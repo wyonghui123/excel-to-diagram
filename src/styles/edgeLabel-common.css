@@ -1,0 +1,219 @@
+/**
+ * edgeLabel-common.css - EdgeLabel 通用样式
+ * 
+ * 统一业务对象图和服务模块图的 edgeLabel 样式
+ * 两种图表现在采用完全一致的样式和交互逻辑
+ */
+
+/* ===== 背景 rect 样式（最高优先级） ===== */
+/* 覆盖 Mermaid classDef 的 fill:none 和 opacity */
+.mermaid-content :deep(.edgeLabel rect[data-bg-rect]),
+.mermaid-content :deep(.edge-label-clean rect[data-bg-rect]) {
+  fill: #ffffff !important;
+  fill-opacity: 1 !important;
+  opacity: 1 !important;
+  stroke: none !important;
+  stroke-width: 0 !important;
+  display: block !important;
+  visibility: visible !important;
+}
+
+/* ===== 通用 EdgeLabel 基础样式 ===== */
+/* 注意：这些样式不适用于 .edge-label-clean，因为它有自己的背景规则 */
+.mermaid-content :deep(.edgeLabel):not(.edge-label-clean),
+.mermaid-content :deep(.edgeLabel):not(.edge-label-clean) *,
+.mermaid-content :deep(.edgeLabel):not(.edge-label-clean) > *,
+.mermaid-content :deep(.edgeLabel):not(.edge-label-clean) div,
+.mermaid-content :deep(.edgeLabel):not(.edge-label-clean) span,
+.mermaid-content :deep(.edgeLabel):not(.edge-label-clean) .label,
+.mermaid-content :deep(.edgeLabel):not(.edge-label-clean) foreignObject,
+.mermaid-content :deep(.edgeLabel):not(.edge-label-clean) foreignObject > div,
+.mermaid-content :deep(.edgeLabel):not(.edge-label-clean) foreignObject > span {
+  background-color: transparent !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  font-size: 12px !important;
+  font-weight: normal !important;
+  color: #333333 !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* ===== 纯 CSS 方案：.edge-label-clean 类 ===== */
+/* 隐藏所有 SVG 装饰元素（排除背景 rect） */
+.mermaid-content :deep(.edge-label-clean) path:not([data-bg-rect]),
+.mermaid-content :deep(.edge-label-clean) rect:not([data-bg-rect]),
+.mermaid-content :deep(.edge-label-clean) polygon:not([data-bg-rect]),
+.mermaid-content :deep(.edge-label-clean) polyline:not([data-bg-rect]),
+.mermaid-content :deep(.edge-label-clean) circle:not([data-bg-rect]),
+.mermaid-content :deep(.edge-label-clean) ellipse:not([data-bg-rect]),
+.mermaid-content :deep(.edge-label-clean) line:not([data-bg-rect]) {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  fill: transparent !important;
+  stroke: none !important;
+}
+
+/* ===== 隐藏所有 HTML 元素背景 ===== */
+.mermaid-content :deep(.edge-label-clean) foreignObject,
+.mermaid-content :deep(.edge-label-clean) foreignObject > * {
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+/* 标签文字背景 - 保留白色背景（提高优先级） */
+.mermaid-content :deep(.edge-label-clean span),
+.mermaid-content :deep(.edge-label-clean div),
+.mermaid-content :deep(.edge-label-clean p),
+.mermaid-content :deep(.edge-label-clean) span,
+.mermaid-content :deep(.edge-label-clean) div,
+.mermaid-content :deep(.edge-label-clean) p,
+.mermaid-content :deep(.edge-label-clean .label),
+.mermaid-content :deep(.edge-label-clean .label *) {
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 2px 4px !important;
+  margin: 0 !important;
+}
+
+/* 保留文字样式 */
+.mermaid-content :deep(.edge-label-clean) text,
+.mermaid-content :deep(.edge-label-clean) textPath {
+  fill: #333333 !important;
+  font-size: 12px !important;
+  font-weight: normal !important;
+  font-family: Arial, sans-serif !important;
+  stroke: none !important;
+}
+
+/* ===== 隐藏 SVG 装饰元素 ===== */
+.mermaid-content :deep(.edgeLabel path),
+.mermaid-content :deep(.edgeLabel rect:not([data-bg-rect])),
+.mermaid-content :deep(.edgeLabel polygon),
+.mermaid-content :deep(.edgeLabel polyline),
+.mermaid-content :deep(.edgeLabel circle),
+.mermaid-content :deep(.edgeLabel ellipse),
+.mermaid-content :deep(.edgeLabel line) {
+  fill: transparent !important;
+  stroke: none !important;
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+}
+
+/* ===== foreignObject 样式 ===== */
+.mermaid-content :deep(.edgeLabel foreignObject) {
+  background: transparent !important;
+  background-color: transparent !important;
+  overflow: visible !important;
+  width: auto !important;
+  min-width: 100% !important;
+}
+
+.mermaid-content :deep(.edgeLabel foreignObject > div),
+.mermaid-content :deep(.edgeLabel foreignObject > span) {
+  background: transparent !important;
+  background-color: transparent !important;
+  display: inline-block !important;
+  white-space: nowrap !important;
+  padding: 2px 4px !important;
+}
+
+/* ===== 文字样式 ===== */
+.mermaid-content :deep(.edgeLabel text),
+.mermaid-content :deep(.edgeLabel textPath) {
+  fill: #333333 !important;
+  font-size: 12px !important;
+  font-weight: normal !important;
+  font-family: Arial, sans-serif !important;
+  stroke: none !important;
+}
+
+/* ===== 业务对象图特有：labelBkg 白色背景 ===== */
+.mermaid-content.businessObject :deep(.labelBkg),
+.mermaid-content.businessObject :deep(.labelBkg *) {
+  fill: #ffffff !important;
+  fill-opacity: 1 !important;
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  stroke: none !important;
+  color: #333 !important;
+}
+
+.mermaid-content.businessObject :deep(.labelBkg) {
+  display: inline-block !important;
+  line-height: 1.2 !important;
+  padding: 2px 6px !important;
+  margin: 0 !important;
+}
+
+.mermaid-content.businessObject :deep(.labelBkg p) {
+  margin: 0 !important;
+  padding: 0 !important;
+  line-height: 1.2 !important;
+}
+
+.mermaid-content.businessObject :deep(.labelBkg span) {
+  display: inline !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+/* ===== cluster-label 子图标题样式修复 ===== */
+/* skewX(-10deg) 导致左边被截断，需要补偿 */
+.mermaid-content :deep(.cluster-label foreignObject) {
+  overflow: visible !important;
+  width: auto !important;
+  min-width: 100% !important;
+}
+
+.mermaid-content :deep(.cluster-label foreignObject > div) {
+  display: inline-block !important;
+  padding: 4px 8px !important;
+  margin-left: 10px !important;
+  transform-origin: left center !important;
+}
+
+.mermaid-content :deep(.cluster-label .nodeLabel),
+.mermaid-content :deep(.cluster-label .nodeLabel *) {
+  display: inline-block !important;
+  white-space: nowrap !important;
+  transform-origin: left center !important;
+}
+
+/* subgraph 标题也需要同样的修复 */
+.mermaid-content :deep(.subgraph foreignObject) {
+  overflow: visible !important;
+  width: auto !important;
+  min-width: 100% !important;
+}
+
+.mermaid-content :deep(.subgraph foreignObject > div) {
+  display: inline-block !important;
+  padding: 4px 8px !important;
+  margin-left: 10px !important;
+  transform-origin: left center !important;
+}
+
+.mermaid-content :deep(.subgraph .nodeLabel),
+.mermaid-content :deep(.subgraph .nodeLabel *) {
+  display: inline-block !important;
+  white-space: nowrap !important;
+  transform-origin: left center !important;
+}
+
+/* ===== 服务模块图：无需特殊覆盖，使用通用样式 ===== */
+/* 服务模块图现在与业务对象图样式完全一致 */
+/* 交互状态统一采用简单的点击显示逻辑，不再需要复杂的选中/悬停/聚焦样式 */
