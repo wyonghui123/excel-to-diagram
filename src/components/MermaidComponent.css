@@ -1,0 +1,579 @@
+.mermaid-container {
+  width: 100%;
+  height: 600px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  overflow: hidden !important;
+  background-color: #FFFFFF;
+  position: relative;
+}
+
+.mermaid-container.maximized {
+  width: 100vw;
+  height: 100vh;
+  position: fixed;
+  top: 0;
+  left: 0;
+  border: none;
+  border-radius: 0;
+  z-index: 9999;
+  background-color: #FFFFFF;
+}
+
+.toolbar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background-color: rgba(255, 255, 255, 0.9);
+  padding: 4px;
+  border-radius: 6px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+.toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background-color: transparent;
+  color: #555;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.15s;
+}
+
+.toolbar-btn:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+  color: #333;
+}
+
+.btn-icon {
+  font-size: 14px;
+}
+
+.export-btn:hover {
+  background-color: #E64A19;
+  border-color: #E64A19;
+}
+
+.mermaid-wrapper {
+  overflow: hidden !important;
+  position: absolute;
+  background-color: #FFFFFF;
+  border-radius: 8px;
+  box-sizing: border-box;
+  z-index: 1;
+}
+
+.draggable-area {
+  overflow: visible !important;
+  position: absolute;
+  background-color: #F0F0F0;
+  border-radius: 8px;
+  box-sizing: border-box;
+  z-index: 2;
+  transform-origin: center center !important;
+  transition: transform 0.15s ease-out;
+}
+
+.draggable-area.dragging {
+  transition: none !important;
+}
+
+.diagram-canvas {
+  width: 100%;
+  height: 100%;
+  overflow: visible !important;
+  position: relative;
+  background-color: transparent;
+  box-sizing: border-box;
+}
+
+.mermaid-content {
+  display: block !important;
+  transform-origin: center center;
+  transition: transform 0.1s ease-out;
+  background-color: transparent !important;
+  overflow: visible !important;
+  box-sizing: border-box;
+}
+
+.mermaid-content pre.mermaid {
+  margin: 0 !important;
+  padding: 20px !important;
+  background: transparent !important;
+  white-space: pre !important;
+  overflow: visible !important;
+  font-family: inherit !important;
+  font-size: inherit !important;
+  width: 100% !important;
+  min-width: 100% !important;
+  min-height: 100% !important;
+  height: auto !important;
+  box-sizing: border-box !important;
+  position: relative;
+}
+
+.mermaid-content pre.mermaid svg {
+  max-width: none !important;
+  width: 100% !important;
+  height: auto !important;
+  min-width: 100% !important;
+  min-height: 100% !important;
+  overflow: visible !important;
+  display: block !important;
+  background: #FFFFFF !important;
+  box-sizing: border-box;
+}
+
+.mermaid-content.serviceModule :deep(.edgeLabel):not(.edge-label-clean),
+.mermaid-content.serviceModule :deep(.edgeLabel):not(.edge-label-clean) *,
+.mermaid-content.serviceModule :deep(.edgeLabel):not(.edge-label-clean) > *,
+.mermaid-content.serviceModule :deep(.edgeLabel):not(.edge-label-clean) div,
+.mermaid-content.serviceModule :deep(.edgeLabel):not(.edge-label-clean) span,
+.mermaid-content.serviceModule :deep(.edgeLabel):not(.edge-label-clean) .label,
+.mermaid-content.serviceModule :deep(.edgeLabel):not(.edge-label-clean) foreignObject,
+.mermaid-content.serviceModule :deep(.edgeLabel):not(.edge-label-clean) .label-container,
+.mermaid-content.serviceModule :deep(.edgeLabel):not(.edge-label-clean) .labelBg {
+  background-color: transparent !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  font-size: 12px !important;
+  font-weight: normal !important;
+  color: #000000 !important;
+  border: none !important;
+  box-shadow: none !important;
+  position: static !important;
+  margin: 0 !important;
+}
+
+.mermaid-content.serviceModule :deep(.edgeLabel rect:not([data-bg-rect])),
+.mermaid-content.serviceModule :deep(.edgeLabel .label-container),
+.mermaid-content.serviceModule :deep(.edgeLabel .labelBg) {
+  fill: transparent !important;
+  stroke: none !important;
+  display: block !important;
+  visibility: visible !important;
+}
+
+.mermaid-content.serviceModule :deep(.edgeLabel foreignObject) {
+  background: transparent !important;
+  background-color: transparent !important;
+  overflow: visible !important;
+}
+
+.mermaid-content.serviceModule :deep(.edgeLabel foreignObject > div),
+.mermaid-content.serviceModule :deep(.edgeLabel foreignObject > span) {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+.mermaid-content.serviceModule :deep(.edgeLabel.selected),
+.mermaid-content.serviceModule :deep(.edgeLabel.selected *),
+.mermaid-content.serviceModule :deep(.edgeLabel.selected div),
+.mermaid-content.serviceModule :deep(.edgeLabel.selected span),
+.mermaid-content.serviceModule :deep(.edgeLabel.selected .label),
+.mermaid-content.serviceModule :deep(.node.selected),
+.mermaid-content.serviceModule :deep(.node.selected *),
+.mermaid-content.serviceModule :deep(.node.selected .label),
+.mermaid-content.serviceModule :deep(.node.selected rect),
+.mermaid-content.serviceModule :deep(.edgePath.selected),
+.mermaid-content.serviceModule :deep(.edgePath.selected *) {
+  background-color: transparent !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  filter: none !important;
+  stroke: inherit !important;
+  fill: inherit !important;
+  opacity: 1 !important;
+}
+
+.mermaid-content.serviceModule :deep(.edgeLabel.selected rect),
+.mermaid-content.serviceModule :deep(.node.selected rect),
+.mermaid-content.serviceModule :deep(.label-container.selected) {
+  fill: transparent !important;
+  display: none !important;
+}
+
+.mermaid-content.serviceModule :deep(.node),
+.mermaid-content.serviceModule :deep(.node *),
+.mermaid-content.serviceModule :deep(.edgePath),
+.mermaid-content.serviceModule :deep(.edgePath *),
+.mermaid-content.serviceModule :deep(.edgeLabel),
+.mermaid-content.serviceModule :deep(.edgeLabel *) {
+  -webkit-tap-highlight-color: transparent !important;
+  outline: none !important;
+  cursor: default !important;
+}
+
+.mermaid-content.serviceModule :deep(.node.selected rect),
+.mermaid-content.serviceModule :deep(.node.selected polygon),
+.mermaid-content.serviceModule :deep(.node.selected circle),
+.mermaid-content.serviceModule :deep(.node.selected foreignObject),
+.mermaid-content.serviceModule :deep(.node.selected g rect),
+.mermaid-content.serviceModule :deep(.node.selected > rect),
+.mermaid-content.serviceModule :deep(.node.selected > * rect) {
+  fill: transparent !important;
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  stroke: none !important;
+}
+
+.mermaid-content.serviceModule :deep(.edgeLabel.selected),
+.mermaid-content.serviceModule :deep(.edgeLabel.selected *),
+.mermaid-content.serviceModule :deep(.edgeLabel.selected rect),
+.mermaid-content.serviceModule :deep(.edgeLabel.selected polygon),
+.mermaid-content.serviceModule :deep(.edgeLabel.selected circle),
+.mermaid-content.serviceModule :deep(.edgeLabel.selected foreignObject),
+.mermaid-content.serviceModule :deep(.edgeLabel.selected > rect),
+.mermaid-content.serviceModule :deep(.edgeLabel.selected > * rect) {
+  fill: transparent !important;
+  background-color: transparent !important;
+  background: transparent !important;
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  stroke: none !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.mermaid-content.serviceModule :deep(.node.focused),
+.mermaid-content.serviceModule :deep(.node.hovered),
+.mermaid-content.serviceModule :deep(.edgePath.focused),
+.mermaid-content.serviceModule :deep(.edgePath.hovered),
+.mermaid-content.serviceModule :deep(.edgeLabel.focused),
+.mermaid-content.serviceModule :deep(.edgeLabel.hovered) {
+  background-color: transparent !important;
+  fill: inherit !important;
+  stroke: inherit !important;
+  filter: none !important;
+  opacity: 1 !important;
+}
+
+.mermaid-content.serviceModule :deep(.node rect),
+.mermaid-content.serviceModule :deep(.node polygon),
+.mermaid-content.serviceModule :deep(.node circle) {
+  fill: inherit !important;
+  stroke: inherit !important;
+  stroke-width: inherit !important;
+}
+
+.mermaid-content.serviceModule :deep(.edgePath path),
+.mermaid-content.serviceModule :deep(.edgePath marker) {
+  fill: inherit !important;
+  stroke: inherit !important;
+  stroke-width: inherit !important;
+}
+
+.mermaid-content.serviceModule :deep(.edgeLabel rect:not([data-bg-rect])) {
+  display: block !important;
+  visibility: visible !important;
+  fill: transparent !important;
+  stroke: none !important;
+}
+
+.mermaid-content.serviceModule :deep(.edgeLabel path),
+.mermaid-content.serviceModule :deep(.edgeLabel line),
+.mermaid-content.serviceModule :deep(.edgeLabel polyline),
+.mermaid-content.serviceModule :deep(.edgeLabel circle),
+.mermaid-content.serviceModule :deep(.edgeLabel polygon) {
+  display: none !important;
+  visibility: hidden !important;
+}
+
+.mermaid-content.serviceModule :deep(.edgeLabel text),
+.mermaid-content.serviceModule :deep(.edgeLabel textPath) {
+  fill: #000000 !important;
+  font-size: 12px !important;
+  font-weight: normal !important;
+  stroke: none !important;
+}
+
+.mermaid-content.serviceModule :deep(.node rect) {
+  fill: inherit !important;
+  stroke: inherit !important;
+  stroke-width: inherit !important;
+}
+
+.mermaid-content.serviceModule :deep(.node .label-container) {
+  fill: transparent !important;
+}
+
+.mermaid-content.serviceModule :deep(.node .nodeLabel) {
+  text-anchor: middle !important;
+  dominant-baseline: middle !important;
+  font-size: 16px !important;
+  font-weight: bold !important;
+  white-space: normal !important;
+  overflow: visible !important;
+}
+
+.mermaid-content.serviceModule :deep(.node text) {
+  text-anchor: middle !important;
+  dominant-baseline: middle !important;
+  font-size: 16px !important;
+  white-space: normal !important;
+  overflow: visible !important;
+}
+
+.mermaid-content.serviceModule :deep(.node tspan) {
+  text-anchor: middle !important;
+  dominant-baseline: middle !important;
+  font-size: 16px !important;
+  white-space: normal !important;
+  overflow: visible !important;
+}
+
+.mermaid-content.serviceModule :deep(.node rect) {
+  fill: inherit !important;
+  stroke: inherit !important;
+  stroke-width: inherit !important;
+}
+
+.mermaid-content.serviceModule :deep(.node .label) {
+  min-width: 280px !important;
+  min-height: 90px !important;
+  width: 280px !important;
+  height: 90px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  text-align: center !important;
+  padding: 10px !important;
+  box-sizing: border-box !important;
+  font-size: 16px !important;
+  font-weight: bold !important;
+  line-height: 1.4 !important;
+}
+
+.mermaid-content.serviceModule :deep(.node .label-content) {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.mermaid-content.serviceModule :deep(.edgePath path) {
+  stroke-width: 2px !important;
+}
+
+.mermaid-content.serviceModule :deep(.arrowheadPath) {
+  fill: #333 !important;
+}
+
+.mermaid-content.serviceModule :deep(.flowchart-link) {
+  stroke-linecap: round !important;
+  stroke-linejoin: round !important;
+}
+
+.mermaid-content.businessObject :deep(.edgeLabel),
+.mermaid-content.businessObject :deep(.edgeLabel .label) {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+  background: rgba(255, 255, 255, 0.95) !important;
+  border-radius: 4px !important;
+  padding: 4px 8px !important;
+  font-size: 12px !important;
+  font-weight: normal !important;
+  color: #333 !important;
+  border: 1px solid #ddd !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
+}
+
+.mermaid-content.businessObject :deep(.edgeLabel),
+.mermaid-content.businessObject :deep(.edgeLabel .label),
+.mermaid-content.businessObject :deep(.edgeLabel .label .background),
+.mermaid-content.businessObject :deep(.edgeLabel rect:not([data-bg-rect])),
+.mermaid-content.businessObject :deep(.edgeLabel rect.background:not([data-bg-rect])),
+.mermaid-content.businessObject :deep(.edgeLabel polygon),
+.mermaid-content.businessObject :deep(.edgeLabel circle),
+.mermaid-content.businessObject :deep(.edgeLabel path),
+.mermaid-content.businessObject :deep(.edgeLabel .labelBg),
+.mermaid-content.businessObject :deep(.edgeLabel .label-container),
+.mermaid-content.businessObject :deep(.edgeLabel foreignObject),
+.mermaid-content.businessObject :deep(.edgeLabel foreignObject > div) {
+  fill: transparent !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  stroke: none !important;
+}
+
+.mermaid-content.businessObject :deep(.edgeLabel path),
+.mermaid-content.businessObject :deep(.edgeLabelBkg path),
+.mermaid-content.businessObject :deep(g.edgeLabel path),
+.mermaid-content.businessObject :deep(.labelBkg path),
+.mermaid-content.businessObject :deep(g.labelBkg path),
+.mermaid-content.businessObject :deep(span.edgeLabel svg path),
+.mermaid-content.businessObject :deep(span.edgeLabel path),
+.mermaid-content.businessObject :deep(.edgeLabel svg),
+.mermaid-content.businessObject :deep(span.edgeLabel svg) {
+  fill: transparent !important;
+  stroke: transparent !important;
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+}
+
+.mermaid-content.businessObject :deep(.labelBkg),
+.mermaid-content.businessObject :deep(.labelBkg *) {
+  fill: #ffffff !important;
+  fill-opacity: 1 !important;
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  stroke: none !important;
+  color: #333 !important;
+}
+
+.mermaid-content.businessObject :deep(.labelBkg) {
+  display: inline-block !important;
+  line-height: 1.2 !important;
+  padding: 2px 6px !important;
+  margin: 0 !important;
+}
+
+.mermaid-content.businessObject :deep(.labelBkg p) {
+  margin: 0 !important;
+  padding: 0 !important;
+  line-height: 1.2 !important;
+}
+
+.mermaid-content.businessObject :deep(.labelBkg span) {
+  display: inline !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.mermaid-content.businessObject :deep(.edgeLabel span),
+.mermaid-content.businessObject :deep(.edgeLabel p),
+.mermaid-content.businessObject :deep(.edgeLabel div) {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+.mermaid-content.businessObject :deep(.edgeLabel text),
+.mermaid-content.businessObject :deep(.edgeLabel textPath) {
+  fill: #333 !important;
+  font-size: 12px !important;
+  font-weight: normal !important;
+  stroke: none !important;
+  font-family: Arial, sans-serif !important;
+}
+
+.mermaid-content.businessObject :deep(.edgeLabel foreignObject) {
+  overflow: visible !important;
+}
+
+.mermaid-content.businessObject :deep(.edgeLabel .label-container) {
+  fill: rgba(255, 255, 255, 0.95) !important;
+  stroke: #ddd !important;
+  stroke-width: 1px !important;
+}
+
+.mermaid-content.businessObject :deep(.node .nodeLabel),
+.mermaid-content.businessObject :deep(.node text),
+.mermaid-content.businessObject :deep(.node tspan) {
+  text-anchor: middle !important;
+  dominant-baseline: middle !important;
+}
+
+.mermaid-content.businessObject :deep(.node .label) {
+  text-align: center !important;
+}
+
+.mermaid-content.businessObject :deep(.subgraph .label),
+.mermaid-content.businessObject :deep(.subgraph-label),
+.mermaid-content.businessObject :deep(.subgraphLabel),
+.mermaid-content.businessObject :deep(.subgraph text),
+.mermaid-content.businessObject :deep(.subgraph-label-wrapper) {
+  font-size: 14px !important;
+  font-weight: bold !important;
+  font-style: italic !important;
+  text-wrap: wrap !important;
+  max-width: 200px !important;
+  text-align: center !important;
+}
+
+.mermaid-content.businessObject :deep(.subgraph foreignObject),
+.mermaid-content.businessObject :deep(.subgraph foreignObject div),
+.mermaid-content.businessObject :deep(.subgraph foreignObject span),
+.mermaid-content.businessObject :deep(.subgraph foreignObject p) {
+  font-style: italic !important;
+}
+
+.mermaid-content.serviceModule :deep(.cluster text),
+.mermaid-content.serviceModule :deep(.subgraph text),
+.mermaid-content.serviceModule :deep(.cluster-label text),
+.mermaid-content.serviceModule :deep(.subgraph-label text),
+.mermaid-content.serviceModule :deep(.cluster .label text),
+.mermaid-content.serviceModule :deep(.subgraph .label text),
+.mermaid-content.serviceModule :deep(.clusterLabel text),
+.mermaid-content.serviceModule :deep(.subgraphLabel text) {
+  font-style: italic !important;
+}
+
+.mermaid-content.serviceModule :deep(.cluster-label),
+.mermaid-content.serviceModule :deep(.subgraph-label),
+.mermaid-content.serviceModule :deep(.cluster .label),
+.mermaid-content.serviceModule :deep(.subgraph .label),
+.mermaid-content.serviceModule :deep(.clusterLabel),
+.mermaid-content.serviceModule :deep(.subgraphLabel) {
+  font-style: italic !important;
+}
+
+.mermaid-content.serviceModule :deep(.cluster foreignObject),
+.mermaid-content.serviceModule :deep(.subgraph foreignObject),
+.mermaid-content.serviceModule :deep(.cluster foreignObject *),
+.mermaid-content.serviceModule :deep(.subgraph foreignObject *) {
+  font-style: italic !important;
+}
+
+.mermaid-content.serviceModule :deep(.cluster foreignObject div),
+.mermaid-content.serviceModule :deep(.subgraph foreignObject div),
+.mermaid-content.serviceModule :deep(.cluster foreignObject span),
+.mermaid-content.serviceModule :deep(.subgraph foreignObject span),
+.mermaid-content.serviceModule :deep(.cluster foreignObject p),
+.mermaid-content.serviceModule :deep(.subgraph foreignObject p),
+.mermaid-content.serviceModule :deep(.cluster foreignObject h1),
+.mermaid-content.serviceModule :deep(.subgraph foreignObject h1),
+.mermaid-content.serviceModule :deep(.cluster foreignObject h2),
+.mermaid-content.serviceModule :deep(.subgraph foreignObject h2) {
+  font-style: italic !important;
+}
+
+/* ����ָ�����ʽ - ���� ELK �������� */
+[class*="__zone_divider__"],
+[id*="__zone_divider__"] {
+  opacity: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  border: none !important;
+  background: none !important;
+  pointer-events: none !important;
+  fill: transparent !important;
+  stroke: none !important;
+}
+
+/* ȷ���ָ����� SVG ��Ҳ���ɼ� */
+.mermaid-content :deep([id*="__zone_divider__"]) {
+  display: none !important;
+  visibility: hidden !important;
+}
