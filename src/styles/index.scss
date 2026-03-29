@@ -1,0 +1,85 @@
+// 导入所有样式
+@import './variables.scss';
+@import './mixins.scss';
+
+// 全局样式
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  color: var(--color-text-primary);
+  background: var(--color-bg-secondary);
+  line-height: var(--line-height-normal);
+}
+
+#app {
+  min-height: 100vh;
+}
+
+// 通用工具类
+.text-primary { color: var(--color-text-primary); }
+.text-secondary { color: var(--color-text-secondary); }
+.text-tertiary { color: var(--color-text-tertiary); }
+.text-disabled { color: var(--color-text-disabled); }
+
+.bg-primary { background: var(--color-bg-primary); }
+.bg-secondary { background: var(--color-bg-secondary); }
+.bg-tertiary { background: var(--color-bg-tertiary); }
+
+// 间距工具类
+@each $size in (xs, sm, md, lg, xl, xxl) {
+  .m-#{$size} { margin: var(--spacing-#{$size}); }
+  .mt-#{$size} { margin-top: var(--spacing-#{$size}); }
+  .mr-#{$size} { margin-right: var(--spacing-#{$size}); }
+  .mb-#{$size} { margin-bottom: var(--spacing-#{$size}); }
+  .ml-#{$size} { margin-left: var(--spacing-#{$size}); }
+  
+  .p-#{$size} { padding: var(--spacing-#{$size}); }
+  .pt-#{$size} { padding-top: var(--spacing-#{$size}); }
+  .pr-#{$size} { padding-right: var(--spacing-#{$size}); }
+  .pb-#{$size} { padding-bottom: var(--spacing-#{$size}); }
+  .pl-#{$size} { padding-left: var(--spacing-#{$size}); }
+}
+
+// 弹性布局工具类
+.flex { display: flex; }
+.flex-col { flex-direction: column; }
+.flex-wrap { flex-wrap: wrap; }
+.items-center { align-items: center; }
+.items-start { align-items: flex-start; }
+.items-end { align-items: flex-end; }
+.justify-center { justify-content: center; }
+.justify-between { justify-content: space-between; }
+.justify-around { justify-content: space-around; }
+.flex-1 { flex: 1; }
+
+// 文本工具类
+.text-left { text-align: left; }
+.text-center { text-align: center; }
+.text-right { text-align: right; }
+.font-bold { font-weight: 700; }
+.font-medium { font-weight: 500; }
+
+// 溢出工具类
+.overflow-hidden { overflow: hidden; }
+.overflow-auto { overflow: auto; }
+.overflow-scroll { overflow: scroll; }
+
+// 滚动条样式
+.scrollbar {
+  @include scrollbar;
+}
+
+// 隐藏元素
+.hidden { display: none; }
+.invisible { visibility: hidden; }
