@@ -97,7 +97,9 @@ const emit = defineEmits(['close', 'save', 'update:entityData', 'update:visible'
 const formRef = ref(null)
 const formData = ref({})
 
-// 🆕 v1 批次 3 / FR-6.7: 字段策略
+const metaFields = computed(() => props.meta.fields || [])
+
+// 🆕 v1 批次 3 / FR-6.7: 字段策略（必须在 metaFields 定义之后）
 const { isRequiredByRow, requiredMap } = useFieldPolicy(
   computed(() => props.meta),
   computed(() => metaFields.value)
@@ -107,8 +109,6 @@ const fieldPolicy = computed(() => ({
   isRequiredByRow,
   requiredMap
 }))
-
-const metaFields = computed(() => props.meta.fields || [])
 
 const slotFields = computed(() => metaFields.value.filter(f => f.slot))
 
