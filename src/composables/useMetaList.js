@@ -366,6 +366,13 @@ export function useMetaList(objectType, options = {}) {
 
       await _loadMetaConfig()
       
+      // 🆕 v1 批次 3 / FR-6.1: 激活 field-policies API
+      if (objectType && autoLoad) {
+        autoLoad(objectType, 'read').catch(e => {
+          console.warn('[useMetaList] autoLoad field-policies failed:', e)
+        })
+      }
+
       const hasColumns = columns.value && columns.value.length > 0
       const shouldAutoLoad = config.autoLoad || hasColumns
       if (shouldAutoLoad) {
@@ -1339,6 +1346,7 @@ export function useMetaList(objectType, options = {}) {
   
   /** FieldPolicy - 统一字段策略引擎 */
   const {
+    autoLoad,         // 🆕 v1 批次 3 / FR-6.1
     editableMap,
     visibleMap,
     immutableMap,
