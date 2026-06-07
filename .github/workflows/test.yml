@@ -1,0 +1,216 @@
+# 🆕 v3.14: CI Workflow (BO Action Backend Tests)
+# ====================================================
+#
+# 触发:
+#   - push 到 main / develop / v3.x 分支
+#   - PR 到 main
+#   - 手动触发 (workflow_dispatch)
+#
+# 跑:
+#   - Python 3.14 + Windows runner (与 dev 一致)
+#   - 7/7 测试模块 (P0-1 ~ v3.10)
+#   - DB integrity 验证
+#   - 19 Action 回归
+#
+# 关键设计:
+#   1. 启动 waitress_server (后台)
+#   2. 跑 conftest.py 7/7 测试
+#   3. 关闭 server (PID kill)
+#   4. 上传 artifacts (logs)
+
+name: BO Action Backend Tests
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - v3.*
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+# 防止重复跑
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-tests:
+    name: Python 7/7 Tests (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    env:
+      FLASK_DEBUG: 'false'
+      PYTHONIOENCODING: 'utf-8'
+      CORS_ALLOWED_ORIGINS: 'http://localhost:5173,http://localhost:3010'
+      # 🆕 v3.14: 测试用独立 DB (避免污染生产)
+      TEST_DB_PATH: 'meta/architecture.test.db'
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: 'pip'
+
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install waitress gevent pytest
+          # 安装项目本身 (meta/ 作为包)
+          pip install -e . 2>&1 | tail -5 || echo "setup.py not found, OK"
+
+      - name: 🗄️ Setup test database
+        run: |
+          # 🆕 v3.18: 跨平台 bash (GitHub Actions 多 OS runner)
+          if [ -f "meta/architecture.db" ]; then
+            cp meta/architecture.db "$TEST_DB_PATH"
+            echo "Test DB created from production schema"
+          else
+            echo "No production DB found, will create new"
+            python -c "import sqlite3; sqlite3.connect('$TEST_DB_PATH').close()"
+          fi
+
+      - name: 🚀 Start Waitress Server
+        run: |
+          # 🆕 v3.18: 跨平台启动 (后台)
+          nohup python waitress_server.py > server.log 2> server.err &
+          sleep 10
+          # 健康检查
+          if ! curl -s --max-time 5 http://localhost:3010/api/v2/action/_health > health.txt; then
+            echo "Server health check failed"
+            cat server.log server.err
+            exit 1
+          fi
+          echo "Server started: $(cat health.txt)"
+
+      - name: 🧪 Run 7/7 Tests
+        run: |
+          # 🆕 v3.18: 跨平台测试 (走 test.py 入口, 合规)
+          export PYTHONIOENCODING='utf-8'
+          export TEST_ENTRY='1'
+          python d:/filework/test.py --all --force 2>&1 | tee test-results.log
+          if [ $? -ne 0 ]; then
+            echo "Tests failed"
+            exit 1
+          fi
+
+      - name: ⚙️ Run Engine Tests (新, 快速 feedback)
+        # 🆕 v3.18: 5 个 _eng.py 文件 - 核心引擎 (condition/scope/feature/metrics/nested_where)
+        run: |
+          export PYTHONIOENCODING='utf-8'
+          export TEST_ENTRY='1'
+          python d:/filework/test.py --unit -m unit 2>&1 | tee engine-results.log
+          if [ $? -ne 0 ]; then
+            echo "Engine tests failed"
+            exit 1
+          fi
+
+      - name: 🔍 DB Integrity Check
+        run: |
+          integrity=$(python -c "import sqlite3; print(sqlite3.connect('meta/architecture.test.db').execute('PRAGMA integrity_check').fetchone()[0])")
+          echo "DB integrity: $integrity"
+          if [ "$integrity" != "ok" ]; then
+            echo "DB integrity check failed: $integrity"
+            exit 1
+          fi
+
+      - name: 📊 Test Summary
+        if: always()
+        run: |
+          echo "=== Test Summary ==="
+          if [ -f test-results.log ]; then
+            grep -E '✅|❌|总计' test-results.log || tail -20 test-results.log
+          fi
+
+      - name: 🛑 Stop Server
+        if: always()
+        run: |
+          # 🆕 v3.18: 跨平台 kill
+          pkill -f waitress_server.py || true
+
+      - name: 📤 Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs
+          path: |
+            test-results.log
+            server.log
+            server.err
+          retention-days: 7
+          if-no-files-found: ignore
+
+  smoke-tests:
+    name: Smoke Tests (快速)
+    runs-on: windows-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: 'pip'
+
+      - name: 📦 Install dependencies
+        run: |
+          pip install waitress
+          pip install -e . 2>&1 | tail -5 || echo "OK"
+
+      - name: 🚀 Smoke test
+        run: |
+          bash scripts/run_smoke.sh
+
+  frontend-tests:
+    name: Frontend Vitest (Node.js)
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: |
+          npm ci --no-audit --no-fund
+
+      - name: 🧪 Run Vitest unit tests
+        run: |
+          npm run test:run 2>&1 | Tee-Object -FilePath vitest-results.log
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Vitest tests failed"
+            exit 1
+          }
+
+      - name: 📊 Test Summary
+        if: always()
+        run: |
+          Write-Host "=== Vitest Summary ==="
+          if (Test-Path vitest-results.log) {
+            Get-Content vitest-results.log | Select-String -Pattern 'Test Files|Tests ' | Select-Object -Last 5
+          }
+
+      - name: 📤 Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitest-logs
+          path: vitest-results.log
+          retention-days: 7
+          if-no-files-found: ignore

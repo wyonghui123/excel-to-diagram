@@ -1,0 +1,213 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+  schedule:
+    - cron: '0 2 * * *'
+
+jobs:
+  unit-tests:
+    name: Unit Tests (含 engine)
+    runs-on: ubuntu-latest
+
+    env:
+      # 🆕 v3.18: 必须设置 TEST_ENTRY=1 通过 conftest 硬阻断
+      TEST_ENTRY: '1'
+      PYTHONIOENCODING: 'utf-8'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov
+
+    - name: Run unit tests
+      # 🆕 v3.18: 排除 deprecated (v1.4 P8 sunset) + 排除 db 依赖的 unit
+      run: |
+        pytest -m "unit and not deprecated" --cov=meta --cov-report=xml --cov-report=term-missing
+
+    - name: Upload coverage
+      uses: codecov/codecov-action@v4
+      with:
+        file: ./coverage.xml
+        fail_ci_if_error: false
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+
+    env:
+      # 🆕 v3.18: 必须设置 TEST_ENTRY=1 通过 conftest 硬阻断
+      TEST_ENTRY: '1'
+      PYTHONIOENCODING: 'utf-8'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest
+
+    - name: Run integration tests
+      # 🆕 v3.18: 排除 deprecated (sunset 端点不参与 regression)
+      run: |
+        pytest -m "integration and not deprecated" --tb=short
+
+  api-tests:
+    name: API Tests
+    runs-on: ubuntu-latest
+
+    env:
+      TEST_ENTRY: '1'
+      PYTHONIOENCODING: 'utf-8'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest
+
+    - name: Run API tests
+      run: |
+        pytest -m "api and not deprecated" --tb=short
+
+  engine-tests:
+    # 🆕 v3.18: 5 个 engine 测试文件 (无外部依赖, 快速 feedback)
+    name: Engine Tests (新)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    env:
+      TEST_ENTRY: '1'
+      PYTHONIOENCODING: 'utf-8'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest
+
+    - name: Run engine tests
+      # 🆕 v3.18: 5 个 _eng.py 文件 - 核心引擎 (condition/scope/feature/metrics/nested_where)
+      run: |
+        pytest meta/tests/test_*_eng.py --tb=short -v
+
+  performance-tests:
+    name: Performance Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'pull_request'
+
+    env:
+      TEST_ENTRY: '1'
+      PYTHONIOENCODING: 'utf-8'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest
+
+    - name: Run performance tests
+      run: |
+        pytest meta/tests/performance/ -v --tb=short
+
+    - name: Generate performance report
+      run: |
+        python -m meta.tests.performance.performance_reporter --format markdown --output performance_report.md
+
+    - name: Upload performance report
+      uses: actions/upload-artifact@v4
+      with:
+        name: performance-report
+        path: |
+          meta/tests/performance/reports/
+          performance_report.md
+        retention-days: 30
+
+  full-test-suite:
+    name: Full Test Suite
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [unit-tests, integration-tests, engine-tests]
+
+    env:
+      TEST_ENTRY: '1'
+      PYTHONIOENCODING: 'utf-8'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov
+
+    - name: Run all tests (含 deprecated 用于历史 regression)
+      run: |
+        pytest --cov=meta --cov-report=xml --cov-report=term-missing --tb=short
+
+    - name: Upload coverage
+      uses: codecov/codecov-action@v4
+      with:
+        file: ./coverage.xml
+        fail_ci_if_error: false
