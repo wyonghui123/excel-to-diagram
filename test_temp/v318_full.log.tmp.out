@@ -1,0 +1,311 @@
+
+============================================================
+  测试运行器 - 最佳实践模式
+============================================================
+
+[CHECKPOINT] WAL 4KB -> 0KB
+[SLIM] 快照瘦身: 清理 audit_logs(1928)
+[DEBUG] Using snapshot: architecture_snapshot_20260606_222850.db for test_hypothesis_v318.py
+[DEBUG] Running: d:\filework\excel-to-diagram\meta\tests\e2e\bo_action\[SERVER_DEBUG] Loading .e[SERVER_DEBUG] Loading .env from: d:\filework\excel-to-diagram\.env
+[SERVER_DEBUG] .env file exists: True
+[SERVER_DEBUG] JWT_SECRET_KEY after load_dotenv: dev-only-secret-key-...
+[YAML Loader] Object 'ai_async_task' already has ai_async_task_* CRUD actions defined, skipping automatic addition
+[YAML Loader] Loaded: ai_async_task from ai_async_task.yaml
+2026-06-06 22:28:56,360 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs_data=[]
+2026-06-06 22:28:56,362 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs=[]
+[YAML Loader] Object 'annotation' already has annotation_* CRUD actions defined, skipping automatic addition
+[YAML Loader] Loaded: annotation from annotation.yaml
+2026-06-06 22:28:56,516 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs_data=[{'id': 'basic', 'label': '基本信息', 'type': 'fields', 'fields': ['id', 'created_at', 'log_category', 'log_level', 'user_name', 'user_id', 'action', 'object_type', 'object_id', 'ip_address', 'user_agent']}, {'id': 'change', 'label': '变更详情', 'type': 'fields', 'fields': ['field_name', 'old_value', 'new_value', 'extra_data']}, {'id': 'trace', 'label': '追踪信息', 'type': 'fields', 'fields': ['trace_id', 'transaction_id', 'agent_id', 'agent_session_id', 'tool_call_id', 'agent_reasoning']}, {'id': 'system', 'label': '系统信息', 'type': 'fields', 'fields': ['status', 'retry_count', 'error_message']}]
+2026-06-06 22:28:56,522 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs=[UIDetailTab(id='basic', label='基本信息', type='fields', fields=['id', 'created_at', 'log_category', 'log_level', 'user_name', 'user_id', 'action', 'object_type', 'object_id', 'ip_address', 'user_agent'], association='', widget='', actions=[]), UIDetailTab(id='change', label='变更详情', type='fields', fields=['field_name', 'old_value', 'new_value', 'extra_data'], association='', widget='', actions=[]), UIDetailTab(id='trace', label='追踪信息', type='fields', fields=['trace_id', 'transaction_id', 'agent_id', 'agent_session_id', 'tool_call_id', 'agent_reasoning'], association='', widget='', actions=[]), UIDetailTab(id='system', label='系统信息', type='fields', fields=['status', 'retry_count', 'error_message'], association='', widget='', actions=[])]
+[YAML Loader] Loaded: audit_log from audit_log.yaml
+[YAML Loader] Auto-added missing action '_create' for object ''
+[YAML Loader] Auto-added missing action '_read' for object ''
+[YAML Loader] Auto-added missing action '_update' for object ''
+[YAML Loader] Auto-added missing action '_delete' for object ''
+[YAML Loader] Auto-added missing action '_list' for object ''
+[YAML Loader] Loaded:  from audit_log_expectations.yaml
+2026-06-06 22:28:56,880 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs_data=[]
+2026-06-06 22:28:56,880 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs=[]
+[YAML Loader] Object 'business_object' already has business_object_* CRUD actions defined, skipping automatic addition
+[YAML Loader] Loaded: business_object from business_object.yaml
+[YAML Loader] Auto-added missing action 'change_event_create' for object 'change_event'
+[YAML Loader] Auto-added missing action 'change_event_read' for object 'change_event'
+[YAML Loader] Auto-added missing action 'change_event_update' for object 'change_event'
+[YAML Loader] Auto-added missing action 'change_event_delete' for object 'change_event'
+[YAML Loader] Auto-added missing action 'change_event_list' for object 'change_event'
+[YAML Loader] Loaded: change_event from change_event.yaml
+[YAML Loader] Auto-added missing action 'change_subscription_create' for object 'change_subscription'
+[YAML Loader] Auto-added missing action 'change_subscription_read' for object 'change_subscription'
+[YAML Loader] Auto-added missing action 'change_subscription_update' for object 'change_subscription'
+[YAML Loader] Auto-added missing action 'change_subscription_delete' for object 'change_subscription'
+[YAML Loader] Auto-added missing action 'change_subscription_list' for object 'change_subscription'
+[YAML Loader] Loaded: change_subscription from change_subscription.yaml
+[YAML Loader] Auto-added missing action 'data_permission_create' for object 'data_permission'
+[YAML Loader] Auto-added missing action 'data_permission_read' for object 'data_permission'
+[YAML Loader] Auto-added missing action 'data_permission_update' for object 'data_permission'
+[YAML Loader] Auto-added missing action 'data_permission_delete' for object 'data_permission'
+[YAML Loader] Auto-added missing action 'data_permission_list' for object 'data_permission'
+[YAML Loader] Loaded: data_permission from data_permission.yaml
+2026-06-06 22:28:57,114 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs_data=[]
+2026-06-06 22:28:57,114 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs=[]
+[YAML Loader] Object 'domain' already has domain_* CRUD actions defined, skipping automatic addition
+[YAML Loader] Loaded: domain from domain.yaml
+[YAML Loader] Auto-added missing action 'employee_data_scope_create' for object 'employee_data_scope'
+[YAML Loader] Auto-added missing action 'employee_data_scope_read' for object 'employee_data_scope'
+[YAML Loader] Auto-added missing action 'employee_data_scope_update' for object 'employee_data_scope'
+[YAML Loader] Auto-added missing action 'employee_data_scope_delete' for object 'employee_data_scope'
+[YAML Loader] Auto-added missing action 'employee_data_scope_list' for object 'employee_data_scope'
+[YAML Loader] Loaded: employee_data_scope from employee_data_scope.yaml
+2026-06-06 22:28:57,205 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs_data=[]
+2026-06-06 22:28:57,205 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs=[]
+[YAML Loader] Auto-added missing action 'enum_type_create' for object 'enum_type'
+[YAML Loader] Auto-added missing action 'enum_type_read' for object 'enum_type'
+[YAML Loader] Auto-added missing action 'enum_type_update' for object 'enum_type'
+[YAML Loader] Auto-added missing action 'enum_type_delete' for object 'enum_type'
+[YAML Loader] Auto-added missing action 'enum_type_list' for object 'enum_type'
+[YAML Loader] Loaded: enum_type from enum_type.yaml
+2026-06-06 22:28:57,300 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs_data=[]
+2026-06-06 22:28:57,300 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs=[]
+[YAML Loader] Object 'enum_value' already has enum_value_* CRUD actions defined, skipping automatic addition
+[YAML Loader] Loaded: enum_value from enum_value.yaml
+[YAML Loader] Auto-added missing action 'filter_variant_create' for object 'filter_variant'
+[YAML Loader] Auto-added missing action 'filter_variant_read' for object 'filter_variant'
+[YAML Loader] Auto-added missing action 'filter_variant_update' for object 'filter_variant'
+[YAML Loader] Auto-added missing action 'filter_variant_delete' for object 'filter_variant'
+[YAML Loader] Auto-added missing action 'filter_variant_list' for object 'filter_variant'
+[YAML Loader] Loaded: filter_variant from filter_variant.yaml
+[YAML Loader] Auto-added missing action 'group_data_permission_create' for object 'group_data_permission'
+[YAML Loader] Auto-added missing action 'group_data_permission_read' for object 'group_data_permission'
+[YAML Loader] Auto-added missing action 'group_data_permission_update' for object 'group_data_permission'
+[YAML Loader] Auto-added missing action 'group_data_permission_delete' for object 'group_data_permission'
+[YAML Loader] Auto-added missing action 'group_data_permission_list' for object 'group_data_permission'
+[YAML Loader] Loaded: group_data_permission from group_data_permission.yaml
+[YAML Loader] Loaded: hierarchies from hierarchies.yaml
+[YAML Loader] Object 'menu' already has menu_* CRUD actions defined, skipping automatic addition
+[YAML Loader] Loaded: menu from menu.yaml
+[YAML Loader] Auto-added missing action 'menu_permission_create' for object 'menu_permission'
+[YAML Loader] Auto-added missing action 'menu_permission_read' for object 'menu_permission'
+[YAML Loader] Auto-added missing action 'menu_permission_update' for object 'menu_permission'
+[YAML Loader] Auto-added missing action 'menu_permission_delete' for object 'menu_permission'
+[YAML Loader] Auto-added missing action 'menu_permission_list' for object 'menu_permission'
+[YAML Loader] Loaded: menu_permission from menu_permission.yaml
+[YAML Loader] Auto-added missing action 'permission_create' for object 'permission'
+[YAML Loader] Auto-added missing action 'permission_read' for object 'permission'
+[YAML Loader] Auto-added missing action 'permission_update' for object 'permission'
+[YAML Loader] Auto-added missing action 'permission_delete' for object 'permission'
+[YAML Loader] Auto-added missing action 'permission_list' for object 'permission'
+[YAML Loader] Loaded: permission from permission.yaml
+[YAML Loader] Auto-added missing action 'permission_bundle_create' for object 'permission_bundle'
+[YAML Loader] Auto-added missing action 'permission_bundle_read' for object 'permission_bundle'
+[YAML Loader] Auto-added missing action 'permission_bundle_update' for object 'permission_bundle'
+[YAML Loader] Auto-added missing action 'permission_bundle_delete' for object 'permission_bundle'
+[YAML Loader] Auto-added missing action 'permission_bundle_list' for object 'permission_bundle'
+[YAML Loader] Loaded: permission_bundle from permission_bundle.yaml
+[YAML Loader] Auto-added missing action 'permission_rule_create' for object 'permission_rule'
+[YAML Loader] Auto-added missing action 'permission_rule_read' for object 'permission_rule'
+[YAML Loader] Auto-added missing action 'permission_rule_update' for object 'permission_rule'
+[YAML Loader] Auto-added missing action 'permission_rule_delete' for object 'permission_rule'
+[YAML Loader] Auto-added missing action 'permission_rule_list' for object 'permission_rule'
+[YAML Loader] Loaded: permission_rule from permission_rule.yaml
+2026-06-06 22:28:57,623 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs_data=[]
+2026-06-06 22:28:57,623 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs=[]
+[YAML Loader] Object 'product' already has product_* CRUD actions defined, skipping automatic addition
+[YAML Loader] Loaded: product from product.yaml
+2026-06-06 22:28:57,865 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs_data=[]
+2026-06-06 22:28:57,865 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs=[]
+[YAML Loader] Object 'relationship' already has relationship_* CRUD actions defined, skipping automatic addition
+[YAML Loader] Loaded: relationship from relationship.yaml
+2026-06-06 22:28:57,940 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs_data=[{'id': 'basic', 'label': '基本信息', 'type': 'fields', 'fields': ['name', 'code', 'description', 'is_active', 'is_system', 'permission_count']}, {'id': 'permissions', 'label': '权限配置', 'type': 'custom'}, {'id': 'assigned_groups', 'label': '用户组 (已分配)', 'type': 'association', 'association': 'assigned_groups', 'description': '此角色已分配给以下用户组，用户组成员自动获得此角色权限', 'help_text': '如需分配到更多用户组，请在用户组详情页的"角色"标签页中操作', 'actions': ['list']}, {'id': 'audit-log', 'label': '操作日志', 'type': 'history'}]
+2026-06-06 22:28:57,940 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs=[UIDetailTab(id='basic', label='基本信息', type='fields', fields=['name', 'code', 'description', 'is_active', 'is_system', 'permission_count'], association='', widget='', actions=[]), UIDetailTab(id='permissions', label='权限配置', type='custom', fields=[], association='', widget='', actions=[]), UIDetailTab(id='assigned_groups', label='用户组 (已分配)', type='association', fields=[], association='assigned_groups', widget='', actions=['list']), UIDetailTab(id='audit-log', label='操作日志', type='history', fields=[], association='', widget='', actions=[])]
+[YAML Loader] Object 'role' already has role_* CRUD actions defined, skipping automatic addition
+[YAML Loader] Loaded: role from role.yaml
+[YAML Loader] Auto-added missing action 'role_data_permission_create' for object 'role_data_permission'
+[YAML Loader] Auto-added missing action 'role_data_permission_read' for object 'role_data_permission'
+[YAML Loader] Auto-added missing action 'role_data_permission_update' for object 'role_data_permission'
+[YAML Loader] Auto-added missing action 'role_data_permission_delete' for object 'role_data_permission'
+[YAML Loader] Auto-added missing action 'role_data_permission_list' for object 'role_data_permission'
+[YAML Loader] Loaded: role_data_permission from role_data_permission.yaml
+[YAML Loader] Auto-added missing action 'role_dimension_scope_create' for object 'role_dimension_scope'
+[YAML Loader] Auto-added missing action 'role_dimension_scope_read' for object 'role_dimension_scope'
+[YAML Loader] Auto-added missing action 'role_dimension_scope_update' for object 'role_dimension_scope'
+[YAML Loader] Auto-added missing action 'role_dimension_scope_delete' for object 'role_dimension_scope'
+[YAML Loader] Auto-added missing action 'role_dimension_scope_list' for object 'role_dimension_scope'
+[YAML Loader] Loaded: role_dimension_scope from role_dimension_scope.yaml
+[YAML Loader] Auto-added missing action 'role_permission_create' for object 'role_permission'
+[YAML Loader] Auto-added missing action 'role_permission_read' for object 'role_permission'
+[YAML Loader] Auto-added missing action 'role_permission_update' for object 'role_permission'
+[YAML Loader] Auto-added missing action 'role_permission_delete' for object 'role_permission'
+[YAML Loader] Auto-added missing action 'role_permission_list' for object 'role_permission'
+[YAML Loader] Loaded: role_permission from role_permission.yaml
+[YAML Loader] Object 'scheduled_task' already has scheduled_task_* CRUD actions defined, skipping automatic addition
+[YAML Loader] Loaded: scheduled_task from scheduled_task.yaml
+2026-06-06 22:28:58,181 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs_data=[]
+2026-06-06 22:28:58,181 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs=[]
+[YAML Loader] Object 'service_module' already has service_module_* CRUD actions defined, skipping automatic addition
+[YAML Loader] Loaded: service_module from service_module.yaml
+2026-06-06 22:28:58,283 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs_data=[]
+2026-06-06 22:28:58,284 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs=[]
+[YAML Loader] Object 'sub_domain' already has sub_domain_* CRUD actions defined, skipping automatic addition
+[YAML Loader] Loaded: sub_domain from sub_domain.yaml
+[YAML Loader] Object 'task_execution' already has task_execution_* CRUD actions defined, skipping automatic addition
+[YAML Loader] Loaded: task_execution from task_execution.yaml
+[YAML Loader] Object 'task_queue' already has task_queue_* CRUD actions defined, skipping automatic addition
+[YAML Loader] Loaded: task_queue from task_queue.yaml
+[YAML Loader] Auto-added missing action 'test_objects_create' for object 'test_objects'
+[YAML Loader] Auto-added missing action 'test_objects_read' for object 'test_objects'
+[YAML Loader] Auto-added missing action 'test_objects_update' for object 'test_objects'
+[YAML Loader] Auto-added missing action 'test_objects_delete' for object 'test_objects'
+[YAML Loader] Auto-added missing action 'test_objects_list' for object 'test_objects'
+[YAML Loader] Loaded: test_objects from test_objects.yaml
+[YAML Loader] Auto-added missing action 'test_table_create' for object 'test_table'
+[YAML Loader] Auto-added missing action 'test_table_read' for object 'test_table'
+[YAML Loader] Auto-added missing action 'test_table_update' for object 'test_table'
+[YAML Loader] Auto-added missing action 'test_table_delete' for object 'test_table'
+[YAML Loader] Auto-added missing action 'test_table_list' for object 'test_table'
+[YAML Loader] Loaded: test_table from test_table.yaml
+2026-06-06 22:28:58,460 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs_data=[{'id': 'basic', 'label': '基本信息', 'type': 'fields', 'fields': ['username', 'password', 'display_name', 'email', 'status', 'sso_provider', 'sso_user_id']}, {'id': 'groups', 'label': '所属用户组', 'type': 'association', 'association': 'groups', 'widget': 'association_list', 'actions': ['assign', 'unassign']}]
+2026-06-06 22:28:58,460 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs=[UIDetailTab(id='basic', label='基本信息', type='fields', fields=['username', 'password', 'display_name', 'email', 'status', 'sso_provider', 'sso_user_id'], association='', widget='', actions=[]), UIDetailTab(id='groups', label='所属用户组', type='association', fields=[], association='groups', widget='association_list', actions=['assign', 'unassign'])]
+[YAML Loader] Object 'user' already has user_* CRUD actions defined, skipping automatic addition
+[YAML Loader] Loaded: user from user.yaml
+2026-06-06 22:28:58,502 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs_data=[{'id': 'basic', 'label': '基本信息', 'type': 'fields', 'fields': ['code', 'name', 'parent_id', 'manager_id', 'description']}, {'id': 'members', 'label': '成员', 'type': 'association', 'association': 'members', 'actions': ['assign', 'unassign']}, {'id': 'roles', 'label': '角色', 'type': 'association', 'association': 'roles', 'actions': ['assign', 'unassign']}]
+2026-06-06 22:28:58,502 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs=[UIDetailTab(id='basic', label='基本信息', type='fields', fields=['code', 'name', 'parent_id', 'manager_id', 'description'], association='', widget='', actions=[]), UIDetailTab(id='members', label='成员', type='association', fields=[], association='members', widget='', actions=['assign', 'unassign']), UIDetailTab(id='roles', label='角色', type='association', fields=[], association='roles', widget='', actions=['assign', 'unassign'])]
+[YAML Loader] Auto-added missing action 'user_group_create' for object 'user_group'
+[YAML Loader] Auto-added missing action 'user_group_read' for object 'user_group'
+[YAML Loader] Auto-added missing action 'user_group_update' for object 'user_group'
+[YAML Loader] Auto-added missing action 'user_group_delete' for object 'user_group'
+[YAML Loader] Auto-added missing action 'user_group_list' for object 'user_group'
+[YAML Loader] Loaded: user_group from user_group.yaml
+[YAML Loader] Auto-added missing action 'user_group_member_create' for object 'user_group_member'
+[YAML Loader] Auto-added missing action 'user_group_member_read' for object 'user_group_member'
+[YAML Loader] Auto-added missing action 'user_group_member_update' for object 'user_group_member'
+[YAML Loader] Auto-added missing action 'user_group_member_delete' for object 'user_group_member'
+[YAML Loader] Auto-added missing action 'user_group_member_list' for object 'user_group_member'
+[YAML Loader] Loaded: user_group_member from user_group_member.yaml
+2026-06-06 22:28:58,591 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs_data=[]
+2026-06-06 22:28:58,591 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs=[]
+[YAML Loader] Object 'version' already has version_* CRUD actions defined, skipping automatic addition
+[YAML Loader] Loaded: version from version.yaml
+2026-06-06 22:28:58,611 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs_data=[{'id': 'basic', 'label': '基本信息', 'type': 'fields', 'fields': ['code', 'name', 'description']}]
+2026-06-06 22:28:58,611 - meta.core.yaml_loader - INFO - [-] - [YAML Loader] parse_ui_detail_view_config: tabs=[UIDetailTab(id='basic', label='基本信息', type='fields', fields=['code', 'name', 'description'], association='', widget='', actions=[])]
+[YAML Loader] Auto-added missing action 'new_object_create' for object 'new_object'
+[YAML Loader] Auto-added missing action 'new_object_read' for object 'new_object'
+[YAML Loader] Auto-added missing action 'new_object_update' for object 'new_object'
+[YAML Loader] Auto-added missing action 'new_object_delete' for object 'new_object'
+[YAML Loader] Auto-added missing action 'new_object_list' for object 'new_object'
+[YAML Loader] Loaded: new_object from _template.yaml
+[1m============================= test session starts =============================[0m
+platform win32 -- Python 3.14.3, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\Administrator\AppData\Local\Python\pythoncore-3.14-64\python.exe
+cachedir: .pytest_cache
+hypothesis profile 'default'
+rootdir: d:\filework\excel-to-diagram
+configfile: pytest.ini
+plugins: anyio-4.13.0, hypothesis-6.155.2, cov-7.1.0, rerunfailures-16.3, timeout-2.4.0, xdist-3.8.0
+timeout: 300.0s
+timeout method: thread
+timeout func_only: False
+[1mcollecting ... [0mcollected 5 items
+
+meta/tests/e2e/bo_action/test_hypothesi[32mPASSED[0[32mPASSED[0m[32m [ 25%][32mPASSED[0m[32m [ 20%][0m
+meta/tests/e2e/bo_action/test_hypothesis_v318.py::t[32mPASSED[0m[32m [[32mPASSED[0m[32m [ 40%][0m
+meta/tests/e2e/bo_action/test_hypothesis_v318.py::test_enum_type_query_robust [32mPASSED[0m[32m [ 60%][0m
+meta/tests/e2e/bo_action/test_hypothesis_v318.py::test_subscription_create_robust [32mPASSED[0m[32m [ 80%][0m
+meta/tests/e2e/bo_action/test_hypothesis_v318.py::test_batch_save_safe_text [32mPASSED[0m[32m [100%][0m
+
+============================ slowest 20 durations =============================
+20.57s call     meta/tests/e2e/bo_action/test_hypothesis_v318.py::test_enum_type_query_robust
+20.55s call     meta/tests/e2e/bo_action/test_hypothesis_v318.py::test_user_authenticate_robust
+20.51s call     meta/tests/e2e/bo_action/test_hypothesis_v318.py::test_subscription_create_robust
+20.51s call     meta/tests/e2e/bo_action/test_hypothesis_v318.py::test_batch_save_safe_text
+20.48s call     meta/tests/e2e/bo_action/test_hypothesis_v318.py::test_role_check_robust
+4.23s setup    meta/tests/e2e/bo_action/test_hypothesis_v318.py::test_user_authenticate_robust
+0.07s teardown meta/tests/e2e/bo_action/test_hypothesis_v318.py::test_batch_save_safe_text
+0.00s teardown meta/tests/e2e/bo_action/test_hypothesis_v318.py::test_enum_type_query_robust
+0.00s setup    meta/tests/e2e/bo_action/test_hypothesis_v318.py::test_subscription_create_robust
+0.00s teardown meta/tests/e2e/bo_action/test_hypothesis_v318.py::test_role_check_robust
+0.00s setup    meta/tests/e2e/bo_action/test_hypothesis_v318.py::test_enum_type_query_robust
+0.00s teardown meta/tests/e2e/bo_action/test_hypothesis_v318.py::test_user_authenticate_robust
+0.00s teardown meta/tests/e2e/bo_action/test_hypothesis_v318.py::test_subscription_create_robust
+0.00s setup    meta/tests/e2e/bo_action/test_hypothesis_v318.py::test_role_check_robust
+0.00s setup    meta/tests/e2e/bo_action/test_hypothesis_v318.py::test_batch_save_safe_text
+[32m======================== [32m[1m5 passed[0m[32m in 108.19s (0:01:48)[0m[32m ========================[0m
+[DEBUG] Done — no snapshot created, no results recorded
+m旧密码[39;49;00m[33m'[39;49;00m [95min[39;49;00m b.get([33m'[39;49;00m[33mmessage[39;49;00m[33m'[39;49;00m, [33m'[39;49;00m[33m'[39;49;00m)[90m[39;49;00m
+[1m[31mE   AssertionError: assert (False is True or '\u65e7\u5bc6\u7801' in 'Token\u5df2\u5931\u6548')[0m
+[1m[31mE    +  where False = <built-in method get of dict object at 0x000001C6EBD47040>('success')[0m
+[1m[31mE    +    where <built-in method get of dict object at 0x000001C6EBD47040> = {'data': None, 'message': 'Token\u5df2\u5931\u6548', 'success': False}.get[0m
+[1m[31mE    +  and   'Token\u5df2\u5931\u6548' = <built-in method get of dict object at 0x000001C6EBD47040>('message', '')[0m
+[1m[31mE    +    where <built-in method get of dict object at 0x000001C6EBD47040> = {'data': None, 'message': 'Token\u5df2\u5931\u6548', 'success': False}.get[0m
+[31m[1m__________________________ test_user_update_profile ___________________________[0m
+[1m[31mmeta\tests\e2e\bo_action\test_all_19_actions.py[0m:60: in test_user_update_profile
+    [0m[94massert[39;49;00m b.get([33m'[39;49;00m[33msuccess[39;49;00m[33m'[39;49;00m) [95mis[39;49;00m [94mTrue[39;49;00m[90m[39;49;00m
+[1m[31mE   AssertionError: assert False is True[0m
+[1m[31mE    +  where False = <built-in method get of dict object at 0x000001C6EBDFC7C0>('success')[0m
+[1m[31mE    +    where <built-in method get of dict object at 0x000001C6EBDFC7C0> = {'data': None, 'message': 'Token\u5df2\u5931\u6548', 'success': False}.get[0m
+[31m[1m__________________________ test_user_reset_password ___________________________[0m
+[1m[31mmeta\tests\e2e\bo_action\test_all_19_actions.py[0m:89: in test_user_reset_password
+    [0m[94mif[39;49;00m create.get([33m'[39;49;00m[33mdata[39;49;00m[33m'[39;49;00m, {}).get([33m'[39;49;00m[33mcreated[39;49;00m[33m'[39;49;00m):[90m[39;49;00m
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^[90m[39;49;00m
+[1m[31mE   AttributeError: 'NoneType' object has no attribute 'get'[0m
+[31m[1m______________________________ test_audit_export ______________________________[0m
+[1m[31mmeta\tests\e2e\bo_action\test_all_19_actions.py[0m:117: in test_audit_export
+    [0m[94massert[39;49;00m b.get([33m'[39;49;00m[33msuccess[39;49;00m[33m'[39;49;00m) [95mis[39;49;00m [94mTrue[39;49;00m[90m[39;49;00m
+[1m[31mE   AssertionError: assert False is True[0m
+[1m[31mE    +  where False = <built-in method get of dict object at 0x000001C6EBDE8BC0>('success')[0m
+[1m[31mE    +    where <built-in method get of dict object at 0x000001C6EBDE8BC0> = {'data': None, 'message': 'Token\u5df2\u5931\u6548', 'success': False}.get[0m
+[31m[1m_______________________ test_function_subscription_list _______________________[0m
+[1m[31mmeta\tests\e2e\bo_action\test_all_19_actions.py[0m:174: in test_function_subscription_list
+    [0m[94massert[39;49;00m b.get([33m'[39;49;00m[33msuccess[39;49;00m[33m'[39;49;00m) [95mis[39;49;00m [94mTrue[39;49;00m[90m[39;49;00m
+[1m[31mE   AssertionError: assert False is True[0m
+[1m[31mE    +  where False = <built-in method get of dict object at 0x000001C6EBE0AF80>('success')[0m
+[1m[31mE    +    where <built-in method get of dict object at 0x000001C6EBE0AF80> = {'data': None, 'message': 'Token\u5df2\u5931\u6548', 'success': False}.get[0m
+[31m[1m_____________________________ test_enum_type_crud _____________________________[0m
+[1m[31mmeta\tests\e2e\bo_action\test_all_19_actions.py[0m:190: in test_enum_type_crud
+    [0m[94massert[39;49;00m c.get([33m'[39;49;00m[33msuccess[39;49;00m[33m'[39;49;00m) [95mis[39;49;00m [94mTrue[39;49;00m, [33mf[39;49;00m[33m'[39;49;00m[33mcreate 失败: [39;49;00m[33m{[39;49;00mc.get([33m"[39;49;00m[33mmessage[39;49;00m[33m"[39;49;00m)[33m}[39;49;00m[33m'[39;49;00m[90m[39;49;00m
+[1m[31mE   AssertionError: create 失败: Token已失效[0m
+[1m[31mE   assert False is True[0m
+[1m[31mE    +  where False = <built-in method get of dict object at 0x000001C6EBE202C0>('success')[0m
+[1m[31mE    +    where <built-in method get of dict object at 0x000001C6EBE202C0> = {'data': None, 'message': 'Token\u5df2\u5931\u6548', 'success': False}.get[0m
+============================ slowest 20 durations =============================
+4.28s call     meta/tests/e2e/bo_action/test_all_19_actions.py::test_user_logout
+2.37s call     meta/tests/e2e/bo_action/test_all_19_actions.py::test_user_authenticate
+2.29s setup    meta/tests/e2e/bo_action/test_all_19_actions.py::test_user_get_current
+2.11s setup    meta/tests/e2e/bo_action/test_all_19_actions.py::test_user_authenticate
+2.09s call     meta/tests/e2e/bo_action/test_all_19_actions.py::test_user_change_password
+2.06s call     meta/tests/e2e/bo_action/test_all_19_actions.py::test_enum_type_crud
+2.05s call     meta/tests/e2e/bo_action/test_all_19_actions.py::test_user_get_current
+2.05s call     meta/tests/e2e/bo_action/test_all_19_actions.py::test_version_clear_other_current
+2.05s call     meta/tests/e2e/bo_action/test_all_19_actions.py::test_audit_retry
+2.05s call     meta/tests/e2e/bo_action/test_all_19_actions.py::test_function_aggregate_refresh
+2.05s call     meta/tests/e2e/bo_action/test_all_19_actions.py::test_subscription_create
+2.05s call     meta/tests/e2e/bo_action/test_all_19_actions.py::test_batch_save
+2.05s call     meta/tests/e2e/bo_action/test_all_19_actions.py::test_user_update_profile
+2.04s call     meta/tests/e2e/bo_action/test_all_19_actions.py::test_batch_delete
+2.04s call     meta/tests/e2e/bo_action/test_all_19_actions.py::test_function_aggregate_query
+2.04s call     meta/tests/e2e/bo_action/test_all_19_actions.py::test_user_reset_password
+2.04s call     meta/tests/e2e/bo_action/test_all_19_actions.py::test_function_value_help_resolve
+2.03s call     meta/tests/e2e/bo_action/test_all_19_actions.py::test_audit_export
+2.03s call     meta/tests/e2e/bo_action/test_all_19_actions.py::test_function_subscription_list
+0.00s setup    meta/tests/e2e/bo_action/test_all_19_actions.py::test_batch_save
+[36m[1m=========================== short test summary info ===========================[0m
+[31mFAILED[0m meta/tests/e2e/bo_action/test_all_19_actions.py::[1mtest_user_change_password[0m - AssertionError: assert (False is True or '\u65e7\u5bc6\u7801' in 'Token\u5df2\u5931\u6548')
+ +  where False = <built-in method get of dict object at 0x000001C6EBD47040>('success')
+ +    where <built-in method get of dict object at 0x000001C6EBD47040> = {'data': None, 'message': 'Token\u5df2\u5931\u6548', 'success': False}.get
+ +  and   'Token\u5df2\u5931\u6548' = <built-in method get of dict object at 0x000001C6EBD47040>('message', '')
+ +    where <built-in method get of dict object at 0x000001C6EBD47040> = {'data': None, 'message': 'Token\u5df2\u5931\u6548', 'success': False}.get
+[31mFAILED[0m meta/tests/e2e/bo_action/test_all_19_actions.py::[1mtest_user_update_profile[0m - AssertionError: assert False is True
+ +  where False = <built-in method get of dict object at 0x000001C6EBDFC7C0>('success')
+ +    where <built-in method get of dict object at 0x000001C6EBDFC7C0> = {'data': None, 'message': 'Token\u5df2\u5931\u6548', 'success': False}.get
+[31mFAILED[0m meta/tests/e2e/bo_action/test_all_19_actions.py::[1mtest_user_reset_password[0m - AttributeError: 'NoneType' object has no attribute 'get'
+[31mFAILED[0m meta/tests/e2e/bo_action/test_all_19_actions.py::[1mtest_audit_export[0m - AssertionError: assert False is True
+ +  where False = <built-in method get of dict object at 0x000001C6EBDE8BC0>('success')
+ +    where <built-in method get of dict object at 0x000001C6EBDE8BC0> = {'data': None, 'message': 'Token\u5df2\u5931\u6548', 'success': False}.get
+[31mFAILED[0m meta/tests/e2e/bo_action/test_all_19_actions.py::[1mtest_function_subscription_list[0m - AssertionError: assert False is True
+ +  where False = <built-in method get of dict object at 0x000001C6EBE0AF80>('success')
+ +    where <built-in method get of dict object at 0x000001C6EBE0AF80> = {'data': None, 'message': 'Token\u5df2\u5931\u6548', 'success': False}.get
+[31mFAILED[0m meta/tests/e2e/bo_action/test_all_19_actions.py::[1mtest_enum_type_crud[0m - AssertionError: create 失败: Token已失效
+assert False is True
+ +  where False = <built-in method get of dict object at 0x000001C6EBE202C0>('success')
+ +    where <built-in method get of dict object at 0x000001C6EBE202C0> = {'data': None, 'message': 'Token\u5df2\u5931\u6548', 'success': False}.get
+[31m======================== [31m[1m6 failed[0m, [32m11 passed[0m[31m in 44.15s[0m[31m ========================[0m
+[DEBUG] Done — no snapshot created, no results recorded
+

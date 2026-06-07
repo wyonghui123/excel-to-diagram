@@ -738,14 +738,14 @@ const {
   inlineEdit: props.options.inlineEdit
 })
 
-// 🆕 v1 批次 3 / FR-6.4: 读取 display_value（优先后端注入）
+// [DECORATIVE] [NEW] v1.3 / FR-6.4: 读取 display_value（优先后端注入）
 // getCellValue 已处理 display_values，此处薄封装供模板用
 function getCellDisplayValue(row, column) {
   return getCellValue(row, column.prop)
 }
 
 if (props.objectType === 'user') {
-  console.log(`[MetaListPage] 🎯 useMetaList for user called, options=`, JSON.stringify(props.options), `displayMode=${props.displayMode}, externalEditing=${props.externalEditing}`)
+  console.log(`[MetaListPage] [DECORATIVE] useMetaList for user called, options=`, JSON.stringify(props.options), `displayMode=${props.displayMode}, externalEditing=${props.externalEditing}`)
 }
 
 function onTableSelectionChange(rows) {

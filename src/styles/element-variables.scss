@@ -1,0 +1,310 @@
+/**
+ * Element Plus 主题变量覆盖
+ * 
+ * 将 YonDesign 设计令牌映射到 Element Plus CSS 变量
+ * 参考: https://element-plus.org/zh-CN/guide/theming.html
+ * 
+ * 加载顺序:
+ * 1. tokens-yonyou.scss (YonDesign 设计令牌)
+ * 2. variables.scss (应用级变量)
+ * 3. element-variables.scss (本文件 - EP 变量映射)
+ * 4. element-plus/theme-chalk/index.css (EP 默认样式)
+ */
+
+:root {
+  // ============================================
+  // 1. 主色映射 (Primary - YonDesign Orange)
+  // ============================================
+  
+  --el-color-primary: #ea580c;           // YonDesign Orange 600
+  --el-color-primary-light-3: #fb923c;
+  --el-color-primary-light-5: #fdba74;
+  --el-color-primary-light-7: #fed7aa;
+  --el-color-primary-light-8: #ffedd5;
+  --el-color-primary-light-9: #fff7ed;
+  --el-color-primary-dark-2: #c2410c;
+
+  // ============================================
+  // 2. 功能色映射
+  // ============================================
+  
+  // Success - YonDesign Green
+  --el-color-success: #22c55e;
+  --el-color-success-light-3: #4ade80;
+  --el-color-success-light-5: #86efac;
+  --el-color-success-light-7: #bbf7d0;
+  --el-color-success-light-8: #dcfce7;
+  --el-color-success-light-9: #f0fdf4;
+  --el-color-success-dark-2: #16a34a;
+
+  // Warning - YonDesign Amber
+  --el-color-warning: #f59e0b;
+  --el-color-warning-light-3: #fbbf24;
+  --el-color-warning-light-5: #fcd34d;
+  --el-color-warning-light-7: #fde68a;
+  --el-color-warning-light-8: #fef3c7;
+  --el-color-warning-light-9: #fffbeb;
+  --el-color-warning-dark-2: #d97706;
+
+  // Danger - YonDesign Orange (规范色)
+  --el-color-danger: #c2410c;
+  --el-color-danger-light-3: #ea580c;
+  --el-color-danger-light-5: #fb923c;
+  --el-color-danger-light-7: #fed7aa;
+  --el-color-danger-light-8: #ffedd5;
+  --el-color-danger-light-9: #fff7ed;
+  --el-color-danger-dark-2: #9a3412;
+
+  // Info - YonDesign Blue (自定义)
+  --el-color-info: #3b82f6;
+  --el-color-info-light-3: #60a5fa;
+  --el-color-info-light-5: #93c5fd;
+  --el-color-info-light-7: #bfdbfe;
+  --el-color-info-light-8: #dbeafe;
+  --el-color-info-light-9: #eff6ff;
+  --el-color-info-dark-2: #2563eb;
+
+  // ============================================
+  // 3. 文本色映射
+  // ============================================
+  
+  --el-text-color-primary: var(--color-text-primary);       // #333333
+  --el-text-color-regular: var(--color-text-secondary);     // #666666
+  --el-text-color-secondary: var(--color-text-tertiary);    // #999999
+  --el-text-color-placeholder: var(--color-text-disabled);  // #cccccc
+  --el-text-color-disabled: #c0c4cc;
+
+  // ============================================
+  // 4. 背景色映射
+  // ============================================
+  
+  --el-bg-color: var(--color-bg-primary);                   // #ffffff
+  --el-bg-color-page: var(--color-bg-secondary);            // #f5f7fa
+  --el-bg-color-overlay: var(--color-bg-primary);
+  
+  // ============================================
+  // 4.5. 填充色映射 (Fill Colors) - 关键！表格排序悬停会用到这些！
+  // ============================================
+  
+  --el-fill-color: var(--color-bg-secondary);               // #f5f7fa
+  --el-fill-color-light: var(--color-bg-spotlight);         // #f9fafb
+  --el-fill-color-lighter: var(--color-bg-tertiary);        // #e5e7eb
+  --el-fill-color-blank: var(--color-bg-primary);           // #ffffff
+  
+  // ============================================
+  // 5. 边框映射
+  // ============================================
+  
+  --el-border-color: var(--color-border);                   // #e8e8e8
+  --el-border-color-light: var(--color-border-light);       // #f0f0f0
+  --el-border-color-lighter: #fafafa;
+  --el-border-color-extra-light: #fafafa;
+  --el-border-color-dark: #d4d7de;
+  --el-border-color-darker: #cdd0d6;
+
+  --el-border-width: 1px;
+  --el-border-style: solid;
+  --el-border-color-hover: var(--el-text-color-placeholder);
+  --el-border: var(--el-border-width) var(--el-border-style) var(--el-border-color);
+
+  // ============================================
+  // 6. 圆角映射 (YonDesign 规范)
+  // ============================================
+  
+  --el-border-radius-base: 6px;                             // YonDesign sm
+  --el-border-radius-small: 4px;                            // YonDesign xs
+  --el-border-radius-round: 8px;                            // YonDesign md
+  --el-border-radius-circle: 50%;
+
+  // ============================================
+  // 7. 字体映射
+  // ============================================
+  
+  --el-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+  --el-font-size-extra-large: 20px;
+  --el-font-size-large: 18px;
+  --el-font-size-medium: 16px;
+  --el-font-size-base: 14px;
+  --el-font-size-small: 13px;
+  --el-font-size-extra-small: 12px;
+
+  --el-font-weight-primary: 500;
+  --el-font-line-height-primary: 22px;
+
+  // ============================================
+  // 8. 组件尺寸映射 (YonDesign 规范)
+  // YonDesign: sm=28px, md=32px, lg=40px
+  // Element Plus: small=24px, default=32px, large=40px
+  // ============================================
+  
+  --el-component-size: 32px;                                // md (default)
+  --el-component-size-small: 28px;                          // sm (YonDesign small)
+  --el-component-size-large: 40px;                          // lg (YonDesign large)
+
+  // ============================================
+  // 9. 间距映射
+  // ============================================
+  
+  --el-main-padding: 20px;
+
+  // ============================================
+  // 10. 阴影映射
+  // ============================================
+  
+  --el-box-shadow: var(--shadow-sm);                        // 0 2px 8px rgba(0,0,0,0.06)
+  --el-box-shadow-light: 0 0 6px rgba(0, 0, 0, 0.04);
+  --el-box-shadow-lighter: 0 0 4px rgba(0, 0, 0, 0.02);
+  --el-box-shadow-dark: var(--shadow-md);                   // 0 4px 12px rgba(0,0,0,0.1)
+
+  // ============================================
+  // 11. 过渡动画映射
+  // ============================================
+  
+  --el-transition-duration: 0.2s;
+  --el-transition-duration-fast: 0.15s;
+  --el-transition-duration-slow: 0.3s;
+  --el-transition-function: ease;
+  --el-transition-function-ease-in-out: cubic-bezier(0.645, 0.045, 0.355, 1);
+  --el-transition-function-fast-bezier: cubic-bezier(0.23, 1, 0.32, 1);
+
+  // ============================================
+  // 12. 特定组件覆盖
+  // ============================================
+  
+  // Button
+  --el-button-font-weight: 500;
+  --el-button-border-radius: var(--el-border-radius-base);
+  --el-button-padding-vertical: 8px;
+  --el-button-padding-horizontal: 16px;
+  --el-button-small-padding-vertical: 6px;
+  --el-button-small-padding-horizontal: 12px;
+  --el-button-large-padding-vertical: 10px;
+  --el-button-large-padding-horizontal: 20px;
+
+  // Input
+  --el-input-border-radius: var(--el-border-radius-base);
+  --el-input-height: var(--el-component-size);
+  --el-input-small-height: var(--el-component-size-small);
+  --el-input-large-height: var(--el-component-size-large);
+
+  // Select
+  --el-select-border-radius-hover: var(--el-border-radius-base);
+  --el-select-input-font-size: 14px;
+
+  // Table
+  --el-table-border-color: var(--el-border-color-lighter);
+  --el-table-header-bg-color: #fafafa;
+  --el-table-row-hover-bg-color: var(--color-bg-secondary);
+  --el-table-text-color: var(--el-text-color-primary);
+  --el-table-header-text-color: var(--el-text-color-regular);
+  --el-table-bg-color: var(--color-bg-primary);
+  --el-table-tr-bg-color: var(--color-bg-primary);
+  --el-table-expanded-cell-bg-color: var(--color-bg-primary);
+  --el-table-current-row-bg-color: #fff7ed;  // 使用浅橙色，不要影响表头排序
+
+  // Card
+  --el-card-border-radius: var(--el-border-radius-round);
+  --el-card-padding: 16px;
+
+  // Dialog
+  --el-dialog-border-radius: var(--el-border-radius-round);
+  --el-dialog-padding-primary: 20px;
+
+  // Message
+  --el-message-border-radius: var(--el-border-radius-base);
+
+  // Tag
+  --el-tag-border-radius: var(--el-border-radius-small);
+
+  // Form
+  --el-form-label-font-size: var(--el-font-size-base);
+  --el-form-label-color: var(--el-text-color-regular);
+
+  // Menu
+  --el-menu-item-height: 48px;
+  --el-menu-sub-item-height: 44px;
+
+  // Pagination
+  --el-pagination-border-radius: var(--el-border-radius-small);
+  --el-pagination-button-width: 32px;
+  --el-pagination-button-height: 32px;
+
+  // Tabs
+  --el-tabs-header-height: 40px;
+}
+
+// ============================================
+// 深色模式支持
+// ============================================
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --el-bg-color: #1a1a1a;
+    --el-bg-color-page: #141414;
+    --el-bg-color-overlay: #1d1d1d;
+
+    --el-text-color-primary: #ffffff;
+    --el-text-color-regular: #d0d0d0;
+    --el-text-color-secondary: #a3a3a3;
+    --el-text-color-placeholder: #8c8c8c;
+    --el-text-color-disabled: #6b6b6b;
+
+    --el-border-color: #3a3a3a;
+    --el-border-color-light: #4a4a4a;
+    --el-border-color-lighter: #5a5a5a;
+
+    --el-fill-color: #303030;
+    --el-fill-color-light: #3a3a3a;
+    --el-fill-color-lighter: #444444;
+    --el-fill-color-blank: #1a1a1a;
+
+    --el-box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+    --el-box-shadow-light: 0 0 6px rgba(0, 0, 0, 0.2);
+    --el-box-shadow-dark: 0 4px 12px rgba(0, 0, 0, 0.35);
+
+    // Table
+    --el-table-bg-color: #1a1a1a;
+    --el-table-header-bg-color: #2a2a2a;
+    --el-table-row-hover-bg-color: #2a2a2a;
+    --el-table-border-color: #3a3a3a;
+
+    // Card
+    --el-card-bg-color: #1d1d1d;
+  }
+}
+
+// ============================================
+// 手动深色模式切换类
+// ============================================
+
+html.dark {
+  --el-bg-color: #1a1a1a;
+  --el-bg-color-page: #141414;
+  --el-bg-color-overlay: #1d1d1d;
+
+  --el-text-color-primary: #ffffff;
+  --el-text-color-regular: #d0d0d0;
+  --el-text-color-secondary: #a3a3a3;
+  --el-text-color-placeholder: #8c8c8c;
+  --el-text-color-disabled: #6b6b6b;
+
+  --el-border-color: #3a3a3a;
+  --el-border-color-light: #4a4a4a;
+  --el-border-color-lighter: #5a5a5a;
+
+  --el-fill-color: #303030;
+  --el-fill-color-light: #3a3a3a;
+  --el-fill-color-lighter: #444444;
+  --el-fill-color-blank: #1a1a1a;
+
+  --el-box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  --el-box-shadow-light: 0 0 6px rgba(0, 0, 0, 0.2);
+  --el-box-shadow-dark: 0 4px 12px rgba(0, 0, 0, 0.35);
+
+  --el-table-bg-color: #1a1a1a;
+  --el-table-header-bg-color: #2a2a2a;
+  --el-table-row-hover-bg-color: #2a2a2a;
+  --el-table-border-color: #3a3a3a;
+
+  --el-card-bg-color: #1d1d1d;
+}

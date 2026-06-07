@@ -1,0 +1,94 @@
+{
+  "total_files": 316,
+  "active_files": 275,
+  "archived_files": 41,
+  "total_size_kb": 6672.5,
+  "files_with_frontmatter": 5,
+  "files_with_toc": 23,
+  "chinese_named_files": 1,
+  "total_h1": 2431,
+  "total_h2": 2851,
+  "total_h3": 6105,
+  "missing_links": 96,
+  "anchor_issues": 90,
+  "files_with_issues": 59,
+  "size_distribution": {
+    "<5KB": 36,
+    "50-100KB": 16,
+    "20-50KB": 91,
+    ">100KB": 7,
+    "5-20KB": 166
+  },
+  "dir_distribution": {
+    "docs": 316
+  },
+  "top_files_by_size": [
+    {
+      "path": "docs\\AI_AGENT_APP_CAPABILITY_PLANNING.md",
+      "size_kb": 165.5,
+      "headers": 60,
+      "archived": false
+    },
+    {
+      "path": "docs\\specs\\spec-task-scheduler.md",
+      "size_kb": 152.9,
+      "headers": 130,
+      "archived": false
+    },
+    {
+      "path": "docs\\ARCHITECTURE_V2.md",
+      "size_kb": 150.6,
+      "headers": 147,
+      "archived": false
+    },
+    {
+      "path": "docs\\superpowers\\specs\\2026-05-12-unified-config-object-design.md",
+      "size_kb": 148.6,
+      "headers": 179,
+      "archived": false
+    },
+    {
+      "path": "docs\\UI_COMPONENT_LIBRARY_ANALYSIS.md",
+      "size_kb": 123.0,
+      "headers": 98,
+      "archived": false
+    },
+    {
+      "path": "docs\\architecture\\02-yaml-conventions-v2.md",
+      "size_kb": 121.5,
+      "headers": 193,
+      "archived": false
+    },
+    {
+      "path": "docs\\specs\\useMetaList-refactor\\spec-base-v1.0.0.md",
+      "size_kb": 109.1,
+      "headers": 109,
+      "archived": false
+    },
+    {
+      "path": "docs\\specs\\research-yaml-config-boundary.md",
+      "size_kb": 82.5,
+      "headers": 88,
+      "archived": false
+    },
+    {
+      "path": "docs\\ENTERPRISE_PLATFORM_CAPABILITY_PLANNING.md",
+      "size_kb": 80.8,
+      "headers": 34,
+      "archived": false
+    },
+    {
+      "path": "docs\\spec_data_permission_unified_model.md",
+      "size_kb": 80.4,
+      "headers": 86,
+      "archived": false
+    }
+  ],
+  "frontmatter_coverage": 1.8,
+  "toc_coverage": 8.4,
+  "chinese_name_ratio": 0.4,
+  "avg_size_kb": 21.1,
+  "total_issues": 186,
+  "health_score": 62.4,
+  "generated_at": "2026-06-07T23:50:19.028437+08:00"
+}

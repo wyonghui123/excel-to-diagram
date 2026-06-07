@@ -1,0 +1,292 @@
+# ============================================
+# 任务执行记录
+# 说明: 每次任务执行的记录，作为BO Object自动获得审计日志能力
+# ============================================
+
+id: task_execution
+name: 任务执行记录
+table_name: task_executions
+description: 记录每次任务执行的详细信息，包括状态、耗时、结果等
+persistent: true
+
+semantics:
+  meaning: 任务执行历史记录
+  category: system_entity
+  hierarchy_level: 0
+
+fields:
+  - id: id
+    name: 执行ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+
+  - id: name
+    name: 任务名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 200
+
+  - id: task_id
+    name: 任务定义ID
+    type: integer
+    db_column: task_id
+
+  - id: task_type
+    name: 任务类型
+    type: string
+    db_column: task_type
+    required: true
+    max_length: 50
+    enum_values:
+      - value: business
+        label: 业务任务
+      - value: ai
+        label: AI任务
+      - value: system
+        label: 系统任务
+      - value: action
+        label: Action任务
+
+  - id: handler
+    name: 处理器
+    type: string
+    db_column: handler
+    required: true
+    max_length: 500
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: pending
+    max_length: 20
+    enum_values:
+      - value: pending
+        label: 待执行
+      - value: queued
+        label: 已排队
+      - value: running
+        label: 执行中
+      - value: completed
+        label: 已完成
+      - value: failed
+        label: 失败
+      - value: cancelled
+        label: 已取消
+
+  - id: attempt
+    name: 尝试次数
+    type: integer
+    db_column: attempt
+    default: 1
+
+  - id: trigger_type
+    name: 触发类型
+    type: string
+    db_column: trigger_type
+    max_length: 20
+
+  - id: trigger_source
+    name: 触发源
+    type: string
+    db_column: trigger_source
+    max_length: 200
+
+  - id: queue
+    name: 队列
+    type: string
+    db_column: queue
+    default: business
+    max_length: 50
+
+  - id: priority
+    name: 优先级
+    type: integer
+    db_column: priority
+    default: 50
+
+  - id: params
+    name: 执行参数
+    type: json
+    db_column: params
+
+  - id: result
+    name: 执行结果
+    type: json
+    db_column: result
+
+  - id: error_message
+    name: 错误信息
+    type: text
+    db_column: error_message
+
+  - id: error_traceback
+    name: 错误堆栈
+    type: text
+    db_column: error_traceback
+
+  - id: timeout
+    name: 超时时间(秒)
+    type: integer
+    db_column: timeout
+    default: 300
+
+  - id: max_retries
+    name: 最大重试次数
+    type: integer
+    db_column: max_retries
+    default: 3
+
+  - id: retry_count
+    name: 已重试次数
+    type: integer
+    db_column: retry_count
+    default: 0
+
+  - id: worker_id
+    name: 执行Worker
+    type: string
+    db_column: worker_id
+    max_length: 100
+
+  - id: queued_at
+    name: 入队时间
+    type: datetime
+    db_column: queued_at
+
+  - id: started_at
+    name: 开始时间
+    type: datetime
+    db_column: started_at
+
+  - id: completed_at
+    name: 完成时间
+    type: datetime
+    db_column: completed_at
+
+  - id: duration_ms
+    name: 执行耗时(毫秒)
+    type: integer
+    db_column: duration_ms
+
+  - id: tokens_used
+    name: Token使用量
+    type: integer
+    db_column: tokens_used
+
+  - id: cost
+    name: 成本
+    type: decimal
+    db_column: cost
+    precision: 10
+    scale: 4
+
+  - id: model_used
+    name: 使用的模型
+    type: string
+    db_column: model_used
+    max_length: 100
+
+  - id: ai_session_id
+    name: AI会话ID
+    type: string
+    db_column: ai_session_id
+    max_length: 100
+
+  - id: agent_id
+    name: Agent ID
+    type: string
+    db_column: agent_id
+    max_length: 100
+
+  - id: ai_context
+    name: AI上下文
+    type: json
+    db_column: ai_context
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    semantics:
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    semantics:
+      audit_field: true
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    snapshot_fields: [status, result, error_message, duration_ms, tokens_used, cost]
+  delete:
+    enabled: true
+    fields: business_only
+
+indexes:
+  - fields: [task_id]
+    name: idx_task_execution_task
+
+  - fields: [status]
+    name: idx_task_execution_status
+
+  - fields: [created_at]
+    name: idx_task_execution_time
+
+  - fields: [task_type]
+    name: idx_task_execution_type
+
+actions:
+  - id: task_execution_read
+    name: 查看执行记录
+    type: crud
+    method: GET
+    path: /api/v1/task_executions
+    description: 查看任务执行历史记录
+
+  - id: task_execution_delete
+    name: 删除执行记录
+    type: crud
+    method: DELETE
+    path: /api/v1/task_executions/{id}
+    description: 删除任务执行记录
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    title: 任务执行记录
+    defaultSort:
+      field: created_at
+      direction: desc
+    columns:
+      - field: id
+        width: 80
+      - field: name
+        width: 200
+      - field: status
+        width: 100
+      - field: trigger_type
+        width: 80
+      - field: started_at
+        width: 180
+      - field: duration_ms
+        width: 80
+      - field: retry_count
+        width: 60
+
+category_config:
+  create_permission: task_execution:create
+  update_permission: task_execution:update
+  delete_permission: task_execution:delete

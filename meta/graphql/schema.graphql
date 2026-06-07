@@ -1,0 +1,200 @@
+# M9 GraphQL Schema (SDL) - v1.0
+#
+# 这是 M9 GraphQL 协议层的 **Schema First** 单一事实源。
+# 10 entity × 2 query = 20 root queries。
+#
+# 实现位置：meta/graphql/__init__.py (Python 端)
+# 单一事实源：ENTITY_SCHEMAS 字典 (与本 SDL 保持 1:1 对应)
+# 派生工具：M10 MCP Server tools/resources 自动派生自本 SDL
+#
+# 关键设计：
+# - PascalCase 类型名（GraphQL 约定）
+# - camelCase 字段名（GraphQL 约定）
+# - snake_case (DB) → camelCase (API) 协议转换在 resolver 层完成
+# - 时间字段统一用 String（ISO 8601 格式）
+# - 关联 ID 用 Int（如 productId），关联 name 用 String（如 productName）
+#
+# 约束：
+# - id 必填（! 后缀）
+# - createdAt/updatedAt 必填（后端生成）
+# - 业务字段（code/name/description）默认必填
+# - 可选字段（description, displayName, etc.）不加 !
+# - 暂不实现：Mutation / Subscription / Interface / Union
+
+# =============================================================================
+# Entity Types (10 个核心实体)
+# =============================================================================
+
+type User {
+  id: ID!
+  username: String!
+  displayName: String
+  email: String
+  status: String
+  createdAt: String!
+  updatedAt: String!
+  lastLoginAt: String
+}
+
+type Role {
+  id: ID!
+  code: String!
+  name: String!
+  description: String
+  createdAt: String!
+  updatedAt: String!
+}
+
+type UserGroup {
+  id: ID!
+  code: String!
+  name: String!
+  description: String
+  createdAt: String!
+  updatedAt: String!
+}
+
+type Product {
+  id: ID!
+  code: String!
+  name: String!
+  description: String
+  isActive: Boolean
+  childCount: Int
+  createdAt: String!
+  updatedAt: String!
+}
+
+type BusinessObject {
+  id: ID!
+  code: String!
+  name: String!
+  description: String
+  versionId: Int
+  serviceModuleId: Int
+  serviceModuleName: String
+  createdAt: String!
+  updatedAt: String!
+}
+
+type Version {
+  id: ID!
+  code: String!
+  name: String!
+  description: String
+  isCurrent: Boolean
+  productId: Int
+  productName: String
+  createdAt: String!
+  updatedAt: String!
+}
+
+type Domain {
+  id: ID!
+  code: String!
+  name: String!
+  description: String
+  versionId: Int
+  createdAt: String!
+  updatedAt: String!
+}
+
+type SubDomain {
+  id: ID!
+  code: String!
+  name: String!
+  description: String
+  domainId: Int
+  createdAt: String!
+  updatedAt: String!
+}
+
+type ServiceModule {
+  id: ID!
+  code: String!
+  name: String!
+  description: String
+  subDomainId: Int
+  createdAt: String!
+  updatedAt: String!
+}
+
+type Annotation {
+  id: ID!
+  targetType: String!
+  targetId: Int!
+  category: String
+  content: String
+  createdAt: String!
+  updatedAt: String!
+  createdBy: Int
+}
+
+# =============================================================================
+# Root Query (20 个：10 entity × 2 query)
+# =============================================================================
+# 命名约定：
+#   - 单数 (user)：根据 ID 查单个
+#   - 复数 (users)：分页查询列表
+# 分页参数：
+#   - page: 页码（默认 1）
+#   - pageSize: 每页数量（默认 20）
+
+type Query {
+  # User
+  user(id: ID!): User
+  users(page: Int = 1, pageSize: Int = 20): [User!]!
+
+  # Role
+  role(id: ID!): Role
+  roles(page: Int = 1, pageSize: Int = 20): [Role!]!
+
+  # UserGroup
+  userGroup(id: ID!): UserGroup
+  userGroups(page: Int = 1, pageSize: Int = 20): [UserGroup!]!
+
+  # Product
+  product(id: ID!): Product
+  products(page: Int = 1, pageSize: Int = 20): [Product!]!
+
+  # BusinessObject
+  businessObject(id: ID!): BusinessObject
+  businessObjects(page: Int = 1, pageSize: Int = 20): [BusinessObject!]!
+
+  # Version
+  version(id: ID!): Version
+  versions(page: Int = 1, pageSize: Int = 20): [Version!]!
+
+  # Domain
+  domain(id: ID!): Domain
+  domains(page: Int = 1, pageSize: Int = 20): [Domain!]!
+
+  # SubDomain
+  subDomain(id: ID!): SubDomain
+  subDomains(page: Int = 1, pageSize: Int = 20): [SubDomain!]!
+
+  # ServiceModule
+  serviceModule(id: ID!): ServiceModule
+  serviceModules(page: Int = 1, pageSize: Int = 20): [ServiceModule!]!
+
+  # Annotation
+  annotation(id: ID!): Annotation
+  annotations(page: Int = 1, pageSize: Int = 20): [Annotation!]!
+}
+
+# =============================================================================
+# M10 MCP Server 派生信息（注释，不在 SDL 规范中）
+# =============================================================================
+# 自动派生 20 个 tools（MCP tools/list 返回）：
+#   - get_user_by_id
+#   - list_user
+#   - get_role_by_id
+#   - list_role
+#   - ...（每个 entity × 2）
+#
+# 自动派生 10 个 resources（MCP resources/list 返回）：
+#   - entity://User
+#   - entity://Role
+#   - ...（每个 entity 1 个）
+#
+# 派生逻辑：见 spec-m9-graphql-protocol.md v1.2.0 §6.7

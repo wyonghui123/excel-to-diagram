@@ -1,0 +1,19 @@
+- [ ] Analytics: SemanticAnnotation 新增 analytics 属性，默认空字典，不影响现有字段
+- [ ] Analytics: yaml_loader.py parse_semantics() 解析 analytics 配置
+- [ ] Analytics: 现有 YAML 无 analytics 时，加载行为与修改前完全一致
+- [ ] ComputationService: 新增 sum_field 聚合计算类型
+- [ ] ComputationService: 新增 avg_field 聚合计算类型
+- [ ] ComputationService: 新增 max_field 聚合计算类型
+- [ ] ComputationService: 新增 min_field 聚合计算类型
+- [ ] ComputationService: compute_field() 正确执行聚合计算
+- [ ] API: POST /api/v1/query/aggregate 端点可用
+- [ ] API: AggregateRequest 数据类定义完整
+- [ ] API: 聚合查询支持多度量
+- [ ] API: 聚合查询支持多维度（GROUP BY）
+- [ ] API: 聚合查询支持过滤条件
+- [ ] API: 聚合查询返回正确格式结果
+- [ ] YAML: business_object.yaml 的 relation_count 字段有 analytics 标注
+- [ ] YAML: domain/sub_domain/service_module 的虚拟字段有 analytics 标注
+- [ ] 测试: test_analytics_aggregation.py 覆盖语义解析、聚合计算、API 测试
+- [ ] 测试: 现有测试套件全部通过
+- [ ] 端到端: 聚合查询 API 返回预期聚合结果

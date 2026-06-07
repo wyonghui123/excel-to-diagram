@@ -1,0 +1,51 @@
+# ============================================
+# 测试表元模型
+# 用于简单的事务测试
+# ============================================
+
+id: test_table
+name: 测试表
+table_name: test_table
+description: 用于简单事务测试的表
+
+display_name_field: name
+
+authorization:
+  check: false
+
+import_export:
+  import_enabled: false
+  export_enabled: false
+
+semantics:
+  meaning: 测试用表
+  category: test
+
+audit:
+  enabled: false
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    ui:
+      visible: false
+
+  - id: name
+    name: 名称
+    type: string
+    db_column: name
+    required: true
+    semantics:
+      display_name: true
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    default: "pending"
+    semantics:
+      meaning: 测试状态

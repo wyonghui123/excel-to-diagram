@@ -1,0 +1,799 @@
+D:\filework\excel-to-diagram\meta\api\annotation_routes_api.py:33: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\api\annotation_routes_api.py:61: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\api\annotation_routes_api.py:164: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\api\association_api.py:241: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\api\audit_api.py:156: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\audit_api.py:161: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\audit_api.py:294: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\audit_api.py:517: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\bo_api.py:25: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\api\bo_api.py:93: B324[bandit]: HIGH: Use of weak MD5 hash for security. Consider usedforsecurity=False
+D:\filework\excel-to-diagram\meta\api\bo_api.py:420: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\bo_api.py:492: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\bo_api.py:963: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\api\bo_api.py:997: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\api\data_permission_api.py:198: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\enum_api.py:182: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\enum_api.py:290: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\api\enum_api.py:359: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\api\enum_api.py:408: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\api\enum_api.py:553: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\enum_api.py:569: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\api\enum_api.py:575: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\api\enum_api.py:609: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\api\enum_api.py:615: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\api\enum_api.py:866: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\enum_api.py:882: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\api\enum_api.py:888: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\api\export_import_api.py:100: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\api\export_import_api.py:555: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\api\manage_api.py:106: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\api\manage_api.py:437: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\manage_api.py:449: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\manage_api.py:462: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\manage_api.py:825: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\api\management_dimension_api.py:188: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\management_dimension_api.py:192: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\menu_permission_api.py:295: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\meta_api.py:484: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\meta_api.py:595: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\meta_api.py:606: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\meta_api.py:618: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\meta_api.py:631: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\role_menu_api.py:98: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\api\role_menu_api.py:103: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\api\role_menu_api.py:317: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\role_menu_api.py:340: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\role_menu_api.py:361: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\api\special_routes_api.py:43: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\special_routes_api.py:53: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\api\special_routes_api.py:201: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\special_routes_api.py:212: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\special_routes_api.py:229: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\special_routes_api.py:230: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\special_routes_api.py:231: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\special_routes_api.py:232: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\special_routes_api.py:246: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\special_routes_api.py:256: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\stats_api.py:42: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\stats_api.py:56: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\stats_api.py:63: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\stats_api.py:98: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\stats_api.py:122: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\stats_api.py:131: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\user_api.py:147: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\api\user_api.py:152: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\action_executor.py:352: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\action_executor.py:375: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\action_executor.py:387: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\action_executor.py:412: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\action_executor.py:564: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\action_executor.py:850: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\action_executor.py:972: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\action_executor.py:1180: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\action_executor.py:1212: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\action_executor.py:1241: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\action_executor.py:1308: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\aggregate_manager.py:180: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\aggregate_manager.py:182: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\aggregate_manager.py:185: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\aggregate_manager.py:211: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\aggregate_manager.py:283: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\aggregate_manager.py:434: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\aggregate_manager.py:444: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\aggregate_manager.py:451: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\aggregate_manager.py:455: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\analytical_engine.py:156: B324[bandit]: HIGH: Use of weak MD5 hash for security. Consider usedforsecurity=False
+D:\filework\excel-to-diagram\meta\core\analytics_query_builder.py:243: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:333: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:357: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:377: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:405: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:409: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:429: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:434: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:464: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:468: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:473: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:503: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:507: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:527: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:532: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:575: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:597: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:618: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:643: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:667: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:677: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:696: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:727: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:732: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:763: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:789: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:817: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:827: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:856: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:887: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:892: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:965: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:1006: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:1011: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\association_engine.py:1049: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\bo_framework.py:115: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\condition_evaluator.py:46: B307[bandit]: MEDIUM: Use of possibly insecure function - consider using safer ast.literal_eval.
+D:\filework\excel-to-diagram\meta\core\consistency_guard.py:144: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\consistency_guard.py:276: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\consistency_guard.py:411: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\consistency_guard.py:502: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\constraint_engine.py:98: B307[bandit]: MEDIUM: Use of possibly insecure function - consider using safer ast.literal_eval.
+D:\filework\excel-to-diagram\meta\core\constraint_engine.py:119: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\enrichment_engine.py:172: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\enrichment_engine.py:214: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\enrichment_engine.py:269: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\enrichment_engine.py:347: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\enums\repository.py:159: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\enums\repository.py:277: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\enums\repository.py:361: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\enums\repository.py:574: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\incremental_index_strategy.py:278: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\index_management_service.py:259: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\index_management_service.py:266: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\index_management_service.py:273: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\index_management_service.py:392: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\index_monitor.py:289: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\interceptors\audit_interceptor.py:117: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\interceptors\audit_interceptor.py:337: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\interceptors\cascade_interceptor.py:69: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\interceptors\cascade_interceptor.py:103: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\interceptors\context_interceptor.py:43: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\interceptors\data_permission_interceptor.py:64: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\interceptors\data_permission_interceptor.py:95: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\interceptors\lock_interceptor.py:164: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\interceptors\persistence_interceptor.py:227: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\interceptors\persistence_interceptor.py:385: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\interceptors\persistence_interceptor.py:392: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\interceptors\persistence_interceptor.py:394: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\interceptors\persistence_interceptor.py:429: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\interceptors\persistence_interceptor.py:434: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\interceptors\persistence_interceptor.py:447: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\interceptors\persistence_interceptor.py:452: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\interceptors\persistence_interceptor.py:560: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\interceptors\version_context_interceptor.py:77: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\query_builder.py:590: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\rule_chain.py:894: B307[bandit]: MEDIUM: Use of possibly insecure function - consider using safer ast.literal_eval.
+D:\filework\excel-to-diagram\meta\core\rule_executor.py:881: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\rule_executor.py:923: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\schema_generator.py:405: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\schema_generator.py:417: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\sql_adapters.py:181: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\sql_adapters.py:199: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\sql_adapters.py:277: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\sql_adapters.py:335: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\sql_adapters.py:353: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\sql_adapters.py:381: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\sql_adapters.py:403: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\sql_adapters.py:419: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\core\sql_adapters.py:687: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\sql_adapters.py:733: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\sql_connection_pool.py:165: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\sql_connection_pool.py:173: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\sql_connection_pool.py:270: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\sql_connection_pool.py:297: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\sql_connection_pool.py:331: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\sql_connection_pool.py:338: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\sql_connection_pool.py:346: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\sql_write_queue.py:129: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\sql_write_queue.py:238: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\startup_checks.py:65: B105[bandit]: LOW: Possible hardcoded password: 'your-secret-key-change-in-production'
+D:\filework\excel-to-diagram\meta\core\value_help_providers.py:100: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\core\yaml_loader.py:1948: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\dev\analyze_tests.py:13: B404[bandit]: LOW: Consider possible security implications associated with the subprocess module.
+D:\filework\excel-to-diagram\meta\dev\analyze_tests.py:192: B607[bandit]: LOW: Starting a process with a partial executable path
+D:\filework\excel-to-diagram\meta\dev\analyze_tests.py:192: B603[bandit]: LOW: subprocess call - check for execution of untrusted input.
+D:\filework\excel-to-diagram\meta\dev\init_test_data.py:89: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\migrations\add_performance_indexes.py:192: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\ops_server.py:175: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\ops_server.py:224: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\ops_server.py:328: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\ops_server.py:335: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\ops_server.py:344: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\ops_server.py:351: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\ops_server.py:360: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\ops_server.py:426: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\ops_server.py:435: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\ops_server.py:444: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\ops_server.py:458: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\ops_server.py:513: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\ops_server.py:518: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\ops_server.py:545: B104[bandit]: MEDIUM: Possible binding to all interfaces.
+D:\filework\excel-to-diagram\meta\scripts\init_auth.py:304: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\scripts\init_auth_tables.py:215: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\scripts\preload_hot_roles.py:61: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\server.py:24: B404[bandit]: LOW: Consider possible security implications associated with the subprocess module.
+D:\filework\excel-to-diagram\meta\server.py:27: B607[bandit]: LOW: Starting a process with a partial executable path
+D:\filework\excel-to-diagram\meta\server.py:27: B603[bandit]: LOW: subprocess call - check for execution of untrusted input.
+D:\filework\excel-to-diagram\meta\server.py:52: B404[bandit]: LOW: Consider possible security implications associated with the subprocess module.
+D:\filework\excel-to-diagram\meta\server.py:53: B607[bandit]: LOW: Starting a process with a partial executable path
+D:\filework\excel-to-diagram\meta\server.py:53: B603[bandit]: LOW: subprocess call - check for execution of untrusted input.
+D:\filework\excel-to-diagram\meta\server.py:432: B104[bandit]: MEDIUM: Possible binding to all interfaces.
+D:\filework\excel-to-diagram\meta\services\association_service.py:40: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\association_service.py:56: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\association_service.py:76: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\association_service.py:84: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\association_service.py:107: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\association_service.py:117: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\association_service.py:141: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\association_service.py:151: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\association_service.py:243: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\association_service.py:248: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\association_service.py:274: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\association_service.py:275: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\async_audit_writer.py:224: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\async_audit_writer.py:247: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\async_audit_writer.py:261: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\audit_service.py:208: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\audit_service.py:321: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\audit_service.py:335: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\audit_service.py:531: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\business_key_service.py:94: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\business_key_service.py:248: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\cascade_service.py:580: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\cascade_service.py:600: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\cascade_service.py:652: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\cascade_service.py:659: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\computation_service.py:171: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\computation_service.py:223: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\computation_service.py:305: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\computation_service.py:332: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\computation_service.py:357: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\computation_service.py:365: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\condition_permission_service.py:155: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\condition_permission_service.py:217: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\condition_permission_service.py:373: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\condition_permission_service.py:382: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\condition_permission_service.py:419: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\condition_permission_service.py:422: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\condition_permission_service.py:525: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\condition_permission_service.py:689: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\condition_permission_service.py:696: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\condition_permission_service.py:767: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\condition_permission_service.py:784: B112[bandit]: LOW: Try, Except, Continue detected.
+D:\filework\excel-to-diagram\meta\services\condition_permission_service.py:806: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\condition_permission_service.py:831: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\data_permission_generator.py:48: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\data_permission_generator.py:61: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\data_permission_service.py:40: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\data_permission_service.py:205: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\data_permission_service.py:211: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\data_permission_service.py:238: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\data_permission_service.py:353: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\data_permission_service.py:439: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\data_permission_service.py:471: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\data_permission_service.py:574: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\data_permission_service.py:608: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\data_permission_service.py:759: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\data_permission_service.py:802: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\data_permission_service.py:807: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\deletion_service.py:43: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\deletion_service.py:57: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\deletion_service.py:75: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\deletion_service.py:112: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\deletion_service.py:128: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\deletion_service.py:133: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\deletion_service.py:136: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\deletion_service.py:160: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\deletion_service.py:224: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\dimension_scope_engine.py:93: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\dimension_scope_engine.py:132: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\dimension_scope_engine.py:189: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\dimension_scope_engine.py:194: B112[bandit]: LOW: Try, Except, Continue detected.
+D:\filework\excel-to-diagram\meta\services\excel_design_system.py:138: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\field_policy_engine.py:307: B307[bandit]: MEDIUM: Use of possibly insecure function - consider using safer ast.literal_eval.
+D:\filework\excel-to-diagram\meta\services\hierarchy_path_service.py:180: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\hierarchy_path_service.py:317: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\hierarchy_service.py:134: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\hierarchy_service.py:201: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\hierarchy_validation_service.py:168: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\hierarchy_validation_service.py:174: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\import_export_service.py:359: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\import_export_service.py:887: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\import_export_service.py:891: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\import_export_service.py:1007: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\import_export_service.py:1261: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\import_export_service.py:1265: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\import_export_service.py:1418: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\import_export_service.py:1863: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\import_export_service.py:1887: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\import_export_service.py:1928: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\import_export_service.py:2102: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\import_export_service.py:2323: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\import_export_service.py:2328: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\import_export_service.py:2404: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\import_export_service.py:2620: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\manage_service.py:202: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\manage_service.py:229: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\manage_service.py:238: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\manage_service.py:275: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\manage_service.py:281: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\manage_service.py:294: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\manage_service.py:296: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\manage_service.py:377: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\management_dimension_engine.py:393: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\management_dimension_engine.py:490: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\management_dimension_engine.py:562: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\management_dimension_engine.py:594: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\menu_auto_generator.py:46: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\menu_auto_generator.py:72: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\meta_action_service.py:81: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\object_identity_service.py:106: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\owner_transfer_service.py:85: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\owner_transfer_service.py:106: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\owner_transfer_service.py:162: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\owner_transfer_service.py:217: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\owner_transfer_service.py:324: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\permission_audit_service.py:168: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\permission_sync_service.py:56: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\permission_sync_service.py:80: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\permission_sync_service.py:84: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\permission_sync_service.py:309: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\query_service.py:184: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\query_service.py:204: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\services\query_service.py:617: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\query_service.py:695: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\query_service.py:703: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\query_service.py:718: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\query_service.py:731: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\query_service.py:758: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\query_service.py:770: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\query_service.py:772: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\query_service.py:775: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\query_service.py:877: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\query_service.py:890: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\query_service.py:892: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\query_service.py:894: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\query_service.py:1297: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\query_service.py:1304: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\query_service.py:1318: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\query_service.py:1330: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\query_service.py:1381: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\query_service.py:1386: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\query_service.py:1391: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\query_service.py:1519: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\query_service.py:1700: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\token_service.py:38: B105[bandit]: LOW: Possible hardcoded password: 'dev-only-secret-key-not-for-production-use'
+D:\filework\excel-to-diagram\meta\services\user_group_service.py:79: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\user_group_service.py:262: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\services\webhook_service.py:200: B310[bandit]: MEDIUM: Audit url open for permitted schemes. Allowing use of file:/ or custom schemes is often unexpected.
+D:\filework\excel-to-diagram\meta\test_login.py:4: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests\_debug_dataperm.py:27: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\tests\_debug_dataperm.py:29: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\tests\conftest.py:29: B105[bandit]: LOW: Possible hardcoded password: 'test-secret-key-for-testing-purposes-only-min32chars'
+D:\filework\excel-to-diagram\meta\tests\performance\conftest.py:77: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\performance\conftest.py:82: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\performance\conftest.py:238: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\performance\conftest.py:242: B107[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests\performance\conftest.py:330: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\performance\conftest.py:344: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\performance\conftest.py:361: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\performance\conftest.py:372: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\performance\locustfile.py:71: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests\performance\locustfile.py:348: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests\performance\locustfile.py:383: B605[bandit]: LOW: Starting a process with a shell: Seems safe, but may be changed in the future, consider rewriting without shell
+D:\filework\excel-to-diagram\meta\tests\performance\locustfile.py:383: B607[bandit]: LOW: Starting a process with a partial executable path
+D:\filework\excel-to-diagram\meta\tests\performance\performance_base.py:218: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\performance\performance_reporter.py:123: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\performance\performance_reporter.py:206: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\tests\performance\performance_reporter.py:211: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\tests\performance\performance_reporter.py:235: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\performance\performance_reporter.py:301: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\performance\performance_reporter.py:382: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\performance\run_performance_test.py:22: B404[bandit]: LOW: Consider possible security implications associated with the subprocess module.
+D:\filework\excel-to-diagram\meta\tests\performance\run_performance_test.py:83: B607[bandit]: LOW: Starting a process with a partial executable path
+D:\filework\excel-to-diagram\meta\tests\performance\run_performance_test.py:83: B603[bandit]: LOW: subprocess call - check for execution of untrusted input.
+D:\filework\excel-to-diagram\meta\tests\performance\run_performance_test.py:145: B603[bandit]: LOW: subprocess call - check for execution of untrusted input.
+D:\filework\excel-to-diagram\meta\tests\performance\test_api_performance.py:58: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests\performance\test_concurrent_load.py:72: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\performance\test_concurrent_load.py:76: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\performance\test_concurrent_load.py:310: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\performance\test_concurrent_load.py:314: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\performance\test_index_effectiveness.py:44: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\performance\test_index_effectiveness.py:48: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\performance\test_index_effectiveness.py:71: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\performance\test_index_effectiveness.py:75: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\performance\test_index_effectiveness.py:349: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\performance\test_index_effectiveness.py:353: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\performance\test_large_data_scenario.py:57: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\performance\test_large_data_scenario.py:61: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\performance\test_large_data_scenario.py:317: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\performance\test_large_data_scenario.py:321: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_annotation_api.py:50: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_annotation_api.py:396: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_annotation_import.py:39: B306[bandit]: MEDIUM: Use of insecure and deprecated function (mktemp).
+D:\filework\excel-to-diagram\meta\tests\test_annotation_import.py:52: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_annotation_import.py:110: B306[bandit]: MEDIUM: Use of insecure and deprecated function (mktemp).
+D:\filework\excel-to-diagram\meta\tests\test_annotation_import.py:139: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_annotation_import.py:152: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_annotation_import.py:207: B306[bandit]: MEDIUM: Use of insecure and deprecated function (mktemp).
+D:\filework\excel-to-diagram\meta\tests\test_annotation_import.py:285: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_annotation_metadata_driven.py:392: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_api.py:79: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\tests\test_api_smoke_tests.py:28: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_api_smoke_tests.py:34: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests\test_api_smoke_tests.py:190: B105[bandit]: LOW: Possible hardcoded password: 'test123456'
+D:\filework\excel-to-diagram\meta\tests\test_app_builder.py:107: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_association_engine.py:60: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_async_audit_writer.py:25: B105[bandit]: LOW: Possible hardcoded password: 'test-secret-key-for-async-audit'
+D:\filework\excel-to-diagram\meta\tests\test_async_audit_writer.py:73: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_async_audit_writer.py:77: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_audit_compensation.py:21: B105[bandit]: LOW: Possible hardcoded password: 'test-secret-key-for-phase3'
+D:\filework\excel-to-diagram\meta\tests\test_audit_compensation.py:68: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_audit_compensation.py:72: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_audit_integration.py:644: B105[bandit]: LOW: Possible hardcoded password: 'secret123'
+D:\filework\excel-to-diagram\meta\tests\test_audit_integration.py:647: B105[bandit]: LOW: Possible hardcoded password: 'abc123'
+D:\filework\excel-to-diagram\meta\tests\test_audit_integration.py:660: B105[bandit]: LOW: Possible hardcoded password: 'secret1'
+D:\filework\excel-to-diagram\meta\tests\test_audit_integration.py:661: B105[bandit]: LOW: Possible hardcoded password: 'secret2'
+D:\filework\excel-to-diagram\meta\tests\test_audit_integration.py:701: B105[bandit]: LOW: Possible hardcoded password: 'secret'
+D:\filework\excel-to-diagram\meta\tests\test_audit_interceptor_unified.py:26: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests\test_audit_interceptor_unified.py:32: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_audit_interceptor_unified.py:86: B105[bandit]: LOW: Possible hardcoded password: 'test123456'
+D:\filework\excel-to-diagram\meta\tests\test_audit_interceptor_unified.py:123: B105[bandit]: LOW: Possible hardcoded password: 'test123456'
+D:\filework\excel-to-diagram\meta\tests\test_audit_interceptor_unified.py:180: B105[bandit]: LOW: Possible hardcoded password: 'test123456'
+D:\filework\excel-to-diagram\meta\tests\test_audit_interceptor_unified.py:228: B105[bandit]: LOW: Possible hardcoded password: 'test123456'
+D:\filework\excel-to-diagram\meta\tests\test_audit_interceptor_unified.py:563: B105[bandit]: LOW: Possible hardcoded password: 'test123456'
+D:\filework\excel-to-diagram\meta\tests\test_audit_interceptor_unified.py:612: B105[bandit]: LOW: Possible hardcoded password: 'test123456'
+D:\filework\excel-to-diagram\meta\tests\test_audit_interceptor_unified.py:664: B105[bandit]: LOW: Possible hardcoded password: 'test123456'
+D:\filework\excel-to-diagram\meta\tests\test_audit_log_v2.py:23: B105[bandit]: LOW: Possible hardcoded password: 'test-secret-key-for-audit-tests'
+D:\filework\excel-to-diagram\meta\tests\test_audit_log_v2.py:71: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_audit_log_v2.py:75: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_audit_log_v2.py:397: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_audit_log_v2.py:437: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_audit_unified.py:34: B105[bandit]: LOW: Possible hardcoded password: 'hashed_password_12345'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:276: B107[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:292: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:303: B105[bandit]: LOW: Possible hardcoded password: 'wrong'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:314: B105[bandit]: LOW: Possible hardcoded password: 'whatever'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:325: B105[bandit]: LOW: Possible hardcoded password: ''
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:480: B105[bandit]: LOW: Possible hardcoded password: 'newpass123'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:496: B105[bandit]: LOW: Possible hardcoded password: 'pass123456'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:512: B105[bandit]: LOW: Possible hardcoded password: 'ab'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:536: B105[bandit]: LOW: Possible hardcoded password: 'test123'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:543: B105[bandit]: LOW: Possible hardcoded password: 'test123'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:543: B105[bandit]: LOW: Possible hardcoded password: 'newtest456'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:550: B105[bandit]: LOW: Possible hardcoded password: 'newtest456'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:571: B105[bandit]: LOW: Possible hardcoded password: 'wrongpassword'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:571: B105[bandit]: LOW: Possible hardcoded password: 'somepass789'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:583: B105[bandit]: LOW: Possible hardcoded password: 'newtest456'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:583: B105[bandit]: LOW: Possible hardcoded password: 'ab'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:595: B105[bandit]: LOW: Possible hardcoded password: ''
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:595: B105[bandit]: LOW: Possible hardcoded password: ''
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:607: B105[bandit]: LOW: Possible hardcoded password: 'newtest456'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:619: B105[bandit]: LOW: Possible hardcoded password: 'somepass789'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:636: B105[bandit]: LOW: Possible hardcoded password: 'reset123456'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:648: B105[bandit]: LOW: Possible hardcoded password: 'ab'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:660: B105[bandit]: LOW: Possible hardcoded password: 'pass123456'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:685: B105[bandit]: LOW: Possible hardcoded password: 'reset123456'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:700: B105[bandit]: LOW: Possible hardcoded password: 'reset123456'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:700: B105[bandit]: LOW: Possible hardcoded password: 'finalpass789'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:748: B105[bandit]: LOW: Possible hardcoded password: 'hackpassword'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:759: B105[bandit]: LOW: Possible hardcoded password: 'x'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:759: B105[bandit]: LOW: Possible hardcoded password: 'y'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:769: B105[bandit]: LOW: Possible hardcoded password: 'hackpassword'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:788: B106[bandit]: LOW: Possible hardcoded password: 'viewer123'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:795: B105[bandit]: LOW: Possible hardcoded password: 'pass123456'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:931: B105[bandit]: LOW: Possible hardcoded password: 'finalpass789'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:936: B105[bandit]: LOW: Possible hardcoded password: 'wrong'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api.py:955: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_auth_api_granular.py:34: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api_granular.py:43: B105[bandit]: LOW: Possible hardcoded password: 'wrongpassword'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api_granular.py:52: B105[bandit]: LOW: Possible hardcoded password: 'password'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api_granular.py:61: B105[bandit]: LOW: Possible hardcoded password: 'password'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api_granular.py:70: B105[bandit]: LOW: Possible hardcoded password: ''
+D:\filework\excel-to-diagram\meta\tests\test_auth_api_granular.py:79: B105[bandit]: LOW: Possible hardcoded password: 'password'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api_granular.py:97: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api_granular.py:121: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api_granular.py:165: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api_granular.py:226: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api_granular.py:270: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api_granular.py:285: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api_granular.py:286: B105[bandit]: LOW: Possible hardcoded password: 'newpassword123'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api_granular.py:300: B105[bandit]: LOW: Possible hardcoded password: 'wrongpassword'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api_granular.py:301: B105[bandit]: LOW: Possible hardcoded password: 'newpassword123'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api_granular.py:313: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api_granular.py:314: B105[bandit]: LOW: Possible hardcoded password: 'newpassword123'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api_granular.py:326: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests\test_auth_api_granular.py:346: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests\test_auth_middleware.py:135: B105[bandit]: LOW: Possible hardcoded password: 'x'
+D:\filework\excel-to-diagram\meta\tests\test_auth_middleware.py:135: B105[bandit]: LOW: Possible hardcoded password: 'y'
+D:\filework\excel-to-diagram\meta\tests\test_auth_permission.py:313: B105[bandit]: LOW: Possible hardcoded password: 'test123'
+D:\filework\excel-to-diagram\meta\tests\test_auth_permission.py:320: B105[bandit]: LOW: Possible hardcoded password: 'wrong'
+D:\filework\excel-to-diagram\meta\tests\test_auth_permission.py:324: B105[bandit]: LOW: Possible hardcoded password: 'test123'
+D:\filework\excel-to-diagram\meta\tests\test_auth_permission.py:328: B105[bandit]: LOW: Possible hardcoded password: 'test123'
+D:\filework\excel-to-diagram\meta\tests\test_auth_permission.py:332: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests\test_auth_permission.py:365: B105[bandit]: LOW: Possible hardcoded password: 'invalid.token.here'
+D:\filework\excel-to-diagram\meta\tests\test_auth_permission.py:370: B105[bandit]: LOW: Possible hardcoded password: ''
+D:\filework\excel-to-diagram\meta\tests\test_auth_provider.py:53: B105[bandit]: LOW: Possible hardcoded password: 'legacypassword'
+D:\filework\excel-to-diagram\meta\tests\test_bo_api.py:71: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_bo_api.py:89: B105[bandit]: LOW: Possible hardcoded password: 'pwd'
+D:\filework\excel-to-diagram\meta\tests\test_bo_api.py:108: B105[bandit]: LOW: Possible hardcoded password: 'pwd'
+D:\filework\excel-to-diagram\meta\tests\test_bo_api.py:153: B105[bandit]: LOW: Possible hardcoded password: 'pwd'
+D:\filework\excel-to-diagram\meta\tests\test_bo_api.py:165: B105[bandit]: LOW: Possible hardcoded password: 'pwd'
+D:\filework\excel-to-diagram\meta\tests\test_bo_api.py:175: B105[bandit]: LOW: Possible hardcoded password: 'pwd'
+D:\filework\excel-to-diagram\meta\tests\test_bo_api.py:191: B105[bandit]: LOW: Possible hardcoded password: 'pwd'
+D:\filework\excel-to-diagram\meta\tests\test_bo_api.py:199: B105[bandit]: LOW: Possible hardcoded password: 'pwd'
+D:\filework\excel-to-diagram\meta\tests\test_bo_api.py:200: B105[bandit]: LOW: Possible hardcoded password: 'pwd'
+D:\filework\excel-to-diagram\meta\tests\test_bo_api.py:344: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_bo_api.py:349: B105[bandit]: LOW: Possible hardcoded password: 'pwd'
+D:\filework\excel-to-diagram\meta\tests\test_bo_api.py:407: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_bo_api.py:412: B105[bandit]: LOW: Possible hardcoded password: 'pwd'
+D:\filework\excel-to-diagram\meta\tests\test_bo_api_granular.py:66: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_bo_api_granular.py:72: B105[bandit]: LOW: Possible hardcoded password: 'test123'
+D:\filework\excel-to-diagram\meta\tests\test_bo_api_granular.py:90: B105[bandit]: LOW: Possible hardcoded password: 'test123'
+D:\filework\excel-to-diagram\meta\tests\test_bo_api_granular.py:112: B105[bandit]: LOW: Possible hardcoded password: 'test123'
+D:\filework\excel-to-diagram\meta\tests\test_bo_api_granular.py:132: B105[bandit]: LOW: Possible hardcoded password: 'test123'
+D:\filework\excel-to-diagram\meta\tests\test_bo_api_granular.py:150: B105[bandit]: LOW: Possible hardcoded password: 'test123'
+D:\filework\excel-to-diagram\meta\tests\test_bo_api_granular.py:297: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_bo_api_granular.py:303: B105[bandit]: LOW: Possible hardcoded password: 'test123'
+D:\filework\excel-to-diagram\meta\tests\test_bo_api_granular.py:327: B105[bandit]: LOW: Possible hardcoded password: 'test123'
+D:\filework\excel-to-diagram\meta\tests\test_bo_api_granular.py:387: B105[bandit]: LOW: Possible hardcoded password: 'test123'
+D:\filework\excel-to-diagram\meta\tests\test_bo_api_granular.py:428: B105[bandit]: LOW: Possible hardcoded password: 'test123'
+D:\filework\excel-to-diagram\meta\tests\test_bo_api_granular.py:441: B105[bandit]: LOW: Possible hardcoded password: 'test123'
+D:\filework\excel-to-diagram\meta\tests\test_bo_api_granular.py:478: B105[bandit]: LOW: Possible hardcoded password: 'test123'
+D:\filework\excel-to-diagram\meta\tests\test_bo_api_granular.py:503: B105[bandit]: LOW: Possible hardcoded password: 'test123'
+D:\filework\excel-to-diagram\meta\tests\test_bo_transaction_lock.py:50: B105[bandit]: LOW: Possible hardcoded password: 'test_hash'
+D:\filework\excel-to-diagram\meta\tests\test_bo_transaction_lock.py:79: B105[bandit]: LOW: Possible hardcoded password: 'test_hash'
+D:\filework\excel-to-diagram\meta\tests\test_bo_transaction_lock.py:95: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_bo_transaction_lock.py:111: B105[bandit]: LOW: Possible hardcoded password: 'test_hash'
+D:\filework\excel-to-diagram\meta\tests\test_bo_transaction_lock.py:159: B105[bandit]: LOW: Possible hardcoded password: 'test_hash'
+D:\filework\excel-to-diagram\meta\tests\test_bo_transaction_lock.py:190: B105[bandit]: LOW: Possible hardcoded password: 'test_hash'
+D:\filework\excel-to-diagram\meta\tests\test_bo_transaction_lock.py:277: B105[bandit]: LOW: Possible hardcoded password: 'test_hash'
+D:\filework\excel-to-diagram\meta\tests\test_bo_transaction_lock.py:322: B105[bandit]: LOW: Possible hardcoded password: 'test_hash'
+D:\filework\excel-to-diagram\meta\tests\test_bo_transaction_lock.py:331: B105[bandit]: LOW: Possible hardcoded password: 'test_hash'
+D:\filework\excel-to-diagram\meta\tests\test_change_notification_config.py:63: B105[bandit]: LOW: Possible hardcoded password: ''
+D:\filework\excel-to-diagram\meta\tests\test_change_notification_config.py:74: B106[bandit]: LOW: Possible hardcoded password: 'my-secret-key'
+D:\filework\excel-to-diagram\meta\tests\test_change_notification_config.py:79: B105[bandit]: LOW: Possible hardcoded password: 'my-secret-key'
+D:\filework\excel-to-diagram\meta\tests\test_change_notification_config.py:157: B105[bandit]: LOW: Possible hardcoded password: 'super-secret'
+D:\filework\excel-to-diagram\meta\tests\test_change_notification_config.py:164: B105[bandit]: LOW: Possible hardcoded password: 'super-secret'
+D:\filework\excel-to-diagram\meta\tests\test_change_notification_config.py:176: B105[bandit]: LOW: Possible hardcoded password: ''
+D:\filework\excel-to-diagram\meta\tests\test_change_notification_config.py:203: B105[bandit]: LOW: Possible hardcoded password: 'webhook-secret'
+D:\filework\excel-to-diagram\meta\tests\test_change_notification_config.py:273: B105[bandit]: LOW: Possible hardcoded password: 'test-secret'
+D:\filework\excel-to-diagram\meta\tests\test_change_notification_integration.py:63: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_change_notification_integration.py:413: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_change_notification_integration.py:560: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_change_notification_service.py:66: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_cleanup_integrity.py:54: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_cleanup_integrity.py:95: B105[bandit]: LOW: Possible hardcoded password: 'Test123456'
+D:\filework\excel-to-diagram\meta\tests\test_cleanup_integrity.py:163: B105[bandit]: LOW: Possible hardcoded password: 'Test123456'
+D:\filework\excel-to-diagram\meta\tests\test_cleanup_integrity.py:179: B105[bandit]: LOW: Possible hardcoded password: 'Test123456'
+D:\filework\excel-to-diagram\meta\tests\test_cleanup_integrity.py:191: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests\test_cleanup_integrity.py:192: B105[bandit]: LOW: Possible hardcoded password: 'NewAdmin123'
+D:\filework\excel-to-diagram\meta\tests\test_connection_pool.py:497: B108[bandit]: MEDIUM: Probable insecure usage of temp file/directory.
+D:\filework\excel-to-diagram\meta\tests\test_connection_pool.py:499: B108[bandit]: MEDIUM: Probable insecure usage of temp file/directory.
+D:\filework\excel-to-diagram\meta\tests\test_connection_pool.py:593: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_constraint_engine.py:95: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_constraint_engine.py:187: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_data_permission_api.py:55: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_data_permission_api.py:258: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_data_permission_api.py:340: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_data_permission_service.py:376: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_derivation_executor.py:78: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_derivation_executor.py:140: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\tests\test_diagnose_domain_list.py:198: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\tests\test_e2e_lifecycle.py:48: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_enum_api_extended.py:27: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests\test_foreign_key_resolution.py:23: B306[bandit]: MEDIUM: Use of insecure and deprecated function (mktemp).
+D:\filework\excel-to-diagram\meta\tests\test_foreign_key_resolution.py:116: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_foreign_key_resolution.py:155: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_foreign_key_resolution.py:209: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_foreign_key_resolution.py:250: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_foreign_key_resolution.py:292: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_import_with_parent_resolution.py:23: B306[bandit]: MEDIUM: Use of insecure and deprecated function (mktemp).
+D:\filework\excel-to-diagram\meta\tests\test_import_with_parent_resolution.py:145: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_import_with_parent_resolution.py:186: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_import_with_parent_resolution.py:251: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_import_with_parent_resolution.py:299: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_import_with_parent_resolution.py:338: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_manage_api.py:68: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_manage_api.py:92: B105[bandit]: LOW: Possible hardcoded password: 'pwd123456'
+D:\filework\excel-to-diagram\meta\tests\test_manage_api.py:100: B105[bandit]: LOW: Possible hardcoded password: 'pwd123456'
+D:\filework\excel-to-diagram\meta\tests\test_manage_api.py:129: B105[bandit]: LOW: Possible hardcoded password: 'pwd123456'
+D:\filework\excel-to-diagram\meta\tests\test_manage_api.py:144: B105[bandit]: LOW: Possible hardcoded password: 'pwd123456'
+D:\filework\excel-to-diagram\meta\tests\test_manage_api.py:157: B105[bandit]: LOW: Possible hardcoded password: 'pwd123456'
+D:\filework\excel-to-diagram\meta\tests\test_manage_api.py:158: B105[bandit]: LOW: Possible hardcoded password: 'pwd123456'
+D:\filework\excel-to-diagram\meta\tests\test_manage_api.py:166: B105[bandit]: LOW: Possible hardcoded password: 'pwd123456'
+D:\filework\excel-to-diagram\meta\tests\test_manage_api.py:169: B105[bandit]: LOW: Possible hardcoded password: 'pwd123456'
+D:\filework\excel-to-diagram\meta\tests\test_manage_api.py:186: B105[bandit]: LOW: Possible hardcoded password: 'pwd123456'
+D:\filework\excel-to-diagram\meta\tests\test_management_dimension_api.py:57: B105[bandit]: LOW: Possible hardcoded password: 'test-secret-key'
+D:\filework\excel-to-diagram\meta\tests\test_management_dimension_api.py:483: B105[bandit]: LOW: Possible hardcoded password: 'test-secret-key'
+D:\filework\excel-to-diagram\meta\tests\test_meta_action_api.py:52: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_meta_api.py:18: B105[bandit]: LOW: Possible hardcoded password: 'test-secret-key-for-testing'
+D:\filework\excel-to-diagram\meta\tests\test_ops_server.py:23: B105[bandit]: LOW: Possible hardcoded password: 'test-admin-token-for-ops-1234567890'
+D:\filework\excel-to-diagram\meta\tests\test_ops_server.py:85: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_ops_server.py:89: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_ops_server.py:93: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_ops_server.py:330: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_owner_permission.py:226: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_permission_rule_api_extended.py:27: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests\test_queryservice_dataperm.py:218: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_queryservice_dataperm.py:290: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\tests\test_relationship_crud.py:34: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_relationship_crud.py:64: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_relationship_crud.py:74: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_relationship_crud.py:96: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_relationship_crud.py:101: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_relationship_crud.py:107: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_relationship_crud.py:120: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_relationship_crud.py:131: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_relationship_crud.py:150: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_relationship_crud.py:159: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_relationship_crud.py:163: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_relationship_crud.py:176: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_relationship_crud.py:186: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_relationship_crud.py:200: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_relationship_crud.py:206: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_relationship_crud.py:212: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_relationship_crud.py:217: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_relationship_crud.py:229: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_role_api.py:62: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_role_menu_api.py:27: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests\test_rule_chain_extended.py:155: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_rule_chain_extended.py:168: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_rule_chain_extended.py:183: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_security_improvements.py:24: B105[bandit]: LOW: Possible hardcoded password: 'test-secret-key-for-security-tests-only'
+D:\filework\excel-to-diagram\meta\tests\test_security_improvements.py:149: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_security_improvements.py:177: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_security_improvements.py:208: B105[bandit]: LOW: Possible hardcoded password: 'secret123'
+D:\filework\excel-to-diagram\meta\tests\test_security_improvements.py:210: B105[bandit]: LOW: Possible hardcoded password: 'jwt_token_here'
+D:\filework\excel-to-diagram\meta\tests\test_security_pentest.py:140: B324[bandit]: HIGH: Use of weak MD5 hash for security. Consider usedforsecurity=False
+D:\filework\excel-to-diagram\meta\tests\test_security_pentest.py:244: B105[bandit]: LOW: Possible hardcoded password: 'eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJ1c2VyX2lkIjoxfQ.'
+D:\filework\excel-to-diagram\meta\tests\test_security_pentest.py:316: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_self_service_whitelist.py:159: B107[bandit]: LOW: Possible hardcoded password: 'test123'
+D:\filework\excel-to-diagram\meta\tests\test_self_service_whitelist.py:264: B105[bandit]: LOW: Possible hardcoded password: 'test123'
+D:\filework\excel-to-diagram\meta\tests\test_self_service_whitelist.py:264: B105[bandit]: LOW: Possible hardcoded password: 'newpass123'
+D:\filework\excel-to-diagram\meta\tests\test_self_service_whitelist.py:312: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_set_current_action.py:106: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_sql_config.py:80: B108[bandit]: MEDIUM: Probable insecure usage of temp file/directory.
+D:\filework\excel-to-diagram\meta\tests\test_sql_config.py:81: B108[bandit]: MEDIUM: Probable insecure usage of temp file/directory.
+D:\filework\excel-to-diagram\meta\tests\test_startup_checks.py:73: B105[bandit]: LOW: Possible hardcoded password: 'your-secret-key-change-in-production'
+D:\filework\excel-to-diagram\meta\tests\test_startup_checks.py:84: B105[bandit]: LOW: Possible hardcoded password: 'abc'
+D:\filework\excel-to-diagram\meta\tests\test_startup_checks.py:178: B105[bandit]: LOW: Possible hardcoded password: 'SecurePassword123!'
+D:\filework\excel-to-diagram\meta\tests\test_startup_checks.py:196: B105[bandit]: LOW: Possible hardcoded password: 'test'
+D:\filework\excel-to-diagram\meta\tests\test_token_blacklist_service.py:35: B105[bandit]: LOW: Possible hardcoded password: 'test-token-123'
+D:\filework\excel-to-diagram\meta\tests\test_token_blacklist_service.py:47: B105[bandit]: LOW: Possible hardcoded password: 'test-token-456'
+D:\filework\excel-to-diagram\meta\tests\test_token_blacklist_service.py:60: B105[bandit]: LOW: Possible hardcoded password: 'test-token-789'
+D:\filework\excel-to-diagram\meta\tests\test_token_blacklist_service.py:69: B105[bandit]: LOW: Possible hardcoded password: 'expired-token'
+D:\filework\excel-to-diagram\meta\tests\test_token_blacklist_service.py:77: B105[bandit]: LOW: Possible hardcoded password: 'plaintext-token-value'
+D:\filework\excel-to-diagram\meta\tests\test_transaction_advanced.py:150: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_user_api_extended.py:29: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests\test_user_api_extended.py:111: B105[bandit]: LOW: Possible hardcoded password: 'Newpass123'
+D:\filework\excel-to-diagram\meta\tests\test_user_api_extended.py:140: B105[bandit]: LOW: Possible hardcoded password: 'Test1234'
+D:\filework\excel-to-diagram\meta\tests\test_user_group_api_extended.py:29: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests\test_user_group_associate_audit.py:53: B105[bandit]: LOW: Possible hardcoded password: 'test_hash'
+D:\filework\excel-to-diagram\meta\tests\test_user_group_associate_audit.py:175: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_user_group_associate_audit.py:181: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:30: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:66: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:67: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:74: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:74: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:91: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:105: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:110: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:117: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:126: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:140: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:144: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:152: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:165: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:169: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:177: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:190: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:194: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:202: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:215: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:219: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:227: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:239: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:249: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:260: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:273: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:281: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:289: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:297: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_v2_api_permissions.py:301: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests\test_value_help_validation.py:140: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_value_help_validation.py:251: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_value_help_validation.py:361: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests\test_webhook_service.py:32: B106[bandit]: LOW: Possible hardcoded password: 'my-secret'
+D:\filework\excel-to-diagram\meta\tests\test_webhook_service.py:37: B105[bandit]: LOW: Possible hardcoded password: 'my-secret'
+D:\filework\excel-to-diagram\meta\tests\test_webhook_service.py:44: B105[bandit]: LOW: Possible hardcoded password: ''
+D:\filework\excel-to-diagram\meta\tests\test_webhook_service.py:96: B105[bandit]: LOW: Possible hardcoded password: 'my-secret'
+D:\filework\excel-to-diagram\meta\tests\test_webhook_service.py:114: B105[bandit]: LOW: Possible hardcoded password: 'my-secret'
+D:\filework\excel-to-diagram\meta\tests_backups\test_api_smoke_tests.py:25: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests_backups\test_api_smoke_tests.py:167: B105[bandit]: LOW: Possible hardcoded password: 'test123456'
+D:\filework\excel-to-diagram\meta\tests_backups\test_audit_integration.py:644: B105[bandit]: LOW: Possible hardcoded password: 'secret123'
+D:\filework\excel-to-diagram\meta\tests_backups\test_audit_integration.py:647: B105[bandit]: LOW: Possible hardcoded password: 'abc123'
+D:\filework\excel-to-diagram\meta\tests_backups\test_audit_integration.py:660: B105[bandit]: LOW: Possible hardcoded password: 'secret1'
+D:\filework\excel-to-diagram\meta\tests_backups\test_audit_integration.py:661: B105[bandit]: LOW: Possible hardcoded password: 'secret2'
+D:\filework\excel-to-diagram\meta\tests_backups\test_audit_integration.py:701: B105[bandit]: LOW: Possible hardcoded password: 'secret'
+D:\filework\excel-to-diagram\meta\tests_backups\test_audit_interceptor_unified.py:26: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests_backups\test_audit_interceptor_unified.py:77: B105[bandit]: LOW: Possible hardcoded password: 'test123456'
+D:\filework\excel-to-diagram\meta\tests_backups\test_audit_interceptor_unified.py:114: B105[bandit]: LOW: Possible hardcoded password: 'test123456'
+D:\filework\excel-to-diagram\meta\tests_backups\test_audit_interceptor_unified.py:171: B105[bandit]: LOW: Possible hardcoded password: 'test123456'
+D:\filework\excel-to-diagram\meta\tests_backups\test_audit_interceptor_unified.py:219: B105[bandit]: LOW: Possible hardcoded password: 'test123456'
+D:\filework\excel-to-diagram\meta\tests_backups\test_audit_interceptor_unified.py:554: B105[bandit]: LOW: Possible hardcoded password: 'test123456'
+D:\filework\excel-to-diagram\meta\tests_backups\test_audit_interceptor_unified.py:603: B105[bandit]: LOW: Possible hardcoded password: 'test123456'
+D:\filework\excel-to-diagram\meta\tests_backups\test_audit_interceptor_unified.py:655: B105[bandit]: LOW: Possible hardcoded password: 'test123456'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:276: B107[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:292: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:303: B105[bandit]: LOW: Possible hardcoded password: 'wrong'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:314: B105[bandit]: LOW: Possible hardcoded password: 'whatever'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:325: B105[bandit]: LOW: Possible hardcoded password: ''
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:480: B105[bandit]: LOW: Possible hardcoded password: 'newpass123'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:496: B105[bandit]: LOW: Possible hardcoded password: 'pass123456'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:512: B105[bandit]: LOW: Possible hardcoded password: 'ab'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:536: B105[bandit]: LOW: Possible hardcoded password: 'test123'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:543: B105[bandit]: LOW: Possible hardcoded password: 'test123'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:543: B105[bandit]: LOW: Possible hardcoded password: 'newtest456'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:550: B105[bandit]: LOW: Possible hardcoded password: 'newtest456'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:571: B105[bandit]: LOW: Possible hardcoded password: 'wrongpassword'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:571: B105[bandit]: LOW: Possible hardcoded password: 'somepass789'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:583: B105[bandit]: LOW: Possible hardcoded password: 'newtest456'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:583: B105[bandit]: LOW: Possible hardcoded password: 'ab'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:595: B105[bandit]: LOW: Possible hardcoded password: ''
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:595: B105[bandit]: LOW: Possible hardcoded password: ''
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:607: B105[bandit]: LOW: Possible hardcoded password: 'newtest456'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:619: B105[bandit]: LOW: Possible hardcoded password: 'somepass789'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:636: B105[bandit]: LOW: Possible hardcoded password: 'reset123456'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:648: B105[bandit]: LOW: Possible hardcoded password: 'ab'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:660: B105[bandit]: LOW: Possible hardcoded password: 'pass123456'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:685: B105[bandit]: LOW: Possible hardcoded password: 'reset123456'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:700: B105[bandit]: LOW: Possible hardcoded password: 'reset123456'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:700: B105[bandit]: LOW: Possible hardcoded password: 'finalpass789'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:748: B105[bandit]: LOW: Possible hardcoded password: 'hackpassword'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:759: B105[bandit]: LOW: Possible hardcoded password: 'x'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:759: B105[bandit]: LOW: Possible hardcoded password: 'y'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:769: B105[bandit]: LOW: Possible hardcoded password: 'hackpassword'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:788: B106[bandit]: LOW: Possible hardcoded password: 'viewer123'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:795: B105[bandit]: LOW: Possible hardcoded password: 'pass123456'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:931: B105[bandit]: LOW: Possible hardcoded password: 'finalpass789'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:936: B105[bandit]: LOW: Possible hardcoded password: 'wrong'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_api.py:955: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_middleware.py:135: B105[bandit]: LOW: Possible hardcoded password: 'x'
+D:\filework\excel-to-diagram\meta\tests_backups\test_auth_middleware.py:135: B105[bandit]: LOW: Possible hardcoded password: 'y'
+D:\filework\excel-to-diagram\meta\tests_backups\test_cleanup_integrity.py:54: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests_backups\test_cleanup_integrity.py:95: B105[bandit]: LOW: Possible hardcoded password: 'Test123456'
+D:\filework\excel-to-diagram\meta\tests_backups\test_cleanup_integrity.py:163: B105[bandit]: LOW: Possible hardcoded password: 'Test123456'
+D:\filework\excel-to-diagram\meta\tests_backups\test_cleanup_integrity.py:179: B105[bandit]: LOW: Possible hardcoded password: 'Test123456'
+D:\filework\excel-to-diagram\meta\tests_backups\test_cleanup_integrity.py:191: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests_backups\test_cleanup_integrity.py:192: B105[bandit]: LOW: Possible hardcoded password: 'NewAdmin123'
+D:\filework\excel-to-diagram\meta\tests_backups\test_diagnose_domain_list.py:196: B608[bandit]: MEDIUM: Possible SQL injection vector through string-based query construction.
+D:\filework\excel-to-diagram\meta\tests_backups\test_management_dimension_api.py:57: B105[bandit]: LOW: Possible hardcoded password: 'test-secret-key'
+D:\filework\excel-to-diagram\meta\tests_backups\test_management_dimension_api.py:483: B105[bandit]: LOW: Possible hardcoded password: 'test-secret-key'
+D:\filework\excel-to-diagram\meta\tests_backups\test_ops_server.py:23: B105[bandit]: LOW: Possible hardcoded password: 'test-admin-token-for-ops-1234567890'
+D:\filework\excel-to-diagram\meta\tests_backups\test_ops_server.py:85: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests_backups\test_ops_server.py:89: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests_backups\test_ops_server.py:93: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests_backups\test_ops_server.py:330: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tests_backups\test_relationship_crud.py:67: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests_backups\test_relationship_crud.py:77: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests_backups\test_relationship_crud.py:99: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests_backups\test_relationship_crud.py:104: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests_backups\test_relationship_crud.py:110: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests_backups\test_relationship_crud.py:123: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests_backups\test_relationship_crud.py:134: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests_backups\test_relationship_crud.py:153: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests_backups\test_relationship_crud.py:162: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests_backups\test_relationship_crud.py:166: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests_backups\test_relationship_crud.py:179: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests_backups\test_relationship_crud.py:189: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests_backups\test_relationship_crud.py:203: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests_backups\test_relationship_crud.py:209: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests_backups\test_relationship_crud.py:215: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests_backups\test_relationship_crud.py:220: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests_backups\test_relationship_crud.py:232: B113[bandit]: MEDIUM: Call to requests without timeout
+D:\filework\excel-to-diagram\meta\tests_backups\test_role_dimension_scope_api.py:23: B105[bandit]: LOW: Possible hardcoded password: 'admin123'
+D:\filework\excel-to-diagram\meta\tests_backups\test_self_service_whitelist.py:159: B107[bandit]: LOW: Possible hardcoded password: 'test123'
+D:\filework\excel-to-diagram\meta\tests_backups\test_self_service_whitelist.py:264: B105[bandit]: LOW: Possible hardcoded password: 'test123'
+D:\filework\excel-to-diagram\meta\tests_backups\test_self_service_whitelist.py:264: B105[bandit]: LOW: Possible hardcoded password: 'newpass123'
+D:\filework\excel-to-diagram\meta\tests_backups\test_self_service_whitelist.py:312: B110[bandit]: LOW: Try, Except, Pass detected.
+D:\filework\excel-to-diagram\meta\tools\sync_schema.py:50: B324[bandit]: HIGH: Use of weak MD5 hash for security. Consider usedforsecurity=False

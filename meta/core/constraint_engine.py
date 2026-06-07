@@ -84,7 +84,7 @@ class ConstraintEngine:
             return self._check_immutable(context, field, constraint)
         elif constraint_type == 'no_delete':
             return self._check_no_delete(context, field, constraint)
-        elif constraint_type == 'conditional_required':  # 🆕 v1 批次 2 / FR-4.2
+        elif constraint_type == 'conditional_required':  # [DECORATIVE] [NEW] v1.2 / FR-4.2
             return self._check_conditional_required(context, field, constraint)
 
         return None
@@ -203,7 +203,7 @@ class ConstraintEngine:
     def _check_conditional_required(
         self, context: ActionContext, field, constraint: Dict
     ) -> Optional[ConstraintViolation]:
-        """🆕 v1 批次 2 / FR-4.1: 条件必填校验
+        """[DECORATIVE] [NEW] v1.2 / FR-4.1: 条件必填校验
 
         当某个条件的求值结果为 True 时，字段变成必填。
 

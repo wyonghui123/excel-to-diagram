@@ -1,0 +1,1 @@
+export { useSvgStyle } from './useSvgStyle.js'

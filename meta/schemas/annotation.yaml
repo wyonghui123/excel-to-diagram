@@ -1,0 +1,403 @@
+# ============================================
+# 备注元模型
+# 说明: 为架构对象添加的业务备注信息
+# ============================================
+
+id: annotation
+name: 备注信息
+table_name: annotations
+description: 为架构对象添加的业务备注信息，支持一个对象关联多条备注。
+
+# ────────────────────────────────────────────
+# 语义标注
+# ────────────────────────────────────────────
+semantics:
+  meaning: 架构对象的业务备注
+  category: auxiliary
+  aliases:
+    - 备注
+    - Annotation
+    - 打标
+
+# ────────────────────────────────────────────
+# Aspect 引用
+# ────────────────────────────────────────────
+aspects: [audit_aspect]
+
+# Audit configuration
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+      - created_by
+      - updated_by
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+      - created_by
+      - updated_by
+
+# ────────────────────────────────────────────
+# UI 视图配置
+# ────────────────────────────────────────────
+ui_view_config:
+  list:
+    pageSize: 20
+    columns:
+      - key: category
+        title: 分类
+        width: 100
+        position: 1
+        importance: high
+        sortable: false
+      - key: content
+        title: 内容
+        width: 300
+        position: 2
+        importance: high
+        sortable: false
+      - key: target_type
+        title: 关联对象类型
+        width: 120
+        position: 3
+        importance: medium
+        sortable: false
+      - key: created_at
+        title: 创建时间
+        width: 180
+        position: 4
+        importance: low
+        sortable: true
+      - key: created_by
+        title: 创建人
+        width: 100
+        position: 5
+        importance: low
+        sortable: false
+      - key: updated_at
+        title: 更新时间
+        width: 180
+        position: 6
+        importance: low
+        sortable: true
+    pageSize: 20
+  detail:
+    facets:
+      - title: 基本信息
+        type: fieldGroup
+        fields:
+          - category
+          - content
+      - title: 关联信息
+        type: fieldGroup
+        fields:
+          - target_type
+          - target_id
+      - title: 系统信息
+        type: fieldGroup
+        fields:
+          - created_at
+          - created_by
+          - updated_at
+          - updated_by
+  form:
+    sections:
+      - title: 备注信息
+        fields:
+          - category
+          - content
+    layout: vertical
+
+# ────────────────────────────────────────────
+# 字段定义
+# ────────────────────────────────────────────
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键，系统内部使用
+      analytics:
+        category: measure
+        aggregation: count
+        display_name: 备注数量
+    ui:
+      visible: false
+      editable: false
+
+  - id: target_type
+    name: 关联对象类型
+    type: string
+    db_column: target_type
+    required: true
+    description: 备注关联的对象类型
+    semantics:
+      meaning: 备注关联的架构对象类型
+      export_visible: false
+      import_visible: true
+      immutable: true
+      parent_key: true
+      import_order: 1
+      analytics:
+        category: dimension
+        type: categorical
+        display_name: 关联对象类型
+    value_help:
+      source:
+        type: enum
+        enum_type_id: arch_object_type
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+      presentation:
+        result_type: dropdown
+    ui:
+      widget: select
+      title: 关联对象类型
+      width: 120
+      options:
+        - value: domain
+          label: 领域
+        - value: sub_domain
+          label: 子领域
+        - value: service_module
+          label: 服务模块
+        - value: business_object
+          label: 业务对象
+        - value: relationship
+          label: 业务关系
+
+  - id: target_id
+    name: 关联对象ID
+    type: integer
+    db_column: target_id
+    required: true
+    description: 备注关联的对象ID
+    semantics:
+      meaning: 备注关联的架构对象ID
+      resolve_from_field: target_code
+      resolve_to_field: target_type
+      export_visible: false
+      import_visible: false
+    ui:
+      visible: false
+      editable: false
+
+  - id: category
+    name: 备注分类
+    type: string
+    db_column: category
+    required: true
+    description: 备注分类
+    semantics:
+      meaning: 备注的分类级别
+      export_visible: false
+      import_visible: true
+      mandatory: true
+      import_order: 10
+      analytics:
+        category: dimension
+        type: categorical
+        display_name: 备注分类
+    value_help:
+      source:
+        type: enum
+        enum_type_id: annotation_category
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+      presentation:
+        result_type: dropdown
+    ui:
+      widget: select
+      title: 备注分类
+      width: 100
+      enum_type: annotation_category
+      options_source: enum
+      options:
+        - value: important
+          label: "重要"
+        - value: warning
+          label: "警告"
+        - value: info
+          label: "信息"
+        - value: tip
+          label: "提示"
+
+  - id: content
+    name: 备注内容
+    type: text
+    db_column: content
+    description: 备注详细内容
+    semantics:
+      meaning: 备注的详细说明
+      export_visible: true
+      import_visible: false
+      import_editable: true
+      import_order: 20
+    ui:
+      widget: textarea
+      title: 备注内容
+      width: 40
+      placeholder: 请输入备注内容...
+
+  - id: target_code
+    name: 关联对象编码
+    type: string
+    db_column: target_code
+    description: 备注关联对象的编码
+    semantics:
+      meaning: 关联对象编码
+      export_visible: true
+      import_visible: true
+      virtual: true
+      parent_key: true
+      import_order: 2
+    ui:
+      title: 关联对象编码
+      width: 120
+      visible: true
+    ui:
+      title: 关联对象编码
+      width: 20
+
+  - id: target_name
+    name: 关联对象名称
+    type: string
+    description: 备注关联对象的名称
+    semantics:
+      meaning: 关联对象名称
+      export_visible: true
+      import_visible: false
+      virtual: true
+      import_order: 4
+    ui:
+      title: 关联对象名称
+      width: 25
+
+  - id: category_label
+    name: 备注分类
+    type: string
+    description: 备注分类的中文展示
+    semantics:
+      meaning: 备注分类中文展示
+      export_visible: true
+      import_visible: false
+      virtual: true
+      import_order: 11
+    ui:
+      title: 备注分类
+      width: 10
+
+# ────────────────────────────────────────────
+# 关联关系
+# ────────────────────────────────────────────
+associations:
+  - name: target
+    target_type: polymorphic
+    type: many_to_one
+    polymorphic_type_field: target_type
+    polymorphic_id_field: target_id
+    cascade_delete: true
+    async_delete: false
+    description: 备注关联的目标对象（多态关联，级联删除）
+    display:
+      label: 关联对象
+      target_display_field: target_name
+      target_code_field: target_code
+
+# ────────────────────────────────────────────
+# 操作定义
+# ────────────────────────────────────────────
+actions:
+  - id: annotation_create
+    name: 创建备注
+    type: crud
+    method: POST
+    path: /api/v1/annotations
+    description: 创建新的备注
+
+  - id: annotation_read
+    name: 查询备注
+    type: crud
+    method: GET
+    path: /api/v1/annotations/{id}
+    description: 查询单个备注
+
+  - id: annotation_update
+    name: 更新备注
+    type: crud
+    method: PUT
+    path: /api/v1/annotations/{id}
+    description: 更新备注信息
+
+  - id: annotation_delete
+    name: 删除备注
+    type: crud
+    method: DELETE
+    path: /api/v1/annotations/{id}
+    description: 删除备注
+
+  - id: annotation_list
+    name: 列表查询
+    type: crud
+    method: GET
+    path: /api/v1/annotations
+    description: 查询备注列表
+
+  - id: list_by_target
+    name: 按对象查询
+    type: custom
+    method: GET
+    path: /api/v1/annotations/by-target
+    description: 按关联对象查询备注列表
+
+# ────────────────────────────────────────────
+# 校验规则
+# ────────────────────────────────────────────
+validations:
+  - id: target_type_required
+    name: 关联对象类型必填
+    type: field
+    rule: target_type is not None
+    message: 关联对象类型不能为空
+    severity: error
+
+  - id: target_id_required
+    name: 关联对象ID必填
+    type: field
+    rule: target_id is not None
+    message: 关联对象ID不能为空
+    severity: error
+
+  - id: category_required
+    name: 备注分类必填
+    type: field
+    rule: category is not None
+    message: 备注分类不能为空
+    severity: error
+
+  - id: category_valid
+    name: 备注分类有效值
+    type: field
+    rule: category in ['important', 'warning', 'info', 'tip', 'TEST']
+    message: 备注分类必须是 important、warning、info、tip 或 TEST
+    severity: error

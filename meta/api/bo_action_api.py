@@ -34,7 +34,7 @@ class ActionResult:
     """
     Action 处理器返回值 (扩展)
     - 基础: success / data / message (兼容 dict)
-    - 🆕 v3.1: file_data / file_mimetype / file_filename (文件流支持)
+    - [DECORATIVE] v3.1: file_data / file_mimetype / file_filename (文件流支持)
     """
     success: bool
     data: Any = None
@@ -50,7 +50,7 @@ bo_action_bp = Blueprint(
 )
 
 
-# 🆕 v3.18 M.1: trace_id before_request 注入 (全 bo_action 路由)
+# [DECORATIVE] v3.18 M.1: trace_id before_request 注入 (全 bo_action 路由)
 @bo_action_bp.before_request
 def _inject_trace_id():
     """每个 bo_action 请求:
@@ -101,7 +101,7 @@ def execute_action(action_id: str):
     Auth: 根据 registry 的 requires_auth / requires_admin 字段决定
     v3.1: 兼容 ActionResult 文件流返回
     """
-    # 🆕 v3.1: 从 registry 读 requires_auth
+    # [DECORATIVE] v3.1: 从 registry 读 requires_auth
     meta = bo_action_registry.get(action_id)
     if not meta:
         return jsonify({'success': False, 'data': None, 'message': f'Unknown action: {action_id}'}), 404
@@ -124,7 +124,7 @@ def execute_action(action_id: str):
             return jsonify({'success': False, 'data': None, 'message': '登录已过期'}), 401
         g.current_user = user_info
 
-        # 🆕 v3.1: admin 鉴权
+        # [DECORATIVE] v3.1: admin 鉴权
         if meta.requires_admin:
             from meta.api.auth_api import is_admin
             if not is_admin():
@@ -160,7 +160,7 @@ def execute_action(action_id: str):
     result = bo_action_registry.call(action_id, params, context)
     duration_ms = (time.time() - start) * 1000
 
-    # 🆕 v3.1: ActionResult 文件流支持 (audit.export 用)
+    # [DECORATIVE] v3.1: ActionResult 文件流支持 (audit.export 用)
     if isinstance(result, ActionResult) and result.file_data is not None:
         # v3.1: 文件流 - base64 包装 (避免 Flask send_file 在某些环境下崩)
         import base64
@@ -260,7 +260,7 @@ def list_action_schemas():
 @bo_action_bp.route('/_chain', methods=['POST'])
 def execute_subflow_endpoint():
     """
-    🆕 v3.2: Subflow / Chain Action 端点
+    [DECORATIVE] v3.2: Subflow / Chain Action 端点
 
     串联多个 BO Action 一次执行。
     详情见 meta.services.subflow_engine.execute_subflow()
@@ -294,16 +294,16 @@ def execute_subflow_endpoint():
     steps = body.get('steps', [])
     atomic = bool(body.get('atomic', False))
     context = body.get('context', {})
-    templates = body.get('templates', {})  # 🆕 v3.6 C-3: 嵌套 subflow 模板
-    dry_run = bool(body.get('dry_run', False))  # 🆕 v3.7
-    template_name = body.get('template')  # 🆕 v3.7: 引用 server-side 模板
+    templates = body.get('templates', {})  # [DECORATIVE] v3.6 C-3: 嵌套 subflow 模板
+    dry_run = bool(body.get('dry_run', False))  # [DECORATIVE] v3.7
+    template_name = body.get('template')  # [DECORATIVE] v3.7: 引用 server-side 模板
     template_params = body.get('params', {})  # 模板渲染参数
 
     # 注入 IP
     from flask import request as _req
     user_info['ip_address'] = _req.remote_addr
 
-    # 🆕 v3.7: 模板引用
+    # [DECORATIVE] v3.7: 模板引用
     if template_name:
         from meta.services.subflow_template_store import SubflowTemplateStore
         rendered = SubflowTemplateStore.render_template(template_name, template_params)
@@ -325,7 +325,7 @@ def execute_subflow_endpoint():
         context=context,
         user_info=user_info,
         templates=templates,
-        dry_run=dry_run,  # 🆕 v3.7
+        dry_run=dry_run,  # [DECORATIVE] v3.7
     )
 
     status_code = 200 if result.get('success') else 400
@@ -333,7 +333,7 @@ def execute_subflow_endpoint():
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 🆕 v3.7: Subflow SSE 进度流
+# [DECORATIVE] v3.7: Subflow SSE 进度流
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @bo_action_bp.route('/_chain_stream', methods=['POST'])
 def execute_subflow_stream_endpoint():
@@ -373,12 +373,12 @@ def execute_subflow_stream_endpoint():
 
     from meta.services.subflow_engine import execute_subflow
 
-    # 🆕 v3.9: 真流式 SSE - gevent WSGIServer 每 yield 立即 flush
+    # [DECORATIVE] v3.9: 真流式 SSE - gevent WSGIServer 每 yield 立即 flush
     # 不再需要 push app_context, 不再需要一次性 yield 全部
     # 业务收益: 前端能实时看到 step 1 → step 2 → ... 进度
 
     def generate():
-        # 🆕 v3.9: 关键 - 在 generate 内部使用 gevent 协程 yield
+        # [DECORATIVE] v3.9: 关键 - 在 generate 内部使用 gevent 协程 yield
         # gevent 在遇到 IO (registry.call) 时自动切协程
         progress_events = []
 
@@ -415,7 +415,7 @@ def execute_subflow_stream_endpoint():
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 🆕 v3.7: Subflow 模板 CRUD
+# [DECORATIVE] v3.7: Subflow 模板 CRUD
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @bo_action_bp.route('/_subflow_template', methods=['GET'])
 def list_subflow_templates():
@@ -509,7 +509,7 @@ def get_subflow_template(name):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 🆕 v3.7: Subflow 性能指标
+# [DECORATIVE] v3.7: Subflow 性能指标
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @bo_action_bp.route('/_subflow_metrics', methods=['GET'])
 def subflow_metrics():
@@ -535,7 +535,7 @@ def subflow_metrics():
     })
 
 
-# 🆕 v1 批次 2 / FR-2.1: 提取为独立函数（可被 FR-2.4 全量 OpenAPI 端点复用）
+# [DECORATIVE] [NEW] v1.2 / FR-2.1: 提取为独立函数（可被 FR-2.4 全量 OpenAPI 端点复用）
 def _generate_action_openapi(base_url: str = 'http://localhost:3010') -> dict:
     """
     生成 Action OpenAPI 3.0 规范（独立函数）
@@ -668,7 +668,7 @@ def _generate_action_openapi(base_url: str = 'http://localhost:3010') -> dict:
 @bo_action_bp.route('/_openapi.json', methods=['GET'])
 def openapi_spec():
     """
-    🆕 v3.6 + v1 批次 2: Action OpenAPI 3.0 规范输出（重构自内联实现）
+    [DECORATIVE] v3.6 + [NEW] v1.2: Action OpenAPI 3.0 规范输出（重构自内联实现）
 
     用于:
     - Swagger UI 集成 (/_docs 端点)
@@ -681,7 +681,7 @@ def openapi_spec():
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 🆕 v3.6 D-1: Swagger UI 集成
+# [DECORATIVE] v3.6 D-1: Swagger UI 集成
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @bo_action_bp.route('/_docs', methods=['GET'])
 def swagger_ui():

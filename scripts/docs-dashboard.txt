@@ -1,0 +1,57 @@
+============================================================
+  Excel-to-Diagram Documentation Quality Dashboard
+  Generated: 2026-06-07T23:50:19.028437+08:00
+============================================================
+
+[OVERALL] Health Score: 62.4 / 100
+
+=== File Statistics ===
+  Total files:        316
+  Active files:       275
+  Archived files:     41
+  Total size:         6672.5 KB
+  Average size:       21.1 KB
+
+=== Quality Coverage ===
+  Frontmatter:        5/275 (1.8%)
+  TOC:                23/275 (8.4%)
+  English names:      274/275 (99.6%)
+
+=== Headers ===
+  H1: 2431    H2: 2851    H3: 6105
+
+=== Link Health ===
+  Missing links:      96
+  Anchor issues:      90
+  Files with issues:  59
+  Total issues:       186
+
+=== Size Distribution ===
+  <5KB        36  ####################################
+  5-20KB     166  ##################################################
+  20-50KB     91  ##################################################
+  50-100KB    16  ################
+  >100KB       7  #######
+
+=== Top 10 Largest Files ===
+   1.  165.5 KB   60 H  docs\AI_AGENT_APP_CAPABILITY_PLANNING.md
+   2.  152.9 KB  130 H  docs\specs\spec-task-scheduler.md
+   3.  150.6 KB  147 H  docs\ARCHITECTURE_V2.md
+   4.  148.6 KB  179 H  docs\superpowers\specs\2026-05-12-unified-config-object-design.md
+   5.  123.0 KB   98 H  docs\UI_COMPONENT_LIBRARY_ANALYSIS.md
+   6.  121.5 KB  193 H  docs\architecture\02-yaml-conventions-v2.md
+   7.  109.1 KB  109 H  docs\specs\useMetaList-refactor\spec-base-v1.0.0.md
+   8.   82.5 KB   88 H  docs\specs\research-yaml-config-boundary.md
+   9.   80.8 KB   34 H  docs\ENTERPRISE_PLATFORM_CAPABILITY_PLANNING.md
+  10.   80.4 KB   86 H  docs\spec_data_permission_unified_model.md
+
+=== Directory Distribution ===
+  docs                            316 files
+
+============================================================
+  Recommendations:
+============================================================
+  [HIGH] Fix 186 link issues
+         python scripts/check_doc_links.py --quiet
+  [MED]  Add frontmatter to docs (1.8% coverage)
+  [OK]   Documentation is acceptable, room for improvement

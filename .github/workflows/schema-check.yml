@@ -1,0 +1,65 @@
+name: Schema Compatibility Check
+
+on:
+  pull_request:
+    paths:
+      - 'meta/graphql/__init__.py'
+      - 'schema/**'
+
+jobs:
+  schema-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # 需要完整历史以支持 git show
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Schema Diff
+        id: diff
+        run: |
+          python -m schema.audit.ci_check \
+            --before=origin/${{ github.base_ref }}:meta/graphql/__init__.py \
+            --after=HEAD:meta/graphql/__init__.py \
+            --threshold=80 \
+            --format=markdown \
+            > schema_diff.md 2>&1
+          EXIT_CODE=$?
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "Schema compatibility check FAILED (exit code: $EXIT_CODE)"
+            echo "See schema_diff.md for details."
+            exit $EXIT_CODE
+          fi
+          echo "Schema compatibility check PASSED"
+
+      - name: Upload diff report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: schema-diff-report
+          path: schema_diff.md
+
+      - name: Comment on PR
+        if: failure()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('schema_diff.md', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '## ⚠️ Schema Compatibility Check Failed\n\n' +
+                    '请修复破坏性变更，或申请 maintainer 添加 `schema-override` 标签。\n\n' +
+                    '<details><summary>详细 diff</summary>\n\n```markdown\n' +
+                    report + '\n```\n</details>'
+            });

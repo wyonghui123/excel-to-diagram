@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>代码差异分析 - 业务对象图 vs 服务模块图</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Microsoft YaHei','Segoe UI',sans-serif;background:#f0f2f5;padding:24px;color:#2c3e50;line-height:1.7}
+h1{text-align:center;margin-bottom:6px;color:#1a1a2e;font-size:26px}
+h2{font-size:20px;color:#2c3e50;margin:28px 0 14px;padding-bottom:8px;border-bottom:3px solid #2c3e50}
+h3{font-size:16px;color:#34495e;margin:20px 0 10px;padding-left:12px;border-left:4px solid #3498db}
+h4{font-size:14px;color:#555;margin:14px 0 8px}
+.subtitle{text-align:center;color:#7f8c8d;margin-bottom:28px;font-size:14px}
+.container{max-width:1900px;margin:0 auto}
+.section{background:white;border-radius:12px;padding:28px;margin-bottom:24px;box-shadow:0 2px 12px rgba(0,0,0,0.06)}
+.data-table{width:100%;border-collapse:collapse;margin:12px 0;font-size:12px}
+.data-table th{background:#2c3e50;color:white;padding:10px 14px;text-align:left;font-size:13px}
+.data-table td{padding:8px 14px;border-bottom:1px solid #eee;vertical-align:top}
+.data-table tr:hover td{background:#f0f7ff}
+.data-table .sub-header td{background:#f8f9fa;font-weight:bold;color:#2c3e50}
+.compare-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:16px 0}
+.compare-box{border-radius:10px;padding:20px}
+.compare-left{background:#eaf2f8;border:2px solid #2980b9}
+.compare-right{background:#fdf2e9;border:2px solid #e67e22}
+.compare-box h4{margin-bottom:12px;font-size:15px}
+.compare-box ul{list-style:none;padding:0}
+.compare-box li{font-size:13px;margin:8px 0;padding:6px 10px;border-radius:4px}
+.compare-left li{background:rgba(255,255,255,0.6)}
+.compare-right li{background:rgba(255,255,255,0.6)}
+.diff-table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13px}
+.diff-table th{background:#2c3e50;color:white;padding:12px 16px;text-align:left}
+.diff-table td{padding:10px 16px;border-bottom:1px solid #eee;line-height:1.6}
+.diff-table tr:hover td{background:#f8f9fa}
+.diff-table .dim{background:#eaf2f8;border-right:3px solid #2980b9;font-weight:bold;width:140px}
+.iface{border:2px solid #2980b9;border-radius:8px;padding:14px;margin:10px 0;background:#f0f7ff}
+.iface .title{font-weight:bold;color:#2980b9;margin-bottom:8px;font-size:13px}
+.iface pre{font-size:11px;background:white;padding:10px;border-radius:4px;margin:0;white-space:pre-wrap;line-height:1.5}
+.warn{background:#fff8e1;border:2px solid #ffc107;border-radius:8px;padding:12px;margin:10px 0;font-size:12px}
+.warn .icon{margin-right:6px}
+.code-ref{font-family:'Consolas',monospace;font-size:11px;background:#f0f0f0;padding:1px 4px;border-radius:3px;color:#c0392b}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:bold;color:white;margin:0 2px}
+.badge-bo{background:#2980b9}
+.badge-sm{background:#e67e22}
+.badge-shared{background:#27ae60}
+.badge-diff{background:#e74c3c}
+.conclusion-box{background:#f0f7ff;border:2px solid #2980b9;border-radius:10px;padding:20px;margin:16px 0}
+.conclusion-box p{font-size:13px;line-height:1.8;color:#555;margin-top:10px}
+.conclusion-box p:first-child{margin-top:0}
+.split-flow{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:12px 0}
+.split-flow .iface{margin:0}
+.split-label{text-align:center;font-weight:bold;font-size:13px;margin-bottom:6px;padding:4px 8px;border-radius:6px;color:white}
+.bg-bo{background:#2980b9}
+.bg-sm{background:#e67e22}
+.bg-shared{background:#27ae60}
+.bg-diff{background:#e74c3c}
+.metric{text-align:center;padding:16px;border-radius:8px;margin:8px 0}
+.metric .num{font-size:28px;font-weight:bold;color:#2c3e50}
+.metric .label{font-size:12px;color:#7f8c8d;margin-top:4px}
+.metrics-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:16px 0}
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>代码差异分析 — 业务对象图 vs 服务模块图</h1>
+<div class="subtitle">代码映射 · 结构差异 · 业务逻辑 · 数据交互 · 职责划分 · 依赖关系 · 接口设计</div>
+
+<div class="metrics-row">
+    <div class="metric" style="background:#eaf2f8"><div class="num">8</div><div class="label">BO图专属文件</div></div>
+    <div class="metric" style="background:#fdf2e9"><div class="num">6</div><div class="label">SM图专属文件</div></div>
+    <div class="metric" style="background:#eafaf1"><div class="num">7</div><div class="label">共享文件</div></div>
+    <div class="metric" style="background:#fdecec"><div class="num">5</div><div class="label">关键差异点</div></div>
+</div>
+
+<!-- ============================================================ -->
+<!-- PART 1: 代码映射关系 -->
+<!-- ============================================================ -->
+<div class="section">
+<h2>一、两种图在代码层面的映射关系</h2>
+
+<h3>1.1 文件级映射对照表</h3>
+
+<table class="data-table">
+    <tr><th>功能层</th><th>业务对象图（BO）</th><th>服务模块图（SM）</th><th>关系</th></tr>
+    <tr class="sub-header"><td colspan="4">数据构建层（Service）</td></tr>
+    <tr>
+        <td>图表数据构建</td>
+        <td><span class="code-ref">diagramDataBuilder.js</span><br>buildDiagramData() / buildNodes() / buildLinks()</td>
+        <td><span class="code-ref">serviceModuleDiagramBuilder.js</span><br>buildServiceModuleDiagramData()</td>
+        <td><span class="badge badge-diff">独立实现</span> 无继承关系，完全独立</td>
+    </tr>
+    <tr class="sub-header"><td colspan="4">分组模型层（GroupModel）</td></tr>
+    <tr>
+        <td>架构处理器</td>
+        <td colspan="2"><span class="code-ref">architectureProcessor.js</span><br>buildBusinessObjectGroupModel() / buildServiceModuleGroupModel()</td>
+        <td><span class="badge badge-shared">共享文件</span> 同一文件，不同函数</td>
+    </tr>
+    <tr>
+        <td>分组类型定义</td>
+        <td colspan="2"><span class="code-ref">types.js</span><br>GroupType / createGroup / isTerminalGroup()</td>
+        <td><span class="badge badge-shared">共享文件</span> isTerminalGroup按chartType分化</td>
+    </tr>
+    <tr>
+        <td>图表类型配置</td>
+        <td colspan="2"><span class="code-ref">chartTypeConfig.js</span><br>ChartTypeConfig[BUSINESS_OBJECT] / [SERVICE_MODULE]</td>
+        <td><span class="badge badge-shared">共享文件</span> 同一配置对象，不同键</td>
+    </tr>
+    <tr>
+        <td>统一分组模型</td>
+        <td colspan="2"><span class="code-ref">GroupModel.js</span><br>fromUserConfig() / toMermaidConfig()</td>
+        <td><span class="badge badge-shared">共享文件</span> 完全共享，chartType参数驱动分化</td>
+    </tr>
+    <tr class="sub-header"><td colspan="4">渲染层（Syntax）</td></tr>
+    <tr>
+        <td>Mermaid语法生成</td>
+        <td><span class="code-ref">useBusinessObjectSyntax.js</span><br>generateMermaidCode()</td>
+        <td><span class="code-ref">useServiceModuleSyntax.js</span><br>generateMermaidCode()</td>
+        <td><span class="badge badge-diff">独立实现</span> 函数签名不同，逻辑差异大</td>
+    </tr>
+    <tr>
+        <td>颜色计算</td>
+        <td><span class="code-ref">useMermaidColors.js</span><br>assignColorsToGroups() + nodeColorMap</td>
+        <td><span class="code-ref">serviceModuleDiagramBuilder.js</span><br>内联颜色映射逻辑</td>
+        <td><span class="badge badge-diff">独立实现</span> BO图渲染层计算，SM图构建层计算</td>
+    </tr>
+    <tr>
+        <td>布局引擎</td>
+        <td colspan="2"><span class="code-ref">layouts/index.js</span><br>routeLayout()</td>
+        <td><span class="badge badge-shared">共享文件</span> 完全共享</td>
+    </tr>
+    <tr class="sub-header"><td colspan="4">配置层（Config）</td></tr>
+    <tr>
+        <td>Store配置</td>
+        <td colspan="2"><span class="code-ref">diagramConfigStore.js</span><br>chartType / centerScope / colorGroupBy</td>
+        <td><span class="badge badge-shared">共享文件</span> 完全共享，chartType区分</td>
+    </tr>
+    <tr>
+        <td>数据流管理</td>
+        <td colspan="2"><span class="code-ref">useDiagramData.js</span><br>generateDiagram() 内部 if/else 分支</td>
+        <td><span class="badge badge-shared">共享文件</span> 同一函数，chartType分支</td>
+    </tr>
+    <tr>
+        <td>配置页面颜色</td>
+        <td colspan="2"><span class="code-ref">GroupItem.vue</span><br>getContainerColor()</td>
+        <td><span class="badge badge-shared">共享文件</span> 同一函数，chartType分支</td>
+    </tr>
+    <tr>
+        <td>自动分组</td>
+        <td colspan="2"><span class="code-ref">LayoutControlPanel.vue</span><br>handleAutoGroup() / handleServiceModuleAutoGroup()</td>
+        <td><span class="badge badge-shared">共享文件</span> 不同函数，独立实现</td>
+    </tr>
+</table>
+
+<h3>1.2 代码量与复杂度对比</h3>
+
+<div class="compare-grid">
+    <div class="compare-box compare-left">
+        <h4><span class="badge badge-bo">BO</span> 业务对象图核心代码</h4>
+        <ul>
+            <li><strong>diagramDataBuilder.js:</strong> 116行 — 极简，仅做字段映射</li>
+            <li><strong>useBusinessObjectSyntax.js:</strong> 1073行 — 最复杂的渲染逻辑</li>
+            <li><strong>buildNodes():</strong> 14行 — 一对一字段映射</li>
+            <li><strong>buildLinks():</strong> 13行 — 一对一字段映射</li>
+            <li><strong>buildDiagramData():</strong> 34行 — 简单组装</li>
+            <li><strong>颜色计算:</strong> 渲染层（useBusinessObjectSyntax内）约80行</li>
+            <li><strong>分组模型:</strong> 4层层级（DOMAIN→SUB_DOMAIN→SM→BO）</li>
+        </ul>
+    </div>
+    <div class="compare-box compare-right">
+        <h4><span class="badge badge-sm">SM</span> 服务模块图核心代码</h4>
+        <ul>
+            <li><strong>serviceModuleDiagramBuilder.js:</strong> 464行 — 包含颜色、过滤、排序</li>
+            <li><strong>useServiceModuleSyntax.js:</strong> 437行 — 较简洁的渲染逻辑</li>
+            <li><strong>buildServiceModuleDiagramData():</strong> 180行 — 包含完整业务逻辑</li>
+            <li><strong>颜色计算:</strong> 构建层（builder内）约70行</li>
+            <li><strong>分组模型:</strong> 3层层级（DOMAIN→SUB_DOMAIN→SM）</li>
+            <li><strong>额外逻辑:</strong> extractServiceModuleCodesFromGroups() 约65行</li>
+            <li><strong>额外逻辑:</strong> sortContainersByTemplate() 约110行</li>
+        </ul>
+    </div>
+</div>
+
+<div class="warn">
+    <span class="icon">[WARNING]</span>
+    <strong>关键发现：</strong>BO图的数据构建层极简（116行），复杂度集中在渲染层（1073行）；SM图的数据构建层较复杂（464行），渲染层相对简洁（437行）。这反映了两种图在<strong>职责分配</strong>上的根本差异——BO图将颜色计算推迟到渲染时，SM图在构建时就完成了颜色计算。
+</div>
+
+</div>
+
+<!-- ============================================================ -->
+<!-- PART 2: 数据模型与实体类代码结构差异 -->
+<!-- ============================================================ -->
+<div class="section">
+<h2>二、数据模型与实体类代码结构差异</h2>
+
+<h3>2.1 节点构建函数对比</h3>
+
+<div class="split-flow">
+    <div>
+        <div class="split-label bg-bo">BO图：buildNodes()</div>
+        <div class="iface">
+<pre>export function buildNodes(businessObjects) {
+  return businessObjects.map(bo => ({
+    id: bo.name,              // ← 用 name 作 id
+    name: bo.name,
+    originalName: bo.name,
+    code: bo.code,
+    category: 'object',
+    domain: bo.domain,
+    subDomain: bo.subDomain,
+    serviceModule: bo.serviceModule,
+    serviceModuleName: bo.serviceModuleName,
+    isCenter: bo.isCenter || false,
+    annotationCategory: bo.annotationCategory || 'info',
+    annotationContent: bo.annotationContent || ''
+    // ← 无 color 字段！
+    // ← 无 textColor 字段！
+  }))
+}</pre>
+        </div>
+    </div>
+    <div>
+        <div class="split-label bg-sm">SM图：节点构建（内联在buildServiceModuleDiagramData中）</div>
+        <div class="iface">
+<pre>const nodes = filteredServiceModules.map((sm, index) => {
+  const isCenter = finalCenterServiceModuleCodes.has(sm.code)
+  let baseColor
+  if (colorGroupBy === 'subDomain') {
+    baseColor = subDomainColors[sm.subDomain] || colors[0]
+  } else {
+    baseColor = domainColors[sm.domain] || colors[0]
+  }
+  const finalColor = isCenter ? centerScopeColor : baseColor
+  return {
+    id: sm.code,              // ← 用 code 作 id
+    name: sm.name,
+    code: sm.code,
+    domain: sm.domain,
+    subDomain: sm.subDomain,
+    color: finalColor,        // ← 构建时计算颜色！
+    textColor: nodeTextColor,  // ← 构建时确定文字颜色！
+    isCenter: isCenter,
+    annotationCategory: sm.annotationCategory || 'info',
+    annotationContent: sm.annotationContent || ''
+    // ← 无 serviceModule/serviceModuleName 字段
+    // ← 无 category 字段
+    // ← 无 originalName 字段
+  }
+})</pre>
+        </div>
+    </div>
+</div>
+
+<h3>2.2 节点实体属性差异矩阵</h3>
+
+<table class="data-table">
+    <tr><th>属性</th><th>BO图节点</th><th>SM图节点</th><th>差异说明</th></tr>
+    <tr><td><strong>id</strong></td><td>bo.name（中文名）</td><td>sm.code（编码）</td><td><span class="badge badge-diff">关键差异</span> 标识策略完全不同</td></tr>
+    <tr><td><strong>code</strong></td><td>bo.code</td><td>sm.code</td><td>相同语义，但BO图中code≠id</td></tr>
+    <tr><td><strong>color</strong></td><td>不存在</td><td>构建时计算</td><td><span class="badge badge-diff">关键差异</span> BO图颜色在渲染层计算</td></tr>
+    <tr><td><strong>textColor</strong></td><td>不存在</td><td>构建时确定</td><td>同上</td></tr>
+    <tr><td><strong>isCenter</strong></td><td>从bo.isCenter读取</td><td>从finalCenterServiceModuleCodes计算</td><td>来源不同：BO图从generateDiagram赋值，SM图从Set查找</td></tr>
+    <tr><td><strong>category</strong></td><td>'object'</td><td>不存在</td><td>BO图有分类标记，SM图无</td></tr>
+    <tr><td><strong>originalName</strong></td><td>存在</td><td>不存在</td><td>BO图保留原始名称（用于节点查找）</td></tr>
+    <tr><td><strong>serviceModule</strong></td><td>存在</td><td>不存在</td><td>BO图节点携带SM归属信息</td></tr>
+    <tr><td><strong>serviceModuleName</strong></td><td>存在</td><td>不存在</td><td>同上</td></tr>
+    <tr><td><strong>domain/subDomain</strong></td><td>存在</td><td>存在</td><td>相同</td></tr>
+</table>
+
+<h3>2.3 连线构建函数对比</h3>
+
+<div class="split-flow">
+    <div>
+        <div class="split-label bg-bo">BO图：buildLinks()</div>
+        <div class="iface">
+<pre>export function buildLinks(relationships) {
+  return relationships.map(rel => ({
+    source: rel.sourceName,     // ← 用 name
+    target: rel.targetName,     // ← 用 name
+    sourceName: rel.sourceName,
+    targetName: rel.targetName,
+    sourceCode: rel.sourceCode,
+    targetCode: rel.targetCode,
+    relationCode: rel.relationCode,
+    relationDesc: rel.relationDesc,
+    annotationCategory: rel.annotationCategory || 'info',
+    annotationContent: rel.annotationContent || ''
+  }))
+}</pre>
+        </div>
+    </div>
+    <div>
+        <div class="split-label bg-sm">SM图：连线构建（内联）</div>
+        <div class="iface">
+<pre>const links = filteredRelationships.map(rel => ({
+  source: rel.sourceServiceModuleCode,  // ← 用 code
+  target: rel.targetServiceModuleCode,  // ← 用 code
+  label: rel.serviceRelationshipCode,
+  tooltip: `关系编码: ${rel.serviceRelationshipCode}\n
+            业务对象关系: ${rel.businessObjectRelationshipCodes?.join(', ')}`,
+  annotationCategory: rel.annotationCategory || 'info',
+  annotationContent: rel.annotationContent || ''
+}))</pre>
+        </div>
+    </div>
+</div>
+
+<table class="data-table">
+    <tr><th>属性</th><th>BO图连线</th><th>SM图连线</th><th>差异说明</th></tr>
+    <tr><td><strong>source/target</strong></td><td>name（中文名）</td><td>code（编码）</td><td><span class="badge badge-diff">关键差异</span> 与节点id策略一致</td></tr>
+    <tr><td><strong>label</strong></td><td>不存在</td><td>serviceRelationshipCode</td><td>SM图有显式标签</td></tr>
+    <tr><td><strong>tooltip</strong></td><td>不存在</td><td>包含聚合BO关系信息</td><td>SM图有聚合信息提示</td></tr>
+    <tr><td><strong>sourceCode/targetCode</strong></td><td>存在</td><td>不存在（source本身就是code）</td><td>BO图需要额外字段因为source是name</td></tr>
+    <tr><td><strong>relationDesc</strong></td><td>存在</td><td>不存在</td><td>BO图保留关系描述</td></tr>
+</table>
+
+<h3>2.4 构建函数签名对比</h3>
+
+<div class="split-flow">
+    <div>
+        <div class="split-label bg-bo">BO图：buildDiagramData()</div>
+        <div class="iface">
+<pre>export function buildDiagramData({
+  businessObjects,        // 原始数据
+  relationships,          // 原始数据
+  domainProducts,         // 原始数据
+  serviceModules,         // 原始数据
+  colorGroupBy,           // 配置
+  colorScheme,            // 配置
+  nodeTextColor,          // 配置
+  centerScopeColor,       // 配置
+  layoutTemplate,         // 配置
+  customColors,           // 配置
+  hideLinkLabelTails,     // 配置
+  layoutControlConfig,    // 配置
+  centerScope             // 状态
+})  // 13个参数</pre>
+        </div>
+    </div>
+    <div>
+        <div class="split-label bg-sm">SM图：buildServiceModuleDiagramData()</div>
+        <div class="iface">
+<pre>export function buildServiceModuleDiagramData({
+  serviceModules,                  // 原始数据
+  serviceModuleRelationships,      // 推导数据
+  domainProducts,                  // 原始数据
+  centerSubDomain,                 // 配置
+  centerSubDomainColor,            // 配置
+  centerScopeColor,                // 配置
+  colorGroupBy,                    // 配置
+  colorScheme,                     // 配置
+  nodeTextColor,                   // 配置
+  layoutTemplate,                  // 配置
+  customColors,                    // 配置
+  hideLinkLabelTails,              // 配置
+  layoutControlConfig,             // 配置
+  groupControlTitleMap,            // 状态
+  centerServiceModuleCodes         // 推导数据
+})  // 15个参数</pre>
+        </div>
+    </div>
+</div>
+
+<table class="data-table">
+    <tr><th>差异维度</th><th>BO图</th><th>SM图</th></tr>
+    <tr><td>参数数量</td><td>13个</td><td>15个</td><td>SM图多2个参数</td></tr>
+    <tr><td>数据输入</td><td>4个原始数据（BO/Rel/DP/SM）</td><td>3个数据（SM/SMRel/DP）</td><td>SM图输入推导数据(SMRel)</td></tr>
+    <tr><td>推导参数</td><td>无</td><td>centerServiceModuleCodes</td><td>SM图需要额外推导数据</td></tr>
+    <tr><td>中心配置</td><td>centerScope（BO编码数组）</td><td>centerSubDomain + centerServiceModuleCodes</td><td>SM图中心概念更复杂</td></tr>
+    <tr><td>返回值</td><td>透传所有输入 + nodes/links</td><td>计算后的nodes/links/containers</td><td>SM图返回值包含更多计算结果</td></tr>
+</table>
+
+</div>
+
+<!-- ============================================================ -->
+<!-- PART 3: 业务逻辑实现方式差异 -->
+<!-- ============================================================ -->
+<div class="section">
+<h2>三、业务逻辑实现方式差异</h2>
+
+<h3>3.1 颜色计算：渲染层 vs 构建层</h3>
+
+<p style="font-size:13px; margin-bottom:12px; color:#555;">
+这是两种图在业务逻辑实现上<strong>最根本的差异</strong>。BO图将颜色计算推迟到Mermaid语法生成阶段（渲染层），SM图在数据构建阶段就完成了颜色计算。
+</p>
+
+<div class="split-flow">
+    <div>
+        <div class="split-label bg-bo">BO图：渲染层颜色计算</div>
+        <div class="iface">
+<pre>// 在 useBusinessObjectSyntax.js 中
+// generateMermaidCode() 内部
+
+// 步骤1: 建立模块分组映射
+const moduleGroups = new Map()
+businessObjectNodes.forEach(node => {
+  const moduleInfo = objectToModuleMap.get(nodeCode)
+  if (moduleInfo) {
+    moduleGroups.set(groupKey, { info, nodes })
+  }
+})
+
+// 步骤2: 按colorGroupBy确定分组键
+if (colorGroupBy === 'serviceModule') {
+  groupKey = group.info.serviceModuleName
+} else if (colorGroupBy === 'subDomain') {
+  groupKey = group.info.subDomain
+} else {
+  groupKey = group.info.domain
+}
+
+// 步骤3: 分配颜色
+const colorMap = assignColorsToGroups(uniqueGroups, colors, customColors)
+
+// 步骤4: 逐节点判断中心范围
+optimizedGroups.forEach(group => {
+  group.nodes.forEach(node => {
+    if (centerScopeBoCodes.includes(nodeCode)) {
+      nodeColorMap.set(node.id, centerColor)
+    } else {
+      nodeColorMap.set(node.id, groupColor)
+    }
+  })
+})
+
+// 步骤5: 生成Mermaid style指令
+nodes.forEach(node => {
+  mermaidCode += `  style ${id} ${getNodeStyle(nodeColor)}\n`
+})</pre>
+        </div>
+    </div>
+    <div>
+        <div class="split-label bg-sm">SM图：构建层颜色计算</div>
+        <div class="iface">
+<pre>// 在 serviceModuleDiagramBuilder.js 中
+// buildServiceModuleDiagramData() 内部
+
+// 步骤1: 确定中心SM编码
+const finalCenterServiceModuleCodes =
+  centerServiceModuleCodes
+    ? new Set(centerServiceModuleCodes)
+    : new Set(filteredServiceModules
+        .filter(sm => sm.isCenter || 
+                      sm.subDomain === actualCenterSubDomain)
+        .map(sm => sm.code))
+
+// 步骤2: 构建颜色映射
+if (colorGroupBy === 'subDomain') {
+  uniqueSubDomains.forEach((subDomain, index) => {
+    subDomainColors[subDomain] = colors[index % colors.length]
+  })
+} else {
+  uniqueDomains.forEach((domain, index) => {
+    domainColors[domain] = colors[index % colors.length]
+  })
+}
+
+// 步骤3: 逐节点计算颜色（构建时）
+const nodes = filteredServiceModules.map(sm => {
+  const isCenter = finalCenterServiceModuleCodes.has(sm.code)
+  let baseColor = colorGroupBy === 'subDomain'
+    ? subDomainColors[sm.subDomain]
+    : domainColors[sm.domain]
+  const finalColor = isCenter ? centerScopeColor : baseColor
+  return { ..., color: finalColor, isCenter }
+})
+
+// 步骤4: 渲染时直接使用
+nodes.forEach(node => {
+  mermaidCode += `  style ${node.id} ${getNodeStyle(node.color)}\n`
+})</pre>
+        </div>
+    </div>
+</div>
+
+<table class="data-table">
+    <tr><th>差异维度</th><th>BO图（渲染层计算）</th><th>SM图（构建层计算）</th></tr>
+    <tr><td>计算位置</td><td>useBusinessObjectSyntax.js</td><td>serviceModuleDiagramBuilder.js</td></tr>
+    <tr><td>计算时机</td><td>Mermaid代码生成时</td><td>diagramData构建时</td></tr>
+    <tr><td>颜色存储</td><td>nodeColorMap（局部变量）</td><td>node.color（节点属性）</td></tr>
+    <tr><td>中心判断</td><td>centerScopeBoCodes.includes(nodeCode)</td><td>finalCenterServiceModuleCodes.has(sm.code)</td></tr>
+    <tr><td>分组键计算</td><td>从objectToModuleMap推导（3级if/else）</td><td>直接从sm.domain/sm.subDomain读取</td></tr>
+    <tr><td>颜色方案</td><td>getColors() + assignColorsToGroups()</td><td>COLOR_SCHEMES常量 + 内联逻辑</td></tr>
+    <tr><td>连线颜色</td><td>基于源/目标节点颜色计算（复杂规则）</td><td>无特殊连线颜色逻辑</td></tr>
+    <tr><td>一致性风险</td><td>与GroupItem.vue独立计算，可能不一致</td><td>与GroupItem.vue独立计算，可能不一致</td></tr>
+</table>
+
+<h3>3.2 关系推导：直接使用 vs 聚合推导</h3>
+
+<div class="split-flow">
+    <div>
+        <div class="split-label bg-bo">BO图：直接使用原始关系</div>
+        <div class="iface">
+<pre>// relationships 直接从 Excel 解析得到
+// buildLinks() 做简单字段映射
+// 无需推导，一对一映射
+
+// 过滤逻辑（在 generateDiagram 中）：
+filteredRelationships = hasFilter
+  ? relationships.filter(rel =>
+      finalBoCodes.has(rel.sourceCode) &&
+      finalBoCodes.has(rel.targetCode))
+  : relationships
+
+// 特点：
+// - 原始数据，无信息损失
+// - 过滤条件简单（两端都在范围内）
+// - 无聚合操作</pre>
+        </div>
+    </div>
+    <div>
+        <div class="split-label bg-sm">SM图：从BO关系聚合推导</div>
+        <div class="iface">
+<pre>// computedServiceModuleRelations() 推导
+// 从 BO 关系聚合为 SM 关系
+
+// 推导步骤：
+1. 构建 boToModuleMap: bo.code → sm.code
+2. 遍历 Relationship，按 (sourceSM, targetSM) 分组
+3. 跳过 sourceSM === targetSM（同SM内关系丢弃）
+4. 聚合 BO 关系编码和标注
+
+// 过滤逻辑（在 generateDiagram 中）：
+// 先推导，再过滤
+const serviceModuleRelationships =
+  computedServiceModuleRelations(
+    finalRelationships,
+    filteredBusinessObjects,
+    filteredServiceModules)
+
+// 特点：
+// - N:1 聚合（多条BO关系 → 一条SM关系）
+// - 信息损失（同SM内关系被丢弃）
+// - 标注聚合（BO关系细节合并为标注）</pre>
+        </div>
+    </div>
+</div>
+
+<h3>3.3 isCenter计算：直接赋值 vs Set查找</h3>
+
+<div class="split-flow">
+    <div>
+        <div class="split-label bg-bo">BO图：generateDiagram中直接赋值</div>
+        <div class="iface">
+<pre>// 在 generateDiagram() 中
+const centerScopeSet = new Set(centerScope.value || [])
+const filteredBusinessObjects = hasFilter
+  ? previewData.value.businessObjects
+      .filter(bo => finalBoCodes.has(bo.code))
+      .map(bo => ({
+        ...bo,
+        isCenter: centerScopeSet.has(bo.code)  // ← 直接赋值
+      }))
+  : previewData.value.businessObjects.map(bo => ({
+      ...bo,
+      isCenter: false
+    }))
+
+// isCenter 写入 BO 对象副本
+// buildNodes() 直接读取 bo.isCenter</pre>
+        </div>
+    </div>
+    <div>
+        <div class="split-label bg-sm">SM图：构建时从Set查找</div>
+        <div class="iface">
+<pre>// 在 generateDiagram() 中
+const centerServiceModuleCodes = new Set()
+filteredBusinessObjects.forEach(bo => {
+  if (centerBoCodes.has(bo.code) && bo.serviceModule) {
+    centerServiceModuleCodes.add(bo.serviceModule)
+  }
+})
+
+// 传入 buildServiceModuleDiagramData()
+// 在构建时查找：
+const finalCenterServiceModuleCodes =
+  centerServiceModuleCodes
+    ? new Set(centerServiceModuleCodes)
+    : new Set(filteredServiceModules
+        .filter(sm => sm.isCenter || ...)
+        .map(sm => sm.code))
+
+const isCenter =
+  finalCenterServiceModuleCodes.has(sm.code)  // ← Set查找</pre>
+        </div>
+    </div>
+</div>
+
+<h3>3.4 filteredContainers构建：两种数据源和结构</h3>
+
+<div class="split-flow">
+    <div>
+        <div class="split-label bg-bo">BO图：基于DomainProduct构建</div>
+        <div class="iface">
+<pre>// 在 useDiagramData.js filteredContainers computed 中
+// BO图分支：
+
+previewData.value.domainProducts.forEach(domain => {
+  domain.modules.forEach(module => {
+    const moduleBusinessObjects = businessObjects.filter(
+      bo => bo.subDomain === module.name && finalBoCodes.has(bo.code)
+    )
+    containers.push({
+      id: module.code || module.name,
+      name: module.name,
+      fullTitle: domain.name + ' / ' + module.name,
+      domain: domain.name,
+      domainCode: domain.code || domain.name,
+      subDomainName: module.name,
+      nodes: moduleBusinessObjects.map(bo => ({
+        id: bo.name,       // ← BO节点
+        name: bo.name,
+        code: bo.code,
+        serviceModuleName: smName,
+        serviceModule: smCode
+      })),
+      serviceModuleMap: Object.fromEntries(serviceModuleMap)
+    })
+  })
+})
+
+// 特点：
+// - 数据源：domainProducts + businessObjects
+// - container.nodes = BusinessObject[]
+// - 有 serviceModuleMap 额外映射</pre>
+        </div>
+    </div>
+    <div>
+        <div class="split-label bg-sm">SM图：基于ServiceModule构建</div>
+        <div class="iface">
+<pre>// SM图分支：
+
+previewData.value.serviceModules.forEach(sm => {
+  const hasAnyBo = previewData.value.businessObjects.some(
+    bo => bo.serviceModule === sm.code && finalBoCodes.has(bo.code)
+  )
+  if (!hasAnyBo) return
+
+  if (!subDomainMap.has(sm.subDomain)) {
+    subDomainMap.set(sm.subDomain, {
+      id: sm.subDomain,
+      name: sm.subDomain,
+      fullTitle: domain ? `${domain.name} / ${sm.subDomain}` : sm.subDomain,
+      domain: domain ? domain.name : '未分类',
+      domainCode: domain ? (domain.code || domain.name) : '未分类',
+      subDomainName: sm.subDomain,
+      nodes: []              // ← SM节点
+    })
+  }
+  subDomainMap.get(sm.subDomain).nodes.push({
+    id: sm.code,             // ← SM节点
+    name: sm.name,
+    code: sm.code
+  })
+})
+
+// 特点：
+// - 数据源：serviceModules + businessObjects（仅用于过滤判断）
+// - container.nodes = ServiceModule[]
+// - 无 serviceModuleMap</pre>
+        </div>
+    </div>
+</div>
+
+</div>
+
+<!-- ============================================================ -->
+<!-- PART 4: 数据交互模式差异 -->
+<!-- ============================================================ -->
+<div class="section">
+<h2>四、数据交互模式差异</h2>
+
+<h3>4.1 generateDiagram()中的分支逻辑</h3>
+
+<div class="iface">
+    <div class="title">useDiagramData.js generateDiagram() 的 BO/SM 分支对比</div>
+<pre>// ===== 共享的前置计算（约200行）=====
+// finalBoCodes、filteredBusinessObjects、filteredServiceModules
+// filteredRelationships、filteredDomainProducts
+// isCenter 自底向上计算（BO→SM→SubDomain→Domain）
+
+if (chartType.value === 'serviceModule') {
+  // ===== SM图分支（约90行）=====
+  
+  // 1. 推导SM关系（BO图不需要）
+  const serviceModuleRelationships = computedServiceModuleRelations(...)
+  
+  // 2. 推导中心SM编码（BO图不需要）
+  const centerServiceModuleCodes = new Set()
+  filteredBusinessObjects.forEach(bo => {
+    if (centerBoCodes.has(bo.code) && bo.serviceModule) {
+      centerServiceModuleCodes.add(bo.serviceModule)
+    }
+  })
+  
+  // 3. 过滤SM关系（BO图不需要）
+  const filteredServiceModuleRelationships = ...
+  
+  // 4. 构建分组模型（使用ChartType.BUSINESS_OBJECT！）
+  let architectureGroups = buildGroupModelFromArchitecture(
+    architectureData, ChartType.BUSINESS_OBJECT  // ← 注意：不是SERVICE_MODULE
+  )
+  
+  // 5. 创建GroupModel（使用ChartType.SERVICE_MODULE）
+  const groupModel = GroupModel.fromUserConfig(
+    architectureGroups, userConfig, ChartType.SERVICE_MODULE
+  )
+  
+  // 6. 调用SM图构建器（15个参数）
+  diagramData.value = buildServiceModuleDiagramData({
+    serviceModules: finalFilteredServiceModules,
+    serviceModuleRelationships: filteredServiceModuleRelationships,
+    centerScopeColor: diagramConfig.value.centerScopeColor,  // ← 历史bug修复点
+    centerServiceModuleCodes: centerServiceModuleCodes.size > 0
+      ? Array.from(centerServiceModuleCodes) : null,
+    // ... 其他12个参数
+  })
+  
+} else {
+  // ===== BO图分支（约60行）=====
+  
+  // 1. 构建分组模型（使用ChartType.BUSINESS_OBJECT）
+  let architectureGroups = buildGroupModelFromArchitecture(
+    architectureData, ChartType.BUSINESS_OBJECT
+  )
+  
+  // 2. 应用范围过滤（SM图不做！）
+  if (hasFilter && finalBoCodes) {
+    architectureGroups = filterGroupModelByScope(
+      architectureGroups, finalBoCodes, ChartType.BUSINESS_OBJECT
+    )
+  }
+  
+  // 3. 创建GroupModel（使用ChartType.BUSINESS_OBJECT）
+  const groupModel = GroupModel.fromUserConfig(
+    architectureGroups, userConfig, ChartType.BUSINESS_OBJECT
+  )
+  
+  // 4. 调用BO图构建器（13个参数）
+  diagramData.value = buildDiagramData({
+    businessObjects: filteredBusinessObjects,
+    relationships: finalRelationships,
+    centerScopeColor: diagramConfig.value.centerScopeColor,
+    centerScope: centerScope.value,
+    // ... 其他11个参数
+  })
+}</pre>
+</div>
+
+<h3>4.2 关键交互差异</h3>
+
+<table class="data-table">
+    <tr><th>差异维度</th><th>BO图</th><th>SM图</th><th>影响</th></tr>
+    <tr>
+        <td>分组模型构建</td>
+        <td>buildGroupModelFromArchitecture(data, BUSINESS_OBJECT)</td>
+        <td>buildGroupModelFromArchitecture(data, BUSINESS_OBJECT) ← 用的是BO类型！</td>
+        <td><span class="badge badge-diff">关键差异</span> SM图先用BO类型构建4层分组，再用SM类型合并配置。这是一个workaround</td>
+    </tr>
+    <tr>
+        <td>范围过滤</td>
+        <td>filterGroupModelByScope() 过滤分组</td>
+        <td>不做分组过滤</td>
+        <td>SM图保留所有分组，通过centerScopeMarkers处理高亮</td>
+    </tr>
+    <tr>
+        <td>关系推导</td>
+        <td>不需要（直接使用原始关系）</td>
+        <td>computedServiceModuleRelations() 推导</td>
+        <td>SM图额外约100行推导逻辑</td>
+    </tr>
+    <tr>
+        <td>中心范围传递</td>
+        <td>centerScope（BO编码数组）</td>
+        <td>centerServiceModuleCodes（SM编码数组）</td>
+        <td>SM图需要BO→SM的桥接推导</td>
+    </tr>
+    <tr>
+        <td>Store回写</td>
+        <td>无</td>
+        <td>configStore.updateLayoutControlConfig(layoutControlConfig)</td>
+        <td><span class="badge badge-diff">差异</span> SM图回写Store，BO图不回写</td>
+    </tr>
+</table>
+
+<h3>4.3 architectureProcessor中的分支差异</h3>
+
+<div class="split-flow">
+    <div>
+        <div class="split-label bg-bo">buildBusinessObjectGroupModel()</div>
+        <div class="iface">
+<pre>层级：Domain → SubDomain → SM → BO（4层）
+
+特点：
+1. 使用 boMap（bo.code → bo对象）
+2. SM层有 businessObjects 遍历
+3. BO作为末端节点（GroupType.BUSINESS_OBJECT）
+4. BO的elementRef包含parentCode（SM code）
+5. 空SM（无BO）不会被添加到树中
+6. 约100行代码
+
+关键逻辑：
+sm.businessObjects.forEach(bo => {
+  const boData = typeof bo === 'string'
+    ? boMap.get(bo) || { code: bo, name: bo }
+    : bo
+  const boGroup = createGroup({
+    type: GroupType.BUSINESS_OBJECT,
+    title: boData.name || boData.code || bo,
+    isCenter: boData.isCenter || false,
+    parentId: smGroup.id,
+    elementRef: { ... }
+  })
+  smGroup.children.push(boGroup)
+})</pre>
+        </div>
+    </div>
+    <div>
+        <div class="split-label bg-sm">buildServiceModuleGroupModel()</div>
+        <div class="iface">
+<pre>层级：Domain → SubDomain → SM（3层）
+
+特点：
+1. 使用 smMap（sm.code → sm对象）
+2. SM作为末端节点（GroupType.SERVICE_MODULE）
+3. SM的elementRef包含parentCode（SubDomain code）
+4. SM从smMap获取完整数据（smData?.name）
+5. 所有SM都会被添加（即使无BO）
+6. 约85行代码
+7. 有大量console.log调试语句
+
+关键逻辑：
+subDomain.submodules.forEach(sm => {
+  const smData = smMap.get(sm.code)
+  const smGroup = createGroup({
+    type: GroupType.SERVICE_MODULE,
+    title: smData?.name || smData?.code || sm.name,
+    parentId: subDomainGroup.id,
+    elementRef: { ... }
+  })
+  subDomainGroup.children.push(smGroup)
+})</pre>
+        </div>
+    </div>
+</div>
+
+<h3>4.4 Mermaid语法生成交互差异</h3>
+
+<div class="split-flow">
+    <div>
+        <div class="split-label bg-bo">useBusinessObjectSyntax.js</div>
+        <div class="iface">
+<pre>函数签名：
+generateMermaidCode(
+  data,                    // diagramData
+  relationDescriptions,    // 输出参数
+  layoutEngine,            // 'dagre' | 'elk'
+  layoutType,              // 'grouped'
+  layoutControlConfig      // 分组配置
+)  // 5个参数
+
+数据消费方式：
+- 从 data.nodes 读取节点（需要过滤 category === 'object'）
+- 从 data.domainProducts 重新构建 objectToModuleMap
+- 从 data.centerScope 读取中心范围
+- 从 data.colorGroupBy 读取分组方式
+- 颜色在函数内部计算（不使用 data.nodes[].color）
+
+关键特点：
+- 需要重新构建模块分组映射（约80行）
+- 需要重新计算颜色（约40行）
+- 支持连线颜色计算（约30行）
+- 支持 virtualContainer 排序（约80行）
+- 代码量：1073行</pre>
+        </div>
+    </div>
+    <div>
+        <div class="split-label bg-sm">useServiceModuleSyntax.js</div>
+        <div class="iface">
+<pre>函数签名：
+generateMermaidCode(
+  data,                    // diagramData
+  relationDescriptions,    // 输出参数
+  layoutEngine,            // 'dagre' | 'elk'
+  layoutType,              // 'grouped'
+  positions,               // 位置数组
+  zoneRowCount,            // 区域行数
+  preserveModelOrder,      // 保持模型顺序
+  layoutControlConfig      // 分组配置
+)  // 8个参数
+
+数据消费方式：
+- 直接使用 data.nodes（无需过滤，全是SM节点）
+- 直接使用 data.containers（已按subDomain分组）
+- 直接使用 data.nodes[].color（构建时已计算）
+- 直接使用 data.nodes[].isCenter（构建时已计算）
+
+关键特点：
+- 无需重新构建映射（直接使用containers）
+- 无需计算颜色（构建时已完成）
+- 支持 resolveGroupContainers（约120行）
+- 支持 sortContainersForGrid（约50行）
+- 代码量：437行（不到BO图的一半）</pre>
+        </div>
+    </div>
+</div>
+
+</div>
+
+<!-- ============================================================ -->
+<!-- PART 5: 职责划分、依赖关系与接口设计 -->
+<!-- ============================================================ -->
+<div class="section">
+<h2>五、职责划分、依赖关系与接口设计核心区别</h2>
+
+<h3>5.1 职责划分对比</h3>
+
+<table class="diff-table">
+    <tr><th class="dim">职责</th><th>BO图</th><th>SM图</th></tr>
+    <tr>
+        <td class="dim">数据构建</td>
+        <td><strong>极简透传</strong>：buildDiagramData()仅做字段映射（34行），不计算颜色、不过滤节点</td>
+        <td><strong>重度计算</strong>：buildServiceModuleDiagramData()包含颜色计算、节点过滤、关系过滤、容器排序（180行）</td>
+    </tr>
+    <tr>
+        <td class="dim">颜色计算</td>
+        <td><strong>渲染层负责</strong>：useBusinessObjectSyntax.js内部计算，结果不回写diagramData</td>
+        <td><strong>构建层负责</strong>：serviceModuleDiagramBuilder.js内部计算，结果写入node.color</td>
+    </tr>
+    <tr>
+        <td class="dim">关系处理</td>
+        <td><strong>直接使用</strong>：原始Relationship直接映射为Link，无转换</td>
+        <td><strong>推导聚合</strong>：computedServiceModuleRelations()从BO关系推导SM关系，N:1聚合</td>
+    </tr>
+    <tr>
+        <td class="dim">中心判断</td>
+        <td><strong>前置计算</strong>：generateDiagram()中计算isCenter并写入BO副本</td>
+        <td><strong>构建时计算</strong>：从centerServiceModuleCodes Set查找</td>
+    </tr>
+    <tr>
+        <td class="dim">分组过滤</td>
+        <td><strong>有</strong>：filterGroupModelByScope()按finalBoCodes过滤分组树</td>
+        <td><strong>无</strong>：保留所有分组，通过centerScopeMarkers处理高亮</td>
+    </tr>
+    <tr>
+        <td class="dim">Mermaid生成</td>
+        <td><strong>复杂</strong>：需重建映射、计算颜色、处理连线颜色（1073行）</td>
+        <td><strong>简洁</strong>：直接使用构建结果、resolve容器（437行）</td>
+    </tr>
+    <tr>
+        <td class="dim">Store回写</td>
+        <td><strong>无</strong>：不回写layoutControlConfig到Store</td>
+        <td><strong>有</strong>：configStore.updateLayoutControlConfig()</td>
+    </tr>
+</table>
+
+<h3>5.2 依赖关系对比</h3>
+
+<div class="compare-grid">
+    <div class="compare-box compare-left">
+        <h4><span class="badge badge-bo">BO</span> 业务对象图依赖链</h4>
+        <ul>
+            <li><strong>数据源依赖：</strong>businessObjects + relationships + domainProducts + serviceModules</li>
+            <li><strong>构建依赖：</strong>diagramDataBuilder.js（极简）</li>
+            <li><strong>分组依赖：</strong>architectureProcessor → GroupModel → toMermaidConfig</li>
+            <li><strong>渲染依赖：</strong>useBusinessObjectSyntax + useMermaidColors + useBlockDiagramSyntax + routeLayout</li>
+            <li><strong>颜色依赖：</strong>useMermaidColors.assignColorsToGroups()（独立模块）</li>
+            <li><strong>映射依赖：</strong>objectToModuleMap（渲染时从domainProducts重建）</li>
+            <li><strong>特点：</strong>渲染层承担了大部分计算职责</li>
+        </ul>
+    </div>
+    <div class="compare-box compare-right">
+        <h4><span class="badge badge-sm">SM</span> 服务模块图依赖链</h4>
+        <ul>
+            <li><strong>数据源依赖：</strong>serviceModules + domainProducts + businessObjects（仅用于过滤）</li>
+            <li><strong>构建依赖：</strong>serviceModuleDiagramBuilder.js（重度）</li>
+            <li><strong>推导依赖：</strong>computedServiceModuleRelations()（BO→SM关系推导）</li>
+            <li><strong>分组依赖：</strong>architectureProcessor(BUSINESS_OBJECT!) → GroupModel(SERVICE_MODULE)</li>
+            <li><strong>渲染依赖：</strong>useServiceModuleSyntax + useBlockDiagramSyntax + routeLayout</li>
+            <li><strong>颜色依赖：</strong>COLOR_SCHEMES常量 + 内联逻辑（无独立模块）</li>
+            <li><strong>特点：</strong>构建层承担了大部分计算职责，渲染层仅做格式转换</li>
+        </ul>
+    </div>
+</div>
+
+<h3>5.3 接口设计核心区别</h3>
+
+<table class="diff-table">
+    <tr><th class="dim">接口维度</th><th>BO图</th><th>SM图</th></tr>
+    <tr>
+        <td class="dim">构建函数返回值</td>
+        <td>透传式：{ nodes, links, domainProducts, serviceModules, colorGroupBy, centerScopeColor, centerScope, ... } — 几乎原样返回所有输入</td>
+        <td>计算式：{ nodes(含color), links, containers, centerSubDomain, colorGroupBy, ... } — 返回计算后的结果</td>
+    </tr>
+    <tr>
+        <td class="dim">节点标识接口</td>
+        <td>id=bo.name, code=bo.code — 双标识，渲染时需要nodeNameToIdMap和nodeCodeToIdMap两套映射</td>
+        <td>id=sm.code, code=sm.code — 单标识，id和code一致，无需额外映射</td>
+    </tr>
+    <tr>
+        <td class="dim">连线标识接口</td>
+        <td>source=sourceName, target=targetName — 用中文名，需要sourceCode/targetCode辅助字段</td>
+        <td>source=sourceServiceModuleCode, target=targetServiceModuleCode — 用编码，无需辅助字段</td>
+    </tr>
+    <tr>
+        <td class="dim">颜色接口</td>
+        <td>diagramData不含颜色信息，渲染层通过nodeColorMap计算 — 接口不传递颜色</td>
+        <td>diagramData.nodes[].color包含最终颜色 — 接口传递完整颜色</td>
+    </tr>
+    <tr>
+        <td class="dim">容器接口</td>
+        <td>diagramData不含containers，由layoutControlConfig.groups携带 — 容器在分组配置中</td>
+        <td>diagramData.containers包含完整容器数据 — 容器在构建结果中</td>
+    </tr>
+    <tr>
+        <td class="dim">中心范围接口</td>
+        <td>centerScope: string[]（BO编码数组）— 直接传递</td>
+        <td>centerServiceModuleCodes: string[] | null（SM编码数组）— 需要推导后传递</td>
+    </tr>
+</table>
+
+<h3>5.4 核心结论</h3>
+
+<div class="conclusion-box">
+<p style="font-size:14px; line-height:1.8; color:#2c3e50;">
+<strong>两种图的代码实现遵循了截然不同的职责分配哲学。</strong>
+</p>
+<p style="font-size:13px; line-height:1.8; color:#555; margin-top:10px;">
+<strong>BO图 = "瘦构建 + 胖渲染"：</strong>diagramDataBuilder.js仅做116行的字段映射，将所有计算职责（颜色、分组、映射）推迟到useBusinessObjectSyntax.js（1073行）的渲染阶段。这种设计的优势是构建层简单可靠，劣势是渲染层过于复杂，且颜色计算结果无法被其他组件复用（如配置页面GroupItem.vue需要独立计算颜色）。
+</p>
+<p style="font-size:13px; line-height:1.8; color:#555; margin-top:10px;">
+<strong>SM图 = "胖构建 + 瘦渲染"：</strong>serviceModuleDiagramBuilder.js承担了464行的计算职责（颜色、过滤、排序、中心判断），useServiceModuleSyntax.js仅做437行的格式转换。这种设计的优势是构建结果自包含（nodes[].color/isCenter已确定），渲染层简洁，且颜色结果可被其他组件复用；劣势是构建层逻辑复杂，参数列表过长（15个参数），容易遗漏（如centerScopeColor历史bug）。
+</p>
+<p style="font-size:13px; line-height:1.8; color:#555; margin-top:10px;">
+<strong>最根本的5个差异点：</strong>
+</p>
+<ul style="font-size:13px; line-height:1.8; color:#555; margin-top:6px; padding-left:20px;">
+<li><strong>标识策略：</strong>BO图用name作id（中文，需双映射），SM图用code作id（编码，单映射）——这是所有下游差异的根源</li>
+<li><strong>颜色计算时机：</strong>BO图渲染层计算（不持久化），SM图构建层计算（写入node.color）——导致颜色双路径问题</li>
+<li><strong>关系数据来源：</strong>BO图直接使用原始关系，SM图从BO关系推导——引入computedServiceModuleRelations()的额外复杂度</li>
+<li><strong>分组模型构建：</strong>SM图使用ChartType.BUSINESS_OBJECT构建4层分组再用SERVICE_MODULE合并——这是一个workaround，暗示分组模型对SM图的支持不够原生</li>
+<li><strong>Store交互：</strong>SM图回写layoutControlConfig到Store，BO图不回写——导致两种图的状态管理策略不一致</li>
+</ul>
+<p style="font-size:13px; line-height:1.8; color:#555; margin-top:10px;">
+<strong>统一化建议：</strong>
+</p>
+<ul style="font-size:13px; line-height:1.8; color:#555; margin-top:6px; padding-left:20px;">
+<li>统一标识策略：BO图也应使用code作id，消除双映射的复杂度</li>
+<li>统一颜色计算时机：两种图都应在构建层计算颜色，渲染层仅做格式转换</li>
+<li>统一构建函数签名：引入配置对象模式（如DiagramBuildConfig），替代15+个独立参数</li>
+<li>修复SM图分组构建workaround：使用ChartType.SERVICE_MODULE直接构建3层分组，而非先建4层再合并</li>
+<li>统一Store交互策略：两种图都应（或都不应）回写layoutControlConfig到Store</li>
+</ul>
+</div>
+
+</div>
+
+</div>
+</body>
+</html>

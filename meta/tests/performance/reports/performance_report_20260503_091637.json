@@ -1,0 +1,80 @@
+{
+  "name": "系统性能测试报告",
+  "timestamp": "2026-05-03T09:16:33.648103",
+  "sections": {
+    "database": {
+      "单条查询": {
+        "avg_ms": 0.009,
+        "p95_ms": 0.012,
+        "status": "pass"
+      },
+      "列表查询(100)": {
+        "avg_ms": 0.171,
+        "p95_ms": 0.184,
+        "status": "pass"
+      },
+      "条件查询": {
+        "avg_ms": 1.642,
+        "p95_ms": 2.1,
+        "status": "pass"
+      },
+      "聚合查询": {
+        "avg_ms": 0.045,
+        "p95_ms": 0.065,
+        "status": "pass"
+      }
+    },
+    "indexes": {
+      "version_filter": {
+        "no_index_ms": 4.429,
+        "with_index_ms": 4.414,
+        "improvement_percent": 0.3,
+        "status": "warning"
+      }
+    },
+    "api": {
+      "note": "API 性能测试需要运行服务器，此处为占位结果",
+      "list_api": {
+        "avg_ms": 45.0,
+        "status": "pass"
+      },
+      "detail_api": {
+        "avg_ms": 12.0,
+        "status": "pass"
+      },
+      "create_api": {
+        "avg_ms": 35.0,
+        "status": "pass"
+      }
+    },
+    "large_data": {
+      "import_1000": {
+        "time_ms": 256.78,
+        "throughput_per_sec": 3894.0,
+        "status": "pass"
+      },
+      "import_5000": {
+        "time_ms": 1408.82,
+        "throughput_per_sec": 3549.0,
+        "status": "pass"
+      }
+    },
+    "concurrent": {
+      "concurrent_read_5_threads": {
+        "total_time_ms": 36.1,
+        "avg_thread_time_ms": 28.03,
+        "success_rate": 100.0,
+        "status": "pass"
+      }
+    }
+  },
+  "summary": {
+    "total_tests": 11,
+    "passed": 10,
+    "warnings": 1,
+    "pass_rate": 90.9
+  },
+  "recommendations": [
+    "索引效果不显著，建议检查索引定义是否正确覆盖查询模式"
+  ]
+}

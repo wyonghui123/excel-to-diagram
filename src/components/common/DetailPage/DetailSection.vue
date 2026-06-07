@@ -404,7 +404,7 @@ function getFieldValue(field) {
 }
 
 function getFieldDisplayValue(field) {
-  // 🆕 v1 批次 3 / FR-6.6: 优先后端 display_values
+  // [DECORATIVE] [NEW] v1.3 / FR-6.6: 优先后端 display_values
   if (props.data?.display_values?.[field.id] !== undefined) {
     return props.data.display_values[field.id]
   }

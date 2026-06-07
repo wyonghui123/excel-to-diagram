@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>虚拟分组布局控制测试</title>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    import elkLayouts from 'https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk@0.1.7/dist/mermaid-layout-elk.esm.min.mjs';
+
+    window.mermaid = mermaid;
+    window.elkLayouts = elkLayouts;
+  </script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      padding: 20px;
+    }
+
+    h1 {
+      text-align: center;
+      color: #fff;
+    }
+
+    .controls {
+      max-width: 1200px;
+      margin: 20px auto;
+      background: #16213e;
+      padding: 20px;
+      border-radius: 8px;
+    }
+
+    .control-row {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-bottom: 15px;
+    }
+
+    .control-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    label {
+      color: #a0a0a0;
+    }
+
+    select, button {
+      padding: 8px 12px;
+      border: 1px solid #0f3460;
+      border-radius: 4px;
+      background: #1a1a2e;
+      color: #eee;
+      font-size: 14px;
+    }
+
+    button {
+      background: #e94560;
+      border: none;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    button:hover {
+      background: #ff6b6b;
+    }
+
+    .test-result {
+      max-width: 1600px;
+      margin: 20px auto;
+      background: #16213e;
+      padding: 20px;
+      border-radius: 8px;
+    }
+
+    .test-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #e94560;
+      margin-bottom: 15px;
+    }
+
+    .mermaid-container {
+      background: #fff;
+      border-radius: 8px;
+      padding: 20px;
+      min-height: 800px;
+      overflow: auto;
+    }
+
+    .mermaid-container svg {
+      max-width: 100%;
+      height: auto;
+    }
+
+    .stats {
+      background: #0f3460;
+      padding: 15px;
+      border-radius: 4px;
+      margin-top: 15px;
+      font-family: monospace;
+      font-size: 13px;
+    }
+
+    .legend {
+      background: #0f3460;
+      padding: 15px;
+      border-radius: 4px;
+      margin-top: 15px;
+    }
+
+    .legend h4 {
+      color: #e94560;
+      margin-bottom: 10px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 5px;
+      font-size: 13px;
+    }
+
+    .legend-color {
+      width: 20px;
+      height: 20px;
+      border-radius: 4px;
+    }
+
+    .code-block {
+      background: #0a0a1a;
+      padding: 15px;
+      border-radius: 4px;
+      margin-top: 15px;
+      font-family: 'Consolas', monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      max-height: 400px;
+      overflow: auto;
+      color: #a0a0a0;
+    }
+
+    .toggle-group {
+      background: #0f3460;
+      padding: 10px;
+      border-radius: 4px;
+      margin-bottom: 15px;
+    }
+
+    .toggle-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-right: 15px;
+    }
+  </style>
+</head>
+<body>
+  <h1>[SYMBOL] 虚拟分组布局控制测试</h1>
+  <p style="text-align: center; color: #a0a0a0;">
+    测试目的：验证通过创建虚拟分组（enabled, visible=false）来控制子容器布局的效果
+  </p>
+
+  <div class="controls">
+    <div class="control-row">
+      <div class="control-item">
+        <label>测试场景:</label>
+        <select id="testScenario">
+          <option value="no-virtual">无虚拟分组（基准测试，所有容器平铺）</option>
+          <option value="two-virtual">两个虚拟分组（目标20节点/组）</option>
+          <option value="four-virtual">四个虚拟分组（目标15节点/组）</option>
+          <option value="seven-virtual">七个虚拟分组（目标10节点/组）</option>
+          <option value="ten-virtual">十个虚拟分组（目标8节点/组）</option>
+        </select>
+      </div>
+      <div class="control-item">
+        <label>布局方向:</label>
+        <select id="layoutDirection">
+          <option value="LR">LR (从左到右)</option>
+          <option value="TB">TB (从上到下)</option>
+        </select>
+      </div>
+      <button onclick="runTest()">[DECORATIVE] 运行测试</button>
+    </div>
+
+    <div class="toggle-group">
+      <div class="toggle-item">
+        <label>容器配置:</label>
+      </div>
+      <div class="toggle-item">
+        <input type="checkbox" id="showContainerLabels" checked>
+        <label for="showContainerLabels">显示容器标签</label>
+      </div>
+      <div class="toggle-item">
+        <input type="checkbox" id="showVirtualBorders" checked>
+        <label for="showVirtualBorders">显示虚拟分组边框（调试用）</label>
+      </div>
+    </div>
+  </div>
+
+  <div class="test-result">
+    <div class="test-title" id="test-title">测试1：无虚拟分组（基准测试）</div>
+    <div class="mermaid-container" id="mermaid-result">
+      点击"运行测试"开始渲染...
+    </div>
+
+    <div class="legend">
+      <h4>图例说明</h4>
+      <div class="legend-item">
+        <div class="legend-color" style="background: #1890FF;"></div>
+        <span>虚拟分组A</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background: #52C41A;"></div>
+        <span>虚拟分组B</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background: #FAAD14;"></div>
+        <span>虚拟分组C</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background: #722ED1;"></div>
+        <span>虚拟分组D</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background: #13C2C2;"></div>
+        <span>虚拟分组E</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background: #EB2F96;"></div>
+        <span>虚拟分组F</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background: #F5222D;"></div>
+        <span>虚拟分组G</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background: #FA541C;"></div>
+        <span>虚拟分组H</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background: #FA8C16;"></div>
+        <span>虚拟分组I</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background: #A0D911;"></div>
+        <span>虚拟分组J</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background: #13C2C2;"></div>
+        <span>实际容器（正常显示）</span>
+      </div>
+    </div>
+
+    <div class="stats" id="stats">
+      等待生成统计信息...
+    </div>
+
+    <div class="code-block" id="code-output" style="display: none;">
+      Mermaid 代码:
+    </div>
+  </div>
+
+  <script>
+    const CONTAINER_COLORS = [
+      '#1890FF', '#52C41A', '#FAAD14', '#722ED1', '#13C2C2',
+      '#EB2F96', '#F5222D', '#FA541C', '#FA8C16', '#A0D911',
+      '#2F54EB', '#531DAB', '#FF6B6B', '#4ECDC4', '#45B7D1',
+      '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F'
+    ];
+
+    const CONTAINER_NAMES = [
+      '主数据管理', '供应商管理', '客户管理', '物料管理', '价格管理',
+      '采购订单', '采购到货', '采购退货', '采购付款', '采购合同',
+      '销售订单', '销售出库', '销售退货', '销售收款', '销售合同',
+      '库存入库', '库存出库', '库存盘点', '库存调拨', '库存预警'
+    ];
+
+    const VIRTUAL_GROUP_NAMES = ['虚拟分组A', '虚拟分组B', '虚拟分组C', '虚拟分组D', '虚拟分组E', '虚拟分组F', '虚拟分组G', '虚拟分组H', '虚拟分组I', '虚拟分组J'];
+
+    async function initMermaid() {
+      const { mermaid, elkLayouts } = window;
+      mermaid.registerLayoutLoaders(elkLayouts);
+
+      const direction = document.getElementById('layoutDirection').value;
+      const elkDirection = direction === 'LR' ? 'RIGHT' : 'DOWN';
+
+      mermaid.initialize({
+        startOnLoad: false,
+        layout: 'elk',
+        elk: {
+          'elk.direction': elkDirection,
+          'elk.spacing.nodeNode': 60,
+          'elk.layered.spacing.nodeNodeBetweenLayers': 100,
+          'elk.padding': '[top=30,left=40,right=40,bottom=30]',
+          'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
+          'elk.algorithm': 'layered',
+          'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
+          'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
+          'elk.layered.spacing.edgeNodeBetweenLayers': 40,
+          'elk.layered.componentsSpacing': 80,
+          'elk.spacing.componentComponent': 60,
+        },
+        flowchart: {
+          htmlLabels: true,
+          useMaxWidth: false,
+          curve: 'basis'
+        }
+      });
+    }
+
+    function generateTestData() {
+      const containers = [];
+      // 节点数量差异大，模拟真实业务场景
+      const nodeCounts = [12, 2, 8, 3, 15, 4, 2, 10, 3, 6, 5, 9, 2, 7, 3, 11, 4, 6, 2, 5];
+
+      for (let i = 0; i < 20; i++) {
+        containers.push({
+          id: `C${i + 1}`,
+          name: CONTAINER_NAMES[i],
+          nodeCount: nodeCounts[i],
+          color: CONTAINER_COLORS[i]
+        });
+      }
+
+      return containers;
+    }
+
+    // 基于节点数量均匀分配的算法
+    function distributeContainersByNodeCount(containers, targetNodesPerGroup = 15) {
+      const groups = [];
+      let currentGroup = { containers: [], totalNodes: 0 };
+
+      // 按节点数量从大到小排序，优先分配大容器
+      const sorted = [...containers].sort((a, b) => b.nodeCount - a.nodeCount);
+
+      sorted.forEach(container => {
+        if (currentGroup.totalNodes + container.nodeCount > targetNodesPerGroup && currentGroup.containers.length > 0) {
+          groups.push(currentGroup);
+          currentGroup = { containers: [], totalNodes: 0 };
+        }
+        currentGroup.containers.push(container);
+        currentGroup.totalNodes += container.nodeCount;
+      });
+
+      if (currentGroup.containers.length > 0) {
+        groups.push(currentGroup);
+      }
+
+      return groups;
+    }
+
+    function generateCrossLinks(containers) {
+      const links = [];
+
+      // 容器内节点到节点的真实跨容器连线
+      // 每个容器内选取一些节点，与其他容器内的节点建立连线
+      links.push({ from: 'C1_N1', to: 'C6_N1' });  // 主数据管理节点1 -> 采购订单节点1
+      links.push({ from: 'C1_N2', to: 'C11_N1' }); // 主数据管理节点2 -> 销售订单节点1
+      links.push({ from: 'C2_N1', to: 'C7_N1' });  // 供应商管理节点1 -> 采购到货节点1
+      links.push({ from: 'C3_N1', to: 'C12_N1' }); // 客户管理节点1 -> 销售出库节点1
+      links.push({ from: 'C4_N1', to: 'C8_N1' });  // 物料管理节点1 -> 采购退货节点1
+      links.push({ from: 'C5_N1', to: 'C9_N1' });  // 价格管理节点1 -> 采购付款节点1
+      links.push({ from: 'C6_N1', to: 'C16_N1' }); // 采购订单节点1 -> 库存入库节点1
+      links.push({ from: 'C7_N1', to: 'C17_N1' }); // 采购到货节点1 -> 库存出库节点1
+      links.push({ from: 'C8_N1', to: 'C18_N1' }); // 采购退货节点1 -> 库存盘点节点1
+      links.push({ from: 'C9_N1', to: 'C19_N1' }); // 采购付款节点1 -> 库存调拨节点1
+      links.push({ from: 'C10_N1', to: 'C20_N1' }); // 采购合同节点1 -> 库存预警节点1
+      links.push({ from: 'C11_N1', to: 'C12_N1' }); // 销售订单节点1 -> 销售出库节点1
+      links.push({ from: 'C12_N1', to: 'C13_N1' }); // 销售出库节点1 -> 销售退货节点1
+      links.push({ from: 'C13_N1', to: 'C14_N1' }); // 销售退货节点1 -> 销售收款节点1
+      links.push({ from: 'C14_N1', to: 'C15_N1' }); // 销售收款节点1 -> 销售合同节点1
+      links.push({ from: 'C16_N1', to: 'C17_N1' }); // 库存入库节点1 -> 库存出库节点1
+      links.push({ from: 'C17_N1', to: 'C18_N1' }); // 库存出库节点1 -> 库存盘点节点1
+      links.push({ from: 'C18_N1', to: 'C19_N1' }); // 库存盘点节点1 -> 库存调拨节点1
+      links.push({ from: 'C19_N1', to: 'C20_N1' }); // 库存调拨节点1 -> 库存预警节点1
+
+      // 更多跨容器连线
+      links.push({ from: 'C2_N2', to: 'C11_N2' }); // 供应商管理节点2 -> 销售订单节点2
+      links.push({ from: 'C3_N2', to: 'C6_N2' });  // 客户管理节点2 -> 采购订单节点2
+      links.push({ from: 'C4_N2', to: 'C16_N2' }); // 物料管理节点2 -> 库存入库节点2
+      links.push({ from: 'C5_N2', to: 'C12_N2' }); // 价格管理节点2 -> 销售出库节点2
+      links.push({ from: 'C1_N3', to: 'C17_N2' }); // 主数据管理节点3 -> 库存出库节点2
+      links.push({ from: 'C2_N3', to: 'C18_N2' }); // 供应商管理节点3 -> 库存盘点节点2
+      links.push({ from: 'C3_N3', to: 'C19_N2' }); // 客户管理节点3 -> 库存调拨节点2
+
+      // 虚拟分组内的连线（同一个虚拟分组内的容器节点连线）
+      links.push({ from: 'C1_N4', to: 'C2_N1' }); // 虚拟分组A内的连线
+      links.push({ from: 'C3_N2', to: 'C4_N1' });
+      links.push({ from: 'C5_N3', to: 'C6_N3' });
+      links.push({ from: 'C7_N2', to: 'C8_N1' });
+      links.push({ from: 'C9_N2', to: 'C10_N1' });
+
+      links.push({ from: 'C11_N3', to: 'C12_N2' }); // 虚拟分组B内的连线
+      links.push({ from: 'C13_N2', to: 'C14_N1' });
+      links.push({ from: 'C15_N2', to: 'C16_N3' });
+      links.push({ from: 'C17_N2', to: 'C18_N1' });
+      links.push({ from: 'C19_N2', to: 'C20_N1' });
+
+      return links;
+    }
+
+    function generateMermaidCode(scenario, containers, links, showVirtualBorders) {
+      const direction = document.getElementById('layoutDirection').value;
+      const showLabels = document.getElementById('showContainerLabels').checked;
+
+      let code = `flowchart-elk ${direction}\n`;
+
+      const virtualGroupStyles = [];
+
+      if (scenario === 'no-virtual') {
+        // 无虚拟分组，所有容器平铺
+        containers.forEach((c, i) => {
+          code += `  subgraph ${c.id}["${showLabels ? c.name + ` (${c.nodeCount}节点)` : ''}"]\n`;
+          code += `    direction TB\n`;
+          for (let n = 1; n <= c.nodeCount; n++) {
+            code += `    ${c.id}_N${n}["节点${n}"]\n`;
+          }
+          code += `  end\n`;
+          if (showVirtualBorders) {
+            virtualGroupStyles.push(`style ${c.id} fill:#${c.color}20,stroke:#${c.color},stroke-width:2px`);
+          } else {
+            virtualGroupStyles.push(`style ${c.id} fill:#${c.color}10,stroke:none`);
+          }
+        });
+      } else {
+        // 有虚拟分组，基于节点数量均匀分配
+        let targetNodesPerGroup = 15;
+        if (scenario === 'two-virtual') targetNodesPerGroup = 20;
+        if (scenario === 'four-virtual') targetNodesPerGroup = 15;
+        if (scenario === 'seven-virtual') targetNodesPerGroup = 10;
+        if (scenario === 'ten-virtual') targetNodesPerGroup = 8;
+        const groups = distributeContainersByNodeCount(containers, targetNodesPerGroup);
+
+        groups.forEach((group, gi) => {
+          code += `  subgraph VG${gi + 1}["虚拟分组${String.fromCharCode(65 + gi)} (${group.containers.length}容器/${group.totalNodes}节点)"]\n`;
+          code += `    direction ${direction}\n`;
+
+          // 保持原始顺序展示（非排序后的顺序）
+          group.containers.forEach(c => {
+            code += `    subgraph ${c.id}["${showLabels ? c.name + ` (${c.nodeCount}节点)` : ''}"]\n`;
+            code += `      direction TB\n`;
+            for (let n = 1; n <= c.nodeCount; n++) {
+              code += `      ${c.id}_N${n}["节点${n}"]\n`;
+            }
+            code += `    end\n`;
+          });
+
+          code += `  end\n`;
+
+          if (showVirtualBorders) {
+            virtualGroupStyles.push(`style VG${gi + 1} fill:#${CONTAINER_COLORS[gi * 5]}20,stroke:#${CONTAINER_COLORS[gi * 5]},stroke-width:3px`);
+          } else {
+            virtualGroupStyles.push(`style VG${gi + 1} fill:none,stroke:none`);
+          }
+        });
+
+        // 剩余未分配的容器（如果有的话）
+        const assignedIds = new Set(groups.flatMap(g => g.containers.map(c => c.id)));
+        const unassigned = containers.filter(c => !assignedIds.has(c.id));
+
+        unassigned.forEach(c => {
+          code += `  subgraph ${c.id}["${showLabels ? c.name + ` (${c.nodeCount}节点)` : ''}"]\n`;
+          code += `    direction TB\n`;
+          for (let n = 1; n <= c.nodeCount; n++) {
+            code += `    ${c.id}_N${n}["节点${n}"]\n`;
+          }
+          code += `  end\n`;
+          if (showVirtualBorders) {
+            virtualGroupStyles.push(`style ${c.id} fill:#${c.color}20,stroke:#${c.color},stroke-width:2px`);
+          } else {
+            virtualGroupStyles.push(`style ${c.id} fill:#${c.color}10,stroke:none`);
+          }
+        });
+
+        // 所有容器的样式
+        containers.forEach(c => {
+          if (showVirtualBorders) {
+            virtualGroupStyles.push(`style ${c.id} fill:#${c.color}15,stroke:#${c.color},stroke-width:1px`);
+          } else {
+            virtualGroupStyles.push(`style ${c.id} fill:#${c.color}10,stroke:none`);
+          }
+        });
+      }
+
+      links.forEach(link => {
+        code += `  ${link.from} --> ${link.to}\n`;
+      });
+
+      virtualGroupStyles.forEach(style => {
+        code += `  ${style}\n`;
+      });
+
+      return code;
+    }
+
+    async function runTest() {
+      await initMermaid();
+
+      const scenario = document.getElementById('testScenario').value;
+      const showVirtualBorders = document.getElementById('showVirtualBorders').checked;
+
+      const scenarioNames = {
+        'no-virtual': '无虚拟分组（基准测试）',
+        'one-virtual': '一个虚拟分组（包含前10个容器）',
+        'two-virtual': '两个虚拟分组（各10个容器）',
+        'four-virtual': '四个虚拟分组（各5个容器）'
+      };
+
+      document.getElementById('test-title').textContent = `测试：${scenarioNames[scenario]}`;
+
+      const containers = generateTestData();
+      const links = generateCrossLinks(containers);
+      const code = generateMermaidCode(scenario, containers, links, showVirtualBorders);
+
+      document.getElementById('code-output').textContent = 'Mermaid 代码:\n' + code;
+      document.getElementById('code-output').style.display = 'block';
+
+      const container = document.getElementById('mermaid-result');
+      container.innerHTML = '';
+
+      try {
+        const { mermaid } = window;
+        const result = await mermaid.render('test-svg', code);
+        container.innerHTML = result.svg;
+
+        const stats = generateStats(scenario, containers, links);
+        document.getElementById('stats').innerHTML = stats;
+
+      } catch (error) {
+        container.innerHTML = `<div style="color: red; padding: 20px;">渲染失败: ${error.message}</div>`;
+        console.error('渲染失败:', error);
+      }
+    }
+
+    function generateStats(scenario, containers, links) {
+      const stats = [];
+
+      stats.push(`<strong>测试场景:</strong> ${scenario}`);
+      stats.push(`<strong>容器总数:</strong> ${containers.length}`);
+
+      const totalNodes = containers.reduce((sum, c) => sum + c.nodeCount, 0);
+      stats.push(`<strong>节点总数:</strong> ${totalNodes}`);
+
+      stats.push(`<strong>跨容器连线数:</strong> ${links.length}`);
+
+      if (scenario === 'no-virtual') {
+        stats.push(`<strong>虚拟分组数:</strong> 0（基准）`);
+      } else if (scenario === 'one-virtual') {
+        stats.push(`<strong>虚拟分组数:</strong> 1`);
+        stats.push(`<strong>虚拟分组A容器:</strong> ${containers.slice(0, 10).length} 个`);
+        stats.push(`<strong>虚拟分组A节点:</strong> ${containers.slice(0, 10).reduce((sum, c) => sum + c.nodeCount, 0)}`);
+        stats.push(`<strong>未分组容器:</strong> ${containers.slice(10).length} 个`);
+      } else if (scenario === 'two-virtual') {
+        stats.push(`<strong>虚拟分组数:</strong> 2`);
+        stats.push(`<strong>虚拟分组A:</strong> ${containers.slice(0, 10).length} 个容器, ${containers.slice(0, 10).reduce((sum, c) => sum + c.nodeCount, 0)} 个节点`);
+        stats.push(`<strong>虚拟分组B:</strong> ${containers.slice(10).length} 个容器, ${containers.slice(10).reduce((sum, c) => sum + c.nodeCount, 0)} 个节点`);
+      } else if (scenario === 'four-virtual') {
+        stats.push(`<strong>虚拟分组数:</strong> 4`);
+        for (let i = 0; i < 4; i++) {
+          const group = containers.slice(i * 5, (i + 1) * 5);
+          stats.push(`<strong>虚拟分组${VIRTUAL_GROUP_NAMES[i]}:</strong> ${group.length} 个容器, ${group.reduce((sum, c) => sum + c.nodeCount, 0)} 个节点`);
+        }
+      }
+
+      return stats.join('<br>');
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      runTest();
+    });
+  </script>
+</body>
+</html>

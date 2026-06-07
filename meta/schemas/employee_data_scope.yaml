@@ -1,0 +1,62 @@
+# ============================================
+# 员工数据权限范围元模型（借鉴用友BIP）
+# 说明: 员工数据权限范围模板
+# ============================================
+
+id: employee_data_scope
+name: 员工数据权限范围
+table_name: employee_data_scopes
+description: 员工数据权限范围模板，支持本人/部门/层级三种范围
+
+semantics:
+  meaning: 员工数据权限范围定义
+  category: system_entity
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+
+  - id: code
+    name: 范围编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    description: self/department/department_tree/organization
+
+  - id: name
+    name: 范围名称
+    type: string
+    db_column: name
+    required: true
+    description: 本人/本部门/本部门及下级/本组织
+
+  - id: condition_template
+    name: 条件模板
+    type: string
+    db_column: condition_template
+    required: true
+    description: |
+      条件模板，支持参数替换：
+      :user_id - 当前用户ID
+      :user_department_id - 当前用户部门ID
+      :user_department_tree - 当前用户部门及下级ID列表
+      :user_organization_id - 当前用户组织ID
+
+  - id: description
+    name: 描述
+    type: string
+    db_column: description
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_emp_scope_code
+
+relations: []
+actions: []

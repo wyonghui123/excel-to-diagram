@@ -47,7 +47,7 @@ export function useFieldPolicy(metaConfig, columns) {
   const fieldPolicies = ref(null)
 
   /**
-   * 🆕 v1 批次 2 / FR-4.5: 条件必填映射表
+   * [DECORATIVE] [NEW] v1.2 / FR-4.5: 条件必填映射表
    * 结构: { field_id: [{condition, message, severity}, ...] }
    * 来源: fieldPolicies API 响应中的 conditional_required 数组
    */
@@ -70,7 +70,7 @@ export function useFieldPolicy(metaConfig, columns) {
       const result = await apiV2.get(path)
       if (result.success && result.data) {
         fieldPolicies.value = result.data
-        // 🆕 v1 批次 2 / FR-4.5: 提取 conditional_required 到 requiredMap
+        // [DECORATIVE] [NEW] v1.2 / FR-4.5: 提取 conditional_required 到 requiredMap
         const newRequiredMap = {}
         for (const [fieldId, policy] of Object.entries(result.data)) {
           if (policy.conditional_required && policy.conditional_required.length > 0) {
@@ -401,7 +401,7 @@ export function useFieldPolicy(metaConfig, columns) {
   }
 
   /**
-   * 🆕 v1 批次 3 / FR-6.3: 条件必填评估器
+   * [DECORATIVE] [NEW] v1.3 / FR-6.3: 条件必填评估器
    * 用 new Function + with(row) 沙箱评估条件表达式
    * @param {string} condition - 条件表达式 (如 "domain_id is not None")
    * @param {Object} row - 行数据
@@ -418,7 +418,7 @@ export function useFieldPolicy(metaConfig, columns) {
   }
 
   /**
-   * 🆕 v1 批次 3 / FR-6.3: 基于 row 上下文的重载 isRequired
+   * [DECORATIVE] [NEW] v1.3 / FR-6.3: 基于 row 上下文的重载 isRequired
    * 先调基础 isRequired(fieldId)，再检查 conditional_required 条件是否满足。
    * @param {string} fieldId - 字段标识
    * @param {Object} row - 行数据（用于条件评估）
@@ -559,12 +559,12 @@ export function useFieldPolicy(metaConfig, columns) {
   }
   
   /**
-   * 🆕 v1 批次 3 / FR-6.1: 字段策略是否已加载
+   * [DECORATIVE] [NEW] v1.3 / FR-6.1: 字段策略是否已加载
    */
   const policiesLoaded = ref(false)
 
   /**
-   * 🆕 v1 批次 3 / FR-6.1: 自动加载入口
+   * [DECORATIVE] [NEW] v1.3 / FR-6.1: 自动加载入口
    * 列表页 / 详情页 mount 时调用，激活后端 field-policies API
    * @param {string} objectType - 对象类型 (如 'user', 'role')
    * @param {string} context - 上下文 (read|create|update)
@@ -583,10 +583,10 @@ export function useFieldPolicy(metaConfig, columns) {
     // 后端策略
     fieldPolicies,
     loadFieldPolicies,
-    requiredMap,  // 🆕 v1 批次 2 / FR-4.5: 条件必填映射
+    requiredMap,  // [DECORATIVE] [NEW] v1.2 / FR-4.5: 条件必填映射
 
-    autoLoad,           // 🆕 v1 批次 3 / FR-6.1
-    policiesLoaded,     // 🆕 v1 批次 3 / FR-6.1
+    autoLoad,           // [DECORATIVE] [NEW] v1.3 / FR-6.1
+    policiesLoaded,     // [DECORATIVE] [NEW] v1.3 / FR-6.1
 
     editableMap,
     visibleMap,
@@ -600,8 +600,8 @@ export function useFieldPolicy(metaConfig, columns) {
     isImmutable,
     isNewRowCheck,
     isRowEditable,
-    isRequiredByRow,     // 🆕 v1 批次 3 / FR-6.3
-    evaluateCondition,   // 🆕 v1 批次 3 / FR-6.3 (供 MetaForm 独立复用)
+    isRequiredByRow,     // [DECORATIVE] [NEW] v1.3 / FR-6.3
+    evaluateCondition,   // [DECORATIVE] [NEW] v1.3 / FR-6.3 (供 MetaForm 独立复用)
     
     // 批量操作
     getEditableFields,

@@ -1,0 +1,5 @@
+console.log('0 || undefined =', 0 || undefined)
+console.log('0 ?? undefined =', 0 ?? undefined)
+console.log('1 || undefined =', 1 || undefined)
+console.log('false || "id" =', false || 'id')
+console.log('true || "id" =', true || 'id')

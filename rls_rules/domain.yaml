@@ -1,0 +1,26 @@
+# M11 RLS 规则：domain（业务域）
+# 元数据层级：公司 → domain → sub_domain → service_module
+
+entity: domain
+
+# 行级过滤
+row_filters:
+  - applies_to: [role:user, role:viewer, role:manager]
+    condition: "domain.company_id == $user.company_id"
+  - applies_to: [role:admin]
+    condition: "true"
+  - applies_to: [role:ai-agent]
+    condition: "domain.is_public == true"
+
+# 字段脱敏
+field_masks:
+  - field: internal_owner
+    mask: "***HIDDEN***"
+    applies_to: [role:viewer, role:ai-agent]
+
+# 操作权限
+actions:
+  create: [role:admin, role:manager]
+  read: [role:admin, role:manager, role:user, role:viewer, role:ai-agent]
+  update: [role:admin, role:manager]
+  delete: [role:admin]

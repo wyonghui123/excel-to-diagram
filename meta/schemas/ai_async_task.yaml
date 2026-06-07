@@ -1,0 +1,282 @@
+# ============================================
+# AI异步任务
+# 说明: AI Agent异步任务队列
+# ============================================
+
+id: ai_async_task
+name: AI异步任务
+table_name: ai_async_tasks
+description: AI Agent异步执行的长期任务队列，支持优先级调度和成本追踪
+persistent: true
+
+semantics:
+  meaning: AI异步任务队列
+  category: system_entity
+  hierarchy_level: 0
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+
+  - id: task_type
+    name: 任务类型
+    type: string
+    db_column: task_type
+    required: true
+    max_length: 50
+    enum_values:
+      - value: query
+        label: AI查询
+      - value: analyze
+        label: AI分析
+      - value: action
+        label: AI动作
+      - value: embedding
+        label: 嵌入计算
+      - value: agent
+        label: Agent任务
+      - value: rag
+        label: RAG检索
+
+  - id: session_id
+    name: AI会话ID
+    type: string
+    db_column: session_id
+    max_length: 100
+
+  - id: agent_id
+    name: Agent ID
+    type: string
+    db_column: agent_id
+    max_length: 100
+
+  - id: parent_task_id
+    name: 父任务ID
+    type: integer
+    db_column: parent_task_id
+
+  - id: request
+    name: 请求内容
+    type: json
+    db_column: request
+    required: true
+
+  - id: context
+    name: 执行上下文
+    type: json
+    db_column: context
+
+  - id: priority
+    name: 优先级
+    type: integer
+    db_column: priority
+    default: 50
+
+  - id: queue
+    name: 队列
+    type: string
+    db_column: queue
+    default: ai_normal
+    max_length: 50
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    default: pending
+    max_length: 20
+    enum_values:
+      - value: pending
+        label: 待执行
+      - value: queued
+        label: 已排队
+      - value: running
+        label: 执行中
+      - value: completed
+        label: 已完成
+      - value: failed
+        label: 失败
+      - value: cancelled
+        label: 已取消
+
+  - id: worker_id
+    name: 执行Worker
+    type: string
+    db_column: worker_id
+    max_length: 100
+
+  - id: started_at
+    name: 开始时间
+    type: datetime
+    db_column: started_at
+
+  - id: completed_at
+    name: 完成时间
+    type: datetime
+    db_column: completed_at
+
+  - id: duration_ms
+    name: 执行耗时(毫秒)
+    type: integer
+    db_column: duration_ms
+
+  - id: result
+    name: 执行结果
+    type: json
+    db_column: result
+
+  - id: error_message
+    name: 错误信息
+    type: text
+    db_column: error_message
+
+  - id: tokens_used
+    name: Token使用量
+    type: integer
+    db_column: tokens_used
+
+  - id: cost
+    name: 成本
+    type: decimal
+    db_column: cost
+    precision: 10
+    scale: 4
+
+  - id: model_used
+    name: 使用的模型
+    type: string
+    db_column: model_used
+    max_length: 100
+
+  - id: retry_count
+    name: 已重试次数
+    type: integer
+    db_column: retry_count
+    default: 0
+
+  - id: max_retries
+    name: 最大重试次数
+    type: integer
+    db_column: max_retries
+    default: 3
+
+  - id: timeout
+    name: 超时时间(秒)
+    type: integer
+    db_column: timeout
+    default: 300
+
+  - id: tenant_id
+    name: 租户ID
+    type: integer
+    db_column: tenant_id
+
+  - id: user_id
+    name: 用户ID
+    type: integer
+    db_column: user_id
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    semantics:
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    semantics:
+      audit_field: true
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    snapshot_fields: [status, result, tokens_used, cost]
+
+indexes:
+  - fields: [status]
+    name: idx_ai_async_task_status
+
+  - fields: [session_id]
+    name: idx_ai_async_task_session
+
+  - fields: [tenant_id]
+    name: idx_ai_async_task_tenant
+
+  - fields: [priority]
+    name: idx_ai_async_task_priority
+
+  - fields: [created_at]
+    name: idx_ai_async_task_time
+
+actions:
+  - id: ai_async_task_create
+    name: 创建AI任务
+    type: crud
+    method: POST
+    path: /api/v1/ai_async_tasks
+    description: 创建AI异步任务
+
+  - id: ai_async_task_read
+    name: 查看AI任务
+    type: crud
+    method: GET
+    path: /api/v1/ai_async_tasks
+    description: 查看AI异步任务列表与详情
+
+  - id: ai_async_task_update
+    name: 更新AI任务
+    type: crud
+    method: PUT
+    path: /api/v1/ai_async_tasks/{id}
+    description: 更新AI异步任务
+
+  - id: ai_async_task_delete
+    name: 删除AI任务
+    type: crud
+    method: DELETE
+    path: /api/v1/ai_async_tasks/{id}
+    description: 删除AI异步任务记录
+
+  - id: ai_async_task_list
+    name: 列表AI任务
+    type: crud
+    method: GET
+    path: /api/v1/ai_async_tasks/list
+    description: 列出所有AI异步任务
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    title: AI异步任务
+    columns:
+      - field: task_type
+        width: 100
+      - field: status
+        width: 80
+      - field: priority
+        width: 60
+      - field: tokens_used
+        width: 80
+      - field: cost
+        width: 80
+      - field: duration_ms
+        width: 80
+      - field: retry_count
+        width: 60
+
+category_config:
+  create_permission: ai_task:create
+  update_permission: ai_task:update
+  delete_permission: ai_task:delete

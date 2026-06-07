@@ -1,0 +1,55 @@
+id: user_group_member
+name: 用户组成员
+table_name: user_group_members
+description: 用户组成员关系
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+
+  - id: user_id
+    name: 用户ID
+    type: integer
+    db_column: user_id
+    required: true
+    description: 用户ID
+
+  - id: group_id
+    name: 用户组ID
+    type: integer
+    db_column: group_id
+    required: true
+    description: 用户组ID
+
+  - id: is_manager
+    name: 是否管理员
+    type: boolean
+    db_column: is_manager
+    default: false
+    description: 是否为组管理员
+
+  - id: joined_at
+    name: 加入时间
+    type: datetime
+    db_column: joined_at
+    description: 加入时间
+
+indexes:
+  - fields: [user_id, group_id]
+    unique: true
+    name: idx_user_group_member_unique
+  - fields: [group_id]
+    name: idx_user_group_member_group
+  - fields: [user_id]
+    name: idx_user_group_member_user
+
+relations: []
+actions: []
+
+ui_view_config:
+  skip_auto_menu: true

@@ -1,0 +1,22 @@
+- [x] Aspect: SemanticAnnotation 新增 auto_fill 属性，默认空字典，不影响现有字段
+- [x] Aspect: MetaObject 新增 aspects 属性，默认空列表，不影响现有对象
+- [x] Aspect: yaml_loader.py 新增 parse_aspects_yaml() 函数，加载 aspects.yaml
+- [x] Aspect: _resolve_aspects() 正确合并 fields + semantics + validations + rules
+- [x] Aspect: 本地字段覆盖 Aspect 字段时，aspect_source 标记正确
+- [x] Aspect: 多 Aspect 同 id 字段冲突时，后引用覆盖先引用，日志记录警告
+- [x] Aspect: Aspect 中的 rules 合并时 rule.id 加 Aspect 前缀避免冲突
+- [x] Aspect: includes 语法作为 aspects 别名继续有效，行为一致
+- [x] Aspect: 现有 YAML 无 aspects/includes 时，加载行为与修改前完全一致
+- [x] Pseudo Variables: PseudoVariableResolver 支持 $now、$user.id、$user.name、$uuid
+- [x] Pseudo Variables: _prepare_data() 从硬编码改为读取 auto_fill 配置
+- [x] Pseudo Variables: _prepare_data() 中 created_at/updated_at 的 datetime.now() 硬编码已移除
+- [x] Pseudo Variables: auto_fill.on_create 在创建时注入，auto_fill.on_update 在更新时注入
+- [x] Pseudo Variables: 无用户上下文时 $user 返回空字符串
+- [x] Pseudo Variables: 无 auto_fill 配置的字段行为与修改前完全一致
+- [x] 标准 Aspect 库: aspects.yaml 定义 audit_aspect（含 auto_fill）、hierarchy_aspect、naming_aspect、owner_aspect
+- [x] 标准 Aspect 库: domain/sub_domain/service_module/business_object/relationship 的 includes 迁移为 aspects
+- [x] 标准 Aspect 库: 迁移后所有对象的字段列表与迁移前完全一致
+- [x] 测试: test_aspect_resolution.py 覆盖 Aspect 加载、合并、覆盖、冲突、兼容性
+- [x] 测试: test_pseudo_variables.py 覆盖 $now/$user/$uuid 注入、边界情况
+- [x] 测试: 现有测试套件全部通过（569+ tests）
+- [x] 端到端: 创建 domain 时 created_at/updated_at/created_by/updated_by 自动填充

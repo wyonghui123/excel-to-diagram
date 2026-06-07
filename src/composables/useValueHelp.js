@@ -1,0 +1,283 @@
+import { ref, computed, watch } from 'vue'
+import boService from '@/services/boService'
+
+export function useValueHelp(valueHelpConfig, options = {}) {
+  const optionsList = ref([])
+  const loading = ref(false)
+  const error = ref(null)
+  const displayValue = ref('')
+
+  const source = computed(() => valueHelpConfig?.source || {})
+  const behavior = computed(() => valueHelpConfig?.behavior || {})
+  const presentation = computed(() => valueHelpConfig?.presentation || {})
+
+  // 初始 options：优先使用行为配置的 initial_options（用于在 value help 异步加载前显示当前值）
+  if (Array.isArray(behavior.value.initial_options) && behavior.value.initial_options.length > 0) {
+    optionsList.value = behavior.value.initial_options.map(opt => ({
+      value: opt.value,
+      display: opt.display || String(opt.value),
+      code: opt.code || '',
+      extra: {}
+    }))
+  }
+
+  const sourceType = computed(() => source.value.type || 'enum')
+  const sourceId = computed(() => {
+    if (sourceType.value === 'enum') return source.value.enum_type_id || ''
+    if (sourceType.value === 'bo') return source.value.target_bo || ''
+    if (sourceType.value === 'custom') return source.value.endpoint || ''
+    return ''
+  })
+
+  const sourceConfigParams = computed(() => {
+    const src = source.value
+    const params = {}
+    if (src.value_field) params.value_field = src.value_field
+    if (src.display_field) params.display_field = src.display_field
+    if (src.code_field) params.code_field = src.code_field
+    if (src.value_filter && Object.keys(src.value_filter).length > 0) {
+      params.value_filter = src.value_filter
+    }
+    if (src.hierarchy && Object.keys(src.hierarchy).length > 0) {
+      params.hierarchy = src.hierarchy
+    }
+    return params
+  })
+
+  let debounceTimer = null
+
+  // 计算有效的 search_fields：
+  // 优先使用 behavior.search_fields，如果为空则回退到 code_field 和 display_field
+  const effectiveSearchFields = computed(() => {
+    const explicit = behavior.value.search_fields
+    if (explicit && explicit.length > 0) {
+      return explicit
+    }
+    // 回退：使用 code_field 和 display_field 作为默认搜索字段
+    const defaults = []
+    if (source.value.code_field) defaults.push(source.value.code_field)
+    if (source.value.display_field && source.value.display_field !== source.value.code_field) {
+      defaults.push(source.value.display_field)
+    }
+    return defaults
+  })
+
+  async function loadOptions(search = '', params = {}) {
+    const minLen = behavior.value.min_search_length || 0
+    // 空 search 时不受 min_search_length 限制（用于预加载全部 options，让本地 filterable 工作）
+    if (minLen > 0 && search.length > 0 && search.length < minLen) {
+      return
+    }
+
+    if (!sourceId.value) {
+      return
+    }
+
+    // 空搜索时优先显示最近使用的选项
+    if (!search && behavior.value.enable_recent !== false) {
+      const recentItems = getRecentItems()
+      if (recentItems.length > 0) {
+        // 标记最近使用的选项
+        const markedRecent = recentItems.map(item => ({ ...item, isRecent: true }))
+        optionsList.value = markedRecent
+        loading.value = true
+        error.value = null
+
+        try {
+          const response = await boService.searchValueHelp(sourceType.value, sourceId.value, {
+            search: '',
+            search_fields: effectiveSearchFields.value.join(','),
+            page: 1,
+            pageSize: params.pageSize || presentation.value.page_size || 15,
+            filters: params.filters || {},
+            ...sourceConfigParams.value,
+          })
+
+          if (response.success && response.data) {
+            const allItems = response.data.data || []
+            // 合并最近使用（最近使用的排前面，带标记）
+            const recentValues = new Set(recentItems.map(r => String(r.value)))
+            const regularItems = allItems.filter(item => !recentValues.has(String(item.value)))
+            optionsList.value = [...markedRecent, ...regularItems]
+          }
+        } catch (e) {
+          // 如果加载失败，仍然显示最近使用的
+          console.warn('[useValueHelp] Failed to load full options:', e)
+        } finally {
+          loading.value = false
+        }
+        return
+      }
+    }
+
+    loading.value = true
+    error.value = null
+
+    try {
+      const response = await boService.searchValueHelp(sourceType.value, sourceId.value, {
+        search,
+        search_fields: effectiveSearchFields.value.join(','),
+        page: params.page || 1,
+        pageSize: params.pageSize || presentation.value.page_size || 15,
+        sort: (presentation.value.sort_by || []).map(s => `${s.field}:${s.direction || 'asc'}`).join(','),
+        filters: params.filters || {},
+        ...sourceConfigParams.value,
+      })
+
+      if (response.success && response.data) {
+        optionsList.value = response.data.data || []
+      } else {
+        error.value = response.error || response.message || 'Failed to load options'
+      }
+    } catch (e) {
+      error.value = e.message
+    } finally {
+      loading.value = false
+    }
+  }
+
+  function loadOptionsDebounced(search = '', params = {}) {
+    const debounceMs = behavior.value.debounce_ms || 300
+    if (debounceTimer) {
+      clearTimeout(debounceTimer)
+    }
+    debounceTimer = setTimeout(() => {
+      loadOptions(search, params)
+    }, debounceMs)
+  }
+
+  async function resolveDisplay(value) {
+    // 检查空值：null, undefined, '', 空数组
+    const isEmpty = !value && value !== 0 || (Array.isArray(value) && value.length === 0)
+    if (isEmpty) {
+      displayValue.value = ''
+      return
+    }
+
+    if (!sourceId.value) {
+      displayValue.value = String(value)
+      return
+    }
+
+    try {
+      const response = await boService.resolveValueHelp(sourceType.value, sourceId.value, value, sourceConfigParams.value)
+      if (response.success && response.data) {
+        displayValue.value = response.data.display || String(value)
+        const resolved = response.data
+        const exists = optionsList.value.some(opt => String(opt.value) === String(resolved.value))
+        if (!exists) {
+          optionsList.value = [
+            ...optionsList.value,
+            { value: resolved.value, display: resolved.display, code: resolved.code || '', extra: {} }
+          ]
+        }
+      } else {
+        displayValue.value = String(value)
+      }
+    } catch (e) {
+      displayValue.value = String(value)
+    }
+  }
+
+  function validateInput(value) {
+    if (!behavior.value.validation) return true
+    if (behavior.value.binding_strength === 'loose') return true
+    if (!optionsList.value.length) return true
+    const strVal = String(value)
+    return optionsList.value.some(opt => String(opt.value) === strVal)
+  }
+
+  function getFilterParams(formValues = {}) {
+    const filters = {}
+    const bindings = behavior.value.parameter_bindings || []
+    for (const binding of bindings) {
+      if (binding.constant) {
+        filters[binding.target_field] = binding.constant
+      } else if (binding.local_field && formValues[binding.local_field] !== undefined) {
+        filters[binding.target_field] = formValues[binding.local_field]
+      }
+    }
+    return filters
+  }
+
+  function isBindingSatisfied(formValues = {}) {
+    const bindings = behavior.value.parameter_bindings || []
+    for (const binding of bindings) {
+      if (binding.required && !binding.constant) {
+        if (!formValues[binding.local_field]) {
+          return false
+        }
+      }
+    }
+    return true
+  }
+
+  const outMappings = computed(() => {
+    return behavior.value.out_mappings || []
+  })
+
+  // 最近使用功能
+  const RECENT_MAX_ITEMS = 3
+  const recentKey = computed(() => `recent_value_help_${sourceId.value}`)
+
+  function getRecentItems() {
+    try {
+      const stored = localStorage.getItem(recentKey.value)
+      return stored ? JSON.parse(stored) : []
+    } catch (e) {
+      console.warn('[useValueHelp] Failed to get recent items:', e)
+      return []
+    }
+  }
+
+  function saveRecentItem(item) {
+    try {
+      const recent = getRecentItems()
+      const filtered = recent.filter(r => r.value !== item.value)
+      const updated = [item, ...filtered].slice(0, RECENT_MAX_ITEMS)
+      localStorage.setItem(recentKey.value, JSON.stringify(updated))
+    } catch (e) {
+      console.warn('[useValueHelp] Failed to save recent item:', e)
+    }
+  }
+
+  function applyOutMappings(selectedItem, formValues) {
+    if (!outMappings.value.length || !selectedItem) return {}
+
+    const updates = {}
+    const sourceData = {
+      value: selectedItem.value,
+      display: selectedItem.display,
+      code: selectedItem.code,
+      ...(selectedItem.extra || {})
+    }
+
+    for (const mapping of outMappings.value) {
+      const sourceValue = sourceData[mapping.value_help_field]
+      if (sourceValue !== undefined) {
+        updates[mapping.local_field] = sourceValue
+      }
+    }
+
+    return updates
+  }
+
+  return {
+    optionsList,
+    loading,
+    error,
+    displayValue,
+    sourceType,
+    sourceId,
+    loadOptions,
+    loadOptionsDebounced,
+    resolveDisplay,
+    validateInput,
+    getFilterParams,
+    isBindingSatisfied,
+    outMappings,
+    applyOutMappings,
+    getRecentItems,
+    saveRecentItem,
+  }
+}

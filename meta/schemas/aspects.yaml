@@ -1,0 +1,353 @@
+# ============================================
+# 标准 Aspect 库
+# 定义可复用的字段切面，供实体模型通过 aspects 引用
+# ============================================
+
+audit_aspect:
+  description: 审计字段切面 - 自动记录创建和修改信息
+  fields:
+    - id: created_at
+      name: 创建时间
+      type: datetime
+      db_column: created_at
+      description: 创建时间
+      semantics:
+        meaning: 记录创建的时间戳
+        source_of_truth: audit_logs
+        derivation:
+          from: audit_logs
+          rule: "created_at WHERE action = 'CREATE'"
+          description: 首次创建操作的时间
+        auto_fill:
+          on_create: $now
+        analytics:
+          category: dimension
+          type: temporal
+          display_name: 创建时间
+        # 过滤配置（参考 SAP CDS @Consumption.filter）
+        filterable: true
+        filter_type: date
+        filter_label: 创建时间
+        filter_placeholder: 选择创建时间范围
+        filter_scope: global
+      materialization:
+        strategy: redundant_storage
+        description: 冗余存储于业务表，未来可改为虚拟计算
+        sync_policy: write_through
+        index: true
+      ui:
+        visible: true
+        editable: false
+        widget: datetime
+        fieldGroup: 系统信息
+        i18n_key: common.field.created_at
+
+    - id: updated_at
+      name: 更新时间
+      type: datetime
+      db_column: updated_at
+      storage: virtual
+      description: 更新时间（从审计日志实时计算）
+      derive_from_object: audit_logs
+      derive_rule: "MAX(created_at_epoch) WHERE action = 'UPDATE'"
+      semantics:
+        meaning: 记录最后更新的时间戳
+        source_of_truth: audit_logs
+        derivation:
+          from: audit_logs
+          rule: "MAX(created_at_epoch) WHERE action = 'UPDATE'"
+          description: 最后一次更新操作的时间（Unix epoch 毫秒，从audit_logs实时计算，若无UPDATE则使用created_at）
+        # 过滤配置（参考 SAP CDS @Consumption.filter）
+        filterable: true
+        filter_type: date
+        filter_label: 更新时间
+        filter_placeholder: 选择更新时间范围
+        filter_scope: global
+      materialization:
+        strategy: virtual
+        description: 查询时通过子查询从audit_logs实时计算，不再物理存储
+      ui:
+        visible: true
+        editable: false
+        widget: datetime
+        fieldGroup: 系统信息
+        i18n_key: common.field.updated_at
+
+    - id: created_by
+      name: 创建人
+      type: string
+      db_column: created_by
+      description: 创建人用户名
+      semantics:
+        meaning: 记录创建操作的用户
+        source_of_truth: audit_logs
+        derivation:
+          from: audit_logs
+          rule: "user_name WHERE action = 'CREATE'"
+          description: 首次创建操作的用户
+        auto_fill:
+          on_create: $user.name
+        # 过滤配置（参考 SAP CDS @Consumption.filter）
+        filterable: true
+        filter_type: user
+        filter_label: 创建人
+        filter_placeholder: 输入创建人姓名
+        filter_scope: global
+        filter_operator: like
+      materialization:
+        strategy: redundant_storage
+        description: 冗余存储于业务表，未来可改为虚拟计算
+        sync_policy: write_through
+      ui:
+        visible: true
+        editable: false
+        widget: input
+        fieldGroup: 系统信息
+        i18n_key: common.field.created_by
+
+    - id: updated_by
+      name: 更新人
+      type: string
+      db_column: updated_by
+      description: 更新人用户名
+      semantics:
+        meaning: 记录最后更新操作的用户
+        source_of_truth: audit_logs
+        derivation:
+          from: audit_logs
+          rule: "user_name ORDER BY created_at DESC LIMIT 1 WHERE action IN ('CREATE', 'UPDATE')"
+          description: 最后一次创建或更新操作的用户
+        auto_fill:
+          on_create: $user.name
+          on_update: $user.name
+        # 过滤配置（参考 SAP CDS @Consumption.filter）
+        filterable: true
+        filter_type: user
+        filter_label: 更新人
+        filter_placeholder: 输入更新人姓名
+        filter_scope: global
+        filter_operator: like
+      materialization:
+        strategy: redundant_storage
+        description: 冗余存储于业务表，未来可改为虚拟计算
+        sync_policy: write_through
+      ui:
+        visible: true
+        editable: false
+        widget: input
+        fieldGroup: 系统信息
+        i18n_key: common.field.updated_by
+
+hierarchy_aspect:
+  description: 层级归属字段切面 - 版本和产品上下文
+  fields:
+    - id: version_id
+      name: 版本
+      type: integer
+      db_column: version_id
+      required: true
+      description: 所属版本
+      ui:
+        widget: select
+        relation: version
+        display_field: version_name
+      semantics:
+        meaning: 关联的产品版本
+        parent_key: true
+        readonly_always: true
+        context_field: true
+
+    - id: version_name
+      name: 版本
+      type: string
+      description: 所属版本名称
+      storage: virtual
+      ui:
+        visible: true
+        editable: false
+      semantics:
+        meaning: 关联版本的显示名称
+      redundancy:
+        type: virtual
+        source_field: version_id
+        derived_from: version.name
+        join_path:
+          - table: versions
+            from: version_id
+            to: id
+            select: name
+
+    - id: version_code
+      name: 版本编码
+      type: string
+      description: 所属版本编码（用于导入导出和快速输入）
+      storage: virtual
+      semantics:
+        meaning: 版本的业务键，用于导入导出和外键解析
+        business_key: false
+        import_visible: true
+        export_visible: true
+        import_order: 3
+        data_category: code
+        virtual: true
+      ui:
+        visible: true
+        editable: true
+        widget: input
+        fieldGroup: 层级归属
+        fieldGroupPosition: 15
+      redundancy:
+        type: virtual
+        source_field: version_id
+        derived_from: version.code
+        join_path:
+          - table: versions
+            from: version_id
+            to: id
+            select: code
+
+    - id: product_code
+      name: 产品编码
+      type: string
+      description: 所属产品编码
+      semantics:
+        meaning: 产品编码，用于跨环境数据迁移
+        business_key: true
+        import_order: 0
+        virtual: true
+        export_visible: false
+        import_visible: false
+      ui:
+        visible: false
+
+naming_aspect:
+  description: 命名字段切面 - 编码和名称
+  fields:
+    - id: code
+      name: 编码
+      type: string
+      db_column: code
+      description: 编码
+      semantics:
+        meaning: 唯一编码
+        business_key: true
+        immutable: true
+        pattern: "^[A-Z][A-Z0-9_]*$"
+        data_category: code
+        import_visible: true
+        export_visible: true
+        import_order: 2
+      ui:
+        visible: true
+        editable: true
+        widget: input
+        fieldGroup: 基本信息
+        fieldGroupPosition: 10
+
+    - id: name
+      name: 名称
+      type: string
+      db_column: name
+      description: 名称
+      semantics:
+        meaning: 显示名称
+        display_name: true
+        data_category: text
+        import_visible: true
+        export_visible: true
+        import_order: 20
+      ui:
+        visible: true
+        editable: true
+        widget: input
+        fieldGroup: 基本信息
+        fieldGroupPosition: 20
+
+owner_aspect:
+  description: 负责人字段切面（Spec v1.3 FR-010 Draft 模式通用化）
+  fields:
+    - id: owner_id
+      name: 负责人
+      type: integer
+      db_column: owner_id
+      description: 负责人ID
+      semantics:
+        meaning: 负责人，关联用户表
+        # 局部过滤配置（视图特定过滤）
+        filterable: true
+        filter_type: foreign_key
+        filter_label: 负责人
+        filter_placeholder: 选择负责人
+        filter_scope: local
+        filter_operator: eq
+      ui:
+        visible: true
+        editable: true
+        widget: select
+        relation: user
+        display_field: display_name
+        fieldGroup: 系统信息
+        i18n_key: common.field.owner_id
+    # ===== Spec v1.3 FR-010: 通用 visibility 字段 =====
+    - id: visibility
+      name: 可见性
+      type: string
+      db_column: visibility
+      default: draft
+      description: 可见性（public/draft/team）
+      semantics:
+        meaning: 记录可见性，draft 模式仅 owner 可见
+        filterable: true
+        filter_type: enum
+        filter_label: 可见性
+        filter_scope: local
+        filter_operator: eq
+        enum_values:
+          - value: public
+            label: 公开
+            color: success
+            description: 所有人可见
+          - value: draft
+            label: 草稿
+            color: warning
+            description: 仅负责人可见
+          - value: team
+            label: 团队
+            color: info
+            description: 团队成员可见
+      ui:
+        visible: true
+        editable: true
+        widget: radio
+        fieldGroup: 系统信息
+        i18n_key: common.field.visibility
+
+  # ===== Spec v1.3 FR-010: 通用 Draft 模式 scope =====
+  authorization:
+    check: true
+    scope: "visibility = 'public' OR owner_id = $user.id"
+    auto_owner: true
+    allow_transfer: true
+
+  # ===== Spec v1.3 FR-010: 转让与发布动作 =====
+  actions:
+    - id: publish
+      name: 发布
+      description: 将可见性从 draft 改为 public
+      from_states: [draft, team]
+      to_state: public
+      triggers: [before_update]
+      permission_required: [update]
+    - id: make_draft
+      name: 转草稿
+      description: 将可见性改回 draft
+      from_states: [public, team]
+      to_state: draft
+      permission_required: [update]
+    - id: transfer_owner
+      name: 转让负责人
+      description: 转让记录 owner
+      permission_required: [update]
+      audit:
+        log: true
+        fields: [owner_id, old_owner_id]

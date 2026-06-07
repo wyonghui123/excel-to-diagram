@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>CSS 变量测试</title>
+  <style>
+    :root {
+      /* 测试 CSS 变量是否定义 */
+      --test-orange: #ea580c;
+      --test-blue: #1677ff;
+    }
+    
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+    }
+    
+    .test-section {
+      margin: 20px 0;
+      padding: 15px;
+      border: 1px solid #ddd;
+    }
+    
+    .color-box {
+      display: inline-block;
+      width: 100px;
+      height: 50px;
+      text-align: center;
+      line-height: 50px;
+      margin: 5px;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <h1>CSS 变量测试</h1>
+  
+  <div class="test-section">
+    <h2>1. 直接颜色测试</h2>
+    <div class="color-box" style="background: #ea580c; color: white;">#ea580c 橙色</div>
+    <div class="color-box" style="background: #1677ff; color: white;">#1677ff 蓝色</div>
+  </div>
+  
+  <div class="test-section">
+    <h2>2. CSS 变量测试</h2>
+    <div class="color-box" style="background: var(--test-orange); color: white;">--test-orange</div>
+    <div class="color-box" style="background: var(--test-blue); color: white;">--test-blue</div>
+  </div>
+  
+  <div class="test-section">
+    <h2>3. el-color-primary 测试</h2>
+    <div class="color-box" style="background: var(--el-color-primary, #ea580c); color: white;">--el-color-primary</div>
+  </div>
+  
+  <div class="test-section">
+    <h2>4. 浏览器检查</h2>
+    <button onclick="checkCSS()">检查 CSS 变量值</button>
+    <pre id="output"></pre>
+  </div>
+  
+  <script>
+    function checkCSS() {
+      const vars = [
+        '--el-color-primary',
+        '--yonyou-orange-600',
+        '--color-primary'
+      ];
+      
+      let output = '';
+      for (const v of vars) {
+        const computed = getComputedStyle(document.documentElement).getPropertyValue(v);
+        output += `${v} = "${computed}"\n`;
+      }
+      document.getElementById('output').textContent = output;
+    }
+  </script>
+</body>
+</html>

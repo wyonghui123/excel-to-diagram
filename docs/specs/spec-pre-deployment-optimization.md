@@ -619,7 +619,8 @@ def create_app():
 ✅ FR-5.7: AppBuilder 构建的应用功能正常（server 启动 200 OK）
 ✅ FR-5.4: telemetry tracer 正常工作
 ✅ FR-5.2: server.py 仍可正常启动
-✅ 回归测试: python test.py --failed → 28 pre-existing errors, 无新回归
+✅ 回归测试 (2026-06-07 全量): --all 4930P/24F/8E/158S → --failed 17P/7F/0E/68S (ground truth)
+  └─ 7 失败全部 pre-existing（不动批次 2/3 改动文件）: 批次 1/2/3 零回归
 
 UI 验证（Vite dev server 构建问题已修复）：
 ✅ FR-6.1: 列表页加载后 fieldPolicies !== null（HTTP 200, 8/8 批次 3 文件 200 OK）

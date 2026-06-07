@@ -1,0 +1,51 @@
+# Pre-commit hooks for AI content protection
+# 自动阻止包含问题内容的代码被提交
+#
+# 安装: pre-commit install
+# 跳过: git commit --no-verify
+
+repos:
+  - repo: local
+    hooks:
+      # 1. AI 内容防护检查
+      - id: scan-ai-content
+        name: AI Content Protection (CRITICAL/HIGH)
+        entry: python d:/filework/scan_ai_content.py
+        language: system
+        pass_filenames: true
+        types_or: [python, javascript, typescript, vue, css, html]
+        stages: [pre-commit]
+
+      # 2. AI 内容防护严格模式（包含 MEDIUM）
+      - id: scan-ai-content-strict
+        name: AI Content Protection (Strict)
+        entry: python d:/filework/scan_ai_content.py --strict
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
+      # 3. 自动修复 + 提示
+      - id: fix-ai-content
+        name: Auto-fix AI Content (Dry Run)
+        entry: python d:/filework/fix_ai_content.py --dry-run --force
+        language: system
+        pass_filenames: true
+        stages: [manual]
+
+      # 4. 编码检查（防止 GBK 文件混入）
+      - id: check-encoding
+        name: Check File Encoding (UTF-8)
+        entry: python d:/filework/check_encoding.py
+        language: system
+        pass_filenames: true
+        stages: [pre-commit]
+
+      # 5. 规范文件 Emoji 检查
+      - id: scan-rules-emoji
+        name: Scan Rules Emoji
+        entry: python d:/filework/scan_ai_content.py d:/filework/excel-to-diagram/.trae/rules/
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

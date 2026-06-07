@@ -1,0 +1,263 @@
+# ============================================
+# 业务对象元模型模板
+# 
+# 使用说明：
+# 1. 复制此文件到 meta/schemas/ 目录
+# 2. 重命名为 your_object.yaml
+# 3. 修改 id, name, table_name
+# 4. 根据业务需求修改 fields
+# 5. 配置 detail.tabs 和 associations
+# 6. 重启后端服务
+#
+# 遵循 YAML 单一事实原则：
+# - 只配置例外情况
+# - 默认值由后端智能推导
+# ============================================
+
+id: new_object
+name: 新对象
+table_name: new_objects
+description: 新对象描述
+
+# 语义配置
+semantics:
+  meaning: 业务含义
+  category: system_entity
+  business_key: [code]
+
+# 删除策略
+deletion_policy:
+  mode: restrict
+  cascade_delete: []
+
+# 审计配置
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+
+# ============================================
+# 字段定义
+# ============================================
+fields:
+  # 系统字段（自动只读、隐藏）
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+
+  # 业务键字段（自动只读）
+  - id: code
+    name: 编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 50
+    description: 对象唯一编码
+    semantics:
+      business_key: true
+
+  # 名称字段（必填）
+  - id: name
+    name: 名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 对象显示名称
+    semantics:
+      display_name: true
+
+  # 描述字段（可选）
+  - id: description
+    name: 描述
+    type: string
+    db_column: description
+    max_length: 500
+    nullable: true
+
+  # 审计字段（自动隐藏、只读）
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    semantics:
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    semantics:
+      audit_field: true
+
+# ============================================
+# 关联定义（如有）
+# ============================================
+associations:
+  # 示例：成员关联
+  # members:
+  #   name: 成员
+  #   label: 成员
+  #   plural_label: 成员列表
+  #   target_type: user
+  #   type: many_to_many
+  #   through: table_a_b
+  #   source_key: a_id
+  #   target_key: b_id
+  #   display:
+  #     label: 成员
+  #     target_display_field: display_name
+  #   actions:
+  #     assign:
+  #       name: add_member
+  #       label: 添加成员
+  #     unassign:
+  #       name: remove_member
+  #       label: 移除成员
+
+# ============================================
+# 索引定义
+# ============================================
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_code
+
+# ============================================
+# UI 视图配置
+# ============================================
+ui_view_config:
+  skip_auto_menu: true
+  showChangeHistory: true
+
+  # 列表视图配置
+  list:
+    title: 新对象管理
+    description: 新对象列表
+    
+    columns:
+      - field: code
+        width: 120
+        sortable: true
+      - field: name
+        width: 180
+        sortable: true
+      - field: description
+        width: 250
+        type: ellipsis
+    
+    selection:
+      enabled: true
+      mode: multiple
+    
+    searchFields:
+      - name
+      - code
+    
+    actions:
+      - id: create
+        label: 新建
+        icon: plus
+        type: primary
+        permission: new_object:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    
+    batch_actions:
+      - id: batch_delete
+        label: 批量删除
+        icon: delete
+        type: danger
+        permission: new_object:delete
+
+  # 表单视图配置
+  form:
+    title: 新对象信息
+    layout: vertical
+    
+    groups:
+      - id: basic
+        label: 基本信息
+        columns: 2
+        fields:
+          - code
+          - name
+      
+      - id: extra
+        label: 其他信息
+        columns: 1
+        fields:
+          - description
+    
+    fields:
+      code:
+        placeholder: 请输入编码
+        required: true
+        hint: 唯一标识，创建后不可修改
+      name:
+        placeholder: 请输入名称
+        required: true
+      description:
+        widget: textarea
+        rows: 3
+        placeholder: 请输入描述
+
+  # 详情视图配置
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - code
+          - name
+          - description
+      
+      # 示例：关联面板
+      # - id: members
+      #   label: 成员
+      #   type: association
+      #   association: members
+      #   actions:
+      #     - assign
+      #     - unassign
+
+# ============================================
+# 权限配置
+# ============================================
+category_config:
+  create_permission: new_object:create
+  update_permission: new_object:update
+  delete_permission: new_object:delete
+  owner_auto_permission: false
+
+# ============================================
+# 导入导出配置
+# ============================================
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: code

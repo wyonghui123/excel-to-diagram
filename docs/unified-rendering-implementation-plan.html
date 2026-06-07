@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>分组模型统一渲染 - 安全分步执行方案</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Microsoft YaHei','Segoe UI',sans-serif;background:#f0f2f5;padding:24px;color:#2c3e50;line-height:1.7}
+h1{text-align:center;margin-bottom:6px;color:#1a1a2e;font-size:26px}
+h2{font-size:20px;color:#2c3e50;margin:28px 0 14px;padding-bottom:8px;border-bottom:3px solid #2c3e50}
+h3{font-size:16px;color:#34495e;margin:20px 0 10px;padding-left:12px;border-left:4px solid #3498db}
+h4{font-size:14px;color:#555;margin:14px 0 8px}
+.subtitle{text-align:center;color:#7f8c8d;margin-bottom:28px;font-size:14px}
+.container{max-width:1900px;margin:0 auto}
+.section{background:white;border-radius:12px;padding:28px;margin-bottom:24px;box-shadow:0 2px 12px rgba(0,0,0,0.06)}
+.data-table{width:100%;border-collapse:collapse;margin:12px 0;font-size:12px}
+.data-table th{background:#2c3e50;color:white;padding:10px 14px;text-align:left;font-size:13px}
+.data-table td{padding:8px 14px;border-bottom:1px solid #eee;vertical-align:top}
+.data-table tr:hover td{background:#f0f7ff}
+.iface{border:2px solid #2980b9;border-radius:8px;padding:14px;margin:10px 0;background:#f0f7ff}
+.iface .title{font-weight:bold;color:#2980b9;margin-bottom:8px;font-size:13px}
+.iface pre{font-size:11px;background:white;padding:10px;border-radius:4px;margin:0;white-space:pre-wrap;line-height:1.5}
+.warn{background:#fff8e1;border:2px solid #ffc107;border-radius:8px;padding:12px;margin:10px 0;font-size:12px}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:bold;color:white;margin:0 2px}
+.badge-safe{background:#27ae60}
+.badge-caution{background:#f39c12}
+.badge-risk{background:#e74c3c}
+.badge-add{background:#27ae60}
+.badge-mod{background:#e67e22}
+.badge-del{background:#e74c3c}
+.badge-verify{background:#2980b9}
+.conclusion-box{background:#f0f7ff;border:2px solid #2980b9;border-radius:10px;padding:20px;margin:16px 0}
+.conclusion-box p{font-size:13px;line-height:1.8;color:#555;margin-top:10px}
+.conclusion-box p:first-child{margin-top:0}
+.phase-box{border-left:4px solid;border-radius:0 10px 10px 0;padding:18px 20px;margin:16px 0}
+.phase-0{border-color:#95a5a6;background:#f8f9fa}
+.phase-1{border-color:#e74c3c;background:#fef5f5}
+.phase-2{border-color:#e67e22;background:#fef9f0}
+.phase-3{border-color:#f39c12;background:#fefbf0}
+.phase-4{border-color:#27ae60;background:#f0faf0}
+.phase-5{border-color:#2980b9;background:#f0f7ff}
+.step{margin:8px 0;padding:10px 14px;border-radius:6px;font-size:13px;background:white;border:1px solid #eee}
+.step-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.step-num{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;color:white;font-size:11px;font-weight:bold;flex-shrink:0}
+.step-file{font-family:'Consolas',monospace;font-size:11px;color:#c0392b;background:#f0f0f0;padding:1px 4px;border-radius:3px}
+.step-action{font-size:11px;padding:2px 6px;border-radius:4px;color:white}
+.verify-box{background:#eaf2f8;border:2px solid #2980b9;border-radius:8px;padding:12px;margin:10px 0;font-size:12px}
+.verify-box strong{color:#2980b9}
+.rollback-box{background:#fef5f5;border:2px solid #e74c3c;border-radius:8px;padding:12px;margin:10px 0;font-size:12px}
+.rollback-box strong{color:#e74c3c}
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>分组模型统一渲染 — 安全分步执行方案</h1>
+<div class="subtitle">6个Phase · 18个Step · 每步可验证 · 每步可回滚</div>
+
+<!-- ============================================================ -->
+<div class="section">
+<h2>安全原则</h2>
+
+<div class="conclusion-box">
+<p style="font-size:14px;line-height:1.8;color:#2c3e50;">
+<strong>三条铁律：</strong>
+</p>
+<ul style="font-size:13px;line-height:1.8;color:#555;margin-top:6px;padding-left:20px;">
+<li><strong>增量式变更：</strong>每一步只做一件事，新增代码不删除旧代码，新旧并行运行</li>
+<li><strong>对比验证：</strong>每一步完成后，新旧路径输出必须一致，否则不进入下一步</li>
+<li><strong>即时回滚：</strong>每一步都有明确的回滚方法，回滚只需删除新增代码、恢复旧代码</li>
+</ul>
+</div>
+</div>
+
+<!-- ============================================================ -->
+<div class="phase-box phase-0">
+<h2>Phase 0: 基线建立（不修改任何代码）</h2>
+
+<div class="step">
+<div class="step-head">
+<span class="step-num" style="background:#95a5a6">0.1</span>
+<strong>录制当前渲染输出基线</strong>
+</div>
+<p>操作：分别对BO图和SM图，在以下场景截图并保存Mermaid代码输出：</p>
+<ul style="font-size:12px;padding-left:16px;margin-top:4px;">
+<li>场景A：无中心范围选择，默认配色</li>
+<li>场景B：选择中心范围（5个BO），按领域配色</li>
+<li>场景C：选择中心范围，按子领域配色</li>
+<li>场景D：选择中心范围，按服务模块配色</li>
+<li>场景E：禁用某个分组后</li>
+</ul>
+<p style="font-size:12px;color:#7f8c8d;margin-top:4px;">目的：后续每一步的输出都与此基线对比，确保不引入回归</p>
+</div>
+
+<div class="step">
+<div class="step-head">
+<span class="step-num" style="background:#95a5a6">0.2</span>
+<strong>添加feature flag</strong>
+<span class="badge badge-safe">安全</span>
+</div>
+<p>文件：<span class="step-file">diagramConfigStore.js</span></p>
+<p>操作：在store中新增 <code>useUnifiedRenderer: false</code> 字段</p>
+<p style="font-size:12px;color:#27ae60;margin-top:4px;">安全性：新增字段，默认false，不影响任何现有逻辑</p>
+</div>
+
+<div class="verify-box">
+<strong>[DECORATIVE] 验证：</strong>应用正常启动，所有功能不受影响，<code>configStore.useUnifiedRenderer === false</code>
+</div>
+</div>
+
+<!-- ============================================================ -->
+<div class="phase-box phase-1">
+<h2>Phase 1: GroupModel增强 — 补充渲染信息（纯新增，不修改现有逻辑）</h2>
+
+<div class="step">
+<div class="step-head">
+<span class="step-num" style="background:#e74c3c">1.1</span>
+<strong>Group类型增加渲染字段</strong>
+<span class="step-action" style="background:#27ae60">新增</span>
+</div>
+<p>文件：<span class="step-file">groupModel/types.js</span></p>
+<p>操作：在createGroup函数中，为返回的Group对象增加可选字段：</p>
+<pre style="font-size:11px;background:#f8f9fa;padding:8px;border-radius:4px;margin-top:4px;">// 新增字段（默认值，不影响现有逻辑）
+color: null,              // 容器背景色 / 节点填充色
+textColor: null,          // 节点文字颜色
+isCenter: false,          // 是否中心范围（已有，确保默认值正确）
+annotationCategory: 'info',
+annotationContent: ''</pre>
+<p style="font-size:12px;color:#27ae60;margin-top:4px;">安全性：新增可选字段，默认null/false，不影响任何使用Group的现有代码</p>
+</div>
+
+<div class="step">
+<div class="step-head">
+<span class="step-num" style="background:#e74c3c">1.2</span>
+<strong>新建enrichGroupModel函数</strong>
+<span class="step-action" style="background:#27ae60">新增</span>
+</div>
+<p>文件：<span class="step-file">groupModel/enrichGroupModel.js</span>（新文件）</p>
+<p>操作：创建enrichGroupModel函数，为GroupModel树补充颜色和标注信息：</p>
+<pre style="font-size:11px;background:#f8f9fa;padding:8px;border-radius:4px;margin-top:4px;">export function enrichGroupModel(groupModel, chartType, options) {
+  const { colorMap, centerCodes, annotationMap, nodeTextColor } = options
+  
+  function enrichGroup(groupId) {
+    const group = groupModel.getById(groupId)
+    if (!group) return
+    
+    const isTerminal = isTerminalGroup(group, chartType)
+    
+    if (isTerminal) {
+      const code = group.elementRef?.code
+      if (code) {
+        group.color = colorMap.get(code) || null
+        group.textColor = nodeTextColor || 'black'
+        group.isCenter = centerCodes.has(code)
+        const annotation = annotationMap.get(code)
+        if (annotation) {
+          group.annotationCategory = annotation.category || 'info'
+          group.annotationContent = annotation.content || ''
+        }
+      }
+    } else {
+      // 容器颜色：使用分组层级对应的颜色
+      // domain级用domainColors，subDomain级用subDomainColors
+      group.color = options.containerColorMap?.get(group.id) || null
+    }
+    
+    // 递归处理子分组
+    const children = groupModel.getChildren(groupId)
+    children.forEach(child => enrichGroup(child.id))
+  }
+  
+  // 从根分组开始
+  groupModel.getRootGroups().forEach(root => enrichGroup(root.id))
+}</pre>
+<p style="font-size:12px;color:#27ae60;margin-top:4px;">安全性：新文件，不修改任何现有代码，不调用此函数则无影响</p>
+</div>
+
+<div class="step">
+<div class="step-head">
+<span class="step-num" style="background:#e74c3c">1.3</span>
+<strong>新建ColorCalculator</strong>
+<span class="step-action" style="background:#27ae60">新增</span>
+</div>
+<p>文件：<span class="step-file">groupModel/ColorCalculator.js</span>（新文件）</p>
+<p>操作：创建统一的颜色计算器，输出 colorMap（code→color 映射）：</p>
+<pre style="font-size:11px;background:#f8f9fa;padding:8px;border-radius:4px;margin-top:4px;">export class ColorCalculator {
+  static compute(config) {
+    const { nodes, colorGroupBy, colorScheme, centerScopeColor, customColors } = config
+    const colors = COLOR_SCHEMES[colorScheme] || COLOR_SCHEMES.default
+    const colorMap = new Map()
+    
+    // 1. 按colorGroupBy分组
+    const groupKeys = new Map()
+    nodes.forEach(node => {
+      const key = colorGroupBy === 'subDomain' ? node.subDomain
+                : colorGroupBy === 'serviceModule' ? node.serviceModule
+                : node.domain
+      groupKeys.set(node.code, key)
+    })
+    
+    // 2. 为每个分组分配颜色
+    const uniqueGroups = [...new Set(groupKeys.values())]
+    const groupColorMap = new Map()
+    uniqueGroups.forEach((group, index) => {
+      groupColorMap.set(group, customColors[group] || colors[index % colors.length])
+    })
+    
+    // 3. 逐节点计算最终颜色
+    nodes.forEach(node => {
+      const baseColor = groupColorMap.get(groupKeys.get(node.code)) || colors[0]
+      const finalColor = node.isCenter ? centerScopeColor : baseColor
+      colorMap.set(node.code, finalColor)
+    })
+    
+    return { colorMap, groupColorMap }
+  }
+}</pre>
+<p style="font-size:12px;color:#27ae60;margin-top:4px;">安全性：新文件，不修改任何现有代码</p>
+</div>
+
+<div class="step">
+<div class="step-head">
+<span class="step-num" style="background:#e74c3c">1.4</span>
+<strong>新建UnifiedRenderer</strong>
+<span class="step-action" style="background:#27ae60">新增</span>
+</div>
+<p>文件：<span class="step-file">groupModel/UnifiedRenderer.js</span>（新文件）</p>
+<p>操作：创建统一渲染器，从enrichedGroupModel生成Mermaid代码：</p>
+<pre style="font-size:11px;background:#f8f9fa;padding:8px;border-radius:4px;margin-top:4px;">export class UnifiedRenderer {
+  static render(groupModel, links, chartType, options) {
+    const rootGroups = groupModel.getRootGroups()
+    const nodeIdMap = buildNodeIdMap(rootGroups, chartType)
+    
+    let code = options.layoutEngine === 'elk' 
+      ? 'flowchart-elk LR\n' : 'flowchart LR\n'
+    
+    // 1. 递归渲染分组树
+    rootGroups.forEach(group => {
+      code += this.renderGroup(group, groupModel, chartType, nodeIdMap, 0)
+    })
+    
+    // 2. 渲染连线
+    links.forEach(link => {
+      const sourceId = nodeIdMap.codeToIdMap.get(link.source)
+      const targetId = nodeIdMap.codeToIdMap.get(link.target)
+      if (sourceId && targetId) {
+        code += `  ${sourceId} --> ${targetId}\n`
+      }
+    })
+    
+    // 3. 渲染样式
+    rootGroups.forEach(group => {
+      code += this.renderStyles(group, groupModel, chartType)
+    })
+    
+    return code
+  }
+  
+  static renderGroup(group, groupModel, chartType, nodeIdMap, depth) {
+    const isTerminal = isTerminalGroup(group, chartType)
+    let code = ''
+    
+    if (isTerminal) {
+      const displayText = group.elementRef?.code 
+        ? `${group.title}\\n(${group.elementRef.code})` 
+        : group.title
+      const centerMark = group.isCenter ? '◆ ' : ''
+      code += `${'  '.repeat(depth + 1)}${group.id}["${centerMark}${displayText}"]\n`
+    } else {
+      code += `${'  '.repeat(depth + 1)}subgraph ${group.id}["${group.title}"]\n`
+      code += `${'  '.repeat(depth + 2)}direction ${group.layout?.direction || 'TB'}\n`
+      
+      const children = groupModel.getChildren(group.id)
+      children.forEach(child => {
+        code += this.renderGroup(child, groupModel, chartType, nodeIdMap, depth + 1)
+      })
+      
+      code += `${'  '.repeat(depth + 1)}end\n`
+    }
+    
+    return code
+  }
+  
+  static renderStyles(group, groupModel, chartType) {
+    const isTerminal = isTerminalGroup(group, chartType)
+    let code = ''
+    
+    if (isTerminal && group.color) {
+      code += `  style ${group.id} fill:${group.color},color:${group.textColor || 'black'}\n`
+    } else if (!isTerminal && group.color) {
+      code += `  style ${group.id} fill:${group.color},stroke:#999\n`
+    }
+    
+    const children = groupModel.getChildren(group.id)
+    children.forEach(child => {
+      code += this.renderStyles(child, groupModel, chartType)
+    })
+    
+    return code
+  }
+}</pre>
+<p style="font-size:12px;color:#27ae60;margin-top:4px;">安全性：新文件，不修改任何现有代码，不调用则无影响</p>
+</div>
+
+<div class="verify-box">
+<strong>[DECORATIVE] 验证：</strong>应用正常启动，所有功能不受影响。新文件存在但未被调用，feature flag仍为false。
+</div>
+
+<div class="rollback-box">
+<strong>↩ 回滚：</strong>删除4个新文件（enrichGroupModel.js、ColorCalculator.js、UnifiedRenderer.js）和types.js中新增的字段。
+</div>
+</div>
+
+<!-- ============================================================ -->
+<div class="phase-box phase-2">
+<h2>Phase 2: SM图接入统一渲染（先验证简单场景）</h2>
+
+<div class="step">
+<div class="step-head">
+<span class="step-num" style="background:#e67e22">2.1</span>
+<strong>generateDiagram中SM分支：调用enrichGroupModel</strong>
+<span class="step-action" style="background:#e67e22">修改</span>
+</div>
+<p>文件：<span class="step-file">useDiagramData.js</span> generateDiagram() SM分支</p>
+<p>操作：在现有的GroupModel构建完成后，调用enrichGroupModel补充颜色信息：</p>
+<pre style="font-size:11px;background:#f8f9fa;padding:8px;border-radius:4px;margin-top:4px;">// 现有代码（保留）：
+const groupModel = GroupModel.fromUserConfig(architectureGroups, userConfig, ChartType.SERVICE_MODULE)
+const mermaidConfig = groupModel.toMermaidConfig()
+
+// [DECORATIVE] 新增代码（在mermaidConfig之后）：
+if (configStore.useUnifiedRenderer) {
+  // 计算颜色
+  const colorResult = ColorCalculator.compute({
+    nodes: finalFilteredServiceModules.map(sm => ({
+      code: sm.code, domain: sm.domain, subDomain: sm.subDomain, isCenter: sm.isCenter
+    })),
+    colorGroupBy: diagramConfig.value.colorGroupBy,
+    colorScheme: diagramConfig.value.colorScheme,
+    centerScopeColor: diagramConfig.value.centerScopeColor,
+    customColors: diagramConfig.value.customColors || {}
+  })
+  
+  // 构建标注映射
+  const annotationMap = new Map()
+  finalFilteredServiceModules.forEach(sm => {
+    if (sm.annotationContent) {
+      annotationMap.set(sm.code, { category: sm.annotationCategory, content: sm.annotationContent })
+    }
+  })
+  
+  // 增强GroupModel
+  enrichGroupModel(groupModel, ChartType.SERVICE_MODULE, {
+    colorMap: colorResult.colorMap,
+    containerColorMap: colorResult.groupColorMap,
+    centerCodes: new Set(centerServiceModuleCodes),
+    annotationMap,
+    nodeTextColor: diagramConfig.value.nodeTextColor
+  })
+  
+  // 使用统一渲染器生成Mermaid代码
+  const links = filteredServiceModuleRelationships.map(rel => ({
+    source: rel.sourceServiceModuleCode,
+    target: rel.targetServiceModuleCode,
+    label: rel.serviceRelationshipCode,
+    tooltip: `关系编码: ${rel.serviceRelationshipCode}`,
+    relationCode: rel.serviceRelationshipCode,
+    annotationCategory: rel.annotationCategory || 'info',
+    annotationContent: rel.annotationContent || ''
+  }))
+  
+  const mermaidCode = UnifiedRenderer.render(
+    groupModel, links, ChartType.SERVICE_MODULE,
+    { layoutEngine: diagramConfig.value.layoutEngine }
+  )
+  
+  // 对比输出（调试用，验证后删除）
+  console.log('[UnifiedRenderer] SM mermaid code length:', mermaidCode.length)
+  
+  // 构建diagramData（兼容旧结构，同时包含新渲染结果）
+  diagramData.value = {
+    ...buildServiceModuleDiagramData({ /* 现有参数不变 */ }),
+    _unifiedMermaidCode: mermaidCode  // 新增字段，不影响旧渲染
+  }
+}
+
+// 现有代码（保留）：
+diagramData.value = buildServiceModuleDiagramData({ /* 现有参数不变 */ })</pre>
+<p style="font-size:12px;color:#f39c12;margin-top:4px;">注意：此时feature flag为false，新代码不会执行，不影响现有功能</p>
+</div>
+
+<div class="step">
+<div class="step-head">
+<span class="step-num" style="background:#e67e22">2.2</span>
+<strong>开启feature flag，对比SM图输出</strong>
+<span class="badge badge-caution">需验证</span>
+</div>
+<p>操作：在浏览器控制台执行 <code>configStore.useUnifiedRenderer = true</code>，然后触发SM图重新生成</p>
+<p>验证步骤：</p>
+<ol style="font-size:12px;padding-left:16px;margin-top:4px;">
+<li>对比控制台中 <code>[UnifiedRenderer]</code> 输出的Mermaid代码长度与旧渲染器输出</li>
+<li>对比SM图渲染结果与Phase 0基线截图</li>
+<li>检查节点颜色是否与旧渲染一致</li>
+<li>检查连线是否正确</li>
+<li>检查分组嵌套是否正确（2层：领域→子领域→SM节点）</li>
+</ol>
+</div>
+
+<div class="step">
+<div class="step-head">
+<span class="step-num" style="background:#e67e22">2.3</span>
+<strong>修复SM图统一渲染的差异</strong>
+<span class="badge badge-caution">按需</span>
+</div>
+<p>操作：根据2.2的对比结果，调整UnifiedRenderer的渲染逻辑，直到输出与旧渲染器一致</p>
+<p>可能需要调整的点：</p>
+<ul style="font-size:12px;padding-left:16px;margin-top:4px;">
+<li>节点ID格式（group.id vs sm.code）</li>
+<li>subgraph标题格式</li>
+<li>连线样式</li>
+<li>容器背景色</li>
+<li>节点显示格式（名称+编码）</li>
+</ul>
+</div>
+
+<div class="verify-box">
+<strong>[DECORATIVE] 验证：</strong>SM图在feature flag开启时，渲染结果与旧渲染器完全一致（5个场景截图对比）
+</div>
+
+<div class="rollback-box">
+<strong>↩ 回滚：</strong>将feature flag设为false即可恢复旧渲染器。无需修改代码。
+</div>
+</div>
+
+<!-- ============================================================ -->
+<div class="phase-box phase-3">
+<h2>Phase 3: BO图接入统一渲染（验证复杂场景）</h2>
+
+<div class="step">
+<div class="step-head">
+<span class="step-num" style="background:#f39c12">3.1</span>
+<strong>generateDiagram中BO分支：调用enrichGroupModel</strong>
+<span class="step-action" style="background:#e67e22">修改</span>
+</div>
+<p>文件：<span class="step-file">useDiagramData.js</span> generateDiagram() BO分支</p>
+<p>操作：与Phase 2类似，在BO分支中增加统一渲染路径：</p>
+<pre style="font-size:11px;background:#f8f9fa;padding:8px;border-radius:4px;margin-top:4px;">// 现有代码（保留）：
+const groupModel = GroupModel.fromUserConfig(architectureGroups, userConfig, ChartType.BUSINESS_OBJECT)
+const layoutControlConfig = groupModel.toMermaidConfig()
+
+// [DECORATIVE] 新增代码：
+if (configStore.useUnifiedRenderer) {
+  // 计算颜色（BO节点）
+  const colorResult = ColorCalculator.compute({
+    nodes: filteredBusinessObjects.map(bo => ({
+      code: bo.code, domain: bo.domain, subDomain: bo.subDomain,
+      serviceModule: bo.serviceModule, isCenter: bo.isCenter
+    })),
+    colorGroupBy: diagramConfig.value.colorGroupBy,
+    colorScheme: diagramConfig.value.colorScheme,
+    centerScopeColor: diagramConfig.value.centerScopeColor,
+    customColors: diagramConfig.value.customColors || {}
+  })
+  
+  // 构建标注映射
+  const annotationMap = new Map()
+  filteredBusinessObjects.forEach(bo => {
+    if (bo.annotationContent) {
+      annotationMap.set(bo.code, { category: bo.annotationCategory, content: bo.annotationContent })
+    }
+  })
+  
+  // 增强GroupModel
+  enrichGroupModel(groupModel, ChartType.BUSINESS_OBJECT, {
+    colorMap: colorResult.colorMap,
+    containerColorMap: colorResult.groupColorMap,
+    centerCodes: new Set(centerScope.value || []),
+    annotationMap,
+    nodeTextColor: diagramConfig.value.nodeTextColor
+  })
+  
+  // 构建连线
+  const links = finalRelationships.map(rel => ({
+    source: rel.sourceCode,
+    target: rel.targetCode,
+    label: rel.relationDesc,
+    relationCode: rel.relationCode,
+    annotationCategory: rel.annotationCategory || 'info',
+    annotationContent: rel.annotationContent || ''
+  }))
+  
+  const mermaidCode = UnifiedRenderer.render(
+    groupModel, links, ChartType.BUSINESS_OBJECT,
+    { layoutEngine: diagramConfig.value.layoutEngine }
+  )
+  
+  diagramData.value = {
+    ...buildDiagramData({ /* 现有参数不变 */ }),
+    _unifiedMermaidCode: mermaidCode
+  }
+}
+
+// 现有代码（保留）：
+diagramData.value = buildDiagramData({ /* 现有参数不变 */ })</pre>
+</div>
+
+<div class="step">
+<div class="step-head">
+<span class="step-num" style="background:#f39c12">3.2</span>
+<strong>对比BO图输出，修复差异</strong>
+<span class="badge badge-caution">需验证</span>
+</div>
+<p>操作：与Phase 2.2相同，对比5个场景的渲染结果</p>
+<p>BO图比SM图复杂（3层嵌套 vs 2层），可能需要更多调整：</p>
+<ul style="font-size:12px;padding-left:16px;margin-top:4px;">
+<li>3层subgraph嵌套的正确缩进</li>
+<li>BO节点的id格式（当前用name，统一后用code）</li>
+<li>连线source/target的映射（当前用name，统一后用code）</li>
+<li>连线颜色计算（BO图有基于源/目标节点颜色的连线颜色逻辑）</li>
+<li>节点大小自适应（preCalculateNodeSizes）</li>
+</ul>
+</div>
+
+<div class="step">
+<div class="step-head">
+<span class="step-num" style="background:#f39c12">3.3</span>
+<strong>BO图节点id统一为code</strong>
+<span class="badge badge-risk">关键变更</span>
+</div>
+<p>操作：确认UnifiedRenderer使用code作为节点id后，修改连线映射逻辑</p>
+<p>关键点：当前BO图节点id=bo.name，连线source/target=sourceName/targetName。统一后id=bo.code，连线source/target=sourceCode/targetCode。</p>
+<p style="font-size:12px;color:#e74c3c;margin-top:4px;">风险：这是最大的变更点，影响Mermaid节点引用。但只在feature flag开启时生效。</p>
+</div>
+
+<div class="verify-box">
+<strong>[DECORATIVE] 验证：</strong>BO图和SM图在feature flag开启时，渲染结果与旧渲染器完全一致
+</div>
+
+<div class="rollback-box">
+<strong>↩ 回滚：</strong>将feature flag设为false即可恢复旧渲染器。
+</div>
+</div>
+
+<!-- ============================================================ -->
+<div class="phase-box phase-4">
+<h2>Phase 4: 切换默认渲染器（feature flag默认开启）</h2>
+
+<div class="step">
+<div class="step-head">
+<span class="step-num" style="background:#27ae60">4.1</span>
+<strong>feature flag默认值改为true</strong>
+<span class="step-action" style="background:#e67e22">修改</span>
+</div>
+<p>文件：<span class="step-file">diagramConfigStore.js</span></p>
+<p>操作：将 <code>useUnifiedRenderer: false</code> 改为 <code>useUnifiedRenderer: true</code></p>
+<p style="font-size:12px;color:#27ae60;margin-top:4px;">前提：Phase 2和Phase 3的验证已全部通过</p>
+</div>
+
+<div class="step">
+<div class="step-head">
+<span class="step-num" style="background:#27ae60">4.2</span>
+<strong>全面回归测试</strong>
+<span class="badge badge-verify">必须</span>
+</div>
+<p>操作：对所有场景进行全面测试：</p>
+<ul style="font-size:12px;padding-left:16px;margin-top:4px;">
+<li>BO图：5个场景（Phase 0基线）</li>
+<li>SM图：5个场景（Phase 0基线）</li>
+<li>切换图表类型后重新生成</li>
+<li>修改中心范围后重新生成</li>
+<li>修改配色方案后重新生成</li>
+<li>禁用/启用分组后重新生成</li>
+<li>自动分组功能</li>
+<li>配置页面颜色与图表颜色一致性</li>
+</ul>
+</div>
+
+<div class="step">
+<div class="step-head">
+<span class="step-num" style="background:#27ae60">4.3</span>
+<strong>保留旧渲染器作为fallback</strong>
+<span class="badge badge-safe">安全</span>
+</div>
+<p>操作：保留旧渲染代码，通过feature flag可以随时切回。在store中增加 <code>fallbackToLegacyRenderer()</code> 方法。</p>
+</div>
+
+<div class="verify-box">
+<strong>[DECORATIVE] 验证：</strong>默认使用统一渲染器，所有功能正常。可通过feature flag切回旧渲染器。
+</div>
+
+<div class="rollback-box">
+<strong>↩ 回滚：</strong>将feature flag改回false，或调用fallbackToLegacyRenderer()。
+</div>
+</div>
+
+<!-- ============================================================ -->
+<div class="phase-box phase-5">
+<h2>Phase 5: 清理旧代码（确认稳定后执行）</h2>
+
+<div class="step">
+<div class="step-head">
+<span class="step-num" style="background:#2980b9">5.1</span>
+<strong>删除旧渲染器文件</strong>
+<span class="step-action" style="background:#e74c3c">删除</span>
+</div>
+<p>操作：确认统一渲染器稳定运行后（建议至少2周无问题），删除以下文件：</p>
+<ul style="font-size:12px;padding-left:16px;margin-top:4px;">
+<li><span class="step-file">diagramDataBuilder.js</span> — 被UnifiedRenderer替代</li>
+<li><span class="step-file">serviceModuleDiagramBuilder.js</span> — 被UnifiedRenderer替代</li>
+<li><span class="step-file">useBusinessObjectSyntax.js</span> — 被UnifiedRenderer替代</li>
+<li><span class="step-file">useServiceModuleSyntax.js</span> — 被UnifiedRenderer替代</li>
+<li><span class="step-file">useMermaidColors.js</span> — 被ColorCalculator替代</li>
+</ul>
+</div>
+
+<div class="step">
+<div class="step-head">
+<span class="step-num" style="background:#2980b9">5.2</span>
+<strong>清理useDiagramData.js</strong>
+<span class="step-action" style="background:#e67e22">修改</span>
+</div>
+<p>操作：</p>
+<ul style="font-size:12px;padding-left:16px;margin-top:4px;">
+<li>移除if/else分支中的旧渲染路径</li>
+<li>移除buildDiagramData和buildServiceModuleDiagramData的import</li>
+<li>移除computedServiceModuleRelations函数（移入独立模块或保留）</li>
+<li>简化generateDiagram()为统一路径</li>
+</ul>
+</div>
+
+<div class="step">
+<div class="step-head">
+<span class="step-num" style="background:#2980b9">5.3</span>
+<strong>移除feature flag</strong>
+<span class="step-action" style="background:#e74c3c">删除</span>
+</div>
+<p>操作：从diagramConfigStore中移除useUnifiedRenderer字段</p>
+</div>
+
+<div class="step">
+<div class="step-head">
+<span class="step-num" style="background:#2980b9">5.4</span>
+<strong>清理调试日志</strong>
+<span class="step-action" style="background:#e67e22">修改</span>
+</div>
+<p>操作：移除GroupModel.js、useDiagramData.js等文件中的console.log调试语句</p>
+</div>
+
+<div class="verify-box">
+<strong>[DECORATIVE] 最终验证：</strong>应用功能完整，代码量减少约1450行，无旧渲染器残留。
+</div>
+</div>
+
+<!-- ============================================================ -->
+<div class="section">
+<h2>风险矩阵与应对策略</h2>
+
+<table class="data-table">
+    <tr><th>风险</th><th>等级</th><th>影响</th><th>应对</th><th>所在Phase</th></tr>
+    <tr>
+        <td>BO图节点id从name改为code导致Mermaid引用断裂</td>
+        <td><span class="badge badge-risk">高</span></td>
+        <td>BO图节点和连线无法正确渲染</td>
+        <td>Phase 3.3重点验证；feature flag可即时回滚；nodeIdMap提供code→id映射</td>
+        <td>Phase 3</td>
+    </tr>
+    <tr>
+        <td>3层嵌套subgraph缩进错误</td>
+        <td><span class="badge badge-caution">中</span></td>
+        <td>Mermaid解析失败</td>
+        <td>Phase 3.2对比输出；Mermaid语法对缩进不敏感，风险较低</td>
+        <td>Phase 3</td>
+    </tr>
+    <tr>
+        <td>连线颜色逻辑缺失（BO图有，SM图无）</td>
+        <td><span class="badge badge-caution">中</span></td>
+        <td>BO图连线颜色与旧版不一致</td>
+        <td>在UnifiedRenderer.renderStyles中增加连线颜色逻辑</td>
+        <td>Phase 3</td>
+    </tr>
+    <tr>
+        <td>禁用分组提升逻辑在UnifiedRenderer中不正确</td>
+        <td><span class="badge badge-caution">中</span></td>
+        <td>禁用分组后图表显示错误</td>
+        <td>enrichGroupModel在toMermaidConfig()之后执行，已处理禁用提升</td>
+        <td>Phase 2/3</td>
+    </tr>
+    <tr>
+        <td>容器排序（layoutTemplate）在UnifiedRenderer中不正确</td>
+        <td><span class="badge badge-safe">低</span></td>
+        <td>容器显示顺序与旧版不同</td>
+        <td>在enrichGroupModel中按模板排序children</td>
+        <td>Phase 2/3</td>
+    </tr>
+</table>
+
+</div>
+
+<!-- ============================================================ -->
+<div class="section">
+<h2>总结</h2>
+
+<div class="conclusion-box">
+<p style="font-size:14px;line-height:1.8;color:#2c3e50;">
+<strong>6个Phase，18个Step，每一步都可独立验证和回滚。</strong>
+</p>
+<p style="font-size:13px;line-height:1.8;color:#555;margin-top:10px;">
+<strong>安全性保障的核心机制是feature flag：</strong>所有新代码只在<code>useUnifiedRenderer=true</code>时执行，默认为false。这意味着在任何时候，只需将flag设为false即可恢复旧渲染器，无需修改任何代码。
+</p>
+<p style="font-size:13px;line-height:1.8;color:#555;margin-top:10px;">
+<strong>Phase 0-1是纯新增，零风险；</strong>Phase 2-3是验证阶段，通过对比确保新渲染器输出与旧渲染器一致；Phase 4是切换阶段，将默认值改为true；Phase 5是清理阶段，删除旧代码。每个Phase完成后才进入下一个Phase。
+</p>
+<p style="font-size:13px;line-height:1.8;color:#555;margin-top:10px;">
+<strong>最大的风险点在Phase 3.3（BO图节点id从name改为code）。</strong>这是整个方案中唯一可能影响Mermaid渲染正确性的变更。建议在Phase 3.2中充分验证后再执行3.3。
+</p>
+</div>
+
+</div>
+
+</div>
+</body>
+</html>

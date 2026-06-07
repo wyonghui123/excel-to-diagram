@@ -1,0 +1,117 @@
+id: permission_rule
+name: 条件权限规则
+table_name: permission_rules
+description: 基于条件的动态权限规则，支持维度过滤和条件匹配
+
+fields:
+  - id: role_id
+    name: 角色ID
+    type: integer
+    required: true
+    description: 关联的角色ID
+    ui:
+      visible: true
+      editable: true
+
+  - id: resource_type
+    name: 资源类型
+    type: string
+    required: true
+    description: 资源类型
+    ui:
+      visible: true
+      editable: true
+
+  - id: condition
+    name: 条件表达式
+    type: text
+    required: true
+    description: 权限条件表达式（JSON格式）
+    ui:
+      visible: true
+      editable: true
+
+  - id: permission_level
+    name: 权限级别
+    type: string
+    required: true
+    default: "read"
+    description: 权限级别（read/write/admin）
+    ui:
+      visible: true
+      editable: true
+
+  - id: is_denied
+    name: 是否拒绝
+    type: boolean
+    default: false
+    description: 是否为拒绝规则（优先级高于允许规则）
+    ui:
+      visible: true
+      editable: true
+
+  - id: inherit_to_children
+    name: 继承到子对象
+    type: boolean
+    default: true
+    description: 是否将权限继承到子对象
+    ui:
+      visible: true
+      editable: true
+
+  - id: propagate_to_parents
+    name: 向上传播
+    type: boolean
+    default: true
+    description: 是否将权限向上传播到父级资源
+    ui:
+      visible: true
+      editable: true
+
+  - id: analysis_mode
+    name: 分析模式
+    type: string
+    description: 权限分析模式
+    ui:
+      visible: false
+
+  - id: created_at
+    name: 创建时间
+    type: timestamp
+    description: 记录创建时间
+    ui:
+      visible: true
+      editable: false
+
+  - id: created_by
+    name: 创建人
+    type: integer
+    description: 创建人ID
+    ui:
+      visible: false
+
+  - id: updated_at
+    name: 更新时间
+    type: timestamp
+    description: 记录更新时间
+    ui:
+      visible: true
+      editable: false
+
+associations:
+  - name: role
+    type: reference
+    target_entity: role
+    source_key: role_id
+    description: 关联的角色
+
+audit:
+  enabled: true
+  strategy: business_only
+  fields: [role_id, resource_type, condition, permission_level, is_denied]
+
+category_config:
+  category: system
+  sub_category: permission
+  icon: "filter"
+  color: "#f59e0b"

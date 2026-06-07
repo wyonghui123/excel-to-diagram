@@ -1,0 +1,113 @@
+# ============================================
+# 测试对象元模型
+# 用于单元测试和集成测试
+# ============================================
+
+id: test_objects
+name: 测试对象
+table_name: test_objects
+description: 用于测试的临时对象
+
+display_name_field: name
+
+authorization:
+  check: false
+
+import_export:
+  import_enabled: false
+  export_enabled: false
+
+semantics:
+  meaning: 测试用对象
+  category: test
+  custom:
+    color_coding: test
+    icon: test
+
+aspects: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+  delete:
+    enabled: true
+    fields: business_only
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    ui:
+      visible: false
+
+  - id: name
+    name: 名称
+    type: string
+    db_column: name
+    required: true
+    description: 测试对象名称
+    semantics:
+      meaning: 测试名称
+      display_name: true
+      import_visible: true
+      export_visible: true
+
+  - id: code
+    name: 编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    description: 测试对象编码
+    semantics:
+      meaning: 测试编码
+      business_key: true
+      import_visible: true
+      export_visible: true
+
+  - id: price
+    name: 价格
+    type: float
+    db_column: price
+    description: 测试价格
+    semantics:
+      meaning: 测试价格
+      analytics:
+        category: measure
+        aggregation: sum
+
+  - id: active
+    name: 激活
+    type: boolean
+    db_column: active
+    default: true
+    description: 是否激活
+    semantics:
+      meaning: 激活状态
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    description: 测试描述
+    semantics:
+      meaning: 测试描述
+      import_visible: true
+      export_visible: true
+
+validations:
+  - id: name_required
+    name: 名称必填
+    type: field
+    rule: name is not None and name != ''
+    message: 名称不能为空
+    severity: error

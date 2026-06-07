@@ -1,0 +1,29 @@
+/**
+ * [FR-011] 统一样式入口 (Single Style Entry)
+ *
+ * 合并 main.js 中的 6 个样式文件为单入口
+ * 加载顺序敏感,不要随意调整顺序!
+ *
+ * 顺序说明:
+ *  1. tokens-yonyou    - YonDesign 设计令牌 (CSS 变量)
+ *  2. variables        - 应用级 SCSS 变量
+ *  3. element-variables - Element Plus 主题变量映射
+ *  4. yon-ep           - YonDesign 风格的 EP 全局样式
+ *  5. meta-table       - 元数据表格 (partial: _meta-table.scss)
+ *  6. element-plus-overrides - EP 组件样式覆盖 (CSS, 只能用 @import)
+ *  7. ../style.css     - 应用全局样式 (含 :root 重置)
+ *
+ * 注意: @use 不支持 .css 文件,所以 .css 用 @import
+ *       (Sass 1.x 推荐使用 meta.load-css,但为简单起见用 @import)
+ */
+
+// SCSS 模块 (按加载顺序)
+@use './tokens-yonyou.scss';
+@use './variables.scss';
+@use './element-variables.scss';
+@use './yon-ep.scss';
+@use './meta-table';
+
+// CSS 文件 (@use 不支持,使用 @import)
+@import './element-plus-overrides.css';
+@import '../style.css';

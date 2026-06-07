@@ -1,0 +1,618 @@
+# ============================================
+# 用户元模型
+# 说明: 系统用户，支持本地认证和SSO集成
+# ============================================
+
+id: user
+name: 用户
+table_name: users
+description: 系统用户，支持本地认证和SSO集成
+display_name_field: username
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 系统用户
+  category: system_entity
+  hierarchy_level: 0
+  aliases:
+    - 用户
+    - User
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+      - password_hash
+      - sso_provider
+      - sso_user_id
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+      - password_hash
+      - sso_provider
+      - sso_user_id
+  associate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+
+  - id: username
+    name: 用户名
+    type: string
+    db_column: username
+    required: true
+    unique: true
+    description: 登录用户名
+    semantics:
+      meaning: 用户唯一标识，用于登录
+      business_key: true
+      export_visible: true
+
+  - id: email
+    name: 邮箱
+    type: string
+    db_column: email
+    description: 用户邮箱
+    semantics:
+      meaning: 用户邮箱地址
+      export_visible: true
+
+  - id: password_hash
+    name: 密码哈希
+    type: string
+    db_column: password_hash
+    description: 本地密码哈希，SSO后可为空
+    semantics:
+      meaning: 密码的哈希值，本地认证使用
+      sensitivity: restricted
+    ui:
+      visible: false
+
+  - id: password
+    name: 密码
+    type: string
+    db_column: password_hash
+    required: false
+    semantics:
+      meaning: 用户密码，首次登录时由用户自行设置
+      virtual: true
+    ui:
+      hidden_in_detail: true
+      hidden_in_list: true
+      hidden_in_form: true
+
+  - id: display_name
+    name: 显示名称
+    type: string
+    db_column: display_name
+    description: 用户显示名称
+    semantics:
+      meaning: 用户在界面上的显示名称
+      display_name: true
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    default: active
+    description: 用户状态 active/inactive/locked
+    semantics:
+      meaning: 用户账号状态
+      filterable: true
+      filter_type: enum
+      filter_label: 用户状态
+      filter_placeholder: 选择状态
+      filter_scope: local
+    enum_values:
+      - value: active
+        label: 活跃
+        color: success
+        icon: circle-check
+        category: active
+        is_initial: true
+        description: 用户账号正常，可正常使用系统
+      - value: inactive
+        label: 未激活
+        color: info
+        icon: circle-close
+        category: inactive
+        description: 用户账号未激活，需先激活才能使用
+      - value: locked
+        label: 已锁定
+        color: danger
+        icon: lock
+        category: error
+        description: 用户账号已锁定，无法登录系统
+    value_help:
+      source:
+        type: enum
+        enum_type_id: user_status
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: true
+      presentation:
+        result_type: dropdown
+        color_mapping:
+          active: success
+          inactive: info
+          locked: danger
+    ui:
+      widget: value_help
+      form_widget: select
+      default: active
+
+  - id: status_entered_at
+    name: 状态进入时间
+    type: datetime
+    db_column: status_entered_at
+    description: 进入当前状态的时间
+    semantics:
+      meaning: 用于计算当前状态停留时长
+      audit_field: true
+    ui:
+      visible: false
+      editable: false
+
+  - id: current_status_duration_days
+    name: 当前状态停留天数
+    type: integer
+    db_column: current_status_duration_days
+    description: 在当前状态停留的天数
+    storage: virtual
+    semantics:
+      meaning: 用户在当前状态停留的天数，用于状态监控
+      analytics:
+        category: measure
+    computation:
+      formula: 'IF(ISNULL(status_entered_at), 0, DATEDIFF(status_entered_at, NOW(), "days"))'
+    ui:
+      widget: number
+      editable: false
+
+  - id: sso_provider
+    name: SSO提供者
+    type: string
+    db_column: sso_provider
+    description: SSO提供者 local/ldap/oauth2/saml
+    semantics:
+      meaning: 认证提供者类型，预留SSO集成
+    ui:
+      editable: false
+
+  - id: sso_user_id
+    name: SSO用户ID
+    type: string
+    db_column: sso_user_id
+    description: SSO系统中的用户唯一标识
+    semantics:
+      meaning: SSO系统中的用户标识，预留SSO集成
+    ui:
+      editable: false
+
+  - id: must_change_password
+    name: 强制改密
+    type: integer
+    db_column: must_change_password
+    default: 0
+    description: 是否需要在下次登录时修改密码
+    semantics:
+      meaning: 强制改密标记，管理员重置密码后设为1
+      sensitivity: internal
+    ui:
+      visible: false
+      editable: false
+
+  - id: password_history
+    name: 密码历史
+    type: string
+    db_column: password_history
+    default: "[]"
+    description: 历史密码哈希列表（JSON），用于防重用
+    semantics:
+      meaning: 最近N次密码的哈希值
+      sensitivity: restricted
+    ui:
+      visible: false
+
+  - id: last_login_at
+    name: 最后登录时间
+    type: datetime
+    db_column: last_login_at
+    description: 最后登录时间
+    semantics:
+      meaning: 用户最近一次登录的时间
+    ui:
+      editable: false
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建的时间戳
+      audit_field: true
+
+  - id: inactive_days
+    name: 不活跃天数
+    type: integer
+    db_column: inactive_days
+    description: 用户不活跃天数
+    storage: virtual
+    semantics:
+      meaning: 用户自最后登录以来的不活跃天数，用于自动锁定策略
+      analytics:
+        category: measure
+        aggregation: max
+    computation:
+      formula: 'IF(ISNULL(last_login_at), DATEDIFF(created_at, NOW(), "days"), DATEDIFF(last_login_at, NOW(), "days"))'
+    ui:
+      widget: number
+      editable: false
+
+  - id: account_age_days
+    name: 账号年龄
+    type: integer
+    db_column: account_age_days
+    description: 账号创建至今的天数
+    storage: virtual
+    semantics:
+      meaning: 用户账号的年龄（天数），用于账号生命周期管理
+      analytics:
+        category: measure
+        aggregation: avg
+    computation:
+      formula: 'DATEDIFF(created_at, NOW(), "days")'
+    ui:
+      widget: number
+      editable: false
+
+  # ========== Layer 4: 个人偏好设置 ==========
+  # 仅右上角账户设置可编辑，用户管理列表/表单不展示
+  - id: locale
+    name: 语言区域
+    type: string
+    db_column: locale
+    default: "zh-CN"
+    description: 用户语言区域设置
+    enum_values:
+      - value: zh-CN
+        label: 中文（简体）
+      - value: en-US
+        label: English (US)
+      - value: en-GB
+        label: English (UK)
+    ui:
+      widget: select
+      editable: true
+      hidden_in_list: true
+      hidden_in_form: true
+
+  - id: timezone
+    name: 时区
+    type: string
+    db_column: timezone
+    default: "Asia/Shanghai"
+    description: IANA 时区标识
+    ui:
+      widget: select
+      editable: true
+      hidden_in_list: true
+      hidden_in_form: true
+
+  - id: date_style
+    name: 日期格式长度
+    type: string
+    db_column: date_style
+    default: "medium"
+    description: 日期显示格式长度 full/long/medium/short
+    enum_values:
+      - value: full
+        label: 完整
+        description: "如: 2025年5月24日 星期六"
+      - value: long
+        label: 长
+        description: "如: 2025年5月24日"
+      - value: medium
+        label: 中
+        description: "如: 2025-05-24"
+      - value: short
+        label: 短
+        description: "如: 25-05-24"
+    ui:
+      widget: radio_group
+      editable: true
+      hidden_in_list: true
+      hidden_in_form: true
+
+  - id: time_style
+    name: 时间格式长度
+    type: string
+    db_column: time_style
+    default: "short"
+    description: 时间显示格式长度 full/long/medium/short
+    enum_values:
+      - value: full
+        label: 完整
+        description: "如: 14:30:00 CST"
+      - value: long
+        label: 长
+        description: "如: 14:30:00"
+      - value: medium
+        label: 中
+        description: "如: 14:30:00"
+      - value: short
+        label: 短
+        description: "如: 14:30"
+    ui:
+      widget: radio_group
+      editable: true
+      hidden_in_list: true
+      hidden_in_form: true
+
+  - id: hour_cycle
+    name: 时间制式
+    type: integer
+    db_column: hour_cycle
+    default: 24
+    description: 12小时制或24小时制
+    enum_values:
+      - value: 12
+        label: 12小时制
+        description: "如: 2:30 PM"
+      - value: 24
+        label: 24小时制
+        description: "如: 14:30"
+    ui:
+      widget: radio_group
+      editable: true
+      hidden_in_list: true
+      hidden_in_form: true
+
+indexes:
+  - fields: [username]
+    unique: true
+    name: idx_user_username
+  - fields: [sso_provider, sso_user_id]
+    unique: true
+    name: idx_user_sso
+
+relations: []
+
+associations:
+  - name: groups
+    target_type: user_group
+    type: many_to_many
+    through: user_group_members
+    source_key: user_id
+    target_key: group_id
+    display:
+      label: 所属用户组
+      plural_label: 用户组列表
+      target_display_field: name
+      target_code_field: code
+      columns:
+        - id: code
+          label: 组编码
+          width: 150
+        - id: name
+          label: 组名称
+          width: 200
+        - id: description
+          label: 描述
+          width: 300
+    actions:
+      assign:
+        name: assign_group
+        label: 分配用户组
+      unassign:
+        name: unassign_group
+        label: 移除用户组
+        confirm_message: 确定要从用户组中移除该成员吗？
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: username
+  description_for_agent: "用户数据导入导出，支持批量创建和更新用户"
+
+category_config:
+  create_permission: user:create
+  update_permission: user:update
+  delete_permission: user:delete
+  owner_auto_permission: false
+
+ui_view_config:
+  showChangeHistory: true
+  
+  list:
+    detail_mode: page
+    detail_path: '/detail/user'
+    title: 用户管理
+    description: 系统用户列表
+    # 单一事实原则：默认所有字段都可排序和过滤
+    # - sortable: 默认所有字段可排序，除非显式声明 sortable: false
+    # - filterable: 默认所有字段可过滤，除非显式声明 filterable: false
+    # - searchFields: 默认所有字符串类型字段可搜索
+    # - defaultSort: 默认按 updated_at 降序
+    columns:
+      - field: username
+        width: 120
+      - field: display_name
+        width: 120
+      - field: email
+        width: 180
+      - field: status
+        width: 100
+        widget: badge
+        badge_colors:
+          active: success
+          inactive: warning
+          locked: danger
+      - field: last_login_at
+        width: 160
+        format: datetime
+        filter_type: date_range
+      - field: created_at
+        width: 160
+        format: datetime
+        filter_type: date_range
+      - field: updated_at
+        width: 160
+        format: datetime
+        label: 变更时间
+        filter_type: date_range
+    actions:
+      - id: create
+        label: 新建用户
+        icon: plus
+        type: primary
+
+    batch_actions:
+      - id: batch_delete
+        label: 批量删除
+        icon: delete
+        type: danger
+        confirm: 确定要删除选中的用户吗？
+  
+  form:
+    title: 用户信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [username, display_name]
+          - fields: [email, status]
+      - title: 认证信息
+        columns:
+          - fields: [sso_provider, sso_user_id]
+  
+  detail:
+    title: 用户详情
+    layout: tabs
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - username
+          - password
+          - display_name
+          - email
+          - status
+          - sso_provider
+          - sso_user_id
+      - id: groups
+        label: 所属用户组
+        type: association
+        association: groups
+        widget: association_list
+        actions:
+          - assign
+          - unassign
+
+# ────────────────────────────────────────────
+# 状态转换规则
+# ────────────────────────────────────────────
+rules:
+  - id: activate_user
+    name: 激活用户
+    type: state_transition
+    state_field: status
+    from_states: [inactive, locked]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 激活
+      icon: check_circle
+      confirm_message: "确定要激活此用户吗？"
+      highlight: true
+
+  - id: lock_user
+    name: 锁定用户
+    type: state_transition
+    state_field: status
+    from_states: [active, inactive]
+    to_state: locked
+    triggers: [before_update]
+    ui_hints:
+      label: 锁定
+      icon: lock
+      confirm_message: "确定要锁定此用户吗？"
+
+  - id: deactivate_user
+    name: 停用用户
+    type: state_transition
+    state_field: status
+    from_states: [active, locked]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "确定要停用此用户吗？"
+
+# ────────────────────────────────────────────
+# 操作定义
+# ────────────────────────────────────────────
+actions:
+  - id: user_create
+    name: 创建用户
+    type: crud
+    method: POST
+    path: /api/v1/users
+  - id: user_read
+    name: 查询用户
+    type: crud
+    method: GET
+    path: /api/v1/users/{id}
+  - id: user_update
+    name: 更新用户
+    type: crud
+    method: PUT
+    path: /api/v1/users/{id}
+  - id: user_delete
+    name: 删除用户
+    type: crud
+    method: DELETE
+    path: /api/v1/users/{id}
+  - id: user_list
+    name: 用户列表
+    type: crud
+    method: GET
+    path: /api/v1/users
+
+deletion_policy:
+  restrict_on:
+  cascade_delete:
+    - user_group_members
+    - change_subscriptions
+    - filter_variants
+    - data_permissions
+    - user_roles

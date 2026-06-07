@@ -1,0 +1,88 @@
+name: Documentation CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'docs/**'
+      - '.markdownlint.jsonc'
+      - 'scripts/check_doc_links.py'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'docs/**'
+      - '.markdownlint.jsonc'
+
+jobs:
+  markdown-lint:
+    name: Markdown Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install markdownlint-cli
+        run: npm install -g markdownlint-cli
+
+      - name: Run markdownlint
+        run: markdownlint docs/ --config .markdownlint.jsonc --ignore docs/archive
+
+  link-check:
+    name: Link Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+
+      - name: Run link check
+        run: |
+          python scripts/check_doc_links.py --quiet
+
+      - name: Upload link issues
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: link-check-report
+          path: scripts/link-issues-detailed.txt
+
+  docs-build:
+    name: Docs Build (Sanity)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify ARCHITECTURE_V2.md TOC
+        run: |
+          if ! grep -q "^## 目录" docs/ARCHITECTURE_V2.md; then
+            echo "ERROR: ARCHITECTURE_V2.md missing TOC"
+            exit 1
+          fi
+          echo "[OK] TOC exists"
+
+      - name: Verify docs/README.md exists
+        run: |
+          if [ ! -f docs/README.md ]; then
+            echo "ERROR: docs/README.md missing"
+            exit 1
+          fi
+          echo "[OK] docs/README.md exists"
+
+      - name: Count markdown files
+        run: |
+          COUNT=$(find docs -name "*.md" -not -path "*/archive/*" | wc -l)
+          echo "Active markdown files: $COUNT"
+          if [ "$COUNT" -gt 100 ]; then
+            echo "WARN: Too many active docs ($COUNT), consider archiving"
+          fi

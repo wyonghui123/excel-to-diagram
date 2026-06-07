@@ -1,0 +1,30 @@
+# M11 RLS 规则：version（产品版本）
+# 与 product.yaml 类似，但版本是不可变的
+
+entity: version
+
+# 行级过滤
+row_filters:
+  - applies_to: [role:user, role:viewer, role:manager]
+    condition: "version.company_id == $user.company_id"
+  - applies_to: [role:admin]
+    condition: "true"
+  - applies_to: [role:ai-agent]
+    condition: "version.is_published == true"
+
+# 字段脱敏
+field_masks:
+  - field: release_notes
+    mask: "***HIDDEN***"
+    applies_to: [role:ai-agent]  # AI 不可见未发布版本的 release notes
+  - field: internal_roadmap
+    mask: "***HIDDEN***"
+    applies_to: [role:user, role:viewer, role:ai-agent]
+
+# 操作权限（版本通常只读）
+actions:
+  create: [role:admin, role:manager]
+  read: [role:admin, role:manager, role:user, role:viewer, role:ai-agent]
+  update: [role:admin, role:manager]
+  delete: [role:admin]
+  publish: [role:admin, role:manager]

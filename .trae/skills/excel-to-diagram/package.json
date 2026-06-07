@@ -1,0 +1,5 @@
+{
+  "name": "excel-to-diagram",
+  "version": "1.0.0",
+  "description": "Converts Excel data to application architecture diagrams using Mermaid"
+}

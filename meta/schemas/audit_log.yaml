@@ -1,0 +1,868 @@
+# ============================================
+# 审计对象
+# 说明: 记录所有业务对象的变更历史
+# ============================================
+
+id: audit_log
+name: 审计日志
+table_name: audit_logs
+description: 审计日志记录所有业务对象的变更历史，包括创建、更新、删除操作
+persistent: false  # 审计日志是只读对象，不应该被手动创建或修改
+is_view: false
+
+# ────────────────────────────────────────────
+# 导入导出配置（审计日志只读，不支持导入）
+# ────────────────────────────────────────────
+import_export:
+  import_enabled: false
+  export_enabled: true
+  auto_crud: false  # 禁用自动添加 CRUD actions
+
+# ────────────────────────────────────────────
+# 语义标注
+# ────────────────────────────────────────────
+semantics:
+  meaning: 系统审计日志
+  category: system_entity
+  hierarchy_level: 0
+  aliases:
+    - 审计日志
+    - AuditLog
+    - 变更记录
+
+# ────────────────────────────────────────────
+# 字段定义
+# ────────────────────────────────────────────
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      analytics:
+        category: measure
+        aggregation: count
+        display_name: 操作次数
+
+  - id: log_category
+    name: 日志类型
+    type: string
+    db_column: log_category
+    required: true
+    default: "business"
+    description: 日志分类，用于区分不同类型的日志
+    semantics:
+      meaning: 日志类型（business/security/operation/performance/system）
+      analytics:
+        category: dimension
+        type: categorical
+        display_name: 日志类型
+    enum_values:
+      - value: business
+        label: 业务审计
+        color: primary
+      - value: security
+        label: 安全日志
+        color: danger
+      - value: operation
+        label: 运营日志
+        color: info
+      - value: performance
+        label: 性能日志
+        color: warning
+      - value: system
+        label: 系统日志
+        color: default
+    value_help:
+      source:
+        type: enum
+        enum_type_id: audit_log_category
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+      presentation:
+        result_type: dropdown
+        color_mapping:
+          business: primary
+          security: danger
+          operation: info
+          performance: warning
+          system: default
+
+  - id: log_level
+    name: 日志级别
+    type: string
+    db_column: log_level
+    required: true
+    default: "INFO"
+    description: 日志严重程度级别
+    semantics:
+      meaning: 日志级别（DEBUG/INFO/WARNING/ERROR/CRITICAL）
+      analytics:
+        category: dimension
+        type: categorical
+        display_name: 日志级别
+    enum_values:
+      - value: DEBUG
+        label: 调试
+        color: default
+      - value: INFO
+        label: 信息
+        color: info
+      - value: WARNING
+        label: 警告
+        color: warning
+      - value: ERROR
+        label: 错误
+        color: danger
+      - value: CRITICAL
+        label: 严重
+        color: danger
+    value_help:
+      source:
+        type: enum
+        enum_type_id: audit_log_level
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+      presentation:
+        result_type: dropdown
+        color_mapping:
+          DEBUG: default
+          INFO: info
+          WARNING: warning
+          ERROR: danger
+          CRITICAL: danger
+
+  - id: object_type
+    name: 对象类型
+    type: string
+    db_column: object_type
+    required: true
+    description: 业务对象类型
+    semantics:
+      meaning: 被操作的对象类型（如 product, version, domain 等）
+      analytics:
+        category: dimension
+        type: categorical
+        display_name: 对象类型
+    enum_values:
+      - value: user
+        label: 用户
+      - value: role
+        label: 角色
+      - value: user_group
+        label: 用户组
+      - value: product
+        label: 产品
+      - value: version
+        label: 版本
+      - value: domain
+        label: 领域
+      - value: sub_domain
+        label: 子域
+      - value: service_module
+        label: 服务模块
+      - value: business_object
+        label: 业务对象
+      - value: relationship
+        label: 关系
+      - value: annotation
+        label: 标注
+      - value: enum_type
+        label: 枚举类型
+      - value: enum_value
+        label: 枚举值
+      - value: __audit_failure__
+        label: 审计失败
+
+  - id: object_id
+    name: 对象ID
+    type: integer
+    db_column: object_id
+    required: true
+    description: 被操作对象的ID
+    semantics:
+      meaning: 被操作对象的唯一标识
+
+  - id: parent_object_type
+    name: 父对象类型
+    type: string
+    db_column: parent_object_type
+    description: 级联操作产生时记录父对象的类型
+    semantics:
+      meaning: 级联来源父对象的类型
+
+  - id: parent_object_id
+    name: 父对象ID
+    type: integer
+    db_column: parent_object_id
+    description: 级联操作产生时记录父对象的ID
+    semantics:
+      meaning: 级联来源父对象的唯一标识
+
+  - id: action
+    name: 操作类型
+    type: string
+    db_column: action
+    required: true
+    description: 操作类型
+    semantics:
+      meaning: 操作类型（CREATE, UPDATE, DELETE）
+      analytics:
+        category: dimension
+        type: categorical
+        display_name: 操作类型
+    value_help:
+      source:
+        type: enum
+        enum_type_id: audit_action_type
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+      presentation:
+        result_type: dropdown
+        color_mapping:
+          CREATE: success
+          UPDATE: info
+          DELETE: danger
+
+  - id: field_name
+    name: 字段名
+    type: string
+    db_column: field_name
+    description: 变更的字段名（UPDATE 时记录）
+    semantics:
+      meaning: 被修改的字段名称
+
+  - id: old_value
+    name: 旧值
+    type: text
+    db_column: old_value
+    description: 字段修改前的值
+    semantics:
+      meaning: 修改前的字段值
+
+  - id: new_value
+    name: 新值
+    type: text
+    db_column: new_value
+    description: 字段修改后的值
+    semantics:
+      meaning: 修改后的字段值
+
+  - id: user_id
+    name: 用户ID
+    type: integer
+    db_column: user_id
+    description: 操作人ID
+    semantics:
+      meaning: 执行操作的用户ID
+      analytics:
+        category: dimension
+        type: foreign_key
+        display_name: 操作用户
+
+  - id: user_name
+    name: 用户名
+    type: string
+    db_column: user_name
+    description: 操作人名称
+    semantics:
+      meaning: 执行操作用户的显示名称
+
+  - id: ip_address
+    name: IP地址
+    type: string
+    db_column: ip_address
+    description: 操作人IP地址
+    semantics:
+      meaning: 客户端 IP 地址
+
+  - id: user_agent
+    name: 用户代理
+    type: string
+    db_column: user_agent
+    description: 浏览器用户代理
+    semantics:
+      meaning: 客户端浏览器信息
+
+  - id: created_at
+    name: 操作时间
+    type: datetime
+    db_column: created_at
+    required: true
+    default: "NOW()"
+    description: 审计记录创建时间
+    semantics:
+      meaning: 操作发生的时间戳
+      analytics:
+        category: dimension
+        type: temporal
+        display_name: 操作时间
+
+  - id: extra_data
+    name: 附加数据
+    type: json
+    db_column: extra_data
+    description: 附加的上下文信息
+    semantics:
+      meaning: 额外的上下文数据（JSON格式）
+
+  - id: trace_id
+    name: 链路追踪ID
+    type: string
+    db_column: trace_id
+    description: 请求链路追踪ID，关联日志系统
+    semantics:
+      meaning: 分布式链路追踪标识
+
+  - id: transaction_id
+    name: 事务ID
+    type: string
+    db_column: transaction_id
+    description: 业务事务唯一标识，同一事务的多条审计记录共享
+    semantics:
+      meaning: 关联同一业务事务的多条审计记录
+
+  - id: status
+    name: 审计状态
+    type: string
+    db_column: status
+    default: "written"
+    description: 审计记录写入状态 (written/pending/failed)
+    semantics:
+      meaning: 审计日志写入状态，用于异步写入补偿
+      filterable: true
+      filter_type: enum
+    enum_values:
+      - value: pending
+        label: 待写入
+        color: warning
+        icon: clock
+        is_initial: true
+        category: active
+        description: 审计记录待写入外部系统
+      - value: written
+        label: 已写入
+        color: success
+        icon: circle-check
+        is_final: true
+        category: final
+        description: 审计记录已成功写入
+      - value: failed
+        label: 写入失败
+        color: danger
+        icon: circle-close
+        category: error
+        description: 审计记录写入失败，可重试
+    ui:
+      widget: badge
+      badge_colors:
+        pending: warning
+        written: success
+        failed: danger
+
+  - id: status_entered_at
+    name: 状态进入时间
+    type: datetime
+    db_column: status_entered_at
+    description: 进入当前状态的时间
+    semantics:
+      meaning: 用于计算当前状态停留时长
+      audit_field: true
+    ui:
+      visible: false
+      editable: false
+
+  - id: retry_count
+    name: 重试次数
+    type: integer
+    db_column: retry_count
+    default: 0
+    description: 审计写入重试次数
+    semantics:
+      meaning: 异步写入失败后的重试计数
+
+  - id: error_message
+    name: 错误信息
+    type: text
+    db_column: error_message
+    description: 审计写入失败时的错误信息
+    semantics:
+      meaning: 失败审计记录的错误详情
+
+  - id: agent_id
+    name: Agent标识
+    type: string
+    db_column: agent_id
+    description: AI Agent 标识
+    semantics:
+      meaning: 执行操作的AI Agent唯一标识
+
+  - id: agent_session_id
+    name: Agent会话ID
+    type: string
+    db_column: agent_session_id
+    description: AI Agent 会话标识
+    semantics:
+      meaning: Agent与用户的会话上下文
+
+  - id: tool_call_id
+    name: 工具调用ID
+    type: string
+    db_column: tool_call_id
+    description: Agent工具调用的幂等键
+    semantics:
+      meaning: 工具调用唯一标识，用于幂等性保障
+
+  - id: agent_reasoning
+    name: Agent推理上下文
+    type: text
+    db_column: agent_reasoning
+    description: Agent执行操作时的推理上下文
+    semantics:
+      meaning: Agent决策过程的可追溯记录
+
+# ────────────────────────────────────────────
+# UI 视图配置 (元数据驱动)
+# ────────────────────────────────────────────
+ui_view_config:
+  list:
+    title: 审计日志
+    description: 系统审计日志列表，记录所有业务对象的变更历史
+    # 单一事实原则：默认所有字段可排序和过滤
+    # - sortable: 默认所有字段可排序，除非显式声明 sortable: false
+    # - filterable: 默认所有字段可过滤，除非显式声明 filterable: false
+    # - searchFields: 默认所有字符串类型字段可搜索
+    # - defaultSort: 默认按 created_at 降序
+    defaultSort:
+      field: created_at
+      direction: desc
+    columns:
+      - field: id
+        label: 日志ID
+        width: 80
+        sortable: true
+        filterable: true
+        filter_type: number
+        linkable: true
+      - field: created_at
+        label: 操作时间
+        width: 180
+        format: datetime
+        sortable: true
+        filterable: true
+        filter_type: date_range
+      - field: log_category
+        label: 日志类型
+        width: 100
+        widget: badge
+        sortable: true
+        filterable: true
+        filter_type: select
+        filter_options:
+          - value: business
+            label: 业务审计
+            color: primary
+          - value: security
+            label: 安全日志
+            color: danger
+          - value: operation
+            label: 运营日志
+            color: info
+          - value: performance
+            label: 性能日志
+            color: warning
+          - value: system
+            label: 系统日志
+            color: default
+        badge_colors:
+          business: primary
+          security: danger
+          operation: info
+          performance: warning
+          system: default
+      - field: log_level
+        label: 日志级别
+        width: 80
+        widget: badge
+        sortable: true
+        filterable: true
+        filter_type: select
+        filter_options:
+          - value: DEBUG
+            label: 调试
+            color: default
+          - value: INFO
+            label: 信息
+            color: info
+          - value: WARNING
+            label: 警告
+            color: warning
+          - value: ERROR
+            label: 错误
+            color: danger
+          - value: CRITICAL
+            label: 严重
+            color: danger
+        badge_colors:
+          DEBUG: default
+          INFO: info
+          WARNING: warning
+          ERROR: danger
+          CRITICAL: danger
+      - field: user_name
+        label: 操作人
+        width: 120
+        sortable: true
+        filterable: true
+        filter_type: text
+      - field: action
+        label: 操作类型
+        width: 80
+        widget: badge
+        sortable: true
+        filterable: true
+        filter_type: select
+        filter_options:
+          - value: CREATE
+            label: 创建
+            color: success
+          - value: UPDATE
+            label: 更新
+            color: info
+          - value: DELETE
+            label: 删除
+            color: danger
+        badge_colors:
+          CREATE: success
+          UPDATE: info
+          DELETE: danger
+      - field: object_type
+        label: 对象类型
+        width: 100
+        widget: badge
+        sortable: true
+        filterable: true
+        filter_type: text
+        badge_colors:
+          user: default
+          role: default
+          user_group: default
+          product: primary
+          version: info
+          domain: primary
+          sub_domain: info
+          service_module: info
+          business_object: primary
+          relationship: warning
+          annotation: default
+          enum_type: default
+          enum_value: default
+          __audit_failure__: danger
+      - field: object_id
+        label: 对象ID
+        width: 80
+        sortable: true
+        filterable: true
+        filter_type: number
+      - field: field_name
+        label: 变更字段
+        width: 120
+        sortable: true
+        filterable: true
+        filter_type: text
+      - field: old_value
+        label: 旧值
+        width: 150
+        ellipsis: true
+        sortable: false
+        filterable: false
+      - field: new_value
+        label: 新值
+        width: 150
+        ellipsis: true
+        sortable: false
+        filterable: false
+      - field: ip_address
+        label: IP地址
+        width: 120
+        sortable: true
+        filterable: true
+        filter_type: text
+      - field: trace_id
+        label: 链路ID
+        width: 150
+        sortable: true
+        filterable: true
+        filter_type: text
+    pageSize: 50
+    selectable: false
+    actions:
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+        position: toolbar
+
+  detail:
+    title: 审计日志详情
+    layout: tabs
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - id
+          - created_at
+          - log_category
+          - log_level
+          - user_name
+          - user_id
+          - action
+          - object_type
+          - object_id
+          - ip_address
+          - user_agent
+      - id: change
+        label: 变更详情
+        type: fields
+        fields:
+          - field_name
+          - old_value
+          - new_value
+          - extra_data
+      - id: trace
+        label: 追踪信息
+        type: fields
+        fields:
+          - trace_id
+          - transaction_id
+          - agent_id
+          - agent_session_id
+          - tool_call_id
+          - agent_reasoning
+      - id: system
+        label: 系统信息
+        type: fields
+        fields:
+          - status
+          - retry_count
+          - error_message
+
+# ────────────────────────────────────────────
+# 索引定义
+# ────────────────────────────────────────────
+indexes:
+  - fields: [log_category]
+    name: idx_audit_category
+    description: 按日志类型索引
+
+  - fields: [log_category, action, created_at]
+    name: idx_audit_category_action_time
+    description: 复合索引（分类统计查询）
+
+  - fields: [log_level]
+    name: idx_audit_level
+    description: 按日志级别索引
+
+  - fields: [object_type, object_id]
+    name: idx_audit_object
+    description: 按对象类型和ID索引
+
+  - fields: [user_id]
+    name: idx_audit_user
+    description: 按用户索引
+
+  - fields: [created_at]
+    name: idx_audit_time
+    description: 按时间索引
+
+  - fields: [trace_id]
+    name: idx_audit_trace
+    description: 按链路追踪ID索引
+
+  - fields: [transaction_id]
+    name: idx_audit_txn
+    description: 按事务ID索引
+
+  - fields: [status]
+    name: idx_audit_status
+    description: 按审计状态索引
+
+  - fields: [tool_call_id]
+    name: idx_audit_tool_call
+    description: 按工具调用ID索引(幂等查询)
+
+  - fields: [parent_object_type, parent_object_id]
+    name: idx_audit_parent
+    description: 按父对象类型和ID索引（级联审计查询）
+
+# ────────────────────────────────────────────
+# 关联关系
+# ────────────────────────────────────────────
+relations: []
+
+# ────────────────────────────────────────────
+# 操作定义（明确列出，不依赖自动添加）
+# 注意：审计日志是只读对象，不能有 create/update/delete 等写操作
+# ────────────────────────────────────────────
+actions:
+  - id: audit_log_list
+    name: 列表查询
+    type: crud
+    method: GET
+    path: /api/v1/audit_logs
+    description: 查询审计日志列表
+
+  - id: audit_log_read
+    name: 查看日志详情
+    type: crud
+    method: GET
+    path: /api/v1/audit_logs/{id}
+    description: 查看审计日志详情
+
+  - id: audit_log_delete
+    name: 删除日志
+    type: crud
+    method: DELETE
+    path: /api/v1/audit_logs/{id}
+    description: 删除审计日志记录
+
+# ────────────────────────────────────────────
+# 查询定义
+# ────────────────────────────────────────────
+queries:
+  - id: recent_changes
+    name: 最近变更
+    filters:
+      - field: created_at
+        operator: gte
+        param: since
+    sorts:
+      - field: created_at
+        direction: desc
+    limit: 100
+
+  - id: object_history
+    name: 对象历史
+    filters:
+      - field: object_type
+        operator: eq
+        param: object_type
+      - field: object_id
+        operator: eq
+        param: object_id
+    sorts:
+      - field: created_at
+        direction: desc
+
+  - id: user_activity
+    name: 用户活动
+    filters:
+      - field: user_id
+        operator: eq
+        param: user_id
+    sorts:
+      - field: created_at
+        direction: desc
+
+  - id: category_statistics
+    name: 分类统计
+    description: 按日志类型统计
+    group_by: [log_category]
+    aggregates:
+      - field: id
+        function: count
+        alias: count
+
+  - id: level_statistics
+    name: 级别统计
+    description: 按日志级别统计
+    group_by: [log_level]
+    aggregates:
+      - field: id
+        function: count
+        alias: count
+
+  - id: category_level_statistics
+    name: 分类级别统计
+    description: 按日志类型和级别统计
+    group_by: [log_category, log_level]
+    aggregates:
+      - field: id
+        function: count
+        alias: count
+
+  - id: by_category
+    name: 按类型筛选
+    filters:
+      - field: log_category
+        operator: eq
+        param: category
+    sorts:
+      - field: created_at
+        direction: desc
+
+  - id: by_level
+    name: 按级别筛选
+    filters:
+      - field: log_level
+        operator: eq
+        param: level
+    sorts:
+      - field: created_at
+        direction: desc
+
+# ────────────────────────────────────────────
+# 状态转换规则
+# 用于异步写入补偿场景
+# ────────────────────────────────────────────
+rules:
+  - id: mark_written
+    name: 标记已写入
+    type: state_transition
+    state_field: status
+    from_states: [pending]
+    to_state: written
+    triggers: [before_update]
+    ui_hints:
+      label: 标记已写入
+      icon: circle-check
+      highlight: true
+
+  - id: mark_failed
+    name: 标记写入失败
+    type: state_transition
+    state_field: status
+    from_states: [pending]
+    to_state: failed
+    triggers: [before_update]
+    ui_hints:
+      label: 标记失败
+      icon: circle-close
+
+  - id: retry_write
+    name: 重试写入
+    type: state_transition
+    state_field: status
+    from_states: [failed]
+    to_state: pending
+    triggers: [before_update]
+    side_effects:
+      - type: set_field
+        target: error_message
+        value: ""
+    ui_hints:
+      label: 重试写入
+      icon: refresh
+      highlight: true
+      confirm_message: "确定要重试写入此审计记录吗？"

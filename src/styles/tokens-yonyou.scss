@@ -1,0 +1,375 @@
+/**
+ * 用友YonDesign设计令牌 (Yonyou Design Tokens)
+ *
+ * 基于用友企业级设计系统 YonDesign
+ * 参考: https://yondesign.yonyoucloud.com/
+ *
+ * 从官网提取的实际颜色数据：
+ * - Orange 橙色系
+ * - Amber 琥珀色
+ * - Yellow 黄色
+ * - Lime 青柠色
+ * - Green 绿色
+ *
+ * 规范原则:
+ * 1. 主色采用YonDesign提供的橙色系
+ * 2. 中性色采用灰蓝色系
+ * 3. 功能色遵循语义化命名
+ * 4. 支持浅色/深色模式
+ */
+
+// ============================================
+// 1. YonDesign颜色系统 (来自官网)
+// ============================================
+
+:root {
+  // Orange 橙色系 - YonDesign主色调
+  --yonyou-orange-50: #fff7ed;
+  --yonyou-orange-100: #ffedd5;
+  --yonyou-orange-200: #fed7aa;
+  --yonyou-orange-300: #fdba74;
+  --yonyou-orange-400: #fb923c;
+  --yonyou-orange-500: #f97316;
+  --yonyou-orange-600: #ea580c;
+  --yonyou-orange-700: #c2410c;
+  --yonyou-orange-800: #9a3412;
+  --yonyou-orange-900: #7c2d12;
+
+  // Amber 琥珀色
+  --yonyou-amber-50: #fffbeb;
+  --yonyou-amber-100: #fef3c7;
+  --yonyou-amber-200: #fde68a;
+  --yonyou-amber-300: #fcd34d;
+  --yonyou-amber-400: #fbbf24;
+  --yonyou-amber-500: #f59e0b;
+  --yonyou-amber-600: #d97706;
+  --yonyou-amber-700: #b45309;
+  --yonyou-amber-800: #92400e;
+  --yonyou-amber-900: #78350f;
+
+  // Yellow 黄色
+  --yonyou-yellow-50: #fefce8;
+  --yonyou-yellow-100: #fef9c3;
+  --yonyou-yellow-200: #fef08a;
+  --yonyou-yellow-300: #fde047;
+  --yonyou-yellow-400: #facc15;
+  --yonyou-yellow-500: #eab308;
+  --yonyou-yellow-600: #ca8a04;
+  --yonyou-yellow-700: #a16207;
+  --yonyou-yellow-800: #854d0e;
+  --yonyou-yellow-900: #713f12;
+
+  // Lime 青柠色
+  --yonyou-lime-50: #f7fee7;
+  --yonyou-lime-100: #ecfccb;
+  --yonyou-lime-200: #d9f99d;
+  --yonyou-lime-300: #bef264;
+  --yonyou-lime-400: #a3e635;
+  --yonyou-lime-500: #84cc16;
+  --yonyou-lime-600: #65a30d;
+  --yonyou-lime-700: #4d7c0f;
+  --yonyou-lime-800: #3f6212;
+  --yonyou-lime-900: #365314;
+
+  // Green 绿色
+  --yonyou-green-50: #F0FDF4;
+  --yonyou-green-100: #DCFCE7;
+  --yonyou-green-200: #BBF7D0;
+  --yonyou-green-300: #86EFAC;
+  --yonyou-green-400: #4ADE80;
+  --yonyou-green-500: #22C55E;
+  --yonyou-green-600: #16A34A;
+  --yonyou-green-700: #15803D;
+  --yonyou-green-800: #166534;
+  --yonyou-green-900: #14532D;
+
+  // ============================================
+  // 2. 语义化颜色映射 (基于YonDesign)
+  // ============================================
+
+  // 主色 - YonDesign Orange
+  --color-primary: var(--yonyou-orange-600);
+  --color-primary-hover: var(--yonyou-orange-500);
+  --color-primary-active: var(--yonyou-orange-700);
+  --color-primary-disabled: var(--yonyou-orange-300);
+  --color-primary-bg: var(--yonyou-orange-50);
+  --color-primary-bg-hover: var(--yonyou-orange-100);
+
+  // 次级色 - Amber
+  --color-secondary: var(--yonyou-amber-500);
+  --color-secondary-hover: var(--yonyou-amber-400);
+  --color-secondary-active: var(--yonyou-amber-600);
+
+  // 强调色 - Yellow
+  --color-accent: var(--yonyou-yellow-500);
+  --color-accent-hover: var(--yonyou-yellow-400);
+  --color-accent-active: var(--yonyou-yellow-600);
+
+  // ============================================
+  // 3. 功能色 (Functional Colors)
+  // ============================================
+
+  // 成功 - YonDesign Green
+  --color-success: var(--yonyou-green-500);
+  --color-success-hover: var(--yonyou-green-600);
+  --color-success-active: var(--yonyou-green-700);
+  --color-success-bg: var(--yonyou-green-50);
+  --color-success-border: var(--yonyou-green-300);
+
+  // 警告 - YonDesign Amber
+  --color-warning: var(--yonyou-amber-500);
+  --color-warning-hover: var(--yonyou-amber-600);
+  --color-warning-active: var(--yonyou-amber-700);
+  --color-warning-bg: var(--yonyou-amber-50);
+  --color-warning-border: var(--yonyou-amber-300);
+
+  // 错误 - Orange深色
+  --color-error: var(--yonyou-orange-700);
+  --color-error-hover: var(--yonyou-orange-800);
+  --color-error-active: var(--yonyou-orange-900);
+  --color-error-bg: var(--yonyou-orange-50);
+  --color-error-border: var(--yonyou-orange-200);
+
+  // 信息 - Lime
+  --color-info: var(--yonyou-lime-600);
+  --color-info-hover: var(--yonyou-lime-500);
+  --color-info-active: var(--yonyou-lime-700);
+  --color-info-bg: var(--yonyou-lime-50);
+  --color-info-border: var(--yonyou-lime-200);
+
+  // ============================================
+  // 4. 中性色系统 (灰蓝色系)
+  // ============================================
+
+  // 文本色
+  --color-text-primary: #1f2937;
+  --color-text-secondary: #4b5563;
+  --color-text-tertiary: #6b7280;
+  --color-text-quaternary: #9ca3af;
+  --color-text-disabled: rgba(0, 0, 0, 0.25);
+  --color-text-placeholder: #9ca3af;
+  --color-text-inverse: #ffffff;
+
+  // 背景色
+  --color-bg-base: #ffffff;
+  --color-bg-container: #ffffff;
+  --color-bg-elevated: #ffffff;
+  --color-bg-layout: #f3f4f6;
+  --color-bg-spotlight: #f9fafb;
+  --color-bg-secondary: #f3f4f6;
+  --color-bg-tertiary: #e5e7eb;
+  --color-bg-disabled: #f3f4f6;
+
+  // 边框色
+  --color-border: #d1d5db;
+  --color-border-secondary: #e5e7eb;
+  --color-border-tertiary: #f3f4f6;
+  --color-border-light: #f9fafb;
+
+  // 阴影色
+  --color-shadow: rgba(0, 0, 0, 0.08);
+  --color-shadow-secondary: rgba(0, 0, 0, 0.06);
+}
+
+// ============================================
+// 5. 深色模式配色
+// ============================================
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    // 文本色
+    --color-text-primary: #f9fafb;
+    --color-text-secondary: #e5e7eb;
+    --color-text-tertiary: #d1d5db;
+    --color-text-quaternary: #9ca3af;
+    --color-text-disabled: rgba(255, 255, 255, 0.3);
+    --color-text-placeholder: rgba(255, 255, 255, 0.4);
+
+    // 背景色
+    --color-bg-base: #111827;
+    --color-bg-container: #1f2937;
+    --color-bg-elevated: #374151;
+    --color-bg-layout: #0f172a;
+    --color-bg-spotlight: #1f2937;
+    --color-bg-secondary: #374151;
+    --color-bg-tertiary: #4b5563;
+    --color-bg-disabled: #374151;
+
+    // 边框色
+    --color-border: #4b5563;
+    --color-border-secondary: #374151;
+    --color-border-tertiary: #1f2937;
+
+    // 阴影色
+    --color-shadow: rgba(0, 0, 0, 0.3);
+    --color-shadow-secondary: rgba(0, 0, 0, 0.2);
+  }
+}
+
+// ============================================
+// 6. 字体系统 (Typography)
+// ============================================
+
+:root {
+  // 字体家族
+  --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+  --font-family-code: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+
+  // 字体大小
+  --font-size-xxs: 10px;
+  --font-size-xs: 12px;
+  --font-size-sm: 13px;
+  --font-size-base: 14px;
+  --font-size-md: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 18px;
+  --font-size-xxl: 20px;
+  --font-size-xxxl: 24px;
+  --font-size-display: 30px;
+  --font-size-mega: 38px;
+
+  // 字体粗细
+  --font-weight-thin: 100;
+  --font-weight-extralight: 200;
+  --font-weight-light: 300;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  // 行高
+  --line-height-none: 1;
+  --line-height-tight: 1.25;
+  --line-height-snug: 1.375;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.625;
+  --line-height-loose: 1.75;
+}
+
+// ============================================
+// 7. 间距系统 (Spacing)
+// ============================================
+
+:root {
+  --spacing-none: 0;
+  --spacing-xxs: 2px;
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --spacing-xxl: 40px;
+  --spacing-xxxl: 48px;
+  --spacing-4xl: 64px;
+
+  // 组件特定间距
+  --spacing-form-item: 24px;
+  --spacing-card-padding: 24px;
+  --spacing-section-gap: 32px;
+}
+
+// ============================================
+// 8. 圆角系统 (Border Radius)
+// ============================================
+
+:root {
+  --radius-none: 0;
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
+  --radius-xxl: 12px;
+  --radius-full: 9999px;
+
+  // 组件特定圆角
+  --radius-button: var(--radius-md);
+  --radius-input: var(--radius-md);
+  --radius-card: var(--radius-lg);
+  --radius-modal: var(--radius-xl);
+  --radius-dropdown: var(--radius-lg);
+  --radius-tooltip: var(--radius-sm);
+  --radius-badge: var(--radius-full);
+}
+
+// ============================================
+// 9. 阴影系统 (Shadows)
+// ============================================
+
+:root {
+  --shadow-none: none;
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+
+  // 功能阴影
+  --shadow-focus: 0 0 0 2px rgba(234, 88, 12, 0.2);
+  --shadow-error-focus: 0 0 0 2px rgba(194, 65, 12, 0.2);
+}
+
+// ============================================
+// 10. Z-Index 层级系统
+// ============================================
+
+:root {
+  --z-index-base: 0;
+  --z-index-raised: 10;
+  --z-index-dropdown: 1000;
+  --z-index-sticky: 1100;
+  --z-index-fixed: 1200;
+  --z-index-modal-backdrop: 1300;
+  --z-index-modal: 1400;
+  --z-index-popover: 1500;
+  --z-index-tooltip: 1600;
+  --z-index-notification: 1700;
+  --z-index-max: 9999;
+}
+
+// ============================================
+// 11. 动效系统 (Motion)
+// ============================================
+
+:root {
+  // 动画时长
+  --duration-instant: 0ms;
+  --duration-fast: 100ms;
+  --duration-normal: 200ms;
+  --duration-slow: 300ms;
+
+  // 缓动曲线
+  --ease-linear: linear;
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+
+  // 组合动画
+  --transition-fast: all var(--duration-fast) var(--ease-out);
+  --transition-normal: all var(--duration-normal) var(--ease-in-out);
+}
+
+// ============================================
+// 12. 组件尺寸 (Component Sizes)
+// ============================================
+
+:root {
+  // 按钮尺寸
+  --btn-height-xs: 20px;
+  --btn-height-sm: 24px;
+  --btn-height-md: 32px;
+  --btn-height-lg: 40px;
+  --btn-height-xl: 48px;
+
+  // 输入框尺寸
+  --input-height-xs: 24px;
+  --input-height-sm: 28px;
+  --input-height-md: 32px;
+  --input-height-lg: 40px;
+
+  // 图标尺寸
+  --icon-size-xs: 10px;
+  --icon-size-sm: 12px;
+  --icon-size-md: 14px;
+  --icon-size-base: 16px;
+  --icon-size-lg: 18px;
+  --icon-size-xl: 20px;
+}

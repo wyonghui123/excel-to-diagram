@@ -1,0 +1,485 @@
+/**
+ * [!!!] [!!!] [!!!] 强制性规范警告 [!!!] [!!!] [!!!]
+ *
+ * 【修改此文件前必须阅读】
+ * - 规范文档：src/styles/YON_DESIGN_CONSTANTS.md
+ * - 完整指南：src/styles/YON_EP_GUIDE.md
+ *
+ * [FORBIDDEN] 禁止事项：
+ * [X] 禁止使用 Ant Design 蓝色 (#1677ff, #1890ff, #4096ff)
+ * [X] 禁止使用 Material Design 颜色
+ * [X] 禁止硬编码颜色值（必须使用 --yonyou-* 变量）
+ *
+ * [REQUIRED] 强制要求：
+ * [OK] 主色调必须使用 YonDesign Orange（#ea580c 橙色系）
+ * [OK] 所有颜色必须引用 tokens-yonyou.scss 中的变量
+ * [OK] 修改后必须在组件对比页面验证
+ *
+ * [INFO] YonDesign 核心色阶：
+ * - 主色: #ea580c (orange-600)
+ * - Hover: #f97316 (orange-500) + #fff7ed (orange-50 背景)
+ * - Active: #c2410c (orange-700) + #ffedd5 (orange-100 背景)
+ *
+ * [REF] 参考实现：MetaTable.vue 中的 .mt-link-btn 类
+ *
+ * 违反以上规范将导致设计系统不一致，务必严格遵守！
+ */
+
+// ============================================
+// YonDesign + Element Plus 标准样式覆盖
+// ============================================
+
+/**
+ * 规范说明：
+ * 1. 圆润圆角：按钮/输入框 6px，标签/分页 4px，卡片/弹窗 8px
+ * 2. 主题色：强制使用 #ea580c (YonDesign Orange) - 非蓝色！
+ * 3. Link 按钮：使用橙色系，参考 MetaTable 的 mt-link-btn 实现
+ *
+ * 使用方式：在 main.js 中导入即可全局生效
+ */
+
+// ============================================
+// 1. CSS 变量强制覆盖（最高优先级）
+// ============================================
+:root:root,
+html:root,
+html :root {
+  --el-color-primary: #ea580c !important;
+  --el-color-primary-light-3: #fb923c !important;
+  --el-color-primary-light-5: #fdba74 !important;
+  --el-color-primary-light-7: #fed7aa !important;
+  --el-color-primary-light-8: #ffedd5 !important;
+  --el-color-primary-light-9: #fff7ed !important;
+  --el-color-primary-dark-2: #c2410c !important;
+  --el-color-primary-rgb: 234, 88, 12 !important;
+}
+
+// ============================================
+// 2. 基础圆角覆盖
+// ============================================
+:root {
+  --el-border-radius-base: 6px;
+  --el-border-radius-small: 4px;
+  --el-border-radius-round: 8px;
+  --el-border-radius-circle: 50%;
+}
+
+// ============================================
+// 3. 按钮圆润
+// ============================================
+.el-button {
+  border-radius: 6px !important;
+
+  // [FIX] 默认按钮 Hover/Focus 状态（非 Primary/Link）
+  // 设计原则：保持文字颜色不变或使用深色，避免与背景对比度不足
+  &:focus,
+  &:hover {
+    border-color: var(--el-color-primary-light-5) !important;
+    // color 将由各类型按钮单独定义，避免全局覆盖导致 Primary 按钮文字变橙/红
+  }
+
+  &--primary {
+    background-color: var(--el-color-primary) !important;
+    border-color: var(--el-color-primary) !important;
+    color: #ffffff !important;  // 强制白色文字
+
+    &:hover,
+    &:focus {
+      background-color: var(--el-color-primary-light-3) !important;
+      border-color: var(--el-color-primary-light-3) !important;
+      color: #ffffff !important;  // [修复] Hover 保持白色文字，不变橙/红色
+    }
+
+    &:active {
+      background-color: var(--el-color-primary-dark-2) !important;
+      border-color: var(--el-color-primary-dark-2) !important;
+      color: #ffffff !important;
+    }
+  }
+
+  &--success {
+    background-color: #22c55e !important;
+    border-color: #22c55e !important;
+    color: #ffffff !important;
+
+    &:hover,
+    &:focus {
+      background-color: #4ade80 !important;
+      border-color: #4ade80 !important;
+      color: #ffffff !important;
+    }
+
+    &:active {
+      background-color: #16a34a !important;
+      border-color: #16a34a !important;
+      color: #ffffff !important;
+    }
+  }
+
+  &--warning {
+    background-color: #f59e0b !important;
+    border-color: #f59e0b !important;
+    color: #ffffff !important;
+
+    &:hover,
+    &:focus {
+      background-color: #fbbf24 !important;
+      border-color: #fbbf24 !important;
+      color: #ffffff !important;
+    }
+
+    &:active {
+      background-color: #d97706 !important;
+      border-color: #d97706 !important;
+      color: #ffffff !important;
+    }
+  }
+
+  &--danger {
+    background-color: #ea580c !important;
+    border-color: #ea580c !important;
+    color: #ffffff !important;
+
+    &:hover,
+    &:focus {
+      background-color: #f97316 !important;
+      border-color: #f97316 !important;
+      color: #ffffff !important;
+    }
+
+    &:active {
+      background-color: #c2410c !important;
+      border-color: #c2410c !important;
+      color: #ffffff !important;
+    }
+  }
+
+  // [MATERIAL DESIGN] Link 按钮特殊处理（操作列按钮）
+  // 设计原则：遵循 Material Design 3 Text Button 规范
+  // - Hover/Focus/Active 状态只改变背景透明度
+  // - 文字颜色始终保持不变，确保可读性
+  // - 通过背景深浅表达交互状态层次
+  // 参考实现：MetaTable.vue 中的 .mt-link-btn 类
+  &.is-link {
+    border: none !important;
+    background: transparent !important;
+    color: var(--yonyou-orange-600, #ea580c) !important;  // 固定使用 YonDesign 主色
+    padding: 4px 8px !important;
+    border-radius: var(--radius-sm, 4px) !important;
+
+    // Hover 状态：6% 透明度的橙色背景
+    &:hover,
+    &:focus {
+      background: rgba(234, 88, 12, 0.06) !important;  /* 6% opacity orange */
+      color: var(--yonyou-orange-600, #ea580c) !important;  /* 文字色不变 */
+      border: none !important;
+      box-shadow: none !important;
+    }
+
+    // Focus 状态（键盘导航）：12% 透明度
+    &:focus-visible {
+      background: rgba(234, 88, 12, 0.12) !important;  /* 12% opacity */
+      color: var(--yonyou-orange-600, #ea580c) !important;
+      outline: none !important;
+    }
+
+    // Active/Pressed 状态：16% 透明度
+    &:active {
+      background: rgba(234, 88, 12, 0.16) !important;  /* 16% opacity */
+      color: var(--yonyou-orange-600, #ea580c) !important;  /* 文字色仍然不变 */
+    }
+
+    // 覆盖所有 Element Plus 类型变体，统一使用 YonDesign 样式
+    &.el-button--danger,
+    &.el-button--warning,
+    &[class*="el-button--"] {
+      color: var(--yonyou-orange-600, #ea580c) !important;
+
+      &:hover,
+      &:focus,
+      &:active {
+        color: var(--yonyou-orange-600, #ea580c) !important;
+        background: rgba(234, 88, 12, 0.06) !important;  /* 统一使用 6% */
+      }
+    }
+  }
+}
+
+// ============================================
+// 4. 输入框圆润
+// ============================================
+.el-input__wrapper,
+.el-input__wrapper.is-focus {
+  border-radius: 6px !important;
+}
+
+.el-textarea__inner {
+  border-radius: 6px !important;
+}
+
+// ============================================
+// 5. 选择器圆润
+// ============================================
+.el-select__wrapper,
+.el-select__wrapper.is-focused {
+  border-radius: 6px !important;
+}
+
+.el-select-dropdown__item {
+  border-radius: 4px !important;
+  margin: 2px 4px !important;
+}
+
+// ============================================
+// 6. 标签圆润
+// ============================================
+.el-tag {
+  border-radius: 4px !important;
+}
+
+// ============================================
+// 7. 卡片圆润
+// ============================================
+.el-card {
+  border-radius: 8px !important;
+}
+
+// ============================================
+// 8. 弹窗圆润
+// ============================================
+.el-dialog {
+  border-radius: 8px !important;
+  
+  &__header {
+    border-radius: 8px 8px 0 0 !important;
+  }
+  
+  &__footer {
+    border-radius: 0 0 8px 8px !important;
+  }
+}
+
+.el-message-box {
+  border-radius: 8px !important;
+}
+
+// ============================================
+// 9. 抽屉圆润
+// ============================================
+.el-drawer {
+  border-radius: 8px 0 0 8px !important;
+}
+
+// ============================================
+// 10. 分页圆润
+// ============================================
+.el-pager li {
+  border-radius: 4px !important;
+  margin: 0 2px !important;
+}
+
+.el-pagination button {
+  border-radius: 4px !important;
+}
+
+// ============================================
+// 11. 表格圆润
+// ============================================
+.el-table {
+  border-radius: 6px !important;
+  overflow: hidden;
+  
+  &__header th.el-table__cell {
+    background-color: var(--el-fill-color-light) !important;
+  }
+}
+
+// ============================================
+// 12. 标签页圆润
+// ============================================
+.el-tabs__item {
+  border-radius: 6px 6px 0 0 !important;
+}
+
+// ============================================
+// 13. 下拉菜单圆润
+// ============================================
+.el-dropdown-menu {
+  border-radius: 6px !important;
+  
+  &__item {
+    border-radius: 4px !important;
+    margin: 2px 4px !important;
+  }
+}
+
+// ============================================
+// 14. 开关主题色
+// ============================================
+.el-switch {
+  &.is-checked {
+    --el-switch-on-color: var(--el-color-primary) !important;
+  }
+}
+
+// ============================================
+// 15. 滑块主题色
+// ============================================
+.el-slider {
+  --el-slider-main-bg-color: var(--el-color-primary) !important;
+  --el-slider-runway-bg-color: var(--el-fill-color-light) !important;
+}
+
+// ============================================
+// 16. 进度条主题色
+// ============================================
+.el-progress-bar__outer {
+  background-color: var(--el-fill-color-light) !important;
+}
+
+// ============================================
+// 17. 头像
+// ============================================
+.el-avatar {
+  border-radius: 50% !important;
+}
+
+// ============================================
+// 18. 步骤条
+// ============================================
+.el-step__title {
+  border-radius: 4px !important;
+}
+
+// ============================================
+// 19. 时间线
+// ============================================
+.el-timeline-item__node {
+  border-radius: 50% !important;
+}
+
+// ============================================
+// 20. 描述列表
+// ============================================
+.el-descriptions {
+  border-radius: 6px !important;
+  overflow: hidden;
+}
+
+// ============================================
+// 21. 空状态
+// ============================================
+.el-empty {
+  border-radius: 8px !important;
+}
+
+// ============================================
+// 22. 骨架屏
+// ============================================
+.el-skeleton__item {
+  border-radius: 4px !important;
+}
+
+// ============================================
+// 23. 结果页
+// ============================================
+.el-result {
+  border-radius: 8px !important;
+}
+
+// ============================================
+// 24. 日历
+// ============================================
+.el-calendar {
+  border-radius: 8px !important;
+  
+  .el-calendar-table td.is-today {
+    background-color: var(--el-color-primary-light-9) !important;
+    color: var(--el-color-primary) !important;
+  }
+}
+
+// ============================================
+// 25. 图片
+// ============================================
+.el-image {
+  border-radius: 6px !important;
+}
+
+// ============================================
+// 26. 链接
+// ============================================
+.el-link {
+  &--primary {
+    color: var(--el-color-primary) !important;
+    
+    &:hover,
+    &:focus {
+      color: var(--el-color-primary-light-3) !important;
+    }
+  }
+}
+
+// ============================================
+// 27. 统计数值
+// ============================================
+.el-statistic {
+  border-radius: 8px !important;
+  padding: 16px;
+  background: var(--el-fill-color-light);
+}
+
+// ============================================
+// 28. 段落选择
+// ============================================
+.el-segmented {
+  border-radius: 6px !important;
+}
+
+// ============================================
+// 29. 树形控件
+// ============================================
+.el-tree-node__content {
+  border-radius: 4px !important;
+}
+
+// ============================================
+// 30. 导航菜单
+// ============================================
+.el-menu-item,
+.el-sub-menu__title {
+  border-radius: 6px !important;
+}
+
+// ============================================
+// 31. 表格排序 - 仅激活状态显示主题色
+// ============================================
+.el-table th.ascending .sort-caret.ascending {
+  border-bottom-color: var(--el-color-primary) !important;
+}
+
+.el-table th.descending .sort-caret.descending {
+  border-top-color: var(--el-color-primary) !important;
+}
+
+// ============================================
+// 32. 表头悬停 - 不变色
+// ============================================
+.el-table th.el-table__cell:hover {
+  background-color: var(--el-fill-color-light) !important;
+}
+
+// ============================================
+// 33. 表格排序图标容器 - 背景透明
+// ============================================
+.el-table .caret-wrapper,
+.el-table .caret-wrapper:hover {
+  background: transparent !important;
+}
+
+// ============================================
+// 34. 警告提示
+// ============================================
+.el-alert {
+  border-radius: 6px !important;
+}

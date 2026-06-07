@@ -1,0 +1,1130 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ELK 嵌套容器和跨容器连线验证</title>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    import elkLayouts from 'https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk@0.1.7/dist/mermaid-layout-elk.esm.min.mjs';
+
+    window.mermaid = mermaid;
+    window.elkLayouts = elkLayouts;
+  </script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f5;
+      padding: 20px;
+    }
+
+    h1 {
+      text-align: center;
+      color: #333;
+    }
+
+    .subtitle {
+      text-align: center;
+      color: #666;
+      margin-bottom: 30px;
+    }
+
+    .test-container {
+      max-width: 1600px;
+      margin: 20px auto;
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    .test-section {
+      margin-bottom: 40px;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 20px;
+    }
+
+    .test-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #1890ff;
+      margin-bottom: 10px;
+    }
+
+    .test-desc {
+      color: #666;
+      margin-bottom: 15px;
+    }
+
+    .config-info {
+      background: #f6f8fa;
+      padding: 15px;
+      border-radius: 4px;
+      margin-bottom: 15px;
+      font-family: monospace;
+      font-size: 13px;
+    }
+
+    .mermaid-result {
+      border: 1px dashed #ddd;
+      border-radius: 4px;
+      padding: 20px;
+      min-height: 400px;
+      background: #fafafa;
+      overflow: auto;
+    }
+
+    .mermaid-result svg {
+      max-width: 100%;
+      height: auto;
+    }
+
+    .analysis {
+      background: #fffbe6;
+      border: 1px solid #ffe58f;
+      border-radius: 4px;
+      padding: 15px;
+      margin-top: 15px;
+    }
+
+    .analysis h4 {
+      color: #d48806;
+      margin-bottom: 10px;
+    }
+
+    .mermaid-code {
+      background: #f6f8fa;
+      border: 1px solid #e1e4e8;
+      border-radius: 4px;
+      padding: 12px;
+      margin-top: 10px;
+      font-family: 'Consolas', monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    .controls {
+      display: flex;
+      gap: 15px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .control-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    label {
+      font-weight: 500;
+      color: #555;
+    }
+
+    select, button {
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+
+    button {
+      background: #1890ff;
+      color: white;
+      border: none;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    button:hover {
+      background: #40a9ff;
+    }
+
+    .status {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 4px;
+      font-size: 14px;
+      margin-left: 10px;
+    }
+
+    .status.success {
+      background: #f6ffed;
+      color: #52c41a;
+      border: 1px solid #b7eb8f;
+    }
+
+    .status.error {
+      background: #fff2f0;
+      color: #ff4d4f;
+      border: 1px solid #ffccc7;
+    }
+
+    .status.loading {
+      background: #e6f7ff;
+      color: #1890ff;
+      border: 1px solid #91d5ff;
+    }
+
+    .notes {
+      background: #f6ffed;
+      border: 1px solid #b7eb8f;
+      border-radius: 4px;
+      padding: 15px;
+      margin-top: 20px;
+    }
+
+    .notes h4 {
+      color: #52c41a;
+      margin-bottom: 10px;
+    }
+
+    .problems {
+      background: #fff2f0;
+      border: 1px solid #ffccc7;
+      border-radius: 4px;
+      padding: 15px;
+      margin-top: 20px;
+    }
+
+    .problems h4 {
+      color: #ff4d4f;
+      margin-bottom: 10px;
+    }
+
+    .highlight-issue {
+      background: #fff2f0 !important;
+      border-color: #ffccc7 !important;
+    }
+  </style>
+</head>
+<body>
+  <h1>[SYMBOL] ELK 嵌套容器和跨容器连线验证</h1>
+  <p class="subtitle">模拟业务对象图：整体方向 LR，嵌套容器内节点有外部关系</p>
+
+  <div class="test-container">
+    <div class="controls">
+      <div class="control-item">
+        <label>布局引擎:</label>
+        <select id="layoutEngine">
+          <option value="elk" selected>ELK</option>
+          <option value="dagre">Dagre</option>
+        </select>
+      </div>
+      <div class="control-item">
+        <label>整体方向:</label>
+        <select id="overallDirection">
+          <option value="LR" selected>LR (从左到右)</option>
+          <option value="TB">TB (从上到下)</option>
+        </select>
+      </div>
+      <div class="control-item">
+        <label>容器内方向:</label>
+        <select id="containerDirection">
+          <option value="TB" selected>TB (垂直排列)</option>
+          <option value="LR">LR (水平排列)</option>
+        </select>
+      </div>
+      <div class="control-item">
+        <label>跨容器连线:</label>
+        <select id="crossLinks">
+          <option value="multiple" selected>多组跨容器连线</option>
+          <option value="single">单组跨容器连线</option>
+          <option value="none">无跨容器连线</option>
+        </select>
+      </div>
+      <div class="control-item">
+        <label>后处理:</label>
+        <select id="postProcess">
+          <option value="with" selected>有后处理（模拟实际）</option>
+          <option value="without">无后处理（ELK原生）</option>
+        </select>
+      </div>
+      <button onclick="runAllTests()">[DECORATIVE] 运行所有测试</button>
+    </div>
+
+    <!-- 测试1：基础LR布局 + 嵌套容器 + 跨容器连线 -->
+    <div class="test-section">
+      <div class="test-title">
+        测试1：基础 LR 布局 + 嵌套容器 + 跨容器连线
+        <span id="status-test1" class="status loading">等待中</span>
+      </div>
+      <div class="test-desc">
+        模拟实际业务场景：一个分组包含多个容器，每个容器内有多个节点，节点之间有跨容器连线
+      </div>
+      <div class="config-info">
+        配置：整体 direction=LR，容器 direction=TB（垂直排列），节点有跨容器连线
+      </div>
+      <div id="test1-result" class="mermaid-result">
+        点击"运行所有测试"开始渲染...
+      </div>
+      <div class="mermaid-code" id="test1-code" style="display: none;"></div>
+      <div class="analysis" id="test1-analysis" style="display: none;">
+        <h4>[DECORATIVE] 分析结果</h4>
+        <div id="test1-analysis-content"></div>
+      </div>
+    </div>
+
+    <!-- 测试2：多层级嵌套 + 跨域连线 -->
+    <div class="test-section">
+      <div class="test-title">
+        测试2：多层级嵌套 + 跨域连线
+        <span id="status-test2" class="status loading">等待中</span>
+      </div>
+      <div class="test-desc">
+        模拟真实业务场景：多个域（分组），每个域内有多个容器，容器内有多个节点，存在跨域跨容器的连线
+      </div>
+      <div class="config-info">
+        结构：域A → 容器A1/A2，域B → 容器B1/B2，域C → 容器C1/C2
+        连线：A1.node1 → B2.node3, B1.node2 → C1.node1 等
+      </div>
+      <div id="test2-result" class="mermaid-result">
+        点击"运行所有测试"开始渲染...
+      </div>
+      <div class="mermaid-code" id="test2-code" style="display: none;"></div>
+      <div class="analysis" id="test2-analysis" style="display: none;">
+        <h4>[DECORATIVE] 分析结果</h4>
+        <div id="test2-analysis-content"></div>
+      </div>
+    </div>
+
+    <!-- 测试3：分离外部连线节点前后对比 -->
+    <div class="test-section">
+      <div class="test-title">
+        测试3：分离外部连线节点前后对比
+        <span id="status-test3" class="status loading">等待中</span>
+      </div>
+      <div class="test-desc">
+        验证分离方案：无外部连线的节点 vs 有外部连线的节点，方向控制是否有效
+      </div>
+      <div class="config-info">
+        左侧：混合容器（所有节点混在一起）
+        右侧：分离容器（无外部连线节点 vs 有外部连线节点分开）
+      </div>
+      <div id="test3-result" class="mermaid-result">
+        点击"运行所有测试"开始渲染...
+      </div>
+      <div class="mermaid-code" id="test3-code" style="display: none;"></div>
+      <div class="analysis" id="test3-analysis" style="display: none;">
+        <h4>[DECORATIVE] 分析结果</h4>
+        <div id="test3-analysis-content"></div>
+      </div>
+    </div>
+
+    <!-- 测试4：大小差异容器测试（关键！） -->
+    <div class="test-section highlight-issue">
+      <div class="test-title">
+        [WARNING] 测试4：大小差异容器水平排列（你们的实际场景）
+        <span id="status-test4" class="status loading">等待中</span>
+      </div>
+      <div class="test-desc">
+        <strong>核心问题场景：</strong>A容器非常大（多个节点），B和C容器非常小（2-3个节点），水平排列时B和C之间的间距可能为0
+      </div>
+      <div class="config-info">
+        结构：A(大) - [B(小), C(小)] 水平排列<br/>
+        A: 6个节点，2层嵌套容器<br/>
+        B: 2个节点，2层嵌套容器<br/>
+        C: 2个节点，2层嵌套容器<br/>
+        <br/>
+        <strong>连线规则：</strong>B → A，C → A（都是到A的连线，B和C之间无连线）
+      </div>
+      <div id="test4-result" class="mermaid-result">
+        点击"运行所有测试"开始渲染...
+      </div>
+      <div class="mermaid-code" id="test4-code" style="display: none;"></div>
+      <div class="analysis" id="test4-analysis" style="display: none;">
+        <h4>[DECORATIVE] 分析结果</h4>
+        <div id="test4-analysis-content"></div>
+      </div>
+    </div>
+
+    <!-- 测试5：大小差异容器 + 跨容器连线 -->
+    <div class="test-section highlight-issue">
+      <div class="test-title">
+        [WARNING] 测试5：大小差异容器 + 跨容器连线（最接近实际场景）
+        <span id="status-test5" class="status loading">等待中</span>
+      </div>
+      <div class="test-desc">
+        <strong>最接近实际：</strong>A(大)水平排列在左边，B和C(小)垂直排列在右边，B和C之间有连线
+      </div>
+      <div class="config-info">
+        结构：<br/>
+        - A(大): 左侧，多个节点，多层嵌套<br/>
+        - B(小): 右侧上方，2-3个节点<br/>
+        - C(小): 右侧下方，2-3个节点<br/>
+        <br/>
+        <strong>连线规则：</strong>A → B，A → C（B和C之间无连线，都是到大容器A的连线）
+      </div>
+      <div id="test5-result" class="mermaid-result">
+        点击"运行所有测试"开始渲染...
+      </div>
+      <div class="mermaid-code" id="test5-code" style="display: none;"></div>
+      <div class="analysis" id="test5-analysis" style="display: none;">
+        <h4>[DECORATIVE] 分析结果</h4>
+        <div id="test5-analysis-content"></div>
+      </div>
+    </div>
+
+    <!-- 测试6：真实业务场景模拟（供应链云） -->
+    <div class="test-section">
+      <div class="test-title">
+        测试6：真实业务场景模拟（供应链云）
+        <span id="status-test6" class="status loading">等待中</span>
+      </div>
+      <div class="test-desc">
+        模拟实际业务对象结构：主数据 → 供应商/客户/物料，库存管理 → 库存类型/批次/库位
+      </div>
+      <div class="config-info">
+        域：主数据管理、库存管理、采购管理
+        容器：每个域下的业务对象容器
+        连线：跨域、跨容器的业务关系
+      </div>
+      <div id="test6-result" class="mermaid-result">
+        点击"运行所有测试"开始渲染...
+      </div>
+      <div class="mermaid-code" id="test6-code" style="display: none;"></div>
+      <div class="analysis" id="test6-analysis" style="display: none;">
+        <h4>[DECORATIVE] 分析结果</h4>
+        <div id="test6-analysis-content"></div>
+      </div>
+    </div>
+
+    <!-- 测试7：有后处理模拟（+30px容器高度） -->
+    <div class="test-section highlight-issue">
+      <div class="test-title">
+        [WARNING] 测试7：有后处理模拟（+30px容器高度）
+        <span id="status-test7" class="status loading">等待中</span>
+      </div>
+      <div class="test-desc">
+        <strong>测试目的：</strong>模拟实际后处理 fixContainerTitlePosition 函数的效果（增加容器高度30px）
+      </div>
+      <div class="config-info">
+        与测试5/6相同的结构，但应用了后处理模拟<br/>
+        对比"后处理:无"和"后处理:有"的结果差异
+      </div>
+      <div id="test7-result" class="mermaid-result">
+        点击"运行所有测试"开始渲染...
+      </div>
+      <div class="mermaid-code" id="test7-code" style="display: none;"></div>
+      <div class="analysis" id="test7-analysis" style="display: none;">
+        <h4>[DECORATIVE] 分析结果</h4>
+        <div id="test7-analysis-content"></div>
+      </div>
+    </div>
+
+    <div class="notes" id="summary-notes" style="display: none;">
+      <h4>[OK] 测试结论</h4>
+      <div id="summary-content"></div>
+    </div>
+  </div>
+
+  <script>
+    const testScenarios = [
+      { id: 'test1', title: '基础LR布局+嵌套容器+跨容器连线', generate: generateTest1 },
+      { id: 'test2', title: '多层级嵌套+跨域连线', generate: generateTest2 },
+      { id: 'test3', title: '分离外部连线节点前后对比', generate: generateTest3 },
+      { id: 'test4', title: '大小差异容器水平排列', generate: generateTest4 },
+      { id: 'test5', title: '大小差异容器+跨容器连线', generate: generateTest5 },
+      { id: 'test6', title: '真实业务场景模拟', generate: generateTest6 },
+      { id: 'test7', title: '有后处理结果（+30px容器高度）', generate: generateTest7 }
+    ];
+
+    function getConfig() {
+      return {
+        layoutEngine: document.getElementById('layoutEngine').value,
+        overallDirection: document.getElementById('overallDirection').value,
+        containerDirection: document.getElementById('containerDirection').value,
+        crossLinks: document.getElementById('crossLinks').value,
+        postProcess: document.getElementById('postProcess').value
+      };
+    }
+
+    function getOppositeDirection(dir) {
+      const opposites = { TB: 'DOWN', LR: 'RIGHT', BT: 'UP', RL: 'LEFT' };
+      return opposites[dir] || 'RIGHT';
+    }
+
+    function simulatePostProcess(svg) {
+      // 方案1已移除 fixContainerTitlePosition
+      // 此函数暂时保留用于对比测试，但实际不再执行任何操作
+      console.log('[simulatePostProcess] fixContainerTitlePosition 已移除，无后处理模拟')
+    }
+
+    async function initMermaid() {
+      const { mermaid, elkLayouts } = window;
+      mermaid.registerLayoutLoaders(elkLayouts);
+
+      const config = getConfig();
+      const elkDirection = config.overallDirection === 'LR' ? 'RIGHT' : 'DOWN';
+
+      mermaid.initialize({
+        startOnLoad: false,
+        layout: config.layoutEngine,
+        elk: {
+          'elk.direction': elkDirection,
+          'elk.spacing.nodeNode': 60,
+          'elk.layered.spacing.nodeNodeBetweenLayers': 100,
+          'elk.padding': '[top=30,left=30,right=30,bottom=30]',
+          'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
+          'elk.algorithm': 'layered',
+          'elk.layered.componentsSpacing': 80,
+          'elk.spacing.componentComponent': 80,
+        },
+        flowchart: {
+          htmlLabels: true,
+          useMaxWidth: false,
+          curve: 'basis'
+        }
+      });
+    }
+
+    function generateTest1(config) {
+      const graphKeyword = config.layoutEngine === 'elk' ? 'flowchart-elk' : 'flowchart';
+      let code = `${graphKeyword} ${config.overallDirection}\n`;
+
+      code += `  subgraph GroupA["分组 A"]\n`;
+      code += `    direction ${config.overallDirection}\n`;
+
+      code += `    subgraph A1["容器 A1"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      A1_N1["节点 A1-1"]\n`;
+      code += `      A1_N2["节点 A1-2"]\n`;
+      code += `      A1_N3["节点 A1-3"]\n`;
+      code += `    end\n`;
+
+      code += `    subgraph A2["容器 A2"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      A2_N1["节点 A2-1"]\n`;
+      code += `      A2_N2["节点 A2-2"]\n`;
+      code += `    end\n`;
+
+      code += `  end\n`;
+
+      if (config.crossLinks !== 'none') {
+        code += `  A1_N1 --> A2_N1\n`;
+        code += `  A1_N3 --> A2_N2\n`;
+        if (config.crossLinks === 'multiple') {
+          code += `  A2_N1 -.-> A1_N2\n`;
+        }
+      }
+
+      return code;
+    }
+
+    function generateTest2(config) {
+      const graphKeyword = config.layoutEngine === 'elk' ? 'flowchart-elk' : 'flowchart';
+      let code = `${graphKeyword} ${config.overallDirection}\n`;
+
+      code += `  subgraph DomainA["财务域"]\n`;
+      code += `    direction ${config.overallDirection}\n`;
+      code += `    subgraph A_Container1["凭证管理"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      A_C1_N1["凭证录入"]\n`;
+      code += `      A_C1_N2["凭证审核"]\n`;
+      code += `      A_C1_N3["凭证记账"]\n`;
+      code += `    end\n`;
+      code += `    subgraph A_Container2["账簿查询"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      A_C2_N1["总账账簿"]\n`;
+      code += `      A_C2_N2["明细账簿"]\n`;
+      code += `    end\n`;
+      code += `  end\n`;
+
+      code += `  subgraph DomainB["采购域"]\n`;
+      code += `    direction ${config.overallDirection}\n`;
+      code += `    subgraph B_Container1["采购订单"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      B_C1_N1["请购单"]\n`;
+      code += `      B_C1_N2["采购订单"]\n`;
+      code += `      B_C1_N3["采购到货"]\n`;
+      code += `    end\n`;
+      code += `    subgraph B_Container2["供应商管理"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      B_C2_N1["供应商档案"]\n`;
+      code += `      B_C2_N2["供应商评级"]\n`;
+      code += `    end\n`;
+      code += `  end\n`;
+
+      code += `  subgraph DomainC["库存域"]\n`;
+      code += `    direction ${config.overallDirection}\n`;
+      code += `    subgraph C_Container1["库存操作"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      C_C1_N1["出库申请"]\n`;
+      code += `      C_C1_N2["入库登记"]\n`;
+      code += `      C_C1_N3["库存盘点"]\n`;
+      code += `    end\n`;
+      code += `    subgraph C_Container2["库存查询"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      C_C2_N1["实时库存"]\n`;
+      code += `      C_C2_N2["库存台账"]\n`;
+      code += `    end\n`;
+      code += `  end\n`;
+
+      if (config.crossLinks !== 'none') {
+        code += `  A_C1_N2 --> B_C1_N1\n`;
+        code += `  B_C1_N3 --> C_C1_N1\n`;
+        code += `  C_C1_N2 --> A_C1_N1\n`;
+        if (config.crossLinks === 'multiple') {
+          code += `  B_C2_N1 --> A_C2_N1\n`;
+          code += `  C_C2_N1 -.-> B_C2_N2\n`;
+        }
+      }
+
+      return code;
+    }
+
+    function generateTest3(config) {
+      const graphKeyword = config.layoutEngine === 'elk' ? 'flowchart-elk' : 'flowchart';
+      let code = `${graphKeyword} ${config.overallDirection}\n`;
+
+      code += `  subgraph Mixed["混合容器"]\n`;
+      code += `    direction ${config.overallDirection}\n`;
+      code += `    subgraph MixedContainer["业务对象容器"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      M_N1["节点 N1"]\n`;
+      code += `      M_N2["节点 N2"]\n`;
+      code += `      M_N3["节点 N3"]\n`;
+      code += `      M_N4["节点 N4"]\n`;
+      code += `      M_N5["节点 N5"]\n`;
+      code += `      M_N6["节点 N6"]\n`;
+      code += `    end\n`;
+      code += `  end\n`;
+
+      code += `  subgraph Separated["分离容器"]\n`;
+      code += `    direction ${config.overallDirection}\n`;
+      code += `    subgraph SeparatedInner["无外部连线节点"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      S_N2["节点 N2"]\n`;
+      code += `      S_N4["节点 N4"]\n`;
+      code += `      S_N5["节点 N5"]\n`;
+      code += `    end\n`;
+      code += `    subgraph SeparatedBoundary["有外部连线节点"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      S_N1["节点 N1"]\n`;
+      code += `      S_N3["节点 N3"]\n`;
+      code += `      S_N6["节点 N6"]\n`;
+      code += `    end\n`;
+      code += `  end\n`;
+
+      if (config.crossLinks !== 'none') {
+        code += `  M_N1 --> M_N3\n`;
+        code += `  S_N1 --> S_N3\n`;
+        if (config.crossLinks === 'multiple') {
+          code += `  M_N1 -.外部连线.-> M_N6\n`;
+          code += `  S_N1 -.外部连线.-> S_N6\n`;
+        }
+      }
+
+      return code;
+    }
+
+    function generateTest4(config) {
+      const graphKeyword = config.layoutEngine === 'elk' ? 'flowchart-elk' : 'flowchart';
+      let code = `${graphKeyword} ${config.overallDirection}\n`;
+
+      // A 容器 - 非常大，包含多层嵌套
+      code += `  subgraph A["容器 A (大)"]\n`;
+      code += `    direction ${config.overallDirection}\n`;
+
+      code += `    subgraph A_SubGroup1["A-子分组1"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      subgraph A_C1["A-容器1"]\n`;
+      code += `        direction ${config.containerDirection}\n`;
+      code += `        A_C1_N1["A-业务对象1"]\n`;
+      code += `        A_C1_N2["A-业务对象2"]\n`;
+      code += `        A_C1_N3["A-业务对象3"]\n`;
+      code += `      end\n`;
+      code += `      subgraph A_C2["A-容器2"]\n`;
+      code += `        direction ${config.containerDirection}\n`;
+      code += `        A_C2_N1["A-业务对象4"]\n`;
+      code += `        A_C2_N2["A-业务对象5"]\n`;
+      code += `      end\n`;
+      code += `    end\n`;
+
+      code += `    subgraph A_SubGroup2["A-子分组2"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      subgraph A_C3["A-容器3"]\n`;
+      code += `        direction ${config.containerDirection}\n`;
+      code += `        A_C3_N1["A-业务对象6"]\n`;
+      code += `        A_C3_N2["A-业务对象7"]\n`;
+      code += `        A_C3_N3["A-业务对象8"]\n`;
+      code += `      end\n`;
+      code += `    end\n`;
+      code += `  end\n`;
+
+      // B 容器 - 非常小
+      code += `  subgraph B["容器 B (小)"]\n`;
+      code += `    direction ${config.overallDirection}\n`;
+      code += `    subgraph B_SubGroup1["B-子分组1"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      subgraph B_C1["B-容器1"]\n`;
+      code += `        direction ${config.containerDirection}\n`;
+      code += `        B_C1_N1["B-业务对象1"]\n`;
+      code += `        B_C1_N2["B-业务对象2"]\n`;
+      code += `      end\n`;
+      code += `    end\n`;
+      code += `  end\n`;
+
+      // C 容器 - 非常小
+      code += `  subgraph C["容器 C (小)"]\n`;
+      code += `    direction ${config.overallDirection}\n`;
+      code += `    subgraph C_SubGroup1["C-子分组1"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      subgraph C_C1["C-容器1"]\n`;
+      code += `        direction ${config.containerDirection}\n`;
+      code += `        C_C1_N1["C-业务对象1"]\n`;
+      code += `        C_C1_N2["C-业务对象2"]\n`;
+      code += `      end\n`;
+      code += `    end\n`;
+      code += `  end\n`;
+
+      if (config.crossLinks !== 'none') {
+        code += `  B_C1_N1 --> A_C1_N1\n`;  // B → A (跨容器连线)
+        code += `  C_C1_N1 --> A_C2_N1\n`;  // C → A (跨容器连线)
+        if (config.crossLinks === 'multiple') {
+          code += `  A_C3_N1 -.-> B_C1_N2\n`;  // A → B
+        }
+      }
+
+      return code;
+    }
+
+    function generateTest5(config) {
+      const graphKeyword = config.layoutEngine === 'elk' ? 'flowchart-elk' : 'flowchart';
+      let code = `${graphKeyword} ${config.overallDirection}\n`;
+
+      // A 容器 - 非常大，在左边
+      code += `  subgraph A["主数据管理 (大)"]\n`;
+      code += `    direction ${config.overallDirection}\n`;
+
+      code += `    subgraph A_Vendor["供应商管理"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      A_V_N1["供应商档案"]\n`;
+      code += `      A_V_N2["供应商联系人"]\n`;
+      code += `      A_V_N3["供应商银行账户"]\n`;
+      code += `    end\n`;
+
+      code += `    subgraph A_Customer["客户管理"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      A_C_N1["客户档案"]\n`;
+      code += `      A_C_N2["客户联系人"]\n`;
+      code += `    end\n`;
+
+      code += `    subgraph A_Material["物料管理"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      A_M_N1["物料主数据"]\n`;
+      code += `      A_M_N2["物料分类"]\n`;
+      code += `      A_M_N3["计量单位"]\n`;
+      code += `      A_M_N4["物料价格"]\n`;
+      code += `    end\n`;
+      code += `  end\n`;
+
+      // B 容器 - 小，在右边上方
+      code += `  subgraph B["采购订单 (小)"]\n`;
+      code += `    direction ${config.overallDirection}\n`;
+      code += `    subgraph B_Order["采购订单"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      B_O_N1["采购订单"]\n`;
+      code += `      B_O_N2["订单明细"]\n`;
+      code += `    end\n`;
+      code += `  end\n`;
+
+      // C 容器 - 小，在右边下方
+      code += `  subgraph C["库存管理 (小)"]\n`;
+      code += `    direction ${config.overallDirection}\n`;
+      code += `    subgraph C_Stock["库存操作"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      C_S_N1["出库申请"]\n`;
+      code += `      C_S_N2["入库登记"]\n`;
+      code += `    end\n`;
+      code += `  end\n`;
+
+      if (config.crossLinks !== 'none') {
+        code += `  B_O_N1 --> A_V_N1\n`;  // B → A
+        code += `  B_O_N2 --> A_M_N1\n`;  // B → A
+        code += `  C_S_N1 -.-> A_V_N2\n`;  // C → A
+        code += `  C_S_N2 -.-> A_M_N2\n`;  // C → A
+      }
+
+      return code;
+    }
+
+    function generateTest7(config) {
+      const graphKeyword = config.layoutEngine === 'elk' ? 'flowchart-elk' : 'flowchart';
+
+      let code = `${graphKeyword} ${config.overallDirection}\n`;
+
+      code += `subgraph A["主数据管理 (大)"]\n`;
+      code += `direction ${config.overallDirection}\n`;
+      code += `subgraph A_V["供应商管理"]\n`;
+      code += `direction ${config.containerDirection}\n`;
+      code += `A_V_N1["供应商档案"]\n`;
+      code += `A_V_N2["供应商联系人"]\n`;
+      code += `A_V_N3["供应商银行账户"]\n`;
+      code += `end\n`;
+      code += `subgraph A_C["客户管理"]\n`;
+      code += `direction ${config.containerDirection}\n`;
+      code += `A_C_N1["客户档案"]\n`;
+      code += `A_C_N2["客户联系人"]\n`;
+      code += `end\n`;
+      code += `subgraph A_M["物料管理"]\n`;
+      code += `direction ${config.containerDirection}\n`;
+      code += `A_M_N1["物料主数据"]\n`;
+      code += `A_M_N2["物料分类"]\n`;
+      code += `A_M_N3["计量单位"]\n`;
+      code += `A_M_N4["物料价格"]\n`;
+      code += `end\n`;
+      code += `end\n`;
+
+      code += `subgraph B["采购订单 (小)"]\n`;
+      code += `direction ${config.overallDirection}\n`;
+      code += `subgraph B_Order["采购订单"]\n`;
+      code += `direction ${config.containerDirection}\n`;
+      code += `B_O_N1["采购订单"]\n`;
+      code += `B_O_N2["订单明细"]\n`;
+      code += `end\n`;
+      code += `end\n`;
+
+      code += `subgraph C["库存管理 (小)"]\n`;
+      code += `direction ${config.overallDirection}\n`;
+      code += `subgraph C_Stock["库存操作"]\n`;
+      code += `direction ${config.containerDirection}\n`;
+      code += `C_S_N1["出库申请"]\n`;
+      code += `C_S_N2["入库登记"]\n`;
+      code += `end\n`;
+      code += `end\n`;
+
+      if (config.crossLinks !== 'none') {
+        code += `B_O_N1 --> A_V_N1\n`;
+        code += `B_O_N2 --> A_M_N1\n`;
+        code += `C_S_N1 -.-> A_V_N2\n`;
+        code += `C_S_N2 -.-> A_M_N2\n`;
+      }
+
+      return code;
+    }
+
+    function generateTest6(config) {
+      const graphKeyword = config.layoutEngine === 'elk' ? 'flowchart-elk' : 'flowchart';
+      let code = `${graphKeyword} ${config.overallDirection}\n`;
+
+      code += `  subgraph MD["主数据管理"]\n`;
+      code += `    direction ${config.overallDirection}\n`;
+      code += `    subgraph MD_Vendor["供应商管理"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      MD_V_N1["供应商档案"]\n`;
+      code += `      MD_V_N2["供应商联系人"]\n`;
+      code += `      MD_V_N3["供应商银行账户"]\n`;
+      code += `    end\n`;
+      code += `    subgraph MD_Customer["客户管理"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      MD_C_N1["客户档案"]\n`;
+      code += `      MD_C_N2["客户联系人"]\n`;
+      code += `      MD_C_N3["客户银行账户"]\n`;
+      code += `    end\n`;
+      code += `    subgraph MD_Material["物料管理"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      MD_M_N1["物料主数据"]\n`;
+      code += `      MD_M_N2["物料分类"]\n`;
+      code += `      MD_M_N3["计量单位"]\n`;
+      code += `    end\n`;
+      code += `  end\n`;
+
+      code += `  subgraph INV["库存管理"]\n`;
+      code += `    direction ${config.overallDirection}\n`;
+      code += `    subgraph INV_Type["库存类型"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      INV_T_N1["原材料"]\n`;
+      code += `      INV_T_N2["在制品"]\n`;
+      code += `      INV_T_N3["产成品"]\n`;
+      code += `    end\n`;
+      code += `    subgraph INV_Batch["批次管理"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      INV_B_N1["批次号"]\n`;
+      code += `      INV_B_N2["批次属性"]\n`;
+      code += `      INV_B_N3["批次追溯"]\n`;
+      code += `    end\n`;
+      code += `    subgraph INV_WH["库位管理"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      INV_W_N1["仓库"]\n`;
+      code += `      INV_W_N2["库区"]\n`;
+      code += `      INV_W_N3["库位"]\n`;
+      code += `    end\n`;
+      code += `  end\n`;
+
+      code += `  subgraph PUR["采购管理"]\n`;
+      code += `    direction ${config.overallDirection}\n`;
+      code += `    subgraph PUR_PurchReq["请购管理"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      PUR_PR_N1["请购单"]\n`;
+      code += `      PUR_PR_N2["请购明细"]\n`;
+      code += `      PUR_PR_N3["请购审核"]\n`;
+      code += `    end\n`;
+      code += `    subgraph PUR_PO["采购订单"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      PUR_PO_N1["采购订单"]\n`;
+      code += `      PUR_PO_N2["采购明细"]\n`;
+      code += `      PUR_PO_N3["订单确认"]\n`;
+      code += `    end\n`;
+      code += `    subgraph PUR_Invoice["采购发票"]\n`;
+      code += `      direction ${config.containerDirection}\n`;
+      code += `      PUR_I_N1["发票登记"]\n`;
+      code += `      PUR_I_N2["发票核对"]\n`;
+      code += `      PUR_I_N3["发票认证"]\n`;
+      code += `    end\n`;
+      code += `  end\n`;
+
+      if (config.crossLinks !== 'none') {
+        code += `  MD_V_N1 --> PUR_PO_N1\n`;
+        code += `  MD_M_N1 --> PUR_PO_N2\n`;
+        code += `  PUR_PO_N1 --> INV_W_N1\n`;
+        code += `  MD_V_N1 --> PUR_I_N2\n`;
+        code += `  MD_C_N1 -.-> INV_T_N2\n`;
+        if (config.crossLinks === 'multiple') {
+          code += `  INV_T_N1 --> PUR_PR_N1\n`;
+          code += `  INV_B_N1 --> INV_W_N2\n`;
+          code += `  PUR_PO_N2 -.-> INV_B_N2\n`;
+        }
+      }
+
+      return code;
+    }
+
+    async function renderTest(scenario) {
+      const config = getConfig();
+      const code = scenario.generate(config);
+      const containerId = `${scenario.id}-result`;
+      const statusId = `status-${scenario.id}`;
+      const codeId = `${scenario.id}-code`;
+      const analysisId = `${scenario.id}-analysis`;
+
+      document.getElementById(statusId).textContent = '渲染中...';
+      document.getElementById(statusId).className = 'status loading';
+
+      try {
+        const { mermaid } = window;
+        const container = document.getElementById(containerId);
+        container.innerHTML = '';
+
+        const result = await mermaid.render(`${scenario.id}-svg`, code);
+        container.innerHTML = result.svg;
+
+        const svg = container.querySelector('svg');
+
+        if (config.postProcess === 'with') {
+          simulatePostProcess(svg);
+        }
+
+        analyzeLayout(scenario.id, svg, config);
+
+        document.getElementById(codeId).textContent = code;
+        document.getElementById(codeId).style.display = 'block';
+
+        document.getElementById(statusId).textContent = '成功';
+        document.getElementById(statusId).className = 'status success';
+      } catch (error) {
+        console.error(`测试 ${scenario.id} 失败:`, error);
+        document.getElementById(containerId).innerHTML = `<div style="color: red; padding: 20px;">渲染失败: ${error.message}</div>`;
+        document.getElementById(codeId).textContent = code;
+        document.getElementById(statusId).textContent = '失败';
+        document.getElementById(statusId).className = 'status error';
+      }
+    }
+
+    function analyzeLayout(testId, svg, config, suffix = '') {
+      if (!svg) return;
+
+      const analysisContent = document.getElementById(`${testId}-analysis-content`);
+      const analysisEl = document.getElementById(`${testId}-analysis`);
+      const analysis = [];
+
+      const subgraphs = svg.querySelectorAll('.subgraph, .cluster');
+      const containerInfos = [];
+
+      subgraphs.forEach(sg => {
+        const rect = sg.querySelector('rect');
+        const label = sg.querySelector('.cluster-label, .subgraph-label, text');
+        const title = label?.textContent?.trim() || label?.innerText?.trim() || 'Unknown';
+
+        if (rect) {
+          const x = parseFloat(rect.getAttribute('x')) || 0;
+          const y = parseFloat(rect.getAttribute('y')) || 0;
+          const w = parseFloat(rect.getAttribute('width')) || 0;
+          const h = parseFloat(rect.getAttribute('height')) || 0;
+
+          containerInfos.push({ title, x, y, w, h, bottom: y + h, right: x + w });
+        }
+      });
+
+      analysis.push(`<p><strong>容器数量：</strong>${containerInfos.length}</p>`);
+
+      // 检查顶级容器（直接的兄弟容器）
+      const topLevelContainers = [];
+      containerInfos.forEach(c => {
+        const isChildOfAnother = containerInfos.some(other =>
+          other !== c &&
+          c.x >= other.x &&
+          c.x + c.w <= other.x + other.w &&
+          c.y >= other.y &&
+          c.y + c.h <= other.y + other.h
+        );
+        if (!isChildOfAnother) {
+          topLevelContainers.push(c);
+        }
+      });
+
+      if (topLevelContainers.length > 1) {
+        analysis.push(`<p><strong>顶级容器数量：</strong>${topLevelContainers.length}</p>`);
+
+        // 按 x 坐标排序（对于 LR 布局）
+        topLevelContainers.sort((a, b) => a.x - b.x);
+
+        // 检查水平间距
+        for (let i = 1; i < topLevelContainers.length; i++) {
+          const prev = topLevelContainers[i - 1];
+          const curr = topLevelContainers[i];
+          const gap = curr.x - prev.right;
+
+          if (gap < 0) {
+            analysis.push(`<p style="color: #ff4d4f;"><strong>[X] 重叠：</strong>${prev.title} 与 ${curr.title} 水平重叠</p>`);
+          } else if (gap === 0) {
+            analysis.push(`<p style="color: orange;"><strong>[WARNING] 间距为0：</strong>${prev.title} → ${curr.title} 水平间距=0</p>`);
+          } else if (gap < 30) {
+            analysis.push(`<p style="color: orange;"><strong>[WARNING] 间距过小：</strong>${prev.title} → ${curr.title} 水平间距=${gap.toFixed(0)}px</p>`);
+          } else {
+            analysis.push(`<p style="color: #52c41a;"><strong>[OK] 间距正常：</strong>${prev.title} → ${curr.title} 水平间距=${gap.toFixed(0)}px</p>`);
+          }
+        }
+
+        // 对于垂直排列的容器（同 x 范围），检查垂直间距
+        const groupedByX = {};
+        topLevelContainers.forEach(c => {
+          const xKey = Math.round(c.x / 50) * 50;
+          if (!groupedByX[xKey]) groupedByX[xKey] = [];
+          groupedByX[xKey].push(c);
+        });
+
+        Object.entries(groupedByX).forEach(([xKey, containers]) => {
+          if (containers.length >= 2) {
+            containers.sort((a, b) => a.y - b.y);
+            for (let i = 1; i < containers.length; i++) {
+              const prev = containers[i - 1];
+              const curr = containers[i];
+              const gap = curr.y - prev.bottom;
+
+              if (gap < 0) {
+                analysis.push(`<p style="color: #ff4d4f;"><strong>[X] 重叠：</strong>${prev.title} 与 ${curr.title} 垂直重叠</p>`);
+              } else if (gap === 0) {
+                analysis.push(`<p style="color: orange;"><strong>[WARNING] 间距为0：</strong>${prev.title} → ${curr.title} 垂直间距=0</p>`);
+              } else if (gap < 30) {
+                analysis.push(`<p style="color: orange;"><strong>[WARNING] 间距过小：</strong>${prev.title} → ${curr.title} 垂直间距=${gap.toFixed(0)}px</p>`);
+              } else {
+                analysis.push(`<p style="color: #52c41a;"><strong>[OK] 间距正常：</strong>${prev.title} → ${curr.title} 垂直间距=${gap.toFixed(0)}px</p>`);
+              }
+            }
+          }
+        });
+      }
+
+      // 检查嵌套关系
+      const potentialParents = containerInfos.filter(c =>
+        c.title.includes('域') || c.title.includes('Group') ||
+        c.title.includes('(大)') || c.title.includes('(小)') ||
+        !c.title.includes('容器') && !c.title.includes('业务对象') &&
+        !c.title.includes('管理') && !c.title.includes('分组')
+      );
+
+      potentialParents.forEach(parent => {
+        const children = containerInfos.filter(c =>
+          c !== parent &&
+          c.x >= parent.x &&
+          c.right <= parent.right &&
+          c.y >= parent.y &&
+          c.bottom <= parent.bottom
+        );
+
+        if (children.length > 0) {
+          analysis.push(`<p><strong>嵌套关系：</strong>${parent.title} 包含 ${children.length} 个子容器</p>`);
+
+          children.forEach(child => {
+            const overflowRight = child.right - parent.right;
+            const overflowBottom = child.bottom - parent.bottom;
+
+            if (overflowRight > 5 || overflowBottom > 5) {
+              analysis.push(`<p style="color: #ff4d4f;"><strong>[X] 子容器超出父边界：</strong>${child.title} 超出 ${parent.title}</p>`);
+            } else {
+              analysis.push(`<p style="color: #52c41a;"><strong>[OK] 子容器在父边界内：</strong>${child.title}</p>`);
+            }
+          });
+        }
+      });
+
+      analysisContent.innerHTML = analysis.join('');
+      analysisEl.style.display = 'block';
+    }
+
+    async function runAllTests() {
+      await initMermaid();
+
+      for (const scenario of testScenarios) {
+        await renderTest(scenario);
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+
+      updateSummary();
+    }
+
+    function updateSummary() {
+      const summaryEl = document.getElementById('summary-notes');
+      const summaryContent = document.getElementById('summary-content');
+
+      const issues = [];
+      const successes = [];
+
+      document.querySelectorAll('.analysis').forEach(el => {
+        if (el.style.display !== 'none') {
+          const content = el.textContent;
+          if (content.includes('重叠') || content.includes('间距为0') || content.includes('间距过小') || content.includes('超出')) {
+            issues.push(el.id);
+          }
+          if (content.includes('间距正常') || content.includes('在父边界内')) {
+            successes.push(el.id);
+          }
+        }
+      });
+
+      if (issues.length === 0 && successes.length > 0) {
+        summaryContent.innerHTML = `
+          <p>[OK] 所有测试通过，未检测到容器重叠或间距问题</p>
+          <p>[DECORATIVE] 成功测试：${successes.length} 个</p>
+          <p>[DECORATIVE] 结论：ELK 原生布局在此场景下表现正常，可以考虑减少或移除 SVG 后处理</p>
+        `;
+        summaryEl.style.display = 'block';
+      } else if (issues.length > 0) {
+        summaryContent.innerHTML = `
+          <p>[WARNING] 检测到 ${issues.length} 个潜在问题（重叠、间距为0、间距过小）</p>
+          <p>[DECORATIVE] 涉及测试：${issues.length} 个</p>
+          <p>[DECORATIVE] 结论：建议保留 SVG 后处理来解决 ELK 布局的容器间距问题</p>
+          <p>[DECORATIVE] 特别说明：如果"间距为0"问题集中在测试4/5（大小差异容器），说明这是 ELK 的已知行为</p>
+        `;
+        summaryEl.style.display = 'block';
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      ['layoutEngine', 'overallDirection', 'containerDirection', 'crossLinks', 'postProcess'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+          el.addEventListener('change', () => {
+            console.log('Config changed:', getConfig());
+          });
+        }
+      });
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,268 @@
+# ============================================
+# 变更订阅对象
+# 说明: 存储用户订阅配置，支持灵活的事件订阅
+# ============================================
+
+id: change_subscription
+name: 变更订阅
+table_name: change_subscriptions
+description: 变更订阅配置，支持用户订阅特定对象类型的变更事件
+persistent: true
+is_view: false
+
+semantics:
+  meaning: 变更订阅配置
+  category: system_entity
+  hierarchy_level: 0
+  aliases:
+    - 变更订阅
+    - ChangeSubscription
+    - 事件订阅
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+
+  - id: user_id
+    name: 用户ID
+    type: integer
+    db_column: user_id
+    required: true
+    description: 订阅用户ID
+    semantics:
+      meaning: 订阅者的用户ID
+
+  - id: object_type
+    name: 对象类型
+    type: string
+    db_column: object_type
+    required: true
+    description: 订阅的对象类型
+    semantics:
+      meaning: 订阅的业务对象类型
+
+  - id: event_types
+    name: 事件类型
+    type: json
+    db_column: event_types
+    description: 订阅的事件类型列表
+    semantics:
+      meaning: JSON数组，订阅的事件类型
+
+  - id: channel
+    name: 通知渠道
+    type: string
+    db_column: channel
+    required: true
+    default: "in_app"
+    description: 通知渠道
+    semantics:
+      meaning: 通知投递渠道
+    ui:
+      widget: select
+      options:
+        - value: in_app
+          label: 站内消息
+        - value: email
+          label: 邮件
+        - value: webhook
+          label: Webhook
+        - value: sms
+          label: 短信
+
+  - id: filter_condition
+    name: 过滤条件
+    type: json
+    db_column: filter_condition
+    description: 过滤条件
+    semantics:
+      meaning: JSON对象，事件过滤条件
+
+  - id: webhook_url
+    name: Webhook地址
+    type: string
+    db_column: webhook_url
+    description: Webhook回调地址
+    semantics:
+      meaning: Webhook通知的回调URL
+
+  - id: webhook_secret
+    name: Webhook密钥
+    type: string
+    db_column: webhook_secret
+    description: Webhook签名密钥
+    semantics:
+      meaning: Webhook请求签名密钥
+    ui:
+      visible: false
+
+  - id: enabled
+    name: 是否启用
+    type: boolean
+    db_column: enabled
+    required: true
+    default: true
+    description: 是否启用
+    semantics:
+      meaning: 订阅是否启用
+      filterable: true
+      filter_type: enum
+    enum_values:
+      - value: true
+        label: 已启用
+        color: success
+        icon: check_circle
+        is_initial: true
+        category: active
+        description: 订阅已启用，变更事件将发送通知
+      - value: false
+        label: 已禁用
+        color: info
+        icon: pause_circle
+        category: inactive
+        description: 订阅已禁用，不会发送通知
+    ui:
+      widget: badge
+      badge_colors:
+        true: success
+        false: info
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    required: true
+    default: "NOW()"
+    description: 订阅创建时间
+    semantics:
+      meaning: 订阅创建的时间戳
+
+indexes:
+  - fields: [user_id]
+    name: idx_change_subscriptions_user_id
+    description: 按用户ID索引
+
+  - fields: [object_type]
+    name: idx_change_subscriptions_object_type
+    description: 按对象类型索引
+
+  - fields: [enabled]
+    name: idx_change_subscriptions_enabled
+    description: 按启用状态索引
+
+relations:
+  - id: user
+    name: 用户
+    type: reference
+    target: user
+    source_field: user_id
+    target_field: id
+    cardinality: N:1
+    description: 订阅用户
+
+rules:
+  - id: enable_subscription
+    name: 启用订阅
+    type: state_transition
+    state_field: enabled
+    from_states: [false]
+    to_state: true
+    triggers: [before_update]
+    ui_hints:
+      label: 启用
+      icon: check_circle
+      confirm_message: "确定要启用此订阅吗？"
+      highlight: true
+
+  - id: disable_subscription
+    name: 禁用订阅
+    type: state_transition
+    state_field: enabled
+    from_states: [true]
+    to_state: false
+    triggers: [before_update]
+    ui_hints:
+      label: 禁用
+      icon: pause_circle
+      confirm_message: "确定要禁用此订阅吗？"
+
+actions:
+  - id: create_subscription
+    name: 创建订阅
+    type: crud
+    method: POST
+    path: /api/v1/change_subscriptions
+    description: 创建变更订阅
+
+  - id: list_subscriptions
+    name: 订阅列表
+    type: crud
+    method: GET
+    path: /api/v1/change_subscriptions
+    description: 查询订阅列表
+
+  - id: get_subscription
+    name: 查询订阅
+    type: crud
+    method: GET
+    path: /api/v1/change_subscriptions/{id}
+    description: 查询单个订阅
+
+  - id: update_subscription
+    name: 更新订阅
+    type: crud
+    method: PUT
+    path: /api/v1/change_subscriptions/{id}
+    description: 更新订阅配置
+
+  - id: delete_subscription
+    name: 删除订阅
+    type: crud
+    method: DELETE
+    path: /api/v1/change_subscriptions/{id}
+    description: 删除订阅
+
+  - id: toggle_subscription
+    name: 切换订阅状态
+    type: business
+    method: PUT
+    path: /api/v1/change_subscriptions/{id}/toggle
+    description: 启用/禁用订阅
+
+queries:
+  - id: active_subscriptions
+    name: 活跃订阅
+    filters:
+      - field: enabled
+        operator: eq
+        value: true
+    sorts:
+      - field: created_at
+        direction: desc
+
+  - id: user_subscriptions
+    name: 用户订阅
+    filters:
+      - field: user_id
+        operator: eq
+        param: user_id
+    sorts:
+      - field: created_at
+        direction: desc
+
+  - id: subscriptions_by_object
+    name: 按对象类型订阅
+    filters:
+      - field: object_type
+        operator: eq
+        param: object_type
+      - field: enabled
+        operator: eq
+        value: true

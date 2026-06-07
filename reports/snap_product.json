@@ -1,0 +1,36 @@
+{
+  "url": "http://localhost:3004/product-management?productId=1&versionId=2",
+  "title": "产品管理 - ArchWorkspace",
+  "has_table": true,
+  "has_form": false,
+  "has_tabs": false,
+  "has_search": true,
+  "has_new_btn": false,
+  "has_delete": false,
+  "has_edit": false,
+  "tab_names": [],
+  "button_names": [
+    "产品管理",
+    "新建产品",
+    "搜索",
+    "重置",
+    "更多",
+    "确定",
+    "清空"
+  ],
+  "field_names": [
+    "页",
+    "输入搜索",
+    "开始时间",
+    "结束时间",
+    "开始日期",
+    "结束日期"
+  ],
+  "table_columns": [
+    "名称",
+    "编码",
+    "是否活跃",
+    "创建时间",
+    "更新时间"
+  ]
+}

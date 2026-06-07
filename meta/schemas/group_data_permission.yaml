@@ -1,0 +1,67 @@
+id: group_data_permission
+name: 用户组数据权限
+table_name: group_data_permissions
+description: 用户组的数据访问权限
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+
+  - id: group_id
+    name: 用户组ID
+    type: integer
+    db_column: group_id
+    required: true
+    description: 用户组ID
+
+  - id: resource_type
+    name: 资源类型
+    type: string
+    db_column: resource_type
+    required: true
+    description: 资源类型 domain/sub_domain/service_module/business_object
+
+  - id: resource_id
+    name: 资源ID
+    type: integer
+    db_column: resource_id
+    required: true
+    description: 资源ID
+
+  - id: permission_level
+    name: 权限级别
+    type: string
+    db_column: permission_level
+    required: true
+    description: 权限级别 read/write/admin
+
+  - id: inherit_to_children
+    name: 继承到子级
+    type: boolean
+    db_column: inherit_to_children
+    default: true
+    description: 是否自动继承到子层级
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+
+indexes:
+  - fields: [group_id, resource_type, resource_id]
+    unique: true
+    name: idx_group_data_perm_unique
+  - fields: [group_id]
+    name: idx_group_data_perm_group
+
+relations: []
+actions: []
+
+ui_view_config:
+  skip_auto_menu: true

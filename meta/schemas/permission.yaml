@@ -1,0 +1,125 @@
+id: permission
+name: 功能权限
+table_name: permissions
+description: 系统功能权限定义，控制用户对资源的操作能力
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+
+  - id: code
+    name: 权限编码
+    type: string
+    required: true
+    unique: true
+    description: 权限的唯一编码标识
+    constraints:
+      - type: immutable
+        message: 权限编码创建后不可修改
+    ui:
+      visible: true
+      editable: true
+
+  - id: name
+    name: 权限名称
+    type: string
+    required: true
+    description: 权限的显示名称
+    ui:
+      visible: true
+      editable: true
+
+  - id: resource_type
+    name: 资源类型
+    type: string
+    description: 关联的资源类型
+    ui:
+      visible: true
+      editable: true
+
+  - id: action
+    name: 操作类型
+    type: string
+    description: 允许的操作（create/read/update/delete等）
+    ui:
+      visible: true
+      editable: true
+
+  - id: description
+    name: 描述
+    type: text
+    description: 权限详细说明
+    ui:
+      visible: true
+      editable: true
+
+  - id: resource_id
+    name: 资源ID
+    type: integer
+    description: 关联的资源实例ID
+    ui:
+      visible: false
+
+  - id: scope
+    name: 作用范围
+    type: string
+    default: "all"
+    description: 权限作用范围
+    ui:
+      visible: true
+      editable: true
+
+associations:
+  - name: roles
+    type: many_to_many
+    target_entity: role
+    through: role_permissions
+    source_key: permission_id
+    target_key: role_id
+    description: 拥有此权限的角色列表
+
+audit:
+  enabled: true
+  strategy: business_only
+  fields: [code, name, resource_type, action]
+
+category_config:
+  category: system
+  sub_category: permission
+  icon: "shield"
+  color: "#6366f1"
+
+ui_view_config:
+  list:
+    detail_mode: page
+    detail_path: '/detail/permission'
+    pageSize: 20
+    actions:
+      - id: create
+        label: 新建权限
+        icon: plus
+        type: primary
+    batch_actions:
+      - id: batch_delete
+        label: 批量删除
+        icon: delete
+        type: danger
+        confirm: 确定要删除选中的权限吗？
+    columns:
+      - field: code
+        width: 150
+        sortable: true
+      - field: name
+        width: 150
+        sortable: true
+      - field: resource_type
+        width: 120
+      - field: action
+        width: 100
+      - field: description
+        width: 200
+        type: ellipsis

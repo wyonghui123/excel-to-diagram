@@ -1,0 +1,182 @@
+import { BOBaseService } from '@/services/bo/boBaseService'
+import { downloadBlob } from '@/utils/httpClient'
+
+export class BOExportImportService extends BOBaseService {
+  /**
+   * 将完整 URL 路径转换为 _request 可用的相对路径
+   * 服务端返回的 download_url 包含 /api/v1 前缀，_request 会自动添加
+   */
+  _toRelativePath(fullPath) {
+    return fullPath.replace(/^\/api\/v[12]/, '')
+  }
+
+  async downloadTemplate(objectType, params = {}) {
+    const types = params.selected_types || [objectType]
+
+    const requestBody = {
+      object_type: objectType,
+      scope: 'template',
+      selected_types: types,
+      options: {
+        include_hierarchy_path: false,
+        include_hierarchy_ids: true,
+        include_operation_mode: true,
+        protect_sheet: false,
+        include_readonly: true,
+        include_annotations: false,
+        include_child_objects: false
+      }
+    }
+
+    const result = await this._request('POST', '/export', { body: requestBody, version: 1 })
+
+    if (result.success && result.data?.download_url) {
+      const downloadPath = this._toRelativePath(result.data.download_url)
+      const downloadResult = await this._request('GET', downloadPath, { responseType: 'blob', version: 1 })
+      if (!downloadResult.success) return { success: false, message: '下载模板失败' }
+      downloadBlob(downloadResult.data, 'import_template.xlsx')
+      return { success: true }
+    }
+
+    return result
+  }
+
+  async previewImport(objectType, file, options = {}) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('mode', 'preview')
+    formData.append('conflict_strategy', options.conflictStrategy || 'upsert')
+
+    return this._request('POST', '/import', { body: formData, version: 1 })
+  }
+
+  async exportData(objectType, params = {}) {
+    const requestBody = {
+      object_type: objectType,
+      scope: params.scope || 'single',
+      filters: params.filters || {},
+      options: {
+        include_hierarchy_path: true,
+        include_hierarchy_ids: true,
+        include_metadata_sheet: true,
+        protect_sheet: false,
+        ...(params.options || {})
+      }
+    }
+
+    if (params.selected_types?.length) {
+      requestBody.selected_types = params.selected_types
+    }
+
+    if (params.ordering) {
+      const isDesc = params.ordering.startsWith('-')
+      requestBody.sort_by = isDesc ? params.ordering.substring(1) : params.ordering
+      requestBody.sort_order = isDesc ? 'desc' : 'asc'
+    }
+
+    if (params.page !== undefined && params.page_size !== undefined) {
+      requestBody.page = params.page
+      requestBody.page_size = params.page_size
+    }
+
+    if (params.fields) {
+      requestBody.options.fields = params.fields.split(',')
+    }
+
+    const result = await this._request('POST', '/export', { body: requestBody, version: 1 })
+
+    if (result.success && result.data?.download_url) {
+      const downloadPath = this._toRelativePath(result.data.download_url)
+
+      const downloadResult = await this._request('GET', downloadPath, { responseType: 'blob', version: 1 })
+
+      if (!downloadResult.success) {
+        return { success: false, message: '下载文件失败' }
+      }
+
+      downloadBlob(downloadResult.data, `${objectType}_export_${new Date().toISOString().slice(0, 10)}.xlsx`)
+
+      return { success: true, total_rows: result.data.total_rows }
+    }
+
+    return result
+  }
+
+  async exportDataAsync(objectType, params = {}) {
+    const requestBody = {
+      object_type: objectType,
+      scope: params.scope || 'single',
+      filters: params.filters || {},
+      options: {
+        include_hierarchy_path: true,
+        include_hierarchy_ids: true,
+        include_metadata_sheet: true,
+        protect_sheet: false,
+        ...(params.options || {})
+      }
+    }
+
+    if (params.selected_types?.length) {
+      requestBody.selected_types = params.selected_types
+    }
+
+    if (params.ordering) {
+      const isDesc = params.ordering.startsWith('-')
+      requestBody.sort_by = isDesc ? params.ordering.substring(1) : params.ordering
+      requestBody.sort_order = isDesc ? 'desc' : 'asc'
+    }
+
+    if (params.page !== undefined && params.page_size !== undefined) {
+      requestBody.page = params.page
+      requestBody.page_size = params.page_size
+    }
+
+    return this._request('POST', '/export/async', { body: requestBody, version: 1 })
+  }
+
+  async getExportStatus(taskId) {
+    return this._request('GET', `/export/status/${taskId}`, { version: 1 })
+  }
+
+  async downloadExportFile(downloadUrl, filename) {
+    const downloadPath = this._toRelativePath(downloadUrl)
+    const downloadResult = await this._request('GET', downloadPath, { responseType: 'blob', version: 1 })
+
+    if (!downloadResult.success) {
+      return { success: false, message: '下载文件失败' }
+    }
+
+    downloadBlob(downloadResult.data, filename || 'export.xlsx')
+    return { success: true }
+  }
+
+  async importData(objectType, file, options = {}) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('mode', 'execute')
+    formData.append('conflict_strategy', options.conflictStrategy || 'upsert')
+
+    if (options.validate) formData.append('validate', 'true')
+    if (options.skipErrors) formData.append('skip_errors', 'true')
+    if (options.updateExisting) formData.append('update_existing', 'true')
+
+    return this._request('POST', '/import', { body: formData, version: 1 })
+  }
+
+  async importDataAsync(file, conflictStrategy = 'upsert', context = {}) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('conflict_strategy', conflictStrategy)
+    if (context.version_id) formData.append('version_id', context.version_id)
+    if (context.product_id) formData.append('product_id', context.product_id)
+    if (context.cascade_fields?.length) {
+      formData.append('cascade_fields', JSON.stringify(context.cascade_fields))
+    }
+
+    return this._request('POST', '/import/async', { body: formData, version: 1 })
+  }
+
+  async getImportStatus(taskId) {
+    return this._request('GET', `/import/status/${taskId}`, { version: 1 })
+  }
+}

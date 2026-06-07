@@ -1,0 +1,103 @@
+{
+  "extends": [
+    "stylelint-config-standard-scss"
+  ],
+  "plugins": [
+    "stylelint-scss"
+  ],
+  "rules": {
+    "color-no-invalid-hex": true,
+    "color-hex-length": null,
+    "color-function-notation": null,
+    "alpha-value-notation": null,
+    "declaration-block-no-duplicate-custom-properties": null,
+    "no-duplicate-selectors": null,
+    "declaration-block-single-line-max-declarations": null,
+    "selector-class-pattern": null,
+    "number-max-precision": null,
+    "media-feature-range-notation": null,
+    "declaration-property-value-disallowed-list": null,
+    "function-disallowed-list": null,
+    "color-named": null,
+    "scss/dollar-variable-pattern": null,
+    "scss/at-import-partial-extension": null,
+    "max-nesting-depth": null,
+    "block-no-empty": true,
+    "comment-empty-line-before": null,
+    "declaration-empty-line-before": null,
+    "custom-property-empty-line-before": null,
+    "scss/double-slash-comment-empty-line-before": null,
+    "property-no-vendor-prefix": null,
+    "value-no-vendor-prefix": null,
+    "selector-no-vendor-prefix": null,
+    "media-feature-name-no-vendor-prefix": null,
+    "at-rule-no-vendor-prefix": null,
+    "at-rule-empty-line-before": null,
+    "value-keyword-case": null,
+    "selector-pseudo-class-no-unknown": [
+      true,
+      {
+        "ignorePseudoClasses": ["deep", "global", "slotted"]
+      }
+    ],
+    "unit-disallowed-list": [
+      "pt",
+      "pc",
+      "in",
+      "cm",
+      "mm"
+    ],
+    "shorthand-property-no-redundant-values": null,
+    "declaration-block-no-redundant-longhand-properties": null,
+    "scss/no-global-function-names": null,
+    "rule-empty-line-before": null,
+    "declaration-block-no-shorthand-property-overrides": null,
+    "no-descending-specificity": null,
+
+    "color-no-hex": [
+      "warn",
+      {
+        "message": "请使用 design tokens (var(--color-*)) 替代硬编码颜色。参考 .trae/context/developer/ui-design-standards.md 状态色彩语义章节"
+      }
+    ],
+    "declaration-property-value-allowed-list": [
+      {
+        "/^(color|background-color|border|border-color|border-top-color|border-right-color|border-bottom-color|border-left-color|fill|stroke)$/": [
+          "/^var\\(--/",
+          "/^transparent$/",
+          "/^inherit$/",
+          "/^currentColor$/",
+          "/^none$/",
+          "/^unset$/",
+          "/^initial$/"
+        ]
+      },
+      {
+        "ignoreValues": [
+          "/^var\\(--/",
+          "/^transparent$/",
+          "/^inherit$/",
+          "/^currentColor$/",
+          "/^none$/",
+          "/^unset$/",
+          "/^initial$/",
+          "/^rgb\\(/",
+          "/^rgba\\(/",
+          "/^hsl\\(/",
+          "/^hsla\\(/"
+        ]
+      }
+    ]
+  },
+  "ignoreFiles": [
+    "node_modules/**/*",
+    "dist/**/*",
+    "build/**/*",
+    "coverage/**/*",
+    "**/*.vue",
+    "src/style.css",
+    "src/components/MermaidComponent.css",
+    "src/styles/edgeLabel-common.css",
+    "src/styles/element-variables.scss"
+  ]
+}

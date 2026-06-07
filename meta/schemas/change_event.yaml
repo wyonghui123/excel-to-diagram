@@ -1,0 +1,355 @@
+# ============================================
+# 变更事件对象
+# 说明: 存储变更事件记录，用于事件溯源和通知分发
+# ============================================
+
+id: change_event
+name: 变更事件
+table_name: change_events
+description: 变更事件记录所有业务对象的变更事件，支持事件驱动架构和通知分发
+persistent: true
+is_view: false
+
+semantics:
+  meaning: 变更事件记录
+  category: system_entity
+  hierarchy_level: 0
+  aliases:
+    - 变更事件
+    - ChangeEvent
+    - 事件记录
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+
+  - id: object_type
+    name: 对象类型
+    type: string
+    db_column: object_type
+    required: true
+    description: 业务对象类型
+    semantics:
+      meaning: 被操作的对象类型（如 product, version, domain 等）
+
+  - id: object_id
+    name: 对象ID
+    type: integer
+    db_column: object_id
+    required: true
+    description: 被操作对象的ID
+    semantics:
+      meaning: 被操作对象的唯一标识
+
+  - id: event_type
+    name: 事件类型
+    type: string
+    db_column: event_type
+    required: true
+    description: 事件类型
+    semantics:
+      meaning: 事件类型（create, update, delete, state_change）
+
+  - id: changed_fields
+    name: 变更字段
+    type: json
+    db_column: changed_fields
+    description: 变更的字段名列表
+    semantics:
+      meaning: JSON数组，记录变更的字段名
+
+  - id: old_values
+    name: 旧值
+    type: json
+    db_column: old_values
+    description: 变更前的值
+    semantics:
+      meaning: JSON对象，变更前的字段值
+
+  - id: new_values
+    name: 新值
+    type: json
+    db_column: new_values
+    description: 变更后的值
+    semantics:
+      meaning: JSON对象，变更后的字段值
+
+  - id: payload
+    name: 附加数据
+    type: json
+    db_column: payload
+    description: 事件的附加数据
+    semantics:
+      meaning: JSON对象，事件的附加上下文数据
+
+  - id: channels
+    name: 通知渠道
+    type: json
+    db_column: channels
+    description: 通知渠道列表
+    semantics:
+      meaning: JSON数组，通知渠道列表
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: "pending"
+    description: 事件状态
+    semantics:
+      meaning: 事件处理状态
+      filterable: true
+      filter_type: enum
+    enum_values:
+      - value: pending
+        label: 待处理
+        color: info
+        icon: clock
+        is_initial: true
+        category: active
+        description: 事件等待处理
+      - value: processing
+        label: 处理中
+        color: primary
+        icon: loading
+        category: active
+        description: 事件正在处理
+      - value: delivered
+        label: 已投递
+        color: success
+        icon: circle-check
+        is_final: true
+        category: final
+        description: 事件已成功投递
+      - value: failed
+        label: 失败
+        color: danger
+        icon: circle-close
+        category: error
+        description: 事件投递失败，可重试
+    ui:
+      widget: select
+
+  - id: status_entered_at
+    name: 状态进入时间
+    type: datetime
+    db_column: status_entered_at
+    description: 进入当前状态的时间
+    semantics:
+      meaning: 用于计算当前状态停留时长
+      audit_field: true
+    ui:
+      visible: false
+      editable: false
+
+  - id: retry_count
+    name: 重试次数
+    type: integer
+    db_column: retry_count
+    required: true
+    default: 0
+    description: 重试次数
+    semantics:
+      meaning: 事件投递重试次数
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    required: true
+    default: "NOW()"
+    description: 事件创建时间
+    semantics:
+      meaning: 事件创建的时间戳
+
+  - id: delivered_at
+    name: 投递时间
+    type: datetime
+    db_column: delivered_at
+    description: 事件投递时间
+    semantics:
+      meaning: 事件成功投递的时间戳
+
+  - id: audit_log_id
+    name: 审计日志ID
+    type: integer
+    db_column: audit_log_id
+    description: 关联的审计日志ID
+    semantics:
+      meaning: 关联的审计日志记录ID
+
+  - id: delivery_latency_seconds
+    name: 投递延迟秒数
+    type: integer
+    db_column: delivery_latency_seconds
+    description: 事件从创建到投递的延迟秒数
+    storage: virtual
+    semantics:
+      meaning: 事件投递延迟时长（秒），用于监控事件处理性能
+      analytics:
+        category: measure
+        aggregation: avg
+    computation:
+      formula: 'IF(ISNULL(delivered_at), DATEDIFF(created_at, NOW(), "seconds"), DATEDIFF(created_at, delivered_at, "seconds"))'
+    ui:
+      widget: number
+      format: duration_seconds
+
+indexes:
+  - fields: [object_type]
+    name: idx_change_events_object_type
+    description: 按对象类型索引
+
+  - fields: [object_id]
+    name: idx_change_events_object_id
+    description: 按对象ID索引
+
+  - fields: [status]
+    name: idx_change_events_status
+    description: 按状态索引
+
+  - fields: [created_at]
+    name: idx_change_events_created_at
+    description: 按创建时间索引
+
+  - fields: [audit_log_id]
+    name: idx_change_events_audit_log
+    description: 按审计日志ID索引
+
+relations:
+  - id: audit_log
+    name: 审计日志
+    type: reference
+    target: audit_log
+    source_field: audit_log_id
+    target_field: id
+    cardinality: N:1
+    description: 关联的审计日志
+
+rules:
+  - id: process_event
+    name: 开始处理事件
+    type: state_transition
+    state_field: status
+    from_states: [pending]
+    to_state: processing
+    triggers: [before_update]
+    ui_hints:
+      label: 开始处理
+      icon: loading
+      highlight: true
+
+  - id: deliver_event
+    name: 投递成功
+    type: state_transition
+    state_field: status
+    from_states: [processing]
+    to_state: delivered
+    triggers: [before_update]
+    side_effects:
+      - type: set_field
+        target: delivered_at
+        value: "NOW()"
+    ui_hints:
+      label: 投递成功
+      icon: circle-check
+      highlight: true
+
+  - id: fail_event
+    name: 投递失败
+    type: state_transition
+    state_field: status
+    from_states: [processing]
+    to_state: failed
+    triggers: [before_update]
+    ui_hints:
+      label: 标记失败
+      icon: circle-close
+
+  - id: retry_event
+    name: 重试事件
+    type: state_transition
+    state_field: status
+    from_states: [failed]
+    to_state: pending
+    triggers: [before_update]
+    side_effects:
+      - type: set_field
+        target: retry_count
+        value: "retry_count + 1"
+    ui_hints:
+      label: 重试
+      icon: refresh
+      highlight: true
+
+actions:
+  - id: create_event
+    name: 创建事件
+    type: crud
+    method: POST
+    path: /api/v1/change_events
+    description: 创建变更事件
+
+  - id: list_events
+    name: 事件列表
+    type: crud
+    method: GET
+    path: /api/v1/change_events
+    description: 查询事件列表
+
+  - id: get_event
+    name: 查询事件
+    type: crud
+    method: GET
+    path: /api/v1/change_events/{id}
+    description: 查询单个事件
+
+  - id: update_status
+    name: 更新状态
+    type: business
+    method: PUT
+    path: /api/v1/change_events/{id}/status
+    description: 更新事件状态
+
+queries:
+  - id: pending_events
+    name: 待处理事件
+    filters:
+      - field: status
+        operator: eq
+        value: pending
+    sorts:
+      - field: created_at
+        direction: asc
+    limit: 100
+
+  - id: events_by_object
+    name: 对象事件列表
+    filters:
+      - field: object_type
+        operator: eq
+        param: object_type
+      - field: object_id
+        operator: eq
+        param: object_id
+    sorts:
+      - field: created_at
+        direction: desc
+
+  - id: failed_events
+    name: 失败事件
+    filters:
+      - field: status
+        operator: eq
+        value: failed
+    sorts:
+      - field: created_at
+        direction: desc

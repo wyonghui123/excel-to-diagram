@@ -1,0 +1,620 @@
+{
+  "info": {
+    "name": "BO Action API",
+    "description": "Auto-generated from BO Action OpenAPI spec. Run scripts/export_postman.py",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "ops/action",
+      "item": [
+        {
+          "name": "导出审计日志为 xlsx/csv 文件（管理员, 🆕 v3.1 文件流）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v2/action/audit.export",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "action",
+                "audit.export"
+              ]
+            },
+            "description": " (admin only)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"string\",\n  \"end_date\": \"2026-06-06\",\n  \"format\": \"xlsx\",\n  \"object_type\": \"string\",\n  \"start_date\": \"2026-06-06\",\n  \"user_name\": \"string\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "重试失败的审计日志记录（管理员）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v2/action/audit.retry",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "action",
+                "audit.retry"
+              ]
+            },
+            "description": " (admin only)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"record_id\": 0\n}"
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "crud/action",
+      "item": [
+        {
+          "name": "批量删除（任意 object_type, 与 batch_save 对称）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v2/action/batch_delete",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "action",
+                "batch_delete"
+              ]
+            },
+            "description": "批量删除（任意 object_type, 与 batch_save 对称）",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"force\": false,\n  \"ids\": [\n    0\n  ],\n  \"object_type\": \"string\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "草稿批量保存（支持 is_new/create+update）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v2/action/batch_save",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "action",
+                "batch_save"
+              ]
+            },
+            "description": "草稿批量保存（支持 is_new/create+update）",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"drafts\": [\n    {\n      \"fields\": {},\n      \"is_new\": false,\n      \"row_id\": null\n    }\n  ],\n  \"object_type\": \"string\"\n}"
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "metadata/action",
+      "item": [
+        {
+          "name": "创建业务枚举类型 (admin 限定, 不允许 system 类别)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v2/action/enum_type.create",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "action",
+                "enum_type.create"
+              ]
+            },
+            "description": " (admin only)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category\": \"business\",\n  \"description\": \"string\",\n  \"dimension_schema\": {},\n  \"id\": \"string\",\n  \"mutability\": \"extensible\",\n  \"name\": \"string\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "删除业务枚举类型 (admin 限定, 仅当无 enum_values 时)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v2/action/enum_type.delete",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "action",
+                "enum_type.delete"
+              ]
+            },
+            "description": " (admin only)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"string\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "更新业务枚举类型 (admin 限定, system 不可改)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v2/action/enum_type.update",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "action",
+                "enum_type.update"
+              ]
+            },
+            "description": " (admin only)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"string\",\n  \"dimension_schema\": {},\n  \"id\": \"string\",\n  \"mutability\": \"extensible\",\n  \"name\": \"string\"\n}"
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "stats/function",
+      "item": [
+        {
+          "name": "[FUNCTION] [Function] 查询聚合表数据",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v2/action/function.aggregate.query",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "action",
+                "function.aggregate.query"
+              ]
+            },
+            "description": "[FUNCTION] [Function] 查询聚合表数据"
+          },
+          "response": []
+        },
+        {
+          "name": "[FUNCTION] [Function] 刷新聚合表 (admin 限定, 注意: 实际是写操作, 标为 function 仅因 aggregate 域)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v2/action/function.aggregate.refresh",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "action",
+                "function.aggregate.refresh"
+              ]
+            },
+            "description": " (admin only)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "notification/function",
+      "item": [
+        {
+          "name": "[FUNCTION] [Function] 列出当前用户的订阅 (可选 object_type 过滤)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v2/action/function.subscription.list",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "action",
+                "function.subscription.list"
+              ]
+            },
+            "description": "[FUNCTION] [Function] 列出当前用户的订阅 (可选 object_type 过滤)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "value_help/function",
+      "item": [
+        {
+          "name": "[FUNCTION] [Function] 解析 value_help 值的显示信息 (display/code)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v2/action/function.value_help.resolve",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "action",
+                "function.value_help.resolve"
+              ]
+            },
+            "description": "[FUNCTION] [Function] 解析 value_help 值的显示信息 (display/code)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "notification/action",
+      "item": [
+        {
+          "name": "创建对象变更通知订阅（websocket/webhook）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v2/action/subscription.create",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "action",
+                "subscription.create"
+              ]
+            },
+            "description": "创建对象变更通知订阅（websocket/webhook）",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"channel\": \"websocket\",\n  \"event_types\": [\n    \"created\"\n  ],\n  \"filter_condition\": {},\n  \"object_type\": \"string\",\n  \"webhook_secret\": \"string\",\n  \"webhook_url\": \"string\"\n}"
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "auth/action",
+      "item": [
+        {
+          "name": "用户登录认证",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v2/action/user.authenticate",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "action",
+                "user.authenticate"
+              ]
+            },
+            "description": "用户登录认证",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"password\": \"string\",\n  \"username\": \"string\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "修改当前用户密码",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v2/action/user.change_password",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "action",
+                "user.change_password"
+              ]
+            },
+            "description": "修改当前用户密码",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"new_password\": \"string\",\n  \"old_password\": \"string\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "获取当前登录用户信息",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v2/action/user.get_current",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "action",
+                "user.get_current"
+              ]
+            },
+            "description": "获取当前登录用户信息",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "用户登出（token 加入黑名单）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v2/action/user.logout",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "action",
+                "user.logout"
+              ]
+            },
+            "description": "用户登出（token 加入黑名单）",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "管理员重置指定用户密码（强制 must_change_password=1）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v2/action/user.reset_password",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "action",
+                "user.reset_password"
+              ]
+            },
+            "description": " (admin only)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"new_password\": \"string\",\n  \"user_id\": 0\n}"
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "profile/action",
+      "item": [
+        {
+          "name": "更新当前用户个人信息（display_name/email/locale/timezone 等）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v2/action/user.update_profile",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "action",
+                "user.update_profile"
+              ]
+            },
+            "description": "更新当前用户个人信息（display_name/email/locale/timezone 等）",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date_style\": \"string\",\n  \"display_name\": \"string\",\n  \"email\": \"string\",\n  \"hour_cycle\": \"string\",\n  \"locale\": \"string\",\n  \"time_style\": \"string\",\n  \"timezone\": \"string\"\n}"
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "business/action",
+      "item": [
+        {
+          "name": "清除同产品下其他版本的 is_current 标志 (set_current action 的 trigger)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v2/action/version.clear_other_current",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "action",
+                "version.clear_other_current"
+              ]
+            },
+            "description": "清除同产品下其他版本的 is_current 标志 (set_current action 的 trigger)",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3010",
+      "type": "string"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "success": true,
+  "duration": 13.7,
+  "trace_id": "dd3ee0b9019e46009857dba8d75e295a",
+  "exit_code": 0,
+  "stdout": "",
+  "stderr": "",
+  "passed": 3,
+  "total": 3,
+  "pass_rate": 100.0
+}

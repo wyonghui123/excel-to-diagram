@@ -1,0 +1,140 @@
+# ============================================================
+# 生产服务器环境配置
+# ============================================================
+# 最后更新: 2026-04-28
+# 版本: v1.0
+
+[metadata]
+environment = "production"
+region = "内网"
+last_verified = "2026-04-30"
+config_version = "1.2"
+update_note = "融合 server-inventory.md 信息，补充内核版本和启动脚本"
+inventory_file = "server-inventory.md"
+
+# -------- 基础路径 --------
+[paths]
+app_root = "/opt/app"
+current_link = "/opt/app/current"
+releases_dir = "/opt/app/deployments"
+backup_dir = "/opt/app/backups"
+shared_data = "/opt/app/shared/data"
+shared_logs = "/opt/app/shared/logs"
+temp_dir = "/opt/app/tmp"
+
+# -------- 应用路径 --------
+[paths.frontend]
+root = "/opt/app/excel-to-diagram/dist"
+server_script = "server.py"
+
+[paths.backend]
+root = "/opt/app/meta"
+server_script = "server.py"
+
+# -------- 数据库 --------
+[database]
+type = "sqlite"
+dir = "/opt/app/shared/data"
+file = "architecture.db"
+# 数据库文件路径 = dir + "/" + file
+
+# -------- Python 环境 --------
+[dependencies.python]
+binary = "/usr/local/bin/python3.9.21"
+pip = "/usr/local/bin/pip3.9.21"
+version = "3.9.21"
+conda_env = null
+note = "已升级至 Python 3.9.21，修复安全漏洞"
+# 启动脚本（隔离 Conda 环境）
+startup_scripts = [
+    { name = "python3.9.21-clean", path = "/usr/local/bin/python3.9.21-clean", purpose = "Python 解释器（干净环境）" },
+    { name = "pip3.9.21-clean", path = "/usr/local/bin/pip3.9.21-clean", purpose = "pip 包管理器（干净环境）" }
+]
+# 预装包（已安装）
+preinstalled_packages = [
+    "flask",
+    "werkzeug",
+    "jinja2",
+    "sqlite3",
+    "requests",
+    "pyyaml"
+]
+
+# 新版本需要的包
+required_packages = [
+    "openpyxl>=3.1.0",
+    "flask-cors>=4.0.0"
+]
+
+# -------- 系统依赖 --------
+[dependencies.system]
+os_version = "CentOS Linux 7.5.1804 (Core)"
+kernel_version = "3.10.0-862.3.3.el7.x86_64"
+required_libs = [
+    "libxml2",
+    "libxslt"
+]
+# 安全升级记录
+security_updates = [
+    { component = "OpenSSH", from = "7.4p1", to = "9.9p1", date = "2026-04-30" },
+    { component = "OpenSSL", from = "旧版本", to = "1.1.1u", date = "2026-04-30" },
+    { component = "zlib", from = "旧版本", to = "1.3.1", date = "2026-04-30" },
+    { component = "Python", from = "3.9.17", to = "3.9.21", date = "2026-04-30" }
+]
+
+# -------- Node.js --------
+[nodejs]
+enabled = false
+# 服务器没有 Node.js，前端需要预构建
+
+# -------- Nginx --------
+[nginx]
+enabled = false
+# 使用 Python server.py 代理
+
+# -------- 服务配置 --------
+[services.frontend]
+name = "frontend"
+port = 8081
+process_pattern = "server.py"
+health_endpoint = "/health"
+work_dir = "/opt/app"
+startup_command = "python server.py"
+check_timeout = 5
+check_retry = 3
+
+[services.backend]
+name = "backend"
+port = 5000
+process_pattern = "server.py"
+health_endpoint = "/api/v1/health"
+work_dir = "/opt/app/meta"
+startup_command = "python server.py"
+check_timeout = 5
+check_retry = 3
+note = "端口从5001改为5000，与后端实际配置一致"
+
+# -------- 网络配置 --------
+[network]
+allowed_sources = ["172.20.0.0/16"]
+firewall_required = false
+
+# -------- 安全配置 --------
+[security]
+run_as_user = "root"
+file_permissions = "755"
+log_rotation_days = 30
+
+# -------- 备份配置 --------
+[backup]
+enabled = true
+retention_days = 7
+keep_versions = 5
+auto_backup_before_deploy = true
+backup_includes = ["database", "config"]
+
+# -------- 部署配置 --------
+[deploy]
+auto_rollback_on_failure = true
+health_check_required = true
+functional_test_required = false

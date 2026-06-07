@@ -1,0 +1,318 @@
+/**
+ * Element Plus 组件样式强制覆盖
+ * 使用更高优先级确保 YonDesign 风格生效
+ * 
+ * 主色: #ea580c (YonDesign Orange)
+ */
+
+/* ============================================
+   0. CSS 变量强制覆盖 (最高优先级)
+   解决 unplugin-vue-components 自动导入组件样式时
+   重新注入 Element Plus 默认 CSS 变量导致被覆盖的问题
+   ============================================ */
+:root:root,
+html:root,
+html :root {
+  --el-color-primary: #ea580c !important;
+  --el-color-primary-light-3: #fb923c !important;
+  --el-color-primary-light-5: #fdba74 !important;
+  --el-color-primary-light-7: #fed7aa !important;
+  --el-color-primary-light-8: #ffedd5 !important;
+  --el-color-primary-light-9: #fff7ed !important;
+  --el-color-primary-dark-2: #c2410c !important;
+  --el-color-primary-rgb: 234, 88, 12 !important;
+}
+
+/* ============================================
+   1. 按钮强制覆盖 (最高优先级)
+   ============================================ */
+.el-button--primary,
+button.el-button--primary {
+  --el-button-bg-color: #ea580c !important;
+  --el-button-border-color: #ea580c !important;
+  --el-button-text-color: #ffffff !important;
+  --el-button-hover-bg-color: #c2410c !important;
+  --el-button-hover-border-color: #c2410c !important;
+  --el-button-active-bg-color: #a04009 !important;
+  --el-button-active-border-color: #a04009 !important;
+}
+
+/* ============================================
+   2. 链接按钮 (link 类型)
+   ============================================ */
+.el-button.is-link,
+button.el-button.is-link {
+  color: #666666 !important;
+}
+
+.el-button.is-link:hover,
+button.el-button.is-link:hover {
+  color: #ea580c !important;
+}
+
+.el-button--primary.is-link,
+button.el-button--primary.is-link {
+  color: #ea580c !important;
+}
+
+.el-button--primary.is-link:hover,
+button.el-button--primary.is-link:hover {
+  color: #c2410c !important;
+}
+
+/* ============================================
+   3. 文本链接
+   ============================================ */
+.el-link {
+  --el-link-default-font-color: #666666 !important;
+  --el-link-default-active-color: #ea580c !important;
+  --el-link-hover-font-color: #ea580c !important;
+}
+
+.el-link.el-link--primary {
+  --el-link-font-color: #ea580c !important;
+  --el-link-hover-font-color: #c2410c !important;
+}
+
+/* ============================================
+   4. 分页组件
+   ============================================ */
+.el-pagination .el-pager li.is-active {
+  background-color: #ea580c !important;
+  color: #ffffff !important;
+}
+
+.el-pagination .el-pager li:hover {
+  color: #ea580c !important;
+}
+
+.el-pager li.is-active {
+  background-color: #ea580c !important;
+}
+
+/* ============================================
+   5. 复选框
+   ============================================ */
+.el-checkbox__input.is-checked .el-checkbox__inner {
+  background-color: #ea580c !important;
+  border-color: #ea580c !important;
+}
+
+.el-checkbox__input.is-indeterminate .el-checkbox__inner {
+  background-color: #ea580c !important;
+  border-color: #ea580c !important;
+}
+
+.el-checkbox__input.is-focus .el-checkbox__inner {
+  border-color: #ea580c !important;
+}
+
+.el-checkbox__inner:hover {
+  border-color: #ea580c !important;
+}
+
+/* 复选框选中图标颜色 */
+.el-checkbox__input.is-checked + .el-checkbox__label {
+  color: #333333 !important;
+}
+
+/* ============================================
+   6. 单选框
+   ============================================ */
+.el-radio__input.is-checked .el-radio__inner {
+  background-color: #ea580c !important;
+  border-color: #ea580c !important;
+}
+
+.el-radio__input.is-checked + .el-radio__label {
+  color: #333333 !important;
+}
+
+/* ============================================
+   7. 输入框焦点边框
+   ============================================ */
+.el-input__wrapper:focus-within,
+.el-input__wrapper.is-focus {
+  box-shadow: 0 0 0 1px #ea580c inset !important;
+}
+
+.el-input__wrapper:hover:not(.is-focus) {
+  box-shadow: 0 0 0 1px #ea580c inset !important;
+}
+
+/* ============================================
+   8. 选择器
+   ============================================ */
+.el-select .el-input.is-focus .el-input__wrapper {
+  box-shadow: 0 0 0 1px #ea580c inset !important;
+}
+
+.el-select-dropdown__item.selected {
+  color: #ea580c !important;
+  font-weight: 600;
+}
+
+.el-select-dropdown__item.is-hovering {
+  background-color: #fff7ed !important;
+}
+
+/* ============================================
+   9. 日期选择器
+   ============================================ */
+.el-date-editor {
+  --el-input-focus-border-color: #ea580c !important;
+}
+
+.el-date-editor .el-range-separator {
+  color: #666666 !important;
+  font-weight: 500;
+}
+
+.el-date-editor .el-range-icon {
+  color: #999999 !important;
+}
+
+.el-date-editor .el-range-input {
+  font-size: 13px !important;
+}
+
+.el-date-editor .el-range-input::placeholder {
+  color: #cccccc !important;
+}
+
+/* ============================================
+   10. 表格排序
+   ============================================ */
+.el-table th.ascending .sort-caret.ascending {
+  border-bottom-color: #ea580c !important;
+}
+
+.el-table th.descending .sort-caret.descending {
+  border-top-color: #ea580c !important;
+}
+
+/* ============================================
+   11. 标签页
+   ============================================ */
+.el-tabs__item.is-active {
+  color: #ea580c !important;
+}
+
+.el-tabs__item:hover {
+  color: #ea580c !important;
+}
+
+.el-tabs__active-bar {
+  background-color: #ea580c !important;
+}
+
+/* ============================================
+   12. 开关
+   ============================================ */
+.el-switch.is-checked .el-switch__core {
+  background-color: #ea580c !important;
+  border-color: #ea580c !important;
+}
+
+/* ============================================
+   13. 下拉菜单
+   ============================================ */
+.el-dropdown-menu__item:hover {
+  background-color: #fff7ed !important;
+  color: #ea580c !important;
+}
+
+/* ============================================
+   14. 对话框关闭按钮
+   ============================================ */
+.el-dialog__headerbtn:hover .el-dialog__close {
+  color: #ea580c !important;
+}
+
+/* ============================================
+   15. 加载动画
+   ============================================ */
+.el-loading-spinner .circular {
+  stroke: #ea580c !important;
+}
+
+/* ============================================
+   16. 步骤条
+   ============================================ */
+.el-step__head.is-finish {
+  color: #ea580c !important;
+  border-color: #ea580c !important;
+}
+
+.el-step__head.is-process {
+  color: #ea580c !important;
+  border-color: #ea580c !important;
+}
+
+.el-step__title.is-finish {
+  color: #ea580c !important;
+}
+
+.el-step__title.is-process {
+  color: #ea580c !important;
+}
+
+/* ============================================
+   17. Popper z-index 修复 (Element Plus dropdown 被 modal 遮罩)
+   ============================================
+   原因: el-select / el-cascader / el-date-picker 等通过 teleport 把
+   下拉项渲染到 <body>，而 Element Plus 默认 popper z-index (1001) 低于
+   本项目 modal (1400)，导致下拉被遮罩挡住，既影响生产视觉，也导致
+   Playwright 自动化测试无法截图。
+
+   解决: 把所有 popper 元素的 z-index 提升到 --z-index-max (9999)，
+   保证它们永远在 modal 之上。
+*/
+.el-select-dropdown,
+.el-select__popper,
+.el-popper,
+.el-dropdown-menu,
+.el-dropdown__popper,
+.el-autocomplete__popper,
+.el-autocomplete-suggestion,
+.el-cascader__dropdown,
+.el-cascader__suggestion-panel,
+.el-cascader__suggestion-list,
+.el-color-picker__panel,
+.el-color-picker__wrapper,
+.el-date-editor.el-range-editor,
+.el-picker__popper,
+.el-time-panel,
+.el-time-select__popper,
+.el-tooltip__popper,
+.el-tree-select__popper,
+.el-tree-select-dropdown,
+.el-v2-cascader__dropdown,
+.el-virtual-list,
+.el-message-box,
+.el-message,
+.el-notification,
+.el-popper.is-pure,
+.el-popper.is-light,
+.el-popper.is-dark,
+.el-overlay-message-box,
+.el-overlay-notification {
+  z-index: var(--z-index-max) !important;
+}
+
+/* Element Plus 的弹层容器也需要提高 */
+.el-popper-container,
+#el-popper-container- {
+  z-index: var(--z-index-max) !important;
+}
+
+/* ============================================
+   18. AppSelect / AppDatePicker / 自定义弹层类（统一 z-index）
+   ============================================ */
+.app-select-popper,
+.app-datepicker-popper,
+.app-tooltip-popper,
+.app-popover-popper,
+.row-action-popper {
+  z-index: var(--z-index-select) !important;
+}

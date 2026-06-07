@@ -1,0 +1,254 @@
+groups:
+  - name: excel-to-diagram-alerts
+    interval: 30s
+    rules:
+      # ============================================================
+      # 服务不可用告警
+      # ============================================================
+      - alert: ServiceDown
+        expr: up{job="backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: service
+        annotations:
+          summary: "服务不可用"
+          description: "{{ $labels.instance }} 后端服务已停止运行超过1分钟"
+          runbook_url: "https://wiki.company.com/runbooks/service-down"
+
+      - alert: FrontendDown
+        expr: up{job="frontend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: frontend
+        annotations:
+          summary: "前端服务不可用"
+          description: "{{ $labels.instance }} 前端服务已停止运行超过1分钟"
+
+      - alert: AdminDown
+        expr: up{job="admin"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          component: admin
+        annotations:
+          summary: "Admin服务不可用"
+          description: "{{ $labels.instance }} Admin服务已停止运行超过2分钟"
+
+  - name: excel-to-diagram-health
+    interval: 1m
+    rules:
+      # ============================================================
+      # 健康检查告警
+      # ============================================================
+      - alert: HealthCheckFailed
+        expr: probe_success{job="blackbox"} == 0
+        for: 30s
+        labels:
+          severity: warning
+          component: healthcheck
+        annotations:
+          summary: "健康检查失败"
+          description: "{{ $labels.instance }} 健康检查失败"
+
+      - alert: BackendHealthCheckFailed
+        expr: probe_success{instance="http://172.20.59.7:5001/api/v1/health"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: backend
+        annotations:
+          summary: "后端健康检查失败"
+          description: "后端服务健康检查端点响应异常，请检查服务状态和日志"
+
+      - alert: HighHTTPErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "HTTP 5xx错误率过高"
+          description: "5分钟内5xx错误率超过5%"
+
+  - name: excel-to-diagram-resources
+    interval: 1m
+    rules:
+      # ============================================================
+      # 资源使用告警
+      # ============================================================
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: resource
+        annotations:
+          summary: "CPU使用率过高"
+          description: "{{ $labels.instance }} CPU使用率超过80%已超过5分钟"
+
+      - alert: HighMemoryUsage
+        expr: (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) < 0.2
+        for: 5m
+        labels:
+          severity: warning
+          component: resource
+        annotations:
+          summary: "内存使用率过高"
+          description: "{{ $labels.instance }} 可用内存低于20%"
+
+      - alert: HighDiskUsage
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) < 0.1
+        for: 5m
+        labels:
+          severity: critical
+          component: resource
+        annotations:
+          summary: "磁盘空间不足"
+          description: "{{ $labels.instance }} 磁盘可用空间低于10%"
+
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) < 0.15
+        for: 10m
+        labels:
+          severity: warning
+          component: resource
+        annotations:
+          summary: "磁盘空间即将不足"
+          description: "{{ $labels.instance }} 磁盘可用空间低于15%，请及时清理"
+
+  - name: excel-to-diagram-performance
+    interval: 2m
+    rules:
+      # ============================================================
+      # 性能告警
+      # ============================================================
+      - alert: HighResponseTime
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+          component: performance
+        annotations:
+          summary: "API响应时间过高"
+          description: "95%分位响应时间超过2秒，请检查性能问题"
+
+      - alert: LowThroughput
+        expr: rate(http_requests_total[5m]) < 1
+        for: 10m
+        labels:
+          severity: info
+          component: performance
+        annotations:
+          summary: "请求吞吐量过低"
+          description: "最近5分钟请求量异常低，可能存在服务问题"
+
+  - name: excel-to-diagram-business
+    interval: 5m
+    rules:
+      # ============================================================
+      # 业务指标告警
+      # ============================================================
+      - alert: DatabaseSizeHigh
+        expr: (sqlite3_database_size_bytes / 1024 / 1024) > 1000
+        for: 10m
+        labels:
+          severity: info
+          component: database
+        annotations:
+          summary: "数据库文件过大"
+          description: "数据库文件已超过1GB，建议进行数据清理或归档"
+
+      - alert: NoRecentDeployment
+        expr: time() - file_directory_mtime{path="/opt/app/releases"} > 604800
+        for: 1h
+        labels:
+          severity: info
+          component: deployment
+        annotations:
+          summary: "长时间无部署"
+          description: "已超过7天没有新的部署，建议检查自动化部署流程"
+
+  - name: excel-to-diagram-database
+    interval: 1m
+    rules:
+      - alert: DatabasePoolExhausted
+        expr: sqlite_pool_active_readers >= sqlite_pool_max_readers
+        for: 1m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "数据库读连接池耗尽"
+          description: "所有读连接均在使用中，新请求将被阻塞等待"
+
+      - alert: WriteQueueBacklog
+        expr: sqlite_write_queue_depth > 10
+        for: 2m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "数据库写队列积压"
+          description: "写队列深度超过10，可能存在写入瓶颈"
+
+      - alert: WALFileTooLarge
+        expr: sqlite_wal_file_size_bytes / (1024 * 1024) > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "WAL文件过大"
+          description: "WAL文件超过100MB，checkpoint可能未正常执行"
+
+      - alert: DatabaseFileTooLarge
+        expr: sqlite_db_file_size_bytes / (1024 * 1024 * 1024) > 1
+        for: 10m
+        labels:
+          severity: info
+          component: database
+        annotations:
+          summary: "数据库文件过大"
+          description: "数据库文件超过1GB，建议执行VACUUM回收空间"
+
+      - alert: DatabaseLockTimeoutHigh
+        expr: rate(sqlite_lock_timeouts_total[5m]) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "数据库锁超时频率过高"
+          description: "5分钟内锁超时率超过0.01次/秒，并发冲突严重"
+
+      - alert: SlowQueryRateHigh
+        expr: rate(sqlite_slow_queries_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "慢查询频率过高"
+          description: "5分钟内慢查询率超过0.1次/秒，需要优化查询"
+
+      - alert: DatabaseReadLatencyHigh
+        expr: sqlite_read_p95_ms > 500
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "数据库读延迟过高"
+          description: "读操作P95延迟超过500ms"
+
+      - alert: DatabaseWriteLatencyHigh
+        expr: sqlite_write_p95_ms > 1000
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "数据库写延迟过高"
+          description: "写操作P95延迟超过1000ms"

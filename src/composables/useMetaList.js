@@ -329,7 +329,7 @@ export function useMetaList(objectType, options = {}) {
    */
   async function init(columnsOverride) {
     if (!objectType) {
-      console.warn(`[useMetaList] ⚠️ objectType 为空，跳过初始化`)
+      console.warn(`[useMetaList] [WARNING] objectType 为空，跳过初始化`)
       data.value = []
       pagination.total = 0
       return
@@ -366,7 +366,7 @@ export function useMetaList(objectType, options = {}) {
 
       await _loadMetaConfig()
       
-      // 🆕 v1 批次 3 / FR-6.1: 激活 field-policies API
+      // [DECORATIVE] [NEW] v1.3 / FR-6.1: 激活 field-policies API
       if (objectType && autoLoad) {
         autoLoad(objectType, 'read').catch(e => {
           console.warn('[useMetaList] autoLoad field-policies failed:', e)
@@ -379,7 +379,7 @@ export function useMetaList(objectType, options = {}) {
         if (hasColumns) {
           await loadList()
         } else {
-          console.warn(`[useMetaList] ⚠️ columns为空，跳过loadList。metaConfig.list:`, JSON.stringify(metaConfig.value?.list?.columns || metaConfig.value?.list?.tableColumns || null))
+          console.warn(`[useMetaList] [WARNING] columns为空，跳过loadList。metaConfig.list:`, JSON.stringify(metaConfig.value?.list?.columns || metaConfig.value?.list?.tableColumns || null))
           data.value = []
           pagination.total = 0
         }
@@ -388,7 +388,7 @@ export function useMetaList(objectType, options = {}) {
         pagination.total = 0
       }
     } catch (error) {
-      console.error(`[useMetaList] ❌ 初始化失败 (${objectType}):`, error)
+      console.error(`[useMetaList] [X] 初始化失败 (${objectType}):`, error)
       ElMessage.error('加载列表配置失败')
     }
   }
@@ -399,7 +399,7 @@ export function useMetaList(objectType, options = {}) {
    */
   async function loadList(extraParams = {}) {
     if (!objectType) {
-      console.warn(`[useMetaList] ⚠️ loadList: objectType 为空，跳过`)
+      console.warn(`[useMetaList] [WARNING] loadList: objectType 为空，跳过`)
       data.value = []
       pagination.total = 0
       loading.value = false
@@ -437,18 +437,18 @@ export function useMetaList(objectType, options = {}) {
         } else {
           data.value = []
           pagination.total = 0
-          console.warn('[useMetaList] ⚠️ 无法识别的数据格式:', typeof rawData, rawData ? (Array.isArray(rawData) ? `数组长度${rawData.length}` : Object.keys(rawData).slice(0,5)) : null)
+          console.warn('[useMetaList] [WARNING] 无法识别的数据格式:', typeof rawData, rawData ? (Array.isArray(rawData) ? `数组长度${rawData.length}` : Object.keys(rawData).slice(0,5)) : null)
         }
         
 
         
         _restoreSelectionState()
       } else {
-        console.warn(`[useMetaList] ⚠️ boService.query 返回 success=false:`, result.message || '无消息')
+        console.warn(`[useMetaList] [WARNING] boService.query 返回 success=false:`, result.message || '无消息')
         handleError('加载数据', new Error(result.message || '加载数据失败'), { showMessage: false })
       }
     } catch (error) {
-      console.error(`[useMetaList] ❌ loadList 异常:`, error)
+      console.error(`[useMetaList] [X] loadList 异常:`, error)
       handleError('加载数据', error)
       data.value = []
     } finally {
@@ -866,7 +866,7 @@ export function useMetaList(objectType, options = {}) {
    */
   async function _loadMetaConfig() {
     if (!objectType) {
-      console.warn('[useMetaList] ⚠️ _loadMetaConfig: objectType 为空')
+      console.warn('[useMetaList] [WARNING] _loadMetaConfig: objectType 为空')
       return
     }
     try {
@@ -878,13 +878,13 @@ export function useMetaList(objectType, options = {}) {
         _transformMetaToComponentFormat()
         return
       } else {
-        console.warn(`[useMetaList] ⚠️ 无法加载 ${objectType} 的元数据: success=${result?.success}, data存在=${!!result?.data}, message=${result?.message || 'none'}`)
+        console.warn(`[useMetaList] [WARNING] 无法加载 ${objectType} 的元数据: success=${result?.success}, data存在=${!!result?.data}, message=${result?.message || 'none'}`)
       }
     } catch (e) {
-      console.error(`[useMetaList] ❌ 加载元数据失败 (${objectType}):`, e)
+      console.error(`[useMetaList] [X] 加载元数据失败 (${objectType}):`, e)
     }
     
-    console.warn(`[useMetaList] ⚠️ 元数据加载失败，使用空配置回退`)
+    console.warn(`[useMetaList] [WARNING] 元数据加载失败，使用空配置回退`)
     metaConfig.value = {
       list: {
         columns: [],
@@ -902,7 +902,7 @@ export function useMetaList(objectType, options = {}) {
    */
   function _transformMetaToComponentFormat() {
     if (!metaConfig.value) {
-      console.error('[useMetaList] ❌ metaConfig 为空，无法转换')
+      console.error('[useMetaList] [X] metaConfig 为空，无法转换')
       return
     }
     
@@ -912,7 +912,7 @@ export function useMetaList(objectType, options = {}) {
     if (listConfig.tableColumns || listConfig.columns) {
       columns.value = _transformColumns(listConfig.tableColumns || listConfig.columns)
     } else {
-      console.warn('[useMetaList] ⚠️ 未找到列定义 (tableColumns/columns)')
+      console.warn('[useMetaList] [WARNING] 未找到列定义 (tableColumns/columns)')
     }
     
     // 转换过滤器
@@ -1346,7 +1346,7 @@ export function useMetaList(objectType, options = {}) {
   
   /** FieldPolicy - 统一字段策略引擎 */
   const {
-    autoLoad,         // 🆕 v1 批次 3 / FR-6.1
+    autoLoad,         // [DECORATIVE] [NEW] v1.3 / FR-6.1
     editableMap,
     visibleMap,
     immutableMap,
@@ -1656,7 +1656,7 @@ export function useMetaList(objectType, options = {}) {
     if (draftRow && fieldName in draftRow) {
       return draftRow[fieldName]
     }
-    // 🆕 v1 批次 2 / FR-3.3: 优先读后端注入的 display_values（如 FK 显示名、枚举标签）
+    // [DECORATIVE] [NEW] v1.2 / FR-3.3: 优先读后端注入的 display_values（如 FK 显示名、枚举标签）
     if (row?.display_values?.[fieldName] !== undefined) {
       return row.display_values[fieldName]
     }

@@ -1,0 +1,43 @@
+{
+  "version": "1.0",
+  "metadata": {
+    "recorded_at": "2026-06-02T07:10:36.256115+00:00",
+    "base_url": "http://localhost:3004/",
+    "event_count": 2,
+    "duration_ms": 30740.0
+  },
+  "events": [
+    {
+      "seq": 0,
+      "type": "navigate",
+      "timestamp": 1780384205515,
+      "target": {
+        "selector": "",
+        "fallback_selectors": [],
+        "text": "",
+        "tag": "",
+        "classes": []
+      },
+      "page_url": "/",
+      "value": "/"
+    },
+    {
+      "seq": 2,
+      "type": "click",
+      "timestamp": 1780384205677,
+      "target": {
+        "selector": "span.user-menu__name",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"el-id-6957-0\"]/span[2]"
+        ],
+        "text": "Self Updated Name",
+        "tag": "span",
+        "classes": [
+          "user-menu__name"
+        ]
+      },
+      "page_url": "/system/archdata",
+      "value": null
+    }
+  ]
+}

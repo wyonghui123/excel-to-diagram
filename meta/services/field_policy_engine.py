@@ -219,14 +219,14 @@ class FieldPolicyEngine:
                     return True
             elif getattr(constraints, 'required', False):
                 return True
-            # 🆕 v1 批次 2 / FR-4.3: 条件必填 → 保守策略返回 True（UI 显示星号）
+            # [DECORATIVE] [NEW] v1.2 / FR-4.3: 条件必填 → 保守策略返回 True（UI 显示星号）
             if self._has_conditional_required(constraints):
                 return True
         return False
 
     @staticmethod
     def _has_conditional_required(constraints) -> bool:
-        """🆕 v1 批次 2 / FR-4.3: 检查 constraints 是否声明了 conditional_required
+        """[DECORATIVE] [NEW] v1.2 / FR-4.3: 检查 constraints 是否声明了 conditional_required
 
         保守策略：只要有 conditional_required 规则就返回 True，UI 显示星号。
         实际校验由后端 ConstraintEngine 兜底。

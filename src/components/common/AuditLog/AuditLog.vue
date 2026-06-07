@@ -1,0 +1,901 @@
+<template>
+  <div class="audit-log">
+    <div v-if="loading" class="al-loading">
+      <div class="al-spinner"></div>
+      <span>加载日志...</span>
+    </div>
+    <div v-else-if="!logs || logs.length === 0" class="al-empty">
+      <svg class="al-empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+      </svg>
+      <span class="al-empty-text">暂无变更记录</span>
+      <span class="al-empty-hint">当此对象被修改时，变更记录将显示在这里</span>
+    </div>
+    <template v-else>
+      <div v-if="showFilter" class="al-filter">
+        <div class="al-filter-row">
+          <span class="al-filter-label">操作:</span>
+          <AppButton
+            v-for="opt in filterOptions"
+            :key="opt.value"
+            :variant="activeFilter === opt.value ? 'primary' : 'secondary'"
+            size="xs"
+            :class="{ 'al-filter-btn--active': activeFilter === opt.value }"
+            @click="handleFilterChange(opt.value)"
+          >
+            {{ opt.label }}
+          </AppButton>
+        </div>
+        <div class="al-filter-row" v-if="availableFields.length > 0">
+          <span class="al-filter-label">字段:</span>
+          <el-dropdown trigger="click" @command="handleFieldFilterChange">
+            <AppButton variant="secondary" size="xs" class="al-field-dropdown">
+              {{ activeFieldFilter || '全部字段' }}
+              <svg class="al-dropdown-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M6 9l6 6 6-6"/>
+              </svg>
+            </AppButton>
+            <template #dropdown>
+              <el-dropdown-menu class="al-field-menu">
+                <div class="al-field-search">
+                  <input
+                    v-model="fieldSearchText"
+                    type="text"
+                    placeholder="搜索字段..."
+                    class="al-field-search-input"
+                  />
+                </div>
+                <el-dropdown-item :command="''" :class="{ 'is-active': !activeFieldFilter }">
+                  全部字段
+                </el-dropdown-item>
+                <el-dropdown-item
+                  v-for="field in filteredFieldOptions"
+                  :key="field"
+                  :command="field"
+                  :class="{ 'is-active': activeFieldFilter === field }"
+                >
+                  {{ field }}
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
+        <div class="al-filter-actions">
+          <AppButton
+            variant="secondary"
+            size="xs"
+            @click="toggleAllGroups"
+          >
+            {{ allExpanded ? '折叠全部' : '展开全部' }}
+          </AppButton>
+        </div>
+      </div>
+
+      <div class="al-list">
+        <div
+          v-for="group in displayedGroups"
+          :key="group.key"
+          class="al-group"
+        >
+          <div class="al-group-header" @click="toggleGroup(group.key)">
+            <div class="al-group-main">
+              <span class="al-group-time">{{ formatTime(group.timestamp) }}</span>
+              <span class="al-group-user">{{ group.user_name || '-' }}</span>
+              <span
+                class="al-group-action"
+                :class="'al-action--' + (group.primaryAction || 'unknown').toLowerCase()"
+              >
+                {{ formatAction(group.primaryAction) }}
+              </span>
+              <span class="al-group-count" v-if="group.items.length > 1">
+                {{ group.items.length }} 项变更
+              </span>
+            </div>
+            <div class="al-group-toggle">
+              <svg
+                :class="['al-toggle-icon', { 'al-toggle-icon--expanded': expandedGroups.has(group.key) }]"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M9 18l6-6-6-6"/>
+              </svg>
+            </div>
+          </div>
+
+          <div v-if="expandedGroups.has(group.key)" class="al-group-items">
+            <div
+              v-for="item in group.items"
+              :key="item.id"
+              :class="['al-item', { 'al-item--clickable': clickMode }]"
+              @click="handleLogClick(item)"
+            >
+              <div class="al-detail al-detail--associate" v-if="item.action === 'ASSOCIATE' || item.action === 'ASSIGN'">
+                <span class="al-field">{{ item.field_name || '关联' }}:</span>
+                <span class="al-associate-add">+ {{ parseTargetDisplay(item.new_value) }}</span>
+              </div>
+              <div class="al-detail al-detail--dissociate" v-else-if="item.action === 'DISSOCIATE' || item.action === 'REVOKE'">
+                <span class="al-field">{{ item.field_name || '关联' }}:</span>
+                <span class="al-associate-remove">- {{ parseTargetDisplay(item.old_value) }}</span>
+              </div>
+              <div class="al-detail al-detail--batch-associate" v-else-if="item._batch_associate">
+                <span class="al-field">{{ item.field_name || '关联' }}:</span>
+                <span class="al-associate-add">+ {{ formatBatchTargets(item._batch_targets) }}</span>
+              </div>
+              <div class="al-detail" v-else-if="item.field_name">
+                <span class="al-field">{{ item.field_name }}:</span>
+                <span class="al-old">{{ item.old_value || '(空)' }}</span>
+                <span class="al-arrow">→</span>
+                <span class="al-new">{{ item.new_value || '(空)' }}</span>
+              </div>
+              <div class="al-detail al-detail--create" v-else-if="item.action === 'CREATE'">
+                <span>创建记录</span>
+              </div>
+              <div class="al-detail al-detail--delete" v-else-if="item.action === 'DELETE'">
+                <span>删除记录</span>
+              </div>
+              <div class="al-detail" v-else>
+                <span>{{ item.action }}</span>
+              </div>
+              <div v-if="item._source && item._source !== 'own'" class="al-source-badge">
+                {{ formatSource(item._source, item._child_type) }}
+              </div>
+              <div v-else-if="item._cascade_from && !item._source" class="al-cascade-from">
+                由 {{ item._cascade_from.type }} 级联操作
+              </div>
+            </div>
+
+            <div v-if="group._children.length > 0" class="al-children-section">
+              <AppCollapse>
+                <template #title>
+                  <span class="al-children-summary">级联影响 {{ group._children.length }} 个子对象</span>
+                </template>
+                <div class="al-children-list">
+                  <div
+                    v-for="child in group._children"
+                    :key="child.id"
+                    class="al-child-item"
+                  >
+                    <span class="al-child-type">{{ child.object_type }}</span>
+                    <span class="al-child-action">{{ formatAction(child.action) }}</span>
+                    <span v-if="child.field_name" class="al-child-detail">
+                      {{ child.field_name }}: {{ child.old_value }} → {{ child.new_value }}
+                    </span>
+                  </div>
+                </div>
+              </AppCollapse>
+            </div>
+          </div>
+        </div>
+
+        <AppButton
+          v-if="!showPagination && logs.length > displayLimit && !showAll"
+          variant="text"
+          size="sm"
+          block
+          @click="showAll = true"
+        >
+          展开全部 {{ logs.length }} 条记录
+        </AppButton>
+        <AppButton
+          v-else-if="!showPagination && showAll && logs.length > displayLimit"
+          variant="text"
+          size="sm"
+          block
+          @click="showAll = false"
+        >
+          收起
+        </AppButton>
+      </div>
+
+      <div v-if="showPagination && total > pageSize" class="al-pagination">
+        <el-pagination
+          :current-page="currentPage"
+          :page-size="pageSize"
+          :total="total"
+          layout="prev, pager, next"
+          small
+          @current-change="handlePageChange"
+        />
+      </div>
+    </template>
+  </div>
+</template>
+
+<script setup>
+import { computed, ref, watch } from 'vue'
+import AppButton from '@/components/common/AppButton/AppButton.vue'
+import AppCollapse from '@/components/common/AppCollapse/AppCollapse.vue'
+import { dateFormatService } from '@/services/DateFormatService'
+
+const props = defineProps({
+  logs: {
+    type: Array,
+    default: () => []
+  },
+  loading: {
+    type: Boolean,
+    default: false
+  },
+  displayLimit: {
+    type: Number,
+    default: 10
+  },
+  total: {
+    type: Number,
+    default: 0
+  },
+  showFilter: {
+    type: Boolean,
+    default: true
+  },
+  showPagination: {
+    type: Boolean,
+    default: false
+  },
+  currentPage: {
+    type: Number,
+    default: 1
+  },
+  pageSize: {
+    type: Number,
+    default: 20
+  },
+  clickMode: {
+    type: String,
+    default: ''
+  },
+  objectType: {
+    type: String,
+    default: ''
+  },
+  objectId: {
+    type: [String, Number],
+    default: null
+  }
+})
+
+const emit = defineEmits([
+  'page-change',
+  'filter-change',
+  'log-click'
+])
+
+const showAll = ref(false)
+const activeFilter = ref('')
+const activeFieldFilter = ref('')
+const fieldSearchText = ref('')
+const expandedGroups = ref(new Set())
+const allExpanded = ref(true)
+
+const filterOptions = [
+  { label: '全部', value: '' },
+  { label: '创建', value: 'CREATE' },
+  { label: '更新', value: 'UPDATE' },
+  { label: '删除', value: 'DELETE' },
+  { label: '添加关联', value: 'ASSOCIATE' },
+  { label: '移除关联', value: 'DISSOCIATE' },
+  { label: '关联操作', value: '_association_target' },
+  { label: '级联操作', value: '_cascade_child' },
+  { label: '子对象变更', value: '_child_object' }
+]
+
+const availableFields = computed(() => {
+  if (!Array.isArray(props.logs)) return []
+  const fields = new Set()
+  for (const item of props.logs) {
+    if (item.field_name) fields.add(item.field_name)
+  }
+  return Array.from(fields).sort()
+})
+
+const filteredFieldOptions = computed(() => {
+  if (!fieldSearchText.value) return availableFields.value
+  const search = fieldSearchText.value.toLowerCase()
+  return availableFields.value.filter(f => f.toLowerCase().includes(search))
+})
+
+const filteredLogs = computed(() => {
+  if (!Array.isArray(props.logs)) return []
+  let result = props.logs
+
+  if (activeFilter.value) {
+    if (activeFilter.value === 'ASSOCIATE') {
+      result = result.filter(item => item.action === 'ASSOCIATE' || item.action === 'ASSIGN')
+    } else if (activeFilter.value === 'DISSOCIATE') {
+      result = result.filter(item => item.action === 'DISSOCIATE' || item.action === 'REVOKE')
+    } else if (activeFilter.value.startsWith('_')) {
+      result = result.filter(item => item._source === activeFilter.value.slice(1))
+    } else {
+      result = result.filter(item => item.action === activeFilter.value)
+    }
+  }
+
+  if (activeFieldFilter.value) {
+    result = result.filter(item => item.field_name === activeFieldFilter.value)
+  }
+
+  result = aggregateBatchAssociations(result)
+
+  return result
+})
+
+const groupedLogs = computed(() => {
+  const groups = new Map()
+
+  for (const item of filteredLogs.value) {
+    const groupKey = item.trace_id || item.transaction_id || `single-${item.id}`
+
+    if (!groups.has(groupKey)) {
+      groups.set(groupKey, {
+        key: groupKey,
+        timestamp: item.created_at,
+        user_name: item.user_name,
+        primaryAction: item.action,
+        items: [],
+        _children: []
+      })
+    }
+
+    const group = groups.get(groupKey)
+    if (item._parent_type) {
+      group._children.push(item)
+    } else if (item._source === 'cascade_child' || item._source === 'child_object') {
+      group._children.push(item)
+    } else {
+      group.items.push(item)
+    }
+
+    if (item.created_at < group.timestamp) {
+      group.timestamp = item.created_at
+    }
+  }
+
+  const result = Array.from(groups.values())
+  result.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+
+  return result
+})
+
+watch(groupedLogs, (groups) => {
+  if (allExpanded.value) {
+    expandedGroups.value = new Set(groups.map(g => g.key))
+  }
+}, { immediate: true })
+
+function toggleAllGroups() {
+  allExpanded.value = !allExpanded.value
+  if (allExpanded.value) {
+    expandedGroups.value = new Set(groupedLogs.value.map(g => g.key))
+  } else {
+    expandedGroups.value = new Set()
+  }
+}
+
+const displayedGroups = computed(() => {
+  if (props.showPagination) return groupedLogs.value
+
+  if (showAll.value) return groupedLogs.value
+
+  let count = 0
+  const result = []
+  for (const group of groupedLogs.value) {
+    if (count >= props.displayLimit) break
+    result.push(group)
+    count++
+  }
+  return result
+})
+
+function toggleGroup(groupKey) {
+  const newExpanded = new Set(expandedGroups.value)
+  if (newExpanded.has(groupKey)) {
+    newExpanded.delete(groupKey)
+  } else {
+    newExpanded.add(groupKey)
+  }
+  expandedGroups.value = newExpanded
+  allExpanded.value = newExpanded.size === groupedLogs.value.length
+}
+
+function handleFilterChange(filterValue) {
+  activeFilter.value = filterValue
+  showAll.value = false
+  allExpanded.value = true
+  if (typeof filterValue === 'string' && filterValue.startsWith('_')) {
+    return
+  }
+  emit('filter-change', { action: filterValue || undefined, field: activeFieldFilter.value || undefined })
+}
+
+function handleFieldFilterChange(fieldValue) {
+  activeFieldFilter.value = fieldValue
+  showAll.value = false
+  allExpanded.value = true
+  emit('filter-change', { action: activeFilter.value || undefined, field: fieldValue || undefined })
+}
+
+function handlePageChange(page) {
+  emit('page-change', page)
+}
+
+function handleLogClick(item) {
+  if (!props.clickMode) return
+  emit('log-click', item)
+}
+
+function formatTime(time) {
+  if (!time) return '-'
+  const date = new Date(time)
+  if (isNaN(date.getTime())) return '-'
+  return dateFormatService.format(date, { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+function formatAction(action) {
+  const actionMap = {
+    'CREATE': '创建',
+    'UPDATE': '更新',
+    'DELETE': '删除',
+    'LOGIN': '登录',
+    'LOGOUT': '登出',
+    'ASSOCIATE': '添加关联',
+    'DISSOCIATE': '移除关联',
+    'ASSIGN': '分配',
+    'REVOKE': '撤销'
+  }
+  if (!action) return '未知'
+  return actionMap[action] || '未知'
+}
+
+function parseTargetDisplay(raw) {
+  if (!raw) return '-'
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+    if (parsed && parsed.target_display && parsed.target_type) {
+      return `${parsed.target_display}（${parsed.target_type}）`
+    }
+    return raw
+  } catch {
+    return raw
+  }
+}
+
+function formatBatchTargets(targets) {
+  if (!Array.isArray(targets) || targets.length === 0) return '-'
+  if (targets.length <= 3) {
+    return targets.join('、')
+  }
+  const shown = targets.slice(0, 2).join('、')
+  return `${shown} 等 ${targets.length} 人`
+}
+
+function formatSource(source, childType) {
+  const sourceMap = {
+    'association_target': '来自关联',
+    'cascade_child': '级联操作',
+    'child_object': childType || '子对象',
+    'relationship': '关系变更'
+  }
+  return sourceMap[source] || ''
+}
+
+function aggregateBatchAssociations(items) {
+  if (!Array.isArray(items) || items.length < 2) return items
+  
+  const batchGroups = {}
+  const nonBatchItems = []
+
+  for (const item of items) {
+    const isAssocAction = item.action === 'ASSOCIATE' || item.action === 'DISSOCIATE' || item.action === 'ASSIGN' || item.action === 'REVOKE'
+    if (!isAssocAction || !item.transaction_id) {
+      nonBatchItems.push(item)
+      continue
+    }
+
+    const batchKey = `${item.transaction_id}|${item.action}|${item.field_name}`
+    if (!batchGroups[batchKey]) {
+      batchGroups[batchKey] = { action: item.action, field_name: item.field_name, items: [] }
+    }
+    batchGroups[batchKey].items.push(item)
+  }
+
+  const result = [...nonBatchItems]
+
+  for (const [, group] of Object.entries(batchGroups)) {
+    if (group.items.length >= 2) {
+      const first = group.items[0]
+      const targets = group.items.map(it => {
+        const raw = group.action === 'DISSOCIATE' || group.action === 'REVOKE' ? it.old_value : it.new_value
+        return parseTargetDisplay(raw)
+      })
+      result.push({
+        ...first,
+        _batch_associate: true,
+        _batch_targets: targets,
+        _batch_count: group.items.length
+      })
+    } else {
+      result.push(group.items[0])
+    }
+  }
+
+  return result
+}
+</script>
+
+<style scoped>
+.audit-log {
+  width: 100%;
+}
+
+.al-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xl);
+  color: var(--color-text-secondary);
+}
+
+.al-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: al-spin 0.8s linear infinite;
+}
+
+@keyframes al-spin {
+  to { transform: rotate(360deg); }
+}
+
+.al-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-2xl);
+  color: var(--color-text-tertiary);
+}
+
+.al-empty-icon {
+  width: 48px;
+  height: 48px;
+  opacity: 0.5;
+}
+
+.al-empty-text {
+  font-size: var(--font-size-sm);
+}
+
+.al-empty-hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+.al-filter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
+}
+
+.al-filter-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  flex-wrap: wrap;
+}
+
+.al-filter-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  min-width: 36px;
+}
+
+.al-filter-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.al-field-dropdown {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  min-width: 100px;
+}
+
+.al-dropdown-icon {
+  width: 12px;
+  height: 12px;
+}
+
+.al-field-menu {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.al-field-search {
+  padding: var(--spacing-xs);
+  border-bottom: 1px solid var(--color-border-light, var(--color-border));
+}
+
+.al-field-search-input {
+  width: 100%;
+  padding: 4px 8px;
+  font-size: var(--font-size-xs);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  outline: none;
+}
+
+.al-field-search-input:focus {
+  border-color: var(--color-primary);
+}
+
+.al-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.al-group {
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+}
+
+.al-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-sm) var(--spacing-md);
+  cursor: pointer;
+  transition: all var(--transition-normal);
+}
+
+.al-group-header:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.al-group-main {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  font-size: var(--font-size-sm);
+  flex-wrap: wrap;
+}
+
+.al-group-time {
+  color: var(--color-text-secondary);
+  font-family: monospace;
+  font-size: var(--font-size-xs);
+}
+
+.al-group-user {
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium);
+}
+
+.al-group-action {
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+}
+
+.al-group-count {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  padding: 2px 6px;
+  background: var(--color-bg-spotlight);
+  border-radius: var(--radius-sm);
+}
+
+.al-group-toggle {
+  flex-shrink: 0;
+}
+
+.al-toggle-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--color-text-tertiary);
+  transition: transform 0.2s ease;
+}
+
+.al-toggle-icon--expanded {
+  transform: rotate(90deg);
+}
+
+.al-group-items {
+  border-top: 1px solid var(--color-border-light, var(--color-border));
+  background: var(--color-bg-primary);
+}
+
+.al-item {
+  padding: var(--spacing-xs) var(--spacing-md);
+  border-bottom: 1px solid var(--color-border-light, var(--color-border));
+}
+
+.al-item:last-child {
+  border-bottom: none;
+}
+
+.al-item--clickable {
+  cursor: pointer;
+}
+
+.al-item--clickable:hover {
+  background: var(--color-primary-bg);
+}
+
+.al-action--create {
+  background: var(--color-success-bg, #dcfce7);
+  color: var(--color-success, #16a34a);
+}
+
+.al-action--update {
+  background: var(--color-primary-bg);
+  color: var(--color-primary);
+}
+
+.al-action--delete {
+  background: var(--color-error-bg);
+  color: var(--color-error);
+}
+
+.al-action--assign {
+  background: var(--color-warning-bg, #fef3c7);
+  color: var(--color-warning, #d97706);
+}
+
+.al-action--revoke {
+  background: var(--color-bg-spotlight);
+  color: var(--color-text-secondary);
+}
+
+.al-action--associate {
+  background: #dbeafe;
+  color: #2563eb;
+}
+
+.al-action--dissociate {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.al-action--unknown {
+  background: var(--color-bg-spotlight);
+  color: var(--color-text-secondary);
+}
+
+.al-detail {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+}
+
+.al-field {
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium);
+}
+
+.al-old {
+  color: var(--color-error);
+  text-decoration: line-through;
+}
+
+.al-arrow {
+  color: var(--color-text-tertiary);
+}
+
+.al-new {
+  color: var(--color-success, #16a34a);
+  font-weight: var(--font-weight-medium);
+}
+
+.al-detail--create {
+  color: var(--color-success, #16a34a);
+}
+
+.al-detail--delete {
+  color: var(--color-error);
+}
+
+.al-detail--associate,
+.al-detail--batch-associate {
+  color: var(--color-text-secondary);
+}
+
+.al-detail--dissociate {
+  color: var(--color-text-secondary);
+}
+
+.al-associate-add {
+  color: var(--color-success, #16a34a);
+  font-weight: var(--font-weight-medium);
+}
+
+.al-associate-remove {
+  color: var(--color-error);
+  font-weight: var(--font-weight-medium);
+}
+
+.al-pagination {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--spacing-md);
+  padding-top: var(--spacing-md);
+  border-top: 1px solid var(--color-border-light, var(--color-border));
+}
+
+.al-cascade-from {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  padding-left: var(--spacing-md);
+  margin-top: 2px;
+}
+
+.al-source-badge {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  padding-left: var(--spacing-md);
+  margin-top: 2px;
+}
+
+.al-children-section {
+  margin-top: var(--spacing-sm);
+  border-top: 1px solid var(--color-border-light, var(--color-border));
+  padding-top: var(--spacing-sm);
+}
+
+.al-children-summary {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.al-children-list {
+  padding-left: var(--spacing-md);
+}
+
+.al-child-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xs) 0;
+  font-size: var(--font-size-sm);
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-sm);
+  padding-left: var(--spacing-sm);
+  padding-right: var(--spacing-sm);
+  margin-bottom: var(--spacing-xs);
+  transition: background var(--transition-normal);
+}
+
+.al-child-item:hover {
+  background: var(--color-bg-secondary);
+}
+
+.al-child-type {
+  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-medium);
+}
+
+.al-child-action {
+  color: var(--color-text-primary);
+}
+
+.al-child-detail {
+  color: var(--color-text-tertiary);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+</style>

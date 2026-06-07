@@ -1,0 +1,432 @@
+# ============================================
+# 枚举类型元模型
+# 层级: N/A (独立管理对象)
+# 说明: 定义业务枚举类型的元数据
+# ============================================
+
+id: enum_type
+name: 枚举类型
+table_name: enum_types
+description: 枚举类型定义，支持系统枚举和业务枚举的分层管理，支持多维枚举值。
+
+# ────────────────────────────────────────────
+# Aspect 引用
+# ────────────────────────────────────────────
+aspects: [audit_aspect]
+
+# ────────────────────────────────────────────
+# 导入导出配置
+# ────────────────────────────────────────────
+import_export:
+  import_enabled: false
+  export_enabled: true
+  cascade_export: true
+  cascade_import: false
+  description: 枚举类型仅支持导出，不支持导入（枚举类型由系统预定义或通过初始化脚本创建）
+
+# ────────────────────────────────────────────
+# 审计配置
+# ────────────────────────────────────────────
+audit:
+  enabled: true
+  strategy: changed_only
+  description: 枚举类型的变更将记录审计日志
+
+# ────────────────────────────────────────────
+# 语义标注
+# ────────────────────────────────────────────
+semantics:
+  meaning: 枚举类型的元数据定义
+  business_key: true
+  display_name: true
+  category: meta_object
+  aliases:
+    - 枚举类型
+    - EnumType
+    - Enumeration
+
+# ────────────────────────────────────────────
+# UI 视图配置
+# ────────────────────────────────────────────
+ui_view_config:
+  filter:
+    layout: sidebar
+    filters:
+      - key: version_id
+        title: 版本
+        type: select
+        source: version
+        display_field: name
+        position: 0
+        required: true
+      - key: category
+        title: 类别
+        type: select
+        position: 1
+      - key: description
+        title: 描述搜索
+        type: text
+        placeholder: 搜索枚举描述...
+        position: 100
+  list:
+    detail_mode: page
+    detail_path: '/detail/enum_type'
+    pageSize: 20
+    actions:
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    columns:
+      - key: id
+        title: 编码
+        width: 150
+        position: 1
+        importance: high
+        sortable: true
+        i18n_key: enum_type.field.id
+      - key: name
+        title: 名称
+        width: 150
+        position: 2
+        importance: high
+        sortable: true
+        i18n_key: enum_type.field.name
+      - key: category
+        title: 分类
+        width: 100
+        position: 3
+        importance: high
+        sortable: true
+        i18n_key: enum_type.field.category
+        widget: badge
+        badge_colors:
+          system: default
+          business: primary
+      - key: mutability
+        title: 可维护性
+        width: 120
+        position: 4
+        importance: high
+        sortable: true
+        i18n_key: enum_type.field.mutability
+      - key: dimension_count
+        title: 维度数
+        width: 80
+        position: 5
+        importance: medium
+        sortable: true
+        computed: true
+        computation:
+          type: dimension_count
+      - key: value_count
+        title: 值数量
+        width: 80
+        position: 6
+        importance: medium
+        sortable: true
+        computed: true
+        computation:
+          type: count_children
+          child_object: enum_value
+      - key: created_at
+        title: 创建时间
+        width: 180
+        position: 90
+        importance: low
+        sortable: true
+        defaultVisible: false
+        i18n_key: common.field.created_at
+      - key: updated_at
+        title: 更新时间
+        width: 180
+        position: 91
+        importance: low
+        sortable: true
+        defaultVisible: false
+    pageSize: 20
+    selectable: true
+
+  detail:
+    facets:
+      - title: 基本信息
+        type: fieldGroup
+        fields:
+          - id
+          - name
+          - category
+          - mutability
+          - description
+      - title: 维度配置
+        type: fieldGroup
+        fields:
+          - dimension_schema
+      - title: 系统信息
+        type: fieldGroup
+        fields:
+          - created_at
+          - updated_at
+    showChangeHistory: true
+    showRelations: true
+
+  child_sections:
+    - child_object: enum_value
+      title: 枚举值
+      display: expandable
+      pageSize: 20
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true
+      rowMutability: extensible
+  form:
+    sections:
+      - title: 基本信息
+        fields:
+          - id
+          - name
+          - category
+          - mutability
+          - description
+      - title: 维度配置
+        fields:
+          - dimension_schema
+    layout: vertical
+
+# ────────────────────────────────────────────
+# 字段定义
+# ────────────────────────────────────────────
+fields:
+  - id: id
+    name: 编码
+    type: string
+    db_column: id
+    required: true
+    unique: true
+    description: 枚举类型唯一标识
+    semantics:
+      meaning: 枚举类型的唯一编码
+      business_key: true
+      immutable: true
+      pattern: "^[a-z][a-z0-9_]*$"
+      examples:
+        - field_type
+        - relation_type
+        - note_type
+      data_category: code
+      analytics:
+        category: measure
+        aggregation: count
+        display_name: 枚举类型数量
+    ui:
+      visible: true
+      editable: true
+      widget: input
+      fieldGroup: 基本信息
+      fieldGroupPosition: 10
+      i18n_key: enum_type.field.id
+
+  - id: name
+    name: 名称
+    type: string
+    db_column: name
+    required: true
+    description: 枚举类型显示名称
+    semantics:
+      meaning: 枚举类型的显示名称
+      display_name: true
+      examples:
+        - 字段类型
+        - 关系类型
+        - 备注类型
+      data_category: text
+    ui:
+      visible: true
+      editable: true
+      widget: input
+      fieldGroup: 基本信息
+      fieldGroupPosition: 20
+      i18n_key: enum_type.field.name
+
+  - id: category
+    name: 分类
+    type: string
+    db_column: category
+    required: true
+    description: 枚举分类（system=系统枚举, business=业务枚举）
+    semantics:
+      meaning: 区分系统预置枚举和用户自定义枚举
+      analytics:
+        category: dimension
+        type: categorical
+        display_name: 枚举分类
+    enum_values:
+      - value: system
+        label: 系统
+        color: default
+      - value: business
+        label: 业务
+        color: primary
+    value_help:
+      source:
+        type: enum
+        enum_type_id: enum_category
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+      presentation:
+        result_type: dropdown
+    ui:
+      visible: true
+      editable: true
+      widget: value_help
+      fieldGroup: 基本信息
+      fieldGroupPosition: 30
+      i18n_key: enum_type.field.category
+
+  - id: mutability
+    name: 可维护性
+    type: string
+    db_column: mutability
+    required: true
+    description: 用户可维护程度（mutable/immutable）
+    semantics:
+      meaning: 控制用户对枚举值的操作权限
+      analytics:
+        category: dimension
+        type: categorical
+        display_name: 可维护性
+    ui:
+      visible: true
+      editable: true
+      widget: text
+      fieldGroup: 基本信息
+      fieldGroupPosition: 40
+      i18n_key: enum_type.field.mutability
+
+  - id: dimension_schema
+    name: 维度定义
+    type: json
+    db_column: dimension_schema
+    description: 多维枚举的维度定义
+    semantics:
+      meaning: 定义枚举的维度结构，如产品、模块等
+    ui:
+      visible: true
+      editable: true
+      widget: textarea
+      fieldGroup: 维度配置
+      fieldGroupPosition: 10
+      i18n_key: enum_type.field.dimension_schema
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    description: 枚举类型说明
+    semantics:
+      meaning: 枚举类型的详细描述
+      data_category: text
+    ui:
+      visible: true
+      editable: true
+      widget: textarea
+      render_hints:
+        searchable: true
+      fieldGroup: 基本信息
+      fieldGroupPosition: 50
+      i18n_key: enum_type.field.description
+
+  - id: dimension_count
+    name: 维度数
+    type: integer
+    description: 枚举类型的维度数量
+    storage: virtual
+    semantics:
+      meaning: 枚举类型定义的维度数量
+      analytics:
+        category: measure
+        aggregation: sum
+        display_name: 维度总数
+    computation:
+      type: dimension_count
+    ui:
+      visible: true
+      editable: false
+
+  - id: value_count
+    name: 值数量
+    type: integer
+    description: 枚举类型的枚举值数量
+    storage: virtual
+    semantics:
+      meaning: 枚举类型包含的枚举值总数
+      analytics:
+        category: measure
+        aggregation: sum
+        display_name: 枚举值总数
+    computation:
+      type: count_children
+      child_object: enum_value
+    ui:
+      visible: true
+      editable: false
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建的时间戳
+    ui:
+      visible: true
+      editable: false
+      widget: datetime
+      fieldGroup: 系统信息
+      i18n_key: common.field.created_at
+
+# ────────────────────────────────────────────
+# 关联关系
+# ────────────────────────────────────────────
+relations:
+  - id: enum_type_to_values
+    name: 包含枚举值
+    type: parent_child
+    target: enum_value
+    cardinality: "1:N"
+    description: 一个枚举类型包含多个枚举值
+    semantics:
+      meaning: 枚举类型与枚举值的关系
+
+# ────────────────────────────────────────────
+# 校验规则
+# ────────────────────────────────────────────
+validations:
+  - id: id_required
+    name: 编码必填
+    type: field
+    rule: id is not None and id != ''
+    message: 编码不能为空
+    severity: error
+
+  - id: name_required
+    name: 名称必填
+    type: field
+    rule: name is not None and name != ''
+    message: 名称不能为空
+    severity: error
+
+  - id: category_required
+    name: 分类必填
+    type: field
+    rule: category is not None and category != ''
+    message: 分类不能为空
+    severity: error
+
+  - id: mutability_required
+    name: 可维护性必填
+    type: field
+    rule: mutability is not None and mutability != ''
+    message: 可维护性不能为空
+    severity: error

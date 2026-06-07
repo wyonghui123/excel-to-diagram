@@ -1,0 +1,130 @@
+id: menu_permission
+name: 菜单权限
+table_name: menu_permissions
+description: 菜单访问权限配置，控制用户可见的菜单项
+
+fields:
+  - id: menu_code
+    name: 菜单编码
+    type: string
+    required: true
+    unique: true
+    description: 菜单的唯一编码
+    constraints:
+      - type: immutable
+        message: 菜单编码创建后不可修改
+    ui:
+      visible: true
+      editable: true
+
+  - id: menu_name
+    name: 菜单名称
+    type: string
+    required: true
+    description: 菜单显示名称
+    ui:
+      visible: true
+      editable: true
+
+  - id: menu_path
+    name: 菜单路径
+    type: string
+    required: true
+    description: 菜单路由路径
+    ui:
+      visible: true
+      editable: true
+
+  - id: required_permissions
+    name: 所需权限
+    type: text
+    description: 访问此菜单所需的权限列表（JSON数组）
+    ui:
+      visible: true
+      editable: true
+
+  - id: required_any_permission
+    name: 任意权限即可
+    type: boolean
+    default: false
+    description: true表示满足任一权限即可访问，false表示需满足所有权限
+    ui:
+      visible: true
+      editable: true
+
+  - id: parent_menu
+    name: 父菜单
+    type: string
+    description: 父菜单编码
+    ui:
+      visible: true
+      editable: true
+
+  - id: icon
+    name: 图标
+    type: string
+    description: 菜单图标
+    ui:
+      visible: true
+      editable: true
+
+  - id: sort_order
+    name: 排序
+    type: integer
+    default: 0
+    description: 菜单排序顺序
+    ui:
+      visible: true
+      editable: true
+
+  - id: is_active
+    name: 是否启用
+    type: boolean
+    default: true
+    description: 菜单是否启用
+    ui:
+      visible: true
+      editable: true
+
+  - id: data_permission_hint
+    name: 数据权限提示
+    type: text
+    description: 数据权限配置提示
+    ui:
+      visible: false
+
+  - id: created_at
+    name: 创建时间
+    type: timestamp
+    description: 记录创建时间
+    ui:
+      visible: true
+      editable: false
+
+  - id: updated_at
+    name: 更新时间
+    type: timestamp
+    description: 记录更新时间
+    ui:
+      visible: true
+      editable: false
+
+associations:
+  - name: roles
+    type: many_to_many
+    target_entity: role
+    through: role_menu_permissions
+    source_key: menu_code
+    target_key: role_id
+    description: 可访问此菜单的角色列表
+
+audit:
+  enabled: true
+  strategy: business_only
+  fields: [menu_code, menu_name, menu_path, required_permissions, is_active]
+
+category_config:
+  category: system
+  sub_category: permission
+  icon: "menu"
+  color: "#10b981"

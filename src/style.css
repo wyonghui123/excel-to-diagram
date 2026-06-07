@@ -1,0 +1,179 @@
+/* 用友YonDesign设计系统样式 */
+/* 样式已在 main.js 中导入，避免重复导入导致循环依赖 */
+
+/* 防止图标在CSS加载前显示为大尺寸（FOUC） */
+svg,
+.el-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1em;
+  height: 1em;
+  max-width: 32px;
+  max-height: 32px;
+}
+
+/* 基础样式重置 */
+:root {
+  font-family: var(--font-family);
+  line-height: var(--line-height-normal);
+  font-weight: var(--font-weight-normal);
+
+  color-scheme: light dark;
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-layout);
+
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--color-bg-layout);
+  color: var(--color-text-primary);
+}
+
+#app {
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* 链接样式 */
+a {
+  font-weight: var(--font-weight-medium);
+  color: var(--color-primary);
+  text-decoration: inherit;
+}
+
+a:hover {
+  color: var(--color-primary-hover);
+}
+
+/* 标题样式 */
+h1, h2, h3, h4, h5, h6 {
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-semibold);
+}
+
+h1 {
+  font-size: var(--font-size-mega);
+  line-height: var(--line-height-tight);
+}
+
+h2 {
+  font-size: var(--font-size-display);
+  line-height: var(--line-height-tight);
+}
+
+h3 {
+  font-size: var(--font-size-xxxl);
+  line-height: var(--line-height-snug);
+}
+
+/* 段落样式 */
+p {
+  color: var(--color-text-secondary);
+  line-height: var(--line-height-normal);
+}
+
+/* ============================================
+   Element Plus 组件样式覆盖
+   ============================================ */
+
+/* 强制覆盖 Element Plus 主色按钮样式 */
+.el-button--primary {
+  --el-button-bg-color: #ea580c !important;
+  --el-button-border-color: #ea580c !important;
+  --el-button-hover-bg-color: #c2410c !important;
+  --el-button-hover-border-color: #c2410c !important;
+  --el-button-active-bg-color: #c2410c !important;
+  --el-button-active-border-color: #c2410c !important;
+}
+
+/* Element Plus 按钮文字强制居中 */
+.el-button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  vertical-align: middle !important;
+}
+
+.el-button > span {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 4px;
+}
+
+.el-button .el-icon {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.el-button .app-icon {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-shrink: 0;
+}
+
+.el-button .app-icon + span,
+.el-button > span > .app-icon {
+  vertical-align: middle;
+}
+
+/* ============================================
+   表格排序图标修复 - 关键！
+   ============================================ */
+
+/* 确保表头单元格所有状态背景都是浅灰色 */
+.el-table th.el-table__cell,
+.el-table th.el-table__cell:hover,
+.el-table th.el-table__cell:active,
+.el-table th.el-table__cell:focus,
+.el-table th.el-table__cell.is-sortable,
+.el-table th.el-table__cell.is-sortable:hover {
+  background-color: #fafafa !important;
+  background: #fafafa !important;
+}
+
+/* 确保表头单元格内部所有元素背景透明 */
+.el-table th.el-table__cell *,
+.el-table th.el-table__cell *:hover,
+.el-table th.el-table__cell *:active,
+.el-table th.el-table__cell *:focus {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* 专门针对排序图标容器 caret-wrapper */
+.el-table .caret-wrapper,
+.el-table .caret-wrapper:hover,
+.el-table .caret-wrapper:active,
+.el-table .caret-wrapper:focus,
+.el-table .el-table__header .caret-wrapper,
+.el-table .el-table__header .caret-wrapper:hover,
+.el-table th .caret-wrapper,
+.el-table th .caret-wrapper:hover,
+.el-table th.el-table__cell .caret-wrapper,
+.el-table th.el-table__cell .caret-wrapper:hover,
+.el-table th.el-table__cell.is-sortable .caret-wrapper,
+.el-table th.el-table__cell.is-sortable .caret-wrapper:hover {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* 防止图标在CSS加载前显示为大尺寸（FOUC） */

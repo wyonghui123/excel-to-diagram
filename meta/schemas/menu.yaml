@@ -1,0 +1,264 @@
+id: menu
+name: 菜单
+table_name: menus
+description: |
+  系统菜单配置，由BO元数据驱动。
+  菜单 = 通用页面组件 × 对象(s) + config
+  
+  设计原则：
+  1. 菜单与BO通过 bo_bindings 声明关联
+  2. required_permissions 从 bo_bindings 自动推导
+  3. 支持 SAP PFCG 风格的菜单-权限联动
+bo_category: configuration
+bo_sub_category: customizing
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+
+  - id: menu_code
+    name: 菜单编码
+    type: string
+    db_column: menu_code
+    required: true
+    unique: true
+    max_length: 200
+    semantics:
+      business_key: true
+
+  - id: menu_name
+    name: 菜单名称
+    type: string
+    db_column: menu_name
+    required: true
+    max_length: 200
+
+  - id: menu_path
+    name: 路由路径
+    type: string
+    db_column: menu_path
+    max_length: 500
+    description: 前端路由路径，如 /product-management
+
+  - id: page_type
+    name: 页面类型
+    type: string
+    db_column: page_type
+    required: true
+    default: object_list
+    enum_values:
+    - value: object_list
+      description: 对象列表页，需设置 primary_object_type；由 dynamicRoutes.js 自动注册
+    - value: object_detail
+      description: 对象详情页，由 dynamicRoutes.js 自动注册
+    - value: multi_object_hub
+      description: 多对象聚合页（Tab容器），需设置 object_types；Tab 项由 tabGroupConfigs 或 API children 驱动
+    - value: custom_page
+      description: 自定义页面，dynamicRoutes.js 不自动注册路由；必须在 router/index.js 中注册静态路由，否则页面空白
+    - value: dashboard
+      description: 仪表盘页面，暂未实现（dynamicRoutes.js 未注册专用组件，当前 fallback 至 object_list）
+
+  - id: object_types
+    name: 关联业务对象
+    type: json
+    db_column: object_types
+    description: JSON数组，关联的BO ID列表（用于 multi_object_hub）
+
+  - id: primary_object_type
+    name: 主业务对象
+    type: string
+    db_column: primary_object_type
+    max_length: 100
+    description: 主 BO ID，用于权限推导和页面配置
+
+  - id: bo_bindings
+    name: BO绑定声明
+    type: json
+    db_column: bo_bindings
+    description: |
+      声明菜单与 BO 的关联关系，用于：
+      1. 自动推导 required_permissions
+      2. 自动生成页面配置
+      3. 数据权限提示
+      
+      结构示例：
+      [
+        {"bo_id": "product", "role": "primary", "include_actions": ["create", "read", "update", "delete"]},
+        {"bo_id": "version", "role": "secondary", "include_actions": ["read"]}
+      ]
+      
+      role 取值：
+      - primary: 主对象，用于权限推导
+      - secondary: 辅助对象，显示在页面中
+      - reference: 引用对象，用于 Value Help
+
+  - id: required_permissions
+    name: 所需权限
+    type: json
+    db_column: required_permissions
+    description: |
+      JSON数组，访问此菜单所需的功能权限编码列表。
+      从 bo_bindings 自动推导，也可手动配置。
+      示例：["product:read", "product:create"]
+
+  - id: required_any_permission
+    name: 任意权限匹配
+    type: boolean
+    db_column: required_any_permission
+    default: false
+    description: |
+      true: 只需满足 required_permissions 中任意一项即可访问
+      false: 需满足 required_permissions 中所有权限才能访问
+
+  - id: data_permission_hint
+    name: 数据权限提示
+    type: json
+    db_column: data_permission_hint
+    description: |
+      提示需要配置的数据权限范围。
+      结构示例：
+      {
+        "resource_types": ["product", "version"],
+        "message": "建议分配产品和版本的数据权限"
+      }
+
+  - id: page_config
+    name: 页面配置
+    type: json
+    db_column: page_config
+    description: 页面级别的配置参数，如 pageSize、columns 等
+
+  - id: parent_menu
+    name: 父菜单编码
+    type: string
+    db_column: parent_menu
+    max_length: 200
+    description: 父菜单的 menu_code，用于构建菜单树
+
+  - id: icon
+    name: 图标
+    type: string
+    db_column: icon
+    max_length: 200
+    description: 菜单图标名称
+
+  - id: color
+    name: 主题色
+    type: string
+    db_column: color
+    max_length: 50
+    description: 菜单主题色，用于 LandingPage 卡片
+
+  - id: description
+    name: 描述
+    type: string
+    db_column: description
+    max_length: 500
+
+  - id: sort_order
+    name: 排序
+    type: integer
+    db_column: sort_order
+    default: 0
+
+  - id: is_active
+    name: 是否启用
+    type: boolean
+    db_column: is_active
+    default: true
+
+  - id: show_in_sidebar
+    name: 侧边栏显示
+    type: boolean
+    db_column: show_in_sidebar
+    default: true
+    description: 是否在侧边栏导航中显示，false则仅作为URL可达的页面
+
+  - id: auto_generated
+    name: 是否自动生成
+    type: boolean
+    db_column: auto_generated
+    default: false
+    description: 是否由 MenuAutoGenerator 从 BO 元数据自动生成
+
+category_config:
+  create_permission: menu:create
+  update_permission: menu:update
+  delete_permission: menu:delete
+
+ui_view_config:
+  list:
+    title: 菜单管理
+    columns:
+      - field: menu_code
+        width: 160
+      - field: menu_name
+        width: 160
+      - field: page_type
+        width: 120
+      - field: primary_object_type
+        width: 140
+      - field: sort_order
+        width: 80
+      - field: show_in_sidebar
+        width: 100
+      - field: is_active
+        width: 80
+      - field: auto_generated
+        width: 100
+    actions:
+      - id: create
+        label: 新建菜单
+        icon: plus
+        type: primary
+    batch_actions:
+      - id: batch_delete
+        label: 批量删除
+        icon: delete
+        type: danger
+        confirm: 确定要删除选中的菜单吗？
+
+  form:
+    title: 菜单信息
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [menu_code, menu_name, menu_path, page_type, primary_object_type]
+          - fields: [parent_menu, icon, color, sort_order, is_active, show_in_sidebar]
+      - title: BO绑定
+        columns:
+          - fields: [bo_bindings, object_types, required_permissions, required_any_permission]
+      - title: 高级配置
+        columns:
+          - fields: [page_config, data_permission_hint, description]
+
+actions:
+  - id: menu_create
+    name: 创建菜单
+    type: crud
+    method: POST
+    path: /api/v1/menus
+  - id: menu_read
+    name: 查询菜单
+    type: crud
+    method: GET
+    path: /api/v1/menus/{id}
+  - id: menu_update
+    name: 更新菜单
+    type: crud
+    method: PUT
+    path: /api/v1/menus/{id}
+  - id: menu_delete
+    name: 删除菜单
+    type: crud
+    method: DELETE
+    path: /api/v1/menus/{id}
+  - id: menu_list
+    name: 菜单列表
+    type: crud
+    method: GET
+    path: /api/v1/menus

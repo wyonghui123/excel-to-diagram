@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>业务对象图 - 数据模型与数据流架构</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: #f0f2f5; padding: 20px; }
+        h1 { text-align: center; margin-bottom: 20px; color: #1a1a2e; font-size: 22px; }
+        .container { max-width: 1600px; margin: 0 auto; }
+        
+        .layer { 
+            background: white; border-radius: 12px; padding: 20px; margin-bottom: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08); position: relative;
+        }
+        .layer-title {
+            font-size: 16px; font-weight: bold; color: white; padding: 8px 16px;
+            border-radius: 6px; margin-bottom: 16px; display: inline-block;
+        }
+        .layer-1 .layer-title { background: #e74c3c; }
+        .layer-2 .layer-title { background: #e67e22; }
+        .layer-3 .layer-title { background: #2ecc71; }
+        .layer-4 .layer-title { background: #3498db; }
+        .layer-5 .layer-title { background: #9b59b6; }
+        .layer-6 .layer-title { background: #1abc9c; }
+        
+        .flow-arrow {
+            text-align: center; font-size: 28px; color: #95a5a6; margin: 8px 0;
+            position: relative;
+        }
+        .flow-arrow .label {
+            font-size: 12px; color: #7f8c8d; position: absolute; right: 20px; top: 50%;
+            transform: translateY(-50%);
+        }
+        
+        .data-box {
+            border: 2px solid #ddd; border-radius: 8px; padding: 12px; margin: 8px;
+            display: inline-block; vertical-align: top; min-width: 280px;
+            background: #fafafa; position: relative;
+        }
+        .data-box.highlight { border-color: #e74c3c; background: #fef5f5; }
+        .data-box .box-title {
+            font-size: 13px; font-weight: bold; color: #2c3e50; margin-bottom: 8px;
+            border-bottom: 1px solid #eee; padding-bottom: 4px;
+        }
+        .data-box .box-title .source {
+            font-size: 11px; color: #95a5a6; font-weight: normal; margin-left: 8px;
+        }
+        .data-box pre {
+            font-size: 11px; color: #555; background: #f5f5f5; padding: 8px;
+            border-radius: 4px; overflow-x: auto; white-space: pre-wrap;
+            line-height: 1.5; margin: 0;
+        }
+        .data-box .note {
+            font-size: 10px; color: #e74c3c; margin-top: 6px; font-style: italic;
+        }
+        
+        .row { display: flex; flex-wrap: wrap; gap: 8px; }
+        .row > .data-box { flex: 1; min-width: 280px; }
+        
+        .process-box {
+            background: #eaf4fe; border: 2px solid #3498db; border-radius: 8px;
+            padding: 12px; margin: 8px; display: inline-block; vertical-align: top;
+            min-width: 280px;
+        }
+        .process-box .box-title {
+            font-size: 13px; font-weight: bold; color: #2980b9; margin-bottom: 8px;
+        }
+        .process-box .step {
+            font-size: 11px; color: #555; margin: 4px 0; padding-left: 16px;
+            position: relative;
+        }
+        .process-box .step::before {
+            content: '→'; position: absolute; left: 0; color: #3498db;
+        }
+        
+        .color-box {
+            display: inline-block; width: 16px; height: 16px; border-radius: 3px;
+            vertical-align: middle; margin: 0 2px; border: 1px solid #ddd;
+        }
+        
+        .legend {
+            background: #f8f9fa; border-radius: 8px; padding: 12px; margin-bottom: 16px;
+            display: flex; gap: 20px; flex-wrap: wrap; font-size: 12px;
+        }
+        .legend-item { display: flex; align-items: center; gap: 6px; }
+        .legend-color { width: 24px; height: 14px; border-radius: 3px; border: 1px solid #ddd; }
+    </style>
+</head>
+<body>
+<div class="container">
+<h1>业务对象图 - 数据模型与数据流架构</h1>
+
+<div class="legend">
+    <div class="legend-item"><div class="legend-color" style="background:#e74c3c"></div> 数据源层</div>
+    <div class="legend-item"><div class="legend-color" style="background:#e67e22"></div> 过滤计算层</div>
+    <div class="legend-item"><div class="legend-color" style="background:#2ecc71"></div> 分组模型层</div>
+    <div class="legend-item"><div class="legend-color" style="background:#3498db"></div> 图表构建层</div>
+    <div class="legend-item"><div class="legend-color" style="background:#9b59b6"></div> 颜色计算层</div>
+    <div class="legend-item"><div class="legend-color" style="background:#1abc9c"></div> 渲染输出层</div>
+</div>
+
+<!-- ===== Layer 1: 数据源 ===== -->
+<div class="layer layer-1">
+    <div class="layer-title">Layer 1: 数据源 (previewData / rawData)</div>
+    <div class="row">
+        <div class="data-box highlight">
+            <div class="box-title">previewData.businessObjects <span class="source">Excel解析</span></div>
+<pre>{
+  code: 'BCDM01',          // 业务对象编码（全局唯一）
+  name: '条码1',            // 业务对象名称
+  serviceModule: 'BCDM',   // 所属服务模块编码
+  serviceModuleName: '条码管理',
+  subDomain: '采购供应',    // 所属子领域
+  domain: '供应链云',       // 所属领域
+  isCenter: false           // 是否中心（后续计算）
+}</pre>
+        </div>
+        <div class="data-box highlight">
+            <div class="box-title">previewData.domainProducts <span class="source">Excel解析</span></div>
+<pre>{
+  name: '供应链云',         // 领域名称
+  code: 'SCM',             // 领域编码
+  modules: [{              // 子领域列表
+    name: '采购供应',       // 子领域名称
+    code: 'PUR',           // 子领域编码
+    submodules: [{         // 服务模块列表
+      name: '条码管理',     // 服务模块名称
+      code: 'BCDM',        // 服务模块编码
+      businessObjects: [{  // 业务对象列表
+        code: 'BCDM01', name: '条码1'
+      }]
+    }]
+  }]
+}</pre>
+        </div>
+        <div class="data-box">
+            <div class="box-title">previewData.relationships <span class="source">Excel解析</span></div>
+<pre>{
+  sourceCode: 'BCDM01',     // 源业务对象编码
+  targetCode: 'PUM01',      // 目标业务对象编码
+  sourceName: '条码1',
+  targetName: '采购1',
+  relationCode: 'REL001',   // 关系编码
+  relationDesc: '关联'      // 关系描述
+}</pre>
+        </div>
+    </div>
+</div>
+
+<div class="flow-arrow">↓<span class="label">用户选择中心范围 + 关系过滤</span></div>
+
+<!-- ===== Layer 2: 过滤计算 ===== -->
+<div class="layer layer-2">
+    <div class="layer-title">Layer 2: 过滤计算 (useDiagramData.js)</div>
+    <div class="row">
+        <div class="data-box highlight">
+            <div class="box-title">centerScope <span class="source">diagramConfigStore</span></div>
+<pre>// 用户在步骤1选择的中心业务对象编码
+centerScope = ['BCDM01', 'BCDM02', 'BCDM03', ...]
+
+// 存储在 diagramConfigStore.centerScope
+// 由 StepScope.vue 组件更新</pre>
+        </div>
+        <div class="data-box">
+            <div class="box-title">relationFilteredBoCodes <span class="source">computed</span></div>
+<pre>// 基于关系范围选择，计算出的关联业务对象编码
+// 通过遍历关系，找到与中心范围相关的业务对象
+relationFilteredBoCodes = ['PUM01', 'PUM02', ...]</pre>
+        </div>
+        <div class="data-box highlight">
+            <div class="box-title">finalBoCodes <span class="source">centerScope ∪ relationFiltered</span></div>
+<pre>// 最终显示范围 = 中心范围 ∪ 关系新增
+finalBoCodes = new Set([
+  ...centerScope,           // 中心范围
+  ...relationFilteredBoCodes // 关系关联范围
+])
+
+// 用于过滤 containers 和 relationships</pre>
+        </div>
+    </div>
+    <div class="row">
+        <div class="data-box">
+            <div class="box-title">centerScopeMarkers <span class="source">updateCenterScopeMarkers()</span></div>
+<pre>{
+  domains: Map {
+    '供应链云' => true,    // 领域是否包含中心节点
+    '制造云' => false
+  },
+  subDomains: Map {
+    '采购供应' => true,   // 子领域是否包含中心节点
+    '销售服务' => false
+  },
+  serviceModules: Map {
+    '条码管理' => true,   // 服务模块是否包含中心节点
+    'BCDM' => true        // 同时存储编码
+  }
+}
+// 只基于 centerScope 计算，不包含关系范围</pre>
+            <div class="note">注意：centerScopeMarkers 只基于 centerScope，不包含 relationFilteredBoCodes</div>
+        </div>
+    </div>
+</div>
+
+<div class="flow-arrow">↓<span class="label">filteredContainers computed</span></div>
+
+<!-- ===== Layer 3: 分组模型 ===== -->
+<div class="layer layer-3">
+    <div class="layer-title">Layer 3: 分组模型 (filteredContainers → groups)</div>
+    <div class="row">
+        <div class="data-box">
+            <div class="box-title">filteredContainers (业务对象图) <span class="source">computed</span></div>
+<pre>// 按 finalBoCodes 过滤后的子领域容器
+[{
+  id: '采购供应',           // 子领域ID
+  name: '采购供应',         // 子领域名称
+  domain: '供应链云',       // 领域名称
+  domainCode: 'SCM',       // 领域编码
+  subDomainName: '采购供应',
+  nodes: [{                // 业务对象节点列表
+    id: '条码1',
+    name: '条码1',
+    code: 'BCDM01',
+    serviceModuleName: '条码管理',
+    serviceModule: 'BCDM'
+  }, {
+    id: '采购1',
+    name: '采购1',
+    code: 'PUM01',
+    serviceModuleName: '采购管理',
+    serviceModule: 'PUM'
+  }],
+  serviceModuleMap: {      // 按服务模块分组
+    '条码管理': { code:'BCDM', nodes:[...] }
+  }
+}]</pre>
+        </div>
+        <div class="process-box">
+            <div class="box-title">handleBusinessObjectAutoGroup()</div>
+            <div class="step">遍历 props.containers，按 domain 分组</div>
+            <div class="step">每个 domain 内按 subDomainName 分组</div>
+            <div class="step">每个 subDomain 内按 serviceModuleName 分组</div>
+            <div class="step">分析节点外部连线（ELK分组）</div>
+            <div class="step">创建虚拟容器（createNodeContainer）</div>
+            <div class="step">构建 groups 树形结构</div>
+        </div>
+        <div class="data-box">
+            <div class="box-title">groups (分组模型) <span class="source">LayoutControlPanel.vue</span></div>
+<pre>[{
+  id: 'domain_供应链云',
+  title: '供应链云',
+  groupType: 'domain',
+  direction: 'LR',
+  children: [{
+    id: 'subDomain_采购供应',
+    title: '采购供应',
+    groupType: 'subDomain',
+    direction: 'TB',
+    containers: [{
+      id: 'bo_BCDM01_boundary',
+      name: '条码1',
+      elementCode: 'BCDM01',  // ← 关键：业务对象编码
+      isVirtual: true,
+      nodes: ['BCDM01'],
+      domain: '供应链云',
+      subDomainName: '采购供应',
+      _elkGroup: 'boundary'
+    }],
+    children: [{
+      // serviceModule 子分组
+      id: 'serviceModule_BCDM',
+      title: '条码管理',
+      groupType: 'serviceModule',
+      containers: [...],
+      children: [
+        // ELK inner/boundary 子分组
+      ]
+    }]
+  }]
+}]</pre>
+            <div class="note">注意：container.elementCode 是业务对象编码，用于颜色判断</div>
+        </div>
+    </div>
+</div>
+
+<div class="flow-arrow">↓<span class="label">generateDiagram() / buildDiagramData()</span></div>
+
+<!-- ===== Layer 4: 图表构建 ===== -->
+<div class="layer layer-4">
+    <div class="layer-title">Layer 4: 图表构建 (diagramDataBuilder.js)</div>
+    <div class="row">
+        <div class="process-box">
+            <div class="box-title">buildDiagramData()</div>
+            <div class="step">buildNodes(businessObjects) → 构建节点</div>
+            <div class="step">buildLinks(relationships) → 构建连线</div>
+            <div class="step">合并配置参数（colorGroupBy, centerScopeColor 等）</div>
+        </div>
+        <div class="data-box">
+            <div class="box-title">diagramData.nodes <span class="source">buildNodes()</span></div>
+<pre>[{
+  id: '条码1',              // 使用 bo.name 作为ID
+  name: '条码1',
+  originalName: '条码1',
+  code: 'BCDM01',           // 业务对象编码
+  category: 'object',
+  domain: '供应链云',
+  subDomain: '采购供应',
+  serviceModule: 'BCDM',
+  serviceModuleName: '条码管理',
+  isCenter: false           // 注意：此处未计算
+}]</pre>
+            <div class="note">注意：buildNodes 不计算 isCenter，颜色在渲染时计算</div>
+        </div>
+        <div class="data-box">
+            <div class="box-title">diagramData (完整输出) <span class="source">buildDiagramData()</span></div>
+<pre>{
+  nodes: [...],              // 节点数组
+  links: [...],              // 连线数组
+  domainProducts: [...],     // 领域产品数据
+  serviceModules: [...],     // 服务模块数据
+  colorGroupBy: 'domain',   // 颜色分组方式
+  colorScheme: 'default',   // 颜色方案
+  nodeTextColor: 'black',   // 节点文字颜色
+  centerScopeColor: '#808080', // 中心范围颜色
+  centerScope: ['BCDM01',...], // 中心范围编码
+  layoutTemplate: 'default', // 布局模板
+  customColors: {},          // 自定义颜色
+  hideLinkLabelTails: false, // 隐藏连线标签尾部
+  layoutControlConfig: {...}, // 分组控制配置
+  groupControlTitleMap: {...}// 分组标题映射
+}</pre>
+        </div>
+    </div>
+</div>
+
+<div class="flow-arrow">↓<span class="label">MermaidComponent.vue 渲染</span></div>
+
+<!-- ===== Layer 5: 颜色计算 ===== -->
+<div class="layer layer-5">
+    <div class="layer-title">Layer 5: 颜色计算 (GroupItem.vue / MermaidComponent.vue)</div>
+    <div class="row">
+        <div class="process-box">
+            <div class="box-title">getContainerColor(container) - 分组配置页面</div>
+            <div class="step">获取 containerData（code, elementCode, name, domain, subDomainName）</div>
+            <div class="step">计算 centerScopeSet = new Set(centerScope)</div>
+            <div class="step">判断 isCenter：containerCode ∈ centerScopeSet ?</div>
+            <div class="step">判断 isCenter：container.name ∈ centerScopeMarkers.serviceModules ?</div>
+            <div class="step">若 isCenter → 返回 centerScopeColor（如 #808080 灰色）</div>
+            <div class="step">若非中心 → 根据 colorGroupBy 计算 colorKey</div>
+            <div class="step">colorGroupBy='domain' → colorKey = containerData.domain</div>
+            <div class="step">colorGroupBy='subDomain' → colorKey = containerData.subDomainName</div>
+            <div class="step">colorGroupBy='serviceModule' → colorKey = containerData.serviceModuleName</div>
+            <div class="step">返回 colorMapping[colorKey] 或默认颜色</div>
+        </div>
+        <div class="data-box">
+            <div class="box-title">颜色判断逻辑详解</div>
+<pre>// 1. 中心判断（优先级最高）
+isCenter = centerScopeSet.has(containerData.code)
+        || centerScopeSet.has(containerData.elementCode)
+        || centerScopeSet.has(containerData.name)
+        || centerScopeMarkers.serviceModules.has(containerData.name)
+        || centerScopeMarkers.serviceModules.has(containerData.code)
+
+// 2. 中心颜色
+if (isCenter) return centerScopeColor  // '#808080'
+
+// 3. 非中心颜色（按 colorGroupBy 分组）
+colorKey = {
+  'domain': containerData.domain,        // '供应链云'
+  'subDomain': containerData.subDomainName, // '采购供应'
+  'serviceModule': containerData.serviceModuleName // '条码管理'
+}[colorGroupBy]
+
+return colorMapping[colorKey]  // '#1890FF'</pre>
+        </div>
+        <div class="data-box">
+            <div class="box-title">MermaidComponent 颜色计算</div>
+<pre>// MermaidComponent.vue 中计算节点颜色
+// 使用 diagramData 中的参数：
+// - centerScope: 中心范围编码
+// - centerScopeColor: 中心颜色
+// - colorGroupBy: 分组方式
+// - colorScheme / customColors: 颜色方案
+
+// 对每个节点：
+isCenter = centerScope.includes(node.code)
+color = isCenter 
+  ? centerScopeColor 
+  : getColorByGroup(node, colorGroupBy, colorScheme)</pre>
+        </div>
+    </div>
+</div>
+
+<div class="flow-arrow">↓<span class="label">最终渲染</span></div>
+
+<!-- ===== Layer 6: 渲染输出 ===== -->
+<div class="layer layer-6">
+    <div class="layer-title">Layer 6: 渲染输出 (Mermaid / mxGraph)</div>
+    <div class="row">
+        <div class="data-box">
+            <div class="box-title">最终节点颜色示例</div>
+<pre>// 用户选择：centerScope = ['BCDM01', 'BCDM02']
+// colorGroupBy = 'domain'
+// centerScopeColor = '#808080' (灰色)
+
+节点 '条码1' (BCDM01):
+  isCenter = true  (BCDM01 ∈ centerScope)
+  color = '#808080' (灰色) <span class="color-box" style="background:#808080"></span>
+
+节点 '采购1' (PUM01):
+  isCenter = false (PUM01 ∉ centerScope)
+  colorKey = '供应链云' (domain)
+  color = '#1890FF' (蓝色) <span class="color-box" style="background:#1890FF"></span>
+
+节点 '生产1' (WIP01):
+  isCenter = false
+  colorKey = '制造云' (domain)
+  color = '#52C41A' (绿色) <span class="color-box" style="background:#52C41A"></span></pre>
+        </div>
+        <div class="data-box">
+            <div class="box-title">关键数据流路径</div>
+<pre>centerScope (BO编码数组)
+  ↓
+centerScopeMarkers (领域/子领域/服务模块标记)
+  ↓
+filteredContainers (按 finalBoCodes 过滤)
+  ↓
+handleBusinessObjectAutoGroup() (构建 groups)
+  ↓
+groups (分组模型: domain→subDomain→serviceModule→ELK)
+  ↓
+getContainerColor() (分组配置页面颜色)
+  ↓
+buildDiagramData() (图表数据构建)
+  ↓
+MermaidComponent (渲染时颜色计算)
+  ↓
+最终图表展示</pre>
+        </div>
+    </div>
+</div>
+
+</div>
+</body>
+</html>

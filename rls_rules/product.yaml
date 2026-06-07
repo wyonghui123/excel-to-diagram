@@ -1,0 +1,37 @@
+# M11 RLS 规则：product（产品）
+# 与 order.yaml 类似（业务核心实体）
+
+entity: product
+
+# 行级过滤
+row_filters:
+  # 公司内产品：所有公司用户可见
+  - applies_to: [role:user, role:viewer, role:manager]
+    condition: "product.company_id == $user.company_id"
+  # 管理员看所有
+  - applies_to: [role:admin]
+    condition: "true"
+  # AI Agent 仅看上架产品
+  - applies_to: [role:ai-agent]
+    condition: "product.is_published == true"
+
+# 字段脱敏（产品成本/利润）
+field_masks:
+  - field: cost
+    mask: "***"
+    applies_to: [role:viewer, role:user, role:ai-agent]
+  - field: margin
+    mask: "***"
+    applies_to: [role:viewer, role:user, role:ai-agent]
+  - field: supplier_info
+    mask: "***HIDDEN***"
+    applies_to: [role:user, role:viewer, role:ai-agent]
+
+# 操作权限
+actions:
+  create: [role:admin, role:manager]
+  read: [role:admin, role:manager, role:user, role:viewer, role:ai-agent]
+  update: [role:admin, role:manager]
+  delete: [role:admin]
+  publish: [role:admin, role:manager]
+  export: [role:admin, role:manager]

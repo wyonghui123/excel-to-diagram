@@ -1,0 +1,34 @@
+# M11 RLS 规则：order（订单）
+# 替换现有的 meta_object.authorization.scope 硬编码
+# 字段脱敏配置与 FieldPolicyInterceptor 协同
+
+entity: order
+
+# 行级过滤（替换现有 scope 表达式）
+row_filters:
+  # 用户只能看自己公司的订单
+  - applies_to: [role:user, role:viewer]
+    condition: "user.company_id == order.company_id"
+  # 管理员看所有
+  - applies_to: [role:admin, role:manager]
+    condition: "true"
+  # AI Agent 只能看公开订单
+  - applies_to: [role:ai-agent]
+    condition: "order.is_public == true"
+
+# 字段脱敏（与 FieldPolicyInterceptor 协同）
+field_masks:
+  - field: phone
+    mask: "***-****-{}"
+    applies_to: [role:user, role:viewer, role:ai-agent]
+  - field: amount
+    mask: "***"
+    applies_to: [role:viewer, role:ai-agent]
+
+# 操作权限（与 PermissionInterceptor 协同）
+actions:
+  create: [role:admin, role:manager]
+  read: [role:admin, role:manager, role:user, role:viewer, role:ai-agent]
+  update: [role:admin, role:manager]
+  delete: [role:admin]
+  export: [role:admin, role:manager]

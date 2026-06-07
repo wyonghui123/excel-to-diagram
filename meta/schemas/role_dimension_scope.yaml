@@ -1,0 +1,48 @@
+id: role_dimension_scope
+name: 角色维度范围
+table_name: role_dimension_scopes
+description: 角色的管理维度范围声明，是权限推导的入口。
+bo_category: configuration
+bo_sub_category: customizing
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+
+  - id: role_id
+    name: 角色ID
+    type: integer
+    db_column: role_id
+    required: true
+
+  - id: dimension_code
+    name: 维度编码
+    type: string
+    db_column: dimension_code
+    required: true
+    max_length: 100
+
+  - id: dimension_values
+    name: 维度值列表
+    type: json
+    db_column: dimension_values
+    required: true
+
+  - id: inherit_children
+    name: 包含下级
+    type: boolean
+    db_column: inherit_children
+    default: true
+
+  - id: scope_mode
+    name: 范围模式
+    type: string
+    db_column: scope_mode
+    default: include
+    enum_values:
+      - include
+      - exclude

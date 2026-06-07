@@ -66,7 +66,7 @@
         <AppSelect
           v-else-if="field.type === 'select' || (field.options && field.options.length > 0)"
           v-model="formData[field.key]"
-          :options="field.options || []"
+          :options="getOptionsWithDisplay(field.key, field.options) || []"
           :placeholder="field.placeholder || `请选择${field.label}`"
           :disabled="field.disabled"
           :aria-required="field.required ? 'true' : undefined"
@@ -156,7 +156,7 @@ const props = defineProps({
     type: Object,
     default: () => ({})
   },
-  fieldPolicy: {            // 🆕 v1 批次 3 / FR-6.7: useFieldPolicy 注入
+  fieldPolicy: {            // [DECORATIVE] [NEW] v1.3 / FR-6.7: useFieldPolicy 注入
     type: Object,
     default: null
   }
@@ -189,6 +189,7 @@ function setFieldValues(values) {
 function initFormData(source) {
   Object.keys(formData).forEach(key => delete formData[key])
   Object.keys(previousFormData).forEach(key => delete previousFormData[key])
+  Object.keys(displayValues).forEach(key => delete displayValues[key])
   props.fields.forEach(f => {
     formData[f.key] = source?.[f.key] ?? f.defaultValue ?? ''
     previousFormData[f.key] = formData[f.key]
@@ -200,6 +201,12 @@ function initFormData(source) {
         previousFormData[key] = source[key]
       }
     })
+    // [DECORATIVE] [NEW] v1.3: 初始化 display_values（从后端返回的编辑数据中提取）
+    if (source.display_values) {
+      Object.entries(source.display_values).forEach(([key, displayValue]) => {
+        displayValues[key] = displayValue
+      })
+    }
   }
 }
 
@@ -276,6 +283,24 @@ function clearErrors() {
   Object.keys(errors).forEach(key => delete errors[key])
 }
 
+/**
+ * [DECORATIVE] [NEW] v1.3: 获取增强的 options（支持 display_values）
+ * 对于下拉选择字段，如果后端返回了 display_values，用它来增强 options 的 label
+ */
+function getOptionsWithDisplay(fieldKey, options) {
+  if (!options || !Array.isArray(options)) return options
+  const dv = displayValues[fieldKey]
+  if (!dv) return options
+
+  // 找到当前值对应的 option，用 display_values 增强 label
+  return options.map(opt => {
+    if (opt.value === formData[fieldKey] && dv !== opt.label) {
+      return { ...opt, label: String(dv) }
+    }
+    return opt
+  })
+}
+
 function validateField(key) {
   const field = props.fields.find(f => f.key === key)
   if (!field) return true
@@ -288,7 +313,7 @@ function validateField(key) {
 
   const val = formData[key]
 
-  // 🆕 v1 批次 3 / FR-6.7: 条件必填检查（后端 conditional_required 联动）
+  // [DECORATIVE] [NEW] v1.3 / FR-6.7: 条件必填检查（后端 conditional_required 联动）
   if (props.fieldPolicy?.isRequiredByRow) {
     const isConditionallyRequired = props.fieldPolicy.isRequiredByRow(key, formData)
     if (isConditionallyRequired) {

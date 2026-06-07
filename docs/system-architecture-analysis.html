@@ -1,0 +1,1035 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>系统架构综合分析 - 数据模型与数据流</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif; background: #f0f2f5; padding: 24px; color: #2c3e50; line-height: 1.7; }
+        h1 { text-align: center; margin-bottom: 6px; color: #1a1a2e; font-size: 26px; }
+        h2 { font-size: 20px; color: #2c3e50; margin: 28px 0 14px; padding-bottom: 8px; border-bottom: 3px solid #2c3e50; }
+        h3 { font-size: 16px; color: #34495e; margin: 20px 0 10px; padding-left: 12px; border-left: 4px solid #3498db; }
+        h4 { font-size: 14px; color: #555; margin: 14px 0 8px; }
+        h5 { font-size: 13px; color: #666; margin: 12px 0 6px; }
+        .subtitle { text-align: center; color: #7f8c8d; margin-bottom: 28px; font-size: 14px; }
+        .container { max-width: 1900px; margin: 0 auto; }
+        .section { background: white; border-radius: 12px; padding: 28px; margin-bottom: 24px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
+
+        .entity-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(440px, 1fr)); gap: 16px; }
+        .entity-card { border: 2px solid #e0e0e0; border-radius: 10px; overflow: hidden; }
+        .entity-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.12); }
+        .card-header { padding: 10px 16px; font-weight: bold; font-size: 14px; color: white; display: flex; justify-content: space-between; align-items: center; }
+        .card-header .tag { font-size: 11px; background: rgba(255,255,255,0.3); padding: 2px 8px; border-radius: 10px; }
+        .card-body { padding: 14px 16px; }
+        .card-body pre { font-size: 11px; color: #555; background: #f8f9fa; padding: 10px; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; line-height: 1.5; margin: 0; }
+        .card-body .note { font-size: 11px; color: #c0392b; margin-top: 8px; padding: 6px 10px; background: #fef5f5; border-radius: 4px; border-left: 3px solid #e74c3c; }
+        .card-body .source { font-size: 11px; color: #7f8c8d; margin-top: 6px; }
+
+        .bg-source { background: #c0392b; }
+        .bg-filter { background: #d35400; }
+        .bg-group { background: #27ae60; }
+        .bg-build { background: #2980b9; }
+        .bg-color { background: #8e44ad; }
+        .bg-render { background: #16a085; }
+        .bg-relation { background: #7d3c98; }
+        .bg-store { background: #2c3e50; }
+        .bg-config { background: #e67e22; }
+        .bg-model { background: #1abc9c; }
+
+        .data-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 12px; }
+        .data-table th { background: #2c3e50; color: white; padding: 10px 14px; text-align: left; font-size: 13px; }
+        .data-table td { padding: 8px 14px; border-bottom: 1px solid #eee; vertical-align: top; }
+        .data-table tr:hover td { background: #f0f7ff; }
+        .data-table .sub-header td { background: #f8f9fa; font-weight: bold; color: #2c3e50; }
+
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: bold; color: white; margin: 0 2px; }
+        .badge-pk { background: #e74c3c; }
+        .badge-fk { background: #3498db; }
+        .badge-uk { background: #f39c12; }
+        .badge-redundant { background: #95a5a6; }
+        .badge-computed { background: #9b59b6; }
+        .badge-1n { background: #3498db; }
+        .badge-nn { background: #e67e22; }
+        .badge-11 { background: #27ae60; }
+        .badge-enum { background: #1abc9c; }
+
+        .flow-box { background: #fafbfc; border: 2px solid #dce1e6; border-radius: 10px; padding: 20px; margin: 16px 0; }
+        .flow-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+        .flow-node { display: inline-flex; flex-direction: column; align-items: center; padding: 10px 18px; border-radius: 8px; color: white; font-size: 12px; font-weight: bold; min-width: 120px; text-align: center; }
+        .flow-node .sub { font-weight: normal; font-size: 10px; opacity: 0.85; margin-top: 2px; }
+        .flow-arrow { color: #95a5a6; font-size: 22px; margin: 0 2px; }
+        .flow-arrow-down { text-align: center; color: #95a5a6; font-size: 22px; margin: 4px 0; }
+
+        .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 16px 0; }
+        .compare-box { border-radius: 10px; padding: 20px; }
+        .compare-left { background: #eaf2f8; border: 2px solid #2980b9; }
+        .compare-right { background: #fdf2e9; border: 2px solid #e67e22; }
+        .compare-box h4 { margin-bottom: 12px; font-size: 15px; }
+        .compare-box h4 .icon { margin-right: 6px; }
+        .compare-box ul { list-style: none; padding: 0; }
+        .compare-box li { font-size: 13px; margin: 8px 0; padding: 6px 10px; border-radius: 4px; }
+        .compare-left li { background: rgba(255,255,255,0.6); }
+        .compare-right li { background: rgba(255,255,255,0.6); }
+
+        .diff-table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13px; }
+        .diff-table th { background: #2c3e50; color: white; padding: 12px 16px; text-align: left; }
+        .diff-table td { padding: 10px 16px; border-bottom: 1px solid #eee; line-height: 1.6; }
+        .diff-table tr:hover td { background: #f8f9fa; }
+        .diff-table .dim { background: #eaf2f8; border-right: 3px solid #2980b9; font-weight: bold; width: 140px; }
+
+        .iface { border: 2px solid #2980b9; border-radius: 8px; padding: 14px; margin: 10px 0; background: #f0f7ff; }
+        .iface .title { font-weight: bold; color: #2980b9; margin-bottom: 8px; font-size: 13px; }
+        .iface pre { font-size: 11px; background: white; padding: 10px; border-radius: 4px; margin: 0; white-space: pre-wrap; line-height: 1.5; }
+
+        .warn { background: #fff8e1; border: 2px solid #ffc107; border-radius: 8px; padding: 12px; margin: 10px 0; font-size: 12px; }
+        .warn .icon { margin-right: 6px; }
+
+        .legend { display: flex; gap: 16px; flex-wrap: wrap; padding: 14px; background: #e8ecf0; border-radius: 8px; margin-bottom: 20px; font-size: 12px; }
+        .legend-item { display: flex; align-items: center; gap: 6px; }
+        .legend-dot { width: 14px; height: 14px; border-radius: 4px; }
+
+        .constraint { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 11px; margin: 2px; }
+        .c-not-null { background: #fdecec; color: #c0392b; border: 1px solid #e74c3c; }
+        .c-unique { background: #eaf2f8; color: #2980b9; border: 1px solid #3498db; }
+        .c-fk { background: #eafaf1; color: #27ae60; border: 1px solid #2ecc71; }
+        .c-enum { background: #f5eef8; color: #8e44ad; border: 1px solid #9b59b6; }
+
+        .conclusion-box { background: #f0f7ff; border: 2px solid #2980b9; border-radius: 10px; padding: 20px; margin: 16px 0; }
+        .conclusion-box p { font-size: 13px; line-height: 1.8; color: #555; margin-top: 10px; }
+        .conclusion-box p:first-child { margin-top: 0; }
+
+        .code-ref { font-family: 'Consolas', monospace; font-size: 11px; background: #f0f0f0; padding: 1px 4px; border-radius: 3px; color: #c0392b; }
+
+        .split-flow { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 12px 0; }
+        .split-flow .iface { margin: 0; }
+        .split-label { text-align: center; font-weight: bold; font-size: 13px; margin-bottom: 6px; padding: 4px 8px; border-radius: 6px; color: white; }
+    </style>
+</head>
+<body>
+<div class="container">
+
+<h1>系统架构综合分析 — 数据模型与数据流</h1>
+<div class="subtitle">业务对象图 & 服务模块图 | 核心实体 · 属性约束 · 关系结构 · 流转路径 · 转换规则 · 差异分析</div>
+
+<div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#c0392b"></div>数据源</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#d35400"></div>过滤计算</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#27ae60"></div>分组模型</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#2980b9"></div>图表构建</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#8e44ad"></div>颜色计算</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#16a085"></div>渲染输出</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#7d3c98"></div>关系推导</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#2c3e50"></div>持久存储</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#e67e22"></div>配置管理</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#1abc9c"></div>统一模型</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- PART 1: 数据模型 -->
+<!-- ============================================================ -->
+<div class="section">
+<h2>一、数据模型：核心实体、属性定义、关系结构与约束条件</h2>
+
+<h3>1.1 实体全景分类体系</h3>
+
+<p style="font-size:13px; margin-bottom:16px; color:#555;">
+系统数据实体按生命周期和功能定位分为<strong>五大类</strong>：<strong>原始实体</strong>（Excel解析直接产出，应用级生命周期）、<strong>推导实体</strong>（算法计算产出，请求级生命周期）、<strong>计算实体</strong>（响应式计算产出，响应式生命周期）、<strong>配置实体</strong>（用户交互产出，会话级生命周期）、<strong>输出实体</strong>（最终渲染消费，请求级生命周期）。两种图表类型共享原始实体，在推导、计算、配置和输出阶段产生分化。
+</p>
+
+<table class="data-table">
+    <tr><th>分类</th><th>实体</th><th>生命周期</th><th>图表类型</th><th>存储位置</th><th>持久性</th></tr>
+    <tr class="sub-header"><td colspan="6">原始实体（Excel解析产出 — 一对一映射，无数据损失）</td></tr>
+    <tr><td>原始</td><td>BusinessObject</td><td>应用级（随Excel加载创建）</td><td>BO图 + SM图</td><td>previewData.businessObjects</td><td>随应用销毁</td></tr>
+    <tr><td>原始</td><td>ServiceModule</td><td>应用级</td><td>SM图（主）/ BO图（辅）</td><td>previewData.serviceModules</td><td>随应用销毁</td></tr>
+    <tr><td>原始</td><td>DomainProduct</td><td>应用级</td><td>BO图 + SM图</td><td>previewData.domainProducts</td><td>随应用销毁</td></tr>
+    <tr><td>原始</td><td>Relationship</td><td>应用级</td><td>BO图（主）/ SM图（推导源）</td><td>previewData.relationships</td><td>随应用销毁</td></tr>
+    <tr class="sub-header"><td colspan="6">推导实体（算法计算产出 — N:1聚合，存在信息损失）</td></tr>
+    <tr><td>推导</td><td>ServiceModuleRelationship</td><td>请求级</td><td>SM图</td><td>局部变量</td><td>不持久化</td></tr>
+    <tr><td>推导</td><td>centerServiceModuleCodes</td><td>请求级</td><td>SM图</td><td>局部变量</td><td>不持久化</td></tr>
+    <tr><td>推导</td><td>finalBoCodes</td><td>请求级</td><td>BO图 + SM图</td><td>局部变量</td><td>不持久化</td></tr>
+    <tr class="sub-header"><td colspan="6">计算实体（响应式计算产出 — 自动更新，依赖追踪）</td></tr>
+    <tr><td>计算</td><td>CenterScopeMarkers</td><td>响应式（watch centerScope）</td><td>BO图 + SM图</td><td>diagramConfigStore</td><td>Pinia持久</td></tr>
+    <tr><td>计算</td><td>filteredContainers</td><td>响应式（computed）</td><td>BO图 + SM图</td><td>useDiagramData</td><td>不持久化</td></tr>
+    <tr><td>计算</td><td>relationFilteredBoCodes</td><td>响应式（computed）</td><td>BO图 + SM图</td><td>useDiagramData</td><td>不持久化</td></tr>
+    <tr class="sub-header"><td colspan="6">配置实体（用户交互产出 — 会话级，可序列化）</td></tr>
+    <tr><td>配置</td><td>DiagramConfig</td><td>会话级</td><td>BO图 + SM图</td><td>diagramConfigStore</td><td>Pinia持久</td></tr>
+    <tr><td>配置</td><td>LayoutControlConfig</td><td>会话级</td><td>BO图 + SM图</td><td>diagramConfigStore</td><td>Pinia持久</td></tr>
+    <tr class="sub-header"><td colspan="6">输出实体（最终渲染消费 — 请求级，不可变）</td></tr>
+    <tr><td>输出</td><td>Group（统一分组）</td><td>请求级</td><td>BO图 + SM图</td><td>GroupModel.groups Map</td><td>不持久化</td></tr>
+    <tr><td>输出</td><td>DiagramData</td><td>请求级</td><td>BO图 + SM图</td><td>useDiagramData.diagramData</td><td>不持久化</td></tr>
+    <tr><td>输出</td><td>DiagramNode</td><td>请求级</td><td>BO图 + SM图</td><td>diagramData.nodes[]</td><td>不持久化</td></tr>
+</table>
+
+<h3>1.2 核心实体属性定义与约束</h3>
+
+<div class="entity-grid">
+
+<div class="entity-card">
+    <div class="card-header bg-source">BusinessObject（业务对象）<span class="tag">原始实体</span></div>
+    <div class="card-body">
+<pre>{
+  code: string              <span class="badge badge-pk">PK</span> <span class="constraint c-not-null">NOT NULL</span> <span class="constraint c-unique">UNIQUE</span>
+  name: string                     <span class="constraint c-not-null">NOT NULL</span>
+  serviceModule: string            <span class="badge badge-fk">FK→SM.code</span> <span class="constraint c-fk">FK</span>
+  serviceModuleName: string        <span class="badge badge-redundant">冗余</span> 可由 serviceModule→SM.name 推导
+  subDomain: string                <span class="badge badge-redundant">冗余</span> 可由 serviceModule→SM.subDomain 推导
+  domain: string                   <span class="badge badge-redundant">冗余</span> 可由 serviceModule→SM.domain 推导
+  isCenter: boolean                <span class="badge badge-computed">计算</span> generateDiagram时赋值，默认false
+  annotationCategory: string       <span class="constraint c-enum">ENUM: info|warning|error</span>
+  annotationContent: string
+}</pre>
+<div class="source">来源：Excel Sheet「业务对象」→ parseBusinessObjects() | 存储：previewData.businessObjects</div>
+<div class="note">约束：code全局唯一标识业务对象；serviceModule必须引用已存在的SM.code（FK完整性）；subDomain/domain为冗余派生字段，由Excel直接提供而非运行时推导，确保数据一致性需依赖Excel数据质量；isCenter仅在generateDiagram时计算赋值，不在原始数据中持久化</div>
+    </div>
+</div>
+
+<div class="entity-card">
+    <div class="card-header bg-source">ServiceModule（服务模块）<span class="tag">原始实体</span></div>
+    <div class="card-body">
+<pre>{
+  code: string              <span class="badge badge-pk">PK</span> <span class="constraint c-not-null">NOT NULL</span> <span class="constraint c-unique">UNIQUE</span>
+  name: string                     <span class="constraint c-not-null">NOT NULL</span>
+  subDomain: string                <span class="badge badge-fk">FK→SubDomain.name</span> <span class="constraint c-fk">FK</span>
+  domain: string                   <span class="badge badge-redundant">冗余</span> 可由 subDomain→Domain 推导
+  isCenter: boolean                <span class="badge badge-computed">计算</span> generateDiagram时赋值
+  annotationCategory: string       <span class="constraint c-enum">ENUM: info|warning|error</span>
+  annotationContent: string
+}</pre>
+<div class="source">来源：Excel Sheet「服务模块」→ parseServiceModules() | 存储：previewData.serviceModules</div>
+<div class="note">约束：code全局唯一；subDomain必须引用DomainProduct.modules[].name；domain冗余，可通过subDomain→Domain推导；isCenter在generateDiagram中基于"SM是否包含centerScope中的BO"计算</div>
+    </div>
+</div>
+
+<div class="entity-card">
+    <div class="card-header bg-source">DomainProduct（领域产品树）<span class="tag">原始实体</span></div>
+    <div class="card-body">
+<pre>{
+  name: string              <span class="badge badge-pk">PK</span> <span class="constraint c-not-null">NOT NULL</span>
+  code: string                     <span class="constraint c-unique">UNIQUE</span>
+  isCenter: boolean                <span class="badge badge-computed">计算</span> generateDiagram时赋值
+  modules: SubDomain[]             <span class="badge badge-1n">1:N</span>
+}
+
+SubDomain {
+  name: string              <span class="badge badge-pk">PK(局部)</span>
+  code: string
+  isCenter: boolean                <span class="badge badge-computed">计算</span>
+  submodules: ServiceModuleRef[]   <span class="badge badge-1n">1:N</span>
+}
+
+ServiceModuleRef {
+  name: string
+  code: string                     <span class="badge badge-fk">FK→SM.code</span>
+  isCenter: boolean                <span class="badge badge-computed">计算</span>
+  businessObjects: BORef[]         <span class="badge badge-1n">1:N</span>
+}</pre>
+<div class="source">来源：Excel Sheet「领域产品」→ buildDomainProducts() | 存储：previewData.domainProducts</div>
+<div class="note">约束：三层嵌套结构 Domain→SubDomain→SM→BO；modules[].name领域内唯一；submodules[].code全局唯一；isCenter在generateDiagram中自底向上计算（BO→SM→SubDomain→Domain，全部isCenter时父级才isCenter）</div>
+    </div>
+</div>
+
+<div class="entity-card">
+    <div class="card-header bg-source">Relationship（业务对象关系）<span class="tag">原始实体</span></div>
+    <div class="card-body">
+<pre>{
+  sourceCode: string        <span class="badge badge-fk">FK→BO.code</span> <span class="constraint c-not-null">NOT NULL</span>
+  sourceName: string               冗余，可由 sourceCode→BO.name 推导
+  targetCode: string        <span class="badge badge-fk">FK→BO.code</span> <span class="constraint c-not-null">NOT NULL</span>
+  targetName: string               冗余
+  relationCode: string      <span class="badge badge-pk">PK</span> <span class="constraint c-unique">UNIQUE</span>
+  relationDesc: string
+  annotationCategory: string       <span class="constraint c-enum">ENUM: info|warning|error</span>
+  annotationContent: string
+}</pre>
+<div class="source">来源：Excel Sheet「业务对象关系」→ parseRelationships() | 存储：previewData.relationships</div>
+<div class="note">约束：sourceCode≠targetCode（无自环）；relationCode全局唯一；sourceCode和targetCode必须引用已存在的BO.code</div>
+    </div>
+</div>
+
+<div class="entity-card">
+    <div class="card-header bg-relation">ServiceModuleRelationship（服务模块关系）<span class="tag">推导实体</span></div>
+    <div class="card-body">
+<pre>{
+  sourceServiceModuleCode: string   <span class="badge badge-fk">FK→SM.code</span>
+  sourceServiceModuleName: string   <span class="badge badge-redundant">冗余</span>
+  targetServiceModuleCode: string   <span class="badge badge-fk">FK→SM.code</span>
+  targetServiceModuleName: string   <span class="badge badge-redundant">冗余</span>
+  serviceRelationshipCode: string   <span class="badge badge-pk">PK</span> <span class="constraint c-unique">UNIQUE</span>
+  businessObjectRelationshipCodes: string[]  聚合来源
+  annotationContent: string         聚合标注
+  annotationCategory: string        <span class="constraint c-enum">ENUM</span>
+}</pre>
+<div class="source">来源：computedServiceModuleRelations() 推导 | 存储：局部变量</div>
+<div class="note">约束：source≠target（同SM内BO关系被丢弃）；PK格式=sourceCode-targetCode；从BO关系N:1聚合推导，非原始数据；信息损失：同SM内关系被丢弃、BO关系细节被聚合为标注</div>
+    </div>
+</div>
+
+<div class="entity-card">
+    <div class="card-header bg-store">CenterScopeMarkers（中心范围标记）<span class="tag">计算实体</span></div>
+    <div class="card-body">
+<pre>{
+  domains: Map&lt;string, boolean&gt;
+    // key: 领域名称
+    // value: 该领域是否包含中心BO（true/false）
+  subDomains: Map&lt;string, boolean&gt;
+    // key: 子领域名称
+    // value: 该子领域是否包含中心BO
+  serviceModules: Map&lt;string, true&gt;
+    // key: SM.name 或 SM.code（同时存储两种形式）
+    // value: 固定为 true
+}</pre>
+<div class="source">来源：updateCenterScopeMarkers() | 存储：diagramConfigStore.centerScopeMarkers</div>
+<div class="note">约束：仅基于centerScope计算，不含relationFilteredBoCodes；serviceModules Map的key同时包含name和code两种形式（解决不同组件使用不同标识符的问题）；domains/subDomains的value为boolean（表示是否包含），serviceModules的value固定为true（仅表示存在性）</div>
+    </div>
+</div>
+
+<div class="entity-card">
+    <div class="card-header bg-model">Group（统一分组）<span class="tag">输出实体</span></div>
+    <div class="card-body">
+<pre>{
+  id: string                <span class="badge badge-pk">PK</span>  格式: {Type}_{code}
+  type: GroupType           <span class="constraint c-enum">ENUM: DOMAIN|SUB_DOMAIN|
+                            SERVICE_MODULE|BUSINESS_OBJECT|LAYOUT</span>
+  title: string             显示标题
+  elementRef: ElementRef | null  架构元素引用
+  parentId: string | null   <span class="badge badge-fk">FK→Group.id</span>
+  children: Group[]         <span class="badge badge-1n">1:N</span> 子分组
+  layout: {
+    direction: string       <span class="constraint c-enum">ENUM: LR|TB|RL|BT</span>
+    visible: boolean        边框可见性
+    enabled: boolean        分组启用状态
+    style: { fill, stroke, strokeWidth, strokeDasharray }
+  }
+  containers: ContainerNode[]  配置阶段节点列表
+}
+
+ElementRef {
+  type: GroupType           引用的架构元素类型
+  code: string              架构元素编码
+  name: string              架构元素名称
+  parentCode: string | null 父级编码
+  grandparentCode: string | null  祖父级编码
+}</pre>
+<div class="source">来源：buildGroupModelFromArchitecture() | 存储：GroupModel.groups Map</div>
+<div class="note">约束：id格式由createGroupId()生成（如D_供应链、SD_采购管理、SM_CGGL）；elementRef可选，自定义分组无elementRef；BO图层级：DOMAIN→SUB_DOMAIN→SERVICE_MODULE→BUSINESS_OBJECT（4层）；SM图层级：DOMAIN→SUB_DOMAIN→SERVICE_MODULE（3层，SERVICE_MODULE为末端节点）</div>
+    </div>
+</div>
+
+<div class="entity-card">
+    <div class="card-header bg-config">DiagramConfig（图表配置）<span class="tag">配置实体</span></div>
+    <div class="card-body">
+<pre>{
+  chartType: string              <span class="constraint c-enum">ENUM: businessObject|serviceModule</span>
+  colorScheme: string            <span class="constraint c-enum">ENUM: default|vibrant|pastel|warm|cool|business|nature</span>
+  colorGroupBy: string           <span class="constraint c-enum">ENUM: domain|subDomain|serviceModule</span>
+  centerScopeColor: string       HEX颜色，默认 #EDEDED
+  centerDomainColor: string      HEX颜色，默认 #D9D9D9
+  nodeTextColor: string          HEX颜色，默认 black
+  centerScope: string[]          中心范围BO编码数组
+  centerScopeMarkers: CenterScopeMarkers
+  layoutTemplate: string         <span class="constraint c-enum">ENUM: default|grid|horizontal|vertical</span>
+  layoutEngine: string           <span class="constraint c-enum">ENUM: elk|dagre</span>
+  layoutControlConfig: object    分组控制配置
+  customColors: object           自定义颜色映射
+  hideLinkLabelTails: boolean | null
+  assignmentMode: string         <span class="constraint c-enum">ENUM: auto|manual</span>
+}</pre>
+<div class="source">来源：用户交互 | 存储：diagramConfigStore (Pinia)</div>
+<div class="note">约束：chartType决定数据流分支（BO图 vs SM图）；colorGroupBy决定颜色计算策略；centerScope为空时centerScopeMarkers也应为空；layoutControlConfig由GroupModel.toMermaidConfig()生成后回写Store</div>
+    </div>
+</div>
+
+<div class="entity-card">
+    <div class="card-header bg-build">DiagramNode（图表节点）<span class="tag">输出实体</span></div>
+    <div class="card-body">
+<pre>// BO图节点（diagramDataBuilder.js → buildNodes）
+{
+  id: string            // bo.name（注意：用name而非code）
+  name: string
+  code: string          // bo.code <span class="badge badge-pk">PK</span>
+  domain, subDomain, serviceModule, serviceModuleName
+  category: 'object'
+  isCenter: boolean     // generateDiagram时赋值
+  // 注意：color 未在构建时计算，由渲染层动态计算
+}
+
+// SM图节点（serviceModuleDiagramBuilder.js）
+{
+  id: string            // sm.code
+  name: string
+  code: string          // sm.code <span class="badge badge-pk">PK</span>
+  domain, subDomain
+  color: string         <span class="badge badge-computed">构建时计算</span>
+  textColor: string     <span class="badge badge-computed">构建时计算</span>
+  isCenter: boolean     <span class="badge badge-computed">构建时计算</span>
+  annotationCategory, annotationContent
+}</pre>
+<div class="source">来源：buildDiagramData() / buildServiceModuleDiagramData()</div>
+<div class="note">关键差异：①BO图节点id=bo.name，SM图节点id=sm.code（标识策略不同）；②SM图节点在构建时已计算color和isCenter，BO图节点未计算color（颜色在渲染时由Mermaid组件动态计算）；③BO图节点有serviceModule/serviceModuleName字段，SM图节点无</div>
+    </div>
+</div>
+
+<div class="entity-card">
+    <div class="card-header bg-model">ChartTypeConfig（图表类型配置）<span class="tag">配置实体</span></div>
+    <div class="card-body">
+<pre>// businessObject 图表类型
+{
+  groupHierarchy: [DOMAIN, SUB_DOMAIN, SERVICE_MODULE, BUSINESS_OBJECT]
+  visibleInControlPanel: [DOMAIN, SUB_DOMAIN, SERVICE_MODULE]
+  terminalTypes: [BUSINESS_OBJECT]
+  defaultExpandDepth: 3
+  defaultDirection: 'LR'
+}
+
+// serviceModule 图表类型
+{
+  groupHierarchy: [DOMAIN, SUB_DOMAIN, SERVICE_MODULE]
+  visibleInControlPanel: [DOMAIN, SUB_DOMAIN]
+  terminalTypes: [SERVICE_MODULE]
+  defaultExpandDepth: 2
+  defaultDirection: 'LR'
+}</pre>
+<div class="source">来源：chartTypeConfig.js 静态定义 | 存储：模块级常量</div>
+<div class="note">约束：terminalTypes决定哪些GroupType是末端节点（渲染为矩形节点而非分组容器）；visibleInControlPanel决定配置页面显示哪些层级；BO图4层层级、SM图3层层级；此配置驱动architectureProcessor和GroupModel的行为分化</div>
+    </div>
+</div>
+
+</div>
+
+<h3>1.3 实体关系结构</h3>
+
+<h4>1.3.1 核心实体关系图</h4>
+
+<table class="data-table">
+    <tr><th>源实体</th><th>关系类型</th><th>目标实体</th><th>连接字段</th><th>基数约束</th><th>说明</th></tr>
+    <tr><td>Domain</td><td><span class="badge badge-1n">1:N</span> 包含</td><td>SubDomain</td><td>domain.modules[]</td><td>1..1 : 1..N</td><td>每个领域至少1个子领域</td></tr>
+    <tr><td>SubDomain</td><td><span class="badge badge-1n">1:N</span> 包含</td><td>ServiceModule</td><td>subDomain.submodules[]</td><td>1..1 : 1..N</td><td>每个子领域至少1个SM</td></tr>
+    <tr><td>ServiceModule</td><td><span class="badge badge-1n">1:N</span> 包含</td><td>BusinessObject</td><td>bo.serviceModule = sm.code</td><td>1..1 : 0..N</td><td>SM可有0个BO（空模块）</td></tr>
+    <tr><td>ServiceModule</td><td><span class="badge badge-nn">N:N</span> 关联</td><td>ServiceModule</td><td>SMRel.source/targetCode</td><td>0..N : 0..N</td><td>从BO关系推导，同SM内不产生</td></tr>
+    <tr><td>BusinessObject</td><td><span class="badge badge-nn">N:N</span> 关联</td><td>BusinessObject</td><td>Rel.source/targetCode</td><td>0..N : 0..N</td><td>原始Excel数据</td></tr>
+    <tr><td>CenterScope</td><td><span class="badge badge-nn">N:N</span> 标记</td><td>ServiceModule</td><td>bo.serviceModule 桥接</td><td>0..N : 0..N</td><td>通过BO的serviceModule字段间接关联</td></tr>
+</table>
+
+<h4>1.3.2 统一分组模型关系</h4>
+
+<table class="data-table">
+    <tr><th>源实体</th><th>关系类型</th><th>目标实体</th><th>连接字段</th><th>基数约束</th><th>说明</th></tr>
+    <tr><td>Group</td><td><span class="badge badge-1n">1:N</span> 包含</td><td>Group</td><td>child.parentId = parent.id</td><td>0..1 : 0..N</td><td>树形自引用，BO图最多4层，SM图最多3层</td></tr>
+    <tr><td>Group</td><td><span class="badge badge-11">1:1</span> 引用</td><td>ElementRef</td><td>group.elementRef</td><td>0..1 : 0..1</td><td>架构元素引用，自定义分组无elementRef</td></tr>
+    <tr><td>Group</td><td><span class="badge badge-1n">1:N</span> 包含</td><td>ContainerNode</td><td>group.containers[]</td><td>0..1 : 0..N</td><td>配置阶段的节点列表</td></tr>
+    <tr><td>GroupType</td><td><span class="badge badge-11">1:1</span> 决定</td><td>ChartTypeConfig</td><td>chartTypeConfig[type]</td><td>—</td><td>GroupType决定层级深度和末端类型</td></tr>
+</table>
+
+<h4>1.3.3 跨模型桥接关系</h4>
+
+<table class="data-table">
+    <tr><th>桥接路径</th><th>桥接字段</th><th>用途</th><th>数据流阶段</th></tr>
+    <tr><td>CenterScope → ServiceModule</td><td>bo.serviceModule</td><td>从中心BO编码推导中心SM编码</td><td>generateDiagram → centerServiceModuleCodes</td></tr>
+    <tr><td>BusinessObject → SubDomain</td><td>bo.subDomain</td><td>BO归属子领域（冗余字段）</td><td>filteredContainers构建</td></tr>
+    <tr><td>ServiceModule → Domain</td><td>sm.domain</td><td>SM归属领域（冗余字段）</td><td>颜色计算、分组构建</td></tr>
+    <tr><td>Relationship → SMRelationship</td><td>bo.serviceModule</td><td>BO关系聚合为SM关系</td><td>computedServiceModuleRelations()</td></tr>
+    <tr><td>Group.elementRef → DomainProduct</td><td>elementRef.code</td><td>分组与架构元素的关联</td><td>GroupModel构建</td></tr>
+</table>
+
+<h3>1.4 数据类型规范</h3>
+
+<table class="data-table">
+    <tr><th>类型</th><th>格式</th><th>使用字段</th><th>校验规则</th><th>示例</th></tr>
+    <tr><td>编码型 string</td><td>大写字母+数字</td><td>bo.code, sm.code, domain.code</td><td>全局唯一、非空、无空格</td><td>BCDM01, CGGL</td></tr>
+    <tr><td>名称型 string</td><td>中文字符</td><td>bo.name, sm.name, domain.name</td><td>非空、可重复</td><td>条码管理, 采购供应</td></tr>
+    <tr><td>枚举型 string</td><td>预定义值集合</td><td>groupType, colorGroupBy, direction, chartType</td><td>必须为枚举值之一</td><td>DOMAIN, subDomain, LR</td></tr>
+    <tr><td>颜色型 string</td><td>HEX格式</td><td>color, fill, stroke, centerScopeColor</td><td>合法HEX颜色值</td><td>#1890FF, #EDEDED</td></tr>
+    <tr><td>布尔型 boolean</td><td>true / false</td><td>isCenter, visible, enabled</td><td>—</td><td>true, false</td></tr>
+    <tr><td>映射型 Map</td><td>Map&lt;string, boolean|true&gt;</td><td>centerScopeMarkers.domains 等</td><td>key 非空</td><td>Map{'供应链': true}</td></tr>
+    <tr><td>数组型 Array</td><td>有序元素集合</td><td>centerScope, groups, containers</td><td>元素类型一致</td><td>['BCDM01', 'BCDM02']</td></tr>
+    <tr><td>引用型 ElementRef</td><td>{type, code, name, parentCode?}</td><td>group.elementRef</td><td>code非空</td><td>{type:'DOMAIN', code:'GY'}</td></tr>
+</table>
+
+<h3>1.5 约束条件汇总</h3>
+
+<table class="data-table">
+    <tr><th>约束类型</th><th>约束名称</th><th>适用实体</th><th>规则描述</th><th>违反后果</th></tr>
+    <tr><td><span class="constraint c-not-null">NOT NULL</span></td><td>编码非空</td><td>BO.code, SM.code, Domain.name</td><td>主键字段不允许为空</td><td>数据解析失败或节点无法标识</td></tr>
+    <tr><td><span class="constraint c-unique">UNIQUE</span></td><td>编码唯一</td><td>BO.code, SM.code, Rel.relationCode</td><td>主键字段全局唯一</td><td>节点重复或关系冲突</td></tr>
+    <tr><td><span class="constraint c-fk">FK</span></td><td>外键引用</td><td>BO.serviceModule→SM.code</td><td>外键必须引用已存在的目标</td><td>BO无法归属到SM，分组错误</td></tr>
+    <tr><td><span class="constraint c-enum">ENUM</span></td><td>枚举约束</td><td>GroupType, colorGroupBy, chartType</td><td>值必须在预定义集合内</td><td>逻辑分支未覆盖，行为未定义</td></tr>
+    <tr><td>业务约束</td><td>同SM内关系丢弃</td><td>ServiceModuleRelationship</td><td>source≠target</td><td>同SM内BO关系不产生SM关系</td></tr>
+    <tr><td>业务约束</td><td>isCenter自底向上</td><td>Domain, SubDomain, SM</td><td>子级全部isCenter时父级才isCenter</td><td>领域/子领域颜色标记错误</td></tr>
+    <tr><td>语义约束</td><td>nodes语义分化</td><td>ContainerNode</td><td>BO图nodes=BO[]，SM图nodes=SM[]</td><td>类型混淆导致运行时错误</td></tr>
+</table>
+
+</div>
+
+<!-- ============================================================ -->
+<!-- PART 2: 数据流 -->
+<!-- ============================================================ -->
+<div class="section">
+<h2>二、数据流：流转路径、处理过程与转换规则</h2>
+
+<h3>2.1 全局数据流架构</h3>
+
+<div class="flow-box">
+    <div class="flow-row">
+        <div class="flow-node bg-source">Excel 文件<br><span class="sub">useExcelParser</span></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-node bg-source">previewData<br><span class="sub">BO / SM / DP / Rel</span></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-node bg-store">diagramConfigStore<br><span class="sub">centerScope / markers</span></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-node bg-filter">filteredContainers<br><span class="sub">computed 过滤</span></div>
+    </div>
+    <div class="flow-arrow-down">↓</div>
+    <div class="flow-row">
+        <div class="flow-node bg-model">buildGroupModel<br><span class="sub">architectureProcessor</span></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-node bg-model">GroupModel<br><span class="sub">fromUserConfig / toMermaidConfig</span></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-node bg-build">generateDiagram<br><span class="sub">构建 diagramData</span></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-node bg-render">图表渲染<br><span class="sub">Mermaid / mxGraph</span></div>
+    </div>
+</div>
+
+<h3>2.2 各阶段数据转换规则</h3>
+
+<h4>Stage 1: Excel解析 → previewData</h4>
+<div class="iface">
+    <div class="title">转换规则：Excel Sheet → 结构化对象（一对一映射，无数据损失）</div>
+<pre>处理链：parseExcelFile() → parseServiceModules() → parseBusinessObjects() → parseRelationships() → buildServiceModules() → buildDomainProducts() → buildPreviewData()
+
+Sheet「业务对象」  → BusinessObject[]   { code, name, serviceModule, serviceModuleName, subDomain, domain }
+Sheet「服务模块」  → ServiceModule[]   { code, name, subDomain, domain }
+Sheet「领域产品」  → DomainProduct[]   { name, code, modules: [{ name, code, submodules: [{ name, code, businessObjects }] }] }
+Sheet「业务对象关系」→ Relationship[]   { sourceCode, targetCode, relationCode, relationDesc }
+
+转换特点：
+  - 一对一映射，无数据损失
+  - 冗余字段（subDomain, domain）在BO中由Excel直接提供
+  - DomainProduct构建三层嵌套：Domain→SubDomain→SM→BO
+  - serviceModuleMap 和 moduleHierarchy 为中间产物，最终转为 serviceModules[] 和 domainProducts[]</pre>
+</div>
+
+<h4>Stage 2: 中心范围选择 → centerScope + centerScopeMarkers</h4>
+<div class="iface">
+    <div class="title">转换规则：用户选择 → 标记映射（N:1聚合，存在信息损失）</div>
+<pre>输入：用户在 StepScope.vue 中勾选业务对象
+输出：centerScope = ['BCDM01', 'BCDM02', ...]  // BO编码数组
+
+推导：updateCenterScopeMarkers()
+  centerScope → 遍历 businessObjects → 找到包含中心BO的SM
+  → 遍历 domainProducts → 标记包含中心BO的领域/子领域
+  输出：centerScopeMarkers = {
+    domains: Map&lt;领域名, boolean&gt;,        // 是否包含中心BO
+    subDomains: Map&lt;子领域名, boolean&gt;,   // 是否包含中心BO
+    serviceModules: Map&lt;SM.name|SM.code, true&gt;  // 同时存储name和code
+  }
+
+转换特点：
+  - N:1 聚合（多个BO编码 → 少量SM标记）
+  - 信息损失（只保留是否包含，不保留具体哪些BO）
+  - 仅基于 centerScope，不含 relationFilteredBoCodes
+  - serviceModules Map 同时存储 name 和 code 两种 key（解决不同组件使用不同标识符的问题）
+  - 使用 callId 防止过时更新（并发控制）</pre>
+</div>
+
+<h4>Stage 3: 关系范围 + 中心范围 → finalBoCodes</h4>
+<div class="iface">
+    <div class="title">转换规则：并集计算（单调递增）</div>
+<pre>输入：centerScope (Set) + relationFilteredBoCodes (Set)
+输出：finalBoCodes = centerScope ∪ relationFilteredBoCodes
+
+关系分类路径：
+  relationships → buildRelationCategoryTree() → relationCategoryTree (computed)
+  → 用户选择关系节点 → getSelectedRelationCodes() → filteredRelations
+  → 从 filteredRelations 提取 sourceCode/targetCode → relationFilteredBoCodes
+
+关系分类维度（relationClassifier.js）：
+  范围类型：internal（中心范围内）/ external（中心范围外）
+  分类类型：cross-domain / same-domain-cross-subdomain / same-subdomain-cross-module / same-module
+
+转换特点：单调递增（只增不减）；关系范围依赖用户选择的关系类别</pre>
+</div>
+
+<h4>Stage 4: SM关系推导</h4>
+<div class="iface">
+    <div class="title">转换规则：BO关系 → SM关系（N:1聚合，存在信息损失）</div>
+<pre>输入：Relationship[] + BusinessObject[] + ServiceModule[]
+处理（computedServiceModuleRelations）：
+  1. 构建 boToModuleMap: bo.code → { moduleCode, moduleName }
+  2. 构建 moduleCodeToNameMap: sm.code → sm.name
+  3. 遍历 Relationship，按 (sourceModule, targetModule) 分组
+  4. 跳过 sourceModule === targetModule（同SM内关系丢弃）
+  5. 聚合 BO 关系编码和标注
+输出：ServiceModuleRelationship[]
+
+转换特点：
+  - N:1 聚合（多条BO关系 → 一条SM关系）
+  - 信息损失：同SM内关系被丢弃、BO关系细节被聚合为标注
+  - 标注去重：多个BO关系标注用分号连接</pre>
+</div>
+
+<h4>Stage 5: filteredContainers 构建（图表类型分化点）</h4>
+<div class="split-flow">
+    <div>
+        <div class="split-label bg-build">BO图路径</div>
+        <div class="iface">
+<pre>DomainProduct[] → 按 finalBoCodes 过滤
+→ 按 subDomain 分组为容器
+
+container = {
+  id: module.code || module.name,
+  name: module.name,
+  fullTitle: domain.name / module.name,
+  domain, domainCode, subDomainName,
+  nodes: BusinessObject[],  // ← BO节点
+  serviceModuleMap: { ... }  // SM→BO映射
+}
+
+过滤条件：BO.code ∈ finalBoCodes</pre>
+        </div>
+    </div>
+    <div>
+        <div class="split-label bg-color">SM图路径</div>
+        <div class="iface">
+<pre>ServiceModule[] → 按 finalBoCodes 过滤
+（检查SM的BO是否在范围内）
+→ 按 subDomain 分组为容器
+
+container = {
+  id: sm.subDomain,
+  name: sm.subDomain,
+  fullTitle: domain.name / sm.subDomain,
+  domain, domainCode, subDomainName,
+  nodes: ServiceModule[]  // ← SM节点
+}
+
+过滤条件：SM的任一BO.code ∈ finalBoCodes</pre>
+        </div>
+    </div>
+</div>
+<div class="warn">
+    <span class="icon">[WARNING]</span>
+    <strong>语义歧义（系统最关键的设计歧义点）：</strong>container.nodes 在 BO 图中存储 BusinessObject[]，在 SM 图中存储 ServiceModule[]。同一字段名、不同数据类型和语义。此歧义在 handleServiceModuleAutoGroup() 中导致过"采购供应分组下是采购供应节点"的bug——将容器本身误当作节点添加到分组中。
+</div>
+
+<h4>Stage 6: 统一分组模型构建</h4>
+<div class="iface">
+    <div class="title">转换规则：架构数据 → Group树（由 ChartTypeConfig 驱动分化）</div>
+<pre>处理链：buildGroupModelFromArchitecture(architectureData, chartType)
+
+BO图（buildBusinessObjectGroupModel）：
+  DomainProduct[] → 遍历 domain → createGroup(DOMAIN)
+    → 遍历 subDomain → createGroup(SUB_DOMAIN)
+      → 遍历 sm → createGroup(SERVICE_MODULE)
+        → 遍历 bo → createGroup(BUSINESS_OBJECT)  // 末端节点
+  层级：DOMAIN → SUB_DOMAIN → SERVICE_MODULE → BUSINESS_OBJECT（4层）
+
+SM图（buildServiceModuleGroupModel）：
+  DomainProduct[] → 遍历 domain → createGroup(DOMAIN)
+    → 遍历 subDomain → createGroup(SUB_DOMAIN)
+      → 遍历 sm → createGroup(SERVICE_MODULE)  // 末端节点
+  层级：DOMAIN → SUB_DOMAIN → SERVICE_MODULE（3层）
+
+每个 Group 通过 elementRef 关联架构元素：
+  elementRef = { type, code, name, parentCode?, grandparentCode? }
+
+GroupModel.fromUserConfig(architectureGroups, userConfig, chartType)：
+  1. 用 architectureGroups 构建 GroupModel 索引（Map&lt;id, Group&gt;）
+  2. 递归合并 userConfig.groups（按 id / elementCode / title 匹配）
+  3. 合并内容：layout（direction/visible/enabled/style）、containers
+
+GroupModel.toMermaidConfig()：
+  1. getFlattenedGroups()：处理禁用分组（提升子分组到根级别）
+  2. convertGroup()：递归转换为旧版配置格式
+  3. 输出：{ enabled, groups, titleMap }
+
+转换特点：
+  - 统一模型：BO图和SM图使用相同的Group结构和GroupModel类
+  - ChartTypeConfig驱动：terminalTypes决定末端节点类型
+  - 用户配置合并：支持按id/elementCode/title三种方式匹配
+  - 禁用提升：禁用的分组其子分组被提升到父级</pre>
+</div>
+
+<h4>Stage 7: 图表构建（图表类型分化点）</h4>
+<div class="split-flow">
+    <div>
+        <div class="split-label bg-build">BO图：buildDiagramData()</div>
+        <div class="iface">
+<pre>输入：filteredBusinessObjects, finalRelationships,
+      filteredDomainProducts, filteredServiceModules,
+      colorGroupBy, centerScopeColor, colorScheme,
+      nodeTextColor, centerScope, layoutControlConfig, ...
+
+处理：
+  buildNodes(businessObjects) → nodes[]
+    - id = bo.name（注意：用name而非code）
+    - isCenter = centerScopeSet.has(bo.code)
+    - color 未计算（渲染时动态计算）
+  buildLinks(relationships) → links[]
+
+输出：{ nodes, links, domainProducts, serviceModules,
+        colorGroupBy, centerScopeColor, centerScope,
+        layoutControlConfig, ... }</pre>
+        </div>
+    </div>
+    <div>
+        <div class="split-label bg-color">SM图：buildServiceModuleDiagramData()</div>
+        <div class="iface">
+<pre>输入：filteredServiceModules, filteredSMRelationships,
+      filteredDomainProducts, centerScopeColor,
+      colorGroupBy, colorScheme, centerServiceModuleCodes,
+      layoutControlConfig, ...
+
+处理：
+  1. finalCenterServiceModuleCodes = centerServiceModuleCodes
+     ? new Set(centerServiceModuleCodes)
+     : 从 sm.isCenter 或 centerSubDomain 推导
+  2. 颜色映射：
+     subDomain模式：subDomainColors[subDomain] = color
+     domain模式：domainColors[domain] = color
+  3. 节点构建：
+     isCenter = finalCenterServiceModuleCodes.has(sm.code)
+     baseColor = subDomainColors[subDomain] || domainColors[domain]
+     finalColor = isCenter ? centerScopeColor : baseColor
+
+输出：{ nodes[], links[], containers[],
+        centerSubDomain, colorGroupBy, layoutControlConfig, ... }</pre>
+        </div>
+    </div>
+</div>
+
+<h3>2.3 颜色计算双路径分析</h3>
+
+<p style="font-size:13px; margin-bottom:12px; color:#555;">
+颜色计算是系统中唯一存在<strong>双路径独立计算</strong>的关键逻辑，两条路径可能产生不一致的结果。
+</p>
+
+<div class="split-flow">
+    <div>
+        <div class="split-label bg-group">路径A：配置页面（GroupItem.vue）</div>
+        <div class="iface">
+<pre>触发：配置页面渲染每个容器/节点时
+函数：getContainerColor(container)
+
+判断逻辑：
+  1. 检查 container.code/elementCode ∈ centerScope
+  2. 检查 container.name ∈ centerScope
+  3. 检查 container.name/code ∈
+     centerScopeMarkers.serviceModules
+  → 若命中任一：返回 centerScopeColor
+  → 否则：按 colorGroupBy 计算 baseColor
+
+特点：
+  - 基于 centerScopeMarkers（响应式更新）
+  - 逐节点判断（精确到单个节点）
+  - 不依赖 domain/subDomainName 级别判断</pre>
+        </div>
+    </div>
+    <div>
+        <div class="split-label bg-build">路径B：图表构建（serviceModuleDiagramBuilder.js）</div>
+        <div class="iface">
+<pre>触发：generateDiagram() 调用时
+函数：buildServiceModuleDiagramData()
+
+判断逻辑：
+  1. finalCenterServiceModuleCodes =
+     centerServiceModuleCodes ? new Set(...)
+     : 从 sm.isCenter 或 centerSubDomain 推导
+  2. isCenter = finalCenterServiceModuleCodes.has(sm.code)
+  3. baseColor = colorGroupBy === 'subDomain'
+     ? subDomainColors[sm.subDomain]
+     : domainColors[sm.domain]
+  4. finalColor = isCenter ? centerScopeColor : baseColor
+
+特点：
+  - 基于 centerServiceModuleCodes（请求时计算）
+  - 逐节点判断（精确到单个SM）
+  - 依赖 colorGroupBy 决定 baseColor 来源</pre>
+        </div>
+    </div>
+</div>
+
+<div class="warn">
+    <span class="icon">[WARNING]</span>
+    <strong>双路径一致性风险：</strong>路径A使用 centerScopeMarkers.serviceModules（基于centerScope通过BO→SM桥接推导），路径B使用 centerServiceModuleCodes（同样基于centerScope通过BO→SM桥接推导）。两者数据源相同但计算时机不同——路径A是响应式的，路径B是请求时的。如果 centerScope 在两次计算之间发生变化，可能导致配置页面和图表展示的颜色不一致。历史上 centerScopeColor 未传入 buildServiceModuleDiagramData() 就是路径B遗漏参数的典型案例。
+</div>
+
+<h3>2.4 组件间数据交互方式</h3>
+
+<table class="data-table">
+    <tr><th>交互方式</th><th>源组件</th><th>目标组件</th><th>数据</th><th>方向</th><th>特点</th></tr>
+    <tr><td>Pinia Store</td><td>StepScope.vue</td><td>useDiagramData / GroupItem</td><td>centerScope, centerScopeMarkers</td><td>单向（写→读）</td><td>全局共享，响应式</td></tr>
+    <tr><td>Props 传递</td><td>index.vue</td><td>StepConfig → LayoutSelector → LayoutControlPanel</td><td>containers, chartType, domainProducts</td><td>单向（父→子）</td><td>层级传递，链式依赖</td></tr>
+    <tr><td>Emit 事件</td><td>LayoutControlPanel</td><td>LayoutSelector → StepConfig → index.vue</td><td>localConfig（分组配置）</td><td>单向（子→父）</td><td>事件冒泡，逐层转发</td></tr>
+    <tr><td>Computed 响应式</td><td>useDiagramData</td><td>多个消费者</td><td>filteredContainers, relationFilteredBoCodes</td><td>响应式（自动更新）</td><td>惰性计算，缓存结果</td></tr>
+    <tr><td>函数调用</td><td>generateDiagram()</td><td>buildServiceModuleDiagramData()</td><td>所有图表参数（15+个）</td><td>同步调用</td><td>参数列表长，易遗漏</td></tr>
+    <tr><td>Store 回写</td><td>useDiagramData</td><td>diagramConfigStore</td><td>layoutControlConfig, centerScopeMarkers</td><td>单向（写→读）</td><td>跨组件状态同步</td></tr>
+    <tr><td>Watch 监听</td><td>useDiagramData</td><td>centerScope 变化</td><td>触发 updateCenterScopeMarkers</td><td>响应式（被动触发）</td><td>副作用驱动</td></tr>
+</table>
+
+<h3>2.5 数据流关键路径追踪</h3>
+
+<h4>2.5.1 centerScopeColor 传递链（历史bug案例）</h4>
+<div class="iface">
+    <div class="title">centerScopeColor 从用户选择到节点颜色的完整传递链</div>
+<pre>用户选择颜色 → diagramConfigStore.centerScopeColor (ref)
+  → useDiagramData.diagramConfig (computed)
+    → generateDiagram() 读取 diagramConfig.value.centerScopeColor
+      → buildServiceModuleDiagramData({ centerScopeColor: diagramConfig.value.centerScopeColor })
+        → finalColor = isCenter ? centerScopeColor : baseColor
+          → diagramData.nodes[].color
+
+同时（配置页面路径）：
+  diagramConfigStore.centerScopeColor
+    → GroupItem.vue centerScopeColor (computed from store)
+      → getContainerColor() 返回 centerScopeColor
+
+历史bug：centerScopeColor 未传入 buildServiceModuleDiagramData()，
+导致SM图中心节点使用默认颜色而非用户选择的中心范围颜色。
+根因：函数参数列表过长（15+个参数），新增参数时遗漏传递。</pre>
+</div>
+
+<h4>2.5.2 centerServiceModuleCodes 推导链</h4>
+<div class="iface">
+    <div class="title">从 centerScope（BO编码）到 centerServiceModuleCodes（SM编码）的推导过程</div>
+<pre>centerScope = ['BCDM01', 'BCDM02', ...]  // BO编码数组
+  → centerBoCodes = new Set(centerScope)
+    → filteredBusinessObjects.filter(bo => centerBoCodes.has(bo.code))
+      → 遍历 filteredBO，收集 bo.serviceModule
+        → centerServiceModuleCodes = new Set([bo.serviceModule...])
+
+推导特点：
+  - N:1 聚合（多个BO编码 → 少量SM编码）
+  - 依赖 bo.serviceModule 字段（FK桥接）
+  - 仅在 generateDiagram() 中计算，非响应式
+  - 与 centerScopeMarkers.serviceModules 使用相同的数据源和推导逻辑
+    但计算时机和存储方式不同</pre>
+</div>
+
+</div>
+
+<!-- ============================================================ -->
+<!-- PART 3: 数据模型与数据流差异分析 -->
+<!-- ============================================================ -->
+<div class="section">
+<h2>三、数据模型与数据流的关键差异分析</h2>
+
+<h3>3.1 本质特征对比：静态结构 vs 动态过程</h3>
+<div class="compare-grid">
+    <div class="compare-box compare-left">
+        <h4><span class="icon">[SYMBOL]</span>数据模型 — 静态结构</h4>
+        <ul>
+            <li><strong>本质：</strong>描述数据的"形状"——有哪些实体、属性、关系</li>
+            <li><strong>关注点：</strong>数据是什么、如何组织、约束条件</li>
+            <li><strong>时间维度：</strong>静态快照，不随时间变化（除非Schema变更）</li>
+            <li><strong>验证方式：</strong>类型检查、约束校验、关系完整性</li>
+            <li><strong>变更频率：</strong>低（Schema稳定，仅新增字段）</li>
+            <li><strong>文档形式：</strong>ER图、数据字典、TypeScript类型定义</li>
+            <li><strong>错误表现：</strong>编译时/解析时即可发现（类型不匹配、字段缺失）</li>
+        </ul>
+    </div>
+    <div class="compare-box compare-right">
+        <h4><span class="icon">[SYMBOL]</span>数据流 — 动态过程</h4>
+        <ul>
+            <li><strong>本质：</strong>描述数据的"运动"——如何产生、传递、转换、消费</li>
+            <li><strong>关注点：</strong>数据从哪来、到哪去、经过什么处理</li>
+            <li><strong>时间维度：</strong>动态过程，随用户操作实时变化</li>
+            <li><strong>验证方式：</strong>端到端一致性、转换正确性、时序正确性</li>
+            <li><strong>变更频率：</strong>高（业务流程调整、组件重构）</li>
+            <li><strong>文档形式：</strong>流程图、序列图、数据流图</li>
+            <li><strong>错误表现：</strong>运行时才暴露（参数遗漏、时序错误、数据不一致）</li>
+        </ul>
+    </div>
+</div>
+
+<h3>3.2 功能定位差异</h3>
+
+<table class="diff-table">
+    <tr><th class="dim">对比维度</th><th>数据模型</th><th>数据流</th></tr>
+    <tr>
+        <td class="dim">核心问题</td>
+        <td>数据"长什么样"？——实体结构、属性类型、关系约束</td>
+        <td>数据"怎么跑"？——流转路径、处理步骤、转换规则</td>
+    </tr>
+    <tr>
+        <td class="dim">功能定位</td>
+        <td>定义数据的存储结构和组织方式</td>
+        <td>定义数据的处理逻辑和传递方式</td>
+    </tr>
+    <tr>
+        <td class="dim">表现形式</td>
+        <td>TypeScript interface / JSON Schema / 类型定义</td>
+        <td>函数调用链（computed → watch → function call chain）</td>
+    </tr>
+    <tr>
+        <td class="dim">存储特性</td>
+        <td>数据在特定位置"停留"：previewData、diagramConfigStore、GroupModel.groups</td>
+        <td>数据在组件间"穿越"：Props、Emit、Store、函数参数</td>
+    </tr>
+    <tr>
+        <td class="dim">一致性保障</td>
+        <td>类型系统（TypeScript）、约束条件（PK/FK/NOT NULL/UNIQUE）</td>
+        <td>响应式系统（Vue computed/watch）、调用顺序、参数传递完整性</td>
+    </tr>
+    <tr>
+        <td class="dim">错误类型</td>
+        <td>结构错误：字段缺失、类型不匹配、约束违反、FK引用断裂</td>
+        <td>流程错误：参数遗漏、调用时序错误、数据不一致、响应式依赖缺失</td>
+    </tr>
+    <tr>
+        <td class="dim">设计考量</td>
+        <td>规范化（减少冗余）vs 性能（适当冗余如 sm.domain、bo.subDomain）</td>
+        <td>单向数据流（可预测性）vs 双向通信（灵活性）</td>
+    </tr>
+    <tr>
+        <td class="dim">演化规律</td>
+        <td>增量式：新增字段/实体，向后兼容，旧字段可标记deprecated</td>
+        <td>重构式：流程调整可能改变整条数据链路，牵一发动全身</td>
+    </tr>
+    <tr>
+        <td class="dim">测试策略</td>
+        <td>单元测试：验证数据结构、约束、类型、FK完整性</td>
+        <td>集成测试：验证端到端数据一致性、转换正确性、参数传递完整性</td>
+    </tr>
+    <tr>
+        <td class="dim">维护关注点</td>
+        <td>Schema迁移、向后兼容、文档同步、冗余字段一致性</td>
+        <td>调用链完整性、参数传递正确性、响应式依赖正确性、时序一致性</td>
+    </tr>
+</table>
+
+<h3>3.3 数据存储 vs 数据传输的特性差异</h3>
+
+<div class="compare-grid">
+    <div class="compare-box compare-left">
+        <h4><span class="icon">[SYMBOL]</span>数据存储特性（数据模型视角）</h4>
+        <ul>
+            <li><strong>持久性：</strong>previewData随应用生命周期存在；diagramConfigStore通过Pinia持久化</li>
+            <li><strong>结构稳定性：</strong>BusinessObject、ServiceModule等实体结构在Excel解析后不再变化</li>
+            <li><strong>冗余策略：</strong>bo.subDomain、bo.domain、sm.domain为性能冗余，避免运行时多跳查询</li>
+            <li><strong>标识唯一性：</strong>code字段全局唯一，作为PK和FK的基础</li>
+            <li><strong>嵌套深度：</strong>DomainProduct三层嵌套，GroupModel最多四层嵌套</li>
+            <li><strong>类型安全：</strong>TypeScript类型定义提供编译时检查</li>
+        </ul>
+    </div>
+    <div class="compare-box compare-right">
+        <h4><span class="icon">[SYMBOL]</span>数据传输特性（数据流视角）</h4>
+        <ul>
+            <li><strong>瞬时性：</strong>函数参数、局部变量在调用栈中存在，调用结束即销毁</li>
+            <li><strong>转换动态性：</strong>finalBoCodes、centerServiceModuleCodes每次generateDiagram重新计算</li>
+            <li><strong>信息损失：</strong>SM关系推导丢弃同SM内BO关系；centerScopeMarkers只保留boolean标记</li>
+            <li><strong>传递链脆弱性：</strong>centerScopeColor需经4级传递，任一环节遗漏即导致bug</li>
+            <li><strong>路径分叉：</strong>BO图和SM图在Stage 5后走不同处理路径</li>
+            <li><strong>一致性挑战：</strong>颜色双路径独立计算，可能产生不一致结果</li>
+        </ul>
+    </div>
+</div>
+
+<h3>3.4 本系统中的具体问题映射</h3>
+
+<h4>数据模型层面的问题</h4>
+<table class="data-table">
+    <tr><th>问题</th><th>类型</th><th>具体表现</th><th>影响范围</th></tr>
+    <tr><td>语义歧义</td><td>结构设计</td><td>container.nodes 在 BO 图中是 BusinessObject[]，在 SM 图中是 ServiceModule[]，同一字段名不同语义</td><td>filteredContainers、handleServiceModuleAutoGroup</td></tr>
+    <tr><td>冗余字段</td><td>规范化</td><td>bo.subDomain、bo.domain、sm.domain 可通过关系推导，但为性能保留冗余</td><td>颜色计算、分组构建</td></tr>
+    <tr><td>双重标识</td><td>一致性</td><td>centerScopeMarkers.serviceModules 同时以 name 和 code 为 key，增加匹配复杂度</td><td>getContainerColor()</td></tr>
+    <tr><td>标识策略不一致</td><td>类型规范</td><td>BO图节点id=bo.name，SM图节点id=sm.code；ContainerNode在BO图有elementCode，SM图有code</td><td>节点查找、颜色匹配</td></tr>
+    <tr><td>isCenter计算时机</td><td>生命周期</td><td>BO.isCenter在generateDiagram时计算赋值到原始数据副本，非响应式；SM.isCenter同理</td><td>颜色判断、分组标记</td></tr>
+</table>
+
+<h4>数据流层面的问题</h4>
+<table class="data-table">
+    <tr><th>问题</th><th>类型</th><th>具体表现</th><th>历史bug</th></tr>
+    <tr><td>参数遗漏</td><td>传递完整性</td><td>centerScopeColor 未传入 buildServiceModuleDiagramData()</td><td>SM图中心节点颜色错误（根因bug）</td></tr>
+    <tr><td>双路径计算</td><td>一致性</td><td>颜色在 GroupItem.vue 和 serviceModuleDiagramBuilder.js 中独立计算</td><td>配置页面与图表颜色不一致</td></tr>
+    <tr><td>多次重建</td><td>性能</td><td>updateCenterScopeMarkers() 每次 centerScope 变化都完整重建，无增量更新</td><td>—</td></tr>
+    <tr><td>信息损失</td><td>转换规则</td><td>SM关系推导丢弃同SM内BO关系；centerScopeMarkers 只保留 boolean 标记</td><td>—</td></tr>
+    <tr><td>传递链过长</td><td>可维护性</td><td>centerScopeColor: diagramConfig → generateDiagram → buildServiceModuleDiagramData → 节点color，4级传递</td><td>新增参数时易遗漏</td></tr>
+    <tr><td>变量声明顺序</td><td>时序正确性</td><td>finalCenterServiceModuleCodes 在使用后才声明（ReferenceError）</td><td>运行时崩溃</td></tr>
+    <tr><td>响应式依赖缺失</td><td>响应式</td><td>GroupItem.vue 中颜色计算未正确依赖 centerScopeColor 变化</td><td>颜色不更新</td></tr>
+</table>
+
+<h3>3.5 演化规律对比</h3>
+
+<div class="compare-grid">
+    <div class="compare-box compare-left">
+        <h4><span class="icon">[DECORATIVE]</span>数据模型演化规律</h4>
+        <ul>
+            <li><strong>增量式增长：</strong>新增字段（如isCenter、annotationCategory）不影响现有结构</li>
+            <li><strong>向后兼容：</strong>旧字段可标记deprecated但保留（如serviceModuleName）</li>
+            <li><strong>统一化趋势：</strong>从分散的ContainerNode/GroupModel向统一Group模型演化</li>
+            <li><strong>冗余收敛：</strong>新模型通过elementRef减少冗余，但旧模型冗余字段仍存在</li>
+            <li><strong>类型强化：</strong>GroupType枚举替代字符串groupType，增强类型安全</li>
+            <li><strong>演化风险低：</strong>结构变更影响范围可控，可通过类型系统检测</li>
+        </ul>
+    </div>
+    <div class="compare-box compare-right">
+        <h4><span class="icon">[REFRESH]</span>数据流演化规律</h4>
+        <ul>
+            <li><strong>重构式变更：</strong>新增参数需修改整条调用链（如centerScopeColor遗漏）</li>
+            <li><strong>路径分叉加剧：</strong>BO图和SM图的处理差异随功能增加而扩大</li>
+            <li><strong>双路径累积：</strong>颜色计算等逻辑在不同组件中独立实现，难以统一</li>
+            <li><strong>隐式依赖增加：</strong>响应式watch/computed的依赖关系隐式，难以追踪</li>
+            <li><strong>参数膨胀：</strong>buildServiceModuleDiagramData参数从7个增长到15+个</li>
+            <li><strong>演化风险高：</strong>流程变更可能影响整条数据链路，难以预测影响范围</li>
+        </ul>
+    </div>
+</div>
+
+<h3>3.6 开发维护中的不同关注点</h3>
+
+<div class="compare-grid">
+    <div class="compare-box compare-left">
+        <h4><span class="icon">[SYMBOL]</span>数据模型维护关注点</h4>
+        <ul>
+            <li><strong>新增字段时：</strong>确保类型定义更新、约束条件添加、文档同步</li>
+            <li><strong>修改关系时：</strong>检查FK引用完整性、级联影响范围</li>
+            <li><strong>重构时：</strong>向后兼容性检查、数据迁移方案</li>
+            <li><strong>典型风险：</strong>字段语义漂移（如nodes字段含义随图表类型变化）</li>
+            <li><strong>验证手段：</strong>TypeScript编译检查、单元测试、数据校验（dataValidator.js）</li>
+            <li><strong>修复成本：</strong>低——结构问题通常可通过类型系统快速定位</li>
+        </ul>
+    </div>
+    <div class="compare-box compare-right">
+        <h4><span class="icon">[SYMBOL]</span>数据流维护关注点</h4>
+        <ul>
+            <li><strong>新增参数时：</strong>确保整条调用链都传递新参数（如centerScopeColor遗漏）</li>
+            <li><strong>修改流程时：</strong>验证端到端数据一致性、响应式依赖正确性</li>
+            <li><strong>重构时：</strong>调用顺序可能改变、中间状态可能不一致</li>
+            <li><strong>典型风险：</strong>参数传递链断裂（中间环节遗漏关键参数）</li>
+            <li><strong>验证手段：</strong>端到端集成测试、数据流日志（DataFlowLogger）、运行时断言</li>
+            <li><strong>修复成本：</strong>高——流程问题通常需要追踪整条数据链路才能定位</li>
+        </ul>
+    </div>
+</div>
+
+<h3>3.7 核心结论</h3>
+
+<div class="conclusion-box">
+<p style="font-size:14px; line-height:1.8; color:#2c3e50;">
+<strong>数据模型是"地图"，数据流是"路线"。</strong>
+</p>
+<p style="font-size:13px; line-height:1.8; color:#555; margin-top:10px;">
+数据模型定义了系统中存在哪些"地点"（实体）、它们有哪些"特征"（属性）、彼此如何"相邻"（关系）。数据流定义了数据如何在这些"地点"之间"旅行"——经过哪些"中转站"（组件）、采用什么"交通工具"（Props/Store/函数调用）、在中转站做什么"加工"（转换规则）。
+</p>
+<p style="font-size:13px; line-height:1.8; color:#555; margin-top:10px;">
+<strong>本系统中最频繁的bug源于数据流问题，而非数据模型问题。</strong>数据模型相对稳定，一旦定义好很少变动；数据流则随业务逻辑调整而频繁变化，且调用链越长、分叉越多，出错概率越高。centerScopeColor未传入、颜色双路径计算不一致、变量声明顺序错误、centerScopeMarkers多次重建——这些都是数据流问题，不是数据模型问题。
+</p>
+<p style="font-size:13px; line-height:1.8; color:#555; margin-top:10px;">
+<strong>静态结构与动态过程的本质差异：</strong>数据模型的静态性使其可以通过类型系统在编译时捕获错误；数据流的动态性使其错误只能在运行时暴露。数据模型的冗余字段（如bo.domain）是设计选择，有明确的权衡；数据流的参数遗漏（如centerScopeColor）是设计缺陷，没有合理的权衡。数据模型的演化是增量的、向后兼容的；数据流的演化是重构式的、可能破坏整条链路的。
+</p>
+<p style="font-size:13px; line-height:1.8; color:#555; margin-top:10px;">
+<strong>优化建议：</strong>
+</p>
+<ul style="font-size:13px; line-height:1.8; color:#555; margin-top:6px; padding-left:20px;">
+<li>数据模型层面：统一container.nodes的语义（引入nodeType区分BO/SM）；统一节点标识策略（BO图id=bo.code而非bo.name）；消除centerScopeMarkers的双重标识</li>
+<li>数据流层面：缩短参数传递链（将配置对象整体传入而非逐个参数）；统一颜色计算路径（消除GroupItem.vue和serviceModuleDiagramBuilder.js的双路径）；增量更新centerScopeMarkers；为buildServiceModuleDiagramData引入配置对象模式替代15+个独立参数</li>
+<li>架构层面：引入数据流验证层（在关键转换节点添加断言，确保输入输出一致性）；建立参数传递完整性检查机制（函数签名变更时自动检测调用点）</li>
+</ul>
+</div>
+
+</div>
+
+</div>
+</body>
+</html>

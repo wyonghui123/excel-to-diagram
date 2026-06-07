@@ -1,0 +1,73 @@
+# ============================================
+# 角色权限关联元模型
+# 说明: 角色与权限的多对多关联
+# ============================================
+
+id: role_permission
+name: 角色权限
+table_name: role_permissions
+description: 角色与权限的多对多关联
+
+semantics:
+  meaning: 角色权限关联
+  category: system_entity
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+
+  - id: role_id
+    name: 角色ID
+    type: integer
+    db_column: role_id
+    required: true
+    description: 关联角色ID
+    semantics:
+      meaning: 关联的角色
+      parent_key: true
+
+  - id: permission_id
+    name: 权限ID
+    type: integer
+    db_column: permission_id
+    required: true
+    description: 关联权限ID
+    semantics:
+      meaning: 关联的权限
+
+  - id: granted
+    name: 授予状态
+    type: boolean
+    db_column: granted
+    required: true
+    default: true
+    description: true=包含(include), false=排除(exclude)
+    semantics:
+      meaning: 权限包含或排除
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建的时间戳
+
+indexes:
+  - fields: [role_id, permission_id]
+    unique: true
+    name: idx_role_permission_unique
+
+relations: []
+actions: []
+
+ui_view_config:
+  skip_auto_menu: true
+  showChangeHistory: true

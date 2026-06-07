@@ -1,0 +1,75 @@
+# Excel to Diagram Prometheus 监控配置
+# 版本: v1.0
+# 更新日期: 2026-04-29
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'excel-to-diagram'
+    environment: 'production'
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  # Prometheus 自身监控
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # 后端服务监控 (Python/Flask)
+  - job_name: 'backend'
+    static_configs:
+      - targets: ['172.20.59.7:5001']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+
+  # 前端服务监控 (静态文件服务器)
+  - job_name: 'frontend'
+    static_configs:
+      - targets: ['172.20.59.7:8081']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+
+  # Admin 服务监控
+  - job_name: 'admin'
+    static_configs:
+      - targets: ['172.20.59.7:8080']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+
+  # Node Exporter (系统指标)
+  - job_name: 'node'
+    static_configs:
+      - targets: ['172.20.59.7:9100']
+    scrape_interval: 15s
+
+  # Blackbox Exporter (HTTP探测)
+  - job_name: 'blackbox'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://172.20.59.7:8081
+          - http://172.20.59.7:5001/api/v1/health
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: 172.20.59.7:9115
+
+  # Pushgateway (接收自定义指标)
+  - job_name: 'pushgateway'
+    static_configs:
+      - targets: ['172.20.59.7:9091']
+    honor_labels: true

@@ -1,0 +1,2 @@
+# 测试截图输出目录（自动创建）
+# 超过 7 天的截图可通过 python test_helpers/scripts/cleanup_screenshots.py 清理

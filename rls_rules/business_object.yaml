@@ -1,0 +1,29 @@
+# M11 RLS 规则：business_object（业务对象/元数据核心）
+# M9 GraphQL 已支持
+
+entity: business_object
+
+# 行级过滤
+row_filters:
+  # 业务对象层级：公司 → domain → ...
+  - applies_to: [role:user, role:viewer, role:manager]
+    condition: "business_object.company_id == $user.company_id"
+  - applies_to: [role:admin]
+    condition: "true"
+  - applies_to: [role:ai-agent]
+    condition: "business_object.is_public == true"
+
+# 字段脱敏（业务对象内部元数据）
+field_masks:
+  - field: internal_spec
+    mask: "***HIDDEN***"
+    applies_to: [role:viewer, role:ai-agent]
+
+# 操作权限
+actions:
+  create: [role:admin, role:manager]
+  read: [role:admin, role:manager, role:user, role:viewer, role:ai-agent]
+  update: [role:admin, role:manager]
+  delete: [role:admin]
+  import: [role:admin, role:manager]
+  export: [role:admin, role:manager]

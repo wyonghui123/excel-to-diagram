@@ -1,0 +1,76 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+release/
+
+# Environment variables (IMPORTANT: Contains secrets)
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Cache
+.cache/
+.parcel-cache/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Runtime state files (service manager / watchdog)
+*.pid
+.service_manager.lock
+
+.vercel
+.env*.local
+
+# Cloudflare
+.wrangler/
+.dev.vars
+
+# Archive (historical backups and temporary files)
+archive/
+
+# Exports (generated Excel files)
+exports/
+
+# Test artifacts (screenshots, outputs)
+test_output/*.png
+test_output/*.jpg
+test_results/
+_browser_sessions/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Database files (development)
+*.db
+*.db-shm
+*.db-wal
+meta/.architecture.lock
+*.architecture.lock
+
+# Runtime state files (service manager / Playwright sessions)
+.service_status.json
+.service_status_*.json
+
+# Uploads
+meta/uploads/

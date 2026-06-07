@@ -1,0 +1,75 @@
+# 标准动作声明 — 纯元数据，不映射数据库表
+# 由 StandardActionLoader 独立加载，不经过 yaml_loader 的 BO Schema 链路
+
+standard_actions:
+  - id: crud_create
+    name: 创建
+    action_type: crud
+    method: POST
+    description: 创建资源
+
+  - id: crud_read
+    name: 读取
+    action_type: crud
+    method: GET
+    description: 读取单个资源
+
+  - id: crud_update
+    name: 更新
+    action_type: crud
+    method: PUT
+    description: 更新资源
+
+  - id: crud_delete
+    name: 删除
+    action_type: crud
+    method: DELETE
+    description: 删除资源
+
+  - id: crud_list
+    name: 列表
+    action_type: crud
+    method: GET
+    description: 列表查询
+
+  - id: export
+    name: 导出
+    action_type: batch
+    method: GET
+    description: 导出资源
+
+  - id: import
+    name: 导入
+    action_type: batch
+    method: POST
+    description: 导入资源
+
+  - id: approve
+    name: 审批
+    action_type: business
+    method: POST
+    description: 审批操作
+
+  - id: search
+    name: 搜索
+    action_type: crud
+    method: GET
+    description: 搜索查询
+
+  - id: assign
+    name: 分配
+    action_type: business
+    method: POST
+    description: 分配资源
+
+  - id: revoke
+    name: 撤销
+    action_type: business
+    method: POST
+    description: 撤销资源
+
+  - id: manage
+    name: 管理
+    action_type: business
+    method: POST
+    description: 管理操作

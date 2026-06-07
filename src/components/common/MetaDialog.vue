@@ -34,7 +34,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import AppModal from './AppModal/AppModal.vue'
 import AppButton from './AppButton/AppButton.vue'
 import MetaForm from './MetaForm.vue'
-import { useFieldPolicy } from '@/composables/useFieldPolicy'  // 🆕 v1 批次 3 / FR-6.7
+import { useFieldPolicy } from '@/composables/useFieldPolicy'  // [DECORATIVE] [NEW] v1.3 / FR-6.7
 
 const props = defineProps({
   visible: {
@@ -99,7 +99,7 @@ const formData = ref({})
 
 const metaFields = computed(() => props.meta.fields || [])
 
-// 🆕 v1 批次 3 / FR-6.7: 字段策略（必须在 metaFields 定义之后）
+// [DECORATIVE] [NEW] v1.3 / FR-6.7: 字段策略（必须在 metaFields 定义之后）
 const { isRequiredByRow, requiredMap } = useFieldPolicy(
   computed(() => props.meta),
   computed(() => metaFields.value)

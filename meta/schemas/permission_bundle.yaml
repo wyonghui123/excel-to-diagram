@@ -1,0 +1,108 @@
+id: permission_bundle
+name: 权限包
+table_name: permission_bundles
+description: 预定义的权限组合包，支持一键分配功能权限+数据权限+菜单权限
+
+fields:
+  - id: bundle_code
+    name: 权限包编码
+    type: string
+    required: true
+    unique: true
+    description: 权限包的唯一编码
+    constraints:
+      - type: immutable
+        message: 权限包编码创建后不可修改
+    ui:
+      visible: true
+      editable: true
+
+  - id: bundle_name
+    name: 权限包名称
+    type: string
+    required: true
+    description: 权限包显示名称
+    ui:
+      visible: true
+      editable: true
+
+  - id: description
+    name: 描述
+    type: text
+    description: 权限包详细说明
+    ui:
+      visible: true
+      editable: true
+
+  - id: menu_permissions
+    name: 菜单权限
+    type: text
+    description: 包含的菜单权限列表（JSON数组）
+    ui:
+      visible: true
+      editable: true
+
+  - id: function_permissions
+    name: 功能权限
+    type: text
+    description: 包含的功能权限列表（JSON数组）
+    ui:
+      visible: true
+      editable: true
+
+  - id: data_permission_template
+    name: 数据权限模板
+    type: text
+    description: 数据权限模板配置（JSON）
+    ui:
+      visible: true
+      editable: true
+
+  - id: is_active
+    name: 是否启用
+    type: boolean
+    default: true
+    description: 权限包是否启用
+    ui:
+      visible: true
+      editable: true
+
+  - id: is_system
+    name: 系统内置
+    type: boolean
+    default: false
+    description: 是否为系统内置权限包
+    constraints:
+      - type: no_delete
+        trigger_value: true
+        message: 系统权限包不可删除
+    ui:
+      visible: true
+      editable: true
+
+  - id: created_at
+    name: 创建时间
+    type: timestamp
+    description: 记录创建时间
+    ui:
+      visible: true
+      editable: false
+
+  - id: updated_at
+    name: 更新时间
+    type: timestamp
+    description: 记录更新时间
+    ui:
+      visible: true
+      editable: false
+
+audit:
+  enabled: true
+  strategy: business_only
+  fields: [bundle_code, bundle_name, menu_permissions, function_permissions, is_active]
+
+category_config:
+  category: system
+  sub_category: permission
+  icon: "package"
+  color: "#ec4899"

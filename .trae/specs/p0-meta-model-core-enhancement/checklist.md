@@ -1,0 +1,23 @@
+- [x] Shared Property: shared_properties.yaml 文件创建，包含 hierarchy_fields, audit_fields, owner_fields, naming_fields 四个共享字段组
+- [x] Shared Property: MetaField 新增 included_from 属性，默认空字符串，不影响现有字段
+- [x] Shared Property: MetaObject 新增 includes 属性，默认空列表，不影响现有对象
+- [x] Shared Property: yaml_loader.py 新增 parse_shared_properties() 和 _resolve_includes() 函数
+- [x] Shared Property: _resolve_includes() 正确展开共享字段到 fields 列表，本地字段覆盖共享字段
+- [x] Shared Property: 现有 YAML 无 includes 时，加载行为与修改前完全一致
+- [x] Composition: RelationType 枚举新增 COMPOSITION，现有 PARENT_CHILD/REFERENCE/MANY_TO_MANY 不受影响
+- [x] Composition: MetaRelation 新增 cascade_delete 和 ownership 属性，默认 False，不影响现有 relation
+- [x] Composition: yaml_loader.py 的 RELATION_TYPE_MAP 新增 composition 映射，parse_relation() 解析新属性
+- [x] Composition: CascadeService 支持 relation 定义优先于 hierarchies.yaml 的级联策略
+- [x] Composition: cascade_delete=true 时级联删除子实体；cascade_delete=false 时阻止删除
+- [x] Composition: 现有 type: parent_child 的 relation 行为不变
+- [x] Authorization: MetaObject 新增 authorization 属性，默认 None，不影响现有对象
+- [x] Authorization: yaml_loader.py 解析 authorization 配置节
+- [x] Authorization: check:true 但未指定 permissions 时，自动生成 {object_id}:{action} 格式权限码
+- [x] Authorization: manage_api.py CRUD 端点根据 authorization 配置自动绑定权限检查
+- [x] Authorization: AUTH_ENABLED=false 时所有权限检查跳过，与当前行为一致
+- [x] Authorization: 行级权限 scope 配置在列表查询时注入过滤条件
+- [x] Authorization: 现有 YAML 无 authorization 配置时，API 行为与修改前完全一致
+- [x] 端到端: domain.yaml 添加 includes + authorization + composition 后，CRUD 流程正常
+- [x] 端到端: 删除 domain 时级联删除 sub_domain（composition + cascade_delete=true）
+- [x] 端到端: 权限检查按 authorization 配置生效，无权限返回 403
+- [x] 无功能减少: 所有修改均为新增可选属性，不改变现有默认行为

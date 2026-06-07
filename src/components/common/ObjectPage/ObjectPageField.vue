@@ -108,7 +108,7 @@ const props = defineProps({
     type: Number,
     default: 0
   },
-  fieldPolicy: {          // 🆕 v1 批次 3 / FR-6.2: 外部 useFieldPolicy 注入
+  fieldPolicy: {          // [DECORATIVE] [NEW] v1.3 / FR-6.2: 外部 useFieldPolicy 注入
     type: Object,
     default: null
   }
@@ -141,7 +141,7 @@ function getFieldLabel(key) {
 }
 
 function isRequired(key) {
-  // 🆕 v1 批次 3 / FR-6.2: 优先走 useFieldPolicy.requiredMap（后端策略）
+  // [DECORATIVE] [NEW] v1.3 / FR-6.2: 优先走 useFieldPolicy.requiredMap（后端策略）
   if (props.fieldPolicy?.requiredMap?.value?.[key] !== undefined) {
     return props.fieldPolicy.requiredMap.value[key] === true
   }
@@ -156,7 +156,7 @@ function isFkField(key) {
 }
 
 function getFieldDisplayValue(key) {
-  // 🆕 v1 批次 3 / FR-6.5: 优先后端 display_values
+  // [DECORATIVE] [NEW] v1.3 / FR-6.5: 优先后端 display_values
   const dv = props.formData?.display_values?.[key]
   if (dv !== undefined && dv !== null) return dv
 

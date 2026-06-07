@@ -712,7 +712,7 @@ def batch_delete_bo(object_type):
         manage_service.set_audit_user(user_id, user_name, user_ip, user_ua)
         
         result = manage_service.batch_delete(object_type, ids, force)
-        
+
         return jsonify({
             'success': result.failed_count == 0,
             'success_count': result.success_count,
@@ -724,6 +724,100 @@ def batch_delete_bo(object_type):
         import traceback
         logger.error(f"[bo_api] batch-delete error: {e}\n{traceback.format_exc()}")
         return jsonify({'success': False, 'message': str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# [FIX GAP-008 2026-06-07] v2 端点补齐 — 8 个原仅 v1 存在的端点迁移到 v2
+# v1 端点 (manage_api) 已被 sunset_at=2026-06-05, v2 路径未实现 → 测试报 500
+# 解决: 在 v2 重新注册 8 个路由, 委托给 v1 handler (共享业务逻辑)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# 延迟导入避免循环依赖
+def _v1_handlers():
+    """延迟导入 v1 handler 函数 (避免 manage_api 导入 bo_api 形成循环)"""
+    from meta.api.manage_api import (
+        list_records_post as _list_records_post,
+        batch_create as _batch_create,
+        batch_update as _batch_update,
+        list_actions as _list_actions,
+        recover_from_log as _recover_from_log,
+        list_deleted_objects as _list_deleted_objects,
+        get_state_history as _get_state_history,
+        get_stage_metrics as _get_stage_metrics,
+    )
+    return {
+        'list_records_post': _list_records_post,
+        'batch_create': _batch_create,
+        'batch_update': _batch_update,
+        'list_actions': _list_actions,
+        'recover_from_log': _recover_from_log,
+        'list_deleted_objects': _list_deleted_objects,
+        'get_state_history': _get_state_history,
+        'get_stage_metrics': _get_stage_metrics,
+    }
+
+
+@bo_bp.route('/<object_type>/list', methods=['POST'])
+@login_required
+def v2_list_records_post(object_type):
+    """POST 列表查询 (URL 过长场景) — 委托给 v1 manage_api"""
+    return _v1_handlers()['list_records_post'](object_type)
+
+
+@bo_bp.route('/<object_type>/batch-create', methods=['POST'])
+@login_required
+def v2_batch_create(object_type):
+    """批量创建 — 委托给 v1 manage_api"""
+    return _v1_handlers()['batch_create'](object_type)
+
+
+@bo_bp.route('/<object_type>/batch-update', methods=['POST'])
+@login_required
+def v2_batch_update(object_type):
+    """批量更新 — 委托给 v1 manage_api"""
+    return _v1_handlers()['batch_update'](object_type)
+
+
+@bo_bp.route('/<object_type>/<int:obj_id>/actions', methods=['GET'])
+@login_required
+def v2_list_actions(object_type, obj_id):
+    """获取可执行 Action 列表 — 委托给 v1 manage_api"""
+    return _v1_handlers()['list_actions'](object_type, obj_id)
+
+
+@bo_bp.route('/<object_type>/<int:obj_id>/actions', methods=['GET'])
+@login_required
+def v2_list_actions_string(object_type, obj_id):
+    """[path variant] 字符串 id 兼容 — 委托给 v1 manage_api"""
+    return _v1_handlers()['list_actions'](object_type, obj_id)
+
+
+@bo_bp.route('/<object_type>/<int:obj_id>/recover', methods=['POST'])
+@login_required
+def v2_recover_from_log(object_type, obj_id):
+    """从 audit_log 恢复已删除 — 委托给 v1 manage_api"""
+    return _v1_handlers()['recover_from_log'](object_type, obj_id)
+
+
+@bo_bp.route('/<object_type>/deleted', methods=['GET'])
+@login_required
+def v2_list_deleted_objects(object_type):
+    """查询已删除对象 — 委托给 v1 manage_api"""
+    return _v1_handlers()['list_deleted_objects'](object_type)
+
+
+@bo_bp.route('/<object_type>/<int:obj_id>/state_history', methods=['GET'])
+@login_required
+def v2_get_state_history(object_type, obj_id):
+    """状态转换历史 — 委托给 v1 manage_api"""
+    return _v1_handlers()['get_state_history'](object_type, obj_id)
+
+
+@bo_bp.route('/<object_type>/<int:obj_id>/stage_metrics', methods=['GET'])
+@login_required
+def v2_get_stage_metrics(object_type, obj_id):
+    """状态停留统计 — 委托给 v1 manage_api"""
+    return _v1_handlers()['get_stage_metrics'](object_type, obj_id)
 
 
 # ── Architecture Preview ──
@@ -1106,13 +1200,13 @@ def get_meta_full(object_type):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 🆕 v1 批次 2 / FR-2.4: 全量 OpenAPI 端点（Action + BO CRUD + Meta）
+# [DECORATIVE] [NEW] v1.2 / FR-2.4: 全量 OpenAPI 端点（Action + BO CRUD + Meta）
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @meta_v2_bp.route('/_openapi.json', methods=['GET'])
 def get_full_openapi():
     """
-    🆕 v1 批次 2 / FR-2.4: 全量 OpenAPI 规范（Action + BO CRUD + Meta）
+    [DECORATIVE] [NEW] v1.2 / FR-2.4: 全量 OpenAPI 规范（Action + BO CRUD + Meta）
 
     与 bo_action_api._openapi.json（Action-only）共存。
     复用 _generate_action_openapi + _generate_bo_crud_paths + _generate_bo_schema。
@@ -1177,7 +1271,7 @@ def get_field_policies(object_type):
         editable_fields = engine.get_editable_fields(field_ids, policy_context)
         readonly_fields = engine.get_readonly_fields(field_ids, policy_context)
 
-        # 🆕 v1 批次 2 / FR-4.5a: 提取 conditional_required 规则（从 field.constraints）
+        # [DECORATIVE] [NEW] v1.2 / FR-4.5a: 提取 conditional_required 规则（从 field.constraints）
         # 供前端 useFieldPolicy.requiredMap 消费
         policies = {}
         for field_id in field_ids:
@@ -1207,7 +1301,7 @@ def get_field_policies(object_type):
                 'editable': field_id in editable_fields,
                 'visible': engine.is_field_visible(field_id, policy_context),
                 'required': engine.is_field_required(field_id, policy_context),
-                'conditional_required': conditional_required,  # 🆕 FR-4.5a
+                'conditional_required': conditional_required,  # [DECORATIVE] FR-4.5a
             }
 
         return jsonify({
@@ -1868,7 +1962,7 @@ def delete_permission_rule_v2(rule_id):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 🆕 v1 批次 2 / FR-2.2 / FR-2.3: OpenAPI 工具函数（被 FR-2.4 全量端点调用）
+# [DECORATIVE] [NEW] v1.2 / FR-2.2 / FR-2.3: OpenAPI 工具函数（被 FR-2.4 全量端点调用）
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 _TYPE_MAP = {
@@ -1888,7 +1982,7 @@ def _map_field_type(field_type) -> str:
 
 def _generate_bo_schema(meta_object) -> dict:
     """
-    🆕 v1 批次 2 / FR-2.3: 将 MetaObject 转换为 OpenAPI components/schemas 子对象
+    [DECORATIVE] [NEW] v1.2 / FR-2.3: 将 MetaObject 转换为 OpenAPI components/schemas 子对象
 
     防御: 用 getattr(field, 'xxx', None) 处理字段可能缺失的属性
     """
@@ -1901,7 +1995,7 @@ def _generate_bo_schema(meta_object) -> dict:
         if getattr(field, 'description', None):
             prop["description"] = field.description
         if getattr(field, 'enum_values', None):
-            # 🆕 v1 批次 2 / bug #4 fix: 兼容 enum_values 元素可能是 str 或 dict
+            # [DECORATIVE] [NEW] v1.2 / bug #4 fix: 兼容 enum_values 元素可能是 str 或 dict
             enum_list = []
             for v in field.enum_values:
                 if isinstance(v, dict):
@@ -1933,7 +2027,7 @@ def _generate_bo_schema(meta_object) -> dict:
 
 def _generate_bo_crud_paths(meta_objects) -> dict:
     """
-    🆕 v1 批次 2 / FR-2.2: 为每个 BO 类型生成 7 个标准 CRUD 端点的 OpenAPI path 描述
+    [DECORATIVE] [NEW] v1.2 / FR-2.2: 为每个 BO 类型生成 7 个标准 CRUD 端点的 OpenAPI path 描述
 
     端点:
     - GET    /api/v2/bo/{type}            列表

@@ -1,0 +1,3699 @@
+{
+  "summary": {
+    "total": 42,
+    "total_safe": 340,
+    "total_unsafe": 703,
+    "complexity": {
+      "very_complex": 33,
+      "complex": 3,
+      "moderate": 6,
+      "simple": 0
+    },
+    "total_minutes": 3237
+  },
+  "specs": [
+    {
+      "spec": "role-permission-center.spec.js",
+      "total_changes": 127,
+      "safe_changes": 61,
+      "unsafe_changes": 66,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 27,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 27,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "navigateAndWaitForPage",
+          "count": 5,
+          "safe": true,
+          "category": "navigation"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 36,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 26,
+          "safe": false,
+          "category": "screenshot"
+        },
+        {
+          "pattern": "el_table_locator",
+          "count": 4,
+          "safe": false,
+          "category": "pom"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          "\n  login, navigateAndWaitForPage, setAdminPermissions,\n  attachAndVerifyScreenshot, checkPageHealth, waitForStable,\n  apiGet, apiPost, apiDelete\n"
+        ],
+        "login_call": [
+          "    await login(page)",
+          "    await login(page)",
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n"
+        ],
+        "navigateAndWaitForPage": [
+          [
+            "/system/role-permission/999999",
+            ",\n      { expectedPath: 'role-permission' }\n    "
+          ],
+          [
+            "/system/roles",
+            ",\n      { expectedPath: 'roles', waitForTable: true }\n    "
+          ],
+          [
+            "/system/roles",
+            ",\n      { expectedPath: 'roles', waitForTable: true }\n    "
+          ]
+        ],
+        "waitForTimeout": [
+          "1500",
+          "500",
+          "500"
+        ],
+        "attachScreenshot": [
+          [
+            "01-page-loaded",
+            ", { expectedPath: 'role-permission' }"
+          ],
+          [
+            "02-dimension-selected",
+            ""
+          ],
+          [
+            "03-rule-list",
+            ""
+          ]
+        ],
+        "el_table_locator": [
+          "page.locator('.el-table",
+          "page.locator('.el-table",
+          "page.locator('.el-table"
+        ]
+      },
+      "line_count": 1019,
+      "test_count": 27
+    },
+    {
+      "spec": "import-export.spec.js",
+      "total_changes": 68,
+      "safe_changes": 4,
+      "unsafe_changes": 64,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 44,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 18,
+          "safe": false,
+          "category": "screenshot"
+        },
+        {
+          "pattern": "el_table_locator",
+          "count": 1,
+          "safe": false,
+          "category": "pom"
+        },
+        {
+          "pattern": "el_tabs_item",
+          "count": 1,
+          "safe": false,
+          "category": "pom"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          " login, navigateAndWaitForPage, attachScreenshot, setAdminPermissions, findProductWithVersion, attachAndVerifyScreenshot "
+        ],
+        "login_call": [
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)"
+        ],
+        "waitForTimeout": [
+          "1500",
+          "1000",
+          "500"
+        ],
+        "attachScreenshot": [
+          [
+            "01-bo-list",
+            ", { expectedPath: 'archdata' }"
+          ],
+          [
+            "03-export-complete",
+            ", { expectedPath: 'archdata' }"
+          ],
+          [
+            "02-export-dialog",
+            ", { expectedPath: 'archdata' }"
+          ]
+        ],
+        "el_table_locator": [
+          "page.locator('.el-table"
+        ],
+        "el_tabs_item": [
+          "page.locator('.el-tabs__item"
+        ]
+      },
+      "line_count": 676,
+      "test_count": 2
+    },
+    {
+      "spec": "arch-data-filter-scope.spec.js",
+      "total_changes": 53,
+      "safe_changes": 8,
+      "unsafe_changes": 45,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 2,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 2,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "navigateAndWaitForPage",
+          "count": 2,
+          "safe": true,
+          "category": "navigation"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 24,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 17,
+          "safe": false,
+          "category": "screenshot"
+        },
+        {
+          "pattern": "el_table_locator",
+          "count": 1,
+          "safe": false,
+          "category": "pom"
+        },
+        {
+          "pattern": "el_tabs_item",
+          "count": 3,
+          "safe": false,
+          "category": "pom"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          " login, navigateAndWaitForPage, attachScreenshot, setAdminPermissions, findProductWithVersion, attachAndVerifyScreenshot "
+        ],
+        "login_call": [
+          "    await login(page)",
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n"
+        ],
+        "navigateAndWaitForPage": [
+          [
+            "/system/archdata",
+            ", {\n      waitForTable: false,\n      waitForSelector: '.collapsible-panel, .el-tabs, .el-tree'\n    }"
+          ],
+          [
+            "/system/archdata",
+            ", {\n      waitForTable: false,\n      waitForSelector: '.collapsible-panel, .el-tabs, .el-tree'\n    }"
+          ]
+        ],
+        "waitForTimeout": [
+          "500",
+          "500",
+          "500"
+        ],
+        "attachScreenshot": [
+          [
+            "01-archdata-loaded",
+            ", {\n      expectedPath: 'archdata'\n    }"
+          ],
+          [
+            "02-object-scope-panel",
+            ""
+          ],
+          [
+            "03-object-scope-expanded",
+            ""
+          ]
+        ],
+        "el_table_locator": [
+          "page.locator('.el-table"
+        ],
+        "el_tabs_item": [
+          "page.locator('.el-tabs__item",
+          "page.locator('.el-tabs__item",
+          "page.locator('.el-tabs__item"
+        ]
+      },
+      "line_count": 255,
+      "test_count": 2
+    },
+    {
+      "spec": "audit-log-embedded-access.spec.js",
+      "total_changes": 53,
+      "safe_changes": 11,
+      "unsafe_changes": 42,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 5,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 4,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 25,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 14,
+          "safe": false,
+          "category": "screenshot"
+        },
+        {
+          "pattern": "el_table_locator",
+          "count": 3,
+          "safe": false,
+          "category": "pom"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          "\n  login, navigateAndWaitForPage, setAdminPermissions,\n  attachAndVerifyScreenshot, getAuthHeaders, findProductWithVersion\n"
+        ],
+        "login_call": [
+          "    await login(page)",
+          "    await login(page)",
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)",
+          "    await setAdminPermissions(page)"
+        ],
+        "waitForTimeout": [
+          "1500",
+          "1500",
+          "800"
+        ],
+        "attachScreenshot": [
+          [
+            "01-embedded-drawer",
+            ", { expectedPath: 'archdata' }"
+          ],
+          [
+            "02-embedded-interactions",
+            ", { expectedPath: AUDIT_PATH }"
+          ],
+          [
+            "03-direct-route",
+            ", { expectedPath: AUDIT_PATH }"
+          ]
+        ],
+        "el_table_locator": [
+          "page.locator('.el-table",
+          "page.locator('.el-table",
+          "page.locator('.el-table"
+        ]
+      },
+      "line_count": 442,
+      "test_count": 14
+    },
+    {
+      "spec": "arch-data-crud.spec.js",
+      "total_changes": 43,
+      "safe_changes": 6,
+      "unsafe_changes": 37,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 2,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 2,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 20,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 12,
+          "safe": false,
+          "category": "screenshot"
+        },
+        {
+          "pattern": "el_table_locator",
+          "count": 5,
+          "safe": false,
+          "category": "pom"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          "\n  login, navigateAndWaitForPage, setAdminPermissions,\n  findProductWithVersion, getAuthHeaders, attachAndVerifyScreenshot\n"
+        ],
+        "login_call": [
+          "    await login(page)",
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n"
+        ],
+        "waitForTimeout": [
+          "1000",
+          "1500",
+          "500"
+        ],
+        "attachScreenshot": [
+          [
+            "01-bo-list",
+            ", { expectedPath: 'archdata' }"
+          ],
+          [
+            "02-bo-detail-before-edit",
+            ", { expectedPath: 'archdata' }"
+          ],
+          [
+            "03-bo-edit-form",
+            ", { expectedPath: 'archdata' }"
+          ]
+        ],
+        "el_table_locator": [
+          "page.locator('.el-table",
+          "page.locator('.el-table",
+          "page.locator('.el-table"
+        ]
+      },
+      "line_count": 466,
+      "test_count": 2
+    },
+    {
+      "spec": "user-role.spec.js",
+      "total_changes": 44,
+      "safe_changes": 9,
+      "unsafe_changes": 35,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 3,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 3,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "navigateAndWaitForPage",
+          "count": 1,
+          "safe": true,
+          "category": "navigation"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 17,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 14,
+          "safe": false,
+          "category": "screenshot"
+        },
+        {
+          "pattern": "el_table_locator",
+          "count": 4,
+          "safe": false,
+          "category": "pom"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          " login, navigateAndWaitForPage, setAdminPermissions, attachAndVerifyScreenshot "
+        ],
+        "login_call": [
+          "    await login(page)",
+          "    await login(page)",
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n"
+        ],
+        "navigateAndWaitForPage": [
+          [
+            "/user-permission",
+            ", {\n    expectedPath: 'user-permission',\n    waitForTable: true\n  }"
+          ]
+        ],
+        "waitForTimeout": [
+          "1000",
+          "1000",
+          "500"
+        ],
+        "attachScreenshot": [
+          [
+            "01-user-list",
+            ", { expectedPath: 'user-permission' }"
+          ],
+          [
+            "02-user-create-form",
+            ", { expectedPath: 'user-permission' }"
+          ],
+          [
+            "03-user-after-create",
+            ", { expectedPath: 'user-permission' }"
+          ]
+        ],
+        "el_table_locator": [
+          "page.locator('.el-table",
+          "page.locator('.el-table",
+          "page.locator('.el-table"
+        ]
+      },
+      "line_count": 272,
+      "test_count": 3
+    },
+    {
+      "spec": "audit-log-grouping-detail.spec.js",
+      "total_changes": 40,
+      "safe_changes": 6,
+      "unsafe_changes": 34,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 2,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 2,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 14,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 14,
+          "safe": false,
+          "category": "screenshot"
+        },
+        {
+          "pattern": "el_table_locator",
+          "count": 6,
+          "safe": false,
+          "category": "pom"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          "\n  login, navigateAndWaitForPage, setAdminPermissions,\n  attachAndVerifyScreenshot\n"
+        ],
+        "login_call": [
+          "    await login(page)",
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)",
+          "    await setAdminPermissions(page)"
+        ],
+        "waitForTimeout": [
+          "800",
+          "800",
+          "500"
+        ],
+        "attachScreenshot": [
+          [
+            "01-default-collapsed",
+            ", { expectedPath: AUDIT_PATH }"
+          ],
+          [
+            "02-group-expanded",
+            ", { expectedPath: AUDIT_PATH }"
+          ],
+          [
+            "03-group-collapsed",
+            ", { expectedPath: AUDIT_PATH }"
+          ]
+        ],
+        "el_table_locator": [
+          "page.locator('.el-table",
+          "page.locator('.el-table",
+          "page.locator('.el-table"
+        ]
+      },
+      "line_count": 237,
+      "test_count": 10
+    },
+    {
+      "spec": "enum-management.spec.js",
+      "total_changes": 37,
+      "safe_changes": 9,
+      "unsafe_changes": 28,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 3,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 3,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "navigateAndWaitForPage",
+          "count": 1,
+          "safe": true,
+          "category": "navigation"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 11,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 14,
+          "safe": false,
+          "category": "screenshot"
+        },
+        {
+          "pattern": "el_table_locator",
+          "count": 3,
+          "safe": false,
+          "category": "pom"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          "\n  login, navigateAndWaitForPage, setAdminPermissions,\n  attachAndVerifyScreenshot, getAuthHeaders, getPaginatedData, apiPost, apiDelete\n"
+        ],
+        "login_call": [
+          "    await login(page)",
+          "    await login(page)",
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n"
+        ],
+        "navigateAndWaitForPage": [
+          [
+            "/business-config",
+            ", {\n    expectedPath: 'business-config',\n    waitForTable: true\n  }"
+          ]
+        ],
+        "waitForTimeout": [
+          "1000",
+          "1500",
+          "1500"
+        ],
+        "attachScreenshot": [
+          [
+            "01-enum-type-list",
+            ", { expectedPath: 'business-config' }"
+          ],
+          [
+            "02-enum-type-detail",
+            ", { expectedPath: 'detail' }"
+          ],
+          [
+            "03-enum-type-list-final",
+            ", { expectedPath: 'business-config' }"
+          ]
+        ],
+        "el_table_locator": [
+          "page.locator('.el-table",
+          "page.locator('.el-table",
+          "page.locator('.el-table"
+        ]
+      },
+      "line_count": 346,
+      "test_count": 3
+    },
+    {
+      "spec": "product-version.spec.js",
+      "total_changes": 33,
+      "safe_changes": 9,
+      "unsafe_changes": 24,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 3,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 3,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "navigateAndWaitForPage",
+          "count": 1,
+          "safe": true,
+          "category": "navigation"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 10,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 12,
+          "safe": false,
+          "category": "screenshot"
+        },
+        {
+          "pattern": "el_table_locator",
+          "count": 1,
+          "safe": false,
+          "category": "pom"
+        },
+        {
+          "pattern": "search_input",
+          "count": 1,
+          "safe": false,
+          "category": "pom"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          "\n  login, navigateAndWaitForPage, setAdminPermissions,\n  attachAndVerifyScreenshot, getAuthHeaders, getPaginatedData, findProductWithVersion\n"
+        ],
+        "login_call": [
+          "    await login(page)",
+          "    await login(page)",
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n"
+        ],
+        "navigateAndWaitForPage": [
+          [
+            "/product-management",
+            ", {\n    expectedPath: 'product-management',\n    waitForTable: true\n  }"
+          ]
+        ],
+        "waitForTimeout": [
+          "1000",
+          "1500",
+          "1500"
+        ],
+        "attachScreenshot": [
+          [
+            "01-product-list",
+            ", { expectedPath: 'product-management' }"
+          ],
+          [
+            "02-product-detail",
+            ", { expectedPath: 'detail' }"
+          ],
+          [
+            "03-product-list-final",
+            ", { expectedPath: 'product-management' }"
+          ]
+        ],
+        "el_table_locator": [
+          "page.locator('.el-table"
+        ],
+        "search_input": [
+          "page.locator('input[placeholder*=\"搜索\""
+        ]
+      },
+      "line_count": 233,
+      "test_count": 3
+    },
+    {
+      "spec": "fk-filter.spec.js",
+      "total_changes": 28,
+      "safe_changes": 6,
+      "unsafe_changes": 22,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "page_goto",
+          "count": 2,
+          "safe": true,
+          "category": "navigation"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 10,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 6,
+          "safe": false,
+          "category": "screenshot"
+        },
+        {
+          "pattern": "el_table_locator",
+          "count": 6,
+          "safe": false,
+          "category": "pom"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          " login, setAdminPermissions, attachAndVerifyScreenshot "
+        ],
+        "login_call": [
+          "    \n    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)"
+        ],
+        "page_goto": [
+          "http://localhost:3004/user-permission",
+          "http://localhost:3004/user-permission"
+        ],
+        "waitForTimeout": [
+          "2000",
+          "500",
+          "500"
+        ],
+        "attachScreenshot": [
+          [
+            "01-user-group-list",
+            ""
+          ],
+          [
+            "02-dropdown-open",
+            ""
+          ],
+          [
+            "03-after-filter",
+            ""
+          ]
+        ],
+        "el_table_locator": [
+          "page.locator('.el-table",
+          "page.locator('.el-table",
+          "page.locator('.el-table"
+        ]
+      },
+      "line_count": 169,
+      "test_count": 2
+    },
+    {
+      "spec": "relation-scope-field.spec.js",
+      "total_changes": 29,
+      "safe_changes": 8,
+      "unsafe_changes": 21,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 2,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 2,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "navigateAndWaitForPage",
+          "count": 2,
+          "safe": true,
+          "category": "navigation"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 12,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 3,
+          "safe": false,
+          "category": "screenshot"
+        },
+        {
+          "pattern": "el_table_locator",
+          "count": 4,
+          "safe": false,
+          "category": "pom"
+        },
+        {
+          "pattern": "el_tabs_item",
+          "count": 2,
+          "safe": false,
+          "category": "pom"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          " login, navigateAndWaitForPage, attachAndVerifyScreenshot, setAdminPermissions, findProductWithVersion "
+        ],
+        "login_call": [
+          "    await login(page)",
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n"
+        ],
+        "navigateAndWaitForPage": [
+          [
+            "/system/archdata",
+            ", {\n      waitForTable: false,\n      waitForSelector: '.gt-selector'\n    }"
+          ],
+          [
+            "/system/archdata",
+            ", {\n      waitForTable: false,\n      waitForSelector: '.gt-selector'\n    }"
+          ]
+        ],
+        "waitForTimeout": [
+          "800",
+          "1500",
+          "1000"
+        ],
+        "attachScreenshot": [
+          [
+            "01-relation-tab",
+            ", {\n      expectedPath: 'archdata'\n    }"
+          ],
+          [
+            "02-relation-scope-values",
+            ", {\n      expectedPath: 'archdata'\n    }"
+          ],
+          [
+            "03-sorted-by-scope",
+            ", {\n      expectedPath: 'archdata'\n    }"
+          ]
+        ],
+        "el_table_locator": [
+          "page.locator('.el-table",
+          "page.locator('.el-table",
+          "page.locator('.el-table"
+        ],
+        "el_tabs_item": [
+          "page.locator('.el-tabs__item",
+          "page.locator('.el-tabs__item"
+        ]
+      },
+      "line_count": 193,
+      "test_count": 2
+    },
+    {
+      "spec": "audit-log-filter.spec.js",
+      "total_changes": 23,
+      "safe_changes": 4,
+      "unsafe_changes": 19,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 14,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 4,
+          "safe": false,
+          "category": "screenshot"
+        },
+        {
+          "pattern": "el_table_locator",
+          "count": 1,
+          "safe": false,
+          "category": "pom"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          "\n  login, navigateAndWaitForPage, setAdminPermissions,\n  attachAndVerifyScreenshot, getAuthHeaders\n"
+        ],
+        "login_call": [
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)"
+        ],
+        "waitForTimeout": [
+          "800",
+          "800",
+          "500"
+        ],
+        "attachScreenshot": [
+          [
+            "02-filter-field-name",
+            ", { expectedPath: AUDIT_PATH }"
+          ],
+          [
+            "03-field-search",
+            ", { expectedPath: AUDIT_PATH }"
+          ],
+          [
+            "05-combined-filter",
+            ", { expectedPath: AUDIT_PATH }"
+          ]
+        ],
+        "el_table_locator": [
+          "page.locator('.el-table"
+        ]
+      },
+      "line_count": 235,
+      "test_count": 7
+    },
+    {
+      "spec": "audit-log-objects-p1.spec.js",
+      "total_changes": 22,
+      "safe_changes": 4,
+      "unsafe_changes": 18,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 11,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 7,
+          "safe": false,
+          "category": "screenshot"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          "\n  login, navigateAndWaitForPage, setAdminPermissions,\n  attachAndVerifyScreenshot, getAuthHeaders\n"
+        ],
+        "login_call": [
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)"
+        ],
+        "waitForTimeout": [
+          "500",
+          "500",
+          "500"
+        ],
+        "attachScreenshot": [
+          [
+            "01-sub-domain",
+            ", { expectedPath: AUDIT_PATH }"
+          ],
+          [
+            "02-user-group",
+            ", { expectedPath: AUDIT_PATH }"
+          ],
+          [
+            "03-menu",
+            ", { expectedPath: AUDIT_PATH }"
+          ]
+        ]
+      },
+      "line_count": 353,
+      "test_count": 11
+    },
+    {
+      "spec": "ValueHelp-5-layer-link.spec.js",
+      "total_changes": 17,
+      "safe_changes": 1,
+      "unsafe_changes": 16,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "login_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 16,
+          "safe": false,
+          "category": "wait"
+        }
+      ],
+      "samples": {
+        "login_call": [
+          "  await login(page)"
+        ],
+        "waitForTimeout": [
+          "1000",
+          "2000",
+          "1000"
+        ]
+      },
+      "line_count": 233,
+      "test_count": 15
+    },
+    {
+      "spec": "audit-log.spec.js",
+      "total_changes": 24,
+      "safe_changes": 9,
+      "unsafe_changes": 15,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 3,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 3,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "navigateAndWaitForPage",
+          "count": 1,
+          "safe": true,
+          "category": "navigation"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 5,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 7,
+          "safe": false,
+          "category": "screenshot"
+        },
+        {
+          "pattern": "el_table_locator",
+          "count": 2,
+          "safe": false,
+          "category": "pom"
+        },
+        {
+          "pattern": "search_input",
+          "count": 1,
+          "safe": false,
+          "category": "pom"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          "\n  login, navigateAndWaitForPage, setAdminPermissions,\n  attachAndVerifyScreenshot, getAuthHeaders, getPaginatedData\n"
+        ],
+        "login_call": [
+          "    await login(page)",
+          "    await login(page)",
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n"
+        ],
+        "navigateAndWaitForPage": [
+          [
+            "/system-admin",
+            ", {\n    expectedPath: 'system-admin',\n    waitForTable: true\n  }"
+          ]
+        ],
+        "waitForTimeout": [
+          "1000",
+          "1000",
+          "500"
+        ],
+        "attachScreenshot": [
+          [
+            "01-audit-log-list",
+            ", { expectedPath: 'system-admin' }"
+          ],
+          [
+            "02-audit-log-filtered",
+            ", { expectedPath: 'system-admin' }"
+          ],
+          [
+            "03-audit-log-list-final",
+            ", { expectedPath: 'system-admin' }"
+          ]
+        ],
+        "el_table_locator": [
+          "page.locator('.el-table",
+          "page.locator('.el-table"
+        ],
+        "search_input": [
+          "page.locator('input[placeholder*=\"搜索\""
+        ]
+      },
+      "line_count": 186,
+      "test_count": 3
+    },
+    {
+      "spec": "value-help-filter.spec.js",
+      "total_changes": 22,
+      "safe_changes": 7,
+      "unsafe_changes": 15,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "page_goto",
+          "count": 3,
+          "safe": true,
+          "category": "navigation"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 6,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 5,
+          "safe": false,
+          "category": "screenshot"
+        },
+        {
+          "pattern": "el_table_locator",
+          "count": 4,
+          "safe": false,
+          "category": "pom"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          " login, setAdminPermissions, attachAndVerifyScreenshot "
+        ],
+        "login_call": [
+          "    \n    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)"
+        ],
+        "page_goto": [
+          "http://localhost:3004/user-permission",
+          "http://localhost:3004/user-permission",
+          "http://localhost:3004/user-permission"
+        ],
+        "waitForTimeout": [
+          "500",
+          "300",
+          "2000"
+        ],
+        "attachScreenshot": [
+          [
+            "01-user-list",
+            ""
+          ],
+          [
+            "02-filter-popover",
+            ""
+          ],
+          [
+            "01-user-group-list",
+            ""
+          ]
+        ],
+        "el_table_locator": [
+          "page.locator('.el-table",
+          "page.locator('.el-table",
+          "page.locator('.el-table"
+        ]
+      },
+      "line_count": 161,
+      "test_count": 3
+    },
+    {
+      "spec": "relation-scope-tree.spec.js",
+      "total_changes": 20,
+      "safe_changes": 5,
+      "unsafe_changes": 15,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "page_goto",
+          "count": 1,
+          "safe": true,
+          "category": "navigation"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 9,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 6,
+          "safe": false,
+          "category": "screenshot"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          "\n  login,\n  setAdminPermissions,\n  attachAndVerifyScreenshot,\n  assertHealthy,\n  waitForDomExists,\n  waitForStable\n"
+        ],
+        "login_call": [
+          "    await login(page)\n"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)\n"
+        ],
+        "page_goto": [
+          "/system/archdata?productId=1&versionId=1"
+        ],
+        "waitForTimeout": [
+          "2000",
+          "4000",
+          "2000"
+        ],
+        "attachScreenshot": [
+          [
+            "01-oss-tree-labels",
+            ", {\n      expectedPath: 'archdata'\n    }"
+          ],
+          [
+            "02-oss-node-selected",
+            ", {\n      expectedPath: 'archdata'\n    }"
+          ],
+          [
+            "03-rss-node-selected",
+            ", {\n      expectedPath: 'archdata'\n    }"
+          ]
+        ]
+      },
+      "line_count": 526,
+      "test_count": 6
+    },
+    {
+      "spec": "audit-log-levels.spec.js",
+      "total_changes": 19,
+      "safe_changes": 4,
+      "unsafe_changes": 15,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 9,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 6,
+          "safe": false,
+          "category": "screenshot"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          "\n  login, navigateAndWaitForPage, setAdminPermissions,\n  attachAndVerifyScreenshot, getAuthHeaders\n"
+        ],
+        "login_call": [
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)"
+        ],
+        "waitForTimeout": [
+          "1500",
+          "1500",
+          "1000"
+        ],
+        "attachScreenshot": [
+          [
+            "01-five-categories",
+            ", { expectedPath: AUDIT_PATH }"
+          ],
+          [
+            "02-five-levels",
+            ", { expectedPath: AUDIT_PATH }"
+          ],
+          [
+            "03-category-colors",
+            ", { expectedPath: AUDIT_PATH }"
+          ]
+        ]
+      },
+      "line_count": 298,
+      "test_count": 6
+    },
+    {
+      "spec": "condition-rule-dialog-spec-v14.spec.js",
+      "total_changes": 31,
+      "safe_changes": 17,
+      "unsafe_changes": 14,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 9,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 6,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 12,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 2,
+          "safe": false,
+          "category": "screenshot"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          "\n  login, setAdminPermissions, apiGet, apiPost, attachAndVerifyScreenshot\n"
+        ],
+        "login_call": [
+          "    await login(page)",
+          "    await login(page)",
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n"
+        ],
+        "waitForTimeout": [
+          "2000",
+          "1500",
+          "2000"
+        ],
+        "attachScreenshot": [
+          [
+            "condition-rule-dialog-open",
+            ""
+          ],
+          [
+            "condition-rule-denied-enabled",
+            ""
+          ]
+        ]
+      },
+      "line_count": 330,
+      "test_count": 9
+    },
+    {
+      "spec": "audit-log-objects-p0.spec.js",
+      "total_changes": 18,
+      "safe_changes": 4,
+      "unsafe_changes": 14,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 10,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 4,
+          "safe": false,
+          "category": "screenshot"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          "\n  login, navigateAndWaitForPage, setAdminPermissions,\n  attachAndVerifyScreenshot, getAuthHeaders, getPaginatedData\n"
+        ],
+        "login_call": [
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)"
+        ],
+        "waitForTimeout": [
+          "800",
+          "500",
+          "800"
+        ],
+        "attachScreenshot": [
+          [
+            "02-domain-associate",
+            ", { expectedPath: AUDIT_PATH }"
+          ],
+          [
+            "03-user-security",
+            ", { expectedPath: AUDIT_PATH }"
+          ],
+          [
+            "04-role-security",
+            ", { expectedPath: AUDIT_PATH }"
+          ]
+        ]
+      },
+      "line_count": 321,
+      "test_count": 5
+    },
+    {
+      "spec": "useMetaList-21-keypath.spec.js",
+      "total_changes": 15,
+      "safe_changes": 1,
+      "unsafe_changes": 14,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "login_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 10,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "el_table_locator",
+          "count": 3,
+          "safe": false,
+          "category": "pom"
+        },
+        {
+          "pattern": "search_input",
+          "count": 1,
+          "safe": false,
+          "category": "pom"
+        }
+      ],
+      "samples": {
+        "login_call": [
+          "  await login(page)"
+        ],
+        "waitForTimeout": [
+          "1000",
+          "1000",
+          "500"
+        ],
+        "el_table_locator": [
+          "page.locator('.el-table",
+          "page.locator('.el-table",
+          "page.locator('.el-table"
+        ],
+        "search_input": [
+          "page.locator('input[placeholder*=\"搜索\""
+        ]
+      },
+      "line_count": 209,
+      "test_count": 21
+    },
+    {
+      "spec": "fk-filter-issue.spec.js",
+      "total_changes": 20,
+      "safe_changes": 8,
+      "unsafe_changes": 12,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 2,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 2,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "page_goto",
+          "count": 2,
+          "safe": true,
+          "category": "navigation"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 8,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "el_table_locator",
+          "count": 4,
+          "safe": false,
+          "category": "pom"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          " login, setAdminPermissions "
+        ],
+        "login_call": [
+          "    \n    await login(page)",
+          "    \n    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)\n    ",
+          "    await setAdminPermissions(page)\n    "
+        ],
+        "page_goto": [
+          "http://localhost:3004/user-permission",
+          "http://localhost:3004/user-permission"
+        ],
+        "waitForTimeout": [
+          "2000",
+          "500",
+          "500"
+        ],
+        "el_table_locator": [
+          "page.locator('.el-table",
+          "page.locator('.el-table",
+          "page.locator('.el-table"
+        ]
+      },
+      "line_count": 133,
+      "test_count": 2
+    },
+    {
+      "spec": "user-permission.spec.js",
+      "total_changes": 20,
+      "safe_changes": 8,
+      "unsafe_changes": 12,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 2,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 2,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "navigateAndWaitForPage",
+          "count": 2,
+          "safe": true,
+          "category": "navigation"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 4,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 4,
+          "safe": false,
+          "category": "screenshot"
+        },
+        {
+          "pattern": "el_table_locator",
+          "count": 2,
+          "safe": false,
+          "category": "pom"
+        },
+        {
+          "pattern": "el_tabs_item",
+          "count": 2,
+          "safe": false,
+          "category": "pom"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          "\n  login, navigateAndWaitForPage, setAdminPermissions,\n  attachAndVerifyScreenshot\n"
+        ],
+        "login_call": [
+          "    await login(page)",
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)",
+          "    await setAdminPermissions(page)"
+        ],
+        "navigateAndWaitForPage": [
+          [
+            "/user-permission",
+            ", {\n      expectedPath: 'user-permission',\n      waitForTabs: true\n    }"
+          ],
+          [
+            "/user-permission?tab=roles",
+            ", { waitForTabs: true }"
+          ]
+        ],
+        "waitForTimeout": [
+          "1500",
+          "1000",
+          "1500"
+        ],
+        "attachScreenshot": [
+          [
+            "01-user-permission",
+            ""
+          ],
+          [
+            "02-user-group-tab",
+            ""
+          ],
+          [
+            "03-roles-tab",
+            ""
+          ]
+        ],
+        "el_table_locator": [
+          "page.locator('.el-table",
+          "page.locator('.el-table"
+        ],
+        "el_tabs_item": [
+          "page.locator('.el-tabs__item",
+          "page.locator('.el-tabs__item"
+        ]
+      },
+      "line_count": 63,
+      "test_count": 2
+    },
+    {
+      "spec": "diagram.spec.js",
+      "total_changes": 19,
+      "safe_changes": 7,
+      "unsafe_changes": 12,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 2,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 2,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "navigateAndWaitForPage",
+          "count": 1,
+          "safe": true,
+          "category": "navigation"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 5,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 7,
+          "safe": false,
+          "category": "screenshot"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          "\n  login, navigateAndWaitForPage, setAdminPermissions,\n  attachAndVerifyScreenshot, findProductWithVersion\n"
+        ],
+        "login_call": [
+          "    await login(page)",
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n"
+        ],
+        "navigateAndWaitForPage": [
+          [
+            "/diagram",
+            ", {\n    expectedPath: 'diagram',\n    waitForTable: false,\n    waitForSelector: '.step-navigator, [class*=\"step\"], .diagram-app'\n  }"
+          ]
+        ],
+        "waitForTimeout": [
+          "1500",
+          "1500",
+          "2000"
+        ],
+        "attachScreenshot": [
+          [
+            "01-diagram-page",
+            ", { expectedPath: 'diagram' }"
+          ],
+          [
+            "02-diagram-steps",
+            ", { expectedPath: 'diagram' }"
+          ],
+          [
+            "01-archdata-before-diagram",
+            ", { expectedPath: 'archdata' }"
+          ]
+        ]
+      },
+      "line_count": 131,
+      "test_count": 2
+    },
+    {
+      "spec": "audit-log-actions.spec.js",
+      "total_changes": 16,
+      "safe_changes": 4,
+      "unsafe_changes": 12,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 7,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 5,
+          "safe": false,
+          "category": "screenshot"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          "\n  login, navigateAndWaitForPage, setAdminPermissions,\n  attachAndVerifyScreenshot, getAuthHeaders\n"
+        ],
+        "login_call": [
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)"
+        ],
+        "waitForTimeout": [
+          "800",
+          "800",
+          "800"
+        ],
+        "attachScreenshot": [
+          [
+            "01-export-btn",
+            ", { expectedPath: AUDIT_PATH }"
+          ],
+          [
+            "02-page-next",
+            ", { expectedPath: AUDIT_PATH }"
+          ],
+          [
+            "03-page-jump",
+            ", { expectedPath: AUDIT_PATH }"
+          ]
+        ]
+      },
+      "line_count": 183,
+      "test_count": 7
+    },
+    {
+      "spec": "audit-log-base.spec.js",
+      "total_changes": 23,
+      "safe_changes": 12,
+      "unsafe_changes": 11,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 5,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 5,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 4,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 5,
+          "safe": false,
+          "category": "screenshot"
+        },
+        {
+          "pattern": "el_table_locator",
+          "count": 2,
+          "safe": false,
+          "category": "pom"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          "\n  login, navigateAndWaitForPage, setAdminPermissions,\n  attachAndVerifyScreenshot\n"
+        ],
+        "login_call": [
+          "    await login(page)",
+          "    await login(page)",
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n"
+        ],
+        "waitForTimeout": [
+          "800",
+          "800",
+          "1000"
+        ],
+        "attachScreenshot": [
+          [
+            "01-loading-state",
+            ", { expectedPath: AUDIT_PATH }"
+          ],
+          [
+            "02-empty-state",
+            ", { expectedPath: AUDIT_PATH }"
+          ],
+          [
+            "03-table-columns",
+            ", { expectedPath: AUDIT_PATH }"
+          ]
+        ],
+        "el_table_locator": [
+          "page.locator('.el-table",
+          "page.locator('.el-table"
+        ]
+      },
+      "line_count": 203,
+      "test_count": 5
+    },
+    {
+      "spec": "business-object-crud.spec.js",
+      "total_changes": 18,
+      "safe_changes": 8,
+      "unsafe_changes": 10,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 2,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 2,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "navigateAndWaitForPage",
+          "count": 2,
+          "safe": true,
+          "category": "navigation"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 5,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 3,
+          "safe": false,
+          "category": "screenshot"
+        },
+        {
+          "pattern": "el_tabs_item",
+          "count": 1,
+          "safe": false,
+          "category": "pom"
+        },
+        {
+          "pattern": "search_input",
+          "count": 1,
+          "safe": false,
+          "category": "pom"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          "\n  login, navigateAndWaitForPage, setAdminPermissions,\n  attachAndVerifyScreenshot\n"
+        ],
+        "login_call": [
+          "    await login(page)",
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)",
+          "    await setAdminPermissions(page)"
+        ],
+        "navigateAndWaitForPage": [
+          [
+            "/system/archdata",
+            ", {\n      expectedPath: 'archdata',\n      waitForTable: true\n    }"
+          ],
+          [
+            "/system/archdata",
+            ", { waitForTable: true }"
+          ]
+        ],
+        "waitForTimeout": [
+          "1500",
+          "1000",
+          "1000"
+        ],
+        "attachScreenshot": [
+          [
+            "01-archdata-list",
+            ""
+          ],
+          [
+            "02-archdata-bo-tab",
+            ""
+          ],
+          [
+            "03-archdata-search",
+            ""
+          ]
+        ],
+        "el_tabs_item": [
+          "page.locator('.el-tabs__item"
+        ],
+        "search_input": [
+          "page.locator('input[placeholder*=\"搜索\""
+        ]
+      },
+      "line_count": 59,
+      "test_count": 2
+    },
+    {
+      "spec": "product-crud.spec.js",
+      "total_changes": 18,
+      "safe_changes": 8,
+      "unsafe_changes": 10,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 2,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 2,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "navigateAndWaitForPage",
+          "count": 2,
+          "safe": true,
+          "category": "navigation"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 5,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 3,
+          "safe": false,
+          "category": "screenshot"
+        },
+        {
+          "pattern": "el_table_locator",
+          "count": 1,
+          "safe": false,
+          "category": "pom"
+        },
+        {
+          "pattern": "search_input",
+          "count": 1,
+          "safe": false,
+          "category": "pom"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          "\n  login, navigateAndWaitForPage, setAdminPermissions,\n  attachAndVerifyScreenshot\n"
+        ],
+        "login_call": [
+          "    await login(page)",
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)",
+          "    await setAdminPermissions(page)"
+        ],
+        "navigateAndWaitForPage": [
+          [
+            "/product-management",
+            ", {\n      expectedPath: 'product-management',\n      waitForTable: true\n    }"
+          ],
+          [
+            "/product-management",
+            ", { waitForTable: true }"
+          ]
+        ],
+        "waitForTimeout": [
+          "1500",
+          "1000",
+          "1000"
+        ],
+        "attachScreenshot": [
+          [
+            "01-product-list",
+            ""
+          ],
+          [
+            "02-product-list-loaded",
+            ""
+          ],
+          [
+            "03-create-dialog",
+            ""
+          ]
+        ],
+        "el_table_locator": [
+          "page.locator('.el-table"
+        ],
+        "search_input": [
+          "page.locator('input[placeholder*=\"搜索\""
+        ]
+      },
+      "line_count": 79,
+      "test_count": 2
+    },
+    {
+      "spec": "value-help-dialog.spec.js",
+      "total_changes": 15,
+      "safe_changes": 5,
+      "unsafe_changes": 10,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "page_goto",
+          "count": 1,
+          "safe": true,
+          "category": "navigation"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 4,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 6,
+          "safe": false,
+          "category": "screenshot"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          " login, setAdminPermissions, attachAndVerifyScreenshot "
+        ],
+        "login_call": [
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)"
+        ],
+        "page_goto": [
+          "http://localhost:3004/user-permission"
+        ],
+        "waitForTimeout": [
+          "3000",
+          "8000",
+          "3000"
+        ],
+        "attachScreenshot": [
+          [
+            "01-user-permission-page",
+            ""
+          ],
+          [
+            "02-user-group-list",
+            ""
+          ],
+          [
+            "03-new-form",
+            ""
+          ]
+        ]
+      },
+      "line_count": 98,
+      "test_count": 1
+    },
+    {
+      "spec": "workspace.spec.js",
+      "total_changes": 16,
+      "safe_changes": 9,
+      "unsafe_changes": 7,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 2,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 2,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "navigateAndWaitForPage",
+          "count": 2,
+          "safe": true,
+          "category": "navigation"
+        },
+        {
+          "pattern": "page_goto",
+          "count": 1,
+          "safe": true,
+          "category": "navigation"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 4,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 3,
+          "safe": false,
+          "category": "screenshot"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          "\n  login, navigateAndWaitForPage, setAdminPermissions,\n  attachAndVerifyScreenshot\n"
+        ],
+        "login_call": [
+          "    await login(page)",
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)",
+          "    await setAdminPermissions(page)\n"
+        ],
+        "navigateAndWaitForPage": [
+          [
+            "/product-management",
+            ", { waitForTable: true }"
+          ],
+          [
+            "/system/archdata",
+            ", { waitForTable: true }"
+          ]
+        ],
+        "page_goto": [
+          "/"
+        ],
+        "waitForTimeout": [
+          "2000",
+          "2000",
+          "1000"
+        ],
+        "attachScreenshot": [
+          [
+            "01-workspace",
+            ""
+          ],
+          [
+            "02-workspace-after-click",
+            ""
+          ],
+          [
+            "03-multi-tabs",
+            ""
+          ]
+        ]
+      },
+      "line_count": 54,
+      "test_count": 2
+    },
+    {
+      "spec": "user-group-filter.spec.js",
+      "total_changes": 13,
+      "safe_changes": 6,
+      "unsafe_changes": 7,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "page_goto",
+          "count": 2,
+          "safe": true,
+          "category": "navigation"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 1,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 5,
+          "safe": false,
+          "category": "screenshot"
+        },
+        {
+          "pattern": "el_table_locator",
+          "count": 1,
+          "safe": false,
+          "category": "pom"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          " login, navigateAndWaitForPage, setAdminPermissions, attachAndVerifyScreenshot "
+        ],
+        "login_call": [
+          "    \n    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)"
+        ],
+        "page_goto": [
+          "http://localhost:3004/user-permission",
+          "http://localhost:3004/user-permission"
+        ],
+        "waitForTimeout": [
+          "1000"
+        ],
+        "attachScreenshot": [
+          [
+            "01-page-loaded",
+            ", { expectedPath: 'user-permission' }"
+          ],
+          [
+            "02-table-with-filters",
+            ", { expectedPath: 'user-permission' }"
+          ],
+          [
+            "01-before-click",
+            ", { expectedPath: 'user-permission' }"
+          ]
+        ],
+        "el_table_locator": [
+          "page.locator('.el-table"
+        ]
+      },
+      "line_count": 121,
+      "test_count": 2
+    },
+    {
+      "spec": "fk-filter-debug.spec.js",
+      "total_changes": 11,
+      "safe_changes": 5,
+      "unsafe_changes": 6,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "page_goto",
+          "count": 1,
+          "safe": true,
+          "category": "navigation"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 5,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "el_table_locator",
+          "count": 1,
+          "safe": false,
+          "category": "pom"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          " login, setAdminPermissions "
+        ],
+        "login_call": [
+          "    \n    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)\n    "
+        ],
+        "page_goto": [
+          "http://localhost:3004/user-permission"
+        ],
+        "waitForTimeout": [
+          "2000",
+          "500",
+          "500"
+        ],
+        "el_table_locator": [
+          "page.locator('.el-table"
+        ]
+      },
+      "line_count": 102,
+      "test_count": 1
+    },
+    {
+      "spec": "fk-filter-search.spec.js",
+      "total_changes": 11,
+      "safe_changes": 5,
+      "unsafe_changes": 6,
+      "complexity": "very_complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "page_goto",
+          "count": 1,
+          "safe": true,
+          "category": "navigation"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 4,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 1,
+          "safe": false,
+          "category": "screenshot"
+        },
+        {
+          "pattern": "el_table_locator",
+          "count": 1,
+          "safe": false,
+          "category": "pom"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          " login, setAdminPermissions, attachAndVerifyScreenshot "
+        ],
+        "login_call": [
+          "    \n    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)\n    "
+        ],
+        "page_goto": [
+          "http://localhost:3004/user-permission"
+        ],
+        "waitForTimeout": [
+          "2000",
+          "500",
+          "2000"
+        ],
+        "attachScreenshot": [
+          [
+            "01-ste-search",
+            ""
+          ]
+        ],
+        "el_table_locator": [
+          "page.locator('.el-table"
+        ]
+      },
+      "line_count": 64,
+      "test_count": 1
+    },
+    {
+      "spec": "condition-rule-dialog.spec.js",
+      "total_changes": 10,
+      "safe_changes": 6,
+      "unsafe_changes": 4,
+      "complexity": "complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 2,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 2,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 3,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 1,
+          "safe": false,
+          "category": "screenshot"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          "\n  login, navigateAndWaitForPage, setAdminPermissions,\n  attachAndVerifyScreenshot\n"
+        ],
+        "login_call": [
+          "    await login(page)",
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n"
+        ],
+        "waitForTimeout": [
+          "2000",
+          "1500",
+          "500"
+        ],
+        "attachScreenshot": [
+          [
+            "01-rule-dialog-open",
+            ""
+          ]
+        ]
+      },
+      "line_count": 73,
+      "test_count": 2
+    },
+    {
+      "spec": "overlap-warning.spec.js",
+      "total_changes": 7,
+      "safe_changes": 4,
+      "unsafe_changes": 3,
+      "complexity": "complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 1,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 2,
+          "safe": false,
+          "category": "screenshot"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          "\n  login, navigateAndWaitForPage, setAdminPermissions,\n  attachAndVerifyScreenshot\n"
+        ],
+        "login_call": [
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)\n"
+        ],
+        "waitForTimeout": [
+          "2000"
+        ],
+        "attachScreenshot": [
+          [
+            "01-before-warning",
+            ""
+          ],
+          [
+            "02-overlap-checked",
+            ""
+          ]
+        ]
+      },
+      "line_count": 52,
+      "test_count": 1
+    },
+    {
+      "spec": "user-group-detail.spec.js",
+      "total_changes": 6,
+      "safe_changes": 3,
+      "unsafe_changes": 3,
+      "complexity": "complex",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "page_goto",
+          "count": 2,
+          "safe": true,
+          "category": "navigation"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 3,
+          "safe": false,
+          "category": "wait"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "page_goto": [
+          "http://localhost:3004/",
+          "http://localhost:3004/detail/user_group/3"
+        ],
+        "waitForTimeout": [
+          "1000",
+          "3000",
+          "15000"
+        ]
+      },
+      "line_count": 77,
+      "test_count": 1
+    },
+    {
+      "spec": "menu-bo-linker.spec.js",
+      "total_changes": 10,
+      "safe_changes": 8,
+      "unsafe_changes": 2,
+      "complexity": "moderate",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 3,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 3,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 1,
+          "safe": false,
+          "category": "wait"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 1,
+          "safe": false,
+          "category": "screenshot"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          "\n  login, navigateAndWaitForPage, setAdminPermissions,\n  attachAndVerifyScreenshot\n"
+        ],
+        "login_call": [
+          "    await login(page)",
+          "    await login(page)",
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n"
+        ],
+        "waitForTimeout": [
+          "2000"
+        ],
+        "attachScreenshot": [
+          [
+            "01-role-permission-ui",
+            ""
+          ]
+        ]
+      },
+      "line_count": 66,
+      "test_count": 3
+    },
+    {
+      "spec": "permission-explainer.spec.js",
+      "total_changes": 10,
+      "safe_changes": 8,
+      "unsafe_changes": 2,
+      "complexity": "moderate",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 3,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 3,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "attachScreenshot",
+          "count": 2,
+          "safe": false,
+          "category": "screenshot"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          "\n  login, setAdminPermissions,\n  attachAndVerifyScreenshot\n"
+        ],
+        "login_call": [
+          "    await login(page)",
+          "    await login(page)",
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n"
+        ],
+        "attachScreenshot": [
+          [
+            "01-explain-api-unavailable",
+            ""
+          ],
+          [
+            "01-explain-api-verified",
+            ""
+          ]
+        ]
+      },
+      "line_count": 105,
+      "test_count": 3
+    },
+    {
+      "spec": "debug-column-config.spec.js",
+      "total_changes": 6,
+      "safe_changes": 5,
+      "unsafe_changes": 1,
+      "complexity": "moderate",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 1,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "page_goto",
+          "count": 1,
+          "safe": true,
+          "category": "navigation"
+        },
+        {
+          "pattern": "waitForTimeout",
+          "count": 1,
+          "safe": false,
+          "category": "wait"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          " login, setAdminPermissions "
+        ],
+        "login_call": [
+          "    \n    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)\n    "
+        ],
+        "page_goto": [
+          "http://localhost:3004/user-permission"
+        ],
+        "waitForTimeout": [
+          "3000"
+        ]
+      },
+      "line_count": 60,
+      "test_count": 1
+    },
+    {
+      "spec": "intent-apis.spec.js",
+      "total_changes": 10,
+      "safe_changes": 10,
+      "unsafe_changes": 0,
+      "complexity": "moderate",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 4,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 4,
+          "safe": true,
+          "category": "auth"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          " login, setAdminPermissions "
+        ],
+        "login_call": [
+          "    await login(page)",
+          "    await login(page)",
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n"
+        ]
+      },
+      "line_count": 104,
+      "test_count": 4
+    },
+    {
+      "spec": "role-intents.spec.js",
+      "total_changes": 10,
+      "safe_changes": 10,
+      "unsafe_changes": 0,
+      "complexity": "moderate",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 4,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 4,
+          "safe": true,
+          "category": "auth"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          " login, setAdminPermissions "
+        ],
+        "login_call": [
+          "    await login(page)",
+          "    await login(page)",
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n"
+        ]
+      },
+      "line_count": 117,
+      "test_count": 4
+    },
+    {
+      "spec": "data-permission-config.spec.js",
+      "total_changes": 8,
+      "safe_changes": 8,
+      "unsafe_changes": 0,
+      "complexity": "moderate",
+      "details": [
+        {
+          "pattern": "pw_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "auth_import",
+          "count": 1,
+          "safe": true,
+          "category": "import"
+        },
+        {
+          "pattern": "login_call",
+          "count": 3,
+          "safe": true,
+          "category": "auth"
+        },
+        {
+          "pattern": "setAdminPermissions_call",
+          "count": 3,
+          "safe": true,
+          "category": "auth"
+        }
+      ],
+      "samples": {
+        "pw_import": [
+          "import { test, expect } from '@playwright/test'"
+        ],
+        "auth_import": [
+          "\n  login, setAdminPermissions\n"
+        ],
+        "login_call": [
+          "    await login(page)",
+          "    await login(page)",
+          "    await login(page)"
+        ],
+        "setAdminPermissions_call": [
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n",
+          "    await setAdminPermissions(page)\n"
+        ]
+      },
+      "line_count": 84,
+      "test_count": 3
+    }
+  ]
+}

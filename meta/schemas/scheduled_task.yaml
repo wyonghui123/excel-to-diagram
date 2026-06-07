@@ -1,0 +1,278 @@
+# ============================================
+# 任务定义
+# 说明: 定义后台调度任务的配置
+# ============================================
+
+id: scheduled_task
+name: 任务定义
+table_name: scheduled_tasks
+description: 后台调度任务定义，支持Cron定时、事件驱动、Webhook、手动等多种触发模式
+persistent: true
+
+semantics:
+  meaning: 后台调度任务定义
+  category: system_entity
+  hierarchy_level: 0
+  business_key: [code]
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+
+  - id: code
+    name: 任务代码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 100
+    semantics:
+      business_key: true
+
+  - id: name
+    name: 任务名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 200
+
+  - id: description
+    name: 描述
+    type: string
+    db_column: description
+    max_length: 500
+
+  - id: category
+    name: 任务分类
+    type: string
+    db_column: category
+    required: true
+    default: business
+    max_length: 50
+    enum_values:
+      - value: business
+        label: 业务任务
+      - value: ai
+        label: AI任务
+      - value: system
+        label: 系统任务
+
+  - id: handler
+    name: 处理器
+    type: string
+    db_column: handler
+    required: true
+    max_length: 500
+    description: 任务处理器名称
+
+  - id: handler_config
+    name: 处理器配置
+    type: json
+    db_column: handler_config
+
+  - id: trigger_mode
+    name: 触发模式
+    type: string
+    db_column: trigger_mode
+    required: true
+    default: cron
+    max_length: 20
+
+  - id: schedule
+    name: Cron表达式
+    type: string
+    db_column: schedule
+    max_length: 100
+
+  - id: trigger_config
+    name: 触发配置
+    type: json
+    db_column: trigger_config
+
+  - id: queue
+    name: 队列
+    type: string
+    db_column: queue
+    default: business
+    max_length: 50
+
+  - id: priority
+    name: 优先级
+    type: integer
+    db_column: priority
+    default: 50
+
+  - id: timeout
+    name: 超时时间(秒)
+    type: integer
+    db_column: timeout
+    default: 300
+
+  - id: max_retries
+    name: 最大重试次数
+    type: integer
+    db_column: max_retries
+    default: 3
+
+  - id: retry_delay
+    name: 重试延迟(秒)
+    type: integer
+    db_column: retry_delay
+    default: 60
+
+  - id: retry_backoff
+    name: 重试退避策略
+    type: string
+    db_column: retry_backoff
+    default: linear
+    max_length: 20
+
+  - id: tenant_scope
+    name: 租户级任务
+    type: boolean
+    db_column: tenant_scope
+    default: false
+
+  - id: enabled
+    name: 是否启用
+    type: boolean
+    db_column: enabled
+    default: true
+
+  - id: last_run_at
+    name: 上次执行时间
+    type: datetime
+    db_column: last_run_at
+
+  - id: next_run_at
+    name: 下次执行时间
+    type: datetime
+    db_column: next_run_at
+
+  - id: ai_config
+    name: AI任务配置
+    type: json
+    db_column: ai_config
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    semantics:
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    semantics:
+      audit_field: true
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+  delete:
+    enabled: true
+    fields: business_only
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_scheduled_task_code
+
+  - fields: [category]
+    name: idx_scheduled_task_category
+
+  - fields: [enabled]
+    name: idx_scheduled_task_enabled
+
+  - fields: [next_run_at]
+    name: idx_scheduled_task_next_run
+
+actions:
+  - id: scheduled_task_create
+    name: 创建任务
+    type: crud
+    method: POST
+    path: /api/v1/scheduled_tasks
+    description: 创建新的调度任务
+
+  - id: scheduled_task_read
+    name: 查看任务
+    type: crud
+    method: GET
+    path: /api/v1/scheduled_tasks
+    description: 查看调度任务列表与详情
+
+  - id: scheduled_task_update
+    name: 编辑任务
+    type: crud
+    method: PUT
+    path: /api/v1/scheduled_tasks/{id}
+    description: 编辑调度任务配置
+
+  - id: scheduled_task_delete
+    name: 删除任务
+    type: crud
+    method: DELETE
+    path: /api/v1/scheduled_tasks/{id}
+    description: 删除调度任务
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    title: 任务定义
+    columns:
+      - field: code
+        width: 160
+      - field: name
+        width: 200
+      - field: category
+        width: 80
+      - field: trigger_mode
+        width: 100
+      - field: schedule
+        width: 140
+      - field: queue
+        width: 80
+      - field: priority
+        width: 60
+      - field: last_run_at
+        width: 180
+      - field: next_run_at
+        width: 180
+      - field: enabled
+        width: 60
+    actions:
+      - id: create
+        label: 新建任务
+        icon: plus
+        type: primary
+  form:
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name, category, description]
+          - fields: [trigger_mode, schedule, handler]
+      - title: 执行配置
+        columns:
+          - fields: [queue, priority, timeout]
+          - fields: [max_retries, retry_delay, retry_backoff]
+      - title: 高级设置
+        columns:
+          - fields: [tenant_scope, enabled]
+          - fields: [handler_config, trigger_config]
+
+category_config:
+  create_permission: scheduled_task:create
+  update_permission: scheduled_task:update
+  delete_permission: scheduled_task:delete

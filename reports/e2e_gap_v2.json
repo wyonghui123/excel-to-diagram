@@ -1,0 +1,1187 @@
+{
+  "generated_at": "2026-06-07T16:31:50.712995",
+  "summary": {
+    "total_objects": 36,
+    "covered": 25,
+    "uncovered": 11,
+    "coverage_pct": 69.4,
+    "total_specs": 47,
+    "total_routes": 32,
+    "total_components": 12
+  },
+  "by_priority": {
+    "P0": {
+      "total": 14,
+      "covered": 14
+    },
+    "P1": {
+      "total": 13,
+      "covered": 11
+    },
+    "P2": {
+      "total": 9,
+      "covered": 0
+    }
+  },
+  "gaps": [
+    {
+      "id": "ai_async_task",
+      "name": "AI异步任务",
+      "priority": "P2",
+      "has_audit": false,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 26,
+      "action_count": 5,
+      "covered": false,
+      "covering_specs": [],
+      "coverage_count": 0
+    },
+    {
+      "id": "annotation",
+      "name": "备注信息",
+      "priority": "P1",
+      "has_audit": true,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 8,
+      "action_count": 6,
+      "covered": true,
+      "covering_specs": [
+        "e2e\\features\\ValueHelp-5-layer-link.spec.js",
+        "e2e\\features\\arch-data-filter-scope.spec.js",
+        "e2e\\features\\audit-log-objects-p1.spec.js"
+      ],
+      "coverage_count": 3
+    },
+    {
+      "id": "audit_log",
+      "name": "审计日志",
+      "priority": "P0",
+      "has_audit": false,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 27,
+      "action_count": 3,
+      "covered": true,
+      "covering_specs": [
+        "e2e\\features\\audit-log-base.spec.js",
+        "e2e\\features\\audit-log-embedded-access.spec.js",
+        "e2e\\features\\audit-log-levels.spec.js",
+        "e2e\\features\\audit-log-objects-p1.spec.js",
+        "e2e\\features\\audit-log.spec.js"
+      ],
+      "coverage_count": 5
+    },
+    {
+      "id": "business_object",
+      "name": "业务对象",
+      "priority": "P0",
+      "has_audit": true,
+      "has_hierarchy": true,
+      "has_crud": false,
+      "parent": "service_module",
+      "field_count": 16,
+      "action_count": 7,
+      "covered": true,
+      "covering_specs": [
+        "e2e\\features\\ValueHelp-5-layer-link.spec.js",
+        "e2e\\features\\arch-data-crud-v2.spec.js",
+        "e2e\\features\\arch-data-crud.spec.js",
+        "e2e\\features\\arch-data-filter-scope.spec.js",
+        "e2e\\features\\audit-log-embedded-access.spec.js",
+        "e2e\\features\\audit-log-objects-p1.spec.js",
+        "e2e\\features\\business-object-crud.spec.js",
+        "e2e\\features\\data-permission-config.spec.js",
+        "e2e\\features\\diagram.spec.js",
+        "e2e\\features\\import-export.spec.js",
+        "e2e\\features\\intent-apis.spec.js",
+        "e2e\\features\\menu-bo-linker.spec.js",
+        "e2e\\features\\permission-explainer.spec.js",
+        "e2e\\features\\relation-scope-field.spec.js",
+        "e2e\\features\\relation-scope-tree.spec.js",
+        "e2e\\features\\role-intents.spec.js",
+        "e2e\\features\\useMetaList-21-keypath.spec.js",
+        "e2e\\features\\workspace.spec.js",
+        "e2e\\smoke\\arch-data.smoke.spec.js"
+      ],
+      "coverage_count": 19
+    },
+    {
+      "id": "change_event",
+      "name": "变更事件",
+      "priority": "P2",
+      "has_audit": false,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 16,
+      "action_count": 4,
+      "covered": false,
+      "covering_specs": [],
+      "coverage_count": 0
+    },
+    {
+      "id": "change_subscription",
+      "name": "变更订阅",
+      "priority": "P2",
+      "has_audit": false,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 10,
+      "action_count": 6,
+      "covered": false,
+      "covering_specs": [],
+      "coverage_count": 0
+    },
+    {
+      "id": "data_permission",
+      "name": "数据权限",
+      "priority": "P1",
+      "has_audit": false,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 6,
+      "action_count": 0,
+      "covered": true,
+      "covering_specs": [
+        "e2e\\features\\ValueHelp-5-layer-link.spec.js",
+        "e2e\\features\\audit-log-embedded-access.spec.js",
+        "e2e\\features\\audit-log-objects-p0.spec.js",
+        "e2e\\features\\audit-log-objects-p1.spec.js",
+        "e2e\\features\\condition-rule-dialog-spec-v14.spec.js",
+        "e2e\\features\\condition-rule-dialog.spec.js",
+        "e2e\\features\\debug-column-config.spec.js",
+        "e2e\\features\\fk-filter-debug.spec.js",
+        "e2e\\features\\fk-filter-issue.spec.js",
+        "e2e\\features\\fk-filter-search.spec.js",
+        "e2e\\features\\fk-filter.spec.js",
+        "e2e\\features\\menu-bo-linker.spec.js",
+        "e2e\\features\\overlap-warning.spec.js",
+        "e2e\\features\\permission-explainer.spec.js",
+        "e2e\\features\\role-permission-center.spec.js",
+        "e2e\\features\\useMetaList-21-keypath.spec.js",
+        "e2e\\features\\user-group-filter.spec.js",
+        "e2e\\features\\user-permission.spec.js",
+        "e2e\\features\\user-role.spec.js",
+        "e2e\\features\\value-help-dialog.spec.js",
+        "e2e\\features\\value-help-filter.spec.js"
+      ],
+      "coverage_count": 21
+    },
+    {
+      "id": "domain",
+      "name": "领域",
+      "priority": "P0",
+      "has_audit": true,
+      "has_hierarchy": true,
+      "has_crud": false,
+      "parent": "version",
+      "field_count": 11,
+      "action_count": 5,
+      "covered": true,
+      "covering_specs": [
+        "e2e\\features\\arch-data-crud.spec.js",
+        "e2e\\features\\audit-log-embedded-access.spec.js",
+        "e2e\\features\\audit-log-levels.spec.js",
+        "e2e\\features\\audit-log-objects-p0.spec.js",
+        "e2e\\features\\audit-log-objects-p1.spec.js",
+        "e2e\\features\\business-object-crud.spec.js",
+        "e2e\\features\\condition-rule-dialog-spec-v14.spec.js"
+      ],
+      "coverage_count": 7
+    },
+    {
+      "id": "employee_data_scope",
+      "name": "员工数据权限范围",
+      "priority": "P1",
+      "has_audit": false,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 5,
+      "action_count": 0,
+      "covered": false,
+      "covering_specs": [],
+      "coverage_count": 0
+    },
+    {
+      "id": "enum_type",
+      "name": "枚举类型",
+      "priority": "P1",
+      "has_audit": true,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 9,
+      "action_count": 0,
+      "covered": true,
+      "covering_specs": [
+        "e2e\\features\\audit-log-objects-p1.spec.js",
+        "e2e\\features\\enum-management.spec.js"
+      ],
+      "coverage_count": 2
+    },
+    {
+      "id": "enum_value",
+      "name": "枚举值",
+      "priority": "P1",
+      "has_audit": true,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "enum_type",
+      "field_count": 13,
+      "action_count": 5,
+      "covered": true,
+      "covering_specs": [
+        "e2e\\features\\audit-log-objects-p1.spec.js"
+      ],
+      "coverage_count": 1
+    },
+    {
+      "id": "filter_variant",
+      "name": "过滤变体",
+      "priority": "P1",
+      "has_audit": false,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 9,
+      "action_count": 0,
+      "covered": false,
+      "covering_specs": [],
+      "coverage_count": 0
+    },
+    {
+      "id": "group_data_permission",
+      "name": "用户组数据权限",
+      "priority": "P1",
+      "has_audit": false,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 7,
+      "action_count": 0,
+      "covered": true,
+      "covering_specs": [
+        "e2e\\features\\ValueHelp-5-layer-link.spec.js",
+        "e2e\\features\\audit-log-embedded-access.spec.js",
+        "e2e\\features\\audit-log-objects-p0.spec.js",
+        "e2e\\features\\audit-log-objects-p1.spec.js",
+        "e2e\\features\\condition-rule-dialog-spec-v14.spec.js",
+        "e2e\\features\\condition-rule-dialog.spec.js",
+        "e2e\\features\\debug-column-config.spec.js",
+        "e2e\\features\\fk-filter-debug.spec.js",
+        "e2e\\features\\fk-filter-issue.spec.js",
+        "e2e\\features\\fk-filter-search.spec.js",
+        "e2e\\features\\fk-filter.spec.js",
+        "e2e\\features\\menu-bo-linker.spec.js",
+        "e2e\\features\\overlap-warning.spec.js",
+        "e2e\\features\\permission-explainer.spec.js",
+        "e2e\\features\\role-permission-center.spec.js",
+        "e2e\\features\\useMetaList-21-keypath.spec.js",
+        "e2e\\features\\user-group-filter.spec.js",
+        "e2e\\features\\user-permission.spec.js",
+        "e2e\\features\\user-role.spec.js",
+        "e2e\\features\\value-help-dialog.spec.js",
+        "e2e\\features\\value-help-filter.spec.js"
+      ],
+      "coverage_count": 21
+    },
+    {
+      "id": "hierarchies",
+      "name": "层级定义",
+      "priority": "P2",
+      "has_audit": false,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 0,
+      "action_count": 0,
+      "covered": false,
+      "covering_specs": [],
+      "coverage_count": 0
+    },
+    {
+      "id": "menu",
+      "name": "菜单",
+      "priority": "P0",
+      "has_audit": false,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 20,
+      "action_count": 5,
+      "covered": true,
+      "covering_specs": [
+        "e2e\\features\\audit-log-embedded-access.spec.js",
+        "e2e\\features\\audit-log-filter.spec.js",
+        "e2e\\features\\audit-log-objects-p0.spec.js",
+        "e2e\\features\\audit-log-objects-p1.spec.js",
+        "e2e\\features\\import-export.spec.js",
+        "e2e\\features\\menu-bo-linker.spec.js",
+        "e2e\\features\\role-permission-center.spec.js"
+      ],
+      "coverage_count": 7
+    },
+    {
+      "id": "menu_permission",
+      "name": "菜单权限",
+      "priority": "P1",
+      "has_audit": false,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 12,
+      "action_count": 0,
+      "covered": true,
+      "covering_specs": [
+        "e2e\\features\\ValueHelp-5-layer-link.spec.js",
+        "e2e\\features\\audit-log-embedded-access.spec.js",
+        "e2e\\features\\audit-log-filter.spec.js",
+        "e2e\\features\\audit-log-objects-p0.spec.js",
+        "e2e\\features\\audit-log-objects-p1.spec.js",
+        "e2e\\features\\condition-rule-dialog-spec-v14.spec.js",
+        "e2e\\features\\condition-rule-dialog.spec.js",
+        "e2e\\features\\debug-column-config.spec.js",
+        "e2e\\features\\fk-filter-debug.spec.js",
+        "e2e\\features\\fk-filter-issue.spec.js",
+        "e2e\\features\\fk-filter-search.spec.js",
+        "e2e\\features\\fk-filter.spec.js",
+        "e2e\\features\\import-export.spec.js",
+        "e2e\\features\\menu-bo-linker.spec.js",
+        "e2e\\features\\overlap-warning.spec.js",
+        "e2e\\features\\permission-explainer.spec.js",
+        "e2e\\features\\role-permission-center.spec.js",
+        "e2e\\features\\useMetaList-21-keypath.spec.js",
+        "e2e\\features\\user-group-filter.spec.js",
+        "e2e\\features\\user-permission.spec.js",
+        "e2e\\features\\user-role.spec.js",
+        "e2e\\features\\value-help-dialog.spec.js",
+        "e2e\\features\\value-help-filter.spec.js"
+      ],
+      "coverage_count": 23
+    },
+    {
+      "id": "permission",
+      "name": "功能权限",
+      "priority": "P0",
+      "has_audit": false,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 8,
+      "action_count": 0,
+      "covered": true,
+      "covering_specs": [
+        "e2e\\features\\ValueHelp-5-layer-link.spec.js",
+        "e2e\\features\\audit-log-embedded-access.spec.js",
+        "e2e\\features\\audit-log-objects-p0.spec.js",
+        "e2e\\features\\audit-log-objects-p1.spec.js",
+        "e2e\\features\\condition-rule-dialog-spec-v14.spec.js",
+        "e2e\\features\\condition-rule-dialog.spec.js",
+        "e2e\\features\\data-permission-config.spec.js",
+        "e2e\\features\\debug-column-config.spec.js",
+        "e2e\\features\\fk-filter-debug.spec.js",
+        "e2e\\features\\fk-filter-issue.spec.js",
+        "e2e\\features\\fk-filter-search.spec.js",
+        "e2e\\features\\fk-filter.spec.js",
+        "e2e\\features\\menu-bo-linker.spec.js",
+        "e2e\\features\\overlap-warning.spec.js",
+        "e2e\\features\\permission-explainer.spec.js",
+        "e2e\\features\\role-intents.spec.js",
+        "e2e\\features\\role-permission-center.spec.js",
+        "e2e\\features\\useMetaList-21-keypath.spec.js",
+        "e2e\\features\\user-group-filter.spec.js",
+        "e2e\\features\\user-permission.spec.js",
+        "e2e\\features\\user-role.spec.js",
+        "e2e\\features\\value-help-dialog.spec.js",
+        "e2e\\features\\value-help-filter.spec.js"
+      ],
+      "coverage_count": 23
+    },
+    {
+      "id": "permission_bundle",
+      "name": "权限包",
+      "priority": "P1",
+      "has_audit": false,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 10,
+      "action_count": 0,
+      "covered": true,
+      "covering_specs": [
+        "e2e\\features\\ValueHelp-5-layer-link.spec.js",
+        "e2e\\features\\audit-log-embedded-access.spec.js",
+        "e2e\\features\\audit-log-objects-p0.spec.js",
+        "e2e\\features\\audit-log-objects-p1.spec.js",
+        "e2e\\features\\condition-rule-dialog-spec-v14.spec.js",
+        "e2e\\features\\condition-rule-dialog.spec.js",
+        "e2e\\features\\debug-column-config.spec.js",
+        "e2e\\features\\fk-filter-debug.spec.js",
+        "e2e\\features\\fk-filter-issue.spec.js",
+        "e2e\\features\\fk-filter-search.spec.js",
+        "e2e\\features\\fk-filter.spec.js",
+        "e2e\\features\\menu-bo-linker.spec.js",
+        "e2e\\features\\overlap-warning.spec.js",
+        "e2e\\features\\permission-explainer.spec.js",
+        "e2e\\features\\role-permission-center.spec.js",
+        "e2e\\features\\useMetaList-21-keypath.spec.js",
+        "e2e\\features\\user-group-filter.spec.js",
+        "e2e\\features\\user-permission.spec.js",
+        "e2e\\features\\user-role.spec.js",
+        "e2e\\features\\value-help-dialog.spec.js",
+        "e2e\\features\\value-help-filter.spec.js"
+      ],
+      "coverage_count": 21
+    },
+    {
+      "id": "permission_rule",
+      "name": "条件权限规则",
+      "priority": "P1",
+      "has_audit": false,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 11,
+      "action_count": 0,
+      "covered": true,
+      "covering_specs": [
+        "e2e\\features\\ValueHelp-5-layer-link.spec.js",
+        "e2e\\features\\audit-log-embedded-access.spec.js",
+        "e2e\\features\\audit-log-objects-p0.spec.js",
+        "e2e\\features\\audit-log-objects-p1.spec.js",
+        "e2e\\features\\condition-rule-dialog-spec-v14.spec.js",
+        "e2e\\features\\condition-rule-dialog.spec.js",
+        "e2e\\features\\debug-column-config.spec.js",
+        "e2e\\features\\fk-filter-debug.spec.js",
+        "e2e\\features\\fk-filter-issue.spec.js",
+        "e2e\\features\\fk-filter-search.spec.js",
+        "e2e\\features\\fk-filter.spec.js",
+        "e2e\\features\\menu-bo-linker.spec.js",
+        "e2e\\features\\overlap-warning.spec.js",
+        "e2e\\features\\permission-explainer.spec.js",
+        "e2e\\features\\role-permission-center.spec.js",
+        "e2e\\features\\useMetaList-21-keypath.spec.js",
+        "e2e\\features\\user-group-filter.spec.js",
+        "e2e\\features\\user-permission.spec.js",
+        "e2e\\features\\user-role.spec.js",
+        "e2e\\features\\value-help-dialog.spec.js",
+        "e2e\\features\\value-help-filter.spec.js"
+      ],
+      "coverage_count": 21
+    },
+    {
+      "id": "product",
+      "name": "产品线",
+      "priority": "P0",
+      "has_audit": true,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 7,
+      "action_count": 5,
+      "covered": true,
+      "covering_specs": [
+        "e2e\\features\\arch-data-crud-v2.spec.js",
+        "e2e\\features\\arch-data-crud.spec.js",
+        "e2e\\features\\arch-data-filter-scope.spec.js",
+        "e2e\\features\\audit-log-embedded-access.spec.js",
+        "e2e\\features\\audit-log-objects-p1.spec.js",
+        "e2e\\features\\data-permission-config.spec.js",
+        "e2e\\features\\diagram.spec.js",
+        "e2e\\features\\import-export.spec.js",
+        "e2e\\features\\product-crud.spec.js",
+        "e2e\\features\\product-version.spec.js",
+        "e2e\\features\\relation-scope-field.spec.js",
+        "e2e\\features\\workspace.spec.js",
+        "e2e\\smoke\\arch-data.smoke.spec.js"
+      ],
+      "coverage_count": 13
+    },
+    {
+      "id": "relationship",
+      "name": "业务关系",
+      "priority": "P0",
+      "has_audit": true,
+      "has_hierarchy": true,
+      "has_crud": false,
+      "parent": "version",
+      "field_count": 37,
+      "action_count": 6,
+      "covered": true,
+      "covering_specs": [
+        "e2e\\features\\arch-data-crud.spec.js",
+        "e2e\\features\\audit-log-objects-p1.spec.js"
+      ],
+      "coverage_count": 2
+    },
+    {
+      "id": "role",
+      "name": "角色",
+      "priority": "P0",
+      "has_audit": true,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 13,
+      "action_count": 5,
+      "covered": true,
+      "covering_specs": [
+        "e2e\\features\\ValueHelp-5-layer-link.spec.js",
+        "e2e\\features\\audit-log-levels.spec.js",
+        "e2e\\features\\audit-log-objects-p0.spec.js",
+        "e2e\\features\\audit-log-objects-p1.spec.js",
+        "e2e\\features\\business-object-crud.spec.js",
+        "e2e\\features\\condition-rule-dialog-spec-v14.spec.js",
+        "e2e\\features\\condition-rule-dialog.spec.js",
+        "e2e\\features\\menu-bo-linker.spec.js",
+        "e2e\\features\\overlap-warning.spec.js",
+        "e2e\\features\\product-crud.spec.js",
+        "e2e\\features\\role-intents.spec.js",
+        "e2e\\features\\role-permission-center.spec.js",
+        "e2e\\features\\useMetaList-21-keypath.spec.js",
+        "e2e\\features\\user-permission.spec.js",
+        "e2e\\features\\user-role.spec.js",
+        "e2e\\smoke\\auth.smoke.spec.js"
+      ],
+      "coverage_count": 16
+    },
+    {
+      "id": "role_data_permission",
+      "name": "角色数据权限",
+      "priority": "P1",
+      "has_audit": false,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 8,
+      "action_count": 0,
+      "covered": true,
+      "covering_specs": [
+        "e2e\\features\\ValueHelp-5-layer-link.spec.js",
+        "e2e\\features\\audit-log-embedded-access.spec.js",
+        "e2e\\features\\audit-log-levels.spec.js",
+        "e2e\\features\\audit-log-objects-p0.spec.js",
+        "e2e\\features\\audit-log-objects-p1.spec.js",
+        "e2e\\features\\business-object-crud.spec.js",
+        "e2e\\features\\condition-rule-dialog-spec-v14.spec.js",
+        "e2e\\features\\condition-rule-dialog.spec.js",
+        "e2e\\features\\debug-column-config.spec.js",
+        "e2e\\features\\fk-filter-debug.spec.js",
+        "e2e\\features\\fk-filter-issue.spec.js",
+        "e2e\\features\\fk-filter-search.spec.js",
+        "e2e\\features\\fk-filter.spec.js",
+        "e2e\\features\\menu-bo-linker.spec.js",
+        "e2e\\features\\overlap-warning.spec.js",
+        "e2e\\features\\permission-explainer.spec.js",
+        "e2e\\features\\product-crud.spec.js",
+        "e2e\\features\\role-intents.spec.js",
+        "e2e\\features\\role-permission-center.spec.js",
+        "e2e\\features\\useMetaList-21-keypath.spec.js",
+        "e2e\\features\\user-group-filter.spec.js",
+        "e2e\\features\\user-permission.spec.js",
+        "e2e\\features\\user-role.spec.js",
+        "e2e\\features\\value-help-dialog.spec.js",
+        "e2e\\features\\value-help-filter.spec.js",
+        "e2e\\smoke\\auth.smoke.spec.js"
+      ],
+      "coverage_count": 26
+    },
+    {
+      "id": "role_dimension_scope",
+      "name": "角色维度范围",
+      "priority": "P1",
+      "has_audit": false,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 6,
+      "action_count": 0,
+      "covered": true,
+      "covering_specs": [
+        "e2e\\features\\ValueHelp-5-layer-link.spec.js",
+        "e2e\\features\\audit-log-levels.spec.js",
+        "e2e\\features\\audit-log-objects-p0.spec.js",
+        "e2e\\features\\audit-log-objects-p1.spec.js",
+        "e2e\\features\\business-object-crud.spec.js",
+        "e2e\\features\\condition-rule-dialog-spec-v14.spec.js",
+        "e2e\\features\\condition-rule-dialog.spec.js",
+        "e2e\\features\\menu-bo-linker.spec.js",
+        "e2e\\features\\overlap-warning.spec.js",
+        "e2e\\features\\product-crud.spec.js",
+        "e2e\\features\\role-intents.spec.js",
+        "e2e\\features\\role-permission-center.spec.js",
+        "e2e\\features\\useMetaList-21-keypath.spec.js",
+        "e2e\\features\\user-permission.spec.js",
+        "e2e\\features\\user-role.spec.js",
+        "e2e\\smoke\\auth.smoke.spec.js"
+      ],
+      "coverage_count": 16
+    },
+    {
+      "id": "role_permission",
+      "name": "角色权限",
+      "priority": "P1",
+      "has_audit": false,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 5,
+      "action_count": 0,
+      "covered": true,
+      "covering_specs": [
+        "e2e\\features\\ValueHelp-5-layer-link.spec.js",
+        "e2e\\features\\audit-log-embedded-access.spec.js",
+        "e2e\\features\\audit-log-levels.spec.js",
+        "e2e\\features\\audit-log-objects-p0.spec.js",
+        "e2e\\features\\audit-log-objects-p1.spec.js",
+        "e2e\\features\\business-object-crud.spec.js",
+        "e2e\\features\\condition-rule-dialog-spec-v14.spec.js",
+        "e2e\\features\\condition-rule-dialog.spec.js",
+        "e2e\\features\\debug-column-config.spec.js",
+        "e2e\\features\\fk-filter-debug.spec.js",
+        "e2e\\features\\fk-filter-issue.spec.js",
+        "e2e\\features\\fk-filter-search.spec.js",
+        "e2e\\features\\fk-filter.spec.js",
+        "e2e\\features\\menu-bo-linker.spec.js",
+        "e2e\\features\\overlap-warning.spec.js",
+        "e2e\\features\\permission-explainer.spec.js",
+        "e2e\\features\\product-crud.spec.js",
+        "e2e\\features\\role-intents.spec.js",
+        "e2e\\features\\role-permission-center.spec.js",
+        "e2e\\features\\useMetaList-21-keypath.spec.js",
+        "e2e\\features\\user-group-filter.spec.js",
+        "e2e\\features\\user-permission.spec.js",
+        "e2e\\features\\user-role.spec.js",
+        "e2e\\features\\value-help-dialog.spec.js",
+        "e2e\\features\\value-help-filter.spec.js",
+        "e2e\\smoke\\auth.smoke.spec.js"
+      ],
+      "coverage_count": 26
+    },
+    {
+      "id": "scheduled_task",
+      "name": "任务定义",
+      "priority": "P2",
+      "has_audit": false,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 23,
+      "action_count": 4,
+      "covered": false,
+      "covering_specs": [],
+      "coverage_count": 0
+    },
+    {
+      "id": "service_module",
+      "name": "服务模块",
+      "priority": "P0",
+      "has_audit": true,
+      "has_hierarchy": true,
+      "has_crud": false,
+      "parent": "sub_domain",
+      "field_count": 16,
+      "action_count": 5,
+      "covered": true,
+      "covering_specs": [
+        "e2e\\features\\audit-log-objects-p1.spec.js"
+      ],
+      "coverage_count": 1
+    },
+    {
+      "id": "sub_domain",
+      "name": "子领域",
+      "priority": "P0",
+      "has_audit": true,
+      "has_hierarchy": true,
+      "has_crud": false,
+      "parent": "domain",
+      "field_count": 15,
+      "action_count": 5,
+      "covered": true,
+      "covering_specs": [
+        "e2e\\features\\arch-data-crud.spec.js",
+        "e2e\\features\\audit-log-embedded-access.spec.js",
+        "e2e\\features\\audit-log-levels.spec.js",
+        "e2e\\features\\audit-log-objects-p0.spec.js",
+        "e2e\\features\\audit-log-objects-p1.spec.js",
+        "e2e\\features\\business-object-crud.spec.js",
+        "e2e\\features\\condition-rule-dialog-spec-v14.spec.js"
+      ],
+      "coverage_count": 7
+    },
+    {
+      "id": "task_execution",
+      "name": "任务执行记录",
+      "priority": "P2",
+      "has_audit": false,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 31,
+      "action_count": 2,
+      "covered": false,
+      "covering_specs": [],
+      "coverage_count": 0
+    },
+    {
+      "id": "task_queue",
+      "name": "任务队列配置",
+      "priority": "P2",
+      "has_audit": false,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 10,
+      "action_count": 4,
+      "covered": false,
+      "covering_specs": [],
+      "coverage_count": 0
+    },
+    {
+      "id": "test_objects",
+      "name": "测试对象",
+      "priority": "P2",
+      "has_audit": false,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 6,
+      "action_count": 0,
+      "covered": false,
+      "covering_specs": [],
+      "coverage_count": 0
+    },
+    {
+      "id": "test_table",
+      "name": "测试表",
+      "priority": "P2",
+      "has_audit": false,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 3,
+      "action_count": 0,
+      "covered": false,
+      "covering_specs": [],
+      "coverage_count": 0
+    },
+    {
+      "id": "user",
+      "name": "用户",
+      "priority": "P0",
+      "has_audit": true,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 22,
+      "action_count": 5,
+      "covered": true,
+      "covering_specs": [
+        "e2e\\features\\ValueHelp-5-layer-link.spec.js",
+        "e2e\\features\\audit-log-embedded-access.spec.js",
+        "e2e\\features\\audit-log-filter.spec.js",
+        "e2e\\features\\audit-log-objects-p0.spec.js",
+        "e2e\\features\\audit-log-objects-p1.spec.js",
+        "e2e\\features\\data-permission-config.spec.js",
+        "e2e\\features\\debug-column-config.spec.js",
+        "e2e\\features\\fk-filter-debug.spec.js",
+        "e2e\\features\\fk-filter-issue.spec.js",
+        "e2e\\features\\fk-filter-search.spec.js",
+        "e2e\\features\\fk-filter.spec.js",
+        "e2e\\features\\role-intents.spec.js",
+        "e2e\\features\\useMetaList-21-keypath.spec.js",
+        "e2e\\features\\user-group-detail.spec.js",
+        "e2e\\features\\user-group-filter.spec.js",
+        "e2e\\features\\user-permission.spec.js",
+        "e2e\\features\\user-role.spec.js",
+        "e2e\\features\\value-help-dialog.spec.js",
+        "e2e\\features\\value-help-filter.spec.js"
+      ],
+      "coverage_count": 19
+    },
+    {
+      "id": "user_group",
+      "name": "用户组",
+      "priority": "P0",
+      "has_audit": true,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 8,
+      "action_count": 0,
+      "covered": true,
+      "covering_specs": [
+        "e2e\\features\\ValueHelp-5-layer-link.spec.js",
+        "e2e\\features\\audit-log-embedded-access.spec.js",
+        "e2e\\features\\audit-log-filter.spec.js",
+        "e2e\\features\\audit-log-objects-p0.spec.js",
+        "e2e\\features\\audit-log-objects-p1.spec.js",
+        "e2e\\features\\data-permission-config.spec.js",
+        "e2e\\features\\debug-column-config.spec.js",
+        "e2e\\features\\fk-filter-debug.spec.js",
+        "e2e\\features\\fk-filter-issue.spec.js",
+        "e2e\\features\\fk-filter-search.spec.js",
+        "e2e\\features\\fk-filter.spec.js",
+        "e2e\\features\\role-intents.spec.js",
+        "e2e\\features\\useMetaList-21-keypath.spec.js",
+        "e2e\\features\\user-group-detail.spec.js",
+        "e2e\\features\\user-group-filter.spec.js",
+        "e2e\\features\\user-permission.spec.js",
+        "e2e\\features\\user-role.spec.js",
+        "e2e\\features\\value-help-dialog.spec.js",
+        "e2e\\features\\value-help-filter.spec.js"
+      ],
+      "coverage_count": 19
+    },
+    {
+      "id": "user_group_member",
+      "name": "用户组成员",
+      "priority": "P0",
+      "has_audit": false,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "",
+      "field_count": 5,
+      "action_count": 0,
+      "covered": true,
+      "covering_specs": [
+        "e2e\\features\\ValueHelp-5-layer-link.spec.js",
+        "e2e\\features\\audit-log-embedded-access.spec.js",
+        "e2e\\features\\audit-log-filter.spec.js",
+        "e2e\\features\\audit-log-objects-p0.spec.js",
+        "e2e\\features\\audit-log-objects-p1.spec.js",
+        "e2e\\features\\data-permission-config.spec.js",
+        "e2e\\features\\debug-column-config.spec.js",
+        "e2e\\features\\fk-filter-debug.spec.js",
+        "e2e\\features\\fk-filter-issue.spec.js",
+        "e2e\\features\\fk-filter-search.spec.js",
+        "e2e\\features\\fk-filter.spec.js",
+        "e2e\\features\\role-intents.spec.js",
+        "e2e\\features\\useMetaList-21-keypath.spec.js",
+        "e2e\\features\\user-group-detail.spec.js",
+        "e2e\\features\\user-group-filter.spec.js",
+        "e2e\\features\\user-permission.spec.js",
+        "e2e\\features\\user-role.spec.js",
+        "e2e\\features\\value-help-dialog.spec.js",
+        "e2e\\features\\value-help-filter.spec.js"
+      ],
+      "coverage_count": 19
+    },
+    {
+      "id": "version",
+      "name": "产品版本",
+      "priority": "P0",
+      "has_audit": true,
+      "has_hierarchy": false,
+      "has_crud": false,
+      "parent": "product",
+      "field_count": 11,
+      "action_count": 7,
+      "covered": true,
+      "covering_specs": [
+        "e2e\\features\\arch-data-crud-v2.spec.js",
+        "e2e\\features\\arch-data-crud.spec.js",
+        "e2e\\features\\arch-data-filter-scope.spec.js",
+        "e2e\\features\\audit-log-embedded-access.spec.js",
+        "e2e\\features\\audit-log-objects-p1.spec.js",
+        "e2e\\features\\diagram.spec.js",
+        "e2e\\features\\import-export.spec.js",
+        "e2e\\features\\product-version.spec.js",
+        "e2e\\features\\relation-scope-field.spec.js",
+        "e2e\\smoke\\arch-data.smoke.spec.js"
+      ],
+      "coverage_count": 10
+    }
+  ],
+  "route_gaps": [
+    {
+      "route": "/",
+      "label": "工作台 (Workspace)",
+      "key": "workspace",
+      "covered_in_e2e": false
+    },
+    {
+      "route": "/diagram",
+      "label": "架构图生成器",
+      "key": "diagram",
+      "covered_in_e2e": false
+    },
+    {
+      "route": "/product-management",
+      "label": "产品管理",
+      "key": "product",
+      "covered_in_e2e": true
+    },
+    {
+      "route": "/user-permission/:tab?",
+      "label": "用户/角色/用户组",
+      "key": "user",
+      "covered_in_e2e": true
+    },
+    {
+      "route": "/business-config/enums/:id",
+      "label": "业务配置 (枚举)",
+      "key": "enum_type",
+      "covered_in_e2e": true
+    },
+    {
+      "route": "/business-config/:tab?",
+      "label": "业务配置 (枚举)",
+      "key": "enum_type",
+      "covered_in_e2e": true
+    },
+    {
+      "route": "/system/role-permission/:roleId",
+      "label": "角色管理",
+      "key": "role",
+      "covered_in_e2e": true
+    },
+    {
+      "route": "/system/role-detail/:roleId",
+      "label": "角色管理",
+      "key": "role",
+      "covered_in_e2e": true
+    },
+    {
+      "route": "/system/archdata",
+      "label": "架构数据管理",
+      "key": "business_object",
+      "covered_in_e2e": true
+    },
+    {
+      "route": "/system/task-management",
+      "label": "任务调度",
+      "key": "scheduled_task",
+      "covered_in_e2e": false
+    },
+    {
+      "route": "/account",
+      "label": "账户设置",
+      "key": "account",
+      "covered_in_e2e": false
+    },
+    {
+      "route": "/",
+      "label": "工作台 (Workspace)",
+      "key": "workspace",
+      "covered_in_e2e": false
+    },
+    {
+      "route": "/",
+      "label": "工作台 (Workspace)",
+      "key": "workspace",
+      "covered_in_e2e": false
+    },
+    {
+      "route": "/",
+      "label": "工作台 (Workspace)",
+      "key": "workspace",
+      "covered_in_e2e": false
+    },
+    {
+      "route": "/",
+      "label": "工作台 (Workspace)",
+      "key": "workspace",
+      "covered_in_e2e": false
+    }
+  ],
+  "specs": [
+    {
+      "file": "e2e\\features\\arch-data-crud-v2.spec.js",
+      "test_count": 1
+    },
+    {
+      "file": "e2e\\features\\arch-data-crud.spec.js",
+      "test_count": 2
+    },
+    {
+      "file": "e2e\\features\\arch-data-filter-scope.spec.js",
+      "test_count": 2
+    },
+    {
+      "file": "e2e\\features\\audit-log-actions.spec.js",
+      "test_count": 7
+    },
+    {
+      "file": "e2e\\features\\audit-log-base.spec.js",
+      "test_count": 5
+    },
+    {
+      "file": "e2e\\features\\audit-log-embedded-access.spec.js",
+      "test_count": 14
+    },
+    {
+      "file": "e2e\\features\\audit-log-filter.spec.js",
+      "test_count": 7
+    },
+    {
+      "file": "e2e\\features\\audit-log-grouping-detail.spec.js",
+      "test_count": 10
+    },
+    {
+      "file": "e2e\\features\\audit-log-levels.spec.js",
+      "test_count": 6
+    },
+    {
+      "file": "e2e\\features\\audit-log-objects-p0.spec.js",
+      "test_count": 5
+    },
+    {
+      "file": "e2e\\features\\audit-log-objects-p1.spec.js",
+      "test_count": 11
+    },
+    {
+      "file": "e2e\\features\\audit-log.spec.js",
+      "test_count": 3
+    },
+    {
+      "file": "e2e\\features\\business-object-crud.spec.js",
+      "test_count": 2
+    },
+    {
+      "file": "e2e\\features\\condition-rule-dialog-spec-v14.spec.js",
+      "test_count": 9
+    },
+    {
+      "file": "e2e\\features\\condition-rule-dialog.spec.js",
+      "test_count": 2
+    },
+    {
+      "file": "e2e\\features\\data-permission-config.spec.js",
+      "test_count": 3
+    },
+    {
+      "file": "e2e\\features\\debug-column-config.spec.js",
+      "test_count": 1
+    },
+    {
+      "file": "e2e\\features\\diagram.spec.js",
+      "test_count": 2
+    },
+    {
+      "file": "e2e\\features\\enum-management.spec.js",
+      "test_count": 3
+    },
+    {
+      "file": "e2e\\features\\fk-filter-debug.spec.js",
+      "test_count": 1
+    },
+    {
+      "file": "e2e\\features\\fk-filter-issue.spec.js",
+      "test_count": 2
+    },
+    {
+      "file": "e2e\\features\\fk-filter-search.spec.js",
+      "test_count": 1
+    },
+    {
+      "file": "e2e\\features\\fk-filter.spec.js",
+      "test_count": 2
+    },
+    {
+      "file": "e2e\\features\\import-export.spec.js",
+      "test_count": 2
+    },
+    {
+      "file": "e2e\\features\\intent-apis.spec.js",
+      "test_count": 4
+    },
+    {
+      "file": "e2e\\features\\menu-bo-linker.spec.js",
+      "test_count": 3
+    },
+    {
+      "file": "e2e\\features\\overlap-warning.spec.js",
+      "test_count": 1
+    },
+    {
+      "file": "e2e\\features\\permission-explainer.spec.js",
+      "test_count": 3
+    },
+    {
+      "file": "e2e\\features\\product-crud.spec.js",
+      "test_count": 2
+    },
+    {
+      "file": "e2e\\features\\product-version.spec.js",
+      "test_count": 3
+    },
+    {
+      "file": "e2e\\features\\relation-scope-field.spec.js",
+      "test_count": 2
+    },
+    {
+      "file": "e2e\\features\\relation-scope-tree.spec.js",
+      "test_count": 6
+    },
+    {
+      "file": "e2e\\features\\role-intents.spec.js",
+      "test_count": 4
+    },
+    {
+      "file": "e2e\\features\\role-permission-center.spec.js",
+      "test_count": 27
+    },
+    {
+      "file": "e2e\\features\\useMetaList-21-keypath.spec.js",
+      "test_count": 21
+    },
+    {
+      "file": "e2e\\features\\user-group-detail.spec.js",
+      "test_count": 1
+    },
+    {
+      "file": "e2e\\features\\user-group-filter.spec.js",
+      "test_count": 2
+    },
+    {
+      "file": "e2e\\features\\user-permission.spec.js",
+      "test_count": 2
+    },
+    {
+      "file": "e2e\\features\\user-role.spec.js",
+      "test_count": 3
+    },
+    {
+      "file": "e2e\\features\\value-help-dialog.spec.js",
+      "test_count": 1
+    },
+    {
+      "file": "e2e\\features\\value-help-filter.spec.js",
+      "test_count": 3
+    },
+    {
+      "file": "e2e\\features\\ValueHelp-5-layer-link.spec.js",
+      "test_count": 15
+    },
+    {
+      "file": "e2e\\features\\workspace.spec.js",
+      "test_count": 2
+    },
+    {
+      "file": "e2e\\smoke\\arch-data.smoke.spec.js",
+      "test_count": 2
+    },
+    {
+      "file": "e2e\\smoke\\auth.smoke.spec.js",
+      "test_count": 3
+    },
+    {
+      "file": "e2e\\smoke\\arch-data.smoke.spec.js",
+      "test_count": 2
+    },
+    {
+      "file": "e2e\\smoke\\auth.smoke.spec.js",
+      "test_count": 3
+    }
+  ]
+}

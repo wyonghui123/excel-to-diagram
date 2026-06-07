@@ -1,0 +1,161 @@
+# ============================================
+# 任务队列配置
+# 说明: 管理任务调度队列的配置
+# ============================================
+
+id: task_queue
+name: 任务队列配置
+table_name: task_queues
+description: 管理任务调度队列，每个队列有独立的线程池和优先级
+persistent: true
+
+semantics:
+  meaning: 任务调度队列配置
+  category: system_entity
+  hierarchy_level: 0
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+
+  - id: name
+    name: 队列名称
+    type: string
+    db_column: name
+    required: true
+    unique: true
+    max_length: 50
+    semantics:
+      business_key: true
+
+  - id: description
+    name: 描述
+    type: string
+    db_column: description
+    max_length: 200
+
+  - id: priority
+    name: 优先级
+    type: integer
+    db_column: priority
+    required: true
+    default: 50
+
+  - id: max_workers
+    name: 最大Worker数
+    type: integer
+    db_column: max_workers
+    default: 5
+
+  - id: timeout
+    name: 默认超时(秒)
+    type: integer
+    db_column: timeout
+    default: 300
+
+  - id: enabled
+    name: 是否启用
+    type: boolean
+    db_column: enabled
+    default: true
+
+  - id: current_workers
+    name: 当前Worker数
+    type: integer
+    db_column: current_workers
+    default: 0
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    semantics:
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    semantics:
+      audit_field: true
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+  delete:
+    enabled: true
+    fields: business_only
+
+indexes:
+  - fields: [name]
+    unique: true
+    name: idx_task_queue_name
+
+  - fields: [priority]
+    name: idx_task_queue_priority
+
+actions:
+  - id: task_queue_create
+    name: 创建队列
+    type: crud
+    method: POST
+    path: /api/v1/task_queues
+    description: 创建新的任务队列
+
+  - id: task_queue_read
+    name: 查看队列
+    type: crud
+    method: GET
+    path: /api/v1/task_queues
+    description: 查看任务队列列表与详情
+
+  - id: task_queue_update
+    name: 编辑队列
+    type: crud
+    method: PUT
+    path: /api/v1/task_queues/{id}
+    description: 编辑任务队列配置
+
+  - id: task_queue_delete
+    name: 删除队列
+    type: crud
+    method: DELETE
+    path: /api/v1/task_queues/{id}
+    description: 删除任务队列
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    title: 队列管理
+    columns:
+      - field: name
+        width: 120
+      - field: description
+        width: 200
+      - field: priority
+        width: 80
+      - field: max_workers
+        width: 100
+      - field: current_workers
+        width: 100
+      - field: enabled
+        width: 80
+    actions:
+      - id: create
+        label: 新建队列
+        icon: plus
+        type: primary
+
+category_config:
+  create_permission: task_queue:create
+  update_permission: task_queue:update
+  delete_permission: task_queue:delete

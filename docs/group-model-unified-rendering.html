@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>分组模型统一渲染方案</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Microsoft YaHei','Segoe UI',sans-serif;background:#f0f2f5;padding:24px;color:#2c3e50;line-height:1.7}
+h1{text-align:center;margin-bottom:6px;color:#1a1a2e;font-size:26px}
+h2{font-size:20px;color:#2c3e50;margin:28px 0 14px;padding-bottom:8px;border-bottom:3px solid #2c3e50}
+h3{font-size:16px;color:#34495e;margin:20px 0 10px;padding-left:12px;border-left:4px solid #3498db}
+h4{font-size:14px;color:#555;margin:14px 0 8px}
+.subtitle{text-align:center;color:#7f8c8d;margin-bottom:28px;font-size:14px}
+.container{max-width:1900px;margin:0 auto}
+.section{background:white;border-radius:12px;padding:28px;margin-bottom:24px;box-shadow:0 2px 12px rgba(0,0,0,0.06)}
+.data-table{width:100%;border-collapse:collapse;margin:12px 0;font-size:12px}
+.data-table th{background:#2c3e50;color:white;padding:10px 14px;text-align:left;font-size:13px}
+.data-table td{padding:8px 14px;border-bottom:1px solid #eee;vertical-align:top}
+.data-table tr:hover td{background:#f0f7ff}
+.iface{border:2px solid #2980b9;border-radius:8px;padding:14px;margin:10px 0;background:#f0f7ff}
+.iface .title{font-weight:bold;color:#2980b9;margin-bottom:8px;font-size:13px}
+.iface pre{font-size:11px;background:white;padding:10px;border-radius:4px;margin:0;white-space:pre-wrap;line-height:1.5}
+.warn{background:#fff8e1;border:2px solid #ffc107;border-radius:8px;padding:12px;margin:10px 0;font-size:12px}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:bold;color:white;margin:0 2px}
+.badge-yes{background:#27ae60}
+.badge-no{background:#e74c3c}
+.badge-partial{background:#f39c12}
+.badge-bo{background:#2980b9}
+.badge-sm{background:#e67e22}
+.badge-unified{background:#27ae60}
+.conclusion-box{background:#f0f7ff;border:2px solid #2980b9;border-radius:10px;padding:20px;margin:16px 0}
+.conclusion-box p{font-size:13px;line-height:1.8;color:#555;margin-top:10px}
+.conclusion-box p:first-child{margin-top:0}
+.compare-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:16px 0}
+.compare-box{border-radius:10px;padding:20px}
+.compare-left{background:#eaf2f8;border:2px solid #2980b9}
+.compare-right{background:#fdf2e9;border:2px solid #e67e22}
+.compare-box h4{margin-bottom:12px;font-size:15px}
+.compare-box ul{list-style:none;padding:0}
+.compare-box li{font-size:13px;margin:8px 0;padding:6px 10px;border-radius:4px}
+.compare-left li{background:rgba(255,255,255,0.6)}
+.compare-right li{background:rgba(255,255,255,0.6)}
+.tree-node{display:inline-block;padding:4px 10px;border-radius:6px;margin:2px;font-size:12px;color:white;font-weight:bold}
+.tn-domain{background:#c0392b}
+.tn-subdomain{background:#e67e22}
+.tn-sm{background:#2980b9}
+.tn-bo{background:#27ae60}
+.tn-container{background:#8e44ad;border:2px dashed #fff}
+.tree-line{color:#95a5a6;font-family:monospace;font-size:13px;line-height:1.8}
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>分组模型统一渲染方案</h1>
+<div class="subtitle">核心命题：一切皆分组 → 容器嵌套容器 → 叶子即节点 → 统一渲染</div>
+
+<!-- ============================================================ -->
+<div class="section">
+<h2>一、核心命题验证：图表能否统一为"嵌套容器+节点"？</h2>
+
+<h3>1.1 当前两种图的渲染本质</h3>
+
+<div class="compare-grid">
+    <div class="compare-box compare-left">
+        <h4><span class="badge badge-bo">BO</span> 业务对象图渲染</h4>
+        <ul>
+            <li><strong>Mermaid结构：</strong>subgraph(领域) → subgraph(子领域) → subgraph(服务模块) → 节点(业务对象)</li>
+            <li><strong>本质：</strong>3层嵌套容器 + 叶子节点</li>
+            <li><strong>当前代码：</strong>useBusinessObjectSyntax.js 约1073行，包含颜色计算、映射重建等</li>
+        </ul>
+    </div>
+    <div class="compare-box compare-right">
+        <h4><span class="badge badge-sm">SM</span> 服务模块图渲染</h4>
+        <ul>
+            <li><strong>Mermaid结构：</strong>subgraph(领域) → subgraph(子领域) → 节点(服务模块)</li>
+            <li><strong>本质：</strong>2层嵌套容器 + 叶子节点</li>
+            <li><strong>当前代码：</strong>useServiceModuleSyntax.js 约437行，直接使用构建结果</li>
+        </ul>
+    </div>
+</div>
+
+<div class="conclusion-box">
+<p style="font-size:14px;line-height:1.8;color:#2c3e50;">
+<strong>结论：两种图的渲染本质完全相同——都是"嵌套容器+叶子节点"。</strong>
+</p>
+<p style="font-size:13px;line-height:1.8;color:#555;margin-top:10px;">
+差异仅在于：<strong>嵌套深度不同</strong>（BO图3层容器，SM图2层容器）和<strong>叶子节点类型不同</strong>（BO图叶子是BusinessObject，SM图叶子是ServiceModule）。这恰好就是GroupModel已经抽象出来的概念——<strong>isTerminalGroup()</strong>判断是否为叶子，<strong>GroupType</strong>区分类型，<strong>children</strong>构建嵌套。
+</p>
+</div>
+
+<h3>1.2 GroupModel已具备的统一能力</h3>
+
+<table class="data-table">
+    <tr><th>能力</th><th>GroupModel现状</th><th>是否满足统一渲染</th></tr>
+    <tr><td>树形结构</td><td>parentId + children 构建树</td><td><span class="badge badge-yes">满足</span></td></tr>
+    <tr><td>容器/节点区分</td><td>isTerminalGroup(group, chartType)</td><td><span class="badge badge-yes">满足</span></td></tr>
+    <tr><td>层级深度控制</td><td>ChartTypeConfig.groupHierarchy</td><td><span class="badge badge-yes">满足</span></td></tr>
+    <tr><td>启用/禁用</td><td>layout.enabled + 禁用提升逻辑</td><td><span class="badge badge-yes">满足</span></td></tr>
+    <tr><td>布局方向</td><td>layout.direction</td><td><span class="badge badge-yes">满足</span></td></tr>
+    <tr><td>架构元素引用</td><td>elementRef (type, code, name, parentCode)</td><td><span class="badge badge-yes">满足</span></td></tr>
+    <tr><td>颜色信息</td><td>无（当前在构建层/渲染层独立计算）</td><td><span class="badge badge-no">缺失</span></td></tr>
+    <tr><td>isCenter标记</td><td>有isCenter字段但未在渲染时使用</td><td><span class="badge badge-partial">部分</span></td></tr>
+    <tr><td>连线/关系</td><td>无（当前diagramData.links独立存储）</td><td><span class="badge badge-no">缺失</span></td></tr>
+    <tr><td>标注信息</td><td>无</td><td><span class="badge badge-no">缺失</span></td></tr>
+</table>
+
+<h3>1.3 统一渲染的核心思路</h3>
+
+<div class="iface">
+    <div class="title">统一渲染算法：遍历GroupModel树 → 容器/节点二分法</div>
+<pre>function renderGroupModel(groupModel, links) {
+  const mermaidCode = 'flowchart LR\n'
+  
+  // 递归遍历 GroupModel 树
+  function renderGroup(group, depth = 0) {
+    const isTerminal = isTerminalGroup(group, chartType)
+    
+    if (isTerminal) {
+      // 叶子 = 节点：渲染为矩形
+      renderNode(group)
+    } else {
+      // 非叶子 = 容器：渲染为 subgraph
+      renderContainer(group, depth)
+    }
+  }
+  
+  function renderNode(group) {
+    // group.color — 从GroupModel读取（新增字段）
+    // group.title — 显示名称
+    // group.elementRef.code — 编码
+    mermaidCode += `  ${group.id}["${group.title}\n(${group.elementRef.code})"]\n`
+    mermaidCode += `  style ${group.id} ${getNodeStyle(group.color)}\n`
+  }
+  
+  function renderContainer(group, depth) {
+    mermaidCode += `  subgraph ${group.id}["${group.title}"]\n`
+    mermaidCode += `    direction ${group.layout.direction}\n`
+    
+    // 递归渲染子分组
+    group.children.forEach(child => renderGroup(child, depth + 1))
+    
+    mermaidCode += `  end\n`
+    mermaidCode += `  style ${group.id} ${getContainerStyle(group.color)}\n`
+  }
+  
+  // 渲染连线（叶子节点之间的连线）
+  links.forEach(link => {
+    mermaidCode += `  ${link.source} --> ${link.target}\n`
+  })
+  
+  return mermaidCode
+}</pre>
+</div>
+
+<div class="warn">
+<span class="icon">[WARNING]</span>
+<strong>关键洞察：</strong>当前useBusinessObjectSyntax.js的1073行中，约400行是在做"从diagramData重建分组映射"的工作——把nodes按domain/subDomain/serviceModule重新分组。如果直接从GroupModel树渲染，这400行代码完全不需要！GroupModel本身就是分组后的树结构，无需重建。
+</div>
+
+</div>
+
+<!-- ============================================================ -->
+<div class="section">
+<h2>二、GroupModel增强方案：补充渲染所需信息</h2>
+
+<h3>2.1 需要增强的字段</h3>
+
+<table class="data-table">
+    <tr><th>字段</th><th>当前状态</th><th>增强方案</th><th>赋值时机</th></tr>
+    <tr>
+        <td><strong>color</strong></td>
+        <td>无</td>
+        <td>每个Group增加color字段：容器用容器背景色，节点用节点颜色</td>
+        <td>generateDiagram时由ColorCalculator计算后写入</td>
+    </tr>
+    <tr>
+        <td><strong>textColor</strong></td>
+        <td>无</td>
+        <td>叶子节点增加textColor字段</td>
+        <td>同color</td>
+    </tr>
+    <tr>
+        <td><strong>isCenter</strong></td>
+        <td>有字段但未在渲染中使用</td>
+        <td>激活isCenter字段，颜色计算时使用</td>
+        <td>generateDiagram时计算（已有逻辑）</td>
+    </tr>
+    <tr>
+        <td><strong>annotationCategory/Content</strong></td>
+        <td>无</td>
+        <td>叶子节点增加标注字段</td>
+        <td>从原始数据(elementRef.code)查找</td>
+    </tr>
+    <tr>
+        <td><strong>displayCode</strong></td>
+        <td>elementRef.code</td>
+        <td>已有，直接使用elementRef.code作为节点显示编码</td>
+        <td>构建时已有</td>
+    </tr>
+</table>
+
+<h3>2.2 增强后的Group结构</h3>
+
+<div class="iface">
+    <div class="title">增强后的Group — 自包含渲染所需全部信息</div>
+<pre>Group {
+  id: string                    // 分组ID（如 D_供应链, SD_采购管理, SM_CGGL, BO_BCDM01）
+  type: GroupType               // DOMAIN | SUB_DOMAIN | SERVICE_MODULE | BUSINESS_OBJECT
+  title: string                 // 显示标题
+  elementRef: ElementRef | null // 架构元素引用
+  
+  // 渲染增强字段（新增）
+  color: string                 // 容器背景色 / 节点填充色
+  textColor: string             // 节点文字颜色（仅叶子节点）
+  isCenter: boolean             // 是否中心范围
+  annotationCategory: string    // 标注类别（仅叶子节点）
+  annotationContent: string     // 标注内容（仅叶子节点）
+  
+  // 已有字段
+  parentId: string | null
+  children: Group[]             // 子分组（容器嵌套容器，或容器包含叶子）
+  layout: {
+    direction: string           // 容器内布局方向
+    visible: boolean
+    enabled: boolean
+    style: { fill, stroke, strokeWidth, strokeDasharray }
+  }
+}</pre>
+</div>
+
+<h3>2.3 连线（Link）的独立存储</h3>
+
+<div class="iface">
+    <div class="title">连线不放入GroupModel树，作为独立数据传入渲染器</div>
+<pre>// 连线是叶子节点之间的关系，不属于树形结构
+// 从GroupModel的叶子节点ID可以匹配连线的source/target
+
+interface DiagramLink {
+  source: string    // 源叶子节点的 elementRef.code
+  target: string    // 目标叶子节点的 elementRef.code
+  label?: string    // 关系标签
+  tooltip?: string  // 提示信息
+  relationCode: string
+  annotationCategory: string
+  annotationContent: string
+}
+
+// 渲染时：遍历links，通过 elementRef.code → group.id 映射找到Mermaid节点ID
+// 这个映射可以从 GroupModel.buildNodeIdMap() 获得</pre>
+</div>
+
+</div>
+
+<!-- ============================================================ -->
+<div class="section">
+<h2>三、统一渲染管线的完整设计</h2>
+
+<h3>3.1 新管线 vs 旧管线</h3>
+
+<div class="compare-grid">
+    <div class="compare-box compare-left">
+        <h4>旧管线（当前）</h4>
+        <ul>
+            <li>previewData → filteredData</li>
+            <li>filteredData → buildDiagramData() → diagramData</li>
+            <li>diagramData → useBusinessObjectSyntax() → 重建映射 → 计算颜色 → 生成Mermaid</li>
+            <li><strong>问题：</strong>渲染层需要重建分组映射（~400行），颜色双路径计算</li>
+        </ul>
+    </div>
+    <div class="compare-box compare-right">
+        <h4>新管线（统一）</h4>
+        <ul>
+            <li>previewData → filteredData</li>
+            <li>filteredData → GroupModel（增强color/isCenter）</li>
+            <li>GroupModel + links → UnifiedRenderer → 生成Mermaid</li>
+            <li><strong>优势：</strong>GroupModel就是分组后的树，无需重建；颜色在写入GroupModel时统一计算</li>
+        </ul>
+    </div>
+</div>
+
+<h3>3.2 新管线的阶段设计</h3>
+
+<div class="iface">
+    <div class="title">统一渲染管线 — 5个阶段，仅1个分化点</div>
+<pre>Stage 1: 数据输入 + 过滤（共享，与当前相同）
+  previewData → filteredBO, filteredSM, filteredRel, filteredDP
+  isCenter 自底向上计算
+
+Stage 2: GroupModel构建 + 增强（[DECORATIVE] 核心融合点）
+  2a. buildGroupModelFromArchitecture(data, chartType) → Group树
+  2b. GroupModel.fromUserConfig(groups, userConfig, chartType) → 合并用户配置
+  2c. enrichGroupModel(groupModel, { colorCalculator, isCenterMap, annotationMap })
+      → 为每个Group写入 color, textColor, isCenter, annotation
+      
+  enrichGroupModel 实现：
+    traverseGroups(groups, (group) => {
+      if (isTerminalGroup(group, chartType)) {
+        // 叶子节点：从colorMap读取颜色
+        const code = group.elementRef.code
+        group.color = colorMap.get(code) || defaultColor
+        group.textColor = nodeTextColor
+        group.isCenter = centerCodes.has(code)
+        group.annotationCategory = annotationMap.get(code)?.category || 'info'
+        group.annotationContent = annotationMap.get(code)?.content || ''
+      } else {
+        // 容器：从groupColors读取背景色
+        group.color = containerColorMap.get(group.id) || '#f5f5f5'
+      }
+    })
+
+Stage 3: 连线构建（[DECORATIVE] 唯一分化点）
+  BO图: links = filteredRel.map(rel → { source: rel.sourceCode, target: rel.targetCode, ... })
+  SM图: links = computedSMRelations(filteredRel, ...).map(rel → { source: rel.sourceSMCode, ... })
+
+Stage 4: 统一渲染（共享！）
+  UnifiedRenderer.render(enrichedGroupModel, links) → Mermaid代码
+  
+Stage 5: 图表展示（共享，与当前相同）</pre>
+</div>
+
+<h3>3.3 UnifiedRenderer核心算法</h3>
+
+<div class="iface">
+    <div class="title">UnifiedRenderer — 统一渲染器，替代两个Syntax文件</div>
+<pre>export class UnifiedRenderer {
+  render(groupModel, links, options) {
+    const { layoutEngine, chartType } = options
+    const rootGroups = groupModel.getRootGroups()
+    const nodeIdMap = buildNodeIdMap(rootGroups, chartType)
+    
+    let code = layoutEngine === 'elk' 
+      ? 'flowchart-elk LR\n' 
+      : 'flowchart LR\n'
+    
+    // 1. 递归渲染分组树
+    rootGroups.forEach(group => {
+      code += this.renderGroup(group, chartType, nodeIdMap, 0)
+    })
+    
+    // 2. 渲染连线
+    links.forEach(link => {
+      const sourceId = nodeIdMap.codeToIdMap.get(link.source)
+      const targetId = nodeIdMap.codeToIdMap.get(link.target)
+      if (sourceId && targetId) {
+        code += `  ${sourceId} --> ${targetId}\n`
+      }
+    })
+    
+    // 3. 渲染样式
+    rootGroups.forEach(group => {
+      code += this.renderStyles(group, chartType)
+    })
+    
+    return code
+  }
+  
+  renderGroup(group, chartType, nodeIdMap, depth) {
+    const isTerminal = isTerminalGroup(group, chartType)
+    
+    if (isTerminal) {
+      // 叶子 = 节点
+      const displayText = group.elementRef.code 
+        ? `${group.title}\\n(${group.elementRef.code})` 
+        : group.title
+      return `  ${group.id}["${displayText}"]\n`
+    }
+    
+    // 非叶子 = 容器
+    let code = `  subgraph ${group.id}["${group.title}"]\n`
+    code += `    direction ${group.layout.direction}\n`
+    
+    group.children.forEach(child => {
+      code += this.renderGroup(child, chartType, nodeIdMap, depth + 1)
+    })
+    
+    code += `  end\n`
+    return code
+  }
+  
+  renderStyles(group, chartType) {
+    const isTerminal = isTerminalGroup(group, chartType)
+    let code = ''
+    
+    if (isTerminal) {
+      code += `  style ${group.id} ${getNodeStyle(group.color, group.textColor)}\n`
+    } else {
+      code += `  style ${group.id} ${getContainerStyle(group.color)}\n`
+    }
+    
+    group.children?.forEach(child => {
+      code += this.renderStyles(child, chartType)
+    })
+    
+    return code
+  }
+}</pre>
+</div>
+
+</div>
+
+<!-- ============================================================ -->
+<div class="section">
+<h2>四、可行性验证：逐项检查</h2>
+
+<h3>4.1 渲染功能对照</h3>
+
+<table class="data-table">
+    <tr><th>渲染功能</th><th>BO图当前实现</th><th>SM图当前实现</th><th>统一渲染能否覆盖</th></tr>
+    <tr>
+        <td>嵌套容器(subgraph)</td>
+        <td>3层subgraph</td>
+        <td>2层subgraph</td>
+        <td><span class="badge badge-yes">能</span> GroupModel.children递归，深度自动适配</td>
+    </tr>
+    <tr>
+        <td>叶子节点(矩形)</td>
+        <td>BO节点</td>
+        <td>SM节点</td>
+        <td><span class="badge badge-yes">能</span> isTerminalGroup判断，type区分显示格式</td>
+    </tr>
+    <tr>
+        <td>节点颜色</td>
+        <td>渲染层计算nodeColorMap</td>
+        <td>构建层计算node.color</td>
+        <td><span class="badge badge-yes">能</span> 统一在enrichGroupModel时计算，写入group.color</td>
+    </tr>
+    <tr>
+        <td>容器颜色</td>
+        <td>colorMap.get(groupName)</td>
+        <td>默认白色'#ffffff'</td>
+        <td><span class="badge badge-yes">能</span> 容器group.color由enrichGroupModel赋值</td>
+    </tr>
+    <tr>
+        <td>中心范围标记(◆)</td>
+        <td>isCenter时标题加◆前缀</td>
+        <td>isCenter时用centerScopeColor</td>
+        <td><span class="badge badge-yes">能</span> group.isCenter决定颜色和标记</td>
+    </tr>
+    <tr>
+        <td>连线渲染</td>
+        <td>sourceName/targetName</td>
+        <td>sourceSMCode/targetSMCode</td>
+        <td><span class="badge badge-yes">能</span> 统一用code，通过nodeIdMap映射</td>
+    </tr>
+    <tr>
+        <td>连线颜色</td>
+        <td>基于源/目标节点颜色计算</td>
+        <td>无特殊连线颜色</td>
+        <td><span class="badge badge-partial">部分</span> 需在UnifiedRenderer中实现连线颜色逻辑</td>
+    </tr>
+    <tr>
+        <td>禁用分组提升</td>
+        <td>GroupModel.toMermaidConfig()处理</td>
+        <td>同左</td>
+        <td><span class="badge badge-yes">能</span> 已有逻辑，enrichGroupModel在提升后执行</td>
+    </tr>
+    <tr>
+        <td>容器排序(布局模板)</td>
+        <td>virtualContainer排序</td>
+        <td>sortContainersByTemplate</td>
+        <td><span class="badge badge-yes">能</span> 在enrichGroupModel时按模板排序children</td>
+    </tr>
+    <tr>
+        <td>节点大小自适应</td>
+        <td>preCalculateNodeSizes</td>
+        <td>preCalculateNodeSizes</td>
+        <td><span class="badge badge-yes">能</span> 共享useBlockDiagramSyntax</td>
+    </tr>
+    <tr>
+        <td>ELK布局</td>
+        <td>flowchart-elk</td>
+        <td>flowchart-elk</td>
+        <td><span class="badge badge-yes">能</span> 仅影响graph声明，与分组模型无关</td>
+    </tr>
+</table>
+
+<h3>4.2 代码量预估</h3>
+
+<table class="data-table">
+    <tr><th>模块</th><th>当前代码量</th><th>统一后代码量</th><th>变化</th></tr>
+    <tr><td>diagramDataBuilder.js</td><td>116行</td><td rowspan="2">0行（删除）</td><td rowspan="2">-580行</td></tr>
+    <tr><td>serviceModuleDiagramBuilder.js</td><td>464行</td></tr>
+    <tr><td>useBusinessObjectSyntax.js</td><td>1073行</td><td rowspan="2">~500行（UnifiedRenderer）</td><td rowspan="2">-1010行</td></tr>
+    <tr><td>useServiceModuleSyntax.js</td><td>437行</td></tr>
+    <tr><td>enrichGroupModel（新增）</td><td>0行</td><td>~80行</td><td>+80行</td></tr>
+    <tr><td>ColorCalculator（新增）</td><td>0行</td><td>~60行</td><td>+60行</td></tr>
+    <tr><td><strong>合计</strong></td><td><strong>2090行</strong></td><td><strong>~640行</strong></td><td><strong>-1450行（减少69%）</strong></td></tr>
+</table>
+
+</div>
+
+<!-- ============================================================ -->
+<div class="section">
+<h2>五、核心结论与实施建议</h2>
+
+<div class="conclusion-box">
+<p style="font-size:14px;line-height:1.8;color:#2c3e50;">
+<strong>图表大方向完全可以统一成一个——通过分组模型完成统一。</strong>
+</p>
+<p style="font-size:13px;line-height:1.8;color:#555;margin-top:10px;">
+两种图在渲染层面的本质完全相同：<strong>嵌套容器+叶子节点</strong>。GroupModel已经具备了统一渲染所需的大部分能力（树形结构、容器/节点区分、层级控制、启用/禁用），仅缺少颜色和标注信息。通过<strong>enrichGroupModel</strong>步骤补充这些信息后，一个<strong>UnifiedRenderer</strong>即可替代当前的两个独立Syntax文件（共1510行），代码量减少约69%。
+</p>
+<p style="font-size:13px;line-height:1.8;color:#555;margin-top:10px;">
+<strong>统一后的渲染管线极简：</strong>
+</p>
+<ul style="font-size:13px;line-height:1.8;color:#555;margin-top:6px;padding-left:20px;">
+<li><strong>输入：</strong>enrichedGroupModel（带颜色的分组树）+ links（连线数组）</li>
+<li><strong>算法：</strong>递归遍历GroupModel树，isTerminal→渲染节点，!isTerminal→渲染容器subgraph</li>
+<li><strong>输出：</strong>Mermaid/mxGraph代码</li>
+</ul>
+<p style="font-size:13px;line-height:1.8;color:#555;margin-top:10px;">
+<strong>最大的收益：</strong>当前useBusinessObjectSyntax.js中约400行的"从diagramData重建分组映射"逻辑将完全不需要——因为GroupModel本身就是分组后的树结构。这是消除代码重复和一致性风险的根本途径。
+</p>
+<p style="font-size:13px;line-height:1.8;color:#555;margin-top:10px;">
+<strong>实施建议：</strong>分两步走——
+</p>
+<ul style="font-size:13px;line-height:1.8;color:#555;margin-top:6px;padding-left:20px;">
+<li><strong>第一步：</strong>实现enrichGroupModel + UnifiedRenderer，先用SM图验证（SM图更简单，2层嵌套）</li>
+<li><strong>第二步：</strong>验证通过后，将BO图也切换到UnifiedRenderer，删除旧的diagramDataBuilder和两个Syntax文件</li>
+</ul>
+</div>
+
+</div>
+
+</div>
+</body>
+</html>

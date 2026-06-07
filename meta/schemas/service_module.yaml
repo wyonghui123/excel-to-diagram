@@ -1,0 +1,840 @@
+# ============================================
+# 服务模块元模型
+# 层级: 5 (产品 → 版本 → 领域 → 子领域 → 服务模块)
+# 说明: 服务模块是子领域的下一级分类，代表一个独立的服务模块
+# ============================================
+
+id: service_module
+name: 服务模块
+table_name: service_modules
+description: 服务模块是从属于子领域的三级业务分类。
+display_name_field: name
+parent_object: sub_domain
+aspects: [hierarchy_aspect, audit_aspect, owner_aspect, naming_aspect]
+
+# 管理维度绑定（Spec v1.3 数据权限统一模型）
+dimension_bindings:
+  - dimension: service_module
+    field: id
+  - dimension: sub_domain
+    field: sub_domain_id
+  - dimension: domain
+    field: sub_domain_id
+    through: sub_domain
+  - dimension: version
+    field: sub_domain_id
+    through: "sub_domain->domain"
+  - dimension: product
+    field: sub_domain_id
+    through: "sub_domain->domain->version"
+
+# Audit configuration
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+      - created_by
+      - updated_by
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+      - created_by
+      - updated_by
+
+deletability:
+  condition: "self.child_count == 0 and self.relation_count == 0"
+  message: "存在业务对象或关联关系的服务模块不能删除"
+
+authorization:
+  check: true
+  scope: "owner_id = $user.id"
+  auto_owner: true
+  auto_permission: admin
+  inherit_to_children: true
+  allow_transfer: true
+  transfer_keep_permissions: true
+
+hierarchy:
+  enabled: true
+  hierarchy_id: biz_hierarchy
+  level: 4
+  parent_field: sub_domain_id
+  path_field: hierarchy_path
+  depth_field: hierarchy_depth
+
+context:
+  field: version_id
+  description: "版本上下文，所有查询自动注入 version_id 过滤"
+
+cascade_select:
+  - field: business_object_id
+    parent_object: business_object
+    parent_display_field: name
+    filter_by: service_module_id
+
+# ────────────────────────────────────────────
+# 语义标注
+# ────────────────────────────────────────────
+semantics:
+  meaning: 独立的服务模块
+  business_key: true
+  display_name: true
+  category: core_entity
+  hierarchy_level: 5
+  aliases:
+    - 服务模块
+    - ServiceModule
+    - SM
+    - 模块
+  custom:
+    color_coding: servicemodule
+    icon: module
+
+# ────────────────────────────────────────────
+# 导入导出配置
+# ────────────────────────────────────────────
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: true              # 导出时包含业务对象、关系
+  cascade_import: true
+  conflict_strategy: upsert
+  conflict_key: code
+  description_for_agent: "服务模块是子领域的下一级分类，代表一个独立的服务模块。服务模块下包含多个业务对象。"
+
+# ────────────────────────────────────────────
+# 分析模型定义
+# ────────────────────────────────────────────
+analytical_model:
+  enabled: true
+  
+  fact:
+    table: service_modules
+    alias: sm
+    measures:
+      - id: service_module_count
+        field: id
+        aggregation: count
+        display_name: 服务模块数量
+        format: "#,##0"
+  
+  dimensions:
+    - id: version_id
+      field: sm.version_id
+      display_name: 版本
+      hierarchy_level: 1
+    
+    - id: sub_domain_id
+      field: sm.sub_domain_id
+      display_name: 子领域
+      hierarchy_level: 2
+  
+  # ────────────────────────────────────────────
+  # 跨表关联过滤（SAP CDS Association + Path Expression 风格）
+  # ────────────────────────────────────────────
+  cross_table_filters:
+    - id: annotation_category
+      display_name: 备注类型
+      description: 按备注类型过滤包含该类型备注的服务模块
+      
+      association:
+        target_table: annotations
+        target_alias: a
+        join_type: exists
+        
+        on_conditions:
+          - left_field: sm.id
+            operator: eq
+            right_field: a.target_id
+          - left_field: "'service_module'"
+            operator: eq
+            right_field: a.target_type
+        
+        where_conditions:
+          - field: a.category
+            operator: in
+            parameter: annotation_category
+      
+      ui:
+        filter_type: multi-select
+        filter_label: 备注类型
+        filter_placeholder: 请选择备注类型
+        options_source: enum
+        enum_type: annotation_category
+        position: 50
+    
+    - id: annotation_content_search
+      display_name: 备注内容
+      description: 按备注内容模糊搜索服务模块
+      
+      association:
+        target_table: annotations
+        target_alias: a
+        join_type: exists
+        
+        on_conditions:
+          - left_field: sm.id
+            operator: eq
+            right_field: a.target_id
+          - left_field: "'service_module'"
+            operator: eq
+            right_field: a.target_type
+        
+        where_conditions:
+          - field: a.content
+            operator: like
+            parameter: annotation_content_search
+      
+      ui:
+        filter_type: search
+        filter_label: 备注内容
+        filter_placeholder: 输入备注内容关键词...
+        position: 51
+
+# ────────────────────────────────────────────
+# UI 视图配置
+# ────────────────────────────────────────────
+ui_view_config:
+  list:
+    pageSize: 20
+    columns:
+      - key: name
+        title: 名称
+        width: 200
+        position: 1
+        importance: high
+        sortable: true
+        i18n_key: service_module.field.name
+      - key: code
+        title: 编码
+        width: 150
+        position: 2
+        importance: medium
+        sortable: true
+        i18n_key: service_module.field.code
+      - key: sub_domain_name
+        title: 子领域
+        width: 120
+        position: 10
+        importance: medium
+        sortable: true
+        i18n_key: service_module.field.sub_domain_name
+      - key: domain_name
+        title: 领域
+        width: 120
+        position: 11
+        importance: medium
+        sortable: true
+        i18n_key: service_module.field.domain_name
+      - key: relation_count
+        title: 关系数量
+        width: 100
+        position: 80
+        importance: medium
+        sortable: true
+        computed: true
+        computation:
+          type: count_relations
+          scope: descendants
+      - key: created_at
+        title: 创建时间
+        width: 180
+        position: 90
+        importance: low
+        sortable: true
+      - key: updated_at
+        title: 更新时间
+        width: 180
+        position: 91
+        importance: low
+        sortable: true
+    selectable: true
+  detail:
+    facets:
+      - title: 基本信息
+        type: fieldGroup
+        fields:
+          - name
+          - code
+          - version_name
+          - domain_name
+          - sub_domain_name
+      - title: 系统信息
+        type: fieldGroup
+        fields:
+          - created_at
+          - updated_at
+          - created_by
+          - updated_by
+    showChangeHistory: true
+  child_sections:
+    - child_object: annotation
+      title: 备注信息
+      display: inline
+      pageSize: 10
+      columns:
+        - key: category
+          title: 分类
+          width: 80
+        - key: content
+          title: 内容
+          width: 300
+        - key: created_at
+          title: 创建时间
+          width: 150
+        - key: created_by
+          title: 创建人
+          width: 100
+      actions:
+        - key: create
+          label: 添加备注
+        - key: edit
+          label: 编辑
+        - key: delete
+          label: 删除
+          danger: true
+  form:
+    sections:
+      - title: 基本信息
+        fields:
+          - code
+          - name
+          - version_id
+          - domain_id
+          - sub_domain_id
+    layout: vertical
+  change_notification:
+    enabled: true
+    events:
+      - type: create
+        channels: [in_app]
+        track_fields: [code, name, sub_domain_id]
+        payload: [id, code, name]
+      - type: update
+        channels: [in_app]
+        track_fields: [code, name]
+        payload: [id, code, name]
+      - type: delete
+        channels: [in_app]
+        track_fields: []
+        payload: [id, code, name]
+
+# ────────────────────────────────────────────
+# 字段定义
+# ────────────────────────────────────────────
+fields:
+  - id: version_code
+    name: 版本编码
+    type: string
+    description: 所属版本编码
+    storage: virtual
+    semantics:
+      meaning: 版本编码，用于跨环境数据迁移
+      business_key: true
+      import_order: 1
+      virtual: true
+      export_visible: false
+      import_visible: false
+    ui:
+      visible: false
+
+  - id: sub_domain_code
+    name: 子领域编码
+    type: string
+    description: 所属子领域编码（用于导入导出和快速输入）
+    storage: virtual
+    semantics:
+      meaning: 子领域的业务键，用于导入导出和外键解析
+      business_key: false
+      import_visible: true
+      export_visible: true
+      import_order: 3
+      data_category: code
+      virtual: true
+    ui:
+      visible: true
+      editable: true
+      widget: input
+      fieldGroup: 层级归属
+      fieldGroupPosition: 35
+      i18n_key: service_module.field.sub_domain_code
+
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    ui:
+      visible: false
+      editable: false
+    semantics:
+      meaning: 自增主键，系统内部使用
+      analytics:
+        category: measure
+        aggregation: count
+        display_name: 服务模块数量
+
+  - id: version_id
+    name: 版本
+    type: integer
+    db_column: version_id
+    required: true
+    description: 所属版本（用于筛选）
+    ui:
+      widget: select
+      relation: version
+      display_field: version_name
+    semantics:
+      meaning: 关联的产品版本（用于筛选）
+      # 版本始终只读（自动带入当前版本）
+      readonly_always: true
+      context_field: true
+      analytics:
+        category: dimension
+        type: foreign_key
+        display_name: 版本
+    value_help:
+      source:
+        type: bo
+        target_bo: version
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: false
+      behavior:
+        validation: true
+        binding_strength: strict
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 120
+          - field: name
+            label: 名称
+            width: 200
+
+  - id: domain_id
+    name: 领域
+    type: integer
+    description: 所属领域（用于级联筛选子领域）
+    storage: virtual
+    ui:
+      widget: select
+      relation: domain
+      display_field: domain_name
+      depends_on: version_id
+      cascade_group: hierarchy
+      cascade_level: 2
+    semantics:
+      meaning: 用于级联筛选子领域（从子领域推导）
+      immutable: true
+      redundancy:
+        type: virtual
+        source_field: sub_domain_id
+        derived_from: domain.id
+        join_path:
+          - table: sub_domains
+            from: sub_domain_id
+            to: id
+            select: domain_id
+      analytics:
+        category: dimension
+        type: foreign_key
+        display_name: 领域
+    value_help:
+      source:
+        type: bo
+        target_bo: domain
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: false
+      behavior:
+        validation: true
+        binding_strength: strict
+        parameter_bindings:
+          - local_field: version_id
+            target_field: version_id
+            required: true
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 120
+          - field: name
+            label: 名称
+            width: 200
+
+  - id: sub_domain_id
+    name: 子领域
+    type: integer
+    db_column: sub_domain_id
+    required: true
+    description: 所属子领域（编辑时可切换）
+    ui:
+      widget: select
+      relation: sub_domain
+      display_field: sub_domain_name
+      depends_on: domain_id
+      cascade_group: hierarchy
+      cascade_level: 3
+    semantics:
+      meaning: 关联的子领域（父对象）
+      parent_key: true
+      mandatory: true
+      resolve_from_field: sub_domain_code
+      resolve_to_object: sub_domain
+      analytics:
+        category: dimension
+        type: foreign_key
+        display_name: 子领域
+      # 注意：根据 SAP One Model 设计，parent_key 仅表示层级关系，不强制只读
+      # 编辑时可切换到其他子领域
+    value_help:
+      source:
+        type: bo
+        target_bo: sub_domain
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: false
+      behavior:
+        validation: true
+        binding_strength: strict
+        parameter_bindings:
+          - local_field: domain_id
+            target_field: domain_id
+            required: true
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 120
+          - field: name
+            label: 名称
+            width: 200
+
+  - id: code
+    name: 编码
+    type: string
+    db_column: code
+    required: true
+    description: 服务模块编码
+    semantics:
+      meaning: 服务模块的唯一编码
+      business_key: true
+      immutable: true
+      pattern: "^[A-Z][A-Z0-9_]*$"
+      examples:
+        - SM_PROCUREMENT
+        - SM_WAREHOUSE
+        - SM_LOGISTICS
+      data_category: code
+      import_visible: true
+      export_visible: true
+      import_order: 2
+
+  - id: name
+    name: 名称
+    type: string
+    db_column: name
+    required: true
+    description: 服务模块名称
+    semantics:
+      meaning: 服务模块的显示名称
+      display_name: true
+      examples:
+        - 采购管理
+        - 仓储管理
+        - 物流管理
+      data_category: text
+      import_visible: true
+      export_visible: true
+      import_order: 20
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    description: 服务模块描述
+    ui:
+      widget: textarea
+      render_hints:
+        searchable: true
+    semantics:
+      meaning: 服务模块的详细描述
+      data_category: text
+      import_visible: true
+      export_visible: true
+      import_order: 30
+
+  - id: domain_name
+    name: 领域
+    type: string
+    description: 所属领域名称
+    storage: virtual
+    ui:
+      visible: true
+      editable: false
+    semantics:
+      meaning: 关联领域的显示名称
+      # 冗余字段一致性声明（Type-B: 虚拟冗余，多层JOIN）
+      redundancy:
+        type: virtual
+        source_field: sub_domain_id
+        derived_from: domain.name
+        join_path:
+          - table: sub_domains
+            from: sub_domain_id
+            to: id
+            select: domain_id
+          - table: domains
+            from: domain_id
+            to: id
+            select: name
+
+  - id: sub_domain_name
+    name: 子领域
+    type: string
+    description: 所属子领域名称
+    storage: virtual
+    ui:
+      visible: true
+      editable: false
+    semantics:
+      meaning: 关联子领域的显示名称
+      # 冗余字段一致性声明（Type-B: 虚拟冗余）
+      redundancy:
+        type: virtual
+        source_field: sub_domain_id
+        derived_from: sub_domain.name
+        join_path:
+          - table: sub_domains
+            from: sub_domain_id
+            to: id
+            select: name
+
+  - id: version_name
+    name: 版本
+    type: string
+    description: 所属版本名称
+    storage: virtual
+    ui:
+      visible: true
+      editable: false
+    semantics:
+      meaning: 关联版本的显示名称
+      redundancy:
+        type: virtual
+        source_field: version_id
+        derived_from: version.name
+        join_path:
+          - table: versions
+            from: version_id
+            to: id
+            select: name
+
+  - id: owner_id
+    name: 负责人
+    type: integer
+    db_column: owner_id
+    description: 服务模块负责人ID
+    semantics:
+      meaning: 服务模块的负责人，关联用户表
+      export_visible: false
+      import_visible: false
+      analytics:
+        category: dimension
+        type: foreign_key
+        display_name: 负责人
+    ui:
+      visible: true
+      editable: true
+      widget: select
+      relation: user
+      display_field: display_name
+      fieldGroup: 系统信息
+      i18n_key: common.field.owner_id
+    value_help:
+      source:
+        type: bo
+        target_bo: user
+        value_field: id
+        display_field: display_name
+        code_field: username
+        apply_target_permissions: false
+      behavior:
+        validation: true
+        binding_strength: strict
+        search_fields: [username, display_name]
+      presentation:
+        result_type: dialog
+        display_format: "{display_name} ({username})"
+        columns:
+          - field: username
+            label: 用户名
+            width: 120
+          - field: display_name
+            label: 显示名称
+            width: 150
+          - field: email
+            label: 邮箱
+            width: 200
+
+  - id: relation_count
+    name: 关系数量
+    type: integer
+    description: 服务模块下所有业务对象的关系数量
+    storage: virtual
+    semantics:
+      meaning: 服务模块下所有业务对象的关系数量统计
+      analytics:
+        category: measure
+        aggregation: count
+    computation:
+      type: count_relations
+      scope: descendants
+
+  - id: child_count
+    name: 业务对象数量
+    type: integer
+    description: 服务模块下的业务对象数量
+    storage: virtual
+    computed: true
+    semantics:
+      meaning: 服务模块包含的业务对象数量
+      analytics:
+        category: measure
+        aggregation: sum
+        display_name: 业务对象总数
+    computation:
+      type: count_children
+      child_object: business_object
+    ui:
+      visible: true
+
+  - id: bo_density
+    name: BO密度
+    type: number
+    description: 业务对象关系密度
+    storage: virtual
+    semantics:
+      meaning: 平均每个业务对象的关系数量，反映服务模块内业务对象之间的关联紧密程度
+      analytics:
+        category: measure
+        aggregation: avg
+    computation:
+      formula: 'ROUND(DIVIDE(relation_count, child_count, 0), 2)'
+    ui:
+      widget: number
+      format: decimal
+      precision: 2
+      editable: false
+
+# ────────────────────────────────────────────
+# 关联关系
+# ────────────────────────────────────────────
+relations:
+  - id: sm_to_version
+    name: 归属版本
+    type: parent_child
+    target: version
+    cardinality: "N:1"
+    description: 服务模块归属的版本
+    semantics:
+      meaning: 服务模块与版本的层级关系
+
+  - id: sm_to_subdomain
+    name: 归属子领域
+    type: parent_child
+    target: sub_domain
+    cardinality: "N:1"
+    description: 服务模块归属的子领域
+    semantics:
+      meaning: 服务模块与子领域的层级关系
+
+  - id: sm_to_business_objects
+    name: 包含业务对象
+    type: parent_child
+    target: business_object
+    cardinality: "1:N"
+    description: 一个服务模块包含多个业务对象
+    semantics:
+      meaning: 服务模块与业务对象的层级关系
+
+indexes:
+  - name: uidx_service_modules_version_code
+    fields: [version_id, code]
+    type: unique
+    priority: high
+    description: "版本+编码唯一索引（业务键约束）"
+
+# ────────────────────────────────────────────
+# 操作定义
+# ────────────────────────────────────────────
+actions:
+  - id: service_module_create
+    name: 创建服务模块
+    type: crud
+    method: POST
+    path: /api/v1/service_modules
+    description: 创建新的服务模块
+
+  - id: service_module_read
+    name: 查询服务模块
+    type: crud
+    method: GET
+    path: /api/v1/service_modules/{id}
+    description: 查询单个服务模块
+
+  - id: service_module_update
+    name: 更新服务模块
+    type: crud
+    method: PUT
+    path: /api/v1/service_modules/{id}
+    description: 更新服务模块信息
+
+  - id: service_module_delete
+    name: 删除服务模块
+    type: crud
+    method: DELETE
+    path: /api/v1/service_modules/{id}
+    description: 删除服务模块
+
+  - id: service_module_list
+    name: 列表查询
+    type: crud
+    method: GET
+    path: /api/v1/service_modules
+    description: 查询服务模块列表
+
+# ────────────────────────────────────────────
+# 校验规则
+# ────────────────────────────────────────────
+validations:
+  - id: version_id_required
+    name: 版本ID必填
+    type: field
+    rule: version_id is not None
+    message: 版本ID不能为空
+    severity: error

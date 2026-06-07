@@ -1,0 +1,164 @@
+# ============================================
+# 过滤变体元模型
+# 用于保存和管理用户的过滤条件组合
+# 参考 SAP Fiori SmartFilterBar 的变体管理功能
+# ============================================
+
+id: filter_variant
+name: 过滤变体
+table_name: filter_variants
+description: 用户保存的过滤条件组合，支持个人和共享变体
+
+semantics:
+  meaning: 过滤变体是用户保存的过滤条件预设
+  category: system_entity
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+
+  - id: name
+    name: 变体名称
+    type: string
+    db_column: name
+    required: true
+    description: 变体的显示名称
+    semantics:
+      meaning: 用户定义的变体名称
+      display_name: true
+    ui:
+      visible: true
+      editable: true
+      widget: input
+
+  - id: object_type
+    name: 对象类型
+    type: string
+    db_column: object_type
+    required: true
+    description: 变体适用的对象类型
+    semantics:
+      meaning: 过滤变体关联的元模型对象类型
+    ui:
+      visible: true
+      editable: true
+      widget: select
+
+  - id: filters
+    name: 过滤条件
+    type: json
+    db_column: filters
+    required: true
+    description: 过滤条件的JSON表示
+    semantics:
+      meaning: 保存的过滤条件键值对
+    ui:
+      visible: false
+      editable: false
+
+  - id: user_id
+    name: 创建用户
+    type: integer
+    db_column: user_id
+    description: 创建该变体的用户ID
+    semantics:
+      meaning: 变体的所有者
+    ui:
+      visible: true
+      editable: false
+
+  - id: is_shared
+    name: 是否共享
+    type: boolean
+    db_column: is_shared
+    default: false
+    description: 是否为共享变体
+    semantics:
+      meaning: 共享变体对所有用户可见
+    ui:
+      visible: true
+      editable: true
+      widget: checkbox
+
+  - id: is_default
+    name: 是否默认
+    type: boolean
+    db_column: is_default
+    default: false
+    description: 是否为用户的默认变体
+    semantics:
+      meaning: 用户进入页面时自动应用的变体
+    ui:
+      visible: true
+      editable: true
+      widget: checkbox
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      auto_fill:
+        on_create: $now
+    ui:
+      visible: true
+      editable: false
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      auto_fill:
+        on_create: $now
+        on_update: $now
+    ui:
+      visible: true
+      editable: false
+
+indexes:
+  - name: idx_filter_variants_user_object
+    fields: [user_id, object_type]
+    type: composite
+    priority: high
+    description: 用户+对象类型复合索引
+
+  - name: idx_filter_variants_shared
+    fields: [is_shared, object_type]
+    type: composite
+    priority: medium
+    description: 共享变体索引
+
+ui_view_config:
+  list:
+    pageSize: 20
+    columns:
+      - key: name
+        title: 名称
+        width: 200
+        position: 1
+      - key: object_type
+        title: 对象类型
+        width: 150
+        position: 2
+      - key: is_shared
+        title: 共享
+        width: 80
+        position: 3
+      - key: is_default
+        title: 默认
+        width: 80
+        position: 4
+      - key: created_at
+        title: 创建时间
+        width: 180
+        position: 5

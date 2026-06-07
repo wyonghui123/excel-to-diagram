@@ -1,0 +1,33 @@
+# M11 RLS 规则：role（角色）
+# M10 MCP 自动派生 get_role_by_id / list_roles 工具时受此规则约束
+
+entity: role
+
+# 行级过滤
+row_filters:
+  # 管理员看所有
+  - applies_to: [role:admin, role:manager]
+    condition: "true"
+  # 普通用户仅看本公司的公共角色
+  - applies_to: [role:user, role:viewer]
+    condition: "role.company_id == $user.company_id AND role.is_public == true"
+  # AI Agent 仅看公共角色
+  - applies_to: [role:ai-agent]
+    condition: "role.is_public == true"
+
+# 字段脱敏（重点：权限描述）
+field_masks:
+  - field: description
+    mask: "{}"
+    applies_to: [role:ai-agent]  # AI Agent 看到的描述不脱敏（用于推理）
+  - field: permissions_internal
+    mask: "***HIDDEN***"
+    applies_to: [role:user, role:viewer, role:ai-agent, role:manager]  # 仅 admin 可见内部权限
+
+# 操作权限
+actions:
+  create: [role:admin]
+  read: [role:admin, role:manager, role:user, role:viewer, role:ai-agent]
+  update: [role:admin]
+  delete: [role:admin]
+  assign: [role:admin, role:manager]  # 分配角色给用户

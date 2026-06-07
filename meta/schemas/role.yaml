@@ -1,0 +1,494 @@
+# ============================================
+# 角色元模型
+# 说明: 系统角色，用于RBAC权限控制
+# ============================================
+
+id: role
+name: 角色
+table_name: roles
+description: 系统角色，用于基于角色的权限控制
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 系统角色
+  category: system_entity
+  hierarchy_level: 0
+  aliases:
+    - 角色
+    - Role
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+      - is_system
+  associate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+
+  - id: code
+    name: 角色编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    description: 角色编码，如 admin, editor, viewer
+    semantics:
+      meaning: 角色的唯一编码
+      business_key: true
+      immutable: true
+
+  - id: name
+    name: 角色名称
+    type: string
+    db_column: name
+    required: true
+    description: 角色显示名称
+    semantics:
+      meaning: 角色的显示名称
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    description: 角色描述
+    semantics:
+      meaning: 角色的详细说明
+      searchable: true
+
+  - id: is_active
+    name: 启用状态
+    type: boolean
+    db_column: is_active
+    default: true
+    description: 角色是否启用，停用后该角色的权限将失效
+    semantics:
+      meaning: 角色的启用/停用状态
+    enum_values:
+      - value: 1
+        label: 启用中
+        color: success
+      - value: 0
+        label: 已停用
+        color: default
+    ui:
+      widget: switch
+      editable: true
+
+  - id: is_system
+    name: 系统角色
+    type: boolean
+    db_column: is_system
+    default: false
+    description: 系统角色不可删除，新建角色默认为自定义角色
+    enum_values:
+      - value: 1
+        label: 系统角色
+        color: info
+      - value: 0
+        label: 自定义角色
+        color: default
+    semantics:
+      meaning: 标记是否为系统内置角色
+      readonly_always: true
+    constraints:
+      - type: no_delete
+        trigger_value: true
+        message: 系统角色不可删除
+    ui:
+      widget: select
+
+  - id: is_super_admin
+    name: 超级管理员
+    type: boolean
+    db_column: is_super_admin
+    default: false
+    description: 标记是否为超级管理员角色，拥有系统最高权限
+    semantics:
+      meaning: 超级管理员角色标识，用于权限判断
+      system_flag: true
+    enum_values:
+      - value: 1
+        label: 是
+        color: danger
+      - value: 0
+        label: 否
+        color: default
+    ui:
+      hidden_in_form: true
+      editable: false
+      widget: badge
+
+  - id: priority
+    name: 优先级
+    type: integer
+    db_column: priority
+    default: 0
+    description: 角色优先级，用于权限提升检查
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建的时间戳
+      audit_field: true
+
+  - id: user_count
+    name: 用户数
+    type: integer
+    description: 角色关联的用户数量（计算字段）
+    semantics:
+      meaning: 用户统计
+      computed: true
+      readonly_always: true
+      sql: "SELECT COUNT(*) FROM user_roles WHERE role_id = ?"
+      cacheable: true
+      cache_ttl: 600
+
+  - id: menu_count
+    name: 菜单数
+    type: integer
+    description: 角色关联的菜单数量（计算字段）
+    semantics:
+      meaning: 菜单权限统计
+      computed: true
+      readonly_always: true
+      sql: "SELECT COUNT(*) FROM role_menus WHERE role_id = ?"
+      cacheable: true
+      cache_ttl: 600
+
+  - id: permission_count
+    name: 权限数
+    type: integer
+    description: 角色关联的权限数量（计算字段）
+    semantics:
+      meaning: 权限统计
+      computed: true
+      readonly_always: true
+      sql: "SELECT COUNT(*) FROM role_permissions WHERE role_id = ?"
+      cacheable: true
+      cache_ttl: 600
+
+  - id: data_perm_count
+    name: 数据权限数
+    type: integer
+    description: 角色关联的数据权限数量（计算字段）
+    semantics:
+      meaning: 数据权限统计
+      computed: true
+      readonly_always: true
+      sql: "SELECT COUNT(*) FROM permission_rules WHERE role_id = ?"
+      cacheable: true
+      cache_ttl: 600
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_role_code
+
+relations: []
+
+associations:
+  permissions:
+    name: permissions
+    label: 权限
+    plural_label: 权限列表
+    type: many_to_many
+    through: role_permissions
+    source_key: role_id
+    target_entity: permission
+    target_key: permission_id
+    description: 角色权限关联
+    display:
+      label: 权限
+      plural_label: 权限
+      target_display_field: name
+      target_code_field: code
+      columns:
+        - id: code
+          label: 权限编码
+          width: 150
+        - id: name
+          label: 权限名称
+          width: 180
+    actions:
+      grant:
+        name: grant_permission
+        label: 授予权限
+      revoke:
+        name: revoke_permission
+        label: 撤销权限
+        confirm_message: 确定要撤销此权限吗？
+
+  assigned_groups:
+    name: assigned_groups
+    label: 用户组
+    plural_label: 用户组列表
+    target_type: user_group
+    type: reverse_many_to_many
+    through: group_roles
+    source_key: role_id
+    target_key: group_id
+    description: 分配了此角色的用户组。用户组成员将自动获得此角色权限。
+    display:
+      label: 用户组
+      plural_label: 用户组
+      target_display_field: name
+      target_code_field: code
+      columns:
+        - id: code
+          label: 组编码
+          width: 120
+        - id: name
+          label: 组名称
+          width: 180
+    readonly: true
+    help_text: 此角色已分配给以下用户组。如需分配到更多用户组，请在用户组详情页的"角色"标签页中操作。
+
+ui_view_config:
+  showChangeHistory: true
+
+  list:
+    detail_mode: page
+    detail_path: '/detail/role'
+    title: 角色管理
+    description: 系统角色列表
+    columns:
+      - field: code
+        width: 120
+        sortable: true
+        filterable: true
+      - field: name
+        width: 150
+        sortable: true
+        filterable: true
+      - field: description
+        width: 200
+        type: ellipsis
+      - field: is_active
+        width: 100
+        filterable: true
+        filter_type: select
+        widget: badge
+        filter_options:
+          - value: 1
+            label: 启用中
+          - value: 0
+            label: 已停用
+        badge_colors:
+          true: success
+          false: default
+        labels:
+          true: 启用
+          false: 停用
+      - field: is_system
+        width: 100
+        filterable: true
+        filter_type: select
+        widget: badge
+        filter_options:
+          - value: 1
+            label: 系统角色
+          - value: 0
+            label: 自定义角色
+        badge_colors:
+          true: info
+          false: default
+        labels:
+          true: 系统
+          false: 自定义
+      - field: is_super_admin
+        width: 100
+        filterable: true
+        filter_type: select
+        widget: badge
+        filter_options:
+          - value: 1
+            label: 是
+          - value: 0
+            label: 否
+        badge_colors:
+          true: danger
+          false: default
+        labels:
+          true: 超管
+          false: 普通
+      - field: created_at
+        width: 160
+        format: datetime
+        filter_type: date_range
+      - field: updated_at
+        width: 160
+        format: datetime
+        label: 变更时间
+        filter_type: date_range
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - name
+      - code
+      - description
+    actions:
+      - id: create
+        label: 新建角色
+        icon: plus
+        type: primary
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+      - id: import
+        label: 导入
+        icon: upload
+        type: default
+    batch_actions:
+      - id: batch_delete
+        label: 批量删除
+        icon: delete
+        type: danger
+        confirm: 确定要删除选中的角色吗？
+    filters:
+      - field: code
+        type: text
+        placeholder: 搜索角色编码
+      - field: name
+        type: text
+        placeholder: 搜索角色名称
+      - field: is_system
+        type: select
+        placeholder: 选择类型
+
+  form:
+    title: 角色信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name, priority]
+          - fields: [is_active, is_system, is_super_admin]
+      - title: 描述
+        columns:
+          - fields: [description]
+
+  detail:
+    mode: page
+    page_route: RolePermissionDetail
+    layout: tabs
+    title: "{record.name} 详情"
+    actions:
+      - id: edit
+        label: 编辑
+        icon: edit
+        type: primary
+      - id: save
+        label: 保存
+        icon: check
+        type: primary
+      - id: cancel
+        label: 取消
+        icon: close
+        type: default
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - name
+          - code
+          - description
+          - is_active
+          - is_system
+          - permission_count
+
+      - id: permissions
+        label: 权限配置
+        type: custom
+
+      - id: assigned_groups
+        label: 用户组 (已分配)
+        type: association
+        association: assigned_groups
+        description: 此角色已分配给以下用户组，用户组成员自动获得此角色权限
+        help_text: 如需分配到更多用户组，请在用户组详情页的"角色"标签页中操作
+        actions:
+          - list
+
+      - id: audit-log
+        label: 操作日志
+        type: history
+
+actions:
+  - id: role_create
+    name: 创建角色
+    type: crud
+    method: POST
+    path: /api/v1/roles
+  - id: role_read
+    name: 查询角色
+    type: crud
+    method: GET
+    path: /api/v1/roles/{id}
+  - id: role_update
+    name: 更新角色
+    type: crud
+    method: PUT
+    path: /api/v1/roles/{id}
+  - id: role_delete
+    name: 删除角色
+    type: crud
+    method: DELETE
+    path: /api/v1/roles/{id}
+  - id: role_list
+    name: 角色列表
+    type: crud
+    method: GET
+    path: /api/v1/roles
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: code
+  description_for_agent: "角色数据导入导出，支持批量创建和更新角色"
+
+category_config:
+  create_permission: role:create
+  update_permission: role:update
+  delete_permission: role:delete
+  owner_auto_permission: false
+
+deletion_policy:
+  cascade_delete:
+    - user_roles
+    - role_permissions

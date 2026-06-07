@@ -1,0 +1,15 @@
+- [x] archDataStore 新增 selectedDomains/selectedSubDomains/relationScopeSelection 状态，Tab 切换不丢失
+- [x] useRelationScopeTree composable 能基于选中领域正确生成关系范围树
+- [x] 关系范围树正确分类：中心范围/跨领域/同领域跨子域/同子域跨服务模块
+- [x] 关系范围树逐级展开：领域对 → 子领域对 → 服务模块对
+- [x] 关系范围树每个节点显示关系数量统计
+- [x] 关系范围树顶部显示上下文提示"📌 基于选择: X、Y"
+- [x] 未选择领域时关系范围树显示空状态引导
+- [x] TreeNavigator 领域选择状态持久化到 archDataStore
+- [x] TreeNavigator 底部"查看关系"快捷按钮正常工作
+- [x] "查看关系"按钮在有选择时启用，无选择时禁用
+- [x] index.vue 左侧面板使用 v-show 保持两个组件挂载状态
+- [x] DynamicFilter 替换为 RelationScopeTree
+- [x] 领域树选择变化时关系范围树自动重新生成
+- [x] 关系范围树节点右键菜单支持跳转到层级数据 Tab
+- [x] 关系范围树选择变化时右侧关系列表正确过滤

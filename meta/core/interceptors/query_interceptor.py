@@ -42,7 +42,7 @@ class QueryInterceptor(Interceptor):
                 return
             self._inject_type_tag(context, items)
             self._enrich_records(context, items)
-            self._inject_display_values(context, items)  # 🆕 v1 批次 2 / FR-3.2: 在 enrichment 之后、compute 之前
+            self._inject_display_values(context, items)  # [DECORATIVE] [NEW] v1.2 / FR-3.2: 在 enrichment 之后、compute 之前
             self._compute_columns(context, items)
             self._check_can_delete(context, items)
         elif context.action in ('crud_update', 'crud_create'):
@@ -128,7 +128,7 @@ class QueryInterceptor(Interceptor):
                     item['can_delete'] = True
 
     def _inject_display_values(self, context: 'ActionContext', items: list) -> None:
-        """🆕 v1 批次 2 / FR-3.1: 为每条记录追加 display_values 字段
+        """[DECORATIVE] [NEW] v1.2 / FR-3.1: 为每条记录追加 display_values 字段
 
         规则:
         - FK 字段 → 关联对象的 display_field 值（通过 enrichment_engine 生成的 <field>_display 虚拟字段）

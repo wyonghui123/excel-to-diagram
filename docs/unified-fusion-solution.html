@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>统一融合方案 - 业务对象图与服务模块图</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Microsoft YaHei','Segoe UI',sans-serif;background:#f0f2f5;padding:24px;color:#2c3e50;line-height:1.7}
+h1{text-align:center;margin-bottom:6px;color:#1a1a2e;font-size:26px}
+h2{font-size:20px;color:#2c3e50;margin:28px 0 14px;padding-bottom:8px;border-bottom:3px solid #2c3e50}
+h3{font-size:16px;color:#34495e;margin:20px 0 10px;padding-left:12px;border-left:4px solid #3498db}
+h4{font-size:14px;color:#555;margin:14px 0 8px}
+.subtitle{text-align:center;color:#7f8c8d;margin-bottom:28px;font-size:14px}
+.container{max-width:1900px;margin:0 auto}
+.section{background:white;border-radius:12px;padding:28px;margin-bottom:24px;box-shadow:0 2px 12px rgba(0,0,0,0.06)}
+.data-table{width:100%;border-collapse:collapse;margin:12px 0;font-size:12px}
+.data-table th{background:#2c3e50;color:white;padding:10px 14px;text-align:left;font-size:13px}
+.data-table td{padding:8px 14px;border-bottom:1px solid #eee;vertical-align:top}
+.data-table tr:hover td{background:#f0f7ff}
+.diff-table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13px}
+.diff-table th{background:#2c3e50;color:white;padding:12px 16px;text-align:left}
+.diff-table td{padding:10px 16px;border-bottom:1px solid #eee;line-height:1.6}
+.diff-table tr:hover td{background:#f8f9fa}
+.diff-table .dim{background:#eaf2f8;border-right:3px solid #2980b9;font-weight:bold;width:160px}
+.iface{border:2px solid #2980b9;border-radius:8px;padding:14px;margin:10px 0;background:#f0f7ff}
+.iface .title{font-weight:bold;color:#2980b9;margin-bottom:8px;font-size:13px}
+.iface pre{font-size:11px;background:white;padding:10px;border-radius:4px;margin:0;white-space:pre-wrap;line-height:1.5}
+.warn{background:#fff8e1;border:2px solid #ffc107;border-radius:8px;padding:12px;margin:10px 0;font-size:12px}
+.warn .icon{margin-right:6px}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:bold;color:white;margin:0 2px}
+.badge-p0{background:#e74c3c}
+.badge-p1{background:#e67e22}
+.badge-p2{background:#f39c12}
+.badge-p3{background:#27ae60}
+.badge-bo{background:#2980b9}
+.badge-sm{background:#e67e22}
+.badge-unified{background:#27ae60}
+.badge-breaking{background:#e74c3c}
+.conclusion-box{background:#f0f7ff;border:2px solid #2980b9;border-radius:10px;padding:20px;margin:16px 0}
+.conclusion-box p{font-size:13px;line-height:1.8;color:#555;margin-top:10px}
+.conclusion-box p:first-child{margin-top:0}
+.compare-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:16px 0}
+.compare-box{border-radius:10px;padding:20px}
+.compare-left{background:#eaf2f8;border:2px solid #2980b9}
+.compare-right{background:#fdf2e9;border:2px solid #e67e22}
+.compare-box h4{margin-bottom:12px;font-size:15px}
+.compare-box ul{list-style:none;padding:0}
+.compare-box li{font-size:13px;margin:8px 0;padding:6px 10px;border-radius:4px}
+.compare-left li{background:rgba(255,255,255,0.6)}
+.compare-right li{background:rgba(255,255,255,0.6)}
+.split-flow{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:12px 0}
+.split-flow .iface{margin:0}
+.split-label{text-align:center;font-weight:bold;font-size:13px;margin-bottom:6px;padding:4px 8px;border-radius:6px;color:white}
+.bg-bo{background:#2980b9}
+.bg-sm{background:#e67e22}
+.bg-unified{background:#27ae60}
+.bg-breaking{background:#e74c3c}
+.phase-box{border:2px solid;border-radius:10px;padding:18px;margin:12px 0}
+.phase-box h4{margin-bottom:8px}
+.phase-1{border-color:#e74c3c;background:#fef5f5}
+.phase-2{border-color:#e67e22;background:#fef9f0}
+.phase-3{border-color:#f39c12;background:#fefbf0}
+.phase-4{border-color:#27ae60;background:#f0faf0}
+.phase-5{border-color:#2980b9;background:#f0f7ff}
+.step-list{list-style:none;padding:0;counter-reset:step}
+.step-list li{counter-increment:step;padding:8px 12px;margin:6px 0;border-radius:6px;font-size:13px;position:relative;padding-left:40px}
+.step-list li::before{content:counter(step);position:absolute;left:8px;top:8px;background:#2c3e50;color:white;width:22px;height:22px;border-radius:50%;text-align:center;line-height:22px;font-size:11px;font-weight:bold}
+.step-current{background:#eaf2f8;border-left:3px solid #2980b9}
+.step-new{background:#eafaf1;border-left:3px solid #27ae60}
+.step-modify{background:#fdf2e9;border-left:3px solid #e67e22}
+.step-remove{background:#fdecec;border-left:3px solid #e74c3c;text-decoration:line-through;opacity:0.6}
+.metric{text-align:center;padding:16px;border-radius:8px;margin:8px 0}
+.metric .num{font-size:28px;font-weight:bold;color:#2c3e50}
+.metric .label{font-size:12px;color:#7f8c8d;margin-top:4px}
+.metrics-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:16px 0}
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>统一融合方案 — 业务对象图与服务模块图</h1>
+<div class="subtitle">标准化定义 · 接口规范 · 完整流程 · 集成策略 · 技术架构</div>
+
+<div class="metrics-row">
+    <div class="metric" style="background:#fdecec"><div class="num">5</div><div class="label">当前差异点</div></div>
+    <div class="metric" style="background:#fef9f0"><div class="num">3</div><div class="label">融合阶段</div></div>
+    <div class="metric" style="background:#eafaf1"><div class="num">7</div><div class="label">统一接口</div></div>
+    <div class="metric" style="background:#f0f7ff"><div class="num">12</div><div class="label">重构步骤</div></div>
+</div>
+
+<!-- ============================================================ -->
+<!-- PART 0: 融合目标与预期价值 -->
+<!-- ============================================================ -->
+<div class="section">
+<h2>零、融合核心目标与预期价值</h2>
+
+<h3>0.1 核心目标</h3>
+
+<div class="conclusion-box">
+<p style="font-size:14px;line-height:1.8;color:#2c3e50;">
+<strong>消除BO图与SM图在代码层面的不对称性，建立统一的图表构建管线，使两种图表类型成为同一管线的两种输出模式，而非两套独立实现。</strong>
+</p>
+<p style="font-size:13px;line-height:1.8;color:#555;margin-top:10px;">
+具体目标：
+</p>
+<ul style="font-size:13px;line-height:1.8;color:#555;margin-top:6px;padding-left:20px;">
+<li><strong>统一标识策略：</strong>所有节点使用code作为唯一标识（id=code），消除name/code双标识的复杂度</li>
+<li><strong>统一颜色计算：</strong>颜色在构建层统一计算，写入node.color，渲染层仅做格式转换</li>
+<li><strong>统一构建接口：</strong>使用配置对象模式替代15+个独立参数，两种图共享同一构建函数签名</li>
+<li><strong>统一分组模型：</strong>SM图直接使用ChartType.SERVICE_MODULE构建3层分组，消除BO类型workaround</li>
+<li><strong>统一Store交互：</strong>两种图都通过相同机制回写layoutControlConfig，状态管理策略一致</li>
+</ul>
+</div>
+
+<h3>0.2 预期价值</h3>
+
+<table class="data-table">
+    <tr><th>维度</th><th>当前状态</th><th>融合后</th><th>价值量化</th></tr>
+    <tr><td>代码重复</td><td>2套独立构建器（116+464行）</td><td>1套统一构建器（~350行）</td><td>减少约230行重复代码</td></tr>
+    <tr><td>颜色一致性</td><td>双路径独立计算，可能不一致</td><td>单路径计算，保证一致</td><td>消除1类一致性bug</td></tr>
+    <tr><td>参数遗漏风险</td><td>15个独立参数，已出过遗漏bug</td><td>1个配置对象，类型安全</td><td>消除1类参数遗漏bug</td></tr>
+    <tr><td>新增图表类型成本</td><td>需新建独立Builder + Syntax（~500行）</td><td>仅需新增ChartTypeConfig + 适配器（~100行）</td><td>开发成本降低80%</td></tr>
+    <tr><td>调试定位时间</td><td>需在2套代码中追踪数据流</td><td>1套管线，追踪路径清晰</td><td>调试时间减少50%</td></tr>
+</table>
+
+</div>
+
+<!-- ============================================================ -->
+<!-- PART 1: 业务对象标准化定义与数据模型设计 -->
+<!-- ============================================================ -->
+<div class="section">
+<h2>一、业务对象标准化定义与数据模型设计</h2>
+
+<h3>1.1 统一节点模型（UnifiedDiagramNode）</h3>
+
+<div class="iface">
+    <div class="title">统一节点模型 — 消除BO/SM节点结构差异</div>
+<pre>export interface UnifiedDiagramNode {
+  id: string                    // 统一使用 code 作为 id（不再使用 name）
+  code: string                  // 实体编码（全局唯一）
+  name: string                  // 实体名称（显示用）
+  entityType: EntityType        // 'BUSINESS_OBJECT' | 'SERVICE_MODULE'
+  domain: string                // 所属领域
+  subDomain: string             // 所属子领域
+  serviceModule?: string        // 所属服务模块编码（仅BO节点有）
+  serviceModuleName?: string    // 所属服务模块名称（仅BO节点有）
+  color: string                 // 构建时计算的颜色（HEX）
+  textColor: string             // 文字颜色
+  isCenter: boolean             // 是否中心范围
+  annotationCategory: string    // 标注类别
+  annotationContent: string     // 标注内容
+}</pre>
+</div>
+
+<h3>1.2 统一连线模型（UnifiedDiagramLink）</h3>
+
+<div class="iface">
+    <div class="title">统一连线模型 — 消除BO/SM连线结构差异</div>
+<pre>export interface UnifiedDiagramLink {
+  source: string                // 源节点 code（不再使用 name）
+  target: string                // 目标节点 code
+  sourceCode: string            // 源编码（冗余，与source相同）
+  targetCode: string            // 目标编码
+  label?: string                // 关系标签
+  tooltip?: string              // 提示信息
+  relationCode: string          // 关系编码
+  relationDesc?: string         // 关系描述
+  sourceBoRelations?: string[]  // 聚合来源（SM关系专用）
+  annotationCategory: string
+  annotationContent: string
+}</pre>
+</div>
+
+<h3>1.3 统一图表数据模型（UnifiedDiagramData）</h3>
+
+<div class="iface">
+    <div class="title">统一图表数据模型 — 两种图共享同一输出结构</div>
+<pre>export interface UnifiedDiagramData {
+  chartType: ChartType              // 'businessObject' | 'serviceModule'
+  nodes: UnifiedDiagramNode[]       // 统一节点数组
+  links: UnifiedDiagramLink[]       // 统一连线数组
+  containers: UnifiedContainer[]    // 统一容器数组
+  colorGroupBy: string              // 颜色分组方式
+  colorScheme: string               // 配色方案
+  centerScopeColor: string          // 中心范围颜色
+  nodeTextColor: string             // 节点文字颜色
+  layoutTemplate: string            // 布局模板
+  layoutControlConfig: object       // 分组控制配置
+  groupControlTitleMap: object      // 分组标题映射
+  customColors: object              // 自定义颜色
+  hideLinkLabelTails: boolean       // 隐藏连线标签尾部
+}
+
+export interface UnifiedContainer {
+  id: string                        // 容器ID
+  name: string                      // 容器名称
+  fullTitle: string                 // 完整标题
+  domain: string                    // 所属领域
+  domainCode: string                // 领域编码
+  subDomainName: string             // 子领域名称
+  color: string                     // 容器背景色
+  nodes: UnifiedContainerNode[]     // 容器内节点
+}
+
+export interface UnifiedContainerNode {
+  id: string                        // 节点code
+  name: string                      // 节点名称
+  code: string                      // 节点编码
+  entityType: EntityType            // 节点类型标识
+}</pre>
+</div>
+
+<h3>1.4 统一构建配置模型（DiagramBuildConfig）</h3>
+
+<div class="iface">
+    <div class="title">统一构建配置 — 替代15+个独立参数</div>
+<pre>export interface DiagramBuildConfig {
+  chartType: ChartType
+  
+  data: {
+    businessObjects: BusinessObject[]
+    serviceModules: ServiceModule[]
+    relationships: Relationship[]           // BO关系（原始）
+    serviceModuleRelationships?: ServiceModuleRelationship[]  // SM关系（推导）
+    domainProducts: DomainProduct[]
+  }
+  
+  scope: {
+    centerScope: string[]                   // 中心范围BO编码
+    finalBoCodes: Set&lt;string&gt;               // 最终显示范围
+    centerServiceModuleCodes?: string[]     // 中心范围SM编码（SM图专用）
+  }
+  
+  style: {
+    colorGroupBy: string
+    colorScheme: string
+    centerScopeColor: string
+    nodeTextColor: string
+    customColors: object
+  }
+  
+  layout: {
+    layoutTemplate: string
+    layoutControlConfig: object | null
+    groupControlTitleMap: object
+    hideLinkLabelTails: boolean
+  }
+}</pre>
+</div>
+
+</div>
+
+<!-- ============================================================ -->
+<!-- PART 2: 服务模块间的接口规范与通信协议 -->
+<!-- ============================================================ -->
+<div class="section">
+<h2>二、服务模块间的接口规范与通信协议</h2>
+
+<h3>2.1 统一构建器接口（DiagramBuilder）</h3>
+
+<div class="iface">
+    <div class="title">统一图表构建器 — 两种图共享同一构建入口</div>
+<pre>export class DiagramBuilder {
+  constructor(private config: DiagramBuildConfig) {}
+  
+  build(): UnifiedDiagramData {
+    const { chartType, data, scope, style, layout } = this.config
+    
+    // 1. 统一过滤（共享逻辑）
+    const filteredData = this.filterByScope(data, scope)
+    
+    // 2. 统一颜色计算（共享逻辑）
+    const colorContext = this.computeColors(filteredData, style, scope)
+    
+    // 3. 按图表类型构建节点（分化点）
+    const nodes = this.buildNodes(filteredData, colorContext, scope)
+    
+    // 4. 按图表类型构建连线（分化点）
+    const links = this.buildLinks(filteredData, scope)
+    
+    // 5. 统一容器构建（共享逻辑）
+    const containers = this.buildContainers(filteredData)
+    
+    return {
+      chartType,
+      nodes,
+      links,
+      containers,
+      ...style,
+      ...layout
+    }
+  }
+  
+  // 共享方法
+  private filterByScope(data, scope): FilteredData
+  private computeColors(data, style, scope): ColorContext
+  private buildContainers(data): UnifiedContainer[]
+  
+  // 分化方法（由chartType决定行为）
+  private buildNodes(data, colorContext, scope): UnifiedDiagramNode[]
+  private buildLinks(data, scope): UnifiedDiagramLink[]
+}</pre>
+</div>
+
+<h3>2.2 颜色计算统一接口</h3>
+
+<div class="iface">
+    <div class="title">ColorCalculator — 统一颜色计算，消除双路径问题</div>
+<pre>export class ColorCalculator {
+  // 统一入口：构建层计算颜色
+  static compute(config: {
+    nodes: Array&lt;{ code: string; domain: string; subDomain: string; isCenter: boolean }&gt;
+    colorGroupBy: string
+    colorScheme: string
+    centerScopeColor: string
+    customColors: object
+  }): Map&lt;string, string&gt; {
+    const { nodes, colorGroupBy, colorScheme, centerScopeColor, customColors } = config
+    const colors = COLOR_SCHEMES[colorScheme] || COLOR_SCHEMES.default
+    const colorMap = new Map&lt;string, string&gt;()
+    
+    // 1. 按colorGroupBy分组
+    const groupKeys = new Map&lt;string, string&gt;()
+    nodes.forEach(node => {
+      const key = colorGroupBy === 'subDomain' ? node.subDomain 
+                : colorGroupBy === 'serviceModule' ? node.serviceModule 
+                : node.domain
+      groupKeys.set(node.code, key)
+    })
+    
+    // 2. 为每个分组分配颜色
+    const uniqueGroups = [...new Set(groupKeys.values())]
+    const groupColorMap = new Map&lt;string, string&gt;()
+    uniqueGroups.forEach((group, index) => {
+      groupColorMap.set(group, customColors[group] || colors[index % colors.length])
+    })
+    
+    // 3. 逐节点计算最终颜色
+    nodes.forEach(node => {
+      const baseColor = groupColorMap.get(groupKeys.get(node.code)) || colors[0]
+      const finalColor = node.isCenter ? centerScopeColor : baseColor
+      colorMap.set(node.code, finalColor)
+    })
+    
+    return colorMap
+  }
+}</pre>
+</div>
+
+<h3>2.3 组件间通信协议</h3>
+
+<table class="data-table">
+    <tr><th>通信方向</th><th>协议</th><th>数据载体</th><th>当前方式</th><th>融合后</th></tr>
+    <tr><td>Store → 构建器</td><td>配置读取</td><td>DiagramBuildConfig</td><td>逐字段computed</td><td>整体配置对象</td></tr>
+    <tr><td>构建器 → 渲染层</td><td>数据传递</td><td>UnifiedDiagramData</td><td>diagramData ref</td><td>不变（ref）</td></tr>
+    <tr><td>渲染层 → Store</td><td>状态回写</td><td>layoutControlConfig</td><td>仅SM图回写</td><td>统一回写</td></tr>
+    <tr><td>配置页 → 构建器</td><td>颜色查询</td><td>colorMap（共享）</td><td>独立计算</td><td>从构建结果读取</td></tr>
+    <tr><td>用户交互 → Store</td><td>配置更新</td><td>centerScope等</td><td>直接更新</td><td>不变</td></tr>
+</table>
+
+</div>
+
+<!-- ============================================================ -->
+<!-- PART 3: 完整流程设计 -->
+<!-- ============================================================ -->
+<div class="section">
+<h2>三、从配置数据输入到图表渲染输出的完整流程设计</h2>
+
+<h3>3.1 统一管线架构</h3>
+
+<div class="iface">
+    <div class="title">统一图表构建管线 — 7个阶段，3个分化点</div>
+<pre>┌─────────────────────────────────────────────────────────────────────┐
+│                    统一图表构建管线 (Unified Pipeline)                │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  Stage 1: 数据输入（共享）                                          │
+│  ┌──────────┐    ┌──────────────────────────────────────────┐       │
+│  │ Excel文件 │ → │ previewData: { BO, SM, DP, Rel }         │       │
+│  └──────────┘    └──────────────────────────────────────────┘       │
+│                                                                     │
+│  Stage 2: 范围计算（共享）                                          │
+│  ┌──────────┐    ┌──────────────────────────────────────────┐       │
+│  │ 用户选择  │ → │ finalBoCodes = centerScope ∪ relationScope│      │
+│  │ centerScope│   │ centerScopeMarkers (响应式)              │       │
+│  └──────────┘    └──────────────────────────────────────────┘       │
+│                                                                     │
+│  Stage 3: 数据过滤（共享）                                          │
+│  ┌──────────────────────────────────────────────────────────┐       │
+│  │ filteredBO, filteredSM, filteredRel, filteredDP          │       │
+│  │ isCenter 自底向上计算: BO→SM→SubDomain→Domain             │       │
+│  └──────────────────────────────────────────────────────────┘       │
+│                                                                     │
+│  [DECORATIVE] 分化点 A: 关系处理                                               │
+│  ┌────────────────────┐  ┌────────────────────────────┐             │
+│  │ BO图: 直接使用Rel   │  │ SM图: computedSMRelations() │             │
+│  └────────────────────┘  └────────────────────────────┘             │
+│                                                                     │
+│  Stage 4: 颜色计算（统一）[DECORATIVE] 核心融合点                              │
+│  ┌──────────────────────────────────────────────────────────┐       │
+│  │ ColorCalculator.compute() → colorMap: Map&lt;code, color&gt;   │       │
+│  │ 两种图使用相同算法：isCenter→centerColor, else→baseColor  │       │
+│  └──────────────────────────────────────────────────────────┘       │
+│                                                                     │
+│  [DECORATIVE] 分化点 B: 节点/连线构建                                          │
+│  ┌────────────────────┐  ┌────────────────────────────┐             │
+│  │ BO图: buildBONodes  │  │ SM图: buildSMNodes          │             │
+│  │ id=code(统一!)      │  │ id=code(统一!)              │             │
+│  │ color从colorMap读取  │  │ color从colorMap读取          │             │
+│  └────────────────────┘  └────────────────────────────┘             │
+│                                                                     │
+│  Stage 5: 分组模型构建（统一）                                       │
+│  ┌──────────────────────────────────────────────────────────┐       │
+│  │ buildGroupModelFromArchitecture(data, chartType)          │       │
+│  │ [DECORATIVE] SM图直接使用 ChartType.SERVICE_MODULE（消除workaround） │       │
+│  │ GroupModel.fromUserConfig(groups, userConfig, chartType)  │       │
+│  │ groupModel.toMermaidConfig() → layoutControlConfig        │       │
+│  └──────────────────────────────────────────────────────────┘       │
+│                                                                     │
+│  Stage 6: 渲染语法生成（分化）[DECORATIVE] 分化点 C                            │
+│  ┌────────────────────┐  ┌────────────────────────────┐             │
+│  │ BO图: BOSyntaxGen   │  │ SM图: SMSyntaxGen           │             │
+│  │ 直接使用node.color   │  │ 直接使用node.color           │             │
+│  │ 无需重新计算颜色     │  │ 无需重新计算颜色             │             │
+│  └────────────────────┘  └────────────────────────────┘             │
+│                                                                     │
+│  Stage 7: 图表渲染（共享）                                          │
+│  ┌──────────────────────────────────────────────────────────┐       │
+│  │ MermaidComponent / mxGraphComponent                      │       │
+│  └──────────────────────────────────────────────────────────┘       │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘</pre>
+</div>
+
+<h3>3.2 各阶段输入输出规范</h3>
+
+<table class="data-table">
+    <tr><th>阶段</th><th>输入</th><th>输出</th><th>共享/分化</th><th>关键转换</th></tr>
+    <tr><td>1. 数据输入</td><td>Excel文件</td><td>previewData</td><td><span class="badge badge-unified">共享</span></td><td>一对一映射</td></tr>
+    <tr><td>2. 范围计算</td><td>centerScope + relationScope</td><td>finalBoCodes + centerScopeMarkers</td><td><span class="badge badge-unified">共享</span></td><td>并集计算</td></tr>
+    <tr><td>3. 数据过滤</td><td>previewData + finalBoCodes</td><td>filteredBO/SM/Rel/DP</td><td><span class="badge badge-unified">共享</span></td><td>范围过滤 + isCenter计算</td></tr>
+    <tr><td>3a. 关系推导</td><td>filteredRel + BO→SM映射</td><td>serviceModuleRelationships</td><td><span class="badge badge-sm">SM分化</span></td><td>N:1聚合</td></tr>
+    <tr><td>4. 颜色计算</td><td>filteredNodes + style + scope</td><td>colorMap</td><td><span class="badge badge-unified">共享</span></td><td>统一ColorCalculator</td></tr>
+    <tr><td>5a. BO节点构建</td><td>filteredBO + colorMap</td><td>UnifiedDiagramNode[]</td><td><span class="badge badge-bo">BO分化</span></td><td>id=code, color从colorMap</td></tr>
+    <tr><td>5b. SM节点构建</td><td>filteredSM + colorMap</td><td>UnifiedDiagramNode[]</td><td><span class="badge badge-sm">SM分化</span></td><td>id=code, color从colorMap</td></tr>
+    <tr><td>6. 分组模型</td><td>filteredDP + chartType</td><td>layoutControlConfig</td><td><span class="badge badge-unified">共享</span></td><td>chartType驱动分化</td></tr>
+    <tr><td>7. 渲染生成</td><td>UnifiedDiagramData</td><td>Mermaid/mxGraph代码</td><td><span class="badge badge-unified">共享</span></td><td>直接使用node.color</td></tr>
+</table>
+
+</div>
+
+<!-- ============================================================ -->
+<!-- PART 4: 依赖关系与集成策略 -->
+<!-- ============================================================ -->
+<div class="section">
+<h2>四、各模块间的依赖关系与集成策略</h2>
+
+<h3>4.1 当前依赖关系 vs 融合后依赖关系</h3>
+
+<div class="compare-grid">
+    <div class="compare-box compare-left">
+        <h4>当前依赖（不对称）</h4>
+        <ul>
+            <li><strong>BO图：</strong>diagramDataBuilder(116行) → useBusinessObjectSyntax(1073行)</li>
+            <li><strong>SM图：</strong>serviceModuleDiagramBuilder(464行) → useServiceModuleSyntax(437行)</li>
+            <li><strong>颜色：</strong>BO图渲染层计算 / SM图构建层计算</li>
+            <li><strong>分组：</strong>BO图用BUSINESS_OBJECT / SM图用BUSINESS_OBJECT再转SERVICE_MODULE</li>
+            <li><strong>Store：</strong>SM图回写 / BO图不回写</li>
+            <li><strong>标识：</strong>BO图id=name / SM图id=code</li>
+        </ul>
+    </div>
+    <div class="compare-box compare-right">
+        <h4>融合后依赖（对称）</h4>
+        <ul>
+            <li><strong>统一：</strong>DiagramBuilder(~350行) → SyntaxGenerator(BO:~600行 / SM:~400行)</li>
+            <li><strong>颜色：</strong>ColorCalculator（构建层统一计算）</li>
+            <li><strong>分组：</strong>buildGroupModelFromArchitecture(data, chartType) 直接使用对应类型</li>
+            <li><strong>Store：</strong>统一回写layoutControlConfig</li>
+            <li><strong>标识：</strong>统一id=code</li>
+            <li><strong>配置：</strong>DiagramBuildConfig配置对象</li>
+        </ul>
+    </div>
+</div>
+
+<h3>4.2 模块集成策略</h3>
+
+<h4>策略一：渐进式融合（推荐）</h4>
+
+<div class="phase-box phase-1">
+<h4><span class="badge badge-p0">P0</span> Phase 1: 统一标识策略（无破坏性变更）</h4>
+<ol class="step-list">
+    <li class="step-modify">修改 buildNodes()：BO节点id从bo.name改为bo.code</li>
+    <li class="step-modify">修改 buildLinks()：连线source/target从name改为code</li>
+    <li class="step-modify">修改 useBusinessObjectSyntax.js：适配id=code，移除nodeNameToIdMap</li>
+    <li class="step-current">验证：BO图功能正常，所有节点和连线正确显示</li>
+</ol>
+</div>
+
+<div class="phase-box phase-2">
+<h4><span class="badge badge-p1">P1</span> Phase 2: 统一颜色计算（中等变更）</h4>
+<ol class="step-list">
+    <li class="step-new">新建 ColorCalculator.js：统一颜色计算逻辑</li>
+    <li class="step-modify">修改 diagramDataBuilder.js：buildNodes()中调用ColorCalculator，写入node.color</li>
+    <li class="step-modify">修改 useBusinessObjectSyntax.js：移除内联颜色计算，直接使用node.color</li>
+    <li class="step-modify">修改 GroupItem.vue：从diagramData.nodes读取颜色，不再独立计算</li>
+    <li class="step-current">验证：BO图和SM图颜色一致，配置页面颜色与图表颜色一致</li>
+</ol>
+</div>
+
+<div class="phase-box phase-3">
+<h4><span class="badge badge-p2">P2</span> Phase 3: 统一构建接口（较大变更）</h4>
+<ol class="step-list">
+    <li class="step-new">新建 DiagramBuildConfig 类型定义</li>
+    <li class="step-new">新建 DiagramBuilder.js：统一构建入口</li>
+    <li class="step-modify">修改 useDiagramData.js：generateDiagram()使用DiagramBuildConfig</li>
+    <li class="step-remove">废弃 diagramDataBuilder.js 和 serviceModuleDiagramBuilder.js 的独立导出</li>
+    <li class="step-current">验证：两种图通过统一入口构建，输出结构一致</li>
+</ol>
+</div>
+
+<div class="phase-box phase-4">
+<h4><span class="badge badge-p3">P3</span> Phase 4: 修复分组模型workaround（架构优化）</h4>
+<ol class="step-list">
+    <li class="step-modify">修改 architectureProcessor.js：buildServiceModuleGroupModel()直接构建3层分组</li>
+    <li class="step-modify">修改 useDiagramData.js：SM图使用ChartType.SERVICE_MODULE构建分组</li>
+    <li class="step-modify">统一Store回写：BO图和SM图都回写layoutControlConfig</li>
+    <li class="step-current">验证：SM图分组构建不再依赖BO类型workaround</li>
+</ol>
+</div>
+
+<div class="phase-box phase-5">
+<h4><span class="badge badge-unified">P4</span> Phase 5: 清理与文档（收尾）</h4>
+<ol class="step-list">
+    <li class="step-remove">移除 diagramDataBuilder.js（已被DiagramBuilder替代）</li>
+    <li class="step-remove">移除 serviceModuleDiagramBuilder.js（已被DiagramBuilder替代）</li>
+    <li class="step-remove">移除 useMermaidColors.js（已被ColorCalculator替代）</li>
+    <li class="step-modify">清理所有console.log调试语句</li>
+    <li class="step-new">更新类型定义和接口文档</li>
+</ol>
+</div>
+
+<h3>4.3 关键冲突与解决策略</h3>
+
+<table class="data-table">
+    <tr><th>冲突点</th><th>风险等级</th><th>影响范围</th><th>解决策略</th></tr>
+    <tr>
+        <td>BO图id从name改为code</td>
+        <td><span class="badge badge-p0">高</span></td>
+        <td>useBusinessObjectSyntax.js、Mermaid渲染、节点查找</td>
+        <td>Phase 1优先处理；Mermaid节点引用需全部更新；提供name→code映射过渡期</td>
+    </tr>
+    <tr>
+        <td>颜色计算从渲染层移到构建层</td>
+        <td><span class="badge badge-p1">中</span></td>
+        <td>useBusinessObjectSyntax.js（1073行→~600行）</td>
+        <td>Phase 2处理；先建ColorCalculator，再逐步迁移；保留旧路径作为fallback</td>
+    </tr>
+    <tr>
+        <td>SM图分组构建去掉workaround</td>
+        <td><span class="badge badge-p2">中</span></td>
+        <td>architectureProcessor.js、useDiagramData.js</td>
+        <td>Phase 4处理；需确保GroupModel.fromUserConfig对3层分组的支持完整</td>
+    </tr>
+    <tr>
+        <td>统一Store回写</td>
+        <td><span class="badge badge-p3">低</span></td>
+        <td>diagramConfigStore.js</td>
+        <td>Phase 4处理；BO图增加回写逻辑，SM图保持不变</td>
+    </tr>
+</table>
+
+</div>
+
+<!-- ============================================================ -->
+<!-- PART 5: 技术架构设计 -->
+<!-- ============================================================ -->
+<div class="section">
+<h2>五、确保系统一致性与可扩展性的技术架构设计</h2>
+
+<h3>5.1 分层架构</h3>
+
+<div class="iface">
+    <div class="title">统一分层架构 — 5层结构，清晰职责</div>
+<pre>┌─────────────────────────────────────────────────────────┐
+│  Layer 5: 表现层 (Presentation)                         │
+│  ┌───────────────────────────────────────────────────┐  │
+│  │ MermaidComponent / mxGraphComponent               │  │
+│  │ StepScope / StepConfig / LayoutControlPanel       │  │
+│  │ GroupItem.vue                                     │  │
+│  └───────────────────────────────────────────────────┘  │
+│                          ↓↑                             │
+│  Layer 4: 渲染层 (Rendering)                            │
+│  ┌───────────────────────────────────────────────────┐  │
+│  │ BOSyntaxGenerator / SMSyntaxGenerator             │  │
+│  │ 职责：UnifiedDiagramData → Mermaid/mxGraph代码     │  │
+│  │ 特点：仅做格式转换，不计算颜色                      │  │
+│  └───────────────────────────────────────────────────┘  │
+│                          ↓↑                             │
+│  Layer 3: 构建层 (Building)                             │
+│  ┌───────────────────────────────────────────────────┐  │
+│  │ DiagramBuilder (统一入口)                          │  │
+│  │ ├─ ColorCalculator (统一颜色)                      │  │
+│  │ ├─ BONodeBuilder / SMNodeBuilder (节点分化)        │  │
+│  │ ├─ BOLinkBuilder / SMLinkBuilder (连线分化)        │  │
+│  │ └─ ContainerBuilder (统一容器)                     │  │
+│  └───────────────────────────────────────────────────┘  │
+│                          ↓↑                             │
+│  Layer 2: 模型层 (Model)                                │
+│  ┌───────────────────────────────────────────────────┐  │
+│  │ GroupModel / architectureProcessor / types.js      │  │
+│  │ ChartTypeConfig / DiagramBuildConfig               │  │
+│  │ computedServiceModuleRelations (关系推导)           │  │
+│  └───────────────────────────────────────────────────┘  │
+│                          ↓↑                             │
+│  Layer 1: 数据层 (Data)                                 │
+│  ┌───────────────────────────────────────────────────┐  │
+│  │ useExcelParser → previewData                       │  │
+│  │ diagramConfigStore (Pinia)                         │  │
+│  └───────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘</pre>
+</div>
+
+<h3>5.2 一致性保障机制</h3>
+
+<table class="data-table">
+    <tr><th>一致性维度</th><th>当前问题</th><th>融合后机制</th><th>验证方式</th></tr>
+    <tr>
+        <td>颜色一致性</td>
+        <td>配置页面和图表独立计算颜色</td>
+        <td>ColorCalculator单一来源；配置页面从diagramData.nodes读取颜色</td>
+        <td>端到端测试：配置页颜色 === 图表颜色</td>
+    </tr>
+    <tr>
+        <td>标识一致性</td>
+        <td>BO图id=name, SM图id=code</td>
+        <td>统一id=code；消除nodeNameToIdMap</td>
+        <td>类型检查：id类型始终为code格式</td>
+    </tr>
+    <tr>
+        <td>状态一致性</td>
+        <td>SM图回写Store，BO图不回写</td>
+        <td>统一回写机制；generateDiagram后统一更新Store</td>
+        <td>集成测试：切换图表类型后layoutControlConfig正确</td>
+    </tr>
+    <tr>
+        <td>分组一致性</td>
+        <td>SM图用BO类型构建分组</td>
+        <td>直接使用ChartType.SERVICE_MODULE构建3层分组</td>
+        <td>单元测试：分组层级与ChartTypeConfig一致</td>
+    </tr>
+</table>
+
+<h3>5.3 可扩展性设计</h3>
+
+<div class="iface">
+    <div class="title">新增图表类型的扩展点</div>
+<pre>// 新增图表类型只需3步：
+
+// Step 1: 在 ChartTypeConfig 中定义新类型
+export const ChartTypeConfig = {
+  ...existingTypes,
+  [ChartType.NEW_TYPE]: {
+    groupHierarchy: [GroupType.DOMAIN, GroupType.SUB_DOMAIN],
+    visibleInControlPanel: [GroupType.DOMAIN],
+    terminalTypes: [GroupType.SUB_DOMAIN],
+    defaultExpandDepth: 1,
+    defaultDirection: 'LR'
+  }
+}
+
+// Step 2: 在 DiagramBuilder 中新增节点/连线构建方法
+private buildNewTypeNodes(data, colorContext, scope): UnifiedDiagramNode[] {
+  // 仅需实现节点构建逻辑
+  // 颜色计算、过滤、分组模型已由管线统一处理
+}
+
+private buildNewTypeLinks(data, scope): UnifiedDiagramLink[] {
+  // 仅需实现连线构建逻辑
+}
+
+// Step 3: 新增渲染语法生成器
+class NewTypeSyntaxGenerator {
+  generate(data: UnifiedDiagramData): string {
+    // 直接使用 data.nodes[].color，无需计算颜色
+  }
+}
+
+// 无需修改的部分：
+// - ColorCalculator（自动适配新节点类型）
+// - GroupModel（通过ChartTypeConfig自动适配）
+// - diagramConfigStore（通过chartType字段自动适配）
+// - useDiagramData.generateDiagram()（通过DiagramBuildConfig自动适配）</pre>
+</div>
+
+<h3>5.4 核心结论</h3>
+
+<div class="conclusion-box">
+<p style="font-size:14px;line-height:1.8;color:#2c3e50;">
+<strong>融合的本质是"从两套管线回归一套管线"。</strong>
+</p>
+<p style="font-size:13px;line-height:1.8;color:#555;margin-top:10px;">
+当前系统中BO图和SM图虽然共享了部分基础设施（GroupModel、diagramConfigStore、architectureProcessor），但在最关键的构建层和渲染层存在严重的职责分配不对称：BO图是"瘦构建+胖渲染"，SM图是"胖构建+瘦渲染"。这种不对称导致了颜色双路径计算、标识策略不一致、参数遗漏等一系列问题。
+</p>
+<p style="font-size:13px;line-height:1.8;color:#555;margin-top:10px;">
+融合方案的核心是建立<strong>统一图表构建管线</strong>，将两种图的共同逻辑（过滤、颜色计算、分组模型、容器构建）提升到共享层，仅将节点/连线构建和渲染语法生成作为分化点。这样既保留了两者的功能差异，又消除了代码重复和一致性风险。
+</p>
+<p style="font-size:13px;line-height:1.8;color:#555;margin-top:10px;">
+<strong>5个统一化要点：</strong>
+</p>
+<ul style="font-size:13px;line-height:1.8;color:#555;margin-top:6px;padding-left:20px;">
+<li>统一标识：id=code，消除name/code双标识</li>
+<li>统一颜色：ColorCalculator构建层计算，渲染层直接使用</li>
+<li>统一接口：DiagramBuildConfig配置对象，替代15+参数</li>
+<li>统一分组：SM图直接用SERVICE_MODULE类型，消除workaround</li>
+<li>统一状态：两种图统一回写Store，状态管理一致</li>
+</ul>
+<p style="font-size:13px;line-height:1.8;color:#555;margin-top:10px;">
+<strong>渐进式实施策略：</strong>4个Phase按优先级递减实施，每个Phase独立可验证，不依赖后续Phase。Phase 1（统一标识）风险最高但价值最大，应优先实施；Phase 5（清理收尾）风险最低，最后实施。整体预计减少约230行重复代码，消除2类一致性bug，新增图表类型开发成本降低80%。
+</p>
+</div>
+
+</div>
+
+</div>
+</body>
+</html>

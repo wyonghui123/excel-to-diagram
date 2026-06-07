@@ -1,0 +1,54 @@
+{
+  "url": "http://localhost:3004/system/archdata?productId=1&versionId=2",
+  "title": "架构数据管理 - ArchWorkspace",
+  "has_table": true,
+  "has_form": false,
+  "has_tabs": true,
+  "has_search": true,
+  "has_new_btn": true,
+  "has_delete": false,
+  "has_edit": false,
+  "tab_names": [
+    "领域",
+    "子领域",
+    "服务模块",
+    "业务对象",
+    "关联关系"
+  ],
+  "button_names": [
+    "架构数据管理",
+    "切换",
+    "展开全部",
+    "收起全部",
+    "全选",
+    "清空",
+    "刷新",
+    "新建",
+    "搜索",
+    "重置",
+    "更多",
+    "确定"
+  ],
+  "field_names": [
+    "搜索业务对象",
+    "页",
+    "输入搜索",
+    "开始时间",
+    "结束时间",
+    "开始日期",
+    "结束日期"
+  ],
+  "table_columns": [
+    "源编码",
+    "源业务对象",
+    "目标编码",
+    "目标业务对象",
+    "关系编码",
+    "关系类型",
+    "方向",
+    "关系范围",
+    "描述",
+    "创建时间",
+    "更新时间"
+  ]
+}

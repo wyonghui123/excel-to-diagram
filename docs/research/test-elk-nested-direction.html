@@ -1,0 +1,1304 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ELK 嵌套容器方向测试</title>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    import elkLayouts from 'https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk@0.1.7/dist/mermaid-layout-elk.esm.min.mjs';
+    
+    window.mermaid = mermaid;
+    window.elkLayouts = elkLayouts;
+  </script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f5;
+      padding: 20px;
+    }
+    
+    .container {
+      max-width: 1600px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    
+    h1 {
+      text-align: center;
+      color: #333;
+      margin-bottom: 10px;
+    }
+    
+    .subtitle {
+      text-align: center;
+      color: #666;
+      margin-bottom: 30px;
+    }
+    
+    .controls {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    .control-group {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    
+    .control-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    label {
+      font-weight: 500;
+      color: #555;
+    }
+    
+    select, button {
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    
+    button {
+      background: #1890ff;
+      color: white;
+      border: none;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    
+    button:hover {
+      background: #40a9ff;
+    }
+    
+    .test-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 30px;
+    }
+    
+    .test-card {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+    
+    .test-header {
+      background: #fafafa;
+      padding: 15px 20px;
+      border-bottom: 1px solid #eee;
+    }
+    
+    .test-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 5px;
+    }
+    
+    .test-desc {
+      font-size: 13px;
+      color: #666;
+    }
+    
+    .test-content {
+      padding: 20px;
+      min-height: 500px;
+    }
+    
+    .mermaid-container {
+      background: #fafafa;
+      border: 1px dashed #ddd;
+      border-radius: 4px;
+      padding: 20px;
+      min-height: 450px;
+      overflow: auto;
+    }
+
+    .mermaid-container svg {
+      max-width: 100%;
+      height: auto;
+    }
+    
+    .code-block {
+      background: #f6f8fa;
+      border: 1px solid #e1e4e8;
+      border-radius: 4px;
+      padding: 12px;
+      margin-top: 10px;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 12px;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    
+    .status {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 3px;
+      font-size: 12px;
+      margin-left: 10px;
+    }
+    
+    .status.success {
+      background: #f6ffed;
+      color: #52c41a;
+      border: 1px solid #b7eb8f;
+    }
+    
+    .status.error {
+      background: #fff2f0;
+      color: #ff4d4f;
+      border: 1px solid #ffccc7;
+    }
+    
+    .status.loading {
+      background: #e6f7ff;
+      color: #1890ff;
+      border: 1px solid #91d5ff;
+    }
+    
+    .toggle-code {
+      font-size: 12px;
+      color: #1890ff;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+    
+    .toggle-code:hover {
+      text-decoration: underline;
+    }
+    
+    .legend {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    .legend h3 {
+      margin-bottom: 15px;
+      color: #333;
+    }
+    
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+    
+    .legend-color {
+      width: 20px;
+      height: 20px;
+      border-radius: 4px;
+      border: 1px solid #ddd;
+    }
+    
+    .notes {
+      background: #fffbe6;
+      border: 1px solid #ffe58f;
+      border-radius: 4px;
+      padding: 15px;
+      margin-top: 20px;
+    }
+    
+    .notes h4 {
+      color: #d48806;
+      margin-bottom: 10px;
+    }
+    
+    .notes ul {
+      margin-left: 20px;
+      color: #666;
+    }
+    
+    .notes li {
+      margin-bottom: 5px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>[SYMBOL] ELK 嵌套容器方向测试</h1>
+    <p class="subtitle">测试 ELK 布局引擎下嵌套容器内节点和容器的排列方向，以及连线的影响</p>
+    
+    <div class="legend">
+      <h3>[CLIPBOARD] 测试说明</h3>
+      <div class="legend-item">
+        <div class="legend-color" style="background: #e6f7ff;"></div>
+        <span><strong>外层分组 (Group)</strong>: 包含多个子容器</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background: #f6ffed;"></div>
+        <span><strong>内层容器 (Container)</strong>: 包含实际节点</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background: #fff7e6;"></div>
+        <span><strong>节点 (Node)</strong>: 实际业务对象</span>
+      </div>
+      <div class="legend-item">
+        <span>[SYMBOL] <strong>透明连线 (~~~)</strong>: 用于保持容器内节点方向</span>
+      </div>
+    </div>
+    
+    <div class="controls">
+      <div class="control-group">
+        <div class="control-item">
+          <label>布局引擎:</label>
+          <select id="layoutEngine">
+            <option value="elk" selected>ELK</option>
+            <option value="dagre">Dagre</option>
+          </select>
+        </div>
+        <div class="control-item">
+          <label>整体方向:</label>
+          <select id="overallDirection">
+            <option value="TB" selected>TB (从上到下)</option>
+            <option value="LR">LR (从左到右)</option>
+            <option value="BT">BT (从下到上)</option>
+            <option value="RL">RL (从右到左)</option>
+          </select>
+        </div>
+        <div class="control-item">
+          <label>容器内方向:</label>
+          <select id="containerDirection">
+            <option value="TB">TB (从上到下)</option>
+            <option value="LR" selected>LR (从左到右)</option>
+            <option value="same">与整体相同</option>
+            <option value="opposite">与整体相反</option>
+          </select>
+        </div>
+        <div class="control-item">
+          <label>连线测试:</label>
+          <select id="linkTest">
+            <option value="none">无外部连线</option>
+            <option value="cross" selected>跨容器连线</option>
+            <option value="internal">仅内部连线</option>
+            <option value="mixed">混合连线</option>
+          </select>
+        </div>
+        <div class="control-item">
+          <label>透明连线:</label>
+          <select id="invisibleLinks">
+            <option value="without" selected>不添加 ~~~</option>
+            <option value="with">添加 ~~~</option>
+          </select>
+        </div>
+        <button onclick="runAllTests()">[DECORATIVE] 运行所有测试</button>
+      </div>
+    </div>
+    
+    <div class="test-grid" id="testGrid">
+      <!-- 测试卡片将通过 JS 生成 -->
+    </div>
+    
+    <div class="notes">
+      <h4>[DECORATIVE] 关键发现</h4>
+      <ul>
+        <li><strong>Issue #5864</strong>: 当子图有外部连线时，内部方向会被忽略</li>
+        <li><strong>解决方案</strong>: 添加透明不可见连线 (~~~) 可以"欺骗"ELK保持内部方向</li>
+        <li><strong>方向控制</strong>: ELK 使用 elk.direction 配置 (DOWN/RIGHT/LEFT/UP)</li>
+        <li><strong>嵌套层级</strong>: 使用 elk.hierarchyHandling: INCLUDE_CHILDREN 支持嵌套结构</li>
+      </ul>
+    </div>
+  </div>
+
+  <script>
+    // 测试场景定义
+    const testScenarios = [
+      {
+        id: 'basic-nested',
+        title: '基础嵌套容器',
+        description: '最简单的两层嵌套：一个分组包含两个容器',
+        generateCode: (config) => generateBasicNested(config)
+      },
+      {
+        id: 'multi-level',
+        title: '多级嵌套',
+        description: '三层嵌套：分组 > 子分组 > 容器',
+        generateCode: (config) => generateMultiLevel(config)
+      },
+      {
+        id: 'sibling-containers',
+        title: '同级多容器',
+        description: '一个分组包含多个同级容器，测试容器排列方向',
+        generateCode: (config) => generateSiblingContainers(config)
+      },
+      {
+        id: 'cross-links',
+        title: '跨容器连线影响',
+        description: '测试跨容器连线对容器内节点方向的影响',
+        generateCode: (config) => generateCrossLinks(config)
+      },
+      {
+        id: 'mixed-direction',
+        title: '混合方向容器',
+        description: '同一分组内不同容器使用不同方向',
+        generateCode: (config) => generateMixedDirection(config)
+      },
+      {
+        id: 'real-world',
+        title: '真实场景模拟',
+        description: '模拟实际业务对象图的嵌套结构',
+        generateCode: (config) => generateRealWorld(config)
+      },
+      {
+        id: 'separate-by-link',
+        title: '按连线分离容器',
+        description: '无连线容器 vs 有连线容器：验证无连线容器方向是否被尊重',
+        generateCode: (config) => generateSeparateByLink(config)
+      },
+      {
+        id: 'mixed-vs-separated',
+        title: '混合容器 vs 分离容器',
+        description: '对比混合存放 vs 分离存放：验证分离后无连线容器是否被尊重',
+        generateCode: (config) => generateMixedVsSeparated(config)
+      },
+      {
+        id: 'nested-separated',
+        title: '嵌套分离容器',
+        description: 'C、D作为A的嵌套子容器：测试嵌套结构下无连线子容器方向是否被尊重',
+        generateCode: (config) => generateNestedSeparated(config)
+      },
+      {
+        id: 'internal-links-only',
+        title: '仅内部连线容器',
+        description: '无外部连线的容器内有2个节点有内部连线：验证内部连线是否影响容器方向',
+        generateCode: (config) => generateInternalLinksOnly(config)
+      }
+    ];
+
+    // 生成基础嵌套容器代码
+    function generateBasicNested(config) {
+      const { layoutEngine, overallDirection, containerDirection, invisibleLinks } = config;
+      const dir = containerDirection === 'same' ? overallDirection :
+                  containerDirection === 'opposite' ? getOppositeDirection(overallDirection) :
+                  containerDirection;
+
+      const graphKeyword = layoutEngine === 'elk' ? 'flowchart-elk' : 'flowchart';
+      let code = `${graphKeyword} ${overallDirection}\n`;
+      code += `  subgraph G1["分组 1"]\n`;
+      code += `    direction ${overallDirection}\n`;
+      code += `    subgraph C1["容器 A"]\n`;
+      code += `      direction ${dir}\n`;
+      code += `      A1["节点 A1"]\n`;
+      code += `      A2["节点 A2"]\n`;
+      code += `      A3["节点 A3"]\n`;
+      if (invisibleLinks === 'with') {
+        code += `      A1 ~~~ A2\n`;
+        code += `      A2 ~~~ A3\n`;
+      }
+      code += `    end\n`;
+      code += `    subgraph C2["容器 B"]\n`;
+      code += `      direction ${dir}\n`;
+      code += `      B1["节点 B1"]\n`;
+      code += `      B2["节点 B2"]\n`;
+      if (invisibleLinks === 'with') {
+        code += `      B1 ~~~ B2\n`;
+      }
+      code += `    end\n`;
+      code += `  end\n`;
+      
+      // 根据连线测试添加连线
+      if (config.linkTest === 'cross') {
+        code += `  A2 --> B1\n`;
+      } else if (config.linkTest === 'internal') {
+        code += `  A1 --> A2\n`;
+        code += `  A2 --> A3\n`;
+      } else if (config.linkTest === 'mixed') {
+        code += `  A1 --> A2\n`;
+        code += `  A2 --> B1\n`;
+        code += `  B1 --> B2\n`;
+      }
+      
+      return code;
+    }
+
+    // 生成多级嵌套代码
+    function generateMultiLevel(config) {
+      const { layoutEngine, overallDirection, containerDirection, invisibleLinks } = config;
+      const dir = containerDirection === 'same' ? overallDirection :
+                  containerDirection === 'opposite' ? getOppositeDirection(overallDirection) :
+                  containerDirection;
+      const graphKeyword = layoutEngine === 'elk' ? 'flowchart-elk' : 'flowchart';
+
+      let code = `${graphKeyword} ${overallDirection}\n`;
+      code += `  subgraph G1["父分组"]\n`;
+      code += `    direction ${overallDirection}\n`;
+      code += `    subgraph G1_1["子分组 1"]\n`;
+      code += `      direction ${overallDirection}\n`;
+      code += `      subgraph C1["容器 A"]\n`;
+      code += `        direction ${dir}\n`;
+      code += `        A1["节点 A1"]\n`;
+      code += `        A2["节点 A2"]\n`;
+      if (invisibleLinks === 'with') {
+        code += `        A1 ~~~ A2\n`;
+      }
+      code += `      end\n`;
+      code += `    end\n`;
+      code += `    subgraph G1_2["子分组 2"]\n`;
+      code += `      direction ${overallDirection}\n`;
+      code += `      subgraph C2["容器 B"]\n`;
+      code += `        direction ${dir}\n`;
+      code += `        B1["节点 B1"]\n`;
+      code += `        B2["节点 B2"]\n`;
+      if (invisibleLinks === 'with') {
+        code += `        B1 ~~~ B2\n`;
+      }
+      code += `      end\n`;
+      code += `    end\n`;
+      code += `  end\n`;
+      
+      if (config.linkTest !== 'none') {
+        code += `  A1 --> B1\n`;
+      }
+      
+      return code;
+    }
+
+    // 生成同级多容器代码
+    function generateSiblingContainers(config) {
+      const { layoutEngine, overallDirection, containerDirection, invisibleLinks } = config;
+      const dir = containerDirection === 'same' ? overallDirection :
+                  containerDirection === 'opposite' ? getOppositeDirection(overallDirection) :
+                  containerDirection;
+      const graphKeyword = layoutEngine === 'elk' ? 'flowchart-elk' : 'flowchart';
+
+      let code = `${graphKeyword} ${overallDirection}\n`;
+      code += `  subgraph G1["多容器分组"]\n`;
+      code += `    direction ${overallDirection}\n`;
+      
+      const containers = ['A', 'B', 'C', 'D'];
+      containers.forEach((c, i) => {
+        code += `    subgraph C${i+1}["容器 ${c}"]\n`;
+        code += `      direction ${dir}\n`;
+        code += `      ${c}1["节点 ${c}1"]\n`;
+        code += `      ${c}2["节点 ${c}2"]\n`;
+        if (invisibleLinks === 'with') {
+          code += `      ${c}1 ~~~ ${c}2\n`;
+        }
+        code += `    end\n`;
+      });
+      
+      code += `  end\n`;
+      
+      if (config.linkTest === 'cross') {
+        code += `  A1 --> B1\n`;
+        code += `  B1 --> C1\n`;
+        code += `  C1 --> D1\n`;
+      }
+      
+      return code;
+    }
+
+    // 生成跨容器连线测试代码
+    function generateCrossLinks(config) {
+      const { layoutEngine, overallDirection, invisibleLinks } = config;
+      const graphKeyword = layoutEngine === 'elk' ? 'flowchart-elk' : 'flowchart';
+
+      let code = `${graphKeyword} ${overallDirection}\n`;
+      code += `  subgraph G1["跨容器连线测试"]\n`;
+      code += `    direction ${overallDirection}\n`;
+      
+      // 容器1 - 多个节点
+      code += `    subgraph C1["源容器 (多节点)"]\n`;
+      code += `      direction LR\n`;
+      code += `      S1["源 1"]\n`;
+      code += `      S2["源 2"]\n`;
+      code += `      S3["源 3"]\n`;
+      if (invisibleLinks === 'with') {
+        code += `      S1 ~~~ S2\n`;
+        code += `      S2 ~~~ S3\n`;
+      }
+      code += `    end\n`;
+      
+      // 容器2 - 多个节点
+      code += `    subgraph C2["目标容器 (多节点)"]\n`;
+      code += `      direction LR\n`;
+      code += `      T1["目标 1"]\n`;
+      code += `      T2["目标 2"]\n`;
+      code += `      T3["目标 3"]\n`;
+      if (invisibleLinks === 'with') {
+        code += `      T1 ~~~ T2\n`;
+        code += `      T2 ~~~ T3\n`;
+      }
+      code += `    end\n`;
+      
+      code += `  end\n`;
+      
+      // 多种连线模式
+      code += `  S1 --> T1\n`;
+      code += `  S2 --> T2\n`;
+      code += `  S3 --> T3\n`;
+      
+      return code;
+    }
+
+    // 生成混合方向容器代码
+    function generateMixedDirection(config) {
+      const { layoutEngine, overallDirection, invisibleLinks } = config;
+      const graphKeyword = layoutEngine === 'elk' ? 'flowchart-elk' : 'flowchart';
+
+      let code = `${graphKeyword} ${overallDirection}\n`;
+      code += `  subgraph G1["混合方向测试"]\n`;
+      code += `    direction ${overallDirection}\n`;
+      
+      // TB 方向容器
+      code += `    subgraph C1["TB 方向容器"]\n`;
+      code += `      direction TB\n`;
+      code += `      A1["顶部"]\n`;
+      code += `      A2["中部"]\n`;
+      code += `      A3["底部"]\n`;
+      if (invisibleLinks === 'with') {
+        code += `      A1 ~~~ A2\n`;
+        code += `      A2 ~~~ A3\n`;
+      }
+      code += `    end\n`;
+      
+      // LR 方向容器
+      code += `    subgraph C2["LR 方向容器"]\n`;
+      code += `      direction LR\n`;
+      code += `      B1["左侧"]\n`;
+      code += `      B2["中间"]\n`;
+      code += `      B3["右侧"]\n`;
+      if (invisibleLinks === 'with') {
+        code += `      B1 ~~~ B2\n`;
+        code += `      B2 ~~~ B3\n`;
+      }
+      code += `    end\n`;
+      
+      code += `  end\n`;
+      
+      if (config.linkTest !== 'none') {
+        code += `  A2 --> B2\n`;
+      }
+      
+      return code;
+    }
+
+    // 生成真实场景模拟代码
+    function generateRealWorld(config) {
+      const { layoutEngine, overallDirection, containerDirection, invisibleLinks } = config;
+      const dir = containerDirection === 'same' ? overallDirection :
+                  containerDirection === 'opposite' ? getOppositeDirection(overallDirection) :
+                  containerDirection;
+      const graphKeyword = layoutEngine === 'elk' ? 'flowchart-elk' : 'flowchart';
+
+      let code = `${graphKeyword} ${overallDirection}\n`;
+      
+      // 财务域
+      code += `  subgraph G_FIN["财务域"]\n`;
+      code += `    direction ${overallDirection}\n`;
+      code += `    subgraph C_FIN_GL["总账模块"]\n`;
+      code += `      direction ${dir}\n`;
+      code += `      FIN_GL_1["凭证管理"]\n`;
+      code += `      FIN_GL_2["账簿查询"]\n`;
+      code += `      FIN_GL_3["期末处理"]\n`;
+      if (invisibleLinks === 'with') {
+        code += `      FIN_GL_1 ~~~ FIN_GL_2\n`;
+        code += `      FIN_GL_2 ~~~ FIN_GL_3\n`;
+      }
+      code += `    end\n`;
+      code += `    subgraph C_FIN_AP["应付模块"]\n`;
+      code += `      direction ${dir}\n`;
+      code += `      FIN_AP_1["供应商管理"]\n`;
+      code += `      FIN_AP_2["发票处理"]\n`;
+      if (invisibleLinks === 'with') {
+        code += `      FIN_AP_1 ~~~ FIN_AP_2\n`;
+      }
+      code += `    end\n`;
+      code += `  end\n`;
+      
+      // 采购域
+      code += `  subgraph G_PUR["采购域"]\n`;
+      code += `    direction ${overallDirection}\n`;
+      code += `    subgraph C_PUR_PO["采购订单"]\n`;
+      code += `      direction ${dir}\n`;
+      code += `      PUR_PO_1["订单创建"]\n`;
+      code += `      PUR_PO_2["订单审批"]\n`;
+      code += `      PUR_PO_3["订单跟踪"]\n`;
+      if (invisibleLinks === 'with') {
+        code += `      PUR_PO_1 ~~~ PUR_PO_2\n`;
+        code += `      PUR_PO_2 ~~~ PUR_PO_3\n`;
+      }
+      code += `    end\n`;
+      code += `  end\n`;
+      
+      // 跨域连线
+      if (config.linkTest !== 'none') {
+        code += `  FIN_AP_2 --> PUR_PO_1\n`;
+        code += `  PUR_PO_3 --> FIN_GL_1\n`;
+      }
+      
+      return code;
+    }
+
+    // 生成按连线分离容器代码
+    // 核心测试：三种容器类型对比
+    // 1. 无内部连线 - 只有节点，无任何连线
+    // 2. 有内部连线 - 只有内部连线，无外部连线
+    // 3. 有外部连线 - 有内部连线 + 跨容器外部连线
+    function generateSeparateByLink(config) {
+      const { layoutEngine, overallDirection, invisibleLinks } = config;
+      const graphKeyword = layoutEngine === 'elk' ? 'flowchart-elk' : 'flowchart';
+
+      let code = `${graphKeyword} ${overallDirection}\n`;
+
+      // 分组：库存管理
+      code += `  subgraph G_INV["库存管理"]\n`;
+      code += `    direction ${overallDirection}\n`;
+
+      // 类型1: 无内部连线的容器 - 只有节点，没有任何连线
+      code += `    subgraph INV_NO_INT_LINK["库存_无内部连线"]\n`;
+      code += `      direction TB\n`;  // 期望这个方向被尊重
+      code += `      INV_NIL_1["库存类型"]\n`;
+      code += `      INV_NIL_2["库存参数"]\n`;
+      code += `      INV_NIL_3["仓库物料关系"]\n`;
+      // 无任何连线
+      if (invisibleLinks === 'with') {
+        code += `      INV_NIL_1 ~~~ INV_NIL_2\n`;
+        code += `      INV_NIL_2 ~~~ INV_NIL_3\n`;
+      }
+      code += `    end\n`;
+
+      // 类型2: 有内部连线的容器 - 只有内部连线，无外部连线
+      code += `    subgraph INV_INT_LINK["库存_有内部连线"]\n`;
+      code += `      direction TB\n`;  // 期望这个方向被尊重
+      code += `      INV_IL_1["库存移动"]\n`;
+      code += `      INV_IL_2["库存盘点"]\n`;
+      code += `      INV_IL_3["库存调整"]\n`;
+      code += `      INV_IL_1 --> INV_IL_2\n`;  // 内部连线
+      code += `      INV_IL_2 --> INV_IL_3\n`;  // 内部连线
+      if (invisibleLinks === 'with') {
+        code += `      INV_IL_1 ~~~ INV_IL_2\n`;
+        code += `      INV_IL_2 ~~~ INV_IL_3\n`;
+      }
+      code += `    end\n`;
+
+      // 类型3: 有外部连线的容器 - 有内部连线 + 跨容器外部连线
+      code += `    subgraph INV_EXT_LINK["库存_有外部连线"]\n`;
+      code += `      direction TB\n`;  // 这个方向可能不生效
+      code += `      INV_EL_1["出库申请"]\n`;
+      code += `      INV_EL_2["采购入库单"]\n`;
+      code += `      INV_EL_1 --> INV_EL_2\n`;  // 内部连线
+      if (invisibleLinks === 'with') {
+        code += `      INV_EL_1 ~~~ INV_EL_2\n`;
+      }
+      code += `    end\n`;
+
+      code += `  end\n`;
+
+      // 分组：采购管理
+      code += `  subgraph G_PUR["采购管理"]\n`;
+      code += `    direction ${overallDirection}\n`;
+
+      // 类型1: 无内部连线的容器
+      code += `    subgraph PUR_NO_INT_LINK["采购_无内部连线"]\n`;
+      code += `      direction TB\n`;
+      code += `      PUR_NIL_1["价格汇总单"]\n`;
+      code += `      PUR_NIL_2["消耗结算单"]\n`;
+      code += `      PUR_NIL_3["物料限价表"]\n`;
+      // 无任何连线
+      if (invisibleLinks === 'with') {
+        code += `      PUR_NIL_1 ~~~ PUR_NIL_2\n`;
+        code += `      PUR_NIL_2 ~~~ PUR_NIL_3\n`;
+      }
+      code += `    end\n`;
+
+      // 类型2: 有内部连线的容器
+      code += `    subgraph PUR_INT_LINK["采购_有内部连线"]\n`;
+      code += `      direction TB\n`;
+      code += `      PUR_IL_1["采购订单"]\n`;
+      code += `      PUR_IL_2["采购到货"]\n`;
+      code += `      PUR_IL_3["采购发票"]\n`;
+      code += `      PUR_IL_1 --> PUR_IL_2\n`;  // 内部连线
+      code += `      PUR_IL_2 --> PUR_IL_3\n`;  // 内部连线
+      if (invisibleLinks === 'with') {
+        code += `      PUR_IL_1 ~~~ PUR_IL_2\n`;
+        code += `      PUR_IL_2 ~~~ PUR_IL_3\n`;
+      }
+      code += `    end\n`;
+
+      // 类型3: 有外部连线的容器
+      code += `    subgraph PUR_EXT_LINK["采购_有外部连线"]\n`;
+      code += `      direction TB\n`;
+      code += `      PUR_EL_1["请购单"]\n`;
+      code += `      PUR_EL_2["采购申请"]\n`;
+      code += `      PUR_EL_1 --> PUR_EL_2\n`;  // 内部连线
+      if (invisibleLinks === 'with') {
+        code += `      PUR_EL_1 ~~~ PUR_EL_2\n`;
+      }
+      code += `    end\n`;
+
+      code += `  end\n`;
+
+      // 跨容器外部连线 - 只连接"有外部连线"类型的容器
+      if (config.linkTest !== 'none') {
+        code += `  INV_EL_1 --> PUR_EL_1\n`;  // 库存_有外部连线 --> 采购_有外部连线
+        code += `  PUR_EL_2 --> INV_EL_2\n`;  // 采购_有外部连线 --> 库存_有外部连线
+      }
+
+      return code;
+    }
+
+    // 生成混合容器 vs 分离容器对比代码
+    // 情况1: 混合容器 - 所有节点混合在一个容器，有外部连线的节点也在其中
+    // 情况2: 分离容器 - 有外部连线的节点单独分离出来，无外部连线的节点在一起
+    function generateMixedVsSeparated(config) {
+      const { layoutEngine, overallDirection, invisibleLinks } = config;
+      const graphKeyword = layoutEngine === 'elk' ? 'flowchart-elk' : 'flowchart';
+
+      let code = `${graphKeyword} ${overallDirection}\n`;
+
+      // ==================== 情况1: 混合容器 ====================
+      code += `  %% ===== 情况1: 混合容器 =====\n`;
+      code += `  subgraph MIXED["情况1_混合容器"]\n`;
+      code += `    direction ${overallDirection}\n`;
+
+      // 容器A: A1-A18 全部混合（有外部连线的A1和A12也在其中）
+      // 注意：容器内无任何内部连线，只有外部连线
+      code += `    subgraph CONTAINER_A["容器A (A1-A18全部混合)"]\n`;
+      code += `      direction TB\n`;  // 期望：可能不生效（因为有外部连线）
+      code += `      A1["A1"]\n`;
+      code += `      A2["A2"]\n`;
+      code += `      A3["A3"]\n`;
+      code += `      A4["A4"]\n`;
+      code += `      A5["A5"]\n`;
+      code += `      A6["A6"]\n`;
+      code += `      A7["A7"]\n`;
+      code += `      A8["A8"]\n`;
+      code += `      A9["A9"]\n`;
+      code += `      A10["A10"]\n`;
+      code += `      A11["A11"]\n`;
+      code += `      A12["A12"]\n`;
+      code += `      A13["A13"]\n`;
+      code += `      A14["A14"]\n`;
+      code += `      A15["A15"]\n`;
+      code += `      A16["A16"]\n`;
+      code += `      A17["A17"]\n`;
+      code += `      A18["A18"]\n`;
+      // 无任何内部连线
+      if (invisibleLinks === 'with') {
+        code += `      A1 ~~~ A2\n`;
+        code += `      A2 ~~~ A3\n`;
+        code += `      A3 ~~~ A4\n`;
+        code += `      A4 ~~~ A5\n`;
+        code += `      A5 ~~~ A6\n`;
+        code += `      A6 ~~~ A7\n`;
+        code += `      A7 ~~~ A8\n`;
+        code += `      A8 ~~~ A9\n`;
+        code += `      A9 ~~~ A10\n`;
+        code += `      A10 ~~~ A11\n`;
+        code += `      A11 ~~~ A12\n`;
+        code += `      A12 ~~~ A13\n`;
+        code += `      A13 ~~~ A14\n`;
+        code += `      A14 ~~~ A15\n`;
+        code += `      A15 ~~~ A16\n`;
+        code += `      A16 ~~~ A17\n`;
+        code += `      A17 ~~~ A18\n`;
+      }
+      code += `    end\n`;
+
+      // 容器B: B1-B3 - 同样无内部连线
+      code += `    subgraph CONTAINER_B["容器B (B1-B3)"]\n`;
+      code += `      direction TB\n`;
+      code += `      B1["B1"]\n`;
+      code += `      B2["B2"]\n`;
+      code += `      B3["B3"]\n`;
+      // 无任何内部连线
+      if (invisibleLinks === 'with') {
+        code += `      B1 ~~~ B2\n`;
+        code += `      B2 ~~~ B3\n`;
+      }
+      code += `    end\n`;
+
+      // 跨容器外部连线
+      code += `    A1 --> B1\n`;  // A1 -> B1
+      code += `    B2 --> A12\n`;  // B2 -> A12
+
+      code += `  end\n`;
+
+      // ==================== 情况2: 分离容器 ====================
+      code += `  %% ===== 情况2: 分离容器 =====\n`;
+      code += `  subgraph SEPARATED["情况2_分离容器"]\n`;
+      code += `    direction ${overallDirection}\n`;
+
+      // 容器C: A2-A11, A13-A18（无外部连线的节点）
+      // 注意：容器内无任何内部连线
+      code += `    subgraph CONTAINER_C["容器C (无外部连线节点)"]\n`;
+      code += `      direction TB\n`;  // 期望：应该被尊重
+      code += `      C_A2["A2"]\n`;
+      code += `      C_A3["A3"]\n`;
+      code += `      C_A4["A4"]\n`;
+      code += `      C_A5["A5"]\n`;
+      code += `      C_A6["A6"]\n`;
+      code += `      C_A7["A7"]\n`;
+      code += `      C_A8["A8"]\n`;
+      code += `      C_A9["A9"]\n`;
+      code += `      C_A10["A10"]\n`;
+      code += `      C_A11["A11"]\n`;
+      code += `      C_A13["A13"]\n`;
+      code += `      C_A14["A14"]\n`;
+      code += `      C_A15["A15"]\n`;
+      code += `      C_A16["A16"]\n`;
+      code += `      C_A17["A17"]\n`;
+      code += `      C_A18["A18"]\n`;
+      // 无任何内部连线
+      if (invisibleLinks === 'with') {
+        code += `      C_A2 ~~~ C_A3\n`;
+        code += `      C_A3 ~~~ C_A4\n`;
+        code += `      C_A4 ~~~ C_A5\n`;
+        code += `      C_A5 ~~~ C_A6\n`;
+        code += `      C_A6 ~~~ C_A7\n`;
+        code += `      C_A7 ~~~ C_A8\n`;
+        code += `      C_A8 ~~~ C_A9\n`;
+        code += `      C_A9 ~~~ C_A10\n`;
+        code += `      C_A10 ~~~ C_A11\n`;
+        code += `      C_A11 ~~~ C_A13\n`;
+        code += `      C_A13 ~~~ C_A14\n`;
+        code += `      C_A14 ~~~ C_A15\n`;
+        code += `      C_A15 ~~~ C_A16\n`;
+        code += `      C_A16 ~~~ C_A17\n`;
+        code += `      C_A17 ~~~ C_A18\n`;
+      }
+      code += `    end\n`;
+
+      // 容器D: A1, A12（只有有外部连线的节点）
+      // 注意：容器内无任何内部连线
+      code += `    subgraph CONTAINER_D["容器D (有外部连线节点)"]\n`;
+      code += `      direction TB\n`;  // 可能不生效
+      code += `      D_A1["A1"]\n`;
+      code += `      D_A12["A12"]\n`;
+      // 无任何内部连线
+      if (invisibleLinks === 'with') {
+        code += `      D_A1 ~~~ D_A12\n`;
+      }
+      code += `    end\n`;
+
+      // 容器E: B1-B3 - 同样无内部连线
+      code += `    subgraph CONTAINER_E["容器E (B1-B3)"]\n`;
+      code += `      direction TB\n`;
+      code += `      E_B1["B1"]\n`;
+      code += `      E_B2["B2"]\n`;
+      code += `      E_B3["B3"]\n`;
+      // 无任何内部连线
+      if (invisibleLinks === 'with') {
+        code += `      E_B1 ~~~ E_B2\n`;
+        code += `      E_B2 ~~~ E_B3\n`;
+      }
+      code += `    end\n`;
+
+      // 跨容器外部连线
+      code += `    D_A1 --> E_B1\n`;  // A1 -> B1
+      code += `    E_B2 --> D_A12\n`;  // B2 -> A12
+
+      code += `  end\n`;
+
+      return code;
+    }
+
+    // 生成嵌套分离容器测试代码
+    // 结构：外层容器A包含两个子容器C和D
+    // C: 无外部连线的节点 (A2-A11, A13-A18)
+    // D: 有外部连线的节点 (A1, A12)
+    function generateNestedSeparated(config) {
+      const { layoutEngine, overallDirection, invisibleLinks } = config;
+      const graphKeyword = layoutEngine === 'elk' ? 'flowchart-elk' : 'flowchart';
+
+      let code = `${graphKeyword} ${overallDirection}\n`;
+
+      // ==================== 情况1: 分离容器（非嵌套）====================
+      code += `  %% ===== 情况1: 分离容器（非嵌套，作为对照）=====\n`;
+      code += `  subgraph FLAT["情况1_分离容器_非嵌套"]\n`;
+      code += `    direction ${overallDirection}\n`;
+
+      // 容器C: A2-A11, A13-A18（无外部连线的节点）
+      code += `    subgraph FLAT_C["容器C (无外部连线)"]\n`;
+      code += `      direction TB\n`;  // 期望：应该被尊重
+      for (let i = 2; i <= 11; i++) {
+        code += `      FLAT_C_A${i}["A${i}"]\n`;
+      }
+      for (let i = 13; i <= 18; i++) {
+        code += `      FLAT_C_A${i}["A${i}"]\n`;
+      }
+      code += `      FLAT_C_A2 --> FLAT_C_A3\n`;  // 关键：容器C内部的连线（A2->A3）
+      if (invisibleLinks === 'with') {
+        for (let i = 2; i <= 10; i++) {
+          code += `      FLAT_C_A${i} ~~~ FLAT_C_A${i+1}\n`;
+        }
+        code += `      FLAT_C_A11 ~~~ FLAT_C_A13\n`;
+        for (let i = 13; i <= 17; i++) {
+          code += `      FLAT_C_A${i} ~~~ FLAT_C_A${i+1}\n`;
+        }
+      }
+      code += `    end\n`;
+
+      // 容器D: A1, A12（有外部连线的节点）
+      code += `    subgraph FLAT_D["容器D (有外部连线)"]\n`;
+      code += `      direction TB\n`;
+      code += `      FLAT_D_A1["A1"]\n`;
+      code += `      FLAT_D_A12["A12"]\n`;
+      if (invisibleLinks === 'with') {
+        code += `      FLAT_D_A1 ~~~ FLAT_D_A12\n`;
+      }
+      code += `    end\n`;
+
+      // 容器B
+      code += `    subgraph FLAT_B["容器B (B1-B3)"]\n`;
+      code += `      direction TB\n`;
+      code += `      FLAT_B1["B1"]\n`;
+      code += `      FLAT_B2["B2"]\n`;
+      code += `      FLAT_B3["B3"]\n`;
+      if (invisibleLinks === 'with') {
+        code += `      FLAT_B1 ~~~ FLAT_B2\n`;
+        code += `      FLAT_B2 ~~~ FLAT_B3\n`;
+      }
+      code += `    end\n`;
+
+      // 外部连线
+      code += `    FLAT_D_A1 --> FLAT_B1\n`;
+      code += `    FLAT_B2 --> FLAT_D_A12\n`;
+
+      code += `  end\n`;
+
+      // ==================== 情况2: 嵌套分离容器 ====================
+      code += `  %% ===== 情况2: 嵌套分离容器 (A包含C和D) =====\n`;
+      code += `  subgraph NESTED["情况2_嵌套分离容器"]\n`;
+      code += `    direction ${overallDirection}\n`;
+
+      // 外层容器A包含C和D两个子容器
+      code += `    subgraph NESTED_A["容器A (包含C和D)"]\n`;
+      code += `      direction ${overallDirection}\n`;  // 外层A的方向
+
+      // 子容器C: A2-A11, A13-A18（无外部连线的节点）
+      code += `      subgraph NESTED_C["子容器C (无外部连线)"]\n`;
+      code += `        direction TB\n`;  // 期望：应该被尊重
+      for (let i = 2; i <= 11; i++) {
+        code += `        NESTED_C_A${i}["A${i}"]\n`;
+      }
+      for (let i = 13; i <= 18; i++) {
+        code += `        NESTED_C_A${i}["A${i}"]\n`;
+      }
+      if (invisibleLinks === 'with') {
+        for (let i = 2; i <= 10; i++) {
+          code += `        NESTED_C_A${i} ~~~ NESTED_C_A${i+1}\n`;
+        }
+        code += `        NESTED_C_A11 ~~~ NESTED_C_A13\n`;
+        for (let i = 13; i <= 17; i++) {
+          code += `        NESTED_C_A${i} ~~~ NESTED_C_A${i+1}\n`;
+        }
+      }
+      code += `      end\n`;
+
+      // 子容器D: A1, A12（有外部连线的节点）
+      code += `      subgraph NESTED_D["子容器D (有外部连线)"]\n`;
+      code += `        direction TB\n`;  // 可能不生效
+      code += `        NESTED_D_A1["A1"]\n`;
+      code += `        NESTED_D_A12["A12"]\n`;
+      if (invisibleLinks === 'with') {
+        code += `        NESTED_D_A1 ~~~ NESTED_D_A12\n`;
+      }
+      code += `      end\n`;
+
+      code += `    end\n`;  // 结束容器A
+
+      // 容器B（在A外部）
+      code += `    subgraph NESTED_B["容器B (B1-B3)"]\n`;
+      code += `      direction TB\n`;
+      code += `      NESTED_B1["B1"]\n`;
+      code += `      NESTED_B2["B2"]\n`;
+      code += `      NESTED_B3["B3"]\n`;
+      if (invisibleLinks === 'with') {
+        code += `      NESTED_B1 ~~~ NESTED_B2\n`;
+        code += `      NESTED_B2 ~~~ NESTED_B3\n`;
+      }
+      code += `    end\n`;
+
+      // 外部连线（从A内部的D连到A外部的B）
+      code += `    NESTED_D_A1 --> NESTED_B1\n`;
+      code += `    NESTED_B2 --> NESTED_D_A12\n`;
+
+      code += `  end\n`;
+
+      // ==================== 情况3: 嵌套分离容器（容器C有内部连线） ====================
+      code += `  %% ===== 情况3: 嵌套分离容器（容器C有内部连线，无外部连线）=====\n`;
+      code += `  subgraph NESTED_INT_LINK["情况3_嵌套分离容器_容器C有内部连线"]\n`;
+      code += `    direction ${overallDirection}\n`;
+
+      // 外层容器A包含C和D两个子容器
+      code += `    subgraph NESTED_IL_A["容器A (包含C和D)"]\n`;
+      code += `      direction ${overallDirection}\n`;  // 外层A的方向
+
+      // 子容器C: 有内部连线的2个节点（无外部连线）
+      code += `      subgraph NESTED_IL_C["子容器C (有内部连线_无外部连线)"]\n`;
+      code += `        direction TB\n`;  // 核心测试：这个direction是否被尊重？
+      code += `        NESTED_IL_C_1["节点 C1"]\n`;
+      code += `        NESTED_IL_C_2["节点 C2"]\n`;
+      code += `        NESTED_IL_C_1 --> NESTED_IL_C_2\n`;  // 关键：内部连线
+      if (invisibleLinks === 'with') {
+        code += `        NESTED_IL_C_1 ~~~ NESTED_IL_C_2\n`;
+      }
+      code += `      end\n`;
+
+      // 子容器D: 有外部连线的节点
+      code += `      subgraph NESTED_IL_D["子容器D (有外部连线)"]\n`;
+      code += `        direction TB\n`;  // 可能不生效
+      code += `        NESTED_IL_D_1["节点 D1"]\n`;
+      code += `        NESTED_IL_D_2["节点 D2"]\n`;
+      if (invisibleLinks === 'with') {
+        code += `        NESTED_IL_D_1 ~~~ NESTED_IL_D_2\n`;
+      }
+      code += `      end\n`;
+
+      code += `    end\n`;  // 结束容器A
+
+      // 容器B（在A外部）
+      code += `    subgraph NESTED_IL_B["容器B (B1-B2)"]\n`;
+      code += `      direction TB\n`;
+      code += `      NESTED_IL_B1["节点 B1"]\n`;
+      code += `      NESTED_IL_B2["节点 B2"]\n`;
+      if (invisibleLinks === 'with') {
+        code += `      NESTED_IL_B1 ~~~ NESTED_IL_B2\n`;
+      }
+      code += `    end\n`;
+
+      // 外部连线（只有D有外部连线，C无外部连线）
+      code += `    NESTED_IL_D_1 --> NESTED_IL_B1\n`;
+      code += `    NESTED_IL_B2 --> NESTED_IL_D_2\n`;
+
+      code += `  end\n`;
+
+      return code;
+    }
+
+    // 生成仅内部连线测试代码
+    // 无外部连线的容器内有2个节点有内部连线
+    // 核心问题：内部连线是否会破坏容器的 direction 设置？
+    function generateInternalLinksOnly(config) {
+      const { layoutEngine, overallDirection, invisibleLinks } = config;
+      const graphKeyword = layoutEngine === 'elk' ? 'flowchart-elk' : 'flowchart';
+
+      let code = `${graphKeyword} ${overallDirection}\n`;
+
+      // ==================== 情况1: 有内部连线的容器 ====================
+      code += `  %% ===== 情况1: 有内部连线（2节点有连线）=====\n`;
+      code += `  subgraph INTERNAL_LINK["情况1_有内部连线"]\n`;
+      code += `    direction TB\n`;  // 期望：应该被尊重
+
+      code += `    IL_1["节点 1"]\n`;
+      code += `    IL_2["节点 2"]\n`;
+      code += `    IL_1 --> IL_2\n`;  // 内部连线
+
+      if (invisibleLinks === 'with') {
+        code += `    IL_1 ~~~ IL_2\n`;
+      }
+      code += `  end\n`;
+
+      // ==================== 情况2: 无内部连线的容器 ====================
+      code += `  %% ===== 情况2: 无内部连线（对照）=====\n`;
+      code += `  subgraph NO_LINK["情况2_无内部连线"]\n`;
+      code += `    direction TB\n`;  // 应该被尊重
+
+      code += `    NL_1["节点 1"]\n`;
+      code += `    NL_2["节点 2"]\n`;
+      // 无任何连线
+
+      if (invisibleLinks === 'with') {
+        code += `    NL_1 ~~~ NL_2\n`;
+      }
+      code += `  end\n`;
+
+      // ==================== 情况3: 有内部连线（3节点串联） ====================
+      code += `  %% ===== 情况3: 有内部连线（3节点串联）=====\n`;
+      code += `  subgraph INTERNAL_LINK_3["情况3_有内部连线_3节点"]\n`;
+      code += `    direction TB\n`;  // 期望：应该被尊重
+
+      code += `    IL3_1["节点 1"]\n`;
+      code += `    IL3_2["节点 2"]\n`;
+      code += `    IL3_3["节点 3"]\n`;
+      code += `    IL3_1 --> IL3_2\n`;  // 内部连线
+      code += `    IL3_2 --> IL3_3\n`;  // 内部连线
+
+      if (invisibleLinks === 'with') {
+        code += `    IL3_1 ~~~ IL3_2\n`;
+        code += `    IL3_2 ~~~ IL3_3\n`;
+      }
+      code += `  end\n`;
+
+      // ==================== 情况4: 仅透明连线（无真实连线） ====================
+      code += `  %% ===== 情况4: 仅透明连线（无任何连线）=====\n`;
+      code += `  subgraph INVISIBLE_ONLY["情况4_仅透明连线"]\n`;
+      code += `    direction TB\n`;  // 应该被尊重
+
+      code += `    IO_1["节点 1"]\n`;
+      code += `    IO_2["节点 2"]\n`;
+      // 无任何真实连线
+
+      if (invisibleLinks === 'with') {
+        code += `    IO_1 ~~~ IO_2\n`;
+      }
+      code += `  end\n`;
+
+      return code;
+    }
+
+    // 获取相反方向
+    function getOppositeDirection(dir) {
+      const opposites = { TB: 'LR', LR: 'TB', BT: 'RL', RL: 'BT' };
+      return opposites[dir] || 'LR';
+    }
+
+    // 获取当前配置
+    function getConfig() {
+      return {
+        layoutEngine: document.getElementById('layoutEngine').value,
+        overallDirection: document.getElementById('overallDirection').value,
+        containerDirection: document.getElementById('containerDirection').value,
+        linkTest: document.getElementById('linkTest').value,
+        invisibleLinks: document.getElementById('invisibleLinks').value
+      };
+    }
+
+    // 初始化 Mermaid
+    async function initMermaid() {
+      const { mermaid, elkLayouts } = window;
+      mermaid.registerLayoutLoaders(elkLayouts);
+
+      const config = getConfig();
+      const elkDirection = config.overallDirection === 'TB' ? 'DOWN' : 'RIGHT';
+
+      mermaid.initialize({
+        startOnLoad: false,
+        layout: config.layoutEngine,
+        elk: {
+          'elk.direction': elkDirection,
+          'elk.spacing.nodeNode': 80,
+          'elk.layered.spacing.nodeNodeBetweenLayers': 120,
+          'elk.padding': '[top=30,left=30,right=30,bottom=30]',
+          'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
+          'elk.algorithm': 'layered',
+        },
+        flowchart: {
+          htmlLabels: true,
+          useMaxWidth: false,
+          curve: 'basis'
+        }
+      });
+    }
+
+    // 渲染单个测试
+    async function renderTest(scenario) {
+      const config = getConfig();
+      const code = scenario.generateCode(config);
+      const containerId = `mermaid-${scenario.id}`;
+      const statusId = `status-${scenario.id}`;
+      const codeId = `code-${scenario.id}`;
+      
+      // 更新状态为加载中
+      document.getElementById(statusId).textContent = '渲染中...';
+      document.getElementById(statusId).className = 'status loading';
+      
+      try {
+        const { mermaid } = window;
+        const container = document.getElementById(containerId);
+        container.innerHTML = '';
+        
+        const result = await mermaid.render(`${scenario.id}-svg`, code);
+        container.innerHTML = result.svg;
+        
+        // 显示代码
+        document.getElementById(codeId).textContent = code;
+        
+        // 更新状态为成功
+        document.getElementById(statusId).textContent = '成功';
+        document.getElementById(statusId).className = 'status success';
+      } catch (error) {
+        console.error(`测试 ${scenario.id} 失败:`, error);
+        document.getElementById(containerId).innerHTML = `<div style="color: red; padding: 20px;">渲染失败: ${error.message}</div>`;
+        document.getElementById(codeId).textContent = code;
+        document.getElementById(statusId).textContent = '失败';
+        document.getElementById(statusId).className = 'status error';
+      }
+    }
+
+    // 运行所有测试
+    async function runAllTests() {
+      await initMermaid();
+      
+      for (const scenario of testScenarios) {
+        await renderTest(scenario);
+        // 稍微延迟，避免同时渲染导致的问题
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+
+    // 切换代码显示
+    function toggleCode(id) {
+      const codeBlock = document.getElementById(`code-${id}`);
+      codeBlock.style.display = codeBlock.style.display === 'none' ? 'block' : 'none';
+    }
+
+    // 生成测试卡片 HTML
+    function generateTestCards() {
+      const config = getConfig();
+      const engineLabel = config.layoutEngine.toUpperCase();
+      const grid = document.getElementById('testGrid');
+      grid.innerHTML = testScenarios.map(scenario => `
+        <div class="test-card">
+          <div class="test-header">
+            <div class="test-title">
+              [${engineLabel}] ${scenario.title}
+              <span id="status-${scenario.id}" class="status loading">等待中</span>
+            </div>
+            <div class="test-desc">${scenario.description}</div>
+          </div>
+          <div class="test-content">
+            <div id="mermaid-${scenario.id}" class="mermaid-container">
+              <div style="text-align: center; color: #999; padding: 50px;">
+                点击"运行所有测试"开始渲染
+              </div>
+            </div>
+            <div class="toggle-code" onclick="toggleCode('${scenario.id}')">[SYMBOL]️ 显示/隐藏 Mermaid 代码</div>
+            <div id="code-${scenario.id}" class="code-block" style="display: none;"></div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // 页面加载完成后初始化
+    document.addEventListener('DOMContentLoaded', () => {
+      generateTestCards();
+
+      // 监听配置变化，自动重新渲染
+      ['layoutEngine', 'overallDirection', 'containerDirection', 'linkTest', 'invisibleLinks'].forEach(id => {
+        document.getElementById(id).addEventListener('change', () => {
+          generateTestCards();
+        });
+      });
+    });
+  </script>
+</body>
+</html>

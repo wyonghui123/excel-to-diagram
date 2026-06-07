@@ -1,0 +1,58 @@
+id: role_data_permission
+name: 角色数据权限
+table_name: role_data_permissions
+description: 角色级别的数据访问权限配置，控制角色可访问的资源实例范围
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+
+  - id: role_id
+    name: 角色ID
+    type: integer
+    required: true
+    description: 关联的角色ID
+
+  - id: resource_type
+    name: 资源类型
+    type: string
+    required: true
+    description: 资源类型
+
+  - id: resource_id
+    name: 资源ID
+    type: integer
+    required: true
+    description: 资源实例ID
+
+  - id: permission_level
+    name: 权限级别
+    type: string
+    default: read
+    description: 权限级别
+
+  - id: inherit_to_children
+    name: 继承至子级
+    type: integer
+    default: 1
+    description: 是否继承至子资源
+
+  - id: created_at
+    name: 创建时间
+    type: timestamp
+    description: 创建时间
+
+  - id: created_by
+    name: 创建人
+    type: integer
+    description: 创建人ID
+
+category_config:
+  category: system
+  sub_category: permission
+  icon: "shield"
+  color: "#ef4444"

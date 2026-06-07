@@ -1,0 +1,2693 @@
+{
+  "ds1": {
+    "features": {
+      "export_import": 939,
+      "filter": 582,
+      "inline_edit": 107,
+      "batch_ops": 104,
+      "form_validation": 257,
+      "sort": 141,
+      "association": 144,
+      "pagination": 268,
+      "deep_insert": 106,
+      "conditional_logic": 29,
+      "calculated_field": 1
+    },
+    "obj_feature_pairs_count": 131
+  },
+  "ds2_summary": {
+    "total_specs": 56,
+    "v1_count": 52,
+    "v2_count": 29,
+    "soft_fail_count": 12,
+    "api_smoke_count": 0,
+    "avg_score": 70.03571428571429,
+    "low_score_count": 4
+  },
+  "ds2_specs": [
+    {
+      "file": "arch-data-crud-v2.spec.js",
+      "tests": 1,
+      "descs": 1,
+      "v1": false,
+      "v2": true,
+      "soft_fail": false,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 0,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": true,
+      "has_trace": false,
+      "score": 96,
+      "covered_cats": [
+        "export_import"
+      ]
+    },
+    {
+      "file": "arch-data-crud.spec.js",
+      "tests": 2,
+      "descs": 1,
+      "v1": true,
+      "v2": false,
+      "soft_fail": false,
+      "has_skip": true,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 24,
+      "has_isolation": false,
+      "has_withStep": false,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 51,
+      "covered_cats": [
+        "export_import",
+        "pagination"
+      ]
+    },
+    {
+      "file": "arch-data-filter-scope.spec.js",
+      "tests": 2,
+      "descs": 1,
+      "v1": true,
+      "v2": false,
+      "soft_fail": false,
+      "has_skip": true,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 19,
+      "has_isolation": false,
+      "has_withStep": false,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 51,
+      "covered_cats": [
+        "export_import",
+        "filter"
+      ]
+    },
+    {
+      "file": "association-crud.spec.js",
+      "tests": 4,
+      "descs": 1,
+      "v1": true,
+      "v2": true,
+      "soft_fail": false,
+      "has_skip": true,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 2,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": true,
+      "has_trace": false,
+      "score": 86,
+      "covered_cats": [
+        "association",
+        "export_import",
+        "filter"
+      ]
+    },
+    {
+      "file": "audit-log-actions.spec.js",
+      "tests": 7,
+      "descs": 1,
+      "v1": true,
+      "v2": false,
+      "soft_fail": false,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 6,
+      "has_isolation": false,
+      "has_withStep": false,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 63,
+      "covered_cats": [
+        "export_import",
+        "pagination"
+      ]
+    },
+    {
+      "file": "audit-log-base.spec.js",
+      "tests": 5,
+      "descs": 1,
+      "v1": true,
+      "v2": false,
+      "soft_fail": false,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 7,
+      "has_isolation": false,
+      "has_withStep": false,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 63,
+      "covered_cats": [
+        "export_import",
+        "filter"
+      ]
+    },
+    {
+      "file": "audit-log-embedded-access.spec.js",
+      "tests": 14,
+      "descs": 3,
+      "v1": true,
+      "v2": true,
+      "soft_fail": true,
+      "has_skip": true,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 15,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": true,
+      "has_trace": false,
+      "score": 70,
+      "covered_cats": [
+        "export_import"
+      ]
+    },
+    {
+      "file": "audit-log-filter.spec.js",
+      "tests": 7,
+      "descs": 1,
+      "v1": true,
+      "v2": false,
+      "soft_fail": false,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 14,
+      "has_isolation": false,
+      "has_withStep": false,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 63,
+      "covered_cats": [
+        "export_import",
+        "filter"
+      ]
+    },
+    {
+      "file": "audit-log-grouping-detail.spec.js",
+      "tests": 10,
+      "descs": 2,
+      "v1": true,
+      "v2": true,
+      "soft_fail": true,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 13,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 75,
+      "covered_cats": [
+        "export_import",
+        "filter"
+      ]
+    },
+    {
+      "file": "audit-log-levels.spec.js",
+      "tests": 6,
+      "descs": 1,
+      "v1": true,
+      "v2": false,
+      "soft_fail": false,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 0,
+      "has_isolation": false,
+      "has_withStep": false,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 63,
+      "covered_cats": [
+        "association",
+        "export_import"
+      ]
+    },
+    {
+      "file": "audit-log-objects-p0.spec.js",
+      "tests": 5,
+      "descs": 1,
+      "v1": true,
+      "v2": false,
+      "soft_fail": false,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 0,
+      "has_isolation": false,
+      "has_withStep": false,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 63,
+      "covered_cats": [
+        "association",
+        "export_import",
+        "filter"
+      ]
+    },
+    {
+      "file": "audit-log-objects-p1.spec.js",
+      "tests": 11,
+      "descs": 1,
+      "v1": true,
+      "v2": false,
+      "soft_fail": false,
+      "has_skip": true,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 0,
+      "has_isolation": false,
+      "has_withStep": false,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 55,
+      "covered_cats": [
+        "association",
+        "export_import",
+        "filter"
+      ]
+    },
+    {
+      "file": "audit-log.spec.js",
+      "tests": 3,
+      "descs": 1,
+      "v1": true,
+      "v2": false,
+      "soft_fail": false,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 9,
+      "has_isolation": false,
+      "has_withStep": false,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 61,
+      "covered_cats": [
+        "export_import",
+        "filter",
+        "pagination"
+      ]
+    },
+    {
+      "file": "auto-business-object.spec.js",
+      "tests": 3,
+      "descs": 1,
+      "v1": true,
+      "v2": true,
+      "soft_fail": false,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 2,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": true,
+      "has_trace": false,
+      "score": 96,
+      "covered_cats": [
+        "export_import"
+      ]
+    },
+    {
+      "file": "auto-product.spec.js",
+      "tests": 2,
+      "descs": 1,
+      "v1": true,
+      "v2": true,
+      "soft_fail": false,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 1,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": true,
+      "has_trace": false,
+      "score": 96,
+      "covered_cats": [
+        "export_import"
+      ]
+    },
+    {
+      "file": "batch-ops.spec.js",
+      "tests": 4,
+      "descs": 1,
+      "v1": true,
+      "v2": true,
+      "soft_fail": false,
+      "has_skip": true,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 3,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": true,
+      "has_trace": false,
+      "score": 86,
+      "covered_cats": [
+        "batch_ops",
+        "export_import"
+      ]
+    },
+    {
+      "file": "business-object-crud.spec.js",
+      "tests": 2,
+      "descs": 1,
+      "v1": true,
+      "v2": false,
+      "soft_fail": false,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 2,
+      "has_isolation": false,
+      "has_withStep": false,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 61,
+      "covered_cats": [
+        "export_import",
+        "filter"
+      ]
+    },
+    {
+      "file": "calculated-field.spec.js",
+      "tests": 5,
+      "descs": 1,
+      "v1": true,
+      "v2": true,
+      "soft_fail": false,
+      "has_skip": true,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 5,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": true,
+      "has_trace": false,
+      "score": 88,
+      "covered_cats": [
+        "batch_ops",
+        "calculated_field",
+        "export_import",
+        "filter",
+        "sort"
+      ]
+    },
+    {
+      "file": "condition-rule-dialog-spec-v14.spec.js",
+      "tests": 9,
+      "descs": 1,
+      "v1": true,
+      "v2": false,
+      "soft_fail": false,
+      "has_skip": true,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 10,
+      "has_isolation": false,
+      "has_withStep": false,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 53,
+      "covered_cats": [
+        "export_import",
+        "filter"
+      ]
+    },
+    {
+      "file": "condition-rule-dialog.spec.js",
+      "tests": 2,
+      "descs": 1,
+      "v1": true,
+      "v2": true,
+      "soft_fail": true,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 11,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 71,
+      "covered_cats": [
+        "export_import"
+      ]
+    },
+    {
+      "file": "conditional-logic.spec.js",
+      "tests": 7,
+      "descs": 1,
+      "v1": true,
+      "v2": true,
+      "soft_fail": false,
+      "has_skip": true,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 3,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": true,
+      "has_trace": false,
+      "score": 88,
+      "covered_cats": [
+        "conditional_logic",
+        "deep_insert",
+        "export_import",
+        "form_validation"
+      ]
+    },
+    {
+      "file": "data-permission-config.spec.js",
+      "tests": 3,
+      "descs": 1,
+      "v1": true,
+      "v2": true,
+      "soft_fail": false,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 0,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 91,
+      "covered_cats": [
+        "export_import"
+      ]
+    },
+    {
+      "file": "debug-column-config.spec.js",
+      "tests": 1,
+      "descs": 1,
+      "v1": true,
+      "v2": true,
+      "soft_fail": false,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 2,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 91,
+      "covered_cats": [
+        "export_import",
+        "filter"
+      ]
+    },
+    {
+      "file": "deep-insert.spec.js",
+      "tests": 3,
+      "descs": 1,
+      "v1": true,
+      "v2": true,
+      "soft_fail": false,
+      "has_skip": true,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 3,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": true,
+      "has_trace": false,
+      "score": 86,
+      "covered_cats": [
+        "export_import"
+      ]
+    },
+    {
+      "file": "diagram.spec.js",
+      "tests": 2,
+      "descs": 1,
+      "v1": true,
+      "v2": false,
+      "soft_fail": false,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 7,
+      "has_isolation": false,
+      "has_withStep": false,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 61,
+      "covered_cats": [
+        "export_import"
+      ]
+    },
+    {
+      "file": "enum-management.spec.js",
+      "tests": 3,
+      "descs": 1,
+      "v1": true,
+      "v2": true,
+      "soft_fail": true,
+      "has_skip": true,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 16,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 61,
+      "covered_cats": [
+        "export_import",
+        "filter"
+      ]
+    },
+    {
+      "file": "filter-combination.spec.js",
+      "tests": 3,
+      "descs": 1,
+      "v1": true,
+      "v2": true,
+      "soft_fail": false,
+      "has_skip": true,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 1,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": true,
+      "has_trace": false,
+      "score": 86,
+      "covered_cats": [
+        "export_import",
+        "filter",
+        "sort"
+      ]
+    },
+    {
+      "file": "filter-ux.spec.js",
+      "tests": 4,
+      "descs": 1,
+      "v1": true,
+      "v2": true,
+      "soft_fail": false,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 0,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": true,
+      "has_trace": false,
+      "score": 96,
+      "covered_cats": [
+        "export_import",
+        "filter"
+      ]
+    },
+    {
+      "file": "fk-filter-debug.spec.js",
+      "tests": 1,
+      "descs": 1,
+      "v1": true,
+      "v2": false,
+      "soft_fail": false,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 4,
+      "has_isolation": false,
+      "has_withStep": false,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 61,
+      "covered_cats": [
+        "export_import",
+        "filter"
+      ]
+    },
+    {
+      "file": "fk-filter-issue.spec.js",
+      "tests": 2,
+      "descs": 1,
+      "v1": true,
+      "v2": false,
+      "soft_fail": false,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 10,
+      "has_isolation": false,
+      "has_withStep": false,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 61,
+      "covered_cats": [
+        "export_import",
+        "filter"
+      ]
+    },
+    {
+      "file": "fk-filter-search.spec.js",
+      "tests": 1,
+      "descs": 1,
+      "v1": true,
+      "v2": false,
+      "soft_fail": false,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 4,
+      "has_isolation": false,
+      "has_withStep": false,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 61,
+      "covered_cats": [
+        "export_import",
+        "filter"
+      ]
+    },
+    {
+      "file": "fk-filter.spec.js",
+      "tests": 2,
+      "descs": 1,
+      "v1": true,
+      "v2": true,
+      "soft_fail": false,
+      "has_skip": true,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 14,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 81,
+      "covered_cats": [
+        "export_import",
+        "filter"
+      ]
+    },
+    {
+      "file": "form-validation.spec.js",
+      "tests": 7,
+      "descs": 1,
+      "v1": false,
+      "v2": true,
+      "soft_fail": false,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 3,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": true,
+      "has_trace": false,
+      "score": 98,
+      "covered_cats": [
+        "export_import",
+        "form_validation"
+      ]
+    },
+    {
+      "file": "import-export.spec.js",
+      "tests": 2,
+      "descs": 1,
+      "v1": true,
+      "v2": false,
+      "soft_fail": true,
+      "has_skip": true,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 37,
+      "has_isolation": false,
+      "has_withStep": false,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 31,
+      "covered_cats": [
+        "batch_ops",
+        "export_import"
+      ]
+    },
+    {
+      "file": "inline-edit.spec.js",
+      "tests": 4,
+      "descs": 1,
+      "v1": true,
+      "v2": true,
+      "soft_fail": false,
+      "has_skip": true,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 1,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": true,
+      "has_trace": false,
+      "score": 86,
+      "covered_cats": [
+        "export_import",
+        "filter",
+        "inline_edit"
+      ]
+    },
+    {
+      "file": "intent-apis.spec.js",
+      "tests": 4,
+      "descs": 1,
+      "v1": true,
+      "v2": true,
+      "soft_fail": true,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 0,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 71,
+      "covered_cats": [
+        "export_import",
+        "filter"
+      ]
+    },
+    {
+      "file": "menu-bo-linker.spec.js",
+      "tests": 3,
+      "descs": 1,
+      "v1": true,
+      "v2": true,
+      "soft_fail": false,
+      "has_skip": true,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 1,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 81,
+      "covered_cats": [
+        "export_import"
+      ]
+    },
+    {
+      "file": "overlap-warning.spec.js",
+      "tests": 1,
+      "descs": 1,
+      "v1": true,
+      "v2": true,
+      "soft_fail": true,
+      "has_skip": true,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 1,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 61,
+      "covered_cats": [
+        "export_import"
+      ]
+    },
+    {
+      "file": "pagination.spec.js",
+      "tests": 5,
+      "descs": 1,
+      "v1": true,
+      "v2": true,
+      "soft_fail": false,
+      "has_skip": true,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 0,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": true,
+      "has_trace": false,
+      "score": 88,
+      "covered_cats": [
+        "export_import",
+        "pagination"
+      ]
+    },
+    {
+      "file": "permission-explainer.spec.js",
+      "tests": 3,
+      "descs": 1,
+      "v1": true,
+      "v2": true,
+      "soft_fail": true,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 0,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 71,
+      "covered_cats": [
+        "export_import"
+      ]
+    },
+    {
+      "file": "product-crud.spec.js",
+      "tests": 2,
+      "descs": 1,
+      "v1": true,
+      "v2": false,
+      "soft_fail": false,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 7,
+      "has_isolation": false,
+      "has_withStep": false,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 61,
+      "covered_cats": [
+        "export_import"
+      ]
+    },
+    {
+      "file": "product-version.spec.js",
+      "tests": 3,
+      "descs": 1,
+      "v1": true,
+      "v2": true,
+      "soft_fail": false,
+      "has_skip": true,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 11,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": true,
+      "has_trace": false,
+      "score": 86,
+      "covered_cats": [
+        "export_import"
+      ]
+    },
+    {
+      "file": "relation-scope-field.spec.js",
+      "tests": 2,
+      "descs": 1,
+      "v1": true,
+      "v2": false,
+      "soft_fail": false,
+      "has_skip": true,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 12,
+      "has_isolation": false,
+      "has_withStep": false,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 51,
+      "covered_cats": [
+        "export_import",
+        "filter"
+      ]
+    },
+    {
+      "file": "relation-scope-tree.spec.js",
+      "tests": 6,
+      "descs": 1,
+      "v1": true,
+      "v2": false,
+      "soft_fail": false,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 7,
+      "has_isolation": false,
+      "has_withStep": false,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 63,
+      "covered_cats": [
+        "export_import",
+        "filter"
+      ]
+    },
+    {
+      "file": "role-intents.spec.js",
+      "tests": 4,
+      "descs": 1,
+      "v1": true,
+      "v2": true,
+      "soft_fail": true,
+      "has_skip": true,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 0,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 61,
+      "covered_cats": [
+        "export_import"
+      ]
+    },
+    {
+      "file": "role-permission-center.spec.js",
+      "tests": 27,
+      "descs": 1,
+      "v1": true,
+      "v2": false,
+      "soft_fail": true,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 46,
+      "has_isolation": false,
+      "has_withStep": false,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 45,
+      "covered_cats": [
+        "export_import",
+        "filter",
+        "sort"
+      ]
+    },
+    {
+      "file": "sort-ux.spec.js",
+      "tests": 3,
+      "descs": 1,
+      "v1": true,
+      "v2": true,
+      "soft_fail": false,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 0,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": true,
+      "has_trace": false,
+      "score": 96,
+      "covered_cats": [
+        "export_import",
+        "filter",
+        "sort"
+      ]
+    },
+    {
+      "file": "useMetaList-21-keypath.spec.js",
+      "tests": 21,
+      "descs": 1,
+      "v1": false,
+      "v2": false,
+      "soft_fail": false,
+      "has_skip": true,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 20,
+      "has_isolation": false,
+      "has_withStep": false,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 45,
+      "covered_cats": [
+        "batch_ops",
+        "export_import",
+        "filter",
+        "inline_edit",
+        "pagination",
+        "sort"
+      ]
+    },
+    {
+      "file": "user-group-detail.spec.js",
+      "tests": 1,
+      "descs": 1,
+      "v1": true,
+      "v2": true,
+      "soft_fail": true,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 4,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 71,
+      "covered_cats": [
+        "export_import"
+      ]
+    },
+    {
+      "file": "user-group-filter.spec.js",
+      "tests": 2,
+      "descs": 1,
+      "v1": true,
+      "v2": false,
+      "soft_fail": false,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 9,
+      "has_isolation": false,
+      "has_withStep": false,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 61,
+      "covered_cats": [
+        "export_import",
+        "filter"
+      ]
+    },
+    {
+      "file": "user-permission.spec.js",
+      "tests": 2,
+      "descs": 1,
+      "v1": true,
+      "v2": false,
+      "soft_fail": false,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 4,
+      "has_isolation": false,
+      "has_withStep": false,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 61,
+      "covered_cats": [
+        "export_import",
+        "filter"
+      ]
+    },
+    {
+      "file": "user-role.spec.js",
+      "tests": 3,
+      "descs": 1,
+      "v1": true,
+      "v2": true,
+      "soft_fail": true,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 19,
+      "has_isolation": true,
+      "has_withStep": true,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 71,
+      "covered_cats": [
+        "export_import"
+      ]
+    },
+    {
+      "file": "value-help-dialog.spec.js",
+      "tests": 1,
+      "descs": 1,
+      "v1": true,
+      "v2": false,
+      "soft_fail": false,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 11,
+      "has_isolation": false,
+      "has_withStep": false,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 61,
+      "covered_cats": [
+        "export_import",
+        "filter",
+        "pagination"
+      ]
+    },
+    {
+      "file": "value-help-filter.spec.js",
+      "tests": 3,
+      "descs": 1,
+      "v1": true,
+      "v2": false,
+      "soft_fail": false,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 8,
+      "has_isolation": false,
+      "has_withStep": false,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 61,
+      "covered_cats": [
+        "export_import",
+        "filter"
+      ]
+    },
+    {
+      "file": "ValueHelp-5-layer-link.spec.js",
+      "tests": 15,
+      "descs": 1,
+      "v1": false,
+      "v2": false,
+      "soft_fail": false,
+      "has_skip": true,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 16,
+      "has_isolation": false,
+      "has_withStep": false,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 45,
+      "covered_cats": [
+        "association",
+        "filter",
+        "inline_edit"
+      ]
+    },
+    {
+      "file": "workspace.spec.js",
+      "tests": 2,
+      "descs": 1,
+      "v1": true,
+      "v2": false,
+      "soft_fail": false,
+      "has_skip": false,
+      "is_api_smoke": false,
+      "api_calls": 0,
+      "ui_actions": 2,
+      "has_isolation": false,
+      "has_withStep": false,
+      "has_dataFinder": false,
+      "has_trace": false,
+      "score": 61,
+      "covered_cats": [
+        "export_import"
+      ]
+    }
+  ],
+  "ds3_summary": {
+    "total_api_files": 31,
+    "by_risk": {
+      "DATA": 4,
+      "SEC": 22,
+      "COMP": 3,
+      "UX": 2
+    }
+  },
+  "ds3_endpoints": [
+    {
+      "file": "annotation_routes_api.py",
+      "main_risk": "DATA",
+      "main_risk_label": "级联",
+      "all_risks": [
+        "级联"
+      ],
+      "endpoint_count": 6,
+      "routes_sample": [
+        "/annotations/by-target",
+        "/annotations/<int:annotation_id>",
+        "/annotations",
+        "/annotations/<int:annotation_id>",
+        "/annotations/<int:annotation_id>"
+      ]
+    },
+    {
+      "file": "association_api.py",
+      "main_risk": "SEC",
+      "main_risk_label": "角色管理",
+      "all_risks": [
+        "角色管理",
+        "关联",
+        "关联 API",
+        "级联"
+      ],
+      "endpoint_count": 5,
+      "routes_sample": [
+        "/<source_type>/<int:source_id>/<association_name>/<target_type>/<int:target_id>",
+        "/<source_type>/<int:source_id>/<association_name>/<target_type>/<int:target_id>",
+        "/<source_type>/<int:source_id>/<association_name>",
+        "/<entity_type>/<int:entity_id>",
+        "/<entity_type>/deletion-policy"
+      ]
+    },
+    {
+      "file": "audit_api.py",
+      "main_risk": "SEC",
+      "main_risk_label": "角色管理",
+      "all_risks": [
+        "角色管理",
+        "审计"
+      ],
+      "endpoint_count": 5,
+      "routes_sample": [
+        "/logs",
+        "/logs/<int:log_id>",
+        "/logs/export",
+        "/failed",
+        "/overview"
+      ]
+    },
+    {
+      "file": "audit_management_api.py",
+      "main_risk": "COMP",
+      "main_risk_label": "审计",
+      "all_risks": [
+        "审计"
+      ],
+      "endpoint_count": 3,
+      "routes_sample": [
+        "/audit/failed",
+        "/audit/failed/<int:record_id>/retry",
+        "/audit/stats"
+      ]
+    },
+    {
+      "file": "auth_api.py",
+      "main_risk": "SEC",
+      "main_risk_label": "登录",
+      "all_risks": [
+        "登录",
+        "认证"
+      ],
+      "endpoint_count": 5,
+      "routes_sample": [
+        "/login",
+        "/logout",
+        "/me",
+        "/dev-login",
+        "/change-password"
+      ]
+    },
+    {
+      "file": "bo_action_api.py",
+      "main_risk": "SEC",
+      "main_risk_label": "权限校验",
+      "all_risks": [
+        "权限校验",
+        "审计",
+        "登录",
+        "认证"
+      ],
+      "endpoint_count": 13,
+      "routes_sample": [
+        "/<path:action_id>",
+        "/_schemas",
+        "/_chain",
+        "/_chain_stream",
+        "/_subflow_template"
+      ]
+    },
+    {
+      "file": "bo_api.py",
+      "main_risk": "SEC",
+      "main_risk_label": "权限校验",
+      "all_risks": [
+        "权限校验",
+        "角色管理",
+        "关联",
+        "批量"
+      ],
+      "endpoint_count": 49,
+      "routes_sample": [
+        "/<object_type>",
+        "/schema-version",
+        "/<object_type>/<int:obj_id>",
+        "/<object_type>/<path:obj_id>",
+        "/<object_type>"
+      ]
+    },
+    {
+      "file": "database_api.py",
+      "main_risk": "SEC",
+      "main_risk_label": "权限校验",
+      "all_risks": [
+        "权限校验"
+      ],
+      "endpoint_count": 9,
+      "routes_sample": [
+        "/health",
+        "/metrics",
+        "/metrics/prometheus",
+        "/slow-queries",
+        "/vacuum"
+      ]
+    },
+    {
+      "file": "data_permission_api.py",
+      "main_risk": "SEC",
+      "main_risk_label": "权限校验",
+      "all_risks": [
+        "权限校验",
+        "数据权限",
+        "批量"
+      ],
+      "endpoint_count": 4,
+      "routes_sample": [
+        "/<int:perm_id>",
+        "/batch",
+        "/effective",
+        "/self"
+      ]
+    },
+    {
+      "file": "decorators.py",
+      "main_risk": "SEC",
+      "main_risk_label": "权限校验",
+      "all_risks": [
+        "权限校验"
+      ],
+      "endpoint_count": 1,
+      "routes_sample": [
+        "/api/v1/users"
+      ]
+    },
+    {
+      "file": "export_import_api.py",
+      "main_risk": "COMP",
+      "main_risk_label": "数据范围",
+      "all_risks": [
+        "数据范围",
+        "级联",
+        "导入导出"
+      ],
+      "endpoint_count": 9,
+      "routes_sample": [
+        "/export",
+        "/export/async",
+        "/export/status/<task_id>",
+        "/export/download/<path:filename>",
+        "/import"
+      ]
+    },
+    {
+      "file": "filter_variant_api.py",
+      "main_risk": "UX",
+      "main_risk_label": "过滤变体",
+      "all_risks": [
+        "过滤变体"
+      ],
+      "endpoint_count": 4,
+      "routes_sample": [
+        "/<int:variant_id>",
+        "/<int:variant_id>",
+        "/<int:variant_id>",
+        "/<int:variant_id>/set-default"
+      ]
+    },
+    {
+      "file": "intent_api.py",
+      "main_risk": "SEC",
+      "main_risk_label": "权限校验",
+      "all_risks": [
+        "权限校验",
+        "角色管理"
+      ],
+      "endpoint_count": 7,
+      "routes_sample": []
+    },
+    {
+      "file": "m8_api.py",
+      "main_risk": "DATA",
+      "main_risk_label": "关联",
+      "all_risks": [
+        "关联"
+      ],
+      "endpoint_count": 3,
+      "routes_sample": [
+        "/<entity>/valuehelp",
+        "/<entity>/query",
+        "/<entity>/aggregate"
+      ]
+    },
+    {
+      "file": "management_dimension_api.py",
+      "main_risk": "SEC",
+      "main_risk_label": "权限校验",
+      "all_risks": [
+        "权限校验"
+      ],
+      "endpoint_count": 4,
+      "routes_sample": [
+        "/<int:role_id>/permission-rules",
+        "/<int:role_id>/permission-rules",
+        "/<int:role_id>/calculate-impact",
+        "/cache-stats"
+      ]
+    },
+    {
+      "file": "manage_api.py",
+      "main_risk": "COMP",
+      "main_risk_label": "数据范围",
+      "all_risks": [
+        "数据范围",
+        "批量",
+        "级联"
+      ],
+      "endpoint_count": 17,
+      "routes_sample": [
+        "/<object_type>",
+        "/<object_type>/deep",
+        "/<object_type>/<id>",
+        "/<object_type>",
+        "/<object_type>/list"
+      ]
+    },
+    {
+      "file": "menu_permission_api.py",
+      "main_risk": "SEC",
+      "main_risk_label": "权限校验",
+      "all_risks": [
+        "权限校验",
+        "菜单权限"
+      ],
+      "endpoint_count": 9,
+      "routes_sample": [
+        "/menus",
+        "/menus/all",
+        "/menus/<menu_code>",
+        "/menus/<menu_code>/consistency",
+        "/menus/report"
+      ]
+    },
+    {
+      "file": "meta_api.py",
+      "main_risk": "SEC",
+      "main_risk_label": "权限校验",
+      "all_risks": [
+        "权限校验",
+        "批量"
+      ],
+      "endpoint_count": 14,
+      "routes_sample": [
+        "/objects",
+        "/objects/<object_type>",
+        "/<object_type>/view-config",
+        "/<object_type>/view-config/<view_name>",
+        "/<object_type>/list-view"
+      ]
+    },
+    {
+      "file": "object_identity_api.py",
+      "main_risk": "DATA",
+      "main_risk_label": "批量",
+      "all_risks": [
+        "批量"
+      ],
+      "endpoint_count": 3,
+      "routes_sample": [
+        "/batch",
+        "/formatted",
+        "/cache/clear"
+      ]
+    },
+    {
+      "file": "owner_transfer_api.py",
+      "main_risk": "DATA",
+      "main_risk_label": "所有者",
+      "all_risks": [
+        "所有者",
+        "所有者转移"
+      ],
+      "endpoint_count": 4,
+      "routes_sample": [
+        "/validate",
+        "/transfer",
+        "/bulk-transfer",
+        "/transfer-history"
+      ]
+    },
+    {
+      "file": "permission_api.py",
+      "main_risk": "SEC",
+      "main_risk_label": "权限校验",
+      "all_risks": [
+        "权限校验"
+      ],
+      "endpoint_count": 2,
+      "routes_sample": []
+    },
+    {
+      "file": "permission_audit_api.py",
+      "main_risk": "SEC",
+      "main_risk_label": "权限校验",
+      "all_risks": [
+        "权限校验",
+        "审计",
+        "权限审计"
+      ],
+      "endpoint_count": 6,
+      "routes_sample": [
+        "/report",
+        "/user/<int:user_id>/summary",
+        "/stats",
+        "/orphans",
+        "/excessive"
+      ]
+    },
+    {
+      "file": "permission_bundle_api.py",
+      "main_risk": "SEC",
+      "main_risk_label": "权限校验",
+      "all_risks": [
+        "权限校验"
+      ],
+      "endpoint_count": 5,
+      "routes_sample": [
+        "/<bundle_code>",
+        "/assign",
+        "/user/<int:user_id>",
+        "/<bundle_code>",
+        "/<bundle_code>"
+      ]
+    },
+    {
+      "file": "permission_rule_api.py",
+      "main_risk": "SEC",
+      "main_risk_label": "权限校验",
+      "all_risks": [
+        "权限校验",
+        "级联"
+      ],
+      "endpoint_count": 10,
+      "routes_sample": [
+        "/<int:rule_id>",
+        "/<int:rule_id>",
+        "/<int:rule_id>",
+        "/preview",
+        "/check"
+      ]
+    },
+    {
+      "file": "permission_sync_api.py",
+      "main_risk": "SEC",
+      "main_risk_label": "权限校验",
+      "all_risks": [
+        "权限校验",
+        "数据范围"
+      ],
+      "endpoint_count": 5,
+      "routes_sample": [
+        "/sync",
+        "/validate",
+        "/report",
+        "/orphans",
+        "/orphans"
+      ]
+    },
+    {
+      "file": "role_api.py",
+      "main_risk": "SEC",
+      "main_risk_label": "权限校验",
+      "all_risks": [
+        "权限校验",
+        "角色管理"
+      ],
+      "endpoint_count": 12,
+      "routes_sample": [
+        "/<int:role_id>",
+        "/<int:role_id>/users",
+        "/<int:role_id>/users/<int:user_id>",
+        "/<int:role_id>",
+        "/<int:role_id>"
+      ]
+    },
+    {
+      "file": "role_dimension_scope_api.py",
+      "main_risk": "SEC",
+      "main_risk_label": "角色管理",
+      "all_risks": [
+        "角色管理",
+        "数据范围"
+      ],
+      "endpoint_count": 3,
+      "routes_sample": [
+        "/<int:role_id>/dimension-scopes",
+        "/<int:role_id>/dimension-scopes",
+        "/<int:role_id>/derived-permissions"
+      ]
+    },
+    {
+      "file": "role_menu_api.py",
+      "main_risk": "SEC",
+      "main_risk_label": "角色管理",
+      "all_risks": [
+        "角色管理",
+        "数据范围",
+        "认证"
+      ],
+      "endpoint_count": 3,
+      "routes_sample": [
+        "/<int:role_id>/menu-permissions",
+        "/<int:role_id>/unified-permissions",
+        "/<int:role_id>/menu-permissions"
+      ]
+    },
+    {
+      "file": "user_api.py",
+      "main_risk": "SEC",
+      "main_risk_label": "角色管理",
+      "all_risks": [
+        "角色管理",
+        "批量"
+      ],
+      "endpoint_count": 12,
+      "routes_sample": [
+        "/me",
+        "/me",
+        "/<int:user_id>",
+        "/<int:user_id>",
+        "/<int:user_id>"
+      ]
+    },
+    {
+      "file": "user_group_api.py",
+      "main_risk": "SEC",
+      "main_risk_label": "权限校验",
+      "all_risks": [
+        "权限校验",
+        "角色管理"
+      ],
+      "endpoint_count": 19,
+      "routes_sample": [
+        "/user-groups",
+        "/user-groups",
+        "/user-groups/<int:group_id>",
+        "/user-groups/<int:group_id>",
+        "/user-groups/<int:group_id>"
+      ]
+    },
+    {
+      "file": "value_help_api.py",
+      "main_risk": "UX",
+      "main_risk_label": "值帮助",
+      "all_risks": [
+        "值帮助"
+      ],
+      "endpoint_count": 2,
+      "routes_sample": [
+        "/api/v2/value-help/<source_type>/<source_id>",
+        "/api/v2/value-help/<source_type>/<source_id>/resolve"
+      ]
+    }
+  ],
+  "ds4_patterns": {
+    "el-form": 48,
+    "el-dialog": 21,
+    "el-select": 48,
+    "el-date-picker": 13,
+    "el-input": 83,
+    "el-button": 255,
+    "el-tree": 5,
+    "el-pagination": 12,
+    "el-drawer": 6,
+    "el-radio-group": 6,
+    "el-table": 82,
+    "el-upload": 1,
+    "el-tabs": 8,
+    "el-checkbox-group": 4,
+    "el-cascader": 2,
+    "el-menu": 17
+  },
+  "matrix": {
+    "sort": {
+      "label": "排序 (Sort)",
+      "risk": "UX",
+      "is_critical": false,
+      "ds1_in_code": true,
+      "ds1_count": 141,
+      "ds2_covered_specs": 5,
+      "ds2_avg_score": 72.0,
+      "ds2_best_spec": "sort-ux.spec.js",
+      "ds3_risk_apis": [],
+      "ds4_ui_pattern": "el-table / el-pagination",
+      "is_covered": true,
+      "status": "covered"
+    },
+    "filter": {
+      "label": "过滤 (Filter)",
+      "risk": "UX",
+      "is_critical": false,
+      "ds1_in_code": true,
+      "ds1_count": 582,
+      "ds2_covered_specs": 31,
+      "ds2_avg_score": 66.5,
+      "ds2_best_spec": "filter-ux.spec.js",
+      "ds3_risk_apis": [
+        "filter_variant_api.py"
+      ],
+      "ds4_ui_pattern": "el-table / el-pagination",
+      "is_covered": true,
+      "status": "covered"
+    },
+    "filter_combination": {
+      "label": "组合过滤 (Filter Combination)",
+      "risk": "UX",
+      "is_critical": false,
+      "ds1_in_code": false,
+      "ds1_count": 0,
+      "ds2_covered_specs": 0,
+      "ds2_avg_score": 0,
+      "ds2_best_spec": null,
+      "ds3_risk_apis": [],
+      "ds4_ui_pattern": "el-table / el-pagination",
+      "is_covered": false,
+      "status": "missing"
+    },
+    "inline_edit": {
+      "label": "内联编辑 (Inline Edit)",
+      "risk": "DATA",
+      "is_critical": false,
+      "ds1_in_code": true,
+      "ds1_count": 107,
+      "ds2_covered_specs": 3,
+      "ds2_avg_score": 58.7,
+      "ds2_best_spec": "inline-edit.spec.js",
+      "ds3_risk_apis": [],
+      "ds4_ui_pattern": "el-table (inline cell)",
+      "is_covered": false,
+      "status": "thin"
+    },
+    "batch_ops": {
+      "label": "批量操作 (Batch Ops)",
+      "risk": "DATA",
+      "is_critical": false,
+      "ds1_in_code": true,
+      "ds1_count": 104,
+      "ds2_covered_specs": 4,
+      "ds2_avg_score": 62.5,
+      "ds2_best_spec": "calculated-field.spec.js",
+      "ds3_risk_apis": [],
+      "ds4_ui_pattern": "通用 Element UI",
+      "is_covered": true,
+      "status": "covered"
+    },
+    "deep_insert": {
+      "label": "深插入 (Deep Insert)",
+      "risk": "DATA",
+      "is_critical": false,
+      "ds1_in_code": true,
+      "ds1_count": 106,
+      "ds2_covered_specs": 1,
+      "ds2_avg_score": 88.0,
+      "ds2_best_spec": "conditional-logic.spec.js",
+      "ds3_risk_apis": [],
+      "ds4_ui_pattern": "ObjectChildSection",
+      "is_covered": true,
+      "status": "covered"
+    },
+    "calculated_field": {
+      "label": "计算字段 (Calculated Field)",
+      "risk": "DATA",
+      "is_critical": false,
+      "ds1_in_code": true,
+      "ds1_count": 1,
+      "ds2_covered_specs": 1,
+      "ds2_avg_score": 88.0,
+      "ds2_best_spec": "calculated-field.spec.js",
+      "ds3_risk_apis": [],
+      "ds4_ui_pattern": "通用 Element UI",
+      "is_covered": true,
+      "status": "covered"
+    },
+    "pagination": {
+      "label": "分页 (Pagination)",
+      "risk": "UX",
+      "is_critical": false,
+      "ds1_in_code": true,
+      "ds1_count": 268,
+      "ds2_covered_specs": 6,
+      "ds2_avg_score": 61.5,
+      "ds2_best_spec": "pagination.spec.js",
+      "ds3_risk_apis": [],
+      "ds4_ui_pattern": "el-table / el-pagination",
+      "is_covered": true,
+      "status": "covered"
+    },
+    "export_import": {
+      "label": "导入导出 (Import/Export)",
+      "risk": "DATA",
+      "is_critical": false,
+      "ds1_in_code": true,
+      "ds1_count": 939,
+      "ds2_covered_specs": 55,
+      "ds2_avg_score": 70.5,
+      "ds2_best_spec": "form-validation.spec.js",
+      "ds3_risk_apis": [
+        "export_import_api.py"
+      ],
+      "ds4_ui_pattern": "el-upload",
+      "is_covered": true,
+      "status": "covered"
+    },
+    "association": {
+      "label": "关联 (Association)",
+      "risk": "DATA",
+      "is_critical": false,
+      "ds1_in_code": true,
+      "ds1_count": 144,
+      "ds2_covered_specs": 5,
+      "ds2_avg_score": 62.4,
+      "ds2_best_spec": "association-crud.spec.js",
+      "ds3_risk_apis": [
+        "association_api.py"
+      ],
+      "ds4_ui_pattern": "el-dialog / el-cascader / search-help",
+      "is_covered": true,
+      "status": "covered"
+    },
+    "form_validation": {
+      "label": "表单验证 (Form Validation)",
+      "risk": "DATA",
+      "is_critical": false,
+      "ds1_in_code": true,
+      "ds1_count": 257,
+      "ds2_covered_specs": 2,
+      "ds2_avg_score": 93.0,
+      "ds2_best_spec": "form-validation.spec.js",
+      "ds3_risk_apis": [],
+      "ds4_ui_pattern": "el-form / el-select",
+      "is_covered": true,
+      "status": "covered"
+    },
+    "conditional_logic": {
+      "label": "条件逻辑 (Conditional Logic)",
+      "risk": "COMP",
+      "is_critical": true,
+      "ds1_in_code": true,
+      "ds1_count": 29,
+      "ds2_covered_specs": 1,
+      "ds2_avg_score": 88.0,
+      "ds2_best_spec": "conditional-logic.spec.js",
+      "ds3_risk_apis": [],
+      "ds4_ui_pattern": "el-form / el-select",
+      "is_covered": true,
+      "status": "covered"
+    }
+  },
+  "deep_dives": [
+    {
+      "category": "filter",
+      "label": "过滤 (Filter)",
+      "risk": "UX",
+      "status": "covered",
+      "ds1_in_code": true,
+      "ds1_count": 582,
+      "ds2_covered_specs": 31,
+      "ds2_avg_score": 66.5,
+      "ds3_risk_apis": [
+        "filter_variant_api.py"
+      ],
+      "ds4_ui_pattern": "el-table / el-pagination",
+      "scenarios": [
+        {
+          "name": "text_search",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "exact_match",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "date_range",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "date_relative",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "number_range",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "multi_select",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "calculated_field",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "single_criteria",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "multi_criteria_AND",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "multi_criteria_OR",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        }
+      ],
+      "recommended_test_cases": [
+        {
+          "scenario": "text_search",
+          "priority": "P1",
+          "description": "验证 过滤 (Filter) 的 text_search 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "exact_match",
+          "priority": "P1",
+          "description": "验证 过滤 (Filter) 的 exact_match 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "date_range",
+          "priority": "P1",
+          "description": "验证 过滤 (Filter) 的 date_range 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "date_relative",
+          "priority": "P1",
+          "description": "验证 过滤 (Filter) 的 date_relative 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "number_range",
+          "priority": "P1",
+          "description": "验证 过滤 (Filter) 的 number_range 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "multi_select",
+          "priority": "P1",
+          "description": "验证 过滤 (Filter) 的 multi_select 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "calculated_field",
+          "priority": "P1",
+          "description": "验证 过滤 (Filter) 的 calculated_field 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "single_criteria",
+          "priority": "P1",
+          "description": "验证 过滤 (Filter) 的 single_criteria 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "multi_criteria_AND",
+          "priority": "P1",
+          "description": "验证 过滤 (Filter) 的 multi_criteria_AND 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "multi_criteria_OR",
+          "priority": "P1",
+          "description": "验证 过滤 (Filter) 的 multi_criteria_OR 场景",
+          "code_evidence": []
+        }
+      ]
+    },
+    {
+      "category": "filter_combination",
+      "label": "组合过滤 (Filter Combination)",
+      "risk": "UX",
+      "status": "missing",
+      "ds1_in_code": false,
+      "ds1_count": 0,
+      "ds2_covered_specs": 0,
+      "ds2_avg_score": 0,
+      "ds3_risk_apis": [],
+      "ds4_ui_pattern": "el-table / el-pagination",
+      "scenarios": [
+        {
+          "name": "multi_select_plus_text_plus_sort",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "cascading_filters",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "saved_filter_variant",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        }
+      ],
+      "recommended_test_cases": [
+        {
+          "scenario": "multi_select_plus_text_plus_sort",
+          "priority": "P1",
+          "description": "验证 组合过滤 (Filter Combination) 的 multi_select_plus_text_plus_sort 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "cascading_filters",
+          "priority": "P1",
+          "description": "验证 组合过滤 (Filter Combination) 的 cascading_filters 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "saved_filter_variant",
+          "priority": "P1",
+          "description": "验证 组合过滤 (Filter Combination) 的 saved_filter_variant 场景",
+          "code_evidence": []
+        }
+      ]
+    },
+    {
+      "category": "inline_edit",
+      "label": "内联编辑 (Inline Edit)",
+      "risk": "DATA",
+      "status": "thin",
+      "ds1_in_code": true,
+      "ds1_count": 107,
+      "ds2_covered_specs": 3,
+      "ds2_avg_score": 58.7,
+      "ds3_risk_apis": [],
+      "ds4_ui_pattern": "el-table (inline cell)",
+      "scenarios": [
+        {
+          "name": "create_row",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "edit_row",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "delete_row",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "save_row",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "cancel_row",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "visibility_logic",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "readonly_logic",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "quick_mode",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "direct_mode",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "validation_inline",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "tab_navigation",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        }
+      ],
+      "recommended_test_cases": [
+        {
+          "scenario": "create_row",
+          "priority": "P1",
+          "description": "验证 内联编辑 (Inline Edit) 的 create_row 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "edit_row",
+          "priority": "P1",
+          "description": "验证 内联编辑 (Inline Edit) 的 edit_row 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "delete_row",
+          "priority": "P1",
+          "description": "验证 内联编辑 (Inline Edit) 的 delete_row 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "save_row",
+          "priority": "P1",
+          "description": "验证 内联编辑 (Inline Edit) 的 save_row 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "cancel_row",
+          "priority": "P1",
+          "description": "验证 内联编辑 (Inline Edit) 的 cancel_row 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "visibility_logic",
+          "priority": "P1",
+          "description": "验证 内联编辑 (Inline Edit) 的 visibility_logic 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "readonly_logic",
+          "priority": "P1",
+          "description": "验证 内联编辑 (Inline Edit) 的 readonly_logic 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "quick_mode",
+          "priority": "P1",
+          "description": "验证 内联编辑 (Inline Edit) 的 quick_mode 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "direct_mode",
+          "priority": "P1",
+          "description": "验证 内联编辑 (Inline Edit) 的 direct_mode 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "validation_inline",
+          "priority": "P1",
+          "description": "验证 内联编辑 (Inline Edit) 的 validation_inline 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "tab_navigation",
+          "priority": "P1",
+          "description": "验证 内联编辑 (Inline Edit) 的 tab_navigation 场景",
+          "code_evidence": []
+        }
+      ]
+    },
+    {
+      "category": "batch_ops",
+      "label": "批量操作 (Batch Ops)",
+      "risk": "DATA",
+      "status": "covered",
+      "ds1_in_code": true,
+      "ds1_count": 104,
+      "ds2_covered_specs": 4,
+      "ds2_avg_score": 62.5,
+      "ds3_risk_apis": [],
+      "ds4_ui_pattern": "通用 Element UI",
+      "scenarios": [
+        {
+          "name": "batch_add",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "batch_delete",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "batch_update",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "select_all",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "select_page",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "selection_count",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        }
+      ],
+      "recommended_test_cases": [
+        {
+          "scenario": "batch_add",
+          "priority": "P1",
+          "description": "验证 批量操作 (Batch Ops) 的 batch_add 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "batch_delete",
+          "priority": "P1",
+          "description": "验证 批量操作 (Batch Ops) 的 batch_delete 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "batch_update",
+          "priority": "P1",
+          "description": "验证 批量操作 (Batch Ops) 的 batch_update 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "select_all",
+          "priority": "P1",
+          "description": "验证 批量操作 (Batch Ops) 的 select_all 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "select_page",
+          "priority": "P1",
+          "description": "验证 批量操作 (Batch Ops) 的 select_page 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "selection_count",
+          "priority": "P1",
+          "description": "验证 批量操作 (Batch Ops) 的 selection_count 场景",
+          "code_evidence": []
+        }
+      ]
+    },
+    {
+      "category": "pagination",
+      "label": "分页 (Pagination)",
+      "risk": "UX",
+      "status": "covered",
+      "ds1_in_code": true,
+      "ds1_count": 268,
+      "ds2_covered_specs": 6,
+      "ds2_avg_score": 61.5,
+      "ds3_risk_apis": [],
+      "ds4_ui_pattern": "el-table / el-pagination",
+      "scenarios": [
+        {
+          "name": "page_size",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "jump_to_page",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "first_last_page",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "total_count",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        }
+      ],
+      "recommended_test_cases": [
+        {
+          "scenario": "page_size",
+          "priority": "P1",
+          "description": "验证 分页 (Pagination) 的 page_size 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "jump_to_page",
+          "priority": "P1",
+          "description": "验证 分页 (Pagination) 的 jump_to_page 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "first_last_page",
+          "priority": "P1",
+          "description": "验证 分页 (Pagination) 的 first_last_page 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "total_count",
+          "priority": "P1",
+          "description": "验证 分页 (Pagination) 的 total_count 场景",
+          "code_evidence": []
+        }
+      ]
+    },
+    {
+      "category": "association",
+      "label": "关联 (Association)",
+      "risk": "DATA",
+      "status": "covered",
+      "ds1_in_code": true,
+      "ds1_count": 144,
+      "ds2_covered_specs": 5,
+      "ds2_avg_score": 62.4,
+      "ds3_risk_apis": [
+        "association_api.py"
+      ],
+      "ds4_ui_pattern": "el-dialog / el-cascader / search-help",
+      "scenarios": [
+        {
+          "name": "m2m_add",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "m2m_remove",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "fk_select",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "search_help",
+          "code_has": true,
+          "code_locs": [
+            "src\\components\\common\\SearchHelpDialog.vue:12",
+            "src\\components\\common\\SearchHelpDialog.vue:19"
+          ],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "recent_items",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "inline_create_child",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "deep_link",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "batch_add",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "batch_remove",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "validation",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [
+            "form-validation.spec.js"
+          ],
+          "is_covered": true
+        }
+      ],
+      "recommended_test_cases": [
+        {
+          "scenario": "m2m_add",
+          "priority": "P1",
+          "description": "验证 关联 (Association) 的 m2m_add 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "m2m_remove",
+          "priority": "P1",
+          "description": "验证 关联 (Association) 的 m2m_remove 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "fk_select",
+          "priority": "P1",
+          "description": "验证 关联 (Association) 的 fk_select 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "search_help",
+          "priority": "P1",
+          "description": "验证 关联 (Association) 的 search_help 场景",
+          "code_evidence": [
+            "src\\components\\common\\SearchHelpDialog.vue:12"
+          ]
+        },
+        {
+          "scenario": "recent_items",
+          "priority": "P1",
+          "description": "验证 关联 (Association) 的 recent_items 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "inline_create_child",
+          "priority": "P1",
+          "description": "验证 关联 (Association) 的 inline_create_child 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "deep_link",
+          "priority": "P1",
+          "description": "验证 关联 (Association) 的 deep_link 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "batch_add",
+          "priority": "P1",
+          "description": "验证 关联 (Association) 的 batch_add 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "batch_remove",
+          "priority": "P1",
+          "description": "验证 关联 (Association) 的 batch_remove 场景",
+          "code_evidence": []
+        }
+      ]
+    },
+    {
+      "category": "conditional_logic",
+      "label": "条件逻辑 (Conditional Logic)",
+      "risk": "COMP",
+      "status": "covered",
+      "ds1_in_code": true,
+      "ds1_count": 29,
+      "ds2_covered_specs": 1,
+      "ds2_avg_score": 88.0,
+      "ds3_risk_apis": [],
+      "ds4_ui_pattern": "el-form / el-select",
+      "scenarios": [
+        {
+          "name": "visible_when",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "readonly_when",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "required_when",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "value_when",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "cascade_select",
+          "code_has": true,
+          "code_locs": [
+            "src\\composables\\useCascadeSelect.js:11",
+            "src\\composables\\useCascadeSelect.js:231"
+          ],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "dependent_field",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        },
+        {
+          "name": "permission_based_visibility",
+          "code_has": false,
+          "code_locs": [],
+          "spec_mentions": [],
+          "is_covered": false
+        }
+      ],
+      "recommended_test_cases": [
+        {
+          "scenario": "visible_when",
+          "priority": "P0",
+          "description": "验证 条件逻辑 (Conditional Logic) 的 visible_when 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "readonly_when",
+          "priority": "P0",
+          "description": "验证 条件逻辑 (Conditional Logic) 的 readonly_when 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "required_when",
+          "priority": "P0",
+          "description": "验证 条件逻辑 (Conditional Logic) 的 required_when 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "value_when",
+          "priority": "P0",
+          "description": "验证 条件逻辑 (Conditional Logic) 的 value_when 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "cascade_select",
+          "priority": "P0",
+          "description": "验证 条件逻辑 (Conditional Logic) 的 cascade_select 场景",
+          "code_evidence": [
+            "src\\composables\\useCascadeSelect.js:11"
+          ]
+        },
+        {
+          "scenario": "dependent_field",
+          "priority": "P0",
+          "description": "验证 条件逻辑 (Conditional Logic) 的 dependent_field 场景",
+          "code_evidence": []
+        },
+        {
+          "scenario": "permission_based_visibility",
+          "priority": "P0",
+          "description": "验证 条件逻辑 (Conditional Logic) 的 permission_based_visibility 场景",
+          "code_evidence": []
+        }
+      ]
+    }
+  ]
+}

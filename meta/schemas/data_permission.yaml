@@ -1,0 +1,76 @@
+id: data_permission
+name: 数据权限
+table_name: data_permissions
+description: 控制用户对特定资源实例的访问权限
+
+fields:
+  - id: user_id
+    name: 用户ID
+    type: integer
+    required: true
+    description: 关联的用户ID
+    ui:
+      visible: true
+      editable: true
+
+  - id: resource_type
+    name: 资源类型
+    type: string
+    required: true
+    description: 资源类型（如product/domain/business_object等）
+    ui:
+      visible: true
+      editable: true
+
+  - id: resource_id
+    name: 资源ID
+    type: integer
+    required: true
+    description: 资源实例ID
+    ui:
+      visible: true
+      editable: true
+
+  - id: permission_level
+    name: 权限级别
+    type: string
+    required: true
+    description: 权限级别（admin/write/read）
+    ui:
+      visible: true
+      editable: true
+
+  - id: inherit_to_children
+    name: 继承到子对象
+    type: boolean
+    default: true
+    description: 是否将权限继承到子对象
+    ui:
+      visible: true
+      editable: true
+
+  - id: created_at
+    name: 创建时间
+    type: timestamp
+    description: 记录创建时间
+    ui:
+      visible: true
+      editable: false
+
+associations:
+  - name: user
+    type: reference
+    target_entity: user
+    source_key: user_id
+    description: 关联的用户
+
+audit:
+  enabled: true
+  strategy: business_only
+  fields: [user_id, resource_type, resource_id, permission_level]
+
+category_config:
+  category: system
+  sub_category: permission
+  icon: "database"
+  color: "#8b5cf6"

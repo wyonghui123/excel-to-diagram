@@ -1,0 +1,14 @@
+skips:
+  - B101
+  - B311
+exclude_dirs:
+  - /tests/
+  - /test/
+  - /node_modules/
+  - /.git/
+  - /venv/
+  - /dist/
+  - /build/
+  - /meta/tests/
+  - /meta/dev/
+  - /meta/tools/

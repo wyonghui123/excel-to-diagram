@@ -1,0 +1,35 @@
+# M11 RLS 规则：user（用户）
+# M10 MCP 自动派生 get_user_by_id 工具时受此规则约束
+
+entity: user
+
+# 行级过滤
+row_filters:
+  # 用户能看自己（公司隔离）
+  - applies_to: [role:user, role:viewer]
+    condition: "user.company_id == $user.company_id"
+  # 管理员看所有
+  - applies_to: [role:admin, role:manager]
+    condition: "true"
+  # AI Agent 只能看公开用户
+  - applies_to: [role:ai-agent]
+    condition: "user.is_public == true"
+
+# 字段脱敏（重点：手机号、邮箱）
+field_masks:
+  - field: phone
+    mask: "***-****-{}"
+    applies_to: [role:user, role:viewer, role:ai-agent]
+  - field: email
+    mask: "{}@***"
+    applies_to: [role:viewer, role:ai-agent]
+  - field: password_hash
+    mask: "***HIDDEN***"
+    applies_to: [role:user, role:viewer, role:manager, role:ai-agent, role:admin]  # admin 也看不到密码哈希
+
+# 操作权限
+actions:
+  create: [role:admin]
+  read: [role:admin, role:manager, role:user, role:viewer, role:ai-agent]
+  update: [role:admin, role:manager, role:user]  # user 只能改自己
+  delete: [role:admin]

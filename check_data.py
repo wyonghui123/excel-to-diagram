@@ -1,0 +1,10 @@
+import sqlite3
+conn = sqlite3.connect('d:/filework/excel-to-diagram/meta/architecture.db')
+cur = conn.execute("SELECT * FROM user_groups WHERE id=591")
+row = cur.fetchone()
+print("id=591 数据:")
+print(dict(row)) if hasattr(row, 'keys') else print(row)
+print("\n所有列:")
+cur2 = conn.execute("SELECT * FROM user_groups WHERE id=591")
+print([d[0] for d in cur2.description])
+conn.close()

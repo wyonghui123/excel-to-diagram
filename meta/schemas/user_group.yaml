@@ -1,0 +1,443 @@
+id: user_group
+name: 用户组
+table_name: user_groups
+description: 用户组，用于组织用户和实现委托管理
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 用户组
+  category: security_entity
+  business_key: [code]
+  display_name_field: name
+
+deletion_policy:
+  mode: cascade
+  cascade_delete:
+    - user_group_members
+    - group_data_permissions
+    - group_roles
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+      - manager_id
+      - parent_id
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: name
+    name: 组名
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 用户组名称
+    semantics:
+      meaning: 用户组显示名称
+      display_name: true
+
+  - id: code
+    name: 组编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 50
+    pattern: "^[a-z][a-z0-9_]*$"
+    description: 用户组唯一编码
+    semantics:
+      meaning: 用户组业务编码
+      business_key: true
+      immutable: true
+
+  - id: parent_id
+    name: 父组
+    type: integer
+    db_column: parent_id
+    nullable: true
+    description: 父用户组ID，支持层级结构
+    semantics:
+      meaning: 父级用户组引用
+      parent_key: true
+      hierarchy_field: parent
+      hierarchy_level:
+        relation: self_reference
+        max_depth: 10
+      display:
+        type: association
+        target_type: user_group
+        display_field: name
+        placeholder: "无父级"
+    value_help:
+      source:
+        type: bo
+        target_bo: user_group
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        hierarchy:
+          enabled: true
+          parent_field: parent_id
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+      presentation:
+        result_type: dropdown
+        display_format: "{name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 120
+          - field: name
+            label: 名称
+            width: 200
+    ui:
+      widget: select
+      relation: user_group
+      multiple: false
+      clearable: true
+
+  - id: manager_id
+    name: 管理员
+    type: integer
+    db_column: manager_id
+    nullable: true
+    description: 用户组管理员ID
+    semantics:
+      meaning: 用户组管理员
+      display:
+        type: association
+        target_type: user
+        display_field: display_name
+        placeholder: "未指定管理员"
+    value_help:
+      source:
+        type: bo
+        target_bo: user
+        value_field: id
+        display_field: display_name
+        code_field: username
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 1
+      presentation:
+        result_type: dropdown
+        display_format: "{display_name} ({username})"
+        columns:
+          - field: username
+            label: 用户名
+            width: 120
+          - field: display_name
+            label: 显示名称
+            width: 150
+          - field: email
+            label: 邮箱
+            width: 200
+    ui:
+      widget: select
+      relation: user
+      multiple: false
+      clearable: true
+
+  - id: description
+    name: 描述
+    type: string
+    db_column: description
+    max_length: 500
+    nullable: true
+    description: 用户组描述
+    semantics:
+      meaning: 用户组详细说明
+      searchable: true
+    ui:
+      render_as: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: member_count
+    name: 成员数
+    type: integer
+    description: 用户组成员数量（计算字段，通过 user_group_members 子查询获得）
+    computed: true
+    db_column: null
+    semantics:
+      meaning: 组成员统计
+      virtual: true
+      cacheable: true
+      cache_ttl: 300
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: idx_user_group_code
+  - fields: [parent_id]
+    name: idx_user_group_parent
+
+relations: []
+
+associations:
+  members:
+    name: members
+    label: 成员
+    plural_label: 成员列表
+    target_type: user
+    type: many_to_many
+    through: user_group_members
+    source_key: group_id
+    target_key: user_id
+    description: 用户组成员关联
+    metadata_fields:
+      - id: is_manager
+        name: 是否管理员
+        type: boolean
+        default: false
+        description: 是否为组管理员
+    display:
+      label: 成员
+      plural_label: 成员
+      target_display_field: display_name
+      target_code_field: username
+      target_avatar_field: avatar_url
+      columns:
+        - id: username
+          label: 用户名
+          width: 120
+        - id: display_name
+          label: 显示名称
+          width: 150
+        - id: email
+          label: 邮箱
+          width: 200
+    actions:
+      assign:
+        name: add_member
+        label: 添加成员
+      unassign:
+        name: remove_member
+        label: 移除成员
+        confirm_message: 确定要从此用户组移除该成员吗？
+
+  roles:
+    name: roles
+    label: 角色
+    plural_label: 角色列表
+    target_type: role
+    type: many_to_many
+    through: group_roles
+    source_key: group_id
+    target_key: role_id
+    description: 用户组角色关联
+    display:
+      label: 角色
+      plural_label: 角色
+      target_display_field: name
+      target_code_field: code
+      columns:
+        - id: code
+          label: 角色编码
+          width: 120
+        - id: name
+          label: 角色名称
+          width: 150
+        - id: description
+          label: 描述
+          width: 250
+    actions:
+      assign:
+        name: assign_role
+        label: 分配角色
+      unassign:
+        name: revoke_role
+        label: 撤销角色
+        confirm_message: 确定要撤销此角色的分配吗？
+
+category_config:
+  create_permission: user_group:create
+  update_permission: user_group:update
+  delete_permission: user_group:delete
+  owner_auto_permission: false
+
+# 安全配置（启用权限委托）
+security:
+  permission_delegation: true  # 启用 grant/revoke standalone actions
+
+# 使用标准 CRUD actions（无需定义，系统自动推断）
+
+ui_view_config:
+  showChangeHistory: true
+
+  list:
+    detail_mode: page
+    detail_path: '/detail/user_group'
+    title: 用户组管理
+    description: 系统用户组列表
+    columns:
+      - field: name
+        width: 200
+      - field: code
+        width: 120
+        sortable: true
+      - field: parent_id
+        width: 150
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: user_group
+        display_field: name
+        placeholder: "无父级"
+      - field: manager_id
+        width: 150
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: user
+        display_field: display_name
+        placeholder: "未指定"
+      - field: member_count
+        width: 100
+        sortable: true
+        filterable: true
+        filter_type: number_range
+        type: number
+        align: right
+        computed: true
+        computation:
+          type: count_relations
+          scope: self
+      - field: description
+        width: 250
+        type: ellipsis
+      - field: created_at
+        width: 160
+        format: datetime
+        filter_type: date_range
+      - field: updated_at
+        width: 160
+        format: datetime
+        filter_type: date_range
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - name
+      - code
+    actions:
+      - id: create
+        label: 新建用户组
+        icon: plus
+        type: primary
+        permission: user_group:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+      - id: import
+        label: 导入
+        icon: upload
+        type: default
+    batch_actions:
+      - id: batch_delete
+        label: 批量删除
+        icon: delete
+        type: danger
+        permission: user_group:delete
+        confirm: 确定要删除选中的用户组吗？
+    defaultSort:
+      field: updated_at
+      order: desc
+    filters:
+      - field: name
+        label: 组名称
+        type: string
+        operator: contains
+      - field: code
+        label: 组编码
+        type: string
+        operator: contains
+
+  form:
+    title: 用户组信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [parent_id, manager_id]
+      - title: 其他信息
+        columns:
+          - fields: [description]
+
+  detail:
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields:
+          - code
+          - name
+          - parent_id
+          - manager_id
+          - description
+      
+      - id: members
+        label: 成员
+        type: association
+        association: members
+        actions:
+          - assign
+          - unassign
+      
+      - id: roles
+        label: 角色
+        type: association
+        association: roles
+        actions:
+          - assign
+          - unassign

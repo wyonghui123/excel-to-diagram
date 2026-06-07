@@ -1,0 +1,9 @@
+name = "excel-to-diagram-api"
+main = "workers/api.js"
+compatibility_date = "2024-01-01"
+
+[vars]
+
+# Secrets (set via wrangler secret put)
+# DEEPSEEK_API_KEY
+# ZHIPU_API_KEY

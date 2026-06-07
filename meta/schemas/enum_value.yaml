@@ -1,0 +1,533 @@
+# ============================================
+# 枚举值元模型
+# 层级: N/A (隶属于枚举类型)
+# 说明: 枚举类型的具体值项
+# ============================================
+
+id: enum_value
+name: 枚举值
+table_name: enum_values
+description: 枚举类型的具体值项，支持多维枚举值和层级枚举。
+
+parent_object: enum_type
+
+# ────────────────────────────────────────────
+# Aspect 引用
+# ────────────────────────────────────────────
+aspects: [audit_aspect]
+
+# ────────────────────────────────────────────
+# 导入导出配置
+# ────────────────────────────────────────────
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: "enum_type_id,code"
+  description: 枚举值支持导入导出，可用于批量创建或更新枚举值
+
+# ────────────────────────────────────────────
+# 审计配置
+# ────────────────────────────────────────────
+audit:
+  enabled: true
+  strategy: changed_only
+  description: 枚举值的变更将记录审计日志
+
+# ────────────────────────────────────────────
+# 语义标注
+# ────────────────────────────────────────────
+semantics:
+  meaning: 枚举类型的具体值项
+  business_key: true
+  display_name: true
+  category: meta_object
+  aliases:
+    - 枚举值
+    - EnumValue
+    - Enumeration Value
+
+# ────────────────────────────────────────────
+# UI 视图配置
+# ────────────────────────────────────────────
+ui_view_config:
+  list:
+    pageSize: 20
+    selectable: true
+    # Inline Edit 配置
+    inlineEdit:
+      enabled: true
+      mode: quick
+      autoSave: false
+      toolbarPosition: bottom
+    actions:
+      - id: create
+        label: 新建枚举值
+        icon: plus
+        type: primary
+        position: toolbar
+    filterFields:
+      - key: enum_type_id
+        title: 枚举类型
+        type: select
+        source: enum_type
+        visible: false
+        required: true
+    columns:
+      - key: code
+        title: 编码
+        width: 150
+        position: 1
+        importance: high
+        sortable: true
+        i18n_key: enum_value.field.code
+      - key: name
+        title: 名称
+        width: 150
+        position: 2
+        importance: high
+        sortable: true
+        editable: true
+        i18n_key: enum_value.field.name
+      - key: name_en
+        title: 英文名称
+        width: 150
+        position: 3
+        importance: medium
+        sortable: true
+        editable: true
+        i18n_key: enum_value.field.name_en
+      - key: sort_order
+        title: 排序
+        width: 80
+        position: 4
+        importance: medium
+        sortable: true
+        type: number
+        editable: true
+        i18n_key: enum_value.field.sort_order
+      - key: is_active
+        title: 状态
+        width: 80
+        position: 5
+        importance: high
+        sortable: true
+        widget: badge
+        badge_colors:
+          true: success
+          false: info
+        editable: true
+        i18n_key: enum_value.field.is_active
+      - key: is_system
+        title: 系统值
+        width: 80
+        position: 6
+        importance: medium
+        sortable: true
+        widget: badge
+        badge_colors:
+          true: ''
+          false: primary
+      - key: created_at
+        title: 创建时间
+        width: 180
+        position: 90
+        importance: low
+        sortable: true
+        i18n_key: common.field.created_at
+      - key: updated_at
+        title: 更新时间
+        width: 180
+        position: 91
+        importance: low
+        sortable: true
+    pageSize: 20
+    selectable: true
+  detail:
+    facets:
+      - title: 基本信息
+        type: fieldGroup
+        fields:
+          - code
+          - name
+          - name_en
+          - sort_order
+          - is_active
+          - is_system
+      - title: 维度配置
+        type: fieldGroup
+        fields:
+          - dimensions
+      - title: 层级配置
+        type: fieldGroup
+        fields:
+          - parent_code
+      - title: 系统信息
+        type: fieldGroup
+        fields:
+          - enum_type_id
+          - created_at
+          - updated_at
+    showChangeHistory: true
+    showRelations: false
+  form:
+    sections:
+      - title: 基本信息
+        fields:
+          - code
+          - name
+          - name_en
+          - sort_order
+          - is_active
+      - title: 维度配置
+        fields:
+          - dimensions
+      - title: 层级配置
+        fields:
+          - parent_code
+    layout: vertical
+
+# ────────────────────────────────────────────
+# 字段定义
+# ────────────────────────────────────────────
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键，系统内部使用
+    ui:
+      visible: false
+      editable: false
+
+  - id: enum_type_id
+    name: 枚举类型
+    type: string
+    db_column: enum_type_id
+    required: true
+    description: 所属枚举类型
+    ui:
+      widget: value_help
+      relation: enum_type
+      display_field: enum_type_name
+    value_help:
+      source:
+        type: bo
+        target_bo: enum_type
+        value_field: id
+        display_field: name
+        code_field: id
+        apply_target_permissions: false
+      behavior:
+        validation: true
+        binding_strength: strict
+      presentation:
+        result_type: dropdown
+        display_format: "{name}"
+    semantics:
+      meaning: 关联的枚举类型
+      parent_key: true
+      readonly_always: true
+
+  - id: code
+    name: 编码
+    type: string
+    db_column: code
+    required: true
+    description: 枚举值编码
+    semantics:
+      meaning: 枚举值的唯一编码
+      business_key: true
+      immutable: true
+      pattern: "^[A-Z][A-Z0-9_]*$"
+      examples:
+        - STRING
+        - PARENT_CHILD
+        - GENERAL
+      data_category: code
+    ui:
+      visible: true
+      editable: true
+      widget: input
+      fieldGroup: 基本信息
+      fieldGroupPosition: 10
+      i18n_key: enum_value.field.code
+
+  - id: name
+    name: 名称
+    type: string
+    db_column: name
+    required: true
+    description: 枚举值显示名称
+    semantics:
+      meaning: 枚举值的显示名称
+      display_name: true
+      examples:
+        - 字符串
+        - 父子关系
+        - 一般备注
+      data_category: text
+    ui:
+      visible: true
+      editable: true
+      widget: input
+      fieldGroup: 基本信息
+      fieldGroupPosition: 20
+      i18n_key: enum_value.field.name
+
+  - id: name_en
+    name: 英文名称
+    type: string
+    db_column: name_en
+    description: 英文名称（用于国际化）
+    semantics:
+      meaning: 枚举值的英文名称
+      data_category: text
+    ui:
+      visible: true
+      editable: true
+      widget: input
+      fieldGroup: 基本信息
+      fieldGroupPosition: 30
+      i18n_key: enum_value.field.name_en
+
+  - id: dimensions
+    name: 维度值
+    type: json
+    db_column: dimensions
+    description: 多维枚举的维度值
+    semantics:
+      meaning: '存储多维枚举的维度值，如 {"product": "ERP"}'
+    ui:
+      visible: true
+      editable: true
+      widget: textarea
+      fieldGroup: 维度配置
+      fieldGroupPosition: 10
+      i18n_key: enum_value.field.dimensions
+
+  - id: sort_order
+    name: 排序
+    type: integer
+    db_column: sort_order
+    default: 0
+    description: 排序顺序
+    semantics:
+      meaning: 枚举值的显示顺序，数字越小越靠前
+    ui:
+      visible: true
+      editable: true
+      widget: number
+      fieldGroup: 基本信息
+      fieldGroupPosition: 40
+      i18n_key: enum_value.field.sort_order
+
+  - id: is_active
+    name: 是否启用
+    type: boolean
+    db_column: is_active
+    default: true
+    description: 是否启用
+    semantics:
+      meaning: 停用的枚举值不会在业务表单中显示
+    enum_values:
+      - value: true
+        label: 启用
+        color: success
+      - value: false
+        label: 禁用
+        color: info
+    value_help:
+      source:
+        type: enum
+        enum_type_id: yes_no
+        sort_by: sort_order
+      behavior:
+        validation: false
+        binding_strength: loose
+      presentation:
+        result_type: dropdown
+    ui:
+      visible: true
+      editable: true
+      widget: value_help
+      fieldGroup: 基本信息
+      fieldGroupPosition: 50
+      i18n_key: enum_value.field.is_active
+
+  - id: is_system
+    name: 是否系统值
+    type: boolean
+    db_column: is_system
+    default: false
+    description: 是否系统预置值
+    semantics:
+      meaning: 系统预置值不可删除
+      readonly_always: true
+    enum_values:
+      - value: true
+        label: 系统
+        color: ''
+      - value: false
+        label: 用户
+        color: primary
+    ui:
+      visible: true
+      editable: false
+      widget: select
+      fieldGroup: 基本信息
+      fieldGroupPosition: 60
+      i18n_key: enum_value.field.is_system
+      options:
+        - value: true
+          label: 是
+        - value: false
+          label: 否
+
+  - id: parent_code
+    name: 父级编码
+    type: string
+    db_column: parent_code
+    description: 父级枚举值编码（用于层级枚举）
+    semantics:
+      meaning: 用于构建层级枚举结构
+    ui:
+      visible: true
+      editable: true
+      widget: input
+      fieldGroup: 层级配置
+      fieldGroupPosition: 10
+      i18n_key: enum_value.field.parent_code
+
+  - id: metadata
+    name: 扩展元数据
+    type: json
+    db_column: metadata
+    description: 扩展元数据
+    semantics:
+      meaning: 存储额外的元数据信息
+    ui:
+      visible: false
+      editable: false
+
+  - id: enum_type_name
+    name: 枚举类型名称
+    type: string
+    description: 所属枚举类型名称
+    storage: virtual
+    ui:
+      visible: true
+      editable: false
+    semantics:
+      meaning: 关联枚举类型的显示名称
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建的时间戳
+    ui:
+      visible: true
+      editable: false
+      widget: datetime
+      fieldGroup: 系统信息
+      i18n_key: common.field.created_at
+
+# ────────────────────────────────────────────
+# 关联关系
+# ────────────────────────────────────────────
+relations:
+  - id: enum_value_to_type
+    name: 归属枚举类型
+    type: parent_child
+    target: enum_type
+    cardinality: "N:1"
+    description: 枚举值归属的枚举类型
+    semantics:
+      meaning: 枚举值与枚举类型的关系
+
+indexes:
+  - name: uidx_enum_values_type_code
+    fields: [enum_type_id, code]
+    type: unique
+    priority: high
+    description: "枚举类型+编码唯一索引（业务键约束）"
+
+# ────────────────────────────────────────────
+# 操作定义
+# ────────────────────────────────────────────
+actions:
+  - id: enum_value_create
+    name: 创建枚举值
+    type: crud
+    method: POST
+    path: /api/v1/enum-values
+    description: 创建新的枚举值
+
+  - id: enum_value_read
+    name: 查询枚举值
+    type: crud
+    method: GET
+    path: /api/v1/enum-values/{id}
+    description: 查询单个枚举值
+
+  - id: enum_value_update
+    name: 更新枚举值
+    type: crud
+    method: PUT
+    path: /api/v1/enum-values/{id}
+    description: 更新枚举值信息
+
+  - id: enum_value_delete
+    name: 删除枚举值
+    type: crud
+    method: DELETE
+    path: /api/v1/enum-values/{id}
+    description: 删除枚举值
+
+  - id: enum_value_list
+    name: 列表查询
+    type: crud
+    method: GET
+    path: /api/v1/enum-values
+    description: 查询枚举值列表
+
+# ────────────────────────────────────────────
+# 校验规则
+# ────────────────────────────────────────────
+validations:
+  - id: enum_type_id_required
+    name: 枚举类型必填
+    type: field
+    rule: enum_type_id is not None and enum_type_id != ''
+    message: 枚举类型不能为空
+    severity: error
+
+  - id: code_required
+    name: 编码必填
+    type: field
+    rule: code is not None and code != ''
+    message: 编码不能为空
+    severity: error
+
+  - id: name_required
+    name: 名称必填
+    type: field
+    rule: name is not None and name != ''
+    message: 名称不能为空
+    severity: error
+
+  - id: unique_code_per_type
+    name: 编码唯一性
+    type: constraint
+    rule: UNIQUE(enum_type_id, code)
+    message: 同一枚举类型下编码不能重复
+    severity: error

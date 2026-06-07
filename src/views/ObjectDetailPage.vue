@@ -97,7 +97,7 @@ import PermissionConfigPanel from '@/views/SystemManagement/components/Permissio
 import StateTransitionButtons from '@/components/bo/StateTransitionButtons.vue'
 import metaService from '@/services/metaService'
 import { objectTypeService } from '@/services/objectTypeService'
-import { useFieldPolicy } from '@/composables/useFieldPolicy'  // 🆕 v1 批次 3 / FR-6.1
+import { useFieldPolicy } from '@/composables/useFieldPolicy'  // [DECORATIVE] [NEW] v1.3 / FR-6.1
 
 const emit = defineEmits(['refresh'])
 
@@ -114,7 +114,7 @@ const detailPageKey = ref(0)
 
 const entityMeta = ref(null)
 
-// 🆕 v1 批次 3 / FR-6.1: 字段策略
+// [DECORATIVE] [NEW] v1.3 / FR-6.1: 字段策略
 const { autoLoad: autoLoadPolicies } = useFieldPolicy(
   computed(() => entityMeta.value),
   computed(() => [])
@@ -318,7 +318,7 @@ async function loadEntityMeta() {
   } catch (e) {
     console.warn('Failed to load entity meta for', objectType.value, e)
   }
-  // 🆕 v1 批次 3 / FR-6.1: 激活 field-policies API
+  // [DECORATIVE] [NEW] v1.3 / FR-6.1: 激活 field-policies API
   if (objectType.value && autoLoadPolicies) {
     autoLoadPolicies(objectType.value, 'read').catch(e => {
       console.warn('[ObjectDetailPage] autoLoad field-policies failed:', e)
