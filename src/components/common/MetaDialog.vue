@@ -14,7 +14,7 @@
       :model-value="initialFormData"
       :layout="formLayout"
       :label-position="labelPosition"
-      :field-policy="fieldPolicy"  <!-- 🆕 v1 批次 3 / FR-6.7 -->
+      :field-policy="fieldPolicy"
       @update:model-value="handleDataChange"
     >
       <template v-for="field in slotFields" :key="field.key" #[`field-${field.key}`]="scope">
