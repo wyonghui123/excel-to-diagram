@@ -1,3 +1,11 @@
+<!--
+  @deprecated 2026-06-10
+  此文件是旧版 AADiagramApp，已被 views/AADiagramApp/index.vue 完全取代。
+  旧文件自身引用 DataPreview/ScopeSelector/TreeNode 等子组件，这些子组件也已废弃。
+  无生产代码引用（grep 验证通过），保留仅为历史记录。
+  建议下一轮清理时整体删除本文件及其子组件。
+  替代: src/views/AADiagramApp/index.vue
+-->
 <template>
   <div class="aa-diagram-app">
     <!-- 顶部标题栏 -->

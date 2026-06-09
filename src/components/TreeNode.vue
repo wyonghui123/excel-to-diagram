@@ -1,3 +1,14 @@
+<!--
+  @deprecated 2026-06-10
+  自实现树节点组件（仅剩 CenterScopeSelector.vue 一个活跃调用方，传递性依赖）。
+  - 链式依赖: views/AADiagramApp/components/steps/StepScope.vue
+              -> components/CenterScopeSelector.vue
+              -> 本文件 TreeNode.vue
+  - 新版范围选择器（CenterScopeSelector 内层）应迁到 Element Plus el-tree 内置节点。
+  - 迁移完成后本文件可彻底删除。
+  建议处理顺序: 先迁 CenterScopeSelector.vue 到 el-tree，再删除本文件。
+  替代: Element Plus el-tree
+-->
 <template>
   <div class="tree-node" :class="{ 'is-leaf': node.isLeaf }">
     <div class="node-content" :style="{ paddingLeft: level * 20 + 'px' }">

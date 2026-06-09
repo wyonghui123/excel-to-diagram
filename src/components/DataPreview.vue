@@ -1,3 +1,12 @@
+<!--
+  @deprecated 2026-06-10
+  旧版数据预览组件，仅被已废弃的 components/AADiagramApp.vue 引用。
+  数据校验功能迁移到 views/AADiagramApp/components/steps/StepScope.vue（ValidationPanel）。
+  数据预览功能迁移到 views/AADiagramApp/components/steps/StepDisplay.vue。
+  无生产代码引用（grep 验证通过），保留仅为历史记录。
+  建议下一轮清理时删除。
+  替代: views/AADiagramApp/components/steps/{StepScope,StepDisplay}.vue
+-->
 <template>
   <div class="data-preview">
     <!-- 数据校验预警区域 -->

@@ -1,3 +1,12 @@
+<!--
+  @deprecated 2026-06-10
+  旧版范围选择器，仅被已废弃的 DataPreview.vue 引用（链式依赖）。
+  范围选择功能已迁移到 views/AADiagramApp/components/steps/StepScope.vue（CenterScopeSelector）。
+  新版使用 el-tree 实现，不再需要自实现 TreeNode。
+  无生产代码引用（grep 验证通过），保留仅为历史记录。
+  建议下一轮清理时删除。
+  替代: views/AADiagramApp/components/steps/StepScope.vue
+-->
 <template>
   <div class="scope-selector">
     <div class="selector-actions">
