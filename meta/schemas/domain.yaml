@@ -242,6 +242,19 @@ ui_view_config:
         importance: low
         sortable: true
         i18n_key: common.field.updated_at
+      # [FIX 2026-06-09] 补 child_count UI 列，让 computed count_children
+      # 在 list 响应里被 enrichment (compute_batch) 填充，避免 child_count
+      # 仅在排序/过滤 SQL 子查询存在、UI 却不显示的尴尬
+      - key: child_count
+        title: 子领域数量
+        width: 100
+        position: 70
+        importance: medium
+        sortable: true
+        computed: true
+        computation:
+          type: count_children
+          child_object: sub_domain
     selectable: true
   detail:
     facets:

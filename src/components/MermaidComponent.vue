@@ -1,5 +1,5 @@
 <template> 
-  <div class="mermaid-container" :class="{ 'maximized': isMaximized }">
+  <div ref="mermaidContainerEl" class="mermaid-container" :class="{ 'maximized': isMaximized }">
     <div class="toolbar">
       <button class="toolbar-btn" @click="resetAdaptive" title="重置视图">
         <AppIcon name="refresh" size="sm" />
@@ -135,6 +135,7 @@ export default {
     }
 
     const mermaidContainer = ref(null)
+    const mermaidContainerEl = ref(null)  // 关键修复 v10：真 .mermaid-container 元素 ref（之前 mermaidContainer 绑在 .mermaid-content 上）
     const mermaidWrapper = ref(null)
     const draggableArea = ref(null)
     const isMaximized = ref(false)
@@ -189,20 +190,53 @@ export default {
     }
 
     const toggleMaximize = () => {
-      isMaximized.value = !isMaximized.value
-      // 关键修复 v5：全屏切换后必须重新计算画布尺寸
-      // 否则 .mermaid-wrapper / .draggable-area 还是切换前的 inline style（基于 600px 高的 container 算的），
-      // 全屏后 mermaid-container 100vw×100vh，但 draggle 仍 100vw×600px，
-      // 视口下方 30% 是 mermaid-container 白色背景"挡住"图表
-      // 双层 nextTick + rAF 兜底 CSS transition / maximized 应用完成
-      nextTick(() => {
-        requestAnimationFrame(() => {
-          if (mermaidContainer.value) {
-            svgProcessor.setupCanvasLayout(mermaidWrapper, mermaidContainer, draggableArea)
-            interaction.autoFitDiagram()
-          }
+      // 关键修复 v11：进入时强制 console.log，确认函数被调用
+      // 关键修复 v10：用 mermaidContainerEl（真 .mermaid-container 元素）调 requestFullscreen
+      console.log('[toggleMaximize] called | fullscreenElement:', document.fullscreenElement, '| mermaidContainerEl.value:', !!mermaidContainerEl.value)
+
+      if (document.fullscreenElement) {
+        // 当前是浏览器真全屏，退出
+        document.exitFullscreen().then(() => {
+          console.log('[toggleMaximize] exitFullscreen ok')
+        }).catch((err) => {
+          console.error('[toggleMaximize] exitFullscreen failed:', err?.name, err?.message, err)
+          isMaximized.value = !isMaximized.value
         })
-      })
+      } else if (mermaidContainerEl.value) {
+        // 当前非全屏，尝试进入浏览器真全屏
+        const p = mermaidContainerEl.value.requestFullscreen()
+        if (p && typeof p.then === 'function') {
+          p.then(() => {
+            console.log('[toggleMaximize] requestFullscreen ok')
+          }).catch((err) => {
+            console.error('[toggleMaximize] requestFullscreen failed:', err?.name, err?.message, err)
+            // 关键修复 v11：失败时兜底切 CSS class（v8 行为）
+            isMaximized.value = !isMaximized.value
+          })
+        } else {
+          // requestFullscreen 同步返回 undefined（旧浏览器或某些环境）
+          console.warn('[toggleMaximize] requestFullscreen returned no promise, fallback to CSS class')
+          isMaximized.value = !isMaximized.value
+        }
+      } else {
+        // mermaidContainerEl.value 为 null，template ref 没绑上，兜底切 CSS class
+        console.warn('[toggleMaximize] mermaidContainerEl.value is null, fallback to CSS class')
+        isMaximized.value = !isMaximized.value
+      }
+    }
+
+    // 监听浏览器全屏变化（v9：Fullscreen API 接管，v10：用 mermaidContainerEl）
+    // fullscreenchange 事件在浏览器全屏状态改变时触发，时机可靠
+    const handleFullscreenChange = () => {
+      const isFullscreen = !!document.fullscreenElement
+      isMaximized.value = isFullscreen
+      // setTimeout(50) 给 Vue 一点时间完成 DOM 更新（isMaximized 切换 → CSS 应用）
+      setTimeout(() => {
+        if (mermaidContainerEl.value) {
+          svgProcessor.setupCanvasLayout(mermaidWrapper, mermaidContainerEl, draggableArea)
+          interaction.autoFitDiagram()
+        }
+      }, 50)
     }
 
     // 生成Mermaid图表代码并保存关系说明信�?
@@ -301,7 +335,12 @@ export default {
                 svgProcessor.processSvg(svgElAfter, props, relationDescriptions, mermaidContainer, nodeColorMappings)
 
                 // 设置交互功能
-                interaction.addZoomAndPan(mermaidWrapper, mermaidContainer, draggableArea)
+                // 关键修复 v10：传 mermaidContainerEl（真 .mermaid-container）作为 wheel/mousedown 事件目标
+                // 之前传 mermaidWrapper，全屏模式下 mermaidWrapper 仍受父级 CSS 限制，事件触不到或无效
+                // 关键修复 v15：第 3 个参数必须传 mermaidContainer（.mermaid-content），
+                // 之前误传 draggableArea，导致 updateTransform 把 transform 设到 draggle 上而不是 content 上
+                // （v10 改 addZoomAndPan 签名时漏改调用方）
+                interaction.addZoomAndPan(mermaidContainerEl, mermaidWrapper, mermaidContainer)
 
                 // 设置画布布局
                 svgProcessor.setupCanvasLayout(mermaidWrapper, mermaidContainer, draggableArea)
@@ -719,11 +758,49 @@ export default {
       }
     )
 
+    // 关键修复 v14：用 debounced window resize 替代 ResizeObserver
+    // ResizeObserver 监听 mermaid-container 会触发 setupCanvasLayout 死循环
+    // （mermaid 渲染过程中 container 尺寸会被 SVG 推大，触发 observer 重算，再推大...）
+    // 改为监听 window resize（debounced）+ fullscreenchange 事件，架构上消除循环
+    let resizeDebounceTimer = null
+
+    const handleWindowResize = () => {
+      clearTimeout(resizeDebounceTimer)
+      resizeDebounceTimer = setTimeout(() => {
+        if (mermaidContainer.value) {
+          // 关键修复 v14：尺寸安全检查，防止异常尺寸触发死循环
+          const w = mermaidContainer.value.offsetWidth
+          const h = mermaidContainer.value.offsetHeight
+          // 正常浏览器视口不可能超过 10000px，超过说明状态异常，跳过
+          if (w > 0 && w < 10000 && h > 0 && h < 10000) {
+            svgProcessor.setupCanvasLayout(mermaidWrapper, mermaidContainer, draggableArea)
+          } else {
+            console.warn('[handleWindowResize] abnormal size, skip:', w, 'x', h)
+          }
+        }
+      }, 150)
+    }
+
     // 组件挂载后初始化
     onMounted(() => {
       if (props.diagramData) {
         renderMermaid()
       }
+
+      // 关键修复 v14：监听 window resize（debounced 150ms）
+      // 覆盖：浏览器窗口 resize、dev tools 开合、tab 切换等场景
+      // 不监听 mermaid-container 自身（避免 v8 ResizeObserver 死循环）
+      window.addEventListener('resize', handleWindowResize)
+
+      // 关键修复 v9：监听浏览器 fullscreenchange 事件
+      document.addEventListener('fullscreenchange', handleFullscreenChange)
+    })
+
+    onBeforeUnmount(() => {
+      clearTimeout(resizeDebounceTimer)
+      window.removeEventListener('resize', handleWindowResize)
+      // 关键修复 v9：清理 fullscreenchange 监听
+      document.removeEventListener('fullscreenchange', handleFullscreenChange)
     })
 
     // 导出为图片
@@ -1468,9 +1545,11 @@ ${mermaidCode}
 
     return {
       mermaidContainer,
+      mermaidContainerEl,
       mermaidWrapper,
       draggableArea,
       isMaximized,
+      shouldHideTails,
       toggleMaximize,
       resetAdaptive: interaction.resetAdaptive,
       autoFitDiagram: interaction.autoFitDiagram,

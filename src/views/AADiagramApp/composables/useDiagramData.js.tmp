@@ -1,0 +1,31 @@
+  // 关系分类树：基于 centerScope 和 previewData.relationships 计算
+  const relationCategoryTree = computed(() => {
+    if (!previewData.value?.relationships || !previewData.value?.businessObjects) {
+      return []
+    }
+
+    // 运行数据校验，获取问题关系编码
+    const validationResult = validateData(rawData.value, previewData.value)
+    const invalidRelationCodes = new Set()
+    validationResult.items.forEach(item => {
+      if (item.sheet === '业务对象关系' && item.entityCode) {
+        invalidRelationCodes.add(item.entityCode)
+      }
+    })
+
+    // 过滤掉问题关系，同时过滤空关系编码
+    let validRelationships = previewData.value.relationships
+    if (invalidRelationCodes.size > 0) {
+      validRelationships = validRelationships.filter(rel => {
+        if (!rel.relationCode) return false
+        return !invalidRelationCodes.has(rel.relationCode)
+      })
+      console.log(`[relationCategoryTree] 过滤问题关系: ${previewData.value.relationships.length} -> ${validRelationships.length}, invalidCodes:`, Array.from(invalidRelationCodes))
+    }
+
+    return buildRelationCategoryTree(
+      validRelationships,
+      centerScope.value,
+      previewData.value.businessObjects
+    )
+  })

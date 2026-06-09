@@ -267,8 +267,11 @@ export function useSvgProcessor(options) {
     if (!wrapper || !draggable || !content || !pre || !containerEl) return
 
     // 读取容器实际尺寸（首次渲染时容器可能尚未铺满，需要兜底）
-    const containerWidth = containerEl.offsetWidth || containerEl.clientWidth || 1000
-    const containerHeight = containerEl.offsetHeight || containerEl.clientHeight || 600
+    // 关键修复 v8：用 getBoundingClientRect() 强制 layout reflow，读取最新值
+    // 避免 offsetWidth 缓存可能为旧值的问题
+    const containerRect = containerEl.getBoundingClientRect()
+    const containerWidth = Math.round(containerRect.width) || containerEl.offsetWidth || containerEl.clientWidth || 1000
+    const containerHeight = Math.round(containerRect.height) || containerEl.offsetHeight || containerEl.clientHeight || 600
 
     // 关键修复 v4：draggable / wrapper 100% 覆盖容器，top-left 对齐
     // 不再用 1.5x 长边的正方形（之前会导致图表偏下/偏上、灰色背景裸露）
@@ -298,20 +301,32 @@ export function useSvgProcessor(options) {
     content.style.transform = 'none'
     content.style.margin = '0'
 
-    pre.style.width = 'auto'
+    pre.style.width = '100%'  // 关键修复 v6：100% 容器，不要 auto（auto 会让 pre 收缩到 SVG intrinsic 2091.78，居中后溢出 mermaid-container 导致两侧白色背景）
     pre.style.height = '100%'
     pre.style.boxSizing = 'border-box'
     pre.style.padding = '0'
+    pre.style.display = 'flex'
+    pre.style.alignItems = 'center'
+    pre.style.justifyContent = 'center'
 
     const svgEl = pre.querySelector('svg')
     if (svgEl) {
-      // 关键修复 v4：让 SVG 100% 容器高度，宽度按 viewBox 比例自动
-      // 不再让 SVG 用 width/height attribute 渲染（attribute 是 4571×1907，太大）
+      // 关键修复 v6：让 SVG 100%×100% 容器，preserveAspectRatio="xMidYMid slice" 让图表 fill 容器不留白
+      // 不再用 'auto' 收缩到 intrinsic（会溢出 mermaid-container）
       svgEl.style.height = '100%'
-      svgEl.style.width = 'auto'
-      svgEl.style.maxWidth = '100%'
-      svgEl.style.maxHeight = '100%'
+      svgEl.style.width = '100%'
+      svgEl.style.maxWidth = 'none'
+      svgEl.style.maxHeight = 'none'
+      svgEl.setAttribute('preserveAspectRatio', 'xMidYMid slice')
     }
+
+    // 关键诊断 v7：输出关键尺寸到 console，便于排查"全屏留白"问题
+    console.log('[setupCanvasLayout] container:', containerWidth, 'x', containerHeight,
+      '| wrapper:', wrapper.style.width, 'x', wrapper.style.height,
+      '| draggable:', draggable.style.width, 'x', draggable.style.height,
+      '| pre:', pre.style.width, 'x', pre.style.height,
+      '| svg:', svgEl?.getAttribute('preserveAspectRatio'),
+      '| containerEl.offset:', containerEl.offsetWidth, 'x', containerEl.offsetHeight)
   }
 
   /**

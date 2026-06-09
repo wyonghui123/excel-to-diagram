@@ -265,6 +265,20 @@ export default {
       };
       this.clearData();
     }
+  },
+  // 测试专用: dev 环境暴露组件实例到 window，方便 e2e 测试注入 mock 数据跳过 4 步流程
+  // 仅 DEV 构建包含，production 构建 import.meta.env.DEV 为 false，整段被 dead-code-elimination 移除
+  mounted() {
+    console.log('[AADiagramApp] mounted, DEV=', import.meta.env.DEV, 'this=', !!this)
+    if (import.meta.env.DEV) {
+      window.__diagramApp = this
+      console.log('[AADiagramApp] window.__diagramApp exposed')
+    }
+  },
+  beforeUnmount() {
+    if (import.meta.env.DEV && window.__diagramApp === this) {
+      window.__diagramApp = null
+    }
   }
 }
 </script>

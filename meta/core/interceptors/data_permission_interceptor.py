@@ -159,11 +159,44 @@ class DataPermissionInterceptor(Interceptor):
                 'conditions': or_group_conditions,
             })
 
+        # 6. [FIX v1.0.4] Owner 过滤始终可见
+        # 即使 dimension scope 配置存在, 用户对自己 owner 的资源也应该可见
+        # (FR-009: 记录级可见性; auto_owner=true 自动设置 owner_id = 当前用户)
+        # SQL: WHERE (id IN (1,2,11,12) AND product_id IN (1,17))  -- dimension scope
+        #   OR (owner_id = $user_id)                                  -- owner 始终可见
+        if context.user_id and self._bo_has_owner_id(context):
+            owner_cond = {
+                'field': 'owner_id',
+                'operator': 'eq',
+                'value': context.user_id,
+                'source': 'owner',
+            }
+            # 把已注入的所有 dimension scope 条件 + owner 条件包成一个 OR group
+            existing = list(context.extra['query_conditions'])
+            context.extra['query_conditions'] = [{
+                'type': 'or',
+                'conditions': existing + [owner_cond],
+            }]
+            logger.info(
+                f'[_apply_dimension_scope_filter] user={context.user_id} '
+                f'object_type={object_type} added owner OR (owner_id={context.user_id})'
+            )
+
         logger.info(
             f'[_apply_dimension_scope_filter] user={context.user_id} object_type={object_type} '
             f'roles_with_scope={len(per_role_conditions)}'
         )
         return True
+
+    def _bo_has_owner_id(self, context: 'ActionContext') -> bool:
+        """检查当前 BO 是否有 owner_id 字段"""
+        try:
+            from meta.core.bo_schema_loader import get_bo_schema_loader
+            loader = get_bo_schema_loader()
+            return loader.has_owner_id(context.object_type)
+        except Exception as e:
+            logger.debug(f'[_bo_has_owner_id] error: {e}')
+            return False
 
     @staticmethod
     def _parse_compound_expr(expr: str) -> List[Dict]:

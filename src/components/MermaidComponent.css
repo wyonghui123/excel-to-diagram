@@ -11,14 +11,24 @@
 }
 
 .mermaid-container.maximized {
-  width: 100vw;
-  height: 100vh;
-  position: fixed;
-  top: 0;
-  left: 0;
-  border: none;
-  border-radius: 0;
-  z-index: 9999;
+  /* 关键修复 v7：所有关键属性加 !important 兜底
+     避免父级 transform / overflow / contain / filter 等干扰 position: fixed 定位
+     也避免父级 max-width: 1200px (AADiagramApp .content-panel) 误影响子元素宽度计算 */
+  width: 100vw !important;
+  height: 100vh !important;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+  transform: none !important;
+  border: none !important;
+  border-radius: 0 !important;
+  z-index: 9999 !important;
   background-color: #FFFFFF;
 }
 
@@ -140,7 +150,7 @@
   overflow: visible !important;
   font-family: inherit !important;
   font-size: inherit !important;
-  width: auto !important;
+  width: 100% !important;  /* 关键修复 v6：100% 容器，不要 auto（auto 让 pre 收缩到 SVG intrinsic 2091.78，居中后溢出 mermaid-container 导致两侧白色） */
   min-width: 0 !important;
   min-height: 0 !important;
   height: 100% !important;  /* 100% 父元素高度 */
@@ -155,7 +165,7 @@
   /* 关键：让 SVG 100% 容器高度，宽度按 viewBox 比例自动计算
      这样图表天然填满容器高度，不需要 JS 算 fit scale */
   height: 100% !important;
-  width: auto !important;
+  width: 100% !important;
   max-width: 100% !important;
   max-height: 100% !important;
   min-width: 0 !important;
@@ -164,6 +174,9 @@
   display: block !important;
   background: #FFFFFF !important;
   box-sizing: border-box;
+  /* 关键修复 v5：xMidYMid slice 让 SVG fill 容器（裁切超出）
+     viewBox 比例 ≠ 容器比例时不会出现 letterbox 留白 */
+  preserveAspectRatio: xMidYMid slice;
   /* viewBox 保持原样，浏览器自动按比例缩放 */
 }
 

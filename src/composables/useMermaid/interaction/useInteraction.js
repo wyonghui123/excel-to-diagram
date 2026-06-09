@@ -1,12 +1,14 @@
 import { ref } from 'vue'
 
+// 关键修复 v19：用 window 全局对象共享拖动状态，跨 module reload 保持一致
+// HMR 替换 module 后老 addZoomAndPan 闭包内的 let isDragging 与新 handleMouseMove 的 let isDragging 是不同变量
+// 改用 window.__mermaidDrag 全局对象，所有 handler 引用同一对象，状态跨 HMR/闭包保持一致
+const dragState = (typeof window !== 'undefined' && (window.__mermaidDrag || (window.__mermaidDrag = { isDragging: false, startX: 0, startY: 0 }))) || { isDragging: false, startX: 0, startY: 0 }
+
 export function useInteraction() {
   const scale = ref(1)
   const translateX = ref(0)
   const translateY = ref(0)
-  let isDragging = false
-  let startX = 0
-  let startY = 0
 
   /**
    * v4 重构：mermaid-content 不再 absolute 居中（由 CSS flex 居中接管）。
@@ -54,10 +56,13 @@ export function useInteraction() {
     autoFitDiagram()
   }
 
-  const addZoomAndPan = (mermaidWrapperRef, mermaidContainerRef, mermaidContentRef) => {
-    if (!mermaidWrapperRef?.value || !mermaidContainerRef?.value) return
+  const addZoomAndPan = (mermaidContainerElRef, mermaidWrapperRef, mermaidContentRef) => {
+    if (!mermaidContainerElRef?.value || !mermaidWrapperRef?.value || !mermaidContentRef?.value) return
 
-    // 缩放范围：fit=1（CSS 已让 SVG 100% 容器高度），用户可放大到 3x，缩小到 0.3x
+    // 关键修复 v10：把 wheel/mousedown/dblclick 绑在真 .mermaid-container 元素（mermaidContainerEl）上
+    // 之前绑在 mermaidWrapper 上，全屏模式下 mermaidWrapper 仍受父级 CSS 限制，
+    // 事件触不到或 transform 视觉上没效果
+    // mermaid-container 在真全屏时占满整个屏幕，事件能稳定触发
     const minScale = 0.3
     const maxScale = 3
 
@@ -86,45 +91,69 @@ export function useInteraction() {
     }
 
     const handleMouseDown = (e) => {
-      const target = e.target
-      if (target.closest('.node') || target.closest('.edgePath') || target.closest('.edgeLabel')) {
-        return
-      }
+      // 关键修复 v13：用 window 捕获阶段绑 mousedown，确保 fullscreen 模式下事件一定触发
+      if (e.button !== 0) return
+      if (!mermaidContainerElRef?.value) return
+      // 只在 mermaid-container 内的 mousedown 触发拖动
+      if (!mermaidContainerElRef.value.contains(e.target)) return
+      if (e.target.closest('.toolbar') || e.target.closest('.toolbar-btn')) return
+      e.preventDefault()  // 阻止默认行为（防文本选择等）
 
-      isDragging = true
-      startX = e.clientX - translateX.value
-      startY = e.clientY - translateY.value
-      mermaidWrapperRef.value.style.cursor = 'grabbing'
-      mermaidWrapperRef.value.classList.add('dragging')
+      dragState.isDragging = true
+      dragState.startX = e.clientX - translateX.value
+      dragState.startY = e.clientY - translateY.value
+      mermaidContainerElRef.value.style.cursor = 'grabbing'
+      mermaidContainerElRef.value.classList.add('dragging')
+      // 关键修复 v13：加 log 让用户能验证 mousedown 触发
+      console.log('[drag] mousedown', { startX: dragState.startX, startY: dragState.startY, target: e.target.tagName })
     }
 
     const handleMouseMove = (e) => {
-      if (!isDragging) return
-
-      translateX.value = e.clientX - startX
-      translateY.value = e.clientY - startY
+      // 关键诊断 v17：log 每次 mousemove 触发，让用户能看到 mousemove 次数
+      console.log('[drag] mousemove, isDragging=', dragState.isDragging, 'e.clientX=', e.clientX)
+      if (!dragState.isDragging) {
+        return
+      }
+      translateX.value = e.clientX - dragState.startX
+      translateY.value = e.clientY - dragState.startY
       updateTransform(mermaidContentRef)
     }
 
     const handleMouseUp = () => {
-      if (isDragging && mermaidWrapperRef?.value) {
-        mermaidWrapperRef.value.classList.remove('dragging')
-        mermaidWrapperRef.value.style.cursor = 'grab'
+      if (dragState.isDragging) {
+        console.log('[drag] mouseup, final translate:', translateX.value, translateY.value)
       }
-      isDragging = false
+      if (dragState.isDragging && mermaidContainerElRef?.value) {
+        mermaidContainerElRef.value.classList.remove('dragging')
+        mermaidContainerElRef.value.style.cursor = 'grab'
+      }
+      dragState.isDragging = false
     }
 
     const handleDblClick = () => {
       autoFitDiagram()
     }
 
-    mermaidWrapperRef.value.addEventListener('wheel', handleWheel, { passive: false })
-    mermaidWrapperRef.value.addEventListener('mousedown', handleMouseDown)
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', handleMouseUp)
-    mermaidWrapperRef.value.addEventListener('dblclick', handleDblClick)
+    // 关键修复 v18：mousemove/mouseup 改用 document bubble 模式绑（不要 capture）
+    // v16 改 window capture 是错的：window.addEventListener(..., true) 只在 capture 阶段触发
+    // dispatchEvent bubbles:true 的事件走 bubble 阶段，window capture listener 收不到
+    // 改用 document (bubble)，document 一定会收到 bubble 阶段事件
+    // mermaid 内部 stopPropagation 影响 window 不影响 document
+    window.addEventListener('mousedown', handleMouseDown, true)  // mousedown 仍 capture（避免 mermaid 拦截）
+    document.addEventListener('mousemove', handleMouseMove, false)  // bubble 模式
+    document.addEventListener('mouseup', handleMouseUp, false)  // bubble 模式
+    // wheel 和 dblclick 仍绑在 mermaidContainerEl 上（这两个在 fullscreen 模式下工作正常）
+    mermaidContainerElRef.value.addEventListener('wheel', handleWheel, { passive: false })
+    mermaidContainerElRef.value.addEventListener('dblclick', handleDblClick)
 
-    mermaidWrapperRef.value.style.cursor = 'grab'
+    mermaidContainerElRef.value.style.cursor = 'grab'
+
+    // 关键修复 v18：返回清理函数
+    return () => {
+      window.removeEventListener('mousedown', handleMouseDown, true)
+      document.removeEventListener('mousemove', handleMouseMove, false)
+      document.removeEventListener('mouseup', handleMouseUp, false)
+    }
   }
 
   return {

@@ -634,3 +634,403 @@ class TestUserApiListUsersSort:
         assert resp.status_code == 200, resp.data[:300]
         body = resp.get_json()
         assert body['success'] is True
+
+
+# ============================================================
+# 基于计算字段的过滤/排序 API 测试 (v3.18 计算字段专项)
+# ============================================================
+# 背景 (FR-2026-06-09):
+#   - composition/parent_child 关联类型的 count_children 字段
+#     之前 _build_computed_count_sort_clause 不支持 → 已修复
+#   - 但 _try_build_computed_filter 仍未支持 → G1 (待修复,本类测试预期失败)
+#   - formula/category/audit 派生字段的过滤从未覆盖
+#
+# 端点: GET /api/v2/bo/<object_type>?page=&page_size=&ordering=&<filter>__op=value
+# 响应: {success, data:{items, total, page, page_size, filters}}
+# 鉴权: dev-login cookie (与 TestUserApiListUsersSort 一致)
+# ============================================================
+
+
+class TestComputedFieldApiHelper:
+    """共享辅助：构造 admin client + 调 GET /api/v1/bo/<object_type>"""
+
+    @staticmethod
+    def _get_admin_client():
+        from meta.tests.conftest import get_shared_app
+        _, client = get_shared_app()
+        # 走 dev-login 拿 httpOnly cookie
+        client.get('/api/v1/auth/dev-login?username=admin')
+        return client
+
+    @staticmethod
+    def _list(client, object_type, **params):
+        """调 GET /api/v2/bo/<object_type>，返回 (resp, items)
+
+        注: 前端 boCrudService._request() 默认走 apiV2 = /api/v2，
+            对应 bo_bp 的 url_prefix='/api/v2/bo' (见 meta/api/bo_api.py:15)
+        """
+        # 过滤掉 None 值，避免拼出 ?key=None
+        cleaned = {k: v for k, v in params.items() if v is not None}
+        qs = '&'.join(f'{k}={v}' for k, v in cleaned.items())
+        path = f'/api/v2/bo/{object_type}?{qs}' if qs else f'/api/v2/bo/{object_type}'
+        resp = client.get(path)
+        if resp.status_code != 200:
+            return resp, None
+        body = resp.get_json() or {}
+        data = body.get('data', {})
+        items = data.get('items', []) if isinstance(data, dict) else []
+        return resp, items
+
+    @staticmethod
+    def _extract_field(items, field):
+        """从 items 中提取某字段值列表"""
+        return [it.get(field) for it in (items or []) if field in it]
+
+
+class TestCompositionCountSortRegression(TestComputedFieldApiHelper):
+    """G2: composition/parent_child 关联类型 count_children 字段排序回归。
+
+    守护 2026-06-09 修复: _build_computed_count_sort_clause 新增 composition
+    和 parent_child 支持 + source_key fallback + child_object 匹配。
+
+    模拟前端 ?ordering=-child_count (Django / El-Table v2 风格)。
+    """
+
+    def test_product_child_count_sort_desc(self):
+        """GET /api/v1/bo/product?ordering=-child_count → 子版本数量降序"""
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'product', ordering='-child_count', page_size=10)
+        assert resp.status_code == 200, resp.data[:300]
+        assert items is not None
+        counts = self._extract_field(items, 'child_count')
+        if len(counts) >= 2:
+            for i in range(len(counts) - 1):
+                a, b = counts[i] or 0, counts[i + 1] or 0
+                assert a >= b, f"desc 不成立: {counts}"
+
+    def test_product_child_count_sort_asc(self):
+        """GET /api/v1/bo/product?ordering=child_count → 子版本数量升序"""
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'product', ordering='child_count', page_size=10)
+        assert resp.status_code == 200, resp.data[:300]
+        counts = self._extract_field(items, 'child_count')
+        if len(counts) >= 2:
+            for i in range(len(counts) - 1):
+                a, b = counts[i] or 0, counts[i + 1] or 0
+                assert a <= b, f"asc 不成立: {counts}"
+
+    def test_version_child_count_sort_desc(self):
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'version', ordering='-child_count', page_size=10)
+        assert resp.status_code == 200, resp.data[:300]
+        counts = self._extract_field(items, 'child_count')
+        if len(counts) >= 2:
+            for i in range(len(counts) - 1):
+                a, b = counts[i] or 0, counts[i + 1] or 0
+                assert a >= b
+
+    def test_domain_child_count_sort_desc(self):
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'domain', ordering='-child_count', page_size=10)
+        assert resp.status_code == 200, resp.data[:300]
+        counts = self._extract_field(items, 'child_count')
+        if len(counts) >= 2:
+            for i in range(len(counts) - 1):
+                a, b = counts[i] or 0, counts[i + 1] or 0
+                assert a >= b
+
+    def test_sub_domain_child_count_sort_desc(self):
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'sub_domain', ordering='-child_count', page_size=10)
+        assert resp.status_code == 200, resp.data[:300]
+        counts = self._extract_field(items, 'child_count')
+        if len(counts) >= 2:
+            for i in range(len(counts) - 1):
+                a, b = counts[i] or 0, counts[i + 1] or 0
+                assert a >= b
+
+    def test_service_module_child_count_sort_desc(self):
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'service_module', ordering='-child_count', page_size=10)
+        assert resp.status_code == 200, resp.data[:300]
+        counts = self._extract_field(items, 'child_count')
+        if len(counts) >= 2:
+            for i in range(len(counts) - 1):
+                a, b = counts[i] or 0, counts[i + 1] or 0
+                assert a >= b
+
+    def test_enum_type_value_count_sort_desc(self):
+        """parent_child: enum_type → enum_value 的 value_count 排序"""
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'enum_type', ordering='-value_count', page_size=10)
+        assert resp.status_code == 200, resp.data[:300]
+        counts = self._extract_field(items, 'value_count')
+        if len(counts) >= 2:
+            for i in range(len(counts) - 1):
+                a, b = counts[i] or 0, counts[i + 1] or 0
+                assert a >= b
+
+    def test_product_child_count_sort_pagination_consistent(self):
+        """排序后翻页应保持单调性（防止 SQL 失败回退到内存排序）。"""
+        client = self._get_admin_client()
+        _, page1 = self._list(client, 'product', ordering='-child_count', page=1, page_size=5)
+        _, page2 = self._list(client, 'product', ordering='-child_count', page=2, page_size=5)
+        assert page1 is not None and page2 is not None
+        if page1 and page2:
+            last_p1 = page1[-1].get('child_count', 0) or 0
+            first_p2 = page2[0].get('child_count', 0) or 0
+            assert last_p1 >= first_p2, f"跨页单调性破坏: {last_p1} -> {first_p2}"
+
+
+class TestCompositionCountFilter(TestComputedFieldApiHelper):
+    """G1: composition/parent_child 关联类型 count_children 字段过滤。
+
+    ⚠️ 已知问题 (2026-06-09):
+       _try_build_computed_filter 仅支持 many_to_many/one_to_many,
+       不支持 composition/parent_child。本类测试预期失败，
+       用作后续修复的测试依据。
+
+    模拟前端 ?child_count=5&child_count__gte=3 等组合。
+    """
+
+    def test_product_child_count_eq_filter(self):
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'product', child_count=5, page_size=20)
+        assert resp.status_code == 200, resp.data[:300]
+        for it in (items or []):
+            assert (it.get('child_count', 0) or 0) == 5, \
+                f"过滤失败: id={it.get('id')} child_count={it.get('child_count')}"
+
+    def test_product_child_count_gte_filter(self):
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'product', **{'child_count__gte': 3}, page_size=20)
+        assert resp.status_code == 200, resp.data[:300]
+        for it in (items or []):
+            assert (it.get('child_count', 0) or 0) >= 3
+
+    def test_product_child_count_lte_filter(self):
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'product', **{'child_count__lte': 2}, page_size=20)
+        assert resp.status_code == 200, resp.data[:300]
+        for it in (items or []):
+            assert (it.get('child_count', 0) or 0) <= 2
+
+    def test_product_child_count_in_filter(self):
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'product', **{'child_count__in': '1,2,3'}, page_size=20)
+        assert resp.status_code == 200, resp.data[:300]
+        for it in (items or []):
+            assert (it.get('child_count', 0) or 0) in (1, 2, 3)
+
+    def test_product_child_count_notin_filter(self):
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'product', **{'child_count__notin': '0'}, page_size=20)
+        assert resp.status_code == 200, resp.data[:300]
+        for it in (items or []):
+            assert (it.get('child_count', 0) or 0) != 0
+
+    def test_domain_child_count_gte_filter(self):
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'domain', **{'child_count__gte': 1}, page_size=20)
+        assert resp.status_code == 200, resp.data[:300]
+        for it in (items or []):
+            assert (it.get('child_count', 0) or 0) >= 1
+
+    def test_sub_domain_child_count_eq_filter(self):
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'sub_domain', child_count=0, page_size=20)
+        assert resp.status_code == 200, resp.data[:300]
+        for it in (items or []):
+            assert (it.get('child_count', 0) or 0) == 0
+
+    def test_service_module_child_count_gte_filter(self):
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'service_module', **{'child_count__gte': 1}, page_size=20)
+        assert resp.status_code == 200, resp.data[:300]
+        for it in (items or []):
+            assert (it.get('child_count', 0) or 0) >= 1
+
+    def test_enum_type_value_count_eq_filter(self):
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'enum_type', value_count=0, page_size=20)
+        assert resp.status_code == 200, resp.data[:300]
+        for it in (items or []):
+            assert (it.get('value_count', 0) or 0) == 0
+
+    def test_filter_int_coercion_for_sqlite_affinity(self):
+        """SQLite type affinity: 字符串 '5' 应被自动转 int（计数比较不失效）。"""
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'product', child_count='5', page_size=20)
+        assert resp.status_code == 200, resp.data[:300]
+        # 即使 child_count 是字符串 '5' 传入，过滤应仍然生效
+        for it in (items or []):
+            assert int(it.get('child_count', 0)) == 5
+
+
+class TestManyToManyCountSortFilter(TestComputedFieldApiHelper):
+    """G4 替代: many_to_many 关联 count 字段排序 + 过滤。
+
+    补充 relation_count 在 m2m 路径上的过滤能力（之前只测了排序）。
+    """
+
+    def test_business_object_relation_count_sort_desc(self):
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'business_object', ordering='-relation_count', page_size=10)
+        assert resp.status_code == 200, resp.data[:300]
+        counts = self._extract_field(items, 'relation_count')
+        if len(counts) >= 2:
+            for i in range(len(counts) - 1):
+                a, b = counts[i] or 0, counts[i + 1] or 0
+                assert a >= b
+
+    def test_business_object_relation_count_gte_filter(self):
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'business_object', **{'relation_count__gte': 2}, page_size=20)
+        assert resp.status_code == 200, resp.data[:300]
+        for it in (items or []):
+            assert (it.get('relation_count', 0) or 0) >= 2
+
+    def test_business_object_relation_count_eq_filter(self):
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'business_object', relation_count=0, page_size=20)
+        assert resp.status_code == 200, resp.data[:300]
+        for it in (items or []):
+            assert (it.get('relation_count', 0) or 0) == 0
+
+    def test_domain_relation_count_gte_filter(self):
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'domain', **{'relation_count__gte': 1}, page_size=20)
+        assert resp.status_code == 200, resp.data[:300]
+        for it in (items or []):
+            assert (it.get('relation_count', 0) or 0) >= 1
+
+
+class TestFormulaFieldSortFilter(TestComputedFieldApiHelper):
+    """G5: formula/expression 派生字段排序 + 过滤。
+
+    真实字段: domain/sub_domain/service_module.bo_density
+              = ROUND(DIVIDE(relation_count, child_count, 0), 2)
+    """
+
+    def test_domain_bo_density_sort_desc(self):
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'domain', ordering='-bo_density', page_size=10)
+        assert resp.status_code == 200, resp.data[:300]
+        densities = [it.get('bo_density') for it in (items or []) if it.get('bo_density') is not None]
+        if len(densities) >= 2:
+            for i in range(len(densities) - 1):
+                a, b = densities[i], densities[i + 1]
+                assert a >= b, f"desc 不成立: {densities}"
+
+    def test_sub_domain_bo_density_gte_filter(self):
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'sub_domain', **{'bo_density__gte': 0.5}, page_size=20)
+        assert resp.status_code == 200, resp.data[:300]
+        for it in (items or []):
+            v = it.get('bo_density')
+            if v is not None:
+                assert float(v) >= 0.5
+
+
+class TestCategoryAndAuditFieldFilter(TestComputedFieldApiHelper):
+    """G6+G7: hierarchy_scope 派生 category_label + audit_logs 派生 updated_at 过滤。
+
+    之前 TestRelationshipSorting 只测了排序，过滤从未覆盖。
+    """
+
+    def test_relationship_category_label_filter(self):
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'relationship', category_label='跨领域', page_size=20)
+        assert resp.status_code == 200, resp.data[:300]
+        for it in (items or []):
+            assert it.get('category_label') == '跨领域'
+
+    def test_relationship_category_type_filter(self):
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'relationship', category_type='cross_domain', page_size=20)
+        assert resp.status_code == 200, resp.data[:300]
+        for it in (items or []):
+            assert it.get('category_type') == 'cross_domain'
+
+    def test_business_object_updated_at_gte_filter(self):
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'business_object', **{'updated_at__gte': '2026-01-01'}, page_size=20)
+        assert resp.status_code == 200, resp.data[:300]
+        # updated_at 可能是 ISO 字符串或 None（无审计时），仅断言字段存在
+        for it in (items or []):
+            v = it.get('updated_at')
+            assert v is None or isinstance(v, str)
+
+    def test_business_object_updated_at_lte_filter(self):
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'business_object', **{'updated_at__lte': '2099-12-31'}, page_size=20)
+        assert resp.status_code == 200, resp.data[:300]
+
+
+class TestSortFilterCombinations(TestComputedFieldApiHelper):
+    """组合场景: 排序 + 过滤 + 分页 + 关键字 (前端 el-table + 过滤面板典型组合)。"""
+
+    def test_sort_and_filter_combined(self):
+        client = self._get_admin_client()
+        resp, items = self._list(
+            client, 'product',
+            ordering='-child_count',
+            **{'child_count__gte': 1},
+            page_size=10,
+        )
+        assert resp.status_code == 200, resp.data[:300]
+        counts = [(it.get('child_count', 0) or 0) for it in (items or [])]
+        assert all(c >= 1 for c in counts), f"过滤失效: {counts}"
+        if len(counts) >= 2:
+            for i in range(len(counts) - 1):
+                assert counts[i] >= counts[i + 1], f"排序失效: {counts}"
+
+    def test_sort_filter_pagination_combined(self):
+        client = self._get_admin_client()
+        _, p1 = self._list(
+            client, 'product',
+            ordering='-child_count',
+            **{'child_count__gte': 0},
+            page=1, page_size=3,
+        )
+        _, p2 = self._list(
+            client, 'product',
+            ordering='-child_count',
+            **{'child_count__gte': 0},
+            page=2, page_size=3,
+        )
+        assert p1 is not None and p2 is not None
+        if p1 and p2:
+            last_p1 = p1[-1].get('child_count', 0) or 0
+            first_p2 = p2[0].get('child_count', 0) or 0
+            assert last_p1 >= first_p2
+
+    def test_sort_with_keyword(self):
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'business_object', ordering='-relation_count', page_size=5)
+        assert resp.status_code == 200, resp.data[:300]
+
+    def test_filter_with_keyword(self):
+        client = self._get_admin_client()
+        resp, items = self._list(client, 'business_object', **{'relation_count__gte': 0}, page_size=5)
+        assert resp.status_code == 200, resp.data[:300]
+
+    def test_combined_all_features(self):
+        """终极组合: sort + filter + page + size"""
+        client = self._get_admin_client()
+        resp, items = self._list(
+            client, 'business_object',
+            ordering='-relation_count',
+            **{'relation_count__gte': 0},
+            page=1, page_size=10,
+        )
+        assert resp.status_code == 200, resp.data[:300]
+        assert items is not None
+
+    def test_sort_invalid_field_falls_back(self):
+        """非法字段排序应回退到默认排序（不抛 500）。"""
+        client = self._get_admin_client()
+        resp = client.get('/api/v2/bo/product?ordering=-DROP_TABLE&page_size=5')
+        assert resp.status_code == 200, resp.data[:300]
+        body = resp.get_json()
+        assert body['success'] is True

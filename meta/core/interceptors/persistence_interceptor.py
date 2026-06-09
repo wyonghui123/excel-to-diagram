@@ -408,6 +408,10 @@ class PersistenceInterceptor(Interceptor):
         # computed *_count 字段的过滤子句（使用子查询，不能走普通 _build_conditions）
         computed_conditions = []
         computed_params = []
+        # [FIX 2026-06-09] semantic 派生字段过滤 (category_label/category_type)：
+        # 不在 DB 中，需要 LEFT JOIN 业务对象/服务模块/子领域/领域层级表，
+        # 再用 CASE WHEN 表达式对比 source/target 的层级关系生成可比较的值。
+        semantic_join_clauses = []
 
         nested_filters = params.get("filters")
         if isinstance(nested_filters, dict):
@@ -437,6 +441,18 @@ class PersistenceInterceptor(Interceptor):
                 if computed_clause is not None:
                     computed_conditions.append(computed_clause)
                     computed_params.extend(computed_filter_params)
+                    continue
+                # [FIX 2026-06-09] semantic 派生字段过滤 (category_label/category_type)：
+                # 与 computed_*_count 不同，这里返回 (joins, where_clause, params)
+                # - joins 会被收集到 semantic_join_clauses 用于 SQL FROM 后插入
+                # - where_clause 是 CASE WHEN ... = ? 的可比较表达式
+                sem_joins, sem_where, sem_params = self._try_build_semantic_filter(
+                    meta_object, key, value
+                )
+                if sem_where is not None:
+                    semantic_join_clauses.extend(sem_joins)
+                    computed_conditions.append(sem_where)
+                    computed_params.extend(sem_params)
                     continue
                 if key.endswith('__in'):
                     field_name = key[:-4]
@@ -597,14 +613,17 @@ class PersistenceInterceptor(Interceptor):
                 if all_where_clauses:
                     where_sql = "WHERE " + " AND ".join(all_where_clauses)
 
-                count_sql = f"SELECT COUNT(*) as count FROM {meta_object.table_name} {where_sql}"
+                # [FIX 2026-06-09] semantic JOIN 子句 (category_label/category_type filter)
+                semantic_join_sql = " ".join(semantic_join_clauses) if semantic_join_clauses else ""
+
+                count_sql = f"SELECT COUNT(*) as count FROM {meta_object.table_name} {semantic_join_sql} {where_sql}"
                 rows, columns = self._execute_for_list(registry, count_sql, all_params, bool(computed_conditions))
                 total_row = rows[0] if rows else None
                 total = (total_row['count'] if isinstance(total_row, dict) else total_row[0]) if total_row else 0
 
                 if virtual_sort:
                     join_clause, sort_expr = virtual_sort
-                    sql = f"SELECT {meta_object.table_name}.* FROM {meta_object.table_name} {join_clause} {where_sql} ORDER BY {sort_expr} LIMIT ? OFFSET ?"
+                    sql = f"SELECT {meta_object.table_name}.* FROM {meta_object.table_name} {semantic_join_sql} {join_clause} {where_sql} ORDER BY {sort_expr} LIMIT ? OFFSET ?"
                 elif order_by:
                     field = meta_object.get_field(order_by.lstrip('-'))
                     if field:
@@ -614,15 +633,15 @@ class PersistenceInterceptor(Interceptor):
                             meta_object, order_by.lstrip('-'), order_by.startswith('-')
                         )
                         if computed_sort:
-                            sql = f"SELECT * FROM {meta_object.table_name} {where_sql} ORDER BY {computed_sort} LIMIT ? OFFSET ?"
+                            sql = f"SELECT * FROM {meta_object.table_name} {semantic_join_sql} {where_sql} ORDER BY {computed_sort} LIMIT ? OFFSET ?"
                         else:
                             db_column = getattr(field, 'db_column', order_by.lstrip('-'))
                             direction = 'DESC' if order_by.startswith('-') else 'ASC'
-                            sql = f"SELECT * FROM {meta_object.table_name} {where_sql} ORDER BY {db_column} {direction} LIMIT ? OFFSET ?"
+                            sql = f"SELECT * FROM {meta_object.table_name} {semantic_join_sql} {where_sql} ORDER BY {db_column} {direction} LIMIT ? OFFSET ?"
                     else:
-                        sql = f"SELECT * FROM {meta_object.table_name} {where_sql} ORDER BY id DESC LIMIT ? OFFSET ?"
+                        sql = f"SELECT * FROM {meta_object.table_name} {semantic_join_sql} {where_sql} ORDER BY id DESC LIMIT ? OFFSET ?"
                 else:
-                    sql = f"SELECT * FROM {meta_object.table_name} {where_sql} ORDER BY id DESC LIMIT ? OFFSET ?"
+                    sql = f"SELECT * FROM {meta_object.table_name} {semantic_join_sql} {where_sql} ORDER BY id DESC LIMIT ? OFFSET ?"
                 all_params.extend([safe_limit, safe_offset])
                 rows, columns = self._execute_for_list(registry, sql, all_params, bool(computed_conditions))
 
@@ -662,18 +681,21 @@ class PersistenceInterceptor(Interceptor):
                 if all_where_clauses:
                     where_sql = "WHERE " + " AND ".join(all_where_clauses)
 
+                # [FIX 2026-06-09] semantic JOIN 子句 (category_label/category_type filter)
+                semantic_join_sql = " ".join(semantic_join_clauses) if semantic_join_clauses else ""
+
                 # computed *_count 过滤依赖相关子查询，必须用新连接绕过读池
                 # 才能读到最新的 user_group_members 数据（读池连接可能持有过期 WAL 快照）
                 use_fresh = bool(computed_conditions)
 
                 if virtual_sort:
                     join_clause, sort_expr = virtual_sort
-                    count_sql = f"SELECT COUNT(*) as count FROM {meta_object.table_name} {join_clause} {where_sql}"
+                    count_sql = f"SELECT COUNT(*) as count FROM {meta_object.table_name} {semantic_join_sql} {join_clause} {where_sql}"
                     rows, columns = self._execute_for_list(registry, count_sql, all_params, use_fresh)
                     total_row = rows[0] if rows else None
                     total = (total_row['count'] if isinstance(total_row, dict) else total_row[0]) if total_row else 0
 
-                    sql = f"SELECT {meta_object.table_name}.* FROM {meta_object.table_name} {join_clause} {where_sql} ORDER BY {sort_expr} LIMIT ? OFFSET ?"
+                    sql = f"SELECT {meta_object.table_name}.* FROM {meta_object.table_name} {semantic_join_sql} {join_clause} {where_sql} ORDER BY {sort_expr} LIMIT ? OFFSET ?"
                     all_params.extend([safe_limit, safe_offset])
                     rows, columns = self._execute_for_list(registry, sql, all_params, use_fresh)
                     items = []
@@ -684,7 +706,7 @@ class PersistenceInterceptor(Interceptor):
                             items.append(dict(zip(columns, row)))
                     records = items
                 else:
-                    count_sql = f"SELECT COUNT(*) as count FROM {meta_object.table_name} {where_sql}"
+                    count_sql = f"SELECT COUNT(*) as count FROM {meta_object.table_name} {semantic_join_sql} {where_sql}"
                     rows, columns = self._execute_for_list(registry, count_sql, all_params, use_fresh)
                     total_row = rows[0] if rows else None
                     total = (total_row['count'] if isinstance(total_row, dict) else total_row[0]) if total_row else 0
@@ -707,7 +729,7 @@ class PersistenceInterceptor(Interceptor):
                                 continue
                             base_columns += f", {field.db_column} as {field.id}"
 
-                    sql = f"{base_columns} FROM {meta_object.table_name} {where_sql}"
+                    sql = f"{base_columns} FROM {meta_object.table_name} {semantic_join_sql} {where_sql}"
                     if order_by:
 
                         order_clause = []
@@ -834,6 +856,15 @@ class PersistenceInterceptor(Interceptor):
         else:
             assoc_items = list(associations)
 
+        # [FIX 2026-06-09] child_count 字段 (computation.type=count_children)
+        # 计算子对象数量；先按 computation.child_object 与 assoc.target_entity 匹配
+        field_computation = getattr(field, 'computation', None) or {}
+        field_child_object = (
+            field_computation.get('child_object')
+            or field_computation.get('target_object')
+            or ''
+        )
+
         for assoc in assoc_items:
             if isinstance(assoc, str):
                 # 兼容历史格式：list of names
@@ -843,18 +874,25 @@ class PersistenceInterceptor(Interceptor):
                 source_key = None
                 foreign_key_field = None
                 target_table = None
+                target_entity = ''
             else:
                 assoc_name = getattr(assoc, 'name', '')
                 assoc_type = getattr(assoc, 'type', '')
                 through = getattr(assoc, 'through', None)
                 source_key = getattr(assoc, 'source_key', None)
-                # [FIX] merged_one_to_many / one_to_many 等虚拟关联通过外键字段统计
-                foreign_key_field = getattr(assoc, 'foreign_key_field', None)
+                # [FIX] merged_one_to_many / one_to_many / composition 等
+                # 虚拟/父子关联通过外键字段统计；composition 的 FK 通常放在
+                # source_key 里（如 product.yaml 的 source_key: product_id），
+                # 这里把 source_key 作为 foreign_key_field 的兜底。
+                foreign_key_field = (
+                    getattr(assoc, 'foreign_key_field', None)
+                    or source_key
+                )
                 # [FIX] 实际表名通常是 assoc_name 复数 (如 relationships)；
                 # target_entity/target_type 在 YAML 中是单数 (relationship)，DB 表是复数。
                 # 优先级: 显式 target_table > assoc_name 复数 (本表通常命名为 relationships)
                 # > target_entity 复数 > target_entity 单数
-                _target_entity = getattr(assoc, 'target_entity', None) or ''
+                target_entity = getattr(assoc, 'target_entity', None) or ''
                 _pluralized = (
                     assoc_name if assoc_name.endswith('s')
                     else assoc_name + 's'
@@ -862,16 +900,16 @@ class PersistenceInterceptor(Interceptor):
                 target_table = (
                     getattr(assoc, 'target_table', None)
                     or _pluralized
-                    or (_target_entity + 's' if _target_entity and not _target_entity.endswith('s') else _target_entity)
-                    or _target_entity
+                    or (target_entity + 's' if target_entity and not target_entity.endswith('s') else target_entity)
+                    or target_entity
                 )
 
             # [FIX] 支持 many_to_many (走 through/source_key)
-            #       和 merged_one_to_many / one_to_many (走 foreign_key_field)
+            #       和 merged_one_to_many / one_to_many / composition (走 foreign_key_field/source_key)
             many_to_many_matched = False
             if assoc_type == 'many_to_many' and through and source_key:
                 many_to_many_matched = True
-            elif assoc_type in ('merged_one_to_many', 'one_to_many', 'virtual_one_to_many') and foreign_key_field and target_table:
+            elif assoc_type in ('merged_one_to_many', 'one_to_many', 'virtual_one_to_many', 'composition', 'parent_child') and foreign_key_field and target_table:
                 pass  # 走外键路径
             else:
                 continue
@@ -879,13 +917,23 @@ class PersistenceInterceptor(Interceptor):
             # 支持关系名去除常见后缀（ship / ies / es / s）后与 base_name 比较，
             # 这样 relation_count 也能匹配 relationships / relationships_for_xxx
             assoc_singular = re.sub(r'(ship$|ies$|es$|s$)', '', assoc_name)
-            matched = (
+            name_matched = (
                 assoc_name == base_name
                 or assoc_name == base_name + 's'
                 or assoc_singular == base_name
                 or assoc_name == base_name + 'ship'
                 or assoc_name == base_name + 'ship' + 's'
             )
+            # [FIX 2026-06-09] child_count 这种通用字段不会按关联名匹配
+            # (例如 product.child_count 的 base_name='child' 跟 assoc_name='version'
+            # 完全对不上)，所以额外允许通过 computation.child_object 命中
+            # assoc.target_entity/target_type，命中后强制走外键子查询。
+            child_object_matched = bool(
+                field_child_object
+                and target_entity
+                and field_child_object == target_entity
+            )
+            matched = name_matched or child_object_matched
             if not matched:
                 continue
 
@@ -1012,6 +1060,15 @@ class PersistenceInterceptor(Interceptor):
         else:
             assoc_items = list(associations)
 
+        # [FIX 2026-06-09] 把 field_child_object 提取到外层 scope，
+        # 让 assoc 循环和后面的 relations 循环都能复用。
+        field_computation = getattr(field, 'computation', None) or {}
+        field_child_object = (
+            field_computation.get('child_object')
+            or field_computation.get('target_object')
+            or ''
+        )
+
         for assoc in assoc_items:
             if isinstance(assoc, str):
                 assoc_name = assoc
@@ -1020,14 +1077,20 @@ class PersistenceInterceptor(Interceptor):
                 source_key = None
                 foreign_key_field = None
                 target_table = None
+                target_entity = ''
             else:
                 assoc_name = getattr(assoc, 'name', '')
                 assoc_type = getattr(assoc, 'type', '')
                 through = getattr(assoc, 'through', None)
                 source_key = getattr(assoc, 'source_key', None)
-                # [FIX] 兼容 merged_one_to_many 等虚拟关联
-                foreign_key_field = getattr(assoc, 'foreign_key_field', None)
-                _target_entity = getattr(assoc, 'target_entity', None) or ''
+                # [FIX 2026-06-09] composition/parent_child 的 FK 通常在
+                # source_key 里（如 product.yaml 的 source_key: product_id），
+                # 把 source_key 作为 foreign_key_field 的兜底（与 sort 路径对称）。
+                foreign_key_field = (
+                    getattr(assoc, 'foreign_key_field', None)
+                    or source_key
+                )
+                target_entity = getattr(assoc, 'target_entity', None) or ''
                 _pluralized = (
                     assoc_name if assoc_name.endswith('s')
                     else assoc_name + 's'
@@ -1035,27 +1098,39 @@ class PersistenceInterceptor(Interceptor):
                 target_table = (
                     getattr(assoc, 'target_table', None)
                     or _pluralized
-                    or (_target_entity + 's' if _target_entity and not _target_entity.endswith('s') else _target_entity)
-                    or _target_entity
+                    or (target_entity + 's' if target_entity and not target_entity.endswith('s') else target_entity)
+                    or target_entity
                 )
 
-            # [FIX] many_to_many (走 through/source_key) 与 merged_one_to_many (走外键) 都支持
+            # [FIX 2026-06-09] 支持 many_to_many (走 through/source_key)
+            #       和 merged_one_to_many / one_to_many / composition / parent_child (走外键)
             many_to_many_matched = False
             if assoc_type == 'many_to_many' and through and source_key:
                 many_to_many_matched = True
-            elif assoc_type in ('merged_one_to_many', 'one_to_many', 'virtual_one_to_many') and foreign_key_field and target_table:
-                pass
+            elif assoc_type in ('merged_one_to_many', 'one_to_many', 'virtual_one_to_many', 'composition', 'parent_child') and foreign_key_field and target_table:
+                pass  # 走外键路径
             else:
                 continue
             # 匹配：relation_count <-> relationships / relationship / relations / relation
             assoc_singular = re.sub(r'(ship$|ies$|es$|s$)', '', assoc_name)
-            matched = (
+            name_matched = (
                 assoc_name == base_name
                 or assoc_name == base_name + 's'
                 or assoc_singular == base_name
                 or assoc_name == base_name + 'ship'
                 or assoc_name == base_name + 'ship' + 's'
             )
+            # [FIX 2026-06-09] child_count 这种通用字段不会按关联名匹配
+            # (例如 product.child_count 的 base_name='child' 跟 assoc_name='version'
+            # 完全对不上)，所以额外允许通过 computation.child_object 命中
+            # assoc.target_entity/target_type（与 sort 路径对称）。
+            # 注意 field_child_object 已在函数顶部提取，避免重复计算
+            child_object_matched = bool(
+                field_child_object
+                and target_entity
+                and field_child_object == target_entity
+            )
+            matched = name_matched or child_object_matched
             if not matched:
                 continue
 
@@ -1080,7 +1155,221 @@ class PersistenceInterceptor(Interceptor):
             else:
                 return f"{subquery} {operator} ?", list(values)
 
-        return None, None
+        # [FIX 2026-06-09] G1 兜底: meta_object.relations (MetaRelation 类型) 路径
+        # YAML 的 relations: 段被解析为 MetaRelation 而非 AssociationDefinition，
+        # 字段名也不同 (target_object/source_field/relation_type)；
+        # 这里用同样的匹配逻辑再扫一遍。
+        relations = getattr(meta_object, 'relations', None) or []
+        for rel in relations:
+            rel_name = getattr(rel, 'name', '')
+            # MetaRelation.relation_type 是枚举，需要取 .value
+            rel_type_attr = getattr(rel, 'relation_type', None)
+            rel_type_value = getattr(rel_type_attr, 'value', rel_type_attr) or ''
+            rel_type_str = str(rel_type_value).lower() if rel_type_value else ''
+            # 映射：composition/parent_child 在 MetaRelation 里通常叫 PARENT_CHILD/COMPOSITION
+            if rel_type_str in ('composition', 'parent_child'):
+                rel_target_entity = getattr(rel, 'target_object', '') or ''
+                rel_source_field = getattr(rel, 'source_field', '') or ''
+                # [FIX 2026-06-09] source_field 缺失时按命名约定回退:
+                # sub_domains 上指向 domain 的列就是 domain_id
+                if not rel_source_field and rel_target_entity:
+                    inferred_fk = f"{meta_object.id}_id"
+                    rel_source_field = inferred_fk
+                rel_target_table = (
+                    rel_target_entity + 's'
+                    if rel_target_entity and not rel_target_entity.endswith('s')
+                    else rel_target_entity
+                )
+                # 匹配 (与 association 同一逻辑)
+                rel_singular = re.sub(r'(ship$|ies$|es$|s$)', '', rel_name)
+                rel_name_matched = (
+                    rel_name == base_name
+                    or rel_name == base_name + 's'
+                    or rel_singular == base_name
+                )
+                rel_child_object_matched = bool(
+                    field_child_object
+                    and rel_target_entity
+                    and field_child_object == rel_target_entity
+                )
+                if not (rel_name_matched or rel_child_object_matched):
+                    continue
+                if not rel_source_field or not rel_target_table:
+                    continue
+                subquery = (
+                    f"(SELECT COUNT(*) FROM {rel_target_table} "
+                    f"WHERE {rel_target_table}.{rel_source_field} = {table_name}.id)"
+                )
+                if operator in ('IN', 'NOT IN'):
+                    if not values:
+                        return None, None
+                    placeholders = ', '.join(['?'] * len(values))
+                    return f"{subquery} {operator} ({placeholders})", list(values)
+                return f"{subquery} {operator} ?", list(values)
+
+        # [FIX 2026-06-09] G4: count_relations descendants 兜底
+        # 关联列表里没有名字对应的 association 时 (例如 domain.relation_count
+        # 没有 relationships 关联)，尝试通过 computation.type=count_relations +
+        # scope=descendants 直接生成层级子查询。
+        return self._try_build_count_relations_filter(
+            meta_object, field_name, base_name, operator, values
+        )
+
+    def _try_build_count_relations_filter(self, meta_object, field_name, base_name, operator, values):
+        """[FIX 2026-06-09] G4: count_relations descendants SQL 子查询兜底
+
+        适用场景: domain / sub_domain / service_module 的 relation_count 过滤。
+        这些对象没有名为 'relationships' 的 association，无法走标准 _try_build_computed_filter。
+        但 computation.type=count_relations + scope=descendants 提供了层级路径。
+        这里的硬编码层级与领域模型一致：
+
+          domain.id → sub_domains.domain_id → service_modules.sub_domain_id
+                   → business_objects.service_module_id → relationships.source/target_bo_id
+        """
+        if field_name != 'relation_count' or base_name != 'relation':
+            return None, None
+
+        field = meta_object.get_field(field_name)
+        if not field:
+            return None, None
+
+        field_computation = getattr(field, 'computation', None) or {}
+        if field_computation.get('type') != 'count_relations':
+            return None, None
+
+        scope = field_computation.get('scope', 'self')
+        if scope != 'descendants':
+            # scope=self 仅作用于当前对象对应的 BO 集合 (如 business_object)，
+            # 它有 relationships 关联，已在主路径覆盖；此处不重复实现。
+            return None, None
+
+        table_name = meta_object.table_name
+        object_type = meta_object.id
+
+        # 按对象类型生成层级子查询
+        if object_type == 'domain':
+            descendant_match = (
+                "EXISTS (SELECT 1 FROM business_objects bo "
+                "JOIN service_modules sm ON bo.service_module_id = sm.id "
+                "JOIN sub_domains sd ON sm.sub_domain_id = sd.id "
+                "WHERE sd.domain_id = domains.id "
+                "AND (r.source_bo_id = bo.id OR r.target_bo_id = bo.id))"
+            )
+        elif object_type == 'sub_domain':
+            descendant_match = (
+                "EXISTS (SELECT 1 FROM business_objects bo "
+                "JOIN service_modules sm ON bo.service_module_id = sm.id "
+                "WHERE sm.sub_domain_id = sub_domains.id "
+                "AND (r.source_bo_id = bo.id OR r.target_bo_id = bo.id))"
+            )
+        elif object_type == 'service_module':
+            descendant_match = (
+                "EXISTS (SELECT 1 FROM business_objects bo "
+                "WHERE bo.service_module_id = service_modules.id "
+                "AND (r.source_bo_id = bo.id OR r.target_bo_id = bo.id))"
+            )
+        else:
+            return None, None
+
+        subquery = (
+            f"(SELECT COUNT(DISTINCT r.id) FROM relationships r "
+            f"WHERE {descendant_match})"
+        )
+
+        if operator in ('IN', 'NOT IN'):
+            if not values:
+                return None, None
+            placeholders = ', '.join(['?'] * len(values))
+            return f"{subquery} {operator} ({placeholders})", list(values)
+        return f"{subquery} {operator} ?", list(values)
+
+    def _try_build_semantic_filter(self, meta_object, key, value):
+        """[FIX 2026-06-09] semantic 派生字段过滤 (category_label/category_type)
+
+        这些字段不在 DB 中存储，而是通过业务对象/服务模块/子领域/领域
+        层级关系实时计算 (见 ComputationFieldHandler._compute_category_*)。
+        为支持 SQL 过滤，这里：
+          1. 拼出 LEFT JOIN 串把层级表拉进来
+          2. 拼出 CASE WHEN 表达式，把层级匹配结果映射成可比较的中文/英文标签
+          3. 把这个表达式以 = ? 的形式追加到 WHERE
+
+        Returns:
+            (joins: List[str], where_clause: Optional[str], params: List[Any])
+            - joins: LEFT JOIN 子句列表
+            - where_clause: "CASE WHEN ... END = ?" 子句 (None 表示不匹配)
+            - params: 参数列表
+
+        目前支持:
+          - relationship.category_label  (中文标签: 同业务对象/同服务模块/同子领域/同领域/跨领域)
+          - relationship.category_type   (英文枚举: same_bo/same_module/same_subdomain/same_domain/cross_domain)
+        """
+        if value is None:
+            return [], None, []
+
+        # 解析 key 后缀（仅支持精确匹配 = 和 __in）
+        operator = '='
+        if key.endswith('__in'):
+            field_name = key[:-4]
+            operator = 'IN'
+            values = [v.strip() for v in str(value).split(',') if v.strip()]
+        else:
+            field_name = key
+            values = [value]
+
+        if not values:
+            return [], None, []
+
+        # 只处理白名单字段，避免任意字段都走 JOIN
+        if field_name not in ('category_label', 'category_type'):
+            return [], None, []
+
+        # 必须作用于 relationship 表（其它对象无 source_bo_id/target_bo_id 语义）
+        if meta_object.id != 'relationship':
+            logger.warning(f"[_try_build_semantic_filter] category_label/category_type filter only supported on relationship, got {meta_object.id}")
+            return [], None, []
+
+        # JOIN 串：业务对象 ×2 + 服务模块 ×2 + 子领域 ×2 + 领域 ×2
+        # 用 LEFT JOIN 避免因层级缺失数据导致整行消失（与 analytics_query_builder 一致）
+        joins = [
+            "LEFT JOIN business_objects _cat_bo1 ON relationships.source_bo_id = _cat_bo1.id",
+            "LEFT JOIN business_objects _cat_bo2 ON relationships.target_bo_id = _cat_bo2.id",
+            "LEFT JOIN service_modules _cat_sm1 ON _cat_bo1.service_module_id = _cat_sm1.id",
+            "LEFT JOIN service_modules _cat_sm2 ON _cat_bo2.service_module_id = _cat_sm2.id",
+            "LEFT JOIN sub_domains _cat_sd1 ON _cat_sm1.sub_domain_id = _cat_sd1.id",
+            "LEFT JOIN sub_domains _cat_sd2 ON _cat_sm2.sub_domain_id = _cat_sd2.id",
+            "LEFT JOIN domains _cat_d1 ON _cat_sd1.domain_id = _cat_d1.id",
+            "LEFT JOIN domains _cat_d2 ON _cat_sd2.domain_id = _cat_d2.id",
+        ]
+
+        # CASE WHEN 表达式:
+        # 中文 (category_label): 同业务对象 > 同服务模块 > 同子领域 > 同领域 > 跨领域
+        # 英文 (category_type):  same_bo > same_module > same_subdomain > same_domain > cross_domain
+        # 用 COALESCE(..., -1) != COALESCE(..., -1) 处理 LEFT JOIN 产生的 NULL
+        if field_name == 'category_label':
+            case_expr = (
+                "CASE "
+                "WHEN relationships.source_bo_id = relationships.target_bo_id THEN '同业务对象' "
+                "WHEN COALESCE(_cat_sm1.id, -1) = COALESCE(_cat_sm2.id, -1) THEN '同服务模块' "
+                "WHEN COALESCE(_cat_sd1.id, -1) = COALESCE(_cat_sd2.id, -1) THEN '同子领域' "
+                "WHEN COALESCE(_cat_d1.id, -1) = COALESCE(_cat_d2.id, -1) THEN '同领域' "
+                "ELSE '跨领域' "
+                "END"
+            )
+        else:  # category_type
+            case_expr = (
+                "CASE "
+                "WHEN relationships.source_bo_id = relationships.target_bo_id THEN 'same_bo' "
+                "WHEN COALESCE(_cat_sm1.id, -1) = COALESCE(_cat_sm2.id, -1) THEN 'same_module' "
+                "WHEN COALESCE(_cat_sd1.id, -1) = COALESCE(_cat_sd2.id, -1) THEN 'same_subdomain' "
+                "WHEN COALESCE(_cat_d1.id, -1) = COALESCE(_cat_d2.id, -1) THEN 'same_domain' "
+                "ELSE 'cross_domain' "
+                "END"
+            )
+
+        if operator == 'IN':
+            placeholders = ', '.join(['?'] * len(values))
+            return joins, f"({case_expr}) IN ({placeholders})", list(values)
+        return joins, f"({case_expr}) = ?", [values[0]]
 
     def _resolve_virtual_sort(self, meta_object, order_by):
         if not order_by:

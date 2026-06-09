@@ -294,12 +294,30 @@ export default {
           const archData = JSON.parse(archDataStr)
           sessionStorage.setItem('lastArchDataForDiagram', archDataStr)
           sessionStorage.removeItem('archDataForDiagram')
-          
+
           initFromArchDataManager()
           await initDataFromArch(archData)
         } catch (err) {
           console.error('Failed to initialize from arch data:', err)
         }
+      }
+
+      // 测试专用: dev 环境暴露组件状态到 window，方便 e2e 测试跳过 4 步流程
+      // 仅 DEV 构建包含，production 构建 import.meta.env.DEV 为 false，被 dead-code-elimination 移除
+      if (import.meta.env.DEV) {
+        console.log('[AADiagramApp] mounted (new), DEV=', import.meta.env.DEV)
+        window.__diagramApp = {
+          diagramData,
+          currentStep,
+          goToStep,
+          nextStep,
+          prevStep,
+          initFromArchDataManager,
+          generateDiagram,
+          previewData,
+          chartType
+        }
+        console.log('[AADiagramApp] window.__diagramApp exposed (new)')
       }
     })
 

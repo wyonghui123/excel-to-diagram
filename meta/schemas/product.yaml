@@ -225,6 +225,9 @@ ui_view_config:
           title: 当前版本
           width: 90
           editable: true
+        - key: owner_id_display
+          title: 负责人
+          width: 100
         - key: created_at
           title: 创建时间
           width: 160
