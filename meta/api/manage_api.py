@@ -9,7 +9,7 @@ from meta.services.data_permission_filter import DataPermissionFilter
 from meta.core.datasource import get_data_source
 from meta.core.models import registry
 from meta.core.enrichment_engine import init_enrichment_engine, enrich_record, enrich_records
-from meta.api.special_routes_api import _compute_category
+from meta.api.special_routes_api import _compute_category, list_relationships
 import os
 import logging
 

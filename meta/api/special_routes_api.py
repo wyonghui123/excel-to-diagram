@@ -96,15 +96,22 @@ def _list_relationships_impl(ds, user, user_id, user_is_admin):
     if AUTH_ENABLED and user_id and not user_is_admin:
         try:
             bo_ids = _data_perm_filter.perm_service.get_allowed_resource_ids(user_id, 'business_object')
-            # [FIX 2026-06-09] 检查用户是否有 data_permissions 旧表配置
-            #   有配置 → 用 bo_ids 过滤
-            #   无配置 → dimension scope 用户 → allowed_bo_ids = None, 让 scope 自身控制
+            # [FIX v3.18.1 2026-06-09] 检查用户是否有 business_object 类型的 data_permissions 配置
+            #   之前 get_user_data_permissions() 看 user 全部 resource_type 配置,
+            #   TEST60 有 version 类型 data_perms (不是 business_object) 也被判为 has_data_perms=True
+            #   → bo_ids (空, 因为 perm_service 只算 business_object) → allowed_bo_ids = [] → 1=0 拒绝
+            #   修复: 只看 resource_type='business_object' 的配置
             from meta.services.data_permission_service import DataPermissionService
-            has_data_perms = bool(DataPermissionService(ds).get_user_data_permissions(user_id))
+            dps = DataPermissionService(ds)
+            bo_data_perms = [
+                dp for dp in dps.get_user_data_permissions(user_id)
+                if dp.get('resource_type') == 'business_object'
+            ]
+            has_data_perms = bool(bo_data_perms)
             if has_data_perms and bo_ids:
                 allowed_bo_ids = bo_ids
             elif has_data_perms and not bo_ids:
-                # 有 data_perms 但 bo_ids 为空 → 显式拒绝
+                # 有 business_object data_perms 但 bo_ids 为空 → 显式拒绝
                 allowed_bo_ids = []
             # else: dimension scope 用户, allowed_bo_ids 保持 None
         except Exception as e:
