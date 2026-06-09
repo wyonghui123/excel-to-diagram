@@ -1,30 +1,5 @@
-#!/usr/bin/env pwsh
-# AI Agent 写入安全 hook - 警告 stash 残留 + 大量未提交修改
-# 触发时机：每次 commit 后
-
-$ErrorActionPreference = 'Continue'
-$root = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSCommandPath))
-Set-Location $root
-
-$stashCount = (git stash list 2>$null | Measure-Object -Line).Lines
-$dirtyCount = (git status --porcelain 2>$null | Measure-Object -Line).Lines
-
-if ($stashCount -gt 0) {
-    Write-Host ""
-    Write-Host "[WARN] 检测到 $stashCount 个 stash 残留:" -ForegroundColor Yellow
-    git stash list
-    Write-Host ""
-    Write-Host "处理方式 (参考 .trae/rules/ai-agent-undo-protection.md):" -ForegroundColor Cyan
-    Write-Host "  git stash show -p stash@{0}    # 查看内容"
-    Write-Host "  git checkout stash@{0} -- <file> # 单文件恢复 (安全)"
-    Write-Host "  git stash pop                   # 应用 (可能冲突)"
-    Write-Host "  git stash drop                  # 丢弃 (危险)"
-}
-
-if ($dirtyCount -gt 5) {
-    Write-Host ""
-    Write-Host "[WARN] 工作区有 $dirtyCount 个未提交修改" -ForegroundColor Yellow
-    Write-Host "建议: 每完成 1-3 个文件修改就 commit 一次 (见 .trae/rules/ai-agent-undo-protection.md)"
-}
-
-exit 0
+@echo off
+rem AI Agent 写入安全 hook wrapper (Windows)
+rem 调用 ai-guard-post-commit.ps1 执行实际逻辑
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0ai-guard-post-commit.ps1"
+exit /b %ERRORLEVEL%
