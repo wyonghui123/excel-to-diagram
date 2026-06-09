@@ -170,10 +170,11 @@ class QueryBuilder:
     def or_where(self, conditions: List[Tuple[str, Union[str, QueryOperator], Any]]) -> "QueryBuilder":
         """
         添加 OR 条件组
-        
+
         Args:
             conditions: 条件列表 [(field, operator, value), ...]
-            
+                         或 [(field, operator, [v1, v2, ...])] (IN/NOT_IN 用 list)
+
         Returns:
             self
         """
@@ -181,11 +182,20 @@ class QueryBuilder:
         for field, operator, value in conditions:
             if isinstance(operator, str):
                 operator = QueryOperator(operator.lower())
-            or_group.append(QueryCondition(
-                field=self._get_db_column(field),
-                operator=operator,
-                value=self._convert_value(field, value)
-            ))
+            # [FIX v3.18.1] IN/NOT_IN 算子应使用 values list 而非单个 value
+            if operator in (QueryOperator.IN, QueryOperator.NOT_IN, QueryOperator.BETWEEN):
+                values = value if isinstance(value, list) else [value]
+                or_group.append(QueryCondition(
+                    field=self._get_db_column(field),
+                    operator=operator,
+                    values=[self._convert_value(field, v) for v in values]
+                ))
+            else:
+                or_group.append(QueryCondition(
+                    field=self._get_db_column(field),
+                    operator=operator,
+                    value=self._convert_value(field, value)
+                ))
         self._spec.or_conditions.append(or_group)
         return self
     

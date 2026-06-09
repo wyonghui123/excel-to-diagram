@@ -283,7 +283,12 @@ class QueryService:
             or_group = []
             for cond in or_conditions:
                 op = _resolve_operator(cond.operator)
-                or_group.append((cond.field, op, cond.value))
+                # [FIX v3.18.1] IN/NOT_IN 算子必须传 values list
+                if op in (QueryOperator.IN, QueryOperator.NOT_IN):
+                    payload = cond.values if cond.values else [cond.value]
+                else:
+                    payload = cond.value
+                or_group.append((cond.field, op, payload))
             if or_group:
                 builder.or_where(or_group)
 
@@ -1466,12 +1471,15 @@ class QueryService:
             
             if allowed_ids is None:
                 return
-            
+
             if not allowed_ids:
-                builder.where('id', QueryOperator.EQ, -1)
-                logger.info(f"[DataPerm] No permission for {object_type}, returning empty")
+                # [FIX v3.18.1 2026-06-09] 无 data_permissions 旧表配置 → 允许所有
+                #   之前错误地加 id = -1 拒绝 filter
+                #   与 DataPermissionFilter.apply_filter (data_permission_filter.py:33) 行为一致
+                #   这样 dimension scope 用户 (无 data_perms 配置) 不会被误拒
+                logger.info(f"[DataPerm] No data permissions for {object_type}, allowing all (rely on dimension scope)")
                 return
-            
+
             if len(allowed_ids) == 1:
                 builder.where('id', QueryOperator.EQ, allowed_ids[0])
             else:

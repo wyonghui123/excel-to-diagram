@@ -211,11 +211,72 @@ def _apply_scope_filter(object_type: str, conditions):
         return conditions
     if not user or is_admin(user):
         return conditions
-    
+
+    # [FIX v3.18.1 2026-06-09] 优先应用 role_dimension_scope 派生条件
+    #   与 DataPermissionInterceptor._apply_dimension_scope_filter 保持一致
+    #   TEST60 配 version=[1,2,11,12] 时, 对 VERSION_AWARE_BOS (service_module/business_object/relationship)
+    #   应使用 version_id IN (...) 而非 owner_id = $user.id
+    user_id = user.get('user_id')
+    try:
+        from meta.services.dimension_scope_engine import DimensionScopeEngine
+        engine = DimensionScopeEngine(_data_source)
+        # 查 user 的 role_ids
+        cur = _data_source.execute(
+            """SELECT DISTINCT gr.role_id
+               FROM group_roles gr
+               JOIN user_group_members ugm ON gr.group_id = ugm.group_id
+               WHERE ugm.user_id = ?""",
+            [user_id]
+        )
+        role_ids = [row[0] for row in cur.fetchall()]
+        # 查 role 是否有 dimension scope
+        if role_ids:
+            placeholders = ','.join('?' * len(role_ids))
+            cnt_cur = _data_source.execute(
+                f"SELECT COUNT(*) FROM role_dimension_scopes WHERE role_id IN ({placeholders})",
+                role_ids,
+            )
+            has_scope = cnt_cur.fetchone()[0] > 0
+            if has_scope:
+                # 收集所有 role 的条件 (跨 role OR, role 内 AND)
+                from meta.services.query_service import QueryCondition
+                or_group = []
+                for rid in role_ids:
+                    conds = engine.derive_data_conditions(rid)
+                    expr = conds.get(object_type)
+                    if not expr:
+                        continue
+                    # 解析表达式 (单段或 AND 复合)
+                    import re
+                    parts = re.split(r'\s+AND\s+', expr, flags=re.IGNORECASE)
+                    for part in parts:
+                        part = part.strip()
+                        m_in = re.match(r'^(\w+)\s+IN\s*\(([^)]+)\)\s*$', part, re.IGNORECASE)
+                        m_eq = re.match(r'^(\w+)\s*=\s*(\d+)\s*$', part)
+                        if m_in:
+                            field = m_in.group(1)
+                            values = [int(x.strip()) for x in m_in.group(2).split(',') if x.strip()]
+                            or_group.append(QueryCondition(field=field, operator='in', values=values, combine_mode='or'))
+                        elif m_eq:
+                            field = m_eq.group(1)
+                            value = int(m_eq.group(2))
+                            or_group.append(QueryCondition(field=field, operator='eq', value=value, combine_mode='or'))
+                if or_group:
+                    # [FIX v3.18.1] OR 关系: dim scope OR owner
+                    # QueryService or_where 已修复, IN 算子能传 values list
+                    conditions.extend(or_group)
+                    # 加 owner 始终可见 (OR 关系)
+                    conditions.append(QueryCondition(
+                        field='owner_id', operator='eq', value=user_id, combine_mode='or'
+                    ))
+                    return conditions
+    except Exception as e:
+        logger.warning(f"[_apply_scope_filter v3.18.1] dimension scope check failed: {e}")
+
     allowed_ids = _data_perm_filter.perm_service.get_allowed_resource_ids(user.get('user_id'), object_type)
     if allowed_ids:
         return conditions
-    
+
     from meta.services.query_service import QueryCondition
     resolved = scope_expr
     resolved = resolved.replace('$user.id', str(user.get('user_id', '')))

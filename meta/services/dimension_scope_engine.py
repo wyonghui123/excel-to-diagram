@@ -58,6 +58,28 @@ SYSTEM_LEVEL_BOS = [
     'ai_async_task',  # AI异步任务
 ]
 
+# [ADDED v3.18.1 2026-06-09] BO 派生过滤分类 (3 类)
+#   HIERARCHY_CHAIN:  4 层维度内的 BO, 用 id + parent_field 派生
+#   VERSION_AWARE_BOS: 有 version_id 列但不在 HIERARCHY 的 BO, 用 version_id IN (...) 派生
+#   ALWAYS_VISIBLE_BOS: 系统级 BO, 始终可见, 不参与 dimension 过滤
+#
+# 之前 derive_data_conditions 函数内定义的 2 个 dict, 在 _get_all_resource_types()
+# 走 fallback 时无法被看到, 导致 business_object / service_module / relationship
+# 等 BO 的 dimension scope 派生条件缺失, 退回到 owner_id 过滤 → 0 条
+# (即 v3.18.0 修复未生效, 用户报告 TEST60 关系范围空)
+#
+# 修复: 提升到模块级, fallback 时也包含它们
+VERSION_AWARE_BOS = {
+    'service_module': 'service_modules',
+    'business_object': 'business_objects',
+    'relationship': 'relationships',
+}
+ALWAYS_VISIBLE_BOS = {
+    'enum_type', 'enum_value', 'user', 'role', 'user_group',
+    'user_group_member', 'audit_log', 'permission', 'menu',
+    'scheduled_task', 'task_queue', 'task_execution', 'ai_async_task',
+}
+
 
 class DimensionScopeEngine:
 
@@ -136,22 +158,8 @@ class DimensionScopeEngine:
                     expanded.setdefault(target_dim, set()).update(current_ids)
 
         conditions = {}
-        # [FIX v1.0.4 2026-06-09] 非 HIERARCHY_CHAIN 但有 version_id 字段的 BO
-        #   例: service_module / business_object / relationship
-        #   这些表有 version_id 列, 可以直接用 version_id IN (...) 过滤
-        #   跟 HIERARCHY_CHAIN 走相同的 version 维度过滤逻辑
-        VERSION_AWARE_BOS = {
-            'service_module': 'service_modules',
-            'business_object': 'business_objects',
-            'relationship': 'relationships',
-        }
-        # [FIX v1.0.4] 系统中真正的"无维度" BO (例如 enum_type, audit_log) - 它们应该
-        # 始终可见, 不参与 dimension scope 过滤
-        ALWAYS_VISIBLE_BOS = {
-            'enum_type', 'enum_value', 'user', 'role', 'user_group',
-            'audit_log', 'permission', 'menu',
-        }
-
+        # [FIX v3.18.1 2026-06-09] VERSION_AWARE_BOS / ALWAYS_VISIBLE_BOS
+        # 提升到模块级, 见文件顶部定义
         for resource_type in self._get_all_resource_types():
             if resource_type in ALWAYS_VISIBLE_BOS:
                 continue  # 系统级 BO 不参与 dimension 过滤
@@ -325,8 +333,14 @@ class DimensionScopeEngine:
                 return [oid for oid in oids if not oid.startswith('_')]
         except Exception:
             pass
-        # [FIX v1.0.1] Fallback: registry 未初始化时, 用 HIERARCHY_CHAIN
-        return HIERARCHY_CHAIN
+        # [FIX v3.18.1 2026-06-09] Fallback: 包含所有 3 类 BO
+        # 之前只 return HIERARCHY_CHAIN, 漏掉 VERSION_AWARE_BOS 和 ALWAYS_VISIBLE_BOS
+        # 导致 business_object / service_module / relationship 不参与 dimension 派生
+        return (
+            list(HIERARCHY_CHAIN)
+            + list(VERSION_AWARE_BOS.keys())
+            + list(ALWAYS_VISIBLE_BOS)
+        )
 
     def _menu_has_data(self, object_types: List[str],
                         expanded: Dict[str, Set[int]]) -> bool:
