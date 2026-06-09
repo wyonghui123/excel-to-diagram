@@ -182,8 +182,8 @@ function setFilters(filters) {
 }
 
 function clearAll() {
-  selectedAnnotations.value = annotationOptions.value.map(o => o.value)
-  selectedRelations.value = relationOptions.value.map(o => o.value)
+  selectedAnnotations.value = []
+  selectedRelations.value = []
   emitFilterChange()
 }
 

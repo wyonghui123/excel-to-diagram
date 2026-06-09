@@ -128,4 +128,21 @@ export const logger = {
   },
 }
 
+/**
+ * 创建带命名空间的 logger
+ * 兼容 v3 之前的 createLogger(namespace) API
+ *
+ * @param {string} namespace - 命名空间, e.g. 'metaService', 'httpClient'
+ * @returns {Object} 包含 debug/info/warn/error 方法的 logger
+ */
+export function createLogger(namespace) {
+  const prefix = namespace ? `[${namespace}]` : ''
+  return {
+    debug: (...args) => logger.debug(prefix, ...args),
+    info: (...args) => logger.info(prefix, ...args),
+    warn: (...args) => logger.warn(prefix, ...args),
+    error: (...args) => logger.error(prefix, ...args),
+  }
+}
+
 export default logger

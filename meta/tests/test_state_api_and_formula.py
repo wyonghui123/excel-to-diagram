@@ -168,52 +168,61 @@ def test_user_account_age_days_formula():
 
 
 def test_user_current_status_duration_formula():
-    """测试 user current_status_duration_days formula 字段"""
+    """测试 user current_status_duration_days formula 字段 (2026-06-09 重构)
+
+    单一事实源改为 audit_logs, formula 从 audit_logs 子查询派生最近一次 status 变化时间.
+    """
     print("\n=== 测试 user current_status_duration_days ===")
-    
+
     meta_obj = registry.get('user')
     assert meta_obj is not None, "meta_obj not found in registry"
-    
+
     field = None
     for f in meta_obj.fields:
         if f.id == 'current_status_duration_days':
             field = f
             break
-    
+
     assert field is not None, "user 缺少 current_status_duration_days 字段"
-    
+
     storage_str = str(field.storage).lower()
     assert 'virtual' in storage_str
-    
+
     formula = field.computation.get('formula', '') if isinstance(field.computation, dict) else getattr(field.computation, 'formula', '')
     assert 'DATEDIFF' in formula
-    assert 'status_entered_at' in formula
-    
+    # [FIX 2026-06-09] 不再引用 status_entered_at, 改为从 audit_logs 子查询派生
+    assert 'status_entered_at' not in formula, f"formula 不应再引用 status_entered_at (已删除), 实际: {formula}"
+    assert 'audit_logs' in formula, f"formula 应从 audit_logs 派生, 实际: {formula}"
+    assert 'COALESCE' in formula, f"formula 应有 COALESCE 兜底 (没 audit log 时用 created_at), 实际: {formula}"
+
     print(f"  Formula: {formula}")
-    print("[OK] user current_status_duration_days formula 配置正确")
+    print("[OK] user current_status_duration_days formula 从 audit_logs 派生, 配置正确")
 
 
 # ============================================================
-# 4. 用户 status_entered_at 字段验证
+# 4. [REMOVED 2026-06-09] status_entered_at 字段已删除
+#    原 test_user_status_entered_at_field 移除, 改用 test_user_status_entered_at_field_removed
+#    验证字段已成功删除 (避免误恢复)
 # ============================================================
 
-def test_user_status_entered_at_field():
-    """测试 user 有 status_entered_at 字段"""
-    print("\n=== 测试 user status_entered_at ===")
-    
+def test_user_status_entered_at_field_removed():
+    """验证 user status_entered_at 字段已删除 (2026-06-09 重构)
+
+    单一事实源改为 audit_logs. 字段冗余 (被 state_transition 反复覆盖), 产生大量 audit log.
+    详见: rule_executor.py StateTransitionExecutor + user.yaml 字段定义.
+    """
+    print("\n=== 测试 user status_entered_at 已删除 ===")
+
     meta_obj = registry.get('user')
     assert meta_obj is not None, "meta_obj not found in registry"
-    
-    field = None
-    for f in meta_obj.fields:
-        if f.id == 'status_entered_at':
-            field = f
-            break
-    
-    assert field is not None, "user 缺少 status_entered_at 字段"
-    assert field.field_type.value == 'datetime', f"status_entered_at 类型不正确: {field.field_type}"
-    
-    print("[OK] user status_entered_at 字段配置正确")
+
+    field = next((f for f in meta_obj.fields if f.id == 'status_entered_at'), None)
+    assert field is None, (
+        f"user 不应有 status_entered_at 字段 (单一事实源改为 audit_logs), 实际仍存在. "
+        f"如需恢复, 同步恢复 rule_executor.py 自动写逻辑 + audit_log 清理"
+    )
+
+    print("[OK] user status_entered_at 字段已成功删除, 单一事实源为 audit_logs")
 
 
 def test_change_event_status_entered_at_field():
@@ -345,7 +354,7 @@ def run_all_tests():
         test_user_inactive_days_formula,
         test_user_account_age_days_formula,
         test_user_current_status_duration_formula,
-        test_user_status_entered_at_field,
+        test_user_status_entered_at_field_removed,
         test_change_event_status_entered_at_field,
         test_formula_function_registry_has_nonull_functions,
         test_recover_from_log_api_exists,

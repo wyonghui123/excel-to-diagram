@@ -1,3 +1,18 @@
+## 目录
+
+1. [1. Background & Objectives](#1-background-objectives)
+2. [2. Requirement Type Overview](#2-requirement-type-overview)
+3. [3. Functional Requirements](#3-functional-requirements)
+4. [4. Nonfunctional Requirements](#4-nonfunctional-requirements)
+5. [5. External Interface Requirements](#5-external-interface-requirements)
+6. [6. Transition Requirements](#6-transition-requirements)
+7. [7. 现有对象和前端适配影响分析](#7-现有对象和前端适配影响分析)
+8. [8. Priorities & Milestone Suggestions](#8-priorities-milestone-suggestions)
+9. [9. Change / Design Proposal (RFC)](#9-change-design-proposal-(rfc))
+10. [10. TBD List](#10-tbd-list)
+11. [11. Summary](#11-summary)
+
+---
 # Spec: Deep Insert 增强 + 多态 Composition 支持
 
 > **创建日期**: 2026-05-21

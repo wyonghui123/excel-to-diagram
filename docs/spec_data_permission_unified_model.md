@@ -1,3 +1,23 @@
+## 目录
+
+1. [版本历史](#版本历史)
+2. [1. Background & Objectives](#1-background-objectives)
+3. [2. Requirement Type Overview](#2-requirement-type-overview)
+4. [3. Functional Requirements](#3-functional-requirements)
+5. [4. Nonfunctional Requirements](#4-nonfunctional-requirements)
+6. [5. External Interface Requirements](#5-external-interface-requirements)
+7. [6. Transition Requirements](#6-transition-requirements)
+8. [7. Constraints & Assumptions](#7-constraints-assumptions)
+9. [8. Priorities & Milestone Suggestions](#8-priorities-milestone-suggestions)
+10. [9. Change / Design Proposal (RFC)](#9-change-design-proposal-(rfc))
+11. [10. TBD List](#10-tbd-list)
+12. [Spec + RFC 完整性检查](#spec-rfc-完整性检查)
+13. [Spec + RFC Confirmation Request](#spec-rfc-confirmation-request)
+14. [11. 头部产品深度对比（v1.4 新增）](#11-头部产品深度对比（v14-新增）)
+15. [12. Spec v1.4 终稿状态](#12-spec-v14-终稿状态)
+16. [13. v1.4 后端加固（P3 修复，2026-06-05 完成）](#13-v14-后端加固（p3-修复，2026-06-05-完成）)
+
+---
 # Spec: 数据权限统一模型 — 管理维度 / 菜单功能权限 / 数据权限整合方案
 
 > 文档 ID: spec-data-permission-unified-2026-06-04

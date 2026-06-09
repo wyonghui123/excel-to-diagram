@@ -24,6 +24,7 @@ Mermaid 图表生成、样式、渲染相关问题的解决方案
 |------|------|---------|--------|
 | [group-title.md](./layout/group-title.md) | 分组标题显示问题 | 子图方向配置 | subGraphTitleMargin |
 | [color-grouping.md](./layout/color-grouping.md) | 颜色分组管理 | GroupModel 管理 | 颜色映射策略 |
+| [toolbar-drift-recurrence.md](./layout/toolbar-drift-recurrence.md) | MetaListPage 工具栏反复漂移 | 全局 vs scoped CSS 冲突统一 | 4 处 .toolbar 定义 + padding/border 冲突 + Vite style 注释 gotcha |
 
 ### [Element Plus 相关经验](./element-plus/)
 
@@ -51,6 +52,7 @@ Element Plus UI 组件库的踩坑与解决方案
 | 布局方向颠倒 | [mermaid/layout-direction-fix.md](./mermaid/layout-direction-fix.md) |
 | 分组标题不显示 | [layout/group-title.md](./layout/group-title.md) |
 | 颜色分组问题 | [layout/color-grouping.md](./layout/color-grouping.md) |
+| MetaListPage 工具栏漂移/偏移 | [layout/toolbar-drift-recurrence.md](./layout/toolbar-drift-recurrence.md) |
 | Mermaid 渲染异常 | [debugging/mermaid-debugging.md](./debugging/mermaid-debugging.md) |
 | 弹窗内下拉被遮罩看不到 | [element-plus/dropdown-modal-occlusion.md](./element-plus/dropdown-modal-occlusion.md) |
 | 测试"通过"但实际 UI 不可见 | [testing/testability-iron-rules.md](./testing/testability-iron-rules.md) |

@@ -111,9 +111,32 @@ const objectScopeRef = ref(null)
 const relationScopeRef = ref(null)
 const filterSectionRef = ref(null)
 const coordinator = inject('refreshCoordinator', null)
+// [FIX] 从图表返回时 (initialRelationCodes 或 scopeIds.relationExtra.relationCodes 非空)
+//       自动展开关系范围面板, 让用户能直观看到已恢复的勾选
+const _hasInitialRelCodes = () => {
+  if (Array.isArray(props.initialRelationCodes) && props.initialRelationCodes.length > 0) return true
+  if (Array.isArray(props.scopeIds?.relationExtra?.relationCodes) && props.scopeIds.relationExtra.relationCodes.length > 0) return true
+  return false
+}
 const objectExpanded = ref(true)
-const relationExpanded = ref(false)
+const relationExpanded = ref(_hasInitialRelCodes())
 const filterExpanded = ref(false)
+
+// [FIX] 监听 initialRelationCodes / scopeIds.relationExtra 变化, 动态展开关系范围面板
+// 场景: chart app 返回时, 父级 restore 流程异步更新 props, 初始 _hasInitialRelCodes() 是 false
+//       后续 props 同步进来时, 需要重新判断并展开
+watch(
+  () => [props.initialRelationCodes, props.scopeIds?.relationExtra?.relationCodes],
+  ([codes1, codes2]) => {
+    const has = (Array.isArray(codes1) && codes1.length > 0) ||
+                (Array.isArray(codes2) && codes2.length > 0)
+    if (has && !relationExpanded.value) {
+      relationExpanded.value = true
+      trace.log('autoExpand→relPanel', { codes1: codes1?.length, codes2: codes2?.length })
+    }
+  },
+  { immediate: true, deep: true }
+)
 
 const selectedAnnotationCategories = ref([])
 const selectedFilterRelationCodes = ref([])
@@ -221,9 +244,17 @@ const effectiveServiceModuleIds = computed(() => {
   return [...ids]
 })
 
+// 取 4 个 id 源 (boIds / domainIds / subDomainIds / serviceModuleIds) 的总长度。
+// 正常路径: handleObjectScopeChange 写 localSelectedBoCount (包含 4 源之和), 直接用。
+// Restore 路径: localSelectedBoCount=0 但 props 同步后 4 个 ref 已有值, 用派生值兜底。
+// 这样 restore 后 chip "对象范围 1" 不会因为 localSelectedBoCount 没被触发而消失。
 const selectedBoCount = computed(() => {
-  const count = localSelectedBoCount.value
-  return count > 0 ? count : (selectedBoIds.value?.length || 0)
+  const local = localSelectedBoCount.value
+  if (local > 0) return local
+  return (selectedBoIds.value?.length || 0) +
+    (selectedDomainIds.value?.length || 0) +
+    (selectedSubDomainIds.value?.length || 0) +
+    (selectedServiceModuleIds.value?.length || 0)
 })
 const relationCodesCount = computed(() => selectedRelationCodes.value?.length || 0)
 
@@ -437,6 +468,26 @@ watch(selectedDomainIds, scheduleAutoLoad)
 watch(selectedSubDomainIds, scheduleAutoLoad)
 watch(selectedServiceModuleIds, scheduleAutoLoad)
 
+// [FIX] 从图表展示返回时, 父级 restore 会更新 scopeIds; 新挂载的 tree 本地 state
+// (selectedDomainIds / selectedSubDomainIds / selectedServiceModuleIds) 需要从 props 同步,
+// 否则后续 filter / relation change 触发的 emitScopeChange 会用空值覆盖父级已 restore 的值
+// immediate: true 是必要的: 新 child mount 时, props 已经携带了父级 restore 后的 [129],
+// 但 watch 默认不立即触发,会导致 local state 一直是 [], 进而后续 emit 用空值覆盖父级
+function syncFromProps(getter, target) {
+  watch(getter, (newVal) => {
+    if (!newVal) return
+    if (JSON.stringify(newVal) === JSON.stringify(target.value)) return
+    target.value = [...newVal]
+  }, { deep: true, immediate: true })
+}
+syncFromProps(() => props.scopeIds?.domain?.selected, selectedDomainIds)
+syncFromProps(() => props.scopeIds?.sub_domain?.selected, selectedSubDomainIds)
+syncFromProps(() => props.scopeIds?.service_module?.selected, selectedServiceModuleIds)
+// [FIX] restore 路径下也要同步 relationExtra 里的 codes/ids 到本地 scopeSource ref，
+// 否则后续 RSS 的 preservedCheckedKeys → emit scope-change 链会用空值覆盖父级已 restore 的值
+syncFromProps(() => props.scopeIds?.relationExtra?.relationCodes, selectedRelationCodes)
+syncFromProps(() => props.scopeIds?.relationExtra?.relationIds, selectedRelationIds)
+
 watch(() => props.versionId, () => {
   selectedBoIds.value = []
   selectedDomainIds.value = []
@@ -540,5 +591,25 @@ defineExpose({
 
 .relation-scope-tree:has(.rst-panel-relation.is-collapsed) .rst-panel-object {
   flex: 1;
+}
+
+/* [FIX] 关系范围面板展开时, 给 .collapsible-panel 一个明确的高度
+   原因: CollapsiblePanel 内部是 flex 嵌套 (panel → container → header + content),
+   当外层 .rst-panel-relation 用 flex: 0 1 auto 时, 其尺寸由内容决定, 而
+   .collapsible-panel__content 因循环依赖坍缩为 0, 导致 RSS 树被裁掉。
+   用 :not(.is-collapsed) 在面板展开时切换为 flex: 1 1 0, 让面板占满可用空间,
+   这样 content 才有高度。
+*/
+.rst-panel-relation:not(.is-collapsed) {
+  flex: 1 1 0;
+  min-height: 200px;
+}
+
+/* [FIX] CollapsiblePanel 内部 container 高度撑满, 让 content 区域有空间 */
+.rst-panel-relation:not(.is-collapsed) :deep(.collapsible-panel) {
+  height: 100%;
+}
+.rst-panel-relation:not(.is-collapsed) :deep(.collapsible-panel__container) {
+  height: 100%;
 }
 </style>

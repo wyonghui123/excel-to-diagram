@@ -183,10 +183,19 @@ function filterAndCollapse() {
   store.filterText = String(filterCounter.value)
 
   // 恢复用户的展开状态（如果 store 因为某些原因被替换过）
+  // el-tree 2.15+ 没有 setExpandedKeys / getExpandedKeys API，
+  // 必须通过 store.nodesMap[key].expand() 逐个展开（与 installStoreSetDataHook 保持一致）。
   const preferred = userExpandedKeys.value
   if (preferred.size > 0) {
     nextTick(() => {
-      tree.setExpandedKeys([...preferred], false)
+      const currentStore = relationTreeRef.value?.store
+      if (!currentStore?.nodesMap) return
+      for (const key of preferred) {
+        const node = currentStore.nodesMap[key]
+        if (node && !node.isLeaf && typeof node.expand === 'function' && !node.expanded) {
+          node.expand()
+        }
+      }
     })
   }
 }
@@ -328,6 +337,26 @@ const relationCheckedNodeKeys = computed(() => {
   // null → null（触发 watch），[] → []（不变则不触发）
   return codes == null ? null : relationCodesToNodeKeys(codes, classifierTreeData.value)
 })
+
+// [FIX] 从图表展示返回时, 父级 restore 会更新 scopeIds.relationExtra.relationCodes;
+// 新挂载的 RSS 内部 preservedCheckedKeys 是空, 树不会显示勾选。
+// 当 codes 非空 + 树已加载时, 从 codes 派生出 nodeKeys 填充 preservedCheckedKeys。
+// 后续的 relationCheckedNodeKeys watcher → setCheckedKeys → installStoreSetDataHook 会用它恢复勾选。
+watch(
+  () => [props.scopeIds?.relationExtra?.relationCodes, classifierTreeData.value],
+  ([codes, treeData]) => {
+    if (!USE_FILTERSOURCE) return
+    if (preservedCheckedKeys.value.size > 0) return  // 已有用户勾选, 不覆盖
+    if (!codes || codes.length === 0) return
+    if (!treeData || treeData.length === 0) return  // 树未加载, 等下次
+    const nodeKeys = relationCodesToNodeKeys(codes, treeData)
+    if (nodeKeys.length > 0) {
+      preservedCheckedKeys.value = new Set(nodeKeys)
+      trace.log('restoreFromCodes→setPreserved', { codes: codes.length, keys: nodeKeys.length })
+    }
+  },
+  { immediate: true, deep: true }
+)
 
 watch(relationCheckedNodeKeys, (newKeys, oldKeys) => {
   if (!USE_FILTERSOURCE) return
@@ -816,6 +845,8 @@ defineExpose({
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .rss-toolbar {
@@ -845,8 +876,14 @@ defineExpose({
 .rss-tree-container {
   flex: 1;
   min-height: 150px;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: var(--spacing-xs) 0;
+  min-width: 0;
+}
+
+:deep(.collapsible-panel__content) {
+  overflow-x: hidden;
 }
 
 .rss-node {

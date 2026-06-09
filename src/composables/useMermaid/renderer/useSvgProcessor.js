@@ -253,50 +253,64 @@ export function useSvgProcessor(options) {
 
   /**
    * 设置画布布局尺寸
+   * 关键修复 v4：让 draggable/wrapper/mermaid-content 都 100% 覆盖 .mermaid-container，
+   * 不再用 JS 算 fit scale，让 SVG 自身的 viewBox + CSS height:100% 自动按比例缩放。
+   * mermaid-content 用 flex 居中（由 CSS 控制），不再用 absolute + transform。
    */
   const setupCanvasLayout = (mermaidWrapper, mermaidContainer, draggableArea) => {
     const wrapper = mermaidWrapper?.value || document.querySelector('.mermaid-wrapper')
     const draggable = draggableArea?.value || document.querySelector('.draggable-area')
     const content = document.querySelector('.mermaid-content')
     const pre = document.querySelector('pre.mermaid')
+    const containerEl = mermaidContainer?.value || document.querySelector('.mermaid-container')
 
-    if (!wrapper || !draggable || !content || !pre) return
+    if (!wrapper || !draggable || !content || !pre || !containerEl) return
 
-    const canvasSize = 8000
-    const skySize = canvasSize * 1.5
+    // 读取容器实际尺寸（首次渲染时容器可能尚未铺满，需要兜底）
+    const containerWidth = containerEl.offsetWidth || containerEl.clientWidth || 1000
+    const containerHeight = containerEl.offsetHeight || containerEl.clientHeight || 600
 
-    wrapper.style.width = skySize + 'px'
-    wrapper.style.height = skySize + 'px'
-    wrapper.style.left = '50%'
-    wrapper.style.top = '50%'
-    wrapper.style.marginLeft = (-skySize / 2) + 'px'
-    wrapper.style.marginTop = (-skySize / 2) + 'px'
+    // 关键修复 v4：draggable / wrapper 100% 覆盖容器，top-left 对齐
+    // 不再用 1.5x 长边的正方形（之前会导致图表偏下/偏上、灰色背景裸露）
+    wrapper.style.width = containerWidth + 'px'
+    wrapper.style.height = containerHeight + 'px'
+    wrapper.style.left = '0'
+    wrapper.style.top = '0'
+    wrapper.style.marginLeft = '0'
+    wrapper.style.marginTop = '0'
     wrapper.style.boxSizing = 'border-box'
 
-    draggable.style.width = canvasSize + 'px'
-    draggable.style.height = canvasSize + 'px'
-    draggable.style.left = '50%'
-    draggable.style.top = '50%'
-    draggable.style.marginLeft = (-canvasSize / 2) + 'px'
-    draggable.style.marginTop = (-canvasSize / 2) + 'px'
+    draggable.style.width = containerWidth + 'px'
+    draggable.style.height = containerHeight + 'px'
+    draggable.style.left = '0'
+    draggable.style.top = '0'
+    draggable.style.marginLeft = '0'
+    draggable.style.marginTop = '0'
     draggable.style.boxSizing = 'border-box'
     draggable.style.backgroundColor = '#F0F0F0'
 
-    content.style.width = 'auto'
-    content.style.height = 'auto'
-    content.style.position = 'absolute'
-    content.style.top = '50%'
-    content.style.left = '50%'
-    content.style.transform = 'translate(-50%, -50%)'
+    // 关键修复 v4：mermaid-content 不再 absolute 居中
+    // 改用 CSS flex 居中（display: flex + align-items/justify-content: center）
+    // 这样 SVG 100% 高度 + 浏览器按 viewBox 比例自动算宽度，图表天然 fit
+    content.style.position = 'relative'
+    content.style.width = '100%'
+    content.style.height = '100%'
+    content.style.transform = 'none'
+    content.style.margin = '0'
 
     pre.style.width = 'auto'
-    pre.style.height = 'auto'
+    pre.style.height = '100%'
     pre.style.boxSizing = 'border-box'
+    pre.style.padding = '0'
 
     const svgEl = pre.querySelector('svg')
     if (svgEl) {
+      // 关键修复 v4：让 SVG 100% 容器高度，宽度按 viewBox 比例自动
+      // 不再让 SVG 用 width/height attribute 渲染（attribute 是 4571×1907，太大）
+      svgEl.style.height = '100%'
       svgEl.style.width = 'auto'
-      svgEl.style.height = 'auto'
+      svgEl.style.maxWidth = '100%'
+      svgEl.style.maxHeight = '100%'
     }
   }
 

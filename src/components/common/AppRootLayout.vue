@@ -241,12 +241,26 @@ function findItemByKey(items, key) {
   return null
 }
 
-function handleUserCommand(command) {
+async function handleUserCommand(command) {
   if (command === 'account' || command === 'profile') {
     showAccountDialog.value = true
   } else if (command === 'logout') {
-    authStore.logout()
-    router.push('/')
+    // [FIX v1.0.4 2026-06-09] 修复 admin 退出后用 TEST60 登录看到 admin 菜单的问题
+    // 原 bug: 1) authStore.logout() 是 async 但未 await → router.push 抢跑
+    //        2) router.push('/') 是 SPA 内部跳转, 不会重新执行 App.vue 的 onMounted
+    //        3) 残留的 Pinia state (user=null 后, computed 自动失效) 仍被 useMenuPermission 等
+    //           异步 composable 的闭包引用, 导致菜单显示旧数据
+    // 修复:  1) await authStore.logout() 等待清空完成
+    //        2) 用 location.replace('/') 强制硬刷新 (清内存中所有 Pinia store 实例)
+    try {
+      await authStore.logout()
+    } catch (e) {
+      console.error('[AppRootLayout] logout failed:', e)
+    }
+    // 强制硬刷新, 重建整个 Vue 应用 (包括 Pinia stores)
+    //   避免任何 Pinia store 残留旧 user 数据
+    //   location.href = '/' 同样可行, 用 replace 避免后退按钮回到登录前页面
+    window.location.replace('/')
   }
 }
 

@@ -1280,7 +1280,17 @@ def get_stage_metrics(object_type, id):
         return jsonify({'success': False, 'message': 'Record not found'}), 404
     
     current_state = record.get(field)
-    current_state_entered_at = record.get(f'{field}_entered_at')
+    # [FIX 2026-06-09] 不再从 record.get(f'{field}_entered_at') 读, 改为从 audit_logs 派生
+    # 原因: status_entered_at DB 字段已删除 (冗余且被 state_transition 规则反复覆盖),
+    # 单一事实源改为 audit_logs 表 (最近一次 field 变化时间)
+    sql_entered_at = """
+        SELECT created_at FROM audit_logs
+        WHERE object_type = ? AND object_id = ? AND field_name = ? AND action = 'UPDATE'
+        ORDER BY created_at DESC LIMIT 1
+    """
+    cursor_entered = _data_source.execute(sql_entered_at, (object_type, object_id, field))
+    row_entered = cursor_entered.fetchone()
+    current_state_entered_at = row_entered[0] if row_entered else None
     
     field_meta = None
     for f in meta_obj.fields:

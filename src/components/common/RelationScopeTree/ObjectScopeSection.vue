@@ -224,7 +224,6 @@ function handleSelectAll() {
 
   if (!treeRef.value) return
   const allKeys = collectAllKeys(treeData.value)
-  console.log('[ObjectScopeSection] handleSelectAll - allKeys:', allKeys)
   treeRef.value.setCheckedKeys(allKeys)
   emitTypedScopeChange()
 }
@@ -280,14 +279,6 @@ function handleBoCheck(data, checkedInfo) {
 
   if (guard.active()) return
 
-  console.log('[ObjectScopeSection] handleBoCheck:', {
-    clickedNode: { id: data.id, originalId: data.originalId, name: data.name, type: data.type },
-    checkedKeys: checkedInfo.checkedKeys,
-    halfCheckedKeys: checkedInfo.halfCheckedKeys,
-    checkedNodes: checkedInfo.checkedNodes.map(n => ({ id: n.id, originalId: n.data?.originalId, name: n.name, type: n.type })),
-    halfCheckedNodes: (checkedInfo.halfCheckedNodes || []).map(n => ({ id: n.id, originalId: n.data?.originalId, name: n.name, type: n.type }))
-  })
-
   const businessObjectNodes = checkedInfo.checkedNodes.filter(node => node.type === 'business_object')
   nextTick(() => {
     checkedBoIds.value = businessObjectNodes.map(node => node.data?.originalId || node.id)
@@ -304,18 +295,21 @@ const trace = createTrace('ObjectScopeSection')
 // guard.enter/exit 紧贴 setCheckedKeys，消除 nextTick 窗口期用户点击被忽略的竞态
 watch(objectCheckedNodeKeys, (newKeys) => {
   if (!USE_FILTERSOURCE) return
-  nextTick(() => {
+  nextTick(async () => {
     if (!treeRef.value) return
     guard.enter()
     treeRef.value.setCheckedKeys(newKeys || [])
-    guard.exit()
     trace.log('watch→setCheckedKeys', { keyCount: (newKeys || []).length })
+    // 等 el-tree 内部把 setCheckedKeys 触发的 @check 事件派发完，再退出保护区
+    // (el-tree 的 check emit 是同步的, 但事件监听器可能在微任务中处理; 多 nextTick 保险)
+    await nextTick()
+    await nextTick()
+    guard.exit()
   })
 })
 
 function emitTypedScopeChange(_checkedNodes) {
   if (!treeRef.value) {
-    console.log('[ObjectScopeSection] emitTypedScopeChange: treeRef is null, skip')
     return
   }
 
@@ -329,13 +323,6 @@ function emitTypedScopeChange(_checkedNodes) {
   checkedNodes.forEach(node => nodeMap.set(node.id, node))
   halfCheckedNodes.forEach(node => nodeMap.set(node.id, node))
   const allNodes = Array.from(nodeMap.values())
-
-  console.log('[ObjectScopeSection] emitTypedScopeChange:', {
-    checkedCount: checkedNodes.length,
-    halfCheckedCount: halfCheckedNodes.length,
-    allNodesCount: allNodes.length,
-    allNodes: allNodes.map(n => ({ id: n.id, originalId: n.data?.originalId, name: n.name, type: n.type }))
-  })
 
   const domainIds = []
   const subDomainIds = []
@@ -402,13 +389,10 @@ async function loadTreeData(options = {}) {
 
         if (sameStructure) {
           // 树结构未变化, 无需重建 store, 保留用户已选状态
-          console.log('[ObjectScopeSection] loadTreeData: silent refresh, structure unchanged, keep selection')
           return
         }
 
         // 树结构变化 (新增/删除节点), 需要重建但要恢复已选状态
-        console.log('[ObjectScopeSection] loadTreeData: silent refresh, structure changed, preserving selection',
-          currentCheckedKeys.length, 'keys')
         treeData.value = newTree
         const allKeys = collectAllKeys(newTree)
         defaultExpandedKeys.value = allKeys
@@ -528,12 +512,6 @@ watch(() => props.versionId, (newVal) => {
 
 watch(() => props.initialBoIds, async (newBoIds) => {
   if (USE_FILTERSOURCE) return
-  console.log('[ObjectScopeSection] Watcher: initialBoIds changed', {
-    newBoIds,
-    loading: loading.value,
-    treeDataLength: treeData.value.length,
-    hasTreeRef: !!treeRef.value
-  })
   if (loading.value) return
   if (!treeData.value.length) return
   if (!treeRef.value) return
@@ -541,21 +519,13 @@ watch(() => props.initialBoIds, async (newBoIds) => {
   const currentKeys = treeRef.value.getCheckedKeys?.() || []
   const needsUpdate = newBoIds.length !== currentKeys.length ||
     !newBoIds.every(id => currentKeys.includes(id))
-  console.log('[ObjectScopeSection] Watcher: needsUpdate?', {
-    currentKeys,
-    needsUpdate,
-    reason: newBoIds.length !== currentKeys.length ? 'length mismatch' : 'different ids'
-  })
   if (!needsUpdate) return
   checkedBoIds.value = [...newBoIds]
   guard.enter()
   await nextTick()
-  console.log('[ObjectScopeSection] Watcher: calling setCheckedKeys', newBoIds)
   treeRef.value.setCheckedKeys(newBoIds)
   await nextTick()
   guard.exit()
-  console.log('[ObjectScopeSection] Watcher: after setCheckedKeys',
-    treeRef.value?.getCheckedKeys?.())
 }, { deep: true })
 
 defineExpose({
@@ -602,8 +572,14 @@ defineExpose({
 .oss-tree-container {
   flex: 1;
   min-height: 150px;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: var(--spacing-xs) 0;
+  min-width: 0;
+}
+
+:deep(.collapsible-panel__content) {
+  overflow-x: hidden;
 }
 
 .oss-node {

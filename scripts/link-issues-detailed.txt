@@ -1,4 +1,4 @@
-=== MISSING: 120 ===
+=== MISSING: 103 ===
 docs\architecture\02-yaml-conventions-v2.md:L1641 spec-code-quality-performance-optimization.md#10-phase-4-深度模块化--全部完成-
 docs\architecture\02-yaml-conventions-v2.md:L1717 spec-code-quality-performance-optimization.md#spec-核心代码质量与性能优化
 docs\architecture\05-backend-architecture.md:L163 file:///d:/filework/excel-to-diagram/meta/api/bo_action_init.py
@@ -17,22 +17,11 @@ docs\ARCHITECTURE_V2.md:L1441 src/composables/useDetail.js
 docs\ARCHITECTURE_V2.md:L1474 src/composables/useValue.js
 docs\ARCHITECTURE_V2.md:L1591 file:///d:/filework/excel-to-diagram/e2e/features/arch-data-converter.spec.js
 docs\ARCHITECTURE_V2_GAP_ANALYSIS.md:L507 file:///d:/filework/excel-to-diagram/meta/services/meta_action_service.py
-docs\archive\fixes\ASSOCIATE_AUDIT_LOG_IMPLEMENTATION.md:L209 file:///D:/filework/excel-to-diagram/docs/MIGRATION_COMPLETED_REPORT.md
-docs\archive\fixes\ASSOCIATE_AUDIT_LOG_IMPLEMENTATION.md:L210 file:///D:/filework/excel-to-diagram/docs/AUDIT_LOG_FIELD_NAME_FIX_COMPLETED.md
-docs\archive\fixes\ASSOCIATE_AUDIT_LOG_IMPLEMENTATION.md:L211 file:///D:/filework/excel-to-diagram/docs/AUDIT_LOG_DUPLICATE_FIX_COMPLETED.md
-docs\archive\fixes\AUDIT_LOG_DUPLICATE_FIX_COMPLETED.md:L129 file:///D:/filework/excel-to-diagram/docs/AUDIT_LOG_DUPLICATE_ISSUE.md
-docs\archive\fixes\AUDIT_LOG_DUPLICATE_FIX_COMPLETED.md:L130 file:///D:/filework/excel-to-diagram/docs/MIGRATION_COMPLETED_REPORT.md
-docs\archive\fixes\AUDIT_LOG_DUPLICATE_FIX_COMPLETED.md:L131 file:///D:/filework/excel-to-diagram/docs/AUDIT_LOG_FIELD_NAME_FIX_COMPLETED.md
-docs\archive\fixes\AUDIT_LOG_FIELD_NAME_FIX_COMPLETED.md:L205 file:///D:/filework/excel-to-diagram/docs/AUDIT_LOG_FIELD_NAME_FIX.md
-docs\archive\fixes\AUDIT_LOG_FIELD_NAME_FIX_COMPLETED.md:L206 file:///D:/filework/excel-to-diagram/docs/MIGRATION_COMPLETED_REPORT.md
-docs\archive\fixes\MIGRATION_COMPLETED_REPORT.md:L221 file:///D:/filework/excel-to-diagram/docs/MIGRATION_CHECKLIST.md
 docs\archive\fixes\POPPER_FIX_IMPLEMENTATION_REPORT.md:L80 file:///d:/filework/excel-to-diagram/src/styles/tokens.scss#L259-L273
 docs\archive\fixes\POPPER_FIX_IMPLEMENTATION_REPORT.md:L138 file:///d:/filework/excel-to-diagram/src/styles/tokens.scss#L259-L273
 docs\archive\fixes\POPPER_FIX_IMPLEMENTATION_REPORT.md:L159 file:///d:/filework/excel-to-diagram/src/components/common/DetailPage/DetailDrawer.vue
 docs\archive\fixes\POPPER_FIX_IMPLEMENTATION_REPORT.md:L160 file:///d:/filework/excel-to-diagram/src/components/common/AppModal.vue
 docs\archive\fixes\POPPER_FIX_IMPLEMENTATION_REPORT.md:L161 file:///d:/filework/excel-to-diagram/src/components/common/AppDrawer.vue
-docs\archive\fixes\SERVER_RESTART_COMPLETED.md:L59 file:///D:/filework/excel-to-diagram/docs/AUDIT_LOG_FIELD_NAME_FIX_COMPLETED.md
-docs\archive\fixes\SERVER_RESTART_COMPLETED.md:L60 file:///D:/filework/excel-to-diagram/docs/AUDIT_LOG_DUPLICATE_FIX_COMPLETED.md
 docs\archive\progress\bo-action-p1-enum-result.md:L119 file:///d:/filework/excel-to-diagram/docs/archive/progress/v3-bo-action-main-summary.md
 docs\archive\progress\bo-action-v3.13-result.md:L136 file:///d:/filework/excel-to-diagram/docs/archive/progress/v3-bo-action-main-summary.md
 docs\archive\progress\bo-action-v3.14-result.md:L159 file:///d:/filework/excel-to-diagram/docs/archive/progress/v3-bo-action-main-summary.md
@@ -43,7 +32,6 @@ docs\archive\progress\bo-action-v3.7-result.md:L179 file:///d:/filework/excel-to
 docs\archive\progress\bo-action-v3.8-result.md:L172 file:///d:/filework/excel-to-diagram/docs/archive/progress/v3-bo-action-main-summary.md
 docs\BACKLOG-MetaModel-Enhancement.md:L2061 ..%2Fchats%2F重构.md
 docs\BACKLOG-P0-2-MetaModel-Improvement.md:L3 ../analysis/P0-2-SAP-DataModel-Analysis.md
-docs\claude-cursor-integration.md:L227 file:///d:/filework/excel-to-diagram/docs/specs/spec-m11-rls.md
 docs\DOCUMENTATION_STANDARDS.md:L187 ./new-doc.md
 docs\E2E-PHASE1-REFINED-PLAN.md:L158 file:///d:/filework/excel-to-diagram/meta/api/bo/handlers.py
 docs\E2E-PHASE1-REFINED-PLAN.md:L201 file:///d:/filework/excel-to-diagram/e2e/page-objects/WorkspacePage.js
@@ -87,10 +75,6 @@ docs\services\README.md:L18 file:///d:/filework/excel-to-diagram/src/composables
 docs\specs\phase-b-implementation.md:L38 file:///d:/filework/excel-to-diagram/src/views/SystemManagement/UserGroupManagement.vue
 docs\specs\spec-audit-log-v2-action-aware.md:L33 file:///d:/filework/excel-to-diagram/meta/core/action_handlers.py
 docs\specs\spec-audit-log-v2-action-aware.md:L93 file:///d:/filework/excel-to-diagram/meta/core/action_handlers.py
-docs\specs\spec-m11-rls-implementation.md:L7 file:///d:/filework/excel-to-diagram/docs/specs/spec-m11-rls.md
-docs\specs\spec-m11-rls-implementation.md:L436 file:///d:/filework/excel-to-diagram/docs/specs/spec-m11-rls.md
-docs\specs\spec-m13-schema-governance.md:L745 file:///d:/filework/excel-to-diagram/docs/specs/spec-m11-rls.md
-docs\specs\spec-m14-opentelemetry.md:L399 file:///d:/filework/excel-to-diagram/docs/specs/spec-m11-rls.md
 docs\specs\spec-objectpage-layout-density-optimization.md:L30 ../research/元数据驱动架构与权限体系-头部产品研究.md
 docs\specs\spec-phase1-p0-detailed-design.md:L11 file:///d:/filework/excel-to-diagram/docs/research/元数据驱动架构与权限体系-头部产品研究.md
 docs\specs\spec-phase1-security-performance-critical.md:L302 file:///d:/filework/excel-to-diagram/src/components/common/AnnotationList/AnnotationList.vue#L242-L278
@@ -98,7 +82,6 @@ docs\specs\spec-phase1-security-performance-critical.md:L306 file:///d:/filework
 docs\specs\spec-phase1-security-performance-critical.md:L318 file:///d:/filework/excel-to-diagram/src/components/common/ObjectPage/AnnotationForm.vue#L82-L107
 docs\specs\spec-query-engine-unification-m5.md:L662 file:///d:/filework/excel-to-diagram/docs/specs/spec_data_permission_unified_model.md
 docs\specs\spec-tech-debt-resolution.md:L13 file:///d:/filework/excel-to-diagram/src/utils/hierarchyFilterBuilder.js#L32-L66
-docs\specs\spec-ui-business-logic-downflow.md:L15 file:///d:/filework/excel-to-diagram/docs/specs/spec-m11-rls.md
 docs\specs\spec-ui-business-logic-downflow.md:L268 file:///d:/filework/excel-to-diagram/docs/specs/spec-fr-ui-001-httpClient.md
 docs\specs\spec-ui-business-logic-downflow.md:L269 file:///d:/filework/excel-to-diagram/docs/specs/spec-fr-ui-002-authService.md
 docs\specs\spec-ui-business-logic-downflow.md:L273 file:///d:/filework/excel-to-diagram/docs/specs/spec-fr-ui-006-api-base.md

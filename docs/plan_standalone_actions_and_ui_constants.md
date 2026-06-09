@@ -1,3 +1,13 @@
+## 目录
+
+1. [重要说明：membership 与 association 的关系](#重要说明：membership-与-association-的关系)
+2. [一、standalone 动作补充方案](#一-standalone-动作补充方案)
+3. [二、UI 文本 enum 方案](#二-ui-文本-enum-方案)
+4. [三、实施优先级](#三-实施优先级)
+5. [四、验收标准](#四-验收标准)
+6. [五、风险与缓解](#五-风险与缓解)
+
+---
 # 细化方案：standalone 动作补充 + UI 文本 enum
 
 ## 重要说明：membership 与 association 的关系

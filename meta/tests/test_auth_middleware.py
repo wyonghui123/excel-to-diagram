@@ -116,7 +116,8 @@ class TestRequirePermission:
     def test_user_with_specific_permission(self, app_client):
         """有特定权限用户允许访问"""
         app, client = app_client
-        token = _mk_token(perms=['user:list'])
+        # crud_query 需要 user:read 权限（见 permission_interceptor.py _ACTION_PERMISSION_SUFFIX）
+        token = _mk_token(perms=['user:read'])
         resp = client.get('/api/v2/bo/user',
                           headers={'Authorization': f'Bearer {token}'})
         assert resp.status_code != 403

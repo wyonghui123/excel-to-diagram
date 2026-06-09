@@ -15,6 +15,7 @@
     "postinstall": "node scripts/sync-ports.js",
     "pretest:e2e": "node scripts/sync-ports.js",
     "build": "vite build",
+    "analyze": "vite build && echo Bundle analysis: stats.html",
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run",
@@ -33,19 +34,15 @@
     "lint:fix": "eslint src/ --fix"
   },
   "dependencies": {
-    "@excalidraw/excalidraw": "^0.14.0",
     "@mermaid-js/layout-elk": "^0.2.1",
-    "@monaco-editor/loader": "^1.7.0",
     "echarts": "^5.5.1",
     "element-plus": "^2.14.0",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.0",
     "mermaid": "^11.13.0",
-    "monaco-editor": "^0.55.1",
+    "modern-normalize": "^3.0.1",
     "pinia": "^3.0.4",
     "pinia-plugin-persistedstate": "^4.7.1",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
     "vue": "^3.5.13",
     "vue-router": "^4.6.4",
     "xlsx": "^0.18.5"
@@ -63,8 +60,8 @@
     "eslint": "^10.4.1",
     "eslint-plugin-vue": "^10.9.2",
     "happy-dom": "^20.10.1",
-    "jsdom": "^24.1.0",
     "playwright": "1.60.0",
+    "rollup-plugin-visualizer": "^7.0.1",
     "sass": "^1.69.5",
     "stylelint": "^16.26.1",
     "stylelint-config-standard-scss": "^13.1.0",
@@ -75,6 +72,11 @@
     "vitest": "^2.1.0",
     "vue-eslint-parser": "^10.4.1"
   },
+  "sideEffects": [
+    "*.css",
+    "*.scss",
+    "*.vue"
+  ],
   "build": {
     "appId": "com.archworkspace.app",
     "productName": "ArchWorkspace",

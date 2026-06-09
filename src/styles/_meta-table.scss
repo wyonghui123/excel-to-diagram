@@ -142,13 +142,15 @@
   transform: scale(1.05);
 }
 
-/* ======== 工具栏样式 ======== */
+/* ======== Toolbar base styles ======== */
+/* Note: MetaListPage scoped styles provide the full override.
+   This rule only provides minimal base for non-MetaListPage contexts. */
 .toolbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: var(--spacing-sm) 0;
-  border-bottom: 1px solid var(--color-border);
+  flex-wrap: nowrap;
+  min-height: 44px;
 }
 
 .toolbar-left {

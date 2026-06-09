@@ -97,6 +97,52 @@ class HierarchyConfigLoader:
         return [level.get('object') for level in levels if level.get('object')]
 
     @classmethod
+    def sort_by_hierarchy(cls, object_types: List[str]) -> List[str]:
+        """[FR-008] 按层级拓扑排序（父对象在前，子对象在后）
+
+        替代 get_type_order()，支持任意类型子集排序 + child_sections 依赖。
+        统一 import_export_service 中 4 个导出/导入入口的排序逻辑。
+
+        排序规则：
+        1. parent_object 关系：子对象依赖父对象（如 sub_domain → domain）
+        2. child_sections 关系：子对象依赖其所有父对象
+        """
+        from meta.core.models import registry
+
+        graph = {ot: [] for ot in object_types}
+
+        for ot in object_types:
+            obj = registry.get(ot)
+            if obj and obj.parent_object and obj.parent_object in object_types:
+                graph[ot] = [obj.parent_object]
+
+        # child_sections 依赖
+        for ot in object_types:
+            obj = registry.get(ot)
+            if obj and hasattr(obj, 'child_sections') and obj.child_sections:
+                for section in obj.child_sections:
+                    section_type = getattr(section, 'object_type', None)
+                    if section_type and section_type in object_types and section_type != ot:
+                        if ot not in graph[section_type]:
+                            graph[section_type].append(ot)
+
+        result = []
+        visited = set()
+
+        def visit(node):
+            if node in visited:
+                return
+            visited.add(node)
+            for parent in graph.get(node, []):
+                visit(parent)
+            result.append(node)
+
+        for ot in object_types:
+            visit(ot)
+
+        return result
+
+    @classmethod
     def get_dimensions(cls) -> List[Dict[str, Any]]:
         config = cls.get_config()
         return config.get('dimensions', [])

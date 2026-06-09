@@ -681,24 +681,57 @@ class StateTransitionExecutor(RuleExecutor):
         if effective_state is None:
             effective_state = current_state
 
-        # 允许三种情况触发：
-        # 1. effective_state 等于 rule.to_state（前端请求的就是目标状态）
-        # 2. effective_state 在 from_states 中（默认值或前端的中间状态）
-        if effective_state != rule.to_state and effective_state not in rule.from_states:
+        # [FIX Bug 2026-06-09] 状态转换规则 gating 修复
+        # 原 bug: 当 status='active' 时, 3 个 state_transition rule (activate/lock/deactivate) 全部满足
+        # 原 gating "effective_state == to_state OR effective_state in from_states", 导致
+        # 1) 每次 user 普通 PUT update (不改 status) 都会 fire 至少 1 个 rule
+        # 2) fire 后强制 set status=to_state + set status_entered_at=NOW(), 产生大量 audit log
+        # 3) 多个 rule 串行 fire 时会反复覆盖 status_entered_at
+        #
+        # 正确语义: state_transition rule 只在状态真的需要变化时才 fire
+        # - 显式 action 调用 (POST /actions/{rule_id}): effective_state 会被设为 to_state
+        # - 中间状态过渡: effective_state 在 from_states 中但 != current_state
+        # - 普通 update 不改 status: data dict 中没有 state_field → 必须跳过所有 rule
+        # - 当前状态已经是 to_state: 跳过 (无变化)
+
+        # Case 0: data dict 中没有 state_field 字段 (普通 update 不改 status)
+        # 关键判断: 用户在 update 时是否真的请求了状态变化
+        # - POST /actions/{rule_id}: action handler 会把 state_field 显式设到 data dict
+        # - 普通 PUT /user/{id} (改 display_name 等): data dict 中没有 state_field
+        if rule.state_field not in context.data:
             return RuleResult(
                 success=True,
                 rule_id=rule.id,
                 rule_name=rule.name,
-                message="Effective state not in from_states or to_state, skipped",
+                message="State field '{0}' not in update data, skipped (普通 update 不触发状态转换)".format(rule.state_field),
             )
 
-        # 如果已经被其他 rule 改成了别的 to_state，跳过当前 rule
+        # Case 1: 当前已经是 to_state (无变化, 跳过)
+        if current_state == rule.to_state:
+            return RuleResult(
+                success=True,
+                rule_id=rule.id,
+                rule_name=rule.name,
+                message="Already in target state '{0}', skipped".format(rule.to_state),
+            )
+
+        # Case 2: 已被其他 rule 改成了别的状态 (不是本 rule 的 to_state)
         if effective_state != current_state and effective_state != rule.to_state:
             return RuleResult(
                 success=True,
                 rule_id=rule.id,
                 rule_name=rule.name,
-                message="State already changed by another rule to {0}, skipped".format(effective_state),
+                message="State already changed by another rule to '{0}', skipped".format(effective_state),
+            )
+
+        # Case 3: effective_state 必须 == to_state (显式 action) 或 in from_states (中间状态)
+        #         关键: 如果 effective_state == current_state (普通 update 不改 status), 在 Case 1 已跳过
+        if effective_state != rule.to_state and effective_state not in (rule.from_states or []):
+            return RuleResult(
+                success=True,
+                rule_id=rule.id,
+                rule_name=rule.name,
+                message="Effective state '{0}' not in from_states or to_state, skipped".format(effective_state),
             )
         
         if rule.condition:

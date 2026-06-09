@@ -155,12 +155,33 @@ def get_schema_version():
     })
 
 
+def _attach_change_history(record: dict, object_type: str, obj_id) -> None:
+    """[FIX 2026-06-09] 为 v2 BO 读取响应附加 change_history (含子对象/关联操作)
+
+    与 v1 manage_api.get_record 行为一致, 使用 include_children=True 以包含:
+    - 子对象 (parent_object_type=object_type) 的 CRUD 日志
+    - ASSOCIATE/DISSOCIATE/ASSIGN/REVOKE 关联操作日志
+    """
+    if not record:
+        return
+    try:
+        from meta.services.audit_service import AuditService
+        audit_service = AuditService(_get_data_source())
+        record['change_history'] = audit_service.get_object_history(
+            object_type, obj_id, include_children=True
+        )
+    except Exception as e:
+        logger.debug(f"[bo_api] change_history attach failed for {object_type}/{obj_id}: {e}")
+        record['change_history'] = []
+
+
 @bo_bp.route('/<object_type>/<int:obj_id>', methods=['GET'])
 @login_required
 def read_bo(object_type, obj_id):
     bo = _get_bo()
     result = bo.read(object_type, obj_id)
     if result.success:
+        _attach_change_history(result.data, object_type, obj_id)
         return jsonify({'success': True, 'data': result.data})
     return jsonify({'success': False, 'message': result.message}), 404
 
@@ -172,6 +193,7 @@ def read_bo_by_string_id(object_type, obj_id):
     bo = _get_bo()
     result = bo.read(object_type, obj_id)
     if result.success:
+        _attach_change_history(result.data, object_type, obj_id)
         return jsonify({'success': True, 'data': result.data})
     return jsonify({'success': False, 'message': result.message}), 404
 
@@ -1378,12 +1400,19 @@ def get_view_config(object_type, view_name='default'):
         logger.info(f"[bo_api] config.list.actions length: {len(config.list.actions)}")
         
         data = _dataclass_to_dict(config)
-        
+
         bo = _get_bo()
         ui_config = bo.get_ui_config(object_type)
         if ui_config.get('fields'):
             data['fields'] = ui_config['fields']
-        
+        # [FIX 2026-06-09] 合并 associations 元数据。
+        # 原因：role.yaml 的 assigned_groups.readonly: true 需要传到前端
+        #       DetailPage.vue 用 tab.readonly || assocDef?.readonly 判定，
+        #       若不合并 associations → assocDef 找不到 → readonly 永远 false
+        #       → AssociationSection.vue 仍显示"移除"按钮。
+        if ui_config.get('associations'):
+            data['associations'] = ui_config['associations']
+
         logger.info(f"[bo_api] data['list']['actions']: {data['list']['actions']}")
         logger.info(f"[bo_api] data['list']['actions'] length: {len(data['list']['actions'])}")
         

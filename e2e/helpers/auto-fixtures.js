@@ -249,7 +249,9 @@ export const test = base.extend({
       createProductWithVersion: () => dataFinder.createProductWithVersion(page),
       roleWithPermissions: (opts) => dataFinder.findOrCreateRoleWithPermissions(page, opts),
       userGroup: (opts) => dataFinder.findOrCreateUserGroup(page, opts),
-      businessObject: (opts) => dataFinder.findOrCreateBusinessObject(page, opts)
+      businessObject: (opts) => dataFinder.findOrCreateBusinessObject(page, opts),
+      businessObjectHierarchy: (opts) => dataFinder.findOrCreateBusinessObjectHierarchy(page, opts),
+      ensureRelationships: (opts) => dataFinder.ensureRelationships(page, opts)
     }
     await use(bound)
   },

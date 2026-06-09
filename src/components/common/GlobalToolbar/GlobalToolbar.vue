@@ -297,10 +297,29 @@ defineExpose({
 .gt-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
+
+  :deep(.el-button + .el-button) {
+    margin-left: 0;
+  }
 }
 
 .gt-actions .el-button {
   padding: 6px 8px;
+  width: 32px;
+  height: 32px;
+  box-sizing: border-box;
+  margin: 0;
+
+  &:hover,
+  &:focus,
+  &:active {
+    width: 32px;
+    height: 32px;
+    padding: 6px 8px;
+    margin: 0;
+    transform: none;
+    box-shadow: none;
+  }
 }
 </style>

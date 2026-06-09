@@ -93,7 +93,7 @@ export class ArchDataPage extends GenericListPage {
     const sizesSelect = pager.locator('.el-pagination__sizes').first()
     await sizesSelect.click()
     // 选项在下拉框里
-    const option = this.page.locator('.el-select-dropdown__item').filter({ hasText: new RegExp(`^${size}/`) }).first()
+    const option = this.page.locator('.el-select-dropdown__item').filter({ hasText: new RegExp(String(size)) }).first()
     await option.click()
     return this
   }

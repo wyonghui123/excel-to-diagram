@@ -10,6 +10,18 @@ export interface Tab {
   closable?: boolean
   pinned?: boolean
   meta?: Record<string, any>
+  /**
+   * [FR-016] 静态 label (来自路由元数据或业务静态名称)
+   *  - 持久化时优先用 staticLabel
+   *  - 动态 label (来自后端数据) 不持久化,在还原时由业务重新计算
+   */
+  staticLabel?: string
+  /**
+   * [FR-016] 标记 label 是否动态 (默认 true)
+   *  - true: label 由后端/业务动态生成,持久化时丢弃
+   *  - false: label 来自路由 meta.title 等静态来源,可安全持久化
+   */
+  dynamicLabel?: boolean
 }
 
 export const useTabStore = defineStore('tab', () => {
@@ -22,7 +34,9 @@ export const useTabStore = defineStore('tab', () => {
 
     const existing = tabs.value.find(t => t.id === tabId)
     if (existing) {
-      if (existing.label !== tab.label) {
+      // [FR-016] 只在 dynamicLabel=true 时更新 label
+      //   dynamicLabel=false 表示 label 已被业务页设置为具体值，不应被路由覆盖
+      if (existing.dynamicLabel !== false && existing.label !== tab.label) {
         existing.label = tab.label
       }
       activeTabId.value = existing.id
@@ -42,13 +56,33 @@ export const useTabStore = defineStore('tab', () => {
       badge: tab.badge,
       closable: tab.closable !== false,
       pinned: tab.pinned || false,
-      meta: tab.meta
+      meta: tab.meta,
+      // [FR-016] 标记 label 是否动态
+      //   业务层调用 openTab({ dynamicLabel: false }) 表示静态 label
+      staticLabel: tab.staticLabel,
+      dynamicLabel: tab.dynamicLabel !== false  // 默认为 true
     }
 
     tabs.value.push(newTab)
     activeTabId.value = tabId
 
     return newTab
+  }
+
+  /**
+   * [FR-016] 更新 tab 的动态 label
+   *  - 当业务计算出新 label 时调用
+   *  - 如果 tab 处于 dynamicLabel 状态,会更新 label
+   */
+  function updateTabLabel(tabId: string, newLabel: string) {
+    const tab = tabs.value.find(t => t.id === tabId)
+    if (!tab) return
+    tab.label = newLabel
+    // 转为静态 (避免下次还原时被清空)
+    if (tab.dynamicLabel) {
+      tab.staticLabel = newLabel
+      tab.dynamicLabel = false
+    }
   }
 
   function closeTab(tabId: string) {
@@ -114,6 +148,7 @@ export const useTabStore = defineStore('tab', () => {
     activeTabId,
     maxTabs,
     openTab,
+    updateTabLabel,
     closeTab,
     switchTab,
     replaceTabId,
@@ -127,11 +162,42 @@ export const useTabStore = defineStore('tab', () => {
   }
 }, {
   // [FR-006] 升级到 v4 持久化语法 (pick 替代 paths)
-  // 注意: tabStore 的 localStorage 切换属于 FR-016 (M3),此处保留 sessionStorage
+  // [FR-016] 改用 localStorage 跨标签页共享 + 动态 label 过滤
   persist: {
     key: 'tab-store',
-    storage: sessionStorage,
-    pick: ['tabs', 'activeTabId']
+    storage: localStorage,  // [FR-016] 从 sessionStorage → localStorage
+    pick: ['tabs', 'activeTabId'],
+    // [FR-016] 自定义序列化: 动态 label 在序列化时用 staticLabel 替代
+    serializer: {
+      serialize: (value) => {
+        const tabs = value.tabs?.map((t) => ({
+          ...t,
+          // 动态 label 不持久化,用 staticLabel 替代 (如未设置则用当前 label)
+          label: t.dynamicLabel !== false
+            ? (t.staticLabel || t.label)
+            : t.label
+        })) || []
+        return JSON.stringify({ ...value, tabs })
+      },
+      deserialize: (value) => {
+        try {
+          const parsed = JSON.parse(value)
+          // 清理历史残留的 __pending__ 标记
+          if (parsed.tabs) {
+            parsed.tabs = parsed.tabs.map((t) => {
+              if (t.label === '__pending__') {
+                // 优先用 staticLabel,否则标记为动态让业务层重新计算
+                return { ...t, label: t.staticLabel || t.label, dynamicLabel: true }
+              }
+              return t
+            })
+          }
+          return parsed
+        } catch (_) {
+          return { tabs: [], activeTabId: null }
+        }
+      }
+    }
   }
 })
 

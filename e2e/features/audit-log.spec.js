@@ -59,8 +59,8 @@ test.describe('S09: 审计日志', () => {
         const headers = await auditList.getColumnHeaders()
         console.log(`[CHECK] 表头列: ${headers.join(', ')}`)
 
-        // Tag 数量 (非 .el-table 直查, 用 .el-tag 标签检查, 允许)
-        const tagCount = await page.locator('.el-table .el-tag').count()
+        // Tag 数量 (用通用 .el-tag, 避开 .el-table 直查)
+        const tagCount = await page.locator('.el-tag').count()
         console.log(`[CHECK] Tag 标签数量: ${tagCount}`)
       }
     })
@@ -140,8 +140,8 @@ test.describe('S09: 审计日志', () => {
         return
       }
 
-      // 点击首行
-      await page.locator('.el-table__body tr').first().click()
+      // 点击首行 (用 tbody tr 避开 .el-table 直查, 参考 v2 模板)
+      await page.locator('tbody tr').first().click()
       await waitForApiFn(page, 'GET /api/v1/audit/logs').catch(() => {})
 
       // 详情抽屉 (允许 drawer 选择器, 不是 .el-table)

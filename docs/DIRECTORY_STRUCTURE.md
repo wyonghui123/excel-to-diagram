@@ -1,3 +1,11 @@
+---
+title: 项目目录结构
+version: 1.0.0
+date: 2026-06-07
+status: 活跃
+audience: 开发者
+---
+
 # Excel to Diagram 目录结构规范
 
 > 版本: v1.0  

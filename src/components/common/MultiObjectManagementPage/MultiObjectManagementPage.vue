@@ -20,6 +20,7 @@
         <div v-if="page.versionContext.selectedVersionId" class="momp-sidebar">
           <RelationScopeTree
             ref="scopeTreeRef"
+            :key="scopeTreeKey"
             :version-id="page.versionContext.selectedVersionId"
             :initial-bo-ids="initialBoIds"
             :initial-relation-codes="initialRelationCodes"
@@ -223,6 +224,7 @@ const scopeTreeRef = ref(null)
 const globalToolbarRef = ref(null)
 const initialBoIds = ref([])
 const initialRelationCodes = ref([])
+const scopeTreeKey = ref(0)  // 用于返回图表后强制 RelationScopeTree 重新挂载, 恢复勾选
 const sidebarCollapsed = ref(false)
 
 const coordinator = useRefreshCoordinator()
@@ -239,6 +241,16 @@ onMounted(() => {
   const queryTab = route?.query?.tab
   if (queryTab && page.tabs.find(t => t.name === queryTab)) {
     page.activeTab = queryTab
+  }
+
+  // 从图表展示返回时恢复状态
+  // chart app 跳转前会写入 returningFromDiagram + archManagerStateBeforeDiagram
+  const restored = page.restoreStateFromDiagram()
+  if (restored) {
+    initialBoIds.value = restored.initialBoIds
+    initialRelationCodes.value = restored.initialRelationCodes
+    // 强制 RelationScopeTree 重新挂载, 让 initialBoIds / initialRelationCodes 生效
+    scopeTreeKey.value++
   }
 })
 
@@ -324,6 +336,7 @@ const tabsExtraContext = computed(() => {
       page.clearScope()
       scopeTreeRef.value?.clearObjectScope()
       scopeTreeRef.value?.clearRelationScope()
+      scopeTreeRef.value?.clearFilterCondition()
     },
     clearFilter: (key) => {
       if (key === 'objectScope') {

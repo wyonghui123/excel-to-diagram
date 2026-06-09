@@ -1,3 +1,21 @@
+## 目录
+
+1. [0. 摘要](#0-摘要)
+2. [1. 背景与目标](#1-背景与目标)
+3. [2. 目标架构](#2-目标架构)
+4. [3. Trace 上下文 + Span](#3-trace-上下文-span)
+5. [4. Ring Buffer 存储](#4-ring-buffer-存储)
+6. [5. 拦截器集成](#5-拦截器集成)
+7. [6. Dashboard API](#6-dashboard-api)
+8. [7. 性能预算](#7-性能预算)
+9. [8. 5 阶段实施蓝图](#8-5-阶段实施蓝图)
+10. [9. 测试策略](#9-测试策略)
+11. [10. 关键交付物](#10-关键交付物)
+12. [11. 关联文档](#11-关联文档)
+13. [12. 一句话总结](#12-一句话总结)
+14. [13. 变更记录](#13-变更记录)
+
+---
 # M14 v3 引擎：OpenTelemetry 简化版 spec
 
 > **版本**: v1.0.0
@@ -396,7 +414,7 @@ GET /api/v1/telemetry/stats
 | 文档 | 关系 |
 |------|------|
 | [spec-ui-business-logic-downflow.md v3.0](file:///d:/filework/excel-to-diagram/docs/specs/spec-ui-business-logic-downflow.md) | 主文档 |
-| [spec-m11-rls.md](file:///d:/filework/excel-to-diagram/docs/specs/spec-m11-rls.md) | M11（与 M14 拦截器集成）|
+| [spec-m11-rls-implementation.md](file:///d:/filework/excel-to-diagram/docs/specs/spec-m11-rls-implementation.md) | M11（与 M14 拦截器集成）|
 | [spec-m13-schema-governance.md](file:///d:/filework/excel-to-diagram/docs/specs/spec-m13-schema-governance.md) | M13（与 M14 Dashboard 协同）|
 | [meta/core/interceptors/base.py](file:///d:/filework/excel-to-diagram/meta/core/interceptors/base.py) | Interceptor ABC（19 拦截器继承）|
 

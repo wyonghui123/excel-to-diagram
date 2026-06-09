@@ -3,6 +3,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 import os
 import re
+import logging
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.worksheet.datavalidation import DataValidation
@@ -14,8 +15,19 @@ from meta.core.datasource import DataSource
 from meta.services.manage_service import ManageService, BatchOperationResult, CreateRequest, UpdateRequest, DeleteRequest
 from meta.services.query_service import QueryService, SearchRequest, QueryCondition
 from meta.services.hierarchy_filter_service import HierarchyFilterService
-from meta.services.cascade_service import get_type_order
+from meta.services.cascade_service import HierarchyConfigLoader, get_type_order as _cascade_get_type_order
 from meta.services.excel_design_system import ExcelDesignSystem
+
+
+def get_type_order() -> List[str]:
+    """获取类型顺序（转发到 cascade_service）"""
+    return _cascade_get_type_order()
+
+
+# [FIX 2026-06-08] 统一 logger（SSOT）
+# 之前全文 20+ 处 `import logging; logger = logging.getLogger(__name__)` 散落各处。
+# 现在一次性 hoist 到模块顶部，所有调用方直接用 `logger` 即可。
+logger = logging.getLogger(__name__)
 
 
 def _sanitize_xml_string(text: str) -> str:
@@ -85,6 +97,11 @@ class ExportResult:
     sheets: List[Dict[str, Any]] = field(default_factory=list)
     total_rows: int = 0
     errors: List[str] = field(default_factory=list)
+    # [FIX 2026-06-08] M.1 规范：trace_id 透传
+    # 之前只有 logs 里有 trace_id（通过 TraceIdLogFilter 自动注入），
+    # 但 API 返回的 ExportResult 本身不携带 trace_id，调用方需要去 logs 里搜。
+    # 现在显式写入 result，API 可直接返回给前端用于问题追踪。
+    trace_id: Optional[str] = None
 
 
 @dataclass
@@ -93,6 +110,7 @@ class ImportPreview:
     sheets: List[Dict[str, Any]] = field(default_factory=list)
     validation: Dict[str, Any] = field(default_factory=dict)
     import_order: List[str] = field(default_factory=list)
+    trace_id: Optional[str] = None
 
 
 @dataclass
@@ -102,6 +120,7 @@ class ImportResult:
     results: Dict[str, Dict[str, int]] = field(default_factory=dict)
     errors: List[Dict[str, Any]] = field(default_factory=list)
     error_report_path: str = ""
+    trace_id: Optional[str] = None
 
 
 class ImportExportService:
@@ -113,8 +132,47 @@ class ImportExportService:
         self.query_service = query_service or QueryService(data_source)
         self.hierarchy_filter = HierarchyFilterService(self.query_service, data_source)
 
+    def _get_current_trace_id(self) -> Optional[str]:
+        """获取当前请求的 trace_id（M.1 规范）
+
+        用于在 ExportResult / ImportResult / ImportPreview 中携带 trace_id，
+        让前端可以直接显示在错误提示中，便于用户报障时定位。
+
+        Returns:
+            当前 Flask 请求的 trace_id，无请求上下文时返回 None
+        """
+        try:
+            from meta.services.trace_service import get_trace_id
+            return get_trace_id()
+        except Exception:
+            return None
+
     def import_from_excel(self, object_type: str, file_path: str,
                           mapping: Optional[Dict[str, str]] = None) -> BatchOperationResult:
+        """[DEPRECATED 2026-06-08] 旧的单表导入入口
+
+        ⚠️ 此方法不推荐使用，功能不完整：
+        - 不支持 operation_mode（"操作模式"列）
+        - 不支持 parent_key_headers（父对象 FK 列被静默忽略）
+        - 不支持 resolve_from_field / resolve_to_object（多态 FK 解析失败）
+        - 不支持 conflict_strategy
+        - 不注入 version_id context
+        - 不走 _filter_import_record（readonly_always / immutable 字段被错误写入）
+
+        推荐使用 import_cascade(file_path, mode, conflict_strategy)：
+        - mode: 'preview' / 'execute' / 'validate'
+        - conflict_strategy: 'skip' / 'upsert' / 'replace'
+        - 支持 operation_mode、parent_key、resolve_from_field、context_field
+
+        保留此方法仅用于向后兼容，内部已无任何调用方（API 全面走 import_cascade）。
+        建议在 v3.20 移除。
+        """
+        import warnings
+        warnings.warn(
+            "import_from_excel is deprecated since v3.18, use import_cascade instead",
+            DeprecationWarning,
+            stacklevel=2
+        )
         meta_obj = registry.get(object_type)
         if meta_obj is None:
             return BatchOperationResult(
@@ -176,6 +234,30 @@ class ImportExportService:
 
     def export_to_excel(self, object_type: str, filters: Optional[Dict[str, Any]] = None,
                         fields: Optional[List[str]] = None) -> str:
+        """[DEPRECATED 2026-06-08] 旧的单表导出入口
+
+        ⚠️ 此方法不推荐使用，功能不完整：
+        - 不走 _get_export_headers_with_editable → 没有 parent FK 编码/名称列
+        - 不写"操作模式"列 → 用户无法区分 create/update
+        - 不加 BUSINESS_KEY_FILL / REQUIRED_FILL 等底色 → 视觉无提示
+        - 不注入层级路径
+        - 不支持 protect_sheet
+
+        推荐使用 export_selected_types([object_type], filters, options)：
+        - 自动生成 parent FK 列（编码+名称）
+        - 自动添加操作模式列 + 颜色提示
+        - 自动注入层级路径（如果 include_hierarchy_path=True）
+        - 支持 protect_sheet 选项
+
+        保留此方法仅用于向后兼容，内部已无任何调用方（API 全面走 export_selected_types）。
+        建议在 v3.20 移除。
+        """
+        import warnings
+        warnings.warn(
+            "export_to_excel is deprecated since v3.18, use export_selected_types instead",
+            DeprecationWarning,
+            stacklevel=2
+        )
         meta_obj = registry.get(object_type)
         if meta_obj is None:
             raise ValueError("Meta object not found: {0}".format(object_type))
@@ -227,7 +309,7 @@ class ImportExportService:
         os.makedirs(output_dir, exist_ok=True)
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        file_name = "{0}_{1}.xlsx".format(object_type, timestamp)
+        file_name = self._build_export_filename([object_type], timestamp)
         file_path = os.path.join(output_dir, file_name)
 
         wb.save(file_path)
@@ -277,55 +359,17 @@ class ImportExportService:
         return field_map
 
     def _get_enum_value_map_from_value_help(self, meta_field) -> Optional[Dict[str, str]]:
-        vh = getattr(meta_field, 'value_help', None)
-        if not vh:
-            ui_vh = getattr(meta_field, 'ui', None)
-            if ui_vh:
-                vh = getattr(ui_vh, 'value_help', None)
-        if not vh:
-            return None
-
-        source = getattr(vh, 'source', None)
-        if not source or getattr(source, 'type', None) != 'enum':
-            return None
-
-        enum_type_id = getattr(source, 'enum_type_id', None)
-        if not enum_type_id:
-            return None
-
-        try:
-            sql = "SELECT code, name FROM enum_values WHERE enum_type_id = ? AND is_active = 1 ORDER BY sort_order"
-            cursor = self.data_source.execute(sql, [enum_type_id])
-            rows = cursor.fetchall()
-            if rows:
-                return {row[0]: row[1] for row in rows}
-        except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"[ValueHelp] 获取枚举映射失败: {enum_type_id} - {e}")
-        return None
+        """[FR-006] 委托到 enum_resolver.get_enum_map"""
+        from meta.core.enum_resolver import get_enum_map
+        return get_enum_map(meta_field, self.data_source)
 
     def _get_enum_type_id_from_value_help(self, meta_field) -> Optional[str]:
-        vh = getattr(meta_field, 'value_help', None)
-        if not vh:
-            ui_vh = getattr(meta_field, 'ui', None)
-            if ui_vh:
-                vh = getattr(ui_vh, 'value_help', None)
-        if not vh:
-            return None
-
-        source = getattr(vh, 'source', None)
-        if not source or getattr(source, 'type', None) != 'enum':
-            return None
-
-        return getattr(source, 'enum_type_id', None)
+        """[FR-006] 委托到 enum_resolver.get_enum_type_id"""
+        from meta.core.enum_resolver import get_enum_type_id
+        return get_enum_type_id(meta_field)
 
     def _get_bo_display_map_from_value_help(self, meta_field, record_ids: List[Any]) -> Optional[Dict[Any, str]]:
-        vh = getattr(meta_field, 'value_help', None)
-        if not vh:
-            ui_vh = getattr(meta_field, 'ui', None)
-            if ui_vh:
-                vh = getattr(ui_vh, 'value_help', None)
+        vh = self._get_value_help(meta_field)
         if not vh:
             return None
 
@@ -335,34 +379,31 @@ class ImportExportService:
 
         target_bo = getattr(source, 'target_bo', None)
         display_field = getattr(source, 'display_field', 'name') or 'name'
-        value_field = getattr(source, 'value_field', 'id') or 'id'
 
         if not target_bo or not record_ids:
             return None
 
         try:
-            from meta.core.yaml_loader import get_meta_object
-            from meta.core.bo_engine import BOEngine
-
+            # [FR-010] 批量 SQL 查询替代逐条 BOEngine.get_record
+            from meta import get_meta_object
             meta_obj = get_meta_object(target_bo)
             if not meta_obj:
                 return None
 
-            engine = BOEngine(meta_obj)
+            target_table = meta_obj.table_name or target_bo + 's'
+            valid_ids = [rid for rid in record_ids if rid is not None]
+            if not valid_ids:
+                return None
+
+            placeholders = ','.join(['?'] * len(valid_ids))
+            sql = f"SELECT id, {display_field} FROM {target_table} WHERE id IN ({placeholders})"
+            cursor = self.data_source.execute(sql, valid_ids)
+
             result_map = {}
-            for rid in record_ids:
-                if rid is None:
-                    continue
-                try:
-                    record = engine.get_record(rid)
-                    if record:
-                        result_map[rid] = str(record.get(display_field, ''))
-                except Exception:
-                    pass
+            for row in cursor.fetchall():
+                result_map[row[0]] = str(row[1]) if row[1] else ''
             return result_map if result_map else None
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
             logger.warning(f"[ValueHelp] 获取BO显示名映射失败: {target_bo} - {e}")
         return None
 
@@ -396,11 +437,7 @@ class ImportExportService:
                         return label_to_key[value]
 
             if isinstance(value, str):
-                vh_bo = getattr(meta_field, 'value_help', None)
-                if not vh_bo:
-                    ui_vh = getattr(meta_field, 'ui', None)
-                    if ui_vh:
-                        vh_bo = getattr(ui_vh, 'value_help', None)
+                vh_bo = self._get_value_help(meta_field)
                 if vh_bo:
                     vh_source = getattr(vh_bo, 'source', None)
                     if vh_source and getattr(vh_source, 'type', None) == 'bo':
@@ -443,19 +480,22 @@ class ImportExportService:
         options = options or {}
         include_operation_mode = options.get("include_operation_mode", True)
 
-        type_order = get_type_order()
+        # [FR-008] 使用 HierarchyConfigLoader.sort_by_hierarchy 替代 get_type_order
+        from meta.services.cascade_service import HierarchyConfigLoader
+        all_types = [level.get('object') for level in HierarchyConfigLoader.get_levels('biz_hierarchy') if level.get('object')]
+        type_order = HierarchyConfigLoader.sort_by_hierarchy(all_types)
         type_order = self._ensure_association_types_in_order(type_order)
-        
+
         # 检查selected_types是否在registry中注册
         from meta.core.models import registry
         valid_types = [t for t in selected_types if registry.get(t)]
-        
+
         # 如果selected_types不在type_order中，直接使用valid_types
         ordered_types = [t for t in type_order if t in valid_types]
         if not ordered_types:
             # 如果没有在type_order中，直接使用valid_types
             ordered_types = valid_types
-        
+
         if not ordered_types:
             return ExportResult(success=False, errors=["No valid object types selected"])
 
@@ -468,80 +508,24 @@ class ImportExportService:
         wb = Workbook()
         ws_meta = wb.active
         ws_meta.title = "说明"
-        
+
         ds = ExcelDesignSystem
-        
-        ws_meta.cell(row=1, column=1, value="导入模板说明").font = Font(bold=True, size=14, color=ds.PRIMARY_COLOR)
-        ws_meta.row_dimensions[1].height = 24
-        ws_meta.cell(row=2, column=1, value="生成时间").font = ds.LABEL_FONT
-        ws_meta.cell(row=2, column=2, value=datetime.now().strftime("%Y-%m-%d %H:%M:%S")).font = ds.VALUE_FONT
-        ws_meta.cell(row=3, column=1, value="包含对象").font = ds.LABEL_FONT
+
+        # [SSOT 2026-06-08] 使用 _write_meta_sheet_header / _write_meta_sheet_operations / _finalize_meta_sheet
         included_names = [registry.get(ot).name for ot in ordered_types if registry.get(ot)]
-        ws_meta.cell(row=3, column=2, value=", ".join(included_names)).font = ds.VALUE_FONT
-        
-        # 只有在有 CUD 操作时才显示操作说明部分
-        if has_cud:
-            ws_meta.cell(row=5, column=1, value="操作说明").font = ds.SECTION_FONT
-            ws_meta.cell(row=5, column=1).fill = ds.SECTION_FILL
-            ws_meta.cell(row=6, column=1, value="操作模式").font = ds.LABEL_FONT
-            ws_meta.cell(row=6, column=2, value="create - 新增/update - 更新/delete - 删除，留空默认为update").font = ds.VALUE_FONT
-            ws_meta.cell(row=7, column=1, value="单元格颜色").font = ds.LABEL_FONT
-            ws_meta.cell(row=7, column=2, value="不同颜色背景表示不同的字段控制：").font = ds.VALUE_FONT
-            
-            ws_meta.cell(row=8, column=1, value="  灰色").font = ds.LABEL_FONT
-            ws_meta.cell(row=8, column=1).fill = ds.READONLY_FILL
-            ws_meta.cell(row=8, column=2, value="只读字段，不可编辑").font = ds.VALUE_FONT
-            
-            ws_meta.cell(row=9, column=1, value="  浅绿色").font = ds.LABEL_FONT
-            ws_meta.cell(row=9, column=1).fill = ds.BUSINESS_KEY_FILL
-            ws_meta.cell(row=9, column=2, value="业务关键字，新增必填，编辑时只读").font = ds.VALUE_FONT
-            
-            ws_meta.cell(row=10, column=1, value="  浅黄色").font = ds.LABEL_FONT
-            ws_meta.cell(row=10, column=1).fill = ds.REQUIRED_FILL
-            ws_meta.cell(row=10, column=2, value="新增时必填字段").font = ds.VALUE_FONT
-            
-            ws_meta.cell(row=11, column=1, value="业务关键字").font = ds.LABEL_FONT
-            ws_meta.cell(row=11, column=2, value="编码字段为业务关键字，用于唯一标识记录。新增时必填，编辑时只读。").font = ds.VALUE_FONT
-            ws_meta.cell(row=12, column=1, value="父对象编码").font = ds.LABEL_FONT
-            ws_meta.cell(row=12, column=2, value="用于关联父对象。新增时必填，编辑时可切换到其他父对象。").font = ds.VALUE_FONT
-            ws_meta.cell(row=13, column=1, value="删除操作").font = ds.LABEL_FONT
-            ws_meta.cell(row=13, column=2, value="设置操作模式为'delete'，系统将根据业务键查找并删除记录").font = ds.VALUE_FONT
-            ws_meta.cell(row=14, column=1, value="新增操作").font = ds.LABEL_FONT
-            ws_meta.cell(row=14, column=2, value="在新增行中填写数据，操作模式设为'create'。业务关键字和父对象编码必填。").font = ds.VALUE_FONT
-            ws_meta.cell(row=15, column=1, value="冲突处理策略").font = ds.LABEL_FONT
-            ws_meta.cell(row=15, column=2, value="在导入界面选择：有则更新（存在则更新，不存在则新增）或跳过冲突（存在则跳过）。").font = ds.VALUE_FONT
-            ws_meta.cell(row=16, column=1, value="注意事项").font = ds.LABEL_FONT
-            ws_meta.cell(row=16, column=2, value="请勿修改灰色背景单元格的值，否则导入时会忽略这些字段").font = ds.VALUE_FONT
-            
-            for row in range(1, 17):
-                for col in range(1, 3):
-                    ws_meta.cell(row=row, column=col).border = ds.THIN_BORDER
-        elif all_readonly:
-            # 所有对象都是只读的，显示只读说明
-            ws_meta.cell(row=5, column=1, value="说明").font = ds.SECTION_FONT
-            ws_meta.cell(row=5, column=1).fill = ds.SECTION_FILL
-            ws_meta.cell(row=6, column=1, value="导出说明").font = ds.LABEL_FONT
-            ws_meta.cell(row=6, column=2, value="当前导出的对象为只读数据，不支持导入修改。").font = ds.VALUE_FONT
-            ws_meta.cell(row=7, column=1, value="使用说明").font = ds.LABEL_FONT
-            ws_meta.cell(row=7, column=2, value="此模板仅用于查看和导出数据，如需修改请通过系统界面操作。").font = ds.VALUE_FONT
-            
-            for row in range(1, 8):
-                for col in range(1, 3):
-                    ws_meta.cell(row=row, column=col).border = ds.THIN_BORDER
-        else:
-            # 混合模式（部分对象支持 CUD）
-            ws_meta.cell(row=5, column=1, value="说明").font = ds.SECTION_FONT
-            ws_meta.cell(row=5, column=1).fill = ds.SECTION_FILL
-            ws_meta.cell(row=6, column=1, value="注意").font = ds.LABEL_FONT
-            ws_meta.cell(row=6, column=2, value="部分对象不支持导入修改，仅支持导出。").font = ds.VALUE_FONT
-            
-            for row in range(1, 7):
-                for col in range(1, 3):
-                    ws_meta.cell(row=row, column=col).border = ds.THIN_BORDER
-        
-        ws_meta.column_dimensions['A'].width = 18
-        ws_meta.column_dimensions['B'].width = 60
-        
+        self._write_meta_sheet_header(
+            ws_meta,
+            title="导入模板说明",
+            time_str=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            included_names=included_names,
+        )
+        # export_template 没有上下文信息，直接从 row 5 开始操作说明
+        last_row = self._write_meta_sheet_operations(
+            ws_meta, has_cud=has_cud, all_readonly=all_readonly, start_row=5,
+            is_cascade=False, has_child_sheets=False,
+        )
+        self._finalize_meta_sheet(ws_meta, last_row)
+
         header_fill = ds.HEADER_FILL
         header_font = ds.HEADER_FONT
         
@@ -577,14 +561,7 @@ class ImportExportService:
                     cell.comment = Comment(_sanitize_xml_string(header_comments[col_idx - 1]), "系统")
             
             if obj_has_cud:
-                op_mode_validation = DataValidation(
-                    type="list",
-                    formula1='"create - 新增,update - 更新,delete - 删除"',
-                    allow_blank=True
-                )
-                op_mode_validation.error = "请从下拉列表中选择操作模式"
-                op_mode_validation.errorTitle = "无效输入"
-                ws.add_data_validation(op_mode_validation)
+                op_mode_validation = self._create_operation_mode_dv(ws)
             
             col_offset = 1 if include_operation_mode else 0
             enum_validations = {}
@@ -613,7 +590,7 @@ class ImportExportService:
             for row_idx in range(2, 2 + empty_rows_count):
                 if obj_has_cud:
                     op_cell = ws.cell(row=row_idx, column=1, value="create - 新增")
-                    op_cell.fill = ds.BUSINESS_KEY_FILL
+                    op_cell.fill = ds.CREATE_NEW_FILL
                     op_cell.border = ds.THIN_BORDER
                     op_cell.alignment = ds.TEXT_CENTER
                     op_mode_validation.add(op_cell)
@@ -631,11 +608,11 @@ class ImportExportService:
                         dv.add(cell)
                     
                     if actual_col_idx in parent_key_columns:
-                        cell.fill = ds.BUSINESS_KEY_FILL
+                        self._apply_classification_fill(cell, 'parent_key')
                     elif actual_col_idx in create_required_columns:
-                        cell.fill = ds.REQUIRED_FILL
+                        self._apply_classification_fill(cell, 'create_required')
                     elif actual_col_idx in readonly_columns:
-                        cell.fill = ds.READONLY_FILL
+                        self._apply_classification_fill(cell, 'readonly')
             
             for col_idx, header in enumerate(headers, 1):
                 column_letter = get_column_letter(col_idx)
@@ -659,7 +636,8 @@ class ImportExportService:
             success=True,
             file_path=file_path,
             sheets=sheets_info,
-            total_rows=0
+            total_rows=0,
+            trace_id=self._get_current_trace_id(),
         )
 
     def export_selected_types(self, selected_types: List[str], filters: Optional[Dict[str, Any]] = None,
@@ -696,40 +674,46 @@ class ImportExportService:
         include_annotations = options.get("include_child_objects",
                                            options.get("include_annotations", True))
 
-        type_order = get_type_order()
+        # [FR-008] 使用 HierarchyConfigLoader.sort_by_hierarchy 替代 get_type_order
+        from meta.services.cascade_service import HierarchyConfigLoader
+        all_types = [level.get('object') for level in HierarchyConfigLoader.get_levels('biz_hierarchy') if level.get('object')]
+        type_order = HierarchyConfigLoader.sort_by_hierarchy(all_types)
         type_order = self._ensure_association_types_in_order(type_order)
-        
+
         # 检查selected_types是否在registry中注册
         from meta.core.models import registry
         valid_types = [t for t in selected_types if registry.get(t)]
-        
+
         # 如果selected_types不在type_order中，直接使用valid_types
         ordered_types = [t for t in type_order if t in valid_types]
         if not ordered_types:
             # 如果没有在type_order中，直接使用valid_types
             ordered_types = valid_types
-        
+
         if not ordered_types:
             return ExportResult(success=False, errors=["No valid object types selected"])
 
         wb = Workbook()
         ws_meta = wb.active
         ws_meta.title = "说明"
-        
+
         ds = ExcelDesignSystem
-        
+
+        # [SSOT 2026-06-08] 标题（export_selected_types 用较小字号 11）
         ws_meta.cell(row=1, column=1, value="导出信息").font = Font(bold=True, size=11, color=ds.PRIMARY_COLOR)
         ws_meta.row_dimensions[1].height = 20
-        
+
         product_code, version_code = self._get_product_version_codes(filters)
         product_name, version_name = self._get_product_version_info(filters)
-        
+
         try:
             from flask import request as flask_request
             export_user = flask_request.headers.get('X-User-Name', '') if flask_request else ''
         except Exception:
             export_user = ''
-        
+
+        # [SSOT 2026-06-08] 自定义 header（包含 导出用户 + 导出范围 + 包含对象）
+        # 替代了 _write_meta_sheet_header 的标准 3 行，加入 export_user 行
         ws_meta.cell(row=2, column=1, value="导出时间").font = ds.LABEL_FONT
         ws_meta.cell(row=2, column=2, value=datetime.now().strftime("%Y-%m-%d %H:%M:%S")).font = ds.VALUE_FONT
         ws_meta.cell(row=3, column=1, value="导出用户").font = ds.LABEL_FONT
@@ -739,7 +723,8 @@ class ImportExportService:
         ws_meta.cell(row=5, column=1, value="包含对象").font = ds.LABEL_FONT
         included_names = [registry.get(ot).name for ot in ordered_types if registry.get(ot)]
         ws_meta.cell(row=5, column=2, value=", ".join(included_names)).font = ds.VALUE_FONT
-        
+
+        # 上下文信息（仅 selected_types 模式有）
         ws_meta.cell(row=7, column=1, value="上下文信息").font = ds.SECTION_FONT
         ws_meta.cell(row=7, column=1).fill = ds.SECTION_FILL
         ws_meta.cell(row=8, column=1, value="产品编码").font = ds.LABEL_FONT
@@ -752,78 +737,20 @@ class ImportExportService:
         ws_meta.cell(row=11, column=2, value=version_name).font = ds.VALUE_FONT
         ws_meta.cell(row=12, column=1, value="版本ID").font = ds.LABEL_FONT
         ws_meta.cell(row=12, column=2, value=str(filters.get('version_id', '')) if filters else '').font = ds.VALUE_FONT
-        
-        section_font = Font(bold=True, size=11, color=ds.PRIMARY_COLOR)
-        
+
         # 检查是否有任何对象支持 CUD 操作
         has_cud = any(_has_cud_actions(registry.get(ot)) for ot in ordered_types if registry.get(ot))
-        
+
         # 检查是否所有对象都是只读的
         all_readonly = all(not _has_cud_actions(registry.get(ot)) for ot in ordered_types if registry.get(ot))
-        
-        if has_cud:
-            ws_meta.cell(row=14, column=1, value="操作说明").font = section_font
-            ws_meta.cell(row=14, column=1).fill = ds.SECTION_FILL
-            ws_meta.cell(row=15, column=1, value="操作模式").font = ds.LABEL_FONT
-            ws_meta.cell(row=15, column=2, value="create - 新增/update - 更新/delete - 删除，留空默认为update").font = ds.VALUE_FONT
-            ws_meta.cell(row=16, column=1, value="单元格颜色").font = ds.LABEL_FONT
-            ws_meta.cell(row=16, column=2, value="不同颜色背景表示不同的字段控制：").font = ds.VALUE_FONT
-            
-            # 颜色示例行
-            ws_meta.cell(row=17, column=1, value="  灰色").font = ds.LABEL_FONT
-            ws_meta.cell(row=17, column=1).fill = ds.READONLY_FILL
-            ws_meta.cell(row=17, column=2, value="只读字段，不可编辑").font = ds.VALUE_FONT
-            
-            ws_meta.cell(row=18, column=1, value="  浅绿色").font = ds.LABEL_FONT
-            ws_meta.cell(row=18, column=1).fill = ds.BUSINESS_KEY_FILL
-            ws_meta.cell(row=18, column=2, value="父对象编码，新增必填，编辑时可切换").font = ds.VALUE_FONT
-            
-            ws_meta.cell(row=19, column=1, value="  浅黄色").font = ds.LABEL_FONT
-            ws_meta.cell(row=19, column=1).fill = ds.REQUIRED_FILL
-            ws_meta.cell(row=19, column=2, value="业务关键字，新增必填，编辑时只读").font = ds.VALUE_FONT
-            
-            ws_meta.cell(row=20, column=1, value="业务关键字").font = ds.LABEL_FONT
-            ws_meta.cell(row=20, column=2, value="编码字段为业务关键字，用于唯一标识记录。新增时必填，编辑时只读。").font = ds.VALUE_FONT
-            ws_meta.cell(row=21, column=1, value="父对象编码").font = ds.LABEL_FONT
-            ws_meta.cell(row=21, column=2, value="用于关联父对象。新增时必填，编辑时可切换到其他父对象。").font = ds.VALUE_FONT
-            ws_meta.cell(row=22, column=1, value="删除操作").font = ds.LABEL_FONT
-            ws_meta.cell(row=22, column=2, value="设置操作模式为'delete'，系统将根据业务键查找并删除记录").font = ds.VALUE_FONT
-            ws_meta.cell(row=23, column=1, value="新增操作").font = ds.LABEL_FONT
-            ws_meta.cell(row=23, column=2, value="在新增行中填写数据，操作模式设为'create'。业务关键字和父对象编码必填。").font = ds.VALUE_FONT
-            ws_meta.cell(row=24, column=1, value="冲突处理策略").font = ds.LABEL_FONT
-            ws_meta.cell(row=24, column=2, value="在导入界面选择：有则更新（存在则更新，不存在则新增）或跳过冲突（存在则跳过）。").font = ds.VALUE_FONT
-            ws_meta.cell(row=25, column=1, value="子对象Sheet").font = ds.LABEL_FONT
-            ws_meta.cell(row=25, column=2, value="子对象Sheet（如备注信息）支持创建/更新/删除操作，通过操作模式列控制。灰色背景字段为只读字段。").font = ds.VALUE_FONT
-            ws_meta.cell(row=26, column=1, value="注意事项").font = ds.LABEL_FONT
-            ws_meta.cell(row=26, column=2, value="请勿修改灰色背景单元格的值，否则导入时会忽略这些字段").font = ds.VALUE_FONT
 
-            for row in range(1, 27):
-                for col in range(1, 3):
-                    ws_meta.cell(row=row, column=col).border = ds.THIN_BORDER
-        elif all_readonly:
-            ws_meta.cell(row=14, column=1, value="说明").font = section_font
-            ws_meta.cell(row=14, column=1).fill = ds.SECTION_FILL
-            ws_meta.cell(row=15, column=1, value="导出说明").font = ds.LABEL_FONT
-            ws_meta.cell(row=15, column=2, value="当前导出的对象为只读数据，不支持导入修改。").font = ds.VALUE_FONT
-            ws_meta.cell(row=16, column=1, value="使用说明").font = ds.LABEL_FONT
-            ws_meta.cell(row=16, column=2, value="此模板仅用于查看和导出数据，如需修改请通过系统界面操作。").font = ds.VALUE_FONT
-            
-            for row in range(1, 17):
-                for col in range(1, 3):
-                    ws_meta.cell(row=row, column=col).border = ds.THIN_BORDER
-        else:
-            ws_meta.cell(row=14, column=1, value="注意").font = section_font
-            ws_meta.cell(row=14, column=1).fill = ds.SECTION_FILL
-            ws_meta.cell(row=15, column=1, value="注意").font = ds.LABEL_FONT
-            ws_meta.cell(row=15, column=2, value="部分对象不支持导入修改，仅支持导出。").font = ds.VALUE_FONT
-            
-            for row in range(1, 16):
-                for col in range(1, 3):
-                    ws_meta.cell(row=row, column=col).border = ds.THIN_BORDER
-        
-        ws_meta.column_dimensions['A'].width = 18
-        ws_meta.column_dimensions['B'].width = 60
-        
+        # [SSOT 2026-06-08] 使用 _write_meta_sheet_operations（从 row 14 开始）
+        last_row = self._write_meta_sheet_operations(
+            ws_meta, has_cud=has_cud, all_readonly=all_readonly, start_row=14,
+            is_cascade=False, has_child_sheets=True,
+        )
+        self._finalize_meta_sheet(ws_meta, last_row)
+
         header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
         header_font = Font(color="FFFFFF", bold=True)
         
@@ -867,33 +794,8 @@ class ImportExportService:
             
             headers, editable_columns, readonly_columns, parent_key_columns, create_required_columns, header_comments, header_to_field, enum_value_maps, bo_display_fields = self._get_export_headers_with_editable(obj, options)
             
-            bo_display_maps = {}
-            if bo_display_fields and sheet_data:
-                for field_id, vh_info in bo_display_fields.items():
-                    record_ids = list(set(
-                        r.get(field_id) for r in sheet_data
-                        if r.get(field_id) is not None
-                    ))
-                    if record_ids:
-                        from meta import get_meta_object
-                        from meta.core.bo_engine import BOEngine
-                        try:
-                            target_meta = get_meta_object(vh_info['target_bo'])
-                            if target_meta:
-                                engine = BOEngine(target_meta)
-                                display_map = {}
-                                for rid in record_ids:
-                                    try:
-                                        rec = engine.get_record(rid)
-                                        if rec:
-                                            display_map[rid] = str(rec.get(vh_info['display_field'], ''))
-                                    except Exception:
-                                        pass
-                                if display_map:
-                                    bo_display_maps[field_id] = display_map
-                        except Exception:
-                            pass
-            
+            bo_display_maps = self._build_bo_display_maps(sheet_data, bo_display_fields)
+
             # 根据 include_operation_mode 选项决定是否包含操作模式列
             if include_operation_mode:
                 headers.insert(0, "操作模式")
@@ -909,14 +811,7 @@ class ImportExportService:
                     cell.comment = Comment(_sanitize_xml_string(header_comments[col_idx - 1]), "系统")
             
             if include_operation_mode:
-                op_mode_validation = DataValidation(
-                    type="list",
-                    formula1='"create - 新增,update - 更新,delete - 删除"',
-                    allow_blank=True
-                )
-                op_mode_validation.error = "请从下拉列表中选择操作模式"
-                op_mode_validation.errorTitle = "无效输入"
-                ws.add_data_validation(op_mode_validation)
+                op_mode_validation = self._create_operation_mode_dv(ws)
             
             col_offset = 1 if include_operation_mode else 0
 
@@ -954,15 +849,15 @@ class ImportExportService:
 
                     actual_col_idx = col_idx - 1 - col_offset
                     if actual_col_idx in parent_key_columns:
-                        cell.fill = ds.BUSINESS_KEY_FILL
+                        self._apply_classification_fill(cell, 'parent_key')
                         if protect_sheet:
                             cell.protection = Protection(locked=False)
                     elif actual_col_idx in create_required_columns:
-                        cell.fill = ds.REQUIRED_FILL
+                        self._apply_classification_fill(cell, 'create_required')
                         if protect_sheet:
                             cell.protection = Protection(locked=False)
                     elif actual_col_idx in readonly_columns:
-                        cell.fill = ds.READONLY_FILL
+                        self._apply_classification_fill(cell, 'readonly')
                         if protect_sheet:
                             cell.protection = Protection(locked=True)
                     elif actual_col_idx in editable_columns:
@@ -996,7 +891,41 @@ class ImportExportService:
                 for col_idx in export_enum_validations:
                     cell = ws.cell(row=row_idx, column=col_idx)
                     export_enum_validations[col_idx].add(cell)
-            
+
+            # [FIX] 为 0 条数据 / 数据末尾追加空行供用户新增 (跟 export_cascade 保持一致)
+            empty_rows_count = options.get("empty_rows_for_new", 5)
+            next_row_idx = len(sheet_data) + 2
+            for empty_row in range(empty_rows_count):
+                col_idx = 1
+
+                if include_operation_mode:
+                    cell = ws.cell(row=next_row_idx, column=col_idx, value="create - 新增")
+                    cell.fill = ds.CREATE_NEW_FILL
+                    cell.border = ds.THIN_BORDER
+                    cell.alignment = Alignment(horizontal="center")
+                    if protect_sheet:
+                        cell.protection = Protection(locked=False)
+                    if op_mode_validation:
+                        op_mode_validation.add(cell)
+                    col_idx += 1
+
+                for header in headers[1:] if include_operation_mode else headers:
+                    cell = ws.cell(row=next_row_idx, column=col_idx, value="")
+                    cell.border = ds.THIN_BORDER
+
+                    original_col_idx = col_idx - 2 if include_operation_mode else col_idx - 1
+                    if original_col_idx in parent_key_columns:
+                        self._apply_classification_fill(cell, 'parent_key')
+                    elif original_col_idx in create_required_columns:
+                        self._apply_classification_fill(cell, 'create_required')
+                    elif original_col_idx in readonly_columns:
+                        self._apply_classification_fill(cell, 'readonly')
+
+                    if original_col_idx in export_enum_validations:
+                        export_enum_validations[original_col_idx].add(cell)
+                    col_idx += 1
+                next_row_idx += 1
+
             for col_idx, header in enumerate(headers, 1):
                 column_letter = get_column_letter(col_idx)
                 max_length = len(str(header))
@@ -1049,6 +978,9 @@ class ImportExportService:
             if child_parent_map:
                 total_child_types = len(child_parent_map)
                 for idx, (child_type_name, parent_list) in enumerate(child_parent_map.items()):
+                    # 跳过已在主导出中处理的类型，避免重复 sheet
+                    if child_type_name in ordered_types:
+                        continue
                     if progress_callback:
                         try:
                             child_reg_meta = registry.get(child_type_name)
@@ -1071,8 +1003,7 @@ class ImportExportService:
                             self._write_child_sheet(wb, child_type_name, child_meta, child_data or [], sheets_info, options)
                             total_rows += len(child_data) if child_data else 0
                     except Exception as e:
-                        import logging
-                        logging.getLogger(__name__).warning(
+                        logger.warning(
                             f"[Export] 子对象 {child_type_name} 导出失败: {e}"
                         )
         
@@ -1080,17 +1011,9 @@ class ImportExportService:
         os.makedirs(output_dir, exist_ok=True)
         
         product_name, version_name = self._get_product_version_info(filters)
-        
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        if product_name and version_name:
-            safe_product = "".join(c if c.isalnum() or c in '_-' else '_' for c in product_name)
-            safe_version = "".join(c if c.isalnum() or c in '_-' else '_' for c in version_name)
-            file_name = "{0}_{1}_{2}.xlsx".format(safe_product, safe_version, timestamp)
-        elif version_name:
-            safe_version = "".join(c if c.isalnum() or c in '_-' else '_' for c in version_name)
-            file_name = "{0}_{1}.xlsx".format(safe_version, timestamp)
-        else:
-            file_name = "{0}.xlsx".format(timestamp)
+        file_name = self._build_export_filename([product_name, version_name], timestamp)
         file_path = os.path.join(output_dir, file_name)
         
         wb.save(file_path)
@@ -1100,7 +1023,8 @@ class ImportExportService:
             success=True,
             file_path=file_path,
             sheets=sheets_info,
-            total_rows=total_rows
+            total_rows=total_rows,
+            trace_id=self._get_current_trace_id(),
         )
 
     def export_cascade(self, object_type: str, filters: Optional[Dict[str, Any]] = None,
@@ -1157,10 +1081,11 @@ class ImportExportService:
         wb = Workbook()
         ws_meta = wb.active
         ws_meta.title = "说明"
-        
+
         meta_fill = PatternFill(start_color="F8F9FA", end_color="F8F9FA", fill_type="solid")
         section_font = Font(bold=True, size=11, color="1565C0")
-        
+
+        # [SSOT 2026-06-08] 自定义 header（cascade 模式：导出范围 + 起始对象 + 包含对象）
         ws_meta.cell(row=1, column=1, value="导出信息").font = Font(bold=True, size=14, color="1565C0")
         ws_meta.row_dimensions[1].height = 25
         ws_meta.cell(row=2, column=1, value="导出时间").font = ds.LABEL_FONT
@@ -1171,50 +1096,17 @@ class ImportExportService:
         ws_meta.cell(row=4, column=2, value=meta_obj.name).font = ds.VALUE_FONT
         ws_meta.cell(row=5, column=1, value="包含对象").font = ds.LABEL_FONT
         exclude_object_types = {'version', 'product'}
-        included_objects = [registry.get(ot).name for ot in ordered_types 
+        included_objects = [registry.get(ot).name for ot in ordered_types
                            if registry.get(ot) and ot not in exclude_object_types]
         ws_meta.cell(row=5, column=2, value=", ".join(included_objects)).font = ds.VALUE_FONT
-        
-        ws_meta.cell(row=7, column=1, value="操作说明").font = section_font
-        ws_meta.cell(row=7, column=1).fill = ds.SECTION_FILL
-        ws_meta.cell(row=8, column=1, value="操作模式").font = ds.LABEL_FONT
-        ws_meta.cell(row=8, column=2, value="create - 新增/update - 更新/delete - 删除，留空默认为update").font = ds.VALUE_FONT
-        ws_meta.cell(row=9, column=1, value="单元格颜色").font = ds.LABEL_FONT
-        ws_meta.cell(row=9, column=2, value="不同颜色背景表示不同的字段控制：").font = ds.VALUE_FONT
-        
-        # 颜色示例行
-        ws_meta.cell(row=10, column=1, value="  灰色").font = ds.LABEL_FONT
-        ws_meta.cell(row=10, column=1).fill = ds.READONLY_FILL
-        ws_meta.cell(row=10, column=2, value="只读字段，不可编辑").font = ds.VALUE_FONT
-        
-        ws_meta.cell(row=11, column=1, value="  浅绿色").font = ds.LABEL_FONT
-        ws_meta.cell(row=11, column=1).fill = ds.BUSINESS_KEY_FILL
-        ws_meta.cell(row=11, column=2, value="父对象编码，新增必填，编辑时可切换").font = ds.VALUE_FONT
-        
-        ws_meta.cell(row=12, column=1, value="  浅黄色").font = ds.LABEL_FONT
-        ws_meta.cell(row=12, column=1).fill = ds.REQUIRED_FILL
-        ws_meta.cell(row=12, column=2, value="业务关键字，新增必填，编辑时只读").font = ds.VALUE_FONT
-        
-        ws_meta.cell(row=13, column=1, value="业务关键字").font = ds.LABEL_FONT
-        ws_meta.cell(row=13, column=2, value="编码字段为业务关键字，用于唯一标识记录。新增时必填，编辑时只读。").font = ds.VALUE_FONT
-        ws_meta.cell(row=14, column=1, value="父对象编码").font = ds.LABEL_FONT
-        ws_meta.cell(row=14, column=2, value="用于关联父对象。新增时必填，编辑时可切换到其他父对象。").font = ds.VALUE_FONT
-        ws_meta.cell(row=15, column=1, value="删除操作").font = ds.LABEL_FONT
-        ws_meta.cell(row=15, column=2, value="设置操作模式为'delete'，系统将根据业务键查找并删除记录").font = ds.VALUE_FONT
-        ws_meta.cell(row=16, column=1, value="新增操作").font = ds.LABEL_FONT
-        ws_meta.cell(row=16, column=2, value="在新增行中填写数据，操作模式设为'create'。业务关键字和父对象编码必填。").font = ds.VALUE_FONT
-        ws_meta.cell(row=17, column=1, value="冲突处理策略").font = ds.LABEL_FONT
-        ws_meta.cell(row=17, column=2, value="在导入界面选择：有则更新（存在则更新，不存在则新增）或跳过冲突（存在则跳过）。").font = ds.VALUE_FONT
-        ws_meta.cell(row=18, column=1, value="注意事项").font = ds.LABEL_FONT
-        ws_meta.cell(row=18, column=2, value="请勿修改灰色背景单元格的值，否则导入时会忽略这些字段。级联导出不含子对象Sheet").font = ds.VALUE_FONT
 
-        for row in range(1, 19):
-            for col in range(1, 3):
-                ws_meta.cell(row=row, column=col).border = ds.THIN_BORDER
-        
-        ws_meta.column_dimensions['A'].width = 18
-        ws_meta.column_dimensions['B'].width = 60
-        
+        # [SSOT 2026-06-08] 使用 _write_meta_sheet_operations（从 row 7 开始，cascade 模式）
+        last_row = self._write_meta_sheet_operations(
+            ws_meta, has_cud=True, all_readonly=False, start_row=7,
+            is_cascade=True, has_child_sheets=False,
+        )
+        self._finalize_meta_sheet(ws_meta, last_row)
+
         header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
         header_font = Font(color="FFFFFF", bold=True)
         light_blue_fill = PatternFill(start_color="DDEBF7", end_color="DDEBF7", fill_type="solid")
@@ -1239,32 +1131,7 @@ class ImportExportService:
             
             headers, editable_columns, readonly_columns, parent_key_columns, create_required_columns, header_comments, header_to_field, enum_value_maps, bo_display_fields = self._get_export_headers_with_editable(obj, options)
             
-            bo_display_maps = {}
-            if bo_display_fields and sheet_data:
-                for field_id, vh_info in bo_display_fields.items():
-                    record_ids = list(set(
-                        r.get(field_id) for r in sheet_data
-                        if r.get(field_id) is not None
-                    ))
-                    if record_ids:
-                        from meta import get_meta_object
-                        from meta.core.bo_engine import BOEngine
-                        try:
-                            target_meta = get_meta_object(vh_info['target_bo'])
-                            if target_meta:
-                                engine = BOEngine(target_meta)
-                                display_map = {}
-                                for rid in record_ids:
-                                    try:
-                                        rec = engine.get_record(rid)
-                                        if rec:
-                                            display_map[rid] = str(rec.get(vh_info['display_field'], ''))
-                                    except Exception:
-                                        pass
-                                if display_map:
-                                    bo_display_maps[field_id] = display_map
-                        except Exception:
-                            pass
+            bo_display_maps = self._build_bo_display_maps(sheet_data, bo_display_fields)
             
             if include_operation_mode:
                 headers.insert(0, "操作模式")
@@ -1280,17 +1147,7 @@ class ImportExportService:
                     cell.comment = Comment(_sanitize_xml_string(header_comments[col_idx - 1]), "系统")
             
             if include_operation_mode:
-                operation_dv = DataValidation(
-                    type="list",
-                    formula1='"create - 新增,update - 更新,delete - 删除"',
-                    allow_blank=True,
-                    showDropDown=False
-                )
-                operation_dv.error = "请从下拉列表中选择：create - 新增/update - 更新/delete - 删除"
-                operation_dv.errorTitle = "无效输入"
-                operation_dv.prompt = "选择操作模式"
-                operation_dv.promptTitle = "操作模式"
-                ws.add_data_validation(operation_dv)
+                operation_dv = self._create_operation_mode_dv(ws, with_prompt=True, verbose_error=True)
             
             row_idx = 2
             for record in (sheet_data or []):
@@ -1323,26 +1180,26 @@ class ImportExportService:
                     cell.border = ds.THIN_BORDER
                     
                     original_col_idx = col_idx - 2 if include_operation_mode else col_idx - 1
-                    
+
                     if original_col_idx in parent_key_columns:
-                        cell.fill = ds.BUSINESS_KEY_FILL
+                        self._apply_classification_fill(cell, 'parent_key')
                         if protect_sheet:
                             cell.protection = Protection(locked=False)
                     elif original_col_idx in create_required_columns:
-                        cell.fill = ds.REQUIRED_FILL
+                        self._apply_classification_fill(cell, 'create_required')
                         if protect_sheet:
                             cell.protection = Protection(locked=False)
                     elif original_col_idx in readonly_columns:
-                        cell.fill = ds.READONLY_FILL
+                        self._apply_classification_fill(cell, 'readonly')
                         if protect_sheet:
                             cell.protection = Protection(locked=True)
                     else:
                         if protect_sheet:
                             cell.protection = Protection(locked=False)
-                    
+
                     col_idx += 1
                 row_idx += 1
-            
+
             export_enum_validations = {}
             for col_idx, header in enumerate(headers[1:] if include_operation_mode else headers, 2 if include_operation_mode else 1):
                 field_id = header_to_field.get(header, header)
@@ -1374,7 +1231,7 @@ class ImportExportService:
                 
                 if include_operation_mode:
                     cell = ws.cell(row=row_idx, column=col_idx, value="create - 新增")
-                    cell.fill = ds.BUSINESS_KEY_FILL
+                    cell.fill = ds.CREATE_NEW_FILL
                     cell.border = ds.THIN_BORDER
                     cell.alignment = Alignment(horizontal="center")
                     if protect_sheet:
@@ -1387,18 +1244,18 @@ class ImportExportService:
                     cell.border = ds.THIN_BORDER
                     
                     original_col_idx = col_idx - 2 if include_operation_mode else col_idx - 1
-                    
+
                     if original_col_idx in parent_key_columns:
-                        cell.fill = ds.BUSINESS_KEY_FILL
+                        self._apply_classification_fill(cell, 'parent_key')
                         cell.comment = Comment(_sanitize_xml_string("新增时必填：请填写父对象的业务键编码"), "System")
                         if protect_sheet:
                             cell.protection = Protection(locked=False)
                     elif original_col_idx in create_required_columns:
-                        cell.fill = ds.REQUIRED_FILL
+                        self._apply_classification_fill(cell, 'create_required')
                         if protect_sheet:
                             cell.protection = Protection(locked=False)
                     elif original_col_idx in readonly_columns:
-                        cell.fill = ds.READONLY_FILL
+                        self._apply_classification_fill(cell, 'readonly')
                         if protect_sheet:
                             cell.protection = Protection(locked=True)
                     else:
@@ -1449,17 +1306,9 @@ class ImportExportService:
         os.makedirs(output_dir, exist_ok=True)
         
         product_name, version_name = self._get_product_version_info(filters)
-        
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        if product_name and version_name:
-            safe_product = "".join(c if c.isalnum() or c in '_-' else '_' for c in product_name)
-            safe_version = "".join(c if c.isalnum() or c in '_-' else '_' for c in version_name)
-            file_name = "{0}_{1}_{2}.xlsx".format(safe_product, safe_version, timestamp)
-        elif version_name:
-            safe_version = "".join(c if c.isalnum() or c in '_-' else '_' for c in version_name)
-            file_name = "{0}_{1}.xlsx".format(safe_version, timestamp)
-        else:
-            file_name = "{0}.xlsx".format(timestamp)
+        file_name = self._build_export_filename([product_name, version_name], timestamp)
         file_path = os.path.join(output_dir, file_name)
         
         wb.save(file_path)
@@ -1469,7 +1318,8 @@ class ImportExportService:
             success=True,
             file_path=file_path,
             sheets=sheets_info,
-            total_rows=total_rows
+            total_rows=total_rows,
+            trace_id=self._get_current_trace_id(),
         )
 
     def _get_export_headers_with_editable(self, meta_obj: MetaObject, options: Optional[Dict[str, Any]]) -> tuple:
@@ -1490,9 +1340,7 @@ class ImportExportService:
         - create_required_columns: 新增必填列索引（business_key、parent_key等）
         """
         options = options or {}
-        include_hierarchy_ids = options.get("include_hierarchy_ids", True)
         include_hierarchy_path = options.get("include_hierarchy_path", True)
-        include_hierarchy_names = options.get("include_hierarchy_names", True)
 
         hierarchy_fields = self._get_hierarchy_field_names(meta_obj)
 
@@ -1520,8 +1368,6 @@ class ImportExportService:
         
         hierarchy_fields = self._get_hierarchy_field_names(meta_obj)
         
-        import logging
-        logger = logging.getLogger(__name__)
         logger.info(f"[Export] 对象类型: {meta_obj.id}, 总字段数: {len(all_fields)}")
         logger.info(f"[Export] hierarchy_fields: {hierarchy_fields}")
         logger.info(f"[Export] 因默认排除而过滤的字段: {[f.id for f in excluded_by_default]}")
@@ -1553,11 +1399,7 @@ class ImportExportService:
                     if vh_enum_map:
                         enum_value_maps[f.id] = vh_enum_map
 
-                vh = getattr(f, 'value_help', None)
-                if not vh:
-                    ui_vh = getattr(f, 'ui', None)
-                    if ui_vh:
-                        vh = getattr(ui_vh, 'value_help', None)
+                vh = self._get_value_help(f)
                 if vh:
                     vh_source = getattr(vh, 'source', None)
                     if vh_source and getattr(vh_source, 'type', None) == 'bo':
@@ -1605,54 +1447,167 @@ class ImportExportService:
             readonly_columns.append(col_idx)
             col_idx += 1
 
-        is_first_parent = True
-        current_obj = meta_obj
-        while current_obj and current_obj.parent_object:
-            parent_obj = registry.get(current_obj.parent_object)
-            if parent_obj:
-                # 找到对应 parent_object 的 parent_key 字段
-                # 例如：parent_object 是 domain，则找 domain_id 字段
-                parent_key_field_id = "{0}_id".format(current_obj.parent_object)
-                parent_key_field = current_obj.get_field(parent_key_field_id)
-                
-                # 检查这个 parent_key 字段是否是 context_field
-                is_context_field = parent_key_field and getattr(parent_key_field.semantics, 'context_field', False)
-                
-                if is_context_field:
-                    # 遇到 context_field，停止向上追溯
-                    # 这是上下文边界，之外的数据通过导入界面选择
-                    break
-                
-                if include_hierarchy_ids:
-                    header_name = "{0}编码".format(parent_obj.name)
-                    headers.append(header_name)
-                    header_to_field[header_name] = header_name
-                    
-                    if is_first_parent and parent_key_field:
-                        if getattr(parent_key_field.semantics, 'readonly_always', False):
-                            comment_msg = "父对象编码，只读"
-                            readonly_columns.append(col_idx)
-                        else:
-                            comment_msg = "【父对象编码】新增必填；编辑时可切换到其他父对象"
-                            parent_key_columns.append(col_idx)
-                    else:
-                        comment_msg = "父对象编码，只读"
-                        readonly_columns.append(col_idx)
-                    header_comments.append(comment_msg)
-                    col_idx += 1
-                if include_hierarchy_names:
-                    header_name = "{0}名称".format(parent_obj.name)
-                    headers.append(header_name)
-                    header_to_field[header_name] = header_name
-                    header_comments.append("父对象名称，只读")
+        # [FIX 2026-06-08] 重构：使用 _build_parent_fk_columns SSOT 替代原本的 inline 循环
+        # 行为保持完全一致：
+        #   - 第一个非 context_field 父对象的编码列 → parent_key（可填写）
+        #   - 其他编码列 + 所有名称列 → readonly
+        parent_fk_columns = self._build_parent_fk_columns(meta_obj)
+        for col_def in parent_fk_columns:
+            header_name = col_def['header_name']
+            headers.append(header_name)
+            header_to_field[header_name] = header_name
+
+            if col_def['kind'] == '编码':
+                if col_def['classification'] == 'parent_key':
+                    comment_msg = "【父对象编码】新增必填；编辑时可切换到其他父对象"
+                    parent_key_columns.append(col_idx)
+                else:
+                    comment_msg = "父对象编码，只读"
                     readonly_columns.append(col_idx)
-                    col_idx += 1
-                is_first_parent = False
-                current_obj = parent_obj
-            else:
-                break
+            else:  # 名称
+                comment_msg = "父对象名称，只读"
+                readonly_columns.append(col_idx)
+
+            header_comments.append(comment_msg)
+            col_idx += 1
 
         return headers, editable_columns, readonly_columns, parent_key_columns, create_required_columns, header_comments, header_to_field, enum_value_maps, bo_display_fields
+
+    def _compute_list_computed_fields_for_export(self, meta_obj, data):
+        """为导出数据计算 list 中配置的 computed 字段（如 child_count）
+
+        [FR-005] 使用 computation_service.collect_computed_columns SSOT，
+        与 query_service._compute_list_computed_fields 统一。
+        """
+        from meta.services.computation_service import computation_service
+
+        computed_cols = computation_service.collect_computed_columns(meta_obj)
+
+        if computed_cols:
+            computation_service.compute_batch(self.data_source, meta_obj.id, data, computed_cols)
+
+    # ============================================================
+    # [FIX 2026-06-08] Parent FK 列生成 SSOT (Single Source of Truth)
+    # ============================================================
+    # 背景：之前主导出（_get_export_headers_with_editable）和子对象 sheet
+    # （_write_child_sheet）各自维护 parent FK 列生成逻辑，导致：
+    #   1. 子对象 sheet 之前完全缺失该逻辑
+    #   2. 两边代码独立演进，行为可能漂移
+    # 重构：抽离到 _build_parent_fk_columns + _query_parent_fk_value_maps
+    # 两个 helper，所有调用方统一使用。
+    # ============================================================
+
+    def _build_parent_fk_columns(self, meta_obj):
+        """统一的 parent FK 列定义（SSOT）
+
+        沿 meta_obj.parent_object 链向上追溯，生成 (编码, 名称) 列定义。
+
+        [FR-009] 使用 _iter_parent_chain 替代 inline while 循环。
+
+        返回 list[dict]，每个 dict 包含：
+        - parent_obj: 父对象的 MetaObject
+        - parent_fk_field_id: 例如 "product_id" / "domain_id"（用于从子数据取 parent_id）
+        - kind: '编码' | '名称'
+        - lookup_field: 'code' | 'name'（用于从父表取显示值）
+        - header_name: 如 "产品线编码" / "产品线名称"
+        - classification: 'parent_key'（最近一级可填写的 FK）| 'readonly'
+        - is_first_parent: True 表示最近的父对象
+        - readonly_always: 父对象的 FK 字段是否声明 readonly_always
+
+        设计要点：
+        - 第一个非 context_field 的父对象编码列标记为 'parent_key'（可填写），
+          其他编码列 + 所有名称列标记为 'readonly'
+        - 遇到 context_field 字段时停止向上追溯（上下文边界，之外通过导入界面选择）
+        """
+        columns = []
+        is_first_parent = True
+
+        for current_obj, parent_obj, parent_fk_field_id, is_context_boundary in \
+                self._iter_parent_chain(meta_obj, stop_at_context_field=True):
+            if is_context_boundary:
+                break
+
+            parent_key_field = current_obj.get_field(parent_fk_field_id)
+            readonly_always = parent_key_field and getattr(
+                parent_key_field.semantics, 'readonly_always', False
+            )
+
+            # 编码列：可填写（parent_key）或只读（readonly）
+            code_classification = (
+                'parent_key' if (is_first_parent and parent_key_field and not readonly_always)
+                else 'readonly'
+            )
+            columns.append({
+                'parent_obj': parent_obj,
+                'parent_fk_field_id': parent_fk_field_id,
+                'kind': '编码',
+                'lookup_field': 'code',
+                'header_name': "{0}编码".format(parent_obj.name),
+                'classification': code_classification,
+                'is_first_parent': is_first_parent,
+                'readonly_always': readonly_always,
+            })
+            # 名称列：始终只读
+            columns.append({
+                'parent_obj': parent_obj,
+                'parent_fk_field_id': parent_fk_field_id,
+                'kind': '名称',
+                'lookup_field': 'name',
+                'header_name': "{0}名称".format(parent_obj.name),
+                'classification': 'readonly',
+                'is_first_parent': is_first_parent,
+                'readonly_always': True,
+            })
+
+            is_first_parent = False
+
+        return columns
+
+    def _query_parent_fk_value_maps(self, data, parent_fk_columns):
+        """根据 parent_fk_columns 预查询父对象编码/名称映射
+
+        用法：先用 _build_parent_fk_columns(meta_obj) 获取列定义，
+        然后用本方法批量预查询所有需要的父对象 code/name 映射。
+
+        Args:
+            data: 子对象数据列表
+            parent_fk_columns: _build_parent_fk_columns 返回的列定义列表
+
+        Returns:
+            dict[列索引 -> dict[parent_id -> value]]
+            例如：{0: {1: 'TEST15', 2: 'TEST14'}, 1: {1: '产品A', 2: '产品B'}}
+            列索引 0 对应"产品线编码"，列索引 1 对应"产品线名称"
+        """
+        value_maps = {}
+        for col_idx, col_def in enumerate(parent_fk_columns):
+            parent_obj = col_def['parent_obj']
+            parent_fk_field_id = col_def['parent_fk_field_id']
+            lookup_field = col_def['lookup_field']
+
+            # 收集所有出现的 parent ID
+            parent_ids = list({
+                r.get(parent_fk_field_id)
+                for r in data
+                if r.get(parent_fk_field_id) is not None
+            })
+            if not parent_ids:
+                value_maps[col_idx] = {}
+                continue
+
+            try:
+                placeholders = ','.join(['?'] * len(parent_ids))
+                sql = "SELECT id, {0} FROM {1} WHERE id IN ({2})".format(
+                    lookup_field, parent_obj.table_name, placeholders
+                )
+                cursor = self.data_source.execute(sql, tuple(parent_ids))
+                value_maps[col_idx] = {row[0]: row[1] for row in cursor.fetchall()}
+            except Exception as e:
+                logger.warning(
+                    f"[Export] 查询父对象 {parent_obj.id}.{lookup_field} 失败: {e}"
+                )
+                value_maps[col_idx] = {}
+
+        return value_maps
 
     def _get_cascade_object_types(self, object_type: str) -> List[str]:
         """获取级联导出的对象类型列表
@@ -1711,40 +1666,11 @@ class ImportExportService:
     def _sort_by_hierarchy(self, object_types: List[str]) -> List[str]:
         """按层级排序（父对象在前，子对象在后）
 
-        排序规则：
-        1. parent_object 关系：子对象依赖父对象（如 sub_domain → domain）
-        2. child_sections 关系：子对象依赖其所有父对象
-           （如 annotation → [domain, sub_domain, service_module, business_object, relationship]）
+        [FR-008] 委托到 HierarchyConfigLoader.sort_by_hierarchy，
+        统一 4 个导出/导入入口的排序逻辑。
         """
-        graph = {ot: [] for ot in object_types}
-        
-        for ot in object_types:
-            obj = registry.get(ot)
-            if obj and obj.parent_object and obj.parent_object in object_types:
-                graph[ot] = [obj.parent_object]
-        
-        child_parent_map = self._collect_child_object_types(object_types)
-        for child_type, parent_list in child_parent_map.items():
-            if child_type in graph:
-                for pt in parent_list:
-                    if pt in object_types and pt not in graph[child_type]:
-                        graph[child_type].append(pt)
-        
-        result = []
-        visited = set()
-        
-        def visit(node):
-            if node in visited:
-                return
-            visited.add(node)
-            for parent in graph.get(node, []):
-                visit(parent)
-            result.append(node)
-        
-        for ot in object_types:
-            visit(ot)
-        
-        return result
+        from meta.services.cascade_service import HierarchyConfigLoader
+        return HierarchyConfigLoader.sort_by_hierarchy(object_types)
 
     def _query_with_hierarchy(self, object_type: str, filters: Optional[Dict[str, Any]],
                               options: Optional[Dict[str, Any]], sort_by: str = None, 
@@ -1869,12 +1795,23 @@ class ImportExportService:
             return []
 
         placeholders = ','.join(['?'] * len(level_ids))
+        # [FIX FR-001] 软删除过滤 + 默认排序
+        soft_delete_filter = ""
+        meta_obj = registry.get(object_type)
+        if meta_obj and any(f.id == 'is_deleted' for f in meta_obj.fields):
+            soft_delete_filter = " AND (r.is_deleted IS NULL OR r.is_deleted = 0)"
+
+        # [FIX FR-002] 数据权限过滤
+        perm_filter_sql, perm_params = self._build_permission_filter(object_type, 'r')
+
         sql = f"""
             SELECT r.* FROM {table_name} r
             WHERE r.version_id = ?
             AND (r.{source_col} IN ({placeholders}) OR r.{target_col} IN ({placeholders}))
+            {soft_delete_filter}{perm_filter_sql}
+            ORDER BY r.id ASC
         """
-        params = [version_id, *level_ids, *level_ids]
+        params = [version_id, *level_ids, *level_ids] + perm_params
 
         if relation_codes:
             code_placeholders = ','.join(['?'] * len(relation_codes))
@@ -1934,6 +1871,15 @@ class ImportExportService:
         """按 version_id 查询 association 数据（无层级过滤时使用）"""
         from meta.core.enrichment_engine import enrich_records
 
+        # [FIX FR-001] 软删除过滤 + 默认排序
+        soft_delete_filter = ""
+        meta_obj = registry.get(object_type)
+        if meta_obj and any(f.id == 'is_deleted' for f in meta_obj.fields):
+            soft_delete_filter = " AND (is_deleted IS NULL OR is_deleted = 0)"
+
+        # [FIX FR-002] 数据权限过滤
+        perm_filter_sql, perm_params = self._build_permission_filter(object_type)
+
         sql = f"SELECT * FROM {table_name} WHERE version_id = ?"
         params = [version_id]
 
@@ -1941,6 +1887,9 @@ class ImportExportService:
             code_placeholders = ','.join(['?'] * len(relation_codes))
             sql += f" AND relation_code IN ({code_placeholders})"
             params.extend(relation_codes)
+
+        sql += soft_delete_filter + perm_filter_sql + " ORDER BY id ASC"
+        params.extend(perm_params)
 
         cursor = self.data_source.execute(sql, tuple(params))
         columns = [desc[0] for desc in cursor.description]
@@ -2033,8 +1982,6 @@ class ImportExportService:
     def _inject_hierarchy_info(self, data: List[Dict[str, Any]], object_type: str, 
                                filters: Optional[Dict[str, Any]], 
                                options: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-        import logging
-        logger = logging.getLogger(__name__)
         
         meta_obj = registry.get(object_type)
         
@@ -2142,8 +2089,7 @@ class ImportExportService:
             if row:
                 return (row[0] or '', row[1] or '')
         except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(f"Failed to get product/version codes: {e}")
+            logger.warning(f"Failed to get product/version codes: {e}")
         
         return ('', '')
 
@@ -2347,16 +2293,7 @@ class ImportExportService:
             ws.column_dimensions['A'].width = 18
             cell.comment = Comment("新增/更新/删除/跳过，留空默认为更新", "系统")
 
-            operation_dv = DataValidation(
-                type="list",
-                formula1='"create - 新增,update - 更新,delete - 删除"',
-                allow_blank=True
-            )
-            operation_dv.error = "请从下拉列表中选择：create - 新增/update - 更新/delete - 删除"
-            operation_dv.errorTitle = "无效输入"
-            operation_dv.prompt = "选择操作模式"
-            operation_dv.promptTitle = "操作模式"
-            ws.add_data_validation(operation_dv)
+            operation_dv = self._create_operation_mode_dv(ws, with_prompt=True, verbose_error=True)
 
         field_ids = [f.id for f in export_fields]
         field_classifications = {
@@ -2364,6 +2301,12 @@ class ImportExportService:
         }
         enum_validations = {}
         value_help_map = {}
+
+        # [FIX 2026-06-08] 为子对象添加 parent FK 列（SSOT）
+        # 使用 _build_parent_fk_columns + _query_parent_fk_value_maps，
+        # 与 _get_export_headers_with_editable 保持完全一致的列定义
+        parent_fk_columns = self._build_parent_fk_columns(child_meta)
+        parent_fk_value_maps = self._query_parent_fk_value_maps(data, parent_fk_columns) if data else {}
 
         for col_idx, f in enumerate(export_fields):
             actual_col = col_idx + 1 + col_offset
@@ -2411,6 +2354,23 @@ class ImportExportService:
                 enum_validations[actual_col] = dv
                 value_help_map[f.id] = enum_dv_values
 
+        # [FIX 2026-06-08] 添加 parent FK 列（编码 + 名称）的表头
+        for pfk_idx, col_def in enumerate(parent_fk_columns):
+            actual_col = len(export_fields) + 1 + pfk_idx + col_offset
+            cell = ws.cell(row=1, column=actual_col, value=col_def['header_name'])
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            cell.border = ds.THIN_BORDER
+            # 与 _get_export_headers_with_editable 的 comment 保持一致
+            if col_def['kind'] == '编码':
+                if col_def['classification'] == 'parent_key':
+                    cell.comment = Comment("【父对象编码】新增必填；编辑时可切换到其他父对象", "系统")
+                else:
+                    cell.comment = Comment("父对象编码，只读", "系统")
+            else:
+                cell.comment = Comment("父对象名称，只读", "系统")
+
         for row_idx, record in enumerate(data, 2):
             if include_operation_mode:
                 cell = ws.cell(row=row_idx, column=1, value="update - 更新")
@@ -2422,27 +2382,46 @@ class ImportExportService:
             for col_idx, field_id in enumerate(field_ids):
                 actual_col = col_idx + 1 + col_offset
                 value = record.get(field_id, "")
+
+                # Resolve enum label for display
+                field_obj = child_meta.get_field(field_id)
+                if field_obj and field_obj.enum_values:
+                    enum_map = {ev.get('value'): ev.get('label', ev.get('value')) for ev in field_obj.enum_values}
+                    if value in enum_map:
+                        value = f"{value} - {enum_map[value]}"
+
                 cell = ws.cell(row=row_idx, column=actual_col, value=_safe_cell_value(value))
                 cell.border = ds.THIN_BORDER
 
                 classification = field_classifications[field_id]
-                if classification == 'parent_key':
-                    cell.fill = ds.BUSINESS_KEY_FILL
-                elif classification == 'create_required':
-                    cell.fill = ds.REQUIRED_FILL
-                elif classification == 'readonly':
-                    cell.fill = ds.READONLY_FILL
+                self._apply_classification_fill(cell, classification)
                 if actual_col in enum_validations:
                     enum_validations[actual_col].add(cell)
 
+            # [FIX 2026-06-08] 填充 parent FK 列（SSOT）
+            for pfk_idx, col_def in enumerate(parent_fk_columns):
+                actual_col = len(export_fields) + 1 + pfk_idx + col_offset
+                parent_fk_field_id = col_def['parent_fk_field_id']
+                parent_id = record.get(parent_fk_field_id)
+                value_map = parent_fk_value_maps.get(pfk_idx, {})
+                value = value_map.get(parent_id, "")
+                cell = ws.cell(row=row_idx, column=actual_col, value=_safe_cell_value(value))
+                cell.border = ds.THIN_BORDER
+                # 与主导出保持一致：parent_key 用 BUSINESS_KEY_FILL（浅绿色），readonly 用 READONLY_FILL（灰色）
+                if col_def['classification'] == 'parent_key':
+                    cell.fill = ds.BUSINESS_KEY_FILL
+                else:
+                    cell.fill = ds.READONLY_FILL
+
         empty_rows_count = 0
         if include_operation_mode:
-            empty_rows_count = options.get("empty_rows_for_new", 3)
+            # [FIX 2026-06-08] 与主导出（5）保持一致，统一空白新增行默认值
+            empty_rows_count = options.get("empty_rows_for_new", 5)
             for empty_row in range(empty_rows_count):
                 row_idx = len(data) + 2 + empty_row
 
                 cell = ws.cell(row=row_idx, column=1, value="create - 新增")
-                cell.fill = ds.BUSINESS_KEY_FILL
+                cell.fill = ds.CREATE_NEW_FILL
                 cell.border = ds.THIN_BORDER
                 cell.alignment = Alignment(horizontal="center")
                 operation_dv.add(cell)
@@ -2453,13 +2432,9 @@ class ImportExportService:
                     cell.border = ds.THIN_BORDER
 
                     classification = field_classifications[field_id]
+                    self._apply_classification_fill(cell, classification)
                     if classification == 'parent_key':
-                        cell.fill = ds.BUSINESS_KEY_FILL
                         cell.comment = Comment("新增时必填：请填写父对象的业务键编码", "System")
-                    elif classification == 'create_required':
-                        cell.fill = ds.REQUIRED_FILL
-                    elif classification == 'readonly':
-                        cell.fill = ds.READONLY_FILL
                     if actual_col in enum_validations:
                         enum_validations[actual_col].add(cell)
 
@@ -2484,6 +2459,354 @@ class ImportExportService:
             "row_count": len(data) + (empty_rows_count if include_operation_mode else 0)
         })
 
+    def _apply_classification_fill(self, cell, classification: str) -> None:
+        """统一根据 classification 设置单元格底色（SSOT）
+
+        7 处数据写入块原本各自 inline 同样的 if-elif 链设置底色：
+        - 主导出（4 处）：用列索引 in (parent_key_columns / create_required_columns / readonly_columns)
+        - _write_child_sheet（2 处）：用 _classify_field() 返回的 classification 字符串
+
+        本 helper 统一底色规则：
+        - 'parent_key' → BUSINESS_KEY_FILL（浅绿，父对象业务键）
+        - 'create_required' → REQUIRED_FILL（浅黄，新增必填）
+        - 'readonly' → READONLY_FILL（灰色，只读）
+        - 'editable' 或其他 → 不动（保持默认）
+
+        注意：Protection（locked/unlocked）和 comment 不在本 helper 范围内，
+        仍由调用方根据 context 决定（不同出口对 protect_sheet 行为不一致）。
+        """
+        if classification == 'parent_key':
+            cell.fill = ExcelDesignSystem.BUSINESS_KEY_FILL
+        elif classification == 'create_required':
+            cell.fill = ExcelDesignSystem.REQUIRED_FILL
+        elif classification == 'readonly':
+            cell.fill = ExcelDesignSystem.READONLY_FILL
+
+    def _build_bo_display_maps(self, sheet_data: List[Dict[str, Any]],
+                                bo_display_fields: Dict[str, Dict[str, str]]) -> Dict[str, Dict[Any, str]]:
+        """统一批量构建 BO 显示名映射（SSOT）
+
+        2 处原 inline 重复（export_selected_types L786, export_cascade L1148）：
+        遍历 bo_display_fields，对每个 field_id 收集 record_ids 后
+        调 BOEngine.get_record 查 target_bo 的 display_field。
+
+        Args:
+            sheet_data: 当前 sheet 的数据
+            bo_display_fields: {field_id: {target_bo, display_field, value_field}}
+
+        Returns:
+            {field_id: {record_id: display_string}} 字典
+        """
+        bo_display_maps = {}
+        if not bo_display_fields or not sheet_data:
+            return bo_display_maps
+        # [FR-010] 批量 SQL 查询替代逐条 BOEngine.get_record（N+1 → 1 次 SQL）
+        from meta import get_meta_object
+        for field_id, vh_info in bo_display_fields.items():
+            record_ids = list(set(
+                r.get(field_id) for r in sheet_data
+                if r.get(field_id) is not None
+            ))
+            if not record_ids:
+                continue
+            try:
+                target_meta = get_meta_object(vh_info['target_bo'])
+                if not target_meta:
+                    continue
+                target_table = target_meta.table_name or vh_info['target_bo'] + 's'
+                display_field = vh_info['display_field']
+
+                placeholders = ','.join(['?'] * len(record_ids))
+                sql = f"SELECT id, {display_field} FROM {target_table} WHERE id IN ({placeholders})"
+                cursor = self.data_source.execute(sql, list(record_ids))
+
+                display_map = {}
+                for row in cursor.fetchall():
+                    display_map[row[0]] = str(row[1]) if row[1] else ''
+                if display_map:
+                    bo_display_maps[field_id] = display_map
+            except Exception:
+                # 整个 field 失败不影响其他 field
+                continue
+        return bo_display_maps
+
+    def _build_export_filename(self, prefix_parts: List[str], timestamp: Optional[str] = None) -> str:
+        """统一生成导出文件名（SSOT）
+
+        3 处原 inline 重复（export_to_excel L278 / export_selected_types L1033 /
+        export_cascade L1360）漂移已开始（不同地方转义规则可能不一致）。
+        本 helper 统一规则。
+
+        Args:
+            prefix_parts: 文件名前缀部分（产品名、版本名等），按顺序用 _ 连接
+            timestamp: 时间戳字符串（默认用当前时间 YYYYMMDD_HHMMSS）
+
+        Returns:
+            文件名字符串（不含路径），如 "TEST15_V1_20260608_230000.xlsx"
+        """
+        if timestamp is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # 安全字符：仅保留字母数字 + _ -
+        safe_parts = [
+            "".join(c if c.isalnum() or c in '_-' else '_' for c in part)
+            for part in prefix_parts
+            if part  # 跳过空值
+        ]
+        if safe_parts:
+            return "{0}_{1}.xlsx".format("_".join(safe_parts), timestamp)
+        return "{0}.xlsx".format(timestamp)
+
+    def _get_value_help(self, meta_field):
+        """统一获取字段的 value_help 配置（SSOT）
+
+        [FR-007] 委托到 meta.core.value_help_accessor.get_value_help，
+        与 manage_service / EnrichmentEngine 统一。
+        """
+        from meta.core.value_help_accessor import get_value_help
+        return get_value_help(meta_field)
+
+    def _write_meta_sheet_header(self, ws_meta, title: str, time_str: str,
+                                  included_names: List[str]) -> None:
+        """统一写入说明 sheet 头部（标题 + 时间 + 包含对象）
+
+        SSOT: 3 处 export 入口（export_template / export_selected_types /
+        export_cascade）原本各自 inline 同样的 header 写入。
+        """
+        ws_meta.cell(row=1, column=1, value=title).font = Font(
+            bold=True, size=14, color=ExcelDesignSystem.PRIMARY_COLOR
+        )
+        ws_meta.row_dimensions[1].height = 24
+        ws_meta.cell(row=2, column=1, value="生成时间").font = ExcelDesignSystem.LABEL_FONT
+        ws_meta.cell(row=2, column=2, value=time_str).font = ExcelDesignSystem.VALUE_FONT
+        ws_meta.cell(row=3, column=1, value="包含对象").font = ExcelDesignSystem.LABEL_FONT
+        ws_meta.cell(row=3, column=2, value=", ".join(included_names)).font = ExcelDesignSystem.VALUE_FONT
+
+    def _write_meta_sheet_operations(self, ws_meta, has_cud: bool,
+                                     all_readonly: bool, start_row: int,
+                                     is_cascade: bool = False,
+                                     has_child_sheets: bool = False) -> int:
+        """统一写入操作说明 section（SSOT）
+
+        3 种模式：
+        - has_cud=True: 完整操作说明（操作模式、颜色示例、业务关键字、父对象编码、删除/新增/冲突/注意）
+        - all_readonly=True: 只读说明（导出说明 + 使用说明）
+        - 混合（部分对象支持 CUD）: 简短注意
+
+        Args:
+            ws_meta: openpyxl Worksheet
+            has_cud: 是否有任何对象支持 CUD
+            all_readonly: 是否所有对象都只读
+            start_row: 起始行
+            is_cascade: 是否级联导出（影响"注意事项"文案）
+            has_child_sheets: 是否包含子对象 sheet（selected_types 模式）
+
+        Returns:
+            最后一个写入的 row 编号（用于 caller 决定 border 范围）
+        """
+        ds = ExcelDesignSystem
+        if has_cud:
+            row = start_row
+            ws_meta.cell(row=row, column=1, value="操作说明").font = ds.SECTION_FONT
+            ws_meta.cell(row=row, column=1).fill = ds.SECTION_FILL
+            row += 1
+
+            # [FIX 2026-06-08] 操作模式留空默认 create（与 C-3 bug 修复一致）
+            ws_meta.cell(row=row, column=1, value="操作模式").font = ds.LABEL_FONT
+            ws_meta.cell(row=row, column=2, value="create - 新增/update - 更新/delete - 删除，留空默认为 create").font = ds.VALUE_FONT
+            row += 1
+
+            ws_meta.cell(row=row, column=1, value="单元格颜色").font = ds.LABEL_FONT
+            ws_meta.cell(row=row, column=2, value="不同颜色背景表示不同的字段控制：").font = ds.VALUE_FONT
+            row += 1
+
+            # 颜色示例
+            color_examples = [
+                ("  灰色", ds.READONLY_FILL, "只读字段，不可编辑"),
+                ("  浅绿色", ds.BUSINESS_KEY_FILL, "父对象编码，新增必填，编辑时可切换"),
+                ("  浅黄色", ds.REQUIRED_FILL, "业务关键字，新增必填，编辑时只读"),
+                ("  浅蓝色", ds.CREATE_NEW_FILL, "新增操作行，用于添加新数据"),
+            ]
+            for label, fill, desc in color_examples:
+                ws_meta.cell(row=row, column=1, value=label).font = ds.LABEL_FONT
+                ws_meta.cell(row=row, column=1).fill = fill
+                ws_meta.cell(row=row, column=2, value=desc).font = ds.VALUE_FONT
+                row += 1
+
+            # 业务说明
+            explanations = [
+                ("业务关键字", "编码字段为业务关键字，用于唯一标识记录。新增时必填，编辑时只读。"),
+                ("父对象编码", "用于关联父对象。新增时必填，编辑时可切换到其他父对象。"),
+                ("删除操作", "设置操作模式为'delete'，系统将根据业务键查找并删除记录"),
+                ("新增操作", "在新增行中填写数据，操作模式设为'create'。业务关键字和父对象编码必填。"),
+                ("冲突处理策略", "在导入界面选择：有则更新（存在则更新，不存在则新增）或跳过冲突（存在则跳过）。"),
+            ]
+            for label, desc in explanations:
+                ws_meta.cell(row=row, column=1, value=label).font = ds.LABEL_FONT
+                ws_meta.cell(row=row, column=2, value=desc).font = ds.VALUE_FONT
+                row += 1
+
+            # 子对象 sheet 提示（仅 selected_types 模式）
+            if has_child_sheets:
+                ws_meta.cell(row=row, column=1, value="子对象Sheet").font = ds.LABEL_FONT
+                ws_meta.cell(row=row, column=2, value="子对象Sheet（如备注信息）支持创建/更新/删除操作，通过操作模式列控制。灰色背景字段为只读字段。").font = ds.VALUE_FONT
+                row += 1
+
+            # 注意事项（cascade 模式特殊文案）
+            if is_cascade:
+                notice = "请勿修改灰色背景单元格的值，否则导入时会忽略这些字段。级联导出不含子对象Sheet"
+            else:
+                notice = "请勿修改灰色背景单元格的值，否则导入时会忽略这些字段"
+            ws_meta.cell(row=row, column=1, value="注意事项").font = ds.LABEL_FONT
+            ws_meta.cell(row=row, column=2, value=notice).font = ds.VALUE_FONT
+            row += 1
+            return row - 1
+        elif all_readonly:
+            row = start_row
+            ws_meta.cell(row=row, column=1, value="说明").font = ds.SECTION_FONT
+            ws_meta.cell(row=row, column=1).fill = ds.SECTION_FILL
+            row += 1
+            ws_meta.cell(row=row, column=1, value="导出说明").font = ds.LABEL_FONT
+            ws_meta.cell(row=row, column=2, value="当前导出的对象为只读数据，不支持导入修改。").font = ds.VALUE_FONT
+            row += 1
+            ws_meta.cell(row=row, column=1, value="使用说明").font = ds.LABEL_FONT
+            ws_meta.cell(row=row, column=2, value="此模板仅用于查看和导出数据，如需修改请通过系统界面操作。").font = ds.VALUE_FONT
+            row += 1
+            return row - 1
+        else:
+            row = start_row
+            ws_meta.cell(row=row, column=1, value="说明").font = ds.SECTION_FONT
+            ws_meta.cell(row=row, column=1).fill = ds.SECTION_FILL
+            row += 1
+            ws_meta.cell(row=row, column=1, value="注意").font = ds.LABEL_FONT
+            ws_meta.cell(row=row, column=2, value="部分对象不支持导入修改，仅支持导出。").font = ds.VALUE_FONT
+            row += 1
+            return row - 1
+
+    def _finalize_meta_sheet(self, ws_meta, last_row: int) -> None:
+        """统一收尾说明 sheet：边框 + 列宽"""
+        ds = ExcelDesignSystem
+        for row in range(1, last_row + 1):
+            for col in range(1, 3):
+                ws_meta.cell(row=row, column=col).border = ds.THIN_BORDER
+        ws_meta.column_dimensions['A'].width = 18
+        ws_meta.column_dimensions['B'].width = 60
+
+    def _iter_parent_chain(self, meta_obj, stop_at_context_field: bool = False):
+        """统一遍历 parent_object 链（SSOT）
+
+        4 处原 inline 循环独立实现，漂移已开始：
+        - L1763 _build_parent_fk_columns: 已 SSOT 化但 inline 写法
+        - L3055 _add_hierarchy_fields: 在 context_field 停止
+        - L3245 _get_export_headers: 简单遍历（dead code）
+        - L3512 _get_hierarchy_field_names: 简单遍历
+
+        本 helper 统一链遍历规则，让调用方决定每层做什么。
+
+        Args:
+            meta_obj: 起始对象
+            stop_at_context_field: 是否在 context_field 边界停止
+                - True: _add_hierarchy_fields 模式（context_field 之外的数据通过导入界面选择）
+                - False: 向上完整遍历（_get_hierarchy_field_names 模式）
+
+        Yields:
+            (current_obj, parent_obj, parent_fk_field_id, is_context_boundary)
+            - current_obj: 当前层对象（meta_obj 起，第一层是 meta_obj 本身）
+            - parent_obj: registry 查到的父对象
+            - parent_fk_field_id: 如 'product_id' / 'domain_id'
+            - is_context_boundary: True 表示这是 context_field 边界
+        """
+        current_obj = meta_obj
+        while current_obj and getattr(current_obj, 'parent_object', None):
+            parent_obj = registry.get(current_obj.parent_object)
+            if not parent_obj:
+                break
+            parent_fk_field_id = "{0}_id".format(current_obj.parent_object)
+            parent_key_field = current_obj.get_field(parent_fk_field_id)
+            is_context_field = parent_key_field and getattr(
+                parent_key_field.semantics, 'context_field', False
+            )
+            is_context_boundary = is_context_field and stop_at_context_field
+            yield (current_obj, parent_obj, parent_fk_field_id, is_context_boundary)
+            if is_context_boundary:
+                break
+            current_obj = parent_obj
+
+    def _parse_operation_mode_from_label(self, cell_value: Any) -> Optional[str]:
+        """统一解析"操作模式" cell 值为 operation_mode key（SSOT）
+
+        2 处 import 路径（_validate_sheets L3759, _import_sheet L4357）原本 inline
+        同样的 if-elif 链，漂移已开始（_import_sheet 多 1 个 else 分支、
+        _validate_sheets 多 skip 分支）。本 helper 统一。
+
+        支持的格式:
+        - "create - 新增" / "update - 更新" / "delete - 删除" / "skip - 跳过"（含 label）
+        - "create" / "新增"（纯 key）
+        - 大小写不敏感（"Create" / "CREATE" 都接受）
+        - 中英文 key 都接受（"create" / "新增" 都映射到 "create"）
+
+        Args:
+            cell_value: Excel 单元格值（任意类型，自动转 str）
+
+        Returns:
+            operation_mode key: "create" / "update" / "delete" / "skip"
+            如果无法识别返回 None（调用方决定 fallback）
+        """
+        if cell_value is None:
+            return None
+        s = str(cell_value).strip()
+        if not s:
+            return None
+        # 解析 "Key - Label" 格式
+        if ' - ' in s:
+            key_part = s.split(' - ')[0].strip().lower()
+        else:
+            key_part = s.strip().lower()
+
+        if key_part in ["新增", "插入", "create", "insert"]:
+            return "create"
+        if key_part in ["删除", "delete"]:
+            return "delete"
+        if key_part in ["跳过", "skip"]:
+            return "skip"
+        if key_part in ["更新", "update"]:
+            return "update"
+        return None  # 无法识别
+
+    def _create_operation_mode_dv(self, ws, with_prompt: bool = False,
+                                  verbose_error: bool = False) -> DataValidation:
+        """统一创建"操作模式" DataValidation（SSOT）
+
+        4 处 export 入口（export_template / export_selected_types /
+        export_cascade / _write_child_sheet）原本各自 inline 同样的 DV 创建，
+        漂移已开始（error 文案不一致、prompt 配置不一致）。本 helper 统一。
+
+        Args:
+            ws: openpyxl Worksheet
+            with_prompt: 是否添加 prompt（鼠标悬停提示）
+                - export_cascade / _write_child_sheet 用 True
+                - export_template / export_selected_types 用 False
+            verbose_error: error 文案是否详细（列出 create/update/delete 三个选项）
+                - 默认 False（简略），与历史行为对齐
+
+        Returns:
+            DataValidation（同时已 add_data_validation 到 ws）
+        """
+        operation_dv = DataValidation(
+            type="list",
+            formula1='"create - 新增,update - 更新,delete - 删除"',
+            allow_blank=True,
+        )
+        if verbose_error:
+            operation_dv.error = "请从下拉列表中选择：create - 新增/update - 更新/delete - 删除"
+        else:
+            operation_dv.error = "请从下拉列表中选择操作模式"
+        operation_dv.errorTitle = "无效输入"
+        if with_prompt:
+            operation_dv.prompt = "选择操作模式"
+            operation_dv.promptTitle = "操作模式"
+        ws.add_data_validation(operation_dv)
+        return operation_dv
+
     def _build_enum_dv_values(self, field) -> Optional[str]:
         """构造字段的 DataValidation 下拉值（统一优先：value_help > enum_values > ui.options）
 
@@ -2492,11 +2815,7 @@ class ImportExportService:
         """
         candidates = []
 
-        vh = getattr(field, 'value_help', None)
-        if not vh:
-            ui_vh = getattr(field, 'ui', None)
-            if ui_vh:
-                vh = getattr(ui_vh, 'value_help', None)
+        vh = self._get_value_help(field)
         if vh:
             source = getattr(vh, 'source', None)
             if source and getattr(source, 'type', None) == 'enum':
@@ -2556,26 +2875,91 @@ class ImportExportService:
         version_id = (filters or {}).get('version_id')
         parent_fk_field = child_meta.parent_object + '_id'
 
+        # [FIX FR-001] 软删除过滤：排除已删除的父记录
+        soft_delete_filter = ""
+        if any(f.id == 'is_deleted' for f in parent_meta.fields):
+            soft_delete_filter = " AND (p.is_deleted IS NULL OR p.is_deleted = 0)"
+
+        # [FIX FR-002] 数据权限过滤
+        perm_filter_sql, perm_params = self._build_permission_filter(child_type, 'c')
+
         try:
             if version_id:
                 sql = (f"SELECT c.* FROM {child_table} c "
                        f"INNER JOIN {parent_table} p ON c.{parent_fk_field} = p.id "
-                       f"WHERE p.version_id = ?")
-                params = [version_id]
+                       f"WHERE p.version_id = ?{soft_delete_filter}{perm_filter_sql} "
+                       f"ORDER BY c.id ASC")
+                params = [version_id] + perm_params
             else:
                 sql = (f"SELECT c.* FROM {child_table} c "
-                       f"INNER JOIN {parent_table} p ON c.{parent_fk_field} = p.id")
-                params = []
+                       f"INNER JOIN {parent_table} p ON c.{parent_fk_field} = p.id"
+                       f"{soft_delete_filter}{perm_filter_sql} "
+                       f"ORDER BY c.id ASC")
+                params = perm_params
 
             cursor = self.data_source.execute(sql, tuple(params))
             columns = [desc[0] for desc in cursor.description]
-            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+            data = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+            # [FIX 2026-06-08] 计算 list 中配置的 computed 字段（如 child_count）
+            # _query_direct_fk_child 走直接 SQL 路径，没经过 query_service.search()
+            # 所以需要手动调用 _compute_list_computed_fields
+            if data:
+                try:
+                    self._compute_list_computed_fields_for_export(child_meta, data)
+                except Exception as e:
+                    logger.warning(
+                        f"[Export] 子对象 {child_type} 计算字段失败: {e}"
+                    )
+
+            return data
         except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(
+            logger.warning(
                 f"[Export] 查询子对象 {child_type} 失败: {e}"
             )
             return []
+
+    def _build_permission_filter(self, object_type: str, table_alias: str = '') -> tuple:
+        """[FR-002] 构建数据权限过滤 SQL 片段
+
+        复用 query_service._apply_data_permission 的逻辑，
+        获取当前用户的 allowed_ids 并转为 SQL WHERE 条件。
+
+        Returns:
+            (sql_fragment, params) — sql_fragment 如 " AND c.id IN (?, ?, ?)"
+            无权限限制时返回 ("", [])
+        """
+        try:
+            from meta.services.auth_middleware import get_current_user, is_admin
+            from meta.services.data_permission_service import DataPermissionService
+
+            user = get_current_user()
+            if not user or is_admin(user):
+                return "", []
+
+            user_id = user.get('user_id')
+            if not user_id:
+                return "", []
+
+            perm_service = DataPermissionService(self.data_source)
+            allowed_ids = perm_service.get_allowed_resource_ids(user_id, object_type)
+
+            if allowed_ids is None:
+                # None 表示无权限配置，允许全部
+                return "", []
+
+            if not allowed_ids:
+                # 空列表表示无任何权限，返回不可能匹配的条件
+                prefix = f"{table_alias}." if table_alias else ""
+                return f" AND {prefix}id = -1", []
+
+            prefix = f"{table_alias}." if table_alias else ""
+            placeholders = ','.join(['?'] * len(allowed_ids))
+            return f" AND {prefix}id IN ({placeholders})", list(allowed_ids)
+
+        except Exception as e:
+            logger.warning(f"[FR-002] 数据权限过滤构建失败: {e}")
+            return "", []
 
     def _query_annotations_impl(self, parent_types: List[str],
                                  filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
@@ -2700,45 +3084,26 @@ class ImportExportService:
 
     def _add_hierarchy_fields(self, record: Dict[str, Any], meta_obj: MetaObject, options: Dict[str, Any]):
         """添加层级字段（编码和名称）- 向上追溯所有父对象
-        
+
         注意：遇到 context_field 时停止追溯，这是上下文边界
         """
-        include_hierarchy_ids = options.get("include_hierarchy_ids", True)
-        include_hierarchy_names = options.get("include_hierarchy_names", True)
-
-        current_obj = meta_obj
         current_record = record
-
-        while current_obj and current_obj.parent_object:
-            parent_id = current_record.get(current_obj.parent_object + "_id")
-            parent_obj = registry.get(current_obj.parent_object)
-            
-            # 找到对应 parent_object 的 parent_key 字段
-            parent_key_field_id = "{0}_id".format(current_obj.parent_object)
-            parent_key_field = current_obj.get_field(parent_key_field_id)
-            
-            # 检查这个 parent_key 字段是否是 context_field
-            is_context_field = parent_key_field and getattr(parent_key_field.semantics, 'context_field', False)
-            
-            # 遇到 context_field 时停止追溯
-            if is_context_field:
+        for current_obj, parent_obj, parent_fk_field_id, is_context_boundary in self._iter_parent_chain(
+            meta_obj, stop_at_context_field=True
+        ):
+            # helper 已在 is_context_boundary=True 时停止
+            parent_id = current_record.get(parent_fk_field_id)
+            if not parent_id:
                 break
-            
-            if parent_obj and parent_id:
-                parent_record = self._get_parent_record(current_obj.parent_object, parent_id)
-                if include_hierarchy_ids:
-                    bk_fields = [f for f in parent_obj.fields 
-                                if getattr(f.semantics, 'business_key', False) 
-                                and not getattr(f.semantics, 'virtual', False)]
-                    code = parent_record.get(bk_fields[0].id, "") if bk_fields else parent_record.get("code", "")
-                    record["{0}编码".format(parent_obj.name)] = code
-                if include_hierarchy_names:
-                    name = parent_record.get("name", "")
-                    record["{0}名称".format(parent_obj.name)] = name
-                current_obj = parent_obj
-                current_record = parent_record
-            else:
-                break
+            parent_record = self._get_parent_record(parent_obj.id, parent_id)
+            bk_fields = [f for f in parent_obj.fields
+                        if getattr(f.semantics, 'business_key', False)
+                        and not getattr(f.semantics, 'virtual', False)]
+            code = parent_record.get(bk_fields[0].id, "") if bk_fields else parent_record.get("code", "")
+            record["{0}编码".format(parent_obj.name)] = code
+            name = parent_record.get("name", "")
+            record["{0}名称".format(parent_obj.name)] = name
+            current_record = parent_record
 
     def _add_hierarchy_ids(self, record: Dict[str, Any], meta_obj: MetaObject):
         """添加层级ID列（保留兼容性）"""
@@ -2758,8 +3123,6 @@ class ImportExportService:
         从 hierarchies.yaml 的 association_filter_config 读取 source/target 列名和实体类型，
         动态填充层级名称字段。
         """
-        import logging
-        logger = logging.getLogger(__name__)
 
         from meta.services.config_driven_hierarchy_filter import HierarchyConfigLoader
         filter_config = HierarchyConfigLoader.get_association_filter_config(object_type)
@@ -2869,17 +3232,13 @@ class ImportExportService:
                     result[key] = row[i] if row[i] is not None else ''
                 return result
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
             logger.warning("[Enrichment] Failed to get %s by id %s: %s", object_type, entity_id, e)
         return {}
 
     def _get_export_headers(self, meta_obj: MetaObject, options: Optional[Dict[str, Any]]) -> List[str]:
         """获取导出表头"""
         options = options or {}
-        include_hierarchy_ids = options.get("include_hierarchy_ids", True)
         include_hierarchy_path = options.get("include_hierarchy_path", True)
-        include_hierarchy_names = options.get("include_hierarchy_names", True)
         include_readonly = options.get("include_readonly", True)
 
         hierarchy_fields = self._get_hierarchy_field_names(meta_obj)
@@ -2902,15 +3261,11 @@ class ImportExportService:
         if include_hierarchy_path:
             headers.append("层级路径")
 
-        current_obj = meta_obj
-        while current_obj and current_obj.parent_object:
-            parent_obj = registry.get(current_obj.parent_object)
-            if parent_obj:
-                if include_hierarchy_ids:
-                    headers.append("{0}编码".format(parent_obj.name))
-                if include_hierarchy_names:
-                    headers.append("{0}名称".format(parent_obj.name))
-            current_obj = parent_obj
+        # [FR-009] 使用 _iter_parent_chain 替代 inline while 循环
+        for current_obj, parent_obj, parent_fk_field_id, _ in \
+                self._iter_parent_chain(meta_obj, stop_at_context_field=False):
+            headers.append("{0}编码".format(parent_obj.name))
+            headers.append("{0}名称".format(parent_obj.name))
 
         return headers
 
@@ -3165,26 +3520,23 @@ class ImportExportService:
 
     def _get_hierarchy_field_names(self, meta_obj: MetaObject) -> set:
         """获取与层级关联的字段名集合（排除这些字段避免重复）
-        
+
         只排除父对象的业务键字段，因为它们已通过层级编码/名称列显示。
         当前对象自己的业务键字段（如编码）应该保留。
         """
         hierarchy_fields = set()
 
-        current_obj = meta_obj
-        while current_obj and current_obj.parent_object:
-            parent_obj = registry.get(current_obj.parent_object)
-            if parent_obj:
-                hierarchy_fields.add("{0}_id".format(parent_obj.id))
-                hierarchy_fields.add("{0}_name".format(parent_obj.id))
-                hierarchy_fields.add("{0}ID".format(parent_obj.name))
-                hierarchy_fields.add("{0}名".format(parent_obj.name))
-                hierarchy_fields.add("{0}编码".format(parent_obj.name))
-                hierarchy_fields.add("{0}名称".format(parent_obj.name))
-                hierarchy_fields.add("{0}_id".format(parent_obj.name.lower()))
-                hierarchy_fields.add("{0}_name".format(parent_obj.name.lower()))
-                hierarchy_fields.add(parent_obj.name)
-            current_obj = parent_obj
+        # [SSOT 2026-06-08] 使用 _iter_parent_chain helper
+        for _current_obj, parent_obj, _parent_fk_field_id, _is_context_boundary in self._iter_parent_chain(meta_obj):
+            hierarchy_fields.add("{0}_id".format(parent_obj.id))
+            hierarchy_fields.add("{0}_name".format(parent_obj.id))
+            hierarchy_fields.add("{0}ID".format(parent_obj.name))
+            hierarchy_fields.add("{0}名".format(parent_obj.name))
+            hierarchy_fields.add("{0}编码".format(parent_obj.name))
+            hierarchy_fields.add("{0}名称".format(parent_obj.name))
+            hierarchy_fields.add("{0}_id".format(parent_obj.name.lower()))
+            hierarchy_fields.add("{0}_name".format(parent_obj.name.lower()))
+            hierarchy_fields.add(parent_obj.name)
 
         return hierarchy_fields
 
@@ -3236,14 +3588,17 @@ class ImportExportService:
         Returns:
             ImportPreview 或 ImportResult
         """
-        import logging
-        logger = logging.getLogger(__name__)
 
         context = context or {}
 
         if not os.path.exists(file_path):
-            return ImportPreview() if mode == "preview" else ImportResult(
-                success=False, errors=[{"message": "File not found: {0}".format(file_path)}]
+            trace_id = self._get_current_trace_id()
+            if mode == "preview":
+                return ImportPreview(trace_id=trace_id)
+            return ImportResult(
+                success=False,
+                errors=[{"message": "File not found: {0}".format(file_path)}],
+                trace_id=trace_id,
             )
         
         try:
@@ -3302,7 +3657,8 @@ class ImportExportService:
             return ImportPreview(
                 sheets=sheets,
                 validation=validation,
-                import_order=import_order
+                import_order=import_order,
+                trace_id=self._get_current_trace_id(),
             )
         
         results = {}
@@ -3384,7 +3740,8 @@ class ImportExportService:
         return ImportResult(
             success=len(all_errors) == 0,
             results=results,
-            errors=all_errors
+            errors=all_errors,
+            trace_id=self._get_current_trace_id(),
         )
 
     def _sheet_name_to_object_type(self, sheet_name: str) -> Optional[str]:
@@ -3403,8 +3760,6 @@ class ImportExportService:
         2. business_key 值不能重复（在当前版本内）
         3. 父对象 business_key（如 code）必须存在（数据库或当前Excel中）
         """
-        import logging
-        logger = logging.getLogger(__name__)
 
         context = context or {}
         version_id = context.get('version_id')
@@ -3518,25 +3873,17 @@ class ImportExportService:
                 record = dict(zip(sheet["columns"], row))
                 
                 # 确定当前行的操作模式
-                operation_mode = "update"  # 默认是更新模式
+                # [FIX 2026-06-08] 默认值统一为 "create"，与 _import_sheet (L4350) 对齐。
+                # 之前默认 "update" 会导致：用户留空时 _validate_sheets 走 update 路径（跳过 BK 必填检查），
+                # 而 _import_sheet 走 create 路径（调用 create() 但 BK 没填）→ 预览通过但执行失败。
+                operation_mode = "create"  # 默认是新增模式
                 if op_mode_idx is not None and op_mode_idx < len(row):
                     op_value = row[op_mode_idx]
                     if op_value:
-                        op_str = str(op_value).strip()
-                        # 解析 "Key - Label" 格式
-                        if ' - ' in op_str:
-                            key_part = op_str.split(' - ')[0].strip().lower()
-                        else:
-                            key_part = op_str.lower()
-                        
-                        if key_part in ["新增", "插入", "create", "insert"]:
-                            operation_mode = "create"
-                        elif key_part in ["删除", "delete"]:
-                            operation_mode = "delete"
-                        elif key_part in ["跳过", "skip"]:
-                            operation_mode = "skip"
-                        elif key_part in ["更新", "update"]:
-                            operation_mode = "update"
+                        # [SSOT 2026-06-08] 使用 _parse_operation_mode_from_label 统一解析
+                        parsed = self._parse_operation_mode_from_label(op_value)
+                        if parsed is not None:
+                            operation_mode = parsed
                 
                 # 只有新增和更新模式才验证必填字段
                 should_validate_required = operation_mode in ["create", "update"]
@@ -3584,11 +3931,7 @@ class ImportExportService:
                     resolve_from = getattr(field.semantics, 'resolve_from_field', None)
                     resolve_to = getattr(field.semantics, 'resolve_to_object', None)
                     if not resolve_from or not resolve_to:
-                        vh = getattr(field, 'value_help', None)
-                        if not vh:
-                            ui_obj = getattr(field, 'ui', None)
-                            if ui_obj:
-                                vh = getattr(ui_obj, 'value_help', None)
+                        vh = self._get_value_help(field)
                         if vh:
                             vh_source = getattr(vh, 'source', None)
                             if vh_source and getattr(vh_source, 'type', None) == 'bo':
@@ -3806,6 +4149,23 @@ class ImportExportService:
                                             invalid_count += 1
                                             logger.warning(f"[Validate] 引用完整性错误: {obj.name}.{field_label} -> {resolve_to}.{source_value_str} (版本ID: {version_id})")
                 
+                # [FIX FR-004] addability 检查：新增模式下验证 addability 条件
+                # 避免预览通过但执行时被 manage_service.create() 的 addability 拒绝
+                if operation_mode == "create":
+                    try:
+                        if not self.manage_service.check_can_add(sheet["object_type"], record):
+                            obj_name = obj.name or sheet["object_type"]
+                            errors.append({
+                                "sheet": sheet["name"],
+                                "row": row_num,
+                                "field": "操作模式",
+                                "error": f"【新增限制】{obj_name} 当前不满足新增条件（addability 规则），无法新增"
+                            })
+                            invalid_count += 1
+                            continue  # 跳过后续 valid_count
+                    except Exception as e:
+                        logger.warning(f"[FR-004] addability 检查异常: {e}")
+
                 valid_count += 1
         
         return {
@@ -3816,27 +4176,11 @@ class ImportExportService:
 
     def _validate_enum_value(self, enum_type_id: str, code: str) -> bool:
         """验证枚举值是否有效
-        
-        Args:
-            enum_type_id: 枚举类型ID（如 'relation_type'）
-            code: 枚举值编码
-            
-        Returns:
-            bool: 枚举值是否存在且启用
+
+        [FR-006] 委托到 enum_resolver.validate_enum_value
         """
-        try:
-            sql = """
-                SELECT COUNT(*) FROM enum_values 
-                WHERE enum_type_id = ? AND code = ? AND is_active = 1
-            """
-            cursor = self.data_source.execute(sql, [enum_type_id, code])
-            result = cursor.fetchone()
-            return result[0] > 0 if result else False
-        except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"[Validate] 枚举值验证失败: {enum_type_id}.{code} - {e}")
-            return True
+        from meta.core.enum_resolver import validate_enum_value
+        return validate_enum_value(enum_type_id, code, self.data_source)
 
     def _get_enum_value_info(self, enum_type_id: str, code: str) -> Optional[Dict[str, Any]]:
         """获取枚举值详细信息（包括名称和维度）
@@ -3870,8 +4214,6 @@ class ImportExportService:
                         result['dimensions'] = {}
                 return result
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
             logger.warning(f"[Validate] 获取枚举值信息失败: {enum_type_id}.{code} - {e}")
         return None
 
@@ -3894,8 +4236,6 @@ class ImportExportService:
         Returns:
             Dict: {(object_type, code): record} 内存索引
         """
-        import logging
-        logger = logging.getLogger(__name__)
 
         lookup_index: Dict[tuple, Dict] = {}
         if not rows or not headers:
@@ -3920,11 +4260,7 @@ class ImportExportService:
                 resolve_to_field = getattr(field.semantics, 'resolve_to_field', None)
 
                 if not resolve_from and not resolve_to_object and not resolve_to_field:
-                    vh = getattr(field, 'value_help', None)
-                    if not vh:
-                        ui_obj = getattr(field, 'ui', None)
-                        if ui_obj:
-                            vh = getattr(ui_obj, 'value_help', None)
+                    vh = self._get_value_help(field)
                     if vh:
                         vh_source = getattr(vh, 'source', None)
                         if vh_source and getattr(vh_source, 'type', None) == 'bo':
@@ -4020,8 +4356,6 @@ class ImportExportService:
             type_progress_base: 该类型的基础进度（0-100中的起始值）
             type_progress_weight: 该类型的进度权重（占100的比例）
         """
-        import logging
-        logger = logging.getLogger(__name__)
 
         context = context or {}
 
@@ -4120,23 +4454,11 @@ class ImportExportService:
             if has_operation_mode and operation_mode_idx >= 0 and operation_mode_idx < len(row):
                 mode_value = row[operation_mode_idx]
                 if mode_value and str(mode_value).strip():
-                    mode_str = str(mode_value).strip()
-                    # 解析 "Key - Label" 格式（与 valuehelp 一致）
-                    if ' - ' in mode_str:
-                        key_part = mode_str.split(' - ')[0].strip().lower()
-                    else:
-                        key_part = mode_str.lower()
-                    
-                    if key_part in ["新增", "插入", "create", "insert"]:
-                        operation_mode = "create"
-                    elif key_part in ["删除", "delete"]:
-                        operation_mode = "delete"
-                    elif key_part in ["跳过", "skip"]:
-                        operation_mode = "skip"
-                    elif key_part in ["更新", "update"]:
-                        operation_mode = "update"
-                    else:
-                        operation_mode = key_part
+                    # [SSOT 2026-06-08] 使用 _parse_operation_mode_from_label 统一解析
+                    parsed = self._parse_operation_mode_from_label(mode_value)
+                    if parsed is not None:
+                        operation_mode = parsed
+                    # 无法识别时保留默认 "create"，不再用 key_part 兜底
                 else:
                     operation_mode = "create"
             
@@ -4181,11 +4503,7 @@ class ImportExportService:
                 resolve_to_field = getattr(field.semantics, 'resolve_to_field', None)
 
                 if not resolve_from and not resolve_to_object and not resolve_to_field:
-                    vh = getattr(field, 'value_help', None)
-                    if not vh:
-                        ui_obj = getattr(field, 'ui', None)
-                        if ui_obj:
-                            vh = getattr(ui_obj, 'value_help', None)
+                    vh = self._get_value_help(field)
                     if vh:
                         vh_source = getattr(vh, 'source', None)
                         if vh_source and getattr(vh_source, 'type', None) == 'bo':
@@ -4329,18 +4647,14 @@ class ImportExportService:
         }
 
     def _get_business_key_fields(self, object_type: str) -> List:
-        """获取对象的业务键字段列表（支持组合键）"""
+        """获取对象的业务键字段列表（支持组合键）
+
+        [FR-011] 委托到 MetaObject.get_business_key_fields()。
+        """
         obj = registry.get(object_type)
         if not obj:
             return []
-        
-        bk_fields = []
-        for field in obj.fields:
-            if getattr(field.semantics, 'business_key', False):
-                is_virtual = field.storage.value == 'virtual' or getattr(field.semantics, 'virtual', False)
-                if not is_virtual:
-                    bk_fields.append(field)
-        return bk_fields
+        return obj.get_business_key_fields()
 
     def _find_existing_record(self, object_type: str, record: Dict[str, Any],
                                version_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
@@ -4426,8 +4740,6 @@ class ImportExportService:
         Returns:
             bool: 操作是否成功
         """
-        import logging
-        logger = logging.getLogger(__name__)
 
         record_version_id = record.get('version_id')
         logger.info(f"[Upsert] object_type={object_type}, record_version_id={record_version_id}")
@@ -4462,23 +4774,27 @@ class ImportExportService:
 
     def _record_exists(self, object_type: str, record: Dict[str, Any],
                        config: ImportExportConfig) -> bool:
-        """检查记录是否存在"""
-        return self._find_existing_record(object_type, record) is not None
+        """检查记录是否存在
+
+        [FIX 2026-06-08] 传递 record.get('version_id') 以保证 conflict_strategy='skip'
+        不会跨版本误命中（之前漏传会导致同 business_key 的 v1 记录遮挡 v2 新增）。
+        """
+        return self._find_existing_record(
+            object_type, record, record.get('version_id')
+        ) is not None
 
     def _find_by_id(self, object_type: str, record_id: Any) -> Optional[Dict[str, Any]]:
-        """根据 id 查找记录（用于无业务键的导入对象，如 annotation）"""
+        """根据 id 查找记录（用于无业务键的导入对象，如 annotation）
+
+        [FIX FR-003] 改用 data_source.find_by_id，与 manage_service 保持一致，
+        避免手写 SQL 漂移风险。
+        """
         try:
             obj = registry.get(object_type)
             if not obj:
                 return None
             table_name = obj.table_name or object_type
-            sql = "SELECT * FROM {0} WHERE id = ?".format(table_name)
-            cursor = self.data_source.execute(sql, (record_id,))
-            result = cursor.fetchone()
-            if result:
-                columns = [desc[0] for desc in cursor.description]
-                return dict(zip(columns, result))
-            return None
+            return self.data_source.find_by_id(table_name, record_id)
         except Exception:
             return None
 
@@ -4564,8 +4880,7 @@ class ImportExportService:
             
             wb.close()
         except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(f"Failed to read meta sheet: {e}")
+            logger.warning(f"Failed to read meta sheet: {e}")
         
         return meta
 
@@ -4595,7 +4910,6 @@ class ImportExportService:
             if row:
                 return row[0]
         except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(f"Failed to resolve version_id: {e}")
+            logger.warning(f"Failed to resolve version_id: {e}")
         
         return None

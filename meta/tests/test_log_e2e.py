@@ -28,6 +28,7 @@ class TestLogE2E:
         self.business = BusinessLogInterceptor(structured_logger=self.mock_logger)
         self.security = SecurityLogInterceptor(structured_logger=self.mock_logger)
         self.operation = OperationLogInterceptor(structured_logger=self.mock_logger)
+        self.operation.DISABLED = False  # 测试时启用 (生产保持 DISABLED=True)
 
     def _make_context(self, action, object_type='domain', success=True,
                       object_id=1, user_id=1, user_name='admin',

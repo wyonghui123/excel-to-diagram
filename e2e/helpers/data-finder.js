@@ -275,6 +275,130 @@ export async function findOrCreateBusinessObject(page, options = {}) {
   })
 }
 
+/**
+ * 确保 version 里有完整的层级（domain/sub_domain/service_module）+ ≥4 个 BO
+ * 返回 { product, version, businessObjects, hierarchy?, source }
+ */
+export async function findOrCreateBusinessObjectHierarchy(page, options = {}) {
+  const { minBos = 4, scopeNamePrefix = 'E2E_RSS', createIfNone = true } = options
+  return getCached(`boHierarchy:${minBos}:${scopeNamePrefix}`, async () => {
+    const pv = await findOrCreateProductWithVersion(page, { createIfNone })
+    const versionId = pv.version.id
+
+    // 1. 查现有 BOs
+    const resp = await page.request.get(`/api/v2/bo/business_object?version_id=${versionId}&page_size=100`)
+    const body = await resp.json().catch(() => ({}))
+    const bos = body.data?.items || body.data || []
+
+    // 2. 查 service_modules（带层级的）
+    const usable = bos.filter(b => b.service_module_id)
+    if (usable.length >= minBos) {
+      return { product: pv.product, version: pv.version, businessObjects: usable, source: 'existing' }
+    }
+
+    if (!createIfNone) {
+      throw new Error(`Not enough BOs with hierarchy (have ${usable.length}/${minBos})`)
+    }
+
+    // 3. 重建层级
+    const tag = `RSS${Math.random().toString(36).slice(2, 8).toUpperCase()}`
+
+    const domainResp = await page.request.post('/api/v2/bo/domain', {
+      data: { code: `D${tag}`, name: `域${tag}`, version_id: versionId }
+    })
+    const domainBody = await domainResp.json()
+    if (!domainBody.success) throw new Error(`create domain failed: ${JSON.stringify(domainBody)}`)
+    const domain = domainBody.data
+
+    const subDomainResp = await page.request.post('/api/v2/bo/sub_domain', {
+      data: { code: `SD${tag}`, name: `子域${tag}`, domain_id: domain.id, version_id: versionId }
+    })
+    const subDomainBody = await subDomainResp.json()
+    if (!subDomainBody.success) throw new Error(`create sub_domain failed: ${JSON.stringify(subDomainBody)}`)
+    const subDomain = subDomainBody.data
+
+    const sm1Resp = await page.request.post('/api/v2/bo/service_module', {
+      data: { code: `SM1${tag}`, name: `模块1${tag}`, sub_domain_id: subDomain.id, version_id: versionId }
+    })
+    const sm1Body = await sm1Resp.json()
+    if (!sm1Body.success) throw new Error(`create service_module1 failed: ${JSON.stringify(sm1Body)}`)
+    const sm1 = sm1Body.data
+
+    const sm2Resp = await page.request.post('/api/v2/bo/service_module', {
+      data: { code: `SM2${tag}`, name: `模块2${tag}`, sub_domain_id: subDomain.id, version_id: versionId }
+    })
+    const sm2Body = await sm2Resp.json()
+    if (!sm2Body.success) throw new Error(`create service_module2 failed: ${JSON.stringify(sm2Body)}`)
+    const sm2 = sm2Body.data
+
+    const createdBos = []
+    for (let i = 0; i < Math.max(minBos, 4); i++) {
+      const boResp = await page.request.post('/api/v2/bo/business_object', {
+        data: {
+          code: `BO${tag}${i}`,
+          name: `对象${i}${tag}`,
+          service_module_id: i < 2 ? sm1.id : sm2.id,
+          version_id: versionId
+        }
+      })
+      const boBody = await boResp.json()
+      if (!boBody.success) throw new Error(`create BO ${i} failed: ${JSON.stringify(boBody)}`)
+      createdBos.push(boBody.data)
+    }
+
+    return {
+      product: pv.product, version: pv.version,
+      businessObjects: createdBos,
+      hierarchy: { domain, subDomain, serviceModules: [sm1, sm2] },
+      source: 'created'
+    }
+  })
+}
+
+/**
+ * 在已有版本里创建多条关系（同服务模块 + 跨服务模块）
+ * 返回 { relationships, versionId, product, version }
+ */
+export async function ensureRelationships(page, options = {}) {
+  const { minCount = 3, createIfNone = true, hierarchy } = options
+  return getCached(`relationships:${minCount}`, async () => {
+    const hier = hierarchy || await findOrCreateBusinessObjectHierarchy(page, { createIfNone })
+    const versionId = hier.version.id
+    const bos = hier.businessObjects
+    const sm1 = bos.filter(b => b.service_module_id === hier.hierarchy?.serviceModules?.[0]?.id)
+    const sm2 = bos.filter(b => b.service_module_id === hier.hierarchy?.serviceModules?.[1]?.id)
+
+    const created = []
+    // 同服务模块
+    if (sm1.length >= 2) {
+      const r = await page.request.post('/api/v2/bo/relationship', {
+        data: {
+          relation_code: 'INTERNAL_CALL',
+          relation_desc: `E2E_RSS_intra_${Date.now()}`,
+          version_id: versionId,
+          source_bo_id: sm1[0].id, target_bo_id: sm1[1].id
+        }
+      })
+      const rb = await r.json()
+      if (rb.success) created.push(rb.data)
+    }
+    // 跨服务模块
+    if (sm1[0] && sm2[0]) {
+      const r = await page.request.post('/api/v2/bo/relationship', {
+        data: {
+          relation_code: 'INTERNAL_CALL',
+          relation_desc: `E2E_RSS_inter_${Date.now()}`,
+          version_id: versionId,
+          source_bo_id: sm1[0].id, target_bo_id: sm2[0].id
+        }
+      })
+      const rb = await r.json()
+      if (rb.success) created.push(rb.data)
+    }
+    return { relationships: created, versionId, product: hier.product, version: hier.version }
+  })
+}
+
 // ============================================================
 // 数据清理（afterEach 用）
 // ============================================================

@@ -97,11 +97,11 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
-import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { AppIcon } from '@/components/common/AppIcon'
 import SearchHelpDialog from '@/components/common/SearchHelpDialog.vue'
 import * as permService from '@/services/permissionService'
+import { useCrudMessage } from '@/composables/useCrudMessage'
 
 const props = defineProps({
   roleId: {
@@ -114,6 +114,8 @@ const emit = defineEmits({
   'dimension-scopes-saved': () => true,
   'auto-derived': (result) => true
 })
+
+const message = useCrudMessage()
 
 // [REMOVED] 2026-06-03: service_module 和 business_object 从管理维度移除
 // 新的层级链: product → version → domain → sub_domain (4层)
@@ -233,7 +235,7 @@ const pickerValueHelpConfig = computed(() => {
     { field: 'code', label: '编码' }
   ]
   if (parentLabel) {
-    cols.push({ field: 'parent_name', label: parentLabel })
+    cols.push({ field: 'ancestor_path', label: '所属路径' })  // 方案 B: 完整祖先路径
   }
   return {
     source: { type: 'bo', target_bo: dimId },
@@ -275,7 +277,7 @@ async function loadDimensions() {
     }
   } catch (e) {
     console.error('Failed to load dimensions:', e)
-    ElMessage.error('加载管理维度失败')
+    message.error('加载管理维度失败')
   } finally {
     dimensionsLoading.value = false
   }
@@ -399,15 +401,15 @@ async function autoDerive() {
     const result = await permService.derivePermissions(props.roleId)
     if (result.success) {
       emit('auto-derived', result.data)
-      ElMessage.success(
+      message.success(
         `推导完成: ${result.data.recommended_menus?.length || 0} 个推荐菜单, ${result.data.derived_permissions?.length || 0} 项功能权限`
       )
     } else {
-      ElMessage.error(result.message || '自动推导失败')
+      message.error('自动推导失败', result)
     }
   } catch (e) {
     console.error('Auto derive failed:', e)
-    ElMessage.error('自动推导失败')
+    message.error('自动推导失败', e)
   } finally {
     autoDeriving.value = false
   }
@@ -438,11 +440,11 @@ async function saveDimensionScopes() {
   saving.value = true
   try {
     await saveDimensionScopesInternal()
-    ElMessage.success('维度范围保存成功')
+    message.success('维度范围保存成功')
     emit('dimension-scopes-saved')
   } catch (e) {
     console.error('Save dimension scopes failed:', e)
-    ElMessage.error('保存维度范围失败')
+    message.error('保存维度范围失败', e)
   } finally {
     saving.value = false
   }

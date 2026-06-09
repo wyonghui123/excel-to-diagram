@@ -64,7 +64,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { Search } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { useCrudMessage } from '@/composables/useCrudMessage'
 import MetaListPage from '@/components/common/MetaListPage/MetaListPage.vue'
 import boService from '@/services/boService'
 
@@ -100,6 +100,8 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['update:modelValue', 'success'])
+
+const message = useCrudMessage()
 
 const visible = computed({
   get: () => props.modelValue,
@@ -183,7 +185,7 @@ function handleSearchClear() {
 
 async function handleSubmit() {
   if (selectedItems.value.length === 0) {
-    ElMessage.warning('请选择要添加的记录')
+    message.warning('请选择要添加的记录')
     return
   }
 
@@ -209,17 +211,17 @@ async function handleSubmit() {
     if (failed.length === 0) {
       const count = selectedItems.value.length
       if (count === 1) {
-        ElMessage.success('添加成功')
+        message.success('添加成功')
       } else {
-        ElMessage.success(`成功添加 ${count} 条记录`)
+        message.success(`成功添加 ${count} 条记录`)
       }
       emit('success', selectedItems.value)
       handleClose()
     } else {
-      ElMessage.warning(`成功 ${results.length - failed.length} 条，失败 ${failed.length} 条`)
+      message.warning(`成功 ${results.length - failed.length} 条，失败 ${failed.length} 条`)
     }
   } catch (e) {
-    ElMessage.error('添加失败')
+    message.error('添加失败', e)
   } finally {
     submitting.value = false
   }

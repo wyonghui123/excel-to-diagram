@@ -260,6 +260,7 @@
 
 <script setup>
 import { ref } from 'vue'
+// [DEV-ONLY] ThemePreview 是组件展示页面, 故意用 ElMessage 演示 EP 原生组件效果
 import { ElMessage } from 'element-plus'
 
 const inputValue = ref('')

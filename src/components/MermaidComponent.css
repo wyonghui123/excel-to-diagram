@@ -3,7 +3,9 @@
   height: 600px;
   border: 1px solid #ddd;
   border-radius: 4px;
-  overflow: auto !important;
+  /* 关键修复：改为 hidden，避免 .mermaid-wrapper（12000x12000）撑出滚动条
+     图表的浏览通过拖拽 + 滚轮缩放实现，不依赖原生滚动条 */
+  overflow: hidden !important;
   background-color: #FFFFFF;
   position: relative;
 }
@@ -113,9 +115,18 @@
 }
 
 .mermaid-content {
-  display: block !important;
+  /* 关键修复 v4：100%×100% of draggable，flex 居中
+     让浏览器按 SVG viewBox 比例自动缩放图表到容器高度，
+     不再依赖 JS 算 fit scale（fit scale 容易受 getBBox / SVG attribute 异常值影响） */
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100% !important;
+  height: 100% !important;
+  position: relative !important;
+  /* transform 由 JS 控制 panning/zooming */
   transform-origin: center center;
-  transition: transform 0.1s ease-out;
+  transition: transform 0.15s ease-out;
   background-color: transparent !important;
   overflow: visible !important;
   box-sizing: border-box;
@@ -123,30 +134,37 @@
 
 .mermaid-content pre.mermaid {
   margin: 0 !important;
-  padding: 20px !important;
+  padding: 0 !important;  /* 移除 padding，让 SVG 完全按 viewBox 缩放 */
   background: transparent !important;
   white-space: pre !important;
   overflow: visible !important;
   font-family: inherit !important;
   font-size: inherit !important;
-  width: 100% !important;
-  min-width: 100% !important;
-  min-height: 100% !important;
-  height: auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  height: 100% !important;  /* 100% 父元素高度 */
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
   box-sizing: border-box !important;
   position: relative;
 }
 
 .mermaid-content pre.mermaid svg {
-  max-width: none !important;
+  /* 关键：让 SVG 100% 容器高度，宽度按 viewBox 比例自动计算
+     这样图表天然填满容器高度，不需要 JS 算 fit scale */
+  height: 100% !important;
   width: auto !important;
-  height: auto !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
   min-width: 0 !important;
   min-height: 0 !important;
   overflow: visible !important;
   display: block !important;
   background: #FFFFFF !important;
   box-sizing: border-box;
+  /* viewBox 保持原样，浏览器自动按比例缩放 */
 }
 
 .mermaid-content.serviceModule :deep(.edgeLabel):not(.edge-label-clean),

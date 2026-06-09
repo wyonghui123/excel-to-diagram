@@ -1,3 +1,14 @@
+## 目录
+
+1. [概述](#概述)
+2. [配置位置](#配置位置)
+3. [完整示例：`product.yaml` 扩展示例](#完整示例：productyaml-扩展示例)
+4. [`child_sections` 配置详解](#child_sections-配置详解)
+5. [多层级示例：四级父子关系](#多层级示例：四级父子关系)
+6. [前端使用示例](#前端使用示例)
+7. [后端 Schema 扩展](#后端-schema-扩展)
+
+---
 # YAML Schema 扩展示例：`child_list_config`
 
 ## 概述

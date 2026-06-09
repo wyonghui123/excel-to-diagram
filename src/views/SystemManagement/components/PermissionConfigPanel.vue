@@ -87,7 +87,6 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, toRef } from 'vue'
-import { ElMessage } from 'element-plus'
 import { AppIcon } from '@/components/common/AppIcon'
 import MenuPermissionMatrix from './MenuPermissionMatrix.vue'
 import ConditionRuleList from './ConditionRuleList.vue'
@@ -95,6 +94,14 @@ import ConditionRuleDialog from '../ConditionRuleDialog.vue'
 import DimensionScopePanel from './DimensionScopePanel.vue'
 import { useMenuPermission } from '../composables/useMenuPermission'
 import { useConditionRules } from '../composables/useConditionRules'
+import { useMessage } from '@/composables/useMessage'
+
+// [FIX v1.0.4] 改用项目统一消息系统 (useMessage + NotificationContainer)
+//   - 旧实现用 ElMessage, 与 RoleDetailDrawer 的 useMessage 不一致
+//   - Element Plus ElMessage 在 role 详情页内部被 high-z modal 遮挡时
+//     通知 fixed 定位失效, 看不见
+//   - NotificationContainer 是 z-index: 1700, teleport to body, 永远在最上层
+const message = useMessage()
 
 const props = defineProps<{
   roleId: string
@@ -145,12 +152,12 @@ function handleToggleStandalone(menu: any, boId: string, action: string) {
 }
 
 function handleConfigureScope(menu: any, scope: any) {
-  ElMessage.info(`配置 ${menu.display_name} 的 ${scope.resource_type} 数据范围`)
+  message.info(`配置 ${menu.display_name} 的 ${scope.resource_type} 数据范围`)
 }
 
 function handleConfigureDataScope(menu: any) {
   const hintTypes = menu.data_permission_hint?.resource_types || []
-  ElMessage.info(`为 ${menu.display_name} 配置数据权限：${hintTypes.join(', ')}`)
+  message.info(`为 ${menu.display_name} 配置数据权限：${hintTypes.join(', ')}`)
 }
 
 function handleDimensionScopesSaved() {
@@ -163,6 +170,13 @@ async function handleAutoDerived(result: any) {
 
   applyDerived(recommendedMenus, derivedPerms)
   await loadRules()
+  // [FIX v1.0.2] 自动派生后, 直接落库, 不让用户再点保存
+  // 避免 "推荐了 version:read 但 DB 没写入" 的认知错位
+  try {
+    await saveMenuPermissions()
+  } catch (e) {
+    console.error('auto-save after derive failed:', e)
+  }
   // 不显示消息，由 RoleDetailDrawer 统一显示
 }
 
@@ -178,9 +192,9 @@ async function savePermissions() {
   saving.value = true
   try {
     await saveMenuPermissions()
-    ElMessage.success('权限保存成功')
+    message.success('权限保存成功')
   } catch (error) {
-    ElMessage.error('权限保存失败')
+    message.error('权限保存失败')
   } finally {
     saving.value = false
   }
@@ -189,9 +203,9 @@ async function savePermissions() {
 async function handleDeleteConditionRule(rule: any) {
   try {
     await deleteRule(rule.id)
-    ElMessage.success('条件规则删除成功')
+    message.success('条件规则删除成功')
   } catch (error) {
-    ElMessage.error('条件规则删除失败')
+    message.error('条件规则删除失败')
   }
 }
 

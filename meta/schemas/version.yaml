@@ -165,6 +165,15 @@ ui_view_config:
         width: 90
         position: 4
         importance: medium
+      - key: child_count
+        title: 领域数量
+        width: 80
+        position: 5
+        importance: medium
+        computed: true
+        computation:
+          type: count_children
+          child_object: domain
       - key: created_at
         title: 创建时间
         width: 180

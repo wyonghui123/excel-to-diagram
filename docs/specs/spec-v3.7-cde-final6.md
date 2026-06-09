@@ -1,3 +1,19 @@
+## 目录
+
+1. [📋 6 项总览](#-6-项总览)
+2. [1️⃣ Progress callback (SSE) (45min)](#1-progress-callback-(sse)-(45min))
+3. [2️⃣ 模板存储 (server-side named subflow) (45min)](#2-模板存储-(server-side-named-subflow)-(45min))
+4. [3️⃣ dry-run (preview mode) (30min)](#3-dry-run-(preview-mode)-(30min))
+5. [4️⃣ 性能指标 (metrics) (45min)](#4-性能指标-(metrics)-(45min))
+6. [5️⃣ CI 检查 (openapi + tsc) (30min)](#5-ci-检查-(openapi-tsc)-(30min))
+7. [6️⃣ 错误码枚举 (统一 code + TS enum) (30min)](#6-错误码枚举-(统一-code-ts-enum)-(30min))
+8. [📅 实施顺序 (推荐 1 天)](#-实施顺序-(推荐-1-天))
+9. [📊 最终 v3.7 状态预估](#-最终-v37-状态预估)
+10. [🛡️ 实施前置](#-实施前置)
+11. [🚦 回滚计划](#-回滚计划)
+12. [变更记录](#变更记录)
+
+---
 # Spec: v3.7 — C+D+E 进阶剩余 6 项详细方案 (v1.0)
 
 > **日期**: 2026-06-06

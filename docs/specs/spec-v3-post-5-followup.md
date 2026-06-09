@@ -1,3 +1,21 @@
+## 目录
+
+1. [📋 文档定位](#-文档定位)
+2. [🎯 6 个任务总览](#-6-个任务总览)
+3. [1️⃣ Subflow chain_call（ServiceNow Flow Designer 模式）](#1-subflow-chain_call（servicenow-flow-designer-模式）)
+4. [2️⃣ action_handlers.py 完全迁移到 bo_action_registry](#2-action_handlerspy-完全迁移到-bo_action_registry)
+5. [3️⃣ OpenAPI 3.0 自动生成](#3-openapi-30-自动生成)
+6. [4️⃣ TypeScript types 自动生成](#4-typescript-types-自动生成)
+7. [5️⃣ P1 6 个 Action](#5-p1-6-个-action)
+8. [6️⃣ send_file 崩溃根因诊断 (Deferred)](#6-send_file-崩溃根因诊断-(deferred))
+9. [📊 6 任务实施时间线 (推荐)](#-6-任务实施时间线-(推荐))
+10. [🛡️ 实施前置条件](#-实施前置条件)
+11. [🚦 回滚计划](#-回滚计划)
+12. [💡 业务侧收益汇总](#-业务侧收益汇总)
+13. [🔗 关联文档](#-关联文档)
+14. [变更记录](#变更记录)
+
+---
 # Spec: v3 BO Action 体系扩展 — 后续 6 个可选任务细化方案 (v1.0)
 
 > **日期**: 2026-06-05

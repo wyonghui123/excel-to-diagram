@@ -1,10 +1,30 @@
+## 目录
+
+1. [🚦 实施进度（截至 2026-06-06）](#-实施进度（截至-2026-06-06）)
+2. [🚦 关键发现（基于实际代码）](#-关键发现（基于实际代码）)
+3. [0. 摘要](#0-摘要)
+4. [1. 现有 18 拦截器清单（基于 server.py L337-354）](#1-现有-18-拦截器清单（基于-serverpy-l337-354）)
+5. [2. M11 实际范围（**3 个增强 + 4 个新场景**）](#2-m11-实际范围（3-个增强-4-个新场景）)
+6. [3. M11 实施蓝图（**0.5 周**）](#3-m11-实施蓝图（05-周）)
+7. [4. YAML 配置 Schema（与现有 scope 表达式对齐）](#4-yaml-配置-schema（与现有-scope-表达式对齐）)
+8. [5. 4 个新场景实施细节](#5-4-个新场景实施细节)
+9. [6. 测试策略（30+ 用例）](#6-测试策略（30-用例）)
+10. [7. 风险评估（基于实际代码）](#7-风险评估（基于实际代码）)
+11. [8. ROI 重新计算（基于实际代码）](#8-roi-重新计算（基于实际代码）)
+12. [9. 关键决策（基于实际代码）](#9-关键决策（基于实际代码）)
+13. [10. 总结](#10-总结)
+14. [11. 立即可执行](#11-立即可执行)
+15. [12. 关联文档](#12-关联文档)
+16. [13. 变更记录](#13-变更记录)
+
+---
 # M11 v3 引擎：声明式 RLS 实施 spec（基于实际代码）
 
 > **版本**: v1.4.0
 > **创建日期**: 2026-06-06
 > **状态**: ✅ **D1-D5 + TODO-1+2+3+4+5+6 全部完成 / M11 130% / 仅 TODO-7 M10 协同留待**
 > **实施时长**: 1d（D1）+ 0.5d（D2）+ 0.5d（D3）+ 0.5d（D4）+ 0.5d（TODO-1）+ 1d（TODO-2）+ 0.5d（TODO-3）+ 0.5d（TODO-4）+ 1d（TODO-5）+ 0.5d（TODO-6）= 6d
-> **关联 spec**: [spec-m11-rls.md](file:///d:/filework/excel-to-diagram/docs/specs/spec-m11-rls.md)（详细 spec）+ [spec-ui-business-logic-downflow.md v3.0](file:///d:/filework/excel-to-diagram/docs/specs/spec-ui-business-logic-downflow.md)
+> **关联 spec**: [spec-m11-rls-implementation.md](file:///d:/filework/excel-to-diagram/docs/specs/spec-m11-rls-implementation.md)（详细 spec）+ [spec-ui-business-logic-downflow.md v3.0](file:///d:/filework/excel-to-diagram/docs/specs/spec-ui-business-logic-downflow.md)
 > **战略位置**: v3 引擎 M1-M14 战略补强中的第 11 步
 
 ---
@@ -433,7 +453,7 @@ M12 Federation / M13 Schema / M14 OTel
 
 ## 12. 关联文档
 
-- [spec-m11-rls.md](file:///d:/filework/excel-to-diagram/docs/specs/spec-m11-rls.md) — M11 详细 spec
+- [spec-m11-rls-implementation.md](file:///d:/filework/excel-to-diagram/docs/specs/spec-m11-rls-implementation.md) — M11 详细 spec
 - [spec-m9-graphql-protocol.md](file:///d:/filework/excel-to-diagram/docs/specs/spec-m9-graphql-protocol.md) — M9（前置）
 - [spec-m10-mcp-server.md](file:///d:/filework/excel-to-diagram/docs/specs/spec-m10-mcp-server.md) — M10（协同）
 - [meta/server.py L337-354](file:///d:/filework/excel-to-diagram/meta/server.py) — 18 拦截器注册

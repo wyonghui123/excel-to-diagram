@@ -333,6 +333,50 @@ class TestUserMustChangePasswordField:
         assert 'is_system' not in filtered_data, "is_system 应该被过滤掉（系统字段）"
         assert 'created_at' not in filtered_data, "created_at 应该被过滤掉（系统字段）"
 
+    def test_validate_create_accepts_must_change_password_zero(self):
+        """[FIX 2026-06-09] 验证创建用户时 validate_create 不再因 must_change_password=0 报错
+
+        场景: admin 创建用户录入密码保存时，前端表单因 schema 默认值附带 must_change_password=0
+              （该字段 ui.editable: false，由后端 action_executor 自动管理）
+        预期: validate_create 必须通过，不能返回 FIELD_NOT_EDITABLE 错误
+        """
+        meta_obj = registry.get('user')
+        interceptor = FieldPolicyValidationInterceptor(meta_object=meta_obj)
+
+        create_data = {
+            'username': 'newadmin',
+            'email': 'newadmin@example.com',
+            'display_name': 'New Admin',
+            'password': 'admin_pwd',
+            'must_change_password': 0,   # 表单默认值，前端未过滤
+            'status': 'active',
+        }
+
+        result = interceptor.validate_create(create_data)
+        assert result.valid is True, (
+            f"validate_create 应该通过，但报错了: {result.get_error_message()}"
+        )
+        assert len(result.errors) == 0
+
+    def test_validate_create_admin_password_does_not_force_change(self):
+        """[FIX 2026-06-09] admin 显式填密码创建用户，must_change_password 应保持 0
+
+        验证业务语义：admin 显式填密码 → 用户不需要首次登录强制改密
+        """
+        meta_obj = registry.get('user')
+        interceptor = FieldPolicyValidationInterceptor(meta_object=meta_obj)
+
+        create_data = {
+            'username': 'newadmin2',
+            'email': 'newadmin2@example.com',
+            'display_name': 'New Admin 2',
+            'password': 'secure_pwd_123',
+            'must_change_password': 0,
+        }
+
+        result = interceptor.validate_create(create_data)
+        assert result.valid, result.get_error_message()
+
 
 class TestUserGroupMemberCount:
     """测试 user_group.member_count 计算字段"""

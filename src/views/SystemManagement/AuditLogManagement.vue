@@ -149,7 +149,22 @@ import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { MetaListPage } from '@/components/common/MetaListPage'
 import { formatDate } from '@/composables/useMetaList'
 import * as auditLogService from '@/services/auditLogService'
-import * as echarts from 'echarts'
+// [FR-004] ECharts 按需导入: 只注册使用的图表类型, 减少 ~600KB
+import * as echarts from 'echarts/core'
+import { PieChart, LineChart } from 'echarts/charts'
+import {
+  TitleComponent,
+  TooltipComponent,
+  LegendComponent,
+  GridComponent
+} from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+
+echarts.use([
+  PieChart, LineChart,
+  TitleComponent, TooltipComponent, LegendComponent, GridComponent,
+  CanvasRenderer
+])
 import { Document, Lock, WarningFilled, DataLine } from '@element-plus/icons-vue'
 
 const metaListRef = ref(null)

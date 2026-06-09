@@ -737,6 +737,23 @@ def reset_admin_user():
     try:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
+        
+        # [FIX 2026-06-09] 添加用户偏好字段（支持 test_date_format_api.py）
+        preference_columns = [
+            ('locale', "VARCHAR(20) DEFAULT 'zh-CN'"),
+            ('timezone', "VARCHAR(50) DEFAULT 'Asia/Shanghai'"),
+            ('date_style', "VARCHAR(20) DEFAULT 'medium'"),
+            ('time_style', "VARCHAR(20) DEFAULT 'short'"),
+            ('hour_cycle', "INTEGER DEFAULT 24"),
+        ]
+        for col_name, col_def in preference_columns:
+            try:
+                cursor.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_def}")
+                conn.commit()
+            except sqlite3.OperationalError as e:
+                if 'duplicate column' not in str(e).lower():
+                    pass  # 列已存在，忽略
+        
         cursor.execute("SELECT password_hash, status FROM users WHERE username = 'admin'")
         row = cursor.fetchone()
         if row:
@@ -749,7 +766,7 @@ def reset_admin_user():
             computed = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), iterations).hex()
             password_hash = 'PBKDF2$' + str(iterations) + '$' + salt + '$' + computed
 
-            cursor.execute("UPDATE users SET status = 'active', password_hash = ? WHERE username = 'admin'", (password_hash,))
+            cursor.execute("UPDATE users SET status = 'active', password_hash = ?, locale = 'zh-CN', timezone = 'Asia/Shanghai', date_style = 'medium', time_style = 'short', hour_cycle = 24 WHERE username = 'admin'", (password_hash,))
             conn.commit()
     except Exception:
         pass
@@ -1636,3 +1653,104 @@ def temp_excel_dir(tmp_path):
     excel_dir = tmp_path / "excel_test"
     excel_dir.mkdir()
     yield excel_dir
+
+
+# ─── Admin 用户偏好设置隔离 Fixture (Worker-Scoped) ───
+# 解决 test_date_format_api.py 并行测试隔离问题
+
+_admin_prefs_defaults = {
+    'locale': 'zh-CN',
+    'timezone': 'Asia/Shanghai',
+    'date_style': 'medium',
+    'time_style': 'short',
+    'hour_cycle': 24,
+}
+
+
+@pytest.fixture(scope="session")
+def _admin_prefs_isolated():
+    """
+    [FIX 2026-06-09] Worker-Scoped Admin 用户偏好设置隔离
+
+    问题根因：
+    - test_date_format_api.py 中的测试修改 admin 用户(user_id=1)的偏好设置
+    - 每个测试通过 restore_admin_prefs fixture 在测试前后恢复默认值
+    - 但并行测试时，多个 worker 可能同时修改同一个 admin 用户的偏好设置
+    - 导致测试间相互干扰（locale 等字段值不一致）
+
+    解决方案：
+    - 每个 worker 进程有独立的数据库副本（pytest_configure 中已实现）
+    - 每个 worker 的 admin 用户偏好设置在 session 开始时初始化为默认值
+    - 这样每个 worker 的测试互不干扰
+
+    注意：
+    - 这是 session-scoped，会在 session 开始时初始化一次
+    - 与 reset_admin_user fixture 配合使用
+    - reset_admin_user 负责确保 admin 用户存在且有正确的密码和偏好设置
+    """
+    import sqlite3
+
+    db_path = os.environ.get('TEST_DB_PATH',
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'meta', 'architecture.db'))
+
+    if os.environ.get('TESTING') != 'true' or not os.path.exists(db_path):
+        yield
+        return
+
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+
+        # 确保 preference 字段存在
+        for col_name, col_def in [
+            ('locale', "VARCHAR(20) DEFAULT 'zh-CN'"),
+            ('timezone', "VARCHAR(50) DEFAULT 'Asia/Shanghai'"),
+            ('date_style', "VARCHAR(20) DEFAULT 'medium'"),
+            ('time_style', "VARCHAR(20) DEFAULT 'short'"),
+            ('hour_cycle', "INTEGER DEFAULT 24"),
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_def}")
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass  # 列已存在
+
+        # 将所有 admin 用户重置为默认值
+        # 使用 user_id IN (1, 9999, 9998...) 来匹配测试中可能使用的不同 admin ID
+        conn.execute("""
+            UPDATE users SET
+                locale = 'zh-CN',
+                timezone = 'Asia/Shanghai',
+                date_style = 'medium',
+                time_style = 'short',
+                hour_cycle = 24
+            WHERE username = 'admin' OR user_id IN (1, 9999, 9998, 9997)
+        """)
+        conn.commit()
+    except Exception as e:
+        logger.debug(f"[_admin_prefs_isolated] 初始化 admin 偏好设置失败: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+    yield
+
+    # Session 结束时再次恢复默认值
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.execute("""
+            UPDATE users SET
+                locale = 'zh-CN',
+                timezone = 'Asia/Shanghai',
+                date_style = 'medium',
+                time_style = 'short',
+                hour_cycle = 24
+            WHERE username = 'admin' OR user_id IN (1, 9999, 9998, 9997)
+        """)
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        if conn:
+            conn.close()

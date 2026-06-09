@@ -7,6 +7,7 @@
 """
 
 import logging
+import os
 from typing import TYPE_CHECKING
 from meta.core.interceptors.base import Interceptor
 
@@ -16,14 +17,21 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # crud_* 标准动作 → 权限后缀映射
+# [v1.0.1 FR-001] 合并 read/list: list 和 query 复用 read 权限, 避免缺 product:list 时 403
 _ACTION_PERMISSION_SUFFIX = {
     'crud_create': 'create',
     'crud_read':   'read',
     'crud_update': 'update',
     'crud_delete': 'delete',
-    'crud_list':   'list',
-    'crud_query':  'list',
+    'crud_list':   'read',  # v1.0.1: 合并到 read
+    'crud_query':  'read',  # v1.0.1: 合并到 read
 }
+
+# [v1.0.1 D9] 父读 audit-only 严格模式开关 (env 升级用)
+_PARENT_READ_STRICT_MODE = os.environ.get('PARENT_READ_STRICT_MODE', '').lower() == 'true'
+
+# [v1.0.1 D10] 链 read audit-only 严格模式开关 (env 升级用)
+_CHAIN_DERIVATION_STRICT_MODE = os.environ.get('CHAIN_DERIVATION_STRICT_MODE', '').lower() == 'true'
 
 
 class PermissionDenied(Exception):
@@ -32,6 +40,54 @@ class PermissionDenied(Exception):
     def __init__(self, detail: str):
         self.detail = detail
         super().__init__(detail)
+
+
+# [v1.0.1 D9] 父读 audit-only 升级模式异常
+class ParentPermissionDenied(Exception):
+    status_code = 403
+
+    def __init__(self, child: str, parent: str, perm: str, action: str):
+        self.child = child
+        self.parent = parent
+        self.perm = perm
+        self.action = action
+        super().__init__(f'缺少父资源 {parent} 的 read 权限 (操作 {child}.{action}, 需 {perm})')
+
+
+# [v1.0.1 D10] 链 read 类型级硬拒异常 (env 升级模式)
+class ChainReadDenied(Exception):
+    status_code = 403
+
+    def __init__(self, object_type: str, chain: list, required_perm_any_of: list):
+        self.object_type = object_type
+        self.chain = chain
+        self.required_perm_any_of = required_perm_any_of
+        super().__init__(
+            f'写 {object_type} 需链中任一 read 权限: {",".join(required_perm_any_of)}'
+        )
+
+
+# [v1.0.1 D13] 链 read 实例级越权异常
+class ChainInstanceOutOfScope(Exception):
+    status_code = 403
+
+    def __init__(self, object_type: str, target_id: int, chain: list, out_of_scope_parents: list):
+        self.object_type = object_type
+        self.target_id = target_id
+        self.chain = chain
+        self.out_of_scope_parents = out_of_scope_parents
+        super().__init__(
+            f'操作 {object_type}({target_id}) 越权, parent chain 中实例不在 user 数据权限范围'
+        )
+
+
+def user_info_has_perm(permissions, required: str) -> bool:
+    """[v1.0.1] helper: 检查 permissions 集合/列表中是否含 required (支持通配 *)"""
+    if not permissions:
+        return False
+    if '*' in permissions:
+        return True
+    return required in permissions
 
 
 class PermissionInterceptor(Interceptor):
@@ -70,6 +126,14 @@ class PermissionInterceptor(Interceptor):
 
         if is_admin(user_info):
             return
+
+        # [v1.0.1 D9] 父读 audit-only (写操作触发, 不阻塞)
+        if context.action in ('crud_create', 'crud_update', 'crud_delete'):
+            self._check_parent_read_advisory(context, user_info)
+
+        # [v1.0.1 D10] 链 read 类型级 audit-only (写操作触发)
+        if context.action in ('crud_create', 'crud_update', 'crud_delete'):
+            self._check_chain_read(context, user_info, target_id=getattr(context, 'target_id', None))
 
         permissions = user_info.get('permissions', [])
         if not isinstance(permissions, set):
@@ -131,7 +195,252 @@ class PermissionInterceptor(Interceptor):
                 'message': error.detail,
                 'code': 'PERMISSION_DENIED',
             }), error.status_code
+        # [v1.0.1 D13] 链 read 实例级越权
+        if isinstance(error, ChainInstanceOutOfScope):
+            return jsonify({
+                'success': False,
+                'message': str(error),
+                'code': 'ERR_CHAIN_INSTANCE_OUT_OF_SCOPE',
+                'out_of_scope_parents': error.out_of_scope_parents,
+                'chain': error.chain,
+            }), error.status_code
+        # [v1.0.1 D10 env 升级] 链 read 类型级硬拒
+        if isinstance(error, ChainReadDenied):
+            return jsonify({
+                'success': False,
+                'message': str(error),
+                'code': 'ERR_CHAIN_READ_DENIED',
+                'chain': error.chain,
+                'required_perm_any_of': error.required_perm_any_of,
+            }), error.status_code
         return None
+
+    # ============================================================
+    # [v1.0.1 D9] 父读 audit-only
+    # ============================================================
+    def _check_parent_read_advisory(self, context: 'ActionContext', user_info: dict) -> None:
+        """[FR-003 v1.0.1 D9] 父读 audit-only 校验 — 写操作触发, log + header + 不阻塞.
+
+        流程:
+        1. 查 BoYamlCache.get_parent(child_type) → 父 BO 配置
+        2. 缺权限 → audit-only (log + header + /_diagnostics)
+        3. 升级模式: PARENT_READ_STRICT_MODE=true → 抛 ParentPermissionDenied
+        """
+        try:
+            from meta.core.bo_yaml_cache import BoYamlCache
+        except ImportError:
+            return  # BoYamlCache 不可用, 跳过 (向后兼容)
+
+        parent_cfg = BoYamlCache.get_parent(context.object_type)
+        if not parent_cfg:
+            return  # 无 parent 配置, 跳过
+
+        parent_type = parent_cfg.get('object')
+        if not parent_type:
+            return
+
+        permissions = user_info.get('permissions', [])
+        if not isinstance(permissions, set):
+            permissions = set(permissions)
+
+        # admin / 通配符 跳过
+        if '*' in permissions:
+            return
+
+        required_perm = f'{parent_type}:read'
+        if required_perm in permissions:
+            return  # 有权限, 放行
+
+        # 缺权限: audit-only
+        missing_perms = [required_perm]
+        try:
+            from flask import request
+            if request and hasattr(request, 'response') and request.response:
+                request.response.headers['X-Parent-Permission-Warning'] = (
+                    f'missing {",".join(missing_perms)}'
+                )
+        except Exception:
+            pass
+
+        logger.warning(
+            'permission.parent_read.missing',
+            extra={
+                'child_object': context.object_type,
+                'parent_object': parent_type,
+                'parent_required_perm': required_perm,
+                'action': context.action,
+                'user_id': user_info.get('id'),
+                'decision': 'allow_with_warning',
+            }
+        )
+
+        # 写入 /_diagnostics 计数
+        try:
+            from meta.core.diagnostics import get_diagnostics
+            diag = get_diagnostics()
+            if 'parent_read_warnings' not in diag:
+                diag['parent_read_warnings'] = []
+            diag['parent_read_warnings'].append({
+                'child_object': context.object_type,
+                'parent_object': parent_type,
+                'parent_required_perm': required_perm,
+                'action': context.action,
+                'user_id': user_info.get('id'),
+                'decision': 'allow_with_warning',
+            })
+            # 保留最近 100 条
+            if len(diag['parent_read_warnings']) > 100:
+                diag['parent_read_warnings'] = diag['parent_read_warnings'][-100:]
+        except Exception:
+            pass
+
+        # env 升级模式: 硬拒
+        if _PARENT_READ_STRICT_MODE:
+            logger.warning(
+                'permission.parent_read.missing (strict mode)',
+                extra={'decision': 'hard_reject'}
+            )
+            raise ParentPermissionDenied(
+                child=context.object_type,
+                parent=parent_type,
+                perm=required_perm,
+                action=context.action,
+            )
+
+    # ============================================================
+    # [v1.0.1 D10/D13] 链 read 校验
+    # ============================================================
+    def _check_chain_read(self, context: 'ActionContext', user_info: dict, target_id: int = None) -> None:
+        """[FR-003b v1.0.1 D10/D13] 链 read 校验 — 类型级 audit-only + 实例级硬拒.
+
+        类型级 (FR-003b.1):
+        - 写操作触发, 链中任一 read 缺失 → audit-only (log + header + 不阻塞)
+        - env 升级: CHAIN_DERIVATION_STRICT_MODE=true → 抛 ChainReadDenied
+
+        实例级 (FR-003b.2):
+        - 带 target_id 时, 解析实际 parent chain instances
+        - 任一 parent instance 不在 user data scope → 硬拒 ChainInstanceOutOfScope
+        """
+        try:
+            from meta.core.bo_yaml_cache import BoYamlCache
+        except ImportError:
+            return
+
+        chain = BoYamlCache.get_parent_chain(context.object_type)
+        if not chain:
+            return  # 顶层 BO, 无链
+
+        # D11 A2 模式: 读/列表不校验
+        # (已经在 caller 处判断 action, 这里再防一次)
+        if context.action in ('crud_read', 'crud_list', 'crud_query'):
+            return
+
+        permissions = user_info.get('permissions', [])
+        if not isinstance(permissions, set):
+            permissions = set(permissions)
+
+        if '*' in permissions:
+            return  # 通配符放行
+
+        # =========================================================
+        # FR-003b.1 类型级 audit-only
+        # =========================================================
+        if not any(user_info_has_perm(permissions, f'{bo}:read') for bo in chain):
+            missing_perms = [f'{bo}:read' for bo in chain
+                            if not user_info_has_perm(permissions, f'{bo}:read')]
+
+            try:
+                from flask import request
+                if request and hasattr(request, 'response') and request.response:
+                    request.response.headers['X-Chain-Permission-Warning'] = (
+                        f'missing {",".join(missing_perms)}'
+                    )
+            except Exception:
+                pass
+
+            logger.warning(
+                'permission.chain_read.type.missing',
+                extra={
+                    'object_type': context.object_type,
+                    'chain': chain,
+                    'missing_perms': missing_perms,
+                    'action': context.action,
+                    'user_id': user_info.get('id'),
+                    'decision': 'allow_with_warning',
+                }
+            )
+
+            # 写入 /_diagnostics
+            try:
+                from meta.core.diagnostics import get_diagnostics
+                diag = get_diagnostics()
+                if 'chain_read_warnings' not in diag:
+                    diag['chain_read_warnings'] = []
+                diag['chain_read_warnings'].append({
+                    'object_type': context.object_type,
+                    'chain': chain,
+                    'missing_perms': missing_perms,
+                    'action': context.action,
+                    'user_id': user_info.get('id'),
+                    'decision': 'allow_with_warning',
+                })
+                if len(diag['chain_read_warnings']) > 100:
+                    diag['chain_read_warnings'] = diag['chain_read_warnings'][-100:]
+            except Exception:
+                pass
+
+            # env 升级模式: 类型级硬拒
+            if _CHAIN_DERIVATION_STRICT_MODE:
+                raise ChainReadDenied(
+                    object_type=context.object_type,
+                    chain=chain,
+                    required_perm_any_of=[f'{bo}:read' for bo in chain],
+                )
+
+        # =========================================================
+        # FR-003b.2 实例级硬拒 (仅写 + target_id)
+        # =========================================================
+        if target_id is not None:
+            try:
+                actual_parents = BoYamlCache.resolve_parent_chain(
+                    context.object_type, target_id
+                )
+            except Exception as e:
+                logger.debug(f'resolve_parent_chain failed: {e}')
+                actual_parents = []
+
+            if actual_parents:
+                user_data_scope = user_info.get('data_scope', {})
+                out_of_scope = []
+                for parent in actual_parents:
+                    parent_bo = parent['bo']
+                    parent_id = parent['id']
+                    scope = user_data_scope.get(parent_bo, [])
+                    if scope and parent_id not in scope:
+                        out_of_scope.append({
+                            'bo': parent_bo,
+                            'instance_id': parent_id,
+                            'data_scope': scope,
+                        })
+
+                if out_of_scope:
+                    logger.warning(
+                        'permission.chain_read.instance.out_of_scope',
+                        extra={
+                            'object_type': context.object_type,
+                            'target_id': target_id,
+                            'out_of_scope_parents': out_of_scope,
+                            'action': context.action,
+                            'user_id': user_info.get('id'),
+                            'decision': 'hard_reject',
+                        }
+                    )
+                    raise ChainInstanceOutOfScope(
+                        object_type=context.object_type,
+                        target_id=target_id,
+                        chain=[p['bo'] for p in actual_parents],
+                        out_of_scope_parents=out_of_scope,
+                    )
 
 
 def inject_ai_agent_role(user_info, flask_g=None):

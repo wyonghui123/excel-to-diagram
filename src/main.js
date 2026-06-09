@@ -12,7 +12,11 @@ import { logger } from './utils/logger'
 //   - zhCn locale 通过 App.vue 中的 <el-config-provider :locale="zhCn"> 注入
 // import ElementPlus from 'element-plus'
 // import 'element-plus/theme-chalk/index.css'
-import zhCn from 'element-plus/dist/locale/zh-cn.mjs'
+// [FR-008] Element Plus locale: 改用 ESM 按需路径 (vs dist/locale 全量)
+//   - element-plus/es/locale/lang/zh-cn 只包含中文 locale 数据
+//   - element-plus/dist/locale/zh-cn.mjs 包含所有 locale 的聚合导出
+//   - ESM 路径让 Vite tree-shake 未使用的 locale
+import zhCn from 'element-plus/es/locale/lang/zh-cn'
 
 // [FR-011] 统一样式入口 (合并原 6 个样式文件)
 //   顺序敏感: tokens-yonyou → variables → element-variables → yon-ep → meta-table
@@ -35,6 +39,14 @@ pinia.use(createPersistedState({
 
 app.use(pinia)
 app.use(router)
+
+// [FR-015] setOnUnauthorized 提前注册 (在任何 HTTP 请求之前)
+//   - 旧位置在 L79,太晚: loadFromCookie 等初始化请求可能触发 401 但回调未就绪
+setOnUnauthorized(() => {
+  if (window.location.pathname !== '/') {
+    window.location.href = '/?reason=unauthorized'
+  }
+})
 
 app.config.errorHandler = (err, instance, info) => {
   const componentName = instance?.$?.type?.__name
@@ -70,23 +82,14 @@ window.addEventListener('unhandledrejection', (event) => {
 
 window.__pinia = pinia
 
-// [FR-004] 移除 app.use(ElementPlus),改用 unplugin-vue-components 按需自动注册
-//   - size/zIndex 通过 App.vue 的 <el-config-provider :size="default" :z-index="3000"> 配置
-//   - locale 通过 App.vue 的 <el-config-provider :locale="zhCn"> 配置
-//   - 注册逻辑由 ElementPlusResolver 在每个组件使用时自动 import
-// app.use(ElementPlus, { locale: zhCn, size: 'default', zIndex: 3000 })
-
-setOnUnauthorized(() => {
-  if (window.location.pathname !== '/') {
-    window.location.href = '/?reason=unauthorized'
-  }
-})
-
-// 显式恢复会话（替代 authStore 内部的自动调用）
-const authStore = useAuthStore()
-authStore.loadFromCookie('restore')
-
 // [FR-004] 将 zhCn 暴露给 App.vue (ElConfigProvider 需要 locale prop)
+// [FR-015] provide 在 mount 之前 (App.vue inject 才能拿到)
 app.provide('elementPlusLocale', zhCn)
 
-app.mount('#app')
+// [FR-015] await session restore before mount
+//   - 旧实现未 await,app.mount 时 session 可能未恢复,导致闪现登录页
+//   - 使用 .then() 而非 top-level await (构建目标不支持 es2022)
+const authStore = useAuthStore()
+authStore.loadFromCookie('restore').then(() => {
+  app.mount('#app')
+})

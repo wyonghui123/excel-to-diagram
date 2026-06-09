@@ -123,6 +123,30 @@ import { Edit } from '@element-plus/icons-vue'
 import ValueHelpField from '@/components/common/ValueHelpField.vue'
 import { boService } from '@/services/boService.js'
 import { formatDate } from '@/composables/useMetaList'
+// [FIX] 显式导入 Element Plus 组件以支持动态 <component :is> 渲染
+//   - unplugin-vue-components 只能自动导入模板中的字面量标签
+//   - 动态 :is="字符串" 不会触发自动导入，必须显式 import
+import {
+  ElInput,
+  ElInputNumber,
+  ElSelect,
+  ElDatePicker,
+  ElSwitch,
+  ElCheckbox
+} from 'element-plus'
+
+const ELEMENT_PLUS_WIDGET_MAP = {
+  'el-input': ElInput,
+  'el-input-number': ElInputNumber,
+  'el-select': ElSelect,
+  'el-date-picker': ElDatePicker,
+  'el-switch': ElSwitch,
+  'el-checkbox': ElCheckbox
+}
+
+function resolveWidgetComponent(widgetName) {
+  return ELEMENT_PLUS_WIDGET_MAP[widgetName] || ElInput
+}
 
 const props = defineProps({
   row: {
@@ -207,7 +231,10 @@ const inputComponent = computed(() => {
     'date': 'el-date-picker',
     'datetime': 'el-date-picker'
   }
-  return typeMap[props.fieldConfig?.type] || 'el-input'
+  // [FIX] 返回真正的组件引用，而非字符串
+  //  - unplugin-vue-components 只能自动导入模板字面量标签
+  //  - 动态 :is="字符串" 会渲染成字面量 HTML 元素，需显式 import 后用组件引用
+  return resolveWidgetComponent(typeMap[props.fieldConfig?.type] || 'el-input')
 })
 
 const inputProps = computed(() => {

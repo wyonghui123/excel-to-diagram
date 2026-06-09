@@ -72,7 +72,23 @@ def regular_token(app, isolated_token_service):
 
 @pytest.fixture(scope='function', autouse=True)
 def restore_admin_prefs(client, admin_token):
+    """恢复管理员偏好设置 - 每个测试前后都恢复默认值"""
+    # Setup: restore to defaults BEFORE test
+    client.put('/api/v1/users/me',
+        json=DEFAULT_ADMIN_PREFS,
+        headers={'Authorization': f'Bearer {admin_token}'})
     yield
+    # Teardown: restore to defaults AFTER test
+    try:
+        client.put('/api/v1/users/me',
+            json=DEFAULT_ADMIN_PREFS,
+            headers={'Authorization': f'Bearer {admin_token}'})
+    except Exception:
+        pass
+
+
+def _restore_prefs(client, admin_token):
+    """恢复管理员偏好设置到默认值"""
     client.put('/api/v1/users/me',
         json=DEFAULT_ADMIN_PREFS,
         headers={'Authorization': f'Bearer {admin_token}'})

@@ -1,3 +1,15 @@
+## 目录
+
+1. [1. 剩余工作总览](#1-剩余工作总览)
+2. [2. 详细 Todo（按优先级排序）](#2-详细-todo（按优先级排序）)
+3. [3. 优先级矩阵（ROI 排序）](#3-优先级矩阵（roi-排序）)
+4. [4. 时间线建议](#4-时间线建议)
+5. [5. 风险与依赖](#5-风险与依赖)
+6. [6. 验收总览](#6-验收总览)
+7. [7. 关联文档](#7-关联文档)
+8. [8. 变更记录](#8-变更记录)
+
+---
 # Refined Todo: UI 业务逻辑下沉服务层 (v3.1.3 细化)
 
 > **父 spec**: [spec-ui-business-logic-downflow.md](file:///d:/filework/excel-to-diagram/docs/specs/spec-ui-business-logic-downflow.md) v3.1.2 (2026-06-06)

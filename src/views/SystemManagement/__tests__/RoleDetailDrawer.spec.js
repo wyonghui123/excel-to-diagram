@@ -15,7 +15,7 @@ const mockUnifiedData = {
       display_name: '仪表盘',
       menu_path: '/dashboard',
       assigned: true,
-      required_permissions_display: [
+      required_permissions: [
         { code: 'view', granted: true },
         { code: 'edit', granted: true }
       ]

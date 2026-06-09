@@ -157,7 +157,8 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/authStore'
-import { useMessage } from '@/composables/useMessage'
+import { useCrudMessage } from '@/composables/useCrudMessage'
+import { useUserProfileSync } from '@/composables/useUserProfileSync'
 import { useUserPreferencesStore } from '@/stores/userPreferences'
 import { dateFormatService } from '@/services/DateFormatService'
 import * as authService from '@/services/authService'
@@ -170,7 +171,8 @@ const props = defineProps({ visible: Boolean })
 const emit = defineEmits(['close'])
 
 const authStore = useAuthStore()
-const message = useMessage()
+const message = useCrudMessage()
+const profileSync = useUserProfileSync()
 const prefStore = useUserPreferencesStore()
 
 const activeTab = ref('profile')
@@ -319,11 +321,9 @@ async function saveProfile() {
   try {
     const data = await authService.updateProfile({ display_name: profileForm.displayName, email: profileForm.email })
     if (data.success) {
-      if (authStore.user) {
-        authStore.user.display_name = profileForm.displayName
-        authStore.user.email = profileForm.email
-      }
-      message.success('已更新')
+      // [FIX 2026-06-09] 立即同步到 authStore, 顶部菜单/头像首字母实时刷新
+      profileSync.sync({ display_name: profileForm.displayName, email: profileForm.email })
+      message.profileUpdated()
       isEditing.value = false
     } else {
       submitError.value = data.message || '保存失败'
@@ -349,7 +349,7 @@ async function savePassword() {
   try {
     const data = await authService.changePassword(pwdForm.oldPassword, pwdForm.newPassword)
     if (data.success) {
-      message.success('修改成功')
+      message.passwordChanged()
       pwdForm.oldPassword = ''; pwdForm.newPassword = ''; pwdForm.confirmPassword = ''
       if (authStore.mustChangePassword) authStore.mustChangePassword = false
     } else { pwdSubmitError.value = data.message || '修改失败' }
@@ -384,7 +384,7 @@ async function savePreferences() {
       hourCycle: prefForm.hourCycle
     })
     if (success) {
-      message.success('偏好设置已保存')
+      message.preferencesSaved()
       emit('close')
     } else {
       prefSubmitError.value = '保存失败，请重试'

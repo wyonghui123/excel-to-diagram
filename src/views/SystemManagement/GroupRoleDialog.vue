@@ -60,7 +60,7 @@
 
 <script setup>
 import { ref, onMounted, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { useCrudMessage } from '@/composables/useCrudMessage'
 import { Loading } from '@element-plus/icons-vue'
 import boService from '@/services/boService'
 
@@ -71,6 +71,8 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close', 'saved'])
+
+const message = useCrudMessage()
 
 const allRoles = ref([])
 const selectedRoleIds = ref([])
@@ -112,11 +114,11 @@ async function handleSave() {
       await boService.dissociate('user_group', props.groupId, 'roles', roleId, 'role')
     }
     
-    ElMessage.success(`成功关联 ${selectedRoleIds.value.length} 个角色`)
+    message.success(`成功关联 ${selectedRoleIds.value.length} 个角色`)
     emit('saved')
     emit('close')
   } catch (e) {
-    ElMessage.error('网络错误')
+    message.error('网络错误', e)
   } finally {
     saving.value = false
   }

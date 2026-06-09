@@ -331,7 +331,7 @@ function updateTabLabel() {
   if (!tab) return
   const newLabel = objectName.value ? `${pageTitle.value} ${objectName.value}` : pageTitle.value
   if (tab.label !== newLabel) {
-    tab.label = newLabel
+    tabStore.updateTabLabel(tab.id, newLabel)
   }
 }
 </script>

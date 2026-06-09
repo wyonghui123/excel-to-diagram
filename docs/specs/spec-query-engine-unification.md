@@ -1,3 +1,19 @@
+## 目录
+
+1. [1. Background & Objectives](#1-background-objectives)
+2. [2. Requirement Type Overview](#2-requirement-type-overview)
+3. [3. Functional Requirements](#3-functional-requirements)
+4. [4. Nonfunctional Requirements](#4-nonfunctional-requirements)
+5. [5. External Interface Requirements](#5-external-interface-requirements)
+6. [6. Transition Requirements](#6-transition-requirements)
+7. [7. Constraints & Assumptions](#7-constraints-assumptions)
+8. [8. Priorities & Milestones](#8-priorities-milestones)
+9. [9. Change / Design Proposal (RFC)](#9-change-design-proposal-(rfc))
+10. [10. TBD List](#10-tbd-list)
+11. [附录 A：相关历史 bug 清单](#附录-a：相关历史-bug-清单)
+12. [附录 B：Stage 5 - Good Enough 评估](#附录-b：stage-5---good-enough-评估)
+
+---
 # Spec: QueryEngine 统一架构（QE-2026-06）
 
 > **状态**: 已确认 · 暂不实施（用户决策 2026-06-05）

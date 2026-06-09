@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import logging
+import re
 from typing import Dict, Any
 
 from meta.core.interceptors.base import Interceptor
@@ -243,6 +244,7 @@ class PersistenceInterceptor(Interceptor):
         OP_MAP = {
             'eq': '=', 'neq': '!=', 'gt': '>', 'lt': '<',
             'gte': '>=', 'lte': '<=', 'like': 'LIKE',
+            'in': 'IN', 'nin': 'NOT IN',  # [FIX v1.0.2] 支持 in/nin 操作符
         }
 
         conditions = []
@@ -257,6 +259,12 @@ class PersistenceInterceptor(Interceptor):
                     value = c.get('value')
                     if op == 'in_subquery':
                         or_parts.append(f"{field} IN ({value})")
+                    elif op in ('in', 'nin'):
+                        # [FIX v1.0.2] 列表值用 IN (...) 展开
+                        values = c.get('values', value if isinstance(value, list) else [value])
+                        placeholders = ','.join('?' * len(values))
+                        or_parts.append(f"{field} {OP_MAP[op]} ({placeholders})")
+                        params.extend(values)
                     else:
                         sql_op = OP_MAP.get(op, '=')
                         or_parts.append(f"{field} {sql_op} ?")
@@ -269,6 +277,12 @@ class PersistenceInterceptor(Interceptor):
                 value = cond.get('value')
                 if op == 'in_subquery':
                     conditions.append(f"{field} IN ({value})")
+                elif op in ('in', 'nin'):
+                    # [FIX v1.0.2] 列表值用 IN (...) 展开
+                    values = cond.get('values', value if isinstance(value, list) else [value])
+                    placeholders = ','.join('?' * len(values))
+                    conditions.append(f"{field} {OP_MAP[op]} ({placeholders})")
+                    params.extend(values)
                 else:
                     sql_op = OP_MAP.get(op, '=')
                     conditions.append(f"{field} {sql_op} ?")
@@ -552,7 +566,9 @@ class PersistenceInterceptor(Interceptor):
             virtual_sort = self._resolve_virtual_sort(meta_object, order_by)
 
             if search_or_conditions:
-                and_conditions, and_params = registry.ds._build_conditions(filters) if filters else ([], [])
+                # [FIX 2026-06-08] 传 table_prefix 消除 JOIN 后的列名歧义
+                # (例：relationship JOIN business_objects 后 `version_id` 两表都有)
+                and_conditions, and_params = registry.ds._build_conditions(filters, meta_object.table_name) if filters else ([], [])
 
                 all_where_clauses = []
                 all_params = []
@@ -620,7 +636,8 @@ class PersistenceInterceptor(Interceptor):
                 records = items
 
             else:
-                and_conditions, and_params = registry.ds._build_conditions(filters) if filters else ([], [])
+                # [FIX 2026-06-08] 传 table_prefix 消除 JOIN 后的列名歧义
+                and_conditions, and_params = registry.ds._build_conditions(filters, meta_object.table_name) if filters else ([], [])
 
                 all_where_clauses = []
                 all_params = []
@@ -747,7 +764,9 @@ class PersistenceInterceptor(Interceptor):
             records = self._enrich_association_counts(meta_object, records, registry.ds)
             records = self._enrich_fk_display_names(meta_object, records, registry.ds)
 
-            if order_by:
+            # [FIX 2026-06-08] 只有当 SQL 层未排序虚拟字段时才做内存排序
+            # virtual_sort 非 None 表示 SQL 已通过 JOIN + ORDER BY 排序，无需再内存排序
+            if order_by and not virtual_sort:
                 records = self._sort_by_virtual_fields(meta_object, records, order_by)
 
             return ActionResult(success=True, data=records, total=total)
@@ -822,30 +841,75 @@ class PersistenceInterceptor(Interceptor):
                 assoc_type = 'many_to_many'
                 through = None
                 source_key = None
+                foreign_key_field = None
+                target_table = None
             else:
                 assoc_name = getattr(assoc, 'name', '')
                 assoc_type = getattr(assoc, 'type', '')
                 through = getattr(assoc, 'through', None)
                 source_key = getattr(assoc, 'source_key', None)
+                # [FIX] merged_one_to_many / one_to_many 等虚拟关联通过外键字段统计
+                foreign_key_field = getattr(assoc, 'foreign_key_field', None)
+                # [FIX] 实际表名通常是 assoc_name 复数 (如 relationships)；
+                # target_entity/target_type 在 YAML 中是单数 (relationship)，DB 表是复数。
+                # 优先级: 显式 target_table > assoc_name 复数 (本表通常命名为 relationships)
+                # > target_entity 复数 > target_entity 单数
+                _target_entity = getattr(assoc, 'target_entity', None) or ''
+                _pluralized = (
+                    assoc_name if assoc_name.endswith('s')
+                    else assoc_name + 's'
+                )
+                target_table = (
+                    getattr(assoc, 'target_table', None)
+                    or _pluralized
+                    or (_target_entity + 's' if _target_entity and not _target_entity.endswith('s') else _target_entity)
+                    or _target_entity
+                )
 
-            if assoc_type != 'many_to_many':
+            # [FIX] 支持 many_to_many (走 through/source_key)
+            #       和 merged_one_to_many / one_to_many (走 foreign_key_field)
+            many_to_many_matched = False
+            if assoc_type == 'many_to_many' and through and source_key:
+                many_to_many_matched = True
+            elif assoc_type in ('merged_one_to_many', 'one_to_many', 'virtual_one_to_many') and foreign_key_field and target_table:
+                pass  # 走外键路径
+            else:
                 continue
-            # 匹配：member_count <-> members / member
+            # 匹配：relation_count <-> relationships / relationship / relations / relation
+            # 支持关系名去除常见后缀（ship / ies / es / s）后与 base_name 比较，
+            # 这样 relation_count 也能匹配 relationships / relationships_for_xxx
+            assoc_singular = re.sub(r'(ship$|ies$|es$|s$)', '', assoc_name)
             matched = (
                 assoc_name == base_name
                 or assoc_name == base_name + 's'
-                or assoc_name.rstrip('s') == base_name
+                or assoc_singular == base_name
+                or assoc_name == base_name + 'ship'
+                or assoc_name == base_name + 'ship' + 's'
             )
             if not matched:
                 continue
-            if not (through and source_key):
-                continue
 
             direction = 'DESC' if is_desc else 'ASC'
-            return (
-                f"(SELECT COUNT(*) FROM {through} "
-                f"WHERE {through}.{source_key} = {table_name}.id) {direction}"
-            )
+            if many_to_many_matched:
+                return (
+                    f"(SELECT COUNT(*) FROM {through} "
+                    f"WHERE {through}.{source_key} = {table_name}.id) {direction}"
+                )
+            else:
+                # [FIX] merged_one_to_many: 业务对象的关系数量通常按双向计算
+                # (source_bo_id = id OR target_bo_id = id) 才能与 Python 端
+                # computation_service.compute_by_semantics 计算的 relation_count 一致。
+                target_key = getattr(assoc, 'target_key', None) or ''
+                if target_key and target_key != foreign_key_field:
+                    return (
+                        f"(SELECT COUNT(*) FROM {target_table} "
+                        f"WHERE {target_table}.{foreign_key_field} = {table_name}.id "
+                        f"OR {target_table}.{target_key} = {table_name}.id) {direction}"
+                    )
+                return (
+                    f"(SELECT COUNT(*) FROM {target_table} "
+                    f"WHERE {target_table}.{foreign_key_field} = {table_name}.id) {direction}"
+                )
 
         return None
 
@@ -892,6 +956,14 @@ class PersistenceInterceptor(Interceptor):
         elif key.endswith('__lte'):
             field_name = key[:-5]
             operator = '<='
+            values = [value]
+        elif key.endswith('__gt'):
+            field_name = key[:-4]
+            operator = '>'
+            values = [value]
+        elif key.endswith('__lt'):
+            field_name = key[:-4]
+            operator = '<'
             values = [value]
         elif key.endswith('_start'):
             field_name = key[:-6]
@@ -946,25 +1018,60 @@ class PersistenceInterceptor(Interceptor):
                 assoc_type = 'many_to_many'
                 through = None
                 source_key = None
+                foreign_key_field = None
+                target_table = None
             else:
                 assoc_name = getattr(assoc, 'name', '')
                 assoc_type = getattr(assoc, 'type', '')
                 through = getattr(assoc, 'through', None)
                 source_key = getattr(assoc, 'source_key', None)
+                # [FIX] 兼容 merged_one_to_many 等虚拟关联
+                foreign_key_field = getattr(assoc, 'foreign_key_field', None)
+                _target_entity = getattr(assoc, 'target_entity', None) or ''
+                _pluralized = (
+                    assoc_name if assoc_name.endswith('s')
+                    else assoc_name + 's'
+                )
+                target_table = (
+                    getattr(assoc, 'target_table', None)
+                    or _pluralized
+                    or (_target_entity + 's' if _target_entity and not _target_entity.endswith('s') else _target_entity)
+                    or _target_entity
+                )
 
-            if assoc_type != 'many_to_many':
+            # [FIX] many_to_many (走 through/source_key) 与 merged_one_to_many (走外键) 都支持
+            many_to_many_matched = False
+            if assoc_type == 'many_to_many' and through and source_key:
+                many_to_many_matched = True
+            elif assoc_type in ('merged_one_to_many', 'one_to_many', 'virtual_one_to_many') and foreign_key_field and target_table:
+                pass
+            else:
                 continue
+            # 匹配：relation_count <-> relationships / relationship / relations / relation
+            assoc_singular = re.sub(r'(ship$|ies$|es$|s$)', '', assoc_name)
             matched = (
                 assoc_name == base_name
                 or assoc_name == base_name + 's'
-                or assoc_name.rstrip('s') == base_name
+                or assoc_singular == base_name
+                or assoc_name == base_name + 'ship'
+                or assoc_name == base_name + 'ship' + 's'
             )
             if not matched:
                 continue
-            if not (through and source_key):
-                continue
 
-            subquery = f"(SELECT COUNT(*) FROM {through} WHERE {through}.{source_key} = {table_name}.id)"
+            if many_to_many_matched:
+                subquery = f"(SELECT COUNT(*) FROM {through} WHERE {through}.{source_key} = {table_name}.id)"
+            else:
+                # [FIX] 双向 COUNT (source FK = id OR target FK = id) 与 Python 端 relation_count 一致
+                _target_key = getattr(assoc, 'target_key', None) or ''
+                if _target_key and _target_key != foreign_key_field:
+                    subquery = (
+                        f"(SELECT COUNT(*) FROM {target_table} "
+                        f"WHERE {target_table}.{foreign_key_field} = {table_name}.id "
+                        f"OR {target_table}.{_target_key} = {table_name}.id)"
+                    )
+                else:
+                    subquery = f"(SELECT COUNT(*) FROM {target_table} WHERE {target_table}.{foreign_key_field} = {table_name}.id)"
             if operator in ('IN', 'NOT IN'):
                 if not values:
                     return None, None
@@ -995,7 +1102,28 @@ class PersistenceInterceptor(Interceptor):
 
         from meta.core.redundancy_registry import redundancy_registry
         red_def = redundancy_registry.get_redundancy(meta_object.id, field_name)
+        
+        # [FIX 2026-06-08] audit 派生字段排序支持
+        # 如果 red_def 为空，检查是否是 audit 派生字段（derive_from_object='audit_logs'）
         if not red_def or not red_def.join_path:
+            derive_from = getattr(field, 'derive_from_object', None)
+            if derive_from == 'audit_logs':
+                from meta.services.query.virtual_sort import _build_audit_derived_order_join
+                result = _build_audit_derived_order_join(
+                    meta_object.table_name,
+                    meta_object.id,  # object_type for audit query
+                    field_name,
+                    direction
+                )
+                if result:
+                    # _build_audit_derived_order_join 返回三元组 (join_clause, order_alias, sort_dir)
+                    # 需要转为二元组 (join_clause, sort_expr) 以匹配 _resolve_virtual_sort 的返回格式
+                    join_sql, order_alias, sort_dir = result
+                    # [FIX 2026-06-08] COALESCE 回退到 created_at：
+                    # COALESCE 包装已在 _build_audit_derived_order_join() 中完成
+                    sort_expr = f"{order_alias} {sort_dir}"
+                    logger.info(f"[VirtualSort] Built audit-derived JOIN sort for {meta_object.id}.{field_name}: {join_sql}, order_by: {sort_expr}")
+                    return join_sql, sort_expr
             return None
 
         table_name = meta_object.table_name

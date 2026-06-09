@@ -165,6 +165,7 @@ from meta.handlers.import_handlers import ImportQueueHandler
 from meta.api.task_api import task_api_bp, set_scheduler as set_task_scheduler
 from meta.api.key_template_api import key_template_bp, set_engine as set_kt_engine
 from meta.api.test_api import test_bp
+from meta.api.debug_api import debug_bp
 from meta.scripts.init_task_menus import init_task_menus
 from meta.scripts.init_task_seed import init_task_seed_data
 from meta.scripts.init_menu_permissions import init_menu_permissions
@@ -658,6 +659,7 @@ def create_app(db_path=None):
     app.register_blueprint(task_api_bp)
     app.register_blueprint(key_template_bp)
     app.register_blueprint(test_bp)
+    app.register_blueprint(debug_bp)
     # v3 BO Action 统一端点
     from meta.api.bo_action_api import bo_action_bp
     app.register_blueprint(bo_action_bp)

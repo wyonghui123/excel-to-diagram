@@ -8,85 +8,45 @@ export function useInteraction() {
   let startX = 0
   let startY = 0
 
-  const updateTransform = (draggableAreaRef) => {
-    const el = draggableAreaRef?.value || document.querySelector('.draggable-area')
+  /**
+   * v4 重构：mermaid-content 不再 absolute 居中（由 CSS flex 居中接管）。
+   * 所以 transform 只需要 `translate(tx, ty) scale(s)`，
+   * 不需要 translate(-50%, -50%)。
+   * scale=1 + translate=(0,0) 表示 fit 状态（CSS 已让 SVG 100% 容器高度）。
+   */
+  const updateTransform = (mermaidContentRef) => {
+    const el = mermaidContentRef?.value || document.querySelector('.mermaid-content')
     if (el) {
       const transformValue = `translate(${translateX.value}px, ${translateY.value}px) scale(${scale.value})`
       el.style.transform = transformValue
     }
   }
 
+  /**
+   * v4 重构：fit 状态就是 scale=1, translate=(0,0)。
+   * CSS 已经让 SVG 100% 容器高度 + 浏览器按 viewBox 比例自动算宽度，
+   * 图表天然填满容器。fit 只需要重置用户缩放/平移。
+   *
+   * 根因复盘：之前用 JS 算 fit scale 永远不准，因为：
+   *   - getBBox() 会被 viewBox 外的边/标签污染（实测 4571×1907）
+   *   - SVG width/height attribute 跟 viewBox 一致（也是 4571×1907）
+   *   - mermaid 渲染时直接把 viewBox 尺寸做 attribute，没法区分"逻辑尺寸"和"渲染尺寸"
+   * 唯一可靠的是让浏览器自己按 viewBox + CSS height:100% 自动缩放。
+   */
   const autoFitDiagram = () => {
     const container = document.querySelector('.mermaid-container')
-    const draggableAreaEl = document.querySelector('.draggable-area')
-    const svg = document.querySelector('.mermaid-content svg')
-    const content = document.querySelector('.mermaid-content')
-
-    if (!container || !draggableAreaEl || !svg) {
-      return
-    }
+    if (!container) return
 
     const containerWidth = container.offsetWidth
     const containerHeight = container.offsetHeight
 
-    let contentWidth = 0
-    let contentHeight = 0
+    console.log('[autoFitDiagram] container size:', containerWidth, 'x', containerHeight)
+    console.log('[autoFitDiagram] fit: scale=1, translate=(0,0) (CSS auto-scales SVG to container)')
 
-    // 优先使用 viewBox 获取尺寸
-    const viewBox = svg.getAttribute('viewBox')
-    if (viewBox) {
-      const parts = viewBox.split(' ').map(Number)
-      contentWidth = parts[2]
-      contentHeight = parts[3]
-    }
-
-    // 如果 viewBox 无效，尝试其他方法
-    if (contentWidth <= 0 || contentHeight <= 0) {
-      const svgRect = svg.getBoundingClientRect()
-      contentWidth = svgRect.width
-      contentHeight = svgRect.height
-    }
-
-    // 检查 SVG 的 width/height 属性
-    const svgWidthAttr = svg.getAttribute('width')
-    const svgHeightAttr = svg.getAttribute('height')
-    if (svgWidthAttr && svgHeightAttr) {
-      const parsedWidth = parseFloat(svgWidthAttr)
-      const parsedHeight = parseFloat(svgHeightAttr)
-      if (parsedWidth > 0 && parsedHeight > 0) {
-        contentWidth = parsedWidth
-        contentHeight = parsedHeight
-      }
-    }
-
-    // 检查 SVG 的 style.width/height
-    const svgStyleWidth = svg.style.width
-    const svgStyleHeight = svg.style.height
-    if (svgStyleWidth && svgStyleHeight) {
-      const parsedWidth = parseFloat(svgStyleWidth)
-      const parsedHeight = parseFloat(svgStyleHeight)
-      if (parsedWidth > 0 && parsedHeight > 0) {
-        contentWidth = parsedWidth
-        contentHeight = parsedHeight
-      }
-    }
-
-    // 最后的兜底
-    if (contentWidth <= 0 || contentHeight <= 0) {
-      contentWidth = svg.scrollWidth || svg.clientWidth || 800
-      contentHeight = svg.scrollHeight || svg.clientHeight || 600
-    }
-
-    console.log('[autoFitDiagram] content size:', contentWidth, contentHeight)
-    console.log('[autoFitDiagram] container size:', containerWidth, containerHeight)
-
-    const scaleX = containerWidth / contentWidth
-    const scaleY = containerHeight / contentHeight
-    const fillRatio = 0.92
-    scale.value = Math.min(scaleX, scaleY) * fillRatio
+    scale.value = 1
     translateX.value = 0
     translateY.value = 0
-    console.log('[autoFitDiagram] calculated scale:', scale.value)
+
     updateTransform()
   }
 
@@ -94,44 +54,22 @@ export function useInteraction() {
     autoFitDiagram()
   }
 
-  const addZoomAndPan = (mermaidWrapperRef, mermaidContainerRef, draggableAreaRef) => {
+  const addZoomAndPan = (mermaidWrapperRef, mermaidContainerRef, mermaidContentRef) => {
     if (!mermaidWrapperRef?.value || !mermaidContainerRef?.value) return
 
-    const svg = mermaidContainerRef.value.querySelector('svg')
-    if (!svg) return
-
-    let contentWidth, contentHeight
-    const viewBox = svg.getAttribute('viewBox')
-    if (viewBox) {
-      const parts = viewBox.split(' ').map(Number)
-      contentWidth = parts[2]
-      contentHeight = parts[3]
-    } else {
-      contentWidth = svg.scrollWidth || svg.clientWidth
-      contentHeight = svg.scrollHeight || svg.clientHeight
-    }
-
-    const containerRect = mermaidContainerRef.value.getBoundingClientRect()
-    const containerWidth = containerRect.width
-    const containerHeight = containerRect.height
-
-    const minScaleX = containerWidth / contentWidth
-    const minScaleY = containerHeight / contentHeight
-    const minScale = Math.max(0.01, Math.min(minScaleX, minScaleY) * 0.15)
-
-    if (draggableAreaRef?.value) {
-      draggableAreaRef.value.style.backgroundColor = '#F0F0F0'
-    }
+    // 缩放范围：fit=1（CSS 已让 SVG 100% 容器高度），用户可放大到 3x，缩小到 0.3x
+    const minScale = 0.3
+    const maxScale = 3
 
     const handleWheel = (e) => {
       e.preventDefault()
 
-      const rect = draggableAreaRef.value.getBoundingClientRect()
+      const rect = mermaidContentRef.value.getBoundingClientRect()
       const mouseX = e.clientX - rect.left
       const mouseY = e.clientY - rect.top
 
       const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1
-      const newScale = Math.max(minScale, Math.min(3, scale.value * zoomFactor))
+      const newScale = Math.max(minScale, Math.min(maxScale, scale.value * zoomFactor))
 
       const centerX = rect.width / 2
       const centerY = rect.height / 2
@@ -144,7 +82,7 @@ export function useInteraction() {
       translateY.value = translateY.value - offsetY * scaleDiff
 
       scale.value = newScale
-      updateTransform(draggableAreaRef)
+      updateTransform(mermaidContentRef)
     }
 
     const handleMouseDown = (e) => {
@@ -156,8 +94,8 @@ export function useInteraction() {
       isDragging = true
       startX = e.clientX - translateX.value
       startY = e.clientY - translateY.value
-      draggableAreaRef.value.style.cursor = 'grabbing'
-      draggableAreaRef.value.classList.add('dragging')
+      mermaidWrapperRef.value.style.cursor = 'grabbing'
+      mermaidWrapperRef.value.classList.add('dragging')
     }
 
     const handleMouseMove = (e) => {
@@ -165,13 +103,13 @@ export function useInteraction() {
 
       translateX.value = e.clientX - startX
       translateY.value = e.clientY - startY
-      updateTransform(draggableAreaRef)
+      updateTransform(mermaidContentRef)
     }
 
     const handleMouseUp = () => {
-      if (isDragging && draggableAreaRef?.value) {
-        draggableAreaRef.value.classList.remove('dragging')
-        draggableAreaRef.value.style.cursor = 'grab'
+      if (isDragging && mermaidWrapperRef?.value) {
+        mermaidWrapperRef.value.classList.remove('dragging')
+        mermaidWrapperRef.value.style.cursor = 'grab'
       }
       isDragging = false
     }
@@ -180,13 +118,13 @@ export function useInteraction() {
       autoFitDiagram()
     }
 
-    draggableAreaRef.value.addEventListener('wheel', handleWheel, { passive: false })
-    draggableAreaRef.value.addEventListener('mousedown', handleMouseDown)
+    mermaidWrapperRef.value.addEventListener('wheel', handleWheel, { passive: false })
+    mermaidWrapperRef.value.addEventListener('mousedown', handleMouseDown)
     document.addEventListener('mousemove', handleMouseMove)
     document.addEventListener('mouseup', handleMouseUp)
-    draggableAreaRef.value.addEventListener('dblclick', handleDblClick)
+    mermaidWrapperRef.value.addEventListener('dblclick', handleDblClick)
 
-    draggableAreaRef.value.style.cursor = 'grab'
+    mermaidWrapperRef.value.style.cursor = 'grab'
   }
 
   return {

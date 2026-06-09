@@ -397,3 +397,84 @@ describe('AuditLog 操作格式化函数', () => {
     expect(formatAction('')).toBe('未知')
   })
 })
+
+describe('AuditLog 分组合并 (方案 A)', () => {
+  function makeCreateLog(id, field, newValue, opts = {}) {
+    return {
+      id,
+      action: 'CREATE',
+      user_name: opts.user_name || 'admin',
+      object_type: opts.object_type || 'user',
+      object_id: opts.object_id || 1453,
+      trace_id: opts.trace_id || `t-${opts.group || 1}`,
+      transaction_id: opts.transaction_id || null,
+      created_at: opts.created_at || '2026-06-09T16:01:00',
+      field_name: field || null,
+      old_value: null,
+      new_value: newValue || null,
+      extra_data: opts.extra_data || null
+    }
+  }
+
+  it('同 trace 内的 summary 条目 + 字段条目应合并为单一 group, summary 隐藏', () => {
+    const logs = [
+      makeCreateLog(1, null, null, { extra_data: { data: { id: 1453 } } }),
+      makeCreateLog(2, 'username', 'ASDL'),
+      makeCreateLog(3, 'display_name', 'LSKDJFLK'),
+      makeCreateLog(4, 'status', 'active')
+    ]
+    const wrapper = mount(AuditLog, { props: { logs, loading: false } })
+    const groups = wrapper.vm.groupedLogs
+    expect(groups.length).toBe(1)
+    expect(groups[0].items.length).toBe(3)
+    // summary 条目 (field_name=null) 被过滤
+    expect(groups[0].items.every(it => it.field_name)).toBe(true)
+  })
+
+  it('不同 trace 但同 object+5s 内 CREATE 应合并', () => {
+    const logs = [
+      makeCreateLog(1, 'username', 'ASDL', { trace_id: 't-A', created_at: '2026-06-09T16:01:00' }),
+      makeCreateLog(2, 'display_name', 'LSKDJFLK', { trace_id: 't-A' }),
+      makeCreateLog(3, 'id', 1453, { trace_id: 't-B', created_at: '2026-06-09T16:01:02' })
+    ]
+    const wrapper = mount(AuditLog, { props: { logs, loading: false } })
+    const groups = wrapper.vm.groupedLogs
+    expect(groups.length).toBe(1)
+    expect(groups[0].items.length).toBe(3)
+    expect(groups[0].items.map(it => it.field_name).sort()).toEqual(['display_name', 'id', 'username'])
+  })
+
+  it('不同 trace 但超过 5s 间隔的 CREATE 不应合并', () => {
+    const logs = [
+      makeCreateLog(1, 'username', 'ASDL', { trace_id: 't-A', created_at: '2026-06-09T16:01:00' }),
+      makeCreateLog(2, 'id', 1453, { trace_id: 't-B', created_at: '2026-06-09T16:01:30' })
+    ]
+    const wrapper = mount(AuditLog, { props: { logs, loading: false } })
+    const groups = wrapper.vm.groupedLogs
+    expect(groups.length).toBe(2)
+  })
+
+  it('不同 object_type 的同 trace 条目应作为 _children 渲染', () => {
+    const logs = [
+      makeCreateLog(1, 'username', 'ASDL', { object_type: 'user', trace_id: 't-X' }),
+      makeCreateLog(2, 'id', 1, { object_type: 'user_preference', object_id: 99, trace_id: 't-X' })
+    ]
+    const wrapper = mount(AuditLog, { props: { logs, loading: false } })
+    const groups = wrapper.vm.groupedLogs
+    expect(groups.length).toBe(1)
+    expect(groups[0].items.length).toBe(1)
+    expect(groups[0]._children.length).toBe(1)
+    expect(groups[0]._children[0].object_type).toBe('user_preference')
+  })
+
+  it('group count 显示应该包含子对象数量', () => {
+    const logs = [
+      makeCreateLog(1, 'username', 'ASDL', { object_type: 'user', trace_id: 't-Y' }),
+      makeCreateLog(2, 'display_name', 'LSKDJFLK', { object_type: 'user', trace_id: 't-Y' }),
+      makeCreateLog(3, 'id', 1, { object_type: 'user_preference', object_id: 99, trace_id: 't-Y' })
+    ]
+    const wrapper = mount(AuditLog, { props: { logs, loading: false } })
+    expect(wrapper.text()).toContain('2 项变更')
+    expect(wrapper.text()).toContain('1 个关联对象')
+  })
+})

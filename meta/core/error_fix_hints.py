@@ -89,6 +89,45 @@ FIX_HINTS = {
         'fix_hint': 'WAL 文件 > 1MB. 跑 backup_db.py --check 或手动 checkpoint.',
         'see_also': ['scripts/backup_db.py', 'meta/core/db_health_monitor.py'],
     },
+
+    # [v1.0.1] 权限 derivation 错码
+    'parent_permission_denied': {
+        'fix_hint': (
+            '[v1.0.1 D9] 缺少父资源的 read 权限. env PARENT_READ_STRICT_MODE=true 升级触发. '
+            '解决: 1) 给用户/角色授予 {parent}:read 权限, 或 2) 关闭 strict 模式. '
+            '看 meta/core/interceptors/permission_interceptor.py:_check_parent_read_advisory.'
+        ),
+        'see_also': [
+            'meta/core/interceptors/permission_interceptor.py',
+            'meta/core/bo_yaml_cache.py',
+            'docs/specs/spec-permission-derivation-parent-read-2026-06-08-v1.0.md',
+        ],
+    },
+    'err_chain_read_denied': {
+        'fix_hint': (
+            '[v1.0.1 D10] 写子资源时链中任一 read 权限缺失 (env CHAIN_DERIVATION_STRICT_MODE=true 升级触发). '
+            '解决: 1) 给 user/role 授予 chain 中任一 BO 的 read 权限, 或 2) 关闭 strict 模式. '
+            '看 meta/core/interceptors/permission_interceptor.py:_check_chain_read.'
+        ),
+        'see_also': [
+            'meta/core/interceptors/permission_interceptor.py',
+            'meta/core/bo_yaml_cache.py:get_parent_chain',
+            'docs/specs/spec-permission-derivation-parent-read-2026-06-08-v1.0.md#fr-003b',
+        ],
+    },
+    'err_chain_instance_out_of_scope': {
+        'fix_hint': (
+            '[v1.0.1 D13] 写操作实例越权 — target 的 parent chain 中有 instance 不在 user data_scope 范围. '
+            '解决: 1) 给 user 分配正确的数据权限 (覆盖 parent chain instances), '
+            '或 2) 检查 target_id 是否合法, 3) 看 _resolve_parent_chain() 是否能正确解析 FK. '
+            '实例级硬拒, 不是 audit-only.'
+        ),
+        'see_also': [
+            'meta/core/interceptors/permission_interceptor.py',
+            'meta/core/bo_yaml_cache.py:resolve_parent_chain',
+            'docs/specs/spec-permission-derivation-parent-read-2026-06-08-v1.0.md#fr-003b2',
+        ],
+    },
 }
 
 

@@ -439,10 +439,18 @@ class StructuredLogger:
             source: 来源 (service/module name)
             error: 错误信息
             trace_id: 链路追踪ID
-            
-        Returns:
-            bool: 写入是否成功
         """
+        # [FIX Bug 2026-06-09] 把 kwargs 里的 object_type/object_id/user_id/user_name/ip_address
+        # 提到 LogEntry 字段, 否则 audit_logs 表 NOT NULL 约束会 fallback 到 "_unknown" / ""
+        # 详见: 75927-75935 audit log 中 object_type='_unknown' 现象
+        object_type = kwargs.pop('object_type', None)
+        object_id = kwargs.pop('object_id', None)
+        user_id = kwargs.pop('user_id', None)
+        user_name = kwargs.pop('user_name', None)
+        ip_address = kwargs.pop('ip_address', None)
+        user_agent = kwargs.pop('user_agent', None)
+        transaction_id = kwargs.pop('transaction_id', None)
+
         extra_data = {
             'message': message,
             'source': source,
@@ -455,6 +463,13 @@ class StructuredLogger:
             level=LogLevel.from_string(level),
             action=operation,
             trace_id=trace_id,
+            object_type=object_type,
+            object_id=object_id,
+            user_id=user_id,
+            user_name=user_name,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            transaction_id=transaction_id,
             extra_data=extra_data
         )
         
@@ -586,35 +601,65 @@ class StructuredLogger:
                 ds = get_data_source('sqlite', database=db_path)
             from meta.services.audit_service import AuditService
             audit_service = AuditService(ds)
-            
+
+            # [FIX Bug2 2026-06-09] OperationLogInterceptor 调用 log_operation() 时,
+            # object_type/user_name/user_id/object_id/ip_address 是通过 **kwargs 传入的,
+            # log_operation() 把它们塞进 extra_data 而不是 LogEntry 顶层字段。
+            # 这里在写审计日志前从 extra_data 提取回顶层, 避免 audit_service.log() 兜底 '_unknown'。
+            entry_object_type = entry.object_type
+            entry_object_id = entry.object_id
+            entry_user_id = entry.user_id
+            entry_user_name = entry.user_name
+            entry_ip_address = entry.ip_address
+
+            if entry.extra_data and isinstance(entry.extra_data, dict):
+                if entry_object_type is None and entry.extra_data.get('object_type') is not None:
+                    entry_object_type = entry.extra_data.get('object_type')
+                if entry_object_id is None and entry.extra_data.get('object_id') is not None:
+                    entry_object_id = entry.extra_data.get('object_id')
+                if entry_user_id is None and entry.extra_data.get('user_id') is not None:
+                    entry_user_id = entry.extra_data.get('user_id')
+                if entry_user_name is None and entry.extra_data.get('user_name') is not None:
+                    entry_user_name = entry.extra_data.get('user_name')
+                if entry_ip_address is None and entry.extra_data.get('ip_address') is not None:
+                    entry_ip_address = entry.extra_data.get('ip_address')
+
             old_value = None
             new_value = None
-            
+
             if entry.old_data:
                 old_value = json.dumps(entry.old_data, ensure_ascii=False)
             if entry.new_data:
                 new_value = json.dumps(entry.new_data, ensure_ascii=False)
-            
+
+            # [FIX Bug1 2026-06-09] 同时传递 old_data/new_data (dict) 和 old_value/new_value (JSON str)
+            # - 当 entry.field_name 为 None (CRUD 走 BusinessLogInterceptor) 时, AuditService.log
+            #   走 elif 分支, 需要 old_data/new_data 是 dict 才能展开为多行字段
+            # - 当 entry.field_name 有值 (ASSOCIATE/DISSOCIATE) 时, AuditService.log 走 if field_name
+            #   分支, 使用 old_value/new_value (JSON 字符串), old_data/new_data 被忽略
+            # 同时传两个是兼容两种调用场景, 避免业务侧日志退化为 fallback `_record` 行
             audit_service.log(
-                object_type=entry.object_type,
-                object_id=entry.object_id,
+                object_type=entry_object_type,
+                object_id=entry_object_id,
                 action=entry.action,
-                user_id=entry.user_id,
-                user_name=entry.user_name,
+                user_id=entry_user_id,
+                user_name=entry_user_name,
+                old_data=entry.old_data,
+                new_data=entry.new_data,
                 old_value=old_value,
                 new_value=new_value,
                 field_name=entry.field_name,
-                ip_address=entry.ip_address,
+                ip_address=entry_ip_address,
                 trace_id=entry.trace_id,
                 transaction_id=entry.transaction_id,
                 extra_data=entry.extra_data,
                 parent_object_type=entry.parent_object_type,
                 parent_object_id=entry.parent_object_id,
             )
-            
+
             self._stats['total_written'] += 1
             return True
-            
+
         except Exception as e:
             print(f"[ERROR] Failed to write audit log: {e}")
             self._stats['total_failed'] += 1

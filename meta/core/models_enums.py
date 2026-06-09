@@ -127,6 +127,22 @@ class AnnotationCategory(Enum):
     TIP = "tip"
 
 
+class ArchObjectType(Enum):
+    """架构对象类型 — 用于 annotation.target_type 等字段的 value_help
+
+    包含架构数据管理页面 MultiObjectManagementPage 涉及的所有可标注对象类型，
+    也涵盖产品/版本层以便 annotation 跨层级引用。
+    """
+    PRODUCT = "product"
+    VERSION = "version"
+    DOMAIN = "domain"
+    SUB_DOMAIN = "sub_domain"
+    SERVICE_MODULE = "service_module"
+    BUSINESS_OBJECT = "business_object"
+    RELATIONSHIP = "relationship"
+    ANNOTATION = "annotation"
+
+
 class DimensionKey(Enum):
     DEFAULT = "default"
     LANGUAGE = "language"

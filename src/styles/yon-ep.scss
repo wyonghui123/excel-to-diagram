@@ -40,6 +40,7 @@
 
 // ============================================
 // 1. CSS 变量强制覆盖（最高优先级）
+// [FR-005] 合并自 element-plus-overrides.css, 消除重复定义
 // ============================================
 :root:root,
 html:root,
@@ -482,4 +483,183 @@ html :root {
 // ============================================
 .el-alert {
   border-radius: 6px !important;
+}
+
+// ============================================
+// 35-50. [FR-005] 从 element-plus-overrides.css 合并的非重复样式
+// ============================================
+
+// 35. 复选框主题色
+.el-checkbox__input.is-checked .el-checkbox__inner {
+  background-color: var(--el-color-primary) !important;
+  border-color: var(--el-color-primary) !important;
+}
+
+.el-checkbox__input.is-indeterminate .el-checkbox__inner {
+  background-color: var(--el-color-primary) !important;
+  border-color: var(--el-color-primary) !important;
+}
+
+.el-checkbox__input.is-focus .el-checkbox__inner {
+  border-color: var(--el-color-primary) !important;
+}
+
+.el-checkbox__inner:hover {
+  border-color: var(--el-color-primary) !important;
+}
+
+.el-checkbox__input.is-checked + .el-checkbox__label {
+  color: #333333 !important;
+}
+
+// 36. 单选框主题色
+.el-radio__input.is-checked .el-radio__inner {
+  background-color: var(--el-color-primary) !important;
+  border-color: var(--el-color-primary) !important;
+}
+
+.el-radio__input.is-checked + .el-radio__label {
+  color: #333333 !important;
+}
+
+// 37. 输入框焦点边框
+.el-input__wrapper:focus-within,
+.el-input__wrapper.is-focus {
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset !important;
+}
+
+.el-input__wrapper:hover:not(.is-focus) {
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset !important;
+}
+
+// 38. 选择器焦点
+.el-select .el-input.is-focus .el-input__wrapper {
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset !important;
+}
+
+.el-select-dropdown__item.selected {
+  color: var(--el-color-primary) !important;
+  font-weight: 600;
+}
+
+.el-select-dropdown__item.is-hovering {
+  background-color: var(--el-color-primary-light-9) !important;
+}
+
+// 39. 日期选择器
+.el-date-editor {
+  --el-input-focus-border-color: var(--el-color-primary) !important;
+}
+
+.el-date-editor .el-range-separator {
+  color: #666666 !important;
+  font-weight: 500;
+}
+
+.el-date-editor .el-range-icon {
+  color: #999999 !important;
+}
+
+.el-date-editor .el-range-input {
+  font-size: 13px !important;
+}
+
+.el-date-editor .el-range-input::placeholder {
+  color: #cccccc !important;
+}
+
+// 40. 分页激活
+.el-pagination .el-pager li.is-active {
+  background-color: var(--el-color-primary) !important;
+  color: #ffffff !important;
+}
+
+.el-pagination .el-pager li:hover {
+  color: var(--el-color-primary) !important;
+}
+
+.el-pager li.is-active {
+  background-color: var(--el-color-primary) !important;
+}
+
+// 41. 步骤条颜色
+.el-step__head.is-finish {
+  color: var(--el-color-primary) !important;
+  border-color: var(--el-color-primary) !important;
+}
+
+.el-step__head.is-process {
+  color: var(--el-color-primary) !important;
+  border-color: var(--el-color-primary) !important;
+}
+
+.el-step__title.is-finish {
+  color: var(--el-color-primary) !important;
+}
+
+.el-step__title.is-process {
+  color: var(--el-color-primary) !important;
+}
+
+// 42. 对话框关闭按钮
+.el-dialog__headerbtn:hover .el-dialog__close {
+  color: var(--el-color-primary) !important;
+}
+
+// 43. 加载动画
+.el-loading-spinner .circular {
+  stroke: var(--el-color-primary) !important;
+}
+
+// 44. 下拉菜单 hover
+.el-dropdown-menu__item:hover {
+  background-color: var(--el-color-primary-light-9) !important;
+  color: var(--el-color-primary) !important;
+}
+
+// 45. Popper z-index 修复 (Element Plus dropdown 被 modal 遮罩)
+.el-select-dropdown,
+.el-select__popper,
+.el-popper,
+.el-dropdown-menu,
+.el-dropdown__popper,
+.el-autocomplete__popper,
+.el-autocomplete-suggestion,
+.el-cascader__dropdown,
+.el-cascader__suggestion-panel,
+.el-cascader__suggestion-list,
+.el-color-picker__panel,
+.el-color-picker__wrapper,
+.el-date-editor.el-range-editor,
+.el-picker__popper,
+.el-time-panel,
+.el-time-select__popper,
+.el-tooltip__popper,
+.el-tree-select__popper,
+.el-tree-select-dropdown,
+.el-v2-cascader__dropdown,
+.el-virtual-list,
+.el-message-box,
+.el-message,
+.el-notification,
+.el-popper.is-pure,
+.el-popper.is-light,
+.el-popper.is-dark,
+.el-overlay-message-box,
+.el-overlay-notification {
+  z-index: var(--z-index-max) !important;
+}
+
+.el-popper-container,
+#el-popper-container- {
+  z-index: var(--z-index-max) !important;
+}
+
+// 46. 自定义弹层类 z-index
+.app-select-popper,
+.app-datepicker-popper,
+.app-tooltip-popper,
+.app-popover-popper,
+.row-action-popper {
+  z-index: var(--z-index-select) !important;
 }

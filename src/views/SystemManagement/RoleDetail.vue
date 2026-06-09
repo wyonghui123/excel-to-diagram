@@ -165,7 +165,7 @@ async function loadRole() {
 function updateTabLabel() {
   const tab = tabStore.tabs.find(t => t.id === route.path)
   if (tab && role.value) {
-    tab.label = `角色: ${role.value.name || role.value.code}`
+    tabStore.updateTabLabel(tab.id, `角色: ${role.value.name || role.value.code}`)
   }
 }
 

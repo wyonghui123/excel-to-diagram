@@ -1,3 +1,18 @@
+## 目录
+
+1. [1. Background & Objectives](#1-background-objectives)
+2. [2. Requirement Type Overview](#2-requirement-type-overview)
+3. [3. Functional Requirements](#3-functional-requirements)
+4. [4. Nonfunctional Requirements](#4-nonfunctional-requirements)
+5. [5. External Interface Requirements](#5-external-interface-requirements)
+6. [6. Transition Requirements](#6-transition-requirements)
+7. [7. Constraints & Assumptions](#7-constraints-assumptions)
+8. [8. Priorities & Milestone Suggestions](#8-priorities-milestone-suggestions)
+9. [9. Change / Design Proposal (RFC)](#9-change-design-proposal-(rfc))
+10. [10. TBD List](#10-tbd-list)
+11. [11. 实施状态追踪（2026-05-19 更新）](#11-实施状态追踪（2026-05-19-更新）)
+
+---
 # Spec: 元数据驱动平台 Hardcode 风险消除
 
 ## 1. Background & Objectives

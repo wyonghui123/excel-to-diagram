@@ -77,7 +77,9 @@ class AsyncAuditWriter:
         )
 
     def submit(self, audit_fn: Callable, trace_id: str = None,
-               transaction_id: str = None) -> bool:
+               transaction_id: str = None, user_id: Any = None,
+               user_name: str = None, ip_address: str = None,
+               user_agent: str = None) -> bool:
         if not callable(audit_fn):
             logger.error(
                 "[CRITICAL] submit() received non-callable audit_fn: type=%s, value=%s, trace_id=%s. "
@@ -92,12 +94,20 @@ class AsyncAuditWriter:
             return False
 
         if not AUDIT_ASYNC_ENABLED or self._ds is None or not self._running:
-            return self._write_sync(audit_fn, trace_id, transaction_id)
+            return self._write_sync(
+                audit_fn, trace_id, transaction_id,
+                user_id=user_id, user_name=user_name,
+                ip_address=ip_address, user_agent=user_agent,
+            )
 
         task = {
             'fn': audit_fn,
             'trace_id': trace_id,
             'transaction_id': transaction_id,
+            'user_id': user_id,
+            'user_name': user_name,
+            'ip_address': ip_address,
+            'user_agent': user_agent,
             'submitted_at': time.time(),
         }
 
@@ -108,11 +118,22 @@ class AsyncAuditWriter:
             return True
         except queue.Full:
             logger.warning("Audit queue full, falling back to sync write")
-            return self._write_sync(audit_fn, trace_id, transaction_id)
+            return self._write_sync(
+                audit_fn, trace_id, transaction_id,
+                user_id=user_id, user_name=user_name,
+                ip_address=ip_address, user_agent=user_agent,
+            )
 
     def _write_sync(self, audit_fn: Callable, trace_id: str = None,
-                    transaction_id: str = None) -> bool:
-        result = self._write_with_retry(audit_fn, trace_id, transaction_id, is_fallback=True)
+                    transaction_id: str = None, user_id: Any = None,
+                    user_name: str = None, ip_address: str = None,
+                    user_agent: str = None) -> bool:
+        result = self._write_with_retry(
+            audit_fn, trace_id, transaction_id,
+            user_id=user_id, user_name=user_name,
+            ip_address=ip_address, user_agent=user_agent,
+            is_fallback=True,
+        )
         return result
 
     def _worker(self):
@@ -124,7 +145,13 @@ class AsyncAuditWriter:
 
             try:
                 self._write_with_retry(
-                    task['fn'], task.get('trace_id'), task.get('transaction_id')
+                    task['fn'],
+                    trace_id=task.get('trace_id'),
+                    transaction_id=task.get('transaction_id'),
+                    user_id=task.get('user_id'),
+                    user_name=task.get('user_name'),
+                    ip_address=task.get('ip_address'),
+                    user_agent=task.get('user_agent'),
                 )
             except Exception as e:
                 logger.error("Audit worker unexpected error: %s", str(e))
@@ -132,13 +159,18 @@ class AsyncAuditWriter:
                 self._queue.task_done()
 
     def _write_with_retry(self, audit_fn: Callable, trace_id: str = None,
-                          transaction_id: str = None, is_fallback: bool = False) -> bool:
+                          transaction_id: str = None, is_fallback: bool = False,
+                          user_id: Any = None, user_name: str = None,
+                          ip_address: str = None, user_agent: str = None) -> bool:
         """
         带重试的审计日志写入
 
         优化：检测是否已在事务中，避免事务嵌套错误。
         审计日志写入不需要事务保护，直接执行即可。
         """
+        # [FIX Bug1 2026-06-09] is_connected 是 @property 属性 (返回 bool),
+        # 不是方法。当作方法调用会抛 'bool' object is not callable，导致 audit_fn 永远不执行。
+        # 兼容两种定义：@property 和普通方法（用 callable 探测）。
         if not callable(audit_fn):
             logger.error(
                 "[CRITICAL] _write_with_retry() received non-callable audit_fn: type=%s, value=%s, trace_id=%s. "
@@ -149,11 +181,26 @@ class AsyncAuditWriter:
                 self._stats['failed'] += 1
             return False
 
+        def _read_is_connected(ds):
+            """读取 ds.is_connected 的当前值，兼容 @property 和 method 两种定义。"""
+            if ds is None:
+                return True  # ds 为 None 时跳过连接检查
+            attr = getattr(ds, 'is_connected', None)
+            if attr is None:
+                return True
+            # @property: attr 本身是 bool；method: attr 是 callable，返回 bool
+            if callable(attr):
+                try:
+                    return bool(attr())
+                except Exception:
+                    return True
+            return bool(attr)
+
         last_error = None
         max_retries = 1 if _TESTING_MODE else AUDIT_MAX_RETRIES
         for attempt in range(max_retries):
             try:
-                if self._ds is not None and hasattr(self._ds, 'is_connected') and not self._ds.is_connected():
+                if not _read_is_connected(self._ds):
                     logger.warning("Database not connected, skipping audit write")
                     return False
 
@@ -169,7 +216,9 @@ class AsyncAuditWriter:
                             self._stats['failed'] += 1
                         return False
                     logger.debug("Already in transaction, executing audit_fn directly")
-                    audit_fn(trace_id=trace_id, transaction_id=transaction_id)
+                    audit_fn(trace_id=trace_id, transaction_id=transaction_id,
+                             user_id=user_id, user_name=user_name,
+                             ip_address=ip_address, user_agent=user_agent)
                 elif hasattr(self._ds, 'begin_transaction'):
                     self._ds.begin_transaction()
                     try:
@@ -181,7 +230,9 @@ class AsyncAuditWriter:
                             with self._stats_lock:
                                 self._stats['failed'] += 1
                             return False
-                        audit_fn(trace_id=trace_id, transaction_id=transaction_id)
+                        audit_fn(trace_id=trace_id, transaction_id=transaction_id,
+                                 user_id=user_id, user_name=user_name,
+                                 ip_address=ip_address, user_agent=user_agent)
                         self._ds.commit()
                     except Exception:
                         try:
@@ -199,7 +250,9 @@ class AsyncAuditWriter:
                         with self._stats_lock:
                             self._stats['failed'] += 1
                         return False
-                    audit_fn(trace_id=trace_id, transaction_id=transaction_id)
+                    audit_fn(trace_id=trace_id, transaction_id=transaction_id,
+                             user_id=user_id, user_name=user_name,
+                             ip_address=ip_address, user_agent=user_agent)
 
                 with self._stats_lock:
                     if is_fallback:
@@ -245,7 +298,9 @@ class AsyncAuditWriter:
                             with self._stats_lock:
                                 self._stats['failed'] += 1
                             return False
-                        audit_fn(trace_id=trace_id, transaction_id=transaction_id)
+                        audit_fn(trace_id=trace_id, transaction_id=transaction_id,
+                                 user_id=user_id, user_name=user_name,
+                                 ip_address=ip_address, user_agent=user_agent)
                         with self._stats_lock:
                             if is_fallback:
                                 self._stats['fallback_sync'] += 1
@@ -332,24 +387,30 @@ class AsyncAuditWriter:
     def flush(self, timeout: float = 5.0) -> bool:
         try:
             if _TESTING_MODE:
-                deadline = time.time() + min(timeout, 2.0)
-                while not self._queue.empty() and time.time() < deadline:
-                    try:
-                        task = self._queue.get_nowait()
+                    deadline = time.time() + min(timeout, 2.0)
+                    while not self._queue.empty() and time.time() < deadline:
                         try:
-                            self._write_with_retry(
-                                task['fn'], task.get('trace_id'), task.get('transaction_id')
-                            )
-                        except Exception:
-                            pass
-                    except queue.Empty:
-                        break
-                    finally:
-                        try:
-                            self._queue.task_done()
-                        except Exception:
-                            pass
-                return True
+                            task = self._queue.get_nowait()
+                            try:
+                                self._write_with_retry(
+                                    task['fn'],
+                                    task.get('trace_id'),
+                                    task.get('transaction_id'),
+                                    user_id=task.get('user_id'),
+                                    user_name=task.get('user_name'),
+                                    ip_address=task.get('ip_address'),
+                                    user_agent=task.get('user_agent'),
+                                )
+                            except Exception:
+                                pass
+                        except queue.Empty:
+                            break
+                        finally:
+                            try:
+                                self._queue.task_done()
+                            except Exception:
+                                pass
+                    return True
             self._queue.join()
             return True
         except Exception:

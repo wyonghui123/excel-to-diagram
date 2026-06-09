@@ -35,6 +35,7 @@ import { AppHeader as TopNavHeader } from './TopNavHeader'
 import { AppShell } from './AppShell'
 import { AppLayout } from './AppLayout'
 import { MetaListPage } from './MetaListPage'
+import { MetaListV2 } from './MetaListV2'  // [FR-005] 虚拟滚动 wrapper
 import { SubNavTabs } from './SubNavTabs'
 import { ObjectChildSection } from './ObjectChildSection'
 import { PageShell } from './PageShell'
@@ -109,6 +110,7 @@ export default {
   AppShell,
   AppLayout,
   MetaListPage,
+  MetaListV2,  // [FR-005]
   SubNavTabs,
   ObjectChildSection,
   PageShell,

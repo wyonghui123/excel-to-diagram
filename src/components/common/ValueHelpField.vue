@@ -1,10 +1,11 @@
 <template>
   <div class="value-help-field">
     <template v-if="resultType === 'dropdown'">
-      <!-- 单选：不用 filterable，el-select 会自动根据 v-model 匹配 option 显示 label -->
+      <!-- 单选：使用 filterable 确保 el-select 正确显示选中项的 label -->
       <el-select
         v-if="!isMultiple"
         v-model="internalValue"
+        filterable
         :loading="loading"
         :disabled="disabled || !bindingSatisfied"
         :placeholder="placeholder"
@@ -143,19 +144,18 @@ const bindingSatisfied = computed(() => {
 // 这样 el-select 才能找到匹配的 option 并显示 label
 const internalValue = ref(null)
 
-onMounted(() => {
-  nextTick(() => {
-    if (props.modelValue != null && props.modelValue !== '' &&
-        !(Array.isArray(props.modelValue) && props.modelValue.length === 0)) {
-      internalValue.value = props.modelValue
-    }
-  })
-  // 预加载 options，让 filterable 本地搜索能工作
-  // handleDropdownVisible 只在用户点击 el-select 时触发，但 el-select 不会在 mount 时触发
-  // 注意：optionsList 可能有 initial_options（详情页编辑态），仍要预加载全部选项，否则下拉只显示当前值
+onMounted(async () => {
+  // [FIX] 关键：先 await 加载 options，再设 internalValue
+  // 这样 el-select 第一次接收 modelValue 时，options 已经在 el-option 中渲染，
+  // 能立即匹配到对应 option 并显示 label。
   if (bindingSatisfied.value) {
     const filters = getFilterParams(props.formValues)
-    loadOptions('', { filters, pageSize: 200 })
+    await loadOptions('', { filters, pageSize: 200 })
+  }
+  await nextTick()
+  if (props.modelValue != null && props.modelValue !== '' &&
+      !(Array.isArray(props.modelValue) && props.modelValue.length === 0)) {
+    internalValue.value = props.modelValue
   }
 })
 
@@ -164,12 +164,18 @@ watch(() => props.modelValue, (val) => {
 })
 
 // optionsList 异步更新后，重新触发 el-select 匹配
+// [FIX] 使用 silentReset 标志，避免在强制重置时不必要地 emit 给父组件
+// （原来 set null → set 15 会被父组件捕获，导致 formData 短暂变 null）
+let silentReset = false
 watch(optionsList, async () => {
   if (internalValue.value != null && internalValue.value !== '') {
     const val = internalValue.value
+    silentReset = true
     internalValue.value = null
     await nextTick()
     internalValue.value = val
+    await nextTick()
+    silentReset = false
   }
 }, { deep: true })
 
@@ -218,6 +224,8 @@ function handleRemoteSearch(search) {
 }
 
 async function handleSelectChange(val) {
+  // [FIX] silentReset 期间的变更不 emit 给父组件（options 异步加载后的强制重置）
+  if (silentReset) return
   // 关键：先 await resolveDisplay 获取 display text，然后一起 emit
   // 避免在 formData 变化导致 ValueHelpField 重新挂载后再 emit
   const safeEmit = (event, payload) => {

@@ -24,14 +24,14 @@ def value_help_to_dict(vh):
             }
         if vh.behavior:
             # multiple 逻辑：
-            # - None（未设置）：FK 字段默认 True（列表过滤用多选），非 FK 默认 False
-            # - False（显式单选）：详情表单等场景，尊重用户设置
+            # - None（未设置）：详情/表单场景统一默认 False（单选）。list-view filter 走的是
+            #   list_view_config.filter_definitions，跟这里的 ui-config 是分开的两套配置，
+            #   不受此影响。如果某个 view 真要多选，yaml 必须显式设 multiple: true。
+            # - False（显式单选）：尊重用户设置
             # - True（显式多选）：尊重用户设置
-            source_type = getattr(vh.source, 'type', '') if vh.source else ''
-            is_fk = source_type == 'bo'
             raw_multiple = vh.behavior.multiple
             if raw_multiple is None:
-                multiple = is_fk  # FK 未设置 → True（列表过滤），非 FK → False
+                multiple = False  # 修复：FK 字段默认值由 True 改为 False
             else:
                 multiple = raw_multiple  # 显式设置，尊重
             result["behavior"] = {

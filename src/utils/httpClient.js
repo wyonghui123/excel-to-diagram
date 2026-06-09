@@ -113,6 +113,68 @@ function generateTraceId() {
 }
 
 // ---------------------------------------------------------------------------
+// In-flight 请求去重 (FR-017)
+// 相同 GET 请求并发时复用同一个 Promise，避免重复网络请求
+// ---------------------------------------------------------------------------
+const inflightCache = new Map()
+
+/**
+ * 把 options.params 序列化为 query string 并拼到 URL 上
+ *
+ * [FIX-2026-06-08] 修复 loadConditionRules 不传 role_id 的全局 bug
+ *   - 之前 URL 直接 = `${baseUrl}${path}`, 完全忽略 options.params
+ *   - 现在: 把 params 拼成 query string, 跳过 null/undefined, 用 URLSearchParams 做正确编码
+ *   - 影响: 13+ 个 API 接口 (permissionService, filterVariant, annotation 等)
+ *
+ * 行为:
+ *   - 无 params / 空对象 → 返回 baseUrl + path (不加 `?`)
+ *   - 有值参数 → 拼成 ?k1=v1&k2=v2 (URL 编码)
+ *   - null / undefined 值 → 跳过
+ *   - 数组 / 对象 → 转为 JSON 字符串 (避免歧义)
+ *
+ * @param {string} baseUrl - 如 '/api/v1'
+ * @param {string} path - 如 '/permission-rules'
+ * @param {object|undefined} params - 如 { role_id: 1803, page: 1 }
+ * @returns {string} - 完整 URL, 如 '/api/v1/permission-rules?role_id=1803'
+ */
+function buildUrlWithParams(baseUrl, path, params) {
+  if (!params || typeof params !== 'object' || Object.keys(params).length === 0) {
+    return `${baseUrl}${path}`
+  }
+  const qs = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === null) continue
+    if (Array.isArray(v)) {
+      // [FIX-2026-06-08] 数组: 展开为同名多次参数
+      //   filter_product_id: [18, 19] → ?filter_product_id=18&filter_product_id=19
+      //   后端 Flask request.args.getlist() 解析, 用于 SQL IN
+      //   之前 JSON.stringify() 错误, getlist() 拿到 ['"[18,19]"'] 无法 IN 匹配
+      for (const item of v) {
+        if (item === undefined || item === null || item === '') continue
+        qs.append(k, String(item))
+      }
+    } else if (typeof v === 'object') {
+      // 普通对象 → JSON 字符串
+      qs.append(k, JSON.stringify(v))
+    } else {
+      qs.append(k, String(v))
+    }
+  }
+  const qsStr = qs.toString()
+  return qsStr ? `${baseUrl}${path}?${qsStr}` : `${baseUrl}${path}`
+}
+
+/**
+ * 生成去重缓存 key
+ * GET /api/v1/users → "GET:/api/v1/users:"
+ * POST 不参与去重
+ */
+function getCacheKey(method, url, body) {
+  const bodyStr = body ? JSON.stringify(body) : ''
+  return `${method}:${url}:${bodyStr}`
+}
+
+// ---------------------------------------------------------------------------
 // 核心请求函数
 // ---------------------------------------------------------------------------
 const SLOW_REQUEST_THRESHOLD_MS = 1000
@@ -129,12 +191,51 @@ const SLOW_REQUEST_THRESHOLD_MS = 1000
  * @param {AbortSignal} [options.signal] - 取消信号
  * @param {'json'|'blob'} [options.responseType='json'] - 响应类型 (blob 用于文件下载)
  * @param {object} [options.authStore] - 认证 store 实例 (可选，默认自动获取)
+ * @param {boolean} [options.dedupe] - GET 请求去重 (默认 true，设 false 跳过)
  * @returns {Promise<{success: boolean, data: any, message: string, code?: string, httpStatus?: number, traceId: string}>}
  */
 async function request(method, baseUrl, path, options = {}) {
   const traceId = generateTraceId()
   const startTime = Date.now()
-  const url = `${baseUrl}${path}`
+  // [FIX-2026-06-08] 将 options.params 序列化为 query string 拼到 URL 上
+  //   原因: 之前直接用 `${baseUrl}${path}` 构造 URL, 导致所有 { params: {...} } 参数被丢弃,
+  //   loadConditionRules({ role_id: 1803 }) 实际请求变成 GET /permission-rules (无 query),
+  //   后端走 get_all_rules() 分支返回全部 39 条规则, 任意角色都看到同样的 10+ 条 domain 规则.
+  const url = buildUrlWithParams(baseUrl, path, options.params)
+
+  // [FR-017] In-flight 去重: GET 请求默认去重
+  const shouldDedupe = method === 'GET'
+    && options.dedupe !== false
+    && !options.signal
+    && options.responseType !== 'blob'
+
+  if (shouldDedupe) {
+    // 注意: cache key 必须用含 query 的完整 URL,
+    // 否则 GET /users?page=1 和 GET /users?page=2 会被错误去重成同一次请求.
+    const cacheKey = getCacheKey(method, url, options.body)
+    const existing = inflightCache.get(cacheKey)
+    if (existing) {
+      logger.debug(`[httpClient] Deduped request: ${method} ${url} (traceId=${traceId})`)
+      return existing
+    }
+    // 创建 Promise 并缓存，确保自身和后续并发请求拿到同一个引用
+    const promise = _doRequest(method, url, options, traceId, startTime)
+    inflightCache.set(cacheKey, promise)
+    try {
+      const result = await promise
+      return result
+    } finally {
+      inflightCache.delete(cacheKey)
+    }
+  }
+
+  return _doRequest(method, url, options, traceId, startTime)
+}
+
+/**
+ * 实际执行请求 (从 request() 抽出，供去重逻辑复用)
+ */
+async function _doRequest(method, url, options, traceId, startTime) {
 
   // 获取 authStore (优先使用传入的，否则自动获取)
   const authStore = options.authStore || useAuthStore()
@@ -210,7 +311,7 @@ async function request(method, baseUrl, path, options = {}) {
   const elapsed = Date.now() - startTime
   if (elapsed > SLOW_REQUEST_THRESHOLD_MS) {
     // [FR-001] 替换 console.warn → logger.warn
-    logger.warn(`[httpClient] Slow request: ${method} ${path} took ${elapsed}ms (traceId=${traceId})`)
+    logger.warn(`[httpClient] Slow request: ${method} ${url} took ${elapsed}ms (traceId=${traceId})`)
   }
 
   // 401 处理
@@ -364,6 +465,24 @@ function createNamespace(baseUrl) {
 
 export const apiV1 = createNamespace(API_BASE)
 export const apiV2 = createNamespace(API_BASE_V2)
+
+// ---------------------------------------------------------------------------
+// In-flight 缓存管理 (FR-017)
+// ---------------------------------------------------------------------------
+
+/**
+ * 清空 in-flight 去重缓存 (用于测试或路由切换时清理)
+ */
+export function clearInflightCache() {
+  inflightCache.clear()
+}
+
+/**
+ * 获取当前 in-flight 请求数量 (用于监控/调试)
+ */
+export function getInflightCount() {
+  return inflightCache.size
+}
 
 // ---------------------------------------------------------------------------
 // 文件下载工具

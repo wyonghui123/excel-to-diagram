@@ -21,7 +21,7 @@
 
     <ValueHelpField
       v-else-if="valueHelpFieldKeys.has(fieldKey)"
-      :key="`vh-${fieldKey}-${formData[fieldKey] ?? 'null'}-${formRenderKey}`"
+      :key="`vh-${fieldKey}-${formRenderKey}`"
       :model-value="formData[fieldKey]"
       :value-help-config="getValueHelpConfigWithFallback(fieldKey)"
       :form-values="formData"
@@ -48,7 +48,7 @@
     </el-select>
     <component
       v-else
-      :is="getFieldWidget(fieldKey)"
+      :is="resolveWidgetComponent(getFieldWidget(fieldKey))"
       v-model="formData[fieldKey]"
       v-bind="getFieldProps(fieldKey)"
       :disabled="isFieldReadonly(fieldKey)"
@@ -62,6 +62,28 @@
 import ValueHelpField from '../ValueHelpField.vue'
 import FkLinkField from '../FkLinkField/FkLinkField.vue'
 import { dateFormatService } from '@/services/DateFormatService'
+// [FIX] 显式导入 Element Plus 组件以支持动态 <component :is> 渲染
+//   - unplugin-vue-components 只能自动导入模板中的字面量标签
+//   - 动态 :is="字符串" 不会触发自动导入，必须显式 import
+import {
+  ElInput,
+  ElInputNumber,
+  ElSelect,
+  ElDatePicker,
+  ElSwitch,
+  ElRadioGroup,
+  ElCheckbox
+} from 'element-plus'
+
+const ELEMENT_PLUS_WIDGET_MAP = {
+  'el-input': ElInput,
+  'el-input-number': ElInputNumber,
+  'el-select': ElSelect,
+  'el-date-picker': ElDatePicker,
+  'el-switch': ElSwitch,
+  'el-radio-group': ElRadioGroup,
+  'el-checkbox': ElCheckbox
+}
 
 const props = defineProps({
   fieldKey: {
@@ -133,6 +155,10 @@ function _mapFieldTypeToWidget(fieldType) {
 function resolveWidgetName(name) {
   if (name.startsWith('el-')) return name
   return `el-${name}`
+}
+
+function resolveWidgetComponent(widgetName) {
+  return ELEMENT_PLUS_WIDGET_MAP[widgetName] || ElInput
 }
 
 function getFieldLabel(key) {
@@ -256,6 +282,19 @@ function isFieldReadonly(key) {
   const fieldDef = props.fieldDefs[key]
   if (!fieldDef) return true
 
+  // [FIX] 在 editing 模式下：readonly 字段（如 version_id 等 context_field）始终保持 readonly，
+  // 用户不能编辑——其值由 DetailPage 从 selectedVersionId 自动注入。immutable 在 editing 模式
+  // (add) 下不生效（immutable 主要是 update 时保护），但 readonly 一直生效。
+  if (props.editing) {
+    if (fieldDef.readonly === true) return true
+    if (fieldDef.immutable === true && props.objectId && props.objectId !== 'new') return true
+    if (props.isCascadeField(key)) {
+      const parentField = props.getCascadeParent(key)
+      if (parentField && !props.formData[parentField]) return true
+    }
+    return false
+  }
+
   if (fieldDef.editable === false) return true
   if (fieldDef.readonly === true) return true
   if (fieldDef.immutable === true && props.objectId && props.objectId !== 'new') return true
@@ -265,7 +304,6 @@ function isFieldReadonly(key) {
     if (parentField && !props.formData[parentField]) return true
   }
 
-  if (props.editing) return false
   return true
 }
 

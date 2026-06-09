@@ -95,7 +95,7 @@
 
 <script setup>
 import { ref, computed, watch, shallowRef, inject, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import MetaListPage from '../MetaListPage/MetaListPage.vue'
 import AppIcon from '../AppIcon/AppIcon.vue'
 import MetaDialog from '../MetaDialog.vue'
@@ -103,6 +103,7 @@ import boService from '@/services/boService'
 import { CATEGORY_CONFIG } from '@/composables/useMermaid/annotation/annotationConfig'
 import * as annotationService from '@/services/annotationService'
 import EnumService from '@/services/enumService'
+import { useCrudMessage } from '@/composables/useCrudMessage'
 
 const props = defineProps({
   section: {
@@ -128,6 +129,8 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['request-edit', 'open-assign', 'refresh', 'embedded-action'])
+
+const message = useCrudMessage()
 
 const hasRealObjectId = computed(() => {
   const id = props.objectId
@@ -381,35 +384,69 @@ async function handleBatchAction(event, section) {
     
     const results = []
     const errors = []
-    
-    for (const row of selectedRows) {
-      try {
-        const result = await boService.unassignAssociationV2(
-          props.objectType,
-          props.objectId,
-          section.assocName,
-          { association_record_id: row.id }
-        )
-        if (result && (result.success || result === true)) {
-          results.push(row.id)
-        } else {
-          errors.push({ id: row.id, message: result?.message || '移除失败' })
+
+    // [FIX 2026-06-08] 用后端 /batch_unassign 替代 N 次单条 unassign 循环
+    // 原因：循环里第一条成功后,后端可能因 stale association_record_id 返回 404;
+    //      且 N 次 HTTP 请求慢、不原子。后端 bo_api.py:585 已提供 batch_unassign 端点。
+    // 重要：表格 row.id 是 **target_id (role.id)**，不是 through-table 行 id (group_roles.id)。
+    //      之前 v1 unassign 循环误把 role.id 当 association_record_id 传给后端,所以后端查 group_roles 找不到。
+    //      后端 /batch_unassign 接受 { target_ids, target_type } 直接按 role.id 删除,无需 SQL 反查。
+    const assocConfig = getAssociationConfig(section.assocName)
+    const targetType = assocConfig?.target_type
+    const targetIds = selectedRows.map(r => r.id).filter(id => id != null)
+    if (targetIds.length === 0) {
+      message.warning('没有可移除的记录')
+      return
+    }
+
+    try {
+      const result = await boService.batchUnassignAssociationsV2(
+        props.objectType,
+        props.objectId,
+        section.assocName,
+        {
+          target_ids: targetIds,
+          target_type: targetType
         }
-      } catch (e) {
-        errors.push({ id: row.id, message: e.message })
+      )
+      if (result && (result.success || result === true)) {
+        results.push(...targetIds)
+      } else {
+        // 后端 batch_unassign 的 data.results 数组里每项含 success/target_id;
+        // 失败项的 target_id 即本次请求里的 target_id 之一
+        const resultsArr = result?.data?.results
+        const failedIds = (Array.isArray(resultsArr) ? resultsArr : [])
+          .filter(r => !r.success)
+          .map(r => r.target_id)
+        const failedSet = new Set(failedIds)
+        const successIds = targetIds.filter(id => !failedSet.has(id))
+        results.push(...successIds)
+        targetIds.filter(id => failedSet.has(id)).forEach(id => {
+          errors.push({ id, message: result?.message || '移除失败' })
+        })
       }
+    } catch (e) {
+      targetIds.forEach(id => errors.push({ id, message: e.message }))
     }
     
     if (errors.length === 0) {
-      ElMessage.success(`已移除 ${results.length} 项`)
+      message.success(`已移除 ${results.length} 项`)
     } else if (results.length > 0) {
-      ElMessage.warning(`成功移除 ${results.length} 项，失败 ${errors.length} 项`)
+      message.warning(`成功移除 ${results.length} 项，失败 ${errors.length} 项`)
     } else {
-      ElMessage.error('移除失败')
+      message.error('移除失败')
     }
-    
+
     boService._clearCache(props.objectType)
     await refresh()
+    // [FIX 2026-06-08] 批量删除成功后清空 el-table 勾选状态。
+    // 原因: refresh() 重新拉数据,但 el-table 内部的 selectionChange 状态没动,
+    //      totalSelectedCount 仍然 > 0 → 工具栏 "已选择 N 项 / 清除选择 / 批量删除"
+    //      持续显示,即便底层数据已删。clearAllSelection 由 MetaListPage
+    //      defineExpose 暴露(L1480),走 tableRef.clearSelection() 把勾选清掉。
+    if (results.length > 0 && metaListRef.value?.clearAllSelection) {
+      metaListRef.value.clearAllSelection()
+    }
     emit('refresh')
   }
 }
@@ -457,7 +494,7 @@ async function handleAnnotationAction(event, section) {
     }
   } catch (e) {
     console.error('[AssociationSection] Annotation action failed:', e)
-    ElMessage.error('操作失败')
+    message.error('操作失败', e)
   }
 }
 
@@ -557,12 +594,12 @@ async function handleAnnotationSave(formData) {
       })
     }
     if (!result.success) throw new Error(result.message)
-    ElMessage.success(annotationEditingId.value ? '备注已更新' : '备注已添加')
+    message.success(annotationEditingId.value ? '备注已更新' : '备注已添加')
     annotationFormVisible.value = false
     refresh()
     emit('refresh')
-  } catch {
-    ElMessage.error('保存失败')
+  } catch (e) {
+    message.error('保存失败', e)
   } finally {
     annotationSaving.value = false
   }
@@ -571,10 +608,10 @@ async function handleAnnotationSave(formData) {
 async function handleAnnotationDelete(row, section) {
   const result = await annotationService.deleteAnnotation(row.id)
   if (result.success) {
-    ElMessage.success('备注已删除')
+    message.success('备注已删除')
     refresh()
   } else {
-    ElMessage.error(result.message || '删除失败')
+    message.error('删除失败', result)
   }
 }
 
@@ -590,14 +627,14 @@ async function handleEmbeddedAction({ action, row }, section) {
         { association_record_id: row.id }
       )
       if (result && (result.success || result === true)) {
-        ElMessage.success('已移除')
+        message.success('已移除')
         boService._clearCache(props.objectType)
       } else {
-        ElMessage.error(result?.message || '移除失败')
+        message.error('移除失败', result)
       }
     } catch (e) {
       console.error('[AssociationSection] unassign failed:', e)
-      ElMessage.error('移除失败')
+      message.error('移除失败', e)
     }
     await refresh()
     emit('refresh')

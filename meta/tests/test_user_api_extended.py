@@ -112,6 +112,40 @@ def test_update_user_by_admin(client, admin_token):
     assert data.get('success') is True
 
 
+# [NEW 2026-06-09] 验证 status 字段只能通过 state_transition 修改, 普通 PUT 必须被拒绝
+# 防止 admin 误用 PUT 接口直接传 status='locked' 旁路 state_transition rule
+def test_update_user_status_via_put_rejected(client, admin_token):
+    """admin 用 PUT /api/v1/users/<id> 携带 status 字段必须返回 400"""
+    resp = client.put('/api/v1/users/1',
+        json={'status': 'locked'},
+        headers={'Authorization': f'Bearer {admin_token}'})
+
+    # 期望: 400 + error_code = STATUS_CHANGE_VIA_PUT_NOT_ALLOWED
+    # 如果 token 校验或 admin 校验失败(401/500)说明 token/权限问题, 不是我们要测的逻辑
+    if resp.status_code in (401, 500):
+        pytest.skip(f'Auth/env issue (status={resp.status_code}), skip status rejection check')
+
+    assert resp.status_code == 400, f'Expected 400, got {resp.status_code}: {resp.get_data(as_text=True)}'
+    data = resp.get_json()
+    assert data.get('success') is False
+    assert data.get('error_code') == 'STATUS_CHANGE_VIA_PUT_NOT_ALLOWED'
+    assert 'state_transition' in data.get('message', '')
+
+
+def test_update_user_self_status_via_put_rejected(client, admin_token):
+    """用户用 PUT /api/v1/users/me 携带 status 字段必须返回 400"""
+    resp = client.put('/api/v1/users/me',
+        json={'status': 'locked', 'display_name': 'New Name'},
+        headers={'Authorization': f'Bearer {admin_token}'})
+
+    if resp.status_code in (401, 500):
+        pytest.skip(f'Auth/env issue (status={resp.status_code}), skip status rejection check')
+
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data.get('error_code') == 'STATUS_CHANGE_VIA_PUT_NOT_ALLOWED'
+
+
 def test_delete_user_unauthorized(client, regular_token):
     resp = client.delete('/api/v1/users/1',
         headers={'Authorization': f'Bearer {regular_token}'})

@@ -1,4 +1,4 @@
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useAuthStore } from '@/stores/authStore'
 import { apiV1, apiV2 } from '@/utils/httpClient'
 import { useMetaCache } from '@/composables/useMetaCache'
@@ -7,12 +7,27 @@ const menuPermissions = ref([])
 const loading = ref(false)
 const error = ref(null)
 const _menusLoaded = ref(false)
+// [FIX v1.0.4 2026-06-09] 记录上次加载的用户 ID, 检测 user 切换时强制重新拉取
+const _loadedForUserId = ref(null)
 const _serverLeafMenus = ref(null)
 const _serverObjectTypeRouteMap = ref(null)
+// [FIX v1.0.4b 2026-06-09] lazy watcher 注册标志
+let _watchRegistered = false
 
 export function useMenuPermissions() {
   const authStore = useAuthStore()
   const menuCache = useMetaCache('menuCache')
+
+  // [FIX v1.0.4 2026-06-09] 监听 user 变化, 切换用户时 reset
+  //   修复场景: admin 登录看全菜单 → 退出登录 → TEST60 登录
+  //             menuCache 和 module-level state 残留 admin 数据
+  //             导致 TEST60 看到 admin 的菜单
+  // [FIX v1.0.4b 2026-06-09] 必须用 function declaration 而非 const 箭头
+  //   const 在函数体内不提升, 触发 TDZ 错误 "Cannot access 'reset' before initialization"
+  //   把 watch 移到 reset 之后定义, 用闭包引用 (函数声明可提升)
+  //   实际方案: 改用 watchEffect + 函数声明, 或 watch 注册移到文件末尾
+  //   这里采用 lazy 注册: 在 loadMenuPermissions 第一次调用时再注册 watch
+  //   这样避免 setup 时 TDZ 错误
   const accessibleMenus = computed(() => menuPermissions.value)
 
   const flatMenus = computed(() => {
@@ -102,7 +117,28 @@ export function useMenuPermissions() {
   }
 
   const loadMenuPermissions = async () => {
-    if (_menusLoaded.value && menuPermissions.value.length > 0) return
+    // [FIX v1.0.4b 2026-06-09] lazy 注册 user 切换 watcher
+    //   必须在 reset 之后才能引用, 所以放在第一次调用 loadMenuPermissions 时
+    //   借助模块级 _watchRegistered 标记避免重复注册
+    if (!_watchRegistered) {
+      _watchRegistered = true
+      watch(
+        () => authStore.user?.user_id ?? authStore.user?.id ?? null,
+        (newUserId, oldUserId) => {
+          if (oldUserId !== null && newUserId !== oldUserId) {
+            // 用户切换: 清空 menu state 和缓存
+            reset()
+            menuCache.clearCache()
+            _loadedForUserId.value = null
+          }
+        }
+      )
+    }
+    const currentUserId = authStore.user?.user_id ?? authStore.user?.id ?? null
+    // [FIX v1.0.4 2026-06-09] 检查 _loadedForUserId 而非 _menusLoaded
+    //   原 bug: module-level _menusLoaded 一旦为 true 永不重置
+    //   新版: 按 user_id 区分, 切换用户时强制重新拉取
+    if (_menusLoaded.value && _loadedForUserId.value === currentUserId && menuPermissions.value.length > 0) return
 
     loading.value = true
     error.value = null
@@ -136,6 +172,7 @@ export function useMenuPermissions() {
       if (cached?.data && cached.data.length > 0 && !_isHomeOnlyFallback(cached.data)) {
         menuPermissions.value = cached.data
         _menusLoaded.value = true
+        _loadedForUserId.value = currentUserId
         loading.value = false
         return
       }
@@ -147,6 +184,7 @@ export function useMenuPermissions() {
       menuCache.setCache(menus, schemaVersion)
       menuPermissions.value = menus
       _menusLoaded.value = true
+      _loadedForUserId.value = currentUserId
     } catch (err) {
       console.error('[MenuPermissions] API failed, trying cache:', err.message)
       const cached = menuCache.getCache()
@@ -202,6 +240,7 @@ export function useMenuPermissions() {
 
   const reset = () => {
     _menusLoaded.value = false
+    _loadedForUserId.value = null  // [FIX v1.0.4] 也重置 user_id
     menuPermissions.value = []
     error.value = null
     _serverLeafMenus.value = null

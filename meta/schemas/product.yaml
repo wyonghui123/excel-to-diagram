@@ -155,6 +155,15 @@ ui_view_config:
         position: 3
         importance: medium
         sortable: true
+      - key: child_count
+        title: 版本数量
+        width: 80
+        position: 4
+        importance: medium
+        computed: true
+        computation:
+          type: count_children
+          child_object: version
       - key: created_at
         title: 创建时间
         width: 180
@@ -387,6 +396,13 @@ fields:
     db_column: is_active
     default: true
     description: 产品线是否活跃
+    enum_values:
+      - value: 1
+        label: 是
+        color: success
+      - value: 0
+        label: 否
+        color: info
     ui:
       widget: switch
     semantics:

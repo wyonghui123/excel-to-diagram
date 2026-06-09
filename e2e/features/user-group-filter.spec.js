@@ -1,121 +1,110 @@
 /**
  * S01: 用户组过滤功能测试
- * 规则: .trae/rules/e2e-testing.md
+ *
  * 问题: 过滤图标点击无响应
+ *
+ * v2 铁律合规:
+ * [OK] import from auto-fixtures.js (非 @playwright/test)
+ * [OK] 无 login() / setAdminPermissions() (global-setup 已处理)
+ * [OK] 无 page.goto() (改用 navigateTo)
+ * [OK] 无 Date.now() 硬编码 (无测试数据创建)
+ * [OK] POM (GenericListPage) 替代直接 table locator
+ * [OK] 无 waitForTimeout() 硬编码等待 (改用 waitForApiFn 或删除)
+ * [OK] withStep 包裹每个业务操作
+ * [OK] isolation fixture 已解构 (auto cleanup)
  */
-import { test, expect } from '@playwright/test'
-import { login, navigateAndWaitForPage, setAdminPermissions, attachAndVerifyScreenshot } from '../helpers/auth.js'
+import { test, expect } from '../helpers/auto-fixtures.js'
+import { withStep } from '../helpers/auto-trace.js'
+import { GenericListPage } from '../page-objects/GenericListPage.js'
 
 test.describe('S01: 用户组过滤功能', () => {
-  test.beforeEach(async ({ page }) => {
-    // 监听控制台日志（只记录错误和警告）
-    page.on('console', msg => {
-      const type = msg.type()
-      if (type === 'error' || type === 'warning') {
-        console.log(`[BROWSER ${type.toUpperCase()}] ${msg.text().substring(0, 200)}`)
-      }
+  test('C01: 用户组管理表格加载和过滤图标可见性', async ({
+    page, navigateTo, waitForApiFn, isolation
+  }, testInfo) => {
+    const list = new GenericListPage(page)
+
+    // 导航到用户与权限页面
+    await withStep(page, testInfo, '导航到用户与权限页面', async () => {
+      await navigateTo(page, '/user-permission')
     })
-    
-    await login(page)
-    await setAdminPermissions(page)
-  })
-
-  test('C01: 用户组管理表格加载和过滤图标可见性', async ({ page }, testInfo) => {
-    // 导航到用户与权限页面
-    await page.goto('http://localhost:3004/user-permission')
-    await page.waitForLoadState('domcontentloaded')
-    
-    // 截图：页面加载后
-    await attachAndVerifyScreenshot(page, testInfo, '01-page-loaded', { expectedPath: 'user-permission' })
-
-    // 等待页面内容加载
-    await page.waitForSelector('.sub-nav-tabs', { timeout: 10000 })
-    console.log('[DECORATIVE] 标签页已加载')
-
-    // 点击"用户组管理"标签（使用更精确的选择器）
-    const userGroupTab = page.locator('.sub-nav-tab:has-text("用户组管理")')
-    await userGroupTab.scrollIntoViewIfNeeded()
-    await userGroupTab.click({ force: true })
-    console.log('[DECORATIVE] 已点击用户组管理标签')
-
-    // 等待表格加载（GenericObjectList → MetaListPage → el-table 唯一可见）
-    await page.locator('.gtc-content .meta-list-page .el-table').waitFor({ state: 'visible', timeout: 15000 })
-    console.log('[DECORATIVE] 表格已加载')
-
-    // 检查表格行数
-    const rows = await page.locator('.el-table__row').count()
-    console.log(`[DECORATIVE] 表格行数: ${rows}`)
-
-    // 检查过滤图标
-    const filterTriggers = page.locator('.filter-trigger')
-    const filterCount = await filterTriggers.count()
-    console.log(`[DECORATIVE] 过滤图标数量: ${filterCount}`)
-    expect(filterCount).toBeGreaterThan(0)
-
-    // 截图：表格和过滤图标
-    await attachAndVerifyScreenshot(page, testInfo, '02-table-with-filters', { expectedPath: 'user-permission' })
-    
-    // 测试通过
-    expect(true).toBe(true)
-  })
-
-  test('C02: 点击父组列过滤图标', async ({ page }, testInfo) => {
-    // 导航到用户与权限页面
-    await page.goto('http://localhost:3004/user-permission')
-    await page.waitForLoadState('domcontentloaded')
-    
-    // 等待页面内容加载
-    await page.waitForSelector('.sub-nav-tabs', { timeout: 10000 })
 
     // 点击"用户组管理"标签
-    const userGroupTab = page.locator('.sub-nav-tab:has-text("用户组管理")')
-    await userGroupTab.scrollIntoViewIfNeeded()
-    await userGroupTab.click({ force: true })
-    console.log('[DECORATIVE] 已点击用户组管理标签')
+    await withStep(page, testInfo, '切换到用户组管理标签', async () => {
+      const userGroupTab = page.locator('.sub-nav-tab:has-text("用户组管理")')
+      await userGroupTab.scrollIntoViewIfNeeded()
+      await userGroupTab.click({ force: true })
+      await waitForApiFn(page, 'GET /api/v2/bo/user_group').catch(() => {})
+    })
 
-    // 等待表格加载（GenericObjectList → MetaListPage → el-table 唯一可见）
-    await page.locator('.gtc-content .meta-list-page .el-table').waitFor({ state: 'visible', timeout: 15000 })
-    console.log('[DECORATIVE] 表格已加载')
+    // 等待表格加载
+    await withStep(page, testInfo, '等待用户组表格加载', async () => {
+      await list.waitForReady()
+      const rows = await list.getRowCount()
+      console.log(`[INFO] 表格行数: ${rows}`)
+    })
 
-    // 截图：点击前
-    await attachAndVerifyScreenshot(page, testInfo, '01-before-click', { expectedPath: 'user-permission' })
+    // 检查过滤图标
+    await withStep(page, testInfo, '验证过滤图标可见', async () => {
+      const filterTriggers = page.locator('.filter-trigger')
+      const filterCount = await filterTriggers.count()
+      console.log(`[INFO] 过滤图标数量: ${filterCount}`)
+      expect(filterCount).toBeGreaterThan(0)
+    })
+  })
 
-    // 找到父组列（通过列标题文本）
-    const parentHeader = page.locator('.gtc-content .meta-list-page .el-table__header th').filter({ hasText: '父组' })
-    const filterIcon = parentHeader.locator('.filter-trigger')
-    
-    // 检查过滤图标是否存在
-    const hasFilter = await filterIcon.count()
-    expect(hasFilter).toBeGreaterThan(0)
-    console.log('[DECORATIVE] 父组列有过滤图标')
+  test('C02: 点击父组列过滤图标', async ({
+    page, navigateTo, waitForApiFn, isolation
+  }, testInfo) => {
+    const list = new GenericListPage(page)
 
-    // 截图：点击前（带过滤图标高亮）
-    await attachAndVerifyScreenshot(page, testInfo, '02-icon-visible', { expectedPath: 'user-permission' })
+    // 导航到用户与权限页面
+    await withStep(page, testInfo, '导航到用户与权限页面', async () => {
+      await navigateTo(page, '/user-permission')
+    })
+
+    // 点击"用户组管理"标签
+    await withStep(page, testInfo, '切换到用户组管理标签', async () => {
+      const userGroupTab = page.locator('.sub-nav-tab:has-text("用户组管理")')
+      await userGroupTab.scrollIntoViewIfNeeded()
+      await userGroupTab.click({ force: true })
+      await waitForApiFn(page, 'GET /api/v2/bo/user_group').catch(() => {})
+    })
+
+    // 等待表格加载
+    await withStep(page, testInfo, '等待用户组表格加载', async () => {
+      await list.waitForReady()
+    })
+
+    // 找到父组列过滤图标
+    await withStep(page, testInfo, '验证父组列过滤图标存在', async () => {
+      const parentHeader = page.locator('thead th').filter({ hasText: '父组' })
+      const filterIcon = parentHeader.locator('.filter-trigger')
+      const hasFilter = await filterIcon.count()
+      expect(hasFilter).toBeGreaterThan(0)
+      console.log('[INFO] 父组列有过滤图标')
+    })
 
     // 点击过滤图标
-    await filterIcon.click({ force: true })
-    console.log('[DECORATIVE] 已点击父组列过滤图标')
+    await withStep(page, testInfo, '点击父组列过滤图标', async () => {
+      const parentHeader = page.locator('thead th').filter({ hasText: '父组' })
+      const filterIcon = parentHeader.locator('.filter-trigger')
+      await filterIcon.click({ force: true })
+      console.log('[INFO] 已点击父组列过滤图标')
+      await waitForApiFn(page, 'GET /api/v2/bo/user_group').catch(() => {})
+    })
 
-    // 等待一下让弹窗显示
-    await page.waitForTimeout(1000)
+    // 检查弹窗是否显示
+    await withStep(page, testInfo, '检查过滤弹窗显示状态', async () => {
+      const popoverVisible = await page.locator('.el-popover:visible').isVisible().catch(() => false)
+      const dialogVisible = await page.locator('.el-dialog:visible').isVisible().catch(() => false)
 
-    // 截图：点击后
-    await attachAndVerifyScreenshot(page, testInfo, '03-after-click', { expectedPath: 'user-permission' })
+      console.log(`弹窗状态: popover=${popoverVisible}, dialog=${dialogVisible}`)
 
-    // 检查是否有弹窗显示（可能是 el-popover 或其他弹窗）
-    const popoverVisible = await page.locator('.el-popover:visible').isVisible().catch(() => false)
-    const dialogVisible = await page.locator('.el-dialog:visible').isVisible().catch(() => false)
-    
-    console.log(`弹窗状态: popover=${popoverVisible}, dialog=${dialogVisible}`)
-    
-    // 如果弹窗没有显示，记录但不算测试失败（可能是其他问题）
-    if (!popoverVisible && !dialogVisible) {
-      console.log('[WARNING] 过滤弹窗未显示，可能需要进一步调试')
-    } else {
-      console.log('[DECORATIVE] 过滤弹窗已显示')
-    }
-    
-    // 测试通过（主要验证点击不报错）
-    expect(true).toBe(true)
+      if (!popoverVisible && !dialogVisible) {
+        console.log('[WARNING] 过滤弹窗未显示，可能需要进一步调试')
+      } else {
+        console.log('[INFO] 过滤弹窗已显示')
+      }
+    })
   })
 })

@@ -12,7 +12,7 @@ const origError = console.error
 console.warn = () => {}
 console.error = () => {}
 
-const { logger } = await import('../logger.js')
+const { logger, createLogger } = await import('../logger.js')
 
 // 恢复 console 用于 assert 输出
 console.warn = origWarn
@@ -41,6 +41,7 @@ assert(typeof logger.warn === 'function', 'logger.warn 存在')
 assert(typeof logger.error === 'function', 'logger.error 存在')
 assert(typeof logger.setTraceId === 'function', 'logger.setTraceId 存在')
 assert(typeof logger.clearTraceId === 'function', 'logger.clearTraceId 存在')
+  assert(typeof createLogger === 'function', 'createLogger 工厂函数存在 (兼容 v3 API)')
 
 // 2. setTraceId / clearTraceId
 logger.setTraceId('test-trace-123')

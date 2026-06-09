@@ -45,6 +45,13 @@ class OperationLogInterceptor(Interceptor):
     def priority(self) -> int:
         return 97
 
+    # [禁用 2026-06-09]
+    # OperationLogInterceptor 写入的日志（CREATE_OBJECT/READ_OBJECT 等）
+    # 与 AuditInterceptor 写入的业务审计日志重复，且缺少 field_name 等关键信息。
+    # 为避免日志噪音和重复，禁用此拦截器。
+    # 如需运维日志，应写入独立的 operation_logs 表，而非 audit_logs。
+    DISABLED = True
+
     def __init__(self, structured_logger: StructuredLogger = None):
         self._structured_logger = structured_logger or StructuredLogger()
 
@@ -53,6 +60,9 @@ class OperationLogInterceptor(Interceptor):
 
     def after_action(self, context: ActionContext) -> None:
         """操作后记录运维日志"""
+        if self.DISABLED:
+            return
+
         operation = self.OPERATION_MAP.get(context.action)
         if not operation:
             return

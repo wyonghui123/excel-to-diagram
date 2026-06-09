@@ -143,6 +143,43 @@ export default [
     },
   },
 
+  // [NEW 2026-06-09] 禁止 Vue 文件内直接使用 Element Plus 的 ElMessage / ElNotification
+  // 必须走 useCrudMessage (基于 useMessage/NotificationContainer, z-index 1700, teleport to body)
+  // 原因：ElMessage fixed 定位在 high-z modal 场景下被遮挡, 文案五花八门不利于 i18n
+  // ElMessageBox 是 modal 确认对话框 (UX 跟 toast 不同), 不在禁止范围, 单独走 el-dialog
+  // dev/* 路径下豁免 (组件展示页面故意展示 EP 原生效果)
+  // 详见: docs/superpowers/specs/2026-06-09-user-lock-and-feedback-design.md
+  {
+    files: ['src/**/*.vue'],
+    // 注意：使用否定模式排除 dev 页面 (ComponentComparison, dev/*)
+    // ESLint flat config 的 files 不支持 !, 改用单独块覆盖 (见下方)
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'element-plus',
+              importNames: ['ElMessage', 'ElNotification'],
+              message: '禁止直接使用 Element Plus 消息组件，请改用 useCrudMessage / useMessage composable。',
+            },
+          ],
+        },
+      ],
+    },
+  },
+
+  // 覆盖: dev 页面 + ComponentComparison 豁免 (故意展示 EP 原生组件效果)
+  {
+    files: [
+      'src/views/dev/**/*.vue',
+      'src/views/ComponentComparison.vue',
+    ],
+    rules: {
+      'no-restricted-imports': 'off',
+    },
+  },
+
   // 通用规则
   {
     files: ['src/**/*.{js,vue}'],

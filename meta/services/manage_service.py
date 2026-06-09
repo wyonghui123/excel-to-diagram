@@ -152,23 +152,34 @@ class ManageService:
             )
 
     def _validate_value_helps(self, meta_obj: MetaObject, data: Dict[str, Any]) -> List[str]:
-        """验证启用了 value_help.validation 的字段值是否有效"""
+        """验证启用了 value_help.validation 的字段值是否有效
+
+        [FR-007] 使用 value_help_accessor.get_value_help 统一获取 value_help，
+        兼容 field.value_help 和 field.ui.value_help 两种定义方式。
+        """
+        from meta.core.value_help_accessor import get_value_help as _get_vh
+
         errors = []
         for field in meta_obj.fields:
-            if not field.ui or not field.ui.value_help:
+            vh = _get_vh(field)
+            if not vh:
                 continue
-            vh = field.ui.value_help
             if not vh.validation:
                 continue
             field_value = data.get(field.id)
             if field_value is None or field_value == "":
                 continue
-            if not field.ui.relation:
-                continue
-            relation_meta = registry.get(field.ui.relation)
+            # 获取关联对象信息：优先 field.ui.relation，其次从 vh.source 解析
+            relation_meta = None
+            if field.ui and field.ui.relation:
+                relation_meta = registry.get(field.ui.relation)
+            elif vh.source and getattr(vh.source, 'type', None) == 'bo':
+                target_bo = getattr(vh.source, 'target_bo', None)
+                if target_bo:
+                    relation_meta = registry.get(target_bo)
             if not relation_meta:
                 continue
-            display_field = field.ui.display_field or "name"
+            display_field = (field.ui.display_field if field.ui else None) or "name"
             try:
                 filter_dict = {"id": field_value}
                 records = self.data_source.find(relation_meta.table_name, filters=filter_dict)

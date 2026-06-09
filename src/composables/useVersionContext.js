@@ -21,6 +21,7 @@
 
 import { ref, computed, watch, provide, inject, onMounted, isRef } from 'vue'
 import boService from '@/services/boService'
+import { useAuthStore } from '@/stores/authStore'
 
 const VERSION_CONTEXT_KEY = 'versionContext'
 
@@ -69,13 +70,24 @@ function createVersionContext() {
   })
 
   async function fetchProducts() {
+    // [FIX 2026-06-09] 改用 product:read 代替 product:list
+    //   - 旧逻辑严格检查 product:list, 但典型角色只配 product:read
+    //   - 业界实践: read 蕴含 list (Salesforce / OWASP REST API 设计)
+    //   - 后端 list 端点实际接受 product:read (已验证 200 OK)
+    //   - 改用 product:read, 跟后端权限语义对齐, 减少误拦截
+    const authStore = useAuthStore()
+    if (!authStore.hasPermission('product:read')) {
+      products.value = []
+      loadingProducts.value = false
+      return
+    }
     loadingProducts.value = true
     error.value = null
     try {
       const result = await boService.query('product', {
         pageSize: 1000
       })
-      
+
       const items = result.data?.items || result.data || []
       products.value = items.map(item => ({
         id: item.id,
@@ -97,7 +109,15 @@ function createVersionContext() {
       versions.value = []
       return
     }
-    
+
+    // [FIX 2026-06-09] 跟 fetchProducts 一致, 用 version:read 保护
+    //   防止角色只有 version:list 没有 version:read 时误拦截 (反向 case)
+    const authStore = useAuthStore()
+    if (!authStore.hasPermission('version:read')) {
+      versions.value = []
+      loadingVersions.value = false
+      return
+    }
     loadingVersions.value = true
     error.value = null
     try {

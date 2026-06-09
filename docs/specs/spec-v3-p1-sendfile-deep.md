@@ -1,3 +1,30 @@
+## 目录
+
+1. [📋 文档结构](#-文档结构)
+2. [🎯 6 Action 业务总览](#-6-action-业务总览)
+3. [1️⃣ value_help.resolve](#1-value_helpresolve)
+4. [2️⃣ aggregate.refresh](#2-aggregaterefresh)
+5. [3️⃣ aggregate.query](#3-aggregatequery)
+6. [4️⃣ subscription.list](#4-subscriptionlist)
+7. [5️⃣ enum_type.create](#5-enum_typecreate)
+8. [6️⃣ enum_type.update](#6-enum_typeupdate)
+9. [7️⃣ enum_type.delete](#7-enum_typedelete)
+10. [🛡️ P1 6 Action 实施前置条件](#-p1-6-action-实施前置条件)
+11. [🚦 风险评估](#-风险评估)
+12. [实施时间](#实施时间)
+13. [🔍 现象回顾](#-现象回顾)
+14. [🕵️ 6 假设排查结果](#-6-假设排查结果)
+15. [🎯 假设 5: use_debugger=True 与 send_file 冲突](#-假设-5-use_debuggertrue-与-send_file-冲突)
+16. [🛠️ 诊断方案 (1h)](#-诊断方案-(1h))
+17. [💡 推荐结论](#-推荐结论)
+18. [📊 诊断后产出](#-诊断后产出)
+19. [📅 实施顺序 (推荐 1 周内)](#-实施顺序-(推荐-1-周内))
+20. [🛡️ 实施前置](#-实施前置)
+21. [🚦 回滚计划](#-回滚计划)
+22. [📊 最终状态预估](#-最终状态预估)
+23. [变更记录](#变更记录)
+
+---
 # Spec: v3 BO Action — P1 6 Action + send_file 根因诊断详细方案 (v1.0)
 
 > **日期**: 2026-06-05

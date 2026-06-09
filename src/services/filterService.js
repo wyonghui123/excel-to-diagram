@@ -493,7 +493,7 @@ export function buildFilterQueryParams(options = {}) {
       addFilterParam(params, key, headerFilterValues[key], columns, filterFields, { debug })
     })
 
-  if (sortProp) {
+  if (sortProp && sortOrder) {
     const prefix = sortOrder === 'descending' ? '-' : ''
     params.ordering = `${prefix}${sortProp}`
   } else if (defaultOrdering) {

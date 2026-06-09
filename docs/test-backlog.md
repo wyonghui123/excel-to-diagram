@@ -1,3 +1,26 @@
+## 目录
+
+1. [优先级总览](#优先级总览)
+2. [0. P0 紧急：修复 37 failed](#0-p0-紧急：修复-37-failed)
+3. [1. M1: 读路径协议层](#1-m1-读路径协议层)
+4. [2. M2: ListService / AssocQueryService](#2-m2-listservice-assocqueryservice)
+5. [3. M3: computed count + EXISTS](#3-m3-computed-count-exists)
+6. [4. M4: cursor + 日期 + cache + feature flag](#4-m4-cursor-日期-cache-feature-flag)
+7. [5. M5: 写路径 + 事务](#5-m5-写路径-事务)
+8. [6. M6: Allow-list + expand + Explain + 权限](#6-m6-allow-list-expand-explain-权限)
+9. [7. M7.1: CDC 实时订阅](#7-m71-cdc-实时订阅)
+10. [8. M7.2: Multi-DB 激活](#8-m72-multi-db-激活)
+11. [9. M7.3: DeepMutationEngine](#9-m73-deepmutationengine)
+12. [10. M7.4: SchemaIntrospector](#10-m74-schemaintrospector)
+13. [11. 跨模块 E2E](#11-跨模块-e2e)
+14. [12. 性能测试](#12-性能测试)
+15. [13. 故障注入](#13-故障注入)
+16. [14. 回归测试](#14-回归测试)
+17. [统计](#统计)
+18. [推荐实施顺序](#推荐实施顺序)
+19. [当前进度](#当前进度)
+
+---
 # v3 引擎测试用例待办（Test Backlog）
 
 > **来源**: 详细测试场景梳理（[test-scenarios-v3-engine.md](file:///d:/filework/excel-to-diagram/docs/test-scenarios-v3-engine.md)）

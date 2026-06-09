@@ -150,6 +150,13 @@ class UIConfigBuilder:
         if import_export:
             config['import_export'] = _make_json_safe(import_export)
 
+        # [FIX] 注入对象级 cascade_select 配置（yaml 顶部声明的 FK 级联关系）。
+        # 前端 useFormCascade 依赖此字段启动级联监听（父变 → 清空下游 formData）。
+        # 不注入的话前端 metaObject.value.cascade_select 永远为空，initialize() 直接 return。
+        cascade_select = getattr(meta_obj, 'cascade_select', None)
+        if cascade_select:
+            config['cascade_select'] = _make_json_safe(cascade_select)
+
     def _inject_display_names(self, config, object_type, meta_obj):
         dns = self._dns
         display_field = getattr(meta_obj, 'display_name_field', None) or dns._infer_display_name_field(meta_obj)

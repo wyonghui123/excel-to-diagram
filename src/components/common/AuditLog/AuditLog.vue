@@ -87,8 +87,8 @@
               >
                 {{ formatAction(group.primaryAction) }}
               </span>
-              <span class="al-group-count" v-if="group.items.length > 1">
-                {{ group.items.length }} 项变更
+              <span class="al-group-count" v-if="group.items.length > 1 || group._children.length > 0">
+                {{ group.items.length }} 项变更<span v-if="group._children.length > 0"> · {{ group._children.length }} 个关联对象</span>
               </span>
             </div>
             <div class="al-group-toggle">
@@ -333,6 +333,8 @@ const groupedLogs = computed(() => {
         timestamp: item.created_at,
         user_name: item.user_name,
         primaryAction: item.action,
+        object_type: item.object_type,
+        object_id: item.object_id,
         items: [],
         _children: []
       })
@@ -343,6 +345,13 @@ const groupedLogs = computed(() => {
       group._children.push(item)
     } else if (item._source === 'cascade_child' || item._source === 'child_object') {
       group._children.push(item)
+    } else if (
+      group.items.length > 0 &&
+      group.object_type && item.object_type &&
+      group.object_type !== item.object_type
+    ) {
+      // 方案 A: 同 trace 内跨 object_type 归为子对象
+      group._children.push(item)
     } else {
       group.items.push(item)
     }
@@ -352,11 +361,69 @@ const groupedLogs = computed(() => {
     }
   }
 
+  for (const group of groups.values()) {
+    // CREATE 组存在字段条目时, 移除冗余的 summary 条目 (field_name='')
+    if (group.primaryAction === 'CREATE' && group.items.length > 1) {
+      const hasFieldItem = group.items.some(it => it.field_name)
+      if (hasFieldItem) {
+        group.items = group.items.filter(it => it.field_name)
+      }
+    }
+  }
+
   const result = Array.from(groups.values())
   result.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
 
-  return result
+  return mergeAdjacentGroups(result)
 })
+
+function mergeAdjacentGroups(groups) {
+  if (groups.length < 2) return groups
+  const result = [groups[0]]
+  for (let i = 1; i < groups.length; i++) {
+    const prev = result[result.length - 1]
+    const curr = groups[i]
+    if (shouldMergeGroups(prev, curr)) {
+      mergeGroupInto(prev, curr)
+    } else {
+      result.push(curr)
+    }
+  }
+  return result
+}
+
+function shouldMergeGroups(prev, curr) {
+  if (prev.primaryAction !== curr.primaryAction) return false
+  // 双方都必须有 object_type + object_id 才考虑合并, 避免缺字段时误合并
+  if (!prev.object_type || !curr.object_type) return false
+  if (prev.object_id == null || curr.object_id == null) return false
+  // 同 object 视为同一逻辑动作, 即便 user_name 显示有差异
+  // (e.g. 一些条目记录的是 display_name '系统管理员', 另一些是 username 'admin')
+  const sameObject = prev.object_type === curr.object_type &&
+                     String(prev.object_id) === String(curr.object_id)
+  if (!sameObject) return false
+  const timeDelta = Math.abs(new Date(prev.timestamp) - new Date(curr.timestamp))
+  return timeDelta < 5000
+}
+
+function mergeGroupInto(target, source) {
+  const seenIds = new Set(target.items.map(it => it.id))
+  for (const it of source.items) {
+    if (!seenIds.has(it.id)) {
+      target.items.push(it)
+      seenIds.add(it.id)
+    }
+  }
+  for (const child of source._children) {
+    if (!seenIds.has(child.id)) {
+      target._children.push(child)
+      seenIds.add(child.id)
+    }
+  }
+  if (new Date(source.timestamp) < new Date(target.timestamp)) {
+    target.timestamp = source.timestamp
+  }
+}
 
 watch(groupedLogs, (groups) => {
   if (allExpanded.value) {
@@ -681,10 +748,13 @@ function aggregateBatchAssociations(items) {
 }
 
 .al-group-action {
-  padding: 2px 8px;
+  padding: 1px 8px;
   border-radius: var(--radius-sm);
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-medium);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border-light, var(--color-border));
 }
 
 .al-group-count {
@@ -732,44 +802,17 @@ function aggregateBatchAssociations(items) {
   background: var(--color-primary-bg);
 }
 
-.al-action--create {
-  background: var(--color-success-bg, #dcfce7);
-  color: var(--color-success, #16a34a);
-}
-
-.al-action--update {
-  background: var(--color-primary-bg);
-  color: var(--color-primary);
-}
-
-.al-action--delete {
-  background: var(--color-error-bg);
-  color: var(--color-error);
-}
-
-.al-action--assign {
-  background: var(--color-warning-bg, #fef3c7);
-  color: var(--color-warning, #d97706);
-}
-
-.al-action--revoke {
-  background: var(--color-bg-spotlight);
-  color: var(--color-text-secondary);
-}
-
-.al-action--associate {
-  background: #dbeafe;
-  color: #2563eb;
-}
-
-.al-action--dissociate {
-  background: #fee2e2;
-  color: #dc2626;
-}
-
+.al-action--create,
+.al-action--update,
+.al-action--delete,
+.al-action--assign,
+.al-action--revoke,
+.al-action--associate,
+.al-action--dissociate,
 .al-action--unknown {
-  background: var(--color-bg-spotlight);
-  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-light, var(--color-border));
 }
 
 .al-detail {
@@ -787,8 +830,11 @@ function aggregateBatchAssociations(items) {
 }
 
 .al-old {
-  color: var(--color-error);
+  color: var(--color-text-tertiary);
   text-decoration: line-through;
+  background: var(--color-bg-tertiary);
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
 }
 
 .al-arrow {
@@ -796,35 +842,36 @@ function aggregateBatchAssociations(items) {
 }
 
 .al-new {
-  color: var(--color-success, #16a34a);
+  color: var(--color-text-primary);
   font-weight: var(--font-weight-medium);
+  background: var(--color-primary-bg, var(--color-bg-tertiary));
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
 }
 
 .al-detail--create {
-  color: var(--color-success, #16a34a);
-}
-
-.al-detail--delete {
-  color: var(--color-error);
-}
-
-.al-detail--associate,
-.al-detail--batch-associate {
   color: var(--color-text-secondary);
 }
 
+.al-detail--delete {
+  color: var(--color-text-secondary);
+}
+
+.al-detail--associate,
+.al-detail--batch-associate,
 .al-detail--dissociate {
   color: var(--color-text-secondary);
 }
 
 .al-associate-add {
-  color: var(--color-success, #16a34a);
+  color: var(--color-text-primary);
   font-weight: var(--font-weight-medium);
 }
 
 .al-associate-remove {
-  color: var(--color-error);
+  color: var(--color-text-secondary);
   font-weight: var(--font-weight-medium);
+  text-decoration: line-through;
 }
 
 .al-pagination {

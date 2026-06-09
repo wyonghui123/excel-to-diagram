@@ -462,10 +462,15 @@ class AuditInterceptor:
                 record = dict(zip(cols, row))
 
             display_field = getattr(meta, 'display_name_field', None)
-            if display_field and display_field in record:
+            if display_field and display_field in record and record[display_field] not in (None, ''):
                 return str(record[display_field])
 
-            return str(record.get('name') or record.get('display_name') or record.get('code') or tgt_id)
+            # [FIX Bug3 2026-06-09] 避免 target_display=null: 多级回退
+            for fb in ('username', 'code', 'name', 'display_name', 'identifier', 'title'):
+                val = record.get(fb)
+                if val not in (None, ''):
+                    return str(val)
+            return str(tgt_id)
         except Exception as e:
             logger.debug(f"[Audit] Failed to get target display: {e}")
             return None

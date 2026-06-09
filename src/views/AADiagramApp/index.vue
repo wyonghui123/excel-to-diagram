@@ -234,10 +234,10 @@ export default {
               console.error('生成图表失败:', err)
             }
           },
-          'prev': prevStep
+          'prev': handlePrevWrapper
         },
         5: {
-          'prev': prevStep,
+          'prev': handlePrevWrapper,
           'regenerate': () => goToStep(4)
         }
       }
@@ -269,9 +269,10 @@ export default {
     })
 
     const handlePrevWrapper = () => {
-      if (initFromArchData.value && currentStep.value <= 3) {
+      if (initFromArchData.value) {
+        // 从架构管理跳转进来的, 任何步骤的 prev 都直接回到架构管理
         sessionStorage.setItem('returningFromDiagram', 'true')
-        router.push('/system/archdata-legacy')
+        router.push('/system/archdata')
       } else {
         prevStep()
       }
@@ -296,11 +297,6 @@ export default {
           
           initFromArchDataManager()
           await initDataFromArch(archData)
-          
-          console.log('[DIAG] centerScope count:', centerScope.value?.length)
-          console.log('[DIAG] displayStats.total:', JSON.stringify(displayStats.value.total))
-          console.log('[DIAG] displayStats.import:', JSON.stringify(displayStats.value.import))
-          console.log('[DIAG] stepStats keys:', Object.keys(stepStats.value).map(k => k + ':' + JSON.stringify(stepStats.value[k])))
         } catch (err) {
           console.error('Failed to initialize from arch data:', err)
         }

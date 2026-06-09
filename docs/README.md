@@ -1,3 +1,11 @@
+---
+title: Excel-to-Diagram 文档门户
+version: 1.0.0
+date: 2026-06-07
+status: 活跃
+audience: 全员
+---
+
 # Excel-to-Diagram 文档门户
 
 > 项目所有文档的统一入口

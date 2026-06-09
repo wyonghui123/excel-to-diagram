@@ -8,6 +8,7 @@ release/
 # Environment variables (IMPORTANT: Contains secrets)
 .env
 .env.local
+.env.production
 .env.*.local
 
 # IDE
@@ -37,7 +38,6 @@ npm-debug.log*
 .service_manager.lock
 
 .vercel
-.env*.local
 
 # Cloudflare
 .wrangler/

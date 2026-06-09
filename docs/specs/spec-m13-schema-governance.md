@@ -1,3 +1,24 @@
+## 目录
+
+1. [0. 摘要](#0-摘要)
+2. [1. 背景与目标](#1-背景与目标)
+3. [2. 现状分析](#2-现状分析)
+4. [3. 目标架构](#3-目标架构)
+5. [4. Schema 单一事实源（SSOT）](#4-schema-单一事实源（ssot）)
+6. [5. 字段变更审计](#5-字段变更审计)
+7. [6. CI 校验（破坏性变更检测）](#6-ci-校验（破坏性变更检测）)
+8. [7. 元数据双向同步（meta_object ↔ ENTITY_SCHEMAS）](#7-元数据双向同步（meta_object-entity_schemas）)
+9. [8. 可视化 Dashboard](#8-可视化-dashboard)
+10. [9. 性能预算](#9-性能预算)
+11. [10. 5 阶段实施蓝图](#10-5-阶段实施蓝图)
+12. [11. 测试策略](#11-测试策略)
+13. [12. 风险与缓解](#12-风险与缓解)
+14. [13. 关键交付物](#13-关键交付物)
+15. [14. 关联文档](#14-关联文档)
+16. [15. 一句话总结](#15-一句话总结)
+17. [16. 变更记录](#16-变更记录)
+
+---
 # M13 v3 引擎：Schema 治理 详细 spec
 
 > **版本**: v1.5.0
@@ -742,7 +763,7 @@ def detect_drift():
 |------|------|
 | [spec-ui-business-logic-downflow.md v3.0.8](file:///d:/filework/excel-to-diagram/docs/specs/spec-ui-business-logic-downflow.md) | 主文档（v3 引擎总览）|
 | [spec-m9-graphql-protocol.md v1.2.0](file:///d:/filework/excel-to-diagram/docs/specs/spec-m9-graphql-protocol.md) | M9（ENTITY_SCHEMAS 来源）|
-| [spec-m11-rls.md v1.0.0](file:///d:/filework/excel-to-diagram/docs/specs/spec-m11-rls.md) | M11 详细 spec |
+| [spec-m11-rls-implementation.md v1.0.0](file:///d:/filework/excel-to-diagram/docs/specs/spec-m11-rls-implementation.md) | M11 详细 spec |
 | [spec-m11-rls-implementation.md v1.4.0](file:///d:/filework/excel-to-diagram/docs/specs/spec-m11-rls-implementation.md) | M11 实施 spec（同样基于实际代码细化）|
 | [spec-m10-mcp-server.md v1.0.0](file:///d:/filework/excel-to-diagram/docs/specs/spec-m10-mcp-server.md) | M10（MCP 后续可基于 OpenAPI 派生 tools）|
 | [ARCHITECTURE_V2.md](file:///d:/filework/excel-to-diagram/docs/ARCHITECTURE_V2.md) §6 前端架构 | 前端架构基线 |

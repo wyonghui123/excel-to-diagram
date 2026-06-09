@@ -240,11 +240,26 @@ class SQLDataSource(DataSource):
         """返回单个占位符"""
         pass
     
-    def _build_conditions(self, filters: Dict[str, Any]) -> tuple:
-        """构建SQL WHERE条件"""
+    def _build_conditions(self, filters: Dict[str, Any], table_prefix: str = None) -> tuple:
+        """构建SQL WHERE条件
+
+        [FIX 2026-06-08] 接受可选 table_prefix 参数，用于消除 JOIN 后的列名歧义。
+        例如：relationship 表 JOIN business_objects 时，
+        `version_id` 在两个表中都存在，必须限定为 `relationships.version_id`，
+        否则 SQLite 报 "ambiguous column name: version_id"。
+        """
         conditions = []
         params = []
-        
+
+        def _qualify(col: str) -> str:
+            """给列名加表前缀（如果 prefix 非空）"""
+            if not table_prefix:
+                return col
+            # 防止重复加前缀（防御性）
+            if col.startswith(f"{table_prefix}."):
+                return col
+            return f"{table_prefix}.{col}"
+
         for key, value in filters.items():
             # 处理 __in 后缀（多选过滤，Django风格）
             if key.endswith('__in'):
@@ -254,13 +269,13 @@ class SQLDataSource(DataSource):
                     values = [v.strip() for v in value.split(',') if v.strip()]
                 else:
                     values = list(value) if hasattr(value, '__iter__') else [value]
-                
+
                 if values:
                     placeholders = ', '.join([self._placeholder()] * len(values))
-                    conditions.append(f"{field} IN ({placeholders})")
+                    conditions.append(f"{_qualify(field)} IN ({placeholders})")
                     params.extend(values)
                 continue
-            
+
             # 处理 __notin 后缀（排除过滤）
             if key.endswith('__notin'):
                 field = key[:-7]  # 移除 __notin 后缀
@@ -268,13 +283,13 @@ class SQLDataSource(DataSource):
                     values = [v.strip() for v in value.split(',') if v.strip()]
                 else:
                     values = list(value) if hasattr(value, '__iter__') else [value]
-                
+
                 if values:
                     placeholders = ', '.join([self._placeholder()] * len(values))
-                    conditions.append(f"{field} NOT IN ({placeholders})")
+                    conditions.append(f"{_qualify(field)} NOT IN ({placeholders})")
                     params.extend(values)
                 continue
-            
+
             # 按长度降序检测操作符（长操作符优先，消除 >=/> 歧义）
             operators = [
                 (' >=', '>=', lambda k: k.split(' >=')[0]),
@@ -287,7 +302,7 @@ class SQLDataSource(DataSource):
             for detect, sql_op, extract_fn in operators:
                 if detect in key:
                     field = extract_fn(key).strip()
-                    conditions.append(f"{field} {sql_op} {self._placeholder()}")
+                    conditions.append(f"{_qualify(field)} {sql_op} {self._placeholder()}")
                     params.append(value)
                     matched = True
                     break
@@ -297,22 +312,22 @@ class SQLDataSource(DataSource):
 
             if 'LIKE' in key.upper():  # 模糊搜索：key 格式为 "column_name LIKE"
                 field = key.replace(' LIKE', '').replace(' like', '').strip()
-                conditions.append(f"{field} LIKE {self._placeholder()}")
+                conditions.append(f"{_qualify(field)} LIKE {self._placeholder()}")
                 params.append(value)
             elif 'IN' in key.upper():  # 多选过滤：key 格式为 "column_name IN"
                 field = key.replace(' IN', '').replace(' in', '').strip()
                 if isinstance(value, (list, tuple)):
                     placeholders = ', '.join([self._placeholder()] * len(value))
-                    conditions.append(f"{field} IN ({placeholders})")
+                    conditions.append(f"{_qualify(field)} IN ({placeholders})")
                     params.extend(value)
                 else:
-                    conditions.append(f"{field} IN ({self._placeholder()})")
+                    conditions.append(f"{_qualify(field)} IN ({self._placeholder()})")
                     params.append(value)
             else:
                 # 默认精确匹配
-                conditions.append(f"{key} = {self._placeholder()}")
+                conditions.append(f"{_qualify(key)} = {self._placeholder()}")
                 params.append(value)
-        
+
         return conditions, params
     
     def _get_table_columns(self, table_name: str) -> frozenset:

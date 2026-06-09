@@ -15,6 +15,8 @@ from typing import List, Dict, Any, Optional, Type
 from datetime import datetime
 import json
 import logging
+import secrets
+import string
 
 logger = logging.getLogger(__name__)
 
@@ -105,11 +107,18 @@ class AuditLogger:
             field_name: str = "", old_value: Any = None, new_value: Any = None,
             extra_data: Dict[str, Any] = None,
             trace_id: str = None, transaction_id: str = None,
-            parent_object_type: str = None, parent_object_id: Any = None) -> bool:
+            parent_object_type: str = None, parent_object_id: Any = None,
+            user_id: Any = None, user_name: str = None,
+            ip_address: str = None, user_agent: str = None) -> bool:
         if not self.enabled:
             return True
-        
+
         try:
+            # 优先使用调用方显式传入的 user 信息（覆盖 _current_user）
+            effective_user_id = user_id if user_id is not None else self._current_user.get("user_id")
+            effective_user_name = user_name if user_name else (self._current_user.get("user_name") or "system")
+            effective_ip = ip_address if ip_address is not None else self._current_user.get("ip_address", "")
+            effective_ua = user_agent if user_agent is not None else self._current_user.get("user_agent", "")
             log_data = {
                 "object_type": object_type,
                 "object_id": object_id,
@@ -117,10 +126,10 @@ class AuditLogger:
                 "field_name": field_name,
                 "old_value": self._serialize_value(old_value),
                 "new_value": self._serialize_value(new_value),
-                "user_id": self._current_user.get("user_id"),
-                "user_name": self._current_user.get("user_name") or "system",
-                "ip_address": self._current_user.get("ip_address", ""),
-                "user_agent": self._current_user.get("user_agent", ""),
+                "user_id": effective_user_id,
+                "user_name": effective_user_name,
+                "ip_address": effective_ip,
+                "user_agent": effective_ua,
                 "created_at": datetime.now().isoformat(),
                 "extra_data": json.dumps(extra_data) if extra_data else None,
                 "trace_id": trace_id,
@@ -136,16 +145,18 @@ class AuditLogger:
                 log_data["parent_object_type"] = parent_object_type
             if parent_object_id is not None:
                 log_data["parent_object_id"] = str(parent_object_id)
-            
+
             self.ds.insert(self.AUDIT_TABLE, log_data)
             return True
         except Exception as e:
             logger.error("AuditLogger failed to log: %s", str(e))
             return False
-    
+
     def log_create(self, object_type: str, object_id: Any, data: Dict[str, Any],
                    trace_id: str = None, transaction_id: str = None,
-                   parent_object_type: str = None, parent_object_id: Any = None) -> bool:
+                   parent_object_type: str = None, parent_object_id: Any = None,
+                   user_id: Any = None, user_name: str = None,
+                   ip_address: str = None, user_agent: str = None) -> bool:
         self.log(
             object_type=object_type,
             object_id=object_id,
@@ -154,7 +165,11 @@ class AuditLogger:
             trace_id=trace_id,
             transaction_id=transaction_id,
             parent_object_type=parent_object_type,
-            parent_object_id=parent_object_id
+            parent_object_id=parent_object_id,
+            user_id=user_id,
+            user_name=user_name,
+            ip_address=ip_address,
+            user_agent=user_agent,
         )
         for key, value in data.items():
             if key in ("updated_at", "updated_by", "id", "created_at", "created_by",
@@ -170,14 +185,20 @@ class AuditLogger:
                 trace_id=trace_id,
                 transaction_id=transaction_id,
                 parent_object_type=parent_object_type,
-                parent_object_id=parent_object_id
+                parent_object_id=parent_object_id,
+                user_id=user_id,
+                user_name=user_name,
+                ip_address=ip_address,
+                user_agent=user_agent,
             )
         return True
-    
-    def log_update(self, object_type: str, object_id: Any, 
+
+    def log_update(self, object_type: str, object_id: Any,
                    old_data: Dict[str, Any], new_data: Dict[str, Any],
                    trace_id: str = None, transaction_id: str = None,
-                   parent_object_type: str = None, parent_object_id: Any = None) -> bool:
+                   parent_object_type: str = None, parent_object_id: Any = None,
+                   user_id: Any = None, user_name: str = None,
+                   ip_address: str = None, user_agent: str = None) -> bool:
         changes = self._detect_changes(old_data, new_data)
         
         for field, (old_val, new_val) in changes.items():
@@ -191,14 +212,20 @@ class AuditLogger:
                 trace_id=trace_id,
                 transaction_id=transaction_id,
                 parent_object_type=parent_object_type,
-                parent_object_id=parent_object_id
+                parent_object_id=parent_object_id,
+                user_id=user_id,
+                user_name=user_name,
+                ip_address=ip_address,
+                user_agent=user_agent,
             )
-        
+
         return True
-    
+
     def log_delete(self, object_type: str, object_id: Any, data: Dict[str, Any],
                    trace_id: str = None, transaction_id: str = None,
-                   parent_object_type: str = None, parent_object_id: Any = None) -> bool:
+                   parent_object_type: str = None, parent_object_id: Any = None,
+                   user_id: Any = None, user_name: str = None,
+                   ip_address: str = None, user_agent: str = None) -> bool:
         return self.log(
             object_type=object_type,
             object_id=object_id,
@@ -207,7 +234,11 @@ class AuditLogger:
             trace_id=trace_id,
             transaction_id=transaction_id,
             parent_object_type=parent_object_type,
-            parent_object_id=parent_object_id
+            parent_object_id=parent_object_id,
+            user_id=user_id,
+            user_name=user_name,
+            ip_address=ip_address,
+            user_agent=user_agent,
         )
     
     def _detect_changes(self, old_data: Dict[str, Any], new_data: Dict[str, Any]) -> Dict[str, tuple]:
@@ -846,7 +877,7 @@ class ActionExecutor:
                    skip_rules: bool = False) -> ActionResult:
         """执行创建操作"""
         logger.info(f"[ActionExecutor] _do_create START: object={meta_object.id}, params={params}")
-        
+
         fields = meta_object.get_persistent_fields()
         data = self._prepare_data(fields, params, for_create=True)
 
@@ -855,6 +886,45 @@ class ActionExecutor:
                 error="INVALID_DATA",
                 message="Failed to prepare data for create"
             )
+
+        # [FIX 2026-06-08] user 对象特殊处理 password 字段（virtual: true）
+        # 因为 password 字段在 user.yaml 里 semantics.virtual=true，get_persistent_fields()
+        # 会跳过它，所以 _prepare_data 不会把 params['password'] 写入 data['password_hash']。
+        # 必须在这里手动处理：1) 若 admin 传了 password 则哈希后写入；2) 否则自动生成
+        _generated_temp_password = None
+        _admin_password = None
+        if meta_object.id == 'user':
+            from meta.services.auth_provider import _hash_password_pbdkdf2
+            _admin_password = params.get('password', '').strip() if params.get('password') else ''
+            try:
+                if _admin_password:
+                    # admin 显式填了密码：用 admin 填的密码
+                    if len(_admin_password) < 6:
+                        return ActionResult.fail(
+                            error="PASSWORD_TOO_SHORT",
+                            message="密码长度不能少于 6 位"
+                        )
+                    data['password_hash'] = _hash_password_pbdkdf2(_admin_password)
+                    logger.info(
+                        f"[ActionExecutor] Using admin-provided password for user create"
+                    )
+                elif not data.get('password_hash'):
+                    # admin 没填：自动生成 12 位强随机密码
+                    alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+                    _generated_temp_password = ''.join(
+                        secrets.choice(alphabet) for _ in range(12)
+                    )
+                    data['password_hash'] = _hash_password_pbdkdf2(_generated_temp_password)
+                    logger.info(
+                        f"[ActionExecutor] Auto-generated temp password for user "
+                        f"create (length=12)"
+                    )
+                # 首次登录强制改密（仅在自动生成或未设时）
+                if _generated_temp_password and not data.get('must_change_password'):
+                    data['must_change_password'] = 1
+            except Exception as _e:
+                logger.error(f"[ActionExecutor] Failed to process user password: {_e}")
+                # 失败则继续由后端流程兜底
 
         try:
             data = self._resolve_foreign_keys(meta_object, data, params)
@@ -931,22 +1001,32 @@ class ActionExecutor:
                     )
             
             parent_type, parent_id = self._resolve_parent_info(meta_object, data)
-            self._write_audit_log_v2(
-                lambda trace_id=None, transaction_id=None: self.audit_logger.log_create(
+            def _audit_create(trace_id=None, transaction_id=None, user_id=None, user_name=None, ip_address=None, user_agent=None):
+                return self.audit_logger.log_create(
                     object_type=meta_object.id,
                     object_id=last_id,
                     data=data,
                     trace_id=trace_id,
                     transaction_id=transaction_id,
                     parent_object_type=parent_type,
-                    parent_object_id=parent_id
+                    parent_object_id=parent_id,
+                    user_id=user_id,
+                    user_name=user_name,
+                    ip_address=ip_address,
+                    user_agent=user_agent,
                 )
-            )
-            
+            self._write_audit_log_v2(_audit_create)
+
             self._trigger_aggregate_refresh(meta_object.id, last_id, "created")
-            
+
+            result_data = {"id": last_id}
+            # [NEW] 2026-06-08: 若为 user 自动生成了临时密码，返回明文供 admin 告知用户
+            if _generated_temp_password is not None:
+                result_data["generated_temp_password"] = _generated_temp_password
+                result_data["must_change_password"] = True
+
             result = ActionResult.ok(
-                data={"id": last_id},
+                data=result_data,
                 message="{0} created successfully".format(meta_object.name)
             )
             result.last_insert_id = last_id
@@ -1041,9 +1121,23 @@ class ActionExecutor:
         order_by = params.get("_order_by")
         limit = params.get("_limit")
         offset = params.get("_offset")
-        
+
+        import os
+        try:
+            with open(r'D:\filework\excel-to-diagram\logs\_dbg_do_list.log', 'a', encoding='utf-8') as f:
+                f.write(f"\n=== _do_list obj={meta_object.id} table={meta_object.table_name} params_keys={list(params.keys())} ===\n")
+                # 看 context.extra
+                try:
+                    from flask import g
+                    extra = getattr(g, 'context_extra', None) or {}
+                    f.write(f"  g.context_extra={extra}\n")
+                except Exception as e:
+                    f.write(f"  g.context_extra err: {e}\n")
+        except Exception:
+            pass
+
         logger.info(f"[_do_list] order_by={order_by}, limit={limit}, offset={offset}")
-        
+
         # 构建过滤条件（排除特殊参数）
         filters = {}
         special_params = ["_order_by", "_limit", "_offset", "page", "page_size"]
@@ -1054,9 +1148,9 @@ class ActionExecutor:
                 if field:
                     filters[field.db_column] = value
                     logger.info(f"[_do_list] filter: {field.db_column} = {value}")
-        
+
         logger.info(f"[_do_list] final filters: {filters}")
-        
+
         try:
             records = self.ds.find(
                 meta_object.table_name,
@@ -1064,14 +1158,20 @@ class ActionExecutor:
                 order_by=order_by,
                 limit=limit
             )
-            
+
             logger.info(f"[_do_list] ds.find returned {len(records)} records")
-            
+
             # 如果有offset，手动切片
             if offset and records:
                 records = records[offset:]
                 logger.info(f"[_do_list] after offset={offset}: {len(records)} records")
-            
+
+            try:
+                with open(r'D:\filework\excel-to-diagram\logs\_dbg_do_list.log', 'a', encoding='utf-8') as f:
+                    f.write(f"  ds.find returned {len(records)} records, filters={filters}\n")
+            except Exception:
+                pass
+
             return ActionResult.ok(data=records)
         except Exception as e:
             logger.error(f"[_do_list] Error: {e}")
@@ -1193,7 +1293,7 @@ class ActionExecutor:
             if original_data:
                 parent_type, parent_id = self._resolve_parent_info(meta_object, original_data)
                 self._write_audit_log_v2(
-                    lambda trace_id=None, transaction_id=None: self.audit_logger.log_update(
+                    lambda trace_id=None, transaction_id=None, user_id=None, user_name=None, ip_address=None, user_agent=None: self.audit_logger.log_update(
                         object_type=meta_object.id,
                         object_id=id_value,
                         old_data=original_data,
@@ -1201,7 +1301,11 @@ class ActionExecutor:
                         trace_id=trace_id,
                         transaction_id=transaction_id,
                         parent_object_type=parent_type,
-                        parent_object_id=parent_id
+                        parent_object_id=parent_id,
+                        user_id=user_id,
+                        user_name=user_name,
+                        ip_address=ip_address,
+                        user_agent=user_agent
                     )
                 )
             
@@ -1328,14 +1432,18 @@ class ActionExecutor:
             if original_data:
                 parent_type, parent_id = self._resolve_parent_info(meta_object, original_data)
                 self._write_audit_log_v2(
-                    lambda trace_id=None, transaction_id=None: self.audit_logger.log_delete(
+                    lambda trace_id=None, transaction_id=None, user_id=None, user_name=None, ip_address=None, user_agent=None: self.audit_logger.log_delete(
                         object_type=meta_object.id,
                         object_id=id_value,
                         data=original_data,
                         trace_id=trace_id,
                         transaction_id=transaction_id,
                         parent_object_type=parent_type,
-                        parent_object_id=parent_id
+                        parent_object_id=parent_id,
+                        user_id=user_id,
+                        user_name=user_name,
+                        ip_address=ip_address,
+                        user_agent=user_agent
                     )
                 )
                 self._trigger_aggregate_refresh(meta_object.id, id_value, "deleted")
@@ -1368,11 +1476,11 @@ class ActionExecutor:
     
     def _write_audit_log_v2(self, audit_fn):
         """V2 审计日志写入 — 参考 SAP V2 Update 模式
-        
+
         业务事务提交后，审计日志通过 AsyncAuditWriter 异步写入。
         审计写入失败不影响业务结果，仅记录 warning 日志。
-        自动从 Flask g 对象获取 trace_id 和 transaction_id。
-        
+        自动从 Flask g 对象获取 trace_id / transaction_id / 用户上下文。
+
         测试环境下完全跳过审计日志写入（避免 audit_logs 表缺失导致的测试失败）。
         """
         try:
@@ -1380,22 +1488,55 @@ class ActionExecutor:
             if os.environ.get('TESTING', '').lower() in ('true', '1', 'yes'):
                 logger.debug("[AuditLog] Skipping audit log write in TESTING mode")
                 return
-            
+
             trace_id = None
             transaction_id = None
+            user_id = None
+            user_name = None
+            ip_address = None
+            user_agent = None
             try:
-                from flask import g
+                from flask import g, request
                 trace_id = getattr(g, 'trace_id', None)
                 transaction_id = getattr(g, 'transaction_id', None)
+                # [FIX Bug3 2026-06-09] 显式从 g.current_user 读取用户信息，
+                # 避免异步执行时 audit_logger._current_user 已被重置/被覆盖
+                current_user = getattr(g, 'current_user', None)
+                if isinstance(current_user, dict):
+                    user_id = current_user.get('user_id') or current_user.get('id')
+                    user_name = current_user.get('display_name') or current_user.get('username')
+                try:
+                    if request is not None:
+                        ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
+                        if ip_address and ',' in ip_address:
+                            ip_address = ip_address.split(',')[0].strip()
+                        user_agent = request.headers.get('User-Agent', '')
+                except RuntimeError:
+                    pass
             except (ImportError, RuntimeError):
                 pass
 
             from meta.services.async_audit_writer import async_audit_writer, AUDIT_ASYNC_ENABLED
             if AUDIT_ASYNC_ENABLED and async_audit_writer._ds is not None:
-                async_audit_writer.submit(audit_fn, trace_id=trace_id, transaction_id=transaction_id)
+                async_audit_writer.submit(
+                    audit_fn,
+                    trace_id=trace_id,
+                    transaction_id=transaction_id,
+                    user_id=user_id,
+                    user_name=user_name,
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                )
             else:
                 with self.ds.transaction():
-                    audit_fn(trace_id=trace_id, transaction_id=transaction_id)
+                    audit_fn(
+                        trace_id=trace_id,
+                        transaction_id=transaction_id,
+                        user_id=user_id,
+                        user_name=user_name,
+                        ip_address=ip_address,
+                        user_agent=user_agent,
+                    )
         except Exception as e:
             logger.warning("Audit log V2 write failed: %s", str(e))
     
@@ -1433,12 +1574,16 @@ class ActionExecutor:
             result.affected_rows = count
             
             self._write_audit_log_v2(
-                lambda trace_id=None, transaction_id=None: self.audit_logger.log_create(
+                lambda trace_id=None, transaction_id=None, user_id=None, user_name=None, ip_address=None, user_agent=None: self.audit_logger.log_create(
                     object_type=meta_object.id,
                     object_id=0,
                     data={'batch_inserted_count': count, 'object_type': meta_object.id},
                     trace_id=trace_id,
-                    transaction_id=transaction_id
+                    transaction_id=transaction_id,
+                    user_id=user_id,
+                    user_name=user_name,
+                    ip_address=ip_address,
+                    user_agent=user_agent
                 )
             )
             

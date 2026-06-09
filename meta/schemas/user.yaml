@@ -95,12 +95,14 @@ fields:
     db_column: password_hash
     required: false
     semantics:
-      meaning: 用户密码，首次登录时由用户自行设置
+      meaning: 初始密码：admin 创建用户时可填，留空则后端自动生成 12 位强随机密码，首次登录强制改密
       virtual: true
     ui:
       hidden_in_detail: true
       hidden_in_list: true
-      hidden_in_form: true
+      hidden_in_form: false
+      form_widget: password_input
+      help_text: "留空则自动生成 12 位强随机临时密码（首次登录需修改）"
 
   - id: display_name
     name: 显示名称
@@ -152,7 +154,7 @@ fields:
       behavior:
         validation: true
         binding_strength: strict
-        multiple: true
+        multiple: false
       presentation:
         result_type: dropdown
         color_mapping:
@@ -164,30 +166,25 @@ fields:
       form_widget: select
       default: active
 
-  - id: status_entered_at
-    name: 状态进入时间
-    type: datetime
-    db_column: status_entered_at
-    description: 进入当前状态的时间
-    semantics:
-      meaning: 用于计算当前状态停留时长
-      audit_field: true
-    ui:
-      visible: false
-      editable: false
+  # [REMOVED 2026-06-09] status_entered_at 字段已删除
+  # 原字段: 每次状态转换时被 state_transition rule 强制 NOW() 写入,
+  # 但被 3 个 state_transition rule 反复覆盖, 产生大量 audit log
+  # 修复: 单一事实源改为 audit_logs (查最近一次 status 变化时间)
+  # current_status_duration_days 公式从 audit_logs 子查询派生
 
   - id: current_status_duration_days
     name: 当前状态停留天数
     type: integer
     db_column: current_status_duration_days
-    description: 在当前状态停留的天数
+    description: 在当前状态停留的天数 (从 audit_logs 派生)
     storage: virtual
     semantics:
       meaning: 用户在当前状态停留的天数，用于状态监控
+      derived_from_audit_log: true
       analytics:
         category: measure
     computation:
-      formula: 'IF(ISNULL(status_entered_at), 0, DATEDIFF(status_entered_at, NOW(), "days"))'
+      formula: 'DATEDIFF(NOW(), COALESCE((SELECT MAX(created_at) FROM audit_logs WHERE object_type=''user'' AND object_id=user.id AND field_name=''状态'' AND action=''UPDATE''), user.created_at), "days")'
     ui:
       widget: number
       editable: false
@@ -511,7 +508,8 @@ ui_view_config:
           - fields: [email, status]
       - title: 认证信息
         columns:
-          - fields: [sso_provider, sso_user_id]
+          - fields: [password, sso_provider]
+          - fields: [sso_user_id]
   
   detail:
     title: 用户详情

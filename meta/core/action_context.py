@@ -6,7 +6,7 @@
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from enum import Enum
 import uuid
 from datetime import datetime
@@ -86,6 +86,11 @@ class ActionContext:
     lock_timeout: int = 30
     
     extra: Dict[str, Any] = field(default_factory=dict)
+    
+    # [审计延迟写入 2026-06-09]
+    # 在事务中执行 associate/dissociate 时，审计写入会与业务写入发生 SQLite 锁冲突。
+    # 解决方案：在事务内缓存审计记录，事务提交后再写入。
+    _pending_audit_records: List[Dict[str, Any]] = field(default_factory=list)
     
     def __post_init__(self):
         if self.trace_id is None:

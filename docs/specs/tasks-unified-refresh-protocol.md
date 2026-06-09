@@ -1,3 +1,17 @@
+## 目录
+
+1. [关键发现（调研阶段）](#关键发现（调研阶段）)
+2. [Step 1: 新建 useRefreshCoordinator.js](#step-1-新建-userefreshcoordinatorjs)
+3. [Step 2: boService 增强](#step-2-boservice-增强)
+4. [Step 3: DetailPage CRUD 收敛到 boService](#step-3-detailpage-crud-收敛到-boservice)
+5. [Step 4: MOMP 绑定协调器](#step-4-momp-绑定协调器)
+6. [Step 5: MetaListPage 注册回调](#step-5-metalistpage-注册回调)
+7. [Step 6: RelationScopeTree 注册回调](#step-6-relationscopetree-注册回调)
+8. [Step 7: useMultiObjectPage 接入协调器](#step-7-usemultiobjectpage-接入协调器)
+9. [Step 8: 清理旧 emit/watch 路径](#step-8-清理旧-emitwatch-路径)
+10. [验证清单](#验证清单)
+
+---
 # 实施方案: 元数据驱动 MultiObjectPage 统一刷新协议
 
 > 关联 Spec: [spec-unified-refresh-protocol.md](./spec-unified-refresh-protocol.md)  

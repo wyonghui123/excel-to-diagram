@@ -2,22 +2,22 @@
   "total_files": 316,
   "active_files": 275,
   "archived_files": 41,
-  "total_size_kb": 6672.5,
-  "files_with_frontmatter": 5,
-  "files_with_toc": 23,
+  "total_size_kb": 6885.7,
+  "files_with_frontmatter": 19,
+  "files_with_toc": 182,
   "chinese_named_files": 1,
   "total_h1": 2431,
-  "total_h2": 2851,
+  "total_h2": 3010,
   "total_h3": 6105,
-  "missing_links": 96,
-  "anchor_issues": 90,
-  "files_with_issues": 59,
+  "missing_links": 90,
+  "anchor_issues": 193,
+  "files_with_issues": 86,
   "size_distribution": {
     "<5KB": 36,
-    "50-100KB": 16,
-    "20-50KB": 91,
+    "50-100KB": 20,
+    "20-50KB": 92,
     ">100KB": 7,
-    "5-20KB": 166
+    "5-20KB": 161
   },
   "dir_distribution": {
     "docs": 316
@@ -31,38 +31,38 @@
     },
     {
       "path": "docs\\specs\\spec-task-scheduler.md",
-      "size_kb": 152.9,
-      "headers": 130,
+      "size_kb": 159.0,
+      "headers": 131,
       "archived": false
     },
     {
       "path": "docs\\ARCHITECTURE_V2.md",
-      "size_kb": 150.6,
+      "size_kb": 153.7,
       "headers": 147,
       "archived": false
     },
     {
       "path": "docs\\superpowers\\specs\\2026-05-12-unified-config-object-design.md",
-      "size_kb": 148.6,
-      "headers": 179,
+      "size_kb": 152.6,
+      "headers": 180,
       "archived": false
     },
     {
       "path": "docs\\UI_COMPONENT_LIBRARY_ANALYSIS.md",
-      "size_kb": 123.0,
-      "headers": 98,
+      "size_kb": 127.0,
+      "headers": 99,
       "archived": false
     },
     {
       "path": "docs\\architecture\\02-yaml-conventions-v2.md",
-      "size_kb": 121.5,
+      "size_kb": 125.4,
       "headers": 193,
       "archived": false
     },
     {
       "path": "docs\\specs\\useMetaList-refactor\\spec-base-v1.0.0.md",
-      "size_kb": 109.1,
-      "headers": 109,
+      "size_kb": 110.5,
+      "headers": 110,
       "archived": false
     },
     {
@@ -72,23 +72,23 @@
       "archived": false
     },
     {
-      "path": "docs\\ENTERPRISE_PLATFORM_CAPABILITY_PLANNING.md",
-      "size_kb": 80.8,
-      "headers": 34,
+      "path": "docs\\architecture-design.md",
+      "size_kb": 82.0,
+      "headers": 46,
       "archived": false
     },
     {
       "path": "docs\\spec_data_permission_unified_model.md",
-      "size_kb": 80.4,
-      "headers": 86,
+      "size_kb": 81.5,
+      "headers": 87,
       "archived": false
     }
   ],
-  "frontmatter_coverage": 1.8,
-  "toc_coverage": 8.4,
+  "frontmatter_coverage": 6.9,
+  "toc_coverage": 66.2,
   "chinese_name_ratio": 0.4,
-  "avg_size_kb": 21.1,
-  "total_issues": 186,
-  "health_score": 62.4,
-  "generated_at": "2026-06-07T23:50:19.028437+08:00"
+  "avg_size_kb": 21.8,
+  "total_issues": 283,
+  "health_score": 67.3,
+  "generated_at": "2026-06-08T00:08:02.443723+08:00"
 }

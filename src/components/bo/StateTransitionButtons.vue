@@ -32,7 +32,7 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { useCrudMessage } from '@/composables/useCrudMessage'
 import { apiV2 } from '@/utils/httpClient'
 import AppButton from '@/components/common/AppButton/AppButton.vue'
 
@@ -65,6 +65,7 @@ const props = defineProps({
 
 const emit = defineEmits(['success', 'error', 'refresh'])
 
+const message = useCrudMessage()
 const loading = ref(false)
 const executingId = ref(null)
 const confirmDialogVisible = ref(false)
@@ -128,7 +129,8 @@ const executeTransition = async (transition) => {
     )
     
     if (data.success) {
-      ElMessage.success(`${transition.label} 成功`)
+      // [FIX 2026-06-09] 用 useCrudMessage 替代 ElMessage
+      message.stateChanged(transition.label, '数据')
       console.debug('[StateTransitionButtons] emit success and refresh, newStatus:', transition.toState, 'stateField:', transition.stateField)
       const refreshPayload = { newStatus: transition.toState, stateField: transition.stateField }
       console.debug('[StateTransitionButtons] emitting refresh with payload:', refreshPayload)
@@ -136,12 +138,12 @@ const executeTransition = async (transition) => {
       emit('refresh', refreshPayload)
       await loadTransitions()
     } else {
-      ElMessage.error(data.message || `${transition.label} 失败`)
+      message.error(`${transition.label} 失败`, data)
       emit('error', { transition, error: data.message })
     }
   } catch (error) {
     console.error('State transition error:', error)
-    ElMessage.error(`${transition.label} 失败: ${error.message}`)
+    message.error(`${transition.label} 失败`, error)
     emit('error', { transition, error: error.message })
   } finally {
     loading.value = false

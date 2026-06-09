@@ -1,3 +1,18 @@
+## 目录
+
+1. [0. 抽取理由](#0-抽取理由)
+2. [1. 背景与目标](#1-背景与目标)
+3. [2. 现状深度分析](#2-现状深度分析)
+4. [3. 目标架构](#3-目标架构)
+5. [4. FR-UI-007：permissionService.js](#4-fr-ui-007：permissionservicejs)
+6. [5. FR-UI-008：conditionExpressionService.js](#5-fr-ui-008：conditionexpressionservicejs)
+7. [6. FR-UI-009：Vue 组件重构](#6-fr-ui-009：vue-组件重构)
+8. [7. 实施计划](#7-实施计划)
+9. [8. 风险与缓解](#8-风险与缓解)
+10. [附录 A：条件表达式 DSL EBNF](#附录-a：条件表达式-dsl-ebnf)
+11. [附录 B：操作符优先级](#附录-b：操作符优先级)
+
+---
 # Spec 子文档: PR 8-10 FR-UI-007/008/009 权限系统下沉
 
 > **版本**: v1.0.0

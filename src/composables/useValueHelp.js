@@ -79,7 +79,9 @@ export function useValueHelp(valueHelpConfig, options = {}) {
       if (recentItems.length > 0) {
         // 标记最近使用的选项
         const markedRecent = recentItems.map(item => ({ ...item, isRecent: true }))
-        optionsList.value = markedRecent
+        // [FIX] 不要在 await 前直接覆盖 optionsList，否则切领域后会闪一下属于旧领域的最近项。
+        // 先 loading=true 标记正在加载，等后端按 filter 返回后再 set。
+        optionsList.value = []
         loading.value = true
         error.value = null
 
@@ -95,14 +97,20 @@ export function useValueHelp(valueHelpConfig, options = {}) {
 
           if (response.success && response.data) {
             const allItems = response.data.data || []
-            // 合并最近使用（最近使用的排前面，带标记）
-            const recentValues = new Set(recentItems.map(r => String(r.value)))
-            const regularItems = allItems.filter(item => !recentValues.has(String(item.value)))
-            optionsList.value = [...markedRecent, ...regularItems]
+            // [FIX] 用后端 filter 结果做 intersection——只保留属于当前 parent context 的最近项。
+            // localStorage 里的 markedRecent 不带 version/parent 上下文，无脑 prepend 会污染下拉
+            // （切领域后看到旧领域的子领域）。
+            const allValues = new Set(allItems.map(item => String(item.value)))
+            const validRecent = markedRecent.filter(r => allValues.has(String(r.value)))
+            const validRecentValues = new Set(validRecent.map(r => String(r.value)))
+            const regularItems = allItems.filter(item => !validRecentValues.has(String(item.value)))
+            optionsList.value = [...validRecent, ...regularItems]
           }
         } catch (e) {
-          // 如果加载失败，仍然显示最近使用的
+          // 如果加载失败，兜底显示当前 markedRecent 防止完全空白（用户至少能看到上次用过的）
+          // 但这是异常路径，正常流程不会走到
           console.warn('[useValueHelp] Failed to load full options:', e)
+          optionsList.value = markedRecent
         } finally {
           loading.value = false
         }

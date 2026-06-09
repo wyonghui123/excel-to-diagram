@@ -322,6 +322,7 @@
   --z-index-popover: 1500;
   --z-index-tooltip: 1600;
   --z-index-notification: 1700;
+  --z-index-tour: 1700;  // 兼容历史用法, 与 notification 同级 (确保浮在 modal/drawer 之上)
   --z-index-max: 9999;
 }
 

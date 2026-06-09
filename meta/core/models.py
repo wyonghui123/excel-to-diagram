@@ -14,7 +14,7 @@ from meta.core.action_constants import (
 from meta.core.models_enums import (
     FieldType, ObjectType, FieldStorage, FieldSource,
     RelationType, ActionType, ValidationSeverity, QueryOperator, AggregateType,
-    RuleType, RuleScope, RuleTrigger, DataCategory, AnnotationCategory,
+    RuleType, RuleScope, RuleTrigger, DataCategory, AnnotationCategory, ArchObjectType,
     DimensionKey, BusinessRelationType, RelationCategory, Direction,
     BusinessObjectCategory, BoSubCategory, EnumBindingStrength, DimensionReferenceType,
     DataPermissionDimensionType, DerivationType, DerivationStrategy,
@@ -1041,11 +1041,24 @@ class MetaObject:
         return self.functions
     
     def get_business_key_field(self) -> Optional[MetaField]:
-        """获取业务标识字段"""
+        """获取业务标识字段（deprecated: 仅返回第一个，请用 get_business_key_fields）"""
         for f in self.fields:
             if f.semantics.business_key:
                 return f
         return None
+
+    def get_business_key_fields(self) -> list:
+        """[FR-011] 获取所有业务键字段（支持组合键）
+
+        返回所有 business_key=True 且非 virtual 的字段列表。
+        替代 get_business_key_field()（只返回单个字段，不支持组合键）。
+        """
+        return [
+            f for f in self.fields
+            if getattr(f.semantics, 'business_key', False)
+            and f.storage.value != 'virtual'
+            and not getattr(f.semantics, 'virtual', False)
+        ]
     
     def get_display_name_field(self) -> Optional[MetaField]:
         """获取显示名称字段"""

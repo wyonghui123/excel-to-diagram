@@ -394,6 +394,7 @@ fields:
       behavior:
         validation: true
         binding_strength: strict
+        multiple: false  # 详情表单应为单选，不是多选
       presentation:
         result_type: dropdown
         display_format: "{code} - {name}"

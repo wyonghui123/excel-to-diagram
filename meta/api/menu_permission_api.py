@@ -303,6 +303,16 @@ def get_visible_menu_tree():
         
         has_super = '*' in user_perms
         
+        # [FIX 2026-06-08] 查询用户通过 role_menu_permissions 直接被授予的菜单
+        granted_menu_codes = set()
+        if role_ids:
+            mh = ','.join('?' * len(role_ids))
+            menu_grant_rows = ds.execute(
+                f"SELECT DISTINCT rmp.menu_code FROM role_menu_permissions rmp "
+                f"WHERE rmp.role_id IN ({mh})", role_ids
+            ).fetchall()
+            granted_menu_codes = {r[0] for r in menu_grant_rows}
+        
         menu_rows = ds.execute(
             "SELECT * FROM menus WHERE is_active = 1 AND show_in_sidebar = 1 ORDER BY sort_order"
         ).fetchall()
@@ -335,7 +345,8 @@ def get_visible_menu_tree():
                     req_raw = []
             required = req_raw if isinstance(req_raw, list) else []
             
-            visible = has_super or not required or any(p in user_perms for p in required)
+            # [FIX 2026-06-08] 检查菜单可见性：超级权限 OR 无权限要求 OR 有权限 OR 通过 role_menu_permissions 直接授予
+            visible = has_super or not required or any(p in user_perms for p in required) or (code in granted_menu_codes)
             if not visible:
                 continue
             

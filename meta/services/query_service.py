@@ -334,9 +334,9 @@ class QueryService:
                 order_clause = 'updated_at desc'
                 default_updated_at_sort = True
                 logger.info(f"[VirtualSort] No order specified, defaulting to updated_at desc")
-        
+
         logger.info(f"[VirtualSort] search called: object_type={request.object_type}, order_clause={order_clause}, page={request.page}, page_size={request.page_size}")
-        
+
         if order_clause:
             parts = order_clause.strip().split()
             raw_field = parts[0]
@@ -358,14 +358,26 @@ class QueryService:
                     request.page, request.page_size, meta_obj
                 )
                 total_pages = (total + request.page_size - 1) // request.page_size if request.page_size > 0 else 0
-                
+
                 aggregations = {}
                 if data:
                     aggregations["count"] = len(data)
-                
+
                 if request.include_relations and data:
                     data = self._enrich_with_relations(meta_obj, data)
-                
+
+                # [FIX 2026-06-08] 计算 list 中配置的 computed 字段（如 child_count）
+                # 早期 return 路径必须也调用，否则 child_count 永远是 None
+                if data:
+                    data = self._enrich_audit_virtual_fields(meta_obj, data)
+                    try:
+                        from meta.core.interceptors.persistence_interceptor import PersistenceInterceptor
+                        pi = PersistenceInterceptor()
+                        data = pi._enrich_fk_display_names(meta_obj, data, self.ds)
+                    except Exception as e:
+                        logger.warning(f"[QueryService.search] _enrich_fk_display_names failed: {e}")
+                    data = self._compute_list_computed_fields(meta_obj, data)
+
                 return SearchResult(
                     data=data,
                     total=total,
@@ -413,6 +425,16 @@ class QueryService:
                         aggregations["count"] = len(data)
                     if request.include_relations and data:
                         data = self._enrich_with_relations(meta_obj, data)
+                    # [FIX 2026-06-08] 计算 list 中配置的 computed 字段
+                    if data:
+                        data = self._enrich_audit_virtual_fields(meta_obj, data)
+                        try:
+                            from meta.core.interceptors.persistence_interceptor import PersistenceInterceptor
+                            pi = PersistenceInterceptor()
+                            data = pi._enrich_fk_display_names(meta_obj, data, self.ds)
+                        except Exception as e:
+                            logger.warning(f"[QueryService.search] _enrich_fk_display_names failed: {e}")
+                        data = self._compute_list_computed_fields(meta_obj, data)
                     return SearchResult(
                         data=data,
                         total=total,
@@ -446,15 +468,21 @@ class QueryService:
                         memory_sort_direction = direction
                         memory_sort_computed_by = 'default'
 
-        if request.skip_count:
-            total = -1
-            total_pages = -1
-        else:
-            total = builder.count_all()
+        # [FR-007] 虚拟字段排序: 先排序再分页, 修复跨页排序不一致 Bug
+        if memory_sort_field:
+            # 内存排序路径: 先查全部数据, 排序后再分页
+            data = builder.execute()
+            total = len(data) if request.skip_count else builder.count_all()
             total_pages = (total + request.page_size - 1) // request.page_size if request.page_size > 0 else 0
-
-        builder.page(request.page, request.page_size)
-        data = builder.execute()
+        else:
+            builder.page(request.page, request.page_size)
+            data = builder.execute()
+            if request.skip_count:
+                total = -1
+                total_pages = -1
+            else:
+                total = builder.count_all()
+                total_pages = (total + request.page_size - 1) // request.page_size if request.page_size > 0 else 0
 
         aggregations = {}
         if data:
@@ -473,7 +501,7 @@ class QueryService:
         except Exception as e:
             logger.warning(f"[QueryService.search] _enrich_fk_display_names failed: {e}")
 
-        if data and (order_clause or memory_sort_field):
+        if data:
             data = self._compute_list_computed_fields(meta_obj, data)
 
         if order_clause:
@@ -481,6 +509,11 @@ class QueryService:
         
         if memory_sort_field and memory_sort_computed_by:
             data = self._sort_by_computed_field(data, memory_sort_field, memory_sort_direction, memory_sort_computed_by, meta_obj, memory_sort_formula)
+
+        # [FR-007] 内存排序后 Python 分页
+        if memory_sort_field and data:
+            start = (request.page - 1) * request.page_size
+            data = data[start:start + request.page_size]
 
         return SearchResult(
             data=data,
@@ -524,26 +557,18 @@ class QueryService:
         )
 
     def _compute_list_computed_fields(self, meta_obj, data):
-        """计算列表视图中的计算字段（用于排序和过滤）"""
+        """计算列表视图中的计算字段（用于排序和过滤）
+
+        [FR-005] 使用 computation_service.collect_computed_columns SSOT，
+        与 import_export_service._compute_list_computed_fields_for_export 统一。
+        """
         try:
             from meta.services.computation_service import computation_service
-            ui_computed_columns = []
 
-            if hasattr(meta_obj, 'ui_view_config') and meta_obj.ui_view_config:
-                list_config = getattr(meta_obj.ui_view_config, 'list', None)
-                if list_config and hasattr(list_config, 'columns'):
-                    ui_computed_columns = [
-                        {'key': col.key, 'computation': getattr(col, 'computation', None)}
-                        for col in list_config.columns
-                        if getattr(col, 'computed', False) and getattr(col, 'computation', None)
-                    ]
-
-            rule_computed = computation_service.get_computed_columns_from_rules(meta_obj.id)
-            computed_cols = computation_service.merge_computed_columns(ui_computed_columns, rule_computed)
+            computed_cols = computation_service.collect_computed_columns(meta_obj)
 
             if computed_cols:
                 computation_service.compute_batch(self.ds, meta_obj.id, data, computed_cols)
-                logger.debug(f"[ComputedFields] Computed {len(computed_cols)} fields for {meta_obj.id}")
 
         except Exception as e:
             logger.warning(f"[ComputedFields] Failed to compute fields: {e}")

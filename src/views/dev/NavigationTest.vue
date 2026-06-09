@@ -314,6 +314,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
+// [DEV-ONLY] NavigationTest 是导航演示页面, 故意用 ElMessage 演示交互反馈
 import { ElMessage } from 'element-plus'
 import { AppLayout } from '@/components/common'
 import { AppIcon } from '@/components/common'

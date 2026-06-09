@@ -86,6 +86,7 @@ class AssociationDefinition:
     async_delete: bool = False
     max_cardinality: Optional[int] = None
     allow_reassign: bool = False
+    readonly: bool = False  # [FIX 2026-06-09] 详情页/列表页用：true 时隐藏移除/解绑按钮
 
 from meta.core.models import (
     MetaObject,
@@ -1055,17 +1056,22 @@ def parse_association(data: Dict[str, Any]) -> AssociationDefinition:
         through=data.get("through"),
         source_key=data.get("source_key", ""),
         target_entity=data.get("target_entity") or data.get("target_type", ""),
-        target_key=data.get("target_key", ""),
+        target_key=data.get("target_key") or data.get("foreign_key_target", ""),
         actions=actions_dict,
         cardinality=data.get("cardinality", "many_to_many"),
         hierarchy=data.get("hierarchy", False),
-        foreign_key_field=data.get("foreign_key_field"),
+        # [FIX] YAML 中既可能用 foreign_key_field (驼峰)，也可能用 foreign_key_source (下划线)
+        foreign_key_field=(
+            data.get("foreign_key_field")
+            or data.get("foreign_key_source")
+        ),
         cascade_delete=data.get("cascade_delete", False),
         polymorphic_type_field=data.get("polymorphic_type_field"),
         polymorphic_id_field=data.get("polymorphic_id_field"),
         async_delete=data.get("async_delete", False),
         max_cardinality=data.get("max_cardinality"),
         allow_reassign=data.get("allow_reassign", False),
+        readonly=data.get("readonly", False),
     )
 
 
@@ -1268,6 +1274,12 @@ def parse_field(data: Dict[str, Any], included_from: str = "") -> MetaField:
     is_computed = data.get("computed", False)
     if not is_computed and isinstance(semantics_data, dict):
         is_computed = semantics_data.get("computed", False)
+    # [FIX] 字段只要声明了 computation.type（如 count_relations），就视为计算字段，
+    # 这样 _try_build_computed_filter / _build_computed_count_sort_clause 才能用子查询处理。
+    if not is_computed:
+        computation_decl = data.get("computation") or {}
+        if isinstance(computation_decl, dict) and computation_decl.get("type"):
+            is_computed = True
 
     if isinstance(semantics_data, dict) and semantics_data.get("virtual", False):
         storage = FieldStorage.VIRTUAL

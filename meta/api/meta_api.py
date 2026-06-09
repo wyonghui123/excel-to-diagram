@@ -361,36 +361,43 @@ def get_enums_batch():
     ds = _get_enum_ds()
     result = {}
 
+    # [FR-006] 批量查询替代逐类型查询, 避免 N+1
+    if not enum_types:
+        return jsonify({'success': True, 'data': result})
+
+    # 批量存在性检查
+    placeholders = ','.join(['?'] * len(enum_types))
+    cursor = ds.execute(
+        f"SELECT id FROM enum_types WHERE id IN ({placeholders})",
+        enum_types
+    )
+    existing_ids = {row[0] for row in cursor.fetchall()}
+
+    # 批量获取所有枚举值
+    cursor = ds.execute(
+        f"SELECT enum_type_id, code, name, name_en, sort_order, is_active, parent_code "
+        f"FROM enum_values WHERE enum_type_id IN ({placeholders}) AND is_active = 1 "
+        f"ORDER BY enum_type_id, sort_order, code",
+        enum_types
+    )
+    columns = ['code', 'name', 'name_en', 'sort_order', 'is_active', 'parent_code']
+    values_by_type = {}
+    for row in cursor.fetchall():
+        tid = row[0]
+        if tid not in values_by_type:
+            values_by_type[tid] = []
+        values_by_type[tid].append(dict(zip(columns, row[1:])))
+
     for enum_type in enum_types:
-        try:
-            # 检查枚举类型是否存在
-            cursor = ds.execute("SELECT id FROM enum_types WHERE id = ?", [enum_type])
-            if not cursor.fetchone():
-                result[enum_type] = {
-                    'success': False,
-                    'message': f'枚举类型不存在: {enum_type}'
-                }
-                continue
-
-            # 查询活跃的枚举值
-            sql = (
-                "SELECT code, name, name_en, sort_order, is_active, parent_code "
-                "FROM enum_values WHERE enum_type_id = ? AND is_active = 1 "
-                "ORDER BY sort_order, code"
-            )
-            cursor = ds.execute(sql, [enum_type])
-            rows = cursor.fetchall()
-            columns = [desc[0] for desc in cursor.description]
-            values = [dict(zip(columns, row)) for row in rows]
-
-            result[enum_type] = {
-                'success': True,
-                'data': values
-            }
-        except Exception as e:
+        if enum_type not in existing_ids:
             result[enum_type] = {
                 'success': False,
-                'message': str(e)
+                'message': f'枚举类型不存在: {enum_type}'
+            }
+        else:
+            result[enum_type] = {
+                'success': True,
+                'data': values_by_type.get(enum_type, [])
             }
 
     return jsonify({

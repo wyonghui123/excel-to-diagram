@@ -23,8 +23,14 @@ def mock_logger():
 
 @pytest.fixture
 def interceptor(mock_logger):
-    """OperationLogInterceptor with mock logger"""
-    return OperationLogInterceptor(structured_logger=mock_logger)
+    """OperationLogInterceptor with mock logger.
+    
+    注意: 原始 DISABLED=True 是因为写入 audit_logs 会产生噪音 (object_type=_unknown 等).
+    测试时临时改为 False 以验证逻辑正确性; 生产代码保持 DISABLED=True.
+    """
+    i = OperationLogInterceptor(structured_logger=mock_logger)
+    i.DISABLED = False  # 测试时启用, 验证逻辑
+    return i
 
 
 def make_context(action, object_type='domain', success=True,

@@ -47,8 +47,25 @@ class BOService extends BaseService {
   countAssociationsV2(objectType, id, associationName) { return _assocService.countV2(objectType, id, associationName) }
   assignAssociationV2(objectType, id, associationName, data) { return _assocService.assignV2(objectType, id, associationName, data) }
   unassignAssociationV2(objectType, id, associationName, data) { return _assocService.unassignV2(objectType, id, associationName, data) }
-  batchAssignAssociationsV2(objectType, id, associationName, data) { return _assocService.batchAssignV2(objectType, id, associationName, data) }
-  batchUnassignAssociationsV2(objectType, id, associationName, data) { return _assocService.batchUnassignV2(objectType, id, associationName, data) }
+  // [FIX 2026-06-08] associationService.batchAssignV2 / batchUnassignV2 签名是
+  // (objectType, id, associationName, targetIds, options = {}) — 第 4 参是 **数组** 不是对象。
+  // 之前 boService 直接把 data 透传,导致 { target_ids: [...], target_type: '...' } 被当成
+  // targetIds,内部 `targetIds?.length` 是 undefined → body 为空 → 后端 400。
+  // 这里在 boService 层解包,保持对外的 (..., data) 干净 API,call site 不需要改。
+  batchAssignAssociationsV2(objectType, id, associationName, data = {}) {
+    return _assocService.batchAssignV2(
+      objectType, id, associationName,
+      data.target_ids || [],
+      { targetType: data.target_type, metadata: data.metadata }
+    )
+  }
+  batchUnassignAssociationsV2(objectType, id, associationName, data = {}) {
+    return _assocService.batchUnassignV2(
+      objectType, id, associationName,
+      data.target_ids || [],
+      { targetType: data.target_type, associationRecordIds: data.association_record_ids }
+    )
+  }
   batchQueryAssociations(objectType, associationName, data) { return _assocService.batchQuery(objectType, associationName, data) }
   retrieveWithAssociations(objectType, id, options) { return _assocService.retrieveWithAssociations(objectType, id, options) }
 
@@ -78,11 +95,20 @@ class BOService extends BaseService {
 
   clearAllCache() {
     this.cache.clear()
+    // [FIX] boService 的 CRUD 实际由 _crud (BOCrudService) 执行，
+    //   _crud 有自己独立的 cache (LRUCache 实例)。
+    //   若只清 boService.cache 不清 _crud.cache，
+    //   boService.query() 会从 _crud 的 cache 命中旧数据，
+    //   导致 refresh() 后 UI 不更新。
+    this._crud?.cache?.clear?.()
     _assocService.clearCache()
   }
 
   clearCache(objectType) {
     this._clearCache(objectType)
+    // [FIX] 同步清理 _crud (BOCrudService) 的 cache，
+    //   否则 _crud.query() 命中旧 cache，refresh() 不发请求 → UI 不刷新
+    this._crud?._clearListCache?.(objectType)
     _assocService.clearCache(objectType)
   }
 }

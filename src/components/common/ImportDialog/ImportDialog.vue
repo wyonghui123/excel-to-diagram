@@ -269,7 +269,7 @@
 
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { useCrudMessage } from '@/composables/useCrudMessage'
 import { UploadFilled, Download } from '@element-plus/icons-vue'
 import { boService } from '@/services/boService'
 import { metaService } from '@/services/metaService'
@@ -310,6 +310,8 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['update:visible', 'success', 'close'])
+
+const message = useCrudMessage()
 
 const uploadRef = ref(null)
 const currentStep = ref(0)
@@ -499,7 +501,7 @@ function prevStep() {
 
 async function startPreview() {
   if (!selectedFile.value) {
-    ElMessage.warning('请选择要导入的文件')
+    message.warning('请选择要导入的文件')
     return
   }
 
@@ -528,12 +530,12 @@ async function startPreview() {
     if (result.success) {
       previewResult.value = result.data
     } else {
-      ElMessage.error(result.message || '数据校验失败')
+      message.error('数据校验失败', result)
       currentStep.value = 0
     }
   } catch (e) {
     clearInterval(progressInterval)
-    ElMessage.error('数据校验失败: ' + (e.message || '未知错误'))
+    message.error('数据校验失败: ' + (e.message || '未知错误'), e)
     currentStep.value = 0
   } finally {
     previewing.value = false
@@ -550,7 +552,7 @@ async function startImport() {
   totalTypes.value = selectedCascadeFields.value.length
 
   if (!props.context?.version_id && !props.context?.product_id) {
-    ElMessage.warning('请先在顶部导航栏选择产品和版本上下文后再导入')
+    message.warning('请先在顶部导航栏选择产品和版本上下文后再导入')
     importing.value = false
     return
   }
@@ -609,7 +611,7 @@ async function pollImportProgress(taskId) {
           }
           importing.value = false
           if (successCount.value > 0) {
-            ElMessage.success(`成功导入 ${successCount.value} 条数据`)
+            message.success(`成功导入 ${successCount.value} 条数据`)
           }
           emit('success', importResult.value)
         } else if (data.status === 'failed') {
@@ -618,7 +620,7 @@ async function pollImportProgress(taskId) {
             errors: [{ message: data.error || '导入失败' }]
           }
           importing.value = false
-          ElMessage.error(data.error || '导入失败')
+          message.error(data.error || '导入失败')
         } else {
           setTimeout(poll, 1000)
         }
@@ -642,12 +644,12 @@ async function downloadTemplate() {
       : [props.objectType]
     const result = await boService.downloadTemplate(types[0], { selected_types: types })
     if (result.success) {
-      ElMessage.success('模板下载成功')
+      message.success('模板下载成功')
     } else {
-      ElMessage.error(result.message || '模板下载失败')
+      message.error('模板下载失败', result)
     }
   } catch (e) {
-    ElMessage.error('模板下载失败: ' + e.message)
+    message.error('模板下载失败: ' + e.message, e)
   }
 }
 

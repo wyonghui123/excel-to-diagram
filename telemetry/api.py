@@ -1,12 +1,13 @@
 """
 telemetry/api.py - M14 v1.0.0 Telemetry Dashboard API
 
-4 个端点：
+5 个端点：
 - GET /api/v1/telemetry/stats          统计（p50/p95/p99 + 总数）
 - GET /api/v1/telemetry/traces         最近 trace 列表
 - GET /api/v1/telemetry/traces/slow    慢请求列表
 - GET /api/v1/telemetry/traces/<id>    单个 trace 详情
 - POST /api/v1/telemetry/configure     配置（threshold / max）
+- POST /api/v1/telemetry/error         前端错误上报 (FR-003)
 """
 import logging
 from flask import Blueprint, jsonify, request
@@ -73,4 +74,74 @@ def configure():
     return jsonify({
         'max_traces': storage._traces.maxlen,
         'slow_threshold_ms': storage._slow_threshold_ms,
+    })
+
+
+# ---------------------------------------------------------------------------
+# FR-003: 前端错误上报端点
+# 接收 logger.js sendBeacon 上报的错误数据
+# ---------------------------------------------------------------------------
+import threading
+
+# 内存存储: 最近 200 条前端错误 (线程安全)
+_frontend_errors = []
+_frontend_errors_lock = threading.Lock()
+_MAX_FRONTEND_ERRORS = 200
+
+
+@telemetry_bp.route('/error', methods=['POST'])
+def report_error():
+    """接收前端 sendBeacon 上报的错误 (FR-003)
+
+    请求体 (JSON):
+      level: 'error' | 'warn'
+      message: string
+      extra: { stack?, name? } | null
+      traceId: string | null
+      url: string | null
+      userAgent: string | null
+      ts: number (epoch ms)
+    """
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({'success': False, 'message': 'Invalid JSON'}), 400
+
+    # 基本校验
+    level = data.get('level', 'error')
+    message = data.get('message', '')
+    if not message:
+        return jsonify({'success': False, 'message': 'Missing message'}), 400
+
+    error_record = {
+        'level': level,
+        'message': message[:2000],  # 截断防止超长
+        'extra': data.get('extra'),
+        'traceId': data.get('traceId'),
+        'url': (data.get('url') or '')[:500],
+        'userAgent': (data.get('userAgent') or '')[:500],
+        'ts': data.get('ts'),
+        'received_at': __import__('time').time(),
+    }
+
+    with _frontend_errors_lock:
+        _frontend_errors.append(error_record)
+        if len(_frontend_errors) > _MAX_FRONTEND_ERRORS:
+            _frontend_errors.pop(0)
+
+    # 同时写入 Python logger (便于后端日志聚合)
+    logger.error('[FrontendError] %s (traceId=%s)', message[:200], data.get('traceId', '-'))
+
+    return jsonify({'success': True}), 201
+
+
+@telemetry_bp.route('/errors', methods=['GET'])
+def get_errors():
+    """查询前端错误列表 (FR-003)"""
+    limit = min(int(request.args.get('limit', 50)), 200)
+    with _frontend_errors_lock:
+        errors = list(_frontend_errors[-limit:])
+    return jsonify({
+        'count': len(errors),
+        'total': len(_frontend_errors),
+        'errors': errors,
     })

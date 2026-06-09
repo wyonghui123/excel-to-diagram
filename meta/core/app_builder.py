@@ -512,9 +512,22 @@ class ApplicationBuilder:
             elif not allowed_origins and is_debug:
                 response.headers['Access-Control-Allow-Origin'] = request_origin or '*'
             response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
-            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+            # [FR-024] 扩展 Allow-Headers 包含项目自定义头
+            response.headers['Access-Control-Allow-Headers'] = (
+                'Content-Type, Authorization, X-CSRF, X-Trace-Id, X-Agent-Reasoning'
+            )
             response.headers['Access-Control-Allow-Credentials'] = 'true'
+            # [FR-024] Max-Age: 浏览器缓存 preflight 结果 24h, 减少 OPTIONS 请求
+            response.headers['Access-Control-Max-Age'] = '86400'
             return response
+
+        # [FR-024] 显式处理 OPTIONS preflight 请求
+        # 避免 Flask 路由到视图函数返回 405
+        @app.before_request
+        def handle_options_preflight():
+            if request.method == 'OPTIONS':
+                # after_request 会添加 CORS 头, 这里只需返回 204
+                return '', 204
 
         # v1.4 P8 Sunset (2026-06-05): 已 Sunset
         # V1_SPECIAL_PREFIXES 保留**必要的** v1 路径（包括 v1/user-groups, v1/roles）
@@ -668,6 +681,15 @@ def _init_audit_service(ds, db_path):
 
         from meta.migrations.enhance_audit_log_v2 import enhance_audit_log
         enhance_audit_log(db_path)
+
+        # [FR-008/009] 性能索引 v3: relationships + audit_logs 覆盖索引
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        try:
+            from meta.migrations.add_performance_indexes_v3 import create_indexes as create_v3_indexes
+            create_v3_indexes(conn)
+        finally:
+            conn.close()
 
         from meta.services.async_audit_writer import async_audit_writer
         async_audit_writer.set_data_source(ds)

@@ -332,7 +332,6 @@ describe('ExportDialog Component', () => {
       await nextTick()
 
       expect(wrapper.vm.localOptions.includeHierarchyPath).toBe(false)
-      expect(wrapper.vm.localOptions.includeHierarchyIds).toBe(false)
       expect(wrapper.vm.localOptions.protectSheet).toBe(false)
       expect(wrapper.vm.localOptions.markReadonly).toBe(false)
     })
@@ -384,7 +383,6 @@ describe('ExportDialog Component', () => {
         expect.objectContaining({
           options: expect.objectContaining({
             include_hierarchy_path: expect.any(Boolean),
-            include_hierarchy_ids: expect.any(Boolean),
             protect_sheet: expect.any(Boolean),
             mark_readonly: expect.any(Boolean)
           })

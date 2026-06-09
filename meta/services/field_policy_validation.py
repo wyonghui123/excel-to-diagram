@@ -87,16 +87,25 @@ class FieldPolicyValidationInterceptor:
             return result
         
         # 验证每个字段
+        # [FIX 2026-06-09] 修复新建用户保存报错：
+        # 创建上下文中非可编辑字段（ui.editable: false 或系统字段）由后端自动管理
+        # （如 must_change_password 由 action_executor 根据是否生成临时密码自动设置，
+        # created_at 由 _prepare_data 自动填充）。前端表单可能因 schema 默认值附带
+        # 这些字段，校验时应跳过，避免阻断合法创建请求。
         for field_id, value in data.items():
             if not self._is_data_field(field_id, value):
                 continue
-            
+
+            if not self.engine.determine_editable(field_id, context):
+                # 非可编辑字段在 CREATE 上下文中由后端自动管理，跳过校验
+                continue
+
             field_error = self._validate_field_editable(field_id, context)
             if field_error:
                 result.add_error(field_error)
-        
+
         return result
-    
+
     def validate_update(
         self,
         object_id: Any,

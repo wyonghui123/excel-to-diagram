@@ -248,9 +248,22 @@ def list_enum_types():
         cursor = ds.execute(sql, params)
         rows = cursor.fetchall()
         result = [_row_to_dict(cursor, row) for row in rows]
-        
+
+        # [FR-006] 批量获取 value_count, 避免 N+1 查询
+        if result:
+            enum_ids = [row['id'] for row in result]
+            placeholders = ','.join(['?'] * len(enum_ids))
+            cursor2 = ds.execute(
+                f"SELECT enum_type_id, COUNT(*) as cnt FROM enum_values "
+                f"WHERE enum_type_id IN ({placeholders}) GROUP BY enum_type_id",
+                enum_ids
+            )
+            count_map = dict(cursor2.fetchall())
+        else:
+            count_map = {}
+
         for row in result:
-            row['value_count'] = _get_enum_value_count(ds, row['id'])
+            row['value_count'] = count_map.get(row['id'], 0)
             row['dimension_count'] = _get_dimension_count(row.get('dimension_schema'))
 
         # [FIX 2026-06-04] 补充 virtual 字段 updated_at（从 audit_logs 计算）

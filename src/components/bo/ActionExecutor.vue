@@ -195,7 +195,7 @@
 <script setup>
 import { ref, computed, reactive } from 'vue'
 import { ArrowDown } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { useCrudMessage } from '@/composables/useCrudMessage'
 import boService from '@/services/boService'
 import { evaluateCondition } from '@/utils/safeExpression'
 
@@ -235,6 +235,8 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['execute', 'success', 'error'])
+
+const message = useCrudMessage()
 
 const loading = ref(false)
 const paramDialogVisible = ref(false)
@@ -364,27 +366,27 @@ const executeAction = async (action, params) => {
       if (action.showResult !== false) {
         resultDialogVisible.value = true
       } else {
-        ElMessage.success(result.message || `${action.label || action.name} 成功`)
+        message.success(result.message || `${action.label || action.name} 成功`)
       }
       emit('success', { action, result, params })
     } else {
       if (action.showError !== false) {
         resultDialogVisible.value = true
       } else {
-        ElMessage.error(result.message || `${action.label || action.name} 失败`)
+        message.error(`${action.label || action.name} 失败`, result)
       }
       emit('error', { action, error: result.message, params })
     }
-    
+
     emit('execute', { action, result, params })
   } catch (error) {
     console.error('Action execution error:', error)
     lastResult.value = { success: false, message: error.message }
-    
+
     if (action.showError !== false) {
       resultDialogVisible.value = true
     } else {
-      ElMessage.error(`${action.label || action.name} 失败: ${error.message}`)
+      message.error(`${action.label || action.name} 失败: ${error.message}`, error)
     }
     
     emit('error', { action, error: error.message, params })

@@ -208,6 +208,7 @@
             v-loading="loading"
             :data="data"
             :default-sort="defaultSort"
+            :sort="sortInfo"
             border
             class="custom-table"
             table-layout="fixed"
@@ -476,10 +477,10 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, markRaw, inject } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowDown, View, Edit, Delete, List, Plus, Upload, Download, Setting, Lock, MoreFilled, Document, CopyDocument, Promotion } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
 import { useMetaList, formatDate } from '@/composables/useMetaList'
 import { useAssociationNavigation } from '@/composables/useAssociationNavigation'
 import { useMenuPermissions } from '@/composables/useMenuPermissions'
+import { useCrudMessage } from '@/composables/useCrudMessage'
 import TableHeaderFilter from '@/components/common/TableHeaderFilter/TableHeaderFilter.vue'
 import ExportDialog from '@/components/common/ExportDialog/ExportDialog.vue'
 import ImportDialog from '@/components/common/ImportDialog/ImportDialog.vue'
@@ -642,6 +643,7 @@ const emit = defineEmits([
 ])
 
 const router = useRouter()
+const message = useCrudMessage()
 const { objectTypeRouteMap, loadMenuPermissions: loadPermissions } = useMenuPermissions()
 const tableRef = ref(null)
 const coordinator = inject('refreshCoordinator', null)
@@ -1327,15 +1329,15 @@ async function executeDelete() {
   try {
     const result = await boService.delete(props.objectType, deleteTargetRow.value.id)
     if (result.success) {
-      ElMessage.success('删除成功')
+      message.deleted('数据')
       showDeleteConfirm.value = false
       deleteTargetRow.value = null
       await forceRefresh()
     } else {
-      ElMessage.error(result.message || '删除失败')
+      message.error('删除失败', result)
     }
   } catch (e) {
-    ElMessage.error('删除失败')
+    message.error('删除失败', e)
   } finally {
     deleteLoading.value = false
   }
@@ -1514,12 +1516,14 @@ defineExpose({
   display: flex;
   justify-content: space-between;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 12px;
   padding: var(--spacing-sm) var(--spacing-md);
   background: var(--color-bg-container);
   border-radius: var(--border-radius-md);
-  overflow: hidden;
+  overflow-x: auto;
+  min-height: 44px;
+  position: relative; /* Lock positioning context */
 }
 
 .toolbar-left {
@@ -1529,12 +1533,21 @@ defineExpose({
   flex: 1;
   min-width: 0;
   overflow-x: auto;
+
+  .search-field {
+    flex-shrink: 0;
+  }
+
+  .selection-info-wrapper {
+    flex-shrink: 0;
+  }
 }
 
 .toolbar-right {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-shrink: 0;
 }
 
 .filter-toggle-icon {
@@ -1751,7 +1764,7 @@ defineExpose({
   height: auto;
 
   .toolbar {
-    padding: var(--spacing-xs) 0;
+    padding: var(--spacing-xs) var(--spacing-sm);
   }
 
   .table-section {

@@ -1,3 +1,17 @@
+## 目录
+
+1. [1. Background & Objectives](#1-background-objectives)
+2. [2. Requirement Type Overview](#2-requirement-type-overview)
+3. [3. Functional Requirements](#3-functional-requirements)
+4. [4. Nonfunctional Requirements](#4-nonfunctional-requirements)
+5. [5. External Interface Requirements](#5-external-interface-requirements)
+6. [6. Transition Requirements](#6-transition-requirements)
+7. [7. Constraints & Assumptions](#7-constraints-assumptions)
+8. [8. Priorities & Milestones](#8-priorities-milestones)
+9. [9. Change / Design Proposal (RFC)](#9-change-design-proposal-(rfc))
+10. [10. TBD List](#10-tbd-list)
+
+---
 # Spec: Product Version Draft 可见性控制与 Code 唯一性
 
 > **创建日期**: 2026-05-23

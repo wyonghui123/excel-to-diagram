@@ -1,3 +1,11 @@
+---
+title: 数据模型说明
+version: 1.0.0
+date: 2026-06-07
+status: 活跃
+audience: 架构师、开发者
+---
+
 # 数据模型文档
 
 ## 1. Excel 导入数据模型

@@ -8,13 +8,11 @@
  *  1. tokens-yonyou    - YonDesign 设计令牌 (CSS 变量)
  *  2. variables        - 应用级 SCSS 变量
  *  3. element-variables - Element Plus 主题变量映射
- *  4. yon-ep           - YonDesign 风格的 EP 全局样式
+ *  4. yon-ep           - YonDesign 风格的 EP 全局样式 (含 FR-005 合并的 overrides)
  *  5. meta-table       - 元数据表格 (partial: _meta-table.scss)
- *  6. element-plus-overrides - EP 组件样式覆盖 (CSS, 只能用 @import)
- *  7. ../style.css     - 应用全局样式 (含 :root 重置)
+ *  6. ../style.css     - 应用全局样式 (含 :root 重置)
  *
- * 注意: @use 不支持 .css 文件,所以 .css 用 @import
- *       (Sass 1.x 推荐使用 meta.load-css,但为简单起见用 @import)
+ * [FR-005] element-plus-overrides.css 已合并入 yon-ep.scss, 不再单独导入
  */
 
 // SCSS 模块 (按加载顺序)
@@ -25,5 +23,4 @@
 @use './meta-table';
 
 // CSS 文件 (@use 不支持,使用 @import)
-@import './element-plus-overrides.css';
 @import '../style.css';

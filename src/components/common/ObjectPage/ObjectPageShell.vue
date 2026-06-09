@@ -72,7 +72,6 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, provide } from 'vue'
-import { ElMessage } from 'element-plus'
 import ObjectPageHeader from './ObjectPageHeader.vue'
 import ObjectPageContent from './ObjectPageContent.vue'
 import AssignmentDialog from '../AssignmentDialog/AssignmentDialog.vue'

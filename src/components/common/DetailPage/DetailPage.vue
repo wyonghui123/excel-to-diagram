@@ -218,6 +218,13 @@ async function loadEntityMeta() {
     console.warn('[DetailPage] Failed to load entity meta:', e)
   } finally {
     metaLoaded.value = true
+    // [FIX] 启动 FK 级联监听：父字段变化时清空下游 formData。
+    // 工具函数 (useFormCascade.initialize -> clearAllDownstream) 已实现，
+    // 但需要 entityMeta 加载完才有 cascade_select 配置可用。
+    // 这里 fire-and-forget：watch 注册是同步的，inferParentFields 只在编辑模式有意义。
+    if (entityMeta.value?.cascade_select?.length) {
+      cascade.initialize()
+    }
   }
 }
 
@@ -558,6 +565,16 @@ const computedSections = computed(() => {
         if (isCollectionAssociation(tab.association)) {
           const assocDef = entityAssociations.find(a => a.name === tab.association)
           console.debug('[DetailPage] Creating association section:', tab.association, 'assocDef:', assocDef)
+          // [FIX 2026-06-09] readonly 时强制把 unassign/assign 移除，
+          // 只保留 list（防止下游 manyToManyRowActions 即使 section.readonly
+          // 解析失败仍兜底出"移除"按钮）。
+          const isAssocReadonly = !!(tab.readonly || assocDef?.readonly)
+          const safeActions = isAssocReadonly
+            ? (tab.actions || ['list']).filter(a => {
+                const key = typeof a === 'string' ? a : (a.key || a.id)
+                return key === 'list'
+              })
+            : (tab.actions || ['assign', 'unassign', 'list'])
           sections.push({
             key: tab.id || tab.association,
             label: tab.label || tab.association,
@@ -568,8 +585,8 @@ const computedSections = computed(() => {
             assocType: assocDef?.type,
             pageSize: tab.pageSize || 20,
             display: tab.display || 'inline',
-            actions: tab.actions || ['assign', 'unassign', 'list'],
-            readonly: tab.readonly || assocDef?.readonly || false
+            actions: safeActions,
+            readonly: isAssocReadonly
           })
         } else {
         }
@@ -937,9 +954,11 @@ async function handleSave() {
       const fieldDefs = computedFieldDefs.value
       for (const [key, value] of Object.entries(data.value)) {
         if (isSystemField(key)) continue
+        // [FIX] 新建模式下：不过滤 readonly 字段，因为 parent_key/context_field 等
+        // readonly_always 字段（如 version_id）在新建时必须提交。后端在 update 时
+        // 才会做 readonly 校验。
         const def = fieldDefs[key]
-        if (def?.readonly || def?.immutable) continue
-        if (!def?.editable) continue
+        if (def?.immutable && !isCreate) continue
         if (key === 'can_delete' || key === 'relation_count') continue
         if (['version_name', 'domain_name', 'sub_domain_name', 'service_module_name'].includes(key)) continue
         payload[key] = value

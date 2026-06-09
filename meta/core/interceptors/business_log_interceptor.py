@@ -21,16 +21,11 @@ logger = logging.getLogger(__name__)
 class BusinessLogInterceptor(Interceptor):
     """
     业务日志拦截器
-    
-    在 CRUD 操作后记录结构化业务日志，包含：
-    - 操作类型 (CREATE/UPDATE/DELETE)
-    - 对象类型和 ID
-    - 操作人信息
-    - 变更前后的数据差异
-    
-    注意：此拦截器与 AuditInterceptor 互补：
-    - AuditInterceptor：记录关联操作（associate/dissociate）的审计日志
-    - BusinessLogInterceptor：记录所有 CRUD 操作的业务日志（通过 StructuredLogger）
+
+    注意（2026-06-09）：
+    - CRUD 审计日志由 ActionExecutor._write_audit_log_v2() 统一处理。
+    - BusinessLogInterceptor 跳过 CRUD 操作，避免与 ActionExecutor 重复写入。
+    - 仅记录非 CRUD 操作（如 associate/dissociate）的业务日志。
     """
 
     ACTION_MAP = {
@@ -38,6 +33,10 @@ class BusinessLogInterceptor(Interceptor):
         'crud_update': 'UPDATE',
         'crud_delete': 'DELETE',
     }
+
+    # [FIX 2026-06-09] CRUD 操作已由 ActionExecutor._write_audit_log_v2() 统一写入审计日志。
+    # BusinessLogInterceptor 跳过 CRUD，避免写入重复。
+    AUDIT_CRUD_WRITE_DISABLED = True
 
     @property
     def priority(self) -> int:
@@ -50,7 +49,12 @@ class BusinessLogInterceptor(Interceptor):
         pass
 
     def after_action(self, context: ActionContext) -> None:
-        """CRUD 操作后记录业务日志"""
+        """CRUD 操作后记录业务日志（仅非 CRUD 操作的关联日志）"""
+        # [FIX 2026-06-09] 跳过 CRUD，ActionExecutor 已统一写入审计日志
+        if self.AUDIT_CRUD_WRITE_DISABLED and context.is_crud_action:
+            logger.debug("[BusinessLogInterceptor] CRUD audit disabled, skipping. Action=%s", context.action)
+            return
+
         action_name = self.ACTION_MAP.get(context.action)
         if not action_name:
             return

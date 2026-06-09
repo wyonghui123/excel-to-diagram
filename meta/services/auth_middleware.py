@@ -4,7 +4,7 @@
 """
 
 from functools import wraps
-from flask import request, g, jsonify, make_response
+from flask import request, g, jsonify, make_response, current_app
 from meta.services.token_service import TokenService
 from meta.services.token_blacklist_service import token_blacklist_service
 
@@ -62,15 +62,18 @@ def login_required(f):
         g.current_user = user_info
 
         resp = make_response(f(*args, **kwargs))
-        resp.set_cookie(
-            'auth_token',
-            value=token,
-            max_age=86400 * 7,
-            httponly=True,
-            secure=False,
-            samesite='Lax',
-            path='/',
-        )
+        # [TEST-FIX] 在测试环境中不设置 auth_token cookie
+        # 避免测试客户端累积 cookie 导致后续"未认证"测试意外通过
+        if not current_app.config.get('TESTING'):
+            resp.set_cookie(
+                'auth_token',
+                value=token,
+                max_age=86400 * 7,
+                httponly=True,
+                secure=False,
+                samesite='Lax',
+                path='/',
+            )
         return resp
     return decorated
 

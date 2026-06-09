@@ -161,9 +161,10 @@
 <script setup>
 import { ref, computed, watch, onMounted, provide, inject } from 'vue'
 import { Plus, ArrowRight, Loading, WarningFilled, Folder } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import { useParentChild } from '@/composables/useParentChild'
 import { evaluateCondition } from '@/utils/safeExpression'
+import { useCrudMessage } from '@/composables/useCrudMessage'
 import DetailPage from '@/components/common/DetailPage/DetailPage.vue'
 import MetaListPage from '@/components/common/MetaListPage/MetaListPage.vue'
 
@@ -233,6 +234,8 @@ const emit = defineEmits([
   'change',
   'data-loaded'
 ])
+
+const message = useCrudMessage()
 
 const metaListRef = ref(null)
 const expanded = ref(props.displayMode === 'always')
@@ -430,15 +433,15 @@ async function handleAction(action, row) {
       const result = await deleteChild(row[props.rowKey] || row.id)
       
       if (result.success) {
-        ElMessage.success('删除成功')
+        message.deleted('数据')
         emit('delete', row)
         emit('success', { type: 'delete', row })
       } else {
-        ElMessage.error(result.message || '删除失败')
+        message.error('删除失败', result)
       }
     } catch (e) {
       if (e !== 'cancel') {
-        ElMessage.error(e.message || '删除失败')
+        message.error(e.message || '删除失败', e)
       }
     }
   } else {

@@ -1,3 +1,12 @@
+## 目录
+
+1. [一、设计决策](#一-设计决策)
+2. [二、WorkspaceSelectorPanel 组件设计](#二-workspaceselectorpanel-组件设计)
+3. [三、简化的 Sidebar Panel 配置](#三-简化的-sidebar-panel-配置)
+4. [四、组件清单（更新版）](#四-组件清单（更新版）)
+5. [五、实施计划](#五-实施计划)
+
+---
 # WorkspaceSelectorPanel 设计
 
 > **版本**: v1.0  

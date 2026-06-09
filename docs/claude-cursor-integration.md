@@ -224,5 +224,5 @@ app.register_blueprint(mcp_bp)
 
 - [spec-m10-mcp-server.md](file:///d:/filework/excel-to-diagram/docs/specs/spec-m10-mcp-server.md) - 详细 spec
 - [spec-m9-graphql-protocol.md](file:///d:/filework/excel-to-diagram/docs/specs/spec-m9-graphql-protocol.md) - M9 GraphQL（SSOT）
-- [spec-m11-rls.md](file:///d:/filework/excel-to-diagram/docs/specs/spec-m11-rls.md) - M11 RLS（安全）
+- [spec-m11-rls-implementation.md](file:///d:/filework/excel-to-diagram/docs/specs/spec-m11-rls-implementation.md) - M11 RLS（安全）
 - [spec-m14-opentelemetry.md](file:///d:/filework/excel-to-diagram/docs/specs/spec-m14-opentelemetry.md) - M14 Telemetry（监控）

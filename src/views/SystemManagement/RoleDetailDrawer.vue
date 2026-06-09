@@ -88,23 +88,23 @@
                   </div>
                   
                   <div class="menu-badges">
-                    <span v-if="menu.required_permissions_display?.length" 
+                    <span v-if="menu.required_permissions?.length" 
                           :class="['badge', 'badge-capability', { 'badge-all-granted': allCapsGranted(menu) }]">
-                      {{ grantedCapCount(menu) }}/{{ menu.required_permissions_display.length }} 权限
+                      {{ grantedCapCount(menu) }}/{{ menu.required_permissions.length }} 权限
                     </span>
                     <span v-if="menu.has_data_scope" class="badge badge-scope">有数据范围</span>
                   </div>
                 </div>
 
                 <div v-if="expandedMenus.has(menu.menu_code)" class="menu-card-body">
-                  <div v-if="menu.required_permissions_display?.length" class="capability-list">
+                  <div v-if="menu.required_permissions?.length" class="capability-list">
                     <div class="capability-label">
                       <span v-if="menu.assigned"><AppIcon name="key" :size="14" /> 已关联功能权限（随菜单自动授予）</span>
                       <span v-else><AppIcon name="key" :size="14" /> 关联功能权限（勾选菜单后自动授予）</span>
                     </div>
                     <div class="capability-matrix">
                       <div 
-                        v-for="rp in menu.required_permissions_display" 
+                        v-for="rp in menu.required_permissions" 
                         :key="rp.code"
                         :class="['cap-item', {
                           'cap-granted': rp.granted,
@@ -337,13 +337,13 @@ async function loadUnifiedPermissions() {
 }
 
 function grantedCapCount(menu) {
-  if (!menu.required_permissions_display) return 0
-  return menu.required_permissions_display.filter(p => p.granted).length
+  if (!menu.required_permissions) return 0
+  return menu.required_permissions.filter(p => p.granted).length
 }
 
 function allCapsGranted(menu) {
-  if (!menu.required_permissions_display?.length) return false
-  return menu.required_permissions_display.every(p => p.granted)
+  if (!menu.required_permissions?.length) return false
+  return menu.required_permissions.every(p => p.granted)
 }
 
 async function loadConditionRules() {
@@ -405,7 +405,7 @@ function toggleMenu(menuCode, checked, event) {
     menu.assigned = !!checked
     if (checked) {
       expandedMenus.value.add(menuCode)
-      menu.required_permissions_display?.forEach(p => {
+      menu.required_permissions?.forEach(p => {
         p.source = 'auto'
       })
     }
@@ -425,7 +425,7 @@ function toggleMenuExpand(menuCode) {
 function selectAllMenus() {
   unifiedData.value.menus.forEach(m => { 
     m.assigned = true
-    m.required_permissions_display?.forEach(p => { p.source = 'auto' })
+    m.required_permissions?.forEach(p => { p.source = 'auto' })
   })
 }
 
@@ -439,17 +439,34 @@ async function saveUnifiedPermissions() {
   saving.value = true
   try {
     const assignedCodes = unifiedData.value.menus.filter(m => m.assigned).map(m => m.menu_code)
-    
-    const r = await permService.saveMenuPermissions(props.role.id, { menu_codes: assignedCodes })
+
+    // [FIX v1.0.2] 收集所有显式操作过的功能权限 (source != '')
+    //   - source='auto' 来自菜单勾选自动派生, granted=true → 后端 INSERT
+    //   - source='auto' 来自菜单勾选自动派生, granted=false → 后端 DELETE
+    //   - source='include' 手动包含 → 后端 INSERT
+    //   - source='exclude' 手动排除 → 后端 DELETE
+    //   - source='' 未分配 → 不传
+    // 这是修复"取消勾选 version 权限后保存, DB 没删"的核心逻辑
+    const permissions = unifiedData.value.menus
+      .flatMap(m => m.required_permissions || [])
+      .filter(p => p.source && p.source !== '')
+      .map(p => ({ code: p.code, granted: !!p.granted }))
+
+    const r = await permService.saveMenuPermissions(props.role.id, {
+      menu_codes: assignedCodes,
+      permissions,
+    })
     if (r.success) {
       const syncedCount = r.data?.synced_permissions?.length || 0
-      message.success(`权限保存成功：${assignedCodes.length} 个菜单${syncedCount > 0 ? `，已同步 ${syncedCount} 项功能权限` : ''}`)
+      const permCount = permissions.length
+      message.success(`权限保存成功：${assignedCodes.length} 个菜单，${permCount > 0 ? `已处理 ${permCount} 项功能权限` : `已同步 ${syncedCount} 项功能权限`}`)
       emit('updated')
       await loadUnifiedPermissions()
     } else {
       message.error(r.message || '保存失败')
     }
   } catch (e) {
+    console.error('[saveUnifiedPermissions] error:', e)
     message.error('网络错误')
   } finally {
     saving.value = false

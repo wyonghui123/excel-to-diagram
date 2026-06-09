@@ -4740,6 +4740,7 @@ AppShell (全局容器)
 
 <script setup>
 import { ref, computed } from 'vue'
+// [DEV-ONLY] ComponentComparison 是组件对比页面, 故意用 ElMessage/ElMessageBox 演示 EP 原生效果
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowRight, Check, Close, Search, Edit, Delete, Plus } from '@element-plus/icons-vue'
 import {

@@ -79,9 +79,6 @@
             <el-checkbox v-model="localOptions.includeHierarchyPath">
               包含层级路径列
             </el-checkbox>
-            <el-checkbox v-model="localOptions.includeHierarchyIds">
-              包含层级编码/名称
-            </el-checkbox>
             <el-checkbox v-model="localOptions.protectSheet">
               保护工作表
             </el-checkbox>
@@ -118,7 +115,7 @@
 
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { useCrudMessage } from '@/composables/useCrudMessage'
 import { metaService } from '@/services/metaService'
 
 const props = defineProps({
@@ -190,6 +187,8 @@ const props = defineProps({
 
 const emit = defineEmits(['update:visible', 'success', 'close'])
 
+const message = useCrudMessage()
+
 const loading = ref(false)
 const exportScope = ref('current')
 const withFilters = ref(true)
@@ -215,7 +214,6 @@ const selectedMultiTypes = ref([])
 
 const localOptions = ref({
   includeHierarchyPath: props.exportOptions?.includeHierarchyPath ?? false,
-  includeHierarchyIds: props.exportOptions?.includeHierarchyIds ?? false,
   protectSheet: props.exportOptions?.protectSheet ?? false,
   markReadonly: props.exportOptions?.markReadonly ?? false
 })
@@ -304,7 +302,6 @@ function resetState() {
   selectedMultiTypes.value = props.objectTypes.filter(t => t && typeof t === 'string')
   localOptions.value = {
     includeHierarchyPath: props.exportOptions?.includeHierarchyPath ?? false,
-    includeHierarchyIds: props.exportOptions?.includeHierarchyIds ?? false,
     protectSheet: props.exportOptions?.protectSheet ?? false,
     markReadonly: props.exportOptions?.markReadonly ?? false
   }
@@ -361,7 +358,6 @@ async function handleExportSync() {
 
     params.options = {
       include_hierarchy_path: localOptions.value.includeHierarchyPath,
-      include_hierarchy_ids: localOptions.value.includeHierarchyIds,
       protect_sheet: localOptions.value.protectSheet,
       mark_readonly: localOptions.value.markReadonly,
       include_operation_mode: true
@@ -372,14 +368,14 @@ async function handleExportSync() {
 
     if (result.success) {
       const count = result.total_rows || 0
-      ElMessage.success(`导出成功，共 ${count} 条数据`)
+      message.success(`导出成功，共 ${count} 条数据`)
       emit('success', { count })
       handleClose()
     } else {
-      ElMessage.error(result.message || '导出失败')
+      message.error('导出失败', result)
     }
   } catch (e) {
-    ElMessage.error('导出失败: ' + (e.message || '未知错误'))
+    message.error('导出失败: ' + (e.message || '未知错误'), e)
   } finally {
     loading.value = false
   }
@@ -427,7 +423,6 @@ async function handleExportAsync() {
 
     params.options = {
       include_hierarchy_path: localOptions.value.includeHierarchyPath,
-      include_hierarchy_ids: localOptions.value.includeHierarchyIds,
       protect_sheet: localOptions.value.protectSheet,
       mark_readonly: localOptions.value.markReadonly,
       include_operation_mode: true
@@ -437,7 +432,7 @@ async function handleExportAsync() {
     const startResult = await boService.exportDataAsync(effectiveObjectType, params)
 
     if (!startResult.success) {
-      ElMessage.error(startResult.message || '启动导出任务失败')
+      message.error('启动导出任务失败', startResult)
       exporting.value = false
       return
     }
@@ -445,7 +440,7 @@ async function handleExportAsync() {
     const taskId = startResult.data.task_id
     await pollExportProgress(taskId, boService)
   } catch (e) {
-    ElMessage.error('导出失败: ' + (e.message || '未知错误'))
+    message.error('导出失败: ' + (e.message || '未知错误'), e)
     exporting.value = false
   }
 }
@@ -472,13 +467,13 @@ async function pollExportProgress(taskId, boService) {
             await boService.downloadExportFile(data.result.download_url, filename)
             
             const count = data.result.total_rows || 0
-            ElMessage.success(`导出成功，共 ${count} 条数据`)
+            message.success(`导出成功，共 ${count} 条数据`)
             emit('success', { count, result: data.result })
             handleClose()
           }
         } else if (data.status === 'failed') {
           exporting.value = false
-          ElMessage.error(data.error || '导出失败')
+          message.error(data.error || '导出失败')
         } else {
           setTimeout(poll, 1000)
         }

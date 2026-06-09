@@ -408,7 +408,8 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash VARCHAR(200),
     display_name VARCHAR(200),
     status VARCHAR(200) DEFAULT 'active',
-    status_entered_at DATETIME,
+    -- [REMOVED 2026-06-09] status_entered_at DATETIME 已删除
+    -- 单一事实源改为 audit_logs (current_status_duration_days 公式从 audit_logs 派生)
     sso_provider VARCHAR(200),
     sso_user_id VARCHAR(200),
     must_change_password INTEGER DEFAULT 0,

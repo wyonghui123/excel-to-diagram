@@ -1,3 +1,14 @@
+## 目录
+
+1. [一、SAP CAP 的 Deep Authorizations 机制](#一-sap-cap-的-deep-authorizations-机制)
+2. [二、SAP CAP 的安全警告](#二-sap-cap-的安全警告)
+3. [三、Salesforce 的处理机制](#三-salesforce-的处理机制)
+4. [四、对比分析](#四-对比分析)
+5. [五、对我们的启示](#五-对我们的启示)
+6. [六、最佳实践建议](#六-最佳实践建议)
+7. [七、总结](#七-总结)
+
+---
 # SAP等企业级产品对部分可见关系的处理机制深度分析
 
 ## 一、SAP CAP 的 Deep Authorizations 机制

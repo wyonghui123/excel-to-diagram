@@ -1,3 +1,16 @@
+## 目录
+
+1. [1. Background & Objectives](#1-background-objectives)
+2. [2. Functional Requirements](#2-functional-requirements)
+3. [3. Implementation Design](#3-implementation-design)
+4. [4. 受影响文件](#4-受影响文件)
+5. [5. Formula 函数增减分析](#5-formula-函数增减分析)
+6. [6. 存量对象采纳分析](#6-存量对象采纳分析)
+7. [7. 实施计划](#7-实施计划)
+8. [8. 验证方案](#8-验证方案)
+9. [9. Phase 3.5: 状态转换按钮组件 ✅ 已完成](#9-phase-35-状态转换按钮组件-已完成)
+
+---
 # Spec: Phase 3 - Formula 增强与状态模式定义
 
 ## 1. Background & Objectives

@@ -42,7 +42,7 @@ from meta.core.models import (
     DataCategory,
     DerivationType,
     DerivationStrategy,
-    AnnotationCategory,
+    AnnotationCategory, ArchObjectType,
     DimensionKey,
     BusinessRelationType,
     RelationCategory,
@@ -67,6 +67,7 @@ ENUM_CLASSES = [
     DerivationType,
     DerivationStrategy,
     AnnotationCategory,
+    ArchObjectType,
     DimensionKey,
     BusinessRelationType,
     RelationCategory,
@@ -190,6 +191,16 @@ def create_enum_type(ds, enum_type_id: str, name: str, description: str = "",
 
 # 枚举值中文名称映射
 ENUM_VALUE_NAME_MAP = {
+    'arch_object_type': {
+        'product': '产品',
+        'version': '版本',
+        'domain': '领域',
+        'sub_domain': '子领域',
+        'service_module': '服务模块',
+        'business_object': '业务对象',
+        'relationship': '关系',
+        'annotation': '备注',
+    },
     'dimension_key': {
         'default': '默认',
         'language': '语言',

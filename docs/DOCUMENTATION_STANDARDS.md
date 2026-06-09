@@ -1,3 +1,11 @@
+---
+title: 文档编写规范 (Documentation Standards)
+version: 1.0.0
+date: 2026-06-07
+status: 活跃
+audience: 全员
+---
+
 # 文档规范（Documentation Standards）
 
 > 项目所有 Markdown 文档的编写规范

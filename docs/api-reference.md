@@ -1,3 +1,11 @@
+---
+title: API 接口参考
+version: 1.0.0
+date: 2026-06-07
+status: 活跃
+audience: 开发者
+---
+
 # API 接口文档
 
 ## 1. 概述

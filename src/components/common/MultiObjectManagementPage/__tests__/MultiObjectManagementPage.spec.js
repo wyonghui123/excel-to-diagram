@@ -75,6 +75,7 @@ vi.mock('@/composables/useMultiObjectPage', () => ({
     handleToolbarChange: vi.fn(),
     handleGlobalAction: vi.fn(),
     handleShowChart: vi.fn(() => ({ versionId: 1 })),
+    restoreStateFromDiagram: vi.fn(() => false),
     handleImportSuccess: vi.fn(),
     handleExportSuccess: vi.fn()
   }))
@@ -334,6 +335,7 @@ describe('MultiObjectManagementPage', () => {
         exportContext: computed(() => ({})),
         handleGlobalAction: vi.fn(),
         handleShowChart: vi.fn(),
+        restoreStateFromDiagram: vi.fn(() => false),
         handleImportSuccess: vi.fn(),
         handleExportSuccess: vi.fn(),
         handleScopeChange: vi.fn(),
@@ -381,6 +383,7 @@ describe('MultiObjectManagementPage', () => {
         exportContext: computed(() => ({})),
         handleGlobalAction: handleGA,
         handleShowChart: vi.fn(),
+        restoreStateFromDiagram: vi.fn(() => false),
         handleImportSuccess: vi.fn(),
         handleExportSuccess: vi.fn(),
         handleScopeChange: vi.fn(),
@@ -420,6 +423,7 @@ describe('MultiObjectManagementPage', () => {
         exportContext: computed(() => ({})),
         handleGlobalAction: vi.fn(),
         handleShowChart: vi.fn(),
+        restoreStateFromDiagram: vi.fn(() => false),
         handleImportSuccess: vi.fn(),
         handleExportSuccess: vi.fn(),
         handleScopeChange: vi.fn(),

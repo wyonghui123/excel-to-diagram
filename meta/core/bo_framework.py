@@ -150,6 +150,9 @@ class BOFramework:
                             f"action reported failure: {context.result.message}",
                             result=context.result,
                         )
+                # [审计延迟写入 2026-06-09]
+                # 事务提交后，flush 缓存的审计记录
+                self._flush_pending_audit_records(context)
                 return context.result or ActionResult(success=True, message="Operation completed")
             else:
                 self._dispatch_interceptors(context)
@@ -525,6 +528,44 @@ class BOFramework:
 
     def transaction(self):
         return TransactionContext(self)
+
+    def _flush_pending_audit_records(self, context) -> None:
+        """[审计延迟写入 2026-06-09]
+        事务提交后，flush 缓存的审计记录到数据库。
+        
+        Args:
+            context: ActionContext，包含 _pending_audit_records 列表
+        """
+        pending = getattr(context, '_pending_audit_records', [])
+        if not pending:
+            return
+        
+        # 导入 StructuredLogger（延迟导入避免循环依赖）
+        # 不传入 async_writer，直接同步写入
+        from meta.services.structured_logger import StructuredLogger
+        structured_logger = StructuredLogger(async_writer=None)
+        
+        flushed = 0
+        for audit_params in pending:
+            try:
+                structured_logger.log_business(**audit_params)
+                flushed += 1
+            except Exception as e:
+                logger.error(
+                    f"[BOFramework] Failed to flush audit record: {e}, "
+                    f"action={audit_params.get('action')}, "
+                    f"object_type={audit_params.get('object_type')}, "
+                    f"object_id={audit_params.get('object_id')}"
+                )
+        
+        if flushed > 0:
+            logger.info(
+                f"[BOFramework] Flushed {flushed}/{len(pending)} pending audit records "
+                f"after transaction commit"
+            )
+        
+        # 清空缓存
+        context._pending_audit_records.clear()
 
     @staticmethod
     def _infer_navigation(assoc: dict):

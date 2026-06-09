@@ -68,7 +68,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { ArrowDown } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { useCrudMessage } from '@/composables/useCrudMessage'
 import boService from '@/services/boService'
 
 const props = defineProps({
@@ -112,6 +112,7 @@ const props = defineProps({
 
 const emit = defineEmits(['transition', 'success', 'error'])
 
+const message = useCrudMessage()
 const loading = ref(false)
 const confirmDialogVisible = ref(false)
 const pendingTransition = ref(null)
@@ -188,16 +189,18 @@ const executeTransition = async (transition) => {
     }
     
     if (result.success) {
-      ElMessage.success(`${transition.label} 成功`)
+      // [FIX 2026-06-09] 用 useCrudMessage 替代 ElMessage
+      // 避免 high-z modal (z-index > 2200) 遮挡 Element Plus 的 fixed 定位 toast
+      message.stateChanged(transition.label, '数据')
       emit('success', { transition, result })
       emit('transition', { transition, result })
     } else {
-      ElMessage.error(result.message || `${transition.label} 失败`)
+      message.error(`${transition.label} 失败`, result)
       emit('error', { transition, error: result.message })
     }
   } catch (error) {
     console.error('State transition error:', error)
-    ElMessage.error(`${transition.label} 失败: ${error.message}`)
+    message.error(`${transition.label} 失败`, error)
     emit('error', { transition, error: error.message })
   } finally {
     loading.value = false

@@ -23,6 +23,7 @@ import { useFieldPolicy } from './useFieldPolicy'
 import { useListActionStore } from '@/stores/listActionStore'
 import { suggestKeyTemplateCode as _suggestKeyTemplateCodeSvc } from '@/services/keyTemplateService'
 import { saveAllDrafts as _saveAllDraftsSvc, getDraftCreates as _getDraftCreatesSvc } from '@/services/draftPersistService'
+import { useBoAction } from '@/composables/useBoAction'
 import {
   isInternalProp,
   transformFilters,
@@ -55,22 +56,37 @@ import {
  */
 function handleError(context, error, options = {}) {
   const { showMessage = true, defaultMessage = `${context}失败` } = options
-  
+
   console.error(`[useMetaList] ${context}:`, error)
-  
+
+  // [FIX 2026-06-08] 403 权限不足不弹错误 toast（避免无意义干扰），由页面显示权限提示
+  const errorCode = error?.response?.status || error?.status || error?.code
+  if (errorCode === 403) {
+    return error
+  }
+
   if (showMessage) {
-    const message = error?.response?.data?.error || 
-                    error?.message || 
-                    error?.msg || 
+    const message = error?.response?.data?.error ||
+                    error?.message ||
+                    error?.msg ||
                     defaultMessage
     ElMessage.error(message)
   }
-  
+
   return error
 }
 
 export function useMetaList(objectType, options = {}) {
-  
+  // [FIX] useBoAction 是工厂函数（导出的是函数本身，不是 {callPost} 对象），
+  //   必须先调用 useBoAction() 才能拿到 callPost。
+  //   之前 `const { callPost } = await import('@/composables/useBoAction')`
+  //   是错的 —— import() 返回的是模块对象 { useBoAction, default }，
+  //   解构出 callPost === undefined，传给 service 后报
+  //   `callPost is not a function`。
+  //   useBoAction 只依赖 httpClient + authStore，与 useMetaList 无循环依赖，
+  //   故可在 setup 上下文直接静态 import + 顶层调用。
+  const { callPost } = useBoAction()
+
   // ======== 配置项 ========
   const config = {
     mode: options.mode || 'element-plus',  // 'element-plus' | 'custom'
@@ -121,6 +137,9 @@ export function useMetaList(objectType, options = {}) {
   const visibleFilterFields = computed(() =>
     filterFields.value.filter(field => field.defaultVisible !== false)
   )
+
+  // [FIX 2026-06-08] 权限不足标记：用于页面显示"无权限"提示而非空数据
+  const permissionDenied = ref(false)
   
   /** 工具栏操作按钮 */
   const toolbarActions = ref([])
@@ -342,6 +361,10 @@ export function useMetaList(objectType, options = {}) {
         columns.value = _transformColumns(effectiveColumns)
         // 先加载元数据，确保 metaConfig.value 可用
         await _loadMetaConfig()
+        // [FIX-2026-06-08] _loadMetaConfig() 内部会调 _transformMetaToComponentFormat()
+        //   无条件用 metaConfig 的 columns 覆盖 columns.value, 导致 columnsOverride 失效。
+        //   重新应用 columnsOverride 保证 compact 模式自定义列生效。
+        columns.value = _transformColumns(effectiveColumns)
         // 使用 metaConfig 来富化 columns
         if (metaConfig.value) {
           _enrichColumnsWithFieldMeta(metaConfig.value.list || metaConfig.value)
@@ -409,13 +432,21 @@ export function useMetaList(objectType, options = {}) {
     
     try {
       const params = _buildQueryParams(extraParams)
-      
+
       const result = await (config.fetcher
         ? config.fetcher({ page: pagination.current, pageSize: pagination.pageSize, ...params })
         : boService.query(objectType, params))
       if (result?.data) {
       }
-      
+
+      // [FIX 2026-06-08] 403 权限不足：静默处理，不刷控制台错误
+      if (!result.success && result.httpStatus === 403) {
+        permissionDenied.value = true
+        data.value = []
+        pagination.total = 0
+        return
+      }
+
       if (result.success) {
         let rawData = result.data
         
@@ -439,7 +470,9 @@ export function useMetaList(objectType, options = {}) {
           pagination.total = 0
           console.warn('[useMetaList] [WARNING] 无法识别的数据格式:', typeof rawData, rawData ? (Array.isArray(rawData) ? `数组长度${rawData.length}` : Object.keys(rawData).slice(0,5)) : null)
         }
-        
+
+        permissionDenied.value = false
+
 
         
         _restoreSelectionState()
@@ -571,10 +604,12 @@ export function useMetaList(objectType, options = {}) {
 
   /**
    * 处理排序变更
-   * @param {Object} sortInfo - 排序信息 { prop, order }
+   * @param {Object} sort - 排序信息 { prop, order }
    */
   function handleSortChange(sort) {
+    // [FIX 2026-06-08] 排序变更时重置到第 1 页
     sortInfo.value = sort
+    pagination.current = 1
     loadList()
   }
 
@@ -1606,10 +1641,9 @@ export function useMetaList(objectType, options = {}) {
   async function saveDraftValues() {
     loading.value = true
     try {
-      // 动态 import useBoAction 避免循环依赖
-      const { callPost } = await import('@/composables/useBoAction')
+      // [FIX] callPost 已在 useMetaList 顶层 setup 上下文中通过 useBoAction() 解构得到
       const result = await _saveAllDraftsSvc({
-        objectType: objectType.value,
+        objectType,  // objectType 是 useMetaList 形参（字符串），不是 ref，不要加 .value
         draftValues: draftValues.value,
         data: data.value,  // C2 修复：传 array 而非 ref
         callPost,
@@ -1790,6 +1824,9 @@ export function useMetaList(objectType, options = {}) {
     sortInfo,
     defaultSort,
     filteredTotalCount,
+
+    // [FIX 2026-06-08] 权限不足标记
+    permissionDenied,
     
     // 过滤器显示模式
     filterDisplayModeConfig,

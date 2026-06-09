@@ -91,6 +91,63 @@ def admin_required(f):
     return decorated
 
 
+def _build_ancestor_path(dimension_id: str, instance_id: int, data_source) -> str:
+    """
+    构建维度实例的完整祖先路径 (方案 B: 1 列完整路径)
+    
+    层级链: product → version → domain → sub_domain → service_module → business_object
+    
+    返回格式: "parent1 > parent2 > ... > parentN"
+    - version: "产品名"
+    - domain: "产品名 > 版本名"
+    - sub_domain: "产品名 > 版本名 > 领域名"
+    - service_module: "产品名 > 版本名 > 领域名 > 子领域名"
+    - business_object: "产品名 > 版本名 > 领域名 > 子领域名 > 服务模块名"
+    
+    性能: 递归查询, 每层 1 次 SQL (数据量小, 可接受)
+    """
+    if dimension_id == 'product':
+        return ""  # product 是 root, 无祖先
+    
+    path_parts = []
+    current_dim = dimension_id
+    current_id = instance_id
+    
+    # 最多递归 6 层 (product → version → domain → sub_domain → service_module → business_object)
+    for _ in range(6):
+        parent_info = _PARENT_INFO_MAP.get(current_dim)
+        if not parent_info:
+            break
+        
+        parent_type, parent_table, parent_fk, parent_display = parent_info
+        current_table = RESOURCE_TABLE_MAP.get(current_dim)
+        
+        # 查当前记录的 parent_id 和 parent_name
+        sql = f"""
+            SELECT main.{parent_fk}, parent.{parent_display}
+            FROM {current_table} main
+            LEFT JOIN {parent_table} parent ON main.{parent_fk} = parent.id
+            WHERE main.id = ?
+        """
+        cursor = data_source.execute(sql, [current_id])
+        row = cursor.fetchone()
+        if not row:
+            break
+        
+        parent_id, parent_name = row
+        if parent_id is None or parent_name is None:
+            break
+        
+        # 加到路径 (从 root 到 direct parent, 所以插入到开头)
+        path_parts.insert(0, str(parent_name))
+        
+        # 向上一层
+        current_dim = parent_type
+        current_id = parent_id
+    
+    return " > ".join(path_parts)
+
+
 def _validate_required_fields(data: Dict[str, Any], fields: list) -> Optional[str]:
     for field in fields:
         if field not in data or data[field] is None:
@@ -254,6 +311,8 @@ def get_dimension_instances(dimension_id: str):
                     "name": str(row[2]) if row[2] else "",
                     "parent_name": str(row[3]) if row[3] is not None else "",
                 }
+                # 方案 B: 完整祖先路径
+                inst["ancestor_path"] = _build_ancestor_path(dimension_id, row[0], _data_source)
                 instances.append(inst)
         else:
             for row in cursor.fetchall():
@@ -262,6 +321,8 @@ def get_dimension_instances(dimension_id: str):
                     "code": str(row[1]) if row[1] else "",
                     "name": str(row[2]) if row[2] else "",
                 }
+                # product 维度无祖先, ancestor_path 为空字符串
+                inst["ancestor_path"] = ""
                 instances.append(inst)
 
         return jsonify(

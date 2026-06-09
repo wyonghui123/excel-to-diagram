@@ -140,6 +140,25 @@ class RuntimeDimensionResolver:
                 field_info = self._resolve_field_with_joins(binding, bo_id)
                 if field_info is None:
                     continue
+                # [FIX v1.0.1] 向上展开: 当 dim 是 bo 的子维度时
+                # 例: bo=product, dim=version, 用户有 version=[2,11,12]
+                #     binding.field=product_id (在 version 表上) 配 through=version
+                #     直接用 product_id 过滤 products 表是错的 (products 没 product_id 列)
+                #     正确做法: 反查 product_ids
+                upward_resolved = self._try_resolve_upward(
+                    bo_id, dim_code, values, binding
+                )
+                if upward_resolved is not None:
+                    # 向上展开成功: 直接用 id IN (...) 过滤
+                    conditions.append({
+                        'field': 'id',
+                        'joins': [],
+                        'operator': 'in' if len(upward_resolved) > 1 else 'eq',
+                        'value': upward_resolved,
+                        'source': 'dimension_upward',
+                        'dimension': dim_code,
+                    })
+                    continue
                 conditions.append({
                     'field': field_info['field'],
                     'joins': field_info.get('joins', []),  # 新增
@@ -149,6 +168,67 @@ class RuntimeDimensionResolver:
                     'dimension': dim_code,
                 })
         return conditions
+
+    def _try_resolve_upward(
+        self,
+        bo_id: str,
+        dim_code: str,
+        values: List[int],
+        binding: Dict[str, Any],
+    ) -> Optional[List[int]]:
+        """[FIX v1.0.1] 尝试从子维度反查父资源 ID
+
+        场景: 用户的 dimension scope 在子维度 (例: version=[2,11,12]),
+              但要查父 BO (例: product)
+        目的: 反查 product_id 列表, 用 id IN (...) 直接过滤 products 表
+
+        Returns:
+            父资源 ID 列表 (例: [1, 17])
+            None 表示无法向上展开 (bo_id 不在 HIERARCHY_CHAIN 中)
+        """
+        HIERARCHY_CHAIN = ['product', 'version', 'domain', 'sub_domain']
+        PARENT_FIELD_MAP = {
+            'version': 'product_id',
+            'domain': 'version_id',
+            'sub_domain': 'domain_id',
+        }
+        RESOURCE_TABLE_MAP = {
+            'product': 'products',
+            'version': 'versions',
+            'domain': 'domains',
+            'sub_domain': 'sub_domains',
+        }
+        if bo_id not in HIERARCHY_CHAIN or dim_code not in HIERARCHY_CHAIN:
+            return None
+        bo_idx = HIERARCHY_CHAIN.index(bo_id)
+        dim_idx = HIERARCHY_CHAIN.index(dim_code)
+        if dim_idx <= bo_idx:
+            return None  # 不向下展开
+        # 沿 chain 从 dim_idx 走到 bo_idx, 每步反查父 ID
+        current_ids = list(values)
+        for i in range(dim_idx, bo_idx, -1):
+            child_dim = HIERARCHY_CHAIN[i]
+            parent_field = PARENT_FIELD_MAP.get(child_dim)
+            child_table = RESOURCE_TABLE_MAP.get(child_dim)
+            if not parent_field or not child_table or not current_ids:
+                return None
+            try:
+                conn = sqlite3.connect(self._db_path)
+                cursor = conn.cursor()
+                ph = ','.join('?' * len(current_ids))
+                cursor.execute(
+                    f"SELECT DISTINCT {parent_field} FROM {child_table} WHERE id IN ({ph})",
+                    current_ids
+                )
+                rows = cursor.fetchall()
+                conn.close()
+                current_ids = [r[0] for r in rows if r[0] is not None]
+            except Exception as e:
+                logger.warning(f'_try_resolve_upward error: {e}')
+                return None
+            if not current_ids:
+                return []
+        return current_ids
 
     # ----------------------------------------------------------------
     # M2.1: Owner 过滤运行时展开（FR-009）

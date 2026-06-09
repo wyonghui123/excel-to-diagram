@@ -55,6 +55,7 @@ class ExcelDesignSystem:
     READONLY_FILL = PatternFill(start_color=GRAY_300, end_color=GRAY_300, fill_type="solid")
     REQUIRED_FILL = PatternFill(start_color=WARNING_LIGHT, end_color=WARNING_LIGHT, fill_type="solid")
     BUSINESS_KEY_FILL = PatternFill(start_color=SUCCESS_LIGHT, end_color=SUCCESS_LIGHT, fill_type="solid")
+    CREATE_NEW_FILL = PatternFill(start_color=INFO_LIGHT, end_color=INFO_LIGHT, fill_type="solid")
     
     # 边框样式
     THIN_BORDER = Border(

@@ -573,22 +573,161 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
   }
 
   function handleShowChart() {
+    // 在跳转图表前快照当前状态, 以便返回时恢复
+    saveStateForDiagram()
+
+    // 映射层级类型 -> chart app fetchPreviewData 期望的 hierarchyFilter 字段名
+    // fetchPreviewData 期望键: domain_id / sub_domain_id / service_module_id / business_object_id (数组)
+    const typeToFieldMap = {
+      domain: 'domain_id',
+      sub_domain: 'sub_domain_id',
+      service_module: 'service_module_id',
+      business_object: 'business_object_id'
+    }
+
+    // 基于 scopeIds 重新构建 hierarchyFilter（不再直接透传 combinedFilters，
+    // 因为 combinedFilters 的键是 `${parentType}_id__in`（逗号拼接字符串），
+    // 与 chart app 期望的 `*_id`（数组）格式不一致）
+    const hierarchyFilter = {}
+    objectTypes.forEach(type => {
+      const fieldName = typeToFieldMap[type]
+      if (!fieldName) return
+
+      const scope = scopeIds[type]
+      if (!scope) return
+
+      // 优先使用 selected（用户在树上直接勾选），其次 effective（树计算的可见范围）
+      const ids = scope.selected.length > 0
+        ? [...scope.selected]
+        : scope.effective.length > 0
+          ? [...scope.effective]
+          : []
+
+      if (ids.length > 0) {
+        hierarchyFilter[fieldName] = ids
+      }
+    })
+
     const chartData = {
       versionId: versionContext.selectedVersionId.value,
       productId: versionContext.selectedProductId.value,
-      hierarchyFilter: { ...combinedFilters.value }
+      hierarchyFilter
     }
+
+    // 保留 selectedXxxIds 字段以兼容 chart app 可能的直接读取
     objectTypes.forEach(type => {
       if (scopeIds[type] && scopeIds[type].selected.length > 0) {
         chartData[`selected${_pascalCase(type)}Ids`] = [...scopeIds[type].selected]
       }
     })
-    Object.keys(scopeIds.relationExtra || {}).forEach(key => {
-      if (scopeIds.relationExtra[key]?.length > 0) {
-        chartData[key] = [...scopeIds.relationExtra[key]]
-      }
-    })
+
+    // 关系类型过滤：chart app 的 initFromArchDataManager 期望字段名 relationTypeFilter
+    const relationExtra = scopeIds.relationExtra || {}
+    const relationCodesForChart = relationExtra.relationCodes?.length > 0
+      ? [...relationExtra.relationCodes]
+      : relationExtra.filterRelationCodes?.length > 0
+        ? [...relationExtra.filterRelationCodes]
+        : []
+
+    if (relationCodesForChart.length > 0) {
+      chartData.relationTypeFilter = relationCodesForChart
+    }
+
     return chartData
+  }
+
+  // 架构管理 → 图表展示 → 返回 状态持久化
+  // 跳转前快照到 sessionStorage, 返回时由调用方读取并恢复 (避免 SPA 卸载导致 in-memory state 全部丢失)
+  const STATE_RESTORE_KEY = 'archManagerStateBeforeDiagram'
+
+  function saveStateForDiagram() {
+    try {
+      const state = {
+        activeTab: activeTab.value,
+        scopeIds: {},
+        tabFilters: JSON.parse(JSON.stringify(tabFilters.value || {})),
+        initialBoIds: [],
+        initialRelationCodes: [],
+        savedAt: Date.now()
+      }
+
+      Object.keys(scopeIds).forEach(key => {
+        if (key === 'globalFilters') return
+        if (key === 'relationExtra') {
+          state.scopeIds[key] = JSON.parse(JSON.stringify(scopeIds[key] || {}))
+          return
+        }
+        const scope = scopeIds[key]
+        if (scope) {
+          state.scopeIds[key] = {
+            selected: [...(scope.selected || [])],
+            effective: [...(scope.effective || [])]
+          }
+        }
+      })
+
+      // 树的初始勾选 (驱动 ObjectScopeSection / RelationScopeSection 第一次挂载)
+      const boScope = scopeIds.business_object
+      if (boScope?.selected?.length) {
+        state.initialBoIds = [...boScope.selected]
+      }
+      const relExtra = scopeIds.relationExtra
+      if (relExtra?.relationCodes?.length) {
+        state.initialRelationCodes = [...relExtra.relationCodes]
+      }
+
+      sessionStorage.setItem(STATE_RESTORE_KEY, JSON.stringify(state))
+    } catch (e) {
+      console.warn('[useMultiObjectPage] Failed to save state for diagram:', e)
+    }
+  }
+
+  function restoreStateFromDiagram() {
+    try {
+      if (sessionStorage.getItem('returningFromDiagram') !== 'true') return false
+      const stored = sessionStorage.getItem(STATE_RESTORE_KEY)
+      // 无论是否成功解析, 都要清掉 flag 防止后续误触发
+      sessionStorage.removeItem('returningFromDiagram')
+      if (!stored) return false
+
+      const state = JSON.parse(stored)
+      if (!state || typeof state !== 'object') return false
+
+      if (state.activeTab && tabs.value.find(t => t.name === state.activeTab)) {
+        activeTab.value = state.activeTab
+      }
+
+      if (state.scopeIds) {
+        Object.keys(state.scopeIds).forEach(key => {
+          if (key === 'relationExtra') {
+            if (scopeIds.relationExtra) {
+              Object.assign(scopeIds.relationExtra, state.scopeIds[key] || {})
+            }
+            return
+          }
+          if (scopeIds[key]) {
+            scopeIds[key].selected = [...(state.scopeIds[key].selected || [])]
+            scopeIds[key].effective = [...(state.scopeIds[key].effective || [])]
+          }
+        })
+      }
+
+      if (state.tabFilters && typeof state.tabFilters === 'object') {
+        tabFilters.value = { ...tabFilters.value, ...state.tabFilters }
+      }
+
+      // 返回 initialBoIds / initialRelationCodes 供调用方驱动树的重新挂载
+      const restored = {
+        initialBoIds: [...(state.initialBoIds || [])],
+        initialRelationCodes: [...(state.initialRelationCodes || [])]
+      }
+
+      sessionStorage.removeItem(STATE_RESTORE_KEY)
+      return restored
+    } catch (e) {
+      console.warn('[useMultiObjectPage] Failed to restore state from diagram:', e)
+      return false
+    }
   }
 
   function handleImportSuccess() {
@@ -631,6 +770,7 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
     canRefresh,
     handleGlobalAction,
     handleShowChart,
+    restoreStateFromDiagram,
     handleImportSuccess,
     handleExportSuccess,
     importContext,

@@ -150,6 +150,34 @@ class ComputationService:
 
         return merged
 
+    @staticmethod
+    def collect_computed_columns(meta_obj) -> list:
+        """[FR-005] SSOT: 从 ui_view_config + rules 收集计算列配置
+
+        统一 import_export_service._compute_list_computed_fields_for_export
+        和 query_service._compute_list_computed_fields 的重复逻辑。
+
+        Args:
+            meta_obj: MetaObject 实例
+
+        Returns:
+            合并后的计算列配置列表
+        """
+        from meta.services.computation_service import computation_service
+
+        ui_computed_columns = []
+        if hasattr(meta_obj, 'ui_view_config') and meta_obj.ui_view_config:
+            list_config = getattr(meta_obj.ui_view_config, 'list', None)
+            if list_config and hasattr(list_config, 'columns'):
+                ui_computed_columns = [
+                    {'key': col.key, 'computation': getattr(col, 'computation', None)}
+                    for col in list_config.columns
+                    if getattr(col, 'computed', False) and getattr(col, 'computation', None)
+                ]
+
+        rule_computed = computation_service.get_computed_columns_from_rules(meta_obj.id)
+        return computation_service.merge_computed_columns(ui_computed_columns, rule_computed)
+
     def _count_children(self, data_source, object_type: str, record_id: int,
                         computation: Dict[str, Any]) -> int:
         target_object = computation.get('target_object') or computation.get('child_object', '')

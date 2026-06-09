@@ -299,11 +299,23 @@ export function useMenuPermission(roleId: Ref<string>) {
         .filter(m => m.assigned)
         .map(m => m.menu_code)
 
-      // 收集所有手动设置的权限（source='include' 或 'exclude'）
+      // [FIX v1.0.2] 收集所有需要落库的功能权限
+      // source:
+      //   'include' - 用户手动 include
+      //   'exclude' - 用户手动 exclude
+      //   'auto'    - 来自自动推导推荐 (applyDerived 已确认)
+      //   'unbound' - 来自 bo_bindings 派生但未勾选, 不写入
+      // 'auto' 必须写入, 因为用户看到推荐后没再手动改 = 接受推荐
+      // 关键: 这里不能 filter `p.granted === true` !
+      //   用户取消勾选 = source='exclude', granted=false,
+      //   必须传给后端做 DELETE, 否则后端不知道要 ungrant
+      //   之前版本有 `p.granted` 过滤, 导致取消勾选静默丢失
       const permissions = menus.value
         .flatMap(m => m.required_permissions || [])
-        .filter(p => p.source === 'include' || p.source === 'exclude')
-        .map(p => ({ code: p.code, granted: p.granted }))
+        .filter(p =>
+          p.source === 'include' || p.source === 'exclude' || p.source === 'auto'
+        )
+        .map(p => ({ code: p.code, granted: !!p.granted }))
 
       const r = await permService.saveMenuPermissions(roleId.value, { menu_codes: assignedCodes, permissions })
 

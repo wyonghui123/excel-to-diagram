@@ -87,9 +87,29 @@ def list_relationships():
 
 
 def _list_relationships_impl(ds, user, user_id, user_is_admin):
+    # [FIX v1.0.4 2026-06-09] dimension scope 用户 (无 data_permissions 旧表配置) 兼容
+    #   原 bug: TEST60 用 dimension_scope 替代 data_permissions, perm_service 返回空列表
+    #           → L200-207 `1=0` 强制条件 → 0 条
+    #   修复:    1) dimension scope 用户 → allowed_bo_ids = None (跳过 bo_id 过滤)
+    #           2) 让 version_id / scope 自身控制可见性 (与 v2 端点行为一致)
     allowed_bo_ids = None
     if AUTH_ENABLED and user_id and not user_is_admin:
-        allowed_bo_ids = _data_perm_filter.perm_service.get_allowed_resource_ids(user_id, 'business_object')
+        try:
+            bo_ids = _data_perm_filter.perm_service.get_allowed_resource_ids(user_id, 'business_object')
+            # [FIX 2026-06-09] 检查用户是否有 data_permissions 旧表配置
+            #   有配置 → 用 bo_ids 过滤
+            #   无配置 → dimension scope 用户 → allowed_bo_ids = None, 让 scope 自身控制
+            from meta.services.data_permission_service import DataPermissionService
+            has_data_perms = bool(DataPermissionService(ds).get_user_data_permissions(user_id))
+            if has_data_perms and bo_ids:
+                allowed_bo_ids = bo_ids
+            elif has_data_perms and not bo_ids:
+                # 有 data_perms 但 bo_ids 为空 → 显式拒绝
+                allowed_bo_ids = []
+            # else: dimension scope 用户, allowed_bo_ids 保持 None
+        except Exception as e:
+            logger.warning(f"[relationships] get_allowed_resource_ids failed: {e}")
+            allowed_bo_ids = None
     if request.method == 'POST':
         data = request.get_json() or {}
         page = data.get('page', 1)

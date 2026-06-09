@@ -15,7 +15,11 @@
               {{ actionLabel(item.action) }}
             </span>
           </div>
-          <div class="history-detail" v-if="item.field_name">
+          <div class="history-detail" v-if="item.action === 'ASSOCIATE' || item.action === 'DISSOCIATE'">
+            <span class="history-assoc-verb">{{ item.action === 'ASSOCIATE' ? '关联了' : '移除了关联' }}</span>
+            <span class="history-assoc-target">{{ assocTargetLabel(item) }}</span>
+          </div>
+          <div class="history-detail" v-else-if="item.field_name">
             <span class="history-field">{{ fieldLabel(item.field_name) }}:</span>
             <span class="history-old">{{ item.old_value || '(空)' }}</span>
             <span class="history-arrow">→</span>
@@ -98,8 +102,30 @@ function fieldLabel(field) {
 }
 
 function actionLabel(action) {
-  const map = { CREATE: '创建', UPDATE: '更新', DELETE: '删除' }
+  const map = { CREATE: '创建', UPDATE: '更新', DELETE: '删除', ASSOCIATE: '关联', DISSOCIATE: '取消关联' }
   return map[action] || action || '未知'
+}
+
+/**
+ * 从 ASSOCIATE/DISSOCIATE 日志的 old_value/new_value (JSON 字符串) 中解析目标对象
+ * 返回 "目标类型 (target_id)" 或 target_display 字符串，便于阅读
+ */
+function assocTargetLabel(item) {
+  // ASSOCIATE: new_data 包含 target, DISSOCIATE: old_data 包含 target
+  const raw = item.action === 'ASSOCIATE' ? item.new_value : item.old_value
+  if (!raw) return '目标'
+  try {
+    const obj = typeof raw === 'string' ? JSON.parse(raw) : raw
+    const ttype = obj.target_type || ''
+    const tdisp = obj.target_display || ''
+    const tid = obj.target_id
+    if (tdisp) return tdisp
+    if (ttype && tid != null) return `${ttype}#${tid}`
+    if (tid != null) return `#${tid}`
+    return '目标'
+  } catch (e) {
+    return String(raw).slice(0, 40)
+  }
 }
 
 function formatTime(timeStr) {
@@ -242,6 +268,16 @@ watch(() => props.visible, (val) => {
 .history-action.action-create { background: var(--color-success, #16a34a); }
 .history-action.action-update { background: var(--el-color-primary, #ea580c); }
 .history-action.action-delete { background: #ff4d4f; }
+.history-action.action-associate { background: #0ea5e9; }
+.history-action.action-dissociate { background: #f59e0b; }
+.history-assoc-verb {
+  color: var(--color-text-tertiary);
+  font-weight: 500;
+}
+.history-assoc-target {
+  color: var(--el-color-primary, #ea580c);
+  font-weight: 500;
+}
 
 .history-detail {
   display: flex;

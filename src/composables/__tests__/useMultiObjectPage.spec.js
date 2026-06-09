@@ -1363,4 +1363,136 @@ describe('useMultiObjectPage', () => {
       expect(page.objectTypeLabels.value.unknown_type).toBe('unknown_type')
     })
   })
+
+  describe('saveStateForDiagram / restoreStateFromDiagram', () => {
+    let getItemSpy
+    let setItemSpy
+    let removeItemSpy
+
+    beforeEach(() => {
+      sessionStorage.clear()
+      getItemSpy = vi.spyOn(Storage.prototype, 'getItem')
+      setItemSpy = vi.spyOn(Storage.prototype, 'setItem')
+      removeItemSpy = vi.spyOn(Storage.prototype, 'removeItem')
+    })
+
+    afterEach(() => {
+      getItemSpy.mockRestore()
+      setItemSpy.mockRestore()
+      removeItemSpy.mockRestore()
+      sessionStorage.clear()
+    })
+
+    it('saveStateForDiagram 应写入 sessionStorage', () => {
+      const page = createComposable()
+      page.activeTab.value = 'sub_domain'
+      page.scopeIds.domain.selected = [1, 2]
+      page.scopeIds.sub_domain.selected = [10]
+      page.scopeIds.sub_domain.effective = [10, 11, 12]
+
+      // 直接调用闭包内的 saveStateForDiagram（通过 handleShowChart 间接触发）
+      page.handleShowChart()
+
+      const stored = sessionStorage.getItem('archManagerStateBeforeDiagram')
+      expect(stored).toBeTruthy()
+      const parsed = JSON.parse(stored)
+      expect(parsed.activeTab).toBe('sub_domain')
+      expect(parsed.scopeIds.domain.selected).toEqual([1, 2])
+      expect(parsed.scopeIds.sub_domain.selected).toEqual([10])
+      expect(parsed.scopeIds.sub_domain.effective).toEqual([10, 11, 12])
+      expect(parsed.savedAt).toBeGreaterThan(0)
+    })
+
+    it('restoreStateFromDiagram 在无 flag 时应直接返回 false 且不修改状态', () => {
+      const page = createComposable()
+      page.activeTab.value = 'domain'
+
+      const result = page.restoreStateFromDiagram()
+
+      expect(result).toBe(false)
+      expect(page.activeTab.value).toBe('domain')
+    })
+
+    it('restoreStateFromDiagram 在有 flag + 完整 state 时应恢复 activeTab / scopeIds 并返回 initialBoIds', () => {
+      const page = createComposable()
+      const stored = {
+        activeTab: 'relationship',
+        scopeIds: {
+          domain: { selected: [1], effective: [] },
+          business_object: { selected: [100, 200], effective: [] },
+          relationExtra: { relationCodes: ['R1', 'R2'], categoryTypes: [], filterRelationCodes: [] }
+        },
+        tabFilters: { note: 'restored' },
+        initialBoIds: [100, 200],
+        initialRelationCodes: ['R1', 'R2'],
+        savedAt: Date.now()
+      }
+      sessionStorage.setItem('archManagerStateBeforeDiagram', JSON.stringify(stored))
+      sessionStorage.setItem('returningFromDiagram', 'true')
+
+      const result = page.restoreStateFromDiagram()
+
+      expect(result).toBeTruthy()
+      expect(result.initialBoIds).toEqual([100, 200])
+      expect(result.initialRelationCodes).toEqual(['R1', 'R2'])
+      expect(page.activeTab.value).toBe('relationship')
+      expect(page.scopeIds.domain.selected).toEqual([1])
+      expect(page.scopeIds.business_object.selected).toEqual([100, 200])
+      expect(page.scopeIds.relationExtra.relationCodes).toEqual(['R1', 'R2'])
+      // 还原后应清空 sessionStorage, 防止下次误触发
+      expect(sessionStorage.getItem('returningFromDiagram')).toBeNull()
+      expect(sessionStorage.getItem('archManagerStateBeforeDiagram')).toBeNull()
+    })
+
+    it('restoreStateFromDiagram 在 JSON 解析失败时应返回 false 且清掉 flag', () => {
+      const page = createComposable()
+      sessionStorage.setItem('archManagerStateBeforeDiagram', 'not-json-{{{')
+      sessionStorage.setItem('returningFromDiagram', 'true')
+
+      const result = page.restoreStateFromDiagram()
+
+      expect(result).toBe(false)
+      expect(sessionStorage.getItem('returningFromDiagram')).toBeNull()
+    })
+
+    it('restoreStateFromDiagram 在 stored 为空时也应清掉 flag', () => {
+      const page = createComposable()
+      sessionStorage.setItem('returningFromDiagram', 'true')
+
+      const result = page.restoreStateFromDiagram()
+
+      expect(result).toBe(false)
+      expect(sessionStorage.getItem('returningFromDiagram')).toBeNull()
+    })
+
+    it('round-trip: handleShowChart → restoreStateFromDiagram 应完整恢复 scopeIds', () => {
+      // 第一次：构造一个 page 并跳转图表
+      const pageA = createComposable()
+      pageA.activeTab.value = 'business_object'
+      pageA.scopeIds.domain.selected = [3]
+      pageA.scopeIds.business_object.selected = [42, 43]
+      pageA.scopeIds.relationExtra.relationCodes = ['CODE_A']
+
+      const chartData = pageA.handleShowChart()
+      expect(chartData.hierarchyFilter.domain_id).toEqual([3])
+      expect(chartData.hierarchyFilter.business_object_id).toEqual([42, 43])
+
+      // 模拟 chart app 的 handlePrevWrapper 在用户返回时设置 returningFromDiagram flag
+      sessionStorage.setItem('returningFromDiagram', 'true')
+
+      // 第二次：模拟新 page 实例（代表 chart app 返回后 SPA 重建）
+      const pageB = createComposable()
+      expect(pageB.activeTab.value).toBe('domain') // 默认值
+      expect(pageB.scopeIds.domain.selected).toEqual([])
+
+      const restored = pageB.restoreStateFromDiagram()
+      expect(restored).toBeTruthy()
+      expect(restored.initialBoIds).toEqual([42, 43])
+      expect(restored.initialRelationCodes).toEqual(['CODE_A'])
+      expect(pageB.activeTab.value).toBe('business_object')
+      expect(pageB.scopeIds.domain.selected).toEqual([3])
+      expect(pageB.scopeIds.business_object.selected).toEqual([42, 43])
+      expect(pageB.scopeIds.relationExtra.relationCodes).toEqual(['CODE_A'])
+    })
+  })
 })

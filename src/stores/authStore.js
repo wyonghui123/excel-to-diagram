@@ -83,9 +83,45 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  /**
+   * [FIX v1.0.4 2026-06-09] 退出登录 - 彻底清空所有状态
+   *
+   * 修复场景: admin 退出后用 TEST60 登录, 看到 admin 的菜单
+   * 根因:
+   *   1. 原版只 user.value = null, 其他 ref (loading/error/sessionReady) 残留
+   *   2. router.push 抢跑 (async logout 未 await)
+   *   3. sessionStorage 中 useMultiObjectPage 缓存的 BO state 未清
+   * 修复:
+   *   1. 显式重置所有 ref 到初始值
+   *   2. 清空 sessionStorage (项目命名空间)
+   *   3. 调用方必须 await 本函数
+   */
   async function logout() {
-    await authService.logout()
+    try {
+      await authService.logout()
+    } catch (e) {
+      logger.warn('[authStore.logout] authService.logout failed:', e)
+    }
+    // 1. 清空 auth store 全部 state
     user.value = null
+    loading.value = false
+    error.value = ''
+    mustChangePassword.value = false
+    sessionReady.value = false
+    activeDataPermissionHint.value = null
+    // 2. 清空 sessionStorage (项目命名空间, 避免误删用户其他站点数据)
+    try {
+      // useMultiObjectPage 缓存的 page state
+      sessionStorage.removeItem('archManagerStateBeforeDiagram')
+      sessionStorage.removeItem('returningFromDiagram')
+      // useVersionContext 缓存的 LAST_CONTEXT
+      sessionStorage.removeItem('arch-context-last')
+      // 可能存在的 user 缓存
+      sessionStorage.removeItem('auth_user_cache')
+      // [NOTE] localStorage 中 FREQUENT_PRODUCTS 是用户偏好, 不清
+    } catch (e) {
+      logger.warn('[authStore.logout] clear storage failed:', e)
+    }
   }
 
   async function changePassword(oldPassword, newPassword) {
@@ -120,6 +156,15 @@ export const useAuthStore = defineStore('auth', () => {
     return {}
   }
 
+  function hasPermission(perm) {
+    if (!user.value) return false
+    if (typeof perm !== 'string') return false
+    if (perm === '*') return isAdmin.value
+    const perms = user.value.permissions || []
+    if (perms.includes('*')) return true
+    return perms.includes(perm)
+  }
+
   return {
     user,
     loading,
@@ -128,6 +173,7 @@ export const useAuthStore = defineStore('auth', () => {
     sessionReady,
     isLoggedIn,
     isAdmin,
+    hasPermission,
     userDisplayName,
     login,
     logout,
@@ -137,5 +183,10 @@ export const useAuthStore = defineStore('auth', () => {
     getAuthHeaders,
     activeDataPermissionHint,
     setActiveDataPermissionHint,
+  }
+}, {
+  persist: {
+    key: 'app-auth',
+    pick: ['user'],
   }
 })

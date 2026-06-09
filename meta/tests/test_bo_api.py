@@ -902,7 +902,7 @@ class TestBoAPIGranularBatch:
             assert delete_resp.status_code in [200, 204, 400, 401, 404, 500]
 
 CRUD_TEST_CASES = [
-    ("create", "user", {"username": "test_user", "password": "pwd", "email": "test@test.com"}, [201, 200], "创建用户"),
+    ("create", "user", {"username": "test_user", "password": "pwd123", "email": "test@test.com"}, [201, 200], "创建用户"),
     ("create_invalid", "user", {"username": "test_user"}, [400, 422], "缺少必填字段"),
     ("create_empty", "user", {}, [400, 422], "空请求体"),
     ("create_unknown", "unknown_type", {"name": "test"}, [400, 404], "未知对象类型"),

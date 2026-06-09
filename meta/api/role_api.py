@@ -120,10 +120,51 @@ def list_roles():
     
     注意：变更时间从审计日志计算，不存储在对象表中（单一事实原则）
     """
+    # [FIX 2026-06-08] 非管理员不能访问角色列表（避免 OperationalError 500）
+    if not is_admin():
+        return jsonify({'success': False, 'message': '需要管理员权限'}), 403
     roles = _get_perm_service().get_all_roles()
-    for role in roles:
-        role['permissions'] = _get_perm_service().get_role_permissions(role['id'])
-        role['updated_at'] = _get_latest_change_time('role', role['id'])
+
+    # [FR-006] 批量获取权限和更新时间, 避免 N+1 查询
+    if roles:
+        role_ids = [r['id'] for r in roles]
+        placeholders = ','.join(['?'] * len(role_ids))
+
+        # 批量获取角色权限
+        cursor = _data_source.execute(
+            f"SELECT rp.role_id, p.id, p.code, p.name, p.description, p.is_system "
+            f"FROM permissions p JOIN role_permissions rp ON p.id = rp.permission_id "
+            f"WHERE rp.role_id IN ({placeholders})",
+            role_ids
+        )
+        perm_map = {}
+        for row in cursor.fetchall():
+            rid = row[0]
+            if rid not in perm_map:
+                perm_map[rid] = []
+            perm_map[rid].append({
+                'id': row[1], 'code': row[2], 'name': row[3],
+                'description': row[4], 'is_system': row[5]
+            })
+
+        # 批量获取 updated_at (参照 _enrich_updated_at 模式)
+        cursor = _data_source.execute(
+            f"SELECT object_id, MAX(created_at) as max_update_at "
+            f"FROM audit_logs WHERE object_type = 'role' "
+            f"AND object_id IN ({placeholders}) AND action = 'UPDATE' "
+            f"GROUP BY object_id",
+            role_ids
+        )
+        updated_map = dict(cursor.fetchall())
+
+        for role in roles:
+            role['permissions'] = perm_map.get(role['id'], [])
+            role['updated_at'] = updated_map.get(role['id'])
+    else:
+        for role in roles:
+            role['permissions'] = []
+            role['updated_at'] = None
+
     return jsonify({'success': True, 'data': roles})
 
 

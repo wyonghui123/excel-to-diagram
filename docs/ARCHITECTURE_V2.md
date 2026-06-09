@@ -1,3 +1,11 @@
+---
+title: 元数据驱动统一架构文档 (Metadata-Driven Unified Architecture)
+version: 3.0.2
+date: 2026-06-07
+status: 活跃
+audience: 架构师、AI Agent、开发者
+---
+
 # 元数据驱动统一架构文档 (Metadata-Driven Unified Architecture)
 
 > **版本**: v3.0.2

@@ -28,7 +28,7 @@
 </template>
 
 <script>
-import { ref, onMounted, watch, nextTick, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch, nextTick, computed } from 'vue'
 import mermaid from 'mermaid'
 import { AppIcon } from './common/AppIcon'
 import { useDiagramConfigStore } from '../stores/diagramConfigStore.js'
@@ -162,9 +162,47 @@ export default {
     let lastColorGroupBy = 'domain'
     let lastCustomColors = null
     let isFirstRender = true
-    
+
+    /**
+     * 关键修复 v5：全屏切换后必须重新计算画布布局
+     * 否则 .mermaid-wrapper / .draggable-area 的 inline style 仍是切换前基于 600px
+     * 容器算的尺寸，mermaid-container 100vw×100vh 之后 draggle 仍占旧尺寸，
+     * 视口下方/右侧是 mermaid-container 的白色背景，视觉上"挡住图表"
+     */
+    const relayoutAfterSizeChange = () => {
+      // 双层 nextTick + requestAnimationFrame 兜底：
+      //   1) nextTick: 等待 Vue 更新 DOM（maximized class 切换）
+      //   2) requestAnimationFrame: 等待浏览器应用 CSS（mermaid-container 尺寸变化）
+      //   3) setTimeout 0: 再次兜底，处理某些浏览器下一帧才完成 layout 的情况
+      requestAnimationFrame(() => {
+        if (!mermaidContainer.value) return
+        const w = mermaidContainer.value.offsetWidth
+        const h = mermaidContainer.value.offsetHeight
+        if (w === 0 || h === 0) {
+          // 尺寸还没准备好，下一帧再试
+          requestAnimationFrame(() => relayoutAfterSizeChange())
+          return
+        }
+        svgProcessor.setupCanvasLayout(mermaidWrapper, mermaidContainer, draggableArea)
+        interaction.autoFitDiagram()
+      })
+    }
+
     const toggleMaximize = () => {
       isMaximized.value = !isMaximized.value
+      // 关键修复 v5：全屏切换后必须重新计算画布尺寸
+      // 否则 .mermaid-wrapper / .draggable-area 还是切换前的 inline style（基于 600px 高的 container 算的），
+      // 全屏后 mermaid-container 100vw×100vh，但 draggle 仍 100vw×600px，
+      // 视口下方 30% 是 mermaid-container 白色背景"挡住"图表
+      // 双层 nextTick + rAF 兜底 CSS transition / maximized 应用完成
+      nextTick(() => {
+        requestAnimationFrame(() => {
+          if (mermaidContainer.value) {
+            svgProcessor.setupCanvasLayout(mermaidWrapper, mermaidContainer, draggableArea)
+            interaction.autoFitDiagram()
+          }
+        })
+      })
     }
 
     // 生成Mermaid图表代码并保存关系说明信�?

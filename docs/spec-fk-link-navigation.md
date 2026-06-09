@@ -1,3 +1,21 @@
+## 目录
+
+1. [0. 与关联导航 Spec 的关系](#0-与关联导航-spec-的关系)
+2. [1. Background & Objectives](#1-background-objectives)
+3. [2. Requirement Type Overview](#2-requirement-type-overview)
+4. [3. Functional Requirements](#3-functional-requirements)
+5. [4. Nonfunctional Requirements](#4-nonfunctional-requirements)
+6. [5. External Interface Requirements](#5-external-interface-requirements)
+7. [6. Transition Requirements](#6-transition-requirements)
+8. [7. Constraints & Assumptions](#7-constraints-assumptions)
+9. [8. Priorities & Milestone Suggestions](#8-priorities-milestone-suggestions)
+10. [9. Change / Design Proposal (RFC)](#9-change-design-proposal-(rfc))
+11. [10. TBD List](#10-tbd-list)
+12. [11. 文件清单](#11-文件清单)
+13. [12. 设计决策记录 (ADR)](#12-设计决策记录-(adr))
+14. [13. 元数据模型驱动分析](#13-元数据模型驱动分析)
+
+---
 # Spec: 详情页模式切换与 FK 链接导航优化
 
 > **版本**: 1.0  

@@ -1,3 +1,23 @@
+## 目录
+
+1. [🚦 主文档状态快照（截至 2026-06-06）](#-主文档状态快照（截至-2026-06-06）)
+2. [0. v3.0 重构说明](#0-v30-重构说明)
+3. [1. 背景与目标](#1-背景与目标)
+4. [2. 现状与差距分析（高层总结）](#2-现状与差距分析（高层总结）)
+5. [3. 目标架构](#3-目标架构)
+6. [4. FR 索引（14 个 FR，链接到子 spec）](#4-fr-索引（14-个-fr，链接到子-spec）)
+7. [5. 非功能需求](#5-非功能需求)
+8. [6. 实施计划（跨 FR 协调）](#6-实施计划（跨-fr-协调）)
+9. [7. 风险与缓解（跨 FR）](#7-风险与缓解（跨-fr）)
+10. [8. 验收总结](#8-验收总结)
+11. [9. 变更 / 设计提案 (RFC)](#9-变更-设计提案-(rfc))
+12. [10. TBD List（跨 FR）](#10-tbd-list（跨-fr）)
+13. [11. 父 spec 拆薄说明（v3.0 关键决策）](#11-父-spec-拆薄说明（v30-关键决策）)
+14. [附录 A：跨 FR 共享 — 错误对象 code 枚举](#附录-a：跨-fr-共享-—-错误对象-code-枚举)
+15. [附录 B：引用表](#附录-b：引用表)
+16. [附录 C：变更记录](#附录-c：变更记录)
+
+---
 # Spec: UI 层业务逻辑下沉服务层细化方案 (v3.0 — 父 spec 拆薄版)
 
 > **版本**: v3.1.2
@@ -12,7 +32,7 @@
 > * [phase-b-completion.md](file:///d:/filework/excel-to-diagram/docs/specs/phase-b-completion.md) — **Phase B 8 PR 完成总结**（PR 4-11+）
 > * [**spec-m9-graphql-protocol.md v1.2.0**](file:///d:/filework/excel-to-diagram/docs/specs/spec-m9-graphql-protocol.md) — **v3 引擎 M9 GraphQL 协议层（已实施完成）**
 > * [spec-m10-mcp-server.md v1.0.0](file:///d:/filework/excel-to-diagram/docs/specs/spec-m10-mcp-server.md) — **v3 引擎 M10 MCP Server（已实施完成）**
-> * [**spec-m11-rls.md v1.0.0**](file:///d:/filework/excel-to-diagram/docs/specs/spec-m11-rls.md) — **v3 引擎 M11 声明式 RLS 详细 spec**
+> * [**spec-m11-rls-implementation.md v1.0.0**](file:///d:/filework/excel-to-diagram/docs/specs/spec-m11-rls-implementation.md) — **v3 引擎 M11 声明式 RLS 详细 spec**
 > * [**spec-m11-rls-implementation.md v1.4.0**](file:///d:/filework/excel-to-diagram/docs/specs/spec-m11-rls-implementation.md) — **v3 引擎 M11 实施 spec（130% 完成）**
 > * [**spec-m13-schema-governance.md v1.5.0**](file:///d:/filework/excel-to-diagram/docs/specs/spec-m13-schema-governance.md) — **v3 引擎 M13 Schema 治理详细 spec（D1-D5 全部完成）**
 > * [**spec-m14-opentelemetry.md v1.0.0**](file:///d:/filework/excel-to-diagram/docs/specs/spec-m14-opentelemetry.md) — **v3 引擎 M14 OpenTelemetry 简化版 spec（T1-T5 全部完成）**

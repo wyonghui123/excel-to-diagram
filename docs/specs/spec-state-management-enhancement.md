@@ -1,3 +1,15 @@
+## 目录
+
+1. [1. Background & Objectives](#1-background-objectives)
+2. [2. Gap Analysis](#2-gap-analysis)
+3. [3. Solution Design](#3-solution-design)
+4. [4. Implementation Plan](#4-implementation-plan)
+5. [5. Verification](#5-verification)
+6. [6. Comparison: StateSchema vs enum_values Extension](#6-comparison-stateschema-vs-enum_values-extension)
+7. [7. Risks & Mitigations](#7-risks-mitigations)
+8. [8. Appendix: 存量对象状态字段分析](#8-appendix-存量对象状态字段分析)
+
+---
 # Spec: 状态管理增强 - 基于 enum_values 扩展
 
 > **创建日期**: 2026-05-22

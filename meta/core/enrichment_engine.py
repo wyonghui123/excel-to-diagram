@@ -446,7 +446,9 @@ class EnrichmentEngine:
 
         enriched_count = 0
         for field in fields:
-            value_help = getattr(field, 'value_help', None)
+            # [FR-007] 使用 value_help_accessor 统一获取 value_help
+            from meta.core.value_help_accessor import get_value_help as _get_vh
+            value_help = _get_vh(field)
             if not value_help:
                 continue
             source = getattr(value_help, 'source', None)

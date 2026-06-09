@@ -57,11 +57,13 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/authStore'
-import { useMessage } from '@/composables/useMessage'
+import { useCrudMessage } from '@/composables/useCrudMessage'
+import { useUserProfileSync } from '@/composables/useUserProfileSync'
 import * as authService from '@/services/authService'
 
 const authStore = useAuthStore()
-const message = useMessage()
+const message = useCrudMessage()
+const profileSync = useUserProfileSync()
 const emit = defineEmits(['close'])
 
 const submitting = ref(false)
@@ -117,9 +119,11 @@ async function handleSubmit() {
     })
 
     if (data.success) {
-      authStore.user.display_name = form.displayName
-      message.success('个人信息已更新')
-      setTimeout(() => emit('close'), 1000)
+      // [FIX 2026-06-09] 立即同步到 authStore, 顶部菜单/头像首字母实时刷新
+      // 解决"改完名字没反应"导致用户误以为账号被锁的问题
+      profileSync.sync({ display_name: form.displayName, email: form.email })
+      message.profileUpdated()
+      emit('close')
     } else {
       errorMsg.value = data.message || '保存失败'
     }

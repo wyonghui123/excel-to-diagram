@@ -244,7 +244,12 @@ class AuditInterceptor(Interceptor):
         logger.info(f"[AuditInterceptor] Logged DELETE on {context.object_type}/{context.object_id}")
     
     def _log_association_event(self, context: ActionContext, config: AuditActionConfig, action: str) -> None:
-        """统一的关联操作审计日志记录 — 合并 _log_associate/_log_dissociate 中 ~88% 的重复代码"""
+        """统一的关联操作审计日志记录 — 合并 _log_associate/_log_dissociate 中 ~88% 的重复代码
+        
+        [审计延迟写入 2026-06-09]
+        在事务中执行时，审计写入会与业务写入发生 SQLite 锁冲突。
+        解决方案：在事务内缓存审计记录，事务提交后再写入。
+        """
         params = context.params
         tgt_type = params.get('tgt_type')
         tgt_id = params.get('tgt_id')
@@ -272,26 +277,44 @@ class AuditInterceptor(Interceptor):
             }
             new_data_val = None
 
-        self._structured_logger.log_business(
-            action=action,
-            object_type=context.object_type,
-            object_id=context.object_id,
-            user_id=context.user_id,
-            user_name=context.user_name,
-            field_name=association_display,
-            old_data=old_data_val,
-            new_data=new_data_val,
-            ip_address=getattr(context, 'ip_address', None),
-            trace_id=context.trace_id,
-            parent_object_type=tgt_type,
-            parent_object_id=tgt_id,
-            level='INFO'
-        )
+        # 构建审计记录参数
+        audit_params = {
+            'action': action,
+            'object_type': context.object_type,
+            'object_id': context.object_id,
+            'user_id': context.user_id,
+            'user_name': context.user_name,
+            'field_name': association_display,
+            'old_data': old_data_val,
+            'new_data': new_data_val,
+            'ip_address': getattr(context, 'ip_address', None),
+            'trace_id': context.trace_id,
+            'parent_object_type': tgt_type,
+            'parent_object_id': tgt_id,
+            'level': 'INFO'
+        }
 
-        logger.info(
-            f"[AuditInterceptor] Logged {action} on "
-            f"{context.object_type}/{context.object_id} -> {tgt_type}:{tgt_id}"
-        )
+        # [审计延迟写入] 检测是否在事务中
+        # [FIX Test Bug 2026-06-09] 严格用 `is True` 判断, 避免 MagicMock 默认 truthy 导致
+        # dissociate/associate 测试用 MagicMock() 作 data_source 时误判 in_transaction=True 而走 defer 路径
+        # (真实 DataSource.in_transaction 签名: bool, 见 meta/core/datasource.py:273)
+        in_transaction = getattr(context.data_source, 'in_transaction', False) is True
+
+        if in_transaction:
+            # 在事务中：缓存审计记录，等事务提交后再写入
+            context._pending_audit_records.append(audit_params)
+            logger.info(
+                f"[AuditInterceptor] DEFERRED {action} on "
+                f"{context.object_type}/{context.object_id} -> {tgt_type}:{tgt_id} "
+                f"(pending flush after transaction commit)"
+            )
+        else:
+            # 不在事务中：立即写入
+            self._structured_logger.log_business(**audit_params)
+            logger.info(
+                f"[AuditInterceptor] Logged {action} on "
+                f"{context.object_type}/{context.object_id} -> {tgt_type}:{tgt_id}"
+            )
     
     def _get_object_display(self, object_type: str, object_id: int, data_source) -> str:
         """获取业务对象的显示名称，委托给 model_utils.get_object_display"""

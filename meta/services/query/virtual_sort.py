@@ -34,6 +34,15 @@ def build_virtual_field_order_join(
     logger.debug(f"[VirtualSort] RedundancyDef for {meta_obj.id}.{sort_field}: {red_def}")
 
     if not red_def:
+        # [FIX 2026-06-08] 路径 2: audit_logs 派生字段（如 updated_at）。
+        # 这些字段用 derive_from_object 机制而非 redundancy 注册，
+        # 走 audit_logs 子查询聚合 MAX(updated_at)。
+        derive_obj = getattr(field, 'derive_from_object', '')
+        if derive_obj == 'audit_logs':
+            return _build_audit_derived_order_join(
+                meta_obj.table_name, meta_obj.id, sort_field, sort_direction
+            )
+
         logger.warning(f"[VirtualSort] No redundancy definition for {meta_obj.id}.{sort_field}")
         return None
 
@@ -74,6 +83,70 @@ def build_virtual_field_order_join(
     logger.info(f"[VirtualSort] Built JOIN: {join_clause}, order_by: {order_field_alias} {sort_direction}")
 
     return join_clause, order_field_alias, sort_direction
+
+
+def _build_audit_derived_order_join(
+    table_name: str,
+    obj_type: str,
+    sort_field: str,
+    sort_direction: str,
+) -> Optional[Tuple[str, str, str]]:
+    """构造 audit_logs 派生虚拟字段（如 updated_at）的排序 JOIN。
+
+    适用场景：field.storage=VIRTUAL 且 field.derive_from_object='audit_logs'。
+    这类字段（如 aspects.yaml 中的 updated_at）不存于业务表，而是从
+    audit_logs 实时聚合（MAX(created_at) WHERE action='UPDATE'）。
+
+    生成 SQL 片段（会被 execute_virtual_field_query 包装进外层 SELECT）::
+
+        LEFT JOIN (
+            SELECT object_id, MAX(created_at) AS _audit_value
+            FROM audit_logs
+            WHERE object_type = '<obj_type>' AND action = 'UPDATE'
+            GROUP BY object_id
+        ) _audit_sort ON _audit_sort.object_id = <table_name>.id
+
+    安全说明：
+        - table_name 必须经过 validate_table_name() 校验（白名单）
+        - obj_type 来自 YAML 注册表 或 user_api.py 中硬编码的信任值，
+          严禁直接拼接用户输入
+        - audit_logs 在 meta.core.table_name_validator._SYSTEM_TABLES 白名单中
+
+    Args:
+        table_name: 主表名（已通过 validate_table_name 校验）
+        obj_type: object_type 标识（来自 YAML 或硬编码信任值）
+        sort_field: 排序字段名（仅用于日志）
+        sort_direction: 排序方向 ('asc' / 'desc')
+
+    Returns:
+        (join_clause, order_alias, sort_direction) 三元组；
+        order_alias = '_audit_sort._audit_value'
+    """
+    table_name = validate_table_name(table_name)
+    # obj_type 必须是安全标识符（字母数字下划线），非用户输入
+    if not obj_type or not obj_type.replace('_', '').isalnum():
+        logger.warning(f"[VirtualSort] Invalid obj_type: {obj_type!r}")
+        return None
+
+    sub_alias = "_audit_sort"
+    join_clause = (
+        f"LEFT JOIN ("
+        f"SELECT object_id, MAX(created_at) AS _audit_value "
+        f"FROM audit_logs "
+        f"WHERE object_type = '{obj_type}' AND action = 'UPDATE' "
+        f"GROUP BY object_id"
+        f") {sub_alias} ON {sub_alias}.object_id = {table_name}.id"
+    )
+    # [FIX 2026-06-08] COALESCE 回退到 created_at：
+    # audit_logs JOIN 仅含 action='UPDATE' 的记录，无 UPDATE 的用户 _audit_value=NULL，
+    # 导致所有 NULL 值无序排列。用 COALESCE 回退到业务表的 created_at 保证排序确定。
+    order_alias = f"COALESCE({sub_alias}._audit_value, {table_name}.created_at)"
+
+    logger.info(
+        f"[VirtualSort] Built audit-derived JOIN for {obj_type}.{sort_field}: "
+        f"order_by={order_alias} {sort_direction}"
+    )
+    return join_clause, order_alias, sort_direction
 
 
 def execute_virtual_field_query(

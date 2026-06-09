@@ -55,6 +55,15 @@ export class TestIsolation {
   }
 
   /**
+   * 生成大写 code（用于 BO code，要求匹配 ^[A-Z][A-Z0-9_]*$）
+   * 与 generateId 的区别是返回全大写字符，避免被后端小写校验拒绝
+   */
+  generateCode(prefix = 'E') {
+    const upper = this.testRunId.toUpperCase().replace(/-/g, '_')
+    return `${prefix}_${upper}`
+  }
+
+  /**
    * 注册要跟踪的对象（创建后调用，记录 ID）
    */
   track(type, id) {
