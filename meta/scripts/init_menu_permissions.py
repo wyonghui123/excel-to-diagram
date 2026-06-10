@@ -154,7 +154,7 @@ def init_menu_permissions(db_path):
         },
         {
             'menu_code': 'product-management',
-            'menu_name': '产品管理',
+            'menu_name': '产品版本管理',
             'menu_path': '/product-management',
             'icon': 'Box',
             'color': '#06b6d4',

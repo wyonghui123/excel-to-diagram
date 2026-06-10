@@ -45,8 +45,8 @@ test.describe('S05: 工作台与导航', () => {
   }, testInfo) => {
     const list = new GenericListPage(page)
 
-    // 访问产品管理
-    await withStep(page, testInfo, '导航到产品管理页面', async () => {
+    // 访问产品版本管理
+    await withStep(page, testInfo, '导航到产品版本管理页面', async () => {
       await navigateTo(page, '/product-management')
     })
 

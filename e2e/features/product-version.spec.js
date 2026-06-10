@@ -33,7 +33,7 @@ import { GenericListPage } from '../page-objects/GenericListPage.js'
 
 test.describe('S11: 产品版本管理', () => {
 
-  test('C01: 产品管理 - 列表查看与详情', async ({
+  test('C01: 产品版本管理 - 列表查看与详情', async ({
     page, navigateTo, dataFinder, isolation
   }, testInfo) => {
     // 确保有可用产品（无则跳过）
@@ -48,7 +48,7 @@ test.describe('S11: 产品版本管理', () => {
     })
     if (!pv) return
 
-    await withStep(page, testInfo, '导航到产品管理列表', async () => {
+    await withStep(page, testInfo, '导航到产品版本管理列表', async () => {
       await navigateTo(page, '/product-management')
     })
 
@@ -101,7 +101,7 @@ test.describe('S11: 产品版本管理', () => {
       }
     })
 
-    console.log('[OK] 产品管理列表与详情测试完成')
+    console.log('[OK] 产品版本管理列表与详情测试完成')
   })
 
   test('C02: 产品 - 新建与编辑', async ({

@@ -14,7 +14,7 @@
  * 用法：
  *
  *   const nav = new MenuNavigator(page)
- *   await nav.navigateByMenuText('产品管理')           // 自动跳到 /product-management
+ *   await nav.navigateByMenuText('产品版本管理')           // 自动跳到 /product-management
  *   await nav.navigateByMenuText('用户与权限', '角色管理')  // 二级菜单
  */
 
@@ -29,7 +29,7 @@ import { expect } from '@playwright/test'
  */
 const MENU_TEXT_TO_URL = {
   '工作台': '/',
-  '产品管理': '/product-management',
+  '产品版本管理': '/product-management',
   '用户与权限': '/user-permission',
   '用户与权限管理': '/user-permission',
   '架构数据管理': '/system/archdata',

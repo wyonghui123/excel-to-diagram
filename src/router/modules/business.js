@@ -24,7 +24,7 @@ export default [
     name: 'product-management',
     component: () => import('@/views/GenericObjectList.vue'),
     props: { objectType: 'product' },
-    meta: { title: '产品管理', requiresAuth: true }
+    meta: { title: '产品版本管理', requiresAuth: true }
   },
   {
     path: '/user-permission/:tab?',

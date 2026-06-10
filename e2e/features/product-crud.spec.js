@@ -1,5 +1,5 @@
 /**
- * S02: 产品管理 CRUD - 功能测试 (v2 风格)
+ * S02: 产品版本管理 CRUD - 功能测试 (v2 风格)
  *
  * 路径: /product-management
  * 验证: 列表加载、新建产品、编辑产品、删除产品
@@ -20,11 +20,11 @@ import { GenericListPage } from '../page-objects/GenericListPage.js'
 
 const PRODUCT_URL = '/product-management'
 
-test.describe('S02: 产品管理 CRUD', () => {
+test.describe('S02: 产品版本管理 CRUD', () => {
   test('C01: 产品列表加载与表格验证', async ({ page, navigateTo, waitForApiFn }, testInfo) => {
     const list = new GenericListPage(page)
 
-    await withStep(page, testInfo, '导航到产品管理页', async () => {
+    await withStep(page, testInfo, '导航到产品版本管理页', async () => {
       await navigateTo(page, PRODUCT_URL)
     })
 
@@ -49,7 +49,7 @@ test.describe('S02: 产品管理 CRUD', () => {
   test('C02: 新建产品对话框验证', async ({ page, navigateTo, waitForApiFn }, testInfo) => {
     const list = new GenericListPage(page)
 
-    await withStep(page, testInfo, '导航到产品管理页', async () => {
+    await withStep(page, testInfo, '导航到产品版本管理页', async () => {
       await navigateTo(page, PRODUCT_URL)
     })
 

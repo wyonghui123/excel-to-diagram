@@ -322,7 +322,7 @@ def compute_route_gap(routes, gaps):
         "/system/role": ("role", "角色管理"),
         "/system/role-detail": ("role", "角色详情"),
         "/system/user-group": ("user_group", "用户组管理"),
-        "/product-management": ("product", "产品管理"),
+        "/product-management": ("product", "产品版本管理"),
         "/product-detail": ("product", "产品详情"),
         "/business-config": ("enum_type", "业务配置 (枚举)"),
         "/system/task-management": ("scheduled_task", "任务调度"),
