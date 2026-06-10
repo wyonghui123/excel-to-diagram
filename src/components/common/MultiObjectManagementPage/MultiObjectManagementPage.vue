@@ -307,7 +307,7 @@ function onGlobalAction(action) {
     const chartData = page.handleGlobalAction('chart')
     if (chartData) {
       sessionStorage.setItem('archDataForDiagram', JSON.stringify(chartData))
-      router.push('/diagram')
+      router.push('/archdata-chart')
     }
     return
   }

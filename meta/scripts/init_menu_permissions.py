@@ -153,27 +153,6 @@ def init_menu_permissions(db_path):
             })
         },
         {
-            'menu_code': 'aa-diagram',
-            'menu_name': 'AA图监查',
-            'menu_path': '/diagram',
-            'icon': 'PictureFilled',
-            'color': '#f59e0b',
-            'sort_order': 30,
-            'page_type': 'custom_page',
-            'primary_object_type': '',
-            'object_types': json.dumps([]),
-            'bo_bindings': json.dumps([
-                {'bo_id': 'relationship', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
-            ]),
-            'required_permissions': json.dumps([
-                'relationship:create', 'relationship:read', 'relationship:update', 'relationship:delete',
-            ]),
-            'data_permission_hint': json.dumps({
-                'resource_types': ['relationship'],
-                'message': '建议分配关系数据权限'
-            })
-        },
-        {
             'menu_code': 'product-management',
             'menu_name': '产品管理',
             'menu_path': '/product-management',

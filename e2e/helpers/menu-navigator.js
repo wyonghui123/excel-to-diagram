@@ -38,7 +38,7 @@ const MENU_TEXT_TO_URL = {
   '日志管理': '/system-admin',
   '任务管理': '/system/task-management',
   '账户设置': '/account',
-  '架构图': '/diagram',
+  '架构图': '/archdata-chart',
   '主题预览': '/dev/theme-preview',
 }
 

@@ -4,10 +4,14 @@
  */
 export default [
   {
-    path: '/diagram',
-    name: 'diagram',
+    path: '/archdata-chart',
+    name: 'archdata-chart',
     component: () => import('@/views/AADiagramApp/index.vue'),
-    meta: { title: '架构图', requiresAuth: true }
+    meta: {
+      title: '架构数据图表',
+      requiresAuth: true,
+      hiddenFromMenu: true
+    }
   },
   {
     path: '/config',

@@ -9,7 +9,7 @@ const PAGE_TYPE_COMPONENTS = {
 }
 
 const STATIC_ROUTE_NAMES = new Set([
-  'landing', 'login', 'theme-preview', 'diagram', 'config',
+  'landing', 'login', 'theme-preview', 'archdata-chart', 'config',
   'test', 'component-comparison', 'navigation-test',
   'ObjectDetail', 'ObjectDetailCreate', 'RoleDetail',
   'AccountSettings', 'RolePermissionCenter', 'RolePermissionDetail',
@@ -18,7 +18,7 @@ const STATIC_ROUTE_NAMES = new Set([
 ])
 
 const STATIC_ROUTE_PATHS = new Set([
-  '/dev/theme-preview', '/diagram', '/config', '/test',
+  '/dev/theme-preview', '/archdata-chart', '/config', '/test',
   '/component-comparison', '/dev/navigation-test', '/account',
   '/detail/', '/system-admin', '/role/',
   '/system/role-permission/', '/system/role-detail/',

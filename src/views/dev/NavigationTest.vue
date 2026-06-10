@@ -208,7 +208,7 @@
               <el-button @click="navigateTo('/')">
                 首页
               </el-button>
-              <el-button @click="navigateTo('/diagram')">
+              <el-button @click="navigateTo('/archdata-chart')">
                 架构图
               </el-button>
               <el-button @click="navigateTo('/data')">
@@ -357,7 +357,7 @@ const recentSearches = ref(['架构图', '数据管理'])
 
 const menuItems = ref([
   { key: 'home', label: '首页', icon: 'Home', to: '/' },
-  { key: 'diagram', label: '架构图', icon: 'Document', to: '/diagram' },
+  { key: 'archdata-chart', label: '架构图', icon: 'Document', to: '/archdata-chart' },
   { key: 'data', label: '数据管理', icon: 'DataAnalysis', to: '/data' },
   { key: 'product', label: '产品版本', icon: 'Goods', to: '/product-version' },
   { key: 'system', label: '系统管理', icon: 'Setting', children: [
@@ -384,7 +384,7 @@ function handleSearch(keyword) {
 
 function handleSuggestionClick(suggestion) {
   ElMessage.success(`Suggestion clicked: ${suggestion.title}`)
-  router.push(suggestion.title.includes('架构图') ? '/diagram' : '/')
+  router.push(suggestion.title.includes('架构图') ? '/archdata-chart' : '/')
 }
 
 function handleUserCommand(key) {
@@ -495,9 +495,9 @@ function addFavoriteData() {
 
 function addFavoriteDiagram() {
   appStore.addFavorite({
-    id: '/diagram',
+    id: '/archdata-chart',
     label: '架构图',
-    path: '/diagram',
+    path: '/archdata-chart',
     icon: 'Document',
     type: 'page'
   })
@@ -541,7 +541,7 @@ function openDataTab() {
 }
 
 function openDiagramTab() {
-  const tabId = '/diagram'
+  const tabId = '/archdata-chart'
   if (!tabStore.tabs.find(t => t.id === tabId)) {
     tabStore.openTab({
       id: tabId,
@@ -583,7 +583,7 @@ function navigateTo(path) {
 function getPageName(path) {
   const names = {
     '/': '首页',
-    '/diagram': '架构图',
+    '/archdata-chart': '架构图',
     '/data': '数据管理',
     '/product-version': '产品版本'
   }
@@ -593,7 +593,7 @@ function getPageName(path) {
 function getPageIcon(path) {
   const icons = {
     '/': 'Home',
-    '/diagram': 'Document',
+    '/archdata-chart': 'Document',
     '/data': 'DataAnalysis',
     '/product-version': 'Goods'
   }

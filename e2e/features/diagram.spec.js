@@ -24,7 +24,7 @@ test.describe('S10: 架构图', () => {
 
   test('C01: 架构图 - 页面加载与步骤导航器', async ({ page, navigateTo, isolation }, testInfo) => {
     await withStep(page, testInfo, '导航到架构图页面', async () => {
-      await navigateTo(page, '/diagram', {
+      await navigateTo(page, '/archdata-chart', {
         waitForTable: false,
         waitForSelector: '.step-navigator, [class*="step"], .diagram-app'
       })
@@ -73,17 +73,17 @@ test.describe('S10: 架构图', () => {
       const diagramBtn = page.locator('button:has-text("架构图"), button:has-text("生成图"), a:has-text("架构图")').first()
       if (await diagramBtn.isVisible().catch(() => false)) {
         await diagramBtn.click()
-        await page.waitForURL('**/diagram**', { timeout: 10000 }).catch(() => {})
+        await page.waitForURL('**/archdata-chart**', { timeout: 10000 }).catch(() => {})
       } else {
         console.log('[INFO] 架构图按钮不可见，尝试直接访问')
-        await navigateTo(page, '/diagram', {
+        await navigateTo(page, '/archdata-chart', {
           waitForTable: false,
           waitForSelector: '.step-navigator, [class*="step"], .diagram-app'
         })
       }
     })
 
-    const isOnDiagramPage = page.url().includes('/diagram')
+    const isOnDiagramPage = page.url().includes('/archdata-chart')
     if (!isOnDiagramPage) {
       console.log(`[WARN] 点击架构图按钮后未跳转，当前URL: ${page.url()}`)
       return
