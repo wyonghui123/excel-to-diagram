@@ -39,35 +39,56 @@ def main():
     )
     rows = cursor.fetchall()
     if not rows:
-        print("[OK] No aa-diagram menu found, nothing to do.")
-        conn.close()
-        return
+        print("[OK] No aa-diagram menu found in `menus`, nothing to do.")
+    else:
+        print(f"[INFO] Found {len(rows)} aa-diagram menu entry(ies):")
+        for r in rows:
+            print(f"  id={r[0]} code={r[1]} name={r[2]} path={r[3]}")
 
-    print(f"[INFO] Found {len(rows)} aa-diagram menu entry(ies):")
-    for r in rows:
-        print(f"  id={r[0]} code={r[1]} name={r[2]} path={r[3]}")
+        # 2. 删除 role_menu_permissions 关联（如果存在）
+        cursor.execute(
+            "DELETE FROM role_menu_permissions WHERE menu_code = ?",
+            ('aa-diagram',),
+        )
+        deleted_role_menus = cursor.rowcount
+        print(f"[OK] Deleted {deleted_role_menus} role_menu_permissions rows.")
 
-    # 2. 删除 menu_permissions 关联（如果有）
-    menu_ids = [r[0] for r in rows]
-    placeholders = ','.join('?' * len(menu_ids))
+        # 3. 删除 menu_permissions 行（如果存在）
+        cursor.execute(
+            "DELETE FROM menu_permissions WHERE menu_code = ?",
+            ('aa-diagram',),
+        )
+        deleted_perms = cursor.rowcount
+        print(f"[OK] Deleted {deleted_perms} menu_permissions rows.")
+
+        # 4. 删除 menus 行
+        cursor.execute(
+            "DELETE FROM menus WHERE menu_code = ?",
+            ('aa-diagram',),
+        )
+        deleted_menus = cursor.rowcount
+        print(f"[OK] Deleted {deleted_menus} menus rows.")
+
+    # 5. 验证：检查是否还有残留
     cursor.execute(
-        f"DELETE FROM menu_permissions WHERE menu_id IN ({placeholders})",
-        menu_ids,
+        "SELECT 'menus' AS tbl, COUNT(*) FROM menus WHERE menu_code='aa-diagram' "
+        "UNION ALL "
+        "SELECT 'menu_permissions', COUNT(*) FROM menu_permissions WHERE menu_code='aa-diagram' "
+        "UNION ALL "
+        "SELECT 'role_menu_permissions', COUNT(*) FROM role_menu_permissions WHERE menu_code='aa-diagram'"
     )
-    deleted_perms = cursor.rowcount
-    print(f"[OK] Deleted {deleted_perms} menu_permissions rows.")
-
-    # 3. 删除菜单条目
-    cursor.execute(
-        f"DELETE FROM menus WHERE id IN ({placeholders})",
-        menu_ids,
-    )
-    deleted_menus = cursor.rowcount
-    print(f"[OK] Deleted {deleted_menus} menus rows.")
+    residuals = cursor.fetchall()
+    print()
+    print("[VERIFY] Residual rows after cleanup:")
+    for tbl, cnt in residuals:
+        status = '[OK]' if cnt == 0 else '[FAIL]'
+        print(f"  {status} {tbl}: {cnt}")
 
     conn.commit()
     conn.close()
+    print()
     print("[DONE] aa-diagram menu cleanup completed.")
+    print("[NOTE] Frontend menu is cached; user may need to refresh or re-login.")
 
 
 if __name__ == '__main__':
