@@ -69,11 +69,23 @@
     </div>
 
     <template #footer>
-      <AppButton variant="secondary" @click="handleClose">关闭</AppButton>
-      <AppButton variant="primary" @click="handleRefresh">
-        <AppIcon name="refresh" size="sm" />
-        刷新
-      </AppButton>
+      <!--
+        底部操作区按 mode 动态渲染（useDetailActions）。
+        关闭动作不再放 footer —— 由 el-drawer 顶部 X 承担，避免重复按钮。
+        add/edit 模式下保存/取消由 ObjectPageHeader 提供，footer 留空。
+      -->
+      <slot name="footer" :actions="footerActions">
+        <AppButton
+          v-for="act in footerActions.filter((a) => a.visible)"
+          :key="act.key"
+          :variant="act.variant"
+          :disabled="act.disabled"
+          @click="act.onClick"
+        >
+          <AppIcon v-if="act.icon" :name="act.icon" size="sm" />
+          {{ act.label }}
+        </AppButton>
+      </slot>
     </template>
   </el-drawer>
 
@@ -144,6 +156,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useMessage } from '@/composables/useMessage'
 import { useVersionContext } from '@/composables/useVersionContext'
 import { useFormCascade } from '@/composables/useCascadeSelect'
+import { useDetailActions } from '@/composables/useDetailActions'
 import metaService from '@/services/metaService'
 import boService from '@/services/boService'
 import { objectTypeService } from '@/services/objectTypeService'
@@ -189,6 +202,22 @@ const effectiveMode = computed(() => {
 
 const internalEditing = ref(effectiveMode.value === 'add' || effectiveMode.value === 'edit')
 const saving = ref(false)
+
+/**
+ * footer 操作按钮配置：按 mode 动态渲染
+ * view 模式 → 仅"刷新"（X 按钮承担关闭）
+ * add/edit 模式 → footer 让空（保存/取消已在 ObjectPageHeader）
+ * 调用方可通过 <template #footer="slotProps"> 完全自定义
+ */
+const { actions: footerActions } = useDetailActions({
+  mode: effectiveMode,
+  saving,
+  loading,
+  hasData: computed(() => !!data.value),
+  onSave: handleSave,
+  onCancel: handleObjectPageAction.bind(null, { action: { key: 'cancel' } }),
+  onRefresh: handleRefresh,
+})
 
 const entityMeta = ref(null)
 const cascade = useFormCascade(
