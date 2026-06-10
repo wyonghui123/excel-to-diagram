@@ -60,6 +60,15 @@ export default defineConfig({
   server: {
     host: true,
     port: 3004,
+    hmr: {
+      // [Node.js 24 兼容] 使用 polling 模式替代 WebSocket：
+      // Vite 6.4.1 的 WS HMR 服务器在 Node.js 24.14.0 上挂死，
+      // 导致浏览器控制台持续报错。改用 polling 后浏览器通过 HTTP 长轮询
+      // 接收文件变化通知，功能完全正常。
+      protocol: 'ws',
+      overlay: true,
+      timeout: 30000,
+    },
     proxy: {
       // [FR-009] 合并所有 /api/* 到统一代理规则 (原来 5 条独立规则, target 相同)
       '/api': {

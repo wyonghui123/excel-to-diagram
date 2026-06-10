@@ -111,8 +111,18 @@
           <el-descriptions-item label="对象类型">
             {{ getObjectTypeLabel(selectedLog.object_type) }}
           </el-descriptions-item>
-          <el-descriptions-item label="对象ID">
-            {{ selectedLog.object_id }}
+          <el-descriptions-item label="对象">
+            <span class="object-id">{{ selectedLog.object_id }}</span>
+            <span v-if="selectedLog.object_display" class="object-display">
+              {{ selectedLog.object_display }}
+            </span>
+          </el-descriptions-item>
+          <el-descriptions-item v-if="selectedLog.parent_object_type" label="父对象">
+            <span class="parent-type">{{ getObjectTypeLabel(selectedLog.parent_object_type) }}</span>
+            <span class="object-id">{{ selectedLog.parent_object_id }}</span>
+            <span v-if="selectedLog.parent_object_display" class="object-display">
+              {{ selectedLog.parent_object_display }}
+            </span>
           </el-descriptions-item>
           <el-descriptions-item label="业务标识">
             {{ selectedLog.formatted_identity || selectedLog.business_key || '-' }}
@@ -520,6 +530,29 @@ function formatDateTime(datetime) {
   max-height: 200px;
   overflow-y: auto;
   word-break: break-all;
+}
+
+.object-id {
+  font-family: 'Consolas', 'Monaco', monospace;
+  color: var(--color-text-tertiary, #999);
+  font-size: 12px;
+  margin-right: 8px;
+}
+
+.object-display {
+  color: var(--el-color-primary, #ea580c);
+  font-weight: 500;
+}
+
+.parent-type {
+  display: inline-block;
+  padding: 1px 6px;
+  background: #e6f4ff;
+  color: #0ea5e9;
+  font-size: 12px;
+  border-radius: 3px;
+  margin-right: 6px;
+}
   white-space: pre-wrap;
 }
 </style>

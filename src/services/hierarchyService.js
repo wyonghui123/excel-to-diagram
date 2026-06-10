@@ -255,11 +255,21 @@ export function buildHierarchyFilterParams({ levels, scopeIds, objectType }) {
 /**
  * 构建关系过滤参数（回退逻辑，当 hierarchyTypes 不提供 filter_mappings 时使用）
  *
+ * [FIX v3.18] 优先使用 relationIds（精确 ID 过滤），避免与 relation_code__in 产生
+ * AND 语义冲突导致跨域记录（id=29, relation_code=''）被错误排除。
+ * 此函数在 'relationship' 不在 levels 中（isAssociation=false）时被 _buildRelationshipFilters 调用。
+ *
  * @param {Object} relationExtra - scopeIds.relationExtra
  * @returns {Object} 过滤参数对象
  */
 export function buildRelationshipFilterParams(relationExtra) {
   const filters = {}
+
+  // 优先使用 relationIds（精确 ID 过滤）
+  if (relationExtra.relationIds?.length > 0) {
+    filters.id__in = relationExtra.relationIds.join(',')
+    return filters
+  }
 
   if (relationExtra.relationCodes.length > 0) {
     filters.relation_code__in = relationExtra.relationCodes.join(',')

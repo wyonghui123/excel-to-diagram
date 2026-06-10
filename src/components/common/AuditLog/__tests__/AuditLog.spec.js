@@ -475,6 +475,60 @@ describe('AuditLog 分组合并 (方案 A)', () => {
     ]
     const wrapper = mount(AuditLog, { props: { logs, loading: false } })
     expect(wrapper.text()).toContain('2 项变更')
-    expect(wrapper.text()).toContain('1 个关联对象')
+    expect(wrapper.text()).toContain('1 个新建子对象')
+  })
+
+  // [FIX 2026-06-10] 测试 DISSOCIATE 级联删除审计日志展示
+  it('DISSOCIATE 级联删除应正确展示为"移除关联"', () => {
+    const logs = [
+      {
+        id: 1, action: 'DELETE', user_name: 'admin',
+        object_type: 'user_group', object_id: 100,
+        trace_id: 't-D', transaction_id: null,
+        created_at: '2026-06-10T16:00:00',
+        field_name: null, old_value: null, new_value: null,
+        extra_data: { deleted_data: { id: 100, name: '测试组' } }
+      },
+      {
+        id: 2, action: 'DISSOCIATE', user_name: 'admin',
+        object_type: 'user_group', object_id: 100,
+        parent_object_type: 'user', parent_object_id: 50,
+        field_name: '成员',
+        old_value: { target_type: 'user', target_id: 50 },
+        new_value: null,
+        trace_id: 't-D', transaction_id: null,
+        created_at: '2026-06-10T16:00:00',
+        extra_data: { cascade_reason: 'user_group#100 deletion', through_table: 'user_group_members' }
+      },
+      {
+        id: 3, action: 'DISSOCIATE', user_name: 'admin',
+        object_type: 'user_group', object_id: 100,
+        parent_object_type: 'role', parent_object_id: 3,
+        field_name: '角色',
+        old_value: { target_type: 'role', target_id: 3 },
+        new_value: null,
+        trace_id: 't-D', transaction_id: null,
+        created_at: '2026-06-10T16:00:00',
+        extra_data: { cascade_reason: 'user_group#100 deletion', through_table: 'group_roles' }
+      }
+    ]
+    const wrapper = mount(AuditLog, { props: { logs, loading: false } })
+    const groups = wrapper.vm.groupedLogs
+    // 3条日志同 trace，归为1个 group
+    expect(groups.length).toBe(1)
+    // primaryAction 应该是 DELETE（第一条日志）
+    expect(groups[0].primaryAction).toBe('DELETE')
+    // items 中有 1 条 DELETE
+    expect(groups[0].items.some(i => i.action === 'DELETE')).toBe(true)
+    // _children 中有 2 条 DISSOCIATE
+    expect(groups[0]._children.filter(i => i.action === 'DISSOCIATE').length).toBe(2)
+    // 显示"1 项变更"（DELETE 的 summary）+ "2 个新建子对象"（DISSOCIATE）
+    expect(wrapper.text()).toContain('1 项变更')
+    expect(wrapper.text()).toContain('2 个新建子对象')
+    // 筛选 DISSOCIATE 时只显示 2 条
+    const filterBtns = wrapper.findAllComponents({ name: 'AppButton' })
+    // 点击"移除关联"筛选
+    const dissociateBtn = wrapper.findAll('button').find(b => b.text() === '移除关联')
+    expect(dissociateBtn.exists()).toBe(true)
   })
 })

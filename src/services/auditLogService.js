@@ -277,13 +277,40 @@ export async function getLogById(id) {
  * @param {Object} [options.filters]
  * @returns {Promise<{success: boolean, data?: Object, message?: string}>}
  */
+// 判断是否为 v2 BO association API 响应（data 包含 items/total）
+function _isBoResponse(data) {
+  return data && typeof data === 'object' && Array.isArray(data.items) && 'total' in data
+}
+
 export async function getLogsByObject(objectType, objectId, { page = 1, pageSize = 20, filters = {} } = {}) {
   const params = new URLSearchParams({
     page: String(page),
     page_size: String(pageSize),
     ...buildLogFilter({ ...filters, objectType, objectId })
   })
-  return apiV2.get(`/bo/${objectType}/${objectId}/associations/audit_logs?${params.toString()}`)
+
+  // 改用 /audit/logs 端点 — 支持字符串 object_id（如 'annotation_category'），
+  // 而旧版 /bo/:type/:id/associations/audit_logs 的 <int:obj_id> 路由只接受整数。
+  // 注意：audit API 注册在 /api/v1/audit/，因此使用 apiV1（对应 baseURL /api/v1）。
+  const raw = await apiV1.get(`/audit/logs?${params.toString()}`)
+
+  // 归一化响应格式：/audit/logs 返回 { data: [...], total }, 需要 { data: { items: [...], total } }
+  // 与 BO association API 的格式保持一致，供 useAuditLogs.js 的 loadLogs 正常解析。
+  if (raw && raw.success) {
+    if (_isBoResponse(raw.data)) {
+      return raw // 已经是目标格式（保留路径兼容）
+    }
+    return {
+      success: true,
+      data: {
+        items: Array.isArray(raw.data) ? raw.data : [],
+        total: raw.total || 0,
+        page: raw.page || page,
+        page_size: raw.page_size || pageSize
+      }
+    }
+  }
+  return raw
 }
 
 /**

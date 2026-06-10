@@ -371,6 +371,76 @@ describe('useFieldPolicy', () => {
       expect(isEditable('name', { is_system: false }, 'extensible')).toBe(true)
       expect(isEditable('name', { is_system: true }, 'extensible')).toBe(false)
     })
+
+    // [FIX 2026-06-10] 新增行 (enum_value.code 等业务主键) 在 API 加载时
+    // 必须用本地 readonly_always / system 兜底，否则 immutable 字段无法录入。
+    describe('with backend field-policies loaded (simulating read context)', () => {
+      it('allows editing immutable business_key field on new row even when API says editable=false', () => {
+        const metaConfig = createMetaConfig([
+          { id: 'code', semantics: { business_key: true, immutable: true } },
+        ])
+        const { isEditable, fieldPolicies } = useFieldPolicy(metaConfig)
+        // 模拟后端在 read context 返回的策略
+        fieldPolicies.value = {
+          code: { editable: false, visible: true, required: true },
+        }
+
+        // 现有行：API 说不可编辑 → 不可编辑
+        expect(isEditable('code', { id: 1 })).toBe(false)
+        // 新增行：必须用本地语义重新评估 → 可编辑
+        expect(isEditable('code', { id: '__new_1' })).toBe(true)
+        expect(isEditable('code', { id: 1, _isNew: true })).toBe(true)
+      })
+
+      it('keeps readonly_always fields un-editable on new rows even with API', () => {
+        const metaConfig = createMetaConfig([
+          { id: 'enum_type_id', semantics: { readonly_always: true, parent_key: true } },
+        ])
+        const { isEditable, fieldPolicies } = useFieldPolicy(metaConfig)
+        fieldPolicies.value = {
+          enum_type_id: { editable: false, visible: true, required: true },
+        }
+
+        expect(isEditable('enum_type_id', { id: '__new_1' })).toBe(false)
+        expect(isEditable('enum_type_id', { id: 1, _isNew: true })).toBe(false)
+      })
+
+      it('keeps system fields un-editable on new rows even with API', () => {
+        const metaConfig = createMetaConfig([{ id: 'id' }])
+        const { isEditable, fieldPolicies } = useFieldPolicy(metaConfig)
+        fieldPolicies.value = {
+          id: { editable: false, visible: false, required: false },
+        }
+
+        expect(isEditable('id', { id: '__new_1' })).toBe(false)
+      })
+
+      it('respects ui.editable=false on new rows even with API', () => {
+        const metaConfig = createMetaConfig([
+          { id: 'status', ui: { editable: false } },
+        ])
+        const { isEditable, fieldPolicies } = useFieldPolicy(metaConfig)
+        fieldPolicies.value = {
+          status: { editable: false, visible: true, required: false },
+        }
+
+        // 新行时 ui.editable=false 仍不可编辑（与 fallback 行为一致）
+        expect(isEditable('status', { id: '__new_1' })).toBe(false)
+      })
+
+      it('keeps existing-row behavior unchanged with API loaded', () => {
+        const metaConfig = createMetaConfig([{ id: 'name' }])
+        const { isEditable, fieldPolicies } = useFieldPolicy(metaConfig)
+        fieldPolicies.value = {
+          name: { editable: true, visible: true, required: false },
+        }
+
+        // 现有行：API 说可编辑 → 可编辑
+        expect(isEditable('name', { id: 1 })).toBe(true)
+        // 新增行：API 说可编辑 → 仍可编辑
+        expect(isEditable('name', { id: '__new_1' })).toBe(true)
+      })
+    })
   })
 
   describe('isVisible', () => {

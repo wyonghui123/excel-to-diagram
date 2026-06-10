@@ -423,6 +423,11 @@ export function useSvgProcessor(options) {
     applyStyleFixes(svgEl, props.diagramType, mermaidContainer, props.diagramData?.textColor)
     addTooltips(svgEl, relationDescriptions, props.diagramType, hideTails)
 
+    // 注意：之前 v22 加的 fixNodeRectSize 会修改 rect/foreignObject width/height
+    // 但 mermaid ELK layout 是基于原 width 算 edge endpoint 位置
+    // 改 rect 后 edge endpoint 仍然按原位置定位 → 端点错位 + 文字溢出
+    // 关键回退：删 fixNodeRectSize，让 mermaid 自己负责 node sizing（更稳定）
+
     fixContainerTitleCenter(svgEl)
 
     reorderZoneRows(svgEl)
@@ -448,6 +453,8 @@ export function useSvgProcessor(options) {
     addTooltips,
     renderAnnotationOverlay,
     setupCanvasLayout,
-    processSvg
+    processSvg,
+    // 关键导出 v26：导出 buildColorLegendData 让 HTML 导出器复用 legend 逻辑
+    buildColorLegendData
   }
 }

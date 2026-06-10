@@ -8,6 +8,7 @@
  */
 
 import { normalizeFilterType, inferFilterType } from './filterService'
+import { sortColumnsByDefaultOrder } from './columnOrderService'
 
 /**
  * 转换列定义为 Element Plus el-table-column 格式
@@ -15,10 +16,12 @@ import { normalizeFilterType, inferFilterType } from './filterService'
  * @param {Array} yamlColumns - YAML 定义的列
  * @param {Object} options - 选项
  * @param {string} options.filterDisplayMode - 过滤器显示模式 ('hover'|'always'|'manual')
+ * @param {Array} [options.fields=[]] - 字段元数据(用于 smart_default 分类)
+ * @param {Object} [options.columnOrder={}] - 列序配置 { strategy, manual_order, override }
  * @returns {Array} el-table-column 配置数组
  */
 export function transformColumns(yamlColumns, options = {}) {
-  return yamlColumns.map(col => {
+  const transformed = yamlColumns.map(col => {
     const fieldName = (col.key || col.field || col.id || '').toLowerCase()
     const inferredWidth = inferColumnWidth(col)
     const isDatetimeField = /(_at|_time|_date)$/.test(fieldName) && fieldName !== 'id'
@@ -84,6 +87,7 @@ export function transformColumns(yamlColumns, options = {}) {
       column_priority: col.column_priority || null
     }
   })
+  return sortColumnsByDefaultOrder(transformed, options.fields || [], options.columnOrder || {})
 }
 
 /**

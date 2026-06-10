@@ -391,6 +391,28 @@ describe('useMultiObjectPage', () => {
 
       expect(page.combinedFilters.value).not.toHaveProperty('relation_code__in')
     })
+
+    // [FIX] 回归测试 (v3.18 修复 bug: 范围内+范围内与外部 同时选择时只返回 28 条)
+    // 根因：同时发送 id__in (精确 ID) 和 relation_code__in (类型编码)，
+    // 后端 AND 语义把 relation_code 为空的跨域记录 (id=29) 错误排除。
+    // 修复：当 relationIds 已设置 (精确 ID)，_buildCombinedFilters 跳过 relation_codes，
+    //       buildAssociationFilterParams 也跳过 relation_code__in 的映射。
+    // 验证：combinedFilters 中既无 relation_codes 也不含 relation_code__in。
+    it('relationIds 优先: 设置 relationIds 时不应再添加 relation_code 相关过滤', () => {
+      const page = createComposable()
+      page.activeTab.value = 'relationship'
+      // 同时设置 codes 和 ids（模拟 范围内+范围内与外部 同时勾选）
+      page.scopeIds.relationExtra.relationCodes = ['ORDERS', 'APPROVES']
+      page.scopeIds.relationExtra.relationIds = [1, 2, 3, 29]
+
+      const filters = page.combinedFilters.value
+      // _buildCombinedFilters 不应再设 relation_codes（被 hasRelationIds 守卫拦截）
+      expect(filters).not.toHaveProperty('relation_codes')
+      // buildAssociationFilterParams mock 在 relationIds > 0 时只设 id__in，不走 relation_code 分支
+      expect(filters).not.toHaveProperty('relation_code__in')
+      // 精确 ID 过滤应透传
+      expect(filters.id__in).toBe('1,2,3,29')
+    })
   })
 
   describe('combinedFilters - 层级对象 Tab 过滤 (元数据驱动)', () => {

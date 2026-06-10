@@ -1,12 +1,6 @@
 <template>
   <div class="step-config">
     <div class="config-panel">
-      <div class="panel-header-simple">
-        <AppButton type="secondary" @click="$emit('prev')"><AppIcon name="arrow-left" size="sm" /> 上一步</AppButton>
-        <AppButton type="primary" size="lg" @click="handleGenerate">
-          生成图表 <AppIcon name="arrow-right" size="sm" />
-        </AppButton>
-      </div>
       <div class="panel-body no-padding-top">
         <template v-if="chartType === 'businessObject'">
           <CenterDomainSelect

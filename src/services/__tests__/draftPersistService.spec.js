@@ -36,6 +36,87 @@ describe('draftPersistService', () => {
     it('TC-3: 值不同时有变更', () => {
       expect(hasDraftChanges({ name: 'foo' }, { name: 'bar' })).toBe(true)
     })
+
+    // [FIX 2026-06-10] 新行：只要有任一非 context 字段有非空值即视为有变更
+    // 避免"用户接受 keyTemplateService 自动建议的 code，但保存时
+    //  fields.code === initialValues.code 导致 hasDraftChanges=false，
+    //  新行被静默从 data 移除"的 bug
+    describe('新行 (isNewRow=true)', () => {
+      it('TC-N1: 新行带自动建议的 code（值与 initial 相同）应视为有变更', () => {
+        // 模拟场景：用户新增行，auto-suggest 填入 code='AUTO_001'，
+        // 用户没改就保存。旧逻辑会因 fields===initial 返回 false 而静默删除新行。
+        expect(
+          hasDraftChanges(
+            { code: 'AUTO_001', enum_type_id: 'annotation_category' },
+            { code: 'AUTO_001', enum_type_id: 'annotation_category' },
+            true
+          )
+        ).toBe(true)
+      })
+
+      it('TC-N2: 新行只有 *_id context 字段时视为无变更（取消新建）', () => {
+        // 用户点了"新增"但啥也没填就保存，应取消
+        expect(
+          hasDraftChanges(
+            { enum_type_id: 'annotation_category' },
+            { enum_type_id: 'annotation_category' },
+            true
+          )
+        ).toBe(false)
+      })
+
+      it('TC-N3: 新行 _ 开头字段被跳过（即使有值）', () => {
+        expect(
+          hasDraftChanges(
+            { _initial: 1, code: 'X' },
+            {},
+            true
+          )
+        ).toBe(true)
+      })
+
+      it('TC-N4: 新行 code 为空字符串视为无变更', () => {
+        expect(
+          hasDraftChanges(
+            { code: '', enum_type_id: 'x' },
+            { enum_type_id: 'x' },
+            true
+          )
+        ).toBe(false)
+      })
+
+      it('TC-N5: 新行 code=null 视为无变更', () => {
+        expect(
+          hasDraftChanges(
+            { code: null, enum_type_id: 'x' },
+            { enum_type_id: 'x' },
+            true
+          )
+        ).toBe(false)
+      })
+
+      it('TC-N6: 新行 user 显式改 code 视为有变更', () => {
+        expect(
+          hasDraftChanges(
+            { code: 'USER_CHANGED' },
+            { code: 'AUTO' },
+            true
+          )
+        ).toBe(true)
+      })
+    })
+
+    describe('现有行 (isNewRow=false，默认)', () => {
+      it('TC-E1: isNewRow 默认为 false，行为与旧逻辑一致', () => {
+        expect(hasDraftChanges({ name: 'foo' }, { name: 'foo' })).toBe(false)
+      })
+
+      it('TC-E2: 显式传 isNewRow=false 也走旧逻辑', () => {
+        expect(
+          hasDraftChanges({ name: 'foo' }, { name: 'foo' }, false)
+        ).toBe(false)
+      })
+    })
   })
 
   describe('buildDraftPayload', () => {
@@ -79,11 +160,14 @@ describe('draftPersistService', () => {
       expect(result.toRemove).toEqual([])
     })
 
-    it('TC-9: __new_ 行未变更时进入 toRemove（用 __new_ 触发 initialValues 查找）', () => {
+    it('TC-9: __new_ 行只有 *_id context 字段时进入 toRemove（用 __new_ 触发 initialValues 查找）', () => {
+      // [FIX 2026-06-10] 新行：只有 *_id context 字段（来自 filterValues 的 parent context）
+      // 视为无变更，触发取消新建。普通 user-editable 字段（name/code 等）即使值与
+      // initial 相同也视为有变更（keyTemplateService 自动建议场景）。
       const drafts = new Map([
-        ['__new_1', { name: 'foo' }],
+        ['__new_1', { enum_type_id: 'annotation_category' }],
       ])
-      const data = [{ id: '__new_1', _initialValues: { name: 'foo' } }]
+      const data = [{ id: '__new_1', _initialValues: { enum_type_id: 'annotation_category' } }]
       const result = collectDrafts(drafts, data)
       expect(result.drafts).toEqual([])
       expect(result.toRemove.length).toBe(2)  // 1 for removeFromData + 1 for draftValues.delete
@@ -123,9 +207,10 @@ describe('draftPersistService', () => {
       expect(result.updated).toBe(0)
     })
 
-    it('TC-12: __new_ 行未变更时返回空', async () => {
-      const drafts = new Map([['__new_1', { name: 'foo' }]])
-      const data = [{ id: '__new_1', _initialValues: { name: 'foo' } }]  // C2 修复：纯 array 而非 ref
+    it('TC-12: __new_ 行只有 *_id context 字段时返回空', async () => {
+      // [FIX 2026-06-10] 新行：只有 *_id context 字段视为无变更，不调后端
+      const drafts = new Map([['__new_1', { enum_type_id: 'annotation_category' }]])
+      const data = [{ id: '__new_1', _initialValues: { enum_type_id: 'annotation_category' } }]  // C2 修复：纯 array 而非 ref
       const callPost = vi.fn()
       const result = await saveAllDrafts({
         objectType: 'order',
@@ -256,9 +341,10 @@ describe('draftPersistService', () => {
       expect(result).toEqual([])
     })
 
-    it('TC-16: 跳过未变更的 __new_ 行', () => {
-      const drafts = new Map([['__new_1', { name: 'foo' }]])
-      const data = [{ id: '__new_1', _initialValues: { name: 'foo' } }]
+    it('TC-16: 跳过只有 *_id context 字段的未变更 __new_ 行', () => {
+      // [FIX 2026-06-10] 新行：只有 *_id context 字段视为无变更，跳过
+      const drafts = new Map([['__new_1', { enum_type_id: 'annotation_category' }]])
+      const data = [{ id: '__new_1', _initialValues: { enum_type_id: 'annotation_category' } }]
       const result = getDraftCreates(drafts, data)
       expect(result).toEqual([])
     })

@@ -1,13 +1,8 @@
 <template>
   <div class="step-scope">
     <div class="scope-panel">
-      <div class="panel-header">
-        <div class="panel-title">{{ stepMode === 'center' ? '选择中心范围' : '选择关系范围' }}</div>
-        <div class="panel-actions">
-          <AppButton v-if="stepMode === 'center'" :disabled="!centerScope || centerScope.length === 0" type="primary" @click="handleNextToRelation">下一步 <AppIcon name="arrow-right" size="sm" /></AppButton>
-          <AppButton v-if="stepMode === 'relation'" @click="$emit('prev')"><AppIcon name="arrow-left" size="sm" /> 上一步</AppButton>
-          <AppButton v-if="stepMode === 'relation'" type="primary" @click="handleNextToConfig">下一步 <AppIcon name="arrow-right" size="sm" /></AppButton>
-        </div>
+      <div class="panel-header--compact">
+        <span class="panel-title">{{ stepMode === 'center' ? '选择中心范围' : '选择关系范围' }}</span>
       </div>
       <div class="panel-body no-padding-top">
         <!-- 数据校验结果面板 -->
@@ -766,6 +761,12 @@ export default {
   height: 100%;
   display: flex;
   flex-direction: column;
+}
+
+/* 紧凑面板标题 */
+.panel-header--compact {
+  padding: 8px var(--spacing-lg);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .panel-header {

@@ -1116,6 +1116,141 @@ default_ordering:
     direction: asc
 ```
 
+### 6.9 Column Order（列序策略）⭐
+
+> **新增于 v2.4.0**。控制 el-table-column 的列顺序，支持 3 种策略自动级联。
+
+#### 6.9.1 三种策略
+
+| 策略 | 适用场景 | 配置位置 |
+|------|----------|----------|
+| `yaml_position` | 完全兼容老 yaml,所有列严格按 `position` 升序 | `ui_view_config.list.column_order.strategy: yaml_position` |
+| `manual` | 业务方手动指定列顺序(优先级最高) | `ui_view_config.list.column_order.strategy: manual` + `manual_order: [code, name, ...]` |
+| `smart_default` | **默认**,无 position 的列按 6 桶智能分桶 | `ui_view_config.list.column_order.strategy: smart_default` |
+
+#### 6.9.2 6 桶智能规则（smart_default）
+
+```text
+┌────────────────────────────────────────────────────┐
+│ 业务键 (business_key)  weight=10                   │
+│   ├─ businessKey: true                             │
+│   └─ field.semantics == 'business_key'             │
+├────────────────────────────────────────────────────┤
+│ 主标识 (primary)       weight=20                   │
+│   ├─ name / display_name                           │
+│   └─ field.semantics == 'display_name'             │
+├────────────────────────────────────────────────────┤
+│ 分类/状态 (status)     weight=30                   │
+│   ├─ status / state / type / category             │
+│   └─ field.semantics in ['status','state',...]    │
+├────────────────────────────────────────────────────┤
+│ 父级引用 (parent_ref)  weight=40                   │
+│   ├─ field.hierarchy.parent_id == field.id        │
+│   ├─ field.semantics == 'parent_key' / 'parent_id' │
+│   └─ 字段名 _id/_key + foreign_key == true         │
+├────────────────────────────────────────────────────┤
+│ 业务属性 (business)    weight=50                   │
+│   └─ 未识别字段默认                                │
+├────────────────────────────────────────────────────┤
+│ 系统字段 (system)      weight=90                   │
+│   └─ id/uuid/created_at/updated_at/created_by/...  │
+└────────────────────────────────────────────────────┘
+```
+
+**排序规则**:
+1. **有 `position` 的列**保持原位(按 position 升序,**零破坏**)
+2. **无 `position` 的列**按上述 6 桶顺序追加到尾部
+3. 同一桶内按 `field.hierarchy.level` 升序(根节点在前)
+4. 同 level 按字段名字母序
+
+#### 6.9.3 完整配置示例
+
+```yaml
+ui_view_config:
+  list:
+    # 显式声明列序策略(可选,默认 smart_default)
+    column_order:
+      strategy: smart_default       # yaml_position | manual | smart_default
+      # 手动覆盖: 强制指定某些字段进哪个桶(覆盖自动推断)
+      override:
+        business_keys: [customer_code, product_code]
+        primary_fields: [display_name, full_name]
+        status_fields: [workflow_state]
+        parent_ref_fields: [org_id]
+        system_fields: [tenant_id]
+
+    # 手动指定列顺序(仅 manual 策略)
+    manual_order: [code, name, status, created_at]
+
+    # 实际列定义
+    columns:
+      - key: code
+        position: 1                 # 显式定位
+        businessKey: true
+      - key: name
+        # 无 position,自动归入 primary 桶
+      - key: status
+        # 无 position,自动归入 status 桶
+      - key: created_at
+        position: 90                # 显式定位
+```
+
+#### 6.9.4 迁移指南
+
+| 旧 yaml | 新 yaml (v2.4.0) |
+|---------|-----------------|
+| 仅写 `columns[].position` | 保留 `position`,**自动兼容**(strategy=smart_default) |
+| 显式想全 yaml 排序 | 加 `column_order.strategy: yaml_position` |
+| 想让 name 显示在第 1 位 | 不要写 `position: 1`,让 smart_default 自动归入 primary 桶 |
+| 想自定义顺序 | 用 `column_order.strategy: manual` + `manual_order` |
+
+#### 6.9.5 实战案例：关系对象（relationship.yaml）
+
+```yaml
+ui_view_config:
+  list:
+    column_order:
+      strategy: smart_default
+    columns:
+      - key: code                # 业务键(p1,显式)
+      - key: relation_desc       # 描述(p2,显式)
+      - key: relation_type       # 关系类型(p3,显式)
+      - key: source_code         # 源端编码(p4)
+      - key: source_bo_name      # 源端业务对象名(p5)
+      - key: target_code         # 目标编码(p6)
+      - key: target_bo_name      # 目标业务对象名(p7)
+      - key: relation_direction  # 关系方向(p8)
+      - key: category_label      # 分类(p9)
+      - key: created_at          # 创建时间(p90,显式)
+      - key: updated_at          # 更新时间(p91,显式)
+```
+
+**输出列序** (smart_default 策略下):
+```
+code → relation_desc → relation_type → source_code → source_bo_name
+  → target_code → target_bo_name → relation_direction → category_label
+  → created_at → updated_at
+```
+
+#### 6.9.6 关键不变量（前端实现保证）
+
+| 特性 | 机制 |
+|------|------|
+| 零破坏 | `yamlPositionSort` 严格按 `position` 升序,兼容老 yaml |
+| 纯函数 | `sortColumnsByDefaultOrder` 不修改入参,返回新数组 |
+| 兜底防御 | `null` / `undefined` / 非数组输入 → 返回空数组 |
+| 父级引用桶排序 | 按 `hierarchy.level` 升序,根节点优先 |
+| override 优先级 | `override.X_fields` > 字段名推断 > `field.semantics` |
+
+#### 6.9.7 相关代码
+
+| 文件 | 职责 |
+|------|------|
+| `src/services/columnOrderService.js` | 列序策略核心(约 280 行) |
+| `src/services/metaTransformService.js` | `transformColumns` 末尾调用 `sortColumnsByDefaultOrder` |
+| `src/composables/useMetaList.js` | `_transformColumns` 透传 `fields + columnOrder` |
+| `src/services/__tests__/columnOrderService.spec.js` | Vitest 单测(边界/分类/排序/兼容性) |
+
 ---
 
 ## 七、规则体系（Rules）

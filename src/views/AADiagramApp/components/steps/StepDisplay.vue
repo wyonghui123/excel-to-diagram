@@ -1,29 +1,29 @@
 <template>
   <div class="step-display">
     <div class="display-panel">
-      <div class="panel-header-simple">
-        <AppButton type="secondary" @click="$emit('prev')"><AppIcon name="arrow-left" size="sm" /> 上一步</AppButton>
-        <div class="header-actions">
-          <AppButton 
-            v-if="feishuEnabled" 
-            type="secondary" 
+      <!-- 紧凑工具栏：保留飞书按钮和图表类型 badge -->
+      <div v-if="feishuEnabled || chartTypeText" class="toolbar-compact">
+        <div class="chart-type-badge" :class="chartType">
+          <AppIcon :name="chartTypeIcon" size="sm" class="badge-icon" />
+          <span class="badge-text">{{ chartTypeText }}</span>
+        </div>
+        <div class="toolbar-compact__actions">
+          <AppButton
+            v-if="feishuEnabled"
+            type="secondary"
+            size="sm"
             @click="showFeishuBot = true"
-            class="feishu-btn"
           >
-            <AppIcon name="lightning" size="sm" /> 飞书机器人
+            飞书机器人
           </AppButton>
-          <AppButton 
-            v-if="feishuEnabled" 
-            type="secondary" 
+          <AppButton
+            v-if="feishuEnabled"
+            type="secondary"
+            size="sm"
             @click="showFeishuImport = true"
-            class="feishu-btn"
           >
-            <AppIcon name="arrow-down" size="sm" /> 飞书导入
+            飞书导入
           </AppButton>
-          <div class="chart-type-badge" :class="chartType">
-            <AppIcon :name="chartTypeIcon" size="sm" class="badge-icon" />
-            <span class="badge-text">{{ chartTypeText }}</span>
-          </div>
         </div>
       </div>
       <div class="panel-body diagram-panel">
@@ -161,21 +161,28 @@ export default {
   flex-direction: column;
 }
 
-.panel-header-simple {
-  padding: var(--spacing-md) var(--spacing-lg);
-  border-bottom: 1px solid var(--color-border);
+/* 紧凑工具栏 */
+.toolbar-compact {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  align-items: center;
+  padding: 6px var(--spacing-lg);
+  background: var(--color-bg-primary);
+  border-bottom: 1px solid var(--color-border);
+  gap: var(--spacing-sm);
+
+  .chart-type-badge {
+    flex-shrink: 0;
+  }
+
+  &__actions {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+  }
 }
 
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-md);
-}
-
-.feishu-btn {
+.panel-body {
   background: linear-gradient(135deg, #3370ff 0%, #2c5de6 100%) !important;
   color: #fff !important;
   border: none !important;
@@ -237,8 +244,8 @@ export default {
 }
 
 @include respond-to('sm') {
-  .panel-header-simple {
-    padding: var(--spacing-sm) var(--spacing-md);
+  .toolbar-compact {
+    padding: 4px var(--spacing-md);
   }
 
   .panel-body {

@@ -17,6 +17,14 @@
     <span class="fk-link__text">{{ displayValue || value }}</span>
     <el-icon class="fk-link__icon" aria-hidden="true"><Promotion /></el-icon>
   </span>
+  <!--
+    [FIX 2026-06-10] 当 value 为空但 displayValue 仍有值（如 cascade 清空下游 ID
+    但残留显示文本、或后端 display_values 已就位但 formData[id] 缺失），
+    显示 displayValue 作为提示，避免漏显。
+  -->
+  <span v-else-if="displayValue" class="fk-link fk-link--disabled fk-link--readonly">
+    <span class="fk-link__text">{{ displayValue }}</span>
+  </span>
   <span v-else class="fk-empty">-</span>
 </template>
 

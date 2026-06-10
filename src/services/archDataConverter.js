@@ -212,14 +212,16 @@ export function convertToRelationNodeIds(relationTypeFilter) {
   for (const filter of relationTypeFilter) {
     if (typeof filter === 'string') {
       nodeIds.push(filter)
-    } else if (typeof filter === 'object' && filter.id) {
+    } else if (filter && typeof filter === 'object' && filter.id) {
       nodeIds.push(filter.id)
-    } else if (typeof filter === 'object' && filter.scopeType && filter.categoryType) {
+    } else if (filter && typeof filter === 'object' && filter.scopeType && filter.categoryType) {
       const id = filter.level
         ? `${filter.scopeType}-${filter.categoryType}-${filter.level}-${filter.name}`
         : `${filter.scopeType}-${filter.categoryType}`
       nodeIds.push(id)
     }
+    // 关键修复：filter 是 null/undefined 时跳过（之前会抛 TypeError: Cannot read properties of null (reading 'id')）
+    // typeof null === 'object'，会进入第一个 typeof === 'object' 分支并读 filter.id → 报错
   }
 
   return [...new Set(nodeIds)]

@@ -15,6 +15,10 @@
         <AppIcon name="export" size="sm" />
         <span style="font-size: 10px; margin-left: 2px;">彩</span>
       </button>
+      <button class="toolbar-btn" @click="exportAsPdf" title="导出 PDF（横版矢量图）">
+        <AppIcon name="export" size="sm" />
+        <span style="font-size: 10px; margin-left: 2px;">PDF</span>
+      </button>
     </div>
 
     <div class="mermaid-wrapper" ref="mermaidWrapper">
@@ -30,6 +34,9 @@
 <script>
 import { ref, onMounted, onBeforeUnmount, watch, nextTick, computed } from 'vue'
 import mermaid from 'mermaid'
+import { jsPDF } from 'jspdf'
+// eslint-disable-next-line no-unused-vars -- svg2pdf.js 注册 jsPDF 的 .svg() 方法
+import 'svg2pdf.js'
 import { AppIcon } from './common/AppIcon'
 import { useDiagramConfigStore } from '../stores/diagramConfigStore.js'
 
@@ -230,6 +237,18 @@ export default {
     const handleFullscreenChange = () => {
       const isFullscreen = !!document.fullscreenElement
       isMaximized.value = isFullscreen
+      // 关键修复 v21：fullscreen element 在 browser top layer，永远盖住 body 子元素
+      // tooltip 元素默认在 document.body 内，全屏时会被 fullscreen element 遮挡
+      // 解决：进入全屏时把 tooltip 移入 mermaidContainerEl（成为 fullscreen element 子元素，
+      // 一起在 top layer 内），退出全屏时移回 body
+      const tooltip = document.getElementById('mermaid-tooltip')
+      if (tooltip) {
+        if (isFullscreen && mermaidContainerEl.value && tooltip.parentElement !== mermaidContainerEl.value) {
+          mermaidContainerEl.value.appendChild(tooltip)
+        } else if (!isFullscreen && document.body && tooltip.parentElement !== document.body) {
+          document.body.appendChild(tooltip)
+        }
+      }
       // setTimeout(50) 给 Vue 一点时间完成 DOM 更新（isMaximized 切换 → CSS 应用）
       setTimeout(() => {
         if (mermaidContainerEl.value) {
@@ -1148,11 +1167,33 @@ ${mermaidCode}
     const exportAsHtmlFull = async () => {
       if (props.diagramData) {
         showToast('正在生成彩色版，请稍候...')
-        
+
         const positions = props.layoutPositions || []
         const zoneRowCount = props.zoneRowCount || 3
         const mermaidCode = generateMermaidCode(props.diagramData, props.layoutEngine, props.layoutType, positions, zoneRowCount, props.preserveModelOrder, effectiveLayoutControlConfig.value)
         const chartTypeLabel = props.diagramType === 'serviceModule' ? '服务模块图' : '业务对象图'
+
+        // 关键修复 v26：根据当前 diagramData 计算 legend 数据（与 app 内一致）
+        const annotationConfigFull = props.diagramData?.annotationConfig || {}
+        const centerScopeHighlightFull = annotationConfigFull.centerScopeHighlight !== false
+        const colorLegendDataFull = (props.diagramType === 'serviceModule' || props.diagramType === 'businessObject')
+          ? svgProcessor.buildColorLegendData(props.diagramData, nodeColorMappings, centerScopeHighlightFull)
+          : []
+        const legendItemsHtmlFull = colorLegendDataFull.map((item, idx) => {
+          const sep = (item.isCenter && idx < colorLegendDataFull.length - 1)
+            ? '<div class="legend-sep"></div>'
+            : ''
+          return `<div class="legend-item" title="${item.name || ''}">
+            <span class="legend-dot" style="background:${item.color || '#e0e0e0'}"></span>
+            <span class="legend-name">${item.name || ''}</span>
+          </div>${sep}`
+        }).join('')
+        const legendHtmlFull = colorLegendDataFull.length > 0
+          ? `<div class="color-legend-panel" data-annotation-layer="legend">
+              <div class="color-legend-title">图例</div>
+              <div class="color-legend-list">${legendItemsHtmlFull}</div>
+            </div>`
+          : ''
         
         const isServiceModule = props.diagramType === 'serviceModule'
         const overallDirection = effectiveLayoutControlConfig.value?.overallDirection || 'LR'
@@ -1270,12 +1311,63 @@ ${mermaidCode}
     pre.mermaid svg:active {
       cursor: grabbing;
     }
+    /* 关键修复 v26：导出 HTML 内嵌的 legend 样式（与 app 内一致） */
+    .color-legend-panel {
+      position: fixed;
+      top: 60px;
+      left: 20px;
+      background: rgba(255, 255, 255, 0.95);
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 12px;
+      font-family: Arial, sans-serif;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      max-width: 200px;
+      z-index: 100;
+    }
+    .color-legend-title {
+      font-weight: bold;
+      margin-bottom: 6px;
+      border-bottom: 1px solid #eee;
+      padding-bottom: 4px;
+    }
+    .color-legend-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .legend-dot {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border-radius: 2px;
+      flex-shrink: 0;
+      border: 1px solid rgba(0,0,0,0.15);
+    }
+    .legend-name {
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .legend-sep {
+      height: 1px;
+      background: #eee;
+      margin: 4px 0;
+    }
   <\/style>
 <\/head>
 <body>
   <div class="notice">
     [WARNING] 此文件需要从 CDN 加载资源，请保持网络连接。图表将在资源加载完成后自动渲染。
   <\/div>
+  ${legendHtmlFull}
   <pre class="mermaid">
 ${mermaidCode}
   <\/pre>
@@ -1372,6 +1464,11 @@ ${mermaidCode}
     initPromise.then(() => {
       mermaid.initialize(${JSON.stringify(config)});
       mermaid.run({ querySelector: '.mermaid' }).then(() => {
+        // 关键修复 v26：渲染成功后自动移除顶部 WARNING 提示
+        // 之前渲染完成后没移除 .notice，导致 WARNING 一直显示
+        const noticeEl = document.querySelector('.notice');
+        if (noticeEl) noticeEl.remove();
+
         // 渲染完成后滚动到SVG位置
         setTimeout(scrollToSvg, 100);
         
@@ -1502,6 +1599,148 @@ ${mermaidCode}
       }
     }
 
+    // 导出为 PDF（横版矢量图，含 legend）
+    // 关键修复 v26：使用 svg2pdf.js + jsPDF 转换当前 mermaid SVG 为矢量 PDF
+    const exportAsPdf = async () => {
+      const svgEl = mermaidContainer.value?.querySelector('svg')
+      if (!svgEl) {
+        showToast('暂无图表可导出')
+        return
+      }
+
+      // hex 颜色 → rgb（PDF setFillColor 需要 0-255 整数）
+      const hexToRgb = (hex) => {
+        if (!hex) return { r: 224, g: 224, b: 224 }
+        // 处理 #ffffff / #fff / rgb(r,g,b) / 命名色
+        let h = String(hex).trim()
+        if (h.startsWith('rgb')) {
+          const m = h.match(/(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/)
+          if (m) return { r: +m[1], g: +m[2], b: +m[3] }
+        }
+        if (h[0] !== '#') h = '#' + h
+        if (h.length === 4) {
+          h = '#' + h[1] + h[1] + h[2] + h[2] + h[3] + h[3]
+        }
+        if (h.length !== 7) return { r: 224, g: 224, b: 224 }
+        return {
+          r: parseInt(h.substring(1, 3), 16),
+          g: parseInt(h.substring(3, 5), 16),
+          b: parseInt(h.substring(5, 7), 16)
+        }
+      }
+
+      showToast('正在生成 PDF，请稍候...')
+
+      try {
+        // 1. 计算 SVG 实际像素尺寸（含 viewBox 内所有内容）
+        const viewBox = svgEl.getAttribute('viewBox')
+        let svgWidth = svgEl.clientWidth || svgEl.getBoundingClientRect().width
+        let svgHeight = svgEl.clientHeight || svgEl.getBoundingClientRect().height
+        if (viewBox) {
+          const parts = viewBox.split(/\s+/).map(parseFloat)
+          if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
+            svgWidth = parts[2]
+            svgHeight = parts[3]
+          }
+        }
+
+        // 2. 准备 legend 数据（如果应用内有 legend panel，也嵌入到 PDF 顶部）
+        const annotationConfigPdf = props.diagramData?.annotationConfig || {}
+        const centerScopeHighlightPdf = annotationConfigPdf.centerScopeHighlight !== false
+        const colorLegendDataPdf = (props.diagramType === 'serviceModule' || props.diagramType === 'businessObject')
+          ? svgProcessor.buildColorLegendData(props.diagramData, nodeColorMappings, centerScopeHighlightPdf)
+          : []
+
+        // 3. A4 横版：297mm × 210mm，使用 mm 单位（jsPDF 默认）
+        //    单位用 pt 更精细：1 mm = 2.83465 pt
+        const pageWidthPt = 297 * 2.83465   // ~841.89
+        const pageHeightPt = 210 * 2.83465  // ~595.28
+        const marginPt = 10 * 2.83465        // 10mm 边距
+
+        const pdf = new jsPDF({
+          orientation: 'landscape',
+          unit: 'pt',
+          format: [pageWidthPt, pageHeightPt]
+        })
+
+        // 4. 顶部留出 legend 空间
+        // 关键修复 v26：把 legend 真正画在 PDF 顶部（颜色方块 + 名称）
+        let legendBlockHeight = 0
+        if (colorLegendDataPdf.length > 0) {
+          // 每行 6 个 legend 项，每项宽度 ~110pt
+          const legendLineHeight = 14
+          const itemWidth = 110
+          const itemsPerLine = Math.floor((pageWidthPt - marginPt * 2) / itemWidth)
+          const lineCount = Math.ceil(colorLegendDataPdf.length / itemsPerLine)
+          legendBlockHeight = lineCount * legendLineHeight + 18  // 含标题
+
+          // 标题
+          pdf.setFontSize(10)
+          pdf.setTextColor(0, 0, 0)
+          pdf.text('图例', marginPt, marginPt + 10)
+
+          // 颜色方块 + 名称
+          colorLegendDataPdf.forEach((item, idx) => {
+            const col = idx % itemsPerLine
+            const row = Math.floor(idx / itemsPerLine)
+            const x = marginPt + col * itemWidth
+            const y = marginPt + 18 + row * legendLineHeight
+
+            // 解析颜色为 RGB（处理 #ffffff 或 rgb 形式）
+            const rgb = hexToRgb(item.color || '#e0e0e0')
+            pdf.setFillColor(rgb.r, rgb.g, rgb.b)
+            pdf.setDrawColor(180, 180, 180)
+            // 10×10 pt 颜色方块
+            pdf.rect(x, y, 10, 10, 'FD')
+
+            // 名称
+            pdf.setFontSize(8)
+            pdf.setTextColor(40, 40, 40)
+            const name = (item.name || '').substring(0, 14)  // 截断过长名称
+            pdf.text(name, x + 14, y + 8)
+          })
+        }
+
+        // 5. 图表放置区域（legend 下方）
+        const legendTopMargin = legendBlockHeight + 6
+        const drawAreaX = marginPt
+        const drawAreaY = marginPt + legendTopMargin
+        const drawAreaW = pageWidthPt - marginPt * 2
+        const drawAreaH = pageHeightPt - marginPt * 2 - legendTopMargin
+
+        // 6. 等比缩放 SVG 到 drawArea
+        const aspectSvg = svgWidth / svgHeight
+        const aspectArea = drawAreaW / drawAreaH
+        let renderW, renderH
+        if (aspectSvg > aspectArea) {
+          // svg 更宽，以宽度为准
+          renderW = drawAreaW
+          renderH = drawAreaW / aspectSvg
+        } else {
+          // svg 更高，以高度为准
+          renderH = drawAreaH
+          renderW = drawAreaH * aspectSvg
+        }
+        const renderX = drawAreaX + (drawAreaW - renderW) / 2
+        const renderY = drawAreaY + (drawAreaH - renderH) / 2
+
+        // 7. 转换 SVG → PDF（svg2pdf 异步）
+        await pdf.svg(svgEl, {
+          x: renderX,
+          y: renderY,
+          width: renderW,
+          height: renderH
+        })
+
+        // 8. 保存
+        pdf.save(`diagram-${Date.now()}.pdf`)
+        showToast('PDF 已生成')
+      } catch (err) {
+        console.error('[MermaidComponent] PDF 导出失败:', err)
+        showToast('PDF 导出失败: ' + (err?.message || String(err)))
+      }
+    }
+
     // 复制到剪贴板
     const copyToClipboard = async () => {
       if (props.diagramData) {
@@ -1557,6 +1796,7 @@ ${mermaidCode}
       exportAsNative,
       exportAsHtmlSimple,
       exportAsHtmlFull,
+      exportAsPdf,
       copyToClipboard
     }
   }

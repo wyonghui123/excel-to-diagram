@@ -202,6 +202,7 @@ test.describe('S-MERMAID-DRAG: Mermaid 图表交互', () => {
 
     // ============ C02: 拖动平移 ============
     let c02Pass = false
+    let c02KnownIssue = false
     await withStep(page, testInfo, 'C02: 拖动平移测试', async () => {
       const initialTransform = await page.evaluate(() => {
         const content = document.querySelector('.mermaid-content')

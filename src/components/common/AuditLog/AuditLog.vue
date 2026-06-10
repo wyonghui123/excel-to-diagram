@@ -88,7 +88,7 @@
                 {{ formatAction(group.primaryAction) }}
               </span>
               <span class="al-group-count" v-if="group.items.length > 1 || group._children.length > 0">
-                {{ group.items.length }} 项变更<span v-if="group._children.length > 0"> · {{ group._children.length }} 个关联对象</span>
+                {{ group.items.length }} 项变更<span v-if="group._children.length > 0"> · {{ group._children.length }} 个新建子对象</span>
               </span>
             </div>
             <div class="al-group-toggle">
@@ -344,6 +344,13 @@ const groupedLogs = computed(() => {
     if (item._parent_type) {
       group._children.push(item)
     } else if (item._source === 'cascade_child' || item._source === 'child_object') {
+      group._children.push(item)
+    } else if (
+      // [FIX 2026-06-10] DISSOCIATE 级联删除（parent_object_type 存在）与主操作同 trace，
+      // 应归为"子对象"而非主操作条目，避免"X 项变更"计数含 DISSOCIATE
+      (item.action === 'DISSOCIATE' || item.action === 'REVOKE') &&
+      item.parent_object_type
+    ) {
       group._children.push(item)
     } else if (
       group.items.length > 0 &&

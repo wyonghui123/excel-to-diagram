@@ -175,27 +175,15 @@ router.beforeEach(async (to, from, next) => {
         meta: { ...to.meta, sourceTabId }
       })
     } else {
-      const fromTab = tabStore.tabs.find(t => t.id === from.path)
-      if (fromTab) {
-        tabStore.closeTab(from.path)
-        tabStore.openTab({
-          id: to.path,
-          label: tabLabel,
-          path: to.fullPath,
-          dynamicLabel: isDynamicLabel,
-          meta: { ...to.meta }
-        })
-        tabStore.switchTab(to.path)
-      } else {
-        const sourceTabId = tabStore.activeTabId
-        tabStore.openTab({
-          id: to.path,
-          label: tabLabel,
-          path: to.fullPath,
-          dynamicLabel: isDynamicLabel,
-          meta: { ...to.meta, sourceTabId }
-        })
-      }
+      // [FIX] 非详情页也打开新 tab (保留源 tab),不再 close+replace 做 inplace 导航
+      const sourceTabId = tabStore.activeTabId || from.path
+      tabStore.openTab({
+        id: to.path,
+        label: tabLabel,
+        path: to.fullPath,
+        dynamicLabel: isDynamicLabel,
+        meta: { ...to.meta, sourceTabId }
+      })
     }
   }
 

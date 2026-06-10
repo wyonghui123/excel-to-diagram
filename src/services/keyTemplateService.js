@@ -74,12 +74,26 @@ export function hasInvalidParentId(parentParams) {
  * 应用建议的 code 到新建行 + draftValues
  * 注意：直接修改 newRow 的 code / _initialValues 字段
  *
+ * [FIX 2026-06-10] 异步竞态保护：
+ *   _suggestKeyTemplateCode 是 fire-and-forget 异步调用，user 可能在
+ *   自动建议返回之前已经在 code 字段输入了值。无条件覆盖会丢掉用户输入，
+ *   而且更糟的是: 覆盖后 fields.code === initialValues.code，
+ *   saveDraftValues 走到 hasDraftChanges=false 分支会把新建行从 data 中
+ *   静默删除，造成"保存不生效"假象。
+ *   修复: 仅在用户尚未触达 code 字段时才应用建议（code 键不在 rowDrafts 中）。
+ *
  * @param {Object} newRow - 新建行（直接修改）
  * @param {string} codeValue - 建议的 code
  * @param {Map} draftValues - 草稿 Map（用于同步 rowDrafts.code）
- * @returns {{shouldUpdateDraft: boolean}} 是否需要触发响应式更新
+ * @returns {{shouldUpdateDraft: boolean, skipped?: string}} 是否需要触发响应式更新
  */
 export function applyKeyTemplateSuggestion(newRow, codeValue, draftValues) {
+  // Step 0: 用户已经触达 code 字段（含清空），保留用户输入，不应用建议
+  const rowDrafts = draftValues.get(newRow.id)
+  if (rowDrafts && Object.prototype.hasOwnProperty.call(rowDrafts, 'code')) {
+    return { shouldUpdateDraft: false, skipped: 'user_edited' }
+  }
+
   // Step 1: 设置 newRow.code
   newRow.code = codeValue
 
@@ -87,7 +101,6 @@ export function applyKeyTemplateSuggestion(newRow, codeValue, draftValues) {
   newRow._initialValues = { ...(newRow._initialValues || {}), code: codeValue }
 
   // Step 3: 同步到 draftValues
-  const rowDrafts = draftValues.get(newRow.id)
   if (rowDrafts) {
     rowDrafts.code = codeValue
     return { shouldUpdateDraft: true }

@@ -244,6 +244,17 @@ function getEnumColor(key, value) {
 }
 
 function formatReadValue(key) {
+  // [FIX 2026-06-10] browse 模式下优先用 display_values / <key>_display / <key>_name
+  // 让 virtual FK 字段（如 domain_name / sub_domain_name / service_module_name）即使
+  // formData[key] 在某些边界场景下为空，也能正确显示后端注入的 display 值。
+  const dv = props.formData?.display_values?.[key]
+  if (dv != null && dv !== '') return dv
+  const displayKey = props.formData[`${key}_display`]
+    ? `${key}_display`
+    : `${key.replace(/_id$/, '')}_name`
+  const displayValue = props.formData[displayKey]
+  if (displayValue != null && displayValue !== '') return displayValue
+
   const value = props.formData[key]
   if (value == null || value === '') return '-'
 

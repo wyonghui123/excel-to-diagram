@@ -248,13 +248,34 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
   //  tabFilters: scopeIds 变更时一次性计算所有 objectType 的 per-type 过滤 delta
   //  combinedFilters: 合并 base + global + precomputed per-type delta
   // ============================================================
+  // [FIX v3.18] 强制重算计数器 + 显式 watch relationExtra 的每个属性：
+  //   Vue 3 的 watch 对 reactive object 的 deep 模式有时不触发（特别是在 cross-module reactive proxy
+  //   传递场景下，buildAssociationFilterParams 内部读取的属性未被 computed 追踪到）。
+  //   显式 watch 每个属性确保 watch 必触发；computed 显式读取 + Object.assign snapshot
+  //   确保重新计算时拿到最新值。
+  const tabFiltersVersion = ref(0)
   const tabFilters = computed(() => {
+    // 显式读取计数 → 让 computed 依赖此 ref
+    void tabFiltersVersion.value
     const result = {}
     objectTypes.forEach(type => {
       result[type] = _computeTypeFilters(type)
     })
     return result
   })
+
+  // 显式 watch relationExtra 的每个属性（避免 deep watch 不触发的问题）
+  watch(
+    [
+      () => scopeIds.relationExtra.relationIds,
+      () => scopeIds.relationExtra.relationCodes,
+      () => scopeIds.relationExtra.categoryTypes,
+      () => scopeIds.relationExtra.filterRelationCodes
+    ],
+    () => {
+      tabFiltersVersion.value++
+    }
+  )
 
   function _computeTypeFilters(objectType) {
     const filters = {}
@@ -302,7 +323,8 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
       }
     }
 
-    return { ...filters, ...typeDelta }
+    const final = { ...filters, ...typeDelta }
+    return final
   })
 
   /**
@@ -351,12 +373,26 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
    *   - entity_scope:      从 source/target entity 的 scopeIds 派生
    *
    * 当 hierarchyTypes 未提供 filter_mappings 时，回退到 _buildRelationshipFilters 逻辑
+   *
+   * [FIX v3.18] 显式读取 relationExtra 嵌套属性：
+   *   当 buildAssociationFilterParams 是非 reactive 纯函数（hierarchyService.js 模块）时，
+   *   跨模块边界的 reactive proxy 深度追踪会丢失（Vue 3 已知行为）。
+   *   显式在 computed 上下文中读取属性，让 Vue 把这些属性加入 computed 依赖集合，
+   *   watch + computed 才能正确响应 Object.assign(scopeIds.relationExtra, {...}) 的变更。
    */
   function _buildAssociationFilters(filters) {
+    // 显式读取（触发 Vue 3 响应式追踪）
+    const re = scopeIds.relationExtra
+    const relationExtraSnapshot = {
+      relationIds: re.relationIds,
+      relationCodes: re.relationCodes,
+      categoryTypes: re.categoryTypes,
+      filterRelationCodes: re.filterRelationCodes
+    }
     const result = hierarchyService.buildAssociationFilterParams({
       levels: levels.value,
       scopeIds,
-      relationExtra: scopeIds.relationExtra
+      relationExtra: relationExtraSnapshot
     })
     return { ...filters, ...result }
   }
@@ -407,16 +443,18 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
     // relationCodes 为 null/undefined/空数组 → 设置为 [] → watch 触发
     const newRelationCodes = scope.relationCodes == null || scope.relationCodes.length === 0 ? [] : scope.relationCodes
     /**
-     * [WARNING] 必须替换 relationExtra 对象引用（而非 mutate 嵌套属性）以触发 Vue 响应式
-     * 错误写法：scopeIds.relationExtra.relationCodes = [...]  // 不触发响应式！
+     * [WARNING] 必须 mutate relationExtra 嵌套属性（而非替换整个对象引用）以触发 Vue 响应式
+     * 错误写法：scopeIds.relationExtra = { ... }  // 替换引用会导致下游 computed (tabFilters)
+     *                                              // 缓存旧值，因为下游的 buildAssociationFilterParams
+     *                                              // 接收的 relationExtra 是旧对象引用，读取的是旧 relationIds。
+     * 正确写法：Object.assign 触发深响应式
      */
-    scopeIds.relationExtra = {
-      ...scopeIds.relationExtra,
+    Object.assign(scopeIds.relationExtra, {
       relationCodes: newRelationCodes,
       relationIds: scope.relationIds || [],
       categoryTypes: scope.categoryTypes || [],
       filterRelationCodes: scope.filterRelationCodes || []
-    }
+    })
 
     scopeSource.setBusinessObjectIds(scope.boIds || [])
     scopeSource.setRelationCodes(scope.relationCodes || [])
@@ -516,16 +554,22 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
     })
 
     const extra = scopeIds.relationExtra
-    let relationCodes = [...(extra.relationCodes || [])]
-    if (extra.filterRelationCodes?.length > 0) {
-      if (relationCodes.length > 0) {
-        relationCodes = relationCodes.filter(r => extra.filterRelationCodes.includes(r))
-      } else {
-        relationCodes = [...extra.filterRelationCodes]
+    // [FIX] 优先使用 relationIds（精确 ID 过滤）：当 relationIds 已设置时，跳过 relation_codes
+    // 避免后端 AND 语义（id__in AND relation_code__in）把 relation_code 为空的跨域记录（id=29）错误排除。
+    // relationIds 已是精确的 ID 列表（包含 INTERNAL + CROSS_BOUNDARY），无需再用 code 二次过滤。
+    const hasRelationIds = (extra.relationIds?.length || 0) > 0
+    if (!hasRelationIds) {
+      let relationCodes = [...(extra.relationCodes || [])]
+      if (extra.filterRelationCodes?.length > 0) {
+        if (relationCodes.length > 0) {
+          relationCodes = relationCodes.filter(r => extra.filterRelationCodes.includes(r))
+        } else {
+          relationCodes = [...extra.filterRelationCodes]
+        }
       }
-    }
-    if (relationCodes.length > 0) {
-      f.relation_codes = relationCodes
+      if (relationCodes.length > 0) {
+        f.relation_codes = relationCodes
+      }
     }
     if (extra.categoryTypes?.length > 0) {
       f.category_types = [...extra.categoryTypes]
@@ -741,6 +785,11 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
 
   function handleExportSuccess() {
     exportDialogVisible.value = false
+  }
+
+  // [E2E] dev 环境暴露给 e2e 测试
+  if (typeof window !== 'undefined' && import.meta.env?.DEV) {
+    window.__archPage = { objectTypes, activeTab, tabs, versionContext, filterFlow, contextSource, scopeSource, scopeIds, hasScopeSelection, combinedFilters, tabFilters, scopeFilterKeys, handleScopeChange, clearScope, handleToolbarChange }
   }
 
   return {

@@ -271,7 +271,7 @@ export function useFieldPolicy(metaConfig, columns) {
   
   /**
    * 判断单个字段是否可编辑
-   * 
+   *
    * 判断优先级：
    * 1. 系统字段 → 不可编辑
    * 2. readonly_always 语义 → 始终不可编辑
@@ -280,7 +280,11 @@ export function useFieldPolicy(metaConfig, columns) {
    * 5. ui.editable 显式配置 → 使用配置值
    * 6. mutability 逻辑 → 根据对象类型评估
    * 7. 默认值 → 可编辑
-   * 
+   *
+   * [FIX 2026-06-10] API 加载的策略默认是 read context，会将
+   * immutable / business_key 字段判为 editable=false。新增行（__new_/__isNew）
+   * 必须用本地语义重新评估，否则像 enum_value.code 这种业务主键将无法录入。
+   *
    * @param {string} fieldId - 字段标识
    * @param {Object} row - 行数据（用于判断是否新行）
    * @param {string} mutability - 对象 mutability (locked/fully_editable/extensible)
@@ -291,11 +295,28 @@ export function useFieldPolicy(metaConfig, columns) {
     if (fieldPolicies.value) {
       const policy = fieldPolicies.value[fieldId]
       if (policy !== undefined) {
+        // 新增行：API 加载通常是 read context，对 create 场景不准确，
+        // 必须用本地 readonly_always / system 兜底，避免 business_key /
+        // immutable 字段在新建时被锁死。
+        // 注意：editableMap / readonlyAlwaysMap 都会被 API 结果污染（顶部 fast-path），
+        // 这里只查本地 metaConfig.fields 的 ui.editable / readonly_always / system。
+        if (isNewRowCheck(row)) {
+          if (isSystemField(fieldId)) return false
+          if (metaConfig.value?.fields) {
+            const localField = metaConfig.value.fields.find(
+              f => (f.id || f.key) === fieldId
+            )
+            if (localField?.semantics?.readonly_always === true) return false
+            if (localField?.ui?.editable === false) return false
+            if (localField?.editable === false) return false
+          }
+          return true
+        }
         return policy.editable === true
       }
       // API 结果中无此字段，fallback 到当前判断链
     }
-    
+
     if (isSystemField(fieldId)) {
       return false
     }

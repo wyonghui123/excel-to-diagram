@@ -62,6 +62,17 @@ export function useCascadeSelect(metaObject) {
       if (formData && formData[fid] !== undefined) {
         formData[fid] = null
       }
+      // [FIX 2026-06-10] 同时清掉 _display 和 <fid>_name 缓存，避免父级 FK 改变后
+      // 下游 FK 的显示文本（ValueHelpField 缓存的 display 字符串）残留，
+      // 让用户看到「68」这种 ID 而不是空。
+      const displayKey = `${fid}_display`
+      if (formData && formData[displayKey] !== undefined) {
+        formData[displayKey] = null
+      }
+      const nameKey = fid.replace(/_id$/, '') + '_name'
+      if (formData && formData[nameKey] !== undefined) {
+        formData[nameKey] = null
+      }
     })
   }
 

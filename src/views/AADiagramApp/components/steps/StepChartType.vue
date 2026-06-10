@@ -1,12 +1,6 @@
 <template>
   <div class="step-chart-type">
     <div class="chart-type-panel">
-      <div class="panel-header-simple">
-        <AppButton type="secondary" @click="$emit('prev')"><AppIcon name="arrow-left" size="sm" /> 上一步</AppButton>
-        <AppButton type="primary" :disabled="!modelValue" @click="$emit('next')">
-          下一步 <AppIcon name="arrow-right" size="sm" />
-        </AppButton>
-      </div>
       <div class="panel-body">
         <h2 class="section-title">选择图表类型</h2>
         <p class="section-desc">请选择要生成的图表类型</p>

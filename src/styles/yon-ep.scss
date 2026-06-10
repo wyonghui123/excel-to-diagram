@@ -265,6 +265,102 @@ html :root {
 }
 
 // ============================================
+// 8.5. [FIX 2026-06-10] ElMessageBox 弹窗定位 + 遮罩修复
+// ============================================
+// 现象: 批量移除 / 删除等 ElMessageBox.confirm 弹窗出现在页面
+//       顶部 (x:0, y:0), 全宽 (1440px), 透明背景且无遮罩。
+// 原因: Element Plus 2.14.0 在 unplugin-vue-components 自动导入 + 主题
+//       覆盖下, .el-overlay-dialog / .el-message-box__wrapper 的居中
+//       flexbox 样式未生效, 直接导致 .el-message-box 落入 .el-overlay-message-box
+//       的 normal flow (position: static), 出现于 body 左上角。
+// 解决: 把 .el-overlay-message-box 本身做成全屏居中遮罩,
+//       .el-message-box 加白底, 确保视觉上居中、有遮罩、有白底。
+.el-overlay-message-box {
+  position: fixed !important;
+  inset: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: rgba(0, 0, 0, 0.5) !important;
+  z-index: var(--z-index-max) !important;
+}
+
+.el-message-box {
+  position: relative !important;
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  border-radius: 8px !important;
+  max-width: 420px !important;
+  width: auto !important;
+  margin: 0 !important;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18) !important;
+  overflow: hidden !important;
+}
+
+// [FIX] ElMessageBox 内部布局 — EP 2.14.0 组件 CSS 未加载导致子元素全部 display:block
+// Header: 标题左 + 关闭按钮右
+.el-message-box__header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  padding: 16px 20px 0 !important;
+  position: relative !important;
+}
+.el-message-box__title {
+  font-size: 18px !important;
+  line-height: 1 !important;
+  color: #303133 !important;
+  font-weight: 600 !important;
+}
+.el-message-box__headerbtn {
+  position: absolute !important;
+  top: 14px !important;
+  right: 16px !important;
+  width: 24px !important;
+  height: 24px !important;
+  border: none !important;
+  background: transparent !important;
+  cursor: pointer !important;
+  color: #909399 !important;
+  &:hover { color: #303133 !important; }
+}
+
+// Content: 图标左 + 文字右
+.el-message-box__content {
+  padding: 20px 20px 10px !important;
+  color: #606266 !important;
+  font-size: 14px !important;
+}
+.el-message-box__container {
+  display: flex !important;
+  align-items: flex-start !important;
+}
+.el-message-box__status {
+  margin-right: 10px !important;
+  font-size: 24px !important;
+  width: 24px !important;
+  height: 24px !important;
+  flex-shrink: 0 !important;
+  &.el-message-box-icon--warning { color: #e6a23c !important; }
+  &.el-message-box-icon--success { color: #67c23a !important; }
+  &.el-message-box-icon--error { color: #f56c6c !important; }
+  &.el-message-box-icon--info { color: #909399 !important; }
+}
+.el-message-box__message {
+  flex: 1 !important;
+  line-height: 1.5 !important;
+  p { margin: 0 !important; }
+}
+
+// Buttons: 右对齐
+.el-message-box__btns {
+  display: flex !important;
+  justify-content: flex-end !important;
+  padding: 10px 20px 20px !important;
+  gap: 10px !important;
+}
+
+// ============================================
 // 9. 抽屉圆润
 // ============================================
 .el-drawer {

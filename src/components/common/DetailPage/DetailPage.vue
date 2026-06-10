@@ -289,6 +289,11 @@ const drawerTitle = computed(() => {
 })
 
 const dataSubtitle = computed(() => {
+  // 🆕 v1.1 owner refactor (FR-006): 显示 effective_owner_id_display
+  const owner = data.value?.effective_owner_id_display
+  if (owner) {
+    return `负责人: ${owner}`
+  }
   return ''
 })
 
@@ -333,6 +338,8 @@ const computedFieldDefs = computed(() => {
     if (f.ui?.visible === false) continue
     if (f.hidden_in_detail && !isAddMode) continue
     if (f.hidden_in_form && isAddMode) continue
+    // [FIX v1.0.9 2026-06-10] owner 类不可编辑字段在 edit 模式也隐藏
+    if (!isAddMode && f.hidden_in_form && f.ui?.editable === false) continue
     
     const semantics = f.semantics || {}
     // parent_key（自引用外键）允许用户修改（可重新指定父组），不应被视作 immutable。
@@ -475,6 +482,8 @@ const computedSections = computed(() => {
     if (f.visible === false || f.ui?.visible === false) return false
     if (f.hidden_in_detail && !isAddMode) return false
     if (f.hidden_in_form && isAddMode) return false
+    // [FIX v1.0.9 2026-06-10] owner 类不可编辑字段在 edit 模式也隐藏
+    if (!isAddMode && f.hidden_in_form && f.ui?.editable === false) return false
     if (isAddMode) {
       const semantics = f.semantics || {}
       const isSystem = semantics.system_field === true || f.system_field === true

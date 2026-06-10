@@ -105,6 +105,37 @@ describe('keyTemplateService', () => {
       expect(newRow.code).toBe('NEW_CODE')
       expect(result.shouldUpdateDraft).toBe(false)
     })
+
+    // [FIX 2026-06-10] 异步竞态保护：用户已输入则不覆盖
+    it('TC-12a: 用户已输入非空 code 时不覆盖，保留用户值', () => {
+      const newRow = { id: 1 }
+      const drafts = new Map([[1, { name: 'x', code: 'USER_CODE' }]])
+      const result = applyKeyTemplateSuggestion(newRow, 'AUTO_CODE', drafts)
+      expect(newRow.code).toBeUndefined()
+      expect(newRow._initialValues).toBeUndefined()
+      expect(drafts.get(1).code).toBe('USER_CODE')  // 保留用户值
+      expect(result.shouldUpdateDraft).toBe(false)
+      expect(result.skipped).toBe('user_edited')
+    })
+
+    it('TC-12b: 用户清空 code (空字符串) 时也不覆盖，保留用户清空意图', () => {
+      const newRow = { id: 1 }
+      const drafts = new Map([[1, { code: '' }]])
+      const result = applyKeyTemplateSuggestion(newRow, 'AUTO_CODE', drafts)
+      expect(newRow.code).toBeUndefined()
+      expect(drafts.get(1).code).toBe('')  // 保留用户清空
+      expect(result.shouldUpdateDraft).toBe(false)
+      expect(result.skipped).toBe('user_edited')
+    })
+
+    it('TC-12c: 用户未触达 code 字段 (code 键不在 drafts) 时正常应用建议', () => {
+      const newRow = { id: 1 }
+      const drafts = new Map([[1, { name: 'x' }]])  // 没有 code 键
+      const result = applyKeyTemplateSuggestion(newRow, 'AUTO_CODE', drafts)
+      expect(newRow.code).toBe('AUTO_CODE')
+      expect(drafts.get(1).code).toBe('AUTO_CODE')
+      expect(result.shouldUpdateDraft).toBe(true)
+    })
   })
 
   describe('suggestKeyTemplateCode (主入口)', () => {

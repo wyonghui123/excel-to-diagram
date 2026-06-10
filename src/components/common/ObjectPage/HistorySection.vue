@@ -45,11 +45,18 @@ const props = defineProps({
   }
 })
 
+// 判断是否有有效的 objectId：
+// 1. 排除 null / 空字符串 / 'new'（新建模式无历史）
+// 2. 不再限制必须为数字 — 元数据驱动对象（enum_type / enum_value /
+//    business_object / sub_domain / service_module 等）使用字符串主键（如
+//    'annotation_category'），后端 auditLogService.getLogsByObject 会校验
+//    objectId 是否存在并返回 404，因此前端只需保证非空即可
 const hasRealObjectId = computed(() => {
   const id = props.objectId
-  if (id == null || id === '' || id === 'new') return false
-  const numId = Number(id)
-  return !isNaN(numId) && numId > 0
+  if (id == null) return false
+  const strId = String(id).trim()
+  if (strId === '' || strId === 'new') return false
+  return true
 })
 
 const {

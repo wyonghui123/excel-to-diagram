@@ -404,16 +404,14 @@ export function useBusinessObjectSyntax() {
 
     const overallDirection = effectiveLayoutControlConfig?.overallDirection || 'LR'
 
-    // ELK布局使用与配置一致的方向，不再反转
-    // ELK的elk.direction配置会控制实际布局方向
+    // ELK布局使用与配置一致的方向，不再反�?    // ELK的elk.direction配置会控制实际布局方向
     let actualDirection = overallDirection
 
     let graphKeyword
     let elkInitDirective = ''
     if (layoutEngine === 'elk') {
       graphKeyword = `flowchart-elk ${actualDirection}`
-      // ELK配置通过mermaid.initialize传递，不需要在代码中重复配置
-      elkInitDirective = ''
+      // ELK配置通过mermaid.initialize传递，不需要在代码中重复配�?      elkInitDirective = ''
     } else {
       graphKeyword = `flowchart ${actualDirection}`
     }
@@ -426,7 +424,7 @@ export function useBusinessObjectSyntax() {
 
     const objectToModuleMap = new Map()
     
-    // 首先从顶层 businessObjects 数组获取服务模块信息
+    // 首先从顶�?businessObjects 数组获取服务模块信息
     const boServiceModuleMap = new Map()
     if (data.businessObjects) {
       data.businessObjects.forEach(bo => {
@@ -620,7 +618,7 @@ export function useBusinessObjectSyntax() {
 
     const nodeColorMap = new Map()
     const centerScopeBoCodes = data.centerScope || []
-    const centerScopeHighlight = data.centerScopeHighlight !== false  // 默认为 true
+    const centerScopeHighlight = data.centerScopeHighlight !== false  // 默认�?true
     const centerScopeColor = data.centerScopeColor || '#EDEDED'
     const centerColorMap = {
       'gray': '#808080',
@@ -641,11 +639,10 @@ export function useBusinessObjectSyntax() {
         groupKey = group.info.domain
       }
       const groupColor = colorMap.get(groupKey)
-      // 如果 groupColor 不存在，使用第一个颜色作为默认
-      const defaultColor = colors[0]
+      // 如果 groupColor 不存在，使用第一个颜色作为默�?      const defaultColor = colors[0]
       group.nodes.forEach(node => {
         const nodeCode = node.code || node.name
-        // 只有当 centerScopeHighlight 为 true 时，才对中心范围节点特殊处理
+        // 只有�?centerScopeHighlight �?true 时，才对中心范围节点特殊处理
         if (centerScopeHighlight && centerScopeBoCodes.includes(nodeCode)) {
           nodeColorMap.set(node.id, centerColor)
         } else {
@@ -761,7 +758,7 @@ export function useBusinessObjectSyntax() {
 
         const definedNodes = new Set()
 
-        // 提前处理 links 数据，用于 ELK 自动分组
+        // 提前处理 links 数据，用�?ELK 自动分组
         const processedLinks = []
         data.links.forEach(link => {
           let sourceId = null
@@ -806,7 +803,9 @@ export function useBusinessObjectSyntax() {
             const key = node.originalName || node.name
             const id = nodeNameToIdMap.get(key)
             if (id && !definedNodes.has(id)) {
-              const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+              // 关键修复 v21：mermaid 11 不支�?["...\n..."] 换行语法（只支持  �� �?              // 之前 \\n 是字面字符串 �?"采购申请单\n(BO_A)" 一长串�?rect 截断
+              // 改成  ��  �?mermaid �?foreignObject div �?max-width: 200px + white-space: nowrap
+              // 导致  ��  后第二行 "(BO_X)" 仍被 max-width �?              // 改成 " · " 分隔符（单行），rect 自动算宽�?              const displayText = node.code ? `${node.name} · (${node.code})` : node.name
               mermaidCode += `  ${id}["${displayText}"]:::node\n`
               definedNodes.add(id)
             }
@@ -862,20 +861,19 @@ export function useBusinessObjectSyntax() {
             const sourceColor = nodeColorMap.get(sourceId)
             const targetColor = nodeColorMap.get(targetId)
 
-            // 判断源和目标是否在中心范围
+            // 判断源和目标是否在中心范围内
             const linkSourceCode = link.sourceCode || link.sourceName
             const linkTargetCode = link.targetCode || link.targetName
-            // 只有当 centerScopeHighlight 为 true 时，才使用 centerScopeBoCodes 判断
+            // 只有 centerScopeHighlight 为 true 时，才使用 centerScopeBoCodes 判断
             const isSourceCenter = centerScopeHighlight && centerScopeBoCodes.includes(linkSourceCode)
             const isTargetCenter = centerScopeHighlight && centerScopeBoCodes.includes(linkTargetCode)
 
-            // 新的颜色规则：
-            // 1. 如果源和目标中有一个非中心范围的节点，则采用该节点颜色
+            // 新的颜色规则�?            // 1. 如果源和目标中有一个非中心范围的节点，则采用该节点颜色
             // 2. 如果两个都是非中心范围则采用黑色
             // 3. 如果两个都是中心范围则采用该节点颜色
             let linkColor
             if (!isSourceCenter && !isTargetCenter) {
-              // 两个都是非中心范围 -> 黑色
+              // 两个都是非中心范�?-> 黑色
               linkColor = '#000000'
             } else if (isSourceCenter && isTargetCenter) {
               // 两个都是中心范围 -> 采用源节点颜色（或目标节点颜色）
@@ -935,7 +933,7 @@ export function useBusinessObjectSyntax() {
       groupIndex++
 
       const allNodesCenter = group.nodes.every(n => n.isCenter)
-      const centerMark = allNodesCenter ? '◆ ' : ''
+      const centerMark = allNodesCenter ? '◆' : ''
       let subgraphTitle
       if (group.info.type === 'submodule') {
         subgraphTitle = `${centerMark}${groupName}\\n(${group.info.grandparent}/${group.info.parent})`
@@ -951,8 +949,10 @@ export function useBusinessObjectSyntax() {
       mermaidCode += `    direction ${subgraphDirection}\n`
 
       group.nodes.forEach(node => {
-        const centerMark = node.isCenter ? '◆ ' : ''
-        const displayText = node.code ? `${centerMark}${node.name || node.originalName}\\n(${node.code})` : centerMark + (node.name || node.originalName)
+        const centerMark = node.isCenter ? '◆' : ''
+        // 关键修复 v21：mermaid 11 不支持 ["...\n..."] 换行语法（只支持 <br/>）
+        // 改成 " · " 单行分隔符，避免 <br/> 换行 + max-width 切第二行问题
+        const displayText = node.code ? `${centerMark}${node.name || node.originalName} · (${node.code})` : centerMark + (node.name || node.originalName)
         mermaidCode += `    ${node.id}["${displayText}"]:::node\n`
       })
 
@@ -1085,7 +1085,7 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
         code += generateGroupMermaid(child, nodeMap, definedNodes, actualDirection)
       })
     }
-    // 注意：禁用的分组不应该有 containers（已在 buildVirtualContainers 中清除）
+    // 注意：禁用的分组不应该有 containers（已�?buildVirtualContainers 中清除）
     if (group.containers && group.containers.length > 0) {
       group.containers.forEach((container, idx) => {
         if (container.nodes && container.nodes.length > 0) {
@@ -1099,7 +1099,7 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
             container.nodes.forEach(nodeId => {
               const node = nodeMap.get(nodeId)
               if (node && !definedNodes.has(nodeId)) {
-                const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+                const displayText = node.code ? `${node.name} · (${node.code})` : node.name
                 code += `    ${nodeId}["${displayText}"]\n`
                 definedNodes.add(nodeId)
               }
@@ -1110,7 +1110,7 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
             container.nodes.forEach(nodeId => {
               const node = nodeMap.get(nodeId)
               if (node && !definedNodes.has(nodeId)) {
-                const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+                const displayText = node.code ? `${node.name} · (${node.code})` : node.name
                 code += `  ${nodeId}["${displayText}"]\n`
                 definedNodes.add(nodeId)
               }
@@ -1138,7 +1138,7 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
           container.nodes.forEach(nodeId => {
             const node = nodeMap.get(nodeId)
             if (node && !definedNodes.has(nodeId)) {
-              const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+              const displayText = node.code ? `${node.name} · (${node.code})` : node.name
               code += `    ${nodeId}["${displayText}"]\n`
               definedNodes.add(nodeId)
             }
@@ -1158,7 +1158,7 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
           container.nodes.forEach(nodeId => {
             const node = nodeMap.get(nodeId)
             if (node && !definedNodes.has(nodeId)) {
-              const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+              const displayText = node.code ? `${node.name} · (${node.code})` : node.name
               code += `      ${nodeId}["${displayText}"]\n`
               definedNodes.add(nodeId)
             }
@@ -1169,7 +1169,7 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
           container.nodes.forEach(nodeId => {
             const node = nodeMap.get(nodeId)
             if (node && !definedNodes.has(nodeId)) {
-              const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+              const displayText = node.code ? `${node.name} · (${node.code})` : node.name
               code += `    ${nodeId}["${displayText}"]\n`
               definedNodes.add(nodeId)
             }

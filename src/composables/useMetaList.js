@@ -945,7 +945,7 @@ export function useMetaList(objectType, options = {}) {
     
     // 转换列定义
     if (listConfig.tableColumns || listConfig.columns) {
-      columns.value = _transformColumns(listConfig.tableColumns || listConfig.columns)
+      columns.value = _transformColumns(listConfig.tableColumns || listConfig.columns, listConfig)
     } else {
       console.warn('[useMetaList] [WARNING] 未找到列定义 (tableColumns/columns)')
     }
@@ -1093,10 +1093,23 @@ export function useMetaList(objectType, options = {}) {
    * 转换列定义为 Element Plus 格式
    * @private
    * @param {Array} yamlColumns - YAML 定义的列
+   * @param {Object} [listConfig] - 列表配置(用于取 fields + columnOrder)
    * @returns {Array} el-table-column 配置数组
    */
-  function _transformColumns(yamlColumns) {
-    return _transformColumnsSvc(yamlColumns, { filterDisplayMode: filterDisplayModeConfig.value })
+  function _transformColumns(yamlColumns, listConfig) {
+    // 优先使用 listConfig.fields(API 端有), 回退到 metaConfig.value.fields
+    const fields = (listConfig && Array.isArray(listConfig.fields) && listConfig.fields.length > 0)
+      ? listConfig.fields
+      : (metaConfig.value?.fields || [])
+    // 列序配置: listConfig.columnOrder → metaConfig.value.ui_view_config.list.column_order
+    const columnOrder = (listConfig && listConfig.columnOrder)
+      || metaConfig.value?.ui_view_config?.list?.column_order
+      || {}
+    return _transformColumnsSvc(yamlColumns, {
+      filterDisplayMode: filterDisplayModeConfig.value,
+      fields,
+      columnOrder,
+    })
   }
 
   /**

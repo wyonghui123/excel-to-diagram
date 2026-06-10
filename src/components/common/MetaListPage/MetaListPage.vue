@@ -88,7 +88,7 @@
           </template>
 
           <AssociationNavigationMenu
-            v-if="isPageMode && navigableAssociations.length > 0 && !hideToolbar"
+            v-if="isPageMode && navigableAssociations.length > 0 && !hideToolbar && !hideAssociationNavigation"
             :associations="navigableAssociations"
             :selected-ids="selectedIds"
             :loading="loading"
@@ -621,6 +621,10 @@ const props = defineProps({
   batchActionsOverride: {
     type: Array,
     default: null
+  },
+  hideAssociationNavigation: {
+    type: Boolean,
+    default: true
   }
 })
 
@@ -1674,7 +1678,6 @@ defineExpose({
 }
 
 .column-title {
-  cursor: pointer;
   display: flex;
   align-items: center;
   gap: 4px;

@@ -160,6 +160,10 @@ export function useMermaidConfig() {
         useMaxWidth: false,
         htmlLabels: true,
         diagramPadding: 20,
+        // 关键修复 v22：wrappingWidth 控制 mermaid 给 foreignObject div 设的 max-width
+        // 之前 200 太窄，node label "<name> · (code)" 被切（早期 \n 时代）
+        // 现在 node label 改成单行 "name · (code)"，rect 自动算宽度
+        // 保留 200 防超长 label
         wrappingWidth: 200,
         labelPosition: 'c',
         defaultLinkLength: 50,

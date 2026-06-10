@@ -178,6 +178,11 @@ async function loadFieldMeta() {
           if (f.ui?.visible === false) continue
           if (f.hidden_in_detail && !isAddMode) continue
           if (f.hidden_in_form && isAddMode) continue
+          // [FIX v1.0.9 2026-06-10] owner 类不可编辑字段在 edit 模式也隐藏
+          // 当字段同时设了 hidden_in_form: true + ui.editable: false 时,
+          // 表示该字段（如 owner_id）用户永远不应该在 form 中看到,
+          // 否则会误以为能修改。应改为使用 transfer action 修改 owner。
+          if (!isAddMode && f.hidden_in_form && f.ui?.editable === false) continue
 
           const semantics = f.semantics || {}
           const isBusinessKey = semantics.business_key === true

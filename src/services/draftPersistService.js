@@ -29,13 +29,27 @@
  * 检查是否包含已变更字段
  * 业务规则：
  *   1. 跳过 _ 开头的字段（系统字段）
- *   2. 比较 fields[key] vs initialValues[key]
+ *   2. 默认：比较 fields[key] vs initialValues[key]
+ *   3. [FIX 2026-06-10] 新行（isNewRow=true）：任一非 context 字段有非空值即视为有变更
+ *      - 避免"用户接受 keyTemplateService 自动建议的 code，但保存时
+ *        fields.code === initialValues.code 导致 hasDraftChanges=false，
+ *        新行被静默从 data 移除"的 bug
+ *      - 排除 *_id 字段（来自 filterValues 的 parent context，非用户输入）
  *
  * @param {Object} fields - 用户编辑后的字段
  * @param {Object} initialValues - 行初始值
+ * @param {boolean} [isNewRow=false] - 是否为新建行
  * @returns {boolean}
  */
-export function hasDraftChanges(fields, initialValues) {
+export function hasDraftChanges(fields, initialValues, isNewRow = false) {
+  if (isNewRow) {
+    return Object.keys(fields).some(key => {
+      if (key.startsWith('_')) return false
+      if (key.endsWith('_id')) return false  // context 字段（来自 filterValues）
+      const value = fields[key]
+      return value !== null && value !== undefined && value !== ''
+    })
+  }
   return Object.keys(fields).some(key => {
     if (key.startsWith('_')) return false
     return fields[key] !== initialValues[key]
@@ -105,7 +119,7 @@ export function collectDrafts(draftValues, data) {
     const row = isNewRow ? data.find(r => String(r.id) === rowIdStr) : null
     const initialValues = row?._initialValues || {}
 
-    if (!hasDraftChanges(fields, initialValues)) {
+    if (!hasDraftChanges(fields, initialValues, isNewRow)) {
       // 无变更：标记删除
       if (isNewRow) {
         toRemove.push({ rowId: rowIdStr, removeFromData: true })
@@ -228,7 +242,7 @@ export function getDraftCreates(draftValues, data) {
     const row = data.find(r => String(r.id) === rowIdStr)
     const initialValues = row?._initialValues || {}
 
-    if (!hasDraftChanges(fields, initialValues)) continue
+    if (!hasDraftChanges(fields, initialValues, true)) continue
 
     const payload = {}
     for (const [fieldName, newValue] of Object.entries(fields)) {

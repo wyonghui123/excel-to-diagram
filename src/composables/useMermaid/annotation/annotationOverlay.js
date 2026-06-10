@@ -576,8 +576,7 @@ export function useAnnotationOverlay() {
       font-family: Arial, sans-serif;
       box-shadow: 0 2px 8px rgba(0,0,0,0.1);
       max-width: 200px;
-      max-height: 300px;
-      overflow-y: auto;
+      /* 不限制高度，避免图例项多时出现滚动条 */
     `;
 
     const title = document.createElement('div');

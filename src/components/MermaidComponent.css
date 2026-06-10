@@ -1,12 +1,20 @@
 .mermaid-container {
   width: 100%;
-  height: 600px;
+  /* 关键修复 v20：高度 100% 父级，不要硬编码 600px
+     父级 (.diagram-container) 100% of .panel-body，panel-body flex:1 of .display-panel
+     之前硬编码 600px 导致 1280x720 viewport (减去 StepNavigator / panel-header 之后剩余高度 < 600) 时
+     mermaid svg 下半部分（含 edgeLabel / annotation panel）被推到 viewport 之外，
+     用户视觉上能看到 svg 上半部分但 hover 不到底部的 edgeLabel，也看不到底部的 annotation-dock-panel
+     改成 100% 父级后 mermaid svg 自适应 panel-body 高度，edgeLabel / annotation panel 都在可视区域
+     v4 重构已经让 svg 100% × 100% draggable + viewBox 自动缩放，所以响应式安全 */
+  height: 100%;
+  min-height: 200px;
   border: 1px solid #ddd;
   border-radius: 4px;
   /* 关键修复：改为 hidden，避免 .mermaid-wrapper（12000x12000）撑出滚动条
      图表的浏览通过拖拽 + 滚轮缩放实现，不依赖原生滚动条 */
   overflow: hidden !important;
-  background-color: #FFFFFF;
+  background-color: transparent;
   position: relative;
 }
 
@@ -29,7 +37,7 @@
   border: none !important;
   border-radius: 0 !important;
   z-index: 9999 !important;
-  background-color: #FFFFFF;
+  background-color: transparent;
 }
 
 .toolbar {
@@ -90,7 +98,7 @@
   left: 0;
   width: 100%;
   height: 100%;
-  background-color: #FFFFFF;
+  background-color: transparent;
   border-radius: 8px;
   box-sizing: border-box;
   z-index: 1;
@@ -172,7 +180,10 @@
   min-height: 0 !important;
   overflow: visible !important;
   display: block !important;
-  background: #FFFFFF !important;
+  /* 关键修复 v26：背景改为 transparent，让 draggable-area 灰色背景透出
+     之前 background: #FFFFFF !important 导致 svg viewBox 内的空白区域
+     （两个 cluster 之间的空隙）显示为白色小块，跟 draggable 灰色背景不一致 */
+  background: transparent !important;
   box-sizing: border-box;
   /* 关键修复 v5：xMidYMid slice 让 SVG fill 容器（裁切超出）
      viewBox 比例 ≠ 容器比例时不会出现 letterbox 留白 */
@@ -678,4 +689,14 @@
 .mermaid-content :deep([id*="__zone_divider__"]) {
   display: none !important;
   visibility: hidden !important;
+}
+
+/* 修复：cluster/subgraph 背景矩形默认白色填充，在灰色 draggable-area 上显示为白色小块 */
+.mermaid-content :deep(.cluster > rect:first-child),
+.mermaid-content :deep(.subgraph > rect:first-child),
+.mermaid-content :deep(.cluster rect.background),
+.mermaid-content :deep(.subgraph rect.background) {
+  fill: transparent !important;
+  fill-opacity: 0 !important;
+  stroke: none !important;
 }
