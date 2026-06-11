@@ -549,22 +549,31 @@ async function loadBusinessObjectsWithHierarchy() {
   }
 }
 
+function getSelectedScopePayload() {
+  // [FIX v3.18] 统一从 preservedCheckedKeys 同时提取 codes + ids，
+  // 全选/清空/handleClassifierCheck 共享同一真源 (preservedCheckedKeys)，
+  // 避免不同 emit 路径 relationIds 缺失导致 fallback 到 relation_code__in。
+  if (USE_FILTERSOURCE) {
+    const visibleKeys = [...preservedCheckedKeys.value]
+    return {
+      relationCodes: nodeKeysToRelationCodes(visibleKeys, classifierTreeData.value),
+      relationIds: nodeKeysToRelationIds(visibleKeys, classifierTreeData.value)
+    }
+  }
+  // 非 USE_FILTERSOURCE 模式下 relationIds 由 classifier 内部维护
+  return {
+    relationCodes: classifier.getSelectedRelationCodes(),
+    relationIds: classifier.getSelectedRelationIds?.() || []
+  }
+}
+
 function emitScopeChange() {
-  const relationCodes = getSelectedRelationCodes()
-  emit('scope-change', { relationCodes })
+  const { relationCodes, relationIds } = getSelectedScopePayload()
+  emit('scope-change', { relationCodes, relationIds })
 }
 
 function getSelectedRelationCodes() {
-  if (USE_FILTERSOURCE) {
-    // [FIX] USE_FILTERSOURCE 模式下 selectedScopeIds 不会被更新，
-    // 直接从 preservedCheckedKeys (handleClassifierCheck 维护的真源) 提取 codes
-    const codes = nodeKeysToRelationCodes(
-      [...preservedCheckedKeys.value],
-      classifierTreeData.value
-    )
-    return codes
-  }
-  return classifier.getSelectedRelationCodes()
+  return getSelectedScopePayload().relationCodes
 }
 
 function handleClassifierCheck(data, { checkedKeys, checkedNodes, halfCheckedNodes }) {
@@ -652,7 +661,8 @@ function handleSelectAll() {
   if (USE_FILTERSOURCE) {
     const allIds = collectAllClassifierIds(classifierTreeData.value)
     const codes = nodeKeysToRelationCodes(allIds, classifierTreeData.value)
-    emit('scope-change', { relationCodes: codes })
+    const ids = nodeKeysToRelationIds(allIds, classifierTreeData.value)
+    emit('scope-change', { relationCodes: codes, relationIds: ids })
     return
   }
 
@@ -679,7 +689,7 @@ function collectAllClassifierIds(nodes) {
 
 function handleClear() {
   if (USE_FILTERSOURCE) {
-    emit('scope-change', { relationCodes: [] })
+    emit('scope-change', { relationCodes: [], relationIds: [] })
     return
   }
 

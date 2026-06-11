@@ -213,8 +213,6 @@ export default {
         groupItems = this.domains || [];
       }
 
-      console.log('[CenterDomainSelect.groupedItems] groupItems:', groupItems)
-
       if (groupItems.length === 0) {
         return [];
       }

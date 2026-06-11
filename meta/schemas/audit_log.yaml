@@ -445,7 +445,7 @@ ui_view_config:
     # - defaultSort: 默认按 created_at 降序
     defaultSort:
       field: created_at
-      direction: desc
+      order: desc
     columns:
       - field: id
         label: 日志ID

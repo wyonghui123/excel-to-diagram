@@ -404,7 +404,7 @@ test.describe('审计日志 API 集成测试', () => {
     
     // 验证默认排序
     if (listConfig.defaultSort) {
-      console.log(`[DECORATIVE] 默认排序: ${listConfig.defaultSort.field} ${listConfig.defaultSort.direction}`)
+      console.log(`[DECORATIVE] 默认排序: ${listConfig.defaultSort.field} ${listConfig.defaultSort.order}`)
     }
   })
 })

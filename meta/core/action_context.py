@@ -90,11 +90,28 @@ class ActionContext:
     # [审计延迟写入 2026-06-09]
     # 在事务中执行 associate/dissociate 时，审计写入会与业务写入发生 SQLite 锁冲突。
     # 解决方案：在事务内缓存审计记录，事务提交后再写入。
+    # [SPR-07 T-S09-01] 仍为私有字段, 但通过 add_pending_audit / drain_pending_audits 方法访问.
     _pending_audit_records: List[Dict[str, Any]] = field(default_factory=list)
-    
+
     def __post_init__(self):
         if self.trace_id is None:
             self.trace_id = str(uuid.uuid4())[:8]
+
+    def add_pending_audit(self, audit_params: Dict[str, Any]) -> None:
+        """[SPR-07 T-S09-01] 在事务中缓存审计记录, 等待事务提交后 flush.
+
+        替代直接访问 _pending_audit_records 字段, 集中审计 API 入口.
+        """
+        self._pending_audit_records.append(audit_params)
+
+    def drain_pending_audits(self) -> List[Dict[str, Any]]:
+        """[SPR-07 T-S09-01] 原子获取并清空缓存的审计记录 (事务提交后调用).
+
+        原子性: 返回列表 + 同步清空, 避免调用方先 getattr 再 clear 之间的 race condition.
+        """
+        pending = list(self._pending_audit_records)
+        self._pending_audit_records.clear()
+        return pending
     
     @property
     def object_type(self) -> str:

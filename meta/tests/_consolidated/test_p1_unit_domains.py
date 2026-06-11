@@ -56,6 +56,8 @@ class TestOperationLogInterceptor:
         from unittest.mock import MagicMock
         mock_logger = MagicMock()
         interceptor = OperationLogInterceptor(structured_logger=mock_logger)
+        # [FIX 2026-06-10] 拦截器默认禁用，需要启用才能测试
+        interceptor.DISABLED = False
         
         meta_obj = MagicMock()
         meta_obj.id = 'domain'
@@ -75,6 +77,8 @@ class TestOperationLogInterceptor:
         from unittest.mock import MagicMock
         mock_logger = MagicMock()
         interceptor = OperationLogInterceptor(structured_logger=mock_logger)
+        # [FIX 2026-06-10] 拦截器默认禁用，需要启用才能测试
+        interceptor.DISABLED = False
         
         meta_obj = MagicMock()
         meta_obj.id = 'domain'
@@ -94,6 +98,8 @@ class TestOperationLogInterceptor:
         from unittest.mock import MagicMock
         mock_logger = MagicMock()
         interceptor = OperationLogInterceptor(structured_logger=mock_logger)
+        # [FIX 2026-06-10] 拦截器默认禁用，需要启用才能测试
+        interceptor.DISABLED = False
         
         meta_obj = MagicMock()
         meta_obj.id = 'domain'
@@ -113,6 +119,8 @@ class TestOperationLogInterceptor:
         from unittest.mock import MagicMock
         mock_logger = MagicMock()
         interceptor = OperationLogInterceptor(structured_logger=mock_logger)
+        # [FIX 2026-06-10] 拦截器默认禁用，需要启用才能测试
+        interceptor.DISABLED = False
         
         meta_obj = MagicMock()
         meta_obj.id = 'domain'

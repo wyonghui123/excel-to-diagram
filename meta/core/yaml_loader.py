@@ -673,7 +673,10 @@ def parse_ui_list_view_column(data: Dict[str, Any]) -> UIListViewColumn:
     # 解析 filter_options，确保布尔值被正确转换
     raw_filter_options = data.get("filter_options", [])
     filter_options = _convert_filter_options_value(raw_filter_options) if raw_filter_options else []
-    
+    # [FIX 2026-06-10] 解析 enum_values (跟 filter_options 格式相同: [{value, label, color}])
+    raw_enum_values = data.get("enum_values", [])
+    enum_values = _convert_filter_options_value(raw_enum_values) if raw_enum_values else []
+
     return UIListViewColumn(
         key=data.get("key") or data.get("field", ""),
         title=data.get("title") or data.get("label") or data.get("field", ""),  # title fallback to field
@@ -688,11 +691,19 @@ def parse_ui_list_view_column(data: Dict[str, Any]) -> UIListViewColumn:
         i18n_key=data.get("i18n_key", ""),
         field_type=data.get("field_type", "") or data.get("type", ""),  # field_type fallback to type
         format=data.get("format", ""),  # 格式化类型
+        enum_type=data.get("enum_type", ""),  # [FIX 2026-06-10] 枚举类型
+        enum_values=enum_values,  # [FIX 2026-06-10] 枚举值
         options=data.get("options", []),
         computed=data.get("computed", False),
         computation=data.get("computation", {}),
         editable=data.get("editable", True),  # 是否可编辑，默认True
         default_visible=data.get("defaultVisible", data.get("default_visible", True)),  # 默认可见性
+        # [FIX v1.0.9 2026-06-10] 隐藏配置 (让 list 列也能遵守 hidden_in_form)
+        hidden_in_form=data.get("hidden_in_form", False),
+        hidden_in_detail=data.get("hidden_in_detail", False),
+        hidden_in_list=data.get("hidden_in_list", False),
+        # [FIX 2026-06-10] 列头过滤时使用的 API 参数名 (默认与 key 相同)
+        api_param_key=data.get("api_param_key", ""),
     )
 
 
@@ -886,6 +897,8 @@ def parse_ui_filter_definition(data: Dict[str, Any]) -> UIFilterDefinition:
         leaf_value_field=data.get("leaf_value_field", "id"),
         show_count=data.get("show_count", True),
         filter_by=data.get("filter_by", ""),
+        # [FIX 2026-06-10] 支持 source: enum_value + enum_type 模式
+        enum_type=data.get("enum_type", ""),
     )
 
 
@@ -2059,12 +2072,20 @@ _shared_mtimes = {}
 _dir_registry_cache = {}
 
 def _get_file_cache_key(file_path: str) -> Optional[str]:
-    """获取文件缓存键（基于 mtime），如果文件不存在返回 None"""
+    """获取文件缓存键（基于 file_path + mtime），如果文件不存在返回 None
+
+    [FIX v3.18 2026-06-10] 修复 cache key 撞车 bug：
+    原实现只返回 mtime，但 mtime 只到秒/毫秒精度。如果两个文件同时被修改
+    (例如 git checkout, 批量导入)，mtime 完全相同，cache 会返回错对象，
+    导致 `sub_domain.yaml` 加载为 `business_object` 等诡异 bug。
+    现改为 (str(file_path) + mtime) 作为 key。
+    """
     try:
         p = Path(file_path)
         if not p.exists():
             return None
-        return str(p.stat().st_mtime)
+        # 必须包含 path 才能避免撞 key
+        return f"{p.resolve()}|{p.stat().st_mtime}"
     except Exception:
         return None
 
@@ -2097,17 +2118,17 @@ def load_yaml_file(file_path: str, shared_props: Dict[str, List[Dict[str, Any]]]
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
-        
+
         if not data:
             return None
-        
+
         if aspects_defs:
             data = _resolve_aspects(data, aspects_defs, shared_props=shared_props)
         elif shared_props:
             data = _resolve_includes(data, shared_props)
-        
+
         obj = parse_meta_object(data)
-        
+
         obj = ensure_crud_actions(obj)
         
         if cache_key:

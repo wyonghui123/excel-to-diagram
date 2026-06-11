@@ -414,6 +414,20 @@ class EnrichmentEngine:
         self._name_cache.clear()
         self._record_cache.clear()
 
+    # [SPR-01 S-01] 便捷构造：优先返回全局 engine（保留缓存），未初始化时临时构造。
+    @classmethod
+    def for_data_source(cls, data_source) -> "EnrichmentEngine":
+        """[SPR-01] 便捷构造：使用全局 redundancy_registry；优先复用全局 engine 以保留缓存。
+
+        适用场景：未调用 `init_enrichment_engine(ds)` 初始化的早期调用方
+        （如 query_service / manage_api 的 hot path）。
+        """
+        engine = get_enrichment_engine()
+        if engine is not None:
+            return engine
+        from meta.core.redundancy_registry import redundancy_registry
+        return cls(data_source, redundancy_registry)
+
     # ============================================================
     # v1 兼容：FK display + association count（从 enrich_utils 迁移）
     # 2026-06-05 M2 收敛：与 enrich_utils.enrich_fk_display_names /
@@ -609,3 +623,35 @@ def enrich_records(object_type: str, records: List[Dict[str, Any]]) -> List[Dict
     if _engine_instance is None:
         return records
     return _engine_instance.enrich_batch(object_type, records)
+
+
+
+
+
+def get_effective_owner_for_items(object_type: str, items: list) -> list:
+    """
+    [NEW v1.1 / FR-006] 为 items 注入 effective_owner_id
+
+    - product:  effective_owner_id = product.owner_id
+    - child:    effective_owner_id = product.owner_id (通过 parent 链追溯)
+
+    追溯策略 (性能优先):
+    - 1 跳 (version): SELECT owner_id FROM products WHERE id IN (SELECT product_id FROM items)
+    - 2 跳 (domain/relationship): 递归
+    - 等等
+
+    Args:
+        object_type: 'product' | 'version' | 'domain' | ...
+        items: 记录列表
+
+    Returns:
+        注入 effective_owner_id 后的 items
+
+    [V1.1.6 2026-06-11] 改为 no-op, 不再派生 effective_owner_id
+    - V1.1.4 删 yaml 字段定义 + list columns
+    - V1.1.5 删 owner_id DB 列 (除 product)
+    - 顶层 owner 现在只在 product 上, 子对象不再有 owner 概念
+    - UI/Excel 都不再需要 effective_owner_id
+    """
+    # [V1.1.6] 直接返回 items, 不派生任何字段
+    return items

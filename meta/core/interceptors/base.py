@@ -39,24 +39,7 @@ class Interceptor(ABC):
     
     @property
     def priority(self) -> int:
-        """
-        拦截器优先级
-        
-        数值越小优先级越高，越先执行。
-        默认优先级为 100。
-        
-        建议优先级：
-        - ContextInterceptor: 10
-        - LockInterceptor: 20
-        - PermissionInterceptor: 30
-        - ValidationInterceptor: 40
-        - DeterminationInterceptor: 50
-        - BusinessRuleInterceptor: 60
-        - PersistenceInterceptor: 70
-        - AuditInterceptor: 80
-        - WorkflowInterceptor: 90
-        - EventInterceptor: 100
-        """
+        """拦截器优先级 (数值越小越先执行, 默认 100)."""
         return 100
     
     @abstractmethod

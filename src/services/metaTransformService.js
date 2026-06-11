@@ -84,7 +84,12 @@ export function transformColumns(yamlColumns, options = {}) {
       editable: col.editable !== false,
       immutable: col.immutable === true,
 
-      column_priority: col.column_priority || null
+      column_priority: col.column_priority || null,
+      position: col.position,
+
+      // [FIX 2026-06-10] 列头过滤时使用的 API 参数名 (默认与 key 相同)
+      //   例: column prop=category_label, api_param_key=category_type → 请求 ?category_type=xxx
+      api_param_key: col.api_param_key || col.apiParamKey || ''
     }
   })
   return sortColumnsByDefaultOrder(transformed, options.fields || [], options.columnOrder || {})

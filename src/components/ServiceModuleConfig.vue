@@ -191,9 +191,6 @@ export default {
       return COLOR_SCHEMES.find(scheme => scheme.value === this.colorScheme) || COLOR_SCHEMES[0];
     },
     groupedItems() {
-      console.log('[ServiceModuleConfig] groupedItems called, colorGroupBy:', this.colorGroupBy)
-      console.log('[ServiceModuleConfig] centerScope:', this.centerScope?.length)
-      console.log('[ServiceModuleConfig] centerScope first 5:', this.centerScope?.slice?.(0, 5))
       const items = [];
       const colors = this.currentColorScheme.colors;
       const centerBoCodes = new Set(this.centerScope || []);
@@ -213,29 +210,39 @@ export default {
 
       if (groupItems.length === 0) return [];
 
-      // 检查分组是否完全在中心范围内
+      // v29: 对齐 CenterDomainSelect — BO 级检查
+      //   收集每个分组下的所有 BO code, 判断是否全部在 centerBoCodes 中
       const isFullyInCenterScope = (groupName, groupCode) => {
-        // 对于服务模块图，centerScope 存储的是服务模块代码或名称
-        // 直接检查分组名称或代码是否在中心范围内
-        if (centerBoCodes.has(groupName)) {
-          return true;
+        const groupBoCodes = new Set();
+        allBusinessObjects.forEach(bo => {
+          const matchesGroup =
+            bo.serviceModuleName === groupName ||
+            bo.serviceModule === groupName ||
+            bo.serviceModule === groupCode ||
+            bo.serviceModuleName === groupCode;
+          if (matchesGroup) {
+            groupBoCodes.add(bo.code || bo.name);
+          }
+        });
+        if (groupBoCodes.size === 0) return false;
+        for (const code of groupBoCodes) {
+          if (!centerBoCodes.has(code)) {
+            return false;
+          }
         }
-        if (groupCode && centerBoCodes.has(groupCode)) {
-          return true;
-        }
-        return false;
+        return true;
       };
 
       // 检查分组是否部分包含中心范围对象
       const hasCenterScopeItems = (groupName, groupCode) => {
-        // 对于服务模块图，检查该服务模块是否在中心范围内
-        if (centerBoCodes.has(groupName)) {
-          return true;
-        }
-        if (groupCode && centerBoCodes.has(groupCode)) {
-          return true;
-        }
-        return false;
+        return allBusinessObjects.some(bo => {
+          const matchesGroup =
+            bo.serviceModuleName === groupName ||
+            bo.serviceModule === groupName ||
+            bo.serviceModule === groupCode ||
+            bo.serviceModuleName === groupCode;
+          return matchesGroup && centerBoCodes.has(bo.code || bo.name);
+        });
       };
 
       let colorIndex = 0;
@@ -243,8 +250,12 @@ export default {
         const groupName = item.name;
         const groupCode = item.code;
 
+        const fullyIn = this.centerScopeHighlight && isFullyInCenterScope(groupName, groupCode)
+        const hasCenter = this.centerScopeHighlight && hasCenterScopeItems(groupName, groupCode)
+        console.log('[SMC] item:', groupName, 'fullyInCenter:', fullyIn, 'hasCenter:', hasCenter)
+
         // 当区分中心范围时，过滤掉完全在中心范围内的分组
-        if (this.centerScopeHighlight && isFullyInCenterScope(groupName, groupCode)) {
+        if (fullyIn) {
           return;
         }
 

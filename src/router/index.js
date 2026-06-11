@@ -156,6 +156,15 @@ router.beforeEach(async (to, from, next) => {
 
   const tabStore = useTabStore()
 
+  // [v32] 自动识别"从架构数据图表返回架构数据管理"导航
+  //   场景: 用户点 tab bar 的"架构数据管理"tab 从 chart tab 切回
+  //   之前只有 chart tab 内的"上一步"按钮 (onNavPrev) 会设置 returningFromDiagram flag
+  //   tab bar 切回不会触发 onNavPrev, 导致管理页 onMounted 看不到 flag, 走 fresh 路径, 选择被清空
+  //   修复: 在 router 层自动检测这种导航并设置 flag (因为导航本身语义就是"从 chart 返回 management")
+  if (from.path === '/archdata-chart' && to.path === '/system/archdata') {
+    sessionStorage.setItem('returningFromDiagram', 'true')
+  }
+
   const tabLabel = to.meta.isDetailRoute ? getDetailTabLabel(to) : (to.meta.title || to.name)
   // [FR-016] 非详情页 label 来自 meta.title,是静态的;详情页 label 需要业务数据,是动态的
   const isDynamicLabel = !!to.meta.isDetailRoute

@@ -283,8 +283,9 @@ describe('AccountSettings', () => {
       const { useAuthStore } = await import('@/stores/authStore')
       const store = useAuthStore()
 
-      // 源码：is_admin 通过 permissions.includes('*') 或 role.is_super_admin 判断
-      store.user = { roles: [{ is_super_admin: true }], permissions: [] }
+      // V1 简化 (spec-auth-object-category-v2-2026-06-10.md FR-V1-003):
+      // admin 由 permissions 包含 '*' 识别, role.is_super_admin 已废弃
+      store.user = { roles: [{ code: 'super_admin' }], permissions: ['*'] }
       expect(store.isAdmin).toBe(true)
     })
 

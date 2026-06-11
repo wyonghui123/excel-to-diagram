@@ -42,11 +42,13 @@ from meta.core.models import (
     DataCategory,
     DerivationType,
     DerivationStrategy,
-    AnnotationCategory, ArchObjectType,
+    AnnotationCategory,
+    ArchObjectType,
     DimensionKey,
     BusinessRelationType,
     RelationCategory,
     Direction,
+    HierarchyScopeType,
 )
 from meta.core.datasource import get_data_source
 
@@ -72,6 +74,7 @@ ENUM_CLASSES = [
     BusinessRelationType,
     RelationCategory,
     Direction,
+    HierarchyScopeType,
 ]
 
 # 枚举类型ID覆盖映射（避免驼峰转下划线产生冲突）
@@ -191,6 +194,12 @@ def create_enum_type(ds, enum_type_id: str, name: str, description: str = "",
 
 # 枚举值中文名称映射
 ENUM_VALUE_NAME_MAP = {
+    'annotation_category': {
+        'important': '重要',
+        'warning': '警告',
+        'info': '信息',
+        'tip': '提示',
+    },
     'arch_object_type': {
         'product': '产品',
         'version': '版本',
@@ -230,6 +239,12 @@ ENUM_VALUE_NAME_MAP = {
         'PUSH': '推',
         'PULL': '拉',
         'BIDIRECTIONAL': '双向',
+    },
+    'hierarchy_scope_type': {
+        'cross_domain': '跨领域',
+        'same_domain_cross_subdomain': '同领域跨子领域',
+        'same_subdomain_cross_module': '同子领域跨服务模块',
+        'same_module': '同服务模块',
     },
 }
 

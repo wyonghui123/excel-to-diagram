@@ -5,6 +5,7 @@ from typing import Dict, Any, List
 from meta.core.interceptors.base import Interceptor
 from meta.core.action_context import ActionContext, ActionResult
 from meta.core.models import registry
+from meta.core.action_executor import AuditLogger
 
 logger = logging.getLogger(__name__)
 
@@ -59,17 +60,102 @@ class CascadeInterceptor(Interceptor):
             cascade_tables = deletion_policy.cascade_delete or []
 
         object_id = context.object_id
+        associations = getattr(meta_obj, 'associations', None) or {}
+
         for table_info in cascade_tables:
             if isinstance(table_info, str):
                 fk_map = self._infer_fk_column(table_info, context.object_type)
                 if fk_map:
                     table_name, fk_column = fk_map
                     try:
+                        # [FIX 2026-06-10] 先 SELECT 待删记录的 target_ids，
+                        # 以便为每条级联删除写一条 DISSOCIATE 审计日志。
+                        # 修复 bug：删除 user_group 时，user_group_members /
+                        # group_roles 等中间表被级联清空，但 audit_logs 表无任何
+                        # 记录，导致审计链断裂。
+                        pending_target_ids = []
+                        target_type_for_assoc = None
+                        target_key_for_assoc = None
+                        assoc_label_for_log = None
+                        for assoc_name, assoc in associations.items():
+                            if isinstance(assoc, dict):
+                                through = assoc.get('through')
+                                tkey = assoc.get('target_key')
+                                ttype = assoc.get('target_type') or assoc.get('target_entity')
+                                skey = assoc.get('source_key')
+                            else:
+                                through = getattr(assoc, 'through', None)
+                                tkey = getattr(assoc, 'target_key', None)
+                                ttype = getattr(assoc, 'target_type', None) or getattr(assoc, 'target_entity', None)
+                                skey = getattr(assoc, 'source_key', None)
+                            if through == table_name and tkey:
+                                target_type_for_assoc = ttype
+                                target_key_for_assoc = tkey
+                                assoc_label_for_log = assoc_name or through
+                                break
+
+                        if target_key_for_assoc:
+                            try:
+                                cur = context.data_source.execute(
+                                    f"SELECT {target_key_for_assoc} FROM {table_name} WHERE {fk_column} = ?",
+                                    [object_id],
+                                )
+                                pending_target_ids = [row[0] for row in cur.fetchall()]
+                            except Exception as sel_err:
+                                logger.warning(
+                                    f"[CascadeInterceptor] Failed to pre-select from {table_name}: {sel_err}"
+                                )
+
+                        # 执行级联删除
                         context.data_source.execute(
                             f"DELETE FROM {table_name} WHERE {fk_column} = ?",
                             [object_id]
                         )
-                        logger.info(f"[CascadeInterceptor] Cleaned {table_name} for {context.object_type}/{object_id}")
+                        logger.info(
+                            f"[CascadeInterceptor] Cleaned {table_name} for "
+                            f"{context.object_type}/{object_id} (rows={len(pending_target_ids)})"
+                        )
+
+                        # 为每条删除写一条 DISSOCIATE 审计日志
+                        if pending_target_ids:
+                            try:
+                                audit_logger = AuditLogger(context.data_source, enabled=True)
+                                if context.user_id is not None:
+                                    audit_logger.set_user(
+                                        user_id=context.user_id,
+                                        user_name=getattr(context, 'user_name', '') or '',
+                                    )
+                            except Exception as logger_init_err:
+                                logger.warning(
+                                    f"[CascadeInterceptor] Failed to init AuditLogger: {logger_init_err}"
+                                )
+                                audit_logger = None
+
+                            for tgt_id in pending_target_ids:
+                                try:
+                                    if audit_logger is not None:
+                                        audit_logger.log(
+                                            object_type=context.object_type,
+                                            object_id=object_id,
+                                            action='DISSOCIATE',
+                                            field_name=str(assoc_label_for_log or table_name),
+                                            old_value={'target_type': target_type_for_assoc, 'target_id': tgt_id}
+                                                if target_type_for_assoc else {'target_id': tgt_id},
+                                            new_value=None,
+                                            parent_object_type=target_type_for_assoc,
+                                            parent_object_id=tgt_id,
+                                            extra_data={
+                                                'cascade_reason': f'{context.object_type}#{object_id} deletion',
+                                                'through_table': table_name,
+                                                'fk_column': fk_column,
+                                            },
+                                        )
+                                except Exception as audit_err:
+                                    logger.warning(
+                                        f"[CascadeInterceptor] Failed to write DISSOCIATE audit for "
+                                        f"{context.object_type}#{object_id} -/-> "
+                                        f"{target_type_for_assoc}#{tgt_id}: {audit_err}"
+                                    )
                     except Exception as e:
                         logger.warning(f"[CascadeInterceptor] Failed to clean {table_name}: {e}")
 

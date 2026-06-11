@@ -46,6 +46,23 @@
         :value="opt.value"
       />
     </el-select>
+    <ElInput
+      v-else-if="isCodeAutoManagedFinal(isCodeAutoManaged) && fieldKey === 'code'"
+      v-model="formData[fieldKey]"
+      :disabled="isFieldReadonly(fieldKey)"
+      :placeholder="getFieldPlaceholder(fieldKey)"
+      @update:model-value="onCodeInput"
+    >
+      <template #suffix>
+        <span v-if="!isFieldDirtyFinal('code')" class="kt-badge kt-badge--auto">自动</span>
+        <a
+          v-else
+          class="kt-reset-link"
+          :title="'重置为根据父对象自动生成的编码'"
+          @click.prevent.stop="onCodeResetFinal"
+        >重置为自动生成</a>
+      </template>
+    </ElInput>
     <component
       v-else
       :is="resolveWidgetComponent(getFieldWidget(fieldKey))"
@@ -62,6 +79,7 @@
 import ValueHelpField from '../ValueHelpField.vue'
 import FkLinkField from '../FkLinkField/FkLinkField.vue'
 import { dateFormatService } from '@/services/DateFormatService'
+import { inject } from 'vue'
 // [FIX] 显式导入 Element Plus 组件以支持动态 <component :is> 渲染
 //   - unplugin-vue-components 只能自动导入模板中的字面量标签
 //   - 动态 :is="字符串" 不会触发自动导入，必须显式 import
@@ -74,6 +92,36 @@ import {
   ElRadioGroup,
   ElCheckbox
 } from 'element-plus'
+
+// [NEW 2026-06-10] 注入 KeyTemplate 上下文（由 ObjectPageShell 提供）
+// 通过 provide/inject 模式，避免在 ObjectPageContent / FieldGroupSection 中转 props
+// 兼容旧用法：显式 props 仍生效（inject 提供默认值）
+const keyTemplateContext = inject('keyTemplateContext', null)
+const isCodeAutoManagedInjected = keyTemplateContext?.isCodeAutoManaged
+const isFieldDirtyInjected = keyTemplateContext?.isFieldDirty
+const markFieldDirtyInjected = keyTemplateContext?.markFieldDirty
+const onCodeResetInjected = keyTemplateContext?.onCodeReset
+
+// 合并 inject + props：props 优先（向后兼容直接传入的场景）
+const isCodeAutoManagedFinal = (val) => {
+  if (val === true) return true
+  if (isCodeAutoManagedInjected?.value === true) return true
+  return false
+}
+const isFieldDirtyFinal = (key) => {
+  // 优先使用 inject（由 ObjectPageShell 提供）
+  if (typeof isFieldDirtyInjected === 'function') {
+    return isFieldDirtyInjected(key)
+  }
+  // 兼容旧用法：直接传 props.isFieldDirty
+  if (typeof props.isFieldDirty === 'function') {
+    const result = props.isFieldDirty(key)
+    // 防止默认 `() => () => false` 误判：返回值是函数则忽略
+    if (typeof result === 'function') return false
+    return result === true
+  }
+  return false
+}
 
 const ELEMENT_PLUS_WIDGET_MAP = {
   'el-input': ElInput,
@@ -133,10 +181,59 @@ const props = defineProps({
   fieldPolicy: {          // [DECORATIVE] [NEW] v1.3 / FR-6.2: 外部 useFieldPolicy 注入
     type: Object,
     default: null
+  },
+  // [NEW 2026-06-10] KeyTemplate 集成：code 字段状态指示器
+  isCodeAutoManaged: {
+    type: Boolean,
+    default: false
+  },
+  isFieldDirty: {
+    type: Function,
+    default: () => () => false
+  },
+  markFieldDirty: {
+    type: Function,
+    default: null
+  },
+  onCodeReset: {
+    type: Function,
+    default: null
   }
 })
 
 const emit = defineEmits(['field-update', 'field-display-update', 'out-mapping'])
+
+// [NEW 2026-06-10] code 字段输入处理：触发 field-update + 标记 dirty
+function onCodeInput(value) {
+  emit('field-update', { key: props.fieldKey, value })
+  // 优先 props，fallback 到 inject
+  if (typeof props.markFieldDirty === 'function' && props.markFieldDirty !== null) {
+    props.markFieldDirty('code')
+  } else if (typeof markFieldDirtyInjected === 'function') {
+    markFieldDirtyInjected('code')
+  }
+}
+
+// [NEW 2026-06-10] 点击"重置为自动生成"链接（props 路径）
+function onCodeReset() {
+  if (typeof props.onCodeReset === 'function' && props.onCodeReset !== null) {
+    props.onCodeReset()
+  }
+}
+
+// [NEW 2026-06-10] 模板用的 reset 入口（优先 inject 因为这是从 ObjectPageShell 提供的）
+function onCodeResetFinal() {
+  if (typeof onCodeResetInjected === 'function') {
+    onCodeResetInjected()
+  } else {
+    onCodeReset()
+  }
+}
+
+// [NEW 2026-06-10] 默认的 isFieldDirty 函数（兜底）
+function defaultIsFieldDirty() {
+  return false
+}
 
 function _mapFieldTypeToWidget(fieldType) {
   const map = {
@@ -463,5 +560,40 @@ function getFieldOptions(key) {
   text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 1.6;
+}
+
+/* [NEW 2026-06-10] KeyTemplate 状态指示器
+   - .kt-badge: 角标通用样式
+   - .kt-badge--auto: 浅绿底 "自动" 标识
+   - .kt-reset-link: 主题色 "重置" 链接 */
+.kt-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  line-height: 1.5;
+  font-weight: 500;
+  user-select: none;
+}
+
+.kt-badge--auto {
+  background: #e6f7e6;
+  color: #1d6f42;
+  border: 1px solid #b6e0c2;
+}
+
+.kt-reset-link {
+  font-size: 12px;
+  color: var(--el-color-primary, #1565c0);
+  cursor: pointer;
+  user-select: none;
+  text-decoration: none;
+  padding: 0 2px;
+}
+
+.kt-reset-link:hover {
+  text-decoration: underline;
+  color: var(--el-color-primary-light-3, #4096ff);
 }
 </style>

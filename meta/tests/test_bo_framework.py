@@ -386,6 +386,47 @@ class TestBOFrameworkSort:
         assert usernames == sorted(usernames, reverse=reverse_expected), \
             f"{description}: 排序不正确"
 
+    def test_audit_log_default_ordering_created_at(self, db_connection):
+        """[FIX 2026-06-10] audit_log 列表无 ordering 时默认 created_at desc，不使用不存在的 updated_at 列。
+
+        根因：unified_query_facade._build_v3_search_request 默认 sort_by='updated_at'，
+        但 audit_logs 表只有 created_at 列，无 updated_at 列，导致排序异常。
+        """
+        from meta.core.unified_query_facade import _parse_ordering, UnifiedQueryFacade
+        from meta.core.unified_query_protocol import UnifiedQueryRequest
+        from meta.services.query_service import SearchRequest
+
+        # 1. _parse_ordering 空字符串返回 ('', '')，且 not '' == True 会触发默认排序
+        sort_by, sort_order = _parse_ordering('')
+        assert sort_by == '', f"空 ordering 应返回空字符串，实际: {sort_by!r}"
+
+        # 2. 通过 UnifiedQueryFacade._build_v3_search_request 验证 audit_log 默认排序
+        # 直接实例化 facade（data_source=None 走 _get_data_source()）
+        try:
+            facade = UnifiedQueryFacade()
+        except Exception:
+            # 如果无法获取默认数据源，用 db_connection 作为替代
+            facade = UnifiedQueryFacade(db_connection)
+
+        req = UnifiedQueryRequest(entity_type='audit_log', page=1, page_size=20, ordering='')
+        try:
+            search_req = facade._build_v3_search_request(req)
+            # 验证 order_by 不使用 updated_at（audit_logs 表无此列）
+            assert search_req.order_by is not None and 'updated_at' not in search_req.order_by.lower(), \
+                f"audit_log 默认排序不应使用 updated_at，实际: {search_req.order_by}"
+            # 验证使用的是 created_at
+            assert 'created_at' in search_req.order_by.lower(), \
+                f"audit_log 默认排序应使用 created_at，实际: {search_req.order_by}"
+        except Exception as e:
+            # 如果错误包含 updated_at / no such column，说明 bug 未修复
+            err_str = str(e).lower()
+            if 'updated_at' in err_str or 'no such column' in err_str:
+                pytest.fail(
+                    f"audit_log 列表使用了不存在的 updated_at 列排序: {e}\n"
+                    f"修复应为: sort_by = 'created_at' if entity_type == 'audit_log' else 'updated_at'"
+                )
+            raise
+
 
 class TestBOFrameworkPagination:
     """BOFramework分页测试"""

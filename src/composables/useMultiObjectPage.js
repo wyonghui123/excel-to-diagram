@@ -354,9 +354,21 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
 
   /**
    * 构建关系过滤（回退逻辑，当 hierarchyTypes 不提供 filter_mappings 时使用）
+   *
+   * [FIX v3.18] 显式读取 relationExtra 嵌套属性：
+   *   与 _buildAssociationFilters 对齐。跨模块 reactive proxy 传递时，
+   *   Vue 3 的 computed 深度依赖追踪会丢失，必须在 computed 上下文中
+   *   显式 read 这些属性才能让 tabFilters 在 watch 触发后正确重算。
    */
   function _buildRelationshipFilters(filters) {
-    const result = hierarchyService.buildRelationshipFilterParams(scopeIds.relationExtra)
+    const re = scopeIds.relationExtra
+    const relationExtraSnapshot = {
+      relationIds: re.relationIds,
+      relationCodes: re.relationCodes,
+      categoryTypes: re.categoryTypes,
+      filterRelationCodes: re.filterRelationCodes
+    }
+    const result = hierarchyService.buildRelationshipFilterParams(relationExtraSnapshot)
     return { ...filters, ...result }
   }
 
@@ -469,7 +481,17 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
       }
     })
     scopeIds.globalFilters = {}
-    scopeIds.relationExtra = { relationCodes: [], relationIds: [], categoryTypes: [], filterRelationCodes: [] }
+    // [FIX v3.18] 必须 mutate 而非替换引用：
+    // 替换 relationExtra 引用会导致下游 computed (tabFilters) 缓存旧值，
+    // 因为 buildAssociationFilterParams / buildRelationshipFilterParams 接收的
+    // relationExtra 是 reactive 旧对象引用，读到的 relationIds 是旧的。
+    // 跟 handleScopeChange (line 452) 的 Object.assign 写法保持一致。
+    Object.assign(scopeIds.relationExtra, {
+      relationCodes: [],
+      relationIds: [],
+      categoryTypes: [],
+      filterRelationCodes: []
+    })
     scopeSource.clear()
   }
 
@@ -688,6 +710,11 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
     try {
       const state = {
         activeTab: activeTab.value,
+        // [v32-FIX] 显式保存产品/版本 ID，避免 restore 时依赖单例 sessionStorage 异步恢复
+        //   versionContext 是单例，tab 切回场景下 refs 保留，但 F5 刷新后 restoreContext() 是异步的，
+        //   onMounted 时 selectedVersionId 仍为 null，导致 v-if 不渲染树，restore 的 scopeIds 无法应用
+        versionId: versionContext.selectedVersionId.value,
+        productId: versionContext.selectedProductId.value,
         scopeIds: {},
         tabFilters: JSON.parse(JSON.stringify(tabFilters.value || {})),
         initialBoIds: [],
@@ -736,6 +763,15 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
 
       const state = JSON.parse(stored)
       if (!state || typeof state !== 'object') return false
+
+      // [v32-FIX] 先恢复版本上下文，确保 v-if="selectedVersionId" 立即为 true，树能渲染
+      //   然后再恢复 scopeIds/initialBoIds/initialRelationCodes 到树上
+      if (state.versionId != null) {
+        versionContext.selectedVersionId.value = state.versionId
+      }
+      if (state.productId != null) {
+        versionContext.selectedProductId.value = state.productId
+      }
 
       if (state.activeTab && tabs.value.find(t => t.name === state.activeTab)) {
         activeTab.value = state.activeTab

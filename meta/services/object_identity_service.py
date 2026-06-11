@@ -95,27 +95,54 @@ class ObjectIdentityService:
             business_key = self.business_key_service.id_to_business_key(
                 object_type, object_id, format='short'
             )
-            
+
             result['semantic'] = {
                 'business_key': business_key
             }
-            
+
             meta_obj = registry.get(object_type)
+            display_name = ''
+            display_code = ''
+            extra_display_columns: List[str] = []
             if meta_obj:
                 table_name = meta_obj.table_name
-                query = f"SELECT * FROM {table_name} WHERE id = ?"
-                cursor = self.data_source.execute(query, (int(object_id),))
-                row = cursor.fetchone()
-                
+                # [FIX 2026-06-11] 增强 display 字段: 按 schema 优先级提取
+                #   1) schema.display_name_field (e.g. relationship.relation_desc)
+                #   2) semantics.display_name=true 字段
+                #   3) 字段 id 含 'name' (e.g. annotation.content, business_object.name)
+                #   4) 字段 id 含 'desc' / 'description' (fallback)
+                # 只 SELECT 表中真实存在的列, 避免 'no such column' 错误
+                valid_columns = {f.db_column or f.id for f in (meta_obj.fields or [])}
+                display_field, code_field, extra_cols = self._resolve_display_fields(meta_obj)
+                candidate_cols = [display_field, code_field] + extra_cols
+                # 仅加入 schema 中真实存在的列
+                select_cols = [c for c in candidate_cols if c and c in valid_columns]
+                if not select_cols:
+                    # fallback: SELECT id, 用 _fallback_display_value 二次尝试
+                    select_cols = ['id']
+                query = f"SELECT {', '.join(select_cols)} FROM {table_name} WHERE id = ?"
+                try:
+                    cursor = self.data_source.execute(query, (int(object_id),))
+                    row = cursor.fetchone()
+                except Exception as col_err:
+                    logger.warning(f"Display query failed for {object_type}:{object_id}: {col_err}; falling back to SELECT id")
+                    cursor = self.data_source.execute(f"SELECT id FROM {table_name} WHERE id = ?", (int(object_id),))
+                    row = cursor.fetchone()
+
                 if row:
                     columns = [desc[0] for desc in cursor.description]
                     record = dict(zip(columns, row))
-                    
+
+                    display_name = str(record.get(display_field) or '').strip() if display_field and display_field in record else ''
+                    display_code = str(record.get(code_field) or '').strip() if code_field and code_field in record else ''
+
                     result['display'] = {
-                        'name': record.get('name', ''),
-                        'code': record.get('code', '')
+                        'name': display_name,
+                        'code': display_code,
+                        'name_field': display_field,
+                        'code_field': code_field,
                     }
-            
+
             hierarchy_path = self.hierarchy_path_service.get_full_path(
                 object_type, object_id, path_type='full_path'
             )
@@ -144,6 +171,63 @@ class ObjectIdentityService:
                 'hierarchical': {}
             }
     
+    def _resolve_display_fields(self, meta_obj) -> Tuple[str, str, List[str]]:
+        """[FIX 2026-06-11] 解析对象的主显示字段 / 主编码字段, 用于审计日志展示.
+
+        优先级:
+          1) schema.display_name_field (e.g. relationship.relation_desc)
+          2) semantics.display_name=true 的字段
+          3) 字段 id 含 'name' 且 type 非 enum (e.g. annotation 无 display_name 时,
+             不会匹配到 'name', 但 'content' 是 fallback - 这里 'name' 不命中, 走 desc)
+          4) 字段 id 含 'desc' / 'description' / 'content'
+
+        Returns:
+            (name_field, code_field, extra_columns)
+            - name_field: db_column 名 (如 'relation_desc', 'name', 'content')
+            - code_field: db_column 名 (如 'code', 'source_code'), 无则空
+            - extra_columns: 其他需要 SELECT 的列 (暂时保留扩展位)
+        """
+        # 1) schema.display_name_field
+        display_attr = getattr(meta_obj, 'display_name_field', None) or ''
+        name_field = display_attr.strip() if isinstance(display_attr, str) else ''
+
+        # 2) semantics.display_name=true
+        if not name_field:
+            for f in meta_obj.fields or []:
+                if f.semantics and getattr(f.semantics, 'display_name', False):
+                    name_field = f.db_column or f.id
+                    break
+
+        # 3) 字段 id 含 'name'
+        if not name_field:
+            for f in meta_obj.fields or []:
+                fid = (f.id or '').lower()
+                if 'name' in fid and 'enum' not in fid:
+                    name_field = f.db_column or f.id
+                    break
+
+        # 4) desc / description / content / text
+        if not name_field:
+            for f in meta_obj.fields or []:
+                fid = (f.id or '').lower()
+                if any(k in fid for k in ('description', 'desc', 'content')):
+                    name_field = f.db_column or f.id
+                    break
+
+        # code 字段: 优先 semantics.data_category=code, 退到 'code'
+        code_field = ''
+        for f in meta_obj.fields or []:
+            if f.semantics and getattr(f.semantics, 'data_category', '') == 'code':
+                code_field = f.db_column or f.id
+                break
+        if not code_field:
+            for f in meta_obj.fields or []:
+                if (f.id or '').lower() == 'code':
+                    code_field = f.db_column or f.id
+                    break
+
+        return name_field, code_field, []
+
     def _format_identity(self, identity: Dict[str, Any], format: str) -> str:
         """
         格式化对象标识

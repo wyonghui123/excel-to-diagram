@@ -72,7 +72,15 @@
         <el-button size="small" :icon="Download" :disabled="actionDisabled?.export" @click="handleAction('export')" />
       </el-tooltip>
       <el-tooltip content="图表视图" placement="bottom" :teleported="false" popper-class="app-tooltip-popper">
-        <el-button size="small" :icon="TrendCharts" :disabled="actionDisabled?.chart" @click="handleAction('chart')" />
+        <el-button 
+          size="small" 
+          :icon="TrendCharts"
+          :disabled="actionDisabled?.chart"
+          class="gt-btn-chart"
+          @click="handleAction('chart')"
+        >
+          图表视图
+        </el-button>
       </el-tooltip>
       <el-tooltip content="刷新" placement="bottom" :teleported="false" popper-class="app-tooltip-popper">
         <el-button size="small" :icon="Refresh" :disabled="actionDisabled?.refresh" @click="handleAction('refresh')" />
@@ -320,6 +328,32 @@ defineExpose({
     margin: 0;
     transform: none;
     box-shadow: none;
+  }
+}
+
+/* 图表视图按钮 - 突出主操作 */
+.gt-btn-chart {
+  width: auto !important;
+  min-width: 90px;
+  padding: 4px 12px !important;
+  background: rgba(234, 88, 12, 0.08) !important;
+  border: 1px solid var(--color-primary, #ea580c) !important;
+  color: var(--color-primary, #ea580c) !important;
+  font-weight: 500;
+  gap: 4px;
+
+  .el-icon {
+    font-size: 14px;
+  }
+
+  &:hover:not(:disabled) {
+    background: var(--color-primary, #ea580c) !important;
+    color: #fff !important;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 }
 </style>

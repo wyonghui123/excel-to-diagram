@@ -66,7 +66,12 @@
         debug: false
       }"
       @detail="handleViewDetail"
+      @row-click="handleRowClick"
     >
+      <template #cell-id="{ row }">
+        <a class="id-link" @click.stop="handleViewDetail({ row })">{{ row.id }}</a>
+      </template>
+
       <template #cell-object_type="{ row }">
         {{ getObjectTypeLabel(row.object_type) }}
       </template>
@@ -82,7 +87,7 @@
     <el-drawer
       v-model="showDetail"
       title="审计日志详情"
-      size="640px"
+      size="720px"
       direction="rtl"
     >
       <div v-if="selectedLog" class="detail-content">
@@ -115,6 +120,9 @@
             <span class="object-id">{{ selectedLog.object_id }}</span>
             <span v-if="selectedLog.object_display" class="object-display">
               {{ selectedLog.object_display }}
+            </span>
+            <span v-else-if="selectedLog.business_key" class="object-display">
+              {{ selectedLog.business_key }}
             </span>
           </el-descriptions-item>
           <el-descriptions-item v-if="selectedLog.parent_object_type" label="父对象">
@@ -149,13 +157,23 @@
             {{ selectedLog.transaction_id || '-' }}
           </el-descriptions-item>
         </el-descriptions>
+
+        <!-- [FIX 2026-06-11] DELETE 操作的完整字段明细 JSON 块 -->
+        <div v-if="selectedLog.action === 'DELETE' && hasDeletedData" class="deleted-data-section">
+          <div class="section-title">
+            <el-icon><Delete /></el-icon>
+            <span>删除对象完整明细</span>
+            <el-tag size="small" type="info">{{ deletedDataKeys.length }} 个字段</el-tag>
+          </div>
+          <pre class="deleted-data-json">{{ deletedDataFormatted }}</pre>
+        </div>
       </div>
     </el-drawer>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { MetaListPage } from '@/components/common/MetaListPage'
 import { formatDate } from '@/composables/useMetaList'
 import * as auditLogService from '@/services/auditLogService'
@@ -175,7 +193,7 @@ echarts.use([
   TitleComponent, TooltipComponent, LegendComponent, GridComponent,
   CanvasRenderer
 ])
-import { Document, Lock, WarningFilled, DataLine } from '@element-plus/icons-vue'
+import { Document, Lock, WarningFilled, DataLine, Delete } from '@element-plus/icons-vue'
 
 const metaListRef = ref(null)
 const showDetail = ref(false)
@@ -188,10 +206,50 @@ const trendChartRef = ref(null)
 let pieChart = null
 let trendChart = null
 
-function handleViewDetail(payload) {
+// [FIX 2026-06-11] 点击列表行 → 打开 detail drawer (统一入口, 复用 handleViewDetail)
+function handleRowClick(row) {
+  if (!row || !row.id) return
+  handleViewDetail({ row })
+}
+
+async function handleViewDetail(payload) {
   selectedLog.value = payload.row
   showDetail.value = true
+  // [FIX 2026-06-11] 列表接口不带 extra_data 完整字段 (后端 list 不解析),
+  // 详情接口解析为 extra_data_parsed. 这里调详情 API 补全 deleted_data 等 JSON 明细.
+  if (payload.row && payload.row.id) {
+    try {
+      const res = await auditLogService.getLogById(payload.row.id)
+      if (res && res.success && res.data) {
+        selectedLog.value = { ...payload.row, ...res.data }
+      }
+    } catch (e) {
+      console.warn('Failed to load audit log detail:', e)
+    }
+  }
 }
+
+// [FIX 2026-06-11] DELETE 明细 JSON 渲染: 兼容后端 extra_data_parsed.deleted_data
+// 与可能的 selectedLog.deleted_data (旧版字段) 两种结构.
+const deletedDataParsed = computed(() => {
+  if (!selectedLog.value) return {}
+  const parsed = selectedLog.value.extra_data_parsed || {}
+  return parsed.deleted_data || selectedLog.value.deleted_data || {}
+})
+
+const hasDeletedData = computed(() => {
+  return Object.keys(deletedDataParsed.value).length > 0
+})
+
+const deletedDataKeys = computed(() => Object.keys(deletedDataParsed.value))
+
+const deletedDataFormatted = computed(() => {
+  try {
+    return JSON.stringify(deletedDataParsed.value, null, 2)
+  } catch (e) {
+    return String(deletedDataParsed.value)
+  }
+})
 
 async function loadOverview() {
   try {
@@ -554,5 +612,54 @@ function formatDateTime(datetime) {
   margin-right: 6px;
 }
   white-space: pre-wrap;
+}
+
+/* [FIX 2026-06-11] ID 列链接样式 */
+.id-link {
+  color: var(--el-color-primary, #ea580c);
+  cursor: pointer;
+  text-decoration: none;
+  font-weight: 500;
+}
+.id-link:hover {
+  text-decoration: underline;
+}
+
+/* [FIX 2026-06-11] DELETE 明细 JSON 块样式 */
+.deleted-data-section {
+  margin-top: 24px;
+  padding: 16px;
+  background: #fafafa;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+}
+
+.deleted-data-section .section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text-primary, #303133);
+  margin-bottom: 12px;
+}
+
+.deleted-data-section .section-title .el-icon {
+  color: #f56c6c;
+}
+
+.deleted-data-json {
+  margin: 0;
+  padding: 12px;
+  background: #1f2937;
+  color: #f3f4f6;
+  border-radius: 4px;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 </style>

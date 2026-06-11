@@ -14,13 +14,39 @@
 
 import json
 import logging
-from typing import Dict, List, Set
+from typing import Dict, List, Set, Optional
 
 from meta.core.models import registry
+from meta.core.dimension_object_mapping_loader import (
+    get_dimension_object_mapping_loader,
+)
 from meta.services.management_dimension_engine import RESOURCE_TABLE_MAP, \
     PARENT_FIELD_MAP
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_table_name(bo_id: str) -> Optional[str]:
+    """解析 BO 对应的数据库表名
+
+    优先使用硬编码 MAP（兼容老数据），未命中时按 BO 名加 's' 推断
+    （如 product → products，遵循项目命名约定）。
+    """
+    table = RESOURCE_TABLE_MAP.get(bo_id)
+    if table:
+        return table
+    # Fallback: 简单的英语复数约定
+    if bo_id.endswith('s'):
+        return bo_id + 'es'
+    return bo_id + 's'
+
+
+def _resolve_parent_field(child_bo: str, parent_bo: str) -> Optional[str]:
+    """解析 child BO 引用 parent BO 的外键字段
+
+    约定: {parent_bo}_id
+    """
+    return f'{parent_bo}_id'
 
 # [FIX v1.0.2] 权限 code 存在性快速检查 (带缓存)
 _permission_code_cache: Dict[str, bool] = {}
@@ -128,18 +154,38 @@ class DimensionScopeEngine:
         return expanded
 
     def derive_data_conditions(self, role_id: int) -> Dict[str, str]:
+        """派生每个 BO 的数据权限条件
+
+        [FIX 2026-06-10] 优先使用 dimension_object_mapping.yaml 的映射配置，
+        硬编码 HIERARCHY_CHAIN/PARENT_FIELD_MAP 仅作 fallback（向后兼容）。
+
+        支持的 filter_type:
+          - direct: resource.field = dim_value
+            例: dimension=product, bo=product, field=id
+                  → product.id IN (1, 17)
+          - fk: resource.field = dim_value (field 是 BO 自己的外键字段)
+            例: dimension=product, bo=version, field=product_id
+                  → version.product_id IN (1, 17)
+          - chain: 沿 HIERARCHY_CHAIN 追溯到顶层 dim
+            例: dimension=product, bo=domain, field=product_id (chain)
+                  → 沿 version 表追溯 product_id
+        """
         expanded = self.expand_dimension_values(role_id)
+        loader = get_dimension_object_mapping_loader()
+        use_yaml_mapping = loader.is_loaded()
+
         # [FIX v1.0.1] 向上展开: 已知子维度时, 反查父资源 ID
         # 例: TEST60 有 version=[2,11,12], 要列 product
         #     → 查 versions.product_id IN (2,11,12) → expanded['product'] = {1, ...}
-        for dim_code, dim_idx in [(c, i) for i, c in enumerate(HIERARCHY_CHAIN)]:
+        chain_for_expansion = HIERARCHY_CHAIN  # 向上展开仍用硬编码层级链
+        for dim_code, dim_idx in [(c, i) for i, c in enumerate(chain_for_expansion)]:
             if dim_code not in expanded:
                 continue
             # 沿 chain 向上反查
             current_ids = set(expanded[dim_code])
             for i in range(dim_idx - 1, -1, -1):
-                target_dim = HIERARCHY_CHAIN[i]
-                child_dim = HIERARCHY_CHAIN[i + 1]
+                target_dim = chain_for_expansion[i]
+                child_dim = chain_for_expansion[i + 1]
                 parent_field = PARENT_FIELD_MAP.get(child_dim)
                 child_table = RESOURCE_TABLE_MAP.get(child_dim)
                 if not parent_field or not child_table or not current_ids:
@@ -164,49 +210,160 @@ class DimensionScopeEngine:
             if resource_type in ALWAYS_VISIBLE_BOS:
                 continue  # 系统级 BO 不参与 dimension 过滤
 
-            if resource_type in HIERARCHY_CHAIN:
-                parts = []
-                # Case 1: resource_type 自己有 expanded 值（最直接 — id 过滤）
-                # 覆盖: a) 直接 scope; b) 向上展开填充
-                if resource_type in expanded and expanded[resource_type]:
-                    vals = sorted(expanded[resource_type])
-                    if len(vals) == 1:
-                        parts.append(f"id = {vals[0]}")
-                    else:
-                        parts.append(f"id IN ({','.join(str(v) for v in vals)})")
+            parts = []
+            if use_yaml_mapping:
+                # ────────────────────────────────────────
+                # 新路径: 使用 dimension_object_mapping.yaml 配置
+                # ────────────────────────────────────────
+                for dim_code in expanded:
+                    if not expanded[dim_code]:
+                        continue
+                    binding = loader.get_field_for_bo(dim_code, resource_type)
+                    if not binding:
+                        continue
+                    field = binding.get('field')
+                    filter_type = binding.get('filter_type', 'direct')
+                    vals = sorted(expanded[dim_code])
+                    if not field or not vals:
+                        continue
 
-                # Case 2: resource_type 的 parent dim 有 expanded 值, 用 PARENT_FIELD 过滤
-                # 例: resource_type=version, PARENT_FIELD_MAP[version]='product_id'
-                #     parent dim=product, expanded[product]={1,17}
-                #     → versions.product_id IN (1,17)
-                try:
-                    res_idx = HIERARCHY_CHAIN.index(resource_type)
-                except ValueError:
-                    res_idx = -1
-                if res_idx > 0:
-                    parent_dim = HIERARCHY_CHAIN[res_idx - 1]
-                    field = PARENT_FIELD_MAP.get(resource_type)
-                    if field and parent_dim in expanded and expanded[parent_dim]:
-                        vals = sorted(expanded[parent_dim])
+                    # 直接 id 过滤 (例: dimension=product, bo=product, field=id)
+                    if filter_type == 'direct' and dim_code == resource_type:
                         if len(vals) == 1:
                             parts.append(f"{field} = {vals[0]}")
                         else:
-                            parts.append(f"{field} IN ({','.join(str(v) for v in vals)})")
+                            parts.append(
+                                f"{field} IN ({','.join(str(v) for v in vals)})"
+                            )
+                    elif filter_type == 'fk':
+                        # 资源表的 field 是该维度的外键
+                        if len(vals) == 1:
+                            parts.append(f"{field} = {vals[0]}")
+                        else:
+                            parts.append(
+                                f"{field} IN ({','.join(str(v) for v in vals)})"
+                            )
+                    elif filter_type == 'chain':
+                        # 沿 HIERARCHY_CHAIN 追溯到顶层 dim 对应的外键
+                        # 例: dimension=product, bo=domain, chain
+                        #   → 查 domains.version_id → versions WHERE product_id IN (..)
+                        chain_cond = self._build_chain_condition(
+                            resource_type, dim_code, vals
+                        )
+                        if chain_cond:
+                            parts.append(chain_cond)
+            else:
+                # ────────────────────────────────────────
+                # 老路径: 硬编码 HIERARCHY_CHAIN/PARENT_FIELD_MAP (向后兼容)
+                # ────────────────────────────────────────
+                if resource_type in HIERARCHY_CHAIN:
+                    # Case 1: 自身 expanded 有值 (id 过滤)
+                    if resource_type in expanded and expanded[resource_type]:
+                        vals = sorted(expanded[resource_type])
+                        if len(vals) == 1:
+                            parts.append(f"id = {vals[0]}")
+                        else:
+                            parts.append(
+                                f"id IN ({','.join(str(v) for v in vals)})"
+                            )
 
-                if parts:
-                    conditions[resource_type] = ' AND '.join(parts)
+                    # Case 2: parent dim 有 expanded 值, 用 PARENT_FIELD 过滤
+                    try:
+                        res_idx = HIERARCHY_CHAIN.index(resource_type)
+                    except ValueError:
+                        res_idx = -1
+                    if res_idx > 0:
+                        parent_dim = HIERARCHY_CHAIN[res_idx - 1]
+                        field = PARENT_FIELD_MAP.get(resource_type)
+                        if field and parent_dim in expanded and expanded[parent_dim]:
+                            vals = sorted(expanded[parent_dim])
+                            if len(vals) == 1:
+                                parts.append(f"{field} = {vals[0]}")
+                            else:
+                                parts.append(
+                                    f"{field} IN ({','.join(str(v) for v in vals)})"
+                                )
 
-            elif resource_type in VERSION_AWARE_BOS:
-                # [FIX v1.0.4] 非 HIERARCHY 但有 version_id 字段的 BO
-                #   统一用 version_id IN (...) 过滤
-                #   TEST60 配 version=[1,2,11,12] → service_modules.version_id IN (1,2,11,12)
+            # VERSION_AWARE_BOS: 老路径下保留旧行为
+            if not use_yaml_mapping and resource_type in VERSION_AWARE_BOS:
                 if 'version' in expanded and expanded['version']:
                     vals = sorted(expanded['version'])
                     if len(vals) == 1:
                         conditions[resource_type] = f"version_id = {vals[0]}"
                     else:
-                        conditions[resource_type] = f"version_id IN ({','.join(str(v) for v in vals)})"
+                        conditions[resource_type] = (
+                            f"version_id IN ({','.join(str(v) for v in vals)})"
+                        )
+                continue
+
+            if parts:
+                conditions[resource_type] = ' AND '.join(parts)
+
         return conditions
+
+    def _build_chain_condition(
+        self,
+        resource_type: str,
+        target_dim: str,
+        dim_vals: List[int],
+    ) -> Optional[str]:
+        """沿 HIERARCHY_CHAIN 追溯到 target_dim，构造链式 SQL
+
+        例: resource_type=domain, target_dim=product, dim_vals=[1, 17]
+          → 沿 HIERARCHY_CHAIN 找到 product 在 chain 中的位置
+          → domain 表链式 JOIN versions 表 (chain[1] 是 versions)
+          → 最后 WHERE domains.version_id IN (versions WHERE versions.product_id IN (1, 17))
+          → SQL: domain.version_id IN (SELECT id FROM versions WHERE product_id IN (1, 17))
+        """
+        if target_dim not in HIERARCHY_CHAIN:
+            return None
+        target_idx = HIERARCHY_CHAIN.index(target_dim)
+        # resource_type 必须比 target_dim 更深, 否则不是链式
+        if resource_type not in HIERARCHY_CHAIN:
+            return None
+        res_idx = HIERARCHY_CHAIN.index(resource_type)
+        if res_idx <= target_idx:
+            return None
+
+        # 收集链上每跳的 (parent_field, parent_table)
+        # 例: domain -> version -> product
+        #    domain 表 parent_field=version_id, parent_table=versions
+        #    versions 表 parent_field=product_id, parent_table=products
+        chain_steps = []
+        for i in range(res_idx, target_idx, -1):
+            child_bo = HIERARCHY_CHAIN[i]
+            parent_bo = HIERARCHY_CHAIN[i - 1]
+            parent_field = PARENT_FIELD_MAP.get(child_bo)
+            parent_table = RESOURCE_TABLE_MAP.get(parent_bo)
+            if not parent_field or not parent_table:
+                return None
+            chain_steps.append((parent_field, parent_table))
+
+        if not chain_steps:
+            return None
+
+        # 构造子查询: resource 的 fk 字段 IN (SELECT id FROM ... WHERE ...)
+        # 第一跳: resource_type.parent_field 指向 chain_steps[0][0] 对应的表
+        first_field, first_table = chain_steps[0]
+        # 最后一跳: target_dim 对应的表上有 target_dim 的 id 字段
+        last_field, last_table = chain_steps[-1]
+
+        ph = ','.join('?' * len(dim_vals))
+        # 从右往左构造子查询
+        inner = (
+            f"SELECT DISTINCT {last_field} FROM {last_table} "
+            f"WHERE id IN ({ph})"
+        )
+        params: List[Any] = list(dim_vals)
+        # 沿 chain 反向构造
+        for i in range(len(chain_steps) - 2, -1, -1):
+            cur_field, cur_table = chain_steps[i]
+            nxt_field, nxt_table = chain_steps[i + 1]
+            inner = (
+                f"SELECT DISTINCT {cur_field} FROM {cur_table} "
+                f"WHERE id IN ({inner})"
+            )
+        return f"{first_field} IN ({inner})"
 
     def derive_recommended_menus(self, role_id: int) -> List[str]:
         expanded = self.expand_dimension_values(role_id)

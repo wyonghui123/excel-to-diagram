@@ -106,23 +106,13 @@
   vertical-align: middle;
 }
 
-/* ======== SAP Fiori 风格：图标交互优化 ======== */
-
-/* 排序图标：默认隐藏（SAP 风格） */
+/* ======== [FIX 2026-06-11] 隐藏 Element Plus 内置排序图标 ======== */
+/* MetaListPage 使用自定义 .sort-indicator 图标，无需内置 .caret-wrapper */
+.custom-table .caret-wrapper,
+.custom-table .sort-caret,
 .el-table .caret-wrapper,
 .el-table .sort-caret {
-  opacity: 0;
-  transition: opacity 0.15s ease;
-}
-
-/* 悬停表头时：显示排序图标 */
-.el-table th:hover .caret-wrapper,
-.el-table th:hover .sort-caret,
-.el-table th.ascending .caret-wrapper,
-.el-table th.ascending .sort-caret,
-.el-table th.descending .caret-wrapper,
-.el-table th.descending .sort-caret {
-  opacity: 1;
+  display: none !important;
 }
 
 /* 过滤图标容器：内联显示，不换行 */

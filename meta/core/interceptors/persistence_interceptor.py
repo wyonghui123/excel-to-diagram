@@ -7,7 +7,7 @@ from meta.core.interceptors.base import Interceptor
 from meta.core.action_context import ActionContext, ActionResult
 from meta.core.action_executor import ActionRegistry
 from meta.core.association_engine import AssociationEngine
-from meta.core.enrich_utils import enrich_fk_display_names as _shared_enrich_fk, enrich_association_counts as _shared_enrich_counts
+from meta.core.enrichment_engine import EnrichmentEngine
 from meta.core.models import FieldStorage
 # [FIX 2026-06-04] Reuse the Element Plus sortable column index suffix stripper
 # from sql_adapters. Frontend (el-table) sends ordering like "-updated_at:1"
@@ -39,6 +39,18 @@ class PersistenceInterceptor(Interceptor):
     def __init__(self):
         self._registry = None
         self._association_engine = AssociationEngine()
+        # [SPR-04 T-S03-02] suffix operator dispatch table
+        # [FIX v3.18 2026-06-10] 改用方法名字符串 + getattr 模式：
+        #   原实现存的是 bound method (self._build_in_filter)，调用方很容易误传 self
+        #   (e.g. `builder(self, ...)`)，导致 "takes 8 args but 9 given"。
+        #   改用 method name 字典 + getattr 显式 self 边界：getattr(self, name)(args...)
+        #   表达 "这是 self 的方法，调用方不要再传 self"，根除 arity 误传。
+        self._SUFFIX_BUILDER_METHODS = {
+            '__in':   '_build_in_filter',
+            '__like': '_build_like_filter',
+            '_start': '_build_start_filter',
+            '_end':   '_build_end_filter',
+        }
 
     def _get_registry(self, context: ActionContext) -> ActionRegistry:
         if self._registry is None:
@@ -107,6 +119,12 @@ class PersistenceInterceptor(Interceptor):
             context.result = result
 
         except Exception as e:
+            # [R0-2 2026-06-11] ComputationNotSupportedError 必须冒泡到 Flask errorhandler
+            # 让其返回 422 + 统一错误格式. 不要被通用 except 吞掉转 400.
+            from meta.core.computed_field_query import ComputationNotSupportedError
+            if isinstance(e, ComputationNotSupportedError):
+                logger.warning(f"[PersistenceInterceptor] {e}")
+                raise  # 让 Flask errorhandler 接管 (bo_api.py 422 handler)
             logger.error(f"[PersistenceInterceptor] Error: {e}", exc_info=True)
             context.result = ActionResult(success=False, message=str(e), errors=[str(e)])
             raise
@@ -144,9 +162,9 @@ class PersistenceInterceptor(Interceptor):
             # 注入 FK display names（与 _do_list 保持一致）
             try:
                 if result.data:
-                    result.data = self._enrich_fk_display_names(meta_object, result.data, registry.ds)
+                    result.data = EnrichmentEngine.for_data_source(registry.ds).enrich_fk_display_names(meta_object, result.data)
             except Exception as e:
-                logger.warning(f"[_do_read] _enrich_fk_display_names failed: {e}")
+                logger.warning(f"[_do_read] enrich_fk_display_names failed: {e}")
             return ActionResult(
                 success=True,
                 data=result.data,
@@ -204,6 +222,10 @@ class PersistenceInterceptor(Interceptor):
 
         业务规则: role.code, user.username 等 semantics.immutable=true 的字段
         在 update 操作中应被忽略 (schema 是单一事实源)。
+
+        [FIX v1.0.9 2026-06-10] 支持 dict 和 SemanticAnnotation 两种形式:
+        - yaml 解析后: semantics=SemanticAnnotation(immutable=True)
+        - 测试 mock 或 嵌套字段: semantics={'immutable': True}
         """
         if not data or not meta_object:
             return data
@@ -211,8 +233,16 @@ class PersistenceInterceptor(Interceptor):
             fields = getattr(meta_object, 'fields', None) or []
             immutable_ids = set()
             for f in fields:
-                sem = getattr(f, 'semantics', None) or {}
-                if isinstance(sem, dict) and sem.get('immutable'):
+                sem = getattr(f, 'semantics', None)
+                if sem is None:
+                    continue
+                # [FIX v1.0.9] 同时支持 dict 和对象
+                is_immutable = False
+                if isinstance(sem, dict):
+                    is_immutable = bool(sem.get('immutable'))
+                else:
+                    is_immutable = bool(getattr(sem, 'immutable', False))
+                if is_immutable:
                     fid = getattr(f, 'id', None) or getattr(f, 'name', None)
                     if fid:
                         immutable_ids.add(fid)
@@ -221,7 +251,10 @@ class PersistenceInterceptor(Interceptor):
             filtered = {k: v for k, v in data.items() if k not in immutable_ids}
             removed = set(data.keys()) - set(filtered.keys())
             if removed:
-                logger.info(f"[PersistenceInterceptor] Filtered immutable fields: {removed}")
+                logger.info(
+                    f"[PersistenceInterceptor] Filtered immutable fields: {removed} "
+                    f"(immutable_ids: {immutable_ids})"
+                )
             return filtered
         except Exception as e:
             logger.warning(f"[PersistenceInterceptor] _filter_immutable_fields failed: {e}")
@@ -235,6 +268,7 @@ class PersistenceInterceptor(Interceptor):
         Supports:
           - Simple: { 'field': 'visibility', 'operator': 'eq', 'value': 'public' }
           - OR group: { 'type': 'or', 'conditions': [{...}, {...}] }
+          - [FIX v1.0.6 2026-06-10] 嵌套 OR group: 内层 OR group 会被递归处理
         """
         from meta.core.action_context import ActionContext as _AC
         query_conditions = context.extra.get('query_conditions', []) if hasattr(context, 'extra') else []
@@ -247,48 +281,278 @@ class PersistenceInterceptor(Interceptor):
             'in': 'IN', 'nin': 'NOT IN',  # [FIX v1.0.2] 支持 in/nin 操作符
         }
 
+        def _render_cond(cond_obj) -> tuple:
+            """递归渲染单条件 (dict → SQL片段, params)
+
+            如果 cond 是 dict 且 type='or', 递归处理内嵌 conditions。
+            """
+            if not isinstance(cond_obj, dict):
+                return '', []
+
+            # [FIX v1.0.6] 嵌套 OR group 递归处理
+            if cond_obj.get('type') == 'or':
+                sub_parts = []
+                sub_params = []
+                for sub_c in cond_obj.get('conditions', []):
+                    sql, p = _render_cond(sub_c)
+                    if sql:
+                        sub_parts.append(sql)
+                        sub_params.extend(p)
+                if sub_parts:
+                    return "(" + " OR ".join(sub_parts) + ")", sub_params
+                return '', []
+
+            # [FIX v1.0.7 2026-06-10] AND group 支持 (用于 dim AND visibility 嵌套)
+            if cond_obj.get('type') == 'and':
+                sub_parts = []
+                sub_params = []
+                for sub_c in cond_obj.get('conditions', []):
+                    sql, p = _render_cond(sub_c)
+                    if sql:
+                        sub_parts.append(sql)
+                        sub_params.extend(p)
+                if sub_parts:
+                    return "(" + " AND ".join(sub_parts) + ")", sub_params
+                return '', []
+
+            field = cond_obj.get('field', '')
+            op = cond_obj.get('operator', 'eq')
+            value = cond_obj.get('value')
+            if op == 'in_subquery':
+                return f"{field} IN ({value})", []
+            elif op in ('in', 'nin'):
+                # [FIX v1.0.2] 列表值用 IN (...) 展开
+                values = cond_obj.get('values', value if isinstance(value, list) else [value])
+                placeholders = ','.join('?' * len(values))
+                return f"{field} {OP_MAP[op]} ({placeholders})", list(values)
+            else:
+                sql_op = OP_MAP.get(op, '=')
+                return f"{field} {sql_op} ?", [value]
+
         conditions = []
         params = []
 
         for cond in query_conditions:
-            if cond.get('type') == 'or':
-                or_parts = []
-                for c in cond.get('conditions', []):
-                    field = c.get('field', '')
-                    op = c.get('operator', 'eq')
-                    value = c.get('value')
-                    if op == 'in_subquery':
-                        or_parts.append(f"{field} IN ({value})")
-                    elif op in ('in', 'nin'):
-                        # [FIX v1.0.2] 列表值用 IN (...) 展开
-                        values = c.get('values', value if isinstance(value, list) else [value])
-                        placeholders = ','.join('?' * len(values))
-                        or_parts.append(f"{field} {OP_MAP[op]} ({placeholders})")
-                        params.extend(values)
-                    else:
-                        sql_op = OP_MAP.get(op, '=')
-                        or_parts.append(f"{field} {sql_op} ?")
-                        params.append(value)
-                if or_parts:
-                    conditions.append("(" + " OR ".join(or_parts) + ")")
-            else:
-                field = cond.get('field', '')
-                op = cond.get('operator', 'eq')
-                value = cond.get('value')
-                if op == 'in_subquery':
-                    conditions.append(f"{field} IN ({value})")
-                elif op in ('in', 'nin'):
-                    # [FIX v1.0.2] 列表值用 IN (...) 展开
-                    values = cond.get('values', value if isinstance(value, list) else [value])
-                    placeholders = ','.join('?' * len(values))
-                    conditions.append(f"{field} {OP_MAP[op]} ({placeholders})")
-                    params.extend(values)
-                else:
-                    sql_op = OP_MAP.get(op, '=')
-                    conditions.append(f"{field} {sql_op} ?")
-                    params.append(value)
+            sql, p = _render_cond(cond)
+            if sql:
+                conditions.append(sql)
+                params.extend(p)
 
         return conditions, params
+
+    # ---- [SPR-04 T-S03-02] suffix filter builders (dispatch table) ----
+
+    def _build_in_filter(self, meta_object, key, value, ctf_param_map, filters, ctf_exists_clauses, ctf_exists_params):
+        """处理 __in 后缀: `field__in=a,b,c` → `field IN (?, ?, ?)`"""
+        field_name = key[:-4]
+        field = meta_object.get_field(field_name)
+        if field:
+            if getattr(field, 'storage', None) == FieldStorage.VIRTUAL:
+                logger.warning(f"[_do_list] Ignoring filter for virtual field: {field_name}")
+                return
+            values = [v.strip() for v in str(value).split(',') if v.strip()]
+            if values:
+                filters[f"{field.db_column} IN"] = values
+        elif field_name in ctf_param_map:
+            values = [v.strip() for v in str(value).split(',') if v.strip()]
+            if values:
+                ctf = ctf_param_map[field_name]
+                exists_sql, exists_params = self._build_ctf_exists(meta_object, ctf, values)
+                ctf_exists_clauses.append(exists_sql)
+                ctf_exists_params.extend(exists_params)
+        else:
+            logger.warning(f"[_do_list] Unknown filter field: {field_name}")
+
+    def _build_like_filter(self, meta_object, key, value, ctf_param_map, filters, ctf_exists_clauses, ctf_exists_params):
+        """处理 __like 后缀: `field__like=foo` → `field LIKE '%foo%'`"""
+        field_name = key[:-6]
+        field = meta_object.get_field(field_name)
+        if field:
+            if getattr(field, 'storage', None) == FieldStorage.VIRTUAL:
+                logger.warning(f"[_do_list] Ignoring filter for virtual field: {field_name}")
+                return
+            filters[f"{field.db_column} LIKE"] = f"%{value}%"
+        elif field_name in ctf_param_map:
+            values = [str(value).strip()]
+            if values and values[0]:
+                ctf = ctf_param_map[field_name]
+                exists_sql, exists_params = self._build_ctf_exists(meta_object, ctf, values)
+                ctf_exists_clauses.append(exists_sql)
+                ctf_exists_params.extend(exists_params)
+        else:
+            logger.warning(f"[_do_list] Unknown filter field: {field_name}")
+
+    def _build_start_filter(self, meta_object, key, value, ctf_param_map, filters, ctf_exists_clauses, ctf_exists_params):
+        """处理 _start 后缀: `field_start=X` → `field >= X` (date range start)"""
+        base_field = key[:-6]
+        field = meta_object.get_field(base_field)
+        if field:
+            if getattr(field, 'storage', None) == FieldStorage.VIRTUAL:
+                logger.warning(f"[_do_list] Ignoring filter for virtual field: {base_field}")
+                return
+            filters[f"{field.db_column} >="] = value
+        else:
+            filters[f"{base_field} >="] = value
+
+    def _build_end_filter(self, meta_object, key, value, ctf_param_map, filters, ctf_exists_clauses, ctf_exists_params):
+        """处理 _end 后缀: `field_end=X` → `field <= X` (date range end)"""
+        base_field = key[:-4]
+        field = meta_object.get_field(base_field)
+        if field:
+            if getattr(field, 'storage', None) == FieldStorage.VIRTUAL:
+                logger.warning(f"[_do_list] Ignoring filter for virtual field: {base_field}")
+                return
+            filters[f"{field.db_column} <="] = value
+        else:
+            filters[f"{base_field} <="] = value
+
+    def _build_where_sql(
+        self,
+        filters: Dict[str, Any],
+        scope_conditions, scope_params,
+        ctf_exists_clauses, ctf_exists_params,
+        computed_conditions, computed_params,
+        search_or_conditions, search_or_params,
+        registry, meta_object,
+    ):
+        """[SPR-04 T-S03-01] 组合 WHERE 子句 (search/no-search 两个分支共用).
+
+        接受 5 类过滤条件 + 各自 params, 合并为一个 WHERE 字符串和参数列表.
+        顺序: 普通 AND → scope AND → search OR → ctf EXISTS → computed AND.
+
+        Returns:
+            (where_sql, all_params): where_sql 是空字符串或 'WHERE ...'
+        """
+        and_conditions, and_params = (
+            registry.ds._build_conditions(filters, meta_object.table_name)
+            if filters else ([], [])
+        )
+
+        all_where_clauses = []
+        all_params = []
+
+        if and_conditions:
+            all_where_clauses.append("(" + " AND ".join(and_conditions) + ")")
+            all_params.extend(and_params)
+        if scope_conditions:
+            all_where_clauses.append("(" + " AND ".join(scope_conditions) + ")")
+            all_params.extend(scope_params)
+        if search_or_conditions:
+            all_where_clauses.append("(" + " OR ".join(search_or_conditions) + ")")
+            all_params.extend(search_or_params)
+        if ctf_exists_clauses:
+            all_where_clauses.extend(ctf_exists_clauses)
+            all_params.extend(ctf_exists_params)
+        if computed_conditions:
+            all_where_clauses.append("(" + " AND ".join(computed_conditions) + ")")
+            all_params.extend(computed_params)
+
+        where_sql = "WHERE " + " AND ".join(all_where_clauses) if all_where_clauses else ""
+        return where_sql, all_params
+
+    def _build_order_by_clause(self, meta_object, order_by: str, available_columns):
+        """[SPR-04 T-S03-03] 解析多列 order_by 字符串 → SQL 排序子句.
+
+        支持:
+        - 单/多列 (逗号分隔)
+        - DESC (- 前缀)
+        - computed *_count 字段 (走 _build_computed_count_sort_clause 子查询)
+        - VIRTUAL 字段 (留 _sort_by_virtual_fields 内存排序, 跳过)
+        - 不存在的列 (跳过 + warning)
+
+        Returns:
+            (order_clause_sql, order_by_fields): SQL 是 "col1 DESC, col2 ASC" 或 None
+        """
+        if not order_by:
+            return None, []
+        order_clause = []
+        order_by_fields = []
+        for part in order_by.split(','):
+            part = part.strip()
+            if not part:
+                continue
+            is_desc = part.startswith('-')
+            field_name = part.lstrip('-')
+            field = meta_object.get_field(field_name)
+            # computed *_count 字段 (DB 无列), 排序需用子查询
+            computed_sort = self._build_computed_count_sort_clause(meta_object, field_name, is_desc)
+            if computed_sort:
+                order_clause.append(computed_sort)
+                order_by_fields.append(field_name)
+                continue
+            if field and getattr(field, 'storage', None) == FieldStorage.VIRTUAL:
+                # 虚拟字段无物理列, 留给 _sort_by_virtual_fields 内存排序
+                continue
+            # 跳过表中不存在的字段 (防御性兜底)
+            if available_columns and field_name not in available_columns:
+                logger.warning(
+                    f"[_do_list] Skipping ORDER BY for non-existent column: {field_name} "
+                    f"on {meta_object.table_name}"
+                )
+                continue
+            db_column = getattr(field, 'db_column', field_name) if field else field_name
+            order_clause.append(f"{db_column} {'DESC' if is_desc else 'ASC'}")
+            order_by_fields.append(field_name)
+        return (", ".join(order_clause) if order_clause else None), order_by_fields
+
+    def _post_process_records(self, meta_object, records, registry, order_by, virtual_sort):
+        """[SPR-04 T-S03-05] 列表结果后处理: enrich 虚拟字段 + 内存排序.
+
+        步骤:
+        1. 填充 audit 虚拟字段 (created_by/updated_by 等)
+        2. 委托 EnrichmentEngine 算关联计数 + FK display names
+        3. [R0-4 2026-06-11] relationship 专用: ensure_hierarchy_ids + compute_by_semantics
+           修一个长期 P0 — 走 crud_query 路径的 relationship 列表,
+           category_label/category_type 不被 enrichment, 排序/过滤静默失效
+        4. 若 SQL 层未排虚拟字段, 做内存排序
+
+        Returns:
+            records: 后处理后的列表
+        """
+        records = self._enrich_audit_virtual_fields(meta_object, records, registry.ds)
+        # [SPR-01 S-01] 委托给 EnrichmentEngine（删除 v1 兼容 shim）
+        engine = EnrichmentEngine.for_data_source(registry.ds)
+        records = engine.enrich_association_counts(meta_object, records)
+        records = engine.enrich_fk_display_names(meta_object, records)
+
+        # [R0-4 2026-06-11] relationship 列表必须 enrichment hierarchy_scope
+        # 与 v2 专用 _query_relationship_with_scope (bo_api.py:391-397) 对齐
+        if meta_object.id == 'relationship':
+            from meta.services.query.computed_utils import ensure_hierarchy_ids_for_relationships
+            from meta.services.computation_service import computation_service
+            ensure_hierarchy_ids_for_relationships(registry.ds, records)
+            computation_service.compute_by_semantics('relationship', records, registry.ds)
+
+        # [FIX 2026-06-08] 只有当 SQL 层未排序虚拟字段时才做内存排序
+        # virtual_sort 非 None 表示 SQL 已通过 JOIN + ORDER BY 排序，无需再内存排序
+        if order_by and not virtual_sort:
+            records = self._sort_by_virtual_fields(meta_object, records, order_by)
+        return records
+
+    def _build_select_columns(self, meta_object, registry):
+        """[SPR-04 T-S03-04] 生成 SELECT 列子句, 包含物理虚拟列.
+
+        Returns:
+            (select_sql, available_columns): select_sql 是 'SELECT table.*, col1 as id1, ...'
+        """
+        base_columns = f"SELECT {meta_object.table_name}.*"
+        # [FIX 2026-06-04] 增强 SELECT 时只包含实际存在物理列的虚拟字段。
+        # audit_aspect 声明的 updated_at/created_by/updated_by 是 storage=virtual
+        # 且 materialization.strategy=virtual（无物理列），若直接加进 SELECT
+        # 会触发 "no such column: updated_at" 错误。
+        # 这些"真正虚拟"的字段会在后续 _enrich_audit_virtual_fields 步骤中
+        # 从 audit_logs 计算填充。
+        available_columns = None
+        try:
+            available_columns = registry.ds._get_table_columns(meta_object.table_name)
+        except Exception:
+            available_columns = None
+        for field in meta_object.fields:
+            if getattr(field, 'storage', None) == FieldStorage.VIRTUAL and getattr(field, 'db_column', None):
+                if available_columns and field.db_column not in available_columns:
+                    continue
+                base_columns += f", {field.db_column} as {field.id}"
+        return base_columns, available_columns
 
     def _build_ctf_exists(self, meta_object, ctf_config, param_values):
         association = ctf_config.get('association', {})
@@ -361,20 +625,25 @@ class PersistenceInterceptor(Interceptor):
         all_params = on_params + where_params
         return exists_sql, all_params
 
-    def _do_list(self, context: ActionContext, registry: ActionRegistry) -> ActionResult:
-        meta_object = context.meta_object
-        params = context.params
+    def _resolve_pagination(self, params: dict, order_by: str, meta_object):
+        """[SPR-04 T-S03-01b] 解析 limit/offset/page/safe_limit, 返回 (safe_limit, safe_offset, order_by).
 
-        order_by = params.get("_order_by")
-        # [FIX 2026-06-04] 去掉 Element Plus 可排序列索引后缀 ":N"（如 "-updated_at:1"）
-        # 必须在任何下游处理（_resolve_virtual_sort / 字段查找 / SELECT 增强）之前剥离，
-        # 否则 ":1" 会被当成字段名的一部分传递下去。
-        if order_by:
-            order_by = _SORTABLE_INDEX_SUFFIX.sub('', order_by)
-        logger.info(f"[_do_list] order_by={order_by}, params keys={list(params.keys())}")
+        顺序: ordering → _order_by (含 ":N" 剥离) → 默认 -updated_at.
+        """
+        # 优先级: ordering > _order_by > 默认 -updated_at
+        ordering = params.get("ordering")
+        if ordering and not order_by:
+            order_by = ordering
+
+        if not order_by and meta_object:
+            updated_at_field = meta_object.get_field('updated_at')
+            if updated_at_field:
+                order_by = '-updated_at'
+                logger.info(f"[_do_list] No order specified, defaulting to updated_at desc")
+
+        # 解析 limit/offset
         limit = params.get("_limit")
         offset = params.get("_offset")
-
         page = params.get("page")
         page_size = params.get("page_size")
         if page is not None and page_size is not None:
@@ -390,6 +659,23 @@ class PersistenceInterceptor(Interceptor):
         except (ValueError, TypeError):
             safe_limit = 20
             safe_offset = 0
+
+        return safe_limit, safe_offset, order_by
+
+    def _do_list(self, context: ActionContext, registry: ActionRegistry) -> ActionResult:
+        meta_object = context.meta_object
+        params = context.params
+
+        order_by = params.get("_order_by")
+        # [FIX 2026-06-04] 去掉 Element Plus 可排序列索引后缀 ":N"（如 "-updated_at:1"）
+        # 必须在任何下游处理（_resolve_virtual_sort / 字段查找 / SELECT 增强）之前剥离，
+        # 否则 ":1" 会被当成字段名的一部分传递下去。
+        if order_by:
+            order_by = _SORTABLE_INDEX_SUFFIX.sub('', order_by)
+        logger.info(f"[_do_list] order_by={order_by}, params keys={list(params.keys())}")
+
+        # [SPR-04 T-S03-01b] 解析 limit/offset/page/safe_limit
+        safe_limit, safe_offset, order_by = self._resolve_pagination(params, order_by, meta_object)
 
         search_keyword = params.get("search") or params.get("keyword")
 
@@ -454,71 +740,22 @@ class PersistenceInterceptor(Interceptor):
                     computed_conditions.append(sem_where)
                     computed_params.extend(sem_params)
                     continue
-                if key.endswith('__in'):
-                    field_name = key[:-4]
-                    field = meta_object.get_field(field_name)
-                    if field:
-                        field_storage = getattr(field, 'storage', None)
-                        if field_storage == FieldStorage.VIRTUAL:
-                            logger.warning(f"[_do_list] Ignoring filter for virtual field: {field_name}")
-                        else:
-                            values = [v.strip() for v in value.split(',') if v.strip()]
-                            if values:
-                                filters[f"{field.db_column} IN"] = values
-                    elif field_name in ctf_param_map:
-                        values = [v.strip() for v in str(value).split(',') if v.strip()]
-                        if values:
-                            ctf = ctf_param_map[field_name]
-                            exists_sql, exists_params = self._build_ctf_exists(meta_object, ctf, values)
-                            ctf_exists_clauses.append(exists_sql)
-                            ctf_exists_params.extend(exists_params)
-                    else:
-                        logger.warning(f"[_do_list] Unknown filter field: {field_name}")
+                # [SPR-04 T-S03-02] 4 重 suffix operator 改 dispatch table
+                # [FIX v3.18 2026-06-10] 用 method name + getattr 替代 bound method dispatch，
+                # 防止调用方误传 self (历史 bug: 28/29 反复出现就是因为 `builder(self, ...)` 多传 self)。
+                handled = False
+                for suffix, method_name in self._SUFFIX_BUILDER_METHODS.items():
+                    if key.endswith(suffix):
+                        getattr(self, method_name)(
+                            meta_object, key, value,
+                            ctf_param_map, filters, ctf_exists_clauses, ctf_exists_params
+                        )
+                        handled = True
+                        break
+                if handled:
+                    continue
 
-                elif key.endswith('__like'):
-                    field_name = key[:-6]
-                    field = meta_object.get_field(field_name)
-                    if field:
-                        field_storage = getattr(field, 'storage', None)
-                        if field_storage == FieldStorage.VIRTUAL:
-                            logger.warning(f"[_do_list] Ignoring filter for virtual field: {field_name}")
-                        else:
-                            filters[f"{field.db_column} LIKE"] = f"%{value}%"
-                    elif field_name in ctf_param_map:
-                        values = [str(value).strip()]
-                        if values and values[0]:
-                            ctf = ctf_param_map[field_name]
-                            exists_sql, exists_params = self._build_ctf_exists(meta_object, ctf, values)
-                            ctf_exists_clauses.append(exists_sql)
-                            ctf_exists_params.extend(exists_params)
-                    else:
-                        logger.warning(f"[_do_list] Unknown filter field: {field_name}")
-
-                elif key.endswith('_start'):
-                    base_field = key[:-6]
-                    field = meta_object.get_field(base_field)
-                    if field:
-                        field_storage = getattr(field, 'storage', None)
-                        if field_storage == FieldStorage.VIRTUAL:
-                            logger.warning(f"[_do_list] Ignoring filter for virtual field: {base_field}")
-                        else:
-                            filters[f"{field.db_column} >="] = value
-                    else:
-                        filters[f"{base_field} >="] = value
-
-                elif key.endswith('_end'):
-                    base_field = key[:-4]
-                    field = meta_object.get_field(base_field)
-                    if field:
-                        field_storage = getattr(field, 'storage', None)
-                        if field_storage == FieldStorage.VIRTUAL:
-                            logger.warning(f"[_do_list] Ignoring filter for virtual field: {base_field}")
-                        else:
-                            filters[f"{field.db_column} <="] = value
-                    else:
-                        filters[f"{base_field} <="] = value
-
-                elif key == 'exclude_ids' and value:
+                if key == 'exclude_ids' and value:
                     values = []
                     for v in str(value).split(','):
                         v = v.strip()
@@ -582,36 +819,15 @@ class PersistenceInterceptor(Interceptor):
             virtual_sort = self._resolve_virtual_sort(meta_object, order_by)
 
             if search_or_conditions:
-                # [FIX 2026-06-08] 传 table_prefix 消除 JOIN 后的列名歧义
-                # (例：relationship JOIN business_objects 后 `version_id` 两表都有)
-                and_conditions, and_params = registry.ds._build_conditions(filters, meta_object.table_name) if filters else ([], [])
-
-                all_where_clauses = []
-                all_params = []
-
-                if and_conditions:
-                    all_where_clauses.append("(" + " AND ".join(and_conditions) + ")")
-                    all_params.extend(and_params)
-
-                if scope_conditions:
-                    all_where_clauses.append("(" + " AND ".join(scope_conditions) + ")")
-                    all_params.extend(scope_params)
-
-                or_clause = "(" + " OR ".join(search_or_conditions) + ")"
-                all_where_clauses.append(or_clause)
-                all_params.extend(search_or_params)
-
-                if ctf_exists_clauses:
-                    all_where_clauses.extend(ctf_exists_clauses)
-                    all_params.extend(ctf_exists_params)
-
-                if computed_conditions:
-                    all_where_clauses.append("(" + " AND ".join(computed_conditions) + ")")
-                    all_params.extend(computed_params)
-
-                where_sql = ""
-                if all_where_clauses:
-                    where_sql = "WHERE " + " AND ".join(all_where_clauses)
+                # [SPR-04 T-S03-01] where_sql 组合委托给 _build_where_sql
+                where_sql, all_params = self._build_where_sql(
+                    filters,
+                    scope_conditions, scope_params,
+                    ctf_exists_clauses, ctf_exists_params,
+                    computed_conditions, computed_params,
+                    search_or_conditions, search_or_params,
+                    registry, meta_object,
+                )
 
                 # [FIX 2026-06-09] semantic JOIN 子句 (category_label/category_type filter)
                 semantic_join_sql = " ".join(semantic_join_clauses) if semantic_join_clauses else ""
@@ -655,31 +871,15 @@ class PersistenceInterceptor(Interceptor):
                 records = items
 
             else:
-                # [FIX 2026-06-08] 传 table_prefix 消除 JOIN 后的列名歧义
-                and_conditions, and_params = registry.ds._build_conditions(filters, meta_object.table_name) if filters else ([], [])
-
-                all_where_clauses = []
-                all_params = []
-
-                if and_conditions:
-                    all_where_clauses.append("(" + " AND ".join(and_conditions) + ")")
-                    all_params.extend(and_params)
-
-                if scope_conditions:
-                    all_where_clauses.append("(" + " AND ".join(scope_conditions) + ")")
-                    all_params.extend(scope_params)
-
-                if ctf_exists_clauses:
-                    all_where_clauses.extend(ctf_exists_clauses)
-                    all_params.extend(ctf_exists_params)
-
-                if computed_conditions:
-                    all_where_clauses.append("(" + " AND ".join(computed_conditions) + ")")
-                    all_params.extend(computed_params)
-
-                where_sql = ""
-                if all_where_clauses:
-                    where_sql = "WHERE " + " AND ".join(all_where_clauses)
+                # [SPR-04 T-S03-01] where_sql 组合委托给 _build_where_sql (空 search_or_conditions)
+                where_sql, all_params = self._build_where_sql(
+                    filters,
+                    scope_conditions, scope_params,
+                    ctf_exists_clauses, ctf_exists_params,
+                    computed_conditions, computed_params,
+                    [], [],  # 无 search_or_conditions
+                    registry, meta_object,
+                )
 
                 # [FIX 2026-06-09] semantic JOIN 子句 (category_label/category_type filter)
                 semantic_join_sql = " ".join(semantic_join_clauses) if semantic_join_clauses else ""
@@ -711,62 +911,16 @@ class PersistenceInterceptor(Interceptor):
                     total_row = rows[0] if rows else None
                     total = (total_row['count'] if isinstance(total_row, dict) else total_row[0]) if total_row else 0
 
-                    base_columns = f"SELECT {meta_object.table_name}.*"
-                    # [FIX 2026-06-04] 增强 SELECT 时只包含实际存在物理列的虚拟字段。
-                    # audit_aspect 声明的 updated_at/created_by/updated_by 是 storage=virtual
-                    # 且 materialization.strategy=virtual（无物理列），若直接加进 SELECT
-                    # 会触发 "no such column: updated_at" 错误。
-                    # 这些"真正虚拟"的字段会在后续 _enrich_audit_virtual_fields 步骤中
-                    # 从 audit_logs 计算填充。
-                    available_columns_for_select = None
-                    try:
-                        available_columns_for_select = registry.ds._get_table_columns(meta_object.table_name)
-                    except Exception:
-                        available_columns_for_select = None
-                    for field in meta_object.fields:
-                        if getattr(field, 'storage', None) == FieldStorage.VIRTUAL and getattr(field, 'db_column', None):
-                            if available_columns_for_select and field.db_column not in available_columns_for_select:
-                                continue
-                            base_columns += f", {field.db_column} as {field.id}"
+                    base_columns, available_columns_for_select = self._build_select_columns(meta_object, registry)
 
                     sql = f"{base_columns} FROM {meta_object.table_name} {semantic_join_sql} {where_sql}"
                     if order_by:
-
-                        order_clause = []
-                        order_by_fields = []
-                        # [FIX 2026-06-04] 排序时校验字段是否实际存在；
-                        # 顶部已剥离 ":N" 后缀，这里再补一道物理列存在性校验。
-                        available_columns_for_order = available_columns_for_select
-                        for part in order_by.split(','):
-                            part = part.strip()
-                            if not part:
-                                continue
-                            is_desc = part.startswith('-')
-                            field_name = part.lstrip('-')
-                            field = meta_object.get_field(field_name)
-                            # [FIX] computed *_count 字段（如 member_count）即使标记为 virtual
-                            # （DB 无列），排序也需用子查询通过关联表 COUNT。
-                            # 必须在 VIRTUAL 跳过判断之前处理。
-                            computed_sort = self._build_computed_count_sort_clause(meta_object, field_name, is_desc)
-                            if computed_sort:
-                                order_clause.append(computed_sort)
-                                order_by_fields.append(field_name)
-                                continue
-                            if field and getattr(field, 'storage', None) == FieldStorage.VIRTUAL:
-                                # 虚拟字段无物理列，留给 _sort_by_virtual_fields 内存排序
-                                continue
-                            # [FIX 2026-06-04] 跳过表中不存在的字段（防御性兜底）
-                            if available_columns_for_order and field_name not in available_columns_for_order:
-                                logger.warning(
-                                    f"[_do_list] Skipping ORDER BY for non-existent column: {field_name} "
-                                    f"on {meta_object.table_name}"
-                                )
-                                continue
-                            db_column = getattr(field, 'db_column', field_name) if field else field_name
-                            order_clause.append(f"{db_column} {'DESC' if is_desc else 'ASC'}")
-                            order_by_fields.append(field_name)
-                        if order_clause:
-                            sql += " ORDER BY " + ", ".join(order_clause)
+                        # [SPR-04 T-S03-03] order_by 解析委托给 _build_order_by_clause
+                        order_clause_sql, _ = self._build_order_by_clause(
+                            meta_object, order_by, available_columns_for_select
+                        )
+                        if order_clause_sql:
+                            sql += " ORDER BY " + order_clause_sql
                         else:
                             sql += " ORDER BY id DESC"
                     else:
@@ -782,14 +936,10 @@ class PersistenceInterceptor(Interceptor):
                             items.append(dict(zip(columns, row)))
                     records = items
 
-            records = self._enrich_audit_virtual_fields(meta_object, records, registry.ds)
-            records = self._enrich_association_counts(meta_object, records, registry.ds)
-            records = self._enrich_fk_display_names(meta_object, records, registry.ds)
-
-            # [FIX 2026-06-08] 只有当 SQL 层未排序虚拟字段时才做内存排序
-            # virtual_sort 非 None 表示 SQL 已通过 JOIN + ORDER BY 排序，无需再内存排序
-            if order_by and not virtual_sort:
-                records = self._sort_by_virtual_fields(meta_object, records, order_by)
+            # [SPR-04 T-S03-05] 后处理委托给 _post_process_records
+            records = self._post_process_records(
+                meta_object, records, registry, order_by, virtual_sort
+            )
 
             return ActionResult(success=True, data=records, total=total)
         except Exception as e:
@@ -826,394 +976,151 @@ class PersistenceInterceptor(Interceptor):
         return rows, columns
 
     def _build_computed_count_sort_clause(self, meta_object, field_name, is_desc):
-        """为 computed 的 *_count 字段构造子查询排序子句
+        """[R0-3 2026-06-11] SSOT 委托给 ComputedFieldQuery.
 
-        computed 字段（如 member_count）虽然有 db_column，
-        但 DB 中该列未被维护（始终为 NULL），无法直接 ORDER BY。
-        通过 many_to_many 关联的 through 表生成 COUNT 子查询进行排序。
-
-        兼容 meta_object.associations 为 dict（{name: AssociationDefinition}）
-        或 list（[AssociationDefinition | str]）两种形态。
-
-        Returns:
-            str: 完整排序子句（如 "(SELECT COUNT(*) FROM through WHERE ...) DESC"），
-                 不匹配时返回 None。
+        历史: [SPR-02] 委托给公共模块 + 保留 count_children / count_relations 特殊路径.
+        现在: 全部走 ComputedFieldQuery (fail-fast + 次级稳定键 + validate_table_name).
         """
-        field = meta_object.get_field(field_name)
+        try:
+            field = meta_object.get_field(field_name)
+        except Exception:
+            return None
         if not field or not getattr(field, 'computed', False):
             return None
         if not field_name.endswith('_count'):
             return None
 
-        base_name = field_name[:-6]  # member_count -> member
-        table_name = meta_object.table_name
-
-        associations = getattr(meta_object, 'associations', None)
-        if not associations:
-            return None
-        if isinstance(associations, dict):
-            assoc_items = list(associations.values())
-        else:
-            assoc_items = list(associations)
-
-        # [FIX 2026-06-09] child_count 字段 (computation.type=count_children)
-        # 计算子对象数量；先按 computation.child_object 与 assoc.target_entity 匹配
-        field_computation = getattr(field, 'computation', None) or {}
-        field_child_object = (
-            field_computation.get('child_object')
-            or field_computation.get('target_object')
-            or ''
-        )
-
-        for assoc in assoc_items:
-            if isinstance(assoc, str):
-                # 兼容历史格式：list of names
-                assoc_name = assoc
-                assoc_type = 'many_to_many'
-                through = None
-                source_key = None
-                foreign_key_field = None
-                target_table = None
-                target_entity = ''
-            else:
-                assoc_name = getattr(assoc, 'name', '')
-                assoc_type = getattr(assoc, 'type', '')
-                through = getattr(assoc, 'through', None)
-                source_key = getattr(assoc, 'source_key', None)
-                # [FIX] merged_one_to_many / one_to_many / composition 等
-                # 虚拟/父子关联通过外键字段统计；composition 的 FK 通常放在
-                # source_key 里（如 product.yaml 的 source_key: product_id），
-                # 这里把 source_key 作为 foreign_key_field 的兜底。
-                foreign_key_field = (
-                    getattr(assoc, 'foreign_key_field', None)
-                    or source_key
-                )
-                # [FIX] 实际表名通常是 assoc_name 复数 (如 relationships)；
-                # target_entity/target_type 在 YAML 中是单数 (relationship)，DB 表是复数。
-                # 优先级: 显式 target_table > assoc_name 复数 (本表通常命名为 relationships)
-                # > target_entity 复数 > target_entity 单数
-                target_entity = getattr(assoc, 'target_entity', None) or ''
-                _pluralized = (
-                    assoc_name if assoc_name.endswith('s')
-                    else assoc_name + 's'
-                )
-                target_table = (
-                    getattr(assoc, 'target_table', None)
-                    or _pluralized
-                    or (target_entity + 's' if target_entity and not target_entity.endswith('s') else target_entity)
-                    or target_entity
-                )
-
-            # [FIX] 支持 many_to_many (走 through/source_key)
-            #       和 merged_one_to_many / one_to_many / composition (走 foreign_key_field/source_key)
-            many_to_many_matched = False
-            if assoc_type == 'many_to_many' and through and source_key:
-                many_to_many_matched = True
-            elif assoc_type in ('merged_one_to_many', 'one_to_many', 'virtual_one_to_many', 'composition', 'parent_child') and foreign_key_field and target_table:
-                pass  # 走外键路径
-            else:
-                continue
-            # 匹配：relation_count <-> relationships / relationship / relations / relation
-            # 支持关系名去除常见后缀（ship / ies / es / s）后与 base_name 比较，
-            # 这样 relation_count 也能匹配 relationships / relationships_for_xxx
-            assoc_singular = re.sub(r'(ship$|ies$|es$|s$)', '', assoc_name)
-            name_matched = (
-                assoc_name == base_name
-                or assoc_name == base_name + 's'
-                or assoc_singular == base_name
-                or assoc_name == base_name + 'ship'
-                or assoc_name == base_name + 'ship' + 's'
-            )
-            # [FIX 2026-06-09] child_count 这种通用字段不会按关联名匹配
-            # (例如 product.child_count 的 base_name='child' 跟 assoc_name='version'
-            # 完全对不上)，所以额外允许通过 computation.child_object 命中
-            # assoc.target_entity/target_type，命中后强制走外键子查询。
-            child_object_matched = bool(
-                field_child_object
-                and target_entity
-                and field_child_object == target_entity
-            )
-            matched = name_matched or child_object_matched
-            if not matched:
-                continue
-
-            direction = 'DESC' if is_desc else 'ASC'
-            if many_to_many_matched:
-                return (
-                    f"(SELECT COUNT(*) FROM {through} "
-                    f"WHERE {through}.{source_key} = {table_name}.id) {direction}"
-                )
-            else:
-                # [FIX] merged_one_to_many: 业务对象的关系数量通常按双向计算
-                # (source_bo_id = id OR target_bo_id = id) 才能与 Python 端
-                # computation_service.compute_by_semantics 计算的 relation_count 一致。
-                target_key = getattr(assoc, 'target_key', None) or ''
-                if target_key and target_key != foreign_key_field:
-                    return (
-                        f"(SELECT COUNT(*) FROM {target_table} "
-                        f"WHERE {target_table}.{foreign_key_field} = {table_name}.id "
-                        f"OR {target_table}.{target_key} = {table_name}.id) {direction}"
-                    )
-                return (
-                    f"(SELECT COUNT(*) FROM {target_table} "
-                    f"WHERE {target_table}.{foreign_key_field} = {table_name}.id) {direction}"
-                )
-
-        return None
+        from meta.core.computed_field_query import ComputedFieldQuery, ComputationNotSupportedError
+        try:
+            cfq = ComputedFieldQuery(meta_object, field)
+            return cfq.build_order_clause(is_desc=is_desc)
+        except ComputationNotSupportedError:
+            # [R0-2] 不再 silent fallback, 让 caller 决定 (向上抛 422)
+            raise
 
     def _try_build_computed_filter(self, meta_object, key, value):
-        """检测 (key, value) 是否是 computed *_count 字段的过滤，若是返回子查询条件子句
+        """[R0-3 2026-06-11] SSOT 委托给 ComputedFieldQuery.
 
-        支持的操作符（按 key 后缀解析）：
-        - __in:     IN (?, ?, ...)
-        - __notin:  NOT IN (?, ?, ...)
-        - __like:   LIKE ?
-        - _start:   >= ?
-        - _end:     <= ?
-        - 精确匹配: = ?
-
-        [FIX] URL 参数始终是字符串。如果字段是 integer 类型，SQLite 在比较
-        TEXT 占位符与 INTEGER 子查询结果时行为不稳定（type affinity），
-        会导致过滤失效。这里按字段类型把字符串转成 int/float。
-
-        Returns:
-            (sql_clause, [params]) 或 (None, None)
+        历史: [SPR-02] 委托给公共模块 + 保留 relations / count_relations 兜底.
+        现在: count_relations / count_children 走 ComputedFieldQuery,
+              m2m / composition 等其他 type 走 _computed_count_clause (保留).
         """
-        if key.endswith('__in'):
-            field_name = key[:-4]
-            operator = 'IN'
-            if isinstance(value, str):
-                values = [v.strip() for v in value.split(',') if v.strip()]
-            else:
-                values = list(value) if hasattr(value, '__iter__') else [value]
-        elif key.endswith('__notin'):
-            field_name = key[:-7]
-            operator = 'NOT IN'
-            if isinstance(value, str):
-                values = [v.strip() for v in value.split(',') if v.strip()]
-            else:
-                values = list(value) if hasattr(value, '__iter__') else [value]
-        elif key.endswith('__like'):
-            field_name = key[:-6]
-            operator = 'LIKE'
-            values = [f"%{value}%"]
-        elif key.endswith('__gte'):
-            field_name = key[:-5]
-            operator = '>='
-            values = [value]
-        elif key.endswith('__lte'):
-            field_name = key[:-5]
-            operator = '<='
-            values = [value]
-        elif key.endswith('__gt'):
-            field_name = key[:-4]
-            operator = '>'
-            values = [value]
-        elif key.endswith('__lt'):
-            field_name = key[:-4]
-            operator = '<'
-            values = [value]
-        elif key.endswith('_start'):
-            field_name = key[:-6]
-            operator = '>='
-            values = [value]
-        elif key.endswith('_end'):
-            field_name = key[:-4]
-            operator = '<='
-            values = [value]
-        else:
-            field_name = key
-            operator = '='
-            values = [value]
+        from meta.core._computed_count_clause import (
+            parse_operator, normalize_values, coerce_for_field_type,
+            find_count_assoc, build_count_subquery, apply_count_clause,
+        )
 
-        field = meta_object.get_field(field_name)
+        if not meta_object or not key:
+            return None, None
+
+        field_name, operator = parse_operator(key)
+        try:
+            field = meta_object.get_field(field_name)
+        except Exception:
+            return None, None
         if not field or not getattr(field, 'computed', False):
             return None, None
         if not field_name.endswith('_count'):
             return None, None
 
-        # [FIX] 按字段类型转换参数值，避免 SQLite type affinity 问题
-        field_type_attr = getattr(field, 'field_type', None)
-        is_integer = (
-            field_type_attr is not None
-            and (str(field_type_attr).endswith('INTEGER') or str(field_type_attr).endswith('INT')
-                 or str(field_type_attr) in ('integer', 'int', 'bigint', 'smallint'))
-        )
-        if is_integer and operator not in ('LIKE',):
-            def _coerce(v):
-                if isinstance(v, str):
-                    try:
-                        return int(v)
-                    except (ValueError, TypeError):
-                        return v
-                return v
-            values = [_coerce(v) for v in values]
+        field_computation = getattr(field, 'computation', None) or {}
+        comp_type = field_computation.get('type', '')
 
+        # [R0-3] count_relations / count_children 走 SSOT
+        if comp_type in ('count_relations', 'count_children'):
+            from meta.core.computed_field_query import ComputedFieldQuery, ComputationNotSupportedError
+            try:
+                cfq = ComputedFieldQuery(meta_object, field)
+                clause, params = cfq.build_filter_clause(operator, value)
+                if clause is not None:
+                    return clause, params
+            except ComputationNotSupportedError:
+                # [R0-2] 不再 silent fallback, 向上抛 422
+                raise
+            return None, None
+
+        # [保留历史] m2m / composition / parent_child 等其他 type 走 _computed_count_clause
+        values = normalize_values(value, operator)
+        values = coerce_for_field_type(field, operator, values)
         base_name = field_name[:-6]
         table_name = meta_object.table_name
-
-        associations = getattr(meta_object, 'associations', None)
-        if not associations:
-            return None, None
-        if isinstance(associations, dict):
-            assoc_items = list(associations.values())
-        else:
-            assoc_items = list(associations)
-
-        # [FIX 2026-06-09] 把 field_child_object 提取到外层 scope，
-        # 让 assoc 循环和后面的 relations 循环都能复用。
-        field_computation = getattr(field, 'computation', None) or {}
         field_child_object = (
             field_computation.get('child_object')
             or field_computation.get('target_object')
             or ''
         )
 
-        for assoc in assoc_items:
-            if isinstance(assoc, str):
-                assoc_name = assoc
-                assoc_type = 'many_to_many'
-                through = None
-                source_key = None
-                foreign_key_field = None
-                target_table = None
-                target_entity = ''
-            else:
-                assoc_name = getattr(assoc, 'name', '')
-                assoc_type = getattr(assoc, 'type', '')
-                through = getattr(assoc, 'through', None)
-                source_key = getattr(assoc, 'source_key', None)
-                # [FIX 2026-06-09] composition/parent_child 的 FK 通常在
-                # source_key 里（如 product.yaml 的 source_key: product_id），
-                # 把 source_key 作为 foreign_key_field 的兜底（与 sort 路径对称）。
-                foreign_key_field = (
-                    getattr(assoc, 'foreign_key_field', None)
-                    or source_key
-                )
-                target_entity = getattr(assoc, 'target_entity', None) or ''
-                _pluralized = (
-                    assoc_name if assoc_name.endswith('s')
-                    else assoc_name + 's'
-                )
-                target_table = (
-                    getattr(assoc, 'target_table', None)
-                    or _pluralized
-                    or (target_entity + 's' if target_entity and not target_entity.endswith('s') else target_entity)
-                    or target_entity
-                )
-
-            # [FIX 2026-06-09] 支持 many_to_many (走 through/source_key)
-            #       和 merged_one_to_many / one_to_many / composition / parent_child (走外键)
-            many_to_many_matched = False
-            if assoc_type == 'many_to_many' and through and source_key:
-                many_to_many_matched = True
-            elif assoc_type in ('merged_one_to_many', 'one_to_many', 'virtual_one_to_many', 'composition', 'parent_child') and foreign_key_field and target_table:
-                pass  # 走外键路径
-            else:
-                continue
-            # 匹配：relation_count <-> relationships / relationship / relations / relation
-            assoc_singular = re.sub(r'(ship$|ies$|es$|s$)', '', assoc_name)
-            name_matched = (
-                assoc_name == base_name
-                or assoc_name == base_name + 's'
-                or assoc_singular == base_name
-                or assoc_name == base_name + 'ship'
-                or assoc_name == base_name + 'ship' + 's'
+        # 主路径：公共模块 (m2m / one_to_many / composition / parent_child / merged / virtual)
+        assoc_info = find_count_assoc(meta_object, base_name, field_computation)
+        if assoc_info is not None:
+            subquery = build_count_subquery(
+                meta_object, base_name, target_alias='', assoc_info=assoc_info,
             )
-            # [FIX 2026-06-09] child_count 这种通用字段不会按关联名匹配
-            # (例如 product.child_count 的 base_name='child' 跟 assoc_name='version'
-            # 完全对不上)，所以额外允许通过 computation.child_object 命中
-            # assoc.target_entity/target_type（与 sort 路径对称）。
-            # 注意 field_child_object 已在函数顶部提取，避免重复计算
-            child_object_matched = bool(
-                field_child_object
-                and target_entity
-                and field_child_object == target_entity
-            )
-            matched = name_matched or child_object_matched
-            if not matched:
-                continue
-
-            if many_to_many_matched:
-                subquery = f"(SELECT COUNT(*) FROM {through} WHERE {through}.{source_key} = {table_name}.id)"
-            else:
-                # [FIX] 双向 COUNT (source FK = id OR target FK = id) 与 Python 端 relation_count 一致
-                _target_key = getattr(assoc, 'target_key', None) or ''
-                if _target_key and _target_key != foreign_key_field:
-                    subquery = (
-                        f"(SELECT COUNT(*) FROM {target_table} "
-                        f"WHERE {target_table}.{foreign_key_field} = {table_name}.id "
-                        f"OR {target_table}.{_target_key} = {table_name}.id)"
-                    )
-                else:
-                    subquery = f"(SELECT COUNT(*) FROM {target_table} WHERE {target_table}.{foreign_key_field} = {table_name}.id)"
-            if operator in ('IN', 'NOT IN'):
-                if not values:
-                    return None, None
-                placeholders = ', '.join(['?'] * len(values))
-                return f"{subquery} {operator} ({placeholders})", list(values)
-            else:
-                return f"{subquery} {operator} ?", list(values)
+            if subquery is not None:
+                clause, params = apply_count_clause(subquery, operator, values)
+                if clause:
+                    return clause, params
 
         # [FIX 2026-06-09] G1 兜底: meta_object.relations (MetaRelation 类型) 路径
-        # YAML 的 relations: 段被解析为 MetaRelation 而非 AssociationDefinition，
-        # 字段名也不同 (target_object/source_field/relation_type)；
-        # 这里用同样的匹配逻辑再扫一遍。
-        relations = getattr(meta_object, 'relations', None) or []
-        for rel in relations:
-            rel_name = getattr(rel, 'name', '')
-            # MetaRelation.relation_type 是枚举，需要取 .value
-            rel_type_attr = getattr(rel, 'relation_type', None)
-            rel_type_value = getattr(rel_type_attr, 'value', rel_type_attr) or ''
-            rel_type_str = str(rel_type_value).lower() if rel_type_value else ''
-            # 映射：composition/parent_child 在 MetaRelation 里通常叫 PARENT_CHILD/COMPOSITION
-            if rel_type_str in ('composition', 'parent_child'):
-                rel_target_entity = getattr(rel, 'target_object', '') or ''
-                rel_source_field = getattr(rel, 'source_field', '') or ''
-                # [FIX 2026-06-09] source_field 缺失时按命名约定回退:
-                # sub_domains 上指向 domain 的列就是 domain_id
-                if not rel_source_field and rel_target_entity:
-                    inferred_fk = f"{meta_object.id}_id"
-                    rel_source_field = inferred_fk
-                rel_target_table = (
-                    rel_target_entity + 's'
-                    if rel_target_entity and not rel_target_entity.endswith('s')
-                    else rel_target_entity
-                )
-                # 匹配 (与 association 同一逻辑)
-                rel_singular = re.sub(r'(ship$|ies$|es$|s$)', '', rel_name)
-                rel_name_matched = (
-                    rel_name == base_name
-                    or rel_name == base_name + 's'
-                    or rel_singular == base_name
-                )
-                rel_child_object_matched = bool(
-                    field_child_object
-                    and rel_target_entity
-                    and field_child_object == rel_target_entity
-                )
-                if not (rel_name_matched or rel_child_object_matched):
-                    continue
-                if not rel_source_field or not rel_target_table:
-                    continue
-                subquery = (
-                    f"(SELECT COUNT(*) FROM {rel_target_table} "
-                    f"WHERE {rel_target_table}.{rel_source_field} = {table_name}.id)"
-                )
-                if operator in ('IN', 'NOT IN'):
-                    if not values:
-                        return None, None
-                    placeholders = ', '.join(['?'] * len(values))
-                    return f"{subquery} {operator} ({placeholders})", list(values)
-                return f"{subquery} {operator} ?", list(values)
+        rel_clause, rel_params = self._try_build_relations_filter(
+            meta_object, base_name, operator, values,
+            table_name=table_name, field_child_object=field_child_object,
+        )
+        if rel_clause is not None:
+            return rel_clause, rel_params
 
         # [FIX 2026-06-09] G4: count_relations descendants 兜底
-        # 关联列表里没有名字对应的 association 时 (例如 domain.relation_count
-        # 没有 relationships 关联)，尝试通过 computation.type=count_relations +
-        # scope=descendants 直接生成层级子查询。
         return self._try_build_count_relations_filter(
             meta_object, field_name, base_name, operator, values
         )
+
+    def _try_build_relations_filter(
+        self, meta_object, base_name, operator, values,
+        table_name: str = '', field_child_object: str = '',
+    ):
+        """[SPR-02] G1 兜底：meta_object.relations (MetaRelation) 路径。"""
+        from meta.core._computed_count_clause import apply_count_clause
+
+        if not table_name:
+            table_name = meta_object.table_name
+        relations = getattr(meta_object, 'relations', None) or []
+        for rel in relations:
+            rel_name = getattr(rel, 'name', '')
+            rel_type_attr = getattr(rel, 'relation_type', None)
+            rel_type_value = getattr(rel_type_attr, 'value', rel_type_attr) or ''
+            rel_type_str = str(rel_type_value).lower() if rel_type_value else ''
+            if rel_type_str not in ('composition', 'parent_child'):
+                continue
+            rel_target_entity = getattr(rel, 'target_object', '') or ''
+            rel_source_field = getattr(rel, 'source_field', '') or ''
+            if not rel_source_field and rel_target_entity:
+                inferred_fk = f"{meta_object.id}_id"
+                rel_source_field = inferred_fk
+            rel_target_table = (
+                rel_target_entity + 's'
+                if rel_target_entity and not rel_target_entity.endswith('s')
+                else rel_target_entity
+            )
+            rel_singular = re.sub(r'(ship$|ies$|es$|s$)', '', rel_name)
+            rel_name_matched = (
+                rel_name == base_name
+                or rel_name == base_name + 's'
+                or rel_singular == base_name
+            )
+            rel_child_object_matched = bool(
+                field_child_object and rel_target_entity
+                and field_child_object == rel_target_entity
+            )
+            if not (rel_name_matched or rel_child_object_matched):
+                continue
+            if not rel_source_field or not rel_target_table:
+                continue
+            subquery = (
+                f"(SELECT COUNT(*) FROM {rel_target_table} "
+                f"WHERE {rel_target_table}.{rel_source_field} = {table_name}.id)"
+            )
+            return apply_count_clause(subquery, operator, values)
+        return None, None
 
     def _try_build_count_relations_filter(self, meta_object, field_name, base_name, operator, values):
         """[FIX 2026-06-09] G4: count_relations descendants SQL 子查询兜底
@@ -1221,10 +1128,9 @@ class PersistenceInterceptor(Interceptor):
         适用场景: domain / sub_domain / service_module 的 relation_count 过滤。
         这些对象没有名为 'relationships' 的 association，无法走标准 _try_build_computed_filter。
         但 computation.type=count_relations + scope=descendants 提供了层级路径。
-        这里的硬编码层级与领域模型一致：
 
-          domain.id → sub_domains.domain_id → service_modules.sub_domain_id
-                   → business_objects.service_module_id → relationships.source/target_bo_id
+        [SPR-06 T-S08-03] descendant_match 由 _descendant_subquery.build_descendant_exists_sql
+        数据驱动生成, 替代原 67 行 3 分支硬编码.
         """
         if field_name != 'relation_count' or base_name != 'relation':
             return None, None
@@ -1243,32 +1149,11 @@ class PersistenceInterceptor(Interceptor):
             # 它有 relationships 关联，已在主路径覆盖；此处不重复实现。
             return None, None
 
-        table_name = meta_object.table_name
         object_type = meta_object.id
-
-        # 按对象类型生成层级子查询
-        if object_type == 'domain':
-            descendant_match = (
-                "EXISTS (SELECT 1 FROM business_objects bo "
-                "JOIN service_modules sm ON bo.service_module_id = sm.id "
-                "JOIN sub_domains sd ON sm.sub_domain_id = sd.id "
-                "WHERE sd.domain_id = domains.id "
-                "AND (r.source_bo_id = bo.id OR r.target_bo_id = bo.id))"
-            )
-        elif object_type == 'sub_domain':
-            descendant_match = (
-                "EXISTS (SELECT 1 FROM business_objects bo "
-                "JOIN service_modules sm ON bo.service_module_id = sm.id "
-                "WHERE sm.sub_domain_id = sub_domains.id "
-                "AND (r.source_bo_id = bo.id OR r.target_bo_id = bo.id))"
-            )
-        elif object_type == 'service_module':
-            descendant_match = (
-                "EXISTS (SELECT 1 FROM business_objects bo "
-                "WHERE bo.service_module_id = service_modules.id "
-                "AND (r.source_bo_id = bo.id OR r.target_bo_id = bo.id))"
-            )
-        else:
+        # [SPR-06] 数据驱动 descendant_match 替代硬编码 if/elif 链
+        from meta.core._descendant_subquery import build_descendant_exists_sql
+        descendant_match = build_descendant_exists_sql(object_type, target_alias=meta_object.table_name)
+        if descendant_match is None:
             return None, None
 
         subquery = (
@@ -1479,51 +1364,33 @@ class PersistenceInterceptor(Interceptor):
 
     def _sort_by_virtual_fields(self, meta_object, records, order_by):
         """对 VIRTUAL 字段执行内存排序，补充 SQL 层无法排序的虚拟字段
-        
+
         SSOT virtual 字段（如 updated_at）在 enrichment 之后才有值，
         无法在 SQL 层 ORDER BY。此方法在内存中对当前页做排序。
         """
-
         if not records or not order_by:
             return records
 
-        parts = order_by.strip().split(',')
+        # 收集需要排序的 VIRTUAL 字段 (field_name, is_desc)
         sort_keys = []
-        for part in parts:
+        for part in order_by.strip().split(','):
             part = part.strip()
             if not part:
                 continue
             is_desc = part.startswith('-')
             field_name = part.lstrip('-')
             field = meta_object.get_field(field_name)
-            if not field:
-                continue
-            storage = getattr(field, 'storage', None)
-            if storage != FieldStorage.VIRTUAL:
+            if not field or getattr(field, 'storage', None) != FieldStorage.VIRTUAL:
                 continue
             sort_keys.append((field_name, is_desc))
 
         if not sort_keys:
             return records
 
-        def sort_key(record):
-            values = []
-            for fname, _desc in sort_keys:
-                val = record.get(fname)
-                if val is None:
-                    val = ''
-                values.append(val)
-            return tuple(values)
-
+        # [SPR-07 T-S06-01] 倒序 stable sort: 次要 key 先排, 主要 key 后排
         for fname, is_desc in reversed(sort_keys):
             records.sort(key=lambda r, fn=fname: (r.get(fn) or ''), reverse=is_desc)
-
         return records
 
-    def _enrich_association_counts(self, meta_object, records, data_source):
-        # 委托给共享模块（与 association_engine._query_reference 共用）
-        return _shared_enrich_counts(meta_object, records, data_source)
-
-    def _enrich_fk_display_names(self, meta_object, records_or_record, data_source):
-        # 委托给共享模块（与 association_engine._query_reference 共用）
-        return _shared_enrich_fk(meta_object, records_or_record, data_source)
+    # [SPR-01 S-01] 删 _enrich_association_counts / _enrich_fk_display_names wrapper
+    # 调用方已改用 EnrichmentEngine.for_data_source(registry.ds) 直接获取实例

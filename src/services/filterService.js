@@ -352,6 +352,10 @@ export function addFilterParam(params, key, value, columns, filterFields, option
   const fieldType = (field?.type || 'text').toLowerCase()
   const fieldFormat = (field?.format || '').toLowerCase()
   const filterType = (field?.filter_type || '').toLowerCase()
+  // [FIX 2026-06-10] 支持 api_param_key: 把前端 prop 名映射到后端 API 参数名
+  //   例: column prop=category_label, api_param_key=category_type → 请求 ?category_type=xxx
+  //   默认与 key 保持一致
+  const apiKey = (field?.api_param_key || field?.apiParamKey || key)
 
   if (options.debug) {
     console.log(`[FilterService] 添加过滤参数: ${key}=${value} (type: ${fieldType}, format: ${fieldFormat}, filterType: ${filterType})`)
@@ -389,29 +393,29 @@ export function addFilterParam(params, key, value, columns, filterFields, option
     // 只有当明确指定为 number-range 类型且数组有两个元素时才处理为范围
     const isRangeFilterType = filterType === 'number-range' || filterType === 'number_range'
     const isNumericField = fieldType === 'integer' || fieldType === 'float' || fieldType === 'number' || fieldType === 'decimal'
-    
+
     if (isRangeFilterType && value.length === 2 && isNumericField) {
       // 明确的范围过滤（两个元素的数组 + number-range 类型）
       // 使用 __gte/__lte 后缀（后端 persistence_interceptor._try_build_computed_filter 识别）
       const min = value[0]
       const max = value[1]
       if (min !== null && min !== undefined && min !== '') {
-        params[`${key}__gte`] = String(min)
+        params[`${apiKey}__gte`] = String(min)
       }
       if (max !== null && max !== undefined && max !== '') {
-        params[`${key}__lte`] = String(max)
+        params[`${apiKey}__lte`] = String(max)
       }
     } else if (value.length === 1 && isNumericField) {
       // 单元素数组 + 数字字段：当作单值处理（如 FK 字段选择）
-      params[key] = String(value[0])
+      params[apiKey] = String(value[0])
       if (options.debug) {
-        console.log(`[FilterService] 单值过滤: ${key}=${value[0]}`)
+        console.log(`[FilterService] 单值过滤: ${apiKey}=${value[0]}`)
       }
     } else {
       // 多选过滤：使用 __in
-      params[`${key}__in`] = value.join(',')
+      params[`${apiKey}__in`] = value.join(',')
       if (options.debug) {
-        console.log(`[FilterService] 多选过滤: ${key}__in=${params[`${key}__in`]}`)
+        console.log(`[FilterService] 多选过滤: ${apiKey}__in=${params[`${apiKey}__in`]}`)
       }
     }
   } else {
@@ -421,14 +425,14 @@ export function addFilterParam(params, key, value, columns, filterFields, option
     const isNumericValue = typeof value === 'number' || /^-?\d+$/.test(String(value))
 
     if (isTextField && !isIdField && !isNumericValue) {
-      params[`${key}__like`] = `%${value}%`
+      params[`${apiKey}__like`] = `%${value}%`
       if (options.debug) {
-        console.log(`[FilterService] 模糊过滤: ${key} LIKE '%${value}%'`)
+        console.log(`[FilterService] 模糊过滤: ${apiKey} LIKE '%${value}%'`)
       }
     } else {
-      params[key] = String(value)
+      params[apiKey] = String(value)
       if (options.debug) {
-        console.log(`[FilterService] 精确过滤: ${key}=${value}`)
+        console.log(`[FilterService] 精确过滤: ${apiKey}=${value}`)
       }
     }
   }

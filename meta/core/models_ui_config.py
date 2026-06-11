@@ -33,6 +33,13 @@ class UIListViewColumn:
     business_key: bool = False
     value_help_config: Dict[str, Any] = field(default_factory=dict)
     enum_values: List[Dict[str, Any]] = field(default_factory=list)
+    # [FIX v1.0.9 2026-06-10] 隐藏配置 (支持 inline 新增/编辑时禁用)
+    hidden_in_form: bool = False
+    hidden_in_detail: bool = False
+    hidden_in_list: bool = False
+    # [FIX 2026-06-10] 列头过滤时使用的 API 参数名 (默认与 key 相同)
+    #   例: column key=category_label (展示 label), 但 API 用 ?category_type=xxx
+    api_param_key: str = ""
 
 
 @dataclass
@@ -135,8 +142,10 @@ class UIFilterDefinition:
     tree_structure: str = ""  # hierarchy | category | custom
     tree_levels: List[str] = field(default_factory=list)  # ['domain', 'sub_domain', 'service_module', 'business_object']
     leaf_value_field: str = ""  # 叶子节点的值字段，如 'id' 或 'code'
-    show_count: bool = True  # 是否显示数量统计
+    show_count: bool = True  # 是否需要显示数量统计
     filter_by: str = ""  # 依赖的上游筛选器字段
+    # [FIX 2026-06-10] 支持 source: enum_value + enum_type 模式 (动态枚举)
+    enum_type: str = ""
 
 
 @dataclass

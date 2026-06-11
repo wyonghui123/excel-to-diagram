@@ -1,8 +1,18 @@
 import { ref, computed } from 'vue'
 
+/**
+ * @deprecated 2026-06-11 步骤 0-2 (导入/中心/关系) 已废弃。
+ *   入口: /archdata-chart 路由已在菜单中隐藏 (hiddenFromMenu: true)
+ *   替代: 用户应从 "架构数据管理" 页面 navigate 到本页面，自动进入 3 步骤模式
+ *   状态: 仅作 fallback（用户直接 URL 访问时仍能工作）
+ *   TODO: 下轮清理时删除 STEPS 0-2 + 移除 initFromArchData 标志 + 简化 currentStep 为 0/1/2
+ */
 const STEPS = [
+  // @deprecated 旧 6 步骤模式的第 1 步，入口已隐藏，保留仅为 fallback
   { title: '导入', desc: '上传Excel文件', component: 'StepUpload' },
+  // @deprecated 旧 6 步骤模式的第 2 步，入口已隐藏，保留仅为 fallback
   { title: '中心', desc: '选择中心范围', component: 'StepScope' },
+  // @deprecated 旧 6 步骤模式的第 3 步，入口已隐藏，保留仅为 fallback
   { title: '关系', desc: '选择关系范围', component: 'StepScope' },
   { title: '类型', desc: '选择图表类型', component: 'StepChartType' },
   { title: '配置', desc: '设置图表参数', component: 'StepConfig' },

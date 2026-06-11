@@ -1,3 +1,10 @@
+<!--
+  @deprecated 2026-06-11 旧 6 步骤模式第 2/3 步（center / relation），入口已废弃。
+    入口: /archdata-chart 路由已在菜单中隐藏 (hiddenFromMenu: true)
+    替代: 中心范围和关系范围选择已在 "架构数据管理" 页面完成
+    状态: 保留为 fallback（用户直接 URL 访问时仍能工作）
+    TODO: 下轮清理时连同 useDiagramSteps 的 STEPS 1/2 一起删除
+-->
 <template>
   <div class="step-scope">
     <div class="scope-panel">
@@ -367,6 +374,9 @@ export default {
     })
 
     // 基于中心范围和选中关系的业务对象编码（用于配置步骤过滤）
+    // 关键修复 v26: 用 relationIds 匹配, 不要过滤空 code 关系
+    // 现象: id=29 关系 (TEST600→BO_WAREHOUSE, relationCode='') 被 line 411 过滤掉
+    //       → filteredBoCodes 少 TEST600 → 显示 28 而非 29
     const relationFilteredBoCodes = computed(() => {
       if (!props.previewData?.businessObjects) return []
 
@@ -379,12 +389,18 @@ export default {
 
       // 如果有选中关系节点，进一步过滤
       if (props.selectedRelationNodeIds && props.selectedRelationNodeIds.length > 0) {
-        const relationCodes = new Set()
+        const relationIds = new Set()
 
+        // 关键修复 v26: 用 relationIds (按 rel.id 去重) 收集, 而不是 relationCodes
         function traverseNode(node) {
           if (props.selectedRelationNodeIds.includes(node.id)) {
-            if (node.relationCodes && node.relationCodes.length > 0) {
-              node.relationCodes.forEach(code => relationCodes.add(code))
+            // 优先用 relationIds
+            if (node.relationIds && node.relationIds.length > 0) {
+              node.relationIds.forEach(id => relationIds.add(id))
+            }
+            // fallback: relationCodes (旧节点兼容)
+            if (node.relationCodes && node.relationCodes.length > 0 && (!node.relationIds || node.relationIds.length === 0)) {
+              node.relationCodes.forEach(code => relationIds.add(code))
             }
           }
           if (node.children && node.children.length > 0) {
@@ -398,16 +414,16 @@ export default {
 
         // 获取选中关系涉及的业务对象编码
         if (!props.previewData?.relationships) return []
-        
-        // 先过滤无效关系（与 relationCategoryTree 保持一致）
+
+        // 关键修复 v26: 不要过滤空 code 关系
+        // id=29 关系 relationCode 为空, 但它是有效关系 (TEST600→BO_WAREHOUSE)
         const validRelationships = props.previewData.relationships.filter(rel => {
-          if (!rel.relationCode) return false
           if (rel.sourceCode === rel.targetCode) return false
           return true
         })
-        
+
         validRelationships.forEach(rel => {
-          if (relationCodes.has(rel.relationCode)) {
+          if (relationIds.has(rel.id) || relationIds.has(rel.relationCode)) {
             filteredCodes.add(rel.sourceCode)
             filteredCodes.add(rel.targetCode)
           }

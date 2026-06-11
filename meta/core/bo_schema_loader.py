@@ -114,6 +114,22 @@ class BoSchemaLoader:
                 return True
         return False
 
+    def has_visibility_field(self, bo_id: str) -> bool:
+        """[FIX v1.0.8 2026-06-10] 检查 BO 是否声明了 visibility 字段
+
+        用于 DataPermissionInterceptor 判断是否需要应用 visibility scope 过滤:
+        - version 有 visibility 字段 → True (需要应用 visibility scope 保护 draft)
+        - product 没有 visibility 字段 → False (跳过 visibility scope, 避免过严)
+        """
+        schema = self.get_bo_schema(bo_id)
+        if not schema:
+            return False
+        for field in schema.get('fields', []) or []:
+            fid = field.get('id') if isinstance(field, dict) else getattr(field, 'id', None)
+            if fid == 'visibility':
+                return True
+        return False
+
     def get_bo_type(self, bo_id: str) -> str:
         """获取 BO 类型（FR-017 AC-1）
 

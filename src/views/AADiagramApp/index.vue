@@ -30,6 +30,7 @@ import StepNavigator from './components/StepNavigator.vue'
 import { useDiagramSteps } from './composables/useDiagramSteps.js'
 import { useDiagramData } from './composables/useDiagramData.js'
 import { useDiagramConfigStore } from '../../stores/diagramConfigStore.js'
+import { useChartArchDataStore } from '../../stores/chartArchDataStore'
 
 // 步骤组件
 import StepUpload from './components/steps/StepUpload.vue'
@@ -69,6 +70,11 @@ export default {
 
     const configStore = useDiagramConfigStore()
 
+    // [v32] 架构数据图表的"数据来源" Pinia store
+    //  - 由架构管理页 (MultiObjectManagementPage) 的 "图表视图" 按钮写入
+    //  - onMounted 读这个, 不再读 sessionStorage / module cache
+    const chartArchStore = useChartArchDataStore()
+
     const {
       loading,
       error,
@@ -90,6 +96,8 @@ export default {
       selectedRelationNodeIds,
       relationCategoryTree,
       relationFilteredBoCodes,
+      // DEBUG 临时解构
+      filteredRelations,
       handleFileUpload,
       generateDiagram,
       filterByRelation,
@@ -302,31 +310,88 @@ export default {
       // 先重置所有步骤状态，确保每次进入都是干净状态（防止 keep-alive 或状态残留）
       resetSteps()
 
-      const archDataStr = sessionStorage.getItem('archDataForDiagram')
-      if (archDataStr) {
-        try {
-          const archData = JSON.parse(archDataStr)
-          sessionStorage.setItem('lastArchDataForDiagram', archDataStr)
-          sessionStorage.removeItem('archDataForDiagram')
+      // [v32] 双层数据源 (Pinia 主 + sessionStorage 备份):
+      //   1) chartArchStore (Pinia in-memory): 跨组件共享, 用于 tab re-click
+      //   2) sessionStorage 备份: 应对 F5 刷新场景
+      //      - F5 后 Pinia 状态丢失, 但 sessionStorage 保留
+      //      - 此时 onMounted 读 sessionStorage 兜底
+      //   行为:
+      //     A) 首次进入 (有 archData): 切 3 步骤模式 + 加载数据, 默认 step 3
+      //     B) F5 刷新 (Pinia 空, sessionStorage 有): 从 sessionStorage 读, 仍走 3 步骤
+      //     C) 直接 URL 访问 /archdata-chart (都空): 走 6 步骤默认流程
+      let archData = chartArchStore.archData
 
-          // 切到 3 步骤模式（类型 → 配置 → 展示），跳过导入/中心/关系 3 步
-          // 这里调用的 initFromArchDataManager() 是 useDiagramSteps.js 的版本（line 60 解构）
-          // 它把 initFromArchData.value 设为 true，currentStep.value = 3
-          // 注意：useDiagramData.js 也有同名 initFromArchDataManager（被重命名为 initDataFromArch），
-          // 那个是加载数据用的（带参 archData），line 304 调
-          initFromArchDataManager()
-
-          // 关键修复 v24：原本 line 303 + line 304 两行都在调
-          // 之前误判 line 303 是 useDiagramData 版本（重命名后的 initDataFromArch）
-          // 实际是 useDiagramSteps 版本（切 3 步骤模式）
-          // 删了它导致 3 步骤模式没切 → 用户还是看 6 步骤导航
-          // 修复：恢复 line 303，让两个调用都执行（步骤模式切换 + 数据加载）
-
-          await initDataFromArch(archData)
-        } catch (err) {
-          console.error('Failed to initialize from arch data:', err)
+      if (!archData) {
+        // [v32-FIX] F5 刷新场景: Pinia 状态丢失, 从 sessionStorage 读
+        const archDataStr = sessionStorage.getItem('archDataForDiagram')
+          || sessionStorage.getItem('lastArchDataForDiagram')
+        if (archDataStr) {
+          try {
+            archData = JSON.parse(archDataStr)
+            // 重新写回 Pinia, 让后续 tab 切换也能用上
+            chartArchStore.setArchData(archData)
+            console.log('[v32] F5 refresh: restored archData from sessionStorage')
+          } catch (err) {
+            console.error('[v32] Failed to parse archData from sessionStorage:', err)
+          }
         }
       }
+
+      if (archData) {
+        try {
+          // 切到 3 步骤模式 (类型 → 配置 → 展示)
+          initFromArchDataManager()
+
+          // 加载数据 (下游 initDataFromArch 内部逻辑零修改, archData 结构一致)
+          await initDataFromArch(archData)
+
+          // 恢复 currentStep
+          // 优先级: 1) sessionStorage (F5 后) > 2) 默认 3
+          let restoredStep = null
+          const savedStepStr = sessionStorage.getItem('archDataCurrentStep')
+          if (savedStepStr) {
+            const savedStep = parseInt(savedStepStr, 10)
+            if (Number.isFinite(savedStep) && savedStep >= 3 && savedStep <= 5) {
+              restoredStep = savedStep
+            }
+          }
+          currentStep.value = restoredStep !== null ? restoredStep : 3
+        } catch (err) {
+          console.error('[v32] Failed to initialize from arch data:', err)
+        }
+      } else {
+        console.log('[v32] no archData (neither Pinia nor sessionStorage), using 6-step default flow')
+      }
+
+      // [v32] 监听 chartArchStore.sequence, 处理"已在 chart tab 内再次点 图表视图"场景
+      //   - 路由不变 (router.push 相同路径不会 re-mount), 需通过 sequence 触发重新初始化
+      watch(() => chartArchStore.sequence, async (newSeq) => {
+        if (newSeq > 0) {
+          const newArchData = chartArchStore.archData
+          if (newArchData) {
+            console.log('[v32] chartArchStore.sequence changed, re-initializing')
+            resetSteps()
+            initFromArchDataManager()
+            try {
+              await initDataFromArch(newArchData)
+              currentStep.value = 3
+            } catch (err) {
+              console.error('[v32] re-initialization failed:', err)
+            }
+          }
+        }
+      })
+
+      // [v32-FIX] 监听 currentStep 变化, 同步到 sessionStorage (F5 后能恢复精确步骤)
+      //   场景: 3 步骤模式下用户从 step 3 走到 step 4/5, F5 后要恢复
+      watch(currentStep, (newStep) => {
+        if (initFromArchData.value) {
+          sessionStorage.setItem('archDataCurrentStep', String(newStep))
+        } else {
+          // 6 步骤模式不保留
+          sessionStorage.removeItem('archDataCurrentStep')
+        }
+      })
 
       // 测试专用: dev 环境暴露组件状态到 window，方便 e2e 测试跳过 4 步流程
       // 仅 DEV 构建包含，production 构建 import.meta.env.DEV 为 false，被 dead-code-elimination 移除
@@ -347,7 +412,15 @@ export default {
           // 关键诊断字段：3 步骤模式状态
           visibleSteps,
           displayCurrent,
-          initFromArchData
+          initFromArchData,
+          // 测试用: 模拟 tab 系统二次点击 chart 触发组件 re-mount
+          router,
+          // [v32] 暴露 chartArchStore, e2e 测试可直接验证 store 状态
+          chartArchStore,
+          // DEBUG 临时暴露
+          selectedRelationNodeIds,
+          relationCategoryTree,
+          filteredRelations
         }
         console.log('[AADiagramApp] window.__diagramApp exposed (new)')
       }
@@ -379,6 +452,7 @@ export default {
       if (initFromArchData.value && displayCurrent.value === 0) {
         // 3 步骤模式的第一步（类型）：上一步返回架构数据管理页面
         sessionStorage.setItem('returningFromDiagram', 'true')
+        // [v32] 不再需要清除 sessionStorage 中的 archData 备份 (已废弃)
         router.push('/system/archdata')
       } else if (currentStep.value > 0) {
         // 其他情况：正常回退上一步

@@ -217,8 +217,11 @@ class QueryService:
         builder = QueryBuilder(self.ds, meta_obj)
 
         # 应用元模型驱动的过滤条件
+        hierarchy_scope_filters: list = []
         if request.filter_params:
-            self._apply_meta_driven_filters(builder, meta_obj, request.filter_params, request.filter_scope)
+            hierarchy_scope_filters = self._apply_meta_driven_filters(
+                builder, meta_obj, request.filter_params, request.filter_scope
+            ) or []
 
         # [M3 2026-06-05] 应用 UnifiedQueryFacade 注入的子查询条件
         # 用于 computed *_count 字段过滤 / 关联查询过滤
@@ -376,11 +379,10 @@ class QueryService:
                 if data:
                     data = self._enrich_audit_virtual_fields(meta_obj, data)
                     try:
-                        from meta.core.interceptors.persistence_interceptor import PersistenceInterceptor
-                        pi = PersistenceInterceptor()
-                        data = pi._enrich_fk_display_names(meta_obj, data, self.ds)
+                        from meta.core.enrichment_engine import EnrichmentEngine
+                        data = EnrichmentEngine.for_data_source(self.ds).enrich_fk_display_names(meta_obj, data)
                     except Exception as e:
-                        logger.warning(f"[QueryService.search] _enrich_fk_display_names failed: {e}")
+                        logger.warning(f"[QueryService.search] enrich_fk_display_names failed: {e}")
                     data = self._compute_list_computed_fields(meta_obj, data)
 
                 return SearchResult(
@@ -434,11 +436,10 @@ class QueryService:
                     if data:
                         data = self._enrich_audit_virtual_fields(meta_obj, data)
                         try:
-                            from meta.core.interceptors.persistence_interceptor import PersistenceInterceptor
-                            pi = PersistenceInterceptor()
-                            data = pi._enrich_fk_display_names(meta_obj, data, self.ds)
+                            from meta.core.enrichment_engine import EnrichmentEngine
+                            data = EnrichmentEngine.for_data_source(self.ds).enrich_fk_display_names(meta_obj, data)
                         except Exception as e:
-                            logger.warning(f"[QueryService.search] _enrich_fk_display_names failed: {e}")
+                            logger.warning(f"[QueryService.search] enrich_fk_display_names failed: {e}")
                         data = self._compute_list_computed_fields(meta_obj, data)
                     return SearchResult(
                         data=data,
@@ -500,23 +501,41 @@ class QueryService:
 
         # 注入 FK display names（与 _do_list 保持一致）
         try:
-            from meta.core.interceptors.persistence_interceptor import PersistenceInterceptor
-            pi = PersistenceInterceptor()
-            data = pi._enrich_fk_display_names(meta_obj, data, self.ds)
+            from meta.core.enrichment_engine import EnrichmentEngine
+            data = EnrichmentEngine.for_data_source(self.ds).enrich_fk_display_names(meta_obj, data)
         except Exception as e:
-            logger.warning(f"[QueryService.search] _enrich_fk_display_names failed: {e}")
+            logger.warning(f"[QueryService.search] enrich_fk_display_names failed: {e}")
 
         if data:
             data = self._compute_list_computed_fields(meta_obj, data)
 
+        # [FIX 2026-06-10] 计算 hierarchy_scope 虚拟字段 (category_type / category_label)
+        #   之前 _compute_list_computed_fields 不计算 computed_by='hierarchy_scope' 字段,
+        #   导致排序和过滤路径上字段为 None, 需在内存 sort/filter 前显式计算
+        if data:
+            try:
+                from meta.services.computation_service import computation_service
+                computation_service.compute_by_semantics(meta_obj.id, data, self.ds)
+            except Exception as e:
+                logger.warning(f"[QueryService.search] compute_by_semantics failed: {e}")
+
+        # [FIX 2026-06-10] 应用 hierarchy_scope 内存 filter (category_type)
+        #   必须在 compute_by_semantics 之后, sort/paginate 之前
+        if data and hierarchy_scope_filters:
+            data = self._apply_hierarchy_scope_filter_in_memory(
+                data, hierarchy_scope_filters
+            )
+            total = len(data)
+            total_pages = (total + request.page_size - 1) // request.page_size if request.page_size > 0 else 0
+
         if order_clause:
             data = self._sort_by_virtual_fields(meta_obj, data, order_clause)
-        
+
         if memory_sort_field and memory_sort_computed_by:
             data = self._sort_by_computed_field(data, memory_sort_field, memory_sort_direction, memory_sort_computed_by, meta_obj, memory_sort_formula)
 
         # [FR-007] 内存排序后 Python 分页
-        if memory_sort_field and data:
+        if (memory_sort_field or hierarchy_scope_filters) and data:
             start = (request.page - 1) * request.page_size
             data = data[start:start + request.page_size]
 
@@ -593,7 +612,7 @@ class QueryService:
         formula: str = None
     ) -> List[Dict[str, Any]]:
         """对计算型虚拟字段进行内存排序
-        
+
         Args:
             data: 查询结果数据
             order_field: 排序字段
@@ -601,51 +620,122 @@ class QueryService:
             computed_by: 计算函数标识
             meta_obj: 元对象
             formula: 公式表达式（当 computed_by='formula' 时使用）
-            
+
         Returns:
             排序后的数据
         """
         if not data:
             return data
-        
+
         logger.info(f"[ComputedSort] Sorting {len(data)} records by {order_field} ({direction}) using computed_by={computed_by}")
-        
+
+        # [FIX 2026-06-10] hierarchy_scope 按 scope_id 排序, 并按 enum sort_order
+        #   之前误用 name (label) 排序, 导致 category_type 字典序错乱
+        #   category_label (label) 与 category_type (scope_id) 应分别处理
         if computed_by == 'hierarchy_scope':
             from meta.services.cascade_service import HierarchyConfigLoader
+            from meta.services.query.computed_utils import _get_scope_sort_order
 
             self._ensure_hierarchy_ids_for_relationships(data)
 
             for item in data:
-                if order_field not in item or item.get(order_field) is None:
-                    name, _, _ = HierarchyConfigLoader.compute_scope(item)
-                    if not name:
-                        name = '同服务模块'
-                    item[order_field] = name
-        
+                if item.get(order_field) is None:
+                    name, scope_id, _ = HierarchyConfigLoader.compute_scope(item)
+                    if order_field == 'category_label':
+                        item[order_field] = name or '同服务模块'
+                    else:  # category_type 或其他 id 字段
+                        item[order_field] = scope_id or 'same_module'
+
         elif computed_by == 'formula' and formula:
             from meta.core.rule_executor import ExpressionEvaluator, RuleContext
-            
+
             for item in data:
                 if order_field not in item or item.get(order_field) is None:
                     context = RuleContext(meta_obj, item)
                     value = ExpressionEvaluator.evaluate(formula, context)
                     item[order_field] = value
-        
+
         elif computed_by == 'default':
             pass
-        
+
         reverse = direction.lower() == 'desc'
-        
+
+        # [FIX 2026-06-10] hierarchy_scope 排序键: scope_id 走 enum sort_order,
+        #   label 字段走 label 字符串; 其余字段保持原字符串
+        sort_key_fn = self._build_sort_key(order_field, computed_by)
+
+        sorted_data = sorted(data, key=sort_key_fn, reverse=reverse)
+        logger.info(f"[ComputedSort] Sorted {len(sorted_data)} records")
+
+        return sorted_data
+
+    def _build_sort_key(self, order_field: str, computed_by: str):
+        """构造排序键函数
+
+        hierarchy_scope + category_type 走 enum sort_order (跨领域 < 同领域跨子领域 < 同子领域跨服务模块 < 同服务模块)
+        hierarchy_scope + category_label 走 label 字符串
+        其余字段保持原字符串
+        """
+        if computed_by == 'hierarchy_scope' and order_field == 'category_type':
+            from meta.services.query.computed_utils import _get_scope_sort_order
+            scope_order = _get_scope_sort_order()
+            def sort_key(item):
+                val = item.get(order_field, '')
+                if val is None:
+                    return 999
+                return scope_order.get(val, 999)
+            return sort_key
+
         def sort_key(item):
             val = item.get(order_field, '')
             if val is None:
                 return ''
             return str(val)
-        
-        sorted_data = sorted(data, key=sort_key, reverse=reverse)
-        logger.info(f"[ComputedSort] Sorted {len(sorted_data)} records")
-        
-        return sorted_data
+
+        return sort_key
+
+    def _apply_hierarchy_scope_filter_in_memory(
+        self,
+        data: List[Dict[str, Any]],
+        filters: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """在内存中应用 hierarchy_scope 字段的过滤条件 (category_type)
+
+        Args:
+            data: 已计算 category_type/category_label 的记录列表
+            filters: [{'field_id': 'category_type', 'value': 'cross_domain'}, ...]
+
+        Returns:
+            过滤后的记录列表
+        """
+        if not data or not filters:
+            return data
+
+        logger.info(f"[HierarchyScopeFilter] Applying {len(filters)} in-memory filter(s) to {len(data)} records")
+
+        for f in filters:
+            field_id = f['field_id']
+            filter_value = f['value']
+            if filter_value is None or filter_value == '':
+                continue
+
+            if isinstance(filter_value, (list, tuple, set)):
+                target_values = set(str(v) for v in filter_value if v is not None and v != '')
+            else:
+                target_values = {str(filter_value)}
+
+            before_count = len(data)
+            data = [
+                item for item in data
+                if str(item.get(field_id, '')) in target_values
+            ]
+            after_count = len(data)
+            logger.info(
+                f"[HierarchyScopeFilter] {field_id} IN {target_values}: "
+                f"{before_count} -> {after_count}"
+            )
+
+        return data
     
     def _ensure_hierarchy_ids_for_relationships(self, data: List[Dict[str, Any]]):
         return ensure_hierarchy_ids_for_relationships(self.ds, data)
@@ -675,66 +765,27 @@ class QueryService:
         scope = computation.get('scope', 'self')
         
         if comp_type == 'count_relations':
-            rel_table = 'relationships'
-            if scope == 'self' and object_type == 'business_object':
-                count_subquery = (
-                    f"(SELECT COUNT(*) FROM {rel_table} "
-                    f"WHERE {rel_table}.source_bo_id = {table_name}.id "
-                    f"OR {rel_table}.target_bo_id = {table_name}.id) "
-                    f"AS _sort_val"
+            from meta.services.query.computed_subqueries import build_count_relations_expr
+            count_subquery_expr = build_count_relations_expr(
+                table_name, object_type, scope=scope
+            )
+            if not count_subquery_expr:
+                logger.warning(
+                    f"[ComputedSort] Unsupported count_relations scope/object: "
+                    f"scope={scope}, object_type={object_type}"
                 )
-            elif scope == 'self' and object_type == 'user_group':
-                count_subquery = (
-                    f"(SELECT COUNT(*) FROM user_group_members "
-                    f"WHERE user_group_members.group_id = {table_name}.id) "
-                    f"AS _sort_val"
-                )
-            elif scope == 'descendants':
-                if object_type == 'domain':
-                    count_subquery = (
-                        f"(SELECT COUNT(DISTINCT r.id) FROM relationships r "
-                        f"WHERE r.source_bo_id IN ("
-                        f"SELECT bo.id FROM business_objects bo "
-                        f"JOIN service_modules sm ON bo.service_module_id = sm.id "
-                        f"JOIN sub_domains sd ON sm.sub_domain_id = sd.id "
-                        f"WHERE sd.domain_id = {table_name}.id) "
-                        f"OR r.target_bo_id IN ("
-                        f"SELECT bo.id FROM business_objects bo "
-                        f"JOIN service_modules sm ON bo.service_module_id = sm.id "
-                        f"JOIN sub_domains sd ON sm.sub_domain_id = sd.id "
-                        f"WHERE sd.domain_id = {table_name}.id)) "
-                        f"AS _sort_val"
-                    )
-                elif object_type == 'sub_domain':
-                    count_subquery = (
-                        f"(SELECT COUNT(DISTINCT r.id) FROM relationships r "
-                        f"WHERE r.source_bo_id IN ("
-                        f"SELECT bo.id FROM business_objects bo "
-                        f"JOIN service_modules sm ON bo.service_module_id = sm.id "
-                        f"WHERE sm.sub_domain_id = {table_name}.id) "
-                        f"OR r.target_bo_id IN ("
-                        f"SELECT bo.id FROM business_objects bo "
-                        f"JOIN service_modules sm ON bo.service_module_id = sm.id "
-                        f"WHERE sm.sub_domain_id = {table_name}.id)) "
-                        f"AS _sort_val"
-                    )
-                elif object_type == 'service_module':
-                    count_subquery = (
-                        f"(SELECT COUNT(DISTINCT r.id) FROM relationships r "
-                        f"WHERE r.source_bo_id IN ("
-                        f"SELECT bo.id FROM business_objects bo "
-                        f"WHERE bo.service_module_id = {table_name}.id) "
-                        f"OR r.target_bo_id IN ("
-                        f"SELECT bo.id FROM business_objects bo "
-                        f"WHERE bo.service_module_id = {table_name}.id)) "
-                        f"AS _sort_val"
-                    )
-                else:
-                    logger.warning(f"[ComputedSort] Unknown object_type for descendants scope: {object_type}")
-                    return builder.execute(), builder.count_all()
-            else:
-                logger.warning(f"[ComputedSort] Unsupported count_relations scope/object: scope={scope}, object_type={object_type}")
                 return builder.execute(), builder.count_all()
+            count_subquery = f"{count_subquery_expr} AS _sort_val"
+        elif comp_type == 'count_children':
+            # [FIX 2026-06-08] count_children DB 排序支持
+            from meta.services.query.computed_subqueries import build_count_children_expr
+            count_subquery_expr = build_count_children_expr(table_name, object_type)
+            if not count_subquery_expr:
+                logger.warning(
+                    f"[ComputedSort] Unknown object_type for count_children: {object_type}"
+                )
+                return builder.execute(), builder.count_all()
+            count_subquery = f"{count_subquery_expr} AS _sort_val"
         else:
             logger.warning(f"[ComputedSort] Unknown computation type: {comp_type}")
             return builder.execute(), builder.count_all()
@@ -941,15 +992,17 @@ class QueryService:
         meta_obj: MetaObject,
         filter_params: Dict[str, str],
         filter_scope: str = 'global'
-    ) -> None:
-        """
-        应用元模型驱动的过滤条件
-        
+    ) -> list:
+        """[FIX pre-existing bug] 返回 hierarchy_scope_filters 列表供 search() 应用内存过滤.
+
         Args:
             builder: 查询构建器
             meta_obj: 元模型对象
             filter_params: 过滤参数（来自前端）
             filter_scope: 过滤作用域（'global' 或 'local'）
+
+        Returns:
+            hierarchy_scope_filters: 用于内存过滤的层级 scope 条件列表
         """
         try:
             from meta.core.redundancy_registry import redundancy_registry
@@ -995,6 +1048,7 @@ class QueryService:
             
             virtual_field_filters = []
             computed_field_filters = []
+            hierarchy_scope_filters = []
             
             meta_dict = {
                 'fields': []
@@ -1062,14 +1116,24 @@ class QueryService:
                             })
                             logger.info(f"[ComputedFieldFilter] Computed field '{f.id}' with computation type '{computation.get('type')}', will use subquery filter")
                         elif is_virtual:
-                            red_def = redundancy_registry.get_redundancy(meta_obj.id, f.id)
-                            if red_def and red_def.join_path:
-                                virtual_field_filters.append({
+                            # [FIX 2026-06-10] hierarchy_scope computed 虚拟字段走内存 filter
+                            semantics = getattr(f, 'semantics', None)
+                            computed_by = getattr(semantics, 'computed_by', None) if semantics else None
+                            if computed_by == 'hierarchy_scope':
+                                hierarchy_scope_filters.append({
                                     'field_id': f.id,
                                     'value': filter_value,
-                                    'red_def': red_def,
                                 })
-                                logger.info(f"[VirtualFieldFilter] Virtual field '{f.id}' has redundancy join_path, will use EXISTS filter")
+                                logger.info(f"[HierarchyScopeFilter] Virtual field '{f.id}' with computed_by='hierarchy_scope', will use in-memory filter")
+                            else:
+                                red_def = redundancy_registry.get_redundancy(meta_obj.id, f.id)
+                                if red_def and red_def.join_path:
+                                    virtual_field_filters.append({
+                                        'field_id': f.id,
+                                        'value': filter_value,
+                                        'red_def': red_def,
+                                    })
+                                    logger.info(f"[VirtualFieldFilter] Virtual field '{f.id}' has redundancy join_path, will use EXISTS filter")
             
             conditions = filter_service.build_filters_from_meta(
                 meta_dict,
@@ -1146,7 +1210,8 @@ class QueryService:
         
         except Exception as e:
             logger.error(f"[MetaFilter] Failed to apply meta-driven filters: {e}")
-    
+        return hierarchy_scope_filters
+
     def _apply_computed_field_filter(
         self,
         builder: QueryBuilder,
@@ -1225,7 +1290,7 @@ class QueryService:
     ) -> bool:
         """
         应用关系数量过滤
-        
+
         Args:
             builder: 查询构建器
             table_name: 表名
@@ -1233,71 +1298,30 @@ class QueryService:
             scope: 作用域 (self/descendants)
             op: 操作符
             value: 过滤值
-            
+
         Returns:
             是否成功应用
         """
         try:
-            rel_table = 'relationships'
-            
-            if scope == 'self' and object_type == 'business_object':
-                count_expr = (
-                    f"(SELECT COUNT(*) FROM {rel_table} "
-                    f"WHERE {rel_table}.source_bo_id = {table_name}.id "
-                    f"OR {rel_table}.target_bo_id = {table_name}.id)"
+            from meta.services.query.computed_subqueries import build_count_relations_expr
+            count_expr = build_count_relations_expr(
+                table_name, object_type, scope=scope
+            )
+            if not count_expr:
+                logger.warning(
+                    f"[ComputedFieldFilter] Unsupported count_relations scope/object: "
+                    f"scope={scope}, object_type={object_type}"
                 )
-            elif scope == 'descendants':
-                if object_type == 'domain':
-                    count_expr = (
-                        f"(SELECT COUNT(DISTINCT r.id) FROM relationships r "
-                        f"WHERE r.source_bo_id IN ("
-                        f"SELECT bo.id FROM business_objects bo "
-                        f"JOIN service_modules sm ON bo.service_module_id = sm.id "
-                        f"JOIN sub_domains sd ON sm.sub_domain_id = sd.id "
-                        f"WHERE sd.domain_id = {table_name}.id) "
-                        f"OR r.target_bo_id IN ("
-                        f"SELECT bo.id FROM business_objects bo "
-                        f"JOIN service_modules sm ON bo.service_module_id = sm.id "
-                        f"JOIN sub_domains sd ON sm.sub_domain_id = sd.id "
-                        f"WHERE sd.domain_id = {table_name}.id))"
-                    )
-                elif object_type == 'sub_domain':
-                    count_expr = (
-                        f"(SELECT COUNT(DISTINCT r.id) FROM relationships r "
-                        f"WHERE r.source_bo_id IN ("
-                        f"SELECT bo.id FROM business_objects bo "
-                        f"JOIN service_modules sm ON bo.service_module_id = sm.id "
-                        f"WHERE sm.sub_domain_id = {table_name}.id) "
-                        f"OR r.target_bo_id IN ("
-                        f"SELECT bo.id FROM business_objects bo "
-                        f"JOIN service_modules sm ON bo.service_module_id = sm.id "
-                        f"WHERE sm.sub_domain_id = {table_name}.id))"
-                    )
-                elif object_type == 'service_module':
-                    count_expr = (
-                        f"(SELECT COUNT(DISTINCT r.id) FROM relationships r "
-                        f"WHERE r.source_bo_id IN ("
-                        f"SELECT bo.id FROM business_objects bo "
-                        f"WHERE bo.service_module_id = {table_name}.id) "
-                        f"OR r.target_bo_id IN ("
-                        f"SELECT bo.id FROM business_objects bo "
-                        f"WHERE bo.service_module_id = {table_name}.id))"
-                    )
-                else:
-                    logger.warning(f"[ComputedFieldFilter] Unknown object_type for descendants scope: {object_type}")
-                    return False
-            else:
-                logger.warning(f"[ComputedFieldFilter] Unsupported count_relations scope/object: scope={scope}, object_type={object_type}")
                 return False
-            
+
             where_clause = self._build_computed_where_clause(count_expr, op, value)
             if where_clause:
                 builder.where_raw(where_clause)
                 logger.info(f"[ComputedFieldFilter] Applied count_relations filter: {where_clause}")
                 return True
-            
+
             return False
-            
+
         except Exception as e:
             logger.error(f"[ComputedFieldFilter] Failed to apply count_relations filter: {e}")
             return False
@@ -1312,45 +1336,34 @@ class QueryService:
     ) -> bool:
         """
         应用子节点数量过滤
-        
+
         Args:
             builder: 查询构建器
             table_name: 表名
             object_type: 对象类型
             op: 操作符
             value: 过滤值
-            
+
         Returns:
             是否成功应用
         """
         try:
-            if object_type == 'service_module':
-                count_expr = (
-                    f"(SELECT COUNT(*) FROM business_objects bo "
-                    f"WHERE bo.service_module_id = {table_name}.id)"
+            from meta.services.query.computed_subqueries import build_count_children_expr
+            count_expr = build_count_children_expr(table_name, object_type)
+            if not count_expr:
+                logger.warning(
+                    f"[ComputedFieldFilter] Unknown object_type for count_children: {object_type}"
                 )
-            elif object_type == 'sub_domain':
-                count_expr = (
-                    f"(SELECT COUNT(*) FROM service_modules sm "
-                    f"WHERE sm.sub_domain_id = {table_name}.id)"
-                )
-            elif object_type == 'domain':
-                count_expr = (
-                    f"(SELECT COUNT(*) FROM sub_domains sd "
-                    f"WHERE sd.domain_id = {table_name}.id)"
-                )
-            else:
-                logger.warning(f"[ComputedFieldFilter] Unknown object_type for count_children: {object_type}")
                 return False
-            
+
             where_clause = self._build_computed_where_clause(count_expr, op, value)
             if where_clause:
                 builder.where_raw(where_clause)
                 logger.info(f"[ComputedFieldFilter] Applied count_children filter: {where_clause}")
                 return True
-            
+
             return False
-            
+
         except Exception as e:
             logger.error(f"[ComputedFieldFilter] Failed to apply count_children filter: {e}")
             return False

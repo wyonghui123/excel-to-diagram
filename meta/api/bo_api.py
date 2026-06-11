@@ -87,6 +87,33 @@ def _get_data_source():
     return _data_source
 
 
+# ── [R0-2 2026-06-11] 422 ComputationNotSupportedError 统一拦截 ──
+from meta.core.computed_field_query import ComputationNotSupportedError
+
+
+@bo_bp.errorhandler(ComputationNotSupportedError)
+def handle_computation_not_supported(e: ComputationNotSupportedError):
+    """计算字段不被支持 → 422 + 明确错误码, 不再 silent fallback
+
+    [决策5] 422 Unprocessable Entity 语义最准:
+    请求格式正确, 但服务器无法处理 (computation.type 配错了对象类型)
+    """
+    logger.warning(
+        f"[bo_api] ComputationNotSupported: comp_type={e.comp_type} "
+        f"object_type={e.object_type} scope={e.scope}"
+    )
+    return jsonify({
+        'success': False,
+        'error_code': 'COMPUTATION_NOT_SUPPORTED',
+        'message': str(e),
+        'details': {
+            'comp_type': e.comp_type,
+            'object_type': e.object_type,
+            'scope': e.scope,
+        }
+    }), 422
+
+
 # ── CRUD ──
 
 @bo_bp.route('/<object_type>', methods=['POST'])
@@ -214,6 +241,30 @@ def query_bo(object_type):
     # 计算offset
     offset = (page - 1) * page_size
 
+    # [FIX 2026-06-10] relationship 对象对 category_label / category_type 排序需要
+    # 内联子查询计算层级 scope, 因为 DB 中这 2 列大多为 NULL (enrichment 发生在 SQL 后).
+    # 这里直接走 special_routes_api 同款 SQL, 绕过 crud_query 静默忽略未知列的问题.
+    scope_order_sql = None
+    scope_order_is_desc = False
+    if object_type == 'relationship' and ordering:
+        bare = ordering.lstrip('-')
+        if bare in ('category_label', 'category_type'):
+            from meta.api.special_routes_api import _build_relationship_scope_sort_sql
+            from meta.core.virtual_field_transform import load_scope_rules_from_ref
+            rules = load_scope_rules_from_ref('hierarchies.hierarchy_scopes')
+            logger.info(f"[query_bo] relationship sorting: ordering={ordering}, bare={bare}, rules_count={len(rules) if rules else 0}")
+            if rules:
+                scope_order_sql = _build_relationship_scope_sort_sql(rules, bare)
+                scope_order_is_desc = ordering.startswith('-')
+                logger.info(f"[query_bo] scope_order_sql={scope_order_sql[:200]}..., is_desc={scope_order_is_desc}")
+                return _query_relationship_with_scope(
+                    page=page, page_size=page_size, offset=offset,
+                    clean_filters=clean_filters,
+                    scope_sql=scope_order_sql, is_desc=scope_order_is_desc,
+                )
+            else:
+                logger.warning(f"[query_bo] rules is empty, falling back to crud_query (virtual field sorting may not work)")
+
     # 构建查询参数，只传递过滤参数
     query_params = clean_filters.copy()
     if ordering:
@@ -226,19 +277,19 @@ def query_bo(object_type):
 
     # 直接使用crud_query action
     result = bo.execute(object_type, 'crud_query', query_params)
-    
+
     logger.info(f"[query_bo] result.success={result.success}, result.data type={type(result.data)}, len={len(result.data) if hasattr(result.data, '__len__') else 'N/A'}")
-    
+
     # 转换数据格式以匹配前端期望
     if result.success:
         raw_data = result.data
-        
+
         # 从 ActionResult 获取 total
         total = getattr(result, 'total', None)
         if total is None:
             # 如果 result.total 不存在，使用 len(raw_data)
             total = len(raw_data) if isinstance(raw_data, list) else 0
-        
+
         # 获取 filters 数组（从 view-config 中获取）
         filters = []
         try:
@@ -247,7 +298,7 @@ def query_bo(object_type):
                 filters = config.list.filters if hasattr(config.list, 'filters') else []
         except Exception as e:
             logger.warning(f"[query_bo] Failed to get filters from view-config: {e}")
-        
+
         # 检查是否是数组格式（来自 _do_list）
         if isinstance(raw_data, list):
             computation_service.compute_by_semantics(object_type, raw_data)
@@ -270,6 +321,122 @@ def query_bo(object_type):
         logger.error(f"[query_bo] Error: {result.message}")
         status_code = result.status_code or 400
         return jsonify({'success': False, 'message': result.message}), status_code
+
+
+# [SPR-08 T-S14-01] relationship 过滤白名单数据化
+# 简易白名单过滤 (前端用 crud_query 行为对齐: 多值字段用 __in, 逗号分隔)
+# 注: relation_code 不在这里, 因为它跟 relation_code__in 互斥 (优先级 __in > 精确)
+_RELATIONSHIP_SIMPLE_EQ_FIELDS = ('version_id', 'product_code', 'version_code')
+_RELATIONSHIP_IN_FIELD_KEYS = ('category_types', 'category_type')  # 复用同一 SQL 字段 category_type
+
+
+def _build_relationship_filter_clause(clean_filters: dict) -> tuple:
+    """[SPR-08 T-S14-01] 构建 relationship 表 WHERE 子句, 严格走白名单防 SQL 注入.
+
+    支持:
+    - 简单 EQ: version_id / product_code / version_code
+    - relation_code 精确 / __in 多值 (互斥, __in 优先)
+    - category_type(s) 多值 IN (category_types 和 category_type 都支持)
+
+    Returns:
+        (where_clause, params): where_clause 至少 '1=1' (无任何条件时)
+    """
+    conditions = []
+    bind_params = []
+
+    for field in _RELATIONSHIP_SIMPLE_EQ_FIELDS:
+        if field in clean_filters:
+            conditions.append(f'{field} = ?')
+            bind_params.append(clean_filters[field])
+
+    # relation_code 精确 / __in 互斥 (__in 优先, 与原 if/elif 行为对齐)
+    if 'relation_code__in' in clean_filters:
+        codes = [c.strip() for c in str(clean_filters['relation_code__in']).split(',') if c.strip()]
+        if codes:
+            placeholders = ','.join('?' for _ in codes)
+            conditions.append(f'relation_code IN ({placeholders})')
+            bind_params.extend(codes)
+    elif 'relation_code' in clean_filters:
+        conditions.append('relation_code = ?')
+        bind_params.append(clean_filters['relation_code'])
+
+    # category_type(s) 多值 IN (取第一个非空 key)
+    for key in _RELATIONSHIP_IN_FIELD_KEYS:
+        if key in clean_filters and clean_filters[key]:
+            cts = [c.strip() for c in str(clean_filters[key]).split(',') if c.strip()]
+            if cts:
+                placeholders = ','.join('?' for _ in cts)
+                conditions.append(f'category_type IN ({placeholders})')
+                bind_params.extend(cts)
+            break  # 只取第一个非空的 key
+
+    where_clause = ' AND '.join(conditions) if conditions else '1=1'
+    return where_clause, bind_params
+
+
+def _query_relationship_with_scope(page, page_size, offset, clean_filters, scope_sql, is_desc):
+    """[FIX 2026-06-10] relationship + scope 排序专用查询路径.
+
+    DB 中 category_label / category_type 列大多为 NULL, 排序必须用 CASE WHEN 内联子查询
+    计算层级 scope. 直接走 data_source.execute, 复用 special_routes_api 的 scope SQL.
+
+    过滤白名单见 _RELATIONSHIP_SIMPLE_EQ_FIELDS / _RELATIONSHIP_IN_FIELD_KEYS.
+    """
+    ds = _get_data_source()
+
+    # [SPR-08 T-S14-01] WHERE 子句委托给白名单 helper
+    where_clause, bind_params = _build_relationship_filter_clause(clean_filters)
+
+    # count
+    count_sql = f"SELECT COUNT(*) FROM relationships WHERE {where_clause}"
+    total_cursor = ds.execute(count_sql, tuple(bind_params))
+    total = total_cursor.fetchone()[0]
+
+    # data
+    direction = 'DESC' if is_desc else 'ASC'
+    logger.info(f"[_query_relationship_with_scope] is_desc={is_desc}, direction={direction}")
+    # 注意: scope_sql 使用了别名 r (r.source_bo_id, r.target_bo_id 等)
+    # 因此 FROM 子句必须使用相同的别名
+    data_sql = f"""
+        SELECT r.* FROM relationships r
+        WHERE {where_clause}
+        ORDER BY ({scope_sql}) {direction}, r.id ASC
+        LIMIT ? OFFSET ?
+    """
+    data_params = list(bind_params) + [page_size, offset]
+    logger.info(f"[_query_relationship_with_scope] data_sql ORDER BY: ({scope_sql}) {direction}")
+    cursor = ds.execute(data_sql, tuple(data_params))
+    columns_desc = [desc[0] for desc in cursor.description]
+    raw_data = [dict(zip(columns_desc, row)) for row in cursor.fetchall()]
+
+    # [FIX 2026-06-11] 必须在 compute_by_semantics 前显式填充 source/target hierarchy ids,
+    # 否则 compute_scope 把所有关系 fallback 为 '同服务模块' (因为 source_domain_id 全是 None),
+    # 用户看到所有行 category_label 都是 '同服务模块', 误以为排序乱序.
+    # SQL 排序实际是对的 (id=29 sort_key=1, id=2-28 sort_key=3, id=1-27 sort_key=4),
+    # 但前端展示因 category_label 都是 '同服务模块' 而显得毫无变化.
+    from meta.services.query.computed_utils import ensure_hierarchy_ids_for_relationships
+    ensure_hierarchy_ids_for_relationships(ds, raw_data)
+    computation_service.compute_by_semantics('relationship', raw_data)
+
+    # 获取 filters 数组
+    filters = []
+    try:
+        config = view_config_service.get_or_build_view_config('relationship', None)
+        if config and hasattr(config, 'list') and config.list:
+            filters = config.list.filters if hasattr(config.list, 'filters') else []
+    except Exception as e:
+        logger.warning(f"[_query_relationship_with_scope] Failed to get filters: {e}")
+
+    return jsonify({
+        'success': True,
+        'data': {
+            'items': raw_data,
+            'total': total,
+            'page': page,
+            'page_size': page_size,
+            'filters': filters
+        }
+    })
 
 
 @bo_bp.route('/<object_type>/deep', methods=['POST'])
@@ -889,6 +1056,49 @@ def get_architecture_preview():
         if bo_id_list:
             business_objects = [b for b in business_objects if b.get('id') in bo_id_list]
 
+        # ── [v32 2026-06-11] 补全 hierarchy 范围（外部 BO 引用的 SM/SD/Domain 需保留）
+        # 场景：用户在管理页勾选 SM 范围 + 关系范围"内+外部"，
+        #      外部 SM 的 BO 会出现在 business_objects 中（因 bo_id_list 为空），
+        #      但 modules/sub_domains/domains 已被严格过滤掉。
+        # 结果：前端 buildServiceModules 无法为外部 SM 创建容器，
+        #      外部 SM 的 BO 变成蓝色孤儿节点。
+        # 修复：从 business_objects 反推缺失的 SM/SD/Domain 并补回。
+        module_id_set = set(module_id_list) if module_id_list else None
+        sub_domain_id_set = set(sub_domain_id_list) if sub_domain_id_list else None
+        domain_id_set = set(domain_id_list) if domain_id_list else None
+        referenced_sm_ids = set()
+        referenced_sub_domain_ids = set()
+        referenced_domain_ids = set()
+        for b in business_objects:
+            sm_id = b.get('service_module_id')
+            sd_id = b.get('sub_domain_id')
+            d_id = b.get('domain_id')
+            if sm_id and (module_id_set is None or sm_id not in module_id_set):
+                referenced_sm_ids.add(sm_id)
+            if sd_id and (sub_domain_id_set is None or sd_id not in sub_domain_id_set):
+                referenced_sub_domain_ids.add(sd_id)
+            if d_id and (domain_id_set is None or d_id not in domain_id_set):
+                referenced_domain_ids.add(d_id)
+        if referenced_sm_ids or referenced_sub_domain_ids or referenced_domain_ids:
+            extra_modules = [m for m in module_result.data if m.get('id') in referenced_sm_ids]
+            extra_sub_domains = [sd for sd in sub_domain_result.data if sd.get('id') in referenced_sub_domain_ids]
+            extra_domains = [d for d in domain_result.data if d.get('id') in referenced_domain_ids]
+            seen = {m.get('id') for m in modules}
+            for m in extra_modules:
+                if m.get('id') not in seen:
+                    modules.append(m)
+                    seen.add(m.get('id'))
+            seen = {sd.get('id') for sd in sub_domains}
+            for sd in extra_sub_domains:
+                if sd.get('id') not in seen:
+                    sub_domains.append(sd)
+                    seen.add(sd.get('id'))
+            seen = {d.get('id') for d in domains}
+            for d in extra_domains:
+                if d.get('id') not in seen:
+                    domains.append(d)
+                    seen.add(d.get('id'))
+
         # 计算 center_scope（中心范围的 BO code 列表）
         center_scope = []
         if bo_id_list:
@@ -1360,10 +1570,7 @@ def _load_scope_rules():
 def _load_annotation_categories():
     """加载备注分类配置"""
     try:
-        from meta.core.datasource import get_data_source
-        import os
-        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'architecture.db')
-        ds = get_data_source("sqlite", database=db_path)
+        ds = _get_data_source()
         cursor = ds.execute(
             "SELECT code, name, name_en FROM enum_values WHERE enum_type_id = 'annotation_category' AND is_active = 1 ORDER BY sort_order"
         )
@@ -1566,11 +1773,9 @@ def get_role_unified_permissions(role_id):
     - manual_exclude: role_permissions 中 granted=0 的记录
     """
     try:
-        from meta.core.datasource import get_data_source
         from meta.services.menu_permission_service import MenuPermissionService
 
-        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'architecture.db')
-        ds = get_data_source("sqlite", database=db_path)
+        ds = _get_data_source()
         menu_service = MenuPermissionService(ds)
 
         # 获取角色已分配的菜单
@@ -1823,10 +2028,7 @@ def update_role_menu_permissions(role_id):
     采用全量替换策略：DELETE 该角色所有 role_permissions 记录，再 INSERT 请求中的手动权限。
     """
     try:
-        from meta.core.datasource import get_data_source
-
-        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'architecture.db')
-        ds = get_data_source("sqlite", database=db_path)
+        ds = _get_data_source()
 
         # 获取角色信息
         cursor = ds.execute("SELECT is_system FROM roles WHERE id = ?", [role_id])

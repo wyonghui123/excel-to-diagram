@@ -842,22 +842,78 @@ class ActionExecutor:
         return errors
 
     def _cleanup_m2m_tables(self, meta_object: MetaObject, id_value: Any):
-        """删除记录时自动清理 M2M 中间表中的关联行"""
+        """删除记录时自动清理 M2M 中间表中的关联行
+
+        [FIX 2026-06-10] 级联删除前先 SELECT 待删行，每条删除记录一条 DISSOCIATE 审计日志。
+        修复 bug：删除 user_group 时，user_group_members / group_roles 等中间表被级联清空，
+        但 audit_logs 表无任何记录，导致审计链断裂。
+
+        注：meta_object.associations 是 dict[str, AssociationDefinition]，
+        不是 list[dict]，要按 key 取值再读字段。
+        """
+        import sys
         associations = getattr(meta_object, 'associations', None)
         if not associations:
             return
-        for assoc in associations:
-            if not isinstance(assoc, dict):
-                continue
-            through = assoc.get('through')
+        for assoc_name, assoc in associations.items():
+            # 支持 dict 与 dataclass 两种形态
+            if isinstance(assoc, dict):
+                _get = lambda k, default=None: assoc.get(k, default)
+            else:
+                _get = lambda k, default=None: getattr(assoc, k, default)
+
+            through = _get('through')
             if not through:
                 continue
-            source_key = assoc.get('source_key')
+            source_key = _get('source_key')
+            target_key = _get('target_key')
+            target_type = _get('target_type') or _get('target_entity')
+            assoc_label = _get('name') or assoc_name or through
             if not source_key:
                 continue
             try:
+                # 1) 先 SELECT 待删的 target IDs（用于写审计）
+                pending_targets: list = []
+                if target_key:
+                    try:
+                        select_cursor = self.ds.execute(
+                            f"SELECT {target_key} FROM {through} WHERE {source_key} = ?",
+                            (id_value,),
+                        )
+                        pending_targets = [row[0] for row in select_cursor.fetchall()]
+                    except Exception as sel_err:
+                        logger.warning(f"[M2M Cleanup] Failed to pre-select from {through}: {sel_err}")
+
+                # 2) 执行级联删除
                 self.ds.execute(f"DELETE FROM {through} WHERE {source_key} = ?", (id_value,))
-                logger.info(f"[M2M Cleanup] Deleted from {through} where {source_key}={id_value}")
+                logger.info(
+                    f"[M2M Cleanup] Deleted {len(pending_targets)} rows from {through} "
+                    f"where {source_key}={id_value}"
+                )
+
+                # 3) 每条删除写一条 DISSOCIATE 审计日志（object_type=父对象）
+                for tgt_id in pending_targets:
+                    try:
+                        self.audit_logger.log(
+                            object_type=meta_object.id,
+                            object_id=id_value,
+                            action='DISSOCIATE',
+                            field_name=str(assoc_label),
+                            old_value={'target_type': target_type, 'target_id': tgt_id}
+                                if target_type else {'target_id': tgt_id},
+                            new_value=None,
+                            parent_object_type=target_type,
+                            parent_object_id=tgt_id,
+                            extra_data={
+                                'cascade_reason': f'{meta_object.id}#{id_value} deletion',
+                                'through_table': through,
+                            },
+                        )
+                    except Exception as audit_err:
+                        logger.warning(
+                            f"[M2M Cleanup] Failed to write DISSOCIATE audit for "
+                            f"{meta_object.id}#{id_value} -/-> {target_type}#{tgt_id}: {audit_err}"
+                        )
             except Exception as e:
                 logger.warning(f"[M2M Cleanup] Failed to clean {through}: {e}")
 
@@ -1150,6 +1206,49 @@ class ActionExecutor:
                     logger.info(f"[_do_list] filter: {field.db_column} = {value}")
 
         logger.info(f"[_do_list] final filters: {filters}")
+
+        # [FIX 2026-06-11] 检测 order_by 是否引用虚拟字段 (storage=VIRTUAL / computed)
+        # 虚拟字段不在 DB 中, ds.find 会静默 fallback 到默认排序.
+        # 这条路径委托给 QueryService.search(), 它正确处理 count_relations / count_children 等子查询排序.
+        # 注: v3.18 之后 crud_query 实际走 persistence_interceptor._do_list, 此处保留作为 fallback 路径.
+        if order_by:
+            from meta.core.models import FieldStorage
+            bare = order_by.lstrip('-')
+            order_field = meta_object.get_field(bare)
+            is_virtual = False
+            if order_field:
+                storage = getattr(order_field, 'storage', None)
+                if storage == FieldStorage.VIRTUAL or getattr(order_field, 'computed', False):
+                    is_virtual = True
+            if is_virtual:
+                logger.info(f"[_do_list] Virtual field order detected: {order_by}, routing to QueryService.search()")
+                try:
+                    from meta.services.query_service import QueryService, SearchRequest, QueryCondition
+                    qs = QueryService(self.ds)
+                    page = (int(offset or 0) // int(limit or 20)) + 1 if limit else 1
+                    page_size = int(limit or 20)
+                    conditions = []
+                    for col, val in filters.items():
+                        conditions.append(QueryCondition(field=col, operator='eq', value=val))
+                    req = SearchRequest(
+                        object_type=meta_object.id,
+                        conditions=conditions,
+                        order_by=order_by,
+                        page=page,
+                        page_size=page_size,
+                        skip_count=False,
+                    )
+                    result = qs.search(req)
+                    logger.info(f"[_do_list] QueryService.search returned {len(result.data)} rows, total={result.total}")
+                    if result.data:
+                        try:
+                            from meta.core.enrichment_engine import EnrichmentEngine
+                            result.data = EnrichmentEngine.for_data_source(self.ds).enrich_fk_display_names(meta_object, result.data)
+                        except Exception as e:
+                            logger.warning(f"[_do_list] enrich_fk_display_names failed: {e}")
+                    return ActionResult.ok(data=result.data)
+                except Exception as e:
+                    logger.error(f"[_do_list] QueryService.search routing failed: {e}, falling back to ds.find")
 
         try:
             records = self.ds.find(

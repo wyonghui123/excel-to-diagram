@@ -1,0 +1,149 @@
+# ============================================
+# 管理维度 → 业务对象字段映射配置
+#
+# 目的:
+# 1. 替代 dimension_scope_engine.py 中的硬编码 RESOURCE_TABLE_MAP / PARENT_FIELD_MAP
+# 2. 支持"通用维度"(region/department/business_line 等), 而不仅是业务维度
+# 3. 让维度扩展无需改 Python 代码, 改 YAML 即可
+#
+# 字段说明:
+#   dimension_code: 维度标识 (与 role_dimension_scopes.dimension_code 对应)
+#   dimension_type: business | generic
+#     - business: 维度值是某个 BO 的 ID (如 product_id=1)
+#     - generic: 维度值是独立表的 ID (如 region_id=1, 与 BO 无直接 FK)
+#   applies_to: 该维度适用于哪些 BO 的哪些字段
+#     - bo: 业务对象类型
+#     - field: 承载维度值的字段
+#     - filter_type: direct (本表字段) | fk (外键) | chain (沿 parent 链追溯)
+#   value_table: (仅 generic) 维度值存储表
+#   value_field: (仅 generic) 维度值表的 ID 字段
+#
+# 兼容性:
+#   - 默认从该文件加载; 加载失败时 fallback 到硬编码 RESOURCE_TABLE_MAP/PARENT_FIELD_MAP
+#   - 老角色配置(role_dimension_scopes.dimension_values=[1])依然有效, value_table 留空表示 BO ID
+# ============================================
+
+id: dimension_object_mapping
+name: 管理维度对象映射
+description: 管理维度与业务对象字段的映射配置（替代硬编码）
+persistent: false
+
+# 保留兼容: 业务层级维度 (硬编码层级链)
+dimension_object_mappings:
+  # ────────────────────────────────────────
+  # 业务维度（兼容现有 product/version/domain/sub_domain 4 层）
+  # ────────────────────────────────────────
+  - dimension_code: product
+    dimension_type: business
+    description: 产品维度（业务层级根节点）
+    applies_to:
+      - bo: product
+        field: id
+        filter_type: direct
+      - bo: version
+        field: product_id
+        filter_type: fk
+      - bo: domain
+        field: product_id
+        filter_type: chain
+      - bo: sub_domain
+        field: product_id
+        filter_type: chain
+
+  - dimension_code: version
+    dimension_type: business
+    description: 版本维度
+    applies_to:
+      - bo: version
+        field: id
+        filter_type: direct
+      - bo: domain
+        field: version_id
+        filter_type: fk
+      - bo: sub_domain
+        field: version_id
+        filter_type: chain
+
+  - dimension_code: domain
+    dimension_type: business
+    description: 领域维度
+    applies_to:
+      - bo: domain
+        field: id
+        filter_type: direct
+      - bo: sub_domain
+        field: domain_id
+        filter_type: fk
+
+  - dimension_code: sub_domain
+    dimension_type: business
+    description: 子领域维度
+    applies_to:
+      - bo: sub_domain
+        field: id
+        filter_type: direct
+
+  # ────────────────────────────────────────
+  # 通用维度示例 (为未来扩展预留)
+  # 启用方法: 取消注释并配置对应字段
+  # ────────────────────────────────────────
+  # - dimension_code: region
+  #   dimension_type: generic
+  #   description: 地区维度（按地理区域管理数据）
+  #   value_table: regions       # 维度值存哪张表
+  #   value_field: id            # 维度值表的 ID 字段
+  #   applies_to:
+  #     - bo: product
+  #       field: region_id
+  #       filter_type: direct
+  #     - bo: version
+  #       field: region_id
+  #       filter_type: direct
+  #
+  # - dimension_code: department
+  #   dimension_type: generic
+  #   description: 部门维度（按部门管理数据）
+  #   value_table: departments
+  #   value_field: id
+  #   applies_to:
+  #     - bo: product
+  #       field: owning_dept_id
+  #       filter_type: direct
+  #     - bo: business_object
+  #       field: owning_dept_id
+  #       filter_type: direct
+  #
+  # - dimension_code: business_line
+  #   dimension_type: generic
+  #   description: 业务线条维度
+  #   value_table: business_lines
+  #   value_field: id
+  #   applies_to:
+  #     - bo: product
+  #       field: business_line_id
+  #       filter_type: direct
+
+# ────────────────────────────────────────
+# 维度优先级（解决冲突时的评估顺序）
+# 数值越小优先级越高, 先评估
+# 格式: dimension_code: priority_int
+# ────────────────────────────────────────
+dimension_priority:
+  product: 10
+  version: 20
+  domain: 30
+  sub_domain: 40
+  # region: 5       # 通用维度优先级通常更高
+  # department: 6
+
+# ────────────────────────────────────────
+# 与 owner/visibility 的组合策略
+# ────────────────────────────────────────
+combination_policy:
+  # dimension_scope 与 BO.yaml 的 visibility/owner scope 的组合关系
+  # AND: dimension scope 命中后, 还要满足 visibility/owner 才可见（推荐，符合最小权限）
+  # OR: dimension scope 命中即跳过 visibility/owner（兼容旧行为，不推荐）
+  scope_combination: AND
+
+  # owner 例外: 用户对自己 owner 的资源始终可见（与 visibility 无关）
+  owner_always_visible: true

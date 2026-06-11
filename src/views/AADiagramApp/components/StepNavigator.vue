@@ -134,6 +134,7 @@ export default {
         parts.push(`${prefix}${stats.domains || 0}领域`)
         parts.push(`${prefix}${stats.subDomains || 0}子域`)
         parts.push(`${prefix}${stats.businessObjects || 0}对象`)
+        if (stats.externalBusinessObjects > 0) parts.push(`${prefix}${stats.externalBusinessObjects}外部对象`)  // v29
         parts.push(`${prefix}${stats.objectRelations || 0}关系`)
         return parts.join(' · ')
       }

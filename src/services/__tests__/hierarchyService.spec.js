@@ -241,6 +241,84 @@ describe('buildRelationshipFilterParams', () => {
     })
     expect(result.relation_code__in).toBe('R5')
   })
+
+  // [v3.18 新增] relationIds 优先逻辑
+  it('relationIds 存在时应生成 id__in 而非 relation_code__in', () => {
+    const result = buildRelationshipFilterParams({
+      relationIds: [101, 102, 103],
+      relationCodes: ['R1', 'R2'],
+      categoryTypes: [],
+      filterRelationCodes: []
+    })
+    // relationIds 有值时，优先用精确 ID 过滤
+    expect(result.id__in).toBe('101,102,103')
+    // relation_code__in 不应出现（被 relationIds 覆盖）
+    expect(result.relation_code__in).toBeUndefined()
+  })
+
+  it('relationIds 和 relationCodes 同时存在时 relationIds 优先', () => {
+    // 模拟"范围内"节点被勾选：树同时返回 codes 和 ids
+    const result = buildRelationshipFilterParams({
+      relationIds: [5, 6, 7],
+      relationCodes: ['GENERATES', 'DEPENDS_ON'],
+      categoryTypes: ['cross_domain'],
+      filterRelationCodes: []
+    })
+    expect(result.id__in).toBe('5,6,7')
+    expect(result.relation_code__in).toBeUndefined()
+    expect(result.category_types__in).toBe('cross_domain')
+  })
+
+  it('relationIds 为空时应回退到 relationCodes', () => {
+    const result = buildRelationshipFilterParams({
+      relationIds: [],
+      relationCodes: ['CALLS'],
+      categoryTypes: [],
+      filterRelationCodes: []
+    })
+    expect(result.id__in).toBeUndefined()
+    expect(result.relation_code__in).toBe('CALLS')
+  })
+
+  it('relationIds 为 null/undefined 时应回退到 relationCodes', () => {
+    const resultNull = buildRelationshipFilterParams({
+      relationIds: null,
+      relationCodes: ['CALLS'],
+      categoryTypes: [],
+      filterRelationCodes: []
+    })
+    expect(resultNull.relation_code__in).toBe('CALLS')
+
+    const resultUndef = buildRelationshipFilterParams({
+      relationIds: undefined,
+      relationCodes: ['CALLS'],
+      categoryTypes: [],
+      filterRelationCodes: []
+    })
+    expect(resultUndef.relation_code__in).toBe('CALLS')
+  })
+
+  it('relationIds 为单元素数组时应生成逗号分隔的 id__in', () => {
+    const result = buildRelationshipFilterParams({
+      relationIds: [42],
+      relationCodes: [],
+      categoryTypes: [],
+      filterRelationCodes: []
+    })
+    expect(result.id__in).toBe('42')
+    expect(result.relation_code__in).toBeUndefined()
+  })
+
+  it('relationIds 单独存在时应只生成 id__in', () => {
+    const result = buildRelationshipFilterParams({
+      relationIds: [10, 20],
+      relationCodes: [],
+      categoryTypes: [],
+      filterRelationCodes: []
+    })
+    expect(result.id__in).toBe('10,20')
+    expect(Object.keys(result)).toHaveLength(1)
+  })
 })
 
 describe('getDescendantIds', () => {

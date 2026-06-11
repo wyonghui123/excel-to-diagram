@@ -34,6 +34,90 @@ def _compute_category(relation):
     return ('同服务模块', 'same_module')
 
 
+# [FIX 2026-06-10] relationship 表本身没有 source.domain_id / target.domain_id 列,
+#   hierarchy_scope 规则表达式必须用内联子查询才能在关系表上直接 ORDER BY.
+#   与下方 category_types 过滤逻辑保持一致 (避免 LEFT JOIN d1/d2/sd1/sd2/sm1/sm2)
+def _relationship_source_domain_id():
+    return ("(SELECT sd.domain_id FROM sub_domains sd "
+            "JOIN service_modules sm ON sd.id = sm.sub_domain_id "
+            "JOIN business_objects bo ON sm.id = bo.service_module_id "
+            "WHERE bo.id = r.source_bo_id)")
+
+
+def _relationship_target_domain_id():
+    return ("(SELECT sd.domain_id FROM sub_domains sd "
+            "JOIN service_modules sm ON sd.id = sm.sub_domain_id "
+            "JOIN business_objects bo ON sm.id = bo.service_module_id "
+            "WHERE bo.id = r.target_bo_id)")
+
+
+def _relationship_source_sub_domain_id():
+    return ("(SELECT sm.sub_domain_id FROM service_modules sm "
+            "JOIN business_objects bo ON sm.id = bo.service_module_id "
+            "WHERE bo.id = r.source_bo_id)")
+
+
+def _relationship_target_sub_domain_id():
+    return ("(SELECT sm.sub_domain_id FROM service_modules sm "
+            "JOIN business_objects bo ON sm.id = bo.service_module_id "
+            "WHERE bo.id = r.target_bo_id)")
+
+
+def _relationship_source_service_module_id():
+    return ("(SELECT bo.service_module_id FROM business_objects bo "
+            "WHERE bo.id = r.source_bo_id)")
+
+
+def _relationship_target_service_module_id():
+    return ("(SELECT bo.service_module_id FROM business_objects bo "
+            "WHERE bo.id = r.target_bo_id)")
+
+
+def _build_relationship_scope_sort_sql(rules, sort_by: str) -> str:
+    """将 hierarchy_scopes 规则转换为 relationship 可直接使用的 ORDER BY CASE WHEN.
+
+    关系表本身没有 domain_id / sub_domain_id / service_module_id 列,
+    需用内联子查询从 business_objects → service_modules → sub_domains 派生.
+
+    Args:
+        rules: hierarchy_scopes 规则列表, 每条含 rule, id, name
+        sort_by: 'category_label' (按 name 排序) 或 'category_type' (按 sort_order 排序)
+
+    Returns:
+        SQL CASE 表达式, 可直接嵌入 ORDER BY (...)
+    """
+    src_d = _relationship_source_domain_id()
+    tgt_d = _relationship_target_domain_id()
+    src_sd = _relationship_source_sub_domain_id()
+    tgt_sd = _relationship_target_sub_domain_id()
+    src_sm = _relationship_source_service_module_id()
+    tgt_sm = _relationship_target_service_module_id()
+
+    cases = []
+    for idx, rule in enumerate(rules, 1):
+        rule_expr = rule.get('rule', '').strip()
+        if not rule_expr:
+            continue
+
+        # 解析 rule 表达式: source.domain_id / target.sub_domain_id / source.service_module_id
+        # == 替换为 = (与 _transform_rule_to_sql 行为一致)
+        sql_rule = rule_expr
+        sql_rule = sql_rule.replace('source.domain_id', src_d)
+        sql_rule = sql_rule.replace('target.domain_id', tgt_d)
+        sql_rule = sql_rule.replace('source.sub_domain_id', src_sd)
+        sql_rule = sql_rule.replace('target.sub_domain_id', tgt_sd)
+        sql_rule = sql_rule.replace('source.service_module_id', src_sm)
+        sql_rule = sql_rule.replace('target.service_module_id', tgt_sm)
+        sql_rule = sql_rule.replace('==', '=')
+
+        # [FIX 2026-06-11] SQL 排序统一用 idx (sort_order), 不嵌入中文字符串.
+        # 否则 category_label 走 Chinese collation (同 < 跨) 破坏 sort_order.
+        # category_label 字段值在 compute_by_semantics enrichment 阶段再填充, 顺序由 SQL 保证.
+        cases.append(f"WHEN ({sql_rule}) THEN {idx}")
+
+    return f"CASE {' '.join(cases)} ELSE 999 END"
+
+
 def _compute_relation_stats(ds, version_id, where_clause, params):
     stats = {
         'total': 0,
@@ -124,7 +208,18 @@ def _list_relationships_impl(ds, user, user_id, user_is_admin):
         version_id = data.get('version_id')
         business_objects = data.get('business_objects', [])
         business_object_ids = data.get('business_object_id', [])
-        category_types = data.get('category_types', [])
+        # [FIX 2026-06-10] 兼容 YAML ui_view_config.filter.filters[].key
+        #   YAML 用单数 category_type, 后端传统用复数 category_types
+        #   同时支持 ['a', 'b'] (数组) 与 "a,b" (字符串)
+        category_types_raw = data.get('category_types', [])
+        if not category_types_raw:
+            cat_single = data.get('category_type')
+            category_types = [cat_single] if cat_single else []
+        else:
+            if isinstance(category_types_raw, str):
+                category_types = [v.strip() for v in category_types_raw.split(',') if v.strip()]
+            else:
+                category_types = list(category_types_raw)
         relation_codes = data.get('relation_codes', [])
         relation_ids = data.get('id__in', data.get('relation_ids', []))
         domain_ids = data.get('domain_id', [])
@@ -142,7 +237,28 @@ def _list_relationships_impl(ds, user, user_id, user_is_admin):
         version_id = request.args.get('version_id', type=int)
         business_objects = request.args.getlist('business_objects', type=int)
         business_object_ids = request.args.getlist('business_object_id', type=int)
+        # [FIX 2026-06-10] 兼容 category_type (单数, YAML 规范) 和 category_types (复数, 传统)
+        #   同时支持 ?category_types=a,b (单值逗号分隔) 与 ?category_types=a&category_types=b (多值)
+        #   [FIX 2026-06-10] 前端列头过滤用 category_label (column prop 名), 后端兼容之
         category_types = request.args.getlist('category_types')
+        if not category_types:
+            cat_single = request.args.get('category_type')
+            category_types = [cat_single] if cat_single else []
+        else:
+            # 拆分单值内的逗号分隔: ?category_types=a,b → ['a', 'b']
+            category_types = [
+                v.strip() for raw in category_types
+                for v in raw.split(',') if v and v.strip()
+            ]
+        # [FIX 2026-06-10] 兼容 category_label 参数 (前端列头过滤的 prop 名)
+        if not category_types:
+            cat_label = request.args.get('category_label')
+            if cat_label:
+                category_types = [v.strip() for v in cat_label.split(',') if v.strip()]
+        if not category_types:
+            cat_label_in = request.args.get('category_label__in', '')
+            if cat_label_in:
+                category_types = [v.strip() for v in cat_label_in.split(',') if v.strip()]
         relation_codes = request.args.getlist('relation_codes')
         relation_ids_str = request.args.get('id__in', '')
         relation_ids = [int(x) for x in relation_ids_str.split(',') if x.strip().isdigit()] if relation_ids_str else []
@@ -164,10 +280,12 @@ def _list_relationships_impl(ds, user, user_id, user_is_admin):
     }
 
     if sort_by in ('category_label', 'category_type'):
-        from meta.core.virtual_field_transform import load_scope_rules_from_ref, generate_scope_sql_from_rules
+        # [FIX 2026-06-10] 用内联子查询生成 sort CASE WHEN, 避免依赖 d1/d2/sd1/sd2/sm1/sm2 等 JOIN 别名
+        # 与下方 category_types 过滤逻辑保持一致, 不需要额外的 LEFT JOIN
+        from meta.core.virtual_field_transform import load_scope_rules_from_ref
         rules = load_scope_rules_from_ref('hierarchies.hierarchy_scopes')
         if rules:
-            scope_sql = generate_scope_sql_from_rules(rules, for_sort=True)
+            scope_sql = _build_relationship_scope_sort_sql(rules, sort_by)
             order_field = scope_sql
         else:
             order_field = 'r.created_at'

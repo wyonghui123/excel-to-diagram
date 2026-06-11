@@ -124,34 +124,6 @@ fields:
     ui:
       widget: select
 
-  - id: is_super_admin
-    name: 超级管理员
-    type: boolean
-    db_column: is_super_admin
-    default: false
-    description: 标记是否为超级管理员角色，拥有系统最高权限
-    semantics:
-      meaning: 超级管理员角色标识，用于权限判断
-      system_flag: true
-    enum_values:
-      - value: 1
-        label: 是
-        color: danger
-      - value: 0
-        label: 否
-        color: default
-    ui:
-      hidden_in_form: true
-      editable: false
-      widget: badge
-
-  - id: priority
-    name: 优先级
-    type: integer
-    db_column: priority
-    default: 0
-    description: 角色优先级，用于权限提升检查
-
   - id: created_at
     name: 创建时间
     type: datetime
@@ -325,22 +297,6 @@ ui_view_config:
         labels:
           true: 系统
           false: 自定义
-      - field: is_super_admin
-        width: 100
-        filterable: true
-        filter_type: select
-        widget: badge
-        filter_options:
-          - value: 1
-            label: 是
-          - value: 0
-            label: 否
-        badge_colors:
-          true: danger
-          false: default
-        labels:
-          true: 超管
-          false: 普通
       - field: created_at
         width: 160
         format: datetime
@@ -393,8 +349,8 @@ ui_view_config:
     sections:
       - title: 基本信息
         columns:
-          - fields: [code, name, priority]
-          - fields: [is_active, is_system, is_super_admin]
+          - fields: [code, name]
+          - fields: [is_active, is_system]
       - title: 描述
         columns:
           - fields: [description]

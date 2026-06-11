@@ -22,12 +22,13 @@ deletability:
 
 authorization:
   check: true
-  scope: "owner_id = $user.id"
+  scope: "visibility = 'public' OR owner_id = $user.id"
   auto_owner: true
   auto_permission: admin
   inherit_to_children: true
   allow_transfer: true
-  transfer_keep_permissions: true
+  # TBD-15 决策 (v1.1 owner refactor): transfer 后原 owner 失去 admin 权限
+  transfer_keep_permissions: false
 
 hierarchy:
   enabled: true
@@ -107,6 +108,13 @@ ui_view_config:
         title: 是否活跃
         type: select
         position: 0
+      - key: visibility
+        title: 可见性
+        type: select
+        position: 1
+        options:
+          - { value: private, label: 私有 }
+          - { value: public, label: 公开 }
       - key: description
         title: 描述搜索
         type: text
@@ -155,6 +163,11 @@ ui_view_config:
         position: 3
         importance: medium
         sortable: true
+      - key: visibility
+        title: 可见性
+        width: 80
+        position: 4
+        importance: medium
       - key: child_count
         title: 版本数量
         width: 80
@@ -186,6 +199,7 @@ ui_view_config:
           - name
           - code
           - description
+          - visibility
           - is_active
       - title: 系统信息
         type: fieldGroup
@@ -253,6 +267,7 @@ ui_view_config:
           - name
           - code
           - description
+          - visibility
           - is_active
   change_notification:
     enabled: true
@@ -345,6 +360,40 @@ fields:
       import_visible: true
       export_visible: true
       import_order: 30
+
+  # 🆕 v1.1 owner refactor: product 级 visibility (TBD-7)
+  # 整个产品树 (version/domain/.../business_object) 的可见性由 product.visibility 决定
+  # - private: 仅 product.owner + admin + 显式授权者可见
+  # - public: 所有人可见
+  - id: visibility
+    name: 可见性
+    type: string
+    db_column: visibility
+    description: 产品线可见性 (private/public)，控制整个产品树访问
+    default: private
+    required: true
+    enum_values:
+      - value: private
+        label: 私有
+        color: warning
+        description: 仅产品负责人和管理员可见
+      - value: public
+        label: 公开
+        color: success
+        description: 所有有产品权限的用户可见
+    ui:
+      widget: select
+      visible: true
+      editable: true
+      fieldGroup: 基本信息
+      i18n_key: common.field.visibility
+    semantics:
+      meaning: 产品线的可见性，控制整个产品树的访问权限
+      data_category: code
+      import_visible: true
+      export_visible: true
+      import_order: 5
+      immutable: false  # owner 可改 public <-> private
 
   - id: owner_id
     name: 负责人

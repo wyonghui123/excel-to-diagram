@@ -53,6 +53,19 @@ class KeyTemplateInterceptor(Interceptor):
             return
 
         params = context.params
+
+        # [FIXED 2026-06-11] 同步 relation_type → relation_code
+        # UNIQUE INDEX uidx_relationships_version_source_target_type 在
+        # (version_id, source_bo_id, target_bo_id, relation_code) 上。
+        # 如果前端只传 relation_type 而 relation_code 为 NULL，
+        # 多个相同源/目标/版本的关系都会 NULL 冲突失败（实际 SQLite 中多个 NULL 不冲突），
+        # 但 ORM/驱动层可能判定为重复。
+        # 修复：拦截器自动同步，保证两个字段值一致。
+        if 'relation_type' in params and 'relation_code' not in params:
+            params['relation_code'] = params['relation_type']
+        elif 'relation_code' in params and 'relation_type' not in params:
+            params['relation_type'] = params['relation_code']
+
         code_value = params.get('code', '')
         if code_value and str(code_value).strip():
             return
@@ -62,7 +75,20 @@ class KeyTemplateInterceptor(Interceptor):
 
         self._resolve_parent_fields(context, field_values, config)
 
-        code = self._engine.generate_code(config, field_values, meta_object.id)
+        # [FIXED 2026-06-11] 传递 table_name 和 prefix_filter 以支持 auto_detect_start
+        # 原 BUG: generate_code 不传这两个参数，SequenceEngine.auto_detect_start 使用
+        # config.object_id 作表名（如 'relationship'），但实际表是 'relationships'；
+        # 且没有 prefix_filter，所有关系的 code 混在一起取最大序号。
+        import re as _re
+        physical_table = self._resolve_physical_table(meta_object.id, context)
+        tokens = self._engine._parser.parse(config.pattern)
+        prefix_filter = self._engine._parser.resolve_prefix(tokens, field_values)
+
+        code = self._engine.generate_code(
+            config, field_values, meta_object.id,
+            table_name=physical_table,
+            prefix_filter=prefix_filter
+        )
         if code:
             params['code'] = code
             logger.info(
@@ -85,12 +111,21 @@ class KeyTemplateInterceptor(Interceptor):
                 if parent_field not in context.params:
                     parent_field = ref.removesuffix('_no')
                     parent_field = f"{parent_field}_id"
+                    if parent_field not in context.params:
+                        # 🆕 2026-06-10 兼容 _bo_id 后缀（如 source_bo_id / target_bo_id）
+                        # ref 可能是 source_code/target_code，但 params 字段是 source_bo_id/target_bo_id
+                        bo_id_field = f"{ref.replace('_code', '')}_bo_id"
+                        if bo_id_field in context.params:
+                            parent_field = bo_id_field
             if parent_field in context.params and context.params[parent_field]:
                 parent_id = context.params[parent_field]
                 base_type = ref.replace('_code', '').replace('_no', '')
                 from meta.core.metadata_resolver import MetadataResolver
                 resolved = MetadataResolver.get_table_name(base_type)
                 candidate_tables = [resolved] if resolved != base_type else [base_type, base_type + 's', base_type + 'es']
+                # 🆕 2026-06-10 如果是 source_bo_id/target_bo_id，直接查 business_objects 表
+                if parent_field in ('source_bo_id', 'target_bo_id'):
+                    candidate_tables = ['business_objects']
                 try:
                     ds = context.data_source
                     existing_tables = set()
@@ -130,6 +165,32 @@ class KeyTemplateInterceptor(Interceptor):
                     logger.debug(
                         f"[KeyTemplateInterceptor] Could not resolve {ref}: {e}"
                     )
+
+    def _resolve_physical_table(self, object_type: str, context: ActionContext) -> str:
+        """
+        [NEW 2026-06-11] 将逻辑对象名解析为物理表名。
+        例如 'relationship' → 'relationships'（SQLite 中实际表名带复数 s）。
+        """
+        ds = context.data_source
+        try:
+            existing_tables = set()
+            tables_result = ds.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+            for t in tables_result:
+                existing_tables.add(
+                    t[0] if isinstance(t, tuple) else (t.get('name', '') if isinstance(t, dict) else '')
+                )
+            candidate_tables = [object_type, object_type + 's', object_type + 'es']
+            for ct in candidate_tables:
+                if ct in existing_tables:
+                    logger.debug(
+                        f"[KeyTemplateInterceptor] Resolved table name: {object_type} -> {ct}"
+                    )
+                    return ct
+        except Exception as e:
+            logger.debug(f"[KeyTemplateInterceptor] _resolve_physical_table fallback: {e}")
+        return object_type
 
     def after_action(self, context: ActionContext) -> None:
         pass

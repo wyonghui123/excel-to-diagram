@@ -63,11 +63,18 @@ deletability:
 
 authorization:
   check: true
-  scope: "version_id IN (SELECT id FROM versions WHERE owner_id = $user.id)"
-  auto_owner: true
+  # 🆕 v1.1 owner refactor (TBD-8): 通过 version_id → product 链追溯 (TBD-12 走显式表)
+  scope: "version_id IN (SELECT v.id FROM versions v JOIN products p ON v.product_id = p.id WHERE p.visibility = 'public' OR p.owner_id = $user.id)"
+  # 🆕 TBD-9: 关闭 auto_owner (relationship 本来就没有 owner_id 字段)
+  auto_owner: false
+  # 🆕 TBD-11: 保留 auto_permission=admin
   auto_permission: admin
+  # 🆕 TBD-10: relationship 关系是 cross-version 的, 不继承给子
   inherit_to_children: false
+  # 🆕 v1.1: relationship 不再独立 transfer
   allow_transfer: false
+  # relationship 之前就没有 owner, transfer_keep_permissions 默认 false
+  transfer_keep_permissions: false
 
 context:
   field: version_id
@@ -1008,7 +1015,7 @@ fields:
     semantics:
       meaning: 关系类型的中文名称
       derived_from: relation_type
-      export_visible: true
+      export_visible: false
 
   - id: relation_type_name_en
     name: 关系类型英文名称
@@ -1021,7 +1028,7 @@ fields:
     semantics:
       meaning: 关系类型的英文名称
       derived_from: relation_type
-      export_visible: true
+      export_visible: false
 
   - id: relation_category
     name: 关系分类
@@ -1034,7 +1041,7 @@ fields:
     semantics:
       meaning: 关系类型的业务分类（数据流、流程触发、依赖引用）
       computed_from_enum: relation_type
-      export_visible: true
+      export_visible: false
 
   - id: source_bo_name
     name: 源业务对象
@@ -1060,6 +1067,30 @@ fields:
             to: id
             select: name
 
+  - id: source_bo_code
+    name: 源业务对象编码
+    type: string
+    description: 源业务对象编码（与 source_code 一致，命名对称）
+    storage: virtual
+    ui:
+      visible: true
+      editable: false
+      title: 源业务对象编码
+    semantics:
+      meaning: 源业务对象的编码
+      export_visible: true
+      import_visible: false
+      # 冗余字段一致性声明（Type-B: 虚拟冗余）
+      redundancy:
+        type: virtual
+        source_field: source_bo_id
+        derived_from: business_object.code
+        join_path:
+          - table: business_objects
+            from: source_bo_id
+            to: id
+            select: code
+
   - id: target_bo_name
     name: 目标业务对象
     type: string
@@ -1084,8 +1115,32 @@ fields:
             to: id
             select: name
 
+  - id: target_bo_code
+    name: 目标业务对象编码
+    type: string
+    description: 目标业务对象编码（与 target_code 一致，命名对称）
+    storage: virtual
+    ui:
+      visible: true
+      editable: false
+      title: 目标业务对象编码
+    semantics:
+      meaning: 目标业务对象的编码
+      export_visible: true
+      import_visible: false
+      # 冗余字段一致性声明（Type-B: 虚拟冗余）
+      redundancy:
+        type: virtual
+        source_field: target_bo_id
+        derived_from: business_object.code
+        join_path:
+          - table: business_objects
+            from: target_bo_id
+            to: id
+            select: code
+
   - id: category_label
-    name: 分类维度
+    name: 关系范围
     type: string
     description: 关系分类标签
     storage: virtual
@@ -1094,7 +1149,7 @@ fields:
       editable: false
     semantics:
       meaning: 关系的分类维度标签，根据源和目标业务对象的层级关系计算
-      export_visible: false
+      export_visible: true
       import_visible: false
       computed_by: hierarchy_scope
       scope_rules_ref: hierarchies.hierarchy_scopes
@@ -1110,15 +1165,34 @@ fields:
     description: 分类类型编码
     storage: virtual
     ui:
-      visible: false
+      visible: true
       editable: false
     semantics:
       meaning: 关系的分类类型(cross_domain/same_domain_cross_subdomain/same_subdomain_cross_module/same_module)
+      export_visible: false
       computed_by: hierarchy_scope
       analytics:
         category: dimension
         type: categorical
         display_name: 关系范围
+        sortable: true
+        filterable: true
+        filter_type: select
+        filter_label: 关系范围
+        filter_placeholder: 请选择关系范围
+        filter_scope: global
+        filter_operator: eq
+    value_help:
+      source:
+        type: enum
+        enum_type_id: hierarchy_scope_type
+        sort_by: sort_order
+      behavior:
+        validation: false
+        binding_strength: loose
+      presentation:
+        result_type: dropdown
+        display_format: "{name}"
 
   - id: activity_label
     name: 活跃度标签
@@ -1127,6 +1201,8 @@ fields:
     storage: virtual
     semantics:
       meaning: 根据创建时间判断关系的活跃状态，超过90天未更新标记为stale
+      export_visible: false
+      import_visible: false
       analytics:
         category: dimension
     computation:
@@ -1135,8 +1211,6 @@ fields:
       widget: tag
       editable: false
       scope_rules_ref: hierarchies.hierarchy_scopes
-      export_visible: false
-      import_visible: false
 
   - id: domain_relation
     name: 领域关系
@@ -1538,9 +1612,9 @@ ui_view_config:
   list:
     pageSize: 20
     columns:
-      - key: source_code
-        title: 源编码
-        width: 120
+      - key: code
+        title: 关系编码
+        width: 150
         position: 1
         importance: high
         sortable: true
@@ -1550,8 +1624,8 @@ ui_view_config:
         position: 2
         importance: high
         sortable: true
-      - key: target_code
-        title: 目标编码
+      - key: source_bo_code
+        title: 源业务对象编码
         width: 120
         position: 3
         importance: high
@@ -1562,35 +1636,45 @@ ui_view_config:
         position: 4
         importance: high
         sortable: true
-      - key: code
-        title: 关系编码
-        width: 150
+      - key: target_bo_code
+        title: 目标业务对象编码
+        width: 120
         position: 5
         importance: high
         sortable: true
+      - key: relation_desc
+        title: 描述
+        width: 200
+        position: 6
+        importance: high
+        sortable: true
+      # [V1.1.4 2026-06-11] 删 effective_owner_id_display - 顶层 owner 已在 product
       - key: relation_type
         title: 关系类型
         width: 120
-        position: 6
+        position: 7
         importance: high
         sortable: true
       - key: relation_direction
         title: 方向
         width: 80
-        position: 7
+        position: 8
         importance: medium
         sortable: true
       - key: category_label
         title: 关系范围
         width: 150
-        position: 8
-        importance: medium
-        sortable: true
-      - key: relation_desc
-        title: 描述
-        width: 200
         position: 9
         importance: medium
+        sortable: true
+        # [FIX 2026-06-10] 列头过滤: 用 select 控件 + hierarchy_scope_type 枚举
+        filterable: true
+        filter_type: select
+        enum_type: hierarchy_scope_type
+        filter_placeholder: 请选择关系范围
+        # [FIX 2026-06-10] 用 category_type (单数) 作为 API 参数名 (后端已兼容)
+        #   保持与 ui_view_config.filter.filters 命名一致
+        api_param_key: category_type
       - key: created_at
         title: 创建时间
         width: 180
@@ -1617,7 +1701,7 @@ ui_view_config:
       - title: 源业务对象
         type: fieldGroup
         fields:
-          - source_code
+          - source_bo_code
           - source_bo_name
           - source_domain_name
           - source_sub_domain_name
@@ -1625,7 +1709,7 @@ ui_view_config:
       - title: 目标业务对象
         type: fieldGroup
         fields:
-          - target_code
+          - target_bo_code
           - target_bo_name
           - target_domain_name
           - target_sub_domain_name
@@ -1738,13 +1822,10 @@ ui_view_config:
 
       - key: category_type
         title: 关系范围
-        type: tree
-        tree_structure: category
-        tree_levels:
-          - scope_type
-          - category_type
-        leaf_value_field: pair_key
-        show_count: true
+        type: select
+        source: enum_value
+        enum_type: hierarchy_scope_type
+        display_field: name
         position: 3
         default: all
         filter_by: version_id

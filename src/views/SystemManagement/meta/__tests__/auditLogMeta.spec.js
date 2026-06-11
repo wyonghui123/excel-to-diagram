@@ -32,7 +32,7 @@ describe('auditLogMeta', () => {
       expect(auditLogMeta.list).toBeDefined()
       expect(auditLogMeta.list.defaultSort).toBeDefined()
       expect(auditLogMeta.list.defaultSort.field).toBe('created_at')
-      expect(auditLogMeta.list.defaultSort.direction).toBe('desc')
+      expect(auditLogMeta.list.defaultSort.order).toBe('desc')
     })
 
     it('应该包含分页配置', () => {

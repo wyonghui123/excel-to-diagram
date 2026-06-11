@@ -10,7 +10,8 @@ table_name: service_modules
 description: 服务模块是从属于子领域的三级业务分类。
 display_name_field: name
 parent_object: sub_domain
-aspects: [hierarchy_aspect, audit_aspect, owner_aspect, naming_aspect]
+# 🆕 v1.1 owner refactor: 移除 owner_aspect
+aspects: [hierarchy_aspect, audit_aspect, naming_aspect]
 
 # 管理维度绑定（Spec v1.3 数据权限统一模型）
 dimension_bindings:
@@ -59,12 +60,17 @@ deletability:
 
 authorization:
   check: true
-  scope: "owner_id = $user.id"
-  auto_owner: true
+  # 🆕 v1.1 owner refactor (TBD-8): 通过 sub_domain_id → domain_id → version_id → product 链追溯
+  scope: "sub_domain_id IN (SELECT sd.id FROM sub_domains sd JOIN domains d ON sd.domain_id = d.id JOIN versions v ON d.version_id = v.id JOIN products p ON v.product_id = p.id WHERE p.visibility = 'public' OR p.owner_id = $user.id)"
+  # 🆕 TBD-9: 关闭 auto_owner
+  auto_owner: false
+  # 🆕 TBD-11: 保留 auto_permission=admin
   auto_permission: admin
+  # 🆕 TBD-10: 保留 inherit_to_children
   inherit_to_children: true
-  allow_transfer: true
-  transfer_keep_permissions: true
+  # 🆕 v1.1: service_module 不再独立 transfer
+  allow_transfer: false
+  transfer_keep_permissions: false
 
 hierarchy:
   enabled: true
@@ -224,6 +230,7 @@ ui_view_config:
         importance: medium
         sortable: true
         i18n_key: service_module.field.code
+      # [V1.1.4 2026-06-11] 删 effective_owner_id_display - 顶层 owner 已在 product
       - key: sub_domain_name
         title: 子领域
         width: 120
@@ -665,58 +672,17 @@ fields:
             to: id
             select: name
 
-  - id: owner_id
-    name: 负责人
-    type: integer
-    db_column: owner_id
-    description: 服务模块负责人ID
-    semantics:
-      meaning: 服务模块的负责人，关联用户表
-      export_visible: false
-      import_visible: false
-      analytics:
-        category: dimension
-        type: foreign_key
-        display_name: 负责人
-    ui:
-      visible: true
-      editable: true
-      widget: select
-      relation: user
-      display_field: display_name
-      fieldGroup: 系统信息
-      i18n_key: common.field.owner_id
-    value_help:
-      source:
-        type: bo
-        target_bo: user
-        value_field: id
-        display_field: display_name
-        code_field: username
-        apply_target_permissions: false
-      behavior:
-        validation: true
-        binding_strength: strict
-        search_fields: [username, display_name]
-      presentation:
-        result_type: dialog
-        display_format: "{display_name} ({username})"
-        columns:
-          - field: username
-            label: 用户名
-            width: 120
-          - field: display_name
-            label: 显示名称
-            width: 150
-          - field: email
-            label: 邮箱
-            width: 200
+  # 🆕 v1.1 owner refactor (TBD-1): service_module 删除 owner_id 字段
+  # 负责人从 product.owner 派生, 见 effective_owner_id (FR-006)
+  # - id: owner_id
+  #   (字段已删除)
 
   - id: relation_count
     name: 关系数量
     type: integer
     description: 服务模块下所有业务对象的关系数量
     storage: virtual
+    computed: true
     semantics:
       meaning: 服务模块下所有业务对象的关系数量统计
       analytics:
@@ -751,6 +717,7 @@ fields:
     storage: virtual
     semantics:
       meaning: 平均每个业务对象的关系数量，反映服务模块内业务对象之间的关联紧密程度
+      export_visible: false
       analytics:
         category: measure
         aggregation: avg

@@ -21,11 +21,10 @@ from meta.core.association.fallback import (
     fallback_query_associations,
 )
 from meta.core.enrich_utils import (
-    enrich_fk_display_names,
-    enrich_association_counts,
     build_computed_count_filter_clause,
     build_computed_count_order_clause,
 )
+from meta.core.enrichment_engine import EnrichmentEngine
 
 logger = logging.getLogger(__name__)
 
@@ -1369,8 +1368,10 @@ class AssociationEngine:
 
         # 与 _do_list 保持一致：注入 FK display names + computed association counts
         if records and target_meta:
-            enrich_fk_display_names(target_meta, records, context.data_source)
-            enrich_association_counts(target_meta, records, context.data_source)
+            # [SPR-01 S-01] 委托给 EnrichmentEngine（删除 v1 兼容 shim）
+            engine = EnrichmentEngine.for_data_source(context.data_source)
+            engine.enrich_fk_display_names(target_meta, records)
+            engine.enrich_association_counts(target_meta, records)
 
         logger.debug("_query_m2m completed: total=%d fetched=%d", total, len(records))
 
@@ -1450,8 +1451,10 @@ class AssociationEngine:
 
         # 与 _do_list 保持一致：注入 FK display names + computed association counts
         if records and target_meta:
-            enrich_fk_display_names(target_meta, records, context.data_source)
-            enrich_association_counts(target_meta, records, context.data_source)
+            # [SPR-01 S-01] 委托给 EnrichmentEngine（删除 v1 兼容 shim）
+            engine = EnrichmentEngine.for_data_source(context.data_source)
+            engine.enrich_fk_display_names(target_meta, records)
+            engine.enrich_association_counts(target_meta, records)
 
         logger.debug("_query_reverse_m2m completed: total=%d fetched=%d", total, len(records))
 
@@ -1566,8 +1569,10 @@ class AssociationEngine:
 
             # 与 _do_list 保持一致：注入 FK display names + computed association counts
             if records and target_meta:
-                enrich_fk_display_names(target_meta, records, context.data_source)
-                enrich_association_counts(target_meta, records, context.data_source)
+                # [SPR-01 S-01] 委托给 EnrichmentEngine（删除 v1 兼容 shim）
+                engine = EnrichmentEngine.for_data_source(context.data_source)
+                engine.enrich_fk_display_names(target_meta, records)
+                engine.enrich_association_counts(target_meta, records)
 
             return ActionResult(success=True, data={'items': records, 'total': total})
         except Exception as e:
@@ -1672,8 +1677,10 @@ class AssociationEngine:
 
             # 与 _do_list 保持一致：注入 FK display names + computed association counts
             if records and tgt_meta:
-                enrich_fk_display_names(tgt_meta, records, context.data_source)
-                enrich_association_counts(tgt_meta, records, context.data_source)
+                # [SPR-01 S-01] 委托给 EnrichmentEngine（删除 v1 兼容 shim）
+                engine = EnrichmentEngine.for_data_source(context.data_source)
+                engine.enrich_fk_display_names(tgt_meta, records)
+                engine.enrich_association_counts(tgt_meta, records)
 
             return ActionResult(success=True, data={'items': records, 'total': total, 'page': page, 'page_size': page_size})
         except Exception as e:

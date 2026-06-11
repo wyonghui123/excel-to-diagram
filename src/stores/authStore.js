@@ -21,14 +21,8 @@ export const useAuthStore = defineStore('auth', () => {
     if (!user.value) return false
     // Prefer server-provided is_admin field
     if (typeof user.value.is_admin === 'boolean') return user.value.is_admin
-    // Fallback: derive from permissions/roles
+    // Fallback: '*' 通配权限即视为 admin (V1 简化, spec-auth-object-category-v2-2026-06-10.md FR-V1-003)
     if (user.value.permissions?.includes('*')) return true
-    const roles = user.value.roles || []
-    for (const role of roles) {
-      if (typeof role === 'object' && role?.is_super_admin) {
-        return true
-      }
-    }
     return false
   })
   const userDisplayName = computed(

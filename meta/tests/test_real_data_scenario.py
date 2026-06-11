@@ -67,15 +67,26 @@ def _ensure_real_scenario_data(ds):
     visibility='draft' 的记录仅 owner 可见, admin 用户看不到。
     [FIX 2026-06-07-2] 同时清理老的 v2 域 (draft 状态), 让 fixture 域的 ID 最小
     """
-    # 清理老的 v2 fixture 数据 (含 sub_domains, service_modules 关联删除)
-    # 保留本次 fixture 自己创建的数据
+    # [FIX 2026-06-10] 按依赖顺序删除 (FK chain: business_objects → service_modules → sub_domains → domains)
+    # business_objects FK 到 service_modules, 必须先删
+    ds.execute("""
+        DELETE FROM business_objects
+        WHERE service_module_id IN (
+            SELECT sm.id FROM service_modules sm
+            JOIN sub_domains sd ON sm.sub_domain_id = sd.id
+            WHERE sd.version_id = 2
+        )
+    """)
+    # 删 service_modules (FK 到 sub_domains)
     ds.execute("""
         DELETE FROM service_modules
         WHERE sub_domain_id IN (
             SELECT id FROM sub_domains WHERE version_id=2
         )
     """)
+    # 删 sub_domains (FK 到 domains)
     ds.execute("DELETE FROM sub_domains WHERE version_id=2")
+    # 删 domains
     ds.execute("""
         DELETE FROM domains
         WHERE version_id=2 AND code NOT LIKE 'T001_FIXED_%'

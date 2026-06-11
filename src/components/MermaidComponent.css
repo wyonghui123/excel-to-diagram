@@ -48,47 +48,80 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  background-color: rgba(255, 255, 255, 0.9);
-  padding: 4px;
-  border-radius: 6px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+  background-color: rgba(255, 255, 255, 0.95);
+  padding: 6px 8px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+/* 按钮分组 */
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 .toolbar-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
+  gap: 4px;
+  height: 32px;
+  padding: 0 10px;
   background-color: transparent;
   color: #555;
   border: none;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 14px;
-  transition: all 0.15s;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.toolbar-btn-label {
+  font-size: 12px;
+  line-height: 1;
 }
 
 .toolbar-btn:hover {
-  background-color: rgba(0, 0, 0, 0.05);
+  background-color: rgba(0, 0, 0, 0.06);
   color: #333;
+}
+
+.toolbar-btn:active {
+  transform: scale(0.96);
 }
 
 .toolbar-divider {
   width: 1px;
-  height: 20px;
-  background-color: #ddd;
-  margin: 0 4px;
+  height: 24px;
+  background-color: #e0e0e0;
+  margin: 0 6px;
+}
+
+/* 主操作按钮样式 - 导出按钮使用 */
+.toolbar-btn--primary {
+  background-color: rgba(234, 88, 12, 0.08);
+  color: #ea580c;
+  border: 1px solid rgba(234, 88, 12, 0.2);
+}
+
+.toolbar-btn--primary:hover {
+  background-color: #ea580c;
+  color: #fff;
+  border-color: #ea580c;
+  box-shadow: 0 2px 8px rgba(234, 88, 12, 0.3);
+}
+
+.toolbar-btn--primary:active {
+  background-color: #c24a0a;
+  box-shadow: 0 1px 4px rgba(234, 88, 12, 0.2);
 }
 
 .btn-icon {
   font-size: 14px;
-}
-
-.export-btn:hover {
-  background-color: #E64A19;
-  border-color: #E64A19;
 }
 
 .mermaid-wrapper {

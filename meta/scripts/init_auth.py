@@ -49,7 +49,6 @@ def create_tables(conn):
             description TEXT,
             is_active INTEGER DEFAULT 1,
             is_system BOOLEAN DEFAULT 0,
-            is_super_admin INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -183,20 +182,23 @@ def create_tables(conn):
 def seed_roles(conn):
     cursor = conn.cursor()
 
+    # V1 简化: 删 is_super_admin 字段
+    # "拥有 * 权限的角色" 即视为 admin, 不再单独存 is_super_admin 标志
+    # (spec-auth-object-category-v2-2026-06-10.md FR-V1-002)
     roles = [
-        ('admin', '系统管理员', '拥有所有权限', True, True),
-        ('editor', '编辑者', '可创建和编辑数据', True, False),
-        ('viewer', '查看者', '只读权限', True, False),
+        ('admin', '系统管理员', '拥有所有权限', True),
+        ('editor', '编辑者', '可创建和编辑数据', True),
+        ('viewer', '查看者', '只读权限', True),
     ]
 
-    for code, name, desc, is_system, is_super_admin in roles:
+    for code, name, desc, is_system in roles:
         cursor.execute(
-            "INSERT OR IGNORE INTO roles (code, name, description, is_system, is_super_admin) VALUES (?, ?, ?, ?, ?)",
-            (code, name, desc, is_system, is_super_admin)
+            "INSERT OR IGNORE INTO roles (code, name, description, is_system) VALUES (?, ?, ?, ?)",
+            (code, name, desc, is_system)
         )
         cursor.execute(
-            "UPDATE roles SET is_super_admin = ?, name = ?, description = ? WHERE code = ?",
-            (is_super_admin, name, desc, code)
+            "UPDATE roles SET name = ?, description = ? WHERE code = ?",
+            (name, desc, code)
         )
 
     conn.commit()
@@ -302,16 +304,6 @@ def seed_admin_user(conn):
 
 
 
-def add_priority_to_roles(conn):
-    cursor = conn.cursor()
-    try:
-        cursor.execute("SELECT priority FROM roles LIMIT 1")
-    except sqlite3.OperationalError:
-        cursor.execute("ALTER TABLE roles ADD COLUMN priority INTEGER DEFAULT 0")
-        print("Added priority column to roles table")
-    conn.commit()
-
-
 def add_is_active_to_roles(conn):
     cursor = conn.cursor()
     try:
@@ -322,19 +314,22 @@ def add_is_active_to_roles(conn):
     conn.commit()
 
 
-def add_owner_id_to_business_tables(conn):
-    cursor = conn.cursor()
-
-    tables = ['domains', 'sub_domains', 'service_modules', 'business_objects']
-
-    for table in tables:
-        try:
-            cursor.execute(f"SELECT owner_id FROM {table} LIMIT 1")
-        except sqlite3.OperationalError:
-            cursor.execute(f"ALTER TABLE {table} ADD COLUMN owner_id INTEGER REFERENCES users(id)")
-            print(f"Added owner_id column to {table}")
-
-    conn.commit()
+# [V1.1.5 2026-06-11] 删 add_owner_id_to_business_tables
+# owner 概念上移到 product (顶层), 子表不再有 owner_id 列
+# (spec-auth-object-category-v2-2026-06-10.md FR-V1-004 同源设计原则)
+# def add_owner_id_to_business_tables(conn):
+#     cursor = conn.cursor()
+#
+#     tables = ['domains', 'sub_domains', 'service_modules', 'business_objects']
+#
+#     for table in tables:
+#         try:
+#             cursor.execute(f"SELECT owner_id FROM {table} LIMIT 1")
+#         except sqlite3.OperationalError:
+#             cursor.execute(f"ALTER TABLE {table} ADD COLUMN owner_id INTEGER REFERENCES users(id)")
+#             print(f"Added owner_id column to {table}")
+#
+#     conn.commit()
 
 
 def init_auth_system():
@@ -346,9 +341,10 @@ def init_auth_system():
         seed_permissions(conn)
         seed_role_permissions(conn)
         seed_admin_user(conn)
-        add_priority_to_roles(conn)
+        # [V1 简化 2026-06-10] 删 add_priority_to_roles, 不再添加 priority 列
+        # (spec-auth-object-category-v2-2026-06-10.md FR-V1-004)
+        # [V1.1.5 2026-06-11] 删 add_owner_id_to_business_tables, 子表不再有 owner_id
         add_is_active_to_roles(conn)
-        add_owner_id_to_business_tables(conn)
         print("\nAuth system initialized successfully!")
     finally:
         conn.close()

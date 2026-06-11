@@ -106,7 +106,7 @@ describe('useScopeFilterSource', () => {
       source.setBusinessObjectIds([10, 20])
       source.setRelationCodes(['DEPENDS_ON'])
       source.setCategoryTypes(['same_module'])
-      
+
       const val = source.value.value
       expect(val.source_bo_ids).toEqual([10, 20])
       expect(val.target_bo_ids).toEqual([10, 20])
@@ -116,8 +116,41 @@ describe('useScopeFilterSource', () => {
 
     it('should not include empty arrays in value', () => {
       const source = useScopeFilterSource()
-      
       expect(Object.keys(source.value.value)).toHaveLength(0)
+    })
+
+    // [v3.18 新增] id__in 字段生成测试
+    it('should generate id__in when relationIds are set', () => {
+      const source = useScopeFilterSource()
+      source.setRelationIds([5, 10, 15])
+      // 字段名必须是 id__in（与 buildRelationshipFilterParams 对齐），不是 id 或 relation_ids
+      expect(source.value.value.id__in).toEqual([5, 10, 15])
+      // relation_codes 不应出现（relationIds 有值时应被忽略）
+      expect(source.value.value.relation_codes).toBeUndefined()
+    })
+
+    it('should prefer relationIds over relationCodes', () => {
+      // 模拟"范围内"节点勾选：同时设置 codes 和 ids
+      const source = useScopeFilterSource()
+      source.setRelationCodes(['GENERATES', 'DEPENDS_ON'])
+      source.setRelationIds([101, 102])
+      // relationIds 有值时，value 应输出 id__in，不输出 relation_codes
+      expect(source.value.value.id__in).toEqual([101, 102])
+      expect(source.value.value.relation_codes).toBeUndefined()
+    })
+
+    it('should fall back to relation_codes when relationIds is empty', () => {
+      const source = useScopeFilterSource()
+      source.setRelationIds([])
+      source.setRelationCodes(['CALLS'])
+      expect(source.value.value.id__in).toBeUndefined()
+      expect(source.value.value.relation_codes).toEqual(['CALLS'])
+    })
+
+    it('should handle single relationId', () => {
+      const source = useScopeFilterSource()
+      source.setRelationIds([42])
+      expect(source.value.value.id__in).toEqual([42])
     })
   })
 
@@ -155,6 +188,29 @@ describe('useScopeFilterSource', () => {
       source.setRelationCodes(['X'])
       source.setRelationCodes(['Y'])
       expect(source.selectedRelationCodes.value).toEqual(['Y'])
+    })
+  })
+
+  // [v3.18 新增] setRelationIds 测试
+  describe('setRelationIds method', () => {
+    it('should update selectedRelationIds', () => {
+      const source = useScopeFilterSource()
+      source.setRelationIds([100, 200, 300])
+      expect(source.selectedRelationIds.value).toEqual([100, 200, 300])
+    })
+
+    it('should replace previous values', () => {
+      const source = useScopeFilterSource()
+      source.setRelationIds([1, 2])
+      source.setRelationIds([3, 4])
+      expect(source.selectedRelationIds.value).toEqual([3, 4])
+    })
+
+    it('should accept empty array', () => {
+      const source = useScopeFilterSource()
+      source.setRelationIds([1, 2])
+      source.setRelationIds([])
+      expect(source.selectedRelationIds.value).toEqual([])
     })
   })
 

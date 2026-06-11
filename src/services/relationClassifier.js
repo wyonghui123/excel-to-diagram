@@ -310,12 +310,21 @@ export function buildRelationScopeTree(filterParams, allRelationships, businessO
 
     const totalCount = children.reduce((sum, child) => sum + child.count, 0)
 
+    // 关键修复 v26：scope 节点也聚合子节点的 relationIds
+    const allChildIds = new Set()
+    children.forEach(child => {
+      if (child.relationIds && child.relationIds.length > 0) {
+        child.relationIds.forEach(id => allChildIds.add(id))
+      }
+    })
+
     return {
       id: scopeType,
       name,
       scopeType,
       count: totalCount,
-      children
+      children,
+      relationIds: Array.from(allChildIds)
     }
   }
 
@@ -327,7 +336,9 @@ export function buildRelationScopeTree(filterParams, allRelationships, businessO
       categoryType,
       count: 0,
       childCount: 0,
-      children: []
+      children: [],
+      // 关键修复 v26：所有层级节点都聚合 relationIds，便于上溯过滤
+      relationIds: []
     }
 
     if (categoryType === CategoryType.SAME_MODULE) {
@@ -430,6 +441,15 @@ export function buildRelationScopeTree(filterParams, allRelationships, businessO
       node.childCount = node.children.length
     }
 
+    // 关键修复 v26：聚合子节点 relationIds 列表供上层节点使用
+    const allChildIds = new Set()
+    node.children.forEach(child => {
+      if (child.relationIds && child.relationIds.length > 0) {
+        child.relationIds.forEach(id => allChildIds.add(id))
+      }
+    })
+    node.relationIds = Array.from(allChildIds)
+
     return node
   }
 
@@ -475,9 +495,12 @@ function classifyRelationByCodes(relation, centerScope, businessObjects, boMap) 
   // 判断范围类型：源和目标是否都在中心范围内
   const sourceInScope = centerScope.includes(relation.sourceCode);
   const targetInScope = centerScope.includes(relation.targetCode);
+  // 三分法: 范围内 / 跨域 / 范围外 (v29)
   const scopeType = (sourceInScope && targetInScope)
     ? ScopeType.INTERNAL
-    : ScopeType.EXTERNAL;
+    : (sourceInScope || targetInScope)
+      ? ScopeType.CROSS_BOUNDARY
+      : ScopeType.EXTERNAL;
 
   // 判断分类类型：根据层级关系
   let categoryType;
@@ -533,6 +556,12 @@ export function buildRelationCategoryTree(relations, centerScope, businessObject
       [CategoryType.SAME_SUBDOMAIN_CROSS_MODULE]: { count: 0, relations: [], domains: {} },
       [CategoryType.SAME_MODULE]: { count: 0, relations: [], modules: {} }
     },
+    [ScopeType.CROSS_BOUNDARY]: {
+      [CategoryType.CROSS_DOMAIN]: { count: 0, relations: [], domains: {} },
+      [CategoryType.SAME_DOMAIN_CROSS_SUBDOMAIN]: { count: 0, relations: [], domains: {} },
+      [CategoryType.SAME_SUBDOMAIN_CROSS_MODULE]: { count: 0, relations: [], domains: {} },
+      [CategoryType.SAME_MODULE]: { count: 0, relations: [], modules: {} }
+    },
     [ScopeType.EXTERNAL]: {
       [CategoryType.CROSS_DOMAIN]: { count: 0, relations: [], domains: {} },
       [CategoryType.SAME_DOMAIN_CROSS_SUBDOMAIN]: { count: 0, relations: [], domains: {} },
@@ -542,11 +571,16 @@ export function buildRelationCategoryTree(relations, centerScope, businessObject
   };
 
   // 遍历所有关系，进行分类统计
-  // 先按 relationCode 去重，避免重复计数
-  const seenCodes = new Set()
+  // 关键修复 v26：按 rel.id 去重（每条关系都是 unique record），
+  // 之前按 relationCode 去重会导致：
+  //   1. 同一 type 的多条关系只算 1 个（如 4 条 CONTAINS 只显示 1 个）
+  //   2. relationCode 为空的关系被 !rel.relationCode 过滤掉
+  // 这导致架构管理显示 29 关系、chart 页面只显示 21 关系，统计口径不一致
+  const seenIds = new Set()
   const uniqueRelations = relations.filter(rel => {
-    if (!rel.relationCode || seenCodes.has(rel.relationCode)) return false
-    seenCodes.add(rel.relationCode)
+    const id = rel.id ?? rel.relationCode
+    if (id == null || seenIds.has(id)) return false
+    seenIds.add(id)
     return true
   })
 
@@ -749,12 +783,21 @@ function buildCategoryScopeNode(scopeType, name, stats) {
 
   const totalCount = children.reduce((sum, child) => sum + child.count, 0);
 
+  // 关键修复 v26：scope 节点也聚合子节点 relationIds
+  const allChildIds = new Set();
+  children.forEach(child => {
+    if (child.relationIds && child.relationIds.length > 0) {
+      child.relationIds.forEach(id => allChildIds.add(id));
+    }
+  });
+
   return {
     id: scopeType,
     name,
     scopeType,
     count: totalCount,
-    children
+    children,
+    relationIds: Array.from(allChildIds)
   };
 }
 
@@ -774,7 +817,9 @@ function buildCategoryCategoryNode(scopeType, categoryType, name, stats) {
     categoryType,
     count: stats.count,
     childCount: 0,
-    children: []
+    children: [],
+    // 关键修复 v26：所有层级节点都聚合 relationIds，便于上溯过滤
+    relationIds: []
   };
 
   // 根据分类类型构建子节点
@@ -789,7 +834,9 @@ function buildCategoryCategoryNode(scopeType, categoryType, name, stats) {
         categoryType,
         level: 'module',
         count: moduleData.count,
-        relationCodes: moduleData.relations.map(r => r.relationCode)
+        relationCodes: moduleData.relations.map(r => r.relationCode),
+        // 关键修复 v26：module 子节点带 relationIds（按 rel.id）
+        relationIds: moduleData.relations.map(r => r.id).filter(Boolean)
       });
     });
     node.childCount = node.children.length;
@@ -805,7 +852,8 @@ function buildCategoryCategoryNode(scopeType, categoryType, name, stats) {
         level: 'domain',
         count: domainData.count,
         childCount: 0,
-        children: []
+        children: [],
+        relationIds: []
       };
 
       // 跨领域、同领域跨子领域、同子领域跨服务模块都需要添加子领域级节点
@@ -822,7 +870,8 @@ function buildCategoryCategoryNode(scopeType, categoryType, name, stats) {
             level: 'subDomain',
             count: subDomainData.count,
             childCount: 0,
-            children: []
+            children: [],
+            relationIds: []
           };
 
           // 跨领域、同领域跨子领域、同子领域跨服务模块都需要添加服务模块级节点
@@ -838,14 +887,32 @@ function buildCategoryCategoryNode(scopeType, categoryType, name, stats) {
                 categoryType,
                 level: 'module',
                 count: moduleData.count,
-                relationCodes: moduleData.relations.map(r => r.relationCode)
+                relationCodes: moduleData.relations.map(r => r.relationCode),
+                // 关键修复 v26：module 子节点带 relationIds（按 rel.id）
+                relationIds: moduleData.relations.map(r => r.id).filter(Boolean)
               });
             });
             subDomainNode.childCount = subDomainNode.children.length;
+            // 关键修复 v26: subDomainNode 聚合其子 module 节点的 relationIds
+            const allSubChildIds = new Set();
+            subDomainNode.children.forEach(child => {
+              if (child.relationIds && child.relationIds.length > 0) {
+                child.relationIds.forEach(id => allSubChildIds.add(id));
+              }
+            });
+            subDomainNode.relationIds = Array.from(allSubChildIds);
           }
 
           domainNode.children.push(subDomainNode);
         });
+        // 关键修复 v26: domainNode 聚合其子 subDomain 节点的 relationIds
+        const allDomainChildIds = new Set();
+        domainNode.children.forEach(child => {
+          if (child.relationIds && child.relationIds.length > 0) {
+            child.relationIds.forEach(id => allDomainChildIds.add(id));
+          }
+        });
+        domainNode.relationIds = Array.from(allDomainChildIds);
         domainNode.childCount = domainNode.children.length;
       }
       // 注意：所有外部关系类型现在都有完整的层级结构（领域->子领域->服务模块）
@@ -855,6 +922,15 @@ function buildCategoryCategoryNode(scopeType, categoryType, name, stats) {
     });
     node.childCount = node.children.length;
   }
+
+  // 关键修复 v26：聚合子节点 relationIds 列表供上层节点使用
+  const allChildIds = new Set();
+  node.children.forEach(child => {
+    if (child.relationIds && child.relationIds.length > 0) {
+      child.relationIds.forEach(id => allChildIds.add(id));
+    }
+  });
+  node.relationIds = Array.from(allChildIds);
 
   return node;
 }
@@ -893,4 +969,53 @@ export function getSelectedRelationCodes(relationCategoryTree, selectedNodeIds) 
   relationCategoryTree.forEach(rootNode => traverseNode(rootNode));
 
   return Array.from(relationCodes);
+}
+
+/**
+ * 获取选中的关系 ID 数组（按关系记录 ID 去重，而不是按关系类型编码）
+ * 关键修复 v26：解决 chart 页面显示关系数比架构管理少 8 个的问题
+ * - 之前 getSelectedRelationCodes 按 relationCode（关系类型）去重：
+ *   4 条 CONTAINS 关系只算 1 个，1 条空 relationCode 被过滤掉 → 21 个
+ * - 现在按 rel.id（关系记录 ID）去重：每条关系都是 unique → 29 个
+ * @param {Array<Object>} relationCategoryTree - 关系分类树
+ * @param {Array<string>} selectedNodeIds - 选中的节点ID数组
+ * @returns {Array<number|string>} 选中的关系记录 ID 数组（去重）
+ */
+export function getSelectedRelationIds(relationCategoryTree, selectedNodeIds) {
+  const relationIds = new Set();
+
+  function collectRelationIdsFromNode(node) {
+    const ids = [];
+    // 同 module 节点直接带 relationIds（line 345/405）
+    if (node.relationIds && node.relationIds.length > 0) {
+      ids.push(...node.relationIds);
+    }
+    // 兼容：只带 relationCodes 的老节点，逐一加 code 进 set（fallback）
+    if (node.relationCodes && node.relationCodes.length > 0 && (!node.relationIds || node.relationIds.length === 0)) {
+      node.relationCodes.forEach(c => ids.push(c));
+    }
+    if (node.children && node.children.length > 0) {
+      node.children.forEach(child => {
+        ids.push(...collectRelationIdsFromNode(child));
+      });
+    }
+    return ids;
+  }
+
+  function traverseNode(node) {
+    if (selectedNodeIds.includes(node.id)) {
+      collectRelationIdsFromNode(node).forEach(id => relationIds.add(id));
+    }
+    if (node.children && node.children.length > 0) {
+      node.children.forEach(child => traverseNode(child));
+    }
+  }
+
+  if (!Array.isArray(relationCategoryTree) || relationCategoryTree.length === 0) {
+    return [];
+  }
+
+  relationCategoryTree.forEach(rootNode => traverseNode(rootNode));
+
+  return Array.from(relationIds);
 }

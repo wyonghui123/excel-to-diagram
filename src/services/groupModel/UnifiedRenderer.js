@@ -11,7 +11,10 @@ export class UnifiedRenderer {
     const codeToIdMap = new Map()
     flattenedGroups.forEach(group => {
       const code = group.elementRef?.code
-      if (code) {
+      // 关键修复 v26: 只让终端节点 (BO/SM) 的 code 进入 codeToIdMap
+      // 否则 SD_TEST600 (sub_domain) 和 BO_TEST600 (business_object) code 都是 "TEST600"
+      // → 后注册的会覆盖先注册的 (SD 通常在前, 导致 link source 变成 SD_TEST600)
+      if (code && isTerminalGroup(group, chartType)) {
         codeToIdMap.set(code, group.id)
       }
     })
@@ -42,8 +45,19 @@ export class UnifiedRenderer {
       const sourceId = codeToIdMap.get(link.source) || link.source
       const targetId = codeToIdMap.get(link.target) || link.target
       if (sourceId && targetId) {
-        const label = link.label ? `|${link.label}|` : ''
-        code += `  ${sourceId} -->${label} ${targetId}\n`
+        // 关键修复 v26: label 中的特殊字符 ("|", 双引号, 换行) 会让 mermaid 11 报 "Syntax error in text"
+        // 处理: 1) 替换 | → / 2) 替换换行 → 空格 3) 移除多余引号
+        // 4) 如果 label 为空或纯空白, 仍输出不带 label 的 link
+        let safeLabel = ''
+        if (link.label && String(link.label).trim()) {
+          safeLabel = String(link.label)
+            .replace(/\|/g, '/')           // 避免与 mermaid label 语法冲突
+            .replace(/[\r\n]+/g, ' ')      // 换行转空格
+            .replace(/"/g, "'")            // 双引号转单引号
+            .trim()
+        }
+        const labelPart = safeLabel ? `|${safeLabel}|` : ''
+        code += `  ${sourceId} -->${labelPart} ${targetId}\n`
       }
     })
 

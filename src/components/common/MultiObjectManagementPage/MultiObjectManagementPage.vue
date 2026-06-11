@@ -199,6 +199,7 @@
 import { ref, watch, computed, reactive, onMounted, provide } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useTabStore } from '@/stores/tabStore'
+import { useChartArchDataStore } from '@/stores/chartArchDataStore'
 import { FolderOpened, Connection } from '@element-plus/icons-vue'
 import { MasterDetailLayout } from '@/components/common/MasterDetailLayout'
 import { MetaListPage } from '@/components/common/MetaListPage'
@@ -219,6 +220,10 @@ const emit = defineEmits(['toolbarAction', 'tabChange'])
 
 const route = useRoute()
 const router = useRouter()
+
+// [v32] 引入 chart tab 的 Pinia stores (单一数据源)
+const tabStore = useTabStore()
+const chartStore = useChartArchDataStore()
 
 const scopeTreeRef = ref(null)
 const globalToolbarRef = ref(null)
@@ -263,7 +268,7 @@ if (router) {
 }
 
 onBeforeRouteLeave((_to, _from) => {
-  const tabStore = useTabStore()
+  // tabStore / chartStore 已在 setup() 顶部声明, 此处直接使用闭包引用
   const tabEntry = tabStore.tabs.find(t => t.id === route?.path)
   if (tabEntry && tabEntry.path !== route.fullPath) {
     tabStore.closeTab(route.path)
@@ -306,8 +311,38 @@ function onGlobalAction(action) {
   if (action === 'chart') {
     const chartData = page.handleGlobalAction('chart')
     if (chartData) {
-      sessionStorage.setItem('archDataForDiagram', JSON.stringify(chartData))
-      router.push('/archdata-chart')
+      // [v32] 双层数据源: chartStore (主) + sessionStorage (备份)
+      //   1) chartStore (Pinia in-memory): 跨组件共享, 用于 tab re-click
+      //   2) sessionStorage 备份: 用于 F5 刷新场景 (Pinia 状态丢失但 sessionStorage 持久)
+      chartStore.setArchData(chartData)
+
+      // [v32-FIX] sessionStorage 备份, 应对 F5 刷新
+      //   Pinia 状态在 F5 后丢失, 但 sessionStorage 保留
+      //   chart tab onMounted 会先查 Pinia, 找不到再读 sessionStorage
+      try {
+        sessionStorage.setItem('lastArchDataForDiagram', JSON.stringify(chartData))
+        sessionStorage.setItem('archDataForDiagram', JSON.stringify(chartData))
+        sessionStorage.setItem('archDataCurrentStep', '3')
+      } catch (e) {
+        console.warn('[v32] failed to backup archData to sessionStorage:', e)
+      }
+
+      const chartTabId = '/archdata-chart'
+      const existingTab = tabStore.tabs.find(t => t.id === chartTabId)
+      if (existingTab) {
+        // [v32] 确保 tab 可关闭 (防止 localStorage 恢复的 stale pinned/closable)
+        existingTab.closable = true
+        existingTab.pinned = false
+        tabStore.switchTab(chartTabId)
+      } else {
+        tabStore.openTab({
+          id: chartTabId,
+          label: '架构数据图表',
+          path: chartTabId,
+          pinned: false
+        })
+      }
+      router.push(chartTabId)
     }
     return
   }

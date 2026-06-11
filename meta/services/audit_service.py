@@ -619,6 +619,65 @@ class AuditService:
             "total_pages": total_pages,
         }
 
+    # 字段优先级：取第一个非空字段作为对象的显示名
+    _DISPLAY_FIELD_CANDIDATES = ('display_name', 'name', 'username', 'title', 'code')
+
+    def _resolve_display_name(self, record: Dict[str, Any]) -> str:
+        """从对象记录中取第一个非空的 display 字段"""
+        for f in self._DISPLAY_FIELD_CANDIDATES:
+            v = record.get(f)
+            if v is not None and v != '':
+                return str(v)
+        return ''
+
+    def _lookup_display_names(self, type_id_pairs) -> Dict[str, str]:
+        """批量查 (type, id) -> display_name 映射。
+
+        type_id_pairs: Iterable[Tuple[str, str]]
+        返回: {(type, id): display_name}
+        """
+        result: Dict[str, str] = {}
+        if not type_id_pairs:
+            return result
+
+        # 按 type 分组
+        grouped: Dict[str, List[str]] = {}
+        for t, i in type_id_pairs:
+            if not t or i is None or i == '':
+                continue
+            grouped.setdefault(t, []).append(str(i))
+
+        # 尝试从元模型 registry 获取 object_type -> table_name 映射
+        type_to_table: Dict[str, str] = {}
+        try:
+            from meta.core.models import registry
+            for ot in grouped.keys():
+                mobj = registry.get(ot)
+                if mobj and getattr(mobj, 'table_name', None):
+                    type_to_table[ot] = mobj.table_name
+        except Exception:
+            pass
+
+        for t, id_list in grouped.items():
+            unique_ids = set(str(i) for i in id_list)
+            table_name = type_to_table.get(t, t)
+            try:
+                # 优先按 id 列表查询（如果支持的话）；否则降级查全表
+                try:
+                    rows = self.ds.find(table_name, filters={'id': list(unique_ids)}) or []
+                except Exception:
+                    rows = self.ds.find(table_name) or []
+                for row in rows:
+                    rid = str(row.get('id'))
+                    if rid in unique_ids:
+                        dn = self._resolve_display_name(row)
+                        if dn:
+                            result[f"{t}::{rid}"] = dn
+            except Exception:
+                continue
+
+        return result
+
     def get_object_history(self, object_type: str, object_id: Any,
                            include_children: bool = False) -> List[Dict[str, Any]]:
         filters = {
@@ -626,10 +685,10 @@ class AuditService:
             "object_id": object_id,
         }
         records = list(self.ds.find(self.AUDIT_TABLE, filters=filters, order_by="created_at DESC"))
-        
+
         for r in records:
             r['_source'] = 'own'
-        
+
         if include_children:
             try:
                 parent_filters = {
@@ -649,7 +708,7 @@ class AuditService:
                 records = list(records) + list(children_records)
             except Exception as e:
                 pass
-        
+
         for r in records:
             parent_type = r.get('parent_object_type')
             parent_id = r.get('parent_object_id')
@@ -658,12 +717,58 @@ class AuditService:
                     'type': parent_type,
                     'id': parent_id,
                 }
-        
+
+        # [FIX 2026-06-09] 为每条记录附上 object/parent 的 display name
+        try:
+            pairs = set()
+            for r in records:
+                ot = r.get('object_type')
+                oid = r.get('object_id')
+                if ot and oid is not None and oid != '':
+                    pairs.add((ot, str(oid)))
+                pt = r.get('parent_object_type')
+                pid = r.get('parent_object_id')
+                if pt and pid is not None and pid != '':
+                    pairs.add((pt, str(pid)))
+                # 关联日志的 old_data/new_data 里的 target_id 也要查
+                for fld in ('old_data', 'new_data'):
+                    payload = r.get(fld)
+                    if isinstance(payload, dict):
+                        tt = payload.get('target_type')
+                        ti = payload.get('target_id')
+                        if tt and ti is not None and ti != '':
+                            pairs.add((tt, str(ti)))
+            display_map = self._lookup_display_names(pairs)
+            for r in records:
+                ot = r.get('object_type')
+                oid = r.get('object_id')
+                if ot and oid is not None and oid != '':
+                    dn = display_map.get(f"{ot}::{oid}")
+                    if dn:
+                        r['object_display'] = dn
+                pt = r.get('parent_object_type')
+                pid = r.get('parent_object_id')
+                if pt and pid is not None and pid != '':
+                    dn = display_map.get(f"{pt}::{pid}")
+                    if dn:
+                        r['parent_object_display'] = dn
+                for fld in ('old_data', 'new_data'):
+                    payload = r.get(fld)
+                    if isinstance(payload, dict):
+                        tt = payload.get('target_type')
+                        ti = payload.get('target_id')
+                        if tt and ti is not None and ti != '':
+                            dn = display_map.get(f"{tt}::{ti}")
+                            if dn and 'target_display' not in payload:
+                                payload['target_display'] = dn
+        except Exception as e:
+            logging.getLogger(__name__).debug(f"[audit_service.get_object_history] display name enrichment failed: {e}")
+
         try:
             records = sorted(records, key=lambda r: r.get('created_at', ''), reverse=True)
         except Exception:
             pass
-        
+
         return records
 
     def get_user_activities(self, user_id: Any, days: int = 30) -> Dict[str, Any]:

@@ -302,7 +302,8 @@ class AuditInterceptor(Interceptor):
 
         if in_transaction:
             # 在事务中：缓存审计记录，等事务提交后再写入
-            context._pending_audit_records.append(audit_params)
+            # [SPR-07 T-S09-01] 走 public API add_pending_audit, 替代直接访问字段
+            context.add_pending_audit(audit_params)
             logger.info(
                 f"[AuditInterceptor] DEFERRED {action} on "
                 f"{context.object_type}/{context.object_id} -> {tgt_type}:{tgt_id} "

@@ -1,0 +1,209 @@
+# Key Template 在导入导出 Excel 模板中的体现 — 研究报告
+
+> 研究人: AI Agent | 日期: 2026-06-11
+> 范围: 头部产品 Excel 模板对 Key Template 规则的处理现状与改进建议
+
+---
+
+## 一、背景
+
+`key_template` 是 schema 层级的元数据，定义了对象编码的自动生成规则：
+
+```yaml
+# meta/schemas/relationship.yaml
+key_template:
+  enabled: true
+  auto_suggest: true
+  pattern: "{source_code}-{target_code}-{SEQ:2}"
+  segments:
+    - type: parent_field
+      source: source_code
+    - type: separator
+      value: "-"
+    - type: parent_field
+      source: target_code
+    - type: separator
+      value: "-"
+    - type: sequence
+      name: rel_code_seq
+      scope: source_code
+      auto_detect: true
+      padding: 2
+      start: 1
+```
+
+涉及对象：
+- `relationship` (pattern: `{source_code}-{target_code}-{SEQ:2}`)
+- `business_object` (pattern: `{service_module_code}{SEQ:2}`)
+- ~~`version` (2026-06-10 已移除)~~
+
+---
+
+## 二、现状调研
+
+### 2.1 触发链路（已实现 ✅）
+
+```
+Excel 导入 → import_export_service._import_data
+         → manage_service.create()
+         → bo_framework.execute()
+         → KeyTemplateInterceptor.before_action()   ← key_template 拦截器
+         → _engine.generate_code()                    ← 自动生成 code
+         → params['code'] = generated
+         → manage_service.create() → INSERT
+```
+
+**结论**：即使 Excel 模板中 `code` 列留空，导入时也会通过拦截器自动生成。但用户无法感知这条规则。
+
+### 2.2 Excel 模板头部说明（缺失 ❌）
+
+`import_export_service.py` 中的 `_write_meta_sheet_operations` 方法生成的"操作说明"sheet 包含：
+
+```python
+explanations = [
+    ("业务关键字", "编码字段为业务关键字，用于唯一标识记录。新增时必填，编辑时只读。"),
+    ("父对象编码", "用于关联父对象。新增时必填，编辑时可切换到其他父对象。"),
+    ("删除操作", "设置操作模式为'delete'..."),
+    ("新增操作", "在新增行中填写数据..."),
+    ("冲突处理策略", "..."),
+]
+```
+
+**但完全没有提及 key_template 规则**。用户在 Excel 模板的"说明"sheet 里看不到：
+- `code` 列可以留空（系统会自动生成）
+- 生成规则是什么（pattern）
+- 哪些字段会触发自动重算（parent_field）
+- 序号是否自增（auto_detect + scope）
+
+### 2.3 表头 Comment（缺失 ❌）
+
+`code` 列作为 `business_key=True` 字段，目前 comment 是：
+
+```python
+"【业务关键字】新增必填，编辑时只读"
+```
+
+但实际上：对于有 `key_template` 的对象，新增时 **不必填**！因为拦截器会自动生成。
+
+### 2.4 颜色提示（不一致 ❌）
+
+```
+business_key + 有 key_template:   浅黄（新增必填） ❌ 错误
+business_key + 无 key_template:   浅黄（新增必填） ✅ 正确
+```
+
+### 2.5 placeholder / 示例值（缺失 ❌）
+
+`key_template.preview`（如 `"ORDER-USER-01"`）已经定义了示例值，但模板生成时**没有使用**。
+
+---
+
+## 三、头部产品的 Excel 最佳实践对照
+
+| 产品 | key template 在模板中的体现 | 参考点 |
+|------|----------------------------|--------|
+| **SAP Fiori** | 表头 Comment 直接显示自动生成规则，code 列灰色标注 "auto-generated" | SAP S/4HANA 数据迁移模板 |
+| **Salesforce** | metadata sheet 列出"Auto-Number"规则，code 列显示 "(auto)" | Data Loader 模板 |
+| **Microsoft Dynamics** | 字段说明列出"Auto-number Series"配置，code 列标注 "system-generated" | Data Import templates |
+| **Oracle Fusion** | Table-level "Key Generation Strategy" 在说明 sheet 顶部显示 | FBDI 模板 |
+
+**头部产品的共同点**：
+1. ✅ **说明 sheet 顶部**有"自动编码规则"专区
+2. ✅ **code 列**标注 `auto-generated` / `system-generated`
+3. ✅ **颜色淡化**（浅灰 + 斜体）以示非用户编辑
+4. ✅ **示例值**填入 cell 作 placeholder
+
+---
+
+## 四、当前架构的 Gap
+
+| Gap | 影响 | 优先级 |
+|-----|------|--------|
+| G1: 说明 sheet 无 key_template 规则展示 | 用户不知道 code 可留空 → 错误手动填写 → 冲突 | 高 |
+| G2: code 列颜色仍标黄（与"必填"混淆）| 用户以为必填，填写错误值 | 高 |
+| G3: 无 example placeholder（key_template.preview 未利用）| 用户无参照可填 | 中 |
+| G4: key_template 字段变化时，模板不重新生成说明 | 配置更新滞后 | 中 |
+| G5: scope / auto_detect / padding 等细节未告知用户 | 用户不理解序号为何这样 | 低 |
+
+---
+
+## 五、改进建议（Spec 草案）
+
+### 5.1 说明 Sheet 新增"自动编码规则"区
+
+在 `_write_meta_sheet_operations` 中，针对每个有 `key_template` 的对象，在"业务说明"前插入：
+
+```
+【自动编码规则】(关系)
+  编码格式：{source_code}-{target_code}-{SEQ:2}
+  示例：ORDER-USER-01
+  序号规则：按 source_code 分组自增（如已存在 01/02，下次自动生成 03）
+  ⓘ 编码列可留空，系统将根据上方已填的源/目标业务对象自动生成
+```
+
+### 5.2 code 列差异化处理
+
+在 `_get_export_headers_with_editable` 中，识别 `business_key=True` 但 `key_template.enabled=True` 的字段：
+- **comment** 改为：`【自动生成】新增时由系统根据上方父对象字段自动生成；编辑时只读`
+- **底色**：使用 `AUTO_GEN_FILL`（浅蓝灰，区别于黄色"必填"）
+- **新增示例值**：取 `key_template.preview` 作为 placeholder
+
+### 5.3 在 `excel_design_system.py` 增加色
+
+```python
+AUTO_GEN_COLOR = "ECEFF1"          # 浅蓝灰 - 自动生成
+AUTO_GEN_FILL = PatternFill(start_color=AUTO_GEN_COLOR, end_color=AUTO_GEN_COLOR, fill_type="solid")
+```
+
+### 5.4 配置对象级展示
+
+不是 sheet 级，而是**对象级**展示（因为不同对象的 key_template 不同）。建议：
+- `_write_meta_sheet_operations` 接收 `objects_with_templates` 参数
+- 按对象 sheet 分组说明 key_template
+
+---
+
+## 六、实施优先级
+
+| 任务 | 工时 | 业务价值 |
+|------|------|---------|
+| 5.1 说明 sheet 新增"自动编码规则"区 | 4h | ★★★★★ |
+| 5.2 code 列差异化处理 + comment | 2h | ★★★★★ |
+| 5.3 新增 AUTO_GEN_FILL | 0.5h | ★★★ |
+| 5.4 对象级配置展示 | 2h | ★★★ |
+| E2E 测试覆盖 | 2h | ★★★★ |
+
+总计约 10.5h。
+
+---
+
+## 七、附录：相关代码位置
+
+| 文件 | 行号 | 说明 |
+|------|------|------|
+| `meta/services/import_export_service.py` | L1427-1449 | 表头 comment 生成逻辑 |
+| `meta/services/import_export_service.py` | L2178-2188 | `_classify_field`（business_key / parent_key / readonly） |
+| `meta/services/import_export_service.py` | L2617-2702 | `_write_meta_sheet_operations` 说明 sheet 生成 |
+| `meta/services/import_export_service.py` | L4807 | `manage_service.create`（触发 key_template 拦截器） |
+| `meta/core/interceptors/key_template_interceptor.py` | L39-85 | 拦截器自动生成 code |
+| `meta/core/key_template_engine.py` | L454-562 | `generate_code` 核心逻辑 |
+| `meta/api/key_template_api.py` | L178-258 | preview/generate API |
+| `meta/schemas/relationship.yaml` | L138-158 | relationship 的 key_template |
+| `meta/schemas/business_object.yaml` | (待查) | business_object 的 key_template |
+| `meta/services/excel_design_system.py` | L15-150 | Excel 样式定义 |
+
+---
+
+## 八、结论
+
+| 维度 | 现状 | 头部产品水平 |
+|------|------|-------------|
+| **拦截器自动生成** | ✅ 实现完整 | ✅ |
+| **说明 sheet 规则展示** | ❌ 完全缺失 | ✅ |
+| **code 列差异化标识** | ❌ 沿用"必填"提示 | ✅ |
+| **示例 placeholder** | ❌ 未使用 key_template.preview | ✅ |
+| **用户自助配置查看** | ❌ 无 | ✅ |
+
+**最关键缺失**：用户**不知道** code 列可以留空，也**不知道为什么**序号是 02 而不是 01。这两点直接导致了"重复创建导致 400 错误"这类用户感知的问题。
+
+下次修复应优先实施 5.1 + 5.2，工时约 6h，可解决 80% 用户认知痛点。

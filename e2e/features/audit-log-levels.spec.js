@@ -277,36 +277,50 @@ test.describe('S09-F: 审计日志 - 分类与级别 (P1)', () => {
     page, isolation, waitForApiFn, dataFinder
   }, testInfo) => {
     const pv = await dataFinder.productWithVersion()
+    const testId = isolation.generateId()
+    const codePrefix = isolation.generateCode('E')
 
-    // 准备 domain + sub_domain
-    const { domainId, subDomainId } = await withStep(page, testInfo, 'API 创建 domain + sub_domain', async () => {
-      const domain = await isolation.createTracked('domain', {
-        name: `E_AssocDom_${isolation.generateId()}`,
-        code: `E_ASSOCDOM_${isolation.generateCode('E')}`,
-        version_id: pv.version.id
+    // 使用 dataFinder 创建完整层级（domain + sub_domain）
+    await withStep(page, testInfo, '创建测试数据 (domain + sub_domain)', async () => {
+      // 创建 domain
+      const domainResp = await page.request.post('/api/v2/bo/domain', {
+        data: {
+          code: `${codePrefix}_DOM`,
+          name: `F06_Dom_${testId}`,
+          version_id: pv.version.id
+        }
       })
-      const subDomain = await isolation.createTracked('sub_domain', {
-        name: `E_AssocSub_${isolation.generateId()}`,
-        code: `E_ASSOCSUB_${isolation.generateCode('E')}`,
-        version_id: pv.version.id,
-        domain_id: domain.id
+      const domainBody = await domainResp.json()
+      if (!domainBody.success) {
+        throw new Error(`domain 创建失败: ${JSON.stringify(domainBody)}`)
+      }
+      const domain = domainBody.data
+
+      // 创建 sub_domain (直接用 page.request 而不用 isolation.createTracked)
+      const subDomainResp = await page.request.post('/api/v2/bo/sub_domain', {
+        data: {
+          code: `${codePrefix}_SD`,
+          name: `F06_SubDom_${testId}`,
+          version_id: pv.version.id,
+          domain_id: domain.id
+        }
       })
-      return { domainId: domain.id, subDomainId: subDomain.id }
-    })
+      const subDomainBody = await subDomainResp.json()
+      if (!subDomainBody.success) {
+        throw new Error(`sub_domain 创建失败: ${JSON.stringify(subDomainBody)}`)
+      }
 
-    if (!domainId || !subDomainId) {
-      console.log('[SKIP] 前置数据准备失败')
-      return
-    }
+      // 跟踪 domain 以便清理
+      isolation.track('domain', domain.id)
+      console.log(`[F06] domain=${domain.id}, sub_domain=${subDomainBody.data.id}`)
 
-    // 触发关联 — v2: cookies 由 global-setup 自动注入
-    await withStep(page, testInfo, '触发 domain ↔ sub_domain 关联', async () => {
+      // 触发关联
       await page.request.post('/api/v2/bo/association', {
         data: {
-          source_type: 'domain', source_id: domainId,
-          target_type: 'sub_domain', target_id: subDomainId
+          source_type: 'domain', source_id: domain.id,
+          target_type: 'sub_domain', target_id: subDomainBody.data.id
         }
-      }).catch(() => {})
+      })
     })
 
     await waitForApiFn(page, 'GET /api/v1/audit/logs').catch(() => {})
@@ -320,9 +334,9 @@ test.describe('S09-F: 审计日志 - 分类与级别 (P1)', () => {
       const assocItems = assocData.data?.items || []
       const allOperation = assocItems.length === 0 || assocItems.every(l => l.log_category === 'operation')
       console.log(`[OK] ASSOCIATE 日志: total=${assocItems.length}, 全部为 operation: ${allOperation}`)
+      expect(allOperation).toBe(true)
     })
 
-    // 不用手动清理 — isolation afterEach 自动清理 domain + sub_domain
     console.log('[OK] F06 关联动作仅 operation 验证完成')
   })
 })

@@ -140,7 +140,7 @@ def create_role_token(role_code: str, permissions: List = None) -> str:
         - permissions: List - 权限列表（可选，默认使用角色默认权限）
     [RETURN] str: JWT Token
     """
-    role_info = STANDARD_ROLES.get(role_code, {'code': role_code, 'name': role_code, 'is_super_admin': False})
+    role_info = STANDARD_ROLES.get(role_code, {'code': role_code, 'name': role_code})
     role_permissions = permissions or ROLE_DEFAULT_PERMISSIONS.get(role_code, [])
 
     return create_token(
@@ -174,7 +174,7 @@ def parametrize_auth(roles: List = None, permissions: List = None,
 
     arg_values = []
     for role in roles:
-        role_info = STANDARD_ROLES.get(role, {'code': role, 'name': role, 'is_super_admin': False})
+        role_info = STANDARD_ROLES.get(role, {'code': role, 'name': role})
         role_perms = permissions or ROLE_DEFAULT_PERMISSIONS.get(role, [])
 
         token = create_token(
@@ -260,7 +260,7 @@ class AuthTestCases:
 
         arg_values = []
         for role in cls.roles:
-            role_info = STANDARD_ROLES.get(role, {'code': role, 'name': role, 'is_super_admin': False})
+            role_info = STANDARD_ROLES.get(role, {'code': role, 'name': role})
             role_perms = cls.permissions or ROLE_DEFAULT_PERMISSIONS.get(role, [])
 
             token = create_token(

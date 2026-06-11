@@ -25,7 +25,8 @@ deletability:
 
 authorization:
   check: true
-  scope: "visibility = 'public' OR owner_id = $user.id"
+  # [V1.1.2 2026-06-11] visibility 已上移到 product, version 的授权走 product 链
+  scope: "product_id IN (SELECT id FROM products WHERE visibility = 'public' OR owner_id = $user.id)"
   auto_owner: true
   auto_permission: admin
   inherit_to_children: true
@@ -43,24 +44,14 @@ hierarchy:
 # ────────────────────────────────────────────
 # KeyTemplate 自动编码
 # ────────────────────────────────────────────
-key_template:
-  enabled: true
-  auto_suggest: true
-  pattern: "{product_code}_{SEQ:2}"
-  separator: "_"
-  segments:
-    - type: parent_field
-      source: product_code
-      transform: upper
-    - type: separator
-      value: "_"
-    - type: sequence
-      name: version_seq
-      scope: product_code
-      auto_detect: true
-      padding: 2
-      start: 1
-  preview: "SCM_01"
+# [REMOVED 2026-06-10] 移除 version 的 key_template。
+# 原因：
+#   1. version code 是有业务含义的版本名（v1.0 / 2024-Q4 / R2024.1），
+#      不是 BO/REL 那样的系统枚举
+#   2. 自动生成 `{product_code}_{SEQ:2}` (e.g. SCM_01) 与 field.examples
+#      (v1.0/2024Q4/R2024.1) 设计意图冲突
+#   3. 实际数据中用户已多次手动覆盖 (V1/V2)，证明自动建议无价值
+# 决策参考：.trae/specs/key-template-form-interaction/ §11.7
 
 # ────────────────────────────────────────────
 # 导入导出配置
@@ -155,21 +146,13 @@ ui_view_config:
         importance: medium
         sortable: true
         i18n_key: version.field.code
-      - key: visibility
-        title: 可见性
-        width: 80
-        position: 3
-        importance: medium
+      # [V1.1.2 2026-06-11] 删 visibility 列 - 已上移到 product
       - key: is_current
         title: 当前版本
         width: 90
         position: 4
         importance: medium
-      - key: owner_id_display
-        title: 负责人
-        width: 100
-        position: 5
-        importance: medium
+      # [V1.1.4 2026-06-11] 删 owner_id_display 列 - 顶层 owner 已在 product
       - key: child_count
         title: 领域数量
         width: 80
@@ -201,7 +184,6 @@ ui_view_config:
         fields:
           - name
           - code
-          - visibility
           - is_current
           - description
           - product_name
@@ -219,7 +201,6 @@ ui_view_config:
         fields:
           - name
           - code
-          - visibility
           - description
           - is_current
           - product_id
@@ -243,32 +224,9 @@ ui_view_config:
 # 字段定义
 # ────────────────────────────────────────────
 fields:
-  - id: visibility
-    name: 可见性
-    type: string
-    db_column: visibility
-    default: draft
-    required: true
-    description: 版本的可见范围
-    enum_values:
-      - value: public
-        label: 公开
-        color: success
-        description: 所有人可见
-      - value: draft
-        label: 草稿
-        color: warning
-        description: 仅负责人可见
-    ui:
-      widget: select
-      visible: true
-      editable: true
-    semantics:
-      meaning: 控制版本的可见范围
-      data_category: code
-      import_visible: true
-      export_visible: true
-
+  # [V1.1.2 2026-06-11] 删 visibility 字段定义 - 已上移到 product
+  # DB 列 versions.visibility 仍保留 (向后兼容, 但已无 metadata 引用)
+  # V2 任务: 评估是否真正 DROP COLUMN
   - id: product_code
     name: 产品编码
     type: string
@@ -369,7 +327,13 @@ fields:
       import_order: 1
       display_name: true
       immutable: true
-      pattern: "^[A-Z][A-Z0-9_]*$"
+      # [CHANGED 2026-06-10] 放宽 pattern 接受 dot/dash
+      # 原 pattern: ^[A-Z][A-Z0-9_]*$ （拒绝 v1.0/2024-Q4/R2024.1）
+      # 改为 ^[A-Za-z0-9][A-Za-z0-9_.\-]*$
+      #   - 首字符: 字母或数字（接受 1.0.0 / v1.0 / 2024Q4 / R2024.1）
+      #   - 后续字符: 字母/数字/_/./-（接受 V1.0、v1.0-rc1、2024-Q4）
+      # 决策参考：.trae/specs/key-template-form-interaction/ §11.8
+      pattern: "^[A-Za-z0-9][A-Za-z0-9_.\\-]*$"
       data_category: code
       import_visible: true
       export_visible: true
@@ -436,53 +400,7 @@ fields:
             to: id
             select: name
 
-  - id: owner_id
-    name: 负责人
-    type: integer
-    db_column: owner_id
-    description: 版本负责人ID
-    ui:
-      visible: true
-      editable: true
-      widget: select
-      relation: user
-      display_field: display_name
-      fieldGroup: 系统信息
-      i18n_key: common.field.owner_id
-    semantics:
-      meaning: 版本的负责人，关联用户表
-      export_visible: false
-      import_visible: false
-      analytics:
-        category: dimension
-        type: foreign_key
-        display_name: 负责人
-    value_help:
-      source:
-        type: bo
-        target_bo: user
-        value_field: id
-        display_field: display_name
-        code_field: username
-        apply_target_permissions: false
-      behavior:
-        validation: true
-        binding_strength: strict
-        search_fields: [username, display_name]
-      presentation:
-        result_type: dialog
-        display_format: "{display_name} ({username})"
-        columns:
-          - field: username
-            label: 用户名
-            width: 120
-          - field: display_name
-            label: 显示名称
-            width: 150
-          - field: email
-            label: 邮箱
-            width: 200
-
+  # [V1.1.4 2026-06-11] 删 owner_id 字段定义 - DB 列 V1.1.1 已删, 顶层 owner 在 product
   - id: child_count
     name: 领域数量
     type: integer
@@ -672,15 +590,8 @@ rules:
       label: 取消当前
       icon: close
 
-  - id: publish_version
-    name: 发布版本
-    type: state_transition
-    state_field: visibility
-    from_states: [draft]
-    to_state: public
-    triggers: [before_update]
-    ui_hints:
-      label: 发布
-      icon: rocket
-      highlight: true
-      confirm_message: "确定要发布此版本吗？发布后所有人可见，且不可撤销。"
+  # [V1.1.2 2026-06-11] 删 publish_version state_transition
+  # 原 state_field: visibility (version 自己的可见性)
+  # 现在 visibility 在 product 级别, 发布动作需要改到 product 上做
+  # V2 任务: 在 product 级别加 publish_product state_transition
+  # ID 保留 'publish_version' 以便迁移检查

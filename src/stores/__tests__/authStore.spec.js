@@ -111,11 +111,13 @@ describe('authStore', () => {
   })
 
   describe('isAdmin', () => {
-    it('should return true for super_admin role object', () => {
+    it('should return true for super_admin role with wildcard permission', () => {
       const store = useAuthStore()
+      // V1 简化 (spec-auth-object-category-v2-2026-06-10.md FR-V1-003):
+      // admin 由 permissions 包含 '*' 识别, role.is_super_admin 已废弃
       store.user = {
-        roles: [{ is_super_admin: true }],
-        permissions: []
+        roles: [{ code: 'super_admin', name: '超级管理员' }],
+        permissions: ['*']
       }
 
       expect(store.isAdmin).toBe(true)

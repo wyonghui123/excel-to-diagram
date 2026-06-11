@@ -379,8 +379,9 @@ class UnifiedQueryFacade:
         # 解析 ordering: "field" / "-field" / "field asc" / "-field desc"
         sort_by, sort_order = _parse_ordering(req.ordering)
         # 默认 updated_at desc（如 v3 QueryService 行为）
+        # [FIX 2026-06-10] audit_logs 表无 updated_at，默认改为 created_at desc
         if not sort_by:
-            sort_by = 'updated_at'
+            sort_by = 'created_at' if req.entity_type == 'audit_log' else 'updated_at'
             sort_order = 'desc'
 
         # [M3] computed *_count 字段排序：QueryService.search 内部已有
@@ -500,47 +501,15 @@ def _parse_ordering(ordering: str) -> tuple:
 
 # ============================================================
 # [M3 2026-06-05] computed *_count 字段的子查询条件构造
+# [SPR-02 S-02 2026-06-10] 委托给 _computed_count_clause.find_count_assoc /
+#   build_count_subquery / apply_count_clause（去除 _find_m2m_assoc_for_count 重复）
 # ============================================================
 
-def _find_m2m_assoc_for_count(meta_object, base_name: str):
-    """根据 *_count 字段的 base_name 找匹配的 many_to_many 关联。
-
-    Returns:
-        (through, source_key) 元组，未找到返回 (None, None)。
-    """
-    if not meta_object:
-        return None, None
-    associations = getattr(meta_object, 'associations', None)
-    if not associations:
-        return None, None
-    if isinstance(associations, dict):
-        assoc_items = list(associations.values())
-    else:
-        assoc_items = list(associations)
-
-    for assoc in assoc_items:
-        if isinstance(assoc, str):
-            assoc_name = assoc
-            assoc_type = 'many_to_many'
-            through = None
-            source_key = None
-        else:
-            assoc_name = getattr(assoc, 'name', '')
-            assoc_type = getattr(assoc, 'type', '')
-            through = getattr(assoc, 'through', None)
-            source_key = getattr(assoc, 'source_key', None)
-
-        if assoc_type != 'many_to_many':
-            continue
-        # 匹配规则：member_count <-> members / member
-        if (
-            assoc_name == base_name
-            or assoc_name == base_name + 's'
-            or assoc_name.rstrip('s') == base_name
-        ):
-            if through and source_key:
-                return through, source_key
-    return None, None
+# v3 operator 名称 → SQL operator 映射（unified_query_facade 私有）
+_V3_OP_TO_SQL = {
+    'eq': '=', 'ne': '!=', 'gt': '>', 'ge': '>=', 'lt': '<', 'le': '<=',
+    'in': 'IN', 'not_in': 'NOT IN', 'like': 'LIKE', 'ilike': 'LIKE',
+}
 
 
 def _build_count_subquery_condition(
@@ -549,66 +518,65 @@ def _build_count_subquery_condition(
     v3_op: str,
     fv,
 ) -> tuple:
-    """为 computed *_count 字段构造 EXISTS 子查询条件。
+    """[SPR-02 delegate] → _computed_count_clause.find_count_assoc + build_count_subquery + apply_count_clause。
 
-    返回 (exists_subquery_sql, params)。
-    exists_subquery_sql 形如:
-        (SELECT COUNT(*) FROM through WHERE source_key = table.id) >= ?
+    返回 (raw_sql, params)。raw_sql 形如:
+        (SELECT COUNT(*) FROM through WHERE source_key = bo.id) >= ?
     """
+    from meta.core._computed_count_clause import (
+        find_count_assoc, build_count_subquery, apply_count_clause,
+    )
+
     if not meta_object or not field_name.endswith('_count'):
         return '', []
 
-    base_name = field_name[:-6]  # 去掉 _count
-    through, source_key = _find_m2m_assoc_for_count(meta_object, base_name)
-    if not through or not source_key:
+    base_name = field_name[:-6]
+    assoc_info = find_count_assoc(meta_object, base_name)
+    if assoc_info is None or assoc_info.kind != 'many_to_many':
         logger.warning(
             f"[M3] No m2m association for {field_name!r} "
             f"(base_name={base_name!r}) in {getattr(meta_object, 'id', '?')}"
         )
         return '', []
 
-    table_name = meta_object.table_name
     # [FIX 2026-06-05] QueryBuilder.build_sql 用 AS bo 别名（除非有 analytical_model.alias）
     # 这里统一用 `bo.id` 引用，与 QueryBuilder 渲染一致
-    source_ref = f"bo.id"
-    subquery = f"SELECT COUNT(*) FROM {through} WHERE {source_key} = {source_ref}"
+    subquery = build_count_subquery(
+        meta_object, base_name, target_alias='bo', assoc_info=assoc_info
+    )
+    if not subquery:
+        return '', []
 
-    # 算子映射
-    op_map = {
-        'eq': '=', 'ne': '!=', 'gt': '>', 'ge': '>=', 'lt': '<', 'le': '<=',
-        'in': 'IN', 'not_in': 'NOT IN', 'like': 'LIKE', 'ilike': 'LIKE',
-    }
-    sql_op = op_map.get(v3_op, '=')
-
+    sql_op = _V3_OP_TO_SQL.get(v3_op, '=')
     if sql_op in ('IN', 'NOT IN'):
-        if not fv.values:
-            return '', []
-        placeholders = ', '.join(['?'] * len(fv.values))
-        return f"({subquery}) {sql_op} ({placeholders})", list(fv.values)
-    return f"({subquery}) {sql_op} ?", [fv.value]
+        values = list(fv.values) if fv.values else []
+        return apply_count_clause(subquery, sql_op, values)
+    return apply_count_clause(subquery, sql_op, [fv.value])
 
 
 def _build_count_subquery_order(meta_object, field_name: str, sort_order: str) -> str:
-    """为 computed *_count 字段构造 ORDER BY 子句。
+    """[SPR-02 delegate] → _computed_count_clause.build_order_clause 的 m2m 路径。
 
     返回完整表达式，如：
-        (SELECT COUNT(*) FROM through WHERE ...) DESC
+        (SELECT COUNT(*) FROM through WHERE bo.id = ...) DESC
     """
+    from meta.core._computed_count_clause import find_count_assoc, build_count_subquery
+
     if not meta_object or not field_name.endswith('_count'):
         return ''
 
     base_name = field_name[:-6]
-    through, source_key = _find_m2m_assoc_for_count(meta_object, base_name)
-    if not through or not source_key:
+    assoc_info = find_count_assoc(meta_object, base_name)
+    if assoc_info is None or assoc_info.kind != 'many_to_many':
         return ''
 
-    table_name = meta_object.table_name
-    source_ref = f"bo.id"
-    direction = 'DESC' if (sort_order or 'asc').lower() == 'desc' else 'ASC'
-    return (
-        f"(SELECT COUNT(*) FROM {through} "
-        f"WHERE {source_key} = {source_ref}) {direction}"
+    subquery = build_count_subquery(
+        meta_object, base_name, target_alias='bo', assoc_info=assoc_info
     )
+    if not subquery:
+        return ''
+    direction = 'DESC' if (sort_order or 'asc').lower() == 'desc' else 'ASC'
+    return f"{subquery} {direction}"
 
 
 # ============================================================

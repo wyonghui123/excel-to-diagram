@@ -99,6 +99,7 @@ def get_audit_logs():
         page_size = request.args.get('page_size', 20, type=int)
         action = request.args.get('action', '')
         object_type = request.args.get('object_type', '')
+        object_id = request.args.get('object_id', '')
         user_name = request.args.get('user_name', '')
         start_date = request.args.get('start_date', '')
         end_date = request.args.get('end_date', '')
@@ -118,7 +119,11 @@ def get_audit_logs():
         if object_type:
             conditions.append("object_type = ?")
             params.append(object_type)
-        
+
+        if object_id:
+            conditions.append("object_id = ?")
+            params.append(object_id)
+
         if user_name:
             conditions.append("user_name LIKE ?")
             params.append(f"%{user_name}%")
@@ -161,25 +166,25 @@ def get_audit_logs():
         query_sql = f"""
             SELECT id, object_type, object_id, action, field_name, old_value, new_value,
                    user_id, user_name, ip_address, user_agent, created_at, trace_id,
-                   transaction_id, status
+                   transaction_id, status, extra_data
             FROM audit_logs
             WHERE {where_clause}
             ORDER BY {sort_field} {sort_direction}
             LIMIT ? OFFSET ?
         """
         params.extend([page_size, offset])
-        
+
         cursor = _data_source.execute(query_sql, params)
         columns = [desc[0] for desc in cursor.description]
         logs = []
-        
+
         for row in cursor.fetchall():
             log = dict(zip(columns, row))
             # 转换None为空字符串
             for key, value in log.items():
                 if value is None:
                     log[key] = ''
-            
+
             # 生成business_key
             log['business_key'] = _generate_business_key(
                 _data_source,
@@ -188,9 +193,13 @@ def get_audit_logs():
                 log.get('field_name', ''),
                 log.get('new_value', '')
             )
-            
+
+            # [FIX 2026-06-11] 解析 extra_data JSON: 提取 deleted_data (DELETE 明细)
+            # 与 object_display (展示名) 字段, 供前端 drawer 渲染
+            log['extra_data_parsed'] = _extract_deleted_data(log.pop('extra_data', ''))
+
             logs.append(log)
-        
+
         return jsonify({
             'success': True,
             'data': logs,
@@ -226,12 +235,12 @@ def get_audit_log_detail(log_id):
             return jsonify({'success': False, 'message': '审计日志不存在'}), 404
         
         log = dict(zip(columns, row))
-        
+
         # 转换None为空字符串
         for key, value in log.items():
             if value is None:
                 log[key] = ''
-        
+
         # 生成business_key
         log['business_key'] = _generate_business_key(
             _data_source,
@@ -240,6 +249,9 @@ def get_audit_log_detail(log_id):
             log.get('field_name', ''),
             log.get('new_value', '')
         )
+
+        # [FIX 2026-06-11] 解析 extra_data JSON: deleted_data 与 object_display
+        log['extra_data_parsed'] = _extract_deleted_data(log.pop('extra_data', ''))
         
         return jsonify({
             'success': True,
@@ -481,10 +493,24 @@ def _generate_business_key(data_source, object_type: str, object_id: str, field_
     """
     if not object_type or not object_id:
         return ''
-    
+
+    # 提前判断 object_id 是否为纯数字字符串，非数字则直接返回格式化标识，避免无效的 int() 转换
+    is_numeric_id = False
+    try:
+        int(object_id)
+        is_numeric_id = True
+    except (ValueError, TypeError):
+        pass
+
+    if not is_numeric_id:
+        # 枚举类型 / 元数据对象使用字符串主键（如 'annotation_category'），直接返回
+        if object_type and object_id:
+            return f"{object_type}:{object_id}"
+        return ''
+
     try:
         from meta.services.object_identity_service import ObjectIdentityService
-        
+
         service = ObjectIdentityService(data_source)
         identity = service.get_identity(object_type, int(object_id), format='short')
         
@@ -547,3 +573,33 @@ def _generate_business_key(data_source, object_type: str, object_id: str, field_
             import traceback
             traceback.print_exc()
             return f"{object_type}:{object_id}"
+
+
+def _extract_deleted_data(extra_data_raw) -> dict:
+    """[FIX 2026-06-11] 解析 extra_data JSON, 返回 parsed 后的 dict.
+
+    extra_data 通常是 JSON 字符串, 内部结构 (e.g.):
+      {"deleted_data": {...整行原数据...}, "object_display": "AB001 → AB002"}
+
+    Returns:
+        dict: 解析后的 dict. 失败时返回空 dict.
+        - 调用方可直接访问 parsed.get('deleted_data', {}) 获取删除明细
+    """
+    if not extra_data_raw:
+        return {}
+
+    if isinstance(extra_data_raw, (bytes, bytearray)):
+        try:
+            extra_data_raw = extra_data_raw.decode('utf-8')
+        except Exception:
+            return {}
+
+    if isinstance(extra_data_raw, dict):
+        return extra_data_raw
+
+    import json
+    try:
+        result = json.loads(str(extra_data_raw))
+        return result if isinstance(result, dict) else {}
+    except (ValueError, TypeError):
+        return {}

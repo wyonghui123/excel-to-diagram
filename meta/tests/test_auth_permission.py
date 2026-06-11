@@ -59,8 +59,7 @@ def create_test_db():
             code TEXT UNIQUE NOT NULL,
             name TEXT NOT NULL,
             description TEXT,
-            is_system INTEGER DEFAULT 0,
-            is_super_admin INTEGER DEFAULT 0
+            is_system INTEGER DEFAULT 0
         )
     """)
     

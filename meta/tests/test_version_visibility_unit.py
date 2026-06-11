@@ -171,181 +171,97 @@ class TestScopeFilterConditionInjection:
         assert result[0][1]['field'] == 'owner_id'
         assert result[0][1]['value'] == '5'
 
-class TestVersionVisibilityMetadata:
-    """version.yaml visibility 字段元数据验证"""
+class TestIsCurrentStateTransition:
+    """version is_current 状态转换规则元数据验证 (v1.1 新增)
 
-    def setup_method(self):
-        self.version_meta = registry.get('version')
-        assert self.version_meta, "version 对象未在 registry 中注册" is not None
-
-    def test_visibility_field_exists(self):
-        vis_field = None
-        for f in self.version_meta.fields:
-            if f.id == 'visibility':
-                vis_field = f
-                break
-        assert vis_field, "visibility 字段不存在" is not None
-        assert vis_field.name == '可见性'
-
-    def test_visibility_field_type(self):
-        vis_field = next(f for f in self.version_meta.fields if f.id == 'visibility')
-        assert vis_field.field_type == FieldType.STRING
-
-    def test_visibility_field_default(self):
-        vis_field = next(f for f in self.version_meta.fields if f.id == 'visibility')
-        assert vis_field.default == 'draft'
-
-    def test_visibility_field_required(self):
-        vis_field = next(f for f in self.version_meta.fields if f.id == 'visibility')
-        assert vis_field.required
-
-    def test_visibility_field_db_column(self):
-        vis_field = next(f for f in self.version_meta.fields if f.id == 'visibility')
-        assert vis_field.db_column == 'visibility'
-
-    def test_visibility_enum_values(self):
-        vis_field = next(f for f in self.version_meta.fields if f.id == 'visibility')
-        assert vis_field.enum_values, "visibility 缺少 enum_values" is not None
-        enum_vals = [ev.get('value') for ev in vis_field.enum_values]
-        assert 'public' in enum_vals
-        assert 'draft' in enum_vals
-        assert len(enum_vals) == 2
-
-    def test_visibility_public_enum_label(self):
-        vis_field = next(f for f in self.version_meta.fields if f.id == 'visibility')
-        public_ev = next(ev for ev in vis_field.enum_values if ev.get('value') == 'public')
-        assert public_ev.get('label') == '公开'
-
-    def test_visibility_draft_enum_label(self):
-        vis_field = next(f for f in self.version_meta.fields if f.id == 'visibility')
-        draft_ev = next(ev for ev in vis_field.enum_values if ev.get('value') == 'draft')
-        assert draft_ev.get('label') == '草稿'
-
-    def test_visibility_not_immutable(self):
-        vis_field = next(f for f in self.version_meta.fields if f.id == 'visibility')
-        semantics = getattr(vis_field, 'semantics', {})
-        if isinstance(semantics, dict):
-            self.assertNotEqual(semantics.get('immutable'), True)
-
-    def test_visibility_entered_at_field_removed(self):
-        vis_fields = [f for f in self.version_meta.fields if f.id == 'visibility_entered_at']
-        assert len(vis_fields) == 0, "visibility_entered_at 应已删除，改用 Audit Log 推导"
-
-class TestAuthorizationScope:
-    """authorization.scope 元数据验证"""
+    注意：publish_version 规则已移除（visibility 上移到 product）。
+    version 现在只有 is_current 状态转换规则。
+    """
 
     def setup_method(self):
         self.version_meta = registry.get('version')
 
-    def test_authorization_enabled(self):
-        auth = self.version_meta.authorization
-        assert auth is not None
-        if isinstance(auth, dict):
-            assert auth.get('check', False)
-        else:
-            assert auth.check
-
-    def test_authorization_scope_is_or_expression(self):
-        auth = self.version_meta.authorization
-        scope = auth.get('scope') if isinstance(auth, dict) else auth.scope
-        assert 'OR' in scope.upper()
-        assert 'visibility' in scope
-        assert 'owner_id' in scope
-        assert '$user.id' in scope
-
-    def test_authorization_scope_parses_correctly(self):
-        from meta.api.manage_api import _parse_scope_expression
-        auth = self.version_meta.authorization
-        scope = auth.get('scope') if isinstance(auth, dict) else auth.scope
-
-        resolved = scope.replace('$user.id', '42')
-        parsed = _parse_scope_expression(resolved)
-
-        assert len(parsed) == 1
-        assert isinstance(parsed[0], list), f"Expected list, got {type(parsed[0])}"
-        or_group = parsed[0]
-        assert len(or_group) == 2
-
-        public_cond = or_group[0]
-        owner_cond = or_group[1]
-
-        assert public_cond['field'] == 'visibility'
-        assert public_cond['value'] == 'public'
-
-        assert owner_cond['field'] == 'owner_id'
-        assert owner_cond['value'] == '42'
-
-class TestPublishStateTransition:
-    """draft → public 状态转换规则元数据验证"""
-
-    def setup_method(self):
-        self.version_meta = registry.get('version')
-
-    def test_publish_transition_rule_exists(self):
-        publish_rule = None
+    def test_set_current_version_rule_exists(self):
+        """验证 set_current_version 状态转换规则存在"""
+        set_current_rule = None
         for r in self.version_meta.rules:
-            if r.id == 'publish_version':
-                publish_rule = r
+            if r.id == 'set_current_version':
+                set_current_rule = r
                 break
-        assert publish_rule, "publish_version 状态转换规则不存在" is not None
+        assert set_current_rule is not None, "set_current_version 状态转换规则应存在"
 
-    def test_publish_transition_rule_type(self):
-        publish_rule = next(r for r in self.version_meta.rules if r.id == 'publish_version')
-        assert publish_rule.rule_type == RuleType.STATE_TRANSITION
+    def test_set_current_version_rule_type(self):
+        """验证规则类型为状态转换"""
+        set_current_rule = next((r for r in self.version_meta.rules if r.id == 'set_current_version'), None)
+        if set_current_rule is None:
+            # v1.1 refactor 后规则可能在 actions 而非 rules
+            set_current_rule = next((a for a in getattr(self.version_meta, 'actions', []) if a.id == 'set_current_version'), None)
+        assert set_current_rule is not None, "set_current_version 状态转换规则应存在（可能在 rules 或 actions 中）"
+        assert set_current_rule.rule_type == RuleType.STATE_TRANSITION
 
-    def test_publish_transition_state_field(self):
-        publish_rule = next(r for r in self.version_meta.rules if r.id == 'publish_version')
-        assert publish_rule.state_field == 'visibility'
+    def test_set_current_version_state_field(self):
+        """验证状态字段为 is_current"""
+        set_current_rule = next((r for r in self.version_meta.rules if r.id == 'set_current_version'), None)
+        if set_current_rule is None:
+            set_current_rule = next((a for a in getattr(self.version_meta, 'actions', []) if a.id == 'set_current_version'), None)
+        assert set_current_rule is not None, "set_current_version 状态转换规则应存在"
+        assert set_current_rule.state_field == 'is_current'
 
-    def test_publish_transition_from_states(self):
-        publish_rule = next(r for r in self.version_meta.rules if r.id == 'publish_version')
-        assert 'draft' in publish_rule.from_states
-        assert 'public' not in publish_rule.from_states
+    def test_set_current_version_from_states(self):
+        """验证从状态为 false"""
+        set_current_rule = next((r for r in self.version_meta.rules if r.id == 'set_current_version'), None)
+        if set_current_rule is None:
+            set_current_rule = next((a for a in getattr(self.version_meta, 'actions', []) if a.id == 'set_current_version'), None)
+        assert set_current_rule is not None, "set_current_version 状态转换规则应存在"
+        assert False in set_current_rule.from_states or 'false' in set_current_rule.from_states
 
-    def test_publish_transition_to_state(self):
-        publish_rule = next(r for r in self.version_meta.rules if r.id == 'publish_version')
-        assert publish_rule.to_state == 'public'
+    def test_set_current_version_to_state(self):
+        """验证目标状态为 true"""
+        set_current_rule = next((r for r in self.version_meta.rules if r.id == 'set_current_version'), None)
+        if set_current_rule is None:
+            set_current_rule = next((a for a in getattr(self.version_meta, 'actions', []) if a.id == 'set_current_version'), None)
+        assert set_current_rule is not None, "set_current_version 状态转换规则应存在"
+        assert set_current_rule.to_state is True or set_current_rule.to_state == 'true'
 
-    def test_publish_transition_triggers(self):
+    def test_set_current_version_triggers(self):
+        """验证触发器为 before_update"""
         from meta.core.models import RuleTrigger
-        publish_rule = next(r for r in self.version_meta.rules if r.id == 'publish_version')
-        assert RuleTrigger.BEFORE_UPDATE in publish_rule.triggers
+        set_current_rule = next((r for r in self.version_meta.rules if r.id == 'set_current_version'), None)
+        if set_current_rule is None:
+            set_current_rule = next((a for a in getattr(self.version_meta, 'actions', []) if a.id == 'set_current_version'), None)
+        assert set_current_rule is not None, "set_current_version 状态转换规则应存在"
+        assert RuleTrigger.BEFORE_UPDATE in set_current_rule.triggers
 
-    def test_publish_transition_ui_hints(self):
-        publish_rule = next(r for r in self.version_meta.rules if r.id == 'publish_version')
-        hints = publish_rule.ui_hints
+    def test_set_current_version_ui_hints(self):
+        """验证 UI 提示包含正确标签"""
+        set_current_rule = next((r for r in self.version_meta.rules if r.id == 'set_current_version'), None)
+        if set_current_rule is None:
+            set_current_rule = next((a for a in getattr(self.version_meta, 'actions', []) if a.id == 'set_current_version'), None)
+        assert set_current_rule is not None, "set_current_version 状态转换规则应存在"
+        hints = set_current_rule.ui_hints
         assert hints is not None
         if hasattr(hints, 'label'):
-            assert hints.label == '发布'
+            assert hints.label == '设为当前'
         elif isinstance(hints, dict):
-            assert hints.get('label') == '发布'
+            assert hints.get('label') == '设为当前'
 
-    def test_publish_transition_confirm_message(self):
-        publish_rule = next(r for r in self.version_meta.rules if r.id == 'publish_version')
-        hints = publish_rule.ui_hints
-        if hasattr(hints, 'confirm_message'):
-            msg = hints.confirm_message
-        elif isinstance(hints, dict):
-            msg = hints.get('confirm_message', '')
-        assert '不可撤销' in msg
+    def test_unset_current_version_rule_exists(self):
+        """验证 unset_current_version 规则也存在"""
+        unset_rule = None
+        for r in self.version_meta.rules:
+            if r.id == 'unset_current_version':
+                unset_rule = r
+                break
+        assert unset_rule is not None, "unset_current_version 状态转换规则应存在"
 
-    def test_no_reverse_transition(self):
+    def test_no_visibility_state_transitions(self):
+        """验证没有 visibility 相关的状态转换规则（v1.1 refactor）"""
         for r in self.version_meta.rules:
             if isinstance(r, MetaStateTransition) or (
                 hasattr(r, 'rule_type') and r.rule_type == RuleType.STATE_TRANSITION
             ):
-                if hasattr(r, 'state_field') and r.state_field == 'visibility':
-                    assert 'public' not in r.from_states, "不应存在 public → draft 的状态转换规则"
-
-    def test_state_transition_rules_count(self):
-        visibility_rules = []
-        for r in self.version_meta.rules:
-            if isinstance(r, MetaStateTransition) or (
-                hasattr(r, 'rule_type') and r.rule_type == RuleType.STATE_TRANSITION
-            ):
-                if hasattr(r, 'state_field') and r.state_field == 'visibility':
-                    visibility_rules.append(r)
-        assert len(visibility_rules) == 1, "visibility 状态转换规则应只有 1 条（draft → public）"
+                if hasattr(r, 'state_field'):
+                    assert r.state_field != 'visibility', "不应存在 visibility 状态转换规则"
 
 class TestDataPermissionInterceptorOrScope:
     """DataPermissionInterceptor OR scope 注入验证"""

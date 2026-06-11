@@ -359,7 +359,9 @@ def create_record(object_type):
     if object_type in ARCH_TYPES and AUTH_ENABLED:
         user = get_current_user()
         if user:
-            data['owner_id'] = user.get('user_id')
+            # 🆕 v1.1 owner refactor: 只对 product 设 owner_id, child 不再有此列
+            if object_type == 'product':
+                data['owner_id'] = user.get('user_id')
     
     if object_type == 'version' and data.get('is_current'):
         product_id = data.get('product_id')
@@ -485,13 +487,12 @@ def get_record(object_type, id):
         record = enrich_record(object_type, record)
 
         # 填充 FK display names（与 _do_list 保持一致）
-        from meta.core.interceptors.persistence_interceptor import PersistenceInterceptor
         from meta.core.datasource import get_data_source
-        pi = PersistenceInterceptor()
         meta_obj = registry.get(object_type)
         if meta_obj:
+            from meta.core.enrichment_engine import EnrichmentEngine
             ds = get_data_source()
-            record = pi._enrich_fk_display_names(meta_obj, record, ds)
+            record = EnrichmentEngine.for_data_source(ds).enrich_fk_display_names(meta_obj, record)
 
         record['can_delete'] = _get_manage_service().check_can_delete(object_type, record)
         try:

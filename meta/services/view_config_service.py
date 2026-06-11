@@ -442,7 +442,16 @@ class ViewConfigService:
                     col.field_type = field.field_type.value
                     if field.enum_values and not col.options:
                         col.options = self._convert_enum_values_to_options(field.enum_values)
-                    
+
+                    # [FIX 2026-06-10] 把 col.enum_type 传播到 col.enum_type (从 YAML 列配置)
+                    if getattr(col, 'enum_type', '') and not col.enum_values:
+                        # 列配置中显式声明的 enum_type, 优先于从 field 推导
+                        resolved = self._resolve_enum_values_from_db(col.enum_type)
+                        if resolved:
+                            col.enum_values = resolved
+                            if not col.filter_options:
+                                col.filter_options = self._convert_enum_values_to_options(resolved)
+
                     field_ui = getattr(field, 'ui', None)
                     if field_ui:
                         col.editable = getattr(field_ui, 'editable', True)
@@ -611,7 +620,17 @@ class ViewConfigService:
                             'position': filter_dict.get('position', 0),
                             'placeholder': filter_dict.get('placeholder', ''),
                             'default': filter_dict.get('default', ''),
+                            'source': filter_dict.get('source'),
+                            'enum_type': filter_dict.get('enum_type'),
                         }
+                        # [FIX 2026-06-10] 处理 source: enum_value + enum_type 模式:
+                        #   从数据库动态解析 enum_values 并填充 options
+                        if (normalized.get('source') == 'enum_value'
+                                and normalized.get('enum_type')
+                                and not normalized['options']):
+                            resolved = self._resolve_enum_values_from_db(normalized['enum_type'])
+                            if resolved:
+                                normalized['options'] = self._convert_enum_values_to_options(resolved)
                         config.list.filters.append(normalized)
                     if hasattr(filter_config, 'layout'):
                         config.list.filterLayout = filter_config.layout
@@ -741,6 +760,14 @@ class ViewConfigService:
                 col_value_help_config = getattr(col, 'value_help_config', None)
                 if col_value_help_config and col_filter_type != 'enum':
                     filter_config['value_help'] = col_value_help_config
+                # [FIX 2026-06-10] 把列的 enum_type/options/enum_values 传播到过滤器
+                col_enum_type = getattr(col, 'enum_type', '')
+                if col_enum_type and not filter_config.get('options'):
+                    filter_config['enum_type'] = col_enum_type
+                    if getattr(col, 'enum_values', None):
+                        filter_config['options'] = self._convert_enum_values_to_options(col.enum_values)
+                    elif getattr(col, 'filter_options', None):
+                        filter_config['options'] = list(col.filter_options)
             elif field:
                 # 优先检查 value_help 配置（FK 字段）
                 field_value_help = getattr(field, 'value_help', None)

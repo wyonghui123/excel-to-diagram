@@ -148,26 +148,34 @@ def get_current_user():
 
 def is_admin(user_info=None):
     """
-    检查用户是否为超级管理员
-    
-    判断逻辑（按优先级）：
-    1. 用户拥有 '*' 通配权限
-    2. 用户任一角色的 is_super_admin 字段为 True
-    
-    注意：不再硬编码检查角色名称 'admin'，而是通过角色的 is_super_admin 标记判断
+    检查用户是否为超级管理员 (V1 简化: 只查通配)
+
+    【V1 设计】spec-auth-object-category-v2-2026-06-10.md FR-V1-003
+    - 移除 is_super_admin 检查
+    - 简化: 拥有 '*' 通配权限即视为 admin
+    - 细粒度 admin 通过 AuthCapability.check() 检查 (V2c 引入)
+
+    Args:
+        user_info: 可选的用户信息 dict; 为 None 时从 g.current_user 取
+
+    Returns:
+        bool: True 表示该用户拥有 '*' 通配权限
     """
-    info = user_info or get_current_user()
+    # [V1 修复 2026-06-10] 改用 is None 判断, 避免空 dict {} 被当作"未传参"
+    if user_info is None:
+        try:
+            info = get_current_user()
+        except RuntimeError:
+            # 在 Flask app context 之外调用 (例如纯单元测试) 视为未登录
+            info = None
+    else:
+        info = user_info
     if not info:
         return False
-    
-    if '*' in info.get('permissions', []):
-        return True
-    
-    roles = info.get('roles', [])
-    for role in roles:
-        if isinstance(role, dict) and role.get('is_super_admin'):
-            return True
-        elif isinstance(role, str):
-            pass
-    
-    return False
+    perms = info.get('permissions', [])
+    if not isinstance(perms, (set, list, tuple)):
+        try:
+            perms = set(perms)
+        except TypeError:
+            return False
+    return '*' in perms

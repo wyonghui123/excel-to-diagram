@@ -15,6 +15,19 @@
 ---
 # Spec: 元数据驱动平台 Hardcode 风险消除
 
+> **[!!!] DEPRECATED 2026-06-10: `is_super_admin` 相关 AC 已被替代 Spec 覆盖 [!!!]**
+>
+> **状态**: 本 Spec 中关于 `role.is_super_admin` 字段的全部 AC (AC-001-1 ~ AC-001-4 等) **已被 [spec-auth-object-category-v2-2026-06-10.md §4 FR-V1-001 ~ FR-V1-005](./specs/spec-auth-object-category-v2-2026-06-10.md#4-v1-功能需求满足基本上线) 替代**：
+>
+> - AC-001-1 (`role.yaml` 新增 `is_super_admin` 字段) → **反向删除该字段**
+> - AC-001-2 (后端 `is_admin()` 查 `is_super_admin=true`) → **简化为只查 `'*'` 通配**
+> - AC-001-3 (前端 `authStore.isAdmin` 从 `is_super_admin` 判断) → **改用 `permissions.includes('*')`**
+> - AC-001-4 (admin 角色迁移时设 `is_super_admin=true`) → **简化为给 admin role 直接绑定 `'*'` permission**
+>
+> 本节 §2/§7/§8 中相关 `is_super_admin` 内容保留作历史记录，禁止作为新开发参考。
+>
+> **V1 实施记录**：`role.is_super_admin` 字段已删除, `role.priority` 字段已删除, `is_admin()` 已简化。
+
 ## 1. Background & Objectives
 
 ### 1.1 Background

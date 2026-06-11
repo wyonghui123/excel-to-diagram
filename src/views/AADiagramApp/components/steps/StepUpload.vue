@@ -1,3 +1,10 @@
+<!--
+  @deprecated 2026-06-11 旧 6 步骤模式第 1 步，入口已废弃。
+    入口: /archdata-chart 路由已在菜单中隐藏 (hiddenFromMenu: true)
+    替代: 用户应从 "架构数据管理" 页面选择数据后 navigate 到图表页
+    状态: 保留为 fallback（用户直接 URL 访问 /archdata-chart 时仍能工作）
+    TODO: 下轮清理时连同 useDiagramSteps 的 STEPS 0 一起删除
+-->
 <template>
   <div class="step-upload">
     <div class="upload-panel">

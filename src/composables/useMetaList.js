@@ -1682,6 +1682,7 @@ export function useMetaList(objectType, options = {}) {
       }
     } catch (e) {
       handleError('保存修改', e)
+      throw e
     } finally {
       loading.value = false
     }

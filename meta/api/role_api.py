@@ -131,8 +131,9 @@ def list_roles():
         placeholders = ','.join(['?'] * len(role_ids))
 
         # 批量获取角色权限
+        # [V1 修复 2026-06-10] permissions 表没有 is_system 列, 移除避免 500
         cursor = _data_source.execute(
-            f"SELECT rp.role_id, p.id, p.code, p.name, p.description, p.is_system "
+            f"SELECT rp.role_id, p.id, p.code, p.name, p.description "
             f"FROM permissions p JOIN role_permissions rp ON p.id = rp.permission_id "
             f"WHERE rp.role_id IN ({placeholders})",
             role_ids
@@ -144,7 +145,7 @@ def list_roles():
                 perm_map[rid] = []
             perm_map[rid].append({
                 'id': row[1], 'code': row[2], 'name': row[3],
-                'description': row[4], 'is_system': row[5]
+                'description': row[4]
             })
 
         # 批量获取 updated_at (参照 _enrich_updated_at 模式)

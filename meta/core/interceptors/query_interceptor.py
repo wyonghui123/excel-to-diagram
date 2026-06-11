@@ -42,6 +42,10 @@ class QueryInterceptor(Interceptor):
                 return
             self._inject_type_tag(context, items)
             self._enrich_records(context, items)
+            # [V1.1.6 2026-06-11] 关闭 effective_owner_id 派生
+            # V1.1.4 已删 yaml 字段定义 + list columns, V1.1.5 已删 owner_id DB 列
+            # effective_owner_id 不再注入 (UI 不显示, Excel 不导出, 顶层 owner 在 product)
+            # self._inject_effective_owner(context, items)
             self._inject_display_values(context, items)  # [DECORATIVE] [NEW] v1.2 / FR-3.2: 在 enrichment 之后、compute 之前
             self._compute_columns(context, items)
             self._check_can_delete(context, items)
@@ -81,6 +85,22 @@ class QueryInterceptor(Interceptor):
                 context.result.data = enriched
         except Exception as e:
             logger.debug(f"[QueryInterceptor] enrichment skipped for {context.object_type}: {e}")
+
+        # [FIX 2026-06-10] virtual FK fields（如 business_object.domain_id）由 enrich_batch
+        # 通过 join_path 填充。PersistenceInterceptor._do_list 先于本拦截器运行，
+        # 那时这些 virtual FK 字段还是 None，导致 enrich_fk_display_names 被跳过、
+        # domain_id_display / sub_domain_id_display 缺失。这里在 virtual FK 字段已就位后
+        # 重新跑一次 enrich_fk_display_names，再注入到 display_values。
+        try:
+            from meta.core.models import registry as meta_registry
+            from meta.core.enrichment_engine import EnrichmentEngine
+            meta_obj = meta_registry.get(context.object_type)
+            if meta_obj is not None:
+                items_now = self._extract_items(context)
+                if items_now:
+                    EnrichmentEngine().enrich_fk_display_names(meta_obj, items_now)
+        except Exception as e:
+            logger.debug(f"[QueryInterceptor] post-enrich fk_display skipped for {context.object_type}: {e}")
 
     def _compute_columns(self, context: 'ActionContext', items: list) -> None:
         try:

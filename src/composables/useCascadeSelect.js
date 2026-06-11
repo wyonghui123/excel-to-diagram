@@ -192,10 +192,25 @@ export function useCascadeSelect(metaObject) {
         return parentFields.value.map(function(f) { return data ? data[f] : undefined })
       },
       function(newValues, oldValues) {
+        // [FIX 2026-06-11] immediate: true 让 watch 注册时立即执行一次，
+        //   记录当前 parent 字段值作为后续比较的 oldValues。这样：
+        //     1) useFormCascade.initialize 内部 Object.assign(formData, result.data)
+        //        同步触发的第一次 watch 调度，oldValues 是 undefined → 跳过。
+        //     2) fetchData 完成后 data.value = fullData 整体替换触发的第一次
+        //        watch 调度，同样 oldValues=undefined → 跳过。
+        //     3) 用户后续编辑（version_id 真正改变）触发的第二次及之后触发，
+        //        oldValues 已有记录，callback 正常调用，下游 _id/_name 正确清空。
+        // 原 BUG：useFormCascade.initialize 在 for 循环中对每个 cascadeField
+        //   Object.assign(formData, result.data) 触发 watch 第一次调度，oldValues
+        //   是 undefined；外层 forEach(parentFields) 把所有 parent 都当作"改变"，
+        //   反复调用 clearAllDownstream 把 source_domain_name / source_sub_domain_name
+        //   / source_service_module_name / source_bo_name / target_*_name 全部清空，
+        //   浏览态和编辑态下级联 FK 字段全部显示为空。
+        if (!oldValues) return
         parentFields.value.forEach(function(parentField, index) {
           const newValue = newValues[index]
-          const oldValue = oldValues ? oldValues[index] : undefined
-          
+          const oldValue = oldValues[index]
+
           if (newValue !== oldValue) {
             cascadeFields.value.forEach(function(fieldId) {
               const config = cascadeChain.value[fieldId]
@@ -206,7 +221,7 @@ export function useCascadeSelect(metaObject) {
           }
         })
       },
-      { deep: true }
+      { deep: true, immediate: true }
     )
   }
 

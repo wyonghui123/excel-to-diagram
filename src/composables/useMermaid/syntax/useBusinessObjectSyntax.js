@@ -803,9 +803,8 @@ export function useBusinessObjectSyntax() {
             const key = node.originalName || node.name
             const id = nodeNameToIdMap.get(key)
             if (id && !definedNodes.has(id)) {
-              // 关键修复 v21：mermaid 11 不支�?["...\n..."] 换行语法（只支持  �� �?              // 之前 \\n 是字面字符串 �?"采购申请单\n(BO_A)" 一长串�?rect 截断
-              // 改成  ��  �?mermaid �?foreignObject div �?max-width: 200px + white-space: nowrap
-              // 导致  ��  后第二行 "(BO_X)" 仍被 max-width �?              // 改成 " · " 分隔符（单行），rect 自动算宽�?              const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+              // v21: use " · " separator (single-line), rect auto-calculates width
+              const displayText = node.code ? `${node.name} · (${node.code})` : node.name
               mermaidCode += `  ${id}["${displayText}"]:::node\n`
               definedNodes.add(id)
             }
@@ -883,7 +882,26 @@ export function useBusinessObjectSyntax() {
               linkColor = isSourceCenter ? targetColor : sourceColor
             }
 
-            mermaidCode += `  ${sourceId} -->|"${link.relationCode}"| ${targetId}\n`
+            // 关键修复 v26: mermaid 11 对 link label "|" 内空字符串或带特殊字符 ("\\n, |) 报 "Syntax error in text"
+            // 1) 替换 | → /
+            // 2) 替换换行 → 空格
+            // 3) 如果 link.relationCode 为空, 用 relationDesc (用户语义描述) 代替
+            // 4) 如果 relationDesc 也空或纯空白, 输出无 label 的 link
+            const rawCode = (link.relationCode && String(link.relationCode).trim())
+              ? link.relationCode
+              : (link.relationDesc && String(link.relationDesc).trim())
+                ? link.relationDesc
+                : ''
+            let safeCode = ''
+            if (rawCode) {
+              safeCode = String(rawCode)
+                .replace(/\|/g, '/')
+                .replace(/[\r\n]+/g, ' ')
+                .replace(/"/g, "'")
+                .trim()
+            }
+            const labelPart = safeCode ? `|"${safeCode}"|` : ''
+            mermaidCode += `  ${sourceId} -->${labelPart} ${targetId}\n`
 
             mermaidCode += `  linkStyle ${index} ${getLinkStyle(linkColor)}\n`
 
@@ -1029,7 +1047,22 @@ export function useBusinessObjectSyntax() {
 
         const linkColor = getLinkColor(sourceGroupKey, targetGroupKey, sourceColor, targetColor)
 
-        mermaidCode += `  ${sourceId} -->|"${link.relationCode}"| ${targetId}\n`
+        // 关键修复 v26: 见上 (line 886) 的 mermaid label 特殊字符处理
+        const rawCode2 = (link.relationCode && String(link.relationCode).trim())
+          ? link.relationCode
+          : (link.relationDesc && String(link.relationDesc).trim())
+            ? link.relationDesc
+            : ''
+        let safeCode2 = ''
+        if (rawCode2) {
+          safeCode2 = String(rawCode2)
+            .replace(/\|/g, '/')
+            .replace(/[\r\n]+/g, ' ')
+            .replace(/"/g, "'")
+            .trim()
+        }
+        const labelPart2 = safeCode2 ? `|"${safeCode2}"|` : ''
+        mermaidCode += `  ${sourceId} -->${labelPart2} ${targetId}\n`
 
         mermaidCode += `  linkStyle ${index} ${getLinkStyle(linkColor)}\n`
 

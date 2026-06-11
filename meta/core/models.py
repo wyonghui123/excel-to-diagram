@@ -16,6 +16,7 @@ from meta.core.models_enums import (
     RelationType, ActionType, ValidationSeverity, QueryOperator, AggregateType,
     RuleType, RuleScope, RuleTrigger, DataCategory, AnnotationCategory, ArchObjectType,
     DimensionKey, BusinessRelationType, RelationCategory, Direction,
+    HierarchyScopeType,
     BusinessObjectCategory, BoSubCategory, EnumBindingStrength, DimensionReferenceType,
     DataPermissionDimensionType, DerivationType, DerivationStrategy,
     IndexType, IndexPriority, IndexSource,

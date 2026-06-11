@@ -675,7 +675,7 @@ def create_test_headers(token=None, user_id='1', username='admin'):
             'user_id': user_id,
             'username': username,
             'permissions': ['*'],
-            'roles': [{'is_super_admin': True}],
+            'roles': [{'code': 'admin'}],
             'exp': 9999999999,
         }, secret, algorithm='HS256')
         if isinstance(token, bytes):

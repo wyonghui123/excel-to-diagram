@@ -19,7 +19,7 @@ from meta.core.interceptors.enum_protection_interceptor import EnumProtectionInt
 from meta.core.interceptors.business_log_interceptor import BusinessLogInterceptor
 from meta.core.interceptors.security_log_interceptor import SecurityLogInterceptor
 from meta.core.interceptors.operation_log_interceptor import OperationLogInterceptor
-from meta.core.interceptors.permission_interceptor import PermissionInterceptor  # noqa: E402
+from meta.core.interceptors.permission_interceptor import PermissionInterceptor
 
 __all__ = [
     'Interceptor',

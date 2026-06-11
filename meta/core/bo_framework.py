@@ -94,10 +94,6 @@ class BOFramework:
             'trace_id': trace_id,
         }
 
-    def set_audit_user(self, user_id: int = None, user_name: str = None,
-                       ip_address: str = None, trace_id: str = None):
-        self.set_user_context(user_id, user_name, ip_address, trace_id)
-
     def execute(self, object_type: str, action: str, params: Dict[str, Any]) -> ActionResult:
         logger.debug("[BOFramework] execute START: object_type=%s, action=%s", object_type, action)
         
@@ -144,12 +140,9 @@ class BOFramework:
                 with self.transaction() as txn_ctx:
                     context.transaction_id = txn_ctx.transaction_id
                     self._dispatch_interceptors(context)
-                    # 检查 result 标记事务失败
+                    # 检查 result 标记事务失败 → 通过 flag 告知 __exit__ 走 rollback
                     if context.result and not context.result.success:
-                        raise _TxnMarker(
-                            f"action reported failure: {context.result.message}",
-                            result=context.result,
-                        )
+                        txn_ctx.set_outcome(success=False)
                 # [审计延迟写入 2026-06-09]
                 # 事务提交后，flush 缓存的审计记录
                 self._flush_pending_audit_records(context)
@@ -171,6 +164,12 @@ class BOFramework:
             if isinstance(e, PermissionDenied):
                 logger.info(f"[BOFramework] PermissionDenied: {e.detail}")
                 return ActionResult(success=False, message=e.detail, status_code=403)
+            # [R0-2 2026-06-11] ComputationNotSupportedError 必须冒泡到 Flask errorhandler
+            # 让其返回 422 + 统一错误格式. 不要被通用 except 吞掉转 400.
+            from meta.core.computed_field_query import ComputationNotSupportedError
+            if isinstance(e, ComputationNotSupportedError):
+                logger.warning(f"[BOFramework] {e}")
+                raise  # 让 bo_api errorhandler 接管 → 422
             logger.error(f"[BOFramework] Error executing {action} on {object_type}: {e}")
             self._execute_error_interceptors(context, e)
             return ActionResult(success=False, message=str(e), errors=[str(e)])
@@ -318,71 +317,6 @@ class BOFramework:
             params['ordering'] = ordering
         return self.execute(src_type, 'query_associations', params)
 
-    def assign_association(self, src_type: str, src_id: int, tgt_type: str, tgt_id: int,
-                          association_name: str = None, metadata: dict = None) -> ActionResult:
-        logger.info(f"[BOFramework] assign_association: {src_type}:{src_id} -> {tgt_type}:{tgt_id} ({association_name})")
-        params = {
-            'src_id': src_id,
-            'tgt_type': tgt_type,
-            'tgt_id': tgt_id,
-            'association_name': association_name,
-            'metadata': metadata or {},
-        }
-        result = self.execute(src_type, 'assign', params)
-        logger.info(f"[BOFramework] assign_association result: success={result.success}")
-        return result
-
-    def unassign_association(self, src_type: str, src_id: int, tgt_type: str, tgt_id: int,
-                            association_name: str = None) -> ActionResult:
-        logger.info(f"[BOFramework] unassign_association: {src_type}:{src_id} -/-> {tgt_type}:{tgt_id} ({association_name})")
-        params = {
-            'src_id': src_id,
-            'tgt_type': tgt_type,
-            'tgt_id': tgt_id,
-            'association_name': association_name,
-        }
-        result = self.execute(src_type, 'unassign', params)
-        logger.info(f"[BOFramework] unassign_association result: success={result.success}")
-        return result
-
-    def batch_assign_associations(self, src_type: str, src_id: int, tgt_type: str,
-                                  target_ids: List[int], association_name: str = None,
-                                  metadata: dict = None) -> ActionResult:
-        logger.info(f"[BOFramework] batch_assign_associations: {src_type}:{src_id} -> {target_ids} ({association_name})")
-        params = {
-            'src_id': src_id,
-            'tgt_type': tgt_type,
-            'target_ids': target_ids,
-            'association_name': association_name,
-            'metadata': metadata or {},
-        }
-        result = self.execute(src_type, 'batch_assign', params)
-        logger.info(f"[BOFramework] batch_assign_associations result: success={result.success}")
-        return result
-
-    def batch_unassign_associations(self, src_type: str, src_id: int, tgt_type: str,
-                                     target_ids: List[int], association_name: str = None) -> ActionResult:
-        logger.info(f"[BOFramework] batch_unassign_associations: {src_type}:{src_id} -/-> {target_ids} ({association_name})")
-        params = {
-            'src_id': src_id,
-            'tgt_type': tgt_type,
-            'target_ids': target_ids,
-            'association_name': association_name,
-        }
-        result = self.execute(src_type, 'batch_unassign', params)
-        logger.info(f"[BOFramework] batch_unassign_associations result: success={result.success}")
-        return result
-
-    def count_associations(self, src_type: str, src_id: int, association_name: str) -> ActionResult:
-        logger.info(f"[BOFramework] count_associations: {src_type}:{src_id} ({association_name})")
-        params = {
-            'src_id': src_id,
-            'association_name': association_name,
-        }
-        result = self.execute(src_type, 'count', params)
-        logger.info(f"[BOFramework] count_associations result: success={result.success}, data={result.data}")
-        return result
-
     def batch_query_associations(self, src_type: str, source_ids: List[int],
                                   association_name: str, page: int = 1,
                                   page_size: int = 20, search: str = None) -> ActionResult:
@@ -398,6 +332,7 @@ class BOFramework:
     def retrieve_with_associations(self, object_type: str, obj_id: int,
                                   associations: List[str] = None,
                                   depth: int = 1) -> ActionResult:
+        """[RESTORED from SPR-05] 深度获取对象 + 关联 (被 bo_api.py retrieve 路由调用)."""
         logger.info(f"[BOFramework] retrieve_with_associations: {object_type}:{obj_id}, associations={associations}, depth={depth}")
 
         if depth > 2:
@@ -532,19 +467,19 @@ class BOFramework:
     def _flush_pending_audit_records(self, context) -> None:
         """[审计延迟写入 2026-06-09]
         事务提交后，flush 缓存的审计记录到数据库。
-        
-        Args:
-            context: ActionContext，包含 _pending_audit_records 列表
+
+        [SPR-07 T-S09-02] 用 drain_pending_audits() 替代 getattr 私有访问, 同时获得原子性.
         """
-        pending = getattr(context, '_pending_audit_records', [])
+        # [SPR-07 T-S09-02] drain_pending_audits() 原子获取并清空, 替代 getattr + clear 两步
+        pending = context.drain_pending_audits()
         if not pending:
             return
-        
+
         # 导入 StructuredLogger（延迟导入避免循环依赖）
         # 不传入 async_writer，直接同步写入
         from meta.services.structured_logger import StructuredLogger
         structured_logger = StructuredLogger(async_writer=None)
-        
+
         flushed = 0
         for audit_params in pending:
             try:
@@ -557,15 +492,12 @@ class BOFramework:
                     f"object_type={audit_params.get('object_type')}, "
                     f"object_id={audit_params.get('object_id')}"
                 )
-        
+
         if flushed > 0:
             logger.info(
                 f"[BOFramework] Flushed {flushed}/{len(pending)} pending audit records "
                 f"after transaction commit"
             )
-        
-        # 清空缓存
-        context._pending_audit_records.clear()
 
     @staticmethod
     def _infer_navigation(assoc: dict):
@@ -631,29 +563,30 @@ class TransactionContext:
     def __init__(self, bo_framework: BOFramework):
         self.bo_framework = bo_framework
         self.transaction_id = None
+        # [SPR-03] 事务结果标志：默认 commit; 调用方通过 set_outcome(False) 触发 rollback
+        self._should_commit = True
 
     def __enter__(self):
         self.transaction_id = self.bo_framework.begin_transaction()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_type is None:
-            self.bo_framework.commit(self.transaction_id)
-        else:
+        if exc_type is not None:
+            # 异常路径：始终 rollback
             self.bo_framework.rollback(self.transaction_id)
             logger.error(f"[TransactionContext] Transaction rolled back due to error: {exc_val}")
+            return False
+        if not self._should_commit:
+            # 业务标记失败：rollback
+            self.bo_framework.rollback(self.transaction_id)
+            logger.info("[TransactionContext] Transaction rolled back by set_outcome(success=False)")
+            return False
+        self.bo_framework.commit(self.transaction_id)
         return False
 
-
-class _TxnMarker(Exception):
-    """[M5.2 2026-06-05] 事务回滚标记。
-
-    当 action 报告 failure 但未抛异常时，BOFramework 抛此异常
-    以触发 with 块退出时的 rollback。
-    """
-    def __init__(self, message: str, result: Optional[ActionResult] = None):
-        super().__init__(message)
-        self.result = result
+    def set_outcome(self, success: bool) -> None:
+        """[SPR-03] 标记事务最终结果。success=False 时 __exit__ 走 rollback。"""
+        self._should_commit = bool(success)
 
 
 bo_framework = BOFramework()

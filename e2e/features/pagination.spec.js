@@ -65,7 +65,7 @@ test.describe('S-PAG: 分页 (Pagination)', () => {
   })
 
   test('C02 [next_prev]: 上/下页导航', async ({
-    page, navigateTo, dataFinder, waitForApiFn
+    page, navigateTo, dataFinder, waitForApiFn, isolation
   }, testInfo) => {
     const pv = await dataFinder.productWithVersion()
     await navigateTo(page, `/system/archdata?productId=${pv.product.id}&versionId=${pv.version.id}&tab=business_object`)
@@ -74,6 +74,40 @@ test.describe('S-PAG: 分页 (Pagination)', () => {
     await withStep(page, testInfo, '切到 businessObject tab', async () => {
       await archData.openTab('businessObject')
     })
+
+    // 检查是否有足够数据进行分页测试
+    let rowCount = await archData.getRowCount()
+    let totalText = await archData.getTotalText()
+    console.log(`[C02] 初始行数: ${rowCount}, 总条数: ${totalText}`)
+
+    // 解析总条数
+    const totalMatch = totalText.match(/共\s*(\d+)\s*条/)
+    const total = totalMatch ? parseInt(totalMatch[1]) : rowCount
+    const pageSize = 20 // 默认 page_size
+    const hasMultiplePages = total > pageSize
+
+    // 如果数据不足，创建更多 BO（需要超过 pageSize 条才能测试分页）
+    if (!hasMultiplePages) {
+      const needed = pageSize + 1 - total
+      console.log(`[C02] 数据不足 (${total}条)，创建 ${needed} 条 BO...`)
+      await withStep(page, testInfo, '创建足够的 BO 数据', async () => {
+        for (let i = 0; i < needed; i++) {
+          const uniqueSuffix = `PT${Date.now().toString(36).toUpperCase()}${i}`
+          await isolation.createTracked('business_object', {
+            name: `分页测试_${uniqueSuffix}`,
+            code: uniqueSuffix,
+            version_id: pv.version.id
+          }).catch(e => console.log(`[C02] 创建 BO 失败: ${e.message}`))
+        }
+        // 刷新页面
+        await page.reload({ waitUntil: 'domcontentloaded' })
+        await archData.openTab('businessObject')
+        await waitForApiFn(page, 'GET /api/v2/bo/business_object').catch(() => {})
+      })
+      rowCount = await archData.getRowCount()
+      totalText = await archData.getTotalText()
+      console.log(`[C02] 创建后行数: ${rowCount}, 总条数: ${totalText}`)
+    }
 
     await withStep(page, testInfo, '点下一页 (POM nextPage)', async () => {
       const before = await archData.getRowCount()

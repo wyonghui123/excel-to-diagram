@@ -866,11 +866,12 @@ class ImportExportService:
 
             print(f"[Export] {obj.name} 数据写入完成，共 {sheet_row_count} 行")
             
-            export_enum_validations = {}
+            export_enum_validations = {}  # key: actual_col_idx (不含offset)，用于新增行
+            export_enum_validations_by_col = {}  # key: col_idx (含offset)，用于数据行
             for col_idx, header in enumerate(headers[col_offset:] if include_operation_mode else headers, 1 + col_offset if include_operation_mode else 1):
                 actual_col_idx = col_idx - 1 - col_offset if include_operation_mode else col_idx - 1
                 field_id = header_to_field.get(header, header)
-                
+
                 if field_id in enum_value_maps:
                     enum_map = enum_value_maps[field_id]
                     display_values = [f"{k} - {v}" for k, v in enum_map.items()]
@@ -885,15 +886,20 @@ class ImportExportService:
                         dv.prompt = f"请选择{header} (Key - Label)"
                         dv.promptTitle = header
                         ws.add_data_validation(dv)
-                        export_enum_validations[col_idx] = dv
-            
-            for row_idx in range(2, len(sheet_data) + 2):
-                for col_idx in export_enum_validations:
-                    cell = ws.cell(row=row_idx, column=col_idx)
-                    export_enum_validations[col_idx].add(cell)
+                        # [FIX v3.18] 双索引: actual_col_idx (用于新增行) + col_idx (用于数据行)
+                        export_enum_validations[actual_col_idx] = dv
+                        export_enum_validations_by_col[col_idx] = dv
 
-            # [FIX] 为 0 条数据 / 数据末尾追加空行供用户新增 (跟 export_cascade 保持一致)
-            empty_rows_count = options.get("empty_rows_for_new", 5)
+            for row_idx in range(2, len(sheet_data) + 2):
+                for col_idx in export_enum_validations_by_col:
+                    cell = ws.cell(row=row_idx, column=col_idx)
+                    export_enum_validations_by_col[col_idx].add(cell)
+
+            # [FIX] 有数据时不追加新增行，无数据时添加空白新增行 (v3.18)
+            if len(sheet_data) > 0:
+                empty_rows_count = 0
+            else:
+                empty_rows_count = options.get("empty_rows_for_new", 5)
             next_row_idx = len(sheet_data) + 2
             for empty_row in range(empty_rows_count):
                 col_idx = 1
@@ -1200,10 +1206,13 @@ class ImportExportService:
                     col_idx += 1
                 row_idx += 1
 
-            export_enum_validations = {}
+            export_enum_validations = {}  # key: actual_col_idx (不含offset)，用于新增行
+            export_enum_validations_by_col = {}  # key: col_idx (含offset)，用于数据行
             for col_idx, header in enumerate(headers[1:] if include_operation_mode else headers, 2 if include_operation_mode else 1):
+                # [FIX v3.18] actual_col_idx 不含操作模式列偏移，与新增行循环保持一致
+                actual_col_idx = col_idx - 1 - (1 if include_operation_mode else 0)
                 field_id = header_to_field.get(header, header)
-                
+
                 if field_id in enum_value_maps:
                     enum_map = enum_value_maps[field_id]
                     display_values = [f"{k} - {v}" for k, v in enum_map.items()]
@@ -1218,14 +1227,19 @@ class ImportExportService:
                         dv.prompt = f"请选择{header} (Key - Label)"
                         dv.promptTitle = header
                         ws.add_data_validation(dv)
-                        export_enum_validations[col_idx] = dv
-            
+                        export_enum_validations[actual_col_idx] = dv
+                        export_enum_validations_by_col[col_idx] = dv
+
             for row in range(2, row_idx):
-                for col_idx in export_enum_validations:
+                for col_idx in export_enum_validations_by_col:
                     cell = ws.cell(row=row, column=col_idx)
-                    export_enum_validations[col_idx].add(cell)
+                    export_enum_validations_by_col[col_idx].add(cell)
             
-            empty_rows_count = options.get("empty_rows_for_new", 5)
+            # [FIX] 有数据时不追加新增行，无数据时添加空白新增行 (v3.18)
+            if len(sheet_data) > 0:
+                empty_rows_count = 0
+            else:
+                empty_rows_count = options.get("empty_rows_for_new", 5)
             for empty_row in range(empty_rows_count):
                 col_idx = 1
                 
@@ -1384,10 +1398,22 @@ class ImportExportService:
             )
         )
 
+        # [FIX 2026-06-11] 优先用 list columns 的 title 作为 export header
+        # 保持 list 视图与 export 列名一致
+        list_title_map = {}
+        if (meta_obj.ui_view_config and meta_obj.ui_view_config.list
+                and meta_obj.ui_view_config.list.columns):
+            for col in meta_obj.ui_view_config.list.columns:
+                key = getattr(col, 'key', None)
+                title = getattr(col, 'title', None)
+                if key and title:
+                    list_title_map[key] = title
+
         for f in export_fields:
             field_name = f.name or f.id
             if field_name not in hierarchy_fields:
-                header_name = field_name
+                # 优先用 list title, 保持 list/excel 一致
+                header_name = list_title_map.get(f.id, field_name)
                 headers.append(header_name)
                 header_to_field[header_name] = f.id
                 
@@ -2384,11 +2410,22 @@ class ImportExportService:
                 value = record.get(field_id, "")
 
                 # Resolve enum label for display
+                # [FIX 2026-06-11] 修复 child sheet enum 解析：覆盖 value_help → DB 路径
+                # 原逻辑只检查静态 enum_values，导致仅有 value_help 的字段
+                # (annotation.target_type/category, relationship.relation_type/direction)
+                # 在 child sheet 中只显示原始 key
                 field_obj = child_meta.get_field(field_id)
-                if field_obj and field_obj.enum_values:
-                    enum_map = {ev.get('value'): ev.get('label', ev.get('value')) for ev in field_obj.enum_values}
-                    if value in enum_map:
-                        value = f"{value} - {enum_map[value]}"
+                if field_obj and value not in (None, ""):
+                    enum_map = None
+                    if field_obj.enum_values:
+                        enum_map = {ev.get('value'): ev.get('label', ev.get('value'))
+                                    for ev in field_obj.enum_values}
+                    if not enum_map:
+                        enum_map = self._get_enum_value_map_from_value_help(field_obj)
+                    if enum_map and value in enum_map:
+                        label = enum_map[value]
+                        if label != value:
+                            value = f"{value} - {label}"
 
                 cell = ws.cell(row=row_idx, column=actual_col, value=_safe_cell_value(value))
                 cell.border = ds.THIN_BORDER
@@ -2413,11 +2450,14 @@ class ImportExportService:
                 else:
                     cell.fill = ds.READONLY_FILL
 
-        empty_rows_count = 0
-        if include_operation_mode:
-            # [FIX 2026-06-08] 与主导出（5）保持一致，统一空白新增行默认值
+        # [FIX] 有数据时不追加新增行，无数据时添加空白新增行 (v3.18)
+        if len(data) > 0:
+            empty_rows_count = 0
+        elif include_operation_mode:
             empty_rows_count = options.get("empty_rows_for_new", 5)
-            for empty_row in range(empty_rows_count):
+        else:
+            empty_rows_count = 0
+        for empty_row in range(empty_rows_count):
                 row_idx = len(data) + 2 + empty_row
 
                 cell = ws.cell(row=row_idx, column=1, value="create - 新增")
@@ -3152,6 +3192,7 @@ class ImportExportService:
             source_entity_data = self._get_entity_with_hierarchy(source_entity, source_id)
             if source_entity_data:
                 record[source_prefix + '_bo_name'] = source_entity_data.get('name', '')
+                record[source_prefix + '_bo_code'] = source_entity_data.get('code', '')
                 record[source_prefix + '_code'] = record.get(source_prefix + '_code') or source_entity_data.get('code', '')
                 for key, value in source_entity_data.items():
                     if key.endswith('_name') and key != 'name':
@@ -3161,6 +3202,7 @@ class ImportExportService:
             target_entity_data = self._get_entity_with_hierarchy(source_entity, target_id)
             if target_entity_data:
                 record[target_prefix + '_bo_name'] = target_entity_data.get('name', '')
+                record[target_prefix + '_bo_code'] = target_entity_data.get('code', '')
                 record[target_prefix + '_code'] = record.get(target_prefix + '_code') or target_entity_data.get('code', '')
                 for key, value in target_entity_data.items():
                     if key.endswith('_name') and key != 'name':
@@ -3511,6 +3553,13 @@ class ImportExportService:
             if field.semantics.export_visible is False:
                 return False
             if field.semantics.export_visible is True:
+                return True
+
+        # [FIX 2026-06-11] ui.export_visible 作为 fallback（activity_label 等字段在此声明）
+        if hasattr(field, 'ui') and hasattr(field.ui, 'export_visible'):
+            if field.ui.export_visible is False:
+                return False
+            if field.ui.export_visible is True:
                 return True
 
         if hasattr(field, 'ui') and hasattr(field.ui, 'visible'):

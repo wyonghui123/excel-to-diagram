@@ -203,7 +203,7 @@ def dev_login():
         return jsonify({'success': False, 'message': f'用户 {username} 不存在'}), 404
 
     cursor2 = _data_source.execute(
-        "SELECT r.name, r.code, r.is_super_admin, p.code "
+        "SELECT r.name, r.code, p.code "
         "FROM roles r "
         "JOIN group_roles gr ON r.id = gr.role_id "
         "JOIN user_group_members ugm ON gr.group_id = ugm.group_id "
@@ -218,9 +218,9 @@ def dev_login():
     for r in rows:
         role_key = r[1]
         if role_key not in roles:
-            roles[role_key] = {'name': r[0], 'code': r[1], 'is_super_admin': bool(r[2])}
-        if r[3]:
-            permissions.add(r[3])
+            roles[role_key] = {'name': r[0], 'code': r[1]}
+        if r[2]:
+            permissions.add(r[2])
     roles = list(roles.values())
     permissions = list(permissions)
 

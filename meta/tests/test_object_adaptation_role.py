@@ -41,8 +41,6 @@ class TestRoleCRUD:
             description TEXT,
             is_active INTEGER DEFAULT 1,
             is_system INTEGER DEFAULT 0,
-            is_super_admin INTEGER DEFAULT 0,
-            priority INTEGER DEFAULT 0,
             created_at DATETIME,
             updated_at DATETIME,
             created_by INTEGER,
@@ -86,6 +84,22 @@ class TestRoleCRUD:
             role_id INTEGER NOT NULL,
             created_at DATETIME,
             UNIQUE(group_id, role_id)
+        )''')
+        ds.commit()
+
+        # [FIX 2026-06-10] 创建 audit_logs 表（role 启用了 audit_aspect）
+        ds.execute('''CREATE TABLE IF NOT EXISTS audit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            object_type VARCHAR(100) NOT NULL,
+            object_id INTEGER NOT NULL,
+            action VARCHAR(50) NOT NULL,
+            actor_id INTEGER,
+            actor_name VARCHAR(200),
+            changes TEXT,
+            ip_address VARCHAR(50),
+            user_agent TEXT,
+            trace_id VARCHAR(100),
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )''')
         ds.commit()
 

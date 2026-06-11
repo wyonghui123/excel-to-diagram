@@ -62,10 +62,14 @@ export function useScopeFilterSource(options = {}) {
       filters.target_bo_ids = [...boIds]
     }
 
-    // [FIX] 优先使用 relationIds（精确 ID 过滤），回退到 relationCodes（类型编码过滤）
-    // [FIX] 字段名使用 'id'（后端主键列），而不是 'relation_ids'（后端不识别，会被忽略）
+    // [FIX v3.18 2026-06-10] 字段名统一为 `id__in`（与 buildRelationshipFilterParams 对齐）：
+    //   原实现用 `id: [1,2,3]`，但后端 _build_in_filter 只识别 `id__in`（逗号字符串）。
+    //   导致同一个过滤意图用 `id` 数组 + `id__in` 字符串双重下发，
+    //   URL 出现 `id=1&id=2&id=3&id__in=1,2,3`，后端只识别 `id__in`，但语义混乱。
+    //   改用 `id__in` 后，filterFlow 合并时进 scopeFilterKeys 的删除列表，
+    //   再由 buildRelationshipFilterParams 重新加回 (统一逗号字符串格式)。
     if (relIds && relIds.length > 0) {
-      filters.id = [...relIds]
+      filters.id__in = [...relIds]
     } else if (relCodes && relCodes.length > 0) {
       filters.relation_codes = [...relCodes]
     }

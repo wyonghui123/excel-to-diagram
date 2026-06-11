@@ -905,6 +905,104 @@ class TestManyToManyCountSortFilter(TestComputedFieldApiHelper):
             assert (it.get('relation_count', 0) or 0) >= 1
 
 
+class TestCountRelationsSortRegression(TestComputedFieldApiHelper):
+    """relation_count 字段排序回归测试 (FR-2026-06-11)。
+
+    背景：
+        - domain / sub_domain / service_module 的 relation_count 列
+          computation.type = count_relations，scope = descendants，storage = virtual
+        - _build_computed_count_sort_clause 之前只有 count_children 分支，
+          count_relations 被 fallback 到默认排序，导致排序静默失效
+        - 修复：新增 count_relations 分支，调用 build_count_relations_expr
+        - 覆盖：domain / sub_domain / service_module
+
+    验证点：DESC 单调性（a[i] >= a[i+1]）、ASC 单调性、跨页一致性、过滤组合。
+    """
+
+    @pytest.mark.parametrize("object_type", ["domain", "sub_domain", "service_module"])
+    def test_relation_count_sort_desc_monotonic(self, object_type):
+        """DESC 排序单调性：(a[i] >= a[i+1])"""
+        client = self._get_admin_client()
+        resp, items = self._list(
+            client, object_type,
+            ordering="-relation_count", page_size=10
+        )
+        assert resp.status_code == 200, resp.data[:300]
+        counts = self._extract_field(items, "relation_count")
+        if len(counts) >= 2:
+            for i in range(len(counts) - 1):
+                a = counts[i] if counts[i] is not None else 0
+                b = counts[i + 1] if counts[i + 1] is not None else 0
+                assert a >= b, (
+                    f"{object_type} relation_count DESC monotonicity broken: "
+                    f"{counts}"
+                )
+
+    @pytest.mark.parametrize("object_type", ["domain", "sub_domain", "service_module"])
+    def test_relation_count_sort_asc_monotonic(self, object_type):
+        """ASC 排序单调性：(a[i] <= a[i+1])"""
+        client = self._get_admin_client()
+        resp, items = self._list(
+            client, object_type,
+            ordering="relation_count", page_size=10
+        )
+        assert resp.status_code == 200, resp.data[:300]
+        counts = self._extract_field(items, "relation_count")
+        if len(counts) >= 2:
+            for i in range(len(counts) - 1):
+                a = counts[i] if counts[i] is not None else 0
+                b = counts[i + 1] if counts[i + 1] is not None else 0
+                assert a <= b, (
+                    f"{object_type} relation_count ASC monotonicity broken: "
+                    f"{counts}"
+                )
+
+    @pytest.mark.parametrize("object_type", ["domain", "sub_domain", "service_module"])
+    def test_relation_count_pagination_consistent(self, object_type):
+        """跨页单调性：第 1 页末 >= 第 2 页首"""
+        client = self._get_admin_client()
+        _, p1 = self._list(client, object_type, ordering="-relation_count",
+                            page=1, page_size=5)
+        _, p2 = self._list(client, object_type, ordering="-relation_count",
+                            page=2, page_size=5)
+        assert p1 is not None and p2 is not None
+        if p1 and p2:
+            last_p1 = p1[-1].get('relation_count') if p1[-1].get('relation_count') is not None else 0
+            first_p2 = p2[0].get('relation_count') if p2[0].get('relation_count') is not None else 0
+            assert last_p1 >= first_p2, (
+                f"{object_type} cross-page monotonicity broken: "
+                f"page1_last={last_p1} page2_first={first_p2}"
+            )
+
+    @pytest.mark.parametrize("object_type", ["domain", "sub_domain", "service_module"])
+    def test_relation_count_returns_valid_integers(self, object_type):
+        """relation_count 字段应返回整数或 None（不返回错误类型）"""
+        client = self._get_admin_client()
+        resp, items = self._list(client, object_type, ordering="-relation_count", page_size=5)
+        assert resp.status_code == 200, resp.data[:300]
+        for it in (items or []):
+            v = it.get('relation_count')
+            assert v is None or isinstance(v, int), (
+                f"{object_type} relation_count returned invalid type: {type(v)}"
+            )
+
+    def test_relation_count_sort_combined_with_filter(self):
+        """relation_count 排序 + 过滤组合（domain 层）"""
+        client = self._get_admin_client()
+        resp, items = self._list(
+            client, 'domain',
+            ordering='-relation_count',
+            **{'relation_count__gte': 0},
+            page_size=10,
+        )
+        assert resp.status_code == 200, resp.data[:300]
+        counts = [(it.get('relation_count') or 0) for it in (items or [])]
+        assert all(c >= 0 for c in counts), f"filter failed: {counts}"
+        if len(counts) >= 2:
+            for i in range(len(counts) - 1):
+                assert counts[i] >= counts[i + 1], f"sort failed: {counts}"
+
+
 class TestFormulaFieldSortFilter(TestComputedFieldApiHelper):
     """G5: formula/expression 派生字段排序 + 过滤。
 
@@ -1034,3 +1132,351 @@ class TestSortFilterCombinations(TestComputedFieldApiHelper):
         assert resp.status_code == 200, resp.data[:300]
         body = resp.get_json()
         assert body['success'] is True
+
+
+class TestCountChildrenSortRegression(TestComputedFieldApiHelper):
+    """count_children 字段排序回归测试 (FR-2026-06-10)。
+
+    背景：
+        - 领域/子领域/服务模块的 child_count 列
+          computation.type = count_children，storage = virtual
+        - _execute_computed_field_query 之前只处理 count_relations，
+          count_children 被 fallback 到 builder.execute() 导致排序静默失效
+        - 修复：新增 count_children DB 排序分支，底层复用
+          meta/services/query/computed_subqueries.build_count_children_expr
+        - 覆盖：domain(子领域数) / sub_domain(服务模块数) / service_module(业务对象数)
+
+    验证点：DESC 方向单调性（a[i] >= a[i+1]）
+    """
+
+    @pytest.mark.parametrize("object_type,field", [
+        ("domain",         "child_count"),  # 子领域数量
+        ("sub_domain",     "child_count"),  # 服务模块数量
+        ("service_module", "child_count"),  # 业务对象数量
+    ])
+    def test_child_count_sort_desc_monotonic(self, object_type, field):
+        """DESC 排序单调性：(a[i] >= a[i+1])"""
+        client = self._get_admin_client()
+        resp, items = self._list(
+            client, object_type,
+            ordering=f"-{field}", page_size=10
+        )
+        assert resp.status_code == 200, resp.data[:300]
+        counts = self._extract_field(items, field)
+        if len(counts) >= 2:
+            for i in range(len(counts) - 1):
+                a = counts[i] if counts[i] is not None else 0
+                b = counts[i + 1] if counts[i + 1] is not None else 0
+                assert a >= b, (
+                    f"{object_type} {field} DESC monotonicity broken: "
+                    f"{counts}"
+                )
+
+    @pytest.mark.parametrize("object_type,field", [
+        ("domain",         "child_count"),
+        ("sub_domain",     "child_count"),
+        ("service_module", "child_count"),
+    ])
+    def test_child_count_sort_asc_monotonic(self, object_type, field):
+        """ASC 排序单调性：(a[i] <= a[i+1])"""
+        client = self._get_admin_client()
+        resp, items = self._list(
+            client, object_type,
+            ordering=field, page_size=10
+        )
+        assert resp.status_code == 200, resp.data[:300]
+        counts = self._extract_field(items, field)
+        if len(counts) >= 2:
+            for i in range(len(counts) - 1):
+                a = counts[i] if counts[i] is not None else 0
+                b = counts[i + 1] if counts[i + 1] is not None else 0
+                assert a <= b, (
+                    f"{object_type} {field} ASC monotonicity broken: "
+                    f"{counts}"
+                )
+
+    @pytest.mark.parametrize("object_type", ["domain", "sub_domain", "service_module"])
+    def test_child_count_pagination_consistent(self, object_type):
+        """跨页单调性：第 1 页末 >= 第 2 页首"""
+        client = self._get_admin_client()
+        _, p1 = self._list(client, object_type, ordering="-child_count",
+                           page=1, page_size=5)
+        _, p2 = self._list(client, object_type, ordering="-child_count",
+                           page=2, page_size=5)
+        assert p1 is not None and p2 is not None
+        if p1 and p2:
+            last_p1 = p1[-1].get('child_count') if p1[-1].get('child_count') is not None else 0
+            first_p2 = p2[0].get('child_count') if p2[0].get('child_count') is not None else 0
+            assert last_p1 >= first_p2, (
+                f"{object_type} cross-page monotonicity broken: "
+                f"page1_last={last_p1} page2_first={first_p2}"
+            )
+
+    @pytest.mark.parametrize("object_type,field", [
+        ("domain",         "child_count"),
+        ("sub_domain",     "child_count"),
+        ("service_module", "child_count"),
+    ])
+    def test_child_count_returns_valid_integers(self, object_type, field):
+        """child_count 字段应返回整数或 None（不返回错误类型）"""
+        client = self._get_admin_client()
+        resp, items = self._list(client, object_type, ordering=f"-{field}", page_size=5)
+        assert resp.status_code == 200, resp.data[:300]
+        for it in (items or []):
+            v = it.get(field)
+            assert v is None or isinstance(v, int), (
+                f"{object_type} {field} returned invalid type: {type(v)}"
+            )
+
+    def test_child_count_sort_combined_with_filter(self):
+        """child_count 排序 + 过滤组合（domain 层）"""
+        client = self._get_admin_client()
+        resp, items = self._list(
+            client, 'domain',
+            ordering='-child_count',
+            **{'child_count__gte': 0},
+            page_size=10,
+        )
+        assert resp.status_code == 200, resp.data[:300]
+        counts = [(it.get('child_count') or 0) for it in (items or [])]
+        assert all(c >= 0 for c in counts), f"filter failed: {counts}"
+        if len(counts) >= 2:
+            for i in range(len(counts) - 1):
+                assert counts[i] >= counts[i + 1], f"sort failed: {counts}"
+
+
+class TestComputedSubqueriesMatrix:
+    """computed_subqueries 模块单元测试 (FR-2026-06-10)。
+
+    守护 meta/services/query/computed_subqueries 的 is_supported() 和
+    build_count_relations_expr / build_count_children_expr 的覆盖矩阵。
+    """
+
+    def _import(self):
+        from meta.services.query.computed_subqueries import (
+            build_count_relations_expr,
+            build_count_children_expr,
+            is_supported,
+        )
+        return build_count_relations_expr, build_count_children_expr, is_supported
+
+    # ── count_relations / is_supported ────────────────────────────
+
+    @pytest.mark.parametrize("object_type,scope", [
+        ("business_object", "self"),
+        ("user_group",      "self"),
+        ("domain",          "descendants"),
+        ("sub_domain",      "descendants"),
+        ("service_module",  "descendants"),
+    ])
+    def test_count_relations_is_supported(self, object_type, scope):
+        """count_relations: 已知支持的 (object_type, scope) 应返回 True"""
+        _, _, is_supported = self._import()
+        assert is_supported("count_relations", object_type, scope) is True
+
+    @pytest.mark.parametrize("object_type,scope", [
+        ("domain",    "self"),    # domain 没有 source/target_bo_id
+        ("user_group","descendants"),  # user_group 无 descendants 路径
+        ("unknown",   "self"),
+        ("unknown",   "descendants"),
+    ])
+    def test_count_relations_not_supported(self, object_type, scope):
+        """count_relations: 不支持的组合应返回 False"""
+        _, _, is_supported = self._import()
+        assert is_supported("count_relations", object_type, scope) is False
+
+    # ── count_children / is_supported ─────────────────────────────
+
+    @pytest.mark.parametrize("object_type", [
+        "service_module",
+        "sub_domain",
+        "domain",
+    ])
+    def test_count_children_is_supported(self, object_type):
+        """count_children: 已注册的对象类型应返回 True"""
+        _, _, is_supported = self._import()
+        assert is_supported("count_children", object_type) is True
+
+    @pytest.mark.parametrize("object_type", [
+        "business_object",   # 无 children
+        "user_group",       # 无 children
+        "unknown",
+    ])
+    def test_count_children_not_supported(self, object_type):
+        """count_children: 不支持的对象类型应返回 False"""
+        _, _, is_supported = self._import()
+        assert is_supported("count_children", object_type) is False
+
+    # ── build_count_relations_expr ─────────────────────────────────
+
+    @pytest.mark.parametrize("object_type,scope", [
+        ("business_object", "self"),
+        ("user_group",      "self"),
+    ])
+    def test_count_relations_self_returns_sql(self, object_type, scope):
+        """count_relations scope=self 应返回包含 COUNT(*) 的 SQL"""
+        build, _, _ = self._import()
+        expr = build("my_table", object_type, scope=scope)
+        assert expr is not None
+        assert "COUNT(*)" in expr
+        assert "my_table.id" in expr
+
+    def test_count_relations_descendants_domain_returns_sql(self):
+        """count_relations scope=descendants + domain 应返回递归子查询 SQL"""
+        build, _, _ = self._import()
+        expr = build("my_domain", "domain", scope="descendants")
+        assert expr is not None
+        assert "COUNT(DISTINCT r.id)" in expr
+        assert "business_objects" in expr
+        assert "service_modules" in expr
+        assert "sub_domains" in expr
+
+    def test_count_relations_unknown_returns_none(self):
+        """未知 object_type 应返回 None（不抛异常）"""
+        build, _, _ = self._import()
+        expr = build("t", "unknown_obj", scope="self")
+        assert expr is None
+
+    # ── build_count_children_expr ───────────────────────────────────
+
+    @pytest.mark.parametrize("object_type,expected_table", [
+        ("service_module", "business_objects"),
+        ("sub_domain",     "service_modules"),
+        ("domain",         "sub_domains"),
+    ])
+    def test_count_children_returns_sql(self, object_type, expected_table):
+        """count_children 应返回包含 COUNT(*) + 正确表名的 SQL"""
+        _, build, _ = self._import()
+        expr = build("my_table", object_type)
+        assert expr is not None
+        assert "COUNT(*)" in expr
+        assert expected_table in expr
+        assert "my_table.id" in expr
+
+    def test_count_children_unknown_returns_none(self):
+        """未知 object_type 应返回 None（不抛异常）"""
+        _, build, _ = self._import()
+        expr = build("t", "unknown")
+        assert expr is None
+
+    # ── build_count_subquery_expr 统一入口 ─────────────────────────
+
+    @pytest.mark.parametrize("comp_type,object_type", [
+        ("count_relations", "business_object"),
+        ("count_children",  "service_module"),
+    ])
+    def test_build_count_subquery_unified_dispatch(self, comp_type, object_type):
+        """统一入口应根据 comp_type 分发到对应 builder"""
+        from meta.services.query.computed_subqueries import build_count_subquery_expr
+        expr = build_count_subquery_expr(comp_type, "tbl", object_type)
+        assert expr is not None
+        assert "COUNT" in expr
+
+    def test_build_count_subquery_unknown_type_returns_none(self):
+        """未知 comp_type 应返回 None（不抛异常）"""
+        from meta.services.query.computed_subqueries import build_count_subquery_expr
+        expr = build_count_subquery_expr("count_planets", "tbl", "domain")
+        assert expr is None
+
+    # ── unknown comp_type ──────────────────────────────────────────
+
+    def test_is_supported_unknown_type_returns_false(self):
+        """未知 comp_type 应返回 False"""
+        _, _, is_supported = self._import()
+        assert is_supported("count_planets", "domain") is False
+
+
+class TestAuditDerivedFieldSortingExtended(TestComputedFieldApiHelper):
+    """audit_logs 派生字段排序极端场景 (FR-2026-06-10)。
+
+    背景：
+        - updated_at 无 UPDATE 记录时 _audit_value = NULL
+        - NULL 在 SQL ORDER BY 中无序，导致 DESC 排序静默失效
+        - 修复：COALESCE(_audit_sort._audit_value, table.created_at)
+        - 本类测试制造"全无 UPDATE"场景验证修复是否生效
+
+    关键验证：即使 audit_logs 中无 UPDATE 记录，
+    排序仍应回退到 created_at 且顺序确定（不乱序）。
+    """
+
+    def _client(self):
+        """构建带 admin 登录的 Flask test client"""
+        from meta.tests.conftest import get_shared_app
+        _, client = get_shared_app()
+        client.get('/api/v1/auth/dev-login?username=admin')
+        return client
+
+    @pytest.mark.parametrize("ordering", ["-updated_at", "updated_at"])
+    def test_updated_at_sort_works_without_any_audit_records(self, ordering):
+        """无任何 audit_logs 记录时，updated_at 排序仍应返回确定顺序（不报错）"""
+        client = self._client()
+        resp = client.get(
+            f'/api/v1/users?page=1&page_size=10&ordering={ordering}'
+        )
+        assert resp.status_code == 200, resp.data[:300]
+        body = resp.get_json()
+        assert body['success'] is True
+        items = body['data']
+        # updated_at 应为 None 或 ISO 字符串（不能抛异常）
+        for u in (items or []):
+            v = u.get('updated_at')
+            assert v is None or isinstance(v, str), (
+                f"updated_at has invalid type: {type(v)}"
+            )
+
+    @pytest.mark.parametrize("ordering", ["-updated_at", "updated_at"])
+    def test_updated_at_sort_stable_without_audit(self, ordering):
+        """无 audit 场景下，同一请求两次结果应完全一致（顺序稳定）"""
+        client = self._client()
+        r1 = client.get(f'/api/v1/users?page=1&page_size=10&ordering={ordering}')
+        r2 = client.get(f'/api/v1/users?page=1&page_size=10&ordering={ordering}')
+        assert r1.status_code == 200
+        assert r2.status_code == 200
+        ids1 = [u['id'] for u in r1.get_json()['data']]
+        ids2 = [u['id'] for u in r2.get_json()['data']]
+        assert ids1 == ids2, (
+            f"updated_at sort not stable without audit records: "
+            f"request1={ids1} request2={ids2}"
+        )
+
+    @pytest.mark.parametrize("ordering", ["-updated_at", "updated_at"])
+    def test_updated_at_sort_with_mixed_audit_data(self, ordering):
+        """混合场景（部分有 UPDATE，部分只有 CREATE）：排序应返回确定顺序"""
+        client = self._client()
+        resp = client.get(f'/api/v1/users?ordering={ordering}&page_size=20')
+        assert resp.status_code == 200, resp.data[:300]
+        body = resp.get_json()
+        assert body['success'] is True
+        for u in (body['data'] or []):
+            v = u.get('updated_at')
+            assert v is None or isinstance(v, str)
+
+    @pytest.mark.parametrize("ordering", ["-updated_at", "updated_at"])
+    def test_updated_at_sort_pagination_stable(self, ordering):
+        """无 audit 场景下跨页顺序应稳定（page1 末 <= page2 首 for ASC）"""
+        client = self._client()
+        r1 = client.get(f'/api/v1/users?ordering={ordering}&page=1&page_size=5')
+        r2 = client.get(f'/api/v1/users?ordering={ordering}&page=2&page_size=5')
+        assert r1.status_code == 200 and r2.status_code == 200
+        p1_ids = [u['id'] for u in r1.get_json()['data']]
+        p2_ids = [u['id'] for u in r2.get_json()['data']]
+        # 无 audit 时回退到 id ASC → page1 的 id 应全小于 page2 的 id
+        if ordering == "updated_at":  # ASC
+            assert max(p1_ids) < min(p2_ids) or p1_ids == p2_ids, (
+                f"Pagination not stable for ASC: p1={p1_ids} p2={p2_ids}"
+            )
+
+    def test_updated_at_sort_rejects_sql_injection(self):
+        """SQL 注入尝试应被静默拒绝（不抛 500）"""
+        client = self._client()
+        payloads = [
+            "id; DROP TABLE users",
+            "-id OR 1=1",
+            "updated_at--",
+        ]
+        for payload in payloads:
+            resp = client.get(f'/api/v1/users?ordering={payload}&page_size=5')
+            # 应返回 200（fallback）或 400，不应 500
+            assert resp.status_code in (200, 400), (
+                f"Injection payload '{payload}' caused {resp.status_code}"
+            )

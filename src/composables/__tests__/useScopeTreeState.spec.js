@@ -3,6 +3,7 @@ import {
   treeNodesToScope,
   scopeToNodeKeys,
   nodeKeysToRelationCodes,
+  nodeKeysToRelationIds,
   relationCodesToNodeKeys
 } from '@/composables/useScopeTreeState'
 
@@ -283,6 +284,88 @@ describe('nodeKeysToRelationCodes', () => {
   it('不匹配的 nodeKey 返回空数组', () => {
     const result = nodeKeysToRelationCodes(['nonexistent'], RELATION_TREE_DATA)
     expect(result).toEqual([])
+  })
+})
+
+// [v3.18 新增] nodeKeysToRelationIds 测试
+describe('nodeKeysToRelationIds', () => {
+  it('空 nodeKeys 返回空数组', () => {
+    const result = nodeKeysToRelationIds([], RELATION_TREE_DATA)
+    expect(result).toEqual([])
+  })
+
+  it('空 treeData 返回空数组', () => {
+    const result = nodeKeysToRelationIds(['internal-same-module-module-111-111'], [])
+    expect(result).toEqual([])
+  })
+
+  it('null nodeKeys 返回空数组', () => {
+    const result = nodeKeysToRelationIds(null, RELATION_TREE_DATA)
+    expect(result).toEqual([])
+  })
+
+  it('单个 module node 返回对应的 relationIds', () => {
+    // 该节点的 relationIds 应从 treeData 中获取，这里测试函数本身的正确性
+    const result = nodeKeysToRelationIds(['internal-same-module-module-111-111'], RELATION_TREE_DATA)
+    // 如果 treeData 中该节点有 relationIds，会被收集
+    expect(Array.isArray(result)).toBe(true)
+  })
+
+  it('多个 nodeKeys 合并去重', () => {
+    // 即使有重复 ID 也应去重
+    const treeWithDup = [
+      {
+        id: 'node-a',
+        name: '节点A',
+        children: [
+          { id: 'leaf-a', name: '叶子A', level: 'module', relationIds: [1, 2] }
+        ]
+      },
+      {
+        id: 'node-b',
+        name: '节点B',
+        children: [
+          { id: 'leaf-b', name: '叶子B', level: 'module', relationIds: [2, 3] }
+        ]
+      }
+    ]
+    const result = nodeKeysToRelationIds(['leaf-a', 'leaf-b'], treeWithDup)
+    // 去重后应为 [1, 2, 3]
+    expect(result.sort()).toEqual([1, 2, 3])
+  })
+
+  it('节点无 relationIds 时跳过', () => {
+    const treeWithEmpty = [
+      {
+        id: 'node-x',
+        name: '节点X',
+        children: [
+          { id: 'leaf-x', name: '叶子X', level: 'module', relationIds: [] }
+        ]
+      }
+    ]
+    const result = nodeKeysToRelationIds(['leaf-x'], treeWithEmpty)
+    expect(result).toEqual([])
+  })
+
+  it('不存在的 nodeKey 返回空', () => {
+    const result = nodeKeysToRelationIds(['nonexistent-node'], RELATION_TREE_DATA)
+    expect(result).toEqual([])
+  })
+
+  it('relationIds 中无重复值', () => {
+    const treeWithDups = [
+      {
+        id: 'node-1',
+        name: '节点1',
+        children: [
+          { id: 'leaf-1a', name: '叶子1A', level: 'module', relationIds: [10, 10, 10] }
+        ]
+      }
+    ]
+    const result = nodeKeysToRelationIds(['leaf-1a'], treeWithDups)
+    // Set 去重后只剩 [10]
+    expect(result).toEqual([10])
   })
 })
 

@@ -10,7 +10,8 @@ table_name: business_objects
 description: 业务对象是领域模型的核心实体，代表业务领域中的重要的事物或概念。业务对象之间可以有各种关系。
 display_name_field: name
 parent_object: service_module
-aspects: [hierarchy_aspect, audit_aspect, owner_aspect, naming_aspect]
+# 🆕 v1.1 owner refactor: 移除 owner_aspect
+aspects: [hierarchy_aspect, audit_aspect, naming_aspect]
 
 # 管理维度绑定（Spec v1.3 数据权限统一模型）
 dimension_bindings:
@@ -62,12 +63,18 @@ deletability:
 
 authorization:
   check: true
-  scope: "owner_id = $user.id"
-  auto_owner: true
+  # 🆕 v1.1 owner refactor (TBD-8): 通过 service_module_id → ... → product 链追溯
+  # business_object 是最深层, 链路: service_module → sub_domain → domain → version → product
+  scope: "service_module_id IN (SELECT sm.id FROM service_modules sm JOIN sub_domains sd ON sm.sub_domain_id = sd.id JOIN domains d ON sd.domain_id = d.id JOIN versions v ON d.version_id = v.id JOIN products p ON v.product_id = p.id WHERE p.visibility = 'public' OR p.owner_id = $user.id)"
+  # 🆕 TBD-9: 关闭 auto_owner
+  auto_owner: false
+  # 🆕 TBD-11: 保留 auto_permission=admin
   auto_permission: admin
+  # 🆕 TBD-10: 保留 inherit_to_children
   inherit_to_children: true
-  allow_transfer: true
-  transfer_keep_permissions: true
+  # 🆕 v1.1: business_object 不再独立 transfer
+  allow_transfer: false
+  transfer_keep_permissions: false
 
 hierarchy:
   enabled: true
@@ -118,21 +125,21 @@ semantics:
 key_template:
   enabled: true
   auto_suggest: true
-  pattern: "{service_module_code}_{SEQ:4}"
-  separator: "_"
+  # [CHANGED 2026-06-10] 紧凑编码：{服务模块编码}{SEQ:2}，例：PUM01 / PUM02
+  # 原 pattern: "{service_module_code}_{SEQ:4}"（下划线分隔 + 4 位 padding）
+  # 改为无分隔 + 2 位 padding，详见 .trae/specs/key-template-form-interaction/
+  pattern: "{service_module_code}{SEQ:2}"
   segments:
     - type: parent_field
       source: service_module_code
       transform: upper
-    - type: separator
-      value: "_"
     - type: sequence
       name: bo_code_seq
       scope: service_module_code
       auto_detect: true
-      padding: 4
+      padding: 2
       start: 1
-  preview: "ORDER_SVC_0001"
+  preview: "PUM01"
 
 # ────────────────────────────────────────────
 # 导入导出配置
@@ -200,10 +207,7 @@ analytical_model:
       display_name: 服务模块
       hierarchy_level: 4
     
-    - id: owner_id
-      field: bo.owner_id
-      display_name: 负责人
-  
+  # [V1.1.4 2026-06-11] 删 aspects 中 owner_id 引用 - 顶层 owner 已在 product
   # ────────────────────────────────────────────
   # 跨表关联过滤（SAP CDS Association + Path Expression 风格）
   # ────────────────────────────────────────────
@@ -328,6 +332,7 @@ ui_view_config:
         importance: high
         sortable: true
         i18n_key: bo.field.code
+      # [V1.1.4 2026-06-11] 删 effective_owner_id_display - 顶层 owner 已在 product
       - key: service_module_name
         title: 服务模块
         width: 150
@@ -858,58 +863,17 @@ fields:
             to: id
             select: name
 
-  - id: owner_id
-    name: 负责人
-    type: integer
-    db_column: owner_id
-    description: 业务对象负责人ID
-    semantics:
-      meaning: 业务对象的负责人，关联用户表
-      export_visible: false
-      import_visible: false
-      analytics:
-        category: dimension
-        type: foreign_key
-        display_name: 负责人
-    ui:
-      visible: true
-      editable: true
-      widget: select
-      relation: user
-      display_field: display_name
-      fieldGroup: 系统信息
-      i18n_key: common.field.owner_id
-    value_help:
-      source:
-        type: bo
-        target_bo: user
-        value_field: id
-        display_field: display_name
-        code_field: username
-        apply_target_permissions: false
-      behavior:
-        validation: true
-        binding_strength: strict
-        search_fields: [username, display_name]
-      presentation:
-        result_type: dialog
-        display_format: "{display_name} ({username})"
-        columns:
-          - field: username
-            label: 用户名
-            width: 120
-          - field: display_name
-            label: 显示名称
-            width: 150
-          - field: email
-            label: 邮箱
-            width: 200
+  # 🆕 v1.1 owner refactor (TBD-1): business_object 删除 owner_id 字段
+  # 负责人从 product.owner 派生, 见 effective_owner_id (FR-006)
+  # - id: owner_id
+  #   (字段已删除)
 
   - id: relation_count
     name: 关系数量
     type: integer
     description: 业务对象的关系数量
     storage: virtual
+    computed: true
     semantics:
       meaning: 业务对象的关系数量统计
       analytics:

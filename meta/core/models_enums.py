@@ -177,6 +177,19 @@ class Direction(Enum):
     BIDIRECTIONAL = "BIDIRECTIONAL"
 
 
+class HierarchyScopeType(Enum):
+    """关系范围类型 (computed_by=hierarchy_scope 的 4 个 scope)
+
+    数据单一事实源: hierarchies.yaml 的 hierarchy_scopes 段
+    同步到 enum_values 表后, 前端 /api/v1/enum-values?enum_type_id=hierarchy_scope_type
+    可直接拉取 4 个 options, 用于 relationship.category_type 的 filter 下拉.
+    """
+    CROSS_DOMAIN = "cross_domain"
+    SAME_DOMAIN_CROSS_SUBDOMAIN = "same_domain_cross_subdomain"
+    SAME_SUBDOMAIN_CROSS_MODULE = "same_subdomain_cross_module"
+    SAME_MODULE = "same_module"
+
+
 class BusinessObjectCategory(Enum):
     TRANSACTIONAL = "transactional"
     MASTER_DATA = "master_data"

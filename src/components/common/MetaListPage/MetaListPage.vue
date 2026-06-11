@@ -241,7 +241,7 @@
               :resizable="column.resizable !== false"
             >
               <template #header>
-                <div class="column-header" :class="{ 'is-immutable': column.immutable && inlineEditMode }">
+                <div class="column-header" :class="{ 'is-immutable': column.immutable && inlineEditMode, 'is-sortable': column.sortable }">
                   <el-tooltip
                     :content="column.label + (column.immutable && inlineEditMode ? ' (不可编辑)' : '')"
                     placement="top"
@@ -250,13 +250,33 @@
                     :teleported="false"
                     popper-class="app-tooltip-popper"
                   >
-                    <span class="column-title">
+                    <span
+                      class="column-title"
+                      :class="{ 'is-sortable': column.sortable }"
+                      :title="column.sortable ? '点击列名排序' : ''"
+                      @click.stop="onHeaderTitleClick(column)"
+                    >
                       {{ column.label }}
                       <el-icon v-if="column.immutable && inlineEditMode" class="immutable-icon">
                         <Lock />
                       </el-icon>
                     </span>
                   </el-tooltip>
+                  <!-- [FIX 2026-06-10] 自定义列头补回排序指示器 (Element Plus 自定义 #header 后内置 sort icon 丢失) -->
+                  <span
+                    v-if="column.sortable"
+                    class="sort-indicator"
+                    :class="getSortIndicatorClass(column)"
+                    :title="getSortIndicatorTitle(column)"
+                    @click.stop="onSortIndicatorClick(column)"
+                  >
+                    <el-icon class="sort-icon sort-icon--asc">
+                      <CaretTop />
+                    </el-icon>
+                    <el-icon class="sort-icon sort-icon--desc">
+                      <CaretBottom />
+                    </el-icon>
+                  </span>
                   <TableHeaderFilter
                     v-if="column.filterable"
                     :filter-type="column.filter_type || 'search'"
@@ -476,7 +496,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, markRaw, inject } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowDown, View, Edit, Delete, List, Plus, Upload, Download, Setting, Lock, MoreFilled, Document, CopyDocument, Promotion } from '@element-plus/icons-vue'
+import { ArrowDown, ArrowUp, View, Edit, Delete, List, Plus, Upload, Download, Setting, Lock, MoreFilled, Document, CopyDocument, Promotion, CaretTop, CaretBottom, Sort } from '@element-plus/icons-vue'
 import { useMetaList, formatDate } from '@/composables/useMetaList'
 import { useAssociationNavigation } from '@/composables/useAssociationNavigation'
 import { useMenuPermissions } from '@/composables/useMenuPermissions'
@@ -651,6 +671,9 @@ const message = useCrudMessage()
 const { objectTypeRouteMap, loadMenuPermissions: loadPermissions } = useMenuPermissions()
 const tableRef = ref(null)
 const coordinator = inject('refreshCoordinator', null)
+// [FIX 2026-06-11] 点击循环状态: 0=无排序, 1=升序, 2=降序
+// 单独维护避免依赖 Element Plus 内部状态 (自定义 sortable 时不可靠)
+const sortClickCycle = ref(new Map())
 
 const {
   metaConfig,
@@ -881,6 +904,105 @@ function getColumnWidth(column) {
   if (column.sortable) extra += 22
   if (column.filterable) extra += 18
   return base + extra
+}
+
+// ========== [FIX 2026-06-10] 自定义列头排序指示器 ==========
+// 当用户使用自定义 #header slot 时, Element Plus 内置 sort 图标不会渲染.
+// 这里手动添加三态排序指示器 (无 → 升序 → 降序 → 无).
+// 点击列名或排序图标都触发 onSortIndicatorClick.
+
+/**
+ * 获取当前列的排序状态类
+ * - 'is-asc'  升序激活
+ * - 'is-desc' 降序激活
+ * - ''        无排序 (默认)
+ */
+function getSortIndicatorClass(column) {
+  if (!column?.sortable) return ''
+  const prop = column.prop
+  if (!prop || !sortInfo.value) return ''
+  if (sortInfo.value.prop !== prop) return ''
+  if (sortInfo.value.order === 'ascending') return 'is-asc'
+  if (sortInfo.value.order === 'descending') return 'is-desc'
+  return ''
+}
+
+/**
+ * 获取排序指示器的 tooltip
+ */
+function getSortIndicatorTitle(column) {
+  if (!column?.sortable) return ''
+  const cls = getSortIndicatorClass(column)
+  if (cls === 'is-asc') return '当前升序，点击切换为降序'
+  if (cls === 'is-desc') return '当前降序，点击取消排序'
+  return '点击按此列排序'
+}
+
+/**
+ * 三态切换排序: 无 → 升序 → 降序 → 无
+ * [FIX 2026-06-11] 使用独立 clickCycle Map 维护状态, 不依赖 Element Plus 内部状态
+ */
+function onSortIndicatorClick(column) {
+  if (!column?.sortable || !tableRef.value) return
+  const prop = column.prop
+  if (!prop) return
+
+  // 1. 检测是否切换到新列: 如果是, 重置该列的 cycle 为 0
+  const prevProp = sortClickCycle.value.get('__lastProp')
+  if (prevProp !== prop) {
+    // 重置所有列的 cycle
+    sortClickCycle.value.clear()
+    sortClickCycle.value.set('__lastProp', prop)
+  }
+
+  // 2. 获取当前列的 cycle (0=无, 1=升序, 2=降序)
+  const currentCycle = sortClickCycle.value.get(prop) || 0
+
+  // 3. 计算下一个状态
+  let nextCycle, nextOrder
+  if (currentCycle === 0) {
+    // 无排序 → 升序
+    nextCycle = 1
+    nextOrder = 'ascending'
+  } else if (currentCycle === 1) {
+    // 升序 → 降序
+    nextCycle = 2
+    nextOrder = 'descending'
+  } else {
+    // 降序 → 取消排序
+    nextCycle = 0
+    nextOrder = null
+  }
+
+  // 4. 更新 cycle 状态
+  sortClickCycle.value.set(prop, nextCycle)
+
+  // 5. 立即同步本地 sortInfo, 避免 handleSortChange 时序问题
+  sortInfo.value = {
+    prop: nextOrder ? prop : null,
+    order: nextOrder
+  }
+
+  // 6. 同步 Element Plus 内部状态 (用于表头高亮)
+  // order 参数: 'ascending' / 'descending' / null
+  if (nextOrder) {
+    tableRef.value.sort(prop, nextOrder)
+  } else {
+    tableRef.value.clearSort()
+  }
+
+  // 7. 触发数据加载
+  // 重要: 直接调用 loadList 而不是等 sort-change 事件, 避免重复请求
+  pagination.current = 1
+  loadList()
+}
+
+/**
+ * 点击列名 (非图标) 也触发排序
+ */
+function onHeaderTitleClick(column) {
+  if (!column?.sortable) return
+  onSortIndicatorClick(column)
 }
 
 function isFkColumn(column) {
@@ -1506,14 +1628,24 @@ defineExpose({
 </script>
 
 <style scoped>
+/* [FIX 2026-06-11] Unify meta-list-page as one rounded card so toolbar and table
+   read as a single component instead of toolbar floating above the table.
+   - .meta-list-page now owns the background + border-radius (was missing)
+   - .toolbar drops its own background + border-radius and gains a divider line
+   - Layout fixes from 2026-06-09 (overflow-x, min-height, position: relative,
+     flex-wrap: nowrap) are preserved to keep the historical drift regression
+     from recurring (see docs/lessons-learned/layout/toolbar-drift-recurrence.md). */
 .meta-list-page {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
   flex-shrink: 1;
-  gap: var(--spacing-sm);
+  gap: 0;
   overflow: hidden;
+  background: var(--color-bg-container);
+  border-radius: var(--border-radius-md);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .toolbar {
@@ -1523,11 +1655,12 @@ defineExpose({
   flex-wrap: nowrap;
   gap: 12px;
   padding: var(--spacing-sm) var(--spacing-md);
-  background: var(--color-bg-container);
-  border-radius: var(--border-radius-md);
+  background: transparent;
+  border-bottom: 1px solid var(--color-border-light, #ebeef5);
   overflow-x: auto;
   min-height: 44px;
-  position: relative; /* Lock positioning context */
+  position: relative; /* Lock positioning context (2026-06-09 regression fix) */
+  flex-shrink: 0;
 }
 
 .toolbar-left {
@@ -1650,8 +1783,8 @@ defineExpose({
   display: flex;
   justify-content: flex-end;
   padding: var(--spacing-md);
-  background: var(--color-bg-light);
-  border-radius: var(--border-radius-md);
+  background: transparent;
+  border-top: 1px solid var(--color-border-light, #ebeef5);
   flex-shrink: 0;
   margin-top: auto;
 }
@@ -1681,6 +1814,50 @@ defineExpose({
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+/* [FIX 2026-06-10] 可排序列名加 cursor 提示 + 颜色变化 */
+.column-title.is-sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s ease;
+}
+.column-title.is-sortable:hover {
+  color: var(--color-primary);
+}
+
+/* [FIX 2026-06-10] 排序指示器: 双箭头三态 */
+.sort-indicator {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin-left: 2px;
+  cursor: pointer;
+  user-select: none;
+  line-height: 1;
+  gap: 0;
+  flex-shrink: 0;
+}
+.sort-indicator .sort-icon {
+  font-size: 11px;
+  height: 7px;
+  width: 11px;
+  color: #c0c4cc;
+  transition: color 0.15s ease;
+}
+.sort-indicator:hover .sort-icon {
+  color: var(--color-primary);
+}
+.sort-indicator.is-asc .sort-icon--asc {
+  color: var(--color-primary);
+}
+.sort-indicator.is-desc .sort-icon--desc {
+  color: var(--color-primary);
+}
+.sort-indicator.is-asc .sort-icon--desc,
+.sort-indicator.is-desc .sort-icon--asc {
+  color: #e4e7ed;
 }
 
 .immutable-icon {
@@ -1762,9 +1939,14 @@ defineExpose({
   color: var(--color-text-tertiary);
 }
 
-/* ======== compact mode styles ======== */
+/* ======== compact mode styles ========
+   [FIX 2026-06-11] compact mode keeps the unified card look but with
+   tighter padding. Container background and toolbar divider line are
+   preserved (no card-vs-card visual jump when toggling displayMode).
+   Embedded/dialog use cases drop the outer shadow to avoid double cards. */
 .meta-list-page--compact {
   height: auto;
+  box-shadow: none;
 
   .toolbar {
     padding: var(--spacing-xs) var(--spacing-sm);
@@ -1775,7 +1957,7 @@ defineExpose({
   }
 
   .pagination-wrapper {
-    padding: var(--spacing-sm) 0;
+    padding: var(--spacing-sm) var(--spacing-md);
     background: transparent;
   }
 

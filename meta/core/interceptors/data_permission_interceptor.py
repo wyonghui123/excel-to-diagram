@@ -44,16 +44,35 @@ class DataPermissionInterceptor(Interceptor):
         if self._is_admin(context):
             return
 
-        # [FIX v1.0.2] 优先应用 role_dimension_scopes 派生条件
+        # [FIX v1.0.2 + v1.0.5 2026-06-10] 优先应用 role_dimension_scopes 派生条件
         # 当角色声明了 dimension scope (例: TEST60 version=[2,11,12]) 时,
         # DimensionScopeEngine 自动向上展开到 parent BO (例: product={1,17}),
         # 然后注入到 query_conditions。
-        # 这覆盖了 product.yaml 的 owner_id scope 限制, 让用户能基于维度范围看到 product。
-        if self._apply_dimension_scope_filter(context):
-            return  # dimension scope 已应用, 跳过 data_permission 路径
+        #
+        # v1.0.5 修复 (TESET68 bug):
+        #   旧逻辑 dimension scope 应用后直接 return, 完全跳过 visibility/owner scope
+        #   → 用户能看到 product 范围内所有人的 draft 版本 (违反最小权限)
+        #   新逻辑 dimension scope 应用后, 继续调用 _apply_scope_filter,
+        #   visibility/owner scope 条件 AND 叠加到 dimension scope 内部。
+        #
+        # SQL 结构 (修复后):
+        #   WHERE (
+        #     (dimension_scope 派生条件)              -- 维度范围
+        #     AND                                     -- AND 叠加
+        #     (visibility='public' OR owner_id=$user) -- visibility/owner
+        #   )
+        #   OR (owner_id = $user_id)                  -- 自己 owner 始终可见
+        dimension_applied = self._apply_dimension_scope_filter(context)
 
-        self._apply_scope_filter(context)
-        self._apply_data_permission_filter(context)
+        if dimension_applied:
+            # Dimension scope 已应用, 继续叠加 visibility/owner scope (AND 关系)
+            # 不再 return, 让 _apply_scope_filter 把 BO.yaml 中的 visibility scope
+            # 作为 AND 子条件注入到 dimension scope 条件组内
+            self._apply_scope_filter_after_dimension(context)
+        else:
+            # 没 dimension scope, 走原 scope filter
+            self._apply_scope_filter(context)
+            self._apply_data_permission_filter(context)
 
     def _apply_dimension_scope_filter(self, context: 'ActionContext') -> bool:
         """[FIX v1.0.2 / v1.0.3] 应用 role_dimension_scopes 派生条件
@@ -145,7 +164,9 @@ class DataPermissionInterceptor(Interceptor):
         if 'query_conditions' not in context.extra:
             context.extra['query_conditions'] = []
 
-        # 5. 多 role → OR 关系; 单 role → 直接 append 各 AND 段
+        # 5. [FIX v1.0.5 2026-06-10] 多 role → OR 关系; 单 role → 直接 append 各 AND 段
+        #   v1.0.5 移除 v1.0.4 的 owner OR 短路逻辑（修复 TESET68 bug）
+        #   owner 例外改由 _apply_scope_filter_after_dimension + _add_owner_exception 处理
         if len(per_role_conditions) == 1:
             for c in per_role_conditions[0]:
                 context.extra['query_conditions'].append(c)
@@ -159,32 +180,10 @@ class DataPermissionInterceptor(Interceptor):
                 'conditions': or_group_conditions,
             })
 
-        # 6. [FIX v1.0.4] Owner 过滤始终可见
-        # 即使 dimension scope 配置存在, 用户对自己 owner 的资源也应该可见
-        # (FR-009: 记录级可见性; auto_owner=true 自动设置 owner_id = 当前用户)
-        # SQL: WHERE (id IN (1,2,11,12) AND product_id IN (1,17))  -- dimension scope
-        #   OR (owner_id = $user_id)                                  -- owner 始终可见
-        if context.user_id and self._bo_has_owner_id(context):
-            owner_cond = {
-                'field': 'owner_id',
-                'operator': 'eq',
-                'value': context.user_id,
-                'source': 'owner',
-            }
-            # 把已注入的所有 dimension scope 条件 + owner 条件包成一个 OR group
-            existing = list(context.extra['query_conditions'])
-            context.extra['query_conditions'] = [{
-                'type': 'or',
-                'conditions': existing + [owner_cond],
-            }]
-            logger.info(
-                f'[_apply_dimension_scope_filter] user={context.user_id} '
-                f'object_type={object_type} added owner OR (owner_id={context.user_id})'
-            )
-
         logger.info(
             f'[_apply_dimension_scope_filter] user={context.user_id} object_type={object_type} '
-            f'roles_with_scope={len(per_role_conditions)}'
+            f'roles_with_scope={len(per_role_conditions)} '
+            f'(v1.0.5: AND visibility/owner overlay applied in next step)'
         )
         return True
 
@@ -485,3 +484,170 @@ class DataPermissionInterceptor(Interceptor):
         except Exception as e:
             logger.warning(f"[DataPermInterceptor] Failed to init DataPermissionFilter: {e}")
             return None
+
+    # ────────────────────────────────────────
+    # [FIX v1.0.5 + v1.0.8 2026-06-10] Dimension scope 命中后的 visibility 叠加
+    # 修复 TESET68 bug: dimension scope 命中不再跳过 visibility/owner scope
+    #
+    # [FIX v1.0.8 2026-06-10] 只对含 visibility 字段的 BO 应用 visibility scope
+    #   - version 有 visibility 字段 → 应用 visibility scope（保护 draft）
+    #   - product 没有 visibility 字段 → 跳过 visibility scope（避免过严）
+    #   - 两种情况都加 owner 例外（自己 owner 的永远可见）
+    # ────────────────────────────────────────
+    def _apply_scope_filter_after_dimension(self, context: 'ActionContext') -> None:
+        """dimension scope 已应用后, 叠加 visibility scope（仅当 BO 有 visibility 字段）
+
+        [FIX v1.0.8] 分情况处理:
+        - BO 有 visibility 字段（如 version）→ AND 叠加 visibility scope
+        - BO 无 visibility 字段（如 product）→ 跳过 visibility scope（避免过严）
+        - 两种情况都加 owner 例外
+
+        修复后 SQL（version 有 visibility）:
+          WHERE (product_id = 1) AND (visibility='public' OR owner_id=$user)
+              OR (owner_id = $user_id)
+
+        修复后 SQL（product 无 visibility）:
+          WHERE (id IN (1, 17))   -- dimension scope 直接授权
+              OR (owner_id = $user_id)  -- owner 例外
+        """
+        meta_obj = context.meta_object
+        if meta_obj is None:
+            return
+
+        # [FIX v1.0.8] 检查 BO 是否有 visibility 字段
+        if not self._bo_has_visibility_field(context):
+            # 没有 visibility 字段, 跳过 visibility scope
+            # 直接加 owner 例外（dimension scope 已经表达了"被授权"）
+            self._add_owner_exception(context)
+            return
+
+        authorization = getattr(meta_obj, 'authorization', None)
+
+        # 解析 visibility scope（如果有）
+        visibility_conditions = []
+        if authorization:
+            scope_expr = None
+            if isinstance(authorization, dict):
+                scope_expr = authorization.get('scope')
+            elif hasattr(authorization, 'scope'):
+                scope_expr = authorization.scope
+
+            if scope_expr:
+                resolved = scope_expr
+                if context.user_id:
+                    resolved = resolved.replace('$user.id', str(context.user_id))
+                if context.user_name:
+                    resolved = resolved.replace('$user.username', str(context.user_name))
+
+                try:
+                    parsed = self._parse_scope_expression(resolved)
+                    for cond_item in parsed:
+                        if isinstance(cond_item, list):
+                            or_conditions = [
+                                {'field': c['field'], 'operator': c['operator'], 'value': c['value']}
+                                for c in cond_item
+                            ]
+                            visibility_conditions.append({
+                                'type': 'or',
+                                'conditions': or_conditions,
+                                'source': 'visibility_scope',
+                            })
+                        else:
+                            visibility_conditions.append({
+                                'field': cond_item['field'],
+                                'operator': cond_item['operator'],
+                                'value': cond_item['value'],
+                                'source': 'visibility_scope',
+                            })
+                except Exception as e:
+                    logger.warning(f'[_apply_scope_filter_after_dimension] parse scope failed: {e}')
+
+        # 把 visibility 条件平铺到 query_conditions
+        existing = context.extra.get('query_conditions', [])
+        new_conditions = list(existing) + visibility_conditions
+        context.extra['query_conditions'] = new_conditions
+
+        logger.info(
+            f'[_apply_scope_filter_after_dimension] user={context.user_id} '
+            f'object_type={context.object_type} '
+            f'visibility scope AND-overlaid ({len(visibility_conditions)} conds)'
+        )
+
+        # owner 例外
+        self._add_owner_exception(context)
+
+    def _bo_has_visibility_field(self, context: 'ActionContext') -> bool:
+        """[FIX v1.0.8] 检查当前 BO 是否有 visibility 字段
+
+        用于判断是否需要应用 visibility scope 过滤:
+        - version 有 visibility 字段 → True (应用 visibility scope 保护 draft)
+        - product 没有 visibility 字段 → False (跳过 visibility scope, 避免过严)
+
+        委托给 BoSchemaLoader.has_visibility_field (复用现有缓存机制)
+        """
+        try:
+            from meta.core.bo_schema_loader import get_bo_schema_loader
+            loader = get_bo_schema_loader()
+            return loader.has_visibility_field(context.object_type)
+        except Exception as e:
+            logger.debug(f'[_bo_has_visibility_field] error: {e}')
+            return False
+
+    def _add_owner_exception(self, context: 'ActionContext') -> None:
+        """[FIX v1.0.5 + v1.0.7] owner 例外: 用户对自己 owner 的资源始终可见
+
+        即使 dimension scope 命中且 visibility=draft, 只要 owner=自己, 仍然可见。
+
+        [FIX v1.0.7 2026-06-10]
+        persistence_interceptor._build_scope_conditions 支持嵌套 AND/OR group,
+        我们用以下嵌套结构表达:
+
+        最终 SQL 结构:
+          WHERE (product_id = ? AND (visibility = ? OR owner_id = ?))
+              OR (owner_id = ?)
+
+        实现:
+          query_conditions = [
+              {'type': 'and', 'conditions': [dim_cond, visibility_or_group]},
+              owner_cond
+          ]
+        然后把整个列表用顶层 type='or' 包住, 表达 OR 关系:
+          query_conditions = [
+              {'type': 'or', 'conditions': [
+                  {'type': 'and', 'conditions': [dim_cond, visibility_or_group]},
+                  owner_cond,
+              ]}
+          ]
+        """
+        if not context.user_id:
+            return
+        if not self._bo_has_owner_id(context):
+            return
+
+        owner_cond = {
+            'field': 'owner_id',
+            'operator': 'eq',
+            'value': context.user_id,
+            'source': 'owner_exception',
+        }
+        existing = list(context.extra.get('query_conditions', []))
+        if not existing:
+            context.extra['query_conditions'] = [owner_cond]
+            return
+
+        # 把 existing 包成 and_group, 然后 OR 上 owner_cond
+        # 用顶层 type='or' 包住 (dim+visibility AND group) 和 owner_cond
+        and_group = {
+            'type': 'and',
+            'conditions': existing,
+        }
+        context.extra['query_conditions'] = [{
+            'type': 'or',
+            'conditions': [and_group, owner_cond],
+        }]
+        logger.info(
+            f'[_add_owner_exception] user={context.user_id} '
+            f'object_type={context.object_type} '
+            f'wrapped {len(existing)} existing into AND group, '
+            f'OR with owner_exception (top-level OR group)'
+        )

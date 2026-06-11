@@ -625,7 +625,7 @@ class TestRelationshipExportFields:
 
             category_label_field = relationship.get_field("category_label")
             assert category_label_field is not None, "field not found on relationship"
-            assert not category_label_field.semantics.export_visible
+            assert category_label_field.semantics.export_visible, "category_label (关系范围) should be export_visible"
             print("[PASS] Relationship virtual fields have correct export_visible")
         except (AssertionError, AttributeError) as e:
             pytest.fail(f"Relationship virtual fields issue: {e}")

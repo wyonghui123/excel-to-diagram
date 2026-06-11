@@ -208,14 +208,80 @@ class ComputationService:
     def _batch_count_children(self, data_source, object_type: str,
                                records: List[Dict], field_key: str,
                                computation: Dict[str, Any]):
-        for record in records:
-            record_id = record.get('id')
-            if record_id:
-                record[field_key] = self._count_children(
-                    data_source, object_type, record_id, computation
-                )
-            else:
+        """[R2-2.1 2026-06-11] 批量统计子对象数: 1 个 SQL 替代 N+1.
+
+        原实现对每条记录各跑一次 _count_children (1 SQL/record = N+1).
+        新实现用 IN (?, ?, ...) + GROUP BY 一次性统计所有 parent_ids.
+
+        兼容性:
+        - 保留 _count_children 单记录方法作为单元测试与 fallback 入口
+        - LEFT JOIN 保留 NULL parent (无子对象) 也能在结果集中, count = 0
+        - COALESCE 兜底 LEFT JOIN 未匹配的 row
+        - IS NOT NULL 过滤避免 NULL fk 被 IN 排除导致漏算
+        """
+        if not records:
+            return
+
+        # 解析 target_object / fk_field (与 _count_children 逻辑一致)
+        target_object = computation.get('target_object') or computation.get('child_object', '')
+        if not target_object:
+            for record in records:
                 record[field_key] = 0
+            return
+
+        meta_obj = registry.get(target_object)
+        if not meta_obj:
+            for record in records:
+                record[field_key] = 0
+            return
+
+        table_name = meta_obj.table_name
+        fk_field = computation.get('foreign_key', '')
+        if not fk_field:
+            from meta.services.cascade_service import HierarchyConfigLoader
+            fk_field = HierarchyConfigLoader.get_foreign_key(target_object)
+        if not fk_field:
+            for record in records:
+                record[field_key] = 0
+            return
+
+        # 收集所有 parent_ids (去重)
+        record_ids = [r.get('id') for r in records if r.get('id') is not None]
+        unique_ids = list(set(record_ids))
+        if not unique_ids:
+            for record in records:
+                record[field_key] = 0
+            return
+
+        try:
+            placeholders = ','.join(['?'] * len(unique_ids))
+            sql = (
+                f"SELECT {fk_field}, COUNT(*) AS cnt "
+                f"FROM {table_name} "
+                f"WHERE {fk_field} IN ({placeholders}) "
+                f"AND {fk_field} IS NOT NULL "
+                f"GROUP BY {fk_field}"
+            )
+            cursor = data_source.execute(sql, tuple(unique_ids))
+            count_map = {row[0]: row[1] for row in cursor.fetchall()}
+
+            for record in records:
+                rid = record.get('id')
+                record[field_key] = count_map.get(rid, 0) if rid is not None else 0
+        except Exception as e:
+            # [FIX] fallback 到单记录实现 (N+1 但至少结果正确)
+            import logging
+            logging.getLogger(__name__).warning(
+                '[R2-2.1] batch_count_children failed, falling back to per-record: %s', e
+            )
+            for record in records:
+                record_id = record.get('id')
+                if record_id:
+                    record[field_key] = self._count_children(
+                        data_source, object_type, record_id, computation
+                    )
+                else:
+                    record[field_key] = 0
 
     def _evaluate_expression(self, data_source, object_type: str, record_id: int,
                               computation: Dict[str, Any]) -> Any:
@@ -441,14 +507,82 @@ class ComputationService:
 
     def _batch_count_descendant_relations(self, data_source, object_type: str,
                                            records: List[Dict], field_key: str):
-        for record in records:
-            record_id = record.get('id')
-            if record_id:
-                record[field_key] = self._count_descendant_relations(
-                    data_source, object_type, record_id
-                )
-            else:
+        """[R2-2.2 2026-06-11] 批量统计 descendant relations: 1 个 SQL 替代 N+1.
+
+        原实现对每条记录各跑一次 _count_descendant_relations (2 SQL/record = 2N+1).
+        新实现用 LEFT JOIN 一次 JOIN 出所有 parent 维度下的 descendant relations 计数.
+
+        三种 object_type 的 JOIN 路径:
+        - domain       : bo -> sm -> sub_domains -> (filter: sd.domain_id = ?)
+        - sub_domain   : bo -> sm             -> (filter: sm.sub_domain_id = ?)
+        - service_module: bo                  -> (filter: bo.service_module_id = ?)
+
+        关系去重:
+        - 用 COUNT(DISTINCT r.id) 防止 source/target 同 BO 时被算 2 次
+        - LEFT JOIN 确保无 relations 的 parent 也出现在结果中 (count = 0)
+        """
+        if not records:
+            return
+
+        # 收集 parent_ids (去重)
+        record_ids = [r.get('id') for r in records if r.get('id') is not None]
+        unique_ids = list(set(record_ids))
+        if not unique_ids:
+            for record in records:
                 record[field_key] = 0
+            return
+
+        # 根据 object_type 选 parent 维度列
+        if object_type == 'domain':
+            parent_col = 'sd.domain_id'
+        elif object_type == 'sub_domain':
+            parent_col = 'sm.sub_domain_id'
+        elif object_type == 'service_module':
+            parent_col = 'bo.service_module_id'
+        else:
+            # 未支持类型, fallback 到单记录 (与原版行为一致)
+            for record in records:
+                record_id = record.get('id')
+                if record_id:
+                    record[field_key] = self._count_descendant_relations(
+                        data_source, object_type, record_id
+                    )
+                else:
+                    record[field_key] = 0
+            return
+
+        try:
+            placeholders = ','.join(['?'] * len(unique_ids))
+            sql = (
+                f"SELECT {parent_col}, COUNT(DISTINCT r.id) AS cnt "
+                f"FROM business_objects bo "
+                f"JOIN service_modules sm ON bo.service_module_id = sm.id "
+                f"JOIN sub_domains sd ON sm.sub_domain_id = sd.id "
+                f"LEFT JOIN relationships r "
+                f"  ON r.source_bo_id = bo.id OR r.target_bo_id = bo.id "
+                f"WHERE {parent_col} IN ({placeholders}) "
+                f"GROUP BY {parent_col}"
+            )
+            cursor = data_source.execute(sql, tuple(unique_ids))
+            count_map = {row[0]: row[1] for row in cursor.fetchall()}
+
+            for record in records:
+                rid = record.get('id')
+                record[field_key] = count_map.get(rid, 0) if rid is not None else 0
+        except Exception as e:
+            # [FIX] fallback 到单记录实现 (N+1 但至少结果正确)
+            import logging
+            logging.getLogger(__name__).warning(
+                '[R2-2.2] batch_count_descendant_relations failed, falling back to per-record: %s', e
+            )
+            for record in records:
+                record_id = record.get('id')
+                if record_id:
+                    record[field_key] = self._count_descendant_relations(
+                        data_source, object_type, record_id
+                    )
+                else:
+                    record[field_key] = 0
 
     def _batch_count_user_group_members(self, data_source, records: List[Dict], field_key: str):
         if not records:

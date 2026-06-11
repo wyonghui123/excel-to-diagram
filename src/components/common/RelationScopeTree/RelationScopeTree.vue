@@ -185,6 +185,9 @@ const selectedSubDomainIds = shallowRef([])
 const selectedServiceModuleIds = shallowRef([])
 const relationStale = ref(false)
 const relationCodesClearTrigger = ref(0)  // OSS 变更时切换，触发 RelationScopeSection 清空 preservedCheckedKeys
+// [v32-FIX] 一次性标志：首次 OSS change 后如果 relationCodes 是从 chart 恢复的，跳过清空保护 restore；
+//   之后再改 OSS 则正常清空 RSS。避免 restoredCodes 检查因 codes 从未被清空而永久跳过清空。
+const _restoreProtectionConsumed = ref(false)
 const treeData = shallowRef([])
 
 const hierarchyMap = computed(() => {
@@ -294,8 +297,20 @@ function handleObjectScopeChange({ boIds, domainIds, subDomainIds, serviceModule
   // 关键：先同步 emitScopeChange 让 parent 更新 scopeIds.relationExtra = []，
   // 然后同步调用 loadRelationships 用空 codes 重建 RSS 树。
   // 不依赖 scheuleAutoLoad 的 300ms 延迟，避免时序窗口。
-  selectedRelationCodes.value = []
-  emitScopeChange()
+  // [v32-FIX] 用一次性标志位替代 restoredCodes 检查：
+  //   首次 OSS change 时若 relationCodes 非空（从 chart 恢复），
+  //   跳过清空保护 restore；之后再改 OSS 则正常清空 RSS。
+  const restoredCodes = props.scopeIds?.relationExtra?.relationCodes
+  const hasRestoredCodes = restoredCodes && restoredCodes.length > 0
+  if (!_restoreProtectionConsumed.value && hasRestoredCodes) {
+    // 首次：跳过清空，保护 restore 状态
+    _restoreProtectionConsumed.value = true
+  } else {
+    // 后续：正常清空 RSS
+    _restoreProtectionConsumed.value = true  // 标志已消费
+    selectedRelationCodes.value = []
+    emitScopeChange()
+  }
   // emitScopeChange 同步执行 parent 的 handleScopeChange，scopeIds.relationExtra 现在是 []
 
   // 切换到 RelationScopeSection 触发预设清空 + forceClear

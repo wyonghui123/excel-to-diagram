@@ -317,10 +317,78 @@ class TestKeyTemplateEngine:
         assert code == "ORDER_SVC_0001"
 
     def test_preview_code_no_field(self):
+        """[UPDATED 2026-06-11] parent_field 值缺失 → 返回 None（拒绝生成裸序列号）"""
         config = self._make_config()
         code = self.engine.preview_code(config, {})
-        assert code is not None
-        assert "_0001" in code
+        assert code is None, (
+            f"parent_field 缺失时应返回 None（不生成裸序列号），实际: {code}"
+        )
+
+    def test_validate_parent_fields_all_present(self):
+        """[NEW 2026-06-11] 所有 parent_field 值存在 → 返回 True"""
+        config = self._make_config()
+        field_values = {"service_module_code": "PUM"}
+        assert self.engine._validate_parent_fields(config.segments, field_values) is True
+
+    def test_validate_parent_fields_one_missing(self):
+        """[NEW 2026-06-11] 一个 parent_field 值缺失 → 返回 False"""
+        config = self._make_config()
+        assert self.engine._validate_parent_fields(config.segments, {}) is False
+
+    def test_validate_parent_fields_empty_value(self):
+        """[NEW 2026-06-11] parent_field 值为空字符串 → 返回 False"""
+        config = self._make_config()
+        assert self.engine._validate_parent_fields(config.segments, {"service_module_code": ""}) is False
+
+    def test_validate_parent_fields_multi_all_present(self):
+        """[NEW 2026-06-11] 多个 parent_field 全部存在 → 返回 True"""
+        config = KeyTemplateConfig.from_dict("rel", {
+            "enabled": True,
+            "pattern": "{source_code}-{target_code}-{SEQ:2}",
+            "segments": [
+                {"type": "parent_field", "source": "source_code"},
+                {"type": "separator", "value": "-"},
+                {"type": "parent_field", "source": "target_code"},
+                {"type": "separator", "value": "-"},
+                {"type": "sequence", "name": "rel_seq", "scope": "source_code,target_code",
+                 "auto_detect": False, "padding": 2, "start": 1}
+            ]
+        })
+        field_values = {"source_code": "ORDER", "target_code": "USER"}
+        assert self.engine._validate_parent_fields(config.segments, field_values) is True
+
+    def test_validate_parent_fields_multi_one_missing(self):
+        """[NEW 2026-06-11] 多个 parent_field 中一个缺失 → 返回 False"""
+        config = KeyTemplateConfig.from_dict("rel", {
+            "enabled": True,
+            "pattern": "{source_code}-{target_code}-{SEQ:2}",
+            "segments": [
+                {"type": "parent_field", "source": "source_code"},
+                {"type": "separator", "value": "-"},
+                {"type": "parent_field", "source": "target_code"},
+                {"type": "separator", "value": "-"},
+                {"type": "sequence", "name": "rel_seq", "scope": "source_code,target_code",
+                 "auto_detect": False, "padding": 2, "start": 1}
+            ]
+        })
+        field_values = {"source_code": "ORDER"}  # target_code 缺失
+        assert self.engine._validate_parent_fields(config.segments, field_values) is False
+
+    def test_generate_code_rejects_missing_parent_field(self):
+        """[NEW 2026-06-11] parent_field 缺失时 generate_code 返回 None（不生成裸序列号）"""
+        config = self._make_config()
+        code = self.engine.generate_code(config, {}, "test_obj")
+        assert code is None, (
+            f"parent_field 缺失时应返回 None，实际: {code}"
+        )
+
+    def test_preview_code_rejects_missing_parent_field(self):
+        """[NEW 2026-06-11] parent_field 缺失时 preview_code 返回 None"""
+        config = self._make_config()
+        code = self.engine.preview_code(config, {"service_module_code": ""})
+        assert code is None, (
+            f"parent_field 值为空时应返回 None，实际: {code}"
+        )
 
     def test_generate_code_multi_field_pattern(self):
         config = KeyTemplateConfig.from_dict("rel", {

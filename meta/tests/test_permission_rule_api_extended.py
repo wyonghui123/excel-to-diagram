@@ -34,7 +34,7 @@ def admin_token(app):
         'user_id': 1,
         'username': 'admin',
         'display_name': '系统管理员',
-        'roles': [{'name': '超级管理员', 'code': 'super_admin', 'is_super_admin': True}],
+        'roles': [{'name': '超级管理员', 'code': 'super_admin'}],
         'permissions': ['*'],
         'exp': 9999999999,
     }, secret, algorithm='HS256')

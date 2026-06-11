@@ -393,21 +393,111 @@ describe('useCascadeSelect', () => {
         ]
       })
       const formData = ref({ version_id: 1, domain_id: 5 })
-      
+
       const cascade = useCascadeSelect(metaObject)
       const callback = vi.fn()
-      
+
       cascade.watchParentChanges(formData, callback)
-      
+
       await nextTick()
       await nextTick()
-      
+
       formData.value = { version_id: 2, domain_id: 5 }
-      
+
       await nextTick()
       await nextTick()
-      
+
       expect(callback).toHaveBeenCalledWith('domain_id', 2)
+    })
+
+    // [REGRESSION 2026-06-11] useFormCascade.initialize() 在 infer 父级时
+    //   会 Object.assign(formData, result.data) 触发 watch。但 watch 第一次
+    //   触发时 oldValues 是 undefined（lazy watch），如果不防护会调用
+    //   clearAllDownstream 清空所有 _name 缓存，导致浏览态/编辑态下级联 FK
+    //   字段（source_domain_name / source_sub_domain_name / ...）全部为空。
+    it('should skip first trigger with undefined oldValues and call on real changes (regression 2026-06-11)', async () => {
+      const metaObject = ref({
+        cascade_select: [
+          { field: 'version_id', parent_object: 'version', filter_by: 'product_id' },
+          { field: 'domain_id', parent_object: 'domain', filter_by: 'version_id' },
+          { field: 'sub_domain_id', parent_object: 'sub_domain', filter_by: 'domain_id' },
+          { field: 'service_module_id', parent_object: 'service_module', filter_by: 'sub_domain_id' }
+        ]
+      })
+      // 模拟后端 API 返回的完整数据（含 _id 和 _name 虚拟字段）
+      const formData = ref({
+        version_id: 1,
+        domain_id: 1,
+        sub_domain_id: 1,
+        service_module_id: 2,
+        domain_name: '采购管理',
+        sub_domain_name: '采购需求',
+        service_module_name: '供应商管理'
+      })
+
+      const cascade = useCascadeSelect(metaObject)
+      const callback = vi.fn()
+
+      // 模拟 useFormCascade.initialize 的执行顺序：
+      //   1) Object.assign(formData, result.data) 修改 parent field
+      //   2) 然后注册 watch
+      //   第一次 watch 触发时 oldValues = undefined
+      formData.value = { ...formData.value, domain_id: 1 }  // Object.assign 等价
+      cascade.watchParentChanges(formData, callback)
+
+      await nextTick()
+      await nextTick()
+
+      // 关键断言：第一次触发（oldValues=undefined）时不能调用 callback
+      expect(callback).not.toHaveBeenCalled()
+
+      // 后续真实变化必须正常触发
+      formData.value = { ...formData.value, version_id: 2 }
+      await nextTick()
+      await nextTick()
+
+      expect(callback).toHaveBeenCalledWith('domain_id', 2)
+    })
+  })
+
+  // [REGRESSION 2026-06-11] useFormCascade.initialize 流程：infer + Object.assign
+  //   不能清空 _name 字段
+  describe('useFormCascade initialize does not clobber _name fields (regression 2026-06-11)', () => {
+    it('should preserve _name virtual fields after initialize', async () => {
+      const metaObject = ref({
+        cascade_select: [
+          { field: 'source_domain_id', parent_object: 'domain', filter_by: 'version_id' },
+          { field: 'source_sub_domain_id', parent_object: 'sub_domain', filter_by: 'source_domain_id' },
+          { field: 'source_service_module_id', parent_object: 'service_module', filter_by: 'source_sub_domain_id' }
+        ]
+      })
+      // 模拟后端返回的完整 _id + _name
+      const formData = ref({
+        version_id: 1,
+        source_domain_id: 1,
+        source_sub_domain_id: 1,
+        source_service_module_id: 2,
+        source_domain_name: '采购管理',
+        source_sub_domain_name: '采购需求',
+        source_service_module_name: '供应商管理'
+      })
+
+      const mockedRead = vi.mocked(boService.read)
+      // service_module(2) -> sub_domain(1) -> domain(1) -> version(1)
+      mockedRead
+        .mockResolvedValueOnce({ success: true, data: { id: 2, sub_domain_id: 1 } })
+        .mockResolvedValueOnce({ success: true, data: { id: 1, domain_id: 1 } })
+        .mockResolvedValueOnce({ success: true, data: { id: 1, version_id: 1 } })
+
+      const result = useFormCascade(metaObject, formData)
+      await result.initialize()
+      await nextTick()
+      await nextTick()
+
+      // _name 字段必须保留
+      expect(formData.value.source_domain_name).toBe('采购管理')
+      expect(formData.value.source_sub_domain_name).toBe('采购需求')
+      expect(formData.value.source_service_module_name).toBe('供应商管理')
     })
   })
 })

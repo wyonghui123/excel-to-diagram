@@ -1,24 +1,35 @@
 <template> 
   <div ref="mermaidContainerEl" class="mermaid-container" :class="{ 'maximized': isMaximized }">
     <div class="toolbar">
-      <button class="toolbar-btn" @click="resetAdaptive" title="重置视图">
-        <AppIcon name="refresh" size="sm" />
-      </button>
-      <button class="toolbar-btn" @click="toggleMaximize" :title="isMaximized ? '退出全屏' : '全屏查看'">
-        <AppIcon :name="isMaximized ? 'fullscreen-exit' : 'fullscreen'" size="sm" />
-      </button>
+      <!-- 查看操作组 -->
+      <div class="toolbar-group">
+        <button class="toolbar-btn" @click="resetAdaptive" title="重置视图">
+          <AppIcon name="refresh" size="sm" />
+          <span class="toolbar-btn-label">重置</span>
+        </button>
+        <button class="toolbar-btn" @click="toggleMaximize" :title="isMaximized ? '退出全屏' : '全屏查看'">
+          <AppIcon :name="isMaximized ? 'fullscreen-exit' : 'fullscreen'" size="sm" />
+          <span class="toolbar-btn-label">{{ isMaximized ? '退出' : '全屏' }}</span>
+        </button>
+      </div>
+      
       <span class="toolbar-divider"></span>
-      <button class="toolbar-btn" @click="copyToClipboard" title="复制代码">
-        <AppIcon name="copy" size="sm" />
-      </button>
-      <button class="toolbar-btn" @click="exportAsHtmlFull" title="导出 HTML（彩色版 - 可直接双击打开）">
-        <AppIcon name="export" size="sm" />
-        <span style="font-size: 10px; margin-left: 2px;">彩</span>
-      </button>
-      <button class="toolbar-btn" @click="exportAsPdf" title="导出 PDF（横版矢量图）">
-        <AppIcon name="export" size="sm" />
-        <span style="font-size: 10px; margin-left: 2px;">PDF</span>
-      </button>
+      
+      <!-- 导出操作组 -->
+      <div class="toolbar-group">
+        <button class="toolbar-btn" @click="copyToClipboard" title="复制代码">
+          <AppIcon name="copy" size="sm" />
+          <span class="toolbar-btn-label">复制</span>
+        </button>
+        <button class="toolbar-btn toolbar-btn--primary" @click="exportAsHtmlFull" title="导出 HTML（彩色版 - 可直接双击打开）">
+          <AppIcon name="export" size="sm" />
+          <span class="toolbar-btn-label">彩色HTML</span>
+        </button>
+        <button class="toolbar-btn toolbar-btn--primary" @click="exportAsPdf" title="导出 PDF（横版矢量图）">
+          <AppIcon name="export" size="sm" />
+          <span class="toolbar-btn-label">PDF</span>
+        </button>
+      </div>
     </div>
 
     <div class="mermaid-wrapper" ref="mermaidWrapper">
@@ -37,6 +48,7 @@ import mermaid from 'mermaid'
 import { jsPDF } from 'jspdf'
 // eslint-disable-next-line no-unused-vars -- svg2pdf.js 注册 jsPDF 的 .svg() 方法
 import 'svg2pdf.js'
+import html2canvas from 'html2canvas'
 import { AppIcon } from './common/AppIcon'
 import { useDiagramConfigStore } from '../stores/diagramConfigStore.js'
 
@@ -1599,8 +1611,15 @@ ${mermaidCode}
       }
     }
 
-    // 导出为 PDF（横版矢量图，含 legend）
-    // 关键修复 v26：使用 svg2pdf.js + jsPDF 转换当前 mermaid SVG 为矢量 PDF
+    // 导出为 PDF（横版，含 legend）
+    // 关键修复 v28：分两路合成
+    //   - SVG 走 Image 路径：浏览器原生渲染 SVG，自动应用 <style> 块里的 fill/stroke 等（保留图表颜色）
+    //   - Legend 走 html2canvas：浏览器原生渲染中文（无字体限制）
+    //   - 用 Canvas 2D 把两者合成到一起，再嵌入 jsPDF
+    // 修复历史：
+    //   v26 svg2pdf.js → 中文乱码 + 图表文字不显示（Helvetica 不支持中文）
+    //   v27 html2canvas 单体 → 中文 OK，但图表颜色丢失（html2canvas 不解析 SVG <style> 块）
+    //   v28 分路合成 → 中文 OK + 颜色 OK
     const exportAsPdf = async () => {
       const svgEl = mermaidContainer.value?.querySelector('svg')
       if (!svgEl) {
@@ -1608,131 +1627,174 @@ ${mermaidCode}
         return
       }
 
-      // hex 颜色 → rgb（PDF setFillColor 需要 0-255 整数）
-      const hexToRgb = (hex) => {
-        if (!hex) return { r: 224, g: 224, b: 224 }
-        // 处理 #ffffff / #fff / rgb(r,g,b) / 命名色
-        let h = String(hex).trim()
-        if (h.startsWith('rgb')) {
-          const m = h.match(/(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/)
-          if (m) return { r: +m[1], g: +m[2], b: +m[3] }
-        }
-        if (h[0] !== '#') h = '#' + h
-        if (h.length === 4) {
-          h = '#' + h[1] + h[1] + h[2] + h[2] + h[3] + h[3]
-        }
-        if (h.length !== 7) return { r: 224, g: 224, b: 224 }
-        return {
-          r: parseInt(h.substring(1, 3), 16),
-          g: parseInt(h.substring(3, 5), 16),
-          b: parseInt(h.substring(5, 7), 16)
-        }
-      }
+      // 准备 legend 数据
+      const annotationConfigPdf = props.diagramData?.annotationConfig || {}
+      const centerScopeHighlightPdf = annotationConfigPdf.centerScopeHighlight !== false
+      const colorLegendDataPdf = (props.diagramType === 'serviceModule' || props.diagramType === 'businessObject')
+        ? svgProcessor.buildColorLegendData(props.diagramData, nodeColorMappings, centerScopeHighlightPdf)
+        : []
 
       showToast('正在生成 PDF，请稍候...')
 
+      const scale = 1.5
+      const padding = 20
+
       try {
-        // 1. 计算 SVG 实际像素尺寸（含 viewBox 内所有内容）
-        const viewBox = svgEl.getAttribute('viewBox')
-        let svgWidth = svgEl.clientWidth || svgEl.getBoundingClientRect().width
-        let svgHeight = svgEl.clientHeight || svgEl.getBoundingClientRect().height
-        if (viewBox) {
-          const parts = viewBox.split(/\s+/).map(parseFloat)
+        // ============================================================
+        // 1. SVG → Image（浏览器原生 SVG 渲染，完美保留 <style> 块的颜色 + 中文）
+        // 关键修复 v29：用 data URL 代替 blob URL（headless 环境下 blob URL 的 SVG 加载有兼容性问题，会卡住 onload）
+        // ============================================================
+        // 先克隆 SVG 并设置明确的 width/height（避免 load 后 naturalWidth=0）
+        const svgCloneForExport = svgEl.cloneNode(true)
+        if (!svgCloneForExport.getAttribute('xmlns')) {
+          svgCloneForExport.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+        }
+        // 优先用 viewBox 尺寸，否则用 bounding rect
+        const origViewBox = svgEl.getAttribute('viewBox')
+        let exportSvgWidth, exportSvgHeight
+        if (origViewBox) {
+          const parts = origViewBox.split(/\s+/).map(parseFloat)
           if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
-            svgWidth = parts[2]
-            svgHeight = parts[3]
+            exportSvgWidth = parts[2]
+            exportSvgHeight = parts[3]
+          }
+        }
+        if (!exportSvgWidth) {
+          const rect = svgEl.getBoundingClientRect()
+          exportSvgWidth = rect.width || 800
+          exportSvgHeight = rect.height || 600
+        }
+        svgCloneForExport.setAttribute('width', String(exportSvgWidth))
+        svgCloneForExport.setAttribute('height', String(exportSvgHeight))
+
+        const svgString = new XMLSerializer().serializeToString(svgCloneForExport)
+        // 用 encodeURIComponent 编码生成 data URL（避免 SVG 里的 # 等字符被截断）
+        const svgDataUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgString)
+
+        const svgImg = new Image()
+        // 加 5s 超时保护，避免 headless 环境下 onload 卡住
+        await Promise.race([
+          new Promise((resolve, reject) => {
+            svgImg.onload = resolve
+            svgImg.onerror = () => reject(new Error('SVG 加载失败'))
+            svgImg.src = svgDataUrl
+          }),
+          new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('SVG 加载超时 (5s)')), 5000)
+          })
+        ])
+
+        // 获取 SVG 实际尺寸（优先用 Image 加载后的 naturalWidth，fallback 到 viewBox 解析）
+        let svgWidth = svgImg.naturalWidth || exportSvgWidth || 800
+        let svgHeight = svgImg.naturalHeight || exportSvgHeight || 600
+
+        // ============================================================
+        // 2. Legend → Canvas（用 html2canvas 渲染 DOM，中文由浏览器绘制）
+        // ============================================================
+        let legendCanvas = null
+        if (colorLegendDataPdf.length > 0) {
+          const legendWrapper = document.createElement('div')
+          legendWrapper.style.cssText = [
+            'position: fixed',
+            'left: -99999px',
+            'top: 0',
+            'background: #ffffff',
+            'padding: 20px',
+            'font-family: "Microsoft YaHei", "微软雅黑", "PingFang SC", "Helvetica Neue", Arial, sans-serif',
+            'color: #222',
+            'width: ' + (svgWidth + padding * 2) + 'px',
+            'box-sizing: border-box'
+          ].join(';')
+
+          const legendTitle = document.createElement('div')
+          legendTitle.textContent = '图例'
+          legendTitle.style.cssText = 'font-size: 36px; font-weight: bold; margin-bottom: 20px; color: #333;'
+          legendWrapper.appendChild(legendTitle)
+
+          const legendGrid = document.createElement('div')
+          legendGrid.style.cssText = 'display: flex; flex-wrap: wrap; gap: 16px 32px;'
+          colorLegendDataPdf.forEach((item) => {
+            const itemDiv = document.createElement('div')
+            itemDiv.style.cssText = 'display: flex; align-items: center; gap: 12px; font-size: 30px; white-space: nowrap;'
+            const colorBox = document.createElement('span')
+            colorBox.style.cssText = `display: inline-block; width: 36px; height: 36px; background: ${item.color || '#e0e0e0'}; border: 1px solid #999; border-radius: 2px;`
+            const nameSpan = document.createElement('span')
+            nameSpan.textContent = item.name || ''
+            itemDiv.appendChild(colorBox)
+            itemDiv.appendChild(nameSpan)
+            legendGrid.appendChild(itemDiv)
+          })
+          legendWrapper.appendChild(legendGrid)
+
+          document.body.appendChild(legendWrapper)
+          try {
+            legendCanvas = await html2canvas(legendWrapper, {
+              backgroundColor: '#ffffff',
+              scale: scale,
+              logging: false,
+              useCORS: true
+            })
+          } finally {
+            document.body.removeChild(legendWrapper)
           }
         }
 
-        // 2. 准备 legend 数据（如果应用内有 legend panel，也嵌入到 PDF 顶部）
-        const annotationConfigPdf = props.diagramData?.annotationConfig || {}
-        const centerScopeHighlightPdf = annotationConfigPdf.centerScopeHighlight !== false
-        const colorLegendDataPdf = (props.diagramType === 'serviceModule' || props.diagramType === 'businessObject')
-          ? svgProcessor.buildColorLegendData(props.diagramData, nodeColorMappings, centerScopeHighlightPdf)
-          : []
+        // ============================================================
+        // 3. 合成 final canvas（白底 + legend + SVG）
+        // ============================================================
+        const finalWidth = Math.max(
+          legendCanvas ? legendCanvas.width : 0,
+          svgWidth * scale + padding * 2 * scale
+        )
+        const legendHeightPx = legendCanvas ? legendCanvas.height : 0
+        const finalHeight = legendHeightPx + svgHeight * scale + padding * scale
 
-        // 3. A4 横版：297mm × 210mm，使用 mm 单位（jsPDF 默认）
-        //    单位用 pt 更精细：1 mm = 2.83465 pt
-        const pageWidthPt = 297 * 2.83465   // ~841.89
-        const pageHeightPt = 210 * 2.83465  // ~595.28
-        const marginPt = 10 * 2.83465        // 10mm 边距
+        const finalCanvas = document.createElement('canvas')
+        finalCanvas.width = finalWidth
+        finalCanvas.height = finalHeight
+        const ctx = finalCanvas.getContext('2d')
+        ctx.fillStyle = '#ffffff'
+        ctx.fillRect(0, 0, finalCanvas.width, finalCanvas.height)
 
+        // 画 legend（顶部）
+        if (legendCanvas) {
+          ctx.drawImage(legendCanvas, 0, 0)
+        }
+        // 画 SVG（legend 下方）
+        const svgDrawY = legendHeightPx + padding * scale
+        const svgDrawX = padding * scale
+        ctx.drawImage(svgImg, svgDrawX, svgDrawY, svgWidth * scale, svgHeight * scale)
+
+        // ============================================================
+        // 4. A4 横版 PDF
+        // ============================================================
         const pdf = new jsPDF({
           orientation: 'landscape',
           unit: 'pt',
-          format: [pageWidthPt, pageHeightPt]
+          format: 'a4'
         })
+        const pageWidthPt = pdf.internal.pageSize.getWidth()   // ~841.89
+        const pageHeightPt = pdf.internal.pageSize.getHeight()  // ~595.28
+        const marginPt = 20
 
-        // 4. 顶部留出 legend 空间
-        // 关键修复 v26：把 legend 真正画在 PDF 顶部（颜色方块 + 名称）
-        let legendBlockHeight = 0
-        if (colorLegendDataPdf.length > 0) {
-          // 每行 6 个 legend 项，每项宽度 ~110pt
-          const legendLineHeight = 14
-          const itemWidth = 110
-          const itemsPerLine = Math.floor((pageWidthPt - marginPt * 2) / itemWidth)
-          const lineCount = Math.ceil(colorLegendDataPdf.length / itemsPerLine)
-          legendBlockHeight = lineCount * legendLineHeight + 18  // 含标题
-
-          // 标题
-          pdf.setFontSize(10)
-          pdf.setTextColor(0, 0, 0)
-          pdf.text('图例', marginPt, marginPt + 10)
-
-          // 颜色方块 + 名称
-          colorLegendDataPdf.forEach((item, idx) => {
-            const col = idx % itemsPerLine
-            const row = Math.floor(idx / itemsPerLine)
-            const x = marginPt + col * itemWidth
-            const y = marginPt + 18 + row * legendLineHeight
-
-            // 解析颜色为 RGB（处理 #ffffff 或 rgb 形式）
-            const rgb = hexToRgb(item.color || '#e0e0e0')
-            pdf.setFillColor(rgb.r, rgb.g, rgb.b)
-            pdf.setDrawColor(180, 180, 180)
-            // 10×10 pt 颜色方块
-            pdf.rect(x, y, 10, 10, 'FD')
-
-            // 名称
-            pdf.setFontSize(8)
-            pdf.setTextColor(40, 40, 40)
-            const name = (item.name || '').substring(0, 14)  // 截断过长名称
-            pdf.text(name, x + 14, y + 8)
-          })
-        }
-
-        // 5. 图表放置区域（legend 下方）
-        const legendTopMargin = legendBlockHeight + 6
-        const drawAreaX = marginPt
-        const drawAreaY = marginPt + legendTopMargin
+        const aspectCanvas = finalCanvas.width / finalCanvas.height
         const drawAreaW = pageWidthPt - marginPt * 2
-        const drawAreaH = pageHeightPt - marginPt * 2 - legendTopMargin
-
-        // 6. 等比缩放 SVG 到 drawArea
-        const aspectSvg = svgWidth / svgHeight
+        const drawAreaH = pageHeightPt - marginPt * 2
         const aspectArea = drawAreaW / drawAreaH
         let renderW, renderH
-        if (aspectSvg > aspectArea) {
-          // svg 更宽，以宽度为准
+        if (aspectCanvas > aspectArea) {
           renderW = drawAreaW
-          renderH = drawAreaW / aspectSvg
+          renderH = drawAreaW / aspectCanvas
         } else {
-          // svg 更高，以高度为准
           renderH = drawAreaH
-          renderW = drawAreaH * aspectSvg
+          renderW = drawAreaH * aspectCanvas
         }
-        const renderX = drawAreaX + (drawAreaW - renderW) / 2
-        const renderY = drawAreaY + (drawAreaH - renderH) / 2
+        const renderX = marginPt + (drawAreaW - renderW) / 2
+        const renderY = marginPt + (drawAreaH - renderH) / 2
 
-        // 7. 转换 SVG → PDF（svg2pdf 异步）
-        await pdf.svg(svgEl, {
-          x: renderX,
-          y: renderY,
-          width: renderW,
-          height: renderH
-        })
-
-        // 8. 保存
+        // 嵌入 PNG 到 PDF
+        const imgData = finalCanvas.toDataURL('image/png')
+        pdf.addImage(imgData, 'PNG', renderX, renderY, renderW, renderH)
         pdf.save(`diagram-${Date.now()}.pdf`)
         showToast('PDF 已生成')
       } catch (err) {

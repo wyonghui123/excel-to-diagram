@@ -1037,15 +1037,32 @@ async function handleSave() {
       ? await boService.create(props.objectType, payload)
       : await boService.update(props.objectType, props.id, payload)
     if (result.success) {
+      // [FIX 2026-06-11] 子列表保存结果检查：saveDraftValues 内部 validation 错误
+      // 通过 throw 传播到 saveAllChildMetaLists 的 .catch，返回 [{success, error}]
+      let childSaveFailed = false
       if (objectPageRef.value?.hasChildUnsavedChanges?.()) {
         try {
-          await objectPageRef.value.saveAllChildMetaLists()
+          const childResults = await objectPageRef.value.saveAllChildMetaLists()
+          if (childResults && childResults.length > 0) {
+            const failures = childResults.filter(r => r && !r.success)
+            if (failures.length > 0) {
+              childSaveFailed = true
+              // handleError 已展示具体错误，此处只输出 console 便于排查
+              console.error('[DetailPage] 子列表保存失败:', failures.map(f => f.error?.message))
+            }
+          }
         } catch (childError) {
+          childSaveFailed = true
           console.error('[DetailPage] Child MetaList save error:', childError)
-          message.warning('主对象已保存，但子列表部分保存失败')
         }
       }
 
+      if (childSaveFailed) {
+        // 子列表保存失败：保留编辑模式和子列表 draft 状态，不刷新父对象
+        message.warning('主对象已保存，请修正子列表错误后重新保存')
+        saving.value = false
+        return
+      }
       message.success(isCreate ? '创建成功' : '保存成功')
       internalEditing.value = false
       if (!isCreate && props.id) {

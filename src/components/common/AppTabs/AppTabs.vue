@@ -175,7 +175,7 @@ function handleMoreCommand(tabId) {
   border-radius: 2px;
   color: var(--el-text-color-placeholder, #a0a8b0);
   cursor: pointer;
-  opacity: 0;
+  opacity: 0.5;
   transition: opacity 0.2s;
 }
 

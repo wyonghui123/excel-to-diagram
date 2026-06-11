@@ -65,14 +65,19 @@ class BusinessKeyService:
                 return f"{object_type}:{object_id}"
             
             bk_fields = [
-                f for f in meta_obj.fields 
+                f for f in meta_obj.fields
                 if f.semantics and f.semantics.business_key
             ]
-            
+
+            # [FIX 2026-06-11] Fallback: 当没有 business_key: true 字段时 (e.g. annotation),
+            # 按 display_name_field / display_name semantic / name-like 字段构造展示名
             if not bk_fields:
+                fallback_value = self._fallback_display_value(meta_obj, object_id)
+                if fallback_value:
+                    return self._format_simple_business_key(fallback_value, format)
                 logger.warning(f"No business_key fields defined for '{object_type}'")
                 return f"{object_type}:{object_id}"
-            
+
             bk_fields_sorted = sorted(bk_fields, key=lambda f: f.semantics.import_order if f.semantics.import_order is not None else 100)
             
             field_names = []
@@ -85,6 +90,11 @@ class BusinessKeyService:
                     field_names.append(f.id)
             
             if not field_names:
+                # [FIX 2026-06-11] 所有 bk 字段都是 virtual (e.g. relationship 的 source_code/target_code/code
+                # 都是 FK virtual 字段), 用 display_name_field/desc/content 兜底
+                fallback_value = self._fallback_display_value(meta_obj, object_id)
+                if fallback_value:
+                    return self._format_simple_business_key(fallback_value, format)
                 logger.warning(f"No non-virtual business_key fields for '{object_type}'")
                 return f"{object_type}:{object_id}"
             
@@ -284,3 +294,72 @@ class BusinessKeyService:
         """清空缓存"""
         self._cache.clear()
         logger.info("BusinessKeyService cache cleared")
+
+    # ── [FIX 2026-06-11] Fallback: 无 business_key 字段时的展示值提取 ─────────────
+    def _fallback_display_value(self, meta_obj, object_id: int) -> str:
+        """按 display_name_field / display_name semantic / name-like 字段提取展示值.
+
+        优先级:
+          1) meta_obj.display_name_field (e.g. relationship.relation_desc)
+          2) semantics.display_name=true 字段
+          3) 字段 id 含 'name' (e.g. annotation 无 'name' 时跳过)
+          4) 字段 id 含 'desc' / 'description' / 'content' (e.g. annotation.content)
+        """
+        if not meta_obj:
+            return ''
+
+        # 1) schema.display_name_field
+        display_attr = getattr(meta_obj, 'display_name_field', None) or ''
+        candidate_fields: list = []
+        if isinstance(display_attr, str) and display_attr.strip():
+            candidate_fields.append(display_attr.strip())
+
+        # 2) semantics.display_name=true
+        for f in meta_obj.fields or []:
+            if f.semantics and getattr(f.semantics, 'display_name', False):
+                col = f.db_column or f.id
+                if col not in candidate_fields:
+                    candidate_fields.append(col)
+
+        # 3) id 含 'name'
+        for f in meta_obj.fields or []:
+            fid = (f.id or '').lower()
+            col = f.db_column or f.id
+            if 'name' in fid and col not in candidate_fields and 'enum' not in fid:
+                candidate_fields.append(col)
+
+        # 4) desc / description / content
+        for f in meta_obj.fields or []:
+            fid = (f.id or '').lower()
+            col = f.db_column or f.id
+            if any(k in fid for k in ('description', 'desc', 'content')) and col not in candidate_fields:
+                candidate_fields.append(col)
+
+        if not candidate_fields:
+            return ''
+
+        select_cols = ', '.join(candidate_fields[:4])  # 最多取 4 个候选
+        try:
+            cursor = self.data_source.execute(
+                f"SELECT {select_cols} FROM {meta_obj.table_name} WHERE id = ?",
+                (int(object_id),),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return ''
+            for val in row:
+                if val is not None and str(val).strip():
+                    return str(val).strip()
+            return ''
+        except Exception as e:
+            logger.warning(f"Fallback display value failed for {meta_obj.id}:{object_id}: {e}")
+            return ''
+
+    def _format_simple_business_key(self, name_value: str, format: str) -> str:
+        """Fallback 路径的格式化器. 仅有 name, 无 code 配对."""
+        name_value = str(name_value or '').strip()
+        if not name_value:
+            return ''
+        if format == 'minimal':
+            return name_value
+        return name_value

@@ -231,7 +231,7 @@ class LocalAuthProvider(AuthProvider):
 
     def _get_user_roles(self, user_id: int) -> List[Dict]:
         cursor = self.ds.execute(
-            """SELECT r.id, r.code, r.name, r.is_super_admin FROM roles r
+            """SELECT r.id, r.code, r.name FROM roles r
                JOIN group_roles gr ON r.id = gr.role_id
                JOIN user_group_members ugm ON gr.group_id = ugm.group_id
                WHERE ugm.user_id = ?""",
@@ -249,14 +249,12 @@ class LocalAuthProvider(AuthProvider):
                     'id': row[0],
                     'code': row[1],
                     'name': row[2],
-                    'is_super_admin': bool(row[3])
                 })
             else:
                 roles.append({
                     'id': row['id'],
                     'code': row['code'],
                     'name': row['name'],
-                    'is_super_admin': bool(row['is_super_admin'])
                 })
         return roles
 

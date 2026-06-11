@@ -77,6 +77,18 @@ import ObjectPageContent from './ObjectPageContent.vue'
 import AssignmentDialog from '../AssignmentDialog/AssignmentDialog.vue'
 import metaService from '@/services/metaService'
 import boService from '@/services/boService'
+// [NEW 2026-06-10] KeyTemplate 集成
+import { useKeyTemplateFormSync } from '@/composables/useKeyTemplateFormSync'
+import { suggestKeyTemplateCode as _suggestKeyTemplateCodeSvc } from '@/services/keyTemplateService'
+
+// [NEW 2026-06-10] KeyTemplate 表单脏字段跟踪
+const {
+  formDirtyFields,
+  markFieldDirty,
+  resetFieldDirty,
+  isFieldDirty,
+  clearAll: clearFormDirty
+} = useKeyTemplateFormSync()
 
 const props = defineProps({
   title: { type: String, required: true },
@@ -126,11 +138,30 @@ watch(() => props.editing, (val) => {
   internalEditing.value = val
 })
 
+// [NEW 2026-06-10] 编辑状态变为 false 时清理脏字段
+// 关闭/取消编辑后 formDirtyFields 应清空，避免下次打开残留状态
+watch(internalEditing, (val, oldVal) => {
+  if (oldVal && !val) {
+    clearFormDirty()
+    // [FIXED 2026-06-11] 退出编辑模式时清空 parent params 累积缓存
+    // 否则下次新建时会复用上次累积的 *_id 值，导致错误的 preview
+    _ktParentParamsCache.value = {}
+  }
+})
+
 const autoFieldDefs = ref({})
 const uiConfig = ref(null)
 const formRenderKey = ref(0)
 const valueHelpFieldKeys = ref(new Set())
 const enumFieldKeys = ref(new Set())
+
+// [FIXED 2026-06-11] 累积缓存 key template parent field 值
+// 解决 relationship 等多 parent 场景下级联选择时，emit('field-update') 异步
+// 导致 props.formData 尚未更新、另一 parent 字段丢失 → API 返回 422
+// 原 BUG：仅用 changedKey/changedValue 覆盖，调用 resuggest 时另一 parent 字段缺失
+// 修复：每次 handleFieldUpdate 都把当前所有已知 parent 字段值存到缓存，
+//   resuggest 用 formData ∪ 缓存 ∪ 触发参数作为最终的 parentParams
+const _ktParentParamsCache = ref({})
 
 const effectiveFieldDefs = computed(() => {
   const merged = { ...autoFieldDefs.value }
@@ -373,6 +404,101 @@ function handleRefresh(payload = {}) {
 
 function handleFieldUpdate({ key, value }) {
   emit('field-update', { key, value })
+
+  // [NEW 2026-06-10][FIXED 2026-06-11] 仅 key template 实际依赖的 parent_id 字段才触发 resuggest
+  // 原逻辑：所有 *_id 字段变化都触发 → BUG: 选 domain_id 也触发，但 service_module_code 未填，
+  //   scope 退化到 "default"，生成的 code 是裸序列号（如 "44"）而不是 "PUM01"。
+  // 修复：根据 key_template.segments 中 parent_field.source 推导出实际的 _id 字段名。
+  //   例：source=service_module_code → 对应的 _id 字段 = service_module_id
+  // 附加条件（不变）：
+  //   1. 仅在新建模式（isAddMode）
+  //   2. 仅当 code 字段未被用户编辑（formDirtyFields 中无 'code'）
+  if (key && value && isAddMode.value && !isFieldDirty('code')) {
+    const parentFields = _ktParentIdFields()
+    if (Array.isArray(parentFields) ? parentFields.includes(key) : key === parentFields) {
+      // [FIXED 2026-06-11] 写入 parent params 累积缓存。
+      // 多 parent 场景（如 relationship: source_bo_id + target_bo_id）下，
+      // emit 后 props.formData 异步更新，单次只能保证一个字段，
+      // 必须从所有先前触发中累积，才能在任一字段触发时提供完整 parent_params。
+      _ktParentParamsCache.value = {
+        ..._ktParentParamsCache.value,
+        [key]: value
+      }
+      // [FIXED 2026-06-11] 传入 key/value：emit('field-update') 后 props.formData 可能尚未更新
+      // （Vue 事件是异步的），直接用 value 参数覆盖，避免读到旧值
+      triggerKeyTemplateResuggest(key, value)
+    }
+  }
+}
+
+/**
+ * [FIXED 2026-06-11] 从 key_template schema 推导出前端实际监听的 parent_id 字段名。
+ *
+ * 原理：segments 中的 parent_field.source 是后端字段名（如 service_module_code），
+ *   前端表单中对应的字段是 service_module_id（用户在下拉列表中选中的是 ID）。
+ *   对于 relationship，parent_field 有 source_code 和 target_code 两个，
+ *   对应 source_bo_id 和 target_bo_id。
+ *
+ * @returns {string|string[]|null} parent_id 字段名（或数组）；无 key_template 时返回 null
+ */
+function _ktParentIdFields() {
+  if (props.objectType === 'business_object') return 'service_module_id'
+  if (props.objectType === 'relationship') return ['source_bo_id', 'target_bo_id']
+  return null
+}
+
+/**
+ * 触发 key template 重新建议（详情表单场景）
+ * [NEW 2026-06-10] 父对象变化时自动调用
+ *
+ * @param {string} [changedKey] - [FIXED 2026-06-11] 触发变化的字段名，用于强制覆盖 formData 中的值
+ * @param {any} [changedValue] - 字段的新值
+ */
+async function triggerKeyTemplateResuggest(changedKey, changedValue) {
+  if (!props.objectType) return
+  // 构造一个临时 newRow 用于 service 调用（包含当前 formData 的 *_id 字段）
+  // [FIXED 2026-06-11] 三层覆盖保证多 parent 场景下所有字段都已就位：
+  //   1) 基础：props.formData
+  //   2) 累积缓存：_ktParentParamsCache（保留先前 trigger 时存的所有 parent 值）
+  //   3) 当次参数：changedKey/changedValue（最新一次的值）
+  // 这样在 relationship 场景下，先选 source 再选 target 时，
+  //   第2次 resuggest 仍能拿到 source_bo_id（从缓存）+ target_bo_id（本次参数）。
+  const tempNewRow = {
+    id: props.objectId || 'new',
+    _objectType: props.objectType,
+    ...props.formData,
+    ..._ktParentParamsCache.value
+  }
+  if (changedKey && changedValue !== undefined) {
+    tempNewRow[changedKey] = changedValue
+  }
+  // 详情表单场景：filterValues 空、draftValues 空 Map
+  // 关键：传入 formDirtyFields 作为保护（即使上一步判定已过，service 内还会再判一次）
+  const result = await _suggestKeyTemplateCodeSvc(
+    tempNewRow,
+    {},
+    new Map(),
+    boService,
+    { debug: false },
+    () => false,
+    formDirtyFields.value  // [NEW] 详情表单脏字段集合
+  )
+  if (result.success && result.code) {
+    // 写回 formData.code
+    props.formData.code = result.code
+  } else if (result.error) {
+    console.warn('[ObjectPageShell] key template resuggest failed:', result.error)
+  }
+}
+
+/**
+ * 用户点击"重置为自动生成"按钮
+ * [NEW 2026-06-10] 选项 A 交互
+ */
+async function onCodeReset() {
+  resetFieldDirty('code')
+  // 重新建议（此时 formDirtyFields 已清空，会走应用分支）
+  await triggerKeyTemplateResuggest()
 }
 
 function handleOutMapping(updates) {
@@ -390,6 +516,28 @@ function onTabChange(tabKey) {
 const assignDialogState = ref(null)
 
 const childMetaListRefs = ref({})
+
+// [NEW 2026-06-10] 提供 KeyTemplate 表单上下文给子组件（ObjectPageField）
+// 通过 provide/inject 避免在 Content / FieldGroupSection 中转 props
+const isAddMode = computed(() => !props.objectId || props.objectId === 'new')
+
+// isCodeAutoManaged 判定：code 字段在 add 模式下可编辑 + 存在时，认为启用 key template
+// 注：这是一个启发式判断。实际是否启用取决于后端 schema 配置（key_template.auto_suggest）
+// 如果 schema 未启用，suggestKeyTemplateCode 会返回 success=false 并被静默忽略
+const isCodeAutoManaged = computed(() => {
+  if (!isAddMode.value) return false
+  const codeDef = effectiveFieldDefs.value?.code
+  if (!codeDef) return false
+  // code 字段在 add 模式下可编辑（且非只读）→ 启用 key template 交互
+  return codeDef.readonly !== true && codeDef.editable !== false
+})
+
+provide('keyTemplateContext', {
+  isCodeAutoManaged,
+  isFieldDirty,
+  markFieldDirty,
+  onCodeReset
+})
 
 provide('registerMetaListRef', (sectionKey, ref) => {
   if (ref && childMetaListRefs.value[sectionKey] !== ref) {

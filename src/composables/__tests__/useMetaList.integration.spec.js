@@ -91,9 +91,9 @@ describe('useMetaList 集成测试（PR 6）', () => {
   })
 
   describe('集成：service 公开 API 数量（与 useMetaList 期望一致）', () => {
-    it('keyTemplateService 公开 API 数量 = 4（extractParentParams / hasInvalidParentId / applyKeyTemplateSuggestion / suggestKeyTemplateCode）', () => {
+    it('keyTemplateService 公开 API 数量 = 6（extractParentParams / hasInvalidParentId / applyKeyTemplateSuggestion / suggestKeyTemplateCode / shouldSkipSuggestionForForm / resetKeyTemplateCode）', () => {
       const exports = keyTemplateServiceSource.match(/^export (?:async )?function (\w+)/gm) || []
-      expect(exports.length).toBe(4)
+      expect(exports.length).toBe(6)
     })
 
     it('draftPersistService 公开 API 数量 = 5（hasDraftChanges / buildDraftPayload / collectDrafts / saveAllDrafts / getDraftCreates）', () => {

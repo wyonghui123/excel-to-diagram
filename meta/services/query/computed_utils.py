@@ -5,6 +5,57 @@ from meta.core.models import MetaObject, FieldStorage
 
 logger = logging.getLogger(__name__)
 
+# [FIX 2026-06-10] 缓存 hierarchy_scope_type 的 sort_order, 避免每次 sort 都查 DB
+_SCOPE_SORT_ORDER_CACHE: Dict[str, int] = {}
+_SCOPE_SORT_ORDER_LOADED: bool = False
+
+
+def _get_scope_sort_order(ds=None) -> Dict[str, int]:
+    """获取 hierarchy_scope_type 枚举值的 sort_order 映射
+
+    返回: {scope_id: sort_order}
+    例: {'cross_domain': 0, 'same_domain_cross_subdomain': 1, 'same_subdomain_cross_module': 2, 'same_module': 3}
+
+    用法:
+        1. 优先用查询时传的 ds (避免重复查 DB)
+        2. 否则用 module 级缓存
+    """
+    global _SCOPE_SORT_ORDER_CACHE, _SCOPE_SORT_ORDER_LOADED
+
+    if ds is None and _SCOPE_SORT_ORDER_LOADED:
+        return _SCOPE_SORT_ORDER_CACHE
+
+    try:
+        if ds is None:
+            from meta.core.datasource import get_data_source
+            import os
+            db_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                'architecture.db'
+            )
+            ds = get_data_source('sqlite', database=db_path)
+
+        cursor = ds.execute(
+            "SELECT code, sort_order FROM enum_values WHERE enum_type_id = 'hierarchy_scope_type'"
+        )
+        result = {row[0]: row[1] for row in cursor.fetchall()}
+
+        if ds is not None:
+            return result
+
+        _SCOPE_SORT_ORDER_CACHE = result
+        _SCOPE_SORT_ORDER_LOADED = True
+        return result
+    except Exception as e:
+        logger.warning(f"[ComputedUtils] Failed to load scope sort_order: {e}")
+        # 兜底: 用 hierarchies.yaml 中定义的固定顺序
+        return {
+            'cross_domain': 0,
+            'same_domain_cross_subdomain': 1,
+            'same_subdomain_cross_module': 2,
+            'same_module': 3,
+        }
+
 
 def sort_by_virtual_fields(meta_obj: MetaObject, records: List[Dict[str, Any]],
                            order_by: str) -> List[Dict[str, Any]]:

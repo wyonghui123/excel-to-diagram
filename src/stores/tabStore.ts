@@ -39,6 +39,13 @@ export const useTabStore = defineStore('tab', () => {
       if (existing.dynamicLabel !== false && existing.label !== tab.label) {
         existing.label = tab.label
       }
+      // [v32] 应用调用方显式提供的 closable/pinned (防止 localStorage 恢复的 stale 值)
+      if (tab.closable !== undefined) {
+        existing.closable = tab.closable !== false
+      }
+      if (tab.pinned !== undefined) {
+        existing.pinned = tab.pinned
+      }
       activeTabId.value = existing.id
       return existing
     }
