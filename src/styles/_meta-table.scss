@@ -32,9 +32,12 @@
   font-weight: 600 !important;
   font-size: 13px !important;
   padding: 12px 16px !important;
-  /* [FIX 2026-06-12] Root-cause fix #9: 去掉 border-bottom 让表头和表体无缝衔接
-     （之前是 1px solid #f0f0f0 让"表头卡片"和"表体卡片"看起来分离） */
-  border-bottom: none !important;
+  /* [FIX 2026-06-12] 修复 #10: 恢复 border-bottom 但更明显 — 让用户清楚
+     "表头行结束 / 数据行开始" 的视觉边界（之前 border-bottom: none 让
+     两行混在一起像一条线）
+     - b57d4f9 误把这条也改 none，导致 header/data 看起来像透明分隔
+     - 现在用 1px solid #ebeef5（Element Plus 默认）让分隔清晰可见 */
+  border-bottom: 1px solid #ebeef5 !important;
   white-space: nowrap;
 }
 
