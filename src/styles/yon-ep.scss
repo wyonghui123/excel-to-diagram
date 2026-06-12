@@ -564,10 +564,16 @@ html :root {
 }
 
 // ============================================
-// 32. 表头悬停 - 不变色
+// 32. 表头悬停 - 不变色 [FIX 2026-06-12 #12]
+// 之前: background-color: var(--el-fill-color-light) !important (#f9fafb 浅灰)
+//   → hover 表头时变灰, 与 toolbar/表头/数据 一体化设计冲突
+//   → 注释说"不变色"但实际值是 #f9fafb, 是伪装成"不变色"的隐藏陷阱
+// 修复: 改为 transparent (保留 hover 反馈但不改变背景色)
+//   → 用户反馈"又这样了"是因为 hover 时表头会变成 #f9fafb
+//   → 配合 _meta-table.scss:39 border-bottom: 1px solid #dcdfe6 保持视觉一致
 // ============================================
 .el-table th.el-table__cell:hover {
-  background-color: var(--el-fill-color-light) !important;
+  background-color: transparent !important;
 }
 
 // ============================================
