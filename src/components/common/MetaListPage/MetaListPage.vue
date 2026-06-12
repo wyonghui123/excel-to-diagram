@@ -1656,7 +1656,9 @@ defineExpose({
   gap: 12px;
   padding: var(--spacing-sm) var(--spacing-md);
   background: transparent;
-  border-bottom: 1px solid var(--color-border-light, #ebeef5);
+  /* [FIX 2026-06-12] Root-cause fix #9: 去掉 border-bottom 让 toolbar 和 table
+     完全无缝衔接（之前是 1px solid #ebeef5 让两者看起来像独立的卡片） */
+  border-bottom: none;
   overflow-x: auto;
   min-height: 44px;
   position: relative; /* Lock positioning context (2026-06-09 regression fix) */
