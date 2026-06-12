@@ -32,12 +32,11 @@
   font-weight: 600 !important;
   font-size: 13px !important;
   padding: 12px 16px !important;
-  /* [FIX 2026-06-12] 修复 #10: 恢复 border-bottom 但更明显 — 让用户清楚
-     "表头行结束 / 数据行开始" 的视觉边界（之前 border-bottom: none 让
-     两行混在一起像一条线）
-     - b57d4f9 误把这条也改 none，导致 header/data 看起来像透明分隔
-     - 现在用 1px solid #ebeef5（Element Plus 默认）让分隔清晰可见 */
-  border-bottom: 1px solid #ebeef5 !important;
+  /* [FIX 2026-06-12] 修复 #11: 加深表头/数据分隔线
+     - 之前: 1px solid #ebeef5 (rgb 235,238,245) 在白底上几乎透明, 看不见
+     - 现在: 1px solid #dcdfe6 (rgb 220,223,230) Element Plus 标准边框色, 清晰可见
+     - 原因: 用户反馈"表头/第一行中间线像透明"  */
+  border-bottom: 1px solid #dcdfe6 !important;
   white-space: nowrap;
 }
 
