@@ -3,7 +3,11 @@ import { ref, computed } from 'vue'
 
 export const useDiagramConfigStore = defineStore('diagramConfig', () => {
   // 图表类型
-  const chartType = ref('')
+  // 关键修复 v34: chartType 默认 'businessObject' (业务对象图)
+  //   原因: 用户反馈"类型默认选中业务对象图"
+  //   之前默认 '', 用户走到 step 3 (类型选择) 才能手动选; 现在自动选
+  //   注意: sessionStorage 恢复优先于默认值 (F5 刷新后保留用户上次选择)
+  const chartType = ref('businessObject')
   const previousChartType = ref('')
   const chartTypeChanged = ref(false)
 
@@ -111,6 +115,14 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
       chartTypeChanged.value = false
     }
     chartType.value = typeValue
+    // 关键修复 v33: 持久化 chartType 到 sessionStorage (F5 刷新后能恢复)
+    //   原因: chartType='' 时 StepConfig 的颜色配置区域 (CenterDomainSelect / ServiceModuleConfig)
+    //   因 v-if 条件不满足不渲染, 用户刷新后整个颜色区域消失
+    if (typeValue) {
+      sessionStorage.setItem('archDataChartType', typeValue)
+    } else {
+      sessionStorage.removeItem('archDataChartType')
+    }
   }
 
   function updatePreviousChartType(value) {
@@ -175,6 +187,7 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
 
   function resetConfig() {
     chartType.value = ''
+    sessionStorage.removeItem('archDataChartType')
     previousChartType.value = ''
     chartTypeChanged.value = false
     colorScheme.value = 'default'

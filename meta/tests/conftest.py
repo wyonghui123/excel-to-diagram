@@ -13,6 +13,7 @@ conftest.py - 全局 pytest 配置
 import unittest
 import sys
 import os
+import re
 import json
 import logging
 import sqlite3
@@ -1102,12 +1103,158 @@ def pytest_collection_modifyitems(config, items):
         elif any(kw in filename for kw in ['api', 'interceptor', 'middleware', 'integration',
                                             'service', 'comprehensive']):
             item.add_marker(pytest.mark.integration)
-        elif any(kw in filename for kw in ['unit', 'engine', 'executor', 'validator', 
+        elif any(kw in filename for kw in ['unit', 'engine', 'executor', 'validator',
                                             'evaluator', 'parser', 'builder',
                                             'generator', 'resolver']):
             item.add_marker(pytest.mark.unit)
         else:
             item.add_marker(pytest.mark.integration)
+
+    # [P0 v3.18+] 调试铁律: raw SQL 检测 (conftest 自动 skip + 提示用 Factory)
+    _check_raw_sql_in_tests(items)
+
+
+# ─── [P0 v3.18+] 调试协议硬阻断 ───
+# 触发条件 (env var):
+#   CLAIM_FIXED=1     Agent 声称"已修复" → 强制校验最近 10 分钟内有 e2e/smoke 跑过
+#   ALLOW_RAW_SQL=1   紧急 escape hatch, 允许 raw SQL (会 warn 但不 skip)
+#   DRY_RUN=1         只检测不阻断, 打印 would-skip 列表 (用于首次启用时验证)
+# 设计意图: 把 past chat 中"用户路径测试缺失"和"raw SQL 污染 DB"两类高频失误自动化.
+
+_RAW_SQL_PATTERN = re.compile(
+    r'(?:INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM)\b',
+    re.IGNORECASE
+)
+_FACTORIES_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), 'factories'
+)
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_SMOKE_LAST_RUN_FILE = os.path.join(_PROJECT_ROOT, 'e2e', 'smoke', '.last_smoke_run')
+_SMOKE_FRESH_SECONDS = 600  # 10 分钟
+
+
+def _is_raw_sql_allowed(filepath: str) -> bool:
+    """raw SQL 白名单: factory 文件 + 紧急 escape"""
+    if os.environ.get('ALLOW_RAW_SQL') == '1':
+        return True
+    if _FACTORIES_DIR in filepath:
+        return True
+    return False
+
+
+def _check_raw_sql_in_tests(items):
+    """扫描所有 test 文件, 检测 raw SQL INSERT/UPDATE/DELETE
+
+    违规文件 → pytest.mark.skip + stderr 提示用 Factory
+    DRY_RUN=1  → 只打印 would-skip 列表, 不实际 skip
+    返回: skipped 数量
+    """
+    dry_run = os.environ.get('DRY_RUN') == '1'
+    skipped = 0
+    for item in items:
+        fpath = str(item.fspath)
+        if not os.path.isfile(fpath):
+            continue
+        if _is_raw_sql_allowed(fpath):
+            continue
+        try:
+            with open(fpath, 'r', encoding='utf-8') as f:
+                content = f.read()
+        except (OSError, UnicodeDecodeError):
+            continue
+        if not _RAW_SQL_PATTERN.search(content):
+            continue
+        basename = os.path.basename(fpath)
+        if dry_run:
+            _safe_stderr_print(
+                f"[DRY-RUN] would-skip: {item.name} (raw SQL in {basename})"
+            )
+            skipped += 1
+        else:
+            mark = pytest.mark.skip(
+                reason=(
+                    f"raw SQL detected in {basename}; "
+                    f"use UserFactory/SubscriptionFactory "
+                    f"(or set ALLOW_RAW_SQL=1 to bypass)"
+                )
+            )
+            item.add_marker(mark)
+            _safe_stderr_print(
+                f"[SKIP] {item.name}: raw SQL in {basename} -> use Factory"
+            )
+            skipped += 1
+    return skipped
+
+
+def _safe_stderr_print(msg: str) -> None:
+    """Cross-platform stderr print: force UTF-8 to avoid PowerShell mojibake
+
+    [P0 v3.18+] Error messages must use UTF-8 encoding.
+    Without reconfigure, Windows PowerShell (default GBK) renders CJK as garbled text.
+    (Rule 27 in SESSION_REMINDER is "preflight"; this is a separate encoding rule.)
+    """
+    try:
+        if hasattr(sys.stderr, 'reconfigure'):
+            sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+    try:
+        print(msg, file=sys.stderr, flush=True)
+    except UnicodeEncodeError:
+        print(msg.encode('ascii', errors='replace').decode('ascii'), file=sys.stderr)
+
+
+def _check_claim_fixed() -> bool:
+    """CLAIM_FIXED 守卫: 声称"已修复"时, 校验最近 10 分钟内有 e2e/smoke 跑过
+
+    返回: True = 允许, False = 阻断
+    行为:
+      - 无 .last_smoke_run 文件: 放行, 立即写入当前时间 (首次)
+      - 文件存在但 > 600s 没更新: 阻断, 提示先跑 smoke
+    """
+    if os.environ.get('CLAIM_FIXED') != '1':
+        return True
+    if not os.path.exists(_SMOKE_LAST_RUN_FILE):
+        try:
+            os.makedirs(os.path.dirname(_SMOKE_LAST_RUN_FILE), exist_ok=True)
+            with open(_SMOKE_LAST_RUN_FILE, 'w', encoding='utf-8') as f:
+                f.write(datetime.now().isoformat())
+        except Exception:
+            pass
+        return True
+    try:
+        with open(_SMOKE_LAST_RUN_FILE, 'r', encoding='utf-8') as f:
+            ts_str = f.read().strip()
+        ts = datetime.fromisoformat(ts_str)
+        age_sec = (datetime.now() - ts).total_seconds()
+        if age_sec > _SMOKE_FRESH_SECONDS:
+            _safe_stderr_print(
+                f"\n[!!!] CLAIM_FIXED=1 but smoke last ran {int(age_sec)}s ago "
+                f"(> {_SMOKE_FRESH_SECONDS}s)"
+            )
+            _safe_stderr_print(
+                "[!!!] Debug Rule: run e2e/smoke BEFORE claiming 'fixed'"
+            )
+            _safe_stderr_print(
+                "[!!!] Run: python d:\\filework\\test.py --file "
+                "e2e/smoke/<relevant>.smoke.spec.js"
+            )
+            return False
+    except Exception:
+        # 文件损坏 → 放行, 避免误阻断
+        return True
+    return True
+
+
+def pytest_sessionstart(session):
+    """[P0 v3.18+] 调试铁律钩子: CLAIM_FIXED 守卫
+
+    在测试开始前 (collection 之前) 检查 agent 是否声明了"已修复"
+    若声明 → 校验最近 10 分钟有 e2e/smoke 跑过
+    校验失败 → os._exit(1) 立即终止
+    """
+    if not _check_claim_fixed():
+        os._exit(1)
 
 
 # ============================================================================

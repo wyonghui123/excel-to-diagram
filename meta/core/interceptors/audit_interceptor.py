@@ -17,6 +17,7 @@ from meta.services.structured_logger import StructuredLogger, LogEntry
 from meta.enums.log_category import LogCategory
 from meta.enums.log_level import LogLevel
 from meta.core.model_utils import get_object_display
+from meta.core.association.resolvers import resolve_assoc_meta as _resolve_assoc_meta
 
 logger = logging.getLogger(__name__)
 
@@ -78,12 +79,37 @@ class AuditInterceptor(Interceptor):
     
     def after_action(self, context: ActionContext) -> None:
         """动作执行后：处理 CRUD 后处理逻辑和关联操作审计日志写入
-        
+
         - CRUD 审计日志写入已由 ActionExecutor._write_audit_log_v2() 统一处理（跳过）
-        - 关联操作（associate/dissociate）审计日志由此拦截器写入（启用）
+        - 关联操作（associate/dissociate/batch_*/assign/unassign）审计日志由此拦截器写入
         """
-        if not context.is_crud_action and context.action not in ('associate', 'dissociate'):
+        # [DEBUG 2026-06-12] 诊断 batch_unassign 不写 DISSOCIATE 日志
+        try:
+            with open(r'd:\filework\_audit_debug.log', 'a', encoding='utf-8') as _f:
+                _f.write(f"[{context.action}] is_crud={context.is_crud_action} "
+                         f"object_id={context.object_id} result={context.result.success if context.result else 'None'} "
+                         f"params_keys={list(context.params.keys()) if context.params else 'None'}\n")
+        except Exception:
+            pass
+
+        # [FIX 2026-06-12] 之前只处理 associate/dissociate, 导致 batch_assign/batch_unassign
+        # 不产生审计日志. 用户在用户详情页多选删除用户组时, 走的是 batch_unassign 路径,
+        # 所以看不到 DISSOCIATE 日志. 现在把 assign/unassign/batch_assign/batch_unassign
+        # 也纳入审计拦截器, 统一在 _log_association_event 中处理.
+        _ASSOC_ACTIONS = {
+            'associate', 'dissociate',
+            'assign', 'unassign',
+            'batch_assign', 'batch_unassign',
+        }
+        if not context.is_crud_action and context.action not in _ASSOC_ACTIONS:
+            try:
+                with open(r'd:\filework\_audit_debug.log', 'a', encoding='utf-8') as _f:
+                    _f.write(f"  -> SKIP (not assoc action)\n")
+            except Exception: pass
             return
+
+        # [DEBUG]
+        logger.error(f"[FIX 2026-06-12] AuditInterceptor.after_action called: action={context.action}, object_id={context.object_id}, params={context.params}, has_result={context.result is not None and context.result.success if context.result else 'None'}")
         
         if self.AUDIT_CRUD_WRITE_DISABLED and context.is_crud_action:
             logger.debug(f"[AuditInterceptor] CRUD audit write disabled, skipping. Action={context.action}")
@@ -104,8 +130,12 @@ class AuditInterceptor(Interceptor):
         action_config = audit_config.get_action_config(context.action)
         
         if not action_config.enabled:
+            try:
+                with open(r'd:\filework\_audit_debug.log', 'a', encoding='utf-8') as _f:
+                    _f.write(f"  -> SKIP (action_config disabled for {context.action})\n")
+            except Exception: pass
             return
-        
+
         try:
             if context.is_create_action:
                 self._log_create(context, action_config)
@@ -113,9 +143,17 @@ class AuditInterceptor(Interceptor):
                 self._log_update(context, action_config)
             elif context.is_delete_action:
                 self._log_delete(context, action_config)
-            elif context.action == 'associate':
+            elif context.action in ('associate', 'assign', 'batch_assign'):
+                try:
+                    with open(r'd:\filework\_audit_debug.log', 'a', encoding='utf-8') as _f:
+                        _f.write(f"  -> CALLING _log_association_event(action=ASSOCIATE)\n")
+                except Exception: pass
                 self._log_association_event(context, action_config, 'ASSOCIATE')
-            elif context.action == 'dissociate':
+            elif context.action in ('dissociate', 'unassign', 'batch_unassign'):
+                try:
+                    with open(r'd:\filework\_audit_debug.log', 'a', encoding='utf-8') as _f:
+                        _f.write(f"  -> CALLING _log_association_event(action=DISSOCIATE)\n")
+                except Exception: pass
                 self._log_association_event(context, action_config, 'DISSOCIATE')
         except Exception as e:
             logger.error(f"[AuditInterceptor] Error logging audit: {e}")
@@ -245,22 +283,168 @@ class AuditInterceptor(Interceptor):
     
     def _log_association_event(self, context: ActionContext, config: AuditActionConfig, action: str) -> None:
         """统一的关联操作审计日志记录 — 合并 _log_associate/_log_dissociate 中 ~88% 的重复代码
-        
+
         [审计延迟写入 2026-06-09]
         在事务中执行时，审计写入会与业务写入发生 SQLite 锁冲突。
         解决方案：在事务内缓存审计记录，事务提交后再写入。
         """
+        # [DEBUG 2026-06-12] 诊断
+        try:
+            with open(r'd:\filework\_audit_debug.log', 'a', encoding='utf-8') as _f:
+                _f.write(f"    _log_association_event ENTER: action={action}\n")
+        except Exception: pass
+        # [FIX 2026-06-12] context.user_name 只是 'admin', 从 g.current_user 提取带 display_name 的格式
+        try:
+            from flask import g
+            _cu = getattr(g, 'current_user', None) or {}
+            _display = _cu.get('display_name') or ''
+            _username = _cu.get('username') or ''
+            if _display and _username and _display != _username:
+                formatted_user_name = f"{_display} ({_username})"
+            else:
+                formatted_user_name = _display or _username or context.user_name or ''
+        except RuntimeError:
+            formatted_user_name = context.user_name
+
         params = context.params
         tgt_type = params.get('tgt_type')
-        tgt_id = params.get('tgt_id')
         association_name = params.get('association_name', 'members')
 
+        # [FIX 2026-06-12] 批量操作 (batch_assign/batch_unassign) 可能传 target_ids 列表
+        _raw_tgt_ids = params.get('target_ids') or params.get('tgt_id')
+        if isinstance(_raw_tgt_ids, (list, tuple)):
+            tgt_ids = list(_raw_tgt_ids)
+        elif _raw_tgt_ids is not None:
+            tgt_ids = [_raw_tgt_ids]
+        else:
+            tgt_ids = []
+
         src_display = get_object_display(context.object_type, context.object_id, context.data_source)
-        tgt_display = get_object_display(tgt_type, tgt_id, context.data_source)
 
         src_type_name = _TYPE_DISPLAY_MAP.get(context.object_type, context.object_type)
         tgt_type_name = _TYPE_DISPLAY_MAP.get(tgt_type, tgt_type)
         association_display = _ASSOCIATION_DISPLAY_MAP.get(association_name, association_name)
+
+        # [FIX 2026-06-12] 批量操作为每个 target_id 产生一条审计记录
+        # [FIX 2026-06-12] 只对实际存在关联的 target_id 产生审计, 避免"未删除也记日志"
+        # [FIX 2026-06-12] 优先用 context.extra['_assoc_effective_ids'] (AssociationEngine._try_bulk_m2m
+        # 在 DELETE 前 SELECT 并存入的), 因为 AuditInterceptor 是在 PersistenceInterceptor 之后
+        # 执行, 此时 SQLite WAL 模式下不同连接 SELECT 看不到未提交的 DELETE.
+        pre_computed_effective_ids = (context.extra or {}).get('_assoc_effective_ids')
+        if pre_computed_effective_ids is not None:
+            try:
+                with open(r'd:\filework\_audit_debug.log', 'a', encoding='utf-8') as _f:
+                    _f.write(f"    batch: using pre-computed effective_ids={pre_computed_effective_ids} from context.extra\n")
+            except Exception: pass
+            effective_ids = list(pre_computed_effective_ids)
+        elif len(tgt_ids) > 1:
+            # 批量场景: 先查询当前实际存在的关联, 只对存在的写 audit
+            assoc_meta = _resolve_assoc_meta(context.object_type, association_name)
+            try:
+                with open(r'd:\filework\_audit_debug.log', 'a', encoding='utf-8') as _f:
+                    _f.write(f"    batch: tgt_ids={tgt_ids} assoc_meta={assoc_meta}\n")
+            except Exception: pass
+            if assoc_meta and assoc_meta.get('type') == 'many_to_many':
+                through = assoc_meta.get('through')
+                source_key = assoc_meta.get('source_key')
+                target_key = assoc_meta.get('target_key')
+                try:
+                    with open(r'd:\filework\_audit_debug.log', 'a', encoding='utf-8') as _f:
+                        _f.write(f"    batch: through={through} src_key={source_key} tgt_key={target_key}\n")
+                except Exception: pass
+                if through and source_key and target_key:
+                    src_id = context.object_id
+                    placeholders = ','.join('?' for _ in tgt_ids)
+                    if action == 'ASSOCIATE':
+                        # ASSOCIATE: 检查 _try_bulk_m2m 是否实际创建了关联
+                        sql = (f"SELECT {target_key} FROM {through} "
+                               f"WHERE {source_key}=? AND {target_key} IN ({placeholders})")
+                        existing = set(r[0] for r in context.data_source.execute(
+                            sql, tuple([src_id] + tgt_ids)
+                        ).fetchall() or [])
+                        # 只有新增的才记
+                        # 但 _try_bulk_m2m 用了 INSERT OR IGNORE, 所以 existing 包含已存在的
+                        # 这里简化: 都记 (审计完整性优先)
+                        effective_ids = tgt_ids
+                    else:
+                        # DISSOCIATE: 删除前先查存在, 只对存在的记
+                        sql = (f"SELECT {target_key} FROM {through} "
+                               f"WHERE {source_key}=? AND {target_key} IN ({placeholders})")
+                        existing = set(r[0] for r in context.data_source.execute(
+                            sql, tuple([src_id] + tgt_ids)
+                        ).fetchall() or [])
+                        effective_ids = [tid for tid in tgt_ids if tid in existing]
+                        try:
+                            with open(r'd:\filework\_audit_debug.log', 'a', encoding='utf-8') as _f:
+                                _f.write(f"    batch DISSOCIATE: src_id={src_id} sql={sql} existing={existing} effective_ids={effective_ids}\n")
+                        except Exception: pass
+                else:
+                    effective_ids = tgt_ids
+            else:
+                effective_ids = tgt_ids
+        else:
+            # 单条场景, 后续代码会处理 (tgt_ids == 1 走单条路径)
+            effective_ids = tgt_ids
+
+        try:
+            with open(r'd:\filework\_audit_debug.log', 'a', encoding='utf-8') as _f:
+                _f.write(f"    batch: effective_ids={effective_ids} about_to_write={len(effective_ids)}\n")
+        except Exception: pass
+
+        # [FIX 2026-06-12] 批量场景: 循环写所有 effective_ids, 写完直接 return
+        if len(tgt_ids) > 1:
+            if not effective_ids:
+                logger.info(
+                    f"[AuditInterceptor] batch {action}: no effective_ids, "
+                    f"skipping {len(tgt_ids)} non-existing associations"
+                )
+                return
+            for tid in effective_ids:
+                self._write_single_association_audit(
+                    context=context, action=action,
+                    tgt_type=tgt_type, tgt_id=tid,
+                    tgt_type_name=tgt_type_name,
+                    association_display=association_display,
+                    formatted_user_name=formatted_user_name,
+                )
+            if len(effective_ids) < len(tgt_ids):
+                logger.info(
+                    f"[AuditInterceptor] batch {action}: "
+                    f"wrote {len(effective_ids)}/{len(tgt_ids)} audit records "
+                    f"(skipped {len(tgt_ids) - len(effective_ids)} non-existing)"
+                )
+            return
+        elif len(tgt_ids) == 1:
+            tgt_id = effective_ids[0] if effective_ids else tgt_ids[0]
+        else:
+            logger.warning(f"[AuditInterceptor] _log_association_event: no tgt_id found, skipping")
+            return
+
+        tgt_display = get_object_display(tgt_type, tgt_id, context.data_source)
+
+        # [FIX 2026-06-12] 委托给 _write_single_association_audit 统一处理
+        # [审计延迟写入] 检测是否在事务中
+        # [FIX Test Bug 2026-06-09] 严格用 `is True` 判断, 避免 MagicMock 默认 truthy 导致
+        # dissociate/associate 测试用 MagicMock() 作 data_source 时误判 in_transaction=True 而走 defer 路径
+        # (真实 DataSource.in_transaction 签名: bool, 见 meta/core/datasource.py:273)
+        self._write_single_association_audit(
+            context=context, action=action,
+            tgt_type=tgt_type, tgt_id=tgt_id,
+            tgt_type_name=tgt_type_name,
+            tgt_display=tgt_display,
+            association_display=association_display,
+            formatted_user_name=formatted_user_name,
+        )
+
+    def _write_single_association_audit(self, context, action: str,
+                                         tgt_type, tgt_id,
+                                         tgt_type_name: str,
+                                         association_display: str,
+                                         formatted_user_name: str,
+                                         tgt_display: str = None) -> None:
+        """写入单条关联审计记录 (用于单条和批量操作)"""
+        if tgt_display is None:
+            tgt_display = get_object_display(tgt_type, tgt_id, context.data_source)
 
         if action == 'ASSOCIATE':
             old_data_val = None
@@ -277,13 +461,12 @@ class AuditInterceptor(Interceptor):
             }
             new_data_val = None
 
-        # 构建审计记录参数
         audit_params = {
             'action': action,
             'object_type': context.object_type,
             'object_id': context.object_id,
             'user_id': context.user_id,
-            'user_name': context.user_name,
+            'user_name': formatted_user_name,
             'field_name': association_display,
             'old_data': old_data_val,
             'new_data': new_data_val,
@@ -294,15 +477,9 @@ class AuditInterceptor(Interceptor):
             'level': 'INFO'
         }
 
-        # [审计延迟写入] 检测是否在事务中
-        # [FIX Test Bug 2026-06-09] 严格用 `is True` 判断, 避免 MagicMock 默认 truthy 导致
-        # dissociate/associate 测试用 MagicMock() 作 data_source 时误判 in_transaction=True 而走 defer 路径
-        # (真实 DataSource.in_transaction 签名: bool, 见 meta/core/datasource.py:273)
         in_transaction = getattr(context.data_source, 'in_transaction', False) is True
 
         if in_transaction:
-            # 在事务中：缓存审计记录，等事务提交后再写入
-            # [SPR-07 T-S09-01] 走 public API add_pending_audit, 替代直接访问字段
             context.add_pending_audit(audit_params)
             logger.info(
                 f"[AuditInterceptor] DEFERRED {action} on "
@@ -310,7 +487,6 @@ class AuditInterceptor(Interceptor):
                 f"(pending flush after transaction commit)"
             )
         else:
-            # 不在事务中：立即写入
             self._structured_logger.log_business(**audit_params)
             logger.info(
                 f"[AuditInterceptor] Logged {action} on "

@@ -16,6 +16,7 @@ from meta.core.interceptors.audit_interceptor import AuditInterceptor
 from meta.core.interceptors.context_interceptor import ContextInterceptor
 from meta.core.datasource import get_data_source
 from meta.core.yaml_loader import register_from_directory, get_yaml_schema_dir
+from meta.api._audit_helper import write_permission_config_audit
 import os
 
 role_bp = Blueprint('role', __name__, url_prefix='/api/v1/roles')
@@ -389,6 +390,16 @@ def set_role_permissions(role_id):
     if not success:
         return jsonify({'success': False, 'message': '权限配置失败'}), 400
 
+    # [FIX 2026-06-12] 角色权限操作审计日志: 关联到角色对象 (角色详情"操作日志" tab 归集)
+    write_permission_config_audit(
+        action='UPDATE',
+        object_type='role_permissions',
+        object_id=role_id,
+        data={'permission_ids': permission_ids, 'count': len(permission_ids)},
+        parent_object_type='role',
+        parent_object_id=role_id,
+    )
+
     return jsonify({'success': True, 'message': '权限配置成功'})
 
 
@@ -503,6 +514,21 @@ def add_role_data_permission(role_id):
                 data.get('analysis_mode'),
                 user_id
             ])
+
+        # [FIX 2026-06-12] 角色权限操作审计日志: 关联到角色对象
+        write_permission_config_audit(
+            action='CREATE',
+            object_type='role_data_permission',
+            object_id=cursor.lastrowid,
+            data={
+                'role_id': role_id,
+                'resource_type': data.get('resource_type'),
+                'permission_level': data.get('permission_level', 'read'),
+                'is_denied': data.get('is_denied', False),
+            },
+            parent_object_type='role',
+            parent_object_id=role_id,
+        )
 
         return jsonify({
             'success': True,

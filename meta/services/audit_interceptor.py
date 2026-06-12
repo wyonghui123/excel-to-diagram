@@ -338,8 +338,19 @@ class AuditInterceptor:
         """记录关联操作 -> action='ASSOCIATE'"""
         try:
             from flask import g, request
-            captured_user_id = user_id or getattr(g, 'user_id', None)
-            captured_user_name = user_name or getattr(g, 'user_name', None)
+            current_user = getattr(g, 'current_user', None) or {}
+            # [FIX 2026-06-12] 从 g.current_user 提取 user_id 和带 display_name 的 user_name
+            # 之前用 getattr(g, 'user_name', None) 拿不到 display_name,
+            # 且 _set_user_context 只传了 username, 导致日志 user_name 一直是 "admin"
+            captured_user_id = user_id or current_user.get('user_id') or current_user.get('id')
+            _display = current_user.get('display_name') or ''
+            _username = current_user.get('username') or ''
+            if user_name:
+                captured_user_name = user_name
+            elif _display and _username and _display != _username:
+                captured_user_name = f"{_display} ({_username})"
+            else:
+                captured_user_name = _display or _username or ''
             captured_trace_id = trace_id or getattr(g, 'trace_id', None)
             captured_transaction_id = transaction_id or getattr(g, 'transaction_id', None)
             captured_ip = request.remote_addr if request else None
@@ -387,8 +398,17 @@ class AuditInterceptor:
         """记录解除关联操作 -> action='DISSOCIATE'"""
         try:
             from flask import g, request
-            captured_user_id = user_id or getattr(g, 'user_id', None)
-            captured_user_name = user_name or getattr(g, 'user_name', None)
+            current_user = getattr(g, 'current_user', None) or {}
+            # [FIX 2026-06-12] 同 log_associate, 从 g.current_user 提取带 display_name 的 user_name
+            captured_user_id = user_id or current_user.get('user_id') or current_user.get('id')
+            _display = current_user.get('display_name') or ''
+            _username = current_user.get('username') or ''
+            if user_name:
+                captured_user_name = user_name
+            elif _display and _username and _display != _username:
+                captured_user_name = f"{_display} ({_username})"
+            else:
+                captured_user_name = _display or _username or ''
             captured_trace_id = trace_id or getattr(g, 'trace_id', None)
             captured_transaction_id = transaction_id or getattr(g, 'transaction_id', None)
             captured_ip = request.remote_addr if request else None

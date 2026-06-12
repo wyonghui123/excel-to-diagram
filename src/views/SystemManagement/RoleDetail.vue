@@ -138,6 +138,10 @@ const sections = [
     label: '操作日志',
     icon: 'history',
     type: 'history'
+    // [FIX 2026-06-12] 父对象查询: ObjectPageContent 会自动检测 role/user/user_group
+    // 等 SELF_REFERRING_PARENT_OBJECT_TYPES, 自动给 HistorySection 传
+    // parentObjectType='role' + parentObjectId=objectId (即 role.id).
+    // 这里不需要手动指定.
   }
 ]
 

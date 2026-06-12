@@ -56,6 +56,12 @@
 | 22 | **运行命令前必须设置 UTF-8** | `chcp 65001` + `$env:PYTHONIOENCODING="utf-8"` + `$env:PYTHONUTF8=1` |
 | 23 | **新写 E2E 测试必须用 v2 简化方案** | 重复登录 + Date.now 命名 + 不清理 = DB 垃圾 | 见 [e2e-simplification.md](./e2e-simplification.md) |
 | 24 | **读写文件必须 UTF-8 + ast.parse 验证** | docstring 损坏 + IndentationError 调试 30+ 分钟 | 见 [file-encoding-rules.md](./file-encoding-rules.md) |
+| 25 | **[DEBUG] 声称"已修复"必跑 user-path test** | 设 `CLAIM_FIXED=1` 时，conftest 校验最近 10 分钟内有 e2e/smoke 跑过，否则 `os._exit(1)` | 见 §调试铁律 |
+| 26 | **[DEBUG] 测试数据必须走 Factory** | conftest 自动扫描 `INSERT/UPDATE/DELETE`，raw SQL → `pytest.mark.skip`；`ALLOW_RAW_SQL=1` 紧急 escape | 见 §调试铁律 |
+| 27 | **[DEBUG] 修复前必跑 preflight** | 跑测试前必跑 `service_manager.ps1 preflight -Port 3010`，校验 status 文件 started_at < 60s | 见 §调试铁律 |
+| 28 | **[DEBUG] Edit 后必用 Get-Content 做 ground truth** | Read 工具缓存可能误导，Edit 后必须用 PowerShell `[IO.File]::ReadAllText` 验证 | 见 §调试铁律 |
+| 29 | **[DEBUG] 调试 batch/async 路径必先 grep 拦截器** | 必看 `_try_bulk_m2m` / `AsyncAuditWriter` / `cascade_delete` / `bo.associate` 5 个拦截点 | 见 §调试铁律 |
+| 30 | **[DEBUG] 修复报告必含路径+trace_id+风险** | 格式：`Root cause: file:line` + `Hypothesis verified` + `Smoke pass` + `X-Trace-Id` | 见 §调试铁律 |
 > **为什么要遵守这些规则**：
 > - **铁律 1-3**：保护数据库、避免服务冲突、提高多 Agent 协作效率
 > - **铁律 4-7**：避免常见错误（卡死终端、覆盖文件、认证失败）
@@ -96,6 +102,81 @@
 | **Cookie 认证（非 Bearer）** | httpOnly cookie 更安全，前端代码自动处理 |
 | **service_manager.ps1 统一管理** | 跨 Agent 状态可见，端口冲突自动避免 |
 | **测试数据清单文件** | 避免硬编码，测试数据变化时自动适配 |
+
+---
+
+## 调试铁律 (v3.18+)
+
+> **过去踩过的最大效率坑**：Agent 测试通过但用户实测失败、Edit 改完但 Read 工具仍显旧内容、raw SQL 污染 DB、服务重启但没生效、调试 8 轮才找到真正 root cause。
+>
+> 以下 6 条铁律**全部已落地**到 `meta/tests/conftest.py` + `scripts/service_manager.ps1` 钩子，违反 = 立即失败/警告。
+
+### 铁律 25: 声称"已修复"必跑 user-path test
+
+| 项 | 内容 |
+|----|------|
+| **硬阻断位置** | `conftest.py::pytest_sessionstart` |
+| **触发** | 环境变量 `CLAIM_FIXED=1` |
+| **检查** | `e2e/smoke/.last_smoke_run` mtime < 600s |
+| **失败行为** | `os._exit(1)` + stderr 提示"先跑 e2e/smoke" |
+| **正例** | `python test.py --file e2e/smoke/<x>.smoke.spec.js` 然后才设 `CLAIM_FIXED=1` |
+
+### 铁律 26: 测试数据必须走 Factory
+
+| 项 | 内容 |
+|----|------|
+| **硬阻断位置** | `conftest.py::pytest_collection_modifyitems` → `_check_raw_sql_in_tests` |
+| **检测** | 文件含 `INSERT INTO` / `UPDATE x SET` / `DELETE FROM` |
+| **处理** | `pytest.mark.skip(reason="raw SQL detected")` + stderr 提示用 Factory |
+| **豁免** | `meta/tests/factories/` 目录 / `ALLOW_RAW_SQL=1` env / 文件含 `# allow_raw_sql` 注释 |
+| **DRY_RUN** | `DRY_RUN=1` 只打印 would-skip 列表，不实际 skip |
+| **正例** | `from meta.tests.factories import UserFactory; user = UserFactory.create(role='admin')` |
+
+### 铁律 27: 跑测试前必跑 preflight
+
+| 项 | 内容 |
+|----|------|
+| **硬阻断位置** | `service_manager.ps1 preflight` 命令 |
+| **检查** | `.service_status_<port>.json` 的 `started_at` 距今 < `$MaxAge` 秒 (默认 60) |
+| **失败行为** | 退出码 1 + stderr 提示"服务已 N 秒未重启，请先 restart" |
+| **正例** | `powershell -File scripts/service_manager.ps1 preflight -Port 3010` → 0 退出码 → 跑测试 |
+
+### 铁律 28: Edit 后必用 Get-Content 做 ground truth
+
+| 项 | 内容 |
+|----|------|
+| **风险** | Read 工具返回的是会话级快照，磁盘已改但 Read 仍显旧内容 |
+| **正例** | Edit 后立即跑 `powershell -c "[IO.File]::ReadAllText('path')"` 对比 `new_string` |
+| **正例 2** | `python -c "from pathlib import Path; print('OK' if '<新代码>' in Path('path').read_text(encoding='utf-8') else 'FAIL')"` |
+
+### 铁律 29: 调试 batch/async 路径必先 grep 拦截器
+
+| 拦截点 | grep pattern | 常见问题 |
+|--------|-------------|---------|
+| async 审计 | `class\s+\w*Async.*Writer` | 闭包参数不匹配 |
+| Action executor | `class\s+ActionExecutor` | pre/post hook 顺序错 |
+| 审计 log | `def\s+log\(.*audit` | 分支顺序导致 user='system' |
+| ActionContext | `object_id\s*=\s*\|@property\s+def\s+object_id` | 批量路径未设 object_id |
+| 批量 m2m | `_try_bulk_m2m\|bulk_associate` | 绕过审计写入 |
+| cascade_delete | `cascade_delete\|cascade=` | 自引用 FK 没清 |
+| self-ref FK | `parent_id\|ForeignKey.*self` | parent_id 未清空 |
+| BO 框架 dispatch | `def\s+associate\|def\s+dissociate\|def\s+assign` | 方法名拼错 |
+
+**调用法**：`grep -rEn '<pattern>' d:/filework/excel-to-diagram/meta/`
+
+### 铁律 30: 修复报告必含路径+trace_id+风险
+
+**强制格式**（贴在回复里，否则视为"未完成"）：
+
+```
+## Fix Report
+- Symptom: <症状>
+- Root cause: <file:line>  ← 必须可点击定位
+- Hypothesis verified: <哪条假设 + 看到什么证据>
+- User-path test: <smoke name> PASS (trace_id=<X-Trace-Id>)
+- Service status: started_at=<ISO>, preflight=OK
+- Risk: <side effect / 未覆盖的边界条件>
+```
 
 ---
 

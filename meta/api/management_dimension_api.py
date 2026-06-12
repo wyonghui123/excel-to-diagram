@@ -450,6 +450,21 @@ def save_permission_rule(role_id: int):
 
         logger.info(f"保存权限规则成功 [role_id={role_id}, rule_id={rule_id}]")
 
+        # [FIX 2026-06-12] 角色权限规则审计日志: 关联到角色对象
+        from meta.api._audit_helper import write_permission_config_audit
+        write_permission_config_audit(
+            action='CREATE',
+            object_type='permission_rule',
+            object_id=rule_id,
+            data={
+                'role_id': role_id,
+                'resource_type': data.get('resource_type'),
+                'permission_level': data.get('permission_level', 'read'),
+            },
+            parent_object_type='role',
+            parent_object_id=role_id,
+        )
+
         return jsonify(
             {
                 "success": True,

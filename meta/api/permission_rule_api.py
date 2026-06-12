@@ -91,6 +91,20 @@ def create_rule():
 
         rule_id = service.create_rule(data)
         if rule_id:
+            # [FIX 2026-06-12] 权限规则审计日志: 关联到角色对象
+            from meta.api._audit_helper import write_permission_config_audit
+            write_permission_config_audit(
+                action='CREATE',
+                object_type='permission_rule',
+                object_id=rule_id,
+                data={
+                    'role_id': data.get('role_id'),
+                    'resource_type': data.get('resource_type'),
+                    'permission_level': data.get('permission_level', 'read'),
+                },
+                parent_object_type='role',
+                parent_object_id=data.get('role_id'),
+            )
             return jsonify({'success': True, 'data': {'id': rule_id}})
         return jsonify({'success': False, 'message': 'Failed to create rule'}), 500
     except Exception as e:

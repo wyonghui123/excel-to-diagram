@@ -715,6 +715,20 @@ class StateTransitionExecutor(RuleExecutor):
                 message="Already in target state '{0}', skipped".format(rule.to_state),
             )
 
+        # [FIX Bug 2026-06-12] Case 1.5: 用户未改变状态 (effective_state == current_state)
+        # 场景: 用户编辑产品其他字段, 前端 form 自动提交当前 is_active=True (v-model 绑到 switch)
+        # 期望: 跳过 rule, is_active 保持 True
+        # 原 bug: deactivate_product rule 误触发, 把 True 强制改为 False
+        # 关键: 只有 effective_state != current_state 时才说明用户改了状态
+        # 边界: original_data 必须存在 (有"原始"状态可比较). 新建对象场景 (无 original_data) 跳过此检查
+        if context.original_data and effective_state == current_state:
+            return RuleResult(
+                success=True,
+                rule_id=rule.id,
+                rule_name=rule.name,
+                message="State not changed by user (effective_state '{0}' == current_state), skipped (form 提交当前值, 非显式状态切换)".format(effective_state),
+            )
+
         # Case 2: 已被其他 rule 改成了别的状态 (不是本 rule 的 to_state)
         if effective_state != current_state and effective_state != rule.to_state:
             return RuleResult(

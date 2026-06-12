@@ -6,8 +6,14 @@ export default [
   {
     path: '/system-admin',
     name: 'system-admin',
-    component: () => import('@/views/SystemAdmin/index.vue'),
-    meta: { title: '日志管理', requiresAuth: true, requiresAdmin: true }
+    // [FIX 2026-06-12] 之前误指到 SystemAdmin/index.vue 简化版, 丢失了:
+    //   - 行 click 打开 detail drawer
+    //   - ID 列 link
+    //   - getLogById 拉 extra_data_parsed
+    //   - deleted-data-section (DELETE 操作完整明细 JSON 块)
+    // 改指完整版 AuditLogManagement.vue, 所有功能立即恢复.
+    component: () => import('@/views/SystemManagement/AuditLogManagement.vue'),
+    meta: { title: '审计日志管理', requiresAuth: true, requiresAdmin: true }
   },
   {
     path: '/system/role-permission/:roleId',

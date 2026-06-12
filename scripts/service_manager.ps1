@@ -6,12 +6,20 @@
 
 param(
     [Parameter(Position=0)]
-    [ValidateSet('status','start','stop','restart','force-restart','start-fe','start-be','watchdog','watchdog-start','watchdog-stop','clear-stale-lock','list-locks')]
+    [ValidateSet('status','start','stop','restart','force-restart','start-fe','start-be','watchdog','watchdog-start','watchdog-stop','clear-stale-lock','list-locks','preflight')]
     [string]$Command = 'status',
 
     [Parameter()]
     [ValidateRange(1, 65535)]
-    [int]$Port = 3010
+    [int]$Port = 3010,
+
+    # [P0 v3.18+] 调试铁律: preflight 检查 - 要求 status 文件足够新
+    [Parameter()]
+    [switch]$RequireFresh,
+
+    [Parameter()]
+    [ValidateRange(10, 86400)]
+    [int]$MaxAge = 60
 )
 
 $ErrorActionPreference = 'Continue'
@@ -128,6 +136,66 @@ function Get-StatusData {
 
 function Set-StatusData($data) {
     $data | ConvertTo-Json -Depth 3 | Set-Content $statusFile -Encoding UTF8
+}
+
+<#
+.SYNOPSIS
+  [P0 v3.18+] 调试铁律: 检查 status 文件是否"足够新" (避免"重启了但没生效"陷阱)
+.DESCRIPTION
+  校验 .service_status_<port>.json 的 started_at 距今 < $MaxAge 秒
+  返回 $true = 新鲜 (可放心使用), $false = 过时 (应先 restart)
+  退出码: 0 = OK, 1 = stale (含修复提示)
+#>
+function Test-ServiceFresh {
+    param([int]$MaxAgeSeconds = 60)
+
+    if (-not (Test-Path $statusFile)) {
+        Write-Log "[PREFLIGHT] FAIL: status file missing: $statusFile"
+        Write-Host "  [BLOCKED] Service status file not found." -ForegroundColor Red
+        Write-Host "  Hint: Run: service_manager.ps1 start -Port $Port"
+        return $false
+    }
+
+    $data = Get-StatusData
+    if (-not $data) {
+        Write-Log "[PREFLIGHT] FAIL: status file empty/corrupt"
+        Write-Host "  [BLOCKED] Status file empty/corrupt." -ForegroundColor Red
+        Write-Host "  Hint: Run: service_manager.ps1 start -Port $Port"
+        return $false
+    }
+
+    # 找到最早 started_at (前端的 started_at, 不是 backend)
+    $earliest = $null
+    foreach ($svcName in @('frontend', 'backend')) {
+        $svc = $data.$svcName
+        if ($svc -and $svc.started_at) {
+            $ts = [datetime]$svc.started_at
+            if (-not $earliest -or $ts -lt $earliest) {
+                $earliest = $ts
+            }
+        }
+    }
+    if (-not $earliest) {
+        Write-Log "[PREFLIGHT] FAIL: no started_at in status file"
+        Write-Host "  [BLOCKED] No started_at found in status file." -ForegroundColor Red
+        Write-Host "  Hint: Run: service_manager.ps1 restart -Port $Port"
+        return $false
+    }
+
+    $age = (Get-Date) - $earliest
+    $ageSec = [int]$age.TotalSeconds
+    if ($ageSec -gt $MaxAgeSeconds) {
+        Write-Log "[PREFLIGHT] FAIL: service age=${ageSec}s > ${MaxAgeSeconds}s (stale)"
+        Write-Host "  [BLOCKED] Service started ${ageSec}s ago (> ${MaxAgeSeconds}s)." -ForegroundColor Red
+        Write-Host "  Started at: $($earliest.ToString('yyyy-MM-ddTHH:mm:ssZ'))"
+        Write-Host "  Hint: Code may have changed but service is still running OLD code." -ForegroundColor Yellow
+        Write-Host "  Run: service_manager.ps1 restart -Port $Port"
+        return $false
+    }
+
+    Write-Log "[PREFLIGHT] OK: service age=${ageSec}s <= ${MaxAgeSeconds}s"
+    Write-Host "  [OK] Service fresh: started ${ageSec}s ago (limit: ${MaxAgeSeconds}s)"
+    return $true
 }
 
 function Wait-Lock {
@@ -596,6 +664,23 @@ switch ($Command) {
             Write-Host "  Summary: SOME SERVICES NOT RUNNING (Port=$Port)"
         }
         exit $(if ($allOk) { 0 } else { 1 })
+    }
+    'preflight' {
+        # [P0 v3.18+] 调试铁律入口: 跑测试/声称修复前必跑
+        # 用途: 校验 .service_status_<port>.json 够新 (避免"重启了但没生效"陷阱)
+        # 用法: powershell -File scripts/service_manager.ps1 preflight -Port 3010
+        Write-Host ''
+        Write-Host "  Preflight Check (Port=$Port, MaxAge=${MaxAge}s)"
+        Write-Host '  ' + ('=' * 50)
+        $ok = Test-ServiceFresh -MaxAgeSeconds $MaxAge
+        Write-Host '  ' + ('=' * 50)
+        if ($RequireFresh -and -not $ok) {
+            exit 1
+        } elseif ($ok) {
+            exit 0
+        } else {
+            exit 1
+        }
     }
     'stop' {
         if (-not (Wait-Lock)) { exit 1 }

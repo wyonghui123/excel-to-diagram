@@ -258,7 +258,11 @@ def preview_code(object_type):
         'data': {
             'code': code,
             'object_type': object_type,
-            'generated': generate
+            'generated': generate,
+            # [NEW v1.1 2026-06-11] 返回 user_editable 等元信息，前端用于差异化 UI 提示
+            'user_editable': config.user_editable,
+            'pattern': config.pattern,
+            'preview': config.preview or code,
         }
     })
 

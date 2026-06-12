@@ -480,6 +480,18 @@ function classifyRelationByCodes(relation, centerScope, businessObjects, boMap) 
     };
   }
 
+  // 关键修复 v32: 优先采用后端分类结果 (archDataConverter.js line 143-144 把
+  // rel.scope_type / rel.category_type 映射到 rel.scopeType / rel.categoryType)
+  // 后端在 architecture/preview API 已基于后端 center_scope 算过 scope_type/category_type
+  // 后端给的值更权威 (跟 management 页 buildRelationScopeTree 一致),
+  // 不优先采用会导致 management 页 1+4=5 vs 图表页 1+6=7 的统计差异
+  if (relation.scopeType) {
+    return {
+      scopeType: relation.scopeType,
+      categoryType: relation.categoryType || CategoryType.CROSS_DOMAIN  // 兜底
+    };
+  }
+
   // 获取源和目标业务对象
   const sourceBO = boMap.get(relation.sourceCode);
   const targetBO = boMap.get(relation.targetCode);
@@ -590,15 +602,11 @@ export function buildRelationCategoryTree(relations, centerScope, businessObject
       return;
     }
 
-    // 判断源和目标是否在中心范围内
-    const sourceInScope = centerScope.includes(relation.sourceCode);
-    const targetInScope = centerScope.includes(relation.targetCode);
-
-    // 如果源和目标都不在中心范围内，跳过此关系
-    if (!sourceInScope && !targetInScope) {
-      return;
-    }
-
+    // 关键修复 v32: 不再硬过滤 EXTERNAL 关系
+    // 一律交给 classifyRelationByCodes 处理 (它优先采用后端 scopeType/categoryType)
+    // EXTERNAL 关系 (src/tgt 都不在 centerScope) 也入 tree 归到 EXTERNAL scope,
+    // 这样 getSelectedRelationIds 才能选中 EXTERNAL scope 节点下的关系
+    // 与 management 页"范围内 (5) + 范围内与外部 (8) + 范围外" 三段式对齐
     const classification = classifyRelationByCodes(relation, centerScope, businessObjects, boMap);
 
     const { scopeType, categoryType } = classification;
@@ -713,7 +721,12 @@ export function buildRelationCategoryTree(relations, centerScope, businessObject
         }
       }
     } else {
+      // 关键修复 v32: sourceBO/targetBO 缺失时 (后端 hierarchyFilter 没返回外部 BO),
+      // SAME_MODULE stats 没有 domains 字段, 需先补一个, 避免 page crash
       const fallbackKey = '_external_';
+      if (!stats.domains) {
+        stats.domains = {};
+      }
       if (!stats.domains[fallbackKey]) {
         stats.domains[fallbackKey] = {
           name: fallbackKey,

@@ -50,11 +50,13 @@
       v-else-if="isCodeAutoManagedFinal(isCodeAutoManaged) && fieldKey === 'code'"
       v-model="formData[fieldKey]"
       :disabled="isFieldReadonly(fieldKey)"
-      :placeholder="getFieldPlaceholder(fieldKey)"
+      :placeholder="codeFieldPlaceholder || codeFieldPlaceholderInjected || getFieldPlaceholder(fieldKey)"
       @update:model-value="onCodeInput"
     >
       <template #suffix>
-        <span v-if="!isFieldDirtyFinal('code')" class="kt-badge kt-badge--auto">自动</span>
+        <span v-if="!isFieldDirtyFinal('code')" class="kt-badge kt-badge--auto">
+          {{ codeFieldTagText || codeFieldTagTextInjected || '自动' }}
+        </span>
         <a
           v-else
           class="kt-reset-link"
@@ -101,6 +103,10 @@ const isCodeAutoManagedInjected = keyTemplateContext?.isCodeAutoManaged
 const isFieldDirtyInjected = keyTemplateContext?.isFieldDirty
 const markFieldDirtyInjected = keyTemplateContext?.markFieldDirty
 const onCodeResetInjected = keyTemplateContext?.onCodeReset
+// [NEW v1.1 2026-06-11] user_editable 相关 UI 提示
+const codeFieldPlaceholderInjected = keyTemplateContext?.codeFieldPlaceholder
+const codeFieldTagTextInjected = keyTemplateContext?.codeFieldTagText
+const codeFieldTagTypeInjected = keyTemplateContext?.codeFieldTagType
 
 // 合并 inject + props：props 优先（向后兼容直接传入的场景）
 const isCodeAutoManagedFinal = (val) => {
@@ -198,6 +204,19 @@ const props = defineProps({
   onCodeReset: {
     type: Function,
     default: null
+  },
+  // [NEW v1.1 2026-06-11] user_editable 模式相关 props
+  codeFieldPlaceholder: {
+    type: String,
+    default: ''
+  },
+  codeFieldTagText: {
+    type: String,
+    default: ''
+  },
+  codeFieldTagType: {
+    type: String,
+    default: 'info'
   }
 })
 

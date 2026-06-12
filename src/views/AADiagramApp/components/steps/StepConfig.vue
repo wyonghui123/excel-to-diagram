@@ -205,6 +205,11 @@ export default {
     businessObjects: {
       type: Array,
       default: () => []
+    },
+    // 关键修复 v34: 总数统计 (5 个指标) - 来自 useDiagramData.displayStats.total
+    total: {
+      type: Object,
+      default: null
     }
   },
   emits: ['generate', 'prev', 'reset-chart-type-changed'],
@@ -434,6 +439,12 @@ export default {
   height: 100%;
   display: flex;
   flex-direction: column;
+}
+
+.panel-body {
+  flex: 1;
+  padding: var(--spacing-xl);
+  overflow: auto;
 }
 
 .panel-header-simple {

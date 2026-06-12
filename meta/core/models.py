@@ -816,15 +816,21 @@ class AuditConfig:
         """获取动作的审计配置"""
         if action in self.actions:
             return self.actions[action]
-        
+
+        # [FIX 2026-06-12] 批量关联操作复用 associate/dissociate 的审计配置
+        # 否则 batch_unassign/batch_assign 返回 enabled=False, 不写审计日志
         action_map = {
             CRUD_CREATE: self.create,
             CRUD_UPDATE: self.update,
             CRUD_DELETE: self.delete,
             ASSOCIATE: self.associate,
             DISSOCIATE: self.dissociate,
+            'batch_assign': self.associate,
+            'batch_unassign': self.dissociate,
+            'assign': self.associate,
+            'unassign': self.dissociate,
         }
-        
+
         return action_map.get(action, AuditActionConfig(enabled=False))
 
 

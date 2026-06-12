@@ -76,6 +76,8 @@ class SequenceConfig:
 class KeyTemplateConfig:
     object_id: str
     enabled: bool = False
+    # [NEW v1.1 2026-06-11] 用户可编辑模式
+    user_editable: str = "auto_or_manual"
     auto_suggest: bool = True
     pattern: str = ""
     separator: str = "_"
@@ -83,6 +85,15 @@ class KeyTemplateConfig:
     preview: str = ""
     scope: Optional[str] = None
     sequence: Optional[SequenceConfig] = None
+
+    def __post_init__(self):
+        """[NEW v1.1] 校验 user_editable 字段值合法"""
+        valid = {"auto_only", "auto_or_manual", "manual_only"}
+        if self.user_editable not in valid:
+            raise ValueError(
+                f"Invalid user_editable: {self.user_editable!r}. "
+                f"Must be one of {sorted(valid)}"
+            )
 
     @classmethod
     def from_dict(cls, object_id: str, data: Dict[str, Any]) -> "KeyTemplateConfig":
@@ -96,9 +107,13 @@ class KeyTemplateConfig:
         elif data.get("segments"):
             sequence = SequenceConfig.from_segments(data.get("segments", []))
 
+        # [NEW v1.1] 默认 auto_or_manual
+        user_editable = data.get("user_editable", "auto_or_manual")
+
         return cls(
             object_id=object_id,
             enabled=data.get("enabled", False),
+            user_editable=user_editable,
             auto_suggest=data.get("auto_suggest", True),
             pattern=data.get("pattern", ""),
             separator=data.get("separator", "_"),

@@ -9,11 +9,50 @@ from meta.services.auth_middleware import login_required, get_current_user
 from meta.services.field_policy_engine import FieldPolicyEngine, PolicyContext, ObjectContext
 from meta.services.view_config_service import view_config_service
 from meta.services.computation_service import computation_service
+from meta.api._audit_helper import write_permission_config_audit
 
 logger = logging.getLogger(__name__)
 
 bo_bp = Blueprint('bo_v2', __name__, url_prefix='/api/v2/bo')
 meta_v2_bp = Blueprint('meta_v2', __name__, url_prefix='/api/v2/meta')
+
+
+def _enrich_audit_log_items(items):
+    """[FIX 2026-06-12] audit_log 列表通用 enrich.
+    1. 把 extra_data 字符串解析为 extra_data_parsed (前端 deleted-data-section 用)
+    2. 注入 object_type_label / field_name_label / parent_object_type_label (中英文映射)
+
+    跟 v1 /audit/logs 接口对齐, 解决"v2 BO 列表看不到删除明细 JSON"问题.
+    复用 meta.api.audit_api 的 OBJECT_TYPE_LABELS / FIELD_NAME_LABELS 映射.
+    """
+    if not items:
+        return
+    try:
+        from meta.api.audit_api import (
+            OBJECT_TYPE_LABELS,
+            FIELD_NAME_LABELS,
+            _extract_deleted_data,
+        )
+    except Exception as e:
+        logger.warning(f"[audit_log enrich] import failed: {e}")
+        return
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        # 1) extra_data 解析
+        ed_raw = item.get('extra_data')
+        if ed_raw and not item.get('extra_data_parsed'):
+            item['extra_data_parsed'] = _extract_deleted_data(ed_raw)
+        # 2) label 注入
+        ot = item.get('object_type', '') or ''
+        fn = item.get('field_name', '') or ''
+        pot = item.get('parent_object_type', '') or ''
+        if ot and not item.get('object_type_label'):
+            item['object_type_label'] = OBJECT_TYPE_LABELS.get(ot, ot)
+        if fn and not item.get('field_name_label'):
+            item['field_name_label'] = FIELD_NAME_LABELS.get(fn, fn)
+        if pot and not item.get('parent_object_type_label'):
+            item['parent_object_type_label'] = OBJECT_TYPE_LABELS.get(pot, pot)
 
 
 def _set_user_context():
@@ -205,6 +244,12 @@ def _attach_change_history(record: dict, object_type: str, obj_id) -> None:
 @bo_bp.route('/<object_type>/<int:obj_id>', methods=['GET'])
 @login_required
 def read_bo(object_type, obj_id):
+    # [FIX 2026-06-12] audit_log 是只读对象 (persistent: false), BO framework 拒绝读 (404).
+    # v2 BO 接口必须跟 v1 /audit/logs/{id} 对齐, 否则前端拿不到 extra_data_parsed.deleted_data.
+    # 这里直接调 v1 端点拿到完整数据 + 注入中文 label.
+    if object_type == 'audit_log':
+        return _read_audit_log_via_v1(obj_id)
+
     bo = _get_bo()
     result = bo.read(object_type, obj_id)
     if result.success:
@@ -213,10 +258,64 @@ def read_bo(object_type, obj_id):
     return jsonify({'success': False, 'message': result.message}), 404
 
 
+def _read_audit_log_via_v1(obj_id):
+    """[FIX 2026-06-12] audit_log 单条: 走 v1 /audit/logs/{id} (已有 extra_data_parsed)
+    再 enrich 中英文 label, 跟 v2 BO 列表接口行为一致.
+    """
+    try:
+        from meta.api.audit_api import _extract_deleted_data
+        ds = _get_data_source()
+        cursor = ds.execute("""
+            SELECT id, object_type, object_id, action, field_name, old_value, new_value,
+                   user_id, user_name, ip_address, user_agent, created_at, trace_id,
+                   transaction_id, status, retry_count, error_message, agent_id,
+                   agent_session_id, tool_call_id, agent_reasoning, extra_data
+            FROM audit_logs WHERE id = ?
+        """, [obj_id])
+        row = cursor.fetchone()
+        if not row:
+            return jsonify({'success': False, 'message': '审计日志不存在'}), 404
+        columns = [d[0] for d in cursor.description]
+        log = dict(zip(columns, row))
+        for k, v in list(log.items()):
+            if v is None:
+                log[k] = ''
+        log['extra_data_parsed'] = _extract_deleted_data(log.pop('extra_data', '') or '')
+
+        # 注入中文 label (跟 list 端点对齐)
+        try:
+            from meta.api.audit_api import OBJECT_TYPE_LABELS, FIELD_NAME_LABELS
+            ot = log.get('object_type', '') or ''
+            fn = log.get('field_name', '') or ''
+            pot = log.get('parent_object_type', '') or ''
+            if ot:
+                log['object_type_label'] = OBJECT_TYPE_LABELS.get(ot, ot)
+            if fn:
+                log['field_name_label'] = FIELD_NAME_LABELS.get(fn, fn)
+            if pot:
+                log['parent_object_type_label'] = OBJECT_TYPE_LABELS.get(pot, pot)
+        except Exception:
+            pass
+        return jsonify({'success': True, 'data': log})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+def _data_source_default():
+    """兼容旧调用方 — 直接用 _get_data_source()."""
+    return _get_data_source()
+
+
 @bo_bp.route('/<object_type>/<path:obj_id>', methods=['GET'])
 @login_required
 def read_bo_by_string_id(object_type, obj_id):
     """支持字符串ID的读取路由"""
+    # [FIX 2026-06-12] audit_log 走 v1 路径
+    if object_type == 'audit_log':
+        return _read_audit_log_via_v1(obj_id)
+
     bo = _get_bo()
     result = bo.read(object_type, obj_id)
     if result.success:
@@ -302,6 +401,12 @@ def query_bo(object_type):
         # 检查是否是数组格式（来自 _do_list）
         if isinstance(raw_data, list):
             computation_service.compute_by_semantics(object_type, raw_data)
+            # [FIX 2026-06-12] audit_log 通用 enrich: 解析 extra_data 为 extra_data_parsed,
+            # 注入 object_type_label / field_name_label / parent_object_type_label.
+            # 让所有用 v2 BO /audit_log 列表的页面 (系统管理-审计日志管理, 全局搜索等)
+            # 都能直接展示"删除对象完整明细" JSON + 中英文标签, 跟 v1 /audit/logs 接口对齐.
+            if object_type == 'audit_log':
+                _enrich_audit_log_items(raw_data)
             # 返回 { items: [], total: 20, filters: [] } 格式
             return jsonify({
                 'success': True,
@@ -316,6 +421,8 @@ def query_bo(object_type):
             })
         else:
             # 已经是正确格式
+            if object_type == 'audit_log' and isinstance(result.data, dict) and isinstance(result.data.get('items'), list):
+                _enrich_audit_log_items(result.data['items'])
             return jsonify({'success': True, 'data': result.data, 'message': result.message})
     else:
         logger.error(f"[query_bo] Error: {result.message}")
@@ -639,10 +746,14 @@ def query_associations_v2(object_type, obj_id, association_name):
 def count_associations_v2(object_type, obj_id, association_name):
     """统计关联数量 - v2 API"""
     bo = _get_bo()
-    result = bo.count_associations(
-        src_type=object_type,
-        src_id=obj_id,
-        association_name=association_name,
+    # [FIX 2026-06-12] BOFramework 没有 count_associations() 方法
+    result = bo.execute(
+        object_type=object_type,
+        action='count',
+        params={
+            'src_id': obj_id,
+            'association_name': association_name,
+        },
     )
 
     if result.success:
@@ -666,14 +777,22 @@ def assign_association_v2(object_type, obj_id, association_name):
     if not target_type:
         target_type = _infer_target_type(object_type, association_name)
 
-    result = bo.assign_association(
-        src_type=object_type,
-        src_id=obj_id,
-        tgt_type=target_type,
-        tgt_id=target_id,
-        association_name=association_name,
-        metadata=metadata,
-    )
+    # [FIX 2026-06-12] BOFramework 没有 assign_association() 方法
+    # 原 bo.assign_association(...) → AttributeError → 500
+    # 改为 bo.associate(), 由 AssociationEngine._dispatch 处理
+    try:
+        result = bo.associate(
+            src_type=object_type,
+            src_id=obj_id,
+            tgt_type=target_type,
+            tgt_id=target_id,
+            association_name=association_name,
+            metadata=metadata,
+        )
+    except Exception as e:
+        import traceback
+        logger.error(f"[assign_association_v2] Traceback: {traceback.format_exc()}")
+        return jsonify({'success': False, 'error': type(e).__name__, 'message': str(e)}), 500
 
     if result.success:
         return '', 204
@@ -728,13 +847,19 @@ def unassign_association_v2(object_type, obj_id, association_name):
     if not target_type:
         target_type = _infer_target_type(object_type, association_name)
 
-    result = bo.unassign_association(
-        src_type=object_type,
-        src_id=obj_id,
-        tgt_type=target_type,
-        tgt_id=target_id,
-        association_name=association_name,
-    )
+    # [FIX 2026-06-12] BOFramework 没有 unassign_association() 方法
+    try:
+        result = bo.dissociate(
+            src_type=object_type,
+            src_id=obj_id,
+            tgt_type=target_type,
+            tgt_id=target_id,
+            association_name=association_name,
+        )
+    except Exception as e:
+        import traceback
+        logger.error(f"[unassign_association_v2] Traceback: {traceback.format_exc()}")
+        return jsonify({'success': False, 'error': type(e).__name__, 'message': str(e)}), 500
 
     if result.success:
         return '', 204
@@ -757,14 +882,23 @@ def batch_assign_associations_v2(object_type, obj_id, association_name):
     if not target_type:
         target_type = _infer_target_type(object_type, association_name)
 
-    result = bo.batch_assign_associations(
-        src_type=object_type,
-        src_id=obj_id,
-        tgt_type=target_type,
-        target_ids=target_ids,
-        association_name=association_name,
-        metadata=metadata,
-    )
+    # [FIX 2026-06-12] BOFramework 没有 batch_assign_associations() 方法
+    try:
+        result = bo.execute(
+            object_type=object_type,
+            action='batch_assign',
+            params={
+                'src_id': obj_id,
+                'tgt_type': target_type,
+                'target_ids': target_ids,
+                'association_name': association_name,
+                'metadata': metadata,
+            },
+        )
+    except Exception as e:
+        import traceback
+        logger.error(f"[batch_assign_associations_v2] Traceback: {traceback.format_exc()}")
+        return jsonify({'success': False, 'error': type(e).__name__, 'message': str(e)}), 500
 
     if result.success:
         return jsonify({'success': True, 'data': result.data, 'message': result.message})
@@ -810,13 +944,22 @@ def batch_unassign_associations_v2(object_type, obj_id, association_name):
     if not target_type:
         target_type = _infer_target_type(object_type, association_name)
 
-    result = bo.batch_unassign_associations(
-        src_type=object_type,
-        src_id=obj_id,
-        tgt_type=target_type,
-        target_ids=target_ids,
-        association_name=association_name,
-    )
+    # [FIX 2026-06-12] BOFramework 没有 batch_unassign_associations() 方法
+    try:
+        result = bo.execute(
+            object_type=object_type,
+            action='batch_unassign',
+            params={
+                'src_id': obj_id,
+                'tgt_type': target_type,
+                'target_ids': target_ids,
+                'association_name': association_name,
+            },
+        )
+    except Exception as e:
+        import traceback
+        logger.error(f"[batch_unassign_associations_v2] Traceback: {traceback.format_exc()}")
+        return jsonify({'success': False, 'error': type(e).__name__, 'message': str(e)}), 500
 
     if result.success:
         return jsonify({'success': True, 'data': result.data, 'message': result.message})
@@ -2063,6 +2206,16 @@ def update_role_menu_permissions(role_id):
                         INSERT INTO role_permissions (role_id, permission_id, granted, created_at)
                         VALUES (?, ?, ?, CURRENT_TIMESTAMP)
                     """, [role_id, perm_row[0], 1 if granted else 0])
+
+        # [FIX 2026-06-12] 角色 v2 菜单权限审计日志: 关联到角色对象
+        write_permission_config_audit(
+            action='UPDATE',
+            object_type='role_v2_menu_permissions',
+            object_id=role_id,
+            data={'menu_codes': menu_codes, 'permission_count': len(permissions)},
+            parent_object_type='role',
+            parent_object_id=role_id,
+        )
 
         return jsonify({
             'success': True,

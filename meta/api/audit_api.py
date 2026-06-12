@@ -100,6 +100,10 @@ def get_audit_logs():
         action = request.args.get('action', '')
         object_type = request.args.get('object_type', '')
         object_id = request.args.get('object_id', '')
+        # [FIX 2026-06-12] 支持按 parent_object 查询 (角色/用户/用户组详情页"操作日志" tab)
+        # 例如: RoleDetailDrawer 通过 parent_object_type='role' + parent_object_id=3606 拉日志
+        parent_object_type = request.args.get('parent_object_type', '')
+        parent_object_id = request.args.get('parent_object_id', '')
         user_name = request.args.get('user_name', '')
         start_date = request.args.get('start_date', '')
         end_date = request.args.get('end_date', '')
@@ -107,15 +111,15 @@ def get_audit_logs():
         log_level = request.args.get('log_level', '')
         sort_field = request.args.get('sort_field', 'created_at')
         sort_direction = request.args.get('sort_direction', 'desc')
-        
+
         # 构建查询条件
         conditions = []
         params = []
-        
+
         if action:
             conditions.append("action = ?")
             params.append(action)
-        
+
         if object_type:
             conditions.append("object_type = ?")
             params.append(object_type)
@@ -124,49 +128,83 @@ def get_audit_logs():
             conditions.append("object_id = ?")
             params.append(object_id)
 
+        # [FIX 2026-06-12] parent_object 查询逻辑:
+        # - 同时传 (object_type+object_id) 和 (parent_object_type+parent_object_id) 时, 用 OR 联合查询
+        #   (角色自身日志 + 角色子对象日志一起返回)
+        # - 只传 (parent_object_type+parent_object_id) 时, 走纯 parent_object 查询
+        # - 只传 (object_type+object_id) 时, 走纯 object 查询 (向后兼容)
+        # 重要: 走 OR 联合时, 必须 pop 掉前面已经加的 (object_type + object_id) 条件,
+        #       否则会被 AND 收窄到 0 条
+        if parent_object_type and parent_object_id:
+            if object_type and object_id:
+                # 移除刚才加的 object_type + object_id 单独条件, 改用 OR 联合
+                if conditions and conditions[-1] == "object_id = ?":
+                    conditions.pop()
+                    params.pop()
+                if conditions and conditions[-1] == "object_type = ?":
+                    conditions.pop()
+                    params.pop()
+                conditions.append(
+                    f"((object_type = ? AND object_id = ?) OR "
+                    f"(parent_object_type = ? AND parent_object_id = ?))"
+                )
+                params.extend([object_type, object_id, parent_object_type, parent_object_id])
+            else:
+                # 仅 parent_object 查询
+                conditions.append("parent_object_type = ?")
+                params.append(parent_object_type)
+                conditions.append("parent_object_id = ?")
+                params.append(parent_object_id)
+        elif parent_object_type:
+            conditions.append("parent_object_type = ?")
+            params.append(parent_object_type)
+        elif parent_object_id:
+            conditions.append("parent_object_id = ?")
+            params.append(parent_object_id)
+
         if user_name:
             conditions.append("user_name LIKE ?")
             params.append(f"%{user_name}%")
-        
+
         if start_date:
             conditions.append("created_at >= ?")
             params.append(start_date)
-        
+
         if end_date:
             conditions.append("created_at <= ?")
             params.append(end_date + ' 23:59:59')
-        
+
         if log_category:
             conditions.append("log_category = ?")
             params.append(log_category)
-        
+
         if log_level:
             conditions.append("log_level = ?")
             params.append(log_level)
-        
+
         where_clause = " AND ".join(conditions) if conditions else "1=1"
-        
+
         # 验证排序字段
         valid_sort_fields = ['id', 'object_type', 'object_id', 'action', 'user_name', 'log_category', 'log_level', 'created_at']
         if sort_field not in valid_sort_fields:
             sort_field = 'created_at'
-        
+
         if sort_direction not in ['asc', 'desc']:
             sort_direction = 'desc'
-        
+
         # 计算偏移量
         offset = (page - 1) * page_size
-        
+
         # 查询总数
         count_sql = f"SELECT COUNT(*) FROM audit_logs WHERE {where_clause}"
         cursor = _data_source.execute(count_sql, params)
         total = cursor.fetchone()[0]
-        
+
         # 查询数据
         query_sql = f"""
             SELECT id, object_type, object_id, action, field_name, old_value, new_value,
                    user_id, user_name, ip_address, user_agent, created_at, trace_id,
-                   transaction_id, status, extra_data
+                   transaction_id, status, extra_data, parent_object_type, parent_object_id
             FROM audit_logs
             WHERE {where_clause}
             ORDER BY {sort_field} {sort_direction}

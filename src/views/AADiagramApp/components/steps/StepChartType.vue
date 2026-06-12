@@ -2,6 +2,16 @@
   <div class="step-chart-type">
     <div class="chart-type-panel">
       <div class="panel-body">
+        <!-- 关键修复 v36: 恢复范围汇总 (StepScopeSummary) - 之前误删 -->
+        <!--   误读用户需求: 用户说"导航上第一步统计去掉"是指 StepNavigator 上的文字, -->
+        <!--   不是 StepChartType 步骤内部的内容区域 (StepScopeSummary 卡片) -->
+        <!--   修复: 把 StepScopeSummary 加回来 + 保留 StepNavigator 修改 -->
+        <StepScopeSummary
+          :center="center"
+          :incremental="incremental"
+          :total="total"
+        />
+
         <h2 class="section-title">选择图表类型</h2>
         <p class="section-desc">请选择要生成的图表类型</p>
         
@@ -42,14 +52,28 @@
 <script>
 import { AppButton } from '../../../../components/common'
 import { AppIcon } from '../../../../components/common/AppIcon'
+import StepScopeSummary from './StepScopeSummary.vue'
 
 export default {
   name: 'StepChartType',
-  components: { AppButton, AppIcon },
+  components: { AppButton, AppIcon, StepScopeSummary },
   props: {
     modelValue: {
       type: String,
       default: ''
+    },
+    // 关键修复 v36: 范围汇总 props 恢复 (用户要求保留内容区域)
+    center: {
+      type: Object,
+      default: null
+    },
+    incremental: {
+      type: Object,
+      default: null
+    },
+    total: {
+      type: Object,
+      default: null
     }
   },
   emits: ['update:modelValue', 'next', 'prev'],

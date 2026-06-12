@@ -674,19 +674,69 @@ export function useMetaList(objectType, options = {}) {
       )
       
       const idsToDelete = Array.from(selectedIds.value)
-      
+
       const result = await boService.batchDelete(objectType, idsToDelete)
-      
+
       if (result.success) {
         const deletedCount = result.success_count || idsToDelete.length
-        ElMessage.success(`成功删除 ${deletedCount} 条记录`)
+        const successMsg = `成功删除 ${deletedCount} 条记录`
+        // [FIX 2026-06-12 v4] 用户反馈成功 message 不明显 (ElMessage 顶部 3s 自动消失容易错过)
+        // 改用三重保险: ElNotification (显眼长条) + ElMessage (快速反馈) + console.log
+        console.log('[useMetaList] 批量删除成功:', successMsg, result)
+        ElNotification({
+          title: '删除成功',
+          message: successMsg,
+          type: 'success',
+          duration: 4500,
+          position: 'top-right',
+          showClose: true,
+        })
+        ElMessage.success(successMsg)
         clearAllSelection()
         await loadList()
       } else {
-        const errorMsg = result.errors?.length > 0 
-          ? result.errors.map(e => e.message || e).join('; ')
-          : '删除失败'
-        ElMessage.error(errorMsg)
+        // [FIX 2026-06-12 v2] 真实错误信息优先级:
+        // 1) result.message (顶层 message)
+        // 2) result.data.results[].message (batch-delete 207 把每条记录的 message 放在这里)
+        // 3) result.errors (string[]) — 这是技术错误码, 不是中文
+        // 4) 兜底 "删除失败"
+        let errorMsg = result.message
+        if (!errorMsg) {
+          const resultsArr = result.data?.results || []
+          const messagesFromResults = resultsArr
+            .map(r => r?.message)
+            .filter(Boolean)
+          if (messagesFromResults.length) {
+            errorMsg = messagesFromResults.join('; ')
+          }
+        }
+        if (!errorMsg && Array.isArray(result.errors) && result.errors.length) {
+          errorMsg = result.errors
+            .map(e => (typeof e === 'string' ? e : e?.message || JSON.stringify(e)))
+            .join('; ')
+        }
+        if (!errorMsg) errorMsg = '删除失败'
+
+        // [FIX 2026-06-12 v3] 用户反馈 el-message 不够明显, 改用三重保险:
+        // 1) ElNotification 右上角长条 (4.5s, 显眼, 不被遮)
+        // 2) ElMessage 顶部 (3s, 快速反馈)
+        // 3) console.error (开发者工具可见)
+        // 之前用 ElMessage.error(errorMsg) 单一途径, 顶部 3s 自动消失, 用户容易错过
+        console.error('[useMetaList] 批量删除失败:', errorMsg, result)
+        ElNotification({
+          title: '删除失败',
+          message: errorMsg,
+          type: 'error',
+          duration: 6000,  // 6 秒, 比默认 4.5s 更长
+          position: 'top-right',
+          showClose: true,
+        })
+        ElMessage({
+          message: errorMsg,
+          type: 'error',
+          duration: 6000,
+          showClose: true,
+        })
       }
     } catch (error) {
       if (error !== 'cancel') {

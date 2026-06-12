@@ -174,6 +174,89 @@ def test_state_transition_executor():
     print("[PASS] StateTransitionExecutor 测试通过")
 
 
+def test_state_transition_executor_user_form_submit_same_value():
+    """[Bug 2026-06-12] 复现：用户编辑产品时未改变 is_active (前端表单自动提交当前值)
+
+    场景:
+    - DB 中 product.is_active = True
+    - 用户编辑产品其他字段 (如 name), 不动 is_active 开关
+    - 前端 form 把当前 is_active=True 一起提交到后端
+    - 后端 BEFORE_UPDATE 触发 state_transition rule
+    - 期望: is_active 保持 True (用户未改变)
+    - 实际 (Bug): 触发 deactivate_product rule, is_active 被改为 False
+    """
+    print("\n=== [Bug] 测试 StateTransitionExecutor 提交相同值 ===")
+
+    executor = StateTransitionExecutor()
+
+    # 模拟 product 的 deactivate_product 规则
+    deactivate = MetaStateTransition(
+        id="deactivate_product",
+        name="停用产品线",
+        rule_type=RuleType.STATE_TRANSITION,
+        state_field="is_active",
+        from_states=[True],
+        to_state=False,
+        triggers=[RuleTrigger.BEFORE_UPDATE]
+    )
+
+    activate = MetaStateTransition(
+        id="activate_product",
+        name="激活产品线",
+        rule_type=RuleType.STATE_TRANSITION,
+        state_field="is_active",
+        from_states=[False],
+        to_state=True,
+        triggers=[RuleTrigger.BEFORE_UPDATE]
+    )
+
+    # 构造 product 的简化 schema
+    obj = MetaObject(
+        id="product",
+        name="产品线",
+        table_name="product",
+        fields=[MetaField(id="is_active", name="是否活跃", field_type=FieldType.BOOLEAN, db_column="is_active")]
+    )
+
+    # 场景 1: 用户提交 form，未改 is_active (DB=true, form=true)
+    original_data = {"id": 1, "is_active": True, "name": "Old Name"}
+    update_data = {"id": 1, "is_active": True, "name": "New Name"}  # 前端 form 把 is_active=True 一起发
+    context = RuleContext(meta_object=obj, data=update_data, original_data=original_data)
+    result = executor.execute(deactivate, context)
+
+    assert result.success, "状态转换执行应该成功（即使是 skip）"
+    assert update_data["is_active"] is True, (
+        f"is_active 应该保持 True (用户未改变), 实际: {update_data['is_active']}. "
+        f"Bug 表现: deactivate rule 误触发, 把 True 改为 False"
+    )
+
+    print("  [OK] 场景 1: is_active 保持 True (用户未改变)")
+
+    # 场景 2: 用户主动把 is_active 改为 False (DB=true, form=false)
+    original_data2 = {"id": 1, "is_active": True, "name": "Old Name"}
+    update_data2 = {"id": 1, "is_active": False, "name": "New Name"}
+    context2 = RuleContext(meta_object=obj, data=update_data2, original_data=original_data2)
+    result2 = executor.execute(deactivate, context2)
+
+    assert result2.success
+    assert update_data2["is_active"] is False, "用户主动改 False 后应保持 False"
+
+    print("  [OK] 场景 2: 用户主动改 False 保持 False")
+
+    # 场景 3: 用户主动把 is_active 改为 True (DB=false, form=true)
+    original_data3 = {"id": 1, "is_active": False, "name": "Old Name"}
+    update_data3 = {"id": 1, "is_active": True, "name": "New Name"}
+    context3 = RuleContext(meta_object=obj, data=update_data3, original_data=original_data3)
+    result3 = executor.execute(activate, context3)
+
+    assert result3.success
+    assert update_data3["is_active"] is True, "用户主动改 True 后应保持 True"
+
+    print("  [OK] 场景 3: 用户主动改 True 保持 True")
+
+    print("[PASS] StateTransitionExecutor 提交相同值场景测试通过")
+
+
 def test_trigger_executor():
     print("\n=== 测试 TriggerExecutor ===")
     
@@ -422,6 +505,7 @@ def run_all_tests():
     test_validation_executor()
     test_computation_executor()
     test_state_transition_executor()
+    test_state_transition_executor_user_form_submit_same_value()
     test_trigger_executor()
     test_derivation_executor_aggregation()
     test_derivation_executor_transformation()

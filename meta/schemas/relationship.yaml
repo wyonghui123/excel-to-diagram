@@ -137,6 +137,8 @@ semantics:
 # ────────────────────────────────────────────
 key_template:
   enabled: true
+  # [NEW v1.1 2026-06-11] 自动/可手动混合模式
+  user_editable: auto_or_manual
   auto_suggest: true
   pattern: "{source_code}-{target_code}-{SEQ:2}"
   separator: "-"

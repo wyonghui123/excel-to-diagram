@@ -13,6 +13,7 @@ from meta.core.datasource import get_data_source
 from meta.core.models import registry
 from meta.api.user_api import login_required
 from meta.services.auth_middleware import is_admin, get_current_user
+from meta.api._audit_helper import write_permission_config_audit
 from functools import wraps
 
 role_menu_bp = Blueprint('role_menu', __name__, url_prefix='/api/v1/roles')
@@ -708,7 +709,17 @@ def update_role_menu_permissions(role_id):
                                 synced_permissions.append(code)
                             except Exception as e:
                                 pass
-        
+
+        # [FIX 2026-06-12] 角色菜单权限 (PFCG) 审计日志: 关联到角色对象
+        write_permission_config_audit(
+            action='UPDATE',
+            object_type='role_menu',
+            object_id=role_id,
+            data={'menu_codes': menu_codes, 'synced_permissions_count': len(set(synced_permissions))},
+            parent_object_type='role',
+            parent_object_id=role_id,
+        )
+
         return jsonify({
             'success': True,
             'message': f'菜单权限配置已保存，已同步 {len(set(synced_permissions))} 项功能权限',

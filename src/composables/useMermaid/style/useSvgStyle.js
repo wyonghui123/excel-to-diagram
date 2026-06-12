@@ -300,12 +300,62 @@ export function useSvgStyle() {
     })
   }
 
+  /**
+   * 关键修复 v32：修复 edgeLabel 文字被右侧截断的问题
+   * 根本原因：Mermaid 给 foreignObject 的 inner div (.labelBkg) 设了 max-width: 200px
+   *         对中文 label 来说 200px 装不下，所以文字被溢出截断
+   *
+   * 修复策略（保守、不影响节点/容器标题）:
+   *   主方案在 MermaidComponent.css (g.edgeLabel foreignObject > div.labelBkg 选择器)
+   *   本函数作为 JS 兜底，只在 SVG 渲染完成后补充一次样式确保生效
+   *
+   * 重要：不要碰 .nodeLabel / .cluster-label / .subgraph-label，它们的样式在 CSS 中
+   *       (MermaidComponent.css) 有独立规则，width 由 .node 的 rect 自动计算
+   */
+  const fixEdgeLabelOverflow = (svg) => {
+    if (!svg) return
+
+    // 只查询 g.edgeLabel 内的 foreignObject
+    const edgeLabels = svg.querySelectorAll('g.edgeLabel')
+    if (edgeLabels.length === 0) return
+
+    edgeLabels.forEach((edgeLabel) => {
+      const foreignObject = edgeLabel.querySelector('foreignObject')
+      if (!foreignObject) return
+
+      // Mermaid 输出: foreignObject > div.labelBkg > span.edgeLabel > p
+      // 只动 .labelBkg 自己的样式，绝不往下走 (避免影响节点/容器的同名 .edgeLabel span)
+      const labelBkg = foreignObject.querySelector(':scope > div')
+      if (!labelBkg || !labelBkg.classList.contains('labelBkg')) return
+
+      // 解除 mermaid 的 max-width/white-space 限制
+      // 用 !important 优先级，确保覆盖 Mermaid 内联 style
+      labelBkg.style.setProperty('max-width', 'none', 'important')
+      labelBkg.style.setProperty('white-space', 'nowrap', 'important')
+      labelBkg.style.setProperty('overflow', 'visible', 'important')
+      labelBkg.style.setProperty('box-sizing', 'border-box', 'important')
+      labelBkg.style.setProperty('padding', '4px 8px', 'important')
+
+      // 显式设置 text-align（防御性，正常情况 Mermaid 已设）
+      labelBkg.style.setProperty('text-align', 'center', 'important')
+
+      // 显式设置 display（防御性，正常情况 Mermaid 已设 table-cell）
+      labelBkg.style.setProperty('display', 'table-cell', 'important')
+
+      // 关键：不修改 foreignObject 的 width/height
+      // 让 foreignObject 保持原始尺寸，文字通过 overflow:visible 自然溢出显示
+      // 这避免了 v22 fixNodeRectSize 端点错位的 bug
+      foreignObject.style.setProperty('overflow', 'visible', 'important')
+    })
+  }
+
   return {
     validateContainerTitles,
     fixArrowMarkers,
     updateNodeStyles,
     updateClusterStyles,
     fixLabelBackground,
+    fixEdgeLabelOverflow,
     // 向后兼容别名
     applyContainerTitleItalic: validateContainerTitles
   }

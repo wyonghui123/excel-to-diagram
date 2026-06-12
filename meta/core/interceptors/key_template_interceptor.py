@@ -68,6 +68,11 @@ class KeyTemplateInterceptor(Interceptor):
 
         code_value = params.get('code', '')
         if code_value and str(code_value).strip():
+            # [NEW v1.1 2026-06-11] 记录用户传入 code 的事件，便于审计/追踪
+            logger.info(
+                f"[KeyTemplateInterceptor] Using user-supplied code '{code_value}' "
+                f"for {meta_object.id} (user_editable={config.user_editable})"
+            )
             return
 
         field_values = dict(params)

@@ -341,15 +341,30 @@ function handleResize() {
 onMounted(() => {
   loadOverview()
   window.addEventListener('resize', handleResize)
+  // [FIX 2026-06-12] 强制覆盖 el-table inline style height (MetaListPage :height='100%').
+  // inline style 优先级 > CSS !important, 必须 JS 改. window resize 也要重新应用.
+  setTimeout(forceElTableHeight, 0)
+  setTimeout(forceElTableHeight, 200)
+  window.addEventListener('resize', forceElTableHeight)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
+  window.removeEventListener('resize', forceElTableHeight)
   pieChart?.dispose()
   trendChart?.dispose()
   pieChart = null
   trendChart = null
 })
+
+// [FIX 2026-06-12] 强制 el-table 高度 = calc(100vh - 440px), 覆盖 MetaListPage
+// 模板里 :height="tableHeight" 写到根元素的 inline style="height: 100%".
+// inline style 优先级 > !important CSS, 必须 JS 改. 否则 50 行数据无法滚动.
+function forceElTableHeight() {
+  const tables = document.querySelectorAll('.audit-log-management .el-table')
+  const target = `calc(100vh - 440px)`
+  tables.forEach(t => { t.style.height = target })
+}
 
 const OBJECT_TYPE_MAP = {
   'user': '用户',
@@ -465,12 +480,68 @@ function formatDateTime(datetime) {
 </script>
 
 <style scoped>
+/* [FIX 2026-06-12] 整页 flex column: overview 占自然高度, MetaListPage 填满剩余空间.
+   之前 height:100% + overflow:hidden 父子同时锁死高度, 内容超出后整页无法 scroll down. */
 .audit-log-management {
   height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .audit-overview {
+  flex-shrink: 0;
   margin-bottom: 16px;
+}
+
+/* [FIX 2026-06-12] MetaListPage 是嵌入模式, 必须 flex:1 填满剩余高度,
+   且 min-height:0 否则 flex item 默认 min-height:auto 不会缩小. */
+.audit-log-management :deep(.meta-list-page) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* [FIX 2026-06-12] 强制 el-table__body-wrapper 内部滚动条.
+   Element Plus 的 el-table 内部用 .el-scrollbar 包装, 真滚动容器是
+   .el-scrollbar__wrap (不是 body-wrapper). el-scrollbar 默认隐藏滚动条,
+   用户看不到就以为不能滚, 这里强制常驻显示. */
+.audit-log-management :deep(.custom-table) {
+  /* 视口高度 - 顶部导航 ~50 - overview ~250 - 分页 ~60 - 工具栏 ~50 - 余量 30
+     800px 视口下约 360px, 1024px 视口约 580px.  */
+  height: calc(100vh - 440px) !important;
+  min-height: 360px;
+  display: flex !important;
+  flex-direction: column !important;
+}
+.audit-log-management :deep(.el-table__inner-wrapper) {
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+}
+.audit-log-management :deep(.el-table__body-wrapper) {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow: visible !important;
+}
+/* [FIX 2026-06-12] 真滚动容器: el-scrollbar__wrap.
+   强制常驻滚动条 + 略宽让用户清楚看到. */
+.audit-log-management :deep(.el-table__body-wrapper .el-scrollbar__wrap) {
+  overflow-y: auto !important;
+  max-height: 100% !important;
+}
+.audit-log-management :deep(.el-table__body-wrapper .el-scrollbar__bar.is-vertical) {
+  opacity: 1 !important;
+  display: block !important;
+  width: 8px !important;
+}
+/* 滚动条样式: 让用户清楚看到位置 */
+.audit-log-management :deep(.el-table__body-wrapper .el-scrollbar__bar .el-scrollbar__thumb) {
+  background: rgba(144, 147, 153, 0.5) !important;
+  border-radius: 4px !important;
 }
 
 .stat-cards {
@@ -484,7 +555,7 @@ function formatDateTime(datetime) {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 16px 20px;
+  padding: 12px 16px;  /* 16→12 缩卡片高度 */
   border-radius: 8px;
   background: #fff;
   border: 1px solid #ebeef5;
@@ -544,7 +615,7 @@ function formatDateTime(datetime) {
   background: #fff;
   border: 1px solid #ebeef5;
   border-radius: 8px;
-  padding: 16px;
+  padding: 12px 14px;  /* 16→12 缩图表卡片 */
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
 }
 
@@ -553,16 +624,18 @@ function formatDateTime(datetime) {
 }
 
 .chart-card__title {
-  font-size: 14px;
+  font-size: 13px;  /* 14→13 缩标题 */
   font-weight: 500;
   color: var(--color-text-primary, #303133);
-  margin-bottom: 8px;
+  margin-bottom: 6px;  /* 8→6 */
   display: flex;
   align-items: center;
 }
 
+/* [FIX 2026-06-12] 图表高度 240→140, 让 audit-overview 总高 < 250px,
+   释放空间给 meta-list-page 让 el-table 至少 400px 高度能内部滚动. */
 .chart-container {
-  height: 240px;
+  height: 140px;
 }
 
 .field-name-badge {
@@ -610,8 +683,6 @@ function formatDateTime(datetime) {
   font-size: 12px;
   border-radius: 3px;
   margin-right: 6px;
-}
-  white-space: pre-wrap;
 }
 
 /* [FIX 2026-06-11] ID 列链接样式 */

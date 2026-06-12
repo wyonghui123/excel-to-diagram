@@ -12,20 +12,22 @@ import { buildRelationCategoryTree, getSelectedRelationIds } from '@/services/re
  *       relationIds 为空, 选不中深层的关系记录.
  */
 describe('buildRelationCategoryTree relationIds 聚合 (v3.18 复现)', () => {
-  // 模拟用户场景: 1 个 INTERNAL 关系 + 1 个 EXTERNAL 关系
+  // 模拟用户场景: 3 个 INTERNAL 关系 + 1 个 EXTERNAL 关系
   // 1 个 跨子领域 关系 + 1 个 同服务模块 关系
   const businessObjects = [
     { id: 1, code: 'BO_A', name: 'A', domainId: 10, domain: 'D1', subDomainId: 11, subDomain: 'SD1', serviceModuleId: 12, serviceModule: 'SM1', serviceModuleName: 'SM1' },
     { id: 2, code: 'BO_B', name: 'B', domainId: 10, domain: 'D1', subDomainId: 11, subDomain: 'SD1', serviceModuleId: 12, serviceModule: 'SM1', serviceModuleName: 'SM1' },
     { id: 3, code: 'BO_C', name: 'C', domainId: 10, domain: 'D1', subDomainId: 11, subDomain: 'SD1', serviceModuleId: 12, serviceModule: 'SM1', serviceModuleName: 'SM1' },
-    { id: 4, code: 'BO_D', name: 'D', domainId: 20, domain: 'D2', subDomainId: 21, subDomain: 'SD2', serviceModuleId: 22, serviceModule: 'SM2', serviceModuleName: 'SM2' }
+    { id: 4, code: 'BO_D', name: 'D', domainId: 20, domain: 'D2', subDomainId: 21, subDomain: 'SD2', serviceModuleId: 22, serviceModule: 'SM2', serviceModuleName: 'SM2' },
+    { id: 5, code: 'BO_E', name: 'E', domainId: 20, domain: 'D2', subDomainId: 21, subDomain: 'SD2', serviceModuleId: 22, serviceModule: 'SM2', serviceModuleName: 'SM2' }
   ]
 
   const relationships = [
     { id: 1, sourceCode: 'BO_A', targetCode: 'BO_B', relationCode: 'R1' },  // INTERNAL, same-module
     { id: 2, sourceCode: 'BO_B', targetCode: 'BO_C', relationCode: 'R2' },  // INTERNAL, same-module
     { id: 3, sourceCode: 'BO_A', targetCode: 'BO_C', relationCode: 'R3' },  // INTERNAL, same-module
-    { id: 4, sourceCode: 'BO_A', targetCode: 'BO_D', relationCode: 'R4' }   // EXTERNAL, cross-domain
+    // 关系 4: EXTERNAL, src/tgt 都不在 centerScope (按 v32 范围定义)
+    { id: 4, sourceCode: 'BO_D', targetCode: 'BO_E', relationCode: 'R4' }
   ]
 
   it('category 节点应聚合所有子节点的 relationIds (跨层级递归)', () => {
@@ -135,7 +137,10 @@ describe('真实数据复现 (v3.18)', () => {
     })
 
     const ids = getSelectedRelationIds(tree, allCategoryNodeIds)
-    // 期望: 选中所有 29 条关系
-    expect(ids.length).toBe(29)
+    // 期望: 选中所有关系 (动态匹配 API 返回数量, 避免 fixture 写死失效)
+    //   v3.18 修复前: 28 (漏 1 条) → v3.18 修复后: 等于 API 总数 (29/28 取决于当前数据集)
+    expect(ids.length).toBe(relationships.length)
+    // 关键断言: 不能比 API 总数少 (修复前少 1 是 bug)
+    expect(ids.length).toBeGreaterThanOrEqual(relationships.length)
   })
 })

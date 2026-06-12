@@ -325,7 +325,9 @@ const dataStatusType = computed(() => {
   const statusField = getStatusFieldName()
   const val = data.value[statusField]
   if (typeof val === 'boolean') return val ? 'success' : 'danger'
-  return 'default'
+  // [FIX 2026-06-12] 从 statusMap 查徽章类型, 确保状态变化时颜色同步更新
+  // 当前 ObjectDetailPage 设了 :hide-header="true" 暂不显示徽章, 但保留修复以防未来开启
+  return props.statusMap?.[val]?.type || 'default'
 })
 
 const computedFieldDefs = computed(() => {
@@ -886,16 +888,70 @@ async function fetchData(options = {}) {
   }
 }
 
+/**
+ * 状态转换后的"原地更新"逻辑
+ *
+ * [FIX 2026-06-12] 彻底排查: 之前仅更新 data.value[stateField] = newStatus,
+ *   但 ObjectPageField.formatReadValue() 优先读 display_values[stateField] 而非字段值,
+ *   导致 UI 显示的 label 与实际值不一致, 用户必须刷新浏览器才能看到状态更新.
+ *
+ * 修复策略 (多层防御):
+ *  1. props.statusMap[ newStatus ]?.label   -- 父组件传入的 statusMap (来自 enum_values)
+ *  2. entityMeta.fields[].enum_values 查表 -- 兜底 (statusMap 未传入时)
+ *  3. fetchData({ forceRefresh: true })     -- 最后兜底 (本地无 label 上下文时)
+ *
+ * 同时保持 display_values 其他键不变, 只覆盖 stateField 对应的项.
+ */
+function _resolveStatusLabel(stateField, newStatus) {
+  if (newStatus == null) return null
+  // 来源 1: 父组件传入的 statusMap
+  const fromProp = props.statusMap?.[newStatus]?.label
+  if (fromProp) return { label: fromProp, source: 'statusMap' }
+  // 来源 2: 本地 entityMeta 的 enum_values
+  if (entityMeta.value?.fields) {
+    const field = entityMeta.value.fields.find(f => (f.id || f.name) === stateField)
+    const ev = field?.enum_values?.find(e => e.value === newStatus)
+    if (ev) return { label: ev.label || ev.name || String(newStatus), source: 'enum_values' }
+  }
+  return null
+}
+
 async function handleRefresh(payload = {}) {
   console.debug('[DetailPage] handleRefresh called, payload:', payload)
-  
+
   const hasDirectUpdate = payload && payload.newStatus != null && payload.newStatus !== undefined && payload.stateField && data.value
   console.debug('[DetailPage] hasDirectUpdate:', hasDirectUpdate)
-  
+
   if (hasDirectUpdate) {
-    console.debug('[DetailPage] Updating status directly:', payload.stateField, '=', payload.newStatus)
-    data.value = { ...data.value, [payload.stateField]: payload.newStatus }
-    console.debug('[DetailPage] dataStatus after direct update:', dataStatus.value)
+    const stateField = payload.stateField
+    const newStatus = payload.newStatus
+    console.debug('[DetailPage] Updating status directly:', stateField, '=', newStatus)
+
+    const updates = { [stateField]: newStatus }
+
+    // [FIX 2026-06-12] 同步更新 display_values[stateField]
+    // 根因: 详情页 readonly 渲染走 formatReadValue() 读 display_values[stateField],
+    //       仅改 status 字段不会反映到 UI. 用户必须刷新浏览器才能看到状态更新.
+    const resolved = _resolveStatusLabel(stateField, newStatus)
+    if (resolved && data.value.display_values) {
+      updates.display_values = {
+        ...data.value.display_values,
+        [stateField]: resolved.label
+      }
+      console.debug('[DetailPage] Synced display_values[', stateField, '] =', resolved.label, '(from', resolved.source + ')')
+    } else if (!resolved) {
+      // 来源 1+2 都没拿到 label → 本地无法安全更新 display_values
+      // 走最后兜底: 全量重新拉取 (从后端拿权威 display_values)
+      console.warn('[DetailPage] No label source for', stateField, '=', newStatus, '- falling back to fetchData')
+      await fetchData({ forceRefresh: true })
+      console.debug('[DetailPage] after fetchData (label fallback), dataStatus:', dataStatus.value)
+      return
+    } else {
+      console.debug('[DetailPage] No display_values in data.value, skipping display_values sync')
+    }
+
+    data.value = { ...data.value, ...updates }
+    console.debug('[DetailPage] dataStatus after direct update:', dataStatus.value, 'display_value:', updates.display_values?.[stateField])
   } else {
     console.debug('[DetailPage] Fetching fresh data (forceRefresh)')
     await fetchData({ forceRefresh: true })
@@ -913,9 +969,22 @@ function handleTabChange(tabKey) {
 }
 
 function handleFieldUpdate({ key, value }) {
-  if (data.value) {
-    data.value = { ...data.value, [key]: value }
+  if (!data.value) return
+  const updates = { [key]: value }
+  // [FIX 2026-06-12] 同步更新 display_values[key], 防止 readonly 视图显示过期 label
+  // 复用 _resolveStatusLabel 同一套解析逻辑 (statusMap → enum_values)
+  // 仅当 key 命中 enum 字段时才同步, 避免误覆盖其他类型字段的 display_values
+  const enumField = entityMeta.value?.fields?.find(f => (f.id || f.name) === key)
+  if (enumField?.enum_values?.length && data.value.display_values) {
+    const ev = enumField.enum_values.find(e => e.value === value)
+    if (ev) {
+      updates.display_values = {
+        ...data.value.display_values,
+        [key]: ev.label || ev.name || String(value)
+      }
+    }
   }
+  data.value = { ...data.value, ...updates }
 }
 
 function handleFieldDisplayUpdate({ key, displayValue }) {

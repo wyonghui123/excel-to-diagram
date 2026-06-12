@@ -79,7 +79,12 @@ import metaService from '@/services/metaService'
 import boService from '@/services/boService'
 // [NEW 2026-06-10] KeyTemplate 集成
 import { useKeyTemplateFormSync } from '@/composables/useKeyTemplateFormSync'
-import { suggestKeyTemplateCode as _suggestKeyTemplateCodeSvc } from '@/services/keyTemplateService'
+import {
+  suggestKeyTemplateCode as _suggestKeyTemplateCodeSvc,
+  fetchKeyTemplateConfig as _fetchKeyTemplateConfigSvc,
+  getCodeFieldPlaceholder as _getCodeFieldPlaceholderSvc,
+  getCodeFieldTag as _getCodeFieldTagSvc
+} from '@/services/keyTemplateService'
 
 // [NEW 2026-06-10] KeyTemplate 表单脏字段跟踪
 const {
@@ -521,22 +526,77 @@ const childMetaListRefs = ref({})
 // 通过 provide/inject 避免在 Content / FieldGroupSection 中转 props
 const isAddMode = computed(() => !props.objectId || props.objectId === 'new')
 
-// isCodeAutoManaged 判定：code 字段在 add 模式下可编辑 + 存在时，认为启用 key template
-// 注：这是一个启发式判断。实际是否启用取决于后端 schema 配置（key_template.auto_suggest）
-// 如果 schema 未启用，suggestKeyTemplateCode 会返回 success=false 并被静默忽略
+// [FIX v1.1 2026-06-11] isCodeAutoManaged 判定需要等待后端确认 key_template.enabled
+// 原"启发式判断"导致 role/user_group/permission 等无 key_template 的对象
+// 误显示"自动"标签（因为它们的 code 字段可编辑）。现在只有后端明确 enabled=true
+// 时才显示。
+const keyTemplateLoaded = ref(false)
+const keyTemplateEnabled = ref(false)
+const codeFieldUserEditable = ref('auto_or_manual')
+const codeFieldPlaceholderRef = ref('')
+const codeFieldTagTextRef = ref('')
+const codeFieldTagTypeRef = ref('info')
+
 const isCodeAutoManaged = computed(() => {
   if (!isAddMode.value) return false
+  // 必须等后端确认才显示（避免 role 等无 key_template 对象误显示）
+  if (!keyTemplateLoaded.value) return false
+  if (!keyTemplateEnabled.value) return false
   const codeDef = effectiveFieldDefs.value?.code
   if (!codeDef) return false
   // code 字段在 add 模式下可编辑（且非只读）→ 启用 key template 交互
   return codeDef.readonly !== true && codeDef.editable !== false
 })
 
+async function loadKeyTemplateConfig() {
+  const objectType = props.objectType || (props.routeContext && props.routeContext.objectType)
+  if (!isAddMode.value || !objectType) {
+    keyTemplateLoaded.value = true
+    keyTemplateEnabled.value = false
+    codeFieldPlaceholderRef.value = ''
+    codeFieldTagTextRef.value = ''
+    return
+  }
+  try {
+    const result = await _fetchKeyTemplateConfigSvc(objectType, boService)
+    const enabled = !!result?.success && result.enabled === true
+    keyTemplateEnabled.value = enabled
+    if (enabled) {
+      const userEditable = result.user_editable || 'auto_or_manual'
+      codeFieldUserEditable.value = userEditable
+      codeFieldPlaceholderRef.value = _getCodeFieldPlaceholderSvc(userEditable)
+      const tag = _getCodeFieldTagSvc(userEditable)
+      codeFieldTagTextRef.value = tag.text
+      codeFieldTagTypeRef.value = tag.type
+    } else {
+      codeFieldPlaceholderRef.value = ''
+      codeFieldTagTextRef.value = ''
+    }
+  } catch (e) {
+    keyTemplateEnabled.value = false
+    codeFieldPlaceholderRef.value = ''
+    codeFieldTagTextRef.value = ''
+    console.debug('[ObjectPageShell] loadKeyTemplateConfig failed:', e)
+  } finally {
+    keyTemplateLoaded.value = true
+  }
+}
+
+watch(
+  () => [isAddMode.value, props.objectType],
+  () => { loadKeyTemplateConfig() },
+  { immediate: true }
+)
+
 provide('keyTemplateContext', {
   isCodeAutoManaged,
   isFieldDirty,
   markFieldDirty,
-  onCodeReset
+  onCodeReset,
+  // [NEW v1.1] user_editable 相关 UI 提示
+  codeFieldPlaceholder: codeFieldPlaceholderRef,
+  codeFieldTagText: codeFieldTagTextRef,
+  codeFieldTagType: codeFieldTagTypeRef
 })
 
 provide('registerMetaListRef', (sectionKey, ref) => {

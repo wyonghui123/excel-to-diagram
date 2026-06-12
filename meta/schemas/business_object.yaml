@@ -124,6 +124,8 @@ semantics:
 # ────────────────────────────────────────────
 key_template:
   enabled: true
+  # [NEW v1.1 2026-06-11] 自动/可手动混合模式
+  user_editable: auto_or_manual
   auto_suggest: true
   # [CHANGED 2026-06-10] 紧凑编码：{服务模块编码}{SEQ:2}，例：PUM01 / PUM02
   # 原 pattern: "{service_module_code}_{SEQ:4}"（下划线分隔 + 4 位 padding）

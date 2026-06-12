@@ -267,4 +267,87 @@ describe('useAuditLogs', () => {
       )
     })
   })
+
+  // [FIX 2026-06-12] 父对象查询: 角色详情"操作日志" tab 同时拉子对象日志
+  describe('parentObjectType / parentObjectId (FR 角色详情操作日志)', () => {
+    it('passes parentObjectType/parentObjectId to getLogsByObject', async () => {
+      auditLogService.getLogsByObject.mockResolvedValue({
+        success: true,
+        data: { items: [{ id: 1, object_type: 'role_menu' }], total: 1 },
+      })
+
+      const { loadLogs, logs, total } = useAuditLogs('role', 22, {
+        autoLoad: false,
+        parentObjectType: 'role',
+        parentObjectId: 22,
+      })
+      const result = await loadLogs()
+
+      expect(result.success).toBe(true)
+      expect(logs.value).toHaveLength(1)
+      expect(logs.value[0].object_type).toBe('role_menu')
+      expect(total.value).toBe(1)
+      expect(auditLogService.getLogsByObject).toHaveBeenCalledWith(
+        'role', 22,
+        expect.objectContaining({
+          parentObjectType: 'role',
+          parentObjectId: 22,
+        })
+      )
+    })
+
+    it('passes undefined when parentObjectType/parentObjectId not provided (向后兼容)', async () => {
+      auditLogService.getLogsByObject.mockResolvedValue({
+        success: true,
+        data: { items: [], total: 0 },
+      })
+
+      const { loadLogs } = useAuditLogs('user', 1, { autoLoad: false })
+      await loadLogs()
+
+      // 旧调用方不应被强制传 parentObjectType/parentObjectId
+      expect(auditLogService.getLogsByObject).toHaveBeenCalledWith(
+        'user', 1,
+        expect.objectContaining({
+          parentObjectType: undefined,
+          parentObjectId: undefined,
+        })
+      )
+    })
+
+    it('支持响应式 ref 形式的 parentObjectId (RoleDetailDrawer 的 computed(() => role.id))', async () => {
+      const { ref } = await import('vue')
+      const roleIdRef = ref(22)
+      auditLogService.getLogsByObject.mockResolvedValue({
+        success: true,
+        data: { items: [], total: 0 },
+      })
+
+      const { loadLogs } = useAuditLogs('role', roleIdRef, {
+        autoLoad: false,
+        parentObjectType: 'role',
+        parentObjectId: roleIdRef,
+      })
+      await loadLogs()
+
+      expect(auditLogService.getLogsByObject).toHaveBeenCalledWith(
+        'role', 22,
+        expect.objectContaining({
+          parentObjectType: 'role',
+          parentObjectId: 22,
+        })
+      )
+
+      // 切换 ref 后再 load, 应该传新值
+      roleIdRef.value = 99
+      await loadLogs()
+      expect(auditLogService.getLogsByObject).toHaveBeenLastCalledWith(
+        'role', 99,
+        expect.objectContaining({
+          parentObjectType: 'role',
+          parentObjectId: 99,
+        })
+      )
+    })
+  })
 })

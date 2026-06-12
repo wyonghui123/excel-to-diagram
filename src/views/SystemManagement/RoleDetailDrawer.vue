@@ -290,7 +290,15 @@ const {
   loadLogs: loadRoleLogs,
   setPage: setRoleLogsPage,
   setFilters: setRoleLogsFilters
-} = useAuditLogs('role', computed(() => props.role?.id), { autoLoad: false })
+} = useAuditLogs('role', computed(() => props.role?.id), {
+  autoLoad: false,
+  // [FIX 2026-06-12] 角色详情"操作日志" tab 同时拉:
+  //  - object_type='role' & object_id=role.id (角色自身的 UPDATE 名称/描述等)
+  //  - parent_object_type='role' & parent_object_id=role.id (权限配置 5 种 object_type)
+  // 后端 audit_api.py get_audit_logs 会用 OR 联合查询两种条件
+  parentObjectType: 'role',
+  parentObjectId: computed(() => props.role?.id),
+})
 
 const auditLogDetailVisible = ref(false)
 const selectedAuditLog = ref(null)

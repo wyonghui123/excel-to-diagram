@@ -139,7 +139,11 @@ export default {
           relationCategoryTree: relationCategoryTree.value
         },
         3: {
-          modelValue: chartType.value
+          modelValue: chartType.value,
+          // 关键修复 v36: 范围汇总 props 恢复 (StepChartType 内部 StepScopeSummary 需用)
+          center: displayStats.value.center,
+          incremental: displayStats.value.incremental,
+          total: displayStats.value.total
         },
         4: {
           previewData: previewData.value,
@@ -344,6 +348,16 @@ export default {
 
           // 加载数据 (下游 initDataFromArch 内部逻辑零修改, archData 结构一致)
           await initDataFromArch(archData)
+
+          // 关键修复 v33: 恢复 chartType (F5 刷新后颜色配置区域消失)
+          //   chartType 决定 StepConfig 中 CenterDomainSelect / ServiceModuleConfig 是否渲染
+          //   F5 后 configStore 重建, chartType='', v-if 不满足 → 颜色区域消失
+          //   修复: 从 sessionStorage.archDataChartType 恢复
+          const savedChartType = sessionStorage.getItem('archDataChartType')
+          if (savedChartType && !configStore.chartType) {
+            configStore.updateChartType(savedChartType)
+            console.log('[v33] F5 refresh: restored chartType=', savedChartType)
+          }
 
           // 恢复 currentStep
           // 优先级: 1) sessionStorage (F5 后) > 2) 默认 3

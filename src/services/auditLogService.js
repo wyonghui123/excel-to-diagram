@@ -198,6 +198,11 @@ export function groupByTransaction(logs) {
  * @param {string} [filters.user]
  * @param {string} [filters.startDate]
  * @param {string} [filters.endDate]
+ * @param {string} [filters.objectType] - 主对象类型 (object_type)
+ * @param {string|number} [filters.objectId] - 主对象 ID
+ * @param {string} [filters.parentObjectType] - 父对象类型 (parent_object_type)
+ * @param {string|number} [filters.parentObjectId] - 父对象 ID
+ * @param {string} [filters.transactionId]
  * @returns {Object}
  */
 export function buildLogFilter(filters = {}) {
@@ -210,6 +215,13 @@ export function buildLogFilter(filters = {}) {
   if (filters.endDate) out.end_date = filters.endDate
   if (filters.objectType) out.object_type = filters.objectType
   if (filters.objectId !== undefined && filters.objectId !== null) out.object_id = filters.objectId
+  // [FIX 2026-06-12] 父对象查询: 让角色/用户详情页"操作日志" tab 同时拉
+  // (1) object_type=role & object_id=X 的直接日志
+  // (2) parent_object_type=role & parent_object_id=X 的子对象日志 (如 role_menu, role_permissions)
+  if (filters.parentObjectType) out.parent_object_type = filters.parentObjectType
+  if (filters.parentObjectId !== undefined && filters.parentObjectId !== null) {
+    out.parent_object_id = String(filters.parentObjectId)
+  }
   if (filters.transactionId) out.transaction_id = filters.transactionId
   return out
 }
@@ -257,11 +269,16 @@ export async function exportLogs({ filters = {} } = {}) {
 /**
  * 获取审计日志详情
  *
+ * 走 v1 /audit/logs/{id} 而不是 v2 /bo/audit_log/{id}:
+ *   - audit_log.yaml 标记 persistent: false, v2 BO read 拒绝 (404 "not persistent")
+ *   - v1 端点已经返回 extra_data_parsed (deleted_data / record_snapshot), 跟 v1 list 对齐
+ *   - 前端 AuditLogManagement.vue 用此接口补全 "删除对象完整明细" 块
+ *
  * @param {number|string} id
  * @returns {Promise<{success: boolean, data?: Object, message?: string}>}
  */
 export async function getLogById(id) {
-  return apiV2.get(`/bo/audit_log/${id}`)
+  return apiV1.get(`/audit/logs/${id}`)
 }
 
 /**
@@ -269,12 +286,19 @@ export async function getLogById(id) {
  *
  * 替代 useAuditLogs.js 中的 queryAssociations(type, id, 'audit_logs', ...) 反模式
  *
+ * [FIX 2026-06-12] 支持 parentObjectType/parentObjectId:
+ *   当角色/用户详情页"操作日志" tab 需要同时拉 (a) 自身日志 + (b) 子对象日志时,
+ *   传 parentObjectType='role' + parentObjectId=role.id, 后端 audit API 会用 OR 联合查询.
+ *   (meta/api/audit_api.py 的 get_audit_logs 已经支持此参数)
+ *
  * @param {string} objectType
  * @param {number|string} objectId
  * @param {Object} [options]
  * @param {number} [options.page=1]
  * @param {number} [options.pageSize=20]
  * @param {Object} [options.filters]
+ * @param {string} [options.parentObjectType] - 父对象类型
+ * @param {string|number} [options.parentObjectId] - 父对象 ID
  * @returns {Promise<{success: boolean, data?: Object, message?: string}>}
  */
 // 判断是否为 v2 BO association API 响应（data 包含 items/total）
@@ -282,11 +306,17 @@ function _isBoResponse(data) {
   return data && typeof data === 'object' && Array.isArray(data.items) && 'total' in data
 }
 
-export async function getLogsByObject(objectType, objectId, { page = 1, pageSize = 20, filters = {} } = {}) {
+export async function getLogsByObject(objectType, objectId, { page = 1, pageSize = 20, filters = {}, parentObjectType, parentObjectId } = {}) {
   const params = new URLSearchParams({
     page: String(page),
     page_size: String(pageSize),
-    ...buildLogFilter({ ...filters, objectType, objectId })
+    ...buildLogFilter({
+      ...filters,
+      objectType,
+      objectId,
+      parentObjectType,
+      parentObjectId,
+    })
   })
 
   // 改用 /audit/logs 端点 — 支持字符串 object_id（如 'annotation_category'），

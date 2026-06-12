@@ -261,6 +261,19 @@
   overflow: visible !important;
 }
 
+/* 关键修复 v32：edge label 文字右侧截断
+   原因：Mermaid 给 .labelBkg 设了内联 max-width: 200px，中文 label 装不下被截断
+   解决：用更高优先级的选择器强制覆盖 max-width
+   注意：只覆盖 .labelBkg，不影响 .nodeLabel/.cluster-label/.subgraph-label */
+.mermaid-content.serviceModule :deep(g.edgeLabel foreignObject > div.labelBkg),
+.mermaid-content.serviceModule :deep(.edgeLabel foreignObject > div.labelBkg) {
+  max-width: none !important;
+  white-space: nowrap !important;
+  overflow: visible !important;
+  box-sizing: border-box !important;
+  padding: 4px 8px !important;
+}
+
 .mermaid-content.serviceModule :deep(.edgeLabel foreignObject > div),
 .mermaid-content.serviceModule :deep(.edgeLabel foreignObject > span) {
   background: transparent !important;
@@ -587,6 +600,17 @@
 
 .mermaid-content.businessObject :deep(.edgeLabel foreignObject) {
   overflow: visible !important;
+}
+
+/* 关键修复 v32：业务对象图 edge label 文字右侧截断
+   原因同 serviceModule，详见上面注释 */
+.mermaid-content.businessObject :deep(g.edgeLabel foreignObject > div.labelBkg),
+.mermaid-content.businessObject :deep(.edgeLabel foreignObject > div.labelBkg) {
+  max-width: none !important;
+  white-space: nowrap !important;
+  overflow: visible !important;
+  box-sizing: border-box !important;
+  padding: 4px 8px !important;
 }
 
 .mermaid-content.businessObject :deep(.edgeLabel .label-container) {

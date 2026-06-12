@@ -70,6 +70,8 @@
                     :ref="el => setHistoryRef(mainSection.key, el)"
                     :object-type="objectType"
                     :object-id="objectId"
+                    :parent-object-type="mainSection.parentObjectType || effectiveParentObjectType"
+                    :parent-object-id="mainSection.parentObjectId || objectId"
                   />
                 </slot>
               </div>
@@ -107,6 +109,8 @@
             :ref="el => setHistoryRef(section.key, el)"
             :object-type="objectType"
             :object-id="objectId"
+            :parent-object-type="section.parentObjectType || effectiveParentObjectType"
+            :parent-object-id="section.parentObjectId || objectId"
           />
 
           <AssociationSection
@@ -256,6 +260,22 @@ const hasRealObjectId = computed(() => {
   if (id == null || id === '' || id === 'new') return false
   const numId = Number(id)
   return !isNaN(numId) && numId > 0
+})
+
+// [FIX 2026-06-12] 父对象查询: 哪些 objectType 自身日志很少, 但 "权限配置/成员管理/关联操作" 等
+// 会写日志到 child object_type (parent_object_type=自身, parent_object_id=自身ID).
+// 这些对象在详情页"操作日志" tab 需要同时拉 self + child 日志.
+const SELF_REFERRING_PARENT_OBJECT_TYPES = new Set([
+  'role',        // role_menu / role_permissions / role_data_permission / role_dimension_scope / role_v2_menu_permissions / permission_rule
+  'user',        // user_role / user_group_member / user_data_scope
+  'user_group',  // user_group_member
+  'product',     // product-level 子对象 (如未来增加 product_member)
+  'version',     // version-level 子对象
+])
+
+const effectiveParentObjectType = computed(() => {
+  if (!props.objectType) return null
+  return SELF_REFERRING_PARENT_OBJECT_TYPES.has(props.objectType) ? props.objectType : null
 })
 
 function isSectionVisible(section) {

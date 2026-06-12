@@ -646,6 +646,21 @@ def _apply_assoc_list_post_filter(records: List[Dict[str, Any]], target_meta, pa
     return records, len(records)
 
 
+def _store_effective_ids(context: 'ActionContext', effective_ids: list) -> None:
+    """[FIX 2026-06-12] 把 _try_bulk_m2m 查到的"实际存在的关联 ID"存入 context.extra,
+    供 AuditInterceptor 在事务提交后复用, 避免重复 SELECT 查不到删除前的状态.
+
+    使用 key '_assoc_effective_ids' 是为避免与业务字段冲突 (前面加下划线).
+    """
+    if not context:
+        return
+    extra = getattr(context, 'extra', None)
+    if extra is None:
+        # ActionContext 的 extra 是 dict, 不应 None
+        return
+    extra['_assoc_effective_ids'] = list(effective_ids) if effective_ids else []
+
+
 class AssociationEngine:
     def _write_audit_log(self, context: ActionContext, action: str,
                         tgt_type: str, tgt_id: int, association_name: str = None):
@@ -777,12 +792,35 @@ class AssociationEngine:
                     flat_vals.extend([src_id, tid])
                 sql = f"INSERT OR IGNORE INTO {through} ({source_key},{target_key}) VALUES {placeholders}"
                 context.data_source.execute(sql, tuple(flat_vals))
+                # [FIX 2026-06-12] 把 effective_ids (实际已存在的关联) 传给审计拦截器
+                # INSERT OR IGNORE 只插入不存在的, 所以有效 ID 是 tgt_ids
+                _store_effective_ids(context, target_ids)
                 return [{'target_id': tid, 'success': True, 'message': '批量分配成功'} for tid in target_ids]
             else:
-                placeholders = ','.join('?' for _ in target_ids)
-                sql = f"DELETE FROM {through} WHERE {source_key}=? AND {target_key} IN ({placeholders})"
-                context.data_source.execute(sql, tuple([src_id] + target_ids))
-                return [{'target_id': tid, 'success': True, 'message': '批量取消分配成功'} for tid in target_ids]
+                # [FIX 2026-06-12] 先 SELECT 现有的关联 ID, 再 DELETE.
+                # 原实现先 DELETE 再让审计拦截器 SELECT, 但 SQLite WAL 模式下
+                # 后续 SELECT 在不同连接上看不到未提交的 DELETE, 导致 existing=set().
+                # 必须在 DELETE 前先 SELECT, 然后只删除存在的, 把 effective_ids 传给审计.
+                sel_placeholders = ','.join('?' for _ in target_ids)
+                sel_sql = (f"SELECT {target_key} FROM {through} "
+                           f"WHERE {source_key}=? AND {target_key} IN ({sel_placeholders})")
+                existing_rows = context.data_source.execute(
+                    sel_sql, tuple([src_id] + target_ids)
+                ).fetchall() or []
+                existing_ids = [r[0] for r in existing_rows]
+
+                if not existing_ids:
+                    # [FIX 2026-06-12] 即便没找到也要存空列表, 审计拦截器看到空就跳过
+                    _store_effective_ids(context, [])
+                    return [{'target_id': tid, 'success': True, 'message': '批量取消分配成功(无现存关联)'} for tid in target_ids]
+
+                del_placeholders = ','.join('?' for _ in existing_ids)
+                del_sql = (f"DELETE FROM {through} WHERE {source_key}=? "
+                           f"AND {target_key} IN ({del_placeholders})")
+                context.data_source.execute(del_sql, tuple([src_id] + existing_ids))
+                # [FIX 2026-06-12] 关键: 把 effective_ids 存入 context, 让审计拦截器复用
+                _store_effective_ids(context, existing_ids)
+                return [{'target_id': tid, 'success': True, 'message': '批量取消分配成功'} for tid in existing_ids]
         except Exception as e:
             logger.warning(f"[AssociationEngine] bulk m2m failed, falling back to per-item: {e}")
             return None

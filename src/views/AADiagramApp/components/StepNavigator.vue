@@ -26,8 +26,10 @@
           <span v-else class="step-number">{{ index + 1 }}</span>
         </div>
         <span class="step-title">{{ step.title }}</span>
-        <!-- 统计信息内联 -->
-        <span v-if="index <= current && stepStats[step.originalIndex] && hasStats(stepStats[step.originalIndex], step.originalIndex)" class="step-stats-inline">
+        <!-- 关键修复 v35: 导航统计显示规则 -->
+        <!--   - 类型 (originalIndex=3): 不显示 (用户反馈"类型这边的统计去掉") -->
+        <!--   - 配置 (originalIndex=4): 显示 5 指标 (用户反馈"配置这边的进行优化") -->
+        <span v-if="shouldShowStats(step.originalIndex) && hasStats(stepStats[step.originalIndex], step.originalIndex)" class="step-stats-inline">
           {{ formatMinimalStats(stepStats[step.originalIndex], step.originalIndex) }}
         </span>
         <div v-if="index < steps.length - 1" class="step-connector">
@@ -93,13 +95,22 @@ export default {
     canAccess(index) {
       return index <= this.current + 1
     },
+    // 关键修复 v35: 控制哪些步骤在导航上显示统计
+    //   用户的 3 步骤模式: 类型(3)→配置(4)→展示(5)
+    //   反馈: 类型这边的统计去掉, 配置这边进行优化
+    //   决策: 只在 originalIndex === 4 (配置) 显示 5 指标, 其他都隐藏
+    shouldShowStats(originalIndex) {
+      return originalIndex === 4
+    },
     hasStats(stats, index) {
       if (index === 4) {
         return stats && (
           (stats.serviceModules > 0) ||
           (stats.businessObjects > 0) ||
           (stats.objectRelations > 0) ||
-          (stats.serviceModuleRelations > 0)
+          (stats.serviceModuleRelations > 0) ||
+          (stats.domains > 0) ||
+          (stats.subDomains > 0)
         )
       }
       if (index === 2) {
@@ -109,21 +120,25 @@ export default {
     },
     formatMinimalStats(stats, index) {
       if (!stats) return ''
-      const parts = []
       const isCenter = index === 1
       const isIncremental = index === 2
       const prefix = isIncremental ? '+' : ''
       const isConfig = index === 4
 
       if (isConfig) {
-        if (stats.serviceModules > 0) parts.push(`${stats.serviceModules}服务模块`)
-        if (stats.businessObjects > 0) parts.push(`${stats.businessObjects}对象`)
-        if (stats.objectRelations > 0) parts.push(`${stats.objectRelations}关系`)
-        if (stats.serviceModuleRelations > 0) parts.push(`${stats.serviceModuleRelations}模块关系`)
-        return parts.join(' · ') || ''
+        // 关键修复 v35: 配置步骤显示完整 5 指标 (领域/子域/服务/对象/关系)
+        //   用户反馈"配置这边的进行优化" - 优化为完整 5 指标展示
+        const parts = []
+        if (stats.domains > 0) parts.push(`${stats.domains}领域`)
+        if (stats.subDomains > 0) parts.push(`${stats.subDomains}子域`)
+        if (stats.serviceModules > 0) parts.push(`${stats.serviceModules}服务`)
+        parts.push(`${stats.businessObjects}对象`)
+        parts.push(`${stats.objectRelations}关系`)
+        return parts.join(' · ')
       }
 
       if (isCenter) {
+        const parts = []
         if (stats.domains > 0) parts.push(`${stats.domains}领域`)
         if (stats.subDomains > 0) parts.push(`${stats.subDomains}子域`)
         parts.push(`${stats.businessObjects}对象`)
@@ -131,6 +146,7 @@ export default {
       }
 
       if (isIncremental) {
+        const parts = []
         parts.push(`${prefix}${stats.domains || 0}领域`)
         parts.push(`${prefix}${stats.subDomains || 0}子域`)
         parts.push(`${prefix}${stats.businessObjects || 0}对象`)
@@ -139,11 +155,13 @@ export default {
         return parts.join(' · ')
       }
 
+      // 关键修复 v35: 类型 (originalIndex=3) 已通过 shouldShowStats 拦截, 这里不会执行
+      //   保留这段是作为 fallback (万一 shouldShowStats 逻辑改了)
+      const parts = []
       if (stats.domains > 0) parts.push(`${stats.domains}领域`)
       if (stats.subDomains > 0) parts.push(`${stats.subDomains}子域`)
       parts.push(`${stats.businessObjects}对象`)
       if (stats.objectRelations > 0) parts.push(`${stats.objectRelations}关系`)
-
       return parts.join(' · ')
     }
   }

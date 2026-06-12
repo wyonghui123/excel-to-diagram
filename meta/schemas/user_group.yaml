@@ -12,11 +12,26 @@ semantics:
   display_name_field: name
 
 deletion_policy:
-  mode: cascade
-  cascade_delete:
-    - user_group_members
-    - group_data_permissions
-    - group_roles
+  # [FIX 2026-06-12 v2] 强依赖检查: 有成员/角色/数据权限/子组时禁止删除,
+  # 避免误删导致权限/数据权限丢失。
+  # 之前只有 cascade_delete, batch-delete 走 manage_service.batch_delete 不会
+  # 触发 FK 违反(因为 cascade 自动清), 也不会走 restrict_on (因为这里没配置),
+  # 导致含成员的用户组被批量删除成功但无任何提示。
+  mode: restrict  # 改用 restrict mode, 让 restrict_on 规则生效
+  restrict_on:
+    - table: user_group_members
+      foreign_key: group_id
+      message: 用户组下还有成员，请先移除所有成员后再删除
+    - table: group_roles
+      foreign_key: group_id
+      message: 用户组还分配了角色，请先撤销角色后再删除
+    - table: group_data_permissions
+      foreign_key: group_id
+      message: 用户组还配置了数据权限，请先清除数据权限后再删除
+    - table: user_groups
+      foreign_key: parent_id
+      message: 该用户组下还有子用户组，请先删除或迁移子组后再删除
+  cascade_delete: []  # 清空: 不再自动清理, 改用 restrict_on 阻止删除
 
 audit:
   enabled: true

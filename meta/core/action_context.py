@@ -121,7 +121,13 @@ class ActionContext:
     @property
     def object_id(self) -> Optional[int]:
         """对象 ID"""
-        if self.action in ('associate', 'dissociate'):
+        # [FIX 2026-06-12] 关联操作 (associate/dissociate/assign/unassign/batch_*) 的源 ID
+        # 都从 src_id 读取, 否则日志 object_id 为空
+        if self.action in (
+            'associate', 'dissociate',
+            'assign', 'unassign',
+            'batch_assign', 'batch_unassign',
+        ):
             return self.params.get('src_id')
         return self.params.get('id')
     

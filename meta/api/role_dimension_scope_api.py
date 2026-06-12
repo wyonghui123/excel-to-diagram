@@ -12,6 +12,7 @@ from meta.core.datasource import get_data_source
 from meta.api.user_api import login_required
 from meta.services.auth_middleware import is_admin, get_current_user
 from meta.services.dimension_scope_engine import get_dimension_scope_engine
+from meta.api._audit_helper import write_permission_config_audit
 from functools import wraps
 import json
 
@@ -119,6 +120,17 @@ def save_dimension_scopes(role_id):
                         item.get('scope_mode', 'include'),
                     ]
                 )
+        # [FIX 2026-06-12] 角色权限操作审计日志: 关联到角色对象
+        # 之前这个 endpoint 没写 audit, 导致用户改管理维度后审计日志 tab 看不到记录
+        write_permission_config_audit(
+            action='UPDATE',
+            object_type='role_dimension_scope',
+            object_id=role_id,
+            data={'scopes_count': len(data) if isinstance(data, list) else 0,
+                  'dimension_codes': [item.get('dimension_code') for item in data] if isinstance(data, list) else []},
+            parent_object_type='role',
+            parent_object_id=role_id,
+        )
         return jsonify({'success': True, 'message': '\u7ef4\u5ea6\u8303\u56f4\u5df2\u4fdd\u5b58'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -130,6 +142,17 @@ def get_derived_permissions(role_id):
     try:
         engine = get_dimension_scope_engine(_ds())
         result = engine.auto_sync_all(role_id)
+        # [FIX 2026-06-12] 自动推导完成后也写 audit (跟手动 save 一致, 让操作日志完整)
+        write_permission_config_audit(
+            action='UPDATE',
+            object_type='role_dimension_scope',
+            object_id=role_id,
+            data={'auto_derived': True,
+                  'recommended_menus': len(result.get('recommended_menus', [])) if isinstance(result, dict) else 0,
+                  'derived_permissions': len(result.get('derived_permissions', [])) if isinstance(result, dict) else 0},
+            parent_object_type='role',
+            parent_object_id=role_id,
+        )
         return jsonify({'success': True, 'data': result})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500

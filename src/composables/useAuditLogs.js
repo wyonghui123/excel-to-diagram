@@ -5,14 +5,22 @@
  * 移除了 queryAssociations(..., 'audit_logs', ...) 反模式
  *
  * @example
+ * // 拉角色自身日志 (向后兼容)
  * const { logs, total, loading, loadLogs, setFilters, setPage } = useAuditLogs('role', roleId)
+ *
+ * @example
+ * // [FIX 2026-06-12] 拉角色 + 子对象日志 (角色详情"操作日志" tab)
+ * const { logs, total, loading, loadLogs, setFilters, setPage } = useAuditLogs('role', roleId, {
+ *   parentObjectType: 'role',  // 父对象 = 角色自身
+ *   parentObjectId: roleId,
+ * })
  */
 
 import { ref, computed, unref, onMounted } from 'vue'
 import * as auditLogService from '@/services/auditLogService'
 
 export function useAuditLogs(objectType, objectId, options = {}) {
-  const { pageSize = 20, autoLoad = true } = options
+  const { pageSize = 20, autoLoad = true, parentObjectType, parentObjectId } = options
 
   const logs = ref([])
   const total = ref(0)
@@ -22,6 +30,9 @@ export function useAuditLogs(objectType, objectId, options = {}) {
 
   const resolvedObjectType = computed(() => unref(objectType))
   const resolvedObjectId = computed(() => unref(objectId))
+  // [FIX 2026-06-12] parentObjectType/parentObjectId 也支持响应式 ref
+  const resolvedParentObjectType = computed(() => unref(parentObjectType))
+  const resolvedParentObjectId = computed(() => unref(parentObjectId))
 
   async function loadLogs(params = {}) {
     const type = resolvedObjectType.value
@@ -34,7 +45,9 @@ export function useAuditLogs(objectType, objectId, options = {}) {
     const result = await auditLogService.getLogsByObject(type, id, {
       page: params.page || currentPage.value,
       pageSize: params.pageSize || pageSize,
-      filters: { ...filters.value, ...(params.filters || {}) }
+      filters: { ...filters.value, ...(params.filters || {}) },
+      parentObjectType: resolvedParentObjectType.value,
+      parentObjectId: resolvedParentObjectId.value,
     })
 
     if (result.success) {

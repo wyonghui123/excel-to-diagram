@@ -240,3 +240,64 @@ export async function suggestKeyTemplateCode(
     return { success: false, error: e }
   }
 }
+
+/**
+ * [NEW v1.1 2026-06-11] 获取对象的 key_template 配置（user_editable 等）
+ *
+ * 调用 GET /api/v2/key-template/config/{objectType}
+ *
+ * @param {string} objectType
+ * @param {Object} boService
+ * @returns {Promise<{success: boolean, enabled?: boolean, user_editable?: string, error?: Error}>}
+ */
+export async function fetchKeyTemplateConfig(objectType, boService) {
+  if (!boService || typeof boService._request !== 'function') {
+    return { success: false, error: new Error('Invalid boService') }
+  }
+  try {
+    const result = await boService._request('GET', `/key-template/config/${objectType}`)
+    if (!result?.success) {
+      return { success: false, error: new Error(result?.message || 'Failed to fetch config') }
+    }
+    const kt = result.data?.key_template || {}
+    return {
+      success: true,
+      enabled: !!result.data?.key_template,
+      user_editable: kt.user_editable || 'auto_or_manual',
+      pattern: kt.pattern || '',
+      preview: kt.preview || '',
+    }
+  } catch (e) {
+    return { success: false, error: e }
+  }
+}
+
+/**
+ * [NEW v1.1 2026-06-11] 根据 user_editable 模式返回 code input 的 placeholder
+ */
+export function getCodeFieldPlaceholder(userEditable) {
+  switch (userEditable) {
+    case 'auto_only':
+      return '由系统自动生成'
+    case 'manual_only':
+      return '请手动输入业务编码（必填且唯一）'
+    case 'auto_or_manual':
+    default:
+      return '可填可空；留空由系统自动生成'
+  }
+}
+
+/**
+ * [NEW v1.1 2026-06-11] 根据 user_editable 模式返回 UI 标签
+ */
+export function getCodeFieldTag(userEditable) {
+  switch (userEditable) {
+    case 'auto_only':
+      return { text: '自动生成', type: 'info' }
+    case 'manual_only':
+      return { text: '手动编码', type: 'warning' }
+    case 'auto_or_manual':
+    default:
+      return { text: '可手动', type: 'info' }
+  }
+}

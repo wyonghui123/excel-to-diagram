@@ -56,6 +56,8 @@ class ExcelDesignSystem:
     REQUIRED_FILL = PatternFill(start_color=WARNING_LIGHT, end_color=WARNING_LIGHT, fill_type="solid")
     BUSINESS_KEY_FILL = PatternFill(start_color=SUCCESS_LIGHT, end_color=SUCCESS_LIGHT, fill_type="solid")
     CREATE_NEW_FILL = PatternFill(start_color=INFO_LIGHT, end_color=INFO_LIGHT, fill_type="solid")
+    # [NEW v1.1 2026-06-11] 自动/可手动模式底色（浅蓝）
+    AUTO_GEN_OR_MANUAL_FILL = PatternFill(start_color="E1F5FE", end_color="E1F5FE", fill_type="solid")
     
     # 边框样式
     THIN_BORDER = Border(

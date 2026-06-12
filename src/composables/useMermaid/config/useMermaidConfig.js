@@ -160,11 +160,13 @@ export function useMermaidConfig() {
         useMaxWidth: false,
         htmlLabels: true,
         diagramPadding: 20,
-        // 关键修复 v22：wrappingWidth 控制 mermaid 给 foreignObject div 设的 max-width
-        // 之前 200 太窄，node label "<name> · (code)" 被切（早期 \n 时代）
-        // 现在 node label 改成单行 "name · (code)"，rect 自动算宽度
-        // 保留 200 防超长 label
-        wrappingWidth: 200,
+        // 关键修复 v32：wrappingWidth 决定 mermaid 给 foreignObject 内 div 设的 max-width
+        //   之前 200 太窄，对中文 edge label（如 "供应链云>采购订单"）会右边截断
+        //   提升到 500 后能容纳 ~25 个中文字符
+        //   node label 仍是单行 "name · (code)"，自动会被 rect/foreignObject 撑开
+        //   Mermaid ELK layout 内部基于 wrappingWidth 算 foreignObject 宽度，但 edge endpoint
+        //   是按 g.edgeLabel 的 translate 位置定位，不会因为 wrappingWidth 改变而错位
+        wrappingWidth: 500,
         labelPosition: 'c',
         defaultLinkLength: 50,
         arrowHeadWidth: 6,
@@ -179,7 +181,9 @@ export function useMermaidConfig() {
       baseConfig.flowchart.nodeSpacing = layoutParams?.nodeSpacing || 120
       baseConfig.flowchart.rankSpacing = layoutParams?.rankSpacing || 150
       baseConfig.flowchart.diagramPadding = 40
-      baseConfig.flowchart.wrappingWidth = 400
+      // 关键修复 v32：serviceModule 也有中文 edge label 被截断的问题
+      //   400 → 800 让 label 有足够空间
+      baseConfig.flowchart.wrappingWidth = 800
       baseConfig.flowchart.defaultLinkLength = 60
       baseConfig.flowchart.arrowHeadWidth = 8
       baseConfig.flowchart.arrowHeadHeight = 6

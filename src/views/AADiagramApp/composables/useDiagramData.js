@@ -385,10 +385,22 @@ export function useDiagramData() {
           if (rel.id == null) return
           if (treeSet.has(rel.id)) return        // 已被 fromTree 覆盖
           if (rel.sourceCode === rel.targetCode) return  // 排除自环
-          const sourceIn = centerSet.has(rel.sourceCode)
-          const targetIn = centerSet.has(rel.targetCode)
-          if (sourceIn !== targetIn) {            // 跨域 (XOR)
+
+          // 关键修复 v32: fromCrossBoundary 用后端 scopeType 优先判断
+          // 老逻辑用 XOR (sourceIn !== targetIn) 会漏掉"按前端 src/tgt 都不在 center
+          //   但后端算 CROSS_BOUNDARY"的关系 (e.g. 后端 center_scope 跟前端用户选的不完全一致)
+          // 新逻辑: 后端有 scopeType 时按后端 (INTERNAL/CROSS_BOUNDARY 都补);
+          //         后端没 scopeType 时按前端 OR 兜底 (src/tgt 至少 1 端在 center 即补)
+          if (rel.scopeType === 'internal' || rel.scopeType === 'cross-boundary') {
             fromCrossBoundary.push(rel.id)
+            return
+          }
+          if (!rel.scopeType) {
+            const sourceIn = centerSet.has(rel.sourceCode)
+            const targetIn = centerSet.has(rel.targetCode)
+            if (sourceIn || targetIn) {  // 兜底: OR 条件 (INTERNAL + CROSS_BOUNDARY)
+              fromCrossBoundary.push(rel.id)
+            }
           }
         })
       }
@@ -432,13 +444,19 @@ export function useDiagramData() {
 
     // 计算增量统计 = 总数 - 中心范围（真正的新增部分）
     // 用于关系步骤显示，带+前缀表示相比中心新增
+    // 关键修复 v32: objectRelations 用 total - center 而非 filteredRelations.length
+    // 因为 filteredRelations 可能漏掉 1 条 (e.g. 后端算 CROSS_BOUNDARY 但前端 src/tgt 都不在 centerScope
+    //   → 不入 tree → fromTree 没收集 → relationFilteredBoCodes 漏 1 BO)
+    // 用 total - center 总是与中心范围的实际显示关系数对齐:
+    //   center 5 (INTERNAL) + 增量 8 (CROSS_BOUNDARY) = 总 13, 与管理页 5+8=13 一致
     const incrementalStats = {
       domains: totalStats.domains - centerStats.domains,
       subDomains: totalStats.subDomains - centerStats.subDomains,
       serviceModules: totalStats.serviceModules - centerStats.serviceModules,
       businessObjects: totalStats.businessObjects - centerStats.businessObjects,
       externalBusinessObjects: externalBoCodes.value.size,  // v29: 跨域关系引入的范围外端 BO 数
-      objectRelations: filteredRelations.value.length
+      objectRelations: totalStats.objectRelations - centerStats.objectRelations,
+      serviceModuleRelations: totalStats.serviceModuleRelations - centerStats.serviceModuleRelations
     }
 
     return {
@@ -971,12 +989,175 @@ export function useDiagramData() {
 
     return {
       import: stats.value,
-      center: selectedStats.value.center || { domains: 0, subDomains: 0, serviceModules: 0, businessObjects: 0, objectRelations: 0 },
+      // 关键修复 v32 (终版): center.objectRelations 也按 "用户选中的 INTERNAL 关系" 算
+      // 跟管理页 buildRelationScopeTree 的 "范围内" 节点下的 relationIds 数对齐
+      center: (() => {
+            const base = selectedStats.value.center || { domains: 0, subDomains: 0, serviceModules: 0, businessObjects: 0, objectRelations: 0 }
+            if (!relationCategoryTree.value) return base
+            const ids = new Set()
+            const gather = (n) => {
+              if (!n) return
+              if (n.relationIds) n.relationIds.forEach(id => ids.add(id))
+              if (n.relationCodes && (!n.relationIds || n.relationIds.length === 0)) {
+                n.relationCodes.forEach(c => ids.add(c))
+              }
+              if (n.children) n.children.forEach(gather)
+            }
+            const collect = (node) => {
+              if (!node) return
+              const isInternal = node.id === 'internal' || (typeof node.id === 'string' && node.id.startsWith('internal-'))
+              if (isInternal) gather(node)
+              if (node.children) node.children.forEach(collect)
+            }
+            relationCategoryTree.value.forEach(collect)
+            // 兜底: 分类树收集到的关系数 < previewData 中 INTERNAL 关系数
+            if (previewData.value?.relationships) {
+              const rels = previewData.value.relationships
+              const centerSet = new Set(centerScope.value || [])
+              const truthIds = new Set()
+              for (const r of rels) {
+                if (r.id == null) continue
+                if (r.sourceCode === r.targetCode) continue
+                if (r.scopeType === 'internal') {
+                  truthIds.add(r.id); continue
+                }
+                const srcIn = centerSet.has(r.sourceCode)
+                const tgtIn = centerSet.has(r.targetCode)
+                if (srcIn && tgtIn) truthIds.add(r.id)
+              }
+              return { ...base, objectRelations: Math.max(ids.size, truthIds.size) }
+            }
+            return { ...base, objectRelations: ids.size }
+          })(),
       external: selectedStats.value.external || { domains: 0, subDomains: 0, serviceModules: 0, businessObjects: 0, objectRelations: 0 },
-      incremental: selectedStats.value.incremental || { domains: 0, subDomains: 0, serviceModules: 0, businessObjects: 0, objectRelations: 0 },
+      // 关键修复 v32 (终版): incremental.objectRelations = total - center (都用 selectedNodeIds 口径)
+      // 关键修复 v33: 但当 relationCategoryTree 缺失 cross-boundary 节点 (后端 scopeType 错算为
+      //   external) 时, 上面的 total - center 永远是 0. 改用 previewData + 后端 scopeType 兜底:
+      //   1) 若 relationCategoryTree 中有 cross-boundary 节点 + relationIds, 仍用 total - center
+      //   2) 否则直接用 previewData.relationships 中 scopeType=cross-boundary 的关系 ID 数
+      incremental: (() => {
+        const base = selectedStats.value.incremental || { domains: 0, subDomains: 0, serviceModules: 0, businessObjects: 0, objectRelations: 0 }
+        const computeFromTree = () => {
+          if (!relationCategoryTree.value) return 0
+          const ids = new Set()
+          const gather = (n) => {
+            if (!n) return
+            if (n.relationIds) n.relationIds.forEach(id => ids.add(id))
+            if (n.relationCodes && (!n.relationIds || n.relationIds.length === 0)) {
+              n.relationCodes.forEach(c => ids.add(c))
+            }
+            if (n.children) n.children.forEach(gather)
+          }
+          const collect = (node) => {
+            if (!node) return
+            const isInternalOrCross = node.id === 'internal' || node.id === 'cross-boundary' ||
+              (typeof node.id === 'string' && (node.id.startsWith('internal-') || node.id.startsWith('cross-boundary-')))
+            if (isInternalOrCross) gather(node)
+            if (node.children) node.children.forEach(collect)
+          }
+          relationCategoryTree.value.forEach(collect)
+          return ids.size
+        }
+        const computeCenter = () => {
+          if (!relationCategoryTree.value) return 0
+          const ids = new Set()
+          const gather = (n) => {
+            if (!n) return
+            if (n.relationIds) n.relationIds.forEach(id => ids.add(id))
+            if (n.relationCodes && (!n.relationIds || n.relationIds.length === 0)) {
+              n.relationCodes.forEach(c => ids.add(c))
+            }
+            if (n.children) n.children.forEach(gather)
+          }
+          const collect = (node) => {
+            if (!node) return
+            const isInternal = node.id === 'internal' ||
+              (typeof node.id === 'string' && node.id.startsWith('internal-'))
+            if (isInternal) gather(node)
+            if (node.children) node.children.forEach(collect)
+          }
+          relationCategoryTree.value.forEach(collect)
+          return ids.size
+        }
+        let total = computeFromTree()
+        let center = computeCenter()
+        let incFromTree = total - center
+        // 兜底: 关系分类树中 cross-boundary 节点不存在或没收集到时, 用 previewData 算
+        if (incFromTree === 0 && previewData.value?.relationships) {
+          const rels = previewData.value.relationships
+          const centerSet = new Set(centerScope.value || [])
+          const ids = new Set()
+          for (const r of rels) {
+            if (r.id == null) continue
+            if (r.sourceCode === r.targetCode) continue  // 排除自环
+            // 1) 优先用后端 scopeType
+            if (r.scopeType === 'cross-boundary') {
+              ids.add(r.id)
+              continue
+            }
+            // 2) 后端没标 cross-boundary 时, 用业务定义 (XOR) 兜底
+            const srcIn = centerSet.has(r.sourceCode)
+            const tgtIn = centerSet.has(r.targetCode)
+            if (srcIn !== tgtIn) {
+              ids.add(r.id)
+            }
+          }
+          return { ...base, objectRelations: ids.size }
+        }
+        return { ...base, objectRelations: incFromTree }
+      })(),
+      // 关键修复 v32 (终版): 三个 card 的 objectRelations 都按 "用户选中的关系" 算
+      //   center.objectRelations: 用户选中的 INTERNAL 关系数
+      //   incremental.objectRelations: 用户选中的 CROSS_BOUNDARY 关系数
+      //   total.objectRelations: 用户选中的 INTERNAL + CROSS_BOUNDARY 关系数
+      // 关键修复 v33: 分类树缺失节点时用 previewData 兜底
       total: {
-        ...selectedStats.value.total,
-        objectRelations: filteredRelations.value.length || 0
+        ...(selectedStats.value.total || {}),
+        // 用 filterTreeByScope 算 INTERNAL + CROSS_BOUNDARY 节点下的关系 ID 并集
+        objectRelations: (() => {
+          if (!relationCategoryTree.value) return 0
+          const ids = new Set()
+          const collect = (node) => {
+            if (!node) return
+            const isInternalOrCross = node.id === 'internal' || node.id === 'cross-boundary' ||
+              (typeof node.id === 'string' && (node.id.startsWith('internal-') || node.id.startsWith('cross-boundary-')))
+            if (isInternalOrCross) {
+              // 收集此节点及子节点的 relationIds
+              const gather = (n) => {
+                if (!n) return
+                if (n.relationIds) n.relationIds.forEach(id => ids.add(id))
+                if (n.relationCodes && (!n.relationIds || n.relationIds.length === 0)) {
+                  n.relationCodes.forEach(c => ids.add(c))
+                }
+                if (n.children) n.children.forEach(gather)
+              }
+              gather(node)
+            }
+            if (node.children) node.children.forEach(collect)
+          }
+          relationCategoryTree.value.forEach(collect)
+          // 兜底: 分类树收集到的关系数 < previewData 中 INTERNAL+CROSS_BOUNDARY 关系数
+          // (hierarchyFilter 模式下外部 BO 没返回, cross-boundary 节点的 relationIds 漏了)
+          if (previewData.value?.relationships) {
+            const rels = previewData.value.relationships
+            const centerSet = new Set(centerScope.value || [])
+            const truthIds = new Set()
+            for (const r of rels) {
+              if (r.id == null) continue
+              if (r.sourceCode === r.targetCode) continue
+              if (r.scopeType === 'internal' || r.scopeType === 'cross-boundary') {
+                truthIds.add(r.id); continue
+              }
+              // 业务定义: src ⊕ tgt 任一端在中心范围
+              const srcIn = centerSet.has(r.sourceCode)
+              const tgtIn = centerSet.has(r.targetCode)
+              if (srcIn || tgtIn) truthIds.add(r.id)
+            }
+            // 取 max(ids, truthIds) 的大小, 避免分类树重复计算
+            return Math.max(ids.size, truthIds.size)
+          }
+          return ids.size
+        })()
       },
       config: configStats
     }

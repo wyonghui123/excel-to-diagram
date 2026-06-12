@@ -417,11 +417,21 @@ async function _doRequest(method, url, options, traceId, startTime) {
   }
 
   // 成功
+  // [FIX 2026-06-12] 即使是 2xx 也要保留 errors / message, 让 batch-delete (207 Multi-Status)
+  // 之类"部分失败"响应能在前端 useMetaList.handleBatchDelete 看到具体错误。
+  // 之前 bug: 207 走成功分支, result.errors / body.message 都没保留,
+  // 前端 result.errors 为 undefined, 走兜底'删除失败'四个字, 用户看不到具体原因。
   const result = {
     success: body.success !== undefined ? body.success : true,
     data: body.data !== undefined ? body.data : body,
     message: body.message || '',
     traceId,
+  }
+  if (body.errors) {
+    result.errors = body.errors
+  }
+  if (body.error_code) {
+    result.error_code = body.error_code
   }
 
   for (const interceptor of responseInterceptors) {

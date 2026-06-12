@@ -123,6 +123,23 @@ export function useSvgProcessor(options) {
   }
 
   /**
+   * 关键修复 v32：在 SVG 渲染完成后调用，重新计算 edgeLabel 的 foreignObject 尺寸
+   * 必须在 Mermaid.run() 之后 + 浏览器布局完成（nextTick/requestAnimationFrame）之后调用
+   * 因为要读取 innerDiv.getBoundingClientRect() 的实际值
+   *
+   * 安全策略：
+   *   - 只调整 foreignObject > div.labelBkg 的内联样式（max-width/white-space/padding）
+   *   - 绝不修改 foreignObject 的 width/height 属性（避免 v22 端点错位 bug）
+   *   - 调整 viewBox 给溢出文字留空间
+   */
+  const fixEdgeLabelSize = (svgEl) => {
+    if (!svgEl) return
+    // 强制 reflow 一次再读取
+    void svgEl.getBoundingClientRect()
+    svgStyle.fixEdgeLabelOverflow(svgEl)
+  }
+
+  /**
    * 添加 Tooltip
    */
   const addTooltips = (svgEl, relationDescriptions, diagramType, hideTails = false) => {
@@ -450,6 +467,7 @@ export function useSvgProcessor(options) {
     addContainerCodeAttributes,
     addLinkCodeAttributes,
     applyStyleFixes,
+    fixEdgeLabelSize,
     addTooltips,
     renderAnnotationOverlay,
     setupCanvasLayout,

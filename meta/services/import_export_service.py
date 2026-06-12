@@ -523,6 +523,7 @@ class ImportExportService:
         last_row = self._write_meta_sheet_operations(
             ws_meta, has_cud=has_cud, all_readonly=all_readonly, start_row=5,
             is_cascade=False, has_child_sheets=False,
+            objects=ordered_types,
         )
         self._finalize_meta_sheet(ws_meta, last_row)
 
@@ -613,6 +614,10 @@ class ImportExportService:
                         self._apply_classification_fill(cell, 'create_required')
                     elif actual_col_idx in readonly_columns:
                         self._apply_classification_fill(cell, 'readonly')
+                    # [NEW v1.1 2026-06-11] auto_or_manual_code 差异化底色
+                    auto_cols = (getattr(self, '_auto_or_manual_code_columns', {}) or {}).get(meta_obj.name, [])
+                    if actual_col_idx in auto_cols:
+                        self._apply_classification_fill(cell, 'auto_or_manual_code')
             
             for col_idx, header in enumerate(headers, 1):
                 column_letter = get_column_letter(col_idx)
@@ -748,6 +753,7 @@ class ImportExportService:
         last_row = self._write_meta_sheet_operations(
             ws_meta, has_cud=has_cud, all_readonly=all_readonly, start_row=14,
             is_cascade=False, has_child_sheets=True,
+            objects=selected_types,
         )
         self._finalize_meta_sheet(ws_meta, last_row)
 
@@ -848,7 +854,13 @@ class ImportExportService:
                     cell.border = ds.THIN_BORDER
 
                     actual_col_idx = col_idx - 1 - col_offset
-                    if actual_col_idx in parent_key_columns:
+                    # [NEW v1.1 2026-06-11] auto_or_manual_code 差异化底色
+                    auto_cols = (getattr(self, '_auto_or_manual_code_columns', {}) or {}).get(meta_obj.name, [])
+                    if actual_col_idx in auto_cols:
+                        self._apply_classification_fill(cell, 'auto_or_manual_code')
+                        if protect_sheet:
+                            cell.protection = Protection(locked=False)
+                    elif actual_col_idx in parent_key_columns:
                         self._apply_classification_fill(cell, 'parent_key')
                         if protect_sheet:
                             cell.protection = Protection(locked=False)
@@ -920,7 +932,11 @@ class ImportExportService:
                     cell.border = ds.THIN_BORDER
 
                     original_col_idx = col_idx - 2 if include_operation_mode else col_idx - 1
-                    if original_col_idx in parent_key_columns:
+                    # [NEW v1.1 2026-06-11] auto_or_manual_code 差异化底色
+                    auto_cols = (getattr(self, '_auto_or_manual_code_columns', {}) or {}).get(meta_obj.name, [])
+                    if original_col_idx in auto_cols:
+                        self._apply_classification_fill(cell, 'auto_or_manual_code')
+                    elif original_col_idx in parent_key_columns:
                         self._apply_classification_fill(cell, 'parent_key')
                     elif original_col_idx in create_required_columns:
                         self._apply_classification_fill(cell, 'create_required')
@@ -1110,6 +1126,7 @@ class ImportExportService:
         last_row = self._write_meta_sheet_operations(
             ws_meta, has_cud=True, all_readonly=False, start_row=7,
             is_cascade=True, has_child_sheets=False,
+            objects=ordered_types,
         )
         self._finalize_meta_sheet(ws_meta, last_row)
 
@@ -1187,7 +1204,13 @@ class ImportExportService:
                     
                     original_col_idx = col_idx - 2 if include_operation_mode else col_idx - 1
 
-                    if original_col_idx in parent_key_columns:
+                    # [NEW v1.1 2026-06-11] auto_or_manual_code 差异化底色
+                    auto_cols = (getattr(self, '_auto_or_manual_code_columns', {}) or {}).get(meta_obj.name, [])
+                    if original_col_idx in auto_cols:
+                        self._apply_classification_fill(cell, 'auto_or_manual_code')
+                        if protect_sheet:
+                            cell.protection = Protection(locked=False)
+                    elif original_col_idx in parent_key_columns:
                         self._apply_classification_fill(cell, 'parent_key')
                         if protect_sheet:
                             cell.protection = Protection(locked=False)
@@ -1259,7 +1282,13 @@ class ImportExportService:
                     
                     original_col_idx = col_idx - 2 if include_operation_mode else col_idx - 1
 
-                    if original_col_idx in parent_key_columns:
+                    # [NEW v1.1 2026-06-11] auto_or_manual_code 差异化底色
+                    auto_cols = (getattr(self, '_auto_or_manual_code_columns', {}) or {}).get(meta_obj.name, [])
+                    if original_col_idx in auto_cols:
+                        self._apply_classification_fill(cell, 'auto_or_manual_code')
+                        if protect_sheet:
+                            cell.protection = Protection(locked=False)
+                    elif original_col_idx in parent_key_columns:
                         self._apply_classification_fill(cell, 'parent_key')
                         cell.comment = Comment(_sanitize_xml_string("新增时必填：请填写父对象的业务键编码"), "System")
                         if protect_sheet:
@@ -1439,11 +1468,21 @@ class ImportExportService:
                 comment_parts = []
                 if f.description:
                     comment_parts.append(f.description)
-                
+
                 # 只在有控制信息时添加标识
                 has_control_info = False
+                # [NEW v1.1 2026-06-11] KeyTemplate user_editable 差异化标识
+                kt_user_editable = self._get_key_template_user_editable(meta_obj)
+                is_auto_or_manual_code = (
+                    f.semantics.business_key
+                    and kt_user_editable == 'auto_or_manual'
+                )
+
                 if f.semantics.business_key:
-                    comment_parts.append("【业务关键字】新增必填，编辑时只读")
+                    if is_auto_or_manual_code:
+                        comment_parts.append("【自动/可手动】留空由系统生成；填写则使用填入值（唯一性校验）")
+                    else:
+                        comment_parts.append("【业务关键字】新增必填，编辑时只读")
                     has_control_info = True
                     create_required_columns.append(col_idx)
                 elif f.required or getattr(f.semantics, 'mandatory', False):
@@ -1453,11 +1492,17 @@ class ImportExportService:
                     comment_parts.append("【父对象外键】新增必填")
                     has_control_info = True
                     create_required_columns.append(col_idx)
-                
+
                 if not self._is_field_editable(f):
                     comment_parts.append("【只读】")
                     has_control_info = True
-                
+
+                # [NEW v1.1 2026-06-11] 记录 auto_or_manual code 列索引（用于差异化底色）
+                if is_auto_or_manual_code:
+                    if not hasattr(self, '_auto_or_manual_code_columns'):
+                        self._auto_or_manual_code_columns = {}
+                    self._auto_or_manual_code_columns.setdefault(meta_obj.name, []).append(col_idx)
+
                 header_comments.append("；".join(comment_parts) if has_control_info else "")
                 
                 if self._is_field_editable(f):
@@ -2508,6 +2553,7 @@ class ImportExportService:
 
         本 helper 统一底色规则：
         - 'parent_key' → BUSINESS_KEY_FILL（浅绿，父对象业务键）
+        - 'auto_or_manual_code' → AUTO_GEN_OR_MANUAL_FILL（浅蓝，自动/可手动，v1.1 NEW）
         - 'create_required' → REQUIRED_FILL（浅黄，新增必填）
         - 'readonly' → READONLY_FILL（灰色，只读）
         - 'editable' 或其他 → 不动（保持默认）
@@ -2517,6 +2563,9 @@ class ImportExportService:
         """
         if classification == 'parent_key':
             cell.fill = ExcelDesignSystem.BUSINESS_KEY_FILL
+        elif classification == 'auto_or_manual_code':
+            # [NEW v1.1 2026-06-11] 自动/可手动模式底色（浅蓝）
+            cell.fill = ExcelDesignSystem.AUTO_GEN_OR_MANUAL_FILL
         elif classification == 'create_required':
             cell.fill = ExcelDesignSystem.REQUIRED_FILL
         elif classification == 'readonly':
@@ -2624,7 +2673,8 @@ class ImportExportService:
     def _write_meta_sheet_operations(self, ws_meta, has_cud: bool,
                                      all_readonly: bool, start_row: int,
                                      is_cascade: bool = False,
-                                     has_child_sheets: bool = False) -> int:
+                                     has_child_sheets: bool = False,
+                                     objects=None) -> int:
         """统一写入操作说明 section（SSOT）
 
         3 种模式：
@@ -2665,12 +2715,55 @@ class ImportExportService:
                 ("  浅绿色", ds.BUSINESS_KEY_FILL, "父对象编码，新增必填，编辑时可切换"),
                 ("  浅黄色", ds.REQUIRED_FILL, "业务关键字，新增必填，编辑时只读"),
                 ("  浅蓝色", ds.CREATE_NEW_FILL, "新增操作行，用于添加新数据"),
+                ("  浅蓝灰", ds.AUTO_GEN_OR_MANUAL_FILL, "自动/可手动编码，留空由系统生成（v1.1）"),
             ]
             for label, fill, desc in color_examples:
                 ws_meta.cell(row=row, column=1, value=label).font = ds.LABEL_FONT
                 ws_meta.cell(row=row, column=1).fill = fill
                 ws_meta.cell(row=row, column=2, value=desc).font = ds.VALUE_FONT
                 row += 1
+
+            # [NEW v1.1 2026-06-11] 自动编码规则区
+            auto_or_manual_objects = []
+            for each_obj in (objects or []):
+                if isinstance(each_obj, str):
+                    resolved = registry.get(each_obj)
+                    if resolved is None:
+                        continue
+                    obj_name = resolved.name
+                    kt_dict = getattr(resolved, 'key_template', None) or {}
+                elif isinstance(each_obj, dict):
+                    obj_name = each_obj.get('name', str(each_obj))
+                    kt_dict = each_obj.get('key_template', {}) or {}
+                else:
+                    obj_name = getattr(each_obj, 'name', str(each_obj))
+                    kt_dict = getattr(each_obj, 'key_template', None) or {}
+                kt = (kt_dict.get('user_editable') if isinstance(kt_dict, dict) else '')
+                if kt in ('auto_only', 'auto_or_manual', 'manual_only'):
+                    auto_or_manual_objects.append((obj_name, kt, kt_dict))
+            if auto_or_manual_objects:
+                ws_meta.cell(row=row, column=1, value="自动编码规则").font = ds.SECTION_FONT
+                ws_meta.cell(row=row, column=1).fill = ds.SECTION_FILL
+                row += 1
+                for obj_name, kt, kt_dict in auto_or_manual_objects:
+                    pattern = kt_dict.get('pattern', '') if isinstance(kt_dict, dict) else ''
+                    preview = kt_dict.get('preview', '') if isinstance(kt_dict, dict) else ''
+                    mode_desc = {
+                        'auto_only': '强制自动生成（只读）',
+                        'auto_or_manual': '自动优先：留空由系统生成；填写则使用填入值（唯一性校验）',
+                        'manual_only': '纯手动：必须由用户填写',
+                    }.get(kt, kt)
+                    ws_meta.cell(row=row, column=1, value=f"  {obj_name} - 模式").font = ds.LABEL_FONT
+                    ws_meta.cell(row=row, column=2, value=mode_desc).font = ds.VALUE_FONT
+                    row += 1
+                    if pattern:
+                        ws_meta.cell(row=row, column=1, value="    格式").font = ds.LABEL_FONT
+                        ws_meta.cell(row=row, column=2, value=pattern).font = ds.VALUE_FONT
+                        row += 1
+                    if preview:
+                        ws_meta.cell(row=row, column=1, value="    示例").font = ds.LABEL_FONT
+                        ws_meta.cell(row=row, column=2, value=preview).font = ds.VALUE_FONT
+                        row += 1
 
             # 业务说明
             explanations = [
@@ -3310,6 +3403,29 @@ class ImportExportService:
             headers.append("{0}名称".format(parent_obj.name))
 
         return headers
+
+    def _get_key_template_user_editable(self, meta_obj) -> str:
+        """[NEW v1.1 2026-06-11] 获取对象的 key_template user_editable 模式
+
+        返回 'auto_only' / 'auto_or_manual' / 'manual_only'，未配置时返回空字符串。
+        参数兼容 MetaObject / dict / str（object_type）。
+        """
+        if meta_obj is None:
+            return ''
+        if isinstance(meta_obj, str):
+            try:
+                meta_obj = registry.get(meta_obj)
+                if meta_obj is None:
+                    return ''
+            except Exception:
+                return ''
+        if isinstance(meta_obj, dict):
+            kt = meta_obj.get('key_template', {}) or {}
+        else:
+            kt = getattr(meta_obj, 'key_template', None) or {}
+        if isinstance(kt, dict):
+            return kt.get('user_editable', '')
+        return ''
 
     def _is_field_editable(self, field, mode: str = 'edit') -> bool:
         """判断字段是否可编辑（用于导入导出）

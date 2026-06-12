@@ -1,0 +1,12 @@
+﻿    4 fixes | claude-cursor-integration.md
+    6 fixes | specs\spec-m11-rls-implementation.md
+    4 fixes | specs\spec-m13-schema-governance.md
+    2 fixes | specs\spec-m14-opentelemetry.md
+    7 fixes | specs\spec-ui-business-logic-downflow.md
+    3 fixes | archive\fixes\ASSOCIATE_AUDIT_LOG_IMPLEMENTATION.md
+    3 fixes | archive\fixes\AUDIT_LOG_DUPLICATE_FIX_COMPLETED.md
+    2 fixes | archive\fixes\AUDIT_LOG_FIELD_NAME_FIX_COMPLETED.md
+    1 fixes | archive\fixes\MIGRATION_COMPLETED_REPORT.md
+    2 fixes | archive\fixes\SERVER_RESTART_COMPLETED.md
+
+[OK] Total: 34 missing-link fixes in 10 files
