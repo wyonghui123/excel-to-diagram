@@ -353,35 +353,44 @@ class DataSource(ABC):
 
 class DataSourceFactory:
     """数据源工厂"""
-    
+
     _adapters: Dict[DataSourceType, Type[DataSource]] = {}
-    
+
     @classmethod
     def register(cls, source_type: DataSourceType, adapter_class: Type[DataSource]) -> None:
         """
         注册数据源适配器
-        
+
         Args:
             source_type: 数据源类型
             adapter_class: 适配器类
         """
         cls._adapters[source_type] = adapter_class
-    
+
     @classmethod
     def create(cls, source_type: DataSourceType, **kwargs) -> DataSource:
         """
         创建数据源实例
-        
+
         Args:
             source_type: 数据源类型
             **kwargs: 连接参数
-            
+
         Returns:
             数据源实例
         """
         if source_type not in cls._adapters:
-            raise ValueError("Unsupported data source type: {0}".format(source_type.value))
-        
+            # 懒加载: 触发 sql_adapters 模块导入, 完成 adapter 注册
+            try:
+                from meta.core import sql_adapters  # noqa: F401
+            except Exception:
+                pass
+            if source_type not in cls._adapters:
+                raise ValueError(
+                    "Unsupported data source type: {0}. "
+                    "确保已 import meta.core.sql_adapters 完成 adapter 注册".format(source_type.value)
+                )
+
         adapter_class = cls._adapters[source_type]
         adapter = adapter_class()
         adapter.connect(**kwargs)

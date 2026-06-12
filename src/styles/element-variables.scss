@@ -193,7 +193,10 @@
 
   // Table
   --el-table-border-color: var(--el-border-color-lighter);
-  --el-table-header-bg-color: #fafafa;
+  // [FIX 2026-06-12] toolbar/table 一体化根因修复 #7
+  // 反复复发根因：之前这里是 #fafafa 让表头与 toolbar 产生"立体断层"
+  // 现在统一改为 #ffffff，与 toolbar 区域完全融为一体
+  --el-table-header-bg-color: #ffffff;
   --el-table-row-hover-bg-color: var(--color-bg-secondary);
   --el-table-text-color: var(--el-text-color-primary);
   --el-table-header-text-color: var(--el-text-color-regular);

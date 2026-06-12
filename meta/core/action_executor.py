@@ -802,7 +802,19 @@ class ActionExecutor:
         return None
 
     def _check_deletion_policy_restrict(self, meta_object: MetaObject, id_value: Any) -> List[str]:
-        """检查 deletion_policy.restrict_on 规则"""
+        """检查 deletion_policy.restrict_on 规则
+
+        [FIX 2026-06-12] 兼容两种 rule 格式:
+        - RestrictRule dataclass（yaml_loader.parse_deletion_policy 解析出的格式）:
+            table / foreign_key / message
+        - dict 格式（老格式，向后兼容）:
+            target_object/target + fk_field/field + message
+        也支持直接从 dict 读取 table/foreign_key 键。
+
+        之前 bug：YAML 里的 restrict_on 规则被解析为 RestrictRule dataclass，
+        旧代码只识别 dict 格式，导致规则被静默跳过 → 删 product（含 versions）不报错
+        → SQL FK 违反被吞，删除看似"成功"实际未删。
+        """
         errors = []
         deletion_policy = getattr(meta_object, 'deletion_policy', None)
         if not deletion_policy:
@@ -815,30 +827,37 @@ class ActionExecutor:
             restrict_rules = deletion_policy.restrict_on or []
 
         for rule in restrict_rules:
-            if not isinstance(rule, dict):
+            # 兼容 RestrictRule dataclass + dict
+            if hasattr(rule, 'table') and hasattr(rule, 'foreign_key'):
+                target_table = rule.table
+                fk_field = rule.foreign_key
+                message = getattr(rule, 'message', '') or ''
+            elif isinstance(rule, dict):
+                target_table = rule.get('table')
+                target_object = rule.get('target_object') or rule.get('target')
+                target_table = target_table or target_object
+                fk_field = rule.get('foreign_key') or rule.get('fk_field') or rule.get('field')
+                message = rule.get('message', '') or ''
+            else:
                 continue
-            target_object = rule.get('target_object') or rule.get('target')
-            fk_field = rule.get('fk_field') or rule.get('field')
-            if not target_object or not fk_field:
-                continue
-            from meta import get_meta_object
-            target_meta = get_meta_object(target_object)
-            if not target_meta:
+            if not target_table or not fk_field:
                 continue
             try:
-                query = f"SELECT COUNT(*) FROM {target_meta.table_name} WHERE {fk_field} = ?"
+                query = f"SELECT COUNT(*) FROM {target_table} WHERE {fk_field} = ?"
                 cursor = self.ds.execute(query, (id_value,))
                 row = cursor.fetchone()
                 count = row[0] if row else 0
                 if count > 0:
-                    child_name = target_meta.name or target_object
-                    msg = rule.get('message') or ValidationMessageRegistry.get(
+                    msg = message or ValidationMessageRegistry.get(
                         "validation.object.restrict_on_delete",
-                        child_name=child_name, field_name=fk_field, count=count
+                        child_name=target_table, field_name=fk_field, count=count
                     )
                     errors.append(msg)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(
+                    f"[_check_deletion_policy_restrict] table={target_table} "
+                    f"fk={fk_field} 查询失败: {e}"
+                )
         return errors
 
     def _cleanup_m2m_tables(self, meta_object: MetaObject, id_value: Any):
@@ -1427,6 +1446,53 @@ class ActionExecutor:
                 message=translate_error_message(str(e), meta_object)
             )
     
+    def _write_delete_blocked_audit(
+        self,
+        meta_object: MetaObject,
+        id_value: Any,
+        original_data: Optional[Dict[str, Any]],
+        action_label: str,
+        error_code: str,
+        message: str,
+    ) -> None:
+        """[FIX 2026-06-12] 记录"删除被拒/失败"审计, 让审计链完整可追溯。
+
+        当 delete 被 FK / restrict_on / deletability / 业务规则拦截, 或 SQL 异常时,
+        写一条 action=DELETE_BLOCKED|DELETE_FAILED 审计, 保留原 record snapshot + 失败原因,
+        便于排查"为什么没有 DELETE 审计"。
+
+        审计失败不影响业务失败结果, 最多 warning 日志。
+        """
+        if not original_data:
+            return
+        try:
+            parent_type, parent_id = self._resolve_parent_info(meta_object, original_data)
+            self._write_audit_log_v2(
+                lambda trace_id=None, transaction_id=None, user_id=None, user_name=None, ip_address=None, user_agent=None: self.audit_logger.log(
+                    object_type=meta_object.id,
+                    object_id=id_value,
+                    action=action_label,
+                    extra_data={
+                        "blocked": True,
+                        "error_code": error_code,
+                        "message": message,
+                        "record_snapshot": original_data,
+                    },
+                    trace_id=trace_id,
+                    transaction_id=transaction_id,
+                    parent_object_type=parent_type,
+                    parent_object_id=parent_id,
+                    user_id=user_id,
+                    user_name=user_name,
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                )
+            )
+        except Exception as audit_err:
+            logger.warning(
+                "[Audit] Failed to write delete-blocked audit: %s", audit_err
+            )
+
     def _do_delete(self, meta_object: MetaObject, params: Dict[str, Any],
                    skip_rules: bool = False) -> ActionResult:
         """执行删除操作"""
@@ -1436,32 +1502,44 @@ class ActionExecutor:
                 error="MISSING_ID",
                 message="Parameter 'id' is required"
             )
-        
+
         original_data = None
         try:
             original_data = self.ds.find_by_id(meta_object.table_name, id_value)
         except:
             pass
-        
+
         if not original_data:
             return ActionResult.fail(
                 error="NOT_FOUND",
                 message=f"记录不存在: {meta_object.id}#{id_value}"
             )
-        
+
         if original_data:
             hierarchy_result = validate_delete(
                 meta_object.id, id_value, self.ds
             )
             if not hierarchy_result.valid:
+                self._write_delete_blocked_audit(
+                    meta_object, id_value, original_data,
+                    action_label="DELETE_BLOCKED",
+                    error_code=hierarchy_result.error_code or "HIERARCHY_BLOCKED",
+                    message=hierarchy_result.message,
+                )
                 return ActionResult.fail(
                     error=hierarchy_result.error_code,
                     message=hierarchy_result.message
                 )
-        
+
         if not skip_rules and original_data:
             if not self._check_deletability(meta_object, original_data):
                 msg = getattr(meta_object.deletability, 'message', None) or '该记录不可删除'
+                self._write_delete_blocked_audit(
+                    meta_object, id_value, original_data,
+                    action_label="DELETE_BLOCKED",
+                    error_code="CANNOT_DELETE",
+                    message=msg,
+                )
                 return ActionResult.fail(
                     error="CANNOT_DELETE",
                     message=msg
@@ -1469,6 +1547,12 @@ class ActionExecutor:
 
             ref_errors = self._check_reverse_fk_references(meta_object, id_value)
             if ref_errors:
+                self._write_delete_blocked_audit(
+                    meta_object, id_value, original_data,
+                    action_label="DELETE_BLOCKED",
+                    error_code="REFERENTIAL_INTEGRITY",
+                    message="; ".join(ref_errors),
+                )
                 return ActionResult.fail(
                     error="REFERENTIAL_INTEGRITY",
                     message="; ".join(ref_errors)
@@ -1476,32 +1560,44 @@ class ActionExecutor:
 
             restrict_errors = self._check_deletion_policy_restrict(meta_object, id_value)
             if restrict_errors:
+                self._write_delete_blocked_audit(
+                    meta_object, id_value, original_data,
+                    action_label="DELETE_BLOCKED",
+                    error_code="RESTRICT_ON_DELETE",
+                    message="; ".join(restrict_errors),
+                )
                 return ActionResult.fail(
                     error="RESTRICT_ON_DELETE",
                     message="; ".join(restrict_errors)
                 )
-        
+
             report = self.rule_engine.execute_rules(
                 meta_object, RuleTrigger.BEFORE_DELETE, original_data
             )
             if not report.success:
+                self._write_delete_blocked_audit(
+                    meta_object, id_value, original_data,
+                    action_label="DELETE_BLOCKED",
+                    error_code="VALIDATION_FAILED",
+                    message="Before delete validation failed",
+                )
                 result = ActionResult.fail(
                     error="VALIDATION_FAILED",
                     message="Before delete validation failed"
                 )
                 result.rule_report = report
                 return result
-        
+
         try:
             self._cleanup_m2m_tables(meta_object, id_value)
             with self.ds.transaction():
                 if meta_object.soft_delete:
                     delete_field = meta_object.soft_delete_field
                     delete_data = {delete_field: meta_object.soft_delete_value}
-                    
+
                     if hasattr(self.ds, 'update'):
                         self.ds.update(meta_object.table_name, id_value, delete_data)
-                    
+
                     if not skip_rules and original_data:
                         original_data[delete_field] = meta_object.soft_delete_value
                         self.rule_engine.execute_rules(
@@ -1521,13 +1617,26 @@ class ActionExecutor:
                                     message=f"记录不存在: {meta_object.id}#{id_value}"
                                 )
                     except Exception as e:
+                        # [FIX 2026-06-12] SQL DELETE 失败（典型：FK 违反）必须冒泡，
+                        # 不能 silently 吞错 → 之前 bug：函数继续走 AFTER_DELETE + 审计 +
+                        # 返回 ActionResult.ok，前端看到"成功"但记录未删（"没有成功，也没有报错"）
                         logger.warning(f"[_do_delete] DELETE execution error: {e}")
-                    
+                        self._write_delete_blocked_audit(
+                            meta_object, id_value, original_data,
+                            action_label="DELETE_FAILED",
+                            error_code="DELETE_FAILED",
+                            message=f"删除失败（数据库约束）: {e}",
+                        )
+                        return ActionResult.fail(
+                            error="DELETE_FAILED",
+                            message=f"删除失败（数据库约束）: {e}",
+                        )
+
                     if not skip_rules and original_data:
                         self.rule_engine.execute_rules(
                             meta_object, RuleTrigger.AFTER_DELETE, original_data
                         )
-            
+
             if original_data:
                 parent_type, parent_id = self._resolve_parent_info(meta_object, original_data)
                 self._write_audit_log_v2(
@@ -1546,13 +1655,19 @@ class ActionExecutor:
                     )
                 )
                 self._trigger_aggregate_refresh(meta_object.id, id_value, "deleted")
-            
+
             result = ActionResult.ok(
                 message="{0} deleted successfully".format(meta_object.name)
             )
             result.affected_rows = 1
             return result
         except Exception as e:
+            self._write_delete_blocked_audit(
+                meta_object, id_value, original_data,
+                action_label="DELETE_FAILED",
+                error_code="DELETE_FAILED",
+                message=translate_error_message(str(e), meta_object),
+            )
             return ActionResult.fail(
                 error="DELETE_FAILED",
                 message=translate_error_message(str(e), meta_object)
@@ -1808,7 +1923,23 @@ class ActionExecutor:
                                   record_id: Any,
                                   effect: "ActionEffect",
                                   params: Dict[str, Any]) -> ActionResult:
-        """应用 set_fields 效果"""
+        """应用 set_fields 效果
+
+        [FIX 2026-06-12] 审计合规修复:
+        - 之前: self.ds.update(table, id, data) → 走 raw SQL, 绕过 audit_logs
+        - 现在: 通过 BOFramework.update() 走完整拦截器链
+          (PermissionInterceptor → DataPermissionInterceptor → CascadeInterceptor →
+           AuditInterceptor → BusinessLogInterceptor → PersistenceInterceptor →
+           ActionRegistry.update → ActionExecutor.execute('crud_update') →
+           ActionExecutor._do_update → _write_audit_log_v2 → audit_logs 表)
+
+        这样 business action 的 set_fields 效果也能产生 audit log,
+        比如 set_current action 把 is_current=true 写到自己身上也会有审计记录。
+
+        - 同时, audit_aspect 的 auto_fill (created_by/updated_by) 也会被填充
+        - 兜底: 如果 BOFramework.update() 失败 (例如 bo_framework 不可用), 回退到 raw SQL
+          (保留旧行为, 不阻塞 action 流程)
+        """
         update_data = {}
         for field_name, field_value in effect.fields.items():
             resolved_value = self._resolve_field_value(field_value, record, params)
@@ -1819,15 +1950,138 @@ class ActionExecutor:
         if not update_data:
             return ActionResult.ok(data=record)
 
+        # 1) 优先走 BOFramework.update() 触发 audit log
         try:
-            self.ds.update(meta_object.table_name, record_id, update_data)
-            record.update(update_data)
-            return ActionResult.ok(data=record)
+            from meta.core.bo_framework import bo_framework as _bo
+
+            # 同步 user context (从 Flask g.current_user / executor._request_context)
+            self._sync_user_context_for_business_action()
+
+            bo_result = _bo.update(meta_object.id, record_id, update_data)
+            if bo_result and bo_result.success:
+                # 用更新后的 record (bo_result.data 包含新值) 刷新本地 record
+                if isinstance(bo_result.data, dict):
+                    record.update(bo_result.data)
+                else:
+                    record.update(update_data)
+                return ActionResult.ok(
+                    data=record,
+                    message=bo_result.message or "set_fields effect applied via BO framework",
+                )
+            else:
+                # BO framework 失败 (例如权限被拒) - 不再静默回退到 raw SQL, 因为
+                # 那会导致 audit 不一致 (raw SQL 没 audit log, 但业务上字段已写?)
+                # 实际上 _bo.update() 在 permission denied 时也会 fail 不写, 所以失败
+                # 是合理的, 应当冒泡
+                logger.warning(
+                    f"[set_fields_effect] BOFramework.update failed for "
+                    f"{meta_object.id}#{record_id}: {bo_result.message if bo_result else 'No result'}"
+                )
+                return ActionResult.fail(
+                    error=bo_result.error if bo_result else "SET_FIELDS_FAILED",
+                    message=bo_result.message if bo_result else "BO framework update failed",
+                )
         except Exception as e:
+            # [FIX 2026-06-12] BO framework 不可用 / 异常时, 不再 fallback raw SQL
+            # (raw SQL 会让 audit 与业务不一致). 直接报错让 caller 处理.
+            # 唯一例外: 当 bo_framework 真的 import 失败 (例如单元测试环境),
+            # 才走 raw SQL 兜底, 保持向后兼容.
+            error_msg = str(e)
+            is_bootstrap_failure = (
+                'ImportError' in error_msg
+                or 'cannot import' in error_msg
+                or 'bo_framework' in error_msg
+                or isinstance(e, ImportError)
+            )
+            if is_bootstrap_failure:
+                logger.warning(
+                    f"[set_fields_effect] BOFramework not available ({e}), "
+                    f"falling back to raw SQL (no audit log)"
+                )
+                try:
+                    self.ds.update(meta_object.table_name, record_id, update_data)
+                    record.update(update_data)
+                    return ActionResult.ok(data=record)
+                except Exception as inner_e:
+                    return ActionResult.fail(
+                        error="SET_FIELDS_FAILED",
+                        message=str(inner_e),
+                    )
+            # 其他异常 (运行时错误) 应当冒泡
             return ActionResult.fail(
                 error="SET_FIELDS_FAILED",
-                message=str(e),
+                message=f"BOFramework.update raised: {e}",
             )
+
+    def _sync_user_context_for_business_action(self) -> None:
+        """[FIX 2026-06-12] business action 调 BOFramework.update() 前同步 user context.
+
+        ActionExecutor 自己的 audit_logger._current_user 是独立的属性, 跟 BOFramework
+        _user_context 无关。set_current action 处理过程中, audit_logger 可能没设 user,
+        导致 BOFramework.update() 内部的 audit log 写时 user_id/user_name 为空。
+
+        同步策略:
+          1) 从 Flask g.current_user (auth_middleware 已设) 拿 user_id/user_name/ip
+          2) 写到 bo_framework._user_context (走 set_user_context)
+          3) 找到 PersistenceInterceptor._registry.executor, 调 set_audit_user()
+             (同时写 audit_logger._current_user + _pseudo_resolver._user_context)
+        """
+        try:
+            from flask import g, request
+            from meta.core.bo_framework import bo_framework as _bo
+            from meta.services.auth_middleware import get_current_user
+
+            current_user = (
+                get_current_user()
+                or getattr(g, 'current_user', None)
+                or self._request_context.get('user')
+                or {}
+            )
+            if not current_user:
+                return
+
+            user_id = current_user.get('user_id') or current_user.get('id')
+            display = current_user.get('display_name') or ''
+            username = current_user.get('username') or ''
+            if display and username and display != username:
+                user_name = f"{display} ({username})"
+            else:
+                user_name = display or username or ''
+            try:
+                ip_address = request.remote_addr
+            except RuntimeError:
+                ip_address = ''
+            try:
+                user_agent = request.headers.get('User-Agent', '')
+            except RuntimeError:
+                user_agent = ''
+
+            _bo.set_user_context(
+                user_id=user_id,
+                user_name=user_name,
+                ip_address=ip_address,
+            )
+
+            for interceptor in getattr(_bo, 'interceptors', []) or []:
+                cls_name = interceptor.__class__.__name__
+                if cls_name != 'PersistenceInterceptor':
+                    continue
+                registry = getattr(interceptor, '_registry', None)
+                if registry is None:
+                    continue
+                executor = getattr(registry, 'executor', None)
+                if executor is None:
+                    continue
+                if hasattr(executor, 'set_audit_user'):
+                    executor.set_audit_user(
+                        user_id=user_id,
+                        user_name=user_name,
+                        ip_address=ip_address,
+                        user_agent=user_agent,
+                    )
+                break
+        except Exception as e:
+            logger.debug(f"[set_fields_effect] User context sync skipped: {e}")
 
     def _resolve_field_value(self, expression: Any, record: Dict[str, Any],
                               params: Dict[str, Any]) -> Any:

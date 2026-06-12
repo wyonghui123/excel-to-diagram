@@ -24,24 +24,25 @@
   border: none !important;
 }
 
-/* 表头单元格 */
+/* 表头单元格 — 白色背景与 toolbar 区域融为一体 [FIX 2026-06-12] */
 .custom-table .el-table__header th.el-table__cell {
-  background-color: var(--color-bg-spotlight, #fafafa) !important;
+  background-color: #ffffff !important;
+  background: #ffffff !important;
   color: var(--color-text-secondary, #666666) !important;
   font-weight: 600 !important;
   font-size: 13px !important;
   padding: 12px 16px !important;
-  border-bottom: 2px solid var(--color-border, #e8e8e8) !important;
+  border-bottom: 1px solid var(--color-border-light, #f0f0f0) !important;
   white-space: nowrap;
 }
 
-/* 表头所有状态保持浅灰色背景 */
+/* 表头所有状态保持白色背景 [FIX 2026-06-12] */
 .custom-table .el-table__header th.el-table__cell,
 .custom-table .el-table__header th.el-table__cell:hover,
 .custom-table .el-table__header th.el-table__cell.is-sortable,
 .custom-table .el-table__header th.el-table__cell.is-sortable:hover {
-  background-color: var(--color-bg-spotlight, #fafafa) !important;
-  background: var(--color-bg-spotlight, #fafafa) !important;
+  background-color: #ffffff !important;
+  background: #ffffff !important;
 }
 
 /* 表头内部所有元素透明背景 */

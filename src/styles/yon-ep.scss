@@ -387,7 +387,11 @@ html :root {
   overflow: hidden;
   
   &__header th.el-table__cell {
-    background-color: var(--el-fill-color-light) !important;
+    // [FIX 2026-06-12] toolbar/table 一体化根因修复 #7
+    // 反复复发根因：之前这里用 var(--el-fill-color-light) (#f9fafb)
+    // 绕过 --el-table-header-bg-color 直接给表头灰色，覆盖了 _meta-table.scss / style.css 的修复
+    // 统一改为 #ffffff
+    background-color: #ffffff !important;
   }
 }
 
