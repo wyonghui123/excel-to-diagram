@@ -1626,24 +1626,104 @@ ui_view_config:
         position: 2
         importance: high
         sortable: true
+        # [FIX 2026-06-13] FK 列头过滤: value_help 弹出业务对象选择, 过滤 source_bo_id
+        searchable: false
+        filterable: true
+        filter_type: value_help
+        filter_placeholder: 选择源业务对象
+        api_param_key: source_bo_id
+        value_help:
+          source:
+            type: bo
+            target_bo: business_object
+            value_field: id
+            display_field: name
+            code_field: code
+          behavior:
+            multiple: true
+            allow_clear: true
+            parameter_bindings:
+              - local_field: version_id
+                target_field: version_id
+                required: true
       - key: source_bo_code
         title: 源业务对象编码
         width: 120
         position: 3
         importance: high
         sortable: true
+        # [FIX 2026-06-13] FK 列头过滤: 按编码搜, 弹业务对象选择, 过滤 source_bo_id
+        searchable: false
+        filterable: true
+        filter_type: value_help
+        filter_placeholder: 按编码选择源业务对象
+        api_param_key: source_bo_id
+        value_help:
+          source:
+            type: bo
+            target_bo: business_object
+            value_field: id
+            display_field: name
+            code_field: code
+          behavior:
+            multiple: true
+            allow_clear: true
+            parameter_bindings:
+              - local_field: version_id
+                target_field: version_id
+                required: true
       - key: target_bo_name
         title: 目标业务对象
         width: 150
         position: 4
         importance: high
         sortable: true
+        # [FIX 2026-06-13] FK 列头过滤: value_help 弹出业务对象选择, 过滤 target_bo_id
+        searchable: false
+        filterable: true
+        filter_type: value_help
+        filter_placeholder: 选择目标业务对象
+        api_param_key: target_bo_id
+        value_help:
+          source:
+            type: bo
+            target_bo: business_object
+            value_field: id
+            display_field: name
+            code_field: code
+          behavior:
+            multiple: true
+            allow_clear: true
+            parameter_bindings:
+              - local_field: version_id
+                target_field: version_id
+                required: true
       - key: target_bo_code
         title: 目标业务对象编码
         width: 120
         position: 5
         importance: high
         sortable: true
+        # [FIX 2026-06-13] FK 列头过滤: 按编码搜, 弹业务对象选择, 过滤 target_bo_id
+        searchable: false
+        filterable: true
+        filter_type: value_help
+        filter_placeholder: 按编码选择目标业务对象
+        api_param_key: target_bo_id
+        value_help:
+          source:
+            type: bo
+            target_bo: business_object
+            value_field: id
+            display_field: name
+            code_field: code
+          behavior:
+            multiple: true
+            allow_clear: true
+            parameter_bindings:
+              - local_field: version_id
+                target_field: version_id
+                required: true
       - key: relation_desc
         title: 描述
         width: 200

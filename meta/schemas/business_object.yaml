@@ -335,27 +335,86 @@ ui_view_config:
         sortable: true
         i18n_key: bo.field.code
       # [V1.1.4 2026-06-11] 删 effective_owner_id_display - 顶层 owner 已在 product
+      # [FIX 2026-06-13] FK 列头过滤: 用 value_help 弹出业务对象选择, 过滤底层 FK 字段 (api_param_key)
+      #   searchable: false -> 不进入顶部 keyword search (底层 service_module_id 是 int, 搜不到)
       - key: service_module_name
         title: 服务模块
         width: 150
         position: 10
         importance: high
         sortable: true
+        searchable: false
+        filterable: true
+        filter_type: value_help
+        filter_placeholder: 选择服务模块
+        api_param_key: service_module_id
         i18n_key: bo.field.service_module_name
+        value_help:
+          source:
+            type: bo
+            target_bo: service_module
+            value_field: id
+            display_field: name
+            code_field: code
+          behavior:
+            multiple: true
+            allow_clear: true
+            parameter_bindings:
+              - local_field: version_id
+                target_field: version_id
+                required: true
       - key: sub_domain_name
         title: 子领域
         width: 120
         position: 11
         importance: medium
         sortable: true
+        searchable: false
+        filterable: true
+        filter_type: value_help
+        filter_placeholder: 选择子领域
+        api_param_key: sub_domain_id
         i18n_key: bo.field.sub_domain_name
+        value_help:
+          source:
+            type: bo
+            target_bo: sub_domain
+            value_field: id
+            display_field: name
+            code_field: code
+          behavior:
+            multiple: true
+            allow_clear: true
+            parameter_bindings:
+              - local_field: version_id
+                target_field: version_id
+                required: true
       - key: domain_name
         title: 领域
         width: 120
         position: 12
         importance: medium
         sortable: true
+        searchable: false
+        filterable: true
+        filter_type: value_help
+        filter_placeholder: 选择领域
+        api_param_key: domain_id
         i18n_key: bo.field.domain_name
+        value_help:
+          source:
+            type: bo
+            target_bo: domain
+            value_field: id
+            display_field: name
+            code_field: code
+          behavior:
+            multiple: true
+            allow_clear: true
+            parameter_bindings:
+              - local_field: version_id
+                target_field: version_id
+                required: true
       - key: relation_count
         title: 关系数量
         width: 100

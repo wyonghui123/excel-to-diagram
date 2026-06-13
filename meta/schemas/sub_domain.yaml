@@ -227,13 +227,33 @@ ui_view_config:
         sortable: true
         i18n_key: sub_domain.field.code
       # [V1.1.4 2026-06-11] 删 effective_owner_id_display - 顶层 owner 已在 product
+      # [FIX 2026-06-13] FK 列头过滤: value_help 弹出领域选择, 过滤 domain_id
       - key: domain_name
         title: 领域
         width: 150
         position: 3
         importance: high
         sortable: true
+        searchable: false
+        filterable: true
+        filter_type: value_help
+        filter_placeholder: 选择领域
+        api_param_key: domain_id
         i18n_key: sub_domain.field.domain_name
+        value_help:
+          source:
+            type: bo
+            target_bo: domain
+            value_field: id
+            display_field: name
+            code_field: code
+          behavior:
+            multiple: true
+            allow_clear: true
+            parameter_bindings:
+              - local_field: version_id
+                target_field: version_id
+                required: true
       - key: relation_count
         title: 关系数量
         width: 100
