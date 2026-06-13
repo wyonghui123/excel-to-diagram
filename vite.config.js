@@ -60,6 +60,16 @@ export default defineConfig({
   server: {
     host: true,
     port: 3004,
+    // [FIX 2026-06-12 #13] 根治 MetaListPage toolbar/table "又这样了" 复发
+    // 根因: 浏览器缓存 Vite 编译产物 (SCSS 改完后旧 CSS 被缓存)
+    // 用户反馈"我刷新后现在又好了" 确认是缓存问题
+    // 修复: dev server 返回 no-store 头, 强制浏览器每次重新拉资源
+    // 范围: dev 模式生效 (server.headers), production 由 Vite 静态资源 hash 控制
+    headers: {
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+    },
     hmr: {
       // [Node.js 24 兼容] 使用 polling 模式替代 WebSocket：
       // Vite 6.4.1 的 WS HMR 服务器在 Node.js 24.14.0 上挂死，
