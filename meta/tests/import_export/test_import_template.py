@@ -15,7 +15,7 @@ import os
 import sys
 from openpyxl import load_workbook
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
 from meta.tests.conftest import get_shared_app
 from meta.services.token_service import TokenService

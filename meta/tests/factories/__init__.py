@@ -1,133 +1,76 @@
-# -*- coding: utf-8 -*-
 """
-[MODULE] meta.tests.factories (v3.18 D.2)
-[DESCRIPTION] Test data factories for AI Coding Agent
+测试数据工厂库 (Phase 4 v3.18.3+)
+====================================
 
-使用:
-  from meta.tests.factories import UserFactory, SubscriptionFactory
+提供 13+ 个核心工厂, 解决:
+- 硬编码 ID 泛滥 (1495 处 → ≤50)
+- 工厂采用率 0.28% → 80%
+- 清理率 0% → 95%
+- 唯一性规范化 (TBD-4)
 
-  user = UserFactory.create(role='admin')  # 写 DB
-  user = UserFactory.build()               # 仅构造, 不写 DB
+设计原则:
+1. 必须走真实 API (不能用 mock)
+2. 必须支持多 Agent 并行 (含 PID)
+3. 必须配 cleanup() 防止 DB 污染
+4. 必须生成唯一标识 (counter + random + ts)
+5. 必须有 docstring 和使用示例
 
-合规:
-  [OK] 走 cookie 认证 (走 tests/fixtures/admin_token.py)
-  [OK] 复用 v3.17 体系
+使用示例:
+    from meta.tests.factories import UserFactory, BusinessObjectFactory
+
+    def test_user_create(test_users):
+        user = test_users()  # auto-cleanup
+        assert user['id'] > 0
 """
-import os
-import sys
-import time
-import random
-import string
-from typing import Optional
-
-# 默认走 admin_token 的 cookie 模式
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(_HERE)))
-_FIXTURES_DIR = os.path.join(_PROJECT_ROOT, 'tests', 'fixtures')
-if _FIXTURES_DIR not in sys.path:
-    sys.path.insert(0, _FIXTURES_DIR)
-
-
-def _random_str(n: int = 8) -> str:
-    return ''.join(random.choices(string.ascii_lowercase + string.digits, k=n))
-
-
-class UserFactory:
-    """[DECORATIVE] v3.18 D.2: User factory (AI Agent 直接造测试数据)
-
-    字段:
-      username, display_name, email, role, password
-    """
-
-    _COUNTER = 0
-
-    @classmethod
-    def _next_id(cls) -> int:
-        cls._COUNTER += 1
-        return cls._COUNTER
-
-    @classmethod
-    def build(cls, **kwargs) -> dict:
-        """仅构造, 不写 DB"""
-        n = cls._next_id()
-        ts = int(time.time())
-        defaults = {
-            'username': kwargs.pop('username', f'user_{n}_{ts}_{_random_str(4)}'),
-            'display_name': kwargs.pop('display_name', f'Test User {n}'),
-            'email': kwargs.pop('email', f'user_{n}_{ts}@test.local'),
-            'role': kwargs.pop('role', 'user'),
-            'password': kwargs.pop('password', 'test123'),
-        }
-        defaults.update(kwargs)
-        return defaults
-
-    @classmethod
-    def create(cls, **kwargs) -> dict:
-        """通过 batch_save 写 DB, 返回创建的 user dict"""
-        from admin_token import call_action
-        data = cls.build(**kwargs)
-        try:
-            cookie = kwargs.pop('_cookie', None)
-        except KeyError:
-            cookie = None
-        # 拿 cookie
-        if not cookie:
-            from admin_token import get_admin_cookie
-            cookie = get_admin_cookie()
-
-        _, b = call_action('batch_save', {
-            'object_type': 'user',
-            'drafts': [{
-                'row_id': '__new_' + data['username'],
-                'is_new': True,
-                'fields': {
-                    'username': data['username'],
-                    'display_name': data['display_name'],
-                    'email': data['email'],
-                    'password_hash': 'placeholder',  # server 端 hash
-                },
-            }],
-        }, cookie=cookie)
-        if b.get('data', {}).get('created'):
-            data['id'] = b['data']['created'][0]
-        return data
-
-    @classmethod
-    def cleanup(cls, user_id, cookie=None):
-        """删除测试 user"""
-        from admin_token import call_action
-        if not cookie:
-            from admin_token import get_admin_cookie
-            cookie = get_admin_cookie()
-        call_action('batch_delete', {
-            'object_type': 'user',
-            'row_ids': [user_id],
-        }, cookie=cookie)
+from ._base import (
+    BaseFactory,
+    unique_id,
+    unique_str,
+    unique_email,
+    FACTORY_REGISTRY,
+    register_factory,
+)
+from .user import UserFactory
+from .role import RoleFactory
+from .user_group import UserGroupFactory
+from .bo import BusinessObjectFactory
+from .version import VersionFactory
+from .domain import DomainFactory
+from .subscription import SubscriptionFactory
+from .annotation import AnnotationFactory
+from .audit import AuditLogFactory
+from .permission import PermissionFactory
+from .relationship import RelationshipFactory
+from .product import ProductFactory
+from .import_export import ImportExportFactory
+from .webhook import WebhookFactory
 
 
-class SubscriptionFactory:
-    """[DECORATIVE] v3.18 D.2: Subscription factory"""
+__all__ = [
+    # 基础
+    'BaseFactory',
+    'unique_id',
+    'unique_str',
+    'unique_email',
+    'FACTORY_REGISTRY',
+    'register_factory',
+    # 工厂类
+    'UserFactory',
+    'RoleFactory',
+    'UserGroupFactory',
+    'BusinessObjectFactory',
+    'VersionFactory',
+    'DomainFactory',
+    'SubscriptionFactory',
+    'AnnotationFactory',
+    'AuditLogFactory',
+    'PermissionFactory',
+    'RelationshipFactory',
+    'ProductFactory',
+    'ImportExportFactory',
+    'WebhookFactory',
+]
 
-    @classmethod
-    def build(cls, **kwargs) -> dict:
-        n = int(time.time())
-        defaults = {
-            'object_type': kwargs.pop('object_type', 'user'),
-            'event_types': kwargs.pop('event_types', ['created']),
-            'channel': kwargs.pop('channel', 'webhook'),
-            'webhook_url': kwargs.pop('webhook_url', f'http://localhost:9999/test_{n}_{_random_str(4)}'),
-        }
-        defaults.update(kwargs)
-        return defaults
 
-    @classmethod
-    def create(cls, **kwargs) -> dict:
-        from admin_token import call_action
-        if not kwargs.get('_cookie'):
-            from admin_token import get_admin_cookie
-            kwargs['_cookie'] = get_admin_cookie()
-        data = cls.build(**kwargs)
-        _, b = call_action('subscription.create', data, cookie=kwargs['_cookie'])
-        if b.get('data', {}).get('id'):
-            data['id'] = b['data']['id']
-        return data
+__version__ = '3.18.3'
+__phase__ = 'Phase 4'

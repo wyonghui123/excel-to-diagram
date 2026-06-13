@@ -156,6 +156,16 @@ export function useTooltip() {
    */
   // const setLabelBackground = (edgeLabels) => { ... }
 
+  // 实例级状态：每个 useTooltip() 调用都有自己的清理列表
+  let _cleanupFns = []
+  let _currentSvg = null
+
+  // 注册可清理的事件监听器
+  const addListener = (element, event, handler, options) => {
+    element.addEventListener(event, handler, options)
+    _cleanupFns.push(() => element.removeEventListener(event, handler, options))
+  }
+
   const matchPathsToRelations = (svg, labels, relationDescriptions) => {
     const pathToRelationMap = new Map()
     const relationCodeMap = new Map()
@@ -207,7 +217,7 @@ export function useTooltip() {
   }
 
   const setupLabelEvents = (label, index, tooltip, relationDescriptions, pathToRelationMap, labels, selectedElements, svg, realEdgePaths) => {
-    label.addEventListener('mouseenter', (e) => {
+    const onEnter = (e) => {
       let tooltipText = '无关系说明'
       const labelText = label.textContent || label.innerHTML
       const relation = relationDescriptions.find(r => r.relationCode && r.relationCode.trim() === labelText.trim())
@@ -215,17 +225,14 @@ export function useTooltip() {
         tooltipText = formatTooltipText(relation)
       }
       showTooltip(tooltip, tooltipText, e.clientX, e.clientY)
-    })
-
-    label.addEventListener('mousemove', (e) => {
+    }
+    const onMove = (e) => {
       moveTooltip(tooltip, e.clientX, e.clientY)
-    })
-
-    label.addEventListener('mouseleave', () => {
+    }
+    const onLeave = () => {
       hideTooltip(tooltip)
-    })
-
-    label.addEventListener('click', (e) => {
+    }
+    const onClick = (e) => {
       e.stopPropagation()
       clearHighlight(selectedElements)
       selectedElements.label = label
@@ -241,25 +248,27 @@ export function useTooltip() {
           correspondingPath.style.filter = 'drop-shadow(0 0 8px rgba(0, 0, 0, 0.6))'
         }
       }
-    })
+    }
+
+    addListener(label, 'mouseenter', onEnter)
+    addListener(label, 'mousemove', onMove)
+    addListener(label, 'mouseleave', onLeave)
+    addListener(label, 'click', onClick)
   }
 
   const setupPathEvents = (path, tooltip, pathToRelationMap, labels, selectedElements, svg) => {
-    path.addEventListener('mouseenter', (e) => {
+    const onEnter = (e) => {
       const relation = pathToRelationMap.get(path)
       const tooltipText = relation ? formatTooltipText(relation) : '无关系说明'
       showTooltip(tooltip, tooltipText, e.clientX, e.clientY)
-    })
-
-    path.addEventListener('mousemove', (e) => {
+    }
+    const onMove = (e) => {
       moveTooltip(tooltip, e.clientX, e.clientY)
-    })
-
-    path.addEventListener('mouseleave', () => {
+    }
+    const onLeave = () => {
       hideTooltip(tooltip)
-    })
-
-    path.addEventListener('click', (e) => {
+    }
+    const onClick = (e) => {
       e.stopPropagation()
 
       selectedElements.path = null
@@ -284,7 +293,12 @@ export function useTooltip() {
         highlightNode(svg, relation.source, 'source', selectedElements)
         highlightNode(svg, relation.target, 'target', selectedElements)
       }
-    })
+    }
+
+    addListener(path, 'mouseenter', onEnter)
+    addListener(path, 'mousemove', onMove)
+    addListener(path, 'mouseleave', onLeave)
+    addListener(path, 'click', onClick)
   }
 
   const addTrailingDottedLines = (svg, labels, diagramType, hideTails = false) => {
@@ -447,7 +461,7 @@ export function useTooltip() {
   }
 
   const addClickToClearHighlight = (svg, selectedElements) => {
-    svg.addEventListener('click', (e) => {
+    const onClick = (e) => {
       const target = e.target
       const isNode = target.closest('.node')
       const isEdgePath = target.closest('.edgePath') || target.classList.contains('flowchart-link')
@@ -456,15 +470,20 @@ export function useTooltip() {
       if (!isNode && !isEdgePath && !isEdgeLabel) {
         clearHighlight(selectedElements)
       }
-    })
+    }
+    addListener(svg, 'click', onClick)
   }
 
   const addMouseOverTooltips = (svg, relationDescriptions, diagramType, hideTails = false) => {
     if (!svg) return
 
+    // 先清理本实例上一次的监听器和装饰元素（不跨实例）
+    cleanup()
+
     const tooltip = createTooltipElement()
     const selectedElements = createSelectionState()
     const edgeLabels = getEdgeLabels(svg)
+    _currentSvg = svg
 
     // [OK] 纯 CSS 方案：不再需要 JavaScript 设置背景
     // setLabelBackground(edgeLabels)
@@ -484,7 +503,20 @@ export function useTooltip() {
     addClickToClearHighlight(svg, selectedElements)
   }
 
+  // 清理本实例注册的所有事件监听器 + 当前 svg 上的装饰元素
+  // 不清理 tooltip DOM 元素（fullscreen 切换需要复用）
+  // 不影响其他 MermaidComponent 实例
+  const cleanup = () => {
+    _cleanupFns.forEach(fn => fn())
+    _cleanupFns = []
+    if (_currentSvg) {
+      _currentSvg.querySelectorAll('[data-trailing-line], [data-trailing-marker]').forEach(el => el.remove())
+    }
+    _currentSvg = null
+  }
+
   return {
-    addMouseOverTooltips
+    addMouseOverTooltips,
+    cleanup
   }
 }

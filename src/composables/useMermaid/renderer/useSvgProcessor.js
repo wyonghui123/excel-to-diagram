@@ -472,6 +472,7 @@ export function useSvgProcessor(options) {
     renderAnnotationOverlay,
     setupCanvasLayout,
     processSvg,
+    cleanup,
     // 关键导出 v26：导出 buildColorLegendData 让 HTML 导出器复用 legend 逻辑
     buildColorLegendData
   }

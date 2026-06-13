@@ -115,8 +115,8 @@ describe('useMetaList 接口契约（PR 5）', () => {
 
   describe('return 块 API 存在性（源码静态分析）', () => {
     it('return 块包含全部 85 个顶层 API 标识符', () => {
-      // 提取 return { ... } 顶层属性
-      const returnBlockMatch = useMetaListSource.match(/  return \{[\s\S]*?\n  \}\n\}/)
+      // 提取 return { ... } 顶层属性 (兼容 CRLF 行尾)
+      const returnBlockMatch = useMetaListSource.match(/  return \{[\s\S]*?\r?\n  \}\r?\n\}/)
       expect(returnBlockMatch).not.toBeNull()
       const returnBlock = returnBlockMatch[0]
 
@@ -216,8 +216,8 @@ describe('useMetaList 接口契约（PR 5）', () => {
     })
 
     it('return 块未引入未声明的 API（防止新增 API 漏记）', () => {
-      // 提取 return 块的顶层 API
-      const returnBlockMatch = useMetaListSource.match(/  return \{[\s\S]*?\n  \}\n\}/)
+      // 提取 return 块的顶层 API (兼容 CRLF 行尾)
+      const returnBlockMatch = useMetaListSource.match(/  return \{[\s\S]*?\r?\n  \}\r?\n\}/)
       const returnBlock = returnBlockMatch[0]
       const declaredApis = new Set()
       for (const line of returnBlock.split('\n')) {

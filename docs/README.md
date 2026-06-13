@@ -1,7 +1,7 @@
 ---
 title: Excel-to-Diagram 文档门户
-version: 1.0.0
-date: 2026-06-07
+version: 1.1.0
+date: 2026-06-13
 status: 活跃
 audience: 全员
 ---
@@ -9,7 +9,7 @@ audience: 全员
 # Excel-to-Diagram 文档门户
 
 > 项目所有文档的统一入口
-> 最后更新: 2026-06-07
+> 最后更新: 2026-06-13 (新增 useMetaList 拆分 + 浅响应式迁移规范索引)
 
 ## 核心文档
 
@@ -45,7 +45,7 @@ audience: 全员
 | [page-type-matrix.md](./architecture/page-type-matrix.md) | 页面类型矩阵 |
 | [yaml-child-list-config-example.md](./architecture/yaml-child-list-config-example.md) | YAML 配置示例 |
 
-### 设计规范 [specs/](./specs/)（91 份）
+### 设计规范 [specs/](./specs/)（93 份）
 
 各子系统的设计规范与 RFC。
 
@@ -62,6 +62,8 @@ audience: 全员
 | [spec-version-visibility-draft.md](./specs/spec-version-visibility-draft.md) | 版本可见性 |
 | [spec-v3-gap-analysis.md](./specs/spec-v3-gap-analysis.md) | v3 差距分析 |
 | [spec-pre-deployment-optimization-v2.md](./specs/spec-pre-deployment-optimization-v2.md) | 部署前优化 v2 |
+| [spec-code-health-phase2-2026-06-13.md](./specs/spec-code-health-phase2-2026-06-13.md) | 代码健康 Phase 2 (浅响应式迁移) |
+| [spec-use-metalist-split-2026-06-13.md](./specs/spec-use-metalist-split-2026-06-13.md) | useMetaList 拆分分析 + 实施报告 (154 passed / 0 failed) |
 
 ### 权限体系升级专题 [spec_权限体系升级/](./spec_权限体系升级/)（7 份）
 
@@ -138,6 +140,7 @@ audience: 全员
 | [SOP-USER-DEPLOYMENT.md](./SOP-USER-DEPLOYMENT.md) | 用户部署 SOP |
 | [UI_COMPONENT_GUIDELINES.md](./UI_COMPONENT_GUIDELINES.md) | UI 组件指南 |
 | [审计日志最佳实践.md](./audit-log-best-practices.md) | 审计日志最佳实践 |
+| [CHANGELOG-2026-06-13-M1-phase2.md](./CHANGELOG-2026-06-13-M1-phase2.md) | M1+Phase 2 完成报告 (浅响应式 + 拆分前置 + MVU 抽取) |
 
 ## 旧版本与归档
 

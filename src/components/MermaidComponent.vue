@@ -160,6 +160,7 @@ export default {
     const isMaximized = ref(false)
     let isRendering = false  // 防止无限循环
     let lastRenderData = null  // 上次渲染的数据，用于检测变化
+    let interactionCleanup = null  // useInteraction 返回的清理函数（用于 onBeforeUnmount）
 
     const effectiveLayoutControlConfig = computed(() => {
       const baseConfig = props.layoutControlConfig || props.diagramData?.layoutControlConfig || null
@@ -832,6 +833,16 @@ export default {
       window.removeEventListener('resize', handleWindowResize)
       // 关键修复 v9：清理 fullscreenchange 监听
       document.removeEventListener('fullscreenchange', handleFullscreenChange)
+      // 修复内存泄漏：清理 useInteraction 注册的 wheel/mousedown/mousemove/mouseup 监听器
+      if (interactionCleanup) {
+        interactionCleanup()
+        interactionCleanup = null
+      }
+      // 修复内存泄漏：清理 useTooltip + annotationOverlay 注册的监听器
+      // svgProcessor.cleanup() 内部调用 tooltip.cleanup()
+      if (svgProcessor && typeof svgProcessor.cleanup === 'function') {
+        svgProcessor.cleanup()
+      }
     })
 
     // 导出为图片

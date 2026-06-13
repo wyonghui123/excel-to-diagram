@@ -1,0 +1,185 @@
+{
+  "common": {
+    "save": "保存",
+    "cancel": "取消",
+    "confirm": "确认",
+    "delete": "删除",
+    "edit": "编辑",
+    "create": "创建",
+    "search": "搜索",
+    "reset": "重置",
+    "submit": "提交",
+    "back": "返回",
+    "next": "下一步",
+    "previous": "上一步",
+    "loading": "加载中...",
+    "success": "操作成功",
+    "failed": "操作失败",
+    "warning": "警告",
+    "error": "错误",
+    "info": "提示"
+  },
+  "auth": {
+    "login": "登录",
+    "logout": "退出登录",
+    "username": "用户名",
+    "password": "密码",
+    "displayName": "显示名称",
+    "email": "邮箱",
+    "loginFailed": "登录失败",
+    "loginSuccess": "登录成功",
+    "sessionExpired": "会话已过期，请重新登录",
+    "unauthorized": "未授权",
+    "usernamePlaceholder": "请输入用户名",
+    "passwordPlaceholder": "请输入密码",
+    "loginPrompt": "请登录以继续",
+    "defaultAccount": "默认管理员账号: admin / admin123"
+  },
+  "changePassword": {
+    "title": "修改密码",
+    "oldPassword": "旧密码",
+    "oldPasswordPlaceholder": "请输入旧密码",
+    "newPassword": "新密码",
+    "newPasswordPlaceholder": "请输入新密码（至少6位）",
+    "confirmNewPassword": "确认新密码",
+    "confirmNewPasswordPlaceholder": "请再次输入新密码",
+    "passwordMismatch": "两次输入的密码不一致",
+    "fillAllFields": "请填写所有字段",
+    "passwordTooShort": "新密码长度不能少于6位",
+    "newPasswordMismatch": "两次输入的新密码不一致",
+    "success": "密码修改成功",
+    "failed": "密码修改失败"
+  },
+  "accountSettings": {
+    "title": "账户设置",
+    "displayName": "请输入显示名称",
+    "email": "请输入邮箱",
+    "locale": {
+      "zhCN": "中文（简体）",
+      "enUS": "English (US)",
+      "enGB": "English (UK)"
+    },
+    "tabs": {
+      "profile": "个人信息",
+      "security": "安全设置",
+      "preferences": "偏好设置"
+    },
+    "profile": {
+      "username": "用户名",
+      "displayName": "显示名称",
+      "email": "电子邮件",
+      "edit": "编辑资料",
+      "usernameNotEditable": "用户名不可修改",
+      "defaultRole": "普通用户"
+    },
+    "security": {
+      "intro": "为保障账户安全，建议定期更换密码",
+      "forceNotice": "密码已被重置，请设置新密码",
+      "setPassword": "设置密码",
+      "changePassword": "修改密码"
+    },
+    "preferences": {
+      "language": "语言",
+      "timezone": "时区",
+      "dateStyle": "日期格式",
+      "timeStyle": "时间格式",
+      "hourCycle": "时间制式",
+      "preview": "预览",
+      "hour24": "24小时制",
+      "hour12": "12小时制",
+      "save": "保存偏好设置",
+      "dateStyleFull": "完整",
+      "dateStyleLong": "长",
+      "dateStyleMedium": "中",
+      "dateStyleShort": "短"
+    },
+    "strength": {
+      "weak": "弱",
+      "medium": "中",
+      "strong": "强"
+    },
+    "validation": {
+      "required": "不能为空",
+      "emailFormat": "格式不正确",
+      "passwordRequired": "请输入",
+      "passwordTooShort": "至少6位",
+      "passwordMismatch": "不一致",
+      "saveFailed": "保存失败",
+      "saveFailedRetry": "保存失败，请重试",
+      "networkError": "网络错误",
+      "changePasswordFailed": "修改失败"
+    }
+  },
+  "diagram": {
+    "title": "图表",
+    "type": "类型",
+    "config": "配置",
+    "display": "展示",
+    "preview": "预览",
+    "export": "导出",
+    "import": "导入",
+    "copyCode": "复制代码",
+    "exportHTML": "导出 HTML（只读版 - 可直接双击打开）",
+    "resetView": "重置视图",
+    "maximize": "最大化",
+    "minimize": "最小化",
+    "close": "关闭"
+  },
+  "ai": {
+    "inputPlaceholder": "输入消息或命令...",
+    "thinking": "思考中...",
+    "replying": "回复中...",
+    "errorMessage": "AI 错误"
+  },
+  "feishuBot": {
+    "title": "飞书机器人交互",
+    "connected": "已连接",
+    "disconnected": "未连接",
+    "connecting": "连接中...",
+    "connect": "连接机器人"
+  },
+  "validationPanel": {
+    "title": "数据校验结果",
+    "errorCount": "个错误",
+    "warningCount": "个警告",
+    "infoCount": "个提示",
+    "filterHint": "点击查看被过滤的对象和关联",
+    "filteredSummary": "过滤: {objects}对象/{relations}关系"
+  },
+  "import": {
+    "feishuToken": "请输入飞书表格的 Token",
+    "sheetName": "例如: Sheet1",
+    "range": "例如: A1:Z100",
+    "deepseekApiKey": "请输入 DeepSeek API Key",
+    "intelligentApiKey": "请输入智能 API Key",
+    "feishuAppId": "请输入飞书 App ID"
+  },
+  "validation": {
+    "filterHint": "点击查看被过滤的对象和关联"
+  },
+  "message": {
+    "operationSuccess": "操作成功",
+    "operationFailed": "操作失败"
+  },
+  "metaList": {
+    "loadListConfigFailed": "加载列表配置失败",
+    "selectRowsFirst": "请先选择要操作的数据",
+    "selectDeleteFirst": "请选择要删除的记录",
+    "confirmDeleteTitle": "确认删除",
+    "confirmDeleteMessage": "确定要删除选中的 {count} 条记录吗？",
+    "deleteSuccess": "成功删除 {count} 条记录",
+    "deleteFailedTitle": "删除失败",
+    "deleteFailed": "删除失败",
+    "importSuccess": "导入完成，共处理 {count} 条数据",
+    "confirmTitle": "确认操作",
+    "discardChangesTitle": "提示",
+    "discardChangesMessage": "有未保存的修改，是否放弃？",
+    "discardChangesConfirm": "放弃",
+    "saveFailed": "保存失败",
+    "loadFailed": "{context}失败",
+    "selectionLimitHit": "选中数量超过上限 {limit} 条, 已截断。请减少选区或分批操作。"
+  },
+  "app": {
+    "title": "BIP应用架构管理"
+  }
+}

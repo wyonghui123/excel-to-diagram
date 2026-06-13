@@ -1,6 +1,13 @@
 // Auto-generated from meta/core/error_codes.py
 // DO NOT EDIT MANUALLY
 // Date: 2026-06-06T01:54:57.275Z
+//
+// ⚠️ 命名约定：
+//   - `ErrorCodes`（带 s）是运行时枚举值（30 个业务错误，lowercase snake_case）
+//   - `ErrorCode`（无 s）是 TypeScript 类型（值联合）
+//   - 这与 '@/utils/httpClient' 的 ErrorCode（HTTP 传输层，UPPER_SNAKE）不同源，
+//     业务代码请勿混用。
+// ---------------------------------------------------------------------------
 
 export const ErrorCodes = {
   UNAUTHORIZED: 'unauthorized',

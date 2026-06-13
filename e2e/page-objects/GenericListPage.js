@@ -195,4 +195,114 @@ export class GenericListPage {
     const count = await this.getRowCount()
     expect(count, 'List should be empty').toBe(0)
   }
+
+  // ============================================================
+  // Row Actions (Dropdown) — v3.18 enum E2E
+  // ============================================================
+
+  /**
+   * 打开行级操作下拉菜单 (点 ... 触发 dropdown)
+   * @param {string|RegExp} rowText
+   * @returns {Promise<void>}
+   */
+  async openRowActionsMenu(rowText) {
+    const row = await this.findRow(rowText, { timeout: 5000 })
+    if (!row) throw new Error(`Row "${rowText}" not found for row action`)
+    const trigger = row.locator('.row-action-trigger, button[aria-label*="操作"], .action-column .el-dropdown button').first()
+    if (!(await trigger.isVisible({ timeout: 2000 }).catch(() => false))) {
+      throw new Error(`Row "${rowText}" has no row action trigger (e.g. category=system hides it)`)
+    }
+    await trigger.click()
+    // dropdown 出现
+    await this.page.waitForSelector('.row-action-popper:visible, .el-dropdown-menu:visible', { timeout: 3000 }).catch(() => {})
+  }
+
+  /**
+   * 检查行级操作菜单中某项是否可见
+   * @param {string|RegExp} rowText
+   * @param {string|RegExp} actionLabel - 按钮 label (e.g. "编辑", "删除", "查看详情")
+   * @returns {Promise<boolean>}
+   */
+  async isRowActionVisible(rowText, actionLabel) {
+    try {
+      await this.openRowActionsMenu(rowText)
+    } catch (e) {
+      return false
+    }
+    const popper = this.page.locator('.row-action-popper:visible, .el-dropdown-menu:visible').last()
+    const item = popper.locator('.el-dropdown-menu__item:visible', { hasText: actionLabel }).first()
+    const visible = await item.isVisible({ timeout: 1500 }).catch(() => false)
+    // 关闭 popper
+    await this.page.keyboard.press('Escape').catch(() => {})
+    await this.page.waitForTimeout(150)
+    return visible
+  }
+
+  /**
+   * 点击行级操作 (dropdown 模式)
+   * @param {string|RegExp} rowText
+   * @param {string|RegExp} actionLabel
+   */
+  async clickRowAction(rowText, actionLabel) {
+    await this.openRowActionsMenu(rowText)
+    const popper = this.page.locator('.row-action-popper:visible, .el-dropdown-menu:visible').last()
+    const item = popper.locator('.el-dropdown-menu__item:visible', { hasText: actionLabel }).first()
+    await item.waitFor({ state: 'visible', timeout: 3000 })
+    await item.click()
+    return this
+  }
+
+  /**
+   * 点击行内 "编辑" 按钮 (兼容 inline 按钮和 dropdown)
+   */
+  async clickRowEdit(rowText) {
+    // 优先尝试 inline 按钮
+    const row = await this.findRow(rowText, { timeout: 5000 })
+    if (!row) throw new Error(`Row "${rowText}" not found`)
+    const inlineEdit = row.locator('button:has-text("编辑"):not(.row-action-trigger)').first()
+    if (await inlineEdit.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await inlineEdit.click()
+      return this
+    }
+    // 否则走 dropdown
+    return this.clickRowAction(rowText, /编辑|Edit/)
+  }
+
+  /**
+   * 点击行内 "删除" 按钮 (兼容 inline 按钮和 dropdown)
+   */
+  async clickRowDelete(rowText) {
+    const row = await this.findRow(rowText, { timeout: 5000 })
+    if (!row) throw new Error(`Row "${rowText}" not found`)
+    const inlineDel = row.locator('button:has-text("删除"):not(.row-action-trigger)').first()
+    if (await inlineDel.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await inlineDel.click()
+      return this
+    }
+    return this.clickRowAction(rowText, /删除|Delete/)
+  }
+
+  /**
+   * 获取行级 API 解析的 ui_actions_resolved
+   * 直接调后端接口 (admin cookie 来自 storageState)
+   * 优先 v1 端点, 410 时回退 v2 BO 端点
+   * @param {string} objectType - e.g. 'enum_type'
+   * @param {string} objectId - 业务 ID (e.g. 'data_category' 或 'ActionType')
+   * @returns {Promise<Object>} ui_actions_resolved
+   */
+  async getUiActionsResolved(objectType, objectId) {
+    // 优先 v1 enum-types/<id> (返回 ui_actions_resolved)
+    const v1 = await this.page.request.get(`/api/v1/${objectType.replace(/_/g, '-')}/${encodeURIComponent(objectId)}`)
+    if (v1.ok()) {
+      const body = await v1.json()
+      return body?.data?.ui_actions_resolved || body?.ui_actions_resolved || null
+    }
+    // 回退 v2 BO 端点
+    const v2 = await this.page.request.get(`/api/v2/bo/${objectType}/${encodeURIComponent(objectId)}`)
+    if (v2.ok()) {
+      const body = await v2.json()
+      return body?.data?.ui_actions_resolved || body?.ui_actions_resolved || null
+    }
+    throw new Error(`getUiActionsResolved failed: v1=${v1.status()}, v2=${v2.status()}`)
+  }
 }

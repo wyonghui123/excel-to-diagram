@@ -3,6 +3,10 @@ import logging
 import os
 from flask import Blueprint, request, jsonify, g
 
+# 用户输入 page_size 的上限（防止 DoS 攻击）
+# 注：内部硬编码调用（如预览端点 page_size=5000）不受此限制
+MAX_USER_PAGE_SIZE = 500
+
 from meta.core.bo_framework import bo_framework
 from meta.core.models import registry
 from meta.services.auth_middleware import login_required, get_current_user
@@ -331,6 +335,7 @@ def query_bo(object_type):
     request_filters = dict(request.args)
     page = int(request.args.get('page', 1))
     page_size = int(request.args.get('page_size', request.args.get('pageSize', 20)))
+    page_size = max(1, min(page_size, MAX_USER_PAGE_SIZE))  # 防止 DoS：限制用户输入
     ordering = request.args.get('ordering', '')
 
     # 移除分页和排序参数，只保留过滤参数
@@ -693,6 +698,7 @@ def query_associations_bo(object_type, obj_id, association_name):
     bo = _get_bo()
     page = int(request.args.get('page', 1))
     page_size = int(request.args.get('page_size', request.args.get('pageSize', 50)))
+    page_size = max(1, min(page_size, MAX_USER_PAGE_SIZE))  # 防止 DoS：限制用户输入
 
     filters, ordering, search = _extract_assoc_query_params(request.args)
 
@@ -974,6 +980,10 @@ def batch_query_associations(object_type, association_name):
     source_ids = data.get('source_ids', [])
     page = data.get('page', 1)
     page_size = data.get('page_size', data.get('pageSize', 20))
+    try:
+        page_size = max(1, min(int(page_size), MAX_USER_PAGE_SIZE))  # 防止 DoS：限制用户输入
+    except (TypeError, ValueError):
+        page_size = 20
     search = data.get('search', '')
 
     if not source_ids:

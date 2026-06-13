@@ -222,4 +222,145 @@ export class DetailDrawerPage {
     expect(drawerText, `Drawer should contain text "${text}"`).toContain(text)
     return this
   }
+
+  // ============================================================
+  // Facet / Action 矩阵 (v3.18 enum E2E)
+  // ============================================================
+
+  /**
+   * 切换 facet (e.g. "基本信息", "维度配置", "系统信息")
+   * @param {string|RegExp} facetName
+   */
+  async switchFacet(facetName) {
+    const drawer = this.getRoot()
+    // 兼容: 标题 tab (.app-card-header) / 锚点 tab (.anchor-tab) / 标准 el-tabs
+    const candidates = [
+      `.app-card-header:has-text("${facetName}")`,
+      `.anchor-tab:has-text("${facetName}")`,
+      `.el-tabs__item:has-text("${facetName}")`,
+      `.el-collapse-item__header:has-text("${facetName}")`,
+      `.section-title:has-text("${facetName}")`
+    ]
+    for (const sel of candidates) {
+      const tab = drawer.locator(sel).first()
+      if (await tab.isVisible({ timeout: 1500 }).catch(() => false)) {
+        await tab.click()
+        await this.page.waitForTimeout(300)
+        return this
+      }
+    }
+    throw new Error(`Facet "${facetName}" not found in drawer`)
+  }
+
+  /**
+   * 断言 drawer 中无任何 action 按钮 (用于 system/locked 场景)
+   * @param {string[]} allowedLabels - 允许出现的按钮 (默认 [])
+   */
+  async expectNoActions(allowedLabels = []) {
+    const drawer = this.getRoot()
+    const allowed = new Set(allowedLabels)
+    const actionBar = drawer.locator(this.actionsSelector).first()
+    const exists = await actionBar.count()
+    if (exists === 0) return this  // 没有 action bar → 通过
+
+    const buttons = actionBar.locator('button')
+    const cnt = await buttons.count()
+    const visibleLabels = []
+    for (let i = 0; i < cnt; i++) {
+      const btn = buttons.nth(i)
+      if (await btn.isVisible({ timeout: 500 }).catch(() => false)) {
+        const txt = (await btn.textContent() || '').trim()
+        if (txt) visibleLabels.push(txt)
+      }
+    }
+    const unexpected = visibleLabels.filter(l => !allowed.has(l))
+    expect(unexpected, `drawer 应无操作按钮, 但发现: ${unexpected.join(', ')}`).toEqual([])
+    return this
+  }
+
+  /**
+   * 断言字段被禁用 (label 找到对应 input, input/textarea/select disabled)
+   */
+  async expectFieldDisabled(label) {
+    const drawer = this.getRoot()
+    const formItem = drawer.locator(
+      `.el-form-item:has(.el-form-item__label:has-text("${label}"))`
+    ).first()
+    await formItem.waitFor({ state: 'visible', timeout: 3000 })
+    const input = formItem.locator('input, textarea').first()
+    const exists = await input.count()
+    if (exists > 0) {
+      const disabled = await input.isDisabled()
+      expect(disabled, `Field "${label}" should be disabled`).toBe(true)
+    } else {
+      // 选择型字段: el-select 整体 disabled
+      const select = formItem.locator('.el-select').first()
+      const exists2 = await select.count()
+      if (exists2 > 0) {
+        const cls = (await select.getAttribute('class') || '').split(/\s+/)
+        expect(cls.some(c => c.includes('disabled')), `Select "${label}" should be disabled`).toBe(true)
+      }
+    }
+    return this
+  }
+
+  /**
+   * 等待成功/错误通知 (ElNotification / ElMessage)
+   * @param {'success'|'error'|'warning'|'info'} type
+   * @param {string|RegExp} textMatch
+   * @param {number} timeout
+   */
+  async expectNotification(type, textMatch, timeout = 8000) {
+    const sel = `.el-notification.${type}, .el-notification--${type}, .el-message--${type}`
+    const notif = this.page.locator(sel).first()
+    await notif.waitFor({ state: 'visible', timeout }).catch(async () => {
+      // 兜底: 任意 notification/message
+      const fallback = this.page.locator(`.el-notification:has-text("${textMatch}"), .el-message:has-text("${textMatch}")`).first()
+      await fallback.waitFor({ state: 'visible', timeout: 2000 })
+    })
+    const txt = (await notif.textContent().catch(() => '')) || ''
+    if (textMatch instanceof RegExp) {
+      expect(txt, `Notification text should match ${textMatch}`).toMatch(textMatch)
+    } else if (typeof textMatch === 'string') {
+      expect(txt, `Notification should contain "${textMatch}"`).toContain(textMatch)
+    }
+    return this
+  }
+
+  /**
+   * 等待通知消失 (防止脏数据)
+   */
+  async waitNotificationGone(timeout = 10000) {
+    await this.page.locator('.el-notification, .el-message').first().waitFor({ state: 'hidden', timeout }).catch(() => {})
+    return this
+  }
+
+  /**
+   * 切换到"编辑"模式后, 获取表单所有字段 + 值
+   * @returns {Promise<Array<{label: string, value: string, disabled: boolean}>>}
+   */
+  async getFormFields() {
+    const drawer = this.getRoot()
+    const items = drawer.locator('.el-form-item')
+    const cnt = await items.count()
+    const out = []
+    for (let i = 0; i < cnt; i++) {
+      const item = items.nth(i)
+      const label = (await item.locator('.el-form-item__label').textContent() || '').trim()
+      const input = item.locator('input, textarea').first()
+      const select = item.locator('.el-select').first()
+      let value = ''
+      let disabled = false
+      if (await input.count() > 0) {
+        value = await input.inputValue().catch(() => '')
+        disabled = await input.isDisabled()
+      } else if (await select.count() > 0) {
+        value = (await select.locator('.el-select__placeholder, input').first().textContent().catch(() => '')) || ''
+        const cls = (await select.getAttribute('class') || '').split(/\s+/)
+        disabled = cls.some(c => c.includes('disabled'))
+      }
+      if (label) out.push({ label, value, disabled })
+    }
+    return out
+  }
 }

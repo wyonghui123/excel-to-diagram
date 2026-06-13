@@ -186,7 +186,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { DateTimePicker } from '@/components/common'
 import ValueHelpField from '@/components/common/ValueHelpField.vue'
 
@@ -314,11 +314,17 @@ function clearAllOptions(field) {
 }
 
 // 点击外部关闭下拉框
-if (typeof window !== 'undefined') {
-  document.addEventListener('click', () => {
-    activeMultiSelect.value = null
-  })
+const handleOutsideClick = () => {
+  activeMultiSelect.value = null
 }
+
+onMounted(() => {
+  document.addEventListener('click', handleOutsideClick)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', handleOutsideClick)
+})
 </script>
 
 <style scoped>

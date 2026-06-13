@@ -49,6 +49,27 @@ semantics:
 # UI 视图配置
 # ────────────────────────────────────────────
 ui_view_config:
+  # ──────────────────────────────────────────
+  # UI 按钮矩阵 (v3.18 enum-mgmt-spec FR-011)
+  # ──────────────────────────────────────────
+  # 后端 GET /api/v1/enum-types/{id} 时按 (category, mutability) 实时求值，
+  # 返回 ui_actions_resolved 字段。前端 v-bind="ui_actions_resolved" 控制按钮。
+  ui_actions:
+    create_value:
+      allowed_when: "category != 'system' AND mutability != 'locked'"
+      frontend_hint: "新增枚举值"
+    update_value:
+      allowed_when: "category != 'system' AND mutability != 'locked'"
+      note: "is_system=true 的 enum_value 额外受 enum_value.is_system 保护（见 enum_value.ui_actions）"
+    delete_value:
+      allowed_when: "category != 'system' AND mutability != 'locked'"
+    toggle_active:
+      allowed_when: "category != 'system' AND mutability != 'locked'"
+    update_type:
+      allowed_when: "category != 'system'"
+      note: "mutability 字段变更需要 super_admin 权限（FR-018）"
+    delete_type:
+      allowed_when: "category != 'system' AND value_count == 0"
   filter:
     layout: sidebar
     filters:
@@ -289,17 +310,37 @@ fields:
     type: string
     db_column: mutability
     required: true
-    description: 用户可维护程度（mutable/immutable）
+    description: 用户可维护程度。规范化为 3 档：fullEditable（完全可改）/ extensible（可加不可改预置）/ locked（完全锁）。3 值之外在 API 层被拒绝（INVALID_MUTABILITY）。
     semantics:
       meaning: 控制用户对枚举值的操作权限
       analytics:
         category: dimension
         type: categorical
         display_name: 可维护性
+    enum_values:
+      - value: fullEditable
+        label: 完全可改
+        color: success
+      - value: extensible
+        label: 可扩展
+        color: warning
+      - value: locked
+        label: 完全锁
+        color: danger
+    value_help:
+      source:
+        type: enum
+        enum_type_id: mutability
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+      presentation:
+        result_type: dropdown
     ui:
       visible: true
       editable: true
-      widget: text
+      widget: value_help
       fieldGroup: 基本信息
       fieldGroupPosition: 40
       i18n_key: enum_type.field.mutability

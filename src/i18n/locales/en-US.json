@@ -1,0 +1,185 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "delete": "Delete",
+    "edit": "Edit",
+    "create": "Create",
+    "search": "Search",
+    "reset": "Reset",
+    "submit": "Submit",
+    "back": "Back",
+    "next": "Next",
+    "previous": "Previous",
+    "loading": "Loading...",
+    "success": "Success",
+    "failed": "Failed",
+    "warning": "Warning",
+    "error": "Error",
+    "info": "Info"
+  },
+  "auth": {
+    "login": "Login",
+    "logout": "Logout",
+    "username": "Username",
+    "password": "Password",
+    "displayName": "Display Name",
+    "email": "Email",
+    "loginFailed": "Login failed",
+    "loginSuccess": "Login success",
+    "sessionExpired": "Session expired, please login again",
+    "unauthorized": "Unauthorized",
+    "usernamePlaceholder": "Enter username",
+    "passwordPlaceholder": "Enter password",
+    "loginPrompt": "Please login to continue",
+    "defaultAccount": "Default admin account: admin / admin123"
+  },
+  "changePassword": {
+    "title": "Change Password",
+    "oldPassword": "Old Password",
+    "oldPasswordPlaceholder": "Enter old password",
+    "newPassword": "New Password",
+    "newPasswordPlaceholder": "Enter new password (at least 6 characters)",
+    "confirmNewPassword": "Confirm New Password",
+    "confirmNewPasswordPlaceholder": "Re-enter new password",
+    "passwordMismatch": "Passwords do not match",
+    "fillAllFields": "Please fill in all fields",
+    "passwordTooShort": "New password must be at least 6 characters",
+    "newPasswordMismatch": "New passwords do not match",
+    "success": "Password changed successfully",
+    "failed": "Password change failed"
+  },
+  "accountSettings": {
+    "title": "Account Settings",
+    "displayName": "Enter display name",
+    "email": "Enter email",
+    "locale": {
+      "zhCN": "中文（简体）",
+      "enUS": "English (US)",
+      "enGB": "English (UK)"
+    },
+    "tabs": {
+      "profile": "Profile",
+      "security": "Security",
+      "preferences": "Preferences"
+    },
+    "profile": {
+      "username": "Username",
+      "displayName": "Display Name",
+      "email": "Email",
+      "edit": "Edit Profile",
+      "usernameNotEditable": "Username cannot be modified",
+      "defaultRole": "Regular User"
+    },
+    "security": {
+      "intro": "For account security, please change your password regularly",
+      "forceNotice": "Password has been reset, please set a new one",
+      "setPassword": "Set Password",
+      "changePassword": "Change Password"
+    },
+    "preferences": {
+      "language": "Language",
+      "timezone": "Timezone",
+      "dateStyle": "Date Format",
+      "timeStyle": "Time Format",
+      "hourCycle": "Hour System",
+      "preview": "Preview",
+      "hour24": "24-hour",
+      "hour12": "12-hour",
+      "save": "Save Preferences",
+      "dateStyleFull": "Full",
+      "dateStyleLong": "Long",
+      "dateStyleMedium": "Medium",
+      "dateStyleShort": "Short"
+    },
+    "strength": {
+      "weak": "Weak",
+      "medium": "Medium",
+      "strong": "Strong"
+    },
+    "validation": {
+      "required": "Required",
+      "emailFormat": "Invalid format",
+      "passwordRequired": "Required",
+      "passwordTooShort": "At least 6 characters",
+      "passwordMismatch": "Mismatch",
+      "saveFailed": "Save failed",
+      "saveFailedRetry": "Save failed, please retry",
+      "networkError": "Network error",
+      "changePasswordFailed": "Change failed"
+    }
+  },
+  "diagram": {
+    "title": "Diagram",
+    "type": "Type",
+    "config": "Config",
+    "display": "Display",
+    "preview": "Preview",
+    "export": "Export",
+    "import": "Import",
+    "copyCode": "Copy Code",
+    "exportHTML": "Export HTML (read-only - can open directly)",
+    "resetView": "Reset View",
+    "maximize": "Maximize",
+    "minimize": "Minimize",
+    "close": "Close"
+  },
+  "ai": {
+    "inputPlaceholder": "Type a message or command...",
+    "thinking": "Thinking...",
+    "replying": "Replying...",
+    "errorMessage": "AI Error"
+  },
+  "feishuBot": {
+    "title": "Feishu Bot Interaction",
+    "connected": "Connected",
+    "disconnected": "Disconnected",
+    "connecting": "Connecting...",
+    "connect": "Connect Bot"
+  },
+  "validationPanel": {
+    "title": "Data Validation Results",
+    "errorCount": " errors",
+    "warningCount": " warnings",
+    "infoCount": " hints",
+    "filterHint": "Click to view filtered objects and relations",
+    "filteredSummary": "Filtered: {objects} objects / {relations} relations"
+  },
+  "import": {
+    "feishuToken": "Enter Feishu Sheet Token",
+    "sheetName": "e.g.: Sheet1",
+    "range": "e.g.: A1:Z100",
+    "deepseekApiKey": "Enter DeepSeek API Key",
+    "intelligentApiKey": "Enter AI API Key",
+    "feishuAppId": "Enter Feishu App ID"
+  },
+  "validation": {
+    "filterHint": "Click to view filtered objects and relations"
+  },
+  "message": {
+    "operationSuccess": "Operation successful",
+    "operationFailed": "Operation failed"
+  },
+  "metaList": {
+    "loadListConfigFailed": "Failed to load list configuration",
+    "selectRowsFirst": "Please select data to operate on",
+    "selectDeleteFirst": "Please select records to delete",
+    "confirmDeleteTitle": "Confirm Delete",
+    "confirmDeleteMessage": "Are you sure to delete the selected {count} records?",
+    "deleteSuccess": "Successfully deleted {count} records",
+    "deleteFailedTitle": "Delete Failed",
+    "deleteFailed": "Delete failed",
+    "importSuccess": "Import completed, processed {count} records",
+    "confirmTitle": "Confirm",
+    "discardChangesTitle": "Notice",
+    "discardChangesMessage": "You have unsaved changes. Discard?",
+    "discardChangesConfirm": "Discard",
+    "saveFailed": "Save failed",
+    "loadFailed": "{context} failed",
+    "selectionLimitHit": "Selection exceeds limit of {limit} items, truncated. Please reduce or batch the operation."
+  },
+  "app": {
+    "title": "BIP Application Architecture Management"
+  }
+}

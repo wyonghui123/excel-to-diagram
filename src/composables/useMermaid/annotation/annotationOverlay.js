@@ -67,6 +67,21 @@ export function useAnnotationOverlay() {
     }
   };
 
+  // 实例级状态：每个 useAnnotationOverlay() 调用都有自己的清理列表
+  let _cleanupFns = []
+
+  // 注册可清理的事件监听器
+  const addListener = (element, event, handler, options) => {
+    element.addEventListener(event, handler, options)
+    _cleanupFns.push(() => element.removeEventListener(event, handler, options))
+  }
+
+  // 清理本实例注册的所有事件监听器（DOM 由 removeAnnotationLayers 处理）
+  const cleanupListeners = () => {
+    _cleanupFns.forEach(fn => fn())
+    _cleanupFns = []
+  }
+
   const overlayAnnotationPanel = (svg, annotations, options = {}) => {
     const {
       position = PANEL_POSITION.BOTTOM
@@ -173,7 +188,7 @@ export function useAnnotationOverlay() {
     };
 
     // 循环切换状态：collapsed -> compact -> detail -> collapsed
-    header.addEventListener('click', () => {
+    const onHeaderClick = () => {
       if (currentState === 'collapsed') {
         currentState = 'compact';
         list.style.display = 'flex';
@@ -192,7 +207,8 @@ export function useAnnotationOverlay() {
       titleSpan.textContent = getTitleText();
       updatePanel();
       updateContentStyles();
-    });
+    };
+    addListener(header, 'click', onHeaderClick);
 
     annotations.forEach(ann => {
       const categoryConfig = getCategoryConfig(ann.category);
@@ -274,6 +290,9 @@ export function useAnnotationOverlay() {
   };
 
   const bindAnnotationInteraction = (svg, annotations) => {
+    // 先清理本实例上一次的监听器（panel header + svg 全局）
+    cleanupListeners()
+
     const container = svg.closest('.mermaid-container');
     if (!container) return;
 
@@ -283,7 +302,7 @@ export function useAnnotationOverlay() {
     });
 
     container.querySelectorAll('.annotation-item').forEach(item => {
-      item.addEventListener('click', () => {
+      const onItemClick = () => {
         const targetId = item.getAttribute('data-target-id');
         const ann = annotationMap.get(targetId);
         const targetType = ann ? ann.targetType : null;
@@ -292,40 +311,38 @@ export function useAnnotationOverlay() {
           item.classList.add('annotation-item-selected');
           item.style.background = 'rgba(0, 0, 0, 0.05)';
         }
-      });
-
-      item.addEventListener('mouseenter', () => {
+      };
+      const onItemMouseEnter = () => {
         const targetId = item.getAttribute('data-target-id');
         if (targetId) {
           hoverTargetElement(svg, targetId, true);
         }
-      });
-
-      item.addEventListener('mouseleave', () => {
+      };
+      const onItemMouseLeave = () => {
         const targetId = item.getAttribute('data-target-id');
         if (targetId) {
           hoverTargetElement(svg, targetId, false);
         }
-      });
+      };
+      addListener(item, 'click', onItemClick);
+      addListener(item, 'mouseenter', onItemMouseEnter);
+      addListener(item, 'mouseleave', onItemMouseLeave);
     });
 
-    svg.addEventListener('mousedown', () => {
+    const onSvgMouseDown = () => {
       isDraggingState = false;
-    });
-
-    svg.addEventListener('mousemove', (e) => {
+    };
+    const onSvgMouseMove = (e) => {
       if (e.buttons > 0) {
         isDraggingState = true;
       }
-    });
-
-    svg.addEventListener('mouseup', () => {
+    };
+    const onSvgMouseUp = () => {
       setTimeout(() => {
         isDraggingState = false;
       }, 100);
-    });
-
-    svg.addEventListener('click', (e) => {
+    };
+    const onSvgClick = (e) => {
       // 排除拖拽操作触发的点击
       if (!isDraggingState) {
         if (e.target === svg || e.target.closest('.annotation-dock-panel') === null) {
@@ -339,7 +356,11 @@ export function useAnnotationOverlay() {
           }
         }
       }
-    });
+    };
+    addListener(svg, 'mousedown', onSvgMouseDown);
+    addListener(svg, 'mousemove', onSvgMouseMove);
+    addListener(svg, 'mouseup', onSvgMouseUp);
+    addListener(svg, 'click', onSvgClick);
   };
 
   const highlightTargetElement = (svg, targetId, targetType) => {
@@ -512,6 +533,10 @@ export function useAnnotationOverlay() {
   };
 
   const removeAnnotationLayers = (svg) => {
+    // 关键：先清理事件监听器（panel header + svg 全局 + annotation-item）
+    // 必须在删除 DOM 节点之前清理，否则 removeEventListener 无法匹配（节点引用变化）
+    cleanupListeners()
+
     svg.querySelectorAll('[data-annotation-layer]').forEach(el => {
       el.remove();
     });

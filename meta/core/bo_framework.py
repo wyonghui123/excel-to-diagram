@@ -484,10 +484,6 @@ class BOFramework:
         """
         # [SPR-07 T-S09-02] drain_pending_audits() 原子获取并清空, 替代 getattr + clear 两步
         pending = context.drain_pending_audits()
-        try:
-            with open(r'd:\filework\_audit_debug.log', 'a', encoding='utf-8') as _f:
-                _f.write(f"  _flush_pending_audit_records: pending_count={len(pending) if pending else 0}\n")
-        except Exception: pass
         if not pending:
             return
 
@@ -501,10 +497,6 @@ class BOFramework:
             try:
                 structured_logger.log_business(**audit_params)
                 flushed += 1
-                try:
-                    with open(r'd:\filework\_audit_debug.log', 'a', encoding='utf-8') as _f:
-                        _f.write(f"    flushed action={audit_params.get('action')} obj={audit_params.get('object_type')}/{audit_params.get('object_id')}\n")
-                except Exception: pass
             except Exception as e:
                 logger.error(
                     f"[BOFramework] Failed to flush audit record: {e}, "
@@ -512,10 +504,6 @@ class BOFramework:
                     f"object_type={audit_params.get('object_type')}, "
                     f"object_id={audit_params.get('object_id')}"
                 )
-                try:
-                    with open(r'd:\filework\_audit_debug.log', 'a', encoding='utf-8') as _f:
-                        _f.write(f"    FLUSH FAILED: {e}\n")
-                except Exception: pass
 
         if flushed > 0:
             logger.info(

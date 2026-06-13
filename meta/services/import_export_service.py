@@ -15,13 +15,17 @@ from meta.core.datasource import DataSource
 from meta.services.manage_service import ManageService, BatchOperationResult, CreateRequest, UpdateRequest, DeleteRequest
 from meta.services.query_service import QueryService, SearchRequest, QueryCondition
 from meta.services.hierarchy_filter_service import HierarchyFilterService
-from meta.services.cascade_service import HierarchyConfigLoader, get_type_order as _cascade_get_type_order
+from meta.services.cascade_service import HierarchyConfigLoader
 from meta.services.excel_design_system import ExcelDesignSystem
-
-
-def get_type_order() -> List[str]:
-    """获取类型顺序（转发到 cascade_service）"""
-    return _cascade_get_type_order()
+from meta.services.import_export_types import (
+    get_type_order,
+    _sanitize_xml_string,
+    _safe_cell_value,
+    _has_cud_actions,
+    ExportResult,
+    ImportPreview,
+    ImportResult,
+)
 
 
 # [FIX 2026-06-08] 统一 logger（SSOT）
@@ -29,98 +33,6 @@ def get_type_order() -> List[str]:
 # 现在一次性 hoist 到模块顶部，所有调用方直接用 `logger` 即可。
 logger = logging.getLogger(__name__)
 
-
-def _sanitize_xml_string(text: str) -> str:
-    """清理字符串中的特殊字符，避免 XML 解析错误
-    
-    处理以下情况：
-    1. 移除控制字符（0x00-0x1F，除了换行和制表符）
-    2. 移除其他非法 XML 字符
-    
-    注意：不进行 XML 实体转义，openpyxl 会自动处理
-    """
-    if not text:
-        return ""
-    
-    text = str(text)
-    
-    # 移除控制字符（保留换行符 \n 和制表符 \t）
-    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', text)
-    
-    # 移除其他非法 XML 字符（如零宽字符等）
-    text = re.sub(r'[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]', '', text)
-    
-    return text
-
-
-def _safe_cell_value(value: Any) -> Any:
-    """安全地设置单元格值，确保不会导致 XML 错误"""
-    if value is None:
-        return None
-    if isinstance(value, (int, float, bool)):
-        return value
-    # 对于字符串值，只移除控制字符，不进行 XML 转义
-    return _sanitize_xml_string(str(value))
-
-
-def _has_cud_actions(meta_object: MetaObject) -> bool:
-    """检查对象是否有 CUD 操作（用于决定是否显示操作模式列）
-    
-    只有同时满足以下条件的 action 才算作 CUD 操作：
-    1. method 是 POST/PUT/DELETE
-    2. action_type 是 'crud'
-    3. position 是 'toolbar' 或 'row'
-    
-    对于 audit_log 这种只读对象，即使有 POST 方法的业务 action，
-    如果 action_type 不是 'crud' 或 position 不正确，也不应该显示操作模式列
-    """
-    if not meta_object:
-        return False
-    
-    actions = getattr(meta_object, 'actions', []) or []
-    for action in actions:
-        method = getattr(action, 'method', '').upper()
-        if method in ('POST', 'PUT', 'DELETE'):
-            action_type = getattr(action, 'action_type', None)
-            if action_type and action_type.value == 'crud':
-                position = getattr(action, 'position', 'toolbar')
-                if position in ('toolbar', 'row'):
-                    return True
-    return False
-
-
-@dataclass
-class ExportResult:
-    """导出结果"""
-    success: bool
-    file_path: str = ""
-    sheets: List[Dict[str, Any]] = field(default_factory=list)
-    total_rows: int = 0
-    errors: List[str] = field(default_factory=list)
-    # [FIX 2026-06-08] M.1 规范：trace_id 透传
-    # 之前只有 logs 里有 trace_id（通过 TraceIdLogFilter 自动注入），
-    # 但 API 返回的 ExportResult 本身不携带 trace_id，调用方需要去 logs 里搜。
-    # 现在显式写入 result，API 可直接返回给前端用于问题追踪。
-    trace_id: Optional[str] = None
-
-
-@dataclass
-class ImportPreview:
-    """导入预览"""
-    sheets: List[Dict[str, Any]] = field(default_factory=list)
-    validation: Dict[str, Any] = field(default_factory=dict)
-    import_order: List[str] = field(default_factory=list)
-    trace_id: Optional[str] = None
-
-
-@dataclass
-class ImportResult:
-    """导入结果"""
-    success: bool
-    results: Dict[str, Dict[str, int]] = field(default_factory=dict)
-    errors: List[Dict[str, Any]] = field(default_factory=list)
-    error_report_path: str = ""
-    trace_id: Optional[str] = None
 
 
 class ImportExportService:
@@ -855,7 +767,7 @@ class ImportExportService:
 
                     actual_col_idx = col_idx - 1 - col_offset
                     # [NEW v1.1 2026-06-11] auto_or_manual_code 差异化底色
-                    auto_cols = (getattr(self, '_auto_or_manual_code_columns', {}) or {}).get(meta_obj.name, [])
+                    auto_cols = (getattr(self, '_auto_or_manual_code_columns', {}) or {}).get(obj.name, [])
                     if actual_col_idx in auto_cols:
                         self._apply_classification_fill(cell, 'auto_or_manual_code')
                         if protect_sheet:

@@ -7,23 +7,25 @@
  * 旧写法：每个测试 30+ 行
  * 新写法：业务流式描述
  *
+ * [Phase 6 增强] (2026-06-13):
+ * - 新增 goToBOList(pv) 一站式方法 (合并 4 步样板: navigateTo + openTab + waitForReady)
+ * - 之前 5+ 个 spec 重复此模式
+ *
  * @example
  * const archData = new ArchDataPage(page)
  * const pv = await dataFinder.productWithVersion()
- * await navigateTo(page, `/system/archdata?productId=${pv.product.id}&versionId=${pv.version.id}`)
  *
+ * // [Phase 6 推荐] 1 行替代 4 行
+ * await archData.goToBOList(pv)
+ *
+ * // 老用法
+ * await navigateTo(page, `/system/archdata?productId=${pv.product.id}&versionId=${pv.version.id}`)
  * await archData.openTab('业务对象')
- * await archData.openDetailByCode(boCode)
- * const drawer = new DetailDrawerPage(page)
- * await drawer.clickEdit()
- * await drawer.fillFieldByLabel('名称', newName)
- * await drawer.clickSave()
- * await drawer.expectSuccessMessage()
- * await drawer.close()
- * await archData.expectRowNotExists(boCode)
+ * await archData.waitForReady()
  */
 
 import { GenericListPage } from './GenericListPage.js'
+import { navigateTo } from '../helpers/auto-fixtures.js'
 
 export class ArchDataPage extends GenericListPage {
   constructor(page) {
@@ -38,6 +40,33 @@ export class ArchDataPage extends GenericListPage {
       businessObject: '业务对象',
       relationship: '关联关系'
     }
+  }
+
+  /**
+   * [Phase 6] 一站式进入 archdata 业务对象 tab
+   * 替代以下 3 步样板:
+   *   1. await navigateTo(page, `/system/archdata?productId=...&versionId=...`)
+   *   2. await archData.openTab('业务对象')
+   *   3. await archData.waitForReady()
+   *
+   * @param {{product: {id: number}, version: {id: number}}} pv - product + version
+   * @returns {Promise<this>} 支持链式调用
+   *
+   * @example
+   * const pv = await dataFinder.productWithVersion()
+   * const archData = new ArchDataPage(page)
+   * await archData.goToBOList(pv)
+   * await archData.clickRowByName('xxx')
+   */
+  async goToBOList(pv) {
+    if (!pv?.product?.id || !pv?.version?.id) {
+      throw new Error('goToBOList 需要 pv.product.id 和 pv.version.id')
+    }
+    const url = `/system/archdata?productId=${pv.product.id}&versionId=${pv.version.id}&tab=business_object`
+    await navigateTo(this.page, url)
+    await this.openTab('businessObject')
+    await this.waitForReady()
+    return this
   }
 
   /**

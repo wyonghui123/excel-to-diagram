@@ -69,6 +69,26 @@ class ErrorCode(str, Enum):
     FILE_TOO_LARGE = 'file_too_large'        # 200 false
     FILE_GENERATION_FAILED = 'file_generation_failed'  # 200 false
 
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 枚举管理 (v3.18 enum-mgmt-spec)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 详见 docs/specs/spec-enum-mgmt-v1.0.md
+    ENUM_TYPE_LOCKED = 'enum_type_locked'                        # 200 false - mutability=locked 拒绝
+    ENUM_VALUE_LOCKED = 'enum_value_locked'                      # 200 false - mutability=locked 拒绝
+    SYSTEM_VALUE_IMMUTABLE = 'system_value_immutable'            # 200 false - is_system=true 拒绝 update/delete
+    SYSTEM_ENUM_IMMUTABLE = 'system_enum_immutable'              # 200 false - category=system 拒绝 update/delete
+    INVALID_MUTABILITY = 'invalid_mutability'                    # 400 - mutability 值不在 3 档内
+    INVALID_CODE_FORMAT = 'invalid_code_format'                  # 400 - code 不符合 ^[A-Z][A-Z0-9_]*$
+    CODE_IMMUTABLE = 'code_immutable'                            # 400 - enum_value.code 不可改
+    ID_IMMUTABLE = 'id_immutable'                                # 400 - enum_type.id 不可改
+    DUPLICATE_CODE = 'duplicate_code'                            # 400 - (enum_type_id, code) 重复
+    DUPLICATE_NAME = 'duplicate_name'                            # 400 - (enum_type_id, name) 重复
+    HAS_VALUES = 'has_values'                                    # 400 - 删除 enum_type 时仍有 enum_value
+    MUTABILITY_CHANGE_REQUIRES_SUPER_ADMIN = 'mutability_change_requires_super_admin'  # 403
+    MISSING_DIMENSION_KEY = 'missing_dimension_key'              # 400
+    INVALID_DIMENSION_KEY = 'invalid_dimension_key'              # 400
+    INVALID_DIMENSION_VALUE = 'invalid_dimension_value'          # 400
+
 
 # 用于脚本生成的常量
 ALL_CODES = [c.value for c in ErrorCode]

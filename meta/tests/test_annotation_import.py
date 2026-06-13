@@ -27,9 +27,12 @@ class TestAnnotationImportMeta:
     """注解导入元模型声明测试"""
 
     def setup_method(self):
-        import meta
-        meta._yaml_loaded = False
-        meta._load_from_yaml()
+        # [FIX 2026-06-12] 使用正确的 API 重置 registry
+        from meta.core.yaml_loader import get_yaml_schema_dir, register_from_directory
+        from meta.core.models import registry
+        # 重新加载元数据
+        schema_dir = get_yaml_schema_dir()
+        register_from_directory(schema_dir, registry._objects)
 
     def test_annotation_meta_exists(self):
         """annotation 元模型必须存在"""

@@ -536,7 +536,7 @@ class ApplicationBuilder:
         #   - 主表 CRUD 路由（GET/POST/PUT/DELETE /user-groups, /roles）已由 endpoint 层移除
         V1_SPECIAL_PREFIXES = {
             'relationships', 'business_object', 'annotations', 'audit', 'meta',
-            'analytics', 'enums', 'enum-types', 'auth', 'menu-permission',
+            'analytics', 'enums', 'enum-types', 'enum-values', 'auth', 'menu-permission',
             'notifications', 'import', 'export', 'import-export',
             'permission-rules', 'management-dimensions', 'roles', 'user-groups',
             'permission-bundles', 'role-menus', 'role-dimension-scopes',

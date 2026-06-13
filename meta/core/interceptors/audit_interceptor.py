@@ -7,6 +7,7 @@
 """
 
 import logging
+import os
 from typing import Dict, Any, List, Set
 
 from meta.core.interceptors.base import Interceptor
@@ -20,6 +21,9 @@ from meta.core.model_utils import get_object_display
 from meta.core.association.resolvers import resolve_assoc_meta as _resolve_assoc_meta
 
 logger = logging.getLogger(__name__)
+
+# 通过环境变量开启诊断日志（默认关闭）
+_AUDIT_DEBUG = os.environ.get('AUDIT_DEBUG', '').lower() in ('1', 'true', 'yes')
 
 _TYPE_DISPLAY_MAP = {
     'user': '用户',
@@ -83,14 +87,8 @@ class AuditInterceptor(Interceptor):
         - CRUD 审计日志写入已由 ActionExecutor._write_audit_log_v2() 统一处理（跳过）
         - 关联操作（associate/dissociate/batch_*/assign/unassign）审计日志由此拦截器写入
         """
-        # [DEBUG 2026-06-12] 诊断 batch_unassign 不写 DISSOCIATE 日志
-        try:
-            with open(r'd:\filework\_audit_debug.log', 'a', encoding='utf-8') as _f:
-                _f.write(f"[{context.action}] is_crud={context.is_crud_action} "
-                         f"object_id={context.object_id} result={context.result.success if context.result else 'None'} "
-                         f"params_keys={list(context.params.keys()) if context.params else 'None'}\n")
-        except Exception:
-            pass
+        if _AUDIT_DEBUG:
+            logger.debug(f"[AuditInterceptor] after_action: action={context.action} is_crud={context.is_crud_action} object_id={context.object_id}")
 
         # [FIX 2026-06-12] 之前只处理 associate/dissociate, 导致 batch_assign/batch_unassign
         # 不产生审计日志. 用户在用户详情页多选删除用户组时, 走的是 batch_unassign 路径,
@@ -102,15 +100,12 @@ class AuditInterceptor(Interceptor):
             'batch_assign', 'batch_unassign',
         }
         if not context.is_crud_action and context.action not in _ASSOC_ACTIONS:
-            try:
-                with open(r'd:\filework\_audit_debug.log', 'a', encoding='utf-8') as _f:
-                    _f.write(f"  -> SKIP (not assoc action)\n")
-            except Exception: pass
             return
 
-        # [DEBUG]
-        logger.error(f"[FIX 2026-06-12] AuditInterceptor.after_action called: action={context.action}, object_id={context.object_id}, params={context.params}, has_result={context.result is not None and context.result.success if context.result else 'None'}")
-        
+        # [FIX 2026-06-12] context.user_name 只是 'admin', 从 g.current_user 提取带 display_name 的格式
+        if _AUDIT_DEBUG:
+            logger.debug(f"[AuditInterceptor] after_action processing: action={context.action} object_id={context.object_id}")
+
         if self.AUDIT_CRUD_WRITE_DISABLED and context.is_crud_action:
             logger.debug(f"[AuditInterceptor] CRUD audit write disabled, skipping. Action={context.action}")
             return
@@ -130,10 +125,8 @@ class AuditInterceptor(Interceptor):
         action_config = audit_config.get_action_config(context.action)
         
         if not action_config.enabled:
-            try:
-                with open(r'd:\filework\_audit_debug.log', 'a', encoding='utf-8') as _f:
-                    _f.write(f"  -> SKIP (action_config disabled for {context.action})\n")
-            except Exception: pass
+            if _AUDIT_DEBUG:
+                logger.debug(f"[AuditInterceptor] action_config disabled for {context.action}, skipping")
             return
 
         try:
@@ -144,16 +137,12 @@ class AuditInterceptor(Interceptor):
             elif context.is_delete_action:
                 self._log_delete(context, action_config)
             elif context.action in ('associate', 'assign', 'batch_assign'):
-                try:
-                    with open(r'd:\filework\_audit_debug.log', 'a', encoding='utf-8') as _f:
-                        _f.write(f"  -> CALLING _log_association_event(action=ASSOCIATE)\n")
-                except Exception: pass
+                if _AUDIT_DEBUG:
+                    logger.debug(f"[AuditInterceptor] calling _log_association_event(ASSOCIATE)")
                 self._log_association_event(context, action_config, 'ASSOCIATE')
             elif context.action in ('dissociate', 'unassign', 'batch_unassign'):
-                try:
-                    with open(r'd:\filework\_audit_debug.log', 'a', encoding='utf-8') as _f:
-                        _f.write(f"  -> CALLING _log_association_event(action=DISSOCIATE)\n")
-                except Exception: pass
+                if _AUDIT_DEBUG:
+                    logger.debug(f"[AuditInterceptor] calling _log_association_event(DISSOCIATE)")
                 self._log_association_event(context, action_config, 'DISSOCIATE')
         except Exception as e:
             logger.error(f"[AuditInterceptor] Error logging audit: {e}")
@@ -288,11 +277,8 @@ class AuditInterceptor(Interceptor):
         在事务中执行时，审计写入会与业务写入发生 SQLite 锁冲突。
         解决方案：在事务内缓存审计记录，事务提交后再写入。
         """
-        # [DEBUG 2026-06-12] 诊断
-        try:
-            with open(r'd:\filework\_audit_debug.log', 'a', encoding='utf-8') as _f:
-                _f.write(f"    _log_association_event ENTER: action={action}\n")
-        except Exception: pass
+        if _AUDIT_DEBUG:
+            logger.debug(f"[AuditInterceptor] _log_association_event ENTER: action={action}")
         # [FIX 2026-06-12] context.user_name 只是 'admin', 从 g.current_user 提取带 display_name 的格式
         try:
             from flask import g
@@ -332,26 +318,20 @@ class AuditInterceptor(Interceptor):
         # 执行, 此时 SQLite WAL 模式下不同连接 SELECT 看不到未提交的 DELETE.
         pre_computed_effective_ids = (context.extra or {}).get('_assoc_effective_ids')
         if pre_computed_effective_ids is not None:
-            try:
-                with open(r'd:\filework\_audit_debug.log', 'a', encoding='utf-8') as _f:
-                    _f.write(f"    batch: using pre-computed effective_ids={pre_computed_effective_ids} from context.extra\n")
-            except Exception: pass
+            if _AUDIT_DEBUG:
+                logger.debug(f"[AuditInterceptor] batch: using pre-computed effective_ids={pre_computed_effective_ids} from context.extra")
             effective_ids = list(pre_computed_effective_ids)
         elif len(tgt_ids) > 1:
             # 批量场景: 先查询当前实际存在的关联, 只对存在的写 audit
             assoc_meta = _resolve_assoc_meta(context.object_type, association_name)
-            try:
-                with open(r'd:\filework\_audit_debug.log', 'a', encoding='utf-8') as _f:
-                    _f.write(f"    batch: tgt_ids={tgt_ids} assoc_meta={assoc_meta}\n")
-            except Exception: pass
+            if _AUDIT_DEBUG:
+                logger.debug(f"[AuditInterceptor] batch: tgt_ids={tgt_ids} assoc_meta={assoc_meta}")
             if assoc_meta and assoc_meta.get('type') == 'many_to_many':
                 through = assoc_meta.get('through')
                 source_key = assoc_meta.get('source_key')
                 target_key = assoc_meta.get('target_key')
-                try:
-                    with open(r'd:\filework\_audit_debug.log', 'a', encoding='utf-8') as _f:
-                        _f.write(f"    batch: through={through} src_key={source_key} tgt_key={target_key}\n")
-                except Exception: pass
+                if _AUDIT_DEBUG:
+                    logger.debug(f"[AuditInterceptor] batch: through={through} src_key={source_key} tgt_key={target_key}")
                 if through and source_key and target_key:
                     src_id = context.object_id
                     placeholders = ','.join('?' for _ in tgt_ids)
@@ -374,10 +354,8 @@ class AuditInterceptor(Interceptor):
                             sql, tuple([src_id] + tgt_ids)
                         ).fetchall() or [])
                         effective_ids = [tid for tid in tgt_ids if tid in existing]
-                        try:
-                            with open(r'd:\filework\_audit_debug.log', 'a', encoding='utf-8') as _f:
-                                _f.write(f"    batch DISSOCIATE: src_id={src_id} sql={sql} existing={existing} effective_ids={effective_ids}\n")
-                        except Exception: pass
+                        if _AUDIT_DEBUG:
+                            logger.debug(f"[AuditInterceptor] batch DISSOCIATE: src_id={src_id} sql={sql} existing={existing} effective_ids={effective_ids}")
                 else:
                     effective_ids = tgt_ids
             else:
@@ -386,10 +364,8 @@ class AuditInterceptor(Interceptor):
             # 单条场景, 后续代码会处理 (tgt_ids == 1 走单条路径)
             effective_ids = tgt_ids
 
-        try:
-            with open(r'd:\filework\_audit_debug.log', 'a', encoding='utf-8') as _f:
-                _f.write(f"    batch: effective_ids={effective_ids} about_to_write={len(effective_ids)}\n")
-        except Exception: pass
+        if _AUDIT_DEBUG:
+            logger.debug(f"[AuditInterceptor] batch: effective_ids={effective_ids} about_to_write={len(effective_ids)}")
 
         # [FIX 2026-06-12] 批量场景: 循环写所有 effective_ids, 写完直接 return
         if len(tgt_ids) > 1:

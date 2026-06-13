@@ -6,7 +6,7 @@
  */
 
 import { API_BASE, API_BASE_V2, getHeaders } from '@/utils/api'
-import { apiV1, apiV2, ErrorCode } from '@/utils/httpClient'
+import { apiV1, apiV2 } from '@/utils/httpClient'
 import { useAuthStore } from '@/stores/authStore'
 import { LRUCache } from '@/utils/lruCache'
 

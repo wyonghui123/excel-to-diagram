@@ -207,6 +207,38 @@ def _row_to_dict(cursor, row):
     return dict(zip(columns, row))
 
 
+def compute_ui_actions(enum_type: dict) -> dict:
+    """
+    按 (category, mutability, value_count) 实时求值 UI 按钮矩阵 (FR-012)
+
+    返回每个 action 的 allowed: bool。前端 v-bind="ui_actions_resolved" 直接控制按钮 disabled。
+
+    规则对应 meta/schemas/enum_type.yaml 中 ui_view_config.ui_actions 的 allowed_when 表达式。
+    """
+    category = enum_type.get('category', 'business')
+    mutability = enum_type.get('mutability', 'extensible')
+    has_values = (enum_type.get('value_count', 0) or 0) > 0
+    is_sys_enum = (category == 'system')
+    is_locked = (mutability == 'locked')
+
+    return {
+        'create_value':    not is_sys_enum and not is_locked,
+        'update_value':    not is_sys_enum and not is_locked,
+        'delete_value':    not is_sys_enum and not is_locked,
+        'toggle_active':   not is_sys_enum and not is_locked,
+        'update_type':     not is_sys_enum,
+        'delete_type':     not is_sys_enum and not has_values,
+    }
+
+
+def _validate_mutability_or_400(mutability: str) -> tuple:
+    """校验 mutability 值，合法返回 (True, '')，非法返回 (False, error_msg)"""
+    from meta.core.interceptors.enum_protection_interceptor import ALLOWED_MUTABILITY
+    if mutability not in ALLOWED_MUTABILITY:
+        return False, f"mutability 必须是 {sorted(ALLOWED_MUTABILITY)} 之一，当前值 '{mutability}'"
+    return True, ''
+
+
 # ============================================
 # 枚举类型 API
 # ============================================
@@ -296,6 +328,9 @@ def get_enum_type(enum_type_id):
         enum_type = _row_to_dict(cursor, row)
         enum_type['value_count'] = _get_enum_value_count(ds, enum_type_id)
         enum_type['dimension_count'] = _get_dimension_count(enum_type.get('dimension_schema'))
+
+        # [v3.18 FR-012] 实时求值 UI 按钮矩阵
+        enum_type['ui_actions_resolved'] = compute_ui_actions(enum_type)
         
         # 获取变更历史
         try:
@@ -346,7 +381,20 @@ def create_enum_type():
         
         if not enum_type_id or not name:
             return _api_error('编码和名称不能为空', 'VALIDATION_ERROR')
-        
+
+        # [v3.18 FR-001] mutability 值空间校验
+        if mutability:
+            ok, err = _validate_mutability_or_400(mutability)
+            if not ok:
+                return _api_error(err, 'INVALID_MUTABILITY')
+
+        # [v3.18 FR-001] 系统枚举不可通过 API 创建
+        if category == 'system':
+            return _api_error(
+                '系统枚举不可通过 API 创建（请使用初始化脚本或 migrate_enums.py）',
+                'SYSTEM_ENUM_IMMUTABLE'
+            )
+
         import json
         dimension_schema_str = json.dumps(dimension_schema) if dimension_schema else None
         
@@ -399,8 +447,16 @@ def update_enum_type(enum_type_id):
             return _api_error('枚举类型不存在', 'NOT_FOUND', 404)
         
         existing = _row_to_dict(cursor, existing)
+        # [v3.18 NOTE] 系统枚举保护：API 直连路径不走 BO Action 拦截器
+        # 此处保留本地检查（拦截器保护 BO Action 路径，此处保护直连 API 路径）
         if existing['category'] == 'system':
             return _api_error('系统枚举不可修改', 'SYSTEM_ENUM_IMMUTABLE')
+
+        # [v3.18 FR-001] mutability 值空间校验
+        if 'mutability' in data:
+            ok, err = _validate_mutability_or_400(data['mutability'])
+            if not ok:
+                return _api_error(err, 'INVALID_MUTABILITY')
         
         name = data.get('name', existing['name'])
         mutability = data.get('mutability', existing['mutability'])
@@ -469,9 +525,10 @@ def delete_enum_type(enum_type_id):
             return _api_error('枚举类型不存在', 'NOT_FOUND', 404)
         
         existing = _row_to_dict(cursor, existing)
+        # [v3.18 NOTE] API 直连路径不走 BO Action 拦截器，保留本地检查
         if existing['category'] == 'system':
             return _api_error('系统枚举不可删除', 'SYSTEM_ENUM_IMMUTABLE')
-        
+
         value_count = _get_enum_value_count(ds, enum_type_id)
         if value_count > 0:
             return _api_error(f'该枚举类型下有 {value_count} 个枚举值，无法删除', 'HAS_VALUES')
@@ -721,8 +778,8 @@ def create_enum_value(enum_type_id):
         enum_type = _row_to_dict(cursor, enum_type_row)
         
         if enum_type['mutability'] == 'locked':
-            return _api_error('该枚举类型已锁定，不可添加值', 'ENUM_LOCKED')
-        
+            return _api_error('该枚举类型已锁定，不可添加值', 'ENUM_VALUE_LOCKED')
+
         code = data.get('code')
         name = data.get('name')
         name_en = data.get('name_en', '')
@@ -732,10 +789,18 @@ def create_enum_value(enum_type_id):
         is_system = data.get('is_system', False)
         parent_code = data.get('parent_code', '')
         metadata = data.get('metadata', {})
-        
+
         if not code or not name:
             return _api_error('编码和名称不能为空', 'VALIDATION_ERROR')
-        
+
+        # [v3.18 FR-007] code 格式校验
+        import re as _re
+        if not _re.match(r'^[A-Z][A-Z0-9_]*$', code):
+            return _api_error(
+                f"code '{code}' 不符合格式 ^[A-Z][A-Z0-9_]*$（仅允许大写字母、数字、下划线，且以大写字母开头）",
+                'INVALID_CODE_FORMAT'
+            )
+
         cursor = ds.execute(
             "SELECT id FROM enum_values WHERE enum_type_id = ? AND code = ?",
             [enum_type_id, code]
@@ -743,6 +808,15 @@ def create_enum_value(enum_type_id):
         existing = cursor.fetchone()
         if existing:
             return _api_error('该编码已存在', 'DUPLICATE_CODE')
+
+        # [v3.18 FR-009] (enum_type_id, name) 唯一性检查
+        cursor = ds.execute(
+            "SELECT id FROM enum_values WHERE enum_type_id = ? AND name = ?",
+            [enum_type_id, name]
+        )
+        existing_name = cursor.fetchone()
+        if existing_name:
+            return _api_error(f'该名称 "{name}" 已存在', 'DUPLICATE_NAME')
         
         import json
         dimensions_str = json.dumps(dimensions) if dimensions else None
@@ -788,8 +862,19 @@ def update_enum_value(value_id):
         enum_type = _row_to_dict(cursor, enum_type_row)
         
         if enum_type['mutability'] == 'locked':
-            return _api_error('该枚举类型已锁定，不可修改值', 'ENUM_LOCKED')
-        
+            return _api_error('该枚举类型已锁定，不可修改值', 'ENUM_VALUE_LOCKED')
+
+        # [v3.18 FR-008] code 不可改
+        if 'code' in data and data['code'] != existing['code']:
+            return _api_error(
+                f"code 字段不可修改（原值 '{existing['code']}'，尝试改为 '{data['code']}'）",
+                'CODE_IMMUTABLE'
+            )
+
+        # [v3.18 DEC-2] is_system=true 永远不可改
+        if existing.get('is_system') == 1 or existing.get('is_system') is True:
+            return _api_error('系统预置值（is_system=true）不可修改', 'SYSTEM_VALUE_IMMUTABLE')
+
         name = data.get('name', existing['name'])
         name_en = data.get('name_en', existing.get('name_en', ''))
         dimensions = data.get('dimensions')
@@ -835,19 +920,53 @@ def delete_enum_value(value_id):
         
         if existing.get('is_system'):
             return _api_error('系统预置值不可删除', 'SYSTEM_VALUE_IMMUTABLE')
-        
+
         cursor = ds.execute("SELECT * FROM enum_types WHERE id = ?", [existing['enum_type_id']])
         enum_type_row = cursor.fetchone()
         if not enum_type_row:
             return _api_error('枚举类型不存在', 'NOT_FOUND', 404)
         enum_type = _row_to_dict(cursor, enum_type_row)
-        
+
         if enum_type['mutability'] == 'locked':
-            return _api_error('该枚举类型已锁定，不可删除值', 'ENUM_LOCKED')
-        
+            return _api_error('该枚举类型已锁定，不可删除值', 'ENUM_VALUE_LOCKED')
+
+        # [v3.18 FR-005] 硬删除前 WARNING 日志 + trace_id
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            f"[EnumHardDelete] About to DELETE enum_value id={value_id} "
+            f"code={existing.get('code')} type={existing.get('enum_type_id')}"
+        )
+
+        # [v3.18 FR-014] 审计日志 object_id 改用 code（更可读）
+        # 记录后再删除
+        user_id = None
+        user_name = 'system'
+        try:
+            from flask_login import current_user
+            if current_user.is_authenticated:
+                user_id = getattr(current_user, 'id', None)
+                user_name = getattr(current_user, 'username', 'system') or getattr(current_user, 'name', 'system')
+        except:
+            pass
+
+        try:
+            _get_audit_interceptor().log_delete(
+                object_type='enum_value',
+                object_id=existing.get('code'),  # [v3.18 FR-014] 用 code 而非 id
+                data={
+                    'enum_type_id': existing.get('enum_type_id'),
+                    'code': existing.get('code'),
+                    'name': existing.get('name'),
+                },
+                user_id=str(user_id) if user_id else None,
+                user_name=user_name,
+            )
+        except Exception as audit_err:
+            _logging.getLogger(__name__).warning(f"[EnumHardDelete] Audit log failed: {audit_err}")
+
         ds.execute("DELETE FROM enum_values WHERE id = ?", [value_id])
         ds.commit()
-        
+
         return _api_success(message='删除成功')
     except Exception as e:
         logger.exception("删除枚举值失败")

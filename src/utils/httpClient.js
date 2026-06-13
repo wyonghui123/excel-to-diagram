@@ -21,7 +21,12 @@ import { useAuthStore } from '@/stores/authStore'
 import { logger } from '@/utils/logger'
 
 // ---------------------------------------------------------------------------
-// ErrorCode 枚举
+// ErrorCode 枚举 —— HTTP 传输层错误（注意：与业务错误不同源）
+// ---------------------------------------------------------------------------
+// ⚠️ 本枚举仅用于 httpClient 内部构造 transport 错误响应（NETWORK/TIMEOUT/4xx/5xx）。
+// 业务错误（如 token_expired、action_failed 等）请用 '@/composables/errorCodes' 的
+// ErrorCodes（auto-generated from meta/core/error_codes.py），其值风格为 lowercase snake_case。
+// 本枚举与 ErrorCodes 故意保持值风格不同（UPPER_SNAKE vs lowercase）以体现分层。
 // ---------------------------------------------------------------------------
 export const ErrorCode = Object.freeze({
   ERR_NETWORK:          'NETWORK_ERROR',

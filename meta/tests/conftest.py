@@ -23,6 +23,9 @@ from datetime import datetime
 
 import pytest
 
+# 在任何测试导入之前设置环境变量，确保 rate_limiter 被禁用
+os.environ['DISABLE_RATE_LIMIT'] = 'true'
+
 logger = logging.getLogger(__name__)
 
 # ─── 提前定义 get_shared_app（解决循环导入问题）───
@@ -1901,3 +1904,75 @@ def _admin_prefs_isolated():
     finally:
         if conn:
             conn.close()
+
+
+# ============================================================================
+# [Phase 5 v3.18.4+] trace_id 端到端可观测性集成
+# ============================================================================
+# M.1: 每个测试一个 trace_id, 跨 subflow/audit/SSE 关联
+# TBD: test-observability-rules.md § M.1, multi-agent-coordination.md § D.7
+
+try:
+    from meta.tests.factories._trace_id import (
+        generate_trace_id as _gen_tid,
+        set_trace_id as _set_tid,
+        clear_trace_id as _clear_tid,
+        get_trace_id as _get_tid,
+    )
+    _TRACE_ID_AVAILABLE = True
+except ImportError:
+    _TRACE_ID_AVAILABLE = False
+
+
+@pytest.fixture(autouse=True)
+def _auto_trace_id(request):
+    """
+    [Phase 5] 自动 trace_id fixture
+    - 每个测试自动生成新 trace_id
+    - 测试结束自动清理 (避免污染其他测试)
+    - autouse=True, 无需手动声明
+    - 支持 pytest-xdist 多进程 (ContextVar 隔离)
+
+    使用:
+        # 自动获取
+        from meta.tests.factories._trace_id import get_trace_id
+        tid = get_trace_id()  # 当前测试的 trace_id
+
+        # 关联到请求
+        session.headers['X-Trace-Id'] = tid
+    """
+    if not _TRACE_ID_AVAILABLE:
+        yield
+        return
+
+    tid = _gen_tid()
+    _set_tid(tid)
+    # 暴露到 request.node 以便其他 hook 访问
+    try:
+        request.node._trace_id = tid
+    except Exception:
+        pass
+    yield tid
+    _clear_tid()
+
+
+@pytest.hookimpl(tryfirst=True, hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """
+    [Phase 5] 失败测试记录 trace_id
+    - 失败时自动把 trace_id 写入 report
+    - Agent 排查时可直接拿 trace_id 查询日志/DB
+    """
+    outcome = yield
+    if not _TRACE_ID_AVAILABLE:
+        return
+    if call.when == "call" and call.excinfo is not None:
+        try:
+            tid = _get_tid() or getattr(item, '_trace_id', None)
+            if tid and hasattr(outcome, 'get_result'):
+                report = outcome.get_result()
+                if hasattr(report, 'keywords'):
+                    report._trace_id = tid
+        except Exception:
+            pass
+

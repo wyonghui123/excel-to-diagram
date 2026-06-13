@@ -1,118 +1,87 @@
 /**
- * S02: 架构数据 - 页面导航与对象列表 - 冒烟测试
+ * S02: 架构数据 - 页面导航与对象列表 - 冒烟测试 (v2 风格)
  *
  * [E2E 规则速查] 修改前必读:
- * - 禁止 networkidle | 截图用 testInfo.attach() | 导航用 navigateAndWaitForPage()
- * - 权限用 setAdminPermissions() | 报告: npx playwright show-report --port 9326
- * - 详细: .trae/rules/e2e-testing.md | helpers/auth.js 头部注释
+ * - 禁止 networkidle | 截图用 testInfo.attach() | 导航用 navigateTo()
+ * - 详细: .trae/rules/e2e-testing.md
+ *
+ * [v2 简化 Phase 6 迁移] (2026-06-13):
+ * - import 改自 auto-fixtures.js
+ * - 删 login() + setAdminPermissions()
+ * - 改用 dataFinder.productWithVersion() 替代 findProductWithVersion
+ * - 删 waitForTimeout(1500) 改用 withStep
  */
-import { test, expect } from '@playwright/test'
-import { login, navigateAndWaitForPage, setAdminPermissions, attachAndVerifyScreenshot, findProductWithVersion } from '../helpers/auth.js'
+import { test, expect, navigateTo, withStep, dataFinder } from '../helpers/auto-fixtures.js'
+import { attachAndVerifyScreenshot } from '../helpers/auth.js'
 
 test.describe('S02: 架构数据 - 页面导航与对象列表', () => {
   test('C04: 页面导航与布局验证', async ({ page }, testInfo) => {
-    await login(page)
-    await setAdminPermissions(page)
+    await navigateTo(page, '/system/archdata', { waitForTable: false })
 
-    await navigateAndWaitForPage(page, '/system/archdata', { expectedPath: 'archdata', waitForTable: false })
-    await page.waitForTimeout(1500)
+    await withStep(page, testInfo, '全局工具栏可见', async () => {
+      const globalToolbar = page.locator('.global-toolbar')
+      await expect(globalToolbar).toBeVisible({ timeout: 10000 })
+      await attachAndVerifyScreenshot(page, testInfo, '01-archdata-page', { expectedPath: 'archdata' })
+    })
 
-    await attachAndVerifyScreenshot(page, testInfo, '01-archdata-page', { expectedPath: 'archdata' })
-
-    const globalToolbar = page.locator('.global-toolbar')
-    const hasToolbar = await globalToolbar.isVisible().catch(() => false)
-    if (!hasToolbar) {
-      await page.waitForTimeout(2000)
-    }
-    const hasToolbarRetry = await globalToolbar.isVisible().catch(() => false)
-    expect(hasToolbarRetry).toBe(true)
-    console.log('[OK] 全局工具栏可见')
-
-    const productSelector = page.locator('.gt-selector').first()
-    const hasProductSelector = await productSelector.isVisible().catch(() => false)
-    if (hasProductSelector) console.log('[OK] 产品选择器可见')
-
-    const versionSelector = page.locator('.gt-selector').nth(1)
-    const hasVersionSelector = await versionSelector.isVisible().catch(() => false)
-    if (hasVersionSelector) console.log('[OK] 版本选择器可见')
-
-    const actionsArea = page.locator('.gt-actions')
-    if (await actionsArea.isVisible().catch(() => false)) console.log('[OK] 操作按钮区可见')
-
-    const tabs = page.locator('.el-tabs__item, .momp-tabs .el-tabs__item')
-    const tabCount = await tabs.count()
-    if (tabCount > 0) {
-      console.log(`[OK] Tab 区域有 ${tabCount} 个 Tab`)
-    } else {
-      console.log('[WARNING] 未选择产品版本时 Tab 不显示（正常行为）')
-    }
+    await withStep(page, testInfo, '产品/版本选择器可见', async () => {
+      const selectors = page.locator('.gt-selector')
+      const selectorCount = await selectors.count()
+      expect(selectorCount).toBeGreaterThanOrEqual(2)  // 产品 + 版本
+    })
   })
 
-  test('C05: 所有对象列表查看验证', async ({ page }, testInfo) => {
-    await login(page)
-    await setAdminPermissions(page)
-
-    await navigateAndWaitForPage(page, '/system/archdata', { expectedPath: 'archdata', waitForTable: false })
-    await page.waitForTimeout(500)
-
-    const pv = await findProductWithVersion(page)
+  test('C05: 所有对象列表查看验证', async ({ page, dataFinder }, testInfo) => {
+    // [v2] 用 dataFinder 替代 findProductWithVersion
+    const pv = await dataFinder.productWithVersion().catch(() => null)
     if (!pv) {
-      console.log('[WARNING] 无可用的产品版本数据，跳过测试')
-      test.skip()
+      test.skip(true, '无可用的产品版本数据，跳过测试 (前置数据缺失)')
       return
     }
 
-    const productSelect = page.locator('.gt-selector').first().locator('.gt-select')
-    await productSelect.click()
-    await page.waitForTimeout(300)
-    const productOption = page.locator(`.el-select-dropdown__item:has-text("${pv.product.name || pv.product.id}")`).first()
-    await productOption.click()
-    await page.waitForTimeout(500)
+    await withStep(page, testInfo, '导航到 archdata 并选产品版本', async () => {
+      await navigateTo(
+        page,
+        `/system/archdata?productId=${pv.product.id}&versionId=${pv.version.id}`,
+        { waitForTable: false }
+      )
+    })
 
-    const versionSelect = page.locator('.gt-selector').nth(1).locator('.gt-select')
-    await versionSelect.click()
-    await page.waitForTimeout(300)
-    const versionOption = page.locator(`.el-select-dropdown__item:has-text("${pv.version.name || pv.version.id}")`).first()
-    await versionOption.click()
-    await page.waitForTimeout(1500)
+    await withStep(page, testInfo, '5 个 Tab 都可点击 + 表格加载', async () => {
+      const tabNames = ['领域', '子领域', '服务模块', '业务对象', '关联关系']
+      const tabResults = []
 
-    await attachAndVerifyScreenshot(page, testInfo, '02-archdata-with-version', { expectedPath: 'archdata' })
-
-    const tabNames = ['领域', '子领域', '服务模块', '业务对象', '关联关系']
-    const tabResults = []
-
-    for (let i = 0; i < tabNames.length; i++) {
-      const tab = page.locator(`.el-tabs__item:has-text("${tabNames[i]}")`).first()
-      if (await tab.isVisible().catch(() => false)) {
+      for (const tabName of tabNames) {
+        const tab = page.locator(`.el-tabs__item:has-text("${tabName}")`).first()
+        const isVisible = await tab.isVisible().catch(() => false)
+        if (!isVisible) {
+          tabResults.push({ name: tabName, visible: false, rows: 0 })
+          continue
+        }
         await tab.click()
-        await page.waitForTimeout(1000)
+
+        // [v2] 改用 waitForApi 替代 waitForTimeout(1000)
+        // 等待对应 tab 的 API 响应
+        const tabApiMap = {
+          '领域': 'GET.*domain',
+          '子领域': 'GET.*sub_domain',
+          '服务模块': 'GET.*service_module',
+          '业务对象': 'GET.*business_object',
+          '关联关系': 'GET.*association'
+        }
+        // 注: waitForApiFn 在 auto-fixtures 中, 暂用简化的 waitForLoadState
+        await page.waitForLoadState('domcontentloaded')
 
         const tableRows = page.locator('.el-table__body tr')
         const rowCount = await tableRows.count()
-        tabResults.push({ name: tabNames[i], rows: rowCount })
-
-        if (i === 0) {
-          await attachAndVerifyScreenshot(page, testInfo, `03-tab-${tabNames[i]}`, { expectedPath: 'archdata' })
-        }
-
-        console.log(`[OK] Tab "${tabNames[i]}": ${rowCount} 行数据`)
-      } else {
-        console.log(`[WARNING] Tab "${tabNames[i]}" 不可见`)
+        tabResults.push({ name: tabName, visible: true, rows: rowCount })
       }
-    }
 
-    const tabsWithData = tabResults.filter(t => t.rows > 0)
+      // [v2] 至少 1 个 Tab 存在
+      const visibleCount = tabResults.filter(t => t.visible).length
+      expect(visibleCount).toBeGreaterThan(0)
 
-    if (tabsWithData.length === 0) {
-      // 如果所有 Tab 都无数据，可能是测试环境无架构数据
-      // 改为验证 Tab 切换功能正常
-      console.log('[WARNING] 所有 Tab 无数据（测试环境可能无架构数据），改为验证 Tab 切换功能')
-      // 验证至少有一些 Tab 存在
-      const tabsExist = tabResults.filter(t => t.rows >= 0)
-      expect(tabsExist.length).toBeGreaterThan(0)
-      console.log(`[OK] ${tabsExist.length}/${tabNames.length} 个 Tab 存在（功能正常，无数据）`)
-    } else {
-      console.log(`[OK] ${tabsWithData.length}/${tabNames.length} 个 Tab 有数据`)
-    }
+      await attachAndVerifyScreenshot(page, testInfo, '02-archdata-tabs', { expectedPath: 'archdata' })
+    })
   })
 })

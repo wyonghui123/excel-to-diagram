@@ -16,17 +16,21 @@
  * })
  */
 
-import { ref, computed, unref, onMounted } from 'vue'
+import { ref, computed, unref, onMounted, shallowRef } from 'vue'
 import * as auditLogService from '@/services/auditLogService'
 
 export function useAuditLogs(objectType, objectId, options = {}) {
   const { pageSize = 20, autoLoad = true, parentObjectType, parentObjectId } = options
 
-  const logs = ref([])
+  // [M2 PR-2.1] 审计日志数据是 API 整体返回后整体替换，无 push/splice 原地修改 → shallowRef
+  //   性能: 1000+ 条日志 reactive 创建 1000+ Proxy → shallowRef 0 Proxy
+  //   触发: 仅整体替换时触发 watcher，避免无谓的细粒度更新
+  const logs = shallowRef([])
   const total = ref(0)
   const loading = ref(false)
   const currentPage = ref(1)
-  const filters = ref({})
+  // [M2 PR-2.1] filters 同样只做整体替换 (setFilters/clearFilters 都是 new object) → shallowRef
+  const filters = shallowRef({})
 
   const resolvedObjectType = computed(() => unref(objectType))
   const resolvedObjectId = computed(() => unref(objectId))

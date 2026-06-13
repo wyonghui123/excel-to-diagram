@@ -39,6 +39,7 @@
 import { test as base, expect } from '@playwright/test'
 import { assertHealthy, waitForStable } from './auth.js'
 import * as dataFinder from './data-finder.js'
+import { clearCache as clearDataFinderCache } from './data-finder.js'
 import { TestIsolation, attachIsolationFixtures } from './test-isolation.js'
 import { MenuNavigator, findMenuPathForUrl } from './menu-navigator.js'
 import { waitForApi, mockApi } from './network-waiter.js'
@@ -265,7 +266,7 @@ export const test = base.extend({
   isolation: async ({ page }, use, testInfo) => {
     const iso = new TestIsolation(page, testInfo)
     await use(iso)
-    // afterEach: 自动清理
+    // afterEach: 自动清理 (try/finally 强制)
     try {
       const result = await iso.cleanup()
       if (result.errors.length > 0) {
@@ -273,6 +274,13 @@ export const test = base.extend({
       }
     } catch (e) {
       console.warn('[isolation] cleanup failed:', e.message)
+    } finally {
+      // [Phase 6] 清 data-finder 缓存, 避免下一次测试拿到脏数据
+      try {
+        clearDataFinderCache()
+      } catch (e) {
+        console.warn('[isolation] clearDataFinderCache failed:', e.message)
+      }
     }
   },
 

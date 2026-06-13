@@ -55,7 +55,7 @@ class TestAuditInterceptorUnified:
         }
 
         response = shared_client.post(
-            '/api/v2/bo/users',
+            '/api/v2/bo/user',
             headers=admin_headers,
             data=json.dumps(test_user)
         )
@@ -89,7 +89,7 @@ class TestAuditInterceptorUnified:
         }
 
         response = shared_client.post(
-            '/api/v2/bo/users',
+            '/api/v2/bo/user',
             headers=admin_headers,
             data=json.dumps(test_user)
         )
@@ -107,7 +107,7 @@ class TestAuditInterceptorUnified:
 
         update_data = {'display_name': f'更新后_{int(time.time())}'}
         response = shared_client.put(
-            f'/api/v2/bo/users/{user_id}',
+            f'/api/v2/bo/user/{user_id}',
             headers=admin_headers,
             data=json.dumps(update_data)
         )
@@ -124,7 +124,7 @@ class TestAuditInterceptorUnified:
 
         update_data = {'display_name': 'Admin'}
         response = shared_client.put(
-            '/api/v2/bo/users/1',
+            '/api/v2/bo/user/1',
             headers=admin_headers,
             data=json.dumps(update_data)
         )
@@ -148,7 +148,7 @@ class TestAuditInterceptorUnified:
         }
 
         response = shared_client.post(
-            '/api/v2/bo/users',
+            '/api/v2/bo/user',
             headers=admin_headers,
             data=json.dumps(test_user)
         )
@@ -165,7 +165,7 @@ class TestAuditInterceptorUnified:
             pytest.skip("无法获取创建的用户ID")
 
         response = shared_client.delete(
-            f'/api/v2/bo/users/{user_id}',
+            f'/api/v2/bo/user/{user_id}',
             headers=admin_headers
         )
 
@@ -445,7 +445,7 @@ class TestAuditInterceptorUnified:
 
         update_data = {'display_name': 'Admin'}
         response = shared_client.put(
-            '/api/v2/bo/users/1',
+            '/api/v2/bo/user/1',
             headers=admin_headers,
             data=json.dumps(update_data)
         )
@@ -469,7 +469,7 @@ class TestAuditInterceptorUnified:
         }
 
         response = shared_client.post(
-            '/api/v2/bo/users',
+            '/api/v2/bo/user',
             headers=admin_headers,
             data=json.dumps(test_user)
         )
@@ -488,7 +488,7 @@ class TestAuditInterceptorUnified:
         original_name = data.get('data', {}).get('display_name')
         update_data = {'display_name': f'变化后的名字_{int(time.time())}'}
         response = shared_client.put(
-            f'/api/v2/bo/users/{user_id}',
+            f'/api/v2/bo/user/{user_id}',
             headers=admin_headers,
             data=json.dumps(update_data)
         )
@@ -516,7 +516,7 @@ class TestAuditInterceptorUnified:
         }
 
         response = shared_client.post(
-            '/api/v2/bo/users',
+            '/api/v2/bo/user',
             headers=admin_headers,
             data=json.dumps(test_user)
         )

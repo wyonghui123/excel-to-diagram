@@ -402,16 +402,8 @@ export async function ensureRelationships(page, options = {}) {
 // ============================================================
 // 数据清理（afterEach 用）
 // ============================================================
-export async function cleanupTestArtifacts(page, testIds) {
-  if (!testIds || testIds.length === 0) return
-  for (const id of testIds) {
-    try {
-      await apiDelete(page, `/api/v2/bo/version/${id}`)
-    } catch (e) { /* ignore */ }
-    try {
-      await apiDelete(page, `/api/v2/bo/product/${id}`)
-    } catch (e) { /* ignore */ }
-  }
-}
-
 export { clearCache }
+
+// [Phase 6 清理] 删除 dead code: cleanupTestArtifacts
+// 原因: 无 spec 使用, 已被 isolation.createTracked + cleanup 拓扑序取代
+// 旧位置: 第 405-415 行

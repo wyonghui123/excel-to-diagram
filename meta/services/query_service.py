@@ -350,9 +350,9 @@ class QueryService:
             raw_field = parts[0]
             order_field = raw_field.lstrip('-')
             direction = 'desc' if raw_field.startswith('-') else (parts[1] if len(parts) > 1 else 'asc')
-            
+
             logger.info(f"[VirtualSort] order_field={order_field}, direction={direction}")
-            
+
             virtual_join_info = self._build_virtual_field_order_join(
                 meta_obj, order_field, direction
             )

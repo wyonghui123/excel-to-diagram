@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, shallowRef } from 'vue'
 
 export const useDiagramConfigStore = defineStore('diagramConfig', () => {
   // 图表类型
@@ -22,7 +22,9 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
   // 中心范围配置
   const centerDomain = ref('')
   const centerScope = ref([])
-  const centerScopeMarkers = ref({
+  // [M2 PR-2.1] centerScopeMarkers 包含 3 个 Map，整体替换模式 (updateCenterScopeMarkers 整体赋值)
+  //   改 shallowRef 避免对内部 Map 创建 Proxy
+  const centerScopeMarkers = shallowRef({
     domains: new Map(),
     subDomains: new Map(),
     serviceModules: new Map()
@@ -36,7 +38,9 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
 
   // 其他配置
   const customColors = ref({})
-  const positions = ref([])
+  // [M2 PR-2.1] positions 节点位置数组可能包含 1000+ 节点坐标，整体替换模式 (updatePositions 整体赋值)
+  //   改 shallowRef 避免深度代理开销
+  const positions = shallowRef([])
   const preserveModelOrder = ref(false)
   const hideLinkLabelTails = ref(null)
   const annotationPanelPosition = ref('bottom')

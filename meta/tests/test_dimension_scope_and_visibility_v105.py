@@ -233,9 +233,11 @@ class TestDataPermissionInterceptorV105:
             'source': 'dimension_scope',
         }]
 
-        # 模拟 _bo_has_owner_id 返回 True (version 有 owner_id)
+        # [FIX 2026-06-13] mock _bo_has_visibility_field 也需要返回 True
+        # 否则方法会跳过 visibility scope，直接添加 owner exception
         import unittest.mock as mock
-        with mock.patch.object(interceptor, '_bo_has_owner_id', return_value=True):
+        with mock.patch.object(interceptor, '_bo_has_owner_id', return_value=True), \
+             mock.patch.object(interceptor, '_bo_has_visibility_field', return_value=True):
             interceptor._apply_scope_filter_after_dimension(ctx)
 
         # v1.0.7 修复后结构:
@@ -434,8 +436,10 @@ class TestTeset68EndToEnd:
         interceptor = DataPermissionInterceptor()
         ctx = MockContext()
 
+        # [FIX 2026-06-13] mock _bo_has_visibility_field 也需要返回 True
         import unittest.mock as mock
-        with mock.patch.object(interceptor, '_bo_has_owner_id', return_value=True):
+        with mock.patch.object(interceptor, '_bo_has_owner_id', return_value=True), \
+             mock.patch.object(interceptor, '_bo_has_visibility_field', return_value=True):
             interceptor._apply_scope_filter_after_dimension(ctx)
 
         # v1.0.7 结构: [{type:'or', conditions:[and_group, owner_cond]}]

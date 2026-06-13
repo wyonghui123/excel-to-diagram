@@ -1,14 +1,22 @@
 # -*- coding: utf-8 -*-
 """
-BO Action (v3.5 P1): enum_type.create / enum_type.update / enum_type.delete
-============================================================================
+BO Action (v3.5 P1 + v3.18 enum-mgmt-spec): enum_type.create / enum_type.update / enum_type.delete
+===================================================================================================
 
 业务枚举类型的 CRUD。
-业务逻辑与 enum_api.py:318-510 完全一致 (admin 限定, system 枚举不可改/删)。
+
+【v3.18 更新】
+- mutability 值空间规范化为 3 档：fullEditable / extensible / locked
+- 校验改用 ErrorCode 错误码（与 API 路径保持一致）
+- 系统枚举保护 + 字段必填 + mutability 值校验，由本服务和 EnumProtectionInterceptor 共同保障
+  （拦截器跑在 BO Action 路径，防御纵深）
+
+注：业务逻辑与 enum_api.py:331-503 类似但独立维护（API 直连路径不走 BO Action）。
 """
 import json
 import logging
 import os
+import re
 from datetime import datetime
 from typing import Any, Dict
 
@@ -47,6 +55,14 @@ def _get_admin_info(context):
     }
 
 
+def _validate_mutability_or_err(mutability: str):
+    """v3.18: 校验 mutability 值合法性。返回 (ok: bool, err_msg: str)"""
+    from meta.core.interceptors.enum_protection_interceptor import ALLOWED_MUTABILITY
+    if mutability not in ALLOWED_MUTABILITY:
+        return False, f'mutability 必须是 {sorted(ALLOWED_MUTABILITY)} 之一，当前值 "{mutability}"'
+    return True, ''
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 1️⃣ enum_type.create
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -59,7 +75,7 @@ def enum_type_create_handler(params: Dict[str, Any], context: Dict[str, Any]) ->
             'id': str (required),
             'name': str (required),
             'category': 'business' (default, 不允许 'system'),
-            'mutability': 'extensible' | 'frozen' (default 'extensible'),
+            'mutability': 'extensible' | 'fullEditable' | 'locked' (default 'extensible'),
             'dimension_schema': object (optional),
             'description': str (default ''),
         }
@@ -67,12 +83,18 @@ def enum_type_create_handler(params: Dict[str, Any], context: Dict[str, Any]) ->
     enum_type_id = params.get('id')
     name = params.get('name')
     if not enum_type_id or not name:
-        return {'success': False, 'data': None, 'message': 'id 和 name 必填'}
+        return {'success': False, 'data': None, 'message': 'id 和 name 必填', 'errors': ['ACTION_PARAMS_MISSING']}
 
     category = params.get('category', 'business')
     if category == 'system':
-        return {'success': False, 'data': None, 'message': '不能创建 system 类别枚举'}
+        return {'success': False, 'data': None, 'message': '系统枚举不可通过 BO Action 创建（请使用初始化脚本或 migrate_enums.py）', 'errors': ['SYSTEM_ENUM_IMMUTABLE']}
     mutability = params.get('mutability', 'extensible')
+
+    # [v3.18 FR-001] mutability 值空间校验
+    ok, err = _validate_mutability_or_err(mutability)
+    if not ok:
+        return {'success': False, 'data': None, 'message': err, 'errors': ['INVALID_MUTABILITY']}
+
     dimension_schema = params.get('dimension_schema')
     description = params.get('description', '')
 
@@ -86,7 +108,7 @@ def enum_type_create_handler(params: Dict[str, Any], context: Dict[str, Any]) ->
             "SELECT id FROM enum_types WHERE id = ?", [enum_type_id]
         ).fetchone()
         if existing:
-            return {'success': False, 'data': None, 'message': f'枚举类型 {enum_type_id} 已存在'}
+            return {'success': False, 'data': None, 'message': f'枚举类型 {enum_type_id} 已存在', 'errors': ['DUPLICATE_CODE']}
 
         # 设置 BO 上下文 (审计)
         admin = _get_admin_info(context)
@@ -107,7 +129,7 @@ def enum_type_create_handler(params: Dict[str, Any], context: Dict[str, Any]) ->
         }
     except Exception as e:
         logger.exception(f"[enum_type.create] failed: {e}")
-        return {'success': False, 'data': None, 'message': f'创建失败: {e}'}
+        return {'success': False, 'data': None, 'message': f'创建失败: {e}', 'errors': ['CREATE_ENUM_TYPE_ERROR']}
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -121,14 +143,14 @@ def enum_type_update_handler(params: Dict[str, Any], context: Dict[str, Any]) ->
         params: {
             'id': str (required),
             'name': str (optional),
-            'mutability': 'extensible' | 'frozen' (optional),
+            'mutability': 'extensible' | 'fullEditable' | 'locked' (optional),
             'dimension_schema': object (optional),
             'description': str (optional),
         }
     """
     enum_type_id = params.get('id') or params.get('enum_type_id')
     if not enum_type_id:
-        return {'success': False, 'data': None, 'message': 'id 必填'}
+        return {'success': False, 'data': None, 'message': 'id 必填', 'errors': ['ACTION_PARAMS_MISSING']}
 
     try:
         ds = _get_ds()
@@ -138,7 +160,7 @@ def enum_type_update_handler(params: Dict[str, Any], context: Dict[str, Any]) ->
             [enum_type_id]
         ).fetchone()
         if not existing:
-            return {'success': False, 'data': None, 'message': '枚举类型不存在'}
+            return {'success': False, 'data': None, 'message': '枚举类型不存在', 'errors': ['DATA_NOT_FOUND']}
 
         # sqlite3.Row / tuple 都兼容
         if hasattr(existing, 'keys'):
@@ -151,7 +173,13 @@ def enum_type_update_handler(params: Dict[str, Any], context: Dict[str, Any]) ->
             }
 
         if existing_dict.get('category') == 'system':
-            return {'success': False, 'data': None, 'message': '系统枚举不可修改'}
+            return {'success': False, 'data': None, 'message': '系统枚举不可修改', 'errors': ['SYSTEM_ENUM_IMMUTABLE']}
+
+        # [v3.18 FR-001] mutability 值空间校验
+        if 'mutability' in params:
+            ok, err = _validate_mutability_or_err(params['mutability'])
+            if not ok:
+                return {'success': False, 'data': None, 'message': err, 'errors': ['INVALID_MUTABILITY']}
 
         name = params.get('name', existing_dict.get('name'))
         mutability = params.get('mutability', existing_dict.get('mutability'))
@@ -181,7 +209,7 @@ def enum_type_update_handler(params: Dict[str, Any], context: Dict[str, Any]) ->
         }
     except Exception as e:
         logger.exception(f"[enum_type.update] failed: {e}")
-        return {'success': False, 'data': None, 'message': f'更新失败: {e}'}
+        return {'success': False, 'data': None, 'message': f'更新失败: {e}', 'errors': ['UPDATE_ENUM_TYPE_ERROR']}
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -198,7 +226,7 @@ def enum_type_delete_handler(params: Dict[str, Any], context: Dict[str, Any]) ->
     """
     enum_type_id = params.get('id') or params.get('enum_type_id')
     if not enum_type_id:
-        return {'success': False, 'data': None, 'message': 'id 必填'}
+        return {'success': False, 'data': None, 'message': 'id 必填', 'errors': ['ACTION_PARAMS_MISSING']}
 
     try:
         ds = _get_ds()
@@ -208,7 +236,7 @@ def enum_type_delete_handler(params: Dict[str, Any], context: Dict[str, Any]) ->
             [enum_type_id]
         ).fetchone()
         if not existing:
-            return {'success': False, 'data': None, 'message': '枚举类型不存在'}
+            return {'success': False, 'data': None, 'message': '枚举类型不存在', 'errors': ['DATA_NOT_FOUND']}
 
         if hasattr(existing, 'keys'):
             existing_dict = dict(existing)
@@ -216,7 +244,7 @@ def enum_type_delete_handler(params: Dict[str, Any], context: Dict[str, Any]) ->
             existing_dict = {'id': existing[0], 'name': existing[1], 'category': existing[2]}
 
         if existing_dict.get('category') == 'system':
-            return {'success': False, 'data': None, 'message': '系统枚举不可删除'}
+            return {'success': False, 'data': None, 'message': '系统枚举不可删除', 'errors': ['SYSTEM_ENUM_IMMUTABLE']}
 
         # 检查 enum_values
         value_count = ds.execute(
@@ -227,6 +255,7 @@ def enum_type_delete_handler(params: Dict[str, Any], context: Dict[str, Any]) ->
             return {
                 'success': False, 'data': None,
                 'message': f'该枚举类型下有 {value_count} 个枚举值, 无法删除',
+                'errors': ['HAS_VALUES'],
             }
 
         # 设置 BO 上下文 (审计)
@@ -243,4 +272,4 @@ def enum_type_delete_handler(params: Dict[str, Any], context: Dict[str, Any]) ->
         }
     except Exception as e:
         logger.exception(f"[enum_type.delete] failed: {e}")
-        return {'success': False, 'data': None, 'message': f'删除失败: {e}'}
+        return {'success': False, 'data': None, 'message': f'删除失败: {e}', 'errors': ['DELETE_ENUM_TYPE_ERROR']}

@@ -24,6 +24,7 @@ import { useListActionStore } from '@/stores/listActionStore'
 import { suggestKeyTemplateCode as _suggestKeyTemplateCodeSvc } from '@/services/keyTemplateService'
 import { saveAllDrafts as _saveAllDraftsSvc, getDraftCreates as _getDraftCreatesSvc } from '@/services/draftPersistService'
 import { useBoAction } from '@/composables/useBoAction'
+import { t as i18nT } from '@/i18n'
 import {
   isInternalProp,
   transformFilters,
@@ -52,10 +53,10 @@ import {
  * 统一的错误处理函数
  * @param {string} context - 操作上下文描述
  * @param {Error} error - 错误对象
- * @param {Object} options - 选项 { showMessage: boolean, defaultMessage: string }
+ * @param {Object} options - 选项 { showMessage: boolean, defaultMessage: string, t?: Function }
  */
 function handleError(context, error, options = {}) {
-  const { showMessage = true, defaultMessage = `${context}失败` } = options
+  const { showMessage = true, defaultMessage, t = i18nT } = options
 
   console.error(`[useMetaList] ${context}:`, error)
 
@@ -69,7 +70,7 @@ function handleError(context, error, options = {}) {
     const message = error?.response?.data?.error ||
                     error?.message ||
                     error?.msg ||
-                    defaultMessage
+                    (defaultMessage || t('metaList.loadFailed', '{context}失败', { context }))
     ElMessage.error(message)
   }
 
@@ -85,6 +86,11 @@ export function useMetaList(objectType, options = {}) {
   //   `callPost is not a function`。
   //   useBoAction 只依赖 httpClient + authStore，与 useMetaList 无循环依赖，
   //   故可在 setup 上下文直接静态 import + 顶层调用。
+  //
+  // [v3 决策 2026-06-13] 验证: useBoAction() 是纯函数工厂 (无 setup 副作用，
+  //   无 watch/computed，无 onMounted)，N 个 MetaListPage 实例的工厂调用
+  //   **无性能成本**。FR-018 惰性化不适用 (昨晚 spec 假设错误)。
+  //   真正的前置应是 useFieldPolicy.autoLoad() 集成 (见下)。
   const { callPost } = useBoAction()
 
   // ======== 配置项 ========
@@ -160,7 +166,9 @@ export function useMetaList(objectType, options = {}) {
   const importOptions = ref({})
   
   /** 列表数据 */
-  const data = ref([])
+  // [M2 PR-2.1] data 列表可能包含 1000+ 行，整个 set 替换 (data.value = ...) 而非 push/splice
+  //   改 shallowRef 避免深度代理，v-for 直接消费 data.value 不受影响
+  const data = shallowRef([])
   
   /** 加载状态 */
   const loading = ref(false)
@@ -195,9 +203,17 @@ export function useMetaList(objectType, options = {}) {
   
   /** 选中的记录ID集合（跨页保留） */
   const selectedIds = ref(new Set())
-  
+
   /** 是否选择了所有页 */
   const isAllPagesSelected = ref(false)
+
+  // [FR-008 v1] 选区上限：防止跨页累积导致序列化/反序列化慢
+  // 业界惯例: Gmail 模式上限 1000, Material UI DataGrid 默认 RowSpanLimit 1000
+  // 1000 行足够大多数批量操作 (1000 records × 5 fields ≈ 100KB JSON, 后端 batch_delete 接受)
+  const MAX_SELECTION_LIMIT = 1000
+
+  /** 是否触发了选区上限（用于 UI 提示 + 阻止超限 selectAllPages） */
+  const selectionLimitHit = ref(false)
   
   /** 导出对话框显示状态 */
   const showExportDialog = ref(false)
@@ -412,7 +428,7 @@ export function useMetaList(objectType, options = {}) {
       }
     } catch (error) {
       console.error(`[useMetaList] [X] 初始化失败 (${objectType}):`, error)
-      ElMessage.error('加载列表配置失败')
+      ElMessage.error(i18nT('metaList.loadListConfigFailed', '加载列表配置失败'))
     }
   }
 
@@ -578,7 +594,7 @@ export function useMetaList(objectType, options = {}) {
    */
   async function handleBatchAction(action) {
     if (selectedRows.value.length === 0) {
-      ElMessage.warning('请先选择要操作的数据')
+      ElMessage.warning(i18nT('metaList.selectRowsFirst', '请先选择要操作的数据'))
       return
     }
     
@@ -656,19 +672,19 @@ export function useMetaList(objectType, options = {}) {
    */
   async function handleBatchDelete() {
     if (selectedIds.value.size === 0) {
-      ElMessage.warning('请选择要删除的记录')
+      ElMessage.warning(i18nT('metaList.selectDeleteFirst', '请选择要删除的记录'))
       return
     }
-    
+
     const count = selectedIds.value.size
-    
+
     try {
       await ElMessageBox.confirm(
-        `确定要删除选中的 ${count} 条记录吗？`,
-        '确认删除',
+        i18nT('metaList.confirmDeleteMessage', '确定要删除选中的 {count} 条记录吗？', { count }),
+        i18nT('metaList.confirmDeleteTitle', '确认删除'),
         {
-          confirmButtonText: '确定',
-          cancelButtonText: '取消',
+          confirmButtonText: i18nT('common.confirm', '确定'),
+          cancelButtonText: i18nT('common.cancel', '取消'),
           type: 'warning'
         }
       )
@@ -679,12 +695,12 @@ export function useMetaList(objectType, options = {}) {
 
       if (result.success) {
         const deletedCount = result.success_count || idsToDelete.length
-        const successMsg = `成功删除 ${deletedCount} 条记录`
+        const successMsg = i18nT('metaList.deleteSuccess', '成功删除 {count} 条记录', { count: deletedCount })
         // [FIX 2026-06-12 v4] 用户反馈成功 message 不明显 (ElMessage 顶部 3s 自动消失容易错过)
         // 改用三重保险: ElNotification (显眼长条) + ElMessage (快速反馈) + console.log
         console.log('[useMetaList] 批量删除成功:', successMsg, result)
         ElNotification({
-          title: '删除成功',
+          title: i18nT('common.delete', '删除成功'),
           message: successMsg,
           type: 'success',
           duration: 4500,
@@ -715,7 +731,7 @@ export function useMetaList(objectType, options = {}) {
             .map(e => (typeof e === 'string' ? e : e?.message || JSON.stringify(e)))
             .join('; ')
         }
-        if (!errorMsg) errorMsg = '删除失败'
+        if (!errorMsg) errorMsg = i18nT('metaList.deleteFailed', '删除失败')
 
         // [FIX 2026-06-12 v3] 用户反馈 el-message 不够明显, 改用三重保险:
         // 1) ElNotification 右上角长条 (4.5s, 显眼, 不被遮)
@@ -724,7 +740,7 @@ export function useMetaList(objectType, options = {}) {
         // 之前用 ElMessage.error(errorMsg) 单一途径, 顶部 3s 自动消失, 用户容易错过
         console.error('[useMetaList] 批量删除失败:', errorMsg, result)
         ElNotification({
-          title: '删除失败',
+          title: i18nT('metaList.deleteFailedTitle', '删除失败'),
           message: errorMsg,
           type: 'error',
           duration: 6000,  // 6 秒, 比默认 4.5s 更长
@@ -741,7 +757,7 @@ export function useMetaList(objectType, options = {}) {
     } catch (error) {
       if (error !== 'cancel') {
         console.error('[useMetaList] 批量删除失败:', error)
-        ElMessage.error(error.message || '删除失败')
+        ElMessage.error(error.message || i18nT('metaList.deleteFailed', '删除失败'))
       }
     }
   }
@@ -788,7 +804,7 @@ export function useMetaList(objectType, options = {}) {
     for (const typeResult of Object.values(results)) {
       totalCount += (typeResult.success || 0) + (typeResult.deleted || 0)
     }
-    ElMessage.success(`导入完成，共处理 ${totalCount} 条数据`)
+    ElMessage.success(i18nT('metaList.importSuccess', '导入完成，共处理 {count} 条数据', { count: totalCount }))
     showImportDialog.value = false
     await loadList()
   }
@@ -861,7 +877,7 @@ export function useMetaList(objectType, options = {}) {
    */
   function selectAllCurrentPage() {
     if (!data.value || data.value.length === 0) return
-    
+
     const rowKey = config.rowKey || 'id'
     const newSet = new Set(selectedIds.value)
     data.value.forEach(row => {
@@ -869,17 +885,28 @@ export function useMetaList(objectType, options = {}) {
         newSet.add(row[rowKey])
       }
     })
-    selectedIds.value = newSet
-    
+    // [FR-008 v1] 选区上限保护
+    if (newSet.size > MAX_SELECTION_LIMIT) {
+      // 截断到上限, 标记 hit
+      const truncated = new Set([...newSet].slice(0, MAX_SELECTION_LIMIT))
+      selectedIds.value = truncated
+      selectionLimitHit.value = true
+      ElMessage.warning(
+        i18nT('metaList.selectionLimitHit', '选中数量超过上限 {limit} 条, 已截断。请减少选区或分批操作。', { limit: MAX_SELECTION_LIMIT })
+      )
+    } else {
+      selectedIds.value = newSet
+    }
+
     selectedRows.value = [...data.value]
   }
-  
+
   /**
    * 选择所有页（参考 Gmail 模式）
    */
   function selectAllPages() {
     isAllPagesSelected.value = true
-    
+
     const rowKey = config.rowKey || 'id'
     const newSet = new Set(selectedIds.value)
     data.value.forEach(row => {
@@ -887,8 +914,18 @@ export function useMetaList(objectType, options = {}) {
         newSet.add(row[rowKey])
       }
     })
-    selectedIds.value = newSet
-    
+    // [FR-008 v1] 选区上限保护: Gmail 模式理论上选所有页, 但要防止 pagination.total 异常
+    if (newSet.size > MAX_SELECTION_LIMIT) {
+      const truncated = new Set([...newSet].slice(0, MAX_SELECTION_LIMIT))
+      selectedIds.value = truncated
+      selectionLimitHit.value = true
+      ElMessage.warning(
+        i18nT('metaList.selectionLimitHit', '选中数量超过上限 {limit} 条, 已截断。请减少选区或分批操作。', { limit: MAX_SELECTION_LIMIT })
+      )
+    } else {
+      selectedIds.value = newSet
+    }
+
     selectedRows.value = [...data.value]
   }
   
@@ -900,6 +937,8 @@ export function useMetaList(objectType, options = {}) {
     selectedIds.value = new Set()
     selectedRows.value = []
     isAllPagesSelected.value = false
+    // [FR-008 v1] 重置上限 hit 标志
+    selectionLimitHit.value = false
   }
 
   /**
@@ -1371,9 +1410,9 @@ export function useMetaList(objectType, options = {}) {
     }
     
     try {
-      await ElMessageBox.confirm(message, action.confirmTitle || '确认操作', {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
+      await ElMessageBox.confirm(message, action.confirmTitle || i18nT('metaList.confirmTitle', '确认操作'), {
+        confirmButtonText: i18nT('common.confirm', '确定'),
+        cancelButtonText: i18nT('common.cancel', '取消'),
         type: action.variant === 'danger' ? 'warning' : 'info'
       })
       return true
@@ -1605,9 +1644,9 @@ export function useMetaList(objectType, options = {}) {
     if (hasUnsavedChanges.value) {
       try {
         await ElMessageBox.confirm(
-          '有未保存的修改，是否放弃？',
-          '提示',
-          { type: 'warning', confirmButtonText: '放弃', cancelButtonText: '取消' }
+          i18nT('metaList.discardChangesMessage', '有未保存的修改，是否放弃？'),
+          i18nT('metaList.discardChangesTitle', '提示'),
+          { type: 'warning', confirmButtonText: i18nT('metaList.discardChangesConfirm', '放弃'), cancelButtonText: i18nT('common.cancel', '取消') }
         )
       } catch {
         return false
@@ -1851,6 +1890,9 @@ export function useMetaList(objectType, options = {}) {
     selectedRows,
     selectedIds,
     isAllPagesSelected,
+    // [FR-008 v1] 选区上限
+    selectionLimitHit,
+    MAX_SELECTION_LIMIT,
     totalSelectedCount,
     currentPageSelectedCount,
     

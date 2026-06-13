@@ -102,11 +102,12 @@ describe('useMetaList 4 种 displayMode 行为守卫', () => {
     // 4 种 displayMode × selectionConfig 行为 = 4 个测试
 
     it('TC-DM-1: page 模式 selectionConfig 默认行为', () => {
-      // source 中存在 page 兜底逻辑
-      expect(useMetaListSource).toContain(`return {
-        enabled: rowActions.value.length > 0 || batchActions.value.length > 0 || !!metaSelectable,
-        mode: metaConfig.value?.list?.selection?.mode || 'multiple'
-      }`)
+      // page 兜底逻辑: 用 metaSelectable (list.selectable || list.selection?.enabled)
+      // selectionConfig 行为: enabled = rowActions || batchActions || metaSelectable
+      // mode 来自 list.selection?.mode
+      expect(useMetaListSource).toContain(`metaSelectable = metaConfig.value?.list?.selectable || metaConfig.value?.list?.selection?.enabled`)
+      expect(useMetaListSource).toMatch(/enabled:\s*rowActions\.value\.length\s*>\s*0\s*\|\|\s*batchActions\.value\.length\s*>\s*0\s*\|\|\s*!!metaSelectable/)
+      expect(useMetaListSource).toContain(`mode: metaConfig.value?.list?.selection?.mode || 'multiple'`)
     })
 
     it('TC-DM-2: embedded 模式 selectionConfig 行为', () => {
