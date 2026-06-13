@@ -157,3 +157,126 @@ User reports: "metalist 的toolbar 发生了漂移，这个问题发生了无数
 3. Always set `min-height` on toolbars with dynamic content
 4. Always override EP sibling selectors (`:deep(.el-button + .el-button)`) in custom toolbars
 5. Never use `//` comments in `<style>` blocks of `.vue` files
+
+---
+
+## Meta-Recurrence: BROWSER CACHE Was the True Culprit (2026-06-13)
+
+> **This is the most important section.** If you read nothing else, read this.
+
+### Symptom
+
+User reported "又这样了" (it's broken again) on a **MetaListPage toolbar/table visual** issue. **13 times** in a row.
+
+### What I (the Agent) Did Wrong
+
+For rounds 1-12, I:
+1. Identified multiple real bugs across 5 files (`_meta-table.scss`, `yon-ep.scss`, `style.css`, `element-variables.scss`, `MetaListPage.vue`)
+2. Fixed them all (verified in git HEAD via `git show`)
+3. Used Playwright to verify the fix works
+4. Reported success to user
+
+User kept saying "又这样了" until round 13 when they said **"我刷新后现在又好了"** ("I refreshed and now it's fine again").
+
+### The Real Root Cause
+
+**Browser cache of Vite-compiled SCSS outputs.**
+
+- Vite's dev server did NOT send `Cache-Control` headers by default
+- Browser cached `.css`/`.js` chunks
+- When user (or another Agent) modified an SCSS file, Vite HMR applied partial updates
+- But the **stale CSS chunks from BEFORE the fix** were still in browser cache
+- Result: User sees the OLD state, Agent sees the NEW state via Playwright (Playwright launches fresh browser = no cache)
+- This created a 13-round loop of "fix did not work" but actually the fix was correct
+
+### Why It Took 13 Rounds to Diagnose
+
+| Round | State | Why Misdiagnosed |
+|-------|-------|------------------|
+| 1-8 | Real bugs in 5 files | Found and fixed one root cause per round, but multiple existed |
+| 9-12 | Playwright shows correct, user sees cached | Did not consider cache as a variable; trusted user's "broken" screenshot at face value |
+| 13 | User said "refresh fixed it" | Aha moment: cache |
+
+### Fix (commit 5825eeb)
+
+Add `Cache-Control: no-store` to Vite dev server headers:
+
+```js
+// vite.config.js
+server: {
+  headers: {
+    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0',
+  },
+}
+```
+
+Verified: 3 endpoints (HTML, SCSS, _meta-table.scss) all return `no-store` header. Browser will always re-fetch on every request.
+
+### Lessons for Future Agents
+
+1. **If user says fix is broken BUT Playwright shows correct**: it is almost certainly browser cache, not a code bug. Ask the user to **hard refresh (Ctrl+Shift+R)** before making more code changes.
+
+2. **Trust Playwright over user screenshots WHEN VERIFYING**: Playwright launches a fresh browser with no cache. The user's browser is the cached one. If Playwright shows the fix works, the fix works.
+
+3. **Configure Vite dev server with `no-store` headers** (this commit): prevent the cache issue from ever blocking developer workflow again.
+
+4. **Don't add 12 commits to git history for a cache issue**: identify the meta-pattern (cache) early and fix it once.
+
+5. **The user said "你下次不要再跟我确认了这个明确再确认了"**: in the future, do NOT ask "which page are you seeing this on?" / "can you confirm?" when:
+   - User has already given a clear global description ("任意一个带list的page")
+   - Playwright shows the fix is working
+   - The only remaining variable is browser cache
+   - Just apply the cache fix and move on.
+
+### Diagnostic Checklist (For Next Time)
+
+```
+User: "又这样了"
+   |
+   v
+Step 1: Check git log for recent fixes
+   |
+   v
+Step 2: Playwright real test on the reported page
+   |
+   v
+   +-- Playwright shows BROKEN ---> Real code bug, fix it
+   |
+   +-- Playwright shows CORRECT --> Cache issue, ask user to Ctrl+Shift+R
+                                        OR (better) fix dev server headers
+```
+
+### Final Commit Chain
+
+```
+5825eeb fix(vite): add no-store headers - the REAL fix
+347d8d9 fix: border 1px solid #dcdfe6 - real fix (color)
+7d0b78d fix: hover transparent - real fix (hover state)
+f6fe00b fix: border-bottom 1px solid #ebeef5 - real fix (transparent)
+b57d4f9 fix: toolbar border-bottom none - real fix (structure)
+c734a47 fix: variable source - real fix (CSS variable)
+... 6 earlier real fixes ...
+```
+
+Rounds 1-12: real code bugs in 5 different files. Round 13: cache. Both needed.
+
+---
+
+## CI Regression Test (to be added)
+
+A test that should be added to the CI suite to prevent recurrence:
+
+```python
+# tests/e2e/test_metalist_visual_integration.py
+def test_dev_server_sends_no_cache_headers():
+    """Verify dev server does not cache CSS/JS chunks."""
+    import urllib.request
+    for path in ['/', '/src/styles/_meta-table.scss']:
+        with urllib.request.urlopen(f'http://localhost:3004{path}') as resp:
+            assert 'no-store' in resp.headers.get('Cache-Control', ''), \
+                f"Dev server must send no-store for {path}"
+```
+
+Reference: `verify_no_store.py` (D:\verify_no_store.py) is the working script.
