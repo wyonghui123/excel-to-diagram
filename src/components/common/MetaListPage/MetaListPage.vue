@@ -286,6 +286,7 @@
                     :model-value="headerFilterValues[column.prop]"
                     :width="getFilterWidth(column)"
                     :value-help-config="column.valueHelpConfig || column.value_help || null"
+                    :form-values="mergedFormValues"
                     @update:model-value="(val) => handleHeaderFilter(column.prop, val)"
                   />
                 </div>
@@ -736,6 +737,7 @@ const {
   finishEditCell,
   updateDraftValue,
   addNewRow,
+  removeNewRow,
   cancelInlineEdit,
   saveDraftValues,
   getDraftCreates,
@@ -837,6 +839,14 @@ const enableDetailPage = computed(() => {
 const importContext = computed(() => ({
   version_id: contextFilters.value?.version_id || null,
   product_id: contextFilters.value?.product_id || null
+}))
+
+// 合并过滤上下文：contextFilters (version_id/product_id from MultiObjectManagementPage)
+// + 当前列表的 filterValues + 已设的 headerFilterValues
+// 作为 value_help 的 parameter_bindings 输入 (例如 version_id)
+const mergedFormValues = computed(() => ({
+  ...(contextFilters.value || {}),
+  ...(filterValues.value || {})
 }))
 
 const enableAutoDelete = computed(() => {
@@ -1450,10 +1460,30 @@ function openDeleteConfirm(row, action) {
 
 async function executeDelete() {
   if (!deleteTargetRow.value) return
-  
+
+  const targetId = deleteTargetRow.value.id
+  // [FIX 2026-06-13] 未保存的新行 (_isNew=true / __new_xxx) 走本地移除,
+  // 不能调 boService.delete, 否则会触发 404/500 (BEFORE FIX BUG)
+  const isNewRow = deleteTargetRow.value._isNew === true ||
+                   (typeof targetId === 'string' && targetId.startsWith('__new_'))
+
   deleteLoading.value = true
   try {
-    const result = await boService.delete(props.objectType, deleteTargetRow.value.id)
+    if (isNewRow) {
+      // 本地移除新行 (useMetaList 提供的 API)
+      const removed = removeNewRow(targetId)
+      if (removed) {
+        message.deleted('数据')
+      } else {
+        // 兜底：理论上不会出现 (isNewRow 已先判断过)
+        message.info('已取消该新增行')
+      }
+      showDeleteConfirm.value = false
+      deleteTargetRow.value = null
+      return
+    }
+
+    const result = await boService.delete(props.objectType, targetId)
     if (result.success) {
       message.deleted('数据')
       showDeleteConfirm.value = false

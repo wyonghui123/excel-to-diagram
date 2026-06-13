@@ -537,6 +537,19 @@ class ViewConfigService:
                                 }
                             }
                             col.filter_type = 'value_help'
+
+                    # [FIX 2026-06-13] 列级 value_help 优先: YAML 显式声明 (针对 *_name 虚拟列)
+                    #   优先级: 列级 value_help > 字段级 value_help > FK 推断
+                    col_level_vh = getattr(col, 'value_help', None) or getattr(col, 'value_help_config', None)
+                    if col_level_vh and isinstance(col_level_vh, dict) and col_level_vh.get('source'):
+                        col.value_help_config = dict(col_level_vh)  # 拷贝, 避免污染源 dict
+                        # 列表过滤默认多选
+                        if col.value_help_config.get('behavior'):
+                            col.value_help_config['behavior']['multiple'] = True
+                        else:
+                            col.value_help_config['behavior'] = {'multiple': True}
+                        # 列级显式声明 > 字段级 filter_type, 强制 value_help
+                        col.filter_type = 'value_help'
                     
                     # 如果字段有 filter_type 设置（来自 semantics），覆盖列配置中的旧值
                     if semantics:
@@ -817,22 +830,29 @@ class ViewConfigService:
         自动生成搜索字段：从字段类型推断可搜索字段
         
         单一事实原则：默认所有字符串类型字段都可搜索，无需在 YAML 中重复声明
+
+        [FIX 2026-06-13] 尊重 column.searchable=False (例如 *_name 虚拟列只用于显示/过滤,
+        不应该参与顶部 keyword 模糊搜索, 否则会出现 "搜中文显示名能匹配" 但实际不存在的记录)
         """
         if hasattr(list_config, 'searchFields') and list_config.searchFields:
             return
-        
+
         search_fields = []
         for col in getattr(list_config, 'columns', []):
             col_key = getattr(col, 'key', None) or getattr(col, 'field', None)
             if not col_key:
                 continue
-            
+
+            # 跳过显式标记为不可搜索的列 (YAML: searchable: false)
+            if getattr(col, 'searchable', True) is False:
+                continue
+
             field = field_map.get(col_key)
             if field:
                 field_type = field.field_type.value if hasattr(field, 'field_type') else 'string'
                 if field_type in ['string', 'text']:
                     search_fields.append(col_key)
-        
+
         if search_fields:
             list_config.searchFields = search_fields
     

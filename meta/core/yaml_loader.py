@@ -676,6 +676,8 @@ def parse_ui_list_view_column(data: Dict[str, Any]) -> UIListViewColumn:
     # [FIX 2026-06-10] 解析 enum_values (跟 filter_options 格式相同: [{value, label, color}])
     raw_enum_values = data.get("enum_values", [])
     enum_values = _convert_filter_options_value(raw_enum_values) if raw_enum_values else []
+    # [FIX 2026-06-13] 列级 value_help: 兼容 value_help (YAML 风格) 和 value_help_config (API 风格)
+    col_value_help = data.get("value_help") or data.get("value_help_config") or {}
 
     return UIListViewColumn(
         key=data.get("key") or data.get("field", ""),
@@ -704,6 +706,10 @@ def parse_ui_list_view_column(data: Dict[str, Any]) -> UIListViewColumn:
         hidden_in_list=data.get("hidden_in_list", False),
         # [FIX 2026-06-10] 列头过滤时使用的 API 参数名 (默认与 key 相同)
         api_param_key=data.get("api_param_key", ""),
+        # [FIX 2026-06-13] FK 列配置: 是否纳入顶部 keyword search
+        searchable=data.get("searchable", True),
+        # [FIX 2026-06-13] FK 列的 value_help 配置 (YAML 写 value_help, 内部存 value_help_config)
+        value_help=col_value_help,
     )
 
 

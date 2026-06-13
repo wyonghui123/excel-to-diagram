@@ -37,9 +37,15 @@ class UIListViewColumn:
     hidden_in_form: bool = False
     hidden_in_detail: bool = False
     hidden_in_list: bool = False
-    # [FIX 2026-06-10] 列头过滤时使用的 API 参数名 (默认与 key 相同)
+    # [FIX v1.0.10 2026-06-10] 列头过滤时使用的 API 参数名 (默认与 key 相同)
     #   例: column key=category_label (展示 label), 但 API 用 ?category_type=xxx
     api_param_key: str = ""
+    # [FIX 2026-06-13] FK 列配置: 是否纳入顶部 keyword search
+    #   *_name 类虚拟列应设为 false (底层 FK 是 int, keyword 搜不到)
+    searchable: bool = True
+    # [FIX 2026-06-13] FK 列的 value_help 配置 (YAML 可写 value_help 或 value_help_config)
+    #   用于列头 value_help 过滤 + parameter_bindings (如 version_id 上下文)
+    value_help: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

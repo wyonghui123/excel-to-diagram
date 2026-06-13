@@ -155,6 +155,7 @@
           :model-value="valueHelpValue"
           :value-help-config="resolvedValueHelpConfig"
           :placeholder="placeholder"
+          :form-values="formValues"
           @update:model-value="handleValueHelpChange"
           @update:displayValue="handleValueHelpDisplayChange"
         />
@@ -196,6 +197,11 @@ const props = defineProps({
   valueHelpConfig: {
     type: Object,
     default: null
+  },
+  // 当前过滤上下文（用于 value_help 的 parameter_bindings，如 version_id）
+  formValues: {
+    type: Object,
+    default: () => ({})
   }
 })
 
