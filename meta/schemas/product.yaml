@@ -405,14 +405,14 @@ fields:
     name: 负责人
     type: integer
     db_column: owner_id
-    description: 产品线负责人ID
+    description: 产品线负责人ID（由系统自动设置）
     ui:
       visible: true
-      editable: true
+      editable: false
       widget: select
       relation: user
       display_field: display_name
-      fieldGroup: 系统信息
+      fieldGroup: 基本信息
       i18n_key: common.field.owner_id
     semantics:
       meaning: 产品线的负责人，关联用户表
