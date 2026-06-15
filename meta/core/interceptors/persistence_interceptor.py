@@ -788,6 +788,9 @@ class PersistenceInterceptor(Interceptor):
                         logger.warning(f"[_do_list] Ignoring unknown filter field: {key}")
 
         scope_conditions, scope_params = self._build_scope_conditions(context)
+        # [DEBUG] 临时调试 dim scope 过滤
+        qc = context.extra.get('query_conditions', []) if hasattr(context, 'extra') else []
+        logger.warning(f'[DPI-LIST-DEBUG] object_type={context.object_type} user_id={context.user_id} query_conditions={qc} scope_conditions={scope_conditions} scope_params={scope_params}')
 
         search_or_conditions = []
         search_or_params = []

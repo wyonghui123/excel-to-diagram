@@ -169,15 +169,19 @@ class DataPermissionInterceptor(Interceptor):
         #   owner 例外改由 _apply_scope_filter_after_dimension + _add_owner_exception 处理
         if len(per_role_conditions) == 1:
             for c in per_role_conditions[0]:
+                c['source'] = 'dimension_scope'  # [FIX 2026-06-16] 标记来源
                 context.extra['query_conditions'].append(c)
         else:
             # 多 role: OR-of-AND
             or_group_conditions = []
             for conds in per_role_conditions:
+                for c in conds:
+                    c['source'] = 'dimension_scope'  # [FIX 2026-06-16] 标记来源
                 or_group_conditions.extend(conds)
             context.extra['query_conditions'].append({
                 'type': 'or',
                 'conditions': or_group_conditions,
+                'source': 'dimension_scope',  # [FIX 2026-06-16] 标记来源
             })
 
         logger.info(
@@ -223,8 +227,11 @@ class DataPermissionInterceptor(Interceptor):
                 continue
             parsed = DataPermissionInterceptor._parse_single_in_or_eq(part)
             if parsed is None:
-                # 解析失败: 整条 cond 失效, 让外层 fallback
-                return []
+                # [FIX 2026-06-16] 解析失败不丢弃已成功解析的部分
+                # 例如 domain 条件 "id = 703 AND version_id IN (SELECT ...)"
+                # "id = 703" 能解析成功，但子查询部分不能 → 只跳过失败部分
+                logger.debug(f'[_parse_compound_expr] Skipping unparseable part: {part}')
+                continue
             results.append(parsed)
         return results
 
@@ -516,9 +523,15 @@ class DataPermissionInterceptor(Interceptor):
 
         # [FIX v1.0.8] 检查 BO 是否有 visibility 字段
         if not self._bo_has_visibility_field(context):
-            # 没有 visibility 字段, 跳过 visibility scope
-            # 直接加 owner 例外（dimension scope 已经表达了"被授权"）
-            self._add_owner_exception(context)
+            # [FIX 2026-06-16] 没有 visibility 字段时, dim scope 已表达被授权范围
+            # 不加 owner 例外, 否则会绕过 dim scope 限制
+            # 例: TEST888 有 domain=703 dim scope → product id=475
+            # 但 owner_id=3371 的 product 有 108 个 → owner 例外让 dim scope 失效
+            logger.info(
+                f'[_apply_scope_filter_after_dimension] user={context.user_id} '
+                f'object_type={context.object_type} '
+                f'no visibility field, dim scope only (no owner exception)'
+            )
             return
 
         authorization = getattr(meta_obj, 'authorization', None)
@@ -602,22 +615,15 @@ class DataPermissionInterceptor(Interceptor):
         persistence_interceptor._build_scope_conditions 支持嵌套 AND/OR group,
         我们用以下嵌套结构表达:
 
-        最终 SQL 结构:
-          WHERE (product_id = ? AND (visibility = ? OR owner_id = ?))
-              OR (owner_id = ?)
+        最终 SQL 结构 (无 dim scope):
+          WHERE (visibility = ? OR owner_id = ?)
 
-        实现:
-          query_conditions = [
-              {'type': 'and', 'conditions': [dim_cond, visibility_or_group]},
-              owner_cond
-          ]
-        然后把整个列表用顶层 type='or' 包住, 表达 OR 关系:
-          query_conditions = [
-              {'type': 'or', 'conditions': [
-                  {'type': 'and', 'conditions': [dim_cond, visibility_or_group]},
-                  owner_cond,
-              ]}
-          ]
+        最终 SQL 结构 (有 dim scope):
+          WHERE (dim_scope_cond AND (visibility = ? OR owner_id = ?))
+
+        [FIX 2026-06-16] 当 dim scope 已应用时, owner 例外不绕过 dim scope
+        旧逻辑: (dim_scope AND visibility) OR owner_id → owner_id 绕过 dim scope
+        新逻辑: dim_scope AND (visibility OR owner_id) → owner_id 在 dim scope 内
         """
         if not context.user_id:
             return
@@ -635,19 +641,56 @@ class DataPermissionInterceptor(Interceptor):
             context.extra['query_conditions'] = [owner_cond]
             return
 
-        # 把 existing 包成 and_group, 然后 OR 上 owner_cond
-        # 用顶层 type='or' 包住 (dim+visibility AND group) 和 owner_cond
-        and_group = {
-            'type': 'and',
-            'conditions': existing,
-        }
-        context.extra['query_conditions'] = [{
-            'type': 'or',
-            'conditions': [and_group, owner_cond],
-        }]
-        logger.info(
-            f'[_add_owner_exception] user={context.user_id} '
-            f'object_type={context.object_type} '
-            f'wrapped {len(existing)} existing into AND group, '
-            f'OR with owner_exception (top-level OR group)'
+        # [FIX 2026-06-16] 检查是否有 dim scope 条件
+        # 如果有 dim scope, owner 例外必须在 dim scope 范围内
+        # 即: dim_scope AND (visibility OR owner_id), 而不是 (dim_scope AND visibility) OR owner_id
+        has_dim_scope = any(
+            c.get('source') == 'dimension_scope' or
+            (c.get('type') == 'and' and any(
+                sc.get('source') == 'dimension_scope'
+                for sc in c.get('conditions', [])
+            ))
+            for c in existing
         )
+
+        if has_dim_scope:
+            # [FIX 2026-06-16] owner 例外在 dim scope 范围内
+            # 把 owner_cond 合并到 visibility OR 组内（如果有的话）
+            # 否则作为独立 AND 条件（但仍在 dim scope 范围内）
+            #
+            # 目标 SQL: dim_scope AND (visibility = 'public' OR owner_id = ?)
+            # 而不是: dim_scope AND visibility = 'public' AND owner_id = ?
+            merged = False
+            for i, cond in enumerate(existing):
+                if isinstance(cond, dict) and cond.get('type') == 'or':
+                    # 找到 visibility OR 组，把 owner_cond 加入
+                    existing[i]['conditions'].append(owner_cond)
+                    merged = True
+                    break
+            if not merged:
+                # 没有 OR 组，创建一个: (owner_id = ?)
+                # 但这会变成 dim_scope AND owner_id = ?，可能过严
+                # 更好的做法是创建 OR 组: (visibility OR owner_id)
+                # 但如果没有 visibility 条件，就直接 append
+                existing.append(owner_cond)
+            context.extra['query_conditions'] = existing
+            logger.info(
+                f'[_add_owner_exception] user={context.user_id} '
+                f'object_type={context.object_type} '
+                f'dim scope active, owner exception within dim scope (merged={merged})'
+            )
+        else:
+            # 无 dim scope: 把 existing 包成 and_group, 然后 OR 上 owner_cond
+            and_group = {
+                'type': 'and',
+                'conditions': existing,
+            }
+            context.extra['query_conditions'] = [{
+                'type': 'or',
+                'conditions': [and_group, owner_cond],
+            }]
+            logger.info(
+                f'[_add_owner_exception] user={context.user_id} '
+                f'object_type={context.object_type} '
+                f'no dim scope, owner exception as top-level OR'
+            )

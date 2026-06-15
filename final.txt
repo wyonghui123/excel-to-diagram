@@ -1,0 +1,1 @@
+﻿conditions: {'product': 'id = 1', 'version': 'id = 1 AND product_id = 1', 'domain': 'id IN (1,2) AND version_id = 1', 'sub_domain': 'id IN (1,2,3,4) AND domain_id IN (1,2)'}

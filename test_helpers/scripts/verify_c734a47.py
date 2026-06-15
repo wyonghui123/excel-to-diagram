@@ -1,0 +1,41 @@
+"""Verify commit c734a47 - CSS variable source fix."""
+import sys, json
+sys.path.insert(0, 'd:/filework/excel-to-diagram')
+from test_helpers.browser_auth_cli import PlaywrightCLI
+
+with PlaywrightCLI() as cli:
+    cli.authenticated_navigate('/system/archdata?productId=1&versionId=1&tab=business_object', timeout=45000)
+    import time
+    time.sleep(6)  # Vite HMR
+
+    result = cli.evaluate('''() => {
+        const th = document.querySelector('.custom-table .el-table__header th.el-table__cell');
+        const root = document.documentElement;
+        const cs = window.getComputedStyle(th);
+
+        const importantRules = [];
+        for (const sheet of document.styleSheets) {
+            try {
+                for (const rule of sheet.cssRules) {
+                    if (rule.selectorText && th.matches(rule.selectorText)) {
+                        if (rule.style.getPropertyPriority('background-color') === 'important' ||
+                            rule.style.getPropertyPriority('background') === 'important') {
+                            importantRules.push({
+                                selector: rule.selectorText.substring(0, 60),
+                                bg: rule.style.background || rule.style.backgroundColor
+                            });
+                        }
+                    }
+                }
+            } catch (e) {}
+        }
+
+        return {
+            computedBg: cs.backgroundColor,
+            cssVar: getComputedStyle(root).getPropertyValue('--el-table-header-bg-color').trim(),
+            importantRules: importantRules
+        };
+    }''')
+
+    print('[VERIFY]', json.dumps(result, indent=2))
+    cli.screenshot('round8_final.png')

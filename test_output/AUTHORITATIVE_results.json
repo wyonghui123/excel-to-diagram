@@ -1,0 +1,124 @@
+[
+  {
+    "url": "/product-management",
+    "states": {
+      "normal": {
+        "thCount": 8,
+        "firstTh": {
+          "backgroundColor": "rgb(255, 255, 255)",
+          "borderBottom": "1px solid rgb(220, 223, 230)",
+          "color": "rgb(102, 102, 102)",
+          "fontWeight": "600",
+          "height": 50
+        },
+        "toolbar": {
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderBottom": "0px none rgb(51, 51, 51)",
+          "padding": "8px 16px",
+          "height": 48
+        }
+      },
+      "hover": {
+        "backgroundColor": "rgb(255, 255, 255)",
+        "color": "rgb(102, 102, 102)",
+        "borderBottom": "1px solid rgb(220, 223, 230)"
+      },
+      "sort_active": {
+        "sortActiveFound": true,
+        "backgroundColor": "rgb(255, 255, 255)",
+        "color": "rgb(102, 102, 102)",
+        "classes": "el-table_2_column_2 ascending is-left is-leaf is-sortable el-table__cell"
+      },
+      "table_empty": {
+        "emptyBlockExists": false,
+        "rowCount": 20
+      },
+      "row_hover": {
+        "rowCount": 20,
+        "backgroundColor": "rgb(255, 255, 255)",
+        "borderBottom": "0px none rgb(96, 98, 102)",
+        "height": 45
+      }
+    },
+    "screenshot": "AUTHORITATIVE_p1_product-management.png",
+    "screenshot_path": "D:\\filework\\excel-to-diagram\\test_output\\AUTHORITATIVE_p1_product-management.png"
+  },
+  {
+    "url": "/system/archdata?tab=association",
+    "states": {
+      "normal": {
+        "error": "no th elements found (.custom-table .el-table__header th.el-table__cell)"
+      },
+      "hover": {
+        "skipped": true,
+        "reason": "no .custom-table th elements on this page"
+      },
+      "sort_active": {
+        "skipped": true,
+        "reason": "no sortable th on this page"
+      },
+      "table_empty": {
+        "emptyBlockExists": false,
+        "rowCount": 0
+      },
+      "row_hover": {
+        "skipped": true,
+        "reason": "no rows to hover"
+      }
+    },
+    "screenshot": "AUTHORITATIVE_p2_system_archdata_tab_association.png",
+    "screenshot_path": "D:\\filework\\excel-to-diagram\\test_output\\AUTHORITATIVE_p2_system_archdata_tab_association.png"
+  },
+  {
+    "url": "/system/archdata?tab=business",
+    "states": {
+      "normal": {
+        "error": "no th elements found (.custom-table .el-table__header th.el-table__cell)"
+      },
+      "hover": {
+        "skipped": true,
+        "reason": "no .custom-table th elements on this page"
+      },
+      "sort_active": {
+        "skipped": true,
+        "reason": "no sortable th on this page"
+      },
+      "table_empty": {
+        "emptyBlockExists": false,
+        "rowCount": 0
+      },
+      "row_hover": {
+        "skipped": true,
+        "reason": "no rows to hover"
+      }
+    },
+    "screenshot": "AUTHORITATIVE_p3_system_archdata_tab_business.png",
+    "screenshot_path": "D:\\filework\\excel-to-diagram\\test_output\\AUTHORITATIVE_p3_system_archdata_tab_business.png"
+  },
+  {
+    "url": "/system/permission/users",
+    "states": {
+      "normal": {
+        "error": "no th elements found (.custom-table .el-table__header th.el-table__cell)"
+      },
+      "hover": {
+        "skipped": true,
+        "reason": "no .custom-table th elements on this page"
+      },
+      "sort_active": {
+        "skipped": true,
+        "reason": "no sortable th on this page"
+      },
+      "table_empty": {
+        "emptyBlockExists": false,
+        "rowCount": 0
+      },
+      "row_hover": {
+        "skipped": true,
+        "reason": "no rows to hover"
+      }
+    },
+    "screenshot": "AUTHORITATIVE_p4_system_permission_users.png",
+    "screenshot_path": "D:\\filework\\excel-to-diagram\\test_output\\AUTHORITATIVE_p4_system_permission_users.png"
+  }
+]

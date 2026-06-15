@@ -299,6 +299,7 @@ def parse_semantics(data: Dict[str, Any]) -> SemanticAnnotation:
         virtual=data.get("virtual", False),
         immutable=data.get("immutable", False),
         parent_key=data.get("parent_key", False),
+        parent_key_display=data.get("parent_key_display", False),
         mandatory=data.get("mandatory", False),
         readonly_always=data.get("readonly_always", False),
         context_field=data.get("context_field", False),

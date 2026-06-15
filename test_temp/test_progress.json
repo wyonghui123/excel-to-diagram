@@ -1,0 +1,17 @@
+{
+  "timestamp": "2026-06-16T00:26:21.469481",
+  "status": "completed",
+  "progress": {
+    "total": 9,
+    "completed": 47,
+    "passed": 933,
+    "failed": 64,
+    "skipped": 128,
+    "errors": 3,
+    "percentage": 522.2
+  },
+  "timing": {
+    "elapsed_seconds": 2.7
+  },
+  "message": "完成: 933 通过, 64 失败, 3 错误"
+}

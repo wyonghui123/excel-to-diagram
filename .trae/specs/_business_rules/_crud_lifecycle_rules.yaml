@@ -785,7 +785,6 @@ rules:
         fix:
           - "relationship.yaml category_label.semantics.import_order = 7.5"
           - "位置: 关系方向 (7) 之后, 目标领域 (8) 之前"
-          - "用户在虚拟字段区域内, 紧跟源服务模块 (7), 然后才是目标层级字段"
           - "使用 float (7.5) 实现中间插入, 避免对其他字段 import_order 的大规模调整"
         verification: |
           重启后导出 relationship 模板, 列顺序:
@@ -793,6 +792,30 @@ rules:
         lesson_learned: |
           1. 浮动 import_order (如 7.5) 是中间插入的最简单方案, 不需要重构排序逻辑
           2. 列分组应基于业务语义 (类型相关/层级相关) 而非 yaml 字段顺序
+      - id: ENH-COMMENT-KEY-TEMPLATE
+        title: "业务编码列 comment 增加 key_template 格式 + 示例"
+        date: '2026-06-15'
+        severity: MEDIUM
+        discovered: |
+          用户反馈: 业务对象 sheet 中, "业务对象编码"列的 comment 只显示:
+            "【自动/可手动】留空由系统生成；填写则使用填入值（唯一性校验）；【只读】"
+          但编码规则 (格式 + 示例) 只在说明页里有, 用户必须翻到说明页才能看到具体格式.
+        fix:
+          - "新增 _get_key_template_info() helper, 提取 key_template.pattern + key_template.preview"
+          - "_get_export_headers_with_editable() 在 business_key 列 comment_parts 中追加 '格式: ...' 和 '示例: ...'"
+          - "结果: 用户在列头上 hover 即可看到完整编码规则, 不需要翻说明页"
+        verification: |
+          业务对象 sheet "业务对象编码"列 comment 现在显示:
+            【自动/可手动】留空由系统生成；填写则使用填入值（唯一性校验）
+            格式: {service_module_code}{SEQ:2}
+            示例: PUM01
+          关系 sheet "关系编码"列 comment:
+            【业务关键字】新增必填，编辑时只读
+            格式: {source_code}-{target_code}-{SEQ:2}
+            示例: ORDER-USER-01
+        lesson_learned: |
+          1. comment 是用户接触列头的第一触点, 应包含完整的列使用信息
+          2. 编码规则 (格式/示例) 是高频查阅信息, 应优先放在 comment 而非说明页
       - id: BUG-CATEGORY-LABEL-MULTIPLE-PATHS
         title: "category_label 多个空路径: 直 SQL association 路径 + 早 return 路径"
         date: '2026-06-14'

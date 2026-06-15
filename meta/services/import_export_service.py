@@ -1385,6 +1385,8 @@ class ImportExportService:
                 has_control_info = False
                 # [NEW v1.1 2026-06-11] KeyTemplate user_editable 差异化标识
                 kt_user_editable = self._get_key_template_user_editable(meta_obj)
+                # [NEW v2 2026-06-15 BMRD] KeyTemplate 编码格式 + 示例
+                kt_info = self._get_key_template_info(meta_obj)
                 is_auto_or_manual_code = (
                     f.semantics.business_key
                     and kt_user_editable == 'auto_or_manual'
@@ -1397,6 +1399,15 @@ class ImportExportService:
                         comment_parts.append("【业务关键字】新增必填，编辑时只读")
                     has_control_info = True
                     create_required_columns.append(col_idx)
+
+                    # [NEW v2 2026-06-15 BMRD] 把 key_template 编码规则附加到 comment
+                    # 用户在列头上即可看到编码格式 + 示例, 不需要再翻说明页
+                    if kt_info.get('pattern'):
+                        comment_parts.append(f"格式: {kt_info['pattern']}")
+                        has_control_info = True
+                    if kt_info.get('preview'):
+                        comment_parts.append(f"示例: {kt_info['preview']}")
+                        has_control_info = True
                 elif f.required or getattr(f.semantics, 'mandatory', False):
                     comment_parts.append("【必填】")
                     has_control_info = True
@@ -3338,6 +3349,34 @@ class ImportExportService:
         if isinstance(kt, dict):
             return kt.get('user_editable', '')
         return ''
+
+    def _get_key_template_info(self, meta_obj) -> Dict[str, str]:
+        """[NEW v2 2026-06-15 BMRD] 获取对象的 key_template 编码格式信息
+
+        返回 dict: {pattern, preview} 用于业务编码列 comment 中展示.
+        pattern: 编码格式规则 (如 {service_module_code}{SEQ:2})
+        preview: 示例编码 (如 PUM01)
+        缺一不可, 找不到时返回空字符串, 业务编码列 comment 中就不显示该行.
+        """
+        if meta_obj is None:
+            return {'pattern': '', 'preview': ''}
+        if isinstance(meta_obj, str):
+            try:
+                meta_obj = registry.get(meta_obj)
+                if meta_obj is None:
+                    return {'pattern': '', 'preview': ''}
+            except Exception:
+                return {'pattern': '', 'preview': ''}
+        if isinstance(meta_obj, dict):
+            kt = meta_obj.get('key_template', {}) or {}
+        else:
+            kt = getattr(meta_obj, 'key_template', None) or {}
+        if not isinstance(kt, dict):
+            return {'pattern': '', 'preview': ''}
+        return {
+            'pattern': kt.get('pattern', ''),
+            'preview': kt.get('preview', ''),
+        }
 
     def _is_field_editable(self, field, mode: str = 'edit') -> bool:
         """判断字段是否可编辑（用于导入导出）

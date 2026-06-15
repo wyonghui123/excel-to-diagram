@@ -1,0 +1,254 @@
+[
+  {
+    "idx": 0,
+    "text": "BO_SUPPLIER_BO_REQ_01",
+    "labelBkgW": "64.6",
+    "pathMidVpX": "115.9",
+    "lbCenterVpX": "115.0",
+    "dx": "-0.9",
+    "dy": "-0.0"
+  },
+  {
+    "idx": 1,
+    "text": "BO_CUSTOMER_BO_SO_01",
+    "labelBkgW": "64.4",
+    "pathMidVpX": "336.6",
+    "lbCenterVpX": "300.4",
+    "dx": "-36.2",
+    "dy": "19.8"
+  },
+  {
+    "idx": 2,
+    "text": "BO_SO_BO_SOL_01",
+    "labelBkgW": "47.2",
+    "pathMidVpX": "775.0",
+    "lbCenterVpX": "775.9",
+    "dx": "0.9",
+    "dy": "-2.6"
+  },
+  {
+    "idx": 3,
+    "text": "BO_SOL_BO_INVENTORY_01",
+    "labelBkgW": "68.4",
+    "pathMidVpX": "1242.5",
+    "lbCenterVpX": "1200.6",
+    "dx": "-41.9",
+    "dy": "40.1"
+  },
+  {
+    "idx": 4,
+    "text": "BO_INVENTORY_BO_INV_LOG_01",
+    "labelBkgW": "80.9",
+    "pathMidVpX": "1034.4",
+    "lbCenterVpX": "825.9",
+    "dx": "-208.5",
+    "dy": "66.6"
+  },
+  {
+    "idx": 5,
+    "text": "BO_INV_LOG_BO_LOCATION_01",
+    "labelBkgW": "77.9",
+    "pathMidVpX": "1059.0",
+    "lbCenterVpX": "1097.8",
+    "dx": "38.7",
+    "dy": "40.5"
+  },
+  {
+    "idx": 6,
+    "text": "BO_LOCATION_BO_WAREHOUSE_01",
+    "labelBkgW": "86.8",
+    "pathMidVpX": "1304.5",
+    "lbCenterVpX": "1303.8",
+    "dx": "-0.8",
+    "dy": "0.0"
+  },
+  {
+    "idx": 7,
+    "text": "BO_WAREHOUSE_BO_INVENTORY_01",
+    "labelBkgW": "89.7",
+    "pathMidVpX": "1534.6",
+    "lbCenterVpX": "1533.8",
+    "dx": "-0.7",
+    "dy": "0.0"
+  },
+  {
+    "idx": 8,
+    "text": "BO_SUPPLIER_BO_PO_01",
+    "labelBkgW": "61.5",
+    "pathMidVpX": "380.6",
+    "lbCenterVpX": "349.9",
+    "dx": "-30.7",
+    "dy": "38.7"
+  },
+  {
+    "idx": 9,
+    "text": "BO_PO_BO_POL_01",
+    "labelBkgW": "48.0",
+    "pathMidVpX": "791.5",
+    "lbCenterVpX": "790.7",
+    "dx": "-0.8",
+    "dy": "0.0"
+  },
+  {
+    "idx": 10,
+    "text": "BO_POL_BO_INVENTORY_01",
+    "labelBkgW": "68.9",
+    "pathMidVpX": "1251.0",
+    "lbCenterVpX": "1136.3",
+    "dx": "-114.7",
+    "dy": "113.0"
+  },
+  {
+    "idx": 11,
+    "text": "BO_PROC_CONTRACT_BO_PO_01",
+    "labelBkgW": "81.7",
+    "pathMidVpX": "637.5",
+    "lbCenterVpX": "636.6",
+    "dx": "-0.8",
+    "dy": "-0.0"
+  },
+  {
+    "idx": 12,
+    "text": "BO_SO_BO_SALES_INV_01",
+    "labelBkgW": "63.7",
+    "pathMidVpX": "1049.6",
+    "lbCenterVpX": "1074.0",
+    "dx": "24.5",
+    "dy": "26.8"
+  },
+  {
+    "idx": 13,
+    "text": "BO_SALES_INV_BO_AR_INV_01",
+    "labelBkgW": "75.1",
+    "pathMidVpX": "1497.4",
+    "lbCenterVpX": "1496.6",
+    "dx": "-0.8",
+    "dy": "-0.0"
+  },
+  {
+    "idx": 14,
+    "text": "BO_CUSTOMER_BO_AR_RECEIPT_01",
+    "labelBkgW": "87.9",
+    "pathMidVpX": "570.4",
+    "lbCenterVpX": "556.1",
+    "dx": "-14.3",
+    "dy": "-14.5"
+  },
+  {
+    "idx": 15,
+    "text": "BO_AR_RECEIPT_BO_AR_INV_01",
+    "labelBkgW": "79.3",
+    "pathMidVpX": "1394.9",
+    "lbCenterVpX": "1399.3",
+    "dx": "4.4",
+    "dy": "-6.1"
+  },
+  {
+    "idx": 16,
+    "text": "BO_CUSTOMER_BO_CUST_CREDIT_01",
+    "labelBkgW": "91.6",
+    "pathMidVpX": "59.3",
+    "lbCenterVpX": "58.5",
+    "dx": "-0.8",
+    "dy": "0.0"
+  },
+  {
+    "idx": 17,
+    "text": "BO_CUST_CREDIT_BO_SO_01",
+    "labelBkgW": "71.5",
+    "pathMidVpX": "453.7",
+    "lbCenterVpX": "446.4",
+    "dx": "-7.3",
+    "dy": "-2.6"
+  },
+  {
+    "idx": 18,
+    "text": "BO_PRICE_LIST_BO_SOL_01",
+    "labelBkgW": "68.2",
+    "pathMidVpX": "690.3",
+    "lbCenterVpX": "689.4",
+    "dx": "-0.8",
+    "dy": "0.0"
+  },
+  {
+    "idx": 19,
+    "text": "BO_INBOUND_BO_INBOUND_L_01",
+    "labelBkgW": "82.5",
+    "pathMidVpX": "823.0",
+    "lbCenterVpX": "822.2",
+    "dx": "-0.8",
+    "dy": "0.0"
+  },
+  {
+    "idx": 20,
+    "text": "BO_INBOUND_L_BO_INVENTORY_01",
+    "labelBkgW": "87.6",
+    "pathMidVpX": "1287.1",
+    "lbCenterVpX": "1266.4",
+    "dx": "-20.6",
+    "dy": "-37.2"
+  },
+  {
+    "idx": 21,
+    "text": "BO_OUTBOUND_BO_OUTBOUND_L_01",
+    "labelBkgW": "93.5",
+    "pathMidVpX": "817.4",
+    "lbCenterVpX": "816.7",
+    "dx": "-0.7",
+    "dy": "-0.0"
+  },
+  {
+    "idx": 22,
+    "text": "BO_OUTBOUND_L_BO_INVENTORY_01",
+    "labelBkgW": "93.1",
+    "pathMidVpX": "1291.4",
+    "lbCenterVpX": "1306.5",
+    "dx": "15.1",
+    "dy": "-17.7"
+  },
+  {
+    "idx": 23,
+    "text": "BO_SUPPLIER_BO_AP_INV_01",
+    "labelBkgW": "72.3",
+    "pathMidVpX": "220.8",
+    "lbCenterVpX": "198.1",
+    "dx": "-22.8",
+    "dy": "-22.9"
+  },
+  {
+    "idx": 24,
+    "text": "BO_AP_INV_BO_PAYMENT_REQ_01",
+    "labelBkgW": "84.2",
+    "pathMidVpX": "522.2",
+    "lbCenterVpX": "521.4",
+    "dx": "-0.8",
+    "dy": "-0.0"
+  },
+  {
+    "idx": 25,
+    "text": "BO_PAYMENT_REQ_BO_PAYMENT_VOUCHER_01",
+    "labelBkgW": "115.5",
+    "pathMidVpX": "771.6",
+    "lbCenterVpX": "770.8",
+    "dx": "-0.7",
+    "dy": "-0.0"
+  },
+  {
+    "idx": 26,
+    "text": "BO_PAYMENT_VOUCHER_BO_AP_PAYMENT_01",
+    "labelBkgW": "111.9",
+    "pathMidVpX": "783.1",
+    "lbCenterVpX": "806.4",
+    "dx": "23.3",
+    "dy": "-39.3"
+  },
+  {
+    "idx": 27,
+    "text": "BO_AP_PAYMENT_BO_SUPPLIER_01",
+    "labelBkgW": "86.1",
+    "pathMidVpX": "450.3",
+    "lbCenterVpX": "510.8",
+    "dx": "60.5",
+    "dy": "-96.8"
+  }
+]

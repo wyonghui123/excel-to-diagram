@@ -111,6 +111,7 @@ class SemanticAnnotation:
     # 字段控制属性（借鉴 SAP CDS View 注解体系）
     immutable: bool = False           # 创建后不可变（类似 @Core.Immutable），新建可编辑，编辑时只读
     parent_key: bool = False          # 父对象键标识（用于层级关联），新建可编辑，编辑时只读
+    parent_key_display: bool = False  # 父对象键的编码显示字段（FK编码显示，虚拟冗余，紧跟FK列出现）
     mandatory: bool = False           # 业务必填（类似 @mandatory，区别于数据库 required）
     readonly_always: bool = False     # 始终只读（类似 SAP readOnly: true），新建和编辑都只读
     

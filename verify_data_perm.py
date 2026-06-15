@@ -1,0 +1,11 @@
+import sqlite3
+db = sqlite3.connect(r'D:\filework\excel-to-diagram\meta\architecture.db')
+cur = db.cursor()
+cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%data%'")
+print('tables:', cur.fetchall())
+print()
+cur.execute('SELECT * FROM role_data_permissions')
+print('role_data_permissions:', cur.fetchall())
+print()
+cur.execute('SELECT * FROM data_permissions')
+print('data_permissions:', cur.fetchall())

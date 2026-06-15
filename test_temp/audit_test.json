@@ -1,0 +1,13 @@
+{
+  "success": true,
+  "duration": 3.0,
+  "trace_id": "2d6d74045d544fc596987e2b9486bf37",
+  "exit_code": 0,
+  "port": 3010,
+  "cmd": "C:\\Users\\Administrator\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe -m pytest d:\\filework\\excel-to-diagram\\meta\\tests\\test_audit_interceptor_unified.py -n 0 -v --tb=short",
+  "total": 14,
+  "passed": 2,
+  "failed": 0,
+  "errors": 0,
+  "skipped": 12
+}

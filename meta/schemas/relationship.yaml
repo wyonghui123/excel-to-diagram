@@ -1155,6 +1155,10 @@ fields:
       import_visible: false
       computed_by: hierarchy_scope
       scope_rules_ref: hierarchies.hierarchy_scopes
+      # [FIX 2026-06-15 BMRD] 把"关系范围"列提到 relation_direction (7) 之后,
+      # 跟 relation_type/relation_direction 三个类型相关列聚在一起, 更易读
+      # 7.5 = 介于 relation_direction (7) 和 target_domain_name (8) 之间
+      import_order: 7.5
       analytics:
         category: dimension
         type: categorical

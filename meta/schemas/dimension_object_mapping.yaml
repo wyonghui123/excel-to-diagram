@@ -74,6 +74,12 @@ dimension_object_mappings:
       - bo: sub_domain
         field: domain_id
         filter_type: fk
+      - bo: service_module
+        field: sub_domain_id
+        filter_type: fk_expanded
+      - bo: business_object
+        field: sub_domain_id
+        filter_type: fk_expanded
 
   - dimension_code: sub_domain
     dimension_type: business
@@ -82,6 +88,12 @@ dimension_object_mappings:
       - bo: sub_domain
         field: id
         filter_type: direct
+      - bo: service_module
+        field: sub_domain_id
+        filter_type: fk
+      - bo: business_object
+        field: sub_domain_id
+        filter_type: chain
 
   # ────────────────────────────────────────
   # 通用维度示例 (为未来扩展预留)

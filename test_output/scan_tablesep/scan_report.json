@@ -1,0 +1,231 @@
+{
+  "scan_time": "2026-06-12 14:58:04",
+  "total_pages": 5,
+  "screenshots": {
+    "business_object": "d:/filework/excel-to-diagram/test_output/scan_tablesep\\scan_business_object.png",
+    "association": "d:/filework/excel-to-diagram/test_output/scan_tablesep\\scan_association.png",
+    "user_group": "d:/filework/excel-to-diagram/test_output/scan_tablesep\\scan_user_group.png",
+    "role": "d:/filework/excel-to-diagram/test_output/scan_tablesep\\scan_role.png",
+    "permission_rule": "d:/filework/excel-to-diagram/test_output/scan_tablesep\\scan_permission_rule.png"
+  },
+  "results": {
+    "business_object": {
+      "url": "/system/archdata?productId=1&versionId=1&tab=business_object",
+      "data": {
+        "url": "http://localhost:3004/system/archdata?productId=1&versionId=1&tab=relationship",
+        "countTables": 1,
+        "countVisibleTables": 1,
+        "countCustomTables": 1,
+        "countVisibleCustomTables": 1,
+        "hasCustomTable": true,
+        "headerBg": "rgb(255, 255, 255)",
+        "headerColor": "rgb(102, 102, 102)",
+        "wrapperBg": "rgba(0, 0, 0, 0)",
+        "cssVar": "#ffffff",
+        "toolbar": {
+          "bg": "rgba(0, 0, 0, 0)",
+          "border": "",
+          "rect": {
+            "x": 342,
+            "y": 196,
+            "w": 922,
+            "h": 49
+          }
+        },
+        "firstTableClasses": "el-table--fit el-table--border el-table--scrollable-x el-table--scrollable-y el-table--enable-row-transition el-table--default el-table el-table--layout-fixed custom-table is-scrolling-left",
+        "firstTableParentClasses": [
+          {
+            "tag": "DIV",
+            "class": "table-wrapper"
+          },
+          {
+            "tag": "DIV",
+            "class": "table-section"
+          },
+          {
+            "tag": "DIV",
+            "class": "meta-list-page"
+          }
+        ],
+        "title": "架构数据管理 - ArchWorkspace"
+      },
+      "status": "ok",
+      "fix_status": "fixed"
+    },
+    "association": {
+      "url": "/system/archdata?productId=1&versionId=1&tab=association",
+      "data": {
+        "url": "http://localhost:3004/system/archdata?productId=1&versionId=1&tab=association",
+        "countTables": 1,
+        "countVisibleTables": 1,
+        "countCustomTables": 1,
+        "countVisibleCustomTables": 1,
+        "hasCustomTable": true,
+        "headerBg": "rgb(255, 255, 255)",
+        "headerColor": "rgb(102, 102, 102)",
+        "wrapperBg": "rgba(0, 0, 0, 0)",
+        "cssVar": "#ffffff",
+        "toolbar": {
+          "bg": "rgba(0, 0, 0, 0)",
+          "border": "",
+          "rect": {
+            "x": 342,
+            "y": 196,
+            "w": 922,
+            "h": 49
+          }
+        },
+        "firstTableClasses": "el-table--fit el-table--border el-table--scrollable-x el-table--scrollable-y el-table--enable-row-transition el-table--default el-table el-table--layout-fixed custom-table is-scrolling-left",
+        "firstTableParentClasses": [
+          {
+            "tag": "DIV",
+            "class": "table-wrapper"
+          },
+          {
+            "tag": "DIV",
+            "class": "table-section"
+          },
+          {
+            "tag": "DIV",
+            "class": "meta-list-page"
+          }
+        ],
+        "title": "架构数据管理 - ArchWorkspace"
+      },
+      "status": "ok",
+      "fix_status": "fixed"
+    },
+    "user_group": {
+      "url": "/user-permission?tab=user-groups",
+      "data": {
+        "url": "http://localhost:3004/user-permission?tab=user-groups",
+        "countTables": 1,
+        "countVisibleTables": 1,
+        "countCustomTables": 1,
+        "countVisibleCustomTables": 1,
+        "hasCustomTable": true,
+        "headerBg": "rgb(255, 255, 255)",
+        "headerColor": "rgb(102, 102, 102)",
+        "wrapperBg": "rgba(0, 0, 0, 0)",
+        "cssVar": "#ffffff",
+        "toolbar": {
+          "bg": "rgba(0, 0, 0, 0)",
+          "border": "",
+          "rect": {
+            "x": 32,
+            "y": 170,
+            "w": 1216,
+            "h": 49
+          }
+        },
+        "firstTableClasses": "el-table--fit el-table--border el-table--scrollable-x el-table--scrollable-y el-table--enable-row-transition el-table--default el-table el-table--layout-fixed custom-table is-scrolling-left",
+        "firstTableParentClasses": [
+          {
+            "tag": "DIV",
+            "class": "table-wrapper"
+          },
+          {
+            "tag": "DIV",
+            "class": "table-section"
+          },
+          {
+            "tag": "DIV",
+            "class": "meta-list-page"
+          }
+        ],
+        "title": "用户与权限管理 - ArchWorkspace"
+      },
+      "status": "ok",
+      "fix_status": "fixed"
+    },
+    "role": {
+      "url": "/user-permission?tab=roles",
+      "data": {
+        "url": "http://localhost:3004/user-permission?tab=roles",
+        "countTables": 1,
+        "countVisibleTables": 1,
+        "countCustomTables": 1,
+        "countVisibleCustomTables": 1,
+        "hasCustomTable": true,
+        "headerBg": "rgb(255, 255, 255)",
+        "headerColor": "rgb(102, 102, 102)",
+        "wrapperBg": "rgba(0, 0, 0, 0)",
+        "cssVar": "#ffffff",
+        "toolbar": {
+          "bg": "rgba(0, 0, 0, 0)",
+          "border": "",
+          "rect": {
+            "x": 32,
+            "y": 170,
+            "w": 1216,
+            "h": 49
+          }
+        },
+        "firstTableClasses": "el-table--fit el-table--border el-table--scrollable-x el-table--scrollable-y el-table--enable-row-transition el-table--default el-table el-table--layout-fixed custom-table is-scrolling-left",
+        "firstTableParentClasses": [
+          {
+            "tag": "DIV",
+            "class": "table-wrapper"
+          },
+          {
+            "tag": "DIV",
+            "class": "table-section"
+          },
+          {
+            "tag": "DIV",
+            "class": "meta-list-page"
+          }
+        ],
+        "title": "用户与权限管理 - ArchWorkspace"
+      },
+      "status": "ok",
+      "fix_status": "fixed"
+    },
+    "permission_rule": {
+      "url": "/system-admin",
+      "data": {
+        "url": "http://localhost:3004/system-admin",
+        "countTables": 1,
+        "countVisibleTables": 1,
+        "countCustomTables": 1,
+        "countVisibleCustomTables": 1,
+        "hasCustomTable": true,
+        "headerBg": "rgb(255, 255, 255)",
+        "headerColor": "rgb(102, 102, 102)",
+        "wrapperBg": "rgba(0, 0, 0, 0)",
+        "cssVar": "#ffffff",
+        "toolbar": {
+          "bg": "rgba(0, 0, 0, 0)",
+          "border": "",
+          "rect": {
+            "x": 16,
+            "y": 418.296875,
+            "w": 1248,
+            "h": 49
+          }
+        },
+        "firstTableClasses": "el-table--fit el-table--border el-table--scrollable-x el-table--scrollable-y el-table--enable-row-hover el-table--enable-row-transition el-table--default el-table el-table--layout-fixed custom-table i",
+        "firstTableParentClasses": [
+          {
+            "tag": "DIV",
+            "class": "table-wrapper"
+          },
+          {
+            "tag": "DIV",
+            "class": "table-section"
+          },
+          {
+            "tag": "DIV",
+            "class": "meta-list-page"
+          }
+        ],
+        "title": "工作台 - ArchWorkspace"
+      },
+      "status": "ok",
+      "fix_status": "fixed"
+    }
+  },
+  "summary": {
+    "fixed": 5
+  }
+}

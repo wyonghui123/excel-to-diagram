@@ -1,0 +1,245 @@
+﻿========== stash@{0} vs HEAD (source code) ==========
+Count: 20
+
+  .trae/specs/cross-domain-relationship-permission/spec.md
+  .trae/specs/cross-domain-relationship-permission/tasks.md
+  docs/auth/role-templates.md
+  meta/api/bo_api.py
+  meta/api/management_dimension_api.py
+  meta/api/value_help_api.py
+  meta/core/interceptors/data_permission_interceptor.py
+  meta/core/interceptors/persistence_interceptor.py
+  meta/core/query_builder.py
+  meta/schemas/relationship.yaml
+  meta/services/cascade_service.py
+  meta/services/data_permission_filter.py
+  meta/services/data_permission_service.py
+  meta/services/dimension_scope_engine.py
+  src/components/common/DetailPage/DetailPage.vue
+  src/components/common/FkLinkField/FkLinkField.vue
+  src/components/common/MasterDetailLayout/MasterDetailLayout.vue
+  src/components/common/MetaForm.vue
+  src/components/common/MetaListPage/MetaListPage.vue
+  src/services/boService.js
+
+========== Working tree vs HEAD ==========
+Count: 12
+
+  .trae/specs/_business_rules/_crud_lifecycle_rules.yaml
+  components.d.ts
+  meta/core/interceptors/data_permission_interceptor.py
+  meta/core/interceptors/persistence_interceptor.py
+  meta/core/models_annotations.py
+  meta/core/yaml_loader.py
+  meta/schemas/dimension_object_mapping.yaml
+  meta/schemas/relationship.yaml
+  meta/services/dimension_scope_engine.py
+  meta/services/import_export_service.py
+  src/components/common/MasterDetailLayout/MasterDetailLayout.vue
+  src/components/common/MultiObjectManagementPage/MultiObjectManagementPage.vue
+
+========== dimension_scope_engine.py: stash@{2} vs HEAD ==========
+HAS DIFFERENCES
+diff --git a/meta/services/dimension_scope_engine.py b/meta/services/dimension_scope_engine.py
+index 6d7ab1a..7a7aa43 100644
+--- a/meta/services/dimension_scope_engine.py
++++ b/meta/services/dimension_scope_engine.py
+@@ -100,6 +100,39 @@ VERSION_AWARE_BOS = {
+     'business_object': 'business_objects',
+     'relationship': 'relationships',
+ }
++
++# [V1.1.8 2026-06-15] 闈?HIERARCHY_CHAIN 鐨?BO 鐨?chain 閰嶇疆
++#   鐢ㄩ€? 璁?_build_chain_condition 鏀寔 service_module / business_object
++#   渚? service_module 鐨?parent_field=sub_domain_id, sub_domain 鐨?parent_field=domain_id
++#   浠?service_module 鍚戜笂杩藉埌 domain:
++#     service_module.sub_domain_id 鈫?sub_domains.id 鈫?sub_domains.domain_id 鈫?domains.id
++#   浠?service_module 鍚戜笂杩藉埌 product:
++#     service_module.sub_domain_id 鈫?sub_domains.id 鈫?... 鈫?products.id
++#
++#   EXTENDED_CHAIN_PARENT: 姣忎釜闈?HIERARCHY BO 鐨勭洿鎺?parent_field
++#   EXTENDED_CHAIN_STEPS: 浠?(闈?HIERARCHY BO) 鍒?(HIERARCHY BO 閿氱偣) 鐨勬杩?+EXTENDED_CHAIN_PARENT = {
++    'service_module': 'sub_domain_id',
++    'business_object': 'service_module_id',
++}
++# 閿氱偣 HIERARCHY BO (浠?EXTENDED_CHAIN_PARENT 鍑哄彂, 绗竴璺冲埌杈剧殑 HIERARCHY BO)
++# 鍚庣画鐨?chain 缁х画娌?HIERARCHY_CHAIN 璧?+EXTENDED_CHAIN_ANCHOR = {
++    'service_module': 'sub_domain',  # SM.sub_domain_id 鈫?sub_domain
++    'business_object': 'service_module',  # BO.service_module_id 鈫?SM (鍐?鈫?SD 鈫?...)
++}
++
++# [V1.1.8 2026-06-15] 鍏崇郴绫?BO 鐨?鍙跺瓙瀛楁 + 鐩爣 BO"鏄犲皠
++#   relationship 鐨?source_bo_id / target_bo_id 鎸囧悜 business_objects.id
++#   褰?yaml 缁?relationship 閰?filter_type=chain, field=source_bo_id 鏃?
++#   _build_chain_condition 闇€瑕佺煡閬?娌?source_bo_id 鈫?business_objects 鈫?service_modules 鈫?..."
++#   杩欎釜鏄犲皠琛ㄦ樉寮忓憡璇?chain 璧风偣瀛楁 + 璺冲埌鐨勪笅涓€绾?BO"
++LEAF_CHAIN_FIELD = {
++    'relationship': {
++        'source_bo_id': 'business_object',   # 璺冲埌 business_object
++        'target_bo_id': 'business_object',   # 璺冲埌 business_object
++    },
++}
+ ALWAYS_VISIBLE_BOS = {
+     'enum_type', 'enum_value', 'user', 'role', 'user_group',
+     'user_group_member', 'audit_log', 'permission', 'menu',
+@@ -218,40 +251,54 @@ class DimensionScopeEngine:
+                 for dim_code in expanded:
+                     if not expanded[dim_code]:
+                         continue
+-                    binding = loader.get_field_for_bo(dim_code, resource_type)
+-                    if not binding:
++                    # [V1.1.9 2026-06-15] 鐢?get_bindings_for_bo 鎷挎墍鏈?binding (multi-binding OR 鍚堝苟)
++                    # 涔嬪墠 get_field_for_bo 鍙彇绗竴涓? 瀵艰嚧 relationship 閰嶇殑 target_bo_id 瀹屽叏娌＄敤涓?+                    # 鐜板湪 multi-binding (渚? source_bo_id + target_bo_id) 鐢?OR 鍚堝苟:
++                    #   source_bo_id IN (...) OR target_bo_id IN (...)
++                    # 琛ㄨ揪"浠讳竴绔湪 dim scope 鍐?璇箟 (璺ㄥ煙 association 鎺ㄥ)
++                    bindings = loader.get_bindings_for_bo(dim_code, resource_type)
++                    if not bindings:
+                         continue
+-                    field = binding.get('field')
+-                    filter_type = binding.get('filter_type', 'direct')
+                     vals = sorted(expanded[dim_code])
+-                    if not field or not vals:
++                    if not vals:
+                         continue
+ 
+-                    # 鐩存帴 id 杩囨护 (渚? dimension=product, bo=product, field=id)
+-                    if filter_type == 'direct' and dim_code == resource_type:
+-                        if len(vals) == 1:
+-                            parts.append(f"{field} = {vals[0]}")
+-                        else:
+-                            parts.append(
+-                                f"{field} IN ({','.join(str(v) for v in vals)})"
++                    # [V1.1.9] multi-binding 鍐呴儴鐢?OR 鍚堝苟 (鍗?binding 鏃?OR 閫€鍖栦负鍗?cond)
++                    binding_parts = []
++                    for binding in bindings:
++                        field = binding.get('field')
++                        filter_type = binding.get('filter_type', 'direct')
++                        if not field:
++                            continue
++
++                        if filter_type == 'direct':
++                            if len(vals) == 1:
++                                binding_parts.append(f"{field} = {vals[0]}")
+
+========== dimension_scope_engine.py: stash@{0} vs HEAD ==========
+HAS DIFFERENCES
+diff --git a/meta/services/dimension_scope_engine.py b/meta/services/dimension_scope_engine.py
+index 6d7ab1a..e6849a9 100644
+--- a/meta/services/dimension_scope_engine.py
++++ b/meta/services/dimension_scope_engine.py
+@@ -117,9 +117,29 @@ class DimensionScopeEngine:
+         expanded = {}
+         for scope in scopes:
+             code = scope['dimension_code']
+-            values = set(json.loads(scope['dimension_values'])
+-                         if isinstance(scope['dimension_values'], str)
+-                         else scope['dimension_values'])
++            # [FIX 2026-06-15] 鍏煎涓夌鏁版嵁褰㈡€?
++            # 1. dim_values 涓?JSON 瀛楃涓?(涓绘祦, 鏉ヨ嚜 UI 閰嶇疆)
++            # 2. dim_values 涓?list (Python 璋冪敤)
++            # 3. dim_values 涓?NULL (鏃ф暟鎹? id 瀹為檯瀛樺埌 inherit_children)
++            # 淇鍓? dim_values=NULL 鏃?set(None) 鎶?TypeError
++            # 淇鍚? NULL 鏃堕檷绾ц inherit_children (鍚屾牱瀛?JSON 鍒楄〃)
++            raw_dv = scope.get('dimension_values')
++            if raw_dv is None:
++                # [FIX 2026-06-15] Bug #3: NULL 鈫?璇?inherit_children 瀛楁
++                raw_dv = scope.get('inherit_children')
++                if raw_dv is None:
++                    continue
++            if isinstance(raw_dv, str):
++                try:
++                    values = set(json.loads(raw_dv))
++                except (json.JSONDecodeError, TypeError):
++                    continue
++            elif isinstance(raw_dv, (list, tuple)):
++                values = set(int(x) for x in raw_dv if str(x).lstrip('-').isdigit())
++            else:
++                continue
++            if not values:
++                continue
+ 
+             if code not in expanded:
+                 expanded[code] = set()
+
+========== dimension_scope_engine.py: working tree vs HEAD ==========
+HAS DIFFERENCES
+diff --git a/meta/services/dimension_scope_engine.py b/meta/services/dimension_scope_engine.py
+index 6d7ab1a..5e0c6ff 100644
+--- a/meta/services/dimension_scope_engine.py
++++ b/meta/services/dimension_scope_engine.py
+@@ -243,6 +243,21 @@ class DimensionScopeEngine:
+                             parts.append(
+                                 f"{field} IN ({','.join(str(v) for v in vals)})"
+                             )
++                    elif filter_type == 'fk_expanded':
++                        # [FIX 2026-06-16] 浠庣埗缁村害鍊煎悜涓嬫煡璇㈠瓙缁村害鍊硷紝鍐嶇敤瀛愮淮搴?FK 杩囨护
++                        # 渚? domain=703 鈫?鏌?sub_domains WHERE domain_id=703 鈫?[138,139,146]
++                        # 鈫?service_modules WHERE sub_domain_id IN (138,139,146)
++                        child_ids = self._expand_down(dim_code, resource_type, vals)
++                        if child_ids:
++                            if len(child_ids) == 1:
++                                parts.append(f"{field} = {child_ids[0]}")
++                            else:
++                                parts.append(
++                                    f"{field} IN ({','.join(str(v) for v in sorted(child_ids))})"
++                                )
++                        else:
++                            # 娌℃湁瀛愮淮搴﹀€?鈫?0 鏉″彲瑙?+                            parts.append("1 = 0")
+                     elif filter_type == 'chain':
+                         # 娌?HIERARCHY_CHAIN 杩芥函鍒伴《灞?dim 瀵瑰簲鐨勫閿?                         # 渚? dimension=product, bo=domain, chain
+@@ -365,6 +380,79 @@ class DimensionScopeEngine:
+             )
+         return f"{first_field} IN ({inner})"
+ 
++    def _expand_down(self, parent_dim: str, child_bo: str, parent_vals: List[int]) -> Optional[Set[int]]:
++        """[FIX 2026-06-16] 浠庣埗缁村害鍊煎悜涓嬫煡璇紝杩斿洖 child_bo 鐨?FK 瀛楁搴旇繃婊ょ殑鍊?+
++        渚? parent_dim='domain', child_bo='service_module', parent_vals=[703]
++          鈫?鏌?sub_domains WHERE domain_id IN (703) 鈫?{138, 139, 146}
++          鈫?service_module 鐢?sub_domain_id IN (138, 139, 146) 杩囨护
++          杩斿洖 {138, 139, 146}
++        """
++        # FK 閾? (parent_dim, child_table, fk_field_in_child_table)
++        # 姣忎竴姝? 浠?parent_dim 鐨?ID 鏌?child_table 涓?fk_field 鍖归厤鐨勮褰曠殑 ID
++        FK_CHAIN = [
++            ('product', 'versions', 'product_id'),
++            ('version', 'domains', 'version_id'),
++            ('domain', 'sub_domains', 'domain_id'),
++            ('sub_domain', 'service_modules', 'sub_domain_id'),
++            ('service_module', 'business_objects', 'service_module_id'),
++        ]
++
++        # 鎵惧埌 parent_dim 鍦?FK_CHAIN 涓殑璧峰浣嶇疆
++        start_idx = None
++        for i, (dim, _, _) in enumerate(FK_CHAIN):
++            if dim == parent_dim:
++                start_idx = i
++                break
++
++        if start_idx is None:
++            return None
++
++        # 鎵惧埌 child_bo 瀵瑰簲鐨?FK_CHAIN 浣嶇疆
++        # FK_CHAIN[i] = (parent_dim, child_table, fk_field)
++        # child_bo 鐨勮〃鍚?= child_bo + 's' (绾﹀畾)
++        child_table_name = child_bo + 's' if not child_bo.endswith('s') else child_bo + 'es'
++        # 涔熸鏌?RESOURCE_TABLE_MAP
++        child_table_name = RESOURCE_TABLE_MAP.get(child_bo, child_table_name)
++
++        target_idx = None
++        for i, (dim, tbl, _) in enumerate(FK_CHAIN):
++            if tbl == child_table_name:
++                target_idx = i
++                break
++
++        if target_idx is None:
++            return None
++
++        # 浠?parent_dim 閫愭鍚戜笅鏌ヨ鍒?child_bo 鐨勭洿鎺ョ埗缁村害
++        # 闇€瑕佹煡璇㈠埌 target_idx - 1 鐨勪綅缃紙鍥犱负 child_bo 鐨?FK 鎸囧悜 target_idx 瀵瑰簲鐨勭淮搴︼級
++        # 瀹為檯涓婇渶瑕佹煡璇㈠埌 target_idx锛屽洜涓?FK_CHAIN[target_idx] 鐨?child_table 灏辨槸 child_bo 鐨勮〃
++        # 鑰?FK_CHAIN[target_idx-1] 鐨?child_table 鏄?child_bo 鐨勭洿鎺ョ埗琛?+
++        # 鎴戜滑闇€瑕佺殑鏄?child_bo 鐨勭洿鎺ョ埗缁村害鐨?ID 鍊?+        # 渚? child_bo='service_module', 鐩存帴鐖剁淮搴?'sub_domain'
++        # FK_CHAIN[3] = ('sub_domain', 'service_modules', 'sub_domain_id')
++        # 鎵€浠ユ垜浠渶瑕?sub_domain 鐨?ID 闆嗗悎
++
++        # 浠?start_idx 鏌ヨ鍒?target_idx - 1

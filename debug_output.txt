@@ -1,0 +1,49 @@
+[login] status=200
+[login] cookies: ['auth_token', 'session']
+[versions] status=200
+[versions] using hardcoded version_id=1
+[relationships] status=200
+[relationships] count=29
+[relationships] sample[0]: {"activity_label": null, "can_delete": true, "category_label": "跨领域", "category_type": "cross_domain", "code": "SDLFJK-S", "created_at": "2026-06-10T10:46:02.885223", "created_by": "", "display_values": {"created_at": "2026-06-10T10:46:02", "source_bo_id": "LSKDJFLASK", "target_bo_id": "仓库", "updated_at": "2026-06-10T10:46:02", "version_id": "新测试2_1780899784189"}, "domain_relation": null, "id": 29, "is_in_scope": null, "module_relation": null, "product_code": null, "relation_category": null, "re
+[business_objects] count=42
+[bo_infos] count=42
+[domains] count=122
+[domains] all: [(320, 'TEST600'), (315, 'TestDiag_WithVersionId_1781057260958'), (314, 'TestDiag_WithVersionId_1781057244438'), (313, 'TestDiag_WithVersionId'), (312, 'TEST18'), (311, 'BatchDeleteTest3_7ee653edfx'), (310, 'BatchDeleteTest2_7ee653ed'), (309, 'BatchDeleteTest1_7ee653ed'), (308, 'CRUD Domain_33925'), (307, 'CRUD Domain_33340'), (306, 'CRUD Domain_32974'), (305, 'CRUD Domain_32676'), (281, 'RoundTrip新增测试'), (279, 'RoundTrip新增测试_roundtrip_test'), (278, 'Upsert新建_UPSERT_NEW_26CE51'), (277, '深度创建领域_715501'), (276, '含备注领域_C69600'), (275, '深度创建领域_F7E2A8'), (274, '含备注领域_6CC8BE'), (273, 'CRUD Domain_7656_roundtrip_test'), (272, 'CRUD Domain_7015'), (271, 'CRUD Domain_6456'), (270, 'CRUD Domain_5876'), (269, 'CRUD Domain_27258'), (268, 'CRUD Domain_26973'), (267, 'CRUD Domain_26679'), (266, 'CRUD Domain_26425'), (265, 'CRUD Domain_62159'), (264, 'CRUD Domain_61835'), (263, 'CRUD Domain_61550'), (262, 'CRUD Domain_61289'), (261, 'CRUD Domain_74142'), (260, 'CRUD Domain_73875'), (259, 'CRUD Domain_73552'), (258, 'CRUD Domain_73240'), (257, 'CRUD Domain_69278'), (256, 'CRUD Domain_69032'), (255, 'CRUD Domain_68753'), (254, 'CRUD Domain_68261'), (230, 'BatchDeleteTest3_de5579ea'), (229, 'BatchDeleteTest2_de5579ea'), (228, 'BatchDeleteTest1_de5579ea'), (227, 'CRUD Domain_39780'), (226, 'CRUD Domain_39558'), (225, 'CRUD Domain_39350'), (224, 'CRUD Domain_39112'), (223, 'BatchDeleteTest3_244e2bed'), (222, 'BatchDeleteTest2_244e2bed'), (221, 'BatchDeleteTest1_244e2bed'), (220, 'CRUD Domain_21999'), (219, 'CRUD Domain_21825'), (218, 'CRUD Domain_21650'), (217, 'CRUD Domain_21442'), (216, 'BatchDeleteTest3_9d249b03'), (215, 'BatchDeleteTest2_9d249b03'), (214, 'BatchDeleteTest1_9d249b03'), (213, 'CRUD Domain_97215'), (212, 'CRUD Domain_96983'), (211, 'CRUD Domain_96772'), (210, 'CRUD Domain_96547'), (149, 'RoundTrip新增测试'), (148, 'RoundTrip新增测试_roundtrip_test'), (147, 'T001_FIXED_D3'), (146, 'T001_FIXED_D2'), (145, 'T001_FIXED_D1'), (144, 'T001_FIXED_D0'), (143, '域RSSDYCHLQ'), (142, '域RSS80DT7R'), (141, '域RSSTSRHEY'), (140, '测试领域V1780928581'), (139, 'TEST60'), (138, '测试领域_1780929931'), (137, '测试领域_1780930010'), (136, '测试领域_1780930189'), (135, '测试领域_1780930307'), (134, '测试领域_1780930436'), (133, '测试领域_1780930560'), (132, '测试领域_1780930719'), (131, '测试领域_1780930905'), (130, '测试领域_1780931105'), (107, '???'), (94, 'CRUD Domain_43299x'), (93, 'CRUD Domain_43189'), (92, 'CRUD Domain_43066'), (91, 'CRUD Domain_42938'), (73, 'RoundTrip新增测试'), (72, 'Upsert新建_UPSERT_NEW_5EED1C'), (71, '深度创建领域_DB4AEA'), (70, '含备注领域_E64CCF'), (69, 'BatchDeleteTest3_8b9d4d3e_roundtrip_test'), (68, 'BatchDeleteTest2_8b9d4d3e'), (67, 'BatchDeleteTest1_8b9d4d3e'), (66, 'CRUD Domain_7972'), (65, 'CRUD Domain_7917'), (64, 'CRUD Domain_7863'), (63, 'CRUD Domain_7809'), (62, 'CRUD Domain_53715'), (61, 'CRUD Domain_53666'), (60, 'CRUD Domain_53615'), (59, 'CRUD Domain_53567'), (58, 'CRUD Domain_90296'), (57, 'CRUD Domain_90234'), (56, 'CRUD Domain_90172'), (55, 'CRUD Domain_90109'), (49, 'RoundTrip新增测试'), (48, 'Upsert新建_UPSERT_NEW_DF8A53'), (47, '深度创建领域_F74F42'), (46, '含备注领域_20B6D1'), (27, 'RoundTrip新增测试'), (25, 'CRUD Domain_68011_roundtrip_test'), (24, 'CRUD Domain_67648'), (23, 'CRUD Domain_67543'), (22, 'CRUD Domain_67476'), (20, 'CRUD Domain_21920'), (19, 'CRUD Domain_21797'), (18, 'CRUD Domain_21747'), (17, 'CRUD Domain_21701'), (5, 'TestDomainForDelete'), (1, '采购管理'), (2, '库存管理'), (3, '销售管理'), (4, '财务管理')]
+
+[domain] using: id=1, name=采购管理
+
+[unique_rels] count=29
+[classified] count=29
+
+========== SCOPE BREAKDOWN ==========
+  internal: count=28, ids=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28]
+  cross-boundary: count=1, ids=[29]
+  external: count=0, ids=[]
+  Internal ∪ Cross = 29
+
+========== CROSS-BOUNDARY RELATION DETAILS ==========
+  id=29, code=None
+    src: TEST600 domainId=320 subDomainId=68
+    tgt: BO_WAREHOUSE domainId=1 subDomainId=1
+
+========== TREE LEAF RELATION IDS ==========
+
+Internal leaf NODE IDs: 25
+Cross-boundary leaf NODE IDs: 1
+
+Internal leaf RELATION IDs: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28]
+Cross-boundary leaf RELATION IDs: [29]
+
+Union (internal + cross): [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29]
+Intersection: []
+Total unique ids in union: 29
+
+========== SIMULATING EL-TREE @CHECK ==========
+When user checks BOTH 'internal' AND 'cross-boundary' parents:
+  checkedKeys (leaf IDs only): ['cross-boundary-cross-domain-module-5-65', 'internal-same-module-module-16-16', 'internal-same-module-module-2-2', 'internal-same-module-module-4-4', 'internal-same-module-module-5-5', 'internal-same-module-module-7-7', 'internal-same-module-module-8-8', 'internal-same-module-module-9-9', 'internal-same-subdomain-cross-module-module-10-9', 'internal-same-subdomain-cross-module-module-11-12', 'internal-same-subdomain-cross-module-module-11-14', 'internal-same-subdomain-cross-module-module-11-9', 'internal-same-subdomain-cross-module-module-12-9', 'internal-same-subdomain-cross-module-module-13-14', 'internal-same-subdomain-cross-module-module-13-9', 'internal-same-subdomain-cross-module-module-15-16', 'internal-same-subdomain-cross-module-module-15-2', 'internal-same-subdomain-cross-module-module-16-2', 'internal-same-subdomain-cross-module-module-2-4', 'internal-same-subdomain-cross-module-module-3-4', 'internal-same-subdomain-cross-module-module-4-5', 'internal-same-subdomain-cross-module-module-5-6', 'internal-same-subdomain-cross-module-module-5-7', 'internal-same-subdomain-cross-module-module-5-8', 'internal-same-subdomain-cross-module-module-5-9', 'internal-same-subdomain-cross-module-module-6-7']
+  Total: 26
+  Expected relationIds from nodeKeysToRelationIds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29]
+  Count: 29
+
+========== FILTER CHECK ==========
+  id=29: src_dom=320, tgt_dom=1, filter passes=True

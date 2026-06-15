@@ -1,0 +1,16 @@
+import sqlite3
+db = sqlite3.connect(r'D:\filework\excel-to-diagram\meta\architecture.db')
+cur = db.cursor()
+print("--- service_modules v=1 ---")
+cur.execute("SELECT id, name, version_id, sub_domain_id FROM service_modules WHERE version_id=1")
+for r in cur.fetchall():
+    print(f"  id={r[0]}, name={r[1]}, v={r[2]}, sd={r[3]}")
+print(f"  count: {cur.rowcount}")
+print()
+print("--- business_objects v=1 ---")
+cur.execute("SELECT COUNT(*) FROM business_objects WHERE version_id=1")
+print(f"  count: {cur.fetchone()[0]}")
+print()
+print("--- relationships v=1 ---")
+cur.execute("SELECT COUNT(*) FROM relationships WHERE version_id=1")
+print(f"  count: {cur.fetchone()[0]}")

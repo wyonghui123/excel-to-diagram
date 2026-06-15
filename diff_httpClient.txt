@@ -1,0 +1,533 @@
+﻿diff --git a/src/utils/httpClient.js b/src/utils/httpClient.js
+index a256b88..a77c85f 100644
+--- a/src/utils/httpClient.js
++++ b/src/utils/httpClient.js
+@@ -1,16 +1,16 @@
+ /**
+- * httpClient - 缁熶竴 HTTP 瀹㈡埛绔?+ * httpClient - 缂佺喍绔?HTTP 鐎广垺鍩涚粩?
+  *
+- * FR-UI-001: 鏇夸唬鏁ｈ惤鐨?fetch() 璋冪敤锛屾彁渚?
+- * - 缁熶竴 credentials: 'include' (Cookie 璁よ瘉)
+- * - 缁熶竴閿欒鐮?(ErrorCode 鏋氫妇)
+- * - 缁熶竴鍝嶅簲鏍煎紡 { success, data, message, code, httpStatus, traceId }
+- * - 401 鑷姩鎷︽埅 (onUnauthorized 鍥炶皟)
+- * - 璇锋眰/鍝嶅簲鎷︽埅鍣?- * - 鎱㈣姹傛棩蹇?(>1s)
+- * - AbortSignal / timeout 鏀寔
++ * FR-UI-001: 閺囧じ鍞弫锝堟儰閻?fetch() 鐠嬪啰鏁ら敍灞惧絹娓?
++ * - 缂佺喍绔?credentials: 'include' (Cookie 鐠併倛鐦?
++ * - 缂佺喍绔撮柨娆掝嚖閻?(ErrorCode 閺嬫矮濡?
++ * - 缂佺喍绔撮崫宥呯安閺嶇厧绱?{ success, data, message, code, httpStatus, traceId }
++ * - 401 閼奉亜濮╅幏锔藉焻 (onUnauthorized 閸ョ偠鐨?
++ * - 鐠囬攱鐪?閸濆秴绨查幏锔藉焻閸?
++ * - 閹便垼顕Ч鍌涙）韫?(>1s)
++ * - AbortSignal / timeout 閺€顖涘瘮
+  *
+- * 鍛藉悕绌洪棿瀵煎嚭:
++ * 閸涜棄鎮曠粚娲？鐎电厧鍤?
+  *   import { apiV1, apiV2 } from '@/utils/httpClient'
+  *   apiV1.get('/users')
+  *   apiV2.post('/action/login', { username, password })
+@@ -21,7 +21,7 @@ import { useAuthStore } from '@/stores/authStore'
+ import { logger } from '@/utils/logger'
+ 
+ // ---------------------------------------------------------------------------
+-// ErrorCode 鏋氫妇
++// ErrorCode 閺嬫矮濡? // ---------------------------------------------------------------------------
+ export const ErrorCode = Object.freeze({
+   ERR_NETWORK:          'NETWORK_ERROR',
+@@ -57,14 +57,14 @@ const HTTP_STATUS_TO_ERROR_CODE = {
+ }
+ 
+ // ---------------------------------------------------------------------------
+-// 鎷︽埅鍣?& 鍥炶皟
++// 閹凤附鍩呴崳?& 閸ョ偠鐨? // ---------------------------------------------------------------------------
+ const requestInterceptors = []
+ const responseInterceptors = []
+ let onUnauthorizedCallback = null
+ 
+ /**
+- * 娉ㄥ唽璇锋眰鎷︽埅鍣?+ * 濞夈劌鍞界拠閿嬬湴閹凤附鍩呴崳?
+  * @param {(url: string, options: object) => void} fn
+  */
+ export function registerRequestInterceptor(fn) {
+@@ -72,7 +72,7 @@ export function registerRequestInterceptor(fn) {
+ }
+ 
+ /**
+- * 娉ㄥ唽鍝嶅簲鎷︽埅鍣?+ * 濞夈劌鍞介崫宥呯安閹凤附鍩呴崳?
+  * @param {(result: object) => void} fn
+  */
+ export function registerResponseInterceptor(fn) {
+@@ -80,7 +80,7 @@ export function registerResponseInterceptor(fn) {
+ }
+ 
+ /**
+- * 璁剧疆 401 鏈巿鏉冨洖璋?(涓?api.js 鐨?setOnUnauthorized 瀵归綈)
++ * 鐠佸墽鐤?401 閺堫亝宸块弶鍐ㄦ礀鐠?(娑?api.js 閻?setOnUnauthorized 鐎靛綊缍?
+  * @param {() => void} callback
+  */
+ export function setOnUnauthorized(callback) {
+@@ -88,23 +88,23 @@ export function setOnUnauthorized(callback) {
+ }
+ 
+ // ---------------------------------------------------------------------------
+-// traceId 鐢熸垚 (FR-013)
+-// 浣跨敤 crypto.randomUUID() (Chrome 92+, Edge 92+, Firefox 95+, Safari 15.4+)
+-// Fallback: crypto.getRandomValues() (鏇村箍娉涚殑娴忚鍣ㄦ敮鎸?
+-// 鏃у疄鐜颁娇鐢?Math.random() 鏄潪鍔犲瘑瀹夊叏,traceId 鍙鐚滄祴
++// traceId 閻㈢喐鍨?(FR-013)
++// 娴ｈ法鏁?crypto.randomUUID() (Chrome 92+, Edge 92+, Firefox 95+, Safari 15.4+)
++// Fallback: crypto.getRandomValues() (閺囨潙绠嶅▔娑氭畱濞村繗顫嶉崳銊︽暜閹?
++// 閺冄冪杽閻滈濞囬悽?Math.random() 閺勵垶娼崝鐘茬槕鐎瑰鍙?traceId 閸欘垵顫﹂悮婊勭ゴ
+ // ---------------------------------------------------------------------------
+ function generateTraceId() {
+-  // 浼樺厛: 鍘熺敓 randomUUID
++  // 娴兼ê鍘? 閸樼喓鏁?randomUUID
+   if (typeof window !== 'undefined' && window.crypto?.randomUUID) {
+     return window.crypto.randomUUID()
+   }
+-  // Fallback: 32 瀛楃 hex (涓庢棫鐗堝吋瀹归暱搴?
++  // Fallback: 32 鐎涙顑?hex (娑撳孩妫悧鍫濆悑鐎瑰綊鏆辨惔?
+   if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
+     const arr = new Uint8Array(16)
+     window.crypto.getRandomValues(arr)
+     return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('')
+   }
+-  // 缁堟瀬 fallback: 鏃у疄鐜?(浠呭湪 crypto 涓嶅彲鐢ㄦ椂)
++  // 缂佸牊鐎?fallback: 閺冄冪杽閻?(娴犲懎婀?crypto 娑撳秴褰查悽銊︽)
+   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+     const r = (Math.random() * 16) | 0
+     const v = c === 'x' ? r : (r & 0x3) | 0x8
+@@ -113,29 +113,42 @@ function generateTraceId() {
+ }
+ 
+ // ---------------------------------------------------------------------------
+-// In-flight 璇锋眰鍘婚噸 (FR-017)
+-// 鐩稿悓 GET 璇锋眰骞跺彂鏃跺鐢ㄥ悓涓€涓?Promise锛岄伩鍏嶉噸澶嶇綉缁滆姹?+// In-flight 鐠囬攱鐪伴崢濠氬櫢 (FR-017)
++// 閻╃鎮?GET 鐠囬攱鐪伴獮璺哄絺閺冭泛顦查悽銊ユ倱娑撯偓娑?Promise閿涘矂浼╅崗宥夊櫢婢跺秶缍夌紒婊嗩嚞濮?
+ // ---------------------------------------------------------------------------
++// [FR-007] inflight 鍘婚噸缂撳瓨锛?0s 瓒呮椂 GC
++// 缁撴瀯锛歁ap<cacheKey, {promise, createdAt}>
+ const inflightCache = new Map()
++const INFLIGHT_TIMEOUT_MS = 30000
++let inflightEvictedCount = 0  // 鎸囨爣锛氳秴鏃?evict 娆℃暟
++
++function evictStaleInflight(now = Date.now()) {
++  for (const [key, entry] of inflightCache.entries()) {
++    if (now - entry.createdAt > INFLIGHT_TIMEOUT_MS) {
++      inflightCache.delete(key)
++      inflightEvictedCount += 1
++    }
++  }
++}
+ 
+ /**
+- * 鎶?options.params 搴忓垪鍖栦负 query string 骞舵嫾鍒?URL 涓?+ * 閹?options.params 鎼村繐鍨崠鏍﹁礋 query string 楠炶埖瀚鹃崚?URL 娑?
+  *
+- * [FIX-2026-06-08] 淇 loadConditionRules 涓嶄紶 role_id 鐨勫叏灞€ bug
+- *   - 涔嬪墠 URL 鐩存帴 = `${baseUrl}${path}`, 瀹屽叏蹇界暐 options.params
+- *   - 鐜板湪: 鎶?params 鎷兼垚 query string, 璺宠繃 null/undefined, 鐢?URLSearchParams 鍋氭纭紪鐮?- *   - 褰卞搷: 13+ 涓?API 鎺ュ彛 (permissionService, filterVariant, annotation 绛?
++ * [FIX-2026-06-08] 娣囶喖顦?loadConditionRules 娑撳秳绱?role_id 閻ㄥ嫬鍙忕仦鈧?bug
++ *   - 娑斿澧?URL 閻╁瓨甯?= `${baseUrl}${path}`, 鐎瑰苯鍙忚箛鐣屾殣 options.params
++ *   - 閻滄澘婀? 閹?params 閹峰吋鍨?query string, 鐠哄疇绻?null/undefined, 閻?URLSearchParams 閸嬫碍顒滅涵顔剧椽閻?
++ *   - 瑜板崬鎼? 13+ 娑?API 閹恒儱褰?(permissionService, filterVariant, annotation 缁?
+  *
+- * 琛屼负:
+- *   - 鏃?params / 绌哄璞?鈫?杩斿洖 baseUrl + path (涓嶅姞 `?`)
+- *   - 鏈夊€煎弬鏁?鈫?鎷兼垚 ?k1=v1&k2=v2 (URL 缂栫爜)
+- *   - null / undefined 鍊?鈫?璺宠繃
+- *   - 鏁扮粍 / 瀵硅薄 鈫?杞负 JSON 瀛楃涓?(閬垮厤姝т箟)
++ * 鐞涘奔璐?
++ *   - 閺?params / 缁屽搫顕挒?閳?鏉╂柨娲?baseUrl + path (娑撳秴濮?`?`)
++ *   - 閺堝鈧厧寮弫?閳?閹峰吋鍨??k1=v1&k2=v2 (URL 缂傛牜鐖?
++ *   - null / undefined 閸?閳?鐠哄疇绻?+ *   - 閺佹壆绮?/ 鐎电钖?閳?鏉烆兛璐?JSON 鐎涙顑佹稉?(闁灝鍘ゅ褌绠?
+  *
+- * @param {string} baseUrl - 濡?'/api/v1'
+- * @param {string} path - 濡?'/permission-rules'
+- * @param {object|undefined} params - 濡?{ role_id: 1803, page: 1 }
+- * @returns {string} - 瀹屾暣 URL, 濡?'/api/v1/permission-rules?role_id=1803'
++ * @param {string} baseUrl - 婵?'/api/v1'
++ * @param {string} path - 婵?'/permission-rules'
++ * @param {object|undefined} params - 婵?{ role_id: 1803, page: 1 }
++ * @returns {string} - 鐎瑰本鏆?URL, 婵?'/api/v1/permission-rules?role_id=1803'
+  */
+ function buildUrlWithParams(baseUrl, path, params) {
+   if (!params || typeof params !== 'object' || Object.keys(params).length === 0) {
+@@ -145,16 +158,16 @@ function buildUrlWithParams(baseUrl, path, params) {
+   for (const [k, v] of Object.entries(params)) {
+     if (v === undefined || v === null) continue
+     if (Array.isArray(v)) {
+-      // [FIX-2026-06-08] 鏁扮粍: 灞曞紑涓哄悓鍚嶅娆″弬鏁?-      //   filter_product_id: [18, 19] 鈫??filter_product_id=18&filter_product_id=19
+-      //   鍚庣 Flask request.args.getlist() 瑙ｆ瀽, 鐢ㄤ簬 SQL IN
+-      //   涔嬪墠 JSON.stringify() 閿欒, getlist() 鎷垮埌 ['"[18,19]"'] 鏃犳硶 IN 鍖归厤
++      // [FIX-2026-06-08] 閺佹壆绮? 鐏炴洖绱戞稉鍝勬倱閸氬秴顦垮▎鈥冲棘閺?
++      //   filter_product_id: [18, 19] 閳??filter_product_id=18&filter_product_id=19
++      //   閸氬海顏?Flask request.args.getlist() 鐟欙絾鐎? 閻劋绨?SQL IN
++      //   娑斿澧?JSON.stringify() 闁挎瑨顕? getlist() 閹峰灝鍩?['"[18,19]"'] 閺冪姵纭?IN 閸栧綊鍘?       for (const item of v) {
+         if (item === undefined || item === null || item === '') continue
+         qs.append(k, String(item))
+       }
+     } else if (typeof v === 'object') {
+-      // 鏅€氬璞?鈫?JSON 瀛楃涓?+      // 閺咁噣鈧艾顕挒?閳?JSON 鐎涙顑佹稉?
+       qs.append(k, JSON.stringify(v))
+     } else {
+       qs.append(k, String(v))
+@@ -165,9 +178,9 @@ function buildUrlWithParams(baseUrl, path, params) {
+ }
+ 
+ /**
+- * 鐢熸垚鍘婚噸缂撳瓨 key
+- * GET /api/v1/users 鈫?"GET:/api/v1/users:"
+- * POST 涓嶅弬涓庡幓閲?+ * 閻㈢喐鍨氶崢濠氬櫢缂傛挸鐡?key
++ * GET /api/v1/users 閳?"GET:/api/v1/users:"
++ * POST 娑撳秴寮稉搴″箵闁?
+  */
+ function getCacheKey(method, url, body) {
+   const bodyStr = body ? JSON.stringify(body) : ''
+@@ -175,52 +188,56 @@ function getCacheKey(method, url, body) {
+ }
+ 
+ // ---------------------------------------------------------------------------
+-// 鏍稿績璇锋眰鍑芥暟
++// 閺嶇绺剧拠閿嬬湴閸戣姤鏆? // ---------------------------------------------------------------------------
+ const SLOW_REQUEST_THRESHOLD_MS = 1000
+ 
+ /**
+- * 缁熶竴璇锋眰鍏ュ彛
+- * @param {string} method - HTTP 鏂规硶
+- * @param {string} baseUrl - API 鍩虹璺緞 (API_BASE 鎴?API_BASE_V2)
+- * @param {string} path - 璇锋眰璺緞 (濡?'/users')
++ * 缂佺喍绔寸拠閿嬬湴閸忋儱褰?+ * @param {string} method - HTTP 閺傝纭?+ * @param {string} baseUrl - API 閸╄櫣顢呯捄顖氱窞 (API_BASE 閹?API_BASE_V2)
++ * @param {string} path - 鐠囬攱鐪扮捄顖氱窞 (婵?'/users')
+  * @param {object} [options]
+- * @param {object} [options.body] - 璇锋眰浣?(POST/PUT/PATCH锛屾敮鎸?FormData)
+- * @param {object} [options.headers] - 棰濆璇锋眰澶?- * @param {number} [options.timeout] - 璇锋眰瓒呮椂 (ms)
+- * @param {AbortSignal} [options.signal] - 鍙栨秷淇″彿
+- * @param {'json'|'blob'} [options.responseType='json'] - 鍝嶅簲绫诲瀷 (blob 鐢ㄤ簬鏂囦欢涓嬭浇)
+- * @param {object} [options.authStore] - 璁よ瘉 store 瀹炰緥 (鍙€夛紝榛樿鑷姩鑾峰彇)
+- * @param {boolean} [options.dedupe] - GET 璇锋眰鍘婚噸 (榛樿 true锛岃 false 璺宠繃)
++ * @param {object} [options.body] - 鐠囬攱鐪版担?(POST/PUT/PATCH閿涘本鏁幐?FormData)
++ * @param {object} [options.headers] - 妫版繂顦荤拠閿嬬湴婢?
++ * @param {number} [options.timeout] - 鐠囬攱鐪扮搾鍛 (ms)
++ * @param {AbortSignal} [options.signal] - 閸欐牗绉锋穱鈥冲娇
++ * @param {'json'|'blob'} [options.responseType='json'] - 閸濆秴绨茬猾璇茬€?(blob 閻劋绨弬鍥︽娑撳娴?
++ * @param {object} [options.authStore] - 鐠併倛鐦?store 鐎圭偘绶?(閸欘垶鈧绱濇妯款吇閼奉亜濮╅懢宄板絿)
++ * @param {boolean} [options.dedupe] - GET 鐠囬攱鐪伴崢濠氬櫢 (姒涙顓?true閿涘矁顔?false 鐠哄疇绻?
+  * @returns {Promise<{success: boolean, data: any, message: string, code?: string, httpStatus?: number, traceId: string}>}
+  */
+ async function request(method, baseUrl, path, options = {}) {
+   const traceId = generateTraceId()
+   const startTime = Date.now()
+-  // [FIX-2026-06-08] 灏?options.params 搴忓垪鍖栦负 query string 鎷煎埌 URL 涓?-  //   鍘熷洜: 涔嬪墠鐩存帴鐢?`${baseUrl}${path}` 鏋勯€?URL, 瀵艰嚧鎵€鏈?{ params: {...} } 鍙傛暟琚涪寮?
+-  //   loadConditionRules({ role_id: 1803 }) 瀹為檯璇锋眰鍙樻垚 GET /permission-rules (鏃?query),
+-  //   鍚庣璧?get_all_rules() 鍒嗘敮杩斿洖鍏ㄩ儴 39 鏉¤鍒? 浠绘剰瑙掕壊閮界湅鍒板悓鏍风殑 10+ 鏉?domain 瑙勫垯.
++  // [FIX-2026-06-08] 鐏?options.params 鎼村繐鍨崠鏍﹁礋 query string 閹风厧鍩?URL 娑?
++  //   閸樼喎娲? 娑斿澧犻惄瀛樺复閻?`${baseUrl}${path}` 閺嬪嫰鈧?URL, 鐎佃壈鍤ч幍鈧張?{ params: {...} } 閸欏倹鏆熺悮顐℃丢瀵?
++  //   loadConditionRules({ role_id: 1803 }) 鐎圭偤妾拠閿嬬湴閸欐ɑ鍨?GET /permission-rules (閺?query),
++  //   閸氬海顏挧?get_all_rules() 閸掑棙鏁潻鏂挎礀閸忋劑鍎?39 閺壜ゎ潐閸? 娴犵粯鍓扮憴鎺曞闁晫婀呴崚鏉挎倱閺嶉娈?10+ 閺?domain 鐟欏嫬鍨?
+   const url = buildUrlWithParams(baseUrl, path, options.params)
+ 
+-  // [FR-017] In-flight 鍘婚噸: GET 璇锋眰榛樿鍘婚噸
++  // [FR-017] In-flight 閸樺鍣? GET 鐠囬攱鐪版妯款吇閸樺鍣?   const shouldDedupe = method === 'GET'
+     && options.dedupe !== false
+     && !options.signal
+     && options.responseType !== 'blob'
+ 
+   if (shouldDedupe) {
++    // 姣忔 dedupe 鍏ュ彛鍏?GC 涓€娆★紙鏋佸揩 O(N)锛?+    evictStaleInflight()
++
+     // 娉ㄦ剰: cache key 蹇呴』鐢ㄥ惈 query 鐨勫畬鏁?URL,
+-    // 鍚﹀垯 GET /users?page=1 鍜?GET /users?page=2 浼氳閿欒鍘婚噸鎴愬悓涓€娆¤姹?
++    // 鍚﹀垯 GET /users?page=1 鍜?GET /users?page=2 浼氳閿欒鍘婚噸鎴愬悓涓€娆¤姹?     const cacheKey = getCacheKey(method, url, options.body)
+     const existing = inflightCache.get(cacheKey)
+     if (existing) {
++      // 浠嶇劧杩斿洖宸插瓨鍦ㄧ殑 promise锛堜笉绠″畠鏄惁瓒呮椂锛岃皟鐢ㄦ柟浼氳嚜宸卞鐞嗭級
+       logger.debug(`[httpClient] Deduped request: ${method} ${url} (traceId=${traceId})`)
+-      return existing
++      return existing.promise
+     }
+     // 鍒涘缓 Promise 骞剁紦瀛橈紝纭繚鑷韩鍜屽悗缁苟鍙戣姹傛嬁鍒板悓涓€涓紩鐢?     const promise = _doRequest(method, url, options, traceId, startTime)
+-    inflightCache.set(cacheKey, promise)
++    inflightCache.set(cacheKey, { promise, createdAt: Date.now() })
+     try {
+       const result = await promise
+       return result
+@@ -233,25 +250,25 @@ async function request(method, baseUrl, path, options = {}) {
+ }
+ 
+ /**
+- * 瀹為檯鎵ц璇锋眰 (浠?request() 鎶藉嚭锛屼緵鍘婚噸閫昏緫澶嶇敤)
++ * 鐎圭偤妾幍褑顢戠拠閿嬬湴 (娴?request() 閹惰棄鍤敍灞肩返閸樺鍣搁柅鏄忕帆婢跺秶鏁?
+  */
+ async function _doRequest(method, url, options, traceId, startTime) {
+ 
+-  // 鑾峰彇 authStore (浼樺厛浣跨敤浼犲叆鐨勶紝鍚﹀垯鑷姩鑾峰彇)
++  // 閼惧嘲褰?authStore (娴兼ê鍘涙担璺ㄦ暏娴肩姴鍙嗛惃鍕剁礉閸氾箑鍨懛顏勫З閼惧嘲褰?
+   const authStore = options.authStore || useAuthStore()
+ 
+-  // 鏋勫缓 headers
++  // 閺嬪嫬缂?headers
+   const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData
+   const headers = {
+     ...getHeaders(authStore),
+     ...options.headers,
+   }
+-  // FormData: 绉婚櫎 Content-Type锛岃娴忚鍣ㄨ嚜鍔ㄨ缃?multipart/form-data boundary
++  // FormData: 缁夊娅?Content-Type閿涘矁顔€濞村繗顫嶉崳銊ㄥ殰閸斻劏顔曠純?multipart/form-data boundary
+   if (isFormData) {
+     delete headers['Content-Type']
+   }
+ 
+-  // 鏋勫缓 fetch options
++  // 閺嬪嫬缂?fetch options
+   const fetchOptions = {
+     method,
+     headers,
+@@ -268,7 +285,7 @@ async function _doRequest(method, url, options, traceId, startTime) {
+     fetchOptions.signal = options.signal
+   }
+ 
+-  // timeout: 閫氳繃 AbortController 瀹炵幇
++  // timeout: 闁俺绻?AbortController 鐎圭偟骞?   let timeoutId = null
+   let controller = null
+   if (options.timeout && !options.signal) {
+@@ -277,29 +294,29 @@ async function _doRequest(method, url, options, traceId, startTime) {
+     timeoutId = setTimeout(() => controller.abort(), options.timeout)
+   }
+ 
+-  // 鎵ц璇锋眰鎷︽埅鍣?+  // 閹笛嗩攽鐠囬攱鐪伴幏锔藉焻閸?
+   for (const interceptor of requestInterceptors) {
+-    try { interceptor(url, fetchOptions) } catch (_) { /* ignore */ }
++    try { interceptor(url, fetchOptions) } catch (e) { logger.error('[httpClient.requestInterceptor] failed:', e) }
+   }
+ 
+   let resp
+   try {
+     resp = await fetch(url, fetchOptions)
+   } catch (e) {
+-    // 鍖哄垎 abort / timeout / network error
++    // 閸栧搫鍨?abort / timeout / network error
+     const isAbort = e instanceof DOMException && e.name === 'AbortError'
+     const isTimeout = isAbort && timeoutId !== null
+ 
+     const result = {
+       success: false,
+       data: null,
+-      message: isTimeout ? '璇锋眰瓒呮椂' : (isAbort ? '璇锋眰宸插彇娑? : '缃戠粶閿欒'),
++      message: isTimeout ? '鐠囬攱鐪扮搾鍛' : (isAbort ? '鐠囬攱鐪板鎻掑絿濞? : '缂冩垹绮堕柨娆掝嚖'),
+       code: isTimeout ? ErrorCode.ERR_TIMEOUT : (isAbort ? ErrorCode.ERR_ABORT : ErrorCode.ERR_NETWORK),
+       traceId,
+     }
+ 
+     for (const interceptor of responseInterceptors) {
+-      try { interceptor(result) } catch (_) { /* ignore */ }
++      try { interceptor(result) } catch (e) { logger.error('[httpClient.responseInterceptor] failed:', e) }
+     }
+ 
+     return result
+@@ -307,14 +324,14 @@ async function _doRequest(method, url, options, traceId, startTime) {
+     if (timeoutId) clearTimeout(timeoutId)
+   }
+ 
+-  // 鎱㈣姹傛棩蹇?+  // 閹便垼顕Ч鍌涙）韫?
+   const elapsed = Date.now() - startTime
+   if (elapsed > SLOW_REQUEST_THRESHOLD_MS) {
+-    // [FR-001] 鏇挎崲 console.warn 鈫?logger.warn
++    // [FR-001] 閺囨寧宕?console.warn 閳?logger.warn
+     logger.warn(`[httpClient] Slow request: ${method} ${url} took ${elapsed}ms (traceId=${traceId})`)
+   }
+ 
+-  // 401 澶勭悊
++  // 401 婢跺嫮鎮?   if (resp.status === 401) {
+     if (onUnauthorizedCallback) {
+       onUnauthorizedCallback()
+@@ -322,29 +339,29 @@ async function _doRequest(method, url, options, traceId, startTime) {
+     const result = {
+       success: false,
+       data: null,
+-      message: '鏈巿鏉冿紝璇烽噸鏂扮櫥褰?,
++      message: '閺堫亝宸块弶鍐跨礉鐠囩兘鍣搁弬鎵瑜?,
+       code: ErrorCode.ERR_401_UNAUTHORIZED,
+       httpStatus: 401,
+       traceId,
+     }
+     for (const interceptor of responseInterceptors) {
+-      try { interceptor(result) } catch (_) { /* ignore */ }
++      try { interceptor(result) } catch (e) { logger.error('[httpClient.responseInterceptor] failed:', e) }
+     }
+     return result
+   }
+ 
+-  // 瑙ｆ瀽鍝嶅簲
++  // 鐟欙絾鐎介崫宥呯安
+   const responseType = options.responseType || 'json'
+ 
+-  // Blob 鍝嶅簲 (鏂囦欢涓嬭浇)
++  // Blob 閸濆秴绨?(閺傚洣娆㈡稉瀣祰)
+   if (responseType === 'blob') {
+     if (!resp.ok) {
+-      // 灏濊瘯瑙ｆ瀽 JSON 閿欒淇℃伅
+-      let errorMsg = `璇锋眰澶辫触: ${resp.status}`
++      // 鐏忔繆鐦憴锝嗙€?JSON 闁挎瑨顕ゆ穱鈩冧紖
++      let errorMsg = `鐠囬攱鐪版径杈Е: ${resp.status}`
+       try {
+         const errBody = await resp.json()
+         errorMsg = errBody.message || errorMsg
+-      } catch (_) { /* ignore */ }
++      } catch (e) { logger.warn('[httpClient] errBody.json() failed:', e) }
+       const errorCode = HTTP_STATUS_TO_ERROR_CODE[resp.status] || ErrorCode.ERR_UNKNOWN
+       const result = {
+         success: false,
+@@ -355,7 +372,7 @@ async function _doRequest(method, url, options, traceId, startTime) {
+         traceId,
+       }
+       for (const interceptor of responseInterceptors) {
+-        try { interceptor(result) } catch (_) { /* ignore */ }
++        try { interceptor(result) } catch (e) { logger.error('[httpClient.responseInterceptor] failed:', e) }
+       }
+       return result
+     }
+@@ -367,7 +384,7 @@ async function _doRequest(method, url, options, traceId, startTime) {
+       traceId,
+     }
+     for (const interceptor of responseInterceptors) {
+-      try { interceptor(result) } catch (_) { /* ignore */ }
++      try { interceptor(result) } catch (e) { logger.error('[httpClient.responseInterceptor] failed:', e) }
+     }
+     return result
+   }
+@@ -376,51 +393,51 @@ async function _doRequest(method, url, options, traceId, startTime) {
+   let body
+   try {
+     body = await resp.json()
+-  } catch (_) {
++  } catch (e) { logger.warn('[httpClient] body.json() failed:', e)
+     const result = {
+       success: false,
+       data: null,
+-      message: `鍝嶅簲瑙ｆ瀽澶辫触 (status=${resp.status})`,
++      message: `閸濆秴绨茬憴锝嗙€芥径杈Е (status=${resp.status})`,
+       code: ErrorCode.ERR_PARSE,
+       httpStatus: resp.status,
+       traceId,
+     }
+     for (const interceptor of responseInterceptors) {
+-      try { interceptor(result) } catch (_) { /* ignore */ }
++      try { interceptor(result) } catch (e) { logger.error('[httpClient.responseInterceptor] failed:', e) }
+     }
+     return result
+   }
+ 
+-  // 闈?2xx
++  // 闂?2xx
+   if (!resp.ok) {
+     const errorCode = HTTP_STATUS_TO_ERROR_CODE[resp.status] || ErrorCode.ERR_UNKNOWN
+     const result = {
+       success: false,
+       data: body.data || body.errors || null,
+-      message: body.message || `璇锋眰澶辫触: ${resp.status}`,
++      message: body.message || `鐠囬攱鐪版径杈Е: ${resp.status}`,
+       code: errorCode,
+       httpStatus: resp.status,
+       traceId,
+     }
+-    // 鍏煎鏃?_handleResponse: errors 淇濇寔鍦ㄩ《灞傦紙useBOApi/useMetaList 渚濊禆 result.errors锛?+    // 閸忕厧顔愰弮?_handleResponse: errors 娣囨繃瀵旈崷銊┿€婄仦鍌︾礄useBOApi/useMetaList 娓氭繆绂?result.errors閿?
+     if (body.errors) {
+       result.errors = body.errors
+     }
+-    // 鍏煎鏃?_handleResponse: error_code 淇濇寔鍦ㄩ《灞傦紙boCrudService deepInsert 渚濊禆锛?+    // 閸忕厧顔愰弮?_handleResponse: error_code 娣囨繃瀵旈崷銊┿€婄仦鍌︾礄boCrudService deepInsert 娓氭繆绂嗛敍?
+     if (body.error_code) {
+       result.error_code = body.error_code
+     }
+     for (const interceptor of responseInterceptors) {
+-      try { interceptor(result) } catch (_) { /* ignore */ }
++      try { interceptor(result) } catch (e) { logger.error('[httpClient.responseInterceptor] failed:', e) }
+     }
+     return result
+   }
+ 
+-  // 鎴愬姛
+-  // [FIX 2026-06-12] 鍗充娇鏄?2xx 涔熻淇濈暀 errors / message, 璁?batch-delete (207 Multi-Status)
+-  // 涔嬬被"閮ㄥ垎澶辫触"鍝嶅簲鑳藉湪鍓嶇 useMetaList.handleBatchDelete 鐪嬪埌鍏蜂綋閿欒銆?-  // 涔嬪墠 bug: 207 璧版垚鍔熷垎鏀? result.errors / body.message 閮芥病淇濈暀,
+-  // 鍓嶇 result.errors 涓?undefined, 璧板厹搴?鍒犻櫎澶辫触'鍥涗釜瀛? 鐢ㄦ埛鐪嬩笉鍒板叿浣撳師鍥犮€?+  // 閹存劕濮?+  // [FIX 2026-06-12] 閸楀厖濞囬弰?2xx 娑旂喕顩︽穱婵堟殌 errors / message, 鐠?batch-delete (207 Multi-Status)
++  // 娑斿琚?闁劌鍨庢径杈Е"閸濆秴绨查懗钘夋躬閸撳秶顏?useMetaList.handleBatchDelete 閻鍩岄崗铚傜秼闁挎瑨顕ら妴?
++  // 娑斿澧?bug: 207 鐠х増鍨氶崝鐔峰瀻閺€? result.errors / body.message 闁姤鐥呮穱婵堟殌,
++  // 閸撳秶顏?result.errors 娑?undefined, 鐠ф澘鍘规惔?閸掔娀娅庢径杈Е'閸ユ稐閲滅€? 閻劍鍩涢惇瀣╃瑝閸掓澘鍙挎担鎾冲斧閸ョ姰鈧€?   const result = {
+     success: body.success !== undefined ? body.success : true,
+     data: body.data !== undefined ? body.data : body,
+@@ -435,14 +452,14 @@ async function _doRequest(method, url, options, traceId, startTime) {
+   }
+ 
+   for (const interceptor of responseInterceptors) {
+-    try { interceptor(result) } catch (_) { /* ignore */ }
++    try { interceptor(response) } catch (e) { logger.error('[httpClient.responseInterceptor] failed:', e) }
+   }
+ 
+   return result
+ }
+ 
+ // ---------------------------------------------------------------------------
+-// 鍛藉悕绌洪棿瀵煎嚭: apiV1 / apiV2
++// 閸涜棄鎮曠粚娲？鐎电厧鍤? apiV1 / apiV2
+ // ---------------------------------------------------------------------------
+ function createNamespace(baseUrl) {
+   return {
+@@ -462,9 +479,9 @@ function createNamespace(baseUrl) {
+       return request('PATCH', baseUrl, path, { ...options, body })
+     },
+     /**
+-     * 涓嬭浇鏂囦欢 (GET + responseType:'blob')
+-     * @param {string} path - 璇锋眰璺緞
+-     * @param {object} [options] - 鍚?request options
++     * 娑撳娴囬弬鍥︽ (GET + responseType:'blob')
++     * @param {string} path - 鐠囬攱鐪扮捄顖氱窞
++     * @param {object} [options] - 閸?request options
+      * @returns {Promise<{success: boolean, data: Blob|null, message: string, traceId: string}>}
+      */
+     download(path, options) {
+@@ -477,31 +494,36 @@ export const apiV1 = createNamespace(API_BASE)
+ export const apiV2 = createNamespace(API_BASE_V2)
+ 
+ // ---------------------------------------------------------------------------
+-// In-flight 缂撳瓨绠＄悊 (FR-017)
++// In-flight 缂傛挸鐡ㄧ粻锛勬倞 (FR-017)
+ // ---------------------------------------------------------------------------
+ 
+ /**
+- * 娓呯┖ in-flight 鍘婚噸缂撳瓨 (鐢ㄤ簬娴嬭瘯鎴栬矾鐢卞垏鎹㈡椂娓呯悊)
++ * 濞撳懐鈹?in-flight 閸樺鍣哥紓鎾崇摠 (閻劋绨ù瀣槸閹存牞鐭鹃悽鍗炲瀼閹广垺妞傚〒鍛倞)
+  */
+ export function clearInflightCache() {
+   inflightCache.clear()
+ }
+ 
+ /**
+- * 鑾峰彇褰撳墠 in-flight 璇锋眰鏁伴噺 (鐢ㄤ簬鐩戞帶/璋冭瘯)
++ * 閼惧嘲褰囪ぐ鎾冲 in-flight 鐠囬攱鐪伴弫浼村櫤 (閻劋绨惄鎴炲付/鐠嬪啳鐦?
+  */
+ export function getInflightCount() {
+   return inflightCache.size
+ }
+ 
++// [FR-007] 鎸囨爣锛氳秴鏃?evict 娆℃暟
++export function getInflightEvictedCount() {
++  return inflightEvictedCount
++}
++
+ // ---------------------------------------------------------------------------
+-// 鏂囦欢涓嬭浇宸ュ叿
++// 閺傚洣娆㈡稉瀣祰瀹搞儱鍙? // ---------------------------------------------------------------------------
+ 
+ /**
+- * 瑙﹀彂娴忚鍣ㄤ笅杞?Blob 鏂囦欢
+- * @param {Blob} blob - 鏂囦欢 Blob
+- * @param {string} filename - 涓嬭浇鏂囦欢鍚?+ * 鐟欙箑褰傚ù蹇氼潔閸ｃ劋绗呮潪?Blob 閺傚洣娆?+ * @param {Blob} blob - 閺傚洣娆?Blob
++ * @param {string} filename - 娑撳娴囬弬鍥︽閸?
+  */
+ export function downloadBlob(blob, filename) {
+   const url = window.URL.createObjectURL(blob)
+@@ -517,3 +539,4 @@ export function downloadBlob(blob, filename) {
+ }
+ 
+ export default { apiV1, apiV2 }
++

@@ -12,8 +12,8 @@
       sidebar-width="320px"
       :sidebar-collapsible="true"
       :sidebar-collapsed="sidebarCollapsed"
-      min-width="240px"
-      max-width="480px"
+      :min-width="240"
+      :max-width="800"
       @collapse-change="handleSidebarCollapse"
     >
       <template #master>

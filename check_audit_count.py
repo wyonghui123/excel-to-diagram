@@ -1,0 +1,11 @@
+import sqlite3
+conn = sqlite3.connect('meta/architecture.db')
+cur = conn.cursor()
+cur.execute("SELECT COUNT(*) FROM audit_logs WHERE object_type='domain' AND object_id=1")
+print(f"object_type=domain AND object_id=1: {cur.fetchone()[0]}")
+cur.execute("SELECT COUNT(*) FROM audit_logs WHERE parent_object_id=1")
+print(f"parent_object_id=1: {cur.fetchone()[0]}")
+cur.execute("SELECT COUNT(*) FROM audit_logs WHERE (object_type='domain' AND object_id=1) OR (parent_object_id=1)")
+print(f"OR: {cur.fetchone()[0]}")
+cur.execute("SELECT COUNT(*) FROM audit_logs WHERE (object_type='domain' AND object_id=1) OR (parent_object_id='1')")
+print(f"OR with string '1': {cur.fetchone()[0]}")

@@ -1,0 +1,128 @@
+{
+  "diag": {
+    "svg": {
+      "rect": {
+        "x": 33,
+        "y": 232,
+        "w": 1534,
+        "h": 735
+      },
+      "viewBox": {
+        "x": -28,
+        "y": -15.5,
+        "w": 5308.984375,
+        "h": 2105.66650390625
+      },
+      "scaleX": 0.2889441542197042,
+      "scaleY": 0.3490581241789674
+    },
+    "edgeLabel": {
+      "transform": "translate(666.671875, 579)",
+      "rect": {
+        "x": 82.74827575683594,
+        "y": 435.32635498046875,
+        "w": 66.321044921875,
+        "h": 8.37738037109375
+      },
+      "centerSvg": {
+        "x": 666.671875,
+        "y": 579
+      },
+      "centerVp": {
+        "x": 233.72137738209108,
+        "y": 439.51505482439615
+      }
+    },
+    "gLabel": {
+      "transform": "translate(-95, -11.999979073397157)",
+      "rect": {
+        "x": 82.74827575683594,
+        "y": 435.32635498046875,
+        "w": 66.321044921875,
+        "h": 8.37738037109375
+      }
+    },
+    "foreignObject": {
+      "x": "0",
+      "y": "0",
+      "width": "190",
+      "height": "24",
+      "rect": {
+        "x": 82.74827575683594,
+        "y": 435.32635498046875,
+        "w": 66.321044921875,
+        "h": 8.37738037109375
+      }
+    },
+    "labelBkg": {
+      "rect": {
+        "x": 82.74827575683594,
+        "y": 435.32635498046875,
+        "w": 64.59757995605469,
+        "h": 8.37738037109375
+      },
+      "centerVp": {
+        "x": 115.04706573486328,
+        "y": 439.5150451660156
+      },
+      "textContent": "BO_SUPPLIER_BO_REQ_01"
+    },
+    "path": {
+      "d": "M528.640625,579L544.140625,579L789.203125,579L804.703125,579",
+      "midSvg": {
+        "x": 666.671875,
+        "y": 579
+      },
+      "midVp": {
+        "x": 233.72137738209108,
+        "y": 439.51505482439615
+      },
+      "rect": {
+        "x": 67.72786712646484,
+        "y": 439.51507568359375,
+        "w": 96.36185455322266,
+        "h": 0
+      }
+    },
+    "diffLabelBkg_to_pathMid": {
+      "dx": -118.6743116472278,
+      "dy": -9.65838052024992e-06
+    },
+    "diffELabel_to_pathMid": {
+      "dx": 0,
+      "dy": 0
+    }
+  },
+  "logs": [
+    "[log] [updateNodeStyles] Processing label: nodeLabel  parent: ",
+    "[log] [updateNodeStyles] Processing label: nodeLabel  parent: ",
+    "[log] [updateNodeStyles] Processing label: nodeLabel  parent: ",
+    "[log] [updateNodeStyles] Processing label: nodeLabel  parent: ",
+    "[log] [updateNodeStyles] Processing label: nodeLabel  parent: ",
+    "[log] [updateNodeStyles] Processing label: nodeLabel  parent: ",
+    "[log] [updateNodeStyles] Processing label: nodeLabel  parent: ",
+    "[log] [updateNodeStyles] Processing label: nodeLabel  parent: ",
+    "[log] [updateNodeStyles] Processing label: nodeLabel  parent: ",
+    "[log] [updateNodeStyles] Processing label: nodeLabel  parent: ",
+    "[log] [updateNodeStyles] Processing label: nodeLabel  parent: ",
+    "[log] [updateNodeStyles] Processing label: nodeLabel  parent: ",
+    "[log] [updateNodeStyles] Processing label: nodeLabel  parent: ",
+    "[log] [updateNodeStyles] Processing label: nodeLabel  parent: ",
+    "[log] [updateNodeStyles] Processing label: nodeLabel  parent: ",
+    "[log] [updateNodeStyles] Processing label: nodeLabel  parent: ",
+    "[log] [updateNodeStyles] Processing label: nodeLabel  parent: ",
+    "[log] [updateNodeStyles] Processing label: nodeLabel  parent: ",
+    "[log] [updateNodeStyles] Processing label: nodeLabel  parent: ",
+    "[log] [updateNodeStyles] Processed nodes: 55",
+    "[log] [updateNodeStyles] Found text/tspan elements: 0",
+    "[log] [updateClusterStyles] textColorSetting: undefined -> clusterTextColor: #000000",
+    "[log] [updateClusterStyles] Found .cluster/.subgraph elements: 60",
+    "[log] [setupCanvasLayout] container: 1534 x 735 | wrapper: 1534px x 735px | draggable: 1534px x 735px | pre: 100% x 100% | svg: xMidYMid slice | containerEl.offset: 1534 x 735",
+    "[log] [v40.2 诊断] forceEdgeLabelToMidpoint: edgeLabels=%d 28",
+    "[log] [v40.2 诊断] forceEdgeLabelToMidpoint: edgePathEls=%d 0",
+    "[log] [v40.2 诊断] forceEdgeLabelToMidpoint DONE: success=%d, fail=%d 28 0",
+    "[log] [autoFitDiagram] container size: 1536 x 737",
+    "[log] [autoFitDiagram] fit: scale=1, translate=(0,0) (CSS auto-scales SVG to container)",
+    "[warning] [waitForRender] 最大重试次数已达，跳过回调"
+  ]
+}

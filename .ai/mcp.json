@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "trae-ide": {
+      "command": "python",
+      "args": [
+        "d:/filework/excel-to-diagram/.trae/scripts/mcp_ide_server.py",
+        "--port", "3020"
+      ],
+      "capabilities": [
+        "file_open",
+        "file_edit",
+        "terminal_run",
+        "terminal_watch",
+        "preview_html",
+        "status_bar_set",
+        "show_notification",
+        "show_dialog"
+      ],
+      "description": "TRAE IDE 集成 - 让 Skills 与 IDE Editor/Terminal/Preview/Status Bar 双向通信"
+    }
+  }
+}

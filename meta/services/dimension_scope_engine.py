@@ -243,6 +243,21 @@ class DimensionScopeEngine:
                             parts.append(
                                 f"{field} IN ({','.join(str(v) for v in vals)})"
                             )
+                    elif filter_type == 'fk_expanded':
+                        # [FIX 2026-06-16] 从父维度值向下查询子维度值，再用子维度 FK 过滤
+                        # 例: domain=703 → 查 sub_domains WHERE domain_id=703 → [138,139,146]
+                        # → service_modules WHERE sub_domain_id IN (138,139,146)
+                        child_ids = self._expand_down(dim_code, resource_type, vals)
+                        if child_ids:
+                            if len(child_ids) == 1:
+                                parts.append(f"{field} = {child_ids[0]}")
+                            else:
+                                parts.append(
+                                    f"{field} IN ({','.join(str(v) for v in sorted(child_ids))})"
+                                )
+                        else:
+                            # 没有子维度值 → 0 条可见
+                            parts.append("1 = 0")
                     elif filter_type == 'chain':
                         # 沿 HIERARCHY_CHAIN 追溯到顶层 dim 对应的外键
                         # 例: dimension=product, bo=domain, chain
@@ -364,6 +379,79 @@ class DimensionScopeEngine:
                 f"WHERE id IN ({inner})"
             )
         return f"{first_field} IN ({inner})"
+
+    def _expand_down(self, parent_dim: str, child_bo: str, parent_vals: List[int]) -> Optional[Set[int]]:
+        """[FIX 2026-06-16] 从父维度值向下查询，返回 child_bo 的 FK 字段应过滤的值
+
+        例: parent_dim='domain', child_bo='service_module', parent_vals=[703]
+          → 查 sub_domains WHERE domain_id IN (703) → {138, 139, 146}
+          → service_module 用 sub_domain_id IN (138, 139, 146) 过滤
+          返回 {138, 139, 146}
+        """
+        # FK 链: (parent_dim, child_table, fk_field_in_child_table)
+        # 每一步: 从 parent_dim 的 ID 查 child_table 中 fk_field 匹配的记录的 ID
+        FK_CHAIN = [
+            ('product', 'versions', 'product_id'),
+            ('version', 'domains', 'version_id'),
+            ('domain', 'sub_domains', 'domain_id'),
+            ('sub_domain', 'service_modules', 'sub_domain_id'),
+            ('service_module', 'business_objects', 'service_module_id'),
+        ]
+
+        # 找到 parent_dim 在 FK_CHAIN 中的起始位置
+        start_idx = None
+        for i, (dim, _, _) in enumerate(FK_CHAIN):
+            if dim == parent_dim:
+                start_idx = i
+                break
+
+        if start_idx is None:
+            return None
+
+        # 找到 child_bo 对应的 FK_CHAIN 位置
+        # FK_CHAIN[i] = (parent_dim, child_table, fk_field)
+        # child_bo 的表名 = child_bo + 's' (约定)
+        child_table_name = child_bo + 's' if not child_bo.endswith('s') else child_bo + 'es'
+        # 也检查 RESOURCE_TABLE_MAP
+        child_table_name = RESOURCE_TABLE_MAP.get(child_bo, child_table_name)
+
+        target_idx = None
+        for i, (dim, tbl, _) in enumerate(FK_CHAIN):
+            if tbl == child_table_name:
+                target_idx = i
+                break
+
+        if target_idx is None:
+            return None
+
+        # 从 parent_dim 逐步向下查询到 child_bo 的直接父维度
+        # 需要查询到 target_idx - 1 的位置（因为 child_bo 的 FK 指向 target_idx 对应的维度）
+        # 实际上需要查询到 target_idx，因为 FK_CHAIN[target_idx] 的 child_table 就是 child_bo 的表
+        # 而 FK_CHAIN[target_idx-1] 的 child_table 是 child_bo 的直接父表
+
+        # 我们需要的是 child_bo 的直接父维度的 ID 值
+        # 例: child_bo='service_module', 直接父维度='sub_domain'
+        # FK_CHAIN[3] = ('sub_domain', 'service_modules', 'sub_domain_id')
+        # 所以我们需要 sub_domain 的 ID 集合
+
+        # 从 start_idx 查询到 target_idx - 1
+        current_ids = set(parent_vals)
+        for i in range(start_idx, target_idx):
+            _, child_table, fk_field = FK_CHAIN[i]
+            if not current_ids:
+                return None
+            ph = ','.join('?' * len(current_ids))
+            try:
+                rows = self._ds.execute(
+                    f"SELECT id FROM {child_table} WHERE {fk_field} IN ({ph})",
+                    list(current_ids)
+                ).fetchall()
+                current_ids = {row[0] for row in rows}
+            except Exception as e:
+                logger.warning(f'[_expand_down] query failed: {e}')
+                return None
+
+        return current_ids if current_ids else None
 
     def derive_recommended_menus(self, role_id: int) -> List[str]:
         expanded = self.expand_dimension_values(role_id)

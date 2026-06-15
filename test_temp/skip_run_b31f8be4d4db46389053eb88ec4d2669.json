@@ -1,0 +1,13 @@
+{
+  "success": false,
+  "duration": 180.09,
+  "trace_id": "da5669fd729a453ba9714c4bae8a8884",
+  "exit_code": -1,
+  "port": 3010,
+  "cmd": "C:\\Users\\Administrator\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe -m pytest d:\\filework\\excel-to-diagram\\meta\\tests -n 0 -rs --tb=line",
+  "total": 14,
+  "passed": 6954,
+  "failed": 293,
+  "errors": 101,
+  "skipped": 246
+}
