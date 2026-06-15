@@ -168,6 +168,11 @@ ui_view_config:
         width: 80
         position: 4
         importance: medium
+      - key: owner_id_display
+        title: 负责人
+        width: 120
+        position: 5
+        importance: medium
       - key: child_count
         title: 版本数量
         width: 80
@@ -201,6 +206,7 @@ ui_view_config:
           - description
           - visibility
           - is_active
+          - owner_id
       - title: 系统信息
         type: fieldGroup
         fields:
