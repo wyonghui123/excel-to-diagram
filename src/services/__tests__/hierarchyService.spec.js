@@ -10,6 +10,7 @@ import {
   hasChildren,
   buildHierarchyFilterParams,
   buildRelationshipFilterParams,
+  buildAssociationFilterParams,
   getDescendantIds,
   collectIdsByTypeWithDescendants,
   collectAncestorIds,
@@ -318,6 +319,161 @@ describe('buildRelationshipFilterParams', () => {
     })
     expect(result.id__in).toBe('10,20')
     expect(Object.keys(result)).toHaveLength(1)
+  })
+})
+
+// [FIX 2026-06-15] buildAssociationFilterParams 新增 filterRelationCodes 行为
+describe('buildAssociationFilterParams', () => {
+  // 模拟 hierarchies.yaml 的 relationships.filter_mappings (hierarchy_scopes[relationships].filter_mappings)
+  const levels = [
+    {
+      object_type: 'relationship',
+      filter_mappings: [
+        { target_object: 'relationship', filter_field: 'relation_code', priority: 1, trigger: 'selected' },
+        { target_object: 'relationship', filter_field: 'category_types', priority: 2, trigger: 'effective' },
+        { target_object: 'relationship', filter_field: 'source_bo_id', priority: 3, trigger: 'entity_scope' },
+        { target_object: 'relationship', filter_field: 'target_bo_id', priority: 3, trigger: 'entity_scope' }
+      ]
+    }
+  ]
+
+  it('relationIds 存在时应优先用 id__in 精确过滤', () => {
+    const result = buildAssociationFilterParams({
+      levels,
+      scopeIds: {},
+      relationExtra: {
+        relationIds: [1, 2, 3],
+        relationCodes: ['GENERATES'],
+        categoryTypes: ['cross_domain'],
+        filterRelationCodes: ['UPDATES']
+      }
+    })
+    expect(result.id__in).toBe('1,2,3')
+    // id__in 精确过滤命中, 其它过滤都被覆盖
+    expect(result.relation_type__in).toBeUndefined()
+  })
+
+  it('relationCodes 选中时应映射到 relation_code__in', () => {
+    const result = buildAssociationFilterParams({
+      levels,
+      scopeIds: {},
+      relationExtra: {
+        relationIds: [],
+        relationCodes: ['GENERATES', 'UPDATES'],
+        categoryTypes: [],
+        filterRelationCodes: []
+      }
+    })
+    expect(result.relation_code__in).toBe('GENERATES,UPDATES')
+  })
+
+  // [FIX 2026-06-15] 之前 mappings.length > 0 分支完全忽略 filterRelationCodes
+  // 现在 filterRelationCodes 应映射到 relation_type__in, 让过滤面板的"关系类型"能真正过滤列表
+  it('filterRelationCodes 应映射到 relation_type__in (用户报的核心 bug)', () => {
+    const result = buildAssociationFilterParams({
+      levels,
+      scopeIds: {},
+      relationExtra: {
+        relationIds: [],
+        relationCodes: [],
+        categoryTypes: [],
+        filterRelationCodes: ['GENERATES', 'UPDATES']
+      }
+    })
+    expect(result.relation_type__in).toBe('GENERATES,UPDATES')
+  })
+
+  it('filterRelationCodes 与现有 relation_code__in 取并集', () => {
+    const result = buildAssociationFilterParams({
+      levels,
+      scopeIds: {},
+      relationExtra: {
+        relationIds: [],
+        relationCodes: ['GENERATES'],
+        categoryTypes: [],
+        filterRelationCodes: ['UPDATES', 'TRIGGERS']
+      }
+    })
+    // relation_code__in (旧字段, 来自关系范围树) 跟 relation_type__in (新字段, 来自过滤面板) 并存
+    expect(result.relation_code__in).toBe('GENERATES')
+    expect(result.relation_type__in).toBe('UPDATES,TRIGGERS')
+  })
+
+  it('filterRelationCodes 应去重 (与现有合并后)', () => {
+    const result = buildAssociationFilterParams({
+      levels,
+      scopeIds: {},
+      relationExtra: {
+        relationIds: [],
+        relationCodes: ['GENERATES'],
+        categoryTypes: [],
+        filterRelationCodes: ['GENERATES', 'UPDATES']
+      }
+    })
+    // 注: 这里 relation_code__in 和 relation_type__in 是不同字段, 所以不重复
+    expect(result.relation_code__in).toBe('GENERATES')
+    expect(result.relation_type__in).toBe('GENERATES,UPDATES')
+  })
+
+  it('应支持 source_bo_id / target_bo_id entity_scope 过滤', () => {
+    // 关系定义 source_entity=business_object, target_entity=business_object
+    const levelsWithEntity = [
+      {
+        object_type: 'relationship',
+        source_entity: 'business_object',
+        target_entity: 'business_object',
+        filter_mappings: levels[0].filter_mappings
+      }
+    ]
+    const result = buildAssociationFilterParams({
+      levels: levelsWithEntity,
+      scopeIds: {
+        business_object: { selected: [10, 20], effective: [] }
+      },
+      relationExtra: {
+        relationIds: [],
+        relationCodes: [],
+        categoryTypes: [],
+        filterRelationCodes: []
+      }
+    })
+    // 关系定义 source_entity=business_object, source_bo_id__in
+    // 同样 target_bo_id__in
+    expect(result.source_bo_id__in).toBe('10,20')
+  })
+
+  it('无 filter_mappings 时回退到 buildRelationshipFilterParams', () => {
+    // buildRelationshipFilterParams 中:
+    //   - filterRelationCodes 与 relationCodes 取交集
+    //   - ['GENERATES'] ∩ ['UPDATES'] = [], 交集为空 → 删除 relation_code__in
+    //   - 但 category_types__in 仍保留
+    const result = buildAssociationFilterParams({
+      levels: [{ object_type: 'relationship' }],
+      scopeIds: {},
+      relationExtra: {
+        relationIds: [],
+        relationCodes: ['GENERATES'],
+        categoryTypes: ['cross_domain'],
+        filterRelationCodes: ['UPDATES']
+      }
+    })
+    expect(result.relation_code__in).toBeUndefined() // 交集为空
+    expect(result.category_types__in).toBe('cross_domain')
+  })
+
+  it('无 filter_mappings 且 filterRelationCodes 与 relationCodes 有交集时, 应取交集', () => {
+    const result = buildAssociationFilterParams({
+      levels: [{ object_type: 'relationship' }],
+      scopeIds: {},
+      relationExtra: {
+        relationIds: [],
+        relationCodes: ['GENERATES', 'UPDATES'],
+        categoryTypes: [],
+        filterRelationCodes: ['UPDATES', 'TRIGGERS']
+      }
+    })
+    // ['GENERATES', 'UPDATES'] ∩ ['UPDATES', 'TRIGGERS'] = ['UPDATES']
+    expect(result.relation_code__in).toBe('UPDATES')
   })
 })
 

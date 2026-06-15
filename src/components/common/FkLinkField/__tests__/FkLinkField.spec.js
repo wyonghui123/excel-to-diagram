@@ -411,4 +411,152 @@ describe('FkLinkField', () => {
       expect(link.attributes('title')).toBe('打开 角色 详情')
     })
   })
+
+  describe('detailMode 属性与 navigate 事件', () => {
+    it('TC-FK-LINK-031: detailMode=page（默认）时渲染为 router-link', () => {
+      const wrapper = createWrapper({
+        value: 1,
+        targetObjectType: 'user'
+      })
+
+      // page 模式下渲染 router-link（stub 为 <a>）
+      const routerLink = wrapper.find('a.fk-link')
+      expect(routerLink.exists()).toBe(true)
+      expect(routerLink.attributes('href')).toBe('/detail/user/1')
+    })
+
+    it('TC-FK-LINK-032: detailMode=drawer 时渲染为普通 <a> 元素（非 router-link）', () => {
+      const wrapper = createWrapper({
+        value: 1,
+        targetObjectType: 'user',
+        detailMode: 'drawer'
+      })
+
+      // drawer 模式下不是 router-link，而是普通 <a>
+      const link = wrapper.find('a.fk-link')
+      expect(link.exists()).toBe(true)
+      // drawer 模式下不应有 href 属性（由事件处理导航）
+      expect(link.attributes('href')).toBeUndefined()
+    })
+
+    it('TC-FK-LINK-033: detailMode=drawer 时点击触发 navigate 事件', async () => {
+      const wrapper = createWrapper({
+        value: 42,
+        displayValue: 'Admin User',
+        targetObjectType: 'user',
+        detailMode: 'drawer'
+      })
+
+      const link = wrapper.find('a.fk-link')
+      await link.trigger('click')
+
+      expect(wrapper.emitted('navigate')).toBeTruthy()
+      expect(wrapper.emitted('navigate')[0][0]).toEqual({
+        objectType: 'user',
+        id: 42,
+        displayValue: 'Admin User'
+      })
+    })
+
+    it('TC-FK-LINK-034: detailMode=page 时点击不触发 navigate 事件', async () => {
+      const wrapper = createWrapper({
+        value: 1,
+        targetObjectType: 'user',
+        detailMode: 'page'
+      })
+
+      const link = wrapper.find('.fk-link')
+      await link.trigger('click')
+
+      expect(wrapper.emitted('navigate')).toBeFalsy()
+    })
+
+    it('TC-FK-LINK-035: detailMode=drawer + linkDisabled 时降级为纯文本', () => {
+      const wrapper = createWrapper({
+        value: 1,
+        targetObjectType: 'user',
+        detailMode: 'drawer',
+        linkDisabled: true
+      })
+
+      // linkDisabled 优先于 detailMode，渲染为 span
+      const link = wrapper.find('a.fk-link')
+      expect(link.exists()).toBe(false)
+      const disabled = wrapper.find('.fk-link--disabled')
+      expect(disabled.exists()).toBe(true)
+    })
+
+    it('TC-FK-LINK-036: navigate 事件包含正确的 objectType 和 id', async () => {
+      const wrapper = createWrapper({
+        value: 99,
+        displayValue: '采购管理',
+        targetObjectType: 'service_module',
+        detailMode: 'drawer'
+      })
+
+      const link = wrapper.find('a.fk-link')
+      await link.trigger('click')
+
+      const emitted = wrapper.emitted('navigate')[0][0]
+      expect(emitted.objectType).toBe('service_module')
+      expect(emitted.id).toBe(99)
+      expect(emitted.displayValue).toBe('采购管理')
+    })
+
+    it('TC-FK-LINK-037: detailMode 无效值时使用默认 page 模式', () => {
+      const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const wrapper = mount(FkLinkField, {
+        props: {
+          value: 1,
+          targetObjectType: 'user',
+          detailMode: 'invalid'
+        },
+        global: {
+          stubs: {
+            'router-link': {
+              template: '<a :href="to.path" class="fk-link"><slot /></a>',
+              props: ['to']
+            },
+            Promotion: { template: '<svg class="promotion-stub" />' }
+          }
+        }
+      })
+
+      // 无效值被 validator 拒绝，但组件仍渲染（Vue 警告而非崩溃）
+      const link = wrapper.find('.fk-link')
+      expect(link.exists()).toBe(true)
+      consoleWarn.mockRestore()
+    })
+  })
+
+  describe('FK 链接导航 ID 修复验证', () => {
+    it('TC-FK-LINK-038: 数字 ID 生成正确的导航路径（非 code）', async () => {
+      // 修复前：value 可能是 "BO_CUSTOMER"（code），导航到 /detail/business_object/BO_CUSTOMER → 404
+      // 修复后：value 是数字 ID（如 42），导航到 /detail/business_object/42 → 成功
+      const wrapper = createWrapper({
+        value: 42,
+        targetObjectType: 'business_object'
+      })
+
+      await nextTick()
+      const link = wrapper.find('.fk-link')
+      expect(link.attributes('href')).toBe('/detail/business_object/42')
+    })
+
+    it('TC-FK-LINK-039: drawer 模式下 navigate 事件传递数字 ID', async () => {
+      const wrapper = createWrapper({
+        value: 1,
+        displayValue: '采购需求',
+        targetObjectType: 'service_module',
+        detailMode: 'drawer'
+      })
+
+      const link = wrapper.find('a.fk-link')
+      await link.trigger('click')
+
+      const emitted = wrapper.emitted('navigate')[0][0]
+      expect(typeof emitted.id).toBe('number')
+      expect(emitted.id).toBe(1)
+    })
+  })
 })

@@ -36,7 +36,12 @@ const iconMap = {
   position: fixed;
   top: var(--spacing-lg);
   right: var(--spacing-lg);
-  z-index: var(--z-index-tour);
+  /* [FIX 2026-06-14] 与 el-message / el-notification 拉齐到 --z-index-max (9999)，
+   *   否则在 el-drawer / el-dialog 打开时 (默认 z-index 2000-3000) 自定义 toast
+   *   会被遮挡，用户看到"无声失败" (例如架构数据管理页 PUT /bo/domain/684 403)。
+   *   对齐方案：与 .el-message/.el-notification 走 --z-index-max 同一档位。
+   */
+  z-index: var(--z-index-max, 9999) !important;
   display: flex;
   flex-direction: column;
   gap: var(--spacing-sm);

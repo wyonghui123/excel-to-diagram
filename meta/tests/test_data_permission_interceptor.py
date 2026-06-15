@@ -256,3 +256,119 @@ class TestDataPermissionInterceptorExtended:
         assert result['field'] == 'count'
         assert result['operator'] == 'ne'
         assert result['value'] == '0'
+
+    # ============================================================
+    # Regression tests for: _parse_scope_expression must be
+    # parenthesis-aware when splitting top-level OR.
+    #
+    # 背景 (BMRD-2026-06-14, BugID: TEST888-version-invisible):
+    #   原实现用 re.split(r'\s+OR\s+', ...) 在子查询里也会切 OR,
+    #   导致 ``product_id IN (SELECT id FROM products WHERE
+    #   visibility = 'public' OR owner_id = $user.id)`` 被切成两段,
+    #   下游 SQL 拼接后报 'incomplete input'。
+    #   修复: 改为括号感知状态机, 只在 depth=0 且不在字符串字面量内时
+    #   才把 OR 当顶层关键字。
+    # ============================================================
+
+    def test_parse_scope_expression_in_subquery_with_or(self):
+        """[Regression] IN (SELECT ... OR ...) 子查询内的 OR 不应被切分
+
+        复现 BMRD-2026-06-14: TEST888 角色为空时, version 查询报
+        'incomplete input', 根因就是这条 case。
+        """
+        expr = (
+            "product_id IN (SELECT id FROM products "
+            "WHERE visibility = 'public' OR owner_id = $user.id)"
+        )
+        result = DataPermissionInterceptor._parse_scope_expression(expr)
+
+        # 必须只识别为一条 in_subquery 条件, 不能切 OR
+        assert len(result) == 1, \
+            f"IN subquery 内的 OR 不应被切分, 但切出 {len(result)} 段: {result}"
+        assert not isinstance(result[0], list), \
+            f"顶层不应被识别为 OR group, 实际: {result[0]}"
+        cond = result[0]
+        assert cond['field'] == 'product_id'
+        assert cond['operator'] == 'in_subquery'
+        # 子查询体内的 OR 必须原样保留
+        assert "OR owner_id" in cond['value'], \
+            f"子查询体内的 OR 应原样保留, 实际 value: {cond['value']}"
+        assert "$user.id" in cond['value']
+
+    def test_parse_scope_expression_nested_in_subquery(self):
+        """[Regression] 嵌套 IN 子查询不应被切分
+
+        场景: domain.yaml 的 scope 含两层 IN (SELECT ... WHERE ... IN (SELECT ...))
+        """
+        expr = (
+            "version_id IN (SELECT v.id FROM versions v "
+            "WHERE v.product_id IN ("
+            "SELECT id FROM products WHERE visibility = 'public'"
+            "))"
+        )
+        result = DataPermissionInterceptor._parse_scope_expression(expr)
+        assert len(result) == 1
+        assert result[0]['operator'] == 'in_subquery'
+        # 内层 IN 必须完整保留在 value 里
+        assert "IN (SELECT id FROM products" in result[0]['value']
+        assert "visibility = 'public'" in result[0]['value']
+
+    def test_parse_scope_expression_or_in_string_literal(self):
+        """[Regression] 字符串字面量内的 'OR' 不应触发切分
+
+        场景: 字段值含 'A OR B' 这样的字符串, 解析器必须识别引号边界。
+        """
+        result = DataPermissionInterceptor._parse_scope_expression(
+            "name = 'A OR B' OR id = 5"
+        )
+        # 顶层 OR 必须识别, 切出 2 段
+        assert len(result) == 1
+        assert isinstance(result[0], list)
+        assert len(result[0]) == 2
+        # 字符串值内的 'OR' 必须作为普通字符保留
+        assert result[0][0]['value'] == 'A OR B'
+        assert result[0][0]['field'] == 'name'
+        assert result[0][1]['field'] == 'id'
+        assert result[0][1]['value'] == '5'
+
+    def test_apply_scope_filter_with_in_subquery_or(self, interceptor):
+        """[Regression] 端到端: version.yaml 的真实 scope 能正常注入
+
+        这是 BMRD-2026-06-14 的根因场景:
+          - 用户 TEST888 (id=3371) 无角色 → 走 BO yaml 的 authorization.scope
+          - scope = "product_id IN (SELECT id FROM products
+                     WHERE visibility = 'public' OR owner_id = $user.id)"
+        修复前: 切碎 OR, SQL 报 'incomplete input'
+        修复后: 正常生成一条 in_subquery 条件, value 中 $user.id 被替换为 '3371'
+        """
+        meta_obj = Mock()
+        meta_obj.authorization = {
+            'scope': (
+                "product_id IN (SELECT id FROM products "
+                "WHERE visibility = 'public' OR owner_id = $user.id)"
+            )
+        }
+
+        context = MockActionContext(
+            action='crud_query',
+            user_id=3371,
+            user_name='TEST888',
+            object_type='version',
+            meta_object=meta_obj,
+            extra={}
+        )
+
+        interceptor._apply_scope_filter(context)
+        assert 'query_conditions' in context.extra
+        conds = context.extra['query_conditions']
+        # 修复后必须只有 1 条 in_subquery 条件 (不是 2 条碎片)
+        assert len(conds) == 1, \
+            f"预期 1 条条件, 实际 {len(conds)}: {conds}"
+        cond = conds[0]
+        assert cond['field'] == 'product_id'
+        assert cond['operator'] == 'in_subquery'
+        # $user.id 必须被替换为实际用户 ID (在 substitution 阶段, 见
+        # _apply_scope_filter L357, 但 subquery 里的 $user.id 也应替换)
+        # 这里的实现只替换顶层 expr 的 $user.id, subquery 留给 SQL 层
+        # 处理, 关键是 OR 不被切走
+        assert "OR owner_id" in cond['value']

@@ -84,68 +84,68 @@ class EnrichmentEngine:
     
     def enrich_batch(self, object_type: str, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """批量填充记录的虚拟冗余字段
-        
+
         使用批量查询优化性能，避免 N+1 问题。
-        
+
         Args:
             object_type: 对象类型
             records: 原始记录列表
-            
+
         Returns:
             填充后的记录列表
         """
         if not records:
             return records
-        
+
         obj_reds = self.registry.get_object_redundancies(object_type)
         if not obj_reds:
             return records
-        
+
         virtual_reds = {
             fid: red for fid, red in obj_reds.items()
             if red.redundancy_type in (RedundancyType.VIRTUAL, RedundancyType.RESOLUTION)
         }
-        
+
         if not virtual_reds:
             return records
-        
+
         for field_id, red_def in virtual_reds.items():
             self._enrich_field_batch(records, field_id, red_def)
-        
+
         return records
-    
+
     def _enrich_field(self, record: Dict[str, Any], field_id: str, red_def: RedundancyDef):
         """填充单个字段"""
         source_id = record.get(red_def.source_field)
         if source_id is None:
             return
-        
+
         if red_def.join_path:
             value = self._resolve_join_path(red_def.join_path, source_id)
         else:
             value = self._resolve_simple(red_def, source_id)
-        
+
         if value is not None:
             record[field_id] = value
-    
+
     def _enrich_field_batch(self, records: List[Dict[str, Any]], field_id: str, red_def: RedundancyDef):
         """批量填充单个字段"""
         source_ids = list(set(
             r.get(red_def.source_field) for r in records
             if r.get(red_def.source_field) is not None
         ))
-        
+
         if not source_ids:
             return
-        
+
         if red_def.join_path:
             lookup = self._resolve_join_path_batch(red_def.join_path, source_ids)
         else:
             lookup = self._resolve_simple_batch(red_def, source_ids)
-        
+
         if not lookup:
             return
-        
+
         for record in records:
             source_id = record.get(red_def.source_field)
             if source_id is not None and source_id in lookup:

@@ -157,7 +157,9 @@ export function useMenuPermissions() {
 
     try {
       if (!authStore.isLoggedIn) {
-        const cached = menuCache.getCache()
+        // [FIX 2026-06-14] 未登录时也按 userId 维度读 cache
+        // 避免匿名 user 看到上一个登录 user 的菜单
+        const cached = menuCache.getCache(null, currentUserId)
         const cachedData = cached?.data
         menuPermissions.value = (cachedData && !_isHomeOnlyFallback(cachedData)) ? cachedData : _homeOnlyFallback()
         loading.value = false
@@ -168,7 +170,12 @@ export function useMenuPermissions() {
 
     try {
       const schemaVersion = await _fetchSchemaVersion()
-      const cached = menuCache.getCache(schemaVersion)
+      // [FIX 2026-06-14] cache 读取按 userId 维度
+      //   menuCache key 固定 'menuCache', 不带 userId, 切 user 后旧 user 的菜单
+      //   仍残留在 localStorage → 新 user loadMenuPermissions 拿到旧 user 的菜单
+      //   → landing page 短暂显示"系统管理"等无权限的 card
+      //   useMetaCache 拿到 userId 不匹配会 clearCache + 返 null → 走 API 重拉
+      const cached = menuCache.getCache(schemaVersion, currentUserId)
       if (cached?.data && cached.data.length > 0 && !_isHomeOnlyFallback(cached.data)) {
         menuPermissions.value = cached.data
         _menusLoaded.value = true
@@ -181,13 +188,15 @@ export function useMenuPermissions() {
       }
 
       const menus = await _loadFromApi()
-      menuCache.setCache(menus, schemaVersion)
+      // [FIX 2026-06-14] setCache 写入 userId, 下次切换 user 立即失效
+      menuCache.setCache(menus, schemaVersion, currentUserId)
       menuPermissions.value = menus
       _menusLoaded.value = true
       _loadedForUserId.value = currentUserId
     } catch (err) {
       console.error('[MenuPermissions] API failed, trying cache:', err.message)
-      const cached = menuCache.getCache()
+      // [FIX 2026-06-14] fallback 也按 userId 维度
+      const cached = menuCache.getCache(null, currentUserId)
       if (cached?.data && !_isHomeOnlyFallback(cached.data)) {
         menuPermissions.value = cached.data
       } else {

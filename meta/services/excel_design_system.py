@@ -13,22 +13,34 @@ from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 class ExcelDesignSystem:
-    """Excel设计系统 - 统一的样式配置"""
-    
+    """Excel设计系统 - 统一的样式配置
+
+    配色规范 (2026-06-14 BMRD 调整, 解决分区标题/新增行/自动编码三者蓝系混淆):
+    - 分区标题(深蓝白字)    PRIMARY_COLOR #1565C0 + 白色加粗
+    - 业务关键字(浅黄)      WARNING_LIGHT #FFF2CC  (新增必填, 编辑时只读)
+    - 自动/可手动编码(浅蓝灰) INFO_LIGHT  #E1F5FE  (留空由系统生成)
+    - 父对象编码(浅绿)      SUCCESS_LIGHT #E6F7E6
+    - 只读字段(灰色)        GRAY_300     #E0E0E0
+
+    [REMOVED 2026-06-14 BMRD] 新增操作行底色(原 CREATE_NEW_FILL)：
+    理由是 "create - 新增" 文字 + 底部空白位置已足够表达"新增行"语义，
+    操作模式列再加黄色属于冗余, 反而会让用户误以为整列 A 都是必填。
+    """
+
     # 主色调 - 蓝色系（参考Salesforce #00A1E0）
     PRIMARY_COLOR = "1565C0"
-    PRIMARY_LIGHT = "E3F2FD"
-    
+    PRIMARY_LIGHT = "E3F2FD"  # 保留作为历史浅蓝备选, 当前 SECTION 不再使用
+
     # 功能色
     SUCCESS_COLOR = "2E7D32"
-    SUCCESS_LIGHT = "E6F7E6"
+    SUCCESS_LIGHT = "E6F7E6"  # 父对象编码
     WARNING_COLOR = "F57C00"
-    WARNING_LIGHT = "FFF2CC"
+    WARNING_LIGHT = "FFF2CC"  # 业务关键字 (新增操作行已 [REMOVED 2026-06-14], 不再使用)
     ERROR_COLOR = "C62828"
     ERROR_LIGHT = "FFEBEE"
     INFO_COLOR = "0288D1"
-    INFO_LIGHT = "E1F5FE"
-    
+    INFO_LIGHT = "E1F5FE"     # 自动/可手动编码
+
     # 中性色
     GRAY_50 = "FAFAFA"
     GRAY_100 = "F5F5F5"
@@ -37,26 +49,28 @@ class ExcelDesignSystem:
     GRAY_500 = "9E9E9E"
     GRAY_700 = "616161"
     GRAY_900 = "212121"
-    
+
     # 表头样式
     HEADER_FILL = PatternFill(start_color=PRIMARY_COLOR, end_color=PRIMARY_COLOR, fill_type="solid")
     HEADER_FONT = Font(color="FFFFFF", bold=True, size=11)
     HEADER_ALIGNMENT = Alignment(horizontal="center", vertical="center")
-    
+
     # 标签样式
     LABEL_FONT = Font(bold=True, size=10, color=GRAY_700)
     VALUE_FONT = Font(size=10, color=GRAY_900)
-    
-    # 区域标题样式
-    SECTION_FILL = PatternFill(start_color=PRIMARY_LIGHT, end_color=PRIMARY_LIGHT, fill_type="solid")
-    SECTION_FONT = Font(bold=True, size=11, color=PRIMARY_COLOR)
-    
+
+    # 区域标题样式 - 深蓝底白字（Excel 表头风格，强辨识度）
+    # [CHANGED 2026-06-14 BMRD] 由 PRIMARY_LIGHT 改为 PRIMARY_COLOR，与新增行/自动编码彻底区分
+    SECTION_FILL = PatternFill(start_color=PRIMARY_COLOR, end_color=PRIMARY_COLOR, fill_type="solid")
+    SECTION_FONT = Font(bold=True, size=11, color="FFFFFF")
+
     # 字段状态样式
     READONLY_FILL = PatternFill(start_color=GRAY_300, end_color=GRAY_300, fill_type="solid")
     REQUIRED_FILL = PatternFill(start_color=WARNING_LIGHT, end_color=WARNING_LIGHT, fill_type="solid")
     BUSINESS_KEY_FILL = PatternFill(start_color=SUCCESS_LIGHT, end_color=SUCCESS_LIGHT, fill_type="solid")
-    CREATE_NEW_FILL = PatternFill(start_color=INFO_LIGHT, end_color=INFO_LIGHT, fill_type="solid")
-    # [NEW v1.1 2026-06-11] 自动/可手动模式底色（浅蓝）
+    # [REMOVED 2026-06-14 BMRD] CREATE_NEW_FILL 已移除 - 新增操作行不再使用底色
+    # 替代: 保留"create - 新增"文字 + 底部空白位置作为视觉提示
+    # [NEW v1.1 2026-06-11] 自动/可手动模式底色（浅蓝灰，保留）
     AUTO_GEN_OR_MANUAL_FILL = PatternFill(start_color="E1F5FE", end_color="E1F5FE", fill_type="solid")
     
     # 边框样式

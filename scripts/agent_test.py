@@ -203,8 +203,8 @@ def main():
                              '格式: path/to/test.py::test_func_name 或 path/to/test.py')
     parser.add_argument('--file', metavar='PATH',
                         help='单文件运行 (跟 test.py --file 相同)')
-    parser.add_argument('--port', type=int, default=3010,
-                        help='多 agent 端口 (3010-3019, 默认 3010)')
+    parser.add_argument('--port', type=int, default=None,
+                        help='多 agent 端口 (3010-3019, 默认自动分配避免冲突)')
     parser.add_argument('--json', metavar='PATH',
                         help='JSON 输出到文件 (含 trace_id schema)')
     parser.add_argument('--timeout', type=int, default=300,
@@ -215,6 +215,15 @@ def main():
 
     if not args.single and not args.file:
         parser.error('必须指定 --single 或 --file')
+
+    if args.port is None:
+        # [P0] 自动分配 (避免 3010 默认冲突)
+        if not os.environ.get('AGENT_PORT'):
+            args.port = _auto_assign_port()
+            if not args.quiet:
+                print(f'[AUTO-PORT] 分配端口 {args.port}')
+        else:
+            args.port = int(os.environ['AGENT_PORT'])
 
     if not 3010 <= args.port <= 3019:
         parser.error(f'--port 必须在 3010-3019 之间 (给定: {args.port})')

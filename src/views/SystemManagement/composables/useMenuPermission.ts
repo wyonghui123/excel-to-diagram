@@ -68,6 +68,12 @@ export function useMenuPermission(roleId: Ref<string>) {
 
   async function loadMenus() {
     if (!roleId.value) return
+    // [GUARD 2026-06-14] 'new' 是创建态 (role 尚未保存), 后端期望 int role_id
+    // 不拦截会触发 GET /api/v1/roles/new/unified-permissions -> 500
+    if (!/^\d+$/.test(String(roleId.value))) {
+      menus.value = []
+      return
+    }
 
     loading.value = true
     try {
@@ -292,6 +298,10 @@ export function useMenuPermission(roleId: Ref<string>) {
 
   async function save() {
     if (!roleId.value) return
+    // [GUARD 2026-06-14] 'new' 是创建态, 后端期望 int role_id
+    if (!/^\d+$/.test(String(roleId.value))) {
+      throw new Error('保存失败: 角色尚未保存, 请先保存角色')
+    }
 
     saving.value = true
     try {

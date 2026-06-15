@@ -129,6 +129,9 @@ function buildServiceModules(serviceModules, businessObjects) {
 function buildRelationships(rawRelationships) {
   return rawRelationships.map(rel => ({
     id: rel.id,
+    // [v39 关系线标题] 关系实例编码 (e.g. "ORDER-USER-01"), 与"关系类型编码" relation_code 区分
+    // 之前 label 误用 relation_code (类型编码 DEPENDS_ON), 用户期望看到 关系编码 (实例编码)
+    code: rel.code || '',
     relationType: rel.relation_type || rel.relationType || '',
     relationTypeName: rel.relation_type_name || rel.relationTypeName || '',
     relationTypeNameEn: rel.relation_type_name_en || rel.relationTypeNameEn || '',
@@ -136,6 +139,15 @@ function buildRelationships(rawRelationships) {
     relationCode: rel.relation_code || rel.relationCode || '',
     sourceCode: rel.source_code || rel.sourceCode,
     targetCode: rel.target_code || rel.targetCode,
+    // [v34 双向支持] 同时回填 sourceName/targetName (兼容 API 返回的 snake_case 字段)
+    // 之前 buildDiagramData.buildLinks 读 rel.sourceName/targetName 都是 undefined
+    // → diagramData.links[i].source/target/sourceName/targetName 都是 undefined
+    // 不会影响 mermaid 渲染 (useBusinessObjectSyntax 用 sourceCode 查 nodeCodeToIdMap),
+    // 但会让 E2E 调试 / 下游消费方困惑
+    sourceName: rel.source_bo_name || rel.sourceName || rel.source_name || '',
+    targetName: rel.target_bo_name || rel.targetName || rel.target_name || '',
+    sourceId: rel.source_bo_id || rel.sourceId || null,
+    targetId: rel.target_bo_id || rel.targetId || null,
     relationDesc: rel.relation_desc || rel.relationDesc || '',
     annotationContent: rel.annotation_content || rel.annotationContent || '',
     annotationCategory: rel.annotation_category || rel.annotationCategory || 'info',

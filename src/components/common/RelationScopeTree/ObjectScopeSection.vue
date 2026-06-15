@@ -357,15 +357,17 @@ async function loadTreeData(options = {}) {
 
   if (!silent) loading.value = true
   try {
-    const [domainResult, subDomainResult, serviceModuleResult] = await Promise.all([
+    const [domainResult, subDomainResult, serviceModuleResult, boResult] = await Promise.all([
       boService.query('domain', { version_id: props.versionId, page_size: 1000 }),
       boService.query('sub_domain', { version_id: props.versionId, page_size: 1000 }),
-      boService.query('service_module', { version_id: props.versionId, page_size: 5000 })
+      boService.query('service_module', { version_id: props.versionId, page_size: 5000 }),
+      boService.query('business_object', { version_id: props.versionId, page_size: 10000 })
     ])
 
     const domains = domainResult.data?.items || domainResult.data || []
     const subDomains = subDomainResult.data?.items || subDomainResult.data || []
     const serviceModules = serviceModuleResult.data?.items || serviceModuleResult.data || []
+    const businessObjects = boResult.data?.items || boResult.data || []
 
     // === 修复核心: silent 模式下保留用户已选状态，避免 el-tree store 重建导致 checked 丢失 ===
     // 根因: 上游 watch(combinedFilters) → coordinator.refreshAll() → scopeTree.refresh()
@@ -381,7 +383,7 @@ async function loadTreeData(options = {}) {
 
       if (hasSelection) {
         const oldKeys = collectAllKeys(treeData.value)
-        const newTree = buildHierarchyTree(domains, subDomains, serviceModules)
+        const newTree = buildHierarchyTree(domains, subDomains, serviceModules, businessObjects)
         const newKeys = collectAllKeys(newTree)
         const sameStructure =
           oldKeys.length === newKeys.length &&
@@ -411,7 +413,7 @@ async function loadTreeData(options = {}) {
       }
     }
 
-    const tree = buildHierarchyTree(domains, subDomains, serviceModules)
+    const tree = buildHierarchyTree(domains, subDomains, serviceModules, businessObjects)
     treeData.value = tree
 
     const allKeys = collectAllKeys(tree)
@@ -436,9 +438,11 @@ async function loadTreeData(options = {}) {
   }
 }
 
-function buildHierarchyTree(domains, subDomains, serviceModules) {
+function buildHierarchyTree(domains, subDomains, serviceModules, businessObjects) {
   const subDomainMap = new Map()
   const serviceModuleMap = new Map()
+  // v39: 构建 service_module_id → BO 数量 的映射
+  const boCountBySm = new Map()
 
   for (const sd of subDomains) {
     const list = subDomainMap.get(sd.domain_id) || []
@@ -452,46 +456,61 @@ function buildHierarchyTree(domains, subDomains, serviceModules) {
     serviceModuleMap.set(sm.sub_domain_id, list)
   }
 
+  // v39: 统计每个 service_module 下的 BO 数量
+  for (const bo of (businessObjects || [])) {
+    const smId = bo.service_module_id
+    if (smId != null) {
+      boCountBySm.set(smId, (boCountBySm.get(smId) || 0) + 1)
+    }
+  }
+
   return domains.map(domain => {
     const domainSubDomains = subDomainMap.get(domain.id) || []
-    const domainNode = {
-      id: `d_${domain.id}`,
-      originalId: domain.id,
-      name: domain.name,
-      code: domain.code,
-      type: 'domain',
-      count: domainSubDomains.length,
-      children: []
-    }
+    // v39: 先计算域内所有 BO 总数
+    let domainBoCount = 0
+    const subDomainNodes = []
 
     for (const subDomain of domainSubDomains) {
       const moduleList = serviceModuleMap.get(subDomain.id) || []
-      const subDomainNode = {
-        id: `s_${subDomain.id}`,
-        originalId: subDomain.id,
-        name: subDomain.name,
-        code: subDomain.code,
-        type: 'sub_domain',
-        count: moduleList.length,
-        children: []
-      }
+      // v39: 计算子域内所有 BO 总数
+      let subDomainBoCount = 0
+      const serviceModuleNodes = []
 
       for (const module of moduleList) {
-        subDomainNode.children.push({
+        const boCount = boCountBySm.get(module.id) || 0
+        subDomainBoCount += boCount
+        serviceModuleNodes.push({
           id: `sm_${module.id}`,
           originalId: module.id,
           name: module.name,
           code: module.code,
           type: 'service_module',
-          count: 0,
+          count: boCount, // v39: 模块内 BO 数量
           children: []
         })
       }
 
-      domainNode.children.push(subDomainNode)
+      domainBoCount += subDomainBoCount
+      subDomainNodes.push({
+        id: `s_${subDomain.id}`,
+        originalId: subDomain.id,
+        name: subDomain.name,
+        code: subDomain.code,
+        type: 'sub_domain',
+        count: subDomainBoCount, // v39: 子域内 BO 总数
+        children: serviceModuleNodes
+      })
     }
 
-    return domainNode
+    return {
+      id: `d_${domain.id}`,
+      originalId: domain.id,
+      name: domain.name,
+      code: domain.code,
+      type: 'domain',
+      count: domainBoCount, // v39: 域内 BO 总数
+      children: subDomainNodes
+    }
   })
 }
 

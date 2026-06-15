@@ -1079,7 +1079,9 @@ fields:
       editable: false
       title: 源业务对象编码
     semantics:
-      meaning: 源业务对象的编码
+      meaning: 源业务对象的编码（虚拟冗余显示）
+      # [NEW 2026-06-14 BMRD] 父对象编码显示字段 - 跟随 source_bo_id，使用浅绿色
+      parent_key_display: true
       export_visible: true
       import_visible: false
       # 冗余字段一致性声明（Type-B: 虚拟冗余）
@@ -1127,7 +1129,9 @@ fields:
       editable: false
       title: 目标业务对象编码
     semantics:
-      meaning: 目标业务对象的编码
+      meaning: 目标业务对象的编码（虚拟冗余显示）
+      # [NEW 2026-06-14 BMRD] 父对象编码显示字段 - 跟随 target_bo_id，使用浅绿色
+      parent_key_display: true
       export_visible: true
       import_visible: false
       # 冗余字段一致性声明（Type-B: 虚拟冗余）
@@ -1578,6 +1582,21 @@ indexes:
     priority: high
     description: "版本+源+目标+类型唯一索引（防止重复关系）"
 
+  # [2026-06-15] 业务层 + DB 层联合校验：源+目标+方向在版本内唯一
+  #   解决: 历史 bug (id=101 vs id=129 同源同目标同方向但 code 不同 / relation_code 一空一有)
+  #   原因: 现有 uidx_relationships_version_source_target_type 用的是 relation_code 字段,
+  #         KeyTemplate 失败时 relation_code 为空字符串, 绕过了唯一性
+  #   修复: 加源+目标+方向的唯一约束
+  #   - 业务层: MetadataDrivenValidator._check_unique_indexes 校验 (manage_service.create 唯一入口, Excel 导入也走这里)
+  #   - DB 层: 生成 unique index 防 race / 防漏
+  #   - 保留 PUSH/PULL/BIDIRECTIONAL 三个方向独立唯一 (方向不同允许同源同目标)
+  #   - relation_direction 为 NULL 的记录不在约束范围内 (schema 中 required: false)
+  - name: uidx_relationships_version_source_target_direction
+    fields: [version_id, source_bo_id, target_bo_id, relation_direction]
+    type: unique
+    priority: high
+    description: "版本+源+目标+方向唯一索引（防同源同目标同方向重复关系，relation_direction 为空时跳过）"
+
   - name: idx_relationships_version_source
     fields: [version_id, source_bo_id]
     type: composite
@@ -1609,6 +1628,40 @@ validations:
     type: cross_field
     rule: source_bo_id != target_bo_id
     message: 源业务对象和目标业务对象不能相同
+    severity: error
+
+  # [v34 fix] 关系编码唯一性 (整库内 (version_id, code) 联合唯一)
+  - id: code_unique_within_version
+    name: 关系编码在版本内唯一
+    type: unique
+    rule: (version_id, code) 联合唯一
+    scope: version_id
+    fields: [code]
+    message: 关系编码 "{code}" 在当前版本中已存在，请使用唯一编码
+    severity: error
+
+  # [v34 fix] 关系类型必须是 enum 有效值
+  - id: relation_type_in_enum
+    name: 关系类型必须在枚举中
+    type: field
+    rule: relation_type in ('GENERATES', 'UPDATES', 'TRIGGERS', 'REFERENCES')
+    message: '关系类型 "{relation_type}" 不在允许的枚举值中 (GENERATES/UPDATES/TRIGGERS/REFERENCES)'
+    severity: error
+
+  # [v34 fix] 关系方向必须是 enum 有效值 (允许空)
+  - id: relation_direction_in_enum
+    name: 关系方向必须在枚举中
+    type: field
+    rule: relation_direction is None or relation_direction in ('PUSH', 'PULL', 'BIDIRECTIONAL')
+    message: '关系方向 "{relation_direction}" 不在允许的枚举值中 (PUSH/PULL/BIDIRECTIONAL)'
+    severity: error
+
+  # [v34 fix] 关系简称非空
+  - id: relation_code_required
+    name: 关系简称必填
+    type: field
+    rule: relation_code is not None and relation_code != ''
+    message: 关系简称不能为空
     severity: error
 
 # ────────────────────────────────────────────
@@ -1728,29 +1781,25 @@ ui_view_config:
               - local_field: version_id
                 target_field: version_id
                 required: true
-      - key: relation_desc
-        title: 描述
-        width: 200
-        position: 6
-        importance: high
-        sortable: true
-      # [V1.1.4 2026-06-11] 删 effective_owner_id_display - 顶层 owner 已在 product
+      # [FIX 2026-06-15] 列重排: 把"关系类型/方向/范围"3 个类型相关列紧跟业务对象对之后
+      # 之前 relation_type/relation_direction/category_label 被 relation_desc 隔开,
+      # 且放在 6-11 的层级链路列之后, 用户看起来很跳跃 (类型相关列聚在一起更易读)
       - key: relation_type
         title: 关系类型
         width: 120
-        position: 7
+        position: 6
         importance: high
         sortable: true
       - key: relation_direction
         title: 方向
         width: 80
-        position: 8
+        position: 7
         importance: medium
         sortable: true
       - key: category_label
         title: 关系范围
         width: 150
-        position: 9
+        position: 8
         importance: medium
         sortable: true
         # [FIX 2026-06-10] 列头过滤: 用 select 控件 + hierarchy_scope_type 枚举
@@ -1761,6 +1810,58 @@ ui_view_config:
         # [FIX 2026-06-10] 用 category_type (单数) 作为 API 参数名 (后端已兼容)
         #   保持与 ui_view_config.filter.filters 命名一致
         api_param_key: category_type
+      - key: relation_desc
+        title: 描述
+        width: 200
+        position: 9
+        importance: high
+        sortable: true
+      # [FIX 2026-06-14] FK 链路补全: 显示源/目标的领域→子领域→服务模块
+      # 后端通过 redundancy join_path 自动填充 *_name 字段
+      - key: source_domain_name
+        title: 源领域
+        width: 120
+        position: 10
+        importance: medium
+        sortable: true
+      - key: source_sub_domain_name
+        title: 源子领域
+        width: 120
+        position: 11
+        importance: medium
+        sortable: true
+      - key: source_service_module_name
+        title: 源服务模块
+        width: 130
+        position: 12
+        importance: medium
+        sortable: true
+      - key: target_domain_name
+        title: 目标领域
+        width: 120
+        position: 13
+        importance: medium
+        sortable: true
+      - key: target_sub_domain_name
+        title: 目标子领域
+        width: 120
+        position: 14
+        importance: medium
+        sortable: true
+      - key: target_service_module_name
+        title: 目标服务模块
+        width: 130
+        position: 15
+        importance: medium
+        sortable: true
+      # [FIX 2026-06-14] BUG-V008 扩展: 补 FK 链路列 version_name
+      # 后端通过 redundancy join_path 自动填充 (version_id -> versions.name)
+      - key: version_name
+        title: 所属版本
+        width: 150
+        position: 15.5
+        importance: high
+        sortable: true
       - key: created_at
         title: 创建时间
         width: 180

@@ -78,7 +78,9 @@ export function useEdgeLabelStyle() {
       .mermaid-content.businessObject :deep(.labelBkg) {
         display: inline-block !important;
         line-height: 1.2 !important;
-        padding: 2px 6px !important;
+        /* [v40.4 修复] 之前 padding: 2px 6px 让白底 div 比文字大 12x4 px
+           改成 0, 让 div 跟文字本身等大, 白底紧贴文字 */
+        padding: 0 !important;
         margin: 0 !important;
       }
       

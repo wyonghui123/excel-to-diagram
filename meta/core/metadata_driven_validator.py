@@ -93,6 +93,9 @@ class MetadataDrivenValidator:
     def _get_field_name(self, meta_object: 'MetaObject', field: 'MetaField') -> str:
         if field.name:
             return field.name
+        # 尝试从 semantics.meaning 获取友好名
+        if hasattr(field, 'semantics') and field.semantics and getattr(field.semantics, 'meaning', None):
+            return field.semantics.meaning
         return field.id
 
     def _is_empty(self, value: Any) -> bool:
@@ -296,6 +299,32 @@ class MetadataDrivenValidator:
             where_clauses.append("version_id = ?")
             params.append(version_id_value)
 
+        # [BMRD 2026-06-14 FIX] BUG-V006: business_key 配合 FK 字段实现"范围内唯一"
+        # 例: version.name semantics.meaning="产品内唯一" → 加 AND product_id = ?
+        # 规则: 检测 bk_field.semantics.meaning 含"X内唯一", 自动找对应 FK 字段
+        for bk_field, _ in bk_values:
+            meaning = (getattr(bk_field.semantics, 'meaning', '') or '').lower()
+            scope_fk_map = {
+                '产品内唯一': ['product_id', 'parent_id'],
+                'product内唯一': ['product_id', 'parent_id'],
+                'product 内唯一': ['product_id', 'parent_id'],
+                '父对象内唯一': ['parent_id'],
+                '客户内唯一': ['customer_id', 'client_id'],
+                '租户内唯一': ['tenant_id'],
+            }
+            for keyword, fk_candidates in scope_fk_map.items():
+                if keyword in meaning or keyword.lower() in meaning:
+                    for fk_id in fk_candidates:
+                        fk_field = next((x for x in meta_object.fields if x.id == fk_id), None)
+                        if fk_field:
+                            fk_value = data.get(fk_field.id)
+                            if fk_value is not None and f"{fk_field.db_column} = ?" not in where_clauses:
+                                where_clauses.append(f"{fk_field.db_column} = ?")
+                                params.append(fk_value)
+                                import logging
+                                logging.info(f"[BusinessKey] BUG-V006 fix: 加 {fk_field.db_column}={fk_value} 到唯一检查")
+                    break
+
         query = f"SELECT id FROM {meta_object.table_name} WHERE {' AND '.join(where_clauses)}"
         if exclude_id:
             query += " AND id != ?"
@@ -325,14 +354,27 @@ class MetadataDrivenValidator:
             return []
         errors = []
         for index in indexes:
-            if not isinstance(index, dict):
+            # 兼容两种形式: dict (原始 yaml) / MetaIndex 对象 (parse_index 解析后)
+            if isinstance(index, dict):
+                index_type_str = index.get('type', '')
+                index_fields = index.get('fields', [])
+                index_name = index.get('name', 'unknown')
+                is_unique = index_type_str == 'unique'
+            else:
+                # MetaIndex 对象: index_type 可能是 enum 或 str
+                idx_type = getattr(index, 'index_type', None)
+                idx_type_value = getattr(idx_type, 'value', idx_type)
+                index_fields = list(getattr(index, 'fields', []) or [])
+                index_name = getattr(index, 'name', '') or 'unknown'
+                is_unique = (
+                    idx_type_value == 'unique'
+                    or getattr(index, 'unique', False)
+                )
+
+            if not is_unique:
                 continue
-            if index.get('type') != 'unique':
-                continue
-            index_fields = index.get('fields', [])
             if not index_fields:
                 continue
-            index_name = index.get('name', 'unknown')
 
             is_bk_index = True
             for idx_f in index_fields:
@@ -369,13 +411,24 @@ class MetadataDrivenValidator:
                 cursor = self.ds.execute(query, tuple(params))
                 row = cursor.fetchone()
                 if row:
-                    field_names = "、".join(index_fields)
+                    # 将技术 field ID 解析为用户友好的字段名
+                    resolved_names = []
+                    for idx_field in index_fields:
+                        f = next((x for x in meta_object.fields if x.id == idx_field), None)
+                        resolved_names.append(f.name if f and f.name else idx_field)
+                    field_names = "、".join(resolved_names)
+                    # index_name 改用 description 友好描述，避免暴露技术索引名
+                    index_display = ""
+                    if isinstance(index, dict):
+                        index_display = index.get('description', '') or index_name
+                    else:
+                        index_display = getattr(index, 'description', '') or index_name
                     errors.append(ValidationDetail(
                         rule="index_unique",
                         message=ValidationMessageRegistry.get("validation.object.index_unique",
-                                                               index_name=index_name, field_names=field_names),
+                                                               index_name=index_display, field_names=field_names),
                         i18n_key="validation.object.index_unique",
-                        params={"index_name": index_name, "field_names": field_names}
+                        params={"index_name": index_display, "field_names": field_names}
                     ))
             except Exception:
                 pass

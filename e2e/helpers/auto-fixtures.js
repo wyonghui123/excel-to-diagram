@@ -68,6 +68,13 @@ import { waitForApi, mockApi } from './network-waiter.js'
  *   - stableTimeout: 稳定等待超时（默认 5000ms）
  *   - contextTimeout: 等待 versionContext 恢复超时（默认 8000ms）
  */
+export async function navigateToDeepLink(page, schemaId, id) {
+  const base = process.env.APP_URL || 'http://localhost:3004'
+  const url = `${base}/${schemaId}-management/detail/${id}`
+  await page.goto(url, { waitUntil: 'domcontentloaded' })
+  return { url, id }
+}
+
 export async function navigateTo(page, targetPath, options = {}) {
   const {
     waitForTable = true,

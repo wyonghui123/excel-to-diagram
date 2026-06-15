@@ -199,11 +199,11 @@ export function extractBusinessObjectFields(item) {
 /**
  * 从对象中提取关系相关字段
  * @param {Object} item - Excel行数据
- * @returns {Object} { sourceCode, targetCode, relationCode, relationType, description }
+ * @returns {Object} { sourceCode, targetCode, relationCode, relationType, relationDirection, description }
  */
 export function extractRelationshipFields(item) {
   const keys = Object.keys(item)
-  let sourceCode = '', targetCode = '', relationCode = '', relationType = '', description = ''
+  let sourceCode = '', targetCode = '', relationCode = '', relationType = '', relationDirection = '', description = ''
 
   for (const key of keys) {
     const lower = key.toLowerCase()
@@ -258,6 +258,21 @@ export function extractRelationshipFields(item) {
       continue
     }
 
+    // [v40 修复] 关系方向 (推/拉/双向) - 触发 <-->/--> 渲染
+    // 之前缺失此字段, 双向数据流丢失 → getArrowSyntax 拿不到 '双向' → 全部渲染为 -->
+    // Excel 列名支持: 关系方向 / direction / relation_direction
+    if (
+      key.includes('关系方向') ||
+      key.includes('方向') ||
+      lower === 'direction' ||
+      lower.endsWith('direction') ||
+      lower.includes('relation_direction')
+    ) {
+      // 注意: 必须 continue 跳过 (避免被下面的 "描述" 误匹配)
+      relationDirection = val(value)
+      continue
+    }
+
     // 描述/说明
     if (
       key.includes('描述') ||
@@ -270,5 +285,5 @@ export function extractRelationshipFields(item) {
     }
   }
 
-  return { sourceCode, targetCode, relationCode, relationType, description }
+  return { sourceCode, targetCode, relationCode, relationType, relationDirection, description }
 }

@@ -114,6 +114,11 @@ class SemanticAnnotation:
     parent_key_display: bool = False  # 父对象键的编码显示字段（FK编码显示，虚拟冗余，紧跟FK列出现）
     mandatory: bool = False           # 业务必填（类似 @mandatory，区别于数据库 required）
     readonly_always: bool = False     # 始终只读（类似 SAP readOnly: true），新建和编辑都只读
+
+    # [NEW 2026-06-14 BMRD] 父对象 FK 编码显示字段（如 relationship.source_bo_code/target_bo_code）
+    # 这些是 virtual 字段，从 parent_key 字段自动派生显示 code，
+    # 语义上属于"父对象编码家族"，应使用 BUSINESS_KEY_FILL 而非 READONLY_FILL
+    parent_key_display: bool = False
     
     # 上下文字段（借鉴 SAP One Model 参数化导入）
     # 上下文字段不参与导入导出的数据行，而是通过导入界面的选择器确定

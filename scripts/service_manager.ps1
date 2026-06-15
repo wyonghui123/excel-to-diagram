@@ -650,7 +650,19 @@ switch ($Command) {
             $known = $data.$svc
             $status = if ($listening) { 'RUNNING' } else { 'STOPPED' }
             if ($listening) {
-                Write-Host "  $($cfg.name.PadRight(25)) : $status  (port=$($cfg.port), pid=$($known.pid), since=$($known.started_at))"
+                # [v3.18 Layer 4] 校验 listener-PID 是否跟 status.json 报的 PID 一致
+                # 防止 21:54-22:29 那类 "service_manager 报 stale PID, 实际 3010 被 orphan 接管" 的 Layer 4 问题
+                $listenerPid = (Get-NetTCPConnection -LocalPort $cfg.port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1).OwningProcess
+                $pidMatch = ($listenerPid -eq $known.pid)
+                $pidWarn = ''
+                if ($listenerPid -and $known.pid -and -not $pidMatch) {
+                    $pidWarn = " ⚠️  LISTENER MISMATCH: status.json PID=$($known.pid) but actual listener PID=$listenerPid (orphan process?)"
+                    $allOk = $false
+                } elseif ($listenerPid -and -not $known.pid) {
+                    $pidWarn = " ⚠️  LISTENER ORPHAN: actual PID=$listenerPid not in status.json"
+                    $allOk = $false
+                }
+                Write-Host "  $($cfg.name.PadRight(25)) : $status  (port=$($cfg.port), pid=$($known.pid), since=$($known.started_at))$pidWarn"
             } else {
                 Write-Host "  $($cfg.name.PadRight(25)) : $status  (port=$($cfg.port))"
                 $allOk = $false

@@ -100,6 +100,39 @@ VERSION_AWARE_BOS = {
     'business_object': 'business_objects',
     'relationship': 'relationships',
 }
+
+# [V1.1.8 2026-06-15] 非 HIERARCHY_CHAIN 的 BO 的 chain 配置
+#   用途: 让 _build_chain_condition 支持 service_module / business_object
+#   例: service_module 的 parent_field=sub_domain_id, sub_domain 的 parent_field=domain_id
+#   从 service_module 向上追到 domain:
+#     service_module.sub_domain_id → sub_domains.id → sub_domains.domain_id → domains.id
+#   从 service_module 向上追到 product:
+#     service_module.sub_domain_id → sub_domains.id → ... → products.id
+#
+#   EXTENDED_CHAIN_PARENT: 每个非 HIERARCHY BO 的直接 parent_field
+#   EXTENDED_CHAIN_STEPS: 从 (非 HIERARCHY BO) 到 (HIERARCHY BO 锚点) 的步进
+EXTENDED_CHAIN_PARENT = {
+    'service_module': 'sub_domain_id',
+    'business_object': 'service_module_id',
+}
+# 锚点 HIERARCHY BO (从 EXTENDED_CHAIN_PARENT 出发, 第一跳到达的 HIERARCHY BO)
+# 后续的 chain 继续沿 HIERARCHY_CHAIN 走
+EXTENDED_CHAIN_ANCHOR = {
+    'service_module': 'sub_domain',  # SM.sub_domain_id → sub_domain
+    'business_object': 'service_module',  # BO.service_module_id → SM (再 → SD → ...)
+}
+
+# [V1.1.8 2026-06-15] 关系类 BO 的"叶子字段 + 目标 BO"映射
+#   relationship 的 source_bo_id / target_bo_id 指向 business_objects.id
+#   当 yaml 给 relationship 配 filter_type=chain, field=source_bo_id 时,
+#   _build_chain_condition 需要知道"沿 source_bo_id → business_objects → service_modules → ..."
+#   这个映射表显式告诉"chain 起点字段 + 跳到的下一级 BO"
+LEAF_CHAIN_FIELD = {
+    'relationship': {
+        'source_bo_id': 'business_object',   # 跳到 business_object
+        'target_bo_id': 'business_object',   # 跳到 business_object
+    },
+}
 ALWAYS_VISIBLE_BOS = {
     'enum_type', 'enum_value', 'user', 'role', 'user_group',
     'user_group_member', 'audit_log', 'permission', 'menu',
@@ -218,31 +251,54 @@ class DimensionScopeEngine:
                 for dim_code in expanded:
                     if not expanded[dim_code]:
                         continue
-                    binding = loader.get_field_for_bo(dim_code, resource_type)
-                    if not binding:
+                    # [V1.1.9 2026-06-15] 用 get_bindings_for_bo 拿所有 binding (multi-binding OR 合并)
+                    # 之前 get_field_for_bo 只取第一个, 导致 relationship 配的 target_bo_id 完全没用上
+                    # 现在 multi-binding (例: source_bo_id + target_bo_id) 用 OR 合并:
+                    #   source_bo_id IN (...) OR target_bo_id IN (...)
+                    # 表达"任一端在 dim scope 内"语义 (跨域 association 推导)
+                    bindings = loader.get_bindings_for_bo(dim_code, resource_type)
+                    if not bindings:
                         continue
-                    field = binding.get('field')
-                    filter_type = binding.get('filter_type', 'direct')
                     vals = sorted(expanded[dim_code])
-                    if not field or not vals:
+                    if not vals:
                         continue
 
-                    # 直接 id 过滤 (例: dimension=product, bo=product, field=id)
-                    if filter_type == 'direct' and dim_code == resource_type:
-                        if len(vals) == 1:
-                            parts.append(f"{field} = {vals[0]}")
-                        else:
-                            parts.append(
-                                f"{field} IN ({','.join(str(v) for v in vals)})"
+                    # [V1.1.9] multi-binding 内部用 OR 合并 (单 binding 时 OR 退化为单 cond)
+                    binding_parts = []
+                    for binding in bindings:
+                        field = binding.get('field')
+                        filter_type = binding.get('filter_type', 'direct')
+                        if not field:
+                            continue
+
+                        if filter_type == 'direct':
+                            if len(vals) == 1:
+                                binding_parts.append(f"{field} = {vals[0]}")
+                            else:
+                                binding_parts.append(
+                                    f"{field} IN ({','.join(str(v) for v in vals)})"
+                                )
+                        elif filter_type == 'fk':
+                            # 资源表的 field 是该维度的外键
+                            if len(vals) == 1:
+                                binding_parts.append(f"{field} = {vals[0]}")
+                            else:
+                                binding_parts.append(
+                                    f"{field} IN ({','.join(str(v) for v in vals)})"
+                                )
+                        elif filter_type == 'chain':
+                            chain_cond = self._build_chain_condition(
+                                resource_type, dim_code, vals,
+                                custom_field=field if field else None,
                             )
-                    elif filter_type == 'fk':
-                        # 资源表的 field 是该维度的外键
-                        if len(vals) == 1:
-                            parts.append(f"{field} = {vals[0]}")
+                            if chain_cond:
+                                binding_parts.append(chain_cond)
+                    if binding_parts:
+                        # 多个 binding (例: source + target) 用 OR 合并
+                        if len(binding_parts) == 1:
+                            parts.append(binding_parts[0])
                         else:
-                            parts.append(
-                                f"{field} IN ({','.join(str(v) for v in vals)})"
-                            )
+                            parts.append(f"({' OR '.join(binding_parts)})")
                     elif filter_type == 'fk_expanded':
                         # [FIX 2026-06-16] 从父维度值向下查询子维度值，再用子维度 FK 过滤
                         # 例: domain=703 → 查 sub_domains WHERE domain_id=703 → [138,139,146]
@@ -321,64 +377,167 @@ class DimensionScopeEngine:
         resource_type: str,
         target_dim: str,
         dim_vals: List[int],
+        custom_field: Optional[str] = None,
     ) -> Optional[str]:
-        """沿 HIERARCHY_CHAIN 追溯到 target_dim，构造链式 SQL
+        """沿 HIERARCHY_CHAIN 追溯到 target_dim，构造链式 SQL。
 
-        例: resource_type=domain, target_dim=product, dim_vals=[1, 17]
-          → 沿 HIERARCHY_CHAIN 找到 product 在 chain 中的位置
-          → domain 表链式 JOIN versions 表 (chain[1] 是 versions)
-          → 最后 WHERE domains.version_id IN (versions WHERE versions.product_id IN (1, 17))
-          → SQL: domain.version_id IN (SELECT id FROM versions WHERE product_id IN (1, 17))
+        通用算法 (V1.1.8 2026-06-15 重写):
+          1. 构建"节点路径" chain: 从 leaf BO 到 target_dim
+             每个节点 = (table_name, parent_field_on_this_table, parent_table)
+             - 节点 0 (leaf): table=BO 的表, parent_field=BO 的外键 (yaml 配置), parent_table=BO 父级的表
+             - 中间节点 (HIERARCHY BO): table=HIERARCHY BO 的表, parent_field=PARENT_FIELD_MAP[bo]
+             - 末节点 (target_dim): table=target_dim 的表, parent_field=None
+          2. 构造 SQL: 从最内层 (target_dim) 开始, 逐层向外包裹
+             最终: leaf_parent_field IN ( SELECT id FROM leaf_table
+                                          WHERE <node_1.parent_field> IN (
+                                            SELECT id FROM <node_1.parent_table> WHERE ...
+                                          ) )
+
+        参数:
+          resource_type: leaf BO 类型
+          target_dim: 目标维度
+          dim_vals: 目标维度的 ID 列表
+          custom_field: [V1.1.8+] 可选, yaml 中显式配置的 leaf 字段名
+            默认 None → 用 EXTENDED_CHAIN_PARENT[resource_type] 或 PARENT_FIELD_MAP[resource_type]
+            当 resource_type 的"自己的 parent_field"在 yaml 中显式给出 (如 relationship.source_bo_id),
+            用 custom_field 而不是默认的 parent_field
         """
         if target_dim not in HIERARCHY_CHAIN:
             return None
         target_idx = HIERARCHY_CHAIN.index(target_dim)
-        # resource_type 必须比 target_dim 更深, 否则不是链式
-        if resource_type not in HIERARCHY_CHAIN:
-            return None
-        res_idx = HIERARCHY_CHAIN.index(resource_type)
-        if res_idx <= target_idx:
+
+        # ─────────────── 1. 构建 chain 节点路径 ───────────────
+        chain = []  # 节点列表 [leaf, ..., target_dim]
+
+        # 确定 leaf 节点的 parent_field 和 parent_table
+        leaf_table = RESOURCE_TABLE_MAP.get(resource_type)
+        if not leaf_table:
             return None
 
-        # 收集链上每跳的 (parent_field, parent_table)
-        # 例: domain -> version -> product
-        #    domain 表 parent_field=version_id, parent_table=versions
-        #    versions 表 parent_field=product_id, parent_table=products
-        chain_steps = []
-        for i in range(res_idx, target_idx, -1):
-            child_bo = HIERARCHY_CHAIN[i]
-            parent_bo = HIERARCHY_CHAIN[i - 1]
-            parent_field = PARENT_FIELD_MAP.get(child_bo)
-            parent_table = RESOURCE_TABLE_MAP.get(parent_bo)
-            if not parent_field or not parent_table:
+        # leaf 的 parent_field 决定:
+        #   1. 如果传入了 custom_field (yaml 显式), 用 custom_field
+        #   2. 否则, 如果 resource_type 在 EXTENDED_CHAIN_ANCHOR, 用 EXTENDED_CHAIN_PARENT
+        #   3. 否则, 如果 resource_type 在 HIERARCHY_CHAIN, 用 PARENT_FIELD_MAP
+        #   4. 否则 None (无法 chain)
+        if custom_field:
+            leaf_parent_field = custom_field
+        elif resource_type in EXTENDED_CHAIN_ANCHOR:
+            leaf_parent_field = EXTENDED_CHAIN_PARENT.get(resource_type)
+        elif resource_type in HIERARCHY_CHAIN:
+            leaf_parent_field = PARENT_FIELD_MAP.get(resource_type)
+        else:
+            return None
+
+        # leaf 的 parent_table:
+        #   1. 如果 custom_field, 根据 yaml 解析 (但我们没存 — 用 anchor 推断)
+        #   2. 如果 EXTENDED, 用 EXTENDED_CHAIN_ANCHOR[resource_type] 的表
+        #   3. 如果 HIERARCHY, 用 HIERARCHY_CHAIN 中 resource_type-1 的表
+        if custom_field:
+            # custom_field 时通过 LEAF_CHAIN_FIELD 查找下一级 BO
+            # 例: relationship.source_bo_id → business_object
+            # 注意: 如果 resource_type 在 EXTENDED_CHAIN_ANCHOR 中 (如 service_module/business_object),
+            #   custom_field 实际是 yaml 中显式配的 leaf field (== EXTENDED_CHAIN_PARENT[resource_type]),
+            #   此时应该走 EXTENDED 分支, 不用 LEAF_CHAIN_FIELD
+            if resource_type in EXTENDED_CHAIN_ANCHOR:
+                # 走 EXTENDED 分支
+                leaf_parent_field = EXTENDED_CHAIN_PARENT.get(resource_type)
+                leaf_parent_table = RESOURCE_TABLE_MAP.get(EXTENDED_CHAIN_ANCHOR[resource_type])
+                if not leaf_parent_table or not leaf_parent_field:
+                    return None
+                chain.append((leaf_table, leaf_parent_field, leaf_parent_table))
+                current_bo = EXTENDED_CHAIN_ANCHOR[resource_type]
+            else:
+                # 真正的 custom_field: 通过 LEAF_CHAIN_FIELD 查下一级 BO
+                leaf_field_to_bo = LEAF_CHAIN_FIELD.get(resource_type, {})
+                next_bo = leaf_field_to_bo.get(custom_field)
+                if not next_bo:
+                    return None
+                next_bo_table = RESOURCE_TABLE_MAP.get(next_bo)
+                if not next_bo_table or not leaf_parent_field:
+                    return None
+                chain.append((leaf_table, leaf_parent_field, next_bo_table))
+                current_bo = next_bo
+        elif resource_type in EXTENDED_CHAIN_ANCHOR:
+            leaf_parent_table = RESOURCE_TABLE_MAP.get(EXTENDED_CHAIN_ANCHOR[resource_type])
+            # leaf 自己也要加进 chain
+            if not leaf_parent_table or not leaf_parent_field:
                 return None
-            chain_steps.append((parent_field, parent_table))
+            chain.append((leaf_table, leaf_parent_field, leaf_parent_table))
+            current_bo = EXTENDED_CHAIN_ANCHOR[resource_type]
+        else:
+            current_idx = HIERARCHY_CHAIN.index(resource_type)
+            if current_idx <= target_idx:
+                return None
+            parent_bo = HIERARCHY_CHAIN[current_idx - 1]
+            leaf_parent_table = RESOURCE_TABLE_MAP.get(parent_bo)
+            if not leaf_parent_table or not leaf_parent_field:
+                return None
+            chain.append((leaf_table, leaf_parent_field, leaf_parent_table))
+            current_bo = parent_bo
 
-        if not chain_steps:
+        # 继续从 chain 上"父级"走到 target_dim
+        while True:
+            if current_bo == target_dim:
+                # 终点: target_dim 节点
+                table = RESOURCE_TABLE_MAP.get(current_bo)
+                if not table:
+                    return None
+                chain.append((table, None, None))
+                break
+
+            # 判断是 EXTENDED_CHAIN 还是 HIERARCHY_CHAIN 节点
+            if current_bo in EXTENDED_CHAIN_ANCHOR:
+                # 扩展节点
+                parent_field = EXTENDED_CHAIN_PARENT.get(current_bo)
+                anchor = EXTENDED_CHAIN_ANCHOR[current_bo]
+                parent_table = RESOURCE_TABLE_MAP.get(anchor)
+                table = RESOURCE_TABLE_MAP.get(current_bo)
+                if not parent_field or not parent_table or not table:
+                    return None
+                chain.append((table, parent_field, parent_table))
+                current_bo = anchor
+            elif current_bo in HIERARCHY_CHAIN:
+                current_idx = HIERARCHY_CHAIN.index(current_bo)
+                if current_idx <= target_idx:
+                    return None
+                # HIERARCHY 节点
+                parent_field = PARENT_FIELD_MAP.get(current_bo)
+                parent_bo = HIERARCHY_CHAIN[current_idx - 1]
+                parent_table = RESOURCE_TABLE_MAP.get(parent_bo)
+                table = RESOURCE_TABLE_MAP.get(current_bo)
+                if not parent_field or not parent_table or not table:
+                    return None
+                chain.append((table, parent_field, parent_table))
+                current_bo = parent_bo
+            else:
+                return None
+
+        if len(chain) < 2:
             return None
 
-        # 构造子查询: resource 的 fk 字段 IN (SELECT id FROM ... WHERE ...)
-        # 第一跳: resource_type.parent_field 指向 chain_steps[0][0] 对应的表
-        first_field, first_table = chain_steps[0]
-        # 最后一跳: target_dim 对应的表上有 target_dim 的 id 字段
-        last_field, last_table = chain_steps[-1]
+        # ─────────────── 2. 构造 SQL ───────────────
+        vals = ', '.join(str(int(v)) for v in dim_vals)
 
-        ph = ','.join('?' * len(dim_vals))
-        # 从右往左构造子查询
-        inner = (
-            f"SELECT DISTINCT {last_field} FROM {last_table} "
-            f"WHERE id IN ({ph})"
-        )
-        params: List[Any] = list(dim_vals)
-        # 沿 chain 反向构造
-        for i in range(len(chain_steps) - 2, -1, -1):
-            cur_field, cur_table = chain_steps[i]
-            nxt_field, nxt_table = chain_steps[i + 1]
-            inner = (
-                f"SELECT DISTINCT {cur_field} FROM {cur_table} "
-                f"WHERE id IN ({inner})"
+        # cur_query 初始 = target_dim 表的 id 列表
+        # chain[-1] = (target_dim_table, None, None)
+        target_dim_table = chain[-1][0]
+        cur_query = f"SELECT DISTINCT id FROM {target_dim_table} WHERE id IN ({vals})"
+
+        # 从 chain[-2] 倒序走到 chain[0] (leaf), 每层包裹一层
+        #   chain[i] = (table, parent_field, parent_table)
+        #   要把"parent_table.id 列表"变成"table.id 列表"
+        #   = SELECT id FROM table WHERE parent_field IN (cur_query)
+        for i in range(len(chain) - 2, 0, -1):
+            table, parent_field, _ = chain[i]
+            cur_query = (
+                f"SELECT DISTINCT id FROM {table} "
+                f"WHERE {parent_field} IN ({cur_query})"
             )
-        return f"{first_field} IN ({inner})"
+        # cur_query 现在是 chain[1].parent_table 的 id 列表
+        #   chain[1].parent_table = chain[0].table
+        # SQL: leaf.parent_field IN (cur_query)
+        leaf_parent_field, _ = chain[0][1], chain[0][2]
+        return f"{leaf_parent_field} IN ({cur_query})"
 
     def _expand_down(self, parent_dim: str, child_bo: str, parent_vals: List[int]) -> Optional[Set[int]]:
         """[FIX 2026-06-16] 从父维度值向下查询，返回 child_bo 的 FK 字段应过滤的值

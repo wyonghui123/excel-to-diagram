@@ -167,7 +167,10 @@ export function useMermaidConfig() {
         //   Mermaid ELK layout 内部基于 wrappingWidth 算 foreignObject 宽度，但 edge endpoint
         //   是按 g.edgeLabel 的 translate 位置定位，不会因为 wrappingWidth 改变而错位
         wrappingWidth: 500,
-        labelPosition: 'c',
+        // [v40 修复] labelPosition 必须为 'middle' 才会把关系线上的 label 渲染在连线中间
+        //   之前误写 'c' (Mermaid 不识别), 静默 fallback 到 'start' (label 贴近源节点)
+        //   Mermaid 11 合法值: 'start' | 'middle' | 'end'
+        labelPosition: 'middle',
         defaultLinkLength: 50,
         arrowHeadWidth: 6,
         arrowHeadHeight: 6,

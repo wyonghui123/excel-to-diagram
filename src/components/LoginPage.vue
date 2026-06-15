@@ -52,10 +52,6 @@
           <span v-else>登 录</span>
         </button>
       </form>
-
-      <div class="login-footer">
-        <span>默认管理员账号: admin / admin123</span>
-      </div>
     </div>
   </div>
 </template>
@@ -218,12 +214,5 @@ async function handleLogin() {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
-}
-
-.login-footer {
-  margin-top: var(--spacing-lg);
-  text-align: center;
-  color: var(--color-text-quaternary);
-  font-size: var(--font-size-xs);
 }
 </style>

@@ -390,6 +390,8 @@ def create_app(db_path=None):
     from meta.core.interceptors.query_interceptor import QueryInterceptor
     from meta.core.interceptors.data_permission_interceptor import DataPermissionInterceptor
     from meta.core.interceptors.permission_interceptor import PermissionInterceptor
+    from meta.core.interceptors.owner_chain_interceptor import OwnerChainInterceptor
+    from meta.core.interceptors.write_scope_interceptor import WriteScopeInterceptor
     from meta.core.interceptors.owner_permission_interceptor import OwnerAutoPermissionInterceptor
     from meta.core.interceptors.hierarchy_validation_interceptor import HierarchyValidationInterceptor
     from meta.core.interceptors.enum_protection_interceptor import EnumProtectionInterceptor
@@ -409,6 +411,9 @@ def create_app(db_path=None):
     token_version_service.set_data_source(data_source)
     bo_framework.register_interceptor(ContextInterceptor())
     bo_framework.register_interceptor(VersionContextInterceptor())
+    # [V1.1.8] OwnerChainInterceptor (P25) 在 PermissionInterceptor (P30) 之前
+    #   owner chain 命中 -> 跳过 functional perm 检查
+    bo_framework.register_interceptor(OwnerChainInterceptor())
     bo_framework.register_interceptor(PermissionInterceptor())
     bo_framework.register_interceptor(DataPermissionInterceptor())
     bo_framework.register_interceptor(FieldPolicyInterceptor())
@@ -434,6 +439,11 @@ def create_app(db_path=None):
     bo_framework.register_interceptor(PersistenceInterceptor())
     bo_framework.register_interceptor(SecurityLogInterceptor())
     bo_framework.register_interceptor(OwnerAutoPermissionInterceptor())
+    # [H13 2026-06-15] WriteScopeInterceptor 写权限数据范围检查
+    #   在 OwnerAutoPermissionInterceptor 注入 owner_id 之后执行, 用注入的 owner 判定
+    #   必须在 PermissionInterceptor 之后 (functional perm 先通过才进 data scope check)
+    from meta.core.interceptors.write_scope_interceptor import WriteScopeInterceptor
+    bo_framework.register_interceptor(WriteScopeInterceptor())
     bo_framework.register_interceptor(OperationLogInterceptor())
 
     # M14 v1.0.0: Install telemetry tracer on all registered interceptors
@@ -458,6 +468,17 @@ def create_app(db_path=None):
             "Found %d failed audit log records. Use GET /api/v1/audit/failed to review.",
             _failed_total
         )
+
+    # [FR-010] 启动 audit retry worker (后台 thread, 扫 AUDIT_WRITE_FAILED 重试)
+    try:
+        from meta.services.audit_retry_worker import init_audit_retry_worker
+        logging.getLogger(__name__).info(f"[SERVER] Initializing AuditRetryWorker with data_source: {data_source}")
+        init_audit_retry_worker(data_source)
+        logging.getLogger(__name__).info("[SERVER] AuditRetryWorker started successfully")
+    except Exception as e:
+        import traceback
+        logging.getLogger(__name__).error(f"[SERVER] AuditRetryWorker init failed: {e}")
+        logging.getLogger(__name__).error(traceback.format_exc())
 
     task_scheduler = TaskScheduler(
         data_source=data_source,
@@ -698,14 +719,14 @@ def create_app(db_path=None):
     init_socketio(app)
 
     # Phase 3: 标准 CRUD 路由废弃中间件
+    # 仍然有效的 v1 路径前缀 (放行) - 包括业务关系、认证、系统、特殊路由
     V1_SPECIAL_PREFIXES = {
         'relationships', 'business_object', 'annotations', 'audit', 'meta',
-        'analytics', 'enums', 'enum-types', 'enum-values', 'auth', 'menu-permission',
-        'notifications', 'import', 'export', 'import-export',
-        'permission-rules', 'management-dimensions', 'roles', 'user-groups',
-        'permission-bundles', 'role-menus', 'role-dimension-scopes',
-        'filter-variants', 'permission-audit', 'bo', 'users',
-        'data-permissions', 'associations', 'identity', 'meta-actions',
+        'analytics', 'enums', 'enum-types', 'enum-values', 'auth',
+        'import', 'export', 'import-export',
+        'role-menus', 'role-dimension-scopes',
+        'permission-audit', 'bo',
+        'meta-actions',
         'query', 'agent', 'schema', 'system', 'stats', 'manage', 'test',
         # v1.4 P2 修复：保留这些 v1 路径（与 v2 bo object_type 冲突时不迁）
         'permissions',  # /api/v1/permissions/* (FR-012 explain/check/check_intent)
@@ -715,24 +736,82 @@ def create_app(db_path=None):
         'telemetry',    # M14: /api/v1/telemetry/* (stats/traces/configure)
     }
 
+    # v1.4 P8 Sunset (2026-06-05): 应当 sunset 到 v2 的主表 CRUD 资源
+    # 顶层 5 CRUD (GET/POST/PUT/DELETE /api/v1/<resource> 和 /<id>) 会被 410 拦截
+    # 子路径 (/api/v1/<resource>/<id>/<sub> 等) 继续工作 (200)
+    V1_CRUD_MIGRATION = {
+        # v1_path_segment: v2_singular_object_type
+        'users': 'user',
+        'roles': 'role',
+        'user-groups': 'user_group',
+        'permission-bundles': 'permission_bundle',
+        'permission-rules': 'permission_rule',
+        'data-permissions': 'data_permission',
+        'management-dimensions': 'management_dimension',
+        'filter-variants': 'filter_variant',
+        'menu-permission': 'menu_permission',
+        'identity': 'identity',
+        'associations': 'association',
+        'notifications': 'notification',
+    }
+
     @app.before_request
     def deprecate_v1_crud():
-        """v1.4 P8 Sunset (2026-06-05): v1 CRUD 路径直接 410
+        """v1.4 P8 Sunset (2026-06-05): v1 主表 CRUD 路径 410, 子路径继续工作
 
-        V1_SPECIAL_PREFIXES 中的豁免路径继续工作（业务关系路由）
-        主表 CRUD 路由（/user-groups, /roles）由 endpoint 层处理
+        - V1_SPECIAL_PREFIXES 中的路径: 放行
+        - V1_CRUD_MIGRATION 中的主表:
+          - 顶层 CRUD (≤2 段): 410 拦截
+          - 子路径 (>2 段): 放行
+        - 其他 v1 路径: 410 (按 v2 名称映射)
         """
-        if request.path.startswith('/api/v1/'):
-            path_parts = request.path[len('/api/v1/'):].split('/')
-            if path_parts and path_parts[0]:
-                first_segment = path_parts[0]
-                if first_segment not in V1_SPECIAL_PREFIXES:
-                    return jsonify({
-                        'error': 'API Moved',
-                        'message': f'{request.method} {request.path} has moved to /api/v2/bo/{first_segment}',
-                        'migrated_at': '2026-05-14',
-                        'sunset_at': '2026-06-05'
-                    }), 410
+        if not request.path.startswith('/api/v1/'):
+            return None
+
+        path_parts = request.path[len('/api/v1/'):].split('/')
+        if not path_parts or not path_parts[0]:
+            return None
+
+        first_segment = path_parts[0]
+
+        # 1) 在 V1_SPECIAL_PREFIXES 中的路径: 放行
+        if first_segment in V1_SPECIAL_PREFIXES:
+            return None
+
+        # 2) 在 V1_CRUD_MIGRATION 中的主表资源
+        if first_segment in V1_CRUD_MIGRATION:
+            # 精细化拦截: 仅顶层 CRUD 拦截
+            # - 1 段: /<resource>  -> 410 (CRUD list)
+            # - 2 段 + 第二段是整数: /<resource>/<id>  -> 410 (CRUD by id)
+            # - 2 段 + 第二段非整数: /<resource>/<sub>  -> 200 (子路径, e.g. /users/me)
+            # - >2 段: /<resource>/<id>/<sub>  -> 200 (子路径)
+            non_empty_parts = [p for p in path_parts if p]
+            if len(non_empty_parts) == 1:
+                # 1 段: 顶层 CRUD list
+                pass  # 走 410
+            elif len(non_empty_parts) == 2 and non_empty_parts[1].isdigit():
+                # 2 段 + 第二段是整数: 顶层 CRUD by id
+                pass  # 走 410
+            else:
+                # 子路径: 放行让 Blueprint 处理
+                return None
+            v2_target = V1_CRUD_MIGRATION[first_segment]
+        else:
+            # 3) 其他 v1 路径: 410 拦截 (按 v2 名称映射)
+            v2_target = first_segment
+
+        # 构造 v2 路径
+        v2_path = f'/api/v2/bo/{v2_target}'
+        if len(path_parts) > 1 and path_parts[1]:
+            v2_path += '/' + '/'.join(path_parts[1:])
+
+        return jsonify({
+            'error': 'API Moved',
+            'message': f'{request.method} {request.path} has moved to {v2_path}',
+            'migrated_to': v2_path,
+            'migrated_at': '2026-05-14',
+            'sunset_at': '2026-06-05'
+        }), 410
 
     # v1.4 P8 Sunset: 已移除 add_v1_deprecation_headers 中间件
     # v1 豁免路径不再加 Deprecation/Sunset 响应头

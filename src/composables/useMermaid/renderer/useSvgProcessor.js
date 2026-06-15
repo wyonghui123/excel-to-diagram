@@ -2,6 +2,7 @@ import { useSvgStyle } from '../style/useSvgStyle.js'
 import { useTooltip } from '../tooltip/useTooltip.js'
 import { useAnnotation, useAnnotationOverlay } from '../annotation/index.js'
 import { useInteraction } from '../interaction/useInteraction.js'
+import { isBidirectionalLink } from '../syntax/_shared/arrowHelper.js'
 
 /**
  * SVG 后处理逻辑
@@ -93,17 +94,37 @@ export function useSvgProcessor(options) {
 
   /**
    * 添加关系连线编码属性
+   * [v34 修复] 使用精确匹配 (===) 而非 includes,
+   *   因为 relationCode 常是子串 (如 'CALLS' 出现在 'RECALLS' 中),
+   *   includes 会导致所有 edgeLabel 都被错误标为同一个 relationCode
+   *
+   * [v40.1 修复] 之前只匹配 link.relationCode / link.relationDesc, 不匹配 link.code (实例编码)
+   *   后果: arch data 路径下, SVG label 显示的是 link.code (关系实例编码 e.g. "BO_INBOUND_BO_INBOUND_L_01"),
+   *         而 addBidirectionalAttributes 通过 relationCode (类型编码 e.g. "BELONGS_TO") 来识别双向边
+   *         → labelText ("BO_INBOUND...") !== link.relationCode ("BELONGS_TO")
+   *         → data-relation-code 属性永远不设, 双向边无法被识别, marker-start 缺失
+   *   修复: 同时匹配 link.code / link.relationCode / link.relationDesc,
+   *         找到匹配后用 matchedLink.relationCode 设 data-relation-code (addBidirectionalAttributes 仍按 relationCode 匹配)
    */
   const addLinkCodeAttributes = (svgEl, diagramData) => {
     if (!diagramData || !diagramData.links) return
 
     const edgeLabels = svgEl.querySelectorAll('.edgeLabel')
     edgeLabels.forEach(edgeLabel => {
-      const labelText = edgeLabel.textContent || ''
-      const matchedLink = diagramData.links.find(link =>
-        labelText.includes(link.relationDesc || '') ||
-        labelText.includes(link.relationCode || '')
-      )
+      const labelText = (edgeLabel.textContent || '').trim()
+      if (!labelText) return
+
+      // [v40.1 关键修复] 同时匹配 3 个字段 (优先级: code > relationCode > relationDesc)
+      //   code: 关系实例编码 (arch data 路径下的 label 文本)
+      //   relationCode: 关系类型编码 (Excel 导入 / 旧版本下的 label 文本)
+      //   relationDesc: 关系描述 (兜底)
+      const matchedLink = diagramData.links.find(link => {
+        if (link.code && link.code === labelText) return true
+        if (link.relationCode && link.relationCode === labelText) return true
+        if (link.relationDesc && link.relationDesc === labelText) return true
+        return false
+      })
+
       if (matchedLink && matchedLink.relationCode) {
         const edgeGroup = edgeLabel.closest('g')
         if (edgeGroup) {
@@ -111,6 +132,86 @@ export function useSvgProcessor(options) {
         }
       }
     })
+
+    // [v40.2 诊断] 输出标记的 edgeLabel 数量
+    const labeledCount = svgEl.querySelectorAll('g.edgeLabel[data-relation-code]').length
+    const sampleCodes = Array.from(svgEl.querySelectorAll('g.edgeLabel[data-relation-code]'))
+      .slice(0, 5)
+      .map(el => el.getAttribute('data-relation-code'))
+    console.log('[v40.2 诊断] addLinkCodeAttributes: marked %d edgeLabels with data-relation-code, sample=%s',
+      labeledCount, JSON.stringify(sampleCodes))
+  }
+
+  /**
+   * [v34 双向支持] 添加 data-bidirectional 属性到双向边的 path 元素
+   * 供 fixArrowMarkers 检测后设置 marker-start
+   *
+   * Mermaid 11 SVG 结构:
+   *   svg
+   *   ├─ g.edges.edgePaths  (容器, 35 子元素)
+   *   │   └─ g.edgePath (单条边的 path 容器)
+   *   │       └─ path
+   *   └─ g.edgeLabels
+   *       └─ g.edgeLabel  ← addLinkCodeAttributes 在此设 data-relation-code
+   *
+   * edgePath 和 edgeLabel 按 document 顺序一一对应 (都是 N 条)
+   *
+   * [v1.5 修复 2026-06-15] 改用 isBidirectionalLink() (来自 arrowHelper.js)
+   *   数据库 relation_direction 存的是 'BIDIRECTIONAL' (英文 enum code)
+   *   之前用 === '双向' (中文) 永远 false → 双边属性永远不设 → 双向边变成单向边
+   */
+  const addBidirectionalAttributes = (svgEl, diagramData) => {
+    if (!diagramData || !diagramData.links) {
+      console.log('[v40.2 诊断] addBidirectionalAttributes: no diagramData.links')
+      return
+    }
+
+    // 1. 收集所有双向 link 的 relationCode (用 isBidirectionalLink 统一判断)
+    const bidiCodes = new Set(
+      (diagramData.links || [])
+        .filter(link => isBidirectionalLink(link))
+        .map(link => link.relationCode)
+        .filter(Boolean)
+    )
+    console.log('[v40.2 诊断] addBidirectionalAttributes: totalLinks=%d, bidiCodes=%d, codes=%s',
+      (diagramData.links || []).length, bidiCodes.size, JSON.stringify([...bidiCodes]))
+
+    if (bidiCodes.size === 0) return
+
+    // 2. 按 document 顺序收集所有带 data-relation-code 的 g.edgeLabel
+    const labeledEls = Array.from(svgEl.querySelectorAll('g.edgeLabel[data-relation-code]'))
+    if (labeledEls.length === 0) return
+
+    // 3. 按 document 顺序收集所有 g.edgePath (单条边的 path 容器)
+    const edgePathEls = Array.from(svgEl.querySelectorAll('g.edges.edgePaths > g.edgePath'))
+    if (edgePathEls.length === 0) {
+      // 兼容旧结构: path.flowchart-link 直接放在 svg 下
+      const flowLinks = Array.from(svgEl.querySelectorAll('path.flowchart-link'))
+      labeledEls.forEach((el, idx) => {
+        const code = el.getAttribute('data-relation-code')
+        if (!bidiCodes.has(code)) return
+        if (flowLinks[idx]) {
+          flowLinks[idx].setAttribute('data-bidirectional', 'true')
+        }
+      })
+      return
+    }
+
+    // 4. 按索引配对: edgeLabel[i] ↔ edgePath[i]
+    let bidiEdgesMarked = 0
+    labeledEls.forEach((el, idx) => {
+      const code = el.getAttribute('data-relation-code')
+      if (!bidiCodes.has(code)) return
+      const edgePathG = edgePathEls[idx]
+      if (!edgePathG) return
+      // 给该 g.edgePath 内所有 path 设 data-bidirectional
+      const paths = edgePathG.querySelectorAll('path')
+      paths.forEach(p => {
+        p.setAttribute('data-bidirectional', 'true')
+      })
+      bidiEdgesMarked++
+    })
+    console.log('[v40.2 诊断] addBidirectionalAttributes: marked %d paths with data-bidirectional=true', bidiEdgesMarked)
   }
 
   /**
@@ -127,16 +228,21 @@ export function useSvgProcessor(options) {
    * 必须在 Mermaid.run() 之后 + 浏览器布局完成（nextTick/requestAnimationFrame）之后调用
    * 因为要读取 innerDiv.getBoundingClientRect() 的实际值
    *
-   * 安全策略：
-   *   - 只调整 foreignObject > div.labelBkg 的内联样式（max-width/white-space/padding）
-   *   - 绝不修改 foreignObject 的 width/height 属性（避免 v22 端点错位 bug）
-   *   - 调整 viewBox 给溢出文字留空间
+   * 安全策略（v33 改进）:
+   *   - 测 labelBkg.getBoundingClientRect().width 作为内容真实宽度
+   *   - 调整 foreignObject width 属性 + x 属性（x 对称偏移保持中心）
+   *   - 同步调整 rect 背景框宽度
+   *   - 跟 v22 fixNodeRectSize 端点错位 bug 的区别：保持中心点位置不变
    */
   const fixEdgeLabelSize = (svgEl) => {
     if (!svgEl) return
     // 强制 reflow 一次再读取
     void svgEl.getBoundingClientRect()
     svgStyle.fixEdgeLabelOverflow(svgEl)
+    // [v40 关键修复] Mermaid 11.13.0 不支持 flowchart.labelPosition 配置
+    // 强制把 edgeLabel 移到连线中点, 必须在 fixEdgeLabelOverflow 之后调用
+    // (fixEdgeLabelOverflow 先调整了 foreignObject width, 需要读到正确宽度)
+    svgStyle.forceEdgeLabelToMidpoint(svgEl)
   }
 
   /**
@@ -437,6 +543,17 @@ export function useSvgProcessor(options) {
     const hideTails = props.layoutEngine === 'elk' || props.diagramData?.hideLinkLabelTails === true
 
     fixViewBox(svgEl)
+
+    // [v34 关键修复] 必须在 applyStyleFixes (含 fixArrowMarkers) 之前
+    //   调用 addLinkCodeAttributes + addBidirectionalAttributes,
+    //   这样 fixArrowMarkers 才能看到 data-bidirectional='true' 并设置 marker-start
+    if (props.diagramData) {
+      addNodeCodeAttributes(svgEl, props.diagramData)
+      addContainerCodeAttributes(svgEl, props.diagramData)
+      addLinkCodeAttributes(svgEl, props.diagramData)
+      addBidirectionalAttributes(svgEl, props.diagramData)
+    }
+
     applyStyleFixes(svgEl, props.diagramType, mermaidContainer, props.diagramData?.textColor)
     addTooltips(svgEl, relationDescriptions, props.diagramType, hideTails)
 
@@ -449,14 +566,58 @@ export function useSvgProcessor(options) {
 
     reorderZoneRows(svgEl)
 
-    if (props.diagramData) {
-      addNodeCodeAttributes(svgEl, props.diagramData)
-      addContainerCodeAttributes(svgEl, props.diagramData)
-      addLinkCodeAttributes(svgEl, props.diagramData)
-    }
-
     if (props.annotationConfig) {
       renderAnnotationOverlay(svgEl, props.diagramData, props.diagramType, props.annotationConfig, nodeColorMappings)
+    }
+
+    // [v33 关键修复] 调用 fixEdgeLabelSize, 必须在 layout 完成后
+    // 用 requestAnimationFrame 等浏览器完成 reflow
+    // 之前 fixEdgeLabelSize 导出后从未调用, 导致 v32 CSS 修复只在初次渲染生效
+    // ELK 二次布局/全屏切换后宽度变化时, 右边字符仍被截掉
+    scheduleEdgeLabelFix(svgEl)
+  }
+
+  /**
+   * [v33] 调度 edge label 宽度修复
+   * 使用 requestAnimationFrame 等浏览器完成 reflow
+   * 然后再补一次 (双 rAF) 应对某些浏览器的延迟 layout
+   */
+  const scheduleEdgeLabelFix = (svgEl) => {
+    if (!svgEl) return
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          try {
+            fixEdgeLabelSize(svgEl)
+          } catch (e) {
+            console.warn('[useSvgProcessor.scheduleEdgeLabelFix] failed:', e)
+          }
+        })
+      })
+    } else {
+      // 非浏览器环境 (jsdom) 退化
+      setTimeout(() => {
+        try {
+          fixEdgeLabelSize(svgEl)
+        } catch (e) {
+          console.warn('[useSvgProcessor.scheduleEdgeLabelFix] failed:', e)
+        }
+      }, 0)
+    }
+  }
+
+  /**
+   * 清理 svgProcessor 注册的监听器 + 装饰元素
+   * 内部调用 tooltip.cleanup() (useTooltip.js)
+   * 修复: 之前 return 中引用了未定义的 cleanup, 导致 ReferenceError
+   */
+  const cleanup = () => {
+    if (tooltip && typeof tooltip.cleanup === 'function') {
+      try {
+        tooltip.cleanup()
+      } catch (e) {
+        console.warn('[useSvgProcessor.cleanup] tooltip.cleanup failed:', e)
+      }
     }
   }
 
@@ -483,9 +644,8 @@ export function useSvgProcessor(options) {
     renderAnnotationOverlay,
     setupCanvasLayout,
     processSvg,
-    // 关键导出 v32 (2026-06-13): cleanup 函数, 解决 setup 阶段 ReferenceError
-    // 修复: 之前 return 中引用了未定义的 cleanup (仅 export 无函数), 触发 ReferenceError
-    // 现在 cleanup 内部调用 tooltip.cleanup() 来释放事件监听器
+    // [v34 双向支持] 导出 addBidirectionalAttributes 以便单测覆盖
+    addBidirectionalAttributes,
     cleanup,
     // 关键导出 v26：导出 buildColorLegendData 让 HTML 导出器复用 legend 逻辑
     buildColorLegendData

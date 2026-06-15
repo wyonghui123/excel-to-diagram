@@ -94,8 +94,7 @@ class TestE2EParentReadAdvisory(unittest.TestCase):
         url = f'{BASE_URL}/api/v2/bo/version'
         body = {
             'product_id': 1,
-            'version_code': 'TEST_V101',
-            'version_name': 'TEST v1.0.1',
+            'name': 'TEST v1.0.1',  # [CHANGED 2026-06-13] version.code 已删除, name 作为业务键
         }
         resp = self.session.post(url, json=body, timeout=10)
         # 不应是 403 (audit-only 不阻塞)

@@ -12,6 +12,7 @@ audit_bp = Blueprint('audit', __name__)
 
 from meta.core.datasource import get_data_source
 from meta.api.auth_api import login_required, is_admin
+from meta.services.auth_middleware import get_current_user
 
 _data_source = None
 
@@ -20,6 +21,22 @@ def init_audit_services(data_source=None):
     """初始化审计服务"""
     global _data_source
     _data_source = data_source
+
+
+def _require_audit_log_read():
+    """[BMRD-2026-06-14] 审计日志读权限校验 — admin/* 旁路, 否则需要 audit_log:read."""
+    user = get_current_user()
+    if user and is_admin(user):
+        return None
+    if user:
+        perms = user.get('permissions', []) or []
+        if '*' in perms or 'admin' in perms or 'audit_log:read' in perms:
+            return None
+    return jsonify({
+        'success': False,
+        'message': '缺少权限: audit_log:read',
+        'error_code': 'permission.audit_log.read.missing',
+    }), 403
 
 # 业务对象元数据定义 - 定义各对象类型的business key配置
 BUSINESS_KEY_METADATA = {
@@ -93,6 +110,9 @@ BUSINESS_KEY_METADATA = {
 @login_required
 def get_audit_logs():
     """查询审计日志列表"""
+    perm_check = _require_audit_log_read()
+    if perm_check:
+        return perm_check
     try:
         # 获取查询参数
         page = request.args.get('page', 1, type=int)
@@ -116,6 +136,16 @@ def get_audit_logs():
         conditions = []
         params = []
 
+        # [FIX 2026-06-15] 默认过滤审计系统自监控记录:
+        # - __audit_failure__ 是 async_audit_writer 在 audit 写入失败时 fallback 记的元记录
+        #   (id=object_id=0, action=UNKNOWN), 对业务查询无意义
+        #   但 detail 页面 OR 联合查询时会混入, 拖慢查询 + 干扰 UI 显示
+        # - escape hatch: admin 可通过 ?include_internal=true 显式查询内部记录
+        #   用于监控 audit 系统健康度 (AsyncAuditWriter / AuditRetryWorker 的运维视图)
+        include_internal = request.args.get('include_internal', 'false').lower() == 'true'
+        if not include_internal:
+            conditions.append("object_type != '__audit_failure__'")
+
         if action:
             conditions.append("action = ?")
             params.append(action)
@@ -128,39 +158,53 @@ def get_audit_logs():
             conditions.append("object_id = ?")
             params.append(object_id)
 
-        # [FIX 2026-06-12] parent_object 查询逻辑:
+        # [FIX 2026-06-12 + 2026-06-14] parent_object 查询逻辑:
         # - 同时传 (object_type+object_id) 和 (parent_object_type+parent_object_id) 时, 用 OR 联合查询
         #   (角色自身日志 + 角色子对象日志一起返回)
         # - 只传 (parent_object_type+parent_object_id) 时, 走纯 parent_object 查询
         # - 只传 (object_type+object_id) 时, 走纯 object 查询 (向后兼容)
+        # - [FIX 2026-06-14] 只传 parent_object_id (不传 parent_object_type) 时, 也要走 OR 联合
+        #   原因: HistorySection 对所有对象 (domain/sub_domain/relationship 等) 默认传
+        #         parent_object_id=<自身id> 让查询覆盖 "自身日志 + 子对象日志". 这些对象的日志
+        #         自身 parent_object_type 可能是 version/dimension 等其他类型, 所以不传
+        #         parent_object_type; 仅用 parent_object_id 走 OR 联合才能正确返回 (object_id=683) 的日志.
+        #   旧逻辑 (BUG): 单传 parent_object_id 会 AND 一个 parent_object_id=? 条件, 与 object_id 收窄到 0 条
         # 重要: 走 OR 联合时, 必须 pop 掉前面已经加的 (object_type + object_id) 条件,
         #       否则会被 AND 收窄到 0 条
-        if parent_object_type and parent_object_id:
+        def _pop_object_conditions():
+            """移除已添加的 object_type + object_id 单独条件, 改用 OR 联合"""
+            for expected in ("object_id = ?", "object_type = ?"):
+                if conditions and conditions[-1] == expected:
+                    conditions.pop()
+                    params.pop()
+
+        if parent_object_id:
+            # 任意 parent_object_id 传了 + (object_type+object_id) 也传了 -> OR 联合
             if object_type and object_id:
-                # 移除刚才加的 object_type + object_id 单独条件, 改用 OR 联合
-                if conditions and conditions[-1] == "object_id = ?":
-                    conditions.pop()
-                    params.pop()
-                if conditions and conditions[-1] == "object_type = ?":
-                    conditions.pop()
-                    params.pop()
-                conditions.append(
-                    f"((object_type = ? AND object_id = ?) OR "
-                    f"(parent_object_type = ? AND parent_object_id = ?))"
-                )
-                params.extend([object_type, object_id, parent_object_type, parent_object_id])
+                _pop_object_conditions()
+                if parent_object_type:
+                    conditions.append(
+                        f"((object_type = ? AND object_id = ?) OR "
+                        f"(parent_object_type = ? AND parent_object_id = ?))"
+                    )
+                    params.extend([object_type, object_id, parent_object_type, parent_object_id])
+                else:
+                    conditions.append(
+                        f"((object_type = ? AND object_id = ?) OR "
+                        f"(parent_object_id = ?))"
+                    )
+                    params.extend([object_type, object_id, parent_object_id])
             else:
-                # 仅 parent_object 查询
-                conditions.append("parent_object_type = ?")
-                params.append(parent_object_type)
+                # 仅 parent_object_id 查询
+                if parent_object_type:
+                    conditions.append("parent_object_type = ?")
+                    params.append(parent_object_type)
                 conditions.append("parent_object_id = ?")
                 params.append(parent_object_id)
         elif parent_object_type:
+            # 仅 parent_object_type 查询 (罕见)
             conditions.append("parent_object_type = ?")
             params.append(parent_object_type)
-        elif parent_object_id:
-            conditions.append("parent_object_id = ?")
-            params.append(parent_object_id)
 
         if user_name:
             conditions.append("user_name LIKE ?")
@@ -256,6 +300,9 @@ def get_audit_logs():
 @login_required
 def get_audit_log_detail(log_id):
     """查询审计日志详情"""
+    perm_check = _require_audit_log_read()
+    if perm_check:
+        return perm_check
     try:
         cursor = _data_source.execute("""
             SELECT id, object_type, object_id, action, field_name, old_value, new_value,
@@ -306,6 +353,9 @@ def get_audit_log_detail(log_id):
 @login_required
 def export_audit_logs():
     """导出审计日志为CSV"""
+    perm_check = _require_audit_log_read()
+    if perm_check:
+        return perm_check
     try:
         # 获取查询参数
         action = request.args.get('action', '')
@@ -417,6 +467,9 @@ def get_failed_audit_logs():
 @login_required
 def get_audit_overview():
     """获取审计日志统计概览"""
+    perm_check = _require_audit_log_read()
+    if perm_check:
+        return perm_check
     try:
         # 按操作类型统计
         cursor = _data_source.execute("""
@@ -611,6 +664,71 @@ def _generate_business_key(data_source, object_type: str, object_id: str, field_
             import traceback
             traceback.print_exc()
             return f"{object_type}:{object_id}"
+
+
+@audit_bp.route('/retry/status', methods=['GET'])
+@login_required
+def get_retry_worker_status():
+    """获取 audit retry worker 状态"""
+    if not is_admin():
+        return jsonify({'success': False, 'message': '需要管理员权限'}), 403
+
+    try:
+        from meta.services.audit_retry_worker import get_audit_retry_worker
+
+        worker = get_audit_retry_worker()
+        if worker is None:
+            return jsonify({
+                'success': True,
+                'data': {
+                    'running': False,
+                    'message': 'Retry worker not initialized'
+                }
+            })
+
+        stats = worker.get_stats()
+        return jsonify({
+            'success': True,
+            'data': {
+                'running': True,
+                'interval_sec': worker._interval,
+                'batch_size': worker._batch_size,
+                'stats': stats
+            }
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@audit_bp.route('/retry/trigger', methods=['POST'])
+@login_required
+def trigger_retry_worker():
+    """手动触发 audit retry worker 执行一次"""
+    if not is_admin():
+        return jsonify({'success': False, 'message': '需要管理员权限'}), 403
+
+    try:
+        from meta.services.audit_retry_worker import get_audit_retry_worker
+
+        worker = get_audit_retry_worker()
+        if worker is None:
+            return jsonify({'success': False, 'message': 'Retry worker not initialized'}), 500
+
+        # 手动触发一次扫描
+        worker._scan_and_retry()
+
+        stats = worker.get_stats()
+        return jsonify({
+            'success': True,
+            'message': 'Retry worker triggered',
+            'data': stats
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 def _extract_deleted_data(extra_data_raw) -> dict:

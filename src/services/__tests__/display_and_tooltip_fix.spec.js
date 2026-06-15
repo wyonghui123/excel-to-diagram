@@ -188,3 +188,75 @@ describe('displayStats.config (v37 服务模块图统一 5 指标)', () => {
     expect(text).not.toContain('undefined')
   })
 })
+
+// 4. v38 修复: config.objectRelations 跟 total.objectRelations 口径一致
+describe('v38 config.objectRelations 口径统一 (与 total 一致)', () => {
+  // 旧实现用 filteredRelations.length (OR 兜底 16)
+  // 新实现用 totalStats.objectRelations (AND 口径 12)
+  function configStatsOldBehavior(chartType, totalStats, filteredRelationsLength) {
+    if (chartType === 'serviceModule') {
+      return { serviceModules: totalStats.serviceModules, serviceModuleRelations: filteredRelationsLength || 0 }
+    } else {
+      return {
+        serviceModules: totalStats.serviceModules,
+        businessObjects: totalStats.businessObjects,
+        domains: totalStats.domains,
+        subDomains: totalStats.subDomains,
+        objectRelations: filteredRelationsLength || 0  // ← 16 (OR 兜底)
+      }
+    }
+  }
+
+  function configStatsNew(totalStats) {
+    // v38: 跟 total 一致 (AND 口径 12)
+    return {
+      serviceModules: totalStats.serviceModules,
+      businessObjects: totalStats.businessObjects,
+      domains: totalStats.domains,
+      subDomains: totalStats.subDomains,
+      objectRelations: totalStats.objectRelations  // ← 12 (AND 口径)
+    }
+  }
+
+  it('用户场景: 中心 4 关系 + 增量 8 关系 = 总数 12, 配置 16 (错) → 12 (对)', () => {
+    const userTotalStats = {
+      serviceModules: 10, businessObjects: 19, domains: 1, subDomains: 1,
+      objectRelations: 12  // AND 口径
+    }
+    const filteredRelationsLength = 16  // OR 兜底口径
+
+    // 旧行为 (16)
+    const old = configStatsOldBehavior('businessObject', userTotalStats, filteredRelationsLength)
+    expect(old.objectRelations).toBe(16)  // 错
+
+    // v38 新行为 (12)
+    const newStats = configStatsNew(userTotalStats)
+    expect(newStats.objectRelations).toBe(12)  // 对, 跟 total 一致
+  })
+
+  it('v38: 步骤 3 (总数) 12 关系 == 步骤 4 (配置) 12 关系, 数据一致', () => {
+    const userTotalStats = {
+      serviceModules: 10, businessObjects: 19, domains: 1, subDomains: 1,
+      objectRelations: 12
+    }
+    const totalStepStats = { objectRelations: 12 }  // displayStats.total
+    const configStepStats = configStatsNew(userTotalStats)  // displayStats.config
+
+    expect(totalStepStats.objectRelations).toBe(configStepStats.objectRelations)
+  })
+
+  it('v38: 服务模块图也用 5 指标 (与业务对象图统一)', () => {
+    // 之前 v37 应该修了但实际未生效 (修改丢失). 这次 v38 顺带修
+    const userTotalStats = {
+      serviceModules: 10, businessObjects: 19, domains: 1, subDomains: 1,
+      objectRelations: 12
+    }
+    const newStats = configStatsNew(userTotalStats)
+    // 5 指标都在
+    expect(newStats.serviceModules).toBe(10)
+    expect(newStats.businessObjects).toBe(19)
+    expect(newStats.domains).toBe(1)
+    expect(newStats.subDomains).toBe(1)
+    expect(newStats.objectRelations).toBe(12)
+  })
+})

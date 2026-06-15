@@ -39,6 +39,8 @@
 | 1.2 | 废弃双写策略，改为运行时动态展开（SSoT 原则 + 头部产品做法） |
 | 1.3 | 补充 FR-009/010/011 保留 owner/draft 内容 |
 | **1.4** | **SAP 深度研究启发**：<br>- **FR-005 重定位**："重复配置警告" → "匹配预览"（SAP SU53 Trace 启发）<br>- **新增 FR-012 Match Preview API**：用户可查询"实际生效的 SQL + 命中数"<br>- **新增 FR-013 SU24 等价物**：菜单-BO 权限自动关联（事务码 → Authorization Object 启发）<br>- **新增 FR-014 嵌套 aspect 支持**：aspect 可引用其他 aspect（DCL `inherit` 启发）<br>- **FR-009 增强**：Owner 过滤支持多种身份 aspect（`current_user`/`user_group`/`pfcg_auth`）<br>- **FR-006 增强**：Phase 2 性能优化路径（缓存 + 预解析），对齐 SAP DCL Code-to-Data<br>- **TBD-6 重定位**：升级为 FR-012 "匹配预览"，符合头部产品 user mental model |
+| **1.5** | **Bug 修复 (BMRD-2026-06-14, BugID: TEST888-version-invisible)**：<br>- **新增 FR-018 括号感知 scope 表达式解析**：`_parse_scope_expression` 必须跟踪括号深度和字符串字面量边界，只在 `depth=0` 且不在引号内时把 `OR` 当顶层关键字；避免 `IN (SELECT ... WHERE ... OR ...)` 子查询被误切，导致 SQL 报 `incomplete input`。<br>- 触发场景：用户角色为空时走 BO yaml `authorization.scope`，6/8 个 BO（version/domain/sub_domain/service_module/business_object/relationship）默认都带 `IN (SELECT ... OR ...)`，全部中招。<br>- 修复：手写状态机替换 `re.split(r'\s+OR\s+', ...)`；新增 4 条回归单测覆盖 IN 子查询/嵌套/字符串字面量/端到端。 |
+| **1.6** | **FR-013 轻量版落地 (BMRD-2026-06-14, BugID: TEST888-relationship-invisible)**：<br>- **根因**：菜单的 `required_permissions` 只是元数据声明，运行时权限检查走 `role_permissions` 表，两者无自动同步 → 角色绑菜单后做具体操作 403。<br>- **修复**：在 `init_menu_permissions.py` 新增步骤 7.7 "展开菜单权限到角色"，把 `role_menu_permissions` 关联的菜单的 `required_permissions` 自动 grant 到 `role_permissions`（幂等：已存在跳过）。<br>- **触发场景**：架构数据管理页 (`arch-data`) 的 `bo_bindings` 加 `relationship` 派生 BO；TEST888 角色绑 `arch-data` 菜单 → 自动获得 `relationship:read/list/export`。<br>- **设计取舍**：init-time 展开（vs runtime 推导），避免热路径性能开销；类比 SAP SU24 事务码→默认 Authorization Object。<br>- **测试覆盖**：2 个回归 case（首次 grant + 二次幂等），3/3 PASS。 |
 
 ---
 
@@ -581,6 +583,30 @@
   - **FR-012 Match Preview**：Intent 权限计算可生成预览 SQL（SAP SU53 启发）
 - **参考文档**:
   - [rfc_action_service_unified_model.md](./rfc_action_service_unified_model.md) — v2.0 完整 RFC
+
+### FR-018: 括号感知的 scope 表达式解析 (BMRD-2026-06-14)
+
+> **问题**: 原 `_parse_scope_expression` 用 `re.split(r'\s+OR\s+', expr, re.IGNORECASE)` 拆分顶层 OR，但该正则不识别括号边界，会把 `IN (SELECT ... WHERE ... OR ...)` 子查询里的 OR 也切开，生成 `product_id IN (SELECT ... visibility = 'public'` 这种未闭合的左括号碎片，下游 SQL 拼接后数据库报 `incomplete input`（HTTP 400）。
+
+> **触发场景**: 用户角色为空（无显式数据权限）时，`_apply_scope_filter` 走 BO yaml `authorization.scope`。当前 6/8 个 BO（version / domain / sub_domain / service_module / business_object / relationship）的默认 scope 都是 `IN (SELECT ... WHERE p.visibility = 'public' OR p.owner_id = $user.id)` 形式，全部中招。
+
+- **要求 1（语法）**: scope 表达式语法允许以下嵌套结构，解析器必须正确处理：
+  - **IN 子查询 + 顶层 OR**：`product_id IN (SELECT id FROM products WHERE visibility = 'public' OR owner_id = $user.id)` — 子查询内的 OR **不切**
+  - **嵌套 IN 子查询**：`version_id IN (SELECT v.id FROM versions v WHERE v.product_id IN (SELECT id FROM products WHERE visibility = 'public'))` — 外层和内层的 IN 都保留
+  - **字符串字面量内的 OR**：`name = 'A OR B' OR id = 5` — 字符串内 OR 当普通字符，顶层 OR 正常切
+- **要求 2（实现）**: 解析器采用**括号感知状态机**：
+  1. 跟踪 `(` / `)` 维护 `depth`
+  2. 跟踪 `'` / `"` 维护 `in_string` 和 `string_char`
+  3. 仅当 `depth == 0 and not in_string` 时把 `OR` 当顶层关键字
+  4. `OR` 前后必须有空白边界（`\sOR\s`），避免误切 `ORDER` / `FLOOR` 等
+- **要求 3（回归测试）**: 必须有覆盖以下 4 个 case 的单测：
+  1. `IN (SELECT ... OR ...)` 子查询内 OR 不切
+  2. 嵌套 `IN (SELECT ... IN (SELECT ...))` 不切
+  3. 字符串字面量 `'<...OR...>'` 内 OR 不切
+  4. 端到端 `_apply_scope_filter` 接收 version.yaml 真实 scope 不报错
+- **影响范围**: 8/8 BO yaml（product / version / domain / sub_domain / service_module / business_object / relationship / aspects）全部受益，无需改 yaml
+- **测试入口**: `python d:\filework\test.py --file meta\tests\test_data_permission_interceptor.py`（24 cases，1.04s）
+- **BugID**: BMRD-2026-06-14 / TEST888-version-invisible
 
 ## 4. Nonfunctional Requirements
 

@@ -160,6 +160,12 @@ def get_config(object_type):
             'message': f'Unknown object type: {object_type}'
         }), 404
 
+    # [DEBUG_MARK_20260615_1625] 用以验证后端是否使用最新代码
+    import sys as _sys
+    import os as _os
+    _src_path = _os.path.abspath(__file__)
+    _src_mtime = _os.path.getmtime(_src_path)
+    logger.warning(f"[DEBUG_MARK_20260615] ENTERED preview/{object_type}, file={_src_path}, mtime={_src_mtime}, pid={_os.getpid()}, has_engine={_engine is not None}")
     key_template_raw = getattr(meta_object, 'key_template', None)
     if not key_template_raw:
         return jsonify({

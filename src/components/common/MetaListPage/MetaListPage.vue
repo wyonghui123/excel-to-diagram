@@ -316,10 +316,12 @@
                 <template v-if="!inlineEditMode">
                 <FkLinkField
                   v-if="isFkColumn(column)"
-                  :value="row[column.prop]"
+                  :value="getFkIdValue(row, column)"
                   :display-value="getFkDisplayValue(row, column)"
                   :target-object-type="getFkTargetObjectType(column)"
+                  :detail-mode="getFkDetailMode(column)"
                   :link-disabled="isEmbeddedOrDialogMode"
+                  @navigate="handleFkNavigate"
                 />
                 <span
                   v-else-if="column.link && row[column.prop]"
@@ -565,6 +567,7 @@ function getActionIcon(action) {
   return ACTION_ICON_MAP[key] || ACTION_ICON_MAP.default
 }
 import { boService } from '@/services/boService'
+import { metaService } from '@/services/metaService'
 import { useListActionStore } from '@/stores/listActionStore'
 
 const props = defineProps({
@@ -1023,6 +1026,103 @@ function isFkColumn(column) {
 function getFkTargetObjectType(column) {
   if (!isFkColumn(column)) return null
   return column.valueHelpConfig.source.target_bo || null
+}
+
+/**
+ * 获取 FK 列对应的 ID 值（而非显示文本）
+ *
+ * FK 显示列（如 service_module_name）的 column.prop 是显示列名，
+ * row[column.prop] 拿到的是显示文本（如"采购管理"），不能作为导航 ID。
+ * 需要通过 api_param_key 或 value_help.source.value_field 推导出 FK ID 字段名，
+ * 再从 row 中取实际 ID 值（如 row.service_module_id = 42）。
+ */
+function getFkIdValue(row, column) {
+  // 1. 优先用 api_param_key（YAML 显式声明的 FK 字段映射）
+  const apiParamKey = column.apiParamKey || column.api_param_key
+  if (apiParamKey && row[apiParamKey] != null) {
+    return row[apiParamKey]
+  }
+
+  // 2. 从 value_help.source 推导：target_bo + '_id'
+  const targetBo = column.valueHelpConfig?.source?.target_bo
+  if (targetBo) {
+    const fkIdKey = `${targetBo}_id`
+    if (row[fkIdKey] != null) {
+      return row[fkIdKey]
+    }
+  }
+
+  // 3. 兜底：如果 column.prop 本身就是 _id 结尾，直接用
+  if (column.prop?.endsWith('_id')) {
+    return row[column.prop]
+  }
+
+  // 4. 最后兜底：返回原始值（可能不正确，但保持向后兼容）
+  return row[column.prop]
+}
+
+/**
+ * 确定 FK 链接的详情页打开模式
+ *
+ * 规则：
+ * 1. 目标对象类型在 YAML 中配置了 detail_mode: page → 'page'
+ * 2. 当前列表自身是 drawer 模式（非 page），且目标对象类型也在
+ *    MultiObjectManagementPage 的 tabs 中 → 'drawer'（在侧边打开）
+ * 3. 其他情况 → 'page'（默认跳转独立页面）
+ */
+function getFkDetailMode(column) {
+  const targetBo = column.valueHelpConfig?.source?.target_bo
+  if (!targetBo) return 'page'
+
+  // 检查目标对象类型的 view config 中是否配置了 detail_mode: page
+  const targetViewConfig = metaService.getViewConfigSync(targetBo)
+  if (targetViewConfig?.data?.list?.detail_mode === 'page') {
+    return 'page'
+  }
+
+  // 当前列表是 drawer 模式（非 page），且目标对象类型也在同页面 tabs 中
+  // → 使用 drawer 模式，在侧边打开目标对象详情
+  if (!hasDetailPageRoute() && isTargetInSamePage(targetBo)) {
+    return 'drawer'
+  }
+
+  // 默认：跳转独立页面
+  return 'page'
+}
+
+/**
+ * 判断目标对象类型是否在当前页面的 tabs 中
+ * （用于 MultiObjectManagementPage 上下文中的 FK 链接）
+ */
+function isTargetInSamePage(targetBo) {
+  // 检查 visibleColumns 中是否有该对象类型的列
+  // 或通过 props.objectTypes 检查（如果父组件传入了）
+  if (props.options?.objectTypes?.includes(targetBo)) {
+    return true
+  }
+  // 检查当前 metaConfig 中是否有相关 tab 信息
+  if (metaConfig.value?.tabs?.some(t => t.name === targetBo)) {
+    return true
+  }
+  return false
+}
+
+/**
+ * 处理 FK 链接的 drawer 模式导航
+ * 在当前 MetaListPage 的 drawer 中打开目标对象类型的详情
+ */
+function handleFkNavigate({ objectType, id, displayValue }) {
+  // 如果目标对象类型跟当前列表相同，直接用当前 drawer
+  if (objectType === props.objectType) {
+    selectedDetailId.value = id
+    detailEditMode.value = false
+    detailCreateMode.value = false
+    showDetailDrawer.value = true
+    return
+  }
+
+  // 不同对象类型：导航到独立页面（跨对象类型 drawer 需要额外支持）
+  router.push({ path: `/detail/${objectType}/${id}` }).catch(() => {})
 }
 
 function getFkDisplayValue(row, column) {
@@ -1634,6 +1734,13 @@ defineExpose({
   refresh: forceRefresh,
   loadList,
   resetFilters,
+  /**
+   * [FIX 2026-06-14] 外部设置搜索关键词 (避免 ref 通过 defineExpose 被自动 unwrap 后无法赋值)
+   * AssignmentDialog 等 dialog 模式下需要外部搜索框联动 MetaListPage 内部 keyword
+   */
+  setKeyword(value) {
+    keyword.value = value ?? ''
+  },
   setContextFilters,
   clearAllSelection,
   showExportDialog,

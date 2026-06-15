@@ -327,6 +327,21 @@ export function buildAssociationFilterParams({ levels, scopeIds, relationExtra }
         }
       }
     }
+
+    // [FIX 2026-06-15] 处理 filterRelationCodes（来自过滤面板的"关系类型"选择）
+    // 之前 mappings.length > 0 分支完全忽略 filterRelationCodes，导致过滤面板选关系类型后
+    // 列表仍返回空。filter 面板的 relation_type 枚举值（GENERATES/UPDATES 等）应直接
+    // 走 relation_type__in 过滤（与 relationCodes 取并集）。
+    if (relationExtra.filterRelationCodes?.length > 0) {
+      const incoming = relationExtra.filterRelationCodes
+      const existing = filters.relation_type__in
+        ? filters.relation_type__in.split(',').map(s => s.trim()).filter(Boolean)
+        : []
+      const combined = existing.length > 0
+        ? [...new Set([...existing, ...incoming])]
+        : incoming
+      filters.relation_type__in = combined.join(',')
+    }
   }
 
   // source_bo_id / target_bo_id 过滤

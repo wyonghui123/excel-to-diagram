@@ -454,7 +454,7 @@ class ImportExportService:
             
             ws = wb.create_sheet(title=obj.name)
             
-            headers, editable_columns, readonly_columns, parent_key_columns, create_required_columns, header_comments, header_to_field, enum_value_maps, bo_display_fields = self._get_export_headers_with_editable(obj, options)
+            headers, editable_columns, readonly_columns, parent_key_columns, create_required_columns, fk_display_code_columns, header_comments, header_to_field, enum_value_maps, bo_display_fields = self._get_export_headers_with_editable(obj, options)
             
             bo_display_maps = {}
             
@@ -503,7 +503,8 @@ class ImportExportService:
             for row_idx in range(2, 2 + empty_rows_count):
                 if obj_has_cud:
                     op_cell = ws.cell(row=row_idx, column=1, value="create - 新增")
-                    op_cell.fill = ds.CREATE_NEW_FILL
+                    # [REMOVED 2026-06-14 BMRD] 不再设置 CREATE_NEW_FILL
+                    # 视觉提示由 "create - 新增" 文字 + 底部空白位置承载
                     op_cell.border = ds.THIN_BORDER
                     op_cell.alignment = ds.TEXT_CENTER
                     op_mode_validation.add(op_cell)
@@ -519,15 +520,18 @@ class ImportExportService:
                     if actual_col_idx in enum_validations:
                         dv, display_values, keys = enum_validations[actual_col_idx]
                         dv.add(cell)
-                    
-                    if actual_col_idx in parent_key_columns:
+
+                    # [NEW 2026-06-14 BMRD] fk_display_code 优先于 parent_key 识别
+                    if actual_col_idx in fk_display_code_columns:
+                        self._apply_classification_fill(cell, 'fk_display_code')
+                    elif actual_col_idx in parent_key_columns:
                         self._apply_classification_fill(cell, 'parent_key')
                     elif actual_col_idx in create_required_columns:
                         self._apply_classification_fill(cell, 'create_required')
                     elif actual_col_idx in readonly_columns:
                         self._apply_classification_fill(cell, 'readonly')
                     # [NEW v1.1 2026-06-11] auto_or_manual_code 差异化底色
-                    auto_cols = (getattr(self, '_auto_or_manual_code_columns', {}) or {}).get(meta_obj.name, [])
+                    auto_cols = (getattr(self, '_auto_or_manual_code_columns', {}) or {}).get(obj.name, [])
                     if actual_col_idx in auto_cols:
                         self._apply_classification_fill(cell, 'auto_or_manual_code')
             
@@ -709,9 +713,9 @@ class ImportExportService:
             sheet_data = self._query_with_hierarchy(ot, filters, options, sort_by=sort_by, sort_order=sort_order, page=page, page_size=page_size)
             
             ws = wb.create_sheet(title=obj.name)
-            
-            headers, editable_columns, readonly_columns, parent_key_columns, create_required_columns, header_comments, header_to_field, enum_value_maps, bo_display_fields = self._get_export_headers_with_editable(obj, options)
-            
+
+            headers, editable_columns, readonly_columns, parent_key_columns, create_required_columns, fk_display_code_columns, header_comments, header_to_field, enum_value_maps, bo_display_fields = self._get_export_headers_with_editable(obj, options)
+
             bo_display_maps = self._build_bo_display_maps(sheet_data, bo_display_fields)
 
             # 根据 include_operation_mode 选项决定是否包含操作模式列
@@ -772,6 +776,11 @@ class ImportExportService:
                         self._apply_classification_fill(cell, 'auto_or_manual_code')
                         if protect_sheet:
                             cell.protection = Protection(locked=False)
+                    # [FIX 2026-06-14 BMRD] fk_display_code 优先于 parent_key 识别 (修复 bug: 之前此分支漏掉, 现有数据行变灰色)
+                    elif actual_col_idx in fk_display_code_columns:
+                        self._apply_classification_fill(cell, 'fk_display_code')
+                        if protect_sheet:
+                            cell.protection = Protection(locked=True)
                     elif actual_col_idx in parent_key_columns:
                         self._apply_classification_fill(cell, 'parent_key')
                         if protect_sheet:
@@ -830,7 +839,7 @@ class ImportExportService:
 
                 if include_operation_mode:
                     cell = ws.cell(row=next_row_idx, column=col_idx, value="create - 新增")
-                    cell.fill = ds.CREATE_NEW_FILL
+                    # [REMOVED 2026-06-14 BMRD] 不再设置 CREATE_NEW_FILL
                     cell.border = ds.THIN_BORDER
                     cell.alignment = Alignment(horizontal="center")
                     if protect_sheet:
@@ -848,6 +857,9 @@ class ImportExportService:
                     auto_cols = (getattr(self, '_auto_or_manual_code_columns', {}) or {}).get(meta_obj.name, [])
                     if original_col_idx in auto_cols:
                         self._apply_classification_fill(cell, 'auto_or_manual_code')
+                    # [NEW 2026-06-14 BMRD] fk_display_code 优先于 parent_key 识别
+                    elif original_col_idx in fk_display_code_columns:
+                        self._apply_classification_fill(cell, 'fk_display_code')
                     elif original_col_idx in parent_key_columns:
                         self._apply_classification_fill(cell, 'parent_key')
                     elif original_col_idx in create_required_columns:
@@ -1063,11 +1075,11 @@ class ImportExportService:
             sheet_data = self._query_with_hierarchy(ot, filters, options, sort_by=sort_by, sort_order=sort_order, page=page, page_size=page_size)
             
             ws = wb.create_sheet(title=obj.name)
-            
-            headers, editable_columns, readonly_columns, parent_key_columns, create_required_columns, header_comments, header_to_field, enum_value_maps, bo_display_fields = self._get_export_headers_with_editable(obj, options)
-            
+
+            headers, editable_columns, readonly_columns, parent_key_columns, create_required_columns, fk_display_code_columns, header_comments, header_to_field, enum_value_maps, bo_display_fields = self._get_export_headers_with_editable(obj, options)
+
             bo_display_maps = self._build_bo_display_maps(sheet_data, bo_display_fields)
-            
+
             if include_operation_mode:
                 headers.insert(0, "操作模式")
                 header_comments.insert(0, "新增/更新/删除/跳过，留空默认为更新")
@@ -1122,6 +1134,11 @@ class ImportExportService:
                         self._apply_classification_fill(cell, 'auto_or_manual_code')
                         if protect_sheet:
                             cell.protection = Protection(locked=False)
+                    # [NEW 2026-06-14 BMRD] fk_display_code 优先于 parent_key 识别
+                    elif original_col_idx in fk_display_code_columns:
+                        self._apply_classification_fill(cell, 'fk_display_code')
+                        if protect_sheet:
+                            cell.protection = Protection(locked=True)
                     elif original_col_idx in parent_key_columns:
                         self._apply_classification_fill(cell, 'parent_key')
                         if protect_sheet:
@@ -1180,7 +1197,7 @@ class ImportExportService:
                 
                 if include_operation_mode:
                     cell = ws.cell(row=row_idx, column=col_idx, value="create - 新增")
-                    cell.fill = ds.CREATE_NEW_FILL
+                    # [REMOVED 2026-06-14 BMRD] 不再设置 CREATE_NEW_FILL
                     cell.border = ds.THIN_BORDER
                     cell.alignment = Alignment(horizontal="center")
                     if protect_sheet:
@@ -1200,9 +1217,14 @@ class ImportExportService:
                         self._apply_classification_fill(cell, 'auto_or_manual_code')
                         if protect_sheet:
                             cell.protection = Protection(locked=False)
+                    # [NEW 2026-06-14 BMRD] fk_display_code 优先于 parent_key 识别
+                    elif original_col_idx in fk_display_code_columns:
+                        self._apply_classification_fill(cell, 'fk_display_code')
+                        if protect_sheet:
+                            cell.protection = Protection(locked=True)
                     elif original_col_idx in parent_key_columns:
                         self._apply_classification_fill(cell, 'parent_key')
-                        cell.comment = Comment(_sanitize_xml_string("新增时必填：请填写父对象的业务键编码"), "System")
+                        cell.comment = Comment(_sanitize_xml_string("新增时必填：请填写父对象的业务键编码；编辑时不可变更"), "System")
                         if protect_sheet:
                             cell.protection = Protection(locked=False)
                     elif original_col_idx in create_required_columns:
@@ -1308,6 +1330,8 @@ class ImportExportService:
         readonly_columns = []
         parent_key_columns = []
         create_required_columns = []
+        # [NEW 2026-06-14 BMRD] FK 编码显示列 (如 relationship.source_bo_code)
+        fk_display_code_columns = []
         enum_value_maps = {}
         bo_display_fields = {}
         col_idx = 0
@@ -1335,6 +1359,9 @@ class ImportExportService:
             key=lambda f: (
                 0 if getattr(f.semantics, 'business_key', False) else 1,
                 0 if f.storage.value != "virtual" else 1,
+                # [NEW 2026-06-14 BMRD] parent_key_display 紧跟在非虚拟字段之后,
+                # 让 source_bo_code 紧跟 source_bo_id 出现
+                0 if getattr(f.semantics, 'parent_key_display', False) else 1,
                 f.semantics.import_order if f.semantics.import_order else 999
             )
         )
@@ -1391,12 +1418,28 @@ class ImportExportService:
                     f.semantics.business_key
                     and kt_user_editable == 'auto_or_manual'
                 )
+                # [NEW 2026-06-14 BMRD] 获取 key_template 完整信息 (格式 + 示例), 用于表头 comment
+                kt_info = self._get_key_template_info(meta_obj)
+                # [NEW 2026-06-14 BMRD] 父对象 FK 编码显示字段（如 source_bo_code）
+                is_fk_display_code = getattr(f.semantics, 'parent_key_display', False)
 
                 if f.semantics.business_key:
                     if is_auto_or_manual_code:
-                        comment_parts.append("【自动/可手动】留空由系统生成；填写则使用填入值（唯一性校验）")
+                        # [REWRITE 2026-06-14 BMRD v3] 业务化重写, 去掉【】底色等术语
+                        auto_comment = "业务编码（必填）\n留空由系统自动生成；填写则使用填入值（系统会校验是否重复）"
+                        if kt_info.get('pattern'):
+                            auto_comment += f"\n编码规则: {kt_info['pattern']}"
+                        if kt_info.get('preview'):
+                            auto_comment += f"\n示例: {kt_info['preview']}"
+                        comment_parts.append(auto_comment)
                     else:
-                        comment_parts.append("【业务关键字】新增必填，编辑时只读")
+                        # [REWRITE 2026-06-14 BMRD v3] 业务化重写
+                        bk_comment = "业务编码（必填，每行唯一标识）"
+                        if kt_info.get('pattern'):
+                            bk_comment += f"\n编码规则: {kt_info['pattern']}"
+                        if kt_info.get('preview'):
+                            bk_comment += f"\n示例: {kt_info['preview']}"
+                        comment_parts.append(bk_comment)
                     has_control_info = True
                     create_required_columns.append(col_idx)
 
@@ -1409,15 +1452,33 @@ class ImportExportService:
                         comment_parts.append(f"示例: {kt_info['preview']}")
                         has_control_info = True
                 elif f.required or getattr(f.semantics, 'mandatory', False):
-                    comment_parts.append("【必填】")
+                    comment_parts.append("必填项")
                     has_control_info = True
                 elif getattr(f.semantics, 'parent_key', False) and hasattr(f, 'ui') and hasattr(f.ui, 'relation') and f.ui.relation:
-                    comment_parts.append("【父对象外键】新增必填")
+                    # [REWRITE 2026-06-14 BMRD v3] 业务化重写
+                    comment_parts.append("父对象编码（必填，关联到上级对象，编辑时不可变更）")
                     has_control_info = True
                     create_required_columns.append(col_idx)
 
+                # [NEW 2026-06-14 BMRD] FK 编码显示字段特殊处理
+                if is_fk_display_code:
+                    # [REWRITE 2026-06-14 BMRD v3] 业务化重写, 解释"自动带出"
+                    redundancy = getattr(f.semantics, 'redundancy', None)
+                    source_field_id = ''
+                    if redundancy:
+                        source_field_id = (
+                            redundancy.get('source_field') if isinstance(redundancy, dict)
+                            else getattr(redundancy, 'source_field', '') or ''
+                        )
+                    # 友好的来源说明: target_bo_id -> "目标业务对象", source_bo_id -> "源业务对象"
+                    friendly_source = self._friendly_field_name(source_field_id) if source_field_id else '父对象'
+                    fk_comment = f"{friendly_source}的编码（自动带出，无需填写）"
+                    comment_parts.append(fk_comment)
+                    has_control_info = True
+                    fk_display_code_columns.append(col_idx)
+
                 if not self._is_field_editable(f):
-                    comment_parts.append("【只读】")
+                    comment_parts.append("系统自动维护，无需填写")
                     has_control_info = True
 
                 # [NEW v1.1 2026-06-11] 记录 auto_or_manual code 列索引（用于差异化底色）
@@ -1453,7 +1514,8 @@ class ImportExportService:
 
             if col_def['kind'] == '编码':
                 if col_def['classification'] == 'parent_key':
-                    comment_msg = "【父对象编码】新增必填；编辑时可切换到其他父对象"
+                    # [CHANGED 2026-06-14 BMRD] 编辑时不可变更 (与 yaml 规则一致)
+                    comment_msg = "【父对象编码】新增必填，编辑时不可变更；底色：浅绿"
                     parent_key_columns.append(col_idx)
                 else:
                     comment_msg = "父对象编码，只读"
@@ -1465,20 +1527,34 @@ class ImportExportService:
             header_comments.append(comment_msg)
             col_idx += 1
 
-        return headers, editable_columns, readonly_columns, parent_key_columns, create_required_columns, header_comments, header_to_field, enum_value_maps, bo_display_fields
+        return headers, editable_columns, readonly_columns, parent_key_columns, create_required_columns, fk_display_code_columns, header_comments, header_to_field, enum_value_maps, bo_display_fields
 
     def _compute_list_computed_fields_for_export(self, meta_obj, data):
         """为导出数据计算 list 中配置的 computed 字段（如 child_count）
 
         [FR-005] 使用 computation_service.collect_computed_columns SSOT，
         与 query_service._compute_list_computed_fields 统一。
+
+        [FIX 2026-06-14 BMRD] 同时调用 compute_by_semantics,
+        修复 bug: 导出 relationship 时 category_label/category_type 字段为空
+        (因 computed_by: hierarchy_scope 字段在 collect_computed_columns 路径不计算,
+         需要单独走 compute_by_semantics)
         """
         from meta.services.computation_service import computation_service
 
+        # 1. 计算 ui_view_config + rules 中的 computed 字段 (如 child_count)
         computed_cols = computation_service.collect_computed_columns(meta_obj)
-
         if computed_cols:
             computation_service.compute_batch(self.data_source, meta_obj.id, data, computed_cols)
+
+        # 2. [FIX 2026-06-14 BMRD] 计算 semantics.computed_by 字段 (如 hierarchy_scope)
+        # 与 query_service.search() 路径保持一致
+        try:
+            computation_service.compute_by_semantics(meta_obj.id, data, self.data_source)
+        except Exception as e:
+            logger.warning(
+                f"[Export] compute_by_semantics failed for {meta_obj.id}: {e}"
+            )
 
     # ============================================================
     # [FIX 2026-06-08] Parent FK 列生成 SSOT (Single Source of Truth)
@@ -1727,6 +1803,25 @@ class ImportExportService:
         print(f"[Export] 层级信息注入完成")
 
         return data
+
+    def _ensure_hierarchy_scope_computed(self, object_type: str, data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """[FIX 2026-06-14 BMRD] 确保 hierarchy_scope 虚拟字段已计算
+
+        _query_association_with_hierarchy_filters 是 direct SQL 路径,
+        不走 search() 因此不调用 compute_by_semantics. 此方法封装该调用,
+        使 category_label/category_type 在导出数据中非空.
+
+        [SSOT 2026-06-14] query_service.search() 内部已包含此逻辑,
+        本方法保证 direct SQL 路径也具备同样能力.
+        """
+        if not data:
+            return data
+        try:
+            from meta.services.computation_service import computation_service
+            computation_service.compute_by_semantics(object_type, data, self.data_source)
+        except Exception as e:
+            logger.warning(f"[Export] compute_by_semantics failed for {object_type}: {e}")
+        return data
     
     def _query_association_with_hierarchy_filters(self, object_type: str,
                                                      filters: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -1838,8 +1933,8 @@ class ImportExportService:
                             )
 
         data = enrich_records(object_type, data)
-
-        return data
+        # [FIX 2026-06-14 BMRD] direct SQL 路径必须显式计算 hierarchy_scope
+        return self._ensure_hierarchy_scope_computed(object_type, data)
 
     def _get_table_name_for_object(self, object_type: str) -> str:
         """获取对象类型对应的表名"""
@@ -1890,8 +1985,8 @@ class ImportExportService:
         data = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
         data = enrich_records(object_type, data)
-
-        return data
+        # [FIX 2026-06-14 BMRD] direct SQL 路径必须显式计算 hierarchy_scope
+        return self._ensure_hierarchy_scope_computed(object_type, data)
 
     def _is_association_type(self, object_type: str) -> bool:
         """检查对象类型是否是 association 类型"""
@@ -2055,13 +2150,16 @@ class ImportExportService:
         return product_name, version_name
 
     def _get_product_version_codes(self, filters: Optional[Dict[str, Any]]) -> tuple:
-        """根据 filters 中的 version_id 获取 product_code 和 version_code
+        """根据 filters 中的 version_id 获取 product_code 和 version_name
+        
+        [CHANGED 2026-06-13] version.code 字段已删除, 改用 version.name
+        方法名保持不变(向后兼容), 但返回值实际是 version.name
         
         Args:
             filters: 包含 version_id 的过滤条件
             
         Returns:
-            tuple: (product_code, version_code)
+            tuple: (product_code, version_name)
         """
         if not filters:
             return ('', '')
@@ -2071,8 +2169,9 @@ class ImportExportService:
             return ('', '')
         
         try:
+            # [CHANGED 2026-06-13] version.code 字段已删除, 改用 version.name
             query = """
-                SELECT p.code as product_code, v.code as version_code
+                SELECT p.code as product_code, v.name as version_name
                 FROM versions v
                 LEFT JOIN products p ON v.product_id = p.id
                 WHERE v.id = ?
@@ -2149,6 +2248,10 @@ class ImportExportService:
 
         返回值：
         - 'parent_key'：父对象外键（多态 FK / 直接 FK），新增必填、编辑时只读
+        - 'fk_display_code'：父对象 FK 的虚拟显示编码（如 source_bo_code, target_bo_code）
+                            [NEW 2026-06-14 BMRD] 语义上是 parent_key 的代码冗余显示，
+                            应使用 BUSINESS_KEY_FILL (浅绿) 而非 READONLY_FILL (灰色)
+        - 'auto_or_manual_code'：自动/可手动编码 (v1.1)
         - 'create_required'：新增必填字段（业务关键字、必填字段等）
         - 'readonly'：始终只读字段
         - 'editable'：普通可编辑字段
@@ -2159,6 +2262,11 @@ class ImportExportService:
         if getattr(field.semantics, 'parent_key', False):
             if not getattr(field.semantics, 'readonly_always', False):
                 return 'parent_key'
+
+        # [NEW 2026-06-14 BMRD] 父对象编码显示字段 - 与 parent_key 同样使用浅绿
+        # 例: relationship.source_bo_code / relationship.target_bo_code
+        if getattr(field.semantics, 'parent_key_display', False):
+            return 'fk_display_code'
 
         if getattr(field.semantics, 'business_key', False):
             return 'create_required'
@@ -2263,6 +2371,9 @@ class ImportExportService:
         export_fields.sort(key=lambda f: (
             0 if getattr(f.semantics, 'business_key', False) else 1,
             0 if f.storage.value != "virtual" else 1,
+            # [NEW 2026-06-14 BMRD] parent_key_display 紧跟在非虚拟字段之后,
+            # 让 source_bo_code 紧跟 source_bo_id 出现
+            0 if getattr(f.semantics, 'parent_key_display', False) else 1,
             f.semantics.import_order if f.semantics.import_order else 999
         ))
 
@@ -2359,7 +2470,8 @@ class ImportExportService:
             # 与 _get_export_headers_with_editable 的 comment 保持一致
             if col_def['kind'] == '编码':
                 if col_def['classification'] == 'parent_key':
-                    cell.comment = Comment("【父对象编码】新增必填；编辑时可切换到其他父对象", "系统")
+                    # [CHANGED 2026-06-14 BMRD] 编辑时不可变更
+                    cell.comment = Comment("【父对象编码】新增必填，编辑时不可变更；底色：浅绿", "系统")
                 else:
                     cell.comment = Comment("父对象编码，只读", "系统")
             else:
@@ -2429,7 +2541,7 @@ class ImportExportService:
                 row_idx = len(data) + 2 + empty_row
 
                 cell = ws.cell(row=row_idx, column=1, value="create - 新增")
-                cell.fill = ds.CREATE_NEW_FILL
+                # [REMOVED 2026-06-14 BMRD] 不再设置 CREATE_NEW_FILL
                 cell.border = ds.THIN_BORDER
                 cell.alignment = Alignment(horizontal="center")
                 operation_dv.add(cell)
@@ -2476,6 +2588,7 @@ class ImportExportService:
 
         本 helper 统一底色规则：
         - 'parent_key' → BUSINESS_KEY_FILL（浅绿，父对象业务键）
+        - 'fk_display_code' → BUSINESS_KEY_FILL（浅绿，父对象 FK 编码显示字段，如 source_bo_code）
         - 'auto_or_manual_code' → AUTO_GEN_OR_MANUAL_FILL（浅蓝，自动/可手动，v1.1 NEW）
         - 'create_required' → REQUIRED_FILL（浅黄，新增必填）
         - 'readonly' → READONLY_FILL（灰色，只读）
@@ -2485,6 +2598,10 @@ class ImportExportService:
         仍由调用方根据 context 决定（不同出口对 protect_sheet 行为不一致）。
         """
         if classification == 'parent_key':
+            cell.fill = ExcelDesignSystem.BUSINESS_KEY_FILL
+        elif classification == 'fk_display_code':
+            # [NEW 2026-06-14 BMRD] FK 编码显示字段 (虚拟冗余, 显示父对象 code)
+            # 与 parent_key 一致使用浅绿, 表示"语义上属于父对象编码范畴"
             cell.fill = ExcelDesignSystem.BUSINESS_KEY_FILL
         elif classification == 'auto_or_manual_code':
             # [NEW v1.1 2026-06-11] 自动/可手动模式底色（浅蓝）
@@ -2632,17 +2749,20 @@ class ImportExportService:
             ws_meta.cell(row=row, column=2, value="不同颜色背景表示不同的字段控制：").font = ds.VALUE_FONT
             row += 1
 
-            # 颜色示例
+            # 颜色示例 - [UPDATED 2026-06-14 BMRD v4]
+            # 移除: 深蓝色(只用于说明页分区标题, 数据列不使用)
+            # 业务化重写: 去掉"新增必填""编辑时只读""底色"等技术话术
+            # 详细规则请见每个列头 comment, 这里只保留简表
             color_examples = [
-                ("  灰色", ds.READONLY_FILL, "只读字段，不可编辑"),
-                ("  浅绿色", ds.BUSINESS_KEY_FILL, "父对象编码，新增必填，编辑时可切换"),
-                ("  浅黄色", ds.REQUIRED_FILL, "业务关键字，新增必填，编辑时只读"),
-                ("  浅蓝色", ds.CREATE_NEW_FILL, "新增操作行，用于添加新数据"),
-                ("  浅蓝灰", ds.AUTO_GEN_OR_MANUAL_FILL, "自动/可手动编码，留空由系统生成（v1.1）"),
+                ("  浅黄色", ds.REQUIRED_FILL, "业务编码字段（必填，每行唯一）"),
+                ("  浅蓝灰", ds.AUTO_GEN_OR_MANUAL_FILL, "业务编码字段（可自动生成，也可手动指定）"),
+                ("  浅绿色", ds.BUSINESS_KEY_FILL, "父对象编码字段（必填或自动带出）"),
+                ("  灰色", ds.READONLY_FILL, "系统字段（自动维护，无需填写）"),
             ]
             for label, fill, desc in color_examples:
-                ws_meta.cell(row=row, column=1, value=label).font = ds.LABEL_FONT
-                ws_meta.cell(row=row, column=1).fill = fill
+                cell_a = ws_meta.cell(row=row, column=1, value=label)
+                cell_a.font = ds.LABEL_FONT  # 灰色 (移除深蓝色后, 统一用 LABEL_FONT)
+                cell_a.fill = fill
                 ws_meta.cell(row=row, column=2, value=desc).font = ds.VALUE_FONT
                 row += 1
 
@@ -2665,36 +2785,30 @@ class ImportExportService:
                 if kt in ('auto_only', 'auto_or_manual', 'manual_only'):
                     auto_or_manual_objects.append((obj_name, kt, kt_dict))
             if auto_or_manual_objects:
-                ws_meta.cell(row=row, column=1, value="自动编码规则").font = ds.SECTION_FONT
+                # [SIMPLIFIED 2026-06-14 BMRD v5] 编码规则详细格式/示例已移至列头 comment,
+                # 此处仅保留标题 + 简短说明 + 对象名 + 模式 (避免重复)
+                ws_meta.cell(row=row, column=1, value="业务编码说明").font = ds.SECTION_FONT
                 ws_meta.cell(row=row, column=1).fill = ds.SECTION_FILL
                 row += 1
+                ws_meta.cell(row=row, column=2, value="鼠标悬停在每个业务编码列上即可看到编码规则和示例。").font = ds.LABEL_FONT
+                row += 1
                 for obj_name, kt, kt_dict in auto_or_manual_objects:
-                    pattern = kt_dict.get('pattern', '') if isinstance(kt_dict, dict) else ''
-                    preview = kt_dict.get('preview', '') if isinstance(kt_dict, dict) else ''
                     mode_desc = {
-                        'auto_only': '强制自动生成（只读）',
-                        'auto_or_manual': '自动优先：留空由系统生成；填写则使用填入值（唯一性校验）',
-                        'manual_only': '纯手动：必须由用户填写',
+                        'auto_only': '系统自动生成（无需填写）',
+                        'auto_or_manual': '留空由系统生成，填写则使用填入值（系统会校验是否重复）',
+                        'manual_only': '必须手动填写',
                     }.get(kt, kt)
-                    ws_meta.cell(row=row, column=1, value=f"  {obj_name} - 模式").font = ds.LABEL_FONT
+                    ws_meta.cell(row=row, column=1, value=obj_name).font = ds.LABEL_FONT
                     ws_meta.cell(row=row, column=2, value=mode_desc).font = ds.VALUE_FONT
                     row += 1
-                    if pattern:
-                        ws_meta.cell(row=row, column=1, value="    格式").font = ds.LABEL_FONT
-                        ws_meta.cell(row=row, column=2, value=pattern).font = ds.VALUE_FONT
-                        row += 1
-                    if preview:
-                        ws_meta.cell(row=row, column=1, value="    示例").font = ds.LABEL_FONT
-                        ws_meta.cell(row=row, column=2, value=preview).font = ds.VALUE_FONT
-                        row += 1
 
-            # 业务说明
+            # 业务说明 - [REWRITE 2026-06-14 BMRD v4] 业务化重写
             explanations = [
-                ("业务关键字", "编码字段为业务关键字，用于唯一标识记录。新增时必填，编辑时只读。"),
-                ("父对象编码", "用于关联父对象。新增时必填，编辑时可切换到其他父对象。"),
-                ("删除操作", "设置操作模式为'delete'，系统将根据业务键查找并删除记录"),
-                ("新增操作", "在新增行中填写数据，操作模式设为'create'。业务关键字和父对象编码必填。"),
-                ("冲突处理策略", "在导入界面选择：有则更新（存在则更新，不存在则新增）或跳过冲突（存在则跳过）。"),
+                ("业务编码", "每行记录的唯一标识。新建时必须填写。修改时不能变更。"),
+                ("父对象编码", "用于关联到上级对象。新建时必须填写，修改时不能变更。"),
+                ("删除记录", "在操作模式列选择\"删除\"，系统按业务编码找到对应记录并删除。"),
+                ("新增记录", "在底部空白行填写内容，操作模式选择\"新增\"。业务编码和父对象编码为必填项。"),
+                ("冲突处理", "导入时如记录已存在，可选择\"更新\"或\"跳过\"。"),
             ]
             for label, desc in explanations:
                 ws_meta.cell(row=row, column=1, value=label).font = ds.LABEL_FONT
@@ -3350,33 +3464,88 @@ class ImportExportService:
             return kt.get('user_editable', '')
         return ''
 
-    def _get_key_template_info(self, meta_obj) -> Dict[str, str]:
-        """[NEW v2 2026-06-15 BMRD] 获取对象的 key_template 编码格式信息
+    def _friendly_field_name(self, field_id: str) -> str:
+        """[NEW 2026-06-14 BMRD v3] 将字段 ID 转成业务友好名称
 
-        返回 dict: {pattern, preview} 用于业务编码列 comment 中展示.
-        pattern: 编码格式规则 (如 {service_module_code}{SEQ:2})
-        preview: 示例编码 (如 PUM01)
-        缺一不可, 找不到时返回空字符串, 业务编码列 comment 中就不显示该行.
+        例:
+            source_bo_id -> 源业务对象
+            target_bo_id -> 目标业务对象
+            source_domain_id -> 源领域
+            source_sub_domain_id -> 源子领域
+            source_service_module_id -> 源服务模块
+            source_code -> 源编码
+        """
+        if not field_id:
+            return ''
+        # 优先尝试从常见映射表中查找
+        known_names = {
+            'source_bo_id': '源业务对象',
+            'target_bo_id': '目标业务对象',
+            'source_domain_id': '源领域',
+            'target_domain_id': '目标领域',
+            'source_sub_domain_id': '源子领域',
+            'target_sub_domain_id': '目标子领域',
+            'source_service_module_id': '源服务模块',
+            'target_service_module_id': '目标服务模块',
+            'version_id': '版本',
+            'product_id': '产品',
+            'source_code': '源编码',
+            'target_code': '目标编码',
+            'code': '编码',
+        }
+        if field_id in known_names:
+            return known_names[field_id]
+        # 通用规则: 去掉 _id 后缀, 按 _ 拆分转中文
+        name = field_id.replace('_id', '').replace('_code', '编码')
+        parts = name.split('_')
+        # source_/target_ 前缀识别
+        prefix_map = {'source': '源', 'target': '目标'}
+        if parts and parts[0] in prefix_map:
+            parts[0] = prefix_map[parts[0]]
+        # 简单英文到中文映射 (常见业务词)
+        word_map = {
+            'domain': '领域',
+            'sub': '子',
+            'service': '服务',
+            'module': '模块',
+            'bo': '业务对象',
+        }
+        result = ''
+        for p in parts:
+            result += word_map.get(p, p)
+        return result if result else field_id
+
+    def _get_key_template_info(self, meta_obj) -> dict:
+        """[NEW 2026-06-14 BMRD] 获取对象的完整 key_template 信息, 用于表头 comment
+
+        返回 dict 包含:
+        - user_editable: 'auto_only' / 'auto_or_manual' / 'manual_only'
+        - pattern: 编码格式模板 (如 '{source_code}-{target_code}-{SEQ:2}')
+        - preview: 示例 (如 'PUM01')
+        - enabled: 是否启用 key_template
+        未配置时返回空 dict。
         """
         if meta_obj is None:
-            return {'pattern': '', 'preview': ''}
+            return {}
         if isinstance(meta_obj, str):
             try:
                 meta_obj = registry.get(meta_obj)
                 if meta_obj is None:
-                    return {'pattern': '', 'preview': ''}
+                    return {}
             except Exception:
-                return {'pattern': '', 'preview': ''}
+                return {}
         if isinstance(meta_obj, dict):
             kt = meta_obj.get('key_template', {}) or {}
         else:
             kt = getattr(meta_obj, 'key_template', None) or {}
-        if not isinstance(kt, dict):
-            return {'pattern': '', 'preview': ''}
-        return {
-            'pattern': kt.get('pattern', ''),
-            'preview': kt.get('preview', ''),
-        }
+        if isinstance(kt, dict):
+            return {
+                'enabled': kt.get('enabled', False),
+                'user_editable': kt.get('user_editable', ''),
+                'pattern': kt.get('pattern', ''),
+                'preview': kt.get('preview', ''),
+            }
+        return {}
 
     def _is_field_editable(self, field, mode: str = 'edit') -> bool:
         """判断字段是否可编辑（用于导入导出）
@@ -3387,8 +3556,13 @@ class ImportExportService:
         3. 计算字段（computation.formula 或 semantics.computed）：始终只读
         4. virtual 字段（无 computation）：如果是搜索帮助则可编辑，否则只读
         5. immutable 字段：编辑时只读
-        6. parent_key 字段：可编辑（SAP One Model 允许移动层级）
+        6. parent_key 字段：编辑时受 immutable 标志控制（yaml 配 immutable: true 则只读）
         7. ui.editable=false：始终只读
+
+        注：父对象编码的"编辑时可切换"描述已被 BMRD 2026-06-14 修正为
+            "编辑时不可变更"，与 yaml 规则一致。具体行为：
+            - 如果 yaml 中 parent_key 同时声明 immutable/readonly_always，则编辑时只读
+            - 否则按字段的实际 immutable/readonly_always 标志决定
         """
         readonly_field_ids = {'id', 'created_at', 'updated_at', 'created_by', 'updated_by'}
 
@@ -5000,31 +5174,50 @@ class ImportExportService:
         
         return meta
 
-    def _resolve_version_id(self, product_code: str, version_code: str) -> Optional[int]:
-        """根据 product_code 和 version_code 解析 version_id
+    def _resolve_version_id(self, product_code: str, version_name: str) -> Optional[int]:
+        """根据 product_code 和 version_name 解析 version_id
         
         Args:
             product_code: 产品编码
-            version_code: 版本编码
+            version_name: 版本名称 (原 version_code, 2026-06-13 改为 name)
             
         Returns:
             int: version_id，如果未找到返回 None
         """
-        if not product_code or not version_code:
+        if not product_code or not version_name:
             return None
         
         try:
+            # [CHANGED 2026-06-13] version.code 字段已删除, 改用 version.name 匹配
+            # 向后兼容: 如果 name 匹配失败, 尝试 fallback 到旧 code 列(如果存在)
             query = """
                 SELECT v.id
                 FROM versions v
                 LEFT JOIN products p ON v.product_id = p.id
-                WHERE p.code = ? AND v.code = ?
+                WHERE p.code = ? AND v.name = ?
                 LIMIT 1
             """
-            cursor = self.data_source.execute(query, (product_code, version_code))
+            cursor = self.data_source.execute(query, (product_code, version_name))
             row = cursor.fetchone()
             if row:
                 return row[0]
+            
+            # Fallback: 尝试旧 code 列(兼容旧 Excel 导入)
+            try:
+                query_fallback = """
+                    SELECT v.id
+                    FROM versions v
+                    LEFT JOIN products p ON v.product_id = p.id
+                    WHERE p.code = ? AND v.code = ?
+                    LIMIT 1
+                """
+                cursor = self.data_source.execute(query_fallback, (product_code, version_name))
+                row = cursor.fetchone()
+                if row:
+                    logger.info(f"Resolved version_id via legacy code column: {row[0]}")
+                    return row[0]
+            except Exception:
+                pass  # code 列不存在, 忽略
         except Exception as e:
             logger.warning(f"Failed to resolve version_id: {e}")
         

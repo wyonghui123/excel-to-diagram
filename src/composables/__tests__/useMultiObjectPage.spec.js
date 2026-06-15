@@ -1461,9 +1461,11 @@ describe('useMultiObjectPage', () => {
       expect(page.scopeIds.domain.selected).toEqual([1])
       expect(page.scopeIds.business_object.selected).toEqual([100, 200])
       expect(page.scopeIds.relationExtra.relationCodes).toEqual(['R1', 'R2'])
-      // 还原后应清空 sessionStorage, 防止下次误触发
+      // [v39.7-FIX] flag 必须清掉 (防止同一次返回内误触发多次 restore)
+      // 但 STATE_RESTORE_KEY 数据必须保留, 用于第二次/多次从 chart 返回时还能恢复
+      // 数据会在下次 saveStateForDiagram 时被覆盖, 或在用户主动 clear 时清掉
       expect(sessionStorage.getItem('returningFromDiagram')).toBeNull()
-      expect(sessionStorage.getItem('archManagerStateBeforeDiagram')).toBeNull()
+      expect(sessionStorage.getItem('archManagerStateBeforeDiagram')).not.toBeNull()
     })
 
     it('restoreStateFromDiagram 在 JSON 解析失败时应返回 false 且清掉 flag', () => {
@@ -1515,6 +1517,54 @@ describe('useMultiObjectPage', () => {
       expect(pageB.scopeIds.domain.selected).toEqual([3])
       expect(pageB.scopeIds.business_object.selected).toEqual([42, 43])
       expect(pageB.scopeIds.relationExtra.relationCodes).toEqual(['CODE_A'])
+    })
+
+    // [v39.7-FIX] 状态稳定性测试：第二次从 chart 返回管理页时仍能恢复
+    // 之前: restoreStateFromDiagram 会清掉 STATE_RESTORE_KEY, 第二次切回数据已丢
+    // 之后: 保留 STATE_RESTORE_KEY, 配合 onBeforeRouteLeave 每次离开都重新 save
+    it('[v39.7] 多次 restore 应能正确恢复 (状态稳定性)', () => {
+      // 场景: 用户在管理页选择 → 跳图表 → 切回管理页 (第一次 OK)
+      //                    → 再切到图表 → 再切回管理页 (第二次应也能恢复)
+      // 模拟: 第一次 save + restore 后, 数据仍在 sessionStorage
+      //      第二次 restore 应能再次恢复同样的状态
+
+      // 1. 准备数据并保存
+      const stored = {
+        activeTab: 'relationship',
+        scopeIds: {
+          domain: { selected: [1, 2], effective: [] },
+          business_object: { selected: [100, 200, 300], effective: [] },
+          relationExtra: { relationCodes: ['R1', 'R2', 'R3'], categoryTypes: [], filterRelationCodes: [] }
+        },
+        tabFilters: {},
+        initialBoIds: [100, 200, 300],
+        initialRelationCodes: ['R1', 'R2', 'R3'],
+        savedAt: Date.now()
+      }
+      sessionStorage.setItem('archManagerStateBeforeDiagram', JSON.stringify(stored))
+      sessionStorage.setItem('returningFromDiagram', 'true')
+
+      // 2. 第一次 restore (用户首次从 chart 返回)
+      const page1 = createComposable()
+      const result1 = page1.restoreStateFromDiagram()
+      expect(result1).toBeTruthy()
+      expect(result1.initialBoIds).toEqual([100, 200, 300])
+      expect(page1.activeTab.value).toBe('relationship')
+      expect(page1.scopeIds.business_object.selected).toEqual([100, 200, 300])
+      expect(page1.scopeIds.relationExtra.relationCodes).toEqual(['R1', 'R2', 'R3'])
+      // flag 应被清掉, 但数据应保留
+      expect(sessionStorage.getItem('returningFromDiagram')).toBeNull()
+      expect(sessionStorage.getItem('archManagerStateBeforeDiagram')).not.toBeNull()
+
+      // 3. 模拟用户再次从 chart 返回 (第二次)
+      sessionStorage.setItem('returningFromDiagram', 'true')
+      const page2 = createComposable()
+      const result2 = page2.restoreStateFromDiagram()
+      expect(result2).toBeTruthy()
+      expect(result2.initialBoIds).toEqual([100, 200, 300])
+      expect(page2.activeTab.value).toBe('relationship')
+      expect(page2.scopeIds.business_object.selected).toEqual([100, 200, 300])
+      expect(page2.scopeIds.relationExtra.relationCodes).toEqual(['R1', 'R2', 'R3'])
     })
   })
 })

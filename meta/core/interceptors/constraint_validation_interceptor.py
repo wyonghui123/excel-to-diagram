@@ -33,10 +33,18 @@ class ConstraintValidationInterceptor(Interceptor):
         violations = engine.validate(context)
         if violations:
             details = []
+            meta_obj = context.meta_object
             for v in violations:
                 i18n_key = f"validation.field.{v.constraint_type}"
+                # 解析 field_id 为用户友好的 field_name
+                field_name = v.field_id
+                if meta_obj:
+                    f = next((x for x in meta_obj.fields if x.id == v.field_id), None)
+                    if f:
+                        field_name = f.name or f.id
                 detail = ValidationDetail(
                     field_id=v.field_id,
+                    field_name=field_name,
                     rule=v.constraint_type,
                     message=v.message,
                     i18n_key=i18n_key,

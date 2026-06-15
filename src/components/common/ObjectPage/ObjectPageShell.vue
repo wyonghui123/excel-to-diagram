@@ -410,6 +410,13 @@ function handleRefresh(payload = {}) {
 function handleFieldUpdate({ key, value }) {
   emit('field-update', { key, value })
 
+  // [NEW BMRD 2026-06-14] E21 修复: 所有字段修改都标记 dirty
+  // 原 BUG: 只有 code 字段在 onCodeInput 触发 markFieldDirty, 其他字段 (name, description 等) 修改后不触发
+  // 修复: 在 handleFieldUpdate 统一调用 markFieldDirty, 让 dirty 弹窗生效
+  if (typeof markFieldDirty === 'function' && key) {
+    markFieldDirty(key)
+  }
+
   // [NEW 2026-06-10][FIXED 2026-06-11] 仅 key template 实际依赖的 parent_id 字段才触发 resuggest
   // 原逻辑：所有 *_id 字段变化都触发 → BUG: 选 domain_id 也触发，但 service_module_code 未填，
   //   scope 退化到 "default"，生成的 code 是裸序列号（如 "44"）而不是 "PUM01"。

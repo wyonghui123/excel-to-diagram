@@ -26,7 +26,6 @@ class ValidationDetail:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "field_id": self.field_id,
             "field_name": self.field_name,
             "rule": self.rule,
             "message": self.message,
@@ -46,16 +45,17 @@ _ZH_CN_MESSAGES = {
     "validation.field.immutable": "{field_name} 创建后不可修改",
     "validation.field.no_delete": "{field_name} 为 {value} 时不可删除",
     "validation.field.unique_scope": "{field_name} 在范围内不唯一",
-    "validation.field.fk_not_found": "引用的{target_name}不存在（ID: {value}）",
+    "validation.field.fk_not_found": "引用的{target_name}不存在",
     "validation.object.business_key_composite": "【业务关键字】{field_names} 组合值已存在：{values}",
-    "validation.object.index_unique": "唯一索引 {index_name} 冲突：{field_names} 组合值已存在",
+    # [SIMPLIFIED 2026-06-15 BMRD] 移除括号中的 index_name (技术细节, 用户不关心)
+    "validation.object.index_unique": "唯一性冲突：{field_names} 组合值已存在",
     "validation.object.addability_denied": "{message}",
     "validation.object.deletability_denied": "{message}",
     "validation.object.restrict_on_delete": "无法删除：{child_name} 的 {field_name} 引用了此记录（{count}条）",
     "validation.object.has_children": "无法删除：存在 {count} 个子元素",
     "validation.object.parent_field_immutable": "父元素字段 [{field_name}] 不允许修改",
-    "validation.association.source_not_found": "源记录不存在（{object_type} ID: {src_id}）",
-    "validation.association.target_not_found": "目标记录不存在（{object_type} ID: {tgt_id}）",
+    "validation.association.source_not_found": "源记录不存在",
+    "validation.association.target_not_found": "目标记录不存在",
     "validation.association.readonly": "关联 '{assoc_name}' 为只读，不允许{operation}",
     "validation.association.composition_unassign": "组合关联不支持取消关联，请使用删除子对象",
     "validation.association.cardinality_exceeded": "关联数量超出限制：{assoc_name} 最多允许 {cardinality} 个关联",

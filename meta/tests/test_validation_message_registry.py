@@ -95,7 +95,7 @@ class TestValidationMessageRegistryGet:
             "validation.field.fk_not_found", target_name="用户", value=99
         )
         assert "用户" in msg
-        assert "99" in msg
+        assert "99" not in msg  # 不暴露数据库 ID
 
     def test_get_business_key_composite_key(self):
         from meta.core.validation_messages import ValidationMessageRegistry
@@ -108,11 +108,15 @@ class TestValidationMessageRegistryGet:
 
     def test_get_index_unique_key(self):
         from meta.core.validation_messages import ValidationMessageRegistry
+        # [UPDATED 2026-06-15 BMRD] 错误信息不再包含 index_name (技术细节, 用户不关心)
         msg = ValidationMessageRegistry.get(
-            "validation.object.index_unique", index_name="idx_code", field_names="code"
+            "validation.object.index_unique", index_name="编码唯一索引", field_names="编码"
         )
-        assert "idx_code" in msg
-        assert "code" in msg
+        assert "编码" in msg
+        assert "组合值已存在" in msg
+        # 断言 index_name 不再出现 (2026-06-15 简化后)
+        assert "编码唯一索引" not in msg
+        assert msg.startswith("唯一性冲突：")
 
     def test_get_addability_denied_key(self):
         from meta.core.validation_messages import ValidationMessageRegistry
@@ -152,18 +156,16 @@ class TestValidationMessageRegistryGet:
     def test_get_source_not_found_key(self):
         from meta.core.validation_messages import ValidationMessageRegistry
         msg = ValidationMessageRegistry.get(
-            "validation.association.source_not_found", object_type="user", src_id=100
+            "validation.association.source_not_found"
         )
-        assert "user" in msg
-        assert "100" in msg
+        assert "源记录不存在" in msg or "不存在" in msg
 
     def test_get_target_not_found_key(self):
         from meta.core.validation_messages import ValidationMessageRegistry
         msg = ValidationMessageRegistry.get(
-            "validation.association.target_not_found", object_type="role", tgt_id=200
+            "validation.association.target_not_found"
         )
-        assert "role" in msg
-        assert "200" in msg
+        assert "目标记录不存在" in msg or "不存在" in msg
 
     def test_get_readonly_key(self):
         from meta.core.validation_messages import ValidationMessageRegistry
@@ -260,7 +262,7 @@ class TestValidationDetail:
             params={"field_name": "用户名"}
         )
         d = detail.to_dict()
-        assert d["field_id"] == "username"
+        assert "field_id" not in d  # field_id 不暴露给前端
         assert d["field_name"] == "用户名"
         assert d["rule"] == "required"
         assert d["message"] == "用户名 不能为空"

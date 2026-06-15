@@ -34,7 +34,7 @@ _PARENT_INFO_MAP = {
 logger = logging.getLogger(__name__)
 
 management_dimension_bp = Blueprint(
-    "management_dimension", __name__, url_prefix="/api/v1/management-dimensions"
+    "management_dimension", __name__, url_prefix="/api/v2/bo/management_dimension"
 )
 
 _engine: Optional[ManagementDimensionEngine] = None

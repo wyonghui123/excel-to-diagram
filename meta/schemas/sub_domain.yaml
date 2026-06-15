@@ -254,6 +254,14 @@ ui_view_config:
               - local_field: version_id
                 target_field: version_id
                 required: true
+      # [FIX 2026-06-14] BUG-V008 扩展: 补 FK 链路列 version_name
+      # 后端通过 redundancy join_path 自动填充 (version_id -> versions.name)
+      - key: version_name
+        title: 所属版本
+        width: 150
+        position: 4
+        importance: high
+        sortable: true
       - key: relation_count
         title: 关系数量
         width: 100

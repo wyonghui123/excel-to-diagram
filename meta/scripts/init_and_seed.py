@@ -393,51 +393,110 @@ def insert_data():
         else:
             print(f"警告: 服务模块{sm_code}不存在，跳过业务对象{code}")
 
+    # [v34 fix] 关系数据: (source_code, target_code, rel_code, rel_desc, relation_type, relation_direction)
+    #   - rel_code: 关系简称 (Mermaid edge label 显示, 如 PUM01-PUM02-01)
+    #   - relation_type: 关系类型 (必须来自 enum: GENERATES/UPDATES/TRIGGERS/REFERENCES)
+    #   - relation_direction: 关系方向 (必须来自 enum: PUSH/PULL/BIDIRECTIONAL, 可空)
     relationships = [
-        ('BO_SUPPLIER', 'BO_REQ', 'PROVIDES', '供应商提供采购申请所需的物料'),
-        ('BO_CUSTOMER', 'BO_SO', 'ORDERS', '客户下达销售订单'),
-        ('BO_SO', 'BO_SOL', 'CONTAINS', '销售订单包含明细'),
-        ('BO_SOL', 'BO_INVENTORY', 'RESERVES', '订单明细预留库存'),
-        ('BO_INVENTORY', 'BO_INV_LOG', 'GENERATES', '库存变动生成流水'),
-        ('BO_INV_LOG', 'BO_LOCATION', 'AT', '库存流水记录货位'),
-        ('BO_LOCATION', 'BO_WAREHOUSE', 'LOCATED_AT', '货位位于仓库'),
-        ('BO_WAREHOUSE', 'BO_INVENTORY', 'HOLDS', '仓库持有库存'),
-        ('BO_SUPPLIER', 'BO_PO', 'SUPPLIES', '供应商供货'),
-        ('BO_PO', 'BO_POL', 'CONTAINS', '采购订单包含明细'),
-        ('BO_POL', 'BO_INVENTORY', 'ADDS', '采购入库增加库存'),
-        ('BO_PROC_CONTRACT', 'BO_PO', 'GENERATES', '采购合同生成订单'),
-        ('BO_SO', 'BO_SALES_INV', 'GENERATES', '销售订单生成发票'),
-        ('BO_SALES_INV', 'BO_AR_INV', 'CREATES', '销售发票创建应收'),
-        ('BO_CUSTOMER', 'BO_AR_RECEIPT', 'PAYMENTS', '客户付款'),
-        ('BO_AR_RECEIPT', 'BO_AR_INV', 'RECONCILES', '收款核销应收'),
-        ('BO_CUSTOMER', 'BO_CUST_CREDIT', 'HAS', '客户拥有信用额度'),
-        ('BO_CUST_CREDIT', 'BO_SO', 'LIMITS', '信用额度限制订单'),
-        ('BO_PRICE_LIST', 'BO_SOL', 'PRICES', '价格表定价'),
-        ('BO_INBOUND', 'BO_INBOUND_L', 'CONTAINS', '入库单包含明细'),
-        ('BO_INBOUND_L', 'BO_INVENTORY', 'INCREASES', '入库增加库存'),
-        ('BO_OUTBOUND', 'BO_OUTBOUND_L', 'CONTAINS', '出库单包含明细'),
-        ('BO_OUTBOUND_L', 'BO_INVENTORY', 'DECREASES', '出库减少库存'),
-        ('BO_SUPPLIER', 'BO_AP_INV', 'RECEIVES', '供应商收到应付发票'),
-        ('BO_AP_INV', 'BO_PAYMENT_REQ', 'CREATES', '应付发票创建付款申请'),
-        ('BO_PAYMENT_REQ', 'BO_PAYMENT_VOUCHER', 'APPROVES', '付款申请审批生成凭单'),
-        ('BO_PAYMENT_VOUCHER', 'BO_AP_PAYMENT', 'CREATES', '凭单创建付款单'),
-        ('BO_AP_PAYMENT', 'BO_SUPPLIER', 'PAYS', '付款单支付供应商'),
+        # (source, target, rel_code, description, relation_type, direction)
+        ('BO_SUPPLIER', 'BO_REQ', 'PROVIDES', '供应商提供采购申请所需的物料', 'REFERENCES', 'PUSH'),
+        ('BO_CUSTOMER', 'BO_SO', 'ORDERS', '客户下达销售订单', 'TRIGGERS', 'PUSH'),
+        ('BO_SO', 'BO_SOL', 'CONTAINS', '销售订单包含明细', 'REFERENCES', 'PUSH'),
+        ('BO_SOL', 'BO_INVENTORY', 'RESERVES', '订单明细预留库存', 'UPDATES', 'PUSH'),
+        ('BO_INVENTORY', 'BO_INV_LOG', 'GENERATES', '库存变动生成流水', 'GENERATES', 'PUSH'),
+        ('BO_INV_LOG', 'BO_LOCATION', 'AT', '库存流水记录货位', 'REFERENCES', 'PUSH'),
+        ('BO_LOCATION', 'BO_WAREHOUSE', 'LOCATED_AT', '货位位于仓库', 'REFERENCES', 'PUSH'),
+        ('BO_WAREHOUSE', 'BO_INVENTORY', 'HOLDS', '仓库持有库存', 'REFERENCES', 'PUSH'),
+        ('BO_SUPPLIER', 'BO_PO', 'SUPPLIES', '供应商供货', 'REFERENCES', 'PUSH'),
+        ('BO_PO', 'BO_POL', 'CONTAINS', '采购订单包含明细', 'REFERENCES', 'PUSH'),
+        ('BO_POL', 'BO_INVENTORY', 'ADDS', '采购入库增加库存', 'UPDATES', 'PUSH'),
+        ('BO_PROC_CONTRACT', 'BO_PO', 'GENERATES', '采购合同生成订单', 'GENERATES', 'PUSH'),
+        ('BO_SO', 'BO_SALES_INV', 'GENERATES', '销售订单生成发票', 'GENERATES', 'PUSH'),
+        ('BO_SALES_INV', 'BO_AR_INV', 'CREATES', '销售发票创建应收', 'GENERATES', 'PUSH'),
+        ('BO_CUSTOMER', 'BO_AR_RECEIPT', 'PAYMENTS', '客户付款', 'TRIGGERS', 'PUSH'),
+        ('BO_AR_RECEIPT', 'BO_AR_INV', 'RECONCILES', '收款核销应收', 'UPDATES', 'PUSH'),
+        ('BO_CUSTOMER', 'BO_CUST_CREDIT', 'HAS', '客户拥有信用额度', 'REFERENCES', 'PUSH'),
+        ('BO_CUST_CREDIT', 'BO_SO', 'LIMITS', '信用额度限制订单', 'UPDATES', 'PUSH'),
+        ('BO_PRICE_LIST', 'BO_SOL', 'PRICES', '价格表定价', 'REFERENCES', 'PUSH'),
+        ('BO_INBOUND', 'BO_INBOUND_L', 'CONTAINS', '入库单包含明细', 'REFERENCES', 'PUSH'),
+        ('BO_INBOUND_L', 'BO_INVENTORY', 'INCREASES', '入库增加库存', 'UPDATES', 'PUSH'),
+        ('BO_OUTBOUND', 'BO_OUTBOUND_L', 'CONTAINS', '出库单包含明细', 'REFERENCES', 'PUSH'),
+        ('BO_OUTBOUND_L', 'BO_INVENTORY', 'DECREASES', '出库减少库存', 'UPDATES', 'PUSH'),
+        ('BO_SUPPLIER', 'BO_AP_INV', 'RECEIVES', '供应商收到应付发票', 'REFERENCES', 'PUSH'),
+        ('BO_AP_INV', 'BO_PAYMENT_REQ', 'CREATES', '应付发票创建付款申请', 'GENERATES', 'PUSH'),
+        ('BO_PAYMENT_REQ', 'BO_PAYMENT_VOUCHER', 'APPROVES', '付款申请审批生成凭单', 'TRIGGERS', 'PUSH'),
+        ('BO_PAYMENT_VOUCHER', 'BO_AP_PAYMENT', 'CREATES', '凭单创建付款单', 'GENERATES', 'PUSH'),
+        ('BO_AP_PAYMENT', 'BO_SUPPLIER', 'PAYS', '付款单支付供应商', 'TRIGGERS', 'PUSH'),
     ]
+
+    # [v34 fix] 允许同一对 (source, target) 出现多条关系
+    # code/relation_code 唯一性: 用 (source_target_idx) 形式, idx 从 01 递增
+    # 例: BO_SO -> BO_SOL 出现 2 次, 则 code 分别为 BO_SO_BO_SOL_01 / BO_SO_BO_SOL_02
+
+    # ─── enum 校验 ───
+    VALID_RELATION_TYPES = {'GENERATES', 'UPDATES', 'TRIGGERS', 'REFERENCES'}
+    VALID_DIRECTIONS = {'PUSH', 'PULL', 'BIDIRECTIONAL'}
 
     # 注意: 只持久化 source_bo_id + target_bo_id + Type-A 冗余 (source_code/target_code/code)
     # 分类字段 (module_relation, *_name 等) 由 computed_utils.py 运行时 JOIN 计算
     rel_count = 0
-    for source_code, target_code, rel_code, rel_desc in relationships:
+    # [v34 fix] 用 dict 统计每个 (source, target) 对应的 idx 计数
+    pair_counter = {}
+    skipped_invalid_enum = 0
+    duplicate_codes = set()
+    used_codes = set()
+
+    for rel_tuple in relationships:
+        # 兼容旧 4 元组 (无 enum)
+        if len(rel_tuple) == 4:
+            source_code, target_code, rel_code, rel_desc = rel_tuple
+            relation_type = 'RELATION'  # 历史兜底
+            relation_direction = None
+        elif len(rel_tuple) == 6:
+            source_code, target_code, rel_code, rel_desc, relation_type, relation_direction = rel_tuple
+        else:
+            print(f"  ⚠ 跳过关系 (元组长度错误 {len(rel_tuple)}): {rel_tuple}")
+            continue
+
+        # [v34] enum 校验
+        if relation_type not in VALID_RELATION_TYPES:
+            print(f"  ⚠ 跳过关系 (relation_type '{relation_type}' 不在 enum 中): {rel_code} {source_code}->{target_code}")
+            skipped_invalid_enum += 1
+            continue
+        if relation_direction is not None and relation_direction not in VALID_DIRECTIONS:
+            print(f"  ⚠ 跳过关系 (relation_direction '{relation_direction}' 不在 enum 中): {rel_code} {source_code}->{target_code}")
+            skipped_invalid_enum += 1
+            continue
+
         source_id = bo_ids.get(source_code)
         target_id = bo_ids.get(target_code)
         if source_id and target_id:
-            rel_unique_code = f"{source_code}_{target_code}"
+            # [v34 fix] code/relation_code 唯一: 用 idx 计数器
+            pair_key = (source_code, target_code)
+            pair_counter[pair_key] = pair_counter.get(pair_key, 0) + 1
+            idx = pair_counter[pair_key]
+            # 格式: {source}_{target}_{idx:02d}, e.g. BO_SO_BO_SOL_01
+            rel_unique_code = f"{source_code}_{target_code}_{idx:02d}"
+
+            # 二次校验: 整库唯一
+            if rel_unique_code in used_codes:
+                duplicate_codes.add(rel_unique_code)
+                print(f"  ⚠ 重复 code: {rel_unique_code}")
+                continue
+            used_codes.add(rel_unique_code)
+
             cursor.execute("""
-                INSERT INTO relationships (version_id, source_bo_id, target_bo_id, source_code, target_code, code, relation_code, relation_type, relation_desc, created_at, created_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (v1_id, source_id, target_id, source_code, target_code, rel_unique_code, rel_code, 'RELATION', rel_desc, now, 'system'))
+                INSERT INTO relationships (version_id, source_bo_id, target_bo_id, source_code, target_code, code, relation_code, relation_type, relation_direction, relation_desc, created_at, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (v1_id, source_id, target_id, source_code, target_code, rel_unique_code, rel_code, relation_type, relation_direction, rel_desc, now, 'system'))
             rel_count += 1
-            print(f"创建关系{rel_code}: {source_code} -> {target_code}")
+            dir_str = f", {relation_direction}" if relation_direction else ""
+            print(f"创建关系{rel_code}{dir_str}: {source_code} -> {target_code} (code={rel_unique_code})")
+
+    if skipped_invalid_enum > 0:
+        print(f"  ⚠ 共跳过 {skipped_invalid_enum} 条 (enum 校验失败)")
+    if duplicate_codes:
+        print(f"  ⚠ 检测到重复 code: {duplicate_codes}")
 
     conn.commit()
     conn.close()

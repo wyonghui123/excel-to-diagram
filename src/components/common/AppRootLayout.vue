@@ -9,6 +9,10 @@
     @logo-click="goHome"
     @user-command="handleUserCommand"
   >
+    <!-- [NEW BMRD 2026-06-14] E34: 在工具栏 (header-actions 插槽) 加 LocaleSwitcher -->
+    <template #header-actions>
+      <LocaleSwitcher />
+    </template>
     <slot />
   </AppLayout>
 
@@ -33,6 +37,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { AppLayout } from '@/components/common'
+import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'  // [BMRD 2026-06-14] E34
 import AccountSettingsDialog from '@/components/AccountSettingsDialog.vue'
 import { useTabStore } from '@/stores/tabStore'
 import { useAuthStore } from '@/stores/authStore'

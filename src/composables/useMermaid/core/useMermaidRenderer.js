@@ -11,6 +11,7 @@ export function useMermaidRenderer(containerRef, options = {}) {
   const isRendered = ref(false)
   const lastDiagramData = ref(null)
   const lastLayoutConfig = ref(null)
+  const lastMermaidCode = ref('')  // [v34 双向支持] 暴露给 dev/__diagramApp, E2E 可读取诊断 syntax error
 
   const { initializeMermaid } = useMermaidConfig()
 
@@ -36,12 +37,14 @@ export function useMermaidRenderer(containerRef, options = {}) {
 
       const relationDescriptions = []
       let mermaidCode = syntax.generateMermaidCode(
-        diagramData, 
-        relationDescriptions, 
-        layoutEngine, 
-        layoutType, 
+        diagramData,
+        relationDescriptions,
+        layoutEngine,
+        layoutType,
         layoutConfig
       )
+      // [v34 双向支持] 保存到 ref, E2E 可从 window 读取
+      lastMermaidCode.value = mermaidCode
 
       if (layoutType !== 'default' && layoutConfig?.containers) {
         try {
@@ -125,6 +128,7 @@ export function useMermaidRenderer(containerRef, options = {}) {
   return {
     isRendered,
     lastDiagramData,
+    lastMermaidCode,  // [v34 双向支持] E2E 诊断用
     render,
     reRender
   }

@@ -10,7 +10,14 @@ table_name: versions
 description: 产品版本是产品线的软件版本，如 v1.0、2024-Q4 等。每个版本包含独立的领域模型数据。
 display_name_field: name
 parent_object: product
-aspects: [hierarchy_aspect, audit_aspect, owner_aspect, naming_aspect]
+# [CHANGED 2026-06-13] 移除 naming_aspect - version 不需要独立的 code 字段
+# 原因：
+#   1. naming_aspect 提供 code 字段（business_key=true），与 name 语义重叠
+#   2. 行业实践（SAP/Salesforce/Oracle/Jira）均不需要独立的版本编码
+#   3. 版本的自然名称（v1.0/2024-Q4）本身就是标识
+#   4. 唯一性改为 (product_id, name) 联合约束
+# 影响：version 对象不再继承 code 字段，仅使用 name 作为业务键
+aspects: [audit_aspect, owner_aspect]
 
 # 管理维度绑定（Spec v1.3 数据权限统一模型）
 dimension_bindings:
@@ -62,8 +69,8 @@ import_export:
   cascade_export: true
   cascade_import: true
   conflict_strategy: upsert
-  conflict_key: code
-  description_for_agent: "产品版本是产品线的软件版本。导出时会级联包含所有子对象。"
+  conflict_key: "product_id,name"
+  description_for_agent: "产品版本是产品线的软件版本。导出时会级联包含所有子对象。唯一性由 (product_id, name) 联合保证。"
 
 # ────────────────────────────────────────────
 # 语义标注
@@ -85,7 +92,9 @@ semantics:
 # ────────────────────────────────────────────
 # Aspect 引用
 # ────────────────────────────────────────────
-aspects: [audit_aspect, naming_aspect]
+# [CHANGED 2026-06-13] 移除 naming_aspect - 与第20行保持一致
+# 注意：此处的 aspects 会覆盖第20行的配置，因此需要包含完整的列表
+aspects: [audit_aspect, owner_aspect]
 
 # ────────────────────────────────────────────
 # 审计配置
@@ -139,13 +148,8 @@ ui_view_config:
         importance: high
         sortable: true
         i18n_key: version.field.name
-      - key: code
-        title: 编码
-        width: 120
-        position: 2
-        importance: medium
-        sortable: true
-        i18n_key: version.field.code
+      # [REMOVED 2026-06-13] 删除 code 列 - code 字段已废弃, name 作为唯一业务键
+      # 原 code 列与 name 语义重叠, 行业实践(SAP/Salesforce/Oracle)均不需要独立版本编码
       # [V1.1.2 2026-06-11] 删 visibility 列 - 已上移到 product
       - key: is_current
         title: 当前版本
@@ -153,6 +157,14 @@ ui_view_config:
         position: 4
         importance: medium
       # [V1.1.4 2026-06-11] 删 owner_id_display 列 - 顶层 owner 已在 product
+      # [FIX 2026-06-14] BUG-V008 扩展: 补 FK 链路列 product_name
+      # 后端通过 redundancy join_path 自动填充 (version_id -> products.name)
+      - key: product_name
+        title: 所属产品
+        width: 150
+        position: 5
+        importance: high
+        sortable: true
       - key: child_count
         title: 领域数量
         width: 80
@@ -183,7 +195,6 @@ ui_view_config:
         type: fieldGroup
         fields:
           - name
-          - code
           - is_current
           - description
           - product_name
@@ -200,7 +211,6 @@ ui_view_config:
       - title: 基本信息
         fields:
           - name
-          - code
           - description
           - is_current
           - product_id
@@ -209,16 +219,16 @@ ui_view_config:
     events:
       - type: create
         channels: [in_app]
-        track_fields: [code, name, product_id]
-        payload: [id, code, name]
+        track_fields: [name, product_id]
+        payload: [id, name]
       - type: update
         channels: [in_app]
-        track_fields: [code, name, is_current]
-        payload: [id, code, name]
+        track_fields: [name, is_current]
+        payload: [id, name]
       - type: delete
         channels: [in_app]
         track_fields: []
-        payload: [id, code, name]
+        payload: [id, name]
 
 # ────────────────────────────────────────────
 # 字段定义
@@ -303,44 +313,34 @@ fields:
     required: true
     description: 版本名称，如 v1.0、2024-Q4
     semantics:
-      meaning: 版本的显示名称
+      meaning: 版本的显示名称和业务键（产品内唯一）
       display_name: true
-      data_category: text
-      import_visible: true
-      export_visible: true
-      import_order: 20
-      examples:
-        - v1.0
-        - 2024-Q4
-        - R2024.1
-
-  - id: code
-    name: 版本编码
-    type: string
-    db_column: code
-    required: true
-    unique: true
-    description: 版本编码，用于唯一标识版本
-    semantics:
-      meaning: 版本的业务编码
       business_key: true
-      import_order: 1
-      display_name: true
       immutable: true
-      # [CHANGED 2026-06-10] 放宽 pattern 接受 dot/dash
-      # 原 pattern: ^[A-Z][A-Z0-9_]*$ （拒绝 v1.0/2024-Q4/R2024.1）
-      # 改为 ^[A-Za-z0-9][A-Za-z0-9_.\-]*$
-      #   - 首字符: 字母或数字（接受 1.0.0 / v1.0 / 2024Q4 / R2024.1）
-      #   - 后续字符: 字母/数字/_/./-（接受 V1.0、v1.0-rc1、2024-Q4）
-      # 决策参考：.trae/specs/key-template-form-interaction/ §11.8
       pattern: "^[A-Za-z0-9][A-Za-z0-9_.\\-]*$"
       data_category: code
       import_visible: true
       export_visible: true
+      import_order: 1
       examples:
-        - V1.0
-        - 2024Q4
+        - v1.0
+        - 2024-Q4
         - R2024.1
+    ui:
+      visible: true
+      editable: true
+      widget: input
+      fieldGroup: 基本信息
+      fieldGroupPosition: 10
+      i18n_key: version.field.name
+
+  # [REMOVED 2026-06-13] 删除 code 字段
+  # 原因:
+  #   1. code 与 name 语义重叠, 用户实际使用中几乎必然填一样的内容
+  #   2. 行业实践(SAP/Salesforce/Oracle/Jira)均不需要独立的版本编码字段
+  #   3. 版本的自然名称(v1.0/2024-Q4)本身就是标识
+  #   4. 唯一性改为 (product_id, name) 联合约束, 替代原 code 的全局唯一
+  # 迁移: name 字段继承原 code 的 pattern/immutable/business_key 属性
 
   - id: description
     name: 版本描述

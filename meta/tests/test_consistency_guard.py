@@ -133,7 +133,7 @@ class TestWriteGuardIntegration:
     def _create_test_hierarchy(self):
         """创建测试层级数据"""
         product_id = self.ds.insert('products', {'code': 'PROD1', 'name': '产品1'})
-        version_id = self.ds.insert('versions', {'code': 'V1', 'name': '版本1', 'product_id': product_id, 'is_current': 1})
+        version_id = self.ds.insert('versions', {'name': '版本1', 'product_id': product_id, 'is_current': 1})
         domain_id = self.ds.insert('domains', {'code': 'DOM1', 'name': '领域1', 'version_id': version_id})
         sub_domain_id = self.ds.insert('sub_domains', {'code': 'SUB1', 'name': '子领域1', 'domain_id': domain_id})
         service_module_id = self.ds.insert('service_modules', {'code': 'SVC1', 'name': '服务模块1', 'sub_domain_id': sub_domain_id})

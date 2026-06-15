@@ -446,6 +446,15 @@ export function filterRowActions(rowActions, row, objectType, rowMutability, che
 
     const actionKey = (action.key || '').toLowerCase()
 
+    // [FIX 2026-06-13] 未保存的新行 (_isNew=true / __new_xxx)
+    //   - 隐藏单行 edit/update (新行的编辑由 inline cell 处理)
+    //   - 隐藏单行 delete (新行的"删除"应该走本地 removeNewRow, 不调后端)
+    if (row && (row._isNew === true || (typeof row.id === 'string' && row.id.startsWith('__new_')))) {
+      if (actionKey === 'edit' || actionKey === 'update' || actionKey === 'delete') {
+        return false
+      }
+    }
+
     if (objectType === 'enum_type' && row?.category === 'system') {
       if (actionKey === 'edit' || actionKey === 'update' || actionKey === 'delete') {
         return false

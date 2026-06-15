@@ -80,11 +80,20 @@ class LogEntry:
     agent_session_id: Optional[str] = None
     tool_call_id: Optional[str] = None
     agent_reasoning: Optional[str] = None
-    
+
     # 父对象关联（用于级联审计查询）
     parent_object_type: Optional[str] = None
     parent_object_id: Optional[str] = None
-    
+
+    # [v3.18 FR-005] 操作结果 (success/failure/blocked/retry)
+    outcome: Optional[str] = None
+
+    # [v3.18 FR-009] cascade 标记
+    cascade: bool = False
+
+    # [v3.18] user_agent 透传 (修 user_agent 缺失 72.5%)
+    user_agent: Optional[str] = None
+
     # 附加数据
     extra_data: Optional[Dict[str, Any]] = None
     
@@ -638,6 +647,21 @@ class StructuredLogger:
             # - 当 entry.field_name 有值 (ASSOCIATE/DISSOCIATE) 时, AuditService.log 走 if field_name
             #   分支, 使用 old_value/new_value (JSON 字符串), old_data/new_data 被忽略
             # 同时传两个是兼容两种调用场景, 避免业务侧日志退化为 fallback `_record` 行
+            # [v3.18] 优先用 entry.user_agent, 否则从 audit_logger._current_user 拿, 再不行从 Flask request
+            entry_user_agent = getattr(entry, 'user_agent', None)
+            if not entry_user_agent:
+                try:
+                    from meta.core.action_executor import AuditLogger
+                    # 单例模式找当前 AuditLogger (从注册表)
+                    from meta.core.interceptors.persistence_interceptor import PersistenceInterceptor
+                    # 简化: 直接从 Flask g 拿
+                    from flask import g as _g
+                    cu = getattr(_g, 'current_user', None) or {}
+                    if isinstance(cu, dict) and cu.get('user_agent'):
+                        entry_user_agent = cu['user_agent']
+                except Exception:
+                    pass
+
             audit_service.log(
                 object_type=entry_object_type,
                 object_id=entry_object_id,
@@ -650,11 +674,15 @@ class StructuredLogger:
                 new_value=new_value,
                 field_name=entry.field_name,
                 ip_address=entry_ip_address,
+                user_agent=entry_user_agent,
                 trace_id=entry.trace_id,
                 transaction_id=entry.transaction_id,
                 extra_data=entry.extra_data,
                 parent_object_type=entry.parent_object_type,
                 parent_object_id=entry.parent_object_id,
+                # [v3.18 FR-005/009] 透传 outcome + cascade
+                outcome=entry.outcome or 'success',
+                cascade=getattr(entry, 'cascade', False),
             )
 
             self._stats['total_written'] += 1

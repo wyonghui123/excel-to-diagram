@@ -431,7 +431,7 @@ async function handleAction(action, row) {
       )
       
       const result = await deleteChild(row[props.rowKey] || row.id)
-      
+
       if (result.success) {
         message.deleted('数据')
         emit('delete', row)

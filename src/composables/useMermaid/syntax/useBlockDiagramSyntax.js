@@ -2,6 +2,7 @@ import { getColors, assignColorsToGroups } from './useMermaidColors.js'
 import { DEFAULT_LINK_COLOR } from '../color/useMermaidColors.js'
 import { useBlockDiagramStyle } from '../style/useBlockDiagramStyle.js'
 import { useDynamicSizeConfig } from '../config/useDynamicSizeConfig.js'
+import { getArrowSyntax, sanitizeLabel } from './_shared/arrowHelper.js'
 
 export const DIAGRAM_TYPES = {
   BUSINESS_OBJECT: 'businessObject',
@@ -160,7 +161,9 @@ export function useBlockDiagramSyntax() {
       const targetNode = nodeMap.get(link.target)
 
       if (sourceNode && targetNode) {
-        code += `  ${link.source} -->|"${link.label}"| ${link.target}\n`
+        // [v39 关系线标题修复] 优先 code (实例编码), fallback 到 label, 再 fallback 到 relationCode
+        const linkLabel = link.code || link.label || link.relationCode || ''
+        code += getArrowSyntax(link.source, link.target, linkLabel, link)
 
         let linkColor = DEFAULT_LINK_COLOR
         // 计算连线颜色：优先使用节点的 isCenter 标记，其次使用容器的 centerSubDomain
@@ -189,8 +192,8 @@ export function useBlockDiagramSyntax() {
             targetName: targetNode.name,
             source: link.source,
             target: link.target,
-            relationCode: link.label,
-            label: link.label,
+            relationCode: linkLabel,
+            label: linkLabel,
             relationDesc: link.tooltip || '',
             annotationContent: link.annotationContent || '',
             sourceCode: sourceNode.code,
@@ -260,13 +263,18 @@ export function useBlockDiagramSyntax() {
         }
 
         if (options.collectRelations) {
+          // [v39 关系线标题修复] 优先 code → label → relationCode
+          // - code: 关系实例编码 (e.g. "ORDER-USER-01")
+          // - label: 透传的 label (旧逻辑保留, 兼容部分老数据流)
+          // - relationCode: 关系类型编码 (e.g. "DEPENDS_ON")
+          const resolvedRelationCode = link.code || link.label || link.relationCode || ''
           relationDescriptions.push({
             sourceName: sourceNode.name,
             targetName: targetNode.name,
             source: sourceNode.id,
             target: targetNode.id,
-            relationCode: link.label || link.relationCode,
-            label: link.label || link.relationCode,
+            relationCode: resolvedRelationCode,
+            label: resolvedRelationCode,
             relationDesc: link.tooltip || link.relationDesc || '',
             sourceCode: link.sourceCode || sourceNode.code,
             targetCode: link.targetCode || targetNode.code
@@ -312,8 +320,8 @@ export function useBlockDiagramSyntax() {
   return result
 }
 
-const generateLinkCode = (sourceId, targetId, label, linkColor) => {
-  return `  ${sourceId} -->|"${label}"| ${targetId}\n  linkStyle ${0} ${getLinkStyle(linkColor)}\n`
+const generateLinkCode = (sourceId, targetId, label, linkColor, link) => {
+  return `${getArrowSyntax(sourceId, targetId, label, link)}  linkStyle ${0} ${getLinkStyle(linkColor)}\n`
 }
 
 return {

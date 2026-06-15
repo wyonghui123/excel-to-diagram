@@ -112,6 +112,120 @@ def no_auth_headers():
     return {'Content-Type': 'application/json'}
 
 
+# ==================== Hotfix 2026-06-14 角色 Fixtures ====================
+#   业务用户权限矩阵 — 用于 H1/H2/H3 回归测试
+#   角色定义见 .trae/specs/auth-permission-system/tasks.md H1-H3
+
+def _build_jwt_token(secret, payload):
+    token = pyjwt.encode(payload, secret, algorithm='HS256')
+    if isinstance(token, bytes):
+        token = token.decode('utf-8')
+    return token
+
+
+@pytest.fixture(scope="session")
+def super_admin_token():
+    """[FIXTURE 2026-06-14] super_admin token (含 '*' 权限, is_super_admin=True)"""
+    secret = os.environ.get('JWT_SECRET_KEY', 'dev-only-secret-key-not-for-production-use')
+    return _build_jwt_token(secret, {
+        'user_id': 2,
+        'username': 'super_admin',
+        'display_name': 'Super Admin',
+        'permissions': ['*'],
+        'roles': [{'name': '超级管理员', 'code': 'super_admin', 'is_super_admin': True}],
+        'exp': 9999999999,
+    })
+
+
+@pytest.fixture(scope="session")
+def super_admin_headers(super_admin_token):
+    """[FIXTURE 2026-06-14] super_admin 认证头 (is_super_admin 旁路鉴权)"""
+    return {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {super_admin_token}',
+        'X-User-Id': '2',
+        'X-User-Name': 'super_admin',
+    }
+
+
+@pytest.fixture(scope="session")
+def audit_reader_token():
+    """[FIXTURE 2026-06-14] 审计读者 token (只有 audit_log:read, 无其他)"""
+    secret = os.environ.get('JWT_SECRET_KEY', 'dev-only-secret-key-not-for-production-use')
+    return _build_jwt_token(secret, {
+        'user_id': 100,
+        'username': 'audit_reader',
+        'display_name': 'Audit Reader',
+        'permissions': ['audit_log:read'],
+        'roles': [{'name': '审计读者', 'code': 'audit_reader'}],
+        'exp': 9999999999,
+    })
+
+
+@pytest.fixture(scope="session")
+def audit_reader_headers(audit_reader_token):
+    """[FIXTURE 2026-06-14] 审计读者认证头 — 用于 H1 验证 (有 audit_log:read -> 200)"""
+    return {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {audit_reader_token}',
+        'X-User-Id': '100',
+        'X-User-Name': 'audit_reader',
+    }
+
+
+@pytest.fixture(scope="session")
+def no_audit_user_token():
+    """[FIXTURE 2026-06-14] 无 audit 权限用户 token (只有 user:read)"""
+    secret = os.environ.get('JWT_SECRET_KEY', 'dev-only-secret-key-not-for-production-use')
+    return _build_jwt_token(secret, {
+        'user_id': 101,
+        'username': 'no_audit_user',
+        'display_name': 'No Audit User',
+        'permissions': ['user:read'],
+        'roles': [{'name': '普通用户', 'code': 'viewer'}],
+        'exp': 9999999999,
+    })
+
+
+@pytest.fixture(scope="session")
+def no_audit_user_headers(no_audit_user_token):
+    """[FIXTURE 2026-06-14] 无 audit 权限认证头 — 用于 H1 验证 (无 audit_log:read -> 403)"""
+    return {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {no_audit_user_token}',
+        'X-User-Id': '101',
+        'X-User-Name': 'no_audit_user',
+    }
+
+
+@pytest.fixture(scope="session")
+def business_user_token():
+    """[FIXTURE 2026-06-14] 业务用户 token (TEST888 模拟 — 有 arch-data 业务权限, 无 audit)"""
+    secret = os.environ.get('JWT_SECRET_KEY', 'dev-only-secret-key-not-for-production-use')
+    return _build_jwt_token(secret, {
+        'user_id': 102,
+        'username': 'TEST888',
+        'display_name': 'TEST888 业务用户',
+        'permissions': [
+            'domain:read', 'sub_domain:read', 'service_module:read',
+            'business_object:read', 'relationship:read', 'relationship:list',
+        ],
+        'roles': [{'name': '业务用户', 'code': 'business_user'}],
+        'exp': 9999999999,
+    })
+
+
+@pytest.fixture(scope="session")
+def business_user_headers(business_user_token):
+    """[FIXTURE 2026-06-14] 业务用户认证头 — 用于 H2/H3 验证 (有业务权限, 无 system 子菜单)"""
+    return {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {business_user_token}',
+        'X-User-Id': '102',
+        'X-User-Name': 'TEST888',
+    }
+
+
 # ==================== App Client Fixtures ====================
 
 @pytest.fixture(scope="session")

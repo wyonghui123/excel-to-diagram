@@ -669,6 +669,17 @@ export function useMetaList(objectType, options = {}) {
 
   /**
    * 处理批量删除
+   *
+   * 修复 (2026-06-13): 之前直接把所有 selectedIds 传给 boService.batchDelete,
+   *   如果用户选中了新行 (_isNew=true / id 以 __new_ 开头), 后端会返回
+   *   "记录不存在: version#__new_xxx" 400, 但这些新行只是客户端临时行,
+   *   应该走本地 removeNewRow, 不调后端。
+   *
+   * 流程:
+   *   1. 把 selectedIds 拆分为 newIds (临时行) 和 existingIds (已保存)
+   *   2. newIds 走本地 removeNewRow (无 API 调用, 不会触发 400)
+   *   3. existingIds 调 boService.batchDelete
+   *   4. 根据 two 段结果汇总 success / failure message
    */
   async function handleBatchDelete() {
     if (selectedIds.value.size === 0) {
@@ -676,11 +687,11 @@ export function useMetaList(objectType, options = {}) {
       return
     }
 
-    const count = selectedIds.value.size
+    const totalCount = selectedIds.value.size
 
     try {
       await ElMessageBox.confirm(
-        i18nT('metaList.confirmDeleteMessage', '确定要删除选中的 {count} 条记录吗？', { count }),
+        i18nT('metaList.confirmDeleteMessage', '确定要删除选中的 {count} 条记录吗？', { count: totalCount }),
         i18nT('metaList.confirmDeleteTitle', '确认删除'),
         {
           confirmButtonText: i18nT('common.confirm', '确定'),
@@ -688,17 +699,41 @@ export function useMetaList(objectType, options = {}) {
           type: 'warning'
         }
       )
-      
-      const idsToDelete = Array.from(selectedIds.value)
 
-      const result = await boService.batchDelete(objectType, idsToDelete)
+      // 拆分: 临时行 (本地移除) vs 已保存行 (调后端)
+      const newIds = []
+      const existingIds = []
+      for (const id of selectedIds.value) {
+        const idStr = String(id)
+        const isNewId = idStr.startsWith('__new_')
+        // 通过 data 中的 row 二次校验 (更严格, 防止 selectedIds 漏判)
+        const row = data.value.find(r => String(r.id) === idStr)
+        const isNewRow = isNewId || (row && row._isNew === true)
+        if (isNewRow) {
+          newIds.push(idStr)
+        } else {
+          existingIds.push(id)
+        }
+      }
 
-      if (result.success) {
-        const deletedCount = result.success_count || idsToDelete.length
+      // 1) 本地移除临时行 (无后端调用)
+      let localRemovedCount = 0
+      for (const id of newIds) {
+        const removed = removeNewRow(id)
+        if (removed) localRemovedCount += 1
+      }
+
+      // 2) 后端删除已保存行
+      let apiResult = null
+      if (existingIds.length > 0) {
+        apiResult = await boService.batchDelete(objectType, existingIds)
+      }
+
+      // 3) 汇总结果
+      if (apiResult && apiResult.success) {
+        const deletedCount = (apiResult.success_count || existingIds.length) + localRemovedCount
         const successMsg = i18nT('metaList.deleteSuccess', '成功删除 {count} 条记录', { count: deletedCount })
-        // [FIX 2026-06-12 v4] 用户反馈成功 message 不明显 (ElMessage 顶部 3s 自动消失容易错过)
-        // 改用三重保险: ElNotification (显眼长条) + ElMessage (快速反馈) + console.log
-        console.log('[useMetaList] 批量删除成功:', successMsg, result)
+        console.log('[useMetaList] 批量删除成功:', successMsg, { local: localRemovedCount, api: existingIds.length }, apiResult)
         ElNotification({
           title: i18nT('common.delete', '删除成功'),
           message: successMsg,
@@ -710,40 +745,32 @@ export function useMetaList(objectType, options = {}) {
         ElMessage.success(successMsg)
         clearAllSelection()
         await loadList()
+      } else if (existingIds.length === 0) {
+        // 全部是本地新行, 不需要 loadList
+        const successMsg = i18nT('metaList.deleteSuccess', '成功删除 {count} 条记录', { count: localRemovedCount })
+        ElMessage.success(successMsg)
+        clearAllSelection()
       } else {
-        // [FIX 2026-06-12 v2] 真实错误信息优先级:
-        // 1) result.message (顶层 message)
-        // 2) result.data.results[].message (batch-delete 207 把每条记录的 message 放在这里)
-        // 3) result.errors (string[]) — 这是技术错误码, 不是中文
-        // 4) 兜底 "删除失败"
-        let errorMsg = result.message
+        // 真实错误信息优先级: result.message > results[].message > errors[] > 兜底
+        let errorMsg = apiResult?.message
         if (!errorMsg) {
-          const resultsArr = result.data?.results || []
-          const messagesFromResults = resultsArr
-            .map(r => r?.message)
-            .filter(Boolean)
-          if (messagesFromResults.length) {
-            errorMsg = messagesFromResults.join('; ')
-          }
+          const resultsArr = apiResult?.data?.results || []
+          const messagesFromResults = resultsArr.map(r => r?.message).filter(Boolean)
+          if (messagesFromResults.length) errorMsg = messagesFromResults.join('; ')
         }
-        if (!errorMsg && Array.isArray(result.errors) && result.errors.length) {
-          errorMsg = result.errors
+        if (!errorMsg && Array.isArray(apiResult?.errors) && apiResult.errors.length) {
+          errorMsg = apiResult.errors
             .map(e => (typeof e === 'string' ? e : e?.message || JSON.stringify(e)))
             .join('; ')
         }
         if (!errorMsg) errorMsg = i18nT('metaList.deleteFailed', '删除失败')
 
-        // [FIX 2026-06-12 v3] 用户反馈 el-message 不够明显, 改用三重保险:
-        // 1) ElNotification 右上角长条 (4.5s, 显眼, 不被遮)
-        // 2) ElMessage 顶部 (3s, 快速反馈)
-        // 3) console.error (开发者工具可见)
-        // 之前用 ElMessage.error(errorMsg) 单一途径, 顶部 3s 自动消失, 用户容易错过
-        console.error('[useMetaList] 批量删除失败:', errorMsg, result)
+        console.error('[useMetaList] 批量删除失败:', errorMsg, apiResult)
         ElNotification({
           title: i18nT('metaList.deleteFailedTitle', '删除失败'),
           message: errorMsg,
           type: 'error',
-          duration: 6000,  // 6 秒, 比默认 4.5s 更长
+          duration: 6000,
           position: 'top-right',
           showClose: true,
         })
@@ -1707,7 +1734,37 @@ export function useMetaList(objectType, options = {}) {
       draftValues.value = new Map(draftValues.value)
     }
   }
-  
+
+  /**
+   * 移除一个未保存的新行 (本地操作，不调后端)
+   *
+   * 背景: 用户在 inline edit 模式中点 "+ 新增" 后未填字段就点行级 "删除",
+   * 应该本地从 data 中过滤掉 (该 row 是 _isNew=true 临时行, 后端没有对应记录)。
+   * 修复 BUG: 之前 executeDelete 会调 boService.delete('version', '__new_xxx')
+   * 触发 404/500。
+   *
+   * @param {string|number} rowId - 要移除的 row id
+   * @returns {boolean} - 是否成功移除
+   */
+  function removeNewRow(rowId) {
+    if (rowId === null || rowId === undefined) return false
+    const rowIdStr = String(rowId)
+    const targetRow = data.value.find(r => String(r.id) === rowIdStr)
+    if (!targetRow) return false
+
+    // 仅允许移除 _isNew=true 的临时行 (防误删已保存数据)
+    const isNew = targetRow._isNew === true || rowIdStr.startsWith('__new_')
+    if (!isNew) return false
+
+    // 清理 draftValues
+    draftValues.value.delete(rowIdStr)
+    draftValues.value = new Map(draftValues.value)
+
+    // 从 data 中过滤掉
+    data.value = data.value.filter(r => String(r.id) !== rowIdStr)
+    return true
+  }
+
   /**
    * 取消所有编辑
    */
@@ -2001,6 +2058,7 @@ export function useMetaList(objectType, options = {}) {
     finishEditCell,
     updateDraftValue,
     addNewRow,
+    removeNewRow,
     cancelInlineEdit,
     saveDraftValues,
     getDraftCreates,

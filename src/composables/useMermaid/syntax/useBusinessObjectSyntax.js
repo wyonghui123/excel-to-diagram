@@ -5,6 +5,7 @@ import { routeLayout } from '../layouts/index.js'
 import { checkDepth, checkCycle, createVisitedSet } from '../../../services/groupModel/safetyUtils.js'
 import { DataFlowLogger } from '../../../services/groupModel/dataFlowLogger.js'
 import { formatContainerTitle } from '../../../utils/formatContainerTitle.js'
+import { getArrowSyntax, sanitizeLabel } from './_shared/arrowHelper.js'
 
 function sortVirtualContainersBySize(containers) {
   if (!containers || containers.length === 0) {
@@ -420,6 +421,10 @@ export function useBusinessObjectSyntax() {
     const nodeCodeToIdMap = new Map()
     const nodeNameToIdMap = new Map()
     const nodeIdToCodeMap = new Map()
+    // [v33 关键修复] nodeId → node name 映射, 用于 tooltip 显示源/目标节点名
+    // 之前 relationDescriptions 存的是 link.sourceName (可能 undefined),
+    // 导致 tooltip 中 "源 → 目标" 节点名为空
+    const nodeIdToNameMap = new Map()
     let nodeId = 1
 
     const objectToModuleMap = new Map()
@@ -503,6 +508,8 @@ export function useBusinessObjectSyntax() {
       }
       nodeNameToIdMap.set(originalName, id)
       nodeIdToCodeMap.set(id, nodeCode || originalName)
+      // [v33 关键修复] 记录 id → 节点名, 用于 tooltip 回查
+      nodeIdToNameMap.set(id, originalName)
 
       const moduleInfo = objectToModuleMap.get(nodeCode) || objectToModuleMap.get(originalName)
 
@@ -885,13 +892,17 @@ export function useBusinessObjectSyntax() {
             // 关键修复 v26: mermaid 11 对 link label "|" 内空字符串或带特殊字符 ("\\n, |) 报 "Syntax error in text"
             // 1) 替换 | → /
             // 2) 替换换行 → 空格
-            // 3) 如果 link.relationCode 为空, 用 relationDesc (用户语义描述) 代替
-            // 4) 如果 relationDesc 也空或纯空白, 输出无 label 的 link
-            const rawCode = (link.relationCode && String(link.relationCode).trim())
-              ? link.relationCode
-              : (link.relationDesc && String(link.relationDesc).trim())
-                ? link.relationDesc
-                : ''
+            // [v39 关系线标题修复] 3) 优先用 code (关系实例编码 e.g. "ORDER-USER-01"),
+            //    fallback 到 relationCode (关系类型编码 e.g. "DEPENDS_ON"),
+            //    再 fallback 到 relationDesc (描述)
+            // 4) 如果全都空或纯空白, 输出无 label 的 link
+            const rawCode = (link.code && String(link.code).trim())
+              ? link.code
+              : (link.relationCode && String(link.relationCode).trim())
+                ? link.relationCode
+                : (link.relationDesc && String(link.relationDesc).trim())
+                  ? link.relationDesc
+                  : ''
             let safeCode = ''
             if (rawCode) {
               safeCode = String(rawCode)
@@ -901,7 +912,7 @@ export function useBusinessObjectSyntax() {
                 .trim()
             }
             const labelPart = safeCode ? `|"${safeCode}"|` : ''
-            mermaidCode += `  ${sourceId} -->${labelPart} ${targetId}\n`
+            mermaidCode += getArrowSyntax(sourceId, targetId, safeCode, link)
 
             mermaidCode += `  linkStyle ${index} ${getLinkStyle(linkColor)}\n`
 
@@ -913,14 +924,26 @@ export function useBusinessObjectSyntax() {
             })
 
             if (relationDescriptions) {
+              // [v33 关键修复] 从 sourceId/targetId 反查节点名, 确保 tooltip 显示正确
+              // 之前直接用 link.sourceName/targetName, 业务数据可能只有 sourceCode/targetCode
+              // 没有 sourceName/targetName, 导致 tooltip 显示空
+              const resolvedSourceName = nodeIdToNameMap.get(sourceId) || link.sourceName || ''
+              const resolvedTargetName = nodeIdToNameMap.get(targetId) || link.targetName || ''
+              // [v39 关系线标题修复] relationCode 优先用 link.code (实例编码), fallback 到 link.relationCode
+              // 这样 tooltip 的第一行也显示"关系编码"而不是"关系类型编码"
+              const resolvedRelationCode = link.code || link.relationCode || ''
               relationDescriptions.push({
-                sourceName: link.sourceName,
-                targetName: link.targetName,
+                sourceName: resolvedSourceName,
+                targetName: resolvedTargetName,
                 source: sourceId,
                 target: targetId,
-                relationCode: link.relationCode,
-                label: link.relationCode,
+                relationCode: resolvedRelationCode,
+                label: resolvedRelationCode,
                 relationDesc: link.relationDesc || '',
+                // [v34 双向支持] 关系类型 (BusinessRelationType 枚举 code)
+                relationType: link.relationType || '',
+                // [v34 双向支持] 关系方向 (推/拉/双向)
+                relationDirection: link.relationDirection || '',
                 annotationContent: link.annotationContent || '',
                 annotationCategory: link.annotationCategory || 'info',
                 sourceCode: link.sourceCode,
@@ -1048,11 +1071,14 @@ export function useBusinessObjectSyntax() {
         const linkColor = getLinkColor(sourceGroupKey, targetGroupKey, sourceColor, targetColor)
 
         // 关键修复 v26: 见上 (line 886) 的 mermaid label 特殊字符处理
-        const rawCode2 = (link.relationCode && String(link.relationCode).trim())
-          ? link.relationCode
-          : (link.relationDesc && String(link.relationDesc).trim())
-            ? link.relationDesc
-            : ''
+        // [v39 关系线标题修复] 优先 code → relationCode → relationDesc (与上面 line 895 保持一致)
+        const rawCode2 = (link.code && String(link.code).trim())
+          ? link.code
+          : (link.relationCode && String(link.relationCode).trim())
+            ? link.relationCode
+            : (link.relationDesc && String(link.relationDesc).trim())
+              ? link.relationDesc
+              : ''
         let safeCode2 = ''
         if (rawCode2) {
           safeCode2 = String(rawCode2)
@@ -1062,7 +1088,7 @@ export function useBusinessObjectSyntax() {
             .trim()
         }
         const labelPart2 = safeCode2 ? `|"${safeCode2}"|` : ''
-        mermaidCode += `  ${sourceId} -->${labelPart2} ${targetId}\n`
+        mermaidCode += getArrowSyntax(sourceId, targetId, safeCode2, link)
 
         mermaidCode += `  linkStyle ${index} ${getLinkStyle(linkColor)}\n`
 
@@ -1074,14 +1100,23 @@ export function useBusinessObjectSyntax() {
         })
 
         if (relationDescriptions) {
+          // [v33 关键修复] 从 sourceId/targetId 反查节点名, 确保 tooltip 显示正确
+          const resolvedSourceName = nodeIdToNameMap.get(sourceId) || link.sourceName || ''
+          const resolvedTargetName = nodeIdToNameMap.get(targetId) || link.targetName || ''
+          // [v39 关系线标题修复] relationCode 优先用 link.code (实例编码), fallback 到 link.relationCode
+          const resolvedRelationCode = link.code || link.relationCode || ''
           relationDescriptions.push({
-            sourceName: link.sourceName,
-            targetName: link.targetName,
+            sourceName: resolvedSourceName,
+            targetName: resolvedTargetName,
             source: sourceId,
             target: targetId,
-            relationCode: link.relationCode,
-            label: link.relationCode,
+            relationCode: resolvedRelationCode,
+            label: resolvedRelationCode,
             relationDesc: link.relationDesc || '',
+            // [v34 双向支持] 关系类型 (BusinessRelationType 枚举 code)
+            relationType: link.relationType || '',
+            // [v34 双向支持] 关系方向 (推/拉/双向)
+            relationDirection: link.relationDirection || '',
             annotationContent: link.annotationContent || '',
             annotationCategory: link.annotationCategory || 'info',
             sourceCode: link.sourceCode,

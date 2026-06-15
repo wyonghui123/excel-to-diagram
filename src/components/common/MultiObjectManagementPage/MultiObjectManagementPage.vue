@@ -268,6 +268,18 @@ if (router) {
 }
 
 onBeforeRouteLeave((_to, _from) => {
+  // [v39.7-FIX] 每次离开管理页都重新保存状态快照，确保第二次/多次切回时也能恢复
+  // 之前: saveStateForDiagram 只在点击"展示图表"按钮时调用一次
+  //   → 第一次切回管理页时 restore 消费了数据, 第二次切回时数据已丢
+  // 之后: 配合 restoreStateFromDiagram 不再清掉 STATE_RESTORE_KEY
+  //   → 每次离开都刷新快照, 多次 restore 都能拿到最新状态
+  //   → sessionStorage 容量有限 (5-10MB), 但状态快照 < 50KB, 无压力
+  try {
+    page.saveStateForDiagram()
+  } catch (e) {
+    console.warn('[v39.7] Failed to save state on route leave:', e)
+  }
+
   // tabStore / chartStore 已在 setup() 顶部声明, 此处直接使用闭包引用
   const tabEntry = tabStore.tabs.find(t => t.id === route?.path)
   if (tabEntry && tabEntry.path !== route.fullPath) {

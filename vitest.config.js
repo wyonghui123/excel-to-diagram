@@ -22,8 +22,8 @@ export default defineConfig({
     cache: {
       dir: './node_modules/.cache/vitest',
     },
-    include: ['src/**/*.{test,spec}.{js,ts}'],
-    exclude: ['node_modules', 'dist', 'e2e'],
+    include: ['src/**/*.{test,spec}.{js,ts}', 'e2e/screenplay/**/*.{test,spec}.{js,ts}'],
+    exclude: ['node_modules', 'dist', 'e2e/features', 'e2e/smoke', 'e2e/specs'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

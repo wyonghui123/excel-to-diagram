@@ -71,11 +71,18 @@ def get_architecture_preview_impl(bo):
             bo_filter = version_filter.copy()
             bo_page_size = 5000
 
-        # [FR-009] 关系表下推：source_bo_id__in + target_bo_id__in
+        # [FR-009] 关系表下推：source_bo_id__in (单边 SQL 过滤)
+        # v39.6: 修复跨域关系 (cross-boundary) 被误过滤的 bug
+        # 之前: 同时下推 source_bo_id__in + target_bo_id__in → SQL 变成 AND 语义
+        #   只返回 src AND tgt 都在 bo_id_list 的关系
+        #   → cross-boundary 关系 (src 在中心、tgt 在外部) 全部丢失
+        #   → 图表页显示 11 而管理页显示 12 (管理页用 /api/v1/relationships 全量)
+        # 现在: 只下推 source_bo_id__in (单边), 然后 Python 端用 OR 逻辑二次过滤
+        #   保留 src 或 tgt 任一在 bo_id_list 的关系 (含 cross-boundary)
         rel_filter = version_filter.copy()
+        bo_id_set = set(bo_id_list) if bo_id_list else None
         if bo_id_list:
             rel_filter['source_bo_id__in'] = bo_id_list
-            rel_filter['target_bo_id__in'] = bo_id_list
             rel_page_size = min(10000, len(bo_id_list) * len(bo_id_list) * 2)
         else:
             rel_page_size = 10000
@@ -93,6 +100,15 @@ def get_architecture_preview_impl(bo):
         modules = module_result.data if module_result.success else []
         business_objects = bo_result.data if bo_result.success else []
         relationships = rel_result.data if rel_result.success else []
+
+        # v39.6: Python 端 OR 二次过滤，保留 cross-boundary 关系
+        # 之前 SQL 只下推 source_bo_id__in, 但 management 页全量 12 条 vs chart 11 条
+        # 差的就是 tgt-only-in-scope 的关系 (cross-boundary: 外部 src → 中心 tgt)
+        if bo_id_set:
+            relationships = [r for r in relationships if (
+                r.get('source_bo_id') in bo_id_set or r.get('sourceBoId') in bo_id_set or
+                r.get('target_bo_id') in bo_id_set or r.get('targetBoId') in bo_id_set
+            )]
 
         # [FR-009] Python 端二次过滤已不需要（已在 SQL 层下推）
         # 保留以下作为防御性 fallback
@@ -141,6 +157,69 @@ def get_architecture_preview_impl(bo):
                 if d.get('id') not in seen:
                     domains.append(d)
                     seen.add(d.get('id'))
+
+        # ── [v1.1.11 2026-06-15] 补全关系引用的外部 BO 节点 (上下文读取) ──
+        # 原 bug: BO list 受 dim scope 限制, 但关系 list 走 OR 语义允许 source/target 任一端
+        #         在 dim scope 内 (跨域 association 推导)
+        #   → cross-boundary 关系的 target BO 在域外, 不在 business_objects
+        #   → 图表渲染: 边存在 (target_bo_name/code 来自关系 join), 节点缺失
+        #   → 图表显示异常: 5 个孤立节点 + 10 条边 (其中 3 条指向"幽灵节点")
+        # 业界标准 (SAP 字段级授权 + Salesforce OWD 引用模式):
+        #   关系引用的 BO 走"上下文读取"模式, 元数据 (id/code/name/type/domain) 可见
+        #   敏感字段 (description / attributes / custom_field) 仍受 BO 自身 dim scope 控制
+        #   (v1.1.10 单条 get 已加 dim scope 校验, 这里补的是"图谱节点元数据"可见性)
+        # 实施:
+        #   1. 收集所有关系引用的 BO id
+        #   2. diff 出"在关系里但不在 business_objects"的 BO
+        #   3. 用 raw SQL 拉这些 BO 的元数据字段 (绕过 DataPermissionInterceptor)
+        #   4. 标记 is_external=true 让前端区分 (灰显/特殊样式)
+        logger.info(f"[v1.1.11 DEBUG] relationships_count={len(relationships)}")
+        from meta.core.datasource import get_data_source as _preview_ds_factory
+        _ds = _preview_ds_factory()
+        referenced_bo_ids = set()
+        for r in relationships:
+            sid = r.get('source_bo_id') or r.get('sourceBoId')
+            tid = r.get('target_bo_id') or r.get('targetBoId')
+            if sid: referenced_bo_ids.add(sid)
+            if tid: referenced_bo_ids.add(tid)
+        existing_bo_ids = {b.get('id') for b in business_objects}
+        external_bo_ids = referenced_bo_ids - existing_bo_ids
+        logger.info(f"[v1.1.11 DEBUG] referenced={referenced_bo_ids} existing={existing_bo_ids} external={external_bo_ids}")
+
+        if external_bo_ids:
+            placeholders = ','.join('?' * len(external_bo_ids))
+            # 拉元数据字段: id, code, name, type, domain_id, sub_domain_id, service_module_id
+            # 不拉 description / attributes / custom_field (按 V1.1.10 仍受 dim scope 控制)
+            try:
+                ext_rows = _ds.execute(
+                    f"""SELECT id, code, name, type, domain_id, sub_domain_id,
+                               service_module_id, is_active
+                        FROM business_objects WHERE id IN ({placeholders})""",
+                    list(external_bo_ids)
+                ).fetchall()
+                logger.info(f"[v1.1.11 DEBUG] ext_rows fetched: {len(ext_rows)}")
+                # PRAGMA table_info 给的列名顺序固定
+                for row in ext_rows:
+                    bo = {
+                        'id': row[0],
+                        'code': row[1],
+                        'name': row[2],
+                        'type': row[3],
+                        'domain_id': row[4],
+                        'sub_domain_id': row[5],
+                        'service_module_id': row[6],
+                        'is_active': row[7],
+                        'is_external': True,  # 标记: 仅上下文可见, 详情受 dim scope 控制
+                    }
+                    business_objects.append(bo)
+                    bo_id_map[bo['id']] = {
+                        'domain_id': bo['domain_id'],
+                        'sub_domain_id': bo['sub_domain_id'],
+                        'service_module_id': bo['service_module_id'],
+                    }
+                logger.info(f"[v1.1.11 DEBUG] business_objects total now: {len(business_objects)}")
+            except Exception as e:
+                logger.warning(f"[bo_api_preview] external BO ref fetch failed: {e}")
 
         # 计算 center_scope
         center_scope = []

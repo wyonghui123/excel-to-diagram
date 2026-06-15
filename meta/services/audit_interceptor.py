@@ -87,7 +87,7 @@ def audit_log(object_type: str):
                 try:
                     audit_service = AuditService(getattr(self, 'ds', None))
                     
-                    def write_audit_log(trace_id=None, transaction_id=None):
+                    def write_audit_log(trace_id=None, transaction_id=None, **kwargs):
                         # v1.4 增强：request 可能在 service context 中不可用
                         try:
                             ip_addr = request.remote_addr if request else None
@@ -96,16 +96,22 @@ def audit_log(object_type: str):
                             # Working outside of request context
                             ip_addr = None
                             ua = ''
+                        # [FIX 2026-06-13] 允许 async_audit_writer.submit 透传 user_id/user_name/ip/user_agent
+                        # 解决 'got an unexpected keyword argument user_id' TypeError
+                        eff_user_id = kwargs.get('user_id', user_id)
+                        eff_user_name = kwargs.get('user_name', user_name)
+                        eff_ip = kwargs.get('ip_address', ip_addr)
+                        eff_ua = kwargs.get('user_agent', ua)
                         audit_service.log(
                             object_type=object_type,
                             object_id=object_id,
                             action=action,
-                            user_id=user_id,
-                            user_name=user_name,
+                            user_id=eff_user_id,
+                            user_name=eff_user_name,
                             old_data=old_data,
                             new_data=new_data,
-                            ip_address=ip_addr,
-                            user_agent=ua,
+                            ip_address=eff_ip,
+                            user_agent=eff_ua,
                             trace_id=trace_id,
                             transaction_id=transaction_id,
                         )
@@ -167,26 +173,31 @@ class AuditInterceptor:
             captured_ip = None
             captured_ua = None
         
-        def write_audit_log(trace_id=None, transaction_id=None):
+        def write_audit_log(trace_id=None, transaction_id=None, **kwargs):
+            # [FIX 2026-06-13] 允许 async_audit_writer.submit 透传 user_id/user_name/ip/user_agent
+            eff_user_id = kwargs.get('user_id', captured_user_id)
+            eff_user_name = kwargs.get('user_name', captured_user_name)
+            eff_ip = kwargs.get('ip_address', captured_ip)
+            eff_ua = kwargs.get('user_agent', captured_ua)
             self.audit_service.log(
                 object_type=object_type,
                 object_id=object_id,
                 action='CREATE',
-                user_id=captured_user_id,
-                user_name=captured_user_name,
+                user_id=eff_user_id,
+                user_name=eff_user_name,
                 new_data=data,
-                ip_address=captured_ip,
-                user_agent=captured_ua,
+                ip_address=eff_ip,
+                user_agent=eff_ua,
                 trace_id=trace_id or captured_trace_id,
                 transaction_id=transaction_id or captured_transaction_id,
             )
-        
+
         self.async_writer.submit(
             write_audit_log,
             trace_id=captured_trace_id,
             transaction_id=captured_transaction_id
         )
-    
+
     def log_update(self, object_type: str, object_id: int,
                    old_data: Dict[str, Any], new_data: Dict[str, Any],
                    user_id: Optional[str] = None, user_name: Optional[str] = None,
@@ -208,27 +219,32 @@ class AuditInterceptor:
             captured_ip = None
             captured_ua = None
         
-        def write_audit_log(trace_id=None, transaction_id=None):
+        def write_audit_log(trace_id=None, transaction_id=None, **kwargs):
+            # [FIX 2026-06-13] 允许 async_audit_writer.submit 透传 user_id/user_name/ip/user_agent
+            eff_user_id = kwargs.get('user_id', captured_user_id)
+            eff_user_name = kwargs.get('user_name', captured_user_name)
+            eff_ip = kwargs.get('ip_address', captured_ip)
+            eff_ua = kwargs.get('user_agent', captured_ua)
             self.audit_service.log(
                 object_type=object_type,
                 object_id=object_id,
                 action='UPDATE',
-                user_id=captured_user_id,
-                user_name=captured_user_name,
+                user_id=eff_user_id,
+                user_name=eff_user_name,
                 old_data=old_data,
                 new_data=new_data,
-                ip_address=captured_ip,
-                user_agent=captured_ua,
+                ip_address=eff_ip,
+                user_agent=eff_ua,
                 trace_id=trace_id or captured_trace_id,
                 transaction_id=transaction_id or captured_transaction_id,
             )
-        
+
         self.async_writer.submit(
             write_audit_log,
             trace_id=captured_trace_id,
             transaction_id=captured_transaction_id
         )
-    
+
     def log_delete(self, object_type: str, object_id: int, data: Dict[str, Any],
                    user_id: Optional[str] = None, user_name: Optional[str] = None,
                    trace_id: Optional[str] = None, transaction_id: Optional[str] = None):
@@ -249,26 +265,31 @@ class AuditInterceptor:
             captured_ip = None
             captured_ua = None
         
-        def write_audit_log(trace_id=None, transaction_id=None):
+        def write_audit_log(trace_id=None, transaction_id=None, **kwargs):
+            # [FIX 2026-06-13] 允许 async_audit_writer.submit 透传 user_id/user_name/ip/user_agent
+            eff_user_id = kwargs.get('user_id', captured_user_id)
+            eff_user_name = kwargs.get('user_name', captured_user_name)
+            eff_ip = kwargs.get('ip_address', captured_ip)
+            eff_ua = kwargs.get('user_agent', captured_ua)
             self.audit_service.log(
                 object_type=object_type,
                 object_id=object_id,
                 action='DELETE',
-                user_id=captured_user_id,
-                user_name=captured_user_name,
+                user_id=eff_user_id,
+                user_name=eff_user_name,
                 old_data=data,
-                ip_address=captured_ip,
-                user_agent=captured_ua,
+                ip_address=eff_ip,
+                user_agent=eff_ua,
                 trace_id=trace_id or captured_trace_id,
                 transaction_id=transaction_id or captured_transaction_id,
             )
-        
+
         self.async_writer.submit(
             write_audit_log,
             trace_id=captured_trace_id,
             transaction_id=captured_transaction_id
         )
-    
+
     def log_batch(self, operations: list):
         """
         批量记录审计日志
@@ -365,21 +386,26 @@ class AuditInterceptor:
 
         tgt_display = self._get_target_display(tgt_type, tgt_id)
 
-        def write_audit_log(trace_id=None, transaction_id=None):
+        def write_audit_log(trace_id=None, transaction_id=None, **kwargs):
+            # [FIX 2026-06-13] 允许 async_audit_writer.submit 透传 user_id/user_name/ip/user_agent
+            eff_user_id = kwargs.get('user_id', captured_user_id)
+            eff_user_name = kwargs.get('user_name', captured_user_name)
+            eff_ip = kwargs.get('ip_address', captured_ip)
+            eff_ua = kwargs.get('user_agent', captured_ua)
             self.audit_service.log(
                 object_type=object_type,
                 object_id=object_id,
                 action='ASSOCIATE',
-                user_id=captured_user_id,
-                user_name=captured_user_name,
+                user_id=eff_user_id,
+                user_name=eff_user_name,
                 field_name=association_name,
                 new_data={
                     'target_type': tgt_type,
                     'target_id': tgt_id,
                     'target_display': tgt_display,
                 },
-                ip_address=captured_ip,
-                user_agent=captured_ua,
+                ip_address=eff_ip,
+                user_agent=eff_ua,
                 trace_id=trace_id or captured_trace_id,
                 transaction_id=transaction_id or captured_transaction_id,
                 parent_object_type=tgt_type,
@@ -423,21 +449,26 @@ class AuditInterceptor:
 
         tgt_display = self._get_target_display(tgt_type, tgt_id)
 
-        def write_audit_log(trace_id=None, transaction_id=None):
+        def write_audit_log(trace_id=None, transaction_id=None, **kwargs):
+            # [FIX 2026-06-13] 允许 async_audit_writer.submit 透传 user_id/user_name/ip/user_agent
+            eff_user_id = kwargs.get('user_id', captured_user_id)
+            eff_user_name = kwargs.get('user_name', captured_user_name)
+            eff_ip = kwargs.get('ip_address', captured_ip)
+            eff_ua = kwargs.get('user_agent', captured_ua)
             self.audit_service.log(
                 object_type=object_type,
                 object_id=object_id,
                 action='DISSOCIATE',
-                user_id=captured_user_id,
-                user_name=captured_user_name,
+                user_id=eff_user_id,
+                user_name=eff_user_name,
                 field_name=association_name,
                 old_data={
                     'target_type': tgt_type,
                     'target_id': tgt_id,
                     'target_display': tgt_display,
                 },
-                ip_address=captured_ip,
-                user_agent=captured_ua,
+                ip_address=eff_ip,
+                user_agent=eff_ua,
                 trace_id=trace_id or captured_trace_id,
                 transaction_id=transaction_id or captured_transaction_id,
                 parent_object_type=tgt_type,

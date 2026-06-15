@@ -1,1 +1,1 @@
-export { useTooltip } from './useTooltip.js'
+export { useTooltip, preloadEnums } from './useTooltip.js'

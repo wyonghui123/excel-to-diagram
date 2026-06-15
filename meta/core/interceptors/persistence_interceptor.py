@@ -162,9 +162,16 @@ class PersistenceInterceptor(Interceptor):
             # 注入 FK display names（与 _do_list 保持一致）
             try:
                 if result.data:
-                    result.data = EnrichmentEngine.for_data_source(registry.ds).enrich_fk_display_names(meta_object, result.data)
+                    engine = EnrichmentEngine.for_data_source(registry.ds)
+                    # [FIX 2026-06-14] BUG-V008 详情页修复: 先填充虚拟冗余字段
+                    # (domain_id/sub_domain_id 等从 service_module_id 推导, 见
+                    # business_object.yaml 的 redundancy.join_path 配置)
+                    # enrich_fk_display_names 依赖已有 FK 值才能查 display_name,
+                    # 所以必须先 enrich_one 把 domain_id/sub_domain_id 推导出来。
+                    result.data = engine.enrich_one(meta_object.id, result.data)
+                    result.data = engine.enrich_fk_display_names(meta_object, result.data)
             except Exception as e:
-                logger.warning(f"[_do_read] enrich_fk_display_names failed: {e}")
+                logger.warning(f"[_do_read] enrichment failed: {e}")
             return ActionResult(
                 success=True,
                 data=result.data,
@@ -288,6 +295,12 @@ class PersistenceInterceptor(Interceptor):
             """
             if not isinstance(cond_obj, dict):
                 return '', []
+
+            # [FIX v1.0.6 2026-06-15] always_true: 永真占位, 渲染 1=1
+            # 用于多 role 派生时, 无 dim scope 的角色派生"无条件" (全开放)
+            # 跟 SAP/Salesforce/Oracle 多 role data scope 并集语义一致
+            if cond_obj.get('type') == 'always_true':
+                return "1=1", []
 
             # [FIX v1.0.6] 嵌套 OR group 递归处理
             if cond_obj.get('type') == 'or':

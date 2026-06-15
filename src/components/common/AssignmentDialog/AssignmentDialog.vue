@@ -161,10 +161,12 @@ function handleSearchInput(query) {
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(() => {
     const keyword = query || ''
-    if (metaListRef.value && metaListRef.value.keyword !== undefined) {
-      const kw = metaListRef.value.keyword
-      if (kw !== undefined && kw !== null && typeof kw === 'object' && 'value' in kw) {
-        kw.value = keyword
+    if (metaListRef.value) {
+      // [FIX 2026-06-14] 使用 setKeyword 方法而非直接赋值 keyword.value
+      // 因为 defineExpose 暴露的 ref 会被 Vue setupState proxy 自动 unwrap,
+      // metaListRef.value.keyword 是字符串而非 ref 对象, 直接赋值无效
+      if (typeof metaListRef.value.setKeyword === 'function') {
+        metaListRef.value.setKeyword(keyword)
       }
       metaListRef.value.loadList()
     }
@@ -175,9 +177,8 @@ function handleSearchClear() {
   dialogSearchQuery.value = ''
   if (searchTimer) clearTimeout(searchTimer)
   if (metaListRef.value) {
-    const kw = metaListRef.value.keyword
-    if (kw !== undefined && kw !== null && typeof kw === 'object' && 'value' in kw) {
-      kw.value = ''
+    if (typeof metaListRef.value.setKeyword === 'function') {
+      metaListRef.value.setKeyword('')
     }
     metaListRef.value.loadList()
   }

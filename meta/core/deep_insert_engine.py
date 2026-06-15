@@ -26,9 +26,14 @@ class DeepInsertEngine:
         children_data = params.get('children', params.get('_children', {}))
         options = params.get('options', {})
 
-        if not parent_data and '_children' not in params:
-            parent_data = {k: v for k, v in params.items() if not k.startswith('_')}
-            children_data = params.get('_children', {})
+        # [BMRD 2026-06-14 FIX] 排除非业务字段: options/_children/children/parent
+        # 原 BUG: 简化格式下, options 字段被误识别为父数据
+        # 条件: 没有显式 parent 但提供了 _children/children, 表示简化格式
+        if not parent_data and ('_children' in params or 'children' in params):
+            _RESERVED = {'options', 'parent', 'children', '_children'}
+            parent_data = {k: v for k, v in params.items()
+                          if not k.startswith('_') and k not in _RESERVED}
+            children_data = params.get('_children', params.get('children', {}))
 
         meta_obj = registry.get(object_type)
         if not meta_obj:
@@ -272,15 +277,25 @@ class DeepInsertEngine:
         from meta.core.bo_framework import bo_framework
 
         if data.get('id'):
-            return bo_framework.update(object_type, data['id'], data)
-        return bo_framework.create(object_type, data)
+            result = bo_framework.update(object_type, data['id'], data)
+        else:
+            result = bo_framework.create(object_type, data)
+        # [BMRD 2026-06-14 FIX] 统一包装: 成功时 data 可能是 None
+        if result.success and not result.data:
+            result.data = data
+        return result
 
     def _create_or_update_child(self, child_type: str, data: Dict, data_source) -> ActionResult:
         from meta.core.bo_framework import bo_framework
 
         if data.get('id'):
-            return bo_framework.update(child_type, data['id'], data)
-        return bo_framework.create(child_type, data)
+            result = bo_framework.update(child_type, data['id'], data)
+        else:
+            result = bo_framework.create(child_type, data)
+        # [BMRD 2026-06-14 FIX] 统一包装: 成功时 data 可能是 None
+        if result.success and not result.data:
+            result.data = data
+        return result
 
     def _infer_fk_field(self, parent_type: str, child_type: str, child_meta) -> Optional[str]:
         for f in child_meta.fields:

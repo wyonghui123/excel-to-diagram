@@ -34,8 +34,9 @@ def setup_test_db():
     cursor.execute('''
         CREATE TABLE versions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            code TEXT,
-            name TEXT
+            name TEXT,
+            product_id INTEGER,
+            UNIQUE(product_id, name)
         )
     ''')
 
@@ -95,7 +96,7 @@ def test_01_resolve_parent_by_business_key():
         executor = ActionExecutor(ds)
 
         # 创建版本
-        ds.insert('versions', {'id': 1, 'code': 'V1', 'name': '版本1'})
+        ds.insert('versions', {'id': 1, 'name': '版本1', 'product_id': 1})
 
         # 创建领域
         ds.insert('domains', {'id': 1, 'version_id': 1, 'code': 'FINANCE', 'name': '财务'})
@@ -136,7 +137,7 @@ def test_02_resolve_parent_not_found():
         executor = ActionExecutor(ds)
 
         # 创建版本
-        ds.insert('versions', {'id': 1, 'code': 'V1', 'name': '版本1'})
+        ds.insert('versions', {'id': 1, 'name': '版本1', 'product_id': 1})
 
         # 创建子领域，使用不存在的 domain_code
         sub_domain = get_meta_object('sub_domain')
@@ -176,8 +177,8 @@ def test_03_resolve_with_version_isolation():
         executor = ActionExecutor(ds)
 
         # 创建两个版本
-        ds.insert('versions', {'id': 1, 'code': 'V1', 'name': '版本1'})
-        ds.insert('versions', {'id': 2, 'code': 'V2', 'name': '版本2'})
+        ds.insert('versions', {'id': 1, 'name': '版本1', 'product_id': 1})
+        ds.insert('versions', {'id': 2, 'name': '版本2', 'product_id': 1})
 
         # 在版本1创建领域
         ds.insert('domains', {'id': 1, 'version_id': 1, 'code': 'FINANCE', 'name': '财务'})
@@ -231,7 +232,7 @@ def test_04_resolve_multiple_levels():
         executor = ActionExecutor(ds)
 
         # 创建版本
-        ds.insert('versions', {'id': 1, 'code': 'V1', 'name': '版本1'})
+        ds.insert('versions', {'id': 1, 'name': '版本1', 'product_id': 1})
 
         # 创建领域
         ds.insert('domains', {'id': 1, 'version_id': 1, 'code': 'FINANCE', 'name': '财务'})
@@ -273,7 +274,7 @@ def test_05_resolve_with_existing_id():
         executor = ActionExecutor(ds)
 
         # 创建版本
-        ds.insert('versions', {'id': 1, 'code': 'V1', 'name': '版本1'})
+        ds.insert('versions', {'id': 1, 'name': '版本1', 'product_id': 1})
 
         # 创建两个领域
         ds.insert('domains', {'id': 1, 'version_id': 1, 'code': 'FINANCE', 'name': '财务'})

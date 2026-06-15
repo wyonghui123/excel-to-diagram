@@ -318,6 +318,22 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
 
       const container = resolveContainer(containerData, containers)
       if (container && container.nodes && container.nodes.length > 0) {
+        // [v32 修复 2026-06-13] 跳过 disabled 容器, 与 disabled group 分支行为一致
+        if (container.enabled === false) {
+          // disabled 容器: 不创建 subgraph, 仅外提节点
+          container.nodes.forEach(nodeId => {
+            const actualNodeId = typeof nodeId === 'object' ? (nodeId.id || nodeId.code || nodeId.name) : nodeId
+            if (!definedNodes.has(actualNodeId)) {
+              const node = nodeMap.get(actualNodeId)
+              if (node) {
+                const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+                code += `${indent}  ${actualNodeId}["${displayText}"]\n`
+                definedNodes.add(actualNodeId)
+              }
+            }
+          })
+          return
+        }
         const containerId = `G${groupIndex}_C${idx + 1}`
         const containerCode = generateContainerCode(container, idx, nodeMap, definedNodes, indent, containerId, layoutEngine, links, nextContainerDepth + 1)
         containerCodes.push(containerCode)

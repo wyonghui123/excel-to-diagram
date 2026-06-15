@@ -27,14 +27,14 @@ export function useMetaCache(cacheKey, ttl = DEFAULT_TTL) {
   const fromCache = ref(false)
   const cacheExpired = ref(false)
 
-  function getCache(expectedVersion = null) {
+  function getCache(expectedVersion = null, expectedUserId = null) {
     try {
       const raw = localStorage.getItem(cacheKey)
       if (!raw) return null
-      
+
       const cached = JSON.parse(raw)
       const now = Date.now()
-      
+
       if (cached.timestamp && (now - cached.timestamp > ttl)) {
         cacheExpired.value = true
         return null
@@ -44,7 +44,21 @@ export function useMetaCache(cacheKey, ttl = DEFAULT_TTL) {
         cacheExpired.value = true
         return null
       }
-      
+
+      // [FIX 2026-06-14] user_id 维度: 切换用户后, 旧 user 的 cache 不应被新 user 复用
+      // 场景: admin 登录 → 菜单 cache 写入 localStorage; admin 退出 → TEST333 登录
+      //       旧 cache key "menuCache" 不含 user_id, TEST333 loadMenuPermissions 拿到 admin 的菜单
+      //       → landing page 短暂显示"系统管理"card, refresh 后才正确
+      // 修复: 写入时把 userId 存到 entry, 读取时比对, 不匹配则清空
+      if (expectedUserId !== null && cached.userId !== undefined && cached.userId !== expectedUserId) {
+        console.warn(
+          `[useMetaCache] Cache "${cacheKey}" was for user_id=${cached.userId}, ` +
+          `current user_id=${expectedUserId}, clearing stale cache.`
+        )
+        clearCache()
+        return null
+      }
+
       return cached
     } catch (e) {
       console.warn(`[useMetaCache] Failed to read cache "${cacheKey}":`, e)
@@ -52,12 +66,13 @@ export function useMetaCache(cacheKey, ttl = DEFAULT_TTL) {
     }
   }
 
-  function setCache(newData, version = null) {
+  function setCache(newData, version = null, userId = null) {
     try {
       const cacheEntry = {
         data: newData,
         timestamp: Date.now(),
-        version
+        version,
+        userId
       }
       localStorage.setItem(cacheKey, JSON.stringify(cacheEntry))
     } catch (e) {

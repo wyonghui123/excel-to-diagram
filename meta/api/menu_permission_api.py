@@ -416,6 +416,23 @@ def get_visible_menu_tree():
                     tree.append(m)
                 else:
                     tree.append(m)
+
+        # [FIX 2026-06-14] 后置清理: 空 children 的 custom_page 父菜单 (分组节点/无内容页) 应当隐藏
+        #   否则 TEST888 这类没有 system 子菜单权限的用户会看到空的"系统管理"分组
+        #   判定条件: page_type='custom_page' + 没有可见 children → 隐藏
+        #   保留: 自身有 menu_path 且 page_type 不是 'custom_page' (如 'object_list' / 'multi_object_hub') 仍可点击
+        def _prune_empty_groups(nodes):
+            keep = []
+            for n in nodes:
+                if n.get('children'):
+                    n['children'] = _prune_empty_groups(n['children'])
+                # custom_page + 没有 children → 内容为空, 隐藏
+                if n.get('page_type') == 'custom_page' and not n.get('children'):
+                    continue
+                keep.append(n)
+            return keep
+
+        tree = _prune_empty_groups(tree)
         
         # Build leaf_menus: leaf nodes excluding hub children and dashboard
         hub_parent_codes = set()
@@ -431,6 +448,17 @@ def get_visible_menu_tree():
             if not m.get('menu_code') or m['menu_code'] == 'dashboard':
                 continue
             if not m.get('menu_path'):
+                continue
+            # [FIX 2026-06-15 H12] 跳过 group 容器节点 (page_type='custom_page')
+            #   之前 v1.0.5 的 parent_codes 判定用 m.get('children'), 但 line 410-418 的
+            #   children 填充是 in-place 改 menu_map[parent] 引用, 跟 flat 共享 dict 引用.
+            #   多数场景下 parent_codes 能正确判定, 但 group 节点 (如 system) 实际没 children
+            #   (因为子菜单是不同 perm scope, line 317 SQL 没把它们的子加到 flat),
+            #   导致 system 误进 leaf_menus, 在 landing page 出现"系统管理"分组节点.
+            #
+            #   改判定: page_type='custom_page' 即视为 group 容器, 不应作为 leaf
+            #   (这类菜单通常 menu_path 指向 generic container page 而非真实功能页)
+            if m.get('page_type') == 'custom_page':
                 continue
             if m['menu_code'] in parent_codes:
                 continue

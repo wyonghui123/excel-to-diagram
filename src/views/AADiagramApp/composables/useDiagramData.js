@@ -1,6 +1,7 @@
 import { ref, computed, watch, watchEffect, nextTick } from 'vue'
 import { useExcelParser } from '../../../composables/useExcelParser.js'
 import { useDiagramConfigStore } from '../../../stores/diagramConfigStore.js'
+import { useChartArchDataStore } from '../../../stores/chartArchDataStore'
 import { apiV2 } from '@/utils/httpClient'
 import { extractSubDomains } from '../../../services/dataTransformer.js'
 import { buildDiagramData } from '../../../services/diagramDataBuilder.js'
@@ -24,7 +25,6 @@ import {
   getSelectedRelationCodes,
   getSelectedRelationIds
 } from '../../../services/relationClassifier.js'
-import { validateData } from '../../../services/dataValidator.js'
 import { buildPreviewDataFromArchData, convertToRelationNodeIds } from '../../../services/archDataConverter.js'
 
 /**
@@ -204,6 +204,9 @@ export function useDiagramData() {
   const configStore = useDiagramConfigStore()
   window.__configStore = configStore
 
+  // [2026-06-15] 架构数据图表缓存 store (diagramData 缓存用)
+  const chartArchStore = useChartArchDataStore()
+
   const centerScope = computed(() => configStore.centerScope)
   const selectedScope = ref([])
   // 关键修复 v27: relationFilteredBoCodes 已改为 computed (见 line 372)
@@ -364,49 +367,12 @@ export function useDiagramData() {
   // 关键修复 v29：补全跨域关系 (src⊕tgt, 如 TEST600→BO_WAREHOUSE)
   //   收紧条件: 仅当用户主动选了 INTERNAL 或 CROSS_BOUNDARY 节点时才补全
   //   保护"用户只选 INTERNAL 不想引入外部"语义
+  // v39.3: 去掉补全跨域关系逻辑，直接使用关系范围树中选中的关系 ID
+  //   之前逻辑: fromTree + fromCrossBoundary 补全，导致图表页显示 17 而管理页显示 12
+  //   现在逻辑: 只使用 getSelectedRelationIds，与管理页关系范围 badge 完全一致
+  //   用户反馈: "去掉补全跨域关系逻辑"
   const filteredRelations = computed(() => {
-    const fromTree = getSelectedRelationIds(relationCategoryTree.value, selectedRelationNodeIds.value)
-
-    // 补全跨域关系 (src ∈ centerScope ⊕ tgt ∈ centerScope)
-    //   条件: 1) 用户选了 INTERNAL 或 CROSS_BOUNDARY 节点
-    //          2) 关系跨域 (XOR)
-    //          3) 非自环
-    //          4) 未被 fromTree 覆盖
-    const treeSet = new Set(fromTree)
-    const fromCrossBoundary = []
-    const centerSet = new Set(centerScope.value || [])
-
-    if (previewData.value?.relationships && centerSet.size > 0) {
-      const userSelectedInternalOrCross = (selectedRelationNodeIds.value || []).some(nodeId =>
-        nodeId.startsWith('internal-') || nodeId.startsWith('cross-boundary-')
-      )
-      if (userSelectedInternalOrCross) {
-        previewData.value.relationships.forEach(rel => {
-          if (rel.id == null) return
-          if (treeSet.has(rel.id)) return        // 已被 fromTree 覆盖
-          if (rel.sourceCode === rel.targetCode) return  // 排除自环
-
-          // 关键修复 v32: fromCrossBoundary 用后端 scopeType 优先判断
-          // 老逻辑用 XOR (sourceIn !== targetIn) 会漏掉"按前端 src/tgt 都不在 center
-          //   但后端算 CROSS_BOUNDARY"的关系 (e.g. 后端 center_scope 跟前端用户选的不完全一致)
-          // 新逻辑: 后端有 scopeType 时按后端 (INTERNAL/CROSS_BOUNDARY 都补);
-          //         后端没 scopeType 时按前端 OR 兜底 (src/tgt 至少 1 端在 center 即补)
-          if (rel.scopeType === 'internal' || rel.scopeType === 'cross-boundary') {
-            fromCrossBoundary.push(rel.id)
-            return
-          }
-          if (!rel.scopeType) {
-            const sourceIn = centerSet.has(rel.sourceCode)
-            const targetIn = centerSet.has(rel.targetCode)
-            if (sourceIn || targetIn) {  // 兜底: OR 条件 (INTERNAL + CROSS_BOUNDARY)
-              fromCrossBoundary.push(rel.id)
-            }
-          }
-        })
-      }
-    }
-
-    return Array.from(new Set([...fromTree, ...fromCrossBoundary]))
+    return getSelectedRelationIds(relationCategoryTree.value, selectedRelationNodeIds.value)
   })
 
   // 关键修复 v27: 关系范围对应的 BO 集合, 必须跟随 filteredRelations 实时计算
@@ -1005,199 +971,160 @@ export function useDiagramData() {
   })
 
   // 新的显示统计格式：导入、中心范围、外部关联、选择总数
+  // v39.6: 重构 total/config 计算 - total = center + incremental (与"总数 = 中心∪关系"语义一致)
+  // 之前: total.objectRelations = filteredRelations.length (只含 relation tree 选中)
+  //   → 丢失中心范围的 4 条关系, 总数显示 8 而非 12
+  // 之后: total = center + incremental, config = total (口径完全一致)
   const displayStats = computed(() => {
-    // 根据图表类型计算配置步骤的统计
-    const configStats = (() => {
-      if (chartType.value === 'serviceModule') {
-        const totalStats = selectedStats.value.total
-        return {
-          serviceModules: totalStats.serviceModules,
-          serviceModuleRelations: filteredRelations.value.length || 0
+    // 关键修复 v37: 服务模块图也用完整 5 指标 (与业务对象图统一)
+    // 关键修复 v38: objectRelations 跟 displayStats.total.objectRelations 口径一致
+    // 关键修复 v39.6: total = center + incremental, config = total
+    // 先计算 center / incremental / external, 再算 total
+    const center = (() => {
+      const base = selectedStats.value.center || { domains: 0, subDomains: 0, serviceModules: 0, businessObjects: 0, objectRelations: 0 }
+      if (!relationCategoryTree.value) return base
+      const ids = new Set()
+      const gather = (n) => {
+        if (!n) return
+        if (n.relationIds) n.relationIds.forEach(id => ids.add(id))
+        if (n.relationCodes && (!n.relationIds || n.relationIds.length === 0)) {
+          n.relationCodes.forEach(c => ids.add(c))
         }
-      } else {
-        const totalStats = selectedStats.value.total
-        return {
-          serviceModules: totalStats.serviceModules,
-          businessObjects: totalStats.businessObjects,
-          domains: totalStats.domains,
-          subDomains: totalStats.subDomains,
-          objectRelations: filteredRelations.value.length || 0
-        }
+        if (n.children) n.children.forEach(gather)
       }
+      const collect = (node) => {
+        if (!node) return
+        const isInternal = node.id === 'internal' || (typeof node.id === 'string' && node.id.startsWith('internal-'))
+        if (isInternal) gather(node)
+        if (node.children) node.children.forEach(collect)
+      }
+      relationCategoryTree.value.forEach(collect)
+      // 兜底: 分类树收集到的关系数 < previewData 中 INTERNAL 关系数
+      if (previewData.value?.relationships) {
+        const rels = previewData.value.relationships
+        const centerSet = new Set(centerScope.value || [])
+        const truthIds = new Set()
+        for (const r of rels) {
+          if (r.id == null) continue
+          if (r.sourceCode === r.targetCode) continue
+          if (r.scopeType === 'internal') {
+            truthIds.add(r.id); continue
+          }
+          const srcIn = centerSet.has(r.sourceCode)
+          const tgtIn = centerSet.has(r.targetCode)
+          if (srcIn && tgtIn) truthIds.add(r.id)
+        }
+        return { ...base, objectRelations: Math.max(ids.size, truthIds.size) }
+      }
+      return { ...base, objectRelations: ids.size }
     })()
+
+    const external = selectedStats.value.external || { domains: 0, subDomains: 0, serviceModules: 0, businessObjects: 0, objectRelations: 0 }
+
+    // 关键修复 v32 (终版): incremental.objectRelations = total - center (都用 selectedNodeIds 口径)
+    // 关键修复 v33: 但当 relationCategoryTree 缺失 cross-boundary 节点 (后端 scopeType 错算为
+    //   external) 时, 上面的 total - center 永远是 0. 改用 previewData + 后端 scopeType 兜底:
+    //   1) 若 relationCategoryTree 中有 cross-boundary 节点 + relationIds, 仍用 total - center
+    //   2) 否则直接用 previewData.relationships 中 scopeType=cross-boundary 的关系 ID 数
+    const incremental = (() => {
+      const base = selectedStats.value.incremental || { domains: 0, subDomains: 0, serviceModules: 0, businessObjects: 0, objectRelations: 0 }
+      const computeFromTree = () => {
+        if (!relationCategoryTree.value) return 0
+        const ids = new Set()
+        const gather = (n) => {
+          if (!n) return
+          if (n.relationIds) n.relationIds.forEach(id => ids.add(id))
+          if (n.relationCodes && (!n.relationIds || n.relationIds.length === 0)) {
+            n.relationCodes.forEach(c => ids.add(c))
+          }
+          if (n.children) n.children.forEach(gather)
+        }
+        const collect = (node) => {
+          if (!node) return
+          const isInternalOrCross = node.id === 'internal' || node.id === 'cross-boundary' ||
+            (typeof node.id === 'string' && (node.id.startsWith('internal-') || node.id.startsWith('cross-boundary-')))
+          if (isInternalOrCross) gather(node)
+          if (node.children) node.children.forEach(collect)
+        }
+        relationCategoryTree.value.forEach(collect)
+        return ids.size
+      }
+      const computeCenter = () => {
+        if (!relationCategoryTree.value) return 0
+        const ids = new Set()
+        const gather = (n) => {
+          if (!n) return
+          if (n.relationIds) n.relationIds.forEach(id => ids.add(id))
+          if (n.relationCodes && (!n.relationIds || n.relationIds.length === 0)) {
+            n.relationCodes.forEach(c => ids.add(c))
+          }
+          if (n.children) n.children.forEach(gather)
+        }
+        const collect = (node) => {
+          if (!node) return
+          const isInternal = node.id === 'internal' ||
+            (typeof node.id === 'string' && node.id.startsWith('internal-'))
+          if (isInternal) gather(node)
+          if (node.children) node.children.forEach(collect)
+        }
+        relationCategoryTree.value.forEach(collect)
+        return ids.size
+      }
+      let totalFromTree = computeFromTree()
+      let centerFromTree = computeCenter()
+      let incFromTree = totalFromTree - centerFromTree
+      // 兜底: 关系分类树中 cross-boundary 节点不存在或没收集到时, 用 previewData 算
+      if (incFromTree === 0 && previewData.value?.relationships) {
+        const rels = previewData.value.relationships
+        const centerSet = new Set(centerScope.value || [])
+        const ids = new Set()
+        for (const r of rels) {
+          if (r.id == null) continue
+          if (r.sourceCode === r.targetCode) continue  // 排除自环
+          // 1) 优先用后端 scopeType
+          if (r.scopeType === 'cross-boundary') {
+            ids.add(r.id)
+            continue
+          }
+          // 2) 后端没标 cross-boundary 时, 用业务定义 (XOR) 兜底
+          const srcIn = centerSet.has(r.sourceCode)
+          const tgtIn = centerSet.has(r.targetCode)
+          if (srcIn !== tgtIn) {
+            ids.add(r.id)
+          }
+        }
+        return { ...base, objectRelations: ids.size }
+      }
+      return { ...base, objectRelations: incFromTree }
+    })()
+
+    // v39.6: total = center + incremental (与"中心∪关系"语义一致)
+    // 之前 total = filteredRelations.length 只含 relation tree 选中，丢中心范围关系
+    // 同时统一 services/objects 等维度也用加法（与关系一致）
+    const total = {
+      ...(selectedStats.value.total || {}),
+      serviceModules: center.serviceModules + (incremental.serviceModules || 0),
+      businessObjects: center.businessObjects + (incremental.businessObjects || 0),
+      domains: center.domains + (incremental.domains || 0),
+      subDomains: center.subDomains + (incremental.subDomains || 0),
+      objectRelations: center.objectRelations + incremental.objectRelations
+    }
+
+    // v39.6: config = total (口径完全一致, 不再从 selectedStats.total 取)
+    const configStats = {
+      serviceModules: total.serviceModules,
+      businessObjects: total.businessObjects,
+      domains: total.domains,
+      subDomains: total.subDomains,
+      objectRelations: total.objectRelations
+    }
 
     return {
       import: stats.value,
-      // 关键修复 v32 (终版): center.objectRelations 也按 "用户选中的 INTERNAL 关系" 算
-      // 跟管理页 buildRelationScopeTree 的 "范围内" 节点下的 relationIds 数对齐
-      center: (() => {
-            const base = selectedStats.value.center || { domains: 0, subDomains: 0, serviceModules: 0, businessObjects: 0, objectRelations: 0 }
-            if (!relationCategoryTree.value) return base
-            const ids = new Set()
-            const gather = (n) => {
-              if (!n) return
-              if (n.relationIds) n.relationIds.forEach(id => ids.add(id))
-              if (n.relationCodes && (!n.relationIds || n.relationIds.length === 0)) {
-                n.relationCodes.forEach(c => ids.add(c))
-              }
-              if (n.children) n.children.forEach(gather)
-            }
-            const collect = (node) => {
-              if (!node) return
-              const isInternal = node.id === 'internal' || (typeof node.id === 'string' && node.id.startsWith('internal-'))
-              if (isInternal) gather(node)
-              if (node.children) node.children.forEach(collect)
-            }
-            relationCategoryTree.value.forEach(collect)
-            // 兜底: 分类树收集到的关系数 < previewData 中 INTERNAL 关系数
-            if (previewData.value?.relationships) {
-              const rels = previewData.value.relationships
-              const centerSet = new Set(centerScope.value || [])
-              const truthIds = new Set()
-              for (const r of rels) {
-                if (r.id == null) continue
-                if (r.sourceCode === r.targetCode) continue
-                if (r.scopeType === 'internal') {
-                  truthIds.add(r.id); continue
-                }
-                const srcIn = centerSet.has(r.sourceCode)
-                const tgtIn = centerSet.has(r.targetCode)
-                if (srcIn && tgtIn) truthIds.add(r.id)
-              }
-              return { ...base, objectRelations: Math.max(ids.size, truthIds.size) }
-            }
-            return { ...base, objectRelations: ids.size }
-          })(),
-      external: selectedStats.value.external || { domains: 0, subDomains: 0, serviceModules: 0, businessObjects: 0, objectRelations: 0 },
-      // 关键修复 v32 (终版): incremental.objectRelations = total - center (都用 selectedNodeIds 口径)
-      // 关键修复 v33: 但当 relationCategoryTree 缺失 cross-boundary 节点 (后端 scopeType 错算为
-      //   external) 时, 上面的 total - center 永远是 0. 改用 previewData + 后端 scopeType 兜底:
-      //   1) 若 relationCategoryTree 中有 cross-boundary 节点 + relationIds, 仍用 total - center
-      //   2) 否则直接用 previewData.relationships 中 scopeType=cross-boundary 的关系 ID 数
-      incremental: (() => {
-        const base = selectedStats.value.incremental || { domains: 0, subDomains: 0, serviceModules: 0, businessObjects: 0, objectRelations: 0 }
-        const computeFromTree = () => {
-          if (!relationCategoryTree.value) return 0
-          const ids = new Set()
-          const gather = (n) => {
-            if (!n) return
-            if (n.relationIds) n.relationIds.forEach(id => ids.add(id))
-            if (n.relationCodes && (!n.relationIds || n.relationIds.length === 0)) {
-              n.relationCodes.forEach(c => ids.add(c))
-            }
-            if (n.children) n.children.forEach(gather)
-          }
-          const collect = (node) => {
-            if (!node) return
-            const isInternalOrCross = node.id === 'internal' || node.id === 'cross-boundary' ||
-              (typeof node.id === 'string' && (node.id.startsWith('internal-') || node.id.startsWith('cross-boundary-')))
-            if (isInternalOrCross) gather(node)
-            if (node.children) node.children.forEach(collect)
-          }
-          relationCategoryTree.value.forEach(collect)
-          return ids.size
-        }
-        const computeCenter = () => {
-          if (!relationCategoryTree.value) return 0
-          const ids = new Set()
-          const gather = (n) => {
-            if (!n) return
-            if (n.relationIds) n.relationIds.forEach(id => ids.add(id))
-            if (n.relationCodes && (!n.relationIds || n.relationIds.length === 0)) {
-              n.relationCodes.forEach(c => ids.add(c))
-            }
-            if (n.children) n.children.forEach(gather)
-          }
-          const collect = (node) => {
-            if (!node) return
-            const isInternal = node.id === 'internal' ||
-              (typeof node.id === 'string' && node.id.startsWith('internal-'))
-            if (isInternal) gather(node)
-            if (node.children) node.children.forEach(collect)
-          }
-          relationCategoryTree.value.forEach(collect)
-          return ids.size
-        }
-        let total = computeFromTree()
-        let center = computeCenter()
-        let incFromTree = total - center
-        // 兜底: 关系分类树中 cross-boundary 节点不存在或没收集到时, 用 previewData 算
-        if (incFromTree === 0 && previewData.value?.relationships) {
-          const rels = previewData.value.relationships
-          const centerSet = new Set(centerScope.value || [])
-          const ids = new Set()
-          for (const r of rels) {
-            if (r.id == null) continue
-            if (r.sourceCode === r.targetCode) continue  // 排除自环
-            // 1) 优先用后端 scopeType
-            if (r.scopeType === 'cross-boundary') {
-              ids.add(r.id)
-              continue
-            }
-            // 2) 后端没标 cross-boundary 时, 用业务定义 (XOR) 兜底
-            const srcIn = centerSet.has(r.sourceCode)
-            const tgtIn = centerSet.has(r.targetCode)
-            if (srcIn !== tgtIn) {
-              ids.add(r.id)
-            }
-          }
-          return { ...base, objectRelations: ids.size }
-        }
-        return { ...base, objectRelations: incFromTree }
-      })(),
-      // 关键修复 v32 (终版): 三个 card 的 objectRelations 都按 "用户选中的关系" 算
-      //   center.objectRelations: 用户选中的 INTERNAL 关系数
-      //   incremental.objectRelations: 用户选中的 CROSS_BOUNDARY 关系数
-      //   total.objectRelations: 用户选中的 INTERNAL + CROSS_BOUNDARY 关系数
-      // 关键修复 v33: 分类树缺失节点时用 previewData 兜底
-      total: {
-        ...(selectedStats.value.total || {}),
-        // 用 filterTreeByScope 算 INTERNAL + CROSS_BOUNDARY 节点下的关系 ID 并集
-        objectRelations: (() => {
-          if (!relationCategoryTree.value) return 0
-          const ids = new Set()
-          const collect = (node) => {
-            if (!node) return
-            const isInternalOrCross = node.id === 'internal' || node.id === 'cross-boundary' ||
-              (typeof node.id === 'string' && (node.id.startsWith('internal-') || node.id.startsWith('cross-boundary-')))
-            if (isInternalOrCross) {
-              // 收集此节点及子节点的 relationIds
-              const gather = (n) => {
-                if (!n) return
-                if (n.relationIds) n.relationIds.forEach(id => ids.add(id))
-                if (n.relationCodes && (!n.relationIds || n.relationIds.length === 0)) {
-                  n.relationCodes.forEach(c => ids.add(c))
-                }
-                if (n.children) n.children.forEach(gather)
-              }
-              gather(node)
-            }
-            if (node.children) node.children.forEach(collect)
-          }
-          relationCategoryTree.value.forEach(collect)
-          // 兜底: 分类树收集到的关系数 < previewData 中 INTERNAL+CROSS_BOUNDARY 关系数
-          // (hierarchyFilter 模式下外部 BO 没返回, cross-boundary 节点的 relationIds 漏了)
-          if (previewData.value?.relationships) {
-            const rels = previewData.value.relationships
-            const centerSet = new Set(centerScope.value || [])
-            const truthIds = new Set()
-            for (const r of rels) {
-              if (r.id == null) continue
-              if (r.sourceCode === r.targetCode) continue
-              if (r.scopeType === 'internal' || r.scopeType === 'cross-boundary') {
-                truthIds.add(r.id); continue
-              }
-              // 业务定义: src ⊕ tgt 任一端在中心范围
-              const srcIn = centerSet.has(r.sourceCode)
-              const tgtIn = centerSet.has(r.targetCode)
-              if (srcIn || tgtIn) truthIds.add(r.id)
-            }
-            // 取 max(ids, truthIds) 的大小, 避免分类树重复计算
-            return Math.max(ids.size, truthIds.size)
-          }
-          return ids.size
-        })()
-      },
+      center,
+      external,
+      incremental,
+      total,
       config: configStats
     }
   })
@@ -1214,30 +1141,13 @@ export function useDiagramData() {
       return []
     }
 
-    // 运行数据校验，获取问题关系编码
-    // 关键修复 v28: 必须用 previewData (42 BO, 含外部) 而不是 rawData (24 BO, 老引用)
-    // 否则 validateRelationshipForeignKeys 会因 BO_INV_LOG/BO_SALES_INV/BO_PROC_CONTRACT 等
-    // "新加入"的外部关联 BO 不在 rawData.businessObjectData 中, 而误报 FOREIGN_KEY 错误,
-    // 把 GENERATES/PROVIDES 等 code 加入 invalidCodes, 过滤掉 4+ 条内部关系 (id=1,5,12,13)
-    // 现象: 中心范围选 22 BO 时, 显示 25/28 关系而非 29
-    const validationResult = validateData(previewData.value, previewData.value)
-    const invalidRelationCodes = new Set()
-    validationResult.items.forEach(item => {
-      // 只过滤 ERROR 级别 (FOREIGN_KEY 错误), 不要过滤 WARNING
-      // (旧逻辑: 任何 level 都加, 导致 BO_INV_LOG 等正常关系被误杀)
-      if (item.sheet === '业务对象关系' && item.entityCode && item.level === 'error') {
-        invalidRelationCodes.add(item.entityCode)
-      }
-    })
-
-    // 过滤掉问题关系
-    let validRelationships = previewData.value.relationships
-    if (invalidRelationCodes.size > 0) {
-      validRelationships = previewData.value.relationships.filter(rel => !invalidRelationCodes.has(rel.relationCode))
-    }
-
+    // v39.5: 去掉 validateData 过滤，与管理页 buildRelationScopeTree 数据源对齐
+    // 根因: 图表页用 entityCode (relationCode) 做 filter，会把所有同 code 的关系都过滤掉
+    //   → 图表页显示 11 而管理页显示 12 (差 1 条)
+    // 修复: 直接用 previewData.relationships 构建 tree，与管理页保持一致
+    // 注: validation 错误应通过 UI 提示用户，不应静默过滤掉关系
     return buildRelationCategoryTree(
-      validRelationships,
+      previewData.value.relationships,
       centerScope.value,
       previewData.value.businessObjects
     )
@@ -1347,31 +1257,17 @@ export function useDiagramData() {
       })
     })
 
-    // 运行数据校验，获取问题关系编码
-    // 关键修复 v28: 必须用 previewData 而不是 rawData (老引用问题)
-    // 同时只过滤 ERROR 级别 (FOREIGN_KEY 错误), 不要过滤 WARNING (自环等)
-    const validationResult = validateData(previewData.value, previewData.value)
-    const invalidRelationCodes = new Set()
-    validationResult.items.forEach(item => {
-      if (item.sheet === '业务对象关系' && item.entityCode && item.level === 'error') {
-        invalidRelationCodes.add(item.entityCode)
-      }
-    })
-
-    // 过滤关系：先按范围过滤，再排除问题关系
+    // 过滤关系：先按范围过滤
     // 关键修复 v28: 用 OR 条件, 只要 src 或 tgt 在 finalBoCodes 中就保留
     // 之前用 AND: TEST600 不在 finalBoCodes 但 BO_WAREHOUSE 在 → id=29 被排除
     // 现象: 图表缺 TEST600 节点和 TEST600→BO_WAREHOUSE 连线
+    // v39.5: 去掉 validateData 过滤，与管理页 buildRelationScopeTree 数据源对齐
+    //   之前按 entityCode (relationCode) 过滤会误杀所有同 code 的关系 → 图表少 1 条
     let filteredRelationships = hasFilter
       ? previewData.value.relationships.filter(rel =>
           finalBoCodes.has(rel.sourceCode) || finalBoCodes.has(rel.targetCode)
         )
       : previewData.value.relationships
-
-    // 排除校验发现的问题关系
-    if (invalidRelationCodes.size > 0) {
-      filteredRelationships = filteredRelationships.filter(rel => !invalidRelationCodes.has(rel.relationCode))
-    }
 
     // 根据关系范围选择过滤关系
     // 关键修复 v26: filteredRelations 现在是 relationId[] (按 id 去重) 而非 code[]
@@ -1790,10 +1686,20 @@ export function useDiagramData() {
           const unifiedLinks = finalRelationships.map(rel => ({
             source: rel.sourceCode,
             target: rel.targetCode,
-            label: rel.relationDesc,
+            // [v39 关系线标题修复] 优先 rel.code (关系实例编码), fallback 到 rel.relationCode (关系类型编码)
+            // 之前用 rel.relationDesc (描述) - 用户看到的不是关系编码
+            label: rel.code || rel.relationCode || '',
             relationCode: rel.relationCode,
             annotationCategory: rel.annotationCategory || 'info',
-            annotationContent: rel.annotationContent || ''
+            annotationContent: rel.annotationContent || '',
+            // [v40 修复] 之前 unifiedLinks 缺失 relationType / relationDirection
+            //   UnifiedRenderer 渲染时拿不到 '双向' → 全部回退为 -->
+            //   tooltip 也显示不了 enum 名称
+            relationType: rel.relationType || '',
+            relationDirection: rel.relationDirection || null,
+            // 关系实例编码 (透传给 UnifiedRenderer 用)
+            code: rel.code || '',
+            relationDesc: rel.relationDesc || ''
           }))
 
           const unifiedMermaidCode = UnifiedRenderer.render(
@@ -1826,6 +1732,16 @@ export function useDiagramData() {
           layoutControlConfig: legacyConfig
         })
       }
+    }
+
+    // [2026-06-15] 写入 diagramData 缓存
+    //  - 切 tab 回来时直接命中, 不重新生成
+    //  - 范围/配置变了 → configHash 不匹配 → 自动失效
+    try {
+      const hash = computeConfigHash()
+      chartArchStore.setDiagramCache(diagramData.value, hash)
+    } catch (e) {
+      console.warn('[useDiagramData] Failed to cache diagramData:', e)
     }
   }
 
@@ -2019,6 +1935,73 @@ export function useDiagramData() {
       }
     }
   )
+
+  // [2026-06-15] 计算配置/范围 hash
+  //  包含所有会进入 buildDiagramData / buildServiceModuleDiagramData 的字段
+  //  任何一个变了, 缓存就失效, 触发重新生成
+  //  - 用户改 colorScheme / nodeTextColor / centerScope 等 → 立即生效 (下次 generate)
+  //  - 切 tab 回来时 → hash 不匹配 → 不读缓存, 走 generate
+  const computeConfigHash = () => {
+    const cfg = configStore
+    // 选所有影响图表输出的字段 (不包含 timestamp / id / 调试字段)
+    const payload = {
+      // 1) 范围 (影响 filtered*)
+      chartType: cfg.chartType,
+      centerScope: [...(cfg.centerScope || [])].sort(),
+      selectedRelationNodeIds: [...(cfg.selectedRelationNodeIds || [])].sort(),
+      relationFilteredBoCodes: [...(cfg.relationFilteredBoCodes || [])].sort(),
+
+      // 2) 配色
+      colorGroupBy: cfg.colorGroupBy,
+      colorScheme: cfg.colorScheme,
+      nodeTextColor: cfg.nodeTextColor,
+      centerScopeColor: cfg.centerScopeColor,
+      centerDomain: cfg.centerDomain,
+      centerDomainColor: cfg.centerDomainColor,
+      centerScopeHighlight: cfg.centerScopeHighlight,
+      customColors: cfg.customColors,
+
+      // 3) 布局
+      layoutTemplate: cfg.layoutTemplate,
+      layoutEngine: cfg.layoutEngine,
+      layoutControlConfig: cfg.layoutControlConfig,
+      positions: cfg.positions,
+      preserveModelOrder: cfg.preserveModelOrder,
+      hideLinkLabelTails: cfg.hideLinkLabelTails,
+      useLegacyGroupControl: cfg.useLegacyGroupControl,
+
+      // 4) 注解
+      annotationPanelPosition: cfg.annotationPanelPosition,
+      showAnnotationIcons: cfg.showAnnotationIcons,
+      assignmentMode: cfg.assignmentMode
+    }
+    // 用 JSON.stringify 作 hash (简单够用; 不需要 crypto 防碰撞)
+    return JSON.stringify(payload)
+  }
+
+  // [2026-06-15] 尝试从 Pinia 缓存读 diagramData
+  //  命中场景:
+  //   - 切 tab 回来 (用户已 generate 过, archData/configStore 没变)
+  //  未命中场景:
+  //   - 首次进入 / F5 后 (Pinia 状态丢失)
+  //   - 范围/配置变了 (configHash 不匹配)
+  //   - 超过 30 分钟 TTL
+  //   - 缓存版本不匹配 (schema 升级)
+  //  @returns 命中返回 data, 未命中返回 null
+  const loadCachedDiagram = () => {
+    try {
+      const hash = computeConfigHash()
+      const cached = chartArchStore.getDiagramCache(hash)
+      if (cached) {
+        diagramData.value = cached
+        return cached
+      }
+      return null
+    } catch (e) {
+      console.warn('[useDiagramData] Failed to load cached diagram:', e)
+      return null
+    }
+  }
 
   const resetData = () => {
     clearData()
@@ -2282,6 +2265,10 @@ export function useDiagramData() {
     saveCenterScopePreset,
     loadCenterScopePreset,
     clearRelationScope,
-    initFromArchDataManager
+    initFromArchDataManager,
+
+    // [2026-06-15] 缓存读写 (切 tab 状态恢复用)
+    loadCachedDiagram,
+    computeConfigHash
   }
 }

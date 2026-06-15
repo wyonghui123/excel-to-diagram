@@ -84,16 +84,6 @@
           <span>{{ data.display }}</span>
         </template>
       </el-tree>
-
-      <div class="vh-pagination" v-if="total > pageSize">
-        <el-pagination
-          v-model:current-page="currentPage"
-          :page-size="pageSize"
-          :total="total"
-          layout="prev, pager, next"
-          @current-change="handlePageChange"
-        />
-      </div>
     </div>
 
     <template #footer>
@@ -641,31 +631,44 @@ function handleConfirm() {
 .vh-meta-list {
   flex: 1;
   min-height: 0;
-  max-height: 420px;
+  max-height: 500px;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
-/* 强制限制 el-table 高度，跟随父容器 */
-.vh-meta-list :deep(.el-table) {
-  height: 100% !important;
-  max-height: 420px;
-}
-
-.vh-meta-list :deep(.table-section) {
+/* 让 MetaListPage 在 dialog 内自适应高度，分页可正常显示 */
+.vh-meta-list :deep(.meta-list-page) {
   height: 100%;
   display: flex;
   flex-direction: column;
 }
 
+/* 限制 el-table 高度，给分页预留空间 */
+.vh-meta-list :deep(.el-table) {
+  flex: 1;
+  min-height: 0;
+}
+
+.vh-meta-list :deep(.table-section) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .vh-meta-list :deep(.table-wrapper) {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow: auto;
 }
-.vh-pagination {
-  margin-top: 12px;
-  display: flex;
-  justify-content: flex-end;
+
+/* 分页区域在 dialog 内正常显示 */
+.vh-meta-list :deep(.pagination-wrapper) {
+  flex-shrink: 0;
+  padding: var(--spacing-sm) 0;
+  border-top: 1px solid var(--el-border-color-lighter);
 }
 .vh-selected-tags {
   margin-top: 12px;

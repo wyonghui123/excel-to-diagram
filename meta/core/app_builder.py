@@ -202,6 +202,8 @@ class ApplicationBuilder:
         from meta.core.interceptors.data_permission_interceptor import DataPermissionInterceptor
         from meta.core.interceptors.permission_interceptor import PermissionInterceptor
         from meta.core.interceptors.owner_permission_interceptor import OwnerAutoPermissionInterceptor
+        from meta.core.interceptors.owner_chain_interceptor import OwnerChainInterceptor
+        from meta.core.interceptors.write_scope_interceptor import WriteScopeInterceptor
         from meta.core.interceptors.hierarchy_validation_interceptor import HierarchyValidationInterceptor
         from meta.core.interceptors.enum_protection_interceptor import EnumProtectionInterceptor
         from meta.core.interceptors.field_policy_interceptor import FieldPolicyInterceptor
@@ -216,9 +218,14 @@ class ApplicationBuilder:
         bo_framework._data_source = ds
         bo_framework.register_interceptor(ContextInterceptor())
         bo_framework.register_interceptor(VersionContextInterceptor())
+        # [V1.1.8] OwnerChainInterceptor (P25) 在 PermissionInterceptor (P30) 之前
+        #   owner chain 命中 -> 跳过 functional perm 检查
+        bo_framework.register_interceptor(OwnerChainInterceptor())
         # [PermissionInterceptor 注册补齐 2026-06-07]
         # PermissionInterceptor(P30) 与 server.py 对齐：先功能权限校验，再数据权限过滤
         bo_framework.register_interceptor(PermissionInterceptor())
+        # [V1.1.8] WriteScopeInterceptor (P35) 在 PermissionInterceptor 之后
+        bo_framework.register_interceptor(WriteScopeInterceptor())
         bo_framework.register_interceptor(DataPermissionInterceptor())
         bo_framework.register_interceptor(FieldPolicyInterceptor())
         from meta.core.interceptors.constraint_validation_interceptor import ConstraintValidationInterceptor
@@ -401,6 +408,17 @@ class ApplicationBuilder:
                 logger.info("[AppBuilder] DBHealthMonitor initialized")
             except Exception as e:
                 logger.warning(f"[AppBuilder] DBHealthMonitor init failed: {e}")
+
+        # 阶段 5: [FR-010] 启动 audit retry worker (后台 thread, 扫 AUDIT_WRITE_FAILED 重试)
+        try:
+            from meta.services.audit_retry_worker import init_audit_retry_worker
+            logger.info(f"[AppBuilder] Initializing AuditRetryWorker with data_source: {self._data_source}")
+            init_audit_retry_worker(self._data_source)
+            logger.info("[AppBuilder] AuditRetryWorker started successfully")
+        except Exception as e:
+            import traceback
+            logger.error(f"[AppBuilder] AuditRetryWorker init failed: {e}")
+            logger.error(traceback.format_exc())
 
         return self._app
 

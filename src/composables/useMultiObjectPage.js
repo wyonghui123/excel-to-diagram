@@ -757,7 +757,7 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
     try {
       if (sessionStorage.getItem('returningFromDiagram') !== 'true') return false
       const stored = sessionStorage.getItem(STATE_RESTORE_KEY)
-      // 无论是否成功解析, 都要清掉 flag 防止后续误触发
+      // [v32-FIX] 无论是否成功解析, 都要清掉 flag 防止后续误触发
       sessionStorage.removeItem('returningFromDiagram')
       if (!stored) return false
 
@@ -802,7 +802,12 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
         initialRelationCodes: [...(state.initialRelationCodes || [])]
       }
 
-      sessionStorage.removeItem(STATE_RESTORE_KEY)
+      // [v39.7-FIX] 修复第二次切回管理页状态被清空的问题
+      // 之前: sessionStorage.removeItem(STATE_RESTORE_KEY) 第一次 restore 就清掉数据
+      //   → 第二次从 chart 返回时 flag 被 router/chart 重新设置, 但数据已丢失, 状态变空
+      // 之后: 保留数据, 配合 onBeforeRouteLeave 每次离开都重新 saveStateForDiagram
+      //   → 数据始终是最新快照, 多次 restore 都能拿到正确状态
+      //   → 数据会在下次 saveStateForDiagram 时被覆盖, 或在用户主动 clear 时清掉
       return restored
     } catch (e) {
       console.warn('[useMultiObjectPage] Failed to restore state from diagram:', e)
@@ -825,7 +830,7 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
 
   // [E2E] dev 环境暴露给 e2e 测试
   if (typeof window !== 'undefined' && import.meta.env?.DEV) {
-    window.__archPage = { objectTypes, activeTab, tabs, versionContext, filterFlow, contextSource, scopeSource, scopeIds, hasScopeSelection, combinedFilters, tabFilters, scopeFilterKeys, handleScopeChange, clearScope, handleToolbarChange }
+    window.__archPage = { objectTypes, activeTab, tabs, versionContext, filterFlow, contextSource, scopeSource, scopeIds, hasScopeSelection, combinedFilters, tabFilters, scopeFilterKeys, handleScopeChange, clearScope, handleToolbarChange, saveStateForDiagram, restoreStateFromDiagram, handleShowChart }
   }
 
   return {
@@ -855,6 +860,7 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
     canRefresh,
     handleGlobalAction,
     handleShowChart,
+    saveStateForDiagram,
     restoreStateFromDiagram,
     handleImportSuccess,
     handleExportSuccess,

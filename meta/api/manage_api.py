@@ -126,6 +126,11 @@ def _set_audit_user():
     user_agent = request.headers.get('User-Agent', '')
     service.set_audit_user(user_id, user_name, ip_address, user_agent)
 
+    # [v3.18] 把 user_agent 也写到 g.current_user, 给 structured_logger 透传
+    if isinstance(g.current_user, dict):
+        g.current_user['user_agent'] = user_agent
+        g.current_user['ip_address'] = ip_address
+
     agent_id = getattr(g, 'agent_id', None) or request.headers.get('X-Agent-Id')
     agent_session_id = getattr(g, 'agent_session_id', None) or request.headers.get('X-Agent-Session-Id')
     tool_call_id = getattr(g, 'tool_call_id', None) or request.headers.get('X-Tool-Call-Id')

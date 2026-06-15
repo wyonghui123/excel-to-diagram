@@ -6,11 +6,15 @@ from meta.core.ui_config.value_help_formatter import value_help_to_dict, _make_j
 
 class UIConfigBuilder:
 
-    def __init__(self, display_name_service, infer_navigation_fn):
+    def __init__(self, display_name_service, infer_navigation_fn, data_source=None):
         self._dns = display_name_service
         self._field_extractor = FieldExtractor()
         self._assoc_extractor = AssociationExtractor()
         self._infer_navigation = infer_navigation_fn
+        # [FIX 2026-06-15] data_source 用于从数据库加载 value_help.source.type=='enum' 的动态枚举值
+        # 之前只使用字段元数据中静态定义的 enum_values，导致 detail 页显示 key (REFERENCES, BIDIRECTIONAL)
+        # 而非中文 name。详见关系详情 bug 报告。
+        self._data_source = data_source
 
     def build(self, object_type, view_name=None):
         cache_key = "{0}:{1}".format(object_type, view_name or 'default')
@@ -54,6 +58,17 @@ class UIConfigBuilder:
                         elif isinstance(raw_val, str) and raw_val.lower() in ('true', 'false'):
                             opt['value'] = 1 if raw_val.lower() == 'true' else 0
                 field_info['enum_values'] = normalized
+            else:
+                # [FIX 2026-06-15] 字段未静态定义 enum_values 时，从 value_help.source.type='enum' 的
+                # enum_type_id 动态查询数据库加载（如 relation_type、direction）。
+                # 前端 DetailSection.vue 的 formatEnumValue 依赖 field.enum_values 做 key→name 映射。
+                vh_dict = value_help_to_dict(getattr(f, 'value_help', None)) or {}
+                vh_source = vh_dict.get('source') or {}
+                if vh_source.get('type') == 'enum' and vh_source.get('enum_type_id'):
+                    db_enum_values = self._load_enum_values_from_db(
+                        vh_source.get('enum_type_id'))
+                    if db_enum_values:
+                        field_info['enum_values'] = db_enum_values
 
             default_value = getattr(f, 'default', None)
             if default_value is not None:
@@ -170,3 +185,47 @@ class UIConfigBuilder:
             if rel.display_format:
                 relation_displays[rel.id] = rel.display_format
         config['relation_displays'] = relation_displays
+
+    def _load_enum_values_from_db(self, enum_type_id):
+        """从数据库加载指定 enum_type 的所有有效枚举值。
+
+        Returns:
+            list[dict]: [{'value': 'CODE', 'label': '名称', 'id': 'CODE', 'name': '名称'}, ...]
+            失败或无数据时返回空列表。
+        """
+        if not enum_type_id or not self._data_source:
+            return []
+        try:
+            ds = self._data_source
+            cursor = ds.execute(
+                "SELECT code, name, name_en FROM enum_values "
+                "WHERE enum_type_id = ? AND is_active = 1 "
+                "ORDER BY sort_order, code",
+                [enum_type_id],
+            )
+            rows = cursor.fetchall() if cursor else []
+            options = []
+            for row in rows:
+                # row 可能是 tuple、dict 或 sqlite3.Row
+                if isinstance(row, dict):
+                    code = row.get('code', '')
+                    name = row.get('name', '') or code
+                else:
+                    code = row[0] if len(row) > 0 else ''
+                    name = row[1] if len(row) > 1 else (code or '')
+                if not code:
+                    continue
+                # 同时给 value/label 和 id/name 两种 key 风格，兼容 DetailSection.vue 的
+                # getFieldOptions/formatEnumValue（它要 opt.value 或 opt.id）和其它 widget。
+                options.append({
+                    'value': code,
+                    'label': name,
+                    'id': code,
+                    'name': name,
+                })
+            return options
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning(
+                f"[UIConfigBuilder] _load_enum_values_from_db({enum_type_id}) failed: {exc}")
+            return []

@@ -449,23 +449,23 @@ class TestProductVersionUserRoleReadonlyMandatory:
         immutable = getattr(code_field.semantics, 'immutable', False)
         assert immutable is True, "product.code 应为 immutable"
 
-    def test_02_version_code_immutable(self):
-        """version.code: immutable 字段验证"""
+    def test_02_version_name_immutable(self):
+        """version.name: immutable 字段验证 (name 作为业务键)"""
         from meta.core.models import registry
         version = registry.get('version')
         if not version:
             pytest.skip("找不到 version 元模型")
 
-        code_field = None
+        name_field = None
         for f in version.fields:
-            if f.id == 'code':
-                code_field = f
+            if f.id == 'name':
+                name_field = f
                 break
-        if not code_field:
-            pytest.skip("找不到 version.code 字段")
+        if not name_field:
+            pytest.skip("找不到 version.name 字段")
 
-        immutable = getattr(code_field.semantics, 'immutable', False)
-        assert immutable is True, "version.code 应为 immutable"
+        immutable = getattr(name_field.semantics, 'immutable', False)
+        assert immutable is True, "version.name 应为 immutable (作为业务键)"
 
     def test_03_role_code_immutable(self):
         """role.code: immutable 字段验证"""

@@ -148,6 +148,92 @@ export class GenericListPage {
   }
 
   /**
+   * 断言行可见 (扩展: 软断言 UI, Healer 守护)
+   * @param {string|RegExp} text
+   * @param {Object} options { timeout, softOn: true }
+   */
+  async expectRowVisible(text, options = {}) {
+    const { timeout = 5000, soft = true } = options
+    try {
+      const row = await this.findRow(text, { timeout })
+      if (row) {
+        const visible = await row.isVisible()
+        if (visible) return { visible: true, row }
+      }
+      if (soft) {
+        console.warn(`[GenericListPage] 行 "${text}" 不可见 (软断言)`)
+        return { visible: false, row: null }
+      }
+      expect(false, `[UI 列表] 行 "${text}" 应可见`).toBe(true)
+    } catch (e) {
+      if (soft) {
+        console.warn(`[GenericListPage] 行 "${text}" 验证失败 (软断言: ${e.message})`)
+        return { visible: false, error: e.message }
+      }
+      throw e
+    }
+  }
+
+  /**
+   * 断言列可排序 (有 sort 按钮)
+   * @param {string} columnTitle 表头列名 (如 '编码', '名称')
+   */
+  async expectColumnSortable(columnTitle) {
+    // Element Plus 表格: th .cell 内的 sort caret
+    const header = this.page.locator(`${this.tableSelector} .el-table__header th .cell`, { hasText: columnTitle }).first()
+    await header.waitFor({ state: 'visible', timeout: 3000 })
+    // 检查是否有排序 caret (Element Plus 会加 .sort-caret)
+    const parent = header.locator('..')
+    const hasSort = await parent.locator('.sort-caret, .caret-wrapper, .is-sortable').count() > 0
+    if (!hasSort) {
+      // 软断言: 业务列表的某些列可能不可排序
+      console.warn(`[GenericListPage] 列 "${columnTitle}" 看起来不可排序 (软断言)`)
+    }
+    return { sortable: hasSort }
+  }
+
+  /**
+   * 断言筛选器存在
+   * @param {string} filterLabel 筛选标签 (如 '是否活跃')
+   */
+  async expectFilterExists(filterLabel) {
+    // Element Plus 筛选器一般在 sidebar 或 toolbar
+    const filter = this.page.locator(`label:has-text("${filterLabel}"), .filter-item:has-text("${filterLabel}"), .el-form-item:has(label:has-text("${filterLabel}"))`).first()
+    try {
+      await filter.waitFor({ state: 'visible', timeout: 3000 })
+      return { exists: true }
+    } catch (e) {
+      // 软断言: 某些视图可能没有该筛选
+      console.warn(`[GenericListPage] 筛选 "${filterLabel}" 不存在 (软断言)`)
+      return { exists: false }
+    }
+  }
+
+  /**
+   * 一站式: 列表 UI 验证 (行可见 + 列存在 + 筛选存在)
+   * @param {string} rowText - 应可见的行
+   * @param {Object} checks { columns: [], filters: [] }
+   */
+  async verifyListUI(rowText, checks = {}) {
+    const results = { row: null, columns: [], filters: [] }
+    // 1. 行可见
+    results.row = await this.expectRowVisible(rowText, { soft: true })
+    // 2. 列存在
+    for (const col of checks.columns || []) {
+      const headers = await this.getColumnHeaders()
+      const hasCol = headers.includes(col)
+      results.columns.push({ name: col, exists: hasCol })
+      if (!hasCol) console.warn(`[GenericListPage] 列 "${col}" 不存在`)
+    }
+    // 3. 筛选存在
+    for (const f of checks.filters || []) {
+      const r = await this.expectFilterExists(f)
+      results.filters.push({ name: f, exists: r.exists })
+    }
+    return results
+  }
+
+  /**
    * 断言行不存在（带重试）
    */
   async expectRowNotExists(text, options = {}) {

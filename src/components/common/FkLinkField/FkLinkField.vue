@@ -1,6 +1,17 @@
 <template>
+  <!-- drawer 模式：点击触发事件，由父组件在 drawer 中打开详情 -->
+  <a
+    v-if="value && targetObjectType && !linkDisabled && detailMode === 'drawer'"
+    class="fk-link"
+    :title="linkTitle"
+    @click.stop="handleClick"
+  >
+    <span class="fk-link__text">{{ displayValue || value }}</span>
+    <el-icon class="fk-link__icon" aria-hidden="true"><Promotion /></el-icon>
+  </a>
+  <!-- page 模式：router-link 跳转到独立详情页 -->
   <router-link
-    v-if="value && targetRoute && !linkDisabled"
+    v-else-if="value && targetRoute && !linkDisabled"
     :to="targetRoute"
     class="fk-link"
     :title="linkTitle"
@@ -59,12 +70,23 @@ const props = defineProps({
   targetObjectLabel: {
     type: String,
     default: ''
+  },
+  /**
+   * 详情页打开模式：
+   * - 'page': 跳转到独立详情页 /detail/:objectType/:id（默认）
+   * - 'drawer': 触发 navigate 事件，由父组件在 drawer 中打开
+   */
+  detailMode: {
+    type: String,
+    default: 'page',
+    validator: (v) => ['page', 'drawer'].includes(v)
   }
 })
 
+const emit = defineEmits(['navigate'])
+
 const targetRoute = computed(() => {
   if (!props.value || !props.targetObjectType) return null
-  // FK 链接总是跳转到详情页：/detail/:objectType/:id
   return { path: `/detail/${props.targetObjectType}/${props.value}` }
 })
 
@@ -72,11 +94,20 @@ const linkTitle = computed(() => {
   const label = props.targetObjectLabel || props.targetObjectType || '关联对象'
   return `打开 ${label} 详情`
 })
+
+function handleClick() {
+  emit('navigate', {
+    objectType: props.targetObjectType,
+    id: props.value,
+    displayValue: props.displayValue
+  })
+}
 </script>
 
 <style scoped>
 .fk-link {
-  color: var(--color-primary);
+  /* FK 链接使用文本色 (近黑)，与主对象链接 (--color-primary 主橙色) 区分 */
+  color: var(--color-text-primary);
   text-decoration: none;
   cursor: pointer;
   transition: color 0.15s ease, text-decoration 0.15s ease;
@@ -89,7 +120,8 @@ const linkTitle = computed(() => {
 }
 
 .fk-link:hover {
-  color: var(--color-primary-hover);
+  /* hover 时切换到主橙色，提示可点击 */
+  color: var(--color-primary);
   text-decoration: underline;
 }
 

@@ -1,8 +1,8 @@
 <template>
   <div class="aa-diagram-app">
     <StepNavigator
-      :steps="visibleSteps"
-      :current="displayCurrent"
+      :steps="steps"
+      :current="currentStep"
       :step-stats="stepStats"
       :has-prev="canNavPrev"
       :has-next="canNavNext"
@@ -23,18 +23,15 @@
 </template>
 
 <script>
-import { computed, watch, onMounted, getCurrentInstance } from 'vue'
+import { computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { AppHeader } from '../../components/common'
-import StepNavigator from './components/StepNavigator.vue'
 import { useDiagramSteps } from './composables/useDiagramSteps.js'
 import { useDiagramData } from './composables/useDiagramData.js'
 import { useDiagramConfigStore } from '../../stores/diagramConfigStore.js'
 import { useChartArchDataStore } from '../../stores/chartArchDataStore'
+import StepNavigator from './components/StepNavigator.vue'
 
-// 步骤组件
-import StepUpload from './components/steps/StepUpload.vue'
-import StepScope from './components/steps/StepScope.vue'
+// 步骤组件（2026-06-13: 6 步骤已废弃，仅保留 3 步骤: 类型/配置/展示）
 import StepChartType from './components/steps/StepChartType.vue'
 import StepConfig from './components/steps/StepConfig.vue'
 import StepDisplay from './components/steps/StepDisplay.vue'
@@ -42,29 +39,20 @@ import StepDisplay from './components/steps/StepDisplay.vue'
 export default {
   name: 'AADiagramApp',
   components: {
-    AppHeader,
     StepNavigator,
     StepChartType,
-    StepUpload,
-    StepScope,
     StepConfig,
     StepDisplay
   },
-  emits: ['back-to-landing'],
   setup() {
     const router = useRouter()
     const {
       steps,
-      visibleSteps,
       currentStep,
-      displayCurrent,
       currentStepInfo,
       goToStep,
       nextStep,
       prevStep,
-      initFromArchData,
-      initFromArchDataManager,
-      handlePrev,
       resetSteps
     } = useDiagramSteps()
 
@@ -81,10 +69,8 @@ export default {
       previewData,
       rawData,
       centerScope,
-      selectedScope,
       chartType,
       chartTypeChanged,
-      previousChartType,
       diagramConfig,
       diagramData,
       availableSubDomains,
@@ -95,13 +81,9 @@ export default {
       centerScopePresets,
       selectedRelationNodeIds,
       relationCategoryTree,
-      relationFilteredBoCodes,
       // DEBUG 临时解构
       filteredRelations,
-      handleFileUpload,
       generateDiagram,
-      filterByRelation,
-      setInternalRelationFilter,
       resetChartTypeChanged,
       saveCenterScopePreset,
       loadCenterScopePreset,
@@ -110,42 +92,22 @@ export default {
       centerScopeMarkers,
       filteredDomainProducts,
       initFromArchDataManager: initDataFromArch,
-      isInitializedFromArchData
+      isInitializedFromArchData,
+      // [2026-06-15] 缓存读取 (切 tab 时恢复 diagramData)
+      loadCachedDiagram
     } = useDiagramData()
 
-    // 监控 centerScopeMarkers 变化
-    // 步骤组件的 props
+    // 步骤组件的 props (3 步骤模式: 0=类型, 1=配置, 2=展示)
     const stepProps = computed(() => {
       const propsMap = {
-        0: { loading: loading.value, error: error.value },
-        1: {
-          stepMode: 'center',
-          previewData: previewData.value,
-          rawData: rawData.value,
-          modelValue: centerScope.value,
-          centerScope: centerScope.value,
-          centerScopePresets: centerScopePresets.value,
-          selectedRelationNodeIds: selectedRelationNodeIds.value,
-          relationCategoryTree: relationCategoryTree.value
-        },
-        2: {
-          stepMode: 'relation',
-          previewData: previewData.value,
-          rawData: rawData.value,
-          modelValue: centerScope.value,
-          centerScope: centerScope.value,
-          centerScopePresets: centerScopePresets.value,
-          selectedRelationNodeIds: selectedRelationNodeIds.value,
-          relationCategoryTree: relationCategoryTree.value
-        },
-        3: {
+        0: {
           modelValue: chartType.value,
           // 关键修复 v36: 范围汇总 props 恢复 (StepChartType 内部 StepScopeSummary 需用)
           center: displayStats.value.center,
           incremental: displayStats.value.incremental,
           total: displayStats.value.total
         },
-        4: {
+        1: {
           previewData: previewData.value,
           subDomains: availableSubDomains.value,
           domains: availableDomains.value,
@@ -160,7 +122,7 @@ export default {
           centerScopeBoCodes: new Set(centerScope.value || []),
           businessObjects: previewData.value?.businessObjects || []
         },
-        5: {
+        2: {
           diagramData: diagramData.value,
           // 关键修复 v23：chartType 可能是空字符串（chartType 计算属性初值/未选类型），
           // 空字符串会让 MermaidComponent validator 失败 → Vue warn → props.diagramType = ''
@@ -174,75 +136,15 @@ export default {
       return propsMap[currentStep.value] || {}
     })
 
-    // 处理文件上传并自动跳转
-    const handleFileUploadAndNext = async (file) => {
-      await handleFileUpload(file)
-      // 数据加载完成后自动跳转到下一步
-      if (previewData.value) {
-        nextStep()
-      }
-    }
-
     // 步骤组件的事件
     const stepEvents = computed(() => {
       const eventsMap = {
         0: {
-          'file-selected': handleFileUploadAndNext
-        },
-        1: {
-          'update:modelValue': (val) => {
-            centerScope.value = val
-          },
-          'next': nextStep,
-          'prev': prevStep,
-          'filter-by-relation': filterByRelation,
-          'internal-relation-filter': setInternalRelationFilter,
-          'update:centerScope': (val) => {
-            configStore.updateCenterScope(val)
-          },
-          'update:selectedRelationNodeIds': (val) => selectedRelationNodeIds.value = val,
-          'save-center-scope-preset': saveCenterScopePreset,
-          'load-center-scope-preset': loadCenterScopePreset,
-          'delete-center-scope-preset': deleteCenterScopePreset,
-          'toggle-relation-node': toggleRelationNode,
-          'apply-relation-filter': (boCodes) => {
-            if (boCodes && boCodes.length > 0) {
-              relationFilteredBoCodes.value = boCodes
-            } else {
-              relationFilteredBoCodes.value = null
-            }
-          }
-        },
-        2: {
-          'update:modelValue': (val) => {
-            configStore.updateCenterScope(val)
-          },
-          'next': nextStep,
-          'prev': prevStep,
-          'filter-by-relation': filterByRelation,
-          'internal-relation-filter': setInternalRelationFilter,
-          'update:centerScope': (val) => {
-            configStore.updateCenterScope(val)
-          },
-          'update:selectedRelationNodeIds': (val) => selectedRelationNodeIds.value = val,
-          'save-center-scope-preset': saveCenterScopePreset,
-          'load-center-scope-preset': loadCenterScopePreset,
-          'delete-center-scope-preset': deleteCenterScopePreset,
-          'toggle-relation-node': toggleRelationNode,
-          'apply-relation-filter': (boCodes) => {
-            if (boCodes && boCodes.length > 0) {
-              relationFilteredBoCodes.value = boCodes
-            } else {
-              relationFilteredBoCodes.value = null
-            }
-          }
-        },
-        3: {
           'update:modelValue': (val) => configStore.updateChartType(val),
           'next': nextStep,
-          'prev': handlePrevWrapper
+          'prev': onNavPrev
         },
-        4: {
+        1: {
           'update:config': (val) => {
             Object.assign(diagramConfig.value, val)
           },
@@ -257,61 +159,85 @@ export default {
               console.error('生成图表失败:', err)
             }
           },
-          'prev': handlePrevWrapper
+          'prev': onNavPrev
         },
-        5: {
-          'prev': handlePrevWrapper,
-          'regenerate': () => goToStep(4)
+        2: {
+          'prev': onNavPrev,
+          'regenerate': () => goToStep(1)
         }
       }
       return eventsMap[currentStep.value] || {}
     })
 
     /**
-     * 步骤导航统计信息
-     * 
-     * 各步骤统计映射：
-     * - 步骤0（导入）: displayStats.import - 显示导入的总数据量
-     * - 步骤1（中心）: displayStats.center - 显示中心范围的完整统计（领域、子域、对象）
-     * - 步骤2（关系）: displayStats.incremental - 显示相比中心新增的统计（带+前缀）
-     * - 步骤3（类型）: displayStats.total - 显示总数统计（中心+外部）
-     * - 步骤4（配置）: displayStats.config - 根据图表类型显示不同统计
-     *   * 业务对象图：服务模块、对象、关系
-     *   * 服务模块图：服务模块、模块关系
-     * - 步骤5（展示）: null - 不显示统计
+     * 步骤导航统计信息 (3 步骤模式)
+     *  - 步骤0（类型）: displayStats.total - 显示总数统计
+     *  - 步骤1（配置）: displayStats.config - 根据图表类型显示不同统计
+     *  - 步骤2（展示）: null - 不显示统计
      */
     const stepStats = computed(() => {
       return {
-        0: displayStats.value.import,         // 导入步骤 - 显示总数
-        1: displayStats.value.center,         // 中心步骤 - 显示中心范围统计
-        2: displayStats.value.incremental,    // 关系步骤 - 显示增量统计
-        3: displayStats.value.total,          // 类型步骤 - 显示总数统计
-        4: displayStats.value.config,         // 配置步骤 - 显示图表类型相关统计
-        5: null                               // 展示步骤 - 不显示统计
+        0: displayStats.value.total,          // 类型步骤 - 显示总数
+        1: displayStats.value.config,         // 配置步骤 - 显示图表类型相关统计
+        2: null                               // 展示步骤 - 不显示统计
       }
     })
 
-    const handlePrevWrapper = () => {
-      if (initFromArchData.value) {
-        // 从架构管理跳转进来的, 任何步骤的 prev 都直接回到架构管理
+    // 导航栏按钮: 在第一步也显示"上一步"（用于返回架构数据管理）
+    const canNavPrev = computed(() => {
+      return currentStep.value >= 0  // 始终允许 (第一步是返回架构管理)
+    })
+    const canNavNext = computed(() => {
+      return currentStep.value < steps.value.length - 1
+    })
+    const navNextLabel = computed(() => {
+      // 配置步骤显示"生成图表"而不是"下一步"
+      if (currentStep.value === 1) return '生成图表'
+      return '下一步'
+    })
+
+    const onNavPrev = () => {
+      if (currentStep.value === 0) {
+        // 3 步骤模式的第一步（类型）：上一步返回架构数据管理页面
         sessionStorage.setItem('returningFromDiagram', 'true')
         router.push('/system/archdata')
-      } else {
+      } else if (currentStep.value > 0) {
+        // 其他情况：正常回退上一步
         prevStep()
       }
     }
 
-    watch(currentStep, (newStep, oldStep) => {
-      if (newStep === 4) {
+    const onNavNext = () => {
+      if (currentStep.value === 1) {
+        // 配置步骤：触发生成 + 跳转到展示页
+        try {
+          generateDiagram()
+          nextStep()
+        } catch (err) {
+          console.error('生成图表失败:', err)
+        }
+      } else if (canNavNext.value) {
+        nextStep()
+      }
+    }
+
+    const handleStepChange = (index) => {
+      goToStep(index)
+    }
+
+    watch(currentStep, (newStep) => {
+      if (newStep === 1) {
         const hasSelectedRelations = selectedRelationNodeIds.value && selectedRelationNodeIds.value.length > 0
         if (!hasSelectedRelations) {
           configStore.updateCenterScopeHighlight(false)
         }
       }
+      // [v32] 同步到 sessionStorage, F5 后能恢复精确步骤
+      sessionStorage.setItem('archDataCurrentStep', String(newStep))
     })
 
     onMounted(async () => {
-      // 先重置所有步骤状态，确保每次进入都是干净状态（防止 keep-alive 或状态残留）
+      // 先重置所有步骤状态，确保每次进入都是干净状态
       resetSteps()
 
       // [v32] 双层数据源 (Pinia 主 + sessionStorage 备份):
@@ -320,9 +246,10 @@ export default {
       //      - F5 后 Pinia 状态丢失, 但 sessionStorage 保留
       //      - 此时 onMounted 读 sessionStorage 兜底
       //   行为:
-      //     A) 首次进入 (有 archData): 切 3 步骤模式 + 加载数据, 默认 step 3
-      //     B) F5 刷新 (Pinia 空, sessionStorage 有): 从 sessionStorage 读, 仍走 3 步骤
-      //     C) 直接 URL 访问 /archdata-chart (都空): 走 6 步骤默认流程
+      //     A) 首次进入 (有 archData): 加载数据, 默认 step 0
+      //     B) F5 刷新 (Pinia 空, sessionStorage 有): 从 sessionStorage 读
+      //     C) 直接 URL 访问 /archdata-chart (都空): 2026-06-13 重定向到 /system/archdata
+      //        (6 步骤 fallback 已废弃)
       let archData = chartArchStore.archData
 
       if (!archData) {
@@ -343,9 +270,6 @@ export default {
 
       if (archData) {
         try {
-          // 切到 3 步骤模式 (类型 → 配置 → 展示)
-          initFromArchDataManager()
-
           // 加载数据 (下游 initDataFromArch 内部逻辑零修改, archData 结构一致)
           await initDataFromArch(archData)
 
@@ -359,22 +283,44 @@ export default {
             console.log('[v33] F5 refresh: restored chartType=', savedChartType)
           }
 
-          // 恢复 currentStep
-          // 优先级: 1) sessionStorage (F5 后) > 2) 默认 3
+          // 恢复 currentStep (3 步骤模式: 0/1/2)
+          // 优先级: 1) sessionStorage (F5 后) > 2) 默认 0
           let restoredStep = null
           const savedStepStr = sessionStorage.getItem('archDataCurrentStep')
           if (savedStepStr) {
             const savedStep = parseInt(savedStepStr, 10)
-            if (Number.isFinite(savedStep) && savedStep >= 3 && savedStep <= 5) {
+            if (Number.isFinite(savedStep) && savedStep >= 0 && savedStep <= 2) {
               restoredStep = savedStep
             }
           }
-          currentStep.value = restoredStep !== null ? restoredStep : 3
+
+          // [2026-06-15] step 2 (展示) 恢复条件:
+          //   - 用户上次在展示页 → 期望切回来看到图
+          //   - 但 diagramData 是 useDiagramData() 的局部 ref(null), 切 tab 后丢失
+          //   - 解决: 尝试从 Pinia 缓存读, 命中才允许 step 2
+          //   - 未命中: 范围/配置可能变了, 或 30 分钟 TTL 过期, 或 F5 后 Pinia 状态丢失
+          //            → 回退到 step 1 (让用户重新生成, 避免展示 stale 图)
+          if (restoredStep === 2) {
+            const cachedDiagram = loadCachedDiagram()
+            if (cachedDiagram) {
+              console.log('[v44] diagramData 缓存命中, 保留 step 2')
+            } else {
+              console.log('[v44] diagramData 缓存未命中 (范围/配置变了 / TTL 过期 / F5 丢失), 回退到 step 1')
+              restoredStep = 1
+            }
+          }
+
+          currentStep.value = restoredStep !== null ? restoredStep : 0
         } catch (err) {
           console.error('[v32] Failed to initialize from arch data:', err)
         }
       } else {
-        console.log('[v32] no archData (neither Pinia nor sessionStorage), using 6-step default flow')
+        // [2026-06-13] 6 步骤 fallback 已废弃
+        //   之前: 走 6 步骤默认流程 (StepUpload → StepScope → StepScope → StepChartType → StepConfig → StepDisplay)
+        //   现在: 重定向到架构管理页, 让用户先选择数据
+        console.log('[v40] no archData (neither Pinia nor sessionStorage), redirecting to arch manager (6-step fallback deprecated)')
+        router.replace('/system/archdata')
+        return
       }
 
       // [v32] 监听 chartArchStore.sequence, 处理"已在 chart tab 内再次点 图表视图"场景
@@ -385,10 +331,9 @@ export default {
           if (newArchData) {
             console.log('[v32] chartArchStore.sequence changed, re-initializing')
             resetSteps()
-            initFromArchDataManager()
             try {
               await initDataFromArch(newArchData)
-              currentStep.value = 3
+              currentStep.value = 0
             } catch (err) {
               console.error('[v32] re-initialization failed:', err)
             }
@@ -396,19 +341,7 @@ export default {
         }
       })
 
-      // [v32-FIX] 监听 currentStep 变化, 同步到 sessionStorage (F5 后能恢复精确步骤)
-      //   场景: 3 步骤模式下用户从 step 3 走到 step 4/5, F5 后要恢复
-      watch(currentStep, (newStep) => {
-        if (initFromArchData.value) {
-          sessionStorage.setItem('archDataCurrentStep', String(newStep))
-        } else {
-          // 6 步骤模式不保留
-          sessionStorage.removeItem('archDataCurrentStep')
-        }
-      })
-
-      // 测试专用: dev 环境暴露组件状态到 window，方便 e2e 测试跳过 4 步流程
-      // 仅 DEV 构建包含，production 构建 import.meta.env.DEV 为 false，被 dead-code-elimination 移除
+      // 测试专用: dev 环境暴露组件状态到 window，方便 e2e 测试
       if (import.meta.env.DEV) {
         console.log('[AADiagramApp] mounted (new), DEV=', import.meta.env.DEV)
         window.__diagramApp = {
@@ -417,19 +350,11 @@ export default {
           goToStep,
           nextStep,
           prevStep,
-          initFromArchDataManager,
           generateDiagram,
           previewData,
           chartType,
-          relationFilteredBoCodes,
           centerScope,
-          // 关键诊断字段：3 步骤模式状态
-          visibleSteps,
-          displayCurrent,
-          initFromArchData,
-          // 测试用: 模拟 tab 系统二次点击 chart 触发组件 re-mount
           router,
-          // [v32] 暴露 chartArchStore, e2e 测试可直接验证 store 状态
           chartArchStore,
           // DEBUG 临时暴露
           selectedRelationNodeIds,
@@ -440,63 +365,9 @@ export default {
       }
     })
 
-    const handleStepChange = (displayIdx) => {
-      const step = visibleSteps.value[displayIdx]
-      if (step) {
-        goToStep(step.originalIndex)
-      }
-    }
-
-    // 导航栏 prev/next 按钮状态
-    const canNavPrev = computed(() => {
-      // 第一步也显示上一步（用于返回架构数据管理页面）
-      return currentStep.value > 0 || initFromArchData.value
-    })
-    const canNavNext = computed(() => {
-      const maxStep = visibleSteps.value.length - 1
-      return displayCurrent.value < maxStep
-    })
-    const navNextLabel = computed(() => {
-      // 配置步骤显示"生成图表"而不是"下一步"
-      if (currentStep.value === 4) return '生成图表'
-      return '下一步'
-    })
-
-    const onNavPrev = () => {
-      if (initFromArchData.value && displayCurrent.value === 0) {
-        // 3 步骤模式的第一步（类型）：上一步返回架构数据管理页面
-        sessionStorage.setItem('returningFromDiagram', 'true')
-        // [v32] 不再需要清除 sessionStorage 中的 archData 备份 (已废弃)
-        router.push('/system/archdata')
-      } else if (currentStep.value > 0) {
-        // 其他情况：正常回退上一步
-        prevStep()
-      }
-    }
-
-    const onNavNext = () => {
-      if (currentStep.value === 4) {
-        // 配置步骤：触发生成 + 跳转到展示页（与原 panel-header 按钮行为一致）
-        try {
-          generateDiagram()
-          nextStep()
-        } catch (err) {
-          console.error('生成图表失败:', err)
-        }
-      } else if (canNavNext.value) {
-        nextStep()
-      }
-    }
-
-    const goBack = () => {
-      router.push('/')
-    }
-
     return {
       steps,
-      visibleSteps,
       currentStep,
-      displayCurrent,
       currentStepInfo,
       goToStep,
       handleStepChange,
@@ -505,8 +376,6 @@ export default {
       stepStats,
       stepProps,
       stepEvents,
-      initFromArchData,
-      goBack,
       canNavPrev,
       canNavNext,
       navNextLabel,

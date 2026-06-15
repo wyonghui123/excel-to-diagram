@@ -118,6 +118,28 @@ def derive_level(action: str, *, outcome: str = "success") -> str:
     return AuditLevel.INFO.value
 
 
+def derive_outcome_from_action(action: str) -> str:
+    """[v3.18 FR-005] 从 action 字符串自动 derive outcome
+
+    映射:
+      DELETE_BLOCKED  → blocked
+      DELETE_FAILED   → failure
+      AUDIT_WRITE_FAILED / *_FAILED → failure
+      AUDIT_RETRY     → retry
+      其它            → success
+    """
+    if not action:
+        return AuditOutcome.SUCCESS.value
+    action_upper = action.upper()
+    if action_upper == "DELETE_BLOCKED" or "BLOCKED" in action_upper:
+        return AuditOutcome.BLOCKED.value
+    if action_upper == "DELETE_FAILED" or "FAILED" in action_upper:
+        return AuditOutcome.FAILURE.value
+    if "RETRY" in action_upper:
+        return AuditOutcome.RETRY.value
+    return AuditOutcome.SUCCESS.value
+
+
 # ============ user_name 标准化 (FR-006) ============
 
 _USER_NAME_RE = re.compile(r"^(.+?)\s*\(([^()]+)\)$")
@@ -187,6 +209,14 @@ if __name__ == "__main__":
     assert derive_level("CREATE", outcome="failure") == "WARN"
     assert derive_level("AUDIT_WRITE_FAILED") == "ERROR"
     print("[OK] derive_level 3 级")
+
+    assert derive_outcome_from_action("CREATE") == "success"
+    assert derive_outcome_from_action("DELETE_BLOCKED") == "blocked"
+    assert derive_outcome_from_action("DELETE_FAILED") == "failure"
+    assert derive_outcome_from_action("AUDIT_WRITE_FAILED") == "failure"
+    assert derive_outcome_from_action("AUDIT_RETRY") == "retry"
+    assert derive_outcome_from_action("") == "success"
+    print("[OK] derive_outcome_from_action 4 种")
 
     assert normalize_user_name("张三", "zhangsan") == "张三 (zhangsan)"
     assert normalize_user_name("zhangsan", "zhangsan") == "zhangsan"

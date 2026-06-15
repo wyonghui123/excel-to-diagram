@@ -134,11 +134,12 @@ describe('useMetaList 集成测试（PR 6）', () => {
   })
 
   describe('集成：字节级一致性（PR 4 关键不变式）', () => {
-    it('useMetaList.js 总行数在合理范围内（Phase 2 提取后约 2000 行）', () => {
+    it('useMetaList.js 总行数在合理范围内（Phase 2 提取后约 2000 行 + 2026-06-13 removeNewRow 增量）', () => {
       const lines = useMetaListSource.split('\n').length
       // Phase 2 提取 metaTransformService 后行数减少
+      // 2026-06-13: 新增 removeNewRow 修复未保存新行删除 BUG, +30 行
       expect(lines).toBeGreaterThan(1850)
-      expect(lines).toBeLessThan(2100)
+      expect(lines).toBeLessThan(2200)
     })
 
     it('3 个下沉点函数总行数 < 50 行（原 135 行 → 简化后约 33 行）', () => {

@@ -28,7 +28,7 @@ class TestValidationDetail:
             params={},
         )
         d = detail.to_dict()
-        assert d['field_id'] == 'fld_001'
+        assert 'field_id' not in d  # field_id 不暴露给前端
         assert d['field_name'] == '姓名'
         assert d['rule'] == 'required'
         assert d['i18n_key'] == 'validation.field.required'

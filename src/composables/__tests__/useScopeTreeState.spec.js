@@ -4,7 +4,8 @@ import {
   scopeToNodeKeys,
   nodeKeysToRelationCodes,
   nodeKeysToRelationIds,
-  relationCodesToNodeKeys
+  relationCodesToNodeKeys,
+  relationIdsToNodeKeys
 } from '@/composables/useScopeTreeState'
 
 const OBJECT_TREE_DATA = [
@@ -412,5 +413,172 @@ describe('relationCodesToNodeKeys', () => {
   it('null relationCodes 返回空数组（OSS 变更清空 RSS 勾选）', () => {
     const result = relationCodesToNodeKeys(null, RELATION_TREE_DATA)
     expect(result).toEqual([])
+  })
+})
+
+// v39.4: relationIdsToNodeKeys 测试 - 修复从图表返回时关系范围选择状态"漂移"问题
+// 使用独立 fixture (RELATION_TREE_WITH_IDS) 包含 relationIds 字段
+const RELATION_TREE_WITH_IDS = [
+  {
+    id: 'internal',
+    name: '范围内',
+    children: [
+      {
+        id: 'internal-cross-domain',
+        name: '跨领域',
+        children: [
+          {
+            id: 'internal-leaf-1',
+            name: '库存-财务核算',
+            level: 'module',
+            relationCodes: ['RS001', 'RS002'],
+            relationIds: [101, 102]
+          }
+        ]
+      },
+      {
+        id: 'internal-same-module',
+        name: '同服务模块',
+        children: [
+          {
+            id: 'internal-leaf-2',
+            name: '库存-库存',
+            level: 'module',
+            relationCodes: ['RS003'],
+            relationIds: [103]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    id: 'external',
+    name: '范围外',
+    children: [
+      {
+        id: 'external-cross-domain',
+        name: '跨领域',
+        children: [
+          {
+            id: 'external-leaf-1',
+            name: '外部-外部',
+            level: 'module',
+            relationCodes: ['RS004'],
+            relationIds: [201]
+          }
+        ]
+      }
+    ]
+  }
+]
+
+describe('relationIdsToNodeKeys', () => {
+  it('空 relationIds 返回空数组', () => {
+    const result = relationIdsToNodeKeys([], RELATION_TREE_WITH_IDS)
+    expect(result).toEqual([])
+  })
+
+  it('空 treeData 返回空数组', () => {
+    const result = relationIdsToNodeKeys([101], [])
+    expect(result).toEqual([])
+  })
+
+  it('null relationIds 返回空数组（OSS 变更清空）', () => {
+    const result = relationIdsToNodeKeys(null, RELATION_TREE_WITH_IDS)
+    expect(result).toEqual([])
+  })
+
+  it('undefined relationIds 返回空数组', () => {
+    const result = relationIdsToNodeKeys(undefined, RELATION_TREE_WITH_IDS)
+    expect(result).toEqual([])
+  })
+
+  it('单个 relationId 匹配到对应 module node（节点仅含 1 个 id）', () => {
+    // internal-leaf-2 只含 103，传 103 应匹配
+    const result = relationIdsToNodeKeys([103], RELATION_TREE_WITH_IDS)
+    expect(result).toContain('internal-leaf-2')
+  })
+
+  it('节点含多个 ids 时，必须全部传入才能匹配', () => {
+    // internal-leaf-1 含 [101,102]，只传 101 不应匹配（102 缺失）
+    const result = relationIdsToNodeKeys([101], RELATION_TREE_WITH_IDS)
+    expect(result).not.toContain('internal-leaf-1')
+  })
+
+  it('多个 relationId 全部匹配才返回 node key', () => {
+    // 101+102 都属于 internal-leaf-1 → 匹配
+    const result = relationIdsToNodeKeys([101, 102], RELATION_TREE_WITH_IDS)
+    expect(result).toContain('internal-leaf-1')
+  })
+
+  it('部分匹配的 relationId 不返回 node key', () => {
+    // 102 存在但 9999 不存在 → 内部所有 ids 都要匹配才算
+    const result = relationIdsToNodeKeys([102, 9999], RELATION_TREE_WITH_IDS)
+    expect(result).not.toContain('internal-leaf-1')
+  })
+
+  it('不存在的 relationId 不影响已匹配的 node（集合中含有效 id）', () => {
+    const result = relationIdsToNodeKeys([103, 99999], RELATION_TREE_WITH_IDS)
+    expect(result).toContain('internal-leaf-2')
+  })
+
+  it('只匹配叶子 module 节点，不返回父级 scope/category 节点', () => {
+    // 关键测试: 修复"漂移"问题 - 不能返回父节点否则会级联勾选所有子节点
+    const result = relationIdsToNodeKeys([101], RELATION_TREE_WITH_IDS)
+    result.forEach(key => {
+      expect(key).toMatch(/-leaf-/)
+    })
+    expect(result).not.toContain('internal')
+    expect(result).not.toContain('internal-cross-domain')
+  })
+
+  it('跨 scope 误匹配防护: 同 code 在不同 scope 不会导致跨 scope 勾选', () => {
+    // 关键测试: 模拟用户原始问题场景
+    // 修复前 relationCodesToNodeKeys 会因 CONTAINS code 同时存在于 internal/external
+    //   而误匹配到 external-leaf-1，导致"勾选状态飘到范围外"
+    // 修复后 relationIdsToNodeKeys 用唯一 ID 精确匹配，不会跨 scope
+    const result = relationIdsToNodeKeys([101, 102], RELATION_TREE_WITH_IDS)
+    expect(result).toContain('internal-leaf-1')
+    expect(result).not.toContain('external-leaf-1')  // 关键: 不应误匹配范围外
+  })
+
+  it('关系 ID 数字和字符串混用也能正确匹配（String 转换）', () => {
+    const result = relationIdsToNodeKeys(['101', '102'], RELATION_TREE_WITH_IDS)
+    expect(result).toContain('internal-leaf-1')
+  })
+
+  it('同一 scope 多个叶子节点独立匹配', () => {
+    // 同时匹配 internal-leaf-1 (101,102) 和 internal-leaf-2 (103)
+    const result = relationIdsToNodeKeys([101, 102, 103], RELATION_TREE_WITH_IDS)
+    expect(result).toContain('internal-leaf-1')
+    expect(result).toContain('internal-leaf-2')
+  })
+
+  it('跳过有 children 的中间节点（只匹配叶子）', () => {
+    // 即使中间节点没有 relationIds，也不会被错误返回
+    const treeWithIntermediates = [
+      {
+        id: 'root',
+        name: '根',
+        relationIds: [999],  // 根节点也有 relationIds 但不是叶子
+        children: [
+          {
+            id: 'mid',
+            name: '中间',
+            relationIds: [888],  // 中间节点也有 relationIds 但不是叶子
+            children: [
+              {
+                id: 'leaf',
+                name: '叶子',
+                level: 'module',
+                relationIds: [101]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+    const result = relationIdsToNodeKeys([101, 888, 999], treeWithIntermediates)
+    expect(result).toEqual(['leaf'])  // 只匹配叶子
   })
 })

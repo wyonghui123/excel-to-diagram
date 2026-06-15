@@ -199,12 +199,14 @@ hierarchy_aspect:
       redundancy:
         type: virtual
         source_field: version_id
-        derived_from: version.code
+        # [CHANGED 2026-06-13] version.code 字段已删除, 改用 version.name
+        # 字段名保持 version_code 不变(向后兼容), 但实际解析 version.name
+        derived_from: version.name
         join_path:
           - table: versions
             from: version_id
             to: id
-            select: code
+            select: name
 
     - id: product_code
       name: 产品编码

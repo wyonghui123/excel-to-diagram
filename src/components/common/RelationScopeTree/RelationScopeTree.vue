@@ -3,6 +3,7 @@
     <CollapsiblePanel
       title="对象范围"
       :badge="selectedBoCount"
+      :badge-label="'对象'"
       :default-expanded="objectExpanded"
       :height-full="false"
       class="rst-panel-object"
@@ -23,6 +24,7 @@
     <CollapsiblePanel
       title="关系范围"
       :badge="relationCodesCount"
+      :badge-label="'关系'"
       :default-expanded="relationExpanded"
       :height-full="false"
       class="rst-panel-relation"
@@ -46,12 +48,16 @@
 
     <CollapsiblePanel
       title="过滤条件"
-      :badge="filterCount"
       :default-expanded="filterExpanded"
       :height-full="false"
       class="rst-panel-filter"
       @toggle="handleFilterToggle"
     >
+      <template #badge>
+        <span v-if="hasActiveFilter" class="filter-badge-text">
+          {{ filterBoCount }} 对象 · {{ filterRelationCount }} 关系
+        </span>
+      </template>
       <RelationFilterSection
         ref="filterSectionRef"
         :version-id="versionId"
@@ -247,19 +253,121 @@ const effectiveServiceModuleIds = computed(() => {
   return [...ids]
 })
 
-// 取 4 个 id 源 (boIds / domainIds / subDomainIds / serviceModuleIds) 的总长度。
-// 正常路径: handleObjectScopeChange 写 localSelectedBoCount (包含 4 源之和), 直接用。
-// Restore 路径: localSelectedBoCount=0 但 props 同步后 4 个 ref 已有值, 用派生值兜底。
-// 这样 restore 后 chip "对象范围 1" 不会因为 localSelectedBoCount 没被触发而消失。
+// 关键修复 v39: 扁平化所有受选源 (boIds + domainIds + subDomainIds + serviceModuleIds) 影响的 BO id 列表
+//   关系: domain ⊃ sub_domain ⊃ service_module ⊃ business_object
+//   注: hierarchyMap 只存 id→{domainId,subDomainId,serviceModuleId}, 不存 boIdsBySm
+//   修复需要先在 load 时 query BO list, 构建 boIdsBySm 反向索引
+const allBusinessObjects = shallowRef([])
+
+// 用 treeData 反向构建: service_module_id → bo_ids[]
+const boIdsBySm = computed(() => {
+  if (!treeData.value || treeData.value.length === 0) return new Map()
+  const map = new Map()
+  function walk(nodes) {
+    if (!nodes) return
+    for (const n of nodes) {
+      if (n.type === 'business_object') {
+        // hierarchyMap 反查 sm id
+        const info = hierarchyMap.value[n.id]
+        if (info?.serviceModuleId != null) {
+          const list = map.get(info.serviceModuleId) || []
+          list.push(n.id)
+          map.set(info.serviceModuleId, list)
+        }
+      }
+      if (n.children) walk(n.children)
+    }
+  }
+  walk(treeData.value)
+  return map
+})
+
+// 扁平展开所有受影响的 BO id
+const flattenSelectedBoIds = computed(() => {
+  const result = new Set()
+  // 直接选的 BO
+  for (const id of selectedBoIds.value) result.add(id)
+  // 选的 service_module
+  for (const smId of selectedServiceModuleIds.value) {
+    const bos = boIdsBySm.value.get(smId) || []
+    for (const boId of bos) result.add(boId)
+  }
+  // 选的 sub_domain
+  for (const sdId of selectedSubDomainIds.value) {
+    const info = hierarchyMap.value[sdId]
+    if (!info) continue
+    // 找 sd 内所有 SM, 再找每个 SM 的 BO
+    for (const n of (treeData.value || [])) {
+      // 简化: 从 boIdsBySm 反向查 (hierarchyMap 的 bo → smId 但 sd → [smIds] 没存)
+      // 用 treeData 二次 walk
+    }
+    walkSubDomain(info)
+  }
+  // 选的 domain
+  for (const dId of selectedDomainIds.value) {
+    walkDomain(hierarchyMap.value[dId])
+  }
+  return [...result]
+
+  function walkSubDomain(info) {
+    if (!info) return
+    // treeData 中找 sm_*, type=service_module, 看 hierarchyMap[smId]?.subDomainId === info.subDomainId
+    for (const smId of (boIdsBySm.value.keys())) {
+      const smInfo = hierarchyMap.value[smId]
+      if (smInfo?.subDomainId === info.subDomainId) {
+        for (const boId of (boIdsBySm.value.get(smId) || [])) result.add(boId)
+      }
+    }
+  }
+  function walkDomain(info) {
+    if (!info) return
+    for (const smId of (boIdsBySm.value.keys())) {
+      const smInfo = hierarchyMap.value[smId]
+      if (smInfo?.domainId === info.domainId) {
+        for (const boId of (boIdsBySm.value.get(smId) || [])) result.add(boId)
+      }
+    }
+  }
+})
+
+// 关键修复 v39: chip 数字从"4 源 id 总数"改为"扁平去重 BO 总数"
+//   之前: domain(1)+sd(1)+sm(3)+bo(4) = 9 → chip 显示 "对象范围 9" (混杂 BO+层级 id)
+//   之前问题: 跳到图表页, 图表页导航显示 "19对象" (真 BO 数) - 不一致
+//   现在: domain 内所有 BO (N) + sd 内 (M) + sm 内 (K) + 已选 bo (J) - 去重 = 真 BO 数
+//   跟图表页 businessObjects / objectRelations 口径完全一致
+// 关键修复 v39.1: 始终使用扁平去重 BO 总数, 不再依赖 localSelectedBoCount
+//   之前逻辑: localSelectedBoCount > 0 时直接返回, 导致显示 4 源 id 总数而非 BO 数
+//   现在逻辑: 始终使用 flattenSelectedBoIds 计算扁平去重 BO 总数
 const selectedBoCount = computed(() => {
-  const local = localSelectedBoCount.value
-  if (local > 0) return local
+  // 始终使用扁平去重 BO 总数
+  const flatBoIds = flattenSelectedBoIds.value
+  if (flatBoIds && flatBoIds.length > 0) {
+    return new Set(flatBoIds).size
+  }
+  // 兜底: 4 源 id 总数 (旧行为, 兼容性)
   return (selectedBoIds.value?.length || 0) +
     (selectedDomainIds.value?.length || 0) +
     (selectedSubDomainIds.value?.length || 0) +
     (selectedServiceModuleIds.value?.length || 0)
 })
-const relationCodesCount = computed(() => selectedRelationCodes.value?.length || 0)
+
+// 关键修复 v40: 关系范围 chip 从 "selectedRelationCodes 数(节点数/关系类型编码数)" 改为
+//   "selectedRelationIds 数(关系记录数)", 跟图表页 displayStats.total.objectRelations 口径完全一致
+//   之前 (v39): selectedRelationCodes.length = 关系类型编码去重数 (e.g., 用户选 5 个不同 code → 显示 "5 关系")
+//     → 跟"关系范围"树节点 count (= 实际关系数) 不一致; 跟图表页导航也不一致
+//     → 用户视角: 选 5 个 code 后看到 chip 显示 "5 关系" 跟树节点 "(12)" 含义不同, 易混淆
+//   现在 (v40): selectedRelationIds.length = 用户选择涉及的实际关系记录数
+//     → 跟"关系范围"树节点 count 一致 (都是关系数)
+//     → 跟图表页 filteredRelations.length 一致
+//     → 跟管理页 "对象范围 chip" 用的 "BO 数" 口径一致
+//   命名保持 relationCodesCount 不变, 因外部 (MultiObjectManagementPage.tabsExtraContext) 已
+//     把它当 relationCount 用; 内部改用 selectedRelationIds 口径, 外部语义不变
+const relationCodesCount = computed(() => {
+  // 优先用 selectedRelationIds (精确关系记录数), 兜底用 selectedRelationCodes (类型编码数)
+  const ids = selectedRelationIds.value
+  if (ids && ids.length > 0) return ids.length
+  return selectedRelationCodes.value?.length || 0
+})
 
 const filterCount = computed(() => {
   return filterSectionRef.value?.filterCount || 0
@@ -602,6 +710,23 @@ defineExpose({
 .rst-panel-filter {
   flex: 1;
   min-height: 48px;
+}
+
+/* v39: 过滤条件 badge 样式 */
+.filter-badge-text {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: var(--color-primary-bg, #fff7ed);
+  color: var(--color-primary, #ea580c);
+  border-radius: 10px;
+  font-size: var(--font-size-xs, 11px);
+  font-weight: 500;
+  flex-shrink: 0;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .relation-scope-tree:has(.rst-panel-relation.is-collapsed) .rst-panel-object {

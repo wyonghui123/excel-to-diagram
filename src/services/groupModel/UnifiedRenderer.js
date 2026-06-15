@@ -1,4 +1,5 @@
 import { isTerminalGroup } from './types.js'
+import { getArrowSyntax, sanitizeLabel } from '@/composables/useMermaid/syntax/_shared/arrowHelper.js'
 
 export class UnifiedRenderer {
   static render(groupModel, links, chartType, options = {}) {
@@ -45,19 +46,14 @@ export class UnifiedRenderer {
       const sourceId = codeToIdMap.get(link.source) || link.source
       const targetId = codeToIdMap.get(link.target) || link.target
       if (sourceId && targetId) {
-        // 关键修复 v26: label 中的特殊字符 ("|", 双引号, 换行) 会让 mermaid 11 报 "Syntax error in text"
-        // 处理: 1) 替换 | → / 2) 替换换行 → 空格 3) 移除多余引号
-        // 4) 如果 label 为空或纯空白, 仍输出不带 label 的 link
-        let safeLabel = ''
-        if (link.label && String(link.label).trim()) {
-          safeLabel = String(link.label)
-            .replace(/\|/g, '/')           // 避免与 mermaid label 语法冲突
-            .replace(/[\r\n]+/g, ' ')      // 换行转空格
-            .replace(/"/g, "'")            // 双引号转单引号
-            .trim()
-        }
-        const labelPart = safeLabel ? `|${safeLabel}|` : ''
-        code += `  ${sourceId} -->${labelPart} ${targetId}\n`
+        // [v40 修复] 之前硬编码 `-->${labelPart}`, 双向关系不渲染 <-->
+        // 现在改用 getArrowSyntax, 支持:
+        //   1) 双向 (link.relationDirection === '双向') → <-- text -->
+        //   2) 单向 (其它)                          → -->|"text"|
+        //   3) label 安全转义 (| → /, 换行 → 空格, " → ')
+        // label 优先级: link.label (unifiedLinks 里映射的 rel.code) > link.code > link.relationCode
+        const labelText = link.label || link.code || link.relationCode || ''
+        code += getArrowSyntax(sourceId, targetId, labelText, link)
       }
     })
 

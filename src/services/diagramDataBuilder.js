@@ -55,10 +55,16 @@ export function buildLinks(relationships) {
     targetName: rel.targetName,
     sourceCode: rel.sourceCode,
     targetCode: rel.targetCode,
+    // [v39 关系线标题] 关系实例编码 (e.g. "ORDER-USER-01")
+    // 之前 mermaid label 误用 relationCode (类型编码), 现优先用 code
+    code: rel.code || '',
     relationCode: rel.relationCode,
     relationDesc: rel.relationDesc,
     annotationCategory: rel.annotationCategory || 'info',
-    annotationContent: rel.annotationContent || ''
+    annotationContent: rel.annotationContent || '',
+    // [v34 双向支持] 透传 relationType + relationDirection, 供箭头生成和 tooltip 使用
+    relationType: rel.relationType || '',
+    relationDirection: rel.relationDirection || null
   }));
 }
 

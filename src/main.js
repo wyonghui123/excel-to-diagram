@@ -84,7 +84,10 @@ window.__pinia = pinia
 
 // [FR-004] 将 zhCn 暴露给 App.vue (ElConfigProvider 需要 locale prop)
 // [FR-015] provide 在 mount 之前 (App.vue inject 才能拿到)
-app.provide('elementPlusLocale', zhCn)
+// [BMRD 2026-06-14] E34: 改为响应式, 允许运行时切换 locale
+import { useLocale } from '@/composables/useLocale'
+const { elementPlusLocale: epLocale } = useLocale()
+app.provide('elementPlusLocale', epLocale)
 
 // [FR-015] await session restore before mount
 //   - 旧实现未 await,app.mount 时 session 可能未恢复,导致闪现登录页

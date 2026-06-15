@@ -79,7 +79,7 @@ import {
 import { useRelationClassifier, buildRelationScopeTree } from '@/composables/useRelationClassifier'
 import { AppButton } from '@/components/common/AppButton'
 import { boService } from '@/services/boService'
-import { nodeKeysToRelationCodes, nodeKeysToRelationIds, relationCodesToNodeKeys } from '@/composables/useScopeTreeState'
+import { nodeKeysToRelationCodes, nodeKeysToRelationIds, relationCodesToNodeKeys, relationIdsToNodeKeys } from '@/composables/useScopeTreeState'
 import { createTrace } from '@/utils/trace'
 import { createScopeGuard } from '@/composables/scopeGuard'
 import { apiV1 } from '@/utils/httpClient'
@@ -342,17 +342,36 @@ const relationCheckedNodeKeys = computed(() => {
 // 新挂载的 RSS 内部 preservedCheckedKeys 是空, 树不会显示勾选。
 // 当 codes 非空 + 树已加载时, 从 codes 派生出 nodeKeys 填充 preservedCheckedKeys。
 // 后续的 relationCheckedNodeKeys watcher → setCheckedKeys → installStoreSetDataHook 会用它恢复勾选。
+// v39.4: 使用 relationIds (唯一 ID) 还原勾选状态，避免 relationCodes (类型编码) 跨 scope 误匹配
+// 根因: relationCodes 是类型编码 (如 "CONTAINS")，同一 code 可出现在不同 scope 的模块节点中
+//   还原时 relationCodesToNodeKeys 会匹配到"范围外"的节点，导致勾选状态"漂移"
+// 修复: 优先使用 relationIds 精确匹配叶子 module 节点
 watch(
-  () => [props.scopeIds?.relationExtra?.relationCodes, classifierTreeData.value],
-  ([codes, treeData]) => {
+  () => [props.scopeIds?.relationExtra?.relationIds, props.scopeIds?.relationExtra?.relationCodes, classifierTreeData.value],
+  ([ids, codes, treeData]) => {
     if (!USE_FILTERSOURCE) return
     if (preservedCheckedKeys.value.size > 0) return  // 已有用户勾选, 不覆盖
-    if (!codes || codes.length === 0) return
     if (!treeData || treeData.length === 0) return  // 树未加载, 等下次
-    const nodeKeys = relationCodesToNodeKeys(codes, treeData)
-    if (nodeKeys.length > 0) {
-      preservedCheckedKeys.value = new Set(nodeKeys)
-      trace.log('restoreFromCodes→setPreserved', { codes: codes.length, keys: nodeKeys.length })
+
+    let nodeKeys = []
+
+    // v39.4: 优先使用 relationIds (唯一 ID) 精确匹配
+    if (ids && ids.length > 0) {
+      nodeKeys = relationIdsToNodeKeys(ids, treeData)
+      if (nodeKeys.length > 0) {
+        preservedCheckedKeys.value = new Set(nodeKeys)
+        trace.log('restoreFromIds→setPreserved', { ids: ids.length, keys: nodeKeys.length })
+        return
+      }
+    }
+
+    // 兜底: 使用 relationCodes (类型编码) - 旧逻辑，可能跨 scope 误匹配
+    if (codes && codes.length > 0) {
+      nodeKeys = relationCodesToNodeKeys(codes, treeData)
+      if (nodeKeys.length > 0) {
+        preservedCheckedKeys.value = new Set(nodeKeys)
+        trace.log('restoreFromCodes→setPreserved (fallback)', { codes: codes.length, keys: nodeKeys.length })
+      }
     }
   },
   { immediate: true, deep: true }

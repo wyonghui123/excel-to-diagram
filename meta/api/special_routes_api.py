@@ -303,14 +303,11 @@ def _list_relationships_impl(ds, user, user_id, user_is_admin):
     #         拼成 source/target OR 子查询 (跟 V1.1.9 修复一致)
     #   注: v1 与 v2 现在都走相同的 OR-of-AND 派生路径, TEST333 (5434+5970) 在两端都返回 4 条
     allowed_bo_ids = None
+    dim_scope_conds = []  # 各 role 派生的 relationship cond_expr 列表
     if AUTH_ENABLED and user_id and not user_is_admin:
         try:
             bo_ids = _data_perm_filter.perm_service.get_allowed_resource_ids(user_id, 'business_object')
             # [FIX v3.18.1 2026-06-09] 检查用户是否有 business_object 类型的 data_permissions 配置
-            #   之前 get_user_data_permissions() 看 user 全部 resource_type 配置,
-            #   TEST60 有 version 类型 data_perms (不是 business_object) 也被判为 has_data_perms=True
-            #   → bo_ids (空, 因为 perm_service 只算 business_object) → allowed_bo_ids = [] → 1=0 拒绝
-            #   修复: 只看 resource_type='business_object' 的配置
             from meta.services.data_permission_service import DataPermissionService
             dps = DataPermissionService(ds)
             bo_data_perms = [
@@ -323,15 +320,28 @@ def _list_relationships_impl(ds, user, user_id, user_is_admin):
             elif has_data_perms and not bo_ids:
                 # 有 business_object data_perms 但 bo_ids 为空 → 显式拒绝
                 allowed_bo_ids = []
-            # else: dimension scope 用户, 走 V1.1.14 OR 派生
             else:
                 # [V1.1.14] dim scope 用户, 调 DimensionScopeEngine 派生 'business_object' cond
                 # 跟 v2 /api/v2/bo/relationship (走 DataPermissionInterceptor) 行为对齐
                 # 语义: 任一 role 派生命中 → 允许 (OR-of-AND per role)
-                allowed_bo_ids = _derive_bo_ids_from_dim_scope(ds, user_id)
+                from meta.services.dimension_scope_engine import DimensionScopeEngine
+                ds_engine = DimensionScopeEngine(ds)
+                cursor = ds.execute(
+                    """SELECT DISTINCT gr.role_id
+                       FROM group_roles gr
+                       JOIN user_group_members ugm ON gr.group_id = ugm.group_id
+                       WHERE ugm.user_id = ?""",
+                    [user_id]
+                )
+                user_role_ids = [row[0] for row in cursor.fetchall()]
+                for role_id in user_role_ids:
+                    data_conds = ds_engine.derive_data_conditions(role_id)
+                    rel_cond = data_conds.get('relationship')
+                    if rel_cond:
+                        dim_scope_conds.append(rel_cond)
         except Exception as e:
-            logger.warning(f"[relationships] get_allowed_resource_ids failed: {e}")
-            allowed_bo_ids = None
+            logger.warning(f"[relationships] dim scope calc failed: {e}")
+            dim_scope_conds = []
     if request.method == 'POST':
         data = request.get_json() or {}
         page = data.get('page', 1)
@@ -481,6 +491,13 @@ def _list_relationships_impl(ds, user, user_id, user_is_admin):
             conditions.append(f"(r.source_bo_id IN ({placeholders}) OR r.target_bo_id IN ({placeholders}))")
             params.extend(allowed_bo_ids)
             params.extend(allowed_bo_ids)
+    # [V1.1.9] dim scope 派生 cond: 多 role → OR-of-AND (单 role → 直接)
+    #   跟 v2 /api/v2/bo/relationship 行为一致
+    if dim_scope_conds:
+        if len(dim_scope_conds) == 1:
+            conditions.append(dim_scope_conds[0])
+        else:
+            conditions.append('(' + ') OR ('.join(dim_scope_conds) + ')')
     if keyword:
         conditions.append("""(
             r.relation_code LIKE ? OR

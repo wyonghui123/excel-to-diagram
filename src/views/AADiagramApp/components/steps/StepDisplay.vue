@@ -24,6 +24,14 @@
           >
             飞书导入
           </AppButton>
+          <AppButton
+            type="secondary"
+            size="sm"
+            @click="handleBackToArch"
+          >
+            <AppIcon name="arrow-left" size="sm" />
+            返回架构管理
+          </AppButton>
         </div>
       </div>
       <div class="panel-body diagram-panel">
@@ -67,6 +75,7 @@
 
 <script>
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { AppButton } from '../../../../components/common'
 import { AppIcon } from '../../../../components/common/AppIcon'
 import MermaidComponent from '../../../../components/MermaidComponent.vue'
@@ -89,6 +98,7 @@ export default {
   },
   emits: ['prev', 'regenerate', 'command', 'import'],
   setup(props, { emit }) {
+    const router = useRouter()
     const feishuEnabled = ref(false)
     const showFeishuBot = ref(false)
     const showFeishuImport = ref(false)
@@ -113,12 +123,18 @@ export default {
       emit('import', data)
     }
 
+    const handleBackToArch = () => {
+      sessionStorage.setItem('returningFromDiagram', 'true')
+      router.push('/system/archdata')
+    }
+
     return {
       feishuEnabled,
       showFeishuBot,
       showFeishuImport,
       handleFeishuCommand,
-      handleFeishuImport
+      handleFeishuImport,
+      handleBackToArch
     }
   },
   computed: {
@@ -182,10 +198,14 @@ export default {
   }
 }
 
+// [2026-06-15] 移除 .panel-body 的蓝色渐变 + 白色文字：
+//   旧实现把整个 panel-body（含 empty-state）都染成蓝色 + 白字，
+//   导致 "图表尚未生成" 状态显示成全屏蓝色，视觉上与系统不一致。
+//   修复：panel-body 保持中性背景，仅在 diagram-container（Mermaid 画布）使用深色背景。
 .panel-body {
-  background: linear-gradient(135deg, #3370ff 0%, #2c5de6 100%) !important;
-  color: #fff !important;
-  border: none !important;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  border: none;
 }
 
 .chart-type-badge {

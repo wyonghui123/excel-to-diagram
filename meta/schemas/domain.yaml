@@ -224,6 +224,14 @@ ui_view_config:
         position: 2
         importance: medium
         sortable: true
+      # [FIX 2026-06-14] BUG-V008 扩展: 补 FK 链路列 version_name
+      # 后端通过 redundancy join_path 自动填充 (version_id -> versions.name)
+      - key: version_name
+        title: 所属版本
+        width: 150
+        position: 3
+        importance: high
+        sortable: true
       # [V1.1.4 2026-06-11] 删 effective_owner_id_display - 顶层 owner 已在 product
       - key: relation_count
         title: 关系数量
@@ -351,12 +359,14 @@ fields:
       redundancy:
         type: resolution
         source_field: version_id
-        derived_from: version.code
+        # [CHANGED 2026-06-13] version.code 字段已删除, 改用 version.name
+        # 字段名保持 version_code 不变(向后兼容), 但实际解析 version.name
+        derived_from: version.name
         join_path:
           - table: versions
             from: version_id
             to: id
-            select: code
+            select: name
     ui:
       visible: true
       editable: true

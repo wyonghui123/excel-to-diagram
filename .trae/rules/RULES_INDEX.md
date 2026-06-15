@@ -1,6 +1,6 @@
 # 规范规则索引
 
-> 最后更新: 2026-06-07 | 状态: 活跃
+> 最后更新: 2026-06-13 | 状态: 活跃
 > 本文件是所有规范规则的统一索引和依赖图
 
 ## 快速入口
@@ -73,6 +73,15 @@
 | 规范 | 主题 | 优先级 |
 |------|------|--------|
 | [multi-agent-coordination.md](./multi-agent-coordination.md) | 多智能体协调 | 必读 |
+| [agent-bootstrap.md](./agent-bootstrap.md) | AI Agent 启动 5 步检查（autoload 配套） | 必读 |
+
+### AI 可观测性（2026-06-13 新增）
+
+| 规范 | 主题 | 优先级 |
+|------|------|--------|
+| [test-observability-rules.md](./test-observability-rules.md) | 测试可观测性 | 推荐 |
+| [.trae/scripts/metrics_aggregator.py](../.trae/scripts/metrics_aggregator.py) | 指标聚合脚本 | 参考 |
+| [.trae/scripts/prune_agent_logs.py](../.trae/scripts/prune_agent_logs.py) | 日志清理脚本 | 参考 |
 
 ## 已废弃规范（4个，2026-06-07 移至 deprecated/）
 
@@ -84,6 +93,16 @@
 | [deprecated/multi-agent-quickstart.md](./deprecated/multi-agent-quickstart.md) | 旧版多智能体指南 | multi-agent-coordination.md |
 
 **目录说明**：[deprecated/README.md](./deprecated/README.md)
+
+## 重复内容清理（2026-06-14 标注）
+
+> **下表中的文件内容已被合并/重复，禁止在 Agent prompt 中同时引用。**
+
+| 文件 | 重复内容 | 替代方案 |
+|------|---------|----------|
+| [ai-coding-standards.md](./ai-coding-standards.md) | 与 [core/coding-standards.md](./core/coding-standards.md) 完全重复 | 读 core/coding-standards.md 即可 |
+| [powershell-curl-alias.md](./powershell-curl-alias.md) | 与 [powershell-rules.md](./powershell-rules.md) "铁律：禁止使用 curl" 重复 | 读 powershell-rules.md 即可 |
+| [core/agent-roles.md](./core/agent-roles.md) | 与 [roles/agent-roles.md](../roles/agent-roles.md) 内容重复 | 读 roles/agent-roles.md（更完整） |
 
 ## 规范依赖图
 

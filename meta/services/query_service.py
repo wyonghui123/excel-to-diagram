@@ -384,6 +384,9 @@ class QueryService:
                     except Exception as e:
                         logger.warning(f"[QueryService.search] enrich_fk_display_names failed: {e}")
                     data = self._compute_list_computed_fields(meta_obj, data)
+                    # [FIX 2026-06-14 BMRD] 早 return 路径也必须计算 hierarchy_scope
+                    # 否则 category_label/category_type 在此路径上为 None (导出和列表均受影响)
+                    data = self._compute_hierarchy_scope_for_export(meta_obj, data)
 
                 return SearchResult(
                     data=data,
@@ -441,6 +444,8 @@ class QueryService:
                         except Exception as e:
                             logger.warning(f"[QueryService.search] enrich_fk_display_names failed: {e}")
                         data = self._compute_list_computed_fields(meta_obj, data)
+                        # [FIX 2026-06-14 BMRD] 早 return 路径也必须计算 hierarchy_scope
+                        data = self._compute_hierarchy_scope_for_export(meta_obj, data)
                     return SearchResult(
                         data=data,
                         total=total,
@@ -512,12 +517,9 @@ class QueryService:
         # [FIX 2026-06-10] 计算 hierarchy_scope 虚拟字段 (category_type / category_label)
         #   之前 _compute_list_computed_fields 不计算 computed_by='hierarchy_scope' 字段,
         #   导致排序和过滤路径上字段为 None, 需在内存 sort/filter 前显式计算
-        if data:
-            try:
-                from meta.services.computation_service import computation_service
-                computation_service.compute_by_semantics(meta_obj.id, data, self.ds)
-            except Exception as e:
-                logger.warning(f"[QueryService.search] compute_by_semantics failed: {e}")
+        # [FIX 2026-06-14 BMRD] 改用 _compute_hierarchy_scope_for_export 辅助方法,
+        #   早 return 路径 (virtual join / count_relations) 也调用, 避免 3 处重复代码
+        data = self._compute_hierarchy_scope_for_export(meta_obj, data)
 
         # [FIX 2026-06-10] 应用 hierarchy_scope 内存 filter (category_type)
         #   必须在 compute_by_semantics 之后, sort/paginate 之前
@@ -597,6 +599,24 @@ class QueryService:
         except Exception as e:
             logger.warning(f"[ComputedFields] Failed to compute fields: {e}")
 
+        return data
+
+    def _compute_hierarchy_scope_for_export(self, meta_obj, data):
+        """计算 hierarchy_scope 虚拟字段 (category_label / category_type)
+
+        [FIX 2026-06-14 BMRD] 修复 bug: 早 return 路径 (virtual join sort, count_relations sort)
+        之前未调用 compute_by_semantics, 导致 category_label/category_type 在此路径上为 None,
+        Excel 导出后该列永远是空.
+
+        此方法封装异常处理, 静默失败, 不影响主流程.
+        """
+        if not data:
+            return data
+        try:
+            from meta.services.computation_service import computation_service
+            computation_service.compute_by_semantics(meta_obj.id, data, self.ds)
+        except Exception as e:
+            logger.warning(f"[QueryService.search] compute_by_semantics failed: {e}")
         return data
 
     def _sort_by_virtual_fields(self, meta_obj, records, order_by):
@@ -1478,6 +1498,16 @@ class QueryService:
             if not user_id:
                 return
 
+            # [FIX 2026-06-14] 优先尝试 dimension scope 派生条件
+            # 原因: value-help / search-help / report 等 query_service.search 路径
+            #   不走 action_executor + DataPermissionInterceptor, 完全跳过 dimension scope
+            #   导致 user 在 value-help 下拉里只能看到 data_permissions 表里的 explicit ids
+            #   (例: TEST333 创建 RACE 领域后, 该条自动授予 admin → allowed_ids=[683])
+            #   但 dimension scope 派生 (例: 领域 in 采购管理) 应当覆盖更广范围 (410 条)
+            # 这里先调 DimensionScopeEngine, 跟 DataPermissionInterceptor._apply_dimension_scope_filter 一致
+            if self._try_apply_dimension_scope(builder, user_id, object_type):
+                return
+
             perm_filter = DataPermissionFilter(self.ds)
             
             allowed_ids = perm_filter.perm_service.get_allowed_resource_ids(user_id, object_type)
@@ -1501,6 +1531,156 @@ class QueryService:
             logger.info(f"[DataPerm] Applied filter for {object_type}: {len(allowed_ids)} IDs")
         except Exception as e:
             logger.warning(f"[DataPerm] Failed to apply data permission: {e}")
+
+    def _try_apply_dimension_scope(
+        self,
+        builder: QueryBuilder,
+        user_id: int,
+        object_type: str,
+    ) -> bool:
+        """[FIX 2026-06-14] 尝试用 DimensionScopeEngine 派生条件替代 data_permissions 限制
+
+        Returns:
+            True  - 成功应用 dimension scope (不再走 allowed_ids fallback)
+            False - user 没有任何 role 的 dimension scope 涉及此 object_type
+        """
+        try:
+            # 1. 查 user 的所有 role_id (通过 group 链路)
+            cursor = self.ds.execute(
+                """SELECT DISTINCT gr.role_id
+                   FROM group_roles gr
+                   JOIN user_group_members ugm ON gr.group_id = ugm.group_id
+                   WHERE ugm.user_id = ?""",
+                [user_id]
+            )
+            role_ids = [row[0] for row in cursor.fetchall()]
+        except Exception as e:
+            logger.debug(f"[_try_apply_dimension_scope] query role_ids failed: {e}")
+            return False
+
+        if not role_ids:
+            return False
+
+        # 2. 查 role_dimension_scopes, 确认至少有一个 role 有 scope
+        try:
+            placeholders = ','.join('?' * len(role_ids))
+            cursor = self.ds.execute(
+                f"SELECT COUNT(*) FROM role_dimension_scopes WHERE role_id IN ({placeholders})",
+                role_ids
+            )
+            count = cursor.fetchone()[0]
+            if not count:
+                return False
+        except Exception as e:
+            logger.debug(f"[_try_apply_dimension_scope] check role_dimension_scopes failed: {e}")
+            return False
+
+        # 3. 派生所有 role 的 data_conditions
+        try:
+            from meta.services.dimension_scope_engine import DimensionScopeEngine
+            engine = DimensionScopeEngine(self.ds)
+        except ImportError:
+            return False
+
+        # 复用拦截器里的解析器 (单段/复合 AND/in_subquery 全部支持)
+        from meta.core.interceptors.data_permission_interceptor import DataPermissionInterceptor
+
+        per_role_conds: List[List[Dict]] = []
+        for role_id in role_ids:
+            try:
+                data_conditions = engine.derive_data_conditions(role_id)
+                cond_expr = data_conditions.get(object_type)
+                if not cond_expr:
+                    continue
+                conds = DataPermissionInterceptor._parse_compound_expr(cond_expr)
+                if not conds:
+                    continue
+                per_role_conds.append(conds)
+                logger.info(
+                    f"[_try_apply_dimension_scope] user={user_id} role={role_id} "
+                    f"object_type={object_type} -> conds={conds}"
+                )
+            except Exception as e:
+                logger.warning(f"[_try_apply_dimension_scope] derive role_id={role_id} failed: {e}")
+
+        if not per_role_conds:
+            return False
+
+        # 4. 应用到 builder
+        if len(per_role_conds) == 1:
+            for c in per_role_conds[0]:
+                self._apply_single_cond(builder, c)
+        else:
+            # 多 role → OR-of-AND
+            all_and_segments = []
+            for conds in per_role_conds:
+                all_and_segments.extend(conds)
+            self._apply_or_group(builder, all_and_segments)
+
+        logger.info(
+            f"[_try_apply_dimension_scope] user={user_id} object_type={object_type} "
+            f"roles_with_scope={len(per_role_conds)} (override allowed_ids)"
+        )
+        return True
+
+    def _apply_single_cond(self, builder: QueryBuilder, cond: Dict) -> None:
+        """[FIX 2026-06-14] 应用单条 dimension scope 条件到 QueryBuilder
+
+        支持的 cond 形式 (来自 DataPermissionInterceptor._parse_compound_expr):
+          - {'field': ..., 'operator': 'in',    'values': [...]}
+          - {'field': ..., 'operator': 'eq',    'value': ...}
+          - {'field': ..., 'operator': 'in_subquery', 'value': '<SELECT>...'}
+        """
+        op = cond.get('operator', 'eq')
+        field = cond['field']
+        if op == 'in':
+            values = cond.get('values') or cond.get('value') or []
+            if not values:
+                return
+            if len(values) == 1:
+                builder.where(field, QueryOperator.EQ, values[0])
+            else:
+                builder.where_in(field, values)
+        elif op == 'eq':
+            builder.where(field, QueryOperator.EQ, cond['value'])
+        elif op == 'in_subquery':
+            # in_subquery 形式: 嵌入到 SQL WHERE 中作为子查询
+            inner = cond['value']
+            builder.where_raw(f"{field} IN ({inner})")
+        else:
+            logger.warning(f"[_apply_single_cond] unsupported operator: {op}")
+
+    def _apply_or_group(self, builder: QueryBuilder, conds: List[Dict]) -> None:
+        """[FIX 2026-06-14 v2] 应用多段 OR 组合 (来自多 role dimension scope) 到 QueryBuilder
+
+        注意: 旧实现把 IN 拆成多个 EQ 再 or_where, 失去 IN 子查询语义
+        新实现: 整段 cond 列表拼成 OR-of-AND raw SQL 表达式
+        """
+        if not conds:
+            return
+        or_expr = ' AND '.join(self._cond_to_sql(c) for c in conds)
+        builder.where_raw(f"({or_expr})")
+
+    def _cond_to_sql(self, cond: Dict) -> str:
+        """[FIX 2026-06-14] 把单条 cond dict 转成 SQL 表达式
+
+        支持 in / eq / in_subquery 三种 operator.
+        注意: 此函数只用于生成维度范围的"枚举式"过滤, 不接受外部 user input,
+             不会出现 SQL injection 风险。
+        """
+        op = cond.get('operator', 'eq')
+        field = cond['field']
+        if op == 'in':
+            values = cond.get('values') or cond.get('value') or []
+            vals = ', '.join(str(v) for v in values)
+            return f"{field} IN ({vals})"
+        elif op == 'eq':
+            return f"{field} = {cond['value']}"
+        elif op == 'in_subquery':
+            return f"{field} IN ({cond['value']})"
+        else:
+            logger.warning(f"[_cond_to_sql] unsupported operator: {op}")
+            return '1=1'
 
     def _apply_soft_delete_filter(
         self,

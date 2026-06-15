@@ -27,9 +27,12 @@
         <div class="collapsible-panel__header-left">
           <slot name="header">
             <span v-if="title" class="collapsible-panel__title">{{ title }}</span>
-            <span v-if="badge" class="collapsible-panel__badge">
-              {{ badge }}
-            </span>
+            <slot name="badge">
+              <span v-if="badge" class="collapsible-panel__badge">
+                {{ badge }}
+                <span v-if="badgeLabel" class="collapsible-panel__badge-label">{{ badgeLabel }}</span>
+              </span>
+            </slot>
           </slot>
         </div>
 
@@ -69,6 +72,7 @@ import { ArrowLeft, ArrowRight, ArrowUp, ArrowDown } from '@element-plus/icons-v
  * @typedef {Object} CollapsiblePanelProps
  * @property {string} [title] - 面板标题
  * @property {number|null} [badge] - 标题栏徽章数字
+ * @property {string} [badgeLabel] - 标题栏徽章标签 (如 "对象", "关系")
  * @property {boolean} [collapsible] - 是否可折叠
  * @property {boolean} [defaultExpanded] - 默认展开状态
  * @property {boolean} [resizable] - 是否可拖拽调整宽度
@@ -91,6 +95,11 @@ const props = defineProps({
   badge: {
     type: Number,
     default: null
+  },
+  /** 标题栏徽章标签 */
+  badgeLabel: {
+    type: String,
+    default: ''
   },
   /** 是否可折叠 */
   collapsible: {
@@ -318,6 +327,12 @@ function startResize(e) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  gap: 4px;
+}
+
+.collapsible-panel__badge-label {
+  font-size: var(--font-size-xs, 11px);
+  opacity: 0.8;
 }
 
 .collapsible-panel__header-right {

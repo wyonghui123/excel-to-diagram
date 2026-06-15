@@ -250,9 +250,21 @@ def _attach_change_history(record: dict, object_type: str, obj_id) -> None:
 def read_bo(object_type, obj_id):
     # [FIX 2026-06-12] audit_log 是只读对象 (persistent: false), BO framework 拒绝读 (404).
     # v2 BO 接口必须跟 v1 /audit/logs/{id} 对齐, 否则前端拿不到 extra_data_parsed.deleted_data.
-    # 这里直接调 v1 端点拿到完整数据 + 注入中文 label.
+    # 这里直接走 v1 端点拿到完整数据 + 注入中文 label.
     if object_type == 'audit_log':
         return _read_audit_log_via_v1(obj_id)
+
+    # [FIX v1.1.10 2026-06-15] 单条 get 应用 dim scope (跟 list 一致)
+    # 原 bug: DataPermissionInterceptor 派生的 query_conditions 是 list 用的,
+    #         单条 crud_read 走 `WHERE id = ?` 直接查, 拦截器条件不生效
+    #         → TEST333 能 GET 任意 BO 单条 (含域外), 拿到完整 description / change_history
+    #         → 安全漏洞 (绕过 dim scope)
+    # 修复: read_bo API 层加 dim scope 校验, 不在范围内 → 404 (不暴露存在性)
+    # 注意: 关系 list 接口"上下文读取" (target_bo_name 等元数据) 走的是关系接口自
+    #       己 SQL, 不走 BO 单条 get, 不受此限制 (符合 SAP 风格字段级授权)
+    _deny = _check_single_bo_in_dim_scope(object_type, obj_id)
+    if _deny:
+        return jsonify({'success': False, 'message': '对象不存在或无访问权限'}), 404
 
     bo = _get_bo()
     result = bo.read(object_type, obj_id)
@@ -260,6 +272,83 @@ def read_bo(object_type, obj_id):
         _attach_change_history(result.data, object_type, obj_id)
         return jsonify({'success': True, 'data': result.data})
     return jsonify({'success': False, 'message': result.message}), 404
+
+
+def _check_single_bo_in_dim_scope(object_type: str, obj_id: int):
+    """[V1.1.10 2026-06-15] 单条 BO get 应用 dim scope 校验
+
+    语义: 调用 DimensionScopeEngine.derive_data_conditions(role_id) 派生当前 object_type 的 cond_expr,
+          检查 obj_id 是否在派生范围内. 不在 → 返回 True (deny).
+
+    例: TEST333 + 5970 读域外 BO 316:
+      - 5970 dim scope: domain=[703] → 派生 BO cond: `id IN (chain 派生 → 8 个 BO)`
+      - 316 不在 8 个内 → deny → 404
+
+    Returns:
+        True = 应拒绝, False = 允许
+    """
+    try:
+        from flask import g
+        user = getattr(g, 'current_user', None) or _get_current_user_safe()
+        if not user:
+            return False  # 无 user 上下文, 让其他拦截器处理
+        # admin 跳过
+        from meta.services.auth_middleware import is_admin
+        if is_admin(user):
+            return False
+        # audit_log 等元数据对象不受 dim scope 限制
+        if object_type in ('audit_log',):
+            return False
+        # 拿 user 的所有 role_id
+        ds = _get_data_source()
+        cursor = ds.execute(
+            """SELECT DISTINCT gr.role_id
+               FROM group_roles gr
+               JOIN user_group_members ugm ON gr.group_id = ugm.group_id
+               WHERE ugm.user_id = ?""",
+            [user.get('id') or user.get('user_id')]
+        )
+        role_ids = [row[0] for row in cursor.fetchall()]
+        if not role_ids:
+            return False
+
+        # 多 role 任一允许 → 放行 (OR 语义)
+        from meta.services.dimension_scope_engine import DimensionScopeEngine
+        engine = DimensionScopeEngine(ds)
+        for role_id in role_ids:
+            data_conds = engine.derive_data_conditions(role_id)
+            cond_expr = data_conds.get(object_type)
+            if not cond_expr:
+                continue  # 该 role 无 dim scope 派生
+            # 用 cond_expr 跑单条 id 校验
+            # 把 cond_expr 的 "id IN (...)" 改为 "id = ?", 或者直接在子查询里加 WHERE id=?
+            # 简化: 用一个独立 SQL — 派生 "id" 字段 chain, 把 obj_id 加进去
+            # 解析 cond_expr, 找 chain 的 leaf
+            meta_obj = registry.get(object_type)
+            if not meta_obj:
+                continue
+            table = meta_obj.table_name
+            sql = f"SELECT 1 FROM {table} WHERE id = ? AND ({cond_expr}) LIMIT 1"
+            row = ds.execute(sql, [obj_id]).fetchone()
+            if row:
+                return False  # 在 dim scope 内 → 允许
+        # 所有 role 都没匹配 → deny
+        logger.info(
+            f'[_check_single_bo_in_dim_scope] DENY object_type={object_type} obj_id={obj_id} '
+            f'user={user.get("id")} roles={role_ids}'
+        )
+        return True
+    except Exception as e:
+        logger.warning(f'[_check_single_bo_in_dim_scope] check failed, ALLOW (fail-open): {e}')
+        return False  # 校验失败 → 放行 (避免误杀)
+
+
+def _get_current_user_safe():
+    try:
+        from flask import g
+        return g.get('current_user') if hasattr(g, 'current_user') else None
+    except Exception:
+        return None
 
 
 def _read_audit_log_via_v1(obj_id):
@@ -438,8 +527,13 @@ def query_bo(object_type):
 # [SPR-08 T-S14-01] relationship 过滤白名单数据化
 # 简易白名单过滤 (前端用 crud_query 行为对齐: 多值字段用 __in, 逗号分隔)
 # 注: relation_code 不在这里, 因为它跟 relation_code__in 互斥 (优先级 __in > 精确)
-_RELATIONSHIP_SIMPLE_EQ_FIELDS = ('version_id', 'product_code', 'version_code')
-_RELATIONSHIP_IN_FIELD_KEYS = ('category_types', 'category_type')  # 复用同一 SQL 字段 category_type
+# [CHANGED 2026-06-13] 移除 version_code - relationships 表无此列, 使用 version_id 过滤
+_RELATIONSHIP_SIMPLE_EQ_FIELDS = ('version_id', 'product_code')
+_RELATIONSHIP_IN_FIELD_KEYS = ('category_types__in', 'category_type__in', 'category_types', 'category_type')  # 复用同一 SQL 字段 category_type
+# [FIX 2026-06-15] 增加 relation_type IN 支持
+# 过滤面板的"关系类型"选的是 relation_type 枚举值 (GENERATES/UPDATES/TRIGGERS/REFERENCES),
+# 这些值会通过 relation_type__in 传到这里. 旧版本只支持 relation_code (历史字段) 导致查询返回空.
+_RELATIONSHIP_IN_FIELD_KEYS_FOR_TYPE = ('relation_type__in', 'relation_types__in', 'relation_type', 'relation_types')
 
 
 def _build_relationship_filter_clause(clean_filters: dict) -> tuple:
@@ -448,7 +542,8 @@ def _build_relationship_filter_clause(clean_filters: dict) -> tuple:
     支持:
     - 简单 EQ: version_id / product_code / version_code
     - relation_code 精确 / __in 多值 (互斥, __in 优先)
-    - category_type(s) 多值 IN (category_types 和 category_type 都支持)
+    - relation_type__in / relation_types__in 多值 IN (来自过滤面板"关系类型"选择)
+    - category_type(s) 多值 IN (category_types__in / category_type__in / 简写都支持)
 
     Returns:
         (where_clause, params): where_clause 至少 '1=1' (无任何条件时)
@@ -471,6 +566,17 @@ def _build_relationship_filter_clause(clean_filters: dict) -> tuple:
     elif 'relation_code' in clean_filters:
         conditions.append('relation_code = ?')
         bind_params.append(clean_filters['relation_code'])
+
+    # [FIX 2026-06-15] relation_type / relation_types 多值 IN
+    # 过滤面板"关系类型"下选的是 relation_type 枚举值, 走这个分支
+    for key in _RELATIONSHIP_IN_FIELD_KEYS_FOR_TYPE:
+        if key in clean_filters and clean_filters[key]:
+            rts = [c.strip() for c in str(clean_filters[key]).split(',') if c.strip()]
+            if rts:
+                placeholders = ','.join('?' for _ in rts)
+                conditions.append(f'relation_type IN ({placeholders})')
+                bind_params.extend(rts)
+            break  # 只取第一个非空的 key
 
     # category_type(s) 多值 IN (取第一个非空 key)
     for key in _RELATIONSHIP_IN_FIELD_KEYS:
@@ -1209,6 +1315,92 @@ def get_architecture_preview():
         if bo_id_list:
             business_objects = [b for b in business_objects if b.get('id') in bo_id_list]
 
+        # ── [V1.1.13 2026-06-15] SAP 风格 dim scope 层级包容 (Hierarchical Inclusion) ──
+        # 业务语义: "通过关系" 引入的外部 BO, 应当递归引出完整层级 (BO->SM->SD->D)
+        # 之前 V1.1.11/12 只补全外部节点元数据 (is_external=true, 仍受 dim scope 隔离)
+        # V1.1.13 把外部节点加入 dim scope (跟 SAP 风格一致):
+        #   - 引入 1 个 BO = 引入它的 SM, SM = 引入它的 SD, SD = 引入它的 D
+        #   - "通过关系" 关系另一头 (任一端) 递归加入
+        # 实施:
+        #   1. 收集当前 dim scope 派生的"中心" (4 个层级的 id)
+        #   2. 调用 DimScopeRelationshipIncluder 扩展 (BFS 反推)
+        #   3. 用扩展后的 scope 拉元数据 (raw SQL, 绕过 DataPermissionInterceptor)
+        #   4. 把"已扩展"实体加入业务对象/模块/子域/域列表 (is_external=false)
+        #   V1.1.11/12 仍跑 (处理更深一层的"无关系引用"情况), 但 V1.1.13 优先
+        # ────────────────────────────────────────────
+        try:
+            from meta.services.dim_scope_relationship_includer import DimScopeRelationshipIncluder
+            _ds2 = _get_data_source()
+            includer = DimScopeRelationshipIncluder(_ds2)
+            # 1. 收集当前 4 个层级 id 作为 initial
+            initial = {
+                'domain_ids': [d.get('id') for d in domains if d.get('id')],
+                'sub_domain_ids': [sd.get('id') for sd in sub_domains if sd.get('id')],
+                'sm_ids': [m.get('id') for m in modules if m.get('id')],
+                'bo_ids': [b.get('id') for b in business_objects if b.get('id')],
+            }
+            # 2. 扩展
+            expanded = includer.expand(initial, relationships)
+            # 3. 拉扩展后的元数据
+            existing_d_ids = set(initial['domain_ids'])
+            existing_sd_ids = set(initial['sub_domain_ids'])
+            existing_sm_ids = set(initial['sm_ids'])
+            existing_bo_ids = set(initial['bo_ids'])
+            new_d_ids = expanded['d'] - existing_d_ids
+            new_sd_ids = expanded['sd'] - existing_sd_ids
+            new_sm_ids = expanded['sm'] - existing_sm_ids
+            new_bo_ids = expanded['bo'] - existing_bo_ids
+            # 4. 拉元数据并加入列表 (is_external=false 因为是"已扩展 dim scope")
+            if new_bo_ids:
+                ph = ','.join('?' * len(new_bo_ids))
+                rows = _ds2.execute(
+                    f"SELECT id, code, name, domain_id, sub_domain_id, service_module_id, visibility "
+                    f"FROM business_objects WHERE id IN ({ph})", list(new_bo_ids)
+                ).fetchall()
+                for r in rows:
+                    business_objects.append({
+                        'id': r[0], 'code': r[1], 'name': r[2],
+                        'domain_id': r[3], 'sub_domain_id': r[4], 'service_module_id': r[5],
+                        'visibility': r[6],
+                        'is_included_via_relationship': True,  # 标记: SAP 风格关系引入
+                    })
+            if new_sm_ids:
+                ph = ','.join('?' * len(new_sm_ids))
+                rows = _ds2.execute(
+                    f"SELECT id, name, sub_domain_id FROM service_modules WHERE id IN ({ph})", list(new_sm_ids)
+                ).fetchall()
+                for r in rows:
+                    modules.append({
+                        'id': r[0], 'name': r[1], 'sub_domain_id': r[2],
+                        'is_included_via_relationship': True,
+                    })
+            if new_sd_ids:
+                ph = ','.join('?' * len(new_sd_ids))
+                rows = _ds2.execute(
+                    f"SELECT id, name, domain_id FROM sub_domains WHERE id IN ({ph})", list(new_sd_ids)
+                ).fetchall()
+                for r in rows:
+                    sub_domains.append({
+                        'id': r[0], 'name': r[1], 'domain_id': r[2],
+                        'is_included_via_relationship': True,
+                    })
+            if new_d_ids:
+                ph = ','.join('?' * len(new_d_ids))
+                rows = _ds2.execute(
+                    f"SELECT id, name, version_id FROM domains WHERE id IN ({ph})", list(new_d_ids)
+                ).fetchall()
+                for r in rows:
+                    domains.append({
+                        'id': r[0], 'name': r[1], 'version_id': r[2],
+                        'is_included_via_relationship': True,
+                    })
+            logger.info(
+                f'[V1.1.13] SAP-style hierarchical inclusion: '
+                f'added d={len(new_d_ids)} sd={len(new_sd_ids)} sm={len(new_sm_ids)} bo={len(new_bo_ids)}'
+            )
+        except Exception as e:
+            logger.warning(f'[V1.1.13] dim scope inclusion failed: {e}')
+
         # ── [v32 2026-06-11] 补全 hierarchy 范围（外部 BO 引用的 SM/SD/Domain 需保留）
         # 场景：用户在管理页勾选 SM 范围 + 关系范围"内+外部"，
         #      外部 SM 的 BO 会出现在 business_objects 中（因 bo_id_list 为空），
@@ -1251,6 +1443,132 @@ def get_architecture_preview():
                 if d.get('id') not in seen:
                     domains.append(d)
                     seen.add(d.get('id'))
+
+        # ── [v1.1.11 2026-06-15] 补全关系引用的外部 BO 节点 (上下文读取) ──
+        # 原 bug: BO list 受 dim scope 限制, 但关系 list 走 OR 语义允许 source/target
+        #         任一端在 dim scope 内 (跨域 association 推导 V1.1.9)
+        #   → cross-boundary 关系的 target BO 在域外, 不在 business_objects
+        #   → 图表渲染: 边存在 (target_bo_name 来自关系 join), 节点缺失
+        #   → 图表显示异常: 5 个孤立节点 + 10 条边 (其中 3 条指向"幽灵节点")
+        # 业界标准 (SAP 字段级授权 + Salesforce OWD 引用模式):
+        #   关系引用的 BO 走"上下文读取"模式, 元数据 (id/code/name/type/domain) 可见
+        #   敏感字段 (description / attributes / custom_field) 仍受 BO 自身 dim scope 控制
+        #   (v1.1.10 单条 get 已加 dim scope 校验, 这里补的是"图谱节点元数据"可见性)
+        # 实施: 收集所有关系引用的 BO id, diff 出"在关系里但不在 business_objects"
+        #       的 BO, 用 raw SQL 拉元数据字段 (绕过 DataPermissionInterceptor),
+        #       标记 is_external=true 让前端区分 (灰显/特殊样式)
+        try:
+            _ds = _get_data_source()
+            referenced_bo_ids = set()
+            for r in relationships:
+                sid = r.get('source_bo_id') or r.get('sourceBoId')
+                tid = r.get('target_bo_id') or r.get('targetBoId')
+                if sid: referenced_bo_ids.add(sid)
+                if tid: referenced_bo_ids.add(tid)
+            existing_bo_ids = {b.get('id') for b in business_objects}
+            external_bo_ids = referenced_bo_ids - existing_bo_ids
+            if external_bo_ids:
+                placeholders = ','.join('?' * len(external_bo_ids))
+                ext_rows = _ds.execute(
+                    f"""SELECT id, code, name, domain_id, sub_domain_id,
+                               service_module_id, visibility
+                        FROM business_objects WHERE id IN ({placeholders})""",
+                    list(external_bo_ids)
+                ).fetchall()
+                # 收集外部 BO 涉及的层级 id (用于 V1.1.12 补外部容器)
+                ext_domain_ids = set()
+                ext_sd_ids = set()
+                ext_sm_ids = set()
+                for row in ext_rows:
+                    bo = {
+                        'id': row[0],
+                        'code': row[1],
+                        'name': row[2],
+                        'domain_id': row[3],
+                        'sub_domain_id': row[4],
+                        'service_module_id': row[5],
+                        'visibility': row[6],
+                        'is_external': True,  # 标记: 仅上下文可见, 详情受 dim scope 控制
+                    }
+                    business_objects.append(bo)
+                    if bo['domain_id']: ext_domain_ids.add(bo['domain_id'])
+                    if bo['sub_domain_id']: ext_sd_ids.add(bo['sub_domain_id'])
+                    if bo['service_module_id']: ext_sm_ids.add(bo['service_module_id'])
+                logger.info(
+                    f'[v1.1.11] chart view external BO nodes: '
+                    f'external_added={len(external_bo_ids)} total_now={len(business_objects)}'
+                )
+
+                # ── [V1.1.12 2026-06-15] 补外部 BO 涉及的层级容器 (domain / sub_domain / service) ──
+                # 原 bug: V32 的 hierarchy 补全在 V1.1.11 之前跑, 看不到 V1.1.11 补的外部 BO
+                #   → 图表渲染: 外部 BO 节点有 data, 但没有父级 group 包裹, 变成蓝色孤儿
+                # 修复: V1.1.11 补完外部 BO 后, 再从 business_objects (含外部) 反推 SM/SD/Domain
+                # 业界标准: 拉容器 id+name+parent_id 3 字段, 不拉 description/其他敏感字段
+                # ────────────────────────────────────────────
+                # 收集当前 business_objects 涉及的 SM/SD/Domain id
+                # (注意: V1.1.11 补的 BO 也在 business_objects 内, 所以这里能拿到外部的)
+                # 同样用 module_result.data / sub_domain_result.data / domain_result.data
+                # 拉未过滤的全量数据, 这样能拿到不在 dim scope 内的容器
+                cur_referenced_sm_ids = set()
+                cur_referenced_sub_domain_ids = set()
+                cur_referenced_domain_ids = set()
+                for b in business_objects:
+                    sm_id = b.get('service_module_id')
+                    sd_id = b.get('sub_domain_id')
+                    d_id = b.get('domain_id')
+                    if sm_id: cur_referenced_sm_ids.add(sm_id)
+                    if sd_id: cur_referenced_sub_domain_ids.add(sd_id)
+                    if d_id: cur_referenced_domain_ids.add(d_id)
+                # diff: 在 referenced 里但不在当前容器列表
+                existing_module_ids_set = {m.get('id') for m in modules}
+                existing_sd_ids_set = {sd.get('id') for sd in sub_domains}
+                existing_domain_ids_set = {d.get('id') for d in domains}
+                need_sm = cur_referenced_sm_ids - existing_module_ids_set
+                need_sd = cur_referenced_sub_domain_ids - existing_sd_ids_set
+                need_d = cur_referenced_domain_ids - existing_domain_ids_set
+                if need_sm or need_sd or need_d:
+                    # [V1.1.12] module_result.data 已被 dim scope 过滤, 没有外部容器数据
+                    # 必须用 raw SQL 拉 (绕过 DataPermissionInterceptor)
+                    if need_sm:
+                        ph_sm = ','.join('?' * len(need_sm))
+                        sm_rows = _ds.execute(
+                            f"SELECT id, name, sub_domain_id FROM service_modules WHERE id IN ({ph_sm})",
+                            list(need_sm)
+                        ).fetchall()
+                        for r in sm_rows:
+                            modules.append({
+                                'id': r[0], 'name': r[1], 'sub_domain_id': r[2],
+                                'is_external': True,
+                            })
+                    if need_sd:
+                        ph_sd = ','.join('?' * len(need_sd))
+                        sd_rows = _ds.execute(
+                            f"SELECT id, name, domain_id FROM sub_domains WHERE id IN ({ph_sd})",
+                            list(need_sd)
+                        ).fetchall()
+                        for r in sd_rows:
+                            sub_domains.append({
+                                'id': r[0], 'name': r[1], 'domain_id': r[2],
+                                'is_external': True,
+                            })
+                    if need_d:
+                        ph_d = ','.join('?' * len(need_d))
+                        d_rows = _ds.execute(
+                            f"SELECT id, name, version_id FROM domains WHERE id IN ({ph_d})",
+                            list(need_d)
+                        ).fetchall()
+                        for r in d_rows:
+                            domains.append({
+                                'id': r[0], 'name': r[1], 'version_id': r[2],
+                                'is_external': True,
+                            })
+                    logger.info(
+                        f'[v1.1.12] chart view external containers: '
+                        f'need_domains={len(need_d)} need_sd={len(need_sd)} need_sm={len(need_sm)} '
+                        f'added={sum([len(need_d) if need_d else 0, len(need_sd) if need_sd else 0, len(need_sm) if need_sm else 0])}'
+                    )
+        except Exception as e:
+            logger.warning(f'[bo_api.get_architecture_preview] external BO/containers ref fetch failed: {e}')
 
         # 计算 center_scope（中心范围的 BO code 列表）
         center_scope = []

@@ -139,13 +139,13 @@ export function nodeKeysToRelationIds(nodeKeys, treeData) {
 
 /**
  * 从 relation_codes 反向计算 el-tree 的 default-checked-keys
- * 
+ *
  * 用于 RelationScopeSection 的 :default-checked-keys 绑定。
  * 遍历树找到 relationCodes 完全匹配的 module 节点，收集其 node key。
  * 如果某个 module 节点的所有 relationCodes 都在目标列表中，则该节点被选中。
- * 
+ *
  * 纯函数，可脱离 Vue 组件进行单元测试。
- * 
+ *
  * @param {string[]} relationCodes - 当前选中的 relation_code 数组
  * @param {Array} treeData - 关系分类树节点数组
  * @returns {string[]} el-tree node-key 数组（叶子 module 节点）
@@ -159,6 +159,38 @@ export function relationCodesToNodeKeys(relationCodes, treeData) {
   _walkTree(treeData, node => {
     if (node.relationCodes?.length > 0) {
       const allMatch = node.relationCodes.every(c => codeSet.has(c))
+      if (allMatch) {
+        keys.add(node.id)
+      }
+    }
+  })
+
+  return [...keys]
+}
+
+/**
+ * 从 relationIds (唯一关系记录 ID) 反向计算 el-tree 的 default-checked-keys
+ *
+ * v39.4: 修复从图表页返回时关系范围选择状态"漂移"问题。
+ * 根因: relationCodes 是类型编码 (如 "CONTAINS")，同一 code 可出现在不同 scope 的模块节点中。
+ *   还原时 relationCodesToNodeKeys 会匹配到"范围外"的节点（其 codes 也存在于保存集合中），
+ *   导致 el-tree setCheckedKeys 包含父节点后级联勾选所有子节点，状态错位。
+ * 修复: 使用 relationIds (唯一 ID) 精确匹配叶子 module 节点，避免跨 scope 误匹配。
+ *
+ * @param {Array<number|string>} relationIds - 当前选中的关系记录唯一 ID 数组
+ * @param {Array} treeData - 关系分类树节点数组
+ * @returns {string[]} el-tree node-key 数组（仅叶子 module 节点）
+ */
+export function relationIdsToNodeKeys(relationIds, treeData) {
+  if (!relationIds?.length || !treeData?.length) return []
+
+  const idSet = new Set(relationIds.map(String))
+  const keys = new Set()
+
+  _walkTree(treeData, node => {
+    // 只匹配叶子 module 节点（有 relationIds 且无 children）
+    if (node.relationIds?.length > 0 && (!node.children || node.children.length === 0)) {
+      const allMatch = node.relationIds.every(id => idSet.has(String(id)))
       if (allMatch) {
         keys.add(node.id)
       }

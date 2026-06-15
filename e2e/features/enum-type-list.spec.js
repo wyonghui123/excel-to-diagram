@@ -33,42 +33,9 @@
 import { test, expect } from '../helpers/auto-fixtures.js'
 import { withStep } from '../helpers/auto-trace.js'
 import { GenericListPage } from '../page-objects/GenericListPage.js'
+import { findSystemEnum, findBusinessEnumWithId } from '../helpers/enum-finder.js'
 
 const ENUM_LIST_URL = '/business-config/enum-types'
-
-// ============================================================
-// 公共 Helper
-// ============================================================
-
-/**
- * 通过 API 找第一个业务枚举 (category=business)
- * 注意: /api/v1/enum-types 实际返回 body.data.data[] (v1 嵌套格式)
- * 返回 { id, name } - enum_type 用 name 作业务 key (id 通常为 null)
- */
-async function findFirstBusinessEnum(page) {
-  const resp = await page.request.get('/api/v1/enum-types?page=1&page_size=50')
-  if (!resp.ok()) return null
-  const body = await resp.json()
-  const items = body?.data?.data || body?.data?.items || body?.data?.records || (Array.isArray(body?.data) ? body.data : []) || []
-  if (!Array.isArray(items)) return null
-  const found = items.find(i => i.category === 'business')
-  if (!found) return null
-  return { id: found.id || found.name, name: found.name }
-}
-
-/**
- * 通过 API 找第一个 system 枚举
- */
-async function findFirstSystemEnum(page) {
-  const resp = await page.request.get('/api/v1/enum-types?page=1&page_size=50')
-  if (!resp.ok()) return null
-  const body = await resp.json()
-  const items = body?.data?.data || body?.data?.items || body?.data?.records || (Array.isArray(body?.data) ? body.data : []) || []
-  if (!Array.isArray(items)) return null
-  const found = items.find(i => i.category === 'system')
-  if (!found) return null
-  return { id: found.id || found.name, name: found.name }
-}
 
 // ============================================================
 // E01-E02: 列表加载 + 标签展示
@@ -101,7 +68,7 @@ test.describe('S-ETL: 枚举类型管理 - 列表加载', () => {
 
   test('E02: system 枚举列表加载 + category badge', async ({ page, navigateTo, waitForApiFn }, testInfo) => {
     const list = new GenericListPage(page)
-    const sysEnum = await findFirstSystemEnum(page)
+    const sysEnum = await findSystemEnum(page)
     if (!sysEnum) {
       test.skip(true, 'no system enum in DB')
       return
@@ -135,9 +102,9 @@ test.describe('S-ETL: 枚举类型管理 - 列表交互', () => {
 
   test('E13: 列表搜索 name 关键字', async ({ page, navigateTo, waitForApiFn }, testInfo) => {
     const list = new GenericListPage(page)
-    const target = await findFirstBusinessEnum(page)
-    if (!target) {
-      test.skip(true, 'no business enum')
+    const target = await findBusinessEnumWithId(page)
+    if (!target || !target.id) {
+      test.skip(true, 'no business enum with valid id')
       return
     }
 
@@ -146,8 +113,8 @@ test.describe('S-ETL: 枚举类型管理 - 列表交互', () => {
       await waitForApiFn(page, 'GET /api/v2/bo/enum_type').catch(() => {})
     })
 
-    await withStep(page, testInfo, `输入搜索关键字 "${target.id.slice(0, 4)}"`, async () => {
-      const keyword = target.id.slice(0, 4)
+    await withStep(page, testInfo, `输入搜索关键字 "${target.name.slice(0, 4)}"`, async () => {
+      const keyword = target.name.slice(0, 4)
       const searchInput = page.locator('input[placeholder*="搜索"], input[placeholder*="名称"], input[placeholder*="编码"]').first()
       if (await searchInput.isVisible({ timeout: 2000 }).catch(() => false)) {
         await searchInput.fill(keyword)
@@ -156,7 +123,7 @@ test.describe('S-ETL: 枚举类型管理 - 列表交互', () => {
         await page.waitForTimeout(800)
       } else {
         // 备用: 直接调 API 验证搜索语义
-        const resp = await page.request.get(`/api/v1/enum-types?keyword=${encodeURIComponent(keyword)}`)
+        const resp = await page.request.get(`/api/v2/bo/enum_type?name=${encodeURIComponent(keyword)}&page_size=10`)
         expect(resp.ok(), 'search API should succeed').toBe(true)
       }
     })
@@ -388,8 +355,7 @@ test.describe('S-ETL: 枚举类型管理 - 过滤器 & 通知', () => {
     await withStep(page, testInfo, 'API 创建 1 个 enum (用于重复测试)', async () => {
       const resp = await page.request.post('/api/v2/bo/enum_type', {
         data: {
-          id: uniqueCode,
-          name: `E27 Notif ${uniqueCode}`,
+          name: uniqueCode,
           category: 'business',
           mutability: 'fullEditable',
           description: 'E27 test',
@@ -397,38 +363,28 @@ test.describe('S-ETL: 枚举类型管理 - 过滤器 & 通知', () => {
         }
       })
       expect(resp.ok(), `create should succeed, got ${resp.status()}`).toBe(true)
-      createdId = uniqueCode
+      const body = await resp.json()
+      createdId = body?.data?.id || uniqueCode
     })
 
     await withStep(page, testInfo, 'API 重复创建, 验证 4xx + 错误消息', async () => {
-      // v2 BO 端点可能不强制 unique (BO action 模式), 试 v1 端点
-      const v1Resp = await page.request.post('/api/v1/enum-types', {
-        data: {
-          id: uniqueCode,
-          name: `E27 dup`,
-          category: 'business',
-          mutability: 'fullEditable',
-          is_active: true
-        }
-      })
-      // 接受任何端点的 4xx (v1 应 4xx; v2 可能 201)
-      if (v1Resp.status() >= 400) {
-        const body = await v1Resp.json()
-        expect(body.message || body.error_code, 'should mention duplicate').toBeTruthy()
-        return
-      }
-      // v1 没拒绝 → 试 v2
+      // V2 BO 端点重复创建
       const v2Resp = await page.request.post('/api/v2/bo/enum_type', {
         data: {
-          id: uniqueCode,
-          name: `E27 dup v2`,
+          name: uniqueCode,
           category: 'business',
           mutability: 'fullEditable',
           is_active: true
         }
       })
-      // 软断言: 至少 v1 应拒绝 (如果 v1 没拒绝说明端点不强制, 接受)
-      console.log(`[E27] v1=${v1Resp.status()}, v2=${v2Resp.status()}`)
+      // 接受 4xx (业务错误) 或 201 (如果端点不强制 unique)
+      if (v2Resp.status() >= 400) {
+        const body = await v2Resp.json()
+        expect(body.message || body.error_code, 'should mention duplicate').toBeTruthy()
+      } else {
+        // 端点不强制 unique, 记录行为
+        console.log(`[E27] v2 status=${v2Resp.status()} (endpoint does not enforce uniqueness)`)
+      }
     })
 
     await withStep(page, testInfo, '清理: API 删除测试 enum', async () => {
@@ -438,14 +394,10 @@ test.describe('S-ETL: 枚举类型管理 - 过滤器 & 通知', () => {
     })
   })
 
-  test('E28: 错误提示 - 字段必填校验', async ({ page, isolation, waitForApiFn }, testInfo) => {
-    const uniqueCode = `E28_REQ_${Date.now().toString(36).toUpperCase()}`
-
-    // 不 navigateTo (E28 是纯 API 测试, navigateTo 11s 慢)
+  test('E28: 错误提示 - 字段必填校验', async ({ page }, testInfo) => {
     await withStep(page, testInfo, 'API 创建 缺 name (必填), 应 400', async () => {
       const resp = await page.request.post('/api/v2/bo/enum_type', {
         data: {
-          id: uniqueCode,
           name: '',  // 缺必填
           category: 'business',
           mutability: 'fullEditable'

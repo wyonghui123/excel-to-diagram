@@ -34,8 +34,13 @@ RESOURCE_TABLE_MAP = {
     'version': 'versions',
     'domain': 'domains',
     'sub_domain': 'sub_domains',
-    # 'service_module': 'service_modules',  # 已移除
-    # 'business_object': 'business_objects',  # 已移除
+    # [V1.1.8 2026-06-15] 重新加回 service_module / business_object / relationship 的表映射
+    #   原因: dimension_scope_engine 的 _build_chain_condition 需要
+    #   RESOURCE_TABLE_MAP 查这些 BO 的物理表名 (即使它们不参与 HIERARCHY_CHAIN 展开)
+    #   旧版注释掉导致 chain 构造时 RESOURCE_TABLE_MAP.get('service_module') → None, 链式 SQL 失败
+    'service_module': 'service_modules',
+    'business_object': 'business_objects',
+    'relationship': 'relationships',
 }
 
 CHILD_TYPE_MAP = {

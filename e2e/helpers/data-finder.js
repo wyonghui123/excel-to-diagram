@@ -153,11 +153,13 @@ export async function createProductWithVersion(page) {
   const testId = generateTestId('e2e')
 
   // 1. 创建产品（不传 id，让后端生成）
+  // [FIX 2026-06-13] 必须传 visibility='private' - schema 要求必填,否则后端拒
   const productResp = await apiPost(page, '/api/v2/bo/product', {
     code: testId.toUpperCase(),
     name: `测试产品_${testId}`,
     description: 'Auto-created by E2E data-finder',
-    is_active: true
+    is_active: true,
+    visibility: 'private'
   })
   const product = productResp.data || productResp
   if (!product.id) {

@@ -244,7 +244,10 @@ export function buildServiceModuleDiagramData({
     label: rel.serviceRelationshipCode,
     tooltip: `关系编码: ${rel.serviceRelationshipCode}\n业务对象关系: ${rel.businessObjectRelationshipCodes?.join(', ')}`,
     annotationCategory: rel.annotationCategory || 'info',
-    annotationContent: rel.annotationContent || ''
+    annotationContent: rel.annotationContent || '',
+    // [v34 双向支持] 透传 relationType + relationDirection
+    relationType: rel.relationType || '',
+    relationDirection: rel.relationDirection || null
   }));
 
   // 构建容器（子领域）- 容器默认白色背景

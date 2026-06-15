@@ -12,13 +12,20 @@ export function useValueHelp(valueHelpConfig, options = {}) {
   const presentation = computed(() => valueHelpConfig?.presentation || {})
 
   // 初始 options：优先使用行为配置的 initial_options（用于在 value help 异步加载前显示当前值）
+  // [FIX 2026-06-14] 保存为 pinnedOptions，loadOptions 后必须合并回来
+  // 场景: 详情页编辑态下, initial_options 含当前值 (例 domain_id=1, "采购管理")
+  // 但 value-help API 按 created_at desc 返回前 200 条, 老数据 id=1 不在结果中
+  // 不合并会导致 el-select 找不到 value=1 的 option, 显示原始 ID "1"
+  const pinnedOptions = ref([])
   if (Array.isArray(behavior.value.initial_options) && behavior.value.initial_options.length > 0) {
-    optionsList.value = behavior.value.initial_options.map(opt => ({
+    pinnedOptions.value = behavior.value.initial_options.map(opt => ({
       value: opt.value,
       display: opt.display || String(opt.value),
       code: opt.code || '',
-      extra: {}
+      extra: {},
+      __pinned: true  // 标记, 调试可见
     }))
+    optionsList.value = [...pinnedOptions.value]
   }
 
   const sourceType = computed(() => source.value.type || 'enum')
@@ -104,14 +111,24 @@ export function useValueHelp(valueHelpConfig, options = {}) {
             const validRecent = markedRecent.filter(r => allValues.has(String(r.value)))
             const validRecentValues = new Set(validRecent.map(r => String(r.value)))
             const regularItems = allItems.filter(item => !validRecentValues.has(String(item.value)))
-            optionsList.value = [...validRecent, ...regularItems]
+            // [FIX 2026-06-14] 追加 pinnedOptions (详情页编辑态当前值的占位 option)
+            // 确保当前值的 option 在下拉列表中, 避免 el-select 显示原始 ID
+            const regularValues = new Set(regularItems.map(item => String(item.value)))
+            const pinnedNotInResult = pinnedOptions.value.filter(
+              p => !regularValues.has(String(p.value))
+                && !validRecentValues.has(String(p.value))
+            )
+            optionsList.value = [...pinnedNotInResult, ...validRecent, ...regularItems]
           }
         } catch (e) {
-          // 如果加载失败，兜底显示当前 markedRecent 防止完全空白（用户至少能看到上次用过的）
-          // 但这是异常路径，正常流程不会走到
-          console.warn('[useValueHelp] Failed to load full options:', e)
-          optionsList.value = markedRecent
-        } finally {
+        // 如果加载失败，兜底显示当前 markedRecent 防止完全空白（用户至少能看到上次用过的）
+        // 但这是异常路径，正常流程不会走到
+        console.warn('[useValueHelp] Failed to load full options:', e)
+        // [FIX 2026-06-14] 错误兜底也要保留 pinnedOptions, 避免编辑态下当前值消失
+        const recentValues = new Set(markedRecent.map(r => String(r.value)))
+        const pinnedNotInRecent = pinnedOptions.value.filter(p => !recentValues.has(String(p.value)))
+        optionsList.value = [...pinnedNotInRecent, ...markedRecent]
+      } finally {
           loading.value = false
         }
         return
@@ -133,7 +150,12 @@ export function useValueHelp(valueHelpConfig, options = {}) {
       })
 
       if (response.success && response.data) {
-        optionsList.value = response.data.data || []
+        const apiItems = response.data.data || []
+        // [FIX 2026-06-14] 追加 pinnedOptions (详情页编辑态当前值的占位 option)
+        // 确保当前值的 option 在下拉列表中, 避免 el-select 显示原始 ID
+        const apiValues = new Set(apiItems.map(item => String(item.value)))
+        const pinnedNotInResult = pinnedOptions.value.filter(p => !apiValues.has(String(p.value)))
+        optionsList.value = [...pinnedNotInResult, ...apiItems]
       } else {
         error.value = response.error || response.message || 'Failed to load options'
       }

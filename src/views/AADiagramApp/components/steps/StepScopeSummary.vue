@@ -119,7 +119,15 @@ export default {
       return this.center && this.center.businessObjects > 0
     },
     hasIncremental() {
-      return this.incremental && (this.incremental.businessObjects > 0 || this.incremental.domains > 0)
+      // 关键修复：关系范围可能仅新增关系（src/tgt 都在中心范围内），
+      // 此时 businessObjects/domains/subDomains/serviceModules 都是 0，
+      // 但 objectRelations > 0，因此需一并检查所有增量维度。
+      if (!this.incremental) return false
+      return this.incremental.businessObjects > 0
+        || this.incremental.domains > 0
+        || this.incremental.subDomains > 0
+        || this.incremental.serviceModules > 0
+        || this.incremental.objectRelations > 0
     },
     hasTotal() {
       return this.total && this.total.businessObjects > 0

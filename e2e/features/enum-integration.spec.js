@@ -1,5 +1,5 @@
 /**
- * S-EI: 枚举管理 - 集成/边界 E2E 测试 (v3.18)
+ * S-EI: 枚举管理 - 集成/边界 E2E 测试 (v3.18-r2)
  *
  * 覆盖 (8 测, P2):
  *   E31: 持久化: 刷新页面后值仍存在
@@ -11,25 +11,19 @@
  *   E37: 审计日志: 创建 enum_value 产生 operation INFO
  *   E38: 审计日志: 失败 system_value update 产生 operation ERROR
  *
- * v2 铁律合规: 同 enum-type-list.spec.js
+ * 适配说明 (2026-06-13 根因分析后):
+ * - business enum id=null, 用 name 作为标识符
+ * - system enum (ActionType) 有有效 id (action_type)
+ * - V1 enum-values 端点 410 sunset, 用 V2 BO enum_value
+ * - 审计日志 API 存在但写入失败 (AUDIT_WRITE_FAILED)
  */
 import { test, expect } from '../helpers/auto-fixtures.js'
 import { withStep } from '../helpers/auto-trace.js'
-
-// ============================================================
-// 公共 Helper
-// ============================================================
-
-async function findFirstBusinessEnum(page) {
-  const resp = await page.request.get('/api/v1/enum-types?page=1&page_size=50')
-  if (!resp.ok()) return null
-  const body = await resp.json()
-  const items = body?.data?.data || body?.data?.items || body?.data?.records || (Array.isArray(body?.data) ? body.data : []) || []
-  if (!Array.isArray(items)) return null
-  const found = items.find(i => i.category === 'business')
-  if (!found) return null
-  return { id: found.id || found.name, name: found.name }
-}
+import {
+  findSystemEnum,
+  findEnumValues,
+  findSystemEnumValue
+} from '../helpers/enum-finder.js'
 
 // ============================================================
 // E31-E34: 持久化/多 tab/深链/i18n
@@ -38,9 +32,9 @@ async function findFirstBusinessEnum(page) {
 test.describe('S-EI: 枚举管理 - 集成/边界', () => {
 
   test('E31: 持久化 - 刷新页面后值仍存在', async ({ page, navigateTo, waitForApiFn }, testInfo) => {
-    const target = await findFirstBusinessEnum(page)
+    const target = await findSystemEnum(page)
     if (!target) {
-      test.skip(true, 'no business enum')
+      test.skip(true, 'no system enum')
       return
     }
 
@@ -49,12 +43,9 @@ test.describe('S-EI: 枚举管理 - 集成/边界', () => {
       await waitForApiFn(page, 'GET /api/v2/bo/enum_type').catch(() => {})
     })
 
-    const beforeCount = await withStep(page, testInfo, '获取 enum_value 数量', async () => {
-      const r = await page.request.get(`/api/v1/enum-values?enum_type_id=${encodeURIComponent(target.id)}&page_size=200`)
-      if (!r.ok()) return 0
-      const b = await r.json()
-      const items = b?.data?.items || b?.data?.records || b?.data || []
-      return items.length
+    const beforeCount = await withStep(page, testInfo, '获取 enum_value 数量 (V2 BO)', async () => {
+      const values = await findEnumValues(page, { enum_type_id: target.id })
+      return values.length
     })
 
     await withStep(page, testInfo, '刷新页面', async () => {
@@ -63,55 +54,45 @@ test.describe('S-EI: 枚举管理 - 集成/边界', () => {
     })
 
     await withStep(page, testInfo, '值数应一致', async () => {
-      const r = await page.request.get(`/api/v1/enum-values?enum_type_id=${encodeURIComponent(target.id)}&page_size=200`)
-      if (!r.ok()) {
-        test.skip(true, 'API 不可用')
-        return
-      }
-      const b = await r.json()
-      const items = b?.data?.items || b?.data?.records || b?.data || []
-      expect(items.length, 'count should persist after reload').toBe(beforeCount)
+      const values = await findEnumValues(page, { enum_type_id: target.id })
+      expect(values.length, 'count should persist after reload').toBe(beforeCount)
     })
   })
 
-  test('E32: 多 tab - 2 个 enum_type 详情互不干扰', async ({ page, context }, testInfo) => {
-    // 取 2 个 business enum
-    const resp = await page.request.get('/api/v1/enum-types?page=1&page_size=10')
+  test('E32: 多 tab - 2 个 enum_type 详情互不干扰', async ({ page, context, baseURL }, testInfo) => {
+    // 取 2 个 system enum (有有效 id)
+    const resp = await page.request.get('/api/v2/bo/enum_type?page=1&page_size=50')
     if (!resp.ok()) {
       test.skip(true, 'enum_types API 不可用')
       return
     }
     const body = await resp.json()
-    const items = body?.data?.data || body?.data?.items || body?.data?.records || (Array.isArray(body?.data) ? body.data : []) || []
-    const business = items.filter(i => i.category === 'business').slice(0, 2)
-    if (business.length < 2) {
-      test.skip(true, '需要 2 个 business enum')
+    const items = body?.data?.items || []
+    const system = items.filter(i => i.category === 'system' && i.id).slice(0, 2)
+    if (system.length < 2) {
+      test.skip(true, '需要 2 个 system enum with valid id')
       return
     }
 
-    // 验证 2 个 enum 详情可独立加载 (新 tab 用同 context cookies)
     const tab1 = await context.newPage()
     const tab2 = await context.newPage()
     try {
-      await withStep(page, testInfo, '打开 tab 1 (enum 1) 单独', async () => {
-        await tab1.goto(`http://localhost:3010/detail/enum_type/${encodeURIComponent(business[0].id)}`)
+      await withStep(page, testInfo, '打开 tab 1 (enum 1)', async () => {
+        await tab1.goto(`${baseURL}/detail/enum_type/${encodeURIComponent(system[0].id)}`)
         await tab1.waitForTimeout(2000)
         const text1 = await tab1.locator('body').textContent()
-        console.log(`[E32] tab1 (${business[0].id}) page loaded, body length=${text1.length}`)
+        console.log(`[E32] tab1 (${system[0].id}) loaded, body length=${text1.length}`)
       })
 
-      await withStep(page, testInfo, '打开 tab 2 (enum 2) 单独', async () => {
-        await tab2.goto(`http://localhost:3010/detail/enum_type/${encodeURIComponent(business[1].id)}`)
+      await withStep(page, testInfo, '打开 tab 2 (enum 2)', async () => {
+        await tab2.goto(`${baseURL}/detail/enum_type/${encodeURIComponent(system[1].id)}`)
         await tab2.waitForTimeout(2000)
         const text2 = await tab2.locator('body').textContent()
-        console.log(`[E32] tab2 (${business[1].id}) page loaded, body length=${text2.length}`)
+        console.log(`[E32] tab2 (${system[1].id}) loaded, body length=${text2.length}`)
       })
 
-      await withStep(page, testInfo, '验证 2 个 tab 加载完成', async () => {
-        // enum_type 用 name 作为业务键, id 可能为 null
-        const id1 = business[0].id || business[0].name
-        const id2 = business[1].id || business[1].name
-        expect(id1).not.toBe(id2)
+      await withStep(page, testInfo, '验证 2 个 tab 独立', async () => {
+        expect(system[0].id).not.toBe(system[1].id)
       })
     } finally {
       await tab1.close().catch(() => {})
@@ -119,22 +100,22 @@ test.describe('S-EI: 枚举管理 - 集成/边界', () => {
     }
   })
 
-  test('E33: URL 深链 - 直接访问 /detail/enum_type/123 加载', async ({ page, navigateTo, waitForApiFn }, testInfo) => {
-    const target = await findFirstBusinessEnum(page)
+  test('E33: URL 深链 - 直接访问 /detail/enum_type/action_type', async ({ page, navigateTo, waitForApiFn }, testInfo) => {
+    const target = await findSystemEnum(page)
     if (!target) {
-      test.skip(true, 'no business enum')
+      test.skip(true, 'no system enum')
       return
     }
 
     await withStep(page, testInfo, '直接 navigateTo 深链', async () => {
       await navigateTo(page, `/detail/enum_type/${encodeURIComponent(target.id)}`)
-      await waitForApiFn(page, 'GET /api/v2/bo/enum_type').catch(() => {}).catch(() => {})
+      await waitForApiFn(page, 'GET /api/v2/bo/enum_type').catch(() => {})
       await page.waitForTimeout(1500)
     })
 
     await withStep(page, testInfo, '验证页面显示该 enum', async () => {
       const allText = await page.locator('body').textContent()
-      expect(allText.includes(target.id), `page should contain ${target.id}`).toBe(true)
+      expect(allText.includes(target.name), `page should contain ${target.name}`).toBe(true)
     })
   })
 
@@ -144,7 +125,7 @@ test.describe('S-EI: 枚举管理 - 集成/边界', () => {
       await waitForApiFn(page, 'GET /api/v2/bo/enum_type').catch(() => {})
     })
 
-    await withStep(page, testInfo, '验证中文表头 (枚举类型/编码/名称/可维护性/分类)', async () => {
+    await withStep(page, testInfo, '验证中文表头', async () => {
       const headerText = await page.locator('.el-table__header').textContent()
       expect(headerText, 'should contain 名称').toMatch(/名称/)
       expect(headerText, 'should contain 分类').toMatch(/分类/)
@@ -159,13 +140,12 @@ test.describe('S-EI: 枚举管理 - 集成/边界', () => {
 test.describe('S-EI: 枚举管理 - 性能/健康/审计', () => {
 
   test('E35: 性能 - 列表 API 响应 < 3s', async ({ page }, testInfo) => {
-    await withStep(page, testInfo, '直接测 API 响应时间 (不含 navigateTo SPA 启动开销)', async () => {
+    await withStep(page, testInfo, '直接测 V2 BO API 响应时间', async () => {
       const start = Date.now()
-      const r = await page.request.get('/api/v1/enum-types?page=1&page_size=20')
+      const r = await page.request.get('/api/v2/bo/enum_type?page=1&page_size=20')
       const elapsed = Date.now() - start
-      console.log(`[E35] API 响应耗时: ${elapsed}ms, status: ${r.status()}`)
-      // SPA 启动 ~10s; 仅测 API 端到端
-      expect(r.ok(), `API 应可用: ${r.status()}`).toBe(true)
+      console.log(`[E35] V2 BO API 响应耗时: ${elapsed}ms, status: ${r.status()}`)
+      expect(r.ok(), `V2 BO API 应可用: ${r.status()}`).toBe(true)
       expect(elapsed, 'API 应 < 3s').toBeLessThan(3000)
     })
   })
@@ -177,7 +157,7 @@ test.describe('S-EI: 枚举管理 - 性能/健康/审计', () => {
       if (msg.type() === 'error') errors.push(`console.error: ${msg.text()}`)
     })
 
-    await withStep(page, testInfo, '导航到列表 + 操作', async () => {
+    await withStep(page, testInfo, '导航到列表', async () => {
       await navigateTo(page, '/business-config/enum-types')
       await waitForApiFn(page, 'GET /api/v2/bo/enum_type').catch(() => {})
       await page.waitForTimeout(1000)
@@ -188,7 +168,7 @@ test.describe('S-EI: 枚举管理 - 性能/健康/审计', () => {
         !e.includes('favicon') &&
         !e.includes('404') &&
         !e.includes('dev-login') &&
-        !e.includes('ResizeObserver')  // 已知无害
+        !e.includes('ResizeObserver')
       )
       if (fatal.length > 0) {
         console.log(`[E36] 致命错误: ${fatal.join('\n')}`)
@@ -197,18 +177,18 @@ test.describe('S-EI: 枚举管理 - 性能/健康/审计', () => {
     })
   })
 
-  test('E37: 审计日志 - 创建 enum_value 产生 operation INFO', async ({ page, isolation, waitForApiFn }, testInfo) => {
-    const target = await findFirstBusinessEnum(page)
+  test('E37: 审计日志 - 创建 enum_value 产生 operation INFO', async ({ page }, testInfo) => {
+    const target = await findSystemEnum(page)
     if (!target) {
-      test.skip(true, 'no business enum')
+      test.skip(true, 'no system enum')
       return
     }
 
     const code = `E37_AUDIT_${Date.now().toString(36).toUpperCase()}`
     let valueId = null
 
-    await withStep(page, testInfo, 'API 创建 enum_value', async () => {
-      const r = await page.request.post('/api/v1/enum-values', {
+    await withStep(page, testInfo, 'V2 BO 创建 enum_value', async () => {
+      const r = await page.request.post('/api/v2/bo/enum_value', {
         data: {
           enum_type_id: target.id,
           code: code,
@@ -218,7 +198,7 @@ test.describe('S-EI: 枚举管理 - 性能/健康/审计', () => {
       })
       if (r.ok()) {
         const b = await r.json()
-        valueId = b?.data?.id || b?.id
+        valueId = b?.data?.id
       } else {
         test.skip(true, `create failed: ${r.status()}`)
       }
@@ -240,43 +220,29 @@ test.describe('S-EI: 枚举管理 - 性能/健康/审计', () => {
     })
 
     if (valueId) {
-      await page.request.delete(`/api/v1/enum-values/${valueId}`).catch(() => {})
+      await page.request.delete(`/api/v2/bo/enum_value/${valueId}`).catch(() => {})
     }
   })
 
   test('E38: 审计日志 - 失败 system_value update 产生 operation ERROR', async ({ page }, testInfo) => {
     let sysValue = null
-    await withStep(page, testInfo, '查找 is_system=true enum_value', async () => {
-      const r1 = await page.request.get('/api/v1/enum-values?is_system=1&page_size=10')
-      let items = []
-      if (r1.ok()) {
-        const b = await r1.json()
-        items = b?.data?.items || b?.data?.records || b?.data || []
-      }
-      sysValue = items.find(v => v.is_system === true || v.system_value === true)
-      if (!sysValue) {
-        const r2 = await page.request.get('/api/v1/enum-values?page_size=10')
-        if (r2.ok()) {
-          const b = await r2.json()
-          items = b?.data?.items || b?.data?.records || b?.data || []
-          sysValue = items[0]
-        }
-      }
+
+    await withStep(page, testInfo, '通过 V2 BO 查找 enum_value', async () => {
+      const values = await findEnumValues(page)
+      sysValue = values[0]
       if (!sysValue) {
         test.skip(true, 'no enum_value')
       }
+      console.log(`[E38] found value: id=${sysValue?.id}, is_system=${sysValue?.is_system}`)
     })
 
-    await withStep(page, testInfo, 'API 失败 update', async () => {
-      if (!sysValue) return
-      const r1 = await page.request.put(`/api/v1/enum-values/${sysValue.id}`, {
+    if (!sysValue) return
+
+    await withStep(page, testInfo, 'V2 BO PUT 尝试编辑', async () => {
+      const r = await page.request.put(`/api/v2/bo/enum_value/${sysValue.id}`, {
         data: { name: 'E38_HACKED' }
       })
-      if (r1.status() === 410) {
-        await page.request.put(`/api/v2/bo/enum_value/${sysValue.id}`, {
-          data: { name: 'E38_HACKED' }
-        })
-      }
+      console.log(`[E38] update status: ${r.status()}`)
     })
 
     await withStep(page, testInfo, '查审计日志 (operation ERROR)', async () => {

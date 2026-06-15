@@ -271,7 +271,11 @@
   white-space: nowrap !important;
   overflow: visible !important;
   box-sizing: border-box !important;
-  padding: 4px 8px !important;
+  /* [v40.4 修复] 之前 padding: 4px 8px, 让白底 div 比文字大很多 (text+16px 宽, +8px 高)
+     改成 0, 让 labelBkg div 跟文字本身等大, 白底紧贴文字 */
+  padding: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
 }
 
 .mermaid-content.serviceModule :deep(.edgeLabel foreignObject > div),

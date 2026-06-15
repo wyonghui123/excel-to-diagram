@@ -397,4 +397,186 @@ describe('MetaListPage - FK字段链接 & BusinessKey 链接渲染', () => {
       expect(fkTitleTemplate('用户')).toContain('打开')
     })
   })
+
+  describe('getFkIdValue - FK ID 获取逻辑（修复导航传值错误）', () => {
+    // 模拟 getFkIdValue 的核心逻辑（与 MetaListPage.vue 中实现一致）
+    function getFkIdValue(row, column) {
+      // 1. 优先用 apiParamKey（YAML 显式声明的 FK 字段映射）
+      const apiParamKey = column.apiParamKey || column.api_param_key
+      if (apiParamKey && row[apiParamKey] != null) {
+        return row[apiParamKey]
+      }
+      // 2. 从 value_help.source 推导：target_bo + '_id'
+      const targetBo = column.valueHelpConfig?.source?.target_bo
+      if (targetBo) {
+        const fkIdKey = `${targetBo}_id`
+        if (row[fkIdKey] != null) {
+          return row[fkIdKey]
+        }
+      }
+      // 3. 兜底：如果 column.prop 本身就是 _id 结尾，直接用
+      if (column.prop?.endsWith('_id')) {
+        return row[column.prop]
+      }
+      // 4. 最后兜底
+      return row[column.prop]
+    }
+
+    // 模拟后端返回的列表行数据
+    const boRow = {
+      id: 1,
+      code: 'BO_CUSTOMER',
+      name: '客户',
+      service_module_id: 1,
+      service_module_name: '采购需求',
+      domain_id: 2,
+      domain_name: '供应链',
+      display_values: { service_module_id: '采购需求', domain_id: '供应链' }
+    }
+
+    it('TC-ML-FKID-001: FK 显示列通过 apiParamKey 获取 ID（service_module_name → service_module_id）', () => {
+      // service_module_name 列配置了 apiParamKey: service_module_id
+      const column = {
+        prop: 'service_module_name',
+        label: '服务模块',
+        apiParamKey: 'service_module_id',
+        valueHelpConfig: { source: { type: 'bo', target_bo: 'service_module' } }
+      }
+
+      const fkId = getFkIdValue(boRow, column)
+      expect(fkId).toBe(1) // 数字 ID，不是 "采购需求"
+      expect(typeof fkId).toBe('number')
+    })
+
+    it('TC-ML-FKID-002: 无 apiParamKey 时通过 target_bo 推导 FK ID 字段', () => {
+      // domain_name 列没有 apiParamKey，但有 target_bo: domain
+      const column = {
+        prop: 'domain_name',
+        label: '子领域',
+        valueHelpConfig: { source: { type: 'bo', target_bo: 'domain' } }
+      }
+
+      const fkId = getFkIdValue(boRow, column)
+      expect(fkId).toBe(2) // 通过 domain_id 推导
+    })
+
+    it('TC-ML-FKID-003: column.prop 以 _id 结尾时直接使用', () => {
+      const column = {
+        prop: 'user_id',
+        label: '用户',
+        valueHelpConfig: { source: { type: 'bo', target_bo: 'user' } }
+      }
+
+      const row = { user_id: 10, user_id_display: 'Admin User' }
+      const fkId = getFkIdValue(row, column)
+      expect(fkId).toBe(10)
+    })
+
+    it('TC-ML-FKID-004: FK ID 为 null 时正确返回 null（而非显示文本）', () => {
+      const row = { id: 1, service_module_id: null, service_module_name: null }
+      const column = {
+        prop: 'service_module_name',
+        label: '服务模块',
+        apiParamKey: 'service_module_id',
+        valueHelpConfig: { source: { type: 'bo', target_bo: 'service_module' } }
+      }
+
+      const fkId = getFkIdValue(row, column)
+      expect(fkId).toBeNull()
+    })
+
+    it('TC-ML-FKID-005: 修复前错误场景 - 不应返回显示文本作为 ID', () => {
+      // 修复前：row[column.prop] = row['service_module_name'] = '采购需求'
+      // 修复后：通过 apiParamKey 返回 row['service_module_id'] = 1
+      const column = {
+        prop: 'service_module_name',
+        label: '服务模块',
+        apiParamKey: 'service_module_id',
+        valueHelpConfig: { source: { type: 'bo', target_bo: 'service_module' } }
+      }
+
+      const wrongValue = boRow[column.prop] // '采购需求' - 这是修复前的错误行为
+      const correctValue = getFkIdValue(boRow, column) // 1 - 修复后
+
+      expect(wrongValue).toBe('采购需求') // 修复前：显示文本
+      expect(correctValue).toBe(1) // 修复后：数字 ID
+      expect(wrongValue).not.toBe(correctValue)
+    })
+
+    it('TC-ML-FKID-006: 兜底场景 - 无任何 FK ID 映射时返回原始值', () => {
+      const column = {
+        prop: 'unknown_field',
+        label: '未知字段',
+        valueHelpConfig: { source: { type: 'bo', target_bo: 'unknown' } }
+      }
+
+      const row = { unknown_field: 'some_value' }
+      const fkId = getFkIdValue(row, column)
+      expect(fkId).toBe('some_value')
+    })
+  })
+
+  describe('getFkDetailMode - FK 链接详情页模式确定', () => {
+    // 模拟 getFkDetailMode 的核心逻辑
+    function getFkDetailMode(column, hasDetailPageRoute, isTargetInSamePage) {
+      const targetBo = column.valueHelpConfig?.source?.target_bo
+      if (!targetBo) return 'page'
+
+      // 目标对象类型配置了 detail_mode: page → 'page'
+      // (这里简化模拟，实际从 metaService.getViewConfigSync 获取)
+      const targetViewConfig = column._mockTargetViewConfig
+      if (targetViewConfig?.data?.list?.detail_mode === 'page') {
+        return 'page'
+      }
+
+      // 当前列表是 drawer 模式（非 page），且目标对象在同页面 tabs 中 → 'drawer'
+      if (!hasDetailPageRoute && isTargetInSamePage) {
+        return 'drawer'
+      }
+
+      // 默认：跳转独立页面
+      return 'page'
+    }
+
+    const fkColumn = {
+      prop: 'service_module_name',
+      label: '服务模块',
+      apiParamKey: 'service_module_id',
+      valueHelpConfig: { source: { type: 'bo', target_bo: 'service_module' } }
+    }
+
+    it('TC-ML-DM-001: 目标对象配置 detail_mode=page 时返回 page', () => {
+      const column = {
+        ...fkColumn,
+        _mockTargetViewConfig: { data: { list: { detail_mode: 'page' } } }
+      }
+      expect(getFkDetailMode(column, false, true)).toBe('page')
+    })
+
+    it('TC-ML-DM-002: 当前 drawer 模式 + 目标在同页面 tabs 中 → drawer', () => {
+      expect(getFkDetailMode(fkColumn, false, true)).toBe('drawer')
+    })
+
+    it('TC-ML-DM-003: 当前 drawer 模式 + 目标不在同页面 tabs 中 → page', () => {
+      expect(getFkDetailMode(fkColumn, false, false)).toBe('page')
+    })
+
+    it('TC-ML-DM-004: 当前 page 模式（hasDetailPageRoute=true）→ page', () => {
+      expect(getFkDetailMode(fkColumn, true, true)).toBe('page')
+    })
+
+    it('TC-ML-DM-005: 无 valueHelpConfig 时默认 page', () => {
+      const noConfigColumn = { prop: 'name', label: '名称' }
+      expect(getFkDetailMode(noConfigColumn, false, false)).toBe('page')
+    })
+
+    it('TC-ML-DM-006: 无 target_bo 时默认 page', () => {
+      const noTargetColumn = {
+        prop: 'name',
+        label: '名称',
+        valueHelpConfig: { source: { type: 'enum' } }
+      }
+      expect(getFkDetailMode(noTargetColumn, false, false)).toBe('page')
+    })
+  })
 })

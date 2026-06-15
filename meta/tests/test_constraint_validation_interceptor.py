@@ -112,7 +112,7 @@ class TestConstraintValidationInterceptorBeforeAction:
         details = exc_info.value.details
         assert isinstance(details, list)
         assert len(details) == 1
-        assert details[0]['field_id'] == 'email'
+        assert 'field_id' not in details[0]  # field_id 不暴露给前端
         assert details[0]['rule'] == 'pattern'
 
     @patch('meta.core.interceptors.constraint_validation_interceptor.ConstraintEngine')

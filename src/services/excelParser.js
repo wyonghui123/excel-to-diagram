@@ -212,7 +212,14 @@ export function parseRelationships(relData, businessObjects) {
   });
 
   relData.forEach(item => {
-    const { sourceCode, targetCode, relationCode: extractedRelationCode, description: relationDesc } = extractRelationshipFields(item);
+    const {
+      sourceCode,
+      targetCode,
+      relationCode: extractedRelationCode,
+      relationType,
+      relationDirection,
+      description: relationDesc
+    } = extractRelationshipFields(item);
     const { annotationCategory, annotationContent } = extractAnnotationFields(item);
 
     if (sourceCode && targetCode) {
@@ -228,6 +235,9 @@ export function parseRelationships(relData, businessObjects) {
         sourceName,
         targetName,
         relationCode,
+        relationType,
+        // [v40 修复] 透传关系方向 (推/拉/双向) → getArrowSyntax 触发 <-->/--> 渲染
+        relationDirection: relationDirection || null,
         relationDesc,
         annotationCategory: annotationCategory || 'info',
         annotationContent: annotationContent || ''

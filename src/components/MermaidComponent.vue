@@ -56,7 +56,7 @@ import { useMermaidConfig } from '../composables/useMermaid/config/useMermaidCon
 import { useInteraction } from '../composables/useMermaid/interaction/useInteraction.js'
 import { useBusinessObjectSyntax, useServiceModuleSyntax } from '../composables/useMermaid/syntax/index.js'
 import { useSvgStyle } from '../composables/useMermaid/style/index.js'
-import { useTooltip } from '../composables/useMermaid/tooltip/index.js'
+import { useTooltip, preloadEnums } from '../composables/useMermaid/tooltip/index.js'
 import { useMermaidColors } from '../composables/useMermaid/color/index.js'
 import { useMermaidDataMap } from '../composables/useMermaid/dataMap/index.js'
 import { useAnnotation, useAnnotationOverlay } from '../composables/useMermaid/annotation/index.js'
@@ -273,6 +273,8 @@ export default {
 
     // 生成Mermaid图表代码并保存关系说明信�?
     let relationDescriptions = []
+    // [v34 双向支持] 暴露 mermaidCode 到 window, E2E 可读取诊断 syntax error
+    let lastMermaidCodeRef = ''
 
     const serviceModuleSyntax = useServiceModuleSyntax()
     const businessObjectSyntax = useBusinessObjectSyntax()
@@ -288,15 +290,23 @@ export default {
           const result = serviceModuleSyntax.generateMermaidCode(data, relationDescriptions, layoutEngine, layoutType, positions, zoneRowCount, preserveModelOrder, layoutControlConfig)
           if (typeof result === 'object' && result !== null) {
             nodeColorMappings = result.nodeColorMappings || []
-            return result.code || result.mermaidCode || ''
+            const code = result.code || result.mermaidCode || ''
+            lastMermaidCodeRef = code
+            if (typeof window !== 'undefined') window.__lastMermaidCode = code
+            return code
           }
+          lastMermaidCodeRef = result
+          if (typeof window !== 'undefined') window.__lastMermaidCode = result
           return result
         } else {
           const result = businessObjectSyntax.generateMermaidCode(data, relationDescriptions, layoutEngine, layoutType, layoutControlConfig)
           if (typeof result === 'object' && result !== null) {
             nodeColorMappings = result.nodeColorMappings || []
             linkColorMappings = result.linkColorMappings || []
-            return result.mermaidCode || ''
+            const code = result.mermaidCode || ''
+            lastMermaidCodeRef = code
+            if (typeof window !== 'undefined') window.__lastMermaidCode = code
+            return code
           }
           return result
         }
@@ -313,7 +323,16 @@ export default {
         return
       }
       isRendering = true
-      
+
+      // [v40 关系枚举预加载] 渲染前先预加载 relation_type / direction 枚举
+      // 之前 fire-and-forget 时, 用户首次 hover 时 EnumService 还没加载完 → tooltip 显示 code
+      // 修复: 在渲染前 await 加载, 后续 hover 一定命中缓存 (L1)
+      if (props.diagramData && props.diagramData.links && props.diagramData.links.length > 0) {
+        preloadEnums().catch((e) => {
+          console.warn('[MermaidComponent] preloadEnums failed:', e?.message || e)
+        })
+      }
+
       if (mermaidContainer.value && props.diagramData) {
         try {
           // 暂时禁用 UnifiedRenderer，因为它缺少样式、tooltip、交互等功能
@@ -818,6 +837,14 @@ export default {
       if (props.diagramData) {
         renderMermaid()
       }
+
+      // [v40 修复] 主动预加载 direction / relation_type 枚举
+      // 原因: 之前 fire-and-forget 在第一次 hover 时才触发, 用户在第一次 hover 前
+      //       tooltip 仍显示 raw code (例如 'PUSH' / 'GENERATES')
+      // 修复: 组件挂载即 await preloadEnums(), EnumService._cache 在用户首次 hover 前就绪
+      preloadEnums().catch((e) => {
+        console.warn('[MermaidComponent] preloadEnums failed:', e?.message || e)
+      })
 
       // 关键修复 v14：监听 window resize（debounced 150ms）
       // 覆盖：浏览器窗口 resize、dev tools 开合、tab 切换等场景

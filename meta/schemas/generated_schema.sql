@@ -477,6 +477,8 @@ CREATE TABLE IF NOT EXISTS products (
 )
 
 -- 产品版本: 产品版本是产品线的软件版本，如 v1.0、2024-Q4 等。每个版本包含独立的领域模型数据。
+-- [CHANGED 2026-06-13] 删除 code 列, name 作为唯一业务键(产品内唯一)
+-- 迁移: 原 code 数据已合并到 name, 唯一性由 (product_id, name) 联合约束保证
 CREATE TABLE IF NOT EXISTS versions (
     created_at DATETIME,
     created_by VARCHAR(200),
@@ -485,11 +487,11 @@ CREATE TABLE IF NOT EXISTS versions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     product_id INTEGER NOT NULL,
     name VARCHAR(200) NOT NULL,
-    code VARCHAR(200) UNIQUE NOT NULL,
     description TEXT,
     is_current INTEGER DEFAULT 0,
     owner_id INTEGER,
-    FOREIGN KEY (product_id) REFERENCES products(id)
+    FOREIGN KEY (product_id) REFERENCES products(id),
+    UNIQUE(product_id, name)
 )
 
 -- 领域: 领域是业务领域的顶层分类，代表一个业务领域。领域下包含多个子领域。
@@ -710,6 +712,8 @@ CREATE INDEX IF NOT EXISTS idx_business_objects_name ON business_objects(name)
 
 -- Indexes for 业务关系
 CREATE UNIQUE INDEX IF NOT EXISTS uidx_relationships_version_source_target_type ON relationships(version_id, source_bo_id, target_bo_id, relation_code)
+-- [2026-06-15] 业务层+DB层联合校验: 源+目标+方向在版本内唯一 (修复历史 bug: id=101 vs id=129 同源同目标同方向但 code 不同)
+CREATE UNIQUE INDEX IF NOT EXISTS uidx_relationships_version_source_target_direction ON relationships(version_id, source_bo_id, target_bo_id, relation_direction)
 CREATE INDEX IF NOT EXISTS idx_relationships_version_source ON relationships(version_id, source_bo_id)
 CREATE INDEX IF NOT EXISTS idx_relationships_version_target ON relationships(version_id, target_bo_id)
 CREATE INDEX IF NOT EXISTS idx_relationships_version_id ON relationships(version_id)

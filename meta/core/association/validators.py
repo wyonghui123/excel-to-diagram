@@ -20,10 +20,12 @@ def validate_source_target_existence(engine, context, src_id, tgt_type, tgt_id,
             f"SELECT 1 FROM {src_table} WHERE id = ?", [src_id]
         )
         if cursor.fetchone() is None:
+            src_meta_obj = registry.get(context.object_type)
+            src_display = src_meta_obj.name if src_meta_obj else context.object_type
             msg = ValidationMessageRegistry.get(
                 "validation.association.source_not_found",
-                object_type=context.object_type, src_id=src_id,
             )
+            msg = f"源{src_display}不存在"
             return ActionResult(success=False, message=msg, errors=[msg])
     except Exception as e:
         logger.warning(f"[AssociationEngine] source existence check failed: {e}")
@@ -37,10 +39,12 @@ def validate_source_target_existence(engine, context, src_id, tgt_type, tgt_id,
             f"SELECT 1 FROM {tgt_table} WHERE id = ?", [tgt_id]
         )
         if cursor.fetchone() is None:
+            tgt_meta_obj = registry.get(target_entity)
+            tgt_display = tgt_meta_obj.name if tgt_meta_obj else target_entity
             msg = ValidationMessageRegistry.get(
                 "validation.association.target_not_found",
-                object_type=target_entity, tgt_id=tgt_id,
             )
+            msg = f"目标{tgt_display}不存在"
             return ActionResult(success=False, message=msg, errors=[msg])
     except Exception as e:
         logger.warning(f"[AssociationEngine] target existence check failed: {e}")

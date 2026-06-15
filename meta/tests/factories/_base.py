@@ -26,6 +26,13 @@ from typing import Optional, Dict, Any, List
 logger = logging.getLogger(__name__)
 
 
+# [FIX FACTORY-FRAMEWORK] BO 框架 API 基础 URL
+# 14 个工厂默认都走 BO 框架 (POST/DELETE /api/v2/bo/{type})
+# 子类可重写 _create_path/_delete_path 走其他端点
+import os
+_BO_API_BASE = os.environ.get('BO_API_BASE', 'http://localhost:3010')
+
+
 # ============================================================
 # 唯一性 Helper (TBD-4: counter+random 人类可读)
 # ============================================================
@@ -138,23 +145,38 @@ class BaseFactory:
         Returns:
             dict: 包含 id 的数据
         """
-        from admin_token import call_action, get_admin_cookie
+        import requests
+        from admin_token import get_admin_cookie
         cookie = cookie or get_admin_cookie()
         data = cls.build(**overrides)
         # [Phase 5] 注入 trace_id (测试可观测性)
         data = _inject_trace_id(data)
 
         try:
-            result = call_action(
-                cls._create_action(),
-                cls._create_payload(data),
-                cookie=cookie
+            url = f"{_BO_API_BASE}{cls._create_path()}"
+            resp = requests.post(
+                url,
+                json=cls._create_payload(data),
+                headers={'Cookie': cookie, 'Content-Type': 'application/json',
+                         'X-Trace-Id': data.get('trace_id', '')},
+                timeout=15,
             )
-            # 提取 ID
-            if 'created' in result.get('data', {}):
-                data['id'] = result['data']['created'][0]
-            elif 'id' in result.get('data', {}):
-                data['id'] = result['data']['id']
+            try:
+                result = resp.json()
+            except Exception:
+                result = {'success': False, 'message': resp.text[:200]}
+
+            # [FIX FACTORY-BUG] BO 框架返回 {'success', 'data': {'id': ...}, 'message'}
+            if resp.status_code not in (200, 201) or not result.get('success'):
+                logger.warning(f"Factory {cls.__name__} create 非成功响应: "
+                               f"status={resp.status_code} result={result}")
+                data['id'] = -1
+                return data
+            result_data = result.get('data', {}) or {}
+            if 'id' in result_data:
+                data['id'] = result_data['id']
+            elif 'created' in result_data and result_data['created']:
+                data['id'] = result_data['created'][0]
             else:
                 logger.warning(f"Could not extract id from result: {result}")
                 data['id'] = -1
@@ -175,38 +197,52 @@ class BaseFactory:
         Returns:
             bool: 是否成功清理
         """
-        from admin_token import call_action, get_admin_cookie
+        import requests
+        from admin_token import get_admin_cookie
         cookie = cookie or get_admin_cookie()
         try:
-            call_action(
-                cls._delete_action(),
-                {**cls._delete_payload(), 'id': obj_id},
-                cookie=cookie
+            url = f"{_BO_API_BASE}{cls._delete_path(obj_id)}"
+            resp = requests.delete(
+                url,
+                headers={'Cookie': cookie, 'Content-Type': 'application/json'},
+                timeout=15,
             )
-            return True
+            try:
+                result = resp.json()
+            except Exception:
+                result = {'success': False}
+            return resp.status_code in (200, 201, 204) and result.get('success', True)
         except Exception as e:
             logger.warning(f"Factory cleanup failed: {cls.__name__}#{obj_id} - {e}")
             return False
 
     @classmethod
-    def _create_action(cls) -> str:
-        """子类重写: 创建 action 名"""
-        return f'{cls._OBJECT_TYPE}.create'
+    def _create_path(cls) -> str:
+        """[FIX FACTORY-FRAMEWORK] 子类可重写: 创建 URL 路径
+        默认走 BO 框架: /api/v2/bo/{object_type}
+        """
+        return f'/api/v2/bo/{cls._OBJECT_TYPE}'
 
     @classmethod
     def _create_payload(cls, data: Dict) -> Dict:
-        """子类重写: 创建 payload 格式"""
-        return {'object_type': cls._OBJECT_TYPE, 'data': data}
+        """[FIX FACTORY-FRAMEWORK] 子类可重写: 创建 payload 格式
+        BO 框架: data 本身作为 body (无 wrapper)
+        """
+        return data
 
     @classmethod
-    def _delete_action(cls) -> str:
-        """子类重写: 删除 action 名"""
-        return f'{cls._OBJECT_TYPE}.delete'
+    def _delete_path(cls, obj_id: int) -> str:
+        """[FIX FACTORY-FRAMEWORK] 子类可重写: 删除 URL 路径
+        BO 框架: /api/v2/bo/{object_type}/{id}
+        """
+        return f'/api/v2/bo/{cls._OBJECT_TYPE}/{obj_id}'
 
     @classmethod
     def _delete_payload(cls) -> Dict:
-        """子类重写: 删除 payload 格式"""
-        return {'object_type': cls._OBJECT_TYPE}
+        """[FIX FACTORY-FRAMEWORK] 子类可重写: 删除 payload 格式
+        BO 框架 DELETE: 无 body
+        """
+        return {}
 
 
 # ============================================================

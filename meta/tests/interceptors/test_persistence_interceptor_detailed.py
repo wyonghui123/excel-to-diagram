@@ -289,6 +289,61 @@ class TestPersistenceInterceptorDoRead:
 
         assert result.success is False
 
+    def test_enriches_virtual_redundancy_fields(self):
+        """[FIX 2026-06-14] BUG-V008 详情页修复: _do_read 必须先 enrich_one
+        填充虚拟冗余字段 (e.g. domain_id 从 service_module_id 推导),
+        再 enrich_fk_display_names 注入 {field}_display。
+        """
+        from meta.core.interceptors.persistence_interceptor import PersistenceInterceptor
+        interceptor = PersistenceInterceptor()
+
+        # 模拟 business_object 单条记录: DB 只有 service_module_id, 没有 domain_id/sub_domain_id
+        mock_registry = Mock()
+        mock_registry.read.return_value = ActionResult(
+            success=True,
+            data={'id': 1, 'code': 'BO_REQ', 'name': '采购申请', 'service_module_id': 2}
+        )
+        interceptor._registry = mock_registry
+
+        # Patch EnrichmentEngine.for_data_source to return a stub that records calls
+        with patch(
+            'meta.core.interceptors.persistence_interceptor.EnrichmentEngine.for_data_source'
+        ) as mock_engine_factory:
+            stub_engine = Mock()
+            # enrich_one 必须把 domain_id 从 None 推导为 1
+            stub_engine.enrich_one.return_value = {
+                'id': 1, 'code': 'BO_REQ', 'name': '采购申请',
+                'service_module_id': 2, 'domain_id': 1, 'sub_domain_id': 1,
+                'domain_name': '采购管理', 'sub_domain_name': '采购需求',
+            }
+            # enrich_fk_display_names 必须基于已有 FK 值注入 display 字段
+            stub_engine.enrich_fk_display_names.return_value = {
+                'id': 1, 'code': 'BO_REQ', 'name': '采购申请',
+                'service_module_id': 2, 'domain_id': 1, 'sub_domain_id': 1,
+                'domain_name': '采购管理', 'sub_domain_name': '采购需求',
+                'domain_id_display': '采购管理', 'sub_domain_id_display': '采购需求',
+                'service_module_id_display': '供应商管理',
+            }
+            mock_engine_factory.return_value = stub_engine
+
+            ctx = _make_ctx(
+                object_type='business_object', action='crud_read', params={'id': 1}
+            )
+            result = interceptor._do_read(ctx, mock_registry)
+
+        assert result.success is True
+        # 验证 enrich_one 被调用
+        stub_engine.enrich_one.assert_called_once()
+        # 验证 enrich_fk_display_names 被调用
+        stub_engine.enrich_fk_display_names.assert_called_once()
+        # 验证 call 顺序: enrich_one 必须先于 enrich_fk_display_names
+        call_order = [c[0] for c in stub_engine.method_calls]
+        assert call_order.index('enrich_one') < call_order.index('enrich_fk_display_names'), \
+            f"enrich_one should be called before enrich_fk_display_names, got order: {call_order}"
+        # 验证最终数据中包含 domain_id
+        assert result.data.get('domain_id') == 1
+        assert result.data.get('domain_id_display') == '采购管理'
+
 
 # ============================================================
 # _do_update

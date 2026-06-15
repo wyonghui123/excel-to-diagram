@@ -60,9 +60,9 @@ class TestEnrichmentEngineBasic:
         self.ds.execute("""
             CREATE TABLE IF NOT EXISTS versions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                code TEXT,
                 name TEXT,
-                product_id INTEGER
+                product_id INTEGER,
+                UNIQUE(product_id, name)
             )
         """)
         
@@ -117,10 +117,9 @@ class TestEnrichmentEngineBasic:
     def test_enrich_one_simple_virtual(self):
         """测试单层虚拟冗余字段填充"""
         self.ds.insert('products', {'code': 'PROD1', 'name': '产品1'})
-        product_id = self.ds.insert('versions', {'code': 'V1', 'name': '版本1', 'product_id': 1})
+        product_id = self.ds.insert('versions', {'name': '版本1', 'product_id': 1})
         self.ds.commit()
-        
-        record = {'id': product_id, 'code': 'V1', 'name': '版本1', 'product_id': 1}
+        record = {'id': product_id, 'name': '版本1', 'product_id': 1}
         result = self.engine.enrich_one('version', record)
         
         assert 'product_name' in result, 'enrichment engine did not return product_name - check yaml redundancy config'
@@ -129,7 +128,7 @@ class TestEnrichmentEngineBasic:
     def test_enrich_one_multi_layer_join(self):
         """测试多层 JOIN 路径填充"""
         self.ds.insert('products', {'code': 'PROD1', 'name': '产品1'})
-        self.ds.insert('versions', {'code': 'V1', 'name': '版本1', 'product_id': 1})
+        self.ds.insert('versions', {'name': '版本1', 'product_id': 1})
         self.ds.insert('domains', {'code': 'DOM1', 'name': '领域1', 'version_id': 1})
         self.ds.insert('sub_domains', {'code': 'SUB1', 'name': '子领域1', 'domain_id': 1})
         sm_id = self.ds.insert('service_modules', {'code': 'SVC1', 'name': '服务模块1', 'sub_domain_id': 1})
@@ -150,7 +149,7 @@ class TestEnrichmentEngineBasic:
     def test_enrich_batch(self):
         """测试批量填充"""
         self.ds.insert('products', {'code': 'PROD1', 'name': '产品1'})
-        self.ds.insert('versions', {'code': 'V1', 'name': '版本1', 'product_id': 1})
+        self.ds.insert('versions', {'name': '版本1', 'product_id': 1})
         self.ds.insert('domains', {'code': 'DOM1', 'name': '领域1', 'version_id': 1})
         self.ds.insert('sub_domains', {'code': 'SUB1', 'name': '子领域1', 'domain_id': 1})
         sm_id = self.ds.insert('service_modules', {'code': 'SVC1', 'name': '服务模块1', 'sub_domain_id': 1})
@@ -230,16 +229,16 @@ class TestEnrichmentEngineCache:
     def test_cache_reuse(self):
         """测试缓存重用"""
         self.ds.insert('products', {'code': 'PROD1', 'name': '产品1'})
-        self.ds.insert('versions', {'code': 'V1', 'name': '版本1', 'product_id': 1})
-        self.ds.insert('versions', {'code': 'V2', 'name': '版本2', 'product_id': 1})
+        self.ds.insert('versions', {'name': '版本1', 'product_id': 1})
+        self.ds.insert('versions', {'name': '版本2', 'product_id': 1})
         self.ds.commit()
         
-        record1 = {'id': 1, 'code': 'V1', 'name': '版本1', 'product_id': 1}
+        record1 = {'id': 1, 'name': '版本1', 'product_id': 1}
         result1 = self.engine.enrich_one('version', record1)
         
         stats1 = self.engine.get_cache_stats()
         
-        record2 = {'id': 2, 'code': 'V2', 'name': '版本2', 'product_id': 1}
+        record2 = {'id': 2, 'name': '版本2', 'product_id': 1}
         result2 = self.engine.enrich_one('version', record2)
         
         stats2 = self.engine.get_cache_stats()
@@ -250,10 +249,10 @@ class TestEnrichmentEngineCache:
     def test_clear_cache(self):
         """测试清空缓存"""
         self.ds.insert('products', {'code': 'PROD1', 'name': '产品1'})
-        self.ds.insert('versions', {'code': 'V1', 'name': '版本1', 'product_id': 1})
+        self.ds.insert('versions', {'name': '版本1', 'product_id': 1})
         self.ds.commit()
         
-        record = {'id': 1, 'code': 'V1', 'name': '版本1', 'product_id': 1}
+        record = {'id': 1, 'name': '版本1', 'product_id': 1}
         self.engine.enrich_one('version', record)
         
         stats_before = self.engine.get_cache_stats()
@@ -357,7 +356,7 @@ class TestEnrichmentEngineRelationship:
     def _create_test_hierarchy(self):
         """创建测试层级数据"""
         self.ds.insert('products', {'code': 'PROD1', 'name': '产品1'})
-        self.ds.insert('versions', {'code': 'V1', 'name': '版本1', 'product_id': 1})
+        self.ds.insert('versions', {'name': '版本1', 'product_id': 1})
         self.ds.insert('domains', {'code': 'DOM1', 'name': '领域1', 'version_id': 1})
         self.ds.insert('sub_domains', {'code': 'SUB1', 'name': '子领域1', 'domain_id': 1})
         sm_id = self.ds.insert('service_modules', {'code': 'SVC1', 'name': '服务模块1', 'sub_domain_id': 1})
@@ -448,7 +447,8 @@ class TestEnrichmentEngineBusinessObjectIdFields:
         self.ds.execute("""
             CREATE TABLE IF NOT EXISTS versions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                code TEXT, name TEXT, product_id INTEGER
+                name TEXT, product_id INTEGER,
+                UNIQUE(product_id, name)
             )
         """)
         self.ds.execute("""
@@ -480,7 +480,7 @@ class TestEnrichmentEngineBusinessObjectIdFields:
     def _insert_test_data(self):
         """插入测试数据，返回 IDs"""
         self.ds.insert('products', {'code': 'PROD1', 'name': '产品A'})
-        ver_id = self.ds.insert('versions', {'code': 'V1', 'name': '版本1', 'product_id': 1})
+        ver_id = self.ds.insert('versions', {'name': '版本1', 'product_id': 1})
         dom_id = self.ds.insert('domains', {'code': 'DOM1', 'name': '资产云', 'version_id': ver_id})
         sub_id = self.ds.insert('sub_domains', {'code': 'SUB1', 'name': '资产管理与经营', 'domain_id': dom_id})
         sm_id = self.ds.insert('service_modules', {'code': 'SVC1', 'name': '资产管理服务', 'sub_domain_id': sub_id})
@@ -602,7 +602,7 @@ class TestEnrichmentEngineErrorHandling:
     def _create_minimal_tables(self):
         """创建最小化的表结构"""
         self.ds.execute("CREATE TABLE products (id INTEGER PRIMARY KEY, code TEXT, name TEXT)")
-        self.ds.execute("CREATE TABLE versions (id INTEGER PRIMARY KEY, code TEXT, name TEXT, product_id INTEGER)")
+        self.ds.execute("CREATE TABLE versions (id INTEGER PRIMARY KEY, name TEXT, product_id INTEGER, UNIQUE(product_id, name))")
         self.ds.commit()
 
     def test_null_source_field_handling(self):
@@ -653,7 +653,7 @@ class TestEnrichmentEngineErrorHandling:
     def test_cache_stats_after_operations(self):
         """测试操作后的缓存统计"""
         self.ds.insert('products', {'code': 'P1', 'name': '产品'})
-        self.ds.insert('versions', {'code': 'V1', 'name': '版本', 'product_id': 1})
+        self.ds.insert('versions', {'name': '版本', 'product_id': 1})
         self.ds.commit()
 
         record = {'id': 1, 'code': 'V1', 'product_id': 1}
@@ -696,7 +696,8 @@ class TestEnrichmentEngineServiceModuleIdFields:
         """)
         self.ds.execute("""
             CREATE TABLE IF NOT EXISTS versions (
-                id INTEGER PRIMARY KEY, code TEXT, name TEXT, product_id INTEGER
+                id INTEGER PRIMARY KEY, name TEXT, product_id INTEGER,
+                UNIQUE(product_id, name)
             )
         """)
         self.ds.execute("""
@@ -719,7 +720,7 @@ class TestEnrichmentEngineServiceModuleIdFields:
 
     def _insert_service_module_data(self):
         self.ds.insert('products', {'code': 'PROD1', 'name': '产品A'})
-        ver_id = self.ds.insert('versions', {'code': 'V1', 'name': '版本1', 'product_id': 1})
+        ver_id = self.ds.insert('versions', {'name': '版本1', 'product_id': 1})
         dom_id = self.ds.insert('domains', {'code': 'DOM1', 'name': '资产云', 'version_id': ver_id})
         sub_id = self.ds.insert('sub_domains', {'code': 'SUB1', 'name': '资产管理与经营', 'domain_id': dom_id})
         sm_id = self.ds.insert(

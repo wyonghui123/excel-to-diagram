@@ -10,6 +10,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+def _write_debug(tag, msg):
+    """[v1.1.5 DEBUG] 写调试信息到文件 (因 service_manager 不捕获 stdout)"""
+    try:
+        debug_file = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'logs', 'permission_debug.log')
+        debug_file = os.path.abspath(debug_file)
+        os.makedirs(os.path.dirname(debug_file), exist_ok=True)
+        with open(debug_file, 'a', encoding='utf-8') as f:
+            f.write(f'[{tag}] {msg}\n')
+    except Exception as e:
+        logger.debug(f'write_debug failed: {e}')
+
 AUTH_ENABLED = os.environ.get('AUTH_ENABLED', 'true').lower() in ('true', '1', 'yes')
 
 
@@ -144,11 +156,27 @@ class DataPermissionInterceptor(Interceptor):
                 data_conditions = engine.derive_data_conditions(role_id)
                 cond_expr = data_conditions.get(object_type)
                 if not cond_expr:
+                    # [FIX v1.0.7 2026-06-15] 角色无 dim scope 派生 = 跳过 (不进 OR-of-AND)
+                    # 业界标准 (SAP/Salesforce/Oracle): 多 role data scope 取并集, 但
+                    #   "无 dim scope" 不等于 "always_true 永真" (那是过度宽松).
+                    # 正确语义: 该 role 不参与 dim scope 组合, 让其他有 dim scope 的 role
+                    #   决定可见范围. 例: TEST333 (5434 公司可读 + 5970 采购管理) →
+                    #   5970 单独生效 → domain=703 范围内 8 条 (而非全部 29).
+                    # 之前 v1.0.6 加 always_true 占位: 5970 限制被吞 → 29 条 (违反隔离).
+                    logger.info(
+                        f'[_apply_dimension_scope_filter] user={context.user_id} role={role_id} '
+                        f'object_type={object_type} -> NO dim scope, SKIP (v1.0.7)'
+                    )
                     continue
 
                 # 4. 解析单段表达式 (支持 AND 复合)
                 conds = self._parse_compound_expr(cond_expr)
                 if not conds:
+                    # [FIX v1.0.7] 解析失败也跳过, 不阻断也不占位
+                    logger.info(
+                        f'[_apply_dimension_scope_filter] user={context.user_id} role={role_id} '
+                        f'object_type={object_type} -> parse empty, SKIP (v1.0.7)'
+                    )
                     continue
                 per_role_conditions.append(conds)
                 logger.info(
@@ -156,7 +184,9 @@ class DataPermissionInterceptor(Interceptor):
                     f'object_type={object_type} -> conds={conds}'
                 )
             except Exception as e:
+                # [FIX v1.0.7] 异常时跳过, 不阻断也不占位
                 logger.warning(f'[_apply_dimension_scope_filter] derive role_id={role_id} failed: {e}')
+                continue
 
         if not per_role_conditions:
             return False  # 没有 role 派生该 object_type, 走原 scope filter
@@ -187,6 +217,7 @@ class DataPermissionInterceptor(Interceptor):
         logger.info(
             f'[_apply_dimension_scope_filter] user={context.user_id} object_type={object_type} '
             f'roles_with_scope={len(per_role_conditions)} '
+            f'per_role_conditions={per_role_conditions} '
             f'(v1.0.5: AND visibility/owner overlay applied in next step)'
         )
         return True
@@ -209,9 +240,13 @@ class DataPermissionInterceptor(Interceptor):
           - "id IN (1, 2, 3)"                       → 单条 IN
           - "id = 1"                                 → 单条 EQ
           - "id IN (2,11,12) AND product_id IN (1,17)" → 多条 (AND 关系)
+          - [FIX v1.1.9] "(A IN (...) OR B IN (...))" → 单条 OR 段 (跨域 association 推导)
+              关系: source_bo_id / target_bo_id 任一端在 dim scope 内
+              → 嵌套 {'type': 'or', 'conditions': [A, B]}
 
         Returns:
-            list of {'field': str, 'operator': str, 'value' or 'values': ...}
+            list of {'field', 'operator', 'value'/'values'}
+            或 list 中含 {'type': 'or', 'conditions': [...]}
         """
         import re
         expr = expr.strip()
@@ -225,6 +260,25 @@ class DataPermissionInterceptor(Interceptor):
             part = part.strip()
             if not part:
                 continue
+            # [FIX v1.1.9] 段内含 OR: (A OR B) 形式 → 解析为 OR 嵌套 dict
+            if ' OR ' in part.upper():
+                or_match = re.match(r'^\((.*)\)$', part, re.IGNORECASE | re.DOTALL)
+                if or_match:
+                    inner = or_match.group(1)
+                    or_parts = re.split(r'\s+OR\s+', inner, flags=re.IGNORECASE)
+                    or_conds = []
+                    for op in or_parts:
+                        op = op.strip()
+                        if not op:
+                            continue
+                        parsed = DataPermissionInterceptor._parse_single_in_or_eq(op)
+                        if parsed is None:
+                            return []  # 解析失败: 整条 cond 失效
+                        or_conds.append(parsed)
+                    if or_conds:
+                        results.append({'type': 'or', 'conditions': or_conds})
+                    continue
+            # 单段: 直接解析
             parsed = DataPermissionInterceptor._parse_single_in_or_eq(part)
             if parsed is None:
                 # [FIX 2026-06-16] 解析失败不丢弃已成功解析的部分
@@ -237,16 +291,50 @@ class DataPermissionInterceptor(Interceptor):
 
     @staticmethod
     def _parse_single_in_or_eq(expr: str):
-        """解析单段 'field IN (a,b,c)' 或 'field = n'"""
+        """解析单段表达式
+
+        支持:
+          - 'id IN (1, 2, 3)' → 字面量列表
+          - 'id = 1' → 等值
+          - [FIX 2026-06-14] 'id IN (SELECT ...)' → in_subquery (DimensionScopeEngine 派生)
+        """
         import re
         expr = expr.strip()
 
-        # 'id IN (1, 2, 3)' 或 'product_id IN (1, 2)'
-        m = re.match(r'^(\w+)\s+IN\s*\(([^)]+)\)\s*$', expr, re.IGNORECASE)
+        # [FIX 2026-06-14] 优先处理 'field IN (SELECT ...)' 子查询形式
+        # 解析思路: 找到 'IN' 之后首个 '(', 用括号深度跟踪提取完整子查询
+        m = re.match(r'^(\w+)\s+IN\s*\(', expr, re.IGNORECASE)
         if m:
             field = m.group(1)
+            open_idx = m.end() - 1  # 指向 '('
+            # 括号深度跟踪, 提取完整 SELECT 子查询
+            depth = 0
+            close_idx = -1
+            for i in range(open_idx, len(expr)):
+                c = expr[i]
+                if c == '(':
+                    depth += 1
+                elif c == ')':
+                    depth -= 1
+                    if depth == 0:
+                        close_idx = i
+                        break
+            if close_idx == -1:
+                return None  # 括号不闭合, 解析失败
+            inner = expr[open_idx + 1:close_idx].strip()
+            trailing = expr[close_idx + 1:].strip()
+            if trailing:
+                return None  # IN (...) 之后不应有别的内容 (允许的 AND 在 _parse_compound_expr 处理)
+
+            # [FIX 2026-06-14] 子查询形式: field IN (SELECT ...)
+            if re.match(r'^SELECT\b', inner, re.IGNORECASE):
+                # 替换 SELECT 内的 ? 占位符为 $user.id (如果 scope 表达式里有)
+                inner_resolved = inner.replace('?', str(0))  # 占位符在执行时由 SQL 渲染层替换
+                return {'field': field, 'operator': 'in_subquery', 'value': inner_resolved}
+
+            # 字面量列表: field IN (1, 2, 3)
             try:
-                values = [int(x.strip()) for x in m.group(2).split(',') if x.strip()]
+                values = [int(x.strip()) for x in inner.split(',') if x.strip()]
             except ValueError:
                 return None
             if not values:
@@ -403,13 +491,72 @@ class DataPermissionInterceptor(Interceptor):
 
     @staticmethod
     def _parse_scope_expression(expr: str):
-        import re
+        """
+        括号感知的 OR 拆分。
 
-        or_parts = re.split(r'\s+OR\s+', expr, flags=re.IGNORECASE)
+        修复 v1.x: 之前用 re.split(r'\\s+OR\\s+', ...) 会把 IN (SELECT ... WHERE ... OR ...)
+        子查询里的 OR 也拆开, 产生 ``product_id IN (SELECT ... visibility = 'public'`` 这种
+        未闭合的左括号碎片, 下游 SQL 拼接后报 'incomplete input'。
+
+        新实现是手写状态机, 跟踪括号深度和字符串字面量, 只在 depth==0 且不在字符串内
+        时才识别顶层 OR 关键字。
+        """
+        or_parts = []
+        depth = 0
+        in_string = False
+        string_char = None
+        current = []
+        i = 0
+        n = len(expr)
+        while i < n:
+            c = expr[i]
+
+            # 字符串字面量内 (跳过 OR 关键字检测)
+            if in_string:
+                current.append(c)
+                if c == '\\' and i + 1 < n:
+                    current.append(expr[i + 1])
+                    i += 2
+                    continue
+                if c == string_char:
+                    in_string = False
+                i += 1
+                continue
+            if c in ("'", '"'):
+                in_string = True
+                string_char = c
+                current.append(c)
+                i += 1
+                continue
+
+            # 括号深度跟踪
+            if c == '(':
+                depth += 1
+            elif c == ')':
+                depth = max(depth - 1, 0)
+
+            # 仅在 depth=0 时把 OR 当顶层关键字
+            if depth == 0 and not in_string:
+                if (i + 2) <= n and expr[i:i + 2].upper() == 'OR' \
+                        and (i == 0 or expr[i - 1].isspace()) \
+                        and (i + 2 == n or expr[i + 2].isspace()):
+                    or_parts.append(''.join(current).strip())
+                    current = []
+                    i += 2
+                    continue
+
+            current.append(c)
+            i += 1
+
+        if current:
+            tail = ''.join(current).strip()
+            if tail:
+                or_parts.append(tail)
+
         if len(or_parts) > 1:
             or_group = []
             for part in or_parts:
-                or_group.append(DataPermissionInterceptor._parse_simple_condition(part.strip()))
+                or_group.append(DataPermissionInterceptor._parse_simple_condition(part))
             return [or_group]
 
         return [DataPermissionInterceptor._parse_simple_condition(expr.strip())]
@@ -469,8 +616,9 @@ class DataPermissionInterceptor(Interceptor):
             dict_conditions = []
             for c in filtered:
                 if isinstance(c, QueryCondition):
-                    cond_dict = {'field': c.field, 'operator': c.operator.value if hasattr(c.operator, 'value') else str(c.operator)}
-                    if c.operator.value if hasattr(c.operator, 'value') else str(c.operator) == 'in':
+                    op_val = c.operator.value if hasattr(c.operator, 'value') else str(c.operator)
+                    cond_dict = {'field': c.field, 'operator': op_val}
+                    if op_val == 'in':
                         cond_dict['values'] = c.values
                     else:
                         cond_dict['value'] = c.value
@@ -607,7 +755,7 @@ class DataPermissionInterceptor(Interceptor):
             return False
 
     def _add_owner_exception(self, context: 'ActionContext') -> None:
-        """[FIX v1.0.5 + v1.0.7] owner 例外: 用户对自己 owner 的资源始终可见
+        """[FIX v1.0.5 + v1.0.7 + v1.1.5] owner 例外: 用户对自己 owner 的资源始终可见
 
         即使 dimension scope 命中且 visibility=draft, 只要 owner=自己, 仍然可见。
 
@@ -624,18 +772,28 @@ class DataPermissionInterceptor(Interceptor):
         [FIX 2026-06-16] 当 dim scope 已应用时, owner 例外不绕过 dim scope
         旧逻辑: (dim_scope AND visibility) OR owner_id → owner_id 绕过 dim scope
         新逻辑: dim_scope AND (visibility OR owner_id) → owner_id 在 dim scope 内
+
+        [FIX v1.1.5 2026-06-15] HIERARCHY_CHAIN 化: version/domain/sub_domain
+        顶层没有 owner_id 字段, 但顶层 owner 在 product. 之前 _bo_has_owner_id
+        返回 False 导致 owner 例外失效 (e.g. TEST333 创建了 product 476 + V10,
+        看不到 V10).
+
+        修复: 即使 BO 无 owner_id 字段, 也尝试沿 HIERARCHY_CHAIN 向上查
+        product.owner_id. 用 build_owner_exception_subquery 生成链式 SQL 子查询
+        (e.g. version: 'id IN (SELECT id FROM versions WHERE product_id IN
+        (SELECT id FROM products WHERE owner_id = $user))').
+
+        降级: chain 上找不到 (BO 不在 chain) → 不加 owner 例外
         """
         if not context.user_id:
             return
-        if not self._bo_has_owner_id(context):
+
+        # [v1.1.5] 决定 owner 例外 SQL 表达式
+        owner_cond = self._build_owner_exception_cond(context)
+        if owner_cond is None:
+            # 既无 owner_id 字段, 又不在 HIERARCHY_CHAIN
             return
 
-        owner_cond = {
-            'field': 'owner_id',
-            'operator': 'eq',
-            'value': context.user_id,
-            'source': 'owner_exception',
-        }
         existing = list(context.extra.get('query_conditions', []))
         if not existing:
             context.extra['query_conditions'] = [owner_cond]
@@ -694,3 +852,53 @@ class DataPermissionInterceptor(Interceptor):
                 f'object_type={context.object_type} '
                 f'no dim scope, owner exception as top-level OR'
             )
+
+    def _build_owner_exception_cond(self, context: 'ActionContext') -> Optional[Dict]:
+        """[v1.1.5] 构造 owner 例外 condition (含 chain 追溯)
+
+        决策树:
+        1. BO 有 owner_id 字段 (e.g. product) → owner_id = $user 直接
+        2. BO 在 HIERARCHY_CHAIN (e.g. version/domain/sub_domain) →
+           用 build_owner_exception_subquery 生成链式 SQL 子查询
+        3. 都不满足 (e.g. relationship) → None (caller 不加 owner 例外)
+
+        Returns:
+            QueryCondition dict 或 None
+        """
+        if not context.user_id:
+            return None
+
+        # 路径 1: BO 直接有 owner_id 字段 (跟之前行为一致)
+        if self._bo_has_owner_id(context):
+            return {
+                'field': 'owner_id',
+                'operator': 'eq',
+                'value': context.user_id,
+                'source': 'owner_exception',
+            }
+
+        # 路径 2: [v1.1.5] BO 在 HIERARCHY_CHAIN, 沿 chain 查 product.owner
+        try:
+            from meta.services.chain_owner_resolver import (
+                is_in_chain,
+                build_owner_exception_subquery,
+            )
+            if not is_in_chain(context.object_type):
+                return None
+
+            subquery_expr = build_owner_exception_subquery(
+                context.data_source, context.object_type, context.user_id
+            )
+            if not subquery_expr:
+                return None
+
+            # 表达为 in_subquery 条件
+            return {
+                'field': 'id',
+                'operator': 'in_subquery',
+                'value': subquery_expr,
+                'source': 'owner_exception_chain',
+            }
+        except Exception as e:
+            logger.debug(f'[_build_owner_exception_cond] chain resolve failed: {e}')
+            return None

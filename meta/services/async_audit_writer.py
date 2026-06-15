@@ -54,6 +54,10 @@ class AsyncAuditWriter:
             'queue_size': 0,
         }
         self._stats_lock = threading.Lock()
+        # [v3.18 Layer 1] thread-local storage: 每个 worker thread 自己开 SQLite 连接,
+        # 避免跨线程访问 main thread 创建的 SQLite connection (不同 Python 解释器
+        # 对 sqlite3 跨线程限制不同 — pythoncore-3.14-64 严, WindowsApps python 宽松)
+        self._tls = threading.local()
         if self._running and not _TESTING_MODE:
             self._start_workers()
         elif _TESTING_MODE:
@@ -61,6 +65,64 @@ class AsyncAuditWriter:
 
     def set_data_source(self, data_source):
         self._ds = data_source
+
+    def _get_thread_ds(self):
+        """[v3.18 Layer 1] 拿到当前 thread 专属的 data_source.
+
+        优先用 thread-local (worker 自己开的), 失败回退到主 ds.
+        """
+        # 1) thread-local 优先 (worker 自己开的 connection, 跨线程安全)
+        tls_ds = getattr(self._tls, 'ds', None)
+        if tls_ds is not None:
+            return tls_ds
+        # 2) 回退: 用主 ds (audit_logger 自己管的, 可能是 main thread 的)
+        if self._ds is not None:
+            return self._ds
+        return None
+
+    def _open_thread_local_connection(self, audit_fn):
+        """[v3.18 Layer 1] 给当前 worker thread 打开独立 SQLite 连接.
+
+        策略: 提取 audit_fn 闭包里的 action_executor.ds 的 path, 重建 sqlite3 连接.
+        跨 Python 解释器 (pythoncore-3.14-64 vs WindowsApps) 都用 check_same_thread=False
+        + 自管 connection, 避免 'SQLite objects created in a thread...' 异常.
+        """
+        try:
+            import sqlite3 as _sqlite3
+            # 优先从闭包 audit_fn 里拿 ds 的 db path
+            db_path = None
+            try:
+                # audit_fn 是 lambda, 闭包 cell 里有 self (action_executor)
+                cells = audit_fn.__closure__ or []
+                for cell in cells:
+                    obj = cell.cell_contents
+                    if hasattr(obj, 'ds') and obj.ds is not None:
+                        # obj 是 action_executor, 拿 ds.db_path
+                        candidate = getattr(obj.ds, 'database', None) or getattr(obj.ds, 'db_path', None)
+                        if candidate:
+                            db_path = candidate
+                            break
+            except Exception:
+                pass
+            # 兜底: 从 _ds 拿
+            if not db_path and self._ds is not None:
+                db_path = getattr(self._ds, 'database', None) or getattr(self._ds, 'db_path', None)
+            if not db_path:
+                # 最后兜底: 用默认 path
+                from pathlib import Path
+                db_path = str(Path(__file__).parent.parent / 'architecture.db')
+
+            # 打开独立连接 (worker thread 自己的, 跨线程安全)
+            conn = _sqlite3.connect(db_path, check_same_thread=False, timeout=30.0)
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=30000")
+            # 包成 ds-like 适配器, 跟 action_executor.ds 接口一致
+            ds = _ThreadLocalDS(conn, db_path)
+            self._tls.ds = ds
+            return ds
+        except Exception as e:
+            logger.error("Failed to open thread-local SQLite connection: %s", str(e))
+            return None
 
     def _start_workers(self):
         for i in range(AUDIT_ASYNC_MAX_WORKERS):
@@ -144,6 +206,11 @@ class AsyncAuditWriter:
                 continue
 
             try:
+                # [v3.18 Layer 1] 在 worker thread 上, 第一次执行前打开 thread-local 连接.
+                # 解决 'SQLite objects created in a thread can only be used in that same thread'
+                if getattr(self._tls, 'ds', None) is None:
+                    self._open_thread_local_connection(task['fn'])
+
                 self._write_with_retry(
                     task['fn'],
                     trace_id=task.get('trace_id'),
@@ -198,13 +265,15 @@ class AsyncAuditWriter:
 
         last_error = None
         max_retries = 1 if _TESTING_MODE else AUDIT_MAX_RETRIES
+        # [v3.18 Layer 1] 优先用 thread-local ds, 回退到主 ds
+        thread_ds = self._get_thread_ds()
         for attempt in range(max_retries):
             try:
-                if not _read_is_connected(self._ds):
-                    logger.warning("Database not connected, skipping audit write")
+                if not _read_is_connected(thread_ds):
+                    logger.warning("Database not connected (thread=%s), skipping audit write", threading.current_thread().name)
                     return False
 
-                in_txn = getattr(self._ds, 'in_transaction', False)
+                in_txn = getattr(thread_ds, 'in_transaction', False)
 
                 if in_txn:
                     if not callable(audit_fn):
@@ -219,8 +288,8 @@ class AsyncAuditWriter:
                     audit_fn(trace_id=trace_id, transaction_id=transaction_id,
                              user_id=user_id, user_name=user_name,
                              ip_address=ip_address, user_agent=user_agent)
-                elif hasattr(self._ds, 'begin_transaction'):
-                    self._ds.begin_transaction()
+                elif hasattr(thread_ds, 'begin_transaction'):
+                    thread_ds.begin_transaction()
                     try:
                         if not callable(audit_fn):
                             logger.error(
@@ -233,10 +302,10 @@ class AsyncAuditWriter:
                         audit_fn(trace_id=trace_id, transaction_id=transaction_id,
                                  user_id=user_id, user_name=user_name,
                                  ip_address=ip_address, user_agent=user_agent)
-                        self._ds.commit()
+                        thread_ds.commit()
                     except Exception:
                         try:
-                            self._ds.rollback()
+                            thread_ds.rollback()
                         except Exception:
                             pass
                         raise
@@ -317,11 +386,17 @@ class AsyncAuditWriter:
                                     attempt + 1, delay, error_str)
                         time.sleep(delay)
 
-        self._persist_failed(audit_fn, trace_id, transaction_id, str(last_error))
+        self._persist_failed(
+            audit_fn, trace_id, transaction_id, str(last_error),
+            user_id=user_id, user_name=user_name,
+            ip_address=ip_address, user_agent=user_agent,
+        )
         return False
 
     def _persist_failed(self, audit_fn: Callable, trace_id: str = None,
-                        transaction_id: str = None, error_message: str = ""):
+                        transaction_id: str = None, error_message: str = "",
+                        user_id: Any = None, user_name: str = None,
+                        ip_address: str = None, user_agent: str = None):
         with self._stats_lock:
             self._stats['failed'] += 1
 
@@ -330,50 +405,127 @@ class AsyncAuditWriter:
             AUDIT_MAX_RETRIES, trace_id, error_message
         )
 
+        # [v3.18 Layer 3] 从 audit_fn 闭包提取 obj 信息, 强制写 AUDIT_WRITE_FAILED 一条 audit
+        obj_info = self._extract_obj_info(audit_fn)
+
         try:
-            self._write_failed_record(trace_id, transaction_id, error_message)
+            self._write_failed_record(
+                trace_id, transaction_id, error_message,
+                obj_info=obj_info,
+                user_id=user_id, user_name=user_name,
+                ip_address=ip_address, user_agent=user_agent,
+            )
         except Exception as e:
             logger.error("Failed to persist audit failure record: %s", str(e))
 
+    @staticmethod
+    def _extract_obj_info(audit_fn: Callable) -> Dict[str, Any]:
+        """[v3.18 Layer 3] 从 audit_fn 闭包 cell 里提取 object_type/object_id/action.
+
+        audit_fn 是 action_executor._do_create 内部定义的 lambda, 闭包 cell 里
+        有 meta_object / last_id / data 等. 用 inspect 解出来给 AUDIT_WRITE_FAILED 用.
+        """
+        info: Dict[str, Any] = {"object_type": "__audit_failure__", "object_id": "0", "action": "UNKNOWN"}
+        try:
+            if not callable(audit_fn):
+                return info
+            cells = audit_fn.__closure__ or []
+            for cell in cells:
+                try:
+                    obj = cell.cell_contents
+                except Exception:
+                    continue
+                # obj 是 action_executor 实例
+                if hasattr(obj, 'ds') and hasattr(obj, 'audit_logger'):
+                    # 这是 self, 从它看能不能拿到更多 — 不一定有
+                    continue
+                # 拿 cell 内的字符串/对象 (meta_object.id, last_id, data, etc.)
+                if isinstance(obj, str) and obj in ('CREATE', 'UPDATE', 'DELETE'):
+                    info['action'] = obj
+                # 找 meta_object-like (有 .id 属性 + .table_name 之类)
+                if hasattr(obj, 'id') and hasattr(obj, 'table_name') and callable(getattr(obj, 'get_persistent_fields', None)):
+                    try:
+                        info['object_type'] = str(obj.id)
+                    except Exception:
+                        pass
+                # 找 last_id-like (int 或 str)
+                if isinstance(obj, (int, str)) and not isinstance(obj, bool):
+                    # 可能是 last_id (假设在 meta_object 之后)
+                    if info['object_type'] != '__audit_failure__':
+                        try:
+                            info['object_id'] = str(obj)
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+        return info
+
     def _write_failed_record(self, trace_id: str = None,
                              transaction_id: str = None,
-                             error_message: str = ""):
-        if self._ds is None:
+                             error_message: str = "",
+                             obj_info: Dict[str, Any] = None,
+                             user_id: Any = None, user_name: str = None,
+                             ip_address: str = None, user_agent: str = None):
+        # [v3.18 Layer 1] 优先用 thread-local ds
+        thread_ds = self._get_thread_ds()
+        if thread_ds is None:
             return
+        if obj_info is None:
+            obj_info = {"object_type": "__audit_failure__", "object_id": "0", "action": "UNKNOWN"}
 
+        # [v3.18 Layer 3] 用 obj_info 填 object_type/id/action, 不再写死的 __audit_failure__
         failed_record = {
-            "object_type": "__audit_failure__",
-            "object_id": 0,
+            "object_type": obj_info.get("object_type", "__audit_failure__"),
+            "object_id": obj_info.get("object_id", "0"),
             "action": "AUDIT_WRITE_FAILED",
             "field_name": "",
             "old_value": "",
-            "new_value": "",
-            "user_id": None,
-            "user_name": "system",
-            "ip_address": "",
-            "user_agent": "",
+            "new_value": json.dumps({
+                "original_action": obj_info.get("action", "UNKNOWN"),
+                "error": error_message[:500] if error_message else "",
+            }, ensure_ascii=False),
+            "user_id": user_id,
+            "user_name": user_name or "system",
+            "ip_address": ip_address or "",
+            "user_agent": user_agent or "",
             "created_at": datetime.now().isoformat(),
             "extra_data": json.dumps({
                 "original_trace_id": trace_id,
                 "original_transaction_id": transaction_id,
-            }),
+                "original_object_type": obj_info.get("object_type"),
+                "original_object_id": obj_info.get("object_id"),
+                "original_action": obj_info.get("action"),
+                "failure_kind": "AUDIT_WRITE_FAILED",
+            }, ensure_ascii=False),
             "trace_id": trace_id,
             "transaction_id": transaction_id,
             "status": "failed",
             "retry_count": AUDIT_MAX_RETRIES,
-            "error_message": error_message,
+            "error_message": error_message[:500] if error_message else "",
             "agent_id": None,
             "agent_session_id": None,
             "tool_call_id": None,
             "agent_reasoning": None,
+            # [v3.18 FR-005] 标记 outcome=failure
+            "outcome": "failure",
+            # [v3.18 FR-003/004] system category + ERROR level
+            "log_category": "system",
+            "log_level": "ERROR",
         }
 
         try:
-            self._ds.insert("audit_logs", failed_record)
-            if not self._ds.in_transaction:
-                self._ds.commit()
-        except Exception:
-            pass
+            thread_ds.insert("audit_logs", failed_record)
+            if not thread_ds.in_transaction:
+                thread_ds.commit()
+            logger.warning(
+                "[Layer 3] AUDIT_WRITE_FAILED recorded: object_type=%s object_id=%s action=%s error=%s",
+                obj_info.get("object_type"),
+                obj_info.get("object_id"),
+                obj_info.get("action"),
+                (error_message or "")[:200],
+            )
+        except Exception as e:
+            logger.error("Failed to insert AUDIT_WRITE_FAILED record: %s", str(e))
 
     def get_stats(self) -> Dict[str, Any]:
         with self._stats_lock:
@@ -448,3 +600,75 @@ class AsyncAuditWriter:
 
 
 async_audit_writer = AsyncAuditWriter()
+
+
+class _ThreadLocalDS:
+    """[v3.18 Layer 1] worker thread 专用的 ds 适配器.
+
+    把 sqlite3.Connection 包装成跟 action_executor.ds 兼容的接口
+    (insert / execute / commit / in_transaction / is_connected / begin_transaction / rollback),
+    解决 'SQLite objects created in a thread can only be used in that same thread' 问题.
+    """
+    def __init__(self, conn, db_path):
+        self._conn = conn
+        self.database = db_path
+        self.db_path = db_path
+        self._in_txn = False
+
+    @property
+    def is_connected(self):
+        try:
+            self._conn.execute("SELECT 1").fetchone()
+            return True
+        except Exception:
+            return False
+
+    @property
+    def in_transaction(self):
+        return self._in_txn
+
+    def begin_transaction(self):
+        try:
+            self._conn.execute("BEGIN")
+            self._in_txn = True
+        except Exception:
+            self._in_txn = False
+
+    def commit(self):
+        try:
+            self._conn.commit()
+        finally:
+            self._in_txn = False
+
+    def rollback(self):
+        try:
+            self._conn.rollback()
+        finally:
+            self._in_txn = False
+
+    def execute(self, sql, params=None):
+        """返回 sqlite3.Cursor (兼容 fetchall / fetchone)"""
+        if params is None:
+            return self._conn.execute(sql)
+        return self._conn.execute(sql, params)
+
+    def executemany(self, sql, seq):
+        return self._conn.executemany(sql, seq)
+
+    def insert(self, table, record):
+        """兼容 ds.insert(table, dict) — 跟 SqliteDataSource 同语义."""
+        if not record:
+            return
+        cols = list(record.keys())
+        placeholders = ','.join('?' * len(cols))
+        col_list = ','.join(f'"{c}"' for c in cols)
+        values = [record[c] for c in cols]
+        sql = f'INSERT INTO "{table}" ({col_list}) VALUES ({placeholders})'
+        cur = self._conn.execute(sql, values)
+        return cur.lastrowid
+
+    def close(self):
+        try:
+            self._conn.close()
+        except Exception:
+            pass

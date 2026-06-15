@@ -20,6 +20,8 @@ from meta.core.interceptors.business_log_interceptor import BusinessLogIntercept
 from meta.core.interceptors.security_log_interceptor import SecurityLogInterceptor
 from meta.core.interceptors.operation_log_interceptor import OperationLogInterceptor
 from meta.core.interceptors.permission_interceptor import PermissionInterceptor
+from meta.core.interceptors.write_scope_interceptor import WriteScopeInterceptor
+from meta.core.interceptors.owner_chain_interceptor import OwnerChainInterceptor
 
 __all__ = [
     'Interceptor',
@@ -37,4 +39,6 @@ __all__ = [
     'SecurityLogInterceptor',
     'OperationLogInterceptor',
     'PermissionInterceptor',
+    'WriteScopeInterceptor',
+    'OwnerChainInterceptor',
 ]

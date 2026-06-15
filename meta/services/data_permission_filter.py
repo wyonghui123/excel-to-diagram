@@ -19,19 +19,14 @@ class DataPermissionFilter:
                      conditions: List[QueryCondition]) -> List[QueryCondition]:
         from meta.services.auth_middleware import is_admin, get_current_user
 
-        print(f"[DataPermFilter] apply_filter called: object_type={object_type}, user_id={user_id}")
         current_user = get_current_user()
-        print(f"[DataPermFilter] Current user: {current_user}")
 
         if is_admin():
-            print(f"[DataPermFilter] User is admin, skipping filter")
             return conditions
 
         allowed_ids = self.perm_service.get_allowed_resource_ids(user_id, object_type)
-        print(f"[DataPermFilter] Allowed IDs for {object_type}: {allowed_ids}")
 
         if not allowed_ids:
-            print(f"[DataPermFilter] No data permissions configured, allowing all")
             return conditions
 
         if len(allowed_ids) == 1:

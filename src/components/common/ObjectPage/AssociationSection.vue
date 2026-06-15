@@ -196,7 +196,14 @@ const manyToManyColumns = computed(() => {
 })
 
 const manyToManyFetcher = computed(() => {
-  return (params) => boService.queryAssociations(props.objectType, props.objectId, props.section.assocName, params)
+  return (params) => {
+    // [GUARD 2026-06-14] objectId='new' 是创建态, 后端 /bo/<type>/<id>/associations/<name> 期望 int id
+    // 不拦截会触发 GET /api/v2/bo/role/new/associations/assigned_groups -> 404
+    if (!hasRealObjectId.value) {
+      return Promise.resolve({ success: true, data: { items: [], total: 0, counts: {} } })
+    }
+    return boService.queryAssociations(props.objectType, props.objectId, props.section.assocName, params)
+  }
 })
 
 const manyToManyOptions = computed(() => ({
@@ -289,7 +296,13 @@ const associationFilters = computed(() => {
 })
 
 const associationFetcher = computed(() => {
-  return (params) => boService.queryAssociations(props.objectType, props.objectId, props.section.assocName, params)
+  return (params) => {
+    // [GUARD 2026-06-14] 同 manyToManyFetcher, 创建态 objectId='new' 拦截
+    if (!hasRealObjectId.value) {
+      return Promise.resolve({ success: true, data: { items: [], total: 0, counts: {} } })
+    }
+    return boService.queryAssociations(props.objectType, props.objectId, props.section.assocName, params)
+  }
 })
 
 const associationOptions = computed(() => {
@@ -457,6 +470,12 @@ let _mergedLoadVersion = 0
 
 async function loadMergedRelationships() {
   if (!props.objectId) return
+  // [GUARD 2026-06-14] 创建态 objectId='new' 拦截, 避免 source_bo_id='new' 触发后端异常
+  if (!hasRealObjectId.value) {
+    mergedRelationsData.value = []
+    mergedRelationsLoading.value = false
+    return
+  }
   const version = ++_mergedLoadVersion
   mergedRelationsLoading.value = true
   try {

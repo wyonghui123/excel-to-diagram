@@ -269,7 +269,7 @@ class TestExecuteOlapQuery:
     
     def _insert_test_data(self):
         self.ds.insert('products', {'code': 'PROD1', 'name': '产品1'})
-        self.ds.insert('versions', {'code': 'V1', 'name': '版本1', 'product_id': 1})
+        self.ds.insert('versions', {'name': '版本1', 'product_id': 1})
         self.ds.insert('domains', {'code': 'DOM1', 'name': '领域1', 'version_id': 1})
         self.ds.insert('domains', {'code': 'DOM2', 'name': '领域2', 'version_id': 1})
         self.ds.insert('sub_domains', {'code': 'SUB1', 'name': '子领域1', 'domain_id': 1})

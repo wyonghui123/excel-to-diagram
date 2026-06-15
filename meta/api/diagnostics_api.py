@@ -116,6 +116,23 @@ def build_diagnostics() -> dict:
 
     # 4. recovery_suggestions (基于 health)
     suggestions = []
+
+    # [v2.1] 5. interceptor warnings (写 scope / 父读 / 链 read)
+    # [FIX] 主动初始化 4 类 key, 即便为空数组 (便于前端探测)
+    interceptor_warnings = {
+        'write_scope_warnings': [],
+        'parent_read_warnings': [],
+        'chain_read_warnings': [],
+        'chain_instance_out_of_scope': [],
+    }
+    try:
+        from meta.core.diagnostics import get_diagnostics as _get_diag
+        diag_state = _get_diag()
+        for key in list(interceptor_warnings.keys()):
+            if key in diag_state:
+                interceptor_warnings[key] = diag_state[key]
+    except Exception:
+        pass
     if health_simple.get('wal_size', '0') and 'MB' in str(health_simple['wal_size']):
         wal_mb = float(str(health_simple['wal_size']).replace('MB', '').strip() or 0)
         if wal_mb > 1.0:
@@ -145,6 +162,8 @@ def build_diagnostics() -> dict:
             'error_codes': error_codes_list,
             'error_codes_count': len(error_codes_list),
             'recovery_suggestions': suggestions,
+            # [v2.1] interceptor 警告 (WriteScope / parent read / chain read)
+            'interceptor_warnings': interceptor_warnings,
             'generated_at': datetime.utcnow().isoformat() + 'Z',
             'trace_id': trace_id,
         }

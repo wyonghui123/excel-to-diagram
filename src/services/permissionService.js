@@ -5,7 +5,7 @@
  * 消除 7 个 Vue 组件中的 30 处 fetch() 调用和 8 类重复业务逻辑
  */
 
-import { apiV1 } from '@/utils/httpClient'
+import { apiV1, apiV2 } from '@/utils/httpClient'
 
 // ==================== 常量 ====================
 
@@ -146,40 +146,46 @@ export async function loadRole(roleId) {
 
 /**
  * 加载管理维度列表
+ * [MIGRATION 2026-06-14] v1 顶层 CRUD 已 sunset (410), 改调 v2 /api/v2/bo/management_dimension
  * @param {object} [params]
  * @returns {Promise<object>}
  */
 export async function loadDimensions(params = {}) {
-  return await apiV1.get('/management-dimensions', { params })
+  return await apiV2.get('/bo/management_dimension', { params })
 }
 
 /**
  * 加载维度字段
+ * [MIGRATION 2026-06-14] /fields 端点后端 v1/v2 均未实现, 保留函数接口但加 TODO
  * @param {number|string} dimensionId
  * @returns {Promise<object>}
  */
 export async function loadDimensionFields(dimensionId) {
-  return await apiV1.get(`/management-dimensions/${dimensionId}/fields`)
+  // TODO: 后端 /api/v2/bo/management_dimension/{id}/fields 端点尚未实现
+  //       暂时返回空响应避免前端崩溃, 后续补全后端
+  return Promise.resolve({ success: false, data: { fields: [] }, message: '/fields 端点待实现' })
 }
 
 /**
  * 加载维度实例（Value Help）
+ * [MIGRATION 2026-06-14] v1 无此子路径, 改 v2
  * @param {string} dimCode - 维度代码
  * @param {object} [params] - search, limit, filter_* 等
  * @returns {Promise<object>}
  */
 export async function loadDimensionValues(dimCode, params = {}) {
-  return await apiV1.get(`/permission-rules/dimensions/${dimCode}/values`, { params })
+  return await apiV2.get(`/bo/management_dimension/dimensions/${dimCode}/values`, { params })
 }
 
 /**
  * 加载维度实例（分页，用于 DimensionScopePanel）
+ * [MIGRATION 2026-06-14] v1 无 management-dimensions blueprint, 改 v2
  * @param {number|string} dimensionId
  * @param {object} [params] - page, page_size, search, filter_*
  * @returns {Promise<object>}
  */
 export async function loadDimensionInstances(dimensionId, params = {}) {
-  return await apiV1.get(`/management-dimensions/${dimensionId}/instances`, { params })
+  return await apiV2.get(`/bo/management_dimension/${dimensionId}/instances`, { params })
 }
 
 /**
@@ -317,29 +323,32 @@ export async function loadOverlapWarnings(roleId, resourceType) {
 
 /**
  * 加载条件规则列表
+ * [MIGRATION 2026-06-14] v1 顶层 CRUD 已 sunset (410), 改调 v2 /api/v2/permission-rules
  * @param {object} [params] - role_id 等
  * @returns {Promise<object>}
  */
 export async function loadConditionRules(params = {}) {
-  return await apiV1.get('/permission-rules', { params })
+  return await apiV2.get('/permission-rules', { params })
 }
 
 /**
  * 删除条件规则
+ * [MIGRATION 2026-06-14] 改调 v2
  * @param {number} ruleId
  * @returns {Promise<object>}
  */
 export async function deleteConditionRule(ruleId) {
-  return await apiV1.delete(`/permission-rules/${ruleId}`)
+  return await apiV2.delete(`/permission-rules/${ruleId}`)
 }
 
 /**
  * 保存条件规则
+ * [MIGRATION 2026-06-14] 改调 v2
  * @param {object} rule
  * @returns {Promise<object>}
  */
 export async function saveConditionRule(rule) {
-  return await apiV1.post('/permission-rules', rule)
+  return await apiV2.post('/permission-rules', rule)
 }
 
 /**
@@ -366,6 +375,10 @@ export async function batchDataPermissions(data) {
  * @param {number} groupId
  * @param {object} data
  * @returns {Promise<object>}
+ * @deprecated 此处使用 v1 子路径 /user-groups/{id}/data-permissions.
+ *   v1 顶层 5 个端点 (GET/POST/PUT/DELETE /user-groups) 已 sunset (410),
+ *   迁移到 /api/v2/bo/user_group. 该子路径暂未 sunset, 仍可使用;
+ *   后续如该子路径也 sunset, 需迁移到 v2 等价接口 (e.g. data-permission BO action).
  */
 export async function addGroupDataPermission(groupId, data) {
   return await apiV1.post(`/user-groups/${groupId}/data-permissions`, data)

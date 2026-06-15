@@ -171,7 +171,7 @@ class DimensionObjectMappingLoader:
     def get_field_for_bo(
         self, dimension_code: str, bo_id: str
     ) -> Optional[Dict[str, Any]]:
-        """查询某个 BO 是否承载了该维度
+        """查询某个 BO 是否承载了该维度 (返回第一个匹配)
 
         Args:
             dimension_code: 维度标识
@@ -184,6 +184,28 @@ class DimensionObjectMappingLoader:
             if entry.get('bo') == bo_id:
                 return entry
         return None
+
+    def get_bindings_for_bo(
+        self, dimension_code: str, bo_id: str
+    ) -> List[Dict[str, Any]]:
+        """[V1.1.9 2026-06-15] 查询某个 BO 承载该维度的所有 binding (支持多 binding OR 合并)
+
+        用途: relationship 有 source_bo_id + target_bo_id 两个字段都承载同一维度
+              (例: 采购订单-应付单据 跨域关系), 需要 OR 合并:
+              source_bo_id IN (dim scope chain) OR target_bo_id IN (dim scope chain)
+              表达"任一端在 dim scope 内"语义 (跨域 association 推导)
+
+        Args:
+            dimension_code: 维度标识
+            bo_id: 业务对象标识
+
+        Returns:
+            [{bo, field, filter_type}, ...] (空 list 表示不承载)
+        """
+        return [
+            entry for entry in self.get_applies_to(dimension_code)
+            if entry.get('bo') == bo_id
+        ]
 
     def reload(self) -> None:
         """强制重载配置（用于运行时 reload）"""

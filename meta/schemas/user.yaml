@@ -73,7 +73,8 @@ fields:
     name: 邮箱
     type: string
     db_column: email
-    description: 用户邮箱
+    required: true
+    description: 用户邮箱 (创建时必填, BMRD 2026-06-14)
     semantics:
       meaning: 用户邮箱地址
       export_visible: true
@@ -108,7 +109,8 @@ fields:
     name: 显示名称
     type: string
     db_column: display_name
-    description: 用户显示名称
+    required: true
+    description: 用户显示名称 (创建时必填, BMRD 2026-06-14)
     semantics:
       meaning: 用户在界面上的显示名称
       display_name: true

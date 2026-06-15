@@ -1,5 +1,15 @@
 <template>
   <nav class="step-navigator">
+    <!-- 返回架构管理按钮 -->
+    <button
+      v-if="showBackToArch"
+      class="nav-btn nav-btn--back"
+      @click.stop="$emit('back-to-arch')"
+    >
+      <AppIcon name="arrow-left" size="sm" />
+      <span class="nav-btn__text">返回架构管理</span>
+    </button>
+
     <!-- 上一步按钮 -->
     <button
       v-if="hasPrev"
@@ -82,9 +92,13 @@ export default {
     nextLabel: {
       type: String,
       default: '下一步'
+    },
+    showBackToArch: {
+      type: Boolean,
+      default: false
     }
   },
-  emits: ['change', 'prev', 'next'],
+  emits: ['change', 'prev', 'next', 'back-to-arch'],
   methods: {
     handleStepClick(index) {
       if (!this.canAccess(index)) {
@@ -95,15 +109,17 @@ export default {
     canAccess(index) {
       return index <= this.current + 1
     },
-    // 关键修复 v35: 控制哪些步骤在导航上显示统计
-    //   用户的 3 步骤模式: 类型(3)→配置(4)→展示(5)
-    //   反馈: 类型这边的统计去掉, 配置这边进行优化
-    //   决策: 只在 originalIndex === 4 (配置) 显示 5 指标, 其他都隐藏
+    // 关键修复 v40: 3 步骤模式 (类型→配置→展示, 索引 0/1/2)
+    //   - 类型 (0): 不显示 (用户反馈"类型这边的统计去掉")
+    //   - 配置 (1): 显示 5 指标 (领域/子域/服务/对象/关系)
+    //   - 展示 (2): 不显示
+    // 6 步骤模式 (导入/中心/关系) 已废弃, 移除 isCenter/isIncremental 相关逻辑
     shouldShowStats(originalIndex) {
-      return originalIndex === 4
+      // 3 步骤模式下 originalIndex 与 index 相同 (0/1/2)
+      return originalIndex === 1  // 只在配置步骤显示
     },
     hasStats(stats, index) {
-      if (index === 4) {
+      if (index === 1) {
         return stats && (
           (stats.serviceModules > 0) ||
           (stats.businessObjects > 0) ||
@@ -113,21 +129,12 @@ export default {
           (stats.subDomains > 0)
         )
       }
-      if (index === 2) {
-        return stats && stats.businessObjects >= 0
-      }
-      return stats && stats.businessObjects > 0
+      return false  // 类型/展示步骤不显示
     },
     formatMinimalStats(stats, index) {
       if (!stats) return ''
-      const isCenter = index === 1
-      const isIncremental = index === 2
-      const prefix = isIncremental ? '+' : ''
-      const isConfig = index === 4
-
-      if (isConfig) {
-        // 关键修复 v35: 配置步骤显示完整 5 指标 (领域/子域/服务/对象/关系)
-        //   用户反馈"配置这边的进行优化" - 优化为完整 5 指标展示
+      if (index === 1) {
+        // 配置步骤: 显示完整 5 指标 (领域/子域/服务/对象/关系)
         const parts = []
         if (stats.domains > 0) parts.push(`${stats.domains}领域`)
         if (stats.subDomains > 0) parts.push(`${stats.subDomains}子域`)
@@ -136,33 +143,7 @@ export default {
         parts.push(`${stats.objectRelations}关系`)
         return parts.join(' · ')
       }
-
-      if (isCenter) {
-        const parts = []
-        if (stats.domains > 0) parts.push(`${stats.domains}领域`)
-        if (stats.subDomains > 0) parts.push(`${stats.subDomains}子域`)
-        parts.push(`${stats.businessObjects}对象`)
-        return parts.join(' · ')
-      }
-
-      if (isIncremental) {
-        const parts = []
-        parts.push(`${prefix}${stats.domains || 0}领域`)
-        parts.push(`${prefix}${stats.subDomains || 0}子域`)
-        parts.push(`${prefix}${stats.businessObjects || 0}对象`)
-        if (stats.externalBusinessObjects > 0) parts.push(`${prefix}${stats.externalBusinessObjects}外部对象`)  // v29
-        parts.push(`${prefix}${stats.objectRelations || 0}关系`)
-        return parts.join(' · ')
-      }
-
-      // 关键修复 v35: 类型 (originalIndex=3) 已通过 shouldShowStats 拦截, 这里不会执行
-      //   保留这段是作为 fallback (万一 shouldShowStats 逻辑改了)
-      const parts = []
-      if (stats.domains > 0) parts.push(`${stats.domains}领域`)
-      if (stats.subDomains > 0) parts.push(`${stats.subDomains}子域`)
-      parts.push(`${stats.businessObjects}对象`)
-      if (stats.objectRelations > 0) parts.push(`${stats.objectRelations}关系`)
-      return parts.join(' · ')
+      return ''
     }
   }
 }

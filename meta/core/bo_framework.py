@@ -56,7 +56,8 @@ class BOFramework:
         self._action_handlers: Dict[str, Dict[str, Any]] = {}
         self._display_name_service = DisplayNameService(registry)
         self._ui_config_builder = UIConfigBuilder(
-            self._display_name_service, BOFramework._infer_navigation)
+            self._display_name_service, BOFramework._infer_navigation,
+            data_source=self._data_source)
         self._async_engine = None
         self._async_audit_writer = None
 

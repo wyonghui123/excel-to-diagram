@@ -102,8 +102,12 @@ def get_dimension_scopes(role_id):
 def save_dimension_scopes(role_id):
     try:
         data = request.get_json()
-        if not data:
-            return jsonify({'success': False, 'error': '\u8bf7\u6c42\u4f53\u4e3a\u7a7a'}), 400
+        # [FIX 2026-06-15] 空 list 是合法操作 (用户清空维度范围), 不应 400
+        # 之前用 `if not data` 把空 list 当 400, 导致"移除 dim value 后保存"必失败
+        if data is None:
+            return jsonify({'success': False, 'error': '请求体为空'}), 400
+        if not isinstance(data, list):
+            return jsonify({'success': False, 'error': '请求体必须为 list'}), 400
         ds = _ds()
         with ds.transaction():
             ds.execute("DELETE FROM role_dimension_scopes WHERE role_id = ?", [role_id])

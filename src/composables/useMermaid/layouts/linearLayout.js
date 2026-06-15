@@ -1,12 +1,15 @@
 import { sortContainersByPosition } from './positionUtils.js'
 import { formatContainerTitle } from '../../../utils/formatContainerTitle.js'
+import { filterEnabledContainers } from './containerFilter.js'
 
 export function generateLinearLayout(containers, positions = [], direction = 'horizontal', nodeMap, definedNodes) {
-  if (!containers || containers.length === 0) {
+  // [v32 修复 2026-06-13] 4 layout 统一: 预过滤 disabled 容器
+  const enabledContainers = filterEnabledContainers(containers)
+  if (!enabledContainers || enabledContainers.length === 0) {
     return ''
   }
 
-  const sortedContainers = sortContainersByPosition(containers, positions)
+  const sortedContainers = sortContainersByPosition(enabledContainers, positions)
 
   let mermaid = `\n%% 线性布局 - ${direction === 'horizontal' ? '水平' : '垂直'}\n`
 
@@ -16,7 +19,7 @@ export function generateLinearLayout(containers, positions = [], direction = 'ho
       const rawContainerName = container.fullTitle || container.name || 'Container'
       const containerName = formatContainerTitle(rawContainerName)
       mermaid += `subgraph ${containerId}["${containerName}"]\n`
-      
+
       if (container.nodes && container.nodes.length > 0 && nodeMap) {
         container.nodes.forEach(nodeId => {
           const node = nodeMap.get(nodeId)

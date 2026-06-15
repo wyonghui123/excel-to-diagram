@@ -134,22 +134,34 @@ def init_menu_permissions(db_path):
             'sort_order': 20,
             'page_type': 'multi_object_hub',
             'primary_object_type': 'domain',
-            'object_types': json.dumps(['domain', 'sub_domain', 'service_module']),
+            'object_types': json.dumps(['domain', 'sub_domain', 'service_module', 'relationship', 'audit_log']),
             'bo_bindings': json.dumps([
                 {'bo_id': 'domain', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list', 'export', 'import']},
                 {'bo_id': 'sub_domain', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
                 {'bo_id': 'service_module', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
                 {'bo_id': 'business_object', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+                # 🆕 BMRD-2026-06-14 方案A: 关系对象随架构数据自动带入 (FR-013 轻量版)
+                # 关系数据是跨层级的纽带, 架构数据管理页操作 domain/sub_domain/... 时必然要查阅
+                # 其相互之间的关系, role='derived' 表示派生而非主 BO
+                {'bo_id': 'relationship', 'role': 'derived', 'include_actions': ['read', 'list', 'export']},
+                # 🆕 BMRD-2026-06-14 审计日志自动带入
+                # domain 详情页"操作日志" tab 需要 read 权限, 紧化 v1 endpoint 后
+                # (v1 现在也校验 audit_log:read) 必须显式 grant 才能看到
+                {'bo_id': 'audit_log', 'role': 'derived', 'include_actions': ['read', 'list', 'export']},
             ]),
             'required_permissions': json.dumps([
                 'domain:create', 'domain:read', 'domain:update', 'domain:delete', 'domain:export', 'domain:import',
                 'sub_domain:create', 'sub_domain:read', 'sub_domain:update', 'sub_domain:delete',
                 'service_module:create', 'service_module:read', 'service_module:update', 'service_module:delete',
                 'business_object:create', 'business_object:read', 'business_object:update', 'business_object:delete',
+                # 🆕 关系对象 (derived) 的最低权限
+                'relationship:read', 'relationship:list', 'relationship:export',
+                # 🆕 审计日志 (derived) 的最低权限 (操作日志 tab 必需)
+                'audit_log:read', 'audit_log:list', 'audit_log:export',
             ]),
             'data_permission_hint': json.dumps({
-                'resource_types': ['domain', 'sub_domain'],
-                'message': '建议分配领域/子域数据权限'
+                'resource_types': ['domain', 'sub_domain', 'relationship', 'audit_log'],
+                'message': '建议分配领域/子域/关系/审计日志数据权限 (关系和审计随架构数据自动带入)'
             })
         },
         {
@@ -248,10 +260,14 @@ def init_menu_permissions(db_path):
             'primary_object_type': 'audit_log',
             'object_types': json.dumps(['audit_log']),
             'bo_bindings': json.dumps([
-                {'bo_id': 'audit_log', 'role': 'primary', 'include_actions': ['read', 'delete', 'list']},
+                {'bo_id': 'audit_log', 'role': 'primary', 'include_actions': ['read', 'list']},
             ]),
+            # [FIX 2026-06-14] 菜单 "日志管理" 限定 super-admin only.
+            #   any(p in user_perms for p in required) 语义下, 普通权限 (如 audit_log:read) 会让所有业务用户都能看见.
+            #   详情 tab 的操作日志 (audit_log:read) 跟菜单的日志管理 (admin only) 是两个独立维度.
+            #   '*' 表示 "super-admin" (admin 角色自带, 普通用户没有).
             'required_permissions': json.dumps([
-                'audit_log:read', 'audit_log:delete',
+                '*',
             ]),
             'data_permission_hint': json.dumps({
                 'resource_types': ['audit_log'],
@@ -433,6 +449,60 @@ def init_menu_permissions(db_path):
         print("  [OK] 无冗余条目")
     else:
         print(f"  [OK] 清理了 {removed_nav} 条冗余导航菜单")
+
+    # ========== 步骤7.7：FR-013 轻量版 — 把菜单权限展开到角色 ==========
+    # 背景 (BMRD-2026-06-14): 菜单的 required_permissions 只是元数据声明, 运行时权限
+    # 检查 (permission_interceptor.py) 走 role_permissions 表, 中间链路断了导致
+    # 角色访问菜单后做具体操作仍 403。修复: 把 role_menu_permissions 关联的
+    # 菜单的 required_permissions 自动 grant 到 role_permissions。
+    # 注: 这是 init-time 展开, 跟 SAP SU24 的"事务码 → 默认授权对象"等价。
+    print("\n[步骤7.7] 展开菜单权限到角色 (FR-013 轻量版)...")
+    cursor.execute("""
+        SELECT rmp.role_id, r.code, mp.required_permissions
+        FROM role_menu_permissions rmp
+        JOIN roles r ON r.id = rmp.role_id
+        JOIN menu_permissions mp ON mp.menu_code = rmp.menu_code
+        WHERE r.is_active = 1
+    """)
+    role_menu_rows = cursor.fetchall()
+    total_granted = 0
+    roles_touched = 0
+    for role_id, role_code, req_perms_str in role_menu_rows:
+        if not req_perms_str:
+            continue
+        try:
+            req_perms = json.loads(req_perms_str)
+        except Exception:
+            continue
+        granted_for_role = 0
+        for perm_code in req_perms:
+            cursor.execute("SELECT id FROM permissions WHERE code = ?", [perm_code])
+            perm_row = cursor.fetchone()
+            if not perm_row:
+                # 权限定义不存在, 跳过 (init_menus 会补)
+                continue
+            perm_id = perm_row[0]
+            cursor.execute("""
+                SELECT 1 FROM role_permissions
+                WHERE role_id = ? AND permission_id = ?
+            """, [role_id, perm_id])
+            if cursor.fetchone():
+                continue  # 已存在
+            cursor.execute("""
+                INSERT INTO role_permissions (role_id, permission_id, granted)
+                VALUES (?, ?, 1)
+            """, [role_id, perm_id])
+            granted_for_role += 1
+        if granted_for_role > 0:
+            roles_touched += 1
+            total_granted += granted_for_role
+            rel_count = sum(1 for p in req_perms if 'relationship' in p)
+            print(f"  ✅ {role_code}: +{granted_for_role} permissions (含 {rel_count} relationship)")
+
+    if total_granted == 0:
+        print("  [OK] 无需展开 (所有权限已存在)")
+    else:
+        print(f"  [OK] 跨 {roles_touched} 个角色共授权 {total_granted} 条 permissions")
 
     print("\n" + "=" * 60)
     print("[OK] 菜单权限表 & 导航表初始化完成！")

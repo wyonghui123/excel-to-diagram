@@ -285,6 +285,8 @@ async function loadDimensions() {
 
 async function loadDimensionScopes() {
   if (!props.roleId) return
+  // [GUARD 2026-06-14] 'new' 是创建态 (role 尚未保存), 后端期望 int role_id
+  if (!/^\d+$/.test(String(props.roleId))) return
   try {
     const result = await permService.loadDimensionScopes(props.roleId)
     if (result.success && result.data) {
@@ -416,6 +418,11 @@ async function autoDerive() {
 }
 
 async function saveDimensionScopesInternal() {
+  // [GUARD 2026-06-14] 'new' 是创建态, 后端期望 int role_id
+  // 不拦截会触发 POST /api/v1/roles/new/dimension-scopes -> 500
+  if (!/^\d+$/.test(String(props.roleId))) {
+    throw new Error('保存失败: 角色尚未保存, 请先保存角色')
+  }
   const scopes = []
   for (const dim of sortedDimensions.value) {
     const vals = selectedValues[dim.id] || []

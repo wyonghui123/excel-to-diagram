@@ -1833,6 +1833,7 @@ class TestBusinessKeyContext:
         bk_fields.sort(key=lambda f: f.semantics.import_order if f.semantics.import_order is not None else 999)
 
         field_ids = [f.id for f in bk_fields]
+        # [CHANGED 2026-06-13] version_code 虚拟字段仍存在(从 version.name 解析), import_order 不变
         assert field_ids == ['product_code', 'version_code', 'code']
         print(f"[PASS] business_key fields order: {field_ids}")
 
@@ -1912,7 +1913,11 @@ class TestBusinessKeyContext:
                 print(f"[PASS] 说明 sheet has context: 产品编码={meta.get('产品编码')}, 版本编码={meta.get('版本编码')}")
 
     def test_06_get_product_version_codes_method(self, api_client):
-        """测试 _get_product_version_codes 方法"""
+        """测试 _get_product_version_codes 方法
+        
+        [CHANGED 2026-06-13] version.code 已删除, 方法返回 version.name
+        方法名保持不变(向后兼容), 但返回值实际是 version.name
+        """
         client, headers = api_client
         from meta.core.datasource import get_data_source
         from meta.services.manage_service import ManageService
@@ -1924,11 +1929,11 @@ class TestBusinessKeyContext:
         query_service = QueryService(ds)
         ie_service = ImportExportService(ds, manage_service, query_service)
 
-        product_code, version_code = ie_service._get_product_version_codes({'version_id': 1})
+        product_code, version_name = ie_service._get_product_version_codes({'version_id': 1})
 
         assert product_code is not None
-        assert version_code is not None
-        print(f"[PASS] _get_product_version_codes returns: product_code={product_code}, version_code={version_code}")
+        assert version_name is not None
+        print(f"[PASS] _get_product_version_codes returns: product_code={product_code}, version_name={version_name}")
 
     def test_07_all_objects_have_context_fields(self, api_client):
         """测试所有架构对象都有 product_code 和 version_code 字段"""
@@ -1952,7 +1957,10 @@ class TestBusinessKeyContext:
         print(f"[PASS] All objects have product_code and version_code fields")
 
     def test_08_resolve_version_id_method(self, api_client):
-        """测试 _resolve_version_id 方法"""
+        """测试 _resolve_version_id 方法
+        
+        [CHANGED 2026-06-13] version.code 已删除, 使用 version.name 解析
+        """
         client, headers = api_client
         from meta.core.datasource import get_data_source
         from meta.services.manage_service import ManageService
@@ -1964,12 +1972,12 @@ class TestBusinessKeyContext:
         query_service = QueryService(ds)
         ie_service = ImportExportService(ds, manage_service, query_service)
 
-        product_code, version_code = ie_service._get_product_version_codes({'version_id': 1})
+        product_code, version_name = ie_service._get_product_version_codes({'version_id': 1})
         assert product_code is not None
-        assert version_code is not None
+        assert version_name is not None
 
-        version_id = ie_service._resolve_version_id(product_code, version_code)
-        assert version_id, f"Should resolve version_id for product_code={product_code}, version_code={version_code}" is not None
+        version_id = ie_service._resolve_version_id(product_code, version_name)
+        assert version_id, f"Should resolve version_id for product_code={product_code}, version_name={version_name}" is not None
         print(f"[PASS] _resolve_version_id returns: version_id={version_id}")
 
     def test_09_find_by_business_key_with_version(self, api_client):
@@ -1997,7 +2005,10 @@ class TestBusinessKeyContext:
             print("[SKIP] No domain data found for test")
 
     def test_10_import_injects_version_id(self, api_client):
-        """测试导入时正确注入 version_id"""
+        """测试导入时正确注入 version_id
+        
+        [CHANGED 2026-06-13] version.code 已删除, 使用 version.name 解析
+        """
         client, headers = api_client
         from meta.core.datasource import get_data_source
         from meta.services.manage_service import ManageService
@@ -2009,8 +2020,8 @@ class TestBusinessKeyContext:
         query_service = QueryService(ds)
         ie_service = ImportExportService(ds, manage_service, query_service)
 
-        product_code, version_code = ie_service._get_product_version_codes({'version_id': 1})
-        version_id = ie_service._resolve_version_id(product_code, version_code)
+        product_code, version_name = ie_service._get_product_version_codes({'version_id': 1})
+        version_id = ie_service._resolve_version_id(product_code, version_name)
 
         assert version_id is not None
         assert version_id >= 1, "Resolved version_id should be valid"

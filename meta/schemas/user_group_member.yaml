@@ -3,6 +3,16 @@ name: 用户组成员
 table_name: user_group_members
 description: 用户组成员关系
 
+# [FIX 2026-06-15] audit_log parent_object 关联:
+# 之前 yaml 缺 parent_object + hierarchy 配置, _resolve_parent_info 返回 (None, None)
+# 导致 user_group_member 的 cud audit 全部 parent=NULL, 用户组详情页"操作日志" tab 看不到
+# 修复后: 写入审计日志时自动填 parent_object_type='user_group', parent_object_id=group_id
+# 不设 path_field/depth_field 因为 user_group_member 不需要树形层级 (仅用 group_id 做反向关联)
+parent_object: user_group
+hierarchy:
+  enabled: true
+  parent_field: group_id
+
 fields:
   - id: id
     name: ID

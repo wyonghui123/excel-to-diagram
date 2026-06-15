@@ -34,12 +34,13 @@ def setup_test_db():
     cursor.execute('''
         CREATE TABLE versions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            code TEXT,
             name TEXT,
+            product_id INTEGER,
             created_at TEXT,
             updated_at TEXT,
             created_by TEXT,
-            updated_by TEXT
+            updated_by TEXT,
+            UNIQUE(product_id, name)
         )
     ''')
 
@@ -119,7 +120,7 @@ def test_01_create_with_parent_code():
         registry_executor = ActionRegistry(ds)
 
         # 创建版本
-        ds.insert('versions', {'id': 1, 'code': 'V1', 'name': '版本1', 'created_at': '2024-01-01', 'updated_at': '2024-01-01'})
+        ds.insert('versions', {'id': 1, 'name': '版本1', 'product_id': 1, 'created_at': '2024-01-01', 'updated_at': '2024-01-01'})
 
         # 创建领域
         ds.insert('domains', {'id': 1, 'version_id': 1, 'code': 'FINANCE', 'name': '财务', 'created_at': '2024-01-01', 'updated_at': '2024-01-01'})
@@ -165,7 +166,7 @@ def test_02_update_with_parent_code():
         registry_executor = ActionRegistry(ds)
 
         # 创建版本
-        ds.insert('versions', {'id': 1, 'code': 'V1', 'name': '版本1', 'created_at': '2024-01-01', 'updated_at': '2024-01-01'})
+        ds.insert('versions', {'id': 1, 'name': '版本1', 'product_id': 1, 'created_at': '2024-01-01', 'updated_at': '2024-01-01'})
 
         # 创建两个领域
         ds.insert('domains', {'id': 1, 'version_id': 1, 'code': 'FINANCE', 'name': '财务', 'created_at': '2024-01-01', 'updated_at': '2024-01-01'})
@@ -207,8 +208,8 @@ def test_03_resolve_with_version_isolation():
         registry_executor = ActionRegistry(ds)
 
         # 创建两个版本
-        ds.insert('versions', {'id': 1, 'code': 'V1', 'name': '版本1', 'created_at': '2024-01-01', 'updated_at': '2024-01-01'})
-        ds.insert('versions', {'id': 2, 'code': 'V2', 'name': '版本2', 'created_at': '2024-01-01', 'updated_at': '2024-01-01'})
+        ds.insert('versions', {'id': 1, 'name': '版本1', 'product_id': 1, 'created_at': '2024-01-01', 'updated_at': '2024-01-01'})
+        ds.insert('versions', {'id': 2, 'name': '版本2', 'product_id': 1, 'created_at': '2024-01-01', 'updated_at': '2024-01-01'})
 
         # 在版本1创建领域
         ds.insert('domains', {'id': 1, 'version_id': 1, 'code': 'FINANCE', 'name': '财务', 'created_at': '2024-01-01', 'updated_at': '2024-01-01'})
@@ -272,7 +273,7 @@ def test_04_resolve_multiple_levels():
         registry_executor = ActionRegistry(ds)
 
         # 创建版本
-        ds.insert('versions', {'id': 1, 'code': 'V1', 'name': '版本1', 'created_at': '2024-01-01', 'updated_at': '2024-01-01'})
+        ds.insert('versions', {'id': 1, 'name': '版本1', 'product_id': 1, 'created_at': '2024-01-01', 'updated_at': '2024-01-01'})
 
         # 创建领域
         ds.insert('domains', {'id': 1, 'version_id': 1, 'code': 'FINANCE', 'name': '财务', 'created_at': '2024-01-01', 'updated_at': '2024-01-01'})
@@ -320,7 +321,7 @@ def test_05_parent_not_found_error():
         registry_executor = ActionRegistry(ds)
 
         # 创建版本
-        ds.insert('versions', {'id': 1, 'code': 'V1', 'name': '版本1', 'created_at': '2024-01-01', 'updated_at': '2024-01-01'})
+        ds.insert('versions', {'id': 1, 'name': '版本1', 'product_id': 1, 'created_at': '2024-01-01', 'updated_at': '2024-01-01'})
 
         # 不创建领域，测试错误处理
 

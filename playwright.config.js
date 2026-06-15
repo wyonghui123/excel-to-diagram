@@ -110,6 +110,25 @@ export default defineConfig({
         storageState: USER_AUTH
       },
       dependencies: ['setup']
+    },
+
+    // ============================================================
+    // Business-Flow tests - 业务流 E2E (AI 派生, v2 规范)
+    // [!!!] 必须在 features 之后注册 - 业务流 E2E 用 business-flow/ 目录
+    //      业务规则来源: .trae/specs/_business_rules/*.yaml
+    //      业务流定义: .trae/specs/<feat>/business-flow.yaml
+    //      业务断言: e2e/screenplay/questions/BusinessRuleAssertor.js
+    // ============================================================
+    {
+      name: 'business-flow',
+      testDir: './e2e/business-flow',
+      testMatch: '*.spec.js',
+      use: {
+        ...baseUse,
+        ...devices['Desktop Chrome'],
+        storageState: ADMIN_AUTH
+      },
+      dependencies: ['setup']
     }
   ]
 })

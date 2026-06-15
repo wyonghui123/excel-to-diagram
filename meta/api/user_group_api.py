@@ -96,66 +96,6 @@ def _set_user_context():
 #   - /user-groups/<id>/logs
 #   - /system/migrate-group-permissions-to-roles
 
-@user_group_bp.route('/user-groups', methods=['GET'])
-@login_required
-def get_user_groups():
-    """v1.4 P8 Sunset: 已迁移到 v2/bo/user_group"""
-    return jsonify({
-        'error': 'API Gone',
-        'message': 'GET /api/v1/user-groups has been sunset; use GET /api/v2/bo/user_group',
-        'sunset_at': '2026-06-05',
-        'migrated_to': '/api/v2/bo/user_group'
-    }), 410
-
-
-@user_group_bp.route('/user-groups', methods=['POST'])
-@login_required
-def create_user_group():
-    """v1.4 P8 Sunset: 已迁移到 v2/bo/user_group"""
-    return jsonify({
-        'error': 'API Gone',
-        'message': 'POST /api/v1/user-groups has been sunset; use POST /api/v2/bo/user_group',
-        'sunset_at': '2026-06-05',
-        'migrated_to': '/api/v2/bo/user_group'
-    }), 410
-
-
-@user_group_bp.route('/user-groups/<int:group_id>', methods=['GET'])
-@login_required
-def get_user_group(group_id):
-    """v1.4 P8 Sunset: 已迁移到 v2/bo/user_group/{id}"""
-    return jsonify({
-        'error': 'API Gone',
-        'message': f'GET /api/v1/user-groups/{group_id} has been sunset; use GET /api/v2/bo/user_group/{group_id}',
-        'sunset_at': '2026-06-05',
-        'migrated_to': f'/api/v2/bo/user_group/{group_id}'
-    }), 410
-
-
-@user_group_bp.route('/user-groups/<int:group_id>', methods=['PUT'])
-@login_required
-def update_user_group(group_id):
-    """v1.4 P8 Sunset: 已迁移到 v2/bo/user_group/{id}"""
-    return jsonify({
-        'error': 'API Gone',
-        'message': f'PUT /api/v1/user-groups/{group_id} has been sunset; use PUT /api/v2/bo/user_group/{group_id}',
-        'sunset_at': '2026-06-05',
-        'migrated_to': f'/api/v2/bo/user_group/{group_id}'
-    }), 410
-
-
-@user_group_bp.route('/user-groups/<int:group_id>', methods=['DELETE'])
-@login_required
-def delete_user_group(group_id):
-    """v1.4 P8 Sunset: 已迁移到 v2/bo/user_group/{id}"""
-    return jsonify({
-        'error': 'API Gone',
-        'message': f'DELETE /api/v1/user-groups/{group_id} has been sunset; use DELETE /api/v2/bo/user_group/{group_id}',
-        'sunset_at': '2026-06-05',
-        'migrated_to': f'/api/v2/bo/user_group/{group_id}'
-    }), 410
-
-
 # 保留 v1/user-groups/<id> 业务关系端点
 # （移到下面以维持模块化结构）
 

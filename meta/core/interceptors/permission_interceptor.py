@@ -127,6 +127,17 @@ class PermissionInterceptor(Interceptor):
         if is_admin(user_info):
             return
 
+        # [V1.1.8] OwnerChainInterceptor (priority=25) 已先执行
+        #   如果 owner chain 命中, 直接放行 (不检查 functional perm)
+        #   语义: user 在自己的 private 产品下, 可做所有 CRUD
+        if getattr(context, '_owner_chain_match', False):
+            chain_root = getattr(context, '_owner_chain_root', {})
+            logger.debug(
+                f'PermissionInterceptor: owner chain matched, bypass functional perm '
+                f'for {context.object_type}:{context.action} (root: {chain_root})'
+            )
+            return  # 放行
+
         # [v1.0.1 D9] 父读 audit-only (写操作触发, 不阻塞)
         if context.action in ('crud_create', 'crud_update', 'crud_delete'):
             self._check_parent_read_advisory(context, user_info)
@@ -213,6 +224,23 @@ class PermissionInterceptor(Interceptor):
                 'chain': error.chain,
                 'required_perm_any_of': error.required_perm_any_of,
             }), error.status_code
+        # [v2.1] 写 scope 拒绝 (FR-005)
+        # 注意: 用 try-import 避免循环引用 (write_scope_interceptor 引用 PermissionInterceptor.on_error)
+        try:
+            from meta.core.interceptors.write_scope_interceptor import WriteScopeDenied
+            if isinstance(error, WriteScopeDenied):
+                return jsonify({
+                    'success': False,
+                    'message': str(error),
+                    'code': 'ERR_WRITE_SCOPE_DENIED',
+                    'object_type': error.object_type,
+                    'target_id': error.target_id,
+                    'user_id': error.user_id,
+                    'side': error.side,
+                    'check_results': error.check_results,
+                }), error.status_code
+        except ImportError:
+            pass
         return None
 
     # ============================================================

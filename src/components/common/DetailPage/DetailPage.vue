@@ -69,23 +69,11 @@
     </div>
 
     <template #footer>
-      <!--
-        底部操作区按 mode 动态渲染（useDetailActions）。
-        关闭动作不再放 footer —— 由 el-drawer 顶部 X 承担，避免重复按钮。
-        add/edit 模式下保存/取消由 ObjectPageHeader 提供，footer 留空。
-      -->
-      <slot name="footer" :actions="footerActions">
-        <AppButton
-          v-for="act in footerActions.filter((a) => a.visible)"
-          :key="act.key"
-          :variant="act.variant"
-          :disabled="act.disabled"
-          @click="act.onClick"
-        >
-          <AppIcon v-if="act.icon" :name="act.icon" size="sm" />
-          {{ act.label }}
-        </AppButton>
-      </slot>
+      <AppButton variant="secondary" @click="handleClose">关闭</AppButton>
+      <AppButton variant="primary" @click="handleRefresh">
+        <AppIcon name="refresh" size="sm" />
+        刷新
+      </AppButton>
     </template>
   </el-drawer>
 
@@ -154,9 +142,9 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { useMessage } from '@/composables/useMessage'
+import { useCrudMessage } from '@/composables/useCrudMessage'
 import { useVersionContext } from '@/composables/useVersionContext'
 import { useFormCascade } from '@/composables/useCascadeSelect'
-import { useDetailActions } from '@/composables/useDetailActions'
 import metaService from '@/services/metaService'
 import boService from '@/services/boService'
 import { objectTypeService } from '@/services/objectTypeService'
@@ -185,6 +173,46 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue', 'close', 'refresh', 'delete', 'loaded', 'saved', 'created'])
 
 const message = useMessage()
+const crudMessage = useCrudMessage()
+
+/**
+ * 根据 httpStatus/result.code 把后端错误归类成更友好、更具体的中文消息
+ *
+ * 设计动机：
+ *   原 `message.error(result.message || '保存失败')` 在 403 无 body.message 时
+ *   会显示 `请求失败: 403` 这种用户看不懂的字符串。这里按统一错误码分类，
+ *   让前端行为与 `useCrudMessage` 的设计目标一致：
+ *     - 显式 401/403/404/422 → 显示对应的权限/资源/校验提示
+ *     - 其余 → 透传 result.message 或 fallback
+ *
+ * 参考：`useMetaList.handleError` 内 [FIX 2026-06-08] 403 静默策略。
+ *   列表加载场景下 403 不弹 toast (由页面绘制权限空态)，但保存/编辑场景下
+ *   用户已经"主动操作"，必须告知结果，否则会和当前工单一样陷入"无声失败"。
+ *
+ * @param {object} result - boService.update/create 返回的 { success, message, code, httpStatus }
+ * @param {string} fallback - 默认文案
+ * @returns {string}
+ */
+function resolveFailureMessage(result, fallback) {
+  if (!result) return fallback
+  const status = result.httpStatus
+  const code = result.code
+
+  if (status === 403 || code === 'FORBIDDEN' || code === 'ERR_403_FORBIDDEN') {
+    return '您没有权限执行此操作，请联系管理员'
+  }
+  if (status === 401 || code === 'UNAUTHORIZED' || code === 'ERR_401_UNAUTHORIZED') {
+    return '登录已过期，请重新登录后再试'
+  }
+  if (status === 404 || code === 'NOT_FOUND' || code === 'ERR_404_NOT_FOUND') {
+    return '记录不存在或已被删除'
+  }
+  if (status === 422 || code === 'VALIDATION_ERROR' || code === 'ERR_422_VALIDATION') {
+    return result.message || '提交的数据格式不正确'
+  }
+  // 其他情况：使用后端 message，没有则用兜底
+  return result.message || fallback
+}
 
 const visible = computed({
   get: () => props.modelValue,
@@ -202,22 +230,6 @@ const effectiveMode = computed(() => {
 
 const internalEditing = ref(effectiveMode.value === 'add' || effectiveMode.value === 'edit')
 const saving = ref(false)
-
-/**
- * footer 操作按钮配置：按 mode 动态渲染
- * view 模式 → 仅"刷新"（X 按钮承担关闭）
- * add/edit 模式 → footer 让空（保存/取消已在 ObjectPageHeader）
- * 调用方可通过 <template #footer="slotProps"> 完全自定义
- */
-const { actions: footerActions } = useDetailActions({
-  mode: effectiveMode,
-  saving,
-  loading,
-  hasData: computed(() => !!data.value),
-  onSave: handleSave,
-  onCancel: handleObjectPageAction.bind(null, { action: { key: 'cancel' } }),
-  onRefresh: handleRefresh,
-})
 
 const entityMeta = ref(null)
 const cascade = useFormCascade(
@@ -289,11 +301,6 @@ const drawerTitle = computed(() => {
 })
 
 const dataSubtitle = computed(() => {
-  // 🆕 v1.1 owner refactor (FR-006): 显示 effective_owner_id_display
-  const owner = data.value?.effective_owner_id_display
-  if (owner) {
-    return `负责人: ${owner}`
-  }
   return ''
 })
 
@@ -325,9 +332,7 @@ const dataStatusType = computed(() => {
   const statusField = getStatusFieldName()
   const val = data.value[statusField]
   if (typeof val === 'boolean') return val ? 'success' : 'danger'
-  // [FIX 2026-06-12] 从 statusMap 查徽章类型, 确保状态变化时颜色同步更新
-  // 当前 ObjectDetailPage 设了 :hide-header="true" 暂不显示徽章, 但保留修复以防未来开启
-  return props.statusMap?.[val]?.type || 'default'
+  return 'default'
 })
 
 const computedFieldDefs = computed(() => {
@@ -340,8 +345,6 @@ const computedFieldDefs = computed(() => {
     if (f.ui?.visible === false) continue
     if (f.hidden_in_detail && !isAddMode) continue
     if (f.hidden_in_form && isAddMode) continue
-    // [FIX v1.0.9 2026-06-10] owner 类不可编辑字段在 edit 模式也隐藏
-    if (!isAddMode && f.hidden_in_form && f.ui?.editable === false) continue
     
     const semantics = f.semantics || {}
     // parent_key（自引用外键）允许用户修改（可重新指定父组），不应被视作 immutable。
@@ -484,8 +487,6 @@ const computedSections = computed(() => {
     if (f.visible === false || f.ui?.visible === false) return false
     if (f.hidden_in_detail && !isAddMode) return false
     if (f.hidden_in_form && isAddMode) return false
-    // [FIX v1.0.9 2026-06-10] owner 类不可编辑字段在 edit 模式也隐藏
-    if (!isAddMode && f.hidden_in_form && f.ui?.editable === false) return false
     if (isAddMode) {
       const semantics = f.semantics || {}
       const isSystem = semantics.system_field === true || f.system_field === true
@@ -605,9 +606,9 @@ const computedSections = computed(() => {
         if (isCollectionAssociation(tab.association)) {
           const assocDef = entityAssociations.find(a => a.name === tab.association)
           console.debug('[DetailPage] Creating association section:', tab.association, 'assocDef:', assocDef)
-          // [FIX 2026-06-09] readonly 时强制把 unassign/assign 移除，
-          // 只保留 list（防止下游 manyToManyRowActions 即使 section.readonly
-          // 解析失败仍兜底出"移除"按钮）。
+          // [FIX 2026-06-09] readonly 时强制把 unassign/assign 移除,
+          // 只保留 list（防止下游 manyToManyRowActions 锛宑hecked in section.readonly
+          // 解析失败后仍彻底出"移除"按钮）。
           const isAssocReadonly = !!(tab.readonly || assocDef?.readonly)
           const safeActions = isAssocReadonly
             ? (tab.actions || ['list']).filter(a => {
@@ -878,80 +879,38 @@ async function fetchData(options = {}) {
       data.value = result.data
       emit('loaded', result.data)
     } else {
-      error.value = result.message || '加载数据失败'
+      // [FIX 2026-06-14] 把 httpStatus/code 也带上, 让 403/404 等更明确
+      //   之前只显示 result.message, 如果 server 返 403 body 没 message 就只有 "加载数据失败"
+      const status = result.httpStatus
+      const statusText = status ? ` [HTTP ${status}]` : ''
+      const code = result.code ? ` (${result.code})` : ''
+      const detailMsg = `${result.message || '加载数据失败'}${statusText}${code}`
+      error.value = detailMsg
+      // [FIX 2026-06-14] 同步触发右上角弹窗 (NotificationContainer)
+      //   原因: drawer 的 inline dp-error 在某些 race (transition/keep-alive) 下可能不渲染,
+      //   用户在 Network 看到 403 但 UI 静默. 弹窗是 Teleport 到 body, 必然可见.
+      //   4s 比默认 3s 长一些, 让用户有时间阅读含 HTTP code 的消息.
+      message.error(detailMsg, 4000)
     }
   } catch (e) {
     console.error('DetailPage fetchData error:', e)
     error.value = '网络错误，请稍后重试'
+    message.error('网络错误，请稍后重试', 4000)
   } finally {
     loading.value = false
   }
 }
 
-/**
- * 状态转换后的"原地更新"逻辑
- *
- * [FIX 2026-06-12] 彻底排查: 之前仅更新 data.value[stateField] = newStatus,
- *   但 ObjectPageField.formatReadValue() 优先读 display_values[stateField] 而非字段值,
- *   导致 UI 显示的 label 与实际值不一致, 用户必须刷新浏览器才能看到状态更新.
- *
- * 修复策略 (多层防御):
- *  1. props.statusMap[ newStatus ]?.label   -- 父组件传入的 statusMap (来自 enum_values)
- *  2. entityMeta.fields[].enum_values 查表 -- 兜底 (statusMap 未传入时)
- *  3. fetchData({ forceRefresh: true })     -- 最后兜底 (本地无 label 上下文时)
- *
- * 同时保持 display_values 其他键不变, 只覆盖 stateField 对应的项.
- */
-function _resolveStatusLabel(stateField, newStatus) {
-  if (newStatus == null) return null
-  // 来源 1: 父组件传入的 statusMap
-  const fromProp = props.statusMap?.[newStatus]?.label
-  if (fromProp) return { label: fromProp, source: 'statusMap' }
-  // 来源 2: 本地 entityMeta 的 enum_values
-  if (entityMeta.value?.fields) {
-    const field = entityMeta.value.fields.find(f => (f.id || f.name) === stateField)
-    const ev = field?.enum_values?.find(e => e.value === newStatus)
-    if (ev) return { label: ev.label || ev.name || String(newStatus), source: 'enum_values' }
-  }
-  return null
-}
-
 async function handleRefresh(payload = {}) {
   console.debug('[DetailPage] handleRefresh called, payload:', payload)
-
+  
   const hasDirectUpdate = payload && payload.newStatus != null && payload.newStatus !== undefined && payload.stateField && data.value
   console.debug('[DetailPage] hasDirectUpdate:', hasDirectUpdate)
-
+  
   if (hasDirectUpdate) {
-    const stateField = payload.stateField
-    const newStatus = payload.newStatus
-    console.debug('[DetailPage] Updating status directly:', stateField, '=', newStatus)
-
-    const updates = { [stateField]: newStatus }
-
-    // [FIX 2026-06-12] 同步更新 display_values[stateField]
-    // 根因: 详情页 readonly 渲染走 formatReadValue() 读 display_values[stateField],
-    //       仅改 status 字段不会反映到 UI. 用户必须刷新浏览器才能看到状态更新.
-    const resolved = _resolveStatusLabel(stateField, newStatus)
-    if (resolved && data.value.display_values) {
-      updates.display_values = {
-        ...data.value.display_values,
-        [stateField]: resolved.label
-      }
-      console.debug('[DetailPage] Synced display_values[', stateField, '] =', resolved.label, '(from', resolved.source + ')')
-    } else if (!resolved) {
-      // 来源 1+2 都没拿到 label → 本地无法安全更新 display_values
-      // 走最后兜底: 全量重新拉取 (从后端拿权威 display_values)
-      console.warn('[DetailPage] No label source for', stateField, '=', newStatus, '- falling back to fetchData')
-      await fetchData({ forceRefresh: true })
-      console.debug('[DetailPage] after fetchData (label fallback), dataStatus:', dataStatus.value)
-      return
-    } else {
-      console.debug('[DetailPage] No display_values in data.value, skipping display_values sync')
-    }
-
-    data.value = { ...data.value, ...updates }
-    console.debug('[DetailPage] dataStatus after direct update:', dataStatus.value, 'display_value:', updates.display_values?.[stateField])
+    console.debug('[DetailPage] Updating status directly:', payload.stateField, '=', payload.newStatus)
+    data.value = { ...data.value, [payload.stateField]: payload.newStatus }
+    console.debug('[DetailPage] dataStatus after direct update:', dataStatus.value)
   } else {
     console.debug('[DetailPage] Fetching fresh data (forceRefresh)')
     await fetchData({ forceRefresh: true })
@@ -969,22 +928,9 @@ function handleTabChange(tabKey) {
 }
 
 function handleFieldUpdate({ key, value }) {
-  if (!data.value) return
-  const updates = { [key]: value }
-  // [FIX 2026-06-12] 同步更新 display_values[key], 防止 readonly 视图显示过期 label
-  // 复用 _resolveStatusLabel 同一套解析逻辑 (statusMap → enum_values)
-  // 仅当 key 命中 enum 字段时才同步, 避免误覆盖其他类型字段的 display_values
-  const enumField = entityMeta.value?.fields?.find(f => (f.id || f.name) === key)
-  if (enumField?.enum_values?.length && data.value.display_values) {
-    const ev = enumField.enum_values.find(e => e.value === value)
-    if (ev) {
-      updates.display_values = {
-        ...data.value.display_values,
-        [key]: ev.label || ev.name || String(value)
-      }
-    }
+  if (data.value) {
+    data.value = { ...data.value, [key]: value }
   }
-  data.value = { ...data.value, ...updates }
 }
 
 function handleFieldDisplayUpdate({ key, displayValue }) {
@@ -1090,14 +1036,17 @@ async function handleSave() {
       const result = await boService.deepInsert(props.objectType, payload, children)
 
       if (result.success) {
-        message.success('创建成功')
+        crudMessage.created()
         internalEditing.value = false
         const savedData = result.data?.parent || result.data || {}
         data.value = savedData
         emit('saved', savedData)
         emit('created', savedData)
       } else {
-        message.error(result.message || '创建失败')
+        // [FIX 2026-06-14] 统一错误码 → 中文消息 (含 403 无权限场景),
+        //   与 useCrudMessage 模型一致, 由 NotificationContainer 渲染 (z-index 9999, teleport to body),
+        //   避免高 z-index modal/drawer 遮挡导致用户看不到反馈 (参见 PermissionConfigPanel 旧坑)。
+        message.error(resolveFailureMessage(result, '创建失败'), 4000)
       }
       return
     }
@@ -1106,33 +1055,21 @@ async function handleSave() {
       ? await boService.create(props.objectType, payload)
       : await boService.update(props.objectType, props.id, payload)
     if (result.success) {
-      // [FIX 2026-06-11] 子列表保存结果检查：saveDraftValues 内部 validation 错误
-      // 通过 throw 传播到 saveAllChildMetaLists 的 .catch，返回 [{success, error}]
-      let childSaveFailed = false
       if (objectPageRef.value?.hasChildUnsavedChanges?.()) {
         try {
-          const childResults = await objectPageRef.value.saveAllChildMetaLists()
-          if (childResults && childResults.length > 0) {
-            const failures = childResults.filter(r => r && !r.success)
-            if (failures.length > 0) {
-              childSaveFailed = true
-              // handleError 已展示具体错误，此处只输出 console 便于排查
-              console.error('[DetailPage] 子列表保存失败:', failures.map(f => f.error?.message))
-            }
-          }
+          await objectPageRef.value.saveAllChildMetaLists()
         } catch (childError) {
-          childSaveFailed = true
           console.error('[DetailPage] Child MetaList save error:', childError)
+          message.warning('主对象已保存，但子列表部分保存失败', 4000)
         }
       }
 
-      if (childSaveFailed) {
-        // 子列表保存失败：保留编辑模式和子列表 draft 状态，不刷新父对象
-        message.warning('主对象已保存，请修正子列表错误后重新保存')
-        saving.value = false
-        return
+      // [FIX 2026-06-14] 改用 useCrudMessage 语义化反馈 (与 objectpage/useCrudMessage 一致)
+      if (isCreate) {
+        crudMessage.created()
+      } else {
+        crudMessage.saved()
       }
-      message.success(isCreate ? '创建成功' : '保存成功')
       internalEditing.value = false
       if (!isCreate && props.id) {
         try {
@@ -1156,11 +1093,13 @@ async function handleSave() {
         }
       }
     } else {
-      message.error(result.message || (isCreate ? '创建失败' : '保存失败'))
+      // [FIX 2026-06-14] 同上, 走统一消息解析 (403 → "您没有权限执行此操作")
+      message.error(resolveFailureMessage(result, isCreate ? '创建失败' : '保存失败'), 4000)
     }
   } catch (e) {
     console.error('[DetailPage] Save error:', e)
-    message.error('保存请求失败')
+    // [FIX 2026-06-14] 兜底也用 useCrudMessage.error 提取 err.message (例如网络层抛出的 Error)
+    crudMessage.error('保存请求失败', e)
   } finally {
     saving.value = false
   }

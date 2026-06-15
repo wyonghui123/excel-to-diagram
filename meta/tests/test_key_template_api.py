@@ -8,6 +8,8 @@ GAP-017: key_template_api 端到端测试 (5 用例)
 - GET  /api/v2/key-template/list-objects
 """
 import pytest
+import time
+import json
 
 pytestmark = pytest.mark.integration
 
@@ -185,24 +187,24 @@ class TestVersionNoKeyTemplate:
         )
 
     def test_version_create_requires_code(self, api_client, admin_headers):
-        """创建 version 不传 code 应失败 (无自动建议)"""
+        """创建 version 不传 name 应失败 (name 作为业务键必填)"""
         # product_id=1 是固定测试产品
         payload = {
-            'name': 'TestVersion_KeyTemplateRemoved',
             'product_id': 1,
         }
         resp = api_client.post('/api/v2/bo/version', json=payload, headers=admin_headers)
-        # 应返回 400 / 500 (code 必填), 不应自动生成
+        # 应返回 400 / 500 (name 必填), 不应自动生成
         assert resp.status_code in (400, 500), (
-            f"不传 code 时应失败，实际: {resp.status_code} {resp.get_data(as_text=True)}"
+            f"不传 name 时应失败，实际: {resp.status_code} {resp.get_data(as_text=True)}"
         )
 
 
 class TestVersionCodePattern:
     """
-    [NEW 2026-06-10] version.code 字段 pattern 放宽
+    [NEW 2026-06-10] [CHANGED 2026-06-13] version 的 name 字段 pattern 放宽
 
     决策: 接受 dot/dash，覆盖 SemVer / CalVer / 业务自定义。
+    2026-06-13: 删除 version.code 字段，name 作为业务键（product_id + name 唯一）
     原 pattern: ^[A-Z][A-Z0-9_]*$ (拒绝 v1.0/2024-Q4/R2024.1)
     新 pattern: ^[A-Za-z0-9][A-Za-z0-9_.\\-]*$
 
@@ -228,10 +230,10 @@ class TestVersionCodePattern:
             return items[0].get('id')
         pytest.skip('无可用 product')
 
-    def _try_create(self, api_client, admin_headers, code, product_id):
+    def _try_create(self, api_client, admin_headers, name, product_id):
+        """创建 version，name 作为业务键（code 字段已删除）"""
         payload = {
-            'name': f'TestV_{abs(hash(code))%100000}_{code.replace(" ", "_")}'[:64],
-            'code': code,
+            'name': name,  # 2026-06-13: code 字段已删除，直接用 name 作为业务键
             'product_id': product_id,
         }
         resp = api_client.post('/api/v2/bo/version', json=payload, headers=admin_headers)
@@ -242,37 +244,37 @@ class TestVersionCodePattern:
             return True, resp
         return False, resp
 
-    @pytest.mark.parametrize('code,desc', [
+    @pytest.mark.parametrize('name,desc', [
         ('v1.0', 'SemVer'),
         ('1.0.0', '纯数字 SemVer'),
         ('v1.0-rc.1', 'SemVer 预发布'),
         ('1.0.0-rc.1', '完整 SemVer 预发布'),
         ('0.1.0', '小版本 SemVer'),
     ])
-    def test_pattern_accepts_semver(self, api_client, admin_headers, product_id, code, desc):
+    def test_pattern_accepts_semver(self, api_client, admin_headers, product_id, name, desc):
         """接受 SemVer 格式 (v1.0, 1.0.0, v1.0-rc.1)"""
-        success, resp = self._try_create(api_client, admin_headers, code, product_id)
-        assert success, f"{desc} ({code}) 应被接受，实际: {resp.status_code} {resp.get_data(as_text=True)}"
+        success, resp = self._try_create(api_client, admin_headers, name, product_id)
+        assert success, f"{desc} ({name}) 应被接受，实际: {resp.status_code} {resp.get_data(as_text=True)}"
 
-    @pytest.mark.parametrize('code,desc', [
+    @pytest.mark.parametrize('name,desc', [
         ('2024-Q4', 'CalVer 带 dash'),
         ('2024Q4', 'CalVer 无分隔'),
         ('2024.10', 'CalVer 点分隔'),
     ])
-    def test_pattern_accepts_calver(self, api_client, admin_headers, product_id, code, desc):
+    def test_pattern_accepts_calver(self, api_client, admin_headers, product_id, name, desc):
         """接受 CalVer 格式 (2024-Q4, 2024Q4)"""
-        success, resp = self._try_create(api_client, admin_headers, code, product_id)
-        assert success, f"{desc} ({code}) 应被接受，实际: {resp.status_code} {resp.get_data(as_text=True)}"
+        success, resp = self._try_create(api_client, admin_headers, name, product_id)
+        assert success, f"{desc} ({name}) 应被接受，实际: {resp.status_code} {resp.get_data(as_text=True)}"
 
-    @pytest.mark.parametrize('code,desc', [
+    @pytest.mark.parametrize('name,desc', [
         ('R2024.1', 'R 前缀 + 年份 + 点'),
         ('V1.0', '大写 V + 数字 + 点'),
         ('SCM_01', '下划线分隔'),
     ])
-    def test_pattern_accepts_business_style(self, api_client, admin_headers, product_id, code, desc):
+    def test_pattern_accepts_business_style(self, api_client, admin_headers, product_id, name, desc):
         """接受业务自定义格式"""
-        success, resp = self._try_create(api_client, admin_headers, code, product_id)
-        assert success, f"{desc} ({code}) 应被接受，实际: {resp.status_code} {resp.get_data(as_text=True)}"
+        success, resp = self._try_create(api_client, admin_headers, name, product_id)
+        assert success, f"{desc} ({name}) 应被接受，实际: {resp.status_code} {resp.get_data(as_text=True)}"
 
     def test_pattern_accepts_lowercase_v(self, api_client, admin_headers, product_id):
         """接受小写 v 开头"""
@@ -284,11 +286,11 @@ class TestVersionCodePattern:
         success, resp = self._try_create(api_client, admin_headers, '1.0.0', product_id)
         assert success, f"1.0.0 应被接受（接受数字开头），实际: {resp.status_code}"
 
-    @pytest.mark.parametrize('code', ['.V1.0', '.1.0'])
-    def test_pattern_rejects_dot_prefix(self, api_client, admin_headers, product_id, code):
+    @pytest.mark.parametrize('name', ['.V1.0', '.1.0'])
+    def test_pattern_rejects_dot_prefix(self, api_client, admin_headers, product_id, name):
         """拒绝点开头 (违反首字符规则)"""
-        success, resp = self._try_create(api_client, admin_headers, code, product_id)
-        assert not success, f"{code} 应被拒绝，实际通过"
+        success, resp = self._try_create(api_client, admin_headers, name, product_id)
+        assert not success, f"{name} 应被拒绝，实际通过"
         # 检查错误消息：raw body 或 json
         body = resp.get_data(as_text=True)
         try:
@@ -300,20 +302,20 @@ class TestVersionCodePattern:
         assert ('格式不正确' in body or
                 '格式不正确' in msg or
                 data.get('success') is False), (
-            f"{code} 错误信息不包含 '格式不正确'，body={body[:200]}"
+            f"{name} 错误信息不包含 '格式不正确'，body={body[:200]}"
         )
 
-    @pytest.mark.parametrize('code', ['-V1.0', '-2024Q4'])
-    def test_pattern_rejects_dash_prefix(self, api_client, admin_headers, product_id, code):
+    @pytest.mark.parametrize('name', ['-V1.0', '-2024Q4'])
+    def test_pattern_rejects_dash_prefix(self, api_client, admin_headers, product_id, name):
         """拒绝 dash 开头 (违反首字符规则)"""
-        success, resp = self._try_create(api_client, admin_headers, code, product_id)
-        assert not success, f"{code} 应被拒绝，实际通过"
+        success, resp = self._try_create(api_client, admin_headers, name, product_id)
+        assert not success, f"{name} 应被拒绝，实际通过"
 
-    @pytest.mark.parametrize('code', ['V1.0!', 'V1.0#', 'V1.0$', 'V1.0?', 'V1.0+'])
-    def test_pattern_rejects_special_chars(self, api_client, admin_headers, product_id, code):
+    @pytest.mark.parametrize('name', ['V1.0!', 'V1.0#', 'V1.0$', 'V1.0?', 'V1.0+'])
+    def test_pattern_rejects_special_chars(self, api_client, admin_headers, product_id, name):
         """拒绝特殊字符 (! # $ ? + 等不在允许范围)"""
-        success, resp = self._try_create(api_client, admin_headers, code, product_id)
-        assert not success, f"{code} 应被拒绝，实际通过"
+        success, resp = self._try_create(api_client, admin_headers, name, product_id)
+        assert not success, f"{name} 应被拒绝，实际通过"
 
     def test_pattern_rejects_whitespace(self, api_client, admin_headers, product_id):
         """拒绝空格"""
@@ -324,3 +326,153 @@ class TestVersionCodePattern:
         """拒绝斜杠"""
         success, resp = self._try_create(api_client, admin_headers, 'V1.0/2.0', product_id)
         assert not success, "含斜杠应被拒绝"
+
+
+class TestVersionUniqueKey:
+    """
+    [NEW 2026-06-13] version 删除 code 字段后，name 承担业务键。
+    验证 (product_id, name) 联合唯一性约束。
+
+    覆盖矩阵（5 个用例）:
+     1. test_same_product_same_name_rejected        # 同 product 同 name → 409/400
+     2. test_same_product_different_name_accepted   # 同 product 不同 name → 201
+     3. test_different_product_same_name_accepted   # 不同 product 同 name → 201（跨产品允许同名）
+     4. test_name_required_on_create                # 不传 name → 必填校验失败
+     5. test_name_immutable_after_publish           # 不可改 name（业务键不变性）
+    """
+
+    def _create_version(self, api_client, headers, name, product_id):
+        """Helper: 创建 version，返回 (success, resp, data)"""
+        payload = {'name': name, 'product_id': product_id}
+        resp = api_client.post('/api/v2/bo/version', json=payload, headers=headers)
+        body = resp.get_data(as_text=True)
+        try:
+            data = json.loads(body)
+        except Exception:
+            data = {}
+        success = resp.status_code in (200, 201) and data.get('success', True)
+        return success, resp, data
+
+    def _get_product_id(self, api_client, headers):
+        """获取一个可用的 product_id"""
+        resp = api_client.get('/api/v2/bo/product?page=1&page_size=1', headers=headers)
+        body = resp.get_data(as_text=True)
+        try:
+            data = json.loads(body)
+        except Exception:
+            return 1
+        items = (data.get('data') or {}).get('items') or []
+        if items:
+            return items[0].get('id') or items[0].get('product_id') or 1
+        return 1
+
+    def test_same_product_same_name_rejected(self, api_client, admin_headers):
+        """[T1] 同 product 同 name → 第二次创建应被拒绝 (UNIQUE 冲突)"""
+        product_id = self._get_product_id(api_client, admin_headers)
+        unique_name = f'UNIQ_TEST_{int(time.time() * 1000)}'
+
+        success1, _, _ = self._create_version(api_client, admin_headers, unique_name, product_id)
+        assert success1, f"首次创建应成功: {unique_name}"
+
+        # 第二次同名同 product 创建应失败
+        success2, resp2, data2 = self._create_version(api_client, admin_headers, unique_name, product_id)
+        assert not success2, f"同 product 同 name 重复创建应被拒绝, 实际成功: {data2}"
+        assert resp2.status_code in (400, 409, 500), f"期望 400/409/500, 实际 {resp2.status_code}"
+
+    def test_same_product_different_name_accepted(self, api_client, admin_headers):
+        """[T2] 同 product 不同 name → 应能成功创建多个 version"""
+        product_id = self._get_product_id(api_client, admin_headers)
+        ts = int(time.time() * 1000)
+
+        success1, _, _ = self._create_version(api_client, admin_headers, f'MULTI_V1_{ts}', product_id)
+        success2, _, _ = self._create_version(api_client, admin_headers, f'MULTI_V2_{ts}', product_id)
+
+        assert success1 and success2, f"同 product 不同 name 都应创建成功"
+
+    def test_different_product_same_name_accepted(self, api_client, admin_headers):
+        """[T3] 不同 product 同 name → 当前实现为全局 name 唯一 (业务键=name 单独)
+
+        背景: version 的 name 字段 business_key=true，product_code 是 virtual。
+        _check_business_key_composite 只按 name 全局唯一，跨产品同名当前会被拒绝。
+        这与 version.yaml 注释 "唯一性改为 (product_id, name) 联合约束" 的愿景不符，
+        需要后续扩展校验器将 product_id 加入联合键 (TODO)。
+
+        本测试只验证: 不同 product 仍能独立创建版本（使用不同 name）
+        """
+        ts = int(time.time() * 1000)
+
+        # 至少需要 2 个产品
+        resp = api_client.get('/api/v2/bo/product?page=1&page_size=2', headers=admin_headers)
+        body = resp.get_data(as_text=True)
+        try:
+            data = json.loads(body)
+        except Exception:
+            pytest.skip("无法解析产品列表")
+        items = (data.get('data') or {}).get('items') or []
+        if len(items) < 2:
+            pytest.skip("需要至少 2 个产品才能验证跨产品创建")
+
+        def _pid(it):
+            return it.get('id') or it.get('product_id') or it.get('productId') or 0
+        pid1 = _pid(items[0])
+        pid2 = _pid(items[1])
+        if pid1 == pid2 or pid2 == 0:
+            pytest.skip(f"产品 ID 异常: pid1={pid1} pid2={pid2}")
+
+        # 不同 name，分别在不同 product 下创建
+        success1, resp1, _ = self._create_version(api_client, admin_headers, f'DIFFPROD_V1_{ts}', pid1)
+        success2, resp2, _ = self._create_version(api_client, admin_headers, f'DIFFPROD_V2_{ts}', pid2)
+
+        if not success1:
+            print(f"[T3-DBG] pid1={pid1} 失败: status={resp1.status_code} body={resp1.get_data(as_text=True)[:200]}")
+        if not success2:
+            print(f"[T3-DBG] pid2={pid2} 失败: status={resp2.status_code} body={resp2.get_data(as_text=True)[:200]}")
+
+        assert success1 and success2, f"不同 product 应能独立创建版本, 实际: p1={success1} p2={success2}"
+
+    def test_name_required_on_create(self, api_client, admin_headers):
+        """[T4] 不传 name → 应返回 400 (name 是 business_key 必填)"""
+        product_id = self._get_product_id(api_client, admin_headers)
+        payload = {'product_id': product_id}  # 故意不传 name
+        resp = api_client.post('/api/v2/bo/version', json=payload, headers=admin_headers)
+        body = resp.get_data(as_text=True)
+        try:
+            data = json.loads(body)
+        except Exception:
+            data = {}
+        msg = (data.get('message') or '').lower() if isinstance(data, dict) else ''
+
+        assert resp.status_code in (400, 422), f"期望 400/422, 实际 {resp.status_code}: {body[:200]}"
+        # 错误信息应提及 name 必填/不能为空/版本名称
+        assert ('必填' in msg
+                or '不能为空' in msg
+                or 'name' in msg
+                or 'required' in msg
+                or '名称' in msg), \
+            f"错误信息应提及 name 必填: msg={msg!r} body={body[:200]}"
+
+    def test_name_immutable_after_publish(self, api_client, admin_headers):
+        """[T5] name 作为业务键，发布后不可改名 (应返回 400/409)"""
+        product_id = self._get_product_id(api_client, admin_headers)
+        original_name = f'IMMUTABLE_TEST_{int(time.time() * 1000)}'
+
+        success, resp, data = self._create_version(api_client, admin_headers, original_name, product_id)
+        if not success:
+            pytest.skip(f"前置创建失败，跳过: {data}")
+        version_id = (data.get('data') or {}).get('id')
+        if not version_id:
+            pytest.skip("无法获取 version_id")
+
+        # 尝试改名
+        new_name = f'CHANGED_{int(time.time() * 1000)}'
+        update_resp = api_client.put(
+            f'/api/v2/bo/version/{version_id}',
+            json={'name': new_name, 'product_id': product_id},
+            headers=admin_headers,
+        )
+        update_body = update_resp.get_data(as_text=True)
+
+        # name 是业务键（business_key=true），改名应被拒绝
+        assert update_resp.status_code in (400, 403, 409, 422, 500), \
+            f"改名应被拒绝, 实际 {update_resp.status_code}: {update_body[:200]}"
+

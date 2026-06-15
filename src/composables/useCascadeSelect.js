@@ -1,4 +1,4 @@
-import { computed, ref, watch, unref } from 'vue'
+import { computed, ref, watch, unref, nextTick } from 'vue'
 import { boService } from '@/services/boService'
 
 export function useCascadeSelect(metaObject) {
@@ -54,10 +54,27 @@ export function useCascadeSelect(metaObject) {
   }
 
   function clearAllDownstream(fieldId, formData) {
-    const fieldIds = cascadeFields.value
-    const startIndex = fieldIds.indexOf(fieldId)
-    if (startIndex === -1) return
-    fieldIds.slice(startIndex).forEach(function(fid) {
+    const config = cascadeChain.value[fieldId]
+    if (!config) return
+
+    // [FIX 2026-06-14] 只清空同一条链上的下游，不影响另一条链。
+    // 原 bug: slice(startIndex) 会把 cascadeFields 数组中 index 之后的所有字段都清空，
+    // 但 cascadeFields 是按 yaml 声明顺序排列的（source_*, target_* 混合）。
+    // 例如 source_bo_id (index 3) 之后是 target_* (index 4-7)，不应该被清空。
+    // 正确做法：沿 cascadeChain 递归收集下游（同一 parent_field 链）。
+    const toClear = new Set([fieldId])
+    function collectDownstream(fid) {
+      Object.entries(cascadeChain.value).forEach(function(entry) {
+        const [key, cfg] = entry
+        if (cfg.parentField === fid && !toClear.has(key)) {
+          toClear.add(key)
+          collectDownstream(key)
+        }
+      })
+    }
+    collectDownstream(fieldId)
+
+    toClear.forEach(function(fid) {
       options.value[fid] = []
       if (formData && formData[fid] !== undefined) {
         formData[fid] = null
@@ -192,26 +209,22 @@ export function useCascadeSelect(metaObject) {
         return parentFields.value.map(function(f) { return data ? data[f] : undefined })
       },
       function(newValues, oldValues) {
-        // [FIX 2026-06-11] immediate: true 让 watch 注册时立即执行一次，
-        //   记录当前 parent 字段值作为后续比较的 oldValues。这样：
-        //     1) useFormCascade.initialize 内部 Object.assign(formData, result.data)
-        //        同步触发的第一次 watch 调度，oldValues 是 undefined → 跳过。
-        //     2) fetchData 完成后 data.value = fullData 整体替换触发的第一次
-        //        watch 调度，同样 oldValues=undefined → 跳过。
-        //     3) 用户后续编辑（version_id 真正改变）触发的第二次及之后触发，
-        //        oldValues 已有记录，callback 正常调用，下游 _id/_name 正确清空。
-        // 原 BUG：useFormCascade.initialize 在 for 循环中对每个 cascadeField
-        //   Object.assign(formData, result.data) 触发 watch 第一次调度，oldValues
-        //   是 undefined；外层 forEach(parentFields) 把所有 parent 都当作"改变"，
-        //   反复调用 clearAllDownstream 把 source_domain_name / source_sub_domain_name
-        //   / source_service_module_name / source_bo_name / target_*_name 全部清空，
-        //   浏览态和编辑态下级联 FK 字段全部显示为空。
+        // [FIX 2026-06-14] 跳过"首次加载"阶段。
+        // 原 BUG：watch 注册时 immediate 触发，oldValues=undefined 跳过；
+        // 然后 fetchData 完成、data.value = API response（含 version_id=1, source_bo_id=16 等）
+        // 整体替换 formData，触发 watch 第二次调度，此时 oldValues=[null,...]（immediate 时的快照）。
+        // 第二次调度中每个 parent 字段都是 null → 1 的"变化"，callback 把这些"变化"
+        // 视为用户编辑，错误调用 clearAllDownstream 清空 formData 下游字段。
+        // 修复：跳过 oldValue == null 的"变化"，因为只有 oldValue 已经有值时（不是首次加载）
+        // 才是真正的用户编辑。
         if (!oldValues) return
         parentFields.value.forEach(function(parentField, index) {
           const newValue = newValues[index]
           const oldValue = oldValues[index]
 
           if (newValue !== oldValue) {
+            // [FIX 2026-06-14] oldValue 是 null/undefined → 首次加载阶段，跳过
+            if (oldValue == null) return
             cascadeFields.value.forEach(function(fieldId) {
               const config = cascadeChain.value[fieldId]
               if (config && config.parentField === parentField) {
@@ -256,10 +269,10 @@ export function useFormCascade(metaObject, formData) {
   async function initialize() {
     const cascadeConfig = metaObject.value?.cascade_select
     if (!cascadeConfig || cascadeConfig.length === 0) return
-    
+
     const allFieldIds = Object.keys(formData.value || {})
     const cascadeFieldIds = cascade.cascadeFields.value
-    
+
     for (const fieldId of cascadeFieldIds) {
       if (allFieldIds.includes(fieldId) && formData.value[fieldId] != null) {
         try {
@@ -272,8 +285,19 @@ export function useFormCascade(metaObject, formData) {
         }
       }
     }
-    
+
     if (!unwatch) {
+      // [FIX 2026-06-14] 推迟 watch 注册到 nextTick 后，避免 initialize 期间的
+      // Object.assign 触发的"假变化"导致 watch 错误调用 clearAllDownstream
+      // 清空下游 formData 字段（编辑态下级联 FK 字段全部显示为空）。
+      // 原因：原 BUG 中，watch 第二次触发时 oldValues=[null,...]（首次记录），
+      // 而不是 undefined，`if (!oldValues) return` 不会跳过，callback 把所有
+      // parent 字段（从 null 变 1）都视为"用户编辑"，清空下游，导致 formData
+      // 中 source_bo_id / source_domain_id 等被清成 null。
+      // 修复：等 initialize 全部完成（Object.assign 引起的 watch 调度 flush 完）
+      // 再注册 watch，这样 watch 第一次 immediate 触发时 oldValues=undefined 跳过，
+      // 后续用户真正编辑才会触发 callback。
+      await nextTick()
       unwatch = cascade.watchParentChanges(formData, function(fieldId, _newValue) {
         cascade.clearAllDownstream(fieldId, formData.value)
       })

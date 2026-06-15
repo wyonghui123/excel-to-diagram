@@ -347,17 +347,36 @@ class AuditService:
             extra_data: Dict[str, Any] = None,
             field_name: str = None, old_value: Any = None, new_value: Any = None,
             parent_object_type: str = None, parent_object_id: Any = None,
-            log_category: str = "business", log_level: str = "INFO") -> bool:
+            log_category: str = None, log_level: str = None,
+            # [v3.18 FR-003/004/005/009/013] 新增参数
+            outcome: str = "success", cascade: bool = False,
+            retention_until: str = None,
+            cascade_root_id: Any = None, cascade_root_action: str = None) -> bool:
         """
         写入审计日志
-        
+
         增强功能：
         1. 自动添加对象标识（audit_object_key, audit_object_display_name）到 extra_data
         2. 自动结构化 FK 字段值（{target_type, target_id, target_key, target_display}）
+        3. [v3.18] 自动 derive log_category (FR-003), log_level (FR-004), retention_until (FR-013)
+        4. [v3.18] 写入 outcome / cascade_root_id / cascade_root_action (FR-005/009)
         """
         try:
             now = datetime.now().isoformat()
-            
+
+            # [v3.18 FR-003/004/013] 自动 derive 缺失的 log_category/log_level/retention_until
+            from meta.core.audit_constants import (
+                derive_category, derive_level, retention_days,
+            )
+            if not log_category:
+                log_category = derive_category(action, cascade=cascade)
+            if not log_level:
+                log_level = derive_level(action, outcome=outcome)
+            if not retention_until:
+                from datetime import timedelta
+                days = retention_days(log_category)
+                retention_until = (datetime.now() + timedelta(days=days)).isoformat()
+
             # 获取对象标识
             object_identity = self._get_object_identity(object_type, object_id)
             
@@ -497,8 +516,13 @@ class AuditService:
                     'parent_object_id': str(parent_object_id) if parent_object_id is not None else None,
                     'log_category': log_category,
                     'log_level': log_level,
+                    # [v3.18 FR-005/009/013] 新增字段
+                    'outcome': outcome,
+                    'retention_until': retention_until,
+                    'cascade_root_id': str(cascade_root_id) if cascade_root_id is not None else None,
+                    'cascade_root_action': cascade_root_action,
                 }
-                
+
                 self.ds.insert(self.AUDIT_TABLE, record)
             
             if not getattr(self.ds, 'in_transaction', False):

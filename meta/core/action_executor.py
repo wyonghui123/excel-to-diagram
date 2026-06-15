@@ -63,7 +63,12 @@ def translate_error_message(error_str: str, meta_object: MetaObject) -> str:
                 if field:
                     field_name = field.semantics.meaning or field.name or field_id
                     return f"{field_name} {biz_message}"
-                return f"{field_id} {biz_message}"
+                # 尝试从 registry 查找对应 MetaObject 的中文名
+                from meta import get_meta_object
+                ref_obj = get_meta_object(field_id)
+                if ref_obj:
+                    return f"{ref_obj.name} {biz_message}"
+                return biz_message
             return biz_message
     
     return error_str
@@ -119,35 +124,64 @@ class AuditLogger:
             effective_user_name = user_name if user_name else (self._current_user.get("user_name") or "system")
             effective_ip = ip_address if ip_address is not None else self._current_user.get("ip_address", "")
             effective_ua = user_agent if user_agent is not None else self._current_user.get("user_agent", "")
-            log_data = {
-                "object_type": object_type,
-                "object_id": object_id,
-                "action": action,
-                "field_name": field_name,
-                "old_value": self._serialize_value(old_value),
-                "new_value": self._serialize_value(new_value),
-                "user_id": effective_user_id,
-                "user_name": effective_user_name,
-                "ip_address": effective_ip,
-                "user_agent": effective_ua,
-                "created_at": datetime.now().isoformat(),
-                "extra_data": json.dumps(extra_data) if extra_data else None,
-                "trace_id": trace_id,
-                "transaction_id": transaction_id,
-                "status": "written",
-                "retry_count": 0,
-                "agent_id": self._agent_context.get("agent_id"),
-                "agent_session_id": self._agent_context.get("agent_session_id"),
-                "tool_call_id": self._agent_context.get("tool_call_id"),
-                "agent_reasoning": self._agent_context.get("agent_reasoning"),
-            }
-            if parent_object_type is not None:
-                log_data["parent_object_type"] = parent_object_type
-            if parent_object_id is not None:
-                log_data["parent_object_id"] = str(parent_object_id)
 
-            self.ds.insert(self.AUDIT_TABLE, log_data)
-            return True
+            # [v3.18 FR-006] 标准化 user_name (display_name (username) 格式)
+            from meta.core.audit_constants import normalize_user_name
+            # 从 users 表查 display_name (如果 user_id 有)
+            display_name = None
+            if effective_user_id:
+                try:
+                    rows = self.ds.execute(
+                        "SELECT display_name, username FROM users WHERE id = ?",
+                        (effective_user_id,),
+                    ).fetchall()
+                    if rows:
+                        display_name = rows[0][0] or None
+                        # 用真实 username 覆盖 effective_user_name (避免是 "admin" 这种纯 username)
+                        actual_username = rows[0][1]
+                        if actual_username:
+                            effective_user_name = normalize_user_name(display_name, actual_username)
+                except Exception:
+                    pass
+            else:
+                # 无 user_id, 用传入的 user_name 推断
+                if effective_user_name and " (" not in effective_user_name and effective_user_name != "system":
+                    # 已是 username, 没法 derive display_name
+                    pass
+
+            # [v3.18 FR-003/004/005/013] 委托给 AuditService.log() 自动 derive + 写 outcome/retention
+            from meta.services.audit_service import AuditService
+            # [v3.18 FR-005] 从 action 自动 derive outcome
+            from meta.core.audit_constants import derive_outcome_from_action
+            outcome = derive_outcome_from_action(action)
+
+            # [v3.18] agent 上下文走 extra_data (AuditService.log 不直接接)
+            if self._agent_context and any(self._agent_context.values()):
+                extra_data = dict(extra_data or {})
+                for k in ('agent_id', 'agent_session_id', 'tool_call_id', 'agent_reasoning'):
+                    v = self._agent_context.get(k)
+                    if v is not None:
+                        extra_data[k] = v
+
+            audit_svc = AuditService(self.ds)
+            return audit_svc.log(
+                object_type=object_type,
+                object_id=object_id,
+                action=action,
+                field_name=field_name,
+                old_value=self._serialize_value(old_value),
+                new_value=self._serialize_value(new_value),
+                extra_data=extra_data,
+                trace_id=trace_id,
+                transaction_id=transaction_id,
+                parent_object_type=parent_object_type,
+                parent_object_id=parent_object_id,
+                user_id=effective_user_id,
+                user_name=effective_user_name,
+                ip_address=effective_ip,
+                user_agent=effective_ua,
+                outcome=outcome,  # 自动 derive (success/blocked/failure/retry)
+            )
         except Exception as e:
             logger.error("AuditLogger failed to log: %s", str(e))
             return False
@@ -545,9 +579,8 @@ class ActionExecutor:
                         from meta import get_meta_object
                         ref_obj = get_meta_object(resolve_to)
                         obj_name = ref_obj.name if ref_obj else resolve_to
-                        version_info = f"(版本ID: {version_id})" if version_id else ""
                         raise ValueError(
-                            f"父对象 {obj_name} 的业务键 '{source_value}' 不存在 {version_info}。"
+                            f"父对象 {obj_name} 的业务键 '{source_value}' 不存在。"
                             f"请先创建 {obj_name} 或检查业务键是否正确。"
                         )
 
@@ -782,6 +815,11 @@ class ActionExecutor:
                     if count > 0:
                         child_name = other_obj.name or other_obj.id
                         field_name = f.name or f.id
+                        # 尝试从 other_obj 解析更友好的字段名
+                        for of in other_obj.fields:
+                            if getattr(of, 'db_column', None) == f.id or of.id == f.id:
+                                field_name = of.name or f.name or f.id
+                                break
                         errors.append(
                             ValidationMessageRegistry.get("validation.object.restrict_on_delete",
                                                            child_name=child_name,
@@ -848,9 +886,32 @@ class ActionExecutor:
                 row = cursor.fetchone()
                 count = row[0] if row else 0
                 if count > 0:
+                    # 将技术表名/FK字段名解析为用户友好的名称
+                    from meta import get_meta_object
+                    from meta.core.models import registry as _model_registry
+                    child_obj = None
+                    # 尝试从 target_object 或 target_table 反查 MetaObject
+                    target_object_id = (rule.get('target_object') or rule.get('target')) if isinstance(rule, dict) else getattr(rule, 'target_object', None) or getattr(rule, 'target', None)
+                    if target_object_id:
+                        child_obj = get_meta_object(target_object_id)
+                    if not child_obj:
+                        # 尝试用 target_table 反查
+                        for obj_id in _model_registry._objects:
+                            mo = _model_registry.get(obj_id)
+                            if mo and getattr(mo, 'table_name', '') == target_table:
+                                child_obj = mo
+                                break
+                    child_name = child_obj.name if child_obj else target_table
+                    # FK 字段名解析
+                    fk_field_name = fk_field
+                    if child_obj:
+                        for f in child_obj.fields:
+                            if getattr(f, 'db_column', None) == fk_field or f.id == fk_field:
+                                fk_field_name = f.name or f.id
+                                break
                     msg = message or ValidationMessageRegistry.get(
                         "validation.object.restrict_on_delete",
-                        child_name=target_table, field_name=fk_field, count=count
+                        child_name=child_name, field_name=fk_field_name, count=count
                     )
                     errors.append(msg)
             except Exception as e:
@@ -937,16 +998,34 @@ class ActionExecutor:
                 logger.warning(f"[M2M Cleanup] Failed to clean {through}: {e}")
 
     def _resolve_parent_info(self, meta_object: MetaObject, data: Dict[str, Any]) -> tuple:
+        """解析对象的父对象信息 (parent_object_type, parent_object_id)
+
+        解析策略 (按优先级):
+        1) 标准的 hierarchy.parent_object + hierarchy.parent_field (普通父子对象, 如 sub_domain.domain_id)
+        2) [FIX 2026-06-14] 多态关联 (polymorphic association): data 中同时存在
+           target_type + target_id 字段 (如 annotation 备注, 关联到任意对象 domain/sub_domain/...)
+           这种情况下, 父对象类型由 data.target_type 动态决定.
+        3) 都没匹配: 返回 (None, None) — 顶级对象 (如 user/role)
+        """
         parent_object_type = meta_object.parent_object
-        if not parent_object_type or not meta_object.hierarchy:
-            return (None, None)
-        parent_field = meta_object.hierarchy.get('parent_field')
-        if not parent_field:
-            return (None, None)
-        parent_id = data.get(parent_field)
-        if parent_id is None:
-            return (None, None)
-        return (parent_object_type, parent_id)
+        if parent_object_type and meta_object.hierarchy:
+            parent_field = meta_object.hierarchy.get('parent_field')
+            if parent_field:
+                parent_id = data.get(parent_field)
+                if parent_id is not None:
+                    return (parent_object_type, parent_id)
+
+        # [FIX 2026-06-14] 多态关联 (polymorphic association) fallback:
+        # 检测 data 中是否有 target_type + target_id 字段 (例如 annotation 备注)
+        # 如果有, 返回 (data['target_type'], data['target_id']) 作为 parent.
+        # 这样 domain/子领域/关系详情页的"操作日志" tab 就能看到关联的备注变更记录.
+        if data and 'target_type' in data and 'target_id' in data:
+            target_type = data.get('target_type')
+            target_id = data.get('target_id')
+            if target_type and target_id is not None:
+                return (target_type, target_id)
+
+        return (None, None)
 
     def _do_create(self, meta_object: MetaObject, params: Dict[str, Any],
                    skip_rules: bool = False) -> ActionResult:
@@ -1510,9 +1589,10 @@ class ActionExecutor:
             pass
 
         if not original_data:
+            obj_display = meta_object.name or meta_object.id
             return ActionResult.fail(
                 error="NOT_FOUND",
-                message=f"记录不存在: {meta_object.id}#{id_value}"
+                message=f"记录不存在: {obj_display}"
             )
 
         if original_data:
@@ -1612,9 +1692,10 @@ class ActionExecutor:
                         if cursor is not None:
                             rowcount = getattr(cursor, 'rowcount', None)
                             if rowcount is not None and rowcount == 0:
+                                obj_display = meta_object.name or meta_object.id
                                 return ActionResult.fail(
                                     error="NOT_FOUND",
-                                    message=f"记录不存在: {meta_object.id}#{id_value}"
+                                    message=f"记录不存在: {obj_display}"
                                 )
                     except Exception as e:
                         # [FIX 2026-06-12] SQL DELETE 失败（典型：FK 违反）必须冒泡，
