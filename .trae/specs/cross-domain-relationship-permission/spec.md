@@ -583,6 +583,11 @@ class BoPickService:
 
 ### 2. 前端改动详情
 
+> **2026-06-15 重构**: 元数据驱动设计 (用户采纳)
+> - 不创建 `src/views/Relationship/Create.vue` 专用视图
+> - 改造现有 `MetaForm.vue` 识别 `value_help.dual_mode: true` → 渲染 `BoSelectorDualMode`
+> - 任何对象类型的 FK 字段 YAML 加 1 行配置即生效
+
 #### 2.1 BoSelectorDualMode.vue (新组件)
 
 **位置**: `src/components/common/ValueHelp/BoSelectorDualMode.vue` (新)
@@ -591,6 +596,7 @@ class BoPickService:
 - 顶部切换 Tab: "列表选择" | "按编码选择"
 - List 模式: 调 `GET /api/v2/bo/business_object?product_id=P`, 按 read scope 过滤
 - Pick by Code 模式: 输入框 + 自动补全 + 调 `pick_by_code` API
+- 元数据驱动: 由 `MetaForm.vue` 在 `field.valueHelp.dual_mode === true` 时自动渲染
 
 **关键代码 (示意)**:
 
@@ -943,14 +949,14 @@ export async function pickBoByCode(code, productId = null) {
 
 > **风险**: 写路径加 functional perm 校验, 可能误拒历史角色配置 (viewer 类角色有 dim_scope 但无 BO:edit)
 
-#### Phase 1: 后端 + functional perm 校验 (软警告) [1 周]
+#### Phase 1: 后端 + functional perm 校验 (软警告) [1 周] ✅ 已交付 (2026-06-15)
 - 部署代码, functional perm 校验**仅 log warn**, 不实际拒绝
 - 收集生产环境 1 周的"应被拒但未拒" 的请求
-- 确认无历史角色配置被误拒, 进入 Phase 2
+- ✅ 测试覆盖: 26 测 (`meta/tests/test_cross_domain_relation_perm.py`)
 
-#### Phase 2: functional perm 校验 (硬拒绝) [1 周]
-- 启用硬拒绝
-- 监控 403 错误率, 异常时回滚
+#### Phase 2: functional perm 校验 (硬拒绝) [1 周] ✅ 已交付 (2026-06-15, 紧接 Phase 1)
+- ✅ 翻转 `_WRITE_SCOPE_REL_FUNCTIONAL_PERM_SOFT_WARN` 默认值 `true → false` (1 行 env var flip, 不重写逻辑)
+- ⏳ 监控 403 错误率 (T2.1.3), 异常时回滚方法: `os.environ['WRITE_SCOPE_REL_FUNCTIONAL_PERM_SOFT_WARN'] = 'true' + restart server`
 
 #### Phase 3: 前端 BoSelectorDualMode 上线 [2 周]
 - 仅在关系表单启用, 其他表单维持现状

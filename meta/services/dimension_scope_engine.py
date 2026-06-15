@@ -150,9 +150,29 @@ class DimensionScopeEngine:
         expanded = {}
         for scope in scopes:
             code = scope['dimension_code']
-            values = set(json.loads(scope['dimension_values'])
-                         if isinstance(scope['dimension_values'], str)
-                         else scope['dimension_values'])
+            # [FIX 2026-06-15] 兼容三种数据形态:
+            # 1. dim_values 为 JSON 字符串 (主流, 来自 UI 配置)
+            # 2. dim_values 为 list (Python 调用)
+            # 3. dim_values 为 NULL (旧数据, id 实际存到 inherit_children)
+            # 修复前: dim_values=NULL 时 set(None) 抛 TypeError
+            # 修复后: NULL 时降级读 inherit_children (同样存 JSON 列表)
+            raw_dv = scope.get('dimension_values')
+            if raw_dv is None:
+                # [FIX 2026-06-15] Bug #3: NULL → 读 inherit_children 字段
+                raw_dv = scope.get('inherit_children')
+                if raw_dv is None:
+                    continue
+            if isinstance(raw_dv, str):
+                try:
+                    values = set(json.loads(raw_dv))
+                except (json.JSONDecodeError, TypeError):
+                    continue
+            elif isinstance(raw_dv, (list, tuple)):
+                values = set(int(x) for x in raw_dv if str(x).lstrip('-').isdigit())
+            else:
+                continue
+            if not values:
+                continue
 
             if code not in expanded:
                 expanded[code] = set()

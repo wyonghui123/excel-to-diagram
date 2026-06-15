@@ -555,10 +555,14 @@ class QueryBuilder:
             params.append(cond.value)
             return "LOWER({0}) LIKE LOWER(?)".format(cond.field), params
         elif cond.operator == QueryOperator.IN:
+            if not cond.values:
+                return "1=0", params
             placeholders = ", ".join(["?"] * len(cond.values))
             params.extend(cond.values)
             return "{0} IN ({1})".format(cond.field, placeholders), params
         elif cond.operator == QueryOperator.NOT_IN:
+            if not cond.values:
+                return "1=1", params
             placeholders = ", ".join(["?"] * len(cond.values))
             params.extend(cond.values)
             return "{0} NOT IN ({1})".format(cond.field, placeholders), params

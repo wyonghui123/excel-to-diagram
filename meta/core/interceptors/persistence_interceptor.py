@@ -959,7 +959,8 @@ class PersistenceInterceptor(Interceptor):
 
             return ActionResult(success=True, data=records, total=total)
         except Exception as e:
-            logger.error(f"[_do_list] Error: {e}")
+            logger.error("[_do_list] Error: %s, object_type=%s", e,
+                         meta_object.id if meta_object else '?')
             return ActionResult(success=False, message=str(e), errors=[str(e)])
 
     def _execute_for_list(self, registry, sql, params, use_fresh):

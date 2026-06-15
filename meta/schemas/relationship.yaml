@@ -749,6 +749,9 @@ fields:
       depends_on: source_service_module_id
       cascade_group: relationship
       cascade_level: 5
+      # [V1.2.0 2026-06-15] 跨域关系 BoSelectorDualMode
+      # 启用 List / Pick by Code 双模式 ValueHelp (跨域逃生口)
+      dual_mode: true
     semantics:
       meaning: 关系的源端业务对象
       parent_key: true
@@ -767,6 +770,10 @@ fields:
         display_field: name
         code_field: code
         apply_target_permissions: false
+      # [V1.2.0 2026-06-15] 跨域关系双模式 ValueHelp 开关
+      # dual_mode: true  →  渲染 BoSelectorDualMode (List 模式套 read scope, By Code 模式逃生口)
+      # 详见: .trae/specs/cross-domain-relationship-permission/spec.md (Option B)
+      dual_mode: true
       behavior:
         validation: true
         binding_strength: strict
@@ -798,6 +805,8 @@ fields:
       depends_on: target_service_module_id
       cascade_group: relationship
       cascade_level: 5
+      # [V1.2.0 2026-06-15] 跨域关系 BoSelectorDualMode
+      dual_mode: true
     semantics:
       meaning: 关系的目标端业务对象
       parent_key: true
@@ -816,6 +825,8 @@ fields:
         display_field: name
         code_field: code
         apply_target_permissions: false
+      # [V1.2.0 2026-06-15] 跨域关系双模式 ValueHelp 开关
+      dual_mode: true
       behavior:
         validation: true
         binding_strength: strict

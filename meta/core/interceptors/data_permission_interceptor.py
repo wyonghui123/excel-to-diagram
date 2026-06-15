@@ -51,9 +51,11 @@ class DataPermissionInterceptor(Interceptor):
             return
 
         if not AUTH_ENABLED:
+            logger.warning(f'[DPI-DEBUG] AUTH_ENABLED=False, skipping all permission checks')
             return
 
         if self._is_admin(context):
+            logger.info(f'[DPI-DEBUG] user={context.user_id} is_admin=True, skipping dim scope')
             return
 
         # [FIX v1.0.2 + v1.0.5 2026-06-10] 优先应用 role_dimension_scopes 派生条件
@@ -75,6 +77,7 @@ class DataPermissionInterceptor(Interceptor):
         #   )
         #   OR (owner_id = $user_id)                  -- 自己 owner 始终可见
         dimension_applied = self._apply_dimension_scope_filter(context)
+        logger.info(f'[DPI-DEBUG] user={context.user_id} object_type={context.object_type} dimension_applied={dimension_applied} query_conditions={context.extra.get("query_conditions", [])}')
 
         if dimension_applied:
             # Dimension scope 已应用, 继续叠加 visibility/owner scope (AND 关系)
@@ -560,6 +563,41 @@ class DataPermissionInterceptor(Interceptor):
             return [or_group]
 
         return [DataPermissionInterceptor._parse_simple_condition(expr.strip())]
+
+    @staticmethod
+    def _split_top_level_or(expr: str) -> List[str]:
+        """按顶层 OR 分割表达式，忽略括号内的 OR
+
+        示例:
+          "a = 1 OR b = 2" → ["a = 1", "b = 2"]
+          "x IN (SELECT ... WHERE a OR b)" → ["x IN (SELECT ... WHERE a OR b)"]
+        """
+        parts = []
+        depth = 0
+        current = []
+        i = 0
+        upper = expr.upper()
+        while i < len(expr):
+            if expr[i] == '(':
+                depth += 1
+                current.append(expr[i])
+                i += 1
+            elif expr[i] == ')':
+                depth -= 1
+                current.append(expr[i])
+                i += 1
+            elif depth == 0 and upper[i:i+4] == ' OR ' and (i == 0 or not upper[i-1].isalnum()):
+                # 顶层 OR
+                parts.append(''.join(current).strip())
+                current = []
+                i += 4  # skip ' OR '
+            else:
+                current.append(expr[i])
+                i += 1
+        remainder = ''.join(current).strip()
+        if remainder:
+            parts.append(remainder)
+        return parts
 
     @staticmethod
     def _parse_simple_condition(expr: str):

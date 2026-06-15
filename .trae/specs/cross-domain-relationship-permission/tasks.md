@@ -66,21 +66,27 @@
 
 ## Phase 2: 硬拒绝启用 (1 周)
 
+> **2026-06-15 实施状态**: ✅ 已切硬拒绝 (env var default `false`)
+> 实施方式: env var flip, 不需要重写代码逻辑, 保留软警告日志能力 (回退/审计双友好)
+
 ### 2.1 functional perm 校验 → 硬拒绝
 
-- [ ] **T2.1.1** 修改 `write_scope_interceptor.py` 的 functional perm 校验逻辑
-  - 移除 Phase 1 的 "log warn" 软警告
-  - 改为: `if not has_edit: return False`
-  - 失败时记录 `INSUFFICIENT_PERMISSION` 错误码
+- [x] **T2.1.1** ✅ (2026-06-15) 翻转 `_WRITE_SCOPE_REL_FUNCTIONAL_PERM_SOFT_WARN` 默认值 `true → false`
+  - 文件: `meta/core/interceptors/write_scope_interceptor.py:120-122`
+  - **不**移除 log warn 代码, 而是 env var 控制: `soft_warn=True` 走 log+继续; `soft_warn=False` (Phase 2 默认) 走 log+`return False`
+  - 失败时: `_log_rel_func_perm_warning(..., 'hard_reject', ...)` + `return False` 触发 `WriteScopeDenied`
+  - 错误码: `INSUFFICIENT_PERMISSION` (由 WriteScopeDenied 抛出)
 
-- [ ] **T2.1.2** 单元测试更新
-  - U05 场景从 "软警告通过" 改为 "硬拒绝"
-  - 期望: `INSUFFICIENT_PERMISSION` 错误
+- [x] **T2.1.2** ✅ (2026-06-15) 单元测试更新
+  - `TestDefaultPhaseConfig` 新增 `test_default_is_hard_reject` (断言默认 False)
+  - `TestDefaultPhaseConfig` 新增 `test_env_true_switches_to_soft_warn` (env=true → 软警告)
+  - `TestU05ViewerRoleSoftWarnVsHardReject` 维持双模式测试 (patch 切 True/False)
+  - 全部 26 测通过
 
-- [ ] **T2.1.3** 监控 1 周 403 错误率
-  - 关键指标: 跨域关系创建的 403 错误率
+- [ ] **T2.1.3** ⏳ (部署后) 监控 1 周 403 错误率
+  - 关键指标: 跨域关系创建的 403 错误率 (`rel_func_perm_hard_reject` log 计数)
   - 阈值: > 5% 触发回滚
-  - 异常回滚: 把 `return False` 改回 `log warn + return True`
+  - **回滚方法**: `os.environ['WRITE_SCOPE_REL_FUNCTIONAL_PERM_SOFT_WARN'] = 'true'` + restart server (1 行 env, 不改代码)
 
 ### 2.2 审计日志增强
 
@@ -95,42 +101,55 @@
 
 ## Phase 3: 前端 BoSelectorDualMode 上线 (2 周)
 
-### 3.1 通用组件开发
+> **2026-06-15 实施状态**: ✅ **元数据驱动重构完成** (用户采纳)
+> 关键决策: 不用 Relationship 专用 view, 改造 MetaForm 识别 `dual_mode: true` → 任何 FK 字段 YAML 加 1 行即生效
 
-- [ ] **T3.1.1** 新建 `src/components/common/ValueHelp/BoListSelector.vue`
+### 3.1 通用组件开发 (已完成)
+
+- [x] **T3.1.1** ✅ `src/components/common/ValueHelp/BoListSelector.vue`
   - 现有 List 模式组件, 抽离为独立组件
-  - Props: productId, domainScope
-  - Emits: update:selected
+  - 集成 4 级级联 + 跨域浏览 toggle (Option B)
+  - Props: productId, allowCrossDomain, modelValue
+  - Emits: update:selected, cross-domain-toggled
 
-- [ ] **T3.1.2** 新建 `src/components/common/ValueHelp/BoCodeSelector.vue`
+- [x] **T3.1.2** ✅ `src/components/common/ValueHelp/BoCodeSelector.vue`
   - 新组件, Pick by Code 模式
-  - Props: productId
-  - Emits: update:selected
-  - 包含错误处理 (404/网络错误/空 code)
+  - Props: productId, disabled, placeholder
+  - Emits: update:selected, error
+  - 错误处理: MISSING_CODE / BO_NOT_FOUND / UNAUTHORIZED / NETWORK_ERROR
+  - Vitest 8 测全绿
 
-- [ ] **T3.1.3** 新建 `src/components/common/ValueHelp/BoSelectorDualMode.vue`
-  - 顶层组件, 包含 Tabs 切换
-  - Tabs: "列表选择" / "按编码选择"
-  - 通过 ref.open() 暴露给父组件
+- [x] **T3.1.3** ✅ `src/components/common/ValueHelp/BoSelectorDualMode.vue`
+  - 顶层组件, 包含 Tabs 切换 (List / By Code)
+  - 通过 ref.open() / clearSelection() 暴露给父组件
+  - Vitest 8 测全绿
 
-- [ ] **T3.1.4** 在 `src/api/boApi.js` 新增 `pickBoByCode(code, productId)` 方法
-  - URL: `/api/v2/bo/business_object/pick_by_code`
+- [x] **T3.1.4** ✅ `src/services/boService.js` 新增 `pickBoByCode(code, productId, options)` 方法
+  - URL: `/bo/business_object/pick_by_code` (经 apiV2 拼接)
   - Method: GET
-  - 处理 200/404/500 错误
+  - 处理 200/400/401/404
+  - 支持 `include_out_of_scope` (跨域 toggle) + `reason` 审计参数
 
-### 3.2 关系表单改造
+### 3.2 元数据驱动集成 (✅ 替代原 Relationship 专用 view)
 
-- [ ] **T3.2.1** 新建 `src/views/Relationship/Create.vue`
-  - 表单字段: source_bo (双模式), target_bo (双模式), relation_type, description
-  - 提交时调 `POST /api/v2/bo/relationship`
-  - 处理 403/422 错误, 显示 "您对 D2 BO 仅可读, 无权创建" 友好提示
+- [x] **T3.2.1** ✅ `src/components/common/MetaForm.vue` 加 `dual_mode` 识别
+  - `isDualMode(field)` 检查 `valueHelp.dual_mode === true`
+  - 识别后渲染 `BoSelectorDualMode` 替代 `ValueHelpField`
+  - 转发 `cross-domain-toggled` / `code-error` 事件
+  - Vitest 5 测全绿 (含 ui.dual_mode 路径, event forwarding)
 
-- [ ] **T3.2.2** 关系编辑页 `src/views/Relationship/Edit.vue` (如无则新建)
-  - 复用 BoSelectorDualMode
-  - 支持修改 source/target
+- [x] **T3.2.2** ✅ `src/components/common/DetailPage/DetailPage.vue` 透传 `dual_mode`
+  - 从 `f.value_help.dual_mode` 或 `f.ui.dual_mode` 派生
+  - 合并到 field defs 的 `valueHelp` 块
+  - 0 回归 (无 DetailPage 专用测试)
 
-- [ ] **T3.2.3** 路由注册 `src/router/index.js`
-  - 路径: `/relationship/create`, `/relationship/:id/edit`
+- [x] **T3.2.3** ✅ `meta/schemas/relationship.yaml` 加 `dual_mode: true`
+  - `source_bo_id.ui.dual_mode: true` + `value_help.dual_mode: true`
+  - `target_bo_id.ui.dual_mode: true` + `value_help.dual_mode: true`
+  - **任何对象类型的 FK 字段** 加这两行即生效, **零代码改动**
+
+- [x] **T3.2.4** ✅ ~~删除~~ `src/views/RelationshipFormView.vue` (回滚错误方案)
+  - 原方案违反元数据驱动原则, 已删除
 
 ### 3.3 E2E 测试
 
@@ -184,6 +203,53 @@
   - 版本号: v1.2.0
   - Release date: 2026-07-15 (暂定)
   - Breaking change: viewer 类角色 (有 dim_scope 但无 BO:edit) 不再能创建关系
+
+---
+
+## 推迟项 / 后续 TODO (2026-06-15 用户决定)
+
+> 以下任务**非阻塞**, 当前 Phase 1+2+3 已完整交付, 跨域关系创建可用 (走 By Code 模式 + OR-edit 闸)。
+> 推迟理由: Phase 1+2 OR-edit 闸已保障写路径安全, Phase 3 By Code 模式 + read scope 已保障读路径默认安全。
+> 推迟项是 UX 增强 (B.1+B.2) 和合规增强 (B.3), 缺它们不破坏安全模型, 视产品反馈再排期。
+
+### B.1 + B.2 (联合: 跨域浏览 toggle 后端支持) [TODO, 暂估 1 天]
+
+- [ ] **TB.1** 后端 `business_object` 列表 API 支持 `?include_out_of_scope=true&reason=...` 参数
+  - 文件: `meta/api/bo_api.py` (query 端点)
+  - 当 `include_out_of_scope=true` 且用户拥有 `cross_domain_relationship:browse` functional perm 时, **绕过** `DataPermissionInterceptor` 的 read scope 过滤
+  - 当用户**没有**该 perm 但带 `include_out_of_scope=true` → 403 PERMISSION_DENIED (不静默忽略, 明确拒绝)
+  - 注: 不引入新 perm 的简化方案不可取, 会导致信息泄露
+
+- [ ] **TB.2** 新增 functional perm: `cross_domain_relationship:browse`
+  - YAML 改动: `meta/objects/role.yaml` 或 `rls_rules/role.yaml` 加 perm 定义
+  - 默认仅授予: 跨域架构师角色 (R-CROSS-ARCH) + 业务 admin
+  - 与 `cross_domain_relationship:create` (或 `business_object:edit`) 是**正交**权限
+  - 测试: 3 测 (有 perm 可见 / 无 perm 403 / 审计记录)
+
+- [ ] **TB.3** 单元测试: B.1 + B.2 行为
+  - `meta/tests/test_bo_list_include_out_of_scope.py` (新)
+  - 6 测: perm 校验 / reason 必填 / 审计写入 / 不影响 List 模式默认行为 / 错误码格式
+
+### B.3 (审计: toggle 使用追溯) [TODO, 暂估 0.5 天]
+
+- [ ] **TB.4** 写路径审计: `/_diagnostics` 记录跨域 toggle 使用情况
+  - 字段: `{ user_id, ts, object_type, field_key, reason, bo_ids_visited }`
+  - 写入时机: 用户在 BoListSelector 切换 `crossDomainEnabled = true` 时
+  - 触发方式: BoSelectorDualMode emit `cross-domain-toggled` → MetaForm emit → ObjectDetailPage 捕获 → 调 audit API
+  - 关联后端: `meta/api/audit_api.py` 加 `record_toggle_usage` 端点
+  - 测试: 3 测 (toggle 写 / reason 必填 / 频率限制: 单用户 100 次/小时)
+
+### 关联的元数据
+
+- 前端代码: [BoListSelector.vue:crossDomainEnabled](file:///d:/filework/excel-to-diagram/src/components/common/ValueHelp/BoListSelector.vue) 已实现 toggle UI + 透传 `include_out_of_scope` + `reason` query params, **后端支持是缺口**
+- 后端 B.1 缺失时: 用户开 toggle → 后端忽略参数 → 用户看不到 D2 BO → 体验困惑但安全无虞
+- 何时启动: 用户反馈 "By Code 模式太累" 或有产品需求希望 D1 manager 直接在 List 模式看到 D2
+
+### 推迟决策记录
+
+- 2026-06-15: 用户与 Agent 讨论, 决定推迟 B.1-B.3
+- 理由: 写路径已安全 (OR-edit), 读路径默认安全 (read scope), UX 增强 (跨域 toggle) 是 nice-to-have
+- 重新评估触发条件: 1) 跨域关系创建量 > 50/天; 2) 客服收到 ≥3 个 "By Code 模式太累" 反馈; 3) 合规审计要求 toggle 追溯
 
 ---
 

@@ -9,9 +9,12 @@
 """
 
 from typing import List, Dict, Any, Optional, Set, Tuple
+import logging
 
 from meta.services.cascade_service import HierarchyConfigLoader
 from meta.core.models import registry
+
+logger = logging.getLogger(__name__)
 
 
 class DataPermissionService:
@@ -183,7 +186,7 @@ class DataPermissionService:
                     'permission_level': propagate_level,
                     'reason': 'auto_propagated_from_child'
                 })
-                print(f"[DataPermService] Propagated: {parent_type}({parent_id}) -> read (from {current_type}({current_id}))")
+                logger.debug("Propagated: %s(%s) -> read (from %s(%s))", parent_type, parent_id, current_type, current_id)
             
             current_type = parent_type
             current_id = parent_id
@@ -315,11 +318,11 @@ class DataPermissionService:
             if perm_idx > resource_idx:
                 parent_id = self._find_parent_id(perm['resource_type'], perm['resource_id'], resource_type)
                 if parent_id:
-                    print(f"[DataPermService] Upward visibility: {perm['resource_type']}({perm['resource_id']}) -> {resource_type}({parent_id})")
+                    logger.debug("Upward visibility: %s(%s) -> %s(%s)", perm['resource_type'], perm['resource_id'], resource_type, parent_id)
                     result.add(parent_id)
 
         if result:
-            print(f"[DataPermService] Upward visible {resource_type} IDs: {result}")
+            logger.debug("Upward visible %s IDs: %s", resource_type, result)
         return result
 
     def _get_parent_visibility_permission_level(self, user_id: int, resource_type: str,
@@ -348,12 +351,12 @@ class DataPermissionService:
             for child_id in child_ids:
                 child_level = self._get_direct_permission_level(user_id, child_type, child_id)
                 if child_level:
-                    print(f"[DataPermService] Parent visibility: {resource_type}({resource_id}) -> read (from child {child_type}({child_id}))")
+                    logger.debug("Parent visibility: %s(%s) -> read (from child %s(%s))", resource_type, resource_id, child_type, child_id)
                     return 'read'
                 
                 child_inherited = self._get_inherited_permission_level(user_id, child_type, child_id)
                 if child_inherited:
-                    print(f"[DataPermService] Parent visibility: {resource_type}({resource_id}) -> read (from inherited child {child_type}({child_id}))")
+                    logger.debug("Parent visibility: %s(%s) -> read (from inherited child %s(%s))", resource_type, resource_id, child_type, child_id)
                     return 'read'
         
         return None
@@ -579,7 +582,7 @@ class DataPermissionService:
         for perm in direct_perms:
             perm['source'] = 'direct'
             result.append(perm)
-        print(f"[DataPermService] User {user_id} direct permissions: {len(direct_perms)}")
+        logger.debug("User %s direct permissions: %s", user_id, len(direct_perms))
 
         # 2. 通过用户组→角色获得的权限
         cursor = self.ds.execute("""
@@ -595,8 +598,8 @@ class DataPermissionService:
         for perm in group_role_perms:
             perm['source'] = 'group_role'
             result.append(perm)
-        print(f"[DataPermService] User {user_id} group-role permissions: {len(group_role_perms)}")
-        print(f"[DataPermService] User {user_id} total effective permissions: {len(result)}")
+        logger.debug("User %s group-role permissions: %s", user_id, len(group_role_perms))
+        logger.debug("User %s total effective permissions: %s", user_id, len(result))
 
         return result
 
@@ -635,7 +638,7 @@ class DataPermissionService:
         parent_idx = self._get_level_index(parent_type)
         resource_idx = self._get_level_index(resource_type)
 
-        print(f"[DEBUG] _find_parent_id: {resource_type}({resource_id}) -> {parent_type}, indices: {resource_idx} -> {parent_idx}")
+        logger.debug("_find_parent_id: %s(%s) -> %s, indices: %s -> %s", resource_type, resource_id, parent_type, resource_idx, parent_idx)
 
         if parent_idx >= resource_idx:
             return None
@@ -648,7 +651,7 @@ class DataPermissionService:
             fk_field = self._get_parent_fk_field(current_type, parent_type_step)
             table_name = self._get_table_name(current_type)
             
-            print(f"[DEBUG]   Step: {current_type}({current_id}) -> {parent_type_step}, FK: {fk_field}, Table: {table_name}")
+            logger.debug("  Step: %s(%s) -> %s, FK: %s, Table: %s", current_type, current_id, parent_type_step, fk_field, table_name)
             
             if not fk_field:
                 return None
@@ -659,12 +662,12 @@ class DataPermissionService:
             )
             row = cursor.fetchone()
             if not row:
-                print(f"[DEBUG]   No row found!")
+                logger.debug("  No row found!")
                 return None
 
             current_id = row[0]
             current_type = parent_type_step
-            print(f"[DEBUG]   Result: parent_id = {current_id}")
+            logger.debug("  Result: parent_id = %s", current_id)
 
         return current_id
 
@@ -682,6 +685,11 @@ class DataPermissionService:
         return fk
 
     def _get_table_name(self, resource_type: str) -> str:
+        # 优先从层级配置获取表名（hierarchies.yaml 中的 table_name 更可靠）
+        hierarchy_table = self._hierarchy_loader.get_table_name(resource_type)
+        if hierarchy_table:
+            return hierarchy_table
+        # Fallback: 从 registry 获取
         normalized = resource_type.rstrip('s')
         meta_obj = registry.get(normalized)
         if meta_obj and meta_obj.table_name:
@@ -724,7 +732,7 @@ class DataPermissionService:
             row = cursor.fetchone()
             return row[0] if row else None
         except Exception as e:
-            print(f"[DEBUG] add_role_data_permission error: {e}")
+            logger.error("add_role_data_permission error: %s", e)
             return None
 
     def remove_role_data_permission(self, perm_id: int) -> bool:
@@ -811,7 +819,7 @@ class DataPermissionService:
             if row:
                 return {'name': row[0], 'code': row[1]}
         except Exception as e:
-            print(f"[DEBUG] _get_resource_detail error: {e}")
+            logger.error("_get_resource_detail error: %s", e)
         return {}
 
     def _build_resource_path(self, resource_type: str, resource_id: int) -> List[Dict]:
@@ -876,7 +884,7 @@ class DataPermissionService:
                     break
 
             except Exception as e:
-                print(f"[DEBUG] _build_resource_path error: {e}")
+                logger.error("_build_resource_path error: %s", e)
                 break
 
         return path_chain

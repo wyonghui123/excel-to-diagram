@@ -5,9 +5,12 @@
 在查询层注入数据权限条件，实现透明过滤
 """
 
+import logging
 from typing import List, Dict, Any, Optional
 from meta.core.query_builder import QueryCondition, QueryOperator
 from meta.services.data_permission_service import DataPermissionService
+
+logger = logging.getLogger(__name__)
 
 
 class DataPermissionFilter:
@@ -24,9 +27,19 @@ class DataPermissionFilter:
         if is_admin():
             return conditions
 
-        allowed_ids = self.perm_service.get_allowed_resource_ids(user_id, object_type)
+        try:
+            allowed_ids = self.perm_service.get_allowed_resource_ids(user_id, object_type)
+        except Exception as e:
+            logger.error(f"[DataPermFilter] get_allowed_resource_ids failed for "
+                         f"user_id={user_id} object_type={object_type}: {e}")
+            # 异常时返回永假条件，防止数据泄露
+            conditions.append(QueryCondition(
+                field='id', operator=QueryOperator.EQ, value=-1
+            ))
+            return conditions
 
         if not allowed_ids:
+            # 没有数据权限配置，允许所有
             return conditions
 
         if len(allowed_ids) == 1:

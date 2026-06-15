@@ -76,7 +76,7 @@
         />
 
         <ValueHelpField
-          v-else-if="field.type === 'value_help' || field.value_help"
+          v-else-if="(field.type === 'value_help' || field.value_help) && !isDualMode(field)"
           v-model="formData[field.key]"
           :value-help-config="field.valueHelpConfig || field.value_help"
           :disabled="field.disabled"
@@ -85,6 +85,23 @@
           @update:model-value="val => { formData[field.key] = val }"
           @update:display-value="val => { displayValues[field.key] = val }"
           @change="validateField(field.key)"
+        />
+
+        <!-- [V1.2.0 2026-06-15] 元数据驱动: dual_mode: true → 渲染 BoSelectorDualMode
+             适用: 跨域关系 / 跨域 BO 引用等场景
+             详见 .trae/specs/cross-domain-relationship-permission/spec.md (Option B)
+        -->
+        <BoSelectorDualMode
+          v-else-if="(field.type === 'value_help' || field.value_help) && isDualMode(field)"
+          :model-value="formData[field.key]"
+          :product-id="getProductIdForField(field)"
+          :label="field.label"
+          :required="field.required"
+          :allow-cross-domain="true"
+          :disabled="field.disabled"
+          @update:model-value="val => { formData[field.key] = val }"
+          @cross-domain-toggled="(val) => onDualModeToggle(field.key, val)"
+          @code-error="(err) => onDualModeCodeError(field.key, err)"
         />
 
         <label v-else-if="field.type === 'checkbox'" class="mf-checkbox">
@@ -120,9 +137,10 @@
 </template>
 
 <script setup>
-import { reactive, computed, watch } from 'vue'
+import { reactive, computed, watch, inject } from 'vue'
 import AppSelect from './AppSelect/AppSelect.vue'
 import ValueHelpField from './ValueHelpField.vue'
+import BoSelectorDualMode from './ValueHelp/BoSelectorDualMode.vue'
 
 const props = defineProps({
   fields: {
@@ -162,7 +180,40 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['update:modelValue', 'change'])
+const emit = defineEmits(['update:modelValue', 'change', 'cross-domain-toggled', 'code-error'])
+
+// [V1.2.0 2026-06-15] 元数据驱动: dual_mode 识别
+// 父组件可通过 provide('productId', ...) 注入 productId; 缺省时回退到 props.productId
+const providedProductId = inject('productId', null)
+
+function isDualMode(field) {
+  // 检查多种 value_help 配置位置
+  const vh = field.valueHelp || field.valueHelpConfig || field.value_help
+  return vh && vh.dual_mode === true
+}
+
+function getProductIdForField(field) {
+  // 优先级: field.productId > provided > 路由 query > 默认 1
+  if (field.productId) return field.productId
+  if (providedProductId?.value) return providedProductId.value
+  if (typeof window !== 'undefined' && window.location) {
+    const url = new URL(window.location.href)
+    const q = url.searchParams.get('productId')
+    if (q) return Number(q)
+  }
+  return 1  // 兜底默认 product
+}
+
+function onDualModeToggle(fieldKey, val) {
+  // 转发给父组件, 供审计 (B.3 落地)
+  emit('cross-domain-toggled', { fieldKey, enabled: val, ts: new Date().toISOString() })
+  console.info('[MetaForm] dual-mode cross-domain toggled:', fieldKey, val)
+}
+
+function onDualModeCodeError(fieldKey, errCode) {
+  emit('code-error', { fieldKey, code: errCode, ts: new Date().toISOString() })
+  console.warn('[MetaForm] dual-mode code error:', fieldKey, errCode)
+}
 
 const formData = reactive({})
 const displayValues = reactive({})

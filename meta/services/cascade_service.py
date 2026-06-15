@@ -92,6 +92,14 @@ class HierarchyConfigLoader:
         return cls.get_cascade_strategy_from_associations(parent_type, child_type)
 
     @classmethod
+    def get_table_name(cls, object_type: str, hierarchy_id: str = 'biz_hierarchy') -> Optional[str]:
+        """从层级配置获取表名（比 registry 更可靠，不依赖 schema 加载顺序）"""
+        level = cls.get_level_by_object(object_type, hierarchy_id)
+        if level and level.get('table_name'):
+            return level.get('table_name')
+        return None
+
+    @classmethod
     def get_type_order(cls) -> List[str]:
         levels = cls.get_levels('biz_hierarchy')
         return [level.get('object') for level in levels if level.get('object')]

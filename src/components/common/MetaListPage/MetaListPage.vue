@@ -2064,13 +2064,14 @@ defineExpose({
 }
 
 .bk-link {
-  color: var(--color-primary);
+  /* 业务键链接：与原版一致使用黑色文本，hover 用 primary 强调 */
+  color: var(--color-text-primary);
   cursor: pointer;
   transition: color 0.15s ease, text-decoration 0.15s ease;
 }
 
 .bk-link:hover {
-  color: var(--color-primary-hover);
+  color: var(--color-primary);
   text-decoration: underline;
 }
 

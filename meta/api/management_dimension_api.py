@@ -8,7 +8,7 @@
 import logging
 import os
 from functools import wraps
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from flask import Blueprint, g, jsonify, request
 
@@ -22,13 +22,16 @@ from meta.services.management_dimension_engine import (
     ManagementDimensionEngine,
     ConditionEvaluator,
 )
+from meta.services.dimension_scope_engine import DimensionScopeEngine
 
 _PARENT_INFO_MAP = {
     'version': ('product', 'products', 'product_id', 'name'),
     'domain': ('version', 'versions', 'version_id', 'name'),
-    'sub_domain': ('domain', 'domains', 'domain_id', 'domain_name'),
-    'service_module': ('sub_domain', 'sub_domains', 'sub_domain_id', 'sub_domain_name'),
-    'business_object': ('service_module', 'service_modules', 'service_module_id', 'module_name'),
+    # [FIX 2026-06-15] parent_display 字段名纠正: 实际 schema 中所有子表都用 'name' 而非 'parent_name'
+    # 之前用 domain_name / sub_domain_name / module_name 在 SQL JOIN 时报 "no such column"
+    'sub_domain': ('domain', 'domains', 'domain_id', 'name'),
+    'service_module': ('sub_domain', 'sub_domains', 'sub_domain_id', 'name'),
+    'business_object': ('service_module', 'service_modules', 'service_module_id', 'name'),
 }
 
 logger = logging.getLogger(__name__)
@@ -56,6 +59,202 @@ def _is_testing():
     """检查是否为测试模式"""
     import os
     return os.environ.get("FLASK_ENV") == "testing" or os.environ.get("TESTING") == "1"
+
+
+def _get_user_dim_scope_ids(user_id: int, dimension_id: str) -> Optional[Set[int]]:
+    """[FIX 2026-06-15] 收集用户在指定 dimension 上可见的 id 集合
+
+    数据源链路:
+        user_group_members → group_roles → role_dimension_scopes
+        → DimensionScopeEngine.expand_dimension_values(role_id) → {dim: set(ids)}
+
+    链式扩展:
+        HIERARCHY_CHAIN 只到 sub_domain, 但 service_module/business_object
+        仍需按 FK 链 (sub_domain → service_module → business_object) 手动扩展
+
+    返回:
+        - None: 该用户**没有任何角色**对任何 dimension 设了 scope → 不过滤 (兼容旧行为)
+        - set(): 该用户**有角色配置了 scope**, 但 expand 后为空 → 严格 0 条可见
+        - set([...]): 该用户可见的 id 集合 (来自 dim_values / inherit_children / FK 链扩展)
+
+    边界:
+        - admin 用户 / '*' 权限: 不调此函数 (调用方判断后跳过)
+        - 数据格式异常 (e.g. dim_values=NULL): 用 inherit_children 兜底
+        - inherit_children=0 也强制扩展 (因为用户有 BO:edit 等下层 perm)
+    """
+    global _data_source
+    if _data_source is None:
+        return None
+
+    try:
+        # 1. user → group_ids
+        cursor = _data_source.execute(
+            "SELECT group_id FROM user_group_members WHERE user_id = ?",
+            [user_id]
+        )
+        group_ids = [r[0] for r in cursor.fetchall()]
+        if not group_ids:
+            return None
+
+        # 2. groups → role_ids (DISTINCT)
+        placeholders = ",".join("?" for _ in group_ids)
+        cursor = _data_source.execute(
+            f"SELECT DISTINCT role_id FROM group_roles WHERE group_id IN ({placeholders})",
+            group_ids
+        )
+        role_ids = [r[0] for r in cursor.fetchall()]
+        if not role_ids:
+            return None
+
+        # 3. 对每个 role 调 expand_dimension_values, union 该 dimension 的 id
+        engine = DimensionScopeEngine(_data_source)
+        all_ids: Set[int] = set()
+        has_any_scope = False
+        any_dimension_scope: Dict[str, Set[int]] = {}
+
+        for role_id in role_ids:
+            try:
+                expanded = engine.expand_dimension_values(role_id)
+            except Exception:
+                expanded = {}
+
+            # 收集该 role 全部 dimension 的 scope (用于后续 FK 链扩展)
+            for dim, ids in expanded.items():
+                if ids:
+                    has_any_scope = True
+                    if dim not in any_dimension_scope:
+                        any_dimension_scope[dim] = set()
+                    any_dimension_scope[dim].update(ids)
+
+        if not has_any_scope:
+            return None
+
+        # 4. 如果目标 dimension 直接有 scope, 直接用
+        if dimension_id in any_dimension_scope and any_dimension_scope[dimension_id]:
+            return any_dimension_scope[dimension_id]
+
+        # 5. [FIX 2026-06-15] 目标 dimension 不在 scope 链中, 但 user 在更高 dim 有 scope
+        #    通过 FK 链手动扩展 (product → version → domain → sub_domain → service_module → business_object)
+        #    强制扩展: 即便 inherit_children=0, 因为 user 配了 BO:edit 等下层 perm, 必须看到下层
+        return _expand_via_fk_chain(dimension_id, any_dimension_scope, _data_source)
+    except Exception as e:
+        logger.error(f"获取用户 dim scope 失败 [user_id={user_id}, dim={dimension_id}]: {e}")
+        return None
+
+
+def _expand_via_fk_chain(
+    target_dim: str,
+    scope_by_dim: Dict[str, Set[int]],
+    ds
+) -> Set[int]:
+    """[FIX 2026-06-15] 通过 FK 链把高层 dim scope 扩展到目标 dim
+
+    链路: product → version → domain → sub_domain → service_module → business_object
+    每个 step 用 parent_fk 字段反向查子表 (子表.parent_fk IN current_ids)
+    """
+    # [FIX 2026-06-15] 完整 6 级 FK 链 (engine 的 HIERARCHY_CHAIN 只到 sub_domain)
+    CHAIN = [
+        # (dim_name, child_table, parent_fk_on_child_table)
+        ('product', None, None),                          # root, 无 parent
+        ('version', 'versions', 'product_id'),
+        ('domain', 'domains', 'version_id'),
+        ('sub_domain', 'sub_domains', 'domain_id'),
+        ('service_module', 'service_modules', 'sub_domain_id'),
+        ('business_object', 'business_objects', 'service_module_id'),
+    ]
+
+    if target_dim not in [c[0] for c in CHAIN]:
+        return set()
+
+    # 1. 找起始位置: 从最高 (i=0) 找第一个有 scope 的 dim, 或到达 target_dim
+    current_ids: Optional[Set[int]] = None
+    start_idx = -1
+    for i, (dim, _, _) in enumerate(CHAIN):
+        if dim in scope_by_dim and scope_by_dim[dim]:
+            current_ids = set(scope_by_dim[dim])
+            start_idx = i
+            break
+
+    if current_ids is None:
+        # 没有任何 dim 有 scope, 已经不会到这一步 (caller has_any_scope check)
+        return set()
+
+    # 1.5 方向检查: target 必须 ≤ start_idx (只能向下走, 不能向上)
+    target_idx = next(i for i, (d, _, _) in enumerate(CHAIN) if d == target_dim)
+    if target_idx < start_idx:
+        # target 在 start 之上, 无法向上扩展 (如: scope=domain, target=product)
+        return set()
+
+    # 2. 从 start_idx 开始, 沿 FK 链向下走, 每次查 child_table
+    for i in range(start_idx, len(CHAIN)):
+        dim, child_table, parent_fk = CHAIN[i]
+
+        if dim == target_dim:
+            # 到达目标
+            return current_ids
+
+        # 否则继续向下走一步: 用 current_ids 查下一级
+        next_i = i + 1
+        if next_i >= len(CHAIN):
+            break
+        next_dim, next_table, next_fk = CHAIN[next_i]
+        if not next_table or not next_fk:
+            continue
+
+        # 覆盖中间 dim 的 scope (如果存在, 直接用 scope 替换)
+        if next_dim in scope_by_dim and scope_by_dim[next_dim]:
+            current_ids = set(scope_by_dim[next_dim])
+        else:
+            # 用 parent_fk 反查子表
+            current_ids = _query_child_ids(ds, next_table, next_fk, current_ids)
+
+    return set()
+
+
+def _query_child_ids(ds, child_table: str, parent_fk: str, parent_ids: Set[int]) -> Set[int]:
+    """查子表 id 集合 (child_table.parent_fk IN parent_ids)"""
+    if not parent_ids:
+        return set()
+    placeholders = ",".join("?" for _ in parent_ids)
+    try:
+        cursor = ds.execute(
+            f"SELECT id FROM {child_table} WHERE {parent_fk} IN ({placeholders})",
+            list(parent_ids)
+        )
+        return {row[0] for row in cursor.fetchall()}
+    except Exception as e:
+        logger.error(f"_query_child_ids failed: table={child_table} parent_fk={parent_fk} err={e}")
+        return set()
+
+
+def _parse_id_field(raw) -> List[int]:
+    """解析 id 字段: 支持 JSON 字符串 / list / None"""
+    if raw is None:
+        return []
+    if isinstance(raw, (list, tuple)):
+        return [int(x) for x in raw if str(x).isdigit()]
+    if isinstance(raw, str):
+        try:
+            import json as _json
+            parsed = _json.loads(raw)
+            if isinstance(parsed, list):
+                return [int(x) for x in parsed if str(x).isdigit()]
+        except Exception:
+            # fallback: 按逗号分隔
+            return [int(x.strip()) for x in raw.split(",") if x.strip().isdigit()]
+    return []
+
+
+def _is_admin_user() -> bool:
+    """判断当前用户是否 admin (绕过 dim scope)"""
+    if not hasattr(g, "current_user") or not g.current_user:
+        return False
+    perms = g.current_user.get("permissions", []) or []
+    if "*" in perms or "admin" in perms:
+        return True
+    if g.current_user.get("is_admin") is True:
+        return True
+    return False
 
 
 def _login_required(f):
@@ -277,6 +476,36 @@ def get_dimension_instances(dimension_id: str):
                         else:
                             where_clause = f"WHERE main.{field_name} IN ({placeholders})"
                         params.extend(filter_values)
+
+        # [FIX 2026-06-15] 应用用户 dim scope 过滤
+        # 业务背景: ValueHelp 弹窗 (来源/目标 4 级级联) 需按用户 role 的 dimension scope 过滤
+        # 修复前: 完全不过滤, TEST888 配 dim_scope=domain=703 却看到全部 484 个 domain
+        # 修复后: 仅返回用户 role scope 覆盖的 instance (admin 跳过)
+        if not _is_admin_user() and hasattr(g, "current_user") and g.current_user:
+            user_id = g.current_user.get("user_id")
+            if user_id:
+                scope_ids = _get_user_dim_scope_ids(int(user_id), dimension_id)
+                if scope_ids is not None:
+                    # [FIX 2026-06-15] scope_ids 是空集 vs 非空集 区分:
+                    #   非空 → IN (ids)
+                    #   空集 (role 有 scope 但 expand 后无 ids) → 无可见 (返回空分页)
+                    if scope_ids:
+                        id_placeholders = ','.join(['?' for _ in scope_ids])
+                        if where_clause:
+                            where_clause += f" AND main.id IN ({id_placeholders})"
+                        else:
+                            where_clause = f"WHERE main.id IN ({id_placeholders})"
+                        params.extend(list(scope_ids))
+                    else:
+                        # 空集: 强一致 0 条可见
+                        if where_clause:
+                            where_clause += " AND 1=0"
+                        else:
+                            where_clause = "WHERE 1=0"
+                        logger.info(
+                            f"[dim-scope] user_id={user_id} dim={dimension_id} "
+                            f"role scope 配置但 expand 后为空, 强制 0 条可见"
+                        )
 
         select_fields = f"main.id, main.{code_field}, main.{display_field}"
         from_clause = f"FROM {table_name} main"

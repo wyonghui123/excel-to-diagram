@@ -3,6 +3,7 @@ import json
 from meta.core.value_help_providers import get_provider
 from meta.core.models import ValueHelpSource
 from meta.services.auth_middleware import login_required
+from meta.services.bo_pick_service import BoPickService
 
 value_help_bp = Blueprint("value_help", __name__)
 
@@ -131,3 +132,93 @@ def resolve_value_help(source_type, source_id):
         return jsonify({"success": True, "data": result})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+# =============================================================================
+# [V1.2.0 2026-06-15] 跨领域关系 - BO Pick by Code 端点
+# Spec: .trae/specs/cross-domain-relationship-permission/spec.md
+#
+# 设计目的: 解决"前端 ValueHelp List 模式看不到 D2 BO" 的死锁.
+#   - List 模式走 read scope 过滤 (现有), U1 看不到 D2 BO
+#   - Pick by Code 模式按编码精确选, 不应用 read scope 过滤
+#   - 但仍受 WriteScopeInterceptor 写权限校验 (OR-edit, 不绕过)
+#
+# 安全保证:
+#   1. 仍需 dev-login cookie 鉴权 (login_required)
+#   2. product_id 必填 (OQ2 决策), 防跨产品误选
+#   3. 仅返回非敏感字段 (id, code, name, description, version_id, service_module_id)
+#   4. 不返回 owner_id, created_by, updated_by 等敏感字段
+# =============================================================================
+@value_help_bp.route("/api/v2/bo/business_object/pick_by_code", methods=["GET"])
+@login_required
+def pick_bo_by_code():
+    """[V1.2.0] 按编码精确选取 BO (不应用 read scope 过滤)
+
+    Query:
+        code: BO 编码 (必填, 如 BO_B_001)
+        product_id: 产品 ID (必填, OQ2 决策, 防跨产品误选)
+
+    Response:
+        200: {success: true, data: {id, code, name, description, version_id, service_module_id}}
+        400: {success: false, error_code: 'MISSING_CODE' | 'MISSING_PRODUCT_ID' | 'INVALID_PRODUCT_ID'}
+        404: {success: false, error_code: 'BO_NOT_FOUND'}
+    """
+    code = request.args.get("code", "").strip()
+    product_id = request.args.get("product_id", "").strip()
+
+    if not code:
+        return jsonify({
+            "success": False,
+            "error_code": "MISSING_CODE",
+            "message": "code 参数不能为空",
+        }), 400
+
+    if not product_id:
+        return jsonify({
+            "success": False,
+            "error_code": "MISSING_PRODUCT_ID",
+            "message": "product_id 参数必填 (OQ2 决策, 防跨产品误选)",
+        }), 400
+
+    try:
+        product_id_int = int(product_id)
+    except ValueError:
+        return jsonify({
+            "success": False,
+            "error_code": "INVALID_PRODUCT_ID",
+            "message": f"product_id 必须是整数, 当前: {product_id}",
+        }), 400
+
+    # 委派给 BoPickService
+    bo = BoPickService.pick_by_code(code=code, product_id=product_id_int)
+    if bo is None:
+        return jsonify({
+            "success": False,
+            "error_code": "BO_NOT_FOUND",
+            "message": f"BO 编码 {code} 在 product {product_id} 下不存在",
+        }), 404
+
+    return jsonify({"success": True, "data": bo})
+
+
+@value_help_bp.route("/api/v2/bo/business_object/<int:bo_id>", methods=["GET"])
+@login_required
+def pick_bo_by_id(bo_id: int):
+    """[V1.2.0] 按 ID 精确选取 BO (不应用 read scope 过滤, 仅含基本字段)
+
+    Path:
+        bo_id: BO ID
+
+    Response:
+        200: {success: true, data: {id, code, name, ...}}
+        404: {success: false, error_code: 'BO_NOT_FOUND'}
+    """
+    bo = BoPickService.pick_by_id(bo_id=bo_id)
+    if bo is None:
+        return jsonify({
+            "success": False,
+            "error_code": "BO_NOT_FOUND",
+            "message": f"BO ID {bo_id} 不存在",
+        }), 404
+
+    return jsonify({"success": True, "data": bo})

@@ -381,6 +381,21 @@ const computedFieldDefs = computed(() => {
       }
     }
 
+    // [V1.2.0 2026-06-15] 透传 dual_mode 标志
+    // YAML 示例:
+    //   value_help:
+    //     source: { type: bo, target_bo: business_object, ... }
+    //     dual_mode: true            # ← 加这一行启用 BoSelectorDualMode
+    // 或 ui.relation 路径:
+    //   ui:
+    //     relation: business_object
+    //     dual_mode: true
+    if (valueHelp && f.value_help?.dual_mode === true) {
+      valueHelp = { ...valueHelp, dual_mode: true }
+    } else if (valueHelp && f.ui?.dual_mode === true) {
+      valueHelp = { ...valueHelp, dual_mode: true }
+    }
+
     defs[f.id] = {
       label: f.name || f.id,
       type: f.type || 'text',

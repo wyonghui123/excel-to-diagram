@@ -471,6 +471,10 @@ def query_bo(object_type):
     # 直接使用crud_query action
     result = bo.execute(object_type, 'crud_query', query_params)
 
+    if not result.success:
+        logger.warning("[query_bo] query failed: object_type=%s msg=%s errors=%s",
+                       object_type, result.message, result.errors)
+
     logger.info(f"[query_bo] result.success={result.success}, result.data type={type(result.data)}, len={len(result.data) if hasattr(result.data, '__len__') else 'N/A'}")
 
     # 转换数据格式以匹配前端期望

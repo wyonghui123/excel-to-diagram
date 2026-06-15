@@ -88,6 +88,37 @@ class BOService extends BaseService {
   searchValueHelp(sourceType, sourceId, params) { return this._searchHelp.searchValueHelp(sourceType, sourceId, params) }
   resolveValueHelp(sourceType, sourceId, value, params) { return this._searchHelp.resolveValueHelp(sourceType, sourceId, value, params) }
 
+  // [V1.2.0 2026-06-15] 跨域关系 Pick by Code 模式 (Phase 3)
+  // 用于双模式 ValueHelp (List mode 不套 read scope → 看不到 D2; Pick by Code 逃生口)
+  // 注: 这是 BO 元数据查询, 不受 read scope 限制 (只校验存在性 + product_id)
+  async pickBoByCode(code, productId, options = {}) {
+    if (!code || typeof code !== 'string') {
+      return { success: false, message: 'MISSING_CODE', data: null }
+    }
+    if (!productId || (typeof productId !== 'number' && typeof productId !== 'string')) {
+      return { success: false, message: 'MISSING_PRODUCT_ID', data: null }
+    }
+    const queryParams = new URLSearchParams()
+    queryParams.set('code', code)
+    queryParams.set('product_id', String(productId))
+    if (options.reason) queryParams.set('reason', options.reason)
+    if (options.includeOutOfScope) queryParams.set('include_out_of_scope', 'true')
+    const path = `/bo/business_object/pick_by_code?${queryParams.toString()}`
+    return this._request('GET', path)
+  }
+
+  // [V1.2.0 2026-06-15] 按 ID 精确查询 BO (供 Pick by Code 模式回退使用)
+  async pickBoById(boId, options = {}) {
+    if (!boId) {
+      return { success: false, message: 'MISSING_BO_ID', data: null }
+    }
+    const queryParams = new URLSearchParams()
+    if (options.reason) queryParams.set('reason', options.reason)
+    const qs = queryParams.toString()
+    const path = `/bo/business_object/${boId}${qs ? '?' + qs : ''}`
+    return this._request('GET', path)
+  }
+
   // 层级操作 — 委托到 hierarchyService（FR-GAP-004）
   getHierarchyTree(rootType, params) { return _hierarchyService.getHierarchyTree(rootType, params) }
   getChildCount(objectType, id, params) { return _hierarchyService.getChildCount(objectType, id, params) }

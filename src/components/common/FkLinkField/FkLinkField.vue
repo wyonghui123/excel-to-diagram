@@ -106,7 +106,7 @@ function handleClick() {
 
 <style scoped>
 .fk-link {
-  /* FK 链接使用文本色 (近黑)，与主对象链接 (--color-primary 主橙色) 区分 */
+  /* 使用文本主色（黑色）保持与原版一致；hover 时用 primary 强调交互 */
   color: var(--color-text-primary);
   text-decoration: none;
   cursor: pointer;
