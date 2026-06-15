@@ -1,0 +1,131 @@
+schema: task_execution
+name: 任务执行记录
+total_rules: 9
+rules:
+- id: BR-task_execution-AUDIT-create
+  type: audit
+  object: task_execution
+  subtype: audit_create
+  fields: all
+  source: schema:task_execution.yaml:audit.create
+  derived_scenarios:
+  - id: T_TASK_EXECUTION_AUDIT_CREATE_001
+    title: create 操作应记录 audit_log
+    priority: P1
+    operation: create
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-task_execution-AUDIT-create'',
+      { operation: ''create'', auditLog: true })'
+- id: BR-task_execution-AUDIT-update
+  type: audit
+  object: task_execution
+  subtype: audit_update
+  fields: changed_only
+  source: schema:task_execution.yaml:audit.update
+  derived_scenarios:
+  - id: T_TASK_EXECUTION_AUDIT_UPDATE_001
+    title: update 操作应记录 audit_log
+    priority: P1
+    operation: update
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-task_execution-AUDIT-update'',
+      { operation: ''update'', auditLog: true })'
+- id: BR-task_execution-AUDIT-delete
+  type: audit
+  object: task_execution
+  subtype: audit_delete
+  fields: business_only
+  source: schema:task_execution.yaml:audit.delete
+  derived_scenarios:
+  - id: T_TASK_EXECUTION_AUDIT_DELETE_001
+    title: delete 操作应记录 audit_log
+    priority: P0
+    operation: delete
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-task_execution-AUDIT-delete'',
+      { operation: ''delete'', auditLog: true })'
+- id: BR-task_execution-FLD-REQ-name
+  type: field_constraint
+  object: task_execution
+  subtype: required
+  field: name
+  source: schema:task_execution.yaml:fields[name].required
+  derived_scenarios:
+  - id: T_TASK_EXECUTION_FLD_REQ_NAME_001
+    title: 字段 name 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-task_execution-FLD-REQ-name'',
+      { field: ''name'', value: null, expected: ''error'' })'
+- id: BR-task_execution-FLD-REQ-task_type
+  type: field_constraint
+  object: task_execution
+  subtype: required
+  field: task_type
+  source: schema:task_execution.yaml:fields[task_type].required
+  derived_scenarios:
+  - id: T_TASK_EXECUTION_FLD_REQ_TASK_TYPE_001
+    title: 字段 task_type 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-task_execution-FLD-REQ-task_type'',
+      { field: ''task_type'', value: null, expected: ''error'' })'
+- id: BR-task_execution-FLD-ENUM-task_type
+  type: field_constraint
+  object: task_execution
+  subtype: enum
+  field: task_type
+  allowed_values:
+  - business
+  - ai
+  - system
+  - action
+  default: null
+  source: schema:task_execution.yaml:fields[task_type].enum_values
+  derived_scenarios:
+  - id: T_TASK_EXECUTION_FLD_ENUM_TASK_TYPE_001
+    title: 字段 task_type 应在枚举值中,无效值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-task_execution-FLD-ENUM-task_type'',
+      { field: ''task_type'', allowed: [''business'', ''ai'', ''system'', ''action'']
+      })'
+- id: BR-task_execution-FLD-REQ-handler
+  type: field_constraint
+  object: task_execution
+  subtype: required
+  field: handler
+  source: schema:task_execution.yaml:fields[handler].required
+  derived_scenarios:
+  - id: T_TASK_EXECUTION_FLD_REQ_HANDLER_001
+    title: 字段 handler 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-task_execution-FLD-REQ-handler'',
+      { field: ''handler'', value: null, expected: ''error'' })'
+- id: BR-task_execution-FLD-REQ-status
+  type: field_constraint
+  object: task_execution
+  subtype: required
+  field: status
+  source: schema:task_execution.yaml:fields[status].required
+  derived_scenarios:
+  - id: T_TASK_EXECUTION_FLD_REQ_STATUS_001
+    title: 字段 status 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-task_execution-FLD-REQ-status'',
+      { field: ''status'', value: null, expected: ''error'' })'
+- id: BR-task_execution-FLD-ENUM-status
+  type: field_constraint
+  object: task_execution
+  subtype: enum
+  field: status
+  allowed_values:
+  - pending
+  - queued
+  - running
+  - completed
+  - failed
+  - cancelled
+  default: pending
+  source: schema:task_execution.yaml:fields[status].enum_values
+  derived_scenarios:
+  - id: T_TASK_EXECUTION_FLD_ENUM_STATUS_001
+    title: 字段 status 应在枚举值中,无效值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-task_execution-FLD-ENUM-status'',
+      { field: ''status'', allowed: [''pending'', ''queued'', ''running'', ''completed'',
+      ''failed'', ''cancelled''] })'

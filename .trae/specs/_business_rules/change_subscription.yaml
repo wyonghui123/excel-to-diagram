@@ -1,0 +1,128 @@
+schema: change_subscription
+name: 变更订阅
+total_rules: 9
+rules:
+- id: BR-change_subscription-STATE-enable-subscription
+  type: rules
+  object: change_subscription
+  subtype: state_transition
+  state_field: enabled
+  from_states:
+  - false
+  to_state: true
+  triggers:
+  - before_update
+  source: schema:change_subscription.yaml:rules[enable_subscription]
+  derived_scenarios:
+  - id: T_CHANGE_SUBSCRIPTION_STATE_ENABLE_SUBSCRIPTION_001
+    title: '状态转换: 启用订阅'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-change_subscription-STATE-enable_subscription'',
+      { from: ''[False]'', to: ''True'' })'
+- id: BR-change_subscription-STATE-disable-subscription
+  type: rules
+  object: change_subscription
+  subtype: state_transition
+  state_field: enabled
+  from_states:
+  - true
+  to_state: false
+  triggers:
+  - before_update
+  source: schema:change_subscription.yaml:rules[disable_subscription]
+  derived_scenarios:
+  - id: T_CHANGE_SUBSCRIPTION_STATE_DISABLE_SUBSCRIPTION_001
+    title: '状态转换: 禁用订阅'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-change_subscription-STATE-disable_subscription'',
+      { from: ''[True]'', to: ''False'' })'
+- id: BR-change_subscription-FLD-REQ-user_id
+  type: field_constraint
+  object: change_subscription
+  subtype: required
+  field: user_id
+  source: schema:change_subscription.yaml:fields[user_id].required
+  derived_scenarios:
+  - id: T_CHANGE_SUBSCRIPTION_FLD_REQ_USER_ID_001
+    title: 字段 user_id 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-change_subscription-FLD-REQ-user_id'',
+      { field: ''user_id'', value: null, expected: ''error'' })'
+- id: BR-change_subscription-FLD-REQ-object_type
+  type: field_constraint
+  object: change_subscription
+  subtype: required
+  field: object_type
+  source: schema:change_subscription.yaml:fields[object_type].required
+  derived_scenarios:
+  - id: T_CHANGE_SUBSCRIPTION_FLD_REQ_OBJECT_TYPE_001
+    title: 字段 object_type 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-change_subscription-FLD-REQ-object_type'',
+      { field: ''object_type'', value: null, expected: ''error'' })'
+- id: BR-change_subscription-FLD-REQ-channel
+  type: field_constraint
+  object: change_subscription
+  subtype: required
+  field: channel
+  source: schema:change_subscription.yaml:fields[channel].required
+  derived_scenarios:
+  - id: T_CHANGE_SUBSCRIPTION_FLD_REQ_CHANNEL_001
+    title: 字段 channel 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-change_subscription-FLD-REQ-channel'',
+      { field: ''channel'', value: null, expected: ''error'' })'
+- id: BR-change_subscription-FLD-REQ-enabled
+  type: field_constraint
+  object: change_subscription
+  subtype: required
+  field: enabled
+  source: schema:change_subscription.yaml:fields[enabled].required
+  derived_scenarios:
+  - id: T_CHANGE_SUBSCRIPTION_FLD_REQ_ENABLED_001
+    title: 字段 enabled 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-change_subscription-FLD-REQ-enabled'',
+      { field: ''enabled'', value: null, expected: ''error'' })'
+- id: BR-change_subscription-FLD-ENUM-enabled
+  type: field_constraint
+  object: change_subscription
+  subtype: enum
+  field: enabled
+  allowed_values:
+  - true
+  - false
+  default: true
+  source: schema:change_subscription.yaml:fields[enabled].enum_values
+  derived_scenarios:
+  - id: T_CHANGE_SUBSCRIPTION_FLD_ENUM_ENABLED_001
+    title: 字段 enabled 应在枚举值中,无效值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-change_subscription-FLD-ENUM-enabled'',
+      { field: ''enabled'', allowed: [True, False] })'
+- id: BR-change_subscription-FLD-REQ-created_at
+  type: field_constraint
+  object: change_subscription
+  subtype: required
+  field: created_at
+  source: schema:change_subscription.yaml:fields[created_at].required
+  derived_scenarios:
+  - id: T_CHANGE_SUBSCRIPTION_FLD_REQ_CREATED_AT_001
+    title: 字段 created_at 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-change_subscription-FLD-REQ-created_at'',
+      { field: ''created_at'', value: null, expected: ''error'' })'
+- id: BR-change_subscription-ACT-toggle-subscription
+  type: action
+  object: change_subscription
+  subtype: business
+  method: PUT
+  path: /api/v1/change_subscriptions/{id}/toggle
+  description: 启用/禁用订阅
+  source: schema:change_subscription.yaml:actions[toggle_subscription]
+  derived_scenarios:
+  - id: T_CHANGE_SUBSCRIPTION_ACT_TOGGLE_SUBSCRIPTION_001
+    title: 业务动作 切换订阅状态 应正确执行
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-change_subscription-ACT-toggle_subscription'',
+      { method: ''PUT'', path: ''/api/v1/change_subscriptions/{id}/toggle'' })'

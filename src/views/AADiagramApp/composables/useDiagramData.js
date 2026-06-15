@@ -459,6 +459,45 @@ export function useDiagramData() {
       serviceModuleRelations: totalStats.serviceModuleRelations - centerStats.serviceModuleRelations
     }
 
+    // [DEBUG 2026-06-15 临时探针] 只读不写, 业务逻辑无任何修改
+    // 启用方式: 浏览器 console 执行 window.__diagDebug = true 后重现问题
+    // 关闭: window.__diagDebug = false
+    if (typeof window !== 'undefined' && window.__diagDebug) {
+      try {
+        const pd = previewData.value || {}
+        console.groupCollapsed('[diag] selectedStats breakdown')
+        console.log('centerBoCodes 数量:', centerBoCodes.value?.size, '前 10:', Array.from(centerBoCodes.value || []).slice(0, 10))
+        console.log('externalBoCodes 数量:', externalBoCodes.value?.size, '内容:', Array.from(externalBoCodes.value || []))
+        console.log('selectedBoCodes (并集) 数量:', selectedBoCodes.size)
+        console.log('previewData.businessObjects 总数:', pd.businessObjects?.length)
+        console.log('previewData.relationships 总数:', pd.relationships?.length)
+        console.log('previewData.domainProducts 顶层数:', pd.domainProducts?.length)
+        if (pd.domainProducts?.length) {
+          const d0 = pd.domainProducts[0]
+          console.log('  domainProducts[0]:', { name: d0?.name, modules数: d0?.modules?.length })
+          if (d0?.modules?.length) {
+            const sd0 = d0.modules[0]
+            console.log('  domainProducts[0].modules[0]:', { name: sd0?.name, submodules数: sd0?.submodules?.length })
+            if (sd0?.submodules?.length) {
+              const sm0 = sd0.submodules[0]
+              console.log('  domainProducts[0].modules[0].submodules[0]:', { name: sm0?.name, BO数: sm0?.businessObjects?.length })
+            }
+          }
+        }
+        console.log('centerStats  :', centerStats)
+        console.log('totalStats   :', totalStats)
+        console.log('incremental  :', incrementalStats)
+        console.log('差值对比 (total - center):', {
+          domains: totalStats.domains - centerStats.domains,
+          subDomains: totalStats.subDomains - centerStats.subDomains,
+          serviceModules: totalStats.serviceModules - centerStats.serviceModules,
+          businessObjects: totalStats.businessObjects - centerStats.businessObjects,
+          objectRelations: totalStats.objectRelations - centerStats.objectRelations,
+        })
+        console.groupEnd()
+      } catch (e) { /* debug only, swallow */ }
+    }
+
     return {
       import: importStats,
       center: centerStats,

@@ -73,6 +73,124 @@ def _relationship_target_service_module_id():
             "WHERE bo.id = r.target_bo_id)")
 
 
+def _derive_bo_ids_from_dim_scope(ds, user_id: int) -> list:
+    """[FIX v1.1.14 2026-06-15] 从 user 的 dimension scope 派生业务对象 ID 列表
+
+    用于 v1 /api/v1/relationships 关系范围树, 跟 v2 /api/v2/bo/relationship
+    (走 DataPermissionInterceptor OR-of-AND) 行为对齐.
+
+    语义: 多 role 时, 任一 role 派生命中 → 允许 (跟 DataPermissionInterceptor 一致)
+          TEST333 (5434 + 5970) → 5970 派生 domain=703 → BO 派生
+            → 7 个 BO (467, 468, 469, 470, 471, 492, 494)
+            → 任一 role 派生: 5434 无 dim scope 不参与, 5970 派生 7 BO
+            → 返回 [467, 468, 469, 470, 471, 492, 494]
+            → 关系 list: source/target 任一在这 7 BO 内 → 4 条 (TEST333 实测)
+
+    Args:
+        ds: DataSource
+        user_id: 用户 ID
+
+    Returns:
+        list[int]: BO id 列表, 空 list 表示无 dim scope (fallback 到 allowed_bo_ids=None)
+    """
+    try:
+        from meta.services.dimension_scope_engine import DimensionScopeEngine
+        ds_engine = DimensionScopeEngine(ds)
+    except Exception as e:
+        logger.warning(f"[_derive_bo_ids_from_dim_scope] import DimensionScopeEngine failed: {e}")
+        return []
+
+    # 1. 拿 user → group → role 链路
+    try:
+        cursor = ds.execute(
+            """SELECT DISTINCT gr.role_id
+               FROM group_roles gr
+               JOIN user_group_members ugm ON gr.group_id = ugm.group_id
+               WHERE ugm.user_id = ?""",
+            [user_id]
+        )
+        user_role_ids = [row[0] for row in cursor.fetchall()]
+    except Exception as e:
+        logger.warning(f"[_derive_bo_ids_from_dim_scope] query role_ids failed: {e}")
+        return []
+
+    if not user_role_ids:
+        return []
+
+    # 2. 对每个 role 调 expand_dimension_values, 沿 chain 派生 d/sd/sm 范围
+    #    之后用 nested SQL 反查 BO
+    #    语义: 多 role 取并集 (跟 V1.1.7 OR-of-AND 修复一致)
+    # 注: TEST333 5970 派生 {domain: [703]}, 然后用 SQL chain 派生 BO
+    all_d_ids = set()
+    all_sd_ids = set()
+    all_sm_ids = set()
+    all_bo_ids = set()
+    any_role_has_scope = False  # 至少一个 role 有 dim scope 配置
+
+    for rid in user_role_ids:
+        try:
+            expanded = ds_engine.expand_dimension_values(rid)
+        except Exception as e:
+            logger.warning(f"[_derive_bo_ids_from_dim_scope] role {rid} expand failed: {e}")
+            continue
+        if not expanded:
+            continue
+        any_role_has_scope = True
+        if 'domain' in expanded: all_d_ids.update(expanded['domain'])
+        if 'sub_domain' in expanded: all_sd_ids.update(expanded['sub_domain'])
+        if 'service_module' in expanded: all_sm_ids.update(expanded['service_module'])
+        # [V1.1.14 增强] business_object 直接在 expanded (如果 yaml mapping 配了)
+        if 'business_object' in expanded: all_bo_ids.update(expanded['business_object'])
+
+    # 没有任何 role 有 dim scope → 返回 [] 让 v1 维持 allowed_bo_ids=None (不应用过滤)
+    # 跟 v2 DataPermissionInterceptor 'not per_role_conditions' 行为一致
+    if not any_role_has_scope:
+        return []
+
+    # 3. 沿 chain 用 raw SQL 派生 BO ids
+    #    条件: bo.service_module_id IN (sm_in_sd) OR sm_id IN (sm_ids) OR
+    #          sd_id IN (sd_ids) OR bo.id IN (bo_ids)
+    parts = []
+    params = []
+    if all_d_ids:
+        ph = ','.join('?' * len(all_d_ids))
+        parts.append(f"sm.sub_domain_id IN (SELECT id FROM sub_domains WHERE domain_id IN ({ph}))")
+        params.extend(all_d_ids)
+    if all_sd_ids:
+        ph = ','.join('?' * len(all_sd_ids))
+        parts.append(f"sm.sub_domain_id IN ({ph})")
+        params.extend(all_sd_ids)
+    if all_sm_ids:
+        ph = ','.join('?' * len(all_sm_ids))
+        parts.append(f"bo.service_module_id IN ({ph})")
+        params.extend(all_sm_ids)
+    if all_bo_ids:
+        ph = ','.join('?' * len(all_bo_ids))
+        parts.append(f"bo.id IN ({ph})")
+        params.extend(all_bo_ids)
+
+    if not parts:
+        return []
+
+    try:
+        cursor = ds.execute(
+            f"""SELECT DISTINCT bo.id FROM business_objects bo
+                LEFT JOIN service_modules sm ON bo.service_module_id = sm.id
+                WHERE {' OR '.join(parts)}""",
+            params
+        )
+        bo_ids = [row[0] for row in cursor.fetchall()]
+        logger.info(
+            f"[_derive_bo_ids_from_dim_scope] user={user_id} roles={user_role_ids} "
+            f"d={len(all_d_ids)} sd={len(all_sd_ids)} sm={len(all_sm_ids)} "
+            f"bo_direct={len(all_bo_ids)} → derived_bo={len(bo_ids)}"
+        )
+        return bo_ids
+    except Exception as e:
+        logger.warning(f"[_derive_bo_ids_from_dim_scope] SQL query failed: {e}")
+        return []
+
+
 def _build_relationship_scope_sort_sql(rules, sort_by: str) -> str:
     """将 hierarchy_scopes 规则转换为 relationship 可直接使用的 ORDER BY CASE WHEN.
 
@@ -176,6 +294,14 @@ def _list_relationships_impl(ds, user, user_id, user_is_admin):
     #           → L200-207 `1=0` 强制条件 → 0 条
     #   修复:    1) dimension scope 用户 → allowed_bo_ids = None (跳过 bo_id 过滤)
     #           2) 让 version_id / scope 自身控制可见性 (与 v2 端点行为一致)
+    #
+    # [FIX v1.1.14 2026-06-15] v1 关系范围树 dim scope 派生 (OR 语义)
+    #   之前: dimension scope 用户 has_data_perms=False → allowed_bo_ids=None
+    #         → 跳过 bo_id 过滤 → 返回全部 32 条 (v764 全部关系)
+    #         与 v2 /api/v2/bo/relationship (走 DataPermissionInterceptor OR-of-AND) 行为不一致
+    #   修复: dimension scope 用户调 DimensionScopeEngine 派生 bo 范围
+    #         拼成 source/target OR 子查询 (跟 V1.1.9 修复一致)
+    #   注: v1 与 v2 现在都走相同的 OR-of-AND 派生路径, TEST333 (5434+5970) 在两端都返回 4 条
     allowed_bo_ids = None
     if AUTH_ENABLED and user_id and not user_is_admin:
         try:
@@ -197,7 +323,12 @@ def _list_relationships_impl(ds, user, user_id, user_is_admin):
             elif has_data_perms and not bo_ids:
                 # 有 business_object data_perms 但 bo_ids 为空 → 显式拒绝
                 allowed_bo_ids = []
-            # else: dimension scope 用户, allowed_bo_ids 保持 None
+            # else: dimension scope 用户, 走 V1.1.14 OR 派生
+            else:
+                # [V1.1.14] dim scope 用户, 调 DimensionScopeEngine 派生 'business_object' cond
+                # 跟 v2 /api/v2/bo/relationship (走 DataPermissionInterceptor) 行为对齐
+                # 语义: 任一 role 派生命中 → 允许 (OR-of-AND per role)
+                allowed_bo_ids = _derive_bo_ids_from_dim_scope(ds, user_id)
         except Exception as e:
             logger.warning(f"[relationships] get_allowed_resource_ids failed: {e}")
             allowed_bo_ids = None

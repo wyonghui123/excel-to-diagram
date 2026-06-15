@@ -1,0 +1,96 @@
+schema: ai_async_task
+name: AI异步任务
+total_rules: 6
+rules:
+- id: BR-ai_async_task-AUDIT-create
+  type: audit
+  object: ai_async_task
+  subtype: audit_create
+  fields: all
+  source: schema:ai_async_task.yaml:audit.create
+  derived_scenarios:
+  - id: T_AI_ASYNC_TASK_AUDIT_CREATE_001
+    title: create 操作应记录 audit_log
+    priority: P1
+    operation: create
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-ai_async_task-AUDIT-create'',
+      { operation: ''create'', auditLog: true })'
+- id: BR-ai_async_task-AUDIT-update
+  type: audit
+  object: ai_async_task
+  subtype: audit_update
+  fields: changed_only
+  source: schema:ai_async_task.yaml:audit.update
+  derived_scenarios:
+  - id: T_AI_ASYNC_TASK_AUDIT_UPDATE_001
+    title: update 操作应记录 audit_log
+    priority: P1
+    operation: update
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-ai_async_task-AUDIT-update'',
+      { operation: ''update'', auditLog: true })'
+- id: BR-ai_async_task-FLD-REQ-task_type
+  type: field_constraint
+  object: ai_async_task
+  subtype: required
+  field: task_type
+  source: schema:ai_async_task.yaml:fields[task_type].required
+  derived_scenarios:
+  - id: T_AI_ASYNC_TASK_FLD_REQ_TASK_TYPE_001
+    title: 字段 task_type 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-ai_async_task-FLD-REQ-task_type'',
+      { field: ''task_type'', value: null, expected: ''error'' })'
+- id: BR-ai_async_task-FLD-ENUM-task_type
+  type: field_constraint
+  object: ai_async_task
+  subtype: enum
+  field: task_type
+  allowed_values:
+  - query
+  - analyze
+  - action
+  - embedding
+  - agent
+  - rag
+  default: null
+  source: schema:ai_async_task.yaml:fields[task_type].enum_values
+  derived_scenarios:
+  - id: T_AI_ASYNC_TASK_FLD_ENUM_TASK_TYPE_001
+    title: 字段 task_type 应在枚举值中,无效值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-ai_async_task-FLD-ENUM-task_type'',
+      { field: ''task_type'', allowed: [''query'', ''analyze'', ''action'', ''embedding'',
+      ''agent'', ''rag''] })'
+- id: BR-ai_async_task-FLD-REQ-request
+  type: field_constraint
+  object: ai_async_task
+  subtype: required
+  field: request
+  source: schema:ai_async_task.yaml:fields[request].required
+  derived_scenarios:
+  - id: T_AI_ASYNC_TASK_FLD_REQ_REQUEST_001
+    title: 字段 request 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-ai_async_task-FLD-REQ-request'',
+      { field: ''request'', value: null, expected: ''error'' })'
+- id: BR-ai_async_task-FLD-ENUM-status
+  type: field_constraint
+  object: ai_async_task
+  subtype: enum
+  field: status
+  allowed_values:
+  - pending
+  - queued
+  - running
+  - completed
+  - failed
+  - cancelled
+  default: pending
+  source: schema:ai_async_task.yaml:fields[status].enum_values
+  derived_scenarios:
+  - id: T_AI_ASYNC_TASK_FLD_ENUM_STATUS_001
+    title: 字段 status 应在枚举值中,无效值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-ai_async_task-FLD-ENUM-status'',
+      { field: ''status'', allowed: [''pending'', ''queued'', ''running'', ''completed'',
+      ''failed'', ''cancelled''] })'

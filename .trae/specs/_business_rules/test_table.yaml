@@ -1,0 +1,16 @@
+schema: test_table
+name: 测试表
+total_rules: 1
+rules:
+- id: BR-test_table-FLD-REQ-name
+  type: field_constraint
+  object: test_table
+  subtype: required
+  field: name
+  source: schema:test_table.yaml:fields[name].required
+  derived_scenarios:
+  - id: T_TEST_TABLE_FLD_REQ_NAME_001
+    title: 字段 name 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-test_table-FLD-REQ-name'', {
+      field: ''name'', value: null, expected: ''error'' })'

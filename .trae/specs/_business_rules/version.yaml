@@ -1,0 +1,374 @@
+schema: version
+name: 产品版本
+total_rules: 27
+rules:
+- id: BR-version-DEL
+  type: deletability
+  object: version
+  condition: self.child_count == 0
+  message: 存在领域的版本不能删除
+  source: schema:version.yaml:deletability
+  derived_scenarios:
+  - id: T_VERSION_DEL_001
+    title: 有依赖时删除应失败
+    priority: P0
+    expected_deletable: false
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-DEL'', { relationCount:
+      1, expected: false })'
+  - id: T_VERSION_DEL_002
+    title: 无依赖时删除应成功
+    priority: P1
+    expected_deletable: true
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-DEL'', { relationCount:
+      0, expected: true })'
+- id: BR-version-AUTH-check
+  type: authorization
+  object: version
+  subtype: check
+  scope: product_id IN (SELECT id FROM products WHERE visibility = 'public' OR owner_id
+    = $user.id)
+  source: schema:version.yaml:authorization.check
+  derived_scenarios:
+  - id: T_VERSION_AUTH_001
+    title: 未授权访问应拒绝
+    priority: P0
+    expected: false
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-AUTH-check'', { authorized:
+      false, expected: 403 })'
+  - id: T_VERSION_AUTH_002
+    title: 已授权访问应成功
+    priority: P1
+    expected: true
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-AUTH-check'', { authorized:
+      true, expected: 200 })'
+- id: BR-version-AUTH-auto_owner
+  type: authorization
+  object: version
+  subtype: auto_owner
+  permission: admin
+  source: schema:version.yaml:authorization.auto_owner
+  derived_scenarios:
+  - id: T_VERSION_OWNER_001
+    title: 创建者自动获得 owner 权限
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-AUTH-auto_owner'', {
+      creatorId: ..., expectedOwner: ... })'
+- id: BR-version-TRANSFER
+  type: authorization
+  object: version
+  subtype: transfer
+  keep_permissions: true
+  source: schema:version.yaml:authorization.allow_transfer
+  derived_scenarios:
+  - id: T_VERSION_TRANS_001
+    title: owner 可转让给其他用户
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-TRANSFER'', { from: ownerId,
+      to: newOwnerId })'
+- id: BR-version-INHERIT
+  type: authorization
+  object: version
+  subtype: inherit
+  source: schema:version.yaml:authorization.inherit_to_children
+  derived_scenarios:
+  - id: T_VERSION_INH_001
+    title: 权限应自动继承给子对象
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-INHERIT'', { parentId:
+      ..., expectedChildAccess: true })'
+- id: BR-version-AUDIT-create
+  type: audit
+  object: version
+  subtype: audit_create
+  fields: all
+  source: schema:version.yaml:audit.create
+  derived_scenarios:
+  - id: T_VERSION_AUDIT_CREATE_001
+    title: create 操作应记录 audit_log
+    priority: P1
+    operation: create
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-AUDIT-create'', { operation:
+      ''create'', auditLog: true })'
+- id: BR-version-AUDIT-update
+  type: audit
+  object: version
+  subtype: audit_update
+  fields: changed_only
+  source: schema:version.yaml:audit.update
+  derived_scenarios:
+  - id: T_VERSION_AUDIT_UPDATE_001
+    title: update 操作应记录 audit_log
+    priority: P1
+    operation: update
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-AUDIT-update'', { operation:
+      ''update'', auditLog: true })'
+- id: BR-version-AUDIT-delete
+  type: audit
+  object: version
+  subtype: audit_delete
+  fields: business_only
+  source: schema:version.yaml:audit.delete
+  derived_scenarios:
+  - id: T_VERSION_AUDIT_DELETE_001
+    title: delete 操作应记录 audit_log
+    priority: P0
+    operation: delete
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-AUDIT-delete'', { operation:
+      ''delete'', auditLog: true })'
+- id: BR-version-ASPECT-audit
+  type: aspect
+  object: version
+  aspect: audit_aspect
+  source: schema:version.yaml:aspects[audit_aspect]
+  derived_scenarios:
+  - id: T_VERSION_ASPECT_AUDIT_ASPECT_001
+    title: audit_aspect 切面应正确触发
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-ASPECT-audit_aspect'',
+      { objectId: ..., aspectFired: true })'
+- id: BR-version-ASPECT-owner
+  type: aspect
+  object: version
+  aspect: owner_aspect
+  source: schema:version.yaml:aspects[owner_aspect]
+  derived_scenarios:
+  - id: T_VERSION_ASPECT_OWNER_ASPECT_001
+    title: owner_aspect 切面应正确触发
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-ASPECT-owner_aspect'',
+      { objectId: ..., aspectFired: true })'
+- id: BR-version-VAL-name-required
+  type: validations
+  object: version
+  subtype: field
+  rule: name is not None and name != ''
+  message: 版本名称不能为空
+  severity: error
+  source: schema:version.yaml:validations[name_required]
+  derived_scenarios:
+  - id: T_VERSION_VAL_NAME_REQUIRED_001
+    title: '校验: 名称必填 应拒绝无效输入'
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-VAL-name_required'',
+      { invalid: true, expected: ''error'' })'
+- id: BR-version-VAL-product-id-required
+  type: validations
+  object: version
+  subtype: field
+  rule: product_id is not None
+  message: 产品ID不能为空
+  severity: error
+  source: schema:version.yaml:validations[product_id_required]
+  derived_scenarios:
+  - id: T_VERSION_VAL_PRODUCT_ID_REQUIRED_001
+    title: '校验: 产品ID必填 应拒绝无效输入'
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-VAL-product_id_required'',
+      { invalid: true, expected: ''error'' })'
+- id: BR-version-VAL-only-one-current-per-product
+  type: validations
+  object: version
+  subtype: business
+  rule: "if is_current:\n    existing = data_source.query(\"SELECT id FROM versions\
+    \ WHERE product_id = ? AND is_current = 1 AND id != ?\", product_id, id)\n   \
+    \ if existing:\n        return False\nreturn True\n"
+  message: 每个产品只能有一个当前版本，请先将其他版本设为非当前版本
+  severity: error
+  source: schema:version.yaml:validations[only_one_current_per_product]
+  derived_scenarios:
+  - id: T_VERSION_VAL_ONLY_ONE_CURRENT_PER_PRODUCT_001
+    title: '校验: 每个产品只能有一个当前版本 应拒绝无效输入'
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-VAL-only_one_current_per_product'',
+      { invalid: true, expected: ''error'' })'
+- id: BR-version-STATE-set-current-version
+  type: rules
+  object: version
+  subtype: state_transition
+  state_field: is_current
+  from_states:
+  - false
+  to_state: true
+  triggers:
+  - before_update
+  source: schema:version.yaml:rules[set_current_version]
+  derived_scenarios:
+  - id: T_VERSION_STATE_SET_CURRENT_VERSION_001
+    title: '状态转换: 设为当前版本'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-STATE-set_current_version'',
+      { from: ''[False]'', to: ''True'' })'
+- id: BR-version-STATE-unset-current-version
+  type: rules
+  object: version
+  subtype: state_transition
+  state_field: is_current
+  from_states:
+  - true
+  to_state: false
+  triggers:
+  - before_update
+  source: schema:version.yaml:rules[unset_current_version]
+  derived_scenarios:
+  - id: T_VERSION_STATE_UNSET_CURRENT_VERSION_001
+    title: '状态转换: 取消当前版本'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-STATE-unset_current_version'',
+      { from: ''[True]'', to: ''False'' })'
+- id: BR-version-IE-import
+  type: import_export
+  object: version
+  subtype: import
+  conflict_strategy: upsert
+  conflict_key: product_id,name
+  cascade: true
+  source: schema:version.yaml:import_export.import_enabled
+  derived_scenarios:
+  - id: T_VERSION_IE_IMP_001
+    title: 导入应使用 upsert 策略处理冲突
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-IE-import'', { strategy:
+      ''upsert'', conflictKey: ''product_id,name'' })'
+- id: BR-version-IE-export
+  type: import_export
+  object: version
+  subtype: export
+  cascade: true
+  source: schema:version.yaml:import_export.export_enabled
+  derived_scenarios:
+  - id: T_VERSION_IE_EXP_001
+    title: 导出应级联包含子对象
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-IE-export'', { cascade:
+      True })'
+- id: BR-version-HIER
+  type: hierarchy
+  object: version
+  level: 1
+  parent_field: product_id
+  path_field: hierarchy_path
+  source: schema:version.yaml:hierarchy
+  derived_scenarios:
+  - id: T_VERSION_HIER_001
+    title: 应正确维护层级 path/depth (level=1)
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-HIER'', { level: 1 })'
+- id: BR-version-FLD-REQ-product_id
+  type: field_constraint
+  object: version
+  subtype: required
+  field: product_id
+  source: schema:version.yaml:fields[product_id].required
+  derived_scenarios:
+  - id: T_VERSION_FLD_REQ_PRODUCT_ID_001
+    title: 字段 product_id 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-FLD-REQ-product_id'',
+      { field: ''product_id'', value: null, expected: ''error'' })'
+- id: BR-version-FLD-REQ-name
+  type: field_constraint
+  object: version
+  subtype: required
+  field: name
+  source: schema:version.yaml:fields[name].required
+  derived_scenarios:
+  - id: T_VERSION_FLD_REQ_NAME_001
+    title: 字段 name 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-FLD-REQ-name'', { field:
+      ''name'', value: null, expected: ''error'' })'
+- id: BR-version-FLD-PAT-name
+  type: field_constraint
+  object: version
+  subtype: pattern
+  field: name
+  pattern: ^[A-Za-z0-9][A-Za-z0-9_.\-]*$
+  source: schema:version.yaml:fields[name].semantics.pattern
+  derived_scenarios:
+  - id: T_VERSION_FLD_PAT_NAME_001
+    title: 字段 name 应匹配模式 ^[A-Za-z0-9][A-Za-z0-9_.\-]*$
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-FLD-PAT-name'', { field:
+      ''name'', pattern: ''^[A-Za-z0-9][A-Za-z0-9_.\-]*$'' })'
+- id: BR-version-FLD-IMM-name
+  type: field_constraint
+  object: version
+  subtype: immutable
+  field: name
+  source: schema:version.yaml:fields[name].semantics.immutable
+  derived_scenarios:
+  - id: T_VERSION_FLD_IMM_NAME_001
+    title: 字段 name 不可变,修改应拒绝
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-FLD-IMM-name'', { field:
+      ''name'', value: ''new'', expected: ''error'' })'
+- id: BR-version-FLD-ENUM-is_current
+  type: field_constraint
+  object: version
+  subtype: enum
+  field: is_current
+  allowed_values:
+  - 1
+  - 0
+  default: false
+  source: schema:version.yaml:fields[is_current].enum_values
+  derived_scenarios:
+  - id: T_VERSION_FLD_ENUM_IS_CURRENT_001
+    title: 字段 is_current 应在枚举值中,无效值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-FLD-ENUM-is_current'',
+      { field: ''is_current'', allowed: [1, 0] })'
+- id: BR-version-REL-version-to-product
+  type: relation
+  object: version
+  subtype: parent_child
+  target: product
+  cardinality: N:1
+  source: schema:version.yaml:relations[version_to_product]
+  derived_scenarios:
+  - id: T_VERSION_REL_VERSION_TO_PRODUCT_001
+    title: 删除父对象应处理子对象 (cardinality=N:1)
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-REL-version_to_product'',
+      { parentId: ..., childrenCount: ... })'
+- id: BR-version-REL-version-to-domains
+  type: relation
+  object: version
+  subtype: parent_child
+  target: domain
+  cardinality: 1:N
+  source: schema:version.yaml:relations[version_to_domains]
+  derived_scenarios:
+  - id: T_VERSION_REL_VERSION_TO_DOMAINS_001
+    title: 删除父对象应处理子对象 (cardinality=1:N)
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-REL-version_to_domains'',
+      { parentId: ..., childrenCount: ... })'
+- id: BR-version-ACT-set-current
+  type: action
+  object: version
+  subtype: business
+  method: POST
+  path: /api/v1/versions/{id}/set-current
+  description: 将版本设为当前活跃版本
+  source: schema:version.yaml:actions[set_current]
+  derived_scenarios:
+  - id: T_VERSION_ACT_SET_CURRENT_001
+    title: 业务动作 设为当前版本 应正确执行
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-ACT-set_current'', {
+      method: ''POST'', path: ''/api/v1/versions/{id}/set-current'' })'
+- id: BR-version-ACT-compare
+  type: action
+  object: version
+  subtype: business
+  method: POST
+  path: /api/v1/versions/compare
+  description: 对比两个版本的差异
+  source: schema:version.yaml:actions[compare]
+  derived_scenarios:
+  - id: T_VERSION_ACT_COMPARE_001
+    title: 业务动作 版本对比 应正确执行
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-ACT-compare'', { method:
+      ''POST'', path: ''/api/v1/versions/compare'' })'

@@ -1,0 +1,160 @@
+schema: role
+name: 角色
+total_rules: 12
+rules:
+- id: BR-role-AUDIT-create
+  type: audit
+  object: role
+  subtype: audit_create
+  fields: all
+  source: schema:role.yaml:audit.create
+  derived_scenarios:
+  - id: T_ROLE_AUDIT_CREATE_001
+    title: create 操作应记录 audit_log
+    priority: P1
+    operation: create
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-role-AUDIT-create'', { operation:
+      ''create'', auditLog: true })'
+- id: BR-role-AUDIT-update
+  type: audit
+  object: role
+  subtype: audit_update
+  fields: changed_only
+  source: schema:role.yaml:audit.update
+  derived_scenarios:
+  - id: T_ROLE_AUDIT_UPDATE_001
+    title: update 操作应记录 audit_log
+    priority: P1
+    operation: update
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-role-AUDIT-update'', { operation:
+      ''update'', auditLog: true })'
+- id: BR-role-AUDIT-delete
+  type: audit
+  object: role
+  subtype: audit_delete
+  fields: business_only
+  source: schema:role.yaml:audit.delete
+  derived_scenarios:
+  - id: T_ROLE_AUDIT_DELETE_001
+    title: delete 操作应记录 audit_log
+    priority: P0
+    operation: delete
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-role-AUDIT-delete'', { operation:
+      ''delete'', auditLog: true })'
+- id: BR-role-ASPECT-audit
+  type: aspect
+  object: role
+  aspect: audit_aspect
+  source: schema:role.yaml:aspects[audit_aspect]
+  derived_scenarios:
+  - id: T_ROLE_ASPECT_AUDIT_ASPECT_001
+    title: audit_aspect 切面应正确触发
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-role-ASPECT-audit_aspect'', {
+      objectId: ..., aspectFired: true })'
+- id: BR-role-IE-import
+  type: import_export
+  object: role
+  subtype: import
+  conflict_strategy: upsert
+  conflict_key: code
+  cascade: false
+  source: schema:role.yaml:import_export.import_enabled
+  derived_scenarios:
+  - id: T_ROLE_IE_IMP_001
+    title: 导入应使用 upsert 策略处理冲突
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-role-IE-import'', { strategy:
+      ''upsert'', conflictKey: ''code'' })'
+- id: BR-role-IE-export
+  type: import_export
+  object: role
+  subtype: export
+  cascade: false
+  source: schema:role.yaml:import_export.export_enabled
+  derived_scenarios:
+  - id: T_ROLE_IE_EXP_001
+    title: 导出应不级联包含子对象
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-role-IE-export'', { cascade:
+      False })'
+- id: BR-role-FLD-REQ-code
+  type: field_constraint
+  object: role
+  subtype: required
+  field: code
+  source: schema:role.yaml:fields[code].required
+  derived_scenarios:
+  - id: T_ROLE_FLD_REQ_CODE_001
+    title: 字段 code 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-role-FLD-REQ-code'', { field:
+      ''code'', value: null, expected: ''error'' })'
+- id: BR-role-FLD-UNQ-code
+  type: field_constraint
+  object: role
+  subtype: unique
+  field: code
+  source: schema:role.yaml:fields[code].unique
+  derived_scenarios:
+  - id: T_ROLE_FLD_UNQ_CODE_001
+    title: 字段 code 唯一,重复值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-role-FLD-UNQ-code'', { field:
+      ''code'', value: ''existing'', expected: ''error'' })'
+- id: BR-role-FLD-IMM-code
+  type: field_constraint
+  object: role
+  subtype: immutable
+  field: code
+  source: schema:role.yaml:fields[code].semantics.immutable
+  derived_scenarios:
+  - id: T_ROLE_FLD_IMM_CODE_001
+    title: 字段 code 不可变,修改应拒绝
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-role-FLD-IMM-code'', { field:
+      ''code'', value: ''new'', expected: ''error'' })'
+- id: BR-role-FLD-REQ-name
+  type: field_constraint
+  object: role
+  subtype: required
+  field: name
+  source: schema:role.yaml:fields[name].required
+  derived_scenarios:
+  - id: T_ROLE_FLD_REQ_NAME_001
+    title: 字段 name 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-role-FLD-REQ-name'', { field:
+      ''name'', value: null, expected: ''error'' })'
+- id: BR-role-FLD-ENUM-is_active
+  type: field_constraint
+  object: role
+  subtype: enum
+  field: is_active
+  allowed_values:
+  - 1
+  - 0
+  default: true
+  source: schema:role.yaml:fields[is_active].enum_values
+  derived_scenarios:
+  - id: T_ROLE_FLD_ENUM_IS_ACTIVE_001
+    title: 字段 is_active 应在枚举值中,无效值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-role-FLD-ENUM-is_active'', {
+      field: ''is_active'', allowed: [1, 0] })'
+- id: BR-role-FLD-ENUM-is_system
+  type: field_constraint
+  object: role
+  subtype: enum
+  field: is_system
+  allowed_values:
+  - 1
+  - 0
+  default: false
+  source: schema:role.yaml:fields[is_system].enum_values
+  derived_scenarios:
+  - id: T_ROLE_FLD_ENUM_IS_SYSTEM_001
+    title: 字段 is_system 应在枚举值中,无效值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-role-FLD-ENUM-is_system'', {
+      field: ''is_system'', allowed: [1, 0] })'

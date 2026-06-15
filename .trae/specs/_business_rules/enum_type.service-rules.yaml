@@ -1,0 +1,970 @@
+object: enum_type
+source: service_layer
+total_rules: 78
+rules:
+- id: BR-enum_type-SRV-VALIDATION-enum_resolver-88
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:enum_resolver.py:L88
+  code_snippet: 'def validate_enum_value(enum_type_id: str, code: str, data_source)
+    -> bool:'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_88_001
+    title: '服务层: def validate_enum_value(enum_type_id: str, code: str, data_source)
+      -> bool:'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-enum_resolver-88'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-VALIDATION-cache_manager-251
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:cache_manager.py:L251
+  code_snippet: 'async def invalidate_all(self):'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_251_001
+    title: '服务层: async def invalidate_all(self):'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-cache_manager-251'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-RETURN-FALSE-repository-270
+  type: service_logic
+  subtype: return_false
+  object: enum_type
+  source: service:repository.py:L270
+  code_snippet: return False
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_RETURN_FALSE_270_001
+    title: '服务层: return False'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-RETURN-FALSE-repository-270'',
+      { trigger: ''service.return_false'' })'
+- id: BR-enum_type-SRV-RETURN-FALSE-repository-567
+  type: service_logic
+  subtype: return_false
+  object: enum_type
+  source: service:repository.py:L567
+  code_snippet: return False
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_RETURN_FALSE_567_001
+    title: '服务层: return False'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-RETURN-FALSE-repository-567'',
+      { trigger: ''service.return_false'' })'
+- id: BR-enum_type-SRV-VALIDATION-secure_admin-129
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:secure_admin.py:L129
+  code_snippet: self._validate_type_data(data, is_create=True)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_129_001
+    title: '服务层: self._validate_type_data(data, is_create=True)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-secure_admin-129'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-GUARD-secure_admin-129
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:secure_admin.py:L129
+  code_snippet: self._validate_type_data(data, is_create=True)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_129_001
+    title: '服务层: self._validate_type_data(data, is_create=True)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-secure_admin-129'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-RAISE-EXCEPTION-secure_admin-134
+  type: service_logic
+  subtype: raise_exception
+  object: enum_type
+  source: service:secure_admin.py:L134
+  code_snippet: 'raise ValidationError(f"枚举类型ID已存在: {data[''id'']}")'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_RAISE_EXCEPTION_134_001
+    title: '服务层: raise ValidationError(f"枚举类型ID已存在: {data[''id'']}")'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-RAISE-EXCEPTION-secure_admin-134'',
+      { trigger: ''service.raise_exception'' })'
+- id: BR-enum_type-SRV-VALIDATION-secure_admin-162
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:secure_admin.py:L162
+  code_snippet: self._validate_type_data(data, is_create=False)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_162_001
+    title: '服务层: self._validate_type_data(data, is_create=False)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-secure_admin-162'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-GUARD-secure_admin-162
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:secure_admin.py:L162
+  code_snippet: self._validate_type_data(data, is_create=False)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_162_001
+    title: '服务层: self._validate_type_data(data, is_create=False)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-secure_admin-162'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-VALIDATION-secure_admin-174
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:secure_admin.py:L174
+  code_snippet: await self._invalidate_cache(enum_type_id)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_174_001
+    title: '服务层: await self._invalidate_cache(enum_type_id)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-secure_admin-174'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-VALIDATION-secure_admin-213
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:secure_admin.py:L213
+  code_snippet: await self._invalidate_cache(enum_type_id)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_213_001
+    title: '服务层: await self._invalidate_cache(enum_type_id)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-secure_admin-213'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-VALIDATION-secure_admin-241
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:secure_admin.py:L241
+  code_snippet: self._validate_value_data(data, is_create=True)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_241_001
+    title: '服务层: self._validate_value_data(data, is_create=True)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-secure_admin-241'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-GUARD-secure_admin-241
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:secure_admin.py:L241
+  code_snippet: self._validate_value_data(data, is_create=True)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_241_001
+    title: '服务层: self._validate_value_data(data, is_create=True)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-secure_admin-241'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-RAISE-EXCEPTION-secure_admin-251
+  type: service_logic
+  subtype: raise_exception
+  object: enum_type
+  source: service:secure_admin.py:L251
+  code_snippet: 'raise ValidationError(f"枚举值编码已存在: {data[''code'']}")'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_RAISE_EXCEPTION_251_001
+    title: '服务层: raise ValidationError(f"枚举值编码已存在: {data[''code'']}")'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-RAISE-EXCEPTION-secure_admin-251'',
+      { trigger: ''service.raise_exception'' })'
+- id: BR-enum_type-SRV-VALIDATION-secure_admin-257
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:secure_admin.py:L257
+  code_snippet: await self._invalidate_cache(enum_type_id)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_257_001
+    title: '服务层: await self._invalidate_cache(enum_type_id)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-secure_admin-257'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-VALIDATION-secure_admin-285
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:secure_admin.py:L285
+  code_snippet: self._validate_value_data(data, is_create=False)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_285_001
+    title: '服务层: self._validate_value_data(data, is_create=False)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-secure_admin-285'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-GUARD-secure_admin-285
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:secure_admin.py:L285
+  code_snippet: self._validate_value_data(data, is_create=False)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_285_001
+    title: '服务层: self._validate_value_data(data, is_create=False)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-secure_admin-285'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-RAISE-EXCEPTION-secure_admin-345
+  type: service_logic
+  subtype: raise_exception
+  object: enum_type
+  source: service:secure_admin.py:L345
+  code_snippet: raise ValidationError("排序项列表不能为空")
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_RAISE_EXCEPTION_345_001
+    title: '服务层: raise ValidationError("排序项列表不能为空")'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-RAISE-EXCEPTION-secure_admin-345'',
+      { trigger: ''service.raise_exception'' })'
+- id: BR-enum_type-SRV-VALIDATION-secure_admin-356
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:secure_admin.py:L356
+  code_snippet: await self._invalidate_cache(enum_type_id)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_356_001
+    title: '服务层: await self._invalidate_cache(enum_type_id)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-secure_admin-356'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-VALIDATION-secure_admin-422
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:secure_admin.py:L422
+  code_snippet: 'def _validate_type_data(self, data: Dict[str, Any], is_create: bool):'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_422_001
+    title: '服务层: def _validate_type_data(self, data: Dict[str, Any], is_create: bool):'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-secure_admin-422'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-GUARD-secure_admin-422
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:secure_admin.py:L422
+  code_snippet: 'def _validate_type_data(self, data: Dict[str, Any], is_create: bool):'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_422_001
+    title: '服务层: def _validate_type_data(self, data: Dict[str, Any], is_create: bool):'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-secure_admin-422'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-RAISE-EXCEPTION-secure_admin-431
+  type: service_logic
+  subtype: raise_exception
+  object: enum_type
+  source: service:secure_admin.py:L431
+  code_snippet: 'raise ValidationError(f"缺少必填字段: {field}")'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_RAISE_EXCEPTION_431_001
+    title: '服务层: raise ValidationError(f"缺少必填字段: {field}")'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-RAISE-EXCEPTION-secure_admin-431'',
+      { trigger: ''service.raise_exception'' })'
+- id: BR-enum_type-SRV-RAISE-EXCEPTION-secure_admin-436
+  type: service_logic
+  subtype: raise_exception
+  object: enum_type
+  source: service:secure_admin.py:L436
+  code_snippet: 'raise ValidationError(f"无效的类型ID格式: {data[''id'']}")'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_RAISE_EXCEPTION_436_001
+    title: '服务层: raise ValidationError(f"无效的类型ID格式: {data[''id'']}")'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-RAISE-EXCEPTION-secure_admin-436'',
+      { trigger: ''service.raise_exception'' })'
+- id: BR-enum_type-SRV-VALIDATION-secure_admin-447
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:secure_admin.py:L447
+  code_snippet: 'def _validate_value_data(self, data: Dict[str, Any], is_create: bool):'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_447_001
+    title: '服务层: def _validate_value_data(self, data: Dict[str, Any], is_create: bool):'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-secure_admin-447'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-GUARD-secure_admin-447
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:secure_admin.py:L447
+  code_snippet: 'def _validate_value_data(self, data: Dict[str, Any], is_create: bool):'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_447_001
+    title: '服务层: def _validate_value_data(self, data: Dict[str, Any], is_create: bool):'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-secure_admin-447'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-RAISE-EXCEPTION-secure_admin-456
+  type: service_logic
+  subtype: raise_exception
+  object: enum_type
+  source: service:secure_admin.py:L456
+  code_snippet: 'raise ValidationError(f"缺少必填字段: {field}")'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_RAISE_EXCEPTION_456_001
+    title: '服务层: raise ValidationError(f"缺少必填字段: {field}")'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-RAISE-EXCEPTION-secure_admin-456'',
+      { trigger: ''service.raise_exception'' })'
+- id: BR-enum_type-SRV-RAISE-EXCEPTION-secure_admin-461
+  type: service_logic
+  subtype: raise_exception
+  object: enum_type
+  source: service:secure_admin.py:L461
+  code_snippet: 'raise ValidationError(f"无效的编码格式: {data[''code'']}")'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_RAISE_EXCEPTION_461_001
+    title: '服务层: raise ValidationError(f"无效的编码格式: {data[''code'']}")'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-RAISE-EXCEPTION-secure_admin-461'',
+      { trigger: ''service.raise_exception'' })'
+- id: BR-enum_type-SRV-RAISE-EXCEPTION-secure_admin-468
+  type: service_logic
+  subtype: raise_exception
+  object: enum_type
+  source: service:secure_admin.py:L468
+  code_snippet: 'raise ValidationError(f"排序权重超出范围 (0-9999): {order}")'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_RAISE_EXCEPTION_468_001
+    title: '服务层: raise ValidationError(f"排序权重超出范围 (0-9999): {order}")'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-RAISE-EXCEPTION-secure_admin-468'',
+      { trigger: ''service.raise_exception'' })'
+- id: BR-enum_type-SRV-RAISE-EXCEPTION-secure_admin-470
+  type: service_logic
+  subtype: raise_exception
+  object: enum_type
+  source: service:secure_admin.py:L470
+  code_snippet: 'raise ValidationError(f"无效的排序权重: {data[''sort_order'']}")'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_RAISE_EXCEPTION_470_001
+    title: '服务层: raise ValidationError(f"无效的排序权重: {data[''sort_order'']}")'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-RAISE-EXCEPTION-secure_admin-470'',
+      { trigger: ''service.raise_exception'' })'
+- id: BR-enum_type-SRV-VALIDATION-secure_admin-472
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:secure_admin.py:L472
+  code_snippet: 'async def _invalidate_cache(self, enum_type_id: str):'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_472_001
+    title: '服务层: async def _invalidate_cache(self, enum_type_id: str):'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-secure_admin-472'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-93
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L93
+  code_snippet: self._validate_create(context)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_93_001
+    title: '服务层: self._validate_create(context)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-93'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-GUARD-enum_protection_interceptor-93
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L93
+  code_snippet: self._validate_create(context)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_93_001
+    title: '服务层: self._validate_create(context)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-enum_protection_interceptor-93'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-95
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L95
+  code_snippet: self._validate_update(context)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_95_001
+    title: '服务层: self._validate_update(context)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-95'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-GUARD-enum_protection_interceptor-95
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L95
+  code_snippet: self._validate_update(context)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_95_001
+    title: '服务层: self._validate_update(context)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-enum_protection_interceptor-95'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-97
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L97
+  code_snippet: self._validate_delete(context)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_97_001
+    title: '服务层: self._validate_delete(context)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-97'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-GUARD-enum_protection_interceptor-97
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L97
+  code_snippet: self._validate_delete(context)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_97_001
+    title: '服务层: self._validate_delete(context)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-enum_protection_interceptor-97'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-132
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L132
+  code_snippet: 'def _validate_create(self, context: ''ActionContext'') -> None:'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_132_001
+    title: '服务层: def _validate_create(self, context: ''ActionContext'') -> None:'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-132'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-GUARD-enum_protection_interceptor-132
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L132
+  code_snippet: 'def _validate_create(self, context: ''ActionContext'') -> None:'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_132_001
+    title: '服务层: def _validate_create(self, context: ''ActionContext'') -> None:'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-enum_protection_interceptor-132'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-135
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L135
+  code_snippet: self._validate_enum_type_create(context)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_135_001
+    title: '服务层: self._validate_enum_type_create(context)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-135'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-GUARD-enum_protection_interceptor-135
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L135
+  code_snippet: self._validate_enum_type_create(context)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_135_001
+    title: '服务层: self._validate_enum_type_create(context)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-enum_protection_interceptor-135'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-137
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L137
+  code_snippet: self._validate_enum_value_create(context)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_137_001
+    title: '服务层: self._validate_enum_value_create(context)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-137'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-GUARD-enum_protection_interceptor-137
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L137
+  code_snippet: self._validate_enum_value_create(context)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_137_001
+    title: '服务层: self._validate_enum_value_create(context)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-enum_protection_interceptor-137'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-139
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L139
+  code_snippet: 'def _validate_enum_type_create(self, context: ''ActionContext'')
+    -> None:'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_139_001
+    title: '服务层: def _validate_enum_type_create(self, context: ''ActionContext'')
+      -> None:'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-139'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-GUARD-enum_protection_interceptor-139
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L139
+  code_snippet: 'def _validate_enum_type_create(self, context: ''ActionContext'')
+    -> None:'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_139_001
+    title: '服务层: def _validate_enum_type_create(self, context: ''ActionContext'')
+      -> None:'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-enum_protection_interceptor-139'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-149
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L149
+  code_snippet: 'def _validate_enum_value_create(self, context: ''ActionContext'')
+    -> None:'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_149_001
+    title: '服务层: def _validate_enum_value_create(self, context: ''ActionContext'')
+      -> None:'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-149'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-GUARD-enum_protection_interceptor-149
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L149
+  code_snippet: 'def _validate_enum_value_create(self, context: ''ActionContext'')
+    -> None:'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_149_001
+    title: '服务层: def _validate_enum_value_create(self, context: ''ActionContext'')
+      -> None:'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-enum_protection_interceptor-149'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-185
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L185
+  code_snippet: 'def _validate_update(self, context: ''ActionContext'') -> None:'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_185_001
+    title: '服务层: def _validate_update(self, context: ''ActionContext'') -> None:'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-185'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-GUARD-enum_protection_interceptor-185
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L185
+  code_snippet: 'def _validate_update(self, context: ''ActionContext'') -> None:'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_185_001
+    title: '服务层: def _validate_update(self, context: ''ActionContext'') -> None:'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-enum_protection_interceptor-185'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-188
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L188
+  code_snippet: self._validate_enum_type_update(context)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_188_001
+    title: '服务层: self._validate_enum_type_update(context)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-188'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-GUARD-enum_protection_interceptor-188
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L188
+  code_snippet: self._validate_enum_type_update(context)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_188_001
+    title: '服务层: self._validate_enum_type_update(context)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-enum_protection_interceptor-188'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-190
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L190
+  code_snippet: self._validate_enum_value_update(context)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_190_001
+    title: '服务层: self._validate_enum_value_update(context)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-190'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-GUARD-enum_protection_interceptor-190
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L190
+  code_snippet: self._validate_enum_value_update(context)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_190_001
+    title: '服务层: self._validate_enum_value_update(context)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-enum_protection_interceptor-190'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-192
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L192
+  code_snippet: 'def _validate_enum_type_update(self, context: ''ActionContext'')
+    -> None:'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_192_001
+    title: '服务层: def _validate_enum_type_update(self, context: ''ActionContext'')
+      -> None:'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-192'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-GUARD-enum_protection_interceptor-192
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L192
+  code_snippet: 'def _validate_enum_type_update(self, context: ''ActionContext'')
+    -> None:'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_192_001
+    title: '服务层: def _validate_enum_type_update(self, context: ''ActionContext'')
+      -> None:'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-enum_protection_interceptor-192'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-GUARD-enum_protection_interceptor-206
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L206
+  code_snippet: 'if self._check_system_enum_immutable(context, ''修改''):'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_206_001
+    title: '服务层: if self._check_system_enum_immutable(context, ''修改''):'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-enum_protection_interceptor-206'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-209
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L209
+  code_snippet: 'def _validate_enum_value_update(self, context: ''ActionContext'')
+    -> None:'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_209_001
+    title: '服务层: def _validate_enum_value_update(self, context: ''ActionContext'')
+      -> None:'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-209'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-GUARD-enum_protection_interceptor-209
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L209
+  code_snippet: 'def _validate_enum_value_update(self, context: ''ActionContext'')
+    -> None:'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_209_001
+    title: '服务层: def _validate_enum_value_update(self, context: ''ActionContext'')
+      -> None:'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-enum_protection_interceptor-209'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-GUARD-enum_protection_interceptor-240
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L240
+  code_snippet: 'if self._check_enum_locked(context, enum_type_id, ''修改''):'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_240_001
+    title: '服务层: if self._check_enum_locked(context, enum_type_id, ''修改''):'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-enum_protection_interceptor-240'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-247
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L247
+  code_snippet: 'def _validate_delete(self, context: ''ActionContext'') -> None:'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_247_001
+    title: '服务层: def _validate_delete(self, context: ''ActionContext'') -> None:'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-247'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-GUARD-enum_protection_interceptor-247
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L247
+  code_snippet: 'def _validate_delete(self, context: ''ActionContext'') -> None:'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_247_001
+    title: '服务层: def _validate_delete(self, context: ''ActionContext'') -> None:'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-enum_protection_interceptor-247'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-250
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L250
+  code_snippet: self._validate_enum_type_delete(context)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_250_001
+    title: '服务层: self._validate_enum_type_delete(context)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-250'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-GUARD-enum_protection_interceptor-250
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L250
+  code_snippet: self._validate_enum_type_delete(context)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_250_001
+    title: '服务层: self._validate_enum_type_delete(context)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-enum_protection_interceptor-250'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-252
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L252
+  code_snippet: self._validate_enum_value_delete(context)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_252_001
+    title: '服务层: self._validate_enum_value_delete(context)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-252'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-GUARD-enum_protection_interceptor-252
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L252
+  code_snippet: self._validate_enum_value_delete(context)
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_252_001
+    title: '服务层: self._validate_enum_value_delete(context)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-enum_protection_interceptor-252'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-254
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L254
+  code_snippet: 'def _validate_enum_type_delete(self, context: ''ActionContext'')
+    -> None:'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_254_001
+    title: '服务层: def _validate_enum_type_delete(self, context: ''ActionContext'')
+      -> None:'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-254'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-GUARD-enum_protection_interceptor-254
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L254
+  code_snippet: 'def _validate_enum_type_delete(self, context: ''ActionContext'')
+    -> None:'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_254_001
+    title: '服务层: def _validate_enum_type_delete(self, context: ''ActionContext'')
+      -> None:'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-enum_protection_interceptor-254'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-GUARD-enum_protection_interceptor-256
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L256
+  code_snippet: 'if self._check_system_enum_immutable(context, ''删除''):'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_256_001
+    title: '服务层: if self._check_system_enum_immutable(context, ''删除''):'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-enum_protection_interceptor-256'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-271
+  type: service_logic
+  subtype: validation
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L271
+  code_snippet: 'def _validate_enum_value_delete(self, context: ''ActionContext'')
+    -> None:'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_VALIDATION_271_001
+    title: '服务层: def _validate_enum_value_delete(self, context: ''ActionContext'')
+      -> None:'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-VALIDATION-enum_protection_interceptor-271'',
+      { trigger: ''service.validation'' })'
+- id: BR-enum_type-SRV-GUARD-enum_protection_interceptor-271
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L271
+  code_snippet: 'def _validate_enum_value_delete(self, context: ''ActionContext'')
+    -> None:'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_271_001
+    title: '服务层: def _validate_enum_value_delete(self, context: ''ActionContext'')
+      -> None:'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-enum_protection_interceptor-271'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-GUARD-enum_protection_interceptor-288
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L288
+  code_snippet: 'if self._check_enum_locked(context, enum_type_id, ''删除''):'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_288_001
+    title: '服务层: if self._check_enum_locked(context, enum_type_id, ''删除''):'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-enum_protection_interceptor-288'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-GUARD-enum_protection_interceptor-295
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L295
+  code_snippet: 'def _check_system_enum_immutable(self, context: ''ActionContext'',
+    action_name: str) -> bool:'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_295_001
+    title: '服务层: def _check_system_enum_immutable(self, context: ''ActionContext'',
+      action_name: st'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-enum_protection_interceptor-295'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-RETURN-FALSE-enum_protection_interceptor-299
+  type: service_logic
+  subtype: return_false
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L299
+  code_snippet: return False
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_RETURN_FALSE_299_001
+    title: '服务层: return False'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-RETURN-FALSE-enum_protection_interceptor-299'',
+      { trigger: ''service.return_false'' })'
+- id: BR-enum_type-SRV-RETURN-FALSE-enum_protection_interceptor-308
+  type: service_logic
+  subtype: return_false
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L308
+  code_snippet: return False
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_RETURN_FALSE_308_001
+    title: '服务层: return False'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-RETURN-FALSE-enum_protection_interceptor-308'',
+      { trigger: ''service.return_false'' })'
+- id: BR-enum_type-SRV-GUARD-enum_protection_interceptor-310
+  type: service_logic
+  subtype: guard
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L310
+  code_snippet: 'def _check_enum_locked(self, context: ''ActionContext'', enum_type_id:
+    str, action_name: str) -> bool:'
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_GUARD_310_001
+    title: '服务层: def _check_enum_locked(self, context: ''ActionContext'', enum_type_id:
+      str, action'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-GUARD-enum_protection_interceptor-310'',
+      { trigger: ''service.guard'' })'
+- id: BR-enum_type-SRV-RETURN-FALSE-enum_protection_interceptor-313
+  type: service_logic
+  subtype: return_false
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L313
+  code_snippet: return False
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_RETURN_FALSE_313_001
+    title: '服务层: return False'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-RETURN-FALSE-enum_protection_interceptor-313'',
+      { trigger: ''service.return_false'' })'
+- id: BR-enum_type-SRV-RETURN-FALSE-enum_protection_interceptor-317
+  type: service_logic
+  subtype: return_false
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L317
+  code_snippet: return False
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_RETURN_FALSE_317_001
+    title: '服务层: return False'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-RETURN-FALSE-enum_protection_interceptor-317'',
+      { trigger: ''service.return_false'' })'
+- id: BR-enum_type-SRV-RETURN-FALSE-enum_protection_interceptor-328
+  type: service_logic
+  subtype: return_false
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L328
+  code_snippet: return False
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_RETURN_FALSE_328_001
+    title: '服务层: return False'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-RETURN-FALSE-enum_protection_interceptor-328'',
+      { trigger: ''service.return_false'' })'
+- id: BR-enum_type-SRV-RETURN-FALSE-enum_protection_interceptor-357
+  type: service_logic
+  subtype: return_false
+  object: enum_type
+  source: service:enum_protection_interceptor.py:L357
+  code_snippet: return False
+  derived_scenarios:
+  - id: T_ENUM_TYPE_SRV_RETURN_FALSE_357_001
+    title: '服务层: return False'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-SRV-RETURN-FALSE-enum_protection_interceptor-357'',
+      { trigger: ''service.return_false'' })'

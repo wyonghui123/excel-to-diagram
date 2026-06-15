@@ -1,0 +1,52 @@
+schema: permission_rule
+name: 条件权限规则
+total_rules: 4
+rules:
+- id: BR-permission_rule-FLD-REQ-role_id
+  type: field_constraint
+  object: permission_rule
+  subtype: required
+  field: role_id
+  source: schema:permission_rule.yaml:fields[role_id].required
+  derived_scenarios:
+  - id: T_PERMISSION_RULE_FLD_REQ_ROLE_ID_001
+    title: 字段 role_id 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-permission_rule-FLD-REQ-role_id'',
+      { field: ''role_id'', value: null, expected: ''error'' })'
+- id: BR-permission_rule-FLD-REQ-resource_type
+  type: field_constraint
+  object: permission_rule
+  subtype: required
+  field: resource_type
+  source: schema:permission_rule.yaml:fields[resource_type].required
+  derived_scenarios:
+  - id: T_PERMISSION_RULE_FLD_REQ_RESOURCE_TYPE_001
+    title: 字段 resource_type 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-permission_rule-FLD-REQ-resource_type'',
+      { field: ''resource_type'', value: null, expected: ''error'' })'
+- id: BR-permission_rule-FLD-REQ-condition
+  type: field_constraint
+  object: permission_rule
+  subtype: required
+  field: condition
+  source: schema:permission_rule.yaml:fields[condition].required
+  derived_scenarios:
+  - id: T_PERMISSION_RULE_FLD_REQ_CONDITION_001
+    title: 字段 condition 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-permission_rule-FLD-REQ-condition'',
+      { field: ''condition'', value: null, expected: ''error'' })'
+- id: BR-permission_rule-FLD-REQ-permission_level
+  type: field_constraint
+  object: permission_rule
+  subtype: required
+  field: permission_level
+  source: schema:permission_rule.yaml:fields[permission_level].required
+  derived_scenarios:
+  - id: T_PERMISSION_RULE_FLD_REQ_PERMISSION_LEVEL_001
+    title: 字段 permission_level 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-permission_rule-FLD-REQ-permission_level'',
+      { field: ''permission_level'', value: null, expected: ''error'' })'

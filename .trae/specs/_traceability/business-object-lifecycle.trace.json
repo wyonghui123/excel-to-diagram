@@ -1,0 +1,37 @@
+{
+  "feat": "business-object-lifecycle",
+  "spec_md": {},
+  "business_flow_yaml": {
+    "path": ".trae\\specs\\business-object-lifecycle\\business-flow.yaml",
+    "review_status": "approved",
+    "actor": "Admin",
+    "goal": "业务对象生命周期 - 创建带自动编码的对象、删除有关系的对象应失败",
+    "tasks": [
+      "T_BIZ_BO_001",
+      "T_BIZ_BO_002",
+      "T_BIZ_BO_003",
+      "T_BIZ_BO_004"
+    ],
+    "questions": [
+      "BR-business_object-DEL-condition",
+      "BR-business_object-KEY",
+      "BR-business_object-CS-domain_id",
+      "BR-business_object-CS-sub_domain_id"
+    ]
+  },
+  "spec_js_files": [
+    "e2e\\business-flow\\business-object-lifecycle.spec.js"
+  ],
+  "rule_refs_in_spec_js": [
+    "BR-business_object-DEL-condition",
+    "BR-business_object-KEY"
+  ],
+  "reverse_trace": {
+    "rule_to_spec_js": [
+      "BR-business_object-DEL-condition",
+      "BR-business_object-KEY"
+    ],
+    "yaml_to_spec_md": null
+  },
+  "generated_at": "2026-06-13T08:21:05.968523Z"
+}

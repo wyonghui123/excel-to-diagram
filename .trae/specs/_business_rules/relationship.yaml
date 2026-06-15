@@ -1,0 +1,365 @@
+schema: relationship
+name: 业务关系
+total_rules: 28
+rules:
+- id: BR-relationship-DEL
+  type: deletability
+  object: relationship
+  condition: 'true'
+  message: 关系可随时删除
+  source: schema:relationship.yaml:deletability
+  derived_scenarios:
+  - id: T_RELATIONSHIP_DEL_001
+    title: 有依赖时删除应失败
+    priority: P0
+    expected_deletable: false
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-DEL'', { relationCount:
+      1, expected: false })'
+  - id: T_RELATIONSHIP_DEL_002
+    title: 无依赖时删除应成功
+    priority: P1
+    expected_deletable: true
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-DEL'', { relationCount:
+      0, expected: true })'
+- id: BR-relationship-AUTH-check
+  type: authorization
+  object: relationship
+  subtype: check
+  scope: version_id IN (SELECT v.id FROM versions v JOIN products p ON v.product_id
+    = p.id WHERE p.visibility = 'public' OR p.owner_id = $user.id)
+  source: schema:relationship.yaml:authorization.check
+  derived_scenarios:
+  - id: T_RELATIONSHIP_AUTH_001
+    title: 未授权访问应拒绝
+    priority: P0
+    expected: false
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-AUTH-check'', {
+      authorized: false, expected: 403 })'
+  - id: T_RELATIONSHIP_AUTH_002
+    title: 已授权访问应成功
+    priority: P1
+    expected: true
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-AUTH-check'', {
+      authorized: true, expected: 200 })'
+- id: BR-relationship-AUDIT-create
+  type: audit
+  object: relationship
+  subtype: audit_create
+  fields: all
+  source: schema:relationship.yaml:audit.create
+  derived_scenarios:
+  - id: T_RELATIONSHIP_AUDIT_CREATE_001
+    title: create 操作应记录 audit_log
+    priority: P1
+    operation: create
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-AUDIT-create'',
+      { operation: ''create'', auditLog: true })'
+- id: BR-relationship-AUDIT-update
+  type: audit
+  object: relationship
+  subtype: audit_update
+  fields: changed_only
+  source: schema:relationship.yaml:audit.update
+  derived_scenarios:
+  - id: T_RELATIONSHIP_AUDIT_UPDATE_001
+    title: update 操作应记录 audit_log
+    priority: P1
+    operation: update
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-AUDIT-update'',
+      { operation: ''update'', auditLog: true })'
+- id: BR-relationship-AUDIT-delete
+  type: audit
+  object: relationship
+  subtype: audit_delete
+  fields: business_only
+  source: schema:relationship.yaml:audit.delete
+  derived_scenarios:
+  - id: T_RELATIONSHIP_AUDIT_DELETE_001
+    title: delete 操作应记录 audit_log
+    priority: P0
+    operation: delete
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-AUDIT-delete'',
+      { operation: ''delete'', auditLog: true })'
+- id: BR-relationship-ASPECT-hierarchy
+  type: aspect
+  object: relationship
+  aspect: hierarchy_aspect
+  source: schema:relationship.yaml:aspects[hierarchy_aspect]
+  derived_scenarios:
+  - id: T_RELATIONSHIP_ASPECT_HIERARCHY_ASPECT_001
+    title: hierarchy_aspect 切面应正确触发
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-ASPECT-hierarchy_aspect'',
+      { objectId: ..., aspectFired: true })'
+- id: BR-relationship-ASPECT-audit
+  type: aspect
+  object: relationship
+  aspect: audit_aspect
+  source: schema:relationship.yaml:aspects[audit_aspect]
+  derived_scenarios:
+  - id: T_RELATIONSHIP_ASPECT_AUDIT_ASPECT_001
+    title: audit_aspect 切面应正确触发
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-ASPECT-audit_aspect'',
+      { objectId: ..., aspectFired: true })'
+- id: BR-relationship-VAL-version-id-required
+  type: validations
+  object: relationship
+  subtype: field
+  rule: version_id is not None
+  message: 版本ID不能为空
+  severity: error
+  source: schema:relationship.yaml:validations[version_id_required]
+  derived_scenarios:
+  - id: T_RELATIONSHIP_VAL_VERSION_ID_REQUIRED_001
+    title: '校验: 版本ID必填 应拒绝无效输入'
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-VAL-version_id_required'',
+      { invalid: true, expected: ''error'' })'
+- id: BR-relationship-VAL-source-not-equal-target
+  type: validations
+  object: relationship
+  subtype: cross_field
+  rule: source_bo_id != target_bo_id
+  message: 源业务对象和目标业务对象不能相同
+  severity: error
+  source: schema:relationship.yaml:validations[source_not_equal_target]
+  derived_scenarios:
+  - id: T_RELATIONSHIP_VAL_SOURCE_NOT_EQUAL_TARGET_001
+    title: '校验: 源目标不能相同 应拒绝无效输入'
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-VAL-source_not_equal_target'',
+      { invalid: true, expected: ''error'' })'
+- id: BR-relationship-IE-import
+  type: import_export
+  object: relationship
+  subtype: import
+  conflict_strategy: upsert
+  conflict_key: ''
+  cascade: false
+  source: schema:relationship.yaml:import_export.import_enabled
+  derived_scenarios:
+  - id: T_RELATIONSHIP_IE_IMP_001
+    title: 导入应使用 upsert 策略处理冲突
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-IE-import'', { strategy:
+      ''upsert'', conflictKey: '''' })'
+- id: BR-relationship-IE-export
+  type: import_export
+  object: relationship
+  subtype: export
+  cascade: false
+  source: schema:relationship.yaml:import_export.export_enabled
+  derived_scenarios:
+  - id: T_RELATIONSHIP_IE_EXP_001
+    title: 导出应不级联包含子对象
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-IE-export'', { cascade:
+      False })'
+- id: BR-relationship-FLD-REQ-version_id
+  type: field_constraint
+  object: relationship
+  subtype: required
+  field: version_id
+  source: schema:relationship.yaml:fields[version_id].required
+  derived_scenarios:
+  - id: T_RELATIONSHIP_FLD_REQ_VERSION_ID_001
+    title: 字段 version_id 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-FLD-REQ-version_id'',
+      { field: ''version_id'', value: null, expected: ''error'' })'
+- id: BR-relationship-FLD-IMM-source_domain_id
+  type: field_constraint
+  object: relationship
+  subtype: immutable
+  field: source_domain_id
+  source: schema:relationship.yaml:fields[source_domain_id].semantics.immutable
+  derived_scenarios:
+  - id: T_RELATIONSHIP_FLD_IMM_SOURCE_DOMAIN_ID_001
+    title: 字段 source_domain_id 不可变,修改应拒绝
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-FLD-IMM-source_domain_id'',
+      { field: ''source_domain_id'', value: ''new'', expected: ''error'' })'
+- id: BR-relationship-FLD-IMM-source_sub_domain_id
+  type: field_constraint
+  object: relationship
+  subtype: immutable
+  field: source_sub_domain_id
+  source: schema:relationship.yaml:fields[source_sub_domain_id].semantics.immutable
+  derived_scenarios:
+  - id: T_RELATIONSHIP_FLD_IMM_SOURCE_SUB_DOMAIN_ID_001
+    title: 字段 source_sub_domain_id 不可变,修改应拒绝
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-FLD-IMM-source_sub_domain_id'',
+      { field: ''source_sub_domain_id'', value: ''new'', expected: ''error'' })'
+- id: BR-relationship-FLD-IMM-source_service_module_id
+  type: field_constraint
+  object: relationship
+  subtype: immutable
+  field: source_service_module_id
+  source: schema:relationship.yaml:fields[source_service_module_id].semantics.immutable
+  derived_scenarios:
+  - id: T_RELATIONSHIP_FLD_IMM_SOURCE_SERVICE_MODULE_ID_001
+    title: 字段 source_service_module_id 不可变,修改应拒绝
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-FLD-IMM-source_service_module_id'',
+      { field: ''source_service_module_id'', value: ''new'', expected: ''error'' })'
+- id: BR-relationship-FLD-IMM-target_domain_id
+  type: field_constraint
+  object: relationship
+  subtype: immutable
+  field: target_domain_id
+  source: schema:relationship.yaml:fields[target_domain_id].semantics.immutable
+  derived_scenarios:
+  - id: T_RELATIONSHIP_FLD_IMM_TARGET_DOMAIN_ID_001
+    title: 字段 target_domain_id 不可变,修改应拒绝
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-FLD-IMM-target_domain_id'',
+      { field: ''target_domain_id'', value: ''new'', expected: ''error'' })'
+- id: BR-relationship-FLD-IMM-target_sub_domain_id
+  type: field_constraint
+  object: relationship
+  subtype: immutable
+  field: target_sub_domain_id
+  source: schema:relationship.yaml:fields[target_sub_domain_id].semantics.immutable
+  derived_scenarios:
+  - id: T_RELATIONSHIP_FLD_IMM_TARGET_SUB_DOMAIN_ID_001
+    title: 字段 target_sub_domain_id 不可变,修改应拒绝
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-FLD-IMM-target_sub_domain_id'',
+      { field: ''target_sub_domain_id'', value: ''new'', expected: ''error'' })'
+- id: BR-relationship-FLD-IMM-target_service_module_id
+  type: field_constraint
+  object: relationship
+  subtype: immutable
+  field: target_service_module_id
+  source: schema:relationship.yaml:fields[target_service_module_id].semantics.immutable
+  derived_scenarios:
+  - id: T_RELATIONSHIP_FLD_IMM_TARGET_SERVICE_MODULE_ID_001
+    title: 字段 target_service_module_id 不可变,修改应拒绝
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-FLD-IMM-target_service_module_id'',
+      { field: ''target_service_module_id'', value: ''new'', expected: ''error'' })'
+- id: BR-relationship-FLD-REQ-source_bo_id
+  type: field_constraint
+  object: relationship
+  subtype: required
+  field: source_bo_id
+  source: schema:relationship.yaml:fields[source_bo_id].required
+  derived_scenarios:
+  - id: T_RELATIONSHIP_FLD_REQ_SOURCE_BO_ID_001
+    title: 字段 source_bo_id 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-FLD-REQ-source_bo_id'',
+      { field: ''source_bo_id'', value: null, expected: ''error'' })'
+- id: BR-relationship-FLD-IMM-source_bo_id
+  type: field_constraint
+  object: relationship
+  subtype: immutable
+  field: source_bo_id
+  source: schema:relationship.yaml:fields[source_bo_id].semantics.immutable
+  derived_scenarios:
+  - id: T_RELATIONSHIP_FLD_IMM_SOURCE_BO_ID_001
+    title: 字段 source_bo_id 不可变,修改应拒绝
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-FLD-IMM-source_bo_id'',
+      { field: ''source_bo_id'', value: ''new'', expected: ''error'' })'
+- id: BR-relationship-FLD-REQ-target_bo_id
+  type: field_constraint
+  object: relationship
+  subtype: required
+  field: target_bo_id
+  source: schema:relationship.yaml:fields[target_bo_id].required
+  derived_scenarios:
+  - id: T_RELATIONSHIP_FLD_REQ_TARGET_BO_ID_001
+    title: 字段 target_bo_id 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-FLD-REQ-target_bo_id'',
+      { field: ''target_bo_id'', value: null, expected: ''error'' })'
+- id: BR-relationship-FLD-IMM-target_bo_id
+  type: field_constraint
+  object: relationship
+  subtype: immutable
+  field: target_bo_id
+  source: schema:relationship.yaml:fields[target_bo_id].semantics.immutable
+  derived_scenarios:
+  - id: T_RELATIONSHIP_FLD_IMM_TARGET_BO_ID_001
+    title: 字段 target_bo_id 不可变,修改应拒绝
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-FLD-IMM-target_bo_id'',
+      { field: ''target_bo_id'', value: ''new'', expected: ''error'' })'
+- id: BR-relationship-FLD-IMM-source_code
+  type: field_constraint
+  object: relationship
+  subtype: immutable
+  field: source_code
+  source: schema:relationship.yaml:fields[source_code].semantics.immutable
+  derived_scenarios:
+  - id: T_RELATIONSHIP_FLD_IMM_SOURCE_CODE_001
+    title: 字段 source_code 不可变,修改应拒绝
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-FLD-IMM-source_code'',
+      { field: ''source_code'', value: ''new'', expected: ''error'' })'
+- id: BR-relationship-FLD-IMM-target_code
+  type: field_constraint
+  object: relationship
+  subtype: immutable
+  field: target_code
+  source: schema:relationship.yaml:fields[target_code].semantics.immutable
+  derived_scenarios:
+  - id: T_RELATIONSHIP_FLD_IMM_TARGET_CODE_001
+    title: 字段 target_code 不可变,修改应拒绝
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-FLD-IMM-target_code'',
+      { field: ''target_code'', value: ''new'', expected: ''error'' })'
+- id: BR-relationship-FLD-IMM-code
+  type: field_constraint
+  object: relationship
+  subtype: immutable
+  field: code
+  source: schema:relationship.yaml:fields[code].semantics.immutable
+  derived_scenarios:
+  - id: T_RELATIONSHIP_FLD_IMM_CODE_001
+    title: 字段 code 不可变,修改应拒绝
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-FLD-IMM-code'',
+      { field: ''code'', value: ''new'', expected: ''error'' })'
+- id: BR-relationship-FLD-REQ-relation_type
+  type: field_constraint
+  object: relationship
+  subtype: required
+  field: relation_type
+  source: schema:relationship.yaml:fields[relation_type].required
+  derived_scenarios:
+  - id: T_RELATIONSHIP_FLD_REQ_RELATION_TYPE_001
+    title: 字段 relation_type 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-FLD-REQ-relation_type'',
+      { field: ''relation_type'', value: null, expected: ''error'' })'
+- id: BR-relationship-REL-rel-to-version
+  type: relation
+  object: relationship
+  subtype: parent_child
+  target: version
+  cardinality: N:1
+  source: schema:relationship.yaml:relations[rel_to_version]
+  derived_scenarios:
+  - id: T_RELATIONSHIP_REL_REL_TO_VERSION_001
+    title: 删除父对象应处理子对象 (cardinality=N:1)
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-REL-rel_to_version'',
+      { parentId: ..., childrenCount: ... })'
+- id: BR-relationship-ACT-batch-import
+  type: action
+  object: relationship
+  subtype: business
+  method: POST
+  path: /api/v1/relationships/import
+  description: 从Excel批量导入关系
+  source: schema:relationship.yaml:actions[batch_import]
+  derived_scenarios:
+  - id: T_RELATIONSHIP_ACT_BATCH_IMPORT_001
+    title: 业务动作 批量导入 应正确执行
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-ACT-batch_import'',
+      { method: ''POST'', path: ''/api/v1/relationships/import'' })'

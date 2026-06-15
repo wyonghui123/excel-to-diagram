@@ -1,0 +1,172 @@
+object: audit_log
+source: service_layer
+total_rules: 14
+rules:
+- id: BR-audit_log-SRV-ASSERT-CHECK-audit_constants-176
+  type: service_logic
+  subtype: assert_check
+  object: audit_log
+  source: service:audit_constants.py:L176
+  code_snippet: assert derive_category("LOGIN") == "security"
+  derived_scenarios:
+  - id: T_AUDIT_LOG_SRV_ASSERT_CHECK_176_001
+    title: '服务层: assert derive_category("LOGIN") == "security"'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-audit_log-SRV-ASSERT-CHECK-audit_constants-176'',
+      { trigger: ''service.assert_check'' })'
+- id: BR-audit_log-SRV-ASSERT-CHECK-audit_constants-178
+  type: service_logic
+  subtype: assert_check
+  object: audit_log
+  source: service:audit_constants.py:L178
+  code_snippet: assert derive_category("READ") == "access"
+  derived_scenarios:
+  - id: T_AUDIT_LOG_SRV_ASSERT_CHECK_178_001
+    title: '服务层: assert derive_category("READ") == "access"'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-audit_log-SRV-ASSERT-CHECK-audit_constants-178'',
+      { trigger: ''service.assert_check'' })'
+- id: BR-audit_log-SRV-ASSERT-CHECK-audit_constants-179
+  type: service_logic
+  subtype: assert_check
+  object: audit_log
+  source: service:audit_constants.py:L179
+  code_snippet: assert derive_category("DELETE_BLOCKED") == "admin"
+  derived_scenarios:
+  - id: T_AUDIT_LOG_SRV_ASSERT_CHECK_179_001
+    title: '服务层: assert derive_category("DELETE_BLOCKED") == "admin"'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-audit_log-SRV-ASSERT-CHECK-audit_constants-179'',
+      { trigger: ''service.assert_check'' })'
+- id: BR-audit_log-SRV-ASSERT-CHECK-audit_constants-180
+  type: service_logic
+  subtype: assert_check
+  object: audit_log
+  source: service:audit_constants.py:L180
+  code_snippet: assert derive_category("AUDIT_WRITE_FAILED") == "system"
+  derived_scenarios:
+  - id: T_AUDIT_LOG_SRV_ASSERT_CHECK_180_001
+    title: '服务层: assert derive_category("AUDIT_WRITE_FAILED") == "system"'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-audit_log-SRV-ASSERT-CHECK-audit_constants-180'',
+      { trigger: ''service.assert_check'' })'
+- id: BR-audit_log-SRV-ASSERT-CHECK-audit_constants-181
+  type: service_logic
+  subtype: assert_check
+  object: audit_log
+  source: service:audit_constants.py:L181
+  code_snippet: assert derive_category("CREATE", cascade=True) == "cascade"
+  derived_scenarios:
+  - id: T_AUDIT_LOG_SRV_ASSERT_CHECK_181_001
+    title: '服务层: assert derive_category("CREATE", cascade=True) == "cascade"'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-audit_log-SRV-ASSERT-CHECK-audit_constants-181'',
+      { trigger: ''service.assert_check'' })'
+- id: BR-audit_log-SRV-ASSERT-CHECK-audit_constants-182
+  type: service_logic
+  subtype: assert_check
+  object: audit_log
+  source: service:audit_constants.py:L182
+  code_snippet: assert derive_category("UPDATE") == "business"
+  derived_scenarios:
+  - id: T_AUDIT_LOG_SRV_ASSERT_CHECK_182_001
+    title: '服务层: assert derive_category("UPDATE") == "business"'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-audit_log-SRV-ASSERT-CHECK-audit_constants-182'',
+      { trigger: ''service.assert_check'' })'
+- id: BR-audit_log-SRV-ASSERT-CHECK-audit_constants-185
+  type: service_logic
+  subtype: assert_check
+  object: audit_log
+  source: service:audit_constants.py:L185
+  code_snippet: assert derive_level("CREATE", outcome="success") == "INFO"
+  derived_scenarios:
+  - id: T_AUDIT_LOG_SRV_ASSERT_CHECK_185_001
+    title: '服务层: assert derive_level("CREATE", outcome="success") == "INFO"'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-audit_log-SRV-ASSERT-CHECK-audit_constants-185'',
+      { trigger: ''service.assert_check'' })'
+- id: BR-audit_log-SRV-ASSERT-CHECK-audit_constants-186
+  type: service_logic
+  subtype: assert_check
+  object: audit_log
+  source: service:audit_constants.py:L186
+  code_snippet: assert derive_level("DELETE_BLOCKED") == "WARN"
+  derived_scenarios:
+  - id: T_AUDIT_LOG_SRV_ASSERT_CHECK_186_001
+    title: '服务层: assert derive_level("DELETE_BLOCKED") == "WARN"'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-audit_log-SRV-ASSERT-CHECK-audit_constants-186'',
+      { trigger: ''service.assert_check'' })'
+- id: BR-audit_log-SRV-ASSERT-CHECK-audit_constants-187
+  type: service_logic
+  subtype: assert_check
+  object: audit_log
+  source: service:audit_constants.py:L187
+  code_snippet: assert derive_level("CREATE", outcome="failure") == "WARN"
+  derived_scenarios:
+  - id: T_AUDIT_LOG_SRV_ASSERT_CHECK_187_001
+    title: '服务层: assert derive_level("CREATE", outcome="failure") == "WARN"'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-audit_log-SRV-ASSERT-CHECK-audit_constants-187'',
+      { trigger: ''service.assert_check'' })'
+- id: BR-audit_log-SRV-ASSERT-CHECK-audit_constants-188
+  type: service_logic
+  subtype: assert_check
+  object: audit_log
+  source: service:audit_constants.py:L188
+  code_snippet: assert derive_level("AUDIT_WRITE_FAILED") == "ERROR"
+  derived_scenarios:
+  - id: T_AUDIT_LOG_SRV_ASSERT_CHECK_188_001
+    title: '服务层: assert derive_level("AUDIT_WRITE_FAILED") == "ERROR"'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-audit_log-SRV-ASSERT-CHECK-audit_constants-188'',
+      { trigger: ''service.assert_check'' })'
+- id: BR-audit_log-SRV-ASSERT-CHECK-audit_constants-199
+  type: service_logic
+  subtype: assert_check
+  object: audit_log
+  source: service:audit_constants.py:L199
+  code_snippet: assert retention_days("security") == 730
+  derived_scenarios:
+  - id: T_AUDIT_LOG_SRV_ASSERT_CHECK_199_001
+    title: '服务层: assert retention_days("security") == 730'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-audit_log-SRV-ASSERT-CHECK-audit_constants-199'',
+      { trigger: ''service.assert_check'' })'
+- id: BR-audit_log-SRV-ASSERT-CHECK-audit_constants-200
+  type: service_logic
+  subtype: assert_check
+  object: audit_log
+  source: service:audit_constants.py:L200
+  code_snippet: assert retention_days("business") == 365
+  derived_scenarios:
+  - id: T_AUDIT_LOG_SRV_ASSERT_CHECK_200_001
+    title: '服务层: assert retention_days("business") == 365'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-audit_log-SRV-ASSERT-CHECK-audit_constants-200'',
+      { trigger: ''service.assert_check'' })'
+- id: BR-audit_log-SRV-ASSERT-CHECK-audit_constants-201
+  type: service_logic
+  subtype: assert_check
+  object: audit_log
+  source: service:audit_constants.py:L201
+  code_snippet: assert retention_days("access") == 90
+  derived_scenarios:
+  - id: T_AUDIT_LOG_SRV_ASSERT_CHECK_201_001
+    title: '服务层: assert retention_days("access") == 90'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-audit_log-SRV-ASSERT-CHECK-audit_constants-201'',
+      { trigger: ''service.assert_check'' })'
+- id: BR-audit_log-SRV-RETURN-FALSE-audit_interceptor-238
+  type: service_logic
+  subtype: return_false
+  object: audit_log
+  source: service:audit_interceptor.py:L238
+  code_snippet: return False
+  derived_scenarios:
+  - id: T_AUDIT_LOG_SRV_RETURN_FALSE_238_001
+    title: '服务层: return False'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-audit_log-SRV-RETURN-FALSE-audit_interceptor-238'',
+      { trigger: ''service.return_false'' })'

@@ -1,0 +1,72 @@
+schema: menu
+name: 菜单
+total_rules: 5
+rules:
+- id: BR-menu-FLD-REQ-menu_code
+  type: field_constraint
+  object: menu
+  subtype: required
+  field: menu_code
+  source: schema:menu.yaml:fields[menu_code].required
+  derived_scenarios:
+  - id: T_MENU_FLD_REQ_MENU_CODE_001
+    title: 字段 menu_code 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-menu-FLD-REQ-menu_code'', { field:
+      ''menu_code'', value: null, expected: ''error'' })'
+- id: BR-menu-FLD-UNQ-menu_code
+  type: field_constraint
+  object: menu
+  subtype: unique
+  field: menu_code
+  source: schema:menu.yaml:fields[menu_code].unique
+  derived_scenarios:
+  - id: T_MENU_FLD_UNQ_MENU_CODE_001
+    title: 字段 menu_code 唯一,重复值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-menu-FLD-UNQ-menu_code'', { field:
+      ''menu_code'', value: ''existing'', expected: ''error'' })'
+- id: BR-menu-FLD-REQ-menu_name
+  type: field_constraint
+  object: menu
+  subtype: required
+  field: menu_name
+  source: schema:menu.yaml:fields[menu_name].required
+  derived_scenarios:
+  - id: T_MENU_FLD_REQ_MENU_NAME_001
+    title: 字段 menu_name 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-menu-FLD-REQ-menu_name'', { field:
+      ''menu_name'', value: null, expected: ''error'' })'
+- id: BR-menu-FLD-REQ-page_type
+  type: field_constraint
+  object: menu
+  subtype: required
+  field: page_type
+  source: schema:menu.yaml:fields[page_type].required
+  derived_scenarios:
+  - id: T_MENU_FLD_REQ_PAGE_TYPE_001
+    title: 字段 page_type 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-menu-FLD-REQ-page_type'', { field:
+      ''page_type'', value: null, expected: ''error'' })'
+- id: BR-menu-FLD-ENUM-page_type
+  type: field_constraint
+  object: menu
+  subtype: enum
+  field: page_type
+  allowed_values:
+  - object_list
+  - object_detail
+  - multi_object_hub
+  - custom_page
+  - dashboard
+  default: object_list
+  source: schema:menu.yaml:fields[page_type].enum_values
+  derived_scenarios:
+  - id: T_MENU_FLD_ENUM_PAGE_TYPE_001
+    title: 字段 page_type 应在枚举值中,无效值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-menu-FLD-ENUM-page_type'', {
+      field: ''page_type'', allowed: [''object_list'', ''object_detail'', ''multi_object_hub'',
+      ''custom_page'', ''dashboard''] })'

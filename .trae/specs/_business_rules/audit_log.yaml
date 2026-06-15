@@ -1,0 +1,227 @@
+schema: audit_log
+name: 审计日志
+total_rules: 14
+rules:
+- id: BR-audit_log-STATE-mark-written
+  type: rules
+  object: audit_log
+  subtype: state_transition
+  state_field: status
+  from_states:
+  - pending
+  to_state: written
+  triggers:
+  - before_update
+  source: schema:audit_log.yaml:rules[mark_written]
+  derived_scenarios:
+  - id: T_AUDIT_LOG_STATE_MARK_WRITTEN_001
+    title: '状态转换: 标记已写入'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-audit_log-STATE-mark_written'',
+      { from: ''[''pending'']'', to: ''written'' })'
+- id: BR-audit_log-STATE-mark-failed
+  type: rules
+  object: audit_log
+  subtype: state_transition
+  state_field: status
+  from_states:
+  - pending
+  to_state: failed
+  triggers:
+  - before_update
+  source: schema:audit_log.yaml:rules[mark_failed]
+  derived_scenarios:
+  - id: T_AUDIT_LOG_STATE_MARK_FAILED_001
+    title: '状态转换: 标记写入失败'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-audit_log-STATE-mark_failed'',
+      { from: ''[''pending'']'', to: ''failed'' })'
+- id: BR-audit_log-STATE-retry-write
+  type: rules
+  object: audit_log
+  subtype: state_transition
+  state_field: status
+  from_states:
+  - failed
+  to_state: pending
+  triggers:
+  - before_update
+  source: schema:audit_log.yaml:rules[retry_write]
+  derived_scenarios:
+  - id: T_AUDIT_LOG_STATE_RETRY_WRITE_001
+    title: '状态转换: 重试写入'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-audit_log-STATE-retry_write'',
+      { from: ''[''failed'']'', to: ''pending'' })'
+- id: BR-audit_log-IE-export
+  type: import_export
+  object: audit_log
+  subtype: export
+  cascade: false
+  source: schema:audit_log.yaml:import_export.export_enabled
+  derived_scenarios:
+  - id: T_AUDIT_LOG_IE_EXP_001
+    title: 导出应不级联包含子对象
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-audit_log-IE-export'', { cascade:
+      False })'
+- id: BR-audit_log-FLD-REQ-log_category
+  type: field_constraint
+  object: audit_log
+  subtype: required
+  field: log_category
+  source: schema:audit_log.yaml:fields[log_category].required
+  derived_scenarios:
+  - id: T_AUDIT_LOG_FLD_REQ_LOG_CATEGORY_001
+    title: 字段 log_category 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-audit_log-FLD-REQ-log_category'',
+      { field: ''log_category'', value: null, expected: ''error'' })'
+- id: BR-audit_log-FLD-ENUM-log_category
+  type: field_constraint
+  object: audit_log
+  subtype: enum
+  field: log_category
+  allowed_values:
+  - business
+  - security
+  - operation
+  - performance
+  - system
+  default: business
+  source: schema:audit_log.yaml:fields[log_category].enum_values
+  derived_scenarios:
+  - id: T_AUDIT_LOG_FLD_ENUM_LOG_CATEGORY_001
+    title: 字段 log_category 应在枚举值中,无效值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-audit_log-FLD-ENUM-log_category'',
+      { field: ''log_category'', allowed: [''business'', ''security'', ''operation'',
+      ''performance'', ''system''] })'
+- id: BR-audit_log-FLD-REQ-log_level
+  type: field_constraint
+  object: audit_log
+  subtype: required
+  field: log_level
+  source: schema:audit_log.yaml:fields[log_level].required
+  derived_scenarios:
+  - id: T_AUDIT_LOG_FLD_REQ_LOG_LEVEL_001
+    title: 字段 log_level 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-audit_log-FLD-REQ-log_level'',
+      { field: ''log_level'', value: null, expected: ''error'' })'
+- id: BR-audit_log-FLD-ENUM-log_level
+  type: field_constraint
+  object: audit_log
+  subtype: enum
+  field: log_level
+  allowed_values:
+  - DEBUG
+  - INFO
+  - WARNING
+  - ERROR
+  - CRITICAL
+  default: INFO
+  source: schema:audit_log.yaml:fields[log_level].enum_values
+  derived_scenarios:
+  - id: T_AUDIT_LOG_FLD_ENUM_LOG_LEVEL_001
+    title: 字段 log_level 应在枚举值中,无效值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-audit_log-FLD-ENUM-log_level'',
+      { field: ''log_level'', allowed: [''DEBUG'', ''INFO'', ''WARNING'', ''ERROR'',
+      ''CRITICAL''] })'
+- id: BR-audit_log-FLD-REQ-object_type
+  type: field_constraint
+  object: audit_log
+  subtype: required
+  field: object_type
+  source: schema:audit_log.yaml:fields[object_type].required
+  derived_scenarios:
+  - id: T_AUDIT_LOG_FLD_REQ_OBJECT_TYPE_001
+    title: 字段 object_type 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-audit_log-FLD-REQ-object_type'',
+      { field: ''object_type'', value: null, expected: ''error'' })'
+- id: BR-audit_log-FLD-ENUM-object_type
+  type: field_constraint
+  object: audit_log
+  subtype: enum
+  field: object_type
+  allowed_values:
+  - user
+  - role
+  - user_group
+  - product
+  - version
+  - domain
+  - sub_domain
+  - service_module
+  - business_object
+  - relationship
+  - annotation
+  - enum_type
+  - enum_value
+  - __audit_failure__
+  default: null
+  source: schema:audit_log.yaml:fields[object_type].enum_values
+  derived_scenarios:
+  - id: T_AUDIT_LOG_FLD_ENUM_OBJECT_TYPE_001
+    title: 字段 object_type 应在枚举值中,无效值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-audit_log-FLD-ENUM-object_type'',
+      { field: ''object_type'', allowed: [''user'', ''role'', ''user_group'', ''product'',
+      ''version'', ''domain'', ''sub_domain'', ''service_module'', ''business_object'',
+      ''relationship'', ''annotation'', ''enum_type'', ''enum_value'', ''__audit_failure__'']
+      })'
+- id: BR-audit_log-FLD-REQ-object_id
+  type: field_constraint
+  object: audit_log
+  subtype: required
+  field: object_id
+  source: schema:audit_log.yaml:fields[object_id].required
+  derived_scenarios:
+  - id: T_AUDIT_LOG_FLD_REQ_OBJECT_ID_001
+    title: 字段 object_id 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-audit_log-FLD-REQ-object_id'',
+      { field: ''object_id'', value: null, expected: ''error'' })'
+- id: BR-audit_log-FLD-REQ-action
+  type: field_constraint
+  object: audit_log
+  subtype: required
+  field: action
+  source: schema:audit_log.yaml:fields[action].required
+  derived_scenarios:
+  - id: T_AUDIT_LOG_FLD_REQ_ACTION_001
+    title: 字段 action 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-audit_log-FLD-REQ-action'', {
+      field: ''action'', value: null, expected: ''error'' })'
+- id: BR-audit_log-FLD-REQ-created_at
+  type: field_constraint
+  object: audit_log
+  subtype: required
+  field: created_at
+  source: schema:audit_log.yaml:fields[created_at].required
+  derived_scenarios:
+  - id: T_AUDIT_LOG_FLD_REQ_CREATED_AT_001
+    title: 字段 created_at 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-audit_log-FLD-REQ-created_at'',
+      { field: ''created_at'', value: null, expected: ''error'' })'
+- id: BR-audit_log-FLD-ENUM-status
+  type: field_constraint
+  object: audit_log
+  subtype: enum
+  field: status
+  allowed_values:
+  - pending
+  - written
+  - failed
+  default: written
+  source: schema:audit_log.yaml:fields[status].enum_values
+  derived_scenarios:
+  - id: T_AUDIT_LOG_FLD_ENUM_STATUS_001
+    title: 字段 status 应在枚举值中,无效值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-audit_log-FLD-ENUM-status'',
+      { field: ''status'', allowed: [''pending'', ''written'', ''failed''] })'

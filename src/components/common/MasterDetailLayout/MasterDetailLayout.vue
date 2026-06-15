@@ -7,33 +7,33 @@
       <div class="master-detail-layout__sidebar-content">
         <slot name="master" />
       </div>
-    </aside>
 
-    <button
-      v-if="sidebarCollapsible"
-      class="master-detail-layout__collapse-btn"
-      :class="{ 'master-detail-layout__collapse-btn--collapsed': isCollapsed }"
-      :style="collapseBtnStyle"
-      @click="toggleCollapse"
-      :title="isCollapsed ? '展开侧边栏' : '折叠侧边栏'"
-      type="button"
-    >
-      <svg
-        class="master-detail-layout__collapse-icon"
-        :class="{ 'master-detail-layout__collapse-icon--collapsed': isCollapsed }"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
+      <button
+        v-if="sidebarCollapsible"
+        class="master-detail-layout__collapse-btn"
+        :class="{ 'master-detail-layout__collapse-btn--collapsed': isCollapsed }"
+        @click="toggleCollapse"
+        :title="isCollapsed ? '展开侧边栏' : '折叠侧边栏'"
+        type="button"
       >
-        <polyline points="15 18 9 12 15 6" />
-      </svg>
-    </button>
+        <svg
+          class="master-detail-layout__collapse-icon"
+          :class="{ 'master-detail-layout__collapse-icon--collapsed': isCollapsed }"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <polyline points="15 18 9 12 15 6" />
+        </svg>
+      </button>
+    </aside>
 
     <div
       v-if="showBorder && !isCollapsed"
-      class="master-detail-layout__resizer"
+      :class="['master-detail-layout__resizer', { 'master-detail-layout__resizer--dragging': isResizing }]"
       @mousedown="startResize"
+      title="拖动调整宽度"
     />
 
     <main class="master-detail-layout__detail">
@@ -86,13 +86,6 @@ const sidebarStyle = computed(() => {
   return { width: `${currentWidth.value}px` }
 })
 
-const collapseBtnStyle = computed(() => {
-  if (isCollapsed.value) {
-    return { left: '0px' }
-  }
-  return { left: `${currentWidth.value}px` }
-})
-
 function toggleCollapse() {
   const newState = !isCollapsed.value
   emit('update:sidebarCollapsed', newState)
@@ -111,11 +104,10 @@ function startResize(event) {
 
 function handleResize(event) {
   if (!isResizing.value) return
-  
+
   const newWidth = event.clientX
-  if (newWidth >= props.minWidth && newWidth <= props.maxWidth) {
-    currentWidth.value = newWidth
-  }
+  const clampedWidth = Math.min(props.maxWidth, Math.max(props.minWidth, newWidth))
+  currentWidth.value = clampedWidth
 }
 
 function stopResize() {

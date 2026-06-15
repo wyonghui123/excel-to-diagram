@@ -1,0 +1,40 @@
+schema: role_permission
+name: 角色权限
+total_rules: 3
+rules:
+- id: BR-role_permission-FLD-REQ-role_id
+  type: field_constraint
+  object: role_permission
+  subtype: required
+  field: role_id
+  source: schema:role_permission.yaml:fields[role_id].required
+  derived_scenarios:
+  - id: T_ROLE_PERMISSION_FLD_REQ_ROLE_ID_001
+    title: 字段 role_id 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-role_permission-FLD-REQ-role_id'',
+      { field: ''role_id'', value: null, expected: ''error'' })'
+- id: BR-role_permission-FLD-REQ-permission_id
+  type: field_constraint
+  object: role_permission
+  subtype: required
+  field: permission_id
+  source: schema:role_permission.yaml:fields[permission_id].required
+  derived_scenarios:
+  - id: T_ROLE_PERMISSION_FLD_REQ_PERMISSION_ID_001
+    title: 字段 permission_id 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-role_permission-FLD-REQ-permission_id'',
+      { field: ''permission_id'', value: null, expected: ''error'' })'
+- id: BR-role_permission-FLD-REQ-granted
+  type: field_constraint
+  object: role_permission
+  subtype: required
+  field: granted
+  source: schema:role_permission.yaml:fields[granted].required
+  derived_scenarios:
+  - id: T_ROLE_PERMISSION_FLD_REQ_GRANTED_001
+    title: 字段 granted 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-role_permission-FLD-REQ-granted'',
+      { field: ''granted'', value: null, expected: ''error'' })'

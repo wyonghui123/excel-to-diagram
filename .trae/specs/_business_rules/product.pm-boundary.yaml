@@ -1,0 +1,60 @@
+object: product
+source: pm_boundary
+total_rules: 4
+rules:
+- id: BR-product-PM-emoji-in-name
+  type: pm_boundary
+  subtype: field
+  object: product
+  title: 产品名包含 emoji 应拒绝
+  severity: error
+  priority: P1
+  source: pm:boundary:emoji-in-name
+  derived_scenarios:
+  - id: T_PRODUCT_PM_EMOJI-IN-NAME_001
+    title: 产品名包含 emoji 应拒绝
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-PM-emoji-in-name'', {
+      trigger: ''pm.boundary'' })'
+- id: BR-product-PM-name-max-length-200
+  type: pm_boundary
+  subtype: field
+  object: product
+  title: 产品名长度 > 200 应拒绝
+  severity: error
+  priority: P1
+  source: pm:boundary:name-max-length-200
+  derived_scenarios:
+  - id: T_PRODUCT_PM_NAME-MAX-LENGTH-200_001
+    title: 产品名长度 > 200 应拒绝
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-PM-name-max-length-200'',
+      { trigger: ''pm.boundary'' })'
+- id: BR-product-PM-code-lower-case-rejected
+  type: pm_boundary
+  subtype: field
+  object: product
+  title: 产品编码小写应拒绝(仅大写+数字+下划线)
+  severity: error
+  priority: P0
+  source: pm:boundary:code-lower-case-rejected
+  derived_scenarios:
+  - id: T_PRODUCT_PM_CODE-LOWER-CASE-REJECTED_001
+    title: 产品编码小写应拒绝(仅大写+数字+下划线)
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-PM-code-lower-case-rejected'',
+      { trigger: ''pm.boundary'' })'
+- id: BR-product-PM-deactivate-with-versions
+  type: pm_boundary
+  subtype: business
+  object: product
+  title: 有版本的产品停用(is_active=false)应警告
+  severity: warning
+  priority: P2
+  source: pm:boundary:deactivate-with-versions
+  derived_scenarios:
+  - id: T_PRODUCT_PM_DEACTIVATE-WITH-VERSIONS_001
+    title: 有版本的产品停用(is_active=false)应警告
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-PM-deactivate-with-versions'',
+      { trigger: ''pm.boundary'' })'

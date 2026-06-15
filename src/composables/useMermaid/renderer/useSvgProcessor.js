@@ -460,6 +460,17 @@ export function useSvgProcessor(options) {
     }
   }
 
+  /**
+   * [v32 2026-06-13] 清理 useSvgProcessor 注册的事件监听器
+   * 调用 tooltip.cleanup() 释放 mouseleave/mouseover 等事件
+   * 幂等设计: 多次调用安全 (tooltip.cleanup 内部清空 _cleanupFns 数组)
+   */
+  const cleanup = () => {
+    if (tooltip && typeof tooltip.cleanup === 'function') {
+      tooltip.cleanup()
+    }
+  }
+
   return {
     fixViewBox,
     fixContainerTitleCenter,
@@ -472,6 +483,9 @@ export function useSvgProcessor(options) {
     renderAnnotationOverlay,
     setupCanvasLayout,
     processSvg,
+    // 关键导出 v32 (2026-06-13): cleanup 函数, 解决 setup 阶段 ReferenceError
+    // 修复: 之前 return 中引用了未定义的 cleanup (仅 export 无函数), 触发 ReferenceError
+    // 现在 cleanup 内部调用 tooltip.cleanup() 来释放事件监听器
     cleanup,
     // 关键导出 v26：导出 buildColorLegendData 让 HTML 导出器复用 legend 逻辑
     buildColorLegendData

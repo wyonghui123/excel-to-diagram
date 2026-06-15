@@ -1,0 +1,93 @@
+schema: test_objects
+name: 测试对象
+total_rules: 7
+rules:
+- id: BR-test_objects-AUDIT-create
+  type: audit
+  object: test_objects
+  subtype: audit_create
+  fields: all
+  source: schema:test_objects.yaml:audit.create
+  derived_scenarios:
+  - id: T_TEST_OBJECTS_AUDIT_CREATE_001
+    title: create 操作应记录 audit_log
+    priority: P1
+    operation: create
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-test_objects-AUDIT-create'',
+      { operation: ''create'', auditLog: true })'
+- id: BR-test_objects-AUDIT-update
+  type: audit
+  object: test_objects
+  subtype: audit_update
+  fields: changed_only
+  source: schema:test_objects.yaml:audit.update
+  derived_scenarios:
+  - id: T_TEST_OBJECTS_AUDIT_UPDATE_001
+    title: update 操作应记录 audit_log
+    priority: P1
+    operation: update
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-test_objects-AUDIT-update'',
+      { operation: ''update'', auditLog: true })'
+- id: BR-test_objects-AUDIT-delete
+  type: audit
+  object: test_objects
+  subtype: audit_delete
+  fields: business_only
+  source: schema:test_objects.yaml:audit.delete
+  derived_scenarios:
+  - id: T_TEST_OBJECTS_AUDIT_DELETE_001
+    title: delete 操作应记录 audit_log
+    priority: P0
+    operation: delete
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-test_objects-AUDIT-delete'',
+      { operation: ''delete'', auditLog: true })'
+- id: BR-test_objects-VAL-name-required
+  type: validations
+  object: test_objects
+  subtype: field
+  rule: name is not None and name != ''
+  message: 名称不能为空
+  severity: error
+  source: schema:test_objects.yaml:validations[name_required]
+  derived_scenarios:
+  - id: T_TEST_OBJECTS_VAL_NAME_REQUIRED_001
+    title: '校验: 名称必填 应拒绝无效输入'
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-test_objects-VAL-name_required'',
+      { invalid: true, expected: ''error'' })'
+- id: BR-test_objects-FLD-REQ-name
+  type: field_constraint
+  object: test_objects
+  subtype: required
+  field: name
+  source: schema:test_objects.yaml:fields[name].required
+  derived_scenarios:
+  - id: T_TEST_OBJECTS_FLD_REQ_NAME_001
+    title: 字段 name 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-test_objects-FLD-REQ-name'',
+      { field: ''name'', value: null, expected: ''error'' })'
+- id: BR-test_objects-FLD-REQ-code
+  type: field_constraint
+  object: test_objects
+  subtype: required
+  field: code
+  source: schema:test_objects.yaml:fields[code].required
+  derived_scenarios:
+  - id: T_TEST_OBJECTS_FLD_REQ_CODE_001
+    title: 字段 code 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-test_objects-FLD-REQ-code'',
+      { field: ''code'', value: null, expected: ''error'' })'
+- id: BR-test_objects-FLD-UNQ-code
+  type: field_constraint
+  object: test_objects
+  subtype: unique
+  field: code
+  source: schema:test_objects.yaml:fields[code].unique
+  derived_scenarios:
+  - id: T_TEST_OBJECTS_FLD_UNQ_CODE_001
+    title: 字段 code 唯一,重复值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-test_objects-FLD-UNQ-code'',
+      { field: ''code'', value: ''existing'', expected: ''error'' })'

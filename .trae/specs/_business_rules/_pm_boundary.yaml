@@ -1,0 +1,94 @@
+# PM/BA 边界 case 标注文件
+#
+# 在 TRAE IDE chat 中,PM/BA 可说:
+#   "添加边界 case: 产品名包含 emoji 应拒绝"
+#   "标注业务规则: 用户名长度限制 3-20"
+#
+# AI 会自动追加到下面
+# 也可直接编辑此文件
+#
+# 格式:
+#   - object: <业务对象 ID>
+#     boundary_cases:
+#       - id: <唯一 ID,英文+下划线>
+#         title: '<业务场景描述>'
+#         rule_type: field | business | custom
+#         severity: error | warning
+#         priority: P0 | P1 | P2
+
+- object: product
+  boundary_cases:
+    - id: emoji-in-name
+      title: '产品名包含 emoji 应拒绝'
+      rule_type: field
+      severity: error
+      priority: P1
+    - id: name-max-length-200
+      title: '产品名长度 > 200 应拒绝'
+      rule_type: field
+      severity: error
+      priority: P1
+    - id: code-lower-case-rejected
+      title: '产品编码小写应拒绝(仅大写+数字+下划线)'
+      rule_type: field
+      severity: error
+      priority: P0
+    - id: deactivate-with-versions
+      title: '有版本的产品停用(is_active=false)应警告'
+      rule_type: business
+      severity: warning
+      priority: P2
+
+- object: user
+  boundary_cases:
+    - id: username-length-3-20
+      title: '用户名长度 3-20 字符,超限应拒绝'
+      rule_type: field
+      severity: error
+      priority: P0
+    - id: password-special-required
+      title: '密码必须含特殊字符'
+      rule_type: field
+      severity: error
+      priority: P0
+    - id: email-format-valid
+      title: '邮箱格式必须合法'
+      rule_type: field
+      severity: error
+      priority: P0
+    - id: concurrent-login-3-devices
+      title: '同一用户最多同时 3 设备登录'
+      rule_type: business
+      severity: warning
+      priority: P2
+
+- object: relationship
+  boundary_cases:
+    - id: no-self-loop
+      title: '不允许 source == target(自环)'
+      rule_type: business
+      severity: error
+      priority: P0
+    - id: max-depth-5
+      title: '关系链深度不超过 5 层'
+      rule_type: business
+      severity: error
+      priority: P1
+    - id: cycle-detect
+      title: '不允许关系环(A→B→C→A)'
+      rule_type: business
+      severity: error
+      priority: P0
+
+- object: business_object
+  boundary_cases:
+    - id: name-unique-in-same-sm
+      title: '同服务模块下 name 唯一'
+      rule_type: business
+      severity: error
+      priority: P0
+    - id: max-children-100
+      title: '业务对象最多 100 个关系'
+      rule_type: business
+      severity: warning
+      priority: P2

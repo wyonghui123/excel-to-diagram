@@ -1,0 +1,292 @@
+schema: sub_domain
+name: 子领域
+total_rules: 22
+rules:
+- id: BR-sub_domain-DEL
+  type: deletability
+  object: sub_domain
+  condition: self.child_count == 0 and self.relation_count == 0
+  message: 存在服务模块或关联关系的子领域不能删除
+  source: schema:sub_domain.yaml:deletability
+  derived_scenarios:
+  - id: T_SUB_DOMAIN_DEL_001
+    title: 有依赖时删除应失败
+    priority: P0
+    expected_deletable: false
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-sub_domain-DEL'', { relationCount:
+      1, expected: false })'
+  - id: T_SUB_DOMAIN_DEL_002
+    title: 无依赖时删除应成功
+    priority: P1
+    expected_deletable: true
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-sub_domain-DEL'', { relationCount:
+      0, expected: true })'
+- id: BR-sub_domain-AUTH-check
+  type: authorization
+  object: sub_domain
+  subtype: check
+  scope: domain_id IN (SELECT d.id FROM domains d JOIN versions v ON d.version_id
+    = v.id JOIN products p ON v.product_id = p.id WHERE p.visibility = 'public' OR
+    p.owner_id = $user.id)
+  source: schema:sub_domain.yaml:authorization.check
+  derived_scenarios:
+  - id: T_SUB_DOMAIN_AUTH_001
+    title: 未授权访问应拒绝
+    priority: P0
+    expected: false
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-sub_domain-AUTH-check'', { authorized:
+      false, expected: 403 })'
+  - id: T_SUB_DOMAIN_AUTH_002
+    title: 已授权访问应成功
+    priority: P1
+    expected: true
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-sub_domain-AUTH-check'', { authorized:
+      true, expected: 200 })'
+- id: BR-sub_domain-INHERIT
+  type: authorization
+  object: sub_domain
+  subtype: inherit
+  source: schema:sub_domain.yaml:authorization.inherit_to_children
+  derived_scenarios:
+  - id: T_SUB_DOMAIN_INH_001
+    title: 权限应自动继承给子对象
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-sub_domain-INHERIT'', { parentId:
+      ..., expectedChildAccess: true })'
+- id: BR-sub_domain-AUDIT-create
+  type: audit
+  object: sub_domain
+  subtype: audit_create
+  fields: all
+  source: schema:sub_domain.yaml:audit.create
+  derived_scenarios:
+  - id: T_SUB_DOMAIN_AUDIT_CREATE_001
+    title: create 操作应记录 audit_log
+    priority: P1
+    operation: create
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-sub_domain-AUDIT-create'', {
+      operation: ''create'', auditLog: true })'
+- id: BR-sub_domain-AUDIT-update
+  type: audit
+  object: sub_domain
+  subtype: audit_update
+  fields: changed_only
+  source: schema:sub_domain.yaml:audit.update
+  derived_scenarios:
+  - id: T_SUB_DOMAIN_AUDIT_UPDATE_001
+    title: update 操作应记录 audit_log
+    priority: P1
+    operation: update
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-sub_domain-AUDIT-update'', {
+      operation: ''update'', auditLog: true })'
+- id: BR-sub_domain-AUDIT-delete
+  type: audit
+  object: sub_domain
+  subtype: audit_delete
+  fields: business_only
+  source: schema:sub_domain.yaml:audit.delete
+  derived_scenarios:
+  - id: T_SUB_DOMAIN_AUDIT_DELETE_001
+    title: delete 操作应记录 audit_log
+    priority: P0
+    operation: delete
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-sub_domain-AUDIT-delete'', {
+      operation: ''delete'', auditLog: true })'
+- id: BR-sub_domain-ASPECT-hierarchy
+  type: aspect
+  object: sub_domain
+  aspect: hierarchy_aspect
+  source: schema:sub_domain.yaml:aspects[hierarchy_aspect]
+  derived_scenarios:
+  - id: T_SUB_DOMAIN_ASPECT_HIERARCHY_ASPECT_001
+    title: hierarchy_aspect 切面应正确触发
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-sub_domain-ASPECT-hierarchy_aspect'',
+      { objectId: ..., aspectFired: true })'
+- id: BR-sub_domain-ASPECT-audit
+  type: aspect
+  object: sub_domain
+  aspect: audit_aspect
+  source: schema:sub_domain.yaml:aspects[audit_aspect]
+  derived_scenarios:
+  - id: T_SUB_DOMAIN_ASPECT_AUDIT_ASPECT_001
+    title: audit_aspect 切面应正确触发
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-sub_domain-ASPECT-audit_aspect'',
+      { objectId: ..., aspectFired: true })'
+- id: BR-sub_domain-ASPECT-naming
+  type: aspect
+  object: sub_domain
+  aspect: naming_aspect
+  source: schema:sub_domain.yaml:aspects[naming_aspect]
+  derived_scenarios:
+  - id: T_SUB_DOMAIN_ASPECT_NAMING_ASPECT_001
+    title: naming_aspect 切面应正确触发
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-sub_domain-ASPECT-naming_aspect'',
+      { objectId: ..., aspectFired: true })'
+- id: BR-sub_domain-VAL-version-id-required
+  type: validations
+  object: sub_domain
+  subtype: field
+  rule: version_id is not None
+  message: 版本ID不能为空
+  severity: error
+  source: schema:sub_domain.yaml:validations[version_id_required]
+  derived_scenarios:
+  - id: T_SUB_DOMAIN_VAL_VERSION_ID_REQUIRED_001
+    title: '校验: 版本ID必填 应拒绝无效输入'
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-sub_domain-VAL-version_id_required'',
+      { invalid: true, expected: ''error'' })'
+- id: BR-sub_domain-IE-import
+  type: import_export
+  object: sub_domain
+  subtype: import
+  conflict_strategy: upsert
+  conflict_key: code
+  cascade: true
+  source: schema:sub_domain.yaml:import_export.import_enabled
+  derived_scenarios:
+  - id: T_SUB_DOMAIN_IE_IMP_001
+    title: 导入应使用 upsert 策略处理冲突
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-sub_domain-IE-import'', { strategy:
+      ''upsert'', conflictKey: ''code'' })'
+- id: BR-sub_domain-IE-export
+  type: import_export
+  object: sub_domain
+  subtype: export
+  cascade: true
+  source: schema:sub_domain.yaml:import_export.export_enabled
+  derived_scenarios:
+  - id: T_SUB_DOMAIN_IE_EXP_001
+    title: 导出应级联包含子对象
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-sub_domain-IE-export'', { cascade:
+      True })'
+- id: BR-sub_domain-HIER
+  type: hierarchy
+  object: sub_domain
+  level: 3
+  parent_field: domain_id
+  path_field: hierarchy_path
+  source: schema:sub_domain.yaml:hierarchy
+  derived_scenarios:
+  - id: T_SUB_DOMAIN_HIER_001
+    title: 应正确维护层级 path/depth (level=3)
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-sub_domain-HIER'', { level: 3
+      })'
+- id: BR-sub_domain-FLD-REQ-version_id
+  type: field_constraint
+  object: sub_domain
+  subtype: required
+  field: version_id
+  source: schema:sub_domain.yaml:fields[version_id].required
+  derived_scenarios:
+  - id: T_SUB_DOMAIN_FLD_REQ_VERSION_ID_001
+    title: 字段 version_id 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-sub_domain-FLD-REQ-version_id'',
+      { field: ''version_id'', value: null, expected: ''error'' })'
+- id: BR-sub_domain-FLD-IMM-domain_id
+  type: field_constraint
+  object: sub_domain
+  subtype: immutable
+  field: domain_id
+  source: schema:sub_domain.yaml:fields[domain_id].semantics.immutable
+  derived_scenarios:
+  - id: T_SUB_DOMAIN_FLD_IMM_DOMAIN_ID_001
+    title: 字段 domain_id 不可变,修改应拒绝
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-sub_domain-FLD-IMM-domain_id'',
+      { field: ''domain_id'', value: ''new'', expected: ''error'' })'
+- id: BR-sub_domain-FLD-REQ-code
+  type: field_constraint
+  object: sub_domain
+  subtype: required
+  field: code
+  source: schema:sub_domain.yaml:fields[code].required
+  derived_scenarios:
+  - id: T_SUB_DOMAIN_FLD_REQ_CODE_001
+    title: 字段 code 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-sub_domain-FLD-REQ-code'', {
+      field: ''code'', value: null, expected: ''error'' })'
+- id: BR-sub_domain-FLD-PAT-code
+  type: field_constraint
+  object: sub_domain
+  subtype: pattern
+  field: code
+  pattern: ^[A-Z][A-Z0-9_]*$
+  source: schema:sub_domain.yaml:fields[code].semantics.pattern
+  derived_scenarios:
+  - id: T_SUB_DOMAIN_FLD_PAT_CODE_001
+    title: 字段 code 应匹配模式 ^[A-Z][A-Z0-9_]*$
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-sub_domain-FLD-PAT-code'', {
+      field: ''code'', pattern: ''^[A-Z][A-Z0-9_]*$'' })'
+- id: BR-sub_domain-FLD-IMM-code
+  type: field_constraint
+  object: sub_domain
+  subtype: immutable
+  field: code
+  source: schema:sub_domain.yaml:fields[code].semantics.immutable
+  derived_scenarios:
+  - id: T_SUB_DOMAIN_FLD_IMM_CODE_001
+    title: 字段 code 不可变,修改应拒绝
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-sub_domain-FLD-IMM-code'', {
+      field: ''code'', value: ''new'', expected: ''error'' })'
+- id: BR-sub_domain-FLD-REQ-name
+  type: field_constraint
+  object: sub_domain
+  subtype: required
+  field: name
+  source: schema:sub_domain.yaml:fields[name].required
+  derived_scenarios:
+  - id: T_SUB_DOMAIN_FLD_REQ_NAME_001
+    title: 字段 name 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-sub_domain-FLD-REQ-name'', {
+      field: ''name'', value: null, expected: ''error'' })'
+- id: BR-sub_domain-REL-subdomain-to-version
+  type: relation
+  object: sub_domain
+  subtype: parent_child
+  target: version
+  cardinality: N:1
+  source: schema:sub_domain.yaml:relations[subdomain_to_version]
+  derived_scenarios:
+  - id: T_SUB_DOMAIN_REL_SUBDOMAIN_TO_VERSION_001
+    title: 删除父对象应处理子对象 (cardinality=N:1)
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-sub_domain-REL-subdomain_to_version'',
+      { parentId: ..., childrenCount: ... })'
+- id: BR-sub_domain-REL-subdomain-to-domain
+  type: relation
+  object: sub_domain
+  subtype: parent_child
+  target: domain
+  cardinality: N:1
+  source: schema:sub_domain.yaml:relations[subdomain_to_domain]
+  derived_scenarios:
+  - id: T_SUB_DOMAIN_REL_SUBDOMAIN_TO_DOMAIN_001
+    title: 删除父对象应处理子对象 (cardinality=N:1)
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-sub_domain-REL-subdomain_to_domain'',
+      { parentId: ..., childrenCount: ... })'
+- id: BR-sub_domain-REL-subdomain-to-service-modules
+  type: relation
+  object: sub_domain
+  subtype: parent_child
+  target: service_module
+  cardinality: 1:N
+  source: schema:sub_domain.yaml:relations[subdomain_to_service_modules]
+  derived_scenarios:
+  - id: T_SUB_DOMAIN_REL_SUBDOMAIN_TO_SERVICE_MODULES_001
+    title: 删除父对象应处理子对象 (cardinality=1:N)
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-sub_domain-REL-subdomain_to_service_modules'',
+      { parentId: ..., childrenCount: ... })'

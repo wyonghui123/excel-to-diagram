@@ -1,0 +1,60 @@
+object: user
+source: pm_boundary
+total_rules: 4
+rules:
+- id: BR-user-PM-username-length-3-20
+  type: pm_boundary
+  subtype: field
+  object: user
+  title: 用户名长度 3-20 字符,超限应拒绝
+  severity: error
+  priority: P0
+  source: pm:boundary:username-length-3-20
+  derived_scenarios:
+  - id: T_USER_PM_USERNAME-LENGTH-3-20_001
+    title: 用户名长度 3-20 字符,超限应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-PM-username-length-3-20'',
+      { trigger: ''pm.boundary'' })'
+- id: BR-user-PM-password-special-required
+  type: pm_boundary
+  subtype: field
+  object: user
+  title: 密码必须含特殊字符
+  severity: error
+  priority: P0
+  source: pm:boundary:password-special-required
+  derived_scenarios:
+  - id: T_USER_PM_PASSWORD-SPECIAL-REQUIRED_001
+    title: 密码必须含特殊字符
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-PM-password-special-required'',
+      { trigger: ''pm.boundary'' })'
+- id: BR-user-PM-email-format-valid
+  type: pm_boundary
+  subtype: field
+  object: user
+  title: 邮箱格式必须合法
+  severity: error
+  priority: P0
+  source: pm:boundary:email-format-valid
+  derived_scenarios:
+  - id: T_USER_PM_EMAIL-FORMAT-VALID_001
+    title: 邮箱格式必须合法
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-PM-email-format-valid'',
+      { trigger: ''pm.boundary'' })'
+- id: BR-user-PM-concurrent-login-3-devices
+  type: pm_boundary
+  subtype: business
+  object: user
+  title: 同一用户最多同时 3 设备登录
+  severity: warning
+  priority: P2
+  source: pm:boundary:concurrent-login-3-devices
+  derived_scenarios:
+  - id: T_USER_PM_CONCURRENT-LOGIN-3-DEVICES_001
+    title: 同一用户最多同时 3 设备登录
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-PM-concurrent-login-3-devices'',
+      { trigger: ''pm.boundary'' })'

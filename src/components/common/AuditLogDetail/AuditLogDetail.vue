@@ -18,27 +18,21 @@
       <div class="ald-info">
         <div class="ald-info-row" v-if="log.user_name">
           <span class="ald-label">操作人</span>
-          <span class="ald-value">{{ log.user_name }}</span>
+          <span class="ald-value">{{ userNameDisplay }}</span>
         </div>
-        <div class="ald-info-row" v-if="log.object_type">
+        <!-- [FIX 2026-06-15 业务化审查] 删除/翻译以下技术性字段:
+             - 对象类型: 翻译为业务术语 (如 annotation -> 备注)
+             - 对象ID:   删除 (业务人员已经在详情页, 信息冗余)
+             - IP:       删除 (业务人员无需关心)
+             - Trace:    删除 (UUID 是技术可观测性概念, 业务价值为 0)
+        -->
+        <div class="ald-info-row" v-if="objectTypeLabel">
           <span class="ald-label">对象类型</span>
-          <span class="ald-value">{{ log.object_type }}</span>
-        </div>
-        <div class="ald-info-row" v-if="log.object_id">
-          <span class="ald-label">对象ID</span>
-          <span class="ald-value">{{ log.object_id }}</span>
+          <span class="ald-value">{{ objectTypeLabel }}</span>
         </div>
         <div class="ald-info-row" v-if="log._cascade_from">
           <span class="ald-label">级联来源</span>
           <span class="ald-value ald-cascade-source">{{ log._cascade_from.type }} #{{ log._cascade_from.id }}</span>
-        </div>
-        <div class="ald-info-row" v-if="log.ip_address">
-          <span class="ald-label">IP</span>
-          <span class="ald-value ald-cascade-source">{{ log.ip_address }}</span>
-        </div>
-        <div class="ald-info-row" v-if="log.trace_id">
-          <span class="ald-label">Trace</span>
-          <span class="ald-value ald-cascade-source">{{ log.trace_id }}</span>
         </div>
       </div>
 
@@ -157,6 +151,7 @@
 <script setup>
 import { computed } from 'vue'
 import { dateFormatService } from '@/services/DateFormatService'
+import { getObjectTypeLabel, getUserNameDisplay, isInternalField, isInternalAction } from '@/utils/auditLogFormat'
 
 const props = defineProps({
   visible: {
@@ -170,6 +165,10 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['update:visible', 'selectLog'])
+
+// [FIX 2026-06-15 业务化审查] 业务名翻译
+const objectTypeLabel = computed(() => getObjectTypeLabel(props.log?.object_type))
+const userNameDisplay = computed(() => getUserNameDisplay(props.log?.user_name))
 
 // [DECORATIVE] FR-LOG-011: RelatedEvents 状态
 const hasRelatedEvents = computed(() => {

@@ -1,0 +1,40 @@
+object: role
+source: service_layer
+total_rules: 3
+rules:
+- id: BR-role-SRV-ASSERT-CHECK-audit_constants-177
+  type: service_logic
+  subtype: assert_check
+  object: role
+  source: service:audit_constants.py:L177
+  code_snippet: assert derive_category("ROLE_ASSIGN") == "authz"
+  derived_scenarios:
+  - id: T_ROLE_SRV_ASSERT_CHECK_177_001
+    title: '服务层: assert derive_category("ROLE_ASSIGN") == "authz"'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-role-SRV-ASSERT-CHECK-audit_constants-177'',
+      { trigger: ''service.assert_check'' })'
+- id: BR-role-SRV-RETURN-FALSE-data_permission_interceptor-162
+  type: service_logic
+  subtype: return_false
+  object: role
+  source: service:data_permission_interceptor.py:L162
+  code_snippet: 'return False  # 没有 role 派生该 object_type, 走原 scope filter'
+  derived_scenarios:
+  - id: T_ROLE_SRV_RETURN_FALSE_162_001
+    title: '服务层: return False  # 没有 role 派生该 object_type, 走原 scope filter'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-role-SRV-RETURN-FALSE-data_permission_interceptor-162'',
+      { trigger: ''service.return_false'' })'
+- id: BR-role-SRV-RETURN-FALSE-permission_interceptor-534
+  type: service_logic
+  subtype: return_false
+  object: role
+  source: service:permission_interceptor.py:L534
+  code_snippet: 'return False  # YAML 有规则且所有 role 都不允许'
+  derived_scenarios:
+  - id: T_ROLE_SRV_RETURN_FALSE_534_001
+    title: '服务层: return False  # YAML 有规则且所有 role 都不允许'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-role-SRV-RETURN-FALSE-permission_interceptor-534'',
+      { trigger: ''service.return_false'' })'

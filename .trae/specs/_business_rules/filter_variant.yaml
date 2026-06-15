@@ -1,0 +1,40 @@
+schema: filter_variant
+name: 过滤变体
+total_rules: 3
+rules:
+- id: BR-filter_variant-FLD-REQ-name
+  type: field_constraint
+  object: filter_variant
+  subtype: required
+  field: name
+  source: schema:filter_variant.yaml:fields[name].required
+  derived_scenarios:
+  - id: T_FILTER_VARIANT_FLD_REQ_NAME_001
+    title: 字段 name 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-filter_variant-FLD-REQ-name'',
+      { field: ''name'', value: null, expected: ''error'' })'
+- id: BR-filter_variant-FLD-REQ-object_type
+  type: field_constraint
+  object: filter_variant
+  subtype: required
+  field: object_type
+  source: schema:filter_variant.yaml:fields[object_type].required
+  derived_scenarios:
+  - id: T_FILTER_VARIANT_FLD_REQ_OBJECT_TYPE_001
+    title: 字段 object_type 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-filter_variant-FLD-REQ-object_type'',
+      { field: ''object_type'', value: null, expected: ''error'' })'
+- id: BR-filter_variant-FLD-REQ-filters
+  type: field_constraint
+  object: filter_variant
+  subtype: required
+  field: filters
+  source: schema:filter_variant.yaml:fields[filters].required
+  derived_scenarios:
+  - id: T_FILTER_VARIANT_FLD_REQ_FILTERS_001
+    title: 字段 filters 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-filter_variant-FLD-REQ-filters'',
+      { field: ''filters'', value: null, expected: ''error'' })'

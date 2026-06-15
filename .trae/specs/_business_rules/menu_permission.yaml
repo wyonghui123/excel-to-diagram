@@ -1,0 +1,52 @@
+schema: menu_permission
+name: 菜单权限
+total_rules: 4
+rules:
+- id: BR-menu_permission-FLD-REQ-menu_code
+  type: field_constraint
+  object: menu_permission
+  subtype: required
+  field: menu_code
+  source: schema:menu_permission.yaml:fields[menu_code].required
+  derived_scenarios:
+  - id: T_MENU_PERMISSION_FLD_REQ_MENU_CODE_001
+    title: 字段 menu_code 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-menu_permission-FLD-REQ-menu_code'',
+      { field: ''menu_code'', value: null, expected: ''error'' })'
+- id: BR-menu_permission-FLD-UNQ-menu_code
+  type: field_constraint
+  object: menu_permission
+  subtype: unique
+  field: menu_code
+  source: schema:menu_permission.yaml:fields[menu_code].unique
+  derived_scenarios:
+  - id: T_MENU_PERMISSION_FLD_UNQ_MENU_CODE_001
+    title: 字段 menu_code 唯一,重复值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-menu_permission-FLD-UNQ-menu_code'',
+      { field: ''menu_code'', value: ''existing'', expected: ''error'' })'
+- id: BR-menu_permission-FLD-REQ-menu_name
+  type: field_constraint
+  object: menu_permission
+  subtype: required
+  field: menu_name
+  source: schema:menu_permission.yaml:fields[menu_name].required
+  derived_scenarios:
+  - id: T_MENU_PERMISSION_FLD_REQ_MENU_NAME_001
+    title: 字段 menu_name 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-menu_permission-FLD-REQ-menu_name'',
+      { field: ''menu_name'', value: null, expected: ''error'' })'
+- id: BR-menu_permission-FLD-REQ-menu_path
+  type: field_constraint
+  object: menu_permission
+  subtype: required
+  field: menu_path
+  source: schema:menu_permission.yaml:fields[menu_path].required
+  derived_scenarios:
+  - id: T_MENU_PERMISSION_FLD_REQ_MENU_PATH_001
+    title: 字段 menu_path 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-menu_permission-FLD-REQ-menu_path'',
+      { field: ''menu_path'', value: null, expected: ''error'' })'

@@ -1,0 +1,334 @@
+schema: business_object
+name: 业务对象
+total_rules: 25
+rules:
+- id: BR-business_object-DEL
+  type: deletability
+  object: business_object
+  condition: self.relation_count == 0
+  message: 存在关联关系的业务对象不能删除
+  source: schema:business_object.yaml:deletability
+  derived_scenarios:
+  - id: T_BUSINESS_OBJECT_DEL_001
+    title: 有依赖时删除应失败
+    priority: P0
+    expected_deletable: false
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-DEL'', { relationCount:
+      1, expected: false })'
+  - id: T_BUSINESS_OBJECT_DEL_002
+    title: 无依赖时删除应成功
+    priority: P1
+    expected_deletable: true
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-DEL'', { relationCount:
+      0, expected: true })'
+- id: BR-business_object-AUTH-check
+  type: authorization
+  object: business_object
+  subtype: check
+  scope: service_module_id IN (SELECT sm.id FROM service_modules sm JOIN sub_domains
+    sd ON sm.sub_domain_id = sd.id JOIN domains d ON sd.domain_id = d.id JOIN versions
+    v ON d.version_id = v.id JOIN products p ON v.product_id = p.id WHERE p.visibility
+    = 'public' OR p.owner_id = $user.id)
+  source: schema:business_object.yaml:authorization.check
+  derived_scenarios:
+  - id: T_BUSINESS_OBJECT_AUTH_001
+    title: 未授权访问应拒绝
+    priority: P0
+    expected: false
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-AUTH-check'',
+      { authorized: false, expected: 403 })'
+  - id: T_BUSINESS_OBJECT_AUTH_002
+    title: 已授权访问应成功
+    priority: P1
+    expected: true
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-AUTH-check'',
+      { authorized: true, expected: 200 })'
+- id: BR-business_object-INHERIT
+  type: authorization
+  object: business_object
+  subtype: inherit
+  source: schema:business_object.yaml:authorization.inherit_to_children
+  derived_scenarios:
+  - id: T_BUSINESS_OBJECT_INH_001
+    title: 权限应自动继承给子对象
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-INHERIT'', {
+      parentId: ..., expectedChildAccess: true })'
+- id: BR-business_object-AUDIT-create
+  type: audit
+  object: business_object
+  subtype: audit_create
+  fields: all
+  source: schema:business_object.yaml:audit.create
+  derived_scenarios:
+  - id: T_BUSINESS_OBJECT_AUDIT_CREATE_001
+    title: create 操作应记录 audit_log
+    priority: P1
+    operation: create
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-AUDIT-create'',
+      { operation: ''create'', auditLog: true })'
+- id: BR-business_object-AUDIT-update
+  type: audit
+  object: business_object
+  subtype: audit_update
+  fields: changed_only
+  source: schema:business_object.yaml:audit.update
+  derived_scenarios:
+  - id: T_BUSINESS_OBJECT_AUDIT_UPDATE_001
+    title: update 操作应记录 audit_log
+    priority: P1
+    operation: update
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-AUDIT-update'',
+      { operation: ''update'', auditLog: true })'
+- id: BR-business_object-AUDIT-delete
+  type: audit
+  object: business_object
+  subtype: audit_delete
+  fields: business_only
+  source: schema:business_object.yaml:audit.delete
+  derived_scenarios:
+  - id: T_BUSINESS_OBJECT_AUDIT_DELETE_001
+    title: delete 操作应记录 audit_log
+    priority: P0
+    operation: delete
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-AUDIT-delete'',
+      { operation: ''delete'', auditLog: true })'
+- id: BR-business_object-ASPECT-hierarchy
+  type: aspect
+  object: business_object
+  aspect: hierarchy_aspect
+  source: schema:business_object.yaml:aspects[hierarchy_aspect]
+  derived_scenarios:
+  - id: T_BUSINESS_OBJECT_ASPECT_HIERARCHY_ASPECT_001
+    title: hierarchy_aspect 切面应正确触发
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-ASPECT-hierarchy_aspect'',
+      { objectId: ..., aspectFired: true })'
+- id: BR-business_object-ASPECT-audit
+  type: aspect
+  object: business_object
+  aspect: audit_aspect
+  source: schema:business_object.yaml:aspects[audit_aspect]
+  derived_scenarios:
+  - id: T_BUSINESS_OBJECT_ASPECT_AUDIT_ASPECT_001
+    title: audit_aspect 切面应正确触发
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-ASPECT-audit_aspect'',
+      { objectId: ..., aspectFired: true })'
+- id: BR-business_object-ASPECT-naming
+  type: aspect
+  object: business_object
+  aspect: naming_aspect
+  source: schema:business_object.yaml:aspects[naming_aspect]
+  derived_scenarios:
+  - id: T_BUSINESS_OBJECT_ASPECT_NAMING_ASPECT_001
+    title: naming_aspect 切面应正确触发
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-ASPECT-naming_aspect'',
+      { objectId: ..., aspectFired: true })'
+- id: BR-business_object-VAL-version-id-required
+  type: validations
+  object: business_object
+  subtype: field
+  rule: version_id is not None
+  message: 版本ID不能为空
+  severity: error
+  source: schema:business_object.yaml:validations[version_id_required]
+  derived_scenarios:
+  - id: T_BUSINESS_OBJECT_VAL_VERSION_ID_REQUIRED_001
+    title: '校验: 版本ID必填 应拒绝无效输入'
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-VAL-version_id_required'',
+      { invalid: true, expected: ''error'' })'
+- id: BR-business_object-VAL-code-format
+  type: validations
+  object: business_object
+  subtype: field
+  rule: code matches '^[A-Z][A-Z0-9_]*$'
+  message: 编码格式不正确，应为大写字母开头
+  severity: warning
+  source: schema:business_object.yaml:validations[code_format]
+  derived_scenarios:
+  - id: T_BUSINESS_OBJECT_VAL_CODE_FORMAT_001
+    title: '校验: 编码格式 应拒绝无效输入'
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-VAL-code_format'',
+      { invalid: true, expected: ''error'' })'
+- id: BR-business_object-IE-import
+  type: import_export
+  object: business_object
+  subtype: import
+  conflict_strategy: upsert
+  conflict_key: code
+  cascade: false
+  source: schema:business_object.yaml:import_export.import_enabled
+  derived_scenarios:
+  - id: T_BUSINESS_OBJECT_IE_IMP_001
+    title: 导入应使用 upsert 策略处理冲突
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-IE-import'',
+      { strategy: ''upsert'', conflictKey: ''code'' })'
+- id: BR-business_object-IE-export
+  type: import_export
+  object: business_object
+  subtype: export
+  cascade: false
+  source: schema:business_object.yaml:import_export.export_enabled
+  derived_scenarios:
+  - id: T_BUSINESS_OBJECT_IE_EXP_001
+    title: 导出应不级联包含子对象
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-IE-export'',
+      { cascade: False })'
+- id: BR-business_object-HIER
+  type: hierarchy
+  object: business_object
+  level: 5
+  parent_field: service_module_id
+  path_field: hierarchy_path
+  source: schema:business_object.yaml:hierarchy
+  derived_scenarios:
+  - id: T_BUSINESS_OBJECT_HIER_001
+    title: 应正确维护层级 path/depth (level=5)
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-HIER'', { level:
+      5 })'
+- id: BR-business_object-FLD-REQ-version_id
+  type: field_constraint
+  object: business_object
+  subtype: required
+  field: version_id
+  source: schema:business_object.yaml:fields[version_id].required
+  derived_scenarios:
+  - id: T_BUSINESS_OBJECT_FLD_REQ_VERSION_ID_001
+    title: 字段 version_id 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-FLD-REQ-version_id'',
+      { field: ''version_id'', value: null, expected: ''error'' })'
+- id: BR-business_object-FLD-IMM-domain_id
+  type: field_constraint
+  object: business_object
+  subtype: immutable
+  field: domain_id
+  source: schema:business_object.yaml:fields[domain_id].semantics.immutable
+  derived_scenarios:
+  - id: T_BUSINESS_OBJECT_FLD_IMM_DOMAIN_ID_001
+    title: 字段 domain_id 不可变,修改应拒绝
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-FLD-IMM-domain_id'',
+      { field: ''domain_id'', value: ''new'', expected: ''error'' })'
+- id: BR-business_object-FLD-IMM-sub_domain_id
+  type: field_constraint
+  object: business_object
+  subtype: immutable
+  field: sub_domain_id
+  source: schema:business_object.yaml:fields[sub_domain_id].semantics.immutable
+  derived_scenarios:
+  - id: T_BUSINESS_OBJECT_FLD_IMM_SUB_DOMAIN_ID_001
+    title: 字段 sub_domain_id 不可变,修改应拒绝
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-FLD-IMM-sub_domain_id'',
+      { field: ''sub_domain_id'', value: ''new'', expected: ''error'' })'
+- id: BR-business_object-FLD-REQ-code
+  type: field_constraint
+  object: business_object
+  subtype: required
+  field: code
+  source: schema:business_object.yaml:fields[code].required
+  derived_scenarios:
+  - id: T_BUSINESS_OBJECT_FLD_REQ_CODE_001
+    title: 字段 code 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-FLD-REQ-code'',
+      { field: ''code'', value: null, expected: ''error'' })'
+- id: BR-business_object-FLD-PAT-code
+  type: field_constraint
+  object: business_object
+  subtype: pattern
+  field: code
+  pattern: ^[A-Z][A-Z0-9_]*$
+  source: schema:business_object.yaml:fields[code].semantics.pattern
+  derived_scenarios:
+  - id: T_BUSINESS_OBJECT_FLD_PAT_CODE_001
+    title: 字段 code 应匹配模式 ^[A-Z][A-Z0-9_]*$
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-FLD-PAT-code'',
+      { field: ''code'', pattern: ''^[A-Z][A-Z0-9_]*$'' })'
+- id: BR-business_object-FLD-IMM-code
+  type: field_constraint
+  object: business_object
+  subtype: immutable
+  field: code
+  source: schema:business_object.yaml:fields[code].semantics.immutable
+  derived_scenarios:
+  - id: T_BUSINESS_OBJECT_FLD_IMM_CODE_001
+    title: 字段 code 不可变,修改应拒绝
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-FLD-IMM-code'',
+      { field: ''code'', value: ''new'', expected: ''error'' })'
+- id: BR-business_object-FLD-REQ-name
+  type: field_constraint
+  object: business_object
+  subtype: required
+  field: name
+  source: schema:business_object.yaml:fields[name].required
+  derived_scenarios:
+  - id: T_BUSINESS_OBJECT_FLD_REQ_NAME_001
+    title: 字段 name 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-FLD-REQ-name'',
+      { field: ''name'', value: null, expected: ''error'' })'
+- id: BR-business_object-REL-bo-to-version
+  type: relation
+  object: business_object
+  subtype: parent_child
+  target: version
+  cardinality: N:1
+  source: schema:business_object.yaml:relations[bo_to_version]
+  derived_scenarios:
+  - id: T_BUSINESS_OBJECT_REL_BO_TO_VERSION_001
+    title: 删除父对象应处理子对象 (cardinality=N:1)
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-REL-bo_to_version'',
+      { parentId: ..., childrenCount: ... })'
+- id: BR-business_object-REL-bo-to-service-module
+  type: relation
+  object: business_object
+  subtype: parent_child
+  target: service_module
+  cardinality: N:1
+  source: schema:business_object.yaml:relations[bo_to_service_module]
+  derived_scenarios:
+  - id: T_BUSINESS_OBJECT_REL_BO_TO_SERVICE_MODULE_001
+    title: 删除父对象应处理子对象 (cardinality=N:1)
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-REL-bo_to_service_module'',
+      { parentId: ..., childrenCount: ... })'
+- id: BR-business_object-ACT-batch-import
+  type: action
+  object: business_object
+  subtype: business
+  method: POST
+  path: /api/v1/business_objects/import
+  description: 从Excel批量导入业务对象
+  source: schema:business_object.yaml:actions[batch_import]
+  derived_scenarios:
+  - id: T_BUSINESS_OBJECT_ACT_BATCH_IMPORT_001
+    title: 业务动作 批量导入 应正确执行
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-ACT-batch_import'',
+      { method: ''POST'', path: ''/api/v1/business_objects/import'' })'
+- id: BR-business_object-ACT-export
+  type: action
+  object: business_object
+  subtype: business
+  method: GET
+  path: /api/v1/business_objects/export
+  description: 导出业务对象到Excel
+  source: schema:business_object.yaml:actions[export]
+  derived_scenarios:
+  - id: T_BUSINESS_OBJECT_ACT_EXPORT_001
+    title: 业务动作 导出 应正确执行
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-ACT-export'',
+      { method: ''GET'', path: ''/api/v1/business_objects/export'' })'

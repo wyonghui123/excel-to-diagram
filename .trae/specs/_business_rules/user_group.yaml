@@ -1,0 +1,115 @@
+schema: user_group
+name: 用户组
+total_rules: 9
+rules:
+- id: BR-user_group-AUDIT-create
+  type: audit
+  object: user_group
+  subtype: audit_create
+  fields: all
+  source: schema:user_group.yaml:audit.create
+  derived_scenarios:
+  - id: T_USER_GROUP_AUDIT_CREATE_001
+    title: create 操作应记录 audit_log
+    priority: P1
+    operation: create
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user_group-AUDIT-create'', {
+      operation: ''create'', auditLog: true })'
+- id: BR-user_group-AUDIT-update
+  type: audit
+  object: user_group
+  subtype: audit_update
+  fields: changed_only
+  source: schema:user_group.yaml:audit.update
+  derived_scenarios:
+  - id: T_USER_GROUP_AUDIT_UPDATE_001
+    title: update 操作应记录 audit_log
+    priority: P1
+    operation: update
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user_group-AUDIT-update'', {
+      operation: ''update'', auditLog: true })'
+- id: BR-user_group-AUDIT-delete
+  type: audit
+  object: user_group
+  subtype: audit_delete
+  fields: business_only
+  source: schema:user_group.yaml:audit.delete
+  derived_scenarios:
+  - id: T_USER_GROUP_AUDIT_DELETE_001
+    title: delete 操作应记录 audit_log
+    priority: P0
+    operation: delete
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user_group-AUDIT-delete'', {
+      operation: ''delete'', auditLog: true })'
+- id: BR-user_group-ASPECT-audit
+  type: aspect
+  object: user_group
+  aspect: audit_aspect
+  source: schema:user_group.yaml:aspects[audit_aspect]
+  derived_scenarios:
+  - id: T_USER_GROUP_ASPECT_AUDIT_ASPECT_001
+    title: audit_aspect 切面应正确触发
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user_group-ASPECT-audit_aspect'',
+      { objectId: ..., aspectFired: true })'
+- id: BR-user_group-FLD-REQ-name
+  type: field_constraint
+  object: user_group
+  subtype: required
+  field: name
+  source: schema:user_group.yaml:fields[name].required
+  derived_scenarios:
+  - id: T_USER_GROUP_FLD_REQ_NAME_001
+    title: 字段 name 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user_group-FLD-REQ-name'', {
+      field: ''name'', value: null, expected: ''error'' })'
+- id: BR-user_group-FLD-REQ-code
+  type: field_constraint
+  object: user_group
+  subtype: required
+  field: code
+  source: schema:user_group.yaml:fields[code].required
+  derived_scenarios:
+  - id: T_USER_GROUP_FLD_REQ_CODE_001
+    title: 字段 code 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user_group-FLD-REQ-code'', {
+      field: ''code'', value: null, expected: ''error'' })'
+- id: BR-user_group-FLD-UNQ-code
+  type: field_constraint
+  object: user_group
+  subtype: unique
+  field: code
+  source: schema:user_group.yaml:fields[code].unique
+  derived_scenarios:
+  - id: T_USER_GROUP_FLD_UNQ_CODE_001
+    title: 字段 code 唯一,重复值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user_group-FLD-UNQ-code'', {
+      field: ''code'', value: ''existing'', expected: ''error'' })'
+- id: BR-user_group-FLD-PAT-code
+  type: field_constraint
+  object: user_group
+  subtype: pattern
+  field: code
+  pattern: ^[a-z][a-z0-9_]*$
+  source: schema:user_group.yaml:fields[code].semantics.pattern
+  derived_scenarios:
+  - id: T_USER_GROUP_FLD_PAT_CODE_001
+    title: 字段 code 应匹配模式 ^[a-z][a-z0-9_]*$
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user_group-FLD-PAT-code'', {
+      field: ''code'', pattern: ''^[a-z][a-z0-9_]*$'' })'
+- id: BR-user_group-FLD-IMM-code
+  type: field_constraint
+  object: user_group
+  subtype: immutable
+  field: code
+  source: schema:user_group.yaml:fields[code].semantics.immutable
+  derived_scenarios:
+  - id: T_USER_GROUP_FLD_IMM_CODE_001
+    title: 字段 code 不可变,修改应拒绝
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user_group-FLD-IMM-code'', {
+      field: ''code'', value: ''new'', expected: ''error'' })'

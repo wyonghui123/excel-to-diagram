@@ -1,0 +1,304 @@
+schema: service_module
+name: 服务模块
+total_rules: 23
+rules:
+- id: BR-service_module-DEL
+  type: deletability
+  object: service_module
+  condition: self.child_count == 0 and self.relation_count == 0
+  message: 存在业务对象或关联关系的服务模块不能删除
+  source: schema:service_module.yaml:deletability
+  derived_scenarios:
+  - id: T_SERVICE_MODULE_DEL_001
+    title: 有依赖时删除应失败
+    priority: P0
+    expected_deletable: false
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-service_module-DEL'', { relationCount:
+      1, expected: false })'
+  - id: T_SERVICE_MODULE_DEL_002
+    title: 无依赖时删除应成功
+    priority: P1
+    expected_deletable: true
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-service_module-DEL'', { relationCount:
+      0, expected: true })'
+- id: BR-service_module-AUTH-check
+  type: authorization
+  object: service_module
+  subtype: check
+  scope: sub_domain_id IN (SELECT sd.id FROM sub_domains sd JOIN domains d ON sd.domain_id
+    = d.id JOIN versions v ON d.version_id = v.id JOIN products p ON v.product_id
+    = p.id WHERE p.visibility = 'public' OR p.owner_id = $user.id)
+  source: schema:service_module.yaml:authorization.check
+  derived_scenarios:
+  - id: T_SERVICE_MODULE_AUTH_001
+    title: 未授权访问应拒绝
+    priority: P0
+    expected: false
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-service_module-AUTH-check'',
+      { authorized: false, expected: 403 })'
+  - id: T_SERVICE_MODULE_AUTH_002
+    title: 已授权访问应成功
+    priority: P1
+    expected: true
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-service_module-AUTH-check'',
+      { authorized: true, expected: 200 })'
+- id: BR-service_module-INHERIT
+  type: authorization
+  object: service_module
+  subtype: inherit
+  source: schema:service_module.yaml:authorization.inherit_to_children
+  derived_scenarios:
+  - id: T_SERVICE_MODULE_INH_001
+    title: 权限应自动继承给子对象
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-service_module-INHERIT'', { parentId:
+      ..., expectedChildAccess: true })'
+- id: BR-service_module-AUDIT-create
+  type: audit
+  object: service_module
+  subtype: audit_create
+  fields: all
+  source: schema:service_module.yaml:audit.create
+  derived_scenarios:
+  - id: T_SERVICE_MODULE_AUDIT_CREATE_001
+    title: create 操作应记录 audit_log
+    priority: P1
+    operation: create
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-service_module-AUDIT-create'',
+      { operation: ''create'', auditLog: true })'
+- id: BR-service_module-AUDIT-update
+  type: audit
+  object: service_module
+  subtype: audit_update
+  fields: changed_only
+  source: schema:service_module.yaml:audit.update
+  derived_scenarios:
+  - id: T_SERVICE_MODULE_AUDIT_UPDATE_001
+    title: update 操作应记录 audit_log
+    priority: P1
+    operation: update
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-service_module-AUDIT-update'',
+      { operation: ''update'', auditLog: true })'
+- id: BR-service_module-AUDIT-delete
+  type: audit
+  object: service_module
+  subtype: audit_delete
+  fields: business_only
+  source: schema:service_module.yaml:audit.delete
+  derived_scenarios:
+  - id: T_SERVICE_MODULE_AUDIT_DELETE_001
+    title: delete 操作应记录 audit_log
+    priority: P0
+    operation: delete
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-service_module-AUDIT-delete'',
+      { operation: ''delete'', auditLog: true })'
+- id: BR-service_module-ASPECT-hierarchy
+  type: aspect
+  object: service_module
+  aspect: hierarchy_aspect
+  source: schema:service_module.yaml:aspects[hierarchy_aspect]
+  derived_scenarios:
+  - id: T_SERVICE_MODULE_ASPECT_HIERARCHY_ASPECT_001
+    title: hierarchy_aspect 切面应正确触发
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-service_module-ASPECT-hierarchy_aspect'',
+      { objectId: ..., aspectFired: true })'
+- id: BR-service_module-ASPECT-audit
+  type: aspect
+  object: service_module
+  aspect: audit_aspect
+  source: schema:service_module.yaml:aspects[audit_aspect]
+  derived_scenarios:
+  - id: T_SERVICE_MODULE_ASPECT_AUDIT_ASPECT_001
+    title: audit_aspect 切面应正确触发
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-service_module-ASPECT-audit_aspect'',
+      { objectId: ..., aspectFired: true })'
+- id: BR-service_module-ASPECT-naming
+  type: aspect
+  object: service_module
+  aspect: naming_aspect
+  source: schema:service_module.yaml:aspects[naming_aspect]
+  derived_scenarios:
+  - id: T_SERVICE_MODULE_ASPECT_NAMING_ASPECT_001
+    title: naming_aspect 切面应正确触发
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-service_module-ASPECT-naming_aspect'',
+      { objectId: ..., aspectFired: true })'
+- id: BR-service_module-VAL-version-id-required
+  type: validations
+  object: service_module
+  subtype: field
+  rule: version_id is not None
+  message: 版本ID不能为空
+  severity: error
+  source: schema:service_module.yaml:validations[version_id_required]
+  derived_scenarios:
+  - id: T_SERVICE_MODULE_VAL_VERSION_ID_REQUIRED_001
+    title: '校验: 版本ID必填 应拒绝无效输入'
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-service_module-VAL-version_id_required'',
+      { invalid: true, expected: ''error'' })'
+- id: BR-service_module-IE-import
+  type: import_export
+  object: service_module
+  subtype: import
+  conflict_strategy: upsert
+  conflict_key: code
+  cascade: true
+  source: schema:service_module.yaml:import_export.import_enabled
+  derived_scenarios:
+  - id: T_SERVICE_MODULE_IE_IMP_001
+    title: 导入应使用 upsert 策略处理冲突
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-service_module-IE-import'', {
+      strategy: ''upsert'', conflictKey: ''code'' })'
+- id: BR-service_module-IE-export
+  type: import_export
+  object: service_module
+  subtype: export
+  cascade: true
+  source: schema:service_module.yaml:import_export.export_enabled
+  derived_scenarios:
+  - id: T_SERVICE_MODULE_IE_EXP_001
+    title: 导出应级联包含子对象
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-service_module-IE-export'', {
+      cascade: True })'
+- id: BR-service_module-HIER
+  type: hierarchy
+  object: service_module
+  level: 4
+  parent_field: sub_domain_id
+  path_field: hierarchy_path
+  source: schema:service_module.yaml:hierarchy
+  derived_scenarios:
+  - id: T_SERVICE_MODULE_HIER_001
+    title: 应正确维护层级 path/depth (level=4)
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-service_module-HIER'', { level:
+      4 })'
+- id: BR-service_module-FLD-REQ-version_id
+  type: field_constraint
+  object: service_module
+  subtype: required
+  field: version_id
+  source: schema:service_module.yaml:fields[version_id].required
+  derived_scenarios:
+  - id: T_SERVICE_MODULE_FLD_REQ_VERSION_ID_001
+    title: 字段 version_id 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-service_module-FLD-REQ-version_id'',
+      { field: ''version_id'', value: null, expected: ''error'' })'
+- id: BR-service_module-FLD-IMM-domain_id
+  type: field_constraint
+  object: service_module
+  subtype: immutable
+  field: domain_id
+  source: schema:service_module.yaml:fields[domain_id].semantics.immutable
+  derived_scenarios:
+  - id: T_SERVICE_MODULE_FLD_IMM_DOMAIN_ID_001
+    title: 字段 domain_id 不可变,修改应拒绝
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-service_module-FLD-IMM-domain_id'',
+      { field: ''domain_id'', value: ''new'', expected: ''error'' })'
+- id: BR-service_module-FLD-REQ-sub_domain_id
+  type: field_constraint
+  object: service_module
+  subtype: required
+  field: sub_domain_id
+  source: schema:service_module.yaml:fields[sub_domain_id].required
+  derived_scenarios:
+  - id: T_SERVICE_MODULE_FLD_REQ_SUB_DOMAIN_ID_001
+    title: 字段 sub_domain_id 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-service_module-FLD-REQ-sub_domain_id'',
+      { field: ''sub_domain_id'', value: null, expected: ''error'' })'
+- id: BR-service_module-FLD-REQ-code
+  type: field_constraint
+  object: service_module
+  subtype: required
+  field: code
+  source: schema:service_module.yaml:fields[code].required
+  derived_scenarios:
+  - id: T_SERVICE_MODULE_FLD_REQ_CODE_001
+    title: 字段 code 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-service_module-FLD-REQ-code'',
+      { field: ''code'', value: null, expected: ''error'' })'
+- id: BR-service_module-FLD-PAT-code
+  type: field_constraint
+  object: service_module
+  subtype: pattern
+  field: code
+  pattern: ^[A-Z][A-Z0-9_]*$
+  source: schema:service_module.yaml:fields[code].semantics.pattern
+  derived_scenarios:
+  - id: T_SERVICE_MODULE_FLD_PAT_CODE_001
+    title: 字段 code 应匹配模式 ^[A-Z][A-Z0-9_]*$
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-service_module-FLD-PAT-code'',
+      { field: ''code'', pattern: ''^[A-Z][A-Z0-9_]*$'' })'
+- id: BR-service_module-FLD-IMM-code
+  type: field_constraint
+  object: service_module
+  subtype: immutable
+  field: code
+  source: schema:service_module.yaml:fields[code].semantics.immutable
+  derived_scenarios:
+  - id: T_SERVICE_MODULE_FLD_IMM_CODE_001
+    title: 字段 code 不可变,修改应拒绝
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-service_module-FLD-IMM-code'',
+      { field: ''code'', value: ''new'', expected: ''error'' })'
+- id: BR-service_module-FLD-REQ-name
+  type: field_constraint
+  object: service_module
+  subtype: required
+  field: name
+  source: schema:service_module.yaml:fields[name].required
+  derived_scenarios:
+  - id: T_SERVICE_MODULE_FLD_REQ_NAME_001
+    title: 字段 name 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-service_module-FLD-REQ-name'',
+      { field: ''name'', value: null, expected: ''error'' })'
+- id: BR-service_module-REL-sm-to-version
+  type: relation
+  object: service_module
+  subtype: parent_child
+  target: version
+  cardinality: N:1
+  source: schema:service_module.yaml:relations[sm_to_version]
+  derived_scenarios:
+  - id: T_SERVICE_MODULE_REL_SM_TO_VERSION_001
+    title: 删除父对象应处理子对象 (cardinality=N:1)
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-service_module-REL-sm_to_version'',
+      { parentId: ..., childrenCount: ... })'
+- id: BR-service_module-REL-sm-to-subdomain
+  type: relation
+  object: service_module
+  subtype: parent_child
+  target: sub_domain
+  cardinality: N:1
+  source: schema:service_module.yaml:relations[sm_to_subdomain]
+  derived_scenarios:
+  - id: T_SERVICE_MODULE_REL_SM_TO_SUBDOMAIN_001
+    title: 删除父对象应处理子对象 (cardinality=N:1)
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-service_module-REL-sm_to_subdomain'',
+      { parentId: ..., childrenCount: ... })'
+- id: BR-service_module-REL-sm-to-business-objects
+  type: relation
+  object: service_module
+  subtype: parent_child
+  target: business_object
+  cardinality: 1:N
+  source: schema:service_module.yaml:relations[sm_to_business_objects]
+  derived_scenarios:
+  - id: T_SERVICE_MODULE_REL_SM_TO_BUSINESS_OBJECTS_001
+    title: 删除父对象应处理子对象 (cardinality=1:N)
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-service_module-REL-sm_to_business_objects'',
+      { parentId: ..., childrenCount: ... })'

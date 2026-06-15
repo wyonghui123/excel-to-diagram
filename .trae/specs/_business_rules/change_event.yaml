@@ -1,0 +1,177 @@
+schema: change_event
+name: 变更事件
+total_rules: 12
+rules:
+- id: BR-change_event-STATE-process-event
+  type: rules
+  object: change_event
+  subtype: state_transition
+  state_field: status
+  from_states:
+  - pending
+  to_state: processing
+  triggers:
+  - before_update
+  source: schema:change_event.yaml:rules[process_event]
+  derived_scenarios:
+  - id: T_CHANGE_EVENT_STATE_PROCESS_EVENT_001
+    title: '状态转换: 开始处理事件'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-change_event-STATE-process_event'',
+      { from: ''[''pending'']'', to: ''processing'' })'
+- id: BR-change_event-STATE-deliver-event
+  type: rules
+  object: change_event
+  subtype: state_transition
+  state_field: status
+  from_states:
+  - processing
+  to_state: delivered
+  triggers:
+  - before_update
+  source: schema:change_event.yaml:rules[deliver_event]
+  derived_scenarios:
+  - id: T_CHANGE_EVENT_STATE_DELIVER_EVENT_001
+    title: '状态转换: 投递成功'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-change_event-STATE-deliver_event'',
+      { from: ''[''processing'']'', to: ''delivered'' })'
+- id: BR-change_event-STATE-fail-event
+  type: rules
+  object: change_event
+  subtype: state_transition
+  state_field: status
+  from_states:
+  - processing
+  to_state: failed
+  triggers:
+  - before_update
+  source: schema:change_event.yaml:rules[fail_event]
+  derived_scenarios:
+  - id: T_CHANGE_EVENT_STATE_FAIL_EVENT_001
+    title: '状态转换: 投递失败'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-change_event-STATE-fail_event'',
+      { from: ''[''processing'']'', to: ''failed'' })'
+- id: BR-change_event-STATE-retry-event
+  type: rules
+  object: change_event
+  subtype: state_transition
+  state_field: status
+  from_states:
+  - failed
+  to_state: pending
+  triggers:
+  - before_update
+  source: schema:change_event.yaml:rules[retry_event]
+  derived_scenarios:
+  - id: T_CHANGE_EVENT_STATE_RETRY_EVENT_001
+    title: '状态转换: 重试事件'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-change_event-STATE-retry_event'',
+      { from: ''[''failed'']'', to: ''pending'' })'
+- id: BR-change_event-FLD-REQ-object_type
+  type: field_constraint
+  object: change_event
+  subtype: required
+  field: object_type
+  source: schema:change_event.yaml:fields[object_type].required
+  derived_scenarios:
+  - id: T_CHANGE_EVENT_FLD_REQ_OBJECT_TYPE_001
+    title: 字段 object_type 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-change_event-FLD-REQ-object_type'',
+      { field: ''object_type'', value: null, expected: ''error'' })'
+- id: BR-change_event-FLD-REQ-object_id
+  type: field_constraint
+  object: change_event
+  subtype: required
+  field: object_id
+  source: schema:change_event.yaml:fields[object_id].required
+  derived_scenarios:
+  - id: T_CHANGE_EVENT_FLD_REQ_OBJECT_ID_001
+    title: 字段 object_id 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-change_event-FLD-REQ-object_id'',
+      { field: ''object_id'', value: null, expected: ''error'' })'
+- id: BR-change_event-FLD-REQ-event_type
+  type: field_constraint
+  object: change_event
+  subtype: required
+  field: event_type
+  source: schema:change_event.yaml:fields[event_type].required
+  derived_scenarios:
+  - id: T_CHANGE_EVENT_FLD_REQ_EVENT_TYPE_001
+    title: 字段 event_type 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-change_event-FLD-REQ-event_type'',
+      { field: ''event_type'', value: null, expected: ''error'' })'
+- id: BR-change_event-FLD-REQ-status
+  type: field_constraint
+  object: change_event
+  subtype: required
+  field: status
+  source: schema:change_event.yaml:fields[status].required
+  derived_scenarios:
+  - id: T_CHANGE_EVENT_FLD_REQ_STATUS_001
+    title: 字段 status 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-change_event-FLD-REQ-status'',
+      { field: ''status'', value: null, expected: ''error'' })'
+- id: BR-change_event-FLD-ENUM-status
+  type: field_constraint
+  object: change_event
+  subtype: enum
+  field: status
+  allowed_values:
+  - pending
+  - processing
+  - delivered
+  - failed
+  default: pending
+  source: schema:change_event.yaml:fields[status].enum_values
+  derived_scenarios:
+  - id: T_CHANGE_EVENT_FLD_ENUM_STATUS_001
+    title: 字段 status 应在枚举值中,无效值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-change_event-FLD-ENUM-status'',
+      { field: ''status'', allowed: [''pending'', ''processing'', ''delivered'', ''failed'']
+      })'
+- id: BR-change_event-FLD-REQ-retry_count
+  type: field_constraint
+  object: change_event
+  subtype: required
+  field: retry_count
+  source: schema:change_event.yaml:fields[retry_count].required
+  derived_scenarios:
+  - id: T_CHANGE_EVENT_FLD_REQ_RETRY_COUNT_001
+    title: 字段 retry_count 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-change_event-FLD-REQ-retry_count'',
+      { field: ''retry_count'', value: null, expected: ''error'' })'
+- id: BR-change_event-FLD-REQ-created_at
+  type: field_constraint
+  object: change_event
+  subtype: required
+  field: created_at
+  source: schema:change_event.yaml:fields[created_at].required
+  derived_scenarios:
+  - id: T_CHANGE_EVENT_FLD_REQ_CREATED_AT_001
+    title: 字段 created_at 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-change_event-FLD-REQ-created_at'',
+      { field: ''created_at'', value: null, expected: ''error'' })'
+- id: BR-change_event-ACT-update-status
+  type: action
+  object: change_event
+  subtype: business
+  method: PUT
+  path: /api/v1/change_events/{id}/status
+  description: 更新事件状态
+  source: schema:change_event.yaml:actions[update_status]
+  derived_scenarios:
+  - id: T_CHANGE_EVENT_ACT_UPDATE_STATUS_001
+    title: 业务动作 更新状态 应正确执行
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-change_event-ACT-update_status'',
+      { method: ''PUT'', path: ''/api/v1/change_events/{id}/status'' })'

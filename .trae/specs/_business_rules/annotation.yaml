@@ -1,0 +1,158 @@
+schema: annotation
+name: 备注信息
+total_rules: 12
+rules:
+- id: BR-annotation-AUDIT-create
+  type: audit
+  object: annotation
+  subtype: audit_create
+  fields: all
+  source: schema:annotation.yaml:audit.create
+  derived_scenarios:
+  - id: T_ANNOTATION_AUDIT_CREATE_001
+    title: create 操作应记录 audit_log
+    priority: P1
+    operation: create
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-annotation-AUDIT-create'', {
+      operation: ''create'', auditLog: true })'
+- id: BR-annotation-AUDIT-update
+  type: audit
+  object: annotation
+  subtype: audit_update
+  fields: changed_only
+  source: schema:annotation.yaml:audit.update
+  derived_scenarios:
+  - id: T_ANNOTATION_AUDIT_UPDATE_001
+    title: update 操作应记录 audit_log
+    priority: P1
+    operation: update
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-annotation-AUDIT-update'', {
+      operation: ''update'', auditLog: true })'
+- id: BR-annotation-AUDIT-delete
+  type: audit
+  object: annotation
+  subtype: audit_delete
+  fields: business_only
+  source: schema:annotation.yaml:audit.delete
+  derived_scenarios:
+  - id: T_ANNOTATION_AUDIT_DELETE_001
+    title: delete 操作应记录 audit_log
+    priority: P0
+    operation: delete
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-annotation-AUDIT-delete'', {
+      operation: ''delete'', auditLog: true })'
+- id: BR-annotation-ASPECT-audit
+  type: aspect
+  object: annotation
+  aspect: audit_aspect
+  source: schema:annotation.yaml:aspects[audit_aspect]
+  derived_scenarios:
+  - id: T_ANNOTATION_ASPECT_AUDIT_ASPECT_001
+    title: audit_aspect 切面应正确触发
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-annotation-ASPECT-audit_aspect'',
+      { objectId: ..., aspectFired: true })'
+- id: BR-annotation-VAL-target-type-required
+  type: validations
+  object: annotation
+  subtype: field
+  rule: target_type is not None
+  message: 关联对象类型不能为空
+  severity: error
+  source: schema:annotation.yaml:validations[target_type_required]
+  derived_scenarios:
+  - id: T_ANNOTATION_VAL_TARGET_TYPE_REQUIRED_001
+    title: '校验: 关联对象类型必填 应拒绝无效输入'
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-annotation-VAL-target_type_required'',
+      { invalid: true, expected: ''error'' })'
+- id: BR-annotation-VAL-target-id-required
+  type: validations
+  object: annotation
+  subtype: field
+  rule: target_id is not None
+  message: 关联对象ID不能为空
+  severity: error
+  source: schema:annotation.yaml:validations[target_id_required]
+  derived_scenarios:
+  - id: T_ANNOTATION_VAL_TARGET_ID_REQUIRED_001
+    title: '校验: 关联对象ID必填 应拒绝无效输入'
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-annotation-VAL-target_id_required'',
+      { invalid: true, expected: ''error'' })'
+- id: BR-annotation-VAL-category-required
+  type: validations
+  object: annotation
+  subtype: field
+  rule: category is not None
+  message: 备注分类不能为空
+  severity: error
+  source: schema:annotation.yaml:validations[category_required]
+  derived_scenarios:
+  - id: T_ANNOTATION_VAL_CATEGORY_REQUIRED_001
+    title: '校验: 备注分类必填 应拒绝无效输入'
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-annotation-VAL-category_required'',
+      { invalid: true, expected: ''error'' })'
+- id: BR-annotation-VAL-category-valid
+  type: validations
+  object: annotation
+  subtype: field
+  rule: category in ['important', 'warning', 'info', 'tip', 'TEST']
+  message: 备注分类必须是 important、warning、info、tip 或 TEST
+  severity: error
+  source: schema:annotation.yaml:validations[category_valid]
+  derived_scenarios:
+  - id: T_ANNOTATION_VAL_CATEGORY_VALID_001
+    title: '校验: 备注分类有效值 应拒绝无效输入'
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-annotation-VAL-category_valid'',
+      { invalid: true, expected: ''error'' })'
+- id: BR-annotation-FLD-REQ-target_type
+  type: field_constraint
+  object: annotation
+  subtype: required
+  field: target_type
+  source: schema:annotation.yaml:fields[target_type].required
+  derived_scenarios:
+  - id: T_ANNOTATION_FLD_REQ_TARGET_TYPE_001
+    title: 字段 target_type 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-annotation-FLD-REQ-target_type'',
+      { field: ''target_type'', value: null, expected: ''error'' })'
+- id: BR-annotation-FLD-IMM-target_type
+  type: field_constraint
+  object: annotation
+  subtype: immutable
+  field: target_type
+  source: schema:annotation.yaml:fields[target_type].semantics.immutable
+  derived_scenarios:
+  - id: T_ANNOTATION_FLD_IMM_TARGET_TYPE_001
+    title: 字段 target_type 不可变,修改应拒绝
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-annotation-FLD-IMM-target_type'',
+      { field: ''target_type'', value: ''new'', expected: ''error'' })'
+- id: BR-annotation-FLD-REQ-target_id
+  type: field_constraint
+  object: annotation
+  subtype: required
+  field: target_id
+  source: schema:annotation.yaml:fields[target_id].required
+  derived_scenarios:
+  - id: T_ANNOTATION_FLD_REQ_TARGET_ID_001
+    title: 字段 target_id 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-annotation-FLD-REQ-target_id'',
+      { field: ''target_id'', value: null, expected: ''error'' })'
+- id: BR-annotation-FLD-REQ-category
+  type: field_constraint
+  object: annotation
+  subtype: required
+  field: category
+  source: schema:annotation.yaml:fields[category].required
+  derived_scenarios:
+  - id: T_ANNOTATION_FLD_REQ_CATEGORY_001
+    title: 字段 category 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-annotation-FLD-REQ-category'',
+      { field: ''category'', value: null, expected: ''error'' })'

@@ -1,0 +1,4 @@
+schema: audit_log_expectations
+name: audit_log_expectations
+total_rules: 0
+rules: []

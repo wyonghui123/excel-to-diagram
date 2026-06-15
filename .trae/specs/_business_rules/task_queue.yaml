@@ -1,0 +1,79 @@
+schema: task_queue
+name: 任务队列配置
+total_rules: 6
+rules:
+- id: BR-task_queue-AUDIT-create
+  type: audit
+  object: task_queue
+  subtype: audit_create
+  fields: all
+  source: schema:task_queue.yaml:audit.create
+  derived_scenarios:
+  - id: T_TASK_QUEUE_AUDIT_CREATE_001
+    title: create 操作应记录 audit_log
+    priority: P1
+    operation: create
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-task_queue-AUDIT-create'', {
+      operation: ''create'', auditLog: true })'
+- id: BR-task_queue-AUDIT-update
+  type: audit
+  object: task_queue
+  subtype: audit_update
+  fields: changed_only
+  source: schema:task_queue.yaml:audit.update
+  derived_scenarios:
+  - id: T_TASK_QUEUE_AUDIT_UPDATE_001
+    title: update 操作应记录 audit_log
+    priority: P1
+    operation: update
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-task_queue-AUDIT-update'', {
+      operation: ''update'', auditLog: true })'
+- id: BR-task_queue-AUDIT-delete
+  type: audit
+  object: task_queue
+  subtype: audit_delete
+  fields: business_only
+  source: schema:task_queue.yaml:audit.delete
+  derived_scenarios:
+  - id: T_TASK_QUEUE_AUDIT_DELETE_001
+    title: delete 操作应记录 audit_log
+    priority: P0
+    operation: delete
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-task_queue-AUDIT-delete'', {
+      operation: ''delete'', auditLog: true })'
+- id: BR-task_queue-FLD-REQ-name
+  type: field_constraint
+  object: task_queue
+  subtype: required
+  field: name
+  source: schema:task_queue.yaml:fields[name].required
+  derived_scenarios:
+  - id: T_TASK_QUEUE_FLD_REQ_NAME_001
+    title: 字段 name 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-task_queue-FLD-REQ-name'', {
+      field: ''name'', value: null, expected: ''error'' })'
+- id: BR-task_queue-FLD-UNQ-name
+  type: field_constraint
+  object: task_queue
+  subtype: unique
+  field: name
+  source: schema:task_queue.yaml:fields[name].unique
+  derived_scenarios:
+  - id: T_TASK_QUEUE_FLD_UNQ_NAME_001
+    title: 字段 name 唯一,重复值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-task_queue-FLD-UNQ-name'', {
+      field: ''name'', value: ''existing'', expected: ''error'' })'
+- id: BR-task_queue-FLD-REQ-priority
+  type: field_constraint
+  object: task_queue
+  subtype: required
+  field: priority
+  source: schema:task_queue.yaml:fields[priority].required
+  derived_scenarios:
+  - id: T_TASK_QUEUE_FLD_REQ_PRIORITY_001
+    title: 字段 priority 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-task_queue-FLD-REQ-priority'',
+      { field: ''priority'', value: null, expected: ''error'' })'

@@ -1,0 +1,342 @@
+schema: product
+name: 产品线
+total_rules: 25
+rules:
+- id: BR-product-DEL
+  type: deletability
+  object: product
+  condition: self.child_count == 0
+  message: 存在版本的产品不能删除
+  source: schema:product.yaml:deletability
+  derived_scenarios:
+  - id: T_PRODUCT_DEL_001
+    title: 有依赖时删除应失败
+    priority: P0
+    expected_deletable: false
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-DEL'', { relationCount:
+      1, expected: false })'
+  - id: T_PRODUCT_DEL_002
+    title: 无依赖时删除应成功
+    priority: P1
+    expected_deletable: true
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-DEL'', { relationCount:
+      0, expected: true })'
+- id: BR-product-AUTH-check
+  type: authorization
+  object: product
+  subtype: check
+  scope: visibility = 'public' OR owner_id = $user.id
+  source: schema:product.yaml:authorization.check
+  derived_scenarios:
+  - id: T_PRODUCT_AUTH_001
+    title: 未授权访问应拒绝
+    priority: P0
+    expected: false
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-AUTH-check'', { authorized:
+      false, expected: 403 })'
+  - id: T_PRODUCT_AUTH_002
+    title: 已授权访问应成功
+    priority: P1
+    expected: true
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-AUTH-check'', { authorized:
+      true, expected: 200 })'
+- id: BR-product-AUTH-auto_owner
+  type: authorization
+  object: product
+  subtype: auto_owner
+  permission: admin
+  source: schema:product.yaml:authorization.auto_owner
+  derived_scenarios:
+  - id: T_PRODUCT_OWNER_001
+    title: 创建者自动获得 owner 权限
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-AUTH-auto_owner'', {
+      creatorId: ..., expectedOwner: ... })'
+- id: BR-product-TRANSFER
+  type: authorization
+  object: product
+  subtype: transfer
+  keep_permissions: false
+  source: schema:product.yaml:authorization.allow_transfer
+  derived_scenarios:
+  - id: T_PRODUCT_TRANS_001
+    title: owner 可转让给其他用户
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-TRANSFER'', { from: ownerId,
+      to: newOwnerId })'
+- id: BR-product-INHERIT
+  type: authorization
+  object: product
+  subtype: inherit
+  source: schema:product.yaml:authorization.inherit_to_children
+  derived_scenarios:
+  - id: T_PRODUCT_INH_001
+    title: 权限应自动继承给子对象
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-INHERIT'', { parentId:
+      ..., expectedChildAccess: true })'
+- id: BR-product-AUDIT-create
+  type: audit
+  object: product
+  subtype: audit_create
+  fields: all
+  source: schema:product.yaml:audit.create
+  derived_scenarios:
+  - id: T_PRODUCT_AUDIT_CREATE_001
+    title: create 操作应记录 audit_log
+    priority: P1
+    operation: create
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-AUDIT-create'', { operation:
+      ''create'', auditLog: true })'
+- id: BR-product-AUDIT-update
+  type: audit
+  object: product
+  subtype: audit_update
+  fields: changed_only
+  source: schema:product.yaml:audit.update
+  derived_scenarios:
+  - id: T_PRODUCT_AUDIT_UPDATE_001
+    title: update 操作应记录 audit_log
+    priority: P1
+    operation: update
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-AUDIT-update'', { operation:
+      ''update'', auditLog: true })'
+- id: BR-product-AUDIT-delete
+  type: audit
+  object: product
+  subtype: audit_delete
+  fields: business_only
+  source: schema:product.yaml:audit.delete
+  derived_scenarios:
+  - id: T_PRODUCT_AUDIT_DELETE_001
+    title: delete 操作应记录 audit_log
+    priority: P0
+    operation: delete
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-AUDIT-delete'', { operation:
+      ''delete'', auditLog: true })'
+- id: BR-product-ASPECT-audit
+  type: aspect
+  object: product
+  aspect: audit_aspect
+  source: schema:product.yaml:aspects[audit_aspect]
+  derived_scenarios:
+  - id: T_PRODUCT_ASPECT_AUDIT_ASPECT_001
+    title: audit_aspect 切面应正确触发
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-ASPECT-audit_aspect'',
+      { objectId: ..., aspectFired: true })'
+- id: BR-product-ASPECT-naming
+  type: aspect
+  object: product
+  aspect: naming_aspect
+  source: schema:product.yaml:aspects[naming_aspect]
+  derived_scenarios:
+  - id: T_PRODUCT_ASPECT_NAMING_ASPECT_001
+    title: naming_aspect 切面应正确触发
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-ASPECT-naming_aspect'',
+      { objectId: ..., aspectFired: true })'
+- id: BR-product-VAL-name-required
+  type: validations
+  object: product
+  subtype: field
+  rule: name is not None and name != ''
+  message: 产品线名称不能为空
+  severity: error
+  source: schema:product.yaml:validations[name_required]
+  derived_scenarios:
+  - id: T_PRODUCT_VAL_NAME_REQUIRED_001
+    title: '校验: 名称必填 应拒绝无效输入'
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-VAL-name_required'',
+      { invalid: true, expected: ''error'' })'
+- id: BR-product-STATE-activate-product
+  type: rules
+  object: product
+  subtype: state_transition
+  state_field: is_active
+  from_states:
+  - false
+  to_state: true
+  triggers:
+  - before_update
+  source: schema:product.yaml:rules[activate_product]
+  derived_scenarios:
+  - id: T_PRODUCT_STATE_ACTIVATE_PRODUCT_001
+    title: '状态转换: 激活产品线'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-STATE-activate_product'',
+      { from: ''[False]'', to: ''True'' })'
+- id: BR-product-STATE-deactivate-product
+  type: rules
+  object: product
+  subtype: state_transition
+  state_field: is_active
+  from_states:
+  - true
+  to_state: false
+  triggers:
+  - before_update
+  source: schema:product.yaml:rules[deactivate_product]
+  derived_scenarios:
+  - id: T_PRODUCT_STATE_DEACTIVATE_PRODUCT_001
+    title: '状态转换: 停用产品线'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-STATE-deactivate_product'',
+      { from: ''[True]'', to: ''False'' })'
+- id: BR-product-IE-import
+  type: import_export
+  object: product
+  subtype: import
+  conflict_strategy: upsert
+  conflict_key: code
+  cascade: true
+  source: schema:product.yaml:import_export.import_enabled
+  derived_scenarios:
+  - id: T_PRODUCT_IE_IMP_001
+    title: 导入应使用 upsert 策略处理冲突
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-IE-import'', { strategy:
+      ''upsert'', conflictKey: ''code'' })'
+- id: BR-product-IE-export
+  type: import_export
+  object: product
+  subtype: export
+  cascade: true
+  source: schema:product.yaml:import_export.export_enabled
+  derived_scenarios:
+  - id: T_PRODUCT_IE_EXP_001
+    title: 导出应级联包含子对象
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-IE-export'', { cascade:
+      True })'
+- id: BR-product-HIER
+  type: hierarchy
+  object: product
+  level: 0
+  parent_field: null
+  path_field: hierarchy_path
+  source: schema:product.yaml:hierarchy
+  derived_scenarios:
+  - id: T_PRODUCT_HIER_001
+    title: 应正确维护层级 path/depth (level=0)
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-HIER'', { level: 0 })'
+- id: BR-product-FLD-REQ-name
+  type: field_constraint
+  object: product
+  subtype: required
+  field: name
+  source: schema:product.yaml:fields[name].required
+  derived_scenarios:
+  - id: T_PRODUCT_FLD_REQ_NAME_001
+    title: 字段 name 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-FLD-REQ-name'', { field:
+      ''name'', value: null, expected: ''error'' })'
+- id: BR-product-FLD-REQ-code
+  type: field_constraint
+  object: product
+  subtype: required
+  field: code
+  source: schema:product.yaml:fields[code].required
+  derived_scenarios:
+  - id: T_PRODUCT_FLD_REQ_CODE_001
+    title: 字段 code 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-FLD-REQ-code'', { field:
+      ''code'', value: null, expected: ''error'' })'
+- id: BR-product-FLD-UNQ-code
+  type: field_constraint
+  object: product
+  subtype: unique
+  field: code
+  source: schema:product.yaml:fields[code].unique
+  derived_scenarios:
+  - id: T_PRODUCT_FLD_UNQ_CODE_001
+    title: 字段 code 唯一,重复值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-FLD-UNQ-code'', { field:
+      ''code'', value: ''existing'', expected: ''error'' })'
+- id: BR-product-FLD-PAT-code
+  type: field_constraint
+  object: product
+  subtype: pattern
+  field: code
+  pattern: ^[A-Z][A-Z0-9_]*$
+  source: schema:product.yaml:fields[code].semantics.pattern
+  derived_scenarios:
+  - id: T_PRODUCT_FLD_PAT_CODE_001
+    title: 字段 code 应匹配模式 ^[A-Z][A-Z0-9_]*$
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-FLD-PAT-code'', { field:
+      ''code'', pattern: ''^[A-Z][A-Z0-9_]*$'' })'
+- id: BR-product-FLD-IMM-code
+  type: field_constraint
+  object: product
+  subtype: immutable
+  field: code
+  source: schema:product.yaml:fields[code].semantics.immutable
+  derived_scenarios:
+  - id: T_PRODUCT_FLD_IMM_CODE_001
+    title: 字段 code 不可变,修改应拒绝
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-FLD-IMM-code'', { field:
+      ''code'', value: ''new'', expected: ''error'' })'
+- id: BR-product-FLD-REQ-visibility
+  type: field_constraint
+  object: product
+  subtype: required
+  field: visibility
+  source: schema:product.yaml:fields[visibility].required
+  derived_scenarios:
+  - id: T_PRODUCT_FLD_REQ_VISIBILITY_001
+    title: 字段 visibility 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-FLD-REQ-visibility'',
+      { field: ''visibility'', value: null, expected: ''error'' })'
+- id: BR-product-FLD-ENUM-visibility
+  type: field_constraint
+  object: product
+  subtype: enum
+  field: visibility
+  allowed_values:
+  - private
+  - public
+  default: private
+  source: schema:product.yaml:fields[visibility].enum_values
+  derived_scenarios:
+  - id: T_PRODUCT_FLD_ENUM_VISIBILITY_001
+    title: 字段 visibility 应在枚举值中,无效值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-FLD-ENUM-visibility'',
+      { field: ''visibility'', allowed: [''private'', ''public''] })'
+- id: BR-product-FLD-ENUM-is_active
+  type: field_constraint
+  object: product
+  subtype: enum
+  field: is_active
+  allowed_values:
+  - 1
+  - 0
+  default: true
+  source: schema:product.yaml:fields[is_active].enum_values
+  derived_scenarios:
+  - id: T_PRODUCT_FLD_ENUM_IS_ACTIVE_001
+    title: 字段 is_active 应在枚举值中,无效值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-FLD-ENUM-is_active'',
+      { field: ''is_active'', allowed: [1, 0] })'
+- id: BR-product-REL-product-to-versions
+  type: relation
+  object: product
+  subtype: parent_child
+  target: version
+  cardinality: 1:N
+  source: schema:product.yaml:relations[product_to_versions]
+  derived_scenarios:
+  - id: T_PRODUCT_REL_PRODUCT_TO_VERSIONS_001
+    title: 删除父对象应处理子对象 (cardinality=1:N)
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-product-REL-product_to_versions'',
+      { parentId: ..., childrenCount: ... })'

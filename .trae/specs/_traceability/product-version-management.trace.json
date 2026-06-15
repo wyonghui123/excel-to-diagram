@@ -1,0 +1,47 @@
+{
+  "feat": "product-version-management",
+  "spec_md": {},
+  "business_flow_yaml": {
+    "path": ".trae\\specs\\product-version-management\\business-flow.yaml",
+    "review_status": "approved",
+    "actor": "Admin",
+    "goal": "产品版本管理 - 创建产品+版本,验证级联关系与删除约束",
+    "tasks": [
+      "T_PRD_VER_001",
+      "T_PRD_VER_002",
+      "T_PRD_VER_003",
+      "T_PRD_VER_004"
+    ],
+    "questions": [
+      "BR-product-DEL-condition",
+      "BR-product-AUTH",
+      "BR-product-AUDIT",
+      "BR-version-DEL-condition",
+      "BR-version-AUTH",
+      "BR-version-AUDIT"
+    ]
+  },
+  "spec_js_files": [
+    "e2e/business-flow/product-version.spec.js"
+  ],
+  "rule_refs_in_spec_js": [
+    "BR-product-AUDIT",
+    "BR-product-AUTH",
+    "BR-product-DEL-condition",
+    "BR-version-AUDIT",
+    "BR-version-AUTH",
+    "BR-version-DEL-condition"
+  ],
+  "reverse_trace": {
+    "rule_to_spec_js": [
+      "BR-product-AUDIT",
+      "BR-product-AUTH",
+      "BR-product-DEL-condition",
+      "BR-version-AUDIT",
+      "BR-version-AUTH",
+      "BR-version-DEL-condition"
+    ],
+    "yaml_to_spec_md": null
+  },
+  "generated_at": "2026-06-13T08:38:43.053761Z"
+}

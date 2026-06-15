@@ -1,0 +1,52 @@
+schema: data_permission
+name: 数据权限
+total_rules: 4
+rules:
+- id: BR-data_permission-FLD-REQ-user_id
+  type: field_constraint
+  object: data_permission
+  subtype: required
+  field: user_id
+  source: schema:data_permission.yaml:fields[user_id].required
+  derived_scenarios:
+  - id: T_DATA_PERMISSION_FLD_REQ_USER_ID_001
+    title: 字段 user_id 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-data_permission-FLD-REQ-user_id'',
+      { field: ''user_id'', value: null, expected: ''error'' })'
+- id: BR-data_permission-FLD-REQ-resource_type
+  type: field_constraint
+  object: data_permission
+  subtype: required
+  field: resource_type
+  source: schema:data_permission.yaml:fields[resource_type].required
+  derived_scenarios:
+  - id: T_DATA_PERMISSION_FLD_REQ_RESOURCE_TYPE_001
+    title: 字段 resource_type 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-data_permission-FLD-REQ-resource_type'',
+      { field: ''resource_type'', value: null, expected: ''error'' })'
+- id: BR-data_permission-FLD-REQ-resource_id
+  type: field_constraint
+  object: data_permission
+  subtype: required
+  field: resource_id
+  source: schema:data_permission.yaml:fields[resource_id].required
+  derived_scenarios:
+  - id: T_DATA_PERMISSION_FLD_REQ_RESOURCE_ID_001
+    title: 字段 resource_id 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-data_permission-FLD-REQ-resource_id'',
+      { field: ''resource_id'', value: null, expected: ''error'' })'
+- id: BR-data_permission-FLD-REQ-permission_level
+  type: field_constraint
+  object: data_permission
+  subtype: required
+  field: permission_level
+  source: schema:data_permission.yaml:fields[permission_level].required
+  derived_scenarios:
+  - id: T_DATA_PERMISSION_FLD_REQ_PERMISSION_LEVEL_001
+    title: 字段 permission_level 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-data_permission-FLD-REQ-permission_level'',
+      { field: ''permission_level'', value: null, expected: ''error'' })'

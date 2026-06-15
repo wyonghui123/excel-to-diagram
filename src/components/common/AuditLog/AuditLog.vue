@@ -80,7 +80,7 @@
           <div class="al-group-header" @click="toggleGroup(group.key)">
             <div class="al-group-main">
               <span class="al-group-time">{{ formatTime(group.timestamp) }}</span>
-              <span class="al-group-user">{{ group.user_name || '-' }}</span>
+              <span class="al-group-user">{{ formatUserName(group.user_name) }}</span>
               <span
                 class="al-group-action"
                 :class="'al-action--' + (group.primaryAction || 'unknown').toLowerCase()"
@@ -208,6 +208,7 @@ import { computed, ref, watch } from 'vue'
 import AppButton from '@/components/common/AppButton/AppButton.vue'
 import AppCollapse from '@/components/common/AppCollapse/AppCollapse.vue'
 import { dateFormatService } from '@/services/DateFormatService'
+import { getActionLabel, getUserNameDisplay, isInternalField, isInternalAction } from '@/utils/auditLogFormat'
 
 const props = defineProps({
   logs: {
@@ -299,6 +300,13 @@ const filteredFieldOptions = computed(() => {
 const filteredLogs = computed(() => {
   if (!Array.isArray(props.logs)) return []
   let result = props.logs
+
+  // [FIX 2026-06-15 业务化审查] 业务视图: 默认隐藏 _record 内部聚合字段
+  // _record 是 cud 操作的聚合 summary, 业务上 group header 已经表明 (创建/更新/删除)
+  // 显示出来会让业务人员困惑 "(空) -> DELETE" 是啥意思
+  // 同时也隐藏其他内部技术字段 (extra_data, cascade_root_id 等)
+  // 同时也隐藏内部技术 action (性能监控/审计系统/未知)
+  result = result.filter(item => !isInternalField(item.field_name) && !isInternalAction(item.action))
 
   if (activeFilter.value) {
     if (activeFilter.value === 'ASSOCIATE') {
@@ -507,19 +515,13 @@ function formatTime(time) {
 }
 
 function formatAction(action) {
-  const actionMap = {
-    'CREATE': '创建',
-    'UPDATE': '更新',
-    'DELETE': '删除',
-    'LOGIN': '登录',
-    'LOGOUT': '登出',
-    'ASSOCIATE': '添加关联',
-    'DISSOCIATE': '移除关联',
-    'ASSIGN': '分配',
-    'REVOKE': '撤销'
-  }
-  if (!action) return '未知'
-  return actionMap[action] || '未知'
+  // [FIX 2026-06-15 业务化审查] 用统一工具函数覆盖全部 action, 避免 "未知"
+  return getActionLabel(action)
+}
+
+function formatUserName(userName) {
+  // [FIX 2026-06-15 业务化审查] "system" -> "系统", "[REDACTED]" -> "已脱敏"
+  return getUserNameDisplay(userName)
 }
 
 function parseTargetDisplay(raw) {

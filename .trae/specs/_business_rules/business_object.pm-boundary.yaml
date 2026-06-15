@@ -1,0 +1,32 @@
+object: business_object
+source: pm_boundary
+total_rules: 2
+rules:
+- id: BR-business_object-PM-name-unique-in-same-sm
+  type: pm_boundary
+  subtype: business
+  object: business_object
+  title: 同服务模块下 name 唯一
+  severity: error
+  priority: P0
+  source: pm:boundary:name-unique-in-same-sm
+  derived_scenarios:
+  - id: T_BUSINESS_OBJECT_PM_NAME-UNIQUE-IN-SAME-SM_001
+    title: 同服务模块下 name 唯一
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-PM-name-unique-in-same-sm'',
+      { trigger: ''pm.boundary'' })'
+- id: BR-business_object-PM-max-children-100
+  type: pm_boundary
+  subtype: business
+  object: business_object
+  title: 业务对象最多 100 个关系
+  severity: warning
+  priority: P2
+  source: pm:boundary:max-children-100
+  derived_scenarios:
+  - id: T_BUSINESS_OBJECT_PM_MAX-CHILDREN-100_001
+    title: 业务对象最多 100 个关系
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-business_object-PM-max-children-100'',
+      { trigger: ''pm.boundary'' })'

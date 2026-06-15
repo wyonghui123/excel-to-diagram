@@ -1,0 +1,131 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://trae.local/schemas/business-flow.schema.json",
+  "title": "Business Flow YAML",
+  "description": "AI 生成 + PM review 的业务流测试规约,作为 Planner → Generator 的中间产物",
+  "type": "object",
+  "required": [
+    "review_status",
+    "agent_draft",
+    "actor",
+    "goal",
+    "tasks",
+    "questions"
+  ],
+  "properties": {
+    "review_status": {
+      "type": "string",
+      "enum": ["draft", "reviewed", "approved"],
+      "description": "PM/BA review 状态;Generator 只接受 reviewed 或 approved"
+    },
+    "agent_draft": {
+      "type": "boolean",
+      "description": "true 表示由 AI 起草,需 PM 人工 review"
+    },
+    "generated_by": {
+      "type": "string",
+      "description": "生成该 YAML 的 Skill 名称"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "actor": {
+      "type": "string",
+      "description": "执行该业务流的用户角色,如 Admin / BusinessAnalyst / Readonly",
+      "enum": ["Admin", "Readonly", "BusinessAnalyst", "DataSteward"]
+    },
+    "goal": {
+      "type": "string",
+      "minLength": 10,
+      "description": "业务流的目标(业务可读的一句话)"
+    },
+    "preconditions": {
+      "type": "array",
+      "description": "前置条件(数据/权限/状态)",
+      "items": {
+        "type": "string"
+      }
+    },
+    "tasks": {
+      "type": "array",
+      "minItems": 1,
+      "description": "业务原子动作(非 UI 操作),Generator 据此生成 Screenplay Task",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "class"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^T_[A-Z_]+_[0-9]+$"
+          },
+          "title": {
+            "type": "string"
+          },
+          "class": {
+            "type": "string",
+            "description": "Screenplay Task 类名,如 CreateBusinessObjectWithKeyTemplate"
+          },
+          "params": {
+            "type": "object",
+            "description": "Task 参数"
+          },
+          "priority": {
+            "type": "string",
+            "enum": ["P0", "P1", "P2"]
+          }
+        }
+      }
+    },
+    "questions": {
+      "type": "array",
+      "minItems": 1,
+      "description": "业务断言(非 DOM 断言),Generator 据此生成 BusinessRuleAssertor",
+      "items": {
+        "type": "object",
+        "required": ["ruleId"],
+        "properties": {
+          "ruleId": {
+            "type": "string",
+            "pattern": "^BR-[a-z_-]+-[A-Z_]+$"
+          },
+          "description": {
+            "type": "string"
+          },
+          "expected": {
+            "type": ["string", "boolean", "number", "object"]
+          },
+          "context": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "data_tables": {
+      "type": "array",
+      "description": "测试数据表",
+      "items": {
+        "type": "object"
+      }
+    },
+    "cleanup": {
+      "type": "object",
+      "description": "清理策略",
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "enum": ["auto", "manual", "none"]
+        },
+        "tables": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "description": "元数据(追踪用)"
+    }
+  },
+  "additionalProperties": true
+}

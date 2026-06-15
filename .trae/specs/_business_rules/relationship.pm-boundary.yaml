@@ -1,0 +1,46 @@
+object: relationship
+source: pm_boundary
+total_rules: 3
+rules:
+- id: BR-relationship-PM-no-self-loop
+  type: pm_boundary
+  subtype: business
+  object: relationship
+  title: 不允许 source == target(自环)
+  severity: error
+  priority: P0
+  source: pm:boundary:no-self-loop
+  derived_scenarios:
+  - id: T_RELATIONSHIP_PM_NO-SELF-LOOP_001
+    title: 不允许 source == target(自环)
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-PM-no-self-loop'',
+      { trigger: ''pm.boundary'' })'
+- id: BR-relationship-PM-max-depth-5
+  type: pm_boundary
+  subtype: business
+  object: relationship
+  title: 关系链深度不超过 5 层
+  severity: error
+  priority: P1
+  source: pm:boundary:max-depth-5
+  derived_scenarios:
+  - id: T_RELATIONSHIP_PM_MAX-DEPTH-5_001
+    title: 关系链深度不超过 5 层
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-PM-max-depth-5'',
+      { trigger: ''pm.boundary'' })'
+- id: BR-relationship-PM-cycle-detect
+  type: pm_boundary
+  subtype: business
+  object: relationship
+  title: 不允许关系环(A→B→C→A)
+  severity: error
+  priority: P0
+  source: pm:boundary:cycle-detect
+  derived_scenarios:
+  - id: T_RELATIONSHIP_PM_CYCLE-DETECT_001
+    title: 不允许关系环(A→B→C→A)
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-relationship-PM-cycle-detect'',
+      { trigger: ''pm.boundary'' })'

@@ -1,0 +1,40 @@
+schema: role_data_permission
+name: 角色数据权限
+total_rules: 3
+rules:
+- id: BR-role_data_permission-FLD-REQ-role_id
+  type: field_constraint
+  object: role_data_permission
+  subtype: required
+  field: role_id
+  source: schema:role_data_permission.yaml:fields[role_id].required
+  derived_scenarios:
+  - id: T_ROLE_DATA_PERMISSION_FLD_REQ_ROLE_ID_001
+    title: 字段 role_id 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-role_data_permission-FLD-REQ-role_id'',
+      { field: ''role_id'', value: null, expected: ''error'' })'
+- id: BR-role_data_permission-FLD-REQ-resource_type
+  type: field_constraint
+  object: role_data_permission
+  subtype: required
+  field: resource_type
+  source: schema:role_data_permission.yaml:fields[resource_type].required
+  derived_scenarios:
+  - id: T_ROLE_DATA_PERMISSION_FLD_REQ_RESOURCE_TYPE_001
+    title: 字段 resource_type 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-role_data_permission-FLD-REQ-resource_type'',
+      { field: ''resource_type'', value: null, expected: ''error'' })'
+- id: BR-role_data_permission-FLD-REQ-resource_id
+  type: field_constraint
+  object: role_data_permission
+  subtype: required
+  field: resource_id
+  source: schema:role_data_permission.yaml:fields[resource_id].required
+  derived_scenarios:
+  - id: T_ROLE_DATA_PERMISSION_FLD_REQ_RESOURCE_ID_001
+    title: 字段 resource_id 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-role_data_permission-FLD-REQ-resource_id'',
+      { field: ''resource_id'', value: null, expected: ''error'' })'

@@ -1,0 +1,203 @@
+schema: enum_value
+name: 枚举值
+total_rules: 15
+rules:
+- id: BR-enum_value-ASPECT-audit
+  type: aspect
+  object: enum_value
+  aspect: audit_aspect
+  source: schema:enum_value.yaml:aspects[audit_aspect]
+  derived_scenarios:
+  - id: T_ENUM_VALUE_ASPECT_AUDIT_ASPECT_001
+    title: audit_aspect 切面应正确触发
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_value-ASPECT-audit_aspect'',
+      { objectId: ..., aspectFired: true })'
+- id: BR-enum_value-VAL-enum-type-id-required
+  type: validations
+  object: enum_value
+  subtype: field
+  rule: enum_type_id is not None and enum_type_id != ''
+  message: 枚举类型不能为空
+  severity: error
+  source: schema:enum_value.yaml:validations[enum_type_id_required]
+  derived_scenarios:
+  - id: T_ENUM_VALUE_VAL_ENUM_TYPE_ID_REQUIRED_001
+    title: '校验: 枚举类型必填 应拒绝无效输入'
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_value-VAL-enum_type_id_required'',
+      { invalid: true, expected: ''error'' })'
+- id: BR-enum_value-VAL-code-required
+  type: validations
+  object: enum_value
+  subtype: field
+  rule: code is not None and code != ''
+  message: 编码不能为空
+  severity: error
+  source: schema:enum_value.yaml:validations[code_required]
+  derived_scenarios:
+  - id: T_ENUM_VALUE_VAL_CODE_REQUIRED_001
+    title: '校验: 编码必填 应拒绝无效输入'
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_value-VAL-code_required'',
+      { invalid: true, expected: ''error'' })'
+- id: BR-enum_value-VAL-name-required
+  type: validations
+  object: enum_value
+  subtype: field
+  rule: name is not None and name != ''
+  message: 名称不能为空
+  severity: error
+  source: schema:enum_value.yaml:validations[name_required]
+  derived_scenarios:
+  - id: T_ENUM_VALUE_VAL_NAME_REQUIRED_001
+    title: '校验: 名称必填 应拒绝无效输入'
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_value-VAL-name_required'',
+      { invalid: true, expected: ''error'' })'
+- id: BR-enum_value-VAL-unique-code-per-type
+  type: validations
+  object: enum_value
+  subtype: constraint
+  rule: UNIQUE(enum_type_id, code)
+  message: 同一枚举类型下编码不能重复
+  severity: error
+  source: schema:enum_value.yaml:validations[unique_code_per_type]
+  derived_scenarios:
+  - id: T_ENUM_VALUE_VAL_UNIQUE_CODE_PER_TYPE_001
+    title: '校验: 编码唯一性 应拒绝无效输入'
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_value-VAL-unique_code_per_type'',
+      { invalid: true, expected: ''error'' })'
+- id: BR-enum_value-IE-import
+  type: import_export
+  object: enum_value
+  subtype: import
+  conflict_strategy: upsert
+  conflict_key: enum_type_id,code
+  cascade: false
+  source: schema:enum_value.yaml:import_export.import_enabled
+  derived_scenarios:
+  - id: T_ENUM_VALUE_IE_IMP_001
+    title: 导入应使用 upsert 策略处理冲突
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_value-IE-import'', { strategy:
+      ''upsert'', conflictKey: ''enum_type_id,code'' })'
+- id: BR-enum_value-IE-export
+  type: import_export
+  object: enum_value
+  subtype: export
+  cascade: false
+  source: schema:enum_value.yaml:import_export.export_enabled
+  derived_scenarios:
+  - id: T_ENUM_VALUE_IE_EXP_001
+    title: 导出应不级联包含子对象
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_value-IE-export'', { cascade:
+      False })'
+- id: BR-enum_value-FLD-REQ-enum_type_id
+  type: field_constraint
+  object: enum_value
+  subtype: required
+  field: enum_type_id
+  source: schema:enum_value.yaml:fields[enum_type_id].required
+  derived_scenarios:
+  - id: T_ENUM_VALUE_FLD_REQ_ENUM_TYPE_ID_001
+    title: 字段 enum_type_id 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_value-FLD-REQ-enum_type_id'',
+      { field: ''enum_type_id'', value: null, expected: ''error'' })'
+- id: BR-enum_value-FLD-REQ-code
+  type: field_constraint
+  object: enum_value
+  subtype: required
+  field: code
+  source: schema:enum_value.yaml:fields[code].required
+  derived_scenarios:
+  - id: T_ENUM_VALUE_FLD_REQ_CODE_001
+    title: 字段 code 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_value-FLD-REQ-code'', {
+      field: ''code'', value: null, expected: ''error'' })'
+- id: BR-enum_value-FLD-PAT-code
+  type: field_constraint
+  object: enum_value
+  subtype: pattern
+  field: code
+  pattern: ^[A-Z][A-Z0-9_]*$
+  source: schema:enum_value.yaml:fields[code].semantics.pattern
+  derived_scenarios:
+  - id: T_ENUM_VALUE_FLD_PAT_CODE_001
+    title: 字段 code 应匹配模式 ^[A-Z][A-Z0-9_]*$
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_value-FLD-PAT-code'', {
+      field: ''code'', pattern: ''^[A-Z][A-Z0-9_]*$'' })'
+- id: BR-enum_value-FLD-IMM-code
+  type: field_constraint
+  object: enum_value
+  subtype: immutable
+  field: code
+  source: schema:enum_value.yaml:fields[code].semantics.immutable
+  derived_scenarios:
+  - id: T_ENUM_VALUE_FLD_IMM_CODE_001
+    title: 字段 code 不可变,修改应拒绝
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_value-FLD-IMM-code'', {
+      field: ''code'', value: ''new'', expected: ''error'' })'
+- id: BR-enum_value-FLD-REQ-name
+  type: field_constraint
+  object: enum_value
+  subtype: required
+  field: name
+  source: schema:enum_value.yaml:fields[name].required
+  derived_scenarios:
+  - id: T_ENUM_VALUE_FLD_REQ_NAME_001
+    title: 字段 name 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_value-FLD-REQ-name'', {
+      field: ''name'', value: null, expected: ''error'' })'
+- id: BR-enum_value-FLD-ENUM-is_active
+  type: field_constraint
+  object: enum_value
+  subtype: enum
+  field: is_active
+  allowed_values:
+  - true
+  - false
+  default: true
+  source: schema:enum_value.yaml:fields[is_active].enum_values
+  derived_scenarios:
+  - id: T_ENUM_VALUE_FLD_ENUM_IS_ACTIVE_001
+    title: 字段 is_active 应在枚举值中,无效值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_value-FLD-ENUM-is_active'',
+      { field: ''is_active'', allowed: [True, False] })'
+- id: BR-enum_value-FLD-ENUM-is_system
+  type: field_constraint
+  object: enum_value
+  subtype: enum
+  field: is_system
+  allowed_values:
+  - true
+  - false
+  default: false
+  source: schema:enum_value.yaml:fields[is_system].enum_values
+  derived_scenarios:
+  - id: T_ENUM_VALUE_FLD_ENUM_IS_SYSTEM_001
+    title: 字段 is_system 应在枚举值中,无效值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_value-FLD-ENUM-is_system'',
+      { field: ''is_system'', allowed: [True, False] })'
+- id: BR-enum_value-REL-enum-value-to-type
+  type: relation
+  object: enum_value
+  subtype: parent_child
+  target: enum_type
+  cardinality: N:1
+  source: schema:enum_value.yaml:relations[enum_value_to_type]
+  derived_scenarios:
+  - id: T_ENUM_VALUE_REL_ENUM_VALUE_TO_TYPE_001
+    title: 删除父对象应处理子对象 (cardinality=N:1)
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_value-REL-enum_value_to_type'',
+      { parentId: ..., childrenCount: ... })'

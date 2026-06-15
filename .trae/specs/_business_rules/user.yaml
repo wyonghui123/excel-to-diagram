@@ -1,0 +1,246 @@
+schema: user
+name: 用户
+total_rules: 16
+rules:
+- id: BR-user-AUDIT-create
+  type: audit
+  object: user
+  subtype: audit_create
+  fields: all
+  source: schema:user.yaml:audit.create
+  derived_scenarios:
+  - id: T_USER_AUDIT_CREATE_001
+    title: create 操作应记录 audit_log
+    priority: P1
+    operation: create
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-AUDIT-create'', { operation:
+      ''create'', auditLog: true })'
+- id: BR-user-AUDIT-update
+  type: audit
+  object: user
+  subtype: audit_update
+  fields: changed_only
+  source: schema:user.yaml:audit.update
+  derived_scenarios:
+  - id: T_USER_AUDIT_UPDATE_001
+    title: update 操作应记录 audit_log
+    priority: P1
+    operation: update
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-AUDIT-update'', { operation:
+      ''update'', auditLog: true })'
+- id: BR-user-AUDIT-delete
+  type: audit
+  object: user
+  subtype: audit_delete
+  fields: business_only
+  source: schema:user.yaml:audit.delete
+  derived_scenarios:
+  - id: T_USER_AUDIT_DELETE_001
+    title: delete 操作应记录 audit_log
+    priority: P0
+    operation: delete
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-AUDIT-delete'', { operation:
+      ''delete'', auditLog: true })'
+- id: BR-user-ASPECT-audit
+  type: aspect
+  object: user
+  aspect: audit_aspect
+  source: schema:user.yaml:aspects[audit_aspect]
+  derived_scenarios:
+  - id: T_USER_ASPECT_AUDIT_ASPECT_001
+    title: audit_aspect 切面应正确触发
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-ASPECT-audit_aspect'', {
+      objectId: ..., aspectFired: true })'
+- id: BR-user-STATE-activate-user
+  type: rules
+  object: user
+  subtype: state_transition
+  state_field: status
+  from_states:
+  - inactive
+  - locked
+  to_state: active
+  triggers:
+  - before_update
+  source: schema:user.yaml:rules[activate_user]
+  derived_scenarios:
+  - id: T_USER_STATE_ACTIVATE_USER_001
+    title: '状态转换: 激活用户'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-STATE-activate_user'', {
+      from: ''[''inactive'', ''locked'']'', to: ''active'' })'
+- id: BR-user-STATE-lock-user
+  type: rules
+  object: user
+  subtype: state_transition
+  state_field: status
+  from_states:
+  - active
+  - inactive
+  to_state: locked
+  triggers:
+  - before_update
+  source: schema:user.yaml:rules[lock_user]
+  derived_scenarios:
+  - id: T_USER_STATE_LOCK_USER_001
+    title: '状态转换: 锁定用户'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-STATE-lock_user'', { from:
+      ''[''active'', ''inactive'']'', to: ''locked'' })'
+- id: BR-user-STATE-deactivate-user
+  type: rules
+  object: user
+  subtype: state_transition
+  state_field: status
+  from_states:
+  - active
+  - locked
+  to_state: inactive
+  triggers:
+  - before_update
+  source: schema:user.yaml:rules[deactivate_user]
+  derived_scenarios:
+  - id: T_USER_STATE_DEACTIVATE_USER_001
+    title: '状态转换: 停用用户'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-STATE-deactivate_user'',
+      { from: ''[''active'', ''locked'']'', to: ''inactive'' })'
+- id: BR-user-IE-import
+  type: import_export
+  object: user
+  subtype: import
+  conflict_strategy: upsert
+  conflict_key: username
+  cascade: false
+  source: schema:user.yaml:import_export.import_enabled
+  derived_scenarios:
+  - id: T_USER_IE_IMP_001
+    title: 导入应使用 upsert 策略处理冲突
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-IE-import'', { strategy:
+      ''upsert'', conflictKey: ''username'' })'
+- id: BR-user-IE-export
+  type: import_export
+  object: user
+  subtype: export
+  cascade: false
+  source: schema:user.yaml:import_export.export_enabled
+  derived_scenarios:
+  - id: T_USER_IE_EXP_001
+    title: 导出应不级联包含子对象
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-IE-export'', { cascade:
+      False })'
+- id: BR-user-FLD-REQ-username
+  type: field_constraint
+  object: user
+  subtype: required
+  field: username
+  source: schema:user.yaml:fields[username].required
+  derived_scenarios:
+  - id: T_USER_FLD_REQ_USERNAME_001
+    title: 字段 username 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-FLD-REQ-username'', { field:
+      ''username'', value: null, expected: ''error'' })'
+- id: BR-user-FLD-UNQ-username
+  type: field_constraint
+  object: user
+  subtype: unique
+  field: username
+  source: schema:user.yaml:fields[username].unique
+  derived_scenarios:
+  - id: T_USER_FLD_UNQ_USERNAME_001
+    title: 字段 username 唯一,重复值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-FLD-UNQ-username'', { field:
+      ''username'', value: ''existing'', expected: ''error'' })'
+- id: BR-user-FLD-ENUM-status
+  type: field_constraint
+  object: user
+  subtype: enum
+  field: status
+  allowed_values:
+  - active
+  - inactive
+  - locked
+  default: active
+  source: schema:user.yaml:fields[status].enum_values
+  derived_scenarios:
+  - id: T_USER_FLD_ENUM_STATUS_001
+    title: 字段 status 应在枚举值中,无效值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-FLD-ENUM-status'', { field:
+      ''status'', allowed: [''active'', ''inactive'', ''locked''] })'
+- id: BR-user-FLD-ENUM-locale
+  type: field_constraint
+  object: user
+  subtype: enum
+  field: locale
+  allowed_values:
+  - zh-CN
+  - en-US
+  - en-GB
+  default: zh-CN
+  source: schema:user.yaml:fields[locale].enum_values
+  derived_scenarios:
+  - id: T_USER_FLD_ENUM_LOCALE_001
+    title: 字段 locale 应在枚举值中,无效值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-FLD-ENUM-locale'', { field:
+      ''locale'', allowed: [''zh-CN'', ''en-US'', ''en-GB''] })'
+- id: BR-user-FLD-ENUM-date_style
+  type: field_constraint
+  object: user
+  subtype: enum
+  field: date_style
+  allowed_values:
+  - full
+  - long
+  - medium
+  - short
+  default: medium
+  source: schema:user.yaml:fields[date_style].enum_values
+  derived_scenarios:
+  - id: T_USER_FLD_ENUM_DATE_STYLE_001
+    title: 字段 date_style 应在枚举值中,无效值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-FLD-ENUM-date_style'', {
+      field: ''date_style'', allowed: [''full'', ''long'', ''medium'', ''short'']
+      })'
+- id: BR-user-FLD-ENUM-time_style
+  type: field_constraint
+  object: user
+  subtype: enum
+  field: time_style
+  allowed_values:
+  - full
+  - long
+  - medium
+  - short
+  default: short
+  source: schema:user.yaml:fields[time_style].enum_values
+  derived_scenarios:
+  - id: T_USER_FLD_ENUM_TIME_STYLE_001
+    title: 字段 time_style 应在枚举值中,无效值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-FLD-ENUM-time_style'', {
+      field: ''time_style'', allowed: [''full'', ''long'', ''medium'', ''short'']
+      })'
+- id: BR-user-FLD-ENUM-hour_cycle
+  type: field_constraint
+  object: user
+  subtype: enum
+  field: hour_cycle
+  allowed_values:
+  - 12
+  - 24
+  default: 24
+  source: schema:user.yaml:fields[hour_cycle].enum_values
+  derived_scenarios:
+  - id: T_USER_FLD_ENUM_HOUR_CYCLE_001
+    title: 字段 hour_cycle 应在枚举值中,无效值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-FLD-ENUM-hour_cycle'', {
+      field: ''hour_cycle'', allowed: [12, 24] })'

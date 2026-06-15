@@ -1,0 +1,184 @@
+object: permission
+source: service_layer
+total_rules: 15
+rules:
+- id: BR-permission-SRV-RETURN-FALSE-field_permission_checker-88
+  type: service_logic
+  subtype: return_false
+  object: permission
+  source: service:field_permission_checker.py:L88
+  code_snippet: return False
+  derived_scenarios:
+  - id: T_PERMISSION_SRV_RETURN_FALSE_88_001
+    title: '服务层: return False'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-permission-SRV-RETURN-FALSE-field_permission_checker-88'',
+      { trigger: ''service.return_false'' })'
+- id: BR-permission-SRV-RETURN-FALSE-field_permission_checker-91
+  type: service_logic
+  subtype: return_false
+  object: permission
+  source: service:field_permission_checker.py:L91
+  code_snippet: return False
+  derived_scenarios:
+  - id: T_PERMISSION_SRV_RETURN_FALSE_91_001
+    title: '服务层: return False'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-permission-SRV-RETURN-FALSE-field_permission_checker-91'',
+      { trigger: ''service.return_false'' })'
+- id: BR-permission-SRV-RETURN-FALSE-field_permission_checker-101
+  type: service_logic
+  subtype: return_false
+  object: permission
+  source: service:field_permission_checker.py:L101
+  code_snippet: return False
+  derived_scenarios:
+  - id: T_PERMISSION_SRV_RETURN_FALSE_101_001
+    title: '服务层: return False'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-permission-SRV-RETURN-FALSE-field_permission_checker-101'',
+      { trigger: ''service.return_false'' })'
+- id: BR-permission-SRV-RETURN-FALSE-field_permission_checker-104
+  type: service_logic
+  subtype: return_false
+  object: permission
+  source: service:field_permission_checker.py:L104
+  code_snippet: return False
+  derived_scenarios:
+  - id: T_PERMISSION_SRV_RETURN_FALSE_104_001
+    title: '服务层: return False'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-permission-SRV-RETURN-FALSE-field_permission_checker-104'',
+      { trigger: ''service.return_false'' })'
+- id: BR-permission-SRV-RETURN-FALSE-data_permission_interceptor-96
+  type: service_logic
+  subtype: return_false
+  object: permission
+  source: service:data_permission_interceptor.py:L96
+  code_snippet: return False
+  derived_scenarios:
+  - id: T_PERMISSION_SRV_RETURN_FALSE_96_001
+    title: '服务层: return False'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-permission-SRV-RETURN-FALSE-data_permission_interceptor-96'',
+      { trigger: ''service.return_false'' })'
+- id: BR-permission-SRV-RETURN-FALSE-data_permission_interceptor-101
+  type: service_logic
+  subtype: return_false
+  object: permission
+  source: service:data_permission_interceptor.py:L101
+  code_snippet: return False
+  derived_scenarios:
+  - id: T_PERMISSION_SRV_RETURN_FALSE_101_001
+    title: '服务层: return False'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-permission-SRV-RETURN-FALSE-data_permission_interceptor-101'',
+      { trigger: ''service.return_false'' })'
+- id: BR-permission-SRV-RETURN-FALSE-data_permission_interceptor-115
+  type: service_logic
+  subtype: return_false
+  object: permission
+  source: service:data_permission_interceptor.py:L115
+  code_snippet: return False
+  derived_scenarios:
+  - id: T_PERMISSION_SRV_RETURN_FALSE_115_001
+    title: '服务层: return False'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-permission-SRV-RETURN-FALSE-data_permission_interceptor-115'',
+      { trigger: ''service.return_false'' })'
+- id: BR-permission-SRV-RETURN-FALSE-data_permission_interceptor-118
+  type: service_logic
+  subtype: return_false
+  object: permission
+  source: service:data_permission_interceptor.py:L118
+  code_snippet: return False
+  derived_scenarios:
+  - id: T_PERMISSION_SRV_RETURN_FALSE_118_001
+    title: '服务层: return False'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-permission-SRV-RETURN-FALSE-data_permission_interceptor-118'',
+      { trigger: ''service.return_false'' })'
+- id: BR-permission-SRV-RETURN-FALSE-data_permission_interceptor-129
+  type: service_logic
+  subtype: return_false
+  object: permission
+  source: service:data_permission_interceptor.py:L129
+  code_snippet: 'return False  # 角色没有 dimension scope, 走原 scope filter'
+  derived_scenarios:
+  - id: T_PERMISSION_SRV_RETURN_FALSE_129_001
+    title: '服务层: return False  # 角色没有 dimension scope, 走原 scope filter'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-permission-SRV-RETURN-FALSE-data_permission_interceptor-129'',
+      { trigger: ''service.return_false'' })'
+- id: BR-permission-SRV-RETURN-FALSE-data_permission_interceptor-132
+  type: service_logic
+  subtype: return_false
+  object: permission
+  source: service:data_permission_interceptor.py:L132
+  code_snippet: return False
+  derived_scenarios:
+  - id: T_PERMISSION_SRV_RETURN_FALSE_132_001
+    title: '服务层: return False'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-permission-SRV-RETURN-FALSE-data_permission_interceptor-132'',
+      { trigger: ''service.return_false'' })'
+- id: BR-permission-SRV-RETURN-FALSE-data_permission_interceptor-198
+  type: service_logic
+  subtype: return_false
+  object: permission
+  source: service:data_permission_interceptor.py:L198
+  code_snippet: return False
+  derived_scenarios:
+  - id: T_PERMISSION_SRV_RETURN_FALSE_198_001
+    title: '服务层: return False'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-permission-SRV-RETURN-FALSE-data_permission_interceptor-198'',
+      { trigger: ''service.return_false'' })'
+- id: BR-permission-SRV-RETURN-FALSE-data_permission_interceptor-301
+  type: service_logic
+  subtype: return_false
+  object: permission
+  source: service:data_permission_interceptor.py:L301
+  code_snippet: return False
+  derived_scenarios:
+  - id: T_PERMISSION_SRV_RETURN_FALSE_301_001
+    title: '服务层: return False'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-permission-SRV-RETURN-FALSE-data_permission_interceptor-301'',
+      { trigger: ''service.return_false'' })'
+- id: BR-permission-SRV-GUARD-data_permission_interceptor-344
+  type: service_logic
+  subtype: guard
+  object: permission
+  source: service:data_permission_interceptor.py:L344
+  code_snippet: yaml_filter = _check_yaml_row_filter(
+  derived_scenarios:
+  - id: T_PERMISSION_SRV_GUARD_344_001
+    title: '服务层: yaml_filter = _check_yaml_row_filter('
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-permission-SRV-GUARD-data_permission_interceptor-344'',
+      { trigger: ''service.guard'' })'
+- id: BR-permission-SRV-RETURN-FALSE-data_permission_interceptor-594
+  type: service_logic
+  subtype: return_false
+  object: permission
+  source: service:data_permission_interceptor.py:L594
+  code_snippet: return False
+  derived_scenarios:
+  - id: T_PERMISSION_SRV_RETURN_FALSE_594_001
+    title: '服务层: return False'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-permission-SRV-RETURN-FALSE-data_permission_interceptor-594'',
+      { trigger: ''service.return_false'' })'
+- id: BR-permission-SRV-RETURN-FALSE-permission_interceptor-87
+  type: service_logic
+  subtype: return_false
+  object: permission
+  source: service:permission_interceptor.py:L87
+  code_snippet: return False
+  derived_scenarios:
+  - id: T_PERMISSION_SRV_RETURN_FALSE_87_001
+    title: '服务层: return False'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-permission-SRV-RETURN-FALSE-permission_interceptor-87'',
+      { trigger: ''service.return_false'' })'

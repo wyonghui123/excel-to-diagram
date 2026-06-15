@@ -1,0 +1,28 @@
+schema: user_group_member
+name: 用户组成员
+total_rules: 2
+rules:
+- id: BR-user_group_member-FLD-REQ-user_id
+  type: field_constraint
+  object: user_group_member
+  subtype: required
+  field: user_id
+  source: schema:user_group_member.yaml:fields[user_id].required
+  derived_scenarios:
+  - id: T_USER_GROUP_MEMBER_FLD_REQ_USER_ID_001
+    title: 字段 user_id 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user_group_member-FLD-REQ-user_id'',
+      { field: ''user_id'', value: null, expected: ''error'' })'
+- id: BR-user_group_member-FLD-REQ-group_id
+  type: field_constraint
+  object: user_group_member
+  subtype: required
+  field: group_id
+  source: schema:user_group_member.yaml:fields[group_id].required
+  derived_scenarios:
+  - id: T_USER_GROUP_MEMBER_FLD_REQ_GROUP_ID_001
+    title: 字段 group_id 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user_group_member-FLD-REQ-group_id'',
+      { field: ''group_id'', value: null, expected: ''error'' })'

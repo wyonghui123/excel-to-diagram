@@ -1,0 +1,16 @@
+object: version
+source: service_layer
+total_rules: 1
+rules:
+- id: BR-version-SRV-RETURN-FALSE-version_context_interceptor-37
+  type: service_logic
+  subtype: return_false
+  object: version
+  source: service:version_context_interceptor.py:L37
+  code_snippet: return False
+  derived_scenarios:
+  - id: T_VERSION_SRV_RETURN_FALSE_37_001
+    title: '服务层: return False'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-version-SRV-RETURN-FALSE-version_context_interceptor-37'',
+      { trigger: ''service.return_false'' })'

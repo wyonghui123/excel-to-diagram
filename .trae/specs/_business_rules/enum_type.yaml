@@ -1,0 +1,166 @@
+schema: enum_type
+name: 枚举类型
+total_rules: 12
+rules:
+- id: BR-enum_type-ASPECT-audit
+  type: aspect
+  object: enum_type
+  aspect: audit_aspect
+  source: schema:enum_type.yaml:aspects[audit_aspect]
+  derived_scenarios:
+  - id: T_ENUM_TYPE_ASPECT_AUDIT_ASPECT_001
+    title: audit_aspect 切面应正确触发
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-ASPECT-audit_aspect'',
+      { objectId: ..., aspectFired: true })'
+- id: BR-enum_type-VAL-id-required
+  type: validations
+  object: enum_type
+  subtype: field
+  rule: id is not None and id != ''
+  message: 编码不能为空
+  severity: error
+  source: schema:enum_type.yaml:validations[id_required]
+  derived_scenarios:
+  - id: T_ENUM_TYPE_VAL_ID_REQUIRED_001
+    title: '校验: 编码必填 应拒绝无效输入'
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-VAL-id_required'',
+      { invalid: true, expected: ''error'' })'
+- id: BR-enum_type-VAL-name-required
+  type: validations
+  object: enum_type
+  subtype: field
+  rule: name is not None and name != ''
+  message: 名称不能为空
+  severity: error
+  source: schema:enum_type.yaml:validations[name_required]
+  derived_scenarios:
+  - id: T_ENUM_TYPE_VAL_NAME_REQUIRED_001
+    title: '校验: 名称必填 应拒绝无效输入'
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-VAL-name_required'',
+      { invalid: true, expected: ''error'' })'
+- id: BR-enum_type-VAL-category-required
+  type: validations
+  object: enum_type
+  subtype: field
+  rule: category is not None and category != ''
+  message: 分类不能为空
+  severity: error
+  source: schema:enum_type.yaml:validations[category_required]
+  derived_scenarios:
+  - id: T_ENUM_TYPE_VAL_CATEGORY_REQUIRED_001
+    title: '校验: 分类必填 应拒绝无效输入'
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-VAL-category_required'',
+      { invalid: true, expected: ''error'' })'
+- id: BR-enum_type-VAL-mutability-required
+  type: validations
+  object: enum_type
+  subtype: field
+  rule: mutability is not None and mutability != ''
+  message: 可维护性不能为空
+  severity: error
+  source: schema:enum_type.yaml:validations[mutability_required]
+  derived_scenarios:
+  - id: T_ENUM_TYPE_VAL_MUTABILITY_REQUIRED_001
+    title: '校验: 可维护性必填 应拒绝无效输入'
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-VAL-mutability_required'',
+      { invalid: true, expected: ''error'' })'
+- id: BR-enum_type-IE-export
+  type: import_export
+  object: enum_type
+  subtype: export
+  cascade: true
+  source: schema:enum_type.yaml:import_export.export_enabled
+  derived_scenarios:
+  - id: T_ENUM_TYPE_IE_EXP_001
+    title: 导出应级联包含子对象
+    priority: P2
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-IE-export'', { cascade:
+      True })'
+- id: BR-enum_type-FLD-REQ-name
+  type: field_constraint
+  object: enum_type
+  subtype: required
+  field: name
+  source: schema:enum_type.yaml:fields[name].required
+  derived_scenarios:
+  - id: T_ENUM_TYPE_FLD_REQ_NAME_001
+    title: 字段 name 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-FLD-REQ-name'', { field:
+      ''name'', value: null, expected: ''error'' })'
+- id: BR-enum_type-FLD-REQ-category
+  type: field_constraint
+  object: enum_type
+  subtype: required
+  field: category
+  source: schema:enum_type.yaml:fields[category].required
+  derived_scenarios:
+  - id: T_ENUM_TYPE_FLD_REQ_CATEGORY_001
+    title: 字段 category 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-FLD-REQ-category'',
+      { field: ''category'', value: null, expected: ''error'' })'
+- id: BR-enum_type-FLD-ENUM-category
+  type: field_constraint
+  object: enum_type
+  subtype: enum
+  field: category
+  allowed_values:
+  - system
+  - business
+  default: null
+  source: schema:enum_type.yaml:fields[category].enum_values
+  derived_scenarios:
+  - id: T_ENUM_TYPE_FLD_ENUM_CATEGORY_001
+    title: 字段 category 应在枚举值中,无效值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-FLD-ENUM-category'',
+      { field: ''category'', allowed: [''system'', ''business''] })'
+- id: BR-enum_type-FLD-REQ-mutability
+  type: field_constraint
+  object: enum_type
+  subtype: required
+  field: mutability
+  source: schema:enum_type.yaml:fields[mutability].required
+  derived_scenarios:
+  - id: T_ENUM_TYPE_FLD_REQ_MUTABILITY_001
+    title: 字段 mutability 必填,空值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-FLD-REQ-mutability'',
+      { field: ''mutability'', value: null, expected: ''error'' })'
+- id: BR-enum_type-FLD-ENUM-mutability
+  type: field_constraint
+  object: enum_type
+  subtype: enum
+  field: mutability
+  allowed_values:
+  - fullEditable
+  - extensible
+  - locked
+  default: null
+  source: schema:enum_type.yaml:fields[mutability].enum_values
+  derived_scenarios:
+  - id: T_ENUM_TYPE_FLD_ENUM_MUTABILITY_001
+    title: 字段 mutability 应在枚举值中,无效值应拒绝
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-FLD-ENUM-mutability'',
+      { field: ''mutability'', allowed: [''fullEditable'', ''extensible'', ''locked'']
+      })'
+- id: BR-enum_type-REL-enum-type-to-values
+  type: relation
+  object: enum_type
+  subtype: parent_child
+  target: enum_value
+  cardinality: 1:N
+  source: schema:enum_type.yaml:relations[enum_type_to_values]
+  derived_scenarios:
+  - id: T_ENUM_TYPE_REL_ENUM_TYPE_TO_VALUES_001
+    title: 删除父对象应处理子对象 (cardinality=1:N)
+    priority: P0
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-enum_type-REL-enum_type_to_values'',
+      { parentId: ..., childrenCount: ... })'

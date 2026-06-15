@@ -1,0 +1,386 @@
+object: user
+source: service_layer
+total_rules: 31
+rules:
+- id: BR-user-SRV-ASSERT-CHECK-audit_constants-191
+  type: service_logic
+  subtype: assert_check
+  object: user
+  source: service:audit_constants.py:L191
+  code_snippet: assert normalize_user_name("张三", "zhangsan") == "张三 (zhangsan)"
+  derived_scenarios:
+  - id: T_USER_SRV_ASSERT_CHECK_191_001
+    title: '服务层: assert normalize_user_name("张三", "zhangsan") == "张三 (zhangsan)"'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-ASSERT-CHECK-audit_constants-191'',
+      { trigger: ''service.assert_check'' })'
+- id: BR-user-SRV-ASSERT-CHECK-audit_constants-192
+  type: service_logic
+  subtype: assert_check
+  object: user
+  source: service:audit_constants.py:L192
+  code_snippet: assert normalize_user_name("zhangsan", "zhangsan") == "zhangsan"
+  derived_scenarios:
+  - id: T_USER_SRV_ASSERT_CHECK_192_001
+    title: '服务层: assert normalize_user_name("zhangsan", "zhangsan") == "zhangsan"'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-ASSERT-CHECK-audit_constants-192'',
+      { trigger: ''service.assert_check'' })'
+- id: BR-user-SRV-ASSERT-CHECK-audit_constants-193
+  type: service_logic
+  subtype: assert_check
+  object: user
+  source: service:audit_constants.py:L193
+  code_snippet: assert normalize_user_name("", "zhangsan") == "zhangsan"
+  derived_scenarios:
+  - id: T_USER_SRV_ASSERT_CHECK_193_001
+    title: '服务层: assert normalize_user_name("", "zhangsan") == "zhangsan"'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-ASSERT-CHECK-audit_constants-193'',
+      { trigger: ''service.assert_check'' })'
+- id: BR-user-SRV-ASSERT-CHECK-audit_constants-194
+  type: service_logic
+  subtype: assert_check
+  object: user
+  source: service:audit_constants.py:L194
+  code_snippet: assert normalize_user_name("张三", "") == "张三"
+  derived_scenarios:
+  - id: T_USER_SRV_ASSERT_CHECK_194_001
+    title: '服务层: assert normalize_user_name("张三", "") == "张三"'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-ASSERT-CHECK-audit_constants-194'',
+      { trigger: ''service.assert_check'' })'
+- id: BR-user-SRV-ASSERT-CHECK-audit_constants-195
+  type: service_logic
+  subtype: assert_check
+  object: user
+  source: service:audit_constants.py:L195
+  code_snippet: assert normalize_user_name("", "") == "anonymous"
+  derived_scenarios:
+  - id: T_USER_SRV_ASSERT_CHECK_195_001
+    title: '服务层: assert normalize_user_name("", "") == "anonymous"'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-ASSERT-CHECK-audit_constants-195'',
+      { trigger: ''service.assert_check'' })'
+- id: BR-user-SRV-ASSERT-CHECK-audit_constants-196
+  type: service_logic
+  subtype: assert_check
+  object: user
+  source: service:audit_constants.py:L196
+  code_snippet: assert normalize_user_name(None, None) == "anonymous"
+  derived_scenarios:
+  - id: T_USER_SRV_ASSERT_CHECK_196_001
+    title: '服务层: assert normalize_user_name(None, None) == "anonymous"'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-ASSERT-CHECK-audit_constants-196'',
+      { trigger: ''service.assert_check'' })'
+- id: BR-user-SRV-PERMISSION-CHECK-secure_admin-126
+  type: service_logic
+  subtype: permission_check
+  object: user
+  source: service:secure_admin.py:L126
+  code_snippet: self._check_permission(action, user)
+  derived_scenarios:
+  - id: T_USER_SRV_PERMISSION_CHECK_126_001
+    title: '服务层: self._check_permission(action, user)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-PERMISSION-CHECK-secure_admin-126'',
+      { trigger: ''service.permission_check'' })'
+- id: BR-user-SRV-GUARD-secure_admin-126
+  type: service_logic
+  subtype: guard
+  object: user
+  source: service:secure_admin.py:L126
+  code_snippet: self._check_permission(action, user)
+  derived_scenarios:
+  - id: T_USER_SRV_GUARD_126_001
+    title: '服务层: self._check_permission(action, user)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-GUARD-secure_admin-126'',
+      { trigger: ''service.guard'' })'
+- id: BR-user-SRV-PERMISSION-CHECK-secure_admin-159
+  type: service_logic
+  subtype: permission_check
+  object: user
+  source: service:secure_admin.py:L159
+  code_snippet: self._check_permission(action, user)
+  derived_scenarios:
+  - id: T_USER_SRV_PERMISSION_CHECK_159_001
+    title: '服务层: self._check_permission(action, user)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-PERMISSION-CHECK-secure_admin-159'',
+      { trigger: ''service.permission_check'' })'
+- id: BR-user-SRV-GUARD-secure_admin-159
+  type: service_logic
+  subtype: guard
+  object: user
+  source: service:secure_admin.py:L159
+  code_snippet: self._check_permission(action, user)
+  derived_scenarios:
+  - id: T_USER_SRV_GUARD_159_001
+    title: '服务层: self._check_permission(action, user)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-GUARD-secure_admin-159'',
+      { trigger: ''service.guard'' })'
+- id: BR-user-SRV-PERMISSION-CHECK-secure_admin-196
+  type: service_logic
+  subtype: permission_check
+  object: user
+  source: service:secure_admin.py:L196
+  code_snippet: self._check_permission(action, user)
+  derived_scenarios:
+  - id: T_USER_SRV_PERMISSION_CHECK_196_001
+    title: '服务层: self._check_permission(action, user)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-PERMISSION-CHECK-secure_admin-196'',
+      { trigger: ''service.permission_check'' })'
+- id: BR-user-SRV-GUARD-secure_admin-196
+  type: service_logic
+  subtype: guard
+  object: user
+  source: service:secure_admin.py:L196
+  code_snippet: self._check_permission(action, user)
+  derived_scenarios:
+  - id: T_USER_SRV_GUARD_196_001
+    title: '服务层: self._check_permission(action, user)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-GUARD-secure_admin-196'',
+      { trigger: ''service.guard'' })'
+- id: BR-user-SRV-PERMISSION-CHECK-secure_admin-238
+  type: service_logic
+  subtype: permission_check
+  object: user
+  source: service:secure_admin.py:L238
+  code_snippet: self._check_permission(action, user)
+  derived_scenarios:
+  - id: T_USER_SRV_PERMISSION_CHECK_238_001
+    title: '服务层: self._check_permission(action, user)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-PERMISSION-CHECK-secure_admin-238'',
+      { trigger: ''service.permission_check'' })'
+- id: BR-user-SRV-GUARD-secure_admin-238
+  type: service_logic
+  subtype: guard
+  object: user
+  source: service:secure_admin.py:L238
+  code_snippet: self._check_permission(action, user)
+  derived_scenarios:
+  - id: T_USER_SRV_GUARD_238_001
+    title: '服务层: self._check_permission(action, user)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-GUARD-secure_admin-238'',
+      { trigger: ''service.guard'' })'
+- id: BR-user-SRV-PERMISSION-CHECK-secure_admin-282
+  type: service_logic
+  subtype: permission_check
+  object: user
+  source: service:secure_admin.py:L282
+  code_snippet: self._check_permission(action, user)
+  derived_scenarios:
+  - id: T_USER_SRV_PERMISSION_CHECK_282_001
+    title: '服务层: self._check_permission(action, user)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-PERMISSION-CHECK-secure_admin-282'',
+      { trigger: ''service.permission_check'' })'
+- id: BR-user-SRV-GUARD-secure_admin-282
+  type: service_logic
+  subtype: guard
+  object: user
+  source: service:secure_admin.py:L282
+  code_snippet: self._check_permission(action, user)
+  derived_scenarios:
+  - id: T_USER_SRV_GUARD_282_001
+    title: '服务层: self._check_permission(action, user)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-GUARD-secure_admin-282'',
+      { trigger: ''service.guard'' })'
+- id: BR-user-SRV-PERMISSION-CHECK-secure_admin-316
+  type: service_logic
+  subtype: permission_check
+  object: user
+  source: service:secure_admin.py:L316
+  code_snippet: self._check_permission(action, user)
+  derived_scenarios:
+  - id: T_USER_SRV_PERMISSION_CHECK_316_001
+    title: '服务层: self._check_permission(action, user)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-PERMISSION-CHECK-secure_admin-316'',
+      { trigger: ''service.permission_check'' })'
+- id: BR-user-SRV-GUARD-secure_admin-316
+  type: service_logic
+  subtype: guard
+  object: user
+  source: service:secure_admin.py:L316
+  code_snippet: self._check_permission(action, user)
+  derived_scenarios:
+  - id: T_USER_SRV_GUARD_316_001
+    title: '服务层: self._check_permission(action, user)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-GUARD-secure_admin-316'',
+      { trigger: ''service.guard'' })'
+- id: BR-user-SRV-PERMISSION-CHECK-secure_admin-341
+  type: service_logic
+  subtype: permission_check
+  object: user
+  source: service:secure_admin.py:L341
+  code_snippet: self._check_permission(action, user)
+  derived_scenarios:
+  - id: T_USER_SRV_PERMISSION_CHECK_341_001
+    title: '服务层: self._check_permission(action, user)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-PERMISSION-CHECK-secure_admin-341'',
+      { trigger: ''service.permission_check'' })'
+- id: BR-user-SRV-GUARD-secure_admin-341
+  type: service_logic
+  subtype: guard
+  object: user
+  source: service:secure_admin.py:L341
+  code_snippet: self._check_permission(action, user)
+  derived_scenarios:
+  - id: T_USER_SRV_GUARD_341_001
+    title: '服务层: self._check_permission(action, user)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-GUARD-secure_admin-341'',
+      { trigger: ''service.guard'' })'
+- id: BR-user-SRV-PERMISSION-CHECK-secure_admin-379
+  type: service_logic
+  subtype: permission_check
+  object: user
+  source: service:secure_admin.py:L379
+  code_snippet: self._check_permission(action, user)
+  derived_scenarios:
+  - id: T_USER_SRV_PERMISSION_CHECK_379_001
+    title: '服务层: self._check_permission(action, user)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-PERMISSION-CHECK-secure_admin-379'',
+      { trigger: ''service.permission_check'' })'
+- id: BR-user-SRV-GUARD-secure_admin-379
+  type: service_logic
+  subtype: guard
+  object: user
+  source: service:secure_admin.py:L379
+  code_snippet: self._check_permission(action, user)
+  derived_scenarios:
+  - id: T_USER_SRV_GUARD_379_001
+    title: '服务层: self._check_permission(action, user)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-GUARD-secure_admin-379'',
+      { trigger: ''service.guard'' })'
+- id: BR-user-SRV-PERMISSION-CHECK-secure_admin-409
+  type: service_logic
+  subtype: permission_check
+  object: user
+  source: service:secure_admin.py:L409
+  code_snippet: 'def _check_permission(self, action: str, user: UserContext):'
+  derived_scenarios:
+  - id: T_USER_SRV_PERMISSION_CHECK_409_001
+    title: '服务层: def _check_permission(self, action: str, user: UserContext):'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-PERMISSION-CHECK-secure_admin-409'',
+      { trigger: ''service.permission_check'' })'
+- id: BR-user-SRV-GUARD-secure_admin-409
+  type: service_logic
+  subtype: guard
+  object: user
+  source: service:secure_admin.py:L409
+  code_snippet: 'def _check_permission(self, action: str, user: UserContext):'
+  derived_scenarios:
+  - id: T_USER_SRV_GUARD_409_001
+    title: '服务层: def _check_permission(self, action: str, user: UserContext):'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-GUARD-secure_admin-409'',
+      { trigger: ''service.guard'' })'
+- id: BR-user-SRV-GUARD-permission_interceptor-132
+  type: service_logic
+  subtype: guard
+  object: user
+  source: service:permission_interceptor.py:L132
+  code_snippet: self._check_parent_read_advisory(context, user_info)
+  derived_scenarios:
+  - id: T_USER_SRV_GUARD_132_001
+    title: '服务层: self._check_parent_read_advisory(context, user_info)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-GUARD-permission_interceptor-132'',
+      { trigger: ''service.guard'' })'
+- id: BR-user-SRV-GUARD-permission_interceptor-136
+  type: service_logic
+  subtype: guard
+  object: user
+  source: service:permission_interceptor.py:L136
+  code_snippet: self._check_chain_read(context, user_info, target_id=getattr(context,
+    'target_id', None))
+  derived_scenarios:
+  - id: T_USER_SRV_GUARD_136_001
+    title: '服务层: self._check_chain_read(context, user_info, target_id=getattr(context,
+      ''target_id'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-GUARD-permission_interceptor-136'',
+      { trigger: ''service.guard'' })'
+- id: BR-user-SRV-GUARD-permission_interceptor-156
+  type: service_logic
+  subtype: guard
+  object: user
+  source: service:permission_interceptor.py:L156
+  code_snippet: yaml_allowed = _check_yaml_permission(user_info, context.object_type,
+    suffix)
+  derived_scenarios:
+  - id: T_USER_SRV_GUARD_156_001
+    title: '服务层: yaml_allowed = _check_yaml_permission(user_info, context.object_type,
+      suffix)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-GUARD-permission_interceptor-156'',
+      { trigger: ''service.guard'' })'
+- id: BR-user-SRV-GUARD-permission_interceptor-221
+  type: service_logic
+  subtype: guard
+  object: user
+  source: service:permission_interceptor.py:L221
+  code_snippet: 'def _check_parent_read_advisory(self, context: ''ActionContext'',
+    user_info: dict) -> None:'
+  derived_scenarios:
+  - id: T_USER_SRV_GUARD_221_001
+    title: '服务层: def _check_parent_read_advisory(self, context: ''ActionContext'',
+      user_info: dict)'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-GUARD-permission_interceptor-221'',
+      { trigger: ''service.guard'' })'
+- id: BR-user-SRV-GUARD-permission_interceptor-313
+  type: service_logic
+  subtype: guard
+  object: user
+  source: service:permission_interceptor.py:L313
+  code_snippet: 'def _check_chain_read(self, context: ''ActionContext'', user_info:
+    dict, target_id: int = None) -> None:'
+  derived_scenarios:
+  - id: T_USER_SRV_GUARD_313_001
+    title: '服务层: def _check_chain_read(self, context: ''ActionContext'', user_info:
+      dict, target_id'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-GUARD-permission_interceptor-313'',
+      { trigger: ''service.guard'' })'
+- id: BR-user-SRV-GUARD-permission_interceptor-489
+  type: service_logic
+  subtype: guard
+  object: user
+  source: service:permission_interceptor.py:L489
+  code_snippet: 'def _check_yaml_permission(user_info, object_type, action_suffix):'
+  derived_scenarios:
+  - id: T_USER_SRV_GUARD_489_001
+    title: '服务层: def _check_yaml_permission(user_info, object_type, action_suffix):'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-GUARD-permission_interceptor-489'',
+      { trigger: ''service.guard'' })'
+- id: BR-user-SRV-GUARD-permission_interceptor-537
+  type: service_logic
+  subtype: guard
+  object: user
+  source: service:permission_interceptor.py:L537
+  code_snippet: 'def _check_yaml_row_filter(user_info, object_type, current_scope_expr,
+    user_id):'
+  derived_scenarios:
+  - id: T_USER_SRV_GUARD_537_001
+    title: '服务层: def _check_yaml_row_filter(user_info, object_type, current_scope_expr,
+      user_id):'
+    priority: P1
+    assertion: 'BusinessRuleAssertor.assertRule(''BR-user-SRV-GUARD-permission_interceptor-537'',
+      { trigger: ''service.guard'' })'
