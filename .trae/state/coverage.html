@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>业务规则覆盖率报告</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 20px; background: #f5f7fa; }
+  .container { max-width: 1200px; margin: 0 auto; background: white; padding: 24px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  h1 { margin: 0 0 8px; }
+  .meta { color: #666; font-size: 12px; margin-bottom: 24px; }
+  .summary { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 16px; margin: 20px 0; }
+  .card { padding: 16px; background: #f8f9fa; border-radius: 6px; border-left: 4px solid #007bff; }
+  .card.coverage { border-left-color: #dc3545; }
+  .card .num { font-size: 32px; font-weight: 600; color: #dc3545; }
+  .card .label { font-size: 12px; color: #666; margin-top: 4px; }
+  .progress { background: #e9ecef; height: 24px; border-radius: 12px; overflow: hidden; margin: 12px 0; }
+  .progress-bar { background: #dc3545; height: 100%; line-height: 24px; color: white; text-align: center; font-size: 12px; transition: width 0.3s; }
+  table { width: 100%; border-collapse: collapse; margin-top: 24px; font-size: 14px; }
+  th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #e9ecef; }
+  th { background: #f8f9fa; font-weight: 600; color: #495057; }
+  tr:hover { background: #f8f9fa; }
+  .badge { padding: 2px 8px; border-radius: 12px; font-size: 12px; color: white; }
+  .badge.green { background: #28a745; }
+  .badge.red { background: #dc3545; }
+  .badge.yellow { background: #ffc107; color: black; }
+  .uncovered { margin-top: 24px; padding: 16px; background: #fff3cd; border-radius: 6px; }
+  .uncovered h3 { margin: 0 0 8px; color: #856404; }
+  .uncovered code { background: #fff; padding: 2px 6px; border-radius: 3px; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>📊 业务规则覆盖率报告</h1>
+  <div class="meta">生成时间: 2026-06-13T09:19:34.581440Z | Spec v2.0 | FR-012/FR-022</div>
+
+  <div class="summary">
+    <div class="card">
+      <div class="num">722</div>
+      <div class="label">总业务规则</div>
+    </div>
+    <div class="card">
+      <div class="num">160</div>
+      <div class="label">已覆盖规则</div>
+    </div>
+    <div class="card">
+      <div class="num">562</div>
+      <div class="label">未覆盖规则</div>
+    </div>
+    <div class="card coverage">
+      <div class="num">22.2%</div>
+      <div class="label">覆盖率 (目标 ≥ 80%)</div>
+    </div>
+  </div>
+
+  <div class="progress">
+    <div class="progress-bar" style="width: 22.2%;">22.2%</div>
+  </div>
+
+  <h2>按业务对象分组</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>对象</th>
+        <th>规则总数</th>
+        <th>已覆盖</th>
+        <th>未覆盖</th>
+        <th>覆盖率</th>
+        <th>状态</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>AI异步任务</b> <small>(ai_async_task)</small></td>
+        <td>6</td>
+        <td>6</td>
+        <td>0</td>
+        <td>100.0%</td>
+        <td><span class="badge green">达成</span></td>
+      </tr>
+      <tr>
+        <td><b>测试表</b> <small>(test_table)</small></td>
+        <td>1</td>
+        <td>1</td>
+        <td>0</td>
+        <td>100.0%</td>
+        <td><span class="badge green">达成</span></td>
+      </tr>
+      <tr>
+        <td><b>备注信息</b> <small>(annotation)</small></td>
+        <td>12</td>
+        <td>10</td>
+        <td>2</td>
+        <td>83.3%</td>
+        <td><span class="badge green">达成</span></td>
+      </tr>
+      <tr>
+        <td><b>产品线</b> <small>(product)</small></td>
+        <td>36</td>
+        <td>21</td>
+        <td>15</td>
+        <td>58.3%</td>
+        <td><span class="badge yellow">部分</span></td>
+      </tr>
+      <tr>
+        <td><b>用户组成员</b> <small>(user_group_member)</small></td>
+        <td>2</td>
+        <td>1</td>
+        <td>1</td>
+        <td>50.0%</td>
+        <td><span class="badge yellow">部分</span></td>
+      </tr>
+      <tr>
+        <td><b>业务关系</b> <small>(relationship)</small></td>
+        <td>34</td>
+        <td>14</td>
+        <td>20</td>
+        <td>41.2%</td>
+        <td><span class="badge yellow">不足</span></td>
+      </tr>
+      <tr>
+        <td><b>角色</b> <small>(role)</small></td>
+        <td>15</td>
+        <td>6</td>
+        <td>9</td>
+        <td>40.0%</td>
+        <td><span class="badge yellow">不足</span></td>
+      </tr>
+      <tr>
+        <td><b>领域</b> <small>(domain)</small></td>
+        <td>33</td>
+        <td>12</td>
+        <td>21</td>
+        <td>36.4%</td>
+        <td><span class="badge yellow">不足</span></td>
+      </tr>
+      <tr>
+        <td><b>服务模块</b> <small>(service_module)</small></td>
+        <td>39</td>
+        <td>13</td>
+        <td>26</td>
+        <td>33.3%</td>
+        <td><span class="badge yellow">不足</span></td>
+      </tr>
+      <tr>
+        <td><b>任务队列配置</b> <small>(task_queue)</small></td>
+        <td>6</td>
+        <td>2</td>
+        <td>4</td>
+        <td>33.3%</td>
+        <td><span class="badge yellow">不足</span></td>
+      </tr>
+      <tr>
+        <td><b>用户组</b> <small>(user_group)</small></td>
+        <td>9</td>
+        <td>3</td>
+        <td>6</td>
+        <td>33.3%</td>
+        <td><span class="badge yellow">不足</span></td>
+      </tr>
+      <tr>
+        <td><b>业务对象</b> <small>(business_object)</small></td>
+        <td>37</td>
+        <td>12</td>
+        <td>25</td>
+        <td>32.4%</td>
+        <td><span class="badge yellow">不足</span></td>
+      </tr>
+      <tr>
+        <td><b>子领域</b> <small>(sub_domain)</small></td>
+        <td>38</td>
+        <td>12</td>
+        <td>26</td>
+        <td>31.6%</td>
+        <td><span class="badge yellow">不足</span></td>
+      </tr>
+      <tr>
+        <td><b>任务定义</b> <small>(scheduled_task)</small></td>
+        <td>10</td>
+        <td>3</td>
+        <td>7</td>
+        <td>30.0%</td>
+        <td><span class="badge yellow">不足</span></td>
+      </tr>
+      <tr>
+        <td><b>产品版本</b> <small>(version)</small></td>
+        <td>55</td>
+        <td>15</td>
+        <td>40</td>
+        <td>27.3%</td>
+        <td><span class="badge yellow">不足</span></td>
+      </tr>
+      <tr>
+        <td><b>审计日志</b> <small>(audit_log)</small></td>
+        <td>49</td>
+        <td>13</td>
+        <td>36</td>
+        <td>26.5%</td>
+        <td><span class="badge yellow">不足</span></td>
+      </tr>
+      <tr>
+        <td><b>变更事件</b> <small>(change_event)</small></td>
+        <td>12</td>
+        <td>3</td>
+        <td>9</td>
+        <td>25.0%</td>
+        <td><span class="badge yellow">不足</span></td>
+      </tr>
+      <tr>
+        <td><b>枚举值</b> <small>(enum_value)</small></td>
+        <td>21</td>
+        <td>3</td>
+        <td>18</td>
+        <td>14.3%</td>
+        <td><span class="badge yellow">不足</span></td>
+      </tr>
+      <tr>
+        <td><b>测试对象</b> <small>(test_objects)</small></td>
+        <td>7</td>
+        <td>1</td>
+        <td>6</td>
+        <td>14.3%</td>
+        <td><span class="badge yellow">不足</span></td>
+      </tr>
+      <tr>
+        <td><b>用户</b> <small>(user)</small></td>
+        <td>57</td>
+        <td>7</td>
+        <td>50</td>
+        <td>12.3%</td>
+        <td><span class="badge yellow">不足</span></td>
+      </tr>
+      <tr>
+        <td><b>变更订阅</b> <small>(change_subscription)</small></td>
+        <td>9</td>
+        <td>1</td>
+        <td>8</td>
+        <td>11.1%</td>
+        <td><span class="badge yellow">不足</span></td>
+      </tr>
+      <tr>
+        <td><b>任务执行记录</b> <small>(task_execution)</small></td>
+        <td>9</td>
+        <td>1</td>
+        <td>8</td>
+        <td>11.1%</td>
+        <td><span class="badge yellow">不足</span></td>
+      </tr>
+      <tr>
+        <td><b>功能权限</b> <small>(permission)</small></td>
+        <td>41</td>
+        <td>2</td>
+        <td>39</td>
+        <td>4.9%</td>
+        <td><span class="badge yellow">不足</span></td>
+      </tr>
+      <tr>
+        <td><b>枚举类型</b> <small>(enum_type)</small></td>
+        <td>192</td>
+        <td>2</td>
+        <td>190</td>
+        <td>1.0%</td>
+        <td><span class="badge yellow">不足</span></td>
+      </tr>
+      <tr>
+        <td><b>aspects</b> <small>(aspects)</small></td>
+        <td>0</td>
+        <td>0</td>
+        <td>0</td>
+        <td>0%</td>
+        <td><span class="badge red">无覆盖</span></td>
+      </tr>
+      <tr>
+        <td><b>audit_log_expectations</b> <small>(audit_log_expectations)</small></td>
+        <td>0</td>
+        <td>0</td>
+        <td>0</td>
+        <td>0%</td>
+        <td><span class="badge red">无覆盖</span></td>
+      </tr>
+      <tr>
+        <td><b>数据权限</b> <small>(data_permission)</small></td>
+        <td>4</td>
+        <td>0</td>
+        <td>4</td>
+        <td>0.0%</td>
+        <td><span class="badge red">无覆盖</span></td>
+      </tr>
+      <tr>
+        <td><b>管理维度对象映射</b> <small>(dimension_object_mapping)</small></td>
+        <td>0</td>
+        <td>0</td>
+        <td>0</td>
+        <td>0%</td>
+        <td><span class="badge red">无覆盖</span></td>
+      </tr>
+      <tr>
+        <td><b>员工数据权限范围</b> <small>(employee_data_scope)</small></td>
+        <td>4</td>
+        <td>0</td>
+        <td>4</td>
+        <td>0.0%</td>
+        <td><span class="badge red">无覆盖</span></td>
+      </tr>
+      <tr>
+        <td><b>过滤变体</b> <small>(filter_variant)</small></td>
+        <td>3</td>
+        <td>0</td>
+        <td>3</td>
+        <td>0.0%</td>
+        <td><span class="badge red">无覆盖</span></td>
+      </tr>
+      <tr>
+        <td><b>用户组数据权限</b> <small>(group_data_permission)</small></td>
+        <td>4</td>
+        <td>0</td>
+        <td>4</td>
+        <td>0.0%</td>
+        <td><span class="badge red">无覆盖</span></td>
+      </tr>
+      <tr>
+        <td><b>层级定义</b> <small>(hierarchies)</small></td>
+        <td>0</td>
+        <td>0</td>
+        <td>0</td>
+        <td>0%</td>
+        <td><span class="badge red">无覆盖</span></td>
+      </tr>
+      <tr>
+        <td><b>菜单</b> <small>(menu)</small></td>
+        <td>5</td>
+        <td>0</td>
+        <td>5</td>
+        <td>0.0%</td>
+        <td><span class="badge red">无覆盖</span></td>
+      </tr>
+      <tr>
+        <td><b>菜单权限</b> <small>(menu_permission)</small></td>
+        <td>4</td>
+        <td>0</td>
+        <td>4</td>
+        <td>0.0%</td>
+        <td><span class="badge red">无覆盖</span></td>
+      </tr>
+      <tr>
+        <td><b>权限包</b> <small>(permission_bundle)</small></td>
+        <td>3</td>
+        <td>0</td>
+        <td>3</td>
+        <td>0.0%</td>
+        <td><span class="badge red">无覆盖</span></td>
+      </tr>
+      <tr>
+        <td><b>条件权限规则</b> <small>(permission_rule)</small></td>
+        <td>4</td>
+        <td>0</td>
+        <td>4</td>
+        <td>0.0%</td>
+        <td><span class="badge red">无覆盖</span></td>
+      </tr>
+      <tr>
+        <td><b>角色数据权限</b> <small>(role_data_permission)</small></td>
+        <td>3</td>
+        <td>0</td>
+        <td>3</td>
+        <td>0.0%</td>
+        <td><span class="badge red">无覆盖</span></td>
+      </tr>
+      <tr>
+        <td><b>角色维度范围</b> <small>(role_dimension_scope)</small></td>
+        <td>4</td>
+        <td>0</td>
+        <td>4</td>
+        <td>0.0%</td>
+        <td><span class="badge red">无覆盖</span></td>
+      </tr>
+      <tr>
+        <td><b>角色权限</b> <small>(role_permission)</small></td>
+        <td>3</td>
+        <td>0</td>
+        <td>3</td>
+        <td>0.0%</td>
+        <td><span class="badge red">无覆盖</span></td>
+      </tr>
+      <tr>
+        <td><b>shared_properties</b> <small>(shared_properties)</small></td>
+        <td>0</td>
+        <td>0</td>
+        <td>0</td>
+        <td>0%</td>
+        <td><span class="badge red">无覆盖</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="uncovered">
+    <h3>⚠️ 未覆盖的业务规则 (562 条)</h3>
+    <p>建议: 在 chat 中说 <code>派生出 XXX 业务流测试</code> 来补全覆盖</p>
+    <ul>
+      <li><code>BR-annotation-ASPECT-audit</code></li>
+      <li><code>BR-annotation-VAL-category-valid</code></li>
+      <li><code>BR-audit_log-SRV-ASSERT-CHECK-176</code></li>
+      <li><code>BR-audit_log-SRV-ASSERT-CHECK-177</code></li>
+      <li><code>BR-audit_log-SRV-ASSERT-CHECK-178</code></li>
+      <li><code>BR-audit_log-SRV-ASSERT-CHECK-179</code></li>
+      <li><code>BR-audit_log-SRV-ASSERT-CHECK-180</code></li>
+      <li><code>BR-audit_log-SRV-ASSERT-CHECK-181</code></li>
+      <li><code>BR-audit_log-SRV-ASSERT-CHECK-182</code></li>
+      <li><code>BR-audit_log-SRV-ASSERT-CHECK-185</code></li>
+      <li><code>BR-audit_log-SRV-ASSERT-CHECK-186</code></li>
+      <li><code>BR-audit_log-SRV-ASSERT-CHECK-187</code></li>
+      <li><code>BR-audit_log-SRV-ASSERT-CHECK-188</code></li>
+      <li><code>BR-audit_log-SRV-ASSERT-CHECK-191</code></li>
+      <li><code>BR-audit_log-SRV-ASSERT-CHECK-192</code></li>
+      <li><code>BR-audit_log-SRV-ASSERT-CHECK-193</code></li>
+      <li><code>BR-audit_log-SRV-ASSERT-CHECK-194</code></li>
+      <li><code>BR-audit_log-SRV-ASSERT-CHECK-195</code></li>
+      <li><code>BR-audit_log-SRV-ASSERT-CHECK-196</code></li>
+      <li><code>BR-audit_log-SRV-ASSERT-CHECK-199</code></li>
+      <li><em>... 及其他 542 条</em></li>
+    </ul>
+  </div>
+
+  <h2>📁 业务流 Spec 清单</h2>
+  <ul>
+    <li><code>e2e\business-flow\all-remaining.spec.js</code></li>
+    <li><code>e2e\business-flow\annotation.spec.js</code></li>
+    <li><code>e2e\business-flow\audit-log-extended.spec.js</code></li>
+    <li><code>e2e\business-flow\audit-log.spec.js</code></li>
+    <li><code>e2e\business-flow\business-object-lifecycle.spec.js</code></li>
+    <li><code>e2e\business-flow\change-event.spec.js</code></li>
+    <li><code>e2e\business-flow\change-subscription.spec.js</code></li>
+    <li><code>e2e\business-flow\composite-and-pm.spec.js</code></li>
+    <li><code>e2e\business-flow\domain.spec.js</code></li>
+    <li><code>e2e\business-flow\enum-management.spec.js</code></li>
+    <li><code>e2e\business-flow\import-export.spec.js</code></li>
+    <li><code>e2e\business-flow\permission-extras.spec.js</code></li>
+    <li><code>e2e\business-flow\permission.spec.js</code></li>
+    <li><code>e2e\business-flow\product-version.spec.js</code></li>
+    <li><code>e2e\business-flow\relationship.spec.js</code></li>
+    <li><code>e2e\business-flow\role.spec.js</code></li>
+    <li><code>e2e\business-flow\service-module.spec.js</code></li>
+    <li><code>e2e\business-flow\sub-domain.spec.js</code></li>
+    <li><code>e2e\business-flow\user.spec.js</code></li>
+
+  </ul>
+
+  <div class="meta" style="margin-top: 32px;">
+    <p>📋 <b>修复建议</b>:</p>
+    <ul>
+      <li>未覆盖规则: 在 TRAE IDE chat 中说 <code>/biz-test &lt;object&gt;</code> 触发业务流生成</li>
+      <li>低覆盖率对象: 优先 <code>派生出业务流测试</code> 补全</li>
+      <li>已达成目标: 持续监控,新规则需补测试</li>
+    </ul>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,6 @@
+{"aggregated_at": "2026-06-13T05:54:59.383160+00:00", "count": 4, "by_skill": {"test-gen": 3, "code-review": 1}, "by_status": {"success": 4}}
+{"aggregated_at": "2026-06-13T05:54:59.456982+00:00", "count": 2, "by_skill": {"test-gen": 2}, "by_status": {"success": 2}}
+{"aggregated_at": "2026-06-13T05:54:59.525774+00:00", "count": 2, "by_skill": {"test-gen": 2}, "by_status": {"success": 2}}
+{"aggregated_at": "2026-06-13T05:54:59.668709+00:00", "count": 3, "by_skill": {"test-gen": 3}, "by_status": {"success": 3}}
+{"aggregated_at": "2026-06-13T05:54:59.742041+00:00", "count": 4, "by_skill": {"test-gen": 3, "code-review": 1}, "by_status": {"success": 4}}
+{"aggregated_at": "2026-06-13T05:54:59.820169+00:00", "count": 4, "by_skill": {"test-gen": 3, "code-review": 1}, "by_status": {"success": 4}}

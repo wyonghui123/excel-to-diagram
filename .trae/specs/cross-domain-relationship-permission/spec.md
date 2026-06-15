@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 # 跨领域关系 (Cross-Domain Relationship) 权限建模 Spec
 
-> **Version**: v1.0 | **Date**: 2026-06-15 | **Status**: Draft (待 review)
+> **Version**: v1.0 | **Date**: 2026-06-15 | **Status**: [APPROVED] (PM review 通过, OQ 全部决策)
 > **Authors**: AI Coding Agent (brainstorming 流程输出) | **Reviewer**: <PM>
+> **Approval Date**: 2026-06-15 | **OQ Decisions**: OQ1-OQ5 全部采纳推荐默认
 > **Spec 类型**: 权限模型扩展 + ValueHelp UX 优化
 > **变更影响范围**: 后端权限引擎 + 前端 ValueHelp 组件 + 角色配置文档
 
@@ -962,17 +963,17 @@ export async function pickBoByCode(code, productId = null) {
 
 ---
 
-## Open Questions (待用户确认)
+## Open Questions (用户决策记录)
 
-> 以下问题在 spec review 阶段需要用户确认, 影响实施细节
+> 以下问题在 spec review 阶段已全部决策 (2026-06-15), 锁定以下决定:
 
-| # | 问题 | 候选 | 默认 |
-|---|------|------|------|
-| OQ1 | dim_scope 派生是否需要区分 read / write? 还是仅靠 functional perm 区分? | A) 仅 functional perm 区分; B) dim_scope 也拆 read_scope + write_scope | A (推荐, 改动最小) |
-| OQ2 | Pick by Code API 是否限定 product_id? (防跨产品误选) | A) 必填; B) 可选; C) 不需要 | A (推荐, 安全性) |
-| OQ3 | BoSelectorDualMode 是否仅用于关系表单, 还是其他表单也用? | A) 仅关系; B) 通用 | A (推荐, 范围控制) |
-| OQ4 | CrossDomain-Architect 角色是否需要"硬编码" 3 个域, 还是支持配置? | A) YAML 配置; B) 动态配置 | A (跟现有 role.yaml 风格一致) |
-| OQ5 | 跨域关系创建后, 是否有"通知另一域负责人" 的机制? | A) 异步通知; B) 不通知; C) 仅审计 | B (推荐, 范围控制) |
+| # | 问题 | **决策** | 理由 |
+|---|------|---------|------|
+| OQ1 | dim_scope 派生是否需要区分 read / write? 还是仅靠 functional perm 区分? | **A) 仅 functional perm 区分** | 改动最小, 跟现有 `dim_scope` 数据结构兼容; functional perm `BO:edit` 作为 "write gate" 已能区分 read/edit |
+| OQ2 | Pick by Code API 是否限定 product_id? (防跨产品误选) | **A) product_id 必填** | 防止跨产品误选, 提升查询效率 (走 version_id 子查询) |
+| OQ3 | BoSelectorDualMode 是否仅用于关系表单, 还是其他表单也用? | **A) 仅关系表单** | 范围控制, 避免过度改动; 其他表单的 BO 选择器维持 List 模式 (不涉及跨域) |
+| OQ4 | CrossDomain-Architect 角色是否需要"硬编码" 3 个域, 还是支持配置? | **A) YAML 配置** | 跟现有 role.yaml 风格一致, 实施时只需在 rls_rules/role.yaml 增加示例 |
+| OQ5 | 跨域关系创建后, 是否有"通知另一域负责人" 的机制? | **B) 不通知** | 范围控制, 留给后续 "跨域协作" spec 专题处理; 当前 audit log 已含 cross_domain=true 字段供后续 dashboard |
 
 ---
 
@@ -1003,3 +1004,5 @@ export async function pickBoByCode(code, productId = null) {
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | v1.0 | 2026-06-15 | AI Coding Agent | Initial draft from brainstorming (Q1-Q5 + 方案 2 决策) |
+| v1.0.1 | 2026-06-15 | AI Coding Agent | Self-review: 无 TBD/TODO 残留, 5 个 OQ 显式列出 |
+| v1.0.2 | 2026-06-15 | PM | [APPROVED] 全部 OQ1-OQ5 采纳推荐默认, spec 状态从 Draft 改为 Approved |

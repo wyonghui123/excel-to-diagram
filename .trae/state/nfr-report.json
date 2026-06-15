@@ -1,0 +1,74 @@
+{
+  "results": [
+    {
+      "id": "NFR-001",
+      "name": "性能",
+      "target": "IDE chat 响应 < 3s (简单 Skill 触发)",
+      "status": "pending",
+      "evidence": "需在 TRAE IDE chat 中实测",
+      "note": "Phase 1 实施,需在真实环境验证"
+    },
+    {
+      "id": "NFR-002",
+      "name": "成本",
+      "target": "单 spec LLM 成本 < ¥5",
+      "status": "pending",
+      "evidence": "agent-runs.jsonl 暂无 cost 记录"
+    },
+    {
+      "id": "NFR-003",
+      "name": "可靠性 (Healer 自愈率)",
+      "target": "Healer 自愈率 ≥ 60%",
+      "status": "pending",
+      "evidence": "healings.jsonl 暂无记录 (Phase 1 暂无失败 case)"
+    },
+    {
+      "id": "NFR-004",
+      "name": "业务规则覆盖率",
+      "target": "≥ 80%",
+      "actual_pct": 9.1,
+      "covered": 7,
+      "total": 77,
+      "status": "in_progress",
+      "evidence": "已覆盖 7/77 规则"
+    },
+    {
+      "id": "NFR-005",
+      "name": "可观测性 (IDE 内)",
+      "target": "所有 Agent 调用在 IDE 中可见",
+      "status": "pass",
+      "evidence": "MCP Server (.trae/scripts/mcp_ide_server.py) 8 个工具 + agent-runs.jsonl 记录"
+    },
+    {
+      "id": "NFR-006",
+      "name": "安全性 (Healer 默认 deny)",
+      "target": "Healer 修复前 MUST 检查 deny list",
+      "status": "pass",
+      "evidence": ".trae\\skills\\healer\\PERMISSIONS.md 存在"
+    },
+    {
+      "id": "NFR-007",
+      "name": "数据隔离",
+      "target": "业务流测试不污染生产 DB",
+      "status": "pass",
+      "evidence": "沿用 e2e/helpers/auto-fixtures.js + isolation fixture + e2e_* 前缀"
+    },
+    {
+      "id": "NFR-008",
+      "name": "多 Agent 隔离",
+      "target": "AGENT_PORT 3010-3019 隔离",
+      "status": "pass",
+      "evidence": "沿用 .trae/rules/multi-agent-coordination.md"
+    },
+    {
+      "id": "NFR-009",
+      "name": "PM/QA 可参与性",
+      "target": "100% 业务流场景有 YAML 草稿",
+      "yaml_count": 1,
+      "status": "in_progress",
+      "evidence": "已有 1 个 business-flow.yaml"
+    }
+  ],
+  "pass": 4,
+  "total": 9
+}

@@ -1,0 +1,11 @@
+#
+# .trae/state/ - Agent 运行状态目录
+# 包含 agent-runs.jsonl 等可观测性日志
+# 90 天后由 .trae/scripts/prune_agent_logs.py 自动清理
+# (FR-016 日志清理)
+#
+# 此目录不应被 git 跟踪（本地运行时数据），但应保留在仓库中以便初始化
+# 真正的 .gitignore 在 .trae/ 父级或项目根 .gitignore
+#
+agent-runs.jsonl
+*.tmp

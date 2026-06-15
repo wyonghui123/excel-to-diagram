@@ -1,0 +1,26 @@
+{"ts": "2026-06-13T08:08:17.284839Z", "level": "info", "message": "file_open", "trace_id": "46c34b57ae474cca", "path": "D:\\filework\\excel-to-diagram\\.trae\\specs\\_business_rules\\_index.json"}
+{"ts": "2026-06-13T08:08:17.293305Z", "level": "info", "message": "file_edit", "trace_id": "fe2a4a30718d4b7e", "path": "D:\\filework\\excel-to-diagram\\tmp_test.txt", "size": 5}
+{"ts": "2026-06-13T08:08:17.295988Z", "level": "info", "message": "terminal_run", "trace_id": "9c4f8574d8834e0c", "cmd": "npx vitest --version", "cwd": "D:\\filework\\excel-to-diagram"}
+{"ts": "2026-06-13T08:08:17.297335Z", "level": "info", "message": "preview_html", "trace_id": "f26d831678994f7d", "path": "D:\\filework\\excel-to-diagram\\.trae\\specs\\_business_rules\\_index.json"}
+{"ts": "2026-06-13T08:08:17.298272Z", "level": "info", "message": "status_bar_set", "trace_id": "9fc03a204cbf4931", "text": "🤖 业务流 3/8 通过", "color": "green", "progress": 0.3}
+{"ts": "2026-06-13T08:08:38.750539Z", "level": "info", "message": "file_open", "trace_id": "1fba7e436c0d4c3f", "path": "D:\\filework\\excel-to-diagram\\.trae\\specs\\_business_rules\\_index.json"}
+{"ts": "2026-06-13T08:08:38.760819Z", "level": "info", "message": "file_edit", "trace_id": "eaa2c5abe9974871", "path": "D:\\filework\\excel-to-diagram\\tmp_test.txt", "size": 5}
+{"ts": "2026-06-13T08:08:38.764751Z", "level": "info", "message": "terminal_run", "trace_id": "0a6eee3e21604187", "cmd": "npx vitest --version", "cwd": "D:\\filework\\excel-to-diagram"}
+{"ts": "2026-06-13T08:08:38.765618Z", "level": "info", "message": "preview_html", "trace_id": "a297055a6ad041f3", "path": "D:\\filework\\excel-to-diagram\\.trae\\specs\\_business_rules\\_index.json"}
+{"ts": "2026-06-13T08:08:38.766183Z", "level": "info", "message": "status_bar_set", "trace_id": "097470208f304b5f", "text": "🤖 业务流 3/8 通过", "color": "green", "progress": 0.3}
+{"ts": "2026-06-13T08:09:23.718978Z", "level": "info", "message": "file_open", "trace_id": "a0751413e5ad4ff1", "path": "D:\\filework\\excel-to-diagram\\.trae\\specs\\_business_rules\\_index.json"}
+{"ts": "2026-06-13T08:09:40.334603Z", "level": "info", "message": "file_open", "trace_id": "6b92b0092a8a4814", "path": "D:\\filework\\excel-to-diagram\\.trae\\specs\\_business_rules\\_index.json"}
+{"ts": "2026-06-13T08:09:56.755076Z", "level": "info", "message": "file_open", "trace_id": "0cebf4fabfd84ef6", "path": "D:\\filework\\excel-to-diagram\\.trae\\specs\\_business_rules\\_index.json"}
+{"ts": "2026-06-13T08:09:56.764205Z", "level": "info", "message": "file_edit", "trace_id": "5b7e12d03d08472c", "path": "D:\\filework\\excel-to-diagram\\tmp_test.txt", "size": 5}
+{"ts": "2026-06-13T08:09:56.767083Z", "level": "info", "message": "terminal_run", "trace_id": "512a2a541b3a4cb2", "cmd": "npx vitest --version", "cwd": "D:\\filework\\excel-to-diagram"}
+{"ts": "2026-06-13T08:09:56.767833Z", "level": "info", "message": "preview_html", "trace_id": "f1659748e700413d", "path": "D:\\filework\\excel-to-diagram\\.trae\\specs\\_business_rules\\_index.json"}
+{"ts": "2026-06-13T08:09:56.768255Z", "level": "info", "message": "status_bar_set", "trace_id": "30d0fe7ed7b44215", "text": "🤖 业务流 3/8 通过", "color": "green", "progress": 0.3}
+{"ts": "2026-06-13T08:09:56.768819Z", "level": "info", "message": "show_notification", "trace_id": "1b778e3ce9934cd3", "type": "action", "title": "📋 Business Flow Draft Ready", "msg": "请 review business-flow.yaml"}
+{"ts": "2026-06-13T08:09:56.769231Z", "level": "info", "message": "show_dialog", "trace_id": "c7757d8b3f1a43ca", "title": "🔧 失败原因: locator 漂移", "content": "建议修复: 将 '.el-button--primary' 替换为 role=button[name='保存']"}
+{"ts": "2026-06-13T08:21:06.110795Z", "level": "info", "message": "file_open", "trace_id": "320585074a024bff", "path": "D:\\filework\\excel-to-diagram\\.trae\\specs\\_business_rules\\_index.json"}
+{"ts": "2026-06-13T08:21:06.119076Z", "level": "info", "message": "file_edit", "trace_id": "348d8c5704ec4d6b", "path": "D:\\filework\\excel-to-diagram\\tmp_test.txt", "size": 5}
+{"ts": "2026-06-13T08:21:06.123535Z", "level": "info", "message": "terminal_run", "trace_id": "4a64ed4632604a5f", "cmd": "npx vitest --version", "cwd": "D:\\filework\\excel-to-diagram"}
+{"ts": "2026-06-13T08:21:06.124687Z", "level": "info", "message": "preview_html", "trace_id": "5ec9595a14ff4db4", "path": "D:\\filework\\excel-to-diagram\\.trae\\specs\\_business_rules\\_index.json"}
+{"ts": "2026-06-13T08:21:06.125775Z", "level": "info", "message": "status_bar_set", "trace_id": "877cd22f46ad4842", "text": "🤖 业务流 3/8 通过", "color": "green", "progress": 0.3}
+{"ts": "2026-06-13T08:21:06.127331Z", "level": "info", "message": "show_notification", "trace_id": "7a8579b914dd4d78", "type": "action", "title": "📋 Business Flow Draft Ready", "msg": "请 review business-flow.yaml"}
+{"ts": "2026-06-13T08:21:06.127605Z", "level": "info", "message": "show_dialog", "trace_id": "49b6113550b5422b", "title": "🔧 失败原因: locator 漂移", "content": "建议修复: 将 '.el-button--primary' 替换为 role=button[name='保存']"}
