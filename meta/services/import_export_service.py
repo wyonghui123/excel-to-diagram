@@ -242,6 +242,22 @@ class ImportExportService:
             field_by_name_list.append((f.name, f))
         field_by_alias = {}
 
+        def _is_pure_display_virtual(f) -> bool:
+            """判断是否为"纯展示虚拟字段" (类似 *_bo_name / *_bo_code)
+            特征: storage=virtual, 有 redundancy.type=virtual
+            """
+            if not (f.storage and f.storage.value == 'virtual') and not getattr(f.semantics, 'virtual', False):
+                return False
+            redundancy = getattr(f.semantics, 'redundancy', None)
+            if not redundancy:
+                return False
+            # [FIX 2026-06-16 BMRD] redundancy 是 dict, 必须用 .get() 而非 getattr()
+            # getattr(dict, 'type', None) 返回 None (dict 没有 .type 属性)
+            rtype = redundancy.get('type') if isinstance(redundancy, dict) else getattr(redundancy, 'type', None)
+            if rtype != 'virtual':
+                return False
+            return True
+
         # [FIX 2026-06-16 BMRD] 预计算"resolve_from_field 源字段"集合
         # 这些字段存储的是用于解析 FK 的编码值, 导入时优先选它们
         # 场景: '源业务对象编码' 匹配到 virtual 的 source_bo_code (display)
@@ -264,23 +280,20 @@ class ImportExportService:
                         continue
                     if _is_pure_display_virtual(vf):
                         vf_redundancy = getattr(vf.semantics, 'redundancy', None)
-                        vf_source_field = getattr(vf_redundancy, 'source_field', None) if vf_redundancy else None
-                        if vf_source_field == fk_id:
+                        # [FIX 2026-06-16 BMRD] vf_redundancy 是 dict, 用 .get() 而非 getattr()
+                        vf_source_field = vf_redundancy.get('source_field') if isinstance(vf_redundancy, dict) else (getattr(vf_redundancy, 'source_field', None) if vf_redundancy else None)
+                        # [FIX 2026-06-16 BMRD] 只映射 derived_from 以 .code 结尾的虚拟字段
+                        # 避免把 source_sub_domain_id (derived_from=sub_domain.name)
+                        # 也映射到 source_code (只有 source_bo_code derived_from=business_object.code 才应映射)
+                        vf_derived_from = vf_redundancy.get('derived_from', '') if isinstance(vf_redundancy, dict) else ''
+                        is_code_display = isinstance(vf_derived_from, str) and vf_derived_from.endswith('.code')
+                        if vf_source_field == fk_id and is_code_display:
                             virtual_display_to_stored_code[vf.id] = stored_code_id
 
-        def _is_pure_display_virtual(f) -> bool:
-            """判断是否为"纯展示虚拟字段" (类似 *_bo_name / *_bo_code)
-            特征: storage=virtual, 有 redundancy.type=virtual
-            """
-            if not (f.storage and f.storage.value == 'virtual') and not getattr(f.semantics, 'virtual', False):
-                return False
-            redundancy = getattr(f.semantics, 'redundancy', None)
-            if not redundancy:
-                return False
-            rtype = getattr(redundancy, 'type', None)
-            if rtype != 'virtual':
-                return False
-            return True
+        for f in meta_object.fields:
+            if f.semantics and f.semantics.aliases:
+                for alias in f.semantics.aliases:
+                    field_by_alias[alias] = f
 
         def _is_stored_code_field(f) -> bool:
             """判断是否为"stored code field" (类似 source_code)
@@ -316,12 +329,44 @@ class ImportExportService:
                 return (resolve_score, 1 if is_virtual else 0, 1 if not import_visible else 0, f.id)
             return sorted(candidates, key=_score)[0]
 
+        def _resolve_pure_display_to_stored(picked_field) -> 'Field | None':
+            """如果 picked_field 是"纯展示虚拟字段", 找其相关的 stored code 字段
+            例: source_bo_code (virtual display) -> source_code (stored resolve_from)
+            """
+            if picked_field.id in virtual_display_to_stored_code:
+                stored_id = virtual_display_to_stored_code[picked_field.id]
+                stored_field = field_by_id.get(stored_id)
+                if stored_field:
+                    return stored_field
+            return None
+
+        # [FIX 2026-06-17] 构建 list view title -> field_id 映射
+        # 导出时优先用 list view 的 title 作为列标题 (L1505),
+        # 导入时也必须能按 list title 反向映射到 field_id
+        # 例: relation_direction 的 name="关系方向", 但 list title="方向"
+        #     导出列标题是"方向", 导入时按 name 匹配不到, 需要按 list title 匹配
+        list_title_to_field_id: Dict[str, str] = {}
+        if (meta_object.ui_view_config and meta_object.ui_view_config.list
+                and meta_object.ui_view_config.list.columns):
+            for col in meta_object.ui_view_config.list.columns:
+                col_key = getattr(col, 'key', None)
+                col_title = getattr(col, 'title', None)
+                if col_key and col_title:
+                    list_title_to_field_id[col_title] = col_key
+
         for header in headers:
             if not header:
                 continue
 
             if header in field_by_id:
-                field_map[header] = header
+                # [FIX 2026-06-16 BMRD] header 也是 field id 时, 检查是否纯展示虚拟字段
+                # 例: header='source_bo_code' (virtual display) -> 改用 source_code
+                picked = field_by_id[header]
+                stored_alt = _resolve_pure_display_to_stored(picked)
+                if stored_alt:
+                    field_map[header] = stored_alt.id
+                else:
+                    field_map[header] = header
                 continue
 
             # 按 name 查找所有候选
@@ -329,12 +374,31 @@ class ImportExportService:
             if name_candidates:
                 best = _pick_best_field(name_candidates, header)
                 if best:
-                    field_map[header] = best.id
+                    # [FIX 2026-06-16 BMRD] 纯展示虚拟字段 → 改用 stored code 字段
+                    # 例: '源业务对象编码' -> source_bo_code (virtual) -> source_code (stored)
+                    stored_alt = _resolve_pure_display_to_stored(best)
+                    if stored_alt:
+                        field_map[header] = stored_alt.id
+                    else:
+                        field_map[header] = best.id
                     continue
 
             if header in field_by_alias:
                 field_map[header] = field_by_alias[header].id
                 continue
+
+            # [FIX 2026-06-17] 按 list view title 查找
+            # 导出用 list title 作列标题, 导入必须能反向映射
+            if header in list_title_to_field_id:
+                field_id = list_title_to_field_id[header]
+                field = field_by_id.get(field_id)
+                if field:
+                    stored_alt = _resolve_pure_display_to_stored(field)
+                    if stored_alt:
+                        field_map[header] = stored_alt.id
+                    else:
+                        field_map[header] = field_id
+                    continue
 
             header_lower = header.lower().replace(" ", "_").replace("-", "_")
             for f in meta_object.fields:
@@ -533,7 +597,8 @@ class ImportExportService:
             
             ws = wb.create_sheet(title=obj.name)
             
-            headers, editable_columns, readonly_columns, parent_key_columns, create_required_columns, header_comments, header_to_field, enum_value_maps, bo_display_fields, fk_display_code_columns = self._get_export_headers_with_editable(obj, options)
+            # [NEW v1.2.3 2026-06-17] 主导出按 'create' 模式处理 (模板可填父对象)
+            headers, editable_columns, readonly_columns, parent_key_columns, create_required_columns, header_comments, header_to_field, enum_value_maps, bo_display_fields, fk_display_code_columns = self._get_export_headers_with_editable(obj, options, mode='create')
             
             bo_display_maps = {}
             
@@ -795,7 +860,8 @@ class ImportExportService:
             
             ws = wb.create_sheet(title=obj.name)
             
-            headers, editable_columns, readonly_columns, parent_key_columns, create_required_columns, header_comments, header_to_field, enum_value_maps, bo_display_fields, fk_display_code_columns = self._get_export_headers_with_editable(obj, options)
+            # [NEW v1.2.3 2026-06-17] 选中对象导出按 'create' 模式处理 (模板可填父对象)
+            headers, editable_columns, readonly_columns, parent_key_columns, create_required_columns, header_comments, header_to_field, enum_value_maps, bo_display_fields, fk_display_code_columns = self._get_export_headers_with_editable(obj, options, mode='create')
             
             bo_display_maps = self._build_bo_display_maps(sheet_data, bo_display_fields)
 
@@ -1158,7 +1224,8 @@ class ImportExportService:
             
             ws = wb.create_sheet(title=obj.name)
             
-            headers, editable_columns, readonly_columns, parent_key_columns, create_required_columns, header_comments, header_to_field, enum_value_maps, bo_display_fields, fk_display_code_columns = self._get_export_headers_with_editable(obj, options)
+            # [NEW v1.2.3 2026-06-17] 模板导出按 'create' 模式处理 (模板就是用来填的)
+            headers, editable_columns, readonly_columns, parent_key_columns, create_required_columns, header_comments, header_to_field, enum_value_maps, bo_display_fields, fk_display_code_columns = self._get_export_headers_with_editable(obj, options, mode='create')
             
             bo_display_maps = self._build_bo_display_maps(sheet_data, bo_display_fields)
             
@@ -1382,7 +1449,7 @@ class ImportExportService:
             trace_id=self._get_current_trace_id(),
         )
 
-    def _get_export_headers_with_editable(self, meta_obj: MetaObject, options: Optional[Dict[str, Any]]) -> tuple:
+    def _get_export_headers_with_editable(self, meta_obj: MetaObject, options: Optional[Dict[str, Any]], mode: str = 'update') -> tuple:
         """获取导出表头及可编辑列索引
 
         默认导出规则（参考 SAP Fiori "所见即所导" 原则）：
@@ -1391,6 +1458,11 @@ class ImportExportService:
         3. 显式设置 export_visible: false 的字段排除（在列表中但不导出）
         4. 默认排除系统字段：id, created_at, updated_at, created_by, updated_by
         5. 默认排除层级外键字段：version_id, product_id 等
+
+        [NEW v1.2.3 2026-06-17] mode 参数:
+        - mode='create' (默认 for 模板导出): 父对象编码列可填（批量新增/重新分类）
+        - mode='update' (默认 for 主调用): 父对象编码列只读
+        由调用方根据场景传入。
 
         返回：
         - headers: 表头列表
@@ -1568,7 +1640,10 @@ class ImportExportService:
         # 行为保持完全一致：
         #   - 第一个非 context_field 父对象的编码列 → parent_key（可填写）
         #   - 其他编码列 + 所有名称列 → readonly
-        parent_fk_columns = self._build_parent_fk_columns(meta_obj)
+        # [NEW v1.2.3 2026-06-17] 传 mode 参数
+        #   - mode='create' → 父对象编码列可填（用户重新分类场景）
+        #   - mode='update' → 父对象编码列只读（向后兼容）
+        parent_fk_columns = self._build_parent_fk_columns(meta_obj, mode=mode)
         for col_def in parent_fk_columns:
             header_name = col_def['header_name']
             headers.append(header_name)
@@ -1667,12 +1742,18 @@ class ImportExportService:
     # 两个 helper，所有调用方统一使用。
     # ============================================================
 
-    def _build_parent_fk_columns(self, meta_obj):
+    def _build_parent_fk_columns(self, meta_obj, mode: str = 'update'):
         """统一的 parent FK 列定义（SSOT）
 
         沿 meta_obj.parent_object 链向上追溯，生成 (编码, 名称) 列定义。
 
         [FR-009] 使用 _iter_parent_chain 替代 inline while 循环。
+        [NEW v1.2.3 2026-06-17] 增加 mode 参数，区分 create/update 场景
+        - mode='create': 模板可填父对象编码（适用于批量新增/重新分类）
+        - mode='update'（默认）: 父对象编码只读（运行时保护 FK 引用/审计链）
+        - parent_key_template_editable='always' 强制 parent_key 列可填（无视 mode）
+        - parent_key_template_editable='create_only' 在 mode='create' 时可填
+        - parent_key_template_editable='never' 始终只读
 
         返回 list[dict]，每个 dict 包含：
         - parent_obj: 父对象的 MetaObject
@@ -1702,11 +1783,23 @@ class ImportExportService:
                 parent_key_field.semantics, 'readonly_always', False
             )
 
-            # 编码列：可填写（parent_key）或只读（readonly）
-            code_classification = (
-                'parent_key' if (is_first_parent and parent_key_field and not readonly_always)
-                else 'readonly'
+            # [NEW v1.2.3 2026-06-17] 优先看 parent_key_template_editable
+            template_editable = parent_key_field and getattr(
+                parent_key_field.semantics, 'parent_key_template_editable', None
             )
+            is_template_editable = False
+            if template_editable == 'always':
+                is_template_editable = True
+            elif template_editable == 'create_only' and mode == 'create':
+                is_template_editable = True
+            elif template_editable == 'never':
+                is_template_editable = False
+            elif template_editable is None:
+                # fallback: 旧的 readonly_always 逻辑（保持向后兼容）
+                is_template_editable = (is_first_parent and parent_key_field and not readonly_always)
+
+            # 编码列：可填写（parent_key）或只读（readonly）
+            code_classification = 'parent_key' if is_template_editable else 'readonly'
             columns.append({
                 'parent_obj': parent_obj,
                 'parent_fk_field_id': parent_fk_field_id,
@@ -2488,7 +2581,8 @@ class ImportExportService:
         # [FIX 2026-06-08] 为子对象添加 parent FK 列（SSOT）
         # 使用 _build_parent_fk_columns + _query_parent_fk_value_maps，
         # 与 _get_export_headers_with_editable 保持完全一致的列定义
-        parent_fk_columns = self._build_parent_fk_columns(child_meta)
+        # [NEW v1.2.3 2026-06-17] 子对象 sheet 也按 'create' 模式 (模板可填父对象)
+        parent_fk_columns = self._build_parent_fk_columns(child_meta, mode='create')
         parent_fk_value_maps = self._query_parent_fk_value_maps(data, parent_fk_columns) if data else {}
 
         for col_idx, f in enumerate(export_fields):
@@ -3543,10 +3637,89 @@ class ImportExportService:
             return {
                 'enabled': kt.get('enabled', False),
                 'user_editable': kt.get('user_editable', ''),
+                'auto_suggest': kt.get('auto_suggest', False),
                 'pattern': kt.get('pattern', ''),
                 'preview': kt.get('preview', ''),
             }
         return {}
+
+    def _auto_generate_code_from_key_template(self, object_type: str, record: Dict[str, Any]) -> Optional[str]:
+        """[NEW 2026-06-17] 使用 key_template 自动生成 code
+
+        action_executor._do_create 不走 bo_framework 拦截器链，
+        KeyTemplateInterceptor 不会执行，需要在导入时手动生成。
+
+        Args:
+            object_type: 对象类型
+            record: 记录数据
+
+        Returns:
+            生成的 code，如果无法生成则返回 None
+        """
+        try:
+            meta_obj = registry.get(object_type)
+            if not meta_obj:
+                return None
+
+            kt = getattr(meta_obj, 'key_template', None) or {}
+            if not isinstance(kt, dict) or not kt.get('enabled') or not kt.get('auto_suggest'):
+                return None
+
+            from meta.core.key_template_engine import KeyTemplateEngine, KeyTemplateConfig
+            config = KeyTemplateConfig.from_dict(object_type, kt)
+            if not config.enabled or not config.auto_suggest:
+                return None
+
+            engine = KeyTemplateEngine(self.data_source)
+
+            # 准备 field_values（从 record 中提取）
+            field_values = dict(record)
+            logger.info(f"[KeyTemplate] Auto-generate code for {object_type}, field_values keys={list(field_values.keys())}, service_module_code={field_values.get('service_module_code')}, source_code={field_values.get('source_code')}")
+
+            # 解析 pattern 中的父字段引用
+            import re
+            field_refs = re.findall(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}', config.pattern)
+            for ref in field_refs:
+                if ref.upper().startswith('SEQ'):
+                    continue
+                if ref not in field_values or not field_values[ref]:
+                    # 尝试从 FK 解析获取
+                    # 例如 source_code → source_bo_id → business_object.code
+                    resolve_to = None
+                    for field in meta_obj.fields:
+                        if field.id == ref:
+                            resolve_to = getattr(field.semantics, 'resolve_to_object', None)
+                            break
+                    if resolve_to:
+                        # 从 resolve_from_field 获取值
+                        for field in meta_obj.fields:
+                            rff = getattr(field.semantics, 'resolve_from_field', None)
+                            if rff == ref:
+                                resolve_from_val = record.get(field.id)
+                                if resolve_from_val:
+                                    # 查询目标对象获取 code
+                                    target_obj = registry.get(resolve_to)
+                                    if target_obj:
+                                        target_record = self.data_source.find_by_business_key(
+                                            target_obj.table_name, resolve_from_val
+                                        )
+                                        if target_record:
+                                            field_values[ref] = target_record.get('code') or target_record.get(ref)
+
+            # 解析物理表名
+            physical_table = meta_obj.table_name
+            tokens = engine._parser.parse(config.pattern)
+            prefix_filter = engine._parser.resolve_prefix(tokens, field_values)
+
+            code = engine.generate_code(
+                config, field_values, object_type,
+                table_name=physical_table,
+                prefix_filter=prefix_filter
+            )
+            return code
+        except Exception as e:
+            logger.warning(f"[Import] Key template auto-generate failed for {object_type}: {e}")
+            return None
 
     def _is_field_editable(self, field, mode: str = 'edit') -> bool:
         """判断字段是否可编辑（用于导入导出）
@@ -3559,14 +3732,13 @@ class ImportExportService:
         5. immutable 字段：编辑时只读
         6. parent_key 字段：可编辑（SAP One Model 允许移动层级）
         7. ui.editable=false：始终只读
+        8. [NEW v1.2.3 2026-06-17] parent_key + parent_key_template_editable 优先级最高
+           - 区分"运行时不可改"(readonly_always) 与 "Excel 模板是否可填"(parent_key_template_editable)
+           - 用户场景：service_module_id 是 parent_key + readonly_always，但批量重新分类需可填
         """
         readonly_field_ids = {'id', 'created_at', 'updated_at', 'created_by', 'updated_by'}
 
         if field.id in readonly_field_ids:
-            return False
-
-        # readonly_always 始终只读
-        if getattr(field.semantics, 'readonly_always', False):
             return False
 
         # 计算字段（computation.formula）始终只读
@@ -3579,19 +3751,30 @@ class ImportExportService:
 
         is_parent_key = getattr(field.semantics, 'parent_key', False)
 
-        if is_parent_key and mode == 'create':
-            is_polymorphic = (
-                getattr(field.semantics, 'virtual', False)
-                or field.storage.value == 'virtual'
-            )
-            if hasattr(field, 'ui') and hasattr(field.ui, 'editable') and field.ui.editable is False:
-                return False
-            if is_polymorphic:
+        # [NEW v1.2.3 2026-06-17] parent_key_template_editable 优先级最高
+        # 明确声明"Excel 模板可填"，与 readonly_always 完全解耦
+        if is_parent_key:
+            template_editable = getattr(field.semantics, 'parent_key_template_editable', None)
+            if template_editable == 'always':
                 return True
+            if template_editable == 'create_only' and mode == 'create':
+                return True
+            if template_editable == 'never':
+                return False
+            # 未显式声明，fallback 到 readonly_always 判断
+            if getattr(field.semantics, 'readonly_always', False):
+                return False
+            # parent_key 字段默认可编辑（SAP One Model 允许移动层级）
+            if mode == 'create':
+                return True
+            # edit 模式: 再看 immutable
+            if getattr(field.semantics, 'immutable', False):
+                return False
             return True
 
-        if mode == 'edit' and is_parent_key:
-            pass
+        # readonly_always 始终只读（非 parent_key 字段）
+        if getattr(field.semantics, 'readonly_always', False):
+            return False
 
         # virtual 字段：如果是计算字段则只读，如果是外键/搜索帮助则可编辑
         if field.storage.value == 'virtual' or getattr(field.semantics, 'virtual', False):
@@ -3604,7 +3787,6 @@ class ImportExportService:
         if mode == 'edit':
             if getattr(field.semantics, 'immutable', False):
                 return False
-            # parent_key 字段可编辑（SAP One Model 允许移动层级）
 
         if hasattr(field, 'ui') and hasattr(field.ui, 'editable') and field.ui.editable is False:
             return False
@@ -4260,6 +4442,14 @@ class ImportExportService:
                         or (is_parent_key_field and operation_mode == "create")
                         or (is_business_key_field and operation_mode == "create")
                     )
+                    # [FIX 2026-06-17] 如果 business_key 字段为空但对象有 key_template
+                    # 且 user_editable 不是 'manual'（即允许自动生成），则不应报必填错误
+                    # 例: relationship 的 code 字段，key_template pattern="{source_code}-{target_code}-{SEQ:2}"
+                    # 用户留空 code 时，KeyTemplateInterceptor 会自动生成
+                    if is_required and is_business_key_field and operation_mode == "create":
+                        kt_info = self._get_key_template_info(obj)
+                        if kt_info.get('enabled') and kt_info.get('user_editable') != 'manual':
+                            is_required = False
                     # [FIX 2026-06-16 BMRD] 如果 context 中已经传入了 product_id / version_id,
                     # 则产品→版本链路上所有 parent_key / business_key 字段的必填验证都应跳过.
                     # 因为 context 已经确定了顶层范围, 整条链路会从数据库自动填充.
@@ -4301,6 +4491,7 @@ class ImportExportService:
                                 "sheet": sheet["name"],
                                 "row": row_num,
                                 "field": field_label,
+                                "value": "",
                                 "error": f"{meaning} 不能为空"
                             })
                             invalid_count += 1
@@ -4321,6 +4512,7 @@ class ImportExportService:
                                     "sheet": sheet["name"],
                                     "row": row_num,
                                     "field": field_label,
+                                    "value": field_value_str,
                                     "error": f"【枚举值无效】'{field_value_str}' 不是有效的 {field_label}，请检查枚举值配置"
                                 })
                                 invalid_count += 1
@@ -4341,14 +4533,32 @@ class ImportExportService:
                     
                     if all_bk_empty:
                         if operation_mode == "create":
-                            bk_field_names = "、".join([f.name for f in bk_fields])
-                            errors.append({
-                                "sheet": sheet["name"],
-                                "row": row_num,
-                                "field": bk_field_names,
-                                "error": "【业务关键字】新增必填"
-                            })
-                            invalid_count += 1
+                            # [FIX 2026-06-17] 如果对象有 key_template 且 enabled + auto_suggest，
+                            # 则 business_key 为空时不应报必填错误，改为 warning
+                            # 例: business_object 的 code 字段，pattern="{service_module_code}{SEQ:2}"
+                            kt_info = self._get_key_template_info(obj)
+                            if kt_info.get('enabled') and kt_info.get('auto_suggest'):
+                                # key_template 可以自动生成，降级为 warning
+                                bk_field_names = "、".join([f.name for f in bk_fields])
+                                errors.append({
+                                    "sheet": sheet["name"],
+                                    "row": row_num,
+                                    "field": bk_field_names,
+                                    "value": "",
+                                    "error": f"【业务关键字】{bk_field_names}为空，将由编码模板自动生成",
+                                    "severity": "warning"
+                                })
+                                # warning 不计入 invalid_count，不阻止导入
+                            else:
+                                bk_field_names = "、".join([f.name for f in bk_fields])
+                                errors.append({
+                                    "sheet": sheet["name"],
+                                    "row": row_num,
+                                    "field": bk_field_names,
+                                    "value": "",
+                                    "error": "【业务关键字】新增必填"
+                                })
+                                invalid_count += 1
                     else:
                         if composite_key in existing_composite_keys:
                             bk_field_names = "、".join([f.name for f in bk_fields])
@@ -4356,6 +4566,7 @@ class ImportExportService:
                                 "sheet": sheet["name"],
                                 "row": row_num,
                                 "field": bk_field_names,
+                                "value": composite_key.replace("||", " + "),
                                 "error": "【业务关键字】组合值重复：{0}".format(composite_key.replace("||", " + "))
                             })
                             invalid_count += 1
@@ -4374,6 +4585,7 @@ class ImportExportService:
                                         "sheet": sheet["name"],
                                         "row": row_num,
                                         "field": bk_field_names,
+                                        "value": composite_key.replace("||", " + "),
                                         "error": f"【业务关键字】数据库中已存在相同记录{version_hint}"
                                     })
                                     invalid_count += 1
@@ -4464,6 +4676,7 @@ class ImportExportService:
                                                 "sheet": sheet["name"],
                                                 "row": row_num,
                                                 "field": field_label,
+                                                "value": source_value_str,
                                                 "error": error_msg,
                                                 "hint": hint
                                             })
@@ -4480,6 +4693,7 @@ class ImportExportService:
                                 "sheet": sheet["name"],
                                 "row": row_num,
                                 "field": "操作模式",
+                                "value": operation_mode,
                                 "error": f"【新增限制】{obj_name} 当前不满足新增条件（addability 规则），无法新增"
                             })
                             invalid_count += 1
@@ -4633,7 +4847,19 @@ class ImportExportService:
                             if resolve_to_object:
                                 target_type = resolve_to_object
                             elif resolve_to_field:
-                                target_type_idx = headers.index(resolve_to_field) if resolve_to_field in headers else -1
+                                # [FIX 2026-06-16 BMRD] resolve_to_field 也是字段ID
+                                # (如 annotation.target_id 的 resolve_to_field='target_type'),
+                                # 需要先通过 field_map 找到 header, 再取列值.
+                                # 之前直接 headers.index(resolve_to_field) 找不到
+                                # (因为 header 是 '关联对象类型' 不是 'target_type').
+                                target_type_idx = -1
+                                if field_map:
+                                    for hdr, fid in field_map.items():
+                                        if fid == resolve_to_field:
+                                            target_type_idx = headers.index(hdr) if hdr in headers else -1
+                                            break
+                                if target_type_idx < 0:
+                                    target_type_idx = headers.index(resolve_to_field) if resolve_to_field in headers else -1
                                 if target_type_idx >= 0 and target_type_idx < len(row):
                                     target_type = row[target_type_idx]
                                     # [FIX 2026-06-16 BMRD] target_type 是从 Excel 取的,
@@ -4780,6 +5006,7 @@ class ImportExportService:
         operation_mode_idx = headers.index("操作模式") if has_operation_mode else -1
 
         logger.info(f"[Import] {object_type}导入 - headers: {headers[:10]}, has_operation_mode={has_operation_mode}")
+        logger.info(f"[Import] {object_type}导入 - field_map: {field_map}")
 
         # [SYMBOL] 性能优化：批量预加载外键引用
         lookup_version_id = context.get('version_id')
@@ -4789,7 +5016,11 @@ class ImportExportService:
         failed_count = 0
         skipped_count = 0
         deleted_count = 0
+        # [NEW v1.2.3 2026-06-17] 拆分 created / updated 统计，给前端第四步骤用
+        created_count = 0
+        updated_count = 0
         errors = []
+        warnings = []
         
         total_rows = len(rows) - 1
         type_name = obj.name or object_type
@@ -4851,8 +5082,18 @@ class ImportExportService:
                     meta_field = obj.get_field(field_id)
                     if meta_field and value is not None:
                         value = self._convert_value(value, meta_field)
+                        # [FIX 2026-06-17] 枚举字段: 拆解 "CODE - LABEL" 格式为 CODE
+                        # Excel 导出的枚举值格式为 "PULL - 拉"，但数据库只存 CODE "PULL"
+                        # _parse_enum_display_to_code 之前只在验证阶段调用，字段赋值时未调用
+                        enum_type_ref = getattr(meta_field.semantics, 'enum_type_ref', None) or (
+                            hasattr(meta_field, 'ui') and getattr(meta_field.ui, 'enum_type', None)
+                        )
+                        if not enum_type_ref:
+                            enum_type_ref = self._get_enum_type_id_from_value_help(meta_field)
+                        if enum_type_ref and isinstance(value, str):
+                            value = self._parse_enum_display_to_code(value)
                     record[field_id] = value
-            
+
             for parent_header, parent_info in parent_key_headers.items():
                 parent_code_idx = headers.index(parent_header) if parent_header in headers else -1
                 logger.debug(f"[Import] 检查父对象列: header={parent_header}, idx={parent_code_idx}")
@@ -4871,12 +5112,20 @@ class ImportExportService:
                                     logger.info(f"[Import] 解析父对象成功: {parent_id_field}={parent_record.get('id')}")
                                 else:
                                     logger.warning(f"[Import] 未找到父对象: {parent_info['parent_type']}.code={parent_code}")
-            
+
+            # [FIX 2026-06-16 BMRD] 先过滤, 再做动态 FK 解析
+            # 之前 FK 解析在过滤之前, 导致解析出来的 target_id (import_visible=false) 被过滤掉
+            # 导致创建时报 "关联对象ID 不能为空" 错
+            record = self._filter_import_record(record, obj, operation_mode)
+            logger.info(f"[DEBUG IMPORT] {object_type} row={row_num} operation_mode={operation_mode} record={record}")
+
             # 外键解析：根据 resolve_from_field 和 resolve_to_object/resolve_to_field 自动解析外键ID
             # 借鉴 SAP @ObjectModel.foreignKey.association 注解
             # 支持两种模式：
             #   1. 静态模式: resolve_to_object = "business_object" （硬编码目标对象类型）
             #   2. 动态模式: resolve_to_field = "target_type"  （从同记录另一字段取目标类型，用于多态外键）
+            # [FIX 2026-06-16 BMRD] 在 filter 之后做 FK 解析, 这样解析出来的 FK ID 不会被 filter 掉
+            # 同时确保 resolve_from 字段 (如 target_code, 是 parent_key + resolve_from_source) 已经被保留
             for field in obj.fields:
                 resolve_from = getattr(field.semantics, 'resolve_from_field', None)
                 resolve_to_object = getattr(field.semantics, 'resolve_to_object', None)
@@ -4893,7 +5142,17 @@ class ImportExportService:
                                 resolve_from = code_field
 
                 if resolve_from and (resolve_to_object or resolve_to_field):
-                    if field.id not in record or record.get(field.id) is None:
+                    # [FIX 2026-06-16 BMRD] 不仅检查 None, 还检查值是否为有效整数 ID
+                    # Excel 中 '源业务对象' 列的值是中文名 (如 '供应商'), 不是 ID
+                    # 这种情况下应从 resolve_from_field (如 source_code) 重新解析
+                    current_value = record.get(field.id)
+                    needs_resolve = current_value is None
+                    if current_value is not None and field.field_type.value in ('integer', 'int'):
+                        try:
+                            int(current_value)
+                        except (ValueError, TypeError):
+                            needs_resolve = True
+                    if needs_resolve:
                         source_value = record.get(resolve_from)
                         if source_value:
                             if resolve_to_field:
@@ -4920,9 +5179,8 @@ class ImportExportService:
                                     record[field.id] = target_record.get('id')
                                 else:
                                     logger.warning(f"[Import] 未找到外键对象: {resolve_to_object}.code={source_value}")
-            
-            record = self._filter_import_record(record, obj, operation_mode)
-            logger.info(f"[DEBUG IMPORT] {object_type} row={row_num} operation_mode={operation_mode} record={record}")
+
+            logger.info(f"[DEBUG IMPORT] {object_type} row={row_num} after FK resolve record={record}")
 
             if context:
                 valid_fields = set()
@@ -4948,9 +5206,22 @@ class ImportExportService:
             try:
                 if operation_mode == "delete":
                     logger.info(f"[Import] 执行删除操作")
-                    self._delete_record(object_type, record, obj.import_export)
-                    deleted_count += 1
-                    success_count += 1
+                    try:
+                        self._delete_record(object_type, record, obj.import_export)
+                        deleted_count += 1
+                        success_count += 1
+                    except ValueError as ve:
+                        # [FIX 2026-06-16] 删除不存在的记录降级为 skip，不作为硬失败
+                        logger.warning(f"[Import] 删除记录不存在，跳过: {ve}")
+                        skipped_count += 1
+                        warnings.append({
+                            "row": row_num,
+                            "operation": operation_mode,
+                            "field": "编码",
+                            "value": record.get("code", ""),
+                            "message": f"记录不存在: {ve}",
+                            "severity": "warning"
+                        })
                 elif operation_mode == "skip":
                     logger.info(f"[Import] 跳过记录")
                     skipped_count += 1
@@ -4962,28 +5233,42 @@ class ImportExportService:
                     logger.info(f"[Import] 新增数据中version_id={record.get('version_id')}")
                     if conflict_strategy == "upsert":
                         logger.info(f"[Import] conflict_strategy=upsert，使用 upsert 处理可能已存在的记录")
-                        if self._upsert_record(object_type, record, obj.import_export):
+                        upsert_result = self._upsert_record(object_type, record, obj.import_export)
+                        if upsert_result["success"]:
                             success_count += 1
+                            # [NEW v1.2.3 2026-06-17] 拆分 created / updated 统计
+                            if upsert_result.get("operation") == "create":
+                                created_count += 1
+                            else:
+                                updated_count += 1
                         else:
                             failed_count += 1
-                            errors.append({"row": row_num, "error": "Upsert failed"})
+                            errors.append({"row": row_num, "operation": operation_mode, "field": "编码", "value": record.get("code", ""), "message": upsert_result.get("error", "Upsert failed")})
                     else:
                         self.manage_service.create(CreateRequest(object_type=object_type, data=record))
                         success_count += 1
+                        created_count += 1
                 elif operation_mode == "update":
                     # [SYMBOL] 关键修复：如果 conflict_strategy=upsert，执行 upsert 而不是更新
                     if conflict_strategy == "upsert":
                         logger.info(f"[Import] 执行upsert操作 (operation_mode=update 但 conflict_strategy=upsert)")
                         if 'version_id' not in record and context.get('version_id'):
                             record['version_id'] = context.get('version_id')
-                        if self._upsert_record(object_type, record, obj.import_export):
+                        upsert_result = self._upsert_record(object_type, record, obj.import_export)
+                        if upsert_result["success"]:
                             success_count += 1
+                            if upsert_result.get("operation") == "create":
+                                created_count += 1
+                            else:
+                                updated_count += 1
                         else:
                             failed_count += 1
+                            errors.append({"row": row_num, "operation": operation_mode, "field": "编码", "value": record.get("code", ""), "message": upsert_result.get("error", "Upsert failed")})
                     else:
                         logger.info(f"[Import] 执行更新操作")
                         self._update_record(object_type, record, obj.import_export)
                         success_count += 1
+                        updated_count += 1
                 else:
                     logger.info(f"[Import] 执行upsert操作 (conflict_strategy={conflict_strategy})")
                     # [SYMBOL] 确保version_id存在
@@ -4991,10 +5276,16 @@ class ImportExportService:
                         record['version_id'] = context.get('version_id')
                     logger.info(f"[Import] upsert数据中version_id={record.get('version_id')}")
                     if conflict_strategy == "upsert":
-                        if self._upsert_record(object_type, record, obj.import_export):
+                        upsert_result = self._upsert_record(object_type, record, obj.import_export)
+                        if upsert_result["success"]:
                             success_count += 1
+                            if upsert_result.get("operation") == "create":
+                                created_count += 1
+                            else:
+                                updated_count += 1
                         else:
                             failed_count += 1
+                            errors.append({"row": row_num, "operation": operation_mode, "field": "编码", "value": record.get("code", ""), "message": upsert_result.get("error", "Upsert failed")})
                     elif conflict_strategy == "skip":
                         if self._record_exists(object_type, record, obj.import_export):
                             logger.info(f"[Import] 记录已存在，跳过")
@@ -5003,12 +5294,14 @@ class ImportExportService:
                         result = self.manage_service.create(CreateRequest(object_type=object_type, data=record))
                         if result.success:
                             success_count += 1
+                            created_count += 1
                         else:
                             failed_count += 1
                     else:
                         result = self.manage_service.create(CreateRequest(object_type=object_type, data=record))
                         if result.success:
                             success_count += 1
+                            created_count += 1
                         else:
                             failed_count += 1
 
@@ -5018,18 +5311,24 @@ class ImportExportService:
                 errors.append({
                     "row": row_num,
                     "operation": operation_mode,
+                    "field": "编码",
+                    "value": record.get("code", ""),
                     "message": f"{type(e).__name__}: {str(e)}"
                 })
 
-        logger.info(f"[Import] 导入完成: success={success_count}, failed={failed_count}, skipped={skipped_count}, deleted={deleted_count}")
+        logger.info(f"[Import] 导入完成: success={success_count}, created={created_count}, updated={updated_count}, "
+                    f"failed={failed_count}, skipped={skipped_count}, deleted={deleted_count}")
         logger.info(f"[Import] errors: {errors[:5]}")
-        
+
         return {
             "success": success_count,
+            "created": created_count,   # [NEW v1.2.3 2026-06-17] 拆分 created
+            "updated": updated_count,   # [NEW v1.2.3 2026-06-17] 拆分 updated
             "failed": failed_count,
             "skipped": skipped_count,
             "deleted": deleted_count,
-            "errors": errors[:20]
+            "errors": errors[:20],
+            "warnings": warnings[:20],  # [NEW v1.2.3 2026-06-17] 告警明细
         }
 
     def _get_business_key_fields(self, object_type: str) -> List:
@@ -5120,11 +5419,11 @@ class ImportExportService:
             raise ValueError("要更新的记录不存在: {0}".format(key_desc))
 
     def _upsert_record(self, object_type: str, record: Dict[str, Any],
-                       config: ImportExportConfig) -> bool:
+                       config: ImportExportConfig) -> dict:
         """Upsert记录：存在则更新，不存在则插入
-        
+
         Returns:
-            bool: 操作是否成功
+            dict: {"success": bool, "error": str or None, "operation": "create"|"update"}
         """
 
         record_version_id = record.get('version_id')
@@ -5145,18 +5444,65 @@ class ImportExportService:
                 record['version_id'] = record_version_id
                 logger.info(f"[Upsert] 强制设置 record.version_id={record_version_id}")
 
+            # [FIX 2026-06-16] UPDATE 时移除 parent_key 字段及其 FK 源字段，避免 PARENT_FIELD_IMMUTABLE 错误
+            # parent_key 字段（如 sub_domain_id）在 hierarchy_validation 中被标记为 immutable
+            # 导入时 FK 解析可能得到与原记录不同的 parent_key 值，但 update 不允许修改
+            # 必须同时移除 parent_key 字段和其 resolve_from_field（如 domain_code），
+            # 否则 action_executor._resolve_foreign_keys 会从 resolve_from_field 重新解析出 parent_key
+            obj_meta = registry.get(object_type)
+            if obj_meta:
+                parent_key_fields_to_remove = set()
+                fk_source_fields_to_remove = set()
+                for field in obj_meta.fields:
+                    is_pk = getattr(field.semantics, 'parent_key', False)
+                    if is_pk and field.id in record:
+                        original_value = existing.get(field.id)
+                        new_value = record.get(field.id)
+                        if original_value is not None and new_value is not None and str(original_value) != str(new_value):
+                            logger.warning(f"[Upsert] parent_key 字段 {field.id} 值不同 (原={original_value}, 新={new_value})，导入不允许修改，将使用原值")
+                        parent_key_fields_to_remove.add(field.id)
+                        # 同时找到该 parent_key 的 resolve_from_field（FK 源字段）
+                        resolve_from = getattr(field.semantics, 'resolve_from_field', None)
+                        if resolve_from and resolve_from in record:
+                            fk_source_fields_to_remove.add(resolve_from)
+                for fk in parent_key_fields_to_remove | fk_source_fields_to_remove:
+                    logger.info(f"[Upsert] 移除 parent_key 相关字段: {fk}")
+                    del record[fk]
+            else:
+                logger.warning(f"[Upsert] registry.get({object_type}) returned None, cannot remove parent_key fields")
+
             result = self.manage_service.update(UpdateRequest(object_type=object_type, id=record_id, data=record))
-            return result.success
+            logger.info(f"[Upsert] update result: success={result.success}, error={result.error}, record_keys_after_remove={list(record.keys())}")
+            if result.success:
+                return {"success": True, "error": None, "operation": "update"}
+            else:
+                error_msg = f"更新失败: {result.error} - {result.message}"
+                logger.warning(f"[Upsert] {error_msg}")
+                return {"success": False, "error": error_msg, "operation": "update"}
         else:
             logger.info(f"[Upsert] 未找到已存在记录，将执行插入操作")
             if 'version_id' not in record:
                 logger.warning(f"[Upsert] [WARNING] record中没有version_id！")
             else:
                 logger.info(f"[Upsert] record.version_id={record_version_id}")
+
+            # [FIX 2026-06-17] 如果 code 为空且对象有 key_template，自动生成 code
+            # action_executor._do_create 不走 bo_framework 拦截器链，
+            # KeyTemplateInterceptor 不会执行，需要手动生成
+            code_value = record.get('code', '')
+            if (not code_value or not str(code_value).strip()):
+                kt_code = self._auto_generate_code_from_key_template(object_type, record)
+                if kt_code:
+                    record['code'] = kt_code
+                    logger.info(f"[Upsert] Key template auto-generated code: {kt_code}")
+
             result = self.manage_service.create(CreateRequest(object_type=object_type, data=record))
-            if not result.success:
-                logger.warning(f"[Upsert] 创建失败: {result.error} - {result.message}")
-            return result.success
+            if result.success:
+                return {"success": True, "error": None, "operation": "create"}
+            else:
+                error_msg = f"创建失败: {result.error} - {result.message}"
+                logger.warning(f"[Upsert] {error_msg}")
+                return {"success": False, "error": error_msg, "operation": "create"}
 
     def _record_exists(self, object_type: str, record: Dict[str, Any],
                        config: ImportExportConfig) -> bool:
