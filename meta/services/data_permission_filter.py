@@ -22,8 +22,6 @@ class DataPermissionFilter:
                      conditions: List[QueryCondition]) -> List[QueryCondition]:
         from meta.services.auth_middleware import is_admin, get_current_user
 
-        current_user = get_current_user()
-
         if is_admin():
             return conditions
 
