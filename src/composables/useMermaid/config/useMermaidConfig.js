@@ -110,7 +110,7 @@ export function getElkConfig(data = null, layoutType = 'default', preserveModelO
     
     // 父容器间距 - 嵌套容器之间的间距
     'elk.spacing.parentParent': 50,
-    
+
     // 节点与容器边缘的间距
     'elk.padding.nodes': '[top=30,left=50,right=50,bottom=30]',
 

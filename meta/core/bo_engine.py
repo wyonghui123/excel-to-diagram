@@ -24,6 +24,7 @@ class BOEngine:
         sort: List[Dict[str, str]] = None,
         search: str = "",
         search_fields: List[str] = None,
+        skip_data_permission: bool = False,
     ) -> Dict[str, Any]:
         if not self._qs:
             return {"data": [], "total": 0, "has_more": False}
@@ -63,6 +64,8 @@ class BOEngine:
 
         if search_fields:
             request.search_fields = search_fields
+        if skip_data_permission:
+            request.skip_data_permission = True
 
         result = self._qs.search(request)
         return {

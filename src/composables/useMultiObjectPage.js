@@ -699,6 +699,18 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
       chartData.relationTypeFilter = relationCodesForChart
     }
 
+    // [V1.2.9 修复] 传递 relationIds（精确关系记录 IDs）和 categoryTypes
+    // 之前只传 relationTypeFilter（关系类型 codes），导致图表页 findNodeIdsForCodes 过度匹配：
+    //   只要节点的 relationCodes 数组包含任意匹配 code，整个节点就被选中
+    // 现在传 relationIds，图表页用反向匹配（节点的 relationIds 与传入的有交集才选中），
+    //   精确还原用户在架构管理页的关系范围选择
+    if (relationExtra.relationIds?.length > 0) {
+      chartData.relationIds = [...relationExtra.relationIds]
+    }
+    if (relationExtra.categoryTypes?.length > 0) {
+      chartData.relationCategoryTypes = [...relationExtra.categoryTypes]
+    }
+
     return chartData
   }
 
@@ -755,14 +767,26 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
 
   function restoreStateFromDiagram() {
     try {
-      if (sessionStorage.getItem('returningFromDiagram') !== 'true') return false
       const stored = sessionStorage.getItem(STATE_RESTORE_KEY)
-      // [v32-FIX] 无论是否成功解析, 都要清掉 flag 防止后续误触发
-      sessionStorage.removeItem('returningFromDiagram')
+      const flag = sessionStorage.getItem('returningFromDiagram')
+      // [FIX v3.19] 任何时候 sessionStorage 有快照都尝试恢复 (不再严格依赖 flag)
+      //   触发场景: 1) router beforeEach 离开时设的 flag 2) F5 刷新后快照仍在
+      //   snapshot 由 onBeforeRouteLeave 维护, 不需要 flag 也能正确工作
+      // 清理 flag, 防止重复触发 (snapshot 本身保留供下次使用)
+      if (flag === 'true') {
+        sessionStorage.removeItem('returningFromDiagram')
+      }
       if (!stored) return false
 
       const state = JSON.parse(stored)
       if (!state || typeof state !== 'object') return false
+
+      // [FIX v3.19] 过期保护: snapshot 超过 1 小时不算, 避免冷数据恢复导致状态混乱
+      const SAVED_TTL_MS = 60 * 60 * 1000
+      if (state.savedAt && (Date.now() - state.savedAt) > SAVED_TTL_MS) {
+        sessionStorage.removeItem(STATE_RESTORE_KEY)
+        return false
+      }
 
       // [v32-FIX] 先恢复版本上下文，确保 v-if="selectedVersionId" 立即为 true，树能渲染
       //   然后再恢复 scopeIds/initialBoIds/initialRelationCodes 到树上

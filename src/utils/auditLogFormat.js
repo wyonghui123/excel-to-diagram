@@ -184,20 +184,170 @@ export function getUserNameDisplay(userName) {
 }
 
 /**
- * _record 字段名业务化 (仅列表页字段过滤 + 详情页显示)
- * @param {string} fieldName
- * @returns {string}
+ * 内部技术字段精确集合 (业务视图应该隐藏)
+ *
+ * 隐藏规则:
+ * 1. 精确匹配: 以下 Set 中的字段名
+ * 2. 模式匹配: isInternalField() 中补充 _id 后缀等规则
  */
 export const INTERNAL_FIELDS = new Set([
   '_record',          // 整个对象的 cud summary, 在 group header 已表明
   'extra_data',       // 元数据
   'cascade_root_id',  // 级联来源 ID
-  'cascade_root_action'
+  'cascade_root_action',
+  // 系统时间戳/操作人 (业务人员无需在变更字段中看到)
+  'id',
+  'created_at',
+  'updated_at',
+  'created_by',
+  'updated_by',
+  // annotation 技术字段
+  'target_type',
+  'target_id',
+])
+
+/**
+ * FK 外键字段后缀模式: *_id (但不含 'id' 本身)
+ * 匹配: version_id, source_bo_id, domain_id, product_id, owner_id 等
+ * 不匹配: id (已在上面的 Set 中)
+ */
+const FK_ID_SUFFIX_RE = /^(?!id$).*_id$/
+
+/**
+ * Virtual display field suffix pattern: source_xxx_name / target_xxx_code
+ * These are redundant fields derived from FK JOINs; FK structured values already include target_display
+ */
+const VIRTUAL_DISPLAY_RE = /^(source|target)_.+_(name|code)$/
+
+/**
+ * Business-visible FK fields - these have _id suffix but should NOT be hidden
+ * because they carry business meaning (e.g. owner_id = who is responsible)
+ */
+const BUSINESS_VISIBLE_FK_FIELDS = new Set([
+  'owner_id',  // product owner - business meaningful
 ])
 
 /**
  * 是否是内部技术字段 (业务视图应该隐藏)
+ *
+ * 隐藏规则:
+ * 1. 精确匹配 INTERNAL_FIELDS 集合
+ * 2. FK 外键字段: *_id 后缀 (version_id, source_bo_id 等), 但排除 BUSINESS_VISIBLE_FK_FIELDS
+ * 3. 虚拟冗余显示字段: source_xxx_name, target_xxx_code 等
  */
 export function isInternalField(fieldName) {
-  return INTERNAL_FIELDS.has(fieldName)
+  if (!fieldName) return false
+  if (INTERNAL_FIELDS.has(fieldName)) return true
+  if (BUSINESS_VISIBLE_FK_FIELDS.has(fieldName)) return false
+  if (FK_ID_SUFFIX_RE.test(fieldName)) return true
+  if (VIRTUAL_DISPLAY_RE.test(fieldName)) return true
+  return false
+}
+
+/**
+ * 字段名 → 业务名 翻译表
+ *
+ * 把技术字段名翻译为业务人员可理解的术语
+ * 优先级: 此表 > 原字段名
+ */
+export const FIELD_LABELS = {
+  // 通用业务字段
+  code: '编码',
+  name: '名称',
+  description: '描述',
+  is_current: '当前版本',
+  is_active: '是否活跃',
+  visibility: '可见性',
+
+  // relationship (业务关系)
+  relation_type: '关系类型',
+  relation_direction: '关系方向',
+  relation_desc: '关系描述',
+  relation_code: '关系编码',
+  source_code: '来源对象',
+  target_code: '目标对象',
+
+  // annotation (备注)
+  category: '分类',
+  content: '内容',
+
+  // product
+  owner_id: '负责人',
+}
+
+/**
+ * 枚举值 → 业务值 翻译表
+ *
+ * 把技术枚举值翻译为业务人员可理解的中文
+ */
+export const FIELD_VALUE_LABELS = {
+  // 关系方向
+  BIDIRECTIONAL: '双向',
+  UNIDIRECTIONAL: '单向',
+
+  // 关系类型
+  UPDATES: '更新',
+  DEPENDS_ON: '依赖',
+  CALLS: '调用',
+  IMPLEMENTS: '实现',
+  EXTENDS: '扩展',
+  REFERENCES: '引用',
+  CONSUMES: '消费',
+  PRODUCES: '生产',
+  USES: '使用',
+  COMPOSES: '组合',
+  AGGREGATES: '聚合',
+
+  // 可见性
+  public: '公开',
+  private: '私有',
+  internal: '内部',
+
+  // 布尔值
+  true: '是',
+  false: '否',
+}
+
+/**
+ * 获取字段业务名
+ * @param {string} fieldName - 后端字段名
+ * @returns {string} 业务名 (找不到回退格式化后的字段名)
+ */
+export function getFieldLabel(fieldName) {
+  if (!fieldName) return ''
+  if (FIELD_LABELS[fieldName]) return FIELD_LABELS[fieldName]
+  // 回退: 把下划线分隔转为更可读的格式 (relation_type → Relation Type)
+  // 但优先用翻译表
+  return fieldName
+}
+
+/**
+ * 获取字段值业务显示
+ * @param {string} value - 后端字段值
+ * @param {string} [fieldName] - 字段名 (用于上下文相关翻译)
+ * @returns {string} 业务值
+ */
+export function getFieldValueDisplay(value, fieldName) {
+  if (value === null || value === undefined || value === '') return '(空)'
+  const str = String(value)
+
+  // 1. FK 结构化值: {"target_type":"business_object","target_id":470,"target_key":"BO_PO","target_display":"采购订单"}
+  //    → 显示 target_display
+  if (str.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(str)
+      if (parsed.target_display) return parsed.target_display
+      if (parsed.target_key) return parsed.target_key
+      // 降级: 显示 JSON 中的可读部分
+      return str
+    } catch {
+      // 不是 JSON, 继续后续处理
+    }
+  }
+
+  // 2. 枚举值翻译
+  if (FIELD_VALUE_LABELS[str]) return FIELD_VALUE_LABELS[str]
+
+  // 3. 原值
+  return str
 }

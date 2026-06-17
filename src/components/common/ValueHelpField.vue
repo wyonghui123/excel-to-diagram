@@ -156,6 +156,13 @@ onMounted(async () => {
   if (props.modelValue != null && props.modelValue !== '' &&
       !(Array.isArray(props.modelValue) && props.modelValue.length === 0)) {
     internalValue.value = props.modelValue
+    // [FIX 2026-06-16] 编辑态预填场景，modelValue 是初始值。
+    // 上面 watch(() => props.modelValue) 不带 immediate，不会主动 resolve。
+    // 如果 modelValue 对应的 option 不在 optionsList 里（比如 cascade_select 把
+    // domain 列表按 version_id=764 过滤了，但 formData 里 source_domain_id=1
+    // 属于其他 version），el-select 找不到 option → fallback 显示 "1"。
+    // 主动调一次 resolveDisplay，让后端按 value 直接查 id=1 的 name 并填 displayValue。
+    resolveDisplay(props.modelValue)
   }
 })
 

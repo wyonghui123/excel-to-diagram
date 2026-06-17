@@ -1,5 +1,6 @@
 from typing import List, Dict, Any, Optional
 import logging
+import threading
 
 from meta.core.query_builder import QueryBuilder
 from meta.core.models import MetaObject, registry, QueryOperator, FieldStorage
@@ -37,6 +38,24 @@ from meta.services.query.filter_utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+# [FIX 2026-06-17] 线程局部 user_id (供 async export/import 后台线程使用)
+# flask.g 在子线程里不可访问, ImportExportService 在 _run_export 进入时设置本变量
+_thread_local = threading.local()
+
+
+def set_thread_user_id(user_id):
+    """[FIX 2026-06-17] 在当前线程设置 user_id (供 _apply_data_permission fallback 使用)"""
+    _thread_local.user_id = user_id
+
+
+def clear_thread_user_id():
+    """[FIX 2026-06-17] 清理当前线程的 user_id"""
+    _thread_local.user_id = None
+
+
+def _get_thread_user_id():
+    return getattr(_thread_local, 'user_id', None)
 
 
 def discover_analytics_fields(meta_obj: MetaObject) -> List[AnalyticsFieldInfo]:
@@ -295,7 +314,7 @@ class QueryService:
             if or_group:
                 builder.or_where(or_group)
 
-        self._apply_data_permission(builder, meta_obj, request.object_type)
+        self._apply_data_permission(builder, meta_obj, request.object_type, request)
         
         self._apply_soft_delete_filter(builder, meta_obj, request.include_deleted, request.deleted_only)
 
@@ -1485,18 +1504,41 @@ class QueryService:
         builder: QueryBuilder,
         meta_obj: MetaObject,
         object_type: str,
+        request: 'SearchRequest' = None,
     ) -> None:
+        # [V1.2.1 2026-06-16] skip_data_permission 标志位
+        # 跨域关系创建的级联字段 ValueHelp 需要看到域外选项
+        if request and getattr(request, 'skip_data_permission', False):
+            logger.info(f"[DataPerm] Skip data permission for {object_type} (skip_data_permission=True)")
+            return
+
         try:
             from meta.services.auth_middleware import get_current_user, is_admin
             from meta.services.data_permission_filter import DataPermissionFilter
 
-            user = get_current_user()
-            if not user or is_admin(user):
-                return
-
-            user_id = user.get('user_id')
-            if not user_id:
-                return
+            # [FIX 2026-06-17] 优先级: request.user_id > thread-local user_id > g.current_user
+            explicit_uid = getattr(request, 'user_id', None) if request else None
+            if explicit_uid:
+                user_id = explicit_uid
+                user = {'user_id': user_id, 'username': f'uid-{user_id}'}
+                if is_admin(user):
+                    return
+            else:
+                # 后台线程 (async export/import) 中 flask.g.current_user 不可用,
+                # 但 ImportExportService 设置了 thread-local user_id 作为 fallback
+                thread_uid = _get_thread_user_id()
+                if thread_uid:
+                    user_id = thread_uid
+                    user = {'user_id': user_id, 'username': f'uid-{user_id}'}
+                    if is_admin(user):
+                        return
+                else:
+                    user = get_current_user()
+                    if not user or is_admin(user):
+                        return
+                    user_id = user.get('user_id')
+                    if not user_id:
+                        return
 
             # [FIX 2026-06-14] 优先尝试 dimension scope 派生条件
             # 原因: value-help / search-help / report 等 query_service.search 路径
@@ -1607,9 +1649,17 @@ class QueryService:
             return False
 
         # 4. 应用到 builder
+        # [V1.2.1 2026-06-16] 支持 OR 条件 (relationship 的 source_bo_id OR target_bo_id)
         if len(per_role_conds) == 1:
             for c in per_role_conds[0]:
-                self._apply_single_cond(builder, c)
+                if c.get('type') == 'or':
+                    # 单 role 内的 OR 条件 (如 relationship)
+                    self._apply_or_group(builder, c['conditions'])
+                elif c.get('type') == 'and':
+                    for ac in c['conditions']:
+                        self._apply_single_cond(builder, ac)
+                else:
+                    self._apply_single_cond(builder, c)
         else:
             # 多 role → OR-of-AND
             all_and_segments = []

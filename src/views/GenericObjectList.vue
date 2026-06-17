@@ -19,6 +19,8 @@
 import { ref, computed } from 'vue'
 import { MetaListPage } from '@/components/common/MetaListPage'
 
+defineOptions({ name: 'GenericObjectList' })
+
 const props = defineProps({
   objectType: {
     type: String,

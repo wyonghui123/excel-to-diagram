@@ -12,6 +12,7 @@
 import { MAX_RECURSION_DEPTH, checkDepth, checkCycle, createVisitedSet } from '../../../services/groupModel/safetyUtils.js'
 import { formatContainerTitle } from '../../../utils/formatContainerTitle.js'
 
+// [v1.1.15 回退] 颜色由用户/系统颜色配置控制, 不在样式表中硬编码
 const LEVEL_STYLES = {
   1: { fill: '#f5f5f5', stroke: '#333333', strokeWidth: 1 },
   2: { fill: '#ffffff', stroke: '#333333', strokeWidth: 1 },
@@ -135,21 +136,13 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
   const styleLines = []
   let code = ''
 
-  console.log(`[generateGroupCode] depth=${depth}, group:`, {
-    id: group?.id,
-    type: group?.type,
-    title: group?.title,
-    containersCount: group?.containers?.length || 0,
-    childrenCount: group?.children?.length || 0
-  })
+  // [v1.1.15 cleanup] 移除调试 console.log
 
   if (!group) {
-    console.log('[generateGroupCode] No group, returning empty')
     return { code, styleLines }
   }
 
   if (!checkDepth(depth, 'GroupLayout.generateGroupCode')) {
-    console.log('[generateGroupCode] Max depth reached, returning empty')
     return { code, styleLines }
   }
 
@@ -158,15 +151,12 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
   }
 
   if (group.id && checkCycle(group.id, visited, 'GroupLayout.generateGroupCode')) {
-    console.log('[generateGroupCode] Cycle detected, returning empty')
     return { code, styleLines }
   }
 
   const hasContent = hasGroupContent(group, containers)
-  console.log(`[generateGroupCode] hasGroupContent result: ${hasContent}`)
-  
+
   if (!hasContent && !group.directNodes) {
-    console.log('[generateGroupCode] No content and no directNodes, returning empty')
     return { code, styleLines }
   }
 
@@ -317,6 +307,61 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
       }
 
       const container = resolveContainer(containerData, containers)
+
+      // [v1.1.15 修复] BO 图表中 SubDomain 容器有 nested containers (SM) 但没有 nodes
+      //   旧逻辑: resolveContainer 找不到 SubDomain (lookup table 只有 SM), 整个被 skip
+      //   修复: 当 containerData 有 nested containers 时, 手动生成外层 wrapper + 递归处理嵌套容器
+      //         避免调用完整 generateGroupCode 造成双重 wrapper
+      if ((!container || !container.nodes || container.nodes.length === 0) &&
+          containerData && typeof containerData === 'object' &&
+          containerData.containers && containerData.containers.length > 0 &&
+          !containerData._isDirectNodesContainer) {
+        // 容器包含子容器但自身没有 BO 节点 (例如 SubDomain 包含 SM 但没有自己的 BO)
+        // 手动生成外层 subgraph wrapper, 内部递归处理 nested containers
+        const subGroupId = `G${groupIndex}_C${idx + 1}`
+        const subDirection = containerData.direction || 'TB'
+        const subIndent = indent
+        const subInnerIndent = indent + '  '
+        let innerCode = ''
+
+        containerData.containers.forEach((nestedContainer, nIdx) => {
+          const nestedResolved = resolveContainer(nestedContainer, containers)
+          if (nestedResolved && nestedResolved.nodes && nestedResolved.nodes.length > 0) {
+            if (nestedResolved.enabled === false) {
+              // disabled 嵌套容器: 仅外提节点
+              nestedResolved.nodes.forEach(nodeId => {
+                const actualNodeId = typeof nodeId === 'object' ? (nodeId.id || nodeId.code || nodeId.name) : nodeId
+                if (!definedNodes.has(actualNodeId)) {
+                  const node = nodeMap.get(actualNodeId)
+                  if (node) {
+                    const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+                    innerCode += `${subInnerIndent}${actualNodeId}["${displayText}"]\n`
+                    definedNodes.add(actualNodeId)
+                  }
+                }
+              })
+            } else {
+              const nestedId = `G${groupIndex * 10 + idx + 1}_C${nIdx + 1}`
+              const nestedCode = generateContainerCode(nestedResolved, nIdx, nodeMap, definedNodes, subInnerIndent, nestedId, layoutEngine, links, nextContainerDepth + 2)
+              innerCode += nestedCode
+              // 嵌套容器的 first/last node pair (用于 edge 排序)
+              const firstNodeId = nestedResolved.nodes[0]
+              const firstNodeIdStr = typeof firstNodeId === 'string' ? firstNodeId : (firstNodeId.id || firstNodeId.code || firstNodeId.name)
+              const lastNodeId = nestedResolved.nodes[nestedResolved.nodes.length - 1]
+              const lastNodeIdStr = typeof lastNodeId === 'string' ? lastNodeId : (lastNodeId.id || lastNodeId.code || lastNodeId.name)
+              containerNodePairs.push({ first: firstNodeIdStr, last: lastNodeIdStr })
+            }
+          }
+        })
+
+        // 用外层 wrapper 包装
+        let wrappedSubCode = `${subIndent}subgraph ${subGroupId}["${containerData.title || containerData.name}"]\n${subIndent}  direction ${subDirection}\n`
+        wrappedSubCode += innerCode
+        wrappedSubCode += `${subIndent}end\n`
+        containerCodes.push(wrappedSubCode)
+        return
+      }
+
       if (container && container.nodes && container.nodes.length > 0) {
         // [v32 修复 2026-06-13] 跳过 disabled 容器, 与 disabled group 分支行为一致
         if (container.enabled === false) {

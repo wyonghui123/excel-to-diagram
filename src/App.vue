@@ -16,9 +16,11 @@
           <!-- [FR-007] keep-alive 缓存列表/工作台页面 -->
           <!-- [FR-021] ErrorBoundary 捕获路由页面错误 -->
           <ErrorBoundary>
-            <keep-alive :max="10" :include="cachedRouteNames" :exclude="excludeRouteNames">
-              <router-view />
-            </keep-alive>
+            <router-view v-slot="{ Component }">
+              <keep-alive :max="10" :include="cachedRouteNames" :exclude="excludeRouteNames">
+                <component :is="Component" />
+              </keep-alive>
+            </router-view>
           </ErrorBoundary>
         </AppRootLayout>
       </template>
@@ -53,6 +55,8 @@ const cachedRouteNames = [
   'MetaListPage',      // 通用元数据列表
   'GenericObjectList', // 通用对象列表
   'ObjectDetail',      // 详情查看 (不含编辑)
+  'GenericTabContainer', // 通用 Tab 容器 (v-show 保留状态)
+  'RelationshipManagement', // 架构数据管理 (per-tab 实例 + v-show)
 ]
 
 // [FR-007] 明确排除的组件名

@@ -607,9 +607,10 @@ export function useSvgProcessor(options) {
   }
 
   /**
-   * 清理 svgProcessor 注册的监听器 + 装饰元素
-   * 内部调用 tooltip.cleanup() (useTooltip.js)
-   * 修复: 之前 return 中引用了未定义的 cleanup, 导致 ReferenceError
+   * [v32 2026-06-13] 清理 useSvgProcessor 注册的事件监听器
+   * 调用 tooltip.cleanup() 释放 mouseleave/mouseover 等事件
+   * 幂等设计: 多次调用安全 (tooltip.cleanup 内部清空 _cleanupFns 数组)
+   * 修复: 之前存在两个 const cleanup 导致 SyntaxError
    */
   const cleanup = () => {
     if (tooltip && typeof tooltip.cleanup === 'function') {
@@ -618,17 +619,6 @@ export function useSvgProcessor(options) {
       } catch (e) {
         console.warn('[useSvgProcessor.cleanup] tooltip.cleanup failed:', e)
       }
-    }
-  }
-
-  /**
-   * [v32 2026-06-13] 清理 useSvgProcessor 注册的事件监听器
-   * 调用 tooltip.cleanup() 释放 mouseleave/mouseover 等事件
-   * 幂等设计: 多次调用安全 (tooltip.cleanup 内部清空 _cleanupFns 数组)
-   */
-  const cleanup = () => {
-    if (tooltip && typeof tooltip.cleanup === 'function') {
-      tooltip.cleanup()
     }
   }
 

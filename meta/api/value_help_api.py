@@ -43,6 +43,12 @@ def search_value_help(source_type, source_id):
         source.value_field = request.args.get("value_field", "id")
         source.display_field = request.args.get("display_field", "name")
         source.code_field = request.args.get("code_field", "code")
+        # [V1.2.1 2026-06-16] 从请求参数读取 apply_target_permissions
+        # 前端 useValueHelp 会把 YAML 中的 apply_target_permissions 传过来
+        # 默认 True (应用权限), 跨域关系创建的级联字段设为 False
+        atp = request.args.get("apply_target_permissions", None)
+        if atp is not None:
+            source.apply_target_permissions = atp.lower() in ("true", "1", "yes")
         value_filter_str = request.args.get("value_filter", "")
         if value_filter_str:
             try:
@@ -113,6 +119,10 @@ def resolve_value_help(source_type, source_id):
         source.value_field = request.args.get("value_field", "id")
         source.display_field = request.args.get("display_field", "name")
         source.code_field = request.args.get("code_field", "code")
+        # [V1.2.1 2026-06-16] 从请求参数读取 apply_target_permissions
+        atp = request.args.get("apply_target_permissions", None)
+        if atp is not None:
+            source.apply_target_permissions = atp.lower() in ("true", "1", "yes")
     elif source_type == "custom":
         source.endpoint = source_id
     else:
@@ -204,15 +214,59 @@ def pick_bo_by_code():
 @value_help_bp.route("/api/v2/bo/business_object/<int:bo_id>", methods=["GET"])
 @login_required
 def pick_bo_by_id(bo_id: int):
-    """[V1.2.0] 按 ID 精确选取 BO (不应用 read scope 过滤, 仅含基本字段)
+    """[V1.2.0] 按 ID 精确选取 BO
+
+    两个使用场景:
+      1. ValueHelp 逃生口 (reason=value_help): 跨域关系创建时选域外 BO, 不应用 read scope 过滤
+      2. 默认 (无 reason): 详情页等常规访问, 应用 dim scope 校验
 
     Path:
         bo_id: BO ID
+
+    Query:
+        reason: 可选, "value_help" 表示 ValueHelp 场景, 跳过 dim scope 校验
 
     Response:
         200: {success: true, data: {id, code, name, ...}}
         404: {success: false, error_code: 'BO_NOT_FOUND'}
     """
+    # [FIX v1.2.1 2026-06-16] dim scope 校验
+    # 详情页 GET /api/v2/bo/business_object/{id} 命中此路由 (Flask 路由优先级),
+    # 绕过了 read_bo 的 _check_single_bo_in_dim_scope, 导致域外 BO 详情可被读取.
+    # 修复: 默认应用 dim scope 校验; ValueHelp 场景 (reason=value_help) 跳过,
+    # 因为跨域关系创建需要选域外 BO (spec: cross-domain-relationship-permission).
+    reason = request.args.get('reason', '')
+
+    # [FIX v1.2.2 2026-06-16] 详情页走完整 bo_framework.read 链路
+    # v1.2.0-v1.2.1 一直用 BoPickService.pick_by_id() 取 6 字段 (id/code/name/description/version_id/service_module_id),
+    # 该路径不经过 PersistenceInterceptor._do_read + QueryInterceptor._enrich_records + enrich_fk_display_names,
+    # 导致业务对象详情的 FK 字段 (domain_id / sub_domain_id / *_display / *_name) 都是空的.
+    # list 上能显示是因为 list 走 unified_query_facade, list 路径完整.
+    # 修复: 详情页场景 (无 reason) 委托给 bo.read 走完整链路;
+    #       ValueHelp 场景保留 BoPickService (跨域选择不需要 read scope 和完整字段).
+    if reason != 'value_help':
+        from meta.api.bo_api import _check_single_bo_in_dim_scope, _get_bo, _attach_change_history
+        _deny = _check_single_bo_in_dim_scope('business_object', bo_id)
+        if _deny:
+            return jsonify({
+                "success": False,
+                "error_code": "ACCESS_DENIED",
+                "message": "对象不存在或无访问权限",
+            }), 404
+
+        # 走完整链路: 物理列 + virtual redundancy + *_name + *_display + display_values
+        bo = _get_bo()
+        result = bo.read('business_object', bo_id)
+        if not result.success:
+            return jsonify({
+                "success": False,
+                "error_code": "BO_NOT_FOUND",
+                "message": f"BO ID {bo_id} 不存在",
+            }), 404
+        _attach_change_history(result.data, 'business_object', bo_id)
+        return jsonify({"success": True, "data": result.data})
+
+    # ValueHelp 跨域场景: 走 BoPickService (无 read scope, 只查最小白名单字段)
     bo = BoPickService.pick_by_id(bo_id=bo_id)
     if bo is None:
         return jsonify({

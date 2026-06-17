@@ -82,7 +82,7 @@ import { boService } from '@/services/boService'
 import { nodeKeysToRelationCodes, nodeKeysToRelationIds, relationCodesToNodeKeys, relationIdsToNodeKeys } from '@/composables/useScopeTreeState'
 import { createTrace } from '@/utils/trace'
 import { createScopeGuard } from '@/composables/scopeGuard'
-import { apiV1 } from '@/utils/httpClient'
+import { apiV1, apiV2 } from '@/utils/httpClient'
 
 const USE_FILTERSOURCE = import.meta.env.VITE_FEATURE_SCOPETREE_FILTERSOURCE !== 'false'
 
@@ -233,7 +233,12 @@ function filterNodeMethod(value, data) {
     return true
   }
   const filterParams = getScopeFilterParams()
-  return data._relationScopes.some(rs => isRelationScopeMatch(rs, filterParams))
+  const matched = data._relationScopes.some(rs => isRelationScopeMatch(rs, filterParams))
+  // [v1.1.15 修复] 当 _relationScopes 中 boId 是 undefined (跨域 BO 不在业务对象列表中)
+  //   时, isRelationScopeMatch 永远 false, 节点全部被过滤, 用户看到 "暂无关系数据"
+  //   兜底: 节点有 count 时仍显示, 避免 el-tree 整树变空
+  if (matched) return true
+  return (data.count || 0) > 0
 }
 
 /**
@@ -467,7 +472,12 @@ async function loadRelationships() {
   loadError.value = ''
   try {
     console.log('[RelationScopeSection] loadRelationships: version_id=' + props.versionId)
-    const result = await apiV1.get('/relationships', { params: { version_id: props.versionId, page_size: 10000 } })
+    // [v1.1.15 修复] 用 v2 端点 /api/v2/bo/relationship 替代 v1 端点
+    //   背景: TEST888 用户调 /api/v1/relationships?version_id=764 返回 0 条关系,
+    //         但调 /api/v2/bo/relationship?version_id=764 返回 11 条 (跟 list 表格一致)
+    //   原因: v1/v2 端点权限过滤或查询路径不同
+    //   修复: el-tree 跟 list 表格一样用 v2 端点, 避免 el-tree 永远拿不到关系数据
+    const result = await apiV2.get('/bo/relationship', { params: { version_id: props.versionId, page_size: 10000 } })
 
     if (!result.success) {
       throw new Error(result.message || `服务端错误`)

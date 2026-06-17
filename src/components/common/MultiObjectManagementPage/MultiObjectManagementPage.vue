@@ -50,19 +50,22 @@
               <slot name="tabsExtra" :context="tabsExtraContext" />
             </div>
 
-            <MetaListPage
-              ref="metaListPageRef"
-              :key="page.activeTab"
-              :object-type="page.activeTab"
-              :initial-filters="page.combinedFilters"
-              :options="listOptions"
-              :enable-detail="true"
-              :enable-auto-crud="true"
-            >
-              <template v-for="(_, slotName) in $slots" :key="slotName" #[slotName]="slotProps">
-                <slot :name="slotName" v-bind="slotProps" />
-              </template>
-            </MetaListPage>
+            <template v-for="tab in page.tabs" :key="tab.name">
+              <MetaListPage
+                v-if="visitedTabs.has(tab.name)"
+                v-show="page.activeTab === tab.name"
+                :ref="el => { if (el) metaListPageRefs[tab.name] = el }"
+                :object-type="tab.name"
+                :initial-filters="page.combinedFilters"
+                :options="listOptions"
+                :enable-detail="true"
+                :enable-auto-crud="true"
+              >
+                <template v-for="(_, slotName) in $slots" :key="slotName" #[slotName]="slotProps">
+                  <slot :name="slotName" v-bind="slotProps" />
+                </template>
+              </MetaListPage>
+            </template>
           </template>
           <div v-else class="momp-empty-detail">
             <el-icon :size="48"><Connection /></el-icon>
@@ -196,7 +199,7 @@
  * [OK] 使用 isHierarchyType(hierarchyTypes, type) 判断层级对象
  */
 
-import { ref, watch, computed, reactive, onMounted, provide } from 'vue'
+import { ref, watch, computed, reactive, onMounted, onActivated, provide } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useTabStore } from '@/stores/tabStore'
 import { useChartArchDataStore } from '@/stores/chartArchDataStore'
@@ -248,8 +251,10 @@ onMounted(() => {
     page.activeTab = queryTab
   }
 
-  // 从图表展示返回时恢复状态
-  // chart app 跳转前会写入 returningFromDiagram + archManagerStateBeforeDiagram
+  // 从其他页面（图表 / 详情 / 工作台等）切回管理页时：
+  //   1. 恢复选择/过滤/activeTab (onBeforeRouteLeave 已保存到 sessionStorage)
+  //   2. 触发一次数据刷新 (相当于点击 toolbar refresh 按钮)
+  //   不再走 "fresh 路径"（清空所有状态）
   const restored = page.restoreStateFromDiagram()
   if (restored) {
     initialBoIds.value = restored.initialBoIds
@@ -257,6 +262,25 @@ onMounted(() => {
     // 强制 RelationScopeTree 重新挂载, 让 initialBoIds / initialRelationCodes 生效
     scopeTreeKey.value++
   }
+
+  // [FIX v3.19] 切回管理页时同步数据 — 状态已恢复, 但列表可能因详情页的编辑而过时
+  // 通过 refreshCoordinator 触发 (类似点 toolbar refresh 按钮), 不会清空用户的选择
+  if (coordinator && coordinator.refreshAll) {
+    // 异步触发, 不阻塞 onMounted
+    setTimeout(() => {
+      try {
+        coordinator.refreshAll()
+      } catch (e) {
+        console.warn('[v3.19] Failed to refresh on return to arch data page:', e)
+      }
+    }, 0)
+  }
+})
+
+// [FR-005] SAP Fiori iAppState 模式：路由切回时保留状态，不自动刷新
+// onActivated 在 keep-alive 缓存组件被激活时调用（非首次 onMounted）
+onActivated(() => {
+  console.log('[MultiObjectManagementPage] onActivated: state preserved (no auto-refresh)')
 })
 
 if (router) {
@@ -304,11 +328,11 @@ const listOptions = computed(() => ({
   ...(props.options.listOptions || {})
 }))
 
-const currentSortInfo = computed(() => metaListPageRef.value?.sortInfo || null)
-const currentDefaultSort = computed(() => metaListPageRef.value?.defaultSort || null)
-const currentListCount = computed(() => metaListPageRef.value?.data?.length || 0)
+const currentSortInfo = computed(() => activeMetaListPage.value?.sortInfo || null)
+const currentDefaultSort = computed(() => activeMetaListPage.value?.defaultSort || null)
+const currentListCount = computed(() => activeMetaListPage.value?.data?.length || 0)
 const currentTotalCount = computed(() => {
-  const t = metaListPageRef.value?.filteredTotalCount
+  const t = activeMetaListPage.value?.filteredTotalCount
   return t?.value ?? t ?? 0
 })
 
@@ -404,7 +428,7 @@ function handleToolbarChange(payload) {
 }
 
 defineExpose({
-  refresh: () => metaListPageRef.value?.refresh(),
+  refresh: () => activeMetaListPage.value?.refresh(),
   clearScope: () => {
     page.clearScope()
     scopeTreeRef.value?.clear()
@@ -412,11 +436,21 @@ defineExpose({
   page
 })
 
-const metaListPageRef = ref(null)
+// [FR-001] Per-tab MetaListPage: 每个 tab 独立实例，v-show 保留状态
+const metaListPageRefs = reactive({})
+const visitedTabs = reactive(new Set([page.activeTab || page.tabs[0]?.name].filter(Boolean)))
+
+// 懒加载：首次访问 tab 时才渲染 MetaListPage
+watch(() => page.activeTab, (newTab) => {
+  if (newTab) visitedTabs.add(newTab)
+})
+
+// 当前激活 tab 的 MetaListPage 引用
+const activeMetaListPage = computed(() => metaListPageRefs[page.activeTab])
 
 watch(() => page.combinedFilters, (newFilters) => {
-  if (metaListPageRef.value?.setContextFilters) {
-    metaListPageRef.value.setContextFilters(newFilters)
+  if (activeMetaListPage.value?.setContextFilters) {
+    activeMetaListPage.value.setContextFilters(newFilters)
   }
   if (!import.meta.env.VITE_FEATURE_SCOPETREE_FILTERSOURCE) {
     coordinator.refreshAll()

@@ -49,6 +49,14 @@ class ValueHelpSource:
     apply_target_permissions: bool = True
     endpoint: str = ""
     params: Dict[str, Any] = field(default_factory=dict)
+    # [v2.0 2026-06-16] FK 字段写路径 dim scope 策略
+    # enforce: FK 值必须在用户 dim scope 内
+    # or_bypass: 同 scope_group 内任一字段在 scope 内即可 (OR-edit 语义)
+    # inherit: 从 scope_inherit_from 指定的父字段继承 enforce 约束
+    # none: 不做写路径 dim scope 校验 (默认, 向后兼容)
+    write_scope_policy: str = 'none'
+    scope_group: Optional[str] = None              # or_bypass 字段组名
+    scope_inherit_from: Optional[str] = None       # inherit 父字段 id
 
 
 @dataclass

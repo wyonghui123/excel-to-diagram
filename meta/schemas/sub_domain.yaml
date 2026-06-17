@@ -211,6 +211,11 @@ analytical_model:
 ui_view_config:
   list:
     pageSize: 20
+    # [FIX 2026-06-17] 显式声明 searchFields，包含 description（text 类型，不在 list columns 中）
+    searchFields:
+      - name
+      - code
+      - description
     columns:
       - key: name
         title: 名称
@@ -483,6 +488,10 @@ fields:
       meaning: 关联的领域
       parent_key: true
       immutable: true
+      readonly_always: true
+      # [FIX v1.2.2 2026-06-16] 父子层级关系不可变
+      # 跨层级移动会破坏关系引用、审计链、dim_scope 权限。
+      # 业务上需要"重新分类"请走专门的"重新分类"操作（action）而非直接改字段。
       resolve_from_field: domain_code
       resolve_to_object: domain
       analytics:

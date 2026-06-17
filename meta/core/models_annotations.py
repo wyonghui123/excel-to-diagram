@@ -114,7 +114,19 @@ class SemanticAnnotation:
     parent_key_display: bool = False  # 父对象键的编码显示字段（FK编码显示，虚拟冗余，紧跟FK列出现）
     mandatory: bool = False           # 业务必填（类似 @mandatory，区别于数据库 required）
     readonly_always: bool = False     # 始终只读（类似 SAP readOnly: true），新建和编辑都只读
+    # [NEW v1.2.3 2026-06-17] Excel 模板专用标记：与 readonly_always 解耦
+    # 区分"运行时 API 限制"(readonly_always, 保护 FK 引用/审计链)
+    # 与"Excel 模板是否可填"(parent_key_template_editable, 方便批量重新分类)
+    # - 'always': 模板行 + 数据行都可填（重新分类场景）
+    # - 'create_only': 模板行可填，数据行只读
+    # - 'never'（默认）: 始终只读，与 readonly_always 行为一致
+    parent_key_template_editable: str = ""  # '' | 'always' | 'create_only' | 'never'
 
+    # [NEW 2026-06-14 BMRD] 父对象 FK 编码显示字段（如 relationship.source_bo_code/target_bo_code）
+    # 这些是 virtual 字段，从 parent_key 字段自动派生显示 code，
+    # 语义上属于"父对象编码家族"，应使用 BUSINESS_KEY_FILL 而非 READONLY_FILL
+    parent_key_display: bool = False
+    
     # 上下文字段（借鉴 SAP One Model 参数化导入）
     # 上下文字段不参与导入导出的数据行，而是通过导入界面的选择器确定
     # 例如：version_id, product_id 等是上下文字段，用户在导入前选择版本，系统自动填充

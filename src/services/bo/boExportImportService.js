@@ -46,6 +46,13 @@ export class BOExportImportService extends BOBaseService {
     formData.append('file', file)
     formData.append('mode', 'preview')
     formData.append('conflict_strategy', options.conflictStrategy || 'upsert')
+    // [FIX 2026-06-16 BMRD] preview 也必须传 context, 否则后端 validate_sheets
+    // 不会跳过 product_code/version_code 必填验证
+    if (options.version_id) formData.append('version_id', options.version_id)
+    if (options.product_id) formData.append('product_id', options.product_id)
+    if (options.cascade_fields?.length) {
+      formData.append('cascade_fields', JSON.stringify(options.cascade_fields))
+    }
 
     return this._request('POST', '/import', { body: formData, version: 1 })
   }

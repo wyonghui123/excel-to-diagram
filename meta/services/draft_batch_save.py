@@ -95,6 +95,24 @@ def batch_save_handler(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[
     except Exception:
         pass  # 上下文设置失败不应阻塞主流程
 
+    # [v2.0 2026-06-16] FK scope 预校验 (All-or-Nothing)
+    # Spec: docs/specs/spec-write-scope-policy-v2.md FR-006
+    scope_violations = _pre_validate_fk_scope(object_type, drafts, user_info)
+    if scope_violations:
+        return {
+            'success': False,
+            'error_code': 'WRITE_SCOPE_VIOLATION_BATCH',
+            'data': {
+                'total': len(drafts),
+                'failed': len(scope_violations),
+                'violations': scope_violations,
+                'created': [],
+                'updated': [],
+                'failures': [],
+            },
+            'message': f'批量操作中 {len(scope_violations)} 条记录超出数据权限范围',
+        }
+
     bo = _get_bo_framework()
 
     created_ids: List[Any] = []
@@ -169,3 +187,175 @@ def batch_save_handler(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[
         },
         'message': f'成功创建 {len(created_ids)} 项, 更新 {len(updated_ids)} 项',
     }
+
+
+def _pre_validate_fk_scope(object_type: str, drafts: List[Dict], user_info: Dict) -> List[Dict]:
+    """[v2.0 2026-06-16] FK scope 预校验 (All-or-Nothing)
+
+    在 batch_save 执行前, 预检查所有 draft 的 FK 字段值是否在用户 dim scope 内。
+    返回 violations 列表, 空 = 全部通过。
+
+    Spec: docs/specs/spec-write-scope-policy-v2.md FR-006
+    """
+    from meta.services.auth_middleware import is_admin
+
+    # admin 跳过
+    if is_admin(user_info):
+        return []
+
+    user_id = user_info.get('user_id') or user_info.get('id')
+    if not user_id:
+        return []
+
+    # 获取 meta_object 的 FK scope 配置
+    try:
+        from meta.core.bo_framework import bo_framework
+        meta_obj = bo_framework._meta_registry.get_meta(object_type)
+    except Exception:
+        return []  # 无法获取 meta, 跳过
+
+    if not meta_obj:
+        return []
+
+    # 收集 enforce/or_bypass/inherit 字段
+    enforce_fields = []
+    bypass_groups: Dict[str, List[Dict]] = {}
+    inherit_fields = []
+
+    for field_def in getattr(meta_obj, 'fields', []):
+        vh = field_def.get('value_help') if isinstance(field_def, dict) else None
+        if not vh:
+            continue
+        source = vh.source if hasattr(vh, 'source') else vh.get('source') if isinstance(vh, dict) else None
+        if not source:
+            continue
+
+        if hasattr(source, 'write_scope_policy'):
+            policy = source.write_scope_policy
+            scope_group = getattr(source, 'scope_group', None)
+            scope_inherit_from = getattr(source, 'scope_inherit_from', None)
+            target_bo = getattr(source, 'target_bo', '')
+        elif isinstance(source, dict):
+            policy = source.get('write_scope_policy', 'none')
+            scope_group = source.get('scope_group')
+            scope_inherit_from = source.get('scope_inherit_from')
+            target_bo = source.get('target_bo', '')
+        else:
+            continue
+
+        field_id = field_def.get('id') if isinstance(field_def, dict) else getattr(field_def, 'id', '')
+
+        if policy == 'enforce':
+            enforce_fields.append({'field_id': field_id, 'target_bo': target_bo, 'policy': 'enforce'})
+        elif policy == 'inherit':
+            inherit_fields.append({
+                'field_id': field_id, 'target_bo': target_bo, 'policy': 'inherit',
+                'scope_inherit_from': scope_inherit_from,
+            })
+        elif policy == 'or_bypass':
+            group = scope_group or field_id
+            bypass_groups.setdefault(group, []).append({
+                'field_id': field_id, 'target_bo': target_bo, 'policy': 'or_bypass',
+                'scope_group': group,
+            })
+
+    if not enforce_fields and not inherit_fields and not bypass_groups:
+        return []  # 无需校验
+
+    # 获取 WSI 实例 (复用 _is_fk_value_in_scope 逻辑)
+    from meta.core.interceptors.write_scope_interceptor import WriteScopeInterceptor
+    wsi = WriteScopeInterceptor()
+    try:
+        data_source = bo_framework._meta_registry.get_data_source(object_type)
+    except Exception:
+        return []
+
+    # 逐条校验
+    violations = []
+    for row_idx, draft in enumerate(drafts):
+        fields = draft.get('fields', {})
+
+        # 校验 enforce 字段
+        for fi in enforce_fields:
+            fk_value = fields.get(fi['field_id'])
+            if fk_value is None:
+                continue
+            if not wsi._is_fk_value_in_scope(user_id, fi['target_bo'], fk_value, data_source):
+                violations.append({
+                    'row': row_idx,
+                    'row_id': draft.get('row_id'),
+                    'field': fi['field_id'],
+                    'value': fk_value,
+                    'scope_policy': fi['policy'],
+                })
+
+        # 校验 inherit 字段
+        for inh in inherit_fields:
+            fk_value = fields.get(inh['field_id'])
+            if fk_value is None:
+                continue
+            parent_field_id = inh['scope_inherit_from']
+            parent_fk_value = fields.get(parent_field_id)
+            if parent_fk_value is not None:
+                # 检查 FK 值是否属于父字段值的子集
+                table_name = _get_table_name_for_bo(inh['target_bo'])
+                try:
+                    cursor = data_source.execute(
+                        f"SELECT {parent_field_id} FROM {table_name} WHERE id = ?",
+                        [fk_value]
+                    )
+                    row = cursor.fetchone()
+                    if row and row[0] == parent_fk_value:
+                        # FK 值属于父字段子集, 但仍需检查 FK 值本身在 scope 内
+                        if wsi._is_fk_value_in_scope(user_id, inh['target_bo'], fk_value, data_source):
+                            continue  # 通过
+                except Exception:
+                    pass
+            # 退化为 enforce
+            if not wsi._is_fk_value_in_scope(user_id, inh['target_bo'], fk_value, data_source, cache):
+                violations.append({
+                    'row': row_idx,
+                    'row_id': draft.get('row_id'),
+                    'field': inh['field_id'],
+                    'value': fk_value,
+                    'scope_policy': 'inherit',
+                })
+
+        # 校验 or_bypass 字段组
+        for group_name, group_fields in bypass_groups.items():
+            any_in_scope = False
+            for fi in group_fields:
+                fk_value = fields.get(fi['field_id'])
+                if fk_value is None:
+                    continue
+                if wsi._is_fk_value_in_scope(user_id, fi['target_bo'], fk_value, data_source):
+                    any_in_scope = True
+                    break
+            if not any_in_scope:
+                for fi in group_fields:
+                    fk_value = fields.get(fi['field_id'])
+                    if fk_value is not None:
+                        violations.append({
+                            'row': row_idx,
+                            'row_id': draft.get('row_id'),
+                            'field': fi['field_id'],
+                            'value': fk_value,
+                            'scope_policy': 'or_bypass',
+                            'scope_group': group_name,
+                        })
+
+    return violations
+
+
+def _get_table_name_for_bo(object_type: str) -> str:
+    """获取 BO 类型对应的表名"""
+    _TABLE_NAME_MAP = {
+        'business_object': 'business_objects',
+        'service_module': 'service_modules',
+        'sub_domain': 'sub_domains',
+        'domain': 'domains',
+        'version': 'versions',
+        'product': 'products',
+        'relationship': 'relationship',
+    }
+    return _TABLE_NAME_MAP.get(object_type, f"{object_type}s")

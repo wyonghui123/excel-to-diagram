@@ -32,7 +32,7 @@
             :color-group-by="configStore.colorGroupBy"
             :color-scheme="configStore.colorScheme"
             :node-text-color="configStore.nodeTextColor"
-            :center-scope-color="configStore.centerScopeColor || '#EDEDED'"
+            :center-scope-color="configStore.centerScopeColor || '#808080'"
             :custom-colors="configStore.customColors || {}"
             :sub-domains="subDomains"
             :domains="domains"

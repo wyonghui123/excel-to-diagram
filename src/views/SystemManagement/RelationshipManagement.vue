@@ -51,6 +51,8 @@
 import { ref } from 'vue'
 import { MultiObjectManagementPage } from '@/components/common/MultiObjectManagementPage'
 
+defineOptions({ name: 'RelationshipManagement' })
+
 const objectTypes = ['domain', 'sub_domain', 'service_module', 'business_object', 'relationship']
 const pageOptions = { defaultTab: 'relationship' }
 const pageRef = ref(null)

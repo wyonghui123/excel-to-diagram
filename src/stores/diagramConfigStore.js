@@ -15,7 +15,7 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
   const colorScheme = ref('default')
   const colorGroupBy = ref('domain')
   const nodeTextColor = ref('black')
-  const centerScopeColor = ref('#EDEDED')
+  const centerScopeColor = ref('#808080')
   const centerDomainColor = ref('#D9D9D9')
   const centerScopeHighlight = ref(true)
 
@@ -87,7 +87,7 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
   }
 
   function updateCenterScopeColor(value) {
-    centerScopeColor.value = value?.value ?? value ?? '#EDEDED'
+    centerScopeColor.value = value?.value ?? value ?? '#808080'
   }
 
   function updateCenterDomain(value) {
@@ -197,7 +197,7 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     colorScheme.value = 'default'
     colorGroupBy.value = 'domain'
     nodeTextColor.value = 'black'
-    centerScopeColor.value = '#EDEDED'
+    centerScopeColor.value = '#808080'
     centerDomainColor.value = '#D9D9D9'
     centerScopeHighlight.value = true
     centerDomain.value = ''

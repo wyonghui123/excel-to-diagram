@@ -11,6 +11,7 @@
       <el-steps :active="currentStep" finish-status="success" simple style="margin-bottom: 20px;">
         <el-step title="选择文件" />
         <el-step title="数据校验" />
+        <el-step title="执行导入" />
         <el-step title="导入结果" />
       </el-steps>
 
@@ -152,8 +153,9 @@
           <div v-if="hasValidationErrors" class="validation-errors">
             <h4 class="validation-errors__title">校验错误详情：</h4>
             <el-table :data="validationErrors" size="small" border max-height="300">
+              <!-- [FIX 2026-06-16 BMRD] 列顺序调整: sheet → 序号(行号) → 字段 → 值 → 错误信息 -->
+              <el-table-column prop="sheet" label="Sheet" width="120" />
               <el-table-column prop="row" label="行号" width="80" />
-              <el-table-column prop="sheet" label="Sheet" width="100" />
               <el-table-column prop="field" label="字段" width="120" />
               <el-table-column prop="value" label="值" width="120" show-overflow-tooltip />
               <el-table-column prop="message" label="错误信息" min-width="200" show-overflow-tooltip />
@@ -165,9 +167,9 @@
         </div>
       </div>
 
-      <!-- 步骤 3: 导入结果 -->
+      <!-- 步骤 3: 执行导入（进度展示） -->
       <div v-else-if="currentStep === 2" class="step-content">
-        <div v-if="importing" class="import-progress">
+        <div class="import-progress">
           <el-progress
             :percentage="importProgress"
             :stroke-width="10"
@@ -179,74 +181,246 @@
           <p class="import-progress__percent">
             已完成 {{ importProgress }}%
           </p>
+          <p class="import-progress__hint">
+            <em>导入完成后将自动展示详细结果</em>
+          </p>
         </div>
+      </div>
 
-        <div v-else-if="importResult" class="import-result">
+      <!-- 步骤 4: 导入结果（统计 + 失败/告警明细） -->
+      <div v-else-if="currentStep === 3" class="step-content">
+        <div v-if="importResult" class="import-result">
+          <!-- 整体状态摘要 -->
           <el-alert
-            v-if="importResult.success"
+            v-if="!hasAnyFailure && !hasAnyWarning"
             title="导入成功"
             type="success"
             show-icon
             :closable="false"
           >
             <template #default>
-              <p>成功导入 <strong>{{ successCount }}</strong> 条数据</p>
+              <p>
+                成功导入 <strong>{{ totalSuccessCount }}</strong> 条数据
+                （创建 {{ totalCreatedCount }}、更新 {{ totalUpdatedCount }}、删除 {{ totalDeletedCount }}）
+              </p>
+            </template>
+          </el-alert>
+
+          <el-alert
+            v-else-if="!hasAnyFailure && hasAnyWarning"
+            title="导入完成（存在告警）"
+            type="warning"
+            show-icon
+            :closable="false"
+          >
+            <template #default>
+              <p>
+                成功 <strong>{{ totalSuccessCount }}</strong> 条（创建 {{ totalCreatedCount }}、更新 {{ totalUpdatedCount }}、删除 {{ totalDeletedCount }}），
+                告警 <strong>{{ totalWarningCount }}</strong> 条
+              </p>
             </template>
           </el-alert>
 
           <el-alert
             v-else
             title="导入完成，但有错误"
-            type="warning"
+            type="error"
             show-icon
             :closable="false"
           >
             <template #default>
-              <p>成功 {{ successCount }} 条，失败 {{ importResult.errors?.length || 0 }} 条</p>
+              <p>
+                成功 <strong>{{ totalSuccessCount }}</strong> 条（创建 {{ totalCreatedCount }}、更新 {{ totalUpdatedCount }}、删除 {{ totalDeletedCount }}），
+                失败 <strong>{{ totalFailedCount }}</strong> 条
+                <span v-if="totalWarningCount > 0">，告警 {{ totalWarningCount }} 条</span>
+              </p>
             </template>
           </el-alert>
 
+          <!-- 统计明细（按对象类型） -->
           <div v-if="importResult.results" class="import-details">
-            <h4 class="import-details__title">导入详情：</h4>
+            <h4 class="import-details__title">
+              导入结果统计
+              <span class="title-hint">（点击"对象类型"可过滤下方失败/告警明细）</span>
+            </h4>
             <el-table :data="importResultsTable" size="small" border>
-              <el-table-column prop="type" label="对象类型" />
-              <el-table-column prop="created" label="新增" width="80" align="center">
+              <el-table-column label="对象类型" min-width="120">
                 <template #default="{ row }">
-                  <span class="count-created">{{ row.created }}</span>
+                  <el-link
+                    :type="filterType === row.typeId ? 'primary' : 'default'"
+                    :underline="false"
+                    :disabled="row.failed === 0 && row.warning === 0"
+                    class="type-link"
+                    @click="handleTypeFilter(row)"
+                  >
+                    <span v-if="filterType === row.typeId">✓ </span>{{ row.type }}
+                  </el-link>
+                </template>
+              </el-table-column>
+              <el-table-column prop="created" label="创建" width="80" align="center">
+                <template #default="{ row }">
+                  <el-tag v-if="row.created > 0" type="success" size="small">{{ row.created }}</el-tag>
+                  <span v-else>-</span>
                 </template>
               </el-table-column>
               <el-table-column prop="updated" label="更新" width="80" align="center">
                 <template #default="{ row }">
-                  <span class="count-updated">{{ row.updated }}</span>
+                  <el-tag v-if="row.updated > 0" type="primary" size="small">{{ row.updated }}</el-tag>
+                  <span v-else>-</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="deleted" label="删除" width="80" align="center">
+                <template #default="{ row }">
+                  <el-tag v-if="row.deleted > 0" type="info" size="small">{{ row.deleted }}</el-tag>
+                  <span v-else>-</span>
                 </template>
               </el-table-column>
               <el-table-column prop="skipped" label="跳过" width="80" align="center">
                 <template #default="{ row }">
-                  <span class="count-skipped">{{ row.skipped }}</span>
+                  <el-tag v-if="row.skipped > 0" type="warning" size="small">{{ row.skipped }}</el-tag>
+                  <span v-else>-</span>
                 </template>
               </el-table-column>
               <el-table-column prop="failed" label="失败" width="80" align="center">
                 <template #default="{ row }">
-                  <span class="count-failed">{{ row.failed }}</span>
+                  <el-tag v-if="row.failed > 0" type="danger" size="small">{{ row.failed }}</el-tag>
+                  <span v-else>-</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="warning" label="告警" width="80" align="center">
+                <template #default="{ row }">
+                  <el-tag v-if="row.warning > 0" type="warning" size="small">{{ row.warning }}</el-tag>
+                  <span v-else>-</span>
                 </template>
               </el-table-column>
             </el-table>
           </div>
 
+          <!-- 失败明细 -->
           <div v-if="importResult.errors && importResult.errors.length > 0" class="import-errors">
-            <h4 class="import-errors__title">错误详情：</h4>
-            <el-table :data="importResult.errors.slice(0, 10)" size="small" border max-height="200">
-              <el-table-column prop="row" label="行号" width="80" align="center" />
-              <el-table-column prop="message" label="错误信息" />
+            <h4 class="import-errors__title">
+              失败明细
+              <span class="title-hint">（共 {{ importResult.errors.length }} 条{{ filterType ? `，当前显示 ${filteredErrors.length} 条` : '' }}）</span>
+            </h4>
+            <!-- [NEW v1.2.3 2026-06-17] 过滤状态条 -->
+            <div v-if="filterType" class="filter-banner">
+              <el-icon><Filter /></el-icon>
+              <span>已过滤：<strong>{{ filterTypeName }}</strong> 的失败明细</span>
+              <el-button link type="primary" size="small" @click="clearTypeFilter">清除过滤</el-button>
+            </div>
+            <el-table
+              :data="pagedErrors"
+              size="small"
+              border
+              max-height="320"
+              row-key="key"
+            >
+              <!-- [NEW v1.2.3 2026-06-17] 可展开行: 显示完整错误信息 + 原始记录 -->
+              <el-table-column type="expand" width="40">
+                <template #default="{ row }">
+                  <div class="error-detail">
+                    <div class="error-detail__section">
+                      <div class="error-detail__label">完整错误信息：</div>
+                      <div class="error-detail__message">{{ row.message }}</div>
+                    </div>
+                    <div v-if="row.value" class="error-detail__section">
+                      <div class="error-detail__label">字段值：</div>
+                      <div class="error-detail__value">{{ row.value }}</div>
+                    </div>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column prop="row" label="行号" width="60" align="center" />
+              <el-table-column prop="operation" label="操作" width="70" align="center">
+                <template #default="{ row }">
+                  <el-tag size="small" :type="operationTagType(row.operation)">{{ operationLabel(row.operation) }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="对象类型" width="100" show-overflow-tooltip>
+                <template #default="{ row }">
+                  {{ getErrorTypeName(row.object_type) }}
+                </template>
+              </el-table-column>
+              <el-table-column prop="field" label="字段" width="80" />
+              <el-table-column prop="message" label="错误信息" min-width="200" show-overflow-tooltip>
+                <template #default="{ row }">
+                  <span class="message-summary">{{ row.message }}</span>
+                </template>
+              </el-table-column>
             </el-table>
+            <el-pagination
+              v-model:current-page="errorsCurrentPage"
+              v-model:page-size="errorsPageSize"
+              :total="filteredErrors.length"
+              :page-sizes="[10, 20, 50, 100]"
+              layout="total, sizes, prev, pager, next, jumper"
+              small
+              class="import-pagination"
+            />
+          </div>
+
+          <!-- 告警明细 -->
+          <div v-if="hasAnyWarning" class="import-warnings">
+            <h4 class="import-warnings__title">
+              告警明细
+              <span class="title-hint">（共 {{ totalWarningCount }} 条{{ filterType ? `，当前显示 ${filteredWarnings.length} 条` : '' }}）</span>
+            </h4>
+            <el-table
+              :data="pagedWarnings"
+              size="small"
+              border
+              max-height="320"
+              row-key="key"
+            >
+              <el-table-column type="expand" width="40">
+                <template #default="{ row }">
+                  <div class="error-detail">
+                    <div class="error-detail__section">
+                      <div class="error-detail__label">完整告警信息：</div>
+                      <div class="error-detail__message">{{ row.message }}</div>
+                    </div>
+                    <div v-if="row.value" class="error-detail__section">
+                      <div class="error-detail__label">字段值：</div>
+                      <div class="error-detail__value">{{ row.value }}</div>
+                    </div>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column prop="row" label="行号" width="60" align="center" />
+              <el-table-column prop="operation" label="操作" width="70" align="center">
+                <template #default="{ row }">
+                  <el-tag size="small" type="warning">{{ operationLabel(row.operation) }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="对象类型" width="100" show-overflow-tooltip>
+                <template #default="{ row }">
+                  {{ getErrorTypeName(row.object_type) }}
+                </template>
+              </el-table-column>
+              <el-table-column prop="field" label="字段" width="80" />
+              <el-table-column prop="message" label="告警信息" min-width="200" show-overflow-tooltip>
+                <template #default="{ row }">
+                  <span class="message-summary">{{ row.message }}</span>
+                </template>
+              </el-table-column>
+            </el-table>
+            <el-pagination
+              v-model:current-page="warningsCurrentPage"
+              v-model:page-size="warningsPageSize"
+              :total="filteredWarnings.length"
+              :page-sizes="[10, 20, 50, 100]"
+              layout="total, sizes, prev, pager, next, jumper"
+              small
+              class="import-pagination"
+            />
           </div>
         </div>
       </div>
     </div>
 
     <template #footer>
-      <el-button v-if="currentStep > 0 && !importing" @click="prevStep">上一步</el-button>
-      <el-button @click="handleClose">{{ currentStep === 2 ? '关闭' : '取消' }}</el-button>
+      <el-button v-if="currentStep > 0 && currentStep < 3" @click="prevStep">上一步</el-button>
+      <el-button @click="handleClose">{{ currentStep === 3 ? '关闭' : '取消' }}</el-button>
       <el-button
         v-if="currentStep === 0"
         type="primary"
@@ -261,7 +435,7 @@
         :disabled="!canImport"
         @click="startImport"
       >
-        确认导入
+        下一步：执行导入
       </el-button>
     </template>
   </el-dialog>
@@ -270,7 +444,7 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { useCrudMessage } from '@/composables/useCrudMessage'
-import { UploadFilled, Download } from '@element-plus/icons-vue'
+import { UploadFilled, Download, Filter } from '@element-plus/icons-vue'
 import { boService } from '@/services/boService'
 import { metaService } from '@/services/metaService'
 
@@ -330,8 +504,22 @@ const currentTypeName = ref('')
 const currentIndex = ref(0)
 const totalTypes = ref(0)
 
+// [NEW v1.2.3 2026-06-17] 失败/告警明细分页
+const errorsPageSize = ref(10)
+const errorsCurrentPage = ref(1)
+const warningsPageSize = ref(10)
+const warningsCurrentPage = ref(1)
+
+// [NEW v1.2.3 2026-06-17] 失败/告警对象类型过滤
+// 点击统计表中的对象类型可过滤下方明细
+const filterType = ref(null)  // null = 不过滤, 字符串 = object type id
+
 const schema = ref(null)
 const loadingSchema = ref(false)
+
+// [NEW v1.2.3 2026-06-17] 对象类型 labels 映射 (id -> 中文名)
+// 来自 /api/v1/meta/objects API，props.objectTypeLabels 优先覆盖
+const objectTypeLabelsMap = ref({})
 
 const cascadeChain = computed(() => {
   if (!schema.value) return []
@@ -370,8 +558,8 @@ const selectedCascadeFields = computed(() => {
 })
 
 const dialogTitle = computed(() => {
-  const titles = ['导入数据', '数据校验', '导入结果']
-  return titles[currentStep.value]
+  const titles = ['导入数据', '数据校验', '执行导入', '导入结果']
+  return titles[currentStep.value] || '导入数据'
 })
 
 const totalPreviewRows = computed(() => {
@@ -414,19 +602,155 @@ const successCount = computed(() => {
   return count
 })
 
+const failedCount = computed(() => {
+  if (!importResult.value?.results) return 0
+  let count = 0
+  Object.values(importResult.value.results).forEach(r => {
+    count += (r.failed || 0)
+  })
+  return count
+})
+
+// [NEW v1.2.3 2026-06-17] 第四步统计 computed
+const totalSuccessCount = computed(() => {
+  if (!importResult.value?.results) return 0
+  return Object.values(importResult.value.results).reduce((sum, r) => sum + (r.success || 0), 0)
+})
+
+const totalCreatedCount = computed(() => {
+  if (!importResult.value?.results) return 0
+  return Object.values(importResult.value.results).reduce((sum, r) => sum + (r.created || 0), 0)
+})
+
+const totalUpdatedCount = computed(() => {
+  if (!importResult.value?.results) return 0
+  return Object.values(importResult.value.results).reduce((sum, r) => sum + (r.updated || 0), 0)
+})
+
+const totalDeletedCount = computed(() => {
+  if (!importResult.value?.results) return 0
+  return Object.values(importResult.value.results).reduce((sum, r) => sum + (r.deleted || 0), 0)
+})
+
+const totalFailedCount = computed(() => {
+  if (!importResult.value?.results) return 0
+  return Object.values(importResult.value.results).reduce((sum, r) => sum + (r.failed || 0), 0)
+})
+
+const totalWarningCount = computed(() => {
+  if (!importResult.value?.results) return 0
+  return Object.values(importResult.value.results).reduce((sum, r) => sum + ((r.warnings || []).length), 0)
+})
+
+const hasAnyFailure = computed(() => totalFailedCount.value > 0)
+const hasAnyWarning = computed(() => totalWarningCount.value > 0)
+
+// 收集所有 warnings（按对象类型聚合）
+const allWarnings = computed(() => {
+  if (!importResult.value?.results) return []
+  const result = []
+  Object.entries(importResult.value.results).forEach(([type, r]) => {
+    if (r.warnings && Array.isArray(r.warnings)) {
+      r.warnings.forEach(w => result.push({ ...w, object_type: type }))
+    }
+  })
+  return result
+})
+
+// [NEW v1.2.3 2026-06-17] 分页数据
+const pagedErrors = computed(() => {
+  const all = filteredErrors.value
+  const start = (errorsCurrentPage.value - 1) * errorsPageSize.value
+  return all.slice(start, start + errorsPageSize.value).map((e, i) => ({
+    ...e,
+    key: `err-${errorsCurrentPage.value}-${i}-${e.row || 0}-${e.object_type || ''}`
+  }))
+})
+
+const pagedWarnings = computed(() => {
+  const all = filteredWarnings.value
+  const start = (warningsCurrentPage.value - 1) * warningsPageSize.value
+  return all.slice(start, start + warningsPageSize.value).map((w, i) => ({
+    ...w,
+    key: `warn-${warningsCurrentPage.value}-${i}-${w.row || 0}-${w.object_type || ''}`
+  }))
+})
+
+// [NEW v1.2.3 2026-06-17] 按对象类型过滤后的 errors / warnings
+const filteredErrors = computed(() => {
+  const all = importResult.value?.errors || []
+  if (!filterType.value) return all
+  return all.filter(e => e.object_type === filterType.value)
+})
+
+const filteredWarnings = computed(() => {
+  if (!filterType.value) return allWarnings.value
+  return allWarnings.value.filter(w => w.object_type === filterType.value)
+})
+
+// 过滤时自动回到第 1 页
+watch(filterType, () => {
+  errorsCurrentPage.value = 1
+  warningsCurrentPage.value = 1
+})
+
+// 过滤模式下显示的类型名
+const filterTypeName = computed(() => {
+  if (!filterType.value) return ''
+  return objectTypeLabelsMap.value?.[filterType.value]
+    || props.objectTypeLabels?.[filterType.value]
+    || filterType.value
+})
+
+// 错误对象类型名称映射 (失败明细)
+// 优先用 objectTypeLabelsMap (从 /meta/objects API 加载), props 兜底
+const getErrorTypeName = (ot) => {
+  return objectTypeLabelsMap.value?.[ot] || props.objectTypeLabels?.[ot] || ot
+}
+
 const importResultsTable = computed(() => {
   if (!importResult.value?.results) return []
   return Object.entries(importResult.value.results).map(([type, result]) => {
-    const field = schema.value?.fields?.find(f => f.id === type)
+    // [FIX 2026-06-17] 用 objectTypeLabelsMap 拿中文名，schema.fields 是字段不是对象类型
+    const displayName = objectTypeLabelsMap.value?.[type] || props.objectTypeLabels?.[type] || type
     return {
-      type: field?.name || type,
-      created: result.created || result.success || 0,
+      type: displayName,
+      typeId: type,  // 保留 id 用于调试
+      created: result.created || 0,
       updated: result.updated || 0,
+      deleted: result.deleted || 0,
       skipped: result.skipped || 0,
-      failed: result.failed || 0
+      failed: result.failed || 0,
+      warning: (result.warnings || []).length
     }
   })
 })
+
+// 操作模式映射
+function operationLabel(op) {
+  const map = { create: '新增', update: '更新', delete: '删除', skip: '跳过', upsert: 'upsert' }
+  return map[op] || (op || '-')
+}
+
+function operationTagType(op) {
+  const map = { create: 'success', update: 'primary', delete: 'info', skip: 'warning', upsert: 'primary' }
+  return map[op] || ''
+}
+
+// [NEW v1.2.3 2026-06-17] 切换对象类型过滤
+function handleTypeFilter(row) {
+  if (!row?.typeId) return
+  // 同一行再次点击 = 取消过滤
+  if (filterType.value === row.typeId) {
+    filterType.value = null
+  } else {
+    filterType.value = row.typeId
+  }
+}
+
+function clearTypeFilter() {
+  filterType.value = null
+}
 
 const progressColor = computed(() => {
   if (importProgress.value < 50) return 'var(--yonyou-orange-600, #ea580c)'
@@ -452,13 +776,33 @@ async function loadSchema() {
 
   loadingSchema.value = true
   try {
-    const result = await metaService.getSchema(props.objectType)
-    if (result.success && result.data) {
-      schema.value = result.data
-      const importConfig = metaService.getImportExportConfig(result.data)
+    const [schemaResult, objectsResult] = await Promise.all([
+      metaService.getSchema(props.objectType),
+      // [NEW v1.2.3 2026-06-17] 加载所有对象类型 labels 映射
+      // /api/v1/meta/objects 返回 [{id, name, ...}]，用于第 4 步显示中文名
+      metaService._request('GET', '/meta/objects').catch(() => ({ success: false, data: [] }))
+    ])
+
+    if (schemaResult.success && schemaResult.data) {
+      schema.value = schemaResult.data
+      const importConfig = metaService.getImportExportConfig(schemaResult.data)
       if (importConfig?.conflictStrategy) {
         conflictStrategy.value = importConfig.conflictStrategy
       }
+    }
+
+    // 构建 objectTypeLabels 映射
+    if (objectsResult.success && Array.isArray(objectsResult.data)) {
+      const map = {}
+      objectsResult.data.forEach(obj => {
+        if (obj?.id) {
+          map[obj.id] = obj.name || obj.id
+        }
+      })
+      // 合并 props 传入的 objectTypeLabels (props 优先)
+      objectTypeLabelsMap.value = { ...map, ...(props.objectTypeLabels || {}) }
+    } else {
+      objectTypeLabelsMap.value = { ...(props.objectTypeLabels || {}) }
     }
   } catch (e) {
     console.error('[ImportDialog] 加载 schema 失败:', e)
@@ -481,6 +825,11 @@ function resetState() {
   currentTypeName.value = ''
   currentIndex.value = 0
   totalTypes.value = 0
+  // [NEW v1.2.3 2026-06-17] 重置分页
+  errorsCurrentPage.value = 1
+  warningsCurrentPage.value = 1
+  // [NEW v1.2.3 2026-06-17] 重置对象类型过滤
+  filterType.value = null
 }
 
 function handleFileChange(file) {
@@ -520,7 +869,11 @@ async function startPreview() {
   try {
     const result = await boService.previewImport(props.objectType, selectedFile.value, {
       conflictStrategy: conflictStrategy.value,
-      cascade_fields: selectedCascadeFields.value
+      cascade_fields: selectedCascadeFields.value,
+      // [FIX 2026-06-16 BMRD] preview 也必须传 context (version_id / product_id),
+      // 否则后端 validate_sheets 不会跳过 product_code/version_code 必填验证
+      version_id: props.context?.version_id,
+      product_id: props.context?.product_id
     })
 
     clearInterval(progressInterval)
@@ -604,16 +957,23 @@ async function pollImportProgress(taskId) {
         currentIndex.value = data.current_index || 0
 
         if (data.status === 'completed') {
+          const hasErrors = data.result?.errors?.length > 0
+          const resultSuccess = data.result?.success !== false && !hasErrors
           importResult.value = {
-            success: true,
+            success: resultSuccess,
             results: data.result?.results || {},
             errors: data.result?.errors || []
           }
           importing.value = false
-          if (successCount.value > 0) {
+          // [NEW v1.2.3 2026-06-17] 切到第 4 步展示详细结果
+          currentStep.value = 3
+          if (resultSuccess && successCount.value > 0) {
             message.success(`成功导入 ${successCount.value} 条数据`)
+          } else if (hasErrors) {
+            message.warning(`导入完成，但有 ${data.result.errors.length} 条错误`)
           }
-          emit('success', importResult.value)
+          // [FIX 2026-06-17] 不在此处 emit success，否则父组件会立刻关闭 dialog
+          // 用户在第 4 步点"关闭"按钮时再 emit，让用户先看到完整结果
         } else if (data.status === 'failed') {
           importResult.value = {
             success: false,
@@ -654,6 +1014,10 @@ async function downloadTemplate() {
 }
 
 function handleClose() {
+  // [NEW v1.2.3 2026-06-17] 第 4 步点"关闭"时通知父组件导入完成，让父组件刷新列表
+  if (currentStep.value === 3 && importResult.value) {
+    emit('success', importResult.value)
+  }
   selectedFile.value = null
   fileList.value = []
   if (uploadRef.value) {
@@ -790,7 +1154,8 @@ function handleClose() {
 
 .sheets-info,
 .import-details,
-.import-errors {
+.import-errors,
+.import-warnings {
   margin-bottom: var(--spacing-lg);
 
   &__title {
@@ -799,6 +1164,111 @@ function handleClose() {
     font-weight: 500;
     color: var(--el-text-color-primary, #303133);
   }
+}
+
+// [NEW v1.2.3 2026-06-17] 第四步导入结果样式
+.import-errors__title {
+  color: var(--el-color-danger, #f56c6c) !important;
+}
+
+.import-warnings__title {
+  color: var(--el-color-warning, #e6a23c) !important;
+}
+
+.title-hint {
+  margin-left: var(--spacing-xs);
+  font-weight: 400;
+  font-size: var(--el-font-size-small, 12px);
+  color: var(--el-text-color-secondary, #909399);
+}
+
+.import-progress__hint {
+  margin-top: var(--spacing-md);
+  text-align: center;
+  color: var(--el-text-color-secondary, #909399);
+  font-size: var(--el-font-size-small, 12px);
+}
+
+// [NEW v1.2.3 2026-06-17] 分页
+.import-pagination {
+  margin-top: var(--spacing-sm);
+  justify-content: flex-end;
+  display: flex;
+}
+
+// [NEW v1.2.3 2026-06-17] 对象类型过滤 - 可点击链接
+.type-link {
+  font-weight: 500;
+  cursor: pointer;
+}
+
+// [NEW v1.2.3 2026-06-17] 过滤状态条
+.filter-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-sm) var(--spacing-md);
+  margin-bottom: var(--spacing-sm);
+  background: var(--el-color-primary-light-9, #ecf5ff);
+  border: 1px solid var(--el-color-primary-light-5, #d9ecff);
+  border-radius: var(--radius-sm, 4px);
+  font-size: var(--el-font-size-base, 14px);
+  color: var(--el-text-color-regular, #606266);
+
+  strong {
+    color: var(--el-color-primary, #409eff);
+    font-weight: 600;
+  }
+
+  .el-icon {
+    color: var(--el-color-primary, #409eff);
+  }
+}
+
+// [NEW v1.2.3 2026-06-17] 错误信息展开详情
+.error-detail {
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--el-fill-color-light, #f5f7fa);
+  border-radius: var(--radius-sm, 4px);
+  font-size: var(--el-font-size-small, 13px);
+
+  &__section {
+    margin-bottom: var(--spacing-sm);
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+
+  &__label {
+    margin-bottom: var(--spacing-xs);
+    font-weight: 500;
+    color: var(--el-text-color-regular, #606266);
+  }
+
+  &__message {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    background: var(--el-color-danger-light-9, #fef0f0);
+    border-left: 3px solid var(--el-color-danger, #f56c6c);
+    color: var(--el-text-color-primary, #303133);
+    word-break: break-all;
+    white-space: pre-wrap;
+    line-height: 1.5;
+  }
+
+  &__value {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    background: var(--el-bg-color, #fff);
+    border: 1px solid var(--el-border-color-light, #e4e7ed);
+    border-radius: var(--radius-sm, 2px);
+    color: var(--el-text-color-primary, #303133);
+    word-break: break-all;
+    font-family: var(--el-font-family-mono, monospace);
+  }
+}
+
+.message-summary {
+  cursor: pointer;
 }
 
 .validation-errors {

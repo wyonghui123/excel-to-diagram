@@ -168,11 +168,16 @@ ui_view_config:
         width: 80
         position: 4
         importance: medium
-      - key: owner_id_display
+      - key: owner_id
         title: 负责人
         width: 120
         position: 5
         importance: medium
+        # [FIX 2026-06-16] 列指向 owner_id (FK) 而非 owner_id_display:
+        #   1) 自动生成识别 ui.relation=user, 给 column.value_help_config (含 display_name)
+        #   2) filter 变 value_help dropdown, 后端可正确按 owner_id IN (...) 过滤
+        #   3) 渲染走 FkLinkField + getFkDisplayValue (row['owner_id_display']) 显示中文名
+        #   4) 详情 facet 已用 owner_id, 列表/详情行为统一
       - key: child_count
         title: 版本数量
         width: 80
@@ -245,7 +250,7 @@ ui_view_config:
           title: 当前版本
           width: 90
           editable: true
-        - key: owner_id_display
+        - key: owner_id
           title: 负责人
           width: 100
         - key: created_at
@@ -437,7 +442,10 @@ fields:
       presentation:
         result_type: dialog
         display_format: "{display_name} ({username})"
-        columns:
+        # [FIX 2026-06-16] columns → display_columns
+        #   yaml_loader & 前端 SearchHelpDialog 都只读 display_columns,
+        #   原 columns: 字段被忽略, 导致 valuehelp dialog 列定义空
+        display_columns:
           - field: username
             label: 用户名
             width: 120
