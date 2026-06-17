@@ -78,6 +78,7 @@
       :enable-auto-crud="section.enableAutoCrud !== undefined ? section.enableAutoCrud : !section.readonly"
       :row-mutability="section.rowMutability || (section.readonly ? 'locked' : 'fully_editable')"
       :external-editing="editing"
+      :exclude-column-keys="excludedColumnKeys"
       @request-edit="$emit('request-edit')"
     />
 
@@ -178,6 +179,19 @@ const isAnnotation = computed(() => {
 
 const targetType = computed(() => {
   return getAssociationTargetType(props.section.assocName)
+})
+
+// [FIX 2026-06-14] 父对象下的子对象 children 列表: 隐藏冗余的"所属产品"列
+// 场景: product → version 列表, version 自带 product_name (所属产品) 列
+//       但当前上下文父对象已经是 product, 该列是冗余信息
+// 仅在 product → version 上下文生效, 不影响其他父子关系
+const excludedColumnKeys = computed(() => {
+  const parentType = props.objectType
+  const childType = targetType.value || props.section.association
+  if (parentType === 'product' && childType === 'version') {
+    return ['product_id', 'product_name', 'product_code']
+  }
+  return []
 })
 
 const registerMetaListRef = inject('registerMetaListRef', null)

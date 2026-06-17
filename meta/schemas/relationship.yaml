@@ -302,12 +302,12 @@ analytical_model:
     - id: annotation_content_search
       display_name: 备注内容
       description: 按备注内容模糊搜索关系
-      
+
       association:
         target_table: annotations
         target_alias: a
         join_type: exists
-        
+
         on_conditions:
           - left_field: r.id
             operator: eq
@@ -315,11 +315,173 @@ analytical_model:
           - left_field: "'relationship'"
             operator: eq
             right_field: a.target_type
-        
+
         where_conditions:
           - field: a.content
             operator: like
             parameter: annotation_content_search
+
+    # [V1.2.5 2026-06-17] 链式过滤: 源/目标 领域/子领域/服务模块 → 反查 BO ids 再过滤 relationships
+    # 列表列头 ValueHelp 选中 domain/sub_domain/service_module 后, 前端发这些参数,
+    # 后端通过 EXISTS 子查询把 "用户选 domain=703" 转换为 "source_bo_id IN (sub_domain=703 下所有 BO ids)"
+    # 关系表本身没有 domain_id/sub_domain_id/service_module_id 字段, 必须通过 JOIN 业务对象/服务模块/子领域/领域层级表派生.
+    # SQL 形态: EXISTS (SELECT 1 {from_join} WHERE {main_table.source_bo_id = bo_src.id AND ... AND {chain_table.filter_col} IN (?))
+
+    - id: source_domain_id
+      display_name: 源领域
+      description: 按源业务对象所属领域过滤关系 (通过 business_objects→service_modules→sub_domains→domains 链)
+
+      association:
+        target_table: domains
+        target_alias: d_src
+        join_type: exists
+
+        on_conditions:
+          - left_field: r.source_bo_id
+            operator: eq
+            right_field: bo_src.id
+          - left_field: bo_src.service_module_id
+            operator: eq
+            right_field: sm_src.id
+          - left_field: sm_src.sub_domain_id
+            operator: eq
+            right_field: sd_src.id
+
+        from_join: |
+          FROM business_objects bo_src
+          JOIN service_modules sm_src ON bo_src.service_module_id = sm_src.id
+          JOIN sub_domains sd_src ON sm_src.sub_domain_id = sd_src.id
+
+        where_conditions:
+          - field: sd_src.domain_id
+            operator: in
+            parameter: source_domain_id
+
+    - id: source_sub_domain_id
+      display_name: 源子领域
+      description: 按源业务对象所属子领域过滤关系
+
+      association:
+        target_table: sub_domains
+        target_alias: sd_src
+        join_type: exists
+
+        on_conditions:
+          - left_field: r.source_bo_id
+            operator: eq
+            right_field: bo_src.id
+          - left_field: bo_src.service_module_id
+            operator: eq
+            right_field: sm_src.id
+
+        from_join: |
+          FROM business_objects bo_src
+          JOIN service_modules sm_src ON bo_src.service_module_id = sm_src.id
+
+        where_conditions:
+          - field: sm_src.sub_domain_id
+            operator: in
+            parameter: source_sub_domain_id
+
+    - id: source_service_module_id
+      display_name: 源服务模块
+      description: 按源业务对象所属服务模块过滤关系
+
+      association:
+        target_table: service_modules
+        target_alias: sm_src
+        join_type: exists
+
+        on_conditions:
+          - left_field: r.source_bo_id
+            operator: eq
+            right_field: bo_src.id
+
+        from_join: |
+          FROM business_objects bo_src
+
+        where_conditions:
+          - field: bo_src.service_module_id
+            operator: in
+            parameter: source_service_module_id
+
+    - id: target_domain_id
+      display_name: 目标领域
+      description: 按目标业务对象所属领域过滤关系
+
+      association:
+        target_table: domains
+        target_alias: d_tgt
+        join_type: exists
+
+        on_conditions:
+          - left_field: r.target_bo_id
+            operator: eq
+            right_field: bo_tgt.id
+          - left_field: bo_tgt.service_module_id
+            operator: eq
+            right_field: sm_tgt.id
+          - left_field: sm_tgt.sub_domain_id
+            operator: eq
+            right_field: sd_tgt.id
+
+        from_join: |
+          FROM business_objects bo_tgt
+          JOIN service_modules sm_tgt ON bo_tgt.service_module_id = sm_tgt.id
+          JOIN sub_domains sd_tgt ON sm_tgt.sub_domain_id = sd_tgt.id
+
+        where_conditions:
+          - field: sd_tgt.domain_id
+            operator: in
+            parameter: target_domain_id
+
+    - id: target_sub_domain_id
+      display_name: 目标子领域
+      description: 按目标业务对象所属子领域过滤关系
+
+      association:
+        target_table: sub_domains
+        target_alias: sd_tgt
+        join_type: exists
+
+        on_conditions:
+          - left_field: r.target_bo_id
+            operator: eq
+            right_field: bo_tgt.id
+          - left_field: bo_tgt.service_module_id
+            operator: eq
+            right_field: sm_tgt.id
+
+        from_join: |
+          FROM business_objects bo_tgt
+          JOIN service_modules sm_tgt ON bo_tgt.service_module_id = sm_tgt.id
+
+        where_conditions:
+          - field: sm_tgt.sub_domain_id
+            operator: in
+            parameter: target_sub_domain_id
+
+    - id: target_service_module_id
+      display_name: 目标服务模块
+      description: 按目标业务对象所属服务模块过滤关系
+
+      association:
+        target_table: service_modules
+        target_alias: sm_tgt
+        join_type: exists
+
+        on_conditions:
+          - left_field: r.target_bo_id
+            operator: eq
+            right_field: bo_tgt.id
+
+        from_join: |
+          FROM business_objects bo_tgt
+
+        where_conditions:
+          - field: bo_tgt.service_module_id
+            operator: in
+            parameter: target_service_module_id
 
 # ────────────────────────────────────────────
 # 字段定义
@@ -441,7 +603,8 @@ fields:
         value_field: id
         display_field: name
         code_field: code
-        apply_target_permissions: false
+        apply_target_permissions: true
+        write_scope_policy: enforce
       behavior:
         validation: true
         binding_strength: strict
@@ -497,7 +660,9 @@ fields:
         value_field: id
         display_field: name
         code_field: code
-        apply_target_permissions: false
+        apply_target_permissions: true
+        write_scope_policy: inherit
+        scope_inherit_from: source_domain_id
       behavior:
         validation: true
         binding_strength: strict
@@ -549,7 +714,9 @@ fields:
         value_field: id
         display_field: name
         code_field: code
-        apply_target_permissions: false
+        apply_target_permissions: true
+        write_scope_policy: inherit
+        scope_inherit_from: source_sub_domain_id
       behavior:
         validation: true
         binding_strength: strict
@@ -610,6 +777,7 @@ fields:
         display_field: name
         code_field: code
         apply_target_permissions: false
+        write_scope_policy: none
       behavior:
         validation: true
         binding_strength: strict
@@ -666,6 +834,7 @@ fields:
         display_field: name
         code_field: code
         apply_target_permissions: false
+        write_scope_policy: none
       behavior:
         validation: true
         binding_strength: strict
@@ -718,6 +887,7 @@ fields:
         display_field: name
         code_field: code
         apply_target_permissions: false
+        write_scope_policy: none
       behavior:
         validation: true
         binding_strength: strict
@@ -769,7 +939,8 @@ fields:
         value_field: id
         display_field: name
         code_field: code
-        apply_target_permissions: false
+        apply_target_permissions: true
+        write_scope_policy: enforce
       # [V1.2.0 2026-06-15] 跨域关系双模式 ValueHelp 开关
       # dual_mode: true  →  渲染 BoSelectorDualMode (List 模式套 read scope, By Code 模式逃生口)
       # 详见: .trae/specs/cross-domain-relationship-permission/spec.md (Option B)
@@ -825,6 +996,7 @@ fields:
         display_field: name
         code_field: code
         apply_target_permissions: false
+        write_scope_policy: none
       # [V1.2.0 2026-06-15] 跨域关系双模式 ValueHelp 开关
       dual_mode: true
       behavior:
@@ -1067,8 +1239,9 @@ fields:
       title: 源业务对象
     semantics:
       meaning: 源业务对象的显示名称
+      # [REMOVED 2026-06-16 BMRD] 删除 import_order=3, 此字段 (显示名) 之前与 source_bo_code (编码) 冲突
+      # 改为 source_bo_code (编码) 占 import_order=3, 此字段 (显示名) 走 source_bo_id FK (显示成 name)
       export_visible: true
-      import_order: 3
       # 冗余字段一致性声明（Type-B: 虚拟冗余）
       redundancy:
         type: virtual
@@ -1091,6 +1264,8 @@ fields:
       title: 源业务对象编码
     semantics:
       meaning: 源业务对象的编码（虚拟冗余显示）
+      # [NEW 2026-06-16 BMRD] import_order 提到 3, 让"源业务对象编码"列排到前面 (在 关系编码 之后)
+      import_order: 3
       # [NEW 2026-06-14 BMRD] 父对象编码显示字段 - 跟随 source_bo_id，使用浅绿色
       parent_key_display: true
       export_visible: true
@@ -1117,8 +1292,9 @@ fields:
       title: 目标业务对象
     semantics:
       meaning: 目标业务对象的显示名称
+      # [REMOVED 2026-06-16 BMRD] 删除 import_order=4, 与 target_bo_code 冲突
+      # 由 target_bo_id FK 显示成 name 即可
       export_visible: true
-      import_order: 4
       # 冗余字段一致性声明（Type-B: 虚拟冗余）
       redundancy:
         type: virtual
@@ -1141,6 +1317,8 @@ fields:
       title: 目标业务对象编码
     semantics:
       meaning: 目标业务对象的编码（虚拟冗余显示）
+      # [NEW 2026-06-16 BMRD] import_order 提到 4, 让"目标业务对象编码"列排到前面
+      import_order: 4
       # [NEW 2026-06-14 BMRD] 父对象编码显示字段 - 跟随 target_bo_id，使用浅绿色
       parent_key_display: true
       export_visible: true
@@ -1170,10 +1348,9 @@ fields:
       import_visible: false
       computed_by: hierarchy_scope
       scope_rules_ref: hierarchies.hierarchy_scopes
-      # [FIX 2026-06-15 BMRD] 把"关系范围"列提到 relation_direction (7) 之后,
-      # 跟 relation_type/relation_direction 三个类型相关列聚在一起, 更易读
-      # 7.5 = 介于 relation_direction (7) 和 target_domain_name (8) 之间
-      import_order: 7.5
+      # [REWRITE 2026-06-16 BMRD] 把"关系范围"列提到 target_bo_code (4) 之后,
+      # 让"源/目标业务对象编码"+"关系范围"3 列聚在一起, 按用户规范
+      import_order: 5
       analytics:
         category: dimension
         type: categorical
@@ -1297,7 +1474,7 @@ fields:
     semantics:
       meaning: 源业务对象所属领域的显示名称
       export_visible: true
-      import_order: 5
+      # [REMOVED 2026-06-16 BMRD] 删除 import_order=5, 此字段与 source_domain_id FK (显示成 name) 重复
       # 冗余字段一致性声明（Type-B: 虚拟冗余，多层JOIN）
       redundancy:
         type: virtual
@@ -1681,6 +1858,19 @@ validations:
 ui_view_config:
   list:
     pageSize: 20
+    # [V1.2.5 2026-06-17] toolbar text search 字段列表
+    # 空数组时 toolbar 不显示搜索框 (前端 v-if="searchFields.length > 0")
+    # 这里列出可搜索的文本字段, 后端 _do_list 会自动对其做 LIKE OR 搜索
+    # [FIX 2026-06-17] 移除 relation_code:
+    #   relation_code 是内部字段 (UI 不显示给用户), 但之前会参与搜索.
+    #   用户搜 "TEST" 会匹配到所有 relation_code='TEST_V11xx' 的关系 (测试数据),
+    #   但这些关系的 code/源BO名/目标BO名/描述都不含 TEST, 用户看到误匹配.
+    #   只保留用户在 UI 列表中能看到的字段: 关系编码(code)、描述、源/目标BO名.
+    searchFields:
+      - code
+      - relation_desc
+      - source_bo_name
+      - target_bo_name
     columns:
       - key: code
         title: 关系编码
@@ -1695,6 +1885,7 @@ ui_view_config:
         importance: high
         sortable: true
         # [FIX 2026-06-13] FK 列头过滤: value_help 弹出业务对象选择, 过滤 source_bo_id
+        # [V1.2.5 2026-06-17] 列表列与详情表单一致: 源端 scope 内 (apply_target_permissions=true, enforce)
         searchable: false
         filterable: true
         filter_type: value_help
@@ -1707,6 +1898,8 @@ ui_view_config:
             value_field: id
             display_field: name
             code_field: code
+            apply_target_permissions: true
+            write_scope_policy: enforce
           behavior:
             multiple: true
             allow_clear: true
@@ -1721,6 +1914,7 @@ ui_view_config:
         importance: high
         sortable: true
         # [FIX 2026-06-13] FK 列头过滤: 按编码搜, 弹业务对象选择, 过滤 source_bo_id
+        # [V1.2.5 2026-06-17] 列表列与详情表单一致: 源端 scope 内 (apply_target_permissions=true, enforce)
         searchable: false
         filterable: true
         filter_type: value_help
@@ -1733,6 +1927,8 @@ ui_view_config:
             value_field: id
             display_field: name
             code_field: code
+            apply_target_permissions: true
+            write_scope_policy: enforce
           behavior:
             multiple: true
             allow_clear: true
@@ -1747,6 +1943,7 @@ ui_view_config:
         importance: high
         sortable: true
         # [FIX 2026-06-13] FK 列头过滤: value_help 弹出业务对象选择, 过滤 target_bo_id
+        # [V1.2.5 2026-06-17] 列表列与详情表单一致: 目标端允许外域 (apply_target_permissions=false, none)
         searchable: false
         filterable: true
         filter_type: value_help
@@ -1759,6 +1956,8 @@ ui_view_config:
             value_field: id
             display_field: name
             code_field: code
+            apply_target_permissions: false
+            write_scope_policy: none
           behavior:
             multiple: true
             allow_clear: true
@@ -1773,6 +1972,7 @@ ui_view_config:
         importance: high
         sortable: true
         # [FIX 2026-06-13] FK 列头过滤: 按编码搜, 弹业务对象选择, 过滤 target_bo_id
+        # [V1.2.5 2026-06-17] 列表列与详情表单一致: 目标端允许外域 (apply_target_permissions=false, none)
         searchable: false
         filterable: true
         filter_type: value_help
@@ -1785,6 +1985,8 @@ ui_view_config:
             value_field: id
             display_field: name
             code_field: code
+            apply_target_permissions: false
+            write_scope_policy: none
           behavior:
             multiple: true
             allow_clear: true
@@ -1829,42 +2031,173 @@ ui_view_config:
         sortable: true
       # [FIX 2026-06-14] FK 链路补全: 显示源/目标的领域→子领域→服务模块
       # 后端通过 redundancy join_path 自动填充 *_name 字段
+      # [V1.2.5 2026-06-17] 列表列与详情表单一致: 列头过滤下拉与表单 value_help 一致
       - key: source_domain_name
         title: 源领域
         width: 120
         position: 10
         importance: medium
         sortable: true
+        filterable: true
+        filter_type: value_help
+        filter_placeholder: 选择源领域
+        # [V1.2.5 2026-06-17] 列头过滤下拉选中 domain/sub_domain/service_module 后,
+        # 前端用 api_param_key 映射成 URL 参数 (后端 chain filter 处理)
+        api_param_key: source_domain_id
+        value_help:
+          source:
+            type: bo
+            target_bo: domain
+            value_field: id
+            display_field: name
+            code_field: code
+            apply_target_permissions: true
+            write_scope_policy: enforce
+          behavior:
+            multiple: true
+            allow_clear: true
+            parameter_bindings:
+              - local_field: version_id
+                target_field: version_id
+                required: true
       - key: source_sub_domain_name
         title: 源子领域
         width: 120
         position: 11
         importance: medium
         sortable: true
+        filterable: true
+        filter_type: value_help
+        filter_placeholder: 选择源子领域
+        api_param_key: source_sub_domain_id
+        value_help:
+          source:
+            type: bo
+            target_bo: sub_domain
+            value_field: id
+            display_field: name
+            code_field: code
+            apply_target_permissions: true
+            write_scope_policy: inherit
+            scope_inherit_from: source_domain_id
+          behavior:
+            multiple: true
+            allow_clear: true
+            # [V1.2.5 2026-06-17] 列表列头过滤不需要 domain 级联 (列表无前置筛选上下文)
+            # 移除 source_domain_id 的 required binding, 只保留 version_id
+            # 后端通过 apply_target_permissions=true 保证只能选 scope 内的 sub_domain
+            parameter_bindings:
+              - local_field: version_id
+                target_field: version_id
+                required: true
       - key: source_service_module_name
         title: 源服务模块
         width: 130
         position: 12
         importance: medium
         sortable: true
+        filterable: true
+        filter_type: value_help
+        filter_placeholder: 选择源服务模块
+        api_param_key: source_service_module_id
+        value_help:
+          source:
+            type: bo
+            target_bo: service_module
+            value_field: id
+            display_field: name
+            code_field: code
+            apply_target_permissions: true
+            write_scope_policy: inherit
+            scope_inherit_from: source_sub_domain_id
+          behavior:
+            multiple: true
+            allow_clear: true
+            # [V1.2.5 2026-06-17] 列表列头过滤不需要 sub_domain 级联
+            parameter_bindings:
+              - local_field: version_id
+                target_field: version_id
+                required: true
       - key: target_domain_name
         title: 目标领域
         width: 120
         position: 13
         importance: medium
         sortable: true
+        filterable: true
+        filter_type: value_help
+        filter_placeholder: 选择目标领域
+        api_param_key: target_domain_id
+        value_help:
+          source:
+            type: bo
+            target_bo: domain
+            value_field: id
+            display_field: name
+            code_field: code
+            apply_target_permissions: false
+            write_scope_policy: none
+          behavior:
+            multiple: true
+            allow_clear: true
+            parameter_bindings:
+              - local_field: version_id
+                target_field: version_id
+                required: true
       - key: target_sub_domain_name
         title: 目标子领域
         width: 120
         position: 14
         importance: medium
         sortable: true
+        filterable: true
+        filter_type: value_help
+        filter_placeholder: 选择目标子领域
+        api_param_key: target_sub_domain_id
+        value_help:
+          source:
+            type: bo
+            target_bo: sub_domain
+            value_field: id
+            display_field: name
+            code_field: code
+            apply_target_permissions: false
+            write_scope_policy: none
+          behavior:
+            multiple: true
+            allow_clear: true
+            # [V1.2.5 2026-06-17] 列表列头过滤不需要 domain 级联
+            parameter_bindings:
+              - local_field: version_id
+                target_field: version_id
+                required: true
       - key: target_service_module_name
         title: 目标服务模块
         width: 130
         position: 15
         importance: medium
         sortable: true
+        filterable: true
+        filter_type: value_help
+        filter_placeholder: 选择目标服务模块
+        api_param_key: target_service_module_id
+        value_help:
+          source:
+            type: bo
+            target_bo: service_module
+            value_field: id
+            display_field: name
+            code_field: code
+            apply_target_permissions: false
+            write_scope_policy: none
+          behavior:
+            multiple: true
+            allow_clear: true
+            # [V1.2.5 2026-06-17] 列表列头过滤不需要 sub_domain 级联
+            parameter_bindings:
+              - local_field: version_id
+                target_field: version_id
+                required: true
       # [FIX 2026-06-14] BUG-V008 扩展: 补 FK 链路列 version_name
       # 后端通过 redundancy join_path 自动填充 (version_id -> versions.name)
       - key: version_name

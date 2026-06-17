@@ -97,6 +97,8 @@ import PermissionConfigPanel from '@/views/SystemManagement/components/Permissio
 import StateTransitionButtons from '@/components/bo/StateTransitionButtons.vue'
 import metaService from '@/services/metaService'
 import { objectTypeService } from '@/services/objectTypeService'
+
+defineOptions({ name: 'ObjectDetail' })
 import { useFieldPolicy } from '@/composables/useFieldPolicy'  // [DECORATIVE] [NEW] v1.3 / FR-6.1
 
 const emit = defineEmits(['refresh'])

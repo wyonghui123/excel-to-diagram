@@ -367,11 +367,17 @@ export function useDiagramData() {
   // 关键修复 v29：补全跨域关系 (src⊕tgt, 如 TEST600→BO_WAREHOUSE)
   //   收紧条件: 仅当用户主动选了 INTERNAL 或 CROSS_BOUNDARY 节点时才补全
   //   保护"用户只选 INTERNAL 不想引入外部"语义
-  // v39.3: 去掉补全跨域关系逻辑，直接使用关系范围树中选中的关系 ID
-  //   之前逻辑: fromTree + fromCrossBoundary 补全，导致图表页显示 17 而管理页显示 12
-  //   现在逻辑: 只使用 getSelectedRelationIds，与管理页关系范围 badge 完全一致
-  //   用户反馈: "去掉补全跨域关系逻辑"
+  // [V1.2.9 修复] 优先使用 archRelationIds (从 chartData 传入的精确关系 IDs)
+  //   反向匹配按叶子 module 节点选中, 但叶子节点的 relationIds 可能包含用户未选的关系
+  //   (例如: 用户选"同子领域跨服务模块"分类下 2 个关系, 但 module 节点 relationIds 是 3 个)
+  //   直接用 archRelationIds 避免反向匹配的过度匹配
+  //   fallback: 用户在图表页手动操作时, 仍可用 getSelectedRelationIds
+  const archRelationIdsRef = ref(null)
+
   const filteredRelations = computed(() => {
+    if (archRelationIdsRef.value && archRelationIdsRef.value.length > 0) {
+      return [...archRelationIdsRef.value]
+    }
     return getSelectedRelationIds(relationCategoryTree.value, selectedRelationNodeIds.value)
   })
 
@@ -384,10 +390,15 @@ export function useDiagramData() {
     const filteredCodes = new Set(centerScopeCodes)
     const relationIds = new Set(filteredRelations.value || [])
     if (previewData.value?.relationships) {
+      // [V1.2.9 修复] 只采纳用户选中的关系引入 BO codes
+      // 之前 [V1.1.13] 有兜底: 用户未勾选时拉所有 cross-boundary 关系的 BO codes
+      //   → 即使用户没勾选任何关系, 也会强行引入所有外部 BO, 图表统计和渲染与关系范围选择脱钩
+      // 现在: 严格按用户选中的关系 (filteredRelations) 引入 BO
+      //   取消所有勾选时, relationFilteredBoCodes = centerScope (即图表只显示中心 BO, 没有任何外部 BO)
       previewData.value.relationships.forEach(rel => {
         if (relationIds.has(rel.id)) {
-          filteredCodes.add(rel.sourceCode)
-          filteredCodes.add(rel.targetCode)
+          if (rel.sourceCode) filteredCodes.add(rel.sourceCode)
+          if (rel.targetCode) filteredCodes.add(rel.targetCode)
         }
       })
     }
@@ -683,7 +694,11 @@ export function useDiagramData() {
   const filteredContainers = computed(() => {
     if (!previewData.value) return []
 
-    // 最终显示范围 = 中心范围 ∪ 关系新增（并集，不会减少，只会新增）
+    // [V1.2.9 修复] 最终显示范围 = 中心范围 ∪ 用户选中的关系引入的外部 BO
+    // 之前 [V1.1.13] 有兜底: 当 relationFilteredBoCodes 不含外部 BO 时,
+    //   从 previewData 拉所有 cross-boundary 关系, 强行引入外部 BO
+    //   → 取消所有关系勾选时, 图表仍然包含所有外部 BO, 统计和渲染与关系范围选择脱钩
+    // 现在: 严格按 relationFilteredBoCodes (已严格依赖 selectedRelationNodeIds)
     const centerScopeSet = new Set(centerScope.value || [])
     const relationSet = new Set(relationFilteredBoCodes.value || [])
     const finalBoCodes = new Set([...centerScopeSet, ...relationSet])
@@ -796,6 +811,7 @@ export function useDiagramData() {
   const filteredDomainProducts = computed(() => {
     if (!previewData.value?.domainProducts) return []
 
+    // [V1.2.9 修复] 移除 [V1.1.13] 跨域兜底: 直接用 relationFilteredBoCodes
     const centerScopeSet = new Set(centerScope.value || [])
     const relationSet = new Set(relationFilteredBoCodes.value || [])
     const finalBoCodes = new Set([...centerScopeSet, ...relationSet])
@@ -983,43 +999,67 @@ export function useDiagramData() {
     const center = (() => {
       const base = selectedStats.value.center || { domains: 0, subDomains: 0, serviceModules: 0, businessObjects: 0, objectRelations: 0 }
       if (!relationCategoryTree.value) return base
-      const ids = new Set()
-      const gather = (n) => {
-        if (!n) return
-        if (n.relationIds) n.relationIds.forEach(id => ids.add(id))
-        if (n.relationCodes && (!n.relationIds || n.relationIds.length === 0)) {
-          n.relationCodes.forEach(c => ids.add(c))
-        }
-        if (n.children) n.children.forEach(gather)
+      // [V1.2.9 修复] center.objectRelations 必须采纳用户的关系范围选择
+      // 之前: 遍历整棵树, 收集所有 INTERNAL 节点 relationIds, 不看用户选没选
+      //   且 gather(根节点) 会收集所有子孙 relationIds → 用户只选 1 个叶子节点也会统计全部
+      // 现在: 直接用 filteredRelations (用户选中的关系 IDs) + previewData.relationships.scopeType
+      //   只统计用户选中的 internal 关系数
+      const selectedIds = selectedRelationNodeIds.value || []
+      // 用户在关系范围里完全没选 → 中心范围关系就是 0
+      if (selectedIds.length === 0) {
+        return { ...base, objectRelations: 0 }
       }
-      const collect = (node) => {
-        if (!node) return
-        const isInternal = node.id === 'internal' || (typeof node.id === 'string' && node.id.startsWith('internal-'))
-        if (isInternal) gather(node)
-        if (node.children) node.children.forEach(collect)
+      const userSelectedRelationIds = new Set(filteredRelations.value || [])
+      if (userSelectedRelationIds.size === 0) {
+        return { ...base, objectRelations: 0 }
       }
-      relationCategoryTree.value.forEach(collect)
-      // 兜底: 分类树收集到的关系数 < previewData 中 INTERNAL 关系数
+      // 统计用户选中的 internal 关系数
+      let internalCount = 0
       if (previewData.value?.relationships) {
-        const rels = previewData.value.relationships
-        const centerSet = new Set(centerScope.value || [])
-        const truthIds = new Set()
-        for (const r of rels) {
-          if (r.id == null) continue
-          if (r.sourceCode === r.targetCode) continue
-          if (r.scopeType === 'internal') {
-            truthIds.add(r.id); continue
+        previewData.value.relationships.forEach(rel => {
+          if (!userSelectedRelationIds.has(rel.id)) return
+          // scopeType 为 internal → 中心范围关系
+          if (rel.scopeType === 'internal') {
+            internalCount++
           }
-          const srcIn = centerSet.has(r.sourceCode)
-          const tgtIn = centerSet.has(r.targetCode)
-          if (srcIn && tgtIn) truthIds.add(r.id)
-        }
-        return { ...base, objectRelations: Math.max(ids.size, truthIds.size) }
+        })
       }
-      return { ...base, objectRelations: ids.size }
+      return { ...base, objectRelations: internalCount }
     })()
 
-    const external = selectedStats.value.external || { domains: 0, subDomains: 0, serviceModules: 0, businessObjects: 0, objectRelations: 0 }
+    // [V1.2.9 修复] external 容器统计必须采纳用户的关系范围选择
+    // 之前: externalBoCodes 为空时, 强行从 previewData 拉所有 cross-boundary 关系
+    //       提取外部 BO codes, 完全无视用户没勾选关系的情况
+    // 现在: externalBoCodes 为空时, 用用户实际选中的关系 ID 过滤 previewData
+    //       只采纳用户选中的 cross-boundary 关系引入的外部 BO
+    //       用户在关系范围里完全没选 → external 全 0
+    const external = (() => {
+      const base = selectedStats.value.external || { domains: 0, subDomains: 0, serviceModules: 0, businessObjects: 0, objectRelations: 0 }
+      if (externalBoCodes.value.size > 0) return base
+      if (!previewData.value?.relationships) return base
+      const selectedIds = selectedRelationNodeIds.value || []
+      // 用户在关系范围里完全没选 → external 容器统计为 0
+      if (selectedIds.length === 0) return base
+      const centerSet = new Set(centerScope.value || [])
+      // 用用户选中的关系 ID 过滤 previewData, 只采纳用户选中的 cross-boundary
+      const userSelectedIds = new Set(filteredRelations.value || [])
+      const crossRels = previewData.value.relationships.filter(r => {
+        if (r.sourceCode === r.targetCode) return false
+        if (!userSelectedIds.has(r.id)) return false
+        if (r.scopeType === 'cross-boundary') return true
+        const srcIn = centerSet.has(r.sourceCode)
+        const tgtIn = centerSet.has(r.targetCode)
+        return srcIn !== tgtIn
+      })
+      if (crossRels.length === 0) return base
+      const externalCodes = new Set()
+      crossRels.forEach(r => {
+        if (!centerSet.has(r.sourceCode) && r.sourceCode) externalCodes.add(r.sourceCode)
+        if (!centerSet.has(r.targetCode) && r.targetCode) externalCodes.add(r.targetCode)
+      })
+      if (externalCodes.size === 0) return base
+      return calculateStatsForBoCodes(Array.from(externalCodes))
+    })()
 
     // 关键修复 v32 (终版): incremental.objectRelations = total - center (都用 selectedNodeIds 口径)
     // 关键修复 v33: 但当 relationCategoryTree 缺失 cross-boundary 节点 (后端 scopeType 错算为
@@ -1028,74 +1068,47 @@ export function useDiagramData() {
     //   2) 否则直接用 previewData.relationships 中 scopeType=cross-boundary 的关系 ID 数
     const incremental = (() => {
       const base = selectedStats.value.incremental || { domains: 0, subDomains: 0, serviceModules: 0, businessObjects: 0, objectRelations: 0 }
-      const computeFromTree = () => {
-        if (!relationCategoryTree.value) return 0
-        const ids = new Set()
-        const gather = (n) => {
-          if (!n) return
-          if (n.relationIds) n.relationIds.forEach(id => ids.add(id))
-          if (n.relationCodes && (!n.relationIds || n.relationIds.length === 0)) {
-            n.relationCodes.forEach(c => ids.add(c))
-          }
-          if (n.children) n.children.forEach(gather)
-        }
-        const collect = (node) => {
-          if (!node) return
-          const isInternalOrCross = node.id === 'internal' || node.id === 'cross-boundary' ||
-            (typeof node.id === 'string' && (node.id.startsWith('internal-') || node.id.startsWith('cross-boundary-')))
-          if (isInternalOrCross) gather(node)
-          if (node.children) node.children.forEach(collect)
-        }
-        relationCategoryTree.value.forEach(collect)
-        return ids.size
+      // [V1.2.9 修复] incremental 同样必须采纳用户的关系范围选择
+      // 之前: cbCollect 遍历整棵树, 对 cross-boundary 根节点 gather → 收集所有 cross-boundary 关系
+      //   且兜底分支 (incFromTree === 0) 还会无视空选择拉所有 cross-boundary
+      // 现在: 直接用 filteredRelations (用户选中的关系 IDs) + previewData.relationships.scopeType
+      //   只统计用户选中的 cross-boundary 关系数
+      const selectedIds = selectedRelationNodeIds.value || []
+      // 用户在关系范围里完全没选 → incremental 直接为 0, 不再走任何兜底
+      if (selectedIds.length === 0) {
+        return { ...base, objectRelations: 0 }
       }
-      const computeCenter = () => {
-        if (!relationCategoryTree.value) return 0
-        const ids = new Set()
-        const gather = (n) => {
-          if (!n) return
-          if (n.relationIds) n.relationIds.forEach(id => ids.add(id))
-          if (n.relationCodes && (!n.relationIds || n.relationIds.length === 0)) {
-            n.relationCodes.forEach(c => ids.add(c))
-          }
-          if (n.children) n.children.forEach(gather)
-        }
-        const collect = (node) => {
-          if (!node) return
-          const isInternal = node.id === 'internal' ||
-            (typeof node.id === 'string' && node.id.startsWith('internal-'))
-          if (isInternal) gather(node)
-          if (node.children) node.children.forEach(collect)
-        }
-        relationCategoryTree.value.forEach(collect)
-        return ids.size
+      const userSelectedRelationIds = new Set(filteredRelations.value || [])
+      if (userSelectedRelationIds.size === 0) {
+        return { ...base, objectRelations: 0 }
       }
-      let totalFromTree = computeFromTree()
-      let centerFromTree = computeCenter()
-      let incFromTree = totalFromTree - centerFromTree
-      // 兜底: 关系分类树中 cross-boundary 节点不存在或没收集到时, 用 previewData 算
-      if (incFromTree === 0 && previewData.value?.relationships) {
-        const rels = previewData.value.relationships
-        const centerSet = new Set(centerScope.value || [])
-        const ids = new Set()
-        for (const r of rels) {
-          if (r.id == null) continue
-          if (r.sourceCode === r.targetCode) continue  // 排除自环
-          // 1) 优先用后端 scopeType
-          if (r.scopeType === 'cross-boundary') {
-            ids.add(r.id)
-            continue
+      // 统计用户选中的 cross-boundary 关系数
+      let crossCount = 0
+      if (previewData.value?.relationships) {
+        previewData.value.relationships.forEach(rel => {
+          if (!userSelectedRelationIds.has(rel.id)) return
+          // scopeType 为 cross-boundary → 通过关系引入的关系
+          if (rel.scopeType === 'cross-boundary') {
+            crossCount++
           }
-          // 2) 后端没标 cross-boundary 时, 用业务定义 (XOR) 兜底
-          const srcIn = centerSet.has(r.sourceCode)
-          const tgtIn = centerSet.has(r.targetCode)
-          if (srcIn !== tgtIn) {
-            ids.add(r.id)
-          }
-        }
-        return { ...base, objectRelations: ids.size }
+        })
       }
-      return { ...base, objectRelations: incFromTree }
+      // 容器统计 (domains/subDomains/serviceModules/businessObjects) 来自 external,
+      // 来自用户选中的 cross-boundary 关系引入的外部 BO
+      const incRelCount = crossCount
+      if (incRelCount > 0 && base.domains === 0 && base.subDomains === 0 &&
+        base.serviceModules === 0 && base.businessObjects === 0) {
+        return {
+          domains: external.domains,
+          subDomains: external.subDomains,
+          serviceModules: external.serviceModules,
+          businessObjects: external.businessObjects,
+          externalBusinessObjects: external.businessObjects,
+          objectRelations: incRelCount,
+          serviceModuleRelations: external.serviceModuleRelations || 0
+        }
+      }
+      return { ...base, objectRelations: incRelCount || base.objectRelations || 0 }
     })()
 
     // v39.6: total = center + incremental (与"中心∪关系"语义一致)
@@ -1180,6 +1193,12 @@ export function useDiagramData() {
         }
       })
     }
+
+    // [V1.2.9 修复] 移除 [V1.1.13] 跨域兜底
+    // 之前: 当上述逻辑都没加入外部 BO 时, 从 previewData 拉所有 cross-boundary 关系
+    //   强行引入外部 BO, 完全无视用户没勾选任何关系的情况
+    // 现在: 严格按 finalBoCodes (已通过 relationFilteredBoCodes 严格依赖 selectedRelationNodeIds)
+    // 取消所有关系勾选时, finalBoCodes = centerScope, 没有任何外部 BO
 
     const hasFilter = finalBoCodes && finalBoCodes.size > 0
 
@@ -1783,6 +1802,9 @@ export function useDiagramData() {
 
   // 切换关系节点选中状态
   const toggleRelationNode = (nodeId) => {
+    // [V1.2.9 修复] 用户在图表页手动切换时, 让 archRelationIdsRef 失效
+    //   这样 filteredRelations 回退到 getSelectedRelationIds (按当前 selectedRelationNodeIds 算)
+    archRelationIdsRef.value = null
     const index = selectedRelationNodeIds.value.indexOf(nodeId)
     if (index === -1) {
       selectedRelationNodeIds.value.push(nodeId)
@@ -1865,6 +1887,8 @@ export function useDiagramData() {
         'same-module': false
       }
     }
+    // [V1.2.9 修复] 用户在图表页清空关系范围时, 让 archRelationIdsRef 失效
+    archRelationIdsRef.value = null
     selectedRelationNodeIds.value = []
   }
 
@@ -2020,7 +2044,7 @@ export function useDiagramData() {
   }
 
   async function initFromArchDataManager(archData) {
-    const { versionId, hierarchyFilter, relationTypeFilter } = archData
+    const { versionId, hierarchyFilter, relationTypeFilter, relationIds: archRelationIds, relationCategoryTypes } = archData
     
     loading.value = true
     try {
@@ -2036,7 +2060,17 @@ export function useDiagramData() {
       // 直接使用 buildPreviewDataFromArchData 返回的 centerScope，避免重复 API 调用
       const centerScopeCodes = result.centerScope || []
       configStore.updateCenterScope(centerScopeCodes)
-      
+
+      // [V1.2.9 修复] 把精确的关系 IDs 存到 ref, 让 filteredRelations 优先用这个
+      //   之前: filteredRelations 走反向匹配后的 module 节点 relationIds, 过度匹配
+      //   (用户选 2 个关系 → module 节点含 3 个 → filteredRelations=3)
+      //   现在: 直接用 chartData 传入的 archRelationIds
+      if (archRelationIds && archRelationIds.length > 0) {
+        archRelationIdsRef.value = [...archRelationIds]
+      } else {
+        archRelationIdsRef.value = null
+      }
+
       if (relationTypeFilter && relationTypeFilter.length > 0) {
         selectedRelationNodeIds.value = convertToRelationNodeIds(relationTypeFilter)
       }
@@ -2053,7 +2087,46 @@ export function useDiagramData() {
       
       await nextTick()
       
-      if (relationTypeFilter && relationTypeFilter.length > 0) {
+      // [V1.2.9 修复] 节点匹配优先级：
+      //   1. archRelationIds 反向匹配（精确）：找出 relationIds 与 archRelationIds 有交集的叶子节点，
+      //      并向上回溯选中所有祖先节点（category + scope）
+      //   2. relationTypeFilter 匹配（回退）：用 relationCodes 匹配（可能过度匹配，但比全选好）
+      //   3. 全选 scope 节点（兜底）：只全选 internal/cross-boundary/external 三个根节点，
+      //      不再全选 category 节点（避免 selectedSet 闸门失效）
+      const archRelationIdsSet = archRelationIds && archRelationIds.length > 0
+        ? new Set(archRelationIds)
+        : null
+
+      if (archRelationIdsSet && relationCategoryTree.value) {
+        // 1. 精确反向匹配：找出所有"relationIds 与 archRelationIds 有交集"的叶子 module 节点
+        const matchedLeafNodes = [] // { node, ancestors: [parentNode...] }
+        function findLeafNodesWithRelationIds(node, ancestors) {
+          // 叶子节点判定：有 relationIds 且无 children（或 children 为空）
+          const hasChildren = node.children && node.children.length > 0
+          if (!hasChildren && node.relationIds && node.relationIds.length > 0) {
+            const hasIntersection = node.relationIds.some(id => archRelationIdsSet.has(id))
+            if (hasIntersection) {
+              matchedLeafNodes.push({ node, ancestors: [...ancestors] })
+            }
+          }
+          if (hasChildren) {
+            node.children.forEach(child => findLeafNodesWithRelationIds(child, [...ancestors, node]))
+          }
+        }
+        relationCategoryTree.value.forEach(rootNode => findLeafNodesWithRelationIds(rootNode, []))
+
+        // 2. 收集所有选中节点 ID（叶子 + 所有祖先）
+        const selectedIdSet = new Set()
+        matchedLeafNodes.forEach(({ node, ancestors }) => {
+          selectedIdSet.add(node.id)
+          ancestors.forEach(ancestor => selectedIdSet.add(ancestor.id))
+        })
+
+        if (selectedIdSet.size > 0) {
+          selectedRelationNodeIds.value = Array.from(selectedIdSet)
+        }
+      } else if (relationTypeFilter && relationTypeFilter.length > 0) {
+        // 回退：用 relationCodes 匹配（可能过度匹配，但比全选好）
         const relationCodesFilter = new Set(relationTypeFilter)
         
         const nodeIds = []
@@ -2077,24 +2150,17 @@ export function useDiagramData() {
           selectedRelationNodeIds.value = nodeIds
         }
       } else {
-        const allCategoryNodeIds = []
-        function collectCategoryNodeIds(node) {
-          if (node.scopeType && node.categoryType) {
-            allCategoryNodeIds.push(node.id)
-          }
-          if (node.children && node.children.length > 0) {
-            node.children.forEach(child => collectCategoryNodeIds(child))
-          }
-        }
+        // 兜底：只全选 scope 级节点（internal/cross-boundary/external）
+        // [V1.2.9 修复] 之前全选所有 category 节点，导致 selectedSet.has(node.id) 闸门对所有 category 节点都通过
+        //   现在只全选 scope 根节点，category 节点默认不选，闸门才能生效
+        const scopeNodeIds = []
         if (relationCategoryTree.value) {
           relationCategoryTree.value.forEach(rootNode => {
-            if (rootNode.children) {
-              rootNode.children.forEach(child => collectCategoryNodeIds(child))
-            }
+            scopeNodeIds.push(rootNode.id)
           })
         }
-        if (allCategoryNodeIds.length > 0) {
-          selectedRelationNodeIds.value = allCategoryNodeIds
+        if (scopeNodeIds.length > 0) {
+          selectedRelationNodeIds.value = scopeNodeIds
         }
       }
       

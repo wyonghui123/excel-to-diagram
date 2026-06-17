@@ -215,6 +215,12 @@ analytical_model:
 ui_view_config:
   list:
     pageSize: 20
+    # [FIX 2026-06-17] 显式声明 searchFields，包含 description（text 类型，不在 list columns 中）
+    #   之前自动生成只包含 list columns 中的 string 字段，description 会被遗漏
+    searchFields:
+      - name
+      - code
+      - description
     columns:
       - key: name
         title: 名称
@@ -470,6 +476,7 @@ fields:
     semantics:
       meaning: 用于级联筛选子领域（从子领域推导）
       immutable: true
+      readonly_always: true
       redundancy:
         type: virtual
         source_field: sub_domain_id
@@ -514,7 +521,7 @@ fields:
     type: integer
     db_column: sub_domain_id
     required: true
-    description: 所属子领域（编辑时可切换）
+    description: 所属子领域（创建后不可变更）
     ui:
       widget: select
       relation: sub_domain
@@ -525,6 +532,8 @@ fields:
     semantics:
       meaning: 关联的子领域（父对象）
       parent_key: true
+      immutable: true
+      readonly_always: true
       mandatory: true
       resolve_from_field: sub_domain_code
       resolve_to_object: sub_domain
@@ -532,8 +541,9 @@ fields:
         category: dimension
         type: foreign_key
         display_name: 子领域
-      # 注意：根据 SAP One Model 设计，parent_key 仅表示层级关系，不强制只读
-      # 编辑时可切换到其他子领域
+      # [FIX v1.2.2 2026-06-16] 父子层级关系不可变
+      # 跨层级移动会破坏关系引用、审计链、dim_scope 权限。
+      # 业务上需要"重新分类"请走专门的"重新分类"操作（action）而非直接改字段。
     value_help:
       source:
         type: bo

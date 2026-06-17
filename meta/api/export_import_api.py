@@ -9,7 +9,7 @@ import os
 import uuid
 import threading
 from pathlib import Path
-from flask import Blueprint, request, jsonify, send_file, abort, g
+from flask import Blueprint, request, jsonify, send_file, abort, g, copy_current_request_context
 from werkzeug.utils import secure_filename
 from urllib.parse import unquote
 
@@ -269,6 +269,16 @@ def export_data_async():
             "protect_sheet": False
         })
 
+        # [FIX 2026-06-17] 从 login_required 已写入的 g.current_user 拿 user_id
+        # 用于后台线程的权限过滤 (避免子线程中 flask.g 不可用导致权限被绕过)
+        export_user_id = None
+        try:
+            g_user = getattr(g, 'current_user', None)
+            if g_user:
+                export_user_id = g_user.get('user_id')
+        except Exception:
+            pass
+
         task_id = str(uuid.uuid4())
         total_types = len(selected_types) if selected_types else 1
         
@@ -284,10 +294,17 @@ def export_data_async():
             'error': None
         }
 
+        # [FIX 2026-06-17] 用 thread-local user_id 传递 user 身份到子线程
+        # 否则 query_service.search() 调 _apply_data_permission 时 get_current_user() 返回 None
+        # 导致权限过滤被跳过 (async 导出包含所有数据的安全漏洞)
+        _run_user_id = export_user_id
         def _run_export():
+            from meta.services.query_service import set_thread_user_id
+            if _run_user_id:
+                set_thread_user_id(_run_user_id)
             try:
                 service = get_import_export_service()
-                
+
                 if scope == 'template':
                     result = service.export_template(selected_types, options, 
                         progress_callback=lambda info: _update_export_task_progress(task_id, info))
@@ -588,7 +605,16 @@ def import_data_async():
             'error': None
         }
 
+        # [FIX 2026-06-17] 用 thread-local user_id 传递 user 身份到子线程
+        # 修复 async 导入也存在的权限上下文丢失问题
+        _run_import_user_id = audit_user_id
         def _run_import():
+            from meta.services.query_service import set_thread_user_id, clear_thread_user_id
+            if _run_import_user_id:
+                try:
+                    set_thread_user_id(int(_run_import_user_id))
+                except Exception:
+                    pass
             try:
                 if _manage_service:
                     _manage_service.set_audit_user(audit_user_id, audit_user_name, audit_ip, audit_ua)

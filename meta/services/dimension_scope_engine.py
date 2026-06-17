@@ -313,36 +313,27 @@ class DimensionScopeEngine:
                             )
                             if chain_cond:
                                 binding_parts.append(chain_cond)
+                        elif filter_type == 'fk_expanded':
+                            # [FIX 2026-06-16] 从父维度值向下查询子维度值，再用子维度 FK 过滤
+                            # 例: domain=703 → 查 sub_domains WHERE domain_id=703 → [138,139,146]
+                            # → service_modules WHERE sub_domain_id IN (138,139,146)
+                            child_ids = self._expand_down(dim_code, resource_type, vals)
+                            if child_ids:
+                                if len(child_ids) == 1:
+                                    binding_parts.append(f"{field} = {child_ids[0]}")
+                                else:
+                                    binding_parts.append(
+                                        f"{field} IN ({','.join(str(v) for v in sorted(child_ids))})"
+                                    )
+                            else:
+                                # 没有子维度值 → 0 条可见
+                                binding_parts.append("1 = 0")
                     if binding_parts:
                         # 多个 binding (例: source + target) 用 OR 合并
                         if len(binding_parts) == 1:
                             parts.append(binding_parts[0])
                         else:
                             parts.append(f"({' OR '.join(binding_parts)})")
-                    elif filter_type == 'fk_expanded':
-                        # [FIX 2026-06-16] 从父维度值向下查询子维度值，再用子维度 FK 过滤
-                        # 例: domain=703 → 查 sub_domains WHERE domain_id=703 → [138,139,146]
-                        # → service_modules WHERE sub_domain_id IN (138,139,146)
-                        child_ids = self._expand_down(dim_code, resource_type, vals)
-                        if child_ids:
-                            if len(child_ids) == 1:
-                                parts.append(f"{field} = {child_ids[0]}")
-                            else:
-                                parts.append(
-                                    f"{field} IN ({','.join(str(v) for v in sorted(child_ids))})"
-                                )
-                        else:
-                            # 没有子维度值 → 0 条可见
-                            parts.append("1 = 0")
-                    elif filter_type == 'chain':
-                        # 沿 HIERARCHY_CHAIN 追溯到顶层 dim 对应的外键
-                        # 例: dimension=product, bo=domain, chain
-                        #   → 查 domains.version_id → versions WHERE product_id IN (..)
-                        chain_cond = self._build_chain_condition(
-                            resource_type, dim_code, vals
-                        )
-                        if chain_cond:
-                            parts.append(chain_cond)
             else:
                 # ────────────────────────────────────────
                 # 老路径: 硬编码 HIERARCHY_CHAIN/PARENT_FIELD_MAP (向后兼容)

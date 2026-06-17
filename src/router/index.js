@@ -161,7 +161,12 @@ router.beforeEach(async (to, from, next) => {
   //   之前只有 chart tab 内的"上一步"按钮 (onNavPrev) 会设置 returningFromDiagram flag
   //   tab bar 切回不会触发 onNavPrev, 导致管理页 onMounted 看不到 flag, 走 fresh 路径, 选择被清空
   //   修复: 在 router 层自动检测这种导航并设置 flag (因为导航本身语义就是"从 chart 返回 management")
+  // [FIX v3.19] 扩展: 任何从 archdata 离开的导航 (例如点 tab 进入详情页 / 工作台 / 账户),
+  //   在切回 archdata 时也要保留选择 + 触发数据刷新
   if (from.path === '/archdata-chart' && to.path === '/system/archdata') {
+    sessionStorage.setItem('returningFromDiagram', 'true')
+  } else if (from.path === '/system/archdata' && to.path !== '/system/archdata') {
+    // 用户从 archdata 离开去其他页面, 切回时需要恢复
     sessionStorage.setItem('returningFromDiagram', 'true')
   }
 

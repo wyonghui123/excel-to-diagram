@@ -83,6 +83,10 @@ class QueryInterceptor(Interceptor):
                 context.result.data['items'] = enriched
             elif enriched and isinstance(context.result.data, list):
                 context.result.data = enriched
+            # [FIX 2026-06-16] crud_read 返回单条 dict 时, enriched 是 list-of-1,
+            # 上面两个分支都 miss → 把 list 第一个写回 result.data
+            elif enriched and isinstance(context.result.data, dict) and context.action == 'crud_read':
+                context.result.data = enriched[0]
         except Exception as e:
             logger.debug(f"[QueryInterceptor] enrichment skipped for {context.object_type}: {e}")
 

@@ -7,9 +7,11 @@
       :has-prev="canNavPrev"
       :has-next="canNavNext"
       :next-label="navNextLabel"
+      :show-back-to-arch="currentStep === 0"
       @change="handleStepChange"
       @prev="onNavPrev"
       @next="onNavNext"
+      @back-to-arch="handleBackToArch"
     />
 
     <main class="main-content">
@@ -93,6 +95,7 @@ export default {
       filteredDomainProducts,
       initFromArchDataManager: initDataFromArch,
       isInitializedFromArchData,
+      resetData,
       // [2026-06-15] 缓存读取 (切 tab 时恢复 diagramData)
       loadCachedDiagram
     } = useDiagramData()
@@ -199,12 +202,17 @@ export default {
     const onNavPrev = () => {
       if (currentStep.value === 0) {
         // 3 步骤模式的第一步（类型）：上一步返回架构数据管理页面
-        sessionStorage.setItem('returningFromDiagram', 'true')
-        router.push('/system/archdata')
+        handleBackToArch()
       } else if (currentStep.value > 0) {
         // 其他情况：正常回退上一步
         prevStep()
       }
+    }
+
+    // [V1.2.9] 统一的返回架构管理页面处理
+    const handleBackToArch = () => {
+      sessionStorage.setItem('returningFromDiagram', 'true')
+      router.push('/system/archdata')
     }
 
     const onNavNext = () => {
@@ -330,6 +338,9 @@ export default {
           const newArchData = chartArchStore.archData
           if (newArchData) {
             console.log('[v32] chartArchStore.sequence changed, re-initializing')
+            // [V1.2.9] 重置 diagramData，避免保留上一次的缓存
+            // 之前只做了 resetSteps + initDataFromArch，但 diagramData 仍持有旧值
+            resetData()
             resetSteps()
             try {
               await initDataFromArch(newArchData)
@@ -380,7 +391,8 @@ export default {
       canNavNext,
       navNextLabel,
       onNavPrev,
-      onNavNext
+      onNavNext,
+      handleBackToArch
     }
   }
 }

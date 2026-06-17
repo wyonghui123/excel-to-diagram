@@ -104,7 +104,15 @@ class BoSchemaLoader:
             return None
 
     def has_owner_id(self, bo_id: str) -> bool:
-        """检查 BO 是否声明了 owner_id 字段"""
+        """检查 BO 是否声明了 owner_id 字段
+
+        [FIX 2026-06-17] 同时检查:
+        1. yaml fields 里有 owner_id 字段
+        2. yaml aspects 列表里有 owner_aspect (aspect 会注入 owner_id 字段)
+        修复: TEST333 + version 这种没有显式 owner_id 字段但引用 owner_aspect 的 BO,
+              之前 has_owner_id 返回 False 导致 owner 例外失效,
+              现在能识别出 aspect 注入的 owner_id 字段.
+        """
         schema = self.get_bo_schema(bo_id)
         if not schema:
             return False
@@ -112,6 +120,10 @@ class BoSchemaLoader:
             fid = field.get('id') if isinstance(field, dict) else getattr(field, 'id', None)
             if fid == 'owner_id':
                 return True
+        # [FIX 2026-06-17] aspect 注入的字段也算
+        aspects = schema.get('aspects', []) or []
+        if 'owner_aspect' in aspects:
+            return True
         return False
 
     def has_visibility_field(self, bo_id: str) -> bool:
@@ -120,6 +132,8 @@ class BoSchemaLoader:
         用于 DataPermissionInterceptor 判断是否需要应用 visibility scope 过滤:
         - version 有 visibility 字段 → True (需要应用 visibility scope 保护 draft)
         - product 没有 visibility 字段 → False (跳过 visibility scope, 避免过严)
+
+        [FIX 2026-06-17] 同时检查 aspect 注入 (owner_aspect 包含 visibility 字段)
         """
         schema = self.get_bo_schema(bo_id)
         if not schema:
@@ -128,6 +142,10 @@ class BoSchemaLoader:
             fid = field.get('id') if isinstance(field, dict) else getattr(field, 'id', None)
             if fid == 'visibility':
                 return True
+        # [FIX 2026-06-17] aspect 注入的字段也算
+        aspects = schema.get('aspects', []) or []
+        if 'owner_aspect' in aspects:
+            return True
         return False
 
     def get_bo_type(self, bo_id: str) -> str:

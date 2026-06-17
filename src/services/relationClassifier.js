@@ -146,7 +146,26 @@ export function buildRelationScopeTree(filterParams, allRelationships, businessO
 
     if (boId != null) {
       const bo = boByIdMap.get(String(boId))
-      if (bo) return bo
+      if (bo) {
+        // [v1.1.15 修复] BO 列表 (/api/v2/bo/business_object) 返回的字段是 snake_case
+        //   (domain_id/sub_domain_id/service_module_id), 但 classifyRelation/buildScopeNode
+        //   用 camelCase (domainId/subDomainId/serviceModuleId) 访问, 导致全 undefined,
+        //   关系被错归 SAME_MODULE 或被 srcDomainId==null 跳过, 树为空.
+        // 修复: 从 map 中找到的 BO 加上 camelCase 别名, 兼容旧 classifyRelation 逻辑.
+        return {
+          ...bo,
+          id: bo.id,
+          code: bo.code,
+          name: bo.name ?? bo.display_name,
+          domainId: bo.domainId ?? bo.domain_id,
+          subDomainId: bo.subDomainId ?? bo.sub_domain_id,
+          serviceModuleId: bo.serviceModuleId ?? bo.service_module_id,
+          domain: bo.domain ?? bo.domain_name,
+          subDomain: bo.subDomain ?? bo.sub_domain_name,
+          serviceModule: bo.serviceModule ?? bo.service_module_name,
+          serviceModuleName: bo.serviceModuleName ?? bo.service_module_name
+        }
+      }
     }
 
     if (code) {
@@ -771,9 +790,11 @@ export function buildRelationCategoryTree(relations, centerScope, businessObject
   });
 
   // 构建树结构
+  // [V1.2.8 修复] 添加 CROSS_BOUNDARY 节点，否则跨域关系不出现在树中，用户无法选中
   const tree = [
     buildCategoryScopeNode(ScopeType.INTERNAL, '中心范围内对象关系', categoryStats[ScopeType.INTERNAL]),
-    buildCategoryScopeNode(ScopeType.EXTERNAL, '中心范围与外部对象关系', categoryStats[ScopeType.EXTERNAL])
+    buildCategoryScopeNode(ScopeType.CROSS_BOUNDARY, '中心范围与外部对象关系', categoryStats[ScopeType.CROSS_BOUNDARY]),
+    buildCategoryScopeNode(ScopeType.EXTERNAL, '范围外对象关系', categoryStats[ScopeType.EXTERNAL])
   ];
 
   return tree;
@@ -798,9 +819,14 @@ function buildCategoryScopeNode(scopeType, name, stats) {
 
   // 关键修复 v26：scope 节点也聚合子节点 relationIds
   const allChildIds = new Set();
+  const allChildCodes = new Set();
   children.forEach(child => {
     if (child.relationIds && child.relationIds.length > 0) {
       child.relationIds.forEach(id => allChildIds.add(id));
+    }
+    // [V1.2.8 修复] 聚合 relationCodes
+    if (child.relationCodes && child.relationCodes.length > 0) {
+      child.relationCodes.forEach(code => allChildCodes.add(code));
     }
   });
 
@@ -810,7 +836,8 @@ function buildCategoryScopeNode(scopeType, name, stats) {
     scopeType,
     count: totalCount,
     children,
-    relationIds: Array.from(allChildIds)
+    relationIds: Array.from(allChildIds),
+    relationCodes: Array.from(allChildCodes)
   };
 }
 
@@ -832,7 +859,9 @@ function buildCategoryCategoryNode(scopeType, categoryType, name, stats) {
     childCount: 0,
     children: [],
     // 关键修复 v26：所有层级节点都聚合 relationIds，便于上溯过滤
-    relationIds: []
+    relationIds: [],
+    // [V1.2.8 修复] 聚合所有子节点的 relationCodes，便于 findNodeIdsForCodes 匹配
+    relationCodes: []
   };
 
   // 根据分类类型构建子节点
@@ -866,7 +895,9 @@ function buildCategoryCategoryNode(scopeType, categoryType, name, stats) {
         count: domainData.count,
         childCount: 0,
         children: [],
-        relationIds: []
+        relationIds: [],
+        // [V1.2.8 修复] 聚合 relationCodes
+        relationCodes: []
       };
 
       // 跨领域、同领域跨子领域、同子领域跨服务模块都需要添加子领域级节点
@@ -884,7 +915,9 @@ function buildCategoryCategoryNode(scopeType, categoryType, name, stats) {
             count: subDomainData.count,
             childCount: 0,
             children: [],
-            relationIds: []
+            relationIds: [],
+            // [V1.2.8 修复] 聚合 relationCodes
+            relationCodes: []
           };
 
           // 跨领域、同领域跨子领域、同子领域跨服务模块都需要添加服务模块级节点
@@ -908,24 +941,36 @@ function buildCategoryCategoryNode(scopeType, categoryType, name, stats) {
             subDomainNode.childCount = subDomainNode.children.length;
             // 关键修复 v26: subDomainNode 聚合其子 module 节点的 relationIds
             const allSubChildIds = new Set();
+            const allSubChildCodes = new Set();
             subDomainNode.children.forEach(child => {
               if (child.relationIds && child.relationIds.length > 0) {
                 child.relationIds.forEach(id => allSubChildIds.add(id));
               }
+              // [V1.2.8 修复] 聚合 relationCodes
+              if (child.relationCodes && child.relationCodes.length > 0) {
+                child.relationCodes.forEach(code => allSubChildCodes.add(code));
+              }
             });
             subDomainNode.relationIds = Array.from(allSubChildIds);
+            subDomainNode.relationCodes = Array.from(allSubChildCodes);
           }
 
           domainNode.children.push(subDomainNode);
         });
         // 关键修复 v26: domainNode 聚合其子 subDomain 节点的 relationIds
         const allDomainChildIds = new Set();
+        const allDomainChildCodes = new Set();
         domainNode.children.forEach(child => {
           if (child.relationIds && child.relationIds.length > 0) {
             child.relationIds.forEach(id => allDomainChildIds.add(id));
           }
+          // [V1.2.8 修复] 聚合 relationCodes
+          if (child.relationCodes && child.relationCodes.length > 0) {
+            child.relationCodes.forEach(code => allDomainChildCodes.add(code));
+          }
         });
         domainNode.relationIds = Array.from(allDomainChildIds);
+        domainNode.relationCodes = Array.from(allDomainChildCodes);
         domainNode.childCount = domainNode.children.length;
       }
       // 注意：所有外部关系类型现在都有完整的层级结构（领域->子领域->服务模块）
@@ -938,12 +983,18 @@ function buildCategoryCategoryNode(scopeType, categoryType, name, stats) {
 
   // 关键修复 v26：聚合子节点 relationIds 列表供上层节点使用
   const allChildIds = new Set();
+  const allChildCodes = new Set();
   node.children.forEach(child => {
     if (child.relationIds && child.relationIds.length > 0) {
       child.relationIds.forEach(id => allChildIds.add(id));
     }
+    // [V1.2.8 修复] 聚合子节点 relationCodes
+    if (child.relationCodes && child.relationCodes.length > 0) {
+      child.relationCodes.forEach(code => allChildCodes.add(code));
+    }
   });
   node.relationIds = Array.from(allChildIds);
+  node.relationCodes = Array.from(allChildCodes);
 
   return node;
 }

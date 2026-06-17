@@ -1,10 +1,10 @@
 <template>
   <div class="step-scope-summary">
     <div class="step-scope-summary__cards">
-      <!-- 中心范围 -->
+      <!-- 对象范围 -->
       <div class="summary-card summary-card--center">
         <div class="summary-card__head">
-          <span class="summary-card__title">中心范围</span>
+          <span class="summary-card__title">对象范围</span>
           <span class="summary-card__subtitle">直接选择</span>
         </div>
         <div class="summary-card__stats" v-if="hasCenter">

@@ -13,7 +13,7 @@
  * ```
  */
 
-import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick, shallowRef, unref } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick, shallowRef, unref, isRef } from 'vue'
 import { evaluateCondition } from '@/utils/safeExpression'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { boService } from '@/services/boService'
@@ -77,7 +77,17 @@ function handleError(context, error, options = {}) {
   return error
 }
 
-export function useMetaList(objectType, options = {}) {
+export function useMetaList(objectTypeOrRef, options = {}) {
+  // [NFR-001] 向后兼容：支持 string | Ref<string> | ComputedRef<string>
+  // 传入 string 时包装为 shallowRef（行为等价于旧版，值不会随 props 变化）
+  // 传入 Ref/ComputedRef 时直接使用（响应 objectType 变化）
+  const objectTypeRef = isRef(objectTypeOrRef)
+    ? objectTypeOrRef
+    : shallowRef(objectTypeOrRef)
+
+  // [NFR-004] 请求竞态安全：版本号保护
+  let _initVersion = 0
+  let _loadVersion = 0
   // [FIX] useBoAction 是工厂函数（导出的是函数本身，不是 {callPost} 对象），
   //   必须先调用 useBoAction() 才能拿到 callPost。
   //   之前 `const { callPost } = await import('@/composables/useBoAction')`
@@ -100,6 +110,8 @@ export function useMetaList(objectType, options = {}) {
     pageSize: options.pageSize || 20,
     pageSizes: options.pageSizes || null,   // 覆盖分页 size 选项列表
     debug: options.debug || false,
+    // [FR-001] 初始过滤器：在 onMounted/init 之前设置，确保首次 loadList 带上 version_id 等
+    initialFilters: options.initialFilters || null,
     // 过滤器显示模式：
     // - 'hover': SAP风格，鼠标悬停时显示（默认）
     // - 'always': 始终显示
@@ -113,6 +125,9 @@ export function useMetaList(objectType, options = {}) {
     displayMode: options.displayMode || 'page',
     // 列定义覆盖（embedded/dialog 生效，传入后跳过 metaService）
     columnsOverride: options.columnsOverride || null,
+    // [FIX 2026-06-14] 排除的列 key 列表（page 模式生效，传入后从 meta columns 过滤掉指定 key）
+    // 适用场景: 子对象页的 children 列表 (如 product → version) 隐藏冗余的父对象列 (product_name 等)
+    excludeColumnKeys: options.excludeColumnKeys || [],
     // 排除的ID列表（dialog 生效）
     excludeIds: options.excludeIds || [],
     // 行唯一键
@@ -363,24 +378,27 @@ export function useMetaList(objectType, options = {}) {
    * @param {Array} columnsOverride - 列定义覆盖（compact mode）
    */
   async function init(columnsOverride) {
-    if (!objectType) {
+    if (!objectTypeRef.value) {
       console.warn(`[useMetaList] [WARNING] objectType 为空，跳过初始化`)
       data.value = []
       pagination.total = 0
       return
     }
-    boService._clearCache(objectType)
-    metaService.clearCache(objectType)
+    boService._clearCache(objectTypeRef.value)
+    metaService.clearCache(objectTypeRef.value)
     try {
       const effectiveColumns = columnsOverride || config.columnsOverride
       if (effectiveColumns) {
-        columns.value = _transformColumns(effectiveColumns)
+        // [FIX 2026-06-14] 先按 excludeColumnKeys 过滤再 transform,
+        //   避免上游传了 columnsOverride + excludeColumnKeys 时两条规则相互干扰
+        const filteredCols = _applyExcludeColumnKeys(effectiveColumns)
+        columns.value = _transformColumns(filteredCols)
         // 先加载元数据，确保 metaConfig.value 可用
         await _loadMetaConfig()
         // [FIX-2026-06-08] _loadMetaConfig() 内部会调 _transformMetaToComponentFormat()
         //   无条件用 metaConfig 的 columns 覆盖 columns.value, 导致 columnsOverride 失效。
         //   重新应用 columnsOverride 保证 compact 模式自定义列生效。
-        columns.value = _transformColumns(effectiveColumns)
+        columns.value = _transformColumns(filteredCols)
         // 使用 metaConfig 来富化 columns
         if (metaConfig.value) {
           _enrichColumnsWithFieldMeta(metaConfig.value.list || metaConfig.value)
@@ -404,10 +422,20 @@ export function useMetaList(objectType, options = {}) {
       }
 
       await _loadMetaConfig()
-      
+
+      // [FIX 2026-06-14] 在 _loadMetaConfig() 之后应用 excludeColumnKeys 过滤
+      // 场景: product → version children 列表隐藏冗余的 product_name/product_id/product_code
+      if (config.excludeColumnKeys && config.excludeColumnKeys.length > 0 && columns.value.length > 0) {
+        const excludeSet = new Set(config.excludeColumnKeys)
+        columns.value = columns.value.filter(col => {
+          const k = col.key || col.field || col.prop
+          return !excludeSet.has(k)
+        })
+      }
+
       // [DECORATIVE] [NEW] v1.3 / FR-6.1: 激活 field-policies API
-      if (objectType && autoLoad) {
-        autoLoad(objectType, 'read').catch(e => {
+      if (objectTypeRef.value && autoLoad) {
+        autoLoad(objectTypeRef.value, 'read').catch(e => {
           console.warn('[useMetaList] autoLoad field-policies failed:', e)
         })
       }
@@ -427,7 +455,7 @@ export function useMetaList(objectType, options = {}) {
         pagination.total = 0
       }
     } catch (error) {
-      console.error(`[useMetaList] [X] 初始化失败 (${objectType}):`, error)
+      console.error(`[useMetaList] [X] 初始化失败 (${objectTypeRef.value}):`, error)
       ElMessage.error(i18nT('metaList.loadListConfigFailed', '加载列表配置失败'))
     }
   }
@@ -437,13 +465,15 @@ export function useMetaList(objectType, options = {}) {
    * @param {Object} extraParams - 额外查询参数
    */
   async function loadList(extraParams = {}) {
-    if (!objectType) {
+    if (!objectTypeRef.value) {
       console.warn(`[useMetaList] [WARNING] loadList: objectType 为空，跳过`)
       data.value = []
       pagination.total = 0
       loading.value = false
       return
     }
+    // [NFR-004] 竞态安全：递增版本号
+    const version = ++_loadVersion
     loading.value = true
     
     try {
@@ -451,7 +481,12 @@ export function useMetaList(objectType, options = {}) {
 
       const result = await (config.fetcher
         ? config.fetcher({ page: pagination.current, pageSize: pagination.pageSize, ...params })
-        : boService.query(objectType, params))
+        : boService.query(objectTypeRef.value, params))
+      // [NFR-004] 竞态检查：如果期间又触发了新的 loadList，丢弃本次结果
+      if (version !== _loadVersion) {
+        console.warn(`[useMetaList] loadList stale result discarded for ${objectTypeRef.value}`)
+        return
+      }
       if (result?.data) {
       }
 
@@ -516,7 +551,7 @@ export function useMetaList(objectType, options = {}) {
         page_size: 1
       })
       
-      const result = await boService.query(objectType, params)
+      const result = await boService.query(objectTypeRef.value, params)
       
       if (result.success) {
         const rawData = result.data
@@ -527,7 +562,7 @@ export function useMetaList(objectType, options = {}) {
         }
       }
     } catch (error) {
-      console.error(`[useMetaList] 获取总数失败 (${objectType}):`, error)
+      console.error(`[useMetaList] 获取总数失败 (${objectTypeRef.value}):`, error)
     }
   }
 
@@ -726,7 +761,7 @@ export function useMetaList(objectType, options = {}) {
       // 2) 后端删除已保存行
       let apiResult = null
       if (existingIds.length > 0) {
-        apiResult = await boService.batchDelete(objectType, existingIds)
+        apiResult = await boService.batchDelete(objectTypeRef.value, existingIds)
       }
 
       // 3) 汇总结果
@@ -972,7 +1007,8 @@ export function useMetaList(objectType, options = {}) {
    * 刷新当前列表（保持当前页和过滤条件）
    */
   async function refresh() {
-    boService.clearCache(objectType)
+    console.log(`[useMetaList] refresh: objectType=${objectTypeRef.value}`)
+    boService.clearCache(objectTypeRef.value)
     await loadList()
   }
 
@@ -982,7 +1018,7 @@ export function useMetaList(objectType, options = {}) {
    * @returns {Array} 可用的行级操作
    */
   function getRowActions(row) {
-    return _filterRowActionsSvc(rowActions.value, row, objectType, config.rowMutability, _checkPermission, _evaluateCondition)
+    return _filterRowActionsSvc(rowActions.value, row, objectTypeRef.value, config.rowMutability, _checkPermission, _evaluateCondition)
   }
 
   // ======== 内部方法 ======
@@ -1016,12 +1052,12 @@ export function useMetaList(objectType, options = {}) {
    * @private
    */
   async function _loadMetaConfig() {
-    if (!objectType) {
+    if (!objectTypeRef.value) {
       console.warn('[useMetaList] [WARNING] _loadMetaConfig: objectType 为空')
       return
     }
     try {
-      const result = await metaService.getViewConfig(objectType)
+      const result = await metaService.getViewConfig(objectTypeRef.value)
       
       if (result.success && result.data) {
         metaConfig.value = result.data
@@ -1029,10 +1065,10 @@ export function useMetaList(objectType, options = {}) {
         _transformMetaToComponentFormat()
         return
       } else {
-        console.warn(`[useMetaList] [WARNING] 无法加载 ${objectType} 的元数据: success=${result?.success}, data存在=${!!result?.data}, message=${result?.message || 'none'}`)
+        console.warn(`[useMetaList] [WARNING] 无法加载 ${objectTypeRef.value} 的元数据: success=${result?.success}, data存在=${!!result?.data}, message=${result?.message || 'none'}`)
       }
     } catch (e) {
-      console.error(`[useMetaList] [X] 加载元数据失败 (${objectType}):`, e)
+      console.error(`[useMetaList] [X] 加载元数据失败 (${objectTypeRef.value}):`, e)
     }
     
     console.warn(`[useMetaList] [WARNING] 元数据加载失败，使用空配置回退`)
@@ -1283,6 +1319,23 @@ export function useMetaList(objectType, options = {}) {
   }
 
   /**
+   * [FIX 2026-06-14] 按 config.excludeColumnKeys 过滤列定义
+   * 适用场景: 子对象 children 列表 (如 product → version) 隐藏冗余的父对象列
+   * @private
+   * @param {Array} cols - 原始列定义数组 (从 yaml 来的格式)
+   * @returns {Array} 过滤后的列定义
+   */
+  function _applyExcludeColumnKeys(cols) {
+    if (!config.excludeColumnKeys || config.excludeColumnKeys.length === 0) return cols
+    if (!Array.isArray(cols) || cols.length === 0) return cols
+    const excludeSet = new Set(config.excludeColumnKeys)
+    return cols.filter(col => {
+      const k = col.key || col.field
+      return !excludeSet.has(k)
+    })
+  }
+
+  /**
    * 最终修正：确保所有 datetime 后缀字段 type='datetime'
    * 无论 _transformColumns 或 _enrichColumnsWithFieldMeta 如何设置
    * @private
@@ -1480,7 +1533,7 @@ export function useMetaList(objectType, options = {}) {
    */
   function emitActionEvent(action, row) {
     const listActionStore = useListActionStore()
-    listActionStore.dispatchAction(objectType, action, row)
+    listActionStore.dispatchAction(objectTypeRef.value, action, row)
   }
 
   // ======== Inline Edit 状态和方法 ========
@@ -1802,7 +1855,7 @@ export function useMetaList(objectType, options = {}) {
     try {
       // [FIX] callPost 已在 useMetaList 顶层 setup 上下文中通过 useBoAction() 解构得到
       const result = await _saveAllDraftsSvc({
-        objectType,  // objectType 是 useMetaList 形参（字符串），不是 ref，不要加 .value
+        objectType: objectTypeRef.value,  // [FR-003] ref 化：使用 .value 获取当前值
         draftValues: draftValues.value,
         data: data.value,  // C2 修复：传 array 而非 ref
         callPost,
@@ -1903,7 +1956,7 @@ export function useMetaList(objectType, options = {}) {
     if (selectedIds.value.size === 0) return {}
     const ids = Array.from(selectedIds.value)
     try {
-      const result = await boService.batchQueryAssociations(objectType, associationName, {
+      const result = await boService.batchQueryAssociations(objectTypeRef.value, associationName, {
         source_ids: ids,
         page: 1,
         page_size: 1
@@ -1919,6 +1972,10 @@ export function useMetaList(objectType, options = {}) {
 
   // ======== 自动初始化 ========
   onMounted(() => {
+    // [FR-001] 在 init 之前设置 initialFilters，确保首次 loadList 带上 version_id 等
+    if (config.initialFilters && Object.keys(config.initialFilters).length > 0) {
+      contextFilters.value = { ...config.initialFilters }
+    }
     init()
   })
 
@@ -1931,12 +1988,44 @@ export function useMetaList(objectType, options = {}) {
     draftValues.value = new Map()
   })
 
+  // [FR-003] watch objectType 变化：响应式重新初始化
+  // [NFR-004] 竞态安全：版本号保护
+  // [NFR-008] 防闪烁：延迟清空 data，先设 loading
+  watch(objectTypeRef, async (newType, oldType) => {
+    if (newType === oldType) return
+    const version = ++_initVersion
+    console.log(`[useMetaList] objectType changed: ${oldType} → ${newType} (v${version})`)
+
+    // [NFR-008] 先设 loading，清空 data 和 columns 避免旧数据错位
+    loading.value = true
+    data.value = []
+    columns.value = []
+
+    // 清空筛选/选中/排序等状态（这些不影响视觉闪烁）
+    selectedIds.value = new Set()
+    selectedRows.value = []
+    filterValues.value = {}
+    headerFilterValues.value = {}
+    sortInfo.value = { prop: null, order: null }
+    keyword.value = ''
+    pagination.current = 1
+    pagination.total = 0
+
+    // 重新初始化（init 内部会在 loadList 成功后更新 data 和 loading）
+    await init()
+
+    // [NFR-004] 竞态检查：如果 init 期间 objectType 又变了，丢弃本次结果
+    if (version !== _initVersion) {
+      console.warn(`[useMetaList] objectType stale result discarded: expected v${_initVersion}, got v${version}`)
+    }
+  })
+
   // ======== 返回公共接口 =======
   
   return {
     // 元数据和配置
     metaConfig,
-    objectType,
+    objectType: objectTypeRef,  // [FR-003] 暴露 ref（自动 unwrap，向后兼容）
     config,
     
     // 列表相关

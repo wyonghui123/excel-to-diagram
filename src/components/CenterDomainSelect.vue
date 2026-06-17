@@ -1,6 +1,6 @@
 <template>
   <div class="center-domain-select">
-    <!-- 第一行：区分中心范围开关 + 中心范围对象颜色 -->
+    <!-- 第一行：范围内节点颜色开关 + 颜色选择器 -->
     <div class="form-row">
       <div class="form-item">
         <label class="form-label checkbox-label">
@@ -9,11 +9,10 @@
             :checked="centerScopeHighlight"
             @change="$emit('update:centerScopeHighlight', $event.target.checked)"
           />
-          <span>区分中心范围</span>
+          <span>范围内节点颜色</span>
         </label>
       </div>
       <div class="form-item color-picker-wrapper" v-if="centerScopeHighlight">
-        <label class="form-label">中心范围对象颜色</label>
         <input
           type="color"
           :value="centerScopeColor"

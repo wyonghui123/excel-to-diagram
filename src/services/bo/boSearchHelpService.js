@@ -26,6 +26,11 @@ export class BOSearchHelpService extends BOBaseService {
     if (params.hierarchy && Object.keys(params.hierarchy).length > 0) {
       queryParams.set('hierarchy', JSON.stringify(params.hierarchy))
     }
+    // [V1.2.1 2026-06-16] 传递 apply_target_permissions 参数
+    // 跨域关系创建的级联字段 ValueHelp 需要跳过 dim scope 过滤
+    if (params.apply_target_permissions !== undefined) {
+      queryParams.set('apply_target_permissions', String(params.apply_target_permissions))
+    }
 
     const path = `/value-help/${sourceType}/${sourceId}?${queryParams.toString()}`
     return this._request('GET', path)

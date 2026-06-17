@@ -48,6 +48,11 @@ export function useValueHelp(valueHelpConfig, options = {}) {
     if (src.hierarchy && Object.keys(src.hierarchy).length > 0) {
       params.hierarchy = src.hierarchy
     }
+    // [V1.2.1 2026-06-16] 传递 apply_target_permissions 参数
+    // 跨域关系创建的级联字段 ValueHelp 需要跳过 dim scope 过滤
+    if (src.apply_target_permissions !== undefined) {
+      params.apply_target_permissions = src.apply_target_permissions
+    }
     return params
   })
 

@@ -107,7 +107,10 @@ class BOService extends BaseService {
     return this._request('GET', path)
   }
 
-  // [V1.2.0 2026-06-15] 按 ID 精确查询 BO (供 Pick by Code 模式回退使用)
+  // [V1.2.0 2026-06-15] 按 ID 精确查询 BO (供 ValueHelp 场景使用)
+  // [V1.2.1 2026-06-16] 默认应用 dim scope 校验; 传 reason=value_help 跳过 (跨域关系创建逃生口)
+  //   - 详情页请用 boService.read() (走 read_bo 路由, 有 dim scope 校验)
+  //   - ValueHelp 场景: pickBoById(boId, { reason: 'value_help' })
   async pickBoById(boId, options = {}) {
     if (!boId) {
       return { success: false, message: 'MISSING_BO_ID', data: null }

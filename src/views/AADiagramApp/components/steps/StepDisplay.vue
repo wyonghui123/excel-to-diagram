@@ -24,14 +24,6 @@
           >
             飞书导入
           </AppButton>
-          <AppButton
-            type="secondary"
-            size="sm"
-            @click="handleBackToArch"
-          >
-            <AppIcon name="arrow-left" size="sm" />
-            返回架构管理
-          </AppButton>
         </div>
       </div>
       <div class="panel-body diagram-panel">
@@ -75,7 +67,6 @@
 
 <script>
 import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { AppButton } from '../../../../components/common'
 import { AppIcon } from '../../../../components/common/AppIcon'
 import MermaidComponent from '../../../../components/MermaidComponent.vue'
@@ -98,7 +89,6 @@ export default {
   },
   emits: ['prev', 'regenerate', 'command', 'import'],
   setup(props, { emit }) {
-    const router = useRouter()
     const feishuEnabled = ref(false)
     const showFeishuBot = ref(false)
     const showFeishuImport = ref(false)
@@ -123,18 +113,12 @@ export default {
       emit('import', data)
     }
 
-    const handleBackToArch = () => {
-      sessionStorage.setItem('returningFromDiagram', 'true')
-      router.push('/system/archdata')
-    }
-
     return {
       feishuEnabled,
       showFeishuBot,
       showFeishuImport,
       handleFeishuCommand,
-      handleFeishuImport,
-      handleBackToArch
+      handleFeishuImport
     }
   },
   computed: {

@@ -86,9 +86,6 @@ class WriteScopeDenied(Exception):
         self.user_id = user_id
         self.check_results = check_results
         self.side = side
-        # [H13 2026-06-15] 把 check_results 详情拼到 message, 不依赖 on_error hook
-        #   这样无论 BO framework 走 PermissionInterceptor.on_error 还是通用 fallback,
-        #   response 都能看到 owner/dim/vis 判定细节
         if check_results:
             detail = (
                 f' [check: owner={check_results.get("owner")} '
@@ -101,6 +98,98 @@ class WriteScopeDenied(Exception):
         super().__init__(
             f'无写权限: {object_type}({target_id}) 不在 user={user_id} 的 dim scope / owner 范围{detail}'
         )
+
+
+class ScopeViolationError(Exception):
+    """[v2.0 2026-06-16] FK 字段写路径 dim scope 校验失败 (status_code=422)
+
+    Spec: docs/specs/spec-write-scope-policy-v2.md FR-002/FR-003
+    """
+    status_code = 422
+
+    def __init__(self, field: str = None, fields: List[str] = None,
+                 value: Any = None, scope_policy: str = '',
+                 scope_group: str = None, allowed_scope: str = ''):
+        self.field = field
+        self.fields = fields or ([field] if field else [])
+        self.value = value
+        self.scope_policy = scope_policy
+        self.scope_group = scope_group
+        self.allowed_scope = allowed_scope
+
+        if scope_policy == 'enforce':
+            msg = f"字段 {field} 的值 {value} 不在您的数据权限范围内"
+        elif scope_policy == 'inherit':
+            msg = f"字段 {field} 的值 {value} 不在父字段的权限范围内"
+        elif scope_policy == 'or_bypass':
+            msg = f"字段组 {scope_group} 中所有值都不在您的数据权限范围内"
+        else:
+            msg = f"字段 {field} 的值 {value} 不在数据权限范围内"
+
+        super().__init__(msg)
+
+    def to_response(self) -> Dict[str, Any]:
+        """转换为 API 响应格式"""
+        if self.scope_policy in ('enforce', 'inherit'):
+            return {
+                'success': False,
+                'error_code': 'WRITE_SCOPE_VIOLATION',
+                'message': str(self),
+                'details': {
+                    'field': self.field,
+                    'value': self.value,
+                    'scope_policy': self.scope_policy,
+                    'allowed_scope': self.allowed_scope,
+                    'fix_hint': '请选择您有权限的领域内的值',
+                }
+            }
+        elif self.scope_policy == 'or_bypass':
+            return {
+                'success': False,
+                'error_code': 'WRITE_SCOPE_VIOLATION',
+                'message': str(self),
+                'details': {
+                    'fields': self.fields,
+                    'scope_policy': 'or_bypass',
+                    'scope_group': self.scope_group,
+                    'allowed_scope': self.allowed_scope,
+                    'fix_hint': '至少一个端点必须在您的数据权限范围内',
+                }
+            }
+        return {
+            'success': False,
+            'error_code': 'WRITE_SCOPE_VIOLATION',
+            'message': str(self),
+        }
+
+
+class ScopeViolationBatchError(Exception):
+    """[v2.0 2026-06-16] 批量操作 FK scope 校验失败 (status_code=422)
+
+    All-or-Nothing 策略: 任一记录失败则整个 batch 拒绝。
+    Spec: docs/specs/spec-write-scope-policy-v2.md FR-006
+    """
+    status_code = 422
+
+    def __init__(self, violations: List[Dict[str, Any]], total: int = 0):
+        self.violations = violations
+        self.total = total
+        super().__init__(
+            f"批量操作中 {len(violations)} 条记录超出数据权限范围"
+        )
+
+    def to_response(self) -> Dict[str, Any]:
+        return {
+            'success': False,
+            'error_code': 'WRITE_SCOPE_VIOLATION_BATCH',
+            'message': str(self),
+            'details': {
+                'total': self.total,
+                'failed': len(self.violations),
+                'violations': self.violations,
+                'fix_hint': '请修正超出权限范围的字段值后重新提交',
+            }
+        }
 
 
 # v2.1 灰度开关 (业务 TBD-D 走 3 阶段: audit → soft-default → hard-reject)
@@ -176,6 +265,10 @@ class WriteScopeInterceptor(Interceptor):
         # 遍历 target (主对象 + 关联操作 src/target)
         for side, target in self._get_targets(context):
             self._check_target(context, user_id, side, target)
+
+        # [v2.0 2026-06-16] FK 字段写路径 dim scope 校验
+        # Spec: docs/specs/spec-write-scope-policy-v2.md FR-002/FR-003/FR-005/FR-006
+        self._validate_fk_scope_policies(context, user_id)
 
     def _get_targets(self, context: 'ActionContext') -> List[Tuple[str, Dict[str, Any]]]:
         """获取需要校验的 target 列表
@@ -1160,14 +1253,274 @@ class WriteScopeInterceptor(Interceptor):
     # ========================================================================
     # 拦截器生命周期
     # ========================================================================
+    # ------------------------------------------------------------------
+    # [v2.0 2026-06-16] FK 字段写路径 dim scope 校验
+    # Spec: docs/specs/spec-write-scope-policy-v2.md
+    # ------------------------------------------------------------------
+
+    def _validate_fk_scope_policies(self, context: 'ActionContext', user_id: int):
+        """校验 FK 字段的 write_scope_policy (enforce / inherit / or_bypass)
+
+        在现有 parent dim scope 校验之后执行, 检查用户提交的 FK 字段值
+        是否在其 dim scope 内。
+        """
+        meta_object = getattr(context, 'meta_object', None)
+        if not meta_object:
+            return
+
+        # 收集所有 enforce/or_bypass/inherit 字段
+        enforce_fields = []
+        bypass_groups: Dict[str, List[Dict]] = {}
+        inherit_fields = []
+
+        for field_def in getattr(meta_object, 'fields', []):
+            # EnhancedMetaField 对象 (有 value_help 属性)
+            if hasattr(field_def, 'value_help'):
+                vh = field_def.value_help
+            elif isinstance(field_def, dict):
+                vh = field_def.get('value_help')
+            else:
+                continue
+
+            if not vh:
+                continue
+
+            # 获取 source
+            if hasattr(vh, 'source'):
+                source = vh.source
+            elif isinstance(vh, dict):
+                source = vh.get('source')
+            else:
+                continue
+
+            if not source:
+                continue
+
+            # 获取 write_scope_policy
+            policy = getattr(source, 'write_scope_policy', 'none') if hasattr(source, 'write_scope_policy') else (source.get('write_scope_policy', 'none') if isinstance(source, dict) else 'none')
+            if policy == 'none':
+                continue
+
+            scope_group = getattr(source, 'scope_group', None) if hasattr(source, 'scope_group') else (source.get('scope_group') if isinstance(source, dict) else None)
+            scope_inherit_from = getattr(source, 'scope_inherit_from', None) if hasattr(source, 'scope_inherit_from') else (source.get('scope_inherit_from') if isinstance(source, dict) else None)
+            target_bo = getattr(source, 'target_bo', '') if hasattr(source, 'target_bo') else (source.get('target_bo', '') if isinstance(source, dict) else '')
+            field_id = getattr(field_def, 'id', '') if hasattr(field_def, 'id') else (field_def.get('id', '') if isinstance(field_def, dict) else '')
+
+            if policy == 'enforce':
+                enforce_fields.append({
+                    'field_id': field_id,
+                    'target_bo': target_bo,
+                    'policy': 'enforce',
+                })
+            elif policy == 'inherit':
+                inherit_fields.append({
+                    'field_id': field_id,
+                    'target_bo': target_bo,
+                    'policy': 'inherit',
+                    'scope_inherit_from': scope_inherit_from,
+                })
+            elif policy == 'or_bypass':
+                group = scope_group or field_id
+                bypass_groups.setdefault(group, []).append({
+                    'field_id': field_id,
+                    'target_bo': target_bo,
+                    'policy': 'or_bypass',
+                    'scope_group': group,
+                })
+
+        if not enforce_fields and not inherit_fields and not bypass_groups:
+            return  # 无需校验
+
+        data_source = context.data_source
+
+        # 解析 inherit → 展开为 enforce (沿 scope_inherit_from 链)
+        resolved_enforce = list(enforce_fields)
+        for inh in inherit_fields:
+            parent_field_id = inh['scope_inherit_from']
+            parent_fk_value = context.params.get(parent_field_id) if hasattr(context, 'params') else None
+
+            if parent_fk_value is not None:
+                # 父字段有值: inherit 字段的 FK 值必须属于父字段值的子集
+                fk_value = context.params.get(inh['field_id']) if hasattr(context, 'params') else None
+                if fk_value is None:
+                    continue
+                self._validate_inherit_field(
+                    inh['field_id'], fk_value, inh['target_bo'],
+                    parent_field_id, parent_fk_value, user_id, data_source
+                )
+            else:
+                # 父字段无值: 退化为 enforce
+                resolved_enforce.append({
+                    'field_id': inh['field_id'],
+                    'target_bo': inh['target_bo'],
+                    'policy': 'inherit',
+                })
+
+        # 校验 enforce 字段
+        for field_info in resolved_enforce:
+            fk_value = context.params.get(field_info['field_id']) if hasattr(context, 'params') else None
+            if fk_value is None:
+                continue  # 未提供的字段不校验
+
+            if not self._is_fk_value_in_scope(user_id, field_info['target_bo'], fk_value, data_source):
+                raise ScopeViolationError(
+                    field=field_info['field_id'],
+                    value=fk_value,
+                    scope_policy=field_info['policy'],
+                    allowed_scope=self._describe_user_scope(user_id, field_info['target_bo'], data_source),
+                )
+
+        # 校验 or_bypass 字段组
+        for group_name, fields in bypass_groups.items():
+            any_in_scope = False
+            violated_fields = []
+            for field_info in fields:
+                fk_value = context.params.get(field_info['field_id']) if hasattr(context, 'params') else None
+                if fk_value is None:
+                    continue
+                if self._is_fk_value_in_scope(user_id, field_info['target_bo'], fk_value, data_source):
+                    any_in_scope = True
+                    break
+                violated_fields.append(field_info)
+
+            if not any_in_scope and violated_fields:
+                raise ScopeViolationError(
+                    fields=[f['field_id'] for f in violated_fields],
+                    scope_policy='or_bypass',
+                    scope_group=group_name,
+                    allowed_scope=self._describe_user_scope(user_id, violated_fields[0]['target_bo'], data_source),
+                )
+
+    def _validate_inherit_field(self, field_id: str, fk_value: Any,
+                                 target_bo: str, parent_field_id: str,
+                                 parent_fk_value: Any, user_id: int,
+                                 data_source):
+        """校验 inherit 字段: FK 值必须属于父字段 FK 值的子集"""
+        # 查询: target_bo(id=fk_value) 的 parent_field_id 列值
+        table_name = self._get_table_name_for_bo(target_bo)
+        try:
+            cursor = data_source.execute(
+                f"SELECT {parent_field_id} FROM {table_name} WHERE id = ?",
+                [fk_value]
+            )
+            row = cursor.fetchone()
+            if row and row[0] == parent_fk_value:
+                # FK 值属于父字段值的子集, 但父字段值本身需要在 scope 内
+                if self._is_fk_value_in_scope(user_id, target_bo, fk_value, data_source):
+                    return  # FK 值在 scope 内, 通过
+        except Exception as e:
+            logger.warning(f'_validate_inherit_field: query failed: {e}')
+
+        # 校验失败
+        if not self._is_fk_value_in_scope(user_id, target_bo, fk_value, data_source):
+            raise ScopeViolationError(
+                field=field_id,
+                value=fk_value,
+                scope_policy='inherit',
+                allowed_scope=self._describe_user_scope(user_id, target_bo, data_source),
+            )
+
+    def _is_fk_value_in_scope(self, user_id: int, target_bo: str, fk_value: Any,
+                               data_source) -> bool:
+        """检查 FK 值是否在用户的 dim scope 内
+
+        使用 DimensionScopeEngine 派生条件, 然后查询数据库验证。
+        """
+        # 1. 获取用户的 role_ids
+        role_ids = self._get_user_role_ids_direct(user_id, data_source)
+        if not role_ids:
+            return False  # 无角色 → 无 dim scope → 拒绝
+
+        # 2. 检查是否有 dim scope 配置
+        try:
+            placeholders = ','.join('?' * len(role_ids))
+            cursor = data_source.execute(
+                f"SELECT COUNT(*) FROM role_dimension_scopes WHERE role_id IN ({placeholders})",
+                list(role_ids)
+            )
+            count = cursor.fetchone()[0]
+            if not count:
+                return True  # 无 dim scope 配置 → 不限制
+        except Exception:
+            return True  # 查询失败 → 不限制 (安全默认)
+
+        # 3. 用 DimensionScopeEngine 派生条件, 查询 FK 值是否匹配
+        from meta.services.dimension_scope_engine import DimensionScopeEngine
+        engine = DimensionScopeEngine(data_source)
+
+        for role_id in role_ids:
+            try:
+                conditions = engine.derive_data_conditions(role_id)
+                cond_expr = conditions.get(target_bo)
+                if not cond_expr:
+                    continue
+
+                # 直接用 cond_expr 作为 SQL WHERE 条件 (跟 _record_matches_cond 一致)
+                # cond_expr 来自 DimensionScopeEngine 内部生成, 不接受用户输入
+                table_name = self._get_table_name_for_bo(target_bo)
+                if not table_name:
+                    continue
+                try:
+                    sql = f"SELECT COUNT(*) FROM {table_name} WHERE id = ? AND ({cond_expr})"
+                    cursor = data_source.execute(sql, [fk_value])
+                    if cursor.fetchone()[0] > 0:
+                        return True  # FK 值在 scope 内
+                except Exception as e:
+                    logger.warning(f'_is_fk_value_in_scope: query failed: {e}')
+
+            except Exception as e:
+                logger.warning(f'_is_fk_value_in_scope: derive role={role_id} failed: {e}')
+
+        return False  # 所有 role 都不匹配
+
+    def _get_table_name_for_bo(self, object_type: str) -> Optional[str]:
+        """获取 BO 对象类型对应的数据库表名"""
+        from meta.services.management_dimension_engine import RESOURCE_TABLE_MAP
+        return RESOURCE_TABLE_MAP.get(object_type)
+
+    def _get_user_role_ids_direct(self, user_id: int, data_source) -> Tuple[int, ...]:
+        """获取用户的 role_ids (直接 data_source 版本, 用于 FK scope 校验)"""
+        try:
+            cursor = data_source.execute(
+                """SELECT DISTINCT gr.role_id
+                   FROM group_roles gr
+                   JOIN user_group_members ugm ON gr.group_id = ugm.group_id
+                   WHERE ugm.user_id = ?""",
+                [user_id]
+            )
+            return tuple(row[0] for row in cursor.fetchall())
+        except Exception:
+            return ()
+
+    def _describe_user_scope(self, user_id: int, target_bo: str,
+                              data_source) -> str:
+        """生成用户对某 BO 的 scope 描述"""
+        role_ids = self._get_user_role_ids_direct(user_id, data_source)
+        if not role_ids:
+            return f'{target_bo}: 无角色'
+
+        from meta.services.dimension_scope_engine import DimensionScopeEngine
+        engine = DimensionScopeEngine(data_source)
+
+        for role_id in role_ids:
+            conditions = engine.derive_data_conditions(role_id)
+            cond_expr = conditions.get(target_bo)
+            if cond_expr:
+                return f'{target_bo}: {cond_expr[:100]}'
+
+        return f'{target_bo}: 无 dim scope 限制'
+
     def after_action(self, context: 'ActionContext') -> None:
         # 写路径 scope 校验仅在 before_action 完成, 无需 after
         pass
 
     def on_error(self, context: 'ActionContext', error: Exception):
-        """[v2.1] 处理 WriteScopeDenied 异常 → JSON 403 响应
-
-        委托给 PermissionInterceptor.on_error 统一序列化
-        """
+        """[v2.1] 处理 WriteScopeDenied / ScopeViolationError 异常 → JSON 响应"""
+        if isinstance(error, (ScopeViolationError, ScopeViolationBatchError)):
+            from flask import jsonify
+            response = jsonify(error.to_response())
+            response.status_code = error.status_code
+            return response
+        # WriteScopeDenied → 委托给 PermissionInterceptor.on_error
         from meta.core.interceptors.permission_interceptor import PermissionInterceptor
         return PermissionInterceptor.on_error(self, context, error)

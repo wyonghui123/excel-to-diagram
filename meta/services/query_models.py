@@ -37,6 +37,14 @@ class SearchRequest:
     cursor: str = ""
     cursor_field: str = "id"
     cursor_direction: str = "after"  # 'after' | 'before'
+    # [V1.2.1 2026-06-16] 跳过 data permission (dim scope + data_permissions) 过滤
+    # 用于跨域关系创建的级联字段 ValueHelp (apply_target_permissions=false)
+    # 避免 QueryService._apply_data_permission() 注入 dim scope 条件导致域外选项不可见
+    skip_data_permission: bool = False
+    # [V1.2.2 2026-06-17] 显式 user_id (跨线程调用场景)
+    # 后台线程 (async export/import) 中 flask.g.current_user 不可用,
+    # 调用方可在 SearchRequest.user_id 显式传入, _apply_data_permission 优先用它
+    user_id: Optional[int] = None
 
     def get_order_by_clause(self) -> str:
         if self.order_by:

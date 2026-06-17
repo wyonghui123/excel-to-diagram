@@ -1,60 +1,80 @@
 <template>
   <div class="audit-log-management">
     <div class="audit-overview" v-if="overview">
-      <div class="stat-cards">
-        <div class="stat-card stat-card--today">
-          <div class="stat-card__icon">
-            <el-icon :size="28"><Document /></el-icon>
-          </div>
-          <div class="stat-card__content">
-            <div class="stat-card__value">{{ overview.today_count }}</div>
-            <div class="stat-card__label">今日操作</div>
-          </div>
-        </div>
-        <div class="stat-card stat-card--security">
-          <div class="stat-card__icon">
-            <el-icon :size="28"><Lock /></el-icon>
-          </div>
-          <div class="stat-card__content">
-            <div class="stat-card__value">{{ overview.security_count }}</div>
-            <div class="stat-card__label">安全事件</div>
-          </div>
-        </div>
-        <div class="stat-card stat-card--error">
-          <div class="stat-card__icon">
-            <el-icon :size="28"><WarningFilled /></el-icon>
-          </div>
-          <div class="stat-card__content">
-            <div class="stat-card__value">{{ overview.failed }}</div>
-            <div class="stat-card__label">失败记录</div>
-          </div>
-        </div>
-        <div class="stat-card stat-card--total">
-          <div class="stat-card__icon">
-            <el-icon :size="28"><DataLine /></el-icon>
-          </div>
-          <div class="stat-card__content">
-            <div class="stat-card__value">{{ overview.total }}</div>
-            <div class="stat-card__label">日志总数</div>
-          </div>
-        </div>
+      <div class="audit-overview__header">
+        <span class="audit-overview__title">
+          <el-icon :size="16" class="audit-overview__title-icon"><DataAnalysis /></el-icon>
+          分析概览
+        </span>
+        <el-button
+          text
+          class="audit-overview__toggle"
+          @click="toggleOverview"
+        >
+          <el-icon :size="14" style="margin-right: 2px;">
+            <component :is="overviewCollapsed ? ArrowDown : ArrowUp" />
+          </el-icon>
+          {{ overviewCollapsed ? '展开' : '收起' }}
+        </el-button>
       </div>
-      <div class="chart-row">
-        <div class="chart-card">
-          <div class="chart-card__title">日志类型分布</div>
-          <div ref="pieChartRef" class="chart-container"></div>
-        </div>
-        <div class="chart-card chart-card--wide">
-          <div class="chart-card__title">
-            操作趋势
-            <el-radio-group v-model="trendDays" size="small" @change="loadOverview" style="margin-left: 12px;">
-              <el-radio-button :value="7">近7天</el-radio-button>
-              <el-radio-button :value="30">近30天</el-radio-button>
-            </el-radio-group>
+      <el-collapse-transition @after-enter="onOverviewTransitionEnd" @after-leave="onOverviewTransitionEnd">
+        <div v-show="!overviewCollapsed" class="audit-overview__body">
+          <div class="stat-cards">
+            <div class="stat-card stat-card--today">
+              <div class="stat-card__icon">
+                <el-icon :size="28"><Document /></el-icon>
+              </div>
+              <div class="stat-card__content">
+                <div class="stat-card__value">{{ overview.today_count }}</div>
+                <div class="stat-card__label">今日操作</div>
+              </div>
+            </div>
+            <div class="stat-card stat-card--security">
+              <div class="stat-card__icon">
+                <el-icon :size="28"><Lock /></el-icon>
+              </div>
+              <div class="stat-card__content">
+                <div class="stat-card__value">{{ overview.security_count }}</div>
+                <div class="stat-card__label">安全事件</div>
+              </div>
+            </div>
+            <div class="stat-card stat-card--error">
+              <div class="stat-card__icon">
+                <el-icon :size="28"><WarningFilled /></el-icon>
+              </div>
+              <div class="stat-card__content">
+                <div class="stat-card__value">{{ overview.failed }}</div>
+                <div class="stat-card__label">失败记录</div>
+              </div>
+            </div>
+            <div class="stat-card stat-card--total">
+              <div class="stat-card__icon">
+                <el-icon :size="28"><DataLine /></el-icon>
+              </div>
+              <div class="stat-card__content">
+                <div class="stat-card__value">{{ overview.total }}</div>
+                <div class="stat-card__label">日志总数</div>
+              </div>
+            </div>
           </div>
-          <div ref="trendChartRef" class="chart-container"></div>
+          <div class="chart-row">
+            <div class="chart-card">
+              <div class="chart-card__title">日志类型分布</div>
+              <div ref="pieChartRef" class="chart-container"></div>
+            </div>
+            <div class="chart-card chart-card--wide">
+              <div class="chart-card__title">
+                操作趋势
+                <el-radio-group v-model="trendDays" size="small" @change="loadOverview" style="margin-left: 12px;">
+                  <el-radio-button :value="7">近7天</el-radio-button>
+                  <el-radio-button :value="30">近30天</el-radio-button>
+                </el-radio-group>
+              </div>
+              <div ref="trendChartRef" class="chart-container"></div>
+            </div>
+          </div>
         </div>
-      </div>
+      </el-collapse-transition>
     </div>
 
     <MetaListPage
@@ -193,7 +213,7 @@ echarts.use([
   TitleComponent, TooltipComponent, LegendComponent, GridComponent,
   CanvasRenderer
 ])
-import { Document, Lock, WarningFilled, DataLine, Delete } from '@element-plus/icons-vue'
+import { Document, Lock, WarningFilled, DataLine, Delete, ArrowUp, ArrowDown, DataAnalysis } from '@element-plus/icons-vue'
 
 const metaListRef = ref(null)
 const showDetail = ref(false)
@@ -202,9 +222,24 @@ const overview = ref(null)
 const trendDays = ref(7)
 const pieChartRef = ref(null)
 const trendChartRef = ref(null)
+const overviewCollapsed = ref(false)
 
 let pieChart = null
 let trendChart = null
+
+async function toggleOverview() {
+  overviewCollapsed.value = !overviewCollapsed.value
+  // 立即重算 el-table 高度 (收起时让列表区先扩张, 展开后再二次校正)
+  await nextTick()
+  forceElTableHeight()
+}
+
+// [NEW 2026-06-17] 收起/展开动画结束后, 再次校正 el-table 高度 + 重绘 ECharts
+// 否则 ECharts 在 display:none 期间 resize 会拿到错误尺寸
+function onOverviewTransitionEnd() {
+  forceElTableHeight()
+  handleResize()
+}
 
 // [FIX 2026-06-11] 点击列表行 → 打开 detail drawer (统一入口, 复用 handleViewDetail)
 function handleRowClick(row) {
@@ -357,13 +392,13 @@ onBeforeUnmount(() => {
   trendChart = null
 })
 
-// [FIX 2026-06-12] 强制 el-table 高度 = calc(100vh - 440px), 覆盖 MetaListPage
+// [FIX 2026-06-12] 强制 el-table 高度, 覆盖 MetaListPage
 // 模板里 :height="tableHeight" 写到根元素的 inline style="height: 100%".
-// inline style 优先级 > !important CSS, 必须 JS 改. 否则 50 行数据无法滚动.
+// [FIX 2026-06-17] 改为 flex:1 + height:auto !important (见 CSS .custom-table).
+// el-table 现在通过 flex 布局自动填满 meta-list-page 剩余空间, 收起/展开分析区时
+// 不需要再写 inline style 调高度, 这里仅保留函数名兼容旧的 onMounted/resize 调用.
 function forceElTableHeight() {
-  const tables = document.querySelectorAll('.audit-log-management .el-table')
-  const target = `calc(100vh - 440px)`
-  tables.forEach(t => { t.style.height = target })
+  // no-op: el-table 自适应 flex 布局, JS 改 height 反而会和 flex 冲突
 }
 
 const OBJECT_TYPE_MAP = {
@@ -495,6 +530,41 @@ function formatDateTime(datetime) {
   margin-bottom: 16px;
 }
 
+/* [NEW 2026-06-17] 分析概览头部: 标题 + 收起/展开按钮 */
+.audit-overview__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 32px;
+  padding: 0 4px;
+  margin-bottom: 8px;
+}
+
+.audit-overview__title {
+  display: flex;
+  align-items: center;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text-primary, #303133);
+}
+
+.audit-overview__title-icon {
+  margin-right: 6px;
+  color: var(--el-color-primary, #ea580c);
+}
+
+.audit-overview__toggle {
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+  color: var(--el-color-primary, #ea580c);
+  padding: 4px 8px;
+}
+
+.audit-overview__toggle:hover {
+  background: rgba(234, 88, 12, 0.06);
+}
+
 /* [FIX 2026-06-12] MetaListPage 是嵌入模式, 必须 flex:1 填满剩余高度,
    且 min-height:0 否则 flex item 默认 min-height:auto 不会缩小. */
 .audit-log-management :deep(.meta-list-page) {
@@ -509,9 +579,12 @@ function formatDateTime(datetime) {
    .el-scrollbar__wrap (不是 body-wrapper). el-scrollbar 默认隐藏滚动条,
    用户看不到就以为不能滚, 这里强制常驻显示. */
 .audit-log-management :deep(.custom-table) {
-  /* 视口高度 - 顶部导航 ~50 - overview ~250 - 分页 ~60 - 工具栏 ~50 - 余量 30
-     800px 视口下约 360px, 1024px 视口约 580px.  */
-  height: calc(100vh - 440px) !important;
+  /* [FIX 2026-06-17] 改用 flex:1 + height:auto, 不再写死 100vh - X.
+     MetaListPage 写 inline style="height:100%" 被 height:auto !important 覆盖.
+     flex:1 让 el-table 在 meta-list-page (display:flex column) 内自动填满剩余空间.
+     收起分析区域后, 剩余空间变大 → el-table 自动变大, 列表下方不再有空白. */
+  flex: 1 1 auto !important;
+  height: auto !important;
   min-height: 360px;
   display: flex !important;
   flex-direction: column !important;

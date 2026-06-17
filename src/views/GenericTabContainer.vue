@@ -15,13 +15,13 @@
           :tab="tab"
         />
         <component
-          v-else-if="isCustomComponent(tab.key)"
+          v-else-if="isCustomComponent(tab.key) && shouldRender(tab.key)"
+          v-show="activeTab === tab.key"
           :is="resolvedComponents[tab.key]"
-          v-if="activeTab === tab.key"
         />
         <GenericObjectList
-          v-else-if="tab.objectType"
-          v-if="activeTab === tab.key"
+          v-else-if="tab.objectType && shouldRender(tab.key)"
+          v-show="activeTab === tab.key"
           :object-type="tab.objectType"
           v-bind="tab.props || {}"
           @detail="(payload) => $emit('detail', { tab: tab.key, ...payload })"
@@ -35,7 +35,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount, markRaw } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, onActivated, markRaw } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useTabStore } from '@/stores/tabStore'
 import { SubNavTabs } from '@/components/common'
@@ -51,6 +51,8 @@ const props = defineProps({
 })
 
 defineEmits(['detail', 'action'])
+
+defineOptions({ name: 'GenericTabContainer' })
 
 const route = useRoute()
 const router = useRouter()
@@ -129,6 +131,10 @@ function isCustomComponent(key) {
 
 const activeTab = ref(getInitialTab())
 
+// [NFR-009] 懒加载：仅渲染已访问过的 tab，避免一次性创建所有 tab 的组件实例
+// 使用 reactive(new Set()) 确保 Set.add() 触发 Vue 响应式更新
+const visitedTabs = reactive(new Set([activeTab.value || getInitialTab()]))
+
 function getInitialTab() {
   const paramTab = route.params.tab
   const queryTab = route.query.tab
@@ -144,9 +150,15 @@ function getInitialTab() {
 
 function handleTabChange(key) {
   activeTab.value = key
+  visitedTabs.add(key)
   if (route.query.tab !== key) {
     router.replace({ query: { ...route.query, tab: key } })
   }
+}
+
+// [NFR-009] 判断 tab 是否应该渲染 DOM
+function shouldRender(key) {
+  return visitedTabs.has(key)
 }
 
 watch(allTabs, (tabs) => {
@@ -171,6 +183,12 @@ onMounted(async () => {
   if (tab && tab !== activeTab.value) {
     activeTab.value = tab
   }
+})
+
+// [FR-005] 路由切换回来时，刷新当前激活 tab 的数据
+onActivated(() => {
+  // [FR-005] SAP Fiori iAppState 模式：路由切回时保留状态，不自动刷新
+  // 数据变更由 refreshCoordinator 处理
 })
 
 onBeforeRouteLeave((_to, _from) => {

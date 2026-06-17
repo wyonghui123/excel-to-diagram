@@ -78,7 +78,7 @@ dimension_object_mappings:
         field: sub_domain_id
         filter_type: fk_expanded
       - bo: business_object
-        field: sub_domain_id
+        field: service_module_id
         filter_type: fk_expanded
       # [V1.1.8 2026-06-15] relationship 通过 source_bo_id 沿 BO→SM→SD→domain 链反推 domain
       #   source_domain_id/target_domain_id 字段是冗余, 但当前 DB 未填充, 直接 filter 匹配 0 条

@@ -110,7 +110,12 @@ export function useSvgStyle() {
         marker.appendChild(polygon)
         defs.appendChild(marker)
 
-        // [v34 双向支持] 同步创建 source 端 marker (refX=0, orient=auto-start-reverse)
+        // [v34 双向支持] 同步创建 source 端 marker
+        // [V1.7 fix] orient 改为 'auto' (非 'auto-start-reverse')
+        // 原因: 'auto-start-reverse' 让 marker x+ = -path tangent = 朝 source 节点内方向
+        //       polygon base (8, 0)(8, 6) 在 marker x+ 方向 → 旋转后 base 跑到 source 节点内
+        //       V1.7 改用 'auto': marker x+ = path tangent = 离开 source 朝 target 方向 (源外)
+        //       旋转后 base 在 source 节点外, tip 在 source 节点边
         const sourceMarkerId = `arrowhead-source-${strokeColor.replace(/[^a-zA-Z0-9]/g, '')}`
         let existingSourceMarker = defs.querySelector(`#${sourceMarkerId}`)
         if (existingSourceMarker) {
@@ -122,10 +127,12 @@ export function useSvgStyle() {
         sourceMarker.setAttribute('markerHeight', '6')
         sourceMarker.setAttribute('refX', '0')           // source 端 refX=0
         sourceMarker.setAttribute('refY', '3')
-        sourceMarker.setAttribute('orient', 'auto-start-reverse')  // 反向
+        sourceMarker.setAttribute('orient', 'auto')      // [V1.7] 不用 auto-start-reverse
         sourceMarker.setAttribute('markerUnits', 'strokeWidth')
         const sourcePolygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon')
-        sourcePolygon.setAttribute('points', '0 0, 8 3, 0 6')
+        // [V1.7 fix] 保持 V1.6 的 polygon '8 0, 0 3, 8 6' (tip 在 refX 0,3, base 在 marker x+ 方向 8,0/8,6)
+        //   配合 'auto' 旋转后, base 在 source 节点外, tip 在 source 节点边
+        sourcePolygon.setAttribute('points', '8 0, 0 3, 8 6')
         sourcePolygon.setAttribute('fill', strokeColor)
         sourcePolygon.setAttribute('stroke', 'none')
         sourceMarker.appendChild(sourcePolygon)

@@ -206,6 +206,9 @@ class BoValueHelpProvider(ValueHelpProvider):
             sort=sort,
             search=query,
             search_fields=search_fields,
+            # [V1.2.1 2026-06-16] apply_target_permissions=False 时跳过底层 dim scope 过滤
+            # 跨域关系创建的级联字段 ValueHelp 需要看到域外选项
+            skip_data_permission=not self.apply_target_permissions,
         )
 
         data = []

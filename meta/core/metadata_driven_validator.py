@@ -39,7 +39,7 @@ class MetadataDrivenValidator:
             field_value = data.get(field.id) or data.get(field.db_column)
             field_name = self._get_field_name(meta_object, field)
 
-            errors.extend(self._check_required(field, field_value, field_name))
+            errors.extend(self._check_required(field, field_value, field_name, meta_object))
             if field_value is None or field_value == '':
                 continue
             errors.extend(self._check_unique(field, field_value, field_name, meta_object))
@@ -101,7 +101,8 @@ class MetadataDrivenValidator:
     def _is_empty(self, value: Any) -> bool:
         return value is None or value == ''
 
-    def _check_required(self, field: 'MetaField', value: Any, field_name: str) -> List[ValidationDetail]:
+    def _check_required(self, field: 'MetaField', value: Any, field_name: str,
+                        meta_object: 'MetaObject' = None) -> List[ValidationDetail]:
         errors = []
         if field.required and self._is_empty(value):
             errors.append(ValidationDetail(
@@ -122,6 +123,13 @@ class MetadataDrivenValidator:
             return errors
 
         if getattr(field.semantics, 'business_key', False) and self._is_empty(value):
+            # [FIX 2026-06-17] 如果对象有 key_template 且 enabled + auto_suggest，
+            # 则 business_key 为空时不应报必填错误，因为 KeyTemplateInterceptor 会自动生成
+            # 例: relationship 的 code 字段，pattern="{source_code}-{target_code}-{SEQ:2}"
+            if meta_object:
+                kt = getattr(meta_object, 'key_template', None) or {}
+                if isinstance(kt, dict) and kt.get('enabled') and kt.get('auto_suggest'):
+                    return errors  # key_template 会自动生成，跳过必填验证
             errors.append(ValidationDetail(
                 field_id=field.id, field_name=field_name, rule="business_key_required",
                 message=ValidationMessageRegistry.get("validation.field.business_key_required", field_name=field_name),

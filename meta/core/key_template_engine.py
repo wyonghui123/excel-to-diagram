@@ -290,7 +290,7 @@ class SequenceEngine:
 
     def auto_detect_start(self, sequence_name: str, table_name: str, code_column: str,
                           scope_condition: str = "", scope_params: tuple = (),
-                          prefix_filter: str = "") -> int:
+                          prefix_filter: str = "", seq_padding: int = 0) -> int:
         """
         [FIXED 2026-06-11] 从现有 code 列中提取最大序号
 
@@ -301,6 +301,10 @@ class SequenceEngine:
         修复策略：改用 Python 正则提取所有 code 的尾部数字（trailing digits），取最大值 + 1。
         支持有/无分隔符的格式。
 
+        [FIXED 2026-06-17] 当 seq_padding > 0 时，只提取尾部恰好 seq_padding 位的数字。
+        无分隔符格式（如 TEST88601）中，TEST886 的尾部 886 不是序列号（3位 ≠ padding=2），
+        只有 TEST88601 的尾部 01 才是序列号。避免前缀中的数字污染序列号检测。
+
         Args:
             sequence_name: 序列名（仅用于日志）
             table_name: 物理表名（必须已解析，如 'business_objects'）
@@ -309,6 +313,7 @@ class SequenceEngine:
             scope_params: WHERE 参数 tuple
             prefix_filter: [NEW 2026-06-11] 在 Python 层过滤 prefix，避免 SQL 层复杂条件
                            例如 'PROC_REQ_MNG' 只匹配以它开头的 code
+            seq_padding: [NEW 2026-06-17] 序列号的 padding 位数，0 表示不限制
         """
         try:
             # 拉取所有 code（数量可控，BO 一般 < 10k）
@@ -319,7 +324,12 @@ class SequenceEngine:
             rows = cursor.fetchall()
 
             import re
-            trailing_digits = re.compile(r'(\d+)\s*$')
+            # [FIX 2026-06-17] 当 seq_padding > 0 时，只匹配尾部恰好 seq_padding 位的数字
+            # 避免 TEST886 的尾部 886（3位）被误认为序列号（padding=2）
+            if seq_padding > 0:
+                trailing_digits = re.compile(r'(\d{' + str(seq_padding) + r'})\s*$')
+            else:
+                trailing_digits = re.compile(r'(\d+)\s*$')
             max_val = 0
             matched_count = 0
             for row in rows:
@@ -529,9 +539,12 @@ class KeyTemplateEngine:
             seq_start = seq_config.start
             if auto_detect and self._data_source:
                 try:
+                    # [FIX 2026-06-17] 传递 seq_padding，避免前缀中的数字污染序列号检测
+                    seq_padding = (seq_seg or {}).get("padding", 0)
                     detected = self._sequence_engine.auto_detect_start(
                         full_seq_name, effective_table, "code",
                         prefix_filter=prefix_filter,
+                        seq_padding=seq_padding,
                     )
                     if detected > seq_start:
                         seq_start = detected

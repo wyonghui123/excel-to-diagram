@@ -48,6 +48,7 @@
           ref="metaListRef"
           :object-type="childObjectType"
           :options="metaListOptions"
+          :columns-override="visibleColumns"
           :initial-filters="computedInitialFilters"
           :enable-detail="enableDetail"
           :enable-auto-crud="enableAutoCrud"
@@ -305,21 +306,32 @@ const effectiveRowMutability = computed(() => {
 })
 
 const visibleColumns = computed(() => {
+  let cols
   if (props.config.columns && props.config.columns.length > 0) {
-    return props.config.columns
-  }
-  
-  if (childMeta.value?.list?.columns) {
-    return childMeta.value.list.columns.filter(col => 
+    cols = props.config.columns
+  } else if (childMeta.value?.list?.columns) {
+    cols = childMeta.value.list.columns.filter(col =>
       col.visible !== false && col.default_visible !== false
     ).slice(0, 5)
+  } else {
+    cols = [
+      { key: 'name', label: '名称', minWidth: 120 },
+      { key: 'code', label: '编码', minWidth: 100 },
+      { key: 'status', label: '状态', width: 100 }
+    ]
   }
-  
-  return [
-    { key: 'name', label: '名称', minWidth: 120 },
-    { key: 'code', label: '编码', minWidth: 100 },
-    { key: 'status', label: '状态', width: 100 }
-  ]
+
+  // [FIX 2026-06-14] 产品详情下的版本 children 列表: 隐藏"所属产品"列
+  // 父对象已经是 product, product_id / product_name / product_code 是冗余信息
+  // 仅在 product → version 上下文生效, 不影响其他父子关系 (如 domain → sub_domain)
+  if (props.parentObjectType === 'product' && props.childObjectType === 'version') {
+    cols = cols.filter(col => {
+      const k = col.key || col.field
+      return k !== 'product_id' && k !== 'product_name' && k !== 'product_code'
+    })
+  }
+
+  return cols
 })
 
 const defaultActions = computed(() => [

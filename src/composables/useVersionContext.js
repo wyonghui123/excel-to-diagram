@@ -142,7 +142,7 @@ function createVersionContext() {
     }
   }
 
-  function selectProduct(product) {
+  async function selectProduct(product) {
     if (!product) {
       selectedProductId.value = null
       selectedProduct.value = null
@@ -158,7 +158,9 @@ function createVersionContext() {
     selectedProductId.value = product.id
     selectedProduct.value = product
     
-    fetchVersions(product.id)
+    // [FIX 2026-06-17] 返回 promise 让调用方可以 await
+    //   之前未 await 导致 restoreContext 中后续 find version 时 versions 还未加载
+    await fetchVersions(product.id)
     
     if (autoSave) {
       saveContext()
@@ -302,13 +304,18 @@ function createVersionContext() {
       if (urlProductId) {
         product = products.value.find(p => p.id === Number(urlProductId))
         if (product) {
-          selectProduct(product)
+          // [FIX 2026-06-17] await selectProduct 确保 versions 已加载
+          //   之前未 await，导致下面 find version 时 versions 为空
+          await selectProduct(product)
         }
       }
 
       if (urlVersionId) {
-        if (product) {
-          await fetchVersions(product.id)
+        // [FIX 2026-06-17] selectProduct 已 await fetchVersions，无需重复调用
+        //   仅当 product 不存在时（只有 versionId 没有 productId）才单独 fetchVersions
+        if (!product && urlProductId) {
+          // product 未找到但 urlProductId 存在，无法 fetchVersions
+          console.warn('[useVersionContext] Product not found for productId from URL:', urlProductId)
         }
         const targetVersionId = Number(urlVersionId)
         let version = versions.value.find(v => v.id === targetVersionId)
@@ -326,6 +333,8 @@ function createVersionContext() {
         }
         if (version) {
           selectVersion(version)
+        } else {
+          console.warn('[useVersionContext] Version not found for versionId from URL:', urlVersionId, 'available versions:', versions.value.map(v => ({ id: v.id, name: v.name })))
         }
       }
       return
@@ -338,10 +347,10 @@ function createVersionContext() {
     
     const product = products.value.find(p => p.id === savedContext.productId)
     if (product) {
-      selectProduct(product)
+      // [FIX 2026-06-17] await selectProduct 确保 versions 已加载
+      await selectProduct(product)
       
       if (savedContext.versionId) {
-        await fetchVersions(product.id)
         const version = versions.value.find(v => v.id === savedContext.versionId)
         if (version) {
           selectVersion(version)

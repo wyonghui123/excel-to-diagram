@@ -834,14 +834,17 @@ export function useBusinessObjectSyntax() {
         })
 
         const businessObjectLinks = data.links.filter(link => {
-          let found = false
-          if (link.sourceCode && link.targetCode) {
-            found = nodeCodeToIdMap.has(link.sourceCode) && nodeCodeToIdMap.has(link.targetCode)
-          }
-          if (!found) {
-            found = nodeNameToIdMap.has(link.sourceName) && nodeNameToIdMap.has(link.targetName)
-          }
-          return found
+          // [v1.1.15 修复] 跨域关系连线过滤逻辑与下方 sourceId/targetId 解析保持一致
+          //   旧逻辑: filter 用 && (AND) 要求 sourceCode+targetCode 同时在 map
+          //           但下方解析用 || (OR) code 优先 fallback name
+          //   结果: 跨域 link 的 source 在 nodeCodeToIdMap, target 只在 nodeNameToIdMap
+          //         时, filter 漏掉 (因为 targetCode 不在 nodeCodeToIdMap)
+          //   修复: filter 也用 OR-after-AND, 任一 code/name 在 map 就接受
+          const sourceFound = (link.sourceCode && nodeCodeToIdMap.has(link.sourceCode)) ||
+                              (link.sourceName && nodeNameToIdMap.has(link.sourceName))
+          const targetFound = (link.targetCode && nodeCodeToIdMap.has(link.targetCode)) ||
+                              (link.targetName && nodeNameToIdMap.has(link.targetName))
+          return sourceFound && targetFound
         })
 
         const linkColorMappings = []

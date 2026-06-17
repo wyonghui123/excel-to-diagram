@@ -210,6 +210,11 @@ analytical_model:
 ui_view_config:
   list:
     pageSize: 20
+    # [FIX 2026-06-17] 显式声明 searchFields，包含 description（text 类型，不在 list columns 中）
+    searchFields:
+      - name
+      - code
+      - description
     columns:
       - key: name
         title: 名称

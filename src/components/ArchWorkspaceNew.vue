@@ -71,6 +71,8 @@ import StatsOverview from './StatsOverview.vue'
 import { useVersionContext } from '@/composables/useVersionContext'
 import { useAuthStore } from '@/stores/authStore'
 import { useMenuPermissions } from '@/composables/useMenuPermissions'
+
+defineOptions({ name: 'ArchWorkspaceNew' })
 import {
   HomeFilled,
   FolderOpened,
