@@ -319,6 +319,12 @@ ui_view_config:
         position: 100
   list:
     pageSize: 20
+    # [FIX 2026-06-17] 显式声明 searchFields，包含 description（text 类型，不在 list columns 中）
+    #   之前自动生成只包含 list columns 中的 string 字段，description 会被遗漏
+    searchFields:
+      - name
+      - code
+      - description
     columns:
       - key: name
         title: 名称
@@ -663,7 +669,8 @@ fields:
         value_field: id
         display_field: name
         code_field: code
-        apply_target_permissions: false
+        apply_target_permissions: true
+        write_scope_policy: enforce
       behavior:
         validation: true
         binding_strength: strict
@@ -714,7 +721,9 @@ fields:
         value_field: id
         display_field: name
         code_field: code
-        apply_target_permissions: false
+        apply_target_permissions: true
+        write_scope_policy: inherit
+        scope_inherit_from: domain_id
       behavior:
         validation: true
         binding_strength: strict
@@ -738,7 +747,7 @@ fields:
     type: integer
     db_column: service_module_id
     required: false
-    description: 所属服务模块（编辑时可切换）
+    description: 所属服务模块（创建后不可变更）
     ui:
       widget: select
       relation: service_module
@@ -749,14 +758,25 @@ fields:
     semantics:
       meaning: 关联的服务模块（父对象）
       parent_key: true
+      immutable: true
+      readonly_always: true
       resolve_from_field: service_module_code
       resolve_to_object: service_module
       mandatory: false
+      # 🆕 v1.2.3 2026-06-17 Excel 模板专用标记（与 readonly_always 解耦）
+      # 区分"运行时不可改"(readonly_always, 保护 FK 引用/审计链)
+      # 与"Excel 模板是否可填"（parent_key_template_editable, 方便批量重新分类）
+      # - 'always': 模板行 + 数据行都可填
+      # - 'create_only': 模板行可填，数据行只读
+      # - 'never'（默认）: 始终只读
+      parent_key_template_editable: 'always'
       analytics:
         category: dimension
         type: foreign_key
         display_name: 服务模块
-      # SAP One Model：parent_key 仅表示层级关系，允许切换父对象
+      # [FIX v1.2.2 2026-06-16] 父子层级关系不可变
+      # 跨层级移动会破坏关系引用、审计链、dim_scope 权限。
+      # 业务上需要"重新分类"请走专门的"重新分类"操作（action）而非直接改字段。
     value_help:
       source:
         type: bo
@@ -764,7 +784,9 @@ fields:
         value_field: id
         display_field: name
         code_field: code
-        apply_target_permissions: false
+        apply_target_permissions: true
+        write_scope_policy: inherit
+        scope_inherit_from: sub_domain_id
       behavior:
         validation: true
         binding_strength: strict

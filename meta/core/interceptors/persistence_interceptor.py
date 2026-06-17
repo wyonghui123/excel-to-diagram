@@ -162,16 +162,9 @@ class PersistenceInterceptor(Interceptor):
             # 注入 FK display names（与 _do_list 保持一致）
             try:
                 if result.data:
-                    engine = EnrichmentEngine.for_data_source(registry.ds)
-                    # [FIX 2026-06-14] BUG-V008 详情页修复: 先填充虚拟冗余字段
-                    # (domain_id/sub_domain_id 等从 service_module_id 推导, 见
-                    # business_object.yaml 的 redundancy.join_path 配置)
-                    # enrich_fk_display_names 依赖已有 FK 值才能查 display_name,
-                    # 所以必须先 enrich_one 把 domain_id/sub_domain_id 推导出来。
-                    result.data = engine.enrich_one(meta_object.id, result.data)
-                    result.data = engine.enrich_fk_display_names(meta_object, result.data)
+                    result.data = EnrichmentEngine.for_data_source(registry.ds).enrich_fk_display_names(meta_object, result.data)
             except Exception as e:
-                logger.warning(f"[_do_read] enrichment failed: {e}")
+                logger.warning(f"[_do_read] enrich_fk_display_names failed: {e}")
             return ActionResult(
                 success=True,
                 data=result.data,
@@ -296,12 +289,6 @@ class PersistenceInterceptor(Interceptor):
             if not isinstance(cond_obj, dict):
                 return '', []
 
-            # [FIX v1.0.6 2026-06-15] always_true: 永真占位, 渲染 1=1
-            # 用于多 role 派生时, 无 dim scope 的角色派生"无条件" (全开放)
-            # 跟 SAP/Salesforce/Oracle 多 role data scope 并集语义一致
-            if cond_obj.get('type') == 'always_true':
-                return "1=1", []
-
             # [FIX v1.0.6] 嵌套 OR group 递归处理
             if cond_obj.get('type') == 'or':
                 sub_parts = []
@@ -358,6 +345,17 @@ class PersistenceInterceptor(Interceptor):
     def _build_in_filter(self, meta_object, key, value, ctf_param_map, filters, ctf_exists_clauses, ctf_exists_params):
         """处理 __in 后缀: `field__in=a,b,c` → `field IN (?, ?, ?)`"""
         field_name = key[:-4]
+        # [V1.2.5 2026-06-17] 先检查 cross_table_filters (chain filter):
+        # 字段是 virtual 时 (source_domain_id 等), 不应直接走 DB 字段 IN, 应走 EXISTS chain.
+        # 即使字段是物理的, 如果 yaml 显式声明了 ctf, 也优先用 ctf (覆盖默认行为).
+        if field_name in ctf_param_map:
+            values = [v.strip() for v in str(value).split(',') if v.strip()]
+            if values:
+                ctf = ctf_param_map[field_name]
+                exists_sql, exists_params = self._build_ctf_exists(meta_object, ctf, values)
+                ctf_exists_clauses.append(exists_sql)
+                ctf_exists_params.extend(exists_params)
+            return
         field = meta_object.get_field(field_name)
         if field:
             if getattr(field, 'storage', None) == FieldStorage.VIRTUAL:
@@ -366,32 +364,27 @@ class PersistenceInterceptor(Interceptor):
             values = [v.strip() for v in str(value).split(',') if v.strip()]
             if values:
                 filters[f"{field.db_column} IN"] = values
-        elif field_name in ctf_param_map:
-            values = [v.strip() for v in str(value).split(',') if v.strip()]
-            if values:
-                ctf = ctf_param_map[field_name]
-                exists_sql, exists_params = self._build_ctf_exists(meta_object, ctf, values)
-                ctf_exists_clauses.append(exists_sql)
-                ctf_exists_params.extend(exists_params)
         else:
             logger.warning(f"[_do_list] Unknown filter field: {field_name}")
 
     def _build_like_filter(self, meta_object, key, value, ctf_param_map, filters, ctf_exists_clauses, ctf_exists_params):
         """处理 __like 后缀: `field__like=foo` → `field LIKE '%foo%'`"""
         field_name = key[:-6]
-        field = meta_object.get_field(field_name)
-        if field:
-            if getattr(field, 'storage', None) == FieldStorage.VIRTUAL:
-                logger.warning(f"[_do_list] Ignoring filter for virtual field: {field_name}")
-                return
-            filters[f"{field.db_column} LIKE"] = f"%{value}%"
-        elif field_name in ctf_param_map:
+        # [V1.2.5 2026-06-17] 先 ctf 后 field: 同 _build_in_filter
+        if field_name in ctf_param_map:
             values = [str(value).strip()]
             if values and values[0]:
                 ctf = ctf_param_map[field_name]
                 exists_sql, exists_params = self._build_ctf_exists(meta_object, ctf, values)
                 ctf_exists_clauses.append(exists_sql)
                 ctf_exists_params.extend(exists_params)
+            return
+        field = meta_object.get_field(field_name)
+        if field:
+            if getattr(field, 'storage', None) == FieldStorage.VIRTUAL:
+                logger.warning(f"[_do_list] Ignoring filter for virtual field: {field_name}")
+                return
+            filters[f"{field.db_column} LIKE"] = f"%{value}%"
         else:
             logger.warning(f"[_do_list] Unknown filter field: {field_name}")
 
@@ -573,6 +566,10 @@ class PersistenceInterceptor(Interceptor):
         target_alias = association.get('target_alias', 't')
         on_conditions = association.get('on_conditions', [])
         where_conditions = association.get('where_conditions', [])
+        # [V1.2.5 2026-06-17] chain filter 支持: from_join 自定义 JOIN 链
+        # 默认 JOIN 只有 target_table, 加 from_join 后支持多表 JOIN
+        # 例 (源域过滤): FROM business_objects bo_src JOIN service_modules sm_src ON ... JOIN sub_domains sd_src ON ...
+        from_join = association.get('from_join', '').strip()
         main_table = meta_object.table_name
 
         def _resolve_field(field_str):
@@ -583,7 +580,15 @@ class PersistenceInterceptor(Interceptor):
                 prefix, col = field_str.rsplit('.', 1)
                 if prefix == target_alias:
                     return f"{target_alias}.{col}", None
-                elif prefix != main_table:
+                # [V1.2.5 2026-06-17] 修复: from_join 引入了额外别名 (bo_src, sm_src, sd_src 等)
+                # 这些别名既不是 target_alias 也不是 main_table, 但在 SQL 中有效.
+                # 之前会错误重写成 main_table.col, 导致 SQL 字段名错乱.
+                # 现在: 既不是 target_alias 也不是 main_table 时, 保留原 prefix.
+                #
+                # 兼容: 主表 'r' 别名 (约定见 relationship.yaml analytical_model.fact.alias),
+                # 主 SQL FROM relationships (无别名), 所以 'r.' 必须替换为 main_table.
+                # 否则 SQL 'no such column: r.source_bo_id'.
+                if prefix == 'r':
                     return f"{main_table}.{col}", None
                 return f"{prefix}.{col}", None
             return f"{main_table}.{field_str}", None
@@ -634,7 +639,16 @@ class PersistenceInterceptor(Interceptor):
         on_clause = ' AND '.join(on_parts)
         where_clause = ' AND '.join(where_parts)
 
-        exists_sql = f"EXISTS (SELECT 1 FROM {target_table} {target_alias} WHERE {on_clause} AND {where_clause})"
+        # [V1.2.5 2026-06-17] 拼接 EXISTS SQL:
+        # 默认: EXISTS (SELECT 1 FROM {target_table} {target_alias} WHERE ...)
+        # chain: EXISTS (SELECT 1 FROM business_objects bo_src JOIN ... WHERE ...)
+        if from_join:
+            # 自定义 FROM JOIN 链, 不需要额外 FROM target_table
+            from_clause = from_join
+        else:
+            from_clause = f"FROM {target_table} {target_alias}"
+
+        exists_sql = f"EXISTS (SELECT 1 {from_clause} WHERE {on_clause} AND {where_clause})"
         all_params = on_params + where_params
         return exists_sql, all_params
 
@@ -801,9 +815,6 @@ class PersistenceInterceptor(Interceptor):
                         logger.warning(f"[_do_list] Ignoring unknown filter field: {key}")
 
         scope_conditions, scope_params = self._build_scope_conditions(context)
-        # [DEBUG] 临时调试 dim scope 过滤
-        qc = context.extra.get('query_conditions', []) if hasattr(context, 'extra') else []
-        logger.warning(f'[DPI-LIST-DEBUG] object_type={context.object_type} user_id={context.user_id} query_conditions={qc} scope_conditions={scope_conditions} scope_params={scope_params}')
 
         search_or_conditions = []
         search_or_params = []
@@ -811,25 +822,135 @@ class PersistenceInterceptor(Interceptor):
         if search_keyword and str(search_keyword).strip():
             search_keyword = str(search_keyword).strip()
 
-            if hasattr(meta_object, 'fields') and meta_object.fields:
-                for f in meta_object.fields:
-                    field_name = getattr(f, 'name', getattr(f, 'key', ''))
-                    db_column = getattr(f, 'db_column', field_name)
+            # [FIX 2026-06-17 v3] 搜索范围控制：
+            # 1. 如果 schema 显式声明了 list.searchFields，则**严格只搜这些字段**（避免误匹配审计字段）
+            # 2. 否则回退到遍历所有 text 字段，但**排除 audit 字段**（created_by/updated_by/created_at/updated_at）
+            #
+            # 历史背景：之前不加审计字段排除，搜索"TEST"会返回所有 updated_by='TEST888' 的数据
+            # (如 "采购合同"、"采购执行" 等正常数据)，用户看到不该出现的结果。
+            list_search_fields = []
+            ui_view_config = getattr(meta_object, 'ui_view_config', None)
+            if ui_view_config:
+                list_cfg = getattr(ui_view_config, 'list', None)
+                if list_cfg:
+                    list_search_fields = getattr(list_cfg, 'searchFields', []) or []
 
-                    field_type = getattr(f, 'field_type', None)
-                    if field_type is not None:
-                        type_value = field_type.value if hasattr(field_type, 'value') else str(field_type)
+            def _is_audit_field(f):
+                """判断字段是否属于审计字段（created_by/updated_by/created_at/updated_at）"""
+                # 方式1：通过 semantics.source_of_truth 识别
+                sem = getattr(f, 'semantics', None)
+                if sem is not None:
+                    if isinstance(sem, dict):
+                        if sem.get('source_of_truth') == 'audit_logs':
+                            return True
                     else:
-                        continue
+                        if getattr(sem, 'source_of_truth', None) == 'audit_logs':
+                            return True
+                # 方式2：通过 field id 兜底识别（兼容未声明 semantics 的情况）
+                field_id = getattr(f, 'id', None) or getattr(f, 'name', None)
+                if field_id in ('created_at', 'updated_at', 'created_by', 'updated_by'):
+                    return True
+                return False
 
-                    is_text_type = type_value in ('string', 'text', 'varchar', 'email')
-                    is_hidden = getattr(f, 'hidden_filter', False)
-                    field_storage = getattr(f, 'storage', None)
-                    is_virtual = field_storage == FieldStorage.VIRTUAL
+            if list_search_fields:
+                # 模式 1: schema 显式声明了 searchFields，严格按声明搜
+                if hasattr(meta_object, 'fields') and meta_object.fields:
+                    for f in meta_object.fields:
+                        field_id = getattr(f, 'id', getattr(f, 'key', ''))
+                        if field_id not in list_search_fields:
+                            continue
 
-                    if is_text_type and not is_hidden and db_column and not is_virtual:
+                        db_column = getattr(f, 'db_column', field_id)
+                        field_type = getattr(f, 'field_type', None)
+                        if field_type is None:
+                            continue
+                        type_value = field_type.value if hasattr(field_type, 'value') else str(field_type)
+                        is_text_type = type_value in ('string', 'text', 'varchar', 'email')
+                        is_hidden = getattr(f, 'hidden_filter', False)
+                        field_storage = getattr(f, 'storage', None)
+                        is_virtual = field_storage == FieldStorage.VIRTUAL
+
+                        if not is_text_type or is_hidden or not db_column:
+                            continue
+
+                        if is_virtual:
+                            # 虚拟字段：暂时不通过 LIKE 搜（除非是已知的 source_bo_/target_bo_ 链）
+                            # 由下方的 virtual 字段 EXISTS 处理
+                            continue
+
                         search_or_conditions.append(f"{db_column} LIKE ?")
                         search_or_params.append(f"%{search_keyword}%")
+            else:
+                # 模式 2: 未声明 searchFields，回退遍历所有 text 字段，但排除 audit
+                if hasattr(meta_object, 'fields') and meta_object.fields:
+                    for f in meta_object.fields:
+                        field_name = getattr(f, 'name', getattr(f, 'key', ''))
+                        db_column = getattr(f, 'db_column', field_name)
+
+                        field_type = getattr(f, 'field_type', None)
+                        if field_type is not None:
+                            type_value = field_type.value if hasattr(field_type, 'value') else str(field_type)
+                        else:
+                            continue
+
+                        is_text_type = type_value in ('string', 'text', 'varchar', 'email')
+                        is_hidden = getattr(f, 'hidden_filter', False)
+                        field_storage = getattr(f, 'storage', None)
+                        is_virtual = field_storage == FieldStorage.VIRTUAL
+
+                        # [FIX 2026-06-17 v3] 排除 audit 字段（避免误匹配 updated_by='TEST888' 等）
+                        if _is_audit_field(f):
+                            continue
+
+                        if is_text_type and not is_hidden and db_column and not is_virtual:
+                            search_or_conditions.append(f"{db_column} LIKE ?")
+                            search_or_params.append(f"%{search_keyword}%")
+
+            # [V1.2.5 2026-06-17] toolbar 搜索支持 virtual 字段 (redundancy 链)
+            # 用户在 toolbar 输入 "采购订单" 时, 后端不仅搜关系表物理字段,
+            # 还要搜 source_bo_name/target_bo_name 这类由冗余链 JOIN 出来的 virtual 字段.
+            # 通过 EXISTS 子查询实现:
+            #   source_bo_name='xxx' → EXISTS (SELECT 1 FROM business_objects WHERE id = r.source_bo_id AND name LIKE '%xxx%')
+
+            # 收集需要通过 EXISTS 搜的 virtual 字段
+            search_virtual_fields = []
+            if hasattr(meta_object, 'fields') and meta_object.fields:
+                for f in meta_object.fields:
+                    field_id = getattr(f, 'id', getattr(f, 'key', ''))
+                    # 仅当 searchFields 显式声明该字段时，才纳入 virtual 搜索
+                    if list_search_fields and field_id not in list_search_fields:
+                        continue
+                    is_virtual = getattr(f, 'storage', None) == FieldStorage.VIRTUAL
+                    is_text_type = False
+                    ft = getattr(f, 'field_type', None)
+                    if ft is not None:
+                        type_value = ft.value if hasattr(ft, 'value') else str(ft)
+                        is_text_type = type_value in ('string', 'text', 'varchar', 'email')
+                    if is_virtual and is_text_type:
+                        search_virtual_fields.append(field_id)
+
+            for vfield_id in search_virtual_fields:
+                # 根据 field_id 推断 JOIN 路径
+                # source_bo_name / source_bo_code → 通过 source_bo_id → business_objects.name/code
+                # target_bo_name / target_bo_code → 通过 target_bo_id → business_objects.name/code
+                if vfield_id.startswith('source_bo_') or vfield_id == 'source_bo_name':
+                    bo_col = vfield_id.replace('source_bo_', '')  # 'name' / 'code'
+                    exists_sql = (
+                        f"EXISTS (SELECT 1 FROM business_objects bo "
+                        f"WHERE bo.id = {meta_object.table_name}.source_bo_id "
+                        f"AND bo.{bo_col} LIKE ?)"
+                    )
+                    search_or_conditions.append(exists_sql)
+                    search_or_params.append(f"%{search_keyword}%")
+                elif vfield_id.startswith('target_bo_') or vfield_id == 'target_bo_name':
+                    bo_col = vfield_id.replace('target_bo_', '')
+                    exists_sql = (
+                        f"EXISTS (SELECT 1 FROM business_objects bo "
+                        f"WHERE bo.id = {meta_object.table_name}.target_bo_id "
+                        f"AND bo.{bo_col} LIKE ?)"
+                    )
+                    search_or_conditions.append(exists_sql)
+                    search_or_params.append(f"%{search_keyword}%")
 
         try:
             virtual_sort = self._resolve_virtual_sort(meta_object, order_by)
