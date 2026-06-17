@@ -30,7 +30,7 @@
           <span class="al-filter-label">字段:</span>
           <el-dropdown trigger="click" @command="handleFieldFilterChange">
             <AppButton variant="secondary" size="xs" class="al-field-dropdown">
-              {{ activeFieldFilter || '全部字段' }}
+              {{ activeFieldFilter ? getFieldLabel(activeFieldFilter) : '全部字段' }}
               <svg class="al-dropdown-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M6 9l6 6 6-6"/>
               </svg>
@@ -54,7 +54,7 @@
                   :command="field"
                   :class="{ 'is-active': activeFieldFilter === field }"
                 >
-                  {{ field }}
+                  {{ getFieldLabel(field) }}
                 </el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -112,22 +112,22 @@
               @click="handleLogClick(item)"
             >
               <div class="al-detail al-detail--associate" v-if="item.action === 'ASSOCIATE' || item.action === 'ASSIGN'">
-                <span class="al-field">{{ item.field_name || '关联' }}:</span>
+                <span class="al-field">{{ getFieldLabel(item.field_name) || '关联' }}:</span>
                 <span class="al-associate-add">+ {{ parseTargetDisplay(item.new_value) }}</span>
               </div>
               <div class="al-detail al-detail--dissociate" v-else-if="item.action === 'DISSOCIATE' || item.action === 'REVOKE'">
-                <span class="al-field">{{ item.field_name || '关联' }}:</span>
+                <span class="al-field">{{ getFieldLabel(item.field_name) || '关联' }}:</span>
                 <span class="al-associate-remove">- {{ parseTargetDisplay(item.old_value) }}</span>
               </div>
               <div class="al-detail al-detail--batch-associate" v-else-if="item._batch_associate">
-                <span class="al-field">{{ item.field_name || '关联' }}:</span>
+                <span class="al-field">{{ getFieldLabel(item.field_name) || '关联' }}:</span>
                 <span class="al-associate-add">+ {{ formatBatchTargets(item._batch_targets) }}</span>
               </div>
               <div class="al-detail" v-else-if="item.field_name">
-                <span class="al-field">{{ item.field_name }}:</span>
-                <span class="al-old">{{ item.old_value || '(空)' }}</span>
+                <span class="al-field">{{ getFieldLabel(item.field_name) }}:</span>
+                <span class="al-old">{{ getFieldValueDisplay(item.old_value, item.field_name) }}</span>
                 <span class="al-arrow">→</span>
-                <span class="al-new">{{ item.new_value || '(空)' }}</span>
+                <span class="al-new">{{ getFieldValueDisplay(item.new_value, item.field_name) }}</span>
               </div>
               <div class="al-detail al-detail--create" v-else-if="item.action === 'CREATE'">
                 <span>创建记录</span>
@@ -157,10 +157,10 @@
                     :key="child.id"
                     class="al-child-item"
                   >
-                    <span class="al-child-type">{{ child.object_type }}</span>
+                    <span class="al-child-type">{{ getObjectTypeLabel(child.object_type) }}</span>
                     <span class="al-child-action">{{ formatAction(child.action) }}</span>
                     <span v-if="child.field_name" class="al-child-detail">
-                      {{ child.field_name }}: {{ child.old_value }} → {{ child.new_value }}
+                      {{ getFieldLabel(child.field_name) }}: {{ getFieldValueDisplay(child.old_value, child.field_name) }} → {{ getFieldValueDisplay(child.new_value, child.field_name) }}
                     </span>
                   </div>
                 </div>
@@ -208,7 +208,7 @@ import { computed, ref, watch } from 'vue'
 import AppButton from '@/components/common/AppButton/AppButton.vue'
 import AppCollapse from '@/components/common/AppCollapse/AppCollapse.vue'
 import { dateFormatService } from '@/services/DateFormatService'
-import { getActionLabel, getUserNameDisplay, isInternalField, isInternalAction } from '@/utils/auditLogFormat'
+import { getActionLabel, getUserNameDisplay, isInternalField, isInternalAction, getFieldLabel, getFieldValueDisplay, getObjectTypeLabel } from '@/utils/auditLogFormat'
 
 const props = defineProps({
   logs: {
@@ -286,7 +286,9 @@ const availableFields = computed(() => {
   if (!Array.isArray(props.logs)) return []
   const fields = new Set()
   for (const item of props.logs) {
-    if (item.field_name) fields.add(item.field_name)
+    if (item.field_name && !isInternalField(item.field_name)) {
+      fields.add(item.field_name)
+    }
   }
   return Array.from(fields).sort()
 })

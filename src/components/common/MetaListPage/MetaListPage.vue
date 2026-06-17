@@ -20,7 +20,8 @@
               size="default"
               prefix-icon="Search"
               style="width: 280px"
-              @keyup.enter="onKeywordSearch"
+              @keydown.enter="onKeywordSearch"
+              @clear="onKeywordSearch"
             />
           </div>
           <el-button
@@ -187,7 +188,8 @@
                 :placeholder="field.placeholder || `请输入${field.label}`"
                 clearable
                 style="width: 180px"
-                @keyup.enter="handleFilterChange(field.key, $event)"
+                @keydown.enter="handleFilterChange(field.key, $event)"
+                @clear="handleFilterChange(field.key, $event)"
               />
             </el-form-item>
             <el-form-item>
@@ -333,7 +335,7 @@
                 <span v-else-if="column.link && !row[column.prop]" class="bk-empty">-</span>
                 <span
                   v-else-if="isBusinessKeyColumn(column) && row[column.prop]"
-                  class="bk-link"
+                  class="bk-link bk-link--primary"
                   title="查看本对象详情"
                   @click.stop="handleBusinessKeyClick(row)"
                 >
@@ -497,7 +499,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick, onMounted, onUnmounted, markRaw, inject } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted, onActivated, markRaw, inject } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowDown, ArrowUp, View, Edit, Delete, List, Plus, Upload, Download, Setting, Lock, MoreFilled, Document, CopyDocument, Promotion, CaretTop, CaretBottom, Sort } from '@element-plus/icons-vue'
 import { useMetaList, formatDate } from '@/composables/useMetaList'
@@ -570,6 +572,9 @@ import { boService } from '@/services/boService'
 import { metaService } from '@/services/metaService'
 import { useListActionStore } from '@/stores/listActionStore'
 
+// [FR-004] 声明组件名以支持 keep-alive include 白名单匹配
+defineOptions({ name: 'MetaListPage' })
+
 const props = defineProps({
   objectType: {
     type: String,
@@ -625,6 +630,12 @@ const props = defineProps({
   columnsOverride: {
     type: Array,
     default: null
+  },
+  // [FIX 2026-06-14] 排除的列 key 列表（page 模式生效，传入后从 meta columns 过滤掉指定 key）
+  // 适用场景: 子对象页的 children 列表 (如 product → version) 隐藏冗余的父对象列
+  excludeColumnKeys: {
+    type: Array,
+    default: () => []
   },
   excludeIds: {
     type: Array,
@@ -754,7 +765,7 @@ const {
   navigableAssociations,
   getNavigableAssociations,
   batchGetAssociationCounts
-} = useMetaList(props.objectType, {
+} = useMetaList(computed(() => props.objectType), {
   mode: 'element-plus',
   autoLoad: props.options.autoLoad !== false,
   pageSize: props.options.pageSize || 20,
@@ -763,13 +774,15 @@ const {
   rowMutability: props.rowMutability,
   displayMode: props.displayMode,
   columnsOverride: props.columnsOverride,
+  excludeColumnKeys: props.excludeColumnKeys,
   excludeIds: props.excludeIds,
   rowKey: props.rowKey,
   rowActionsOverride: props.rowActionsOverride,
   toolbarActionsOverride: props.toolbarActionsOverride,
   batchActionsOverride: props.batchActionsOverride,
   fetcher: props.options.fetcher,
-  inlineEdit: props.options.inlineEdit
+  inlineEdit: props.options.inlineEdit,
+  initialFilters: props.initialFilters
 })
 
 // [DECORATIVE] [NEW] v1.3 / FR-6.4: 读取 display_value（优先后端注入）
@@ -1638,7 +1651,8 @@ watch(() => props.externalEditing, (val) => {
   }
 })
 
-watch(data, () => {
+// [NFR-007] 同时 watch data 和 columns，确保 objectType 变化后两者都更新再 doLayout
+watch([data, columns], () => {
   nextTick(() => {
     if (tableRef.value) {
       tableRef.value.doLayout()
@@ -1677,11 +1691,11 @@ let unsubscribeAction = null
 onMounted(() => {
   unsubscribeAction = useListActionStore().registerHandler(props.objectType, handleMetaListAction)
   loadPermissions()
-  
+
   if (coordinator) {
     coordinator.register(`list:${props.objectType}`, forceRefresh)
   }
-  
+
   const navParams = parseNavigationParams()
   if (navParams) {
     const filterParam = getNavigationFilterParam()
@@ -1689,12 +1703,21 @@ onMounted(() => {
       setContextFilters(filterParam)
     }
   }
-  
+
   if (Object.keys(props.initialFilters).length > 0) {
     setContextFilters(props.initialFilters)
     if (props.options.autoLoad !== false) {
       refresh()
     }
+  }
+})
+
+// [FR-004] 路由级 keep-alive 恢复时刷新数据
+// [FR-005] SAP Fiori iAppState 模式：路由切回时保留状态，不自动刷新
+// 数据变更由 refreshCoordinator 处理，用户可手动点刷新按钮
+onActivated(() => {
+  if (props.objectType) {
+    console.log(`[MetaListPage] onActivated: objectType=${props.objectType}, state preserved (no auto-refresh)`)
   }
 })
 
@@ -1706,6 +1729,28 @@ onUnmounted(() => {
   if (coordinator) {
     coordinator.unregister(`list:${props.objectType}`)
   }
+})
+
+// [NFR-005] objectType 变化时重新注册事件处理器
+watch(() => props.objectType, (newType, oldType) => {
+  if (newType === oldType) return
+
+  // 注销旧 objectType 的处理器
+  if (unsubscribeAction) {
+    unsubscribeAction()
+  }
+  if (coordinator) {
+    coordinator.unregister(`list:${oldType}`)
+  }
+
+  // 注册新 objectType 的处理器
+  unsubscribeAction = useListActionStore().registerHandler(newType, handleMetaListAction)
+  if (coordinator) {
+    coordinator.register(`list:${newType}`, forceRefresh)
+  }
+
+  // 重新加载权限
+  loadPermissions()
 })
 
 watch(() => props.columnsOverride, (newVal, oldVal) => {
@@ -2072,6 +2117,17 @@ defineExpose({
 
 .bk-link:hover {
   color: var(--color-primary);
+  text-decoration: underline;
+}
+
+/* [FIX 2026-06-16] 业务键(主key) 高亮：YonDesign primary 橙色，font-weight 500 */
+.bk-link--primary {
+  color: var(--color-primary);
+  font-weight: 500;
+}
+
+.bk-link--primary:hover {
+  color: var(--color-primary-hover);
   text-decoration: underline;
 }
 

@@ -267,7 +267,10 @@ def read_bo(object_type, obj_id):
         return jsonify({'success': False, 'message': '对象不存在或无访问权限'}), 404
 
     bo = _get_bo()
+    import sys
+    print(f"[DBG-READ-BO] START: object_type={object_type}, obj_id={obj_id}", file=sys.stderr, flush=True)
     result = bo.read(object_type, obj_id)
+    print(f"[DBG-READ-BO] END: success={result.success}, data_keys={list(result.data.keys()) if isinstance(result.data, dict) else 'N/A'}", file=sys.stderr, flush=True)
     if result.success:
         _attach_change_history(result.data, object_type, obj_id)
         return jsonify({'success': True, 'data': result.data})
@@ -279,6 +282,12 @@ def _check_single_bo_in_dim_scope(object_type: str, obj_id: int):
 
     语义: 调用 DimensionScopeEngine.derive_data_conditions(role_id) 派生当前 object_type 的 cond_expr,
           检查 obj_id 是否在派生范围内. 不在 → 返回 True (deny).
+
+    [FIX 2026-06-17] owner 例外: 用户对自己 owner 的资源始终可见 (跟 _do_list 路径一致)
+      - 拿 obj_id 对应 record 的 owner_id, 等于 user.id → allow
+      - 这与 DataPermissionInterceptor._add_owner_exception 行为一致
+      - 修复: TEST333 创建 product 493 (owner=TEST333) 后能直接看 detail
+              之前 dim scope 派生条件不含 owner, TEST333 不是 product 派生范围 → 404
 
     例: TEST333 + 5970 读域外 BO 316:
       - 5970 dim scope: domain=[703] → 派生 BO cond: `id IN (chain 派生 → 8 个 BO)`
@@ -299,14 +308,42 @@ def _check_single_bo_in_dim_scope(object_type: str, obj_id: int):
         # audit_log 等元数据对象不受 dim scope 限制
         if object_type in ('audit_log',):
             return False
-        # 拿 user 的所有 role_id
+
+        user_id = user.get('id') or user.get('user_id')
         ds = _get_data_source()
+
+        # [FIX 2026-06-17] owner 例外: 用户对 owner=自己 的资源始终可见
+        # 优先级最高, 先检查 (避免不必要的 dim scope 派生)
+        meta_obj = registry.get(object_type)
+        if meta_obj is not None and user_id:
+            try:
+                # 检查 BO 是否有 owner_id 字段
+                has_owner_id = any(
+                    getattr(f, 'id', getattr(f, 'name', '')) == 'owner_id'
+                    for f in (getattr(meta_obj, 'fields', None) or [])
+                )
+                if has_owner_id:
+                    table = meta_obj.table_name
+                    owner_row = ds.execute(
+                        f"SELECT 1 FROM {table} WHERE id = ? AND owner_id = ? LIMIT 1",
+                        [obj_id, user_id]
+                    ).fetchone()
+                    if owner_row:
+                        logger.info(
+                            f'[_check_single_bo_in_dim_scope] ALLOW via owner_exception '
+                            f'object_type={object_type} obj_id={obj_id} user={user_id}'
+                        )
+                        return False  # owner 例外放行
+            except Exception as e:
+                logger.debug(f'[_check_single_bo_in_dim_scope] owner check failed: {e}')
+
+        # 拿 user 的所有 role_id
         cursor = ds.execute(
             """SELECT DISTINCT gr.role_id
                FROM group_roles gr
                JOIN user_group_members ugm ON gr.group_id = ugm.group_id
                WHERE ugm.user_id = ?""",
-            [user.get('id') or user.get('user_id')]
+            [user_id]
         )
         role_ids = [row[0] for row in cursor.fetchall()]
         if not role_ids:
@@ -324,7 +361,6 @@ def _check_single_bo_in_dim_scope(object_type: str, obj_id: int):
             # 把 cond_expr 的 "id IN (...)" 改为 "id = ?", 或者直接在子查询里加 WHERE id=?
             # 简化: 用一个独立 SQL — 派生 "id" 字段 chain, 把 obj_id 加进去
             # 解析 cond_expr, 找 chain 的 leaf
-            meta_obj = registry.get(object_type)
             if not meta_obj:
                 continue
             table = meta_obj.table_name
@@ -1357,45 +1393,90 @@ def get_architecture_preview():
             # 4. 拉元数据并加入列表 (is_external=false 因为是"已扩展 dim scope")
             if new_bo_ids:
                 ph = ','.join('?' * len(new_bo_ids))
+                # [V1.1.13 fix] 外部 BO 的 domain_id/sub_domain_id 可能为 NULL,
+                # 必须通过 SM→SD→D 链路获取层级信息
                 rows = _ds2.execute(
-                    f"SELECT id, code, name, domain_id, sub_domain_id, service_module_id, visibility "
-                    f"FROM business_objects WHERE id IN ({ph})", list(new_bo_ids)
+                    f"SELECT bo.id, bo.code, bo.name, bo.domain_id, bo.sub_domain_id, "
+                    f"bo.service_module_id, bo.visibility, "
+                    f"COALESCE(d_direct.name, d_chain.name) as domain_name, "
+                    f"COALESCE(sd_direct.name, sd_chain.name) as sub_domain_name, "
+                    f"COALESCE(sm_direct.name, sm_chain.name) as service_module_name, "
+                    f"COALESCE(sm_direct.code, sm_chain.code) as service_module_code, "
+                    f"COALESCE(bo.domain_id, d_chain.id) as effective_domain_id, "
+                    f"COALESCE(bo.sub_domain_id, sd_chain.id) as effective_sub_domain_id "
+                    f"FROM business_objects bo "
+                    f"LEFT JOIN domains d_direct ON bo.domain_id = d_direct.id "
+                    f"LEFT JOIN sub_domains sd_direct ON bo.sub_domain_id = sd_direct.id "
+                    f"LEFT JOIN service_modules sm_direct ON bo.service_module_id = sm_direct.id "
+                    f"LEFT JOIN service_modules sm_chain ON bo.service_module_id = sm_chain.id "
+                    f"LEFT JOIN sub_domains sd_chain ON sm_chain.sub_domain_id = sd_chain.id "
+                    f"LEFT JOIN domains d_chain ON sd_chain.domain_id = d_chain.id "
+                    f"WHERE bo.id IN ({ph})", list(new_bo_ids)
                 ).fetchall()
+                # [V1.2.6] 去重 + 替换: 同 code 时, version 764 的 BO 优先于 version 1 的
+                # 原 bug: V1.1.11 添加 version 1 的 BO (domain_name=采购管理),
+                #   V1.1.13 添加 version 764 的 BO (domain_name=库存管理x) 被跳过,
+                #   导致 availableDomains 缺少外域领域
+                existing_bo_codes_v13 = {b.get('code') for b in business_objects if b.get('code')}
+                added_codes_v13 = set()
                 for r in rows:
-                    business_objects.append({
+                    r_code = r[1]
+                    if r_code and r_code in added_codes_v13:
+                        continue
+                    new_bo = {
                         'id': r[0], 'code': r[1], 'name': r[2],
-                        'domain_id': r[3], 'sub_domain_id': r[4], 'service_module_id': r[5],
+                        'domain_id': r[11] or r[3], 'sub_domain_id': r[12] or r[4],
+                        'service_module_id': r[5],
                         'visibility': r[6],
-                        'is_included_via_relationship': True,  # 标记: SAP 风格关系引入
-                    })
+                        'domain_name': r[7] or '',
+                        'sub_domain_name': r[8] or '',
+                        'service_module_name': r[9] or '',
+                        'service_module_code': r[10] or '',
+                        'is_external': True,
+                    }
+                    if r_code and r_code in existing_bo_codes_v13:
+                        # [V1.2.6] 替换: 找到已有的同 code BO, 用 version 764 的替换
+                        for i, b in enumerate(business_objects):
+                            if b.get('code') == r_code:
+                                business_objects[i] = new_bo
+                                break
+                    else:
+                        business_objects.append(new_bo)
+                    if r_code: added_codes_v13.add(r_code)
             if new_sm_ids:
                 ph = ','.join('?' * len(new_sm_ids))
                 rows = _ds2.execute(
-                    f"SELECT id, name, sub_domain_id FROM service_modules WHERE id IN ({ph})", list(new_sm_ids)
+                    f"SELECT sm.id, sm.name, sm.code, sm.sub_domain_id, sd.name as sub_domain_name "
+                    f"FROM service_modules sm LEFT JOIN sub_domains sd ON sm.sub_domain_id = sd.id "
+                    f"WHERE sm.id IN ({ph})", list(new_sm_ids)
                 ).fetchall()
                 for r in rows:
                     modules.append({
-                        'id': r[0], 'name': r[1], 'sub_domain_id': r[2],
+                        'id': r[0], 'name': r[1], 'code': r[2], 'sub_domain_id': r[3],
+                        'sub_domain_name': r[4] or '',
                         'is_included_via_relationship': True,
                     })
             if new_sd_ids:
                 ph = ','.join('?' * len(new_sd_ids))
                 rows = _ds2.execute(
-                    f"SELECT id, name, domain_id FROM sub_domains WHERE id IN ({ph})", list(new_sd_ids)
+                    f"SELECT sd.id, sd.name, sd.domain_id, d.name as domain_name "
+                    f"FROM sub_domains sd LEFT JOIN domains d ON sd.domain_id = d.id "
+                    f"WHERE sd.id IN ({ph})", list(new_sd_ids)
                 ).fetchall()
                 for r in rows:
                     sub_domains.append({
                         'id': r[0], 'name': r[1], 'domain_id': r[2],
+                        'domain_name': r[3] or '',
                         'is_included_via_relationship': True,
                     })
             if new_d_ids:
                 ph = ','.join('?' * len(new_d_ids))
                 rows = _ds2.execute(
-                    f"SELECT id, name, version_id FROM domains WHERE id IN ({ph})", list(new_d_ids)
+                    f"SELECT id, name, code, version_id FROM domains WHERE id IN ({ph})", list(new_d_ids)
                 ).fetchall()
                 for r in rows:
                     domains.append({
-                        'id': r[0], 'name': r[1], 'version_id': r[2],
+                        'id': r[0], 'name': r[1], 'code': r[2], 'version_id': r[3],
                         'is_included_via_relationship': True,
                     })
             logger.info(
@@ -1473,31 +1554,119 @@ def get_architecture_preview():
             external_bo_ids = referenced_bo_ids - existing_bo_ids
             if external_bo_ids:
                 placeholders = ','.join('?' * len(external_bo_ids))
+                # [V1.2.5 2026-06-17] LEFT JOIN SM→SD→D 链路获取 effective domain/sub_domain
+                # 原 bug: 外部 BO (version 1) 的 domain_id/sub_domain_id 为 NULL,
+                #   导致前端 availableDomains/availableSubDomains 无法包含外域容器名称,
+                #   颜色配置中缺少外域领域/子领域选项
+                # 逻辑: BO.domain_id 有值 → 直接用; 为 NULL → 通过 SM.sub_domain_id → SD → D 反推
                 ext_rows = _ds.execute(
-                    f"""SELECT id, code, name, domain_id, sub_domain_id,
-                               service_module_id, visibility
-                        FROM business_objects WHERE id IN ({placeholders})""",
+                    f"""SELECT bo.id, bo.code, bo.name, bo.domain_id, bo.sub_domain_id,
+                               bo.service_module_id, bo.visibility,
+                               COALESCE(bo.sub_domain_id, sd_chain.id) as effective_sub_domain_id,
+                               COALESCE(bo.domain_id, d_chain.id) as effective_domain_id,
+                               sd_chain.name as effective_sub_domain_name,
+                               d_chain.name as effective_domain_name,
+                               sm.name as service_module_name,
+                               sm.code as service_module_code
+                        FROM business_objects bo
+                        LEFT JOIN service_modules sm ON bo.service_module_id = sm.id
+                        LEFT JOIN sub_domains sd_chain ON sm.sub_domain_id = sd_chain.id
+                        LEFT JOIN domains d_chain ON sd_chain.domain_id = d_chain.id
+                        WHERE bo.id IN ({placeholders})""",
                     list(external_bo_ids)
                 ).fetchall()
+                # [V1.2.7 2026-06-17] 对同 code 的外部 BO, 优先使用当前 version 的 BO
+                # 原 bug: 关系引用 version 1 的 BO (如 BO#8 BO_INVENTORY, domain=采购管理),
+                #   但 version 764 有同名 BO (如 BO#474, domain=库存管理x),
+                #   V1.1.11 只添加 version 1 的, 导致 domain_name 不对 → posX 错误 + 统计不准
+                # 修复: 先收集所有外部 BO 的 code, 再从当前 version 查找同名 BO 替换
+                ext_bo_codes = set()
+                for row in ext_rows:
+                    if row[1]:
+                        ext_bo_codes.add(row[1])
+                # 查找当前 version 中同 code 的 BO
+                version_bo_map = {}  # code → row (from current version)
+                if ext_bo_codes:
+                    vph = ','.join('?' * len(ext_bo_codes))
+                    version_id_val = version_id
+                    # [V1.2.7] 修复: version 764 的 BO domain_id/sub_domain_id 可能为 NULL,
+                    # 需要走 SM→SD→D 链路反推 (与 V1.2.5 ext_rows 查询一致)
+                    version_rows = _ds.execute(
+                        f"""SELECT bo.id, bo.code, bo.name, bo.domain_id, bo.sub_domain_id,
+                                   bo.service_module_id, bo.visibility,
+                                   COALESCE(bo.sub_domain_id, sd_chain.id) as effective_sub_domain_id,
+                                   COALESCE(bo.domain_id, d_chain.id) as effective_domain_id,
+                                   sd_chain.name as effective_sub_domain_name,
+                                   d_chain.name as effective_domain_name,
+                                   sm.name as service_module_name,
+                                   sm.code as service_module_code
+                            FROM business_objects bo
+                            LEFT JOIN service_modules sm ON bo.service_module_id = sm.id
+                            LEFT JOIN sub_domains sd_chain ON sm.sub_domain_id = sd_chain.id
+                            LEFT JOIN domains d_chain ON sd_chain.domain_id = d_chain.id
+                            WHERE bo.code IN ({vph}) AND bo.version_id = ?""",
+                        list(ext_bo_codes) + [version_id_val]
+                    ).fetchall()
+                    for vr in version_rows:
+                        if vr[1]:
+                            version_bo_map[vr[1]] = vr
                 # 收集外部 BO 涉及的层级 id (用于 V1.1.12 补外部容器)
                 ext_domain_ids = set()
                 ext_sd_ids = set()
                 ext_sm_ids = set()
+                # [V1.2.6] 去重: 如果 business_objects 中已有同 code 的 BO, 不再添加
+                # [V1.2.7] 优先使用当前 version 的 BO (domain_name 更准确)
+                existing_bo_codes = {b.get('code') for b in business_objects if b.get('code')}
+                added_codes = set()
                 for row in ext_rows:
-                    bo = {
-                        'id': row[0],
-                        'code': row[1],
-                        'name': row[2],
-                        'domain_id': row[3],
-                        'sub_domain_id': row[4],
-                        'service_module_id': row[5],
-                        'visibility': row[6],
-                        'is_external': True,  # 标记: 仅上下文可见, 详情受 dim scope 控制
-                    }
+                    bo_code = row[1]
+                    # [V1.2.7] 如果当前 version 有同名 BO, 优先用它
+                    if bo_code and bo_code in version_bo_map:
+                        vr = version_bo_map[bo_code]
+                        eff_domain_id = vr[7] or vr[3]
+                        eff_sub_domain_id = vr[8] or vr[4]
+                    else:
+                        eff_domain_id = row[7] if row[7] else row[3]
+                        eff_sub_domain_id = row[8] if row[8] else row[4]
+                    # 收集层级 id (无论是否跳过, 都需要用于容器补全)
+                    if eff_domain_id: ext_domain_ids.add(eff_domain_id)
+                    if eff_sub_domain_id: ext_sd_ids.add(eff_sub_domain_id)
+                    sm_id = (version_bo_map.get(bo_code, [None])[5]
+                             if bo_code and bo_code in version_bo_map else row[5])
+                    if sm_id: ext_sm_ids.add(sm_id)
+                    # 去重: 已有同 code 的 BO 或本次已添加同 code 的 BO, 跳过
+                    if (bo_code and bo_code in existing_bo_codes) or (bo_code and bo_code in added_codes):
+                        continue
+                    # 构造 BO dict: 优先用 version 764 的数据
+                    if bo_code and bo_code in version_bo_map:
+                        vr = version_bo_map[bo_code]
+                        bo = {
+                            'id': vr[0], 'code': vr[1], 'name': vr[2],
+                            'domain_id': vr[8] or vr[3],
+                            'sub_domain_id': vr[7] or vr[4],
+                            'service_module_id': vr[5],
+                            'visibility': vr[6],
+                            'domain_name': vr[10] or '',
+                            'sub_domain_name': vr[9] or '',
+                            'service_module_name': vr[11] or '',
+                            'service_module_code': vr[12] or '',
+                            'is_external': True,
+                        }
+                    else:
+                        bo = {
+                            'id': row[0], 'code': row[1], 'name': row[2],
+                            'domain_id': eff_domain_id,
+                            'sub_domain_id': eff_sub_domain_id,
+                            'service_module_id': row[5],
+                            'visibility': row[6],
+                            'domain_name': row[10] or '',
+                            'sub_domain_name': row[9] or '',
+                            'service_module_name': row[11] or '',
+                            'service_module_code': row[12] or '',
+                            'is_external': True,
+                        }
                     business_objects.append(bo)
-                    if bo['domain_id']: ext_domain_ids.add(bo['domain_id'])
-                    if bo['sub_domain_id']: ext_sd_ids.add(bo['sub_domain_id'])
-                    if bo['service_module_id']: ext_sm_ids.add(bo['service_module_id'])
+                    if bo_code: added_codes.add(bo_code)
                 logger.info(
                     f'[v1.1.11] chart view external BO nodes: '
                     f'external_added={len(external_bo_ids)} total_now={len(business_objects)}'
@@ -1530,51 +1699,93 @@ def get_architecture_preview():
                 need_sm = cur_referenced_sm_ids - existing_module_ids_set
                 need_sd = cur_referenced_sub_domain_ids - existing_sd_ids_set
                 need_d = cur_referenced_domain_ids - existing_domain_ids_set
+
+                # [V1.2.4 2026-06-17] Phase 1: 添加外部 SM, 并从 SM 反推 SD → D
+                # 原 bug: 外部 BO (version 1) 的 domain_id/sub_domain_id 为 NULL,
+                #   V1.1.12 只从 BO 的 domain_id/sub_domain_id 收集, 无法发现外部容器。
+                #   但外部 BO 有 service_module_id, 添加外部 SM 后可从 SM.sub_domain_id
+                #   反推 SD → D, 完成容器链补全。
+                if need_sm:
+                    ph_sm = ','.join('?' * len(need_sm))
+                    # [V1.2.8] 补全外部 SM 的 code + domain_name/sub_domain_name
+                    sm_rows = _ds.execute(
+                        f"""SELECT sm.id, sm.name, sm.code, sm.sub_domain_id,
+                                   sd.name as sub_domain_name,
+                                   d.name as domain_name,
+                                   d.id as domain_id
+                            FROM service_modules sm
+                            LEFT JOIN sub_domains sd ON sm.sub_domain_id = sd.id
+                            LEFT JOIN domains d ON sd.domain_id = d.id
+                            WHERE sm.id IN ({ph_sm})""",
+                        list(need_sm)
+                    ).fetchall()
+                    for r in sm_rows:
+                        modules.append({
+                            'id': r[0], 'name': r[1], 'code': r[2] or '',
+                            'sub_domain_id': r[3],
+                            'sub_domain_name': r[4] or '',
+                            'domain_name': r[5] or '',
+                            'domain_id': r[6],
+                            'is_external': True,
+                        })
+                        # [V1.2.4] 从 SM 的 sub_domain_id 反推 SD
+                        if r[3]:
+                            cur_referenced_sub_domain_ids.add(r[3])
+
+                # [V1.2.4] Phase 2: 从反推的 sub_domain_ids 补外部 SD, 再从 SD 反推 D
+                need_sd = cur_referenced_sub_domain_ids - existing_sd_ids_set
+                if need_sd:
+                    ph_sd = ','.join('?' * len(need_sd))
+                    # [V1.2.8] 补全外部 SD 的 code + domain_name
+                    sd_rows = _ds.execute(
+                        f"""SELECT sd.id, sd.name, sd.code, sd.domain_id,
+                                   d.name as domain_name
+                            FROM sub_domains sd
+                            LEFT JOIN domains d ON sd.domain_id = d.id
+                            WHERE sd.id IN ({ph_sd})""",
+                        list(need_sd)
+                    ).fetchall()
+                    for r in sd_rows:
+                        sub_domains.append({
+                            'id': r[0], 'name': r[1], 'code': r[2] or '',
+                            'domain_id': r[3],
+                            'domain_name': r[4] or '',
+                            'is_external': True,
+                        })
+                        # [V1.2.4] 从 SD 的 domain_id 反推 D
+                        if r[3]:
+                            cur_referenced_domain_ids.add(r[3])
+
+                # [V1.2.4] Phase 3: 从反推的 domain_ids 补外部 Domain
+                need_d = cur_referenced_domain_ids - existing_domain_ids_set
+                if need_d:
+                    ph_d = ','.join('?' * len(need_d))
+                    # [V1.2.8] 补全外部 Domain 的 code
+                    d_rows = _ds.execute(
+                        f"SELECT id, name, code, version_id FROM domains WHERE id IN ({ph_d})",
+                        list(need_d)
+                    ).fetchall()
+                    for r in d_rows:
+                        domains.append({
+                            'id': r[0], 'name': r[1], 'code': r[2] or '',
+                            'version_id': r[3],
+                            'is_external': True,
+                        })
+
                 if need_sm or need_sd or need_d:
-                    # [V1.1.12] module_result.data 已被 dim scope 过滤, 没有外部容器数据
-                    # 必须用 raw SQL 拉 (绕过 DataPermissionInterceptor)
-                    if need_sm:
-                        ph_sm = ','.join('?' * len(need_sm))
-                        sm_rows = _ds.execute(
-                            f"SELECT id, name, sub_domain_id FROM service_modules WHERE id IN ({ph_sm})",
-                            list(need_sm)
-                        ).fetchall()
-                        for r in sm_rows:
-                            modules.append({
-                                'id': r[0], 'name': r[1], 'sub_domain_id': r[2],
-                                'is_external': True,
-                            })
-                    if need_sd:
-                        ph_sd = ','.join('?' * len(need_sd))
-                        sd_rows = _ds.execute(
-                            f"SELECT id, name, domain_id FROM sub_domains WHERE id IN ({ph_sd})",
-                            list(need_sd)
-                        ).fetchall()
-                        for r in sd_rows:
-                            sub_domains.append({
-                                'id': r[0], 'name': r[1], 'domain_id': r[2],
-                                'is_external': True,
-                            })
-                    if need_d:
-                        ph_d = ','.join('?' * len(need_d))
-                        d_rows = _ds.execute(
-                            f"SELECT id, name, version_id FROM domains WHERE id IN ({ph_d})",
-                            list(need_d)
-                        ).fetchall()
-                        for r in d_rows:
-                            domains.append({
-                                'id': r[0], 'name': r[1], 'version_id': r[2],
-                                'is_external': True,
-                            })
                     logger.info(
-                        f'[v1.1.12] chart view external containers: '
-                        f'need_domains={len(need_d)} need_sd={len(need_sd)} need_sm={len(need_sm)} '
-                        f'added={sum([len(need_d) if need_d else 0, len(need_sd) if need_sd else 0, len(need_sm) if need_sm else 0])}'
+                        f'[v1.1.12+V1.2.4] chart view external containers: '
+                        f'added_sm={len(need_sm) if need_sm else 0} '
+                        f'added_sd={len(need_sd) if need_sd else 0} '
+                        f'added_d={len(need_d) if need_d else 0}'
                     )
         except Exception as e:
             logger.warning(f'[bo_api.get_architecture_preview] external BO/containers ref fetch failed: {e}')
 
         # 计算 center_scope（中心范围的 BO code 列表）
+        # [V1.2.9 修复] 无显式 hierarchyFilter 时，基于 dim scope 过滤后的 domains 计算
+        # 之前：无 domain_id_list 等参数时 center_scope 为空，导致所有关系被标为 internal
+        # 修复：用 DataPermissionInterceptor 过滤后的 domain ids 作为 fallback
         center_scope = []
         if bo_id_list:
             center_scope = [b.get('code', '') for b in business_objects if b.get('id') in bo_id_list]
@@ -1584,6 +1795,11 @@ def get_architecture_preview():
             center_scope = [b.get('code', '') for b in business_objects if b.get('sub_domain_id') in sub_domain_id_list]
         elif domain_id_list:
             center_scope = [b.get('code', '') for b in business_objects if b.get('domain_id') in domain_id_list]
+        else:
+            # [V1.2.9] 无显式过滤参数时，dim scope 过滤后的 domains 即为中心范围
+            # DataPermissionInterceptor 已按用户 dim scope 过滤了 domains
+            # 非 is_external 的 BO 都在用户 dim scope 内，即中心范围
+            center_scope = [b.get('code', '') for b in business_objects if not b.get('is_external')]
 
         # ── Relation Classification（scope_type + category_type 下沉到后端）──
         # 构建 BO id → {domain_id, sub_domain_id, service_module_id} 映射
@@ -1653,6 +1869,14 @@ def get_architecture_preview():
 
             rel['scope_type'] = scope_type
             rel['category_type'] = category_type
+
+        # [V1.2.4→V1.2.9] 过滤 external 关系（对象范围外）
+        # DataPermissionInterceptor V1.2.9 已过滤权限域外关系（source 和 target 都不在 dim scope 内）
+        # 这里过滤的是对象范围外关系（source 和 target 都不在 center_scope 内）
+        # 两层过滤互补:
+        #   - 权限域外: source 和 target 都不在 dim scope (如库存管理→销售管理, 对采购管理用户)
+        #   - 对象范围外: source 和 target 都不在 center_scope (如跨权限域但不在选中范围内)
+        relationships = [r for r in relationships if r.get('scope_type') != 'external']
 
         return jsonify({
             'success': True,

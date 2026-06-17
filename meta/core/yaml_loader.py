@@ -302,7 +302,10 @@ def parse_semantics(data: Dict[str, Any]) -> SemanticAnnotation:
         parent_key_display=data.get("parent_key_display", False),
         mandatory=data.get("mandatory", False),
         readonly_always=data.get("readonly_always", False),
-        # [NEW 2026-06-14 BMRD] 父对象 FK 编码显示字段 (如 relationship.source_bo_code) — parent_key_display 已在 L302 加载, 此处不再重复
+        # [NEW v1.2.3 2026-06-17] Excel 模板专用标记
+        parent_key_template_editable=data.get("parent_key_template_editable", ""),
+        # [NEW 2026-06-14 BMRD] 父对象 FK 编码显示字段 (如 relationship.source_bo_code)
+        # NOTE: parent_key_display 已在 L302 加载, 此处不再重复
         context_field=data.get("context_field", False),
         search_help_for=data.get("search_help_for", None),
         resolve_from_field=data.get("resolve_from_field", ""),
@@ -439,6 +442,9 @@ def parse_value_help(data: Dict[str, Any]) -> Optional["ValueHelpConfig"]:
                 apply_target_permissions=sd.get("apply_target_permissions", True),
                 endpoint=sd.get("endpoint", ""),
                 params=sd.get("params", {}),
+                write_scope_policy=sd.get("write_scope_policy", "none"),
+                scope_group=sd.get("scope_group"),
+                scope_inherit_from=sd.get("scope_inherit_from"),
             )
 
         behavior = None

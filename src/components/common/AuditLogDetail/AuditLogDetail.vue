@@ -38,12 +38,12 @@
 
       <!-- [DECORATIVE] FR-LOG-009: Action Kind Panel -->
       <div v-if="log.action_kind" class="ald-action-kind-panel">
-        <h4 class="ald-section-title">Action 类型</h4>
+        <h4 class="ald-section-title">操作类型</h4>
         <el-tag :type="log.action_kind === 'instance' ? 'primary' : 'info'" size="default">
-          {{ log.action_kind === 'instance' ? '[DECORATIVE] InstanceAction' : '[SYMBOL] StaticAction' }}
+          {{ log.action_kind === 'instance' ? '实例操作' : '静态操作' }}
         </el-tag>
         <span class="ald-action-kind-hint">
-          {{ log.action_kind === 'instance' ? '此 action 绑定到具体对象实例' : '此 action 不绑定实例' }}
+          {{ log.action_kind === 'instance' ? '此操作绑定到具体对象实例' : '此操作不绑定实例' }}
         </span>
       </div>
 
@@ -63,11 +63,11 @@
       <div v-if="hasRelatedEvents" class="ald-related-panel">
         <AppCollapse title="相关操作" :default-expanded="false">
           <div v-if="log.parent_action_id" class="ald-related-section">
-            <strong>父操作</strong> (id={{ log.parent_action_id }})
+            <strong>父操作</strong>
           </div>
           <div v-if="relatedHeader" class="ald-related-header">
-            <span class="ald-related-action">{{ relatedHeader.action }}</span>
-            <span class="ald-related-object">{{ relatedHeader.object_type }}#{{ relatedHeader.object_id }}</span>
+            <span class="ald-related-action">{{ formatAction(relatedHeader.action) }}</span>
+            <span class="ald-related-object">{{ getObjectTypeLabel(relatedHeader.object_type) }}</span>
           </div>
           <div v-if="relatedChildren.length > 0" class="ald-related-children">
             <strong>子操作</strong> ({{ relatedChildren.length }}):
@@ -75,9 +75,9 @@
               <li v-for="child in relatedChildren" :key="child.id"
                   @click="emit('update:visible', false); emit('selectLog', child)"
                   class="ald-related-item">
-                <span class="ald-related-action">{{ child.action }}</span>
-                <span class="ald-related-object">{{ child.object_type }}#{{ child.object_id }}</span>
-                <el-tag size="small" :type="getChildOutcomeType(child.outcome)">{{ child.outcome }}</el-tag>
+                <span class="ald-related-action">{{ formatAction(child.action) }}</span>
+                <span class="ald-related-object">{{ getObjectTypeLabel(child.object_type) }}</span>
+                <el-tag size="small" :type="getChildOutcomeType(child.outcome)">{{ formatOutcome(child.outcome) }}</el-tag>
               </li>
             </ul>
           </div>
@@ -151,7 +151,7 @@
 <script setup>
 import { computed } from 'vue'
 import { dateFormatService } from '@/services/DateFormatService'
-import { getObjectTypeLabel, getUserNameDisplay, isInternalField, isInternalAction } from '@/utils/auditLogFormat'
+import { getObjectTypeLabel, getUserNameDisplay, isInternalField, isInternalAction, getFieldLabel, getFieldValueDisplay, getActionLabel } from '@/utils/auditLogFormat'
 
 const props = defineProps({
   visible: {
@@ -185,6 +185,15 @@ function getChildOutcomeType(outcome) {
   if (outcome === 'failure') return 'danger'
   if (outcome === 'denied') return 'warning'
   return 'info'
+}
+
+function formatAction(action) {
+  return getActionLabel(action)
+}
+
+function formatOutcome(outcome) {
+  const map = { success: '成功', failure: '失败', denied: '已拒绝', retry: '重试中' }
+  return map[outcome] || outcome || '未知'
 }
 
 const actionClass = computed(() => {
@@ -222,22 +231,22 @@ const outcomeTagType = computed(() => {
 
 const outcomeIcon = computed(() => {
   const o = props.log?.outcome
-  if (o === 'success') return '[OK]'
-  if (o === 'failure') return '[X]'
-  if (o === 'denied') return '[SYMBOL]'
-  if (o === 'retry') return '[REFRESH]'
-  return '[SYMBOL]'
+  if (o === 'success') return '✓'
+  if (o === 'failure') return '✗'
+  if (o === 'denied') return '⊘'
+  if (o === 'retry') return '↻'
+  return '·'
 })
 
 const outcomeLabel = computed(() => {
   const o = props.log?.outcome
   const map = {
-    'success': 'SUCCESS',
-    'failure': 'FAILURE',
-    'denied': 'DENIED',
-    'retry': 'RETRY',
+    'success': '成功',
+    'failure': '失败',
+    'denied': '已拒绝',
+    'retry': '重试中',
   }
-  return map[o] || o?.toUpperCase() || 'UNKNOWN'
+  return map[o] || o || '未知'
 })
 
 const formattedTime = computed(() => {
@@ -249,7 +258,16 @@ const formattedTime = computed(() => {
 
 const changes = computed(() => {
   if (!props.log?.changes && !props.log?.field_changes) return []
-  return props.log.changes || props.log.field_changes || []
+  const raw = props.log.changes || props.log.field_changes || []
+  // 过滤技术字段 + 翻译字段名和值
+  return raw
+    .filter(c => !isInternalField(c.field))
+    .map(c => ({
+      ...c,
+      field_label: getFieldLabel(c.field),
+      old_value: getFieldValueDisplay(c.old_value, c.field),
+      new_value: getFieldValueDisplay(c.new_value, c.field),
+    }))
 })
 
 function handleClose() {
