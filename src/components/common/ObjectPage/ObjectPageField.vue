@@ -16,7 +16,10 @@
       >
         {{ getEnumLabel(fieldKey, formData[fieldKey]) }}
       </el-tag>
-      <span v-else class="op-field-value">{{ formatReadValue(fieldKey) }}</span>
+      <span
+        v-else
+        :class="['op-field-value', isBusinessKey(fieldKey) && 'op-field-value--primary']"
+      >{{ formatReadValue(fieldKey) }}</span>
     </template>
 
     <ValueHelpField
@@ -282,6 +285,12 @@ function getFieldLabel(key) {
   return def?.label || key
 }
 
+// [FIX 2026-06-16] 业务键(主key) 标识：DetailPage.computedFieldDefs 透传 business_key=true，
+//   用于 view 模式下让主key 字段值用 YonDesign primary 橙色显示
+function isBusinessKey(key) {
+  return props.fieldDefs[key]?.business_key === true
+}
+
 function isRequired(key) {
   // [DECORATIVE] [NEW] v1.3 / FR-6.2: 优先走 useFieldPolicy.requiredMap（后端策略）
   if (props.fieldPolicy?.requiredMap?.value?.[key] !== undefined) {
@@ -488,7 +497,14 @@ function getValueHelpConfigWithFallback(key) {
   // 让 ValueHelpField 初始就有匹配当前 value 的 option
   const currentValue = props.formData?.[key]
   const displayKey = key + '_display'
-  const currentDisplay = props.formData?.[displayKey]
+  let currentDisplay = props.formData?.[displayKey]
+  // [FIX 2026-06-16] 对于 virtual FK 字段（如 source_domain_id），
+  // 后端返回的 display 字段是 source_domain_name 而非 source_domain_id_display
+  // 需要同时查找 _name 后缀的字段作为 fallback
+  if (!currentDisplay && key.endsWith('_id')) {
+    const nameKey = key.replace(/_id$/, '_name')
+    currentDisplay = props.formData?.[nameKey]
+  }
   if (currentValue == null || currentValue === '' || !currentDisplay) {
     return config
   }
@@ -579,6 +595,12 @@ function getFieldOptions(key) {
   text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 1.6;
+}
+
+/* [FIX 2026-06-16] 业务键(主key) 高亮：YonDesign primary 橙色，font-weight 500 */
+.op-field-value--primary {
+  color: var(--color-primary);
+  font-weight: 500;
 }
 
 /* [NEW 2026-06-10] KeyTemplate 状态指示器

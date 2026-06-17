@@ -68,13 +68,6 @@
       </div>
     </div>
 
-    <template #footer>
-      <AppButton variant="secondary" @click="handleClose">关闭</AppButton>
-      <AppButton variant="primary" @click="handleRefresh">
-        <AppIcon name="refresh" size="sm" />
-        刷新
-      </AppButton>
-    </template>
   </el-drawer>
 
   <div v-else class="detail-page detail-page--standalone">
@@ -406,7 +399,10 @@ const computedFieldDefs = computed(() => {
       immutable: isImmutable && !isAddMode,
       placeholder: f.ui?.placeholder || '',
       options: f.enum_values || f.options || undefined,
-      valueHelp
+      valueHelp,
+      // [FIX 2026-06-16] 把 business_key 透传给 fieldDefs，让 ObjectPageField
+      //   在 view 模式下能给业务键(主key) 加橙色高亮 (YonDesign primary)
+      business_key: isBusinessKey
     }
   }
   return defs
