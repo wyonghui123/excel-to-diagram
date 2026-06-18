@@ -133,7 +133,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, inject } from 'vue'
 import { useMessage } from '@/composables/useMessage'
 import { useCrudMessage } from '@/composables/useCrudMessage'
 import { useVersionContext } from '@/composables/useVersionContext'
@@ -144,6 +144,58 @@ import { objectTypeService } from '@/services/objectTypeService'
 import { AppButton } from '@/components/common/AppButton'
 import { AppIcon } from '@/components/common/AppIcon'
 import { ObjectPage } from '@/components/common/ObjectPage'
+
+// [L1 2026-06-18] 注入 refreshCoordinator，详情页与列表页共享刷新信号
+//   设计动机：metalist 稳定化（FR-005/FR-007）使用 refreshCoordinator 事件总线实现
+//   "保留状态 + 显式刷新"模式。详情页缺这套机制，导致：
+//     1) 列表页保存/删除后，详情页没有 trigger 接收
+//     2) 详情页的 association 子列表切 tab 后 stale
+//   L1 接入 coordinator；L2 让 ObjectPageContent 暴露 refreshAllSections()；
+//   L3 加 onActivated 保留状态（对齐 metalist FR-005）。
+const coordinator = inject('refreshCoordinator', null)
+
+// [L1] refreshKey：详情页用 objectType + id 区分实例。
+//   区别于 metalist 的 `list:${objectType}`（单 objectType 单实例），
+//   详情页可能同时打开同 objectType 的不同对象（如多 tab 浏览器），必须带 id。
+const coordinatorRefreshKey = computed(() =>
+  coordinator && props.id && props.id !== 'new' && !props.createMode
+    ? `detail:${props.objectType}:${props.id}`
+    : null
+)
+
+// [L1] 协调器回调：刷新当前详情对象（主数据 + 所有 association 子列表）
+async function coordinatorRefresh() {
+  try {
+    await handleRefresh({})
+  } catch (e) {
+    console.warn('[DetailPage] coordinatorRefresh handleRefresh error:', e)
+  }
+  if (objectPageRef.value?.refreshAllSections) {
+    try {
+      await objectPageRef.value.refreshAllSections()
+    } catch (e) {
+      console.warn('[DetailPage] coordinatorRefresh refreshAllSections error:', e)
+    }
+  }
+}
+
+// [L1] 协调器注册/注销：监听 objectType/id 变化时 re-register
+//   不在 standalone 创建模式注册（无效 id）；不在 main_content tab 隐藏时注册
+//   （onActivated 处理）。仅在详情页真正有数据时挂回调。
+let _registeredCoordinatorKey = null
+function syncCoordinatorRegistration() {
+  if (!coordinator) return
+  if (_registeredCoordinatorKey && _registeredCoordinatorKey !== coordinatorRefreshKey.value) {
+    coordinator.unregister(_registeredCoordinatorKey)
+    _registeredCoordinatorKey = null
+  }
+  if (coordinatorRefreshKey.value && !_registeredCoordinatorKey) {
+    coordinator.register(coordinatorRefreshKey.value, coordinatorRefresh)
+    _registeredCoordinatorKey = coordinatorRefreshKey.value
+    console.debug(`[DetailPage] coordinator registered: ${_registeredCoordinatorKey}`)
+  }
+}
+watch(coordinatorRefreshKey, syncCoordinatorRegistration)
 
 const { selectedVersionId } = useVersionContext()
 
@@ -848,6 +900,19 @@ onMounted(() => {
     fetchData()
   }
   loadEntityMeta()
+  // [L1 2026-06-18] 首次挂载时确保 coordinator 已注册
+  //   放在 onMounted 而非 setup top-level，是因为 coordinator 必须在 component setup
+  //   完成后才存在（provide 通常在父组件 setup 末尾）。watch(coordinatorRefreshKey)
+  //   会捕获后续变化。
+  syncCoordinatorRegistration()
+})
+
+onUnmounted(() => {
+  // [L1 2026-06-18] 组件销毁时注销 coordinator 回调，避免内存泄漏
+  if (coordinator && _registeredCoordinatorKey) {
+    coordinator.unregister(_registeredCoordinatorKey)
+    _registeredCoordinatorKey = null
+  }
 })
 
 watch(() => [props.objectType, props.id, props.mode, props.createMode, props.editMode], () => {
