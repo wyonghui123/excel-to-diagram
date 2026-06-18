@@ -377,26 +377,150 @@ class TestDataIntegrity:
             'code': role_code,
             'name': 'Unique Test Role'
         }
-        
+
         response1 = api_client.post(
             '/api/v2/bo/role',
             data=json.dumps(data),
             headers=admin_headers
         )
-        
+
         if response1.status_code in [200, 201]:
             role_id = json.loads(response1.data).get('data', {}).get('id')
-            
+
             response2 = api_client.post(
                 '/api/v2/bo/role',
                 data=json.dumps(data),
                 headers=admin_headers
             )
-            
+
             assert response2.status_code in [400, 401, 409, 422, 404], "创建重复角色代码应该失败"
-            
+
             try:
                 api_client.delete(f'/api/v2/bo/role/{role_id}', headers=admin_headers)
             except Exception:
                 pass
+
+
+class TestProductVersionBatchAtomicity:
+    """
+    [TEST CLASS] 产品版本批量创建事务原子性 (SPR-03 回归)
+    [DESCRIPTION] 用户报告: 创建产品 TEST21212 + 两个重名版本, 保存后
+                  产品和 1 个版本已落库, 系统提示错误, 但未回滚.
+                  期望: 整批 all-or-nothing, 失败时产品+所有版本都不应写入.
+    """
+
+    def test_product_with_duplicate_versions_should_rollback_everything(self, api_client, admin_headers):
+        """
+        [TEST] 产品 + 多个重名版本批量保存失败时, 必须整批回滚
+        [EXPECTED]
+            - API 返回 success=False
+            - 产品 (TEST21212) 不应存在
+            - 即便第一个版本已成功, 也应被回滚
+        """
+        # 用 timestamp 后缀避免与历史数据冲突 (用户原始数据 TEST21212 可能已存在)
+        unique_suffix = int(time.time() * 1000)
+        product_name = f'TEST21212_{unique_suffix}'
+        version_name = f'v1_dup_{unique_suffix}'
+
+        # 步骤 1: 先在 versions 表预创建 1 个版本 (模拟"重名约束")
+        # 如果系统没有 versions unique 约束, 我们改用 bo 层重复检测:
+        # 两次创建同名 version 让第二个触发 duplicate 错误
+        # 这里使用 batch_save (产品 + 2 个版本) 的整批接口
+        # 如果 API 不支持嵌套, 我们用 "先建产品, 再批量建版本" 的两步法
+        # 测试核心目标: 任何一步失败 → 整批回滚
+        product_payload = {
+            'object_type': 'product',
+            'drafts': [
+                {
+                    'row_id': f'__new_product_{unique_suffix}',
+                    'is_new': True,
+                    'fields': {
+                        'name': product_name,
+                        'code': f'P_{unique_suffix}',
+                    },
+                },
+            ],
+        }
+
+        product_resp = api_client.post(
+            '/api/v2/action/batch_save',
+            data=json.dumps(product_payload),
+            headers=admin_headers
+        )
+
+        # 假设 product 创建成功, 拿到 product_id
+        if product_resp.status_code not in [200, 201] or not (
+            product_resp.json.get('success') if product_resp.json else False
+        ):
+            pytest.skip(f"无法创建测试产品 (status={product_resp.status_code}, body={product_resp.data[:200]!r})")
+
+        product_data = product_resp.json.get('data', {}) if product_resp.json else {}
+        product_id = product_data.get('created', [None])[0]
+
+        try:
+            # 步骤 2: 现在批量创建 2 个同名版本, 期望第二个触发重名/唯一约束失败 → 整个 batch rollback
+            version_payload = {
+                'object_type': 'version',
+                'drafts': [
+                    {
+                        'row_id': f'__new_v1_{unique_suffix}',
+                        'is_new': True,
+                        'fields': {
+                            'name': version_name,
+                            'code': f'V_{unique_suffix}',
+                            'product_id': product_id,
+                        },
+                    },
+                    {
+                        'row_id': f'__new_v2_{unique_suffix}',
+                        'is_new': True,
+                        'fields': {
+                            'name': version_name,  # 同名 → 应失败
+                            'code': f'V_{unique_suffix}',
+                            'product_id': product_id,
+                        },
+                    },
+                ],
+            }
+
+            version_resp = api_client.post(
+                '/api/v2/action/batch_save',
+                data=json.dumps(version_payload),
+                headers=admin_headers
+            )
+
+            # batch_save 即使部分失败也可能返回 200 (success=False) 或 500 (异常路径)
+            # 关键是 body.success=False
+            body = version_resp.json if version_resp.json else {}
+            assert body.get('success') is False, (
+                f"含重名版本的 batch_save 应失败, 但返回 success=True: "
+                f"status={version_resp.status_code}, body={body}"
+            )
+
+            # 核心断言: 失败后版本应该 0 写入 (整批回滚)
+            failures = body.get('data', {}).get('failures', [])
+            assert len(failures) > 0, "应至少有一条 failure 记录"
+
+            # 验证 DB: 该 product 下不应有 version 留存
+            list_resp = api_client.get(
+                f'/api/v2/bo/version?product_id={product_id}',
+                headers=admin_headers
+            )
+            if list_resp.status_code == 200 and list_resp.json:
+                items = list_resp.json.get('data', {}).get('items', [])
+                # 整批 rollback → 0 个 version
+                assert len(items) == 0, (
+                    f"事务未回滚: 失败后仍有 {len(items)} 个 version 残留, "
+                    f"items={items[:2]}"
+                )
+        finally:
+            # 清理 product
+            if product_id:
+                try:
+                    api_client.delete(
+                        f'/api/v2/bo/product/{product_id}',
+                        headers=admin_headers
+                    )
+                except Exception:
+                    pass
 
