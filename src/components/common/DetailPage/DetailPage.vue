@@ -925,24 +925,70 @@ onUnmounted(() => {
 //   仅 console.debug 留痕，便于排查"为什么切回来不刷"。
 onActivated(() => {
   if (coordinatorRefreshKey.value) {
-    console.debug(`[DetailPage] onActivated: ${coordinatorRefreshKey.value}, state preserved (no auto-refresh)`)
+    console.debug(`[DetailPage] onActivated: ${coordinatorRefreshKey.value}, state preserved (no auto-refresh, internalEditing=${internalEditing.value})`)
   }
 })
 
-watch(() => [props.objectType, props.id, props.mode, props.createMode, props.editMode], () => {
-  metaLoaded.value = false
-  entityMeta.value = null
-  internalEditing.value = effectiveMode.value === 'add' || effectiveMode.value === 'edit'
-  if (effectiveMode.value === 'add') {
-    data.value = {}
-    if (selectedVersionId.value) {
-      data.value.version_id = selectedVersionId.value
-    }
-    loading.value = false
+// [FIX 2026-06-18] watch 触发时**不再粗暴重置 internalEditing**
+//   原 BUG：当用户切到编辑态（internalEditing=true）→ app 顶部 tab 切走再切回，
+//   route 变化触发 watch，effectiveMode 仍是 'view'，导致 internalEditing 被重置为 false，
+//   详情页"刷新成浏览态"。
+//
+//   现在的策略（三态判断）：
+//     1) 首次 mount (immediate)：由 setup 里的 `ref(effectiveMode.value === 'add' || 'edit')`
+//        正确初始化 internalEditing；watch 只记录日志，不重置。
+//     2) 旧 objectType 有效 → 新 objectType 变 undefined/null：用户在 app 顶部 tab 切走，
+//        保留 internalEditing 等所有状态，等待切回。
+//     3) 新 objectType 有效 + 与旧 objectType 不同：切换到不同对象，重置 internalEditing。
+//     4) 同一对象 mode 变化：仅当 effectiveMode 变为 'add'/'edit' 时进入编辑态；
+//        变 'view' 时保留 internalEditing（让用户主动取消）。
+watch(() => [props.objectType, props.id, props.mode, props.createMode, props.editMode], ([newObjectType, newId, newMode, newCreateMode, newEditMode], [oldObjectType, oldId, oldMode, oldCreateMode, oldEditMode]) => {
+  const isFirstRun = oldObjectType === undefined && oldId === undefined
+  if (isFirstRun) {
+    // 首次执行：setup 已正确初始化 internalEditing；onMounted 会处理数据加载
+    // 这里什么都不做，避免覆盖 internalEditing 和重复 fetch
+    console.debug('[DetailPage] watch (first run): internalEditing initialized by setup, will fetch in onMounted')
   } else {
-    fetchData()
+    const oldValid = !!(oldObjectType && oldId)
+    const newValid = !!(newObjectType && newId)
+
+    if (oldValid && !newValid) {
+      // 场景：用户在 app 顶部 tab 切走 (route 变化导致 objectType/id 变 undefined)
+      // → 保留所有状态，等待 onActivated 时恢复
+      console.debug('[DetailPage] watch (route left): preserve state, internalEditing=', internalEditing.value)
+    } else if (newValid && (newObjectType !== oldObjectType || newId !== oldId)) {
+      // 场景：切换到不同对象 → 重置 internalEditing
+      metaLoaded.value = false
+      entityMeta.value = null
+      internalEditing.value = effectiveMode.value === 'add' || effectiveMode.value === 'edit'
+      console.debug('[DetailPage] watch (new object): reset editing, internalEditing=', internalEditing.value)
+    } else {
+      // 场景：同一对象 mode/createMode/editMode 变化
+      //   - effectiveMode 变 'add'/'edit' → 进入编辑态
+      //   - effectiveMode 变 'view' → 保留 internalEditing
+      if (effectiveMode.value === 'add' || effectiveMode.value === 'edit') {
+        internalEditing.value = true
+      }
+      console.debug('[DetailPage] watch (same object, mode change): internalEditing=', internalEditing.value)
+    }
+
+    if (effectiveMode.value === 'add') {
+      data.value = {}
+      if (selectedVersionId.value) {
+        data.value.version_id = selectedVersionId.value
+      }
+      loading.value = false
+    } else if (oldValid && newValid) {
+      // 同一对象内的 mode 变化（如 view→edit）：不重新 fetch，避免丢失未保存编辑
+      // 真正"切到不同对象"已经走 newValid && newObjectType!==oldObjectType 分支，会在 onMounted 后由 onActivated 刷新
+    } else if (newValid) {
+      // 从切走状态切回：重新 fetch 最新数据
+      fetchData()
+    }
+    if (newValid) {
+      loadEntityMeta()
+    }
   }
-  loadEntityMeta()
 }, { immediate: true })
 
 watch(selectedVersionId, () => {
