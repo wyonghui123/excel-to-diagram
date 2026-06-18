@@ -1812,7 +1812,41 @@ class ActionExecutor:
                 pass
 
             from meta.services.async_audit_writer import async_audit_writer, AUDIT_ASYNC_ENABLED
-            if AUDIT_ASYNC_ENABLED and async_audit_writer._ds is not None:
+            # [FIX 2026-06-18] 事务期间强制同步写入:
+            # 当 self.ds.in_transaction=True 时, 不能用 async_audit_writer.
+            # 原因: async_audit_writer 用 worker thread + 独立 SQLite 连接
+            # 写 audit_logs, 这部分写入不在主事务范围内, 主事务 rollback
+            # 时 audit log 不会跟着回滚, 导致业务回滚但审计仍然存在
+            # (例如用户报告: TEST111 + 2 个同名 version, 失败时第 1 个
+            # version 的 audit log 仍然落库, 不符合 all-or-nothing).
+            # 事务内直接同步调用 audit_fn, 让 audit insert 加入当前
+            # 事务, 共享 commit/rollback 生命周期.
+            in_txn = False
+            try:
+                in_txn = bool(getattr(self.ds, 'in_transaction', False))
+            except Exception:
+                in_txn = False
+            if in_txn:
+                logger.debug(
+                    "[AuditLog] In transaction, writing audit synchronously "
+                    "(txn_id=%s) to ensure atomicity with business data",
+                    transaction_id,
+                )
+                try:
+                    audit_fn(
+                        trace_id=trace_id,
+                        transaction_id=transaction_id,
+                        user_id=user_id,
+                        user_name=user_name,
+                        ip_address=ip_address,
+                        user_agent=user_agent,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "[AuditLog] sync write inside transaction failed (will NOT fail business): %s",
+                        str(e),
+                    )
+            elif AUDIT_ASYNC_ENABLED and async_audit_writer._ds is not None:
                 async_audit_writer.submit(
                     audit_fn,
                     trace_id=trace_id,
@@ -2051,7 +2085,7 @@ class ActionExecutor:
                 )
             else:
                 # BO framework 失败 (例如权限被拒) - 不再静默回退到 raw SQL, 因为
-                # 那会导致 audit 不一致 (raw SQL 没 audit log, 但业务上字段已写?)
+                # 那会导致 audit 不一致 (raw SQL 没 audit log, 但业务上字段已写？)
                 # 实际上 _bo.update() 在 permission denied 时也会 fail 不写, 所以失败
                 # 是合理的, 应当冒泡
                 logger.warning(

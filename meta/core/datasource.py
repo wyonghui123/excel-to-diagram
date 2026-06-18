@@ -334,14 +334,28 @@ class DataSource(ABC):
     def transaction(self):
         """
         事务上下文管理器
-        
+
         用法:
             with data_source.transaction():
                 # 执行数据库操作
                 pass
-        
+
         自动处理提交和回滚
+
+        [SPR-04 2026-06-18] 嵌套事务守卫:
+            如果外层已经在事务中 (data_source.in_transaction=True), 不要
+            重复 begin_transaction / commit / rollback, 直接 yield 让内层
+            操作加入外层事务. 这是批量操作 all-or-nothing 的关键.
+
+            背景 bug: 之前在 batch_save 的共享事务中调 bo.create() →
+            PersistenceInterceptor → ActionExecutor._do_create() →
+            self.ds.transaction(), 内层 transaction() 会无条件 commit,
+            提前提交外层共享事务, 导致部分写入无法回滚.
         """
+        if self.in_transaction:
+            # 嵌套场景: 不做 begin/commit, 让操作加入外层事务
+            yield
+            return
         self.begin_transaction()
         try:
             yield
