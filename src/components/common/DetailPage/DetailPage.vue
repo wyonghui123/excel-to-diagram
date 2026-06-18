@@ -133,7 +133,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted, inject } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, onActivated, inject } from 'vue'
 import { useMessage } from '@/composables/useMessage'
 import { useCrudMessage } from '@/composables/useCrudMessage'
 import { useVersionContext } from '@/composables/useVersionContext'
@@ -912,6 +912,20 @@ onUnmounted(() => {
   if (coordinator && _registeredCoordinatorKey) {
     coordinator.unregister(_registeredCoordinatorKey)
     _registeredCoordinatorKey = null
+  }
+})
+
+// [L3 2026-06-18] 对齐 metalist FR-005：路由切回保留状态，不自动刷新
+//   设计动机：ObjectDetail 在 App.vue 的 cachedRouteNames 中（keep-alive），
+//   切走再回来时如果自动 fetchData 会导致：
+//     1) 闪烁（loading → data）
+//     2) 丢失未提交的编辑
+//     3) 丢失用户的滚动位置 / 选中项 / 折叠状态
+//   刷新由 coordinator 显式触发（boService 写后），或用户手动点刷新按钮。
+//   仅 console.debug 留痕，便于排查"为什么切回来不刷"。
+onActivated(() => {
+  if (coordinatorRefreshKey.value) {
+    console.debug(`[DetailPage] onActivated: ${coordinatorRefreshKey.value}, state preserved (no auto-refresh)`)
   }
 })
 
