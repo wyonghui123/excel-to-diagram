@@ -55,6 +55,7 @@
 
                   <AssociationSection
                     v-else-if="mainSection.type === 'association' || mainSection.type === 'annotation'"
+                    :ref="el => setAssociationRef(mainSection.key, el)"
                     :section="mainSection"
                     :object-type="objectType"
                     :object-id="objectId"
@@ -115,6 +116,7 @@
 
           <AssociationSection
             v-else-if="section.type === 'association' || section.type === 'annotation'"
+            :ref="el => setAssociationRef(section.key, el)"
             :section="section"
             :object-type="objectType"
             :object-id="objectId"
@@ -244,12 +246,24 @@ const instance = getCurrentInstance()
 const internalActiveTab = ref(null)
 
 const historyRefs = ref({})
+// [L2 2026-06-18 FIX] 跟踪 association/annotation section refs
+//   用于在 onTabChange 和 coordinator refresh 时调用 section.refresh()
+//   解决"详情页 v-show 切 tab 后子列表 stale"问题
+const associationRefs = ref({})
 
 function setHistoryRef(key, el) {
   if (el) {
     historyRefs.value[key] = el
   } else {
     delete historyRefs.value[key]
+  }
+}
+
+function setAssociationRef(key, el) {
+  if (el) {
+    associationRefs.value[key] = el
+  } else {
+    delete associationRefs.value[key]
   }
 }
 
@@ -344,7 +358,38 @@ function onTabChange(tabKey) {
       nextTick(() => historyRef.loadAuditLogs())
     }
   }
+  // [L2 2026-06-18 FIX] 切到 association/annotation tab 时刷新该 section 的子列表
+  //   原因：v-show 模式下 section 一直挂载，首次拿数据后不再重拉。
+  //   用户从该 tab 切走再切回看不到最新数据（除非手动点刷新）。
+  //   切 tab 触发 refresh() 与 history tab 的 loadAuditLogs() 行为一致。
+  if (section && (section.type === 'association' || section.type === 'annotation')) {
+    const assocRef = associationRefs.value[tabKey]
+    if (assocRef && typeof assocRef.refresh === 'function') {
+      // nextTick 等 v-show 切完 DOM，避免 section 内部读取 width=0 等导致计算错误
+      nextTick(() => {
+        try { assocRef.refresh() }
+        catch (e) { console.warn(`[ObjectPageContent] section refresh failed for "${tabKey}":`, e) }
+      })
+    }
+  }
   emit('tab-change', tabKey)
+}
+
+// [L2 2026-06-18 FIX] 给 DetailPage coordinator 调用的统一入口：
+//   刷新当前 ObjectPage 下所有 association/annotation section
+//   （避免 v-show 缓存导致 stale）。history section 由 HistorySection 自身
+//   监听 props 变化刷新，不需要在这里触发。
+async function refreshAllSections() {
+  const refs = Object.values(associationRefs.value).filter(Boolean)
+  if (refs.length === 0) return
+  // 并行刷新，不相互阻塞；任一失败不阻断其他
+  await Promise.allSettled(refs.map(r => {
+    if (typeof r.refresh === 'function') {
+      try { return Promise.resolve(r.refresh()) }
+      catch (e) { console.warn('[ObjectPageContent] refresh section error:', e); return Promise.resolve() }
+    }
+    return Promise.resolve()
+  }))
 }
 
 function getComponent(componentName) {
@@ -409,7 +454,11 @@ watch(() => [props.objectId, visibleSections.value], () => {
 
 defineExpose({
   internalActiveTab,
-  historyRefs
+  historyRefs,
+  // [L2 2026-06-18] L1 commit 注册的 coordinator 回调依赖此方法
+  //   调用场景：coordinator 触发 → DetailPage.coordinatorRefresh → objectPageRef.value.refreshAllSections()
+  refreshAllSections,
+  associationRefs
 })
 </script>
 
