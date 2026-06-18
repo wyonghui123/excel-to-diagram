@@ -30,12 +30,21 @@
         </div>
       </div>
 
+      <!--
+        [FIX 2026-06-18] v-if 用 detailPageEverMounted 标记，避免 app 顶部 tab 切走时 unmount
+          原因：原本 v-if="objectType && (id || mode === 'add')" 会在 route 变化
+          (objectType 变 undefined) 时 unmount DetailPage，再切回时 remount，
+          丢失 internalEditing 等所有内部状态。
+          修复：onMounted 设置 detailPageEverMounted=true，v-if 用这个标记；
+          ObjectDetailPage 自身被 keep-alive 缓存，detailPageEverMounted 不会重置，
+          因此切走再切回 DetailPage 不会被销毁。
+      -->
       <DetailPage
-        v-if="objectType && (id || mode === 'add')"
+        v-if="detailPageEverMounted"
         ref="detailPageRef"
-        :key="detailPageKey"
+        :key="detailPageMountKey"
         :object-type="objectType"
-        :id="id || 'new'"
+        :id="id || (mode === 'add' ? 'new' : null)"
         :mode="mode"
         :standalone="true"
         :hide-header="true"
@@ -109,10 +118,37 @@ const tabStore = useTabStore()
 const pageRef = ref(null)
 const detailPageRef = ref(null)
 
-const objectType = computed(() => route.params.objectType)
-const id = computed(() => route.params.id)
+// [FIX 2026-06-18] 关键修复：objectType/id 缓存上次的有效值
+//   原因：app 顶部 tab 切走时，route.params.objectType/id 变 undefined，
+//   切回时变回原值。如果直接用 computed 传给 DetailPage，watch 会把
+//   "undefined → 'product'" 判断为"切到不同对象"，导致 internalEditing 重置。
+//
+//   修复：route 切走时 objectType 变 undefined 不向下传；用 lastValidObjectType
+//   缓存上次的有效值，DetailPage 的 props 保持稳定，状态完整保留。
+//   真正"切到不同对象"靠 effectiveObjectType !== lastValidObjectType 判断。
+const rawObjectType = computed(() => route.params.objectType)
+const rawId = computed(() => route.params.id)
+const lastValidObjectType = ref(null)
+const lastValidId = ref(null)
+watch([rawObjectType, rawId], ([newType, newId]) => {
+  if (newType && newId) {
+    lastValidObjectType.value = newType
+    lastValidId.value = newId
+  }
+}, { immediate: true })
+const objectType = computed(() => lastValidObjectType.value || rawObjectType.value)
+const id = computed(() => lastValidId.value || rawId.value)
 const mode = computed(() => route.query.mode || 'view')
-const detailPageKey = ref(0)
+// [FIX 2026-06-18] 重命名为 detailPageMountKey：仅用于强制 remount DetailPage
+//   (PermissionConfigPanel saved 后)，平时稳定不变。
+//   之前叫 detailPageKey 时配合 v-if="objectType && (id || mode === 'add')"，
+//   在 app 顶部 tab 切走时 (route 变化 → id 变 undefined) 会 unmount DetailPage，
+//   切回时 remount 丢失 internalEditing 等内部状态。
+const detailPageMountKey = ref(0)
+// [FIX 2026-06-18] 首次 mount 后设为 true，v-if 用这个标记
+//   目的：ObjectDetailPage 被 keep-alive 缓存，detailPageEverMounted 不会重置，
+//   保证切走再切回时 DetailPage 不被销毁
+const detailPageEverMounted = ref(false)
 
 const entityMeta = ref(null)
 
@@ -269,7 +305,9 @@ function doClose() {
 }
 
 function handleRefresh() {
-  detailPageKey.value++
+  // [FIX 2026-06-18] PermissionConfigPanel saved 后强制 remount DetailPage
+  //   用作 mount key，递增触发组件重建 (注意：必须用 :key 才生效)
+  detailPageMountKey.value++
 }
 
 function handleDelete() {
@@ -297,6 +335,10 @@ onMounted(() => {
   window.addEventListener('keydown', handleKeydown)
   pageRef.value?.focus()
   loadEntityMeta()
+  // [FIX 2026-06-18] 首次 mount 后设置 detailPageEverMounted=true
+  //   之后 ObjectDetailPage 被 keep-alive 缓存，这个 ref 不会重置，
+  //   保证切走再切回时 v-if=true，DetailPage 不被销毁
+  detailPageEverMounted.value = true
 })
 
 onUnmounted(() => {
