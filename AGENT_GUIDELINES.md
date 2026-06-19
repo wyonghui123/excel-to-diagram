@@ -1,15 +1,17 @@
-# AGENT_GUIDELINES v3.20 (2026-06-19 升级)
+# AGENT_GUIDELINES v3.21 (2026-06-19 升级)
 
 > **多 Agent 并行开发铁律**
+> **v3.21 新增**：Bug Triage + Hotfix 工作流（发现 bug 怎么办）
 > **v3.20 新增**：端口隔离规范（解决"测试哪个版本"问题）
 
-## ⚠️ 你必须知道的 5 件事
+## ⚠️ 你必须知道的 6 件事
 
 1. **必须使用 worktree**（用 `agent_bootstrap.ps1`）
 2. **不要碰主工作树**（违反 L2 铁律）
 3. **不要碰 stash@{0}**（违反 L3 铁律）
 4. **测试用你的端口**（3011-3019，不用 3010）
 5. **commit 前必看 spec.md**
+6. **发现 bug 立即 triage**（P1/P2/P3/P4）
 
 ## 🚀 启动流程（30 秒）
 
@@ -73,6 +75,104 @@ python test.py --port 3011 --single <test_path>
 
 ### 详细规范
 见 [docs/port-isolation.md](file:///d:/filework/excel-to-diagram/docs/port-isolation.md)
+
+## 🐛 Bug Triage（v3.21 新增）
+
+### 核心问题
+多 agent 并行开发时，如果发现 bug 影响 main，**不能简单切换分支**：
+- 切换分支 = AI 上下文清零 = 重新解释代码库
+- 必须在独立 worktree 中做 hotfix
+
+### 决策树（30 秒评估）
+
+```
+发现 bug 影响 main
+       ↓
+   服务挂 / 数据丢失 / 安全问题？
+       ├─ YES → P1 Critical → 立即 hotfix（暂停 F1）
+       └─ NO ↓
+   主流程阻塞？
+       ├─ YES → P2 High → Parallel hotfix（不阻塞 F1）
+       └─ NO ↓
+   仅边缘场景？
+       ├─ YES → P3 Medium → Backlog
+       └─ NO → P4 Low → Backlog
+```
+
+### 工作流速查
+
+| 等级 | 响应时间 | 工作流 |
+|------|---------|--------|
+| **P1 Critical** | < 15 分钟 | 5 步 hotfix（暂停 F1）|
+| **P2 High** | < 1 小时 | 3 步并行 hotfix |
+| **P3 Medium** | < 1 天 | 1 步 backlog |
+| **P4 Low** | < 1 周 | 1 步 backlog |
+
+### P1 Critical（5 步）
+
+```powershell
+# 1. Stash F1 工作
+cd <F1-worktree>
+git stash push -u -m "F1-WIP"
+
+# 2. 创建 hotfix wt (基于 main)
+cd d:\filework\excel-to-diagram
+git worktree add -b hotfix/bug-X-2026-06-19 ..\hotfix-bug-X-worktree main
+
+# 3. Fix + test + commit (用端口 3011-3019)
+cd ..\hotfix-bug-X-worktree
+# ... 写 spec.md, 改代码, 测 ...
+
+# 4. Merge 到 main
+cd d:\filework\excel-to-diagram
+git merge --no-ff --autostash hotfix/bug-X-2026-06-19
+
+# 5. Rebase F1 + 恢复 stash
+cd <F1-worktree>
+git rebase main
+git stash pop
+```
+
+### P2 High（3 步并行）
+
+```powershell
+# 1. 创建 hotfix wt (不暂停 F1)
+cd d:\filework\excel-to-diagram
+git worktree add -b hotfix/bug-X-2026-06-19 ..\hotfix-bug-X-worktree main
+
+# 2. Fix + test + commit (与 F1 并行)
+cd ..\hotfix-bug-X-worktree
+
+# 3. F1 完成后: rebase
+cd <F1-worktree>
+git rebase main
+```
+
+### 自动 triage 工具
+
+```powershell
+# 交互式 triage (5 个问题, 自动判定 P1-P4)
+python scripts/bug_triage.py --interactive
+
+# 查看特定等级的 workflow
+python scripts/bug_triage.py --workflow P1
+
+# 列出当前所有 bug
+python scripts/bug_triage.py --list
+```
+
+### 详细规范
+见 [docs/hotfix-workflow.md](file:///d:/filework/excel-to-diagram/docs/hotfix-workflow.md)
+
+### 关键教训
+
+| 错误做法 | 正确做法 |
+|---------|---------|
+| 在 F1 wt 切换分支 | 创建独立 hotfix wt |
+| hotfix 基于 F1 分支 | 基于 main 创建 |
+| F1 + bug fix 混在一个 commit | 分离 commit, 分离 wt |
+| 用 main 端口 (3010) 测 hotfix | 用 agent 端口 (3011-3019) |
+| 跳过 spec.md 直接 hotfix | 始终写 spec.md (即使 hotfix) |
 
 ## 📋 启动检查清单
 
