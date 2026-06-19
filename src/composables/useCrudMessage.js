@@ -47,29 +47,39 @@ export function useCrudMessage() {
      * 保存成功（创建/更新统称）
      * @param {string} entity - 实体名称，如 '用户' / '角色' / '数据'
      */
-    saved: (entity = '数据') => message.success(`${entity}保存成功`),
+    saved: (entity = '数据') => message.success(`${entity}已保存`),
 
     /**
      * 创建成功
      */
-    created: (entity = '数据') => message.success(`${entity}创建成功`),
+    created: (entity = '数据') => message.success(`${entity}已创建`),
 
     /**
      * 更新成功
      */
-    updated: (entity = '数据') => message.success(`${entity}更新成功`),
+    updated: (entity = '数据') => message.success(`${entity}已更新`),
 
     /**
      * 删除成功
      */
-    deleted: (entity = '数据') => message.success(`${entity}删除成功`),
+    deleted: (entity = '数据') => message.success(`${entity}已删除`),
+
+    /**
+     * 启用成功
+     */
+    enabled: (entity = '数据') => message.success(`${entity}已启用`),
+
+    /**
+     * 禁用成功
+     */
+    disabled: (entity = '数据') => message.success(`${entity}已禁用`),
 
     /**
      * 状态变更成功
      * @param {string} action - 动作，如 '锁定' / '激活' / '启用'
      * @param {string} entity - 实体名称，如 '用户'
      */
-    stateChanged: (action, entity = '用户') =>
+    stateChanged: (action, entity = '数据') =>
       message.success(`${entity}已${action}`),
 
     /**
@@ -87,6 +97,16 @@ export function useCrudMessage() {
      */
     profileUpdated: () => message.success('个人信息已更新'),
 
+    /**
+     * 导入完成
+     */
+    imported: (count) => message.success(`导入完成，共处理 ${count} 条数据`),
+
+    /**
+     * 导出完成
+     */
+    exported: (count) => message.success(`已导出 ${count} 条数据`),
+
     // ===== 错误反馈 =====
 
     /**
@@ -96,13 +116,48 @@ export function useCrudMessage() {
      */
     error: (defaultMsg = '操作失败', err = null) => {
       const msg = extractErrorMessage(err, defaultMsg)
-      message.error(msg)
+      message.error(msg, err)
     },
 
     /**
      * 网络错误
      */
-    networkError: () => message.error('网络错误，请稍后重试'),
+    networkError: () => message.error('网络连接失败，请检查网络后重试'),
+
+    /**
+     * 加载失败
+     */
+    loadFailed: (entity = '数据') => message.error(`加载${entity}失败，请稍后重试`),
+
+    /**
+     * 保存失败
+     */
+    saveFailed: (entity = '数据') => message.error(`保存${entity}失败，请稍后重试`),
+
+    /**
+     * 创建失败
+     */
+    createFailed: (entity = '数据') => message.error(`创建${entity}失败，请稍后重试`),
+
+    /**
+     * 更新失败
+     */
+    updateFailed: (entity = '数据') => message.error(`更新${entity}失败，请稍后重试`),
+
+    /**
+     * 删除失败
+     */
+    deleteFailed: (entity = '数据') => message.error(`删除${entity}失败，请稍后重试`),
+
+    // ===== P3 长消息 =====
+
+    /**
+     * 长消息：主+副标题
+     * @param {string} title 主标题
+     * @param {string} subtitle 副标题
+     * @param {string} [type='info'] 类型
+     */
+    detail: (title, subtitle, type = 'info') => message.detail(title, subtitle, type),
 
     // ===== 透传 useMessage（向后兼容 + 特殊场景） =====
 

@@ -368,14 +368,14 @@ async function handleExportSync() {
 
     if (result.success) {
       const count = result.total_rows || 0
-      message.success(`导出成功，共 ${count} 条数据`)
+      message.success(`已导出 ${count} 条数据`)
       emit('success', { count })
       handleClose()
     } else {
-      message.error('导出失败', result)
+      message.error('导出失败，请稍后重试', result)
     }
   } catch (e) {
-    message.error('导出失败: ' + (e.message || '未知错误'), e)
+    message.error('导出失败：' + (e.message || '请稍后重试'), e)
   } finally {
     loading.value = false
   }
@@ -432,7 +432,7 @@ async function handleExportAsync() {
     const startResult = await boService.exportDataAsync(effectiveObjectType, params)
 
     if (!startResult.success) {
-      message.error('启动导出任务失败', startResult)
+      message.error('启动导出任务失败，请稍后重试', startResult)
       exporting.value = false
       return
     }
@@ -440,7 +440,7 @@ async function handleExportAsync() {
     const taskId = startResult.data.task_id
     await pollExportProgress(taskId, boService)
   } catch (e) {
-    message.error('导出失败: ' + (e.message || '未知错误'), e)
+    message.error('导出失败：' + (e.message || '请稍后重试'), e)
     exporting.value = false
   }
 }

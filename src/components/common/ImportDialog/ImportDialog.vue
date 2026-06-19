@@ -299,9 +299,9 @@
               <span>检测到级联失败</span>
             </div>
             <div class="cascade-failure-banner__detail">
-              主对象类型 <strong>{{ cascadeRootTypeName }}</strong> 有 {{ cascadeRootFailed }} 条导入失败，
-              导致依赖它的 <strong>{{ cascadeDependentCount }}</strong> 个下游对象类型全部失败
-              （共 <strong>{{ cascadeDependentFailed }}</strong> 条）。请先修复主对象类型的失败原因。
+              主要数据 <strong>{{ cascadeRootTypeName }}</strong> 有 {{ cascadeRootFailed }} 条导入失败，
+              导致依赖它的 <strong>{{ cascadeDependentCount }}</strong> 个下游数据全部失败
+              （共 <strong>{{ cascadeDependentFailed }}</strong> 条）。请先修复主要数据的失败原因。
             </div>
           </div>
 
@@ -1053,12 +1053,12 @@ async function startPreview() {
     if (result.success) {
       previewResult.value = result.data
     } else {
-      message.error('数据校验失败', result)
+      message.error('数据校验失败，请检查文件内容后重试', result)
       currentStep.value = 0
     }
   } catch (e) {
     clearInterval(progressInterval)
-    message.error('数据校验失败: ' + (e.message || '未知错误'), e)
+    message.error('数据校验失败：' + (e.message || '请检查文件内容后重试'), e)
     currentStep.value = 0
   } finally {
     previewing.value = false
@@ -1175,12 +1175,12 @@ async function downloadTemplate() {
       : [props.objectType]
     const result = await boService.downloadTemplate(types[0], { selected_types: types })
     if (result.success) {
-      message.success('模板下载成功')
+      message.success('模板已下载')
     } else {
-      message.error('模板下载失败', result)
+      message.error('模板下载失败，请稍后重试', result)
     }
   } catch (e) {
-    message.error('模板下载失败: ' + e.message, e)
+    message.error('模板下载失败：' + (e.message || '请稍后重试'), e)
   }
 }
 

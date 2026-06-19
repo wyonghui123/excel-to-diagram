@@ -119,7 +119,7 @@ async function submit() {
     } else {
       message.error(data.message || '添加失败')
     }
-  } catch (e) { message.error('网络错误') }
+  } catch (e) { message.error('批量添加权限失败，请检查网络后重试', e) }
   finally { submitting.value = false }
 }
 </script>

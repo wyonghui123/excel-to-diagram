@@ -1104,8 +1104,8 @@ async function fetchData(options = {}) {
     }
   } catch (e) {
     console.error('DetailPage fetchData error:', e)
-    error.value = '网络错误，请稍后重试'
-    message.error('网络错误，请稍后重试', 4000)
+    error.value = '加载详情数据失败，请稍后重试'
+    message.error('加载详情失败，请稍后重试', 4000)
   } finally {
     loading.value = false
   }
@@ -1165,7 +1165,7 @@ async function handleObjectPageAction({ action }) {
         try {
           const { ElMessageBox } = await import('element-plus')
           await ElMessageBox.confirm(
-            '子列表有未保存的修改，确定要放弃吗？',
+            '关联数据有未保存的修改，确定要放弃吗？',
             '提示',
             { type: 'warning', confirmButtonText: '放弃', cancelButtonText: '取消' }
           )
@@ -1270,7 +1270,7 @@ async function handleSave() {
           await objectPageRef.value.saveAllChildMetaLists()
         } catch (childError) {
           console.error('[DetailPage] Child MetaList save error:', childError)
-          message.warning('主对象已保存，但子列表部分保存失败', 4000)
+          message.warning('主要信息已保存，但部分关联数据保存失败，请刷新页面检查', 4000)
         }
       }
 
@@ -1326,15 +1326,15 @@ async function handleDelete() {
 
     const result = await boService.delete(props.objectType, props.id)
     if (result.success) {
-      message.success('删除成功')
+      message.deleted('记录')
       emit('delete')
       handleClose()
     } else {
-      message.error(result.message || '删除失败')
+      message.error(result.message || '删除失败，请稍后重试')
     }
   } catch (e) {
     if (e !== 'cancel') {
-      message.error('删除请求失败')
+      message.error('删除请求失败，请检查网络后重试')
     }
   }
 }

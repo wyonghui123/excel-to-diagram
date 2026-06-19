@@ -403,15 +403,15 @@ async function autoDerive() {
     const result = await permService.derivePermissions(props.roleId)
     if (result.success) {
       emit('auto-derived', result.data)
-      message.success(
-        `推导完成: ${result.data.recommended_menus?.length || 0} 个推荐菜单, ${result.data.derived_permissions?.length || 0} 项功能权限`
-      )
+      const menuCount = result.data.recommended_menus?.length || 0
+      const permCount = result.data.derived_permissions?.length || 0
+      message.detail('维度推荐完成', `${menuCount} 个推荐菜单，${permCount} 项功能权限`, 'success')
     } else {
-      message.error('自动推导失败', result)
+      message.error('自动推荐失败', result)
     }
   } catch (e) {
     console.error('Auto derive failed:', e)
-    message.error('自动推导失败', e)
+    message.error('自动推荐失败', e)
   } finally {
     autoDeriving.value = false
   }
@@ -447,11 +447,11 @@ async function saveDimensionScopes() {
   saving.value = true
   try {
     await saveDimensionScopesInternal()
-    message.success('维度范围保存成功')
+    message.saved('维度范围')
     emit('dimension-scopes-saved')
   } catch (e) {
     console.error('Save dimension scopes failed:', e)
-    message.error('保存维度范围失败', e)
+    message.error('保存维度范围失败：' + (e?.message || '请稍后重试'), e)
   } finally {
     saving.value = false
   }

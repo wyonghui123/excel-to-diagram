@@ -192,9 +192,9 @@ async function savePermissions() {
   saving.value = true
   try {
     await saveMenuPermissions()
-    message.success('权限保存成功')
+    message.saved('权限设置')
   } catch (error) {
-    message.error('权限保存失败')
+    message.error('保存权限设置失败：' + (error?.message || '请稍后重试'), error)
   } finally {
     saving.value = false
   }
@@ -203,9 +203,9 @@ async function savePermissions() {
 async function handleDeleteConditionRule(rule: any) {
   try {
     await deleteRule(rule.id)
-    message.success('条件规则删除成功')
+    message.deleted('条件规则')
   } catch (error) {
-    message.error('条件规则删除失败')
+    message.error('删除条件规则失败：' + (error?.message || '请稍后重试'), error)
   }
 }
 

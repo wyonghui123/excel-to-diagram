@@ -41,7 +41,7 @@
           </AppButton>
         </div>
         <div v-if="form.is_denied" class="level-hint-denied">
-          已启用「禁止权限」：权限级别被禁用（FR-009 禁止权优先原则）
+          已启用「禁止权限」：权限级别被禁用（禁止权限优先于所有授权）
         </div>
       </div>
 
@@ -53,7 +53,7 @@
             @change="onDeniedChange"
           />
           <span class="denied-label">禁止权限</span>
-          <span class="denied-hint">（禁止权优先原则：禁止权优先于所有授权，选中后此规则拒绝访问，权限级别无效）</span>
+          <span class="denied-hint">（禁止权限优先：禁止权限优先于所有授权，选中后此规则拒绝访问，权限级别无效）</span>
         </label>
       </div>
 
@@ -495,7 +495,7 @@ function onDeniedChange() {
   if (form.is_denied) {
     // 禁止权生效时 propagate_to_parents 无实际意义（拒绝不可能"可见"），但允许保留
     // 仅做一次温和提示
-    message.info('已启用禁止权限：此规则将拒绝所有匹配资源（禁止权优先）')
+    message.info('已启用禁止权限：匹配的数据将全部被拒绝，此规则优先级最高')
   }
 }
 
@@ -711,10 +711,10 @@ async function doPreview() {
     if (r.success) {
       previewResult.value = r.data
     } else {
-      message.error(r.message || '预览失败')
+      message.error(r.message || '预览规则失败，请稍后重试')
     }
   } catch (e) {
-    message.error('网络错误')
+    message.error('预览规则失败，请检查网络后重试', e)
   } finally {
     previewing.value = false
   }
@@ -738,10 +738,10 @@ async function handleSave() {
       emit('saved')
       emit('close')
     } else {
-      message.error(r.message || '添加失败')
+      message.error(r.message || '添加权限规则失败，请稍后重试')
     }
   } catch (e) {
-    message.error('网络错误')
+    message.error('添加权限规则失败，请检查网络后重试', e)
   } finally {
     saving.value = false
   }

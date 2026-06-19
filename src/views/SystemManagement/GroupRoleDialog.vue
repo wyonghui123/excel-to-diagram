@@ -118,7 +118,7 @@ async function handleSave() {
     emit('saved')
     emit('close')
   } catch (e) {
-    message.error('网络错误', e)
+    message.error('保存失败，请检查网络后重试', e)
   } finally {
     saving.value = false
   }

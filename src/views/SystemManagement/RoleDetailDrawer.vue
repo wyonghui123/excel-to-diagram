@@ -391,11 +391,11 @@ async function removeConditionRule(rule) {
         const r = await permService.deleteConditionRule(rule.id)
         if (r.success) {
           await loadConditionRules()
-          message.success('条件规则已删除')
+          message.deleted('条件规则')
         } else {
-          message.error(r.message || '删除失败')
+          message.error(r.message || '删除条件规则失败，请稍后重试')
         }
-      } catch (e) { message.error('网络错误') }
+      } catch (e) { message.error('删除条件规则失败，请检查网络后重试', e) }
       confirmState.value.visible = false
     }
   }
@@ -467,7 +467,10 @@ async function saveUnifiedPermissions() {
     if (r.success) {
       const syncedCount = r.data?.synced_permissions?.length || 0
       const permCount = permissions.length
-      message.success(`权限保存成功：${assignedCodes.length} 个菜单，${permCount > 0 ? `已处理 ${permCount} 项功能权限` : `已同步 ${syncedCount} 项功能权限`}`)
+      const subtitle = permCount > 0
+        ? `${assignedCodes.length} 个菜单，已处理 ${permCount} 项功能权限`
+        : `${assignedCodes.length} 个菜单，已同步 ${syncedCount} 项功能权限`
+      message.detail('权限已保存', subtitle, 'success')
       emit('updated')
       await loadUnifiedPermissions()
     } else {
@@ -475,7 +478,7 @@ async function saveUnifiedPermissions() {
     }
   } catch (e) {
     console.error('[saveUnifiedPermissions] error:', e)
-    message.error('网络错误')
+    message.error('保存权限失败，请检查网络后重试', e)
   } finally {
     saving.value = false
   }
@@ -530,7 +533,9 @@ async function handleDimensionScopesSaved() {
 }
 
 async function handleAutoDerived(result) {
-  message.success(`维度推导完成: ${result.recommended_menus?.length || 0} 个推荐菜单, ${result.derived_permissions?.length || 0} 项功能权限`)
+  const menuCount = result.recommended_menus?.length || 0
+  const permCount = result.derived_permissions?.length || 0
+  message.detail('维度推荐完成', `${menuCount} 个推荐菜单，${permCount} 项功能权限`, 'success')
   await loadUnifiedPermissions()
   await loadConditionRules()
   emit('updated')

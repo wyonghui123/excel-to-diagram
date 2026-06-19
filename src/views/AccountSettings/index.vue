@@ -644,12 +644,12 @@ async function savePreferences() {
       hourCycle: preferenceForm.hourCycle
     })
     if (success) {
-      message.success('偏好设置已保存')
+      message.saved('偏好设置')
     } else {
-      message.error('保存失败，请重试')
+      message.error('保存偏好设置失败，请稍后重试')
     }
   } catch (e) {
-    message.error('网络错误，请稍后重试')
+    message.error('保存偏好设置失败，请检查网络后重试', e)
   } finally {
     prefSubmitting.value = false
   }

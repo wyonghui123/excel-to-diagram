@@ -252,7 +252,7 @@ async function handleSave() {
     }
   } catch (error) {
     console.error('Failed to save role:', error)
-    message.error('保存失败')
+    message.error('保存角色失败：' + (error?.message || '请检查输入后重试'), error)
   } finally {
     isSaving.value = false
   }

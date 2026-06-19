@@ -4513,7 +4513,7 @@ class ImportExportService:
                                     "row": row_num,
                                     "field": field_label,
                                     "value": field_value_str,
-                                    "error": f"【枚举值无效】'{field_value_str}' 不是有效的 {field_label}，请检查枚举值配置"
+                                    "error": f"'{field_value_str}' 不是有效的 {field_label}，请从下拉列表中选择"
                                 })
                                 invalid_count += 1
                 
@@ -4545,7 +4545,7 @@ class ImportExportService:
                                     "row": row_num,
                                     "field": bk_field_names,
                                     "value": "",
-                                    "error": f"【业务关键字】{bk_field_names}为空，将由编码模板自动生成",
+                                    "error": f"编号为空，将由系统自动生成",
                                     "severity": "warning"
                                 })
                                 # warning 不计入 invalid_count，不阻止导入
@@ -4556,7 +4556,7 @@ class ImportExportService:
                                     "row": row_num,
                                     "field": bk_field_names,
                                     "value": "",
-                                    "error": "【业务关键字】新增必填"
+                                    "error": "编号不能为空，请填写"
                                 })
                                 invalid_count += 1
                     else:
@@ -4567,7 +4567,7 @@ class ImportExportService:
                                 "row": row_num,
                                 "field": bk_field_names,
                                 "value": composite_key.replace("||", " + "),
-                                "error": "【业务关键字】组合值重复：{0}".format(composite_key.replace("||", " + "))
+                                "error": "编号「{0}」已存在".format(composite_key.replace("||", " + "))
                             })
                             invalid_count += 1
                         else:
@@ -4586,7 +4586,7 @@ class ImportExportService:
                                         "row": row_num,
                                         "field": bk_field_names,
                                         "value": composite_key.replace("||", " + "),
-                                        "error": f"【业务关键字】数据库中已存在相同记录{version_hint}"
+                                        "error": f"编号「{composite_key.replace('||', ' + ')}」已存在{version_hint}，请使用更新模式或修改编号"
                                     })
                                     invalid_count += 1
                                     logger.warning(f"[Validate] 业务键冲突: {composite_key} (版本ID: {version_id})")
@@ -4670,8 +4670,8 @@ class ImportExportService:
                                         if not ref_record and not in_importing:
                                             field_label = source_field.name or source_field.id
                                             version_info = f"(版本ID: {version_id})" if version_id else ""
-                                            error_msg = f"【引用完整性】引用的 {ref_obj.name} '{source_value_str}' 不存在 {version_info}"
-                                            hint = f"请先导入 {ref_obj.name} 数据，或检查业务键 '{source_value_str}' 是否正确"
+                                            error_msg = f"所属{ref_obj.name}「{source_value_str}」不存在{version_info}，请先添加或检查编号是否正确"
+                                            hint = f"请先添加「{ref_obj.name}」数据，或检查编号「{source_value_str}」是否正确"
                                             errors.append({
                                                 "sheet": sheet["name"],
                                                 "row": row_num,
@@ -4694,7 +4694,7 @@ class ImportExportService:
                                 "row": row_num,
                                 "field": "操作模式",
                                 "value": operation_mode,
-                                "error": f"【新增限制】{obj_name} 当前不满足新增条件（addability 规则），无法新增"
+                                "error": f"当前状态下不能新增「{obj_name}」，请先满足新增条件后重试"
                             })
                             invalid_count += 1
                             continue  # 跳过后续 valid_count

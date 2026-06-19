@@ -293,14 +293,17 @@ async function handleSubmit() {
     }
 
     if (successCount > 0) {
-      message.success(`成功添加 ${successCount} 条权限${failCount > 0 ? `，${failCount} 条失败` : ''}`)
+      const subtitle = failCount > 0
+        ? `成功 ${successCount} 条，失败 ${failCount} 条`
+        : `共 ${successCount} 条`
+      message.detail('权限已添加', subtitle, 'success')
       emit('added')
       emit('close')
     } else {
       error.value = '添加失败，请重试'
     }
   } catch (e) {
-    message.error('网络错误')
+    message.error('添加权限失败，请检查网络后重试', e)
   } finally {
     submitting.value = false
   }
