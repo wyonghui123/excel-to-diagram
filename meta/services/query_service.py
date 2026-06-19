@@ -39,23 +39,47 @@ from meta.services.query.filter_utils import (
 
 logger = logging.getLogger(__name__)
 
-# [FIX 2026-06-17] 线程局部 user_id (供 async export/import 后台线程使用)
+# [FIX 2026-06-17] 线程局部 user (供 async export/import 后台线程使用)
 # flask.g 在子线程里不可访问, ImportExportService 在 _run_export 进入时设置本变量
+# [FIX v1.2.12 2026-06-17] 必须传完整 user dict (含 permissions), 否则 is_admin() 永远返回 False
+# 原因: is_admin(user) 检查 user['permissions'] 是否含 '*', 但 fallback 路径创建的 user dict
+# 只有 user_id 和 username, 没有 permissions, 导致 is_admin() 永远返回 False
+# 后果: admin 用户导出空 Excel (因为 data_permissions 过滤过窄)
 _thread_local = threading.local()
 
 
 def set_thread_user_id(user_id):
-    """[FIX 2026-06-17] 在当前线程设置 user_id (供 _apply_data_permission fallback 使用)"""
+    """[FIX 2026-06-17] 在当前线程设置 user_id (供 _apply_data_permission fallback 使用)
+
+    [DEPRECATED v1.2.12] 仅传 user_id 无法让 is_admin() 正确判断 admin 身份
+    新代码请用 set_thread_user(user_dict)
+    """
     _thread_local.user_id = user_id
+    _thread_local.user = None
+
+
+def set_thread_user(user):
+    """[NEW v1.2.12 2026-06-17] 在当前线程设置完整 user dict (含 permissions)
+
+    关键: 必须传 permissions 字段, 这样 is_admin(user) 才能正确判断 admin 身份
+    """
+    _thread_local.user = user
+    _thread_local.user_id = user.get('user_id') if user else None
 
 
 def clear_thread_user_id():
     """[FIX 2026-06-17] 清理当前线程的 user_id"""
     _thread_local.user_id = None
+    _thread_local.user = None
 
 
 def _get_thread_user_id():
     return getattr(_thread_local, 'user_id', None)
+
+
+def _get_thread_user():
+    """[NEW v1.2.12 2026-06-17] 获取线程局部完整 user dict"""
+    return getattr(_thread_local, 'user', None)
 
 
 def discover_analytics_fields(meta_obj: MetaObject) -> List[AnalyticsFieldInfo]:
@@ -1545,7 +1569,7 @@ class QueryService:
             #   不走 action_executor + DataPermissionInterceptor, 完全跳过 dimension scope
             #   导致 user 在 value-help 下拉里只能看到 data_permissions 表里的 explicit ids
             #   (例: TEST333 创建 RACE 领域后, 该条自动授予 admin → allowed_ids=[683])
-            #   但 dimension scope 派生 (例: 领域 in 采购管理) 应当覆盖更广范围 (410 条)
+            #   但 dimension scope 派生 (例: 领域 in 采购管理) 应当覆盖更大范围 (410 条)
             # 这里先调 DimensionScopeEngine, 跟 DataPermissionInterceptor._apply_dimension_scope_filter 一致
             if self._try_apply_dimension_scope(builder, user_id, object_type):
                 return

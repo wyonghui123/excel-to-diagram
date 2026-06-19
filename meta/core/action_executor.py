@@ -484,11 +484,16 @@ class ActionExecutor:
             if row:
                 bk_field_names = "、".join([f.name for f, v in bk_values])
                 bk_value_str = " + ".join([v for f, v in bk_values])
+                # [NEW v1.2.13 2026-06-19] 单字段时不显示"组合"
+                if len(bk_values) == 1:
+                    return ValidationMessageRegistry.get("validation.object.business_key_single",
+                                                          field_name=bk_values[0][0].name,
+                                                          value=bk_values[0][1])
                 return ValidationMessageRegistry.get("validation.object.business_key_composite",
                                                        field_names=bk_field_names, values=bk_value_str)
         except Exception:
             pass
-        
+
         return None
 
     def _find_by_key(self, object_type: str, key_field: str, key_value: Any,

@@ -38,23 +38,6 @@
           <p class="tip">请选择要导入的 Excel 文件，系统将自动校验数据格式</p>
         </div>
 
-        <!-- 多对象类型选择（从元数据驱动，仅单对象模式） -->
-        <div v-if="!multiTypeMode && cascadeChain.length > 1" class="object-type-selector">
-          <div class="object-type-selector__label">选择导入层级</div>
-          <div class="object-type-selector__items">
-            <el-checkbox
-              v-for="item in cascadeChain"
-              :key="item.field"
-              v-model="item.selected"
-              :disabled="item.level === 1"
-              class="object-type-checkbox"
-            >
-              {{ item.label }}
-              <span v-if="item.parentLabel" class="cascade-hint">← 依赖 {{ item.parentLabel }}</span>
-            </el-checkbox>
-          </div>
-        </div>
-
         <el-form label-width="100px">
           <el-form-item label="上传文件">
             <el-upload
@@ -131,38 +114,82 @@
             </template>
           </el-alert>
 
-          <div v-if="previewResult.sheets && previewResult.sheets.length > 0" class="sheets-info">
-            <h4 class="sheets-info__title">检测到的数据表：</h4>
-            <el-table :data="previewResult.sheets" size="small" border>
-              <el-table-column prop="name" label="Sheet名称" />
-              <el-table-column label="数据行数" width="100">
-                <template #default="{ row }">
-                  {{ row.row_count || row.rows || 0 }}
-                </template>
-              </el-table-column>
-              <el-table-column label="状态" width="100">
-                <template #default="{ row }">
-                  <el-tag :type="row.hasErrors ? 'warning' : 'success'" size="small">
-                    {{ row.hasErrors ? '有错误' : '有效' }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-            </el-table>
+          <!-- [NEW v1.2.13 2026-06-19] Step 2 总览统计条 (紧凑 inline) -->
+          <div class="overview-strip overview-strip--inline">
+            <div class="overview-strip__item overview-strip__item--primary">
+              <span class="overview-strip__value overview-strip__value--primary">{{ totalPreviewRows }}</span>
+              <span class="overview-strip__label">总行数</span>
+            </div>
+            <div class="overview-strip__item" :class="previewSheetsCount > 0 ? 'overview-strip__item--info' : ''">
+              <span class="overview-strip__value" :class="previewSheetsCount > 0 ? 'overview-strip__value--info' : ''">{{ previewSheetsCount }}</span>
+              <span class="overview-strip__label">数据表数</span>
+            </div>
+            <div class="overview-strip__item overview-strip__item--danger">
+              <span class="overview-strip__value overview-strip__value--danger">{{ errorCount }}</span>
+              <span class="overview-strip__label">错误数</span>
+            </div>
+            <div class="overview-strip__item overview-strip__item--warning">
+              <span class="overview-strip__value overview-strip__value--warning">{{ previewWarningCount }}</span>
+              <span class="overview-strip__label">告警数</span>
+            </div>
           </div>
 
-          <div v-if="hasValidationErrors" class="validation-errors">
-            <h4 class="validation-errors__title">校验错误详情：</h4>
-            <el-table :data="validationErrors" size="small" border max-height="300">
-              <!-- [FIX 2026-06-16 BMRD] 列顺序调整: sheet → 序号(行号) → 字段 → 值 → 错误信息 -->
-              <el-table-column prop="sheet" label="Sheet" width="120" />
-              <el-table-column prop="row" label="行号" width="80" />
-              <el-table-column prop="field" label="字段" width="120" />
-              <el-table-column prop="value" label="值" width="120" show-overflow-tooltip />
-              <el-table-column prop="message" label="错误信息" min-width="200" show-overflow-tooltip />
-            </el-table>
-            <p v-if="errorCount > 20" class="more-errors">
-              还有 {{ errorCount - 20 }} 条错误未显示...
-            </p>
+          <!-- [NEW v1.2.12 2026-06-19] Step 2 Sheet 折叠面板 (按对象类型分组) -->
+          <div v-if="previewResult.sheets && previewResult.sheets.length > 0" class="preview-sheets">
+            <h4 class="sheets-info__title">按数据表查看问题：</h4>
+            <el-collapse v-model="activePreviewSheets" class="sheet-collapse-list">
+              <el-collapse-item
+                v-for="sheet in previewSheetGroups"
+                :key="sheet.name"
+                :name="sheet.name"
+                class="sheet-collapse"
+              >
+                <template #title>
+                  <div class="sheet-collapse__header">
+                    <span class="sheet-collapse__title">{{ sheet.name }}</span>
+                    <span class="sheet-collapse__tags">
+                      <el-tag v-if="sheet.errorCount > 0" type="danger" size="small">{{ sheet.errorCount }} 错</el-tag>
+                      <el-tag v-if="sheet.warningCount > 0" type="warning" size="small">{{ sheet.warningCount }} 警</el-tag>
+                      <el-tag size="small" type="info">{{ sheet.rowCount }} 行</el-tag>
+                    </span>
+                  </div>
+                </template>
+                <div class="sheet-collapse__content">
+                  <el-tabs v-model="sheet.activeTab" class="sheet-tabs">
+                    <el-tab-pane label="错误" name="errors">
+                      <el-table
+                        v-if="sheet.errors.length > 0"
+                        :data="sheet.errors"
+                        size="small"
+                        border
+                        max-height="300"
+                      >
+                        <el-table-column prop="row" label="行号" width="80" align="center" />
+                        <el-table-column prop="field" label="字段" width="120" />
+                        <el-table-column prop="value" label="值" width="120" show-overflow-tooltip />
+                        <el-table-column prop="message" label="错误信息" min-width="200" show-overflow-tooltip />
+                      </el-table>
+                      <p v-else class="tip">无错误</p>
+                    </el-tab-pane>
+                    <el-tab-pane label="告警" name="warnings">
+                      <el-table
+                        v-if="sheet.warnings.length > 0"
+                        :data="sheet.warnings"
+                        size="small"
+                        border
+                        max-height="300"
+                      >
+                        <el-table-column prop="row" label="行号" width="80" align="center" />
+                        <el-table-column prop="field" label="字段" width="120" />
+                        <el-table-column prop="value" label="值" width="120" show-overflow-tooltip />
+                        <el-table-column prop="message" label="告警信息" min-width="200" show-overflow-tooltip />
+                      </el-table>
+                      <p v-else class="tip">无告警</p>
+                    </el-tab-pane>
+                  </el-tabs>
+                </div>
+              </el-collapse-item>
+            </el-collapse>
           </div>
         </div>
       </div>
@@ -237,182 +264,171 @@
             </template>
           </el-alert>
 
-          <!-- 统计明细（按对象类型） -->
-          <div v-if="importResult.results" class="import-details">
-            <h4 class="import-details__title">
-              导入结果统计
-              <span class="title-hint">（点击"对象类型"可过滤下方失败/告警明细）</span>
-            </h4>
-            <el-table :data="importResultsTable" size="small" border>
-              <el-table-column label="对象类型" min-width="120">
-                <template #default="{ row }">
-                  <el-link
-                    :type="filterType === row.typeId ? 'primary' : 'default'"
-                    :underline="false"
-                    :disabled="row.failed === 0 && row.warning === 0"
-                    class="type-link"
-                    @click="handleTypeFilter(row)"
-                  >
-                    <span v-if="filterType === row.typeId">✓ </span>{{ row.type }}
-                  </el-link>
-                </template>
-              </el-table-column>
-              <el-table-column prop="created" label="创建" width="80" align="center">
-                <template #default="{ row }">
-                  <el-tag v-if="row.created > 0" type="success" size="small">{{ row.created }}</el-tag>
-                  <span v-else>-</span>
-                </template>
-              </el-table-column>
-              <el-table-column prop="updated" label="更新" width="80" align="center">
-                <template #default="{ row }">
-                  <el-tag v-if="row.updated > 0" type="primary" size="small">{{ row.updated }}</el-tag>
-                  <span v-else>-</span>
-                </template>
-              </el-table-column>
-              <el-table-column prop="deleted" label="删除" width="80" align="center">
-                <template #default="{ row }">
-                  <el-tag v-if="row.deleted > 0" type="info" size="small">{{ row.deleted }}</el-tag>
-                  <span v-else>-</span>
-                </template>
-              </el-table-column>
-              <el-table-column prop="skipped" label="跳过" width="80" align="center">
-                <template #default="{ row }">
-                  <el-tag v-if="row.skipped > 0" type="warning" size="small">{{ row.skipped }}</el-tag>
-                  <span v-else>-</span>
-                </template>
-              </el-table-column>
-              <el-table-column prop="failed" label="失败" width="80" align="center">
-                <template #default="{ row }">
-                  <el-tag v-if="row.failed > 0" type="danger" size="small">{{ row.failed }}</el-tag>
-                  <span v-else>-</span>
-                </template>
-              </el-table-column>
-              <el-table-column prop="warning" label="告警" width="80" align="center">
-                <template #default="{ row }">
-                  <el-tag v-if="row.warning > 0" type="warning" size="small">{{ row.warning }}</el-tag>
-                  <span v-else>-</span>
-                </template>
-              </el-table-column>
-            </el-table>
-          </div>
-
-          <!-- 失败明细 -->
-          <div v-if="importResult.errors && importResult.errors.length > 0" class="import-errors">
-            <h4 class="import-errors__title">
-              失败明细
-              <span class="title-hint">（共 {{ importResult.errors.length }} 条{{ filterType ? `，当前显示 ${filteredErrors.length} 条` : '' }}）</span>
-            </h4>
-            <!-- [NEW v1.2.3 2026-06-17] 过滤状态条 -->
-            <div v-if="filterType" class="filter-banner">
-              <el-icon><Filter /></el-icon>
-              <span>已过滤：<strong>{{ filterTypeName }}</strong> 的失败明细</span>
-              <el-button link type="primary" size="small" @click="clearTypeFilter">清除过滤</el-button>
+          <!-- [NEW v1.2.13 2026-06-19] Step 4 总览统计条 (紧凑 inline 6 列) -->
+          <div class="overview-strip overview-strip--inline overview-strip--result">
+            <div class="overview-strip__item overview-strip__item--success">
+              <span class="overview-strip__value overview-strip__value--success">{{ totalCreatedCount }}</span>
+              <span class="overview-strip__label">创建</span>
             </div>
-            <el-table
-              :data="pagedErrors"
-              size="small"
-              border
-              max-height="320"
-              row-key="key"
-            >
-              <!-- [NEW v1.2.3 2026-06-17] 可展开行: 显示完整错误信息 + 原始记录 -->
-              <el-table-column type="expand" width="40">
-                <template #default="{ row }">
-                  <div class="error-detail">
-                    <div class="error-detail__section">
-                      <div class="error-detail__label">完整错误信息：</div>
-                      <div class="error-detail__message">{{ row.message }}</div>
-                    </div>
-                    <div v-if="row.value" class="error-detail__section">
-                      <div class="error-detail__label">字段值：</div>
-                      <div class="error-detail__value">{{ row.value }}</div>
-                    </div>
-                  </div>
-                </template>
-              </el-table-column>
-              <el-table-column prop="row" label="行号" width="60" align="center" />
-              <el-table-column prop="operation" label="操作" width="70" align="center">
-                <template #default="{ row }">
-                  <el-tag size="small" :type="operationTagType(row.operation)">{{ operationLabel(row.operation) }}</el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="对象类型" width="100" show-overflow-tooltip>
-                <template #default="{ row }">
-                  {{ getErrorTypeName(row.object_type) }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="field" label="字段" width="80" />
-              <el-table-column prop="message" label="错误信息" min-width="200" show-overflow-tooltip>
-                <template #default="{ row }">
-                  <span class="message-summary">{{ row.message }}</span>
-                </template>
-              </el-table-column>
-            </el-table>
-            <el-pagination
-              v-model:current-page="errorsCurrentPage"
-              v-model:page-size="errorsPageSize"
-              :total="filteredErrors.length"
-              :page-sizes="[10, 20, 50, 100]"
-              layout="total, sizes, prev, pager, next, jumper"
-              small
-              class="import-pagination"
-            />
+            <div class="overview-strip__item overview-strip__item--primary">
+              <span class="overview-strip__value overview-strip__value--primary">{{ totalUpdatedCount }}</span>
+              <span class="overview-strip__label">更新</span>
+            </div>
+            <div class="overview-strip__item overview-strip__item--info">
+              <span class="overview-strip__value overview-strip__value--info">{{ totalDeletedCount }}</span>
+              <span class="overview-strip__label">删除</span>
+            </div>
+            <div class="overview-strip__item overview-strip__item--warning">
+              <span class="overview-strip__value overview-strip__value--warning">{{ totalSkippedCount }}</span>
+              <span class="overview-strip__label">跳过</span>
+            </div>
+            <div class="overview-strip__item overview-strip__item--danger">
+              <span class="overview-strip__value overview-strip__value--danger">{{ totalFailedCount }}</span>
+              <span class="overview-strip__label">失败</span>
+            </div>
+            <div class="overview-strip__item overview-strip__item--orange">
+              <span class="overview-strip__value overview-strip__value--orange">{{ totalWarningCount }}</span>
+              <span class="overview-strip__label">告警</span>
+            </div>
           </div>
 
-          <!-- 告警明细 -->
-          <div v-if="hasAnyWarning" class="import-warnings">
-            <h4 class="import-warnings__title">
-              告警明细
-              <span class="title-hint">（共 {{ totalWarningCount }} 条{{ filterType ? `，当前显示 ${filteredWarnings.length} 条` : '' }}）</span>
-            </h4>
-            <el-table
-              :data="pagedWarnings"
-              size="small"
-              border
-              max-height="320"
-              row-key="key"
-            >
-              <el-table-column type="expand" width="40">
-                <template #default="{ row }">
-                  <div class="error-detail">
-                    <div class="error-detail__section">
-                      <div class="error-detail__label">完整告警信息：</div>
-                      <div class="error-detail__message">{{ row.message }}</div>
-                    </div>
-                    <div v-if="row.value" class="error-detail__section">
-                      <div class="error-detail__label">字段值：</div>
-                      <div class="error-detail__value">{{ row.value }}</div>
-                    </div>
+          <!-- [NEW v1.2.12 2026-06-19] 级联失败 banner (business_object 失败时显示) -->
+          <div v-if="hasCascadeFailure" class="cascade-failure-banner" data-testid="cascade-banner">
+            <div class="cascade-failure-banner__title">
+              <el-icon><Warning /></el-icon>
+              <span>检测到级联失败</span>
+            </div>
+            <div class="cascade-failure-banner__detail">
+              主对象类型 <strong>{{ cascadeRootTypeName }}</strong> 有 {{ cascadeRootFailed }} 条导入失败，
+              导致依赖它的 <strong>{{ cascadeDependentCount }}</strong> 个下游对象类型全部失败
+              （共 <strong>{{ cascadeDependentFailed }}</strong> 条）。请先修复主对象类型的失败原因。
+            </div>
+          </div>
+
+          <!-- [NEW v1.2.12 2026-06-19] Step 4 Sheet 折叠面板 (按对象类型分) -->
+          <div v-if="importResult.results && Object.keys(importResult.results).length > 0" class="import-sheets">
+            <h4 class="sheets-info__title">按对象类型查看：</h4>
+            <el-collapse v-model="activeImportSheets" class="sheet-collapse-list">
+              <el-collapse-item
+                v-for="row in importResultsTable"
+                :key="row.typeId"
+                :name="row.typeId"
+                class="sheet-collapse"
+              >
+                <template #title>
+                  <div class="sheet-collapse__header">
+                    <span class="sheet-collapse__title">{{ row.type }}</span>
+                    <span class="sheet-collapse__tags">
+                      <el-tag v-if="row.failed > 0" type="danger" size="small">{{ row.failed }} 失败</el-tag>
+                      <el-tag v-if="row.warning > 0" type="warning" size="small">{{ row.warning }} 告警</el-tag>
+                      <el-tag v-if="row.skipped > 0" type="info" size="small">{{ row.skipped }} 跳过</el-tag>
+                    </span>
                   </div>
                 </template>
-              </el-table-column>
-              <el-table-column prop="row" label="行号" width="60" align="center" />
-              <el-table-column prop="operation" label="操作" width="70" align="center">
-                <template #default="{ row }">
-                  <el-tag size="small" type="warning">{{ operationLabel(row.operation) }}</el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="对象类型" width="100" show-overflow-tooltip>
-                <template #default="{ row }">
-                  {{ getErrorTypeName(row.object_type) }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="field" label="字段" width="80" />
-              <el-table-column prop="message" label="告警信息" min-width="200" show-overflow-tooltip>
-                <template #default="{ row }">
-                  <span class="message-summary">{{ row.message }}</span>
-                </template>
-              </el-table-column>
-            </el-table>
-            <el-pagination
-              v-model:current-page="warningsCurrentPage"
-              v-model:page-size="warningsPageSize"
-              :total="filteredWarnings.length"
-              :page-sizes="[10, 20, 50, 100]"
-              layout="total, sizes, prev, pager, next, jumper"
-              small
-              class="import-pagination"
-            />
+                <div class="sheet-collapse__content">
+                  <el-tabs v-model="row.activeTab" class="sheet-tabs">
+                    <el-tab-pane :label="`成功 (${row.successCount})`" name="success">
+                      <el-table
+                        v-if="getTypeSuccesses(row.typeId).length > 0"
+                        :data="getTypeSuccesses(row.typeId)"
+                        size="small"
+                        border
+                        max-height="300"
+                        row-key="row"
+                      >
+                        <el-table-column prop="row" label="行号" width="60" align="center" />
+                        <el-table-column prop="operation" label="操作" width="70" align="center">
+                          <template #default="{ row: okRow }">
+                            <el-tag size="small" :type="operationTagType(okRow.operation)">{{ operationLabel(okRow.operation) }}</el-tag>
+                          </template>
+                        </el-table-column>
+                        <el-table-column prop="code" label="业务编码" width="160" show-overflow-tooltip />
+                        <el-table-column prop="name" label="名称" min-width="200" show-overflow-tooltip />
+                      </el-table>
+                      <p v-else class="tip">无成功记录</p>
+                    </el-tab-pane>
+                    <el-tab-pane :label="`失败 (${row.failed})`" name="errors">
+                      <el-table
+                        v-if="getTypeErrors(row.typeId).length > 0"
+                        :data="getTypeErrors(row.typeId)"
+                        size="small"
+                        border
+                        max-height="300"
+                        row-key="row"
+                      >
+                        <el-table-column type="expand" width="40">
+                          <template #default="{ row: errRow }">
+                            <div class="error-detail">
+                              <div class="error-detail__section">
+                                <div class="error-detail__label">完整错误信息：</div>
+                                <div class="error-detail__message">{{ errRow.message }}</div>
+                              </div>
+                            </div>
+                          </template>
+                        </el-table-column>
+                        <el-table-column prop="row" label="行号" width="60" align="center" />
+                        <el-table-column prop="operation" label="操作" width="70" align="center">
+                          <template #default="{ row: errRow }">
+                            <el-tag size="small" :type="operationTagType(errRow.operation)">{{ operationLabel(errRow.operation) }}</el-tag>
+                          </template>
+                        </el-table-column>
+                        <el-table-column prop="field" label="字段" width="100" />
+                        <el-table-column prop="message" label="错误信息" min-width="220" show-overflow-tooltip>
+                          <template #default="{ row: errRow }">
+                            <span class="message-summary">{{ errRow.message }}</span>
+                          </template>
+                        </el-table-column>
+                      </el-table>
+                      <p v-else class="tip">无失败记录</p>
+                    </el-tab-pane>
+                    <el-tab-pane :label="`告警 (${row.warning})`" name="warnings">
+                      <el-table
+                        v-if="getTypeWarnings(row.typeId).length > 0"
+                        :data="getTypeWarnings(row.typeId)"
+                        size="small"
+                        border
+                        max-height="300"
+                        row-key="row"
+                      >
+                        <el-table-column prop="row" label="行号" width="60" align="center" />
+                        <el-table-column prop="operation" label="操作" width="70" align="center">
+                          <template #default="{ row: warnRow }">
+                            <el-tag size="small" type="warning">{{ operationLabel(warnRow.operation) }}</el-tag>
+                          </template>
+                        </el-table-column>
+                        <el-table-column prop="field" label="字段" width="100" />
+                        <el-table-column prop="message" label="告警信息" min-width="220" show-overflow-tooltip>
+                          <template #default="{ row: warnRow }">
+                            <span class="message-summary">{{ warnRow.message }}</span>
+                          </template>
+                        </el-table-column>
+                      </el-table>
+                      <p v-else class="tip">无告警</p>
+                    </el-tab-pane>
+                    <el-tab-pane :label="`跳过 (${row.skipped})`" name="skipped">
+                      <el-table
+                        v-if="getTypeSkipped(row.typeId).length > 0"
+                        :data="getTypeSkipped(row.typeId)"
+                        size="small"
+                        border
+                        max-height="300"
+                        row-key="row"
+                      >
+                        <el-table-column prop="row" label="行号" width="60" align="center" />
+                        <el-table-column prop="operation" label="操作" width="70" align="center">
+                          <template #default="{ row: skipRow }">
+                            <el-tag size="small" type="info">{{ operationLabel(skipRow.operation) }}</el-tag>
+                          </template>
+                        </el-table-column>
+                        <el-table-column prop="code" label="业务编码" width="160" show-overflow-tooltip />
+                        <el-table-column prop="name" label="名称" min-width="200" show-overflow-tooltip />
+                      </el-table>
+                      <p v-else class="tip">无跳过记录</p>
+                    </el-tab-pane>
+                  </el-tabs>
+                </div>
+              </el-collapse-item>
+            </el-collapse>
           </div>
         </div>
       </div>
@@ -444,7 +460,8 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { useCrudMessage } from '@/composables/useCrudMessage'
-import { UploadFilled, Download, Filter } from '@element-plus/icons-vue'
+// [NEW v1.2.12 2026-06-19] Warning icon: 级联失败 banner
+import { UploadFilled, Download, Filter, Warning } from '@element-plus/icons-vue'
 import { boService } from '@/services/boService'
 import { metaService } from '@/services/metaService'
 
@@ -514,6 +531,10 @@ const warningsCurrentPage = ref(1)
 // 点击统计表中的对象类型可过滤下方明细
 const filterType = ref(null)  // null = 不过滤, 字符串 = object type id
 
+// [NEW v1.2.12 2026-06-19] Sheet 折叠面板: 默认展开第一个有问题的 sheet
+const activePreviewSheets = ref([])
+const activeImportSheets = ref([])
+
 const schema = ref(null)
 const loadingSchema = ref(false)
 
@@ -521,16 +542,9 @@ const loadingSchema = ref(false)
 // 来自 /api/v1/meta/objects API，props.objectTypeLabels 优先覆盖
 const objectTypeLabelsMap = ref({})
 
-const cascadeChain = computed(() => {
-  if (!schema.value) return []
-
-  const chain = metaService.buildCascadeChain(schema.value)
-
-  return chain.map(item => ({
-    ...item,
-    selected: item.cascadeLevel > 1
-  }))
-})
+// [REMOVED v1.2.12 2026-06-17] cascadeChain: 死代码
+// 原用于"选择导入层级" UI (v1.0.0 设计), 已被 sheet-grouped layout 替代
+// metaService.buildCascadeChain() 仍保留 (search_help 仍在用), 只在导入流程不再使用
 
 const availableMultiTypes = computed(() => {
   return props.objectTypes
@@ -551,11 +565,7 @@ const objectTypeName = computed(() => {
   return field?.name || schema.value.name || props.objectType
 })
 
-const selectedCascadeFields = computed(() => {
-  return cascadeChain.value
-    .filter(item => item.selected)
-    .map(item => item.field)
-})
+// [REMOVED v1.2.12 2026-06-17] selectedCascadeFields: 死代码 (cascadeChain 已删)
 
 const dialogTitle = computed(() => {
   const titles = ['导入数据', '数据校验', '执行导入', '导入结果']
@@ -713,6 +723,8 @@ const importResultsTable = computed(() => {
   return Object.entries(importResult.value.results).map(([type, result]) => {
     // [FIX 2026-06-17] 用 objectTypeLabelsMap 拿中文名，schema.fields 是字段不是对象类型
     const displayName = objectTypeLabelsMap.value?.[type] || props.objectTypeLabels?.[type] || type
+    // [NEW v1.2.13 2026-06-19] 成功数 = created + updated + deleted (不包括 skipped)
+    const successCount = (result.created || 0) + (result.updated || 0) + (result.deleted || 0)
     return {
       type: displayName,
       typeId: type,  // 保留 id 用于调试
@@ -721,10 +733,168 @@ const importResultsTable = computed(() => {
       deleted: result.deleted || 0,
       skipped: result.skipped || 0,
       failed: result.failed || 0,
-      warning: (result.warnings || []).length
+      successCount,
+      warning: (result.warnings || []).length,
+      // [NEW v1.2.13 2026-06-19] 默认 tab: 优先失败 > 成功 > 告警 > 跳过
+      activeTab: (result.failed || 0) > 0 ? 'errors' : (successCount > 0 ? 'success' : (((result.warnings || []).length > 0) ? 'warnings' : 'skipped'))
     }
   })
 })
+
+// [NEW v1.2.12 2026-06-19] Step 2: 数据表数
+const previewSheetsCount = computed(() => {
+  return previewResult.value?.sheets?.length || 0
+})
+
+// [NEW v1.2.12 2026-06-19] Step 2: 告警数 (从 previewResult.validation.warnings 提取)
+const previewWarningCount = computed(() => {
+  const warnings = previewResult.value?.validation?.warnings ||
+                    previewResult.value?.warnings ||
+                    []
+  return warnings.length
+})
+
+// [NEW v1.2.12 2026-06-19] Step 2: 按 Sheet 分组 (每个 sheet 含 errors/warnings 列表)
+const previewSheetGroups = computed(() => {
+  const sheets = previewResult.value?.sheets || []
+  const allErrors = previewResult.value?.validation?.errors ||
+                    previewResult.value?.errors ||
+                    []
+  const allWarnings = previewResult.value?.validation?.warnings ||
+                      previewResult.value?.warnings ||
+                      []
+  return sheets.map(sheet => {
+    const name = sheet.name || sheet.sheet || '-'
+    const errors = allErrors.filter(e => (e.sheet || e.table) === name)
+    const warnings = allWarnings.filter(w => (w.sheet || w.table) === name)
+    return {
+      name,
+      rowCount: sheet.row_count || sheet.rows || 0,
+      errorCount: errors.length,
+      warningCount: warnings.length,
+      errors: errors.map((err, i) => ({
+        row: err.row || err.line || i + 1,
+        field: err.field || err.column || '-',
+        value: err.value || err.input || '-',
+        message: err.error || err.message || String(err)
+      })),
+      warnings: warnings.map((warn, i) => ({
+        row: warn.row || warn.line || i + 1,
+        field: warn.field || warn.column || '-',
+        value: warn.value || warn.input || '-',
+        message: warn.error || warn.message || String(warn)
+      })),
+      activeTab: errors.length > 0 ? 'errors' : (warnings.length > 0 ? 'warnings' : 'errors')
+    }
+  })
+})
+
+// [NEW v1.2.12 2026-06-19] Step 4: 跳过数 (累计)
+const totalSkippedCount = computed(() => {
+  if (!importResult.value?.results) return 0
+  return Object.values(importResult.value.results).reduce((sum, r) => sum + (r.skipped || 0), 0)
+})
+
+// [NEW v1.2.12 2026-06-19] Step 4: 级联失败检测
+// 场景: business_object 失败时, downstream (relationship/annotation) 也会失败
+const hasCascadeFailure = computed(() => {
+  const results = importResult.value?.results
+  if (!results) return false
+  const root = results.business_object
+  if (!root || (root.failed || 0) === 0) return false
+  // 检查下游对象类型 (relationship / annotation) 是否也全部失败
+  const downstream = ['relationship', 'annotation']
+  const failedDownstream = downstream.filter(t => {
+    const r = results[t]
+    return r && (r.failed || 0) > 0
+  })
+  return failedDownstream.length > 0
+})
+
+const cascadeRootTypeName = computed(() => {
+  return objectTypeLabelsMap.value?.business_object || props.objectTypeLabels?.business_object || 'business_object'
+})
+
+const cascadeRootFailed = computed(() => {
+  return importResult.value?.results?.business_object?.failed || 0
+})
+
+const cascadeDependentCount = computed(() => {
+  const results = importResult.value?.results
+  if (!results) return 0
+  return ['relationship', 'annotation'].filter(t => {
+    const r = results[t]
+    return r && (r.failed || 0) > 0
+  }).length
+})
+
+const cascadeDependentFailed = computed(() => {
+  const results = importResult.value?.results
+  if (!results) return 0
+  return ['relationship', 'annotation'].reduce((sum, t) => {
+    const r = results[t]
+    return sum + (r?.failed || 0)
+  }, 0)
+})
+
+// [NEW v1.2.12 2026-06-19] Step 4: 按对象类型获取 errors/warnings
+function getTypeErrors(typeId) {
+  return (importResult.value?.errors || []).filter(e => e.object_type === typeId)
+}
+
+function getTypeWarnings(typeId) {
+  return allWarnings.value.filter(w => w.object_type === typeId)
+}
+
+// [NEW v1.2.13 2026-06-19] Step 4: 按对象类型获取成功/跳过的明细
+// 成功 = created + updated + deleted (不包括 skipped)
+const allSuccesses = computed(() => {
+  if (!importResult.value?.results) return []
+  const result = []
+  Object.entries(importResult.value.results).forEach(([type, r]) => {
+    // 从 importResult.successes 收集 (后端如果有)
+    if (r.successes && Array.isArray(r.successes)) {
+      r.successes.forEach(s => result.push({ ...s, object_type: type }))
+    }
+    // 或者从 errors/successes 区分
+  })
+  // 兜底: 如果没有 successes 列表, 不显示具体行
+  return result
+})
+
+const allSkipped = computed(() => {
+  if (!importResult.value?.results) return []
+  const result = []
+  Object.entries(importResult.value.results).forEach(([type, r]) => {
+    if (r.skipped_items && Array.isArray(r.skipped_items)) {
+      r.skipped_items.forEach(s => result.push({ ...s, object_type: type }))
+    }
+  })
+  return result
+})
+
+function getTypeSuccesses(typeId) {
+  return allSuccesses.value.filter(s => s.object_type === typeId)
+}
+
+function getTypeSkipped(typeId) {
+  return allSkipped.value.filter(s => s.object_type === typeId)
+}
+
+// [NEW v1.2.12 2026-06-19] 默认展开第一个有问题的 sheet
+watch(previewSheetGroups, (groups) => {
+  if (groups.length > 0 && activePreviewSheets.value.length === 0) {
+    const first = groups.find(g => g.errorCount > 0 || g.warningCount > 0) || groups[0]
+    activePreviewSheets.value = [first.name]
+  }
+}, { immediate: true })
+
+watch(importResultsTable, (rows) => {
+  if (rows.length > 0 && activeImportSheets.value.length === 0) {
+    const first = rows.find(r => r.failed > 0 || r.warning > 0) || rows[0]
+    activeImportSheets.value = [first.typeId]
+  }
+}, { immediate: true })
 
 // 操作模式映射
 function operationLabel(op) {
@@ -869,7 +1039,7 @@ async function startPreview() {
   try {
     const result = await boService.previewImport(props.objectType, selectedFile.value, {
       conflictStrategy: conflictStrategy.value,
-      cascade_fields: selectedCascadeFields.value,
+      // [REMOVED v1.2.12] cascade_fields 死参数, 后端不使用
       // [FIX 2026-06-16 BMRD] preview 也必须传 context (version_id / product_id),
       // 否则后端 validate_sheets 不会跳过 product_code/version_code 必填验证
       version_id: props.context?.version_id,
@@ -902,7 +1072,8 @@ async function startImport() {
   importProgress.value = 0
   currentTypeName.value = ''
   currentIndex.value = 0
-  totalTypes.value = selectedCascadeFields.value.length
+  // [FIX v1.2.12 2026-06-17] totalTypes: 多对象模式用选中数, 单对象模式 = 1
+  totalTypes.value = props.multiTypeMode ? selectedMultiTypes.value.length : 1
 
   if (!props.context?.version_id && !props.context?.product_id) {
     message.warning('请先在顶部导航栏选择产品和版本上下文后再导入')
@@ -916,8 +1087,8 @@ async function startImport() {
       conflictStrategy.value,
       {
         version_id: props.context?.version_id,
-        product_id: props.context?.product_id,
-        cascade_fields: selectedCascadeFields.value
+        product_id: props.context?.product_id
+        // [REMOVED v1.2.12] cascade_fields 死参数
       }
     )
 
@@ -1091,37 +1262,8 @@ function handleClose() {
   }
 }
 
-.object-type-selector {
-  margin-bottom: var(--spacing-lg);
-  padding: var(--spacing-md);
-  background: var(--el-fill-color-light, #f5f7fa);
-  border-radius: var(--radius-md, 6px);
-
-  &__label {
-    margin-bottom: var(--spacing-sm);
-    font-size: var(--el-font-size-small, 12px);
-    font-weight: 500;
-    color: var(--el-text-color-regular, #606266);
-  }
-
-  &__items {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--spacing-sm);
-  }
-}
-
-.object-type-checkbox {
-  padding: var(--spacing-xs) var(--spacing-sm);
-  background: var(--el-bg-color, #fff);
-  border-radius: var(--radius-sm, 4px);
-
-  .cascade-hint {
-    margin-left: var(--spacing-xs);
-    font-size: var(--el-font-size-small, 12px);
-    color: var(--el-text-color-secondary, #909399);
-  }
-}
+// [REMOVED v1.2.12 2026-06-17] .object-type-selector / .object-type-checkbox
+// 死代码: 原用于"选择导入层级" UI, 该 UI 已删除
 
 .el-upload__tip {
   margin-top: var(--spacing-xs);
@@ -1326,6 +1468,176 @@ function handleClose() {
 
 .count-failed {
   color: var(--el-color-danger, #f56c6c);
+}
+
+// [NEW v1.2.12 2026-06-19] 步骤标题不换行 (dialog 宽度不够时强制换行)
+:deep(.el-step__title) {
+  white-space: nowrap;
+  font-size: var(--el-font-size-base, 14px);
+}
+
+// [NEW v1.2.13 2026-06-19] 总览统计条 - 紧凑 inline 布局
+.overview-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs);
+  margin-bottom: var(--spacing-md);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--el-fill-color-blank, #fff);
+  border: 1px solid var(--el-border-color-light, #e4e7ed);
+  border-radius: var(--radius-sm, 4px);
+
+  &--result {
+    // 6 列场景, 允许换行但保持紧凑
+  }
+
+  &--inline {
+    .overview-strip__item {
+      flex-direction: row;
+      gap: var(--spacing-xs);
+      padding: 2px 8px;
+    }
+    .overview-strip__value {
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .overview-strip__label {
+      margin-top: 0;
+      font-size: var(--el-font-size-small, 12px);
+    }
+  }
+
+  &__item {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm, 4px);
+    text-align: center;
+    transition: all 0.2s;
+
+    &--success { background: var(--el-color-success-light-9, #f0f9eb); }
+    &--primary { background: var(--el-color-primary-light-9, #ecf5ff); }
+    &--info    { background: var(--el-color-info-light-9, #f4f4f5); }
+    &--warning { background: var(--el-color-warning-light-9, #fdf6ec); }
+    &--danger  { background: var(--el-color-danger-light-9, #fef0f0); }
+    &--orange  { background: rgba(234, 88, 12, 0.08); }
+  }
+
+  &__value {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.2;
+
+    &--success { color: var(--el-color-success, #67c23a); }
+    &--primary { color: var(--el-color-primary, #409eff); }
+    &--info    { color: var(--el-color-info, #909399); }
+    &--warning { color: var(--el-color-warning, #e6a23c); }
+    &--danger  { color: var(--el-color-danger, #f56c6c); }
+    &--orange  { color: var(--yonyou-orange-600, #ea580c); }
+  }
+
+  &__label {
+    margin-top: 0;
+    font-size: var(--el-font-size-small, 12px);
+    color: var(--el-text-color-secondary, #909399);
+  }
+}
+
+// [NEW v1.2.12 2026-06-19] Sheet 折叠面板 (按对象类型分)
+.sheet-collapse {
+  margin-bottom: var(--spacing-md);
+
+  &__header {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    width: 100%;
+  }
+
+  &__title {
+    font-size: var(--el-font-size-base, 14px);
+    font-weight: 500;
+    color: var(--el-text-color-primary, #303133);
+  }
+
+  &__tags {
+    display: inline-flex;
+    gap: var(--spacing-xs);
+  }
+
+  &__count {
+    font-size: var(--el-font-size-small, 12px);
+    color: var(--el-text-color-secondary, #909399);
+  }
+
+  &__content {
+    padding: var(--spacing-sm) 0;
+  }
+}
+
+// [NEW v1.2.12 2026-06-19] Sheet 内 tab 容器 (Error/Warning 分离)
+.sheet-tabs {
+  :deep(.el-tabs__header) {
+    margin: 0 0 var(--spacing-sm) 0;
+  }
+}
+
+// [NEW v1.2.12 2026-06-19] 级联失败 banner
+.cascade-failure-banner {
+  margin-bottom: var(--spacing-md);
+  padding: var(--spacing-md);
+  background: rgba(230, 162, 60, 0.1);
+  border: 1px solid rgba(230, 162, 60, 0.4);
+  border-left: 4px solid var(--el-color-warning, #e6a23c);
+  border-radius: var(--radius-sm, 4px);
+  color: var(--el-text-color-primary, #303133);
+
+  &__title {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    font-weight: 600;
+    color: var(--el-color-warning, #b88230);
+    margin-bottom: var(--spacing-xs);
+  }
+
+  &__detail {
+    font-size: var(--el-font-size-small, 13px);
+    line-height: 1.5;
+    color: var(--el-text-color-regular, #606266);
+  }
+}
+
+// [NEW v1.2.12 2026-06-19] Stats 标签页 - 4 列统计网格
+.import-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
+
+  &__item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-md);
+    background: var(--el-fill-color-light, #f5f7fa);
+    border-radius: var(--radius-sm, 4px);
+  }
+
+  &__label {
+    font-size: var(--el-font-size-small, 12px);
+    color: var(--el-text-color-secondary, #909399);
+    margin-bottom: var(--spacing-xs);
+  }
+
+  &__value {
+    font-size: 24px;
+    font-weight: 600;
+    line-height: 1;
+  }
 }
 
 .more-errors {

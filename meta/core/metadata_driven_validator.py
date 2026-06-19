@@ -249,17 +249,37 @@ class MetadataDrivenValidator:
         if not target_meta:
             return []
         try:
-            query = f"SELECT id FROM {target_meta.table_name} WHERE id = ? LIMIT 1"
+            # [NEW v1.2.13 2026-06-19] 用业务编码(code) 替代 id 查询
+            # 用户填的是 code, 错误信息也应显示 code, 而不是数字 id
+            lookup_value = value
+            lookup_field = 'id'
+            target_fields = getattr(target_meta, 'fields', [])
+            # 查找目标对象的 code 字段 (业务关键字)
+            for tf in target_fields:
+                if getattr(tf.semantics, 'business_key', False):
+                    lookup_field = tf.db_column
+                    break
+            # 如果有 value 不是数字, 用 code 字段查
+            if value is not None and not str(value).isdigit():
+                for tf in target_fields:
+                    if getattr(tf.semantics, 'business_key', False):
+                        lookup_field = tf.db_column
+                        break
+            query = f"SELECT id FROM {target_meta.table_name} WHERE {lookup_field} = ? LIMIT 1"
             cursor = self.ds.execute(query, (value,))
             row = cursor.fetchone()
             if not row:
                 target_name = target_meta.name or target_object
+                # [NEW v1.2.13 2026-06-19] 错误信息包含字段名和值
+                display_value = value if value is not None else ''
                 return [ValidationDetail(
                     field_id=field.id, field_name=field_name, rule="fk_existence",
                     message=ValidationMessageRegistry.get("validation.field.fk_not_found",
-                                                           target_name=target_name, value=value),
+                                                           target_name=target_name,
+                                                           field_name=field_name,
+                                                           value=display_value),
                     i18n_key="validation.field.fk_not_found",
-                    params={"target_name": target_name, "value": value}
+                    params={"target_name": target_name, "field_name": field_name, "value": display_value}
                 )]
         except Exception:
             pass
@@ -344,12 +364,18 @@ class MetadataDrivenValidator:
             if row:
                 bk_field_names = "、".join([f.name for f, v in bk_values])
                 bk_value_str = " + ".join([v for f, v in bk_values])
+                # [NEW v1.2.13 2026-06-19] 单字段时不显示"组合"
+                if len(bk_values) == 1:
+                    msg_key = "validation.object.business_key_single"
+                    msg_params = {"field_name": bk_values[0][0].name, "value": bk_values[0][1]}
+                else:
+                    msg_key = "validation.object.business_key_composite"
+                    msg_params = {"field_names": bk_field_names, "values": bk_value_str}
                 return [ValidationDetail(
                     rule="business_key_composite",
-                    message=ValidationMessageRegistry.get("validation.object.business_key_composite",
-                                                           field_names=bk_field_names, values=bk_value_str),
-                    i18n_key="validation.object.business_key_composite",
-                    params={"field_names": bk_field_names, "values": bk_value_str}
+                    message=ValidationMessageRegistry.get(msg_key, **msg_params),
+                    i18n_key=msg_key,
+                    params=msg_params
                 )]
         except Exception:
             pass

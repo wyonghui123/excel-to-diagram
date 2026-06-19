@@ -298,10 +298,12 @@ def export_data_async():
         # 否则 query_service.search() 调 _apply_data_permission 时 get_current_user() 返回 None
         # 导致权限过滤被跳过 (async 导出包含所有数据的安全漏洞)
         _run_user_id = export_user_id
+        # [FIX v1.2.12 2026-06-17] 同时传完整 user dict (含 permissions) 让 is_admin() 能识别 admin
+        _run_user = g.current_user  # full dict with permissions
         def _run_export():
-            from meta.services.query_service import set_thread_user_id
-            if _run_user_id:
-                set_thread_user_id(_run_user_id)
+            from meta.services.query_service import set_thread_user
+            if _run_user:
+                set_thread_user(_run_user)
             try:
                 service = get_import_export_service()
 
@@ -608,11 +610,13 @@ def import_data_async():
         # [FIX 2026-06-17] 用 thread-local user_id 传递 user 身份到子线程
         # 修复 async 导入也存在的权限上下文丢失问题
         _run_import_user_id = audit_user_id
+        # [FIX v1.2.12 2026-06-17] 同时传完整 user dict (含 permissions) 让 is_admin() 正确识别
+        _run_import_user = g.current_user
         def _run_import():
-            from meta.services.query_service import set_thread_user_id, clear_thread_user_id
-            if _run_import_user_id:
+            from meta.services.query_service import set_thread_user, clear_thread_user_id
+            if _run_import_user:
                 try:
-                    set_thread_user_id(int(_run_import_user_id))
+                    set_thread_user(_run_import_user)
                 except Exception:
                     pass
             try:
