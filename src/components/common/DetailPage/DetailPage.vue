@@ -942,13 +942,21 @@ onActivated(() => {
 //     3) 新 objectType 有效 + 与旧 objectType 不同：切换到不同对象，重置 internalEditing。
 //     4) 同一对象 mode 变化：仅当 effectiveMode 变为 'add'/'edit' 时进入编辑态；
 //        变 'view' 时保留 internalEditing（让用户主动取消）。
-watch(() => [props.objectType, props.id, props.mode, props.createMode, props.editMode], ([newObjectType, newId, newMode, newCreateMode, newEditMode], [oldObjectType, oldId, oldMode, oldCreateMode, oldEditMode]) => {
-  const isFirstRun = oldObjectType === undefined && oldId === undefined
+watch(() => [props.objectType, props.id, props.mode, props.createMode, props.editMode], (newVal, oldVal) => {
+  // [FIX 2026-06-18] immediate 时 oldVal 是 undefined，不能解构成数组。
+  //   旧代码 [oldObjectType, oldId, ...] = undefined 报
+  //   "TypeError: undefined is not iterable (cannot read property Symbol(Symbol.iterator))"。
+  //   改为先取 newVal，内部检查 oldVal。
+  const [newObjectType, newId, newMode, newCreateMode, newEditMode] = newVal
+  const isFirstRun = oldVal === undefined
   if (isFirstRun) {
     // 首次执行：setup 已正确初始化 internalEditing；onMounted 会处理数据加载
     // 这里什么都不做，避免覆盖 internalEditing 和重复 fetch
     console.debug('[DetailPage] watch (first run): internalEditing initialized by setup, will fetch in onMounted')
-  } else {
+    return
+  }
+  const [oldObjectType, oldId, oldMode, oldCreateMode, oldEditMode] = oldVal
+  {
     const oldValid = !!(oldObjectType && oldId)
     const newValid = !!(newObjectType && newId)
 
