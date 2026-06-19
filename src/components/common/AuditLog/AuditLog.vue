@@ -350,9 +350,36 @@ const filteredLogs = computed(() => {
 
 const groupedLogs = computed(() => {
   const groups = new Map()
+  // [FIX 2026-06-19 C.2] 历史日志无 tx/trace 时, 按启发式归组
+  // 启发式规则: 同一 user + 同一 object_type + 同一 object_id + 时间窗口 2s 内, 视为同一操作
+  const HEURISTIC_WINDOW_MS = 2000
 
   for (const item of filteredLogs.value) {
-    const groupKey = item.trace_id || item.transaction_id || `single-${item.id}`
+    let groupKey = item.trace_id || item.transaction_id
+
+    if (!groupKey) {
+      // 尝试匹配已有启发式分组
+      const itemTime = new Date(item.created_at).getTime()
+      let matched = false
+      for (const [key, group] of groups) {
+        if (key.startsWith('heuristic-')) {
+          const groupTime = new Date(group.timestamp).getTime()
+          if (
+            Math.abs(itemTime - groupTime) < HEURISTIC_WINDOW_MS &&
+            group.user_name === item.user_name &&
+            group.object_type === item.object_type &&
+            String(group.object_id) === String(item.object_id)
+          ) {
+            groupKey = key
+            matched = true
+            break
+          }
+        }
+      }
+      if (!matched) {
+        groupKey = `heuristic-${item.user_name}-${item.object_type}-${item.object_id}-${item.id}`
+      }
+    }
 
     if (!groups.has(groupKey)) {
       groups.set(groupKey, {
