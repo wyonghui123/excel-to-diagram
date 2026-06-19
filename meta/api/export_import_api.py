@@ -189,7 +189,7 @@ def export_data():
         service = get_import_export_service()
 
         if scope == 'template':
-            result = service.export_template(selected_types, options)
+            result = service.export_template(selected_types, options, menu_code=menu_code)
         elif scope == 'cascade':
             result = service.export_cascade(
                 object_type, filters, options,
