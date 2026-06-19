@@ -184,7 +184,7 @@ def main():
         stash_count = len([l for l in stash_out.split("\n") if l.strip()])
 
         # Violation detection
-        prev_state = detect_and_record_violans(prev_state)
+        prev_state = detect_and_record_violations(prev_state)
 
         # Status log
         status = "OK" if fe_ok and be_ok else "WARN"
