@@ -27,6 +27,11 @@
 modified_files:
   - meta/api/export_import_api.py
   - meta/services/query_service.py
+  - meta/core/validation_messages.py
+  - meta/core/metadata_driven_validator.py
+  - meta/core/action_executor.py
+  - meta/schemas/relationship.yaml
+  - meta/services/import_export_service.py
   - src/components/common/ImportDialog/ImportDialog.vue
 
 new_files: []

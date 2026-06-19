@@ -90,47 +90,47 @@
         </div>
 
         <div v-else-if="previewResult" class="preview-result">
-          <el-alert
-            v-if="!hasValidationErrors"
-            title="数据校验通过"
-            type="success"
-            show-icon
-            :closable="false"
-          >
-            <template #default>
-              <p>共发现 <strong>{{ totalPreviewRows }}</strong> 条数据可以导入</p>
-            </template>
-          </el-alert>
+          <!-- [NEW v1.2.14 2026-06-19] 紧凑顶部摘要: 一行展示 alert + 统计条 -->
+          <div class="preview-summary">
+            <el-alert
+              v-if="!hasValidationErrors"
+              title="数据校验通过"
+              type="success"
+              show-icon
+              :closable="false"
+              class="preview-summary__alert"
+            >
+              <template #default>
+                <span>共 <strong>{{ totalPreviewRows }}</strong> 条数据可以导入</span>
+              </template>
+            </el-alert>
+            <el-alert
+              v-else
+              :title="`数据校验发现问题（${errorCount} 条）`"
+              type="warning"
+              show-icon
+              :closable="false"
+              class="preview-summary__alert"
+            />
 
-          <el-alert
-            v-else
-            title="数据校验发现问题"
-            type="warning"
-            show-icon
-            :closable="false"
-          >
-            <template #default>
-              <p>共 {{ totalPreviewRows }} 条数据，其中 {{ errorCount }} 条存在问题</p>
-            </template>
-          </el-alert>
-
-          <!-- [NEW v1.2.13 2026-06-19] Step 2 总览统计条 (紧凑 inline) -->
-          <div class="overview-strip overview-strip--inline">
-            <div class="overview-strip__item overview-strip__item--primary">
-              <span class="overview-strip__value overview-strip__value--primary">{{ totalPreviewRows }}</span>
-              <span class="overview-strip__label">总行数</span>
-            </div>
-            <div class="overview-strip__item" :class="previewSheetsCount > 0 ? 'overview-strip__item--info' : ''">
-              <span class="overview-strip__value" :class="previewSheetsCount > 0 ? 'overview-strip__value--info' : ''">{{ previewSheetsCount }}</span>
-              <span class="overview-strip__label">数据表数</span>
-            </div>
-            <div class="overview-strip__item overview-strip__item--danger">
-              <span class="overview-strip__value overview-strip__value--danger">{{ errorCount }}</span>
-              <span class="overview-strip__label">错误数</span>
-            </div>
-            <div class="overview-strip__item overview-strip__item--warning">
-              <span class="overview-strip__value overview-strip__value--warning">{{ previewWarningCount }}</span>
-              <span class="overview-strip__label">告警数</span>
+            <!-- [NEW v1.2.13 2026-06-19] Step 2 总览统计条 (紧凑 inline) -->
+            <div class="overview-strip overview-strip--inline overview-strip--compact">
+              <div class="overview-strip__item overview-strip__item--primary">
+                <span class="overview-strip__value overview-strip__value--primary">{{ totalPreviewRows }}</span>
+                <span class="overview-strip__label">总行数</span>
+              </div>
+              <div class="overview-strip__item" :class="previewSheetsCount > 0 ? 'overview-strip__item--info' : ''">
+                <span class="overview-strip__value" :class="previewSheetsCount > 0 ? 'overview-strip__value--info' : ''">{{ previewSheetsCount }}</span>
+                <span class="overview-strip__label">数据表数</span>
+              </div>
+              <div class="overview-strip__item" :class="errorCount > 0 ? 'overview-strip__item--danger' : ''">
+                <span class="overview-strip__value" :class="errorCount > 0 ? 'overview-strip__value--danger' : ''">{{ errorCount }}</span>
+                <span class="overview-strip__label">错误数</span>
+              </div>
+              <div class="overview-strip__item" :class="previewWarningCount > 0 ? 'overview-strip__item--warning' : ''">
+                <span class="overview-strip__value" :class="previewWarningCount > 0 ? 'overview-strip__value--warning' : ''">{{ previewWarningCount }}</span>
+                <span class="overview-strip__label">告警数</span>
+              </div>
             </div>
           </div>
 
@@ -217,78 +217,65 @@
       <!-- 步骤 4: 导入结果（统计 + 失败/告警明细） -->
       <div v-else-if="currentStep === 3" class="step-content">
         <div v-if="importResult" class="import-result">
-          <!-- 整体状态摘要 -->
-          <el-alert
-            v-if="!hasAnyFailure && !hasAnyWarning"
-            title="导入成功"
-            type="success"
-            show-icon
-            :closable="false"
-          >
-            <template #default>
-              <p>
-                成功导入 <strong>{{ totalSuccessCount }}</strong> 条数据
-                （创建 {{ totalCreatedCount }}、更新 {{ totalUpdatedCount }}、删除 {{ totalDeletedCount }}）
-              </p>
-            </template>
-          </el-alert>
+          <!-- [NEW v1.2.14 2026-06-19] 紧凑顶部摘要: alert + 6 列统计条 一行展示 -->
+          <div class="import-summary">
+            <el-alert
+              v-if="!hasAnyFailure && !hasAnyWarning"
+              :title="`导入成功（${totalSuccessCount} 条）`"
+              type="success"
+              show-icon
+              :closable="false"
+              class="import-summary__alert"
+            >
+              <template #default>
+                <span>创建 <strong>{{ totalCreatedCount }}</strong>、更新 <strong>{{ totalUpdatedCount }}</strong>、删除 <strong>{{ totalDeletedCount }}</strong></span>
+              </template>
+            </el-alert>
 
-          <el-alert
-            v-else-if="!hasAnyFailure && hasAnyWarning"
-            title="导入完成（存在告警）"
-            type="warning"
-            show-icon
-            :closable="false"
-          >
-            <template #default>
-              <p>
-                成功 <strong>{{ totalSuccessCount }}</strong> 条（创建 {{ totalCreatedCount }}、更新 {{ totalUpdatedCount }}、删除 {{ totalDeletedCount }}），
-                告警 <strong>{{ totalWarningCount }}</strong> 条
-              </p>
-            </template>
-          </el-alert>
+            <el-alert
+              v-else-if="!hasAnyFailure && hasAnyWarning"
+              :title="`导入完成（存在 ${totalWarningCount} 条告警）`"
+              type="warning"
+              show-icon
+              :closable="false"
+              class="import-summary__alert"
+            />
 
-          <el-alert
-            v-else
-            title="导入完成，但有错误"
-            type="error"
-            show-icon
-            :closable="false"
-          >
-            <template #default>
-              <p>
-                成功 <strong>{{ totalSuccessCount }}</strong> 条（创建 {{ totalCreatedCount }}、更新 {{ totalUpdatedCount }}、删除 {{ totalDeletedCount }}），
-                失败 <strong>{{ totalFailedCount }}</strong> 条
-                <span v-if="totalWarningCount > 0">，告警 {{ totalWarningCount }} 条</span>
-              </p>
-            </template>
-          </el-alert>
+            <el-alert
+              v-else
+              :title="`导入完成，但有 ${totalFailedCount} 条错误`"
+              type="error"
+              show-icon
+              :closable="false"
+              class="import-summary__alert"
+            />
 
-          <!-- [NEW v1.2.13 2026-06-19] Step 4 总览统计条 (紧凑 inline 6 列) -->
-          <div class="overview-strip overview-strip--inline overview-strip--result">
-            <div class="overview-strip__item overview-strip__item--success">
-              <span class="overview-strip__value overview-strip__value--success">{{ totalCreatedCount }}</span>
-              <span class="overview-strip__label">创建</span>
-            </div>
-            <div class="overview-strip__item overview-strip__item--primary">
-              <span class="overview-strip__value overview-strip__value--primary">{{ totalUpdatedCount }}</span>
-              <span class="overview-strip__label">更新</span>
-            </div>
-            <div class="overview-strip__item overview-strip__item--info">
-              <span class="overview-strip__value overview-strip__value--info">{{ totalDeletedCount }}</span>
-              <span class="overview-strip__label">删除</span>
-            </div>
-            <div class="overview-strip__item overview-strip__item--warning">
-              <span class="overview-strip__value overview-strip__value--warning">{{ totalSkippedCount }}</span>
-              <span class="overview-strip__label">跳过</span>
-            </div>
-            <div class="overview-strip__item overview-strip__item--danger">
-              <span class="overview-strip__value overview-strip__value--danger">{{ totalFailedCount }}</span>
-              <span class="overview-strip__label">失败</span>
-            </div>
-            <div class="overview-strip__item overview-strip__item--orange">
-              <span class="overview-strip__value overview-strip__value--orange">{{ totalWarningCount }}</span>
-              <span class="overview-strip__label">告警</span>
+            <!-- [NEW v1.2.13 2026-06-19] Step 4 总览统计条 (紧凑 inline 6 列) -->
+            <div class="overview-strip overview-strip--inline overview-strip--compact overview-strip--result">
+              <div class="overview-strip__item overview-strip__item--success">
+                <span class="overview-strip__value overview-strip__value--success">{{ totalCreatedCount }}</span>
+                <span class="overview-strip__label">创建</span>
+              </div>
+              <div class="overview-strip__item overview-strip__item--primary">
+                <span class="overview-strip__value overview-strip__value--primary">{{ totalUpdatedCount }}</span>
+                <span class="overview-strip__label">更新</span>
+              </div>
+              <div class="overview-strip__item overview-strip__item--info">
+                <span class="overview-strip__value overview-strip__value--info">{{ totalDeletedCount }}</span>
+                <span class="overview-strip__label">删除</span>
+              </div>
+              <div class="overview-strip__item" :class="totalSkippedCount > 0 ? 'overview-strip__item--warning' : ''">
+                <span class="overview-strip__value" :class="totalSkippedCount > 0 ? 'overview-strip__value--warning' : ''">{{ totalSkippedCount }}</span>
+                <span class="overview-strip__label">跳过</span>
+              </div>
+              <div class="overview-strip__item" :class="totalFailedCount > 0 ? 'overview-strip__item--danger' : ''">
+                <span class="overview-strip__value" :class="totalFailedCount > 0 ? 'overview-strip__value--danger' : ''">{{ totalFailedCount }}</span>
+                <span class="overview-strip__label">失败</span>
+              </div>
+              <div class="overview-strip__item" :class="totalWarningCount > 0 ? 'overview-strip__item--orange' : ''">
+                <span class="overview-strip__value" :class="totalWarningCount > 0 ? 'overview-strip__value--orange' : ''">{{ totalWarningCount }}</span>
+                <span class="overview-strip__label">告警</span>
+              </div>
             </div>
           </div>
 
@@ -1289,9 +1276,38 @@ function handleClose() {
   padding: 0;
 }
 
-.preview-result .el-alert,
-.import-result .el-alert {
+.preview-result > .el-alert,
+.import-result > .el-alert {
   margin-bottom: var(--spacing-lg);
+}
+
+// [NEW v1.2.14 2026-06-19] 紧凑顶部摘要: alert + 统计条 一行展示
+.preview-summary,
+.import-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--el-fill-color-blank, #fff);
+  border: 1px solid var(--el-border-color-light, #e4e7ed);
+  border-radius: var(--radius-sm, 4px);
+
+  &__alert {
+    flex: 1 1 auto;
+    min-width: 200px;
+    margin-bottom: 0 !important;
+    padding: 4px var(--spacing-sm);
+
+    :deep(.el-alert__content) {
+      padding: 0 var(--spacing-xs);
+    }
+
+    :deep(.el-alert__title) {
+      font-size: var(--el-font-size-base, 14px);
+    }
+  }
 }
 
 .sheets-info,
