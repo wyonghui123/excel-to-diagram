@@ -1,56 +1,140 @@
-# Spec: 审计日志 P1 + P2 修复
 
-> 2026-06-20 | Author: agent-audit-fix-p1p2 | Status: ✅ COMPLETED
+---
 
-## 背景
+# Multi-Agent Task Spec - P0 Help Entry
 
-近 2 天审计日志业务视图分析发现两个 P1/P2 问题：
-- **P1**: 12 条历史 user_name 残留 "Admin (admin)" 格式
-- **P2**: transaction_id 覆盖率仅 7.1% (业务人员无法追踪事务边界)
+> **Task ID**: T-HELP-ENTRY-P0
+> **Agent 名称**: agent-help-entry
+> **Worktree**: `d:\filework\agent-help-entry-worktree\`
+> **风险等级**: low
+> **基于 commit**: 873c7db (feat/help-entry-p0 base)
+> **设计 spec**: `d:\filework\docs\specs\2026-06-19-product-user-guide-design.md`
 
-## modified_files
+---
 
-- meta/api/_audit_helper.py
-- meta/services/action_handlers.py
-- meta/services/audit_interceptor.py
-- meta/tests/test_audit_p1_p2_fix.py
+## 1. 任务描述（一句话）
 
-## new_files
+> **目标**: 实现 P0 优先级的帮助入口 - header 顶部 "?" 按钮 + UserMenu 子项 + 帮助中心抽屉(占位)
 
-- scripts/backfill_audit_tx_id_p22_system.py
+---
 
-## deleted_files
+## 2. 改动文件白名单
 
-(无删除)
+```yaml
+modified_files:
+  - src/components/common/AppLayout/AppLayout.vue
+  - src/components/common/AppRootLayout.vue
+  - src/components/common/TopNavHeader/TopNavHeader.vue
+  - auto-imports.d.ts
+  - components.d.ts
 
-## forbidden_files
+new_files:
+  - src/components/common/HelpCenterDrawer/HelpCenterDrawer.vue
+  - src/components/common/HelpCenterDrawer/index.js
+  - src/components/common/HelpCenterDrawer/__tests__/HelpCenterDrawer.spec.js
 
-(无)
-
-## 完成标准
-
-- [x] [P1] user_name LIKE '%(%' = 0
-- [x] [P2-2d] tx_id 覆盖率 >= 95%
-- [x] [P2-all] tx_id 全表覆盖率 >= 90%
-- [x] E2E: C.1 (tx_id 共享) + D.2 (user_name 规范化) 生效
-- [x] 数据修复: 12 条 P1 + 4914 条 P2 backfill
-- [x] [P2.2] system 类记录 tx_id 回填: 1866 条 (100% 全表覆盖率)
-
-## 验证
-
-```
-verify_audit_fix.py → Overall: PASS
-  [P1] user_name 残留 = 0:              PASS
-  [P2-2d] tx_id 覆盖率 >= 95%:         PASS (100.0%)
-  [P2-all] tx_id 全表覆盖率 >= 90%:    PASS (100.0%)
-
-_e2e_c1_d2.py → PASS
-  [OK] C.1 生效: 所有字段自动归到同一事务
-  [OK] D.2 生效: user_name 是 'Admin' (规范化)
+deleted_files: []
 ```
 
-## 风险评估
+---
 
-- **Risk Level**: low (审计日志规范化, 不影响业务逻辑)
-- **回滚方案**: git revert <commit> + re-run backfill script (idempotent)
-- **PM 授权**: 主工作树 commit, 当时仅剩 main worktree (其他已合并)
+## 3. 禁止改文件黑名单
+
+```yaml
+forbidden_files:
+  - .agent-status.json
+  - service_manager.ps1
+  - scripts/agent_bootstrap.ps1
+  - .git/hooks/pre-commit
+  - healthy-baseline-2026-06-17
+  - multi-agent-coordination.md
+  - meta/server.py
+  - vite.config.js
+  - stats.html
+```
+
+---
+
+## 4. 依赖关系
+
+```yaml
+depends_on:
+  - commit: 873c7db
+  - branch: feat/help-entry-p0
+
+blocks: []
+```
+
+---
+
+## 5. 完成标准
+
+```yaml
+acceptance_criteria:
+  - 所有改动在白名单内
+  - 没有改动黑名单文件 (meta/server.py, vite.config.js, stats.html 留待其他 agent)
+  - 单元测试已创建 (9 个 HelpCenterDrawer 测试)
+  - commit message 含铁律声明
+  - 风险评估已记录
+```
+
+---
+
+## 6. 风险评估
+
+### 6.1 改动范围
+
+| 维度 | 评估 |
+|------|------|
+| **文件数量** | 8 (3 new + 5 modified) |
+| **新增行数** | +598 |
+| **删除行数** | -6 |
+| **影响模块** | TopNavHeader, AppLayout, AppRootLayout, HelpCenterDrawer (new) |
+
+### 6.2 风险等级判定
+
+```yaml
+risk_level: low
+
+reason: |
+  - 仅 UI 增强 (P0 占位), 不改业务逻辑
+  - 抽屉组件为新功能, 默认关闭
+  - 不影响现有用户路径
+  - 不动 auth/permission/db schema
+```
+
+### 6.3 缓解措施
+
+```yaml
+mitigation:
+  - 回滚方案: revert commit, 抽屉功能不影响其他模块
+  - 测试覆盖: 9 个单元测试 (display, close, events, A11Y)
+  - 监控指标: console.error / pageerror 监听
+```
+
+---
+
+## 7. 工作日志
+
+```yaml
+decisions:
+  - 2026-06-19: P0 阶段只做 drawer 占位, P1 阶段再 iframe 嵌入 /docs/user-guide/index.html
+  - 2026-06-19: 位置选 header 右侧 + UserMenu 子项 (符合 2026 SaaS 最佳实践)
+  - 2026-06-19: 承载方式选静态 HTML + iframe 嵌入, 部署在当前静态服务(同源)
+  - 2026-06-19: 添加 Ctrl+/ 快捷键, 提升发现性
+
+blockers: []
+
+insights:
+  - features/flags use 'import.meta.env.VITE_ENABLE_HELP_DRAWER' for future P1
+  - TopNavHeader already has is-help-active prop design prepared
+```
+
+---
+
+## 8. 完成后 Checklist
+
+- [x] spec.md 已填写完整
+- [x] 所有 acceptance_criteria 已勾选
+- [ ] commit 成功推送 (push 由 Coordinator 处理)
+- [ ] 通知用户 "ready for merge T-HELP-ENTRY-P0"

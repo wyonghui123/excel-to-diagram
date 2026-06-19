@@ -6,12 +6,14 @@
         :logo-alt="logoAlt"
         :logo-text="logoText"
         :breadcrumbs="breadcrumbs"
+        :is-help-active="isHelpActive"
         @logo-click="handleLogoClick"
         @notification-click="$emit('notification-click')"
         @user-command="$emit('user-command', $event)"
         @ai-click="$emit('ai-click')"
         @favorites-click="$emit('favorites-click')"
         @recent-click="$emit('recent-click')"
+        @help-click="handleHelpClick"
       />
     </template>
 
@@ -106,6 +108,10 @@ const props = defineProps({
   breadcrumbs: {
     type: Array,
     default: () => []
+  },
+  isHelpActive: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -120,7 +126,8 @@ const emit = defineEmits([
   'sidebar-collapse',
   'ai-click',
   'favorites-click',
-  'recent-click'
+  'recent-click',
+  'help-click'
 ])
 
 const router = useRouter()
@@ -161,6 +168,10 @@ function toggleSidebar() {
 
 function handleLogoClick() {
   emit('logo-click')
+}
+
+function handleHelpClick(payload) {
+  emit('help-click', payload)
 }
 
 function handleSidebarSelect(key) {

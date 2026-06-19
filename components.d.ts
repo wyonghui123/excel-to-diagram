@@ -144,6 +144,7 @@ declare module 'vue' {
     FrequentProductsSection: typeof import('./src/components/FrequentProductsSection.vue')['default']
     GlobalSearch: typeof import('./src/components/common/GlobalSearch/GlobalSearch.vue')['default']
     GlobalToolbar: typeof import('./src/components/common/GlobalToolbar/GlobalToolbar.vue')['default']
+    HelpCenterDrawer: typeof import('./src/components/common/HelpCenterDrawer/HelpCenterDrawer.vue')['default']
     HistorySection: typeof import('./src/components/common/ObjectPage/HistorySection.vue')['default']
     ImpactPreview: typeof import('./src/components/common/ImpactPreview/ImpactPreview.vue')['default']
     ImportDialog: typeof import('./src/components/common/ImportDialog/ImportDialog.vue')['default']

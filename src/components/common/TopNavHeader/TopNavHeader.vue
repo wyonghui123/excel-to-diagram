@@ -25,6 +25,26 @@
     </div>
 
     <div class="app-header__right">
+      <el-tooltip
+        :content="helpTooltipText"
+        placement="bottom"
+        :show-after="300"
+      >
+        <button
+          type="button"
+          class="app-header__help-btn"
+          :class="{ 'is-active': isHelpActive }"
+          aria-label="Help Center"
+          data-testid="help-center-btn"
+          @click="handleHelpClick"
+        >
+          <el-icon :size="18" class="app-header__help-icon">
+            <QuestionFilled />
+          </el-icon>
+          <kbd class="app-header__shortcut-hint">Ctrl+/</kbd>
+        </button>
+      </el-tooltip>
+
       <UserMenu
         :user="currentUser"
         :menu-items="userMenuItems"
@@ -36,8 +56,9 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { QuestionFilled } from '@element-plus/icons-vue'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { useAppStore } from '@/stores/appStore'
 import { useAuthStore } from '@/stores/authStore'
@@ -66,8 +87,19 @@ const props = defineProps({
     type: Array,
     default: () => [
       { key: 'profile', label: '个人设置', icon: 'User' },
-      { key: 'logout', label: '退出登录', icon: 'SwitchButton', danger: true }
+      { key: 'help', label: '帮助中心', icon: 'QuestionFilled', divided: true },
+      { key: 'shortcuts', label: '快捷键', icon: 'Key' },
+      { key: 'feedback', label: '意见反馈', icon: 'EditPen' },
+      { key: 'logout', label: '退出登录', icon: 'SwitchButton', danger: true, divided: true }
     ]
+  },
+  isHelpActive: {
+    type: Boolean,
+    default: false
+  },
+  enableGlobalShortcut: {
+    type: Boolean,
+    default: true
   }
 })
 
@@ -79,7 +111,8 @@ const emit = defineEmits([
   'user-command',
   'ai-click',
   'favorites-click',
-  'recent-click'
+  'recent-click',
+  'help-click'
 ])
 
 const router = useRouter()
@@ -99,6 +132,37 @@ const currentUser = computed(() => {
 })
 const notificationCount = computed(() => notificationStore.unreadCount)
 
+const isMac = ref(false)
+const shortcutKey = ref('Ctrl+/')
+const helpTooltipText = computed(() => `帮助中心 (${shortcutKey.value})`)
+
+function detectPlatform() {
+  if (typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '')) {
+    isMac.value = true
+    shortcutKey.value = 'Cmd+/'
+  }
+}
+
+function handleGlobalKeydown(e) {
+  if (!props.enableGlobalShortcut) return
+
+  const target = e.target
+  const tag = target?.tagName?.toLowerCase()
+  const isEditable =
+    tag === 'input' || tag === 'textarea' || target?.isContentEditable === true
+
+  if (isEditable) return
+
+  if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+    e.preventDefault()
+    handleHelpClick()
+  }
+}
+
+function handleHelpClick() {
+  emit('help-click', { source: 'header-btn' })
+}
+
 function handleLogoClick() {
   emit('logo-click')
   router.push('/')
@@ -107,6 +171,15 @@ function handleLogoClick() {
 function handleUserCommand(key) {
   emit('user-command', key)
 }
+
+onMounted(() => {
+  detectPlatform()
+  document.addEventListener('keydown', handleGlobalKeydown)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleGlobalKeydown)
+})
 </script>
 
 <style scoped>
@@ -196,6 +269,60 @@ function handleUserCommand(key) {
 .app-header__recent-btn:hover {
   background: var(--el-fill-color-light, #f5f7fa);
   color: var(--yonyou-orange-600, #ea580c);
+}
+
+.app-header__help-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs, 4px);
+  padding: 6px 10px;
+  border: 1px solid var(--el-border-color, #e5e6eb);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--el-text-color-regular, #606266);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.app-header__help-btn:hover,
+.app-header__help-btn.is-active {
+  border-color: var(--yonyou-orange-600, #ea580c);
+  color: var(--yonyou-orange-600, #ea580c);
+  background: rgba(234, 88, 12, 0.06);
+}
+
+.app-header__help-btn:focus-visible {
+  outline: 2px solid var(--yonyou-orange-500, #f97316);
+  outline-offset: 2px;
+}
+
+.app-header__help-icon {
+  display: flex;
+  align-items: center;
+}
+
+.app-header__shortcut-hint {
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--el-text-color-secondary, #909399);
+  padding: 1px 4px;
+  border: 1px solid var(--el-border-color-light, #ebeef5);
+  border-radius: 3px;
+  background: var(--el-fill-color-blank, #ffffff);
+  line-height: 1.4;
+}
+
+.app-header__help-btn:hover .app-header__shortcut-hint,
+.app-header__help-btn.is-active .app-header__shortcut-hint {
+  color: var(--yonyou-orange-600, #ea580c);
+  border-color: rgba(234, 88, 12, 0.3);
+}
+
+@media (max-width: 768px) {
+  .app-header__shortcut-hint {
+    display: none;
+  }
 }
 
 .app-header__ai-btn {

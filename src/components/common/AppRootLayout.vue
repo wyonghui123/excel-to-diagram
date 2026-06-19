@@ -5,11 +5,12 @@
     :sidebar-items="navigationItems"
     :sidebar-active="currentRoute"
     :logo-text="'BIP应用架构管理'"
+    :is-help-active="helpOpen"
     @sidebar-select="handleNavigation"
     @logo-click="goHome"
     @user-command="handleUserCommand"
+    @help-click="openHelp"
   >
-    <!-- [NEW BMRD 2026-06-14] E34: 在工具栏 (header-actions 插槽) 加 LocaleSwitcher -->
     <template #header-actions>
       <LocaleSwitcher />
     </template>
@@ -20,6 +21,15 @@
     v-if="showAccountDialog"
     :visible="showAccountDialog"
     @close="showAccountDialog = false"
+  />
+
+  <HelpCenterDrawer
+    v-if="helpDrawerEnabled"
+    v-model="helpOpen"
+    :width="800"
+    help-url="/docs/user-guide/index.html"
+    @close="handleHelpClose"
+    @open-in-new-tab="handleHelpOpenInNewTab"
   />
 
   <div v-if="showOfflineBanner" class="offline-banner">
@@ -37,7 +47,8 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { AppLayout } from '@/components/common'
-import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'  // [BMRD 2026-06-14] E34
+import { HelpCenterDrawer } from '@/components/common/HelpCenterDrawer'
+import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import AccountSettingsDialog from '@/components/AccountSettingsDialog.vue'
 import { useTabStore } from '@/stores/tabStore'
 import { useAuthStore } from '@/stores/authStore'
@@ -55,6 +66,20 @@ const menuCache = useMenuCache()
 
 const showAccountDialog = ref(false)
 const menuLoadError = ref(null)
+const helpOpen = ref(false)
+const helpDrawerEnabled = ref(true)
+
+function openHelp(_payload) {
+  helpOpen.value = true
+}
+
+function handleHelpClose() {
+  helpOpen.value = false
+}
+
+function handleHelpOpenInNewTab(url) {
+  console.info('[HelpCenter] open in new tab:', url)
+}
 
 const USE_API_MENU = true
 
@@ -249,6 +274,12 @@ function findItemByKey(items, key) {
 async function handleUserCommand(command) {
   if (command === 'account' || command === 'profile') {
     showAccountDialog.value = true
+  } else if (command === 'help') {
+    openHelp({ source: 'user-menu' })
+  } else if (command === 'shortcuts') {
+    openHelp({ source: 'user-menu', anchor: 'shortcuts' })
+  } else if (command === 'feedback') {
+    openHelp({ source: 'user-menu', anchor: 'feedback' })
   } else if (command === 'logout') {
     // [FIX v1.0.4 2026-06-09] 修复 admin 退出后用 TEST60 登录看到 admin 菜单的问题
     // 原 bug: 1) authStore.logout() 是 async 但未 await → router.push 抢跑
