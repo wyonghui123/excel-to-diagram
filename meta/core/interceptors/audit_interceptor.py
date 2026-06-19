@@ -165,27 +165,62 @@ class AuditInterceptor(Interceptor):
                 return row
             cols = [desc[0] for desc in cursor.description]
             return dict(zip(cols, row))
-        
+
         return {}
+
+    def _resolve_canonical_user_name(self, context: ActionContext) -> str:
+        """[FIX 2026-06-19 D.2] 统一解析 user_name
+
+        优先级:
+        1. flask.g.current_user.display_name (业务友好, 例如 "系统管理员")
+        2. flask.g.current_user.username (例如 "admin")
+        3. context.user_name (兜底)
+        4. context.user_id (最后兜底)
+
+        业务人员之前看到 5 种格式 (Admin/admin/系统管理员/Self Updated Name (admin)/系统管理员 (admin))
+        现在统一只有 1 种 (display_name 或 username)
+        """
+        try:
+            from flask import g
+            _cu = getattr(g, 'current_user', None) or {}
+            _display = _cu.get('display_name') or ''
+            _username = _cu.get('username') or ''
+            if _display:
+                return _display
+            if _username:
+                return _username
+        except RuntimeError:
+            # 非 Flask 上下文 (例如异步/测试)
+            pass
+        if context.user_name:
+            return context.user_name
+        if context.user_id:
+            return str(context.user_id)
+        return 'system'
     
     def _log_create(self, context: ActionContext, config: AuditActionConfig) -> None:
         """记录创建审计日志"""
         new_data = context.result.data or {}
-        
+
         fields_to_log = self._get_fields_to_log(
             context.meta_object,
             {},
             new_data,
             config,
         )
-        
+
+        # [FIX 2026-06-19 D.2] 业务人员看到的 user_name 统一
+        # 之前 context.user_name 是 'admin' (username), 业务人员区分不出 'Admin (admin)' 等
+        # 现在用 display_name 优先, 缺失时回退到 username
+        canonical_user_name = self._resolve_canonical_user_name(context)
+
         for field in fields_to_log:
             self._structured_logger.log_business(
                 action='CREATE',
                 object_type=context.object_type,
                 object_id=context.object_id,
                 user_id=context.user_id,
-                user_name=context.user_name,
+                user_name=canonical_user_name,
                 field_name=field,
                 old_data=None,
                 new_data={'value': new_data.get(field, '')},
@@ -218,7 +253,7 @@ class AuditInterceptor(Interceptor):
                     object_type=context.object_type,
                     object_id=context.object_id,
                     user_id=context.user_id,
-                    user_name=context.user_name,
+                    user_name=self._resolve_canonical_user_name(context),
                     field_name=field,
                     old_data={'value': old_val} if old_val is not None else None,
                     new_data={'value': new_val} if new_val is not None else None,
@@ -259,7 +294,7 @@ class AuditInterceptor(Interceptor):
                 object_type=context.object_type,
                 object_id=context.object_id,
                 user_id=context.user_id,
-                user_name=context.user_name,
+                user_name=self._resolve_canonical_user_name(context),
                 field_name=field,
                 old_data={'value': old_data.get(field, '')},
                 new_data=None,
@@ -279,18 +314,10 @@ class AuditInterceptor(Interceptor):
         """
         if _AUDIT_DEBUG:
             logger.debug(f"[AuditInterceptor] _log_association_event ENTER: action={action}")
-        # [FIX 2026-06-12] context.user_name 只是 'admin', 从 g.current_user 提取带 display_name 的格式
-        try:
-            from flask import g
-            _cu = getattr(g, 'current_user', None) or {}
-            _display = _cu.get('display_name') or ''
-            _username = _cu.get('username') or ''
-            if _display and _username and _display != _username:
-                formatted_user_name = f"{_display} ({_username})"
-            else:
-                formatted_user_name = _display or _username or context.user_name or ''
-        except RuntimeError:
-            formatted_user_name = context.user_name
+        # [FIX 2026-06-19 D.2] 使用 _resolve_canonical_user_name 统一处理
+        # 之前格式 "display (username)" 会导致业务人员看到 "系统管理员 (admin)" 这种重复
+        # 现在统一只用 display_name (缺失时回退 username), 与 CRUD 事件保持一致
+        formatted_user_name = self._resolve_canonical_user_name(context)
 
         params = context.params
         tgt_type = params.get('tgt_type')
