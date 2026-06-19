@@ -113,7 +113,33 @@ if (-not (Test-Path $coordDir)) {
 }
 
 if (Test-Path $portsFile) {
-    $ports = Get-Content $portsFile -Raw | ConvertFrom-Json
+    # Convert from JSON (PSCustomObject -> Hashtable via @())
+    $jsonContent = Get-Content $portsFile -Raw | ConvertFrom-Json
+    $ports = @{
+        allocated = @{}
+        reserved = @{}
+    }
+    if ($jsonContent.allocated) {
+        foreach ($key in $jsonContent.allocated.PSObject.Properties) {
+            $ports.allocated[$key.Name] = @{
+                owner = $key.Value.owner
+                role = $key.Value.role
+                status = $key.Value.status
+            }
+            if ($key.Value.worktree) { $ports.allocated[$key.Name].worktree = $key.Value.worktree }
+            if ($key.Value.branch) { $ports.allocated[$key.Name].branch = $key.Value.branch }
+            if ($key.Value.allocated_at) { $ports.allocated[$key.Name].allocated_at = $key.Value.allocated_at }
+        }
+    }
+    if ($jsonContent.reserved) {
+        foreach ($key in $jsonContent.reserved.PSObject.Properties) {
+            $ports.reserved[$key.Name] = @{
+                owner = $key.Value.owner
+                role = $key.Value.role
+                status = $key.Value.status
+            }
+        }
+    }
 } else {
     $ports = @{
         allocated = @{}
