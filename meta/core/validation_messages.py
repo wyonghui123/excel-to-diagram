@@ -45,9 +45,13 @@ _ZH_CN_MESSAGES = {
     "validation.field.immutable": "{field_name} 创建后不可修改",
     "validation.field.no_delete": "{field_name} 为 {value} 时不可删除",
     "validation.field.unique_scope": "{field_name} 在范围内不唯一",
-    "validation.field.fk_not_found": "引用的{target_name}不存在",
+    "validation.field.fk_not_found": "引用的{target_name}不存在（{field_name}={value}）",
+    # [NEW v1.2.13 2026-06-19] 区分单/多字段业务关键字
+    "validation.object.business_key_single": "【业务关键字】{field_name} 值已存在：{value}",
     "validation.object.business_key_composite": "【业务关键字】{field_names} 组合值已存在：{values}",
     # [SIMPLIFIED 2026-06-15 BMRD] 移除括号中的 index_name (技术细节, 用户不关心)
+    # [NEW v1.2.13 2026-06-19] 区分单/多字段唯一索引
+    "validation.object.index_unique_single": "唯一性冲突：{field_name} 值已存在",
     "validation.object.index_unique": "唯一性冲突：{field_names} 组合值已存在",
     "validation.object.addability_denied": "{message}",
     "validation.object.deletability_denied": "{message}",
