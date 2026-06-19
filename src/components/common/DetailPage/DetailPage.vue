@@ -891,7 +891,13 @@ watch(() => props.modelValue, (val) => {
 
 onMounted(() => {
   if (effectiveMode.value === 'add') {
-    data.value = {}
+    // [FIX 2026-06-18] add 模式保护：onMounted 只在真正首次 mount 时清空 data。
+    //   如果 ObjectDetailPage 被 keep-alive 缓存（detailPageEverMounted=true），
+    //   DetailPage 不 unmount，onMounted 不重复触发。
+    //   但防御性判断：data 已存在就不动它。
+    if (data.value === null) {
+      data.value = {}
+    }
     if (selectedVersionId.value) {
       data.value.version_id = selectedVersionId.value
     }
@@ -960,16 +966,20 @@ watch(() => [props.objectType, props.id, props.mode, props.createMode, props.edi
     const oldValid = !!(oldObjectType && oldId)
     const newValid = !!(newObjectType && newId)
 
+    // [FIX 2026-06-18] 记录 watch 触发前 data 引用，用于 add 模式保护
+    const _dataBeforeWatch = data.value
+    const _isAddRoute = effectiveMode.value === 'add' || newId === 'new'
+
     if (oldValid && !newValid) {
       // 场景：用户在 app 顶部 tab 切走 (route 变化导致 objectType/id 变 undefined)
       // → 保留所有状态，等待 onActivated 时恢复
-      console.debug('[DetailPage] watch (route left): preserve state, internalEditing=', internalEditing.value)
+      console.debug('[DetailPage] watch (route left): preserve state, internalEditing=', internalEditing.value, 'data keys:', _dataBeforeWatch ? Object.keys(_dataBeforeWatch).length : 0)
     } else if (newValid && (newObjectType !== oldObjectType || newId !== oldId)) {
       // 场景：切换到不同对象 → 重置 internalEditing
       metaLoaded.value = false
       entityMeta.value = null
       internalEditing.value = effectiveMode.value === 'add' || effectiveMode.value === 'edit'
-      console.debug('[DetailPage] watch (new object): reset editing, internalEditing=', internalEditing.value)
+      console.debug('[DetailPage] watch (new object): reset editing, internalEditing=', internalEditing.value, 'data keys:', _dataBeforeWatch ? Object.keys(_dataBeforeWatch).length : 0)
     } else {
       // 场景：同一对象 mode/createMode/editMode 变化
       //   - effectiveMode 变 'add'/'edit' → 进入编辑态
@@ -977,15 +987,40 @@ watch(() => [props.objectType, props.id, props.mode, props.createMode, props.edi
       if (effectiveMode.value === 'add' || effectiveMode.value === 'edit') {
         internalEditing.value = true
       }
-      console.debug('[DetailPage] watch (same object, mode change): internalEditing=', internalEditing.value)
+      console.debug('[DetailPage] watch (same object, mode change): internalEditing=', internalEditing.value, 'data keys:', _dataBeforeWatch ? Object.keys(_dataBeforeWatch).length : 0)
     }
 
     if (effectiveMode.value === 'add') {
-      data.value = {}
-      if (selectedVersionId.value) {
-        data.value.version_id = selectedVersionId.value
+      // [FIX 2026-06-18] add 模式保护：data 是用户已填的，**永远不应该**被 watch 清空。
+      //   真正"add 模式初始化 data={}" 只在 onMounted 首次跑一次。
+      //   之后所有 watch 触发（无论原因）都保留 data。
+      //
+      //   旧 BUG：切到 app 顶部 tab 再切回，data 会被清空。
+      //   可能的触发源：
+      //     1) props.mode 抖动（已用 lastValidMode 缓存，理论上不会）
+      //     2) props.id 抖动（已用 lastValidId 缓存）
+      //     3) 子组件/parent 的 watch 链式触发
+      //     4) useVersionContext / useFormCascade 等 composable 的副作用
+      //   不管原因是什么，add 模式下 data 必须是 user-managed，唯一清空点是 onMounted。
+      //
+      //   修复：检查"是否首次 mount + add 模式"：
+      //     - 首次 mount: data 之前是 null（setup 初始化）→ 走 onMounted 的初始化
+      //     - 后续 watch: data 已有用户输入 → 保留
+      //
+      //   简化判断：只有当 data 引用变了（或之前不是对象）才允许清空。
+      //   这里用最稳的判断：data 已经初始化过（非 null），就不动它。
+      if (data.value === null) {
+        // 首次 add 模式（onMounted 还没跑，但 watch 立即触发）：初始化空 data
+        data.value = {}
+        if (selectedVersionId.value) {
+          data.value.version_id = selectedVersionId.value
+        }
+        loading.value = false
+        console.debug('[DetailPage] watch (add mode, first init): set data={}')
+      } else {
+        // add 模式 + data 已存在：保留用户输入
+        console.debug('[DetailPage] watch (add mode, preserve): data keys=', Object.keys(data.value).length, '_dataBeforeWatch ref:', _dataBeforeWatch === data.value)
       }
-      loading.value = false
     } else if (oldValid && newValid) {
       // 同一对象内的 mode 变化（如 view→edit）：不重新 fetch，避免丢失未保存编辑
       // 真正"切到不同对象"已经走 newValid && newObjectType!==oldObjectType 分支，会在 onMounted 后由 onActivated 刷新
@@ -1007,7 +1042,15 @@ watch(selectedVersionId, () => {
 
 async function fetchData(options = {}) {
   if (props.mode === 'add' || props.id === 'new' || !props.id) {
-    data.value = {}
+    // [FIX 2026-06-18] add 模式保护：fetchData 永远不覆盖已有 data。
+    //   原 BUG：watch 在某种情况下会触发 fetchData()（如切走切回），
+    //   旧代码直接 data.value = {} 清空用户已填字段。
+    //   修复：只有当 data 未初始化（null）时才清空。
+    if (data.value === null) {
+      data.value = {}
+    } else {
+      console.debug('[DetailPage] fetchData (add mode, preserve): data keys=', Object.keys(data.value).length)
+    }
     loading.value = false
     return
   }
