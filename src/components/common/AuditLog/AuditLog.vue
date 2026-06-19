@@ -105,51 +105,68 @@
           </div>
 
           <div v-if="expandedGroups.has(group.key)" class="al-group-items">
-            <div
-              v-for="item in group.items"
-              :key="item.id"
-              :class="['al-item', { 'al-item--clickable': clickMode }]"
-              @click="handleLogClick(item)"
-            >
-              <div class="al-detail al-detail--associate" v-if="item.action === 'ASSOCIATE' || item.action === 'ASSIGN'">
-                <span class="al-field">{{ getFieldLabel(item.field_name) || '关联' }}:</span>
-                <span class="al-associate-add">+ {{ parseTargetDisplay(item.new_value) }}</span>
+            <AppCollapse v-if="group.items.length > 0" :default-expanded="true" class="al-items-collapse">
+              <template #title>
+                <span class="al-items-summary">
+                  <span class="al-items-icon">●</span>
+                  主对象字段变更
+                  <el-tag size="small" type="info" effect="plain">{{ group.items.length }} 项</el-tag>
+                </span>
+              </template>
+              <div class="al-items-list">
+                <div
+                  v-for="item in group.items"
+                  :key="item.id"
+                  :class="['al-item', { 'al-item--clickable': clickMode }]"
+                  @click="handleLogClick(item)"
+                >
+                  <div class="al-detail al-detail--associate" v-if="item.action === 'ASSOCIATE' || item.action === 'ASSIGN'">
+                    <span class="al-field">{{ getFieldLabel(item.field_name) || '关联' }}:</span>
+                    <span class="al-associate-add">+ {{ parseTargetDisplay(item.new_value) }}</span>
+                  </div>
+                  <div class="al-detail al-detail--dissociate" v-else-if="item.action === 'DISSOCIATE' || item.action === 'REVOKE'">
+                    <span class="al-field">{{ getFieldLabel(item.field_name) || '关联' }}:</span>
+                    <span class="al-associate-remove">- {{ parseTargetDisplay(item.old_value) }}</span>
+                  </div>
+                  <div class="al-detail al-detail--batch-associate" v-else-if="item._batch_associate">
+                    <span class="al-field">{{ getFieldLabel(item.field_name) || '关联' }}:</span>
+                    <span class="al-associate-add">+ {{ formatBatchTargets(item._batch_targets) }}</span>
+                  </div>
+                  <div class="al-detail" v-else-if="item.field_name">
+                    <span class="al-field">{{ getFieldLabel(item.field_name) }}:</span>
+                    <span class="al-old">{{ getFieldValueDisplay(item.old_value, item.field_name) }}</span>
+                    <span class="al-arrow">→</span>
+                    <span class="al-new">{{ getFieldValueDisplay(item.new_value, item.field_name) }}</span>
+                  </div>
+                  <div class="al-detail al-detail--create" v-else-if="item.action === 'CREATE'">
+                    <span>创建记录</span>
+                  </div>
+                  <div class="al-detail al-detail--delete" v-else-if="item.action === 'DELETE'">
+                    <span>删除记录</span>
+                  </div>
+                  <div class="al-detail" v-else>
+                    <span>{{ item.action }}</span>
+                  </div>
+                  <div v-if="item._source && item._source !== 'own'" class="al-source-badge">
+                    {{ formatSource(item._source, item._child_type) }}
+                  </div>
+                  <div v-else-if="item._cascade_from && !item._source" class="al-cascade-from">
+                    由 {{ item._cascade_from.type }} 级联操作
+                  </div>
+                </div>
               </div>
-              <div class="al-detail al-detail--dissociate" v-else-if="item.action === 'DISSOCIATE' || item.action === 'REVOKE'">
-                <span class="al-field">{{ getFieldLabel(item.field_name) || '关联' }}:</span>
-                <span class="al-associate-remove">- {{ parseTargetDisplay(item.old_value) }}</span>
-              </div>
-              <div class="al-detail al-detail--batch-associate" v-else-if="item._batch_associate">
-                <span class="al-field">{{ getFieldLabel(item.field_name) || '关联' }}:</span>
-                <span class="al-associate-add">+ {{ formatBatchTargets(item._batch_targets) }}</span>
-              </div>
-              <div class="al-detail" v-else-if="item.field_name">
-                <span class="al-field">{{ getFieldLabel(item.field_name) }}:</span>
-                <span class="al-old">{{ getFieldValueDisplay(item.old_value, item.field_name) }}</span>
-                <span class="al-arrow">→</span>
-                <span class="al-new">{{ getFieldValueDisplay(item.new_value, item.field_name) }}</span>
-              </div>
-              <div class="al-detail al-detail--create" v-else-if="item.action === 'CREATE'">
-                <span>创建记录</span>
-              </div>
-              <div class="al-detail al-detail--delete" v-else-if="item.action === 'DELETE'">
-                <span>删除记录</span>
-              </div>
-              <div class="al-detail" v-else>
-                <span>{{ item.action }}</span>
-              </div>
-              <div v-if="item._source && item._source !== 'own'" class="al-source-badge">
-                {{ formatSource(item._source, item._child_type) }}
-              </div>
-              <div v-else-if="item._cascade_from && !item._source" class="al-cascade-from">
-                由 {{ item._cascade_from.type }} 级联操作
-              </div>
-            </div>
+            </AppCollapse>
 
             <div v-if="group._children.length > 0" class="al-children-section">
-              <AppCollapse>
+              <AppCollapse :default-expanded="true">
                 <template #title>
-                  <span class="al-children-summary">级联影响 {{ group._children.length }} 个子对象</span>
+                  <span class="al-children-summary">
+                    <span class="al-children-icon">▣</span>
+                    级联影响 {{ group._children.length }} 个子对象
+                    <el-tag v-if="getChildObjectTypes(group._children)" size="small" type="warning" effect="plain">
+                      {{ getChildObjectTypes(group._children) }}
+                    </el-tag>
+                  </span>
                 </template>
                 <div class="al-children-list">
                   <div
@@ -333,9 +350,36 @@ const filteredLogs = computed(() => {
 
 const groupedLogs = computed(() => {
   const groups = new Map()
+  // [FIX 2026-06-19 C.2] 历史日志无 tx/trace 时, 按启发式归组
+  // 启发式规则: 同一 user + 同一 object_type + 同一 object_id + 时间窗口 2s 内, 视为同一操作
+  const HEURISTIC_WINDOW_MS = 2000
 
   for (const item of filteredLogs.value) {
-    const groupKey = item.trace_id || item.transaction_id || `single-${item.id}`
+    let groupKey = item.trace_id || item.transaction_id
+
+    if (!groupKey) {
+      // 尝试匹配已有启发式分组
+      const itemTime = new Date(item.created_at).getTime()
+      let matched = false
+      for (const [key, group] of groups) {
+        if (key.startsWith('heuristic-')) {
+          const groupTime = new Date(group.timestamp).getTime()
+          if (
+            Math.abs(itemTime - groupTime) < HEURISTIC_WINDOW_MS &&
+            group.user_name === item.user_name &&
+            group.object_type === item.object_type &&
+            String(group.object_id) === String(item.object_id)
+          ) {
+            groupKey = key
+            matched = true
+            break
+          }
+        }
+      }
+      if (!matched) {
+        groupKey = `heuristic-${item.user_name}-${item.object_type}-${item.object_id}-${item.id}`
+      }
+    }
 
     if (!groups.has(groupKey)) {
       groups.set(groupKey, {
@@ -556,6 +600,14 @@ function formatSource(source, childType) {
     'relationship': '关系变更'
   }
   return sourceMap[source] || ''
+}
+
+// [FIX 2026-06-19 业务化] 聚合子对象类型为中文标签
+// 例如 5 个 version 字段 → "版本", 1 个 product 字段 + 1 个 version 字段 → "产品 · 版本"
+function getChildObjectTypes(children) {
+  if (!children || children.length === 0) return ''
+  const types = [...new Set(children.map(c => getObjectTypeLabel(c.object_type || c._child_type)))]
+  return types.filter(Boolean).join(' · ')
 }
 
 function aggregateBatchAssociations(items) {
@@ -914,12 +966,47 @@ function aggregateBatchAssociations(items) {
 }
 
 .al-children-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
   font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
+  color: var(--color-warning, #d97706);
+  font-weight: 500;
+}
+
+.al-children-icon {
+  color: var(--color-warning, #d97706);
+  font-size: 14px;
+  line-height: 1;
 }
 
 .al-children-list {
   padding-left: var(--spacing-md);
+}
+
+.al-items-collapse {
+  margin-bottom: var(--spacing-sm);
+}
+
+.al-items-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+.al-items-icon {
+  color: var(--color-primary, #3b82f6);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.al-items-list {
+  padding-left: var(--spacing-md);
+  border-left: 2px solid var(--color-border-light, var(--color-border));
+  margin-left: 4px;
 }
 
 .al-child-item {
