@@ -8,6 +8,7 @@
 
 import logging
 import os
+import re
 from typing import Dict, Any, List, Set
 
 from meta.core.interceptors.base import Interceptor
@@ -174,7 +175,7 @@ class AuditInterceptor(Interceptor):
         优先级:
         1. flask.g.current_user.display_name (业务友好, 例如 "系统管理员")
         2. flask.g.current_user.username (例如 "admin")
-        3. context.user_name (兜底)
+        3. context.user_name (兜底, 但要剥离 "display (username)" 历史格式)
         4. context.user_id (最后兜底)
 
         业务人员之前看到 5 种格式 (Admin/admin/系统管理员/Self Updated Name (admin)/系统管理员 (admin))
@@ -193,6 +194,12 @@ class AuditInterceptor(Interceptor):
             # 非 Flask 上下文 (例如异步/测试)
             pass
         if context.user_name:
+            # [FIX 2026-06-19 D.2 v2] 剥离历史格式 "display (username)"
+            # 兼容: "Admin (admin)" -> "Admin", "系统管理员 (admin)" -> "系统管理员"
+            if isinstance(context.user_name, str):
+                m = re.match(r'^(.*?)\s*\(([^)]+)\)\s*$', context.user_name)
+                if m and m.group(1) and m.group(2):
+                    return m.group(1).strip()
             return context.user_name
         if context.user_id:
             return str(context.user_id)
