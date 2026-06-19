@@ -13,6 +13,7 @@ Action 执行器 - 基于元模型定义执行 CRUD 操作
 
 from typing import List, Dict, Any, Optional, Type
 from datetime import datetime
+import uuid
 import json
 import logging
 import secrets
@@ -1799,6 +1800,20 @@ class ActionExecutor:
                 from flask import g, request
                 trace_id = getattr(g, 'trace_id', None)
                 transaction_id = getattr(g, 'transaction_id', None)
+                # [FIX 2026-06-19] 业务人员看不到完整操作的根因: 62% 日志无 tx/trace
+                # 这里自动生成, 即使 Flask g context 没有也能让所有 audit_log 归组
+                if not transaction_id:
+                    transaction_id = f"tx_{uuid.uuid4().hex[:16]}"
+                    try:
+                        g.transaction_id = transaction_id
+                    except Exception:
+                        pass
+                if not trace_id:
+                    trace_id = f"tr_{uuid.uuid4().hex[:16]}"
+                    try:
+                        g.trace_id = trace_id
+                    except Exception:
+                        pass
                 # [FIX Bug3 2026-06-09] 显式从 g.current_user 读取用户信息，
                 # 避免异步执行时 audit_logger._current_user 已被重置/被覆盖
                 current_user = getattr(g, 'current_user', None)

@@ -1029,7 +1029,10 @@ fields:
     semantics:
       meaning: 源业务对象编码，便于查询
       data_category: code
-      business_key: true
+      # [NEW v1.2.14 2026-06-19] 移除 business_key: true
+      # 原因: 关系的自然唯一标识是"关系编码 (code)", source_code/target_code 只是引用查找字段,
+      #       不应参与业务关键字唯一性检查
+      # 保留 data_category: code 以便导出/检索使用
       immutable: true
       import_visible: true
       export_visible: true
@@ -1057,7 +1060,7 @@ fields:
     semantics:
       meaning: 目标业务对象编码，便于查询
       data_category: code
-      business_key: true
+      # [NEW v1.2.14 2026-06-19] 移除 business_key: true (原因同 source_code)
       immutable: true
       import_visible: true
       export_visible: true

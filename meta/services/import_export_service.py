@@ -4562,12 +4562,19 @@ class ImportExportService:
                     else:
                         if composite_key in existing_composite_keys:
                             bk_field_names = "、".join([f.name for f in bk_fields])
+                            composite_value = composite_key.replace("||", " + ")
+                            # [NEW v1.2.14 2026-06-19] 单字段时不显示"组合"
+                            if len(bk_fields) == 1:
+                                bk_value = bk_values[0] if bk_values else ""
+                                error_msg = f"编号「{bk_field_names}」值重复：{bk_value}"
+                            else:
+                                error_msg = f"编号组合值重复：{composite_value}"
                             errors.append({
                                 "sheet": sheet["name"],
                                 "row": row_num,
                                 "field": bk_field_names,
-                                "value": composite_key.replace("||", " + "),
-                                "error": "编号「{0}」已存在".format(composite_key.replace("||", " + "))
+                                "value": composite_value,
+                                "error": error_msg
                             })
                             invalid_count += 1
                         else:
@@ -4581,12 +4588,19 @@ class ImportExportService:
                                 if operation_mode == "create":
                                     bk_field_names = "、".join([f.name for f in bk_fields])
                                     version_hint = f" (版本ID: {version_id})" if version_id else " (所有版本)"
+                                    composite_value = composite_key.replace("||", " + ")
+                                    # [NEW v1.2.14 2026-06-19] 单字段时不显示"组合"
+                                    if len(bk_fields) == 1:
+                                        bk_value = bk_values[0] if bk_values else ""
+                                        error_msg = f"编号「{bk_field_names}」值已存在：{bk_value}{version_hint}"
+                                    else:
+                                        error_msg = f"编号组合值已存在：{composite_value}{version_hint}"
                                     errors.append({
                                         "sheet": sheet["name"],
                                         "row": row_num,
                                         "field": bk_field_names,
-                                        "value": composite_key.replace("||", " + "),
-                                        "error": f"编号「{composite_key.replace('||', ' + ')}」已存在{version_hint}，请使用更新模式或修改编号"
+                                        "value": composite_value,
+                                        "error": error_msg
                                     })
                                     invalid_count += 1
                                     logger.warning(f"[Validate] 业务键冲突: {composite_key} (版本ID: {version_id})")
@@ -5021,6 +5035,11 @@ class ImportExportService:
         updated_count = 0
         errors = []
         warnings = []
+        # [NEW v1.2.14 2026-06-19] 成功/跳过明细 (前端第 4 步成功/跳过 subtab 用)
+        # 限制最多 100 条 (避免响应体过大), 超出部分用 +N 表示
+        successes = []
+        skipped_items = []
+        _MAX_DETAIL = 100
         
         total_rows = len(rows) - 1
         type_name = obj.name or object_type
@@ -5210,10 +5229,12 @@ class ImportExportService:
                         self._delete_record(object_type, record, obj.import_export)
                         deleted_count += 1
                         success_count += 1
+                        _record_success_item(successes, row_num, "delete", record, _MAX_DETAIL)
                     except ValueError as ve:
                         # [FIX 2026-06-16] 删除不存在的记录降级为 skip，不作为硬失败
                         logger.warning(f"[Import] 删除记录不存在，跳过: {ve}")
                         skipped_count += 1
+                        _record_skipped_item(skipped_items, row_num, "delete", record, str(ve), _MAX_DETAIL)
                         warnings.append({
                             "row": row_num,
                             "operation": operation_mode,
@@ -5225,6 +5246,7 @@ class ImportExportService:
                 elif operation_mode == "skip":
                     logger.info(f"[Import] 跳过记录")
                     skipped_count += 1
+                    _record_skipped_item(skipped_items, row_num, "skip", record, "操作模式为跳过", _MAX_DETAIL)
                     continue
                 elif operation_mode == "create":
                     logger.info(f"[Import] 执行新增操作")
@@ -5236,11 +5258,13 @@ class ImportExportService:
                         upsert_result = self._upsert_record(object_type, record, obj.import_export)
                         if upsert_result["success"]:
                             success_count += 1
+                            op = upsert_result.get("operation", "create")
                             # [NEW v1.2.3 2026-06-17] 拆分 created / updated 统计
-                            if upsert_result.get("operation") == "create":
+                            if op == "create":
                                 created_count += 1
                             else:
                                 updated_count += 1
+                            _record_success_item(successes, row_num, op, record, _MAX_DETAIL)
                         else:
                             failed_count += 1
                             errors.append({"row": row_num, "operation": operation_mode, "field": "编码", "value": record.get("code", ""), "message": upsert_result.get("error", "Upsert failed")})
@@ -5248,6 +5272,7 @@ class ImportExportService:
                         self.manage_service.create(CreateRequest(object_type=object_type, data=record))
                         success_count += 1
                         created_count += 1
+                        _record_success_item(successes, row_num, "create", record, _MAX_DETAIL)
                 elif operation_mode == "update":
                     # [SYMBOL] 关键修复：如果 conflict_strategy=upsert，执行 upsert 而不是更新
                     if conflict_strategy == "upsert":
@@ -5257,10 +5282,12 @@ class ImportExportService:
                         upsert_result = self._upsert_record(object_type, record, obj.import_export)
                         if upsert_result["success"]:
                             success_count += 1
-                            if upsert_result.get("operation") == "create":
+                            op = upsert_result.get("operation", "update")
+                            if op == "create":
                                 created_count += 1
                             else:
                                 updated_count += 1
+                            _record_success_item(successes, row_num, op, record, _MAX_DETAIL)
                         else:
                             failed_count += 1
                             errors.append({"row": row_num, "operation": operation_mode, "field": "编码", "value": record.get("code", ""), "message": upsert_result.get("error", "Upsert failed")})
@@ -5269,6 +5296,7 @@ class ImportExportService:
                         self._update_record(object_type, record, obj.import_export)
                         success_count += 1
                         updated_count += 1
+                        _record_success_item(successes, row_num, "update", record, _MAX_DETAIL)
                 else:
                     logger.info(f"[Import] 执行upsert操作 (conflict_strategy={conflict_strategy})")
                     # [SYMBOL] 确保version_id存在
@@ -5279,10 +5307,12 @@ class ImportExportService:
                         upsert_result = self._upsert_record(object_type, record, obj.import_export)
                         if upsert_result["success"]:
                             success_count += 1
-                            if upsert_result.get("operation") == "create":
+                            op = upsert_result.get("operation", "upsert")
+                            if op == "create":
                                 created_count += 1
                             else:
                                 updated_count += 1
+                            _record_success_item(successes, row_num, op, record, _MAX_DETAIL)
                         else:
                             failed_count += 1
                             errors.append({"row": row_num, "operation": operation_mode, "field": "编码", "value": record.get("code", ""), "message": upsert_result.get("error", "Upsert failed")})
@@ -5290,11 +5320,13 @@ class ImportExportService:
                         if self._record_exists(object_type, record, obj.import_export):
                             logger.info(f"[Import] 记录已存在，跳过")
                             skipped_count += 1
+                            _record_skipped_item(skipped_items, row_num, "skip", record, "记录已存在", _MAX_DETAIL)
                             continue
                         result = self.manage_service.create(CreateRequest(object_type=object_type, data=record))
                         if result.success:
                             success_count += 1
                             created_count += 1
+                            _record_success_item(successes, row_num, "create", record, _MAX_DETAIL)
                         else:
                             failed_count += 1
                     else:
@@ -5302,6 +5334,7 @@ class ImportExportService:
                         if result.success:
                             success_count += 1
                             created_count += 1
+                            _record_success_item(successes, row_num, "create", record, _MAX_DETAIL)
                         else:
                             failed_count += 1
 
@@ -5329,6 +5362,9 @@ class ImportExportService:
             "deleted": deleted_count,
             "errors": errors[:20],
             "warnings": warnings[:20],  # [NEW v1.2.3 2026-06-17] 告警明细
+            # [NEW v1.2.14 2026-06-19] 成功/跳过明细 (前端第 4 步 subtab 用)
+            "successes": successes,
+            "skipped_items": skipped_items,
         }
 
     def _get_business_key_fields(self, object_type: str) -> List:
