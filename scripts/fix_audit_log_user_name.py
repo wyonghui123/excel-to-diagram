@@ -104,6 +104,37 @@ def main():
         updates += cur.rowcount
         updates_by_user['system'] += cur.rowcount
 
+    # [FIX 2026-06-19] 处理 'unknown' / 'guest' 等残留
+    cur.execute("""
+        UPDATE audit_logs
+        SET user_name = 'system'
+        WHERE user_name IN ('unknown', 'guest', 'anonymous', 'Anonymous')
+          AND user_name != 'system'
+    """)
+    if cur.rowcount > 0:
+        updates += cur.rowcount
+        updates_by_user['system (from unknown/guest)'] += cur.rowcount
+
+    # [FIX 2026-06-19] 处理 lowercase 'admin' (应该是 'Admin' 大写)
+    cur.execute("""
+        UPDATE audit_logs
+        SET user_name = 'Admin'
+        WHERE user_name = 'admin'
+    """)
+    if cur.rowcount > 0:
+        updates += cur.rowcount
+        updates_by_user['Admin (from admin)'] += cur.rowcount
+
+    # [FIX 2026-06-19] 处理空字符串 (应该是 'system')
+    cur.execute("""
+        UPDATE audit_logs
+        SET user_name = 'system'
+        WHERE user_name = '' OR user_name IS NULL
+    """)
+    if cur.rowcount > 0:
+        updates += cur.rowcount
+        updates_by_user['system (from empty)'] += cur.rowcount
+
     conn.commit()
 
     print(f"\n[OK] Total updated: {updates} records")

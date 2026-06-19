@@ -57,12 +57,12 @@ cur.execute("""
 """)
 print(f"   [OK] audit_logs_archive table ready")
 
-# 3. 移动 7 天前的 UNKNOWN
-print(f"\n[2/4] Moving UNKNOWN records older than 7 days")
+# 3. 移动 3 天前的 UNKNOWN
+print(f"\n[2/4] Moving UNKNOWN records older than 3 days")
 cur.execute("""
     SELECT COUNT(*) FROM audit_logs
     WHERE action = 'UNKNOWN'
-      AND DATE(created_at) < DATE('now', '-7 days')
+      AND DATE(created_at) < DATE('now', '-3 days')
 """)
 to_move = cur.fetchone()[0]
 print(f"   Records to move: {to_move}")
@@ -87,8 +87,8 @@ if to_move > 0:
             ?, ?
         FROM audit_logs
         WHERE action = 'UNKNOWN'
-          AND DATE(created_at) < DATE('now', '-7 days')
-    """, (datetime.now().isoformat(), 'E.2: UNKNOWN action archive 7d+'))
+          AND DATE(created_at) < DATE('now', '-3 days')
+    """, (datetime.now().isoformat(), 'E.2: UNKNOWN action archive 3d+'))
 
     print(f"   Copied {to_move} to archive")
 
@@ -96,7 +96,7 @@ if to_move > 0:
     cur.execute("""
         DELETE FROM audit_logs
         WHERE action = 'UNKNOWN'
-          AND DATE(created_at) < DATE('now', '-7 days')
+          AND DATE(created_at) < DATE('now', '-3 days')
     """)
     print(f"   Deleted {to_move} from audit_logs")
 
