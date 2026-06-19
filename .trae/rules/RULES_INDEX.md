@@ -1,13 +1,16 @@
 # 规范规则索引
 
-> 最后更新: 2026-06-13 | 状态: 活跃
+> 最后更新: 2026-06-19 | 状态: 活跃
 > 本文件是所有规范规则的统一索引和依赖图
+> **v2 升级**: 2026-06-19 加 START_HERE.md + 顶层协调文档
 
 ## 快速入口
 
 | 入口 | 文件 | 用途 |
 |------|------|------|
-| [SESSION_REMINDER.md](./SESSION_REMINDER.md) | 47 条铁律 | 新会话必读 |
+| [d:\filework\START_HERE.md](../../START_HERE.md) | **新 agent 必读入口** | 5 步快速开始 |
+| [d:\filework\AGENT_GUIDELINES.md](../../AGENT_GUIDELINES.md) | **顶层协调规范** | v3.20 多 agent 协作 |
+| [SESSION_REMINDER.md](./SESSION_REMINDER.md) | 18 条铁律 | 新会话必读 |
 | [project_rules.md](./project_rules.md) | 项目核心 | 索引 + 必读文件 |
 | [core/](./core/) | 核心子规范 | 拆分后的详细规则 |
 
@@ -83,6 +86,21 @@
 | [.trae/scripts/metrics_aggregator.py](../.trae/scripts/metrics_aggregator.py) | 指标聚合脚本 | 参考 |
 | [.trae/scripts/prune_agent_logs.py](../.trae/scripts/prune_agent_logs.py) | 日志清理脚本 | 参考 |
 
+## 新加入 / 重要规范（2026-06-19 更新）
+
+| 规范 | 主题 | 优先级 | 备注 |
+|------|------|--------|------|
+| [INCIDENT_2026-06-17.md](./INCIDENT_2026-06-17.md) | **6/17 P0 事故复盘** | **必读** | 2026-06-17 36h 开发成果丢失事故 |
+| [d:\filework\START_HERE.md](../../START_HERE.md) | **新 agent 入口** | **必读** | 5 步快速开始（2026-06-19 新建）|
+| [d:\filework\AGENT_GUIDELINES.md](../../AGENT_GUIDELINES.md) | 顶层协调规范 v3.20 | **必读** | 2026-06-19 P0/P1/P2 升级 |
+| [d:\filework\spec_template.md](../../spec_template.md) | Spec 模板 | 必读 | P0 规范 |
+| [ai-content-protection.md](./ai-content-protection.md) | AI 内容保护 | 推荐 | 防止 AI 误改 |
+| [ai-agent-undo-protection.md](./ai-agent-undo-protection.md) | Undo 保护 | 推荐 | 防 stash 灾难 |
+| [encoding-prevention-v20260612.md](./encoding-prevention-v20260612.md) | 编码预防 v20260612 | 推荐 | GBK 乱码防御 |
+| [ui-standards.md](./ui-standards.md) | UI 样式规范（顶层）| 推荐 | 完整 UI 规范 |
+| [service-management-rules.md](./service-management-rules.md) | 服务管理 | 推荐 | service_manager 规范 |
+| [multi-agent-coordination.md](./multi-agent-coordination.md) | **多智能体协调 v3.19** | **必读** | 4 防护层 L1-L4 |
+
 ## 已废弃规范（4个，2026-06-07 移至 deprecated/）
 
 | 文件 | 废弃原因 | 替代方案 |
@@ -94,15 +112,22 @@
 
 **目录说明**：[deprecated/README.md](./deprecated/README.md)
 
-## 重复内容清理（2026-06-14 标注）
+## 重复内容清理（2026-06-19 修正）
 
 > **下表中的文件内容已被合并/重复，禁止在 Agent prompt 中同时引用。**
+> **2026-06-19 验证**: 实际只有 1 处真正的 redirect, 其他 2 处经核实是**互补专题**而非重复。
 
-| 文件 | 重复内容 | 替代方案 |
-|------|---------|----------|
-| [ai-coding-standards.md](./ai-coding-standards.md) | 与 [core/coding-standards.md](./core/coding-standards.md) 完全重复 | 读 core/coding-standards.md 即可 |
-| [powershell-curl-alias.md](./powershell-curl-alias.md) | 与 [powershell-rules.md](./powershell-rules.md) "铁律：禁止使用 curl" 重复 | 读 powershell-rules.md 即可 |
-| [core/agent-roles.md](./core/agent-roles.md) | 与 [roles/agent-roles.md](../roles/agent-roles.md) 内容重复 | 读 roles/agent-roles.md（更完整） |
+| 文件 | 状态 | 实际关系 | 建议 |
+|------|------|---------|------|
+| [ai-coding-standards.md](./ai-coding-standards.md) | ✅ **真 redirect** (13 行, 已合并) | 内容已合并到 [core/coding-standards.md](./core/coding-standards.md) | 只读 core/coding-standards.md |
+| [powershell-curl-alias.md](./powershell-curl-alias.md) | 🟡 **专题文档** (curl 专项) | 与 [powershell-rules.md](./powershell-rules.md) 互补 (通用 vs 专题) | **两者都读**（不重复）|
+| [core/agent-roles.md](./core/agent-roles.md) | 🟡 **引用文档** (30 行) | 引用 [../context-usage.md](../context-usage.md) | **两者都读**（不重复）|
+
+**修正说明**:
+- 原 RULES_INDEX.md 标注 3 处重复, 实际只有 1 处
+- powershell-curl-alias.md 是 curl 专项 (1706B), powershell-rules.md 是通用 (15448B) — 互补
+- core/agent-roles.md 引用 context-usage.md — 互补
+- 建议: 把 ai-coding-standards.md 移到 deprecated/ 目录 (2026-06-19 待执行) |
 
 ## 规范依赖图
 
@@ -193,4 +218,6 @@ SESSION_REMINDER (核心入口)
 
 | 日期 | 变更人 | 变更内容 |
 |------|--------|----------|
+| 2026-06-19 | Smart Agent A | v2 升级：加 START_HERE.md 入口；加 INCIDENT_2026-06-17.md；加 AGENT_GUIDELINES.md v3.20；加 spec_template.md；加 5 个缺失规范；修正 SESSION_REMINDER 18 条（非 47 条）；把 ai-coding-standards.md 移到 deprecated/；修正重复标记（实际只有 1 处）|
+| 2026-06-13 | AI Assistant | 测试可观测性规范；标记 ai-coding-standards/powershell-curl-alias 重复 |
 | 2026-06-07 | AI Assistant | 创建 RULES_INDEX.md，统一规范索引和依赖图 |
