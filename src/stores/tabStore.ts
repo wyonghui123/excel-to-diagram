@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
+import { useAuthStore } from './authStore'  // [FR-001] 绑定用户
 
 export interface Tab {
   id: string
@@ -150,6 +151,28 @@ export const useTabStore = defineStore('tab', () => {
   const closableTabs = computed(() => tabs.value.filter(t => !t.pinned))
   const hasOverflow = computed(() => tabs.value.length > 8)
 
+  // [FR-003] in-memory user 变化清空 tabs
+  //   场景：用户A登录(开tabs) → 登出 → 用户B登录(同浏览器)
+  //   in-memory state 仍是 A 的 tabs, B 看到 A 的 tab
+  //   修复: 监听 auth.user.id 变化, 变化时清空 tabs
+  //   守护: oldId === undefined 时不触发 (初始化时不误清空)
+  const authStore = useAuthStore()
+  watch(
+    () => authStore.user?.id ?? null,
+    (newId, oldId) => {
+      // [NFR-003] 首次 (hydrate 之前) 不清空, 避免初始化时误清空
+      if (oldId === undefined) return
+      if (newId === oldId) return
+      // [NFR-003] 跨用户清空 (含 trace_id)
+      const traceId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID().replace(/-/g, '')
+        : `t-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+      console.debug(`[tabStore] user changed, clearing tabs: ${oldId} -> ${newId}, trace_id=${traceId}`)
+      tabs.value = []
+      activeTabId.value = null
+    }
+  )
+
   return {
     tabs,
     activeTabId,
@@ -175,8 +198,10 @@ export const useTabStore = defineStore('tab', () => {
     storage: localStorage,  // [FR-016] 从 sessionStorage → localStorage
     pick: ['tabs', 'activeTabId'],
     // [FR-016] 自定义序列化: 动态 label 在序列化时用 staticLabel 替代
+    // [FR-001] 附加 _userId 字段,deserialize 时校验跨用户
     serializer: {
       serialize: (value) => {
+        const auth = useAuthStore()  // pinia 自动按需 hydrate
         const tabs = value.tabs?.map((t) => ({
           ...t,
           // 动态 label 不持久化,用 staticLabel 替代 (如未设置则用当前 label)
@@ -184,11 +209,29 @@ export const useTabStore = defineStore('tab', () => {
             ? (t.staticLabel || t.label)
             : t.label
         })) || []
-        return JSON.stringify({ ...value, tabs })
+        return JSON.stringify({
+          ...value,
+          tabs,
+          _userId: auth.user?.id ?? null,  // [FR-001] 绑定用户 id
+        })
       },
       deserialize: (value) => {
         try {
           const parsed = JSON.parse(value)
+          // [FR-002] 跨用户检测: 不匹配则清空 (防 tabs 跨用户泄漏)
+          const auth = useAuthStore()
+          const currentUserId = auth.user?.id ?? null
+          const persistedUserId = parsed._userId ?? null
+          if (persistedUserId !== null && persistedUserId !== currentUserId) {
+            // [NFR-003] 输出清空日志 (含 trace_id)
+            const traceId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+              ? crypto.randomUUID().replace(/-/g, '')
+              : `t-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+            console.debug(`[tabStore] user mismatch, clearing tabs: persisted=${persistedUserId}, current=${currentUserId}, trace_id=${traceId}`)
+            return { tabs: [], activeTabId: null }
+          }
+          // [FR-002] legacy 升级: _userId 为 null (老数据) → 升级为当前 user,保留 tabs
+          // (向后兼容, 防止大规模用户丢 tabs)
           // 清理历史残留的 __pending__ 标记
           if (parsed.tabs) {
             parsed.tabs = parsed.tabs.map((t) => {
