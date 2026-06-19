@@ -138,7 +138,19 @@ watch([rawObjectType, rawId], ([newType, newId]) => {
 }, { immediate: true })
 const objectType = computed(() => lastValidObjectType.value || rawObjectType.value)
 const id = computed(() => lastValidId.value || rawId.value)
-const mode = computed(() => route.query.mode || 'view')
+// [FIX 2026-06-18] mode 也需要缓存：add 模式下 route.query.mode='add'，
+//   切走时 query 清空 → mode 退到 'view'，切回时又变 'add'，触发
+//   DetailPage watch 的 "same object mode change" 分支走
+//   `data.value = {}` 清空用户已填表单。
+//   修复：用 lastValidMode 缓存，route 抖动时 mode 保持稳定。
+const rawMode = computed(() => route.query.mode)
+const lastValidMode = ref(null)
+watch(rawMode, (newMode) => {
+  if (newMode) {
+    lastValidMode.value = newMode
+  }
+}, { immediate: true })
+const mode = computed(() => lastValidMode.value || rawMode.value || 'view')
 // [FIX 2026-06-18] 重命名为 detailPageMountKey：仅用于强制 remount DetailPage
 //   (PermissionConfigPanel saved 后)，平时稳定不变。
 //   之前叫 detailPageKey 时配合 v-if="objectType && (id || mode === 'add')"，

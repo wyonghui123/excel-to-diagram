@@ -24,6 +24,7 @@ TypeError: undefined is not iterable (cannot read property Symbol(Symbol.iterato
 ```yaml
 modified_files:
   - src/components/common/DetailPage/DetailPage.vue
+  - src/views/ObjectDetailPage.vue
 
 new_files: []
 deleted_files: []
