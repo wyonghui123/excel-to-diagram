@@ -38,23 +38,6 @@
           <p class="tip">请选择要导入的 Excel 文件，系统将自动校验数据格式</p>
         </div>
 
-        <!-- 多对象类型选择（从元数据驱动，仅单对象模式） -->
-        <div v-if="!multiTypeMode && cascadeChain.length > 1" class="object-type-selector">
-          <div class="object-type-selector__label">选择导入层级</div>
-          <div class="object-type-selector__items">
-            <el-checkbox
-              v-for="item in cascadeChain"
-              :key="item.field"
-              v-model="item.selected"
-              :disabled="item.level === 1"
-              class="object-type-checkbox"
-            >
-              {{ item.label }}
-              <span v-if="item.parentLabel" class="cascade-hint">← 依赖 {{ item.parentLabel }}</span>
-            </el-checkbox>
-          </div>
-        </div>
-
         <el-form label-width="100px">
           <el-form-item label="上传文件">
             <el-upload
@@ -253,7 +236,7 @@
                     class="type-link"
                     @click="handleTypeFilter(row)"
                   >
-                    <span v-if="filterType === row.typeId">✓ </span>{{ row.type }}
+                    <span v-if="filterType === row.typeId">[已选] </span>{{ row.type }}
                   </el-link>
                 </template>
               </el-table-column>
@@ -521,16 +504,9 @@ const loadingSchema = ref(false)
 // 来自 /api/v1/meta/objects API，props.objectTypeLabels 优先覆盖
 const objectTypeLabelsMap = ref({})
 
-const cascadeChain = computed(() => {
-  if (!schema.value) return []
-
-  const chain = metaService.buildCascadeChain(schema.value)
-
-  return chain.map(item => ({
-    ...item,
-    selected: item.cascadeLevel > 1
-  }))
-})
+// [REMOVED v1.2.12 2026-06-17] cascadeChain: 死代码
+// 原用于"选择导入层级" UI (v1.0.0 设计), 已被 sheet-grouped layout 替代
+// metaService.buildCascadeChain() 仍保留 (search_help 仍在用), 只在导入流程不再使用
 
 const availableMultiTypes = computed(() => {
   return props.objectTypes
@@ -551,11 +527,7 @@ const objectTypeName = computed(() => {
   return field?.name || schema.value.name || props.objectType
 })
 
-const selectedCascadeFields = computed(() => {
-  return cascadeChain.value
-    .filter(item => item.selected)
-    .map(item => item.field)
-})
+// [REMOVED v1.2.12 2026-06-17] selectedCascadeFields: 死代码 (cascadeChain 已删)
 
 const dialogTitle = computed(() => {
   const titles = ['导入数据', '数据校验', '执行导入', '导入结果']
@@ -869,7 +841,7 @@ async function startPreview() {
   try {
     const result = await boService.previewImport(props.objectType, selectedFile.value, {
       conflictStrategy: conflictStrategy.value,
-      cascade_fields: selectedCascadeFields.value,
+      // [REMOVED v1.2.12] cascade_fields 死参数, 后端不使用
       // [FIX 2026-06-16 BMRD] preview 也必须传 context (version_id / product_id),
       // 否则后端 validate_sheets 不会跳过 product_code/version_code 必填验证
       version_id: props.context?.version_id,
@@ -902,7 +874,8 @@ async function startImport() {
   importProgress.value = 0
   currentTypeName.value = ''
   currentIndex.value = 0
-  totalTypes.value = selectedCascadeFields.value.length
+  // [FIX v1.2.12 2026-06-17] totalTypes: 多对象模式用选中数, 单对象模式 = 1
+  totalTypes.value = props.multiTypeMode ? selectedMultiTypes.value.length : 1
 
   if (!props.context?.version_id && !props.context?.product_id) {
     message.warning('请先在顶部导航栏选择产品和版本上下文后再导入')
@@ -916,8 +889,8 @@ async function startImport() {
       conflictStrategy.value,
       {
         version_id: props.context?.version_id,
-        product_id: props.context?.product_id,
-        cascade_fields: selectedCascadeFields.value
+        product_id: props.context?.product_id
+        // [REMOVED v1.2.12] cascade_fields 死参数
       }
     )
 
@@ -1091,37 +1064,8 @@ function handleClose() {
   }
 }
 
-.object-type-selector {
-  margin-bottom: var(--spacing-lg);
-  padding: var(--spacing-md);
-  background: var(--el-fill-color-light, #f5f7fa);
-  border-radius: var(--radius-md, 6px);
-
-  &__label {
-    margin-bottom: var(--spacing-sm);
-    font-size: var(--el-font-size-small, 12px);
-    font-weight: 500;
-    color: var(--el-text-color-regular, #606266);
-  }
-
-  &__items {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--spacing-sm);
-  }
-}
-
-.object-type-checkbox {
-  padding: var(--spacing-xs) var(--spacing-sm);
-  background: var(--el-bg-color, #fff);
-  border-radius: var(--radius-sm, 4px);
-
-  .cascade-hint {
-    margin-left: var(--spacing-xs);
-    font-size: var(--el-font-size-small, 12px);
-    color: var(--el-text-color-secondary, #909399);
-  }
-}
+// [REMOVED v1.2.12 2026-06-17] .object-type-selector / .object-type-checkbox
+// 死代码: 原用于"选择导入层级" UI, 该 UI 已删除
 
 .el-upload__tip {
   margin-top: var(--spacing-xs);
