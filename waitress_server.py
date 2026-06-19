@@ -35,8 +35,37 @@ import sqlite3
 import atexit
 import signal
 
-# [DECORATIVE] v3.18: 多 agent 端口支持 (AGENT_PORT env, 默认 3010)
-AGENT_PORT = int(os.environ.get('AGENT_PORT', '3010'))
+# [DECORATIVE] v3.18 + v3.20: 多 agent 端口支持 (AGENT_PORT env, 默认 3010)
+# 🆕 v3.20: 增强 fallback - 错误处理 + 范围检查 + 启动日志
+_DEFAULT_PORT = 3010
+
+
+def _get_agent_port():
+    """Resolve AGENT_PORT with safe fallback + validation.
+
+    Priority:
+      1. os.environ['AGENT_PORT'] (int convertible, 1-65535)
+      2. _DEFAULT_PORT = 3010
+    """
+    raw = os.environ.get('AGENT_PORT')
+    if raw is None or raw == '':
+        port = _DEFAULT_PORT
+        print(f'[WAITRESS] AGENT_PORT not set, using default {port}')
+        return port
+    try:
+        port = int(raw)
+    except (ValueError, TypeError):
+        print(f'[WAITRESS] AGENT_PORT={raw!r} is not an integer, '
+              f'falling back to default {_DEFAULT_PORT}')
+        return _DEFAULT_PORT
+    if not (1 <= port <= 65535):
+        print(f'[WAITRESS] AGENT_PORT={port} out of range (1-65535), '
+              f'falling back to default {_DEFAULT_PORT}')
+        return _DEFAULT_PORT
+    return port
+
+
+AGENT_PORT = _get_agent_port()
 
 
 # [DECORATIVE] v3.18: DB 进程级文件锁 (跨所有 waitress/gunicorn/pytest 实例)

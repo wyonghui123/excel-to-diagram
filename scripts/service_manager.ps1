@@ -3,6 +3,8 @@
 # 用法: .\scripts\service_manager.ps1 [status|start|stop|restart|force-restart] [-Port <3010-3019>]
 # 用法: python scripts/service_manager.py [status|start|stop|restart] [--port <port>]
 # 🆕 v3.18: 多 Agent 端口隔离 (-Port 3010-3019)
+# 🆕 v3.19: 用 pythonw.exe 避免 console 弹窗
+# 🆕 v3.20: 强制 pythonw + node.exe, 预启动路径验证, frontend 改用 node 直接启动
 
 param(
     [Parameter(Position=0)]
@@ -54,19 +56,45 @@ function Read-EnvPort($key, $default) {
 $flaskPort = Read-EnvPort 'FLASK_PORT' $Port
 $vitePort  = Read-EnvPort 'VITE_DEV_PORT' 3004
 
+# 🆕 v3.19: 用 pythonw.exe 避免 console 窗口弹窗
+# pythonw = GUI Python, 不会创建 console 窗口
+# stdout/stderr 重定向到日志文件 (service_manager 处理)
+# 🆕 v3.20: 强制 pythonw, 找不到则报错 (避免 fallback 到 python.exe 弹窗)
+$pythonExe = (Get-Command pythonw.exe -ErrorAction SilentlyContinue).Source
+if (-not $pythonExe) {
+    Write-Error "v3.20: pythonw.exe not found! Please install Python with 'tcl/tk and IDLE' option."
+    Write-Error "        service_manager requires pythonw to prevent console popups."
+    exit 1
+}
+
+# 🆕 v3.20: 强制使用 node.exe (避免 cmd /c npm run dev 弹窗)
+$nodeExe = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
+if (-not $nodeExe) {
+    Write-Error "v3.20: node.exe not found! Please install Node.js."
+    exit 1
+}
+
+# 🆕 v3.20: 预启动路径验证
+$backendScript = Join-Path $root 'waitress_server.py'
+if (-not (Test-Path $backendScript)) {
+    Write-Error "v3.20: Backend script not found: $backendScript"
+    exit 1
+}
+
+# 🆕 v3.20: vite 路径配置化
+$nodeModulesPath = Join-Path $root 'node_modules'
+$viteBinPath = Join-Path $nodeModulesPath 'vite\bin\vite.js'
+if (-not (Test-Path $viteBinPath)) {
+    Write-Warning "v3.20: vite not found at $viteBinPath (will install npm dependencies first)"
+}
+
 $services = @{
-    frontend = @{ port=$vitePort;  name='Frontend (Vite)';     cmd='cmd.exe'; args=@('/c','npm run dev');   wait=8 }
+    # 🆕 v3.20: 改用 node 直接启动 (was: cmd.exe /c npm run dev = cmd 弹窗源!)
+    frontend = @{ port=$vitePort;  name='Frontend (Vite)';     cmd=$nodeExe; args=@($viteBinPath, '--port', $vitePort.ToString(), '--host', '0.0.0.0'); wait=8 }
     # 🆕 v3.9 备选: gevent_server.py (真流式 SSE, 但 SQLite 锁问题)
     # 当前: waitress_server.py (8 线程, 稳定)
     # 可手动切换: 改 backend 行的 cmd 和 args
-    # 🆕 v3.19: 用 pythonw.exe 避免 console 窗口弹窗
-    # pythonw = GUI Python, 不会创建 console 窗口
-    # stdout/stderr 重定向到日志文件 (service_manager 处理)
-    $pythonExe = (Get-Command pythonw.exe -ErrorAction SilentlyContinue).Source
-    if (-not $pythonExe) {
-        $pythonExe = 'python'
-    }
-    backend  = @{ port=$flaskPort; name='Backend (Waitress)';   cmd=$pythonExe;  args=@('waitress_server.py');     wait=10 }
+    backend  = @{ port=$flaskPort; name='Backend (Waitress)';   cmd=$pythonExe;  args=@($backendScript);     wait=10 }
 }
 
 function Write-Log($msg) {
