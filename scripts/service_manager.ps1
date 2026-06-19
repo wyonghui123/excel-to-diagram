@@ -59,7 +59,14 @@ $services = @{
     # 🆕 v3.9 备选: gevent_server.py (真流式 SSE, 但 SQLite 锁问题)
     # 当前: waitress_server.py (8 线程, 稳定)
     # 可手动切换: 改 backend 行的 cmd 和 args
-    backend  = @{ port=$flaskPort; name='Backend (Waitress)';   cmd='python';  args=@('waitress_server.py');     wait=10 }
+    # 🆕 v3.19: 用 pythonw.exe 避免 console 窗口弹窗
+    # pythonw = GUI Python, 不会创建 console 窗口
+    # stdout/stderr 重定向到日志文件 (service_manager 处理)
+    $pythonExe = (Get-Command pythonw.exe -ErrorAction SilentlyContinue).Source
+    if (-not $pythonExe) {
+        $pythonExe = 'python'
+    }
+    backend  = @{ port=$flaskPort; name='Backend (Waitress)';   cmd=$pythonExe;  args=@('waitress_server.py');     wait=10 }
 }
 
 function Write-Log($msg) {
@@ -543,7 +550,10 @@ function Start-Service($svcName) {
         $env:AGENT_PORT = $port.ToString()
 
         $proc = Start-Process -FilePath $cfg.cmd -ArgumentList $argStr `
-            -WorkingDirectory $root -WindowStyle Hidden -PassThru
+            -WorkingDirectory $root -WindowStyle Hidden -PassThru `
+            -RedirectStandardOutput "$root\scripts\logs\$svcName.out" `
+            -RedirectStandardError "$root\scripts\logs\$svcName.err" `
+            -NoNewWindow
 
         # wait for port
         $ready = $false
@@ -735,7 +745,10 @@ switch ($Command) {
                     param($svcName, $svcPort, $svcWait, $svcCmd, $svcArgs, $workDir)
                     $argStr = ($svcArgs -join ' ')
                     $proc = Start-Process -FilePath $svcCmd -ArgumentList $argStr `
-                        -WorkingDirectory $workDir -WindowStyle Hidden -PassThru
+                        -WorkingDirectory $workDir -WindowStyle Hidden -PassThru `
+                        -RedirectStandardOutput "$root\scripts\logs\$svcName.out" `
+                        -RedirectStandardError "$root\scripts\logs\$svcName.err" `
+                        -NoNewWindow
                     for ($i = 0; $i -lt $svcWait; $i++) {
                         Start-Sleep -Seconds 1
                         $tcp = New-Object System.Net.Sockets.TcpClient
@@ -805,7 +818,10 @@ switch ($Command) {
                     param($svcName, $svcPort, $svcWait, $svcCmd, $svcArgs, $workDir)
                     $argStr = ($svcArgs -join ' ')
                     $proc = Start-Process -FilePath $svcCmd -ArgumentList $argStr `
-                        -WorkingDirectory $workDir -WindowStyle Hidden -PassThru
+                        -WorkingDirectory $workDir -WindowStyle Hidden -PassThru `
+                        -RedirectStandardOutput "$root\scripts\logs\$svcName.out" `
+                        -RedirectStandardError "$root\scripts\logs\$svcName.err" `
+                        -NoNewWindow
                     for ($i = 0; $i -lt $svcWait; $i++) {
                         Start-Sleep -Seconds 1
                         $tcp = New-Object System.Net.Sockets.TcpClient
@@ -860,7 +876,10 @@ switch ($Command) {
                     param($svcName, $svcPort, $svcWait, $svcCmd, $svcArgs, $workDir)
                     $argStr = ($svcArgs -join ' ')
                     $proc = Start-Process -FilePath $svcCmd -ArgumentList $argStr `
-                        -WorkingDirectory $workDir -WindowStyle Hidden -PassThru
+                        -WorkingDirectory $workDir -WindowStyle Hidden -PassThru `
+                        -RedirectStandardOutput "$root\scripts\logs\$svcName.out" `
+                        -RedirectStandardError "$root\scripts\logs\$svcName.err" `
+                        -NoNewWindow
                     for ($i = 0; $i -lt $svcWait; $i++) {
                         Start-Sleep -Seconds 1
                         $tcp = New-Object System.Net.Sockets.TcpClient
