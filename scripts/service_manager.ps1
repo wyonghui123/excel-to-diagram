@@ -552,8 +552,7 @@ function Start-Service($svcName) {
         $proc = Start-Process -FilePath $cfg.cmd -ArgumentList $argStr `
             -WorkingDirectory $root -WindowStyle Hidden -PassThru `
             -RedirectStandardOutput "$root\scripts\logs\$svcName.out" `
-            -RedirectStandardError "$root\scripts\logs\$svcName.err" `
-            -NoNewWindow
+            -RedirectStandardError "$root\scripts\logs\$svcName.err" # 🆕 v3.19: -NoNewWindow removed (incompatible with -WindowStyle on Windows)
 
         # wait for port
         $ready = $false
@@ -747,8 +746,7 @@ switch ($Command) {
                     $proc = Start-Process -FilePath $svcCmd -ArgumentList $argStr `
                         -WorkingDirectory $workDir -WindowStyle Hidden -PassThru `
                         -RedirectStandardOutput "$root\scripts\logs\$svcName.out" `
-                        -RedirectStandardError "$root\scripts\logs\$svcName.err" `
-                        -NoNewWindow
+                        -RedirectStandardError "$root\scripts\logs\$svcName.err" # 🆕 v3.19: -NoNewWindow removed (incompatible with -WindowStyle)
                     for ($i = 0; $i -lt $svcWait; $i++) {
                         Start-Sleep -Seconds 1
                         $tcp = New-Object System.Net.Sockets.TcpClient
@@ -820,8 +818,7 @@ switch ($Command) {
                     $proc = Start-Process -FilePath $svcCmd -ArgumentList $argStr `
                         -WorkingDirectory $workDir -WindowStyle Hidden -PassThru `
                         -RedirectStandardOutput "$root\scripts\logs\$svcName.out" `
-                        -RedirectStandardError "$root\scripts\logs\$svcName.err" `
-                        -NoNewWindow
+                        -RedirectStandardError "$root\scripts\logs\$svcName.err" # 🆕 v3.19: -NoNewWindow removed (incompatible with -WindowStyle)
                     for ($i = 0; $i -lt $svcWait; $i++) {
                         Start-Sleep -Seconds 1
                         $tcp = New-Object System.Net.Sockets.TcpClient
@@ -878,8 +875,7 @@ switch ($Command) {
                     $proc = Start-Process -FilePath $svcCmd -ArgumentList $argStr `
                         -WorkingDirectory $workDir -WindowStyle Hidden -PassThru `
                         -RedirectStandardOutput "$root\scripts\logs\$svcName.out" `
-                        -RedirectStandardError "$root\scripts\logs\$svcName.err" `
-                        -NoNewWindow
+                        -RedirectStandardError "$root\scripts\logs\$svcName.err" # 🆕 v3.19: -NoNewWindow removed (incompatible with -WindowStyle)
                     for ($i = 0; $i -lt $svcWait; $i++) {
                         Start-Sleep -Seconds 1
                         $tcp = New-Object System.Net.Sockets.TcpClient
