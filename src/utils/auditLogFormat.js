@@ -204,6 +204,19 @@ export const INTERNAL_FIELDS = new Set([
   // annotation 技术字段
   'target_type',
   'target_id',
+  // [FIX 2026-06-19] AI Agent 元数据 (业务视图隐藏)
+  'agent_id',
+  'agent_session_id',
+  'agent_reasoning',
+  'tool_call_id',
+  // [FIX 2026-06-19] 审计系统状态字段
+  'error_message',
+  'retry_count',
+  'status',
+  'status_entered_at',
+  'row_hash',
+  'prev_hash',
+  'retention_until',
 ])
 
 /**
@@ -273,6 +286,21 @@ export const FIELD_LABELS = {
 
   // product
   owner_id: '负责人',
+
+  // [FIX 2026-06-19 业务化] enum_type 字段
+  mutability: '可变性',
+  allow_custom_values: '允许自定义值',
+  is_default: '是否默认',
+  display_order: '显示顺序',
+  sort_order: '排序',
+
+  // [FIX 2026-06-19 业务化] 通用布尔/数值
+  is_archived: '是否归档',
+  is_hidden: '是否隐藏',
+  is_required: '是否必填',
+  max_length: '最大长度',
+  min_length: '最小长度',
+  default_value: '默认值',
 }
 
 /**
@@ -302,10 +330,21 @@ export const FIELD_VALUE_LABELS = {
   public: '公开',
   private: '私有',
   internal: '内部',
+  draft: '草稿',
+
+  // [FIX 2026-06-19 业务化] mutability (可变性)
+  readonly: '只读',
+  fully_editable: '允许',
+  fullEditable: '允许',
+  half_editable: '半可编辑',
+  halfEditable: '半可编辑',
+  immutable: '不可变',
 
   // 布尔值
   true: '是',
   false: '否',
+  True: '是',
+  False: '否',
 }
 
 /**
