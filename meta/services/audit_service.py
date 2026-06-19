@@ -364,6 +364,21 @@ class AuditService:
         try:
             now = datetime.now().isoformat()
 
+            # [FIX 2026-06-19 E.2] 强制 action 不能为空, 否则报 ERROR
+            # 业务人员看到 '未识别操作' 是因为某些路径传入了空 action
+            # 这里是入口拦截, 早于所有后续处理
+            if not action or (isinstance(action, str) and action.strip().upper() in ('', 'NULL', 'NONE')):
+                import logging as _logging
+                _logging.getLogger(__name__).error(
+                    f"[audit_service.log] action is empty/None! object_type={object_type} "
+                    f"object_id={object_id} user_id={user_id} extra_data={extra_data}"
+                )
+                action = 'UNKNOWN'
+                # 把这个错误也记下来, 方便排查
+                if extra_data is None:
+                    extra_data = {}
+                extra_data['_action_validation_error'] = 'action was empty at log() entry'
+
             # [v3.18 FR-003/004/013] 自动 derive 缺失的 log_category/log_level/retention_until
             from meta.core.audit_constants import (
                 derive_category, derive_level, retention_days,
