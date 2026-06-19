@@ -82,6 +82,7 @@
       :object-type-labels="page.objectTypeLabels"
       :multi-type-mode="true"
       :context="page.importContext"
+      :menu-code="menuCode"
       @success="page.handleImportSuccess"
     />
 
@@ -98,6 +99,7 @@
       :multi-type-mode="true"
       :show-export-mode="true"
       :show-export-options="true"
+      :menu-code="menuCode"
       @success="page.handleExportSuccess"
     />
   </div>
@@ -223,6 +225,17 @@ const emit = defineEmits(['toolbarAction', 'tabChange'])
 
 const route = useRoute()
 const router = useRouter()
+
+// [NEW v3.20 2026-06-19] 从 route name 推导 menu_code
+// 路由 /system/archdata → name = "ArchDataManagement" → 映射 menu_code = "arch-data"
+// 路由 /archdata-chart → name = "archdata-chart" → 也走"架构数据"前缀（图表导出）
+const menuCode = computed(() => {
+  const name = route?.name
+  if (name === 'ArchDataManagement' || name === 'archdata-chart' || name === 'archdata') {
+    return 'arch-data'
+  }
+  return ''
+})
 
 // [v32] 引入 chart tab 的 Pinia stores (单一数据源)
 const tabStore = useTabStore()

@@ -175,6 +175,11 @@ const props = defineProps({
     type: String,
     default: 'single'
   },
+  // [NEW v3.20 2026-06-19] 触发菜单编码 (arch-data → 后端走"架构数据"前缀)
+  menuCode: {
+    type: String,
+    default: ''
+  },
   width: {
     type: String,
     default: '560px'
@@ -364,7 +369,11 @@ async function handleExportSync() {
     }
 
     const { boService } = await import('@/services/boService')
-    const result = await boService.exportData(effectiveObjectType, params)
+    // [NEW v3.20 2026-06-19] 透传 menuCode → 后端走"架构数据"前缀
+    const result = await boService.exportData(effectiveObjectType, {
+      ...params,
+      menu_code: props.menuCode || undefined,
+    })
 
     if (result.success) {
       const count = result.total_rows || 0
@@ -429,7 +438,10 @@ async function handleExportAsync() {
     }
 
     const { boService } = await import('@/services/boService')
-    const startResult = await boService.exportDataAsync(effectiveObjectType, params)
+    const startResult = await boService.exportDataAsync(effectiveObjectType, {
+      ...params,
+      menu_code: props.menuCode || undefined,
+    })
 
     if (!startResult.success) {
       message.error('启动导出任务失败，请稍后重试', startResult)
