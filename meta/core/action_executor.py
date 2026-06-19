@@ -2178,10 +2178,9 @@ class ActionExecutor:
             user_id = current_user.get('user_id') or current_user.get('id')
             display = current_user.get('display_name') or ''
             username = current_user.get('username') or ''
-            if display and username and display != username:
-                user_name = f"{display} ({username})"
-            else:
-                user_name = display or username or ''
+            # [FIX 2026-06-19 D.2 v3] 优先用 display_name, 不要拼接 "display (username)"
+            # 之前 "Admin (admin)" 业务人员看不懂, 现在统一只用 display_name
+            user_name = display or username or ''
             try:
                 ip_address = request.remote_addr
             except RuntimeError:
