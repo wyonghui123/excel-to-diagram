@@ -145,6 +145,33 @@ import { AppButton } from '@/components/common/AppButton'
 import { AppIcon } from '@/components/common/AppIcon'
 import { ObjectPage } from '@/components/common/ObjectPage'
 
+// [FIX 2026-06-18] 关键修复：把 `const props = defineProps(...)` 移到 setup 顶部
+//   原因：line 160-164 的 coordinatorRefreshKey computed 内部访问 props.id/objectType，
+//   line 198 的 `watch(coordinatorRefreshKey, ...)` 创建时会立即执行 source 一次
+//   （Vue 3 watch 默认行为：cb + flush !== 'post' 时会 effect.run() 拿 initialValue）。
+//   访问 coordinatorRefreshKey.value → 触发 computed getter → 访问 props.id →
+//   props 处于 TDZ（因为 const props = defineProps(...) 在 line 202）→
+//   报 "ReferenceError: Cannot access 'props' before initialization"。
+//
+//   修复：把 `const props = defineProps(...)` 提前到 coordinator 之前。
+//   注：defineProps 是 compiler macro，实际编译产物中会被 hoist 到 setup 顶部，
+//   但为了与 watch 创建顺序对齐（避免任何 hoisting 失败），显式提前最稳。
+const props = defineProps({
+  modelValue: { type: Boolean, default: false },
+  objectType: { type: String, required: true },
+  id: { type: [String, Number], required: true },
+  mode: { type: String, default: 'view' },
+  createMode: { type: Boolean, default: false },
+  editMode: { type: Boolean, default: false },
+  statusField: { type: String, default: null },
+  statusMap: { type: Object, default: () => ({}) },
+  readonly: { type: Boolean, default: false },
+  showDelete: { type: Boolean, default: true },
+  showHistory: { type: Boolean, default: true },
+  standalone: { type: Boolean, default: false },
+  hideHeader: { type: Boolean, default: false }
+})
+
 // [L1 2026-06-18] 注入 refreshCoordinator，详情页与列表页共享刷新信号
 //   设计动机：metalist 稳定化（FR-005/FR-007）使用 refreshCoordinator 事件总线实现
 //   "保留状态 + 显式刷新"模式。详情页缺这套机制，导致：
@@ -198,22 +225,6 @@ function syncCoordinatorRegistration() {
 watch(coordinatorRefreshKey, syncCoordinatorRegistration)
 
 const { selectedVersionId } = useVersionContext()
-
-const props = defineProps({
-  modelValue: { type: Boolean, default: false },
-  objectType: { type: String, required: true },
-  id: { type: [String, Number], required: true },
-  mode: { type: String, default: 'view' },
-  createMode: { type: Boolean, default: false },
-  editMode: { type: Boolean, default: false },
-  statusField: { type: String, default: null },
-  statusMap: { type: Object, default: () => ({}) },
-  readonly: { type: Boolean, default: false },
-  showDelete: { type: Boolean, default: true },
-  showHistory: { type: Boolean, default: true },
-  standalone: { type: Boolean, default: false },
-  hideHeader: { type: Boolean, default: false }
-})
 
 const emit = defineEmits(['update:modelValue', 'close', 'refresh', 'delete', 'loaded', 'saved', 'created'])
 
