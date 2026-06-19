@@ -151,8 +151,12 @@ function getInitialTab() {
 function handleTabChange(key) {
   activeTab.value = key
   visitedTabs.add(key)
-  if (route.query.tab !== key) {
-    router.replace({ query: { ...route.query, tab: key } })
+  // [FIX 2026-06-19] 改用 path param (如 /user-permission/roles), 不是 query (?tab=roles)
+  //   原因: query 形式在 tabStore 持久化 + API 菜单加载完成后会失效
+  //   (API menu_code 与静态 key 不一致导致 fallback 到默认 subtab)
+  //   path param 是 deep link 友好, 符合头部产品语义 (GitHub, Slack)
+  if (route.params.tab !== key) {
+    router.replace({ params: { ...route.params, tab: key } })
   }
 }
 

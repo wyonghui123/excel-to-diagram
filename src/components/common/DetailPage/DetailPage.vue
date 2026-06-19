@@ -940,9 +940,21 @@ onUnmounted(() => {
 //     3) 丢失用户的滚动位置 / 选中项 / 折叠状态
 //   刷新由 coordinator 显式触发（boService 写后），或用户手动点刷新按钮。
 //   仅 console.debug 留痕，便于排查"为什么切回来不刷"。
+// [FIX 2026-06-19] bfcache 兜底 fetch: 关闭浏览器重开时浏览器用 bfcache 恢复整页，
+//   DetailPage 不重新 mount, onMounted 不触发, data.value 仍是 null,
+//   会显示空白. 修复: 在 onActivated 兜底, 仅当 data 为 null 且是 view 模式时 fetch.
+//   守护: data 不为 null (in-app 切走切回) → 不重复 fetch, 保留滚动位置.
 onActivated(() => {
   if (coordinatorRefreshKey.value) {
     console.debug(`[DetailPage] onActivated: ${coordinatorRefreshKey.value}, state preserved (no auto-refresh, internalEditing=${internalEditing.value})`)
+  }
+  // [FIX 2026-06-19] bfcache 兜底 fetch
+  if (data.value === null && props.id && props.mode !== 'add' && props.id !== 'new') {
+    const traceId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID().replace(/-/g, '')
+      : `t-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+    console.debug(`[DetailPage] onActivated fetch fallback, id: ${props.id}, trace_id=${traceId}`)
+    fetchData()
   }
 })
 
