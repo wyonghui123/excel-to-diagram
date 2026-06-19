@@ -157,10 +157,9 @@ def normalize_user_name(display_name: Optional[str], username: Optional[str]) ->
     u = (username or "").strip()
     if not d and not u:
         return "anonymous"
-    if not u or not d or d == u:
-        # username 缺失 / display_name 缺失 / 两者相同 → 纯 username
-        return u or d or "anonymous"
-    return f"{d} ({u})"
+    # [FIX 2026-06-19 D.2 v3] 优先用 display_name, 不再拼接 "display (username)"
+    # 业务人员之前看到 "Admin (admin)" 不理解, 现在统一只用 display_name
+    return d or u or "anonymous"
 
 
 def parse_user_name(user_name: str) -> Dict[str, str]:
