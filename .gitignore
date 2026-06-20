@@ -74,3 +74,29 @@ meta/.architecture.lock
 
 # Uploads
 meta/uploads/
+
+# ===== v3.19 新增：调试残留 + DB 监控日志 =====
+# 调试脚本 (root 目录)
+test_dim_scope_debug*.py
+check_*.py
+debug_*.py
+probe_*.py
+*.dbg/
+
+# DB 监控日志 (运行时生成, 每天数十MB, 不应入仓)
+meta/db_monitor_logs/
+*.jsonl
+
+# stats & debug 报告
+stats.html
+_meta/
+
+# 临时文件 (调试过程产生)
+*.tmp.log
+tmp_*.py
+head_*.py
+list_*.py
+
+# Git 恢复工作区 (本会话创建)
+.git-recovery/
+
