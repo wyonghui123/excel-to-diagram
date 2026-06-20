@@ -139,7 +139,8 @@ defineProps({
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  /* [FIX 2026-06-20 T-2026-06-20-001-r3] overflow:hidden → visible, 让内容自然撑高, document scroll 接管 */
+  overflow: visible;
   padding: var(--spacing-md);
   min-height: 0;
 }
