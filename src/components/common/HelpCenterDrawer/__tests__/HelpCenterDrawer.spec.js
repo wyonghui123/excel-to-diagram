@@ -1,10 +1,10 @@
-// HelpCenterDrawer - P0 placeholder unit test
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+// HelpCenterDrawer - P1 iframe embed unit tests
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import HelpCenterDrawer from '../HelpCenterDrawer.vue'
 
-describe('HelpCenterDrawer - P0 placeholder', () => {
+describe('HelpCenterDrawer - P1 iframe', () => {
   let wrapper
 
   afterEach(() => {
@@ -12,21 +12,47 @@ describe('HelpCenterDrawer - P0 placeholder', () => {
       wrapper.unmount()
       wrapper = null
     }
+    document.body.style.overflow = ''
   })
 
   it('does not render drawer content when modelValue is false', () => {
     wrapper = mount(HelpCenterDrawer, {
       props: { modelValue: false }
     })
-    expect(wrapper.find('.help-drawer').exists()).toBe(false)
+    expect(document.querySelector('.help-drawer')).toBeNull()
   })
 
-  it('renders drawer content when modelValue is true', async () => {
+  it('renders drawer with iframe when modelValue is true', async () => {
     wrapper = mount(HelpCenterDrawer, {
       props: { modelValue: true, attachTo: document.body }
     })
     await nextTick()
     expect(document.querySelector('.help-drawer')).toBeTruthy()
+    const iframe = document.querySelector('.help-drawer__iframe')
+    expect(iframe).toBeTruthy()
+    expect(iframe.tagName).toBe('IFRAME')
+  })
+
+  it('uses default helpUrl pointing to /docs/user-guide/index.html', async () => {
+    wrapper = mount(HelpCenterDrawer, {
+      props: { modelValue: true, attachTo: document.body }
+    })
+    await nextTick()
+    const iframe = document.querySelector('.help-drawer__iframe')
+    expect(iframe.getAttribute('src')).toBe('/docs/user-guide/index.html')
+  })
+
+  it('respects custom helpUrl prop', async () => {
+    wrapper = mount(HelpCenterDrawer, {
+      props: {
+        modelValue: true,
+        helpUrl: '/custom/help/index.html',
+        attachTo: document.body
+      }
+    })
+    await nextTick()
+    const iframe = document.querySelector('.help-drawer__iframe')
+    expect(iframe.getAttribute('src')).toBe('/custom/help/index.html')
   })
 
   it('emits update:modelValue false when close button clicked', async () => {
@@ -59,17 +85,7 @@ describe('HelpCenterDrawer - P0 placeholder', () => {
     expect(wrapper.emitted('update:modelValue')[0]).toEqual([false])
   })
 
-  it('renders the placeholder content for P0 stage', async () => {
-    wrapper = mount(HelpCenterDrawer, {
-      props: { modelValue: true, attachTo: document.body }
-    })
-    await nextTick()
-
-    expect(document.querySelector('.help-drawer__placeholder')).toBeTruthy()
-    expect(document.querySelector('.help-drawer__placeholder-title').textContent).toContain('User Guide')
-  })
-
-  it('opens help URL in new tab when placeholder button clicked', async () => {
+  it('opens helpUrl in new tab when header action button clicked', async () => {
     const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
 
     wrapper = mount(HelpCenterDrawer, {
@@ -77,15 +93,42 @@ describe('HelpCenterDrawer - P0 placeholder', () => {
     })
     await nextTick()
 
-    const btn = document.querySelector('.help-drawer__placeholder button')
+    const btn = document.querySelector('.help-drawer__header-btn')
     expect(btn).toBeTruthy()
     btn.click()
     await nextTick()
 
     expect(openSpy).toHaveBeenCalled()
     expect(openSpy.mock.calls[0][0]).toBe('/docs/user-guide/index.html')
-
     openSpy.mockRestore()
+  })
+
+  it('applies custom width from prop', async () => {
+    wrapper = mount(HelpCenterDrawer, {
+      props: { modelValue: true, width: 1200, attachTo: document.body }
+    })
+    await nextTick()
+
+    const drawerWrapper = document.querySelector('.help-drawer__wrapper')
+    expect(drawerWrapper.style.width).toBe('1200px')
+  })
+
+  it('bumps iframe key when drawer is reopened', async () => {
+    wrapper = mount(HelpCenterDrawer, {
+      props: { modelValue: true, attachTo: document.body }
+    })
+    await nextTick()
+    const iframeEl1 = document.querySelector('.help-drawer__iframe')
+    expect(iframeEl1).toBeTruthy()
+
+    await wrapper.setProps({ modelValue: false })
+    await nextTick()
+    expect(document.querySelector('.help-drawer__iframe')).toBeNull()
+
+    await wrapper.setProps({ modelValue: true })
+    await nextTick()
+    const iframeEl2 = document.querySelector('.help-drawer__iframe')
+    expect(iframeEl2).toBeTruthy()
   })
 
   it('locks body scroll when drawer opens and restores on close', async () => {
@@ -102,32 +145,17 @@ describe('HelpCenterDrawer - P0 placeholder', () => {
     expect(document.body.style.overflow).toBe('')
   })
 
-  it('uses custom helpUrl when provided', async () => {
-    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
-
+  it('closes drawer when Escape is pressed', async () => {
     wrapper = mount(HelpCenterDrawer, {
-      props: {
-        modelValue: true,
-        helpUrl: '/custom/help/index.html',
-        attachTo: document.body
-      }
+      props: { modelValue: true, attachTo: document.body }
     })
     await nextTick()
 
-    const btn = document.querySelector('.help-drawer__placeholder button')
-    btn.click()
-
-    expect(openSpy.mock.calls[0][0]).toBe('/custom/help/index.html')
-    openSpy.mockRestore()
-  })
-
-  it('applies custom width from prop', async () => {
-    wrapper = mount(HelpCenterDrawer, {
-      props: { modelValue: true, width: 1200, attachTo: document.body }
-    })
+    const evt = new KeyboardEvent('keydown', { key: 'Escape' })
+    document.dispatchEvent(evt)
     await nextTick()
 
-    const drawerWrapper = document.querySelector('.help-drawer__wrapper')
-    expect(drawerWrapper.style.width).toBe('1200px')
+    expect(wrapper.emitted('update:modelValue')).toBeTruthy()
+    expect(wrapper.emitted('update:modelValue')[0]).toEqual([false])
   })
 })
