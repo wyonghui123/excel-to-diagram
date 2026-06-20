@@ -276,10 +276,6 @@ async function handleUserCommand(command) {
     showAccountDialog.value = true
   } else if (command === 'help') {
     openHelp({ source: 'user-menu' })
-  } else if (command === 'shortcuts') {
-    openHelp({ source: 'user-menu', anchor: 'shortcuts' })
-  } else if (command === 'feedback') {
-    openHelp({ source: 'user-menu', anchor: 'feedback' })
   } else if (command === 'logout') {
     // [FIX v1.0.4 2026-06-09] 修复 admin 退出后用 TEST60 登录看到 admin 菜单的问题
     // 原 bug: 1) authStore.logout() 是 async 但未 await → router.push 抢跑
