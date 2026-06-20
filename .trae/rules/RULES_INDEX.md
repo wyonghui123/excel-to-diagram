@@ -130,7 +130,7 @@ description: "规则索引：所有规则文件的目录和分类"
 
 **修正说明**:
 - 原 RULES_INDEX.md 标注 3 处重复, 实际只有 1 处
-- powershell-curl-alias.md 是 curl 专项 (1706B), powershell-rules.md 是通用 (15448B) — 互补
+- powershell-curl-alias.md 是 curl 专项 (1706B), powershell-execution-guide.md 是通用 (14196B) — 互补
 - core/agent-roles.md 引用 context-usage.md — 互补
 - 建议: 把 ai-coding-standards.md 移到 deprecated/ 目录 (2026-06-19 待执行) |
 

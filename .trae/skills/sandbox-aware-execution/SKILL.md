@@ -187,6 +187,6 @@ git status   # 假成功 3
 
 ## 参考
 
-- 规则文件：`trae-sandbox-behavior.md`
+- 规则文件：`powershell-execution-guide.md`（整合 trae-sandbox + powershell 规则）
 - 2026-06-20 trae-sandbox 行为发现
 - `.trae/rules/multi-agent-coordination.md` - L5 动态适配策略

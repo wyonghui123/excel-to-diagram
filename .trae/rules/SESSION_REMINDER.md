@@ -215,7 +215,7 @@ powershell -File d:\filework\excel-to-diagram\scripts\service_manager.ps1 restar
 - `.trae/rules/SESSION_REMINDER.md` — **项目规范入口（18 条铁律 + 37 条速查表）**
 - `.trae/rules/test-script-quality-analysis.md` — 测试脚本质量分析、效率优化建议
 - `.trae/rules/page-health-rules.md` — 页面健康检测规范、四层错误检测机制
-- `.trae/rules/powershell-rules.md` — PowerShell 语法规范、Bash→PowerShell 速查表
+- `.trae/rules/powershell-execution-guide.md` — trae-sandbox 行为 + PowerShell 语法规范 + Bash→PowerShell 速查表（整合版）
 - `.trae/rules/test-data-rules.md` — 测试数据管理规范、fixture 使用方法
 - `.trae/rules/service-management-rules.md` — 服务管理规范、重启安全规则
 - `.trae/rules/frontend-test-auth.md` — 前端测试认证规范

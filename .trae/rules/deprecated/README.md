@@ -14,6 +14,8 @@
 | `mcp-parallel-integration.md` | MCP 多实例方案废弃 | `PlaywrightCLI` (天然进程级隔离) |
 | `multi-agent-browser-isolation.md` | session_manager 废弃 | `PlaywrightCLI` (无需 session_manager) |
 | `multi-agent-quickstart.md` | 旧版多智能体指南 | `multi-agent-coordination.md` |
+| `powershell-rules.md` | 2026-06-20 已整合 | `powershell-execution-guide.md` (整合 trae-sandbox + powershell) |
+| `trae-sandbox-behavior.md` | 2026-06-20 已整合 | `powershell-execution-guide.md` (整合 trae-sandbox + powershell) |
 
 ## 替代方案
 
