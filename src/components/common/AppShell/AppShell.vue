@@ -116,7 +116,7 @@ defineProps({
 .app-shell__body {
   flex: 1;
   display: flex;
-  overflow: hidden;
+  /* [FIX 2026-06-20 T-2026-06-20-001] 移除 overflow:hidden, 让 document scroll 接管 */
   min-height: 0;
 }
 
