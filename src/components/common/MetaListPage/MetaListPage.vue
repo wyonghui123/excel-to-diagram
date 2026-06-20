@@ -1820,11 +1820,12 @@ defineExpose({
 .meta-list-page {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  min-height: 0;
+  /* [FIX 2026-06-20 T-2026-06-20-002-v3] height:100% → auto, overflow:hidden → visible, 让 document scroll 接管 */
+  height: auto;
+  min-height: 100%;
   flex-shrink: 1;
   gap: 0;
-  overflow: hidden;
+  overflow: visible;
   background: var(--color-bg-container);
   border-radius: var(--border-radius-md);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -1837,7 +1838,7 @@ defineExpose({
   flex-wrap: nowrap;
   gap: 12px;
   padding: var(--spacing-sm) var(--spacing-md);
-  background: transparent;
+  background: var(--color-bg-container);
   /* [FIX 2026-06-12] Root-cause fix #9: 去掉 border-bottom 让 toolbar 和 table
      完全无缝衔接（之前是 1px solid #ebeef5 让两者看起来像独立的卡片） */
   border-bottom: none;
@@ -1845,6 +1846,10 @@ defineExpose({
   min-height: 44px;
   position: relative; /* Lock positioning context (2026-06-09 regression fix) */
   flex-shrink: 0;
+  /* [FIX 2026-06-20 T-2026-06-20-002-v2] Sticky toolbar (SAP Dynamic Page Layout) - 滚动时工具栏吸顶 */
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
 .toolbar-left {
@@ -1935,8 +1940,9 @@ defineExpose({
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  min-height: 0;
+  /* [FIX 2026-06-20 T-2026-06-20-002-v3] overflow:hidden → visible, 让 document scroll 接管, 分页始终可见 */
+  overflow: visible;
+  min-height: 400px;
 }
 
 .table-wrapper {
