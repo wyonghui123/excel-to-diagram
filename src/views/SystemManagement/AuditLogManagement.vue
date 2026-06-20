@@ -515,10 +515,10 @@ function formatDateTime(datetime) {
 </script>
 
 <style scoped>
-/* [FIX 2026-06-12] 整页 flex column: overview 占自然高度, MetaListPage 填满剩余空间.
-   之前 height:100% + overflow:hidden 父子同时锁死高度, 内容超出后整页无法 scroll down. */
+/* [FIX 2026-06-20] 用 flex:1 + min-height:0 替代 height:100%
+   在 flex 容器中 height:100% 不可靠, flex:1 让元素填满剩余空间 */
 .audit-log-management {
-  height: 100%;
+  flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -574,17 +574,12 @@ function formatDateTime(datetime) {
   flex-direction: column;
 }
 
-/* [FIX 2026-06-12] 强制 el-table__body-wrapper 内部滚动条.
-   Element Plus 的 el-table 内部用 .el-scrollbar 包装, 真滚动容器是
-   .el-scrollbar__wrap (不是 body-wrapper). el-scrollbar 默认隐藏滚动条,
-   用户看不到就以为不能滚, 这里强制常驻显示. */
+/* [FIX 2026-06-20] 移除 height:auto !important 覆写
+   之前为了 flex 布局覆写了 height:100%, 但这导致 el-table 没有固定高度,
+   无法启用内部滚动. 现在 MetaListPage 用 flex:1 + min-height:0,
+   .table-wrapper 有确定高度, height:100% 可以正确继承 */
 .audit-log-management :deep(.custom-table) {
-  /* [FIX 2026-06-17] 改用 flex:1 + height:auto, 不再写死 100vh - X.
-     MetaListPage 写 inline style="height:100%" 被 height:auto !important 覆盖.
-     flex:1 让 el-table 在 meta-list-page (display:flex column) 内自动填满剩余空间.
-     收起分析区域后, 剩余空间变大 → el-table 自动变大, 列表下方不再有空白. */
   flex: 1 1 auto !important;
-  height: auto !important;
   min-height: 360px;
   display: flex !important;
   flex-direction: column !important;

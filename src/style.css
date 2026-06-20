@@ -37,16 +37,13 @@ svg,
 body {
   margin: 0;
   min-width: 320px;
-  /* [FIX 2026-06-20 T-2026-06-20-001] 移除 height:100vh + overflow:hidden, 让 document scroll 接管 */
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: hidden;
   background: var(--color-bg-layout);
   color: var(--color-text-primary);
 }
 
 #app {
-  /* [FIX 2026-06-20 T-2026-06-20-001] 移除 height:100vh + overflow:hidden, 让 flex 子元素自然撑高 */
-  overflow: visible;
+  /* 滚动由 AppShell__content 的 overflow-y:auto 控制 */
 }
 
 /* 链接样式 */
