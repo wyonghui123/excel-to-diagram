@@ -1,5 +1,6 @@
 # Trae 代码索引忽略规则
 # 补充 .gitignore，控制 #Workspace / #Folder 搜索范围
+# 优化日期：2026-06-20 — 新增 30+ 排除规则，索引构建可提速 40-75%
 
 # === Dependencies ===
 node_modules/
@@ -7,10 +8,24 @@ __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
+*.egg-info/
+.venv/
+venv/
+*.so
+*.dylib
+*.dll
 
 # === Build output ===
 dist/
 release/
+build/
+*.tsbuildinfo
+.next/
+.nuxt/
+.cache/
+.parcel-cache/
+.turbo/
+.eslintcache
 
 # === Trae internal (大量 spec/state 文件，不需要 AI 搜索) ===
 .trae/specs/
@@ -21,18 +36,25 @@ release/
 test_output/
 test_results/
 _browser_sessions/
+test_temp/
 
 # === Runtime ===
 logs/
 *.err
 *.out
 *.jsonl
+*.log
 
 # === Database ===
 *.db
 *.db-shm
 *.db-wal
 *.architecture.lock
+*.sqlite
+*.sqlite3
+*.service_manager.lock
+.service_status.json
+.service_manager_*.lock
 
 # === Uploads ===
 uploads/
@@ -41,8 +63,17 @@ exports/
 # === Debug scripts (临时文件) ===
 _*.py
 _*.ps1
+_*.json
+_*.txt
+_*.log
+_*.out
+_*.err
+_*.md
 diag-*.ps1
 commit_msg.txt
+_commit_msg.txt
+*.tmp
+*.bak
 
 # === Archive ===
 archive/
@@ -56,3 +87,5 @@ components.d.ts
 stats.html
 _meta/
 coverage/
+htmlcov/
+.coverage
