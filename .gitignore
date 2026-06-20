@@ -100,3 +100,19 @@ list_*.py
 # Git 恢复工作区 (本会话创建)
 .git-recovery/
 
+
+# ===== v3.22: Runtime artifacts (added 2026-06-20) =====
+# Service runtime logs
+logs/*.err
+logs/*.out
+
+# DB backups (created by watchdog/health monitor)
+meta/architecture.db.backup_*
+meta/architecture.db.backup_archive_*
+
+# Test artifact archives (date-stamped folders)
+_archive_*/
+
+# Test uploads (one-off Excel files for import testing)
+uploads/*.xlsx
+!uploads/.gitkeep
