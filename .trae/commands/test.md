@@ -1,6 +1,9 @@
 ---
 name: test
 description: 运行测试（使用合规入口 python test.py）
+tools:
+  - RunCommand
+argument-hint: "--failed | --all | --single <test_id> | --file <path>"
 ---
 
 运行测试，遵循项目铁律：禁止直接 pytest，必须用 python d:\filework\test.py。

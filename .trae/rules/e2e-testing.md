@@ -1,3 +1,9 @@
+---
+alwaysApply: false
+description: "E2E 测试规则：Playwright 端到端测试规范"
+globs: "tests/e2e/**/*,meta/tests/e2e/**/*"
+---
+
 # E2E 测试规则（Playwright）
 
 > [!!!] 本文件是 v1 时代 E2E 规则，部分仍有效 [!!!]

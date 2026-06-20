@@ -1,3 +1,9 @@
+---
+alwaysApply: false
+description: "前端开发规范：Vue 3 + TypeScript + Vite 技术栈、组件开发、测试规则"
+globs: "src/**/*.{vue,ts,tsx,js,jsx,css,scss}"
+---
+
 # 前端开发规范
 
 ## 技术栈

@@ -1,3 +1,8 @@
+---
+alwaysApply: false
+description: "测试脚本质量分析：效率优化、Token 消耗、执行时间"
+---
+
 # 测试脚本质量分析报告
 
 ## 一、核心问题总结

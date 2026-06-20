@@ -1,3 +1,8 @@
+---
+alwaysApply: false
+description: "上下文窗口管理优化：Token 节省、规则精简策略"
+---
+
 # Context 使用规则
 
 > 最后更新: 2026-06-07 | 状态: 活跃

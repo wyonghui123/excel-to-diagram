@@ -1,6 +1,8 @@
 ---
 name: cleanup
 description: 清理 Worktree + Stash + 临时文件
+tools:
+  - RunCommand
 ---
 
 清理项目中不再需要的 Worktree、Stash 和临时文件。

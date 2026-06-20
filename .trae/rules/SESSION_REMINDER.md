@@ -1,3 +1,7 @@
+---
+alwaysApply: true
+description: 项目铁律入口 - pytest禁止、服务管理、PowerShell兼容
+---
 # 全局规则入口
 
 ## [!!!] [!!!] [!!!] 铁律：禁止直接运行 pytest [!!!] [!!!] [!!!]

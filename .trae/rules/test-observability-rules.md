@@ -1,3 +1,9 @@
+---
+alwaysApply: false
+description: "测试可观测性规范：trace_id、结构化日志、metrics、diagnostics"
+globs: "meta/tests/**/*,meta/core/trace_id*,meta/api/diagnostics*"
+---
+
 # 测试可观测性规范
 
 > **智能体在运行长测试时必须保证可观测性：分批、实时输出、过程检查、快速中断。**

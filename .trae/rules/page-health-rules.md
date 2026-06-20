@@ -1,3 +1,9 @@
+---
+alwaysApply: false
+description: "页面健康检测规范：四层错误检测、console.error 监控、白屏检测"
+globs: "src/**/*.vue,tests/e2e/**/*"
+---
+
 # 页面健康检测规范
 
 > **智能体必须在关键操作前检查页面健康状态，在测试结束时断言健康状态。**

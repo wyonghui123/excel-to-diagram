@@ -1,3 +1,8 @@
+---
+alwaysApply: false
+description: "AI Agent 撤销保护：防止误操作、安全回滚机制"
+---
+
 # AI Agent 写入保护规则 (v1.0)
 
 > **任何 AI Coding Agent (Batch2/3、Claude Code、Cursor、Trae IDE) 修改文件时必读**

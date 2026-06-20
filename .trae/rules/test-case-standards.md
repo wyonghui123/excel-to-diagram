@@ -1,3 +1,9 @@
+---
+alwaysApply: false
+description: "测试用例编写规范：命名、结构、断言标准"
+globs: "meta/tests/**/*,tests/**/*"
+---
+
 # 测试用例编写规范
 
 > **版本** v1.1 | **生效日期** 2026-06-02

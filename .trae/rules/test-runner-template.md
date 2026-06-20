@@ -1,3 +1,8 @@
+---
+alwaysApply: false
+description: "测试运行器模板：conftest.py 配置、fixture 模板"
+---
+
 # 测试运行标准模板 [NEW 2026-06-05]
 
 > [!!!] 所有 Agent 跑测试前必读 [!!!]

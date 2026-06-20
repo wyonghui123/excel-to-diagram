@@ -1,6 +1,8 @@
 ---
 name: health
 description: 前后端健康检查
+tools:
+  - RunCommand
 ---
 
 对前后端服务进行健康检查，验证系统是否正常运行。

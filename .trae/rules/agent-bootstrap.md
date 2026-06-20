@@ -1,3 +1,9 @@
+---
+alwaysApply: false
+description: "Agent Bootstrap 规范：worktree 创建、端口分配、环境初始化"
+globs: "scripts/agent_bootstrap.ps1,scripts/agent_test.py"
+---
+
 # [AGENT-BOOTSTRAP] AI Agent 启动强制前置检查 (autoload)
 
 > **本规则由 Trae IDE 在 Agent 启动时自动注入。**

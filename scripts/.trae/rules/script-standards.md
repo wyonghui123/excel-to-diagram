@@ -1,3 +1,9 @@
+---
+alwaysApply: false
+description: "脚本开发规范：PowerShell 铁律、Git 兼容性、文件编码、服务管理"
+globs: "scripts/*.ps1,scripts/*.py"
+---
+
 # 脚本开发规范
 
 ## 技术栈

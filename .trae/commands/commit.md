@@ -1,6 +1,11 @@
 ---
 name: commit
 description: 规范化提交流程
+tools:
+  - RunCommand
+  - Read
+  - Edit
+argument-hint: "<type>(<scope>): <description>"
 ---
 
 执行规范化 Git 提交流程，遵循项目 commit 规范。

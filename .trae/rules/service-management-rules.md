@@ -1,3 +1,9 @@
+---
+alwaysApply: false
+description: "服务管理规范：启停前后端服务、service_manager 使用规则"
+globs: "scripts/*.ps1,scripts/*.py"
+---
+
 # 服务管理规范（多 Agent 协作）
 
 > 前后端启停必须用 `service_manager.ps1`，禁止直接操作终端/进程。

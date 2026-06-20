@@ -1,3 +1,9 @@
+---
+alwaysApply: false
+description: "后端开发规范：Python + Flask + Waitress 技术栈、API 规则、数据库规则"
+globs: "meta/**/*.py,meta/**/*.yaml"
+---
+
 # 后端开发规范
 
 ## 技术栈

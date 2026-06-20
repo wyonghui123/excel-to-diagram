@@ -1,3 +1,7 @@
+---
+scene: git_message
+description: Git Commit Message 格式规范 - type(scope): description [pm-authorized]
+---
 # Git Commit Message 规范
 
 ## 格式

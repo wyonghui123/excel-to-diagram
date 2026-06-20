@@ -1,3 +1,9 @@
+---
+alwaysApply: false
+description: "审计合规规范：审计日志、操作追踪、权限合规"
+globs: "meta/api/*,meta/core/audit*,meta/core/models_annotations.py"
+---
+
 # 审计合规规范
 
 > 最后更新: 2026-06-07 | 状态: 活跃

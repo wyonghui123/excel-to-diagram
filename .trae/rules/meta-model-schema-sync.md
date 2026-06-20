@@ -1,3 +1,9 @@
+---
+alwaysApply: false
+description: "元模型 Schema 同步规范：models_annotations.py 与 DB schema 一致性"
+globs: "meta/core/models*.py,meta/core/yaml_loader.py"
+---
+
 # 元模型 Schema 同步规范
 
 > **最后更新**: 2026-05-19 (v1.5 更新)

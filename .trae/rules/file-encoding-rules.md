@@ -1,3 +1,9 @@
+---
+alwaysApply: false
+description: "文件编码规范：UTF-8 强制、PowerShell 编码陷阱、mojibake 防护"
+globs: "scripts/*.ps1,*.py"
+---
+
 # 文件编码与字符串语法规范 [NEW 2026-06-05]
 
 > [!!!] 本文件是所有 Agent 写文件/读文件前必读的规范 [!!!]

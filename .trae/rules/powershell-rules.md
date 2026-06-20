@@ -1,3 +1,7 @@
+---
+alwaysApply: true
+description: PowerShell语法规范 - 编码陷阱、Git兼容、curl禁止
+---
 # PowerShell 语法规范 (v3.18)
 
 > **PowerShell 是 Windows 主力 shell，但有大量坑需要规避。本规则让 AI Coding Agent 避免常见陷阱。**

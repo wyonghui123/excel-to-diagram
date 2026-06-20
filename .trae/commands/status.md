@@ -1,6 +1,8 @@
 ---
 name: status
 description: 查看系统状态（服务 + Git + Worktree）
+tools:
+  - RunCommand
 ---
 
 查看当前系统完整状态，包括前后端服务、Git 工作区、Worktree、Stash。

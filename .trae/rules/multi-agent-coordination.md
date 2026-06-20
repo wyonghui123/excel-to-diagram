@@ -1,3 +1,7 @@
+---
+alwaysApply: true
+description: 多Agent协作规范 - worktree隔离、端口隔离、沙箱检测、PM授权例外
+---
 # Multi-Agent 协作规范 (v3.24)
 
 > **多个 AI Coding Agent 并行开发, 测试基础设施需支持端口/DB/env 隔离。**

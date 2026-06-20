@@ -1,3 +1,8 @@
+---
+alwaysApply: false
+description: "项目启动初始化：依赖安装、环境配置、首次运行"
+---
+
 # 项目启动规则
 
 ## [FAST] 唯一启动方式（强制）

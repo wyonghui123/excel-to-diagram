@@ -1,3 +1,7 @@
+---
+alwaysApply: true
+description: 测试运行规则 - pytest禁止、test.py入口、DB保护
+---
 # 测试运行规则
 
 > **[NEW] 测试用例编写规范请参考：** `.trae/rules/test-case-standards.md`

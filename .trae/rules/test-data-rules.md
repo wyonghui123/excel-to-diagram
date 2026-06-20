@@ -1,3 +1,9 @@
+---
+alwaysApply: false
+description: "测试数据管理规范：Factory 模式、cleanup、fixture 使用"
+globs: "meta/tests/**/*,meta/tests/factories/**/*"
+---
+
 # 测试数据管理规范
 
 > **智能体必须使用有效的测试数据，禁止猜测或硬编码产品/版本名称。**

@@ -1,3 +1,9 @@
+---
+alwaysApply: false
+description: "前端测试标准：Vitest + happy-dom + MSW + Source Map"
+globs: "src/**/*.test.ts,src/**/*.spec.ts,src/**/__tests__/**"
+---
+
 # 前端测试标准规范
 
 > **目标：让前端测试容易编写、容易定位问题、性能优秀。**
