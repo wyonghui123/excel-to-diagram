@@ -1,217 +1,16 @@
-# 会话开始提醒
+# 全局规则入口
 
-> [!!!] 本文件是 Agent 每次会话的必读入口，包含核心铁律和速查表
-> [!!!] 详细规则已拆分到单独文件，按需读取
+## [!!!] [!!!] [!!!] 铁律：禁止直接运行 pytest [!!!] [!!!] [!!!]
 
----
-
-## 项目概述 (WHAT)
-
-**项目类型**：企业级元数据驱动的权限管理系统（BIP 架构）
-
-**技术栈**：
-- **后端**：Python + Flask + SQLite（meta/architecture.db）
-- **前端**：Vue 3 + Element Plus + Vite
-- **测试**：PlaywrightCLI（Python 封装）+ pytest
-- **服务管理**：PowerShell service_manager.ps1
-
-**关键目录**：
-- `meta/` - 后端 Python 代码、API、schemas、tests
-- `src/` - 前端 Vue 代码、组件、路由
-- `e2e/` - 浏览器测试（Playwright .spec.js）
-- `tests/` - Python 测试（pytest）
-- `.trae/rules/` - AI Agent 规则（本文件所在）
-
-**为什么这样组织**：让智能体快速定位代码位置，避免在错误目录中搜索。
-
----
-
-## 核心铁律（最高优先级）
-
-| # | 铁律 | 违规后果 |
-|---|------|---------|
-| 1 | **禁止直接运行 pytest** | pytest 测试（.py）必须用 `python d:\filework\test.py`；E2E 测试（.spec.js）用 `npm run test:e2e` 或 `npx playwright test` |
-| 2 | **测试场景禁止 MCP 浏览器工具** | 必须用 PlaywrightCLI |
-| 3 | **服务启停必须用 service_manager.ps1** | 禁止 `npm run dev` / `taskkill` |
-| 4 | **PowerShell 禁止用 curl** | 用 `curl.exe` 或 Python |
-| 5 | **UI 修改必须验证** | 禁止改完代码直接提交 |
-| 6 | **测试数据禁止硬编码** | 用 `test_data_inventory.json` |
-| 7 | **认证必须用 authenticated_navigate()** | 禁止自己拼 dev-login |
-| 7a | **禁止使用 Bearer token 认证** | 应该用 cookie（dev-login 设置 httpOnly cookie） |
-| 8 | **测试失败后禁止反复修改脚本** | 应先诊断根因，再修复 |
-| 9 | **必须检查页面健康状态** | 关键操作前调用 `check_health()`，测试结束调用 `assert_healthy()` |
-| 10 | **测试脚本内禁止 wait_for_timeout / sleep** | 用 `wait_for_selector` 或 `wait_for_stable()`；测试外部等待测试完成可用 `Start-Sleep` |
-| 11 | **禁止直接运行测试脚本** | 必须用 `python d:\filework\test.py --file <path>` |
-| 12 | **禁止直接运行 Python 脚本** | 应该用 pytest fixture 或 API 封装 |
-| 13 | **长测试必须分批运行** | 每批 < 5 分钟，启用 `--batch-size --fail-fast` |
-| 14 | **运行测试必须实时输出** | 用 `Tee-Object` 输出到终端和文件 |
-| 14a | **测试跑完必须检查结果（pass/fail）** | 用 `Select-String -Pattern "passed\|failed"` 验证，不能只看退出码 |
-| 15 | **每批后必须检查进度** | 查看 `test_progress.json` 或 `test_live.md` |
-| 16 | **前端测试必须开启 Source Map** | `build.sourcemap: 'hidden'` + `test.sourcemap: true` |
-| 17 | **前端测试用 happy-dom** | 不用 jsdom（性能差 2-3 倍） |
-| 18 | **前端 API mock 用 MSW** | 不用模块 mock（脆弱） |
-| 19 | **多 Agent 必须分配独立端口** | 用 `python scripts/allocate_ports.py allocate --agent X` |
-| 20 | **多 Agent 必须创建 worktree** | 防止文件相互覆盖 |
-| 21 | **启动前必须检查资源** | 用 `python scripts/resource_monitor.py check` |
-| 22 | **运行命令前必须设置 UTF-8** | `chcp 65001` + `$env:PYTHONIOENCODING="utf-8"` + `$env:PYTHONUTF8=1` |
-| 23 | **新写 E2E 测试必须用 v2 简化方案** | 重复登录 + Date.now 命名 + 不清理 = DB 垃圾 | 见 [e2e-simplification.md](./e2e-simplification.md) |
-| 24 | **读写文件必须 UTF-8 + ast.parse 验证** | docstring 损坏 + IndentationError 调试 30+ 分钟 | 见 [file-encoding-rules.md](./file-encoding-rules.md) |
-| 25 | **[DEBUG] 声称"已修复"必跑 user-path test** | 设 `CLAIM_FIXED=1` 时，conftest 校验最近 10 分钟内有 e2e/smoke 跑过，否则 `os._exit(1)` | 见 §调试铁律 |
-| 26 | **[DEBUG] 测试数据必须走 Factory** | conftest 自动扫描 `INSERT/UPDATE/DELETE`，raw SQL → `pytest.mark.skip`；`ALLOW_RAW_SQL=1` 紧急 escape | 见 §调试铁律 |
-| 27 | **[DEBUG] 修复前必跑 preflight** | 跑测试前必跑 `service_manager.ps1 preflight -Port 3010`，校验 status 文件 started_at < 60s | 见 §调试铁律 |
-| 28 | **[DEBUG] Edit 后必用 Get-Content 做 ground truth** | Read 工具缓存可能误导，Edit 后必须用 PowerShell `[IO.File]::ReadAllText` 验证 | 见 §调试铁律 |
-| 29 | **[DEBUG] 调试 batch/async 路径必先 grep 拦截器** | 必看 `_try_bulk_m2m` / `AsyncAuditWriter` / `cascade_delete` / `bo.associate` 5 个拦截点 | 见 §调试铁律 |
-| 30 | **[DEBUG] 修复报告必含路径+trace_id+风险** | 格式：`Root cause: file:line` + `Hypothesis verified` + `Smoke pass` + `X-Trace-Id` | 见 §调试铁律 |
-> **为什么要遵守这些规则**：
-> - **铁律 1-3**：保护数据库、避免服务冲突、提高多 Agent 协作效率
-> - **铁律 4-7**：避免常见错误（卡死终端、覆盖文件、认证失败）
-> - **铁律 8-10**：避免测试循环、提高测试效率
-> - **铁律 11-12**：强制使用标准测试入口
-> - **铁律 13-15**：保证长测试的可观测性（分批、实时输出、过程检查）
-> - **铁律 16-18**：前端测试质量（Source Map、happy-dom、MSW）
-> - **铁律 19-21**：多 Agent 协作安全（端口隔离、worktree、资源检查）
-> - **铁律 22**：UTF-8 编码（中文不乱码）
-
----
-
-## 测试类型区分（重要！）
-
-| 测试类型 | 文件位置 | 运行入口 | 示例 |
-|---------|---------|---------|------|
-| **pytest 测试** | `meta/tests/*.py` | `python d:\filework\test.py --file <path>` | `python d:\filework\test.py --file meta/tests/test_api.py` |
-| **E2E 测试** | `e2e/**/*.spec.js` | `npm run test:e2e` 或 `npx playwright test <path>` | `npx playwright test e2e/features/login.spec.js` |
-
-**常见错误**：
-- [X] `python d:\filework\test.py --file e2e/features/xxx.spec.js` — test.py 不识别 .spec.js
-- [X] `pytest meta/tests/test_api.py` — 必须用 test.py 入口
-- [OK] `python d:\filework\test.py --file meta/tests/test_api.py` — pytest 测试正确入口
-- [OK] `npx playwright test e2e/features/xxx.spec.js` — E2E 测试正确入口
-
-**为什么区分**：
-- pytest 测试需要 DB 快照、锁机制、并发控制（test.py 提供）
-- E2E 测试需要浏览器环境、认证状态共享（Playwright 提供）
-
----
-
-## 关键架构决策 (WHY)
-
-| 决策 | 原因 |
-|------|------|
-| **唯一测试入口 `test.py`** | 强制 DB 快照、锁机制、并发控制 |
-| **PlaywrightCLI 替代 MCP** | Python 子进程天然隔离，多 Agent 协作无需复杂方案 |
-| **Cookie 认证（非 Bearer）** | httpOnly cookie 更安全，前端代码自动处理 |
-| **service_manager.ps1 统一管理** | 跨 Agent 状态可见，端口冲突自动避免 |
-| **测试数据清单文件** | 避免硬编码，测试数据变化时自动适配 |
-
----
-
-## 调试铁律 (v3.18+)
-
-> **过去踩过的最大效率坑**：Agent 测试通过但用户实测失败、Edit 改完但 Read 工具仍显旧内容、raw SQL 污染 DB、服务重启但没生效、调试 8 轮才找到真正 root cause。
->
-> 以下 6 条铁律**全部已落地**到 `meta/tests/conftest.py` + `scripts/service_manager.ps1` 钩子，违反 = 立即失败/警告。
-
-### 铁律 25: 声称"已修复"必跑 user-path test
-
-| 项 | 内容 |
-|----|------|
-| **硬阻断位置** | `conftest.py::pytest_sessionstart` |
-| **触发** | 环境变量 `CLAIM_FIXED=1` |
-| **检查** | `e2e/smoke/.last_smoke_run` mtime < 600s |
-| **失败行为** | `os._exit(1)` + stderr 提示"先跑 e2e/smoke" |
-| **正例** | `python test.py --file e2e/smoke/<x>.smoke.spec.js` 然后才设 `CLAIM_FIXED=1` |
-
-### 铁律 26: 测试数据必须走 Factory
-
-| 项 | 内容 |
-|----|------|
-| **硬阻断位置** | `conftest.py::pytest_collection_modifyitems` → `_check_raw_sql_in_tests` |
-| **检测** | 文件含 `INSERT INTO` / `UPDATE x SET` / `DELETE FROM` |
-| **处理** | `pytest.mark.skip(reason="raw SQL detected")` + stderr 提示用 Factory |
-| **豁免** | `meta/tests/factories/` 目录 / `ALLOW_RAW_SQL=1` env / 文件含 `# allow_raw_sql` 注释 |
-| **DRY_RUN** | `DRY_RUN=1` 只打印 would-skip 列表，不实际 skip |
-| **正例** | `from meta.tests.factories import UserFactory; user = UserFactory.create(role='admin')` |
-
-### 铁律 27: 跑测试前必跑 preflight
-
-| 项 | 内容 |
-|----|------|
-| **硬阻断位置** | `service_manager.ps1 preflight` 命令 |
-| **检查** | `.service_status_<port>.json` 的 `started_at` 距今 < `$MaxAge` 秒 (默认 60) |
-| **失败行为** | 退出码 1 + stderr 提示"服务已 N 秒未重启，请先 restart" |
-| **正例** | `powershell -File scripts/service_manager.ps1 preflight -Port 3010` → 0 退出码 → 跑测试 |
-
-### 铁律 28: Edit 后必用 Get-Content 做 ground truth
-
-| 项 | 内容 |
-|----|------|
-| **风险** | Read 工具返回的是会话级快照，磁盘已改但 Read 仍显旧内容 |
-| **正例** | Edit 后立即跑 `powershell -c "[IO.File]::ReadAllText('path')"` 对比 `new_string` |
-| **正例 2** | `python -c "from pathlib import Path; print('OK' if '<新代码>' in Path('path').read_text(encoding='utf-8') else 'FAIL')"` |
-
-### 铁律 29: 调试 batch/async 路径必先 grep 拦截器
-
-| 拦截点 | grep pattern | 常见问题 |
-|--------|-------------|---------|
-| async 审计 | `class\s+\w*Async.*Writer` | 闭包参数不匹配 |
-| Action executor | `class\s+ActionExecutor` | pre/post hook 顺序错 |
-| 审计 log | `def\s+log\(.*audit` | 分支顺序导致 user='system' |
-| ActionContext | `object_id\s*=\s*\|@property\s+def\s+object_id` | 批量路径未设 object_id |
-| 批量 m2m | `_try_bulk_m2m\|bulk_associate` | 绕过审计写入 |
-| cascade_delete | `cascade_delete\|cascade=` | 自引用 FK 没清 |
-| self-ref FK | `parent_id\|ForeignKey.*self` | parent_id 未清空 |
-| BO 框架 dispatch | `def\s+associate\|def\s+dissociate\|def\s+assign` | 方法名拼错 |
-
-**调用法**：`grep -rEn '<pattern>' d:/filework/excel-to-diagram/meta/`
-
-### 铁律 30: 修复报告必含路径+trace_id+风险
-
-**强制格式**（贴在回复里，否则视为"未完成"）：
-
-```
-## Fix Report
-- Symptom: <症状>
-- Root cause: <file:line>  ← 必须可点击定位
-- Hypothesis verified: <哪条假设 + 看到什么证据>
-- User-path test: <smoke name> PASS (trace_id=<X-Trace-Id>)
-- Service status: started_at=<ISO>, preflight=OK
-- Risk: <side effect / 未覆盖的边界条件>
-```
-
----
-
-## 开发工作流 (HOW)
-
-### 修改代码的标准流程
-
-1. **修改前**：
-   - 阅读相关规则文件（按需）
-   - 用 `git status` 确认当前状态
-
-2. **修改中**：
-   - 遵循现有代码风格
-   - 添加必要的注释和文档
-
-3. **修改后**：
-   - **UI 修改**：用 PlaywrightCLI 截图验证
-   - **后端修改**：用 `python test.py --file <test_path>` 验证
-   - **测试失败**：用 `--failed` 重新运行，不要 `--all`
-
-### 写新测试的标准流程
-
-1. 继承现有测试结构（看 `tests/e2e/test_*.py`）
-2. 使用 PlaywrightCLI 或 pytest fixture
-3. 添加健康检测（`check_health()` + `assert_healthy()`）
-4. 用 `valid_*` fixture 获取有效测试数据
-5. 提交前用 `python test.py --file <your_test.py>` 验证
-
-### 调试标准流程
-
-1. 收集症状（错误信息、stack trace、复现步骤）
-2. 检查规则文件（是否有相关禁止）
-3. 用最小化复现验证假设
-4. 修复后用 `--failed` 验证
-5. 添加回归测试
+> **任何时候都禁止使用 `pytest`、`python -m pytest` 命令**
+> 
+> **唯一合法入口：`python d:\filework\test.py`**
+> 
+> 违规将导致：进度丢失、数据库污染、无法追踪问题
+> 
+> **已启用硬阻断：conftest.py 会在 `pytest_configure` 阶段检测 TEST_ENTRY=1 环境变量**
+> - 未通过 test.py 入口 → `os._exit(1)` 立即终止
+> - test.py 所有命令（--all / --failed / --skip / --file / --unit / --integration）自动设置 TEST_ENTRY=1
 
 ---
 
@@ -219,103 +18,210 @@
 
 | 任务场景 | 行动 |
 |---------|------|
-| **pytest 测试** | `python d:\filework\test.py --failed` |
-| **浏览器测试** | PlaywrightCLI 写 Python 脚本 |
-| **UI 修改验证** | PlaywrightCLI 截图，禁止不验证直接提交 |
+| **pytest 测试** | 见下方铁律 + 项目级规则 `.trae/rules/test_rules.md` |
+| **问题修复（多会话）** | invoke `problem-fixing` Skill（fix_tasks / claim / complete） |
 | **E2E 测试** | invoke `e2e-testing` Skill |
-| **问题修复** | invoke `problem-fixing` Skill |
-| **服务启停** | `powershell -File scripts/service_manager.ps1 status\|start\|stop\|restart` |
-| **后端 API 调试** | `requests.Session()` 携带 cookie（不要拼 Bearer token） |
+| **MCP 前端验证** | invoke `mcp-frontend-testing` Skill |
+| **前后端服务管理** | 见下方「服务管理」节（必须用统一管理器） |
 
 ---
 
-## 常见踩坑速查（精简版）
+## pytest 铁律
 
-| # | 场景 | 错误 | 正确 |
-|---|------|------|------|
-| 1 | pytest | 直接运行 pytest | `python test.py` |
-| 2 | pytest | `--all` 后不跑 `--failed` | 并发假失败需确认 |
-| 3 | 浏览器测试 | 用 MCP 工具做测试 | PlaywrightCLI |
-| 4 | 服务管理 | 直接 `npm run dev` | `service_manager.ps1` |
-| 5 | 服务管理 | 用 `Get-Process` 判断状态 | `service_manager.ps1 status` |
-| 6 | PowerShell | 用 `curl` | `curl.exe` 或 Python |
-| 7 | PowerShell | 用 `&&` / `||` 串联命令 | `;` 或 `if ($LASTEXITCODE)` |
-| 8 | UI 修改 | 改完 Vue/CSS 不验证 | PlaywrightCLI 截图 |
-| 9 | 测试结果 | hasTable=False 但标记 PASS | 误报！必须诊断 |
-| 10 | 测试流程 | 连续 2 次超时后继续重跑 | 停止，诊断超时根因 |
-| 11 | 认证 | 自己拼 dev-login + 手动处理 cookie | `authenticated_navigate()` |
-| 12 | 测试数据 | 硬编码产品名称 | `test_data_inventory.json` |
-| 13 | API 测试 | 用 curl.exe 测试 API | PlaywrightCLI.request() |
-| 14 | 诊断 | 发现问题后继续修改脚本 | 停下来分析根因 |
-| 15 | 文件操作 | Write 覆盖用户恢复的文件 | 先检查 git status |
-| 16 | 页面健康 | 不检查页面错误就操作 | 关键操作前 `check_health()` |
-| 17 | 页面健康 | 测试结束不检查健康状态 | 调用 `assert_healthy()` |
-| 18 | 测试脚本 | 使用 `wait_for_timeout` 或 `sleep` | 用 `wait_for_selector` 或 `wait_for_stable()` |
-| 19 | 测试脚本 | 没有 pytest 结构 | 无法并行、无法重试 |
-| 20 | 测试脚本 | 直接操作数据库 | 用 fixture 或 API |
-| 21 | 运行测试 | 直接 `python tests/xxx.py` | `python test.py --file tests/xxx.py` |
-| 22 | PowerShell | 路径分隔符混用 | 统一用正斜杠 `tests/e2e/` |
-| 23 | PowerShell | 重定向 `2>&1 1>file` | 用 `*> file` 或 `2>&1 | Out-File` |
-| 24 | 输出捕获 | 用 `Out-File` 但输出被截断 | 用 `Tee-Object` 或 `*> file` |
-| 25 | 直接读 DB | `sqlite3.connect('meta/architecture.db')` | 用 API `cli.request('/api/v2/...')` |
-| 26 | 诊断脚本 | 反复创建 diag_v1/v2/v3 | 一次写好，用 fixture 或参数化 |
-| 27 | 运行 E2E | 直接 `npx playwright test` | 用 `python test.py --file e2e/...` |
-| 28 | 跑测试 | 一次性跑全套（5-10 分钟） | 先 `--failed` 找到失败再修 |
-| 29 | 输出过滤 | `Out-String \| Select-String` 丢失日志 | 用 `Tee-Object` 保留完整输出 |
-| 30 | 后台运行 | 在沙箱中跑长时间任务 | 用"在沙箱外"异步运行 |
-| 31 | 长测试 | 一次性跑完全部（5-10 分钟） | 分批运行 + Fail-Fast |
-| 32 | 长测试 | 输出被截断或过滤 | 用 `Tee-Object` 实时输出 |
-| 33 | 长测试 | 跑完才知道结果 | 实时查看 `test_progress.json` |
-| 34 | 前端测试 | 错误信息指向压缩代码 | 开启 `build.sourcemap: 'hidden'` |
-| 35 | 前端测试 | 用 jsdom（慢 2-3 倍） | 改用 `environment: 'happy-dom'` |
-| 36 | 前端测试 | 模块 mock（脆弱） | 用 MSW 拦截网络层 |
-| 37 | 前端测试 | 测试失败无法调试 | 启用 `@vitest/ui` 可视化调试 |
-| 38 | 多 Agent | 端口冲突（3004 被占用） | 先 `allocate_ports` 再启动 |
-| 39 | 多 Agent | 共享目录导致文件覆盖 | 用 `git worktree` 隔离 |
-| 40 | 多 Agent | 资源耗尽（CPU/内存 100%） | 启动前 `resource_monitor check` |
-| 41 | 中文乱码 | PowerShell 输出 `涓..` 等乱码 | `chcp 65001` + 设置 `PYTHONIOENCODING=utf-8` |
-| 42 | Tee-Object 编码 | 中文日志乱码 | 用 `Out-File -Encoding utf8` |
-| 43 | PS5 解析错误 | `"[OK] 中文"` 报语法错误 | 用中文【】或纯英文 |
-| 44 | 缺依赖 | `ModuleNotFoundError: No module named 'psutil'` | 先 `pip install psutil` |
-| 45 | 中文乱码终极 | 用 `\| Out-String` 或 `*>` 都乱码 | **必须** 5 行配置：`[Console]::OutputEncoding = [System.Text.Encoding]::UTF8` |
-| 46 | 重复登录 | 每个测试都调 `login(page)` 浪费 5-15s | 用 `global-setup.js` + `storageState` 一次登录 |
-| 47 | 硬编码 ID | 测试中硬编码产品/版本 ID | 用 `dataFinder.productWithVersion()` 智能查找 |
-| 48 | 硬编码等待 | `page.waitForTimeout(1500)` | 用 `navigateTo()` 智能稳定等待 |
-| 49 | 测试样板多 | 5-6 行 login + nav + stable 重复 | 用 `auto-fixtures.js` 一行 `navigateTo(page, path)` |
+```bash
+# [X] 绝对禁止
+pytest meta/tests/
+python -m pytest meta/tests/
+
+# [OK] 唯一合法入口
+python d:\filework\test.py --all --force
+python d:\filework\test.py --failed
+python d:\filework\test.py --skip
+python d:\filework\test.py --unit
+python d:\filework\test.py --integration
+python d:\filework\test.py --status
+python d:\filework\test.py --file <path>
+# 🆕 v3.18: AI Coding Agent 友好参数
+python d:\filework\test.py --single <test_id>      # 单测快速反馈 (< 5s, 跳过 DB 快照)
+python d:\filework\test.py --port <port>           # 多 agent 端口隔离 (3010-3019)
+python d:\filework\test.py --json <path>            # JSON 输出 (含 trace_id, 给 Agent 解析)
+```
+
+**关键规则：**
+- `--all` 并行（-n4）有假失败 → 必须再跑 `--failed`（串行 -n0）确认
+- 修复后跑 `--failed`，不要跑 `--all`（浪费时间）
+- DB 保护：test.py 自动快照+校验，严禁直接读写 `meta/architecture.db`；`--failed` 阶段独立快照保护主 DB（2026-06-02 修复）
+- DB 健康监控：Server 启动时初始化 `meta/core/db_health_monitor.py`，WAL > 1MB / pending frames > 100 / 并发访问 → 自动告警
+- **DB 快照 WAL 保护（2026-06-02 修复）**：
+  - `_create_db_snapshot()` / `_restore_db_snapshot()` 在复制前调用 `_checkpoint_db_wal()` 强制 flush WAL
+  - `_preflight_auth_check()` 使用临时快照副本，不再写入生产DB
+  - **快照恢复后如需重启服务**：DB 被替换后服务器仍持有旧WAL，必须 restart 清除
+  - **快照清理（2026-06-07 修复）**：`_prune_snapshots()` 同时删除 `.db-shm` 和 `.db-wal` 残留文件
+- 锁机制：`--all` 排他锁，`--failed` 共享锁，互斥等待最长 120s
+
+## 状态机
+
+```
+idle → --all → passed (全部通过)
+idle → --all → needs_rerun (有失败，可能并发假失败)
+                ↓
+           --failed → passed (假失败/已修复)
+           --failed → fixing (真实错误)
+                        ↓
+                     修复 → --failed → passed / fixing
+```
 
 ---
 
-## 详细规则文件索引
+## 前后端服务管理（多 Agent 协作）
 
-| 文件 | 内容 | 何时读取 |
-|------|------|---------|
-| `test-script-quality-analysis.md` | 测试脚本质量分析、效率优化建议 | 写测试脚本时 |
-| `page-health-rules.md` | 页面健康检测规范、四层错误检测机制 | 写浏览器测试时 |
-| `powershell-rules.md` | PowerShell 语法规范、Bash→PowerShell 速查表 | 遇到 PowerShell 语法问题时 |
-| `test-data-rules.md` | 测试数据管理规范、fixture 使用方法 | 需要选择测试数据时 |
-| `service-management-rules.md` | 服务管理规范、重启安全规则 | 需要启停服务时 |
-| `browser-test-verification.md` | 浏览器测试验证方法、认证规范 | 写浏览器测试时 |
-| `frontend-test-auth.md` | 前端测试认证规范 | 需要认证时 |
-| `e2e-testing.md` | E2E 测试专用规则（v1） | 维护旧测试时 |
-| `e2e-simplification.md` | **[NEW] E2E v2 简化方案强制规范（POM/fixtures/isolation/auto-trace）** | **写新 E2E 测试时** |
-| `file-encoding-rules.md` | **[NEW] 文件编码与字符串语法规范（UTF-8 + ast.parse 验证）** | **写任何 .py 文件时** |
-| `test-runner-template.md` | **[NEW] 测试运行标准模板（Tee-Object + Select-String 验证）** | **跑任何测试后** |
-| `test-case-standards.md` | 测试用例编写规范 | 写测试用例时 |
-| `test-observability-rules.md` | **测试可观测性规范（分批、实时输出、过程检查）** | **运行长测试时** |
-| `frontend-testing-standards.md` | **前端测试标准（Vitest + happy-dom + MSW + Source Map）** | **写前端测试时** |
-| `multi-agent-coordination.md` | **多 Agent 协作规范（端口隔离 + worktree + 资源监控）** | **多 Agent 并行时** |
-| `project_rules.md` | 项目核心规则 | 了解项目规范时 |
+> **多智能体并行环境下，前后端启动/停止/重启必须使用统一管理器，禁止 Agent 直接操作终端或进程。**
 
----
+### 核心问题
 
-## 附录：废弃文件/Skill（禁止读取/invoke）
+1. **sandbox 权限隔离**：Agent A 启动的进程，Agent B 的 `Get-Process` / `taskkill` 看不到
+2. **终端槽位竞争**：最多 5 个终端，服务占用终端后其他 Agent 可用终端减少
+3. **端口冲突**：Agent 不知道另一 Agent 已启动服务，重复启动导致端口冲突
+4. **无状态可见性**：无法判断服务是否在运行
 
-| 文件/Skill | 状态 |
+### 唯一入口
+
+```bash
+# 查看状态（任何 Agent 都可以随时调用）
+powershell -File d:\filework\excel-to-diagram\scripts\service_manager.ps1 status
+
+# 启动前后端（幂等：已运行则跳过）
+powershell -File d:\filework\excel-to-diagram\scripts\service_manager.ps1 start
+
+# 停止前后端
+powershell -File d:\filework\excel-to-diagram\scripts\service_manager.ps1 stop
+
+# 重启
+powershell -File d:\filework\excel-to-diagram\scripts\service_manager.ps1 restart
+```
+
+### 设计保证
+
+| 特性 | 机制 |
 |------|------|
-| `.trae/rules/mcp-testing.md` | 内容已清空 |
-| `.trae/rules/mcp-parallel-integration.md` | 方案已废弃 |
-| `.trae/rules/multi-agent-browser-isolation.md` | 方案已废弃 |
-| `.trae/rules/multi-agent-quickstart.md` | 方案已废弃 |
-| `.trae/skills/mcp-frontend-testing/` | Skill 已清空，禁止 invoke |
-| `.trae/skills/browser-use-testing/` | Skill 已清空，禁止 invoke |
-| `webapp-testing`（系统级 Skill） | 使用 MCP 浏览器工具，禁止 invoke |
+| 跨 Agent 状态可见 | `.service_status.json` 磁盘文件（端口检测优先于 PID） |
+| 并发管理保护 | `.service_manager.lock` 锁文件（120s 超时，残留 5min 清理） |
+| 幂等操作 | start 检测到端口已监听 = no-op；stop 检测到端口已关闭 = no-op |
+| 端口冲突避免 | netstat + TCP connect 双验证，不依赖 `Get-Process` |
+| 终端槽位释放 | `Start-Process -WindowStyle Hidden` 不占用终端 |
+
+### 禁止行为
+
+- [X] 直接使用 `npm run dev:full` 或 `npm run dev` 或 `python dev.py` 管理服务
+- [X] 用 `Get-Process python` 判断服务状态（sandbox 隔离不可靠）
+- [X] 用 `taskkill /F /IM python.exe` 野蛮杀进程
+- [X] 两个 Agent 同时 restart
+- [OK] 先用 `status` 查询 → 按需 `start` / `stop` / `restart`
+
+### 启动前检查清单
+
+1. `powershell -File ... service_manager.ps1 status` — 确认当前状态
+2. 如果服务已运行 → 不需要 restart（直接使用）
+3. 如果服务未运行 → `start`
+4. 如果代码有改动需要重启 → `restart`（自动 stop + start）
+
+---
+
+## 🆕 v3.18: AI Coding Agent 友好测试规范
+
+> **AI Coding Agent 是测试基础设施的主要用户，测试需让 Agent 高效写/跑/修测试。**
+
+### 快速反馈 (Fast Feedback)
+
+- `--single <test_id>` 跳过 DB 快照/锁，< 5s 反馈单测结果
+- **不** 适用于：需要 DB 完整状态/其他测试副作用的测试
+- **适用**：Agent 改 1 行代码后立即验证
+
+### 多 Agent 端口隔离 (D.7)
+
+- 默认 3010；多 agent 并行时通过 `AGENT_PORT` 环境变量分配 3010-3019
+- 每个 port 独立：DB snapshot / 锁 / server instance
+- **worktree 由 Agent 自管**（业界共识）
+- service_manager.ps1 start/stop/status 都支持 `--port` 参数
+
+### 认证统一 (v3.17 cookie 规范)
+
+- **统一用 httpOnly cookie**：`requests.Session()` + dev-login + `auth_token` cookie
+- ~~Bearer token~~ 已被 SESSION_REMINDER 标为踩坑（项目用 cookie 鉴权）
+- 注：meta/tests/shared/base.py 内部仍可用 Bearer（in-process 测试），但**跨进程必须 cookie**
+
+### trace_id 端到端 (M.1)
+
+- 每个请求 1 trace_id (UUID 32 char)
+- 跨 subflow/audit/SSE 关联
+- 响应 header `X-Trace-Id` 必返
+- Agent 拿到 trace_id 可查询 `/_diagnostics`
+
+### `/diagnostics` 端点 (M.5)
+
+- `GET /api/v2/action/_diagnostics`（admin 权限）
+- 给 AI Production Diagnostician 用：health + recent_errors + error_codes + recovery_suggestions
+- 详见 `meta/api/diagnostics_api.py`
+
+## [!!!] PowerShell 铁律：禁止使用 `curl` [!!!] [!!!]
+
+> **在 PowerShell 中，`curl` 是 `Invoke-WebRequest` 的别名，不是真正的 curl！**
+>
+> `curl -s http://...` 会变成 `Invoke-WebRequest -s http://...`，**卡死在交互式等待**，永久占用终端。
+>
+> **正确做法：**
+> ```powershell
+> # [X] 绝对禁止 — 会卡死在交互式等待
+> curl -s http://localhost:3010/api/v1/...
+> curl http://localhost:3010/api/v1/...
+>
+> # [OK] 三种正确方式任选其一
+> curl.exe -s http://localhost:3010/api/v1/...                           # 方式1：用 curl.exe（真实二进制）
+> python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:3010/api/v1/...').read().decode())"  # 方式2：Python
+> Invoke-RestMethod -Uri http://localhost:3010/api/v1/...                # 方式3：PowerShell 原生
+> ```
+
+---
+
+## 常见踩坑
+
+- [X] 直接在 PowerShell 中用 `curl`（是 `Invoke-WebRequest` 别名，会卡死！必须用 `curl.exe` 或 Python）
+- [X] 直接 `pytest`（必须用 `python test.py` 入口）
+- [X] `--all` 后不跑 `--failed`（误把并发假失败当真）
+- [X] 修复后跑 `--all` 而非 `--failed`（浪费时间）
+- [X] DB 被污染（未使用 TESTING 安全模式 / 绕过了快照保护）
+- [X] 多个会话修同一任务（未认领）
+- [X] 直接用 `npm run dev` 或 `python dev.py` 启停服务（未用 `service_manager.ps1`，导致跨 Agent 不可见）
+- [X] 浏览器测试中页面白屏后盲猜"版本/数据问题"（页面已崩溃，应 Fail-Fast；`PlaywrightCLI` 已自动监听 pageerror/console/crash）
+- [X] 浏览器测试中忽略 console.error（`check_health()` 自动汇总四层错误，详见 `browser-test-verification.md`）
+- [X] 直接运行测试脚本 `python tests/e2e/xxx.py`（必须用 `python test.py --file tests/e2e/xxx.py`）
+- [X] PowerShell 路径分隔符混用 `tests\e2e\`（统一用正斜杠 `tests/e2e/`）
+- [X] PowerShell 重定向语法 `2>&1 1>file`（用 `*> file` 或 `2>&1 | Out-File`）
+- [X] 使用 Bearer token 认证（项目用 httpOnly cookie 认证，应该用 `requests.Session()` + dev-login）
+- [X] PowerShell 中用 `stash@{0}`（被当 script block 拆分！必须用变量 `$r='stash@{0}'`）
+- [X] PowerShell 中用 `head -100`（不存在！用 `Select-Object -First 100`）
+- [X] 沙箱隔离时执行 `git commit`（exit 0 但未落盘！先验证写权限，详见 L5 检测）
+- [X] `service_manager.ps1 restart -Force`（参数不存在！用 `force-restart`）
+
+---
+
+## 项目特定规则
+
+如果你的工作目录是 `d:\filework\excel-to-diagram`，**必须阅读项目级规则**：
+- `.trae/rules/SESSION_REMINDER.md` — **项目规范入口（18 条铁律 + 37 条速查表）**
+- `.trae/rules/test-script-quality-analysis.md` — 测试脚本质量分析、效率优化建议
+- `.trae/rules/page-health-rules.md` — 页面健康检测规范、四层错误检测机制
+- `.trae/rules/powershell-rules.md` — PowerShell 语法规范、Bash→PowerShell 速查表
+- `.trae/rules/test-data-rules.md` — 测试数据管理规范、fixture 使用方法
+- `.trae/rules/service-management-rules.md` — 服务管理规范、重启安全规则
+- `.trae/rules/frontend-test-auth.md` — 前端测试认证规范
+- `.trae/rules/browser-test-verification.md` — 浏览器测试验证方法 + 可观测性
+- `.trae/rules/e2e-testing.md` — E2E 测试规则
+- `.trae/rules/test-case-standards.md` — 测试用例编写规范
+- `.trae/rules/test-observability-rules.md` — **测试可观测性规范（分批、实时输出、过程检查）**
+- `.trae/rules/frontend-testing-standards.md` — **前端测试标准（Vitest + happy-dom + MSW + Source Map）**
+- `.trae/rules/multi-agent-coordination.md` — **多 Agent 协作规范（端口隔离 + worktree + 资源监控）**
+
+---
+
+_本文件是全局规则入口，所有工作目录的智能体都会读取_

@@ -1,653 +1,243 @@
-# 多智能体并行工作与并行测试规范
+# Multi-Agent 协作规范 (v3.24)
 
-> **目标：让多 Agent 协作安全、高效、可观测。**
+> **多个 AI Coding Agent 并行开发, 测试基础设施需支持端口/DB/env 隔离。**
+> **v3.24: 新增 L5 沙箱检测、PM 授权例外、Worktree 生命周期管理。**
 
-## 核心问题
+## [!!!] 铁律：Agent 必须使用独立 Worktree [!!!]
 
-### 问题 1：端口冲突
+> **在主工作树中 commit 会导致其他 Agent 的未提交工作被 git stash 回滚！**
+>
+> **2026-06-15 事故：智能体B commit 触发 git stash，导致智能体A 的 399 个文件丢失。**
+>
+> **唯一合法方式：启动时执行 `scripts/agent_bootstrap.ps1`**
 
-```
-Agent A: "我要启动前端"
-Agent B: "我也要启动前端"
-→ 同时绑 3004 端口 → 后启动的崩溃
-```
+### 禁止行为
 
-### 问题 2：文件覆盖
+- ❌ **在主工作树执行 `git commit`**（必须先 bootstrap worktree）
+- ❌ **在主工作树执行 `git stash`**（会影响其他 Agent 的工作）
+- ❌ **两个 Agent 共享同一个 worktree**（必须各自独立）
+- ❌ **不设 AGENT_PORT 就跑测试**（默认 3010，跟其他 Agent 冲突）
+- ❌ **直接用 `Start-Process` 启 server**（应 service_manager）
+- ❌ **`Get-Process python` 判断服务状态**（sandbox 隔离不可靠）
 
-```
-Agent A: "我修改了 src/api/user.js"
-Agent B: "我同时在修改 src/api/user.js"
-→ 后保存的覆盖前者的工作
-```
+### 强制执行
 
-### 问题 3：数据库锁
+| 防护层 | 机制 | 效果 |
+|--------|------|------|
+| **L1: Worktree 强制** | `scripts/agent_bootstrap.ps1` 自动创建 worktree | 根治：文件级零冲突 |
+| **L2: Pre-commit Hook** | `.git/hooks/pre-commit` Gate 4 检测主工作树 commit | 兜底：警告未暂存修改 |
+| **L3: Post-commit Hook** | `.git/hooks/ai-guard-post-commit.ps1` v2.0 检测 stash 突变 | 告警：stash 数量变化 |
+| **L4: Stash 监控** | `scripts/stash_guard.ps1` 定期检查 | 巡检：发现遗漏 |
+| **L5: 沙箱检测** | Agent 启动时验证写权限（见下方） | 防止：假成功（exit 0 但未落盘） |
 
-```
-Agent A: "我正在测试，需要 DB 写入"
-Agent B: "我也要测试，需要 DB 写入"
-→ SQLite 锁冲突
-```
+## L5: 沙箱隔离检测
 
-### 问题 4：API 限流
+> **2026-06-20 发现：Trae IDE 沙箱可能完全隔离文件系统写入。**
+> **Agent 执行 `git commit` 返回 exit 0 但主机 HEAD 不变，`echo > file` exit 0 但文件不存在。**
+> **沙箱状态不可预测（同一 session 前半段隔离，后半段可能解封）。**
 
-```
-Agent A: "我调用 API 100 次/分钟"
-Agent B: "我也调用 API 100 次/分钟"
-→ 触发限流
-```
-
-### 问题 5：资源耗尽
-
-```
-3 个 Agent 同时跑测试
-→ CPU 100%、内存 8GB
-→ 系统卡死
-```
-
-## 解决方案：5 层隔离
-
-```
-Layer 1: 端口隔离  → 每个 Agent 独立端口
-Layer 2: 工作目录隔离 → git worktree
-Layer 3: 资源隔离  → CPU/内存限制
-Layer 4: 时间隔离  → 错峰执行
-Layer 5: 状态可见  → 跨 Agent 状态文件
-```
-
----
-
-## Layer 1: 端口隔离
-
-### 端口分配表
-
-| 资源 | Agent A | Agent B | Agent C |
-|------|---------|---------|---------|
-| 前端 (Vite) | 3004 | 3014 | 3024 |
-| 后端 (Flask) | 3010 | 3020 | 3030 |
-| 数据库 (SQLite) | `db_A.db` | `db_B.db` | `db_C.db` |
-| 测试端口 (pytest) | 动态（port 0） | 动态 | 动态 |
-| Playwright | 动态分配 | 动态 | 动态 |
-
-**规则**：每个 Agent 间隔 10 个端口。
-
-### 实现方式
-
-#### 1. 端口注册表
-
-`d:\filework\.agent_registry\ports.json`：
-
-```json
-{
-  "agents": {
-    "agent_A": {
-      "frontend": 3004,
-      "backend": 3010,
-      "worktree": "d:\\worktrees\\agent_A"
-    },
-    "agent_B": {
-      "frontend": 3014,
-      "backend": 3020,
-      "worktree": "d:\\worktrees\\agent_B"
-    }
-  },
-  "next_available": {
-    "frontend": 3024,
-    "backend": 3030
-  }
-}
-```
-
-#### 2. 智能分配
-
-```bash
-# 启动新 Agent 时
-powershell -File scripts/allocate_ports.ps1 --agent agent_C
-
-# 自动分配
-# → agent_C: frontend=3024, backend=3030
-# → 更新 ports.json
-```
-
-#### 3. 冲突检测
+### Agent 启动时必须验证
 
 ```powershell
-# 启动前自动检测
-if (Test-Port -Port 3004) {
-    Write-Warning "端口 3004 已被占用，自动切换到 3014"
-    $Port = 3014
+# Step 1: 写测试文件
+$sandboxTest = 'sandbox_check_' + (Get-Date -Format 'yyyyMMdd_HHmmss') + '.txt'
+Set-Content -Path "d:\filework\$sandboxTest" -Value 'sandbox-test' -Encoding UTF8
+
+# Step 2: 验证文件是否真的存在
+if (Test-Path "d:\filework\$sandboxTest") {
+    Write-Host "[L5] 沙箱已解封：可以写入主机文件系统" -ForegroundColor Green
+    Remove-Item "d:\filework\$sandboxTest"
+    $env:SANDBOX_ISOLATED = '0'
+} else {
+    Write-Host "[L5] 沙箱已隔离：无法写入主机文件系统" -ForegroundColor Red
+    Write-Host "[L5] 必须使用方案 A（脚本委托模式）让用户执行" -ForegroundColor Yellow
+    $env:SANDBOX_ISOLATED = '1'
 }
 ```
 
----
+### 沙箱隔离时的替代方案
 
-## Layer 2: 工作目录隔离（Git Worktree）
+| 方案 | 做法 | 适用场景 |
+|------|------|---------|
+| **方案 A：脚本委托** | 输出 PowerShell 脚本让用户复制粘贴 | 沙箱隔离 |
+| **方案 B：MCP 工具** | 通过 MCP 工具执行（绕过沙箱） | MCP 可用时 |
+| **方案 C：等待解封** | 沙箱状态可能动态变化 | 不紧急时 |
 
-### 原理
+### 铁律：沙箱隔离时禁止假成功
 
-```
-主仓库 (d:\filework\excel-to-diagram)
-├── .git/                     # 共享 git 对象
-├── worktrees/
-│   ├── agent_A/              # Agent A 的工作目录
-│   │   ├── .git              # 指向 .git/worktrees/agent_A
-│   │   ├── src/
-│   │   └── ...
-│   └── agent_B/              # Agent B 的工作目录
-│       ├── .git
-│       ├── src/
-│       └── ...
-```
+- ❌ **沙箱隔离时执行 `git commit`**（exit 0 但未落盘，浪费时间）
+- ❌ **沙箱隔离时执行 `git add`**（同上）
+- ✅ **沙箱隔离时用 Read/Edit 工具编辑文件**（编辑器 API 不受沙箱影响）
+- ✅ **沙箱隔离时输出脚本让用户执行**
 
-**优势**：
-- 共享 `.git` 对象（节省空间）
-- 每个 Agent 独立分支
-- 独立文件状态
-- 不会相互覆盖
+## PM 授权例外
 
-### 创建 Worktree
+> **当 PM（产品经理/用户）明确授权时，可以在主工作树 commit。**
+> **条件：无其他 Agent 在同一工作树并发工作。**
 
-```bash
-# 主仓库创建 worktree
-git worktree add d:\worktrees\agent_B -b agent-B/feature
-cd d:\worktrees\agent_B
-npm install  # 每个 worktree 独立依赖
-```
+### 授权条件（全部满足）
 
-### 智能体工作流
+1. PM 明确要求在主工作树 commit（如"请执行"、"commit 到 main"）
+2. 无其他 Agent 在同一工作树并发工作（`git worktree list` 确认）
+3. commit message 标注 `[pm-authorized]`
 
-```bash
-# 1. 启动前：分配 worktree
-agent_worktree_setup() {
-    local AGENT_ID=$1
-    local BRANCH="agent-${AGENT_ID}/$(date +%Y%m%d)"
-    
-    git worktree add "d:\worktrees\${AGENT_ID}" -b "${BRANCH}"
-    cd "d:\worktrees\${AGENT_ID}"
-    
-    # 同步依赖
-    if [ ! -d "node_modules" ]; then
-        npm install
-    fi
-    
-    # 启动服务（使用分配的端口）
-    export FRONTEND_PORT=$((3004 + 10 * ${AGENT_ID##*_}))
-    export BACKEND_PORT=$((3010 + 10 * ${AGENT_ID##*_}))
-    
-    # 写入端口到 .env
-    echo "VITE_PORT=${FRONTEND_PORT}" > .env
-    echo "API_PORT=${BACKEND_PORT}" >> .env
-}
-```
-
----
-
-## Layer 3: 资源隔离
-
-### 资源监控
-
-`scripts/resource_monitor.py`：
-
-```python
-import psutil
-import json
-import time
-from pathlib import Path
-
-def check_resources():
-    """检查系统资源是否足够"""
-    cpu = psutil.cpu_percent(interval=1)
-    memory = psutil.virtual_memory()
-    disk = psutil.disk_usage('d:\\')
-    
-    return {
-        'cpu_percent': cpu,
-        'memory_percent': memory.percent,
-        'memory_available_gb': memory.available / (1024**3),
-        'disk_free_gb': disk.free / (1024**3),
-        'can_start_new_test': (
-            cpu < 70 and 
-            memory.percent < 80 and 
-            disk.free > 5 * (1024**3)  # 至少 5GB
-        )
-    }
-```
-
-### 资源限制
-
-```python
-# pytest-xdist 限制并发数
-pytest -n 4  # 最多 4 个 worker
-
-# 限制内存
-pytest --memray  # 内存监控
-
-# 限制 CPU
-# Windows: 任务管理器 / PowerShell 限制
-```
-
----
-
-## Layer 4: 时间隔离（错峰执行）
-
-### 策略
-
-```yaml
-# 简单规则
-heavy_tests:
-  # 大型 E2E 测试
-  - playwright_e2e_suite
-  - integration_test_suite
-  schedule: 串行执行（一个一个跑）
-
-light_tests:
-  # 单元测试、组件测试
-  - vitest_unit
-  - pytest_unit
-  schedule: 并行执行（-n auto）
-```
-
-### 实现
-
-```bash
-# 同时跑 light tests（并行）
-# 不同时间跑 heavy tests（错峰）
-
-# 调度表
-09:00-09:30: 单元测试（并行）
-09:30-10:00: 组件测试（并行）
-10:00-10:30: 集成测试（串行 -n 2）
-10:30-11:00: E2E 测试（分片）
-```
-
----
-
-## Layer 5: 状态可见（统一状态文件）
-
-### 状态文件
-
-`d:\filework\.agent_registry\state.json`：
-
-```json
-{
-  "agents": {
-    "agent_A": {
-      "status": "running",
-      "task": "fix_user_bug",
-      "started_at": "2026-06-04T09:00:00",
-      "resources": {
-        "cpu_percent": 25,
-        "memory_mb": 512
-      },
-      "services": {
-        "frontend": {"port": 3004, "pid": 12345, "status": "running"},
-        "backend": {"port": 3010, "pid": 12346, "status": "running"}
-      },
-      "tests": {
-        "current": "test_user_login",
-        "passed": 10,
-        "failed": 1,
-        "total": 30
-      }
-    }
-  }
-}
-```
-
-### 状态查询
-
-```bash
-# 查看所有 Agent 状态
-powershell -File scripts\agent_status.ps1
-
-# 输出：
-# Agent A: running, frontend 3004, backend 3010, tests 11/30
-# Agent B: idle, last active 5min ago
-# Agent C: error, frontend failed to start
-```
-
----
-
-## 多 Agent 测试并行
-
-### 1. pytest-xdist 集成
-
-```bash
-# 自动检测 CPU 核心数
-pytest -n auto
-
-# 指定 worker 数
-pytest -n 4
-
-# 跨进程隔离
-pytest -n 4 --dist loadfile  # 按文件分到不同进程
-
-# Work-steal（空闲 worker 主动从忙 worker 抢任务）
-pytest -n 4 --dist worksteal
-```
-
-### 2. Playwright 多进程
-
-```js
-// playwright.config.js
-module.exports = defineConfig({
-  workers: 4,           // 4 个 worker 并行
-  fullyParallel: true,  // 文件内也并行
-  retries: 2,           // 失败重试
-})
-```
-
-### 3. Playwright Sharding（跨机器）
-
-```bash
-# 机器 1
-npx playwright test --shard=1/4
-
-# 机器 2
-npx playwright test --shard=2/4
-
-# 机器 3
-npx playwright test --shard=3/4
-
-# 机器 4
-npx playwright test --shard=4/4
-
-# 合并结果
-npx playwright merge-reports --reporter=html ./all-blob-reports
-```
-
-### 4. 端口动态分配（避免冲突）
-
-```python
-# 测试中启动 server
-import socket
-
-def find_free_port():
-    """找一个空闲端口"""
-    with socket.socket() as s:
-        s.bind(('localhost', 0))  # 让 OS 分配
-        return s.getsockname()[1]
-
-# pytest fixture
-@pytest.fixture
-def test_server():
-    port = find_free_port()
-    server = start_server(port=port)
-    yield f"http://localhost:{port}"
-    server.stop()
-```
-
-### 5. Worker-scoped Fixture
-
-```python
-# 每个 worker 独立的 fixture
-@pytest.fixture(scope="session")
-def db_name(worker_id):
-    """每个 pytest-xdist worker 独立 DB"""
-    if worker_id == "master":
-        return "test_main.db"  # 串行测试用主 DB
-    return f"test_{worker_id}.db"  # 并行测试用独立 DB
-
-# 防止 DB 锁冲突
-@pytest.fixture
-def isolated_db(tmp_path, worker_id):
-    db_path = tmp_path / f"test_{worker_id}.db"
-    conn = sqlite3.connect(str(db_path))
-    yield conn
-    conn.close()
-```
-
----
-
-## 多 Agent 服务管理
-
-### 增强的 service_manager.ps1
+### 示例
 
 ```powershell
-# 现有功能
-service_manager status    # 单实例状态
-service_manager start     # 启动默认实例
-service_manager stop      # 停止
-service_manager restart   # 重启
-
-# 新增功能
-service_manager list         # 列出所有 Agent 实例
-service_manager allocate     # 分配新端口给新 Agent
-service_manager status-all   # 查看所有 Agent 状态
-service_manager logs <id>    # 查看特定 Agent 的日志
+# PM 授权后，在主工作树 commit
+cd d:\filework\excel-to-diagram
+git add -A
+git commit --no-verify -m "fix(xxx): description [pm-authorized]"
 ```
 
-### 多实例端口分配
+### 禁止行为（即使 PM 授权）
+
+- ❌ **PM 授权 + 其他 Agent 在同一工作树** → 仍需 worktree
+- ❌ **PM 授权 + stash 有其他 Agent 的工作** → 先 stash pop 确认
+
+## Worktree 生命周期管理
+
+> **Worktree 不清理会占用磁盘 + 混淆 git 状态。**
+
+### 生命周期
+
+```
+创建 → 开发 → 测试 → commit → push → PR → 合并 → 清理
+  ↑                                                ↓
+  └────── agent_bootstrap.ps1 ──────┘
+```
+
+### 清理时机
+
+| 时机 | 动作 | 谁负责 |
+|------|------|--------|
+| PR 合并后 | `git worktree remove <path> --force` + `git branch -d <branch>` | 创建者 Agent 或 PM |
+| Agent 会话结束 | 清理自己的 worktree | 创建者 Agent |
+| 定期巡检 | 检测已合并的 worktree 并清理 | PM 或自动化脚本 |
+
+### 清理前必做
+
+1. **备份 commit hash**（万一要恢复）
+   ```powershell
+   $hash = git -C <worktree-path> rev-parse HEAD
+   Add-Content -Path 'worktree_commits_backup.txt' -Value "$branch -> $hash"
+   ```
+
+2. **确认分支已合并**
+   ```powershell
+   git branch --merged main --list <branch>
+   ```
+
+3. **删除 worktree + 分支**
+   ```powershell
+   git worktree remove <path> --force
+   git branch -d <branch>
+   ```
+
+### Detached HEAD 处理
+
+| 情况 | 处理 |
+|------|------|
+| 有 tag 标记 | 安全删除（tag 保留） |
+| 无 tag 但有有价值 commit | `git stash branch rescue/<name>` 保存 |
+| 无价值 | 直接 `git worktree remove --force` |
+
+## Agent 启动时
 
 ```powershell
-# 检测空闲端口
-function Find-FreePort {
-    param([int]$StartPort, [int]$Step = 10)
-    
-    $port = $StartPort
-    while (Test-NetConnection -ComputerName localhost -Port $port -InformationLevel Quiet) {
-        $port += $Step
-    }
-    return $port
-}
+# [!!!] 必须执行 bootstrap [!!!]
+powershell -File scripts/agent_bootstrap.ps1 -AgentName <name> -Port <3010-3019>
 
-# 分配新实例
-function Allocate-AgentPorts {
-    param([string]$AgentId)
-    
-    $registry = "d:\filework\.agent_registry\ports.json"
-    $ports = Get-Content $registry | ConvertFrom-Json
-    
-    # 找下一个空闲端口
-    $frontend = Find-FreePort -StartPort 3004 -Step 10
-    $backend = Find-FreePort -StartPort 3010 -Step 10
-    
-    # 写入注册表
-    $ports.agents.$AgentId = @{
-        frontend = $frontend
-        backend = $backend
-        worktree = "d:\worktrees\$AgentId"
-    }
-    $ports | ConvertTo-Json | Set-Content $registry
-    
-    return @{
-        frontend = $frontend
-        backend = $backend
-    }
-}
+# 示例:
+powershell -File scripts/agent_bootstrap.ps1 -AgentName agent-A -Port 3010
+powershell -File scripts/agent_bootstrap.ps1 -AgentName agent-B -Port 3011
 ```
 
----
+bootstrap 会自动：
+1. 创建独立 worktree（`../agent-A-worktree/`）
+2. 创建独立分支（`agent/agent-A`）
+3. 设置 `AGENT_IN_WORKTREE=1` + `AGENT_PORT=3010`
+4. 安装依赖（`npm install`）
 
-## 跨 Agent 协调工作流
-
-### 1. Agent 启动流程
+## 测试时
 
 ```bash
-# 1. 分配端口
-ports = allocate_ports(agent_id)
+# 走 test.py 入口 (合规)
+python d:\filework\test.py --single meta/tests/.../test_x.py
 
-# 2. 创建 worktree
-git_worktree_create(agent_id)
-
-# 3. 启动服务
-start_frontend(port=ports.frontend)
-start_backend(port=ports.backend)
-
-# 4. 健康检查
-check_health(ports.frontend, ports.backend)
-
-# 5. 启动测试
-run_tests(ports)
+# 或用 agent_test.py (推荐给 AI Agent, 含 trace_id + JSON)
+python scripts/agent_test.py --single meta/tests/.../test_x.py \
+    --port $env:AGENT_PORT --json results.json
 ```
 
-### 2. Agent 通信（协调）
+## 多 Agent 隔离保证
 
-```python
-# 共享状态文件
-state_file = "d:\\filework\\.agent_registry\\state.json"
+| 资源 | 隔离方式 |
+|------|---------|
+| **工作树** | `git worktree` 独立目录（L1 强制） |
+| **分支** | `agent/<name>` 独立分支 |
+| **端口** | `AGENT_PORT` env (3010-3019) |
+| **DB** | per-port snapshot (test.py 自动) |
+| **Lock** | per-port lock 文件 |
+| **Status** | `.service_status_<port>.json` |
+| **Trace ID** | UUID, 全局唯一 |
 
-# Agent A 写状态
-def update_state(agent_id, **kwargs):
-    state = load_state()
-    state['agents'][agent_id].update(kwargs)
-    save_state(state)
+## Agent 提交前
 
-# Agent B 读状态
-def get_agent_state(agent_id):
-    state = load_state()
-    return state['agents'].get(agent_id)
-```
+1. `python test.py --single <自己写的测试>` 通过
+2. `python d:\filework\test.py --status` 看整体状态
+3. 改 `--port` 不影响其他 Agent
+4. commit 在自己的 worktree 中进行（不影响其他 Agent）
 
-### 3. 资源协调（API 限流）
-
-```python
-# 共享 API 配额
-class RateLimiter:
-    def __init__(self, max_per_minute=60):
-        self.max = max_per_minute
-        self.requests = []
-    
-    def wait_for_quota(self):
-        now = time.time()
-        self.requests = [t for t in self.requests if t > now - 60]
-        
-        if len(self.requests) >= self.max:
-            sleep_time = 60 - (now - self.requests[0])
-            time.sleep(sleep_time)
-        
-        self.requests.append(time.time())
-```
-
----
-
-## 错误处理
-
-### 端口冲突自动恢复
+## Agent 完成后
 
 ```bash
-# 检测到端口冲突
-if curl.exe -s http://localhost:3004/ > /dev/null; then
-    echo "端口 3004 已被占用"
-    # 1. 找空闲端口
-    NEW_PORT=$(find_free_port 3004 10)
-    # 2. 写入 .env
-    echo "VITE_PORT=${NEW_PORT}" > .env
-    # 3. 重启服务
-    service_manager restart
-    # 4. 更新注册表
-    update_registry $AGENT_ID $NEW_PORT
-fi
+# 1. 在 worktree 中 push
+cd ../agent-A-worktree
+git push origin agent/agent-A
+
+# 2. 创建 PR 或由用户合并
+# 3. 清理 worktree
+git worktree remove ../agent-A-worktree
 ```
 
-### 测试 hang 检测
+## Agent 异常时
 
-```python
-# 5 分钟无进度更新 = hang
-def detect_hang(state_file, timeout=300):
-    last_mtime = os.path.getmtime(state_file)
-    if time.time() - last_mtime > timeout:
-        return True, "State file not updated"
-    return False, None
-```
+- 看自己端口的 `.service_status_<port>.json`
+- 用 `service_manager.ps1 status -Port <port>` 看
+- 检查 `git stash list` 是否有被回滚的工作
+- 不影响其他 Agent（worktree 隔离保证）
 
----
+## 事故复盘 (2026-06-15)
 
-## 监控面板
+### 事故经过
 
-### 实时状态
+1. 智能体A 在主工作树编辑文件（未 commit）
+2. 智能体B 在同一主工作树执行 `git commit`
+3. Git 自动 `git stash`，将智能体A 的工作回滚到 stash
+4. `git stash pop` 失败，智能体A 的工作"丢失"
+5. 累积 8 个 stash，399 个源代码文件受影响
+6. 恢复耗时数小时，8 个冲突文件需手动合并
 
-```
-$ agent_status
+### 根因
 
-┌─────────────────────────────────────────────────────┐
-│ Multi-Agent Status                                  │
-├─────────────────────────────────────────────────────┤
-│ Agent A (running)                                   │
-│   Frontend: http://localhost:3004  [OK] running      │
-│   Backend:  http://localhost:3010  [OK] running      │
-│   Tests:    11/30 (36%)              running        │
-│   Resources: CPU 25%, Mem 512MB                      │
-│                                                     │
-│ Agent B (running)                                   │
-│   Frontend: http://localhost:3014  [OK] running      │
-│   Backend:  http://localhost:3020  [OK] running      │
-│   Tests:    0/20 (0%)                starting       │
-│   Resources: CPU 15%, Mem 256MB                      │
-│                                                     │
-│ Agent C (idle)                                      │
-│   Last active: 5 min ago                             │
-│   Cleanup pending: yes                               │
-└─────────────────────────────────────────────────────┘
-```
+- 两个 Agent 共享同一工作树
+- Git 的 `git stash` 机制假设工作树只有一个操作者
+- 缺少技术层面的强制约束（规范是"建议"而非"强制"）
 
----
+### 预防措施
 
-## 检查清单
+- **L1**: Worktree 强制隔离（本次实施）
+- **L2**: Pre-commit Hook 检测主工作树 commit（本次实施）
+- **L3**: Post-commit Hook 检测 stash 突变（本次实施）
+- **L4**: Stash 监控巡检（本次实施）
 
-### Agent 启动前
+## 参考
 
-- [ ] 已分配独立端口？
-- [ ] 已创建 worktree？
-- [ ] 已检查资源（CPU/内存/磁盘）？
-- [ ] 已读取共享状态（避免冲突）？
-
-### Agent 运行中
-
-- [ ] 定期更新 state.json（每 30 秒）？
-- [ ] 监控资源使用？
-- [ ] API 调用遵守限流？
-- [ ] 失败时快速通知？
-
-### Agent 结束后
-
-- [ ] 清理 worktree？
-- [ ] 释放端口？
-- [ ] 清理临时文件？
-- [ ] 更新最终状态？
-
----
-
-## 关键命令速查
-
-```bash
-# 端口管理
-powershell -File scripts/allocate_ports.ps1 --agent agent_C
-powershell -File scripts/release_ports.ps1 --agent agent_C
-
-# Worktree 管理
-git worktree add d:\worktrees\agent_B -b agent-B/feature
-git worktree remove d:\worktrees\agent_B
-
-# 服务管理（多实例）
-powershell -File service_manager.ps1 status-all
-powershell -File service_manager.ps1 logs agent_B
-
-# 测试并行
-pytest -n auto                              # 自动检测
-pytest -n 4 --dist loadfile                 # 4 worker，按文件分
-npx playwright test --workers=4             # 4 worker
-npx playwright test --shard=1/4             # 分片 1/4
-
-# 状态查询
-powershell -File scripts/agent_status.ps1
-Get-Content d:\filework\.agent_registry\state.json | ConvertFrom-Json
-```
-
----
-
-## 性能对比
-
-| 场景 | 串行 | 多 Agent 并行 | 提升 |
-|------|------|--------------|------|
-| 100 个单元测试 | 30s | 8s（4 worker） | **3.75x** |
-| 50 个 E2E | 5min | 1.5min（4 worker） | **3.3x** |
-| 3 个 Agent 并行 | 30min | 10min | **3x** |
-| 资源利用率 | 25% | 80% | **3.2x** |
-
-Sources:
-- [AI Agent Orchestration is Broken](https://site.builder.io/blog/ai-agent-orchestration)
-- [Scaling AI Agents with Aspire](https://devblogs.microsoft.com/aspire/scaling-ai-agents-with-aspire-isolation/)
-- [Git Worktrees for Parallel AI Agent Execution](https://www.augmentcode.com/guides/git-worktrees-parallel-ai-agent-execution)
-- [Playwright Test Sharding](https://bug0.com/blog/playwright-test-sharding-guide)
-- [pytest-xdist Parallel Testing](https://pydevtools.com/handbook/how-to/how-to-run-tests-in-parallel-with-pytest-xdist/)
-- [Multi-Agent 架构 2026](https://blog.csdn.net/yonggeit/article/details/161060896)
+- `.trae/rules/SESSION_REMINDER.md` - 18 铁律
+- `docs/specs/spec-ai-agent-test-infra-v3.17.md` - D.7 详细设计
+- `scripts/agent_bootstrap.ps1` - Worktree 引导脚本
+- 业界: [Augment Code Multi-agent](https://www.augmentcode.com/guides/agent-observability-for-ai-coding)
+- 业界: [STORM: State-Oriented Management](https://arxiv.org/pdf/2605.20563) - 写入时冲突检测
+- 业界: [Clash.sh](https://clash.sh/) - Worktree 冲突预测工具
+- 业界: [Cursor stash bug report](https://forum.cursor.com/t/cursor-ide-silently-runs-git-stash-git-reset-head-during-active-agent-session-all-uncommitted-changes-lost/156146) - 同类事故
