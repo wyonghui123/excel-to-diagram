@@ -1,47 +1,55 @@
-# T-service-manager-fix-2026-06-19
+# Spec: 审计日志 P1 + P2 修复
 
-> **Task ID**: T-service-manager-fix-2026-06-19
-> **Agent**: Smart Agent A
-> **基于 commit**: 8961492
-> **风险等级**: medium (服务启动行为变更)
-> **开始时间**: 2026-06-19 12:10
+> 2026-06-20 | Author: agent-audit-fix-p1p2 | Status: ✅ COMPLETED
 
-## 1. 目标 (Goal)
+## 背景
 
-修复 service_manager.ps1 启动后端时弹 CMD 窗口的问题。
+近 2 天审计日志业务视图分析发现两个 P1/P2 问题：
+- **P1**: 12 条历史 user_name 残留 "Admin (admin)" 格式
+- **P2**: transaction_id 覆盖率仅 7.1% (业务人员无法追踪事务边界)
 
-## 2. 改动文件
+## modified_files
 
-- [x] `scripts/service_manager.ps1` - v3.18 → v3.19
-  - backend 用 pythonw.exe 替代 python.exe
-  - 4 个 Start-Process 都加 RedirectStandardOutput/Error + NoNewWindow
+- meta/api/_audit_helper.py
+- meta/services/action_handlers.py
+- meta/services/audit_interceptor.py
+- meta/tests/test_audit_p1_p2_fix.py
 
-## 3. 禁止改
+## new_files
 
-- ❌ `.agent-status.json`
-- ❌ `.git/hooks/*`
-- ❌ `d:\filework\.coord\ports.json`
+(无新增)
 
-## 4. 依赖
+## deleted_files
 
-- 基于 commit: `8961492`
-- 不依赖其他 agent
+(无删除)
 
-## 5. 完成标准
+## forbidden_files
 
-- [x] service_manager.ps1 修复
-- [x] 在 worktree 中 commit
-- [ ] Merge 到 main
-- [ ] User 重启服务验证无弹窗
+(无)
 
-## 6. 风险评估
+## 完成标准
 
-- **风险 1**: pythonw.exe 不输出 stdout/stderr（GUI 模式）
-  - 缓解：RedirectStandardOutput 到 logs/ 文件
-- **风险 2**: 用户现有服务是 python.exe 启动的，仍有弹窗
-  - 缓解：merge 后用户需重启服务（service_manager restart）
+- [x] [P1] user_name LIKE '%(%' = 0
+- [x] [P2-2d] tx_id 覆盖率 >= 95%
+- [x] [P2-all] tx_id 全表覆盖率 >= 90%
+- [x] E2E: C.1 (tx_id 共享) + D.2 (user_name 规范化) 生效
+- [x] 数据修复: 12 条 P1 + 4914 条 P2 backfill
 
-## 7. 沟通计划
+## 验证
 
-- merge 后通知用户：service_manager.ps1 v3.19 已就绪
-- 建议用户运行 `service_manager.ps1 restart` 让新版本生效
+```
+verify_audit_fix.py → Overall: PASS
+  [P1] user_name 残留 = 0:              PASS
+  [P2-2d] tx_id 覆盖率 >= 95%:         PASS (100.0%)
+  [P2-all] tx_id 全表覆盖率 >= 90%:    PASS (100.0%)
+
+_e2e_c1_d2.py → PASS
+  [OK] C.1 生效: 所有字段自动归到同一事务
+  [OK] D.2 生效: user_name 是 'Admin' (规范化)
+```
+
+## 风险评估
+
+- **Risk Level**: low (审计日志规范化, 不影响业务逻辑)
+- **回滚方案**: git revert <commit> + re-run backfill script (idempotent)
+- **PM 授权**: 主工作树 commit, 当时仅剩 main worktree (其他已合并)

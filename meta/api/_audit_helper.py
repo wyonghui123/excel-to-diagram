@@ -39,8 +39,7 @@ def _audit_user_name() -> str:
     cu = getattr(g, 'current_user', None) or {}
     _display = cu.get('display_name') or ''
     _username = cu.get('username') or ''
-    if _display and _username and _display != _username:
-        return f"{_display} ({_username})"
+    # [FIX 2026-06-20 P1 v4] 修复残留的 "display (username)" 拼接格式
     return _display or _username or ''
 
 

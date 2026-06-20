@@ -240,7 +240,21 @@ class WriteScopeInterceptor(Interceptor):
         from flask import g
         from meta.services.auth_middleware import is_admin
 
-        user_info = g.get('current_user') if hasattr(g, 'current_user') else None
+        # [FIX v1.2.20 2026-06-20] 支持 worker thread 路径
+        # 1) 优先读 flask.g.current_user (BOFramework 主流程)
+        # 2) fallback 读 context.user_info (ManageService → ActionExecutor 路径,
+        #    由 ActionExecutor._check_write_scope 传入)
+        # 3) 都拿不到 → 防御性 return
+        user_info = None
+        try:
+            user_info = g.get('current_user') if hasattr(g, 'current_user') else None
+        except RuntimeError:
+            # worker thread 无 Flask app context
+            user_info = None
+
+        if not user_info:
+            user_info = getattr(context, 'user_info', None)
+
         if not user_info:
             # PermissionInterceptor 已处理未登录
             return

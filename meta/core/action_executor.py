@@ -29,15 +29,14 @@ from meta.core.exceptions import ConcurrentModificationError
 from meta.services.hierarchy_validation_service import validate_update, validate_delete
 from meta.core.metadata_driven_validator import MetadataDrivenValidator
 from meta.core.validation_messages import ValidationMessageRegistry
-# [FIX v1.2.19 2026-06-20] 写路径 dim scope 校验: 防止 ManageService 绕过 BOFramework 拦截器链
+# [FIX v1.2.20 2026-06-20] 写路径 dim scope 校验: 防止 ManageService 绕过 BOFramework 拦截器链
 # 根因: ManageService 直接持有 ActionExecutor, 不走 BOFramework.execute() → 写操作无权限检查
 # 修复: 在 _do_create/_do_update/_do_delete 入口显式调用 WriteScopeInterceptor.before_action()
+# 注意: 这里故意不在模块顶层 import WriteScopeInterceptor, 避免
+#   action_executor ↔ interceptors.write_scope_interceptor ↔ interceptors.__init__
+#   ↔ persistence_interceptor ↔ action_executor 循环导入
+# 所有拦截器符号在 _check_write_scope 内部 lazy import
 from meta.core.action_context import ActionContext
-from meta.core.interceptors.write_scope_interceptor import (
-    WriteScopeInterceptor as _WriteScopeInterceptor,
-    WriteScopeDenied as _WriteScopeDenied,
-    ScopeViolationError as _ScopeViolationError,
-)
 
 
 # [FIX v1.2.18 2026-06-20] 用 lambda 延迟计算, 避免模块加载时 KeyError 触发 fallback 返回 raw template
@@ -875,10 +874,19 @@ class ActionExecutor:
             pass
 
         # 构造 ActionContext 并调用 WriteScopeInterceptor.before_action
+        # [FIX v1.2.20 2026-06-20] lazy import 拦截器符号, 避免循环导入
         try:
-            if ActionExecutor._write_scope_interceptor is None:
-                ActionExecutor._write_scope_interceptor = _WriteScopeInterceptor()
+            from meta.core.interceptors.write_scope_interceptor import (
+                WriteScopeInterceptor as _WSI,
+                WriteScopeDenied as _WSD,
+                ScopeViolationError as _SVE,
+            )
 
+            if ActionExecutor._write_scope_interceptor is None:
+                ActionExecutor._write_scope_interceptor = _WSI()
+
+            # [FIX v1.2.20 2026-06-20] 把完整 user_info 传入 context
+            # WriteScopeInterceptor 会在 flask.g 不可用 (worker thread) 时 fallback 读此字段
             ctx = ActionContext(
                 meta_object=meta_object,
                 action=action,
@@ -887,9 +895,10 @@ class ActionExecutor:
                 user_id=user_id,
                 user_name=user_info.get('username') or user_info.get('display_name'),
                 ip_address=user_info.get('ip_address'),
+                user_info=user_info,
             )
             ActionExecutor._write_scope_interceptor.before_action(ctx)
-        except _WriteScopeDenied as e:
+        except _WSD as e:
             logger.warning(
                 "[WriteScope] DENY action=%s object=%s id=%s user=%s: %s",
                 action, meta_object.id, params.get('id'), user_id, e
@@ -899,7 +908,7 @@ class ActionExecutor:
                 message=str(e),
                 status_code=403,
             )
-        except _ScopeViolationError as e:
+        except _SVE as e:
             logger.warning(
                 "[WriteScope] FK scope violation action=%s object=%s user=%s: %s",
                 action, meta_object.id, user_id, e
@@ -910,12 +919,19 @@ class ActionExecutor:
                 status_code=422,
             )
         except Exception as e:
-            # 拦截器内部异常 (非权限拒绝): log + 放行, 避免阻断正常业务
-            logger.warning(
-                "[WriteScope] check error (non-fatal, allow): action=%s object=%s: %s",
-                action, meta_object.id, e
+            # [FIX v1.2.20 2026-06-20] 拦截器内部异常: 默认拒绝 + 记录 ERROR (安全优先)
+            # 之前设计是"放行" (log + return None), 但这导致 RuntimeError 被吞, 越权写入
+            # 现在: 失败时拒绝, 触发完整 system self-test 才能重新放行
+            logger.error(
+                "[WriteScope] check failed (DENY for safety): action=%s object=%s user=%s err=%s",
+                action, meta_object.id, user_id, e,
+                exc_info=True,
             )
-            return None
+            return ActionResult.fail(
+                error="WRITE_SCOPE_CHECK_FAILED",
+                message="写权限检查内部失败, 拒绝写入以保护数据 (请查看后端日志)",
+                status_code=500,
+            )
 
         return None
 

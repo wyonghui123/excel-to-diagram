@@ -172,6 +172,25 @@ class AuditInterceptor:
             captured_transaction_id = transaction_id
             captured_ip = None
             captured_ua = None
+
+        # [FIX 2026-06-20 P2 v1] 自动生成 transaction_id (如果都没有)
+        if not captured_transaction_id:
+            import uuid as _uuid
+            captured_transaction_id = f"tx_{_uuid.uuid4().hex[:16]}"
+            try:
+                from flask import g
+                g.transaction_id = captured_transaction_id
+            except RuntimeError:
+                pass
+        # [FIX 2026-06-20 P2 v1] 自动生成 trace_id (如果都没有)
+        if not captured_trace_id:
+            import uuid as _uuid
+            captured_trace_id = f"tr_{_uuid.uuid4().hex[:16]}"
+            try:
+                from flask import g
+                g.trace_id = captured_trace_id
+            except RuntimeError:
+                pass
         
         def write_audit_log(trace_id=None, transaction_id=None, **kwargs):
             # [FIX 2026-06-13] 允许 async_audit_writer.submit 透传 user_id/user_name/ip/user_agent
@@ -218,6 +237,25 @@ class AuditInterceptor:
             captured_transaction_id = transaction_id
             captured_ip = None
             captured_ua = None
+
+        # [FIX 2026-06-20 P2 v1] 自动生成 transaction_id
+        if not captured_transaction_id:
+            import uuid as _uuid
+            captured_transaction_id = f"tx_{_uuid.uuid4().hex[:16]}"
+            try:
+                from flask import g
+                g.transaction_id = captured_transaction_id
+            except RuntimeError:
+                pass
+        # [FIX 2026-06-20 P2 v1] 自动生成 trace_id
+        if not captured_trace_id:
+            import uuid as _uuid
+            captured_trace_id = f"tr_{_uuid.uuid4().hex[:16]}"
+            try:
+                from flask import g
+                g.trace_id = captured_trace_id
+            except RuntimeError:
+                pass
         
         def write_audit_log(trace_id=None, transaction_id=None, **kwargs):
             # [FIX 2026-06-13] 允许 async_audit_writer.submit 透传 user_id/user_name/ip/user_agent
@@ -264,6 +302,25 @@ class AuditInterceptor:
             captured_transaction_id = transaction_id
             captured_ip = None
             captured_ua = None
+
+        # [FIX 2026-06-20 P2 v1] 自动生成 transaction_id
+        if not captured_transaction_id:
+            import uuid as _uuid
+            captured_transaction_id = f"tx_{_uuid.uuid4().hex[:16]}"
+            try:
+                from flask import g
+                g.transaction_id = captured_transaction_id
+            except RuntimeError:
+                pass
+        # [FIX 2026-06-20 P2 v1] 自动生成 trace_id
+        if not captured_trace_id:
+            import uuid as _uuid
+            captured_trace_id = f"tr_{_uuid.uuid4().hex[:16]}"
+            try:
+                from flask import g
+                g.trace_id = captured_trace_id
+            except RuntimeError:
+                pass
         
         def write_audit_log(trace_id=None, transaction_id=None, **kwargs):
             # [FIX 2026-06-13] 允许 async_audit_writer.submit 透传 user_id/user_name/ip/user_agent

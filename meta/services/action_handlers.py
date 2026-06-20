@@ -225,10 +225,9 @@ def _sync_user_context_for_audit() -> None:
         user_id = current_user.get('user_id') or current_user.get('id')
         display = current_user.get('display_name') or ''
         username = current_user.get('username') or ''
-        if display and username and display != username:
-            user_name = f"{display} ({username})"
-        else:
-            user_name = display or username or ''
+        # [FIX 2026-06-20 P1 v4] 修复残留的 "display (username)" 拼接格式
+        # 直接 display 优先, 不再拼接括号格式
+        user_name = display or username or ''
         try:
             ip_address = request.remote_addr
         except RuntimeError:

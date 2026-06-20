@@ -74,7 +74,12 @@ class ActionContext:
     user_name: Optional[str] = None
     ip_address: Optional[str] = None
     trace_id: Optional[str] = None
-    
+
+    # [FIX v1.2.20 2026-06-20] 完整 user dict (含 permissions) for worker thread 路径
+    # 拦截器 (WriteScopeInterceptor) 优先读 flask.g.current_user, fallback 读此字段
+    # 这样 import 子线程 (无 Flask app context) 也能完成 dim scope 校验
+    user_info: Optional[Dict[str, Any]] = None
+
     old_data: Optional[Dict[str, Any]] = None
     new_data: Optional[Dict[str, Any]] = None
     result: Optional[ActionResult] = None
