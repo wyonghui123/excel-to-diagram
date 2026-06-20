@@ -1,7 +1,7 @@
 {
   "version": "1.0",
-  "L2_violations": 7,
-  "last_violation": "2026-06-19T13:25:00",
+  "L2_violations": 8,
+  "last_violation": "2026-06-19T18:22:30.254799",
   "details": [
     {
       "id": 1,
@@ -45,6 +45,13 @@
       "reason": "main_worktree_write",
       "details": "Write self_check.py and violation_auto.py to main (intentional, for anti-violation tools)",
       "acknowledged": true
+    },
+    {
+      "id": 8,
+      "date": "2026-06-19T18:22:30.254810",
+      "reason": "orphan_worktree",
+      "details": "Detected by monitor: ['agent-fix-bug-worktree', 'cleanup-worktree', 'dashboard-worktree', 'docs-cleanup-c-worktree', 'guidelines-update-worktree', 'ide-warnings-worktree', 'restore-5f72212-worktree']",
+      "source": "monitor_v22"
     }
   ]
 }

@@ -249,29 +249,54 @@ class MetadataDrivenValidator:
         if not target_meta:
             return []
         try:
-            # [NEW v1.2.13 2026-06-19] 用业务编码(code) 替代 id 查询
-            # 用户填的是 code, 错误信息也应显示 code, 而不是数字 id
-            lookup_value = value
-            lookup_field = 'id'
+            # [NEW v1.2.15 2026-06-19] 多策略查找: 同时尝试 id 和 code, 任一命中即可
+            # 用户填的是业务编码 (TEST885), 但 record 里 service_module_id 已经是 int (148)
+            # 老逻辑只能查 id=148; 如果该 id 在 version 内不存在 (版本隔离), 就报错
+            # 新逻辑: 同时尝试 id 和 code, 任一命中即可
             target_fields = getattr(target_meta, 'fields', [])
-            # 查找目标对象的 code 字段 (业务关键字)
+            code_db_col = None
             for tf in target_fields:
                 if getattr(tf.semantics, 'business_key', False):
-                    lookup_field = tf.db_column
+                    code_db_col = tf.db_column
                     break
-            # 如果有 value 不是数字, 用 code 字段查
-            if value is not None and not str(value).isdigit():
-                for tf in target_fields:
-                    if getattr(tf.semantics, 'business_key', False):
-                        lookup_field = tf.db_column
-                        break
-            query = f"SELECT id FROM {target_meta.table_name} WHERE {lookup_field} = ? LIMIT 1"
-            cursor = self.ds.execute(query, (value,))
-            row = cursor.fetchone()
+
+            row = None
+            matched_value = value
+
+            # 1) 如果 value 是数字, 优先按 id 查 (快路径)
+            if value is not None and str(value).isdigit():
+                try:
+                    int_val = int(str(value))
+                    query = f"SELECT id, code, name FROM {target_meta.table_name} WHERE id = ? LIMIT 1"
+                    cursor = self.ds.execute(query, (int_val,))
+                    row = cursor.fetchone()
+                except (ValueError, TypeError):
+                    row = None
+
+            # 2) 如果 1) 没找到, 按 code 查
+            if not row and code_db_col and value is not None:
+                query = f"SELECT id, code, name FROM {target_meta.table_name} WHERE {code_db_col} = ? LIMIT 1"
+                cursor = self.ds.execute(query, (value,))
+                row = cursor.fetchone()
+
+            # 3) 如果还是没找到, 看看 value 是否是 "name (id)" / "code - name" 格式, 拆 code 部分再查
+            if not row and value is not None and isinstance(value, str):
+                candidates = self._parse_bo_cell_value(value)
+                for cand in candidates:
+                    if cand and not str(cand).isdigit():
+                        query = f"SELECT id, code, name FROM {target_meta.table_name} WHERE {code_db_col} = ? LIMIT 1"
+                        cursor = self.ds.execute(query, (cand,))
+                        row = cursor.fetchone()
+                        if row:
+                            matched_value = cand
+                            break
+
             if not row:
                 target_name = target_meta.name or target_object
-                # [NEW v1.2.13 2026-06-19] 错误信息包含字段名和值
-                display_value = value if value is not None else ''
+                # [NEW v1.2.15 2026-06-19] 错误信息优先显示 code (而非 id 或 name)
+                # 用户在 Excel 里填的是业务编码 (如 TEST880) 或中文名 (如 "客户"),
+                # 不应该看到 "引用的服务模块 '148' 不存在" 这种 ID 噪音
+                display_value = self._pick_prefer_code_for_error(value, data, field, target_meta)
                 return [ValidationDetail(
                     field_id=field.id, field_name=field_name, rule="fk_existence",
                     message=ValidationMessageRegistry.get("validation.field.fk_not_found",
@@ -284,6 +309,60 @@ class MetadataDrivenValidator:
         except Exception:
             pass
         return []
+
+    def _pick_prefer_code_for_error(self, value: Any, data: Dict[str, Any],
+                                      field: 'MetaField', target_meta) -> str:
+        """[NEW v1.2.15 2026-06-19] 为 FK 错误信息选择最有意义的显示值
+
+        优先级:
+          1) record 中与该 field 配对的 *_code / *_id_code 字段值 (e.g. source_code)
+          2) value 本身 (去除 ' - name' 格式尾缀, 取 code 部分)
+          3) 原 value
+
+        Args:
+            value: 当前 FK 字段的 value
+            data: 当前记录 dict
+            field: 触发错误的 FK 字段 (e.g. source_bo_id)
+            target_meta: 目标对象的 MetaObject
+
+        Returns: 用户可读的业务编码字符串
+        """
+        if value is None:
+            return ''
+
+        # 1) 找配对的 code 字段 (resolve_from_field)
+        resolve_from = getattr(field.semantics, 'resolve_from_field', None)
+        if resolve_from:
+            # 先按 field id 找
+            code_val = data.get(resolve_from)
+            if code_val is None:
+                # 再按 name 找 (code 字段可能有 name='源业务对象编码')
+                code_field = target_meta  # placeholder
+                from meta import get_meta_object
+                # 试在 record 所有 key 里匹配
+                for k, v in data.items():
+                    if isinstance(k, str) and ('code' in k.lower() or k == resolve_from):
+                        if isinstance(v, str) and v.strip():
+                            code_val = v
+                            break
+            if code_val and isinstance(code_val, str) and code_val.strip():
+                return code_val.strip()
+
+        # 2) 处理 "CODE - NAME" / "name (id)" 格式
+        v = str(value).strip()
+        if not v:
+            return ''
+        import re as _re
+        # "CODE - NAME"
+        if ' - ' in v:
+            code_part = v.split(' - ', 1)[0].strip()
+            if code_part:
+                return code_part
+        # "name (id)"
+        m = _re.search(r'^(.+?)\s*\(\d+\)\s*$', v)
+        if m:
+            return m.group(1).strip()
+        return v
 
     def _infer_parent_object(self, field: 'MetaField') -> Optional[str]:
         field_id = field.id

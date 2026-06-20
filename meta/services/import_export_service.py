@@ -497,9 +497,18 @@ class ImportExportService:
                     vh_source = getattr(vh_bo, 'source', None)
                     if vh_source and getattr(vh_source, 'type', None) == 'bo':
                         import re
+                        # [FIX v1.2.15 2026-06-19] 支持多种 BO display 格式:
+                        # 1) "name (id)"  e.g. "客户 (16)" → 16
                         m = re.search(r'\((\d+)\)\s*$', value)
                         if m:
                             return int(m.group(1))
+                        # 2) "CODE - NAME"  e.g. "BO_CUSTOMER - 客户" → BO_CUSTOMER
+                        #    返回 code (string), FK resolve loop 会用 lookup_index 转 id
+                        if ' - ' in value:
+                            code_part = value.split(' - ', 1)[0].strip()
+                            if code_part:
+                                return code_part
+                        # 3) 纯 name / 纯 code → 原样返回, FK resolve loop 会查 lookup_index
 
             if meta_field.field_type == FieldType.INTEGER:
                 return int(value)
@@ -2855,6 +2864,58 @@ class ImportExportService:
             return "{0}_{1}.xlsx".format("_".join(safe_parts), timestamp)
         return "{0}.xlsx".format(timestamp)
 
+    # 全局导出唯一特殊菜单（"架构数据管理"），固定前缀"架构数据"
+    # 2026-06-19 规范：导出的 Excel / 导入模版文件名按 objectname 拼前缀，
+    # 全局导出（arch-data 菜单的级联导出）前缀固定为"架构数据"，其他场景用 objectname
+    GLOBAL_MENU_PREFIX_MAP = {
+        'arch-data': '架构数据',
+    }
+
+    def _resolve_cascade_prefix(self, object_type: str, menu_code: Optional[str] = None) -> str:
+        """解析级联导出的文件名前缀（SSOT）
+
+        优先级：
+        1. menu_code 在 GLOBAL_MENU_PREFIX_MAP 中 → 用映射的固定前缀（如 'arch-data' → '架构数据'）
+        2. 否则 → registry.get(object_type).name（中文 objectname）
+        3. 都没有 → object_type（英文 id 兜底）
+
+        Args:
+            object_type: 级联导出起始对象类型
+            menu_code: 发起导出的菜单编码（可选，前端从 route 推导）
+
+        Returns:
+            文件名前缀字符串
+        """
+        if menu_code and menu_code in self.GLOBAL_MENU_PREFIX_MAP:
+            return self.GLOBAL_MENU_PREFIX_MAP[menu_code]
+        meta_obj = registry.get(object_type)
+        if meta_obj and getattr(meta_obj, 'name', None):
+            return meta_obj.name
+        return object_type
+
+    def _resolve_object_names(self, object_types: List[str]) -> List[str]:
+        """根据 object_type 列表解析为中文名列表（SSOT）
+
+        每个 type 取 registry.get(type).name，找不到则用原 type 作为兜底。
+        用于 export_selected_types / export_template 的多对象文件名拼接。
+
+        Args:
+            object_types: object_type id 列表，如 ['business_object', 'relationship']
+
+        Returns:
+            中文名列表，如 ['业务对象', '关系']
+        """
+        names: List[str] = []
+        for ot in object_types:
+            if not ot:
+                continue
+            meta_obj = registry.get(ot)
+            if meta_obj and getattr(meta_obj, 'name', None):
+                names.append(meta_obj.name)
+            else:
+                names.append(ot)
+        return names
+
     def _get_value_help(self, meta_field):
         """统一获取字段的 value_help 配置（SSOT）
 
@@ -4513,7 +4574,7 @@ class ImportExportService:
                                     "row": row_num,
                                     "field": field_label,
                                     "value": field_value_str,
-                                    "error": f"'{field_value_str}' 不是有效的 {field_label}，请从下拉列表中选择"
+                                    "error": f"【枚举值无效】'{field_value_str}' 不是有效的 {field_label}，请检查枚举值配置"
                                 })
                                 invalid_count += 1
                 
@@ -4545,7 +4606,7 @@ class ImportExportService:
                                     "row": row_num,
                                     "field": bk_field_names,
                                     "value": "",
-                                    "error": f"编号为空，将由系统自动生成",
+                                    "error": f"【业务关键字】{bk_field_names}为空，将由编码模板自动生成",
                                     "severity": "warning"
                                 })
                                 # warning 不计入 invalid_count，不阻止导入
@@ -4556,7 +4617,7 @@ class ImportExportService:
                                     "row": row_num,
                                     "field": bk_field_names,
                                     "value": "",
-                                    "error": "编号不能为空，请填写"
+                                    "error": "【业务关键字】新增必填"
                                 })
                                 invalid_count += 1
                     else:
@@ -4566,9 +4627,9 @@ class ImportExportService:
                             # [NEW v1.2.14 2026-06-19] 单字段时不显示"组合"
                             if len(bk_fields) == 1:
                                 bk_value = bk_values[0] if bk_values else ""
-                                error_msg = f"编号「{bk_field_names}」值重复：{bk_value}"
+                                error_msg = f"【业务关键字】{bk_field_names} 值重复：{bk_value}"
                             else:
-                                error_msg = f"编号组合值重复：{composite_value}"
+                                error_msg = f"【业务关键字】组合值重复：{composite_value}"
                             errors.append({
                                 "sheet": sheet["name"],
                                 "row": row_num,
@@ -4592,9 +4653,9 @@ class ImportExportService:
                                     # [NEW v1.2.14 2026-06-19] 单字段时不显示"组合"
                                     if len(bk_fields) == 1:
                                         bk_value = bk_values[0] if bk_values else ""
-                                        error_msg = f"编号「{bk_field_names}」值已存在：{bk_value}{version_hint}"
+                                        error_msg = f"【业务关键字】{bk_field_names} 值已存在：{bk_value}{version_hint}"
                                     else:
-                                        error_msg = f"编号组合值已存在：{composite_value}{version_hint}"
+                                        error_msg = f"【业务关键字】组合值已存在：{composite_value}{version_hint}"
                                     errors.append({
                                         "sheet": sheet["name"],
                                         "row": row_num,
@@ -4684,8 +4745,8 @@ class ImportExportService:
                                         if not ref_record and not in_importing:
                                             field_label = source_field.name or source_field.id
                                             version_info = f"(版本ID: {version_id})" if version_id else ""
-                                            error_msg = f"所属{ref_obj.name}「{source_value_str}」不存在{version_info}，请先添加或检查编号是否正确"
-                                            hint = f"请先添加「{ref_obj.name}」数据，或检查编号「{source_value_str}」是否正确"
+                                            error_msg = f"【引用完整性】引用的 {ref_obj.name} '{source_value_str}' 不存在 {version_info}"
+                                            hint = f"请先导入 {ref_obj.name} 数据，或检查业务键 '{source_value_str}' 是否正确"
                                             errors.append({
                                                 "sheet": sheet["name"],
                                                 "row": row_num,
@@ -4708,7 +4769,7 @@ class ImportExportService:
                                 "row": row_num,
                                 "field": "操作模式",
                                 "value": operation_mode,
-                                "error": f"当前状态下不能新增「{obj_name}」，请先满足新增条件后重试"
+                                "error": f"【新增限制】{obj_name} 当前不满足新增条件（addability 规则），无法新增"
                             })
                             invalid_count += 1
                             continue  # 跳过后续 valid_count
@@ -4754,6 +4815,135 @@ class ImportExportService:
             return value.split(' - ')[0].strip()
         return value
 
+    def _parse_bo_cell_value(self, value: Any) -> List[str]:
+        """[NEW v1.2.15 2026-06-19] 拆解 BO 字段的 Excel 单元格值
+
+        Excel 中 BO 字段导出格式多样 (取决于 display_format 配置):
+          - "BO_CUSTOMER - 客户"   (display_format: "{code} - {name}")
+          - "客户 (16)"            (display_format: "{name} ({id})")
+          - "客户"                 (仅 name, 用户手填)
+          - "BO_CUSTOMER"          (仅 code, 用户手填)
+          - 16                     (int id)
+
+        本方法返回**所有可能的 lookup key** (code/name/原值),
+        让 _preload_references 能批量加载, _convert_value 能逐个尝试匹配.
+
+        Returns: list of candidate keys (去除空字符串)
+        """
+        if value is None:
+            return []
+        if not isinstance(value, str):
+            value = str(value)
+        v = value.strip()
+        if not v:
+            return []
+
+        candidates: List[str] = []
+
+        # 1) "CODE - NAME"  (e.g. "BO_CUSTOMER - 客户")
+        if ' - ' in v:
+            parts = v.split(' - ', 1)
+            code_part = parts[0].strip()
+            name_part = parts[1].strip()
+            if code_part:
+                candidates.append(code_part)
+            if name_part:
+                candidates.append(name_part)
+            # 整串也加入兜底
+            candidates.append(v)
+            return [c for c in candidates if c]
+
+        # 2) "name (id)"  (e.g. "客户 (16)")
+        import re as _re
+        m = _re.search(r'^(.+?)\s*\((\d+)\)\s*$', v)
+        if m:
+            name_part = m.group(1).strip()
+            id_part = m.group(2).strip()
+            if name_part:
+                candidates.append(name_part)
+            if id_part:
+                candidates.append(id_part)
+            return [c for c in candidates if c]
+
+        # 3) 纯字符串: 可能 name 也可能 code
+        candidates.append(v)
+        return [c for c in candidates if c]
+
+    def _resolve_bo_lookup(self, value: Any, target_bo: str,
+                            lookup_index: Dict[tuple, Dict],
+                            ds=None) -> Optional[Dict]:
+        """[NEW v1.2.15 2026-06-19] 从 lookup_index 多 key 查找 BO 记录
+
+        尝试顺序: id (int) → code (业务编码) → name (中文名)
+        返回首个命中的 record (含 id/code/name).
+
+        Args:
+            value: 单元格原始值 (可能是 "客户"、"BO_CUSTOMER"、16、"客户 (16)"、"BO_CUSTOMER - 客户")
+            target_bo: 目标对象类型 (e.g. "business_object", "service_module")
+            lookup_index: _preload_references 返回的索引
+            ds: 备用 data_source (lookup 未命中时回退到直接 DB 查询)
+
+        Returns: 命中的 record dict {id, code, name, ...} 或 None
+        """
+        if value is None:
+            return None
+        candidates = self._parse_bo_cell_value(value)
+
+        for cand in candidates:
+            # 1) 优先查 lookup_index
+            rec = lookup_index.get((target_bo, cand))
+            if rec:
+                return rec
+
+        # 2) 兜底: 直接查 DB
+        if ds is not None:
+            try:
+                from meta import get_meta_object
+            except ImportError:
+                try:
+                    from meta.core.models import get_meta_object
+                except ImportError:
+                    get_meta_object = None
+            target_meta = get_meta_object(target_bo) if get_meta_object else None
+            if target_meta:
+                target_fields = getattr(target_meta, 'fields', [])
+                code_field = None
+                name_field = None
+                for tf in target_fields:
+                    if getattr(tf.semantics, 'business_key', False) and not code_field:
+                        code_field = tf.db_column
+                    if tf.id == 'name' and not name_field:
+                        name_field = tf.db_column
+                for cand in candidates:
+                    # 数字 → id
+                    if str(cand).isdigit():
+                        try:
+                            cur = ds.execute(f"SELECT id, code, name FROM {target_meta.table_name} WHERE id = ? LIMIT 1", (int(cand),))
+                            row = cur.fetchone()
+                            if row:
+                                return {'id': row[0], 'code': row[1], 'name': row[2]}
+                        except Exception:
+                            pass
+                    # 业务编码
+                    if code_field:
+                        try:
+                            cur = ds.execute(f"SELECT id, code, name FROM {target_meta.table_name} WHERE {code_field} = ? LIMIT 1", (cand,))
+                            row = cur.fetchone()
+                            if row:
+                                return {'id': row[0], 'code': row[1], 'name': row[2]}
+                        except Exception:
+                            pass
+                    # 名称
+                    if name_field and name_field != code_field:
+                        try:
+                            cur = ds.execute(f"SELECT id, code, name FROM {target_meta.table_name} WHERE {name_field} = ? LIMIT 1", (cand,))
+                            row = cur.fetchone()
+                            if row:
+                                return {'id': row[0], 'code': row[1], 'name': row[2]}
+                        except Exception:
+                            pass
+        return None
+
     def _get_enum_value_info(self, enum_type_id: str, code: str) -> Optional[Dict[str, Any]]:
         """获取枚举值详细信息（包括名称和维度）
         
@@ -4795,9 +4985,9 @@ class ImportExportService:
         """批量预加载外键引用，避免 N+1 查询问题
 
         优化策略：
-        1. 收集所有需要查询的 (object_type, code) 组合
+        1. 收集所有需要查询的 (object_type, code/name) 组合
         2. 批量查询数据库
-        3. 建立内存索引 {(object_type, code): record}
+        3. 建立内存索引 {(object_type, code): record} 和 {(object_type, name): record}
 
         Args:
             rows: Excel 数据行
@@ -4808,7 +4998,8 @@ class ImportExportService:
             field_map: 表头到字段ID的映射 (header -> field_id)
 
         Returns:
-            Dict: {(object_type, code): record} 内存索引
+            Dict: {(object_type, code_or_name): record} 内存索引
+            同时支持 code 和 name 反查 (Excel 中可能填中文名而非编码)
         """
 
         lookup_index: Dict[tuple, Dict] = {}
@@ -4827,6 +5018,52 @@ class ImportExportService:
                         if parent_type not in object_codes:
                             object_codes[parent_type] = set()
                         object_codes[parent_type].add(parent_code)
+
+            # [NEW v1.2.15 2026-06-19] 同时收集 name 作为 lookup key
+            # Excel 中用户可能填中文名（如 "客户"、"采购管理"）而非业务编码
+            # _convert_value 会优先尝试按 id、code 转换；失败时按 name 查 lookup_index
+            for field in obj.fields:
+                vh = self._get_value_help(field)
+                if not vh:
+                    continue
+                vh_source = getattr(vh, 'source', None)
+                if not vh_source or getattr(vh_source, 'type', None) != 'bo':
+                    continue
+                target_bo = getattr(vh_source, 'target_bo', None)
+                if not target_bo:
+                    continue
+                # 找这个 field 对应的 header
+                field_id = field.id
+                field_name = field.name
+                # 先按 field_id 找 header
+                target_header = None
+                if field_map:
+                    for hdr, fid in field_map.items():
+                        if fid == field_id:
+                            target_header = hdr
+                            break
+                if not target_header:
+                    for h in headers:
+                        if h == field_name:
+                            target_header = h
+                            break
+                if not target_header:
+                    continue
+                try:
+                    idx = headers.index(target_header)
+                except ValueError:
+                    continue
+                if idx >= len(row):
+                    continue
+                cell = row[idx]
+                if cell is None or (isinstance(cell, str) and not cell.strip()):
+                    continue
+                # 拆解 "CODE - LABEL" 或 "name (id)" 或纯 name / code
+                parts = self._parse_bo_cell_value(cell)
+                if target_bo not in object_codes:
+                    object_codes[target_bo] = set()
+                for p in parts:
+                    object_codes[target_bo].add(p)
 
             for field in obj.fields:
                 resolve_from = getattr(field.semantics, 'resolve_from_field', None)
@@ -4899,22 +5136,20 @@ class ImportExportService:
             if not codes:
                 continue
             try:
-                # [FIX 2026-06-16 BMRD] 用 values= 而不是 value=, 否则
-                # query_service.search 把它包成 [list(codes)] 传给 where_in,
-                # where_in 又把 list 整体当作一个值绑定到 SQL, 导致
-                # "Error binding parameter 1: type 'list' is not supported".
-                # lookup_index 始终为空, target_id 解析全部失败.
-                conditions = [
+                # [NEW v1.2.15 2026-06-19] 按 code 和 name 分别查, 同时建 name 索引
+                # 用户可能填中文名 (如 "客户"、"采购管理") 而非编码, 需要按 name 反查
+                # 1) 按 code 查
+                code_conditions = [
                     QueryCondition(field="code", operator="in", values=list(codes))
                 ]
                 if version_id is not None:
-                    conditions.append(
+                    code_conditions.append(
                         QueryCondition(field="version_id", operator="eq", value=version_id)
                     )
 
                 search_request = SearchRequest(
                     object_type=object_type,
-                    conditions=conditions,
+                    conditions=code_conditions,
                     page=1,
                     page_size=len(codes) * 2,
                 )
@@ -4924,8 +5159,64 @@ class ImportExportService:
                     code_value = record.get("code")
                     if code_value:
                         lookup_index[(object_type, code_value)] = record
+                    # [NEW v1.2.15 2026-06-19] 同时建 name 索引
+                    name_value = record.get("name")
+                    if name_value:
+                        lookup_index[(object_type, name_value)] = record
 
-                logger.info(f"[Preload] 预加载 {object_type}: 查询到 {len(result.data)} 条记录")
+                logger.info(f"[Preload] 预加载 {object_type} (by code): 查询到 {len(result.data)} 条记录")
+
+                # 2) 按 name 查 (补充: Excel 中用户可能填了 name 但 code 没匹配)
+                #    提取 codes 中的非数字字符串作为 name 查询
+                try:
+                    from meta import get_meta_object as _get_meta
+                except ImportError:
+                    try:
+                        from meta.core.models import get_meta_object as _get_meta
+                    except ImportError:
+                        _get_meta = None
+                target_meta = _get_meta(object_type) if _get_meta else None
+                if target_meta and hasattr(target_meta, 'table_name'):
+                    target_fields = getattr(target_meta, 'fields', [])
+                    name_db_col = None
+                    for tf in target_fields:
+                        if tf.id == 'name':
+                            name_db_col = tf.db_column
+                            break
+                    if name_db_col:
+                        # 收集 candidates 中非数字、非已按 code 命中的字符串
+                        candidate_names = []
+                        for c in codes:
+                            if isinstance(c, str) and c and not c.isdigit():
+                                # 跳过已找到的 (按 code 查的)
+                                if (object_type, c) not in lookup_index:
+                                    candidate_names.append(c)
+                        if candidate_names:
+                            try:
+                                name_conditions = [
+                                    QueryCondition(field=name_db_col, operator="in", values=candidate_names)
+                                ]
+                                if version_id is not None:
+                                    name_conditions.append(
+                                        QueryCondition(field="version_id", operator="eq", value=version_id)
+                                    )
+                                name_request = SearchRequest(
+                                    object_type=object_type,
+                                    conditions=name_conditions,
+                                    page=1,
+                                    page_size=len(candidate_names) * 2,
+                                )
+                                name_result = self.query_service.search(name_request)
+                                for record in name_result.data:
+                                    code_value = record.get("code")
+                                    name_value = record.get("name")
+                                    if code_value:
+                                        lookup_index[(object_type, code_value)] = record
+                                    if name_value:
+                                        lookup_index[(object_type, name_value)] = record
+                                logger.info(f"[Preload] 预加载 {object_type} (by name): 候选 {len(candidate_names)} 条, 命中 {len(name_result.data)}")
+                            except Exception as e2:
+                                logger.warning(f"[Preload] 按 name 预加载 {object_type} 失败: {e2}")
 
             except Exception as e:
                 logger.warning(f"[Preload] 预加载 {object_type} 失败: {e}")
@@ -5018,6 +5309,29 @@ class ImportExportService:
 
         has_operation_mode = "操作模式" in headers
         operation_mode_idx = headers.index("操作模式") if has_operation_mode else -1
+        # [NEW v1.2.16 2026-06-19] 找到 code/name 列下标, 用于成功/跳过明细兜底
+        # 即便 record 在 update 时被清理了 (parent_key 移除), 也能从原 Excel 行取到 code/name
+        try:
+            code_col_idx = headers.index("编码")
+        except ValueError:
+            code_col_idx = -1
+        try:
+            name_col_idx = headers.index("名称")
+        except ValueError:
+            name_col_idx = -1
+
+        def _get_row_code(row):
+            """从原 Excel 行取业务编码 (兜底)"""
+            if code_col_idx >= 0 and code_col_idx < len(row):
+                v = row[code_col_idx]
+                return str(v).strip() if v is not None else ""
+            return ""
+        def _get_row_name(row):
+            """从原 Excel 行取名称 (兜底)"""
+            if name_col_idx >= 0 and name_col_idx < len(row):
+                v = row[name_col_idx]
+                return str(v).strip() if v is not None else ""
+            return ""
 
         logger.info(f"[Import] {object_type}导入 - headers: {headers[:10]}, has_operation_mode={has_operation_mode}")
         logger.info(f"[Import] {object_type}导入 - field_map: {field_map}")
@@ -5040,7 +5354,29 @@ class ImportExportService:
         successes = []
         skipped_items = []
         _MAX_DETAIL = 100
-        
+
+        # [NEW v1.2.14 2026-06-19] Helper: 记录成功项明细
+        def _record_success_item(items, row_num, operation, record, max_count, code_override=None, name_override=None):
+            if len(items) < max_count:
+                items.append({
+                    "row": row_num,
+                    "operation": operation,
+                    # [NEW v1.2.16 2026-06-19] 优先使用 override (避免 record 被清除后空白)
+                    "code": code_override if code_override is not None else (record.get("code") or record.get("id_code") or ""),
+                    "name": name_override if name_override is not None else (record.get("name") or record.get("display_name") or "")
+                })
+
+        # [NEW v1.2.14 2026-06-19] Helper: 记录跳过项明细
+        def _record_skipped_item(items, row_num, operation, record, reason, max_count, code_override=None, name_override=None):
+            if len(items) < max_count:
+                items.append({
+                    "row": row_num,
+                    "operation": operation,
+                    "code": code_override if code_override is not None else (record.get("code") or record.get("id_code") or ""),
+                    "name": name_override if name_override is not None else (record.get("name") or record.get("display_name") or ""),
+                    "reason": reason
+                })
+
         total_rows = len(rows) - 1
         type_name = obj.name or object_type
         
@@ -5171,6 +5507,10 @@ class ImportExportService:
                             int(current_value)
                         except (ValueError, TypeError):
                             needs_resolve = True
+                    # [NEW v1.2.15 2026-06-19] 如果 current_value 是字符串 (name 或 "code - name" 残留),
+                    # 也需要重查; 因为此时字段 type=integer, 但 record 里塞了 string, validate 会失败
+                    if current_value is not None and isinstance(current_value, str) and field.field_type.value in ('integer', 'int'):
+                        needs_resolve = True
                     if needs_resolve:
                         source_value = record.get(resolve_from)
                         if source_value:
@@ -5182,8 +5522,8 @@ class ImportExportService:
                                 if dynamic_type and isinstance(dynamic_type, str) and ' - ' in dynamic_type:
                                     dynamic_type = dynamic_type.split(' - ')[0].strip()
                                 if dynamic_type:
-                                    # [SYMBOL] 性能优化：使用预加载的内存索引
-                                    target_record = self._find_from_index(lookup_index, dynamic_type, source_value)
+                                    # [NEW v1.2.15 2026-06-19] 多 key 查找 (id/code/name)
+                                    target_record = self._resolve_bo_lookup(source_value, dynamic_type, lookup_index, self.data_source)
                                     if target_record:
                                         record[field.id] = target_record.get('id')
                                         logger.info(f"[Import] 动态外键解析成功: {field.id}={record[field.id]} ({dynamic_type}.code={source_value})")
@@ -5192,10 +5532,11 @@ class ImportExportService:
                                 else:
                                     logger.warning(f"[Import] 动态外键类型字段为空: resolve_to_field={resolve_to_field}")
                             elif resolve_to_object:
-                                # [SYMBOL] 性能优化：使用预加载的内存索引
-                                target_record = self._find_from_index(lookup_index, resolve_to_object, source_value)
+                                # [NEW v1.2.15 2026-06-19] 多 key 查找 (id/code/name)
+                                target_record = self._resolve_bo_lookup(source_value, resolve_to_object, lookup_index, self.data_source)
                                 if target_record:
                                     record[field.id] = target_record.get('id')
+                                    logger.info(f"[Import] 外键解析成功: {field.id}={record[field.id]} ({resolve_to_object}.code={source_value})")
                                 else:
                                     logger.warning(f"[Import] 未找到外键对象: {resolve_to_object}.code={source_value}")
 
@@ -5229,12 +5570,12 @@ class ImportExportService:
                         self._delete_record(object_type, record, obj.import_export)
                         deleted_count += 1
                         success_count += 1
-                        _record_success_item(successes, row_num, "delete", record, _MAX_DETAIL)
+                        _record_success_item(successes, row_num, "delete", record, _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
                     except ValueError as ve:
                         # [FIX 2026-06-16] 删除不存在的记录降级为 skip，不作为硬失败
                         logger.warning(f"[Import] 删除记录不存在，跳过: {ve}")
                         skipped_count += 1
-                        _record_skipped_item(skipped_items, row_num, "delete", record, str(ve), _MAX_DETAIL)
+                        _record_skipped_item(skipped_items, row_num, "delete", record, str(ve), _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
                         warnings.append({
                             "row": row_num,
                             "operation": operation_mode,
@@ -5246,7 +5587,7 @@ class ImportExportService:
                 elif operation_mode == "skip":
                     logger.info(f"[Import] 跳过记录")
                     skipped_count += 1
-                    _record_skipped_item(skipped_items, row_num, "skip", record, "操作模式为跳过", _MAX_DETAIL)
+                    _record_skipped_item(skipped_items, row_num, "skip", record, "操作模式为跳过", _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
                     continue
                 elif operation_mode == "create":
                     logger.info(f"[Import] 执行新增操作")
@@ -5264,7 +5605,7 @@ class ImportExportService:
                                 created_count += 1
                             else:
                                 updated_count += 1
-                            _record_success_item(successes, row_num, op, record, _MAX_DETAIL)
+                            _record_success_item(successes, row_num, op, record, _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
                         else:
                             failed_count += 1
                             errors.append({"row": row_num, "operation": operation_mode, "field": "编码", "value": record.get("code", ""), "message": upsert_result.get("error", "Upsert failed")})
@@ -5272,7 +5613,7 @@ class ImportExportService:
                         self.manage_service.create(CreateRequest(object_type=object_type, data=record))
                         success_count += 1
                         created_count += 1
-                        _record_success_item(successes, row_num, "create", record, _MAX_DETAIL)
+                        _record_success_item(successes, row_num, "create", record, _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
                 elif operation_mode == "update":
                     # [SYMBOL] 关键修复：如果 conflict_strategy=upsert，执行 upsert 而不是更新
                     if conflict_strategy == "upsert":
@@ -5287,7 +5628,7 @@ class ImportExportService:
                                 created_count += 1
                             else:
                                 updated_count += 1
-                            _record_success_item(successes, row_num, op, record, _MAX_DETAIL)
+                            _record_success_item(successes, row_num, op, record, _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
                         else:
                             failed_count += 1
                             errors.append({"row": row_num, "operation": operation_mode, "field": "编码", "value": record.get("code", ""), "message": upsert_result.get("error", "Upsert failed")})
@@ -5296,7 +5637,7 @@ class ImportExportService:
                         self._update_record(object_type, record, obj.import_export)
                         success_count += 1
                         updated_count += 1
-                        _record_success_item(successes, row_num, "update", record, _MAX_DETAIL)
+                        _record_success_item(successes, row_num, "update", record, _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
                 else:
                     logger.info(f"[Import] 执行upsert操作 (conflict_strategy={conflict_strategy})")
                     # [SYMBOL] 确保version_id存在
@@ -5312,7 +5653,7 @@ class ImportExportService:
                                 created_count += 1
                             else:
                                 updated_count += 1
-                            _record_success_item(successes, row_num, op, record, _MAX_DETAIL)
+                            _record_success_item(successes, row_num, op, record, _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
                         else:
                             failed_count += 1
                             errors.append({"row": row_num, "operation": operation_mode, "field": "编码", "value": record.get("code", ""), "message": upsert_result.get("error", "Upsert failed")})
@@ -5320,13 +5661,13 @@ class ImportExportService:
                         if self._record_exists(object_type, record, obj.import_export):
                             logger.info(f"[Import] 记录已存在，跳过")
                             skipped_count += 1
-                            _record_skipped_item(skipped_items, row_num, "skip", record, "记录已存在", _MAX_DETAIL)
+                            _record_skipped_item(skipped_items, row_num, "skip", record, "记录已存在", _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
                             continue
                         result = self.manage_service.create(CreateRequest(object_type=object_type, data=record))
                         if result.success:
                             success_count += 1
                             created_count += 1
-                            _record_success_item(successes, row_num, "create", record, _MAX_DETAIL)
+                            _record_success_item(successes, row_num, "create", record, _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
                         else:
                             failed_count += 1
                     else:
@@ -5334,7 +5675,7 @@ class ImportExportService:
                         if result.success:
                             success_count += 1
                             created_count += 1
-                            _record_success_item(successes, row_num, "create", record, _MAX_DETAIL)
+                            _record_success_item(successes, row_num, "create", record, _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
                         else:
                             failed_count += 1
 
