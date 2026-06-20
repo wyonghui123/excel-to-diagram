@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>第 5 章 · 审计日志 · BIP 帮助中心</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body class="page-chapter" style="--c: #d97706">
+  <header class="chapter-header">
+    <div class="chapter-header__inner">
+      <div class="chapter-header__crumbs">
+        <a href="./index.html">帮助中心</a>
+        <span class="sep">/</span>
+        <span>第 5 章</span>
+      </div>
+      <div class="chapter-header__eyebrow">CHAPTER 05 · AMBER</div>
+      <h1 class="chapter-header__title">审计日志</h1>
+      <p class="chapter-header__desc">
+        谁 · 何时 · 改了什么，全链路可追溯。
+        出问题 5 分钟定位到具体的人和具体那一秒。
+      </p>
+    </div>
+  </header>
+
+  <main class="chapter-main">
+
+    <section class="story-card" aria-label="7 段式故事卡">
+      <h2 class="story-card__title">故事卡 <small>从"谁删了那条数据"到审计零死角</small></h2>
+      <p class="story-card__desc">把"出了事查不到账"这条主线，拆成 7 个节点。</p>
+      <div class="story">
+        <div class="story__node">
+          <div class="story__node-num">1</div>
+          <div class="story__node-title">痛点</div>
+          <div class="story__node-desc">数据被改，三天后才发现，无据可查。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">2</div>
+          <div class="story__node-title">召唤</div>
+          <div class="story__node-desc">每一笔操作都留痕，自动归档 365 天。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">3</div>
+          <div class="story__node-title">入门</div>
+          <div class="story__node-desc">3 步查第一条审计记录。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">4</div>
+          <div class="story__node-title">探索</div>
+          <div class="story__node-desc">操作类型、对象、字段、值变更。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">5</div>
+          <div class="story__node-title">进阶</div>
+          <div class="story__node-desc">批量导出、合规报表、告警钩子。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">6</div>
+          <div class="story__node-title">实战</div>
+          <div class="story__node-desc">5 分钟定位"误删采购订单"事件。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">7</div>
+          <div class="story__node-title">回顾</div>
+          <div class="story__node-desc">速查表 + 引出第 6 章的系统配置。</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">3 · 入门：3 步查第一条记录</h2>
+      <ol>
+        <li>左侧菜单「<strong>审计日志</strong>」。</li>
+        <li>顶部筛选器：选时间范围 + 业务对象。</li>
+        <li>列表点击行展开，可看到「<strong>旧值 → 新值</strong>」diff。</li>
+      </ol>
+      <div class="callout"><strong>提示：</strong>审计日志只读不可改；删除需走合规审批流程。</div>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">4 · 探索：日志字段速查</h2>
+      <table class="tip-table">
+        <thead><tr><th>字段</th><th>含义</th><th>典型值</th></tr></thead>
+        <tbody>
+          <tr><td>trace_id</td><td>同一请求链路 ID</td><td>7f3a...d92</td></tr>
+          <tr><td>actor</td><td>操作者</td><td>user_id / system</td></tr>
+          <tr><td>action</td><td>操作类型</td><td>CREATE / UPDATE / DELETE / READ</td></tr>
+          <tr><td>object_type</td><td>对象类型</td><td>product / order / user</td></tr>
+          <tr><td>object_id</td><td>对象主键</td><td>123</td></tr>
+          <tr><td>diff</td><td>字段值变更</td><td>{price: [100, 120]}</td></tr>
+          <tr><td>ts</td><td>时间戳（毫秒）</td><td>1718892000123</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">5 · 进阶：合规报表与告警</h2>
+      <ul>
+        <li><strong>批量导出</strong>：选时间范围导出 CSV / Parquet，最大支持 100 万行/次。</li>
+        <li><strong>合规报表</strong>：预置 SOX / 等保模板，10 分钟生成月报。</li>
+        <li><strong>告警钩子</strong>：DELETE 操作可配置触发邮件 / 飞书 / 钉钉通知。</li>
+      </ul>
+      <div class="callout"><strong>合规提示：</strong>审计数据保存期限默认 365 天，到期自动归档冷存储（可配置 730 / 1095 天）。</div>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">6 · 实战：定位"误删采购订单"</h2>
+      <table class="tip-table">
+        <thead><tr><th>步骤</th><th>操作</th><th>结果</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>筛选 action=DELETE + object_type=order</td><td>命中 3 条</td></tr>
+          <tr><td>2</td><td>按时间倒序，点最新一条</td><td>trace_id = 7f3a...d92</td></tr>
+          <tr><td>3</td><td>用 trace_id 全局搜索</td><td>同链路还有 1 条 UPDATE</td></tr>
+          <tr><td>4</td><td>展开 UPDATE diff</td><td>status 从「待审」→「已删」</td></tr>
+          <tr><td>5</td><td>查看 actor 详情</td><td>操作人 + 登录 IP + UA</td></tr>
+        </tbody>
+      </table>
+      <p>结论：5 分钟内定位到具体人、具体时间、具体字段，可作为合规证据提交。</p>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">7 · 回顾 &amp; 衔接</h2>
+      <p>本章关键词：<strong>只读不可改</strong>、<strong>trace_id 串联</strong>、<strong>告警即时</strong>。</p>
+      <div class="callout"><strong>下一章预告：</strong>审计发现的"系统配置漂移"问题怎么根治？第 6 章「系统配置」给你答案。</div>
+    </section>
+
+    <nav class="chapter-nav" aria-label="章节导航">
+      <a href="./chapter4.html">
+        <span class="chapter-nav__label">← 上一章</span>
+        <span class="chapter-nav__title">第 4 章 · 权限管理</span>
+      </a>
+      <a href="./chapter6.html">
+        <span class="chapter-nav__label">下一章 →</span>
+        <span class="chapter-nav__title chapter-nav__title--next">第 6 章 · 系统配置</span>
+      </a>
+    </nav>
+  </main>
+</body>
+</html>
