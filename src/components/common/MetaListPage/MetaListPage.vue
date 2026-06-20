@@ -1888,6 +1888,13 @@ defineExpose({
   width: 100%;
   box-sizing: border-box;
   overflow-x: auto;
+  /* [FIX 2026-06-20 T-2026-06-20-002] 限制高度 + 内部滚动 (解决"过滤区域没下限"问题: 内容多时撑很长) */
+  max-height: 240px;
+  overflow-y: auto;
+  /* [FIX 2026-06-20 T-2026-06-20-002] Sticky filter (SAP Dynamic Page Layout) - 滚动时吸顶在 toolbar 下方 */
+  position: sticky;
+  top: 44px;
+  z-index: 9;
 
   :deep(.el-form) {
     flex-wrap: wrap;

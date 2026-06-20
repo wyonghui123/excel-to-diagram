@@ -1,0 +1,19 @@
+fix(archdata): sticky toolbar/filter + visible pagination (SAP Dynamic Page Layout)
+
+[FR-001] Advanced filter bounded: max-height 240px + overflow-y auto (prevents very long filter panel)
+[FR-002] Toolbar sticky (position sticky top 0 z-index 10)
+[FR-003] Advanced filter sticky below toolbar (position sticky top 44px z-index 9)
+[FR-004] Table section overflow visible: let document scroll take over (pagination always visible)
+[FR-005] Meta list page height auto + overflow visible: align with document scroll
+
+L1-Worktree: yes (D:/filework/detail-edit-tab-fix)
+L2-NoMain: yes (committed in worktree, not main)
+L3-Stash: yes (did not touch stash@{0})
+L4-Status: yes (read .agent-status.json before work)
+L5-Service: yes (did not use service_manager)
+
+Base: ea234c4 (current main HEAD after AppShell r1-r3 merges)
+Files: 2 changed (MetaListPage.vue CSS + new spec)
+Risk: low (CSS-only, isolated to MetaListPage)
+Task: T-2026-06-20-002
+Reference: SAP Fiori Dynamic Page Layout (https://experience.sap.com/fiori-design-web/)
