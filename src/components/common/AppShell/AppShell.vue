@@ -65,7 +65,8 @@ defineProps({
 .app-shell {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  /* [FIX 2026-06-20 T-2026-06-20-001-r2] height:100vh → min-height:100vh, 让内容自然撑高，document scroll 接管 */
+  min-height: 100vh;
   background: var(--el-bg-color-page, #f5f7fa);
 }
 
@@ -116,7 +117,7 @@ defineProps({
 .app-shell__body {
   flex: 1;
   display: flex;
-  overflow: hidden;
+  /* [FIX 2026-06-20 T-2026-06-20-001] 移除 overflow:hidden, 让 document scroll 接管 */
   min-height: 0;
 }
 
