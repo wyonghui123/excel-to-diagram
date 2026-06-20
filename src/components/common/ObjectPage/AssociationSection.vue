@@ -632,7 +632,7 @@ async function handleAnnotationSave(formData) {
     refresh()
     emit('refresh')
   } catch (e) {
-    message.error('保存失败', e)
+    message.saveFailed('备注')
   } finally {
     annotationSaving.value = false
   }

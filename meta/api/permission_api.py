@@ -57,7 +57,7 @@ def explain_permission():
                 jsonify(
                     {
                         "success": False,
-                        "error": "user_id and bo_id are required",
+                        "error": "用户 ID 和业务对象 ID 不能为空",
                     }
                 ),
                 400,
@@ -103,7 +103,7 @@ def check_permission():
                 jsonify(
                     {
                         "success": False,
-                        "error": "user_id and bo_id are required",
+                        "error": "用户 ID 和业务对象 ID 不能为空",
                     }
                 ),
                 400,

@@ -11,6 +11,7 @@ import io
 audit_bp = Blueprint('audit', __name__)
 
 from meta.core.datasource import get_data_source
+from meta.api._messages import MSG_ADMIN_REQUIRED
 from meta.api.auth_api import login_required, is_admin
 from meta.services.auth_middleware import get_current_user
 
@@ -437,7 +438,7 @@ def export_audit_logs():
 def get_failed_audit_logs():
     """查询失败的审计日志记录"""
     if not is_admin():
-        return jsonify({'success': False, 'message': '需要管理员权限'}), 403
+        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
     
     try:
         cursor = _data_source.execute("""
@@ -671,7 +672,7 @@ def _generate_business_key(data_source, object_type: str, object_id: str, field_
 def get_retry_worker_status():
     """获取 audit retry worker 状态"""
     if not is_admin():
-        return jsonify({'success': False, 'message': '需要管理员权限'}), 403
+        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
 
     try:
         from meta.services.audit_retry_worker import get_audit_retry_worker
@@ -707,7 +708,7 @@ def get_retry_worker_status():
 def trigger_retry_worker():
     """手动触发 audit retry worker 执行一次"""
     if not is_admin():
-        return jsonify({'success': False, 'message': '需要管理员权限'}), 403
+        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
 
     try:
         from meta.services.audit_retry_worker import get_audit_retry_worker

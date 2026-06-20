@@ -1109,7 +1109,7 @@ async function fetchData(options = {}) {
   } catch (e) {
     console.error('DetailPage fetchData error:', e)
     error.value = '加载详情数据失败，请稍后重试'
-    message.error('加载详情失败，请稍后重试', 4000)
+    message.loadFailed('详情')
   } finally {
     loading.value = false
   }

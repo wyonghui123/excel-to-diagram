@@ -449,7 +449,7 @@ async function handleAction(action, row) {
         emit('delete', row)
         emit('success', { type: 'delete', row })
       } else {
-        message.error('删除失败', result)
+        message.deleteFailed('数据')
       }
     } catch (e) {
       if (e !== 'cancel') {

@@ -85,7 +85,7 @@ def list_annotations_by_target():
     if not target_type or not target_id:
         return jsonify({
             'success': False,
-            'message': 'target_type and target_id are required',
+            'message': '目标类型和目标 ID 不能为空',
         }), 400
 
     valid_target_types = get_type_order() + ['relationship']
@@ -130,7 +130,7 @@ def get_annotation(annotation_id):
     if not row:
         return jsonify({
             'success': False,
-            'message': 'Annotation not found',
+            'message': '标注不存在',
         }), 404
 
     columns = [desc[0] for desc in cursor.description]
@@ -197,13 +197,13 @@ def create_annotation():
     if not data.get('target_type') or not data.get('target_id'):
         return jsonify({
             'success': False,
-            'message': 'target_type and target_id are required',
+            'message': '目标类型和目标 ID 不能为空',
         }), 400
 
     if isinstance(data.get('target_id'), str) and not str(data.get('target_id')).isdigit():
         return jsonify({
             'success': False,
-            'message': 'target_id must be a valid numeric ID',
+            'message': '目标 ID 必须为有效数字',
         }), 400
 
     if not data.get('category'):
@@ -212,7 +212,7 @@ def create_annotation():
     if not data.get('content'):
         return jsonify({
             'success': False,
-            'message': 'content is required',
+            'message': '内容不能为空',
         }), 400
 
     valid_target_types = get_type_order() + ['relationship']

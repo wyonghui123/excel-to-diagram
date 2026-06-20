@@ -281,7 +281,7 @@ def admin_required(f):
     @_login_required
     def decorated(*args, **kwargs):
         if not hasattr(g, "current_user") or not g.current_user:
-            return jsonify({"success": False, "message": "Not authenticated"}), 401
+            return jsonify({"success": False, "message": "请先登录后再操作"}), 401
         perms = g.current_user.get("permissions", [])
         if "*" not in perms and "admin" not in perms:
             return jsonify({"success": False, "message": "Admin required"}), 403

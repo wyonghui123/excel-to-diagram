@@ -35,7 +35,7 @@ def _get_data_perm_service():
 @login_required
 def list_data_permissions():
     if not is_admin():
-        return jsonify({'success': False, 'message': '需要管理员权限'}), 403
+        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
 
     user_id = request.args.get('user_id', type=int)
     resource_type = request.args.get('resource_type', '').strip()
@@ -64,7 +64,7 @@ def list_data_permissions():
 @login_required
 def add_data_permission():
     if not is_admin():
-        return jsonify({'success': False, 'message': '需要管理员权限'}), 403
+        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
 
     data = request.get_json(silent=True) or {}
     user_id = data.get('user_id')
@@ -86,7 +86,7 @@ def add_data_permission():
 
     cursor = _data_source.execute("SELECT id FROM users WHERE id = ?", [user_id])
     if not cursor.fetchone():
-        return jsonify({'success': False, 'message': '用户不存在'}), 404
+        return jsonify({'success': False, 'message': '用户不存在，请检查后重试'}), 404
 
     perm_id = _get_data_perm_service().add_data_permission(
         user_id, resource_type, resource_id, permission_level, inherit_to_children
@@ -107,7 +107,7 @@ def add_data_permission():
 @login_required
 def delete_data_permission(perm_id):
     if not is_admin():
-        return jsonify({'success': False, 'message': '需要管理员权限'}), 403
+        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
 
     success = _get_data_perm_service().remove_data_permission(perm_id)
     _data_source.commit()
@@ -122,7 +122,7 @@ def delete_data_permission(perm_id):
 @login_required
 def batch_add_data_permissions():
     if not is_admin():
-        return jsonify({'success': False, 'message': '需要管理员权限'}), 403
+        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
 
     data = request.get_json(silent=True) or {}
     user_id = data.get('user_id')

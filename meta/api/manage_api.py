@@ -860,7 +860,7 @@ def recover_from_log(object_type, id):
     try:
         object_id = int(id)
     except ValueError:
-        return jsonify({'success': False, 'message': 'Invalid id'}), 400
+        return jsonify({'success': False, 'message': 'ID 无效'}), 400
     
     existing = _data_source.find_by_id(meta_obj.table_name, object_id)
     if existing:
@@ -1119,7 +1119,7 @@ def list_actions(object_type, id):
         pass
 
     if not record:
-        return jsonify({'success': False, 'message': 'Record not found'}), 404
+        return jsonify({'success': False, 'message': '记录不存在'}), 404
 
     from meta.core.condition_evaluator import ConditionEvaluator
     evaluator = ConditionEvaluator()
@@ -1201,11 +1201,11 @@ def get_state_transitions(object_type, id):
     try:
         object_id = int(id)
     except ValueError:
-        return jsonify({'success': False, 'message': 'Invalid id'}), 400
+        return jsonify({'success': False, 'message': 'ID 无效'}), 400
     
     record = _data_source.find_by_id(meta_obj.table_name, object_id)
     if not record:
-        return jsonify({'success': False, 'message': 'Record not found'}), 404
+        return jsonify({'success': False, 'message': '记录不存在'}), 404
     
     state_transitions = []
     for rule in meta_obj.rules:
@@ -1261,7 +1261,7 @@ def get_state_history(object_type, id):
     try:
         object_id = int(id)
     except ValueError:
-        return jsonify({'success': False, 'message': 'Invalid id'}), 400
+        return jsonify({'success': False, 'message': 'ID 无效'}), 400
     
     sql = """
         SELECT id, old_value, new_value, user_name, created_at, action
@@ -1340,11 +1340,11 @@ def get_stage_metrics(object_type, id):
     try:
         object_id = int(id)
     except ValueError:
-        return jsonify({'success': False, 'message': 'Invalid id'}), 400
+        return jsonify({'success': False, 'message': 'ID 无效'}), 400
     
     record = _data_source.find_by_id(meta_obj.table_name, object_id)
     if not record:
-        return jsonify({'success': False, 'message': 'Record not found'}), 404
+        return jsonify({'success': False, 'message': '记录不存在'}), 404
     
     current_state = record.get(field)
     # [FIX 2026-06-09] 不再从 record.get(f'{field}_entered_at') 读, 改为从 audit_logs 派生

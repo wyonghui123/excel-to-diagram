@@ -222,7 +222,7 @@ async function handleSubmit() {
       message.warning(`成功 ${results.length - failed.length} 条，失败 ${failed.length} 条`)
     }
   } catch (e) {
-    message.error('添加失败', e)
+    message.error('添加失败，请稍后重试', e)
   } finally {
     submitting.value = false
   }

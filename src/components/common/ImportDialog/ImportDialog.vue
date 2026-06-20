@@ -1195,10 +1195,10 @@ async function downloadTemplate() {
     if (result.success) {
       message.success('模板下载成功')
     } else {
-      message.error('模板下载失败', result)
+      message.error('模板下载失败，请稍后重试', result)
     }
   } catch (e) {
-    message.error('模板下载失败: ' + e.message, e)
+    message.error('模板下载失败：' + (e.message || '请稍后重试'), e)
   }
 }
 

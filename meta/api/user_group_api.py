@@ -23,7 +23,7 @@ def admin_required(f):
     def decorated(*args, **kwargs):
         user = get_current_user()
         if not user or not is_admin(user):
-            return jsonify({'success': False, 'error': '需要管理员权限'}), 403
+            return jsonify({'success': False, 'error': '您没有执行此操作的权限，需要管理员权限'}), 403
         return f(*args, **kwargs)
     return decorated
 
@@ -299,7 +299,7 @@ def add_group_data_permission(group_id):
         inherit_to_children = data.get('inherit_to_children', True)
 
         if not resource_type or not resource_id:
-            return jsonify({'success': False, 'message': 'resource_type and resource_id are required'}), 400
+            return jsonify({'success': False, 'message': '资源类型和资源 ID 不能为空'}), 400
 
         perm_id = service.add_group_data_permission(group_id, resource_type, resource_id, permission_level, inherit_to_children)
         if perm_id:

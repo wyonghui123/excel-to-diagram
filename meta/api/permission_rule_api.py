@@ -20,7 +20,7 @@ def admin_required(f):
     @login_required
     def decorated(*args, **kwargs):
         if not hasattr(g, 'current_user') or not g.current_user:
-            return jsonify({'success': False, 'message': 'Not authenticated'}), 401
+            return jsonify({'success': False, 'message': '请先登录后再操作'}), 401
         perms = g.current_user.get('permissions', [])
         if '*' not in perms and 'admin' not in perms:
             return jsonify({'success': False, 'message': 'Admin required'}), 403
@@ -174,11 +174,11 @@ def check_permission():
         action = data.get('action', 'read')
 
         if not resource_type or resource_id is None:
-            return jsonify({'success': False, 'message': 'resource_type and resource_id are required'}), 400
+            return jsonify({'success': False, 'message': '资源类型和资源 ID 不能为空'}), 400
 
         user_id = g.current_user.get('user_id') if hasattr(g, 'current_user') and g.current_user else None
         if not user_id:
-            return jsonify({'success': False, 'message': 'Not authenticated'}), 401
+            return jsonify({'success': False, 'message': '请先登录后再操作'}), 401
 
         result = service.check_permission(user_id, resource_type, resource_id, action)
         return jsonify({'success': True, 'data': result})
@@ -229,7 +229,7 @@ def check_resource_references():
         resource_id = data.get('resource_id')
 
         if not resource_type or resource_id is None:
-            return jsonify({'success': False, 'message': 'resource_type and resource_id are required'}), 400
+            return jsonify({'success': False, 'message': '资源类型和资源 ID 不能为空'}), 400
 
         affected = service.check_rule_references_resource(resource_type, resource_id)
         return jsonify({'success': True, 'data': {'affected_rules': affected, 'count': len(affected)}})
