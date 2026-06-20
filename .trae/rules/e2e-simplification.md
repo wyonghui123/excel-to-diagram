@@ -237,10 +237,60 @@ playwright.config.js
 | `.trae/rules/e2e-testing.md` | v1 时代规则（部分仍有效） |
 | `.trae/rules/e2e-simplification.md` | **本文件**，v2 新方案权威规范 |
 | `.trae/rules/frontend-test-auth.md` | 认证细节（dev-login cookie） |
+| `.trae/rules/frontend-test-data-rules.md` | **测试数据管理规范**（v3.19 新增） |
 | `.trae/rules/page-health-rules.md` | 页面健康检查 |
 | `.trae/rules/multi-agent-coordination.md` | 多 Agent 端口/资源隔离 |
 
 **优先级**：`e2e-simplification.md` > `e2e-testing.md`（新方案优先）
+
+---
+
+## 九点五、测试数据规范（v3.19 新增）
+
+> **所有 E2E 测试必须遵循测试数据管理规范，确保测试隔离和自动清理。**
+
+### 核心规则
+
+| 规则 | 说明 | 正确做法 |
+|------|------|---------|
+| **数据获取** | 使用 `ensureProductWithVersion()` | 自动创建测试数据，不会跳过测试 |
+| **数据清理** | 使用 `runCleanup()` | 测试后自动清理，避免 DB 污染 |
+| **禁止硬编码** | 不使用 `productId=1` | 使用 URL 参数 `?productId=${pv.product.id}` |
+
+### 标准测试模板
+
+```javascript
+import { test, expect } from '../helpers/auto-fixtures.js'
+import { ensureProductWithVersion, runCleanup } from '../helpers/auth.js'
+
+test.describe('SXX: 场景名称', () => {
+  // [NEW v3.19] 每个测试后自动清理
+  test.afterEach(async () => {
+    await runCleanup()
+  })
+
+  test('C01: 测试用例', async ({ page }) => {
+    // [NEW v3.19] 确保测试数据存在
+    const pv = await ensureProductWithVersion(page)
+
+    // 使用 URL 参数导航
+    await page.goto(
+      `/system/archdata?productId=${pv.product.id}&versionId=${pv.version.id}`,
+      { waitUntil: 'domcontentloaded' }
+    )
+
+    // ... 测试逻辑 ...
+  })
+})
+```
+
+### 禁止行为
+
+| 禁止 | 后果 |
+|------|------|
+| `findProductWithVersion()` 返回 null 后 `test.skip()` | 测试被跳过，无法验证功能 |
+| 硬编码 `productId=1, versionId=1` | 数据可能不存在或已被删除 |
+| 创建数据后不清理 | DB 污染，测试数据累积 |
 
 ---
 

@@ -86,9 +86,11 @@ class TestRelationshipDataConsistency:
     """
 
     @pytest.fixture(autouse=True)
-    def setup(self):
+    def setup(self, admin_headers):
         from meta.tests.conftest import get_shared_app
-        _, self.client = get_shared_app()
+        _, client = get_shared_app()
+        self.client = client
+        self.headers = admin_headers
 
     def test_relationship_list_has_domain_names(self):
         """测试关系列表包含领域名称"""
@@ -125,10 +127,8 @@ class TestRelationshipDataConsistency:
         """
         test_version_id = 2
 
-        tree_response = self.client.get(f'/api/v1/meta/relationship/filter-tree/business_object?version_id={test_version_id}')
-        assert tree_response.status_code in [200, 401, 404, 500]
-        if tree_response.status_code != 200:
-            pytest.skip("Tree API not accessible (auth required)")
+        tree_response = self.client.get(f'/api/v1/meta/relationship/filter-tree/business_object?version_id={test_version_id}', headers=self.headers)
+        assert tree_response.status_code == 200
         tree_data = tree_response.get_json()
 
         if not tree_data or not tree_data.get('data') or len(tree_data.get('data', {})) == 0:
@@ -137,10 +137,8 @@ class TestRelationshipDataConsistency:
         domain = tree_data.get('data', {})[0]
         domain_id = domain['key']
 
-        list_response = self.client.get(f'/api/v1/relationships?version_id={test_version_id}&domain_id={domain_id}&page=1&pageSize=1000')
-        assert list_response.status_code in [200, 401, 404, 500]
-        if list_response.status_code != 200:
-            pytest.skip("List API not accessible (auth required)")
+        list_response = self.client.get(f'/api/v1/relationships?version_id={test_version_id}&domain_id={domain_id}&page=1&pageSize=1000', headers=self.headers)
+        assert list_response.status_code == 200
         list_data = list_response.get_json()
 
         tree_relation_count = domain.get('relation_count', 0)

@@ -213,27 +213,28 @@ describe('UserCard', () => {
 
 ### 4.2 测试数据工厂
 
+> **重要**：前端测试数据管理规范见 [frontend-test-data-rules.md](./frontend-test-data-rules.md)
+
+**推荐使用已实现的工厂函数**：
+
 ```js
-// tests/factories/user.js
-import { faker } from '@faker-js/faker'
+// [OK] 使用已实现的工厂
+import { createUser, createProduct } from '@/test/factories'
+import { mockUser, mockSuccessResponse } from '@/test/fixtures'
 
-export function createUser(overrides = {}) {
-  return {
-    id: faker.number.int(),
-    name: faker.person.fullName(),
-    email: faker.internet.email(),
-    createdAt: faker.date.recent(),
-    ...overrides
-  }
-}
+// 单元测试 Mock
+const user = mockUser()
+global.fetch.mockResolvedValueOnce(mockSuccessResponse(user))
 
-export function createUserList(count = 5, overrides = {}) {
-  return Array.from({ length: count }, () => createUser(overrides))
-}
-
-// 使用
-const user = createUser({ name: 'Test User' })
+// E2E 测试数据
+const pv = await ensureProductWithVersion(page)
 ```
+
+**工厂函数位置**：
+- `src/test/factories/userFactory.js` - 用户工厂
+- `src/test/factories/productFactory.js` - 产品/版本工厂
+- `src/test/fixtures/mockData.js` - Mock 数据模板
+- `e2e/helpers/testDataSetup.js` - E2E 测试数据核心模块
 
 ### 4.3 共享 Fixture
 

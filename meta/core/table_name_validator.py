@@ -1,5 +1,10 @@
 # -*- coding: utf-8 -*-
+import re
 from meta.core.models import registry
+
+# SQL injection prevention: only allow safe identifier names
+# Format: starts with letter or underscore, followed by letters/digits/underscores
+_SAFE_TABLE_NAME = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 
 _VALID_TABLES_CACHE = None
 _EXTRA_TABLES = set()
@@ -46,26 +51,23 @@ def is_valid_table_name(table_name):
 
 
 def register_table_name(table_name):
-    """注册自定义表名（带安全验证）"""
-    # 先验证表名安全性（复用 is_valid_table_name 逻辑）
-    if not _is_safe_table_name(table_name):
+    """Register a table name. Reject unsafe names to prevent SQL injection.
+
+    Args:
+        table_name: Table name to register. Must be a safe SQL identifier
+                    (letters, digits, underscores; cannot start with digit).
+
+    Raises:
+        ValueError: If the table name is not a safe SQL identifier.
+    """
+    global _EXTRA_TABLES, _VALID_TABLES_CACHE
+    if not _SAFE_TABLE_NAME.match(table_name or ''):
         raise ValueError(
             f"Invalid table name: '{table_name}'. "
-            f"Table names must be alphanumeric with underscores only."
+            f"Must match {_SAFE_TABLE_NAME.pattern}"
         )
-    global _EXTRA_TABLES, _VALID_TABLES_CACHE
     _EXTRA_TABLES.add(table_name)
     _VALID_TABLES_CACHE = None
-
-
-def _is_safe_table_name(table_name):
-    """检查表名是否安全（防止 SQL 注入）"""
-    import re
-    # 合法的表名：字母、数字、下划线，长度 1-128
-    if not table_name or len(table_name) > 128:
-        return False
-    # 允许的字符：字母、数字、下划线
-    return bool(re.match(r'^[a-zA-Z][a-zA-Z0-9_]*$', table_name))
 
 
 def invalidate_cache():

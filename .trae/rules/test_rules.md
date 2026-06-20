@@ -2,6 +2,9 @@
 
 > **[NEW] 测试用例编写规范请参考：** `.trae/rules/test-case-standards.md`
 > — 包含全局状态隔离、Fixture 规范、反模式清单、检查清单
+>
+> **[NEW v3.19] 前端测试数据管理规范：** `.trae/rules/frontend-test-data-rules.md`
+> — 包含单元测试 Mock 数据、E2E 测试数据 Setup、自动清理规范
 
 ## [RED] 第一铁律：永远不要直接运行 pytest
 

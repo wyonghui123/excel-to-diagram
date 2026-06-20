@@ -1,7 +1,7 @@
 /**
  * E2E 测试辅助函数库
  *
- * [CRITICAL] E2E 测试核心规则（修改/新增测试用例前必读）:
+ * [CRITICAL] E2E 测试核心规则（修改/新增测试用例前必读):
  * ─────────────────────────────────────────────────────────
  * 1. 禁止 waitForLoadState('networkidle') - SPA 中会永久卡死
  *    -> 用 domcontentloaded + 元素等待
@@ -28,6 +28,11 @@
  * ─────────────────────────────────────────────────────────
  * 详细规则: .trae/rules/e2e-testing.md（E2E 测试单一事实源）
  * Spec 文档: .trae/specs/e2e-test-system-spec.md
+ *
+ * [NEW v3.19] 测试数据管理:
+ * - 使用 ensureProductWithVersion() 代替 findProductWithVersion()
+ * - 自动创建测试数据，避免测试被跳过
+ * - 使用 runCleanup() 在测试后自动清理
  */
 export async function login(page) {
   const baseUrl = process.env.TEST_BASE_URL || 'http://localhost:3010'
@@ -76,17 +81,6 @@ export async function getPaginatedData(page, url) {
   if (!resp.ok()) return []
   const json = await resp.json()
   return json.data?.items || json.data?.records || json.data?.list || json.data?.rows || (Array.isArray(json.data) ? json.data : [])
-}
-
-export async function findProductWithVersion(page) {
-  const products = await getPaginatedData(page, '/api/v2/bo/product')
-  for (const p of products) {
-    const versions = await getPaginatedData(page, `/api/v2/bo/version?product_id=${p.id}`)
-    if (versions.length > 0) {
-      return { product: p, version: versions[0] }
-    }
-  }
-  return null
 }
 
 export async function apiGet(page, url) {
@@ -434,3 +428,18 @@ export async function waitForDomExists(page, selector, timeout = 15000) {
     { timeout }
   )
 }
+
+// =============================================================================
+// Re-export test data setup utilities for convenience
+// =============================================================================
+
+export {
+  findProductWithVersion,
+  ensureProductWithVersion,
+  createProductWithVersion,
+  cleanupTestData,
+  setupHierarchyData,
+  setupCompleteArchData,
+  runCleanup,
+  clearCleanupRegistry
+} from './testDataSetup.js'

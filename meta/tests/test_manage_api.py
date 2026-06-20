@@ -103,13 +103,15 @@ class TestManageAPI:
     def test_v2_create_user_minimal(self, api_client, admin_headers):
         """POST /api/v2/bo/user 最小必填字段创建"""
         import time
-        ts = int(time.time())
+        import uuid
+        # 使用高精度时间戳 + UUID 后缀，避免并发或脏数据冲突
+        unique = f"{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
         resp = api_client.post(
             '/api/v2/bo/user',
             json={
-                'username': f'test_user_{ts}',
-                'email': f'test_{ts}@example.com',
-                'display_name': f'Test User {ts}',
+                'username': f'test_user_{unique}',
+                'email': f'test_{unique}@example.com',
+                'display_name': f'Test User {unique}',
             },
             headers=admin_headers,
         )
@@ -118,7 +120,10 @@ class TestManageAPI:
         assert body.get('success') is True
         new_id = body['data']['id']
         # 清理
-        api_client.delete(f'/api/v2/bo/user/{new_id}', headers=admin_headers)
+        try:
+            api_client.delete(f'/api/v2/bo/user/{new_id}', headers=admin_headers)
+        except Exception:
+            pass
 
     def test_v2_create_user_missing_username(self, api_client, admin_headers):
         """POST /api/v2/bo/user 缺 username → 400/500"""
@@ -132,36 +137,45 @@ class TestManageAPI:
     def test_v2_update_user(self, api_client, admin_headers):
         """PUT /api/v2/bo/user/<id> 更新用户"""
         import time
-        ts = int(time.time())
+        import uuid
+        unique = f"{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
         resp = api_client.post(
             '/api/v2/bo/user',
             json={
-                'username': f'upd_{ts}',
-                'email': f'upd_{ts}@x.com',
+                'username': f'upd_{unique}',
+                'email': f'upd_{unique}@x.com',
                 'display_name': 'Original',
             },
             headers=admin_headers,
         )
+        assert resp.status_code == 201, resp.get_data(as_text=True)
         new_id = resp.get_json()['data']['id']
-        resp2 = api_client.put(
-            f'/api/v2/bo/user/{new_id}',
-            json={'display_name': 'Updated Name'},
-            headers=admin_headers,
-        )
-        assert resp2.status_code == 200
-        resp3 = api_client.get(f'/api/v2/bo/user/{new_id}', headers=admin_headers)
-        assert resp3.get_json()['data']['display_name'] == 'Updated Name'
-        api_client.delete(f'/api/v2/bo/user/{new_id}', headers=admin_headers)
+        try:
+            resp2 = api_client.put(
+                f'/api/v2/bo/user/{new_id}',
+                json={'display_name': 'Updated Name'},
+                headers=admin_headers,
+            )
+            assert resp2.status_code == 200, resp2.get_data(as_text=True)
+            resp3 = api_client.get(f'/api/v2/bo/user/{new_id}', headers=admin_headers)
+            assert resp3.get_json()['data']['display_name'] == 'Updated Name'
+        finally:
+            try:
+                api_client.delete(f'/api/v2/bo/user/{new_id}', headers=admin_headers)
+            except Exception:
+                pass
 
     def test_v2_delete_user(self, api_client, admin_headers):
         """DELETE /api/v2/bo/user/<id> 软删除"""
         import time
-        ts = int(time.time())
+        import uuid
+        unique = f"{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
         resp = api_client.post(
             '/api/v2/bo/user',
-            json={'username': f'del_{ts}', 'email': f'd_{ts}@x.com', 'display_name': 'D'},
+            json={'username': f'del_{unique}', 'email': f'd_{unique}@x.com', 'display_name': 'D'},
             headers=admin_headers,
         )
+        assert resp.status_code == 201, resp.get_data(as_text=True)
         new_id = resp.get_json()['data']['id']
         resp2 = api_client.delete(f'/api/v2/bo/user/{new_id}', headers=admin_headers)
         assert resp2.status_code in (200, 400)
