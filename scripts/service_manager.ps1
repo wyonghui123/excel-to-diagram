@@ -94,7 +94,7 @@ $services = @{
     # 🆕 v3.9 备选: gevent_server.py (真流式 SSE, 但 SQLite 锁问题)
     # 当前: waitress_server.py (8 线程, 稳定)
     # 可手动切换: 改 backend 行的 cmd 和 args
-    backend  = @{ port=$flaskPort; name='Backend (Waitress)';   cmd=$pythonExe;  args=@($backendScript);     wait=10 }
+    backend  = @{ port=$flaskPort; name='Backend (Waitress)';   cmd=$pythonExe;  args=@($backendScript);     wait=30 }
 }
 
 function Write-Log($msg) {
@@ -758,53 +758,10 @@ switch ($Command) {
     'start' {
         if (-not (Wait-Lock)) { exit 1 }
         try {
-            $data = Get-StatusData
-            if (-not $data) { $data = @{} }
-
-            $jobs = @()
+            # 🆕 v3.24: 改用串行 Start-Service（Start-Job 的 Test-Port 在 Job runspace 里不可靠）
             foreach ($svc in $services.Keys) {
-                if (Test-Port $services[$svc].port) {
-                    Write-Log "$($services[$svc].name) already running"
-                    continue
-                }
-                $svcCfg = $services[$svc]
-                $jobs += Start-Job -Name "svc-$svc" -ScriptBlock {
-                    param($svcName, $svcPort, $svcWait, $svcCmd, $svcArgs, $workDir)
-                    $argStr = ($svcArgs -join ' ')
-                    $proc = Start-Process -FilePath $svcCmd -ArgumentList $argStr `
-                        -WorkingDirectory $workDir -WindowStyle Hidden -PassThru `
-                        -RedirectStandardOutput "$root\scripts\logs\$svcName.out" `
-                        -RedirectStandardError "$root\scripts\logs\$svcName.err" # 🆕 v3.19: -NoNewWindow removed (incompatible with -WindowStyle)
-                    for ($i = 0; $i -lt $svcWait; $i++) {
-                        Start-Sleep -Seconds 1
-                        $tcp = New-Object System.Net.Sockets.TcpClient
-                        try {
-                            $tcp.Connect('127.0.0.1', $svcPort)
-                            $tcp.Close()
-                            $tcp.Dispose()
-                            return @{ svc=$svcName; pid=$proc.Id; ok=$true }
-                        } catch {}
-                    }
-                    return @{ svc=$svcName; pid=$proc.Id; ok=$false }
-                } -ArgumentList $svc, $svcCfg.port, $svcCfg.wait, $svcCfg.cmd, $svcCfg.args, $root
+                Start-Service $svc
             }
-
-            $jobs | Wait-Job | Out-Null
-            foreach ($job in $jobs) {
-                $result = $job | Receive-Job
-                $job | Remove-Job -Force
-                if ($result.ok) {
-                    $data | Add-Member -NotePropertyName $result.svc -NotePropertyValue @{
-                        port = $services[$result.svc].port
-                        pid = $result.pid
-                        started_at = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-                    } -Force
-                    Write-Log "  $($services[$result.svc].name) started (PID=$($result.pid))"
-                } else {
-                    Write-Log "  $($services[$result.svc].name) process spawned but port not responding"
-                }
-            }
-            Set-StatusData $data
             Start-Watchdog
         } finally { Release-Lock }
         exit 0
@@ -823,7 +780,7 @@ switch ($Command) {
         # 检查是否有测试正在运行
         if (-not (Assert-NoRunningTests)) {
             Write-Log "ABORTED: Tests are running. Wait for them to complete or kill them first."
-            Write-Log "To force restart anyway, use: service_manager.ps1 restart -Force"
+            Write-Log "To force restart anyway, use: service_manager.ps1 force-restart"
             exit 1
         }
 
@@ -834,49 +791,10 @@ switch ($Command) {
             }
             Start-Sleep -Seconds 1
 
-            $data = Get-StatusData
-            if (-not $data) { $data = @{} }
-
-            $jobs = @()
+            # 🆕 v3.24: 改用串行 Start-Service（Start-Job 的 Test-Port 在 Job runspace 里不可靠）
             foreach ($svc in $services.Keys) {
-                $svcCfg = $services[$svc]
-                $jobs += Start-Job -Name "svc-$svc" -ScriptBlock {
-                    param($svcName, $svcPort, $svcWait, $svcCmd, $svcArgs, $workDir)
-                    $argStr = ($svcArgs -join ' ')
-                    $proc = Start-Process -FilePath $svcCmd -ArgumentList $argStr `
-                        -WorkingDirectory $workDir -WindowStyle Hidden -PassThru `
-                        -RedirectStandardOutput "$root\scripts\logs\$svcName.out" `
-                        -RedirectStandardError "$root\scripts\logs\$svcName.err" # 🆕 v3.19: -NoNewWindow removed (incompatible with -WindowStyle)
-                    for ($i = 0; $i -lt $svcWait; $i++) {
-                        Start-Sleep -Seconds 1
-                        $tcp = New-Object System.Net.Sockets.TcpClient
-                        try {
-                            $tcp.Connect('127.0.0.1', $svcPort)
-                            $tcp.Close()
-                            $tcp.Dispose()
-                            return @{ svc=$svcName; pid=$proc.Id; ok=$true }
-                        } catch {}
-                    }
-                    return @{ svc=$svcName; pid=$proc.Id; ok=$false }
-                } -ArgumentList $svc, $svcCfg.port, $svcCfg.wait, $svcCfg.cmd, $svcCfg.args, $root
+                Start-Service $svc
             }
-
-            $jobs | Wait-Job | Out-Null
-            foreach ($job in $jobs) {
-                $result = $job | Receive-Job
-                $job | Remove-Job -Force
-                if ($result.ok) {
-                    $data | Add-Member -NotePropertyName $result.svc -NotePropertyValue @{
-                        port = $services[$result.svc].port
-                        pid = $result.pid
-                        started_at = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-                    } -Force
-                    Write-Log "  $($services[$result.svc].name) started (PID=$($result.pid))"
-                } else {
-                    Write-Log "  $($services[$result.svc].name) process spawned but port not responding"
-                }
-            }
-            Set-StatusData $data
             Start-Watchdog
         } finally { Release-Lock }
         exit 0
@@ -891,49 +809,10 @@ switch ($Command) {
             }
             Start-Sleep -Seconds 1
 
-            $data = Get-StatusData
-            if (-not $data) { $data = @{} }
-
-            $jobs = @()
+            # 🆕 v3.24: 改用串行 Start-Service（Start-Job 的 Test-Port 在 Job runspace 里不可靠）
             foreach ($svc in $services.Keys) {
-                $svcCfg = $services[$svc]
-                $jobs += Start-Job -Name "svc-$svc" -ScriptBlock {
-                    param($svcName, $svcPort, $svcWait, $svcCmd, $svcArgs, $workDir)
-                    $argStr = ($svcArgs -join ' ')
-                    $proc = Start-Process -FilePath $svcCmd -ArgumentList $argStr `
-                        -WorkingDirectory $workDir -WindowStyle Hidden -PassThru `
-                        -RedirectStandardOutput "$root\scripts\logs\$svcName.out" `
-                        -RedirectStandardError "$root\scripts\logs\$svcName.err" # 🆕 v3.19: -NoNewWindow removed (incompatible with -WindowStyle)
-                    for ($i = 0; $i -lt $svcWait; $i++) {
-                        Start-Sleep -Seconds 1
-                        $tcp = New-Object System.Net.Sockets.TcpClient
-                        try {
-                            $tcp.Connect('127.0.0.1', $svcPort)
-                            $tcp.Close()
-                            $tcp.Dispose()
-                            return @{ svc=$svcName; pid=$proc.Id; ok=$true }
-                        } catch {}
-                    }
-                    return @{ svc=$svcName; pid=$proc.Id; ok=$false }
-                } -ArgumentList $svc, $svcCfg.port, $svcCfg.wait, $svcCfg.cmd, $svcCfg.args, $root
+                Start-Service $svc
             }
-
-            $jobs | Wait-Job | Out-Null
-            foreach ($job in $jobs) {
-                $result = $job | Receive-Job
-                $job | Remove-Job -Force
-                if ($result.ok) {
-                    $data | Add-Member -NotePropertyName $result.svc -NotePropertyValue @{
-                        port = $services[$result.svc].port
-                        pid = $result.pid
-                        started_at = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-                    } -Force
-                    Write-Log "  $($services[$result.svc].name) started (PID=$($result.pid))"
-                } else {
-                    Write-Log "  $($services[$result.svc].name) process spawned but port not responding"
-                }
-            }
-            Set-StatusData $data
             Start-Watchdog
         } finally { Release-Lock }
         exit 0

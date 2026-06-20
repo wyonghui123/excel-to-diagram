@@ -143,13 +143,13 @@ def main():
 
     # Start backend
     if start_backend():
-        # Wait for startup
-        for _ in range(10):
+        # Wait for startup (v3.24: increased from 10s to 30s, waitress needs ~15s)
+        for _ in range(30):
             time.sleep(1)
             if is_port_listening(BACKEND_PORT):
                 print(f"Backend READY on port {BACKEND_PORT}")
                 return 0
-        print(f"Backend started but port {BACKEND_PORT} not listening after 10s")
+        print(f"Backend started but port {BACKEND_PORT} not listening after 30s")
         return 1
     else:
         print("Failed to start backend")
