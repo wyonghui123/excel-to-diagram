@@ -33,7 +33,7 @@ description: "规则索引：所有规则文件的目录和分类"
 | [e2e-testing.md](./e2e-testing.md) | E2E 测试 | 活跃 | 必读 |
 | [engineering-guidelines.md](./engineering-guidelines.md) | 工程规范 | 活跃 | 参考 |
 | [file-encoding-rules.md](./file-encoding-rules.md) | 文件编码 | 活跃 | 必读 |
-| [powershell-rules.md](./powershell-rules.md) | PowerShell 规则 | 活跃 | 必读 |
+| [powershell-execution-guide.md](./powershell-execution-guide.md) | PowerShell + trae-sandbox 整合规范 | 活跃 | 必读（v2026.06.20 整合）|
 | [powershell-curl-alias.md](./powershell-curl-alias.md) | PowerShell curl 别名 | 活跃 | 推荐 |
 | [project_startup.md](./project_startup.md) | 项目启动 | 活跃 | 参考 |
 | [doc-sync-rules.md](./doc-sync-rules.md) | 文档同步 | 活跃 | 推荐 |
@@ -106,16 +106,24 @@ description: "规则索引：所有规则文件的目录和分类"
 | [service-management-rules.md](./service-management-rules.md) | 服务管理 | 推荐 | service_manager 规范 |
 | [multi-agent-coordination.md](./multi-agent-coordination.md) | **多智能体协调 v3.19** | **必读** | 4 防护层 L1-L4 |
 
-## 已废弃规范（4个，2026-06-07 移至 deprecated/）
+## 已废弃规范（2026-06-20 移至 .deprecated/）
 
-| 文件 | 废弃原因 | 替代方案 |
+> **目录前缀 . 用于让 Trae 完全跳过扫描**
+> **当前废弃文件数：8 个**
+
+### MCP 浏览器测试
+
+| 废弃文件 | 废弃原因 | 替代方案 |
 |------|---------|---------|
-| [deprecated/mcp-testing.md](./deprecated/mcp-testing.md) | MCP 浏览器工具全面禁用 | PlaywrightCLI |
-| [deprecated/mcp-parallel-integration.md](./deprecated/mcp-parallel-integration.md) | MCP 多实例方案废弃 | PlaywrightCLI |
-| [deprecated/multi-agent-browser-isolation.md](./deprecated/multi-agent-browser-isolation.md) | session_manager 废弃 | PlaywrightCLI |
-| [deprecated/multi-agent-quickstart.md](./deprecated/multi-agent-quickstart.md) | 旧版多智能体指南 | multi-agent-coordination.md |
+| [.deprecated/mcp-testing.md](./.deprecated/mcp-testing.md) | MCP 浏览器工具全面禁用 | PlaywrightCLI |
+| [.deprecated/mcp-parallel-integration.md](./.deprecated/mcp-parallel-integration.md) | MCP 多实例方案废弃 | PlaywrightCLI |
+| [.deprecated/multi-agent-browser-isolation.md](./.deprecated/multi-agent-browser-isolation.md) | session_manager 废弃 | PlaywrightCLI |
+| [.deprecated/multi-agent-quickstart.md](./.deprecated/multi-agent-quickstart.md) | 旧版多智能体指南 | multi-agent-coordination.md |
+| [.deprecated/ai-coding-standards.md](./.deprecated/ai-coding-standards.md) | 已合并到 coding-standards.md | coding-standards.md |
+| [.deprecated/trae-sandbox-behavior.md](./.deprecated/trae-sandbox-behavior.md) | 2026-06-20 整合到 powershell-execution-guide.md | powershell-execution-guide.md |
+| [.deprecated/powershell-rules.md](./.deprecated/powershell-rules.md) | 2026-06-20 整合到 powershell-execution-guide.md | powershell-execution-guide.md |
 
-**目录说明**：[deprecated/README.md](./deprecated/README.md)
+**目录说明**：[.deprecated/README.md](./.deprecated/README.md)
 
 ## 重复内容清理（2026-06-19 修正）
 
