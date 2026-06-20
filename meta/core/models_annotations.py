@@ -114,6 +114,8 @@ class SemanticAnnotation:
     parent_key_display: bool = False  # 父对象键的编码显示字段（FK编码显示，虚拟冗余，紧跟FK列出现）
     mandatory: bool = False           # 业务必填（类似 @mandatory，区别于数据库 required）
     readonly_always: bool = False     # 始终只读（类似 SAP readOnly: true），新建和编辑都只读
+    parent_key_template_editable: str = ""  # [NEW v1.2.3 2026-06-17] Excel 模板专用标记
+    # 'always': 模板行+数据行都可填 / 'create_only': 模板行可填, 数据行只读 / 'never' (默认): 始终只读
 
     # 上下文字段（借鉴 SAP One Model 参数化导入）
     # 上下文字段不参与导入导出的数据行，而是通过导入界面的选择器确定

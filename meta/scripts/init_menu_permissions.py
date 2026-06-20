@@ -206,7 +206,7 @@ def init_menu_permissions(db_path):
             'icon': 'User',
             'color': '#ef4444',
             'sort_order': 51,
-            'parent_menu': 'system',
+            'parent_menu': '',
             'page_type': 'multi_object_hub',
             'primary_object_type': 'user',
             'object_types': json.dumps(['user', 'role', 'user_group']),

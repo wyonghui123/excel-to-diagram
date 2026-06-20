@@ -606,7 +606,34 @@ class TestRelationshipExportFields:
         except Exception as e:
             pytest.fail(f"Relationship export test skipped: {e}")
 
-    def test_04_relationship_virtual_fields_export_visible(self, api_client):
+    def test_04_relationship_export_with_version_id_list(self, api_client):
+        """回归测试：version_id 以数组形式下发时不应触发 SQL 参数绑定错误"""
+        client, headers = api_client
+        try:
+            response = client.post(
+                '/api/v1/export',
+                data=json.dumps({
+                    'object_type': 'relationship',
+                    'scope': 'single',
+                    'filters': {'version_id': [1]},
+                    'options': {
+                        'include_hierarchy_path': False,
+                        'include_hierarchy_ids': False
+                    }
+                }),
+                headers=headers
+            )
+            assert response.status_code == 200
+            data = json.loads(response.data)
+            assert data.get('success', False), f"导出失败: {data.get('message', data)}"
+            assert 'download_url' in data.get('data', {})
+            print("[PASS] Relationship export with version_id as list")
+        except (AssertionError, KeyError) as e:
+            pytest.fail(f"Relationship export with list version_id issue: {e}")
+        except Exception as e:
+            pytest.fail(f"Relationship export with list version_id skipped: {e}")
+
+    def test_05_relationship_virtual_fields_export_visible(self, api_client):
         """测试关系的virtual字段设置了export_visible"""
         client, headers = api_client
         try:
@@ -632,7 +659,7 @@ class TestRelationshipExportFields:
         except Exception as e:
             pytest.fail(f"Relationship export test skipped: {e}")
 
-    def test_05_relationship_export_includes_domain_fields(self, api_client):
+    def test_06_relationship_export_includes_domain_fields(self, api_client):
         """测试导出关系时包含领域相关字段"""
         client, headers = api_client
         try:
@@ -670,7 +697,7 @@ class TestRelationshipExportFields:
         except Exception as e:
             pytest.fail(f"Relationship export test skipped: {e}")
 
-    def test_06_enrich_relationship_fills_domain_fields(self, api_client):
+    def test_07_enrich_relationship_fills_domain_fields(self, api_client):
         """测试enrichment填充领域相关字段"""
         client, headers = api_client
         try:
@@ -708,7 +735,7 @@ class TestRelationshipExportFields:
         except Exception as e:
             pytest.fail(f"Relationship export test skipped: {e}")
 
-    def test_07_enrichment_returns_correct_bo_info(self, api_client):
+    def test_08_enrichment_returns_correct_bo_info(self, api_client):
         """测试enrichment实际从BO获取正确信息"""
         client, headers = api_client
         try:

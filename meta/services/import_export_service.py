@@ -1962,18 +1962,24 @@ class ImportExportService:
             page_size: 每页数量（分页导出时使用）
         """
         conditions = []
+        normalized_filters = {}
         if filters:
+            # 防御性规范化：version_id / product_id 等上下文字段应为标量
+            normalized_filters = {
+                key: self._normalize_scalar_id(value) if key in ('version_id', 'product_id') else value
+                for key, value in filters.items()
+            }
             args_dict = {}
-            for key, value in filters.items():
+            for key, value in normalized_filters.items():
                 if isinstance(value, list):
                     args_dict[key] = [str(v) for v in value]
                 else:
-                    args_dict[key] = [str(value)]
-            
+                    args_dict[key] = [str(value)] if value is not None else []
+
             conditions = self.hierarchy_filter.resolve_conditions(object_type, args_dict)
-        
+
         if self._is_association_type(object_type) and filters:
-            return self._query_association_with_hierarchy_filters(object_type, filters)
+            return self._query_association_with_hierarchy_filters(object_type, normalized_filters)
         
         MAX_EXPORT_LIMIT = self._get_export_limit(object_type)
 
@@ -2023,7 +2029,7 @@ class ImportExportService:
 
         meta_obj = registry.get(object_type)
         table_name = meta_obj.table_name if meta_obj else object_type + 's'
-        version_id = filters.get('version_id')
+        version_id = self._normalize_scalar_id(filters.get('version_id'))
         relation_codes = filters.get('relation_codes', [])
         if not isinstance(relation_codes, list):
             relation_codes = [relation_codes] if relation_codes else []
@@ -2039,6 +2045,11 @@ class ImportExportService:
                 continue
             if not isinstance(level_ids, list):
                 level_ids = [level_ids]
+            # 防御性拍平：确保 level_ids 内部元素不是列表
+            level_ids = [
+                self._normalize_scalar_id(v) for v in level_ids
+                if self._normalize_scalar_id(v) is not None
+            ]
 
             return self._query_association_by_level(
                 object_type, table_name, version_id, level_ids,
@@ -2299,6 +2310,23 @@ class ImportExportService:
         
         return "/".join(parts)
 
+    @staticmethod
+    def _normalize_scalar_id(value: Any) -> Any:
+        """将可能是列表的标量 ID 规范化为单个标量值。
+
+        前端某些场景会把单个 version_id / product_id 以数组形式下发
+        （如 {"version_id": [764]}），直接绑定到 SQL 的 `= ?` 会报
+        "Error binding parameter 1: type 'list' is not supported"。
+        本方法在保留 None / 空值语义的前提下，取列表第一个元素。
+        """
+        if value is None:
+            return None
+        if isinstance(value, list):
+            if not value:
+                return None
+            return value[0]
+        return value
+
     def _get_product_version_info(self, filters: Optional[Dict[str, Any]]) -> tuple:
         """获取产品线和版本名称"""
         product_name = ""
@@ -2307,7 +2335,7 @@ class ImportExportService:
         if not filters:
             return product_name, version_name
         
-        version_id = filters.get("version_id")
+        version_id = self._normalize_scalar_id(filters.get("version_id"))
         if version_id:
             try:
                 version_obj = registry.get("version")
@@ -2350,10 +2378,10 @@ class ImportExportService:
         if not filters:
             return ('', '')
         
-        version_id = filters.get('version_id')
+        version_id = self._normalize_scalar_id(filters.get('version_id'))
         if not version_id:
             return ('', '')
-        
+
         try:
             query = """
                 SELECT p.code as product_code, v.code as version_code
@@ -3875,6 +3903,15 @@ class ImportExportService:
         # 删除和更新都需要保留业务键来定位记录
         is_need_bk = operation_mode in ["更新", "update", "Update", "删除", "delete", "Delete"]
         
+        # [FIX v1.2.18j 2026-06-20] 预计算 FK 解析来源字段集合
+        # 这些字段（如 relationship.source_code / target_code）即使 ui.editable=false
+        # 也必须在过滤后保留，否则 FK resolve 拿不到值，导致 source_bo_id 无法解析。
+        resolve_from_sources: set = set()
+        for f in meta_obj.fields:
+            rf = getattr(f.semantics, 'resolve_from_field', None)
+            if rf:
+                resolve_from_sources.add(rf)
+
         for field_id, value in record.items():
             if field_id in system_fields:
                 if is_create:
@@ -3882,43 +3919,34 @@ class ImportExportService:
                 else:
                     filtered[field_id] = value  # 编辑时保留 id 等系统字段
                     continue
-            
+
             field = meta_obj.get_field(field_id)
             if not field:
                 continue
-            
+
             # 业务键字段始终保留（用于定位记录）
             is_bk = getattr(field.semantics, 'business_key', False)
-            
-            # readonly_always 字段忽略（业务键除外）
-            if getattr(field.semantics, 'readonly_always', False) and not is_bk:
+            # FK 解析来源字段同样必须保留（即使 ui.editable=false / virtual）
+            is_resolve_source = field_id in resolve_from_sources
+            is_parent_key = getattr(field.semantics, 'parent_key', False)
+
+            # readonly_always 字段忽略（业务键 / FK 解析来源字段除外）
+            if getattr(field.semantics, 'readonly_always', False) and not is_bk and not is_resolve_source:
                 continue
-            
-            # ui.editable=false 字段忽略（业务键除外）
-            if hasattr(field, 'ui') and hasattr(field.ui, 'editable') and field.ui.editable is False and not is_bk:
+
+            # ui.editable=false 字段忽略（业务键 / FK 解析来源字段除外）
+            if hasattr(field, 'ui') and hasattr(field.ui, 'editable') and field.ui.editable is False and not is_bk and not is_resolve_source:
                 continue
-            
-            # import_editable=false 字段忽略（业务键除外）
-            if hasattr(field.semantics, 'import_editable') and field.semantics.import_editable is False and not is_bk:
+
+            # import_editable=false 字段忽略（业务键 / FK 解析来源字段除外）
+            if hasattr(field.semantics, 'import_editable') and field.semantics.import_editable is False and not is_bk and not is_resolve_source:
                 continue
-            
+
             # virtual 字段的处理
             is_virtual = field.storage.value == 'virtual' or getattr(field.semantics, 'virtual', False)
             has_relation = hasattr(field, 'ui') and hasattr(field.ui, 'relation') and field.ui.relation
-            is_parent_key = getattr(field.semantics, 'parent_key', False)
 
             if is_virtual:
-                # [FIX 2026-06-16] 保留作为 resolve_from_field 的虚拟字段
-                # 场景: domain_code 是虚拟字段,但被 domain_id 用于 FK 解析
-                # 如果过滤掉,FK 解析拿不到值,导致 NOT NULL constraint failed
-                is_resolve_source = False
-                for other in meta_obj.fields:
-                    if other.id == field_id:
-                        continue
-                    if getattr(other.semantics, 'resolve_from_field', None) == field_id:
-                        is_resolve_source = True
-                        break
-
                 if (has_relation or is_parent_key) and is_create:
                     filtered[field_id] = value
                 elif is_parent_key and is_need_bk:
@@ -3928,7 +3956,7 @@ class ImportExportService:
                     filtered[field_id] = value
                 else:
                     continue
-            
+
             # immutable 字段在编辑/更新/删除时忽略（业务键不可修改）
             # 但 business_key 字段必须保留，用于查找记录
             # [SYMBOL] 关键修复：parent_key 字段也必须保留，用于建立父子关系
@@ -3936,13 +3964,13 @@ class ImportExportService:
                 is_bk = getattr(field.semantics, 'business_key', False)
                 if not is_bk and not is_parent_key:
                     continue
-            
+
             # 删除模式下，非 business_key 的 immutable 字段也忽略
             if operation_mode in ["删除", "delete", "Delete"] and getattr(field.semantics, 'immutable', False):
                 is_bk = getattr(field.semantics, 'business_key', False)
                 if not is_bk:
                     continue
-            
+
             filtered[field_id] = value
         
         return filtered
@@ -4210,6 +4238,11 @@ class ImportExportService:
         enabled_types = [ot for ot in import_order if registry.get(ot) and registry.get(ot).import_export.import_enabled]
         total_types = len(enabled_types)
         completed_count = 0
+        # [FIX v1.2.16 2026-06-20] 用 enabled_types (而不是 import_order) 计算进度,
+        # 否则 current_index/total_types 数字不匹配 (例如业务关系 0/5)
+        # 保留 original_index 给 progress_callback 显示真实导入顺序 (供 log 用)
+        enabled_with_idx = [(i, ot) for i, ot in enumerate(import_order)
+                            if registry.get(ot) and registry.get(ot).import_export.import_enabled]
 
         if progress_callback:
             progress_callback({
@@ -4221,7 +4254,7 @@ class ImportExportService:
                 'message': '开始导入，共 {0} 种对象类型'.format(total_types)
             })
 
-        for i, ot in enumerate(import_order):
+        for enabled_pos, (orig_i, ot) in enumerate(enabled_with_idx):
             sheet_info = next((s for s in sheets if s["object_type"] == ot), None)
             if not sheet_info:
                 continue
@@ -4231,9 +4264,9 @@ class ImportExportService:
                 continue
 
             type_name = obj.name or ot
-            current_index = i + 1
-            
-            type_progress_base = int((i / total_types) * 100) if total_types > 0 else 0
+            current_index = enabled_pos + 1  # [FIX v1.2.16] 用 enabled 位置计算, 而不是 orig_i+1
+
+            type_progress_base = int((enabled_pos / total_types) * 100) if total_types > 0 else 0
             type_progress_weight = int(100 / total_types) if total_types > 0 else 100
 
             if progress_callback:
@@ -4262,7 +4295,7 @@ class ImportExportService:
 
             if progress_callback:
                 progress_callback({
-                    'progress': min(99, int(((i + 1) / total_types) * 100)) if total_types > 0 else 100,
+                    'progress': min(99, int(((enabled_pos + 1) / total_types) * 100)) if total_types > 0 else 100,
                     'current_type': ot,
                     'current_type_name': type_name,
                     'total_types': total_types,
@@ -4311,6 +4344,7 @@ class ImportExportService:
         valid_count = 0
         invalid_count = 0
         errors = []
+        warnings = []  # [NEW v1.2.16 2026-06-20] 与 errors 区分
 
         # [SYMBOL] 第一步：收集所有即将导入的业务键，建立索引
         # 格式: {object_type: {bk_field_id: set of values}}
@@ -4551,6 +4585,7 @@ class ImportExportService:
                             errors.append({
                                 "sheet": sheet["name"],
                                 "row": row_num,
+                                "operation": operation_mode,  # [FIX v1.2.18f] 前端 UI 显示需要操作模式
                                 "field": field_label,
                                 "value": "",
                                 "error": f"{meaning} 不能为空"
@@ -4572,6 +4607,7 @@ class ImportExportService:
                                 errors.append({
                                     "sheet": sheet["name"],
                                     "row": row_num,
+                                    "operation": operation_mode,  # [FIX v1.2.18f]
                                     "field": field_label,
                                     "value": field_value_str,
                                     "error": f"【枚举值无效】'{field_value_str}' 不是有效的 {field_label}，请检查枚举值配置"
@@ -4599,9 +4635,10 @@ class ImportExportService:
                             # 例: business_object 的 code 字段，pattern="{service_module_code}{SEQ:2}"
                             kt_info = self._get_key_template_info(obj)
                             if kt_info.get('enabled') and kt_info.get('auto_suggest'):
-                                # key_template 可以自动生成，降级为 warning
+                                # [FIX v1.2.16 2026-06-20] key_template 可以自动生成, 推到 warnings 数组
+                                # 而不是混进 errors (前端只显示 errors, 会让用户以为是错误)
                                 bk_field_names = "、".join([f.name for f in bk_fields])
-                                errors.append({
+                                warnings.append({
                                     "sheet": sheet["name"],
                                     "row": row_num,
                                     "field": bk_field_names,
@@ -4615,6 +4652,7 @@ class ImportExportService:
                                 errors.append({
                                     "sheet": sheet["name"],
                                     "row": row_num,
+                                    "operation": operation_mode,  # [FIX v1.2.18f]
                                     "field": bk_field_names,
                                     "value": "",
                                     "error": "【业务关键字】新增必填"
@@ -4633,6 +4671,7 @@ class ImportExportService:
                             errors.append({
                                 "sheet": sheet["name"],
                                 "row": row_num,
+                                "operation": operation_mode,  # [FIX v1.2.18f]
                                 "field": bk_field_names,
                                 "value": composite_value,
                                 "error": error_msg
@@ -4659,6 +4698,7 @@ class ImportExportService:
                                     errors.append({
                                         "sheet": sheet["name"],
                                         "row": row_num,
+                                        "operation": operation_mode,  # [FIX v1.2.18f]
                                         "field": bk_field_names,
                                         "value": composite_value,
                                         "error": error_msg
@@ -4750,6 +4790,7 @@ class ImportExportService:
                                             errors.append({
                                                 "sheet": sheet["name"],
                                                 "row": row_num,
+                                                "operation": operation_mode,  # [FIX v1.2.18f]
                                                 "field": field_label,
                                                 "value": source_value_str,
                                                 "error": error_msg,
@@ -4781,7 +4822,8 @@ class ImportExportService:
         return {
             "valid_count": valid_count,
             "invalid_count": invalid_count,
-            "errors": errors[:20]
+            "errors": errors[:20],
+            "warnings": warnings[:20]  # [NEW v1.2.16 2026-06-20] 区分 warnings
         }
 
     def _validate_enum_value(self, enum_type_id: str, code: str) -> bool:
@@ -5302,6 +5344,9 @@ class ImportExportService:
         field_map = self._auto_map_fields(obj, headers)
 
         parent_key_headers = self._get_parent_key_headers(obj, headers)
+        if object_type == 'relationship':
+            logger.info(f"[DEBUG IMPORT] {object_type} field_map={field_map}")
+            logger.info(f"[DEBUG IMPORT] {object_type} parent_key_headers={parent_key_headers}")
 
         # [SYMBOL] 调试日志：打印 parent_key_headers
         if parent_key_headers:
@@ -5311,23 +5356,36 @@ class ImportExportService:
         operation_mode_idx = headers.index("操作模式") if has_operation_mode else -1
         # [NEW v1.2.16 2026-06-19] 找到 code/name 列下标, 用于成功/跳过明细兜底
         # 即便 record 在 update 时被清理了 (parent_key 移除), 也能从原 Excel 行取到 code/name
-        try:
-            code_col_idx = headers.index("编码")
-        except ValueError:
-            code_col_idx = -1
-        try:
-            name_col_idx = headers.index("名称")
-        except ValueError:
-            name_col_idx = -1
+        # 不同 sheet 用不同列名: 编码 (默认) / 关系编码 (relationship) / 关联对象编码 (annotation)
+        code_col_candidates = ["编码", "关系编码", "关联对象编码", "业务编码"]
+        name_col_candidates = ["名称", "关联对象名称", "业务名称", "业务对象名称"]
+        code_col_idx = -1
+        name_col_idx = -1
+        for cn in code_col_candidates:
+            if cn in headers:
+                code_col_idx = headers.index(cn)
+                break
+        for nn in name_col_candidates:
+            if nn in headers:
+                name_col_idx = headers.index(nn)
+                break
 
-        def _get_row_code(row):
-            """从原 Excel 行取业务编码 (兜底)"""
+        def _get_row_code(row, record=None):
+            """从原 Excel 行取业务编码 (兜底). 优先级: record.code > row[code_col]"""
+            if record:
+                rec_code = record.get("code") or record.get("id_code")
+                if rec_code and isinstance(rec_code, str) and rec_code.strip():
+                    return rec_code.strip()
             if code_col_idx >= 0 and code_col_idx < len(row):
                 v = row[code_col_idx]
                 return str(v).strip() if v is not None else ""
             return ""
-        def _get_row_name(row):
-            """从原 Excel 行取名称 (兜底)"""
+        def _get_row_name(row, record=None):
+            """从原 Excel 行取名称 (兜底). 优先级: record.name > row[name_col]"""
+            if record:
+                rec_name = record.get("name") or record.get("display_name")
+                if rec_name and isinstance(rec_name, str) and rec_name.strip():
+                    return rec_name.strip()
             if name_col_idx >= 0 and name_col_idx < len(row):
                 v = row[name_col_idx]
                 return str(v).strip() if v is not None else ""
@@ -5358,22 +5416,41 @@ class ImportExportService:
         # [NEW v1.2.14 2026-06-19] Helper: 记录成功项明细
         def _record_success_item(items, row_num, operation, record, max_count, code_override=None, name_override=None):
             if len(items) < max_count:
+                # [FIX v1.2.16 2026-06-20] 优先级:
+                # 1) code_override 非空 (来自 row) 优先
+                # 2) record.code/name (来自 import 解析)
+                # 3) 用空字符串兜底
+                if code_override:
+                    code_val = code_override
+                else:
+                    code_val = record.get("code") or record.get("id_code") or ""
+                if name_override:
+                    name_val = name_override
+                else:
+                    name_val = record.get("name") or record.get("display_name") or ""
                 items.append({
                     "row": row_num,
                     "operation": operation,
-                    # [NEW v1.2.16 2026-06-19] 优先使用 override (避免 record 被清除后空白)
-                    "code": code_override if code_override is not None else (record.get("code") or record.get("id_code") or ""),
-                    "name": name_override if name_override is not None else (record.get("name") or record.get("display_name") or "")
+                    "code": code_val,
+                    "name": name_val
                 })
 
         # [NEW v1.2.14 2026-06-19] Helper: 记录跳过项明细
         def _record_skipped_item(items, row_num, operation, record, reason, max_count, code_override=None, name_override=None):
             if len(items) < max_count:
+                if code_override:
+                    code_val = code_override
+                else:
+                    code_val = record.get("code") or record.get("id_code") or ""
+                if name_override:
+                    name_val = name_override
+                else:
+                    name_val = record.get("name") or record.get("display_name") or ""
                 items.append({
                     "row": row_num,
                     "operation": operation,
-                    "code": code_override if code_override is not None else (record.get("code") or record.get("id_code") or ""),
-                    "name": name_override if name_override is not None else (record.get("name") or record.get("display_name") or ""),
+                    "code": code_val,
+                    "name": name_val,
                     "reason": reason
                 })
 
@@ -5431,9 +5508,13 @@ class ImportExportService:
             for col_idx, header in enumerate(headers):
                 if header == "操作模式":
                     continue
+                if object_type == 'relationship' and row_num == 35:
+                    logger.info(f"[DEBUG IMPORT] {object_type} row=35 PRE-CHECK header={repr(header)} field_map_match={header in field_map}")
                 if header and header in field_map:
                     field_id = field_map[header]
                     value = row[col_idx] if col_idx < len(row) else None
+                    if object_type == 'relationship' and row_num == 35:
+                        logger.info(f"[DEBUG IMPORT] {object_type} row=35 col_idx={col_idx} header={header} field_id={field_id} value={value}")
                     meta_field = obj.get_field(field_id)
                     if meta_field and value is not None:
                         value = self._convert_value(value, meta_field)
@@ -5511,8 +5592,35 @@ class ImportExportService:
                     # 也需要重查; 因为此时字段 type=integer, 但 record 里塞了 string, validate 会失败
                     if current_value is not None and isinstance(current_value, str) and field.field_type.value in ('integer', 'int'):
                         needs_resolve = True
+                    # [FIX v1.2.18g 2026-06-20] 支持多种 resolve_from 候选字段
+                    # 旧逻辑只从 resolve_from_field (如 source_code) 取值, 但 record 实际可能
+                    # 用 source_bo_code / source_bo_name / source_code 多种命名, 需依次回退
                     if needs_resolve:
-                        source_value = record.get(resolve_from)
+                        # 候选 resolve_from 字段 (按常见命名顺序)
+                        candidate_resolve_froms = []
+                        if resolve_from:
+                            candidate_resolve_froms.append(resolve_from)
+                        # 从 schema 中找所有同名字段 (source_bo_code / source_code / source_bo_name 等)
+                        for f in obj.fields:
+                            for prefix in ['source_bo_code', 'source_code', 'source_bo_name',
+                                          'target_bo_code', 'target_code', 'target_bo_name']:
+                                if f.id == prefix and f.id not in candidate_resolve_froms:
+                                    candidate_resolve_froms.append(f.id)
+                        # 取第一个非空值
+                        source_value = None
+                        actual_resolve_from = None
+                        for cand in candidate_resolve_froms:
+                            v = record.get(cand)
+                            if v is not None and str(v).strip():
+                                source_value = v
+                                actual_resolve_from = cand
+                                break
+                        # [FIX v1.2.18i 2026-06-20] 兜底: 候选字段都为空时,
+                        # 直接用 FK 字段当前值 (如 source_bo_id='TEST885') 去查 code/name。
+                        # 场景: Excel 只有 '源业务对象' 列且填的是编码, 没有 source_code/source_bo_code 列。
+                        if not source_value and current_value is not None:
+                            source_value = current_value
+                            actual_resolve_from = field.id
                         if source_value:
                             if resolve_to_field:
                                 dynamic_type = record.get(resolve_to_field)
@@ -5538,9 +5646,9 @@ class ImportExportService:
                                     record[field.id] = target_record.get('id')
                                     logger.info(f"[Import] 外键解析成功: {field.id}={record[field.id]} ({resolve_to_object}.code={source_value})")
                                 else:
-                                    logger.warning(f"[Import] 未找到外键对象: {resolve_to_object}.code={source_value}")
+                                    logger.warning(f"[Import] 未找到外键对象: {resolve_to_object}.code={source_value} | row={row_num} | record keys={list(record.keys())} | source_value type={type(source_value)} | actual_resolve_from={actual_resolve_from}")
 
-            logger.info(f"[DEBUG IMPORT] {object_type} row={row_num} after FK resolve record={record}")
+            logger.info(f"[DEBUG IMPORT] {object_type} row={row_num} after FK resolve record keys={list(record.keys())} sample={ {k: record.get(k) for k in ['source_bo_id','target_bo_id','source_code','target_code']} }")
 
             if context:
                 valid_fields = set()
@@ -5572,10 +5680,10 @@ class ImportExportService:
                         success_count += 1
                         _record_success_item(successes, row_num, "delete", record, _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
                     except ValueError as ve:
-                        # [FIX 2026-06-16] 删除不存在的记录降级为 skip，不作为硬失败
-                        logger.warning(f"[Import] 删除记录不存在，跳过: {ve}")
-                        skipped_count += 1
-                        _record_skipped_item(skipped_items, row_num, "delete", record, str(ve), _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
+                        # [FIX v1.2.18 2026-06-20] 删除不存在的记录只推到 warnings (不再推 skipped)
+                        # 原因: skipped 会让前端合并入 "成功" tab, 但删除失败不是成功也不是 skip, 是告警
+                        logger.warning(f"[Import] 删除记录不存在，作为告警: {ve}")
+                        # 不增加 skipped_count (避免前端把告警合并到成功 tab)
                         warnings.append({
                             "row": row_num,
                             "operation": operation_mode,
@@ -5773,10 +5881,15 @@ class ImportExportService:
             self.manage_service.delete(DeleteRequest(object_type=object_type, id=existing["id"]))
         else:
             bk_fields = self._get_business_key_fields(object_type)
+            obj = registry.get(object_type)
+            obj_name = obj.name if obj else object_type
             if bk_fields:
                 key_desc = ", ".join(["{0}={1}".format(f.id, record.get(f.id)) for f in bk_fields])
+            elif record.get('id') is not None:
+                key_desc = "id={0}".format(record.get('id'))
             else:
-                key_desc = "无业务键"
+                # [FIX v1.2.18i 2026-06-20] 无业务键对象(如 annotation)删除时提示需要 ID
+                key_desc = "无业务键，{0} 删除需要在 Excel 中填写 ID 列".format(obj_name)
             raise ValueError("要删除的记录不存在: {0}".format(key_desc))
 
     def _update_record(self, object_type: str, record: Dict[str, Any], config: ImportExportConfig):
@@ -5809,6 +5922,9 @@ class ImportExportService:
 
         # [SYMBOL] 关键修复：传入 version_id，只在当前版本查找
         existing = self._find_existing_record(object_type, record, record_version_id)
+        logger.info(f"[Upsert] _find_existing_record -> existing={existing.get('id') if existing else None}, "
+                    f"existing_version_id={existing.get('version_id') if existing else None}, "
+                    f"existing_code={existing.get('code') if existing else None}")
 
         if existing:
             existing_version_id = existing.get('version_id')
@@ -5821,32 +5937,24 @@ class ImportExportService:
                 record['version_id'] = record_version_id
                 logger.info(f"[Upsert] 强制设置 record.version_id={record_version_id}")
 
-            # [FIX 2026-06-16] UPDATE 时移除 parent_key 字段及其 FK 源字段，避免 PARENT_FIELD_IMMUTABLE 错误
+            # [FIX v1.2.18 2026-06-20] UPDATE 时强制 parent_key 字段保持原值, 避免 PARENT_FIELD_IMMUTABLE
             # parent_key 字段（如 sub_domain_id）在 hierarchy_validation 中被标记为 immutable
-            # 导入时 FK 解析可能得到与原记录不同的 parent_key 值，但 update 不允许修改
-            # 必须同时移除 parent_key 字段和其 resolve_from_field（如 domain_code），
-            # 否则 action_executor._resolve_foreign_keys 会从 resolve_from_field 重新解析出 parent_key
+            # 即便用户 Excel 里填了新领域 (PROCUREMENT), DB 原值是其他, 也以 DB 为准
+            # [FIX] 不再删除 parent_key + resolve_from_field (会触发 action_executor 重新解析),
+            #       而是直接用 existing 原值覆盖 record 中所有 parent_key 字段
             obj_meta = registry.get(object_type)
             if obj_meta:
-                parent_key_fields_to_remove = set()
-                fk_source_fields_to_remove = set()
                 for field in obj_meta.fields:
                     is_pk = getattr(field.semantics, 'parent_key', False)
-                    if is_pk and field.id in record:
+                    if is_pk:
+                        # 用 existing 原值覆盖 record 中的 parent_key 值
                         original_value = existing.get(field.id)
-                        new_value = record.get(field.id)
-                        if original_value is not None and new_value is not None and str(original_value) != str(new_value):
-                            logger.warning(f"[Upsert] parent_key 字段 {field.id} 值不同 (原={original_value}, 新={new_value})，导入不允许修改，将使用原值")
-                        parent_key_fields_to_remove.add(field.id)
-                        # 同时找到该 parent_key 的 resolve_from_field（FK 源字段）
-                        resolve_from = getattr(field.semantics, 'resolve_from_field', None)
-                        if resolve_from and resolve_from in record:
-                            fk_source_fields_to_remove.add(resolve_from)
-                for fk in parent_key_fields_to_remove | fk_source_fields_to_remove:
-                    logger.info(f"[Upsert] 移除 parent_key 相关字段: {fk}")
-                    del record[fk]
+                        if original_value is not None and field.id in record:
+                            if str(record.get(field.id)) != str(original_value):
+                                logger.info(f"[Upsert] parent_key {field.id} 强制使用 DB 原值: 原值={original_value}, Excel新值={record.get(field.id)}")
+                            record[field.id] = original_value
             else:
-                logger.warning(f"[Upsert] registry.get({object_type}) returned None, cannot remove parent_key fields")
+                logger.warning(f"[Upsert] registry.get({object_type}) returned None, cannot normalize parent_key fields")
 
             result = self.manage_service.update(UpdateRequest(object_type=object_type, id=record_id, data=record))
             logger.info(f"[Upsert] update result: success={result.success}, error={result.error}, record_keys_after_remove={list(record.keys())}")
@@ -5928,6 +6036,10 @@ class ImportExportService:
                 conditions=conditions,
                 page=1,
                 page_size=1,
+                # [FIX v1.2.16 2026-06-20] upsert 路径不应受数据权限过滤,
+                # 否则非 admin 用户 (或维度 scope 限制) 会找不到已存在记录 → 误走 create → 创建失败
+                # upsert 内部的 update 流程由 action_executor 做权限检查, 这里只需纯存在性查询
+                skip_data_permission=True,
             )
             result = self.query_service.search(search_request)
             return result.data[0] if result.data else None

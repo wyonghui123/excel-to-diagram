@@ -31,21 +31,55 @@ from meta.core.metadata_driven_validator import MetadataDrivenValidator
 from meta.core.validation_messages import ValidationMessageRegistry
 
 
+# [FIX v1.2.18 2026-06-20] 用 lambda 延迟计算, 避免模块加载时 KeyError 触发 fallback 返回 raw template
+# 原代码: ValidationMessageRegistry.get(...) 在 import 时执行, params 不完整时 KeyError,
+# 导致 "{target_name} '{value}' 不存在（字段：{field_name}）" 字面量返回给前端
+# [FIX v1.2.18b] factory 现在接受 (meta, field_id, field_value, target_meta, target_field)
+def _make_fk_message(target_meta, field_id, field_value):
+    """生成 FK 错误消息, 含具体的 target 对象名 + 字段名"""
+    target_name = (target_meta.name if target_meta else None) or "关联对象"
+    field_name = field_id  # 默认用 id
+    try:
+        from meta import get_meta_object
+        meta = get_meta_object(field_id) or target_meta
+        if meta:
+            target_name = meta.name
+    except Exception:
+        pass
+    return ValidationMessageRegistry.get(
+        "validation.field.fk_not_found",
+        target_name=target_name,
+        value=str(field_value) if field_value is not None else "",
+        field_name=field_id
+    )
+
+
+def _make_required_message(meta, field_id=None):
+    """生成 NOT NULL 错误消息"""
+    return ValidationMessageRegistry.get("validation.field.required", field_name=field_id or "字段")
+
+
+def _make_unique_message(meta, field_id=None):
+    """生成 UNIQUE 错误消息"""
+    return ValidationMessageRegistry.get("validation.field.unique", field_name=field_id or "值")
+
+
 ERROR_MESSAGE_MAP = {
-    "NOT NULL constraint failed": ValidationMessageRegistry.get("validation.field.required", field_name="字段"),
-    "UNIQUE constraint failed": ValidationMessageRegistry.get("validation.field.unique", field_name="值"),
-    "FOREIGN KEY constraint failed": ValidationMessageRegistry.get("validation.field.fk_not_found", target_name="关联对象", value=""),
-    "CHECK constraint failed": "不满足校验条件",
-    "INTEGER CONSTRAINT failed": "数值类型错误",
+    "NOT NULL constraint failed": _make_required_message,
+    "UNIQUE constraint failed": _make_unique_message,
+    "FOREIGN KEY constraint failed": _make_fk_message,
+    "CHECK constraint failed": lambda meta: "不满足校验条件",
+    "INTEGER CONSTRAINT failed": lambda meta: "数值类型错误",
 }
 
 
-def translate_error_message(error_str: str, meta_object: MetaObject) -> str:
+def translate_error_message(error_str: str, meta_object: MetaObject, data: Optional[Dict[str, Any]] = None) -> str:
     """将数据库错误消息转换为业务友好消息
     
     Args:
         error_str: 原始错误消息
         meta_object: 元模型对象
+        data: [NEW v1.2.18] 正在保存的记录数据, 用于提取 FK 引用的具体值
         
     Returns:
         业务友好的错误消息
@@ -55,24 +89,68 @@ def translate_error_message(error_str: str, meta_object: MetaObject) -> str:
     
     error_lower = error_str.lower()
     
-    for db_error, biz_message in ERROR_MESSAGE_MAP.items():
+    for db_error, biz_message_factory in ERROR_MESSAGE_MAP.items():
         if db_error.lower() in error_lower:
             match = re.search(r'([a-z_]+)\.(code|id|name)', error_str, re.IGNORECASE)
-            if match:
-                field_id = match.group(1)
+            field_id = match.group(1) if match else None
+            # [FIX v1.2.18c] 从 data 提取 FK 引用的具体值
+            field_value = None
+            target_meta = None
+            target_field_name = None
+            # [FIX v1.2.18e] SQLite FK 错误不包含字段名, 用启发式找最可能的 FK 字段
+            if not field_id and data:
+                # 找 type=int 但 value=非数字 的字段 (说明 FK 解析失败)
+                for k, v in data.items():
+                    if k.endswith('_id') and v is not None and not str(v).isdigit():
+                        field_id = k
+                        field_value = v
+                        break
+            if field_id and meta_object:
                 field = meta_object.get_field(field_id)
                 if field:
-                    field_name = field.semantics.meaning or field.name or field_id
-                    return f"{field_name} {biz_message}"
-                # 尝试从 registry 查找对应 MetaObject 的中文名
-                from meta import get_meta_object
-                ref_obj = get_meta_object(field_id)
-                if ref_obj:
-                    return f"{ref_obj.name} {biz_message}"
-                return biz_message
-            return biz_message
+                    target_meta_name = None
+                    try:
+                        target_meta_name = (field.semantics and getattr(field.semantics, 'reference_object_type', None)) or field_id
+                    except Exception:
+                        pass
+                    if target_meta_name:
+                        from meta import get_meta_object
+                        target_meta = get_meta_object(target_meta_name)
+                    # [FIX v1.2.18c] field 的中文名
+                    target_field_name = (field.semantics and getattr(field.semantics, 'meaning', None)) or field.name or field.id
+                    # [FIX v1.2.18c] 从 data 中取 FK 引用的实际值
+                    # FK 字段通常是 target_object_id, 也可能是 target_object_code
+                    if field_value is None and data:
+                        for cand_key in [field.id, f"{field.id}_id", f"{field.id}_code", field.id.replace('_id', '_code')]:
+                            if cand_key in data and data[cand_key] is not None:
+                                field_value = data[cand_key]
+                                break
+            if db_error.lower() == "foreign key constraint failed":
+                # [FIX v1.2.18c] 调用 _make_fk_message 时传 target_meta + field_value + target_field_name
+                try:
+                    if target_field_name:
+                        return _make_fk_message_with_field(target_meta, field_id, field_value, target_field_name)
+                    return biz_message_factory(target_meta, field_id, field_value)
+                except (KeyError, TypeError):
+                    return biz_message_factory(meta_object, field_id or "关联字段", field_value)
+            else:
+                try:
+                    return biz_message_factory(meta_object, field_id, field_value)
+                except (KeyError, TypeError):
+                    return biz_message_factory(meta_object)
     
     return error_str
+
+
+def _make_fk_message_with_field(target_meta, field_id, field_value, field_name):
+    """生成 FK 错误消息 (含具体的 target 对象名 + 字段中文名 + 值)"""
+    target_name = (target_meta.name if target_meta else None) or "关联对象"
+    return ValidationMessageRegistry.get(
+        "validation.field.fk_not_found",
+        target_name=target_name,
+        value=str(field_value) if field_value is not None else "",
+        field_name=field_name or field_id or "关联字段"
+    )
 
 
 import re
@@ -1198,9 +1276,13 @@ class ActionExecutor:
             logger.error(f"[_do_create] RAW ERROR: {raw_error}")
             logger.error(f"[_do_create] TRACEBACK: {traceback.format_exc()}")
             logger.error(f"[_do_create] table={meta_object.table_name}, data keys={list(data.keys()) if data else 'None'}")
+            # [FIX v1.2.18d] 打印 FK 相关字段的值, 调试用
+            if data and 'FOREIGN KEY' in raw_error:
+                logger.error(f"[_do_create] FK values: {[(k, v) for k, v in data.items() if 'id' in k.lower() or 'code' in k.lower()]}")
             return ActionResult.fail(
                 error="CREATE_FAILED",
-                message=translate_error_message(raw_error, meta_object)
+                # [FIX v1.2.18c] 传 data 让 translate_error_message 能提取 FK 引用的具体值
+                message=translate_error_message(raw_error, meta_object, data)
             )
     
     def _do_read(self, meta_object: MetaObject, params: Dict[str, Any]) -> ActionResult:
