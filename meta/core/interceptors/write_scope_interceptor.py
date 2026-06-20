@@ -66,18 +66,12 @@ _PARENT_FIELD_FOR_CREATE = {
     'version': ('product', 'product_id'),
     'domain': ('version', 'version_id'),
     'sub_domain': ('domain', 'domain_id'),
-    # business_object/service_module 主 FK 是 sub_domain_id / service_module_id (DB schema 确认)
-    # 不走 version, 走业务链追溯更准确
-    'service_module': ('sub_domain', 'sub_domain_id'),
-    'business_object': ('service_module', 'service_module_id'),
-    # [FIX v1.2.30 2026-06-20] relationship create 通过 source_bo_id 的 BO chain 校验 dim scope
-    'relationship': ('business_object', 'source_bo_id'),
-    # [FIX v1.2.34 2026-06-21] annotation create 通过 target_type + target_id 校验 parent 的 dim scope
-    #   annotation 是多态辅助对象, create 时 target_type + target_id 在 context.params 中
-    #   但 target_type 是动态的, 无法静态映射, 所以这里用 target_id 作为 parent_id
-    #   实际的 parent_type 在 _get_targets 运行时从 context.params.target_type 获取
-    'annotation': ('_dynamic', 'target_id'),
-}
+    # business_object/service_module 主 FK 是 version_id (DB schema 确认)
+    # 两者也有 domain_id, 但层级归属以 version_id 为准
+    'service_module': ('version', 'version_id'),
+    'business_object': ('version', 'version_id'),
+    # [FIX v1.2.27 2026-06-20] relationship 通过 source_bo 追溯到 business_object
+    'relationship': ('business_object', 'source_bo_id'),}
 
 # v2.1 业务 TBD-F: owner chain fallback 用 created_by 字段
 _BIZ_BO_WITH_DIRECT_OWNER = {'product'}  # 只有 product 直接有 owner_id 字段
@@ -100,9 +94,11 @@ _PARENT_TYPE_NAME_CN = {
 class WriteScopeDenied(Exception):
     """[v2.1] 写 scope 拒绝异常 (status_code=403)
 
-    [FIX v1.2.25 2026-06-20] 支持 business_key + object_type_name + side_info
-    简化错误消息: `无写权限: <object_type_name>(<business_key>), 失败侧: <...>`
-    """
+    [FIX v1.2.25 2026-06-20] 简化消息格式:
+    `无写权限: <object_type_name>(<business_key>), 失败侧: <...>`
+    - object_type_name: 中文对象名 (如 "业务关系", "业务对象")
+    - business_key: 业务键 (如 "BO_INBOUND_L→BO_INVENTORY")
+    - side_info: 关系场景下标明失败侧 (如 "失败侧: 源对象(BO_xxx)")    """
     status_code = 403
 
     def __init__(self, object_type: str, target_id: int, user_id: int,
@@ -406,11 +402,13 @@ class WriteScopeInterceptor(Interceptor):
         # 加载 record (含 owner_id)
         record = self._load_record(context, object_type, target_id)
         if not record:
-            # [DEBUG v1.2.34] annotation 调试日志
-            if object_type == 'annotation':
-                logger.info(f'[WriteScope ANNOTATION] _load_record returned None for annotation({target_id})')
-            raise WriteScopeDenied(
-                object_type, target_id, user_id, {}, side
+            # [FIX v1.2.25 2026-06-20] 加 business_key + object_type_name
+            object_type_name = (
+                context.meta_object.name
+                if getattr(context, 'meta_object', None) else None
+            )            raise WriteScopeDenied(
+                object_type, target_id, user_id, {}, side,
+                object_type_name=object_type_name,
             )
 
         # [DEBUG v1.2.34] annotation 调试日志
@@ -520,53 +518,12 @@ class WriteScopeInterceptor(Interceptor):
                 context.meta_object.name
                 if getattr(context, 'meta_object', None) else None
             )
-            # [FIX v1.2.37 2026-06-21] create 路径错误消息优化:
-            #   - business_key 优先从 params 获取自身对象编码 (Excel 已录入时显示实际编码)
-            #   - side_info 标注父对象类型+编码, 区分父对象权限与自身对象权限
-            #   - relationship create: side_info 标注失败侧 (源对象/目标对象)
-            is_create_path = (side == 'create_parent')
-            if is_create_path:
-                # [FIX v1.2.38 2026-06-21] 优先从 params 获取自身对象编码
-                # 用户反馈: Excel 中已录入编码时, 不应显示 "新增"
-                self_code = None
-                try:
-                    params = context.params or {}
-                    if object_type == 'relationship':
-                        src = params.get('source_code')
-                        tgt = params.get('target_code')
-                        if src and tgt:
-                            self_code = f'{src}→{tgt}'
-                        elif src:
-                            self_code = src
-                    else:
-                        self_code = params.get('code')
-                except Exception:
-                    self_code = None
-                business_key = self_code if self_code else '新增'
-                parent_type = target.get('type', '')
-                child_type = target.get('child_type', '')
-                parent_type_cn = _PARENT_TYPE_NAME_CN.get(parent_type, parent_type)
-                parent_code = self._extract_business_key(parent_type, record)
-                # relationship create: _rel_failed_side 在 _check_relationship_ancestor_dim_scope
-                # 中设置 (update 路径), create 路径未设置, 需手动构造
-                rel_failed_side = getattr(context, '_rel_failed_side', None)
-                if rel_failed_side:
-                    side_info = f'失败侧: {rel_failed_side}'
-                elif child_type == 'relationship' and parent_code:
-                    # relationship create: parent 是 source_bo, 标注为 "失败侧: 源对象"
-                    side_info = f'失败侧: 源对象({parent_code})'
-                elif parent_code:
-                    side_info = f'父对象: {parent_type_cn}({parent_code})'
-                else:
-                    side_info = f'父对象: {parent_type_cn}(id={target_id})'
-            else:
-                business_key = self._extract_business_key(object_type, record)
-                side_info = None
-                if object_type == 'relationship':
-                    failed_side = getattr(context, '_rel_failed_side', None)
-                    if failed_side:
-                        side_info = f'失败侧: {failed_side}'
-            raise WriteScopeDenied(
+            business_key = self._extract_business_key(object_type, record)
+            side_info = None
+            if object_type == 'relationship':
+                failed_side = getattr(context, '_rel_failed_side', None)
+                if failed_side:
+                    side_info = f'失败侧: {failed_side}'            raise WriteScopeDenied(
                 object_type, target_id, user_id, check_results, side,
                 business_key=business_key,
                 object_type_name=object_type_name,
@@ -1788,10 +1745,9 @@ class WriteScopeInterceptor(Interceptor):
                 return None
             cols = [c[0] for c in cursor.description]
             record = dict(zip(cols, row))
-            # [FIX v1.2.30 2026-06-20] 包含 code / source_code / target_code
-            #   用于 _extract_business_key 显示中文业务名
-            result = {
+            # [FIX v1.2.25 2026-06-20] 加 code 字段 (业务键), relationship 还需 source/target code            result = {
                 'id': record.get('id'),
+                'code': record.get('code'),  # 业务键
                 'owner_id': record.get('owner_id'),
                 'visibility': record.get('visibility'),
                 'created_by': record.get('created_by'),
@@ -1800,22 +1756,12 @@ class WriteScopeInterceptor(Interceptor):
                 'domain_id': record.get('domain_id'),
                 'code': record.get('code'),
             }
-            if table == 'relationships':
+            if object_type == 'relationship':
+                # 关系: 加 source_bo_id/target_bo_id + 它们的 code
                 result['source_bo_id'] = record.get('source_bo_id')
                 result['target_bo_id'] = record.get('target_bo_id')
                 result['source_code'] = record.get('source_code')
                 result['target_code'] = record.get('target_code')
-            # [FIX v1.2.34 2026-06-21] annotation 需要 target_type + target_id 用于 parent derived
-            if table == 'annotations':
-                result['target_type'] = record.get('target_type')
-                result['target_id'] = record.get('target_id')
-            # [FIX v1.2.34 2026-06-21] EXTENDED_CHAIN 步进需要 parent FK 字段
-            #   service_module.sub_domain_id → sub_domain
-            #   business_object.service_module_id → service_module
-            if table == 'service_modules':
-                result['sub_domain_id'] = record.get('sub_domain_id')
-            if table == 'business_objects':
-                result['service_module_id'] = record.get('service_module_id')
             return result
         except Exception as e:
             logger.debug(f'_load_record failed for {object_type}({target_id}): {e}')
@@ -2093,14 +2039,16 @@ class WriteScopeInterceptor(Interceptor):
 
         使用 DimensionScopeEngine 派生条件, 然后查询数据库验证。
         """
-        # [FIX v1.2.30 2026-06-20] 跳过非整数 FK 值 (字符串名称/非 ID)
-        #   例: source_domain_id='采购管理' (domain NAME, 不是 id)
-        #   若不放行会导致 _validate_fk_scope_policies 报错: "字段 source_domain_id 的值 采购管理 不在您的数据权限范围内"
-        #   实际上 FK 解析阶段会报更准确的 "引用的关联对象 '采购管理' 不存在"
+        # Excel 填的字符串值 (如 '采购管理') 不是 BO id, 应该由 FK 解析阶段
+        # 报 "引用的关联对象 'xxx' 不存在" 而不是这里报 "不在您的数据权限范围内"
+        # 用 int() 转换, bool 是 int 的子类需显式排除 (避免 True/False 被当 1/0)
+        if isinstance(fk_value, bool):
+            return True  # bool 不当作 FK id, 让后续解析处理
         if not isinstance(fk_value, int):
-            if isinstance(fk_value, bool):
-                return True  # bool 是 int 子类, 显式排除
-            return True  # 字符串等非整数值放行, 让 FK 解析阶段报错
+            try:
+                int(fk_value)  # 试探转换
+            except (TypeError, ValueError):
+                return True  # 非整数 FK 值, 让 FK 解析阶段报更准确的错误
         # 1. 获取用户的 role_ids
         role_ids = self._get_user_role_ids_direct(user_id, data_source)
         if not role_ids:
@@ -2147,6 +2095,40 @@ class WriteScopeInterceptor(Interceptor):
                 logger.warning(f'_is_fk_value_in_scope: derive role={role_id} failed: {e}')
 
         return False  # 所有 role 都不匹配
+
+    def _extract_business_key(self, object_type: str, record: Dict[str, Any]) -> Optional[str]:
+        """[FIX v1.2.25 2026-06-20] 从 record 提取业务键用于错误消息
+
+        - 大多数 BO: 优先 `code`, fallback `BO#<id>`
+        - relationship: 优先 `source_code→target_code`, fallback `BO_INBOUND_L→BO_INVENTORY` (id based)
+        """
+        if not record:
+            return None
+        if object_type == 'relationship':
+            # 关系对象: source→target
+            src = (
+                record.get('source_code')
+                or record.get('source_bo_code')
+            )
+            tgt = (
+                record.get('target_code')
+                or record.get('target_bo_code')
+            )
+            sid = record.get('source_bo_id') or record.get('id')
+            tid = record.get('target_bo_id')
+            if not src:
+                src = f'BO#{sid}' if sid else 'BO?'
+            if not tgt and tid:
+                tgt = f'BO#{tid}'
+            if not tgt:
+                tgt = 'BO?'
+            return f'{src}→{tgt}'
+        # 大多数 BO: 用 code 字段
+        code = record.get('code')
+        if code:
+            return str(code)
+        rid = record.get('id')
+        return f'BO#{rid}' if rid else None
 
     def _get_table_name_for_bo(self, object_type: str) -> Optional[str]:
         """获取 BO 对象类型对应的数据库表名"""

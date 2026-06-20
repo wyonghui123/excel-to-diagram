@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 Action 执行器 - 基于元模型定义执行 CRUD 操作
 
@@ -449,8 +449,8 @@ class ActionResult:
     def fail(cls, error: str = "", message: str = "", errors: list = None,
              status_code: int = None) -> "ActionResult":
         # [FIX v1.2.21 2026-06-20] 支持 status_code kwarg
-        return cls(success=False, error=error, message=message, errors=errors, status_code=status_code)
-
+        return cls(success=False, error=error, message=message,
+                   errors=errors, status_code=status_code)
 
 class ActionExecutor:
     """
