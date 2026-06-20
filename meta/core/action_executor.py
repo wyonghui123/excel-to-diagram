@@ -29,6 +29,15 @@ from meta.core.exceptions import ConcurrentModificationError
 from meta.services.hierarchy_validation_service import validate_update, validate_delete
 from meta.core.metadata_driven_validator import MetadataDrivenValidator
 from meta.core.validation_messages import ValidationMessageRegistry
+# [FIX v1.2.19 2026-06-20] 写路径 dim scope 校验: 防止 ManageService 绕过 BOFramework 拦截器链
+# 根因: ManageService 直接持有 ActionExecutor, 不走 BOFramework.execute() → 写操作无权限检查
+# 修复: 在 _do_create/_do_update/_do_delete 入口显式调用 WriteScopeInterceptor.before_action()
+from meta.core.action_context import ActionContext
+from meta.core.interceptors.write_scope_interceptor import (
+    WriteScopeInterceptor as _WriteScopeInterceptor,
+    WriteScopeDenied as _WriteScopeDenied,
+    ScopeViolationError as _ScopeViolationError,
+)
 
 
 # [FIX v1.2.18 2026-06-20] 用 lambda 延迟计算, 避免模块加载时 KeyError 触发 fallback 返回 raw template
@@ -814,6 +823,102 @@ class ActionExecutor:
                 message="HTTP method '{0}' is not supported".format(method)
             )
 
+    # [FIX v1.2.19 2026-06-20] 写路径 dim scope 校验
+    # ManageService 直接调 ActionExecutor, 绕过 BOFramework 拦截器链,
+    # 导致 import / annotation API 等路径的写操作无数据权限检查。
+    # 此方法在 _do_create/_do_update/_do_delete 入口显式调用 WriteScopeInterceptor,
+    # 复用 BOFramework 路径已有的 5 步校验 (admin/owner/dim_scope/visibility/fk_scope)。
+    _write_scope_interceptor = None  # 类级单例, 避免每次 new
+
+    def _check_write_scope(self, meta_object: MetaObject, action: str,
+                           params: Dict[str, Any]) -> Optional[ActionResult]:
+        """写路径 dim scope 校验 (复用 WriteScopeInterceptor)
+
+        Returns:
+            None: 校验通过 (或非写操作/admin/无用户上下文)
+            ActionResult: 校验失败 (含 403/422 错误)
+        """
+        # 仅校验写操作
+        if action not in ('crud_create', 'crud_update', 'crud_delete'):
+            return None
+
+        # 获取当前用户: 优先 flask.g.current_user, fallback thread-local (import 子线程)
+        user_info = None
+        try:
+            from flask import g
+            user_info = getattr(g, 'current_user', None)
+        except (ImportError, RuntimeError):
+            pass
+
+        if not user_info:
+            # import 子线程: flask.g 不可用, 用 query_service thread-local
+            try:
+                from meta.services.query_service import _get_thread_user
+                user_info = _get_thread_user()
+            except Exception:
+                user_info = None
+
+        if not user_info:
+            # 无用户上下文 (如系统初始化/单元测试) → 跳过, 不阻断
+            return None
+
+        user_id = user_info.get('user_id') or user_info.get('id')
+        if not user_id:
+            return None
+
+        # admin 跳过 (复用 is_admin)
+        try:
+            from meta.services.auth_middleware import is_admin
+            if is_admin(user_info):
+                return None
+        except Exception:
+            pass
+
+        # 构造 ActionContext 并调用 WriteScopeInterceptor.before_action
+        try:
+            if ActionExecutor._write_scope_interceptor is None:
+                ActionExecutor._write_scope_interceptor = _WriteScopeInterceptor()
+
+            ctx = ActionContext(
+                meta_object=meta_object,
+                action=action,
+                params=params,
+                data_source=self.ds,
+                user_id=user_id,
+                user_name=user_info.get('username') or user_info.get('display_name'),
+                ip_address=user_info.get('ip_address'),
+            )
+            ActionExecutor._write_scope_interceptor.before_action(ctx)
+        except _WriteScopeDenied as e:
+            logger.warning(
+                "[WriteScope] DENY action=%s object=%s id=%s user=%s: %s",
+                action, meta_object.id, params.get('id'), user_id, e
+            )
+            return ActionResult.fail(
+                error="WRITE_SCOPE_DENIED",
+                message=str(e),
+                status_code=403,
+            )
+        except _ScopeViolationError as e:
+            logger.warning(
+                "[WriteScope] FK scope violation action=%s object=%s user=%s: %s",
+                action, meta_object.id, user_id, e
+            )
+            return ActionResult.fail(
+                error="WRITE_SCOPE_VIOLATION",
+                message=str(e),
+                status_code=422,
+            )
+        except Exception as e:
+            # 拦截器内部异常 (非权限拒绝): log + 放行, 避免阻断正常业务
+            logger.warning(
+                "[WriteScope] check error (non-fatal, allow): action=%s object=%s: %s",
+                action, meta_object.id, e
+            )
+            return None
+
+        return None
+
     def _check_deletability(self, meta_object: MetaObject, record: Dict[str, Any]) -> bool:
         if not meta_object.deletability or not meta_object.deletability.condition:
             return True
@@ -1115,6 +1220,11 @@ class ActionExecutor:
                    skip_rules: bool = False) -> ActionResult:
         """执行创建操作"""
         logger.info(f"[ActionExecutor] _do_create START: object={meta_object.id}, params={params}")
+
+        # [FIX v1.2.19 2026-06-20] 写路径 dim scope 校验 (防止 ManageService 绕过拦截器链)
+        scope_error = self._check_write_scope(meta_object, 'crud_create', params)
+        if scope_error:
+            return scope_error
 
         fields = meta_object.get_persistent_fields()
         data = self._prepare_data(fields, params, for_create=True)
@@ -1468,6 +1578,11 @@ class ActionExecutor:
     def _do_update(self, meta_object: MetaObject, params: Dict[str, Any],
                     skip_rules: bool = False) -> ActionResult:
         """执行更新操作"""
+        # [FIX v1.2.19 2026-06-20] 写路径 dim scope 校验 (防止 ManageService 绕过拦截器链)
+        scope_error = self._check_write_scope(meta_object, 'crud_update', params)
+        if scope_error:
+            return scope_error
+
         id_value = params.get("id")
         if id_value is None:
             return ActionResult.fail(
@@ -1663,6 +1778,11 @@ class ActionExecutor:
     def _do_delete(self, meta_object: MetaObject, params: Dict[str, Any],
                    skip_rules: bool = False) -> ActionResult:
         """执行删除操作"""
+        # [FIX v1.2.19 2026-06-20] 写路径 dim scope 校验 (防止 ManageService 绕过拦截器链)
+        scope_error = self._check_write_scope(meta_object, 'crud_delete', params)
+        if scope_error:
+            return scope_error
+
         id_value = params.get("id")
         if id_value is None:
             return ActionResult.fail(

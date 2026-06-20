@@ -6136,7 +6136,9 @@ class ImportExportService:
                 page_size=1,
                 # [FIX v1.2.16 2026-06-20] upsert 路径不应受数据权限过滤,
                 # 否则非 admin 用户 (或维度 scope 限制) 会找不到已存在记录 → 误走 create → 创建失败
-                # upsert 内部的 update 流程由 action_executor 做权限检查, 这里只需纯存在性查询
+                # [FIX v1.2.19 2026-06-20] 修正注释: 写入的 dim scope 检查由 ActionExecutor
+                # _do_update/_do_create 入口的 _check_write_scope() 强制执行 (复用 WriteScopeInterceptor),
+                # 不存在越权风险。此处 skip_data_permission=True 只跳过"查找"时的 dim scope。
                 skip_data_permission=True,
             )
             result = self.query_service.search(search_request)
