@@ -8,6 +8,16 @@ alwaysApply: true
 
 > **2026-06-20 重要发现：Trae IDE trae-sandbox 工具行为不一致，必须绕过或用 Read 工具验证。**
 
+> **2026-06-20 重大更新：**
+> 1. **"始终自动运行"模式已生效** - `AI.toolcall.v2.ide.mcp.autoRun = alwaysRun`（在 `c:\Users\Administrator\AppData\Roaming\Trae CN\User\settings.json`）
+>    - **AI Agent 可直接执行所有命令**，**无需用户手动点击确认**
+>    - 不要走"输出 PowerShell 脚本让用户手动执行"的低效模式
+> 2. **hooks.json 已简化** - 只保留 SessionStart，删除复杂 PreToolUse/Stop
+>    - `=` 字符解析错误已彻底解决
+>    - AI 可放心使用包含 `=` 的表达式
+> 3. **stdout 已恢复正常输出** - 重启 Trae IDE 后，`git status/log/diff` 等命令的 stdout 不再被吞
+>    - **唯一遗留陷阱**：shell 重定向（`echo > file`）仍假成功 → **必须用 Write 工具**
+
 ## trae-sandbox 是什么
 
 Trae IDE 内部用来隔离命令执行的工具。所有 `RunCommand` 工具调用都会被它包装：
@@ -16,21 +26,23 @@ Trae IDE 内部用来隔离命令执行的工具。所有 `RunCommand` 工具调
 trae-sandbox.exe exec --storage-path <path> --config-name <name> --shell-path <path> --command-line "<cmd>"
 ```
 
-## 行为不一致矩阵
+## 行为不一致矩阵（2026-06-20 重启后）
 
 | 操作类型 | 是否生效 | 说明 |
 |---------|---------|------|
 | `git commit` | ✅ 正常 | git 内部直接处理 |
 | `git add` | ✅ 正常 | git 内部直接处理 |
 | `git worktree add/remove` | ✅ 正常 | git 内部直接处理 |
-| `git status/log/diff` | ✅ 正常（exit 0） | 但 **stdout 被吞** |
-| `git branch` | ✅ 正常（exit 0） | 但 **stdout 被吞** |
-| `echo hello` | ❌ 假成功 | stdout 被吞，无任何输出 |
-| `echo > file` | ❌ **假成功** | 文件**不会**被创建 |
-| `Out-File` | ❌ **假成功** | 文件**不会**被创建 |
+| `git status/log/diff` | ✅ 正常 | **stdout 已恢复输出** |
+| `git branch` | ✅ 正常 | **stdout 已恢复输出** |
+| `echo hello` | ✅ 正常 | **stdout 已恢复输出** |
+| `echo > file` | ❌ **假成功** | **仍然存在** - 文件不会被创建 |
+| `Out-File` | ❌ **假成功** | **仍然存在** - 文件不会被创建 |
 | `Set-Content` | ⚠️ 可能成功 | trae-sandbox 版本而定 |
-| 复杂 PowerShell `-match 'a=b'` | ❌ 参数解析失败 | `unexpected argument '=' found` |
-| `powershell -File script.ps1` | ⚠️ 部分支持 | 取决于脚本复杂度 |
+| 复杂 PowerShell `-match 'a=b'` | ✅ 正常 | **`=` 字符已可正常使用** |
+| `powershell -File script.ps1` | ✅ 正常 | **已可正常使用** |
+| `Write-Host` | ✅ 正常 | stdout 正常输出 |
+| AI RunCommand 工具调用 | ✅ 正常 | **"始终自动运行"模式生效，无需用户确认** |
 
 ## 关键陷阱：3 类"假成功"
 
