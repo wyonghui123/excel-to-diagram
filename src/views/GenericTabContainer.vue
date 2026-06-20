@@ -176,7 +176,10 @@ watch(allTabs, (tabs) => {
 
   const needsReset = !activeTab.value || activeTab.value === '' || !tabs.find(t => t.key === activeTab.value)
   if (tabs.length > 0 && needsReset) {
-    activeTab.value = tabs[0].key || ''
+    const newKey = tabs[0].key || ''
+    activeTab.value = newKey
+    // [FIX 2026-06-20] 同步 visitedTabs, 否则 shouldRender 返回 false, tab 内容不渲染
+    if (newKey) visitedTabs.add(newKey)
   }
 }, { immediate: true })
 
@@ -186,6 +189,8 @@ onMounted(async () => {
   const tab = getInitialTab()
   if (tab && tab !== activeTab.value) {
     activeTab.value = tab
+    // [FIX 2026-06-20] 同步 visitedTabs, 否则 shouldRender 返回 false, tab 内容不渲染
+    visitedTabs.add(tab)
   }
 })
 

@@ -1820,12 +1820,10 @@ defineExpose({
 .meta-list-page {
   display: flex;
   flex-direction: column;
-  /* [FIX 2026-06-20 T-2026-06-20-002-v3] height:100% → auto, overflow:hidden → visible, 让 document scroll 接管 */
-  height: auto;
-  min-height: 100%;
+  height: 100%;
   flex-shrink: 1;
   gap: 0;
-  overflow: visible;
+  overflow: hidden;
   background: var(--color-bg-container);
   border-radius: var(--border-radius-md);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -1940,8 +1938,7 @@ defineExpose({
   flex: 1;
   display: flex;
   flex-direction: column;
-  /* [FIX 2026-06-20 T-2026-06-20-002-v3] overflow:hidden → visible, 让 document scroll 接管, 分页始终可见 */
-  overflow: visible;
+  overflow: hidden;
   min-height: 400px;
 }
 

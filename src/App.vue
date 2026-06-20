@@ -87,8 +87,7 @@ body {
 
 #app {
   height: 100vh;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden;
 }
 
 .session-loading {
