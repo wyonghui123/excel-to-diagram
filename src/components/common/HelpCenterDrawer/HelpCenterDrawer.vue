@@ -1,6 +1,5 @@
 <!--
-  HelpCenterDrawer - P0 占位版本
-  后续 P1 阶段将嵌入 iframe 加载 /docs/user-guide/index.html
+  HelpCenterDrawer - P1 阶段，iframe 嵌入 /docs/user-guide/index.html
 -->
 <template>
   <Teleport to="body">
@@ -13,43 +12,57 @@
               <el-icon class="help-drawer__title-icon" :size="20">
                 <QuestionFilled />
               </el-icon>
-              <span>Help Center</span>
+              <span>帮助中心</span>
             </div>
-            <button
-              type="button"
-              class="help-drawer__close"
-              aria-label="Close help center"
-              @click="handleClose"
-            >
-              <svg viewBox="0 0 24 24" width="20" height="20">
-                <path
-                  fill="currentColor"
-                  d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"
-                />
-              </svg>
-            </button>
+            <div class="help-drawer__header-actions">
+              <button
+                type="button"
+                class="help-drawer__header-btn"
+                aria-label="Open help docs in new tab"
+                title="新窗口打开"
+                @click="openInNewTab"
+              >
+                <svg viewBox="0 0 24 24" width="16" height="16">
+                  <path
+                    fill="currentColor"
+                    d="M14 3v2h3.59L9.29 13.29l1.42 1.42L19 6.41V10h2V3h-7zM19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2v7z"
+                  />
+                </svg>
+              </button>
+              <button
+                type="button"
+                class="help-drawer__close"
+                aria-label="Close help center"
+                @click="handleClose"
+              >
+                <svg viewBox="0 0 24 24" width="20" height="20">
+                  <path
+                    fill="currentColor"
+                    d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"
+                  />
+                </svg>
+              </button>
+            </div>
           </div>
 
           <div class="help-drawer__body">
-            <!-- P0 placeholder, P1 will embed iframe -->
-            <div class="help-drawer__placeholder">
-              <el-empty description="Help docs coming soon">
-                <template #image>
-                  <div class="help-drawer__placeholder-icon">
-                    <el-icon :size="64"><DocumentCopy /></el-icon>
-                  </div>
-                </template>
-                <div class="help-drawer__placeholder-text">
-                  <p class="help-drawer__placeholder-title">User Guide - V1 Placeholder</p>
-                  <p class="help-drawer__placeholder-desc">
-                    P0 stage - Drawer only.<br />
-                    P1 stage - iframe embed /docs/user-guide/index.html
-                  </p>
-                </div>
-                <el-button type="primary" @click="openInNewTab">
-                  Open in new tab (placeholder)
-                </el-button>
-              </el-empty>
+            <iframe
+              v-if="modelValue"
+              :key="iframeKey"
+              :src="helpUrl"
+              class="help-drawer__iframe"
+              title="帮助文档"
+              referrerpolicy="no-referrer-when-downgrade"
+              @load="handleIframeLoad"
+              @error="handleIframeError"
+            ></iframe>
+
+            <div v-if="loadError" class="help-drawer__fallback">
+              <el-icon :size="48" class="help-drawer__fallback-icon"><Warning /></el-icon>
+              <p class="help-drawer__fallback-title">无法加载帮助文档</p>
+              <p class="help-drawer__fallback-desc">{{ loadError }}</p>
+              <el-button type="primary" @click="retry">重试</el-button>
+              <el-button @click="openInNewTab">新窗口打开</el-button>
             </div>
           </div>
         </div>
@@ -59,8 +72,8 @@
 </template>
 
 <script setup>
-import { computed, watch, onMounted, onUnmounted } from 'vue'
-import { QuestionFilled, DocumentCopy } from '@element-plus/icons-vue'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
+import { QuestionFilled, Warning } from '@element-plus/icons-vue'
 
 const props = defineProps({
   modelValue: {
@@ -69,7 +82,7 @@ const props = defineProps({
   },
   width: {
     type: [Number, String],
-    default: 800
+    default: 880
   },
   helpUrl: {
     type: String,
@@ -83,6 +96,9 @@ const wrapperStyle = computed(() => ({
   width: typeof props.width === 'number' ? `${props.width}px` : props.width
 }))
 
+const iframeKey = ref(0)
+const loadError = ref('')
+
 function handleClose() {
   emit('update:modelValue', false)
   emit('close')
@@ -91,6 +107,19 @@ function handleClose() {
 function openInNewTab() {
   window.open(props.helpUrl, '_blank', 'noopener,noreferrer')
   emit('open-in-new-tab', props.helpUrl)
+}
+
+function retry() {
+  loadError.value = ''
+  iframeKey.value += 1
+}
+
+function handleIframeLoad() {
+  loadError.value = ''
+}
+
+function handleIframeError() {
+  loadError.value = `帮助文档加载失败：${props.helpUrl}`
 }
 
 function handleKeydown(e) {
@@ -106,6 +135,7 @@ watch(
   (val) => {
     if (val) {
       document.body.style.overflow = 'hidden'
+      iframeKey.value += 1
     } else {
       document.body.style.overflow = ''
     }
@@ -173,6 +203,13 @@ onUnmounted(() => {
   color: var(--yonyou-orange-600, #ea580c);
 }
 
+.help-drawer__header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs, 4px);
+}
+
+.help-drawer__header-btn,
 .help-drawer__close {
   display: flex;
   align-items: center;
@@ -188,6 +225,7 @@ onUnmounted(() => {
   transition: all 0.2s;
 }
 
+.help-drawer__header-btn:hover,
 .help-drawer__close:hover {
   background: var(--el-fill-color-light, #f5f7fa);
   color: var(--yonyou-orange-600, #ea580c);
@@ -195,42 +233,46 @@ onUnmounted(() => {
 
 .help-drawer__body {
   flex: 1;
-  overflow: auto;
+  position: relative;
+  overflow: hidden;
+  background: var(--el-fill-color-blank, #ffffff);
+}
+
+.help-drawer__iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+
+.help-drawer__fallback {
+  position: absolute;
+  inset: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: var(--spacing-lg, 24px);
-}
-
-.help-drawer__placeholder {
-  width: 100%;
-  max-width: 480px;
   text-align: center;
+  gap: var(--spacing-sm, 8px);
 }
 
-.help-drawer__placeholder-icon {
+.help-drawer__fallback-icon {
   color: var(--yonyou-orange-500, #f97316);
-  display: flex;
-  justify-content: center;
-  margin-bottom: var(--spacing-md, 16px);
 }
 
-.help-drawer__placeholder-text {
-  margin: var(--spacing-md, 16px) 0 var(--spacing-lg, 24px);
-}
-
-.help-drawer__placeholder-title {
+.help-drawer__fallback-title {
   font-size: var(--el-font-size-large, 16px);
   font-weight: 600;
   color: var(--el-text-color-primary, #1d2129);
-  margin: 0 0 var(--spacing-sm, 8px);
+  margin: 0;
 }
 
-.help-drawer__placeholder-desc {
+.help-drawer__fallback-desc {
   font-size: var(--el-font-size-base, 14px);
   color: var(--el-text-color-secondary, #86909c);
-  line-height: 1.6;
-  margin: 0;
+  margin: 0 0 var(--spacing-md, 16px);
+  word-break: break-all;
 }
 
 .help-drawer-enter-active,
