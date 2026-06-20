@@ -944,17 +944,21 @@ onUnmounted(() => {
 //   DetailPage 不重新 mount, onMounted 不触发, data.value 仍是 null,
 //   会显示空白. 修复: 在 onActivated 兜底, 仅当 data 为 null 且是 view 模式时 fetch.
 //   守护: data 不为 null (in-app 切走切回) → 不重复 fetch, 保留滚动位置.
+// [FIX 2026-06-20] bfcache force-refresh: 上面 onActivated 兜底 fetch 命中 baseService 5 分钟 cache,
+//   返回 stale data (可能没有 display_values), UI 显示 "-". 修复: 用 forceRefresh=true
+//   绕过 cache, 强制后端 fresh fetch. 频率低 (仅 bfcache 恢复触发), 性能可接受.
 onActivated(() => {
   if (coordinatorRefreshKey.value) {
     console.debug(`[DetailPage] onActivated: ${coordinatorRefreshKey.value}, state preserved (no auto-refresh, internalEditing=${internalEditing.value})`)
   }
   // [FIX 2026-06-19] bfcache 兜底 fetch
+  // [FIX 2026-06-20] + forceRefresh 绕过 5min cache
   if (data.value === null && props.id && props.mode !== 'add' && props.id !== 'new') {
     const traceId = (typeof crypto !== 'undefined' && crypto.randomUUID)
       ? crypto.randomUUID().replace(/-/g, '')
       : `t-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-    console.debug(`[DetailPage] onActivated fetch fallback, id: ${props.id}, trace_id=${traceId}`)
-    fetchData()
+    console.debug(`[DetailPage] onActivated force-refresh fetch, id: ${props.id}, trace_id=${traceId}`)
+    fetchData({ forceRefresh: true })
   }
 })
 
