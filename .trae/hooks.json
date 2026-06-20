@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -Command \"$envFile = $env:TRAE_ENV_FILE; if ($envFile) { 'AGENT_PORT=3010' | Out-File -FilePath $envFile -Encoding utf8 -Append; 'TEST_ENTRY=0' | Out-File -FilePath $envFile -Encoding utf8 -Append; Write-Host '[Hook] SessionStart: AGENT_PORT=3010 injected' }\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "RunCommand",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -Command \"$input = [Console]::In.ReadToEnd(); $obj = $input | ConvertFrom-Json; $cmd = $obj.tool_input.command; if ($cmd -match 'pytest\\s' -or $cmd -match 'python\\s+-m\\s+pytest') { Write-Error '[Hook BLOCKED] Direct pytest forbidden. Use: python d:\\filework\\test.py'; exit 2 }; if ($cmd -match '^curl\\s+' -and $cmd -notmatch 'curl\\.exe') { Write-Error '[Hook BLOCKED] PowerShell curl alias forbidden. Use curl.exe or Invoke-RestMethod'; exit 2 }; exit 0\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "loop_limit": 3,
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -Command \"$input = [Console]::In.ReadToEnd(); $obj = $input | ConvertFrom-Json; $msg = $obj.stop_reason; if ($msg -match 'no changes|nothing to') { exit 0 }; $repo = 'd:\\filework\\excel-to-diagram'; $dirty = (git -C $repo status --porcelain 2>$null); if ($dirty) { Write-Error '[Hook] Working tree has uncommitted changes. Consider committing before stopping.'; exit 2 }; exit 0\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
