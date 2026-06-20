@@ -1603,10 +1603,10 @@ async function executeDelete() {
       deleteTargetRow.value = null
       await forceRefresh()
     } else {
-      message.error('删除失败', result)
+      message.deleteFailed('数据')
     }
   } catch (e) {
-    message.error('删除失败', e)
+    message.deleteFailed('数据')
   } finally {
     deleteLoading.value = false
   }

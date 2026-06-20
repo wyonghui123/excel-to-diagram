@@ -156,7 +156,7 @@ def export_data():
     try:
         data = request.get_json()
         if not data:
-            return jsonify({"success": False, "message": "请求体不能为空"}), 400
+            return jsonify({"success": False, "message": "请求内容不能为空"}), 400
 
         object_type = data.get('object_type')
         if not object_type:
@@ -258,7 +258,7 @@ def export_data_async():
     try:
         data = request.get_json()
         if not data:
-            return jsonify({"success": False, "message": "请求体不能为空"}), 400
+            return jsonify({"success": False, "message": "请求内容不能为空"}), 400
 
         object_type = data.get('object_type')
         if not object_type:

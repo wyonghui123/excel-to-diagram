@@ -15,7 +15,7 @@ def init_audit_mgmt_services(audit_service=None):
 @login_required
 def get_failed_audit_logs():
     if not is_admin():
-        return jsonify({'success': False, 'message': '需要管理员权限'}), 403
+        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
 
     page = request.args.get('page', 1, type=int)
     page_size = request.args.get('page_size', 20, type=int)
@@ -35,7 +35,7 @@ def get_failed_audit_logs():
 @login_required
 def retry_failed_audit_log(record_id):
     if not is_admin():
-        return jsonify({'success': False, 'message': '需要管理员权限'}), 403
+        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
 
     result = _audit_service.retry_failed_record(record_id)
 
@@ -55,7 +55,7 @@ def retry_failed_audit_log(record_id):
 @login_required
 def get_audit_writer_stats():
     if not is_admin():
-        return jsonify({'success': False, 'message': '需要管理员权限'}), 403
+        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
 
     from meta.services.async_audit_writer import async_audit_writer
     stats = async_audit_writer.get_stats()

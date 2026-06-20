@@ -24,7 +24,7 @@ def admin_required(f):
         from meta.api.user_api import get_current_user
         user = get_current_user()
         if not user or not is_admin(user):
-            return jsonify({"success": False, "message": "需要管理员权限"}), 403
+            return jsonify({"success": False, "message": "您没有执行此操作的权限，需要管理员权限"}), 403
         return f(*args, **kwargs)
     return decorated
 
@@ -184,7 +184,7 @@ def create_menu_permission():
         if not data:
             return jsonify({
                 'success': False,
-                'error': '请求体不能为空'
+                'error': '请求内容不能为空'
             }), 400
         
         required_fields = ['menu_code', 'menu_name', 'menu_path']
@@ -224,7 +224,7 @@ def update_menu_permission(menu_code):
         if not data:
             return jsonify({
                 'success': False,
-                'error': '请求体不能为空'
+                'error': '请求内容不能为空'
             }), 400
         
         service = _get_menu_service()

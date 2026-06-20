@@ -194,7 +194,7 @@ def _admin_required(f):
         if AUTH_ENABLED:
             from meta.services.auth_middleware import is_admin
             if not is_admin():
-                return _api_error('需要管理员权限', 'FORBIDDEN', 403)
+                return _api_error('您没有执行此操作的权限，需要管理员权限', 'FORBIDDEN', 403)
         return f(*args, **kwargs)
     return decorated_function
 

@@ -162,7 +162,7 @@ def get_subscriptions():
     """获取当前用户的订阅列表"""
     user_id = g.get('user_id')
     if not user_id:
-        return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+        return jsonify({'success': False, 'error': '请先登录后再操作'}), 401
     
     if not ds:
         stats = websocket_manager.get_stats()
@@ -192,7 +192,7 @@ def create_subscription():
     """创建订阅"""
     user_id = g.get('user_id')
     if not user_id:
-        return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+        return jsonify({'success': False, 'error': '请先登录后再操作'}), 401
     
     if not ds:
         return jsonify({'success': False, 'error': 'Service not initialized'}), 500
@@ -248,7 +248,7 @@ def get_subscription(sub_id):
     """获取单个订阅详情"""
     user_id = g.get('user_id')
     if not user_id:
-        return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+        return jsonify({'success': False, 'error': '请先登录后再操作'}), 401
     
     if not ds:
         return jsonify({'success': False, 'error': 'Service not initialized'}), 500
@@ -256,10 +256,10 @@ def get_subscription(sub_id):
     subscription = ds.find_one('change_subscriptions', filters={'id': sub_id})
     
     if not subscription:
-        return jsonify({'success': False, 'error': 'Subscription not found'}), 404
+        return jsonify({'success': False, 'error': '订阅不存在'}), 404
     
     if subscription.get('user_id') != user_id:
-        return jsonify({'success': False, 'error': 'Forbidden'}), 403
+        return jsonify({'success': False, 'error': '您没有执行此操作的权限'}), 403
     
     return jsonify({
         'success': True,
@@ -272,7 +272,7 @@ def update_subscription(sub_id):
     """更新订阅"""
     user_id = g.get('user_id')
     if not user_id:
-        return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+        return jsonify({'success': False, 'error': '请先登录后再操作'}), 401
     
     if not ds:
         return jsonify({'success': False, 'error': 'Service not initialized'}), 500
@@ -280,10 +280,10 @@ def update_subscription(sub_id):
     subscription = ds.find_one('change_subscriptions', filters={'id': sub_id})
     
     if not subscription:
-        return jsonify({'success': False, 'error': 'Subscription not found'}), 404
+        return jsonify({'success': False, 'error': '订阅不存在'}), 404
     
     if subscription.get('user_id') != user_id:
-        return jsonify({'success': False, 'error': 'Forbidden'}), 403
+        return jsonify({'success': False, 'error': '您没有执行此操作的权限'}), 403
     
     data = request.get_json() or {}
     
@@ -334,7 +334,7 @@ def delete_subscription(sub_id):
     """删除订阅"""
     user_id = g.get('user_id')
     if not user_id:
-        return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+        return jsonify({'success': False, 'error': '请先登录后再操作'}), 401
     
     if not ds:
         return jsonify({'success': False, 'error': 'Service not initialized'}), 500
@@ -342,10 +342,10 @@ def delete_subscription(sub_id):
     subscription = ds.find_one('change_subscriptions', filters={'id': sub_id})
     
     if not subscription:
-        return jsonify({'success': False, 'error': 'Subscription not found'}), 404
+        return jsonify({'success': False, 'error': '订阅不存在'}), 404
     
     if subscription.get('user_id') != user_id:
-        return jsonify({'success': False, 'error': 'Forbidden'}), 403
+        return jsonify({'success': False, 'error': '您没有执行此操作的权限'}), 403
     
     try:
         ds.delete('change_subscriptions', sub_id)
@@ -367,7 +367,7 @@ def get_events():
     """获取变更事件列表"""
     user_id = g.get('user_id')
     if not user_id:
-        return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+        return jsonify({'success': False, 'error': '请先登录后再操作'}), 401
     
     if not ds:
         return jsonify({'success': False, 'error': 'Service not initialized'}), 500
@@ -409,7 +409,7 @@ def get_event(event_id):
     """获取单个事件详情"""
     user_id = g.get('user_id')
     if not user_id:
-        return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+        return jsonify({'success': False, 'error': '请先登录后再操作'}), 401
     
     if not ds:
         return jsonify({'success': False, 'error': 'Service not initialized'}), 500
@@ -430,7 +430,7 @@ def retry_event(event_id):
     """重试事件投递"""
     user_id = g.get('user_id')
     if not user_id:
-        return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+        return jsonify({'success': False, 'error': '请先登录后再操作'}), 401
     
     if not ds:
         return jsonify({'success': False, 'error': 'Service not initialized'}), 500

@@ -114,7 +114,7 @@ def db_health():
     - status: healthy / warning / critical
     """
     if not _require_admin():
-        return jsonify({'success': False, 'message': 'admin only', 'code': 'E010'}), 403
+        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限', 'code': 'E010'}), 403
 
     result = {
         'success': True,
@@ -239,7 +239,7 @@ def db_backup():
     返回: filename, size, duration_ms
     """
     if not _require_admin():
-        return jsonify({'success': False, 'message': 'admin only', 'code': 'E010'}), 403
+        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限', 'code': 'E010'}), 403
 
     db_path = _get_db_path()
     backup_dir = _get_backup_dir()
@@ -308,7 +308,7 @@ def db_recover():
     可选: dry_run=true (仅检查, 不执行)
     """
     if not _require_admin():
-        return jsonify({'success': False, 'message': 'admin only', 'code': 'E010'}), 403
+        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限', 'code': 'E010'}), 403
 
     body = request.get_json(silent=True) or {}
     backup_filename = body.get('backup_filename')

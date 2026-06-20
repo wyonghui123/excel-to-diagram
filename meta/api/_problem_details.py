@@ -115,7 +115,7 @@ def validation_error(field: str, message: str):
 def unauthorized(reason: str = "未登录"):
     return build(
         status=401,
-        title="Unauthorized",
+        title="请先登录后再操作",
         detail=reason,
         code="UNAUTHORIZED",
         recovery={
@@ -130,7 +130,7 @@ def unauthorized(reason: str = "未登录"):
 def forbidden(reason: str = "权限不足", required_role: str = None):
     return build(
         status=403,
-        title="Forbidden",
+        title="您没有执行此操作的权限",
         detail=reason,
         code="FORBIDDEN",
         extra={"required_role": required_role} if required_role else None,

@@ -22,7 +22,7 @@ def admin_required(f):
     def decorated(*args, **kwargs):
         user = get_current_user()
         if not user or not is_admin(user):
-            return jsonify({"success": False, "message": "需要管理员权限"}), 403
+            return jsonify({"success": False, "message": "您没有执行此操作的权限，需要管理员权限"}), 403
         return f(*args, **kwargs)
     return decorated
 

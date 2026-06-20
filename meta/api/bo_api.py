@@ -788,7 +788,7 @@ def associate_bo(object_type, obj_id, association_name):
     metadata = data.get('metadata', {})
 
     if not target_id:
-        return jsonify({'success': False, 'message': 'target_id is required'}), 400
+        return jsonify({'success': False, 'message': '目标 ID 不能为空'}), 400
 
     if not target_type:
         target_type = _infer_target_type(object_type, association_name)
@@ -924,7 +924,7 @@ def assign_association_v2(object_type, obj_id, association_name):
     metadata = data.get('metadata', {})
 
     if not target_id:
-        return jsonify({'success': False, 'message': 'target_id is required'}), 400
+        return jsonify({'success': False, 'message': '目标 ID 不能为空'}), 400
 
     if not target_type:
         target_type = _infer_target_type(object_type, association_name)
@@ -994,7 +994,7 @@ def unassign_association_v2(object_type, obj_id, association_name):
         target_id = int(target_id) if target_id else None
 
     if not target_id:
-        return jsonify({'success': False, 'message': 'target_id is required'}), 400
+        return jsonify({'success': False, 'message': '目标 ID 不能为空'}), 400
 
     if not target_type:
         target_type = _infer_target_type(object_type, association_name)
@@ -1905,7 +1905,7 @@ def get_state_transitions(object_type, obj_id):
     bo = _get_bo()
     result = bo.read(object_type, obj_id)
     if not result or not result.success:
-        return jsonify({'success': False, 'message': 'Record not found'}), 404
+        return jsonify({'success': False, 'message': '记录不存在'}), 404
 
     record = result.data if hasattr(result, 'data') else result
 
@@ -1959,7 +1959,7 @@ def get_state_transitions_by_string_id(object_type, obj_id):
     bo = _get_bo()
     result = bo.read(object_type, obj_id)
     if not result or not result.success:
-        return jsonify({'success': False, 'message': 'Record not found'}), 404
+        return jsonify({'success': False, 'message': '记录不存在'}), 404
 
     record = result.data if hasattr(result, 'data') else result
 
@@ -2733,9 +2733,9 @@ def update_role_menu_permissions(role_id):
         cursor = ds.execute("SELECT is_system FROM roles WHERE id = ?", [role_id])
         role_row = cursor.fetchone()
         if not role_row:
-            return jsonify({'success': False, 'message': '角色不存在'}), 404
+            return jsonify({'success': False, 'message': '角色不存在，请检查后重试'}), 404
         if role_row[0]:
-            return jsonify({'success': False, 'message': '系统角色不可修改'}), 400
+            return jsonify({'success': False, 'message': '系统内置角色不能修改'}), 400
 
         data = request.get_json(silent=True) or {}
         menu_codes = data.get('menu_codes', [])

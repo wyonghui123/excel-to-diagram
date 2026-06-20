@@ -101,7 +101,7 @@ def database_slow_queries():
 @login_required
 def database_vacuum():
     if not is_admin():
-        return jsonify({"error": "Admin permission required"}), 403
+        return jsonify({"error": "您没有执行此操作的权限，需要管理员权限"}), 403
     ds = _get_data_source()
     mode = request.args.get('mode', 'dry-run')
     if mode == 'dry-run':
@@ -139,7 +139,7 @@ def database_vacuum():
 @login_required
 def database_analyze():
     if not is_admin():
-        return jsonify({"error": "Admin permission required"}), 403
+        return jsonify({"error": "您没有执行此操作的权限，需要管理员权限"}), 403
     ds = _get_data_source()
     try:
         ds.execute("ANALYZE")
@@ -152,7 +152,7 @@ def database_analyze():
 @login_required
 def database_integrity_check():
     if not is_admin():
-        return jsonify({"error": "Admin permission required"}), 403
+        return jsonify({"error": "您没有执行此操作的权限，需要管理员权限"}), 403
     ds = _get_data_source()
     try:
         result = ds.query("PRAGMA integrity_check")
@@ -165,7 +165,7 @@ def database_integrity_check():
 @login_required
 def database_wal_checkpoint():
     if not is_admin():
-        return jsonify({"error": "Admin permission required"}), 403
+        return jsonify({"error": "您没有执行此操作的权限，需要管理员权限"}), 403
     mode = request.args.get('mode', 'TRUNCATE')
     if mode not in ('PASSIVE', 'TRUNCATE', 'RESTART', 'FULL'):
         return jsonify({"error": "Invalid checkpoint mode: {0}".format(mode)}), 400
@@ -185,7 +185,7 @@ def database_wal_checkpoint():
 @login_required
 def database_reindex():
     if not is_admin():
-        return jsonify({"error": "Admin permission required"}), 403
+        return jsonify({"error": "您没有执行此操作的权限，需要管理员权限"}), 403
     ds = _get_data_source()
     try:
         tables = ds.list_tables()

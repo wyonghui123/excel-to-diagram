@@ -28,7 +28,7 @@ def require_permission(permission_code):
                 return jsonify({
                     'success': False,
                     'error': 'UNAUTHORIZED',
-                    'message': 'Authentication required'
+                    'message': '请先登录后再操作'
                 }), 401
 
             if not _check_permission(user_id, permission_code):

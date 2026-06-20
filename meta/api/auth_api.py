@@ -151,7 +151,7 @@ def logout():
             token_blacklist_service.add_to_blacklist(token, expires_at)
     response = make_response(jsonify({
         'success': True,
-        'message': '登出成功',
+        'message': '已安全退出',
     }))
     response.delete_cookie('auth_token', path='/')
     return response
@@ -276,13 +276,13 @@ def change_password():
     if not old_password or not new_password:
         return jsonify({
             'success': False,
-            'message': '旧密码和新密码不能为空',
+            'message': '当前密码和新密码不能为空',
         }), 400
 
     if len(new_password) < 6:
         return jsonify({
             'success': False,
-            'message': '新密码长度不能少于6位',
+            'message': '新密码长度不能少于 6 位',
         }), 400
 
     provider = _get_auth_provider()
@@ -295,7 +295,7 @@ def change_password():
         is_locked, lockout_msg = rate_limiter.record_failed_attempt(client_ip, username)
         response_data = {
             'success': False,
-            'message': '旧密码错误',
+            'message': '当前密码不正确',
         }
         if not is_locked:
             response_data['message'] += f' ({lockout_msg})'

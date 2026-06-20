@@ -22,7 +22,7 @@ def admin_required(f):
     def decorated(*args, **kwargs):
         user = get_current_user()
         if not user or not is_admin(user):
-            return jsonify({"success": False, "message": "需要管理员权限"}), 403
+            return jsonify({"success": False, "message": "您没有执行此操作的权限，需要管理员权限"}), 403
         return f(*args, **kwargs)
     return decorated
 
@@ -96,12 +96,12 @@ def assign_bundle():
     """将权限包分配给用户"""
     try:
         data = request.get_json()
-        # [FIX BUG-005] 原代码 `if not data` 把空 dict {} 也当 falsy, 触发 "请求体不能为空"
+        # [FIX BUG-005] 原代码 `if not data` 把空 dict {} 也当 falsy, 触发 "请求内容不能为空"
         # 改为检查 None: 空 body (Content-Length 0) → 400, 空 dict {} → 走到字段校验
         if data is None:
             return jsonify({
                 'success': False,
-                'error': '请求体不能为空'
+                'error': '请求内容不能为空'
             }), 400
 
         user_id = data.get('user_id')
@@ -166,7 +166,7 @@ def create_bundle():
         if data is None:
             return jsonify({
                 'success': False,
-                'error': '请求体不能为空'
+                'error': '请求内容不能为空'
             }), 400
 
         required_fields = ['bundle_code', 'bundle_name']
@@ -207,7 +207,7 @@ def update_bundle(bundle_code):
         if data is None:
             return jsonify({
                 'success': False,
-                'error': '请求体不能为空'
+                'error': '请求内容不能为空'
             }), 400
 
         service = _get_bundle_service()
