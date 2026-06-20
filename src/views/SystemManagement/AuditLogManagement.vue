@@ -515,10 +515,10 @@ function formatDateTime(datetime) {
 </script>
 
 <style scoped>
-/* [FIX 2026-06-12] 整页 flex column: overview 占自然高度, MetaListPage 填满剩余空间.
-   之前 height:100% + overflow:hidden 父子同时锁死高度, 内容超出后整页无法 scroll down. */
+/* [FIX 2026-06-20] 用 flex:1 + min-height:0 替代 height:100%
+   在 flex 容器中 height:100% 不可靠, flex:1 让元素填满剩余空间 */
 .audit-log-management {
-  height: 100%;
+  flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;

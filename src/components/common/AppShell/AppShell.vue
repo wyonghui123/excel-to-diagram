@@ -138,7 +138,6 @@ defineProps({
   flex: 1;
   display: flex;
   flex-direction: column;
-  /* [FIX 2026-06-20] overflow-y:auto 让内容在视口内滚动 (列表页表格 + landing page 长内容) */
   overflow-y: auto;
   overflow-x: hidden;
   padding: var(--spacing-md);

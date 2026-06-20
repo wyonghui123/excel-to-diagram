@@ -1820,7 +1820,10 @@ defineExpose({
 .meta-list-page {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  /* [FIX 2026-06-20] 用 flex:1 + min-height:0 替代 height:100%
+     在 flex 容器中 height:100% 不可靠, flex:1 让元素填满剩余空间 */
+  flex: 1;
+  min-height: 0;
   flex-shrink: 1;
   gap: 0;
   overflow: hidden;
@@ -1939,7 +1942,7 @@ defineExpose({
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  min-height: 400px;
+  min-height: 0;
 }
 
 .table-wrapper {

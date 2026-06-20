@@ -222,7 +222,9 @@ onBeforeRouteLeave((_to, _from) => {
 
 <style scoped>
 .generic-tab-container {
-  height: 100%;
+  /* [FIX 2026-06-20] flex:1 替代 height:100% */
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--color-bg-layout);

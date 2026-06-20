@@ -185,7 +185,10 @@ onMounted(async () => {
 @import '../styles/mixins.scss';
 
 .arch-workspace {
-  min-height: 100vh;
+  /* [FIX 2026-06-20] flex:1 填满 AppShell__content, overflow-y:auto 实现视口内滚动 */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   background: var(--color-bg-secondary);
