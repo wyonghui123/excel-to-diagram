@@ -10,6 +10,19 @@ export class BOExportImportService extends BOBaseService {
     return fullPath.replace(/^\/api\/v[12]/, '')
   }
 
+  // [NEW v3.20 2026-06-19] 从后端 download_url 提取文件 basename
+  // 后端 export_data 已返回包含 objectname 的 file_name (如 架构数据_20260619_xxx.xlsx)
+  _filenameFromUrl(downloadUrl, fallback) {
+    if (!downloadUrl) return fallback
+    try {
+      const cleanUrl = downloadUrl.split('?')[0].split('#')[0]
+      const lastSlash = cleanUrl.lastIndexOf('/')
+      return decodeURIComponent(cleanUrl.substring(lastSlash + 1)) || fallback
+    } catch (e) {
+      return fallback
+    }
+  }
+
   async downloadTemplate(objectType, params = {}) {
     const types = params.selected_types || [objectType]
 
@@ -27,6 +40,7 @@ export class BOExportImportService extends BOBaseService {
         include_child_objects: false
       }
     }
+    if (params.menu_code) requestBody.menu_code = params.menu_code
 
     const result = await this._request('POST', '/export', { body: requestBody, version: 1 })
 
@@ -34,7 +48,9 @@ export class BOExportImportService extends BOBaseService {
       const downloadPath = this._toRelativePath(result.data.download_url)
       const downloadResult = await this._request('GET', downloadPath, { responseType: 'blob', version: 1 })
       if (!downloadResult.success) return { success: false, message: '下载模板失败' }
-      downloadBlob(downloadResult.data, 'import_template.xlsx')
+      // [CHG v3.20 2026-06-19] 用后端生成的文件名 (基于 objectname + 时间戳)
+      const filename = this._filenameFromUrl(result.data.download_url, 'import_template.xlsx')
+      downloadBlob(downloadResult.data, filename)
       return { success: true }
     }
 
@@ -75,6 +91,11 @@ export class BOExportImportService extends BOBaseService {
       requestBody.selected_types = params.selected_types
     }
 
+    // [NEW v3.20 2026-06-19] 透传 menu_code (arch-data → 后端走"架构数据"前缀)
+    if (params.menu_code) {
+      requestBody.menu_code = params.menu_code
+    }
+
     if (params.ordering) {
       const isDesc = params.ordering.startsWith('-')
       requestBody.sort_by = isDesc ? params.ordering.substring(1) : params.ordering
@@ -101,7 +122,9 @@ export class BOExportImportService extends BOBaseService {
         return { success: false, message: '下载文件失败' }
       }
 
-      downloadBlob(downloadResult.data, `${objectType}_export_${new Date().toISOString().slice(0, 10)}.xlsx`)
+      // [CHG v3.20 2026-06-19] 用后端基于 objectname 拼的文件名, 替代前端硬编码 ${objectType}_export_${date}.xlsx
+      const filename = this._filenameFromUrl(result.data.download_url, `${objectType}_export.xlsx`)
+      downloadBlob(downloadResult.data, filename)
 
       return { success: true, total_rows: result.data.total_rows }
     }
@@ -125,6 +148,11 @@ export class BOExportImportService extends BOBaseService {
 
     if (params.selected_types?.length) {
       requestBody.selected_types = params.selected_types
+    }
+
+    // [NEW v3.20 2026-06-19] 透传 menu_code
+    if (params.menu_code) {
+      requestBody.menu_code = params.menu_code
     }
 
     if (params.ordering) {

@@ -170,6 +170,8 @@ def export_data():
 
         page = data.get('page')
         page_size = data.get('page_size')
+        # [NEW v3.20 2026-06-19] 菜单编码, arch-data → 文件名"架构数据"前缀
+        menu_code = data.get('menu_code')
 
         options = data.get('options', {
             "include_hierarchy_path": True,
@@ -180,16 +182,21 @@ def export_data():
         })
 
         print(f"[Export API] Received filters: {filters}")
-        print(f"[Export API] Object type: {object_type}, Scope: {scope}, Selected types: {selected_types}")
+        print(f"[Export API] Object type: {object_type}, Scope: {scope}, Selected types: {selected_types}, Menu: {menu_code}")
         print(f"[Export API] Sort by: {sort_by}, Order: {sort_order}")
         print(f"[Export API] Pagination: page={page}, page_size={page_size}")
-        
+
         service = get_import_export_service()
-        
+
         if scope == 'template':
-            result = service.export_template(selected_types, options)
+            result = service.export_template(selected_types, options, menu_code=menu_code)
         elif scope == 'cascade':
-            result = service.export_cascade(object_type, filters, options, sort_by=sort_by, sort_order=sort_order, page=page, page_size=page_size)
+            result = service.export_cascade(
+                object_type, filters, options,
+                sort_by=sort_by, sort_order=sort_order,
+                page=page, page_size=page_size,
+                menu_code=menu_code,
+            )
         elif scope == 'selected' and selected_types:
             result = service.export_selected_types(selected_types, filters, options, sort_by=sort_by, sort_order=sort_order, page=page, page_size=page_size)
         else:
@@ -694,39 +701,50 @@ def import_status(task_id):
 def download_template(object_type):
     """
     下载导入模板API
-    
+
     生成指定对象类型的导入模板Excel文件
+
+    [NEW v3.20 2026-06-19] 支持 query 参数 menu_code:
+    - arch-data → 文件名前缀走"架构数据" (全局级联模板)
+    - 其他 → 走起始对象 objectname
     """
     try:
         from meta.core.models import registry
-        
+
         meta_obj = registry.get(object_type)
         if not meta_obj:
             return jsonify({"success": False, "message": "对象类型不存在"}), 404
-        
+
+        # [NEW v3.20 2026-06-19] menu_code query param
+        menu_code = request.args.get('menu_code')
+
         service = get_import_export_service()
-        result = service.export_template([object_type], {
-            "include_operation_mode": True,
-            "include_hierarchy_path": True,
-            "include_hierarchy_ids": True
-        })
-        
+        result = service.export_template(
+            [object_type],
+            {
+                "include_operation_mode": True,
+                "include_hierarchy_path": True,
+                "include_hierarchy_ids": True,
+            },
+            menu_code=menu_code,
+        )
+
         if not result.success:
             return jsonify({
                 "success": False,
                 "message": "生成模板失败",
                 "errors": result.errors
             }), 500
-        
+
         file_path = result.file_path
         file_name = os.path.basename(file_path)
-        
+
         return send_file(
             file_path,
             as_attachment=True,
             download_name=file_name
         )
-    
+
     except Exception as e:
         import traceback
         error_trace = traceback.format_exc()

@@ -35,6 +35,14 @@ logger = logging.getLogger(__name__)
 
 
 
+# [NEW v3.20 2026-06-19] 全局菜单 → 文件名前缀映射
+# 当前只有"架构数据管理"是全局多对象级联导出（arch-data 菜单），
+# 后续如需新增全局菜单，继续追加。
+GLOBAL_MENU_PREFIX_MAP = {
+    'arch-data': '架构数据',
+}
+
+
 class ImportExportService:
 
     def __init__(self, data_source: DataSource, manage_service: Optional[ManageService] = None,
@@ -221,7 +229,8 @@ class ImportExportService:
         os.makedirs(output_dir, exist_ok=True)
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        file_name = self._build_export_filename([object_type], timestamp)
+        # [CHG v3.20 2026-06-19] 用 objectname 替代 object_type 拼前缀
+        file_name = self._build_export_filename([meta_obj.name], timestamp)
         file_path = os.path.join(output_dir, file_name)
 
         wb.save(file_path)
@@ -526,14 +535,16 @@ class ImportExportService:
         except (ValueError, TypeError):
             return value
 
-    def export_template(self, selected_types: List[str], options: Optional[Dict[str, Any]] = None) -> ExportResult:
+    def export_template(self, selected_types: List[str], options: Optional[Dict[str, Any]] = None,
+                        menu_code: Optional[str] = None) -> ExportResult:
         """
         生成导入模板（只包含表头，不包含数据）
-        
+
         Args:
             selected_types: 选定的对象类型列表
             options: 导出选项
-        
+            menu_code: [NEW v3.20 2026-06-19] 触发菜单编码, arch-data → "架构数据" 前缀
+
         Returns:
             ExportResult: 导出结果
         """
@@ -701,7 +712,18 @@ class ImportExportService:
                 "row_count": 0
             })
         
-        file_name = f"import_template_{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx"
+        # [CHG v3.20 2026-06-19] 文件名基于 objectname 而非 object_type，
+        # menu_code=arch-data → "架构数据" 前缀（全局级联模板），
+        # 其他 → 各 objectname 拼接 + "_template" 后缀。
+        # 例: 架构数据_template_20260619_143012.xlsx
+        # 例: 域_子域_template_20260619_143012.xlsx
+        if menu_code and menu_code in GLOBAL_MENU_PREFIX_MAP:
+            prefix_parts = [GLOBAL_MENU_PREFIX_MAP[menu_code], "template"]
+        else:
+            object_names = self._resolve_object_names(ordered_types)
+            prefix_parts = object_names + ["template"]
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_name = self._build_export_filename(prefix_parts, timestamp)
         export_dir = os.path.join(os.getcwd(), "exports")
         os.makedirs(export_dir, exist_ok=True)
         file_path = os.path.join(export_dir, file_name)
@@ -1109,19 +1131,19 @@ class ImportExportService:
                         logger.warning(
                             f"[Export] 子对象 {child_type_name} 导出失败: {e}"
                         )
-        
+
         output_dir = os.path.join(os.getcwd(), "exports")
         os.makedirs(output_dir, exist_ok=True)
-        
-        product_name, version_name = self._get_product_version_info(filters)
 
+        # [CHG v3.20 2026-06-19] 文件名改为 objectname 列表前缀, 不再附加 product/version 名
+        object_names = self._resolve_object_names(ordered_types)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        file_name = self._build_export_filename([product_name, version_name], timestamp)
+        file_name = self._build_export_filename(object_names, timestamp)
         file_path = os.path.join(output_dir, file_name)
-        
+
         wb.save(file_path)
         wb.close()
-        
+
         return ExportResult(
             success=True,
             file_path=file_path,
@@ -1131,17 +1153,18 @@ class ImportExportService:
         )
 
     def export_cascade(self, object_type: str, filters: Optional[Dict[str, Any]] = None,
-                       options: Optional[Dict[str, Any]] = None, sort_by: str = None, 
+                       options: Optional[Dict[str, Any]] = None, sort_by: str = None,
                        sort_order: str = 'asc',
-                       page: int = None, page_size: int = None) -> ExportResult:
+                       page: int = None, page_size: int = None,
+                       menu_code: Optional[str] = None) -> ExportResult:
         """
         级联导出：导出指定对象及其所有子级对象
-        
+
         参考SAP SuccessFactors导入模板方案：
         1. 单元格级别保护：只读字段使用灰色背景+锁定
         2. 操作模式列：使用下拉列表数据验证
         3. 工作表保护：允许编辑可编辑单元格
-        
+
         Args:
             object_type: 起始对象类型
             filters: 筛选条件
@@ -1156,7 +1179,8 @@ class ImportExportService:
             sort_order: 排序方向 (asc/desc)
             page: 页码（分页导出时使用）
             page_size: 每页数量（分页导出时使用）
-        
+            menu_code: [NEW v3.20 2026-06-19] 触发菜单编码, arch-data 走"架构数据"前缀
+
         Returns:
             ExportResult: 导出结果
         """
@@ -1437,19 +1461,23 @@ class ImportExportService:
                 "row_count": len(sheet_data) if sheet_data else 0
             })
             total_rows += len(sheet_data) if sheet_data else 0
-        
+
         output_dir = os.path.join(os.getcwd(), "exports")
         os.makedirs(output_dir, exist_ok=True)
-        
-        product_name, version_name = self._get_product_version_info(filters)
 
+        # [CHG v3.20 2026-06-19] 级联导出文件名前缀:
+        # - menu_code=arch-data 走"架构数据"
+        # - 其他菜单走起始对象 objectname
+        # - 不再附加 product/version 名 (说明 sheet 已写)
+        # 例: "架构数据_20260619_143012.xlsx" / "域_20260619_143012.xlsx"
+        cascade_prefix = self._resolve_cascade_prefix(object_type, menu_code)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        file_name = self._build_export_filename([product_name, version_name], timestamp)
+        file_name = self._build_export_filename([cascade_prefix], timestamp)
         file_path = os.path.join(output_dir, file_name)
-        
+
         wb.save(file_path)
         wb.close()
-        
+
         return ExportResult(
             success=True,
             file_path=file_path,
@@ -2866,12 +2894,66 @@ class ImportExportService:
                 continue
         return bo_display_maps
 
+    def _resolve_cascade_prefix(self, object_type: str, menu_code: Optional[str] = None) -> str:
+        """[NEW v3.20 2026-06-19] 解析级联导出文件名前缀
+
+        规则（用户最新需求 2026-06-19）：
+        - 全局菜单级联导出（arch-data）→ 走"架构数据"前缀
+        - 其他对象级联导出 → 走 objectname（即 MetaObject.name）
+        - 兜底：object_type 字符串
+
+        Args:
+            object_type: 起始对象类型 ID
+            menu_code: 触发本次导出的菜单编码（可空）
+
+        Returns:
+            文件名前缀字符串（不含时间戳/扩展名）
+        """
+        if menu_code and menu_code in GLOBAL_MENU_PREFIX_MAP:
+            return GLOBAL_MENU_PREFIX_MAP[menu_code]
+        meta_obj = registry.get(object_type)
+        if meta_obj and getattr(meta_obj, 'name', None):
+            return meta_obj.name
+        return object_type
+
+    def _resolve_object_names(self, object_types: List[str]) -> List[str]:
+        """[NEW v3.20 2026-06-19] 解析多对象文件名前缀列表
+
+        规则（用户最新需求 2026-06-19）：
+        - 每个 object_type → MetaObject.name（中文名）
+        - 找不到 registry 记录 → 用 object_type 字符串本身
+        - 跳过空值
+
+        Args:
+            object_types: 对象类型 ID 列表
+
+        Returns:
+            中文名列表（与 input 一一对应，剔除空值）
+        """
+        names: List[str] = []
+        for ot in object_types or []:
+            if not ot:
+                continue
+            meta_obj = registry.get(ot)
+            if meta_obj and getattr(meta_obj, 'name', None):
+                names.append(meta_obj.name)
+            else:
+                names.append(ot)
+        return names
+
     def _build_export_filename(self, prefix_parts: List[str], timestamp: Optional[str] = None) -> str:
         """统一生成导出文件名（SSOT）
 
         3 处原 inline 重复（export_to_excel L278 / export_selected_types L1033 /
         export_cascade L1360）漂移已开始（不同地方转义规则可能不一致）。
         本 helper 统一规则。
+
+        [CHG v3.20 2026-06-19] 文件名前缀规则：
+        - 支持中文（用户要求"基于 objectname"）
+        - 仅替换 Windows 文件名非法字符集（见 invalid_chars 变量）
+        - 控制字符、空格替换为 _
+        - 保留 . _ - 中文 alnum
+        例: "架构数据_20260619_143012.xlsx" / "域_子域_template_20260619_143012.xlsx"
 
         Args:
             prefix_parts: 文件名前缀部分（产品名、版本名等），按顺序用 _ 连接
@@ -2882,12 +2964,19 @@ class ImportExportService:
         """
         if timestamp is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        # 安全字符：仅保留字母数字 + _ -
-        safe_parts = [
-            "".join(c if c.isalnum() or c in '_-' else '_' for c in part)
-            for part in prefix_parts
-            if part  # 跳过空值
-        ]
+        # [CHG v3.20 2026-06-19] Windows 非法字符集（< > : " / \ | ? *）+ 控制字符
+        invalid_chars = '<>:"|?*/' + "\r\n\t\\"
+        safe_parts = []
+        for part in prefix_parts:
+            if not part:
+                continue
+            cleaned = "".join(c if c not in invalid_chars else "_" for c in str(part))
+            # 合并连续 _ 并 strip 首尾
+            while "__" in cleaned:
+                cleaned = cleaned.replace("__", "_")
+            cleaned = cleaned.strip("_").strip()
+            if cleaned:
+                safe_parts.append(cleaned)
         if safe_parts:
             return "{0}_{1}.xlsx".format("_".join(safe_parts), timestamp)
         return "{0}.xlsx".format(timestamp)

@@ -485,6 +485,11 @@ const props = defineProps({
   importOptions: {
     type: Object,
     default: () => ({})
+  },
+  // [NEW v3.20 2026-06-19] 触发菜单编码 (arch-data → 模板走"架构数据"前缀)
+  menuCode: {
+    type: String,
+    default: ''
   }
 })
 
@@ -1183,7 +1188,10 @@ async function downloadTemplate() {
     const types = props.multiTypeMode && selectedMultiTypes.value.length > 0
       ? [...selectedMultiTypes.value]
       : [props.objectType]
-    const result = await boService.downloadTemplate(types[0], { selected_types: types })
+    const result = await boService.downloadTemplate(types[0], {
+      selected_types: types,
+      menu_code: props.menuCode || undefined,
+    })
     if (result.success) {
       message.success('模板下载成功')
     } else {
