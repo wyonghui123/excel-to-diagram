@@ -364,6 +364,16 @@ class AuditService:
         try:
             now = datetime.now().isoformat()
 
+            # [FIX 2026-06-20 P2 v2] AuditService 入口处 auto-gen transaction_id/trace_id
+            # 覆盖所有调用方: AuditInterceptor + AuditLogger + 4 个直接 INSERT 路径
+            # (auth_api/user_api/user_reset_password/subflow_engine)
+            if not transaction_id:
+                import uuid as _uuid
+                transaction_id = f"tx_{_uuid.uuid4().hex[:16]}"
+            if not trace_id:
+                import uuid as _uuid
+                trace_id = f"tr_{_uuid.uuid4().hex[:16]}"
+
             # [FIX 2026-06-19 E.2] 强制 action 不能为空, 否则报 ERROR
             # 业务人员看到 '未识别操作' 是因为某些路径传入了空 action
             # 这里是入口拦截, 早于所有后续处理
