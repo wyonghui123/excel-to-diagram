@@ -131,3 +131,53 @@ More info and automated migrator: https://sass-lang.com/d/import
     src\styles\mixins.scss 12:11               respond-to()
     src\components\ArchWorkspaceNew.vue 261:1  root stylesheet
 
+DEPRECATION WARNING [import]: Sass @import rules are deprecated and will be removed in Dart Sass 3.0.0.
+
+More info and automated migrator: https://sass-lang.com/d/import
+
+  ╷
+2 │ @import '@/styles/mixins.scss';
+  │         ^^^^^^^^^^^^^^^^^^^^^^
+  ╵
+    src\components\common\ImportDialog\ImportDialog.vue 2:9  root stylesheet
+
+DEPRECATION WARNING [import]: Sass @import rules are deprecated and will be removed in Dart Sass 3.0.0.
+
+More info and automated migrator: https://sass-lang.com/d/import
+
+  ╷
+2 │ @import '@/styles/mixins.scss';
+  │         ^^^^^^^^^^^^^^^^^^^^^^
+  ╵
+    src\components\common\ImportDialog\ImportDialog.vue 2:9  root stylesheet
+
+DEPRECATION WARNING [import]: Sass @import rules are deprecated and will be removed in Dart Sass 3.0.0.
+
+More info and automated migrator: https://sass-lang.com/d/import
+
+  ╷
+2 │ @import '@/styles/mixins.scss';
+  │         ^^^^^^^^^^^^^^^^^^^^^^
+  ╵
+    src\components\common\ImportDialog\ImportDialog.vue 2:9  root stylesheet
+
+DEPRECATION WARNING [import]: Sass @import rules are deprecated and will be removed in Dart Sass 3.0.0.
+
+More info and automated migrator: https://sass-lang.com/d/import
+
+  ╷
+2 │ @import '@/styles/mixins.scss';
+  │         ^^^^^^^^^^^^^^^^^^^^^^
+  ╵
+    src\components\common\ImportDialog\ImportDialog.vue 2:9  root stylesheet
+
+DEPRECATION WARNING [import]: Sass @import rules are deprecated and will be removed in Dart Sass 3.0.0.
+
+More info and automated migrator: https://sass-lang.com/d/import
+
+  ╷
+2 │ @import '@/styles/mixins.scss';
+  │         ^^^^^^^^^^^^^^^^^^^^^^
+  ╵
+    src\components\common\ExportDialog\ExportDialog.vue 2:9  root stylesheet
+
