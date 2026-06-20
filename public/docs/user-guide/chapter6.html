@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>第 6 章 · 系统配置 · BIP 帮助中心</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body class="page-chapter" style="--c: #475569">
+  <header class="chapter-header">
+    <div class="chapter-header__inner">
+      <div class="chapter-header__crumbs">
+        <a href="./index.html">帮助中心</a>
+        <span class="sep">/</span>
+        <span>第 6 章</span>
+      </div>
+      <div class="chapter-header__eyebrow">CHAPTER 06 · SLATE</div>
+      <h1 class="chapter-header__title">系统配置</h1>
+      <p class="chapter-header__desc">
+        枚举、菜单、用户组，让系统跟着组织一起长。
+        配置即代码，变更可回滚——让系统真正可治理。
+      </p>
+    </div>
+  </header>
+
+  <main class="chapter-main">
+
+    <section class="story-card" aria-label="7 段式故事卡">
+      <h2 class="story-card__title">故事卡 <small>从"枚举乱改"到系统配置治理</small></h2>
+      <p class="story-card__desc">把"配置漂移"这条主线，拆成 7 个节点。</p>
+      <div class="story">
+        <div class="story__node">
+          <div class="story__node-num">1</div>
+          <div class="story__node-title">痛点</div>
+          <div class="story__node-desc">"在用 / 停用"随便改，下游全乱。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">2</div>
+          <div class="story__node-title">召唤</div>
+          <div class="story__node-desc">YAML 即真相源，3 环境一致。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">3</div>
+          <div class="story__node-title">入门</div>
+          <div class="story__node-desc">5 步加一个新枚举值。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">4</div>
+          <div class="story__node-title">探索</div>
+          <div class="story__node-desc">枚举 / 菜单 / 用户组三件套。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">5</div>
+          <div class="story__node-title">进阶</div>
+          <div class="story__node-desc">灰度发布、配置回滚、YAML diff。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">6</div>
+          <div class="story__node-title">实战</div>
+          <div class="story__node-desc">一次线上事故后的配置治理复盘。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">7</div>
+          <div class="story__node-title">回顾</div>
+          <div class="story__node-desc">六章回顾 + 进阶阅读路线。</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">3 · 入门：5 步加一个新枚举值</h2>
+      <ol>
+        <li>进入「<strong>系统配置 → 枚举管理</strong>」。</li>
+        <li>搜索目标枚举（如 <code>order_status</code>）。</li>
+        <li>进入详情，点「<strong>+ 新增值</strong>」。</li>
+        <li>填写 code（如 <code>PENDING_REVIEW</code>）、label、上线日期。</li>
+        <li>提交后等待代码评审 + CI 通过，自动同步到 dev/staging/prod 三环境。</li>
+      </ol>
+      <div class="callout"><strong>原则：</strong>code 不可修改、label 可修改；下线用「停用」而非删除。</div>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">4 · 探索：三件套对照</h2>
+      <table class="tip-table">
+        <thead><tr><th>配置类型</th><th>存储位置</th><th>典型用途</th><th>修改权限</th></tr></thead>
+        <tbody>
+          <tr><td>枚举</td><td>YAML → DB cache</td><td>状态码、类型字典</td><td>配置管理员</td></tr>
+          <tr><td>菜单</td><td>YAML + 角色绑定</td><td>左侧导航 + 权限点</td><td>系统管理员</td></tr>
+          <tr><td>用户组</td><td>DB + 角色绑定</td><td>把人按职责聚合</td><td>组织管理员</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">5 · 进阶：灰度与回滚</h2>
+      <ul>
+        <li><strong>灰度发布</strong>：新枚举值可设置"仅 dev 可见"或"灰度 10% 用户可见"。</li>
+        <li><strong>配置回滚</strong>：每次发布生成快照，一键回到任意历史版本。</li>
+        <li><strong>YAML diff</strong>：UI 改动自动生成 PR，可在 GitLab / GitHub 上 review。</li>
+      </ul>
+      <div class="callout"><strong>小心：</strong>已使用的枚举值被停用，会让历史数据展示为「未知」——必须先迁数据再停用。</div>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">6 · 实战：线上事故复盘</h2>
+      <p>事故：某次运营活动新增 <code>PROMO_ACTIVE</code> 状态，没走审批直接上线，导致订单流程分支异常。</p>
+      <table class="tip-table">
+        <thead><tr><th>步骤</th><th>操作</th><th>结果</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>审计日志锁定操作人 + 时间</td><td>trace_id = e2c8...a14</td></tr>
+          <tr><td>2</td><td>YAML diff 查看新增值</td><td>确认是新增非修改</td></tr>
+          <tr><td>3</td><td>一键回滚到上一个 release</td><td>5 秒恢复</td></tr>
+          <tr><td>4</td><td>补走审批 + 加 lint 规则</td><td>同类问题不再发生</td></tr>
+          <tr><td>5</td><td>事后复盘报告归档</td><td>合规留痕</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">7 · 回顾 &amp; 进阶阅读</h2>
+      <p><strong>六章关键词回顾：</strong></p>
+      <ul>
+        <li>Ch1 产品版本 —— 可追溯</li>
+        <li>Ch2 架构数据 —— 路径即语义</li>
+        <li>Ch3 AA 图生成 —— 6 步向导</li>
+        <li>Ch4 权限管理 —— 三维防护</li>
+        <li>Ch5 审计日志 —— 全链路留痕</li>
+        <li>Ch6 系统配置 —— YAML 即真相源</li>
+      </ul>
+      <div class="callout">
+        <strong>进阶阅读：</strong>
+        <ul style="margin-top: 8px; padding-left: 18px;">
+          <li>《API 接口契约详解》—— docs/api-reference.md</li>
+          <li>《数据模型与色卡规范》—— docs/data-model-and-color-system-analysis.md</li>
+          <li>《部署与运维 SOP》—— docs/SOP-USER-DEPLOYMENT.md</li>
+        </ul>
+      </div>
+    </section>
+
+    <nav class="chapter-nav" aria-label="章节导航">
+      <a href="./chapter5.html">
+        <span class="chapter-nav__label">← 上一章</span>
+        <span class="chapter-nav__title">第 5 章 · 审计日志</span>
+      </a>
+      <a href="./index.html">
+        <span class="chapter-nav__label">回到目录 ↩</span>
+        <span class="chapter-nav__title chapter-nav__title--next">帮助中心首页</span>
+      </a>
+    </nav>
+  </main>
+</body>
+</html>
