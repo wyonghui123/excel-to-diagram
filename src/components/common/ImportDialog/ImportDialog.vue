@@ -451,6 +451,7 @@ import { useCrudMessage } from '@/composables/useCrudMessage'
 import { UploadFilled, Download, Filter, Warning } from '@element-plus/icons-vue'
 import { boService } from '@/services/boService'
 import { metaService } from '@/services/metaService'
+import { objectTypeService } from '@/services/objectTypeService'
 
 const props = defineProps({
   visible: {
@@ -966,11 +967,11 @@ async function loadSchema() {
 
   loadingSchema.value = true
   try {
-    const [schemaResult, objectsResult] = await Promise.all([
+    const [schemaResult, labelsMap] = await Promise.all([
       metaService.getSchema(props.objectType),
-      // [NEW v1.2.3 2026-06-17] 加载所有对象类型 labels 映射
-      // /api/v1/meta/objects 返回 [{id, name, ...}]，用于第 4 步显示中文名
-      metaService._request('GET', '/meta/objects').catch(() => ({ success: false, data: [] }))
+      // [FIX v1.2.18k 2026-06-20] 用 objectTypeService (apiV1 /meta/objects) 取中文名
+      // metaService._request 默认走 v2，/meta/objects 只在 v1 注册，会 404。
+      objectTypeService.init().catch(() => ({}))
     ])
 
     if (schemaResult.success && schemaResult.data) {
@@ -981,19 +982,8 @@ async function loadSchema() {
       }
     }
 
-    // 构建 objectTypeLabels 映射
-    if (objectsResult.success && Array.isArray(objectsResult.data)) {
-      const map = {}
-      objectsResult.data.forEach(obj => {
-        if (obj?.id) {
-          map[obj.id] = obj.name || obj.id
-        }
-      })
-      // 合并 props 传入的 objectTypeLabels (props 优先)
-      objectTypeLabelsMap.value = { ...map, ...(props.objectTypeLabels || {}) }
-    } else {
-      objectTypeLabelsMap.value = { ...(props.objectTypeLabels || {}) }
-    }
+    // 合并 API labels + props 传入的 objectTypeLabels (props 优先)
+    objectTypeLabelsMap.value = { ...(labelsMap || {}), ...(props.objectTypeLabels || {}) }
   } catch (e) {
     console.error('[ImportDialog] 加载 schema 失败:', e)
   } finally {

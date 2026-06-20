@@ -1,0 +1,133 @@
+[unplugin-vue-components] component "AssociationSection"(D:/filework/excel-to-diagram/src/components/common/ObjectPage/AssociationSection.vue) has naming conflicts with other components, ignored.
+DEPRECATION WARNING [import]: Sass @import rules are deprecated and will be removed in Dart Sass 3.0.0.
+
+More info and automated migrator: https://sass-lang.com/d/import
+
+  ╷
+2 │ @import '../../styles/mixins.scss';
+  │         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  ╵
+    src\components\common\ConfirmDialog.vue 2:9  root stylesheet
+
+DEPRECATION WARNING [import]: Sass @import rules are deprecated and will be removed in Dart Sass 3.0.0.
+
+More info and automated migrator: https://sass-lang.com/d/import
+
+  ╷
+2 │ @import '../../styles/mixins.scss';
+  │         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  ╵
+    src\components\common\EmptyState.vue 2:9  root stylesheet
+
+DEPRECATION WARNING [import]: Sass @import rules are deprecated and will be removed in Dart Sass 3.0.0.
+
+More info and automated migrator: https://sass-lang.com/d/import
+
+  ╷
+2 │ @import '../../styles/mixins.scss';
+  │         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  ╵
+    src\components\common\MetaTable.vue 2:9  root stylesheet
+
+DEPRECATION WARNING [import]: Sass @import rules are deprecated and will be removed in Dart Sass 3.0.0.
+
+More info and automated migrator: https://sass-lang.com/d/import
+
+  ╷
+2 │ @import '../../styles/mixins.scss';
+  │         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  ╵
+    src\components\common\MetaForm.vue 2:9  root stylesheet
+
+DEPRECATION WARNING [import]: Sass @import rules are deprecated and will be removed in Dart Sass 3.0.0.
+
+More info and automated migrator: https://sass-lang.com/d/import
+
+  ╷
+2 │ @import '@/styles/mixins.scss';
+  │         ^^^^^^^^^^^^^^^^^^^^^^
+  ╵
+    src\components\common\ExportDialog\ExportDialog.vue 2:9  root stylesheet
+
+DEPRECATION WARNING [import]: Sass @import rules are deprecated and will be removed in Dart Sass 3.0.0.
+
+More info and automated migrator: https://sass-lang.com/d/import
+
+  ╷
+2 │ @import '@/styles/mixins.scss';
+  │         ^^^^^^^^^^^^^^^^^^^^^^
+  ╵
+    src\components\common\ImportDialog\ImportDialog.vue 2:9  root stylesheet
+
+DEPRECATION WARNING [import]: Sass @import rules are deprecated and will be removed in Dart Sass 3.0.0.
+
+More info and automated migrator: https://sass-lang.com/d/import
+
+  ╷
+2 │ @import '../../../styles/mixins.scss';
+  │         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  ╵
+    src\views\SystemManagement\components\PermissionConfigPanel.vue 2:9  root stylesheet
+
+DEPRECATION WARNING [import]: Sass @import rules are deprecated and will be removed in Dart Sass 3.0.0.
+
+More info and automated migrator: https://sass-lang.com/d/import
+
+  ╷
+2 │ @import '../../../styles/mixins.scss';
+  │         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  ╵
+    src\views\SystemManagement\components\ConditionRuleList.vue 2:9  root stylesheet
+
+DEPRECATION WARNING [import]: Sass @import rules are deprecated and will be removed in Dart Sass 3.0.0.
+
+More info and automated migrator: https://sass-lang.com/d/import
+
+  ╷
+2 │ @import '../../../styles/mixins.scss';
+  │         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  ╵
+    src\views\SystemManagement\components\MenuPermissionMatrix.vue 2:9  root stylesheet
+
+DEPRECATION WARNING [import]: Sass @import rules are deprecated and will be removed in Dart Sass 3.0.0.
+
+More info and automated migrator: https://sass-lang.com/d/import
+
+  ╷
+2 │ @import '../styles/mixins.scss';
+  │         ^^^^^^^^^^^^^^^^^^^^^^^
+  ╵
+    src\components\ArchWorkspaceNew.vue 2:9  root stylesheet
+
+DEPRECATION WARNING [import]: Sass @import rules are deprecated and will be removed in Dart Sass 3.0.0.
+
+More info and automated migrator: https://sass-lang.com/d/import
+
+  ╷
+2 │ @import '../styles/mixins.scss';
+  │         ^^^^^^^^^^^^^^^^^^^^^^^
+  ╵
+    src\components\FrequentProductsSection.vue 2:9  root stylesheet
+
+DEPRECATION WARNING [import]: Sass @import rules are deprecated and will be removed in Dart Sass 3.0.0.
+
+More info and automated migrator: https://sass-lang.com/d/import
+
+  ╷
+2 │ @import '../styles/mixins.scss';
+  │         ^^^^^^^^^^^^^^^^^^^^^^^
+  ╵
+    src\components\StatsOverview.vue 2:9  root stylesheet
+
+DEPRECATION WARNING [global-builtin]: Global built-in functions are deprecated and will be removed in Dart Sass 3.0.0.
+Use map.get instead.
+
+More info and automated migrator: https://sass-lang.com/d/import
+
+   ╷
+12 │   $value: map-get($breakpoints, $breakpoint);
+   │           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   ╵
+    src\styles\mixins.scss 12:11               respond-to()
+    src\components\ArchWorkspaceNew.vue 261:1  root stylesheet
+

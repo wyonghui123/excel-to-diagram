@@ -5494,6 +5494,7 @@ class ImportExportService:
             record = {}
 
             operation_mode = "create"
+            operation_mode_explicit = False
             if has_operation_mode and operation_mode_idx >= 0 and operation_mode_idx < len(row):
                 mode_value = row[operation_mode_idx]
                 if mode_value and str(mode_value).strip():
@@ -5501,6 +5502,7 @@ class ImportExportService:
                     parsed = self._parse_operation_mode_from_label(mode_value)
                     if parsed is not None:
                         operation_mode = parsed
+                        operation_mode_explicit = True
                     # 无法识别时保留默认 "create"，不再用 key_part 兜底
                 else:
                     operation_mode = "create"
@@ -5702,7 +5704,9 @@ class ImportExportService:
                     if 'version_id' not in record and context.get('version_id'):
                         record['version_id'] = context.get('version_id')
                     logger.info(f"[Import] 新增数据中version_id={record.get('version_id')}")
-                    if conflict_strategy == "upsert":
+                    # [FIX v1.2.18l 2026-06-20] 当 Excel 中显式填写了 create 时，按 create 语义执行（不 upsert）
+                    # conflict_strategy=upsert 只在未显式指定操作模式时生效
+                    if conflict_strategy == "upsert" and not operation_mode_explicit:
                         logger.info(f"[Import] conflict_strategy=upsert，使用 upsert 处理可能已存在的记录")
                         upsert_result = self._upsert_record(object_type, record, obj.import_export)
                         if upsert_result["success"]:
@@ -5718,13 +5722,18 @@ class ImportExportService:
                             failed_count += 1
                             errors.append({"row": row_num, "operation": operation_mode, "field": "编码", "value": record.get("code", ""), "message": upsert_result.get("error", "Upsert failed")})
                     else:
-                        self.manage_service.create(CreateRequest(object_type=object_type, data=record))
-                        success_count += 1
-                        created_count += 1
-                        _record_success_item(successes, row_num, "create", record, _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
+                        result = self.manage_service.create(CreateRequest(object_type=object_type, data=record))
+                        if result.success:
+                            success_count += 1
+                            created_count += 1
+                            _record_success_item(successes, row_num, "create", record, _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
+                        else:
+                            failed_count += 1
+                            errors.append({"row": row_num, "operation": operation_mode, "field": "编码", "value": record.get("code", ""), "message": result.message or "创建失败"})
                 elif operation_mode == "update":
                     # [SYMBOL] 关键修复：如果 conflict_strategy=upsert，执行 upsert 而不是更新
-                    if conflict_strategy == "upsert":
+                    # [FIX v1.2.18l 2026-06-20] Excel 中显式 update 时，按 update 语义执行（不 upsert）
+                    if conflict_strategy == "upsert" and not operation_mode_explicit:
                         logger.info(f"[Import] 执行upsert操作 (operation_mode=update 但 conflict_strategy=upsert)")
                         if 'version_id' not in record and context.get('version_id'):
                             record['version_id'] = context.get('version_id')
