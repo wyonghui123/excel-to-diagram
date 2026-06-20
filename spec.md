@@ -17,7 +17,7 @@
 
 ## new_files
 
-(无新增)
+- scripts/backfill_audit_tx_id_p22_system.py
 
 ## deleted_files
 
@@ -34,6 +34,7 @@
 - [x] [P2-all] tx_id 全表覆盖率 >= 90%
 - [x] E2E: C.1 (tx_id 共享) + D.2 (user_name 规范化) 生效
 - [x] 数据修复: 12 条 P1 + 4914 条 P2 backfill
+- [x] [P2.2] system 类记录 tx_id 回填: 1866 条 (100% 全表覆盖率)
 
 ## 验证
 
