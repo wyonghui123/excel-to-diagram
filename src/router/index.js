@@ -175,14 +175,22 @@ router.beforeEach(async (to, from, next) => {
   const isDynamicLabel = !!to.meta.isDetailRoute
 
   if (to.meta.openInNewTab !== false && to.name !== 'landing' && tabLabel) {
-    const existingTab = tabStore.tabs.find(t => t.id === to.path)
+    // [FIX 2026-06-20] Hub 页使用稳定的 baseTabPath 作为 Tab ID,避免子 Tab 切换产生重复 Tab
+    const tabId = to.meta.baseTabPath || to.path
+    const existingTab = tabStore.tabs.find(t => t.id === tabId)
 
     if (existingTab) {
-      tabStore.switchTab(existingTab.id)
+      // [FIX 2026-06-20] 复用 openTab 同步更新 path/label,确保 Hub 子 Tab 切换后 Tab 链接正确
+      tabStore.openTab({
+        id: tabId,
+        label: tabLabel,
+        path: to.fullPath,
+        dynamicLabel: isDynamicLabel
+      })
     } else if (to.meta.isDetailRoute) {
       const sourceTabId = tabStore.activeTabId || from.path
       tabStore.openTab({
-        id: to.path,
+        id: tabId,
         label: tabLabel,
         path: to.fullPath,
         dynamicLabel: isDynamicLabel,
@@ -192,7 +200,7 @@ router.beforeEach(async (to, from, next) => {
       // [FIX] 非详情页也打开新 tab (保留源 tab),不再 close+replace 做 inplace 导航
       const sourceTabId = tabStore.activeTabId || from.path
       tabStore.openTab({
-        id: to.path,
+        id: tabId,
         label: tabLabel,
         path: to.fullPath,
         dynamicLabel: isDynamicLabel,

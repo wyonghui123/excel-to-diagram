@@ -23,7 +23,7 @@ function serializeTabs(tabs) {
 function deserializeTabs(raw) {
   try {
     return JSON.parse(raw)
-  } catch (_) {
+  } catch {
     return { tabs: [], activeTabId: null }
   }
 }
@@ -77,6 +77,17 @@ describe('tabStore (FR-016)', () => {
       const result = store.openTab({ id: 't3', label: 'T3' })
       expect(result).toBeNull()
       expect(store.tabs.length).toBe(2)
+    })
+
+    it('[FIX 2026-06-20] 使用 baseTabPath 作为 id 时 Hub 子路径不重复', () => {
+      const store = useTabStore()
+      // 模拟 router guard 用 baseTabPath 作为 tab id
+      store.openTab({ id: '/user-permission', label: '用户与权限管理', path: '/user-permission' })
+      store.openTab({ id: '/user-permission', label: '用户与权限管理', path: '/user-permission/users' })
+      store.openTab({ id: '/user-permission', label: '用户与权限管理', path: '/user-permission/roles' })
+      expect(store.tabs.length).toBe(1)
+      expect(store.tabs[0].path).toBe('/user-permission/roles')
+      expect(store.activeTabId).toBe('/user-permission')
     })
   })
 

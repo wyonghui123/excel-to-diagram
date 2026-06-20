@@ -1620,13 +1620,13 @@ const isEmbeddedOrDialogMode = computed(() =>
   props.displayMode === 'dialog' || props.displayMode === 'embedded'
 )
 
-// dialog/embedded 模式：使用 max-height 限制表格行数；page 模式：使用 height="100%" 填满容器
+// page 模式：height="100%" 填满容器（依赖外层 flex 布局给出确定高度）
+// dialog/embedded 模式：返回 null，使用 max-height
 const tableHeight = computed(() => {
   if (isEmbeddedOrDialogMode.value) {
-    // dialog/embedded 模式下，限制表格最大高度为 400px
-    return null // 使用 max-height
+    return null
   }
-  return '100%' // page 模式填满容器
+  return '100%'
 })
 const tableMaxHeight = computed(() => {
   if (isEmbeddedOrDialogMode.value) {

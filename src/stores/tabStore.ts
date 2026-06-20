@@ -47,6 +47,10 @@ export const useTabStore = defineStore('tab', () => {
       if (tab.pinned !== undefined) {
         existing.pinned = tab.pinned
       }
+      // [FIX 2026-06-20] Hub 页子 Tab 切换时路径变化，同步更新现有 Tab 的 path
+      if (tab.path && existing.path !== tab.path) {
+        existing.path = tab.path
+      }
       activeTabId.value = existing.id
       return existing
     }

@@ -35,13 +35,13 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, onActivated, markRaw } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onActivated, markRaw } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useTabStore } from '@/stores/tabStore'
 import { SubNavTabs } from '@/components/common'
 import GenericObjectList from '@/views/GenericObjectList.vue'
 import { useMenuPermissions } from '@/composables/useMenuPermissions'
-import { tabGroupConfigs, getGroupTabs, getGroupTitle } from '@/config/menuConfig'
+import { getGroupTabs, getGroupTitle } from '@/config/menuConfig'
 
 const props = defineProps({
   group: {

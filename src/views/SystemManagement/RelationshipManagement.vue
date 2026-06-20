@@ -53,6 +53,9 @@ import { MultiObjectManagementPage } from '@/components/common/MultiObjectManage
 
 defineOptions({ name: 'RelationshipManagement' })
 
+// [FIX v1.2.18 2026-06-20] annotation 不应作为顶层对象类型 (它是辅助关联数据, category=auxiliary)
+// 之前错误地加入 objectTypes, 现在移除
+// annotation 通过其他对象的"备注"关联面板管理, 不通过顶层导入
 const objectTypes = ['domain', 'sub_domain', 'service_module', 'business_object', 'relationship']
 const pageOptions = { defaultTab: 'relationship' }
 const pageRef = ref(null)

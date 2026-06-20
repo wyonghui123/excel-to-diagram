@@ -31,14 +31,24 @@ export default [
     name: 'user-permission',
     component: () => import('@/views/GenericTabContainer.vue'),
     props: { group: 'user-permission' },
-    meta: { title: '用户与权限管理', requiresAuth: true, requiresAdmin: true }
+    meta: {
+      title: '用户与权限管理',
+      requiresAuth: true,
+      requiresAdmin: true,
+      baseTabPath: '/user-permission'
+    }
   },
   {
     path: '/business-config/:tab?',
     name: 'business-config',
     component: () => import('@/views/GenericTabContainer.vue'),
     props: { group: 'business-config' },
-    meta: { title: '业务配置', requiresAuth: true, requiresAdmin: true }
+    meta: {
+      title: '业务配置',
+      requiresAuth: true,
+      requiresAdmin: true,
+      baseTabPath: '/business-config'
+    }
   },
   {
     path: '/detail/:objectType',

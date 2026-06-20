@@ -534,11 +534,14 @@ const objectTypeLabelsMap = ref({})
 // metaService.buildCascadeChain() 仍保留 (search_help 仍在用), 只在导入流程不再使用
 
 const availableMultiTypes = computed(() => {
+  // [FIX v1.2.18 2026-06-20] 优先用 objectTypeLabelsMap (从 /meta/objects API 加载的中文名),
+  // 兼容 props.objectTypeLabels (父组件传入), 最后 fallback 到 type id
+  // 否则 annotation 等类型会显示原始 id 而不是 "备注信息"
   return props.objectTypes
     .filter(t => t && typeof t === 'string')
     .map(t => ({
       value: t,
-      label: props.objectTypeLabels[t] || t
+      label: objectTypeLabelsMap.value?.[t] || props.objectTypeLabels?.[t] || t
     }))
 })
 
@@ -707,11 +710,27 @@ const getErrorTypeName = (ot) => {
 
 const importResultsTable = computed(() => {
   if (!importResult.value?.results) return []
-  return Object.entries(importResult.value.results).map(([type, result]) => {
+  // [FIX v1.2.18h 2026-06-20] 按 props.objectTypes 顺序排序 (hierarchy 顺序),
+  // 而不是依赖 Object.entries 的字典序 (annotation 会排在第一, 颠倒顺序)
+  const typeOrder = props.objectTypes || []
+  const ordered = []
+  // 先按 props.objectTypes 顺序填入
+  for (const t of typeOrder) {
+    if (importResult.value.results[t]) {
+      ordered.push([t, importResult.value.results[t]])
+    }
+  }
+  // 再填入未在 typeOrder 里的 (防御)
+  for (const [t, r] of Object.entries(importResult.value.results)) {
+    if (!typeOrder.includes(t)) {
+      ordered.push([t, r])
+    }
+  }
+  return ordered.map(([type, result]) => {
     // [FIX 2026-06-17] 用 objectTypeLabelsMap 拿中文名，schema.fields 是字段不是对象类型
     const displayName = objectTypeLabelsMap.value?.[type] || props.objectTypeLabels?.[type] || type
-    // [NEW v1.2.13 2026-06-19] 成功数 = created + updated + deleted (不包括 skipped)
-    const successCount = (result.created || 0) + (result.updated || 0) + (result.deleted || 0)
+    // [FIX v1.2.18 2026-06-20] 成功数 = created + updated + deleted + skipped (移除独立 skip tab)
+    const successCount = (result.created || 0) + (result.updated || 0) + (result.deleted || 0) + (result.skipped || 0)
     return {
       type: displayName,
       typeId: type,  // 保留 id 用于调试
@@ -722,8 +741,8 @@ const importResultsTable = computed(() => {
       failed: result.failed || 0,
       successCount,
       warning: (result.warnings || []).length,
-      // [NEW v1.2.13 2026-06-19] 默认 tab: 优先失败 > 成功 > 告警 > 跳过
-      activeTab: (result.failed || 0) > 0 ? 'errors' : (successCount > 0 ? 'success' : (((result.warnings || []).length > 0) ? 'warnings' : 'skipped'))
+      // [FIX v1.2.18] 默认 tab: 优先失败 > 成功(含跳过) > 告警
+      activeTab: (result.failed || 0) > 0 ? 'errors' : (successCount > 0 ? 'success' : (((result.warnings || []).length > 0) ? 'warnings' : 'success'))
     }
   })
 })
@@ -750,7 +769,18 @@ const previewSheetGroups = computed(() => {
   const allWarnings = previewResult.value?.validation?.warnings ||
                       previewResult.value?.warnings ||
                       []
-  return sheets.map(sheet => {
+  // [FIX v1.2.18h 2026-06-20] 按 props.objectTypes (hierarchy 顺序) 排序 sheets,
+  // 保证与 Excel sheet 顺序一致: domain → sub_domain → service_module → business_object → relationship → annotation
+  const typeOrder = props.objectTypes || []
+  const ordered = []
+  for (const t of typeOrder) {
+    const s = sheets.find(sheet => sheet.object_type === t)
+    if (s) ordered.push(s)
+  }
+  for (const s of sheets) {
+    if (!ordered.includes(s)) ordered.push(s)
+  }
+  return ordered.map(sheet => {
     const name = sheet.name || sheet.sheet || '-'
     const errors = allErrors.filter(e => (e.sheet || e.table) === name)
     const warnings = allWarnings.filter(w => (w.sheet || w.table) === name)
@@ -761,12 +791,15 @@ const previewSheetGroups = computed(() => {
       warningCount: warnings.length,
       errors: errors.map((err, i) => ({
         row: err.row || err.line || i + 1,
+        // [FIX v1.2.18f] 操作模式字段 (来自后端 validation errors[].operation)
+        operation: err.operation || '-',
         field: err.field || err.column || '-',
         value: err.value || err.input || '-',
         message: err.error || err.message || String(err)
       })),
       warnings: warnings.map((warn, i) => ({
         row: warn.row || warn.line || i + 1,
+        operation: warn.operation || '-',
         field: warn.field || warn.column || '-',
         value: warn.value || warn.input || '-',
         message: warn.error || warn.message || String(warn)
