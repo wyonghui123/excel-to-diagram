@@ -31,8 +31,27 @@ import os
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+# Import sandbox-safe file_marker
+try:
+    from scripts.debug.utils.sandbox_safe import file_marker as _ss_file_marker
+    _SS_AVAILABLE = True
+except ImportError:
+    _SS_AVAILABLE = False
+
+    def _ss_file_marker(name, state, extra=None):
+        # Fallback: write to .trae/debug/markers/
+        marker_dir = Path(__file__).resolve().parent.parent.parent.parent / ".trae" / "debug" / "markers"
+        marker_dir.mkdir(parents=True, exist_ok=True)
+        marker_path = marker_dir / f"{name}.state.json"
+        data = {"name": name, "state": state, "timestamp": datetime.now().isoformat()}
+        if extra:
+            data["extra"] = extra
+        marker_path.write_text(__import__('json').dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        return marker_path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent  # V3.7 修复：restart 子目录多一层
@@ -180,6 +199,9 @@ def cmd_restart(args):
     print("=" * 70)
     print()
 
+    # V3.5: file_marker for sandbox observability
+    _ss_file_marker("backend_restart", "running", extra={"action": "restart"})
+
     # Step 1: 杀所有 waitress 进程（包括 python.exe）
     killed = kill_all_backend_processes()
     print()
@@ -198,19 +220,23 @@ def cmd_restart(args):
     )
     if not result or result.returncode != 0:
         _log(f"service_manager 启动失败: {result.stderr if result else 'timeout'}", "FAIL")
+        _ss_file_marker("backend_restart", "failed", extra={"stage": "start-be", "stderr": (result.stderr if result else "timeout")[:200]})
         return 1
     print()
 
     # Step 4: 等待端口监听
     if not wait_for_port(3010, timeout=30):
         _log("端口未监听，启动失败", "FAIL")
+        _ss_file_marker("backend_restart", "failed", extra={"stage": "wait_port"})
         return 1
     print()
 
     # Step 5: 验证 health
     if not verify_health():
         _log("health 端点未返回 200", "FAIL")
+        _ss_file_marker("backend_restart", "failed", extra={"stage": "verify_health"})
         return 1
+    _ss_file_marker("backend_restart", "done", extra={"action": "restart"})
     print()
 
     # Step 6: 验证 PID 一致性

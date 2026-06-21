@@ -36,11 +36,26 @@
 """
 
 import argparse
+import json
 import re
 import sys
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
+
+# Import safe-io helper
+try:
+    from scripts.debug.utils.safe_io import emit_safe_output
+except ImportError:
+    def emit_safe_output(data, prefix, output_dir=None, also_stdout=True):
+        out_dir = Path(output_dir) if output_dir else (Path(__file__).resolve().parent.parent.parent.parent / ".trae" / "debug" / "queries")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+        out_file = out_dir / f"{prefix}_{ts}.json"
+        out_file.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        if also_stdout:
+            print(f"[SAFE_OUTPUT] {out_file}")
+        return out_file
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent  # V3.6 修复：log 子目录多一层
@@ -243,6 +258,10 @@ def main():
     parser.add_argument("--no-color", action="store_true", help="禁用颜色")
     parser.add_argument("--max-lines", type=int, default=100000,
                         help="最大读取行数（防内存爆炸）")
+    parser.add_argument("--safe-output", action="store_true",
+                        help="V3.5: 写入 .trae/debug/queries/ 文件（sandbox-safe，输出为 JSON 数组）")
+    parser.add_argument("--safe-output-dir", metavar="DIR",
+                        help="V3.5: 自定义 sandbox-safe 输出目录")
 
     args = parser.parse_args()
 

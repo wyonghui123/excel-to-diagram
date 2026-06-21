@@ -7,20 +7,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -Command \"$p = $env:TRAE_PROJECT_DIR; if (-not $p) { $p = (Get-Location).Path }; & (Join-Path $p 'scripts\\debug\\session_start_bootstrap.ps1')\"",
-            "timeout": 60
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "powershell -Command \"$p = $env:TRAE_PROJECT_DIR; if (-not $p) { $p = (Get-Location).Path }; $input | & (Join-Path $p 'scripts\\debug\\hooks_pre_tool_use.ps1')\"",
-            "timeout": 10
+            "command": "powershell -NoProfile -Command \"$p = $env:TRAE_PROJECT_DIR; if (-not $p) { $p = (Get-Location).Path }; & (Join-Path $p 'scripts\\debug\\session_start_bootstrap.ps1')\"",
+            "timeout": 30
           }
         ]
       }

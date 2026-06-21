@@ -221,7 +221,10 @@ def main():
             "backend_pid": detect_active_backend_pid(),
             "files": files,
         }
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        if args.safe_output:
+            emit_safe_output(result, prefix="check_log_files", output_dir=args.safe_output_dir)
+        else:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
 
     print_results(files, args.filter)

@@ -33,8 +33,16 @@ import os
 import re
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
+
+# Import sandbox-safe utilities (with fallback if not available)
+try:
+    from scripts.debug.utils.sandbox_safe import output as _ss_output
+    _SANDBOX_SAFE_AVAILABLE = True
+except ImportError:
+    _SANDBOX_SAFE_AVAILABLE = False
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -283,6 +291,10 @@ def main():
                         help="检测 code 字段映射错误")
     parser.add_argument("--json", action="store_true",
                         help="输出 JSON 格式")
+    parser.add_argument("--safe-output", action="store_true",
+                        help="V3.5: 写入 .trae/debug/queries/ 文件（sandbox-safe）")
+    parser.add_argument("--safe-output-dir", metavar="DIR",
+                        help="V3.5: 自定义 sandbox-safe 输出目录")
 
     args = parser.parse_args()
 
@@ -314,7 +326,24 @@ def main():
             total_issues += issues
 
     if args.json:
-        print(json.dumps(all_results, ensure_ascii=False, indent=2))
+        if args.safe_output and _SANDBOX_SAFE_AVAILABLE:
+            out_dir = Path(args.safe_output_dir) if args.safe_output_dir else None
+            table_name = "_".join(args.tables) if args.tables else "schema"
+            prefix = f"table_schema_{table_name}"
+            if out_dir:
+                out_dir.mkdir(parents=True, exist_ok=True)
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+                out_file = out_dir / f"{prefix}_{ts}.json"
+                out_file.write_text(
+                    json.dumps(all_results, ensure_ascii=False, indent=2, default=str),
+                    encoding="utf-8",
+                )
+                print(f"[SAFE_OUTPUT] {out_file}")
+            else:
+                out_file = _ss_output(all_results, prefix=prefix)
+                print(f"[SAFE_OUTPUT] {out_file}")
+        else:
+            print(json.dumps(all_results, ensure_ascii=False, indent=2))
 
     if total_issues > 0:
         _log(f"发现 {total_issues} 个字段映射问题", "FAIL")
