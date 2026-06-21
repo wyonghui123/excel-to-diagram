@@ -18,7 +18,14 @@
 # 输出：stdout 纯文本（注入到模型上下文的提示）
 
 $ErrorActionPreference = 'Continue'
-$projectRoot = 'd:\filework\excel-to-diagram'
+
+# V4.0.1: 动态检测项目根（不再硬编码路径）
+$projectRoot = $env:TRAE_PROJECT_DIR
+if (-not $projectRoot) {
+    $bootstrapDir = Split-Path -Parent $PSCommandPath
+    $projectRoot = Split-Path -Parent (Split-Path -Parent $bootstrapDir)
+}
+$projectRoot = $projectRoot -replace '/', '\'
 
 # 读取 stdin（仅用于验证 hook 被触发）
 $raw = ''

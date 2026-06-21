@@ -1,37 +1,25 @@
 # scripts/debug/hooks_pre_tool_use.ps1
 # V4.0 PreToolUse Hook - 拦截根目录调试脚本写入
 #
-# 背景：Agent 持续在项目根目录写 debug_*.py / analyze_*.py / query_*.py 等临时调试脚本，
-#       每次写都增加 .agent-violations.json 计数（已累积 348 个）。
-#       V3 dashboard 能检测但不能阻止。V4.0 在 hook 层强制拦截。
-#
-# 输入：stdin JSON (Trae Hook 格式)
-#   {
-#     "tool_name": "Write",
-#     "tool_input": {"file_path": "...", "content": "..."},
-#     ...
-#   }
-#
-# 输出：stdout JSON (Hook 决策)
-#   {
-#     "hookSpecificOutput": {
-#       "hookEventName": "PreToolUse",
-#       "permissionDecision": "deny",
-#       "permissionDecisionReason": "..."
-#     }
-#   }
-#
-# 退出码 0 = 正常；2 = 拒绝
+# V4.0.1 修复：用 TRAE_PROJECT_DIR 动态检测项目根（不在硬编码路径）
 
 # V4.0: 禁用 .ps1 写日志避免 hook 递归
 $ErrorActionPreference = 'Stop'
+
+# V4.0.1: 动态检测项目根（关键修复 - 不再硬编码路径）
+$projectRoot = $env:TRAE_PROJECT_DIR
+if (-not $projectRoot) {
+    # 回退：从 hook 脚本位置推断
+    $hookDir = Split-Path -Parent $PSCommandPath
+    $projectRoot = Split-Path -Parent (Split-Path -Parent $hookDir)
+}
+$projectRoot = $projectRoot -replace '/', '\'
 
 # 读取 stdin
 $raw = ''
 try {
     $raw = [Console]::In.ReadToEnd()
 } catch {
-    # 没有 stdin 输入 - 允许
     Write-Host '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}'
     exit 0
 }
@@ -41,11 +29,9 @@ if (-not $raw) {
     exit 0
 }
 
-# 解析 JSON
 try {
     $payload = $raw | ConvertFrom-Json -ErrorAction Stop
 } catch {
-    # JSON 解析失败 - 允许
     Write-Host '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}'
     exit 0
 }
@@ -62,7 +48,7 @@ if (-not $filePath) {
     exit 0
 }
 
-# V4.0 违规模式：项目根目录的调试脚本
+# V4.0 违规模式：项目根目录的调试脚本（包括 .py 和 .ps1）
 $violationPatterns = @(
     'debug_.*\.py$'
     'analyze_.*\.py$'
@@ -74,19 +60,19 @@ $violationPatterns = @(
     'tmp\.py$'
     '_debug.*\.py$'
     '_test.*\.py$'
+    '_restart.*\.ps1$'      # V4.0.1: 新增 .ps1 模式
+    '_debug.*\.ps1$'
+    '_test.*\.ps1$'
 )
 
-# 提取相对路径（项目根目录判断）
-$projectRoot = 'd:\filework\excel-to-diagram'
+# 提取相对路径
 $relPath = $filePath
 
-# 规范化路径（统一使用 / 或 \）
+# 规范化路径（统一使用 \）
 $normalizedFilePath = $filePath -replace '/', '\'
 
 if ($normalizedFilePath.StartsWith($projectRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
     $relPath = $normalizedFilePath.Substring($projectRoot.Length).TrimStart('\', '/')
-} elseif ($normalizedFilePath.StartsWith('d:\filework\excel-to-diagram', [System.StringComparison]::OrdinalIgnoreCase)) {
-    $relPath = $normalizedFilePath.Substring('d:\filework\excel-to-diagram'.Length).TrimStart('\', '/')
 }
 
 # 根目录判断：相对路径不包含 \ 或 /（说明在项目根目录）
