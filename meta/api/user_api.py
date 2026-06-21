@@ -9,6 +9,7 @@ import os
 import logging
 from datetime import datetime
 from flask import Blueprint, request, jsonify, g
+from meta.api._messages import MSG_ADMIN_REQUIRED, MSG_USER_NOT_FOUND, MSG_USERNAME_REQUIRED, MSG_PASSWORD_REQUIRED, MSG_PASSWORD_TOO_SHORT, MSG_OLD_PASSWORD_WRONG, MSG_USERNAME_EXISTS
 from meta.services.auth_middleware import login_required, require_permission, get_current_user, is_admin
 from meta.services.query.virtual_sort import _build_audit_derived_order_join
 from meta.services.permission_service import PermissionService
@@ -305,7 +306,7 @@ def list_users():
 def create_user():
     """创建用户"""
     if not is_admin():
-        return jsonify({'success': False, 'message': '需要管理员权限'}), 403
+        return jsonify({'success': False, 'message': MSG_ADMIN_REQUIRED}), 403
 
     data = request.get_json(silent=True) or {}
     username = data.get('username', '').strip()
@@ -317,7 +318,7 @@ def create_user():
         return jsonify({'success': False, 'message': '用户名不能为空'}), 400
 
     if password and len(password) < 6:
-        return jsonify({'success': False, 'message': '密码长度不能少于6位'}), 400
+        return jsonify({'success': False, 'message': '密码长度不能少于 6 位'}), 400
 
     cursor = _data_source.execute("SELECT id FROM users WHERE username = ?", [username])
     if cursor.fetchone():
@@ -373,7 +374,7 @@ def get_current_user_profile():
     row = cursor.fetchone()
     
     if not row:
-        return jsonify({'success': False, 'message': '用户不存在'}), 404
+        return jsonify({'success': False, 'message': '用户不存在，请检查后重试'}), 404
     
     cols = [d[0] for d in cursor.description]
     user = dict(zip(cols, row))
@@ -425,7 +426,7 @@ def update_current_user_profile():
     if not result.success:
         return jsonify({'success': False, 'message': result.message}), 400
 
-    return jsonify({'success': True, 'message': '个人信息更新成功'})
+    return jsonify({'success': True, 'message': '个人信息已更新'})
 
 
 @user_bp.route('/<int:user_id>', methods=['GET'])
@@ -442,7 +443,7 @@ def get_user(user_id):
         result = bo.read('user', user_id)
         
         if not result.success:
-            return jsonify({'success': False, 'message': '用户不存在'}), 404
+            return jsonify({'success': False, 'message': '用户不存在，请检查后重试'}), 404
 
         user = result.data
         user['roles'] = _get_perm_service().get_user_roles(user_id)
@@ -540,7 +541,7 @@ def update_user(user_id):
                         user_name=operator_name,
                     )
 
-    return jsonify({'success': True, 'message': '用户更新成功'})
+    return jsonify({'success': True, 'message': '用户信息已更新'})
 
 
 @user_bp.route('/<int:user_id>', methods=['DELETE'])
@@ -548,7 +549,7 @@ def update_user(user_id):
 def delete_user(user_id):
     """删除用户"""
     if not is_admin():
-        return jsonify({'success': False, 'message': '需要管理员权限'}), 403
+        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
     
     _set_user_context()
     bo = _get_bo_framework()
@@ -557,10 +558,10 @@ def delete_user(user_id):
     
     if not result.success:
         if '不存在' in result.message:
-            return jsonify({'success': False, 'message': '用户不存在'}), 404
+            return jsonify({'success': False, 'message': '用户不存在，请检查后重试'}), 404
         return jsonify({'success': False, 'message': result.message}), 400
 
-    return jsonify({'success': True, 'message': '用户删除成功'})
+    return jsonify({'success': True, 'message': '用户已删除'})
 
 
 @user_bp.route('/batch-delete', methods=['POST'])
@@ -568,7 +569,7 @@ def delete_user(user_id):
 def batch_delete_users():
     """批量删除用户"""
     if not is_admin():
-        return jsonify({'success': False, 'message': '需要管理员权限'}), 403
+        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
     
     data = request.get_json(silent=True) or {}
     ids = data.get('ids', [])
@@ -613,20 +614,20 @@ def batch_delete_users():
 def reset_password(user_id):
     """重置密码"""
     if not is_admin():
-        return jsonify({'success': False, 'message': '需要管理员权限'}), 403
+        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
 
     data = request.get_json(silent=True) or {}
     new_password = data.get('new_password', '')
 
     if not new_password or len(new_password) < 6:
-        return jsonify({'success': False, 'message': '新密码长度不能少于6位'}), 400
+        return jsonify({'success': False, 'message': '新密码长度不能少于 6 位'}), 400
 
     cursor = _data_source.execute(
         "SELECT username FROM users WHERE id = ?", [user_id]
     )
     row = cursor.fetchone()
     if not row:
-        return jsonify({'success': False, 'message': '用户不存在'}), 404
+        return jsonify({'success': False, 'message': '用户不存在，请检查后重试'}), 404
 
     password_hash = _hash_password_pbdkdf2(new_password)
 
@@ -670,7 +671,7 @@ def reset_password(user_id):
 def batch_add_user_data_permissions():
     """批量添加用户数据权限"""
     if not is_admin():
-        return jsonify({'success': False, 'message': '需要管理员权限'}), 403
+        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
 
     try:
         data = request.get_json()
@@ -738,7 +739,7 @@ def update_user_self():
     if not result.success:
         return jsonify({'success': False, 'message': result.message}), 400
 
-    return jsonify({'success': True, 'message': '个人信息更新成功'})
+    return jsonify({'success': True, 'message': '个人信息已更新'})
 
 
 @user_bp.route('/<int:user_id>/menus', methods=['GET'])
@@ -751,7 +752,7 @@ def get_user_menus(user_id):
         cursor = ds.execute("SELECT id, username FROM users WHERE id = ?", [user_id])
         user = cursor.fetchone()
         if not user:
-            return jsonify({'success': False, 'message': '用户不存在'}), 404
+            return jsonify({'success': False, 'message': '用户不存在，请检查后重试'}), 404
         
         cursor = ds.execute("""
             SELECT DISTINCT mp.menu_code, mp.menu_name, mp.menu_path, mp.icon
@@ -791,7 +792,7 @@ def get_user_logs(user_id):
         cursor = ds.execute("SELECT id, username FROM users WHERE id = ?", [user_id])
         user = cursor.fetchone()
         if not user:
-            return jsonify({'success': False, 'message': '用户不存在'}), 404
+            return jsonify({'success': False, 'message': '用户不存在，请检查后重试'}), 404
         
         page = request.args.get('page', 1, type=int)
         page_size = request.args.get('page_size', 20, type=int)
