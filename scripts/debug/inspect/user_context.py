@@ -129,12 +129,41 @@ def get_data_permissions(role_id: int) -> Dict:
     }
 
 
+def load_dotenv(dotenv_path: Optional[Path] = None) -> bool:
+    """自动加载 .env 文件到 os.environ"""
+    if dotenv_path is None:
+        dotenv_path = PROJECT_ROOT / ".env"
+
+    if not dotenv_path.exists():
+        return False
+
+    try:
+        with open(dotenv_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+        return True
+    except (OSError, UnicodeDecodeError):
+        return False
+
+
 def run_sql(sql: str, timeout: int = 30) -> List[str]:
     """执行 SQL 查询（通过 psql 或 sqlite3）
 
     Returns:
         List of pipe-separated rows
     """
+    # V3.3 修复：自动加载 .env
+    if not os.environ.get("DATABASE_URL"):
+        if load_dotenv():
+            _log("已加载 .env 文件", "INFO")
+
     # 检测数据库类型
     db_url = os.environ.get("DATABASE_URL", "")
     if db_url.startswith("postgres"):
