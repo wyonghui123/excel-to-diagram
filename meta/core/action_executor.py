@@ -415,14 +415,16 @@ class PseudoVariableResolver:
 
 class ActionResult:
     """Action 执行结果"""
-    
+
     def __init__(self, success: bool = True, data: Any = None,
-                 message: str = "", error: str = "", errors: list = None):
+                 message: str = "", error: str = "", errors: list = None,
+                 status_code: int = None):  # [FIX v1.2.21 2026-06-20] 加 status_code
         self.success = success
         self.data = data
         self.message = message
         self.error = error
         self.errors = errors or []
+        self.status_code = status_code
         self.affected_rows = 0
         self.last_insert_id = None
         self.rule_report: Optional[RuleExecutionReport] = None
@@ -434,6 +436,7 @@ class ActionResult:
             "message": self.message,
             "error": self.error,
             "errors": self.errors,
+            "status_code": self.status_code,
             "affected_rows": self.affected_rows,
             "last_insert_id": self.last_insert_id,
         }
@@ -443,8 +446,10 @@ class ActionResult:
         return cls(success=True, data=data, message=message)
 
     @classmethod
-    def fail(cls, error: str, message: str = "", errors: list = None) -> "ActionResult":
-        return cls(success=False, error=error, message=message, errors=errors)
+    def fail(cls, error: str = "", message: str = "", errors: list = None,
+             status_code: int = None) -> "ActionResult":
+        # [FIX v1.2.21 2026-06-20] 支持 status_code kwarg
+        return cls(success=False, error=error, message=message, errors=errors, status_code=status_code)
 
 
 class ActionExecutor:
@@ -624,7 +629,74 @@ class ActionExecutor:
 
         return None
 
-    def _resolve_foreign_keys(self, meta_object: MetaObject, data: Dict[str, Any], 
+    def _pre_resolve_foreign_keys(self, meta_object: MetaObject,
+                                  params: Dict[str, Any]) -> None:
+        """[FIX v1.2.35 2026-06-21] 预解析 FK，把解析后的值写回 params
+
+        之前 _check_write_scope 在 _resolve_foreign_keys 之前调用，
+        导致 params 中没有 sub_domain_id 等 FK 字段，
+        _get_targets 返回空列表，跳过权限检查。
+
+        此方法在 _check_write_scope 之前调用，确保 params 中包含 FK 字段。
+        解析失败时不抛异常（让后续 _resolve_foreign_keys 抛出准确错误）。
+
+        [FIX v1.2.36 2026-06-21] 支持多态 FK (resolve_to_field)
+          annotation.target_id 使用 resolve_to_field: target_type (非 resolve_to_object)
+          需要从 params.target_type 动态确定目标表，再用 params.target_code 查 id
+        """
+        for field in meta_object.fields:
+            resolve_from = getattr(field.semantics, 'resolve_from_field', None)
+            resolve_to_object = getattr(field.semantics, 'resolve_to_object', None)
+            resolve_to_field = getattr(field.semantics, 'resolve_to_field', None)
+
+            if not resolve_from:
+                continue
+            if not resolve_to_object and not resolve_to_field:
+                continue
+
+            current_value = params.get(field.id)
+            if current_value is not None and current_value != '':
+                continue  # 已有值，不需要解析
+
+            source_value = params.get(resolve_from)
+            if not source_value:
+                continue  # 无源值，跳过
+
+            version_id = params.get('version_id')
+            try:
+                if resolve_to_field:
+                    # 多态 FK: 从 params 中获取目标类型
+                    dynamic_type = params.get(resolve_to_field)
+                    if not dynamic_type:
+                        continue
+                    # 处理 "code - name" 格式
+                    if isinstance(dynamic_type, str) and ' - ' in dynamic_type:
+                        dynamic_type = dynamic_type.split(' - ')[0].strip()
+                    parent_record = self._find_by_key(
+                        dynamic_type, 'code', source_value, version_id
+                    )
+                    if parent_record:
+                        params[field.id] = parent_record.get('id')
+                        logger.info(
+                            f"[PreResolveFK] {meta_object.id}.{field.id}: "
+                            f"从 {resolve_from}='{source_value}' (type={dynamic_type}) "
+                            f"预解析到 {parent_record.get('id')}"
+                        )
+                else:
+                    # 静态 FK
+                    parent_record = self._find_by_key(
+                        resolve_to_object, 'code', source_value, version_id
+                    )
+                    if parent_record:
+                        params[field.id] = parent_record.get('id')
+                        logger.info(
+                            f"[PreResolveFK] {meta_object.id}.{field.id}: "
+                            f"从 {resolve_from}='{source_value}' 预解析到 {parent_record.get('id')}"
+                        )
+            except Exception as e:
+                logger.debug(f"[PreResolveFK] failed for {field.id}: {e}")
+
+    def _resolve_foreign_keys(self, meta_object: MetaObject, data: Dict[str, Any],
                                original_params: Dict[str, Any] = None) -> Dict[str, Any]:
         """解析外键：从业务键自动解析到技术ID
 
@@ -1237,6 +1309,11 @@ class ActionExecutor:
         """执行创建操作"""
         logger.info(f"[ActionExecutor] _do_create START: object={meta_object.id}, params={params}")
 
+        # [FIX v1.2.35 2026-06-21] 预解析 FK，确保 params 中包含 sub_domain_id 等 FK 字段
+        # 之前 _check_write_scope 在 _resolve_foreign_keys 之前调用，
+        # 导致 params 中没有 FK 字段，_get_targets 返回空列表，跳过权限检查
+        self._pre_resolve_foreign_keys(meta_object, params)
+
         # [FIX v1.2.19 2026-06-20] 写路径 dim scope 校验 (防止 ManageService 绕过拦截器链)
         scope_error = self._check_write_scope(meta_object, 'crud_create', params)
         if scope_error:
@@ -1594,6 +1671,9 @@ class ActionExecutor:
     def _do_update(self, meta_object: MetaObject, params: Dict[str, Any],
                     skip_rules: bool = False) -> ActionResult:
         """执行更新操作"""
+        # [FIX v1.2.35 2026-06-21] 预解析 FK，确保 params 中包含 FK 字段
+        self._pre_resolve_foreign_keys(meta_object, params)
+
         # [FIX v1.2.19 2026-06-20] 写路径 dim scope 校验 (防止 ManageService 绕过拦截器链)
         scope_error = self._check_write_scope(meta_object, 'crud_update', params)
         if scope_error:

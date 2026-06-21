@@ -666,34 +666,32 @@ def _skip_or_error_result(step, message):
 
 
 def _write_audit(name, atomic, total, succeeded, failed, skipped, overall, user_info):
+    # [FIX 2026-06-20 P2.3] 改用 AuditLogger (audit-compliance.md §1.3 禁止直接 INSERT)
+    # 通过 AuditService 自动获得 transaction_id
     try:
-        import os
+        from meta.core.datasource import get_data_source
+        from meta.core.action_executor import AuditLogger
         import json as _json
         db_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             'architecture.db',
         )
-        import sqlite3
-        conn = sqlite3.connect(db_path)
-        conn.execute(
-            """INSERT INTO audit_logs (object_type, object_id, action, user_id, user_name,
-               field_name, extra_data, ip_address, created_at, log_category, log_level)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'workflow', 'INFO')""",
-            [
-                'subflow', 0, 'SUBFLOW',
-                user_info.get('user_id'),
-                user_info.get('display_name', user_info.get('username', 'unknown')),
-                name,
-                _json.dumps({
-                    'name': name, 'atomic': atomic, 'total_steps': total,
-                    'succeeded': succeeded, 'failed': failed, 'skipped': skipped,
-                    'overall_success': overall,
-                }),
-                user_info.get('ip_address', ''),
-            ]
+        ds = get_data_source('sqlite', database=db_path)
+        audit_logger = AuditLogger(ds)
+        audit_logger.log(
+            object_type='subflow',
+            object_id=0,
+            action='SUBFLOW',
+            field_name=name,
+            extra_data=_json.dumps({
+                'name': name, 'atomic': atomic, 'total_steps': total,
+                'succeeded': succeeded, 'failed': failed, 'skipped': skipped,
+                'overall_success': overall,
+            }),
+            user_id=user_info.get('user_id'),
+            user_name=user_info.get('display_name', user_info.get('username', 'unknown')),
+            ip_address=user_info.get('ip_address', ''),
         )
-        conn.commit()
-        conn.close()
     except Exception as e:
         logger.warning(f"[Subflow] audit log failed: {e}")
 

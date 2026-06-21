@@ -247,6 +247,7 @@ def create_annotation():
 
 
 @annotation_bp.route('/annotations/<int:annotation_id>', methods=['PUT'])
+@login_required
 def update_annotation(annotation_id):
     from meta.services.manage_service import UpdateRequest
 

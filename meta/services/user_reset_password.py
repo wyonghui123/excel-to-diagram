@@ -65,17 +65,25 @@ def user_reset_password_handler(params: Dict[str, Any], context: Dict[str, Any])
                 [password_hash, user_id]
             )
 
-        # 写审计 (audit_logs schema: extra_data 不是 new_data)
+        # 写审计 (audit-compliance.md §1.3 禁止直接 INSERT, 改用 AuditLogger)
+        # [FIX 2026-06-20 P2.3] 通过 AuditService 自动获得 transaction_id
         operator_id = context.get('user_id')
         operator_name = context.get('user_name') or 'unknown'
         ip_addr = context.get('ip_address', '')
-        ds.execute(
-            """INSERT INTO audit_logs (object_type, object_id, action, user_id, user_name,
-               field_name, extra_data, ip_address, created_at, log_category, log_level)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'security', 'INFO')""",
-            ['user', user_id, 'RESET_PASSWORD', operator_id, operator_name,
-             'password_hash', f'reset by {operator_name}', ip_addr]
-        )
+        try:
+            from meta.core.action_executor import AuditLogger
+            audit_logger = AuditLogger(ds)
+            audit_logger.log_update(
+                object_type='user',
+                object_id=user_id,
+                old_data={'password_hash': '***'},
+                new_data={'password_hash': f'reset by {operator_name}'},
+                user_id=operator_id,
+                user_name=operator_name,
+                ip_address=ip_addr,
+            )
+        except Exception as audit_err:
+            logger.warning(f"[user.reset_password] audit failed (non-blocking): {audit_err}")
 
         return {
             'success': True,

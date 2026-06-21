@@ -41,6 +41,8 @@ RESOURCE_TABLE_MAP = {
     'service_module': 'service_modules',
     'business_object': 'business_objects',
     'relationship': 'relationships',
+    # [FIX v1.2.34 2026-06-21] annotation 表映射 (WriteScopeInterceptor 需要)
+    'annotation': 'annotations',
 }
 
 CHILD_TYPE_MAP = {
@@ -55,8 +57,9 @@ PARENT_FIELD_MAP = {
     'version': 'product_id',
     'domain': 'version_id',
     'sub_domain': 'domain_id',
-    # 'service_module': 'sub_domain_id',  # 已移除
-    # 'business_object': 'service_module_id',  # 已移除
+    # [V1.1.8+ 2026-06-15] service_module / business_object 链路恢复 (WriteScope 需要)
+    'service_module': 'sub_domain_id',
+    'business_object': 'service_module_id',
 }
 
 DISPLAY_FIELD_MAP = {

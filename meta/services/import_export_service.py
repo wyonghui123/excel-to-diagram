@@ -4632,6 +4632,10 @@ class ImportExportService:
                     # 用户留空 code 时，KeyTemplateInterceptor 会自动生成
                     if is_required and is_business_key_field and operation_mode == "create":
                         kt_info = self._get_key_template_info(obj)
+                        # [DEBUG] 临时日志
+                        if field.id == 'code' and obj.id == 'business_object':
+                            with open(r'd:\filework\excel-to-diagram\debug_kt.log', 'a', encoding='utf-8') as _dbg_f:
+                                _dbg_f.write(f'[KT] obj={obj.id} field={field.id} is_required={is_required} is_bk={is_business_key_field} op={operation_mode} kt_info={kt_info}\n')
                         if kt_info.get('enabled') and kt_info.get('user_editable') != 'manual':
                             is_required = False
                     # [FIX 2026-06-16 BMRD] 如果 context 中已经传入了 product_id / version_id,
@@ -4911,7 +4915,7 @@ class ImportExportService:
         return {
             "valid_count": valid_count,
             "invalid_count": invalid_count,
-            "errors": errors[:20],
+            "errors": errors[:200],
             "warnings": warnings[:20]  # [NEW v1.2.16 2026-06-20] 区分 warnings
         }
 
@@ -5197,6 +5201,17 @@ class ImportExportService:
                     object_codes[target_bo].add(p)
 
             for field in obj.fields:
+                # [FIX v1.2.28 2026-06-20] 跳过 virtual 字段 (storage=virtual 或 semantics.redundancy).
+                # 这些字段值由其他字段自动派生 (例如 source_domain_id 从 source_bo_id 派生),
+                # 不需要 (也不应该) 在 import 时做 FK 解析.
+                # 之前逻辑会尝试解析 source_domain_id = record.get('code') →
+                # 在 domain 表查 BO_AP_PAYMENT_BO_SUPPLIER_01 (relationship 自己的 code) → 找不到
+                # → 7 条 "未找到外键对象" 警告 → 整个 row 被静默跳过, 无成功/失败明细
+                if getattr(field, 'storage', None) == 'virtual':
+                    continue
+                if getattr(field.semantics, 'redundancy', None):
+                    continue
+
                 resolve_from = getattr(field.semantics, 'resolve_from_field', None)
                 resolve_to_object = getattr(field.semantics, 'resolve_to_object', None)
                 resolve_to_field = getattr(field.semantics, 'resolve_to_field', None)
@@ -5766,10 +5781,18 @@ class ImportExportService:
                 if operation_mode == "delete":
                     logger.info(f"[Import] 执行删除操作")
                     try:
-                        self._delete_record(object_type, record, obj.import_export)
-                        deleted_count += 1
-                        success_count += 1
-                        _record_success_item(successes, row_num, "delete", record, _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
+                        # [FIX v1.2.41 2026-06-21] 检查 _delete_record 的 ActionResult 返回值
+                        # 之前: 忽略返回值, 权限拦截 (ActionResult.fail) 被当作成功
+                        delete_result = self._delete_record(object_type, record, obj.import_export)
+                        if delete_result is not None and hasattr(delete_result, 'success') and not delete_result.success:
+                            # 权限拦截或其他业务失败 (如 WriteScopeDenied)
+                            failed_count += 1
+                            err_msg = getattr(delete_result, 'message', None) or getattr(delete_result, 'error', None) or '删除失败'
+                            errors.append({"row": row_num, "operation": operation_mode, "field": "编码", "value": record.get("code", ""), "message": str(err_msg)})
+                        else:
+                            deleted_count += 1
+                            success_count += 1
+                            _record_success_item(successes, row_num, "delete", record, _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
                     except ValueError as ve:
                         # [FIX v1.2.18 2026-06-20] 删除不存在的记录只推到 warnings (不再推 skipped)
                         # 原因: skipped 会让前端合并入 "成功" tab, 但删除失败不是成功也不是 skip, 是告警
@@ -5793,6 +5816,16 @@ class ImportExportService:
                     if 'version_id' not in record and context.get('version_id'):
                         record['version_id'] = context.get('version_id')
                     logger.info(f"[Import] 新增数据中version_id={record.get('version_id')}")
+
+                    # [FIX v1.2.33 2026-06-21] 如果 code 为空且对象有 key_template，自动生成 code
+                    # 此逻辑与 _upsert_record (L6114-6122) 一致，但显式 create 路径不经过 _upsert_record
+                    code_value = record.get('code', '')
+                    if (not code_value or not str(code_value).strip()):
+                        kt_code = self._auto_generate_code_from_key_template(object_type, record)
+                        if kt_code:
+                            record['code'] = kt_code
+                            logger.info(f"[Import] Key template auto-generated code: {kt_code}")
+
                     # [FIX v1.2.18l 2026-06-20] 当 Excel 中显式填写了 create 时，按 create 语义执行（不 upsert）
                     # conflict_strategy=upsert 只在未显式指定操作模式时生效
                     if conflict_strategy == "upsert" and not operation_mode_explicit:
@@ -5840,10 +5873,24 @@ class ImportExportService:
                             errors.append({"row": row_num, "operation": operation_mode, "field": "编码", "value": record.get("code", ""), "message": upsert_result.get("error", "Upsert failed")})
                     else:
                         logger.info(f"[Import] 执行更新操作")
-                        self._update_record(object_type, record, obj.import_export)
-                        success_count += 1
-                        updated_count += 1
-                        _record_success_item(successes, row_num, "update", record, _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
+                        # [FIX v1.2.22 2026-06-20] 检查 _update_record 返回值
+                        # 之前无条件 +1, 即使 WriteScopeDenied 也会被算作成功
+                        try:
+                            update_result = self._update_record(object_type, record, obj.import_export)
+                        except ValueError as ve:
+                            # 业务键找不到等业务错误
+                            failed_count += 1
+                            errors.append({"row": row_num, "operation": operation_mode, "field": "编码", "value": record.get("code", ""), "message": str(ve)})
+                            continue
+                        if update_result and update_result.success:
+                            success_count += 1
+                            updated_count += 1
+                            _record_success_item(successes, row_num, "update", record, _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
+                        else:
+                            # [WriteScope] DENY, FK scope violation, 业务校验失败
+                            failed_count += 1
+                            msg = update_result.message if update_result else "更新失败"
+                            errors.append({"row": row_num, "operation": operation_mode, "field": "编码", "value": record.get("code", ""), "message": msg})
                 else:
                     logger.info(f"[Import] 执行upsert操作 (conflict_strategy={conflict_strategy})")
                     # [SYMBOL] 确保version_id存在
@@ -5876,6 +5923,7 @@ class ImportExportService:
                             _record_success_item(successes, row_num, "create", record, _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
                         else:
                             failed_count += 1
+                            errors.append({"row": row_num, "operation": operation_mode, "field": "编码", "value": record.get("code", ""), "message": result.message or "创建失败"})
                     else:
                         result = self.manage_service.create(CreateRequest(object_type=object_type, data=record))
                         if result.success:
@@ -5884,6 +5932,7 @@ class ImportExportService:
                             _record_success_item(successes, row_num, "create", record, _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
                         else:
                             failed_count += 1
+                            errors.append({"row": row_num, "operation": operation_mode, "field": "编码", "value": record.get("code", ""), "message": result.message or "创建失败"})
 
             except Exception as e:
                 logger.error(f"[Import] ERROR: Operation failed - {type(e).__name__}: {str(e)}")
@@ -5907,7 +5956,7 @@ class ImportExportService:
             "failed": failed_count,
             "skipped": skipped_count,
             "deleted": deleted_count,
-            "errors": errors[:20],
+            "errors": errors[:200],
             "warnings": warnings[:20],  # [NEW v1.2.3 2026-06-17] 告警明细
             # [NEW v1.2.14 2026-06-19] 成功/跳过明细 (前端第 4 步 subtab 用)
             "successes": successes,
@@ -5970,13 +6019,20 @@ class ImportExportService:
             return self._find_by_composite_key(object_type, bk_fields, key_values, version_id)
 
     def _delete_record(self, object_type: str, record: Dict[str, Any], config: ImportExportConfig):
-        """删除记录"""
+        """删除记录
+
+        Returns:
+            ActionResult: manage_service.delete 的返回值, 包含 success/error/message
+            调用方根据 success 决定 success_count 还是 failed_count
+        """
         # 从record中获取version_id
         version_id = record.get('version_id')
         existing = self._find_existing_record(object_type, record, version_id)
 
         if existing:
-            self.manage_service.delete(DeleteRequest(object_type=object_type, id=existing["id"]))
+            # [FIX v1.2.41 2026-06-21] 返回 manage_service.delete 的 ActionResult,
+            # 让调用方能检查 WriteScopeDenied 等失败
+            return self.manage_service.delete(DeleteRequest(object_type=object_type, id=existing["id"]))
         else:
             bk_fields = self._get_business_key_fields(object_type)
             obj = registry.get(object_type)
@@ -5991,13 +6047,20 @@ class ImportExportService:
             raise ValueError("要删除的记录不存在: {0}".format(key_desc))
 
     def _update_record(self, object_type: str, record: Dict[str, Any], config: ImportExportConfig):
-        """更新记录（仅更新，不存在则报错）"""
+        """更新记录（仅更新，不存在则报错）
+
+        Returns:
+            ActionResult: manage_service.update 的返回值, 包含 success/error/message
+            调用方根据 success 决定 success_count 还是 failed_count
+        """
         # 从record中获取version_id
         version_id = record.get('version_id')
         existing = self._find_existing_record(object_type, record, version_id)
 
         if existing:
-            self.manage_service.update(UpdateRequest(object_type=object_type, id=existing["id"], data=record))
+            # [FIX v1.2.22 2026-06-20] 返回 manage_service.update 的 ActionResult,
+            # 让调用方能检查 WriteScopeDenied 等失败
+            return self.manage_service.update(UpdateRequest(object_type=object_type, id=existing["id"], data=record))
         else:
             bk_fields = self._get_business_key_fields(object_type)
             if bk_fields:
@@ -6055,7 +6118,7 @@ class ImportExportService:
                 logger.warning(f"[Upsert] registry.get({object_type}) returned None, cannot normalize parent_key fields")
 
             result = self.manage_service.update(UpdateRequest(object_type=object_type, id=record_id, data=record))
-            logger.info(f"[Upsert] update result: success={result.success}, error={result.error}, record_keys_after_remove={list(record.keys())}")
+            logger.info(f"[Upsert] update result: success={result.success}, error={result.error}, message={result.message}, record_keys_after_remove={list(record.keys())}")
             if result.success:
                 return {"success": True, "error": None, "operation": "update"}
             else:

@@ -64,40 +64,69 @@ _PARENT_FIELD_FOR_CREATE = {
     'version': ('product', 'product_id'),
     'domain': ('version', 'version_id'),
     'sub_domain': ('domain', 'domain_id'),
-    # business_object/service_module 主 FK 是 version_id (DB schema 确认)
-    # 两者也有 domain_id, 但层级归属以 version_id 为准
-    'service_module': ('version', 'version_id'),
-    'business_object': ('version', 'version_id'),
+    # business_object/service_module 主 FK 是 sub_domain_id / service_module_id (DB schema 确认)
+    # 不走 version, 走业务链追溯更准确
+    'service_module': ('sub_domain', 'sub_domain_id'),
+    'business_object': ('service_module', 'service_module_id'),
+    # [FIX v1.2.30 2026-06-20] relationship create 通过 source_bo_id 的 BO chain 校验 dim scope
+    'relationship': ('business_object', 'source_bo_id'),
+    # [FIX v1.2.34 2026-06-21] annotation create 通过 target_type + target_id 校验 parent 的 dim scope
+    #   annotation 是多态辅助对象, create 时 target_type + target_id 在 context.params 中
+    #   但 target_type 是动态的, 无法静态映射, 所以这里用 target_id 作为 parent_id
+    #   实际的 parent_type 在 _get_targets 运行时从 context.params.target_type 获取
+    'annotation': ('_dynamic', 'target_id'),
 }
 
 # v2.1 业务 TBD-F: owner chain fallback 用 created_by 字段
 _BIZ_BO_WITH_DIRECT_OWNER = {'product'}  # 只有 product 直接有 owner_id 字段
 # 其他 BO (version, domain, sub_domain) 沿 chain 向上查 product.owner_id
 
+# [FIX v1.2.37 2026-06-21] 父对象类型中文名映射 (用于 create 路径错误消息)
+#   create 路径时, target 是 parent, 错误消息需区分 "自身对象(新增)" 与 "父对象(编码)"
+_PARENT_TYPE_NAME_CN = {
+    'product': '产品',
+    'version': '版本',
+    'domain': '领域',
+    'sub_domain': '子领域',
+    'service_module': '服务模块',
+    'business_object': '业务对象',
+    'relationship': '业务关系',
+    'annotation': '备注信息',
+}
+
 
 class WriteScopeDenied(Exception):
-    """[v2.1] 写 scope 拒绝异常 (status_code=403)"""
+    """[v2.1] 写 scope 拒绝异常 (status_code=403)
+
+    [FIX v1.2.25 2026-06-20] 支持 business_key + object_type_name + side_info
+    简化错误消息: `无写权限: <object_type_name>(<business_key>), 失败侧: <...>`
+    """
     status_code = 403
 
     def __init__(self, object_type: str, target_id: int, user_id: int,
-                 check_results: Dict[str, Any], side: str = 'primary'):
+                 check_results: Dict[str, Any], side: str = 'primary',
+                 business_key: Optional[str] = None,
+                 object_type_name: Optional[str] = None,
+                 side_info: Optional[str] = None):
         self.object_type = object_type
         self.target_id = target_id
         self.user_id = user_id
         self.check_results = check_results
         self.side = side
-        if check_results:
-            detail = (
-                f' [check: owner={check_results.get("owner")} '
-                f'vis={check_results.get("visibility")} '
-                f'chain_root={check_results.get("owner_chain_root")} '
-                f'dim_roles={len(check_results.get("dim_scope") or [])}]'
-            )
-        else:
-            detail = ''
-        super().__init__(
-            f'无写权限: {object_type}({target_id}) 不在 user={user_id} 的 dim scope / owner 范围{detail}'
-        )
+        self.business_key = business_key
+        self.object_type_name = object_type_name
+        self.side_info = side_info
+
+        # 中文对象名 (默认 object_type, 如 "relationship")
+        type_name = object_type_name or object_type
+        # 业务键 (默认 target_id, 如 "21")
+        key_value = business_key if business_key else str(target_id)
+
+        msg = f'无写权限: {type_name}({key_value})'
+        if side_info:
+            msg += f', {side_info}'
+
+        super().__init__(msg)
 
 
 class ScopeViolationError(Exception):
@@ -308,6 +337,12 @@ class WriteScopeInterceptor(Interceptor):
             parent_id = context.params.get(parent_field)
             if not parent_id:
                 return []  # 防御: 父 id 缺失, 跳过
+            # [FIX v1.2.34 2026-06-21] annotation 的 parent_type 是动态的 (从 target_type 获取)
+            if parent_type == '_dynamic':
+                dynamic_parent_type = context.params.get('target_type')
+                if not dynamic_parent_type:
+                    return []  # 防御: target_type 缺失, 跳过
+                parent_type = dynamic_parent_type
             return [('create_parent', {
                 'type': parent_type,
                 'id': parent_id,
@@ -321,6 +356,11 @@ class WriteScopeInterceptor(Interceptor):
         """检查单个 target 的写权限 (5 步校验)"""
         object_type = target['type']
         target_id = target['id']
+
+        # [DEBUG v1.2.34] annotation 调试
+        if object_type == 'annotation':
+            logger.warning(f'[WriteScope ANNOTATION DEBUG] _check_target called: object_type={object_type}, target_id={target_id}, user_id={user_id}, side={side}')
+
         # [H14.1 2026-06-15] 移除 `if not target_id: return`
         #   create 路径由 _get_targets 把 parent_id 作为 target_id 传入, 有值
         #   之前没 create 拦截, 这里直接跳过; 现在 create 也走完整 step 2-5
@@ -328,9 +368,16 @@ class WriteScopeInterceptor(Interceptor):
         # 加载 record (含 owner_id)
         record = self._load_record(context, object_type, target_id)
         if not record:
+            # [DEBUG v1.2.34] annotation 调试日志
+            if object_type == 'annotation':
+                logger.info(f'[WriteScope ANNOTATION] _load_record returned None for annotation({target_id})')
             raise WriteScopeDenied(
                 object_type, target_id, user_id, {}, side
             )
+
+        # [DEBUG v1.2.34] annotation 调试日志
+        if object_type == 'annotation':
+            logger.info(f'[WriteScope ANNOTATION] _load_record for annotation({target_id}): target_type={record.get("target_type")}, target_id={record.get("target_id")}')
 
         # [V1.1.8 2026-06-15] create 路径: _get_targets 已把 parent 作为 target
         # object_type = parent type, record = parent record
@@ -356,10 +403,18 @@ class WriteScopeInterceptor(Interceptor):
         # [V1.1.8 2026-06-15] 写权限 dim scope 语义:
         #   - update/delete: 只匹配"直接声明的维度层级", 不匹配向上展开
         #   - create: 检查 parent 下是否有用户 scope 内的 child (允许在 scope 范围的 parent 下创建)
-        dim_check = self._check_dim_scope(
-            context, object_type, record, user_id,
-            is_create=(side == 'create_parent'),
-        )
+        # [FIX v1.2.34 2026-06-21] annotation create: 写权限跟随 parent derived,
+        #   不走 _check_parent_dim_scope (检查 child), 而走 _check_ancestor_dim_scope (检查 parent 在 scope 内)
+        is_annotation_create = (side == 'create_parent' and target.get('child_type') == 'annotation')
+        if is_annotation_create:
+            dim_check = self._check_dim_scope_for_annotation_create(
+                context, object_type, record, user_id
+            )
+        else:
+            dim_check = self._check_dim_scope(
+                context, object_type, record, user_id,
+                is_create=(side == 'create_parent'),
+            )
 
         # step 4: visibility 检查 (BO 有 visibility 字段 + 公开)
         visibility_check = self._check_visibility(
@@ -398,8 +453,62 @@ class WriteScopeInterceptor(Interceptor):
             self._log_reject(
                 context, object_type, target_id, user_id, check_results, side
             )
+            # [FIX v1.2.25 2026-06-20] 传中文对象名 + 业务键 + 失败侧
+            object_type_name = (
+                context.meta_object.name
+                if getattr(context, 'meta_object', None) else None
+            )
+            # [FIX v1.2.37 2026-06-21] create 路径错误消息优化:
+            #   - business_key 优先从 params 获取自身对象编码 (Excel 已录入时显示实际编码)
+            #   - side_info 标注父对象类型+编码, 区分父对象权限与自身对象权限
+            #   - relationship create: side_info 标注失败侧 (源对象/目标对象)
+            is_create_path = (side == 'create_parent')
+            if is_create_path:
+                # [FIX v1.2.38 2026-06-21] 优先从 params 获取自身对象编码
+                # 用户反馈: Excel 中已录入编码时, 不应显示 "新增"
+                self_code = None
+                try:
+                    params = context.params or {}
+                    if object_type == 'relationship':
+                        src = params.get('source_code')
+                        tgt = params.get('target_code')
+                        if src and tgt:
+                            self_code = f'{src}→{tgt}'
+                        elif src:
+                            self_code = src
+                    else:
+                        self_code = params.get('code')
+                except Exception:
+                    self_code = None
+                business_key = self_code if self_code else '新增'
+                parent_type = target.get('type', '')
+                child_type = target.get('child_type', '')
+                parent_type_cn = _PARENT_TYPE_NAME_CN.get(parent_type, parent_type)
+                parent_code = self._extract_business_key(parent_type, record)
+                # relationship create: _rel_failed_side 在 _check_relationship_ancestor_dim_scope
+                # 中设置 (update 路径), create 路径未设置, 需手动构造
+                rel_failed_side = getattr(context, '_rel_failed_side', None)
+                if rel_failed_side:
+                    side_info = f'失败侧: {rel_failed_side}'
+                elif child_type == 'relationship' and parent_code:
+                    # relationship create: parent 是 source_bo, 标注为 "失败侧: 源对象"
+                    side_info = f'失败侧: 源对象({parent_code})'
+                elif parent_code:
+                    side_info = f'父对象: {parent_type_cn}({parent_code})'
+                else:
+                    side_info = f'父对象: {parent_type_cn}(id={target_id})'
+            else:
+                business_key = self._extract_business_key(object_type, record)
+                side_info = None
+                if object_type == 'relationship':
+                    failed_side = getattr(context, '_rel_failed_side', None)
+                    if failed_side:
+                        side_info = f'失败侧: {failed_side}'
             raise WriteScopeDenied(
-                object_type, target_id, user_id, check_results, side
+                object_type, target_id, user_id, check_results, side,
+                business_key=business_key,
+                object_type_name=object_type_name,
+                side_info=side_info,
             )
 
     # ========================================================================
@@ -587,6 +696,62 @@ class WriteScopeInterceptor(Interceptor):
 
         return {'matched': False, 'roles_checked': roles_checked}
 
+    def _check_dim_scope_for_annotation_create(
+        self, context: 'ActionContext', object_type: str,
+        record: Dict[str, Any], user_id: int
+    ) -> Dict[str, Any]:
+        """[FIX v1.2.34 2026-06-21] annotation create 的 dim scope 检查
+
+        annotation 是辅助对象, 写权限跟随 parent derived.
+        create 时, object_type 是 parent 类型 (如 service_module),
+        检查 parent 是否在用户的 dim scope 内 (和 update 一样的 ancestor 逻辑).
+
+        不走 _check_parent_dim_scope (语义: parent 下是否有 scope 内的 child),
+        因为 annotation 不是 HIERARCHY_CHAIN 的 child.
+        """
+        role_ids = self._get_user_role_ids(context, user_id)
+        if not role_ids:
+            return {'matched': False, 'roles_checked': []}
+
+        roles_checked = []
+        try:
+            from meta.services.dimension_scope_engine import DimensionScopeEngine
+            engine = DimensionScopeEngine(context.data_source)
+        except Exception as e:
+            logger.debug(f'load DimensionScopeEngine failed: {e}')
+            return {'matched': False, 'roles_checked': []}
+
+        for role_id in role_ids:
+            try:
+                expanded = engine.expand_dimension_values(role_id)
+                # 检查 parent 对象是否在直接声明的维度中
+                if object_type in expanded and expanded[object_type]:
+                    conditions = engine.derive_data_conditions(role_id)
+                    cond_expr = conditions.get(object_type)
+                    roles_checked.append({
+                        'role_id': role_id, 'cond': cond_expr,
+                        'direct_dim': True, 'dim_code': object_type,
+                    })
+                    if cond_expr and self._record_matches_cond(
+                        context, object_type, record, cond_expr
+                    ):
+                        return {'matched': True, 'roles_checked': roles_checked}
+                # 检查 parent 对象的祖先是否在 scope 内 (和 update 逻辑一致)
+                ancestor_match = self._check_ancestor_dim_scope(
+                    context, object_type, record, expanded
+                )
+                roles_checked.append({
+                    'role_id': role_id, 'cond': None,
+                    'direct_dim': False, 'ancestor_match': ancestor_match,
+                })
+                if ancestor_match:
+                    return {'matched': True, 'roles_checked': roles_checked}
+            except Exception as e:
+                logger.debug(f'derive_data_conditions failed for role {role_id}: {e}')
+                continue
+
+        return {'matched': False, 'roles_checked': roles_checked}
+
     def _check_ancestor_dim_scope(
         self, context: 'ActionContext', object_type: str,
         record: Dict[str, Any], expanded: Dict[str, set],
@@ -607,13 +772,98 @@ class WriteScopeInterceptor(Interceptor):
             return self._check_relationship_ancestor_dim_scope(
                 context, record, expanded
             )
-        from meta.services.dimension_scope_engine import HIERARCHY_CHAIN
+
+        # [FIX v1.2.34 2026-06-21] annotation 写权限跟随 parent derived
+        #   annotation 是多态辅助对象, 通过 target_type + target_id 关联到架构对象
+        #   写权限应继承自其关联的 parent 对象 (如 service_module, business_object 等)
+        #   逻辑: 找到 parent 对象, 加载其 record, 递归检查 parent 的 dim scope
+        # [FIX v1.2.36 2026-06-21] 优先使用 context.params 中的 target_type/target_id
+        #   场景: annotation update 时, Excel 中有 target_code='BO_SALES_INV',
+        #   _pre_resolve_foreign_keys 已把 target_code 解析为 target_id 写回 params.
+        #   但 _load_record 加载的 DB record 中 target_id 可能是旧值 (如 orphan id=154).
+        #   应优先用 params 中的新 target_id 检查权限, 否则 orphan annotation 会绕过检查.
+        if object_type == 'annotation':
+            # 优先从 params 获取 (经 _pre_resolve_foreign_keys 解析后的最新值)
+            params_target_type = context.params.get('target_type') if hasattr(context, 'params') else None
+            params_target_id = context.params.get('target_id') if hasattr(context, 'params') else None
+            # 处理 "code - name" 格式
+            if isinstance(params_target_type, str) and ' - ' in params_target_type:
+                params_target_type = params_target_type.split(' - ')[0].strip()
+            # fallback 到 record (DB 中的值)
+            target_type = params_target_type or record.get('target_type')
+            target_id = params_target_id or record.get('target_id')
+            if not target_type or not target_id:
+                logger.info(f'[WriteScope ANNOTATION] no target_type/target_id, allowing (no parent to check)')
+                return True  # 无 parent 信息, 无法检查, 放行
+            # 加载 parent 对象的 record
+            parent_record = self._load_record(context, target_type, int(target_id))
+            if not parent_record:
+                # parent 不存在 (数据不一致), 无法验证权限
+                # 不应因此阻止 annotation 的写操作 — 这是数据问题, 不是权限问题
+                logger.info(f'[WriteScope ANNOTATION] parent {target_type}({target_id}) not found, allowing (orphan annotation)')
+                return True
+            logger.info(f'[WriteScope ANNOTATION] checking parent {target_type}({target_id}) for annotation({record.get("id")})')
+            # 递归检查 parent 的 dim scope
+            #   如果 parent 是 relationship, _check_ancestor_dim_scope 会走 relationship 分支
+            #   如果 parent 是 service_module/business_object, 会走 EXT_CHAIN 分支
+            #   如果 parent 是 sub_domain/domain, 会走 HIERARCHY_CHAIN 分支
+            return self._check_ancestor_dim_scope(context, target_type, parent_record, expanded)
+
+        from meta.services.dimension_scope_engine import HIERARCHY_CHAIN, EXTENDED_CHAIN_ANCHOR, EXTENDED_CHAIN_PARENT
         from meta.services.management_dimension_engine import RESOURCE_TABLE_MAP, PARENT_FIELD_MAP
 
-        # 找 object_type 在 chain 中的位置
+        current_id = record.get('id')
+        if not current_id:
+            return False
+
+        # [v1.2.30 2026-06-20] 非 HIERARCHY_CHAIN 的 BO (service_module/business_object):
+        #   沿 EXTENDED_CHAIN_PARENT 递归步进, 每一跳查 parent_field 直到进入 HIERARCHY_CHAIN
+        #   例: business_object(468) → service_module_id=138 → service_module(138)
+        #         → sub_domain_id=138 → sub_domain(138) → domain_id=703
+        #         → domain 703 in expanded['domain'] → return True
+        #     service_module(886) → sub_domain_id=148 → sub_domain(148) → domain_id=703
+        #         → domain 703 in expanded['domain'] → return True
+        # parent_dim 写死映射 (BO→SM, SM→SD), 因 BO/SM 都不在 HIERARCHY_CHAIN 中
+        _EXT_TO_PARENT_DIM = {
+            'business_object': 'service_module',
+            'service_module': 'sub_domain',
+        }
+        if object_type in EXTENDED_CHAIN_PARENT:
+            visited = 0
+            while visited < 10 and object_type not in HIERARCHY_CHAIN:
+                parent_field = EXTENDED_CHAIN_PARENT.get(object_type)
+                own_table = RESOURCE_TABLE_MAP.get(object_type)
+                if not parent_field or not own_table:
+                    logger.info(f'[WriteScope EXT_CHAIN] ABORT: no parent_field or own_table for {object_type}')
+                    return False
+                row = context.data_source.execute(
+                    f"SELECT {parent_field} FROM {own_table} WHERE id = ?",
+                    [current_id]
+                ).fetchone()
+                if not row or not row[0]:
+                    logger.info(f'[WriteScope EXT_CHAIN] ABORT: no parent found for {object_type}({current_id}).{parent_field}')
+                    return False
+                parent_dim = _EXT_TO_PARENT_DIM.get(object_type)
+                if not parent_dim:
+                    logger.info(f'[WriteScope EXT_CHAIN] ABORT: no parent_dim mapping for {object_type}')
+                    return False
+                old_id = current_id
+                current_id = int(row[0])
+                object_type = parent_dim
+                visited += 1
+                logger.info(f'[WriteScope EXT_CHAIN] step {visited}: {object_type}({current_id}) from {own_table}({old_id}).{parent_field}')
+            # 跳出 while: object_type 现在是 HIERARCHY_CHAIN 内的 dim (sub_domain)
+            if object_type not in HIERARCHY_CHAIN:
+                logger.info(f'[WriteScope EXT_CHAIN] ABORT: object_type={object_type} not in HIERARCHY_CHAIN after {visited} steps')
+                return False  # visited 用尽仍未进入 chain, 异常
+
+        obj_dim = object_type
+
+        # 找 object_type (或锚点 dim) 在 chain 中的位置
         try:
-            obj_idx = HIERARCHY_CHAIN.index(object_type)
+            obj_idx = HIERARCHY_CHAIN.index(obj_dim)
         except ValueError:
+            logger.info(f'[WriteScope ANCESTOR] obj_dim={obj_dim} not in HIERARCHY_CHAIN')
             return False
 
         # 沿 chain 向上找, 检查每个祖先是否在直接声明的维度中
@@ -623,54 +873,26 @@ class WriteScopeInterceptor(Interceptor):
                 continue
 
             ancestor_ids = expanded[ancestor_dim]
-            ancestor_table = RESOURCE_TABLE_MAP.get(ancestor_dim)
-            if not ancestor_table:
-                continue
 
-            # 从 record 沿 chain 向上查到 ancestor_dim, 看 ancestor id 是否在 scope 内
-            # 例: sub_domain → domain_id, domain_id IN (703)
-            current_id = record.get('id')
-            if not current_id:
-                return False
-
-            # 逐步向上查 parent
+            # 从 current_id (锚点 id) 沿 chain 向上逐步查到 ancestor_dim
+            step_id = current_id
             for step_idx in range(obj_idx, ancestor_idx, -1):
                 step_dim = HIERARCHY_CHAIN[step_idx]
                 step_parent_field = PARENT_FIELD_MAP.get(step_dim)
                 step_table = RESOURCE_TABLE_MAP.get(step_dim)
                 if not step_parent_field or not step_table:
                     break
-
-                # 查 parent id
-                if step_idx == obj_idx:
-                    # 第一步: 从 record 的 parent field 查
-                    parent_id = record.get(step_parent_field)
-                    if parent_id:
-                        current_id = int(parent_id)
-                    else:
-                        # record 中没有 parent field, 从 DB 查
-                        row = context.data_source.execute(
-                            f"SELECT {step_parent_field} FROM {step_table} WHERE id = ?",
-                            [current_id]
-                        ).fetchone()
-                        if row and row[0]:
-                            current_id = int(row[0])
-                        else:
-                            return False
+                row = context.data_source.execute(
+                    f"SELECT {step_parent_field} FROM {step_table} WHERE id = ?",
+                    [step_id]
+                ).fetchone()
+                if row and row[0]:
+                    step_id = int(row[0])
                 else:
-                    # 中间步骤: 从 DB 查 parent
-                    row = context.data_source.execute(
-                        f"SELECT {step_parent_field} FROM {step_table} WHERE id = ?",
-                        [current_id]
-                    ).fetchone()
-                    if row and row[0]:
-                        current_id = int(row[0])
-                    else:
-                        return False
-
-            # current_id 现在是 ancestor_dim 的 id, 检查是否在 scope 内
-            if current_id in ancestor_ids:
-                return True
+                    break
+            else:
+                if step_id in ancestor_ids:
+                    return True
 
         return False
 
@@ -687,8 +909,12 @@ class WriteScopeInterceptor(Interceptor):
         链: business_objects → service_modules → sub_domains → domains → versions → products
         一次 SQL JOIN 拿到 source/target BO 的各级 ancestor id, 然后比对 expanded
 
-        [V1.1.8+] 注: record 不含 source_bo_id/target_bo_id (因 _load_record 的
-        PRAGMA table_info 在 data_source 中只返回部分列), 我们自己用 SQL 查
+        [V1.1.8+] 注: record 可能含 source_bo_id/target_bo_id (导入/update 场景 FK 解析后)
+        优先使用 record 中的值; 若 record 中无, 则从数据库查询
+
+        [FIX v1.2.31 2026-06-21] 导入场景: record 中 source_bo_id 是 FK 解析后的新值
+        (如 source_bo_id=468, DOM=703), 而数据库旧值可能是不同 domain 的同名 BO
+        (如 source_bo_id=2, DOM=1). 权限检查应基于"写入后的值"
 
         [V1.2.0 2026-06-15] 跨领域关系 functional perm 校验 (OR-edit 写权限的"写 gate"):
         - 在 dim scope 反推前, 先校验 user 是否有 business_object:edit/:update/:delete 任一
@@ -696,6 +922,12 @@ class WriteScopeInterceptor(Interceptor):
         - Phase 1 (默认): 仅 log warn, 不拒绝 (兼容历史配置)
         - Phase 2: 硬拒绝
         - Spec: .trae/specs/cross-domain-relationship-permission/spec.md
+
+        [FIX v1.2.40 2026-06-21] delete 权限同时检查源和目标
+        - create/update: 仅检查 source_bo_id 链 (目标允许外域, relationship.yaml 配置)
+        - delete: 同时检查 source_bo_id 和 target_bo_id 链 (两端都必须在 scope 内)
+        - 原因: 删除关系影响两端, 需要两端都有写权限
+        - 参考: 用户反馈 "实例的删除权限难道不是依赖源和目标来的吗, 参考写的权限"
         """
         # [V1.2.0] Functional perm gate: 防止"只读 user 误创关系"
         # 仅对 relationship 操作生效 (object_type 在 _check_dim_scope 调用前已路由到此)
@@ -716,28 +948,73 @@ class WriteScopeInterceptor(Interceptor):
         if not target_id:
             return False
 
-        # 直接 SQL 查 source_bo_id / target_bo_id
-        try:
-            row = context.data_source.execute(
-                "SELECT source_bo_id, target_bo_id FROM relationships WHERE id = ?",
-                [target_id]
-            ).fetchone()
-            if not row:
-                return False
-            src_bo_id, tgt_bo_id = row[0], row[1]
-        except Exception as e:
-            logger.debug(f'_check_relationship_ancestor DB query failed: {e}')
-            return False
+        # [FIX v1.2.31 2026-06-21] 优先使用 context.params 中的 source_bo_id/target_bo_id
+        # 导入/update 场景: context.params 包含 FK 解析后的新值 (如 source_bo_id=468, DOM=703)
+        # record (从 _load_record 加载) 是数据库旧值, 可能指向不同 domain 的同名 BO
+        # (如 source_bo_id=2, DOM=1). 权限检查应基于"写入后的值"而非"写入前的旧值"
+        params = getattr(context, 'params', {}) or {}
+        src_bo_id = params.get('source_bo_id')
+        tgt_bo_id = params.get('target_bo_id')
+        src_code = None
+        tgt_code = None
 
-        src_ids = []
-        for v in (src_bo_id, tgt_bo_id):
-            if v:
-                src_ids.append(int(v))
-        if not src_ids:
+        # 如果 context.params 中没有, 尝试 record (从 _load_record 加载, 含 DB 旧值)
+        if src_bo_id is None:
+            src_bo_id = record.get('source_bo_id')
+        if tgt_bo_id is None:
+            tgt_bo_id = record.get('target_bo_id')
+
+        # 如果仍然没有, 从数据库查询
+        if src_bo_id is None and tgt_bo_id is None:
+            try:
+                row = context.data_source.execute(
+                    """SELECT r.source_bo_id, r.target_bo_id,
+                              COALESCE(sbo.code, 'BO#' || r.source_bo_id) AS source_code,
+                              COALESCE(tbo.code, 'BO#' || r.target_bo_id) AS target_code
+                       FROM relationships r
+                       LEFT JOIN business_objects sbo ON sbo.id = r.source_bo_id
+                       LEFT JOIN business_objects tbo ON tbo.id = r.target_bo_id
+                       WHERE r.id = ?""",
+                    [target_id]
+                ).fetchone()
+                if not row:
+                    return False
+                src_bo_id, tgt_bo_id, src_code, tgt_code = row
+            except Exception as e:
+                logger.debug(f'_check_relationship_ancestor DB query failed: {e}')
+                return False
+        else:
+            # 有值, 补查 code 用于 failed side 信息
+            try:
+                if src_bo_id:
+                    src_row = context.data_source.execute(
+                        "SELECT code FROM business_objects WHERE id = ?", [int(src_bo_id)]
+                    ).fetchone()
+                    src_code = src_row[0] if src_row else f'BO#{src_bo_id}'
+                if tgt_bo_id:
+                    tgt_row = context.data_source.execute(
+                        "SELECT code FROM business_objects WHERE id = ?", [int(tgt_bo_id)]
+                    ).fetchone()
+                    tgt_code = tgt_row[0] if tgt_row else f'BO#{tgt_bo_id}'
+            except Exception as e:
+                logger.debug(f'_check_relationship_ancestor code lookup failed: {e}')
+
+        # [FIX v1.2.40 2026-06-21] delete 路径同时检查源和目标
+        # create/update: 仅检查 source_bo_id 链 (目标允许外域)
+        # delete: 同时检查 source_bo_id 和 target_bo_id 链 (两端都必须在 scope 内)
+        is_delete_path = (context.action == 'crud_delete')
+        bo_ids_to_check = []
+        if src_bo_id:
+            bo_ids_to_check.append(('source', int(src_bo_id)))
+        if is_delete_path and tgt_bo_id:
+            bo_ids_to_check.append(('target', int(tgt_bo_id)))
+
+        if not bo_ids_to_check:
             return False
 
         # 一次 SQL JOIN 拿到所有 BO 沿业务链的各级 ancestor id
-        placeholders = ','.join('?' * len(src_ids))
+        bo_ids = [bid for _, bid in bo_ids_to_check]
+        placeholders = ','.join('?' * len(bo_ids))
         try:
             rows = context.data_source.execute(
                 f'''
@@ -753,7 +1030,7 @@ class WriteScopeInterceptor(Interceptor):
                 LEFT JOIN versions v ON v.id = d.version_id
                 WHERE bo.id IN ({placeholders})
                 ''',
-                src_ids
+                bo_ids
             ).fetchall()
         except Exception as e:
             logger.debug(f'_check_relationship_ancestor query failed: {e}')
@@ -766,12 +1043,43 @@ class WriteScopeInterceptor(Interceptor):
             'version_id': 'version',
             'product_id': 'product',
         }
-        for row in rows:
-            for field, dim in ancestor_field_to_dim.items():
-                ancestor_id = row[['sub_domain_id', 'domain_id', 'version_id', 'product_id'].index(field) + 1]
-                if ancestor_id and dim in expanded and expanded[dim] and ancestor_id in expanded[dim]:
-                    return True
-        return False
+        # [FIX v1.2.40] 记录每端的匹配结果
+        # - create/update: 只需 source 匹配
+        # - delete: source 和 target 都必须匹配
+        side_matches = {}  # {'source': bool, 'target': bool}
+        for side, bo_id in bo_ids_to_check:
+            side_matches[side] = False
+            for row in rows:
+                if row[0] != bo_id:
+                    continue
+                for field, dim in ancestor_field_to_dim.items():
+                    ancestor_id = row[['sub_domain_id', 'domain_id', 'version_id', 'product_id'].index(field) + 1]
+                    if ancestor_id and dim in expanded and expanded[dim] and ancestor_id in expanded[dim]:
+                        side_matches[side] = True
+                        break
+                break  # 每个 bo_id 只有一行
+
+        # 判定最终结果
+        if is_delete_path:
+            # delete: source 和 target 都必须在 scope 内
+            src_ok = side_matches.get('source', False)
+            tgt_ok = side_matches.get('target', False)
+            if src_ok and tgt_ok:
+                return True
+            # 设置失败侧信息用于错误消息
+            if not src_ok and not tgt_ok:
+                context._rel_failed_side = f'源对象({src_code})和目标对象({tgt_code})'
+            elif not src_ok:
+                context._rel_failed_side = f'源对象({src_code})'
+            else:
+                context._rel_failed_side = f'目标对象({tgt_code})'
+            return False
+        else:
+            # create/update: 只需 source 在 scope 内
+            if side_matches.get('source', False):
+                return True
+            context._rel_failed_side = f'源对象({src_code})'
+            return False
 
     # ========================================================================
     # [V1.2.0 2026-06-15] 跨领域关系 functional perm 校验辅助方法
@@ -919,14 +1227,59 @@ class WriteScopeInterceptor(Interceptor):
               是否有 domain 在用户的 dim scope 中 (domain=[703])
               → domain 703 属于 version 764 → 允许创建
 
+        [FIX v1.2.32 2026-06-21] 支持 EXTENDED_CHAIN 类型 (business_object, service_module)
+              create relationship 时, object_type=business_object (source BO)
+              business_object 不在 HIERARCHY_CHAIN 中, 需先沿 EXTENDED_CHAIN 步进到
+              HIERARCHY_CHAIN 中的 sub_domain, 再检查其下是否有 scope 内的 child
+
         Returns: True 如果 parent 下有用户 scope 内的 child
         """
-        from meta.services.dimension_scope_engine import HIERARCHY_CHAIN
+        from meta.services.dimension_scope_engine import HIERARCHY_CHAIN, EXTENDED_CHAIN_PARENT
         from meta.services.management_dimension_engine import RESOURCE_TABLE_MAP, PARENT_FIELD_MAP
 
-        # 找 object_type 在 chain 中的位置
+        # [FIX v1.2.32] EXTENDED_CHAIN 类型: 先步进到 HIERARCHY_CHAIN
+        current_id = record.get('id')
+        effective_object_type = object_type
+        if object_type in EXTENDED_CHAIN_PARENT:
+            _EXT_TO_PARENT_DIM = {
+                'business_object': 'service_module',
+                'service_module': 'sub_domain',
+            }
+            visited = 0
+            while visited < 10 and effective_object_type not in HIERARCHY_CHAIN:
+                parent_field = EXTENDED_CHAIN_PARENT.get(effective_object_type)
+                own_table = RESOURCE_TABLE_MAP.get(effective_object_type)
+                if not parent_field or not own_table:
+                    return False
+                row = context.data_source.execute(
+                    f"SELECT {parent_field} FROM {own_table} WHERE id = ?",
+                    [current_id]
+                ).fetchone()
+                if not row or not row[0]:
+                    return False
+                current_id = int(row[0])
+                effective_object_type = _EXT_TO_PARENT_DIM.get(effective_object_type, '')
+                visited += 1
+            if effective_object_type not in HIERARCHY_CHAIN:
+                return False
+            # 用步进后的 record (sub_domain) 替代原始 record
+            record = {'id': current_id}
+
+            # [FIX v1.2.32] 步进到 sub_domain 后, 直接检查其 domain_id 是否在 scope 内
+            # 因为 sub_domain 是 HIERARCHY_CHAIN 最底层, 没有更深的 child dim 可检查
+            # 但用户 scope 通常声明 domain (如 domain=[703]), 需要检查 sub_domain 的 domain_id
+            if effective_object_type == 'sub_domain' and 'domain' in expanded and expanded['domain']:
+                domain_ids = expanded['domain']
+                sd_row = context.data_source.execute(
+                    "SELECT domain_id FROM sub_domains WHERE id = ?",
+                    [current_id]
+                ).fetchone()
+                if sd_row and sd_row[0] in domain_ids:
+                    return True
+
+        # 找 effective_object_type 在 chain 中的位置
         try:
-            obj_idx = HIERARCHY_CHAIN.index(object_type)
+            obj_idx = HIERARCHY_CHAIN.index(effective_object_type)
         except ValueError:
             return False
 
@@ -1089,12 +1442,31 @@ class WriteScopeInterceptor(Interceptor):
           子表 visibility 沿 chain 查 product.visibility
           跟 SAP-style 顶层 attribute 设计一致 (跟 OOP 继承)
 
+        [FIX v1.2.34 2026-06-21] annotation 没有 product_id,
+          visibility 继承自 parent 对象 (target_type + target_id)
+
         Returns: {'allow': bool, 'visibility': 'public'/'private'/None}
         """
         # [V1.1.7] product 顶层: 直接读 record['visibility']
         # 顶层 BO 不会有 visibility 字段 (待加)
         if object_type == 'product':
             visibility = record.get('visibility')
+        elif object_type == 'annotation':
+            # [FIX v1.2.34] annotation 的 visibility 继承自 parent 对象
+            # [FIX v1.2.36] 优先使用 context.params 中的 target_type/target_id
+            #   (经 _pre_resolve_foreign_keys 解析后的最新值, 避免 orphan 旧值绕过检查)
+            params_target_type = context.params.get('target_type') if hasattr(context, 'params') else None
+            params_target_id = context.params.get('target_id') if hasattr(context, 'params') else None
+            if isinstance(params_target_type, str) and ' - ' in params_target_type:
+                params_target_type = params_target_type.split(' - ')[0].strip()
+            target_type = params_target_type or record.get('target_type')
+            target_id = params_target_id or record.get('target_id')
+            if target_type and target_id:
+                parent_record = self._load_record(context, target_type, int(target_id))
+                if parent_record:
+                    return self._check_visibility(context, target_type, parent_record)
+            # orphan annotation: 无法确定 visibility, 默认放行
+            return {'allow': True, 'visibility': 'public'}
         else:
             # [V1.1.7] 子表: 沿 chain 查 product.visibility
             product_id = self._get_product_id(context, object_type, record)
@@ -1181,8 +1553,9 @@ class WriteScopeInterceptor(Interceptor):
                 return None
             cols = [c[0] for c in cursor.description]
             record = dict(zip(cols, row))
-            # 只保留 step 2-4 需要的字段 (减小返回 dict 大小)
-            return {
+            # [FIX v1.2.30 2026-06-20] 包含 code / source_code / target_code
+            #   用于 _extract_business_key 显示中文业务名
+            result = {
                 'id': record.get('id'),
                 'owner_id': record.get('owner_id'),
                 'visibility': record.get('visibility'),
@@ -1190,9 +1563,54 @@ class WriteScopeInterceptor(Interceptor):
                 'product_id': record.get('product_id'),
                 'version_id': record.get('version_id'),
                 'domain_id': record.get('domain_id'),
+                'code': record.get('code'),
             }
+            if table == 'relationships':
+                result['source_bo_id'] = record.get('source_bo_id')
+                result['target_bo_id'] = record.get('target_bo_id')
+                result['source_code'] = record.get('source_code')
+                result['target_code'] = record.get('target_code')
+            # [FIX v1.2.34 2026-06-21] annotation 需要 target_type + target_id 用于 parent derived
+            if table == 'annotations':
+                result['target_type'] = record.get('target_type')
+                result['target_id'] = record.get('target_id')
+            # [FIX v1.2.34 2026-06-21] EXTENDED_CHAIN 步进需要 parent FK 字段
+            #   service_module.sub_domain_id → sub_domain
+            #   business_object.service_module_id → service_module
+            if table == 'service_modules':
+                result['sub_domain_id'] = record.get('sub_domain_id')
+            if table == 'business_objects':
+                result['service_module_id'] = record.get('service_module_id')
+            return result
         except Exception as e:
             logger.debug(f'_load_record failed for {object_type}({target_id}): {e}')
+            return None
+
+    # ========================================================================
+    # 辅助: 提取业务键 (code → 中文业务名)
+    # ========================================================================
+    def _extract_business_key(self, object_type: str, record: Optional[Dict[str, Any]]) -> Optional[str]:
+        """[v1.2.30 2026-06-20] 从 record 提取业务键 (code 字段)
+
+        relationship: `源code→目标code`
+        其他 BO:     `code` 字段值
+        fallback:    None (调用方用 target_id)
+        """
+        if not record:
+            return None
+        try:
+            if object_type == 'relationship':
+                src = record.get('source_code') or record.get('code')
+                tgt = record.get('target_code')
+                if src and tgt:
+                    return f'{src}→{tgt}'
+                if src:
+                    return src
+                return None
+            # 其他 BO: 优先 code, 其次 name
+            bk = record.get('code')
+            return bk if bk else None
+        except Exception:
             return None
 
     # ========================================================================
@@ -1440,6 +1858,14 @@ class WriteScopeInterceptor(Interceptor):
 
         使用 DimensionScopeEngine 派生条件, 然后查询数据库验证。
         """
+        # [FIX v1.2.30 2026-06-20] 跳过非整数 FK 值 (字符串名称/非 ID)
+        #   例: source_domain_id='采购管理' (domain NAME, 不是 id)
+        #   若不放行会导致 _validate_fk_scope_policies 报错: "字段 source_domain_id 的值 采购管理 不在您的数据权限范围内"
+        #   实际上 FK 解析阶段会报更准确的 "引用的关联对象 '采购管理' 不存在"
+        if not isinstance(fk_value, int):
+            if isinstance(fk_value, bool):
+                return True  # bool 是 int 子类, 显式排除
+            return True  # 字符串等非整数值放行, 让 FK 解析阶段报错
         # 1. 获取用户的 role_ids
         role_ids = self._get_user_role_ids_direct(user_id, data_source)
         if not role_ids:

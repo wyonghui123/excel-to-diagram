@@ -151,7 +151,7 @@ def logout():
             token_blacklist_service.add_to_blacklist(token, expires_at)
     response = make_response(jsonify({
         'success': True,
-        'message': '已安全退出',
+        'message': '登出成功',
     }))
     response.delete_cookie('auth_token', path='/')
     return response
@@ -276,13 +276,13 @@ def change_password():
     if not old_password or not new_password:
         return jsonify({
             'success': False,
-            'message': '当前密码和新密码不能为空',
+            'message': '旧密码和新密码不能为空',
         }), 400
 
     if len(new_password) < 6:
         return jsonify({
             'success': False,
-            'message': '新密码长度不能少于 6 位',
+            'message': '新密码长度不能少于6位',
         }), 400
 
     provider = _get_auth_provider()
@@ -295,7 +295,7 @@ def change_password():
         is_locked, lockout_msg = rate_limiter.record_failed_attempt(client_ip, username)
         response_data = {
             'success': False,
-            'message': '当前密码不正确',
+            'message': '旧密码错误',
         }
         if not is_locked:
             response_data['message'] += f' ({lockout_msg})'
@@ -315,13 +315,24 @@ def change_password():
     if ',' in client_ip_addr:
         client_ip_addr = client_ip_addr.split(',')[0].strip()
 
-    _data_source.execute(
-        """INSERT INTO audit_logs (object_type, object_id, action, user_id, user_name,
-           field_name, new_data, ip_address, created_at, log_category, log_level)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'security', 'INFO')""",
-        ['user', user_id, 'CHANGE_PASSWORD', user_id, username,
-         'password_hash', 'password_changed', client_ip_addr]
-    )
+    # [FIX 2026-06-20 P2.3] 改用 AuditLogger (audit-compliance.md §1.3 禁止直接 INSERT)
+    # 通过 AuditService.log() 自动获得 transaction_id (P2 v2)
+    try:
+        from meta.core.action_executor import AuditLogger
+        audit_logger = AuditLogger(_data_source)
+        audit_logger.log_update(
+            object_type='user',
+            object_id=user_id,
+            old_data={'password_hash': '***'},
+            new_data={'password_hash': '***'},
+            user_id=user_id,
+            user_name=username,
+            ip_address=client_ip_addr,
+        )
+    except Exception as e:
+        # 不影响主流程, 仅记录警告
+        import logging
+        logging.getLogger(__name__).warning(f"[Audit] password change audit failed: {e}")
 
     return jsonify({
         'success': True,
