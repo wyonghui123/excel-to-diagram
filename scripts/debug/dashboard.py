@@ -118,9 +118,42 @@ def quick_status() -> Dict[str, Any]:
     elif port_ok:
         backend_status = f"WARN (health={health_code})"
     else:
-        backend_status = "FAIL (port not listening)"
+        # V4.0: 检测是否在"启动中"状态（区分"未启动"vs"启动中"vs"真失败"）
+        startup_state_file = PROJECT_ROOT / ".startup_state.json"
+        if startup_state_file.exists():
+            try:
+                with open(startup_state_file, encoding="utf-8") as f:
+                    states = json.load(f)
+                backend_state = states.get("backend", {})
+                if backend_state.get("state") == "starting":
+                    # 计算启动了多少秒
+                    from datetime import datetime as _dt
+                    try:
+                        started = _dt.fromisoformat(backend_state["started_at"].replace("Z", "+00:00"))
+                        elapsed = int((_dt.now(_dt.now().astimezone().tzinfo) - started).total_seconds())
+                        if elapsed < 90:  # V4.0 启动窗口 90 秒
+                            backend_status = f"STARTING (启动中 {elapsed}s,后端初始化需 30-60s)"
+                            icon = "[i]"
+                        else:
+                            backend_status = f"STALE (启动超时 {elapsed}s)"
+                            icon = "[X]"
+                    except Exception:
+                        backend_status = "STARTING (检测时间失败)"
+                        icon = "[i]"
+                elif backend_state.get("state") == "failed":
+                    backend_status = f"FAIL ({backend_state.get('error', 'unknown')})"
+                    icon = "[X]"
+                else:
+                    backend_status = "FAIL (port not listening)"
+                    icon = "[X]"
+            except Exception:
+                backend_status = "FAIL (port not listening)"
+                icon = "[X]"
+        else:
+            backend_status = "FAIL (port not listening)"
+            icon = "[X]"
 
-    icon = "[OK]" if backend_status == "OK" else "[X]" if "FAIL" in backend_status else "[!]"
+    icon = "[OK]" if backend_status == "OK" else "[X]" if "FAIL" in backend_status or "STALE" in backend_status else "[!]" if "WARN" in backend_status else "[i]"
     print(f"  {icon} 后端: {backend_status}")
 
     # HEAD

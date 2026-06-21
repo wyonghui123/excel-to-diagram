@@ -7,8 +7,20 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -Command Write-Host Trae_session_started",
-            "timeout": 5
+            "command": "powershell -Command \"& 'd:\\filework\\excel-to-diagram\\scripts\\debug\\session_start_bootstrap.ps1'\"",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -Command \"$input | & 'd:\\filework\\excel-to-diagram\\scripts\\debug\\hooks_pre_tool_use.ps1'\"",
+            "timeout": 10
           }
         ]
       }

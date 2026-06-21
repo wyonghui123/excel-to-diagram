@@ -34,25 +34,30 @@ STATUS_FILE = PROJECT_ROOT / ".service_status.json"
 LOCK_FILE = PROJECT_ROOT / ".service_manager.lock"
 LOG_FILE = PROJECT_ROOT / ".service_manager.log"
 
+# V4.0 根因修复：直接启动 python -u waitress_server.py（不再走 powershell 嵌套）
+# 背景：V3 链 powershell → service_manager.ps1 → pythonw.exe → waitress（4 层嵌套，每层超时不同，
+#       导致 service_manager.py 等 8 秒就退出，但后端实际需要 30+ 秒启动）。
+#       修复：直接调用 python，单一超时 60 秒，简单可靠。
 SERVICES = {
     "frontend": {
         "port": 3004,
         "display_name": "Frontend (Vite)",
         "service_name": "frontend",
         "start_cmd": ["npm", "run", "dev"],
-        "wait_seconds": 8,
+        "wait_seconds": 30,  # V4.0: 8 → 30（前端启动较慢）
     },
     "backend": {
         "port": 3010,
-        "display_name": "Backend (Python)",
+        "display_name": "Backend (Waitress)",
         "service_name": "backend",
-        # V3.7 修复：直接调用 service_manager.ps1，不要再走 npm 递归
-        "start_cmd": ["powershell", "-File", "scripts/service_manager.ps1", "start-be"],
-        "wait_seconds": 8,
+        # V4.0: 直接启动 python（不再走 powershell 中间层）
+        "start_cmd": ["python", "-u", "waitress_server.py"],
+        "wait_seconds": 60,  # V4.0: 8 → 60（meta.server.py 初始化 + waitress 监听需 30+ 秒）
     },
 }
 
 MANAGEMENT_LOCK_TIMEOUT = 120
+STARTUP_STATE_FILE = PROJECT_ROOT / ".startup_state.json"  # V4.0: 启动状态跟踪文件
 
 
 def _log(msg: str):
@@ -184,6 +189,47 @@ def _write_status(status: dict):
     """写入服务状态文件"""
     with open(STATUS_FILE, "w", encoding="utf-8") as f:
         json.dump(status, f, indent=2, ensure_ascii=False)
+
+
+# V4.0: 启动状态跟踪（区分"启动中"vs"启动失败"vs"未启动"）
+def _write_startup_state(svc_name: str, state: str, pid: int = None, port: int = None, error: str = None):
+    """写入启动状态
+    
+    Args:
+        state: 'starting' | 'ready' | 'failed' | 'stale'
+    """
+    states = {}
+    if STARTUP_STATE_FILE.exists():
+        try:
+            with open(STARTUP_STATE_FILE, "r", encoding="utf-8") as f:
+                states = json.load(f)
+        except Exception:
+            states = {}
+    
+    states[svc_name] = {
+        "state": state,
+        "pid": pid,
+        "port": port,
+        "started_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "error": error,
+    }
+    
+    try:
+        with open(STARTUP_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(states, f, indent=2, ensure_ascii=False)
+    except OSError:
+        pass
+
+
+def _read_startup_state() -> dict:
+    """读取启动状态"""
+    if not STARTUP_STATE_FILE.exists():
+        return {}
+    try:
+        with open(STARTUP_STATE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
 
 
 def _acquire_lock() -> bool:
@@ -444,9 +490,11 @@ def start_command(name: str = None):
 
             if _check_port(port):
                 _log(f"{config['display_name']} already running on port {port}")
+                _write_startup_state(svc_name, "ready")  # V4.0
                 continue
 
             _log(f"Starting {config['display_name']}...")
+            _write_startup_state(svc_name, "starting", port=port)  # V4.0: 标记启动中
 
             # 使用 DETACHED_PROCESS 不占用终端槽位
             creation_flags = 0
@@ -461,7 +509,7 @@ def start_command(name: str = None):
                 creationflags=creation_flags,
             )
 
-            # 等待端口就绪
+            # 等待端口就绪（V4.0: wait_seconds * 2 = 60*2 = 120 次 * 0.5s = 60 秒）
             ready = False
             for i in range(config["wait_seconds"] * 2):
                 time.sleep(0.5)
@@ -485,8 +533,12 @@ def start_command(name: str = None):
                     "health_url": health_url,      # V2.1 新增
                 }
                 _log(f"  {config['display_name']} started (PID={proc.pid}, port={port}, commit={code_version[:8]})")
+                _write_startup_state(svc_name, "ready", proc.pid, port)  # V4.0: 标记就绪
             else:
+                # V4.0: 失败时记录详细错误
+                _write_startup_state(svc_name, "failed", proc.pid, port, "port not listening within timeout")
                 _log(f"  WARNING: {config['display_name']} process spawned but port {port} not responding")
+                _log(f"  V4.0: Check {PROJECT_ROOT / 'scripts' / 'logs' / f'{config['service_name']}.err'}")
 
         _write_status(status)
         return 0
