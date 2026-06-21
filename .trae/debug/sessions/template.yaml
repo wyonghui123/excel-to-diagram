@@ -1,0 +1,50 @@
+# 调试会话模板 - V1 调试基础设施 (v2026.06.21)
+#
+# 使用：
+#   1. 复制此模板：cp .trae/debug/sessions/template.yaml .trae/debug/sessions/session-<日期>.yaml
+#   2. 编辑会话内容
+#   3. 调试完成后保存（用于跨 session 复用 + 复盘）
+
+session_id: session-YYYYMMDD-NNN
+started_at: YYYY-MM-DDTHH:MM:SSZ
+agent: <agent-name>
+task: <任务简短描述>
+
+# 环境快照（调试开始时记录）
+environment:
+  backend_pid: <pid>
+  backend_commit: <commit-hash>
+  branch: <branch-name>
+  test_user: <username>
+  test_user_id: <user_id>
+
+# 调查过程（按时间顺序）
+investigation:
+  - step: 1
+    action: <做了什么>
+    tool_used: <用的工具，例如 scripts/debug/log/extractor.py>
+    finding: <发现>
+  - step: 2
+    action: ...
+    finding: ...
+
+# 修复
+fixes:
+  - file: <修改的文件>
+    lines: <行号>
+    change: <改了什么>
+
+# 验证
+verification:
+  - method: <验证方法>
+    result: <通过/失败>
+  - method: scripts/debug/restart/restart_safe.py verify
+    result: PASS
+
+# 教训（用于未来避免）
+lessons:
+  - <教训 1>
+  - <教训 2>
+
+completed_at: YYYY-MM-DDTHH:MM:SSZ
+status: completed | failed | in_progress
