@@ -37,7 +37,17 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+# 修复 Windows GBK 编码问题
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 
 # 代码扫描默认目录
 DEFAULT_SCAN_DIRS = [
