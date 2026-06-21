@@ -928,6 +928,9 @@ fields:
       immutable: true
       resolve_from_field: source_code
       resolve_to_object: business_object
+      # [FIX 2026-06-21] 排除导出: source_bo_id 与 source_bo_name 同名("源业务对象"),
+      # 两者都导出会导致重复列。source_bo_id 是 FK, 导入时通过 source_code 解析, 不需要导出。
+      export_visible: false
       analytics:
         category: dimension
         type: foreign_key
@@ -984,6 +987,9 @@ fields:
       immutable: true
       resolve_from_field: target_code
       resolve_to_object: business_object
+      # [FIX 2026-06-21] 排除导出: target_bo_id 与 target_bo_name 同名("目标业务对象"),
+      # 两者都导出会导致重复列。target_bo_id 是 FK, 导入时通过 target_code 解析, 不需要导出。
+      export_visible: false
       analytics:
         category: dimension
         type: foreign_key
@@ -1242,8 +1248,9 @@ fields:
       title: 源业务对象
     semantics:
       meaning: 源业务对象的显示名称
-      # [REMOVED 2026-06-16 BMRD] 删除 import_order=3, 此字段 (显示名) 之前与 source_bo_code (编码) 冲突
-      # 改为 source_bo_code (编码) 占 import_order=3, 此字段 (显示名) 走 source_bo_id FK (显示成 name)
+      # [FIX 2026-06-21] 恢复 import_order=3, 让"源业务对象"列与"源业务对象编码"列排在一起
+      # 之前删除导致此字段排到最后(999), 列顺序混乱
+      import_order: 3
       export_visible: true
       # 冗余字段一致性声明（Type-B: 虚拟冗余）
       redundancy:
@@ -1295,8 +1302,8 @@ fields:
       title: 目标业务对象
     semantics:
       meaning: 目标业务对象的显示名称
-      # [REMOVED 2026-06-16 BMRD] 删除 import_order=4, 与 target_bo_code 冲突
-      # 由 target_bo_id FK 显示成 name 即可
+      # [FIX 2026-06-21] 恢复 import_order=4, 让"目标业务对象"列与"目标业务对象编码"列排在一起
+      import_order: 4
       export_visible: true
       # 冗余字段一致性声明（Type-B: 虚拟冗余）
       redundancy:
@@ -1477,7 +1484,9 @@ fields:
     semantics:
       meaning: 源业务对象所属领域的显示名称
       export_visible: true
-      # [REMOVED 2026-06-16 BMRD] 删除 import_order=5, 此字段与 source_domain_id FK (显示成 name) 重复
+      # [FIX 2026-06-21] 恢复 import_order=5, 让"源领域"列排在"源子领域"前面
+      # 之前删除导致此字段排到最后(999), 列顺序混乱
+      import_order: 5
       # 冗余字段一致性声明（Type-B: 虚拟冗余，多层JOIN）
       redundancy:
         type: virtual

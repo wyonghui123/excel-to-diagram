@@ -1551,12 +1551,29 @@ class ImportExportService:
         # 导致 source_bo_code (import_order=3) 被排到 source_bo_id (no import_order) 之后,
         # 不符合"按用户规范排序"的需求.
         # 新策略: import_order 是用户/PM 指定的列顺序, 应优先于 storage 类型
+        # [FIX v1.2.43 2026-06-21] 统计列(virtual+computed)分离出来, 排在父对象FK列之后
+        # 之前统计列在 passed_fields 中(import_order=999), 排在父对象FK列之前, 顺序错误
+        # [FIX v1.2.43b 2026-06-21] computed 是 MetaField 顶层属性, 不是 semantics 属性
+        regular_fields = []
+        stats_fields = []
+        for f in passed_fields:
+            storage_val = f.storage.value if hasattr(f.storage, 'value') else str(f.storage)
+            is_stats = (storage_val == "virtual" and getattr(f, 'computed', False))
+            if is_stats:
+                stats_fields.append(f)
+            else:
+                regular_fields.append(f)
         export_fields = sorted(
-            passed_fields,
+            regular_fields,
             key=lambda f: (
                 0 if getattr(f.semantics, 'business_key', False) else 1,
                 f.semantics.import_order if f.semantics.import_order else 999
             )
+        )
+        # 统计列按 import_order 排序（通常无 import_order, 保持原序）
+        stats_fields = sorted(
+            stats_fields,
+            key=lambda f: f.semantics.import_order if f.semantics.import_order else 999
         )
 
         # [FIX 2026-06-11] 优先用 list columns 的 title 作为 export header
@@ -1615,21 +1632,42 @@ class ImportExportService:
 
                 if f.semantics.business_key:
                     if is_auto_or_manual_code:
-                        # [REWRITE 2026-06-14 BMRD] 业务化重写, 去掉【】底色等术语
-                        bk_comment = "业务编码（必填）\n留空由系统自动生成；填写则使用填入值（系统会校验是否重复）"
+                        # [FIX v1.2.43 2026-06-21] 恢复18号格式: 用分号连接, 参考列说明
+                        bk_comment = "留空由系统自动生成；填写则使用填入值；（系统会校验是否重复）"
                     else:
-                        # [REWRITE 2026-06-14 BMRD] 业务化重写
-                        bk_comment = "业务编码（必填，每行唯一标识）"
+                        # [FIX v1.2.43 2026-06-21] 恢复18号格式: 简洁明了
+                        bk_comment = "每行唯一标识，用户必填"
                     # [NEW 2026-06-14 BMRD] 关键: 追加 key_template 格式 + 示例
+                    # [FIX v1.2.43 2026-06-21] 恢复18号格式: "自动生成编码规则:" + 中文变量名
                     if kt_info.get('pattern'):
-                        bk_comment += f"\n编码规则: {kt_info['pattern']}"
+                        pattern_zh = self._localize_key_template_pattern(kt_info['pattern'])
+                        bk_comment += f"\n自动生成编码规则: {pattern_zh}"
                     if kt_info.get('preview'):
                         bk_comment += f"\n示例: {kt_info['preview']}"
                     # [FIX 2026-06-16 BMRD] 跳过 f.description (避免与 bk_comment 内容重复)
                     # 之前 f.description = "业务对象编码" / "关系实例编码" 跟 "业务编码（必填）" 重复
-                    comment_parts = [bk_comment]
+                    # [FIX v1.2.43 2026-06-21] 恢复18号格式: 首行用字段描述(如"编码"/"关系编码"), 用\n连接
+                    # 18号格式: "编码\n每行唯一标识，用户必填" 或 "编码\n留空由系统自动生成..."
+                    if f.description:
+                        comment_parts = [f.description, bk_comment]
+                    else:
+                        comment_parts = [bk_comment]
                     has_control_info = True
                     create_required_columns.append(col_idx)
+                    # [FIX v1.2.43 2026-06-21] business_key 用\n连接(覆盖后续的；join)
+                    header_comments.append("\n".join(comment_parts))
+                    # 跳过后续的 "；".join(comment_parts) 逻辑
+                    if self._is_field_editable(f):
+                        editable_columns.append(col_idx)
+                    else:
+                        readonly_columns.append(col_idx)
+                    # [NEW v1.1 2026-06-11] 记录 auto_or_manual code 列索引（用于差异化底色）
+                    if is_auto_or_manual_code:
+                        if not hasattr(self, '_auto_or_manual_code_columns'):
+                            self._auto_or_manual_code_columns = {}
+                        self._auto_or_manual_code_columns.setdefault(meta_obj.name, []).append(col_idx)
+                    col_idx += 1
+                    continue
                 elif f.required or getattr(f.semantics, 'mandatory', False):
                     comment_parts.append("【必填】")
                     has_control_info = True
@@ -1638,7 +1676,10 @@ class ImportExportService:
                     has_control_info = True
                     create_required_columns.append(col_idx)
 
-                if not self._is_field_editable(f):
+                # [FIX v1.2.43 2026-06-21] 恢复18号行为: business_key 字段不标注【只读】
+                # 18号 Excel 中业务编码列从未标注【只读】, 即使 immutable=true
+                # 原因: business_key 是业务标识, 用户需要能看到并理解这是编码字段, 【只读】会造成困惑
+                if not self._is_field_editable(f) and not f.semantics.business_key:
                     comment_parts.append("【只读】")
                     has_control_info = True
 
@@ -1699,6 +1740,28 @@ class ImportExportService:
 
             header_comments.append(comment_msg)
             col_idx += 1
+
+        # [FIX v1.2.43 2026-06-21] 统计列排在最后（父对象FK列之后）
+        # 18号 Excel 中统计列(关系数量/业务对象数量/服务模块数量)始终排在最后
+        # 21号回滚后统计列排在父对象FK列之前, 顺序错误
+        for f in stats_fields:
+            field_name = f.name or f.id
+            if field_name not in hierarchy_fields:
+                header_name = list_title_map.get(f.id, field_name)
+                headers.append(header_name)
+                header_to_field[header_name] = f.id
+
+                # 统计列 comment: 描述 + "（统计/计算字段，自动计算无需填写）"
+                # [FIX v1.2.43 2026-06-21] 恢复18号格式: 不用【只读】, 用统计字段说明
+                comment_parts = []
+                if f.description:
+                    comment_parts.append(f.description)
+                comment_parts.append("（统计/计算字段，自动计算无需填写）")
+                header_comments.append("\n".join(comment_parts))
+
+                # 统计列始终只读
+                readonly_columns.append(col_idx)
+                col_idx += 1
 
         return headers, editable_columns, readonly_columns, parent_key_columns, create_required_columns, header_comments, header_to_field, enum_value_maps, bo_display_fields, fk_display_code_columns
 
@@ -3095,20 +3158,23 @@ class ImportExportService:
             row += 1
 
             # [MERGE 2026-06-16 BMRD] 之前分散在"业务说明"中的"删除操作"内容合并到这里
+            # [FIX v1.2.43 2026-06-21] 恢复18号文案: "按业务编码或者ID找到"
             ws_meta.cell(row=row, column=1, value="更新删除").font = ds.LABEL_FONT
-            ws_meta.cell(row=row, column=2, value="在操作模式列选择'删除' 或'更新'，系统按业务编码找到对应记录并删除，或更新").font = ds.VALUE_FONT
+            ws_meta.cell(row=row, column=2, value="在操作模式列选择'删除' 或'更新'，系统按业务编码或者ID找到对应记录并删除，或更新").font = ds.VALUE_FONT
             row += 1
 
             # [MERGE 2026-06-16 BMRD] 之前"业务说明"中的"冲突处理策略"合并到这里
-            ws_meta.cell(row=row, column=1, value="冲突处理").font = ds.LABEL_FONT
-            ws_meta.cell(row=row, column=2, value="导入时如记录已存在，可选择'更新'或'跳过'").font = ds.VALUE_FONT
+            # [FIX v1.2.42 2026-06-21] 冲突处理 → 更新模式，三选一说明
+            ws_meta.cell(row=row, column=1, value="更新模式").font = ds.LABEL_FONT
+            ws_meta.cell(row=row, column=2, value="不存在则创建否则更新（默认）/只更新存在记录/不更新").font = ds.VALUE_FONT
             row += 1
 
             # 注意事项（cascade 模式特殊文案）
+            # [FIX v1.2.43 2026-06-21] 恢复18号文案: 加回"请注意参考列上说明内容"
             if is_cascade:
-                notice = "请勿修改灰色背景单元格的值，否则导入时会忽略这些字段。级联导出不含子对象Sheet"
+                notice = "请勿修改灰色背景单元格的值，否则导入时会忽略这些字段。级联导出不含子对象Sheet\n请注意参考列上说明内容，比如自动编码规则，唯一性规则等"
             else:
-                notice = "请勿修改灰色背景单元格的值，否则导入时会忽略这些字段"
+                notice = "请勿修改灰色背景单元格的值，否则导入时会忽略这些字段\n请注意参考列上说明内容，比如自动编码规则，唯一性规则等"
             ws_meta.cell(row=row, column=1, value="注意事项").font = ds.LABEL_FONT
             ws_meta.cell(row=row, column=2, value=notice).font = ds.VALUE_FONT
             row += 1
@@ -3121,17 +3187,15 @@ class ImportExportService:
             row += 1
 
             # 颜色示例
-            # [FIX 2026-06-16 BMRD] 浅绿色描述补充 "FK 编码显示字段（自动带出）"
-            # 之前只说"父对象编码", 漏掉了 source_bo_code / target_bo_code 等 parent_key_display 字段
-            # [FIX 2026-06-16 BMRD] 移除"浅蓝色 - 新增操作行"项
-            # 原因: 2026-06-14 BMRD 已删除 CREATE_NEW_FILL (新增操作行不再使用底色)
-            # 替代: 保留"create - 新增"文字 + 底部空白位置作为视觉提示
+            # [FIX v1.2.43 2026-06-21] 恢复18号文案: 浅绿色/浅蓝灰描述
+            # 18号: 浅绿色="父对象编码或者FK对象编码字段，创建必填，更新不可变更"
+            # 18号: 浅蓝灰="留空自动生成编码/可手动录入编码"
             color_examples = [
                 ("  灰色", ds.READONLY_FILL, "只读字段，不可编辑"),
                 ("  浅绿色", ds.BUSINESS_KEY_FILL,
-                 "父对象编码字段（必填或自动带出）;FK 编码显示字段（自动带出，无需填写）"),
+                 "父对象编码或者FK对象编码字段，创建必填，更新不可变更"),
                 ("  浅黄色", ds.REQUIRED_FILL, "业务关键字，新增必填，编辑时只读"),
-                ("  浅蓝灰", ds.AUTO_GEN_OR_MANUAL_FILL, "自动/可手动编码，留空由系统生成（v1.1）"),
+                ("  浅蓝灰", ds.AUTO_GEN_OR_MANUAL_FILL, "留空自动生成编码/可手动录入编码"),
             ]
             for label, fill, desc in color_examples:
                 ws_meta.cell(row=row, column=1, value=label).font = ds.LABEL_FONT
@@ -3820,6 +3884,37 @@ class ImportExportService:
                 'preview': kt.get('preview', ''),
             }
         return {}
+
+    def _localize_key_template_pattern(self, pattern: str) -> str:
+        """[NEW v1.2.43 2026-06-21] 将 key_template pattern 中的英文变量名转为中文
+
+        用于列头 comment 展示，让业务用户能直接看懂编码规则。
+        例: '{service_module_code}{SEQ:2}' → '{服务模块编码}{2位自增序号}'
+            '{source_code}-{target_code}-{SEQ:2}' → '{源业务对象编码}-{目标业务对象编码}-{2位自增序号}'
+        """
+        if not pattern:
+            return pattern
+        import re
+        # 英文变量名 → 中文映射
+        var_map = {
+            'service_module_code': '服务模块编码',
+            'source_code': '源业务对象编码',
+            'target_code': '目标业务对象编码',
+            'sub_domain_code': '子领域编码',
+            'domain_code': '领域编码',
+            'product_code': '产品编码',
+            'version_code': '版本编码',
+        }
+        def replace_var(match):
+            var = match.group(1)
+            # SEQ:N → {N位自增序号}
+            if var.upper().startswith('SEQ'):
+                parts = var.split(':')
+                if len(parts) > 1 and parts[1].isdigit():
+                    return f'{{{parts[1]}位自增序号}}'
+                return '{自增序号}'
+            return '{' + var_map.get(var, var) + '}'
+        return re.sub(r'\{([^}]+)\}', replace_var, pattern)
 
     def _auto_generate_code_from_key_template(self, object_type: str, record: Dict[str, Any]) -> Optional[str]:
         """[NEW 2026-06-17] 使用 key_template 自动生成 code
@@ -5910,6 +6005,23 @@ class ImportExportService:
                         else:
                             failed_count += 1
                             errors.append({"row": row_num, "operation": operation_mode, "field": "编码", "value": record.get("code", ""), "message": upsert_result.get("error", "Upsert failed")})
+                    elif conflict_strategy == "update_only":
+                        # [FIX v1.2.42 2026-06-21] 只更新存在记录，不存在则跳过
+                        existing = self._find_existing_record(object_type, record, record.get('version_id'))
+                        if existing:
+                            update_result = self._update_record(object_type, record, obj.import_export)
+                            if update_result is not None and hasattr(update_result, 'success') and not update_result.success:
+                                failed_count += 1
+                                msg = getattr(update_result, 'message', None) or getattr(update_result, 'error', None) or '更新失败'
+                                errors.append({"row": row_num, "operation": "update", "field": "编码", "value": record.get("code", ""), "message": str(msg)})
+                            else:
+                                success_count += 1
+                                updated_count += 1
+                                _record_success_item(successes, row_num, "update", record, _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
+                        else:
+                            logger.info(f"[Import] 记录不存在，跳过 (update_only)")
+                            skipped_count += 1
+                            _record_skipped_item(skipped_items, row_num, "skip", record, "记录不存在，跳过更新", _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
                     elif conflict_strategy == "skip":
                         if self._record_exists(object_type, record, obj.import_export):
                             logger.info(f"[Import] 记录已存在，跳过")

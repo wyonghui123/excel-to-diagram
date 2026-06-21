@@ -62,10 +62,11 @@
             </el-upload>
           </el-form-item>
 
-          <el-form-item label="冲突处理">
+          <el-form-item label="更新模式">
             <el-radio-group v-model="conflictStrategy">
-              <el-radio label="upsert">更新已存在的记录</el-radio>
-              <el-radio label="skip">跳过已存在的记录</el-radio>
+              <el-radio label="upsert">不存在则创建否则更新</el-radio>
+              <el-radio label="update_only">只更新存在记录</el-radio>
+              <el-radio label="skip">不更新</el-radio>
             </el-radio-group>
           </el-form-item>
 
