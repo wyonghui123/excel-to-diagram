@@ -245,6 +245,57 @@ def _find_and_kill_process(port: int) -> bool:
     return killed
 
 
+def _kill_all_backend_processes() -> int:
+    """V2.1 新增 - 杀掉所有 waitress_server.py 启动的 python 进程
+
+    背景：2026-06-21 调试事故 - 旧后端进程（python.exe）未杀掉，
+          但端口被新 pythonw.exe 占用前的瞬间，旧进程可能仍在 TIME_WAIT。
+          更根本的问题：旧 python.exe 进程没有被显式清理。
+
+    Returns:
+        int: 杀掉的进程数量
+    """
+    if sys.platform != "win32":
+        return 0
+
+    # 用 wmic 找所有带 waitress_server.py 的 python 进程
+    try:
+        result = subprocess.run(
+            ["wmic", "process", "where",
+             "name='python.exe' or name='pythonw.exe'",
+             "get", "ProcessId,CommandLine", "/format:csv"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
+            return 0
+
+        killed = 0
+        for line in result.stdout.splitlines():
+            if "waitress_server.py" not in line:
+                continue
+            # CSV 格式: Node,CommandLine,ProcessId
+            parts = line.strip().split(",")
+            if len(parts) < 3:
+                continue
+            pid_str = parts[-1].strip()
+            try:
+                pid = int(pid_str)
+                if pid == os.getpid():  # 避免杀自己
+                    continue
+                taskkill = subprocess.run(
+                    ["taskkill", "/F", "/PID", str(pid)],
+                    capture_output=True, timeout=10,
+                )
+                if taskkill.returncode == 0:
+                    _log(f"Killed stale backend PID {pid} (waitress_server.py)")
+                    killed += 1
+            except (ValueError, subprocess.SubprocessError):
+                pass
+        return killed
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return 0
+
+
 def status_command():
     """查看服务状态"""
     status = _read_status()
@@ -318,6 +369,13 @@ def stop_command(name: str = None):
             port = config["port"]
             _log(f"Stopping {config['display_name']}...")
 
+            # V2.1 增强：先杀掉所有 waitress_server.py 启动的 python 进程
+            # 防止旧 python.exe 进程残留（即使不在 LISTEN 端口）
+            if svc_name == "backend":
+                killed_count = _kill_all_backend_processes()
+                if killed_count > 0:
+                    _log(f"  V2.1: Killed {killed_count} stale backend processes")
+
             if not _check_port(port):
                 _log(f"  {config['display_name']} already stopped")
                 status.pop(svc_name, None)
@@ -345,6 +403,10 @@ def stop_command(name: str = None):
             if not killed:
                 if _find_and_kill_process(port):
                     _log(f"  Stopped via port {port} scan")
+
+            # V2.1 增强：再杀一次所有 waitress_server.py 进程（兜底）
+            if svc_name == "backend":
+                _kill_all_backend_processes()
 
             # 等待端口释放
             for _ in range(10):

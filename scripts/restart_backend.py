@@ -5,6 +5,10 @@ restart_backend.py - Restart backend using pythonw (no popup)
 Called by watchdog_v30.ps1 instead of service_manager.ps1 to avoid
 powershell.exe popup windows.
 
+V2.1 重大修复 (2026-06-21): find_existing_backend() 现在同时查找 python.exe 和 pythonw.exe
+事故背景: 之前只查 pythonw.exe，导致旧 python.exe 启动的后端进程没被杀掉，
+         请求一直被旧代码处理，修复看似生效但实际无效。
+
 Usage:
     pythonw scripts/restart_backend.py
 """
@@ -32,39 +36,57 @@ def is_port_listening(port):
 
 
 def find_existing_backend():
-    """Find existing pythonw processes running waitress_server"""
-    try:
-        result = subprocess.run(
-            ["tasklist", "/FI", f'IMAGENAME eq pythonw.exe', "/FO", "CSV", "/NH"],
-            capture_output=True, text=True, timeout=10,
-            encoding="utf-8", errors="replace"
-        )
-        # Find PIDs whose command line contains waitress_server
-        pids = []
-        for line in result.stdout.strip().split("\n"):
-            if "pythonw" in line.lower():
+    """Find existing python OR pythonw processes running waitress_server.
+
+    V2.1 修复 (2026-06-21): 同时查找 python.exe 和 pythonw.exe。
+    之前只查 pythonw.exe，导致旧 python.exe 启动的后端进程没被杀掉。
+    """
+    all_pids = set()
+
+    # V2.1 修复: 同时查找 python.exe 和 pythonw.exe
+    for image_name in ("python.exe", "pythonw.exe"):
+        try:
+            result = subprocess.run(
+                ["tasklist", "/FI", f"IMAGENAME eq {image_name}",
+                 "/FO", "CSV", "/NH"],
+                capture_output=True, text=True, timeout=10,
+                encoding="utf-8", errors="replace"
+            )
+            for line in result.stdout.strip().split("\n"):
+                if image_name.lower() not in line.lower():
+                    continue
                 parts = line.strip().strip('"').split('","')
                 if len(parts) >= 2:
                     try:
                         pid = int(parts[1])
-                        # Check command line via wmic
-                        wmic = subprocess.run(
-                            ["wmic", "process", "where", f"ProcessId={pid}",
-                             "get", "CommandLine", "/VALUE"],
-                            capture_output=True, text=True, timeout=5,
-                            encoding="utf-8", errors="replace"
-                        )
-                        if "waitress_server" in wmic.stdout:
-                            pids.append(pid)
+                        all_pids.add(pid)
                     except Exception:
                         continue
-        return pids
-    except Exception:
-        return []
+        except Exception:
+            continue
+
+    # 对每个候选 PID，验证命令行是否包含 waitress_server.py
+    pids = []
+    for pid in all_pids:
+        try:
+            wmic = subprocess.run(
+                ["wmic", "process", "where", f"ProcessId={pid}",
+                 "get", "CommandLine", "/VALUE"],
+                capture_output=True, text=True, timeout=5,
+                encoding="utf-8", errors="replace"
+            )
+            if "waitress_server" in wmic.stdout:
+                pids.append(pid)
+        except Exception:
+            continue
+    return pids
 
 
 def kill_existing_backend():
-    """Kill existing backend processes"""
+    """Kill existing backend processes (python.exe AND pythonw.exe)
+
+    V2.1 修复 (2026-06-21): 杀所有 waitress_server.py 启动的 python 进程。
+    """
     pids = find_existing_backend()
     killed = []
     for pid in pids:

@@ -115,6 +115,114 @@ def get_file_mtime(filepath: str) -> str:
         return ""
 
 
+def check_process_ownership() -> dict:
+    """V2.1 新增 - 检查后端进程所有者一致性（防旧 python.exe 残留）
+
+    关键检测：
+    1. status.json 里的 PID == 端口 3010 LISTEN 的 PID
+    2. 只有 1 个 waitress_server.py 进程在跑
+
+    事故背景：2026-06-21 - restart_backend.py 只杀 pythonw.exe，
+              旧 python.exe 进程（PID 16420/18060）残留导致请求被旧代码处理。
+    """
+    # status.json PID
+    status_pid = 0
+    if STATUS_FILE.exists():
+        try:
+            for encoding in ("utf-8-sig", "utf-8"):
+                try:
+                    with open(STATUS_FILE, "r", encoding=encoding) as f:
+                        data = json.load(f)
+                    status_pid = data.get("backend", {}).get("pid", 0)
+                    break
+                except UnicodeDecodeError:
+                    continue
+        except Exception:
+            pass
+
+    # 端口 3010 LISTEN 的 PID
+    port_pid = 0
+    try:
+        import socket as sock_mod
+        s = sock_mod.socket(sock_mod.AF_INET, sock_mod.SOCK_STREAM)
+        s.settimeout(3)
+        # 先检查端口是否 LISTEN
+        if s.connect_ex(("127.0.0.1", 3010)) == 0:
+            # 用 netstat 找 LISTEN 的 PID
+            result = _run(["netstat", "-ano"], timeout=15)
+            if result:
+                for line in result.stdout.splitlines():
+                    if ":3010" in line and "LISTENING" in line:
+                        parts = line.strip().split()
+                        try:
+                            pid = int(parts[-1])
+                            if pid > 4:
+                                port_pid = pid
+                                break
+                        except (ValueError, IndexError):
+                            continue
+        s.close()
+    except OSError:
+        pass
+
+    # 所有 waitress_server.py 启动的 python 进程
+    all_pids = []
+    if sys.platform == "win32":
+        try:
+            result = _run(
+                ["wmic", "process", "where",
+                 "name='python.exe' or name='pythonw.exe'",
+                 "get", "ProcessId,CommandLine", "/format:csv"],
+                timeout=15
+            )
+            if result:
+                for line in result.stdout.splitlines():
+                    if "waitress_server.py" not in line:
+                        continue
+                    parts = line.strip().split(",")
+                    if len(parts) < 3:
+                        continue
+                    try:
+                        pid = int(parts[-1].strip())
+                        if pid != os.getpid():
+                            all_pids.append(pid)
+                    except ValueError:
+                        continue
+        except Exception:
+            pass
+
+    result = {
+        "status_pid": status_pid,
+        "port_pid": port_pid,
+        "all_pids": all_pids,
+        "consistent": False,
+        "issues": [],
+    }
+
+    # 关键检测 1: status PID == port PID
+    if status_pid and port_pid and status_pid != port_pid:
+        result["issues"].append(
+            f"status.json PID={status_pid} != 端口 3010 LISTEN PID={port_pid} "
+            f"（端口被旧进程占用！修复未生效！）"
+        )
+
+    # 关键检测 2: 多个 waitress 进程（说明旧进程未杀）
+    if len(all_pids) > 1:
+        result["issues"].append(
+            f"发现 {len(all_pids)} 个 waitress_server.py 进程: {all_pids} "
+            f"（旧进程残留！）"
+        )
+
+    # 关键检测 3: port PID 不在 waitress 进程列表
+    if port_pid and port_pid not in all_pids:
+        result["issues"].append(
+            f"端口 LISTEN 的 PID {port_pid} 不是 waitress_server.py 进程"
+        )
+
+    result["consistent"] = len(result["issues"]) == 0
+    return result
+
+
 def get_running_backend_info() -> dict:
     """从 .service_status.json 读取后端启动信息"""
     if not STATUS_FILE.exists():
@@ -300,6 +408,18 @@ def cmd_check(args):
         _log(f"建议: 必须重启后端，否则调试的是旧代码", "FAIL")
     else:
         _log(f"代码版本一致（后端启动: {version_info.get('started_at', 'N/A')}）", "OK")
+
+    # V2.1 新增: 进程所有者一致性检查（防旧 python.exe 残留）
+    print()
+    print("[Step 3.5/6] 进程所有者一致性检查（V2.1 防旧进程残留）")
+    pid_consistency = check_process_ownership()
+    if pid_consistency["consistent"]:
+        _log(f"PID 一致 (status={pid_consistency['status_pid']}, port={pid_consistency['port_pid']}, total={len(pid_consistency['all_pids'])})", "OK")
+    else:
+        _log(f"!!! 进程所有者不一致 !!!", "FAIL")
+        for issue in pid_consistency["issues"]:
+            _log(f"  - {issue}", "FAIL")
+        _log(f"建议: python scripts/verify_backend_owner.py --fix", "FAIL")
 
     # Step 4: Import 验证（避免循环导入）
     if not args.quick:
