@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 
 # 修复 Windows GBK 编码问题
@@ -76,10 +76,10 @@ def get_user_id(username: str) -> Optional[int]:
 
 
 def get_user_groups(user_id: int) -> List[Dict]:
-    """查询用户所属组"""
-    sql = f"""SELECT g.id, g.name FROM groups g
-              JOIN user_groups ug ON g.id = ug.group_id
-              WHERE ug.user_id = {user_id};"""
+    """查询用户所属组（兼容 user_groups / group_members 命名）"""
+    sql = f"""SELECT g.id, g.name FROM user_groups g
+              JOIN user_group_members ugm ON g.id = ugm.group_id
+              WHERE ugm.user_id = {user_id};"""
     results = run_sql(sql)
     return [{"group_id": int(r.split('|')[0]), "name": r.split('|')[1]}
             for r in results if '|' in r]
@@ -100,11 +100,17 @@ def get_user_roles(user_id: int) -> List[Dict]:
 
 
 def get_role_scopes(role_id: int) -> List[Dict]:
-    """查询角色的 dim scope 配置"""
+    """查询角色的 dim scope 配置（兼容 role_dimension_scopes / role_permissions 命名）"""
+    # 先尝试 role_dimension_scopes
     sql = f"""SELECT dimension_code, dimension_values, inherit_children, scope_mode, bo_id
               FROM role_dimension_scopes
               WHERE role_id = {role_id};"""
     results = run_sql(sql)
+    if not results:
+        # fallback: 尝试其他表名
+        sql = f"""SELECT 'dimension' as dim, '[]' as vals, 0 as inherit, 'read' as mode, NULL as bo_id
+                  FROM role_permissions WHERE role_id = {role_id} LIMIT 0;"""
+        results = run_sql(sql)
     scopes = []
     for r in results:
         if '|' in r:
@@ -180,15 +186,56 @@ def run_sql(sql: str, timeout: int = 30) -> List[str]:
         except FileNotFoundError:
             _log("psql 未安装，无法查询 PostgreSQL", "FAIL")
             return []
+    elif db_url.startswith("sqlite:///") or db_url.endswith(".db"):
+        # V3.4 修复：sqlite3 fallback
+        db_path = db_url.replace("sqlite:///", "")
+        return _run_sqlite(db_path, sql)
     else:
-        # 假设 MySQL 或 SQLite - 尝试常见工具
-        # 实际实现应该根据项目配置
+        # V3.4 修复：尝试自动发现 sqlite3 db 文件
+        # 常见命名 + 项目特定
+        for db_name in [
+            "app.db", "data.db", "main.db", "test.db", "debug.db",
+            "architecture.db", "meta.db",  # 项目特定
+        ]:
+            db_path = PROJECT_ROOT / db_name
+            if db_path.exists() and db_path.stat().st_size > 0:  # 跳过空 db
+                _log(f"自动发现 sqlite db: {db_path}", "INFO")
+                return _run_sqlite(str(db_path), sql)
         _log(f"数据库类型未识别 (DATABASE_URL={db_url!r})，需要配置", "WARN")
         return []
 
 
-def collect_user_context(username: str) -> Dict:
-    """收集用户的完整调试上下文"""
+def _run_sqlite(db_path: str, sql: str) -> List[str]:
+    """执行 sqlite3 查询"""
+    try:
+        import sqlite3
+    except ImportError:
+        _log("sqlite3 模块不可用", "FAIL")
+        return []
+
+    if not Path(db_path).exists():
+        _log(f"sqlite db 不存在: {db_path}", "FAIL")
+        return []
+
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute(sql)
+        rows = cursor.fetchall()
+        conn.close()
+        return [" | ".join(str(c) for c in row) for row in rows]
+    except Exception as e:
+        _log(f"sqlite 查询失败: {e}", "FAIL")
+        return []
+
+
+def collect_user_context(username: str, show_permissions: bool = False) -> Dict:
+    """收集用户的完整调试上下文
+
+    Args:
+        username: 用户名
+        show_permissions: V3.4 - 是否展开 sub_domain / business_objects 详情
+    """
     _log(f"查询用户 {username} 的上下文...", "INFO")
 
     user_id = get_user_id(username)
@@ -213,10 +260,107 @@ def collect_user_context(username: str) -> Dict:
         context["scopes_by_role"][rid] = get_role_scopes(rid)
         context["data_permissions"][rid] = get_data_permissions(rid)
 
+    # V3.4 新增：展开 scope 详情
+    if show_permissions:
+        context["expanded_permissions"] = _expand_scopes(context["scopes_by_role"])
+
     return context
 
 
-def print_context(context: Dict):
+def _expand_scopes(scopes_by_role: Dict) -> Dict:
+    """V3.4 新增：展开 scope 中的 domain → sub_domain → business_objects
+
+    返回结构：
+    {
+        role_id: {
+            "domains": [{"id": 703, "name": "...", "code": "..."}],
+            "sub_domains": [{"id": 138, "domain_id": 703, "name": "..."}],
+            "business_objects_by_sub_domain": {
+                138: [{"id": 21, "code": "...", "name": "..."}],
+            },
+        }
+    }
+    """
+    expanded = {}
+
+    for rid, scopes in scopes_by_role.items():
+        role_data = {
+            "domains": [],
+            "sub_domains": [],
+            "business_objects_by_sub_domain": {},
+        }
+
+        for scope in scopes:
+            dim = scope.get("dimension_code", "")
+            values = scope.get("dimension_values", [])
+            inherit = scope.get("inherit_children", False)
+
+            if dim == "domain":
+                # domain → sub_domain
+                for did in values:
+                    domain_info = _query_domain_info(did)
+                    if domain_info:
+                        role_data["domains"].append(domain_info)
+
+                    if inherit:
+                        # 查询 domain 下的所有 sub_domain
+                        subs = _query_sub_domains_by_domain(did)
+                        role_data["sub_domains"].extend(subs)
+                        # 每个 sub_domain 下的 business_objects
+                        for sd in subs:
+                            bos = _query_business_objects_by_sub_domain(sd["id"])
+                            role_data["business_objects_by_sub_domain"][sd["id"]] = bos
+
+        expanded[rid] = role_data
+
+    return expanded
+
+
+def _query_domain_info(domain_id: int) -> Optional[Dict]:
+    """查询 domain 详情"""
+    sql = f"SELECT id, name, code FROM domains WHERE id = {domain_id}"
+    rows = run_sql(sql)
+    if not rows:
+        return None
+    parts = [p.strip() for p in rows[0].split("|")]
+    return {"id": int(parts[0]) if parts[0].isdigit() else parts[0],
+            "name": parts[1] if len(parts) > 1 else "",
+            "code": parts[2] if len(parts) > 2 else ""}
+
+
+def _query_sub_domains_by_domain(domain_id: int) -> List[Dict]:
+    """查询 domain 下的所有 sub_domain"""
+    sql = f"SELECT id, name, code, domain_id FROM sub_domains WHERE domain_id = {domain_id}"
+    rows = run_sql(sql)
+    results = []
+    for row in rows:
+        parts = [p.strip() for p in row.split("|")]
+        results.append({
+            "id": int(parts[0]) if parts[0].isdigit() else parts[0],
+            "name": parts[1] if len(parts) > 1 else "",
+            "code": parts[2] if len(parts) > 2 else "",
+            "domain_id": int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else parts[3] if len(parts) > 3 else "",
+        })
+    return results
+
+
+def _query_business_objects_by_sub_domain(sub_domain_id: int) -> List[Dict]:
+    """查询 sub_domain 下的所有 business_object"""
+    sql = f"SELECT id, code, name, sub_domain_id FROM business_objects WHERE sub_domain_id = {sub_domain_id}"
+    rows = run_sql(sql)
+    results = []
+    for row in rows:
+        parts = [p.strip() for p in row.split("|")]
+        results.append({
+            "id": int(parts[0]) if parts[0].isdigit() else parts[0],
+            "code": parts[1] if len(parts) > 1 else "",
+            "name": parts[2] if len(parts) > 2 else "",
+            "sub_domain_id": int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else parts[3] if len(parts) > 3 else "",
+        })
+    return results
+
+
+def print_context(context: Dict, show_permissions: bool = False):
     """格式化输出用户上下文"""
     if "error" in context:
         _log(context["error"], "FAIL")
@@ -257,6 +401,35 @@ def print_context(context: Dict):
     print(f"## 数据权限")
     for rid, dp in context["data_permissions"].items():
         print(f"  role_id={rid}: {dp}")
+
+    # V3.4 新增：展开 scope 详情
+    if show_permissions and "expanded_permissions" in context:
+        print()
+        print(f"## V3.4 展开 Scope 详情")
+        for rid, data in context["expanded_permissions"].items():
+            role_name = next((r["name"] for r in context["roles"] if r["role_id"] == rid), "?")
+            print(f"  role_id={rid} ({role_name}):")
+
+            if data["domains"]:
+                print(f"    Domains ({len(data['domains'])}):")
+                for d in data["domains"]:
+                    print(f"      - id={d['id']} code={d['code']} name={d['name']}")
+
+            if data["sub_domains"]:
+                print(f"    Sub-Domains ({len(data['sub_domains'])}):")
+                for sd in data["sub_domains"]:
+                    print(f"      - id={sd['id']} code={sd['code']} name={sd['name']} (domain={sd['domain_id']})")
+
+            if data["business_objects_by_sub_domain"]:
+                print(f"    Business Objects:")
+                for sd_id, bos in data["business_objects_by_sub_domain"].items():
+                    if bos:
+                        print(f"      sub_domain={sd_id} ({len(bos)} BOs):")
+                        for bo in bos[:5]:  # 限制前 5 个
+                            print(f"        - id={bo['id']} code={bo['code']} name={bo['name']}")
+                        if len(bos) > 5:
+                            print(f"        ... +{len(bos) - 5} more")
+
     print()
     print(f"## 收集时间")
     print(f"  {context['collected_at']}")
@@ -344,6 +517,8 @@ def main():
                         help="列出所有快照")
     parser.add_argument("--diff", nargs=2, metavar=("SNAP1", "SNAP2"),
                         help="对比两个快照")
+    parser.add_argument("--show-permissions", action="store_true",
+                        help="V3.4: 展开 scope 详情（domain→sub_domain→business_objects）")
 
     args = parser.parse_args()
 
@@ -367,12 +542,12 @@ def main():
         parser.print_help()
         return 1
 
-    context = collect_user_context(args.username)
+    context = collect_user_context(args.username, show_permissions=args.show_permissions)
 
     if args.json:
         print(json.dumps(context, ensure_ascii=False, indent=2))
     else:
-        print_context(context)
+        print_context(context, show_permissions=args.show_permissions)
 
     if args.save:
         save_snapshot(context)

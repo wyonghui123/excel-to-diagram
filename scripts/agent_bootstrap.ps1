@@ -152,6 +152,27 @@ if ($Doctor) {
         Write-Host "      [WARN] scripts/check_powershell_redirection.py not found" -ForegroundColor Yellow
     }
 
+    # ===== [NEW v1.4] Worktree 状态检查 =====
+    Write-Host ""
+    Write-Host "[0/7 WORKTREE] Checking worktree status (v1.4 v2026.06.21) ..." -ForegroundColor Cyan
+    try {
+        $mainHead = (git -C $repoRoot rev-parse --short main 2>$null)
+        $currentHead = (git -C $repoRoot rev-parse --short HEAD 2>$null)
+        if ($mainHead -and $currentHead -and $mainHead -ne $currentHead) {
+            $behindCount = (git -C $repoRoot log --oneline HEAD..main 2>$null | Measure-Object).Count
+            if ($behindCount -gt 0) {
+                Write-Host "      [WARN] 当前 worktree 落后 main $behindCount commits" -ForegroundColor Yellow
+                Write-Host "      [INFO] 升级步骤: git fetch origin && git rebase main" -ForegroundColor Gray
+            } else {
+                Write-Host "      [OK] 当前 HEAD = $currentHead (main: $mainHead)" -ForegroundColor Green
+            }
+        } else {
+            Write-Host "      [OK] worktree 已同步 main ($currentHead)" -ForegroundColor Green
+        }
+    } catch {
+        Write-Host "      [INFO] 跳过 worktree 检查 (非 git 仓库)" -ForegroundColor Gray
+    }
+
     # ===== [NEW v1.3] V1 Debug Infrastructure: Comprehensive Diagnose =====
     Write-Host ""
     Write-Host "[7/7 V1 DEBUG] Comprehensive debug environment diagnose (v2026.06.21) ..." -ForegroundColor Cyan
@@ -168,6 +189,19 @@ if ($Doctor) {
         }
     } else {
         Write-Host "      [WARN] scripts/debug/env/diagnose.py not found" -ForegroundColor Yellow
+    }
+
+    # ===== [NEW v1.4] 根目录调试脚本检测 =====
+    Write-Host ""
+    Write-Host "[V1.4] Checking root debug scripts ..." -ForegroundColor Cyan
+    $checkDebug = Join-Path $repoRoot "scripts/debug/check_debug_script_in_root.py"
+    if (Test-Path $checkDebug) {
+        try {
+            $env:PYTHONIOENCODING = "utf-8"
+            python $checkDebug 2>&1 | Select-Object -First 5
+        } catch {
+            Write-Host "      [WARN] check_debug_script_in_root.py failed" -ForegroundColor Yellow
+        }
     }
 
     Write-Host ""
