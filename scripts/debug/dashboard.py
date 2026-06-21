@@ -429,6 +429,13 @@ def main():
     export_p.add_argument("--output", type=Path, required=True,
                           help="输出路径（如 .trae/debug/reports/report.md）")
 
+    # progress
+    progress_p = sub.add_parser("progress", help="显示调试进度（轮次 + 步骤）")
+    progress_p.add_argument("--task", required=True, help="调试任务")
+    progress_p.add_argument("--step", help="当前步骤名")
+    progress_p.add_argument("--total-steps", type=int, default=5,
+                            help="总步骤数（用于显示进度）")
+
     args = parser.parse_args()
 
     if args.cmd == "start":
@@ -438,9 +445,95 @@ def main():
     elif args.cmd == "export":
         export_markdown(args.output)
         return 0
+    elif args.cmd == "progress":
+        return cmd_progress(args)
     else:
         full_dashboard()
         return 0
+
+
+PROGRESS_FILE = PROJECT_ROOT / ".trae" / "debug" / ".progress.json"
+
+
+def cmd_progress(args):
+    """显示调试进度（轮次 + 步骤）"""
+    # 读取或初始化进度文件
+    progress = {}
+    if PROGRESS_FILE.exists():
+        try:
+            with open(PROGRESS_FILE, encoding="utf-8") as f:
+                progress = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            progress = {}
+
+    if args.step:
+        # 记录一步
+        progress.setdefault("steps", []).append({
+            "task": args.task,
+            "step": args.step,
+            "timestamp": datetime.now().isoformat(),
+        })
+        progress["current_step"] = args.step
+        progress["updated_at"] = datetime.now().isoformat()
+
+        with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
+            json.dump(progress, f, ensure_ascii=False, indent=2)
+
+    # 显示进度
+    print("=" * 70)
+    print(f"调试进度 - V3 调试基础设施 D")
+    print("=" * 70)
+    print(f"任务: {args.task}")
+    print()
+
+    steps = progress.get("steps", [])
+    if not steps:
+        print("  (无记录步骤)")
+        print()
+        print("💡 用法:")
+        print("  python scripts/debug/dashboard.py progress --task '...' --step '重启后端'")
+        print("  python scripts/debug/dashboard.py progress --task '...' --step '验证修复'")
+        print()
+        return 0
+
+    # 找到当前任务的所有步骤
+    task_steps = [s for s in steps if s["task"] == args.task]
+
+    if not task_steps:
+        # 显示所有任务
+        print(f"  任务 '{args.task}' 没有记录步骤")
+        print(f"  共有 {len(set(s['task'] for s in steps))} 个任务的记录")
+        return 0
+
+    # 显示步骤
+    print(f"## 任务 '{args.task}' 的步骤（共 {len(task_steps)} 步）")
+    print()
+    for i, step in enumerate(task_steps, 1):
+        ts = step["timestamp"][:19].replace("T", " ")
+        print(f"  [{i}] {ts} | {step['step']}")
+
+    # 检测"重启-验证循环"（重复出现的步骤）
+    step_counts: Dict[str, int] = {}
+    for s in task_steps:
+        s_name = s["step"].lower()
+        step_counts[s_name] = step_counts.get(s_name, 0) + 1
+
+    repeated = {k: v for k, v in step_counts.items() if v >= 3}
+    if repeated:
+        print()
+        print(f"## ⚠️ 检测到重复步骤（>= 3 次）")
+        for k, v in repeated.items():
+            print(f"  - '{k}': 出现 {v} 次（可能是调试循环，建议停下来评估）")
+
+    # 进度可视化
+    if args.total_steps:
+        print()
+        print(f"## 进度: [{len(task_steps)}/{args.total_steps}]")
+        ratio = min(len(task_steps) / args.total_steps, 1.0)
+        bar = "█" * int(ratio * 30) + "░" * (30 - int(ratio * 30))
+        print(f"  [{bar}] {ratio*100:.0f}%")
+
+    return 0
 
 
 if __name__ == "__main__":
