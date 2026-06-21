@@ -59,10 +59,14 @@ def _log(msg: str, level: str = "INFO"):
 def run_subprocess(cmd, timeout: int = 15) -> Dict[str, Any]:
     """运行子命令并返回结构化结果"""
     try:
+        # V3.6 修复：设置 PYTHONIOENCODING=utf-8 让 child 进程输出 UTF-8
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
         result = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout,
             encoding="utf-8", errors="replace",
             cwd=str(PROJECT_ROOT),
+            env=env,
         )
         return {
             "success": result.returncode == 0,
@@ -159,6 +163,21 @@ def quick_status() -> Dict[str, Any]:
             icon = "[X]"
             err_status = f"FAIL ({n_errors} errors)"
         print(f"  {icon} 最近错误: {err_status}")
+
+    # V3.6: 根目录调试脚本检测
+    debug_check = run_subprocess([
+        "python", "scripts/debug/check_debug_script_in_root.py",
+    ], timeout=10)
+    # 不管退出码（失败也会输出），只看 stdout
+    if debug_check["stdout"]:
+        import re
+        m = re.search(r"发现 (\d+) 个", debug_check["stdout"])
+        if m:
+            count = int(m.group(1))
+            if count > 0:
+                print(f"  [X] 根目录调试脚本: FAIL ({count} 个违规)")
+            else:
+                print(f"  [OK] 根目录调试脚本: OK")
 
     # Sessions
     sessions_dir = PROJECT_ROOT / ".trae" / "debug" / "sessions"

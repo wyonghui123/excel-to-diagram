@@ -192,17 +192,87 @@ def run_sql(sql: str, timeout: int = 30) -> List[str]:
         return _run_sqlite(db_path, sql)
     else:
         # V3.4 修复：尝试自动发现 sqlite3 db 文件
-        # 常见命名 + 项目特定
-        for db_name in [
-            "app.db", "data.db", "main.db", "test.db", "debug.db",
-            "architecture.db", "meta.db",  # 项目特定
-        ]:
-            db_path = PROJECT_ROOT / db_name
-            if db_path.exists() and db_path.stat().st_size > 0:  # 跳过空 db
-                _log(f"自动发现 sqlite db: {db_path}", "INFO")
-                return _run_sqlite(str(db_path), sql)
+        # V3.6 修复：递归查找 + 排除 backup 目录
+        candidate_dbs = _discover_sqlite_dbs()
+        if candidate_dbs:
+            best = candidate_dbs[0]
+            _log(f"自动发现 sqlite db: {best}", "INFO")
+            return _run_sqlite(str(best), sql)
         _log(f"数据库类型未识别 (DATABASE_URL={db_url!r})，需要配置", "WARN")
         return []
+
+
+def _discover_sqlite_dbs() -> List[Path]:
+    """V3.6 改进：递归发现项目所有 sqlite db
+
+    优先级：
+    1. 根目录常见 db（app.db / data.db / architecture.db / meta.db）
+    2. meta/ 下的 db（应用数据库）
+    3. data/ 下的 db（数据目录）
+    4. archive/ 下的 db（归档）
+
+    排除：
+    - backups/ 目录（备份文件）
+    - tests/ 目录（测试 fixture，除非是 meta/tests/）
+    - __pycache__/ 目录
+    """
+    candidates = []
+    seen = set()
+
+    # 优先级 1: 根目录常见 db
+    root_names = ["app.db", "data.db", "main.db", "test.db", "debug.db",
+                  "architecture.db", "meta.db"]
+    for db_name in root_names:
+        db_path = PROJECT_ROOT / db_name
+        if db_path.exists() and db_path.stat().st_size > 0:
+            candidates.append(db_path)
+            seen.add(str(db_path))
+
+    # 优先级 2: meta/ 下的 db（项目特定，应用数据库）
+    for sub in ["meta", "data", "app", "src", "lib"]:
+        sub_path = PROJECT_ROOT / sub
+        if not sub_path.exists():
+            continue
+        for db_path in sub_path.glob("*.db"):
+            # 排除 tests 和 backups
+            if "tests" in db_path.parts or "backups" in db_path.parts or "__pycache__" in db_path.parts:
+                continue
+            if str(db_path) not in seen and db_path.stat().st_size > 0:
+                candidates.append(db_path)
+                seen.add(str(db_path))
+
+    # 优先级 3: archive/ 下的 db（只取最顶层的）
+    archive_path = PROJECT_ROOT / "archive"
+    if archive_path.exists():
+        for db_path in archive_path.glob("*.db"):
+            if str(db_path) not in seen and db_path.stat().st_size > 0:
+                candidates.append(db_path)
+                seen.add(str(db_path))
+        # archive/<sub>/meta/architecture.db 等
+        for db_path in archive_path.glob("**/architecture.db"):
+            if str(db_path) not in seen and db_path.stat().st_size > 0:
+                candidates.append(db_path)
+                seen.add(str(db_path))
+
+    # 按优先级 + 大小排序（大的优先，更可能是主 db）
+    def priority_key(p: Path):
+        parts = p.parts
+        # 优先级分数
+        if "meta" in parts:
+            prio = 1
+        elif "data" in parts:
+            prio = 2
+        elif "app" in parts or "src" in parts:
+            prio = 3
+        elif "archive" in parts:
+            prio = 4
+        else:
+            prio = 5
+        # 越大的越优先（更可能是主 db）
+        return (prio, -p.stat().st_size)
+
+    candidates.sort(key=priority_key)
+    return candidates
 
 
 def _run_sqlite(db_path: str, sql: str) -> List[str]:
