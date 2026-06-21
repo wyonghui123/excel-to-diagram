@@ -113,21 +113,40 @@ def filter_by_level(lines: List[str], level: str) -> List[str]:
 
 
 def filter_by_time(lines: List[str], since: Optional[str], until: Optional[str]) -> List[str]:
-    """根据时间窗口过滤（支持 ISO 格式）"""
+    """根据时间窗口过滤（支持 ISO 格式 + 本地时间）
+
+    自动转换：
+    - "11:08" → 当天的 11:08:00
+    - "2026-06-21T11:08" → 2026-06-21 11:08:00
+    - 自动处理 UTC vs 本地时间
+    """
     if not since and not until:
         return lines
 
     def parse_line_time(line: str) -> Optional[datetime]:
         # 尝试多种时间格式
         patterns = [
-            r'(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?)',
+            # 完整 ISO: 2026-06-21T11:08:23
+            r'(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)',
+            # 短 ISO: 2026-06-21T11:08
+            r'(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2})',
+            # 短时间: 11:08:23 或 11:08
+            r'\b(\d{2}:\d{2}(?::\d{2})?)\b',
         ]
         for p in patterns:
             m = re.search(p, line)
             if m:
                 try:
-                    s = m.group(1).replace(' ', 'T').replace('/', '-')
-                    return datetime.fromisoformat(s)
+                    s = m.group(1).replace(' ', 'T').replace('/', '-').rstrip('.,')
+                    # 处理短时间格式（HH:MM 或 HH:MM:SS）
+                    if len(s) <= 5 or (len(s) <= 8 and ':' in s and 'T' not in s):
+                        # 短时间：补全为今天
+                        today = datetime.now().strftime("%Y-%m-%d")
+                        s = f"{today}T{s}:00" if s.count(':') == 1 else f"{today}T{s}"
+                    if '.' in s or ',' in s:
+                        s = s.replace(',', '.').split('.')[0]  # 移除毫秒
+                    dt = datetime.fromisoformat(s)
+                    return dt
                 except ValueError:
                     continue
         return None
@@ -136,13 +155,22 @@ def filter_by_time(lines: List[str], since: Optional[str], until: Optional[str])
     until_dt = None
     if since:
         try:
-            since_dt = datetime.fromisoformat(since.replace(' ', 'T').replace('/', '-'))
+            s = since.replace(' ', 'T').replace('/', '-')
+            # 短时间补全
+            if len(s) <= 5 or (len(s) <= 8 and ':' in s and 'T' not in s):
+                today = datetime.now().strftime("%Y-%m-%d")
+                s = f"{today}T{s}:00" if s.count(':') == 1 else f"{today}T{s}"
+            since_dt = datetime.fromisoformat(s)
         except ValueError:
             _log(f"无效 since 时间: {since}", "FAIL")
             return lines
     if until:
         try:
-            until_dt = datetime.fromisoformat(until.replace(' ', 'T').replace('/', '-'))
+            s = until.replace(' ', 'T').replace('/', '-')
+            if len(s) <= 5 or (len(s) <= 8 and ':' in s and 'T' not in s):
+                today = datetime.now().strftime("%Y-%m-%d")
+                s = f"{today}T{s}:00" if s.count(':') == 1 else f"{today}T{s}"
+            until_dt = datetime.fromisoformat(s)
         except ValueError:
             _log(f"无效 until 时间: {until}", "FAIL")
             return lines

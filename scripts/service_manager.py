@@ -38,12 +38,14 @@ SERVICES = {
     "frontend": {
         "port": 3004,
         "display_name": "Frontend (Vite)",
+        "service_name": "frontend",
         "start_cmd": ["npm", "run", "dev"],
         "wait_seconds": 8,
     },
     "backend": {
         "port": 3010,
         "display_name": "Backend (Python)",
+        "service_name": "backend",
         "start_cmd": ["npm", "run", "dev:python"],
         "wait_seconds": 5,
     },
@@ -453,8 +455,8 @@ def start_command(name: str = None):
             proc = subprocess.Popen(
                 config["start_cmd"],
                 cwd=str(PROJECT_ROOT),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=open(PROJECT_ROOT / "scripts" / "logs" / f"{config['service_name']}.out", "ab"),
+                stderr=open(PROJECT_ROOT / "scripts" / "logs" / f"{config['service_name']}.err", "ab"),
                 creationflags=creation_flags,
             )
 

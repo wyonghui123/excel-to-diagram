@@ -467,7 +467,8 @@ def cmd_check(args):
     print()
     print("=" * 70)
     if version_info["stale"]:
-        _log("结论: 必须重启后端！执行: python scripts/service_manager.py restart-be", "FAIL")
+        _log("结论: 必须重启后端！执行: python scripts/debug/restart/restart_safe.py restart", "FAIL")
+        _log("(不要再用 service_manager.py restart-be，那个会丢失日志！)", "WARN")
         sys.exit(1)
     else:
         _log("结论: 可以开始调试", "OK")
