@@ -83,6 +83,12 @@ debug_*.py
 probe_*.py
 *.dbg/
 
+# ===== v2026.06.21: 调试基础设施例外 =====
+# scripts/debug/check_*.py 是基础设施工具（必须入仓）
+# 只有 root 目录下的 check_*.py 才被忽略
+!/scripts/debug/check_*.py
+!/scripts/debug/inspect/check_*.py
+
 # DB 监控日志 (运行时生成, 每天数十MB, 不应入仓)
 meta/db_monitor_logs/
 *.jsonl
