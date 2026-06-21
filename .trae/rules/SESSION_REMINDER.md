@@ -8,6 +8,8 @@ description: "项目铁律入口 - pytest禁止、服务管理、curl陷阱、Po
 > **本文件是 AI Agent 会话必读入口。仅保留铁律标题，示例/细节见引用文件。**
 >
 > **v3 (2026-06-21)**: 所有规则默认假设**执行者是 AI Agent**（不是人类），措辞已调整。
+>
+> **v4 (2026-06-21)**: 新增 **调试铁律**（27 → 28），引用 V1 调试基础设施。
 
 ---
 
@@ -40,6 +42,25 @@ description: "项目铁律入口 - pytest禁止、服务管理、curl陷阱、Po
 
 ---
 
+## [!!!] 铁律 4：调试基础设施强制使用 [!!!]
+
+> **调试前必跑 6 步**：`scripts/debug/env/diagnose.py` + `scripts/debug/restart/restart_safe.py verify`
+> **调试中禁止 5 件事**：手动 taskkill、git diff > file、echo > file、反复 Read backend.out 全文、反复查 user_roles
+> **调试后必做 5 件事**：`scripts/debug/verify/run_interceptor_tests.sh` + 清理 DEBUG 代码 + `check_fix_completeness.py` + 写 `.trae/debug/sessions/*.yaml` + 决策日志
+
+7 大工具：
+- `scripts/debug/log/extractor.py` - 日志提取（关键字/级别/时间窗口）
+- `scripts/debug/inspect/user_context.py` - 用户上下文查询
+- `scripts/debug/inspect/table_schema.py` - 表结构 + 字段映射错误检测
+- `scripts/debug/inspect/code_map.py` - 代码地图快速定位
+- `scripts/debug/restart/restart_safe.py` - 安全重启（杀所有 waitress）
+- `scripts/debug/env/diagnose.py` - 综合诊断（一次性回答 10+ 问题）
+- `scripts/debug/verify/run_interceptor_tests.sh` - 一键验证
+
+详情：`.trae/rules/debug-infrastructure-v20260621.md`
+
+---
+
 ## 快速路由表
 
 | 任务 | 行动 |
@@ -48,6 +69,10 @@ description: "项目铁律入口 - pytest禁止、服务管理、curl陷阱、Po
 | 问题修复（多会话）| invoke `problem-fixing` Skill |
 | E2E 测试 | invoke `e2e-testing` Skill |
 | 浏览器验证 | `PlaywrightCLI` (test_helpers/browser_auth_cli.py) |
+| **调试前** | `python scripts/debug/env/diagnose.py` |
+| **调试日志** | `python scripts/debug/log/extractor.py --pattern X --tail N` |
+| **重启后端** | `python scripts/debug/restart/restart_safe.py restart` |
+| **代码定位** | `python scripts/debug/inspect/code_map.py --topic X` |
 | 服务管理 | `service_manager.ps1 [status\|start\|stop\|restart]` |
 | PowerShell + Git 兼容 | 详见 powershell-execution-guide.md |
 | trae-sandbox 行为 | 详见 powershell-execution-guide.md Part 1-2 |
