@@ -36,6 +36,8 @@ description: "规则索引：所有规则文件的目录和分类"
 | [file-encoding-rules.md](./file-encoding-rules.md) | 文件编码 | 活跃 | 必读 |
 | [powershell-execution-guide.md](./powershell-execution-guide.md) | PowerShell + trae-sandbox 整合规范 | 活跃 | 必读（v2026.06.20 整合）|
 | [powershell-curl-alias.md](./powershell-curl-alias.md) | PowerShell curl 别名 | 活跃 | 推荐 |
+| [sandbox-safe-debugging.md](./sandbox-safe-debugging.md) | Sandbox-safe 调试规范 (V3.5) | 活跃 | 必读 |
+| [terminal-interactive-prompt.md](./terminal-interactive-prompt.md) | Trae Terminal 交互式 Prompt 规范 (V1) | 活跃 | 必读（防卡顿）|
 | [project_startup.md](./project_startup.md) | 项目启动 | 活跃 | 参考 |
 | [doc-sync-rules.md](./doc-sync-rules.md) | 文档同步 | 活跃 | 推荐 |
 | [AI_AGENT_COMPONENT_GUIDE.md](./AI_AGENT_COMPONENT_GUIDE.md) | AI 组件指南 | 活跃 | 参考 |

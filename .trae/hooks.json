@@ -12,6 +12,18 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "RunCommand",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -Command \"$cmd = $env:TRAE_TOOL_INPUT; if ($cmd -and $cmd -match '^[A-Za-z]' -and $cmd -notmatch 'powershell -NoProfile') { Write-Host '[V3.5 Tip] Detected shell command without powershell wrapper. Use: powershell -NoProfile -Command \\\"your command\\\" to avoid Trae terminal interactive prompt blocking. See .trae/rules/terminal-interactive-prompt.md' -ForegroundColor Yellow }\"",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }
