@@ -152,6 +152,24 @@ if ($Doctor) {
         Write-Host "      [WARN] scripts/check_powershell_redirection.py not found" -ForegroundColor Yellow
     }
 
+    # ===== [NEW v1.3] V1 Debug Infrastructure: Comprehensive Diagnose =====
+    Write-Host ""
+    Write-Host "[7/7 V1 DEBUG] Comprehensive debug environment diagnose (v2026.06.21) ..." -ForegroundColor Cyan
+    $diagnoseScript = Join-Path $repoRoot "scripts/debug/env/diagnose.py"
+    if (Test-Path $diagnoseScript) {
+        try {
+            $env:PYTHONIOENCODING = "utf-8"
+            $diagnoseOutput = python $diagnoseScript 2>&1
+            # 诊断脚本自己会输出，这里只需要提示完成
+            Write-Host "      [OK] diagnose completed - see output above" -ForegroundColor Green
+            Write-Host "      See: .trae/rules/debug-infrastructure-v20260621.md" -ForegroundColor Gray
+        } catch {
+            Write-Host "      [WARN] diagnose failed" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "      [WARN] scripts/debug/env/diagnose.py not found" -ForegroundColor Yellow
+    }
+
     Write-Host ""
     Write-Host "[DOCTOR COMPLETE]" -ForegroundColor Green
     exit 0
