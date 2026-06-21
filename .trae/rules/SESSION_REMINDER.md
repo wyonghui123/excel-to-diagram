@@ -5,13 +5,15 @@ description: "项目铁律入口 - pytest禁止、服务管理、curl陷阱、Po
 
 # 全局规则入口（精简版 v2026.06.20）
 
-> **本文件是 AI 会话必读入口。仅保留铁律标题，示例/细节见引用文件。**
+> **本文件是 AI Agent 会话必读入口。仅保留铁律标题，示例/细节见引用文件。**
+>
+> **v3 (2026-06-21)**: 所有规则默认假设**执行者是 AI Agent**（不是人类），措辞已调整。
 
 ---
 
 ## [!!!] 铁律 1：禁止直接运行 pytest [!!!]
 
-> **任何时候禁止 `pytest`、`python -m pytest`**
+> **AI Agent 任何时候禁止 `pytest`、`python -m pytest`**
 > **唯一合法入口：`python d:\filework\test.py`**
 > **硬阻断：conftest.py 检测 TEST_ENTRY=1，未通过则 os._exit(1)**
 
@@ -21,7 +23,7 @@ description: "项目铁律入口 - pytest禁止、服务管理、curl陷阱、Po
 
 ## [!!!] 铁律 2：前后端服务必须用 service_manager [!!!]
 
-> **禁止直接用 `npm run dev` / `python dev.py` / `Get-Process` / `taskkill` 管理服务**
+> **AI Agent 禁止直接用 `npm run dev` / `python dev.py` / `Get-Process` / `taskkill` 管理服务**
 > **唯一入口：`powershell -File scripts\service_manager.ps1 [status|start|stop|restart]`**
 
 原因：sandbox 隔离、跨 Agent 不可见、端口冲突、终端占用。
@@ -59,6 +61,9 @@ description: "项目铁律入口 - pytest禁止、服务管理、curl陷阱、Po
 - **多 Agent 端口隔离**：3010-3019（AGENT_PORT env）
 - **认证**：跨进程必须 cookie（httpOnly + auth_token），**禁 Bearer**
 - **`/diagnostics`** admin 端点给 AI Production Diagnostician 用
+- **🆕 v3.21 (2026-06-21) 决策日志**：任何规则边界判断前必须输出决策日志
+  - 工具：`python scripts/decision_log.py violate --rule-id iron-X --reason "..." --alternatives "..."`
+  - 5+ 次 PM 授权 → 触发规则体检
 
 详情：`.trae/rules/test_rules.md`
 
