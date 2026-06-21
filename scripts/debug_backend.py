@@ -380,6 +380,12 @@ def cmd_check(args):
     print('后端调试检查 SOP - V2 元反馈（防「调试旧代码 3 小时」事故）')
     print("=" * 70)
 
+    # Step 0: PS 重定向风险检查（V2.1 P2-4 新增）
+    print()
+    print("[Step 0/6] PowerShell 重定向风险检查（V2.1 P2-4）")
+    ps_check_result = _run(["python", "scripts/check_powershell_redirection.py", "check"], timeout=10)
+    _log("PS 重定向检测脚本已运行（详见 PS_REDIRECTION_RISKS.md）", "INFO")
+
     # Step 1: 沙箱状态（V2 铁律 9）
     print()
     print("[Step 1/6] 沙箱状态检查")

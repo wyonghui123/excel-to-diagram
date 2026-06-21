@@ -1,6 +1,21 @@
 ---
 alwaysApply: true
-description: "多 Agent 并行工作基础设施 (v2026.06.20) - 基于 WriteScopeDenied 修复事故的 5 条新铁律。修复完整性 / commit 频率 / agent 通信 / 测试反馈 / pre-commit hook。"
+description: "[DEPRECATED 2026-06-21] 多 Agent 并行工作基础设施 V1 - 已被 V2.1 替代"
+---
+
+# [DEPRECATED 2026-06-21] 多 Agent 并行工作基础设施规范 (V1)
+
+> **DEPRECATED**: 此规则已被 **V2.1** 替代。
+>
+> **请使用**: `.trae/rules/multi-agent-infrastructure-v20260620-v2.md` (V2.1, 13 铁律)
+>
+> **保留原因**:
+> - 作为历史参考（事故复盘记录）
+> - AI Agent 决策日志可能引用此规则的旧版本号（V1）
+> - 便于追溯规则演进过程
+>
+> **弃用决策**: 见 `.trae/rules/active/CHANGELOG.md` v2026.06.21
+
 ---
 
 # 多 Agent 并行工作基础设施规范 (v2026.06.20)

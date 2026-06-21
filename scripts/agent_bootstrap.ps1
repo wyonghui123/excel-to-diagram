@@ -1,35 +1,45 @@
 #!/usr/bin/env pwsh
 # ============================================================================
-# Agent Bootstrap Script v1.0 (2026-06-19)
+# Agent Bootstrap Script v1.1 (2026-06-21)
 # ============================================================================
-#  git worktree +  +  .env.agent
-#  agent ""
-#
-# :
+# [UPGRADE v1.1] 非交互式 + Doctor 模式
+#   - 新增 -Doctor 参数 (只报告不创建)
+#   - 新增 -SkipConfirm 参数 (跳过主工作树确认)
+#   - 新增 -AutoPort 参数 (自动分配可用端口)
+#   - AgentName/Port 在 -Doctor 模式下不再 Mandatory
+# ============================================================================
+# Usage (interactive):
 #   powershell -File scripts/agent_bootstrap.ps1 -AgentName <name> -Port <3011-3019>
 #
-# :
-#   powershell -File scripts/agent_bootstrap.ps1 -AgentName agent-A -Port 3011
+# Usage (non-interactive, for AI agents):
+#   powershell -File scripts/agent_bootstrap.ps1 -AgentName agent-A -Port 3011 -SkipConfirm
 #
-# :
-#   3010 = main ( / )
-#   3011-3019 = agent  ( agent )
+# Usage (Doctor mode - just report environment):
+#   powershell -File scripts/agent_bootstrap.ps1 -Doctor
+#
+# Port Allocation:
+#   3010 = main (reserved)
+#   3011-3019 = agent worktrees
 # ============================================================================
 
 param(
-    [Parameter(Mandatory=$true)]
     [string]$AgentName,
 
-    [Parameter(Mandatory=$true)]
     [int]$Port,
 
-    [string]$BaseBranch = "main"
+    [string]$BaseBranch = "main",
+
+    [switch]$Doctor = $false,
+
+    [switch]$SkipConfirm = $false,
+
+    [switch]$AutoPort = $false
 )
 
 # =====  echo =====
 Write-Host ""
 Write-Host "================================================================" -ForegroundColor Cyan
-Write-Host "  AGENT BOOTSTRAP v1.0 -  5 " -ForegroundColor Cyan
+Write-Host "  AGENT BOOTSTRAP v1.1 -  5 " -ForegroundColor Cyan
 Write-Host "================================================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  L1:  commit ( worktree)" -ForegroundColor Yellow
@@ -40,6 +50,150 @@ Write-Host "  L5: ,  (-Port)" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "================================================================" -ForegroundColor Cyan
 Write-Host ""
+
+# ===== [NEW v1.1] Doctor 模式 =====
+# 仅输出环境报告，不创建 worktree. 用于 AI Agent 启动前 SOP.
+if ($Doctor) {
+    Write-Host "[DOCTOR MODE]  Report only, no changes" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "[1/5]  repo root ..." -ForegroundColor Cyan
+    $repoRoot = git rev-parse --show-toplevel 2>$null
+    if (-not $repoRoot) {
+        Write-Host "[ERROR] Not in a git repository" -ForegroundColor Red
+        exit 1
+    }
+    $repoRoot = $repoRoot.Trim()
+    Write-Host "      $repoRoot" -ForegroundColor White
+    Write-Host ""
+
+    Write-Host "[2/5]  worktree ..." -ForegroundColor Cyan
+    $worktreesRaw = git worktree list --porcelain 2>&1
+    $count = 0
+    $currentPath = ($repoRoot).Replace("\","/")
+    foreach ($line in $worktreesRaw) {
+        if ($line -match '^worktree ') {
+            $count++
+            $wtPath = $line.Substring(9)
+            $marker = ""
+            if ($wtPath.Replace("\","/") -eq $currentPath) {
+                $marker = " <-- [CURRENT]"
+            }
+            Write-Host "      [$count] $wtPath$marker" -ForegroundColor White
+        } elseif ($line -match '^branch ') {
+            Write-Host "          $($line.Substring(7))" -ForegroundColor Gray
+        }
+    }
+    Write-Host ""
+
+    Write-Host "[3/5]  port ..." -ForegroundColor Cyan
+    $coordDir = Join-Path (Split-Path -Parent $repoRoot) ".coord"
+    $portsFile = Join-Path $coordDir "ports.json"
+    if (Test-Path $portsFile) {
+        $portsData = Get-Content $portsFile -Raw | ConvertFrom-Json
+        Write-Host "      Allocated:" -ForegroundColor White
+        if ($portsData.allocated) {
+            $portsData.allocated.PSObject.Properties | ForEach-Object {
+                Write-Host "        $($_.Name) -> $($_.Value.owner) ($($_.Value.status))" -ForegroundColor White
+            }
+        }
+        Write-Host "      Reserved:" -ForegroundColor White
+        if ($portsData.reserved) {
+            $portsData.reserved.PSObject.Properties | ForEach-Object {
+                Write-Host "        $($_.Name) -> $($_.Value.owner) ($($_.Value.status))" -ForegroundColor White
+            }
+        }
+    } else {
+        Write-Host "      (no .coord/ports.json yet)" -ForegroundColor Gray
+    }
+    Write-Host ""
+
+    Write-Host "[4/5]  worktree ..." -ForegroundColor Cyan
+    Set-Location $repoRoot
+    $statusOutput = git status --short 2>&1
+    $statusLines = @($statusOutput | Where-Object { $_ -match '\S' })
+    Write-Host "      : $($statusLines.Count) " -ForegroundColor White
+    if ($statusLines.Count -gt 0) {
+        Write-Host "      : " -ForegroundColor Yellow
+        $statusLines | Select-Object -First 10 | ForEach-Object {
+            Write-Host "        $_" -ForegroundColor Gray
+        }
+        if ($statusLines.Count -gt 10) {
+            Write-Host "        ...  $($statusLines.Count - 10) " -ForegroundColor Gray
+        }
+    }
+    Write-Host ""
+
+    Write-Host "[5/5]  pre-commit hook ..." -ForegroundColor Cyan
+    $hookPath = Join-Path $repoRoot ".git/hooks/pre-commit"
+    if (Test-Path $hookPath) {
+        $hookVer = "unknown"
+        Get-Content $hookPath | Select-Object -First 10 | ForEach-Object {
+            if ($_ -match 'v(\d+\.\d+)') { $hookVer = "v$($Matches[1])" }
+        }
+        Write-Host "      : $hookVer" -ForegroundColor White
+    } else {
+        Write-Host "      [WARN]  pre-commit hook  " -ForegroundColor Red
+    }
+
+    # ===== [NEW v1.2] V2.1 P2-4: PowerShell Redirection Risk Check =====
+    Write-Host ""
+    Write-Host "[6/6 V2.1]  PowerShell redirection risk (V2.1 P2-4) ..." -ForegroundColor Cyan
+    $psCheckScript = Join-Path $repoRoot "scripts/check_powershell_redirection.py"
+    if (Test-Path $psCheckScript) {
+        try {
+            $env:PYTHONIOENCODING = "utf-8"
+            $psOutput = python $psCheckScript check 2>&1
+            Write-Host "      [OK] PS redirection check tool available" -ForegroundColor Green
+            Write-Host "      See: scripts/PS_REDIRECTION_RISKS.md" -ForegroundColor Gray
+        } catch {
+            Write-Host "      [WARN] PS redirection check failed" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "      [WARN] scripts/check_powershell_redirection.py not found" -ForegroundColor Yellow
+    }
+
+    Write-Host ""
+    Write-Host "[DOCTOR COMPLETE]" -ForegroundColor Green
+    exit 0
+}
+
+# ===== [NEW v1.1] AutoPort =====
+if ($AutoPort -and -not $Port) {
+    $coordDir = Join-Path (Split-Path -Parent (git rev-parse --show-toplevel)) ".coord"
+    $portsFile = Join-Path $coordDir "ports.json"
+    $usedPorts = @{}
+    if (Test-Path $portsFile) {
+        $portsData = Get-Content $portsFile -Raw | ConvertFrom-Json
+        if ($portsData.allocated) {
+            $portsData.allocated.PSObject.Properties | ForEach-Object { $usedPorts[$_.Name] = $true }
+        }
+    }
+    for ($tryPort = 3011; $tryPort -le 3019; $tryPort++) {
+        if (-not $usedPorts.ContainsKey("$tryPort")) {
+            $Port = $tryPort
+            Write-Host "[AutoPort]  port $Port" -ForegroundColor Cyan
+            break
+        }
+    }
+    if (-not $Port) {
+        Write-Host "[ERROR]  3011-3019  " -ForegroundColor Red
+        exit 1
+    }
+}
+
+# ===== [v1.1]  param  (Doctor/AutoPort   ) =====
+if (-not $Doctor -and -not $AutoPort) {
+    if (-not $AgentName) {
+        Write-Host "[ERROR] -AgentName  " -ForegroundColor Red
+        Write-Host "  Doctor : powershell -File scripts/agent_bootstrap.ps1 -Doctor" -ForegroundColor Yellow
+        Write-Host "  : powershell -File scripts/agent_bootstrap.ps1 -AgentName agent-X -Port 3011" -ForegroundColor Yellow
+        exit 1
+    }
+    if (-not $Port) {
+        Write-Host "[ERROR] -Port  (-AutoPort )" -ForegroundColor Red
+        exit 1
+    }
+}
 
 # =====  =====
 if ($Port -lt 3011 -or $Port -gt 3019) {
@@ -68,10 +222,15 @@ if ($mainStatus) {
     Write-Host "[WARN] :" -ForegroundColor Yellow
     Write-Host $mainStatus
     Write-Host ""
-    $confirm = Read-Host "? (y/N)"
-    if ($confirm -ne 'y') {
-        Write-Host "[ERROR] " -ForegroundColor Red
-        exit 1
+    # [FIX v1.1] 支持 -SkipConfirm 非交互模式
+    if ($SkipConfirm) {
+        Write-Host "[SkipConfirm]  " -ForegroundColor Yellow
+    } else {
+        $confirm = Read-Host "? (y/N)"
+        if ($confirm -ne 'y') {
+            Write-Host "[ERROR] " -ForegroundColor Red
+            exit 1
+        }
     }
 }
 
