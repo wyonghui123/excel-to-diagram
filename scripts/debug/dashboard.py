@@ -30,6 +30,7 @@
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -170,7 +171,6 @@ def quick_status() -> Dict[str, Any]:
     ], timeout=10)
     # 不管退出码（失败也会输出），只看 stdout
     if debug_check["stdout"]:
-        import re
         m = re.search(r"发现 (\d+) 个", debug_check["stdout"])
         if m:
             count = int(m.group(1))
@@ -187,10 +187,13 @@ def quick_status() -> Dict[str, Any]:
     if log_fresh["stdout"] and "严重 BUG" in log_fresh["stdout"]:
         # 提取分钟数
         m = re.search(r"最后写入 (\d+) 分钟前", log_fresh["stdout"])
-        age = m.group(1) if m else "?"
+        age = m.group(1) if m is not None else "?"
         print(f"  [X] 后端日志: FAIL (停止更新 {age} 分钟,后端 stdout 未重定向)")
     elif log_fresh["stdout"] and "正常更新" in log_fresh["stdout"]:
         print(f"  [OK] 后端日志: OK")
+    elif not log_fresh["stdout"]:
+        # 没输出说明脚本出错
+        print(f"  [!] 后端日志: 检测失败")
 
     # Sessions
     sessions_dir = PROJECT_ROOT / ".trae" / "debug" / "sessions"

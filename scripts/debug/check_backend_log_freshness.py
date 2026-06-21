@@ -139,6 +139,20 @@ def main():
                 "OK",
             )
         else:
+            # V3.7.2 修复：区分空文件(0 bytes)和有内容的文件
+            # .err 文件通常为空(waitress 不用 stderr),空文件未更新不算 bug
+            # .out 文件必须有写入,否则就是 stdout 未重定向
+            is_err_file = "err" in str(rel).lower()
+            is_empty = freshness["size"] == 0
+
+            if is_err_file and is_empty:
+                _log(
+                    f"{rel}: 写入 {freshness['age_seconds']}s 前 "
+                    f"(size=0B, 空文件 - waitress 未使用 stderr,正常)",
+                    "OK",
+                )
+                continue
+
             age_min = freshness["age_seconds"] // 60
             _log(
                 f"{rel}: 最后写入 {age_min} 分钟前 - 严重 BUG",
