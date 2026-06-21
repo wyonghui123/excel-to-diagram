@@ -113,6 +113,9 @@ function handleClick() {
   transition: color 0.15s ease, text-decoration 0.15s ease;
   font-size: 13px;
   line-height: 1.6;
+  /* 显式锁死普通字重，避免被父级 (cell/el-tooltip/表头 sortable) 的
+     font-weight: 500/700 影响而看起来像 strong */
+  font-weight: 400;
   display: inline-flex;
   align-items: center;
   gap: 2px;
@@ -128,6 +131,8 @@ function handleClick() {
 .fk-link__text {
   /* 文本不换行，避免与图标分离 */
   white-space: nowrap;
+  /* 与 .fk-link 同步锁死普通字重，防止外部 strong 样式干扰 */
+  font-weight: 400;
 }
 
 /* FK 跳转标识图标：默认半透明，hover 时与文字一同高亮 */

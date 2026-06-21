@@ -724,30 +724,20 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* 过滤触发器 - SAP Fiori 风格：默认隐藏，悬停时显示 */
+/* 过滤触发器 - 默认隐藏，由父组件 .column-header:hover :deep(.filter-trigger) 控制显示 */
 .filter-trigger {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  position: relative;     /* 相对定位，用于徽章定位 */
-  width: 18px;            /* 稍大的尺寸，便于点击 */
+  position: relative;
+  width: 18px;
   height: 18px;
   margin-left: 4px;
   border-radius: 3px;
   cursor: pointer;
   transition: all 0.15s ease;
-  opacity: 0.6;           /* 默认半透明可见 */
-  z-index: 1;             /* 确保在表格头部上层 */
-}
-
-.filter-trigger:hover {
-  opacity: 1;
-  background-color: rgba(64, 158, 255, 0.15);
-}
-
-.filter-trigger.is-active {
-  opacity: 1;
-  background-color: rgba(64, 158, 255, 0.2);
+  opacity: 0;
+  z-index: 1;
 }
 
 .filter-icon {

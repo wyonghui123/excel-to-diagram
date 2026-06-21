@@ -120,17 +120,17 @@
   display: none !important;
 }
 
-/* 过滤图标容器：内联显示，不换行 */
+/* 过滤图标容器：默认隐藏，由父组件 MetaListPage 的 .column-header:hover :deep(.filter-trigger) 控制显示 */
 .el-table .filter-trigger {
   display: inline-flex !important;
   flex-shrink: 0 !important;
   align-items: center;
-  opacity: 0.6 !important;  /* 默认半透明可见，便于发现 */
+  opacity: 0 !important;  /* 默认隐藏，与排序图标一致 */
   margin-left: 4px;
   transition: all 0.15s ease;
 }
 
-/* 悬停表头时：显示过滤图标 */
+/* 悬停表头时：显示过滤图标（由 MetaListPage scoped :deep 规则控制） */
 .el-table th:hover .filter-trigger,
 .el-table .filter-trigger.is-active {
   opacity: 1 !important;

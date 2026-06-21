@@ -917,8 +917,9 @@ watch(previewSheetGroups, (groups) => {
 
 watch(importResultsTable, (rows) => {
   if (rows.length > 0 && activeImportSheets.value.length === 0) {
-    const first = rows.find(r => r.failed > 0 || r.warning > 0) || rows[0]
-    activeImportSheets.value = [first.typeId]
+    // [FIX 2026-06-20] 默认展开全部 sheet, 让用户能看到所有成功/失败明细
+    // (之前只展开第一个, 其他 sheet 折叠, 用户看不到成功 tab)
+    activeImportSheets.value = rows.map(r => r.typeId)
   }
 }, { immediate: true })
 

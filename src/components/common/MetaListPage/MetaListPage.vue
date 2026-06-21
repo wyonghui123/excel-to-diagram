@@ -2024,6 +2024,7 @@ defineExpose({
 }
 
 /* [FIX 2026-06-10] 排序指示器: 双箭头三态 */
+/* [UX 2026-06-21] 默认隐藏，hover 列头时显示，激活态常驻 */
 .sort-indicator {
   display: inline-flex;
   flex-direction: column;
@@ -2035,6 +2036,30 @@ defineExpose({
   line-height: 1;
   gap: 0;
   flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+/* hover 列头时显示排序图标 */
+.column-header:hover .sort-indicator {
+  opacity: 1;
+}
+/* hover 列头时显示过滤图标 (子组件 TableHeaderFilter) */
+.column-header:hover :deep(.filter-trigger) {
+  opacity: 0.6;
+}
+/* 过滤激活态：常驻显示，不受 hover 影响 */
+.column-header :deep(.filter-trigger.is-active) {
+  opacity: 1;
+}
+/* hover 图标本身：全显 + 背景 */
+.column-header :deep(.filter-trigger:hover) {
+  opacity: 1;
+  background-color: rgba(64, 158, 255, 0.15);
+}
+/* 排序激活态：常驻显示，不受 hover 影响 */
+.sort-indicator.is-asc,
+.sort-indicator.is-desc {
+  opacity: 1;
 }
 .sort-indicator .sort-icon {
   font-size: 11px;

@@ -20,6 +20,7 @@
  */
 
 import { ref, computed, watch, provide, inject, onMounted, isRef } from 'vue'
+import { useRoute } from 'vue-router'
 import boService from '@/services/boService'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -364,12 +365,35 @@ function createVersionContext() {
   function init() {
     if (mounted) return
     mounted = true
-    
+
     if (autoLoadProducts) {
       fetchProducts()
     }
     if (autoRestore) {
       restoreContext()
+    }
+
+    // [FIX 2026-06-21] 监听路由参数变化，重新应用 URL 中的 productId/versionId
+    //   背景: 单例模式下，init() 只在首次调用时执行一次 (mounted 守卫)
+    //         从首页"常用"携带 ?productId=X&versionId=Y 跳转到架构数据管理页时，
+    //         目标组件再调用 useVersionContext() 时 init() 已被守卫短路，
+    //         restoreContext() 不会重新执行，URL 参数被忽略。
+    //   修复: 监听路由 query 中的 productId/versionId 变化，变化时重新调用 restoreContext()，
+    //         让 URL 参数始终能正确设置版本上下文。
+    //   说明: 仅在 init() 内、首次创建时挂载监听（mounted 守卫保证），不会重复监听。
+    try {
+      const route = useRoute()
+      watch(
+        () => [route.query?.productId, route.query?.versionId],
+        ([newProductId, newVersionId], [oldProductId, oldVersionId]) => {
+          if (newProductId !== oldProductId || newVersionId !== oldVersionId) {
+            restoreContext()
+          }
+        }
+      )
+    } catch (e) {
+      // useRoute() 在非组件上下文（如测试）中可能不可用，忽略即可
+      // 此时 restoreContext() 已在 init() 内部处理首屏 URL 参数
     }
   }
 
