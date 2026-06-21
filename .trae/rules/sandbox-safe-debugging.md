@@ -113,7 +113,53 @@ from scripts.debug.utils.safe_io import emit_safe_output
 emit_safe_output(data, prefix="my_query", output_dir=None)
 ```
 
----
+### 统一入口 (V3.5 P3)
+
+**`scripts/debug/safe_query.py`** — sandbox-aware 调试 wrapper:
+
+```python
+from scripts.debug.safe_query import SafeQuery
+
+# 上下文管理器：自动检测 sandbox 状态 + 写文件 + 错误捕获
+with SafeQuery("my_query", fail_on_blocked=False) as sq:
+    result = expensive_query()
+    sq.write(result)
+    # 输出: .trae/debug/queries/my_query_<ts>.json
+```
+
+**CLI 模式**:
+```bash
+# 检查 sandbox 状态
+python scripts/debug/safe_query.py health
+python scripts/debug/safe_query.py health --json
+
+# 读 session 状态
+python scripts/debug/safe_query.py session
+python scripts/debug/safe_query.py session --json
+
+# 跑任意脚本（sandbox-safe 输出到文件）
+python scripts/debug/safe_query.py run my_script.py arg1 arg2 --safe-output
+python scripts/debug/safe_query.py run my_script.py --safe-output --prefix my_q
+```
+
+### restart_safe 集成 (V3.5 P3)
+
+**`scripts/debug/restart/restart_safe.py restart`** 现在会自动：
+1. 先检查 L5 sandbox 健康状态（`safe_query.py health`）
+2. 如果 BLOCKED → 警告并建议重启 Trae IDE
+3. 如果 DEGRADED → 警告
+4. 如果 OK → 正常执行
+
+新子命令:
+```bash
+python scripts/debug/restart/restart_safe.py health  # 仅检查 sandbox
+```
+
+### dashboard 默认 safe-output (V3.5 P3)
+
+**`scripts/debug/dashboard.py`** 新增 `--default-safe-output` 选项：
+- 默认所有 subcommand 输出到 `.trae/debug/queries/dashboard_*.json`
+- 配合 `Read` 工具读结果，**不依赖 stdout**---
 
 ## 调试 SOP（V1 强制 6 步）
 

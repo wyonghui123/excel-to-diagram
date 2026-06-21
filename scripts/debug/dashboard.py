@@ -509,6 +509,8 @@ def main():
                         help="V3.5: 写入 .trae/debug/queries/ 文件（sandbox-safe）")
     parser.add_argument("--safe-output-dir", metavar="DIR",
                         help="V3.5: 自定义 sandbox-safe 输出目录")
+    parser.add_argument("--default-safe-output", action="store_true",
+                        help="V3.5 P3: 默认所有 subcommand 输出到文件（覆盖 --console）")
 
     sub = parser.add_subparsers(dest="cmd")
 

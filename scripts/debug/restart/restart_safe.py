@@ -347,6 +347,13 @@ def main():
         return cmd_start(args)
     elif args.cmd == "verify":
         return cmd_verify(args)
+    elif args.cmd == "health":
+        # V3.5 P3: Just check sandbox health
+        from scripts.debug.safe_query import check_sandbox_health
+        import json
+        health = check_sandbox_health()
+        print(json.dumps(health, ensure_ascii=False, indent=2))
+        return 0 if health.get("status") == "OK" else 1
 
     return 1
 
