@@ -5956,15 +5956,6 @@ class ImportExportService:
             # [FIX 2026-06-16 BMRD] 在 filter 之后做 FK 解析, 这样解析出来的 FK ID 不会被 filter 掉
             # 同时确保 resolve_from 字段 (如 target_code, 是 parent_key + resolve_from_source) 已经被保留
             for field in obj.fields:
-                # [FIX v1.2.28 2026-06-20] 跳过 virtual 字段 (storage=virtual 或 semantics.redundancy).
-                # 这些字段值由其他字段自动派生 (例如 source_domain_id 从 source_bo_id 派生),
-                # 不需要 (也不应该) 在 import 时做 FK 解析. 否则会把 relationship.code
-                # 当作 domain.code 去查 → 7 条 "未找到外键对象" 警告 → row 静默跳过.
-                if getattr(field, 'storage', None) == 'virtual':
-                    continue
-                if getattr(field.semantics, 'redundancy', None):
-                    continue
-
                 resolve_from = getattr(field.semantics, 'resolve_from_field', None)
                 resolve_to_object = getattr(field.semantics, 'resolve_to_object', None)
                 resolve_to_field = getattr(field.semantics, 'resolve_to_field', None)
@@ -6611,3 +6602,4 @@ class ImportExportService:
             logger.warning(f"Failed to resolve version_id: {e}")
         
         return None
+
