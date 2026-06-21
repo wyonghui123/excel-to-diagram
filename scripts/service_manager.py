@@ -78,13 +78,101 @@ def _check_port(port: int) -> bool:
     return False
 
 
+def _get_current_git_commit() -> str:
+    """获取当前 git commit hash (V2.1 增强 - 防止调试旧代码)"""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(PROJECT_ROOT),
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    return "unknown"
+
+
+def _check_code_version_stale() -> dict:
+    """检查关键代码版本是否比后端启动时间新（V2.1 增强）"""
+    if not STATUS_FILE.exists():
+        return {"stale": False}
+
+    try:
+        with open(STATUS_FILE, "r", encoding="utf-8") as f:
+            status = json.load(f)
+    except Exception:
+        return {"stale": False}
+
+    backend_info = status.get("backend", {})
+    started_at = backend_info.get("started_at")
+    if not started_at:
+        return {"stale": False}
+
+    # 检查关键文件是否比启动时间更新
+    try:
+        backend_start_dt = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+    except ValueError:
+        return {"stale": False}
+
+    stale_files = []
+    critical_files = [
+        "meta/core/action_executor.py",
+        "meta/core/interceptors/write_scope_interceptor.py",
+        "meta/server.py",
+    ]
+
+    for f in critical_files:
+        file_path = PROJECT_ROOT / f
+        if not file_path.exists():
+            continue
+        # V2.1 增强：同时检查 git commit 时间 + 文件 mtime
+        commit_time = ""
+        try:
+            result = subprocess.run(
+                ["git", "log", "-1", "--format=%cI", "--", f],
+                cwd=str(PROJECT_ROOT),
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                commit_time = result.stdout.strip()
+        except Exception:
+            pass
+
+        # 文件 mtime（捕获未提交修改）
+        mtime = ""
+        try:
+            mt = file_path.stat().st_mtime
+            mtime = datetime.fromtimestamp(mt, tz=timezone.utc).isoformat()
+        except OSError:
+            pass
+
+        latest = max([t for t in (commit_time, mtime) if t], default="")
+        if not latest:
+            continue
+        try:
+            file_dt = datetime.fromisoformat(latest)
+            if file_dt > backend_start_dt:
+                stale_files.append(f)
+        except ValueError:
+            continue
+
+    return {"stale": len(stale_files) > 0, "stale_files": stale_files, "started_at": started_at}
+
+
 def _read_status() -> dict:
-    """读取服务状态文件"""
+    """读取服务状态文件（兼容 utf-8-sig BOM）"""
     if not STATUS_FILE.exists():
         return {}
     try:
-        with open(STATUS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+        # V2.1 修复：兼容 watchdog 写的 utf-8-sig BOM 文件
+        for encoding in ("utf-8-sig", "utf-8"):
+            try:
+                with open(STATUS_FILE, "r", encoding=encoding) as f:
+                    return json.load(f)
+            except UnicodeDecodeError:
+                continue
+        return {}
     except (json.JSONDecodeError, OSError):
         return {}
 
@@ -171,17 +259,37 @@ def status_command():
         known = status.get(name, {})
         known_pid = known.get("pid", "?")
         known_time = known.get("started_at", "?")
+        known_code = known.get("code_version", "NOT SET")  # V2.1 新增
+        known_health = known.get("health_url", f"http://localhost:{port}/health")  # V2.1 新增
         healthy = "RUNNING" if is_listening else "STOPPED"
 
         if is_listening:
             print(f"  {config['display_name']:<25s} : {healthy}  "
                   f"(port={port}, pid={known_pid}, since={known_time})")
+            # V2.1 新增：显示 code_version 和 health_url
+            if known_code and known_code != "NOT SET":
+                print(f"  {'':<25s}   commit={known_code[:12]}")
+                print(f"  {'':<25s}   health={known_health}")
         else:
             print(f"  {config['display_name']:<25s} : {healthy}  "
                   f"(port={port})")
             all_healthy = False
 
     print("  " + "=" * 50)
+
+    # V2.1 新增：检测代码版本是否 stale（防止"调试旧代码"事故）
+    stale_info = _check_code_version_stale()
+    if stale_info.get("stale"):
+        print()
+        print("  [!!!] WARNING: Code version stale !!!")
+        print(f"  Backend started: {stale_info.get('started_at', '?')}")
+        print(f"  Stale files (modified after start):")
+        for sf in stale_info.get("stale_files", []):
+            print(f"    - {sf}")
+        print()
+        print("  >>> Run: python scripts/service_manager.py restart-be")
+        print("  >>> Or:  python scripts/debug_backend.py restart-if-stale")
+        all_healthy = False
 
     if not status:
         print("  No status file found -- services may not have been started via service_manager")
@@ -297,14 +405,21 @@ def start_command(name: str = None):
                     break
 
             if ready:
+                # 获取启动时的 git commit（V2.1 增强 - 防止"调试旧代码 3 小时"事故）
+                code_version = _get_current_git_commit()
+                # 健康检查 URL（V2.1 增强 - 避免 /api/v1/health 410 误判）
+                health_url = config.get("health_url", f"http://localhost:{port}/health")
+
                 status[svc_name] = {
                     "port": port,
                     "pid": proc.pid,
                     "started_at": datetime.now(timezone.utc).strftime(
                         "%Y-%m-%dT%H:%M:%SZ"
                     ),
+                    "code_version": code_version,  # V2.1 新增
+                    "health_url": health_url,      # V2.1 新增
                 }
-                _log(f"  {config['display_name']} started (PID={proc.pid}, port={port})")
+                _log(f"  {config['display_name']} started (PID={proc.pid}, port={port}, commit={code_version[:8]})")
             else:
                 _log(f"  WARNING: {config['display_name']} process spawned but port {port} not responding")
 
