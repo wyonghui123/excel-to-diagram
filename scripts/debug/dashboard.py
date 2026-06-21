@@ -38,20 +38,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
 
-# Import safe-io helper for --safe-output
-try:
-    from scripts.debug.utils.safe_io import emit_safe_output
-except ImportError:
-    def emit_safe_output(data, prefix, output_dir=None, also_stdout=True):
-        out_dir = Path(output_dir) if output_dir else (Path(__file__).resolve().parent.parent.parent / ".trae" / "debug" / "queries")
-        out_dir.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
-        out_file = out_dir / f"{prefix}_{ts}.json"
-        out_file.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
-        if also_stdout:
-            print(f"[SAFE_OUTPUT] {out_file}")
-        return out_file
-
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -505,12 +491,6 @@ def main():
         epilog=__doc__,
     )
     parser.add_argument("--brief", action="store_true", help="精简模式")
-    parser.add_argument("--safe-output", action="store_true",
-                        help="V3.5: 写入 .trae/debug/queries/ 文件（sandbox-safe）")
-    parser.add_argument("--safe-output-dir", metavar="DIR",
-                        help="V3.5: 自定义 sandbox-safe 输出目录")
-    parser.add_argument("--default-safe-output", action="store_true",
-                        help="V3.5 P3: 默认所有 subcommand 输出到文件（覆盖 --console）")
 
     sub = parser.add_subparsers(dest="cmd")
 
@@ -535,17 +515,6 @@ def main():
                             help="总步骤数（用于显示进度）")
 
     args = parser.parse_args()
-
-    # V3.5: safe-output mode for default action (full_dashboard)
-    if args.cmd is None and args.safe_output:
-        # Collect quick_status and write result to file
-        result = quick_status()
-        emit_safe_output(
-            result,
-            prefix="dashboard_status",
-            output_dir=args.safe_output_dir,
-        )
-        return 0
 
     if args.cmd == "start":
         return cmd_start(args)

@@ -39,27 +39,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# Import safe-io helper for --safe-output arg
-try:
-    from scripts.debug.utils.safe_io import emit_safe_output
-    _SAFE_IO_AVAILABLE = True
-except ImportError:
-    _SAFE_IO_AVAILABLE = False
-
-    def emit_safe_output(data, prefix, output_dir=None, also_stdout=True):
-        """Fallback if safe_io not available."""
-        import json
-        from datetime import datetime
-        from pathlib import Path
-        out_dir = Path(output_dir) if output_dir else (Path(__file__).resolve().parent.parent.parent.parent / ".trae" / "debug" / "queries")
-        out_dir.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
-        out_file = out_dir / f"{prefix}_{ts}.json"
-        out_file.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
-        if also_stdout:
-            print(f"[SAFE_OUTPUT] {out_file}")
-        return out_file
-
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
@@ -610,10 +589,6 @@ def main():
                         help="对比两个快照")
     parser.add_argument("--show-permissions", action="store_true",
                         help="V3.4: 展开 scope 详情（domain→sub_domain→business_objects）")
-    parser.add_argument("--safe-output", action="store_true",
-                        help="V3.5: 写入 .trae/debug/queries/ 文件（sandbox-safe，绕过 stdout 拦截）")
-    parser.add_argument("--safe-output-dir", metavar="DIR",
-                        help="V3.5: 自定义 sandbox-safe 输出目录")
 
     args = parser.parse_args()
 
@@ -639,14 +614,7 @@ def main():
 
     context = collect_user_context(args.username, show_permissions=args.show_permissions)
 
-    # V3.5: sandbox-safe output mode
-    if args.safe_output:
-        out_file = emit_safe_output(
-            context,
-            prefix=f"user_context_{args.username}",
-            output_dir=args.safe_output_dir,
-        )
-    elif args.json:
+    if args.json:
         print(json.dumps(context, ensure_ascii=False, indent=2))
     else:
         print_context(context, show_permissions=args.show_permissions)

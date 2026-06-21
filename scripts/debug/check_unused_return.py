@@ -32,23 +32,8 @@ import ast
 import json
 import re
 import sys
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-
-# Import safe-io helper
-try:
-    from scripts.debug.utils.safe_io import emit_safe_output
-except ImportError:
-    def emit_safe_output(data, prefix, output_dir=None, also_stdout=True):
-        out_dir = Path(output_dir) if output_dir else (Path(__file__).resolve().parent.parent.parent / ".trae" / "debug" / "queries")
-        out_dir.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
-        out_file = out_dir / f"{prefix}_{ts}.json"
-        out_file.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
-        if also_stdout:
-            print(f"[SAFE_OUTPUT] {out_file}")
-        return out_file
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -258,10 +243,7 @@ def main():
                 "callers": callers,
                 "bad_callers": bad_callers,
             }
-        if args.safe_output:
-            emit_safe_output(result, prefix="check_unused_return", output_dir=args.safe_output_dir)
-        else:
-            print(json.dumps(result, ensure_ascii=False, indent=2))
+        print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if not any(r["bad_callers"] for r in result.values()) else 1
 
     print("=" * 70)

@@ -26,19 +26,12 @@
 # V4.0: 禁用 .ps1 写日志避免 hook 递归
 $ErrorActionPreference = 'Stop'
 
-# V4.0.1: 动态检测项目根（关键修复 - 不再硬编码路径）
-$projectRoot = $env:TRAE_PROJECT_DIR
-if (-not $projectRoot) {
-    $hookDir = Split-Path -Parent $PSCommandPath
-    $projectRoot = Split-Path -Parent (Split-Path -Parent $hookDir)
-}
-$projectRoot = $projectRoot -replace '/', '\'
-
 # 读取 stdin
 $raw = ''
 try {
     $raw = [Console]::In.ReadToEnd()
 } catch {
+    # 没有 stdin 输入 - 允许
     Write-Host '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}'
     exit 0
 }
@@ -48,9 +41,11 @@ if (-not $raw) {
     exit 0
 }
 
+# 解析 JSON
 try {
     $payload = $raw | ConvertFrom-Json -ErrorAction Stop
 } catch {
+    # JSON 解析失败 - 允许
     Write-Host '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}'
     exit 0
 }
@@ -67,7 +62,7 @@ if (-not $filePath) {
     exit 0
 }
 
-# V4.0 违规模式：项目根目录的调试脚本（包括 .py 和 .ps1）
+# V4.0 违规模式：项目根目录的调试脚本
 $violationPatterns = @(
     'debug_.*\.py$'
     'analyze_.*\.py$'
@@ -79,19 +74,19 @@ $violationPatterns = @(
     'tmp\.py$'
     '_debug.*\.py$'
     '_test.*\.py$'
-    '_restart.*\.ps1$'
-    '_debug.*\.ps1$'
-    '_test.*\.ps1$'
 )
 
-# 提取相对路径
+# 提取相对路径（项目根目录判断）
+$projectRoot = 'd:\filework\excel-to-diagram'
 $relPath = $filePath
 
-# 规范化路径（统一使用 \）
+# 规范化路径（统一使用 / 或 \）
 $normalizedFilePath = $filePath -replace '/', '\'
 
 if ($normalizedFilePath.StartsWith($projectRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
     $relPath = $normalizedFilePath.Substring($projectRoot.Length).TrimStart('\', '/')
+} elseif ($normalizedFilePath.StartsWith('d:\filework\excel-to-diagram', [System.StringComparison]::OrdinalIgnoreCase)) {
+    $relPath = $normalizedFilePath.Substring('d:\filework\excel-to-diagram'.Length).TrimStart('\', '/')
 }
 
 # 根目录判断：相对路径不包含 \ 或 /（说明在项目根目录）

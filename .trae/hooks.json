@@ -7,20 +7,20 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python scripts/debug/utils/session_start_bootstrap.py",
-            "timeout": 15
+            "command": "powershell -Command \"& 'd:\\filework\\excel-to-diagram\\scripts\\debug\\session_start_bootstrap.ps1'\"",
+            "timeout": 60
           }
         ]
       }
     ],
     "PreToolUse": [
       {
-        "matcher": "RunCommand",
+        "matcher": "Write",
         "hooks": [
           {
             "type": "command",
-            "command": "python scripts/debug/utils/_pre_tool_hook.py",
-            "timeout": 5
+            "command": "powershell -Command \"$input | & 'd:\\filework\\excel-to-diagram\\scripts\\debug\\hooks_pre_tool_use.ps1'\"",
+            "timeout": 10
           }
         ]
       }

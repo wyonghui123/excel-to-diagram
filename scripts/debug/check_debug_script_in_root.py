@@ -174,10 +174,7 @@ def main():
             "temp_logs": temp_logs,
             "violations": len(debug_scripts) + len(temp_logs),
         }
-        if args.safe_output:
-            emit_safe_output(result, prefix="check_debug_script_in_root", output_dir=args.safe_output_dir)
-        else:
-            print(json.dumps(result, ensure_ascii=False, indent=2))
+        print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if not debug_scripts else 1
 
     # 输出

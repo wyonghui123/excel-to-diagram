@@ -36,13 +36,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
 
-# Import sandbox-safe utilities (with fallback if not available)
-try:
-    from scripts.debug.utils.sandbox_safe import output as _ss_output
-    _SANDBOX_SAFE_AVAILABLE = True
-except ImportError:
-    _SANDBOX_SAFE_AVAILABLE = False
-
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 

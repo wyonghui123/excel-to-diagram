@@ -209,11 +209,7 @@ rsync -av --exclude='__pycache__' \
 | V1 | 2026-06-21 | 5 工具 + 1 规范（5b38ce3）|
 | V2 | 2026-06-21 | + dashboard + tail -f + auto_record + SESSION_REMINDER（6d0e08e）|
 | V2.2 | 2026-06-21 | + dashboard export + code_map imports/references（e5b1d14）|
-| V3 | 2026-06-21 | + check_silent_exceptions + check_class_consistency（aa16392）|
-| V3.1 | 2026-06-21 | + check_log_files + service_manager DEVNULL 修复（0bcee3d）|
-| V3.2 | 2026-06-21 | + GBK 编码修复 13 个工具（127317e）|
-| V3.3 | 2026-06-21 | + 自动加载 .env + check_debug_script_in_root.py（08bf9c4）|
-| V3.4 | 2026-06-21 | + user_context 自动发现 sqlite + --show-permissions + agent_bootstrap v1.4（d3d33c7）|
+| V3 | 2026-06-21 | + check_silent_exceptions + check_class_consistency（待提交）|
 
 ---
 

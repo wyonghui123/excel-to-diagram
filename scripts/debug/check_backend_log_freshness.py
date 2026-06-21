@@ -24,22 +24,8 @@ import argparse
 import json
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
-
-# Import safe-io helper
-try:
-    from scripts.debug.utils.safe_io import emit_safe_output
-except ImportError:
-    def emit_safe_output(data, prefix, output_dir=None, also_stdout=True):
-        out_dir = Path(output_dir) if output_dir else (Path(__file__).resolve().parent.parent.parent / ".trae" / "debug" / "queries")
-        out_dir.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
-        out_file = out_dir / f"{prefix}_{ts}.json"
-        out_file.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
-        if also_stdout:
-            print(f"[SAFE_OUTPUT] {out_file}")
-        return out_file
+from datetime import datetime
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -105,10 +91,6 @@ def main():
     parser.add_argument("--max-age-minutes", type=int, default=5,
                         help="最大日志过期时间（分钟），默认 5")
     parser.add_argument("--json", action="store_true")
-    parser.add_argument("--safe-output", action="store_true",
-                        help="V3.5: 写入 .trae/debug/queries/ 文件（sandbox-safe）")
-    parser.add_argument("--safe-output-dir", metavar="DIR",
-                        help="V3.5: 自定义 sandbox-safe 输出目录")
 
     args = parser.parse_args()
     max_age_seconds = args.max_age_minutes * 60
@@ -122,10 +104,7 @@ def main():
             },
             "timestamp": datetime.now().isoformat(),
         }
-        if getattr(args, "safe_output", False):
-            emit_safe_output(result, prefix="check_backend_log_freshness", output_dir=getattr(args, "safe_output_dir", None))
-        else:
-            print(json.dumps(result, ensure_ascii=False, indent=2))
+        print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
 
     print("=" * 70)
