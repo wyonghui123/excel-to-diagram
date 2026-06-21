@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Optional
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent  # V3.7 修复：restart 子目录多一层
 
 
 # 修复 Windows GBK 编码问题

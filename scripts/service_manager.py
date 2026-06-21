@@ -46,8 +46,9 @@ SERVICES = {
         "port": 3010,
         "display_name": "Backend (Python)",
         "service_name": "backend",
-        "start_cmd": ["npm", "run", "dev:python"],
-        "wait_seconds": 5,
+        # V3.7 修复：直接调用 service_manager.ps1，不要再走 npm 递归
+        "start_cmd": ["powershell", "-File", "scripts/service_manager.ps1", "start-be"],
+        "wait_seconds": 8,
     },
 }
 
