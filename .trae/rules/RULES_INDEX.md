@@ -5,7 +5,8 @@ description: "规则索引：所有规则文件的目录和分类"
 
 # 规范规则索引
 
-> 最后更新: 2026-06-19 | 状态: 活跃
+> 最后更新: 2026-06-20 | 状态: 活跃
+> **v3 升级**: 2026-06-20 添加 multi-agent-infrastructure V1 + V2 规则
 > 本文件是所有规范规则的统一索引和依赖图
 > **v2 升级**: 2026-06-19 加 START_HERE.md + 顶层协调文档
 
@@ -105,6 +106,8 @@ description: "规则索引：所有规则文件的目录和分类"
 | [ui-standards.md](./ui-standards.md) | UI 样式规范（顶层）| 推荐 | 完整 UI 规范 |
 | [service-management-rules.md](./service-management-rules.md) | 服务管理 | 推荐 | service_manager 规范 |
 | [multi-agent-coordination.md](./multi-agent-coordination.md) | **多智能体协调 v3.19** | **必读** | 4 防护层 L1-L4 |
+| [multi-agent-infrastructure-v20260620.md](./multi-agent-infrastructure-v20260620.md) | **多智能体基础设施 V1** | **必读** | 5 铁律（修复完整性） |
+| [multi-agent-infrastructure-v20260620-v2.md](./multi-agent-infrastructure-v20260620-v2.md) | **多智能体基础设施 V2** | **必读** | 12 铁律（沙箱状态机 + Agent Status + Read-First）|
 
 ## 已废弃规范（2026-06-20 移至 .deprecated/）
 
