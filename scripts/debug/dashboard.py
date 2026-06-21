@@ -179,6 +179,19 @@ def quick_status() -> Dict[str, Any]:
             else:
                 print(f"  [OK] 根目录调试脚本: OK")
 
+    # V3.7: 后端日志新鲜度检测（防止 Agent 手动启动后端不写日志）
+    log_fresh = run_subprocess([
+        "python", "scripts/debug/check_backend_log_freshness.py",
+    ], timeout=10)
+    # 检查输出：如果有"严重 BUG"就标记
+    if log_fresh["stdout"] and "严重 BUG" in log_fresh["stdout"]:
+        # 提取分钟数
+        m = re.search(r"最后写入 (\d+) 分钟前", log_fresh["stdout"])
+        age = m.group(1) if m else "?"
+        print(f"  [X] 后端日志: FAIL (停止更新 {age} 分钟,后端 stdout 未重定向)")
+    elif log_fresh["stdout"] and "正常更新" in log_fresh["stdout"]:
+        print(f"  [OK] 后端日志: OK")
+
     # Sessions
     sessions_dir = PROJECT_ROOT / ".trae" / "debug" / "sessions"
     if sessions_dir.exists():
