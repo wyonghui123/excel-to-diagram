@@ -147,6 +147,30 @@ def find_yaml_config(config_key: str, scan_dirs: List[str]) -> List[Tuple[str, i
     return find_in_code(pattern, scan_dirs, file_ext=".yaml")
 
 
+def find_imports(module_name: str, scan_dirs: List[str]) -> List[Tuple[str, int, str]]:
+    """查找所有 import 模块的位置
+
+    支持:
+    - `import x`
+    - `from x import y`
+    - `from x.y import z`
+    """
+    pattern = rf"^(?:from\s+{re.escape(module_name)}|import\s+{re.escape(module_name)})\b"
+    return find_in_code(pattern, scan_dirs, file_ext=".py")
+
+
+def find_references(symbol: str, scan_dirs: List[str]) -> List[Tuple[str, int, str]]:
+    """查找符号的所有引用（反向查找）
+
+    用于：
+    - 找所有调用某函数的地方
+    - 找所有引用某类的地方
+    """
+    # 单词边界匹配
+    pattern = rf"\b{re.escape(symbol)}\b"
+    return find_in_code(pattern, scan_dirs, file_ext=".py", max_results=200)
+
+
 def format_results(topic: str, results: List[Tuple[str, int, str]],
                    group_by_file: bool = True) -> None:
     """格式化输出"""
@@ -191,7 +215,8 @@ def main():
     parser.add_argument("--topic", required=True,
                         help="要查找的关键字（正则）")
     parser.add_argument("--type", choices=["code", "function", "class",
-                                            "raise", "yaml", "any"],
+                                            "raise", "yaml", "import",
+                                            "reference", "any"],
                         default="code", help="查找类型")
     parser.add_argument("--dirs", nargs="+", default=DEFAULT_SCAN_DIRS,
                         help="要扫描的目录")
@@ -210,6 +235,10 @@ def main():
         results = find_exception_raise(args.topic, args.dirs)
     elif args.type == "yaml":
         results = find_yaml_config(args.topic, args.dirs)
+    elif args.type == "import":
+        results = find_imports(args.topic, args.dirs)
+    elif args.type == "reference":
+        results = find_references(args.topic, args.dirs)
     else:
         # code 或 any：通用搜索
         results = find_in_code(args.topic, args.dirs, max_results=args.max_results)
