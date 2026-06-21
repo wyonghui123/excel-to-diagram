@@ -1,0 +1,18 @@
+{
+  "agent_name": "main-orchestrator",
+  "task": "V2 改进方案落地 + 沙箱监控",
+  "worktree": "../main-orchestrator-worktree",
+  "port": 0,
+  "locked_files": [
+    ".trae/rules/multi-agent-infrastructure-v20260620-v2.md",
+    "scripts/agent_heartbeat.py",
+    "scripts/check_sandbox_status.py",
+    "scripts/check_fix_completeness.py"
+  ],
+  "sandbox_status": "healthy",
+  "status": "completed",
+  "started_at": "2026-06-21T08:08:23.046356",
+  "last_heartbeat": "2026-06-21T08:10:25.756226",
+  "last_action": "verified-sandbox-and-fix-completeness",
+  "blocked_reason": null
+}

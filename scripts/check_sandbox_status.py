@@ -114,8 +114,17 @@ def check_sandbox_logs(log_root: str = r'C:\Users\Administrator\AppData\Roaming\
         print(f'[DETECT-3] [WARN] 日志目录不存在: {log_root}')
         return 'unknown'
 
-    # 找最新的日期目录
-    date_dirs = sorted([d for d in log_path.iterdir() if d.is_dir()], reverse=True)
+    # 找最新的日期目录（按目录名解析为时间戳排序）
+    def get_dir_timestamp(d: Path) -> str:
+        """从目录名提取时间戳，格式: 20260620T202327"""
+        match = re.match(r'(\d{8}T\d{6})', d.name)
+        return match.group(1) if match else ''
+
+    date_dirs = sorted(
+        [d for d in log_path.iterdir() if d.is_dir()],
+        key=get_dir_timestamp,
+        reverse=True,
+    )
     if not date_dirs:
         print(f'[DETECT-3] [WARN] 没有日期目录')
         return 'unknown'
