@@ -1002,11 +1002,25 @@ watch(() => [props.objectType, props.id, props.mode, props.createMode, props.edi
       // → 保留所有状态，等待 onActivated 时恢复
       console.debug('[DetailPage] watch (route left): preserve state, internalEditing=', internalEditing.value, 'data keys:', _dataBeforeWatch ? Object.keys(_dataBeforeWatch).length : 0)
     } else if (newValid && (newObjectType !== oldObjectType || newId !== oldId)) {
-      // 场景：切换到不同对象 → 重置 internalEditing
+      // [FIX 2026-06-22] 场景：切换到不同对象 → 视觉"无缝切换" + 修复"新 data 不拉"bug
+      // 原代码 BUG:
+      //   1) entityMeta=null → 字段定义瞬间清空 (UI 闪烁)
+      //   2) watch 不调 fetchData + onMounted 不重跑 (keep-alive 缓存) + onActivated
+      //      data!=null 不跑 → 新 objectType 的 data 永远不更新 (用户看到旧 data)
+      // 新行为:
+      //   1) metaLoaded=false → loadEntityMeta 强制重跑 (line 303 检查) → 拉新 meta
+      //   2) **不**重置 entityMeta → 旧字段定义保留显示, 视觉上不闪
+      //   3) **不**清空 data → 旧 data 保留 (loading 圈期间), 视觉上不闪
+      //   4) loading=true + 显式 fetchData() 拉新 data (原代码没有这一步是 bug)
+      // 视觉上: 用户看到的是 "旧页面 (loading 圈) → 新页面", 没有"清空一刹那"
+      // 已知 trade-off: 100-300ms 内可见旧 fields + 旧 data, 视觉上像"卡住", 接受
       metaLoaded.value = false
-      entityMeta.value = null
       internalEditing.value = effectiveMode.value === 'add' || effectiveMode.value === 'edit'
-      console.debug('[DetailPage] watch (new object): reset editing, internalEditing=', internalEditing.value, 'data keys:', _dataBeforeWatch ? Object.keys(_dataBeforeWatch).length : 0)
+      loading.value = true
+      // 显式拉新 data（原代码不调，导致切到不同 objectType 时 data 不更新）
+      // [FIX] data.value 暂不清空, 等 fetchData 完成再覆盖 → 视觉上保留旧 data (loading 圈)
+      fetchData()
+      console.debug('[DetailPage] watch (new object, smooth-switch): metaLoaded=false, keep entityMeta+data, set loading=true, fetchData() called, internalEditing=', internalEditing.value, 'data keys:', _dataBeforeWatch ? Object.keys(_dataBeforeWatch).length : 0)
     } else {
       // 场景：同一对象 mode/createMode/editMode 变化
       //   - effectiveMode 变 'add'/'edit' → 进入编辑态
