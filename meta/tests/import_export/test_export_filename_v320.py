@@ -23,9 +23,14 @@ sys.path.insert(0, os.path.dirname(
 ))
 
 from meta.services.import_export_service import (
-    GLOBAL_MENU_PREFIX_MAP,
     ImportExportService,
 )
+
+# [FIX v1.2.55 2026-06-22] GLOBAL_MENU_PREFIX_MAP 已从模块级迁移到类级 (SSOT 唯一化)
+# 修复 import_export_service.py 删除模块级重复定义后, 旧版模块级 import 会 ImportError.
+# 此处改用 ImportExportService.GLOBAL_MENU_PREFIX_MAP (类级), 与 service 内部实现保持一致.
+# 历史: 2026-06-19 v3.20 引入时只有模块级定义, 后来类级 (L3133-3135) 出现后变成重复实现
+#       → 修复时统一为类级 SSOT, 模块级 import 必须同步更新.
 
 
 # ===== fixture: 构造一个 minimal service, 不连 DB =====
@@ -206,10 +211,12 @@ class TestGlobalMenuPrefixMap:
     """全局菜单 → 文件名前缀的 SSOT 映射"""
 
     def test_arch_data_mapped(self):
-        assert "arch-data" in GLOBAL_MENU_PREFIX_MAP
-        assert GLOBAL_MENU_PREFIX_MAP["arch-data"] == "架构数据"
+        # [FIX v1.2.55 2026-06-22] GLOBAL_MENU_PREFIX_MAP 已迁移到类级
+        assert "arch-data" in ImportExportService.GLOBAL_MENU_PREFIX_MAP
+        assert ImportExportService.GLOBAL_MENU_PREFIX_MAP["arch-data"] == "架构数据"
 
     def test_other_menus_not_present(self):
         """当前只有 arch-data, 后续新全局菜单要手动加"""
-        assert "user-management" not in GLOBAL_MENU_PREFIX_MAP
-        assert "system-admin" not in GLOBAL_MENU_PREFIX_MAP
+        # [FIX v1.2.55 2026-06-22] GLOBAL_MENU_PREFIX_MAP 已迁移到类级
+        assert "user-management" not in ImportExportService.GLOBAL_MENU_PREFIX_MAP
+        assert "system-admin" not in ImportExportService.GLOBAL_MENU_PREFIX_MAP
