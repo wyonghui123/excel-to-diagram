@@ -675,8 +675,7 @@ class WriteScopeInterceptor(Interceptor):
         if not role_ids:
             return {'matched': False, 'roles_checked': []}
 
-        # [V2.1 2026-06-22] 提取 user 的 perm codes (per-request 缓存)
-        user_perm_codes = self._get_user_perm_codes(context) if _WRITE_SCOPE_V2_1_PERM_CHECK else None
+        # [V2.1 2026-06-22] target_perm: 'service_module:update' 等
         target_perm = f'{object_type}:{target_perm_suffix}'
 
         roles_checked = []
@@ -689,9 +688,13 @@ class WriteScopeInterceptor(Interceptor):
 
         for role_id in role_ids:
             try:
-                # [V2.1 2026-06-22] 前置 perm 检查: role 必须有 target functional perm
+                # [V2.1.2 2026-06-22] 前置 perm 检查: 检查该 ROLE 自身是否有 target perm
+                # 修复 V2.1 bug: 之前用 user 全量 perm, 导致 role A (read) + role B (write)
+                # 情况下, role A 的 dim scope 命中会被误放行
+                # V2.1.2: 查询 role_permissions JOIN permissions WHERE role_id = ?
                 if _WRITE_SCOPE_V2_1_PERM_CHECK:
-                    if not self._role_has_perm(role_id, target_perm, user_perm_codes):
+                    role_perm_codes = self._get_role_perm_codes(context, role_id)
+                    if not self._role_has_perm(role_id, target_perm, role_perm_codes):
                         roles_checked.append({
                             'role_id': role_id,
                             'cond': None,
@@ -763,6 +766,8 @@ class WriteScopeInterceptor(Interceptor):
 
         Spec: .trae/specs/auth-permission-system/write-scope-perm-link-v2.1-spec.md
         Permission 来源: JWT token 注入到 g.current_user.permissions (auth_middleware)
+
+        [DEPRECATED V2.1.2] 应改用 _get_role_perm_codes (role-specific) 而非 user-wide
         """
         try:
             if hasattr(g, 'current_user') and g.current_user:
@@ -783,10 +788,54 @@ class WriteScopeInterceptor(Interceptor):
             pass
         return set()
 
+    def _get_role_perm_codes(self, context: 'ActionContext', role_id: int) -> set:
+        """[V2.1.2] 获取指定 role 的 perm codes (role-specific, NOT user-wide)
+
+        修复 V2.1 bug: 之前用 _get_user_perm_codes (user 全量), 导致
+        multi-role 用户的 read-only role 的 dim scope 命中会被误放行.
+
+        Spec: .trae/specs/auth-permission-system/write-scope-perm-link-v2.1-spec.md
+        数据源: role_permissions JOIN permissions WHERE role_id = ?
+
+        [CACHE] per-request 缓存在 context._role_perm_codes_cache[role_id]
+        """
+        try:
+            # per-request cache
+            cache = getattr(context, '_role_perm_codes_cache', None)
+            if cache is None:
+                cache = {}
+                context._role_perm_codes_cache = cache
+            if role_id in cache:
+                return cache[role_id]
+
+            # 查询 role 自身的 perm codes
+            ds = getattr(context, 'data_source', None)
+            if ds is None:
+                cache[role_id] = set()
+                return set()
+
+            rows = ds.execute(
+                "SELECT p.code FROM permissions p "
+                "JOIN role_permissions rp ON p.id = rp.permission_id "
+                "WHERE rp.role_id = ?",
+                [role_id],
+            ).fetchall()
+            codes = {row[0] for row in rows}
+            cache[role_id] = codes
+            return codes
+        except Exception as e:
+            logger.debug(f'_get_role_perm_codes(role_id={role_id}) failed: {e}')
+            return set()
+
     def _role_has_perm(
-        self, role_id: int, target_perm: str, user_perm_codes: set
+        self, role_id: int, target_perm: str, perm_codes: set
     ) -> bool:
-        """[V2.1] 检查 role 是否含 target_perm
+        """[V2.1] 检查 perm_codes 中是否含 target_perm (role-specific 或 user-wide)
+
+        Args:
+            role_id: role ID (保留用于 logging)
+            target_perm: 'service_module:update' 等
+            perm_codes: 候选 perm code 集合 (V2.1.2 应为 role-specific)
 
         支持通配:
           - '*' (admin 通配)
@@ -796,16 +845,16 @@ class WriteScopeInterceptor(Interceptor):
 
         Spec: .trae/specs/auth-permission-system/write-scope-perm-link-v2.1-spec.md
         """
-        if not user_perm_codes:
+        if not perm_codes:
             return False
-        if '*' in user_perm_codes:
+        if '*' in perm_codes:
             return True
-        if target_perm in user_perm_codes:
+        if target_perm in perm_codes:
             return True
         obj_type = target_perm.split(':', 1)[0]
-        if f'{obj_type}:*' in user_perm_codes:
+        if f'{obj_type}:*' in perm_codes:
             return True
-        if obj_type in user_perm_codes:
+        if obj_type in perm_codes:
             return True
         return False
 

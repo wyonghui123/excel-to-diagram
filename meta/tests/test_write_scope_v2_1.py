@@ -262,25 +262,29 @@ class TestV2_1CheckDimScopeWithPermCheck:
             '_role_ids_cache': [100],
         })
         with self._mock_role_ids([100]):
-            with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
-                mock_engine = mock_engine_cls.return_value
-                mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
-                mock_engine.derive_data_conditions.return_value = {
-                    'service_module': 'service_module.id IN (1)'
-                }
-                with patch.object(
-                    self.interceptor, '_record_matches_cond', return_value=True
-                ):
-                    with patch(
-                        'meta.core.interceptors.write_scope_interceptor._WRITE_SCOPE_V2_1_PERM_CHECK',
-                        True,
+            with patch.object(
+                self.interceptor, '_get_role_perm_codes',
+                return_value={'service_module:update'}
+            ):
+                with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
+                    mock_engine = mock_engine_cls.return_value
+                    mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                    mock_engine.derive_data_conditions.return_value = {
+                        'service_module': 'service_module.id IN (1)'
+                    }
+                    with patch.object(
+                        self.interceptor, '_record_matches_cond', return_value=True
                     ):
-                        ctx = MockActionContext(object_type='service_module', action='crud_update')
-                        record = {'id': 1, 'service_module_id': 1}
-                        result = self.interceptor._check_dim_scope(
-                            ctx, 'service_module', record, user_id=333
-                        )
-                        assert result['matched'] is True
+                        with patch(
+                            'meta.core.interceptors.write_scope_interceptor._WRITE_SCOPE_V2_1_PERM_CHECK',
+                            True,
+                        ):
+                            ctx = MockActionContext(object_type='service_module', action='crud_update')
+                            record = {'id': 1, 'service_module_id': 1}
+                            result = self.interceptor._check_dim_scope(
+                                ctx, 'service_module', record, user_id=333
+                            )
+                            assert result['matched'] is True
 
     def test_role_missing_perm_skipped(self, app_ctx, set_current_user):
         """Scenario 1.3: role 缺 perm → 直接跳过"""
@@ -322,25 +326,29 @@ class TestV2_1CheckDimScopeWithPermCheck:
             '_role_ids_cache': [100],
         })
         with self._mock_role_ids([100]):
-            with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
-                mock_engine = mock_engine_cls.return_value
-                mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
-                mock_engine.derive_data_conditions.return_value = {
-                    'service_module': 'service_module.id IN (1)'
-                }
-                with patch.object(
-                    self.interceptor, '_record_matches_cond', return_value=True
-                ):
-                    with patch(
-                        'meta.core.interceptors.write_scope_interceptor._WRITE_SCOPE_V2_1_PERM_CHECK',
-                        True,
+            with patch.object(
+                self.interceptor, '_get_role_perm_codes',
+                return_value={'*'}
+            ):
+                with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
+                    mock_engine = mock_engine_cls.return_value
+                    mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                    mock_engine.derive_data_conditions.return_value = {
+                        'service_module': 'service_module.id IN (1)'
+                    }
+                    with patch.object(
+                        self.interceptor, '_record_matches_cond', return_value=True
                     ):
-                        ctx = MockActionContext(object_type='service_module', action='crud_update')
-                        record = {'id': 1}
-                        result = self.interceptor._check_dim_scope(
-                            ctx, 'service_module', record, user_id=1
-                        )
-                        assert result['matched'] is True
+                        with patch(
+                            'meta.core.interceptors.write_scope_interceptor._WRITE_SCOPE_V2_1_PERM_CHECK',
+                            True,
+                        ):
+                            ctx = MockActionContext(object_type='service_module', action='crud_update')
+                            record = {'id': 1}
+                            result = self.interceptor._check_dim_scope(
+                                ctx, 'service_module', record, user_id=1
+                            )
+                            assert result['matched'] is True
                         # perm_check='passed' 表示通过了 perm 检查
                         passed = [r for r in result['roles_checked']
                                   if r.get('perm_check') == 'passed']
@@ -410,25 +418,29 @@ class TestV2_1CheckDimScopeWithPermCheck:
             '_role_ids_cache': [100],
         })
         with self._mock_role_ids([100]):
-            with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
-                mock_engine = mock_engine_cls.return_value
-                mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
-                mock_engine.derive_data_conditions.return_value = {
-                    'service_module': 'service_module.id IN (1)'
-                }
-                with patch.object(
-                    self.interceptor, '_record_matches_cond', return_value=True
-                ):
-                    with patch(
-                        'meta.core.interceptors.write_scope_interceptor._WRITE_SCOPE_V2_1_PERM_CHECK',
-                        True,
+            with patch.object(
+                self.interceptor, '_get_role_perm_codes',
+                return_value={'service_module:*'}
+            ):
+                with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
+                    mock_engine = mock_engine_cls.return_value
+                    mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                    mock_engine.derive_data_conditions.return_value = {
+                        'service_module': 'service_module.id IN (1)'
+                    }
+                    with patch.object(
+                        self.interceptor, '_record_matches_cond', return_value=True
                     ):
-                        ctx = MockActionContext(object_type='service_module', action='crud_update')
-                        record = {'id': 1}
-                        result = self.interceptor._check_dim_scope(
-                            ctx, 'service_module', record,
-                            user_id=333, target_perm_suffix='update'
-                        )
+                        with patch(
+                            'meta.core.interceptors.write_scope_interceptor._WRITE_SCOPE_V2_1_PERM_CHECK',
+                            True,
+                        ):
+                            ctx = MockActionContext(object_type='service_module', action='crud_update')
+                            record = {'id': 1}
+                            result = self.interceptor._check_dim_scope(
+                                ctx, 'service_module', record,
+                                user_id=333, target_perm_suffix='update'
+                            )
                         assert result['matched'] is True
 
     def test_no_suffix_shorthand_in_user_perms(self, app_ctx, set_current_user):
@@ -438,25 +450,29 @@ class TestV2_1CheckDimScopeWithPermCheck:
             '_role_ids_cache': [100],
         })
         with self._mock_role_ids([100]):
-            with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
-                mock_engine = mock_engine_cls.return_value
-                mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
-                mock_engine.derive_data_conditions.return_value = {
-                    'service_module': 'service_module.id IN (1)'
-                }
-                with patch.object(
-                    self.interceptor, '_record_matches_cond', return_value=True
-                ):
-                    with patch(
-                        'meta.core.interceptors.write_scope_interceptor._WRITE_SCOPE_V2_1_PERM_CHECK',
-                        True,
+            with patch.object(
+                self.interceptor, '_get_role_perm_codes',
+                return_value={'service_module'}
+            ):
+                with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
+                    mock_engine = mock_engine_cls.return_value
+                    mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                    mock_engine.derive_data_conditions.return_value = {
+                        'service_module': 'service_module.id IN (1)'
+                    }
+                    with patch.object(
+                        self.interceptor, '_record_matches_cond', return_value=True
                     ):
-                        ctx = MockActionContext(object_type='service_module', action='crud_update')
-                        record = {'id': 1}
-                        result = self.interceptor._check_dim_scope(
-                            ctx, 'service_module', record, user_id=333
-                        )
-                        assert result['matched'] is True
+                        with patch(
+                            'meta.core.interceptors.write_scope_interceptor._WRITE_SCOPE_V2_1_PERM_CHECK',
+                            True,
+                        ):
+                            ctx = MockActionContext(object_type='service_module', action='crud_update')
+                            record = {'id': 1}
+                            result = self.interceptor._check_dim_scope(
+                                ctx, 'service_module', record, user_id=333
+                            )
+                            assert result['matched'] is True
 
 
 # ============================================================================
@@ -532,19 +548,23 @@ class TestV2_1TEST333WScenario:
         with patch.object(
             self.interceptor, '_get_user_role_ids', return_value=[5970]
         ):
-            with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
-                mock_engine = mock_engine_cls.return_value
-                mock_engine.expand_dimension_values.return_value = {'domain': {703}}
-                with patch.object(
-                    self.interceptor, '_check_ancestor_dim_scope', return_value=True
-                ):
-                    with patch(
-                        'meta.core.interceptors.write_scope_interceptor._WRITE_SCOPE_V2_1_PERM_CHECK',
-                        True,
+            with patch.object(
+                self.interceptor, '_get_role_perm_codes',
+                return_value={'service_module:update', 'service_module:read'}
+            ):
+                with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
+                    mock_engine = mock_engine_cls.return_value
+                    mock_engine.expand_dimension_values.return_value = {'domain': {703}}
+                    with patch.object(
+                        self.interceptor, '_check_ancestor_dim_scope', return_value=True
                     ):
-                        ctx = MockActionContext(object_type='service_module', action='crud_update')
-                        record = {'id': 1, 'sub_domain_id': 138}
-                        result = self.interceptor._check_dim_scope(
+                        with patch(
+                            'meta.core.interceptors.write_scope_interceptor._WRITE_SCOPE_V2_1_PERM_CHECK',
+                            True,
+                        ):
+                            ctx = MockActionContext(object_type='service_module', action='crud_update')
+                            record = {'id': 1, 'sub_domain_id': 138}
+                            result = self.interceptor._check_dim_scope(
                             ctx, 'service_module', record, user_id=3385
                         )
                         assert result['matched'] is True
@@ -562,26 +582,30 @@ class TestV2_1TEST333WScenario:
         with patch.object(
             self.interceptor, '_get_user_role_ids', return_value=[5970]
         ):
-            with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
-                mock_engine = mock_engine_cls.return_value
-                mock_engine.expand_dimension_values.return_value = {'domain': {703}}
-                with patch.object(
-                    self.interceptor, '_check_ancestor_dim_scope', return_value=False
-                ):
-                    with patch(
-                        'meta.core.interceptors.write_scope_interceptor._WRITE_SCOPE_V2_1_PERM_CHECK',
-                        True,
+            with patch.object(
+                self.interceptor, '_get_role_perm_codes',
+                return_value={'service_module:update', 'service_module:read'}
+            ):
+                with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
+                    mock_engine = mock_engine_cls.return_value
+                    mock_engine.expand_dimension_values.return_value = {'domain': {703}}
+                    with patch.object(
+                        self.interceptor, '_check_ancestor_dim_scope', return_value=False
                     ):
-                        ctx = MockActionContext(object_type='service_module', action='crud_update')
-                        record = {'id': 2, 'sub_domain_id': 200}  # domain=706
-                        result = self.interceptor._check_dim_scope(
-                            ctx, 'service_module', record, user_id=3385
-                        )
-                        assert result['matched'] is False
-                        # perm_check='passed' 但 dim_scope 不命中 (ancestor_match=False)
-                        passed = [r for r in result['roles_checked']
-                                  if r.get('perm_check') == 'passed']
-                        assert len(passed) >= 1
+                        with patch(
+                            'meta.core.interceptors.write_scope_interceptor._WRITE_SCOPE_V2_1_PERM_CHECK',
+                            True,
+                        ):
+                            ctx = MockActionContext(object_type='service_module', action='crud_update')
+                            record = {'id': 2, 'sub_domain_id': 200}  # domain=706
+                            result = self.interceptor._check_dim_scope(
+                                ctx, 'service_module', record, user_id=3385
+                            )
+                            assert result['matched'] is False
+                            # perm_check='passed' 但 dim_scope 不命中 (ancestor_match=False)
+                            passed = [r for r in result['roles_checked']
+                                      if r.get('perm_check') == 'passed']
+                            assert len(passed) >= 1
 
 
 # ============================================================================
