@@ -488,9 +488,8 @@ fields:
       meaning: 关联的领域
       parent_key: true
       immutable: true
-      readonly_always: true
-      # [FIX v1.2.2 2026-06-16] 父子层级关系不可变
-      # 跨层级移动会破坏关系引用、审计链、dim_scope 权限。
+      # [FIX v1.2.3 2026-06-23] 移除 readonly_always, 创建时需可编辑选择领域
+      # 编辑时由 immutable=true 保护 (不可跨层移动)
       # 业务上需要"重新分类"请走专门的"重新分类"操作（action）而非直接改字段。
       resolve_from_field: domain_code
       resolve_to_object: domain
