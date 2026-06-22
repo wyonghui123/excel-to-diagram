@@ -27,6 +27,8 @@ import os
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
+from flask import g  # [V2.1 2026-06-22] 模块顶层导入, 便于 mock.patch 替换
+
 from meta.core.interceptors.base import Interceptor
 # [v1.1.5] 复用共享 chain owner resolver (跟 DataPermissionInterceptor 保持一致)
 from meta.services.chain_owner_resolver import (
@@ -239,6 +241,22 @@ _WRITE_SCOPE_REL_FUNCTIONAL_PERM_SOFT_WARN = os.environ.get(
     'WRITE_SCOPE_REL_FUNCTIONAL_PERM_SOFT_WARN', 'false'
 ).lower() in ('true', '1', 'yes')
 
+# [V2.1 2026-06-22] 写权限 × Dim Scope 联动校验开关
+# 启用后, _check_dim_scope 在 role 循环前增加 perm 前置检查
+# Spec: .trae/specs/auth-permission-system/write-scope-perm-link-v2.1-spec.md
+_WRITE_SCOPE_V2_1_PERM_CHECK = os.environ.get(
+    'WRITE_SCOPE_V2_1_PERM_CHECK', 'false'
+).lower() in ('true', '1', 'yes')
+
+# [V2.1 2026-06-22] action → perm 后缀映射
+_ACTION_TO_PERM_SUFFIX = {
+    'crud_create': 'create',
+    'crud_update': 'update',
+    'crud_delete': 'delete',
+    'associate': 'update',   # 关联动作算 update
+    'dissociate': 'delete',  # 解除关联算 delete
+}
+
 
 class WriteScopeInterceptor(Interceptor):
     """
@@ -405,6 +423,10 @@ class WriteScopeInterceptor(Interceptor):
         #   - create: 检查 parent 下是否有用户 scope 内的 child (允许在 scope 范围的 parent 下创建)
         # [FIX v1.2.34 2026-06-21] annotation create: 写权限跟随 parent derived,
         #   不走 _check_parent_dim_scope (检查 child), 而走 _check_ancestor_dim_scope (检查 parent 在 scope 内)
+        # [V2.1 2026-06-22] 根据 action 自动决定 target_perm_suffix
+        # Spec: .trae/specs/auth-permission-system/write-scope-perm-link-v2.1-spec.md
+        target_perm_suffix = _ACTION_TO_PERM_SUFFIX.get(context.action, 'update')
+
         is_annotation_create = (side == 'create_parent' and target.get('child_type') == 'annotation')
         if is_annotation_create:
             dim_check = self._check_dim_scope_for_annotation_create(
@@ -414,6 +436,7 @@ class WriteScopeInterceptor(Interceptor):
             dim_check = self._check_dim_scope(
                 context, object_type, record, user_id,
                 is_create=(side == 'create_parent'),
+                target_perm_suffix=target_perm_suffix,
             )
 
         # step 4: visibility 检查 (BO 有 visibility 字段 + 公开)
@@ -623,6 +646,7 @@ class WriteScopeInterceptor(Interceptor):
         self, context: 'ActionContext', object_type: str,
         record: Dict[str, Any], user_id: int,
         is_create: bool = False,
+        target_perm_suffix: str = 'update',
     ) -> Dict[str, Any]:
         """[v2.1] 检查 record 是否在用户任一 role 的 dim scope 内
 
@@ -637,10 +661,23 @@ class WriteScopeInterceptor(Interceptor):
           - 写权限 (create): 检查 parent 下是否有用户 scope 内的 child
             例: create domain under version 764
               → version 764 下有 domain 703 (在 scope 内) → 允许创建
+
+        [V2.1 2026-06-22] 写权限 × Dim Scope 联动校验:
+          - 灰度开关 _WRITE_SCOPE_V2_1_PERM_CHECK=true 时启用
+          - dim scope 派生前, 先校验 role 是否有 target_perm (object_type:target_perm_suffix)
+          - 无 perm 的 role 直接跳过 (skipped='missing_functional_perm')
+          - Spec: .trae/specs/auth-permission-system/write-scope-perm-link-v2.1-spec.md
+
+        Args:
+            target_perm_suffix: 'create'/'update'/'delete' (默认 'update')
         """
         role_ids = self._get_user_role_ids(context, user_id)
         if not role_ids:
             return {'matched': False, 'roles_checked': []}
+
+        # [V2.1 2026-06-22] 提取 user 的 perm codes (per-request 缓存)
+        user_perm_codes = self._get_user_perm_codes(context) if _WRITE_SCOPE_V2_1_PERM_CHECK else None
+        target_perm = f'{object_type}:{target_perm_suffix}'
 
         roles_checked = []
         try:
@@ -652,6 +689,21 @@ class WriteScopeInterceptor(Interceptor):
 
         for role_id in role_ids:
             try:
+                # [V2.1 2026-06-22] 前置 perm 检查: role 必须有 target functional perm
+                if _WRITE_SCOPE_V2_1_PERM_CHECK:
+                    if not self._role_has_perm(role_id, target_perm, user_perm_codes):
+                        roles_checked.append({
+                            'role_id': role_id,
+                            'cond': None,
+                            'skipped': 'missing_functional_perm',
+                            'perm_required': target_perm,
+                        })
+                        logger.debug(
+                            f'_check_dim_scope: role={role_id} missing {target_perm}, '
+                            f'skipping dim scope check'
+                        )
+                        continue
+
                 # [V1.1.8] 写权限: 只用直接声明的维度
                 expanded = engine.expand_dimension_values(role_id)
                 # 检查 object_type 是否在直接声明的维度中
@@ -659,10 +711,13 @@ class WriteScopeInterceptor(Interceptor):
                     # 直接声明: 用 derive_data_conditions 的 cond 匹配
                     conditions = engine.derive_data_conditions(role_id)
                     cond_expr = conditions.get(object_type)
-                    roles_checked.append({
+                    role_check_entry = {
                         'role_id': role_id, 'cond': cond_expr,
                         'direct_dim': True, 'dim_code': object_type,
-                    })
+                    }
+                    if _WRITE_SCOPE_V2_1_PERM_CHECK:
+                        role_check_entry['perm_check'] = 'passed'
+                    roles_checked.append(role_check_entry)
                     if cond_expr and self._record_matches_cond(
                         context, object_type, record, cond_expr
                     ):
@@ -672,10 +727,13 @@ class WriteScopeInterceptor(Interceptor):
                     parent_match = self._check_parent_dim_scope(
                         context, object_type, record, expanded, engine, role_id
                     )
-                    roles_checked.append({
+                    parent_entry = {
                         'role_id': role_id, 'cond': None,
                         'direct_dim': False, 'parent_match': parent_match,
-                    })
+                    }
+                    if _WRITE_SCOPE_V2_1_PERM_CHECK:
+                        parent_entry['perm_check'] = 'passed'
+                    roles_checked.append(parent_entry)
                     if parent_match:
                         return {'matched': True, 'roles_checked': roles_checked}
                 else:
@@ -684,10 +742,13 @@ class WriteScopeInterceptor(Interceptor):
                     ancestor_match = self._check_ancestor_dim_scope(
                         context, object_type, record, expanded
                     )
-                    roles_checked.append({
+                    ancestor_entry = {
                         'role_id': role_id, 'cond': None,
                         'direct_dim': False, 'ancestor_match': ancestor_match,
-                    })
+                    }
+                    if _WRITE_SCOPE_V2_1_PERM_CHECK:
+                        ancestor_entry['perm_check'] = 'passed'
+                    roles_checked.append(ancestor_entry)
                     if ancestor_match:
                         return {'matched': True, 'roles_checked': roles_checked}
             except Exception as e:
@@ -695,6 +756,58 @@ class WriteScopeInterceptor(Interceptor):
                 continue
 
         return {'matched': False, 'roles_checked': roles_checked}
+
+    # [V2.1 2026-06-22] 写权限 × Dim Scope 联动校验 helper 方法
+    def _get_user_perm_codes(self, context: 'ActionContext') -> set:
+        """[V2.1] 获取用户所有 perm code (from g.current_user.permissions)
+
+        Spec: .trae/specs/auth-permission-system/write-scope-perm-link-v2.1-spec.md
+        Permission 来源: JWT token 注入到 g.current_user.permissions (auth_middleware)
+        """
+        try:
+            if hasattr(g, 'current_user') and g.current_user:
+                # per-request 缓存
+                cached = g.current_user.get('_perm_codes_cache')
+                if cached is not None:
+                    return cached
+                perms = g.current_user.get('permissions', [])
+                if isinstance(perms, set):
+                    perm_set = perms
+                elif isinstance(perms, (list, tuple)):
+                    perm_set = set(perms)
+                else:
+                    perm_set = set()
+                g.current_user['_perm_codes_cache'] = perm_set
+                return perm_set
+        except Exception:
+            pass
+        return set()
+
+    def _role_has_perm(
+        self, role_id: int, target_perm: str, user_perm_codes: set
+    ) -> bool:
+        """[V2.1] 检查 role 是否含 target_perm
+
+        支持通配:
+          - '*' (admin 通配)
+          - 'service_module:update' (精确)
+          - 'service_module:*' (object 通配)
+          - 'service_module' (无后缀简写)
+
+        Spec: .trae/specs/auth-permission-system/write-scope-perm-link-v2.1-spec.md
+        """
+        if not user_perm_codes:
+            return False
+        if '*' in user_perm_codes:
+            return True
+        if target_perm in user_perm_codes:
+            return True
+        obj_type = target_perm.split(':', 1)[0]
+        if f'{obj_type}:*' in user_perm_codes:
+            return True
+        if obj_type in user_perm_codes:
+            return True
+        return False
 
     def _check_dim_scope_for_annotation_create(
         self, context: 'ActionContext', object_type: str,
