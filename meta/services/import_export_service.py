@@ -35,14 +35,11 @@ logger = logging.getLogger(__name__)
 
 
 
-# [NEW v3.20 2026-06-19] 全局菜单 → 文件名前缀映射
-# 当前只有"架构数据管理"是全局多对象级联导出（arch-data 菜单），
-# 后续如需新增全局菜单，继续追加。
-GLOBAL_MENU_PREFIX_MAP = {
-    'arch-data': '架构数据',
-}
-
-
+# [FIX v1.2.55 2026-06-22] 删除模块级 GLOBAL_MENU_PREFIX_MAP
+# 历史: 2026-06-19 v3.20 引入时只有模块级定义 (L41-43),
+#   后来类级 GLOBAL_MENU_PREFIX_MAP (L3133-3135) 出现后变成重复实现.
+#   export_template (L757-758) 仍引用模块级版本, 本次同步改为类级 self.GLOBAL_MENU_PREFIX_MAP,
+#   模块级 MAP 删除, 仅保留类级作为 SSOT.
 # [FIX v1.2.43c 2026-06-22] 统一 Comment 创建 helper
 # 业务编码列头 comment 包含 key_template 描述（多行内容），默认 Comment 框太小
 # 导致用户需要手动拖动才能看到全部内容，体验差
@@ -754,8 +751,9 @@ class ImportExportService:
         # 其他 → 各 objectname 拼接 + "_template" 后缀。
         # 例: 架构数据_template_20260619_143012.xlsx
         # 例: 域_子域_template_20260619_143012.xlsx
-        if menu_code and menu_code in GLOBAL_MENU_PREFIX_MAP:
-            prefix_parts = [GLOBAL_MENU_PREFIX_MAP[menu_code], "template"]
+        # [FIX v1.2.55 2026-06-22] 改用 self.GLOBAL_MENU_PREFIX_MAP (类级 SSOT, 替代模块级 MAP)
+        if menu_code and menu_code in self.GLOBAL_MENU_PREFIX_MAP:
+            prefix_parts = [self.GLOBAL_MENU_PREFIX_MAP[menu_code], "template"]
         else:
             object_names = self._resolve_object_names(ordered_types)
             prefix_parts = object_names + ["template"]
@@ -1194,7 +1192,8 @@ class ImportExportService:
                        options: Optional[Dict[str, Any]] = None, sort_by: str = None,
                        sort_order: str = 'asc',
                        page: int = None, page_size: int = None,
-                       menu_code: Optional[str] = None) -> ExportResult:
+                       menu_code: Optional[str] = None,
+                       progress_callback: Optional[callable] = None) -> ExportResult:
         """
         级联导出：导出指定对象及其所有子级对象
 
@@ -1218,6 +1217,9 @@ class ImportExportService:
             page: 页码（分页导出时使用）
             page_size: 每页数量（分页导出时使用）
             menu_code: [NEW v3.20 2026-06-19] 触发菜单编码, arch-data 走"架构数据"前缀
+            progress_callback: [FIX v1.2.55 2026-06-22] 进度回调函数, 接收 dict:
+                {progress, current_type, current_type_name, total_types, current_index, message}
+                异步导出端点 (export_import_api._run_export scope=cascade) 依赖此参数上报进度.
 
         Returns:
             ExportResult: 导出结果
@@ -1279,15 +1281,43 @@ class ImportExportService:
         
         sheets_info = []
         total_rows = 0
-        
+
+        # [FIX v1.2.55 2026-06-22] 进度回调 — 参照 export_selected_types (L897-925)
+        # 异步导出端点 (scope=cascade) 必须能上报开始/每 type/结束 三个节点,
+        # 否则 _export_tasks[task_id]['progress'] 永远停在 0, 前端卡死.
+        total_types = sum(1 for ot in ordered_types
+                          if ot not in exclude_object_types)
+        if progress_callback:
+            progress_callback({
+                'progress': 0,
+                'current_type': '',
+                'current_type_name': '',
+                'total_types': total_types,
+                'current_index': 0,
+                'message': '开始级联导出，共 {0} 种对象类型'.format(total_types)
+            })
+
+        current_type_index = 0
         for ot in ordered_types:
             if ot in exclude_object_types:
                 continue
-            
+
             obj = registry.get(ot)
             if obj is None:
                 continue
-            
+            current_type_index += 1
+
+            # [FIX v1.2.55 2026-06-22] 进度回调 — 每个 type 开始时
+            if progress_callback:
+                type_name = obj.name or ot
+                progress_callback({
+                    'progress': int(((current_type_index - 1) / max(total_types, 1)) * 100),
+                    'current_type': ot,
+                    'current_type_name': type_name,
+                    'total_types': total_types,
+                    'current_index': current_type_index,
+                    'message': '正在导出: {0} ({1}/{2})'.format(type_name, current_type_index, total_types)
+                })
             if not obj.import_export.export_enabled:
                 continue
             
@@ -1500,6 +1530,18 @@ class ImportExportService:
                 "row_count": len(sheet_data) if sheet_data else 0
             })
             total_rows += len(sheet_data) if sheet_data else 0
+
+        # [FIX v1.2.55 2026-06-22] 进度回调 — 全部完成, 通知前端 100%
+        # 参照 export_selected_types (L1129-1137)
+        if progress_callback:
+            progress_callback({
+                'progress': 100,
+                'current_type': '',
+                'current_type_name': '',
+                'total_types': total_types,
+                'current_index': total_types,
+                'message': '级联导出完成'
+            })
 
         output_dir = os.path.join(os.getcwd(), "exports")
         os.makedirs(output_dir, exist_ok=True)
@@ -2996,52 +3038,11 @@ class ImportExportService:
                 continue
         return bo_display_maps
 
-    def _resolve_cascade_prefix(self, object_type: str, menu_code: Optional[str] = None) -> str:
-        """[NEW v3.20 2026-06-19] 解析级联导出文件名前缀
-
-        规则（用户最新需求 2026-06-19）：
-        - 全局菜单级联导出（arch-data）→ 走"架构数据"前缀
-        - 其他对象级联导出 → 走 objectname（即 MetaObject.name）
-        - 兜底：object_type 字符串
-
-        Args:
-            object_type: 起始对象类型 ID
-            menu_code: 触发本次导出的菜单编码（可空）
-
-        Returns:
-            文件名前缀字符串（不含时间戳/扩展名）
-        """
-        if menu_code and menu_code in GLOBAL_MENU_PREFIX_MAP:
-            return GLOBAL_MENU_PREFIX_MAP[menu_code]
-        meta_obj = registry.get(object_type)
-        if meta_obj and getattr(meta_obj, 'name', None):
-            return meta_obj.name
-        return object_type
-
-    def _resolve_object_names(self, object_types: List[str]) -> List[str]:
-        """[NEW v3.20 2026-06-19] 解析多对象文件名前缀列表
-
-        规则（用户最新需求 2026-06-19）：
-        - 每个 object_type → MetaObject.name（中文名）
-        - 找不到 registry 记录 → 用 object_type 字符串本身
-        - 跳过空值
-
-        Args:
-            object_types: 对象类型 ID 列表
-
-        Returns:
-            中文名列表（与 input 一一对应，剔除空值）
-        """
-        names: List[str] = []
-        for ot in object_types or []:
-            if not ot:
-                continue
-            meta_obj = registry.get(ot)
-            if meta_obj and getattr(meta_obj, 'name', None):
-                names.append(meta_obj.name)
-            else:
-                names.append(ot)
-        return names
+    # [FIX v1.2.55 2026-06-22] 删除重复实现
+    # 历史: 旧版 _resolve_cascade_prefix (v3.20) 在 L3041-3061, 旧版 _resolve_object_names 在 L3063-3086
+    # 两个都是死代码 — 实际调用方 self._resolve_cascade_prefix (L1539) / self._resolve_object_names (L758, L1184)
+    # 走类方法查找, 命中下方新版 (L3131+) 实现.
+    # 删除后, 类级 GLOBAL_MENU_PREFIX_MAP + 新版两个方法成为唯一定义.
 
     def _build_export_filename(self, prefix_parts: List[str], timestamp: Optional[str] = None) -> str:
         """统一生成导出文件名（SSOT）
@@ -3118,14 +3119,20 @@ class ImportExportService:
         每个 type 取 registry.get(type).name，找不到则用原 type 作为兜底。
         用于 export_selected_types / export_template 的多对象文件名拼接。
 
+        [FIX v1.2.55 2026-06-22] None 防御: object_types 可能为 None (调用方
+        没传 selected_types 时), 原版 `for ot in object_types` 会抛
+        `TypeError: 'NoneType' is not iterable`. 旧版本 (L3048 删除前)
+        有 `or []` 防御但新版漏写. 补回以保持与历史行为一致.
+
         Args:
             object_types: object_type id 列表，如 ['business_object', 'relationship']
+                允许为 None (返回空列表)
 
         Returns:
             中文名列表，如 ['业务对象', '关系']
         """
         names: List[str] = []
-        for ot in object_types:
+        for ot in (object_types or []):
             if not ot:
                 continue
             meta_obj = registry.get(ot)
