@@ -43,6 +43,42 @@ GLOBAL_MENU_PREFIX_MAP = {
 }
 
 
+# [FIX v1.2.43c 2026-06-22] 统一 Comment 创建 helper
+# 业务编码列头 comment 包含 key_template 描述（多行内容），默认 Comment 框太小
+# 导致用户需要手动拖动才能看到全部内容，体验差
+# 解决: 根据内容行数自动调整 Comment 框的 height 和 width
+def _make_header_comment(text: str, author: str = "系统"):
+    """创建带自适应尺寸的 openpyxl Comment
+
+    [FIX v1.2.43c 2026-06-22] 业务编码列头 comment 包含 key_template 描述，
+    默认 Comment 框太小，需要根据内容行数自动调整 height 和 width，
+    确保 key_template 等多行内容能完整显示。
+
+    Args:
+        text: comment 文本
+        author: comment 作者
+
+    Returns:
+        openpyxl.comments.Comment 对象
+    """
+    from openpyxl.comments import Comment
+    # 1 行约 60 字符宽度
+    # 默认宽度 220（约 3-4 行），高度根据行数自适应
+    # key_template 完整信息通常 4-7 行 (描述 + 规则 + 示例)
+    sanitized = _sanitize_xml_string(text) if text else ""
+    cmt = Comment(sanitized, author)
+
+    # 根据行数调整高度
+    line_count = sanitized.count('\n') + 1 if sanitized else 1
+    # 每行约 18 单位高度，最小 100，最大 400
+    height = max(100, min(400, line_count * 18 + 40))
+    # 宽度固定 300（足够显示 ~50 字符/行），用户鼠标悬停时可看到完整内容
+    width = 300
+    cmt.height = height
+    cmt.width = width
+    return cmt
+
+
 class ImportExportService:
 
     def __init__(self, data_source: DataSource, manage_service: Optional[ManageService] = None,
@@ -635,11 +671,12 @@ class ImportExportService:
                 cell.alignment = ds.TEXT_CENTER
                 cell.border = ds.THIN_BORDER
                 if col_idx - 1 < len(header_comments) and header_comments[col_idx - 1]:
-                    cell.comment = Comment(_sanitize_xml_string(header_comments[col_idx - 1]), "系统")
-            
+                    # [FIX v1.2.43c 2026-06-22] 使用 helper 自适应 Comment 尺寸
+                    cell.comment = _make_header_comment(header_comments[col_idx - 1])
+
             if obj_has_cud:
                 op_mode_validation = self._create_operation_mode_dv(ws)
-            
+
             col_offset = 1 if include_operation_mode else 0
             enum_validations = {}
             for col_idx, header in enumerate(headers[col_offset:], 1 + col_offset):
@@ -908,11 +945,12 @@ class ImportExportService:
                 cell.alignment = Alignment(horizontal="center", vertical="center")
                 cell.border = ds.THIN_BORDER
                 if col_idx - 1 < len(header_comments) and header_comments[col_idx - 1]:
-                    cell.comment = Comment(_sanitize_xml_string(header_comments[col_idx - 1]), "系统")
-            
+                    # [FIX v1.2.43c 2026-06-22] 使用 helper 自适应 Comment 尺寸
+                    cell.comment = _make_header_comment(header_comments[col_idx - 1])
+
             if include_operation_mode:
                 op_mode_validation = self._create_operation_mode_dv(ws)
-            
+
             col_offset = 1 if include_operation_mode else 0
 
             sheet_row_count = len(sheet_data)
@@ -1273,11 +1311,12 @@ class ImportExportService:
                 cell.alignment = Alignment(horizontal="center", vertical="center")
                 cell.border = ds.THIN_BORDER
                 if col_idx - 1 < len(header_comments) and header_comments[col_idx - 1]:
-                    cell.comment = Comment(_sanitize_xml_string(header_comments[col_idx - 1]), "系统")
-            
+                    # [FIX v1.2.43c 2026-06-22] 使用 helper 自适应 Comment 尺寸
+                    cell.comment = _make_header_comment(header_comments[col_idx - 1])
+
             if include_operation_mode:
                 operation_dv = self._create_operation_mode_dv(ws, with_prompt=True, verbose_error=True)
-            
+
             row_idx = 2
             for record in (sheet_data or []):
                 col_idx = 1
@@ -1402,7 +1441,7 @@ class ImportExportService:
                             cell.protection = Protection(locked=False)
                     elif original_col_idx in parent_key_columns:
                         self._apply_classification_fill(cell, 'parent_key')
-                        cell.comment = Comment(_sanitize_xml_string("新增时必填：请填写父对象的业务键编码"), "System")
+                        cell.comment = _make_header_comment("新增时必填：请填写父对象的业务键编码", author="System")
                         if protect_sheet:
                             cell.protection = Protection(locked=False)
                     elif original_col_idx in fk_display_code_columns:
@@ -2695,7 +2734,7 @@ class ImportExportService:
             cell.alignment = Alignment(horizontal="center", vertical="center")
             cell.border = ds.THIN_BORDER
             ws.column_dimensions['A'].width = 18
-            cell.comment = Comment("新增/更新/删除/跳过，留空默认为更新", "系统")
+            cell.comment = _make_header_comment("新增/更新/删除/跳过，留空默认为更新")
 
             operation_dv = self._create_operation_mode_dv(ws, with_prompt=True, verbose_error=True)
 
@@ -2742,7 +2781,7 @@ class ImportExportService:
             if not is_editable_create and not (classification == 'parent_key' or classification == 'create_required'):
                 comment_parts.append("【只读】")
             if comment_parts:
-                cell.comment = Comment("；".join(comment_parts), "系统")
+                cell.comment = _make_header_comment("；".join(comment_parts))
 
             enum_dv_values = self._build_enum_dv_values(f)
             if enum_dv_values:
@@ -2770,11 +2809,11 @@ class ImportExportService:
             # 与 _get_export_headers_with_editable 的 comment 保持一致
             if col_def['kind'] == '编码':
                 if col_def['classification'] == 'parent_key':
-                    cell.comment = Comment("【父对象编码】新增必填；编辑时可切换到其他父对象", "系统")
+                    cell.comment = _make_header_comment("【父对象编码】新增必填；编辑时可切换到其他父对象")
                 else:
-                    cell.comment = Comment("父对象编码，只读", "系统")
+                    cell.comment = _make_header_comment("父对象编码，只读")
             else:
-                cell.comment = Comment("父对象名称，只读", "系统")
+                cell.comment = _make_header_comment("父对象名称，只读")
 
         for row_idx, record in enumerate(data, 2):
             if include_operation_mode:
@@ -2854,7 +2893,7 @@ class ImportExportService:
                     classification = field_classifications[field_id]
                     self._apply_classification_fill(cell, classification)
                     if classification == 'parent_key':
-                        cell.comment = Comment("新增时必填：请填写父对象的业务键编码", "System")
+                        cell.comment = _make_header_comment("新增时必填：请填写父对象的业务键编码", author="System")
                     if actual_col in enum_validations:
                         enum_validations[actual_col].add(cell)
 
@@ -3475,46 +3514,184 @@ class ImportExportService:
             return []
 
     def _build_permission_filter(self, object_type: str, table_alias: str = '') -> tuple:
-        """[FR-002] 构建数据权限过滤 SQL 片段
+        """[FIX v1.2.50 2026-06-22] 构建数据权限过滤 SQL 片段
 
-        复用 query_service._apply_data_permission 的逻辑，
-        获取当前用户的 allowed_ids 并转为 SQL WHERE 条件。
+        复用 query_service._apply_data_permission 的逻辑 (dim scope 优先 + data_permissions fallback)。
+        历史 v1.2.49 之前只走 data_permissions 表, 漏掉 dim scope (e.g. relationship
+        跨域 source/target 端权限), 导致 export relationship 时 30 条 vs 列表 9 条
+        (TEST333 清理了 auto_generated data_permissions 后, dim scope 仍是主要权限来源)。
+
+        优先级 (与 query_service._apply_data_permission 一致):
+          1. is_admin → 直接放行
+          2. thread-local user (async export) > g.current_user (sync export)
+          3. DimensionScopeEngine 派生 dim scope (优先, 与列表接口行为一致)
+          4. data_permissions 表 allowed_ids (fallback)
 
         Returns:
-            (sql_fragment, params) — sql_fragment 如 " AND c.id IN (?, ?, ?)"
+            (sql_fragment, params) — sql_fragment 如 " AND (r.source_bo_id IN (...) OR r.target_bo_id IN (...))"
             无权限限制时返回 ("", [])
         """
+        prefix = f"{table_alias}." if table_alias else ""
+
         try:
             from meta.services.auth_middleware import get_current_user, is_admin
             from meta.services.data_permission_service import DataPermissionService
 
-            user = get_current_user()
+            # [FIX v1.2.50 2026-06-22] 优先级: thread-local user (async) > g.current_user (sync)
+            #   async 导出时 flask.g 不可用, 必须从 thread-local 拿
+            user = None
+            try:
+                from meta.services.query_service import _get_thread_user, _get_thread_user_id
+                user = _get_thread_user()
+                thread_uid = _get_thread_user_id()
+            except Exception:
+                thread_uid = None
+            if not user:
+                user = get_current_user()
+                if user:
+                    thread_uid = user.get('user_id')
+
             if not user or is_admin(user):
                 return "", []
 
-            user_id = user.get('user_id')
+            user_id = user.get('user_id') or thread_uid
             if not user_id:
                 return "", []
 
+            # [FIX v1.2.50 2026-06-22] Step 1: 尝试 dim scope (复用 query_service._try_apply_dimension_scope 逻辑)
+            #   关键: relationship 的 dim scope 表达式形如
+            #   "source_bo_id IN (SELECT ...) OR target_bo_id IN (SELECT ...)"
+            #   必须把 dim scope 条件拼到 SQL 中, 而不是只查 data_permissions 表
+            try:
+                from meta.services.dimension_scope_engine import DimensionScopeEngine
+                from meta.core.interceptors.data_permission_interceptor import DataPermissionInterceptor
+                from meta.services.query_service import _thread_local
+
+                effective_user_id = getattr(_thread_local, 'user_id', None) or user_id
+                cursor = self.data_source.execute(
+                    """SELECT DISTINCT gr.role_id
+                       FROM group_roles gr
+                       JOIN user_group_members ugm ON gr.group_id = ugm.group_id
+                       WHERE ugm.user_id = ?""",
+                    [effective_user_id]
+                )
+                role_ids = [row[0] for row in cursor.fetchall()]
+
+                if role_ids:
+                    engine = DimensionScopeEngine(self.data_source)
+                    per_role_conds = []
+                    for role_id in role_ids:
+                        try:
+                            data_conditions = engine.derive_data_conditions(role_id)
+                            cond_expr = data_conditions.get(object_type)
+                            if not cond_expr:
+                                continue
+                            conds = DataPermissionInterceptor._parse_compound_expr(cond_expr)
+                            if conds:
+                                per_role_conds.append(conds)
+                                logger.info(
+                                    f"[_build_permission_filter] user={effective_user_id} role={role_id} "
+                                    f"object_type={object_type} -> {len(conds)} conds"
+                                )
+                        except Exception as e:
+                            logger.warning(f"[_build_permission_filter] role {role_id} derive failed: {e}")
+                            continue
+
+                    if per_role_conds:
+                        sql_fragment = self._dim_scope_conds_to_sql(per_role_conds, prefix)
+                        if sql_fragment:
+                            return f" AND ({sql_fragment})", []
+            except Exception as e:
+                logger.warning(f"[_build_permission_filter] dim scope path failed: {e}, falling back to data_permissions")
+
+            # [FIX v1.2.50 2026-06-22] Step 2: Fallback to data_permissions table
             perm_service = DataPermissionService(self.data_source)
             allowed_ids = perm_service.get_allowed_resource_ids(user_id, object_type)
 
             if allowed_ids is None:
-                # None 表示无权限配置，允许全部
+                # None 表示无权限配置，允许全部 (与 query_service._apply_data_permission 一致)
                 return "", []
 
             if not allowed_ids:
                 # 空列表表示无任何权限，返回不可能匹配的条件
-                prefix = f"{table_alias}." if table_alias else ""
                 return f" AND {prefix}id = -1", []
 
-            prefix = f"{table_alias}." if table_alias else ""
             placeholders = ','.join(['?'] * len(allowed_ids))
             return f" AND {prefix}id IN ({placeholders})", list(allowed_ids)
 
         except Exception as e:
-            logger.warning(f"[FR-002] 数据权限过滤构建失败: {e}")
+            logger.warning(f"[_build_permission_filter] failed: {e}")
             return "", []
+
+    def _dim_scope_conds_to_sql(self, per_role_conds: List[List[Dict]], prefix: str = '') -> str:
+        """[FIX v1.2.50 2026-06-22] 将 dim scope conds (来自 DimensionScopeEngine) 转为 SQL 片段
+
+        Args:
+            per_role_conds: list of [cond, cond, ...] 每个 role 一组 conds
+            prefix: 表别名前缀 (e.g. "r." 表示用 r.source_bo_id 而非 source_bo_id)
+
+        Returns:
+            SQL 字符串 (e.g. "r.source_bo_id IN (SELECT ...) OR r.target_bo_id IN (SELECT ...)")
+            或空字符串
+        """
+        if not per_role_conds:
+            return ""
+
+        def _cond_to_sql(c: Dict) -> str:
+            op = c.get('operator', 'eq')
+            field = c.get('field')
+            if not field:
+                return '1=1'
+            fq_field = f"{prefix}{field}" if prefix else field
+            if op == 'in':
+                values = c.get('values') or c.get('value') or []
+                if isinstance(values, list):
+                    vals = ', '.join(str(v) for v in values)
+                else:
+                    vals = str(values)
+                return f"{fq_field} IN ({vals})"
+            elif op == 'eq':
+                return f"{fq_field} = {c.get('value')}"
+            elif op == 'in_subquery':
+                # [FIX v1.2.50] subquery 内可能也引用其它表, 不强加 prefix
+                #   当前 dim scope 生成的 subquery 不会引用主表别名 (r.), 保持原样
+                return f"{fq_field} IN ({c.get('value')})"
+            return '1=1'
+
+        def _flatten(conds: List[Dict]) -> str:
+            """将一组 conds 转为 SQL 字符串 (顶层 OR 拼接, 嵌套 group 按 type)"""
+            parts = []
+            for c in conds:
+                t = c.get('type')
+                if t == 'or':
+                    inner = c.get('conditions', [])
+                    inner_sqls = [_cond_to_sql(cc) for cc in inner if cc.get('operator')]
+                    if inner_sqls:
+                        parts.append('(' + ' OR '.join(inner_sqls) + ')')
+                elif t == 'and':
+                    inner = c.get('conditions', [])
+                    inner_sqls = [_cond_to_sql(cc) for cc in inner if cc.get('operator')]
+                    if inner_sqls:
+                        parts.append('(' + ' AND '.join(inner_sqls) + ')')
+                elif c.get('operator'):
+                    parts.append(_cond_to_sql(c))
+            if not parts:
+                return ''
+            # 顶层 OR 拼接 (line 1692 调用方语义: OR-of-AND across roles)
+            return ' OR '.join(parts)
+
+        if len(per_role_conds) == 1:
+            return _flatten(per_role_conds[0])
+
+        # 多 role → OR-of-AND across roles
+        all_segments = []
+        for conds in per_role_conds:
+            sql = _flatten(conds)
+            if sql:
+                all_segments.append(sql)
+        if not all_segments:
+            return ''
+        return ' OR '.join(all_segments)
 
     def _query_annotations_impl(self, parent_types: List[str],
                                  filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
@@ -4168,6 +4345,9 @@ class ImportExportService:
 
         替代硬编码的 default_exclude_fields 集合。
         系统字段 + 层级 FK/名称字段 + association 虚拟字段均从配置推导。
+
+        [FIX v1.2.43c 2026-06-22] 备注信息 sheet 特殊豁免: 保留 ID 字段
+        18号 Excel 备注信息 col 2 是"ID"列, 业务上需要通过 ID 定位备注
         """
         from meta.services.config_driven_hierarchy_filter import HierarchyConfigLoader
 
@@ -4178,6 +4358,11 @@ class ImportExportService:
             '版本编码', '版本名称', '产品线编码', '产品线名称',
             'ID'
         }
+
+        # [FIX v1.2.43c 2026-06-22] 备注信息 sheet 特殊豁免: 允许 ID 字段导出
+        if meta_obj.id == 'annotation':
+            exclude.discard('id')
+            exclude.discard('ID')
 
         levels = HierarchyConfigLoader.get_levels()
         for level in levels:

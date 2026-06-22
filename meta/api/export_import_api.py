@@ -188,6 +188,18 @@ def export_data():
 
         service = get_import_export_service()
 
+        # [FIX v1.2.50 2026-06-22] 同步导出也设置 thread-local user
+        # 原因: import_export_service._query_association_with_hierarchy_filters
+        #   会调 _build_permission_filter, 该函数同时支持 thread-local user 和 g.current_user
+        #   设置 thread-local 作为额外保险, 避免 g.current_user 在某些边界场景下丢失
+        try:
+            from meta.services.query_service import set_thread_user
+            g_user = getattr(g, 'current_user', None)
+            if g_user:
+                set_thread_user(g_user)
+        except Exception:
+            pass
+
         if scope == 'template':
             result = service.export_template(selected_types, options, menu_code=menu_code)
         elif scope == 'cascade':
