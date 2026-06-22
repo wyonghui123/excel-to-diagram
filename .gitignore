@@ -7,6 +7,10 @@
 /.trae/debug/queries/*.log
 /.trae/debug/markers/*.json
 /.trae/debug/sandbox_logs/*.jsonl
+/.trae/debug/watchdog/state.json
+/.trae/debug/watchdog/history.jsonl
+/.trae/debug/watchdog/alarms.jsonl
+/.trae/debug/watchdog/watchdog.pid
 
 # V1 调试基础设施（保留 .gitkeep 和 template.yaml）
 /.trae/debug/snapshots/*.json
@@ -18,6 +22,7 @@
 !.trae/debug/queries/.gitkeep
 !.trae/debug/markers/.gitkeep
 !.trae/debug/sandbox_logs/.gitkeep
+!.trae/debug/watchdog/.gitkeep
 
 # Python
 __pycache__/
