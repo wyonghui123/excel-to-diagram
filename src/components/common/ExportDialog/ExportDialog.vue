@@ -475,8 +475,10 @@ async function pollExportProgress(taskId, boService) {
           exportProgress.value = 100
           
           if (data.result?.download_url) {
-            const filename = `export_${new Date().toISOString().slice(0, 10)}.xlsx`
-            await boService.downloadExportFile(data.result.download_url, filename)
+            // [FIX v3.24 2026-06-22] 异步导出完成后, 用后端生成的 file_name (基于 objectname + 时间戳),
+            // 不再用前端硬编码 'export_YYYY-MM-DD.xlsx' 覆盖.
+            // downloadExportFile 内部会从 downloadUrl 自推 filename (跟同步 exportData 路径保持一致).
+            await boService.downloadExportFile(data.result.download_url)
             
             const count = data.result.total_rows || 0
             message.success(`导出成功，共 ${count} 条数据`)

@@ -181,7 +181,12 @@ export class BOExportImportService extends BOBaseService {
       return { success: false, message: '下载文件失败' }
     }
 
-    downloadBlob(downloadResult.data, filename || 'export.xlsx')
+    // [FIX v3.24 2026-06-22] 优先从 downloadUrl 自推后端生成的 basename (objectname + 时间戳),
+    // 仅在 url 无 basename 时才用调用方传入的 filename 兜底.
+    // 之前是直接用 'export_YYYY-MM-DD.xlsx' 覆盖, 导致用户下载的是 'export_2026-06-22.xlsx'
+    // 而不是 '架构数据_20260622_HHMMSS.xlsx'.
+    const finalFilename = this._filenameFromUrl(downloadUrl, filename || 'export.xlsx')
+    downloadBlob(downloadResult.data, finalFilename)
     return { success: true }
   }
 
