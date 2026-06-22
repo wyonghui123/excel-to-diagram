@@ -335,6 +335,14 @@ def main():
     p_session.add_argument("--json", action="store_true")
     p_session.set_defaults(func=cmd_session)
 
+    # status (auto_status 集成)
+    p_status = sub.add_parser("status", help="Auto-detect environment status (uses auto_status.py)")
+    p_status.add_argument("--safe-output", action="store_true", help="Write to file")
+    p_status.add_argument("--json", action="store_true")
+    p_status.add_argument("--watch", action="store_true", help="Watch mode")
+    p_status.add_argument("--interval", type=int, default=60)
+    p_status.set_defaults(func=cmd_status)
+
     # run
     p_run = sub.add_parser("run", help="Run a script with sandbox-safe output")
     p_run.add_argument("script", help="Script to run")

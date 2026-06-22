@@ -7,8 +7,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -NoProfile -Command \"$p = $env:TRAE_PROJECT_DIR; if (-not $p) { $p = (Get-Location).Path }; & (Join-Path $p 'scripts\\debug\\session_start_bootstrap.ps1')\"",
-            "timeout": 30
+            "command": "python scripts/debug/utils/session_start_bootstrap.py",
+            "timeout": 15
           }
         ]
       }
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -NoProfile -Command \"$cmd = $env:TRAE_TOOL_INPUT; if ($cmd -and $cmd -match '^[A-Za-z]' -and $cmd -notmatch 'powershell -NoProfile') { Write-Host '[V3.5 Tip] Detected shell command without powershell wrapper. Use: powershell -NoProfile -Command \\\"your command\\\" to avoid Trae terminal interactive prompt blocking. See .trae/rules/terminal-interactive-prompt.md' -ForegroundColor Yellow }\"",
+            "command": "python scripts/debug/utils/_pre_tool_hook.py",
             "timeout": 5
           }
         ]

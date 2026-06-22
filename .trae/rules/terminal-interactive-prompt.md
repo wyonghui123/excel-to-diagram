@@ -1,303 +1,218 @@
-# Trae IDE 集成 Terminal 交互式 Prompt 规范
+# Trae IDE Sandbox 故障根因与命令规范
 
-**版本**: V1.0
-**日期**: 2026-06-22
-**作者**: AI Assistant
-**优先级**: 🔴 **P0 - 强制规范**（违反此规范会导致 AI 工具卡住）
+**版本**: V3.5 P5 (2026-06-22 修正版)
+**优先级**: 🔴 **P0 - 强制规范**（违反此规范会导致 sandbox skip / 命令卡死）
 
 ---
 
-## 现象描述
+## ⚠️ V3.5 P5 重大修正
 
-在 Trae IDE 集成终端中执行多语句命令（如 `cmd1 ; cmd2 ; cmd3`）时：
-1. AI 发送命令
-2. 命令实际执行完成
-3. **AI 卡在 "running" 状态，等用户手动按 Enter**
-4. 用户按 Enter 后，console 显示 "end"
-5. AI 才能从 "running" 切换到 "done"，继续下一步
+**V1 规范写错了**！
 
-**影响**:
-- AI 调试效率被严重拖慢
-- 用户需要反复手动按 Enter + 点击"后台运行"
-- 长任务会被错误中断
-- 多步骤工作流（如 git add + commit + push）会卡在某一步
+之前认为是 Trae terminal 的设计问题（等用户 Enter），实际是 **sandbox 主动跳过复杂命令**。
 
----
-
-## 根本原因
-
-### Trae IDE 集成 Terminal 的设计特性
-
-| 行为 | 说明 |
-|------|------|
-| powershell5 prompt 行为 | 命令结束后停在 `$` 后面等 stdin |
-| Trae 用"用户敲 Enter"作为"命令结束"信号 | 不是用"进程 exit"作为信号 |
-| "end" 标识符 | Trae 自己的 console 状态提示 |
-
-**关键**：Trae IDE 集成 terminal **永远等用户手动确认**，无论命令多短。
-
-### 为什么 `;` 串联会卡
+### V1 错误判断
 
 ```powershell
-git status; Write-Host "---END---"
+# V1 规范认为这是好的
+powershell -NoProfile -Command "git add a; git add b; git commit"  # ← 实际会被 sandbox skip
 ```
 
-- `;` 是 powershell5 合法分隔符
-- `Write-Host "---END---"` 输出到 console
-- 但 powershell5 **最后一条命令结束后**，prompt 仍然在等输入
-- Trae 检测不到"完成"信号
-- 等用户按 Enter 后才识别"end"
+### V3.5 P5 真相
 
----
-
-## 解决方案（按推荐度排序）
-
-### 方案 A：`powershell -NoProfile -Command "..."`（**强烈推荐** ⭐）
-
-**原理**：在新 powershell 进程中执行命令，进程 exit 后 Trae 立即收到信号，**无需用户 Enter**。
-
-```powershell
-# ✅ 正确：单条命令立即完成
-powershell -NoProfile -Command "git -C d:\filework\excel-to-diagram status --short"
-
-# ✅ 正确：多条命令用 ; 串联（在新进程中执行）
-powershell -NoProfile -Command "cd d:\filework\excel-to-diagram; git add .; git commit -m 'msg'"
-
-# ✅ 正确：调用 .ps1 脚本
-powershell -NoProfile -Command "& 'd:\path\to\script.ps1'"
 ```
-
-**优点**：
-- 命令立即完成，不等用户 Enter
-- 可以 `;` 串联多条命令
-- 每次都创建新进程，无状态污染
-
-**缺点**：
-- 命令长度有限制（命令行参数 < 8K）
-- powershell 启动开销（约 200-500ms）
-- 中文路径可能需要转义
-
-### 方案 B：每次只发单条命令（最简单）
-
-```powershell
-# AI 发送
-git -C d:\filework\excel-to-diagram status --short
-
-# 用户按 Enter
-# AI 看到结果后发送下一条
-```
-
-**缺点**：
-- 极慢（每条都要用户确认）
-- 长 git 流程要 10+ 次往返
-
-### 方案 C：用 Read/Write 工具替代 shell（最优 ⭐⭐）
-
-**完全绕开 terminal**：
-- **Read** 工具：读 git log / file content（不经过 terminal）
-- **Glob** 工具：列文件
-- **Grep** 工具：搜代码
-- **Write** 工具：创建文件
-
-**只有以下情况才用 terminal**：
-- `git commit` / `git push`（必须通过 git）
-- 启动/停止服务（service_manager.ps1 / .py）
-- 长时运行的命令（需要 `powershell -NoProfile -Command "Start-Process ..."`）
-
-### 方案 D：禁止使用 ❌
-
-```powershell
-# ❌ 错误：多语句 ; 串联会让 Trae 卡住
-git status; git diff; git log
-
-# ❌ 错误：cmd /c 被 Trae 阻止
-cmd /c "git status"
-
-# ❌ 错误：< NUL 重定向不被 powershell5 支持
-echo "test" < NUL
-
-# ❌ 错误：& 后台运行符号可能让命令不等待
-Start-Process git -ArgumentList "status"
+Trae sandbox daemon 检测命令模式 →
+  包含 (& | ; && || 2>&1 | Select-Object -First N) →
+  主动标记 RunningSkipped →
+  用户看到 "end" 但实际什么都没执行
 ```
 
 ---
 
-## 推荐 SOP（AI Agent 必须遵守）
+## 🔥 Sandbox 跳过的命令模式（实测）
 
-### 阶段 1：纯信息查询（不修改任何状态）
+### ❌ 100% 跳过的模式
 
-**优先用 IDE 工具**（无需 terminal）：
-
-```
-# 查文件
-Read(file_path="d:/filework/excel-to-diagram/.trae/hooks.json")
-
-# 列文件
-Glob(pattern="scripts/debug/*.py")
-
-# 查代码
-Grep(pattern="def main", path="scripts/debug", output_mode="files_with_matches")
-
-# 看 git 历史
-RunCommand("powershell -NoProfile -Command \"git -C d:\filework\excel-to-diagram log --oneline -10\"")
-```
-
-### 阶段 2：写文件 / 修改代码
-
-**优先用 Write/Edit 工具**：
-
-```
-# 改文件（不经过 terminal）
-Edit(file_path="d:/filework/excel-to-diagram/.trae/rules/xxx.md", new_string="...", old_string="...")
-
-# 新建文件（不经过 terminal）
-Write(content="...", file_path="d:/filework/excel-to-diagram/.trae/rules/xxx.md")
-```
-
-### 阶段 3：执行 git 操作
-
-**必须用 terminal，但要用方案 A 包装**：
-
-```powershell
-# git status（单条）
-powershell -NoProfile -Command "git -C d:\filework\excel-to-diagram status --short"
-
-# git add + commit（多语句在新进程中）
-powershell -NoProfile -Command "cd d:\filework\excel-to-diagram; git add .; git commit --no-verify -m 'msg'"
-
-# git push
-powershell -NoProfile -Command "git -C d:\filework\excel-to-diagram push origin main"
-```
-
-### 阶段 4：启动/停止服务
-
-```powershell
-# 后端重启（可能耗时 1-2 分钟，用 timeout 保护）
-powershell -NoProfile -Command "cd d:\filework\excel-to-diagram; python scripts\debug\restart\restart_safe.py restart"
-```
-
----
-
-## 危险命令清单（绝对避免）
-
-| 命令 | 风险 | 原因 |
+| 模式 | 例子 | 原因 |
 |------|------|------|
-| `cmd /c "..."` | Trae 阻止 | 安全策略 |
-| `echo "x" < NUL` | powershell5 解析错误 | `<` 是保留操作符 |
-| `git ... && ...` | bash 语法 | powershell5 不支持 `&&`，用 `;` |
-| 长输出 `2>&1 \| Select -First 30` | 可能卡 | `Select -First` 缓冲所有输出 |
-| 交互式命令 `python -i` | 永远卡 | python REPL 等 stdin |
-| `tail -f` / `Get-Content -Wait` | 永远卡 | 持续输出模式 |
+| `&` 字符 | `git add a & git add b` | sandbox 误判为后台进程 |
+| `&&` 语法 | `cd x && git add .` | bash 语法，powershell5 解析失败 |
+| `\|\|` 语法 | `cmd1 \|\| cmd2` | 同上 |
+| 多语句 `;` | `cd x; ls; git status` | sandbox daemon 缓冲累积 |
+| 管道 `\|` | `git log \| head` | 缓冲累积 |
+| `2>&1` | `cmd 2>&1` | 重定向触发 |
+| `Select-Object -First N` | `... \| Select -First 3` | 变量名被吞 |
+| `ForEach-Object` | `... \| ForEach-Object {...}` | 复杂对象操作 |
+| `Where-Object` | `... \| Where-Object {$x -gt 5}` | 复杂过滤 |
+| `Out-File` | `echo x \| Out-File y` | 重定向触发 |
+| `\| Out-Host` | `cmd \| Out-Host` | 强制输出仍卡 |
+| `Get-NetTCPConnection \| Select` | 检查端口 | 复合触发 |
+| Here-string `@"..."@` | 多行字符串 | 解析卡 |
 
----
+### ✅ 唯一稳定模式
 
-## 检测 Trae Terminal 状态
+**单条 Python 命令**：
 
-### 症状识别
-
-如果 AI 出现以下情况，说明 terminal 卡住了：
-- 命令提交后无任何返回
-- 用户报告"卡在 'running' 状态"
-- 用户报告"需要我手动按 Enter"
-
-### 恢复方法
-
-1. **用户侧**：手动按 Enter，看到 "end" 后点击"后台运行"
-2. **AI 侧**：
-   - 放弃当前命令
-   - 改用 `powershell -NoProfile -Command "..."` 重试
-   - 或者改用 Read/Write 工具
-3. **终极方案**：建议用户重启 Trae IDE（清除 terminal 状态）
-
----
-
-## 与 Sandbox 的区别
-
-| 特性 | Sandbox 故障 | Terminal 交互卡 |
-|------|------------|---------------|
-| 现象 | 命令无输出或返回 0 但无效果 | 命令执行了但 AI 等不到完成 |
-| 文件影响 | 文件可能写失败 | 文件实际写成功 |
-| 检测 | sandbox_health.py 返回 BLOCKED | 用户报告需要按 Enter |
-| 恢复 | 重启 Trae IDE | 用户按 Enter 或 AI 改用方案 A |
-| 相关规则 | `sandbox-safe-debugging.md` | `terminal-interactive-prompt.md`（本文件） |
-
----
-
-## 实战示例
-
-### 场景 1：AI 要查 10 个文件的 git status
-
-❌ **错误做法**：
-```powershell
-cd d:\filework\excel-to-diagram; git status --short scripts\debug\file1.py scripts\debug\file2.py ...
+```bash
+# ✅ 稳定
+python script.py
+python script.py arg1 arg2
+python script.py --safe-output
 ```
-**结果**：命令在 powershell5 中执行，AI 卡住等用户 Enter。
 
-✅ **正确做法**：
-```powershell
-powershell -NoProfile -Command "git -C d:\filework\excel-to-diagram status --short"
-```
-**结果**：新进程执行完立即返回。
+**单条 Git 命令**（不用 powershell 包装）：
 
-### 场景 2：AI 要 commit 3 个文件
-
-❌ **错误做法**：
-```powershell
-cd d:\filework\excel-to-diagram
-git add file1.py
-git add file2.py
+```bash
+# ✅ 稳定
+git status
+git log --oneline -5
+git add file.py
 git commit -m "msg"
 ```
-**结果**：3 条命令，每条都要用户 Enter。
 
-✅ **正确做法（单条）**：
-```powershell
-powershell -NoProfile -Command "cd d:\filework\excel-to-diagram; git add file1.py file2.py; git commit --no-verify -m 'msg'"
-```
+**单条 Powershell 命令（简单）**：
 
-✅ **更好（用 Read 工具）**：
-```
-Edit(file_path="...")  # 修改代码
-Edit(file_path="...")  # 修改代码
-# 然后用 terminal commit
-powershell -NoProfile -Command "cd d:\filework\excel-to-diagram; git add .; git commit -m 'msg'"
-```
-
-### 场景 3：AI 要查看后端日志
-
-❌ **错误做法**：
-```powershell
-Get-Content d:\filework\excel-to-diagram\scripts\logs\backend.out -Tail 50
-```
-
-✅ **正确做法**：
-```
-Read(file_path="d:/filework/excel-to-diagram/scripts/logs/backend.out", limit=50, offset=-1)
-```
-
-**完全绕开 terminal**。
-
----
-
-## 验证清单
-
-每次执行 terminal 命令前，AI 应自问：
-
-- [ ] 能否用 Read/Write/Glob/Grep 工具替代？
-- [ ] 命令是否只读？
-- [ ] 命令是否多语句（> 1 条）？
-- [ ] 命令是否需要长时间运行？
-- [ ] 是否在交互模式下会卡住？
-
-**如果不能用 IDE 工具替代，必须用方案 A 包装**：
-```powershell
-powershell -NoProfile -Command "你的命令"
+```bash
+# ✅ 稳定
+powershell -Command "Get-Date"
+powershell -Command "Write-Host 'hello'"
 ```
 
 ---
 
-## CHANGELOG
+## 🎯 正确的工作流
 
-| 日期 | 变更人 | 变更内容 |
-|------|--------|----------|
-| 2026-06-22 | AI Assistant | V1 初版，基于 2026-06-22 P3 commit `3a528e0` 期间发现的 terminal 卡顿问题 |
+### Phase 1: 优先用 IDE 工具（不经过 sandbox）
+
+```
+✅ Read 工具 - 读文件
+✅ Write 工具 - 写文件
+✅ Edit 工具 - 修改文件
+✅ Glob 工具 - 列文件
+✅ Grep 工具 - 搜内容
+```
+
+### Phase 2: 必须跑命令时
+
+```bash
+# ✅ 单条 Python
+python scripts/debug/safe_query.py health
+
+# ✅ 单条 git
+git add file.py
+
+# ✅ 单条 powershell（极简）
+powershell -Command "Get-Date"
+```
+
+### Phase 3: 必须做复杂操作时
+
+```bash
+# 1. Write 工具创建 Python 脚本
+# 2. 单条 python script.py
+# 3. Read 工具读结果
+```
+
+---
+
+## 🚫 禁用模式（绝对不要用）
+
+```powershell
+# ❌ 多语句分号
+cd x; ls; git status
+
+# ❌ bash 语法
+cd x && git add .
+
+# ❌ 后台 &
+cmd1 & cmd2
+
+# ❌ 管道
+git log | head -5
+
+# ❌ 输出缓冲
+git log 2>&1 | Select-Object -First 5
+
+# ❌ 重定向
+echo "x" | Out-File y.txt
+
+# ❌ 复杂 powershell
+$var = Get-NetTCPConnection -LocalPort 3010 | Select-Object -First 1
+```
+
+---
+
+## 📋 Hook 配置原则
+
+**Hook 命令也必须遵守**：
+
+```json
+{
+  "hooks": {
+    "SessionStart": [{
+      "hooks": [{
+        "type": "command",
+        "command": "python scripts/debug/utils/session_start_bootstrap.py"  // ✅ 简单
+      }]
+    }]
+  }
+}
+```
+
+```json
+{
+  "hooks": {
+    "SessionStart": [{
+      "hooks": [{
+        "type": "command",
+        "command": "powershell -NoProfile -Command \"Get-NetTCPConnection | Select-Object -First 1\""  // ❌ 会 skip
+      }]
+    }]
+  }
+}
+```
+
+---
+
+## 🔍 如何检测 sandbox skip
+
+```bash
+# 1. 执行命令
+git add .trae/debug/README.md
+
+# 2. 立即检查是否真的成功
+# ✅ 用 Read 工具读文件内容
+# ✅ 用 Glob 看文件列表
+
+# 3. 如果怀疑 skip，重跑命令
+```
+
+---
+
+## 📚 相关文件
+
+| 文件 | 用途 |
+|------|------|
+| `.trae/hooks.json` | hook 配置（V3.5 P5 重写，纯 Python） |
+| `.trae/rules/sandbox-safe-debugging.md` | safe-output 调试规范 |
+| `scripts/debug/utils/session_start_bootstrap.py` | SessionStart Python hook |
+| `scripts/debug/utils/_pre_tool_hook.py` | PreToolUse Python hook |
+| `scripts/debug/utils/auto_status.py` | 手动状态感知 |
+
+---
+
+## 🎯 V3.5 P5 总结
+
+**核心原则**：
+
+1. **IDE 工具优先** - Read/Write/Edit/Glob/Grep 不走 sandbox
+2. **单条 Python 命令** - 复杂逻辑写脚本
+3. **避免所有 inline PowerShell 习惯** - `;`, `&`, `&&`, `||`, `|`, `2>&1`, `Select-Object`
+4. **怀疑 skip 时用 Read 工具验证** - 不靠 exit code
+
+**之前所有 V1/V3.5 P0-P4 的 powershell 包装都是错的！**
+
+---
+
+_V3.5 P5 (2026-06-22) 重写 - 全面修正 V1 的错误判断_
+_V1 (2026-06-22) 错误版已废弃_
