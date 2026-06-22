@@ -1550,10 +1550,16 @@ class QueryService:
             else:
                 # 后台线程 (async export/import) 中 flask.g.current_user 不可用,
                 # 但 ImportExportService 设置了 thread-local user_id 作为 fallback
+                # [FIX v1.2.51 2026-06-22] 优先用 _get_thread_user() (含 permissions),
+                #   只有 user_id 没有 permissions 时才 fall back 到 fake user
+                thread_user = _get_thread_user()
                 thread_uid = _get_thread_user_id()
+                if thread_user and is_admin(thread_user):
+                    # 优先信任 thread_user 里的 permissions (set_thread_user 设置)
+                    return
                 if thread_uid:
                     user_id = thread_uid
-                    user = {'user_id': user_id, 'username': f'uid-{user_id}'}
+                    user = thread_user or {'user_id': user_id, 'username': f'uid-{user_id}'}
                     if is_admin(user):
                         return
                 else:
@@ -1725,15 +1731,37 @@ class QueryService:
             logger.warning(f"[_apply_single_cond] unsupported operator: {op}")
 
     def _apply_or_group(self, builder: QueryBuilder, conds: List[Dict]) -> None:
-        """[FIX 2026-06-14 v2] 应用多段 OR 组合 (来自多 role dimension scope) 到 QueryBuilder
+        """[FIX v1.2.2 2026-06-22] 应用 OR group: 嵌套 group 按 type 递归, 顶层用 OR 拼接
 
-        注意: 旧实现把 IN 拆成多个 EQ 再 or_where, 失去 IN 子查询语义
-        新实现: 整段 cond 列表拼成 OR-of-AND raw SQL 表达式
+        [历史 bug] v1.2.1 实现里直接 `' AND '.join`, 导致 relationship 导出时
+        source_bo_id 与 target_bo_id 之间的 OR 语义被错误变成 AND, 漏掉 9 条
+        (导出 9 vs 列表 18)。修复后, 函数名 / 注释 / 实现一致: OR 拼接。
+
+        [FIX v1.2.2] 同时支持嵌套 or/and group 递归展开, 避免丢失 group 类型信息。
         """
         if not conds:
             return
-        or_expr = ' AND '.join(self._cond_to_sql(c) for c in conds)
-        builder.where_raw(f"({or_expr})")
+        parts = []
+        for c in conds:
+            if c.get('type') == 'or':
+                # 嵌套 OR group: 内部 conds 用 OR 拼
+                inner_parts = [self._cond_to_sql(cc) for cc in c.get('conditions', [])]
+                if inner_parts:
+                    parts.append('(' + ' OR '.join(inner_parts) + ')')
+            elif c.get('type') == 'and':
+                # 嵌套 AND group: 内部 conds 用 AND 拼
+                inner_parts = [self._cond_to_sql(cc) for cc in c.get('conditions', [])]
+                if inner_parts:
+                    parts.append('(' + ' AND '.join(inner_parts) + ')')
+            else:
+                sql = self._cond_to_sql(c)
+                if sql and sql != '1=1':
+                    parts.append(sql)
+        if not parts:
+            return
+        # [FIX v1.2.2] 函数名表明是 OR group, 顶层用 OR 拼接
+        # 多 role 场景 (line 1692 调用方) 是不同语义, 需在调用方按 role 边界处理
+        builder.where_raw('(' + ' OR '.join(parts) + ')')
 
     def _cond_to_sql(self, cond: Dict) -> str:
         """[FIX 2026-06-14] 把单条 cond dict 转成 SQL 表达式
