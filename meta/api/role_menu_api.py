@@ -69,6 +69,16 @@ _ACTION_GROUPS_DEF = {
     'manage': {'label': '管理', 'actions': ['read', 'list', 'create', 'update', 'delete']},
 }
 
+# [FIX-2026-06-23] 动作分组层级 (该组继承自哪些低级组的动作)
+# 用于计算"独占动作" (exclusive actions) - 当前组中不属于任何低级组的动作
+# 例: 'edit' 的 lower=['read','list'] (view 的动作), exclusive=['create','update']
+# 这样 BOs 只有 read 时, edit/manage 分组不显示 (BO 没有 create/update/delete 可操作)
+_GROUP_LOWER_ACTIONS = {
+    'view':   set(),
+    'edit':   set(_ACTION_GROUPS_DEF['view']['actions']),
+    'manage': set(_ACTION_GROUPS_DEF['edit']['actions']),
+}
+
 # 独立动作列表 (与 bo_api.py STANDALONE_ACTIONS 保持一致)
 _STANDALONE_ACTIONS_DEF = ['export', 'import', 'assign', 'unassign',
                           'associate', 'dissociate', 'grant', 'revoke']
@@ -150,18 +160,28 @@ def _derive_bo_permission_groups(bo_bindings, req_perms_display, is_assigned):
         actions_map = resource_perms.get(bo_id, {})
 
         # 2.1 推导 ACTION_GROUPS (view/edit/manage)
+        # [FIX-2026-06-23] 只显示有"独占动作" (exclusive) 的分组
+        # 例: relationship 只有 read, 没有 create/update/delete
+        #   → view 组 (独占=read,list) 显示
+        #   → edit 组 (独占=create,update) 无可显示动作 → 跳过
+        #   → manage 组 (独占=delete) 无可显示动作 → 跳过
+        # 解决"relationship/audit_log 的 编辑/管理 按钮显示但点击无反应"的问题
         groups = {}
         for group_key, group_def in _ACTION_GROUPS_DEF.items():
             group_actions = group_def['actions']
-            available_actions = [a for a in group_actions if a in actions_map]
-            if not available_actions:
-                continue  # 该 BO 没有此分组的动作
+            lower_actions = _GROUP_LOWER_ACTIONS[group_key]
+            # 独占动作 = 当前组中不属于任何低级组的动作
+            exclusive_actions = [a for a in group_actions if a not in lower_actions]
+            # 仅当 BO 实际拥有独占动作时才显示该分组
+            available_exclusive = [a for a in exclusive_actions if a in actions_map]
+            if not available_exclusive:
+                continue  # BO 没有此分组的独占动作, 不显示按钮
 
-            # 分组 granted = 所有可用动作都 granted
-            group_granted = all(actions_map[a]['granted'] for a in available_actions)
+            # 分组 granted = 所有可用的独占动作都 granted
+            group_granted = all(actions_map[a]['granted'] for a in available_exclusive)
 
-            # 分组 source 推导
-            sources = set(actions_map[a]['source'] for a in available_actions)
+            # 分组 source 推导 (基于独占动作)
+            sources = set(actions_map[a]['source'] for a in available_exclusive)
             if 'exclude' in sources:
                 group_source = 'exclude'
             elif 'include' in sources:
