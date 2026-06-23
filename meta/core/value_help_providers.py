@@ -164,9 +164,18 @@ class BoValueHelpProvider(ValueHelpProvider):
             query_params["search"] = query
             if search_fields:
                 query_params["search_fields"] = ",".join(search_fields)
-        if sort:
-            sort_parts = [f"{s['field']}:{s.get('direction', 'asc')}" for s in sort]
-            query_params["sort"] = ",".join(sort_parts)
+
+        # [FIX v1.2.4 2026-06-23] ValueHelp 默认排序改为 id asc
+        # 原行为: 不传 sort 时, BO Engine 内部 fallback 到 updated_at desc,
+        #         导致老数据 (id 小的系统数据如 采购管理 id=703) 沉底
+        #         用户在前 50 条看不到, 但搜索能搜到
+        # 新行为: 不传 sort 时, 默认按 id asc, 系统数据 (低 id) 始终在前
+        #         字母序 (code asc) 在测试数据多时也会被淹没 (e.g. BDT1_* 超过 100 条)
+        #         id asc 更稳定, 不会随测试数据变化
+        if not sort:
+            sort = [{"field": "id", "direction": "asc"}]
+        sort_parts = [f"{s['field']}:{s.get('direction', 'asc')}" for s in sort]
+        query_params["sort"] = ",".join(sort_parts)
 
         filter_conditions = []
         for key, val in filters.items():
