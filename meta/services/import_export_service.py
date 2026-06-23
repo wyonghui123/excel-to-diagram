@@ -5909,10 +5909,11 @@ class ImportExportService:
                 else:
                     operation_mode = "create"
 
-            # [NEW 2026-06-24] force_override_explicit_mode=True 时, 强制让 conflict_strategy 生效
-            # 适用场景: 用户希望前端 radio (upsert/update_only) 完全控制, 不被 Excel "操作模式"列覆盖
-            if force_override_explicit_mode and operation_mode_explicit:
-                logger.info(f"[Import] force_override_explicit_mode=True, 忽略 Excel 操作模式 '{operation_mode}' 改为 '{conflict_strategy}'")
+            # [FIX 2026-06-24] force_override_explicit_mode=True 时, 只对 Excel 操作模式="update"的行做 override
+            # 适用场景: 用户希望前端 radio (upsert/update_only) 控制"更新"行为, 但保留 Excel 显式 create/delete 行
+            # 原因: update 行歧义最大 (可能希望"不存在则创建"), create/delete 是显式意图, 不应被覆盖
+            if force_override_explicit_mode and operation_mode_explicit and operation_mode == "update":
+                logger.info(f"[Import] force_override_explicit_mode=True 且 Excel 操作模式='update', 按 conflict_strategy='{conflict_strategy}' 处理")
                 # 根据 conflict_strategy 反推 operation_mode
                 if conflict_strategy == "upsert":
                     operation_mode = "create"  # upsert 入口
@@ -5923,6 +5924,9 @@ class ImportExportService:
                 elif conflict_strategy == "skip":
                     operation_mode = "skip"
                     operation_mode_explicit = False
+            elif force_override_explicit_mode and operation_mode_explicit:
+                # create / delete 行: 保留 Excel 显式意图, 不 override
+                logger.info(f"[Import] force_override_explicit_mode=True 但 Excel 操作模式='{operation_mode}' 显式, 尊重 Excel 意图")
             
             for col_idx, header in enumerate(headers):
                 if header == "操作模式":
