@@ -62,12 +62,16 @@
             </el-upload>
           </el-form-item>
 
-          <el-form-item label="冲突处理">
-            <el-radio-group v-model="conflictStrategy">
-              <el-radio label="upsert">有则更新，无则创建</el-radio>
-              <el-radio label="update_only">仅更新存在的记录</el-radio>
-              <el-radio label="skip">跳过已存在的记录</el-radio>
-            </el-radio-group>
+          <el-form-item label="更新模式">
+            <el-switch v-model="createIfNotExists" />
+            <span class="conflict-sub-label">
+              {{ createIfNotExists ? '无则创建' : '无则跳过' }}
+            </span>
+            <el-tooltip
+              content="勾选: 不存在则创建 (upsert); 不勾选: 仅更新, 不存在则跳过 (update_only)"
+              placement="top">
+              <el-icon class="conflict-help"><QuestionFilled /></el-icon>
+            </el-tooltip>
           </el-form-item>
 
           <el-form-item label="模板下载">
@@ -449,7 +453,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useCrudMessage } from '@/composables/useCrudMessage'
 // [NEW v1.2.12 2026-06-19] Warning icon: 级联失败 banner
-import { UploadFilled, Download, Filter, Warning } from '@element-plus/icons-vue'
+import { UploadFilled, Download, Filter, Warning, QuestionFilled } from '@element-plus/icons-vue'
 import { boService } from '@/services/boService'
 import { metaService } from '@/services/metaService'
 import { objectTypeService } from '@/services/objectTypeService'
@@ -497,7 +501,11 @@ const uploadRef = ref(null)
 const currentStep = ref(0)
 const selectedFile = ref(null)
 const fileList = ref([])
-const conflictStrategy = ref('upsert')
+const createIfNotExists = ref(true)  // ON = upsert (有则更新无则创建), OFF = update_only (无则跳过)
+// [FIX 2026-06-24] UI 简化为: 仅 1 个开关, 默认 upsert
+const conflictStrategy = computed(() => {
+  return createIfNotExists.value ? 'upsert' : 'update_only'
+})
 
 const previewing = ref(false)
 const previewResult = ref(null)
