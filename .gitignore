@@ -140,3 +140,39 @@ components.d.ts
 /_*.log
 /_*.html
 
+# ===== v3.25: Session cookies + backend debug residue =====
+cookies.txt
+
+# Backend code & DB backups (created by hot-patch scripts)
+meta/*.bak
+meta/*.bak_*
+meta/*.pre_*
+meta/architecture.db.pre_*
+
+# Backend log files at multiple levels
+/backend.err
+/backend.out
+/backend-test.err
+/backend-test.out
+/meta/backend.err
+/meta/backend.out
+/scripts/logs/*.err
+/scripts/logs/*.out
+/scripts/logs/
+
+# One-shot debug scripts in scripts/debug/ (~200 files)
+/scripts/debug/
+
+# Test artifacts
+/test_temp/
+/test_output/
+/test_helpers/screenshots/
+
+# IDE/agent runtime state
+.startup_state.json
+.trae/debug/
+
+# Ad-hoc auto-commit / restart batch scripts
+/commit_v35p5.bat
+/重启后端.bat
+
