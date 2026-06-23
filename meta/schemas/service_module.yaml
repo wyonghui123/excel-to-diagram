@@ -446,7 +446,7 @@ fields:
         value_field: id
         display_field: name
         code_field: code
-        apply_target_permissions: false
+        apply_target_permissions: true
       behavior:
         validation: true
         binding_strength: strict
@@ -498,7 +498,7 @@ fields:
         value_field: id
         display_field: name
         code_field: code
-        apply_target_permissions: false
+        apply_target_permissions: true
       behavior:
         validation: true
         binding_strength: strict
@@ -551,7 +551,7 @@ fields:
         value_field: id
         display_field: name
         code_field: code
-        apply_target_permissions: false
+        apply_target_permissions: true
       behavior:
         validation: true
         binding_strength: strict
