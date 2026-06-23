@@ -277,9 +277,11 @@ class TestAnnotationContractDoc:
 
     def test_permission_contract_md_exists(self):
         """permission-contract.md 必须存在"""
+        # 测试文件位于 meta/tests/permission_matrix/, 往回退 4 级到项目根目录
+        # 然后 .trae/specs/...
         contract_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
-            'specs', 'excel-to-diagram', 'annotation-permission-hardening',
+            '.trae', 'specs', 'excel-to-diagram', 'annotation-permission-hardening',
             'permission-contract.md'
         )
         assert os.path.exists(contract_path), f'契约文档不存在: {contract_path}'
