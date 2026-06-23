@@ -62,11 +62,10 @@
             </el-upload>
           </el-form-item>
 
-          <el-form-item label="更新模式">
+          <el-form-item label="冲突处理">
             <el-radio-group v-model="conflictStrategy">
-              <el-radio label="upsert">不存在则创建否则更新</el-radio>
-              <el-radio label="update_only">只更新存在记录</el-radio>
-              <el-radio label="skip">不更新</el-radio>
+              <el-radio label="upsert">更新已存在的记录</el-radio>
+              <el-radio label="skip">跳过已存在的记录</el-radio>
             </el-radio-group>
           </el-form-item>
 
@@ -486,11 +485,6 @@ const props = defineProps({
   importOptions: {
     type: Object,
     default: () => ({})
-  },
-  // [NEW v3.20 2026-06-19] 触发菜单编码 (arch-data → 模板走"架构数据"前缀)
-  menuCode: {
-    type: String,
-    default: ''
   }
 })
 
@@ -918,9 +912,8 @@ watch(previewSheetGroups, (groups) => {
 
 watch(importResultsTable, (rows) => {
   if (rows.length > 0 && activeImportSheets.value.length === 0) {
-    // [FIX 2026-06-20] 默认展开全部 sheet, 让用户能看到所有成功/失败明细
-    // (之前只展开第一个, 其他 sheet 折叠, 用户看不到成功 tab)
-    activeImportSheets.value = rows.map(r => r.typeId)
+    const first = rows.find(r => r.failed > 0 || r.warning > 0) || rows[0]
+    activeImportSheets.value = [first.typeId]
   }
 }, { immediate: true })
 
@@ -1190,17 +1183,14 @@ async function downloadTemplate() {
     const types = props.multiTypeMode && selectedMultiTypes.value.length > 0
       ? [...selectedMultiTypes.value]
       : [props.objectType]
-    const result = await boService.downloadTemplate(types[0], {
-      selected_types: types,
-      menu_code: props.menuCode || undefined,
-    })
+    const result = await boService.downloadTemplate(types[0], { selected_types: types })
     if (result.success) {
       message.success('模板下载成功')
     } else {
-      message.error('模板下载失败，请稍后重试', result)
+      message.error('模板下载失败', result)
     }
   } catch (e) {
-    message.error('模板下载失败：' + (e.message || '请稍后重试'), e)
+    message.error('模板下载失败: ' + e.message, e)
   }
 }
 
