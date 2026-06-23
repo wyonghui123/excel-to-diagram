@@ -489,6 +489,8 @@ def import_data():
         
         mode = request.form.get('mode', 'preview')
         conflict_strategy = request.form.get('conflict_strategy', 'upsert')
+        # [NEW 2026-06-24] force_override_explicit_mode: 让前端 conflict_strategy 覆盖 Excel "操作模式"列
+        force_override_explicit_mode = request.form.get('force_override_explicit_mode', 'false').lower() == 'true'
 
         _set_audit_user()
 
@@ -504,6 +506,7 @@ def import_data():
         logger.info(f"[API]   product_id = {product_id} (type: {type(product_id)})")
         logger.info(f"[API]   mode = {mode}")
         logger.info(f"[API]   conflict_strategy = {conflict_strategy}")
+        logger.info(f"[API]   force_override_explicit_mode = {force_override_explicit_mode}")
 
         if version_id:
             context['version_id'] = int(version_id)
@@ -515,7 +518,8 @@ def import_data():
         logger.info(f"[API] 最终传递给service的context: {context}")
 
         service = get_import_export_service()
-        result = service.import_cascade(file_path, mode, conflict_strategy, context)
+        result = service.import_cascade(file_path, mode, conflict_strategy, context,
+                                        force_override_explicit_mode=force_override_explicit_mode)
         
         if mode == 'preview':
             return jsonify({
@@ -577,6 +581,8 @@ def import_data_async():
         file.save(file_path)
 
         conflict_strategy = request.form.get('conflict_strategy', 'upsert')
+        # [NEW 2026-06-24] force_override_explicit_mode: 让前端 conflict_strategy 覆盖 Excel "操作模式"列
+        force_override_explicit_mode = request.form.get('force_override_explicit_mode', 'false').lower() == 'true'
 
         context = {}
         version_id = request.form.get('version_id')
@@ -644,7 +650,8 @@ def import_data_async():
                 service = get_import_export_service()
                 result = service.import_cascade(
                     file_path, 'execute', conflict_strategy, context,
-                    progress_callback=lambda info: _update_task_progress(task_id, info)
+                    progress_callback=lambda info: _update_task_progress(task_id, info),
+                    force_override_explicit_mode=force_override_explicit_mode
                 )
                 task = _import_tasks.get(task_id)
                 if task:

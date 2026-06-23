@@ -114,7 +114,7 @@ class ImportExportService:
 
         推荐使用 import_cascade(file_path, mode, conflict_strategy)：
         - mode: 'preview' / 'execute' / 'validate'
-        - conflict_strategy: 'skip' / 'upsert' / 'replace'
+        - conflict_strategy: 'upsert' / 'update_only' / 'skip'
         - 支持 operation_mode、parent_key、resolve_from_field、context_field
 
         保留此方法仅用于向后兼容，内部已无任何调用方（API 全面走 import_cascade）。
@@ -4525,16 +4525,21 @@ class ImportExportService:
     def import_cascade(self, file_path: str, mode: str = "execute",
                        conflict_strategy: str = "upsert",
                        context: Optional[Dict[str, Any]] = None,
-                       progress_callback: Optional[callable] = None) -> Any:
+                       progress_callback: Optional[callable] = None,
+                       force_override_explicit_mode: bool = False) -> Any:
         """
         级联导入：从Excel文件导入多个对象类型的数据
 
         Args:
             file_path: Excel文件路径
             mode: 导入模式 (preview | execute)
-            conflict_strategy: 冲突处理策略 (upsert | skip | replace)
+            conflict_strategy: 冲突处理策略 (upsert | update_only | skip)
             context: 导入上下文，包含version_id和product_id等
             progress_callback: 进度回调函数，接收 dict: {progress, current_type, current_type_name, total_types, current_index, message}
+            force_override_explicit_mode: [NEW 2026-06-24] 是否强制让 conflict_strategy 覆盖 Excel 的"操作模式"列
+                - False (默认): 保留 v1.2.18l 行为, Excel 显式"操作模式"列优先级最高
+                - True: 忽略 Excel "操作模式"列, 完全按 conflict_strategy 处理
+                  适用场景: 用户希望前端 radio 选择生效, 但 Excel 模板自带"操作模式"列
 
         Returns:
             ImportPreview 或 ImportResult
@@ -4662,9 +4667,9 @@ class ImportExportService:
             obj_conflict_strategy = conflict_strategy
             if obj and obj.import_export and obj.import_export.conflict_strategy:
                 obj_conflict_strategy = obj.import_export.conflict_strategy
-
             sheet_result = self._import_sheet(file_path, sheet_info, obj_conflict_strategy, context,
-                                              progress_callback, type_progress_base, type_progress_weight)
+                                              progress_callback, type_progress_base, type_progress_weight,
+                                              force_override_explicit_mode=force_override_explicit_mode)
             results[ot] = sheet_result
             completed_count += 1
 
@@ -5679,7 +5684,8 @@ class ImportExportService:
                       conflict_strategy: str, context: Optional[Dict[str, Any]] = None,
                       progress_callback: Optional[callable] = None,
                       type_progress_base: int = 0,
-                      type_progress_weight: int = 100) -> Dict[str, Any]:
+                      type_progress_weight: int = 100,
+                      force_override_explicit_mode: bool = False) -> Dict[str, Any]:
         """导入单个Sheet的数据
 
         Args:
@@ -5901,6 +5907,21 @@ class ImportExportService:
                     # 无法识别时保留默认 "create"，不再用 key_part 兜底
                 else:
                     operation_mode = "create"
+
+            # [NEW 2026-06-24] force_override_explicit_mode=True 时, 强制让 conflict_strategy 生效
+            # 适用场景: 用户希望前端 radio (upsert/update_only) 完全控制, 不被 Excel "操作模式"列覆盖
+            if force_override_explicit_mode and operation_mode_explicit:
+                logger.info(f"[Import] force_override_explicit_mode=True, 忽略 Excel 操作模式 '{operation_mode}' 改为 '{conflict_strategy}'")
+                # 根据 conflict_strategy 反推 operation_mode
+                if conflict_strategy == "upsert":
+                    operation_mode = "create"  # upsert 入口
+                    operation_mode_explicit = False
+                elif conflict_strategy == "update_only":
+                    operation_mode = "update"
+                    operation_mode_explicit = False
+                elif conflict_strategy == "skip":
+                    operation_mode = "skip"
+                    operation_mode_explicit = False
             
             for col_idx, header in enumerate(headers):
                 if header == "操作模式":
