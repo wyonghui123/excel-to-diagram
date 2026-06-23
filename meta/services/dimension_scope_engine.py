@@ -224,6 +224,10 @@ class DimensionScopeEngine:
                   → 沿 version 表追溯 product_id
         """
         expanded = self.expand_dimension_values(role_id)
+        # [V2.1.5 2026-06-23] 保存未被向上展开污染的 expanded,
+        #   用于 line 384 "防止跨版本数据污染" 的 version 判断
+        #   避免 domain=[703] 误匹配 version_id=764
+        original_expanded = {k: set(v) for k, v in expanded.items()}
         loader = get_dimension_object_mapping_loader()
         use_yaml_mapping = loader.is_loaded()
 
@@ -387,7 +391,10 @@ class DimensionScopeEngine:
         # 例: TEST888 (product=475) 派生时, 应只命中 v=764/v=765 的关系
         #     不应误命中 v=1/v=2 的关系 (即使 sub_domain 被复用)
         # 注意: 'version' 和 'product' 本身没有 version_id 字段, 不能加此过滤
-        if 'version' in expanded and expanded['version']:
+        # [V2.1.5 2026-06-23 修复] 用 original_expanded (未被向上展开污染) 判断 version
+        #   之前的 bug: derive_data_conditions 内部 "向上展开" 会把 version/product 加进 expanded,
+        #   导致 domain=[703] 的 role 也会被强制加 version_id=764 过滤, 误排除 version_id=1 的 BO
+        if 'version' in original_expanded and original_expanded['version']:
             version_vals = sorted(expanded['version'])
             version_cond = (
                 f"version_id = {version_vals[0]}" if len(version_vals) == 1

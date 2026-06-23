@@ -30,28 +30,42 @@ def _get_data_source():
 
 
 def _get_permission_label(perm_code):
-    """从MetaRegistry动态获取权限标签（零硬编码）"""
+    """从MetaRegistry动态获取权限标签（零硬编码）
+
+    [FIX 2026-06-23] 返回 "{对象中文名}:{动作中文名}" 格式 (如 "领域:创建"),
+    让"详细权限"列表中对象和动作都显示中文, 而非仅显示动作名.
+    原 cap-label 只显示动作 ("创建"), 与 cap-code ("domain:create") 配合时
+    用户需在英文对象名 + 中文动作名之间反复对照.
+    """
     if perm_code == '*':
-        return '\u8d85\u7ea7\u6743\u9650'
+        return '超级权限'
     parts = perm_code.split(':')
     if len(parts) != 2:
         return perm_code
     resource_type, suffix = parts
     meta_obj = registry.get(resource_type)
+
+    # 1. 优先从 BO meta 的 action.name 拿中文动作名
+    action_name = None
     if meta_obj:
         action = meta_obj.get_action_by_suffix(suffix)
         if action and action.name:
-            return action.name
-    # [FIX-2026-06-23] 回退到标准动作 name (元数据 _standard_actions.yaml)
-    # 例: domain:create → BO action 'domain_create' 的 suffix 是 'domain_create',
-    # 找不到 'create' → 回退到标准动作 crud_create 的 name='创建'
-    from meta.core.standard_action_loader import StandardActionLoader
-    for sa in StandardActionLoader.get_actions():
-        if sa.get_permission_suffix() == suffix and sa.name:
-            return sa.name
-    # 最终回退: "{资源名}{action 后缀}" (例: "领域create")
-    if meta_obj and meta_obj.name:
-        return f"{meta_obj.name}{suffix}"
+            action_name = action.name
+
+    # 2. 回退到标准动作 name (元数据 _standard_actions.yaml)
+    if not action_name:
+        from meta.core.standard_action_loader import StandardActionLoader
+        for sa in StandardActionLoader.get_actions():
+            if sa.get_permission_suffix() == suffix and sa.name:
+                action_name = sa.name
+                break
+
+    # 3. 组装 "{对象中文名}:{动作中文名}" (有对象名时)
+    if meta_obj and getattr(meta_obj, 'name', None) and action_name:
+        return f"{meta_obj.name}:{action_name}"
+    if action_name:
+        return action_name
+    # 4. 都没有则兜底原 code
     return perm_code
 
 

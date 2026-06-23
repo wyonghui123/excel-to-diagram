@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 [MODULE] write_scope_interceptor — 写路径数据范围拦截器 (v2.1)
 [DESCRIPTION] 在 BO 框架 before_action 阶段对 crud_update/crud_delete/associate/dissociate
@@ -395,6 +395,16 @@ class WriteScopeInterceptor(Interceptor):
         object_type = target['type']
         target_id = target['id']
 
+        # [V2.1 2026-06-23 修复] target_perm_suffix 从 context.action 派生
+        # 之前漏传导致 NameError, 现在从 action 上下文自动推断
+        if context.action == 'crud_create':
+            target_perm_suffix = 'create'
+        elif context.action == 'crud_delete':
+            target_perm_suffix = 'delete'
+        else:
+            # crud_update / associate / dissociate 都用 'update' 权限码
+            target_perm_suffix = 'update'
+
         # [DEBUG v1.2.34] annotation 调试
         if object_type == 'annotation':
             logger.warning(f'[WriteScope ANNOTATION DEBUG] _check_target called: object_type={object_type}, target_id={target_id}, user_id={user_id}, side={side}')
@@ -443,7 +453,12 @@ class WriteScopeInterceptor(Interceptor):
         #   - create: 检查 parent 下是否有用户 scope 内的 child (允许在 scope 范围的 parent 下创建)
         # [FIX v1.2.34 2026-06-21] annotation create: 写权限跟随 parent derived,
         #   不走 _check_parent_dim_scope (检查 child), 而走 _check_ancestor_dim_scope (检查 parent 在 scope 内)
-        is_annotation_create = (side == 'create_parent' and target.get('child_type') == 'annotation')
+        # [V2.1.3 2026-06-23 修复] V2.1 perm check 在 create_parent 场景下误判:
+        #   object_type 是 parent (e.g. business_object), 但实际 perm 应是 child_type (e.g. relationship)
+        #   e.g. relationship create 时, source BO 仅作 chain 起点, 不应要求 business_object:create perm
+        child_type = target.get('child_type')
+        perm_object_type = child_type if (side == 'create_parent' and child_type) else object_type
+        is_annotation_create = (side == 'create_parent' and child_type == 'annotation')
         if is_annotation_create:
             dim_check = self._check_dim_scope_for_annotation_create(
                 context, object_type, record, user_id
@@ -453,6 +468,7 @@ class WriteScopeInterceptor(Interceptor):
                 context, object_type, record, user_id,
                 is_create=(side == 'create_parent'),
                 target_perm_suffix=target_perm_suffix,
+                perm_object_type=perm_object_type,
             )
 
         # step 4: visibility 检查 (BO 有 visibility 字段 + 公开)
@@ -473,9 +489,21 @@ class WriteScopeInterceptor(Interceptor):
         #       TEST333 配 dim scope 含 475, 改 475 通过 — 但 user 期望拒绝)
         #   修复: dim_scope 派生不能独立放行, 必须配对 visibility=public 才放行
         #   写权限 = owner chain 命中 OR (dim_scope 命中 AND visibility=public)
-        # [DEBUG FOR INV_TX TEST] 强制打印到 waitress.out
-        logger.warning(f"[P35 DEBUG] object={object_type} target_id={target_id} user_id={user_id} dim_matched={dim_check.get('matched')} vis_allow={visibility_check.get('allow')} vis={visibility_check.get('visibility')}")
-        if dim_check['matched'] and visibility_check['allow']:
+        # [V2.1.4 2026-06-23] create_parent 场景例外:
+        #   - create_parent: 用户在创建子对象 (relationship/annotation),
+        #     父对象 (source BO) 的 visibility 不应阻止创建
+        #   - 父对象本身未被修改, 仅作为 chain 起点
+        #   - dim_scope 命中即放行 (在用户 scope 内的父对象下创建子对象是允许的)
+        #   - 典型场景: TEST333 (采购管理) 创建以 BO_SUPPLIER 为源的关系, BO_SUPPLIER
+        #     的 visibility 可能为 None/private, 但只要 dim_scope 含 采购管理 即可
+        logger.warning(f"[P35 DEBUG] object={object_type} target_id={target_id} user_id={user_id} side={side} dim_matched={dim_check.get('matched')} vis_allow={visibility_check.get('allow')} vis={visibility_check.get('visibility')}")
+        is_create_path = (side == 'create_parent')
+        if is_create_path:
+            # create_parent: dim_scope 命中即放行, 跳过 visibility 检查
+            if dim_check['matched']:
+                logger.warning(f"[P35 DEBUG] → ALLOW (create_parent, dim only)")
+                return
+        elif dim_check['matched'] and visibility_check['allow']:
             logger.warning(f"[P35 DEBUG] → ALLOW (dim AND vis)")
             return
 
@@ -549,8 +577,8 @@ class WriteScopeInterceptor(Interceptor):
                 if rel_failed_side:
                     side_info = f'失败侧: {rel_failed_side}'
                 elif child_type == 'relationship' and parent_code:
-                    # relationship create: parent 是 source_bo, 标注为 "失败侧: 源对象"
-                    side_info = f'失败侧: 源对象({parent_code})'
+                    # relationship create: parent 是 source_bo, 标注为 "失败侧: 源业务对象"
+                    side_info = f'失败侧: 源业务对象({parent_code})'
                 elif parent_code:
                     side_info = f'父对象: {parent_type_cn}({parent_code})'
                 else:
@@ -682,6 +710,7 @@ class WriteScopeInterceptor(Interceptor):
         record: Dict[str, Any], user_id: int,
         is_create: bool = False,
         target_perm_suffix: str = 'update',
+        perm_object_type: Optional[str] = None,
     ) -> Dict[str, Any]:
         """[v2.1] 检查 record 是否在用户任一 role 的 dim scope 内
 
@@ -703,15 +732,23 @@ class WriteScopeInterceptor(Interceptor):
           - 无 perm 的 role 直接跳过 (skipped='missing_functional_perm')
           - Spec: .trae/specs/auth-permission-system/write-scope-perm-link-v2.1-spec.md
 
+        [V2.1.3 2026-06-23] 新增 perm_object_type 参数:
+          - create_parent 场景下, object_type 是 parent (chain 起点), 但实际 perm 应是 child_type
+          - e.g. relationship create: object_type=business_object, perm_object_type=relationship
+          - 默认 None → perm check 使用 object_type (保持原语义)
+
         Args:
             target_perm_suffix: 'create'/'update'/'delete' (默认 'update')
+            perm_object_type: 覆盖 perm check 使用的 object_type, 默认 None 时用 object_type
         """
         role_ids = self._get_user_role_ids(context, user_id)
         if not role_ids:
             return {'matched': False, 'roles_checked': []}
 
+        # [V2.1.3 2026-06-23] perm check 允许使用 perm_object_type 覆盖
+        perm_check_type = perm_object_type or object_type
         # [V2.1 2026-06-22] target_perm: 'service_module:update' 等
-        target_perm = f'{object_type}:{target_perm_suffix}'
+        target_perm = f'{perm_check_type}:{target_perm_suffix}'
 
         roles_checked = []
         try:
@@ -1333,17 +1370,17 @@ class WriteScopeInterceptor(Interceptor):
                 return True
             # 设置失败侧信息用于错误消息
             if not src_ok and not tgt_ok:
-                context._rel_failed_side = f'源对象({src_code})和目标对象({tgt_code})'
+                context._rel_failed_side = f'源业务对象({src_code})和目标业务对象({tgt_code})'
             elif not src_ok:
-                context._rel_failed_side = f'源对象({src_code})'
+                context._rel_failed_side = f'源业务对象({src_code})'
             else:
-                context._rel_failed_side = f'目标对象({tgt_code})'
+                context._rel_failed_side = f'目标业务对象({tgt_code})'
             return False
         else:
             # create/update: 只需 source 在 scope 内
             if side_matches.get('source', False):
                 return True
-            context._rel_failed_side = f'源对象({src_code})'
+            context._rel_failed_side = f'源业务对象({src_code})'
             return False
 
     # ========================================================================
