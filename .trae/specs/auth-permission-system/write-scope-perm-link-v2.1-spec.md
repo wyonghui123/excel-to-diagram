@@ -107,6 +107,31 @@ Role perm 检查顺序 (任一命中即放行):
 - 角色配置 UI (`DimensionScopePanel`, `MenuPermissionMatrix`)
 - `role_dimension_scopes` / `role_permissions` 表结构
 
+### 5. 双层防御 (与 SAP 一致)
+
+v1.2.5 (value_help) + v2.1.2 (save) 形成双层防御, 行为与 SAP MM01 一致:
+
+| 层 | 实现 | 严格度 | 行为 |
+|----|------|--------|------|
+| **Layer 1 (value_help)** | `apply_target_permissions: true` 启用 dim scope filter | 宽松 | 显示用户在 dim scope 内可见的所有选项 (含 read-only role 的链路展开) |
+| **Layer 2 (save)** | `WriteScopeInterceptor._check_dim_scope` v2.1.2 role-specific perm | 严格 | 仅当 dim scope 命中 + role 自身有 `object_type:create/update` perm 才放行 |
+
+**SAP 对照**:
+- SAP F4 help: 显示所有 plant (宽松, 信息完整)
+- SAP AUTHORITY-CHECK: 写入时校验 M_MATE_WRK 权限对象 (严格)
+
+**实测验证 (TEST333, 2 roles)**:
+- role 5970 (TEST333W): dim=domain=[703] + sub_domain:create
+- role 5433 (TEST888-READSCM): dim=product=[475]+inherit (READ only)
+- value_help: 看到 50 domain (Layer 1 宽松, role 5433 链路展开)
+- save: 写 domain=706 → HTTP 400 (Layer 2 严格, role 5433 无 sub_domain:create)
+- save: 写 domain=703 → 通过 (Layer 2 命中, role 5970 perm+dim scope)
+
+**设计意图**:
+- 价值列表保持信息完整性, 用户可了解业务全貌
+- 保存时严格拦截, 防止越权写入
+- 与 SAP 头部产品的"宽松读 + 严格写"模式一致
+
 ---
 
 ## Impact
@@ -351,3 +376,4 @@ Role perm 检查顺序 (任一命中即放行):
 | 日期 | 版本 | 变更 |
 |------|------|------|
 | 2026-06-22 | v2.1 | 初版: 写权限 × Dim Scope 联动 (perm 前置校验) |
+| 2026-06-23 | v2.1.1 | 补充: 双层防御设计意图 (v1.2.5 value_help 宽松 + v2.1.2 save 严格), 与 SAP MM01 一致 |
