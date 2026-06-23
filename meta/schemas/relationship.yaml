@@ -1070,7 +1070,7 @@ fields:
       immutable: true
       import_visible: true
       export_visible: true
-      import_order: 4
+      import_order: 6
       # 冗余字段一致性声明（Type-A: 物理冗余）
       redundancy:
         type: stored
@@ -1116,7 +1116,8 @@ fields:
       data_category: code
       import_visible: true
       export_visible: true
-      import_order: 5
+      # [FIX 2026-06-23] relation_code 是历史字段, 排在最后
+      import_order: 19
       examples:
         - DEPENDS_ON
         - CALLS
@@ -1143,7 +1144,7 @@ fields:
           target: relation_type_name_en
       import_visible: true
       export_visible: true
-      import_order: 6
+      import_order: 9
       analytics:
         category: dimension
         type: categorical
@@ -1174,7 +1175,7 @@ fields:
       data_category: code
       import_visible: true
       export_visible: true
-      import_order: 7
+      import_order: 10
     value_help:
       source:
         type: enum
@@ -1196,7 +1197,7 @@ fields:
       data_category: text
       import_visible: true
       export_visible: true
-      import_order: 20
+      import_order: 12
 
   - id: relation_type_name
     name: 关系类型名称
@@ -1250,7 +1251,7 @@ fields:
       meaning: 源业务对象的显示名称
       # [FIX 2026-06-21] 恢复 import_order=3, 让"源业务对象"列与"源业务对象编码"列排在一起
       # 之前删除导致此字段排到最后(999), 列顺序混乱
-      import_order: 3
+      import_order: 5
       export_visible: true
       # 冗余字段一致性声明（Type-B: 虚拟冗余）
       redundancy:
@@ -1275,7 +1276,7 @@ fields:
     semantics:
       meaning: 源业务对象的编码（虚拟冗余显示）
       # [NEW 2026-06-16 BMRD] import_order 提到 3, 让"源业务对象编码"列排到前面 (在 关系编码 之后)
-      import_order: 3
+      import_order: 4
       # [NEW 2026-06-14 BMRD] 父对象编码显示字段 - 跟随 source_bo_id，使用浅绿色
       parent_key_display: true
       export_visible: true
@@ -1303,7 +1304,7 @@ fields:
     semantics:
       meaning: 目标业务对象的显示名称
       # [FIX 2026-06-21] 恢复 import_order=4, 让"目标业务对象"列与"目标业务对象编码"列排在一起
-      import_order: 4
+      import_order: 8
       export_visible: true
       # 冗余字段一致性声明（Type-B: 虚拟冗余）
       redundancy:
@@ -1328,7 +1329,7 @@ fields:
     semantics:
       meaning: 目标业务对象的编码（虚拟冗余显示）
       # [NEW 2026-06-16 BMRD] import_order 提到 4, 让"目标业务对象编码"列排到前面
-      import_order: 4
+      import_order: 7
       # [NEW 2026-06-14 BMRD] 父对象编码显示字段 - 跟随 target_bo_id，使用浅绿色
       parent_key_display: true
       export_visible: true
@@ -1360,7 +1361,7 @@ fields:
       scope_rules_ref: hierarchies.hierarchy_scopes
       # [REWRITE 2026-06-16 BMRD] 把"关系范围"列提到 target_bo_code (4) 之后,
       # 让"源/目标业务对象编码"+"关系范围"3 列聚在一起, 按用户规范
-      import_order: 5
+      import_order: 11
       analytics:
         category: dimension
         type: categorical
@@ -1486,7 +1487,7 @@ fields:
       export_visible: true
       # [FIX 2026-06-21] 恢复 import_order=5, 让"源领域"列排在"源子领域"前面
       # 之前删除导致此字段排到最后(999), 列顺序混乱
-      import_order: 5
+      import_order: 13
       # 冗余字段一致性声明（Type-B: 虚拟冗余，多层JOIN）
       redundancy:
         type: virtual
@@ -1522,7 +1523,7 @@ fields:
     semantics:
       meaning: 源业务对象所属子领域的显示名称
       export_visible: true
-      import_order: 6
+      import_order: 14
       # 冗余字段一致性声明（Type-B: 虚拟冗余，多层JOIN）
       redundancy:
         type: virtual
@@ -1554,7 +1555,7 @@ fields:
     semantics:
       meaning: 源业务对象所属服务模块的显示名称
       export_visible: true
-      import_order: 7
+      import_order: 15
       # 冗余字段一致性声明（Type-B: 虚拟冗余，多层JOIN）
       redundancy:
         type: virtual
@@ -1582,7 +1583,7 @@ fields:
     semantics:
       meaning: 目标业务对象所属领域的显示名称
       export_visible: true
-      import_order: 8
+      import_order: 16
       # 冗余字段一致性声明（Type-B: 虚拟冗余，多层JOIN）
       redundancy:
         type: virtual
@@ -1618,7 +1619,7 @@ fields:
     semantics:
       meaning: 目标业务对象所属子领域的显示名称
       export_visible: true
-      import_order: 9
+      import_order: 17
       # 冗余字段一致性声明（Type-B: 虚拟冗余，多层JOIN）
       redundancy:
         type: virtual
@@ -1650,7 +1651,7 @@ fields:
     semantics:
       meaning: 目标业务对象所属服务模块的显示名称
       export_visible: true
-      import_order: 10
+      import_order: 18
       # 冗余字段一致性声明（Type-B: 虚拟冗余，多层JOIN）
       redundancy:
         type: virtual

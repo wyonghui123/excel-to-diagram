@@ -1965,8 +1965,10 @@ class ImportExportService:
             )
 
             # [NEW v1.2.3 2026-06-17] 优先看 parent_key_template_editable
+            # [FIX 2026-06-23] parent_key_template_editable 默认是 "" (空字符串), not None
+            # 需要把空字符串也当作"未设置"，走 fallback 逻辑
             template_editable = parent_key_field and getattr(
-                parent_key_field.semantics, 'parent_key_template_editable', None
+                parent_key_field.semantics, 'parent_key_template_editable', ''
             )
             is_template_editable = False
             if template_editable == 'always':
@@ -1975,7 +1977,8 @@ class ImportExportService:
                 is_template_editable = True
             elif template_editable == 'never':
                 is_template_editable = False
-            elif template_editable is None:
+            elif template_editable in ('', None):
+                # [FIX 2026-06-23] 同时处理 "" 和 None 两种未设置情况
                 # fallback: 旧的 readonly_always 逻辑（保持向后兼容）
                 is_template_editable = (is_first_parent and parent_key_field and not readonly_always)
 
@@ -4210,15 +4213,16 @@ class ImportExportService:
 
         # [NEW v1.2.3 2026-06-17] parent_key_template_editable 优先级最高
         # 明确声明"Excel 模板可填"，与 readonly_always 完全解耦
+        # [FIX 2026-06-23] 默认是 "" 而非 None, 需要兼容
         if is_parent_key:
-            template_editable = getattr(field.semantics, 'parent_key_template_editable', None)
+            template_editable = getattr(field.semantics, 'parent_key_template_editable', '')
             if template_editable == 'always':
                 return True
             if template_editable == 'create_only' and mode == 'create':
                 return True
             if template_editable == 'never':
                 return False
-            # 未显式声明，fallback 到 readonly_always 判断
+            # [FIX 2026-06-23] 未显式声明 ("" 或 None), fallback 到 readonly_always 判断
             if getattr(field.semantics, 'readonly_always', False):
                 return False
             # parent_key 字段默认可编辑（SAP One Model 允许移动层级）
@@ -6366,7 +6370,8 @@ class ImportExportService:
             # 让调用方能检查 WriteScopeDenied 等失败 (之前返回 None 被静默忽略)
             return self.manage_service.update(
                 UpdateRequest(object_type=object_type, id=existing["id"], data=record)
-            )        else:
+            )
+        else:
             bk_fields = self._get_business_key_fields(object_type)
             if bk_fields:
                 key_desc = ", ".join(["{0}={1}".format(f.id, record.get(f.id)) for f in bk_fields])

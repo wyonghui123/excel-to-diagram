@@ -298,6 +298,6 @@ export function getCodeFieldTag(userEditable) {
       return { text: '手动编码', type: 'warning' }
     case 'auto_or_manual':
     default:
-      return { text: '可手动', type: 'info' }
+      return { text: '可录入覆盖', type: 'info' }
   }
 }

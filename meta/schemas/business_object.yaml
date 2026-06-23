@@ -459,11 +459,11 @@ ui_view_config:
       - title: 基本信息
         type: fieldGroup
         fields:
-          - code
           - name
           - description
           - version_id
           - service_module_id
+          - code
           - sub_domain_name
           - domain_name
       - title: 对象关系
@@ -509,13 +509,13 @@ ui_view_config:
     sections:
       - title: 基本信息
         fields:
-          - code
           - name
           - description
           - version_id
           - domain_id
           - sub_domain_id
           - service_module_id
+          - code
     layout: vertical
   change_notification:
     enabled: true
@@ -759,7 +759,8 @@ fields:
       meaning: 关联的服务模块（父对象）
       parent_key: true
       immutable: true
-      readonly_always: true
+      # [FIX v1.2.3 2026-06-23] 移除 readonly_always, 创建时需可编辑选择服务模块
+      # 编辑时由 immutable=true 保护 (不可跨层移动)
       resolve_from_field: service_module_code
       resolve_to_object: service_module
       mandatory: false

@@ -133,6 +133,11 @@ fields:
     description: 技术主键
     semantics:
       meaning: 自增主键，系统内部使用
+      # [FIX 2026-06-23] 给 ID 设置 import_order=1, 导出时放在最前
+      # v1.2.43c 注释: "备注信息 col 2 是'ID'列, 业务上需要通过 ID 定位备注"
+      # 实际应该是 col 1, 因为"操作模式"是导入模式标记, 不算业务列
+      import_order: 1
+      export_visible: true
       analytics:
         category: measure
         aggregation: count
