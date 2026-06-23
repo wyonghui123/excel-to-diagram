@@ -187,9 +187,19 @@ def _derive_bo_permission_groups(bo_bindings, req_perms_display, is_assigned):
                     'source': actions_map[action_key]['source'],
                 })
 
+        # 与导入导出、/meta/objects API 保持一致: 从 registry 读 schema 的中文 name
+        # registry 不可用时兜底原英文 title case，避免单点失败
+        bo_name = bo_id.replace('_', ' ').title()
+        try:
+            obj = registry.get(bo_id)
+            if obj and getattr(obj, 'name', None):
+                bo_name = obj.name
+        except Exception:
+            pass
+
         result.append({
             'bo_id': bo_id,
-            'bo_name': bo_id.replace('_', ' ').title(),
+            'bo_name': bo_name,
             'groups': groups,
             'standalone': standalone,
         })

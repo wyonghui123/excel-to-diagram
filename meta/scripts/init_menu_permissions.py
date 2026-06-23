@@ -143,11 +143,11 @@ def init_menu_permissions(db_path):
                 # 🆕 BMRD-2026-06-14 方案A: 关系对象随架构数据自动带入 (FR-013 轻量版)
                 # 关系数据是跨层级的纽带, 架构数据管理页操作 domain/sub_domain/... 时必然要查阅
                 # 其相互之间的关系, role='derived' 表示派生而非主 BO
-                {'bo_id': 'relationship', 'role': 'derived', 'include_actions': ['read', 'list', 'export']},
+                {'bo_id': 'relationship', 'role': 'derived', 'include_actions': ['read', 'export']},
                 # 🆕 BMRD-2026-06-14 审计日志自动带入
                 # domain 详情页"操作日志" tab 需要 read 权限, 紧化 v1 endpoint 后
                 # (v1 现在也校验 audit_log:read) 必须显式 grant 才能看到
-                {'bo_id': 'audit_log', 'role': 'derived', 'include_actions': ['read', 'list', 'export']},
+                {'bo_id': 'audit_log', 'role': 'derived', 'include_actions': ['read', 'export']},
             ]),
             'required_permissions': json.dumps([
                 'domain:create', 'domain:read', 'domain:update', 'domain:delete', 'domain:export', 'domain:import',
@@ -155,9 +155,9 @@ def init_menu_permissions(db_path):
                 'service_module:create', 'service_module:read', 'service_module:update', 'service_module:delete',
                 'business_object:create', 'business_object:read', 'business_object:update', 'business_object:delete',
                 # 🆕 关系对象 (derived) 的最低权限
-                'relationship:read', 'relationship:list', 'relationship:export',
+                'relationship:read', 'relationship:export',
                 # 🆕 审计日志 (derived) 的最低权限 (操作日志 tab 必需)
-                'audit_log:read', 'audit_log:list', 'audit_log:export',
+                'audit_log:read', 'audit_log:export',
             ]),
             'data_permission_hint': json.dumps({
                 'resource_types': ['domain', 'sub_domain', 'relationship', 'audit_log'],
@@ -260,7 +260,7 @@ def init_menu_permissions(db_path):
             'primary_object_type': 'audit_log',
             'object_types': json.dumps(['audit_log']),
             'bo_bindings': json.dumps([
-                {'bo_id': 'audit_log', 'role': 'primary', 'include_actions': ['read', 'list']},
+                {'bo_id': 'audit_log', 'role': 'primary', 'include_actions': ['read']},
             ]),
             # [FIX 2026-06-14] 菜单 "日志管理" 限定 super-admin only.
             #   any(p in user_perms for p in required) 语义下, 普通权限 (如 audit_log:read) 会让所有业务用户都能看见.

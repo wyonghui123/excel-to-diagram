@@ -208,7 +208,7 @@ def business_user_token():
         'display_name': 'TEST888 业务用户',
         'permissions': [
             'domain:read', 'sub_domain:read', 'service_module:read',
-            'business_object:read', 'relationship:read', 'relationship:list',
+            'business_object:read', 'relationship:read',
         ],
         'roles': [{'name': '业务用户', 'code': 'business_user'}],
         'exp': 9999999999,
