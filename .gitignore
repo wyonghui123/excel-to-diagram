@@ -144,9 +144,9 @@ components.d.ts
 cookies.txt
 
 # Backend code & DB backups (created by hot-patch scripts)
-meta/*.bak
-meta/*.bak_*
-meta/*.pre_*
+**/*.bak
+**/*.bak_*
+**/*.pre_*
 meta/architecture.db.pre_*
 
 # Backend log files at multiple levels
@@ -175,4 +175,23 @@ meta/architecture.db.pre_*
 # Ad-hoc auto-commit / restart batch scripts
 /commit_v35p5.bat
 /重启后端.bat
+
+# ===== v3.26: Remaining debug residue =====
+
+# meta/ 下的临时调试脚本 (与 /_*.py 对应)
+/meta/_*.py
+/meta/_*.txt
+/meta/_*.log
+/meta/_*.patch
+
+# meta/logs/ 运行时日志目录 (与 /scripts/logs/ 平行)
+/meta/logs/
+
+# scripts/ 下的 .trae/ (与 root .trae/debug/ 平行)
+/scripts/.trae/
+
+# scripts/ 下的临时验证脚本 (与 root check_*.py / debug_*.py 对应)
+/scripts/verify_*.py
+/scripts/probe_*.py
+/scripts/list_*.py
 
