@@ -4536,10 +4536,11 @@ class ImportExportService:
             conflict_strategy: 冲突处理策略 (upsert | update_only | skip)
             context: 导入上下文，包含version_id和product_id等
             progress_callback: 进度回调函数，接收 dict: {progress, current_type, current_type_name, total_types, current_index, message}
-            force_override_explicit_mode: [NEW 2026-06-24] 是否强制让 conflict_strategy 覆盖 Excel 的"操作模式"列
-                - False (默认): 保留 v1.2.18l 行为, Excel 显式"操作模式"列优先级最高
-                - True: 忽略 Excel "操作模式"列, 完全按 conflict_strategy 处理
-                  适用场景: 用户希望前端 radio 选择生效, 但 Excel 模板自带"操作模式"列
+            force_override_explicit_mode: [FIX 2026-06-24] 是否让 conflict_strategy 覆盖 Excel 的"操作模式"列
+                - True (默认): 忽略 Excel "操作模式"列, 完全按 conflict_strategy 处理
+                  UI 用户的 intent (更新模式 + 无则创建) 永远是真理, Excel 列是数据
+                - False: 保留 v1.2.18l 行为, Excel 显式"操作模式"列优先级最高
+                  仅供老脚本显式 opt-in 使用 (前端 ImportDialog 不传该字段)
 
         Returns:
             ImportPreview 或 ImportResult

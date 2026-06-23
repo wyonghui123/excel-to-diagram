@@ -489,8 +489,10 @@ def import_data():
         
         mode = request.form.get('mode', 'preview')
         conflict_strategy = request.form.get('conflict_strategy', 'upsert')
-        # [NEW 2026-06-24] force_override_explicit_mode: 让前端 conflict_strategy 覆盖 Excel "操作模式"列
-        force_override_explicit_mode = request.form.get('force_override_explicit_mode', 'false').lower() == 'true'
+        # [FIX 2026-06-24] force_override_explicit_mode 默认 True:
+        #   UI 的 conflict_strategy 永远比 Excel "操作模式"列优先级高
+        #   老脚本要保留 v1.2.18l 行为 (Excel 列优先) 可显式传 'false'
+        force_override_explicit_mode = request.form.get('force_override_explicit_mode', 'true').lower() == 'true'
 
         _set_audit_user()
 
@@ -581,8 +583,8 @@ def import_data_async():
         file.save(file_path)
 
         conflict_strategy = request.form.get('conflict_strategy', 'upsert')
-        # [NEW 2026-06-24] force_override_explicit_mode: 让前端 conflict_strategy 覆盖 Excel "操作模式"列
-        force_override_explicit_mode = request.form.get('force_override_explicit_mode', 'false').lower() == 'true'
+        # [FIX 2026-06-24] force_override_explicit_mode 默认 True (UI 选择优先)
+        force_override_explicit_mode = request.form.get('force_override_explicit_mode', 'true').lower() == 'true'
 
         context = {}
         version_id = request.form.get('version_id')
