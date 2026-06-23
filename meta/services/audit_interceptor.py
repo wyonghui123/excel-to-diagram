@@ -13,9 +13,48 @@ from flask import g, request
 from datetime import datetime
 import json
 import logging
+import uuid
 from typing import Callable, Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_audit_tx_context(trace_id=None, transaction_id=None):
+    """[FIX P2 2026-06-20] auto-generate trace_id / transaction_id 如果缺失
+
+    与 action_executor._write_audit_log_v2() 保持一致,
+    保证所有 audit_logs 记录都有 tx_id (业务人员可按事务追踪"这次保存做了什么")
+
+    Returns:
+        (trace_id, transaction_id) tuple, guaranteed non-empty
+    """
+    try:
+        from flask import g
+        # 优先使用参数, 然后 g 上的, 最后新生成
+        if not transaction_id:
+            transaction_id = getattr(g, 'transaction_id', None)
+        if not transaction_id:
+            transaction_id = f"tx_{uuid.uuid4().hex[:16]}"
+            try:
+                g.transaction_id = transaction_id
+            except RuntimeError:
+                pass
+
+        if not trace_id:
+            trace_id = getattr(g, 'trace_id', None)
+        if not trace_id:
+            trace_id = f"tr_{uuid.uuid4().hex[:16]}"
+            try:
+                g.trace_id = trace_id
+            except RuntimeError:
+                pass
+    except RuntimeError:
+        # 不在 Flask 应用上下文中
+        if not transaction_id:
+            transaction_id = f"tx_{uuid.uuid4().hex[:16]}"
+        if not trace_id:
+            trace_id = f"tr_{uuid.uuid4().hex[:16]}"
+    return trace_id, transaction_id
 
 
 def audit_log(object_type: str):
@@ -155,13 +194,15 @@ class AuditInterceptor:
                    user_id: Optional[str] = None, user_name: Optional[str] = None,
                    trace_id: Optional[str] = None, transaction_id: Optional[str] = None):
         """记录创建操作"""
+        # [FIX P2 2026-06-20] auto-gen tx_id if missing
+        trace_id, transaction_id = _ensure_audit_tx_context(trace_id, transaction_id)
         # 在应用上下文中捕获所有需要的值
         try:
             from flask import g, request
             captured_user_id = user_id or getattr(g, 'user_id', None)
             captured_user_name = user_name or getattr(g, 'user_name', None)
-            captured_trace_id = trace_id or getattr(g, 'trace_id', None)
-            captured_transaction_id = transaction_id or getattr(g, 'transaction_id', None)
+            captured_trace_id = trace_id
+            captured_transaction_id = transaction_id
             captured_ip = request.remote_addr if request else None
             captured_ua = request.headers.get('User-Agent', '') if request else None
         except RuntimeError:
@@ -172,25 +213,6 @@ class AuditInterceptor:
             captured_transaction_id = transaction_id
             captured_ip = None
             captured_ua = None
-
-        # [FIX 2026-06-20 P2 v1] 自动生成 transaction_id (如果都没有)
-        if not captured_transaction_id:
-            import uuid as _uuid
-            captured_transaction_id = f"tx_{_uuid.uuid4().hex[:16]}"
-            try:
-                from flask import g
-                g.transaction_id = captured_transaction_id
-            except RuntimeError:
-                pass
-        # [FIX 2026-06-20 P2 v1] 自动生成 trace_id (如果都没有)
-        if not captured_trace_id:
-            import uuid as _uuid
-            captured_trace_id = f"tr_{_uuid.uuid4().hex[:16]}"
-            try:
-                from flask import g
-                g.trace_id = captured_trace_id
-            except RuntimeError:
-                pass
         
         def write_audit_log(trace_id=None, transaction_id=None, **kwargs):
             # [FIX 2026-06-13] 允许 async_audit_writer.submit 透传 user_id/user_name/ip/user_agent
@@ -222,12 +244,14 @@ class AuditInterceptor:
                    user_id: Optional[str] = None, user_name: Optional[str] = None,
                    trace_id: Optional[str] = None, transaction_id: Optional[str] = None):
         """记录更新操作"""
+        # [FIX P2 2026-06-20] auto-gen tx_id if missing
+        trace_id, transaction_id = _ensure_audit_tx_context(trace_id, transaction_id)
         try:
             from flask import g, request
             captured_user_id = user_id or getattr(g, 'user_id', None)
             captured_user_name = user_name or getattr(g, 'user_name', None)
-            captured_trace_id = trace_id or getattr(g, 'trace_id', None)
-            captured_transaction_id = transaction_id or getattr(g, 'transaction_id', None)
+            captured_trace_id = trace_id
+            captured_transaction_id = transaction_id
             captured_ip = request.remote_addr if request else None
             captured_ua = request.headers.get('User-Agent', '') if request else None
         except RuntimeError:
@@ -237,25 +261,6 @@ class AuditInterceptor:
             captured_transaction_id = transaction_id
             captured_ip = None
             captured_ua = None
-
-        # [FIX 2026-06-20 P2 v1] 自动生成 transaction_id
-        if not captured_transaction_id:
-            import uuid as _uuid
-            captured_transaction_id = f"tx_{_uuid.uuid4().hex[:16]}"
-            try:
-                from flask import g
-                g.transaction_id = captured_transaction_id
-            except RuntimeError:
-                pass
-        # [FIX 2026-06-20 P2 v1] 自动生成 trace_id
-        if not captured_trace_id:
-            import uuid as _uuid
-            captured_trace_id = f"tr_{_uuid.uuid4().hex[:16]}"
-            try:
-                from flask import g
-                g.trace_id = captured_trace_id
-            except RuntimeError:
-                pass
         
         def write_audit_log(trace_id=None, transaction_id=None, **kwargs):
             # [FIX 2026-06-13] 允许 async_audit_writer.submit 透传 user_id/user_name/ip/user_agent
@@ -287,12 +292,14 @@ class AuditInterceptor:
                    user_id: Optional[str] = None, user_name: Optional[str] = None,
                    trace_id: Optional[str] = None, transaction_id: Optional[str] = None):
         """记录删除操作"""
+        # [FIX P2 2026-06-20] auto-gen tx_id if missing
+        trace_id, transaction_id = _ensure_audit_tx_context(trace_id, transaction_id)
         try:
             from flask import g, request
             captured_user_id = user_id or getattr(g, 'user_id', None)
             captured_user_name = user_name or getattr(g, 'user_name', None)
-            captured_trace_id = trace_id or getattr(g, 'trace_id', None)
-            captured_transaction_id = transaction_id or getattr(g, 'transaction_id', None)
+            captured_trace_id = trace_id
+            captured_transaction_id = transaction_id
             captured_ip = request.remote_addr if request else None
             captured_ua = request.headers.get('User-Agent', '') if request else None
         except RuntimeError:
@@ -302,25 +309,6 @@ class AuditInterceptor:
             captured_transaction_id = transaction_id
             captured_ip = None
             captured_ua = None
-
-        # [FIX 2026-06-20 P2 v1] 自动生成 transaction_id
-        if not captured_transaction_id:
-            import uuid as _uuid
-            captured_transaction_id = f"tx_{_uuid.uuid4().hex[:16]}"
-            try:
-                from flask import g
-                g.transaction_id = captured_transaction_id
-            except RuntimeError:
-                pass
-        # [FIX 2026-06-20 P2 v1] 自动生成 trace_id
-        if not captured_trace_id:
-            import uuid as _uuid
-            captured_trace_id = f"tr_{_uuid.uuid4().hex[:16]}"
-            try:
-                from flask import g
-                g.trace_id = captured_trace_id
-            except RuntimeError:
-                pass
         
         def write_audit_log(trace_id=None, transaction_id=None, **kwargs):
             # [FIX 2026-06-13] 允许 async_audit_writer.submit 透传 user_id/user_name/ip/user_agent
