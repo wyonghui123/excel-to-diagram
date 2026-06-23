@@ -931,6 +931,7 @@ class ActionExecutor:
 
         if not user_info:
             # 无用户上下文 (如系统初始化/单元测试) → 跳过, 不阻断
+            logger.warning(f"[ActionExecutor DEBUG] user_info is None, skipping P35 interceptor. action={action}, object={meta_object.id}, params_keys={list(params.keys()) if params else []}")
             return None
 
         user_id = user_info.get('user_id') or user_info.get('id')

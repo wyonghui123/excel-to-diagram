@@ -15,13 +15,11 @@
     </div>
 
     <div class="oss-toolbar">
-      <AppButton variant="text" size="sm" @click="handleExpandAll">
-        <el-icon :size="14"><Expand /></el-icon>
-        展开全部
-      </AppButton>
-      <AppButton variant="text" size="sm" @click="handleCollapseAll">
-        <el-icon :size="14"><Fold /></el-icon>
-        收起全部
+      <AppButton variant="text" size="sm" @click="handleToggleExpandAll">
+        <el-icon :size="14">
+          <component :is="isAllExpanded ? Fold : Expand" />
+        </el-icon>
+        {{ isAllExpanded ? '收起' : '展开' }}
       </AppButton>
       <AppButton variant="text" size="sm" @click="handleSelectAll">
         <el-icon :size="14"><Select /></el-icon>
@@ -111,6 +109,7 @@ const loading = ref(false)
 const searchQuery = ref('')
 const defaultExpandedKeys = shallowRef([])
 const treeKey = ref(1)
+const isAllExpanded = ref(false)
 
 const metaObject = inject('metaObject', ref(null))
 
@@ -213,6 +212,15 @@ function handleCollapseAll() {
       node.expanded = false
     }
   })
+}
+
+function handleToggleExpandAll() {
+  if (isAllExpanded.value) {
+    handleCollapseAll()
+  } else {
+    handleExpandAll()
+  }
+  isAllExpanded.value = !isAllExpanded.value
 }
 
 function handleSelectAll() {
@@ -352,10 +360,12 @@ async function loadTreeData(options = {}) {
   if (!props.versionId) {
     treeData.value = []
     loading.value = false
+    isAllExpanded.value = false
     return
   }
 
   if (!silent) loading.value = true
+  if (!silent) isAllExpanded.value = false
   try {
     const [domainResult, subDomainResult, serviceModuleResult, boResult] = await Promise.all([
       boService.query('domain', { version_id: props.versionId, page_size: 1000 }),
@@ -576,16 +586,29 @@ defineExpose({
 
 .oss-toolbar {
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 2px;
+  gap: 0;
   padding: 2px var(--spacing-xs);
   border-bottom: var(--border-width-thin) solid var(--color-border);
   flex-shrink: 0;
+  overflow: hidden;
+}
+
+.oss-toolbar :deep(.el-button) {
+  margin-left: 0 !important;
 }
 
 .oss-toolbar :deep(.app-btn) {
   font-size: var(--font-size-xs);
-  padding: 2px 4px;
+  padding: 0 2px;
+  min-width: 0;
+  white-space: nowrap;
+  flex-shrink: 1;
+}
+
+.oss-toolbar :deep(.el-icon) {
+  margin-right: 2px;
 }
 
 .oss-tree-container {

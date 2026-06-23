@@ -477,7 +477,10 @@ class WriteScopeInterceptor(Interceptor):
         #       TEST333 配 dim scope 含 475, 改 475 通过 — 但 user 期望拒绝)
         #   修复: dim_scope 派生不能独立放行, 必须配对 visibility=public 才放行
         #   写权限 = owner chain 命中 OR (dim_scope 命中 AND visibility=public)
+        # [DEBUG FOR INV_TX TEST] 强制打印到 waitress.out
+        logger.warning(f"[P35 DEBUG] object={object_type} target_id={target_id} user_id={user_id} dim_matched={dim_check.get('matched')} vis_allow={visibility_check.get('allow')} vis={visibility_check.get('visibility')}")
         if dim_check['matched'] and visibility_check['allow']:
+            logger.warning(f"[P35 DEBUG] → ALLOW (dim AND vis)")
             return
 
         # step 5: 全部不满足

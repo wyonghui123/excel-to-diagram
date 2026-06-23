@@ -381,6 +381,27 @@ class DimensionScopeEngine:
             if parts:
                 conditions[resource_type] = ' AND '.join(parts)
 
+        # [FIX 2026-06-22] 防止跨版本数据污染
+        # 当 expanded['version'] 非空时, 给所有有 version_id 字段的资源类型追加 version_id 过滤
+        # 适用资源: HIERARCHY_CHAIN (除 product, version 外) + VERSION_AWARE_BOS
+        # 例: TEST888 (product=475) 派生时, 应只命中 v=764/v=765 的关系
+        #     不应误命中 v=1/v=2 的关系 (即使 sub_domain 被复用)
+        # 注意: 'version' 和 'product' 本身没有 version_id 字段, 不能加此过滤
+        if 'version' in expanded and expanded['version']:
+            version_vals = sorted(expanded['version'])
+            version_cond = (
+                f"version_id = {version_vals[0]}" if len(version_vals) == 1
+                else f"version_id IN ({','.join(str(v) for v in version_vals)})"
+            )
+            # 这些资源类型都有 version_id 字段
+            # [FIX 2026-06-22] 排除 'version' 自身 (没有 version_id 字段, 加此过滤会 SQL 错误)
+            version_aware_resources = set(VERSION_AWARE_BOS.keys()) | {'domain', 'sub_domain'}
+            for resource_type in list(conditions.keys()):
+                if resource_type in version_aware_resources:
+                    existing = conditions[resource_type]
+                    # [FIX 2026-06-22] 不加额外括号包装, 让 v2 端点 _parse_compound_expr 能正确解析
+                    conditions[resource_type] = f"{existing} AND {version_cond}"
+
         return conditions
 
     def _build_chain_condition(

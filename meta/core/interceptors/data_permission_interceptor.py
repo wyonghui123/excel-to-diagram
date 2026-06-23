@@ -20,10 +20,10 @@ def _has_top_level_or(expr: str) -> bool:
             depth += 1
         elif c == ')':
             depth -= 1
-        elif depth == 0 and expr[i:i+4].upper() == ' OR ' and (i == 0 or expr[i-1] != 'A'):
-            # 确保是独立的 OR 关键词 (不是 AND 中的 O 或其他)
-            if re.match(r'\s+OR\s+', expr[i:i+4], re.IGNORECASE):
-                return True
+        elif depth == 0 and expr[i:i+4].upper() == ' OR ':
+            # [FIX 2026-06-22] 删除 'expr[i-1] != "A"' 检查
+            # 原检查导致 "A OR B" 字符串中 OR 检测失败 (i=1 时 expr[i-1]='A')
+            return True
         i += 1
     return False
 
@@ -41,11 +41,29 @@ def _is_balanced_parens(expr: str) -> bool:
     return depth == 0
 
 
-def _split_top_level_or(expr: str) -> List[str]:
-    """按顶级 OR 拆分表达式 (忽略括号内的 OR)"""
+def _split_top_level_and(expr: str) -> List[str]:
+    """按顶级 AND 拆分表达式 (忽略括号内的 AND)
+
+    [FIX 2026-06-22] 用于 _parse_compound_expr 处理 (A OR B) AND (C OR D) AND (E) 形式
+    """
+    # 如果整个 expr 被 ( ... ) 平衡包裹, 去掉最外层 (但要求外层不是 balanced subset)
+    if expr.startswith('(') and expr.endswith(')'):
+        depth = 0
+        can_strip = True
+        for i, c in enumerate(expr):
+            if c == '(':
+                depth += 1
+            elif c == ')':
+                depth -= 1
+            if depth == 0 and i < len(expr) - 1:
+                can_strip = False
+                break
+        if can_strip:
+            expr = expr[1:-1].strip()
+
+    # 扫描找到所有顶级 AND 位置
+    positions = []
     depth = 0
-    parts = []
-    start = 0
     i = 0
     while i < len(expr):
         c = expr[i]
@@ -53,16 +71,59 @@ def _split_top_level_or(expr: str) -> List[str]:
             depth += 1
         elif c == ')':
             depth -= 1
-        elif depth == 0:
-            # 检测顶级 OR
-            m = re.match(r'\s+OR\s+', expr[i:], re.IGNORECASE)
-            if m:
-                parts.append(expr[start:i])
-                i += m.end()
-                start = i
-                continue
+        elif depth == 0 and expr[i:i+5].upper() == ' AND ':
+            positions.append(i)
         i += 1
-    parts.append(expr[start:])
+
+    if not positions:
+        return [expr]
+    parts = []
+    last = 0
+    for p in positions:
+        parts.append(expr[last:p])
+        last = p + 5  # ' AND ' 长度
+    parts.append(expr[last:])
+    return parts
+
+
+def _split_top_level_or(expr: str) -> List[str]:
+    """按顶级 OR 拆分表达式 (忽略括号内的 OR)"""
+    # [FIX 2026-06-22] 先剥最外层平衡 ( ... )
+    if expr.startswith('(') and expr.endswith(')'):
+        depth = 0
+        can_strip = True
+        for i, c in enumerate(expr):
+            if c == '(':
+                depth += 1
+            elif c == ')':
+                depth -= 1
+            if depth == 0 and i < len(expr) - 1:
+                can_strip = False
+                break
+        if can_strip:
+            expr = expr[1:-1].strip()
+
+    positions = []
+    depth = 0
+    i = 0
+    while i < len(expr):
+        c = expr[i]
+        if c == '(':
+            depth += 1
+        elif c == ')':
+            depth -= 1
+        elif depth == 0 and expr[i:i+4].upper() == ' OR ':
+            positions.append(i)
+        i += 1
+
+    if not positions:
+        return [expr]
+    parts = []
+    last = 0
+    for p in positions:
+        parts.append(expr[last:p])
+        last = p + 4
+    parts.append(expr[last:])
     return parts
 
 
@@ -350,11 +411,26 @@ class DataPermissionInterceptor(Interceptor):
             return []
 
         # 原有 AND 逻辑
-        parts = re.split(r'\s+AND\s+', expr, flags=re.IGNORECASE)
+        # [FIX 2026-06-22] 用括号感知的 AND 切分, 避免切到子查询里的 AND
+        and_parts = _split_top_level_and(expr)
         results = []
-        for part in parts:
+        for part in and_parts:
             part = part.strip()
             if not part:
+                continue
+            # 去除单层最外层括号 (如 "(A OR B)" -> "A OR B")
+            while (part.startswith('(') and part.endswith(')')
+                   and _is_balanced_parens(part[1:-1])):
+                part = part[1:-1].strip()
+            # 如果内部是 OR 表达式, 递归解析
+            if _has_top_level_or(part):
+                sub_parsed = DataPermissionInterceptor._parse_compound_expr(part)
+                if not sub_parsed:
+                    return []
+                if len(sub_parsed) == 1:
+                    results.append(sub_parsed[0])
+                else:
+                    results.append({'type': 'or', 'conditions': sub_parsed})
                 continue
             parsed = DataPermissionInterceptor._parse_single_in_or_eq(part)
             if parsed is None:
