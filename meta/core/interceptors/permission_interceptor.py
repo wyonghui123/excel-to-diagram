@@ -172,6 +172,17 @@ class PermissionInterceptor(Interceptor):
 
         # 回退到现有逻辑
         if required not in permissions:
+            # [FIX FR-005 2026-06-23] 决策埋点 (annotation-permission-hardening)
+            from meta.core.permission_audit import log_permission_decision
+            log_permission_decision(
+                user_id=user_info.get('id'),
+                target_type=context.object_type,
+                target_id=getattr(context, 'target_id', None),
+                action=suffix,
+                decision='deny',
+                reason=f'missing functional permission: {required}',
+                interceptor='PermissionInterceptor',
+            )
             raise PermissionDenied(f'缺少权限: {required}')
 
     # [DECORATIVE] v3.16 bug fix: 之前 after_action 和 on_error 在 class 外 (放在 _apply_yaml_field_masks 函数内做 dead code)

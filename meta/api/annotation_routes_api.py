@@ -1,3 +1,30 @@
+"""
+annotation CRUD API 路由
+
+================================================================================
+权限契约 (v1.0, 2026-06-23)
+================================================================================
+
+annotation 没有独立的功能权限，数据权限完全 derived from parent (target_type + target_id)。
+
+拦截器链：
+    L1 @login_required (本文件)
+    └─ L3 WriteScopeInterceptor (P35) — dim_scope 派生自 parent + visibility 继承 parent
+
+为什么 NOT @require_permission:
+    - annotation 是辅助对象，权限跟随 parent 保持语义一致
+    - P35 已经基于 parent 完成 L2 + L3 校验
+    - 即便绕过前端，P35 仍会拦截 (dim_scope + visibility 双重校验)
+
+orphan annotation 处理 (FR-002):
+    - 修复前：默认放行 `{allow: True, visibility: 'public'}`
+    - 修复后：硬拒 `{allow: False, visibility: 'unknown'}`
+    - 通过 PERMISSION_GUARD_MODE=audit-only 灰度
+
+完整设计文档：
+    .trae/specs/excel-to-diagram/annotation-permission-hardening/permission-contract.md
+================================================================================
+"""
 from flask import Blueprint, request, jsonify
 from meta.services.cascade_service import get_type_order
 from meta.core.models import registry

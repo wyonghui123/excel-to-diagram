@@ -228,6 +228,26 @@ _WRITE_SCOPE_AUDIT_ONLY = os.environ.get('WRITE_SCOPE_AUDIT_ONLY', 'false').lowe
     'true', '1', 'yes',
 )
 
+# [FIX FR-007 2026-06-23] 统一权限灰度开关 (annotation-permission-hardening)
+# PERMISSION_GUARD_MODE:
+#   - 'enforce' (默认): 所有拒绝硬抛异常
+#   - 'audit-only': 所有拒绝只 log + /_diagnostics, 不抛异常 (灰度)
+# 与现有 _WRITE_SCOPE_AUDIT_ONLY 兼容: 任一为 True 即为 audit-only
+_PERMISSION_GUARD_MODE = os.environ.get('PERMISSION_GUARD_MODE', 'enforce').lower()
+_IS_AUDIT_ONLY_MODE = (
+    _WRITE_SCOPE_AUDIT_ONLY
+    or _PERMISSION_GUARD_MODE in ('audit-only', 'audit', 'soft-warn')
+)
+
+
+def is_audit_only_mode() -> bool:
+    """[FR-007] 是否处于 audit-only 灰度模式.
+
+    返回 True 时: 所有权限拒绝只 log + /_diagnostics, 不抛异常.
+    返回 False 时: 正常硬拒 (默认).
+    """
+    return _IS_AUDIT_ONLY_MODE
+
 # [V1.2.0 2026-06-15] 跨领域关系 functional perm 校验灰度开关
 # Phase 1 (软警告): WRITE_SCOPE_REL_FUNCTIONAL_PERM_SOFT_WARN=true
 #   - 仅 log warn + /_diagnostics + X-Rel-Perm-Warning header, 不拒绝
@@ -461,7 +481,23 @@ class WriteScopeInterceptor(Interceptor):
             return
 
         # step 5: 全部不满足
-        if _WRITE_SCOPE_AUDIT_ONLY:
+        # [FIX FR-005 2026-06-23] 决策埋点 (annotation-permission-hardening)
+        from meta.core.permission_audit import log_permission_decision
+        log_permission_decision(
+            user_id=user_id,
+            target_type=object_type,
+            target_id=target_id,
+            action=getattr(context, 'action', 'unknown'),
+            decision='deny',
+            reason=f"strict check failed: dim_matched={dim_check['matched']}, visibility={visibility_check.get('visibility')}",
+            interceptor='WriteScopeInterceptor',
+            extra={
+                'side': side,
+                'check_results': check_results,
+                'dim_roles': dim_check.get('roles_checked', []),
+            },
+        )
+        if is_audit_only_mode():
             # 灰度阶段 1: 软警告 (log + /_diagnostics + header)
             self._log_warning(
                 context, object_type, target_id, user_id, check_results, side
@@ -912,6 +948,18 @@ class WriteScopeInterceptor(Interceptor):
                 logger.debug(f'derive_data_conditions failed for role {role_id}: {e}')
                 continue
 
+        # [FIX FR-005 2026-06-23] 决策埋点 - dim_scope 未命中 (annotation-permission-hardening)
+        from meta.core.permission_audit import log_permission_decision
+        log_permission_decision(
+            user_id=user_id,
+            target_type='annotation',
+            target_id=record.get('id') or record.get('target_id'),
+            action='_dim_scope_check',
+            decision='deny',
+            reason=f"annotation parent '{object_type}' not in user's dim scope (annotation derived from parent)",
+            interceptor='WriteScopeInterceptor',
+            extra={'roles_checked': roles_checked, 'parent_type': object_type},
+        )
         return {'matched': False, 'roles_checked': roles_checked}
 
     def _check_ancestor_dim_scope(
@@ -1617,6 +1665,10 @@ class WriteScopeInterceptor(Interceptor):
             # [FIX v1.2.34] annotation 的 visibility 继承自 parent 对象
             # [FIX v1.2.36] 优先使用 context.params 中的 target_type/target_id
             #   (经 _pre_resolve_foreign_keys 解析后的最新值, 避免 orphan 旧值绕过检查)
+            # [FIX FR-002 2026-06-23] orphan annotation 硬拒 (annotation-permission-hardening)
+            #   修复前: 默认放行 `{allow: True, visibility: 'public'}` (安全风险)
+            #   修复后: 硬拒 `{allow: False, visibility: 'unknown'}`
+            #   灰度: PERMISSION_GUARD_MODE=audit-only 时只 log 不拒
             params_target_type = context.params.get('target_type') if hasattr(context, 'params') else None
             params_target_id = context.params.get('target_id') if hasattr(context, 'params') else None
             if isinstance(params_target_type, str) and ' - ' in params_target_type:
@@ -1627,8 +1679,26 @@ class WriteScopeInterceptor(Interceptor):
                 parent_record = self._load_record(context, target_type, int(target_id))
                 if parent_record:
                     return self._check_visibility(context, target_type, parent_record)
-            # orphan annotation: 无法确定 visibility, 默认放行
-            return {'allow': True, 'visibility': 'public'}
+            # orphan annotation: 无法确定 visibility
+            # FR-002: 硬拒 (audit-only 模式仅 log)
+            from meta.core.permission_audit import log_permission_decision
+            user_id = None
+            try:
+                from flask import g
+                user_id = getattr(g, 'current_user', {}).get('id')
+            except Exception:
+                pass
+            log_permission_decision(
+                user_id=user_id,
+                target_type='annotation',
+                target_id=target_id,
+                action='_visibility_check',
+                decision='deny',
+                reason='orphan annotation: parent not found',
+                interceptor='WriteScopeInterceptor',
+                extra={'orphan_target_type': target_type, 'orphan_target_id': target_id},
+            )
+            return {'allow': False, 'visibility': 'unknown'}
         else:
             # [V1.1.7] 子表: 沿 chain 查 product.visibility
             product_id = self._get_product_id(context, object_type, record)
