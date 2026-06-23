@@ -64,7 +64,7 @@
 
           <el-form-item label="冲突处理">
             <el-radio-group v-model="conflictStrategy">
-              <el-radio label="upsert">更新已存在的记录</el-radio>
+              <el-radio label="upsert">有则更新，无则创建</el-radio>
               <el-radio label="update_only">仅更新存在的记录</el-radio>
               <el-radio label="skip">跳过已存在的记录</el-radio>
             </el-radio-group>
