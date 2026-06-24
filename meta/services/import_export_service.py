@@ -5814,9 +5814,6 @@ class ImportExportService:
         field_map = self._auto_map_fields(obj, headers)
 
         parent_key_headers = self._get_parent_key_headers(obj, headers)
-        if object_type == 'relationship':
-            logger.info(f"[DEBUG IMPORT] {object_type} field_map={field_map}")
-            logger.info(f"[DEBUG IMPORT] {object_type} parent_key_headers={parent_key_headers}")
 
         # [SYMBOL] 调试日志：打印 parent_key_headers
         if parent_key_headers:
@@ -5996,6 +5993,7 @@ class ImportExportService:
             #     - annotation row=9 (id=108) upsert 时拿不到 id, _find_existing_record 返回 None,
             #       走 create 路径, 报"关联对象ID 不能为空"
             #   修复: 重新恢复 V2.1.8 的"仅清 explicit, 不改 op_mode"语义
+            # [MERGE FIX 2026-06-24] merge main 时保留 V2.1.11 详细注释 (c94c4d8 regression 来龙去脉)
             if force_override_explicit_mode and operation_mode_explicit and operation_mode == "update":
                 logger.info(f"[Import] force_override_explicit_mode=True 且 Excel 操作模式='update', 按 conflict_strategy='{conflict_strategy}' 处理 (保持 op_mode=update)")
                 # [V2.1.8/V2.1.11] 仅清除 explicit 标记, 不改变 op_mode
@@ -6007,13 +6005,9 @@ class ImportExportService:
             for col_idx, header in enumerate(headers):
                 if header == "操作模式":
                     continue
-                if object_type == 'relationship' and row_num == 35:
-                    logger.info(f"[DEBUG IMPORT] {object_type} row=35 PRE-CHECK header={repr(header)} field_map_match={header in field_map}")
                 if header and header in field_map:
                     field_id = field_map[header]
                     value = row[col_idx] if col_idx < len(row) else None
-                    if object_type == 'relationship' and row_num == 35:
-                        logger.info(f"[DEBUG IMPORT] {object_type} row=35 col_idx={col_idx} header={header} field_id={field_id} value={value}")
                     meta_field = obj.get_field(field_id)
                     if meta_field and value is not None:
                         value = self._convert_value(value, meta_field)
@@ -6052,7 +6046,6 @@ class ImportExportService:
             # 之前 FK 解析在过滤之前, 导致解析出来的 target_id (import_visible=false) 被过滤掉
             # 导致创建时报 "关联对象ID 不能为空" 错
             record = self._filter_import_record(record, obj, operation_mode)
-            logger.info(f"[DEBUG IMPORT] {object_type} row={row_num} operation_mode={operation_mode} record={record}")
 
             # 外键解析：根据 resolve_from_field 和 resolve_to_object/resolve_to_field 自动解析外键ID
             # 借鉴 SAP @ObjectModel.foreignKey.association 注解
@@ -6146,8 +6139,6 @@ class ImportExportService:
                                     logger.info(f"[Import] 外键解析成功: {field.id}={record[field.id]} ({resolve_to_object}.code={source_value})")
                                 else:
                                     logger.warning(f"[Import] 未找到外键对象: {resolve_to_object}.code={source_value} | row={row_num} | record keys={list(record.keys())} | source_value type={type(source_value)} | actual_resolve_from={actual_resolve_from}")
-
-            logger.info(f"[DEBUG IMPORT] {object_type} row={row_num} after FK resolve record keys={list(record.keys())} sample={ {k: record.get(k) for k in ['source_bo_id','target_bo_id','source_code','target_code']} }")
 
             if context:
                 valid_fields = set()
