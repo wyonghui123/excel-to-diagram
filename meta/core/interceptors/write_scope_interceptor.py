@@ -1314,11 +1314,17 @@ class WriteScopeInterceptor(Interceptor):
         # [FIX v1.2.40 2026-06-21] delete 路径同时检查源和目标
         # create/update: 仅检查 source_bo_id 链 (目标允许外域)
         # delete: 同时检查 source_bo_id 和 target_bo_id 链 (两端都必须在 scope 内)
+        # [FIX V2.1.6 2026-06-24] create/update 也同时检查 source/target, 任一端在 scope 即可
+        #   原因: 用户反馈 "BO_AP_PAYMENT (FINANCE 706) → BO_SUPPLIER (PROCUREMENT 703)",
+        #         TEST888 (PROCUREMENT 703 scope) 想更新该跨领域关系, 之前被拒
+        #         (因为只检查 source=706, 不在 scope)
+        #   现在: 任一端 (source 或 target) 的 chain 在 scope 内 → 允许 update
+        #   delete 保持原语义: 两端都必须在 scope 内 (删除影响两端)
         is_delete_path = (context.action == 'crud_delete')
         bo_ids_to_check = []
         if src_bo_id:
             bo_ids_to_check.append(('source', int(src_bo_id)))
-        if is_delete_path and tgt_bo_id:
+        if tgt_bo_id:
             bo_ids_to_check.append(('target', int(tgt_bo_id)))
 
         if not bo_ids_to_check:
@@ -1387,10 +1393,10 @@ class WriteScopeInterceptor(Interceptor):
                 context._rel_failed_side = f'目标业务对象({tgt_code})'
             return False
         else:
-            # create/update: 只需 source 在 scope 内
-            if side_matches.get('source', False):
+            # create/update: 任一端 (source 或 target) 的 chain 在 scope 内即可
+            if side_matches.get('source', False) or side_matches.get('target', False):
                 return True
-            context._rel_failed_side = f'源业务对象({src_code})'
+            context._rel_failed_side = f'源业务对象({src_code})和目标业务对象({tgt_code})都不在用户 scope 内'
             return False
 
     # ========================================================================
@@ -1448,10 +1454,17 @@ class WriteScopeInterceptor(Interceptor):
             return True
 
         # OR 语义: edit / update / delete 任一即可
+        # [FIX V2.1.7 2026-06-24] 也接受 relationship:create/update/delete
+        #   原因: 用户场景 TEST888 有 relationship:update 但没有 business_object:update
+        #   (用户的 role 只配了 relationship 类 perm, 没配 business_object 类)
+        #   之前会被硬拒绝 (Phase 2), 现在接受任一端点 perm 即视为"可写端点"
         edit_perms = {
             'business_object:edit',
             'business_object:update',
             'business_object:delete',
+            'relationship:create',
+            'relationship:update',
+            'relationship:delete',
         }
         return bool(perms_set & edit_perms)
 
@@ -2030,12 +2043,29 @@ class WriteScopeInterceptor(Interceptor):
         if not meta_object:
             return
 
+        # [FIX V2.1.9 2026-06-24] relationship 的 source_bo_id / target_bo_id 不在这里校验
+        # 原因: 这两个字段在 _check_target (line 470 _check_dim_scope) + V2.1.5/V2.1.6 中
+        #   已统一处理 (relationship update / create 都接受 source 或 target 任一端在 scope 内)
+        #   如果在这里再独立 enforce source_bo_id, 会导致跨领域关系更新被拒
+        #   (例如 TEST888 PROCUREMENT 703 scope 想更新 rel 128: BO_AP_PAYMENT(FINANCE 706) →
+        #    BO_SUPPLIER(PROCUREMENT 703), source 在 FINANCE 不在 scope 但 target 在 PROCUREMENT 在 scope)
+        # 同样 _check_relationship_ancestor_dim_scope 已经在 _check_target 流程里被调用了
+        #   (primary 路径走 _check_dim_scope, 这里专门处理 source/target chain OR 语义)
+        skip_field_ids = set()
+        if context.object_type == 'relationship':
+            skip_field_ids = {'source_bo_id', 'target_bo_id'}
+            logger.debug(f"_validate_fk_scope_policies: skipping relationship endpoint fields {skip_field_ids} (handled by _check_target ancestor OR-semantic check)")
+
         # 收集所有 enforce/or_bypass/inherit 字段
         enforce_fields = []
         bypass_groups: Dict[str, List[Dict]] = {}
         inherit_fields = []
 
         for field_def in getattr(meta_object, 'fields', []):
+            # [FIX V2.1.9] 跳过 relationship 的 source/target BO 字段 (由 _check_target 处理)
+            field_id_check = getattr(field_def, 'id', '') if hasattr(field_def, 'id') else (field_def.get('id', '') if isinstance(field_def, dict) else '')
+            if field_id_check in skip_field_ids:
+                continue
             # EnhancedMetaField 对象 (有 value_help 属性)
             if hasattr(field_def, 'value_help'):
                 vh = field_def.value_help
