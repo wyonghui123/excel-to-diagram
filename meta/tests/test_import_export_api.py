@@ -2441,7 +2441,7 @@ class TestFieldControlModel:
         3. 普通 editable 字段（category, content）无底色
         4. readonly 字段（id, target_name, target_id）有 READONLY_FILL
         5. 新行不会把 editable 字段也变灰
-        6. parent_key 字段有 Excel comment 解释"父对象外键 / 必填"
+        6. parent_key 字段有 Excel comment 解释"父对象编码或者FK对象编码字段，创建必填，更新不可变更"
         """
         client, headers = api_client
         from meta.core.models import registry
@@ -2468,13 +2468,13 @@ class TestFieldControlModel:
         assert target_type_col, f"找不到 关联对象类型 列：{col_map}"
         target_type_header = ws[f"{target_type_col}1"]
         assert target_type_header.comment is not None
-        assert "父对象外键" in target_type_header.comment.text
+        assert "父对象编码或者FK对象编码字段" in target_type_header.comment.text
 
         target_code_col = col_map.get('关联对象编码')
         assert target_code_col, f"找不到 关联对象编码 列：{col_map}"
         target_code_header = ws[f"{target_code_col}1"]
         assert target_code_header.comment is not None
-        assert "父对象外键" in target_code_header.comment.text
+        assert "父对象编码或者FK对象编码字段" in target_code_header.comment.text
 
         existing_target_type = ws[f"{target_type_col}2"]
         assert get_cell_fill_rgb(existing_target_type) == "E6F7E6", \
@@ -2974,8 +2974,8 @@ class TestAnnotationImportAPI:
 
         assert target_type_header is not None, "找不到关联对象类型列头"
         assert target_type_header.comment is not None, "关联对象类型列头应有 comment"
-        assert "父对象外键" in target_type_header.comment.text, \
-            f"关联对象类型的 comment 应包含'父对象外键'，实际: {target_type_header.comment.text}"
+        assert "父对象编码或者FK对象编码字段" in target_type_header.comment.text, \
+            f"关联对象类型的 comment 应包含统一定义描述, 实际: {target_type_header.comment.text}"
 
         print(f"[PASS] Annotation header comment: {target_type_header.comment.text[:50]}")
 
@@ -3131,11 +3131,11 @@ class TestExcelFileContent:
         assert len(headers_with_comments) > 0, "应有表头注释"
 
         has_classification_comment = any(
-            '父对象外键' in text or '业务关键字' in text or '只读' in text or '必填' in text
+            '父对象编码或者FK对象编码字段' in text or '业务关键字' in text or '只读' in text or '必填' in text
             for _, text in headers_with_comments
         )
         assert has_classification_comment, \
-            f"表头注释应包含字段分类说明（父对象外键/业务关键字/只读/必填），实际: {headers_with_comments}"
+            f"表头注释应包含字段分类说明（父对象FK/业务关键字/只读/必填），实际: {headers_with_comments}"
 
     def test_07_child_sheet_parent_key_fill_not_gray(self):
         """子对象 Sheet：parent_key 字段填充色为浅绿（E6F7E6），不是灰色（E0E0E0）"""

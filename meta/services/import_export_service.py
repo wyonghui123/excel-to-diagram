@@ -76,6 +76,12 @@ def _make_header_comment(text: str, author: str = "系统"):
     return cmt
 
 
+# [FIX 2026-06-23] 父对象/FK 对象编码列的统一定义描述 (列头 comment 用)
+# 与 _write_meta_section 中"浅绿色"颜色示例文案保持完全一致
+# 业务规则: 创建必填 (新增记录时必填), 更新不可变更 (已有记录不可修改)
+PARENT_FK_COMMENT = "父对象编码或者FK对象编码字段，创建必填，更新不可变更"
+
+
 class ImportExportService:
 
     def __init__(self, data_source: DataSource, manage_service: Optional[ManageService] = None,
@@ -1471,12 +1477,15 @@ class ImportExportService:
                             cell.protection = Protection(locked=False)
                     elif original_col_idx in parent_key_columns:
                         self._apply_classification_fill(cell, 'parent_key')
-                        cell.comment = _make_header_comment("新增时必填：请填写父对象的业务键编码", author="System")
+                        # [FIX 2026-06-24] 数据 cell comment 也使用 PARENT_FK_COMMENT
+                        cell.comment = _make_header_comment(PARENT_FK_COMMENT, author="System")
                         if protect_sheet:
                             cell.protection = Protection(locked=False)
                     elif original_col_idx in fk_display_code_columns:
                         # [NEW 2026-06-16 BMRD] FK 编码显示字段
                         self._apply_classification_fill(cell, 'fk_display_code')
+                        # [FIX 2026-06-24] 数据 cell comment 也使用 PARENT_FK_COMMENT
+                        cell.comment = _make_header_comment(PARENT_FK_COMMENT, author="System")
                         if protect_sheet:
                             cell.protection = Protection(locked=True)
                     elif original_col_idx in create_required_columns:
@@ -1711,6 +1720,14 @@ class ImportExportService:
                 # 用于业务编码列头 comment, 用户已反馈 5 次以上
                 kt_info = self._get_key_template_info(meta_obj)
 
+                # [FIX 2026-06-24] 父对象/FK 编码字段统一 comment (只显示 PARENT_FK_COMMENT)
+                # 范围: parent_key (含 polymorphic FK, 如 annotation.target_type) + parent_key_display
+                # 业务规则: 父对象编码或者FK对象编码字段，创建必填，更新不可变更
+                is_parent_fk_field = (
+                    getattr(f.semantics, 'parent_key', False)
+                    or getattr(f.semantics, 'parent_key_display', False)
+                )
+
                 if f.semantics.business_key:
                     if is_auto_or_manual_code:
                         # [FIX v1.2.43 2026-06-21] 恢复18号格式: 用分号连接, 参考列说明
@@ -1749,13 +1766,29 @@ class ImportExportService:
                         self._auto_or_manual_code_columns.setdefault(meta_obj.name, []).append(col_idx)
                     col_idx += 1
                     continue
+                elif is_parent_fk_field:
+                    # [FIX 2026-06-24] 父对象/FK 编码字段: comment 严格只显示 PARENT_FK_COMMENT
+                    # 不附加字段描述 (避免 "源业务对象编码（与 source_code 一致，命名对称）")
+                    # 不附加 【只读】 (避免与说明部分文案冲突)
+                    comment_parts = [PARENT_FK_COMMENT]
+                    has_control_info = True
+                    if getattr(f.semantics, 'parent_key', False):
+                        create_required_columns.append(col_idx)
+                    header_comments.append(PARENT_FK_COMMENT)
+                    # 父对象 FK 编码字段不附加其他描述，直接使用 PARENT_FK_COMMENT
+                    if self._is_field_editable(f):
+                        editable_columns.append(col_idx)
+                    else:
+                        readonly_columns.append(col_idx)
+                    if is_auto_or_manual_code:
+                        if not hasattr(self, '_auto_or_manual_code_columns'):
+                            self._auto_or_manual_code_columns = {}
+                        self._auto_or_manual_code_columns.setdefault(meta_obj.name, []).append(col_idx)
+                    col_idx += 1
+                    continue
                 elif f.required or getattr(f.semantics, 'mandatory', False):
                     comment_parts.append("【必填】")
                     has_control_info = True
-                elif getattr(f.semantics, 'parent_key', False) and hasattr(f, 'ui') and hasattr(f.ui, 'relation') and f.ui.relation:
-                    comment_parts.append("【父对象外键】新增必填")
-                    has_control_info = True
-                    create_required_columns.append(col_idx)
 
                 # [FIX v1.2.43 2026-06-21] 恢复18号行为: business_key 字段不标注【只读】
                 # 18号 Excel 中业务编码列从未标注【只读】, 即使 immutable=true
@@ -1768,10 +1801,11 @@ class ImportExportService:
                 # 例: relationship.source_bo_code / target_bo_code
                 # 用途: 跟随 source_bo_id / target_bo_id 自动带出编码
                 # 视觉: 浅绿色 (与父对象编码一致), 但语义是"自动带出, 无需填写"
+                # [FIX 2026-06-24] 该分支已被上方的 is_parent_fk_field 优先捕获, 此处仅作防御
                 if getattr(f.semantics, 'parent_key_display', False):
                     fk_display_code_columns.append(col_idx)
-                    if "FK 编码显示字段" not in "；".join(comment_parts):
-                        comment_parts.append("FK 编码显示字段（自动带出，无需填写）")
+                    if PARENT_FK_COMMENT not in "；".join(comment_parts):
+                        comment_parts.append(PARENT_FK_COMMENT)
                     has_control_info = True
 
                 # [NEW v1.1 2026-06-11] 记录 auto_or_manual code 列索引（用于差异化底色）
@@ -1810,10 +1844,10 @@ class ImportExportService:
 
             if col_def['kind'] == '编码':
                 if col_def['classification'] == 'parent_key':
-                    comment_msg = "【父对象编码】新增必填；编辑时可切换到其他父对象"
+                    comment_msg = PARENT_FK_COMMENT
                     parent_key_columns.append(col_idx)
                 else:
-                    comment_msg = "父对象编码，只读"
+                    comment_msg = PARENT_FK_COMMENT
                     readonly_columns.append(col_idx)
             else:  # 名称
                 comment_msg = "父对象名称，只读"
@@ -2813,17 +2847,23 @@ class ImportExportService:
             comment_parts = []
             if f.description:
                 comment_parts.append(f.description)
+            # [FIX 2026-06-24] 父对象/FK 编码字段统一 comment (子 sheet)
+            # 与 _get_export_headers_with_editable 保持完全一致
             if classification == 'parent_key':
-                if getattr(f.semantics, 'parent_key', False) and getattr(f.semantics, 'readonly_always', False):
-                    comment_parts.append("【父对象外键】始终只读（上下文带入）")
-                else:
-                    comment_parts.append("【父对象外键 / 必填】新增必填，编辑时只读（可切换到其他父对象）")
+                # [FIX 2026-06-24] 严格只显示 PARENT_FK_COMMENT, 不附加字段描述
+                cell.comment = _make_header_comment(PARENT_FK_COMMENT)
+                # 跳过默认的 "；".join(comment_parts) 逻辑
+                comment_parts = None  # 标记已处理
+            elif classification == 'fk_display_code':
+                # [FIX 2026-06-24] FK 编码显示字段: 同样严格只显示 PARENT_FK_COMMENT
+                cell.comment = _make_header_comment(PARENT_FK_COMMENT)
+                comment_parts = None
             elif classification == 'create_required':
                 if getattr(f.semantics, 'business_key', False):
                     comment_parts.append("【业务关键字】新增必填，编辑时只读")
                 else:
                     comment_parts.append("【必填】")
-            if not is_editable_create and not (classification == 'parent_key' or classification == 'create_required'):
+            if not is_editable_create and not (classification == 'parent_key' or classification == 'create_required' or classification == 'fk_display_code'):
                 comment_parts.append("【只读】")
             if comment_parts:
                 cell.comment = _make_header_comment("；".join(comment_parts))
@@ -2854,9 +2894,9 @@ class ImportExportService:
             # 与 _get_export_headers_with_editable 的 comment 保持一致
             if col_def['kind'] == '编码':
                 if col_def['classification'] == 'parent_key':
-                    cell.comment = _make_header_comment("【父对象编码】新增必填；编辑时可切换到其他父对象")
+                    cell.comment = _make_header_comment(PARENT_FK_COMMENT)
                 else:
-                    cell.comment = _make_header_comment("父对象编码，只读")
+                    cell.comment = _make_header_comment(PARENT_FK_COMMENT)
             else:
                 cell.comment = _make_header_comment("父对象名称，只读")
 
@@ -2938,7 +2978,8 @@ class ImportExportService:
                     classification = field_classifications[field_id]
                     self._apply_classification_fill(cell, classification)
                     if classification == 'parent_key':
-                        cell.comment = _make_header_comment("新增时必填：请填写父对象的业务键编码", author="System")
+                        # [FIX 2026-06-24] 子 sheet 数据 cell comment 也使用 PARENT_FK_COMMENT
+                        cell.comment = _make_header_comment(PARENT_FK_COMMENT, author="System")
                     if actual_col in enum_validations:
                         enum_validations[actual_col].add(cell)
 
@@ -3239,10 +3280,10 @@ class ImportExportService:
             # [FIX v1.2.43 2026-06-21] 恢复18号文案: 浅绿色/浅蓝灰描述
             # 18号: 浅绿色="父对象编码或者FK对象编码字段，创建必填，更新不可变更"
             # 18号: 浅蓝灰="留空自动生成编码/可手动录入编码"
+            # [FIX 2026-06-23] 与列头 comment 共用同一常量 PARENT_FK_COMMENT, 避免脱节
             color_examples = [
                 ("  灰色", ds.READONLY_FILL, "只读字段，不可编辑"),
-                ("  浅绿色", ds.BUSINESS_KEY_FILL,
-                 "父对象编码或者FK对象编码字段，创建必填，更新不可变更"),
+                ("  浅绿色", ds.BUSINESS_KEY_FILL, PARENT_FK_COMMENT),
                 ("  浅黄色", ds.REQUIRED_FILL, "业务关键字，新增必填，编辑时只读"),
                 ("  浅蓝灰", ds.AUTO_GEN_OR_MANUAL_FILL, "留空自动生成编码/可手动录入编码"),
             ]
