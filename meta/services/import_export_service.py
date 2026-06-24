@@ -2191,6 +2191,40 @@ class ImportExportService:
         from meta.services.cascade_service import HierarchyConfigLoader
         return HierarchyConfigLoader.sort_by_hierarchy(object_types)
 
+    def _is_all_sheets_all_delete(self, sheets: List[Dict[str, Any]]) -> bool:
+        """[FIX 2026-06-24] 检测所有 sheets 的所有 rows 是否都是 delete 模式
+
+        用于 deep delete 场景的 import_order 反转决策.
+        sheet 字段: columns, preview_rows (list of list)
+          columns[0] 通常是 "操作模式"
+          preview_rows 每行是 list, preview_rows[i][0] 是 row 0 的 operation_mode
+
+        严格判断: 所有 row 的 operation_mode 都以 'delete' 开头.
+        """
+        if not sheets:
+            return False
+        total_rows = 0
+        for sheet in sheets:
+            preview_rows = sheet.get('preview_rows', [])
+            if not preview_rows:
+                continue
+            # 找 "操作模式" 列 index
+            columns = sheet.get('columns', [])
+            op_col_idx = None
+            for i, col in enumerate(columns):
+                if col == '操作模式':
+                    op_col_idx = i
+                    break
+            if op_col_idx is None:
+                # 没有操作模式列, 视为非 delete 主导
+                return False
+            for row in preview_rows:
+                total_rows += 1
+                op_mode = (str(row[op_col_idx]).strip() if op_col_idx < len(row) and row[op_col_idx] else '')
+                if not op_mode.startswith('delete'):
+                    return False
+        return total_rows > 0  # 至少要有 1 行才算 all delete
+
     def _query_with_hierarchy(self, object_type: str, filters: Optional[Dict[str, Any]],
                               options: Optional[Dict[str, Any]], sort_by: str = None, 
                               sort_order: str = 'asc',
@@ -4754,6 +4788,31 @@ class ImportExportService:
         wb.close()
 
         import_order = self._sort_by_hierarchy([s["object_type"] for s in sheets])
+
+        # [FIX 2026-06-24] relationship 排序修复
+        # 问题: _sort_by_hierarchy 只看 parent_object, 忽略 associations
+        #   relationship 的 parent_object=version (不在 object_types 中)
+        #   所以 relationship 没有依赖项, 排到 business_object 之前
+        #   正确顺序应该是: business_object 之后, 因为 relationship 引用 business_object (源+目标)
+        # 修复: 把 relationship 移到 business_object 之后
+        if 'relationship' in import_order and 'business_object' in import_order:
+            import_order.remove('relationship')
+            bo_idx = import_order.index('business_object')
+            import_order.insert(bo_idx + 1, 'relationship')
+
+        # [FIX 2026-06-24] Deep Delete 顺序修复
+        # 问题: import 始终按 _sort_by_hierarchy (父在前, 子在后) 遍历 sheets
+        #   对 create 模式正确, 但对 delete 模式错误 (应该在后父先在先)
+        #   例: 删 service_module 时如果业务对象还没删, cascade_service.before_delete 会返回 has_restrict
+        # 修复: 检测所有 sheets 的所有 rows 是否都是 delete 模式,
+        #   如果是, 反转 import_order (子在先父在后)
+        # 边界:
+        #   - create + delete 混合: 不反转 (create 仍然需要父在先, delete 单独会通过 cascade 删子)
+        #   - update/delete 混合: 不反转 (update 父先合理, delete 依赖 cascade)
+        all_delete = self._is_all_sheets_all_delete(sheets)
+        if all_delete:
+            import_order = list(reversed(import_order))
+            logger.info(f"[Import] Deep delete detected, reversed import_order: {import_order}")
 
         logger.info(f"[Import] sheets: {[s['object_type'] for s in sheets]}")
         logger.info(f"[Import] import_order: {import_order}")
