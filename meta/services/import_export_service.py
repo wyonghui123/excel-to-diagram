@@ -5978,20 +5978,28 @@ class ImportExportService:
                     operation_mode = "create"
 
             # [FIX 2026-06-24] force_override_explicit_mode=True 时, 只对 Excel 操作模式="update"的行做 override
-            # 适用场景: 用户希望前端 radio (upsert/update_only) 控制"更新"行为, 但保留 Excel 显式 create/delete 行
+            # 适用场景: 用户希望前端 radio (upsert/update_only/skip) 控制"更新"行为, 但保留 Excel 显式 create/delete 行
             # 原因: update 行歧义最大 (可能希望"不存在则创建"), create/delete 是显式意图, 不应被覆盖
+            # [V2.1.8 FIX 2026-06-24] 不要把 op_mode 改成 create/skip!
+            #   改成 create 会让权限检查走 create_parent 路径 (检查 sub_domain scope),
+            #   对关系类对象的跨域场景会拒掉 (例如 TEST888 scope=domain=703, 但 source BO
+            #   的 sub_domain 在 FINANCE 706, create_parent 检查失败).
+            #   正确做法: 保持 op_mode="update" 但 operation_mode_explicit=False,
+            #   让下面的 update 分支按 conflict_strategy 分流:
+            #     - upsert → _upsert_record (有则更新, 无则创建)
+            #     - update_only → _update_record (只更新, 无则报错)
+            #     - skip → _update_record 抛错被捕获为 skip 语义
+            # [V2.1.11 FIX 2026-06-24] 之前 c94c4d8 commit 在解 fk_display_code 列冲突时
+            #   误把 V2.1.8 的修改回滚, 导致:
+            #     - operation_mode 被改成 'create' / 'update' / 'skip'
+            #     - _filter_import_record 看到 is_create=True 把 id 等 system fields 过滤掉
+            #     - annotation row=9 (id=108) upsert 时拿不到 id, _find_existing_record 返回 None,
+            #       走 create 路径, 报"关联对象ID 不能为空"
+            #   修复: 重新恢复 V2.1.8 的"仅清 explicit, 不改 op_mode"语义
             if force_override_explicit_mode and operation_mode_explicit and operation_mode == "update":
-                logger.info(f"[Import] force_override_explicit_mode=True 且 Excel 操作模式='update', 按 conflict_strategy='{conflict_strategy}' 处理")
-                # 根据 conflict_strategy 反推 operation_mode
-                if conflict_strategy == "upsert":
-                    operation_mode = "create"  # upsert 入口
-                    operation_mode_explicit = False
-                elif conflict_strategy == "update_only":
-                    operation_mode = "update"
-                    operation_mode_explicit = False
-                elif conflict_strategy == "skip":
-                    operation_mode = "skip"
-                    operation_mode_explicit = False
+                logger.info(f"[Import] force_override_explicit_mode=True 且 Excel 操作模式='update', 按 conflict_strategy='{conflict_strategy}' 处理 (保持 op_mode=update)")
+                # [V2.1.8/V2.1.11] 仅清除 explicit 标记, 不改变 op_mode
+                operation_mode_explicit = False
             elif force_override_explicit_mode and operation_mode_explicit:
                 # create / delete 行: 保留 Excel 显式意图, 不 override
                 logger.info(f"[Import] force_override_explicit_mode=True 但 Excel 操作模式='{operation_mode}' 显式, 尊重 Excel 意图")
