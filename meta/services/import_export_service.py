@@ -2495,22 +2495,75 @@ class ImportExportService:
                     result.add(level.get('object'))
         return result
     
-    def _inject_hierarchy_info(self, data: List[Dict[str, Any]], object_type: str, 
-                               filters: Optional[Dict[str, Any]], 
+    def _inject_hierarchy_info(self, data: List[Dict[str, Any]], object_type: str,
+                               filters: Optional[Dict[str, Any]],
                                options: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-        
+
         meta_obj = registry.get(object_type)
-        
+
         for record in data:
             if options and options.get("include_hierarchy_path", True):
                 record["层级路径"] = self._build_hierarchy_path(record, meta_obj)
 
             self._add_hierarchy_fields(record, meta_obj, options)
 
+            # [FIX 2026-06-24] annotation 是多态关联 (target_type/target_id),
+            #   _add_hierarchy_fields 走 parent_object 链不适用 (annotation 无 parent_object),
+            #   必须在这里特殊处理 target_code / target_name.
+            if object_type == 'annotation':
+                self._enrich_annotation_target(record)
+
             if object_type == 'relationship':
                 self._enrich_relationship_record(record)
-        
+
         return data
+
+    def _enrich_annotation_target(self, record: Dict[str, Any]):
+        """[FIX 2026-06-24] 填充 annotation 的 target_code / target_name.
+
+        annotation 是多态关联: target_type + target_id 指向 parent 对象.
+        普通 _add_hierarchy_fields 走 meta_obj.parent_object 链, 对 annotation 无效
+        (annotation 无 parent_object 字段). 这里直接查 parent 表填 target_code/target_name.
+
+        使用 self.data_source 直接 SQL 查询, 绕过 query_service 的 RBAC 过滤
+        (query_service 在 export 上下文可能过滤掉 target 记录, 导致 target_code 全空).
+        """
+        target_type = record.get('target_type', '')
+        target_id = record.get('target_id')
+        if not target_type or not target_id:
+            return
+
+        try:
+            from meta.services.management_dimension_engine import RESOURCE_TABLE_MAP
+            table_name = RESOURCE_TABLE_MAP.get(target_type)
+            if not table_name:
+                return
+
+            target_code = ''
+            target_name = ''
+            if target_type == 'relationship':
+                row = self.data_source.execute(
+                    f"SELECT relation_code, relation_desc, source_code, target_code FROM {table_name} WHERE id = ?",
+                    [target_id]
+                ).fetchone()
+                if row:
+                    target_code = row[0] or ''
+                    target_name = row[1] or ' -> '.join(filter(None, [row[2], row[3]]))
+            else:
+                row = self.data_source.execute(
+                    f"SELECT code, name FROM {table_name} WHERE id = ?",
+                    [target_id]
+                ).fetchone()
+                if row:
+                    target_code = row[0] or ''
+                    target_name = row[1] or ''
+
+            if target_code:
+                record['target_code'] = target_code
+            if target_name:
+                record['target_name'] = target_name
+        except Exception as e:
+            logger.debug(f'[_enrich_annotation_target] failed for {target_type}({target_id}): {e}')
 
     def _build_hierarchy_path(self, record: Dict[str, Any], meta_obj: MetaObject) -> str:
         """构建层级路径"""
