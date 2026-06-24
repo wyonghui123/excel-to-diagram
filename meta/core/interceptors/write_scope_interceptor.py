@@ -496,12 +496,22 @@ class WriteScopeInterceptor(Interceptor):
         #   - dim_scope 命中即放行 (在用户 scope 内的父对象下创建子对象是允许的)
         #   - 典型场景: TEST333 (采购管理) 创建以 BO_SUPPLIER 为源的关系, BO_SUPPLIER
         #     的 visibility 可能为 None/private, 但只要 dim_scope 含 采购管理 即可
+        # [V2.1.5 2026-06-24] relationship update 也走 create_parent 例外:
+        #   - 之前 create 有豁免, update 没有, 但 update 只修改 relationship 自身的字段
+        #     (名称/描述/类型), 不修改 source/target BO 本身
+        #   - source/target BO 的 dim_scope 检查对 update 来说太严格
+        #   - 典型场景: TEST888 (PROCUREMENT 703 scope) 更新 BO_AP_PAYMENT (FINANCE 706) 为源的
+        #     relationship, 之前会被拒 (FINANCE 706 不在 scope)
+        #   - 现在: dim_scope 命中 source/target BO 的 ancestor 之一即放行
         logger.warning(f"[P35 DEBUG] object={object_type} target_id={target_id} user_id={user_id} side={side} dim_matched={dim_check.get('matched')} vis_allow={visibility_check.get('allow')} vis={visibility_check.get('visibility')}")
         is_create_path = (side == 'create_parent')
-        if is_create_path:
-            # create_parent: dim_scope 命中即放行, 跳过 visibility 检查
+        # [V2.1.5] relationship update 也豁免 dim_scope 严格化
+        is_relationship_update = (context.action == 'crud_update' and object_type == 'relationship')
+        if is_create_path or is_relationship_update:
+            # relationship 操作 (create_parent / update): source/target 仅作 chain 引用
+            # 不修改 BO 本身, dim_scope 命中即放行
             if dim_check['matched']:
-                logger.warning(f"[P35 DEBUG] → ALLOW (create_parent, dim only)")
+                logger.warning(f"[P35 DEBUG] → ALLOW (relationship_op, dim only): {context.action}/{side}")
                 return
         elif dim_check['matched'] and visibility_check['allow']:
             logger.warning(f"[P35 DEBUG] → ALLOW (dim AND vis)")
