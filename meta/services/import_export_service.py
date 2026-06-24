@@ -6307,7 +6307,9 @@ class ImportExportService:
                     try:
                         # [FIX v1.2.41 2026-06-21] 检查 _delete_record 的 ActionResult 返回值
                         # 之前: 忽略返回值, 权限拦截 (ActionResult.fail) 被当作成功
-                        delete_result = self._delete_record(object_type, record, obj.import_export)
+                        # [FIX 2026-06-24] force_cascade=True: 让 import 流程默认 cascade 删子级
+                        # 避免 "父级 delete + 子级 update" 混合模式下父级被 RESTRICT 拒绝
+                        delete_result = self._delete_record(object_type, record, obj.import_export, force_cascade=True)
                         if delete_result is not None and hasattr(delete_result, 'success') and not delete_result.success:
                             # 权限拦截或其他业务失败 (如 WriteScopeDenied)
                             failed_count += 1
@@ -6559,8 +6561,76 @@ class ImportExportService:
             # [SYMBOL] 传入 version_id，只在指定版本内查找
             return self._find_by_composite_key(object_type, bk_fields, key_values, version_id)
 
-    def _delete_record(self, object_type: str, record: Dict[str, Any], config: ImportExportConfig):
+    def _force_cascade_delete(self, parent_type: str, parent_id: Any) -> Dict[str, Any]:
+        """[FIX 2026-06-24] 强制 cascade 删除 parent 及其所有子级
+
+        用于 import 流程: 当父级因为 RESTRICT 失败时, 自动 cascade 删子级.
+        递归: 对每个子级 (composite relation) 先 cascade 删它的子级, 再删它自己.
+
+        Returns:
+            dict: {success: bool, deleted: List[Dict], errors: List[str]}
+        """
+        from meta.core.models import RelationType, registry
+        from meta.services.cascade_service import CascadeService
+
+        deleted = []
+        errors = []
+
+        # 1. 收集所有子级 (PARENT_CHILD + COMPOSITION)
+        # 用 cascade_service._get_child_types 拿 child types, _get_foreign_key 拿 fk
+        cascade_service = CascadeService(self.data_source)
+        child_types = cascade_service._get_all_child_types(parent_type)
+
+        # 2. 对每个子级, 先递归删它的子级, 再删它
+        for child_type in child_types:
+            try:
+                fk_field = cascade_service._get_foreign_key(parent_type, child_type)
+            except Exception:
+                fk_field = f"{parent_type}_id"
+            child_records = self.data_source.find(
+                self._get_table_name_for_object(child_type),
+                {fk_field: parent_id}
+            )
+            for child_rec in child_records:
+                # 递归: 先删子级的子级
+                sub_cascade = self._force_cascade_delete(child_type, child_rec['id'])
+                if not sub_cascade.get('success'):
+                    errors.extend(sub_cascade.get('errors', []))
+                # 再删子级本身
+                try:
+                    child_delete_req = DeleteRequest(object_type=child_type, id=child_rec['id'])
+                    child_result = self.manage_service.delete(child_delete_req)
+                    if child_result and child_result.success:
+                        deleted.append({'object_type': child_type, 'id': child_rec['id']})
+                    else:
+                        msg = getattr(child_result, 'message', 'unknown') if child_result else 'unknown'
+                        errors.append(f"{child_type}({child_rec['id']}): {msg}")
+                except Exception as e:
+                    errors.append(f"{child_type}({child_rec['id']}): {e}")
+
+        return {'success': len(errors) == 0, 'deleted': deleted, 'errors': errors}
+
+    def _get_table_name_for_object(self, object_type: str) -> str:
+        """[FIX 2026-06-24] 从 schema 拿 object_type 对应的 DB 表名"""
+        from meta.core.models import registry
+        obj = registry.get(object_type)
+        if obj and hasattr(obj, 'table_name') and obj.table_name:
+            return obj.table_name
+        # fallback: 加 s
+        return object_type + 's'
+
+    def _delete_record(self, object_type: str, record: Dict[str, Any], config: ImportExportConfig,
+                       force_cascade: bool = False) -> Any:
         """删除记录
+
+        Args:
+            object_type: 对象类型
+            record: 记录数据
+            config: ImportExportConfig
+            force_cascade: [FIX 2026-06-24] import 流程设为 True,
+                如果父级有子级 (cascade_service.before_delete 失败),
+                自动 cascade 删子级后再删父级.
+                单条 delete 默认 False (保持 RESTRICT 行为, 需要用户显式处理子级).
 
         Returns:
             ActionResult: manage_service.delete 的返回值, 包含 success/error/message
@@ -6573,7 +6643,21 @@ class ImportExportService:
         if existing:
             # [FIX v1.2.41 2026-06-21] 返回 manage_service.delete 的 ActionResult,
             # 让调用方能检查 WriteScopeDenied 等失败
-            return self.manage_service.delete(DeleteRequest(object_type=object_type, id=existing["id"]))
+            delete_request = DeleteRequest(object_type=object_type, id=existing["id"])
+            result = self.manage_service.delete(delete_request)
+            # [FIX 2026-06-24] force_cascade: 如果失败原因是 "存在关联的子对象", 自动 cascade 删子级
+            if force_cascade and result is not None and not result.success:
+                err_msg = getattr(result, 'message', '') or ''
+                if '存在关联的子对象' in err_msg or 'CASCADE_RESTRICT' == getattr(result, 'error', ''):
+                    logger.info(f"[Import] force_cascade triggered for {object_type}({existing['id']})")
+                    cascade_result = self._force_cascade_delete(object_type, existing["id"])
+                    if cascade_result.get('success'):
+                        # cascade 删完子级, 再次尝试删父级
+                        result = self.manage_service.delete(delete_request)
+                    else:
+                        # cascade 也失败, 返回原始错误
+                        return result
+            return result
         else:
             bk_fields = self._get_business_key_fields(object_type)
             obj = registry.get(object_type)
