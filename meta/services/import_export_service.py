@@ -6608,6 +6608,23 @@ class ImportExportService:
                 except Exception as e:
                     errors.append(f"{child_type}({child_rec['id']}): {e}")
 
+        # 3. [FIX 2026-06-24] 删 parent 的 annotation (auxiliary, 不在 hierarchies.yaml 的 child_types)
+        # annotation 多态关联 (target_type + target_id) 指向 parent
+        # 不删会导致 orphan annotation, 后续 export obj_code 为空
+        if parent_type in ('domain', 'sub_domain', 'service_module', 'business_object', 'relationship'):
+            anno_records = self.data_source.find('annotations', {'target_type': parent_type, 'target_id': parent_id})
+            for anno in anno_records:
+                try:
+                    anno_delete_req = DeleteRequest(object_type='annotation', id=anno['id'])
+                    anno_result = self.manage_service.delete(anno_delete_req)
+                    if anno_result and anno_result.success:
+                        deleted.append({'object_type': 'annotation', 'id': anno['id']})
+                    else:
+                        msg = getattr(anno_result, 'message', 'unknown') if anno_result else 'unknown'
+                        errors.append(f"annotation({anno['id']}): {msg}")
+                except Exception as e:
+                    errors.append(f"annotation({anno['id']}): {e}")
+
         return {'success': len(errors) == 0, 'deleted': deleted, 'errors': errors}
 
     def _get_table_name_for_object(self, object_type: str) -> str:
