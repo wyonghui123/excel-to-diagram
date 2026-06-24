@@ -1006,9 +1006,13 @@ class ImportExportService:
                             cell.protection = Protection(locked=False)
                     elif actual_col_idx in fk_display_code_columns:
                         # [NEW 2026-06-16 BMRD] FK 编码显示字段 - 浅绿色, 不锁
+                        # [FIX 2026-06-24 v2] 修复保护 bug: 之前误写为 locked=True, 应为 locked=False
+                        # 理由: 父对象编码列虽然语义上"创建必填, 更新不可变更",
+                        # 但 Excel 保护机制下用户应该能点击编辑 (导入时由后端校验)
+                        # parent_key_columns 那边也是 locked=False
                         self._apply_classification_fill(cell, 'fk_display_code')
                         if protect_sheet:
-                            cell.protection = Protection(locked=True)
+                            cell.protection = Protection(locked=False)
                     elif actual_col_idx in create_required_columns:
                         self._apply_classification_fill(cell, 'create_required')
                         if protect_sheet:
@@ -1403,9 +1407,10 @@ class ImportExportService:
                             cell.protection = Protection(locked=False)
                     elif original_col_idx in fk_display_code_columns:
                         # [NEW 2026-06-16 BMRD] FK 编码显示字段
+                        # [FIX 2026-06-24 v2] 修复保护 bug: 之前误写为 locked=True, 应为 locked=False
                         self._apply_classification_fill(cell, 'fk_display_code')
                         if protect_sheet:
-                            cell.protection = Protection(locked=True)
+                            cell.protection = Protection(locked=False)
                     elif original_col_idx in create_required_columns:
                         self._apply_classification_fill(cell, 'create_required')
                         if protect_sheet:
@@ -1776,10 +1781,17 @@ class ImportExportService:
                     # [FIX 2026-06-24] 父对象/FK 编码字段: comment 严格只显示 PARENT_FK_COMMENT
                     # 不附加字段描述 (避免 "源业务对象编码（与 source_code 一致，命名对称）")
                     # 不附加 【只读】 (避免与说明部分文案冲突)
+                    # [FIX 2026-06-24 v2] 修复底色 bug: 必须把列加入正确的分类列表
+                    #  - parent_key: true → parent_key_columns (浅绿色, _apply_classification_fill 给到 BUSINESS_KEY_FILL)
+                    #  - parent_key_display: true → fk_display_code_columns (浅绿色, 同上)
+                    # 之前版本把这些列加到 create_required_columns (浅黄) 或 readonly_columns (灰色),
+                    # 导致源/目标业务对象编码列显示为黄色或灰色, 与说明部分的"浅绿色"颜色示例不符.
+                    if getattr(f.semantics, 'parent_key', False):
+                        parent_key_columns.append(col_idx)
+                    if getattr(f.semantics, 'parent_key_display', False):
+                        fk_display_code_columns.append(col_idx)
                     comment_parts = [PARENT_FK_COMMENT]
                     has_control_info = True
-                    if getattr(f.semantics, 'parent_key', False):
-                        create_required_columns.append(col_idx)
                     header_comments.append(PARENT_FK_COMMENT)
                     # 父对象 FK 编码字段不附加其他描述，直接使用 PARENT_FK_COMMENT
                     if self._is_field_editable(f):
