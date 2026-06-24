@@ -82,6 +82,23 @@
               <span class="al-group-time">{{ formatTime(group.timestamp) }}</span>
               <span class="al-group-user">{{ formatUserName(group.user_name) }}</span>
               <span
+                v-if="group.object_type"
+                class="al-group-object-type"
+                :title="`对象类型: ${group.object_type}`"
+              >
+                {{ formatObjectTypeLabel(group.object_type) }}
+              </span>
+              <!-- [FIX 2026-06-24 业务化] 显示对象业务名/business_key -->
+              <!-- 解决: 用户看到的是 "备注#552" 而不是 "备注: TEST11111-XXX" -->
+              <!-- 优先级: business_key 包含 ":" (API fallback) > business_key 原值 > object_id -->
+              <span
+                v-if="groupBusinessKey(group)"
+                class="al-group-business-key"
+                :title="`业务标识: ${groupBusinessKey(group)}`"
+              >
+                {{ groupBusinessKey(group) }}
+              </span>
+              <span
                 class="al-group-action"
                 :class="'al-action--' + (group.primaryAction || 'unknown').toLowerCase()"
               >
@@ -389,6 +406,10 @@ const groupedLogs = computed(() => {
         primaryAction: item.action,
         object_type: item.object_type,
         object_id: item.object_id,
+        // [FIX 2026-06-24 业务化] 保留 business_key 用于 group header 显示
+        //   业务用户痛点: group header 只显示 "备注", 不知道是哪条
+        //   修复后: 显示 "TEST11111" 等业务名
+        business_key: item.business_key || '',
         items: [],
         _children: []
       })
@@ -568,6 +589,35 @@ function formatAction(action) {
 function formatUserName(userName) {
   // [FIX 2026-06-15 业务化审查] "system" -> "系统", "[REDACTED]" -> "已脱敏"
   return getUserNameDisplay(userName)
+}
+
+// [FIX 2026-06-24] 对象类型业务名 — 详情页/列表页 操作日志 group header 显示
+//   使用 auditLogFormat.getObjectTypeLabel 做后端 object_type → 业务名 翻译
+//   (sub_domain → 子领域, business_object → 业务对象, relationship → 业务关系 等)
+//   避免原始英文技术字段暴露给业务用户
+function formatObjectTypeLabel(objectType) {
+  return getObjectTypeLabel(objectType) || objectType
+}
+
+// [FIX 2026-06-24 业务化] 提取 group 对象的业务标识
+//   - 业务名 (e.g. "TEST11111") 优先显示 — 业务用户能直接看懂
+//   - API fallback "type:id" (e.g. "annotation:552") 包含冒号时退回, 用 #ID 格式
+//   - 没有 business_key 时回退到 object_id
+//
+// 业务用户痛点: 之前 group header 只显示 "备注" 类型, 用户不知道是哪条备注
+// 修复后: 显示 "TEST11111-BO_REQ" 之类的业务标识, 一眼能定位
+function groupBusinessKey(group) {
+  if (!group) return ''
+  const bk = group.business_key
+  if (bk && bk !== '' && !bk.includes(':')) {
+    // 真正的业务名 (sub_domain code / relationship code 等)
+    return bk
+  }
+  if (group.object_id != null && group.object_id !== '') {
+    // API fallback 或缺失, 用 #ID 格式 (业务用户知道是 ID)
+    return `#${group.object_id}`
+  }
+  return ''
 }
 
 function parseTargetDisplay(raw) {
@@ -808,6 +858,31 @@ function aggregateBatchAssociations(items) {
 .al-group-user {
   color: var(--color-text-primary);
   font-weight: var(--font-weight-medium);
+}
+
+.al-group-object-type {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-light, var(--color-border));
+  white-space: nowrap;
+}
+
+.al-group-business-key {
+  color: var(--color-primary, #3b82f6);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  font-family: var(--font-family-mono, monospace);
+  padding: 1px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-bg, var(--color-bg-tertiary));
+  border: 1px solid var(--color-primary-light, var(--color-border));
+  white-space: nowrap;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .al-group-action {

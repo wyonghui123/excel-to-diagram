@@ -41,7 +41,10 @@ const mockLogs = [
     created_at: '2024-01-15T10:30:00',
     field_name: null,
     old_value: null,
-    new_value: null
+    new_value: null,
+    object_type: 'sub_domain',
+    object_id: 285,
+    business_key: 'TEST11111'
   },
   {
     id: 2,
@@ -50,7 +53,10 @@ const mockLogs = [
     created_at: '2024-01-15T14:20:00',
     field_name: 'name',
     old_value: '旧名称',
-    new_value: '新名称'
+    new_value: '新名称',
+    object_type: 'sub_domain',
+    object_id: 285,
+    business_key: 'TEST11111'
   },
   {
     id: 3,
@@ -59,7 +65,22 @@ const mockLogs = [
     created_at: '2024-01-15T16:45:00',
     field_name: null,
     old_value: null,
-    new_value: null
+    new_value: null,
+    object_type: 'business_object',
+    object_id: 470
+  },
+  // [FIX 2026-06-24] 新增测试用例: API fallback business_key (type:id 格式)
+  {
+    id: 4,
+    action: 'CREATE',
+    user_name: '赵六',
+    created_at: '2024-01-15T18:00:00',
+    field_name: 'content',
+    old_value: '',
+    new_value: 'TEST11111-REQ',
+    object_type: 'annotation',
+    object_id: 552,
+    business_key: 'annotation:552'  // API fallback 格式
   }
 ]
 
@@ -90,7 +111,9 @@ describe('AuditLog 组件', () => {
         props: { logs: mockLogs, loading: false }
       })
       expect(wrapper.find('.al-list').exists()).toBe(true)
-      expect(wrapper.findAll('.al-item').length).toBe(3)
+      // [FIX 2026-06-24] mockLogs 新增 1 条 (id=4)
+      //   全部 4 条都进入 group.items, 都是 .al-item (含 CREATE/DELETE placeholder)
+      expect(wrapper.findAll('.al-item').length).toBe(4)
     })
 
     it('应该显示操作用户名称', () => {
@@ -100,6 +123,116 @@ describe('AuditLog 组件', () => {
       expect(wrapper.text()).toContain('张三')
       expect(wrapper.text()).toContain('李四')
       expect(wrapper.text()).toContain('王五')
+    })
+  })
+
+  describe('[FIX 2026-06-24] 对象类型名称显示', () => {
+    it('应该显示 group 的 object_type 业务名 (sub_domain → 子领域)', () => {
+      const wrapper = mount(AuditLog, {
+        props: { logs: [mockLogs[0]], loading: false }
+      })
+      expect(wrapper.find('.al-group-object-type').exists()).toBe(true)
+      expect(wrapper.text()).toContain('子领域')
+    })
+
+    it('应该显示 business_object 的业务名 (→ 业务对象)', () => {
+      const wrapper = mount(AuditLog, {
+        props: { logs: [mockLogs[2]], loading: false }
+      })
+      expect(wrapper.text()).toContain('业务对象')
+    })
+
+    it('title 属性应该展示原始 object_type 供调试', () => {
+      const wrapper = mount(AuditLog, {
+        props: { logs: [mockLogs[0]], loading: false }
+      })
+      const span = wrapper.find('.al-group-object-type')
+      expect(span.attributes('title')).toContain('sub_domain')
+    })
+
+    it('未知 object_type 不应该让组件崩溃 (回退到原值)', () => {
+      const unknownLog = {
+        id: 99,
+        action: 'CREATE',
+        user_name: 'tester',
+        created_at: '2024-01-15T10:30:00',
+        field_name: null,
+        old_value: null,
+        new_value: null,
+        object_type: 'some_custom_unknown_type',
+        object_id: 1
+      }
+      const wrapper = mount(AuditLog, {
+        props: { logs: [unknownLog], loading: false }
+      })
+      // 回退到原值, 不报错
+      expect(wrapper.find('.al-group-object-type').exists()).toBe(true)
+      expect(wrapper.text()).toContain('some_custom_unknown_type')
+    })
+  })
+
+  describe('[FIX 2026-06-24] 业务名 (business_key) 显示', () => {
+    it('应该显示真正的业务名 business_key (例如 "TEST11111")', () => {
+      const wrapper = mount(AuditLog, {
+        props: { logs: [mockLogs[0]], loading: false }
+      })
+      const bkSpan = wrapper.find('.al-group-business-key')
+      expect(bkSpan.exists()).toBe(true)
+      expect(bkSpan.text()).toBe('TEST11111')
+    })
+
+    it('API fallback 格式 "type:id" 应该回退到 #ID 显示', () => {
+      const wrapper = mount(AuditLog, {
+        props: { logs: [mockLogs[3]], loading: false }  // business_key='annotation:552'
+      })
+      const bkSpan = wrapper.find('.al-group-business-key')
+      expect(bkSpan.exists()).toBe(true)
+      // 不应该显示 "annotation:552" 这种 fallback
+      expect(bkSpan.text()).toBe('#552')
+    })
+
+    it('缺失 business_key 时不应该渲染该 span', () => {
+      const noKeyLog = {
+        id: 100,
+        action: 'CREATE',
+        user_name: 'tester',
+        created_at: '2024-01-15T10:30:00',
+        field_name: null,
+        old_value: null,
+        new_value: null,
+        object_type: 'sub_domain',
+        object_id: 999
+        // 没有 business_key
+      }
+      const wrapper = mount(AuditLog, {
+        props: { logs: [noKeyLog], loading: false }
+      })
+      const bkSpan = wrapper.find('.al-group-business-key')
+      expect(bkSpan.exists()).toBe(true)
+      // 缺失时回退到 #ID
+      expect(bkSpan.text()).toBe('#999')
+    })
+  })
+
+  describe('[FIX 2026-06-24] 新增枚举值翻译 (PUSH/PULL/category)', () => {
+    it('关系方向 PUSH 应该翻译为 "推送"', async () => {
+      const { getFieldValueDisplay } = await import('@/utils/auditLogFormat')
+      expect(getFieldValueDisplay('PUSH', 'relation_direction')).toBe('推送')
+    })
+
+    it('关系方向 PULL 应该翻译为 "拉取"', async () => {
+      const { getFieldValueDisplay } = await import('@/utils/auditLogFormat')
+      expect(getFieldValueDisplay('PULL', 'relation_direction')).toBe('拉取')
+    })
+
+    it('备注分类 warning 应该翻译为 "警告"', async () => {
+      const { getFieldValueDisplay } = await import('@/utils/auditLogFormat')
+      expect(getFieldValueDisplay('warning', 'category')).toBe('警告')
+    })
+
+    it('备注分类 info 应该翻译为 "信息"', async () => {
+      const { getFieldValueDisplay } = await import('@/utils/auditLogFormat')
+      expect(getFieldValueDisplay('info', 'category')).toBe('信息')
     })
   })
 

@@ -332,6 +332,18 @@ export const FIELD_VALUE_LABELS = {
   internal: '内部',
   draft: '草稿',
 
+  // [FIX 2026-06-24 业务化] 关系方向 (PUSH/PULL 是技术传输方向, 业务翻译)
+  PUSH: '推送',
+  PULL: '拉取',
+
+  // [FIX 2026-06-24 业务化] annotation 备注分类
+  warning: '警告',
+  info: '信息',
+  error: '错误',
+  success: '成功',
+  danger: '危险',
+  tip: '提示',
+
   // [FIX 2026-06-19 业务化] mutability (可变性)
   readonly: '只读',
   fully_editable: '允许',
