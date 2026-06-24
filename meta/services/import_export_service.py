@@ -709,7 +709,10 @@ class ImportExportService:
                     op_cell = ws.cell(row=row_idx, column=1, value="create - 新增")
                     # [REMOVED 2026-06-14 BMRD] CREATE_NEW_FILL 已删除
                     # 替代: 保留"create - 新增"文字作为视觉提示
-                    op_cell.fill = ds.READONLY_FILL  # 复用灰色 (只读, 表示空行待填)
+                    # [FIX 2026-06-24] 操作模式列改为无填充 (白色)
+                    # 理由: 操作模式是元数据列, 不是数据字段, 不应该跟 readonly 字段混色
+                    # 配合 "create - 新增" 文字已足够表达"待填"语义
+                    # 保留 border 以维持表格视觉一致性
                     op_cell.border = ds.THIN_BORDER
                     op_cell.alignment = ds.TEXT_CENTER
                     op_mode_validation.add(op_cell)
@@ -967,8 +970,9 @@ class ImportExportService:
 
                 if include_operation_mode:
                     op_cell = ws.cell(row=row_idx, column=1, value="update - 更新")
-                    op_cell.fill = ds.READONLY_FILL
-                    op_cell.border = ds.THIN_BORDER
+                    # [FIX 2026-06-24] 操作模式列改为无填充 (白色)
+                    # 理由: 操作模式是元数据列, 不是数据字段, 不应该跟 readonly 字段混色
+                    # 配合 "update - 更新" 文字已足够表达"待更新"语义
                     if protect_sheet:
                         op_cell.protection = Protection(locked=False)
                     op_mode_validation.add(op_cell)
@@ -1060,7 +1064,9 @@ class ImportExportService:
                 if include_operation_mode:
                     cell = ws.cell(row=next_row_idx, column=col_idx, value="create - 新增")
                     # [REMOVED 2026-06-14 BMRD] CREATE_NEW_FILL 已删除
-                    cell.fill = ds.READONLY_FILL  # 复用灰色
+                    # [FIX 2026-06-24] 操作模式列改为无填充 (白色)
+                    # 理由: 操作模式是元数据列, 不是数据字段, 不应该跟 readonly 字段混色
+                    # 保留 border 以维持表格视觉一致性
                     cell.border = ds.THIN_BORDER
                     cell.alignment = Alignment(horizontal="center")
                     if protect_sheet:
@@ -2903,7 +2909,9 @@ class ImportExportService:
         for row_idx, record in enumerate(data, 2):
             if include_operation_mode:
                 cell = ws.cell(row=row_idx, column=1, value="update - 更新")
-                cell.fill = ds.READONLY_FILL
+                # [FIX 2026-06-24] 操作模式列改为无填充 (白色)
+                # 理由: 操作模式是元数据列, 不是数据字段, 不应该跟 readonly 字段混色
+                # 保留 border 以维持表格视觉一致性
                 cell.border = ds.THIN_BORDER
                 cell.alignment = Alignment(horizontal="center")
                 operation_dv.add(cell)
@@ -2965,7 +2973,9 @@ class ImportExportService:
 
                 cell = ws.cell(row=row_idx, column=1, value="create - 新增")
                 # [REMOVED 2026-06-14 BMRD] CREATE_NEW_FILL 已删除
-                cell.fill = ds.READONLY_FILL  # 复用灰色
+                # [FIX 2026-06-24] 操作模式列改为无填充 (白色)
+                # 理由: 操作模式是元数据列, 不是数据字段, 不应该跟 readonly 字段混色
+                # 保留 border 以维持表格视觉一致性
                 cell.border = ds.THIN_BORDER
                 cell.alignment = Alignment(horizontal="center")
                 operation_dv.add(cell)
