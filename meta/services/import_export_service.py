@@ -4383,15 +4383,20 @@ class ImportExportService:
             # immutable 字段在编辑/更新/删除时忽略（业务键不可修改）
             # 但 business_key 字段必须保留，用于查找记录
             # [SYMBOL] 关键修复：parent_key 字段也必须保留，用于建立父子关系
+            # [FIX v2.1.10 2026-06-24] resolve_from_field 源字段（如 source_code/target_code）
+            #   是 immutable 的 stored 字段，但被 FK 解析依赖，必须保留才能解析 source_bo_id/target_bo_id
+            #   之前的修复 (v1.2.18j) 只在 virtual 字段处理时考虑 resolve_from_source
+            #   这里对 immutable + stored 的 resolve_from_source 也要保留
             if is_update and getattr(field.semantics, 'immutable', False):
                 is_bk = getattr(field.semantics, 'business_key', False)
-                if not is_bk and not is_parent_key:
+                if not is_bk and not is_parent_key and not is_resolve_source:
                     continue
 
             # 删除模式下，非 business_key 的 immutable 字段也忽略
+            # [FIX v2.1.10] resolve_from_source 字段（如 source_code）在删除模式下也需要保留（用于定位记录）
             if operation_mode in ["删除", "delete", "Delete"] and getattr(field.semantics, 'immutable', False):
                 is_bk = getattr(field.semantics, 'business_key', False)
-                if not is_bk:
+                if not is_bk and not is_resolve_source:
                     continue
 
             filtered[field_id] = value
