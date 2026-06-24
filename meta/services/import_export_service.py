@@ -79,7 +79,13 @@ def _make_header_comment(text: str, author: str = "系统"):
 # [FIX 2026-06-23] 父对象/FK 对象编码列的统一定义描述 (列头 comment 用)
 # 与 _write_meta_section 中"浅绿色"颜色示例文案保持完全一致
 # 业务规则: 创建必填 (新增记录时必填), 更新不可变更 (已有记录不可修改)
-PARENT_FK_COMMENT = "父对象编码或者FK对象编码字段，创建必填，更新不可变更"
+# [FIX 2026-06-24] 加 "录入的话系统会忽略" 说明
+PARENT_FK_COMMENT = "父对象编码或者FK对象编码字段，创建必填，更新不可变更，录入的话系统会忽略"
+
+# [NEW 2026-06-24] 系统填充只读字段 (parent_key_display=true, 如 BO.domain_code/SM.domain_code)
+# 这类字段是从父对象自动推导的虚拟字段, 用户不能填也不应该填
+# 颜色与 parent_key 一致 (浅绿) 但语义不同, comment 也要区分
+READONLY_SYSTEM_COMMENT = "系统填充只读字段，基于父对象自动推导，不可编辑、不可填写"
 
 
 class ImportExportService:
@@ -1495,8 +1501,9 @@ class ImportExportService:
                     elif original_col_idx in fk_display_code_columns:
                         # [NEW 2026-06-16 BMRD] FK 编码显示字段
                         self._apply_classification_fill(cell, 'fk_display_code')
-                        # [FIX 2026-06-24] 数据 cell comment 也使用 PARENT_FK_COMMENT
-                        cell.comment = _make_header_comment(PARENT_FK_COMMENT, author="System")
+                        # [FIX 2026-06-24 v3] fk_display_code 数据 cell 用 READONLY_SYSTEM_COMMENT
+                        # 与 parent_key 区分 (浅绿都是浅绿, 但语义不同)
+                        cell.comment = _make_header_comment(READONLY_SYSTEM_COMMENT, author="System")
                         if protect_sheet:
                             cell.protection = Protection(locked=True)
                     elif original_col_idx in create_required_columns:
@@ -1786,14 +1793,24 @@ class ImportExportService:
                     #  - parent_key_display: true → fk_display_code_columns (浅绿色, 同上)
                     # 之前版本把这些列加到 create_required_columns (浅黄) 或 readonly_columns (灰色),
                     # 导致源/目标业务对象编码列显示为黄色或灰色, 与说明部分的"浅绿色"颜色示例不符.
+                    # [FIX 2026-06-24 v3] 区分 comment:
+                    #  - parent_key (如 SM.sub_domain_code, BO.service_module_code): 创建必填, 更新不可变更 → PARENT_FK_COMMENT
+                    #  - parent_key_display (如 SM.domain_code, BO.domain_code): 系统填充只读 → READONLY_SYSTEM_COMMENT
                     if getattr(f.semantics, 'parent_key', False):
                         parent_key_columns.append(col_idx)
                     if getattr(f.semantics, 'parent_key_display', False):
                         fk_display_code_columns.append(col_idx)
-                    comment_parts = [PARENT_FK_COMMENT]
+                    # [FIX 2026-06-24 v3] parent_key_display 优先 (更具体的分类), 都是 true 时归类为 readonly system
+                    if getattr(f.semantics, 'parent_key_display', False) and not getattr(f.semantics, 'parent_key', False):
+                        # 纯 parent_key_display 字段: 系统填充只读
+                        comment_text = READONLY_SYSTEM_COMMENT
+                    else:
+                        # parent_key 字段 (用户必须选父对象) 或两者都有的情况: 创建必填
+                        comment_text = PARENT_FK_COMMENT
+                    comment_parts = [comment_text]
                     has_control_info = True
-                    header_comments.append(PARENT_FK_COMMENT)
-                    # 父对象 FK 编码字段不附加其他描述，直接使用 PARENT_FK_COMMENT
+                    header_comments.append(comment_text)
+                    # 父对象 FK 编码字段不附加其他描述，直接使用对应 comment
                     if self._is_field_editable(f):
                         editable_columns.append(col_idx)
                     else:
@@ -1820,10 +1837,11 @@ class ImportExportService:
                 # 用途: 跟随 source_bo_id / target_bo_id 自动带出编码
                 # 视觉: 浅绿色 (与父对象编码一致), 但语义是"自动带出, 无需填写"
                 # [FIX 2026-06-24] 该分支已被上方的 is_parent_fk_field 优先捕获, 此处仅作防御
+                # [FIX 2026-06-24 v3] 防御性 fallback: parent_key_display 用 READONLY_SYSTEM_COMMENT
                 if getattr(f.semantics, 'parent_key_display', False):
                     fk_display_code_columns.append(col_idx)
-                    if PARENT_FK_COMMENT not in "；".join(comment_parts):
-                        comment_parts.append(PARENT_FK_COMMENT)
+                    if READONLY_SYSTEM_COMMENT not in "；".join(comment_parts):
+                        comment_parts.append(READONLY_SYSTEM_COMMENT)
                     has_control_info = True
 
                 # [NEW v1.1 2026-06-11] 记录 auto_or_manual code 列索引（用于差异化底色）
@@ -1865,7 +1883,9 @@ class ImportExportService:
                     comment_msg = PARENT_FK_COMMENT
                     parent_key_columns.append(col_idx)
                 else:
-                    comment_msg = PARENT_FK_COMMENT
+                    # [FIX 2026-06-24 v3] 非最近一级的父对象编码列: 系统填充只读
+                    # 例如 BO.service_module_code (parent_key) 之外的上层父对象编码
+                    comment_msg = READONLY_SYSTEM_COMMENT
                     readonly_columns.append(col_idx)
             else:  # 名称
                 comment_msg = "父对象名称，只读"
@@ -2926,8 +2946,10 @@ class ImportExportService:
                 # 跳过默认的 "；".join(comment_parts) 逻辑
                 comment_parts = None  # 标记已处理
             elif classification == 'fk_display_code':
-                # [FIX 2026-06-24] FK 编码显示字段: 同样严格只显示 PARENT_FK_COMMENT
-                cell.comment = _make_header_comment(PARENT_FK_COMMENT)
+                # [FIX 2026-06-24] FK 编码显示字段 (parent_key_display=true, 如 BO.domain_code/SM.domain_code)
+                # 这是从父对象自动推导的虚拟字段, 语义是"系统填充只读", 不是"创建必填"
+                # 与 parent_key 颜色一致 (浅绿) 但 comment 内容要明确区分
+                cell.comment = _make_header_comment(READONLY_SYSTEM_COMMENT)
                 comment_parts = None
             elif classification == 'create_required':
                 if getattr(f.semantics, 'business_key', False):
@@ -2967,7 +2989,8 @@ class ImportExportService:
                 if col_def['classification'] == 'parent_key':
                     cell.comment = _make_header_comment(PARENT_FK_COMMENT)
                 else:
-                    cell.comment = _make_header_comment(PARENT_FK_COMMENT)
+                    # [FIX 2026-06-24 v3] 非最近一级父对象编码: 系统填充只读
+                    cell.comment = _make_header_comment(READONLY_SYSTEM_COMMENT)
             else:
                 cell.comment = _make_header_comment("父对象名称，只读")
 
@@ -3330,8 +3353,11 @@ class ImportExportService:
 
             # [MERGE 2026-06-16 BMRD] 之前"业务说明"中的"冲突处理策略"合并到这里
             # [FIX v1.2.42 2026-06-21] 冲突处理 → 更新模式，三选一说明
+            # [FIX 2026-06-24] 对齐前端 ImportDialog.vue 的实际 UI (2026-06-24 UI 简化为 1 个开关)
+            # 前端只有 2 种状态: "无则创建" (upsert, ON) / "无则跳过" (update_only, OFF)
+            # 删掉"不更新"描述 (前端不支持 skip 模式)
             ws_meta.cell(row=row, column=1, value="更新模式").font = ds.LABEL_FONT
-            ws_meta.cell(row=row, column=2, value="不存在则创建否则更新（默认）/只更新存在记录/不更新").font = ds.VALUE_FONT
+            ws_meta.cell(row=row, column=2, value="无则创建（默认）/无则跳过").font = ds.VALUE_FONT
             row += 1
 
             # 注意事项（cascade 模式特殊文案）
@@ -3356,9 +3382,11 @@ class ImportExportService:
             # 18号: 浅绿色="父对象编码或者FK对象编码字段，创建必填，更新不可变更"
             # 18号: 浅蓝灰="留空自动生成编码/可手动录入编码"
             # [FIX 2026-06-23] 与列头 comment 共用同一常量 PARENT_FK_COMMENT, 避免脱节
+            # [FIX 2026-06-24 v3] 浅绿色对应两种语义, 在示例里都说明
             color_examples = [
                 ("  灰色", ds.READONLY_FILL, "只读字段，不可编辑"),
-                ("  浅绿色", ds.BUSINESS_KEY_FILL, PARENT_FK_COMMENT),
+                ("  浅绿色", ds.BUSINESS_KEY_FILL,
+                 f"{PARENT_FK_COMMENT}\n注：仅父对象编码字段（如 服务模块编码）；冗余字段（如 领域编码）系统自动填充，只读"),
                 ("  浅黄色", ds.REQUIRED_FILL, "业务关键字，新增必填，编辑时只读"),
                 ("  浅蓝灰", ds.AUTO_GEN_OR_MANUAL_FILL, "留空自动生成编码/可手动录入编码"),
             ]
