@@ -256,9 +256,14 @@ def export_data():
             if allowed_types:
                 object_type = allowed_types[0]
             else:
+                # [H15.2 修复] 错误信息要根据具体跳过的object_type生成
+                if len(skipped_types) == 1:
+                    msg = f"您对 {skipped_types[0]} 没有export权限"
+                else:
+                    msg = f"您对所选的所有object_type都没有export权限: {', '.join(skipped_types)}"
                 return jsonify({
                     "success": False,
-                    "message": "您对所有object_type都没有export权限",
+                    "message": msg,
                     "skipped_types": skipped_types
                 }), 403
 

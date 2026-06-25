@@ -117,6 +117,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useCrudMessage } from '@/composables/useCrudMessage'
 import { metaService } from '@/services/metaService'
+import { useAuthStore } from '@/stores/authStore'
 
 const props = defineProps({
   visible: {
@@ -206,9 +207,13 @@ const currentIndex = ref(0)
 const totalTypes = ref(0)
 const progressMessage = ref('')
 
+// [H15.2 SAP风格] 过滤用户有export权限的object_types
+const authStore = useAuthStore()
+
 const availableMultiTypes = computed(() => {
   return props.objectTypes
     .filter(t => t && typeof t === 'string')
+    .filter(t => authStore.hasPermission(`${t}:export`))  // 只显示有权限的
     .map(t => ({
       value: t,
       label: props.objectTypeLabels[t] || t
