@@ -30,6 +30,27 @@ const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, '..');
 const SCHEMA_DIR = path.join(ROOT, 'meta/schemas');
 const OUTPUT = path.join(ROOT, 'e2e/business-flow/parent-child-transaction.spec.js');
+// [T14] 业务度分组输出
+const OUTPUT_BUSINESS = path.join(ROOT, 'e2e/business-flow/parent-child-transaction.business.spec.js');
+const OUTPUT_TECHNICAL = path.join(ROOT, 'e2e/business-flow/parent-child-transaction.technical.spec.js');
+
+// [T14] 业务度分类 (按 case 整体业务度)
+// business: 反映业务决策/规则, PM/BA 可直接理解
+// technical: 验证通用技术机制 (HTTP/事务/并发/顺序)
+const CASE_CATEGORY = {
+  76: 'technical',  // 父子新建事务 - 技术原子性
+  77: 'technical',  // 父成功+子失败回滚 - 技术回滚
+  78: 'technical',  // 父子更新事务 - 技术原子性
+  79: 'business',   // 删除应级联 - 业务级联决策
+  80: 'business',   // 父删除被子引用应阻止 - 业务阻止规则
+  81: 'technical',  // 跨详情页事务边界 - 事务隔离
+  82: 'technical',  // 子对象顺序敏感 - 数组顺序保证
+  83: 'technical',  // 事务并发冲突 - 并发控制
+  84: 'technical',  // 部分子失败报告 - 错误报告格式
+  85: 'technical',  // composition vs association - 概念区分
+  86: 'business',   // version->domain 应 RESTRICT 阻止 - 业务策略
+  87: 'business',   // 分段级联 - 业务架构决策
+};
 
 // 父子层级定义 (parent, child, child_field)
 const PARENT_CHILD_PAIRS = [
@@ -116,12 +137,24 @@ function main() {
   console.log('\n[2] 生成 E2E spec...');
   const code = generateSpec(cascades);
   fs.writeFileSync(OUTPUT, code, 'utf-8');
-
   const testCount = (code.match(/test\(/g) || []).length;
   console.log(`  输出: ${OUTPUT}`);
   console.log(`  大小: ${code.length} 字符`);
   console.log(`\n=== T13 完成 ===`);
   console.log(`生成 ${testCount} 个 E2E 测试`);
+
+  // [T14] 按业务度分组输出
+  console.log('\n[T14] 按业务度分组输出 spec...');
+  for (const cat of ['business', 'technical']) {
+    const catCode = generateSpecByCategory(cascades, cat);
+    const catPath = cat === 'business' ? OUTPUT_BUSINESS : OUTPUT_TECHNICAL;
+    const catCount = (catCode.match(/test\(/g) || []).length;
+    fs.writeFileSync(catPath, catCode, 'utf-8');
+    console.log(`  [${cat}] ${catPath} -> ${catCount} 个 test`);
+  }
+  console.log(`\n=== T14 完成 ===`);
+  console.log(`业务组: 4 case (79/80/86/87)`);
+  console.log(`技术组: 8 case (76/77/78/81/82/83/84/85)`);
 }
 
 function generateSpec(cascades) {
@@ -184,6 +217,76 @@ ${generateCase86()}
 ${generateCase87()}
 
 test('T13 自检: 父子配对覆盖度', () => {
+  expect(PARENT_CHILD.length).toBe(${PARENT_CHILD_PAIRS.length});
+});
+`;
+}
+
+// [T14] 按业务度分类生成 spec
+function generateSpecByCategory(cascades, category) {
+  const isBusiness = category === 'business';
+  const label = isBusiness ? '业务验收 (PM/BA 必 review)' : '技术回归 (开发自测)';
+  const caseList = Object.entries(CASE_CATEGORY)
+    .filter(([_, cat]) => cat === category)
+    .map(([n, _]) => `case ${n}`)
+    .join(', ');
+
+  return `/**
+ * 父子详情页事务 E2E - ${label} (T14: 业务度分组)
+ *
+ * 模型源:
+ *   - meta/api/bo_api.py: POST /api/v1/<obj>/deep
+ *   - meta/services/cascade_service.py: with self.ds.transaction()
+ *   - meta/schemas/<obj>.yaml: associations[].cascade_delete
+ *
+ * 覆盖 case: ${caseList}
+ *
+ * 业务度分类:
+ *   ${isBusiness ? '🟢 强业务: 反映 PM/BA 决策, 业务方必 review' : '🔵 偏技术: 验证通用技术机制'}
+ *
+ * 生成时间: ${new Date().toISOString()}
+ */
+
+import { test, expect } from '../helpers/auto-fixtures';
+import { BusinessRuleAssertor } from '../screenplay/questions/BusinessRuleAssertor';
+
+const API_BASE = 'http://localhost:3010';
+const PARENT_CHILD = ${js(PARENT_CHILD_PAIRS)};
+const CASCADE_INFO = ${js(cascades)};
+
+async function loginAs(page, username) {
+  await page.request.get(\`\${API_BASE}/api/v1/auth/dev-login?username=\${username}\`);
+}
+
+async function callApi(page, method, path, user, data = null) {
+  try {
+    const opts = { headers: { 'X-User-Id': user, 'Content-Type': 'application/json' }, timeout: 8000 };
+    if (data) opts.data = data;
+    const r = await page.request.fetch(\`\${API_BASE}\${path}\`, { method, ...opts });
+    return r;
+  } catch (e) {
+    return null;
+  }
+}
+
+${isBusiness
+  ? `// 业务 case: 79 (级联), 80 (阻止), 86 (RESTRICT), 87 (分段级联)
+${generateCase79(cascades)}
+${generateCase80(cascades)}
+${generateCase86()}
+${generateCase87()}`
+  : `// 技术 case: 76/77/78 (事务), 81 (隔离), 82 (顺序), 83 (并发), 84 (错误), 85 (概念)
+${generateCase76()}
+${generateCase77()}
+${generateCase78()}
+${generateCase81()}
+${generateCase82()}
+${generateCase83()}
+${generateCase84()}
+${generateCase85(cascades)}`}
+
+test('T14 自检: ${category} 组 test 数', () => {
+  // ${isBusiness ? '业务组 4 case' : '技术组 8 case'}
   expect(PARENT_CHILD.length).toBe(${PARENT_CHILD_PAIRS.length});
 });
 `;
