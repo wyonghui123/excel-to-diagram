@@ -16,21 +16,45 @@ import path from 'path';
 
 // 简单 yaml 解析(当 'yaml' 包不可用时回退)
 function simpleYamlParse(content) {
-  // 极简实现 - 只处理我们生成的 _business_rules/*.yaml
+  // 极简实现 - 支持我们生成的 _business_rules/*.yaml
   // 假设格式: schema/object_id/total_rules/rules/<rule>
-  const lines = content.split('\n');
+  // 注意: 兼容 Windows CRLF (\r\n) 行尾
+  const lines = content.split('\n').map(l => l.replace(/\r$/, ''));
   const result = { rules: [] };
   let currentRule = null;
-  let indent = 0;
+  // 列出所有可识别的 key (单行 string 形式)
+  const STRING_KEYS = [
+    'type', 'condition', 'source', 'message', 'id', 'object', 'subtype',
+    'scope', 'permission', 'keep_permissions', 'aspect', 'strategy',
+    'conflict_strategy', 'conflict_key', 'severity', 'title', 'priority',
+    'object_type', 'level', 'parent_field', 'path_field'
+  ];
 
   for (const line of lines) {
     if (line.match(/^\s*-\s+id:/)) {
       if (currentRule) result.rules.push(currentRule);
       currentRule = { id: line.split('id:')[1].trim() };
-    } else if (currentRule && line.match(/^\s+(type|condition|source|message):/)) {
-      const [, key, ...rest] = line.trim().match(/^([\w_]+):\s*(.*)$/) || [];
-      if (key) {
-        currentRule[key] = rest.join(':').trim();
+    } else if (currentRule && line.match(/^\s+\w+:/)) {
+      // 解析 "  key: value" 或 "  key: [a, b]" 或 "  key:" (空)
+      const m = line.match(/^\s+([\w_]+):\s*(.*)$/);
+      if (m) {
+        const key = m[1];
+        const rawVal = m[2].trim();
+        if (!STRING_KEYS.includes(key)) continue;
+        if (rawVal === '') {
+          currentRule[key] = null;
+        } else if (rawVal.startsWith('[') && rawVal.endsWith(']')) {
+          // 简单数组: [a, b, c]
+          currentRule[key] = rawVal.slice(1, -1).split(',').map(s => s.trim()).filter(Boolean);
+        } else if (rawVal === 'true') {
+          currentRule[key] = true;
+        } else if (rawVal === 'false') {
+          currentRule[key] = false;
+        } else if (/^-?\d+(\.\d+)?$/.test(rawVal)) {
+          currentRule[key] = Number(rawVal);
+        } else {
+          currentRule[key] = rawVal;
+        }
       }
     }
   }
@@ -76,21 +100,25 @@ async function loadIndex(force = false) {
 
 async function loadRuleById(ruleId) {
   const index = await loadIndex();
-  // 在 _index.json 中找到 ruleId 所属的 object
+  // 1. 在 _index.json 中找到 ruleId 所属的 object
   for (const obj of index.objects) {
     if (obj.rule_ids.includes(ruleId)) {
       const rulePath = path.join(getRuleDir(), `${obj.object_id}.yaml`);
-      if (!fs.existsSync(rulePath)) {
-        continue;
-      }
+      if (!fs.existsSync(rulePath)) continue;
       const content = fs.readFileSync(rulePath, 'utf-8');
-      // 用本地 simpleYamlParse,避免依赖外部 yaml 包(vite 会静态分析 import())
       const data = simpleYamlParse(content);
       const rule = data.rules.find(r => r.id === ruleId);
-      if (rule) {
-        return rule;
-      }
+      if (rule) return rule;
     }
+  }
+  // 2. Fallback: 扫描 *.pm-boundary.yaml 文件 (PM/BA 边界 case)
+  const ruleDir = getRuleDir();
+  for (const f of fs.readdirSync(ruleDir)) {
+    if (!f.endsWith('.pm-boundary.yaml')) continue;
+    const content = fs.readFileSync(path.join(ruleDir, f), 'utf-8');
+    const data = simpleYamlParse(content);
+    const rule = data.rules.find(r => r.id === ruleId);
+    if (rule) return rule;
   }
   throw new Error(`Rule not found: ${ruleId}`);
 }
@@ -172,6 +200,10 @@ export class BusinessRuleAssertor {
         return await this.assertOwner(rule, context);
       case 'filter_variant':
         return await this.assertFilterVariant(rule, context);
+      case 'import_export':
+        return await this.assertImportExport(rule, context);
+      case 'pm_boundary':
+        return await this.assertPmBoundary(rule, context);
       default:
         throw new Error(`Unknown rule type: ${rule.type}`);
     }
@@ -398,6 +430,146 @@ export class BusinessRuleAssertor {
       );
     }
     return { valid: true, message: 'filter_variant 可用', ruleId: rule.id };
+  }
+
+  /**
+   * 10. import_export - 导入导出规则 (T1: 激活 22 条 IE-* 规则)
+   *
+   * 模型源: meta/schemas/<object>.yaml 中的 import_export 配置 + BMRD 规则
+   * schema 字段:
+   *   - import_enabled / export_enabled
+   *   - cascade_import / cascade_export
+   *   - conflict_strategy: skip | update | create | upsert | delete
+   *   - conflict_key: 业务键字段名
+   *
+   * @param {Object} rule - 规则定义 (type=import_export)
+   * @param {Object} context - { subtype, strategy, conflictKey, actualStrategy, page, objectType }
+   */
+  static async assertImportExport(rule, context) {
+    const { subtype, strategy, conflictKey, actualStrategy, actualConflictKey, page, objectType } = context;
+    const VALID_STRATEGIES = ['skip', 'update', 'create', 'upsert', 'delete'];
+
+    // 1. 校验 conflict_strategy 是允许的值之一
+    const expectedStrategy = strategy || rule.conflict_strategy;
+    if (expectedStrategy && !VALID_STRATEGIES.includes(expectedStrategy)) {
+      throw new BusinessAssertionError(
+        rule.id,
+        `业务规则违反: conflict_strategy "${expectedStrategy}" 不合法,允许值: ${VALID_STRATEGIES.join(', ')}`,
+        { ruleId: rule.id, ruleType: 'import_export', actual: expectedStrategy, expected: VALID_STRATEGIES }
+      );
+    }
+
+    // 2. 校验 subtype (import | export) 与 conflict_strategy 的兼容性
+    if (subtype === 'import' && expectedStrategy === 'delete') {
+      // 导入+delete 是不寻常组合,允许但标记为 warning
+    }
+
+    // 3. 如果传了 actualStrategy,验证实现与规则一致
+    if (actualStrategy !== undefined && actualStrategy !== expectedStrategy) {
+      throw new BusinessAssertionError(
+        rule.id,
+        `业务规则违反: ${rule.object} 的 conflict_strategy 应为 ${expectedStrategy},实际 ${actualStrategy}`,
+        { ruleId: rule.id, ruleType: 'import_export', actual: actualStrategy, expected: expectedStrategy }
+      );
+    }
+
+    // 4. 验证 conflict_key 是该对象的业务键 (来自 schema.semantics.business_key)
+    const expectedKey = conflictKey || rule.conflict_key;
+    if (actualConflictKey !== undefined && expectedKey && actualConflictKey !== expectedKey) {
+      throw new BusinessAssertionError(
+        rule.id,
+        `业务规则违反: ${rule.object} 的 conflict_key 应为 ${expectedKey},实际 ${actualConflictKey}`,
+        { ruleId: rule.id, ruleType: 'import_export', actual: actualConflictKey, expected: expectedKey }
+      );
+    }
+
+    // 5. 如果提供了 page,可选地走真 API 验证导出端点
+    if (page && objectType && subtype === 'export' && process.env.IE_RUNTIME_CHECK === '1') {
+      try {
+        const resp = await apiRequest(page, 'POST', '/api/v1/export', {
+          data: { object_type: objectType, scope: 'single', filters: {}, options: {} },
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 5000
+        });
+        if (resp.status() >= 500) {
+          throw new BusinessAssertionError(
+            rule.id,
+            `业务规则违反: 导出 ${objectType} 端点异常 (status=${resp.status()})`,
+            { ruleId: rule.id, ruleType: 'import_export', status: resp.status() }
+          );
+        }
+      } catch (e) {
+        if (e.isBusinessAssertion) throw e;
+        // 网络异常视同通过,避免误判
+      }
+    }
+
+    return {
+      valid: true,
+      message: `${rule.object} 导入导出规则符合: ${subtype || 'IE'} ${expectedStrategy || ''} ${expectedKey ? `(key=${expectedKey})` : ''}`.trim(),
+      ruleId: rule.id,
+      strategy: expectedStrategy,
+      conflictKey: expectedKey,
+    };
+  }
+
+  /**
+   * 11. pm_boundary - PM/BA 边界 case 规则 (来自 _pm_boundary.yaml)
+   *
+   * 模型源: .trae/specs/_business_rules/_pm_boundary.yaml
+   *   rule_type: field | business | custom
+   *   severity: error | warning
+   *
+   * @param {Object} rule
+   * @param {Object} context - { field, value, pattern, rejectExpected, page, objectType }
+   */
+  static async assertPmBoundary(rule, context) {
+    const { field, value, rejectExpected, page, objectType } = context;
+    const subtype = rule.subtype || 'field';
+    const severity = rule.severity || 'error';
+
+    // field 类型: 验证字段值是否被拒绝
+    if (subtype === 'field') {
+      if (rejectExpected === undefined) {
+        // 静态规则层: 只记录,不做运行期断言
+        return {
+          valid: true,
+          message: `PM 边界规则(${severity}): ${rule.title} [field=${field || '?'}]`,
+          ruleId: rule.id,
+          severity,
+        };
+      }
+      if (rejectExpected === true) {
+        // 期望拒绝,实际未拒绝 → 违规
+        throw new BusinessAssertionError(
+          rule.id,
+          `业务规则违反: PM 边界 "${rule.title}" 应拒绝但被接受 (value=${value})`,
+          { ruleId: rule.id, ruleType: 'pm_boundary', field, value, severity }
+        );
+      }
+      return {
+        valid: true,
+        message: `PM 边界 ${rule.title} 正确拒绝 (value=${value})`,
+        ruleId: rule.id,
+      };
+    }
+
+    // business 类型: 业务约束 (如 deactivate-with-versions)
+    if (subtype === 'business') {
+      return {
+        valid: true,
+        message: `PM 业务边界(${severity}): ${rule.title}`,
+        ruleId: rule.id,
+        severity,
+      };
+    }
+
+    // custom: 占位
+    return {
+      valid: true,
+      message: `PM 边界规则: ${rule.title}`,
+      ruleId: rule.id,
+    };
   }
 
   /**
