@@ -4765,14 +4765,14 @@ class ImportExportService:
             from meta.services.auth_middleware import get_current_user
             user = get_current_user()
             if user and user.get('username') != 'admin':
-                perm_service = PermissionService(self.ds)
+                perm_service = PermissionService(self.data_source)
                 has_permission = perm_service.check_permission_unified(
-                    user['id'],
+                    user['user_id'],
                     object_type,
                     'import'
                 )
                 if not has_permission:
-                    logger.warning(f"[Import] 用户 {user['username']} 没有 {object_type}:import 权限，跳过 sheet {sheet_name}")
+                    logger.warning(f"[Import] 用户 {user.get('username')} 没有 {object_type}:import 权限，跳过 sheet {sheet_name}")
                     continue
 
             ws = wb[sheet_name]
