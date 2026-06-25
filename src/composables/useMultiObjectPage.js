@@ -525,22 +525,24 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
   }))
 
   // [H15.3 FIX] 添加RBAC权限检查
+  // 全局导入/导出按钮导出所有object types，所以需要检查用户对所有object types的权限
+  // 仅当用户对所有object types都有权限时，按钮才启用
   const authStore = useAuthStore()
 
   const canImport = computed(() => {
     if (actionsConfig.value.import.enabled === false) return false
     if (!versionContext.selectedVersionId.value) return false
-    // 检查用户是否有当前objectType的import权限
-    const permCode = `${activeTab.value}:import`
-    return authStore.hasPermission(permCode)
+    if (!objectTypes || objectTypes.length === 0) return false
+    // 检查用户是否对所有object types都有import权限
+    return objectTypes.every(type => authStore.hasPermission(`${type}:import`))
   })
 
   const canExport = computed(() => {
     if (actionsConfig.value.export.enabled === false) return false
     if (!versionContext.selectedVersionId.value) return false
-    // 检查用户是否有当前objectType的export权限
-    const permCode = `${activeTab.value}:export`
-    return authStore.hasPermission(permCode)
+    if (!objectTypes || objectTypes.length === 0) return false
+    // 检查用户是否对所有object types都有export权限
+    return objectTypes.every(type => authStore.hasPermission(`${type}:export`))
   })
   const canShowChart = computed(() => {
     if (actionsConfig.value.chart.enabled === false) return false
