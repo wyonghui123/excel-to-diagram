@@ -173,14 +173,14 @@
         <el-result
           v-if="lastResult?.success"
           icon="success"
-          title="操作成功"
-          :sub-title="lastResult.message"
+          :title="lastResult.message || '操作成功'"
+          :sub-title="lastResult.detail"
         />
         <el-result
           v-else
           icon="error"
-          title="操作失败"
-          :sub-title="lastResult?.message || '未知错误'"
+          :title="lastResult?.message || '操作失败'"
+          :sub-title="lastResult?.detail || '未知错误'"
         />
       </div>
       <template #footer>
@@ -275,7 +275,8 @@ const confirmMessage = computed(() => {
 })
 
 const resultTitle = computed(() => {
-  return lastResult.value?.success ? '操作成功' : '操作失败'
+  if (!lastResult.value) return ''
+  return lastResult.value.message || (lastResult.value.success ? '操作成功' : '操作失败')
 })
 
 const getButtonType = (action) => {
