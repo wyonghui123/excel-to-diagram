@@ -524,25 +524,25 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
     refresh: { enabled: true, ...config.actions?.refresh }
   }))
 
-  // [H15.3 FIX] 添加RBAC权限检查
-  // 全局导入/导出按钮导出所有object types，所以需要检查用户对所有object types的权限
-  // 仅当用户对所有object types都有权限时，按钮才启用
+  // [H15.3 FIX] 添加RBAC权限检查 (SAP风格 graceful degradation)
+  // 全局导入/导出按钮允许导出，但跳过无权限的object_types (后端处理)
+  // 前端按钮只要用户对至少一个object_type有权限就启用
   const authStore = useAuthStore()
 
   const canImport = computed(() => {
     if (actionsConfig.value.import.enabled === false) return false
     if (!versionContext.selectedVersionId.value) return false
     if (!objectTypes || objectTypes.length === 0) return false
-    // 检查用户是否对所有object types都有import权限
-    return objectTypes.every(type => authStore.hasPermission(`${type}:import`))
+    // 至少一个object_type有import权限就启用
+    return objectTypes.some(type => authStore.hasPermission(`${type}:import`))
   })
 
   const canExport = computed(() => {
     if (actionsConfig.value.export.enabled === false) return false
     if (!versionContext.selectedVersionId.value) return false
     if (!objectTypes || objectTypes.length === 0) return false
-    // 检查用户是否对所有object types都有export权限
-    return objectTypes.every(type => authStore.hasPermission(`${type}:export`))
+    // 至少一个object_type有export权限就启用
+    return objectTypes.some(type => authStore.hasPermission(`${type}:export`))
   })
   const canShowChart = computed(() => {
     if (actionsConfig.value.chart.enabled === false) return false

@@ -377,8 +377,14 @@ async function handleExportSync() {
 
     if (result.success) {
       const count = result.total_rows || 0
-      message.success(`已导出 ${count} 条数据`)
-      emit('success', { count })
+      // [H15.2 SAP风格] 显示被跳过的object_types
+      const skipped = result.skipped_types || []
+      if (skipped.length > 0) {
+        message.warning(`已导出 ${count} 条数据；已跳过 ${skipped.length} 个无权限的object_type: ${skipped.join(', ')}`, 8)
+      } else {
+        message.success(`已导出 ${count} 条数据`)
+      }
+      emit('success', { count, skipped_types: skipped })
       handleClose()
     } else {
       message.error('导出失败，请稍后重试', result)

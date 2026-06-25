@@ -194,17 +194,19 @@ def export_data():
     }
     """
     try:
-        # [H15.2 FIX] 添加导出权限检查
+        # [H15.2 FIX] 添加导出权限检查 (SAP风格 graceful degradation)
+        # 如果用户对部分object_type无权限，跳过这些，导出用户有权限的
         data = request.get_json()
         if not data:
             return jsonify({"success": False, "message": "请求内容不能为空"}), 400
 
         object_type = data.get('object_type')
-        if object_type:
-            _check_export_permission(object_type, 'export')
-
         if not object_type:
             return jsonify({"success": False, "message": "object_type 参数必填"}), 400
+
+        # [SAP风格 graceful degradation] 检查起始object_type权限
+        # 起始object_type必须有权限（用户至少能导出主对象）
+        _check_export_permission(object_type, 'export')
 
         scope = data.get('scope', 'single')
         selected_types = data.get('selected_types', [])
@@ -225,8 +227,39 @@ def export_data():
             "include_child_objects": True
         })
 
+        # [H15.2 SAP风格] 过滤用户无权限的object_types
+        user = get_current_user()
+        skipped_types = []
+
+        def _has_perm(ot):
+            """检查用户对object_type是否有export权限"""
+            if not user or user.get('username') == 'admin':
+                return True
+            service_inner = get_import_export_service()
+            perm_service = PermissionService(service_inner.data_source)
+            return perm_service.check_permission_unified(
+                user['user_id'], ot, 'export'
+            )
+
+        # 对selected_types和object_type做权限过滤
+        if selected_types:
+            allowed_types = [t for t in selected_types if _has_perm(t)]
+            skipped_types = [t for t in selected_types if t not in allowed_types]
+            selected_types = allowed_types
+        else:
+            # 起始object_type已检查过权限，其他cascade的object_types在service中处理
+            pass
+
+        # 如果所有object_types都被过滤，返回错误
+        if selected_types is not None and len(selected_types) == 0 and scope in ('selected', 'template'):
+            return jsonify({
+                "success": False,
+                "message": "您对所选的所有object_type都没有export权限",
+                "skipped_types": skipped_types
+            }), 403
+
         print(f"[Export API] Received filters: {filters}")
-        print(f"[Export API] Object type: {object_type}, Scope: {scope}, Selected types: {selected_types}, Menu: {menu_code}")
+        print(f"[Export API] Object type: {object_type}, Scope: {scope}, Selected types: {selected_types}, Skipped: {skipped_types}, Menu: {menu_code}")
         print(f"[Export API] Sort by: {sort_by}, Order: {sort_order}")
         print(f"[Export API] Pagination: page={page}, page_size={page_size}")
 
@@ -257,24 +290,25 @@ def export_data():
             result = service.export_selected_types(selected_types, filters, options, sort_by=sort_by, sort_order=sort_order, page=page, page_size=page_size)
         else:
             result = service.export_selected_types([object_type], filters, options, sort_by=sort_by, sort_order=sort_order, page=page, page_size=page_size)
-        
+
         if not result.success:
             return jsonify({
                 "success": False,
                 "message": "导出失败",
                 "errors": result.errors
             }), 500
-        
+
         file_name = os.path.basename(result.file_path)
         download_url = "/api/v1/export/download/{0}".format(file_name)
-        
+
         return jsonify({
             "success": True,
             "data": {
                 "file_path": result.file_path,
                 "download_url": download_url,
                 "sheets": result.sheets,
-                "total_rows": result.total_rows
+                "total_rows": result.total_rows,
+                "skipped_types": skipped_types  # [H15.2 SAP风格] 返回被跳过的object_types
             }
         })
     
