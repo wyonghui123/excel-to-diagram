@@ -506,14 +506,17 @@ associations:
     type: composition
     source_key: product_id
     # [FIX 2026-06-25] 显式标注: product -> version 应 CASCADE
-    # 原因: 产品是顶层分类, version 是其内部数据, 删产品应级联清理
-    # 注意: 这与 version -> domain NOT cascade 的策略不同 (用户决定)
-    # 整个 composition 链: product -> version -> domain -> ... 删 product 整链级联
-    # 删 version 仅级联到自身 (不再级联到 domain, 因 domain 是核心数据)
+    # 原因: 产品是顶层分类, version 是其内部数据, 删产品应级联清理 version
+    # 注意: 这是分段级联, 不是整链级联
+    #   product (CASCADE) -> version (RESTRICT) -> domain (CASCADE) -> ...
+    #   删 product 触发 CASCADE 删 version
+    #   删 version 遇到 RESTRICT 阻止 (因 version 仍含 domain)
+    #   所以整条链在 version 这一层就停了, 不会真的级联到 domain
+    #   domain 视为独立业务数据, 不随 product/version 删除
     cascade_delete: true
     ownership: true
     on_delete: CASCADE
-    description: 产品线级联删除其下所有版本 (composition 链头)
+    description: 产品线级联删除其下所有版本 (在 version 层停下, 不再级联 domain)
     display:
       label: 版本
       plural_label: 版本列表

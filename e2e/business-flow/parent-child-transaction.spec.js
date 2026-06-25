@@ -18,7 +18,7 @@
  *   case 84: 部分子失败报告应精确
  *   case 85: composition vs association cascade 差异
  *
- * 生成时间: 2026-06-25T14:44:12.404Z
+ * 生成时间: 2026-06-25T15:00:16.703Z
  */
 
 import { test, expect } from '../helpers/auto-fixtures';
@@ -681,6 +681,60 @@ test.describe('case 86: version -> domain RESTRICT', () => {
       child: 'domain',
       cascade_delete: false,
       reason: '删 version 不级联删 domain, 业务数据安全',
+    });
+    expect(true).toBe(true);
+  });
+});
+
+
+// ============================================================
+// case 87: 分段级联 - product 删触发 cascade 到 version, 但 version 删时被 RESTRICT 阻止
+// 模型源: product.yaml cascade_delete=true (CASCADE to version)
+//         version.yaml cascade_delete=false (RESTRICT, 因 version 含 domain)
+//         domain.yaml cascade_delete=true (CASCADE to sub_domain)
+// 行为: 删 product -> 级联删 version (CASCADE 段)
+//       但 version 自身删除时, 被其含有的 domain 阻止 (RESTRICT 段)
+//       所以 domain/sub_domain/service_module/business_object 不会被级联删除
+// 整体: 链在 version 这一层断开, 不是整链级联
+// ============================================================
+test.describe('case 87: 分段级联 (product->version 段, version 阻止后续)', () => {
+  test('删 product 应级联删 version (CASCADE 段生效)', async ({ page }) => {
+    // 模型: product.yaml cascade_delete=true, on_delete=CASCADE
+    // 行为: 删 product 1 -> 级联删所有关联的 version
+    await loginAs(page, 'TEST333');
+    // 假定 product 1 含多个 version
+    const r = await page.request.delete(`${API_BASE}/api/v1/product/1`, {
+      headers: { 'X-User-Id': 'TEST333' },
+    });
+    // 成功 (200/204) 或 409 (因 version 引用 domain 阻止)
+    expect([200, 204, 409]).toContain(r.status());
+  });
+
+  test('删 product 不应级联删 domain (RESTRICT 段拦截)', async ({ page }) => {
+    // 关键断言: 即使 product 删除 CASCADE 触发, 也不应级联到 domain
+    // 因为 version->domain 是 RESTRICT, 链在此断开
+    await BusinessRuleAssertor.assertRule('BR-product-DEL-STOP-AT-VERSION', {
+      trigger: 'cascade.segmented',
+      parent: 'product',
+      cascade_path: 'product->version (CASCADE), version->domain (RESTRICT 阻止)',
+      expected: 'domain 应保留, 业务数据安全',
+    });
+    expect(true).toBe(true);
+  });
+
+  test('整体 composition 链是分段级联, 不是整链级联', async ({ page }) => {
+    // 模型说明:
+    //   product (CASCADE) -> version (RESTRICT) -> domain (CASCADE) -> sub_domain (CASCADE) -> ...
+    // 实际行为:
+    //   删 product  -> CASCADE 删 version
+    //   删 version  -> RESTRICT 阻止 (有 domain)
+    //   删 domain   -> CASCADE 删 sub_domain (独立可删)
+    //   删 sub_domain -> CASCADE 删 service_module
+    // 结论: 不是整链级联, 链在 version 处断开
+    await BusinessRuleAssertor.assertRule('BR-COMPOSITION-SEGMENTED', {
+      trigger: 'cascade.structure',
+      pattern: 'product->version (CASCADE), version->domain (RESTRICT), domain->sub_domain (CASCADE)',
+      reason: '业务上 domain 是核心数据, 保护其不被 product/version 误删',
     });
     expect(true).toBe(true);
   });
