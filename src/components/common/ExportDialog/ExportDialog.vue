@@ -309,7 +309,8 @@ function resetState() {
   exportScope.value = 'current'
   withFilters.value = true
   localExportMode.value = props.defaultExportMode || 'single'
-  selectedMultiTypes.value = props.objectTypes.filter(t => t && typeof t === 'string')
+  // [H15.2 修复] 使用availableMultiTypes（已过滤RBAC）作为初始值，而非全部objectTypes
+  selectedMultiTypes.value = availableMultiTypes.value.map(t => t.value)
   localOptions.value = {
     includeHierarchyPath: props.exportOptions?.includeHierarchyPath ?? false,
     protectSheet: props.exportOptions?.protectSheet ?? false,
