@@ -1159,36 +1159,51 @@ class ImportExportService:
         if include_annotations:
             child_parent_map = self._collect_child_object_types(ordered_types)
             if child_parent_map:
-                total_child_types = len(child_parent_map)
-                for idx, (child_type_name, parent_list) in enumerate(child_parent_map.items()):
-                    # 跳过已在主导出中处理的类型，避免重复 sheet
-                    if child_type_name in ordered_types:
-                        continue
-                    if progress_callback:
-                        try:
-                            child_reg_meta = registry.get(child_type_name)
-                            child_display = child_reg_meta.name if child_reg_meta else child_type_name
-                        except Exception:
-                            child_display = child_type_name
-                        progress_callback({
-                            'progress': 95 + int((idx / total_child_types) * 5),
-                            'current_type': child_type_name,
-                            'current_type_name': child_display,
-                            'total_types': total_child_types,
-                            'current_index': idx + 1,
-                            'message': '正在导出子对象: {0}'.format(child_display)
-                        })
+                # [H15.2 SAP风格] 过滤child_object_types，应用RBAC
+                from meta.services.auth_middleware import get_current_user
+                user = get_current_user()
+                if user and user.get('username') != 'admin':
+                    from meta.services.permission_service import PermissionService
+                    perm_service = PermissionService(self.data_source)
+                    filtered_child_map = {}
+                    for child_type, parent_list in child_parent_map.items():
+                        if perm_service.check_permission_unified(
+                            user['user_id'], child_type, 'export'
+                        ):
+                            filtered_child_map[child_type] = parent_list
+                    child_parent_map = filtered_child_map
 
-                    try:
-                        child_data = self._query_child_object(child_type_name, parent_list, filters)
-                        child_meta = registry.get(child_type_name)
-                        if child_meta:
-                            self._write_child_sheet(wb, child_type_name, child_meta, child_data or [], sheets_info, options)
-                            total_rows += len(child_data) if child_data else 0
-                    except Exception as e:
-                        logger.warning(
-                            f"[Export] 子对象 {child_type_name} 导出失败: {e}"
-                        )
+                if child_parent_map:
+                    total_child_types = len(child_parent_map)
+                    for idx, (child_type_name, parent_list) in enumerate(child_parent_map.items()):
+                        # 跳过已在主导出中处理的类型，避免重复 sheet
+                        if child_type_name in ordered_types:
+                            continue
+                        if progress_callback:
+                            try:
+                                child_reg_meta = registry.get(child_type_name)
+                                child_display = child_reg_meta.name if child_reg_meta else child_type_name
+                            except Exception:
+                                child_display = child_type_name
+                            progress_callback({
+                                'progress': 95 + int((idx / total_child_types) * 5),
+                                'current_type': child_type_name,
+                                'current_type_name': child_display,
+                                'total_types': total_child_types,
+                                'current_index': idx + 1,
+                                'message': '正在导出子对象: {0}'.format(child_display)
+                            })
+
+                        try:
+                            child_data = self._query_child_object(child_type_name, parent_list, filters)
+                            child_meta = registry.get(child_type_name)
+                            if child_meta:
+                                self._write_child_sheet(wb, child_type_name, child_meta, child_data or [], sheets_info, options)
+                                total_rows += len(child_data) if child_data else 0
+                        except Exception as e:
+                            logger.warning(
+                                f"[Export] 子对象 {child_type_name} 导出失败: {e}"
+                            )
 
         output_dir = os.path.join(os.getcwd(), "exports")
         os.makedirs(output_dir, exist_ok=True)
