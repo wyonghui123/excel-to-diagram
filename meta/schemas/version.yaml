@@ -435,12 +435,17 @@ relations:
 
   - id: version_to_domains
     name: 包含领域
-    type: parent_child
+    type: composition
     target: domain
     cardinality: "1:N"
-    description: 一个版本包含多个领域
+    # [FIX 2026-06-25] 显式标注: version -> domain NOT cascade
+    cascade_delete: false
+    ownership: false
+    on_delete: RESTRICT
+    on_delete_message: "版本包含 {count} 个领域, 请手动迁移或删除领域后重试"
+    description: 一个版本包含多个领域 (version 删不级联删 domain)
     semantics:
-      meaning: 版本与领域的层级关系
+      meaning: 版本与领域的层级关系, 但删除行为非级联 (阻止)
 
 # ────────────────────────────────────────────
 # 操作定义

@@ -47,12 +47,30 @@ function loadYaml(file) {
 
 function extractCascadeInfo(content) {
   if (!content) return null;
-  const block = content.match(/^associations:\s*\n([\s\S]*?)(?=\n[a-z_#][^\s]|\n\n)/m)?.[1];
+  // [FIX 2026-06-25] 块结束判断: 顶级键 (无前导空格) 出现即结束
+  // 原正则会被注释行 (#) 误截断
+  // 改为: 找到 associations: 行, 取到下一个真正顶级 key (行首 [a-z_], 无空格)
+  const lines = content.split('\n');
+  let startIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^associations:\s*$/.test(lines[i])) { startIdx = i; break; }
+  }
+  if (startIdx < 0) return null;
+  let endIdx = lines.length;
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    const l = lines[i];
+    if (/^[a-z_][a-z0-9_]*:\s*$/.test(l)) {
+      endIdx = i; break;
+    }
+  }
+  const block = lines.slice(startIdx + 1, endIdx).join('\n');
   if (!block) return null;
   const comps = [];
-  const assocRegex = /- name:\s*(\w+)\n([\s\S]*?)(?=- name:|$)/g;
+  // [FIX 2026-06-25] 用 split by - name: 替代 regex lookahead
+  // 简单可靠: 每个 - name: 块是 yaml 顶级 list item
+  const itemRegex = /^[ \t]*- name:\s*(\w+)\r?\n((?:[ \t]+.*\r?\n)*)/gm;
   let m;
-  while ((m = assocRegex.exec(block)) !== null) {
+  while ((m = itemRegex.exec(block)) !== null) {
     const body = m[2];
     if (/type:\s*composition/.test(body)) {
       comps.push({
@@ -60,6 +78,7 @@ function extractCascadeInfo(content) {
         type: 'composition',
         cascade_delete: /cascade_delete:\s*(true|false)/.exec(body)?.[1] === 'true',
         ownership: /ownership:\s*(true|false)/.test(body),
+        on_delete: /on_delete:\s*(\w+)/.exec(body)?.[1] || null,
       });
     }
   }
@@ -75,14 +94,19 @@ function main() {
 
   console.log('[1] 加载 schema...');
   const cascades = {};
-  for (const { parent } of PARENT_CHILD_PAIRS) {
-    const p = path.join(SCHEMA_DIR, `${parent}.yaml`);
+  // [FIX 2026-06-25] 扫描所有 PARENT_CHILD_PAIRS 涉及的父对象 + version
+  const scanObjects = [...new Set([
+    ...PARENT_CHILD_PAIRS.map(p => p.parent),
+    'version',  // 显式扫描 version (version_to_domains 在这里)
+  ])];
+  for (const obj of scanObjects) {
+    const p = path.join(SCHEMA_DIR, `${obj}.yaml`);
     const content = loadYaml(p);
     if (!content) continue;
     const info = extractCascadeInfo(content);
-    if (info) cascades[parent] = info;
+    if (info) cascades[obj] = info;
   }
-  console.log(`  加载 ${Object.keys(cascades).length} 个父对象的 associations`);
+  console.log(`  加载 ${Object.keys(cascades).length} 个对象的 associations`);
 
   for (const [parent, infos] of Object.entries(cascades)) {
     const comps = infos.filter(i => i.type === 'composition');
