@@ -204,10 +204,6 @@ def export_data():
         if not object_type:
             return jsonify({"success": False, "message": "object_type 参数必填"}), 400
 
-        # [SAP风格 graceful degradation] 检查起始object_type权限
-        # 起始object_type必须有权限（用户至少能导出主对象）
-        _check_export_permission(object_type, 'export')
-
         scope = data.get('scope', 'single')
         selected_types = data.get('selected_types', [])
         filters = data.get('filters')
@@ -241,22 +237,30 @@ def export_data():
                 user['user_id'], ot, 'export'
             )
 
-        # 对selected_types和object_type做权限过滤
+        # 对所有涉及的object_types做权限过滤
+        # 收集所有需要检查的object_types
+        all_types_to_check = set()
         if selected_types:
-            allowed_types = [t for t in selected_types if _has_perm(t)]
-            skipped_types = [t for t in selected_types if t not in allowed_types]
-            selected_types = allowed_types
-        else:
-            # 起始object_type已检查过权限，其他cascade的object_types在service中处理
-            pass
+            all_types_to_check.update(selected_types)
+        if object_type:
+            all_types_to_check.add(object_type)
 
-        # 如果所有object_types都被过滤，返回错误
-        if selected_types is not None and len(selected_types) == 0 and scope in ('selected', 'template'):
-            return jsonify({
-                "success": False,
-                "message": "您对所选的所有object_type都没有export权限",
-                "skipped_types": skipped_types
-            }), 403
+        # 过滤
+        skipped_types = [t for t in all_types_to_check if not _has_perm(t)]
+        allowed_types = [t for t in all_types_to_check if t not in skipped_types]
+
+        if selected_types:
+            selected_types = [t for t in selected_types if t in allowed_types]
+        if object_type and object_type in skipped_types:
+            # 起始object_type无权限，从allowed中选一个
+            if allowed_types:
+                object_type = allowed_types[0]
+            else:
+                return jsonify({
+                    "success": False,
+                    "message": "您对所有object_type都没有export权限",
+                    "skipped_types": skipped_types
+                }), 403
 
         print(f"[Export API] Received filters: {filters}")
         print(f"[Export API] Object type: {object_type}, Scope: {scope}, Selected types: {selected_types}, Skipped: {skipped_types}, Menu: {menu_code}")
@@ -278,6 +282,12 @@ def export_data():
             pass
 
         if scope == 'template':
+            if not selected_types:
+                return jsonify({
+                    "success": False,
+                    "message": "模板导出至少需要一个object_type",
+                    "skipped_types": skipped_types
+                }), 400
             result = service.export_template(selected_types, options, menu_code=menu_code)
         elif scope == 'cascade':
             result = service.export_cascade(
@@ -288,6 +298,12 @@ def export_data():
             )
         elif scope == 'selected' and selected_types:
             result = service.export_selected_types(selected_types, filters, options, sort_by=sort_by, sort_order=sort_order, page=page, page_size=page_size)
+        elif scope == 'selected' and not selected_types:
+            return jsonify({
+                "success": False,
+                "message": "您对所选的所有object_type都没有export权限",
+                "skipped_types": skipped_types
+            }), 403
         else:
             result = service.export_selected_types([object_type], filters, options, sort_by=sort_by, sort_order=sort_order, page=page, page_size=page_size)
 
