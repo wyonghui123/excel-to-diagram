@@ -1160,8 +1160,12 @@ class ImportExportService:
             child_parent_map = self._collect_child_object_types(ordered_types)
             if child_parent_map:
                 # [H15.2 SAP风格] 过滤child_object_types，应用RBAC
-                from meta.services.auth_middleware import get_current_user
-                user = get_current_user()
+                # 优先用 thread-local user (兼容线程池/无Flask上下文场景)
+                from meta.services.query_service import _get_thread_user
+                user = _get_thread_user()
+                if not user:
+                    from meta.services.auth_middleware import get_current_user
+                    user = get_current_user()
                 if user and user.get('username') != 'admin':
                     from meta.services.permission_service import PermissionService
                     perm_service = PermissionService(self.data_source)
@@ -4777,8 +4781,11 @@ class ImportExportService:
 
             # [H15.2 FIX] 添加导入权限检查
             from meta.services.permission_service import PermissionService
-            from meta.services.auth_middleware import get_current_user
-            user = get_current_user()
+            from meta.services.query_service import _get_thread_user
+            user = _get_thread_user()
+            if not user:
+                from meta.services.auth_middleware import get_current_user
+                user = get_current_user()
             if user and user.get('username') != 'admin':
                 perm_service = PermissionService(self.data_source)
                 has_permission = perm_service.check_permission_unified(
