@@ -22,7 +22,8 @@ from meta.services.import_export_service import (
 from meta.core.datasource import get_data_source
 from meta.services.manage_service import ManageService
 from meta.services.query_service import QueryService
-from meta.services.auth_middleware import login_required
+from meta.services.auth_middleware import login_required, get_current_user
+from meta.services.permission_service import PermissionService
 
 export_import_bp = Blueprint('export_import', __name__, url_prefix='/api/v1')
 
@@ -124,6 +125,45 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+def _check_export_permission(object_type: str, action: str = 'export') -> bool:
+    """检查用户是否有导出/导入权限
+
+    Args:
+        object_type: 业务对象类型（如 'service_module'）
+        action: 动作类型（'export' 或 'import'）
+
+    Returns:
+        bool: True if user has permission, False otherwise
+
+    Raises:
+        403 Forbidden if user lacks permission
+    """
+    user = get_current_user()
+    if not user:
+        abort(403, "未登录")
+
+    # 超级管理员绕过权限检查
+    if user.get('username') == 'admin':
+        return True
+
+    # 构建权限编码
+    permission_code = f"{object_type}:{action}"
+
+    # 检查权限
+    service = get_import_export_service()
+    perm_service = PermissionService(service.data_source)
+    has_permission = perm_service.check_permission_unified(
+        user['user_id'],
+        object_type,
+        action
+    )
+
+    if not has_permission:
+        abort(403, f"您没有 {object_type}:{action} 权限")
+
+    return True
+
+
 @export_import_bp.route('/export', methods=['POST'])
 @login_required
 def export_data():
@@ -154,11 +194,15 @@ def export_data():
     }
     """
     try:
+        # [H15.2 FIX] 添加导出权限检查
         data = request.get_json()
         if not data:
             return jsonify({"success": False, "message": "请求内容不能为空"}), 400
 
         object_type = data.get('object_type')
+        if object_type:
+            _check_export_permission(object_type, 'export')
+
         if not object_type:
             return jsonify({"success": False, "message": "object_type 参数必填"}), 400
 

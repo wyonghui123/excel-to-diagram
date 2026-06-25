@@ -89,6 +89,7 @@ import { useContextFilterSource } from './filterSources/useContextFilterSource'
 import { useScopeFilterSource } from './filterSources/useScopeFilterSource'
 import { useHierarchyTypes } from './useHierarchyTypes'
 import * as hierarchyService from '@/services/hierarchyService'
+import { useAuthStore } from '@/stores/authStore'
 
 /**
  * 约定：FK 字段命名 = 父对象类型 + '_id'
@@ -523,12 +524,24 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
     refresh: { enabled: true, ...config.actions?.refresh }
   }))
 
-  const canImport = computed(() =>
-    actionsConfig.value.import.enabled !== false && !!versionContext.selectedVersionId.value
-  )
-  const canExport = computed(() =>
-    actionsConfig.value.export.enabled !== false && !!versionContext.selectedVersionId.value
-  )
+  // [H15.3 FIX] 添加RBAC权限检查
+  const authStore = useAuthStore()
+
+  const canImport = computed(() => {
+    if (actionsConfig.value.import.enabled === false) return false
+    if (!versionContext.selectedVersionId.value) return false
+    // 检查用户是否有当前objectType的import权限
+    const permCode = `${activeTab.value}:import`
+    return authStore.hasPermission(permCode)
+  })
+
+  const canExport = computed(() => {
+    if (actionsConfig.value.export.enabled === false) return false
+    if (!versionContext.selectedVersionId.value) return false
+    // 检查用户是否有当前objectType的export权限
+    const permCode = `${activeTab.value}:export`
+    return authStore.hasPermission(permCode)
+  })
   const canShowChart = computed(() => {
     if (actionsConfig.value.chart.enabled === false) return false
     if (!versionContext.selectedVersionId.value) return false
@@ -765,7 +778,10 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
     }
   }
 
-  function restoreStateFromDiagram() {
+  function restoreStateFromDiagram(options = {}) {
+    // [FIX 2026-06-25] 根因修复：URL 携带 productId/versionId 时跳过版本上下文恢复
+    //   防止陈旧 sessionStorage 快照覆盖 URL 参数（导致 landing 跳转后版本丢失）
+    const { skipVersionRestore = false } = options
     try {
       const stored = sessionStorage.getItem(STATE_RESTORE_KEY)
       const flag = sessionStorage.getItem('returningFromDiagram')
@@ -790,11 +806,14 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
 
       // [v32-FIX] 先恢复版本上下文，确保 v-if="selectedVersionId" 立即为 true，树能渲染
       //   然后再恢复 scopeIds/initialBoIds/initialRelationCodes 到树上
-      if (state.versionId != null) {
-        versionContext.selectedVersionId.value = state.versionId
-      }
-      if (state.productId != null) {
-        versionContext.selectedProductId.value = state.productId
+      // [FIX 2026-06-25] skipVersionRestore=true 时跳过版本上下文恢复（URL 优先场景）
+      if (!skipVersionRestore) {
+        if (state.versionId != null) {
+          versionContext.selectedVersionId.value = state.versionId
+        }
+        if (state.productId != null) {
+          versionContext.selectedProductId.value = state.productId
+        }
       }
 
       if (state.activeTab && tabs.value.find(t => t.name === state.activeTab)) {

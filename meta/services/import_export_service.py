@@ -4760,6 +4760,21 @@ class ImportExportService:
             if not object_type:
                 continue
 
+            # [H15.2 FIX] 添加导入权限检查
+            from meta.services.permission_service import PermissionService
+            from meta.services.auth_middleware import get_current_user
+            user = get_current_user()
+            if user and user.get('username') != 'admin':
+                perm_service = PermissionService(self.ds)
+                has_permission = perm_service.check_permission_unified(
+                    user['id'],
+                    object_type,
+                    'import'
+                )
+                if not has_permission:
+                    logger.warning(f"[Import] 用户 {user['username']} 没有 {object_type}:import 权限，跳过 sheet {sheet_name}")
+                    continue
+
             ws = wb[sheet_name]
             rows = list(ws.iter_rows(values_only=True))
 
