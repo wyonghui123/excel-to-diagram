@@ -231,21 +231,33 @@ except Exception as e:
     _release_db_lock()
     raise
 
+print(f'[WAITRESS] App created: {application is not None}')
 
 if __name__ == '__main__':
-    # 直接用 Python 启动 (waitress-serve 替代)
-    from waitress import serve
+    import sys
+    use_flask = os.environ.get('USE_FLASK_DEV') == '1'
     try:
-        serve(
-            application,
-            host='0.0.0.0',
-            port=AGENT_PORT,  # [DECORATIVE] v3.18: 来自 env AGENT_PORT
-            threads=8,
-            ident=f'bo_action_server_v3.18_port{AGENT_PORT}',
-            # 调优
-            channel_timeout=60,
-            recv_bytes=65536,
-            send_bytes=65536,
-        )
+        if use_flask:
+            print('[WAITRESS] Using Flask dev server (USE_FLASK_DEV=1)')
+            application.run(host='0.0.0.0', port=AGENT_PORT, debug=False, use_reloader=False)
+        else:
+            print('[WAITRESS] Starting waitress.serve()')
+            from waitress import serve
+            serve(
+                application,
+                host='0.0.0.0',
+                port=AGENT_PORT,  # [DECORATIVE] v3.18: 来自 env AGENT_PORT
+                threads=8,
+                ident=f'bo_action_server_v3.18_port{AGENT_PORT}',
+                # 调优
+                channel_timeout=60,
+                recv_bytes=65536,
+                send_bytes=65536,
+            )
+    except Exception as e:
+        print(f'[WAITRESS] Server ERROR: {type(e).__name__}: {e}')
+        import traceback
+        traceback.print_exc()
+        raise
     finally:
         _release_db_lock()

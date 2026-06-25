@@ -346,7 +346,22 @@ class SequenceEngine:
                 if prefix_filter and not code.startswith(prefix_filter):
                     continue
                 matched_count += 1
-                m = trailing_digits.search(code)
+
+                # [FIX 2026-06-24] 剥离 prefix_filter 后再检测尾部数字
+                # 背景: 当 prefix_filter 本身尾部有数字时 (如 'TEST11111'),
+                #   上面的 trailing_digits 正则会把 'TEST11111' 末两位的 '11'
+                #   误判为序列号, 导致 max_val 虚高 (如 11), next_value 从 12 开始
+                #   实际生成的 code 会重复 (如 TEST1111112)
+                # 修复: 剥离 prefix 后, 只看 BO code 超出 prefix 的部分
+                detect_target = code
+                if prefix_filter and code.startswith(prefix_filter):
+                    detect_target = code[len(prefix_filter):]
+                    # detect_target 应该是 "SEQ:padding" 部分 (如 "12", "01")
+                    # 只匹配整个 detect_target (非尾部, 因为应该只有数字)
+                    m = re.match(r'^(\d+)$', detect_target)
+                else:
+                    m = trailing_digits.search(code)
+
                 if m:
                     try:
                         v = int(m.group(1))
