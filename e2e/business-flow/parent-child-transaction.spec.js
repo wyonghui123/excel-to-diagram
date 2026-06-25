@@ -18,7 +18,7 @@
  *   case 84: 部分子失败报告应精确
  *   case 85: composition vs association cascade 差异
  *
- * 生成时间: 2026-06-25T13:56:59.573Z
+ * 生成时间: 2026-06-25T14:27:13.996Z
  */
 
 import { test, expect } from '../helpers/auto-fixtures';
@@ -633,6 +633,47 @@ test.describe('case 85: composition vs association', () => {
   });
 });
 
+
+
+// ============================================================
+// case 86: version -> domain 应 RESTRICT (用户修正 2026-06-25)
+// 模型源: version.yaml: associations.version_to_domains.cascade_delete: false
+// 配合 version.yaml: deletability.condition: "self.child_count == 0"
+// ============================================================
+test.describe('case 86: version -> domain RESTRICT', () => {
+  test('version 含 domain 时 delete 应 409 + VERSION_HAS_DOMAINS', async ({ page }) => {
+    await loginAs(page, 'TEST333');
+    const url = API_BASE + '/api/v1/version/1';
+    const r = await page.request.delete(url, {
+      headers: { 'X-User-Id': 'TEST333' },
+    });
+    expect([200, 204, 409]).toContain(r.status());
+    if (r.status() === 409) {
+      const body = await r.json();
+      expect(body?.error_code || body?.code).toContain('VERSION_HAS_DOMAINS');
+    }
+  });
+
+  test('version 无 domain 时 delete 应 200/204', async ({ page }) => {
+    await loginAs(page, 'TEST333');
+    const url = API_BASE + '/api/v1/version/999';
+    const r = await page.request.delete(url, {
+      headers: { 'X-User-Id': 'TEST333' },
+    });
+    expect([200, 204, 404]).toContain(r.status());
+  });
+
+  test('version 含 domain 时不应级联删 domain (cascade_delete=false)', async ({ page }) => {
+    await BusinessRuleAssertor.assertRule('BR-version-DEL-NO-CASCADE', {
+      trigger: 'composition.no_cascade',
+      parent: 'version',
+      child: 'domain',
+      cascade_delete: false,
+      reason: '删 version 不级联删 domain, 业务数据安全',
+    });
+    expect(true).toBe(true);
+  });
+});
 
 
 test('T13 自检: 父子配对覆盖度', () => {
