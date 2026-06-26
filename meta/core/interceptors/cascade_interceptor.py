@@ -168,15 +168,40 @@ class CascadeInterceptor(Interceptor):
         if associations is None:
             return
 
+        # 兼容两种格式:
+        #   - List[Dict]: [{"type": "composition", "cascade_delete": true, ...}]
+        #   - Dict[str, Dict/AssociationDefinition]: {"version": AssociationDefinition(...)}
+        assoc_list = []
         if isinstance(associations, list):
-            for assoc in associations:
-                if isinstance(assoc, dict):
-                    if assoc.get('type') == 'composition' and assoc.get('cascade_delete', False):
-                        self._delete_composition_children(context, assoc)
+            assoc_list = associations
+        elif isinstance(associations, dict):
+            assoc_list = list(associations.values())
 
-    def _delete_composition_children(self, context: ActionContext, assoc: Dict) -> None:
-        target_type = assoc.get('target_entity') or assoc.get('target_type')
-        foreign_key = assoc.get('foreign_key') or f"{context.object_type}_id"
+        # [FIX BUG-V011 2026-06-26] 兼容 dict 和 AssociationDefinition dataclass
+        def _get_assoc_field(a, field, default=None):
+            if isinstance(a, dict):
+                return a.get(field, default)
+            return getattr(a, field, default)
+
+        for assoc in assoc_list:
+            assoc_type = _get_assoc_field(assoc, 'type')
+            assoc_cascade = _get_assoc_field(assoc, 'cascade_delete', False)
+            if assoc_type == 'composition' and assoc_cascade:
+                self._delete_composition_children(context, assoc)
+
+    def _delete_composition_children(self, context: ActionContext, assoc) -> None:
+        # [FIX BUG-V011 2026-06-26] 兼容 dict 和 AssociationDefinition
+        if isinstance(assoc, dict):
+            target_type = assoc.get('target_entity') or assoc.get('target_type')
+            foreign_key = assoc.get('foreign_key') or assoc.get('source_key') or f"{context.object_type}_id"
+        else:
+            target_type = getattr(assoc, 'target_entity', None) or getattr(assoc, 'target_type', None)
+            foreign_key = (
+                getattr(assoc, 'foreign_key', None)
+                or getattr(assoc, 'foreign_key_field', None)
+                or getattr(assoc, 'source_key', None)
+                or f"{context.object_type}_id"
+            )
 
         if not target_type:
             return
