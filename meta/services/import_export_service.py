@@ -3784,6 +3784,7 @@ class ImportExportService:
             #   关键: relationship 的 dim scope 表达式形如
             #   "source_bo_id IN (SELECT ...) OR target_bo_id IN (SELECT ...)"
             #   必须把 dim scope 条件拼到 SQL 中, 而不是只查 data_permissions 表
+            dim_scope_applied = False  # [FIX BUG-V020 2026-06-27] 是否走了 dim scope 主路径
             try:
                 from meta.services.dimension_scope_engine import DimensionScopeEngine
                 from meta.core.interceptors.data_permission_interceptor import DataPermissionInterceptor
@@ -3822,25 +3823,35 @@ class ImportExportService:
                     if per_role_conds:
                         sql_fragment = self._dim_scope_conds_to_sql(per_role_conds, prefix)
                         if sql_fragment:
-                            return f" AND ({sql_fragment})", []
+                            # [FIX BUG-V020 2026-06-27] dim scope 主路径也必须叠加 owner exception
+                            # 之前 dim scope 路径直接 return, owner exception (BUG-V014) 只在
+                            # fallback (data_permissions) 路径生效,导致 user 自己 owner 的
+                            # 私有产品被 dim scope 严格过滤掉,导出只返回少数几个产品
+                            # 案例: TEST333 通过 group 加入 role 5433,dim_scope=[475],
+                            #       但 owner_id=3385 的 TESTVVVX/TESTVVVVV 都不在 dim_scope,
+                            #       导出只返回 1 条 (供应链) 而非 3 条
+                            base_sql = f" AND ({sql_fragment})"
+                            base_params = []
+                            dim_scope_applied = True
             except Exception as e:
                 logger.warning(f"[_build_permission_filter] dim scope path failed: {e}, falling back to data_permissions")
 
-            # [FIX v1.2.50 2026-06-22] Step 2: Fallback to data_permissions table
-            perm_service = DataPermissionService(self.data_source)
-            allowed_ids = perm_service.get_allowed_resource_ids(user_id, object_type)
+            if not dim_scope_applied:
+                # [FIX v1.2.50 2026-06-22] Step 2: Fallback to data_permissions table
+                perm_service = DataPermissionService(self.data_source)
+                allowed_ids = perm_service.get_allowed_resource_ids(user_id, object_type)
 
-            if allowed_ids is None:
-                # None 表示无权限配置，允许全部 (与 query_service._apply_data_permission 一致)
-                return "", []
+                if allowed_ids is None:
+                    # None 表示无权限配置，允许全部 (与 query_service._apply_data_permission 一致)
+                    return "", []
 
-            if not allowed_ids:
-                # 空列表表示无任何权限，返回不可能匹配的条件
-                return f" AND {prefix}id = -1", []
+                if not allowed_ids:
+                    # 空列表表示无任何权限，返回不可能匹配的条件
+                    return f" AND {prefix}id = -1", []
 
-            placeholders = ','.join(['?'] * len(allowed_ids))
-            base_sql = f" AND {prefix}id IN ({placeholders})"
-            base_params = list(allowed_ids)
+                placeholders = ','.join(['?'] * len(allowed_ids))
+                base_sql = f" AND {prefix}id IN ({placeholders})"
+                base_params = list(allowed_ids)
 
         except Exception as e:
             logger.warning(f"[_build_permission_filter] failed: {e}")
