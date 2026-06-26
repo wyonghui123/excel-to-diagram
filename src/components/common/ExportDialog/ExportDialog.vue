@@ -198,7 +198,7 @@ const message = useCrudMessage()
 const loading = ref(false)
 const exportScope = ref('current')
 const withFilters = ref(true)
-const localExportMode = ref(props.defaultExportMode || 'single')
+const localExportMode = ref(props.defaultExportMode || 'cascade')
 
 const exporting = ref(false)
 const exportProgress = ref(0)
@@ -308,7 +308,7 @@ async function loadSchema() {
 function resetState() {
   exportScope.value = 'current'
   withFilters.value = true
-  localExportMode.value = props.defaultExportMode || 'single'
+  localExportMode.value = props.defaultExportMode || 'cascade'
   // [H15.2 修复] 使用availableMultiTypes（已过滤RBAC）作为初始值，而非全部objectTypes
   selectedMultiTypes.value = availableMultiTypes.value.map(t => t.value)
   localOptions.value = {

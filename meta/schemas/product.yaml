@@ -421,8 +421,8 @@ fields:
       i18n_key: common.field.owner_id
     semantics:
       meaning: 产品线的负责人，关联用户表
-      export_visible: false
-      import_visible: false
+      export_visible: true
+      import_visible: true
       analytics:
         category: dimension
         type: foreign_key

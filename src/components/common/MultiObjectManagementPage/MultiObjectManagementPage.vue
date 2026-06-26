@@ -97,7 +97,6 @@
       :current-count="currentListCount"
       :total-count="currentTotalCount"
       :multi-type-mode="true"
-      :show-export-mode="true"
       :show-export-options="true"
       :menu-code="menuCode"
       @success="page.handleExportSuccess"
