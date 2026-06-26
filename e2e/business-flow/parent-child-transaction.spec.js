@@ -18,7 +18,7 @@
  *   case 84: 部分子失败报告应精确
  *   case 85: composition vs association cascade 差异
  *
- * 生成时间: 2026-06-25T15:00:16.703Z
+ * 生成时间: 2026-06-25T15:29:07.485Z
  */
 
 import { test, expect } from '../helpers/auto-fixtures';
