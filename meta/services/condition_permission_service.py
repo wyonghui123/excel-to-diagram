@@ -555,23 +555,79 @@ class ConditionPermissionService:
     # ========== 内部方法 ==========
 
     def _is_owner(self, user_id: int, resource_type: str, resource_id: int) -> bool:
-        """检查用户是否是资源的所有者"""
+        """检查用户是否是资源的所有者
+
+        [FIX BUG-V010 2026-06-26] 兼容 V1.1.4 owner refactor
+        背景: V1.1.4 后 owner_id 字段统一在 product 表, 子对象表 (version/domain/
+              sub_domain/service_module/business_object) 已删除 owner_id 列
+        修复: 通过 product chain 追溯 owner, 不再直接查子对象表的 owner_id
+        案例: TEST333 是 product SDLKFJL 的 owner, 删除其下 version 失败
+              原因: 原 _is_owner 查 versions.owner_id, 列不存在, 异常被吞
+        """
         table_name = RESOURCE_TABLE_MAP.get(resource_type)
         if not table_name:
             return False
 
+        # product: 直接查 owner_id
+        if resource_type == 'product':
+            try:
+                cursor = self.ds.execute(
+                    f"SELECT owner_id FROM {table_name} WHERE id = ?",
+                    [resource_id]
+                )
+                row = cursor.fetchone()
+                return row and row[0] == user_id
+            except Exception:
+                return False
+
+        # 子对象: 通过 product chain 追溯 owner
+        # [FIX BUG-V010] 不用 created_by (V1.1 后 user 也变了), 也不用 owner_id (列已删)
+        chain_sql_map = {
+            'version': f"""
+                SELECT p.owner_id FROM {table_name} t
+                JOIN products p ON t.product_id = p.id
+                WHERE t.id = ?
+            """,
+            'domain': f"""
+                SELECT p.owner_id FROM {table_name} t
+                JOIN versions v ON t.version_id = v.id
+                JOIN products p ON v.product_id = p.id
+                WHERE t.id = ?
+            """,
+            'sub_domain': f"""
+                SELECT p.owner_id FROM {table_name} t
+                JOIN domains d ON t.domain_id = d.id
+                JOIN versions v ON d.version_id = v.id
+                JOIN products p ON v.product_id = p.id
+                WHERE t.id = ?
+            """,
+            'service_module': f"""
+                SELECT p.owner_id FROM {table_name} t
+                JOIN sub_domains sd ON t.sub_domain_id = sd.id
+                JOIN domains d ON sd.domain_id = d.id
+                JOIN versions v ON d.version_id = v.id
+                JOIN products p ON v.product_id = p.id
+                WHERE t.id = ?
+            """,
+            'business_object': f"""
+                SELECT p.owner_id FROM {table_name} t
+                JOIN service_modules sm ON t.service_module_id = sm.id
+                JOIN sub_domains sd ON sm.sub_domain_id = sd.id
+                JOIN domains d ON sd.domain_id = d.id
+                JOIN versions v ON d.version_id = v.id
+                JOIN products p ON v.product_id = p.id
+                WHERE t.id = ?
+            """,
+        }
+        sql = chain_sql_map.get(resource_type)
+        if not sql:
+            return False
         try:
-            cursor = self.ds.execute(
-                f"SELECT created_by, owner_id FROM {table_name} WHERE id = ?",
-                [resource_id]
-            )
+            cursor = self.ds.execute(sql, [resource_id])
             row = cursor.fetchone()
-            if row:
-                created_by, owner_id = row
-                return user_id == created_by or user_id == owner_id
+            return row and row[0] == user_id
         except Exception:
-            pass
-        return False
+            return False
 
     def _check_denied_rules(self, user_id: int, resource_type: str, resource_id: int) -> bool:
         """检查禁止权限（用友BIP禁止权优先原则）"""
