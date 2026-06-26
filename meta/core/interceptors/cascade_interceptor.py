@@ -209,14 +209,145 @@ class CascadeInterceptor(Interceptor):
         target_meta = registry.get(target_type)
         target_table = target_meta.table_name if target_meta else target_type
 
+        # [FIX BUG-V012 2026-06-26] 传递级联 (transitive cascade)
+        # 旧代码: 单次 DELETE children, 但子对象有孙对象时 (version→domain),
+        #         SQLite FK 严格模式会报 FOREIGN KEY constraint failed
+        # 修复: 用 SQLite FK list 找所有阻塞对象, 按倒序全删, 再 DELETE
+        # 案例: TEST90909 product 删时, 实际需要
+        #       1. 删 relationships (引用 business_objects)
+        #       2. 删 business_objects (引用 service_modules)
+        #       3. 删 service_modules (引用 sub_domains)
+        #       4. 删 sub_domains (引用 domains)
+        #       5. 删 domains (引用 versions)
+        #       6. 删 versions (引用 products)
+        #       7. 删 products
+        self._delete_with_transitive_cascade(
+            context, target_type, target_table, foreign_key, context.object_id
+        )
+
+    def _delete_with_transitive_cascade(self, context, child_type: str, child_table: str,
+                                        child_fk: str, child_fk_value, _depth: int = 0) -> None:
+        """[FIX BUG-V012] 传递级联删除 child_type (按 FK 倒序删所有引用).
+
+        思路: 用 SQLite 的 PRAGMA foreign_key_list(child_table) 查所有 FK
+              对每个引用了 child_table 的 ref_table, 先按 FK 倒序递归删 ref_table 中引用了 child 的对象
+
+        Args:
+            child_type: 当前要删的 type (e.g. 'version')
+            child_table: 当前要删的 table (e.g. 'versions')
+            child_fk: 当前要删的 FK column (e.g. 'product_id')
+            child_fk_value: 当前要删的 FK value (e.g. 1)
+            _depth: 递归深度, 防栈溢出
+        """
+        if _depth > 10:
+            logger.warning(f'[BUG-V012] _delete_with_transitive_cascade depth > 10, abort')
+            return
+
+        # 1. 查 child_type 实际要删的 ids
+        try:
+            rows = context.data_source.execute(
+                f"SELECT id FROM {child_table} WHERE {child_fk} = ?",
+                [child_fk_value]
+            ).fetchall()
+        except Exception as e:
+            logger.warning(f'[BUG-V012] query {child_table} failed: {e}')
+            return
+        child_ids = [r[0] if isinstance(r, tuple) else r['id'] for r in rows]
+        if not child_ids:
+            return
+
+        # 2. 查 inbound FK: 哪些表引用 child_table.id
+        #    PRAGMA foreign_key_list(t) 查 t 的 outbound FK (t.from -> t.to_table.t.to)
+        #    要找 inbound (哪个表的 from 引用 child_table.id), 需遍历所有表
+        inbound_fks = self._find_inbound_fks(context, child_table)
+
+        # 3. 对每个引用了 child_table 的 ref_table, 先删 ref_table 中引用了 child_ids 的对象 (递归)
+        #    重要: 按依赖深度倒序 (先删最深的)
+        for fk_row in inbound_fks:
+            # fk_row: (ref_table, ref_fk_col)
+            ref_table = fk_row[0]
+            ref_fk_col = fk_row[1]
+            # 跳过自引用
+            if ref_table == child_table:
+                continue
+            # 跳过不在 schema 里的表 (e.g. 系统表)
+            if ref_table.startswith('sqlite_') or ref_table in ('change_log', 'audit_log', 'change_event', 'operation_log', 'hierarchy_index', 'enumeration_value'):
+                continue
+            # 查 ref_table 中引用了 child_ids 的对象
+            try:
+                placeholders = ','.join('?' for _ in child_ids)
+                ref_rows = context.data_source.execute(
+                    f"SELECT id FROM {ref_table} WHERE {ref_fk_col} IN ({placeholders})",
+                    child_ids
+                ).fetchall()
+            except Exception as e:
+                logger.debug(f'[BUG-V012] query {ref_table}.{ref_fk_col} failed: {e}')
+                continue
+            ref_ids = [r[0] if isinstance(r, tuple) else r['id'] for r in ref_rows]
+            if not ref_ids:
+                continue
+            logger.info(
+                f'[BUG-V012] depth={_depth} deleting {len(ref_ids)} {ref_table} '
+                f'referencing {child_table}({child_ids})'
+            )
+            # 递归: ref_table 的对象也有可能被别人引用
+            for ref_id in ref_ids:
+                self._delete_with_transitive_cascade(
+                    context, ref_table, ref_table, 'id', ref_id, _depth + 1
+                )
+            # 删 ref_table 中所有引用了 child_ids 的对象
+            try:
+                placeholders = ','.join('?' for _ in child_ids)
+                context.data_source.execute(
+                    f"DELETE FROM {ref_table} WHERE {ref_fk_col} IN ({placeholders})",
+                    child_ids
+                )
+            except Exception as e:
+                logger.warning(f'[BUG-V012] DELETE {ref_table} failed: {e}')
+
+        # 4. 最后删 child_table 中所有 child_fk_value 的对象
         try:
             context.data_source.execute(
-                f"DELETE FROM {target_table} WHERE {foreign_key} = ?",
-                [context.object_id]
+                f"DELETE FROM {child_table} WHERE {child_fk} = ?",
+                [child_fk_value]
             )
-            logger.info(f"[CascadeInterceptor] Cascade deleted {target_type} children of {context.object_type}/{context.object_id}")
+            logger.info(
+                f'[BUG-V012] Deleted {len(child_ids)} {child_table} WHERE {child_fk} = {child_fk_value}'
+            )
         except Exception as e:
-            logger.warning(f"[CascadeInterceptor] Cascade delete failed for {target_type}: {e}")
+            logger.warning(f'[BUG-V012] DELETE {child_table} WHERE {child_fk} = {child_fk_value} failed: {e}')
+
+    def _find_inbound_fks(self, context, target_table: str) -> list:
+        """[FIX BUG-V012] 查所有 inbound FK 到 target_table.id.
+
+        遍历 sqlite_master, 对每个表 t 查 PRAGMA foreign_key_list(t),
+        找 `to == 'id' AND table == target_table` 的 FK, 返回 (ref_table, from_col) 列表.
+        """
+        inbound = []
+        try:
+            rows = context.data_source.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+            for row in rows:
+                tname = row[0] if isinstance(row, tuple) else row['name']
+                if tname.startswith('sqlite_') or tname == target_table:
+                    continue
+                try:
+                    fk_rows = context.data_source.execute(
+                        f"PRAGMA foreign_key_list({tname})"
+                    ).fetchall()
+                except Exception:
+                    continue
+                for fk_row in fk_rows:
+                    # (id, seq, table, from, to, on_update, on_delete, match)
+                    ref_table = fk_row[2]
+                    from_col = fk_row[3]
+                    to_col = fk_row[4]
+                    if ref_table == target_table and to_col == 'id':
+                        inbound.append((tname, from_col))
+        except Exception as e:
+            logger.warning(f'[BUG-V012] _find_inbound_fks({target_table}) failed: {e}')
+        return inbound
 
     def _infer_fk_column(self, table_name: str, object_type: str) -> tuple:
         from meta.core.metadata_resolver import MetadataResolver
