@@ -1,25 +1,35 @@
+# ============================================
+# 产品线元模型
+# 层级: 1 (顶层)
+# 说明: 产品线是业务系统的顶层分类，代表一个独立的产品或产品系列
+# ============================================
+
 id: product
 name: 产品线
 table_name: products
 description: 产品线是业务系统的顶层分类，代表一个独立的产品或产品系列。一个产品线可以包含多个版本。
 display_name_field: name
-aspects:
-- audit_aspect
-- naming_aspect
+aspects: [audit_aspect, owner_aspect, naming_aspect]
+
+# 管理维度绑定（Spec v1.3 数据权限统一模型）
 dimension_bindings:
-- dimension: product
-  field: id
+  - dimension: product
+    field: id
+
 deletability:
-  condition: self.child_count == 0
-  message: 存在版本的产品不能删除
+  condition: "self.child_count == 0"
+  message: "存在版本的产品不能删除"
+
 authorization:
   check: true
-  scope: visibility = 'public' OR owner_id = $user.id
+  scope: "visibility = 'public' OR owner_id = $user.id"
   auto_owner: true
   auto_permission: admin
   inherit_to_children: true
   allow_transfer: true
+  # TBD-15 决策 (v1.1 owner refactor): transfer 后原 owner 失去 admin 权限
   transfer_keep_permissions: false
+
 hierarchy:
   enabled: true
   hierarchy_id: biz_hierarchy
@@ -27,6 +37,10 @@ hierarchy:
   parent_field: null
   path_field: hierarchy_path
   depth_field: hierarchy_depth
+
+# ────────────────────────────────────────────
+# 导入导出配置
+# ────────────────────────────────────────────
 import_export:
   import_enabled: true
   export_enabled: true
@@ -34,7 +48,11 @@ import_export:
   cascade_import: true
   conflict_strategy: upsert
   conflict_key: code
-  description_for_agent: 产品线是业务系统的顶层分类。导出时会级联包含所有子对象。
+  description_for_agent: "产品线是业务系统的顶层分类。导出时会级联包含所有子对象。"
+
+# ────────────────────────────────────────────
+# 语义标注
+# ────────────────────────────────────────────
 semantics:
   meaning: 业务系统或产品线的顶层分类
   business_key: true
@@ -42,12 +60,19 @@ semantics:
   category: core_entity
   hierarchy_level: 1
   aliases:
-  - 产品
-  - Product
-  - 产品线
+    - 产品
+    - Product
+    - 产品线
   custom:
     color_coding: primary
     icon: product
+
+# ────────────────────────────────────────────
+# Aspect 引用
+# ────────────────────────────────────────────
+aspects: [audit_aspect, naming_aspect]
+
+# Audit configuration
 audit:
   enabled: true
   create:
@@ -57,551 +82,537 @@ audit:
     enabled: true
     fields: changed_only
     exclude:
-    - id
-    - created_at
-    - updated_at
-    - created_by
-    - updated_by
-  delete:
-    enabled: true
-    fields: business_only
-    exclude:
-    - id
-    - created_at
-    - updated_at
-    - created_by
-    - updated_by
-ui_view_config:
-  filter:
-    layout: sidebar
-    filters:
-    - key: is_active
-      title: 是否活跃
-      type: select
-      position: 0
-    - key: visibility
-      title: 可见性
-      type: select
-      position: 1
-      options:
-      - value: private
-        label: 私有
-      - value: public
-        label: 公开
-    - key: description
-      title: 描述搜索
-      type: text
-      placeholder: 搜索描述内容...
-      position: 100
-  list:
-    detail_mode: page
-    detail_path: /detail/product
-    searchFields:
-    - name
-    - code
-    - description
-    pageSize: 20
-    actions:
-    - id: create
-      label: 新建产品
-      icon: plus
-      type: primary
-    - id: export
-      label: 导出
-      icon: download
-      type: default
-    batch_actions:
-    - id: batch_delete
-      label: 批量删除
-      icon: delete
-      type: danger
-      confirm: 确定要删除选中的产品吗？
-    columns:
-    - key: name
-      title: 名称
-      width: 200
-      position: 1
-      importance: high
-      sortable: true
-      i18n_key: product.field.name
-    - key: code
-      title: 编码
-      width: 120
-      position: 2
-      importance: medium
-      sortable: true
-    - key: is_active
-      title: 是否活跃
-      width: 80
-      position: 3
-      importance: medium
-      sortable: true
-    - key: visibility
-      title: 可见性
-      width: 80
-      position: 4
-      importance: medium
-    - key: owner_id
-      title: 负责人
-      width: 120
-      position: 5
-      importance: medium
-    - key: child_count
-      title: 版本数量
-      width: 80
-      position: 4
-      importance: medium
-      computed: true
-      computation:
-        type: count_children
-        child_object: version
-    - key: created_at
-      title: 创建时间
-      width: 180
-      position: 90
-      importance: low
-      sortable: true
-    - key: updated_at
-      title: 更新时间
-      width: 180
-      position: 91
-      importance: low
-      sortable: true
-    selectable: true
-  detail:
-    facets:
-    - title: 基本信息
-      type: fieldGroup
-      fields:
-      - name
-      - code
-      - description
-      - visibility
-      - is_active
-      - owner_id
-    - title: 系统信息
-      type: fieldGroup
-      fields:
+      - id
       - created_at
       - updated_at
       - created_by
       - updated_by
-    showChangeHistory: true
-  child_sections:
-  - child_object: version
-    title: 版本列表
-    display: expandable
-    pageSize: 10
-    inlineEdit:
-      enabled: true
-      mode: row
-      toolbarPosition: bottom
-    columns:
-    - key: name
-      title: 版本名称
-      width: 150
-      editable: true
-      link:
-        type: external
-        path: /system/archdata
-        params:
-          productId: '{{product_id}}'
-          versionId: '{{id}}'
-    - key: code
-      title: 编码
-      width: 100
-      editable: true
-    - key: is_current
-      title: 当前版本
-      width: 90
-      editable: true
-    - key: owner_id
-      title: 负责人
-      width: 100
-    - key: created_at
-      title: 创建时间
-      width: 160
-    actions:
-    - key: edit
-      label: 编辑
-      type: text
-    - key: delete
-      label: 删除
-      type: text
-      danger: true
-    - key: set_current
-      label: 设为当前
-      type: primary
-      condition: row.is_current !== true
-    defaultSort:
-      field: created_at
-      order: desc
-  form:
-    sections:
-    - title: 基本信息
-      fields:
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+      - created_by
+      - updated_by
+
+# ────────────────────────────────────────────
+# UI 视图配置
+# ────────────────────────────────────────────
+ui_view_config:
+  filter:
+    layout: sidebar
+    filters:
+      - key: is_active
+        title: 是否活跃
+        type: select
+        position: 0
+      - key: visibility
+        title: 可见性
+        type: select
+        position: 1
+        options:
+          - { value: private, label: 私有 }
+          - { value: public, label: 公开 }
+      - key: description
+        title: 描述搜索
+        type: text
+        placeholder: 搜索描述内容...
+        position: 100
+  list:
+    detail_mode: page
+    detail_path: '/detail/product'
+    searchFields:
       - name
       - code
       - description
-      - visibility
-      - is_active
+    pageSize: 20
+    actions:
+      - id: create
+        label: 新建产品
+        icon: plus
+        type: primary
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    batch_actions:
+      - id: batch_delete
+        label: 批量删除
+        icon: delete
+        type: danger
+        confirm: 确定要删除选中的产品吗？
+    columns:
+      - key: name
+        title: 名称
+        width: 200
+        position: 1
+        importance: high
+        sortable: true
+        i18n_key: product.field.name
+      - key: code
+        title: 编码
+        width: 120
+        position: 2
+        importance: medium
+        sortable: true
+      - key: is_active
+        title: 是否活跃
+        width: 80
+        position: 3
+        importance: medium
+        sortable: true
+      - key: visibility
+        title: 可见性
+        width: 80
+        position: 4
+        importance: medium
+      - key: owner_id
+        title: 负责人
+        width: 120
+        position: 5
+        importance: medium
+        # [FIX 2026-06-16] 列指向 owner_id (FK) 而非 owner_id_display:
+        #   1) 自动生成识别 ui.relation=user, 给 column.value_help_config (含 display_name)
+        #   2) filter 变 value_help dropdown, 后端可正确按 owner_id IN (...) 过滤
+        #   3) 渲染走 FkLinkField + getFkDisplayValue (row['owner_id_display']) 显示中文名
+        #   4) 详情 facet 已用 owner_id, 列表/详情行为统一
+      - key: child_count
+        title: 版本数量
+        width: 80
+        position: 4
+        importance: medium
+        computed: true
+        computation:
+          type: count_children
+          child_object: version
+      - key: created_at
+        title: 创建时间
+        width: 180
+        position: 90
+        importance: low
+        sortable: true
+      - key: updated_at
+        title: 更新时间
+        width: 180
+        position: 91
+        importance: low
+        sortable: true
+    pageSize: 20
+    selectable: true
+  detail:
+    facets:
+      - title: 基本信息
+        type: fieldGroup
+        fields:
+          - name
+          - code
+          - description
+          - visibility
+          - is_active
+          - owner_id
+      - title: 系统信息
+        type: fieldGroup
+        fields:
+          - created_at
+          - updated_at
+          - created_by
+          - updated_by
+    showChangeHistory: true
+
+  # 子对象列表配置（用于在产品详情页中嵌入版本列表）
+  child_sections:
+    - child_object: version
+      title: 版本列表
+      display: expandable
+      pageSize: 10
+      inlineEdit:
+        enabled: true
+        mode: row
+        toolbarPosition: bottom
+      columns:
+        - key: name
+          title: 版本名称
+          width: 150
+          editable: true
+          link:
+            type: external
+            path: /system/archdata
+            params:
+              productId: "{{product_id}}"
+              versionId: "{{id}}"
+        - key: code
+          title: 编码
+          width: 100
+          editable: true
+        - key: is_current
+          title: 当前版本
+          width: 90
+          editable: true
+        - key: owner_id
+          title: 负责人
+          width: 100
+        - key: created_at
+          title: 创建时间
+          width: 160
+      actions:
+        - key: edit
+          label: 编辑
+          type: text
+        - key: delete
+          label: 删除
+          type: text
+          danger: true
+        - key: set_current
+          label: 设为当前
+          type: primary
+          condition: "row.is_current !== true"
+      defaultSort:
+        field: created_at
+        order: desc
+  form:
+    sections:
+      - title: 基本信息
+        fields:
+          - name
+          - code
+          - description
+          - visibility
+          - is_active
   change_notification:
     enabled: true
     events:
-    - type: create
-      channels:
-      - in_app
-      track_fields:
-      - code
-      - name
-      payload:
-      - id
-      - code
-      - name
-    - type: update
-      channels:
-      - in_app
-      track_fields:
-      - code
-      - name
-      - is_active
-      payload:
-      - id
-      - code
-      - name
-    - type: delete
-      channels:
-      - in_app
-      track_fields: []
-      payload:
-      - id
-      - code
-      - name
+      - type: create
+        channels: [in_app]
+        track_fields: [code, name]
+        payload: [id, code, name]
+      - type: update
+        channels: [in_app]
+        track_fields: [code, name, is_active]
+        payload: [id, code, name]
+      - type: delete
+        channels: [in_app]
+        track_fields: []
+        payload: [id, code, name]
+
+# ────────────────────────────────────────────
+# 字段定义
+# ────────────────────────────────────────────
 fields:
-- id: id
-  name: ID
-  type: integer
-  db_column: id
-  required: true
-  unique: true
-  description: 技术主键
-  ui:
-    visible: false
-    editable: false
-  semantics:
-    meaning: 自增主键，系统内部使用
-    import_order: 999
-    analytics:
-      category: measure
-      aggregation: count
-      display_name: 产品数量
-- id: name
-  name: 名称
-  type: string
-  db_column: name
-  required: true
-  description: 产品线名称
-  semantics:
-    meaning: 产品线的显示名称
-    display_name: true
-    data_category: text
-    import_visible: true
-    export_visible: true
-    import_order: 20
-    examples:
-    - 供应链系统
-    - 财务系统
-    - ERP系统
-- id: code
-  name: 产品编码
-  type: string
-  db_column: code
-  required: true
-  unique: true
-  description: 产品线编码，用于唯一标识产品线
-  semantics:
-    meaning: 产品线的业务编码
-    business_key: true
-    display_name: true
-    immutable: true
-    pattern: ^[A-Z][A-Z0-9_]*$
-    data_category: code
-    import_visible: true
-    export_visible: true
-    import_order: 1
-    examples:
-    - SCM
-    - FIN
-    - ERP
-- id: description
-  name: 描述
-  type: text
-  db_column: description
-  description: 产品线描述
-  ui:
-    render_hints:
-      searchable: true
-  semantics:
-    meaning: 产品线的详细描述
-    data_category: text
-    import_visible: true
-    export_visible: true
-    import_order: 30
-- id: visibility
-  name: 可见性
-  type: string
-  db_column: visibility
-  description: 产品线可见性 (private/public)，控制整个产品树访问
-  default: private
-  required: true
-  enum_values:
-  - value: private
-    label: 私有
-    color: warning
-    description: 仅产品负责人和管理员可见
-  - value: public
-    label: 公开
-    color: success
-    description: 所有有产品权限的用户可见
-  ui:
-    widget: select
-    visible: true
-    editable: true
-    fieldGroup: 基本信息
-    i18n_key: common.field.visibility
-  semantics:
-    meaning: 产品线的可见性，控制整个产品树的访问权限
-    data_category: code
-    import_visible: true
-    export_visible: true
-    import_order: 80
-    immutable: false
-- id: owner_id
-  name: 负责人
-  type: integer
-  db_column: owner_id
-  description: 产品线负责人ID（由系统自动设置）
-  ui:
-    visible: true
-    editable: false
-    widget: select
-    relation: user
-    display_field: display_name
-    fieldGroup: 基本信息
-    i18n_key: common.field.owner_id
-  semantics:
-    meaning: 产品线的负责人，关联用户表
-    export_visible: false
-    import_visible: false
-    analytics:
-      category: dimension
-      type: foreign_key
-      display_name: 负责人
-    import_order: 60
-  value_help:
-    source:
-      type: bo
-      target_bo: user
-      value_field: id
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    ui:
+      visible: false
+      editable: false
+    semantics:
+      meaning: 自增主键，系统内部使用
+      analytics:
+        category: measure
+        aggregation: count
+        display_name: 产品数量
+
+  - id: name
+    name: 名称
+    type: string
+    db_column: name
+    required: true
+    description: 产品线名称
+    semantics:
+      meaning: 产品线的显示名称
+      display_name: true
+      data_category: text
+      import_visible: true
+      export_visible: true
+      import_order: 20
+      examples:
+        - 供应链系统
+        - 财务系统
+        - ERP系统
+
+  - id: code
+    name: 产品编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    description: 产品线编码，用于唯一标识产品线
+    semantics:
+      meaning: 产品线的业务编码
+      business_key: true
+      display_name: true
+      immutable: true
+      pattern: "^[A-Z][A-Z0-9_]*$"
+      data_category: code
+      import_visible: true
+      export_visible: true
+      import_order: 1
+      examples:
+        - SCM
+        - FIN
+        - ERP
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    description: 产品线描述
+    ui:
+      render_hints:
+        searchable: true
+    semantics:
+      meaning: 产品线的详细描述
+      data_category: text
+      import_visible: true
+      export_visible: true
+      import_order: 30
+
+  # 🆕 v1.1 owner refactor: product 级 visibility (TBD-7)
+  # 整个产品树 (version/domain/.../business_object) 的可见性由 product.visibility 决定
+  # - private: 仅 product.owner + admin + 显式授权者可见
+  # - public: 所有人可见
+  - id: visibility
+    name: 可见性
+    type: string
+    db_column: visibility
+    description: 产品线可见性 (private/public)，控制整个产品树访问
+    default: private
+    required: true
+    enum_values:
+      - value: private
+        label: 私有
+        color: warning
+        description: 仅产品负责人和管理员可见
+      - value: public
+        label: 公开
+        color: success
+        description: 所有有产品权限的用户可见
+    ui:
+      widget: select
+      visible: true
+      editable: true
+      fieldGroup: 基本信息
+      i18n_key: common.field.visibility
+    semantics:
+      meaning: 产品线的可见性，控制整个产品树的访问权限
+      data_category: code
+      import_visible: true
+      export_visible: true
+      import_order: 5
+      immutable: false  # owner 可改 public <-> private
+
+  - id: owner_id
+    name: 负责人
+    type: integer
+    db_column: owner_id
+    description: 产品线负责人ID（由系统自动设置）
+    ui:
+      visible: true
+      editable: false
+      widget: select
+      relation: user
       display_field: display_name
-      code_field: username
-      apply_target_permissions: false
-    behavior:
-      validation: true
-      binding_strength: strict
-      search_fields:
-      - username
-      - display_name
-    presentation:
-      result_type: dialog
-      display_format: '{display_name} ({username})'
-      display_columns:
-      - field: username
-        label: 用户名
-        width: 120
-      - field: display_name
-        label: 显示名称
-        width: 150
-      - field: email
-        label: 邮箱
-        width: 200
-- id: is_active
-  name: 是否活跃
-  type: boolean
-  db_column: is_active
-  default: true
-  description: 产品线是否活跃
-  enum_values:
-  - value: 1
-    label: 是
-    color: success
-  - value: 0
-    label: 否
-    color: info
-  ui:
-    widget: switch
-  semantics:
-    meaning: 标记产品线是否在使用中
-    import_order: 81
-    analytics:
-      category: dimension
-      type: boolean
-      display_name: 活跃状态
-- id: child_count
-  name: 版本数量
-  type: integer
-  description: 产品线下的版本数量
-  storage: virtual
-  computed: true
-  semantics:
-    meaning: 产品线包含的版本数量
-    analytics:
-      category: measure
-      aggregation: sum
-      display_name: 版本总数
-    import_order: 95
-  computation:
-    type: count_children
-    child_object: version
-  ui:
-    visible: true
-    editable: false
+      fieldGroup: 基本信息
+      i18n_key: common.field.owner_id
+    semantics:
+      meaning: 产品线的负责人，关联用户表
+      export_visible: false
+      import_visible: false
+      analytics:
+        category: dimension
+        type: foreign_key
+        display_name: 负责人
+    value_help:
+      source:
+        type: bo
+        target_bo: user
+        value_field: id
+        display_field: display_name
+        code_field: username
+        apply_target_permissions: false
+      behavior:
+        validation: true
+        binding_strength: strict
+        search_fields: [username, display_name]
+      presentation:
+        result_type: dialog
+        display_format: "{display_name} ({username})"
+        # [FIX 2026-06-16] columns → display_columns
+        #   yaml_loader & 前端 SearchHelpDialog 都只读 display_columns,
+        #   原 columns: 字段被忽略, 导致 valuehelp dialog 列定义空
+        display_columns:
+          - field: username
+            label: 用户名
+            width: 120
+          - field: display_name
+            label: 显示名称
+            width: 150
+          - field: email
+            label: 邮箱
+            width: 200
+
+  - id: is_active
+    name: 是否活跃
+    type: boolean
+    db_column: is_active
+    default: true
+    description: 产品线是否活跃
+    enum_values:
+      - value: 1
+        label: 是
+        color: success
+      - value: 0
+        label: 否
+        color: info
+    ui:
+      widget: switch
+    semantics:
+      meaning: 标记产品线是否在使用中
+      analytics:
+        category: dimension
+        type: boolean
+        display_name: 活跃状态
+
+  - id: child_count
+    name: 版本数量
+    type: integer
+    description: 产品线下的版本数量
+    storage: virtual
+    computed: true
+    semantics:
+      meaning: 产品线包含的版本数量
+      analytics:
+        category: measure
+        aggregation: sum
+        display_name: 版本总数
+    computation:
+      type: count_children
+      child_object: version
+    ui:
+      visible: true
+      editable: false
+
+# ────────────────────────────────────────────
+# UI 关联配置（用于详情页子对象列表等）
+# ────────────────────────────────────────────
 associations:
-- name: version
-  target_type: version
-  type: composition
-  source_key: product_id
-  cascade_delete: true
-  ownership: true
-  on_delete: CASCADE
-  description: 产品线级联删除其下所有版本 (composition 链头)
-  display:
-    label: 版本
-    plural_label: 版本列表
-    target_display_field: name
-    target_code_field: code
+  - name: version
+    target_type: version
+    type: composition
+    source_key: product_id
+    # [FIX 2026-06-25] 显式标注: product -> version 应 CASCADE
+    # 原因: 产品是顶层分类, version 是其内部数据, 删产品应级联清理 version
+    # 注意: 这是分段级联, 不是整链级联
+    #   product (CASCADE) -> version (RESTRICT) -> domain (CASCADE) -> ...
+    #   删 product 触发 CASCADE 删 version
+    #   删 version 遇到 RESTRICT 阻止 (因 version 仍含 domain)
+    #   所以整条链在 version 这一层就停了, 不会真的级联到 domain
+    #   domain 视为独立业务数据, 不随 product/version 删除
+    cascade_delete: true
+    ownership: true
+    on_delete: CASCADE
+    description: 产品线级联删除其下所有版本 (在 version 层停下, 不再级联 domain)
+    display:
+      label: 版本
+      plural_label: 版本列表
+      target_display_field: name
+      target_code_field: code
+
+# ────────────────────────────────────────────
+# 状态转换规则
+# ────────────────────────────────────────────
 rules:
-- id: activate_product
-  name: 激活产品线
-  type: state_transition
-  state_field: is_active
-  from_states:
-  - false
-  to_state: true
-  triggers:
-  - before_update
-  ui_hints:
-    label: 激活
-    icon: check_circle
-    confirm_message: 确定要激活此产品线吗？
-    highlight: true
-- id: deactivate_product
-  name: 停用产品线
-  type: state_transition
-  state_field: is_active
-  from_states:
-  - true
-  to_state: false
-  triggers:
-  - before_update
-  ui_hints:
-    label: 停用
-    icon: pause_circle
-    confirm_message: 确定要停用此产品线吗？
+  - id: activate_product
+    name: 激活产品线
+    type: state_transition
+    state_field: is_active
+    from_states: [false]
+    to_state: true
+    triggers: [before_update]
+    ui_hints:
+      label: 激活
+      icon: check_circle
+      confirm_message: "确定要激活此产品线吗？"
+      highlight: true
+
+  - id: deactivate_product
+    name: 停用产品线
+    type: state_transition
+    state_field: is_active
+    from_states: [true]
+    to_state: false
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "确定要停用此产品线吗？"
+
+# ────────────────────────────────────────────
+# 关联关系
+# ────────────────────────────────────────────
 relations:
-- id: product_to_versions
-  name: 包含版本
-  type: parent_child
-  target: version
-  cardinality: 1:N
-  description: 一个产品线包含多个版本
-  semantics:
-    meaning: 产品线与版本的层级关系
+  - id: product_to_versions
+    name: 包含版本
+    type: parent_child
+    target: version
+    cardinality: "1:N"
+    description: 一个产品线包含多个版本
+    semantics:
+      meaning: 产品线与版本的层级关系
+
+# ────────────────────────────────────────────
+# 操作定义
+# ────────────────────────────────────────────
 actions:
-- id: product_create
-  name: 创建产品线
-  type: crud
-  method: POST
-  path: /api/v1/products
-  description: 创建新的产品线
-- id: product_read
-  name: 查询产品线
-  type: crud
-  method: GET
-  path: /api/v1/products/{id}
-  description: 查询单个产品线
-- id: product_list
-  name: 列表查询
-  type: crud
-  method: GET
-  path: /api/v1/products
-  description: 查询产品线列表
-- id: product_update
-  name: 更新产品线
-  type: crud
-  method: PUT
-  path: /api/v1/products/{id}
-  description: 更新产品线信息
-- id: product_delete
-  name: 删除产品线
-  type: crud
-  method: DELETE
-  path: /api/v1/products/{id}
-  description: 删除产品线
+  - id: product_create
+    name: 创建产品线
+    type: crud
+    method: POST
+    path: /api/v1/products
+    description: 创建新的产品线
+
+  - id: product_read
+    name: 查询产品线
+    type: crud
+    method: GET
+    path: /api/v1/products/{id}
+    description: 查询单个产品线
+
+  - id: product_list
+    name: 列表查询
+    type: crud
+    method: GET
+    path: /api/v1/products
+    description: 查询产品线列表
+
+  - id: product_update
+    name: 更新产品线
+    type: crud
+    method: PUT
+    path: /api/v1/products/{id}
+    description: 更新产品线信息
+
+  - id: product_delete
+    name: 删除产品线
+    type: crud
+    method: DELETE
+    path: /api/v1/products/{id}
+    description: 删除产品线
+
+# ────────────────────────────────────────────
+# 校验规则
+# ────────────────────────────────────────────
 validations:
-- id: name_required
-  name: 名称必填
-  type: field
-  rule: name is not None and name != ''
-  message: 产品线名称不能为空
-  severity: error
-ui_actions:
-  create:
-    label: 新建产品
-    icon: plus
-    type: primary
-    permission: product:create
-    visible_when: true
-  export:
-    label: 导出
-    icon: download
-    type: default
-    permission: product:export
-    visible_when: true
-ui_badge:
-  visibility:
-    color_map:
-      private: warning
-      public: success
-  is_active:
-    color_map:
-      1: info
-audit_levels:
-- name: create
-  level: INFO
-  category: operation
-- name: update
-  level: INFO
-  category: operation
-- name: delete
-  level: WARN
-  category: destructive
-routes:
-  detail: /detail/product
-  list: /product-management
-list:
-  pagination:
-    default_page_size: 20
-    page_size_options:
-    - 10
-    - 20
-    - 50
-    - 100
-nested:
-  enabled: true
-  parent: None
-  children:
-  - version
-persistence:
-  strategy: audit_log
-  survive_reload: true
+  - id: name_required
+    name: 名称必填
+    type: field
+    rule: name is not None and name != ''
+    message: 产品线名称不能为空
+    severity: error
+
+

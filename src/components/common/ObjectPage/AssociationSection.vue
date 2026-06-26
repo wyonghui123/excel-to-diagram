@@ -527,7 +527,7 @@ async function handleAnnotationAction(event, section) {
     }
   } catch (e) {
     console.error('[AssociationSection] Annotation action failed:', e)
-    message.error('操作失败', e)
+    message.error(e?.message || '关联操作失败', e)
   }
 }
 
