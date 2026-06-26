@@ -472,16 +472,29 @@ class ManageService:
                                 message=f"无法删除：存在关联的{child_meta.name or relation.target_object}"
                             )
 
-        before_result = cascade_service.before_delete(request.object_type, request.id)
-        if not before_result["can_delete"]:
-            return ActionResult.fail(
-                error="CASCADE_RESTRICT",
-                message="无法删除：存在关联的子对象"
+        # [FIX BUG-V013 2026-06-26] 修复 cascade_service.before_delete 与 associations[].cascade_delete 冲突
+        # 旧逻辑: 当 YAML associations[].cascade_delete=true (应级联),
+        #         但 hierarchies.yaml 中 delete_behavior.policy=RESTRICT 时,
+        #         cascade_service.before_delete 仍会返回 can_delete=False,
+        #         导致级联删除被错误拒绝.
+        # 修复: 如果所有 child 关联都是 cascade_delete=true, 跳过 cascade_service.before_delete 检查,
+        #         让 cascade_interceptor 处理实际的级联删除 (它会读取 associations[] 配置).
+        if self._all_children_cascade_delete(meta_obj):
+            logger.debug(
+                f'[BUG-V013] skip cascade_service.before_delete for {request.object_type}({request.id}) '
+                f'- all children are cascade_delete=true, will use cascade_interceptor'
             )
+        else:
+            before_result = cascade_service.before_delete(request.object_type, request.id)
+            if not before_result["can_delete"]:
+                return ActionResult.fail(
+                    error="CASCADE_RESTRICT",
+                    message="无法删除：存在关联的子对象"
+                )
 
-        cascade_result = None
-        if before_result["actions"]:
-            cascade_result = cascade_service.execute_cascade(before_result["actions"])
+            cascade_result = None
+            if before_result["actions"]:
+                cascade_result = cascade_service.execute_cascade(before_result["actions"])
 
         params = {"id": request.id}
         skip_rules = request.force
