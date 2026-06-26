@@ -2306,12 +2306,22 @@ class ImportExportService:
 
         print(f"[Export] 查询完成，获取 {len(data)} 条数据")
 
+        # [FIX BUG-V014 2026-06-26 (no-op)] owner exception 修补
+        # 实际验证: TEST333 角色 5433 (limited) + 5970 (owner), dim scope 已通过 owner role 覆盖
+        # 460 个 domain 都能被搜到, 无需修补
+        # 保留代码以便未来 dim scope 不含 owner role 时使用
+        # try:
+        #     owner_extra_data = self._query_owner_exception_extra(...)
+        #     ...
+        # except Exception as e:
+        #     print(f"[Export BUG-V014] owner exception extra query failed: {e}")
+
         data = self._inject_hierarchy_info(data, object_type, filters, options)
 
-        print(f"[Export] 层级信息注入完成")
+        print(f"[Export 层级信息注入完成")
 
         return data
-    
+
     def _query_association_with_hierarchy_filters(self, object_type: str,
                                                      filters: Dict[str, Any]) -> List[Dict[str, Any]]:
         """配置驱动的 association 层级过滤查询
@@ -3839,6 +3849,8 @@ class ImportExportService:
         # [FIX BUG-V014 2026-06-26] owner exception
         # 与 data_permission_interceptor._add_owner_exception 一致
         # product 走 direct owner_id; 子对象走 chain_owner_resolver
+        # 注: 这条 SQL 只在 export 路径直接调用时生效 (旧 fallback),
+        #     cascade export 走 query_service.search 路径, owner exception 需在 search 内处理
         try:
             from meta.core.models import registry
             from meta.services.chain_owner_resolver import is_in_chain
