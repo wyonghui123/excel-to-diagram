@@ -881,18 +881,59 @@ class DataPermissionInterceptor(Interceptor):
                   owner_cond,
               ]}
           ]
+
+        [FIX BUG-V013 2026-06-26] product 列表查询
+          - has_owner_id(product) 在 V1.1.4 refactor 后返回 False (yaml 无 owner_aspect)
+          - 但 DB 实际 products.owner_id 列存在
+          - 旧代码跳过 owner exception, dim scope product_id=475 永远不覆盖
+          - 修复: product 走 direct owner_id; 子对象走 chain_owner_resolver (跟 BUG-V010 一样)
         """
         if not context.user_id:
             return
-        if not self._bo_has_owner_id(context):
+
+        # [FIX BUG-V013] 不再依赖 yaml owner_aspect, 而是按 BO 类型分:
+        # - product: 直接用 owner_id (DB 列存在)
+        # - 子对象 (version/domain/...): 用 chain_owner_resolver 走 product 链追溯
+        from meta.core.models import registry
+        from meta.services.chain_owner_resolver import is_in_chain
+        meta = registry.get(context.object_type)
+        if not meta:
             return
 
-        owner_cond = {
-            'field': 'owner_id',
-            'operator': 'eq',
-            'value': context.user_id,
-            'source': 'owner_exception',
-        }
+        object_type = context.object_type
+        user_id = context.user_id
+        owner_conds = []
+
+        if object_type == 'product':
+            # product 直接用 owner_id
+            owner_conds.append({
+                'field': 'owner_id',
+                'operator': 'eq',
+                'value': user_id,
+                'source': 'owner_exception',
+            })
+        elif is_in_chain(object_type):
+            # 子对象 (version/domain/...) 用 chain_owner_resolver 走 product 链
+            # SQL: product_id IN (SELECT id FROM products WHERE owner_id = ?)
+            owner_conds.append({
+                'field': 'product_id',
+                'operator': 'in_subquery',
+                'subquery': 'SELECT id FROM products WHERE owner_id = ?',
+                'value': user_id,
+                'source': 'owner_exception_chain',
+            })
+        else:
+            # 其他 (无 owner 关系) 跳过
+            return
+
+        if len(owner_conds) == 1:
+            owner_cond = owner_conds[0]
+        else:
+            owner_cond = {
+                'type': 'or',
+                'conditions': owner_conds,
+            }
+
         existing = list(context.extra.get('query_conditions', []))
         if not existing:
             context.extra['query_conditions'] = [owner_cond]
