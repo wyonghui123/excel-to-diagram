@@ -4,7 +4,7 @@
  * [业务模型规则驱动 (BMRD) v2.0 - 自动生成]
  * 来源: .trae/specs/_business_rules/*.yaml
  * 生成器: scripts/generate-protection-tests.py
- * 生成时间: 2026-06-13
+ * 生成时间: 2026-06-25
  *
  * 业务规则:
  *   DEC-1: System/Locked 枚举保护 [ACTIVE]

@@ -56,3 +56,23 @@ category_config:
   sub_category: permission
   icon: "shield"
   color: "#ef4444"
+
+# ============================================
+# 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
+# ============================================
+
+routes:
+  detail: /detail/role_data_permission/role_data_permission-detail
+  list: /role_data_permission-management
+
+list:
+  pagination:
+    default_page_size: 20
+    page_size_options: [10, 20, 50, 100]
+
+nested:
+  enabled: False
+
+persistence:
+  strategy: audit_log
+  survive_reload: True

@@ -4,6 +4,15 @@
 
 创建 menu_permissions 表并插入系统菜单数据
 每个菜单关联对应的业务对象（BO）
+
+[H14.1] 单一事实源约定：
+    yaml  meta/schemas/*.yaml  import_export: 段
+        是导入导出权限的"业务能力声明" (ImportExportService 能否工作)
+    menu menus.bo_bindings[*].include_actions
+        是权限矩阵 UI 推导源 (_derive_bo_permission_groups 的 actions_map)
+    步骤 6.5 自动从前者派生后者, 消除两层独立维护导致的漂移.
+    人工显式声明 (yaml 未配但 menu 声明, 如 user_group 的 assign)
+    通过反向 KEEP 保留, 不被本脚本删除.
 """
 
 import sqlite3
@@ -11,6 +20,8 @@ import os
 import json
 import sys
 import io
+import glob
+import yaml
 if sys.stdout.encoding != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
@@ -137,16 +148,19 @@ def init_menu_permissions(db_path):
             'object_types': json.dumps(['domain', 'sub_domain', 'service_module', 'relationship', 'audit_log']),
             'bo_bindings': json.dumps([
                 {'bo_id': 'domain', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list', 'export', 'import']},
-                {'bo_id': 'sub_domain', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
-                {'bo_id': 'service_module', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
-                {'bo_id': 'business_object', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+                # [H14.1] 同步 yaml import_export: sub_domain / service_module / business_object 支持导入导出
+                {'bo_id': 'sub_domain', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list', 'export', 'import']},
+                {'bo_id': 'service_module', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list', 'export', 'import']},
+                {'bo_id': 'business_object', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list', 'export', 'import']},
                 # 🆕 BMRD-2026-06-14 方案A: 关系对象随架构数据自动带入 (FR-013 轻量版)
                 # 关系数据是跨层级的纽带, 架构数据管理页操作 domain/sub_domain/... 时必然要查阅
                 # 其相互之间的关系, role='derived' 表示派生而非主 BO
-                {'bo_id': 'relationship', 'role': 'derived', 'include_actions': ['read', 'export']},
+                # [H14.1] relationship yaml 支持 import, 补全
+                {'bo_id': 'relationship', 'role': 'derived', 'include_actions': ['read', 'export', 'import']},
                 # 🆕 BMRD-2026-06-14 审计日志自动带入
                 # domain 详情页"操作日志" tab 需要 read 权限, 紧化 v1 endpoint 后
                 # (v1 现在也校验 audit_log:read) 必须显式 grant 才能看到
+                # [H14.1] audit_log yaml import_enabled=false, 只保留 export
                 {'bo_id': 'audit_log', 'role': 'derived', 'include_actions': ['read', 'export']},
             ]),
             'required_permissions': json.dumps([
@@ -175,8 +189,9 @@ def init_menu_permissions(db_path):
             'primary_object_type': 'product',
             'object_types': json.dumps(['product']),
             'bo_bindings': json.dumps([
-                {'bo_id': 'product', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
-                {'bo_id': 'version', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+                # [H14.1] 同步 yaml import_export: product / version 支持导入导出
+                {'bo_id': 'product', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list', 'export', 'import']},
+                {'bo_id': 'version', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list', 'export', 'import']},
             ]),
             'required_permissions': json.dumps([
                 'product:create', 'product:read', 'product:update', 'product:delete',
@@ -211,8 +226,10 @@ def init_menu_permissions(db_path):
             'primary_object_type': 'user',
             'object_types': json.dumps(['user', 'role', 'user_group']),
             'bo_bindings': json.dumps([
-                {'bo_id': 'user', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
-                {'bo_id': 'role', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+                # [H14.1] 同步 yaml import_export: user / role 支持导入导出
+                # user_group yaml 未配 import_export (无导入导出服务), 显式声明的 assign/unassign/grant/revoke 由 6.5 反向 KEEP
+                {'bo_id': 'user', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list', 'export', 'import']},
+                {'bo_id': 'role', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list', 'export', 'import']},
                 {'bo_id': 'user_group', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list', 'assign', 'unassign', 'grant', 'revoke']},
             ]),
             'required_permissions': json.dumps([
@@ -238,7 +255,8 @@ def init_menu_permissions(db_path):
             'primary_object_type': 'enum_type',
             'object_types': json.dumps(['enum_type']),
             'bo_bindings': json.dumps([
-                {'bo_id': 'enum_type', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
+                # [H14.1] 同步 yaml import_export: enum_type 仅 export_enabled=true (import_enabled=false)
+                {'bo_id': 'enum_type', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list', 'export']},
             ]),
             'required_permissions': json.dumps([
                 'enum_type:create', 'enum_type:read', 'enum_type:update', 'enum_type:delete',
@@ -260,7 +278,8 @@ def init_menu_permissions(db_path):
             'primary_object_type': 'audit_log',
             'object_types': json.dumps(['audit_log']),
             'bo_bindings': json.dumps([
-                {'bo_id': 'audit_log', 'role': 'primary', 'include_actions': ['read']},
+                # [H14.1] 同步 yaml import_export: audit_log 仅 export_enabled=true (import_enabled=false)
+                {'bo_id': 'audit_log', 'role': 'primary', 'include_actions': ['read', 'export']},
             ]),
             # [FIX 2026-06-14] 菜单 "日志管理" 限定 super-admin only.
             #   any(p in user_perms for p in required) 语义下, 普通权限 (如 audit_log:read) 会让所有业务用户都能看见.
@@ -384,7 +403,77 @@ def init_menu_permissions(db_path):
             ])
             print(f"  [OK] nav:  {menu['menu_name']} ({menu['menu_code']}) [{menu.get('page_type')}]")
 
-    # ========== 步骤7：验证结果 ==========
+    # ========== 步骤6.5: yaml import_export → menu bo_bindings 自动对齐 ==========
+    # [H14.1] 单一事实源同步: 从 meta/schemas/*.yaml 读 import_export.import_enabled /
+    # export_enabled, 自动补全到 menus.bo_bindings 对应 BO 的 include_actions.
+    # 不删除人工显式声明 (yaml 未配但 menu 声明), 用 [KEEP] 日志标记.
+    print("\n[步骤6.5] 对齐 yaml import_export → menu bo_bindings ...")
+    schemas_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'schemas')
+    yaml_action_map = {}  # bo_id -> {'import': bool, 'export': bool}
+    for yaml_path in glob.glob(os.path.join(schemas_dir, '*.yaml')):
+        try:
+            with open(yaml_path, 'r', encoding='utf-8') as f:
+                data = yaml.safe_load(f)
+        except Exception as e:
+            print(f"  [WARN] 解析失败 {os.path.basename(yaml_path)}: {e}")
+            continue
+        if not data or 'id' not in data:
+            continue
+        ie = data.get('import_export')
+        if not ie:
+            continue
+        bo_id = data['id']
+        yaml_action_map[bo_id] = {
+            'import': bool(ie.get('import_enabled', False)),
+            'export': bool(ie.get('export_enabled', False)),
+        }
+
+    align_total = 0
+    keep_total = 0
+    for menu in system_menus:
+        menu_code = menu['menu_code']
+        # 从 DB 读最新 bo_bindings (步骤 6 UPSERT 后)
+        cursor.execute("SELECT bo_bindings FROM menus WHERE menu_code = ?", [menu_code])
+        row = cursor.fetchone()
+        if not row or not row[0]:
+            continue
+        try:
+            bindings = json.loads(row[0])
+        except Exception:
+            continue
+        if not bindings:
+            continue
+        menu_dirty = False
+        for b in bindings:
+            bo_id = b.get('bo_id')
+            if not bo_id:
+                continue
+            include_actions = b.get('include_actions', [])
+            # 1) 从 yaml 派生 import/export
+            yaml_acts = yaml_action_map.get(bo_id)
+            if yaml_acts:
+                for act_key, enabled in yaml_acts.items():
+                    if enabled and act_key not in include_actions:
+                        include_actions.append(act_key)
+                        print(f"  [ALIGN] {menu_code}/{bo_id}: +{act_key}")
+                        align_total += 1
+                        menu_dirty = True
+            # 2) 反向 KEEP: yaml 未配 export/import 但 menu 显式声明, 保留 (人工意图)
+            for act_key in ('export', 'import'):
+                if act_key in include_actions:
+                    if not yaml_acts or not yaml_acts.get(act_key):
+                        keep_total += 1
+                        # 不打日志避免噪音, 仅在最终统计报告
+        if menu_dirty:
+            cursor.execute(
+                "UPDATE menus SET bo_bindings = ? WHERE menu_code = ?",
+                [json.dumps(bindings, ensure_ascii=False), menu_code]
+            )
+    if align_total == 0 and keep_total == 0:
+        print("  [OK] 无需对齐 (yaml ↔ menu 已一致)")
+    else:
+        print(f"  [OK] 对齐完成: +{align_total} 个独立动作, 保留 {keep_total} 个人工显式声明")
+
     print("\n[步骤7] 验证初始化结果...")
 
     cursor.execute("SELECT COUNT(*) FROM menus")
@@ -512,6 +601,16 @@ def init_menu_permissions(db_path):
 
 
 if __name__ == '__main__':
-    db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'architecture.db')
+    # [H14.1] 支持通过环境变量指定 db_path (与 server.py:455-456 行为一致)
+    # 优先级: CLI 参数 > ARCH_DB_PATH > SQLITE_DB_PATH > meta/architecture.db
+    db_path = None
+    if len(sys.argv) > 1:
+        db_path = sys.argv[1]
+    if not db_path:
+        db_path = os.environ.get('ARCH_DB_PATH')
+    if not db_path:
+        db_path = os.environ.get('SQLITE_DB_PATH')
+    if not db_path:
+        db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'architecture.db')
     print(f"数据库路径: {db_path}")
     init_menu_permissions(db_path)

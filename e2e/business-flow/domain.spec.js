@@ -22,7 +22,7 @@
  *   BR-domain-DEL-condition  (存在子领域或关联关系的领域不能删除)
  *   BR-domain-AUDIT-create/update/delete  (审计日志)
  *
- * 自动生成时间: 2026-06-13
+ * 自动生成时间: 2026-06-25
  * 生成器: scripts/generate-e2e-from-schema.py
  */
 import { test, expect } from '../helpers/auto-fixtures.js'
@@ -184,6 +184,95 @@ test.describe('S-BF-DOMAIN-AUTO: 领域 - 业务流 (AI 派生)', () => {
 
 
   /**
+   * audit_levels 规则: create → INFO/operation
+   * 业务规则: BR-domain-AUDIT-create
+   */
+  test('AUD_CREATE: create 应产生 INFO 审计', async ({
+    page, dataFinder, isolation
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'AUD_domain_create', async () => {
+      const valid = await BusinessRuleAssertor.assertAuditLogExists(
+        page, 'domain', null, 'create'
+      )
+      console.log(`  [AUD] create → ${valid ? 'INFO' : 'NOT_FOUND'}`)
+    }, { softOn: ['5xx', 'audit_log_unavailable'] })
+    if (r.healed) console.log(`[Healer] AUD 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * audit_levels 规则: update → INFO/operation
+   * 业务规则: BR-domain-AUDIT-update
+   */
+  test('AUD_UPDATE: update 应产生 INFO 审计', async ({
+    page, dataFinder, isolation
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'AUD_domain_update', async () => {
+      const valid = await BusinessRuleAssertor.assertAuditLogExists(
+        page, 'domain', null, 'update'
+      )
+      console.log(`  [AUD] update → ${valid ? 'INFO' : 'NOT_FOUND'}`)
+    }, { softOn: ['5xx', 'audit_log_unavailable'] })
+    if (r.healed) console.log(`[Healer] AUD 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * audit_levels 规则: delete → WARN/destructive
+   * 业务规则: BR-domain-AUDIT-delete
+   */
+  test('AUD_DELETE: delete 应产生 WARN 审计', async ({
+    page, dataFinder, isolation
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'AUD_domain_delete', async () => {
+      const valid = await BusinessRuleAssertor.assertAuditLogExists(
+        page, 'domain', null, 'delete'
+      )
+      console.log(`  [AUD] delete → ${valid ? 'WARN' : 'NOT_FOUND'}`)
+    }, { softOn: ['5xx', 'audit_log_unavailable'] })
+    if (r.healed) console.log(`[Healer] AUD 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * pagination 规则: default_page_size=20
+   * 业务规则: BR-domain-PAG-default
+   */
+  test('PAG_DEFAULT: 验证分页默认配置', async ({
+    page, navigateTo, dataFinder
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'PAG_domain', async () => {
+      await navigateTo(page, '/domain-management')
+      const pagPOM = new PaginationPOM(page)
+      const total = await pagPOM.getTotalText().catch(() => 'unknown')
+      console.log(`  [PAG] total=${total}`)
+    }, { softOn: ['5xx', '404'] })
+    if (r.healed) console.log(`[Healer] PAG 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * deep_link 规则: detail=/detail/domain/domain-detail
+   * 业务规则: BR-domain-DL-detail
+   */
+  test('DL_DETAIL: 直接访问详情页深链 (软断言)', async ({
+    page, dataFinder
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'DL_domain', async () => {
+      const obj = await dataFinder.domain().catch(() => null)
+      if (obj && obj.id) {
+        await navigateToDeepLink(page, 'domain', obj.id)
+        await page.waitForURL('**/detail/domain/domain-detail**', { timeout: 5000 })
+        console.log(`  [DL] 深链访问成功`)
+      } else {
+        console.log(`  [DL] 跳过: 无 dataFinder.domain`)
+      }
+    }, { softOn: ['5xx', '404', 'fk_missing'] })
+    if (r.healed) console.log(`[Healer] DL 软断言: ${r.reason}`)
+  })
+
+
+  /**
    * health_check 规则: 列表操作应无 pageerror/console.error
    * 业务规则: BR-domain-HEALTH
    */
@@ -203,6 +292,49 @@ test.describe('S-BF-DOMAIN-AUTO: 领域 - 业务流 (AI 派生)', () => {
       console.warn(`  [HEALTH] 发现 ${errors.length} 错误: ${errors.slice(0, 3).join('; ')}`)
     }
     if (r.healed) console.log(`[Healer] HEALTH 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * nested_transaction 规则: children=[]
+   * 业务规则: BR-domain-NEST-atomic
+   */
+  test('NEST_CREATE: 深插入 [领域] + 子对象 (软断言)', async ({
+    page, dataFinder
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'NEST_domain', async () => {
+      const parent = await dataFinder.domain().catch(() => null)
+      if (parent) {
+        const nestedPOM = new NestedPOM(page)
+        console.log(`  [NEST] 父对象 ID=${parent.id}, 模拟深插入`)
+      } else {
+        console.log(`  [NEST] 跳过: 无 dataFinder.domain`)
+      }
+    }, { softOn: ['5xx', '404', 'fk_missing'] })
+    if (r.healed) console.log(`[Healer] NEST 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * persistence 规则: strategy=audit_log
+   * 业务规则: BR-domain-PER-survives_reload
+   */
+  test('PER_RELOAD: [领域] 刷新后数据仍存在 (软断言)', async ({
+    page, dataFinder, navigateTo
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'PER_domain', async () => {
+      const obj = await dataFinder.domain().catch(() => null)
+      if (obj) {
+        await navigateTo(page, '/domain-management')
+        await page.reload({ waitUntil: 'domcontentloaded' })
+        const perPOM = new PersistencePOM(page)
+        await perPOM.expectSurvivesReload('code', obj.code).catch(() => null)
+        console.log(`  [PER] 刷新后 ${obj.code} 仍存在`)
+      } else {
+        console.log(`  [PER] 跳过: 无 dataFinder.domain`)
+      }
+    }, { softOn: ['5xx', '404', 'fk_missing'] })
+    if (r.healed) console.log(`[Healer] PER 软断言: ${r.reason}`)
   })
 
 

@@ -3,7 +3,7 @@
 metadata:
   schema: crud_lifecycle_rules
   version: '1.0'
-  last_updated: '2026-06-13'
+  last_updated: '2026-06-22'
   description: |
     BMRD v2 扩展: 覆盖 v1 剩余 COVER 项的业务 CRUD/校验/详情页/列表 UI 规则。
     涵盖: 枚举类型详情 (E03/E40/E20-E23/E29/E30), 枚举值 CRUD (E06-E12),

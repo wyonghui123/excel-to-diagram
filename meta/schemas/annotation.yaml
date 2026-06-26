@@ -406,3 +406,34 @@ validations:
     rule: category in ['important', 'warning', 'info', 'tip', 'TEST']
     message: 备注分类必须是 important、warning、info、tip 或 TEST
     severity: error
+
+# ============================================
+# 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
+# ============================================
+
+audit_levels:
+  - name: create
+    level: INFO
+    category: operation
+  - name: update
+    level: INFO
+    category: operation
+  - name: delete
+    level: WARN
+    category: destructive
+
+routes:
+  detail: /detail/annotation/annotation-detail
+  list: /annotation-management
+
+list:
+  pagination:
+    default_page_size: 20
+    page_size_options: [10, 20, 50, 100]
+
+nested:
+  enabled: False
+
+persistence:
+  strategy: audit_log
+  survive_reload: True

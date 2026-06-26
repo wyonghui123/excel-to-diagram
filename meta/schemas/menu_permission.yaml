@@ -128,3 +128,33 @@ category_config:
   sub_category: permission
   icon: "menu"
   color: "#10b981"
+
+# ============================================
+# 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
+# ============================================
+
+ui_badge:
+  required_any_permission:
+    color_map:
+      true: success
+      false: info
+  is_active:
+    color_map:
+      true: success
+      false: info
+
+routes:
+  detail: /detail/menu_permission/menu_permission-detail
+  list: /menu_permission-management
+
+list:
+  pagination:
+    default_page_size: 20
+    page_size_options: [10, 20, 50, 100]
+
+nested:
+  enabled: False
+
+persistence:
+  strategy: audit_log
+  survive_reload: True

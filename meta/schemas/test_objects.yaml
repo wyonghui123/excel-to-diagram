@@ -111,3 +111,40 @@ validations:
     rule: name is not None and name != ''
     message: 名称不能为空
     severity: error
+
+# ============================================
+# 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
+# ============================================
+
+ui_badge:
+  active:
+    color_map:
+      true: success
+      false: info
+
+audit_levels:
+  - name: create
+    level: INFO
+    category: operation
+  - name: update
+    level: INFO
+    category: operation
+  - name: delete
+    level: WARN
+    category: destructive
+
+routes:
+  detail: /detail/test_objects/test_objects-detail
+  list: /test_objects-management
+
+list:
+  pagination:
+    default_page_size: 20
+    page_size_options: [10, 20, 50, 100]
+
+nested:
+  enabled: False
+
+persistence:
+  strategy: audit_log
+  survive_reload: True

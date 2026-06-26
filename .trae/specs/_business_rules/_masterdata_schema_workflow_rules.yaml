@@ -3,7 +3,7 @@
 metadata:
   schema: masterdata_schema_workflow_rules
   version: '7.0'
-  last_updated: '2026-06-14'
+  last_updated: '2026-06-16'
   description: |
     BMRD v7 扩展: 主数据/表单 schema/工作流/菜单/视图/路由/模板业务规则.
     端点状态:

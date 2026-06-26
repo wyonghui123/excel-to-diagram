@@ -266,3 +266,28 @@ queries:
       - field: enabled
         operator: eq
         value: true
+
+# ============================================
+# 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
+# ============================================
+
+ui_badge:
+  enabled:
+    color_map:
+      True: success
+
+routes:
+  detail: /detail/change_subscription/change_subscription-detail
+  list: /change_subscription-management
+
+list:
+  pagination:
+    default_page_size: 20
+    page_size_options: [10, 20, 50, 100]
+
+nested:
+  enabled: False
+
+persistence:
+  strategy: audit_log
+  survive_reload: True

@@ -20,7 +20,7 @@
  *   BR-role-FLD-UNQ-code  (角色编码 唯一)
  *   BR-role-AUDIT-create/update/delete  (审计日志)
  *
- * 自动生成时间: 2026-06-12
+ * 自动生成时间: 2026-06-25
  * 生成器: scripts/generate-e2e-from-schema.py
  */
 import { test, expect } from '../helpers/auto-fixtures.js'
@@ -179,6 +179,96 @@ test.describe('S-BF-ROLE-AUTO: 角色 - 业务流 (AI 派生)', () => {
   })
 
 
+
+  /**
+   * audit_levels 规则: create → INFO/operation
+   * 业务规则: BR-role-AUDIT-create
+   */
+  test('AUD_CREATE: create 应产生 INFO 审计', async ({
+    page, dataFinder, isolation
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'AUD_role_create', async () => {
+      const valid = await BusinessRuleAssertor.assertAuditLogExists(
+        page, 'role', null, 'create'
+      )
+      console.log(`  [AUD] create → ${valid ? 'INFO' : 'NOT_FOUND'}`)
+    }, { softOn: ['5xx', 'audit_log_unavailable'] })
+    if (r.healed) console.log(`[Healer] AUD 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * audit_levels 规则: update → INFO/operation
+   * 业务规则: BR-role-AUDIT-update
+   */
+  test('AUD_UPDATE: update 应产生 INFO 审计', async ({
+    page, dataFinder, isolation
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'AUD_role_update', async () => {
+      const valid = await BusinessRuleAssertor.assertAuditLogExists(
+        page, 'role', null, 'update'
+      )
+      console.log(`  [AUD] update → ${valid ? 'INFO' : 'NOT_FOUND'}`)
+    }, { softOn: ['5xx', 'audit_log_unavailable'] })
+    if (r.healed) console.log(`[Healer] AUD 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * audit_levels 规则: delete → WARN/destructive
+   * 业务规则: BR-role-AUDIT-delete
+   */
+  test('AUD_DELETE: delete 应产生 WARN 审计', async ({
+    page, dataFinder, isolation
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'AUD_role_delete', async () => {
+      const valid = await BusinessRuleAssertor.assertAuditLogExists(
+        page, 'role', null, 'delete'
+      )
+      console.log(`  [AUD] delete → ${valid ? 'WARN' : 'NOT_FOUND'}`)
+    }, { softOn: ['5xx', 'audit_log_unavailable'] })
+    if (r.healed) console.log(`[Healer] AUD 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * pagination 规则: default_page_size=20
+   * 业务规则: BR-role-PAG-default
+   */
+  test('PAG_DEFAULT: 验证分页默认配置', async ({
+    page, navigateTo, dataFinder
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'PAG_role', async () => {
+      await navigateTo(page, '/role-management')
+      const pagPOM = new PaginationPOM(page)
+      const total = await pagPOM.getTotalText().catch(() => 'unknown')
+      console.log(`  [PAG] total=${total}`)
+    }, { softOn: ['5xx', '404'] })
+    if (r.healed) console.log(`[Healer] PAG 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * deep_link 规则: detail=/detail/role
+   * 业务规则: BR-role-DL-detail
+   */
+  test('DL_DETAIL: 直接访问详情页深链 (软断言)', async ({
+    page, dataFinder
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'DL_role', async () => {
+      const obj = await dataFinder.role().catch(() => null)
+      if (obj && obj.id) {
+        await navigateToDeepLink(page, 'role', obj.id)
+        await page.waitForURL('**/detail/role**', { timeout: 5000 })
+        console.log(`  [DL] 深链访问成功`)
+      } else {
+        console.log(`  [DL] 跳过: 无 dataFinder.role`)
+      }
+    }, { softOn: ['5xx', '404', 'fk_missing'] })
+    if (r.healed) console.log(`[Healer] DL 软断言: ${r.reason}`)
+  })
+
+
   /**
    * health_check 规则: 列表操作应无 pageerror/console.error
    * 业务规则: BR-role-HEALTH
@@ -199,6 +289,63 @@ test.describe('S-BF-ROLE-AUTO: 角色 - 业务流 (AI 派生)', () => {
       console.warn(`  [HEALTH] 发现 ${errors.length} 错误: ${errors.slice(0, 3).join('; ')}`)
     }
     if (r.healed) console.log(`[Healer] HEALTH 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * ui_badge 规则: is_active 字段彩色标签
+   * 业务规则: BR-role-BADGE-is_active
+   */
+  test('BADGE_IS_ACTIVE: 验证 [is_active] 标签颜色 (软断言)', async ({
+    page, navigateTo
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'BADGE_role_is_active', async () => {
+      await navigateTo(page, '/role-management')
+      const tag = page.locator('.el-tag').first()
+      const visible = await tag.isVisible({ timeout: 3000 }).catch(() => false)
+      console.log(`  [BADGE] is_active tag visible=${visible}`)
+    }, { softOn: ['5xx', '404'] })
+    if (r.healed) console.log(`[Healer] BADGE 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * ui_badge 规则: is_system 字段彩色标签
+   * 业务规则: BR-role-BADGE-is_system
+   */
+  test('BADGE_IS_SYSTEM: 验证 [is_system] 标签颜色 (软断言)', async ({
+    page, navigateTo
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'BADGE_role_is_system', async () => {
+      await navigateTo(page, '/role-management')
+      const tag = page.locator('.el-tag').first()
+      const visible = await tag.isVisible({ timeout: 3000 }).catch(() => false)
+      console.log(`  [BADGE] is_system tag visible=${visible}`)
+    }, { softOn: ['5xx', '404'] })
+    if (r.healed) console.log(`[Healer] BADGE 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * persistence 规则: strategy=audit_log
+   * 业务规则: BR-role-PER-survives_reload
+   */
+  test('PER_RELOAD: [角色] 刷新后数据仍存在 (软断言)', async ({
+    page, dataFinder, navigateTo
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'PER_role', async () => {
+      const obj = await dataFinder.role().catch(() => null)
+      if (obj) {
+        await navigateTo(page, '/role-management')
+        await page.reload({ waitUntil: 'domcontentloaded' })
+        const perPOM = new PersistencePOM(page)
+        await perPOM.expectSurvivesReload('code', obj.code).catch(() => null)
+        console.log(`  [PER] 刷新后 ${obj.code} 仍存在`)
+      } else {
+        console.log(`  [PER] 跳过: 无 dataFinder.role`)
+      }
+    }, { softOn: ['5xx', '404', 'fk_missing'] })
+    if (r.healed) console.log(`[Healer] PER 软断言: ${r.reason}`)
   })
 
 

@@ -3,7 +3,7 @@
 metadata:
   schema: audit_i18n_fk_rules
   version: '3.0'
-  last_updated: '2026-06-13'
+  last_updated: '2026-06-16'
   description: |
     BMRD v3 扩展: 覆盖 v1 剩余的 audit_log 集成 (F01-F09), i18n (E34),
     FK 关系 (C01-C03 deep-insert), 持久化 (E31), 多 tab (E32), 健康 (E36).

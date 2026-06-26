@@ -4,7 +4,7 @@ table_name: menus
 description: |
   系统菜单配置，由BO元数据驱动。
   菜单 = 通用页面组件 × 对象(s) + config
-  
+
   设计原则：
   1. 菜单与BO通过 bo_bindings 声明关联
   2. required_permissions 从 bo_bindings 自动推导
@@ -84,13 +84,13 @@ fields:
       1. 自动推导 required_permissions
       2. 自动生成页面配置
       3. 数据权限提示
-      
+
       结构示例：
       [
         {"bo_id": "product", "role": "primary", "include_actions": ["create", "read", "update", "delete"]},
         {"bo_id": "version", "role": "secondary", "include_actions": ["read"]}
       ]
-      
+
       role 取值：
       - primary: 主对象，用于权限推导
       - secondary: 辅助对象，显示在页面中
@@ -262,3 +262,56 @@ actions:
     type: crud
     method: GET
     path: /api/v1/menus
+
+# ============================================
+# 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
+# ============================================
+
+ui_actions:
+  create:
+    label: 新建菜单
+    icon: plus
+    type: primary
+    permission: "menu:create"
+    visible_when: true
+
+ui_badge:
+  page_type:
+    color_map:
+      object_list: info
+      object_detail: info
+      multi_object_hub: info
+      custom_page: info
+      dashboard: info
+  required_any_permission:
+    color_map:
+      true: success
+      false: info
+  is_active:
+    color_map:
+      true: success
+      false: info
+  show_in_sidebar:
+    color_map:
+      true: success
+      false: info
+  auto_generated:
+    color_map:
+      true: success
+      false: info
+
+routes:
+  detail: /detail/menu/menu-detail
+  list: /menu-management
+
+list:
+  pagination:
+    default_page_size: 20
+    page_size_options: [10, 20, 50, 100]
+
+nested:
+  enabled: False
+
+persistence:
+  strategy: audit_log
+  survive_reload: True

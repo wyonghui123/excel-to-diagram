@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 Action 执行器 - 基于元模型定义执行 CRUD 操作
 
@@ -899,6 +899,7 @@ class ActionExecutor:
     # 此方法在 _do_create/_do_update/_do_delete 入口显式调用 WriteScopeInterceptor,
     # 复用 BOFramework 路径已有的 5 步校验 (admin/owner/dim_scope/visibility/fk_scope)。
     _write_scope_interceptor = None  # 类级单例, 避免每次 new
+    _owner_chain_interceptor = None  # [FIX BUG-V010 2026-06-26] 类级单例, 同 ctx 跑 owner chain
 
     def _check_write_scope(self, meta_object: MetaObject, action: str,
                            params: Dict[str, Any]) -> Optional[ActionResult]:
@@ -947,15 +948,21 @@ class ActionExecutor:
 
         # 构造 ActionContext 并调用 WriteScopeInterceptor.before_action
         # [FIX v1.2.20 2026-06-20] lazy import 拦截器符号, 避免循环导入
+        # [FIX BUG-V010 2026-06-26] 同步跑 OwnerChainInterceptor, 让 ctx 有 _owner_chain_match
         try:
             from meta.core.interceptors.write_scope_interceptor import (
                 WriteScopeInterceptor as _WSI,
                 WriteScopeDenied as _WSD,
                 ScopeViolationError as _SVE,
             )
+            from meta.core.interceptors.owner_chain_interceptor import (
+                OwnerChainInterceptor as _OCI,
+            )
 
             if ActionExecutor._write_scope_interceptor is None:
                 ActionExecutor._write_scope_interceptor = _WSI()
+            if ActionExecutor._owner_chain_interceptor is None:
+                ActionExecutor._owner_chain_interceptor = _OCI()
 
             # [FIX v1.2.20 2026-06-20] 把完整 user_info 传入 context
             # WriteScopeInterceptor 会在 flask.g 不可用 (worker thread) 时 fallback 读此字段
@@ -969,6 +976,9 @@ class ActionExecutor:
                 ip_address=user_info.get('ip_address'),
                 user_info=user_info,
             )
+            # [FIX BUG-V010 2026-06-26] 先跑 OwnerChainInterceptor 设置 _owner_chain_match
+            # 这样 WriteScopeInterceptor 的 owner_match check 才会命中
+            ActionExecutor._owner_chain_interceptor.before_action(ctx)
             ActionExecutor._write_scope_interceptor.before_action(ctx)
         except _WSD as e:
             logger.warning(
@@ -1010,9 +1020,50 @@ class ActionExecutor:
     def _check_deletability(self, meta_object: MetaObject, record: Dict[str, Any]) -> bool:
         if not meta_object.deletability or not meta_object.deletability.condition:
             return True
+        # [FIX BUG-V011 2026-06-26] 如果 schema 中所有 child 关联都是 cascade_delete=true
+        # 跳过 deletability.condition 检查, 让 cascade_service 真正执行级联删除
+        if self._all_children_cascade_delete(meta_object):
+            logger.debug(
+                f'[BUG-V011] skip _check_deletability for {meta_object.id} '
+                f'- all children are cascade_delete=true'
+            )
+            return True
         from meta.core.condition_evaluator import ConditionEvaluator
         evaluator = ConditionEvaluator()
         return evaluator.evaluate(meta_object.deletability.condition, context={"self": record})
+
+    def _all_children_cascade_delete(self, meta_object) -> bool:
+        """[FIX BUG-V011 2026-06-26] 检查 meta_object 的所有 child 关联是否都是 cascade_delete=true.
+
+        读 schema (yaml) 的 associations, 检查每条关联的 cascade_delete.
+        支持两种 association 元素类型:
+        - dict (yaml 原始 list 格式)
+        - AssociationDefinition dataclass (metadata_resolver 转换后)
+        """
+        try:
+            assocs = getattr(meta_object, 'associations', None) or []
+            if isinstance(assocs, dict):
+                assocs = list(assocs.values())
+
+            def _get_assoc_field(a, field, default=None):
+                """[FIX BUG-V011] 兼容 dict 和 dataclass 两种格式"""
+                if isinstance(a, dict):
+                    return a.get(field, default)
+                return getattr(a, field, default)
+
+            composition_children = [
+                a for a in assocs
+                if _get_assoc_field(a, 'type') == 'composition'
+            ]
+            if not composition_children:
+                return True
+            return all(
+                _get_assoc_field(a, 'cascade_delete', False)
+                for a in composition_children
+            )
+        except Exception as e:
+            logger.debug(f'[BUG-V011] _all_children_cascade_delete check failed: {e}')
+            return False  # 失败时保守: 不跳过
 
     def _check_addability(self, meta_object: MetaObject, data: Dict[str, Any]) -> Optional[str]:
         if not meta_object.addability or not meta_object.addability.condition:
@@ -1900,20 +1951,30 @@ class ActionExecutor:
             )
 
         if original_data:
-            hierarchy_result = validate_delete(
-                meta_object.id, id_value, self.ds
-            )
-            if not hierarchy_result.valid:
-                self._write_delete_blocked_audit(
-                    meta_object, id_value, original_data,
-                    action_label="DELETE_BLOCKED",
-                    error_code=hierarchy_result.error_code or "HIERARCHY_BLOCKED",
-                    message=hierarchy_result.message,
+            # [FIX BUG-V011 2026-06-26] 如果 schema 中所有 child 关联都是 cascade_delete=true
+            # 跳过 hierarchy_result 检查, 让 cascade_service 真正执行级联删除
+            # 案例: SDLKFJL (product 335) 含 1 个 version, 旧代码报"存在 1 个子元素"
+            #       实际 product.yaml associations[].cascade_delete: true 应级联
+            if self._all_children_cascade_delete(meta_object):
+                logger.debug(
+                    f'[BUG-V011] skip validate_delete for {meta_object.id}({id_value}) '
+                    f'- all children are cascade_delete=true'
                 )
-                return ActionResult.fail(
-                    error=hierarchy_result.error_code,
-                    message=hierarchy_result.message
+            else:
+                hierarchy_result = validate_delete(
+                    meta_object.id, id_value, self.ds
                 )
+                if not hierarchy_result.valid:
+                    self._write_delete_blocked_audit(
+                        meta_object, id_value, original_data,
+                        action_label="DELETE_BLOCKED",
+                        error_code=hierarchy_result.error_code or "HIERARCHY_BLOCKED",
+                        message=hierarchy_result.message,
+                    )
+                    return ActionResult.fail(
+                        error=hierarchy_result.error_code,
+                        message=hierarchy_result.message
+                    )
 
         if not skip_rules and original_data:
             if not self._check_deletability(meta_object, original_data):

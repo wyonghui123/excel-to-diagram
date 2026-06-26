@@ -440,7 +440,7 @@ ui_view_config:
           - parent_id
           - manager_id
           - description
-      
+
       - id: members
         label: 成员
         type: association
@@ -448,7 +448,7 @@ ui_view_config:
         actions:
           - assign
           - unassign
-      
+
       - id: roles
         label: 角色
         type: association
@@ -456,3 +456,60 @@ ui_view_config:
         actions:
           - assign
           - unassign
+
+# ============================================
+# 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
+# ============================================
+
+ui_actions:
+  create:
+    label: 新建用户组
+    icon: plus
+    type: primary
+    permission: "user_group:create"
+    visible_when: true
+  export:
+    label: 导出
+    icon: download
+    type: default
+    permission: "user_group:export"
+    visible_when: true
+  import:
+    label: 导入
+    icon: upload
+    type: default
+    permission: "user_group:import"
+    visible_when: true
+
+audit_levels:
+  - name: create
+    level: INFO
+    category: operation
+  - name: update
+    level: INFO
+    category: operation
+  - name: delete
+    level: WARN
+    category: destructive
+  - name: associate
+    level: INFO
+    category: relation
+  - name: dissociate
+    level: INFO
+    category: relation
+
+routes:
+  detail: /detail/user_group
+  list: /user_group-management
+
+list:
+  pagination:
+    default_page_size: 20
+    page_size_options: [10, 20, 50, 100]
+
+nested:
+  enabled: False
+
+persistence:
+  strategy: audit_log
+  survive_reload: True

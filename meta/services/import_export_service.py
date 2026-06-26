@@ -2898,9 +2898,11 @@ class ImportExportService:
         candidates = []
         seen_names = set()
         for f in child_meta.fields:
-            if f.id in default_exclude_fields and f.id not in cud_required_fields:
+            # [FIX 2026-06-26] business_key 字段总是包含 (用于 export→edit→import round-trip)
+            is_business_key = getattr(f.semantics, 'business_key', False)
+            if not is_business_key and f.id in default_exclude_fields and f.id not in cud_required_fields:
                 continue
-            if f.storage.value == "virtual" and not hasattr(f, 'ui'):
+            if not is_business_key and f.storage.value == "virtual" and not hasattr(f, 'ui'):
                 continue
 
             export_vis = getattr(f.semantics, 'export_visible', None)
@@ -2908,13 +2910,14 @@ class ImportExportService:
 
             is_cud_required = f.id in cud_required_fields
 
-            if not is_cud_required and export_vis is False and import_vis is False:
+            if not is_cud_required and not is_business_key and export_vis is False and import_vis is False:
                 continue
 
             is_export = export_vis is True or is_cud_required
             is_import = import_vis is True
 
-            if is_export or is_import or (hasattr(f, 'ui') and hasattr(f.ui, 'visible') and f.ui.visible is True):
+            # [FIX 2026-06-26] business_key 字段总是进入candidates (用于 round-trip)
+            if is_business_key or is_export or is_import or (hasattr(f, 'ui') and hasattr(f.ui, 'visible') and f.ui.visible is True):
                 candidates.append((f, is_export, is_import))
 
         candidates.sort(key=lambda x: (
@@ -3728,15 +3731,17 @@ class ImportExportService:
         跨域 source/target 端权限), 导致 export relationship 时 30 条 vs 列表 9 条
         (TEST333 清理了 auto_generated data_permissions 后, dim scope 仍是主要权限来源)。
 
+        [FIX BUG-V014 2026-06-26] 加 owner exception
+          - 旧: dim scope 限定 product_id=475, 永远不覆盖 owner
+          - 新: OR 上 owner_id = user_id 条件
+          - 案例: TEST333 导出 17 个 product 私有 owner=自己, 旧只导出 1 个 public
+
         优先级 (与 query_service._apply_data_permission 一致):
           1. is_admin → 直接放行
           2. thread-local user (async export) > g.current_user (sync export)
           3. DimensionScopeEngine 派生 dim scope (优先, 与列表接口行为一致)
           4. data_permissions 表 allowed_ids (fallback)
-
-        Returns:
-            (sql_fragment, params) — sql_fragment 如 " AND (r.source_bo_id IN (...) OR r.target_bo_id IN (...))"
-            无权限限制时返回 ("", [])
+          5. [BUG-V014] owner exception: user 是 owner 时也允许 (无论 dim scope)
         """
         prefix = f"{table_alias}." if table_alias else ""
 
@@ -3824,11 +3829,47 @@ class ImportExportService:
                 return f" AND {prefix}id = -1", []
 
             placeholders = ','.join(['?'] * len(allowed_ids))
-            return f" AND {prefix}id IN ({placeholders})", list(allowed_ids)
+            base_sql = f" AND {prefix}id IN ({placeholders})"
+            base_params = list(allowed_ids)
 
         except Exception as e:
             logger.warning(f"[_build_permission_filter] failed: {e}")
             return "", []
+
+        # [FIX BUG-V014 2026-06-26] owner exception
+        # 与 data_permission_interceptor._add_owner_exception 一致
+        # product 走 direct owner_id; 子对象走 chain_owner_resolver
+        try:
+            from meta.core.models import registry
+            from meta.services.chain_owner_resolver import is_in_chain
+            meta = registry.get(object_type)
+            if meta and user_id:
+                if object_type == 'product':
+                    # product 直接用 owner_id
+                    owner_sql = f" OR {prefix}owner_id = ?"
+                    owner_params = [user_id]
+                elif is_in_chain(object_type):
+                    # 子对象 (version/domain/...) 用 chain_owner_resolver
+                    owner_sql = f" OR {prefix}product_id IN (SELECT id FROM products WHERE owner_id = ?)"
+                    owner_params = [user_id]
+                else:
+                    owner_sql = ""
+                    owner_params = []
+                if owner_sql:
+                    logger.info(
+                        f'[_build_permission_filter BUG-V014] adding owner exception for {object_type}: '
+                        f'{owner_sql.strip()}'
+                    )
+                    # 替换 leading " AND " 为 " OR " (因为 SQL 是 AND-prefixed)
+                    if base_sql.startswith(" AND "):
+                        combined_sql = f" AND ({base_sql[5:]} {owner_sql})"
+                    else:
+                        combined_sql = f"{base_sql} {owner_sql}"
+                    return combined_sql, base_params + owner_params
+        except Exception as e:
+            logger.warning(f"[_build_permission_filter BUG-V014] owner exception failed: {e}")
+
+        return base_sql, base_params
 
     def _dim_scope_conds_to_sql(self, per_role_conds: List[List[Dict]], prefix: str = '') -> str:
         """[FIX v1.2.50 2026-06-22] 将 dim scope conds (来自 DimensionScopeEngine) 转为 SQL 片段

@@ -3,7 +3,7 @@
 metadata:
   schema: permission_security_rules
   version: '4.0'
-  last_updated: '2026-06-14'
+  last_updated: '2026-06-16'
   description: |
     BMRD v4 扩展: 覆盖 v1 中 v2 E2E 已有的 permission/data-permission 测试,
     把现有 v2 E2E 散落的规则集中到 BMRD 模型层.

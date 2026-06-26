@@ -449,7 +449,7 @@ category_config:
 
 ui_view_config:
   showChangeHistory: true
-  
+
   list:
     detail_mode: page
     detail_path: '/detail/user'
@@ -499,7 +499,7 @@ ui_view_config:
         icon: delete
         type: danger
         confirm: 确定要删除选中的用户吗？
-  
+
   form:
     title: 用户信息
     layout: vertical
@@ -512,7 +512,7 @@ ui_view_config:
         columns:
           - fields: [password, sso_provider]
           - fields: [sso_user_id]
-  
+
   detail:
     title: 用户详情
     layout: tabs
@@ -616,3 +616,73 @@ deletion_policy:
     - filter_variants
     - data_permissions
     - user_roles
+
+# ============================================
+# 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
+# ============================================
+
+ui_actions:
+  create:
+    label: 新建用户
+    icon: plus
+    type: primary
+    permission: "user:create"
+    visible_when: true
+
+ui_badge:
+  status:
+    color_map:
+      active: success
+      inactive: info
+      locked: info
+  locale:
+    color_map:
+      zh-CN: info
+      en-US: info
+      en-GB: info
+  date_style:
+    color_map:
+      full: info
+      long: info
+      medium: info
+      short: info
+  time_style:
+    color_map:
+      full: info
+      long: info
+      medium: info
+      short: info
+  hour_cycle:
+    color_map:
+      12: info
+      24: info
+
+audit_levels:
+  - name: create
+    level: INFO
+    category: operation
+  - name: update
+    level: INFO
+    category: operation
+  - name: delete
+    level: WARN
+    category: destructive
+  - name: associate
+    level: INFO
+    category: relation
+
+routes:
+  detail: /detail/user
+  list: /user-management
+
+list:
+  pagination:
+    default_page_size: 20
+    page_size_options: [10, 20, 50, 100]
+
+nested:
+  enabled: False
+
+persistence:
+  strategy: audit_log
+  survive_reload: True

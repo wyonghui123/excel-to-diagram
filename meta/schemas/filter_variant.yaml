@@ -162,3 +162,33 @@ ui_view_config:
         title: 创建时间
         width: 180
         position: 5
+
+# ============================================
+# 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
+# ============================================
+
+ui_badge:
+  is_shared:
+    color_map:
+      true: success
+      false: info
+  is_default:
+    color_map:
+      true: success
+      false: info
+
+routes:
+  detail: /detail/filter_variant/filter_variant-detail
+  list: /filter_variant-management
+
+list:
+  pagination:
+    default_page_size: 20
+    page_size_options: [10, 20, 50, 100]
+
+nested:
+  enabled: False
+
+persistence:
+  strategy: audit_log
+  survive_reload: True

@@ -438,7 +438,11 @@ class WriteScopeInterceptor(Interceptor):
         #   注: 如果 owner 命中, PermissionInterceptor 放行后写权限拦截器仍会执行,
         #       但 dim scope + visibility 检查不会拒绝 owner 的写入 (因为 dim scope
         #       检查的是 "非 owner 用户的范围控制", owner 的检查已在上游完成)
-        owner_match = bool(getattr(context, '_owner_chain_match', False))
+        # [FIX BUG-V010 2026-06-26] context 是 @dataclass, 优先读 extra dict (setattr 不可靠)
+        owner_match = (
+            bool(context.extra.get('_owner_chain_match', False))
+            or bool(getattr(context, '_owner_chain_match', False))
+        )
         if owner_match:
             # owner 命中, 写权限拦截器放行 (不需再 dim scope + visibility)
             logger.debug(

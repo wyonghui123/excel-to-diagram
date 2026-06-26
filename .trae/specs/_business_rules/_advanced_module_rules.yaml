@@ -3,7 +3,7 @@
 metadata:
   schema: advanced_module_rules
   version: '5.0'
-  last_updated: '2026-06-14'
+  last_updated: '2026-06-16'
   description: |
     BMRD v5 扩展: 覆盖 v2 E2E 中已有的高级模块测试.
     涵盖: scheduled_task, change_event, change_subscription, import_export, lock,

@@ -115,3 +115,37 @@ category_config:
   sub_category: permission
   icon: "filter"
   color: "#f59e0b"
+
+# ============================================
+# 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
+# ============================================
+
+ui_badge:
+  is_denied:
+    color_map:
+      true: success
+      false: info
+  inherit_to_children:
+    color_map:
+      true: success
+      false: info
+  propagate_to_parents:
+    color_map:
+      true: success
+      false: info
+
+routes:
+  detail: /detail/permission_rule/permission_rule-detail
+  list: /permission_rule-management
+
+list:
+  pagination:
+    default_page_size: 20
+    page_size_options: [10, 20, 50, 100]
+
+nested:
+  enabled: False
+
+persistence:
+  strategy: audit_log
+  survive_reload: True

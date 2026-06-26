@@ -2,8 +2,20 @@
 """
 业务模型规则驱动 (BMRD) 的 E2E 测试生成器 v2
 支持多个规则文件 (protection_rules, crud_lifecycle_rules, ...)
+
+Usage:
+  python scripts/generate-protection-tests.py                # 生成所有
+  python scripts/generate-protection-tests.py --dry-run      # 只检查不写
+  python scripts/generate-protection-tests.py --filter crud  # 只生成 crud 相关
+  python scripts/generate-protection-tests.py --check-stale  # 检查 stale spec (CI 用)
+
+Exit codes (--check-stale mode):
+  0  - 全部 fresh
+  1  - 有 stale spec (yaml 比 spec 新, 需要重新生成)
 """
+import argparse
 import sys
+from datetime import datetime
 from pathlib import Path
 import yaml
 
@@ -122,8 +134,12 @@ def render_defer_block(rule):
 '''.format(title=title, tests='\n'.join(skip_tests))
 
 
-def generate_spec_file(filename, title, rules, extra_imports='', header_extra=''):
-    """生成 spec 文件"""
+def generate_spec_file(filename, title, rules, extra_imports='', header_extra='', dry_run=False):
+    """生成 spec 文件 (支持 dry-run 模式)
+
+    Args:
+        dry_run: True = 只 print 不会发生什么, 不写文件
+    """
     rules_summary = '\n'.join(
         " *   {id}: {name} [{status}]".format(
             id=r['id'], name=r['name'], status=r.get('status', 'ACTIVE')
@@ -141,7 +157,7 @@ def generate_spec_file(filename, title, rules, extra_imports='', header_extra=''
  * [业务模型规则驱动 (BMRD) v2.0 - 自动生成]
  * 来源: .trae/specs/_business_rules/*.yaml
  * 生成器: scripts/generate-protection-tests.py
- * 生成时间: 2026-06-13
+ * 生成时间: {generated_at}
  *
  * 业务规则:
 {rules_summary}
@@ -168,22 +184,85 @@ import {{ test, expect }} from '../helpers/auto-fixtures.js'
         rules_summary=rules_summary,
         header_extra=header_extra,
         extra_imports=extra_imports,
-        describe_blocks=describe_blocks
+        describe_blocks=describe_blocks,
+        generated_at=datetime.now().strftime('%Y-%m-%d')
     )
     output = OUTPUT_DIR / filename
-    with open(output, 'w', encoding='utf-8') as f:
-        f.write(content)
     test_count = sum(len(r['test_templates']) for r in rules)
-    print("[OK] {output} ({count} tests)".format(output=output, count=test_count))
+
+    if dry_run:
+        # Dry-run: 不写文件, 但显示会发生什么
+        existing = "EXISTS" if output.exists() else "MISSING"
+        if output.exists():
+            # 比较内容 (忽略生成时间字段, 因为每次跑 dry-run 都会变)
+            existing_content = output.read_text(encoding='utf-8')
+            # 替换两个版本里的"生成时间"行, 让比较稳定
+            import re
+            existing_normalized = re.sub(r'生成时间:\s*\d{4}-\d{2}-\d{2}', '生成时间: NORMALIZED', existing_content)
+            content_normalized = re.sub(r'生成时间:\s*\d{4}-\d{2}-\d{2}', '生成时间: NORMALIZED', content)
+            if existing_normalized == content_normalized:
+                action = "NO_CHANGE"
+            else:
+                action = "WOULD_UPDATE"
+        else:
+            action = "WOULD_CREATE"
+        print(f"[DRY-RUN] [{action}] {output} ({test_count} tests) [{existing}]")
+    else:
+        with open(output, 'w', encoding='utf-8') as f:
+            f.write(content)
+        print("[OK] {output} ({count} tests)".format(output=output, count=test_count))
     return test_count
 
 
 def main():
+    parser = argparse.ArgumentParser(description='BMRD E2E 测试生成器')
+    parser.add_argument('--dry-run', action='store_true',
+                        help='只检查不写文件, 显示会创建/更新/不变哪些 spec')
+    parser.add_argument('--filter', type=str, default=None,
+                        help='只处理文件名包含此关键词的 yaml (e.g. crud, protection)')
+    parser.add_argument('--check-stale', action='store_true',
+                        help='检查 stale spec: spec 比 yaml 旧时 exit 1 (CI 用)')
+    args = parser.parse_args()
+
+    # CI 模式: 只检查 stale
+    if args.check_stale:
+        stale_count = 0
+        for cfg in RULE_FILES:
+            yaml_path = RULES_DIR / cfg['yaml']
+            if not yaml_path.exists():
+                continue
+            yaml_mtime = datetime.fromtimestamp(yaml_path.stat().st_mtime)
+            for spec_name in cfg.get('extra_specs', [cfg['spec']]):
+                spec_path = OUTPUT_DIR / spec_name
+                if not spec_path.exists():
+                    print(f"  MISSING: {spec_name} (源: {cfg['yaml']})")
+                    stale_count += 1
+                    continue
+                spec_mtime = datetime.fromtimestamp(spec_path.stat().st_mtime)
+                if spec_mtime < yaml_mtime:
+                    print(f"  STALE: {spec_name} (yaml: {yaml_mtime.strftime('%Y-%m-%d')}, spec: {spec_mtime.strftime('%Y-%m-%d')})")
+                    stale_count += 1
+                else:
+                    print(f"  OK: {spec_name}")
+        if stale_count > 0:
+            print(f"\n[FAIL] {stale_count} stale spec(s) found")
+            print(f"运行 `python scripts/generate-protection-tests.py` 重新生成")
+            return 1
+        else:
+            print(f"\n[OK] All BMRD specs are fresh")
+            return 0
+
     total_all = 0
     total_defer = 0
     total_rules = 0
+    skipped = 0
 
     for cfg in RULE_FILES:
+        # 应用 --filter
+        if args.filter and args.filter.lower() not in cfg['yaml'].lower():
+            skipped += 1
+            continue
+
         yaml_path = RULES_DIR / cfg['yaml']
         if not yaml_path.exists():
             print("[SKIP] {p} not found".format(p=yaml_path))
@@ -204,7 +283,8 @@ def main():
         total = generate_spec_file(
             cfg['spec'], cfg['title'], all_rendered,
             extra_imports=cfg['imports'],
-            header_extra="\n * YAML 文件: {p}".format(p=yaml_path)
+            header_extra="\n * YAML 文件: {p}".format(p=yaml_path),
+            dry_run=args.dry_run
         )
         total_all += total
         total_defer += len(deferred) + len(defer_in_rules)
@@ -215,8 +295,13 @@ def main():
     print("  Active tests: {t}".format(t=total_all))
     print("  Deferred: {d}".format(d=total_defer))
     print("  Total rules: {r}".format(r=total_rules))
+    if args.filter:
+        print("  Filter: {f}".format(f=args.filter))
+        print("  Skipped: {s}".format(s=skipped))
+    print("  Mode: {m}".format(m='DRY-RUN' if args.dry_run else 'WRITE'))
     print("=" * 60)
+    return 0
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

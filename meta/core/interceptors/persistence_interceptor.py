@@ -319,6 +319,17 @@ class PersistenceInterceptor(Interceptor):
             op = cond_obj.get('operator', 'eq')
             value = cond_obj.get('value')
             if op == 'in_subquery':
+                # [FIX BUG-V013 2026-06-26] in_subquery 支持 ? 参数绑定
+                # 旧: 不绑定参数, 如果 subquery 含 ? 会失败
+                # 新: 替换 subquery 中的 ? 为占位符, 收集 value 列表
+                if 'subquery' in cond_obj:
+                    sub_sql = cond_obj['subquery']
+                    # 假设 subquery 含 N 个 ?, value 是 list of N elements
+                    if isinstance(value, list):
+                        placeholders = ','.join('?' * len(value))
+                        return f"{field} IN ({sub_sql.replace('?', placeholders)})", list(value)
+                    else:
+                        return f"{field} IN ({sub_sql})", [value]
                 return f"{field} IN ({value})", []
             elif op in ('in', 'nin'):
                 # [FIX v1.0.2] 列表值用 IN (...) 展开

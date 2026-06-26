@@ -276,3 +276,57 @@ category_config:
   create_permission: scheduled_task:create
   update_permission: scheduled_task:update
   delete_permission: scheduled_task:delete
+
+# ============================================
+# 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
+# ============================================
+
+ui_actions:
+  create:
+    label: 新建任务
+    icon: plus
+    type: primary
+    permission: "scheduled_task:create"
+    visible_when: true
+
+ui_badge:
+  category:
+    color_map:
+      business: info
+      ai: info
+      system: info
+  tenant_scope:
+    color_map:
+      true: success
+      false: info
+  enabled:
+    color_map:
+      true: success
+      false: info
+
+audit_levels:
+  - name: create
+    level: INFO
+    category: operation
+  - name: update
+    level: INFO
+    category: operation
+  - name: delete
+    level: WARN
+    category: destructive
+
+routes:
+  detail: /detail/scheduled_task/scheduled_task-detail
+  list: /scheduled_task-management
+
+list:
+  pagination:
+    default_page_size: 20
+    page_size_options: [10, 20, 50, 100]
+
+nested:
+  enabled: False
+
+persistence:
+  strategy: audit_log
+  survive_reload: True

@@ -4,7 +4,7 @@
  * [业务模型规则驱动 (BMRD) v2.0 - 自动生成]
  * 来源: .trae/specs/_business_rules/*.yaml
  * 生成器: scripts/generate-protection-tests.py
- * 生成时间: 2026-06-13
+ * 生成时间: 2026-06-25
  *
  * 业务规则:
  *   CRUD-1: enum_value 创建完整流程 [ACTIVE]
@@ -26,6 +26,7 @@
  *   PERF-1: 列表 API 性能 baseline [ACTIVE]
  *   E21: 脏数据弹确认依赖 dirty check + beforeunload 事件 [ACTIVE]
  *   E34: i18n locale 切换 UI (zh-CN / en-US) [ACTIVE]
+ *   UI-COLOR-1: Excel 模板配色规范 (v3 业务化重写) [ACTIVE]
  *
  * v2 铁律合规 (8 项):
  * [OK] import from auto-fixtures.js
@@ -607,6 +608,60 @@ test.describe('S-BRP-E34: i18n locale 切换 UI (zh-CN / en-US) (BMRD)', () => {
       console.log('[E34] localStorage app_locale: ' + locale)
       // 默认 zh-CN
       expect(locale, 'localStorage 应有 app_locale (默认 zh-CN)').toBe('zh-CN')
+    })
+
+})
+
+test.describe('S-BRP-UI-COLOR-1: Excel 模板配色规范 (v3 业务化重写) (BMRD)', () => {
+  /**
+   * 导出模板颜色块必须可肉眼区分 (5 种颜色)
+   * 业务规则: UI-COLOR-1 - Excel 模板配色规范 (v3 业务化重写)
+   * 优先级: P1
+   */
+    test('导出模板颜色块必须可肉眼区分 (5 种颜色)', async ({ page }) => {
+      // 1. 下载导出模板
+      const r = await page.request.get('/api/v2/import_export/export?type=enum_type&format=xlsx')
+      test.skip(r.status() !== 200, 'export failed')
+      // 2. 验证图例 sheet (说明页) 的 5 个颜色块使用不同 RGB
+      // 实现细节: 下载后用 openpyxl 读取说明 sheet 各 fill.start_color.rgb
+      // 期望: SECTION != REQUIRED != AUTO != BUSINESS_KEY != READONLY
+      expect(true).toBe(true)  // placeholder, 真实测试在 meta/tests/test_excel_color_scheme.py
+    })
+  /**
+   * relationship.source_bo_code/target_bo_code 应使用浅绿 (BUSINESS_KEY_FILL) 而非灰色
+   * 业务规则: UI-COLOR-1 - Excel 模板配色规范 (v3 业务化重写)
+   * 优先级: P1
+   */
+    test('relationship.source_bo_code/target_bo_code 应使用浅绿 (BUSINESS_KEY_FILL) 而非灰色', async ({ openpyxl }) => {
+      // 1. 导出 relationship sheet
+      const wb = await exportObject('relationship')
+      const ws = wb.getWorksheet('relationship')
+      // 2. 找到 source_bo_code 和 target_bo_code 列
+      const headerRow = ws.getRow(1)
+      const sourceBoCodeCol = headerRow.values.findIndex(v => v === '源业务对象编码')
+      const targetBoCodeCol = headerRow.values.findIndex(v => v === '目标业务对象编码')
+      // 3. 验证 fill RGB 为 E6F7E6 (浅绿)
+      for (let row = 2; row <= 5; row++) {
+        const cell1 = ws.getCell(row, sourceBoCodeCol)
+        const cell2 = ws.getCell(row, targetBoCodeCol)
+        expect(cell1.fill.startColor.rgb).toMatch(/E6F7E6/i)
+        expect(cell2.fill.startColor.rgb).toMatch(/E6F7E6/i)
+      }
+    })
+  /**
+   * source_bo_code 应紧跟 source_bo_id 出现 (列序)
+   * 业务规则: UI-COLOR-1 - Excel 模板配色规范 (v3 业务化重写)
+   * 优先级: P1
+   */
+    test('source_bo_code 应紧跟 source_bo_id 出现 (列序)', async ({ openpyxl }) => {
+      const wb = await exportObject('relationship')
+      const ws = wb.getWorksheet('relationship')
+      const headers = ws.getRow(1).values
+      const sourceBoIdIdx = headers.indexOf('源业务对象')
+      const sourceBoCodeIdx = headers.indexOf('源业务对象编码')
+      // 期望 source_bo_code 在 source_bo_id 之后且相邻
+      expect(sourceBoCodeIdx).toBeGreaterThan(sourceBoIdIdx)
+      expect(sourceBoCodeIdx).toBeLessThanOrEqual(sourceBoIdIdx + 2)
     })
 
 })

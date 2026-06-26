@@ -531,3 +531,41 @@ validations:
     rule: UNIQUE(enum_type_id, code)
     message: 同一枚举类型下编码不能重复
     severity: error
+
+# ============================================
+# 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
+# ============================================
+
+ui_actions:
+  create:
+    label: 新建枚举值
+    icon: plus
+    type: primary
+    permission: "enum_value:create"
+    visible_when: true
+
+ui_badge:
+  is_active:
+    color_map:
+      True: success
+  is_system:
+    color_map:
+      True: success
+
+routes:
+  detail: /detail/enum_value/enum_value-detail
+  list: /enum_value-management
+
+list:
+  pagination:
+    default_page_size: 20
+    page_size_options: [10, 20, 50, 100]
+
+nested:
+  enabled: True
+  parent: enum_type
+  children: []
+
+persistence:
+  strategy: audit_log
+  survive_reload: True

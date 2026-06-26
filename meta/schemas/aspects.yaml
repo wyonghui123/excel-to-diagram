@@ -14,6 +14,7 @@ audit_aspect:
       semantics:
         meaning: 记录创建的时间戳
         source_of_truth: audit_logs
+        import_order: 200
         derivation:
           from: audit_logs
           rule: "created_at WHERE action = 'CREATE'"
@@ -53,6 +54,7 @@ audit_aspect:
       semantics:
         meaning: 记录最后更新的时间戳
         source_of_truth: audit_logs
+        import_order: 201
         derivation:
           from: audit_logs
           rule: "MAX(created_at_epoch) WHERE action = 'UPDATE'"
@@ -81,6 +83,7 @@ audit_aspect:
       semantics:
         meaning: 记录创建操作的用户
         source_of_truth: audit_logs
+        import_order: 202
         derivation:
           from: audit_logs
           rule: "user_name WHERE action = 'CREATE'"
@@ -113,6 +116,7 @@ audit_aspect:
       semantics:
         meaning: 记录最后更新操作的用户
         source_of_truth: audit_logs
+        import_order: 203
         derivation:
           from: audit_logs
           rule: "user_name ORDER BY created_at DESC LIMIT 1 WHERE action IN ('CREATE', 'UPDATE')"
@@ -275,6 +279,7 @@ owner_aspect:
       description: 负责人ID
       semantics:
         meaning: 负责人，关联用户表
+        import_order: 60
         # 局部过滤配置（视图特定过滤）
         filterable: true
         filter_type: foreign_key
@@ -299,6 +304,7 @@ owner_aspect:
       description: 可见性（public/draft/team）
       semantics:
         meaning: 记录可见性，draft 模式仅 owner 可见
+        import_order: 82
         filterable: true
         filter_type: enum
         filter_label: 可见性

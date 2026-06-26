@@ -72,7 +72,6 @@ function Restart-Backend-Once {
             -WindowStyle Hidden `
             -RedirectStandardOutput (Join-Path $root 'restart_backend.out') `
             -RedirectStandardError (Join-Path $root 'restart_backend.err') `
-            -NoNewWindow `
             -PassThru
 
         # Wait for restart to complete (up to 15 seconds)

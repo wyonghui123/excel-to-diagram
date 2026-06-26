@@ -5,6 +5,7 @@ Schema → E2E Test Auto-Generator (阶段二)
 import yaml
 import os
 import sys
+import json
 import argparse
 from pathlib import Path
 import datetime
@@ -774,9 +775,30 @@ def main():
 
     if args.all:
         schemas = []
+        skip_ids = {'aspects', 'shared_properties', 'audit_log_expectations'}
         for f in sorted(os.listdir(SCHEMA_DIR)):
             if f.endswith('.yaml') and not f.startswith('_'):
-                schemas.append(f[:-5])
+                stem = f[:-5]
+                if stem in skip_ids:
+                    print(f'  [SKIP] {stem}: 基础设施 schema, 跳过 spec 生成')
+                    continue
+                # 配置型 schema (persistent: false 或无 table_name + 无 fields) - 跳过
+                # 例: hierarchies, dimension_object_mapping 等都是配置而非业务对象
+                # 但 audit_log 虽然 persistent=false 仍有 UI 页面 (只读), 所以组合判断:
+                #   persistent=false AND 无 table_name/fields/columns → 纯配置, 跳过
+                try:
+                    with open(f'{SCHEMA_DIR}/{f}', encoding='utf-8') as fp:
+                        _s = yaml.safe_load(fp)
+                    if isinstance(_s, dict):
+                        if _s.get('persistent') is False and not _s.get('table_name') and not _s.get('fields') and not _s.get('ui_view_config', {}).get('list', {}).get('columns'):
+                            print(f'  [SKIP] {stem}: 配置型 schema (persistent=false 且无 table/fields), 跳过 spec 生成')
+                            continue
+                        if 'id' in _s and 'table_name' not in _s and not _s.get('fields') and not _s.get('ui_view_config', {}).get('list', {}).get('columns'):
+                            print(f'  [SKIP] {stem}: 配置型 schema (无 table_name/fields/columns), 跳过 spec 生成')
+                            continue
+                except Exception:
+                    pass
+                schemas.append(stem)
     elif args.schema:
         schemas = args.schema
     else:

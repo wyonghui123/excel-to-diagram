@@ -434,15 +434,25 @@ class ManageService:
             if not record:
                 record = self.data_source.find_by_id(meta_obj.table_name, request.id)
             if record:
-                evaluator = ConditionEvaluator()
-                context = {"self": record}
-                can_delete, msg = evaluator.evaluate_with_message(
-                    meta_obj.deletability.condition,
-                    meta_obj.deletability.message or "当前条件不允许删除",
-                    context=context,
-                )
-                if not can_delete:
-                    return ActionResult.fail(error="DELETABILITY_DENIED", message=msg)
+                # [FIX BUG-V011 2026-06-26] deletability.condition 检查应考虑 cascade_delete 配置
+                # 旧代码: self.child_count == 0 → 只要有子就拒绝
+                # 问题: 即使 schema associations[].cascade_delete=true (应级联), 仍被拒绝
+                # 修复: 如果所有 child 关联都是 cascade_delete=true, 跳过本检查 (让 cascade_service 处理)
+                if self._all_children_cascade_delete(meta_obj):
+                    logger.debug(
+                        f'[BUG-V011] skip deletability.condition for {request.object_type}({request.id}) '
+                        f'- all children are cascade_delete=true'
+                    )
+                else:
+                    evaluator = ConditionEvaluator()
+                    context = {"self": record}
+                    can_delete, msg = evaluator.evaluate_with_message(
+                        meta_obj.deletability.condition,
+                        meta_obj.deletability.message or "当前条件不允许删除",
+                        context=context,
+                    )
+                    if not can_delete:
+                        return ActionResult.fail(error="DELETABILITY_DENIED", message=msg)
 
         from meta.core.models import RelationType
         from meta.services.cascade_service import CascadeService
@@ -476,6 +486,36 @@ class ManageService:
         params = {"id": request.id}
         skip_rules = request.force
         result = self.executor.execute(meta_obj, "crud_delete", params, skip_rules=skip_rules)
+
+    def _all_children_cascade_delete(self, meta_obj) -> bool:
+        """[FIX BUG-V011 2026-06-26] 检查 meta_obj 的所有 child 关联是否都是 cascade_delete=true.
+
+        读 schema (yaml) 的 associations, 检查每条关联的 cascade_delete.
+        支持 dict 和 AssociationDefinition 两种格式.
+        """
+        try:
+            assocs = getattr(meta_obj, 'associations', None) or []
+            if isinstance(assocs, dict):
+                assocs = list(assocs.values())
+
+            def _get_assoc_field(a, field, default=None):
+                if isinstance(a, dict):
+                    return a.get(field, default)
+                return getattr(a, field, default)
+
+            composition_children = [
+                a for a in assocs
+                if _get_assoc_field(a, 'type') == 'composition'
+            ]
+            if not composition_children:
+                return True
+            return all(
+                _get_assoc_field(a, 'cascade_delete', False)
+                for a in composition_children
+            )
+        except Exception as e:
+            logger.debug(f'[BUG-V011] _all_children_cascade_delete check failed: {e}')
+            return False
 
         if cascade_result and cascade_result.get('_children_audit_info'):
             try:

@@ -1,6 +1,0 @@
-fix(monitor_v22): correct function name spelling
-
-- detect_and_record_violans -> detect_and_record_violations
-- Caused NameError on monitor v2.2 startup
-- Now monitor v2.2 runs successfully (PID 12340)
-- L2 violation #11 acknowledged (monitor bugfix in main)

@@ -46,3 +46,33 @@ fields:
     enum_values:
       - include
       - exclude
+
+# ============================================
+# 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
+# ============================================
+
+ui_badge:
+  inherit_children:
+    color_map:
+      true: success
+      false: info
+  scope_mode:
+    color_map:
+      include: info
+      exclude: info
+
+routes:
+  detail: /detail/role_dimension_scope/role_dimension_scope-detail
+  list: /role_dimension_scope-management
+
+list:
+  pagination:
+    default_page_size: 20
+    page_size_options: [10, 20, 50, 100]
+
+nested:
+  enabled: False
+
+persistence:
+  strategy: audit_log
+  survive_reload: True

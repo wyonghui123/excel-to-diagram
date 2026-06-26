@@ -32,6 +32,10 @@ const ACTION_LABELS = {
   IMPORT: '导入',
   ASSIGN: '分配',
   UNASSIGN: '取消分配',
+  ASSOCIATE: '关联',
+  DISSOCIATE: '取消关联',
+  GRANT: '授权',
+  REVOKE: '撤销',
   EXECUTE: '执行',
   RESTORE: '恢复'
 }

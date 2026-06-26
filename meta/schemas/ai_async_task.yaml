@@ -280,3 +280,49 @@ category_config:
   create_permission: ai_task:create
   update_permission: ai_task:update
   delete_permission: ai_task:delete
+
+# ============================================
+# 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
+# ============================================
+
+ui_badge:
+  task_type:
+    color_map:
+      query: info
+      analyze: info
+      action: info
+      embedding: info
+      agent: info
+      rag: info
+  status:
+    color_map:
+      pending: info
+      queued: info
+      running: info
+      completed: info
+      failed: info
+      cancelled: info
+
+audit_levels:
+  - name: create
+    level: INFO
+    category: operation
+  - name: update
+    level: INFO
+    category: operation
+
+routes:
+  detail: /detail/ai_async_task/ai_async_task-detail
+  list: /ai_async_task-management
+
+list:
+  pagination:
+    default_page_size: 20
+    page_size_options: [10, 20, 50, 100]
+
+nested:
+  enabled: False
+
+persistence:
+  strategy: audit_log
+  survive_reload: True

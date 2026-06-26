@@ -866,3 +866,68 @@ rules:
       icon: refresh
       highlight: true
       confirm_message: "确定要重试写入此审计记录吗？"
+
+# ============================================
+# 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
+# ============================================
+
+ui_actions:
+  export:
+    label: 导出
+    icon: download
+    type: default
+    permission: "audit_log:export"
+    visible_when: true
+
+ui_badge:
+  log_category:
+    color_map:
+      business: info
+      security: info
+      operation: info
+      performance: info
+      system: info
+  log_level:
+    color_map:
+      DEBUG: info
+      INFO: info
+      WARNING: warning
+      ERROR: info
+      CRITICAL: info
+  object_type:
+    color_map:
+      user: info
+      role: info
+      user_group: info
+      product: info
+      version: info
+      domain: info
+      sub_domain: info
+      service_module: info
+      business_object: info
+      relationship: info
+      annotation: info
+      enum_type: info
+      enum_value: info
+      __audit_failure__: info
+  status:
+    color_map:
+      pending: info
+      written: info
+      failed: info
+
+routes:
+  detail: /detail/audit_log/audit_log-detail
+  list: /audit_log-management
+
+list:
+  pagination:
+    default_page_size: 50
+    page_size_options: [10, 20, 50, 100]
+
+nested:
+  enabled: False
+
+persistence:
+  strategy: audit_log
+  survive_reload: True

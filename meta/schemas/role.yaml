@@ -448,3 +448,65 @@ deletion_policy:
   cascade_delete:
     - user_roles
     - role_permissions
+
+# ============================================
+# 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
+# ============================================
+
+ui_actions:
+  create:
+    label: 新建角色
+    icon: plus
+    type: primary
+    permission: "role:create"
+    visible_when: true
+  export:
+    label: 导出
+    icon: download
+    type: default
+    permission: "role:export"
+    visible_when: true
+  import:
+    label: 导入
+    icon: upload
+    type: default
+    permission: "role:import"
+    visible_when: true
+
+ui_badge:
+  is_active:
+    color_map:
+      1: info
+  is_system:
+    color_map:
+      1: info
+
+audit_levels:
+  - name: create
+    level: INFO
+    category: operation
+  - name: update
+    level: INFO
+    category: operation
+  - name: delete
+    level: WARN
+    category: destructive
+  - name: associate
+    level: INFO
+    category: relation
+
+routes:
+  detail: /detail/role
+  list: /role-management
+
+list:
+  pagination:
+    default_page_size: 20
+    page_size_options: [10, 20, 50, 100]
+
+nested:
+  enabled: False
+
+persistence:
+  strategy: audit_log
+  survive_reload: True

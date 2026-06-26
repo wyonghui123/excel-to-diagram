@@ -1566,5 +1566,88 @@ describe('useMultiObjectPage', () => {
       expect(page2.scopeIds.business_object.selected).toEqual([100, 200, 300])
       expect(page2.scopeIds.relationExtra.relationCodes).toEqual(['R1', 'R2', 'R3'])
     })
+
+    // [FIX 2026-06-25] 回归测试：从 landing "常用产品版本" 跳转时 URL 携带 productId/versionId，
+    //   restoreStateFromDiagram({ skipVersionRestore: true }) 必须跳过陈旧快照的版本上下文覆盖，
+    //   让 useVersionContext 中的 restoreContext (URL 解析) 写入的值生效。
+    //   此前: 旧 sessionStorage 快照中的 productId/versionId 会同步覆盖 versionContext，
+    //          导致 "供应链管理系统 v1.0" 跳转后 toolbar 显示陈旧版本（甚至 null）。
+    //   修复后: skipVersionRestore=true 时不再写入 selectedVersionId/selectedProductId，
+    //          但仍恢复 activeTab/scopeIds/initialBoIds/initialRelationCodes 等展示状态。
+    it('[v40] skipVersionRestore=true 时跳过版本上下文恢复但保留展示状态', async () => {
+      // 模拟 sessionStorage 中的陈旧快照（之前访问 archdata 留下的）
+      const staleSnapshot = {
+        activeTab: 'business_object',
+        productId: 999,        // 故意设为陈旧的、与 URL 不符的产品 ID
+        versionId: 888,        // 故意设为陈旧的、与 URL 不符的版本 ID
+        scopeIds: {
+          domain: { selected: [10], effective: [] },
+          business_object: { selected: [500, 600], effective: [] },
+          relationExtra: { relationCodes: ['STALE_R1'], categoryTypes: [], filterRelationCodes: [] }
+        },
+        tabFilters: {},
+        initialBoIds: [500, 600],
+        initialRelationCodes: ['STALE_R1'],
+        savedAt: Date.now()
+      }
+      sessionStorage.setItem('archManagerStateBeforeDiagram', JSON.stringify(staleSnapshot))
+      sessionStorage.setItem('returningFromDiagram', 'true')
+
+      // 拿到已 mock 的 useVersionContext 实例, 在调用前设置占位值
+      const { useVersionContext } = await import('../useVersionContext')
+      const versionContext = useVersionContext()
+      versionContext.selectedVersionId.value = null
+      versionContext.selectedProductId.value = null
+
+      const page = createComposable()
+      const restored = page.restoreStateFromDiagram({ skipVersionRestore: true })
+
+      // 1. 仍应返回 initialBoIds / initialRelationCodes（展示状态恢复不受影响）
+      expect(restored).toBeTruthy()
+      expect(restored.initialBoIds).toEqual([500, 600])
+      expect(restored.initialRelationCodes).toEqual(['STALE_R1'])
+
+      // 2. activeTab / scopeIds 等展示状态仍被恢复
+      expect(page.activeTab.value).toBe('business_object')
+      expect(page.scopeIds.business_object.selected).toEqual([500, 600])
+
+      // 3. [关键] versionContext 不应被陈旧快照覆盖！
+      //    URL 应用前的占位值 (null) 必须保持不变，让后续 restoreContext(URL) 写入正确的值
+      expect(versionContext.selectedVersionId.value).not.toBe(888)
+      expect(versionContext.selectedProductId.value).not.toBe(999)
+
+      // 4. flag 应被清掉（正常副作用）
+      expect(sessionStorage.getItem('returningFromDiagram')).toBeNull()
+    })
+
+    // [FIX 2026-06-25] 向后兼容测试：无参调用或 options 为空时仍恢复版本上下文
+    //   (确保从 chart / 详情 返回管理页的传统路径不被破坏)
+    it('[v40] restoreStateFromDiagram() 无参调用应保持原有行为 (恢复版本上下文)', () => {
+      const stored = {
+        activeTab: 'domain',
+        productId: 42,
+        versionId: 7,
+        scopeIds: {
+          domain: { selected: [1], effective: [] },
+          business_object: { selected: [], effective: [] },
+          relationExtra: { relationCodes: [], categoryTypes: [], filterRelationCodes: [] }
+        },
+        tabFilters: {},
+        initialBoIds: [],
+        initialRelationCodes: [],
+        savedAt: Date.now()
+      }
+      sessionStorage.setItem('archManagerStateBeforeDiagram', JSON.stringify(stored))
+      sessionStorage.setItem('returningFromDiagram', 'true')
+
+      const page = createComposable()
+      const restored = page.restoreStateFromDiagram()  // 无参
+
+      expect(restored).toBeTruthy()
+      expect(page.activeTab.value).toBe('domain')
+      // 版本上下文应被恢复（传统路径不变）
+      expect(page.versionContext.selectedProductId.value).toBe(42)
+      expect(page.versionContext.selectedVersionId.value).toBe(7)
+    })
   })
 })

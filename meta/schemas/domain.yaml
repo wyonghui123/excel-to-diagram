@@ -1,36 +1,21 @@
-# ============================================
-# 领域元模型
-# 层级: 3 (产品 → 版本 → 领域)
-# 说明: 领域是业务领域的顶层分类，代表一个业务领域
-# ============================================
-
 id: domain
 name: 领域
 table_name: domains
 description: 领域是业务领域的顶层分类，代表一个业务领域。领域下包含多个子领域。
 display_name_field: name
 parent_object: version
-# 🆕 v1.1 owner refactor: 移除 owner_aspect
-aspects: [hierarchy_aspect, audit_aspect, naming_aspect]
-
-# ============================================
-# 管理维度绑定（Spec v1.3 数据权限统一模型）
-# ============================================
-# 声明此 BO 如何应用管理维度值
-# dimension_bindings 列表中的每项：
-#   - dimension: 维度名
-#   - field:     BO 表中对应的字段
-#   - through:   （可选）多跳关联的中间表
+aspects:
+- hierarchy_aspect
+- audit_aspect
+- naming_aspect
 dimension_bindings:
-  - dimension: domain       # 自身就是维度
-    field: id
-  - dimension: product      # 通过 version 关联
-    field: version_id
-    through: version
-  - dimension: version      # 直接 FK
-    field: version_id
-
-# Audit configuration
+- dimension: domain
+  field: id
+- dimension: product
+  field: version_id
+  through: version
+- dimension: version
+  field: version_id
 audit:
   enabled: true
   create:
@@ -40,39 +25,32 @@ audit:
     enabled: true
     fields: changed_only
     exclude:
-      - id
-      - created_at
-      - updated_at
-      - created_by
-      - updated_by
+    - id
+    - created_at
+    - updated_at
+    - created_by
+    - updated_by
   delete:
     enabled: true
     fields: business_only
     exclude:
-      - id
-      - created_at
-      - updated_at
-      - created_by
-      - updated_by
-
+    - id
+    - created_at
+    - updated_at
+    - created_by
+    - updated_by
 deletability:
-  condition: "self.child_count == 0 and self.relation_count == 0"
-  message: "存在子领域或关联关系的领域不能删除"
-
+  condition: self.child_count == 0 and self.relation_count == 0
+  message: 存在子领域或关联关系的领域不能删除
 authorization:
   check: true
-  # 🆕 v1.1 owner refactor (TBD-8): 通过 version_id → product 链追溯
-  scope: "version_id IN (SELECT v.id FROM versions v JOIN products p ON v.product_id = p.id WHERE p.visibility = 'public' OR p.owner_id = $user.id)"
-  # 🆕 TBD-9: 关闭 auto_owner
+  scope: version_id IN (SELECT v.id FROM versions v JOIN products p ON v.product_id
+    = p.id WHERE p.visibility = 'public' OR p.owner_id = $user.id)
   auto_owner: false
-  # 🆕 TBD-11: 保留 auto_permission=admin
   auto_permission: admin
-  # 🆕 TBD-10: 保留 inherit_to_children
   inherit_to_children: true
-  # 🆕 v1.1: domain 不再独立 transfer
   allow_transfer: false
   transfer_keep_permissions: false
-
 hierarchy:
   enabled: true
   hierarchy_id: biz_hierarchy
@@ -80,20 +58,14 @@ hierarchy:
   parent_field: version_id
   path_field: hierarchy_path
   depth_field: hierarchy_depth
-
 context:
   field: version_id
-  description: "版本上下文，所有查询自动注入 version_id 过滤"
-
+  description: 版本上下文，所有查询自动注入 version_id 过滤
 cascade_select:
-  - field: sub_domain_id
-    parent_object: sub_domain
-    parent_display_field: name
-    filter_by: domain_id
-
-# ────────────────────────────────────────────
-# 语义标注
-# ────────────────────────────────────────────
+- field: sub_domain_id
+  parent_object: sub_domain
+  parent_display_field: name
+  filter_by: domain_id
 semantics:
   meaning: 业务领域的顶层分类
   business_key: true
@@ -101,570 +73,550 @@ semantics:
   category: core_entity
   hierarchy_level: 3
   aliases:
-    - 领域
-    - Domain
-    - 业务领域
+  - 领域
+  - Domain
+  - 业务领域
   custom:
     color_coding: domain
     icon: domain
-
-# ────────────────────────────────────────────
-# 导入导出配置
-# ────────────────────────────────────────────
 import_export:
   import_enabled: true
   export_enabled: true
-  cascade_export: true              # 导出时包含子领域、服务模块、业务对象、关系
+  cascade_export: true
   cascade_import: true
-  conflict_strategy: upsert         # 存在则更新，不存在则插入
-  conflict_key: code                # 使用code字段判断冲突
-  description_for_agent: "领域是业务领域的顶层分类，代表一个业务领域。领域下包含多个子领域。导出时会级联包含所有子对象。"
-
-# ────────────────────────────────────────────
-# 分析模型定义
-# ────────────────────────────────────────────
+  conflict_strategy: upsert
+  conflict_key: code
+  description_for_agent: 领域是业务领域的顶层分类，代表一个业务领域。领域下包含多个子领域。导出时会级联包含所有子对象。
 analytical_model:
   enabled: true
-  
   fact:
     table: domains
     alias: d
     measures:
-      - id: domain_count
-        field: id
-        aggregation: count
-        display_name: 领域数量
-        format: "#,##0"
-  
+    - id: domain_count
+      field: id
+      aggregation: count
+      display_name: 领域数量
+      format: '#,##0'
   dimensions:
-    - id: version_id
-      field: d.version_id
-      display_name: 版本
-      hierarchy_level: 1
-  
-  # ────────────────────────────────────────────
-  # 跨表关联过滤（SAP CDS Association + Path Expression 风格）
-  # ────────────────────────────────────────────
+  - id: version_id
+    field: d.version_id
+    display_name: 版本
+    hierarchy_level: 1
   cross_table_filters:
-    - id: annotation_category
-      display_name: 备注类型
-      description: 按备注类型过滤包含该类型备注的领域
-      
-      association:
-        target_table: annotations
-        target_alias: a
-        join_type: exists
-        
-        on_conditions:
-          - left_field: d.id
-            operator: eq
-            right_field: a.target_id
-          - left_field: "'domain'"
-            operator: eq
-            right_field: a.target_type
-        
-        where_conditions:
-          - field: a.category
-            operator: in
-            parameter: annotation_category
-      
-      ui:
-        filter_type: multi-select
-        filter_label: 备注类型
-        filter_placeholder: 请选择备注类型
-        options_source: enum
-        enum_type: annotation_category
-        position: 50
-    
-    - id: annotation_content_search
-      display_name: 备注内容
-      description: 按备注内容模糊搜索领域
-      
-      association:
-        target_table: annotations
-        target_alias: a
-        join_type: exists
-        
-        on_conditions:
-          - left_field: d.id
-            operator: eq
-            right_field: a.target_id
-          - left_field: "'domain'"
-            operator: eq
-            right_field: a.target_type
-        
-        where_conditions:
-          - field: a.content
-            operator: like
-            parameter: annotation_content_search
-      
-      ui:
-        filter_type: search
-        filter_label: 备注内容
-        filter_placeholder: 输入备注内容关键词...
-        position: 51
-
-# ────────────────────────────────────────────
-# UI 视图配置
-# ────────────────────────────────────────────
+  - id: annotation_category
+    display_name: 备注类型
+    description: 按备注类型过滤包含该类型备注的领域
+    association:
+      target_table: annotations
+      target_alias: a
+      join_type: exists
+      on_conditions:
+      - left_field: d.id
+        operator: eq
+        right_field: a.target_id
+      - left_field: '''domain'''
+        operator: eq
+        right_field: a.target_type
+      where_conditions:
+      - field: a.category
+        operator: in
+        parameter: annotation_category
+    ui:
+      filter_type: multi-select
+      filter_label: 备注类型
+      filter_placeholder: 请选择备注类型
+      options_source: enum
+      enum_type: annotation_category
+      position: 50
+  - id: annotation_content_search
+    display_name: 备注内容
+    description: 按备注内容模糊搜索领域
+    association:
+      target_table: annotations
+      target_alias: a
+      join_type: exists
+      on_conditions:
+      - left_field: d.id
+        operator: eq
+        right_field: a.target_id
+      - left_field: '''domain'''
+        operator: eq
+        right_field: a.target_type
+      where_conditions:
+      - field: a.content
+        operator: like
+        parameter: annotation_content_search
+    ui:
+      filter_type: search
+      filter_label: 备注内容
+      filter_placeholder: 输入备注内容关键词...
+      position: 51
 ui_view_config:
   list:
     pageSize: 20
-    # [FIX 2026-06-17] 显式声明 searchFields，包含 description（text 类型，不在 list columns 中）
     searchFields:
-      - name
-      - code
-      - description
+    - name
+    - code
+    - description
     columns:
-      - key: name
-        title: 名称
-        width: 200
-        position: 1
-        importance: high
-        sortable: true
-        i18n_key: domain.field.name
-      - key: code
-        title: 编码
-        width: 150
-        position: 2
-        importance: medium
-        sortable: true
-      # [FIX 2026-06-14] BUG-V008 扩展: 补 FK 链路列 version_name
-      # 后端通过 redundancy join_path 自动填充 (version_id -> versions.name)
-      - key: version_name
-        title: 所属版本
-        width: 150
-        position: 3
-        importance: high
-        sortable: true
-      # [V1.1.4 2026-06-11] 删 effective_owner_id_display - 顶层 owner 已在 product
-      - key: relation_count
-        title: 关系数量
-        width: 100
-        position: 80
-        importance: medium
-        sortable: true
-        computed: true
-        computation:
-          type: count_relations
-          scope: descendants
-      - key: created_at
-        title: 创建时间
-        width: 180
-        position: 90
-        importance: low
-        sortable: true
-        i18n_key: common.field.created_at
-      - key: updated_at
-        title: 更新时间
-        width: 180
-        position: 91
-        importance: low
-        sortable: true
-        i18n_key: common.field.updated_at
-      # [FIX 2026-06-09] 补 child_count UI 列，让 computed count_children
-      # 在 list 响应里被 enrichment (compute_batch) 填充，避免 child_count
-      # 仅在排序/过滤 SQL 子查询存在、UI 却不显示的尴尬
-      - key: child_count
-        title: 子领域数量
-        width: 100
-        position: 70
-        importance: medium
-        sortable: true
-        computed: true
-        computation:
-          type: count_children
-          child_object: sub_domain
+    - key: name
+      title: 名称
+      width: 200
+      position: 1
+      importance: high
+      sortable: true
+      i18n_key: domain.field.name
+    - key: code
+      title: 编码
+      width: 150
+      position: 2
+      importance: medium
+      sortable: true
+    - key: version_name
+      title: 所属版本
+      width: 150
+      position: 3
+      importance: high
+      sortable: true
+    - key: relation_count
+      title: 关系数量
+      width: 100
+      position: 80
+      importance: medium
+      sortable: true
+      computed: true
+      computation:
+        type: count_relations
+        scope: descendants
+    - key: created_at
+      title: 创建时间
+      width: 180
+      position: 90
+      importance: low
+      sortable: true
+      i18n_key: common.field.created_at
+    - key: updated_at
+      title: 更新时间
+      width: 180
+      position: 91
+      importance: low
+      sortable: true
+      i18n_key: common.field.updated_at
+    - key: child_count
+      title: 子领域数量
+      width: 100
+      position: 70
+      importance: medium
+      sortable: true
+      computed: true
+      computation:
+        type: count_children
+        child_object: sub_domain
     selectable: true
   detail:
     facets:
-      - title: 基本信息
-        type: fieldGroup
-        fields:
-          - name
-          - code
-          - version_name
-      - title: 系统信息
-        type: fieldGroup
-        fields:
-          - created_at
-          - updated_at
-          - created_by
-          - updated_by
+    - title: 基本信息
+      type: fieldGroup
+      fields:
+      - name
+      - code
+      - version_name
+    - title: 系统信息
+      type: fieldGroup
+      fields:
+      - created_at
+      - updated_at
+      - created_by
+      - updated_by
     showChangeHistory: true
     showRelations: true
   child_sections:
-    - child_object: annotation
-      title: 备注信息
-      display: inline
-      pageSize: 10
-      columns:
-        - key: category
-          title: 分类
-          width: 80
-        - key: content
-          title: 内容
-          width: 300
-        - key: created_at
-          title: 创建时间
-          width: 150
-        - key: created_by
-          title: 创建人
-          width: 100
-      actions:
-        - key: create
-          label: 添加备注
-        - key: edit
-          label: 编辑
-        - key: delete
-          label: 删除
-          danger: true
+  - child_object: annotation
+    title: 备注信息
+    display: inline
+    pageSize: 10
+    columns:
+    - key: category
+      title: 分类
+      width: 80
+    - key: content
+      title: 内容
+      width: 300
+    - key: created_at
+      title: 创建时间
+      width: 150
+    - key: created_by
+      title: 创建人
+      width: 100
+    actions:
+    - key: create
+      label: 添加备注
+    - key: edit
+      label: 编辑
+    - key: delete
+      label: 删除
+      danger: true
   form:
     sections:
-      - title: 基本信息
-        fields:
-          - code
-          - name
-          - version_id
+    - title: 基本信息
+      fields:
+      - code
+      - name
+      - version_id
     layout: vertical
   change_notification:
     enabled: true
     events:
-      - type: create
-        channels: [in_app]
-        track_fields: [code, name, version_id]
-        payload: [id, code, name]
-      - type: update
-        channels: [in_app]
-        track_fields: [code, name]
-        payload: [id, code, name]
-      - type: delete
-        channels: [in_app]
-        track_fields: []
-        payload: [id, code, name]
-
-# ────────────────────────────────────────────
-# 字段定义
-# ────────────────────────────────────────────
+    - type: create
+      channels:
+      - in_app
+      track_fields:
+      - code
+      - name
+      - version_id
+      payload:
+      - id
+      - code
+      - name
+    - type: update
+      channels:
+      - in_app
+      track_fields:
+      - code
+      - name
+      payload:
+      - id
+      - code
+      - name
+    - type: delete
+      channels:
+      - in_app
+      track_fields: []
+      payload:
+      - id
+      - code
+      - name
 fields:
-  - id: version_code
-    name: 版本编码
-    type: string
-    description: 所属版本编码（用于导入导出和快速输入）
-    storage: virtual
-    semantics:
-      meaning: 版本的业务键，用于导入导出和外键解析
-      business_key: true
-      import_visible: true
-      export_visible: true
-      import_order: 3
-      data_category: code
-      virtual: true
-      # 冗余字段一致性声明（Type-C: 解析冗余）
-      redundancy:
-        type: resolution
-        source_field: version_id
-        # [CHANGED 2026-06-13] version.code 字段已删除, 改用 version.name
-        # 字段名保持 version_code 不变(向后兼容), 但实际解析 version.name
-        derived_from: version.name
-        join_path:
-          - table: versions
-            from: version_id
-            to: id
-            select: name
-    ui:
-      visible: true
-      editable: true
-      widget: input
-      fieldGroup: 层级归属
-      fieldGroupPosition: 15
-      i18n_key: domain.field.version_code
-
-  - id: id
-    name: ID
-    type: integer
-    db_column: id
-    required: true
-    unique: true
-    description: 技术主键
-    semantics:
-      meaning: 自增主键，系统内部使用
-      analytics:
-        category: measure
-        aggregation: count
-        display_name: 领域数量
-    ui:
-      visible: false
-      editable: false
-
-  - id: version_id
-    name: 版本
-    type: integer
-    db_column: version_id
-    required: true
-    description: 所属版本
-    ui:
-      widget: select
-      relation: version
-      display_field: version_name
-    semantics:
-      meaning: 关联的产品版本
-      parent_key: true
-      readonly_always: true
-      context_field: true
-      resolve_from_field: version_code
-      resolve_to_object: version
-      analytics:
-        category: dimension
-        type: foreign_key
-        display_name: 版本
-    value_help:
-      source:
-        type: bo
-        target_bo: version
-        value_field: id
-        display_field: name
-        code_field: code
-        apply_target_permissions: false
-      behavior:
-        validation: true
-        binding_strength: strict
-        multiple: false  # 详情表单应为单选，不是多选
-      presentation:
-        result_type: dropdown
-        display_format: "{code} - {name}"
-        columns:
-          - field: code
-            label: 编码
-            width: 120
-          - field: name
-            label: 名称
-            width: 200
-
-  - id: code
-    name: 编码
-    type: string
-    db_column: code
-    required: true
-    description: 领域编码（预留）
-    semantics:
-      meaning: 领域的唯一编码，预留字段
-      business_key: true
-      immutable: true
-      pattern: "^[A-Z][A-Z0-9_]*$"
-      examples:
-        - SUPPLY_CHAIN
-        - FINANCE
-        - HR
-      data_category: code             # 编码类型，导入时转大写
-      import_visible: true
-      export_visible: true
-      import_order: 4
-    ui:
-      visible: true
-      editable: true
-      widget: input
-      fieldGroup: 基本信息
-      fieldGroupPosition: 10
-      i18n_key: domain.field.code
-
-  - id: name
-    name: 名称
-    type: string
-    db_column: name
-    required: true
-    description: 领域名称
-    semantics:
-      meaning: 领域的显示名称
-      display_name: true
-      examples:
-        - 供应链
-        - 财务
-        - 人力资源
-      data_category: text             # 文本类型
-      import_visible: true
-      export_visible: true
-      import_order: 20
-    ui:
-      visible: true
-      editable: true
-      widget: input
-      fieldGroup: 基本信息
-      fieldGroupPosition: 20
-      lineItem:
-        position: 1
-        importance: high
-
-  - id: description
-    name: 描述
-    type: text
-    db_column: description
-    description: 领域描述
-    ui:
-      widget: textarea
-      render_hints:
-        searchable: true
-    semantics:
-      meaning: 领域的详细描述
-      data_category: text
-      import_visible: true
-      export_visible: true
-      import_order: 30
-
-  - id: version_name
-    name: 版本
-    type: string
-    description: 所属版本名称
-    storage: virtual
-    ui:
-      visible: true
-      editable: false
-    semantics:
-      meaning: 关联版本的显示名称
-      redundancy:
-        type: virtual
-        source_field: version_id
-        derived_from: version.name
-        join_path:
-          - table: versions
-            from: version_id
-            to: id
-            select: name
-
-  # 🆕 v1.1 owner refactor (TBD-1): domain 删除 owner_id 字段
-  # 负责人从 product.owner 派生, 见 effective_owner_id (FR-006)
-  # - id: owner_id
-  #   (字段已删除)
-
-  - id: relation_count
-    name: 关系数量
-    type: integer
-    description: 领域下所有业务对象的关系数量
-    storage: virtual
-    computed: true
-    semantics:
-      meaning: 领域下所有业务对象的关系数量统计
-      analytics:
-        category: measure
-        aggregation: count
-    computation:
-      type: count_relations
-      scope: descendants
-
-  - id: child_count
-    name: 子领域数量
-    type: integer
-    description: 领域下的子领域数量
-    storage: virtual
-    computed: true
-    semantics:
-      meaning: 领域包含的子领域数量
-      analytics:
-        category: measure
-        aggregation: sum
-        display_name: 子领域总数
-    computation:
-      type: count_children
-      child_object: sub_domain
-    ui:
-      visible: true
-      editable: false
-
-  - id: bo_density
-    name: BO密度
-    type: number
-    description: 业务对象关系密度
-    storage: virtual
-    semantics:
-      meaning: 平均每个业务对象的关系数量，反映领域内业务对象之间的关联紧密程度
-      export_visible: false
-      analytics:
-        category: measure
-        aggregation: avg
-    computation:
-      formula: 'ROUND(DIVIDE(relation_count, child_count, 0), 2)'
-    ui:
-      widget: number
-      format: decimal
-      precision: 2
-
-# ────────────────────────────────────────────
-# 关联关系
-# ────────────────────────────────────────────
+- id: version_code
+  name: 版本编码
+  type: string
+  description: 所属版本编码（用于导入导出和快速输入）
+  storage: virtual
+  semantics:
+    meaning: 版本的业务键，用于导入导出和外键解析
+    business_key: true
+    import_visible: true
+    export_visible: true
+    import_order: 1
+    data_category: code
+    virtual: true
+    redundancy:
+      type: resolution
+      source_field: version_id
+      derived_from: version.name
+      join_path:
+      - table: versions
+        from: version_id
+        to: id
+        select: name
+  ui:
+    visible: true
+    editable: true
+    widget: input
+    fieldGroup: 层级归属
+    fieldGroupPosition: 15
+    i18n_key: domain.field.version_code
+- id: id
+  name: ID
+  type: integer
+  db_column: id
+  required: true
+  unique: true
+  description: 技术主键
+  semantics:
+    meaning: 自增主键，系统内部使用
+    analytics:
+      category: measure
+      aggregation: count
+      display_name: 领域数量
+    import_order: 999
+  ui:
+    visible: false
+    editable: false
+- id: version_id
+  name: 版本
+  type: integer
+  db_column: version_id
+  required: true
+  description: 所属版本
+  ui:
+    widget: select
+    relation: version
+    display_field: version_name
+  semantics:
+    meaning: 关联的产品版本
+    parent_key: true
+    readonly_always: true
+    context_field: true
+    resolve_from_field: version_code
+    resolve_to_object: version
+    analytics:
+      category: dimension
+      type: foreign_key
+      display_name: 版本
+    import_order: 999
+  value_help:
+    source:
+      type: bo
+      target_bo: version
+      value_field: id
+      display_field: name
+      code_field: code
+      apply_target_permissions: false
+    behavior:
+      validation: true
+      binding_strength: strict
+      multiple: false
+    presentation:
+      result_type: dropdown
+      display_format: '{code} - {name}'
+      columns:
+      - field: code
+        label: 编码
+        width: 120
+      - field: name
+        label: 名称
+        width: 200
+- id: code
+  name: 编码
+  type: string
+  db_column: code
+  required: true
+  description: 领域编码（预留）
+  semantics:
+    meaning: 领域的唯一编码，预留字段
+    business_key: true
+    immutable: true
+    pattern: ^[A-Z][A-Z0-9_]*$
+    examples:
+    - SUPPLY_CHAIN
+    - FINANCE
+    - HR
+    data_category: code
+    import_visible: true
+    export_visible: true
+    import_order: 2
+  ui:
+    visible: true
+    editable: true
+    widget: input
+    fieldGroup: 基本信息
+    fieldGroupPosition: 10
+    i18n_key: domain.field.code
+- id: name
+  name: 名称
+  type: string
+  db_column: name
+  required: true
+  description: 领域名称
+  semantics:
+    meaning: 领域的显示名称
+    display_name: true
+    examples:
+    - 供应链
+    - 财务
+    - 人力资源
+    data_category: text
+    import_visible: true
+    export_visible: true
+    import_order: 20
+  ui:
+    visible: true
+    editable: true
+    widget: input
+    fieldGroup: 基本信息
+    fieldGroupPosition: 20
+    lineItem:
+      position: 1
+      importance: high
+- id: description
+  name: 描述
+  type: text
+  db_column: description
+  description: 领域描述
+  ui:
+    widget: textarea
+    render_hints:
+      searchable: true
+  semantics:
+    meaning: 领域的详细描述
+    data_category: text
+    import_visible: true
+    export_visible: true
+    import_order: 30
+- id: version_name
+  name: 版本
+  type: string
+  description: 所属版本名称
+  storage: virtual
+  ui:
+    visible: true
+    editable: false
+  semantics:
+    meaning: 关联版本的显示名称
+    redundancy:
+      type: virtual
+      source_field: version_id
+      derived_from: version.name
+      join_path:
+      - table: versions
+        from: version_id
+        to: id
+        select: name
+    import_order: 95
+- id: relation_count
+  name: 关系数量
+  type: integer
+  description: 领域下所有业务对象的关系数量
+  storage: virtual
+  computed: true
+  semantics:
+    meaning: 领域下所有业务对象的关系数量统计
+    analytics:
+      category: measure
+      aggregation: count
+    import_order: 97
+  computation:
+    type: count_relations
+    scope: descendants
+- id: child_count
+  name: 子领域数量
+  type: integer
+  description: 领域下的子领域数量
+  storage: virtual
+  computed: true
+  semantics:
+    meaning: 领域包含的子领域数量
+    analytics:
+      category: measure
+      aggregation: sum
+      display_name: 子领域总数
+    import_order: 95
+  computation:
+    type: count_children
+    child_object: sub_domain
+  ui:
+    visible: true
+    editable: false
+- id: bo_density
+  name: BO密度
+  type: number
+  description: 业务对象关系密度
+  storage: virtual
+  semantics:
+    meaning: 平均每个业务对象的关系数量，反映领域内业务对象之间的关联紧密程度
+    export_visible: false
+    analytics:
+      category: measure
+      aggregation: avg
+    import_order: 96
+  computation:
+    formula: ROUND(DIVIDE(relation_count, child_count, 0), 2)
+  ui:
+    widget: number
+    format: decimal
+    precision: 2
 relations:
-  - id: domain_to_version
-    name: 归属版本
-    type: parent_child
-    target: version
-    cardinality: "N:1"
-    description: 领域归属的版本
-    semantics:
-      meaning: 领域与版本的层级关系
-
-  - id: domain_to_subdomains
-    name: 包含子领域
-    type: composition
-    target: sub_domain
-    cardinality: "1:N"
-    cascade_delete: true
-    ownership: true
-    description: 一个领域包含多个子领域
-    semantics:
-      meaning: 领域与子领域的层级关系
-
+- id: domain_to_version
+  name: 归属版本
+  type: parent_child
+  target: version
+  cardinality: N:1
+  description: 领域归属的版本
+  semantics:
+    meaning: 领域与版本的层级关系
+- id: domain_to_subdomains
+  name: 包含子领域
+  type: composition
+  target: sub_domain
+  cardinality: 1:N
+  cascade_delete: true
+  ownership: true
+  description: 一个领域包含多个子领域
+  semantics:
+    meaning: 领域与子领域的层级关系
 indexes:
-  - name: uidx_domains_version_code
-    fields: [version_id, code]
-    type: unique
-    priority: high
-    description: "版本+编码唯一索引（业务键约束）"
-
-# ────────────────────────────────────────────
-# 操作定义
-# ────────────────────────────────────────────
+- name: uidx_domains_version_code
+  fields:
+  - version_id
+  - code
+  type: unique
+  priority: high
+  description: 版本+编码唯一索引（业务键约束）
 actions:
-  - id: domain_create
-    name: 创建领域
-    type: crud
-    method: POST
-    path: /api/v1/domains
-    description: 创建新的领域
-
-  - id: domain_read
-    name: 查询领域
-    type: crud
-    method: GET
-    path: /api/v1/domains/{id}
-    description: 查询单个领域
-
-  - id: domain_update
-    name: 更新领域
-    type: crud
-    method: PUT
-    path: /api/v1/domains/{id}
-    description: 更新领域信息
-
-  - id: domain_delete
-    name: 删除领域
-    type: crud
-    method: DELETE
-    path: /api/v1/domains/{id}
-    description: 删除领域
-
-  - id: domain_list
-    name: 列表查询
-    type: crud
-    method: GET
-    path: /api/v1/domains
-    description: 查询领域列表
-
-# ────────────────────────────────────────────
-# 校验规则
-# ────────────────────────────────────────────
+- id: domain_create
+  name: 创建领域
+  type: crud
+  method: POST
+  path: /api/v1/domains
+  description: 创建新的领域
+- id: domain_read
+  name: 查询领域
+  type: crud
+  method: GET
+  path: /api/v1/domains/{id}
+  description: 查询单个领域
+- id: domain_update
+  name: 更新领域
+  type: crud
+  method: PUT
+  path: /api/v1/domains/{id}
+  description: 更新领域信息
+- id: domain_delete
+  name: 删除领域
+  type: crud
+  method: DELETE
+  path: /api/v1/domains/{id}
+  description: 删除领域
+- id: domain_list
+  name: 列表查询
+  type: crud
+  method: GET
+  path: /api/v1/domains
+  description: 查询领域列表
 validations:
-  - id: version_id_required
-    name: 版本ID必填
-    type: field
-    rule: version_id is not None
-    message: 版本ID不能为空
-    severity: error
+- id: version_id_required
+  name: 版本ID必填
+  type: field
+  rule: version_id is not None
+  message: 版本ID不能为空
+  severity: error
+audit_levels:
+- name: create
+  level: INFO
+  category: operation
+- name: update
+  level: INFO
+  category: operation
+- name: delete
+  level: WARN
+  category: destructive
+routes:
+  detail: /detail/domain/domain-detail
+  list: /domain-management
+list:
+  pagination:
+    default_page_size: 20
+    page_size_options:
+    - 10
+    - 20
+    - 50
+    - 100
+nested:
+  enabled: true
+  parent: version
+  children: []
+persistence:
+  strategy: audit_log
+  survive_reload: true

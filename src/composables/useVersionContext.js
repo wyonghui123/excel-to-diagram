@@ -19,7 +19,7 @@
  * const { selectedProductId } = injectVersionContext()
  */
 
-import { ref, computed, watch, provide, inject, onMounted, isRef } from 'vue'
+import { ref, computed, watch, provide, inject, onMounted, isRef, effectScope } from 'vue'
 import { useRoute } from 'vue-router'
 import boService from '@/services/boService'
 import { useAuthStore } from '@/stores/authStore'
@@ -361,6 +361,13 @@ function createVersionContext() {
   }
 
   let mounted = false
+  // [FIX 2026-06-25] 使用 detached effectScope 让 watch 脱离调用组件的生命周期。
+  //   之前直接调用 watch() 时，watch 会被绑定到首次调用 useVersionContext() 的组件 setup 上下文中。
+  //   如果该组件被 <keep-alive> 缓存淘汰（max=10）后，watch 会被销毁，导致后续从首页跳转时
+  //   URL 中的 productId/versionId 无法被重新应用到 versionContext 中。
+  //   改用 effectScope(true) 创建独立作用域（detached=true），watch 在此作用域内运行，
+  //   不会被任何组件的 unmount 影响。
+  let globalScope = null
 
   function init() {
     if (mounted) return
@@ -381,19 +388,27 @@ function createVersionContext() {
     //   修复: 监听路由 query 中的 productId/versionId 变化，变化时重新调用 restoreContext()，
     //         让 URL 参数始终能正确设置版本上下文。
     //   说明: 仅在 init() 内、首次创建时挂载监听（mounted 守卫保证），不会重复监听。
+    // [FIX 2026-06-25] watch 改用全局 effectScope 包裹 + 回调内 await restoreContext
+    //   - effectScope(true) 创建 detached 作用域，watch 不绑定到组件 unmount
+    //   - await 保证 restoreContext 异步完成后，versionContext.selectedVersionId 才被外部看到，
+    //     避免与 onMounted 中的 restoreStateFromDiagram 形成覆盖竞态
     try {
-      const route = useRoute()
-      watch(
-        () => [route.query?.productId, route.query?.versionId],
-        ([newProductId, newVersionId], [oldProductId, oldVersionId]) => {
-          if (newProductId !== oldProductId || newVersionId !== oldVersionId) {
-            restoreContext()
+      globalScope = effectScope(true)
+      globalScope.run(() => {
+        const route = useRoute()
+        watch(
+          () => [route.query?.productId, route.query?.versionId],
+          async ([newProductId, newVersionId], [oldProductId, oldVersionId]) => {
+            if (newProductId !== oldProductId || newVersionId !== oldVersionId) {
+              await restoreContext()
+            }
           }
-        }
-      )
+        )
+      })
     } catch (e) {
       // useRoute() 在非组件上下文（如测试）中可能不可用，忽略即可
       // 此时 restoreContext() 已在 init() 内部处理首屏 URL 参数
+      console.warn('[useVersionContext] Failed to setup route query watcher:', e)
     }
   }
 

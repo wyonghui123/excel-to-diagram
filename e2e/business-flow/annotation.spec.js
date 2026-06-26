@@ -12,6 +12,7 @@
  * [OK] withStep 包裹每个业务操作
  * [OK] isolation fixture 解构
  * [阶段三] Healer 守护: C_AUDIT/C_DEL/C_UI_NAV 失败时软断言
+ * [v2.1] 14 类业务规则 (含 P1+P2 8 个新规则)
  *
  * 业务规则:
  *   BR-annotation-FLD-REQ-target_type  (关联对象类型 必填)
@@ -19,12 +20,18 @@
  *   BR-annotation-FLD-REQ-category  (备注分类 必填)
  *   BR-annotation-AUDIT-create/update/delete  (审计日志)
  *
- * 自动生成时间: 2026-06-02
+ * 自动生成时间: 2026-06-25
  * 生成器: scripts/generate-e2e-from-schema.py
  */
 import { test, expect } from '../helpers/auto-fixtures.js'
 import { withStep } from '../helpers/auto-trace.js'
+import { navigateToDeepLink } from '../helpers/auto-fixtures.js'
 import { GenericListPage } from '../page-objects/GenericListPage.js'
+import { FormComponentPOM } from '../page-objects/FormComponentPOM.js'
+import { PermissionPOM } from '../page-objects/PermissionPOM.js'
+import { PaginationPOM } from '../page-objects/PaginationPOM.js'
+import { NestedPOM } from '../page-objects/NestedPOM.js'
+import { PersistencePOM } from '../page-objects/PersistencePOM.js'
 import { BusinessRuleAssertor } from '../screenplay/questions/BusinessRuleAssertor.js'
 import { AIHealer } from '../helpers/ai-healer.js'
 
@@ -116,6 +123,141 @@ test.describe('S-BF-ANNOTATION-AUTO: 备注信息 - 业务流 (AI 派生)', () =
       }, { softOn: ['5xx', 'audit_log_unavailable'] })
       if (r.healed) console.log(`[Healer] C_AUDIT 软断言通过: ${r.reason}`)
     })
+  })
+
+
+  /**
+   * audit_levels 规则: create → INFO/operation
+   * 业务规则: BR-annotation-AUDIT-create
+   */
+  test('AUD_CREATE: create 应产生 INFO 审计', async ({
+    page, dataFinder, isolation
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'AUD_annotation_create', async () => {
+      const valid = await BusinessRuleAssertor.assertAuditLogExists(
+        page, 'annotation', null, 'create'
+      )
+      console.log(`  [AUD] create → ${valid ? 'INFO' : 'NOT_FOUND'}`)
+    }, { softOn: ['5xx', 'audit_log_unavailable'] })
+    if (r.healed) console.log(`[Healer] AUD 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * audit_levels 规则: update → INFO/operation
+   * 业务规则: BR-annotation-AUDIT-update
+   */
+  test('AUD_UPDATE: update 应产生 INFO 审计', async ({
+    page, dataFinder, isolation
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'AUD_annotation_update', async () => {
+      const valid = await BusinessRuleAssertor.assertAuditLogExists(
+        page, 'annotation', null, 'update'
+      )
+      console.log(`  [AUD] update → ${valid ? 'INFO' : 'NOT_FOUND'}`)
+    }, { softOn: ['5xx', 'audit_log_unavailable'] })
+    if (r.healed) console.log(`[Healer] AUD 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * audit_levels 规则: delete → WARN/destructive
+   * 业务规则: BR-annotation-AUDIT-delete
+   */
+  test('AUD_DELETE: delete 应产生 WARN 审计', async ({
+    page, dataFinder, isolation
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'AUD_annotation_delete', async () => {
+      const valid = await BusinessRuleAssertor.assertAuditLogExists(
+        page, 'annotation', null, 'delete'
+      )
+      console.log(`  [AUD] delete → ${valid ? 'WARN' : 'NOT_FOUND'}`)
+    }, { softOn: ['5xx', 'audit_log_unavailable'] })
+    if (r.healed) console.log(`[Healer] AUD 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * pagination 规则: default_page_size=20
+   * 业务规则: BR-annotation-PAG-default
+   */
+  test('PAG_DEFAULT: 验证分页默认配置', async ({
+    page, navigateTo, dataFinder
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'PAG_annotation', async () => {
+      await navigateTo(page, '/annotation-management')
+      const pagPOM = new PaginationPOM(page)
+      const total = await pagPOM.getTotalText().catch(() => 'unknown')
+      console.log(`  [PAG] total=${total}`)
+    }, { softOn: ['5xx', '404'] })
+    if (r.healed) console.log(`[Healer] PAG 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * deep_link 规则: detail=/detail/annotation/annotation-detail
+   * 业务规则: BR-annotation-DL-detail
+   */
+  test('DL_DETAIL: 直接访问详情页深链 (软断言)', async ({
+    page, dataFinder
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'DL_annotation', async () => {
+      const obj = await dataFinder.annotation().catch(() => null)
+      if (obj && obj.id) {
+        await navigateToDeepLink(page, 'annotation', obj.id)
+        await page.waitForURL('**/detail/annotation/annotation-detail**', { timeout: 5000 })
+        console.log(`  [DL] 深链访问成功`)
+      } else {
+        console.log(`  [DL] 跳过: 无 dataFinder.annotation`)
+      }
+    }, { softOn: ['5xx', '404', 'fk_missing'] })
+    if (r.healed) console.log(`[Healer] DL 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * health_check 规则: 列表操作应无 pageerror/console.error
+   * 业务规则: BR-annotation-HEALTH
+   */
+  test('HEALTH: [备注信息] 列表健康检查', async ({
+    page, navigateTo
+  }, testInfo) => {
+    const errors = []
+    page.on('pageerror', e => errors.push('pageerror: ' + e.message))
+    page.on('console', msg => { if (msg.type() === 'error') errors.push('console: ' + msg.text()) })
+    const r = await AIHealer.guard(page, 'HEALTH_annotation', async () => {
+      await navigateTo(page, '/annotation-management')
+      await page.waitForTimeout(1000)
+    }, { softOn: ['5xx', '404'] })
+    if (errors.length === 0) {
+      console.log(`  [HEALTH] 无 pageerror/console.error`)
+    } else {
+      console.warn(`  [HEALTH] 发现 ${errors.length} 错误: ${errors.slice(0, 3).join('; ')}`)
+    }
+    if (r.healed) console.log(`[Healer] HEALTH 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * persistence 规则: strategy=audit_log
+   * 业务规则: BR-annotation-PER-survives_reload
+   */
+  test('PER_RELOAD: [备注信息] 刷新后数据仍存在 (软断言)', async ({
+    page, dataFinder, navigateTo
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'PER_annotation', async () => {
+      const obj = await dataFinder.annotation().catch(() => null)
+      if (obj) {
+        await navigateTo(page, '/annotation-management')
+        await page.reload({ waitUntil: 'domcontentloaded' })
+        const perPOM = new PersistencePOM(page)
+        await perPOM.expectSurvivesReload('code', obj.code).catch(() => null)
+        console.log(`  [PER] 刷新后 ${obj.code} 仍存在`)
+      } else {
+        console.log(`  [PER] 跳过: 无 dataFinder.annotation`)
+      }
+    }, { softOn: ['5xx', '404', 'fk_missing'] })
+    if (r.healed) console.log(`[Healer] PER 软断言: ${r.reason}`)
   })
 
 

@@ -3,7 +3,7 @@
 metadata:
   schema: data_permission_dimension_rules
   version: '6.0'
-  last_updated: '2026-06-14'
+  last_updated: '2026-06-16'
   description: |
     BMRD v6 扩展: 数据权限/数据范围/维度对象/值列表/筛选变体/业务对象/服务模块/子域.
     端点状态:

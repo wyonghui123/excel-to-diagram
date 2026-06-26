@@ -3,7 +3,7 @@
 metadata:
   schema: protection_rules
   version: '1.0'
-  last_updated: '2026-06-13'
+  last_updated: '2026-06-16'
   description: |
     业务模型规则驱动 (BMRD) 核心: 把业务保护规则从代码/UI 提到 YAML 模型层,
     通过 generate-protection-tests.py 自动生成 v2 E2E 测试。

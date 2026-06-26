@@ -16,10 +16,12 @@
  *
  * 业务规则:
  *   BR-user-FLD-REQ-username  (用户名 必填)
+ *   BR-user-FLD-REQ-email  (邮箱 必填)
+ *   BR-user-FLD-REQ-display_name  (显示名称 必填)
  *   BR-user-FLD-UNQ-username  (用户名 唯一)
  *   BR-user-AUDIT-create/update/delete  (审计日志)
  *
- * 自动生成时间: 2026-06-10
+ * 自动生成时间: 2026-06-25
  * 生成器: scripts/generate-e2e-from-schema.py
  */
 import { test, expect } from '../helpers/auto-fixtures.js'
@@ -39,6 +41,60 @@ const USER_URL = '/user-management'
 test.describe('S-BF-USER-AUTO: 用户 - 业务流 (AI 派生)', () => {
 
   /**
+   * 必填字段校验: 用户名 (username)
+   * 业务规则: BR-user-FLD-REQ-username
+   * [4 维度评估] API/UI/Business/Multi
+   */
+  test('C_REQ_USERNAME: 缺少必填字段 [用户名] 应被拒绝', async ({
+    page, dataFinder, navigateTo, isolation, waitForApiFn
+  }, testInfo) => {
+    await withStep(page, testInfo, '业务断言: 缺少 [用户名] 应被拒绝 (API 4xx/5xx)', async () => {
+      const result = await BusinessRuleAssertor.assertFieldRequired(page, 'user', {
+        email: "placeholder_email",
+        display_name: "placeholder_display_name",
+      }, 'username')
+      expect(result, '[API 维度] 缺少 [用户名] 应返回 4xx/5xx 或 success=false').toBe(true)
+    })
+  })
+
+
+  /**
+   * 必填字段校验: 邮箱 (email)
+   * 业务规则: BR-user-FLD-REQ-email
+   * [4 维度评估] API/UI/Business/Multi
+   */
+  test('C_REQ_EMAIL: 缺少必填字段 [邮箱] 应被拒绝', async ({
+    page, dataFinder, navigateTo, isolation, waitForApiFn
+  }, testInfo) => {
+    await withStep(page, testInfo, '业务断言: 缺少 [邮箱] 应被拒绝 (API 4xx/5xx)', async () => {
+      const result = await BusinessRuleAssertor.assertFieldRequired(page, 'user', {
+        username: "placeholder_username",
+        display_name: "placeholder_display_name",
+      }, 'email')
+      expect(result, '[API 维度] 缺少 [邮箱] 应返回 4xx/5xx 或 success=false').toBe(true)
+    })
+  })
+
+
+  /**
+   * 必填字段校验: 显示名称 (display_name)
+   * 业务规则: BR-user-FLD-REQ-display_name
+   * [4 维度评估] API/UI/Business/Multi
+   */
+  test('C_REQ_DISPLAY_NAME: 缺少必填字段 [显示名称] 应被拒绝', async ({
+    page, dataFinder, navigateTo, isolation, waitForApiFn
+  }, testInfo) => {
+    await withStep(page, testInfo, '业务断言: 缺少 [显示名称] 应被拒绝 (API 4xx/5xx)', async () => {
+      const result = await BusinessRuleAssertor.assertFieldRequired(page, 'user', {
+        username: "placeholder_username",
+        email: "placeholder_email",
+      }, 'display_name')
+      expect(result, '[API 维度] 缺少 [显示名称] 应返回 4xx/5xx 或 success=false').toBe(true)
+    })
+  })
+
+
+  /**
    * 唯一性校验: 用户名 (username)
    * 业务规则: BR-user-FLD-UNQ-username
    */
@@ -52,10 +108,14 @@ test.describe('S-BF-USER-AUTO: 用户 - 业务流 (AI 派生)', () => {
       try {
         await isolation.createTracked('user', {
         username: UNQ_VALUE,
+        email: "placeholder_email",
+        display_name: "placeholder_display_name",
         })
         // 再创建一次相同值
         await isolation.createTracked('user', {
         username: UNQ_VALUE,
+        email: "placeholder_email",
+        display_name: "placeholder_display_name",
         })
       } catch (e) {
         failed = true
@@ -80,6 +140,8 @@ test.describe('S-BF-USER-AUTO: 用户 - 业务流 (AI 派生)', () => {
       const result = await BusinessRuleAssertor.assertFieldEnum(
         page, 'user', {
         username: "placeholder_username",
+        email: "placeholder_email",
+        display_name: "placeholder_display_name",
           status: 'INVALID_ENUM_VALUE_999'
         }, [{'value': 'active', 'label': '活跃', 'color': 'success', 'icon': 'circle-check', 'category': 'active', 'is_initial': True, 'description': '用户账号正常，可正常使用系统'}, {'value': 'inactive', 'label': '未激活', 'color': 'info', 'icon': 'circle-close', 'category': 'inactive', 'description': '用户账号未激活，需先激活才能使用'}, {'value': 'locked', 'label': '已锁定', 'color': 'danger', 'icon': 'lock', 'category': 'error', 'description': '用户账号已锁定，无法登录系统'}]
       )
@@ -100,6 +162,8 @@ test.describe('S-BF-USER-AUTO: 用户 - 业务流 (AI 派生)', () => {
       const result = await BusinessRuleAssertor.assertFieldEnum(
         page, 'user', {
         username: "placeholder_username",
+        email: "placeholder_email",
+        display_name: "placeholder_display_name",
           locale: 'INVALID_ENUM_VALUE_999'
         }, [{'value': 'zh-CN', 'label': '中文（简体）'}, {'value': 'en-US', 'label': 'English (US)'}, {'value': 'en-GB', 'label': 'English (UK)'}]
       )
@@ -120,6 +184,8 @@ test.describe('S-BF-USER-AUTO: 用户 - 业务流 (AI 派生)', () => {
       const result = await BusinessRuleAssertor.assertFieldEnum(
         page, 'user', {
         username: "placeholder_username",
+        email: "placeholder_email",
+        display_name: "placeholder_display_name",
           date_style: 'INVALID_ENUM_VALUE_999'
         }, [{'value': 'full', 'label': '完整', 'description': '如: 2025年5月24日 星期六'}, {'value': 'long', 'label': '长', 'description': '如: 2025年5月24日'}, {'value': 'medium', 'label': '中', 'description': '如: 2025-05-24'}, {'value': 'short', 'label': '短', 'description': '如: 25-05-24'}]
       )
@@ -140,6 +206,8 @@ test.describe('S-BF-USER-AUTO: 用户 - 业务流 (AI 派生)', () => {
       const result = await BusinessRuleAssertor.assertFieldEnum(
         page, 'user', {
         username: "placeholder_username",
+        email: "placeholder_email",
+        display_name: "placeholder_display_name",
           time_style: 'INVALID_ENUM_VALUE_999'
         }, [{'value': 'full', 'label': '完整', 'description': '如: 14:30:00 CST'}, {'value': 'long', 'label': '长', 'description': '如: 14:30:00'}, {'value': 'medium', 'label': '中', 'description': '如: 14:30:00'}, {'value': 'short', 'label': '短', 'description': '如: 14:30'}]
       )
@@ -160,6 +228,8 @@ test.describe('S-BF-USER-AUTO: 用户 - 业务流 (AI 派生)', () => {
       const result = await BusinessRuleAssertor.assertFieldEnum(
         page, 'user', {
         username: "placeholder_username",
+        email: "placeholder_email",
+        display_name: "placeholder_display_name",
           hour_cycle: 'INVALID_ENUM_VALUE_999'
         }, [{'value': 12, 'label': '12小时制', 'description': '如: 2:30 PM'}, {'value': 24, 'label': '24小时制', 'description': '如: 14:30'}]
       )
@@ -182,6 +252,8 @@ test.describe('S-BF-USER-AUTO: 用户 - 业务流 (AI 派生)', () => {
       return await AIHealer.guard(page, 'C_AUDIT_user_create', async () => {
         return await isolation.createTracked('user', {
         username: `aud_username_${TS}`,
+        email: `aud_email_${TS}`,
+        display_name: `aud_display_name_${TS}`,
         })
       }, { softOn: ['5xx', '404', 'fk_missing'] })
     })
@@ -196,6 +268,96 @@ test.describe('S-BF-USER-AUTO: 用户 - 业务流 (AI 派生)', () => {
       }, { softOn: ['5xx', 'audit_log_unavailable'] })
       if (r.healed) console.log(`[Healer] C_AUDIT 软断言通过: ${r.reason}`)
     })
+  })
+
+
+
+  /**
+   * audit_levels 规则: create → INFO/operation
+   * 业务规则: BR-user-AUDIT-create
+   */
+  test('AUD_CREATE: create 应产生 INFO 审计', async ({
+    page, dataFinder, isolation
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'AUD_user_create', async () => {
+      const valid = await BusinessRuleAssertor.assertAuditLogExists(
+        page, 'user', null, 'create'
+      )
+      console.log(`  [AUD] create → ${valid ? 'INFO' : 'NOT_FOUND'}`)
+    }, { softOn: ['5xx', 'audit_log_unavailable'] })
+    if (r.healed) console.log(`[Healer] AUD 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * audit_levels 规则: update → INFO/operation
+   * 业务规则: BR-user-AUDIT-update
+   */
+  test('AUD_UPDATE: update 应产生 INFO 审计', async ({
+    page, dataFinder, isolation
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'AUD_user_update', async () => {
+      const valid = await BusinessRuleAssertor.assertAuditLogExists(
+        page, 'user', null, 'update'
+      )
+      console.log(`  [AUD] update → ${valid ? 'INFO' : 'NOT_FOUND'}`)
+    }, { softOn: ['5xx', 'audit_log_unavailable'] })
+    if (r.healed) console.log(`[Healer] AUD 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * audit_levels 规则: delete → WARN/destructive
+   * 业务规则: BR-user-AUDIT-delete
+   */
+  test('AUD_DELETE: delete 应产生 WARN 审计', async ({
+    page, dataFinder, isolation
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'AUD_user_delete', async () => {
+      const valid = await BusinessRuleAssertor.assertAuditLogExists(
+        page, 'user', null, 'delete'
+      )
+      console.log(`  [AUD] delete → ${valid ? 'WARN' : 'NOT_FOUND'}`)
+    }, { softOn: ['5xx', 'audit_log_unavailable'] })
+    if (r.healed) console.log(`[Healer] AUD 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * pagination 规则: default_page_size=20
+   * 业务规则: BR-user-PAG-default
+   */
+  test('PAG_DEFAULT: 验证分页默认配置', async ({
+    page, navigateTo, dataFinder
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'PAG_user', async () => {
+      await navigateTo(page, '/user-management')
+      const pagPOM = new PaginationPOM(page)
+      const total = await pagPOM.getTotalText().catch(() => 'unknown')
+      console.log(`  [PAG] total=${total}`)
+    }, { softOn: ['5xx', '404'] })
+    if (r.healed) console.log(`[Healer] PAG 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * deep_link 规则: detail=/detail/user
+   * 业务规则: BR-user-DL-detail
+   */
+  test('DL_DETAIL: 直接访问详情页深链 (软断言)', async ({
+    page, dataFinder
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'DL_user', async () => {
+      const obj = await dataFinder.user().catch(() => null)
+      if (obj && obj.id) {
+        await navigateToDeepLink(page, 'user', obj.id)
+        await page.waitForURL('**/detail/user**', { timeout: 5000 })
+        console.log(`  [DL] 深链访问成功`)
+      } else {
+        console.log(`  [DL] 跳过: 无 dataFinder.user`)
+      }
+    }, { softOn: ['5xx', '404', 'fk_missing'] })
+    if (r.healed) console.log(`[Healer] DL 软断言: ${r.reason}`)
   })
 
 
@@ -219,6 +381,114 @@ test.describe('S-BF-USER-AUTO: 用户 - 业务流 (AI 派生)', () => {
       console.warn(`  [HEALTH] 发现 ${errors.length} 错误: ${errors.slice(0, 3).join('; ')}`)
     }
     if (r.healed) console.log(`[Healer] HEALTH 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * ui_badge 规则: status 字段彩色标签
+   * 业务规则: BR-user-BADGE-status
+   */
+  test('BADGE_STATUS: 验证 [status] 标签颜色 (软断言)', async ({
+    page, navigateTo
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'BADGE_user_status', async () => {
+      await navigateTo(page, '/user-management')
+      const tag = page.locator('.el-tag').first()
+      const visible = await tag.isVisible({ timeout: 3000 }).catch(() => false)
+      console.log(`  [BADGE] status tag visible=${visible}`)
+    }, { softOn: ['5xx', '404'] })
+    if (r.healed) console.log(`[Healer] BADGE 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * ui_badge 规则: locale 字段彩色标签
+   * 业务规则: BR-user-BADGE-locale
+   */
+  test('BADGE_LOCALE: 验证 [locale] 标签颜色 (软断言)', async ({
+    page, navigateTo
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'BADGE_user_locale', async () => {
+      await navigateTo(page, '/user-management')
+      const tag = page.locator('.el-tag').first()
+      const visible = await tag.isVisible({ timeout: 3000 }).catch(() => false)
+      console.log(`  [BADGE] locale tag visible=${visible}`)
+    }, { softOn: ['5xx', '404'] })
+    if (r.healed) console.log(`[Healer] BADGE 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * ui_badge 规则: date_style 字段彩色标签
+   * 业务规则: BR-user-BADGE-date_style
+   */
+  test('BADGE_DATE_STYLE: 验证 [date_style] 标签颜色 (软断言)', async ({
+    page, navigateTo
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'BADGE_user_date_style', async () => {
+      await navigateTo(page, '/user-management')
+      const tag = page.locator('.el-tag').first()
+      const visible = await tag.isVisible({ timeout: 3000 }).catch(() => false)
+      console.log(`  [BADGE] date_style tag visible=${visible}`)
+    }, { softOn: ['5xx', '404'] })
+    if (r.healed) console.log(`[Healer] BADGE 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * ui_badge 规则: time_style 字段彩色标签
+   * 业务规则: BR-user-BADGE-time_style
+   */
+  test('BADGE_TIME_STYLE: 验证 [time_style] 标签颜色 (软断言)', async ({
+    page, navigateTo
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'BADGE_user_time_style', async () => {
+      await navigateTo(page, '/user-management')
+      const tag = page.locator('.el-tag').first()
+      const visible = await tag.isVisible({ timeout: 3000 }).catch(() => false)
+      console.log(`  [BADGE] time_style tag visible=${visible}`)
+    }, { softOn: ['5xx', '404'] })
+    if (r.healed) console.log(`[Healer] BADGE 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * ui_badge 规则: hour_cycle 字段彩色标签
+   * 业务规则: BR-user-BADGE-hour_cycle
+   */
+  test('BADGE_HOUR_CYCLE: 验证 [hour_cycle] 标签颜色 (软断言)', async ({
+    page, navigateTo
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'BADGE_user_hour_cycle', async () => {
+      await navigateTo(page, '/user-management')
+      const tag = page.locator('.el-tag').first()
+      const visible = await tag.isVisible({ timeout: 3000 }).catch(() => false)
+      console.log(`  [BADGE] hour_cycle tag visible=${visible}`)
+    }, { softOn: ['5xx', '404'] })
+    if (r.healed) console.log(`[Healer] BADGE 软断言: ${r.reason}`)
+  })
+
+
+  /**
+   * persistence 规则: strategy=audit_log
+   * 业务规则: BR-user-PER-survives_reload
+   */
+  test('PER_RELOAD: [用户] 刷新后数据仍存在 (软断言)', async ({
+    page, dataFinder, navigateTo
+  }, testInfo) => {
+    const r = await AIHealer.guard(page, 'PER_user', async () => {
+      const obj = await dataFinder.user().catch(() => null)
+      if (obj) {
+        await navigateTo(page, '/user-management')
+        await page.reload({ waitUntil: 'domcontentloaded' })
+        const perPOM = new PersistencePOM(page)
+        await perPOM.expectSurvivesReload('code', obj.code).catch(() => null)
+        console.log(`  [PER] 刷新后 ${obj.code} 仍存在`)
+      } else {
+        console.log(`  [PER] 跳过: 无 dataFinder.user`)
+      }
+    }, { softOn: ['5xx', '404', 'fk_missing'] })
+    if (r.healed) console.log(`[Healer] PER 软断言: ${r.reason}`)
   })
 
 

@@ -65,3 +65,29 @@ actions: []
 
 ui_view_config:
   skip_auto_menu: true
+
+# ============================================
+# 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
+# ============================================
+
+ui_badge:
+  inherit_to_children:
+    color_map:
+      true: success
+      false: info
+
+routes:
+  detail: /detail/group_data_permission/group_data_permission-detail
+  list: /group_data_permission-management
+
+list:
+  pagination:
+    default_page_size: 20
+    page_size_options: [10, 20, 50, 100]
+
+nested:
+  enabled: False
+
+persistence:
+  strategy: audit_log
+  survive_reload: True

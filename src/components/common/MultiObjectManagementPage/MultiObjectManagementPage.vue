@@ -268,7 +268,14 @@ onMounted(() => {
   //   1. 恢复选择/过滤/activeTab (onBeforeRouteLeave 已保存到 sessionStorage)
   //   2. 触发一次数据刷新 (相当于点击 toolbar refresh 按钮)
   //   不再走 "fresh 路径"（清空所有状态）
-  const restored = page.restoreStateFromDiagram()
+  // [FIX 2026-06-25] 根因修复：URL 显式携带 productId/versionId 时（如从 landing "常用产品版本" 跳转），
+  //   必须让 URL 参数优先于 sessionStorage 快照，否则会被陈旧快照覆盖导致版本丢失。
+  //   此时跳过 restoreStateFromDiagram() 中的 versionId/productId 恢复分支，
+  //   仅保留 activeTab / scopeIds / filters 等"展示状态"恢复。
+  const urlHasProductContext = !!(route?.query?.productId || route?.query?.versionId)
+  const restored = urlHasProductContext
+    ? page.restoreStateFromDiagram({ skipVersionRestore: true })
+    : page.restoreStateFromDiagram()
   if (restored) {
     initialBoIds.value = restored.initialBoIds
     initialRelationCodes.value = restored.initialRelationCodes

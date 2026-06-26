@@ -79,6 +79,17 @@ class HierarchyValidationInterceptor(Interceptor):
         if force:
             return
 
+        # [FIX BUG-V011 2026-06-26] 如果 schema 中所有 child 关联都是 cascade_delete=true
+        # 跳过本校验, 让 cascade_service 真正执行级联删除
+        # 案例: SDLKFJL (product 335) 含 1 个 version, 旧代码报"存在 1 个子元素"
+        #       实际 product.yaml associations[].cascade_delete: true 应级联
+        if self._all_children_cascade_delete(context.object_type):
+            logger.debug(
+                f'[HierarchyValidation] skip validate_no_children for {context.object_type}({context.object_id}) '
+                f'- all children are cascade_delete=true'
+            )
+            return
+
         try:
             from meta.services.hierarchy_validation_service import validate_delete
             obj_id = context.object_id
@@ -93,3 +104,38 @@ class HierarchyValidationInterceptor(Interceptor):
             self._handle_validation_result(context, result)
         except Exception as e:
             logger.debug(f"[HierarchyValidation] delete validation skipped: {e}")
+
+    def _all_children_cascade_delete(self, object_type: str) -> bool:
+        """[FIX BUG-V011] 检查 object_type 的所有 child 关联是否都是 cascade_delete=true.
+
+        读 schema (yaml) 的 associations, 检查每条关联的 cascade_delete.
+        支持 dict 和 AssociationDefinition 两种格式.
+        """
+        try:
+            from meta.core.models import registry
+            meta = registry.get(object_type)
+            if not meta:
+                return True
+
+            assocs = getattr(meta, 'associations', None) or []
+            if isinstance(assocs, dict):
+                assocs = list(assocs.values())
+
+            def _get_assoc_field(a, field, default=None):
+                if isinstance(a, dict):
+                    return a.get(field, default)
+                return getattr(a, field, default)
+
+            composition_children = [
+                a for a in assocs
+                if _get_assoc_field(a, 'type') == 'composition'
+            ]
+            if not composition_children:
+                return True
+            return all(
+                _get_assoc_field(a, 'cascade_delete', False)
+                for a in composition_children
+            )
+        except Exception as e:
+            logger.debug(f'[BUG-V011] _all_children_cascade_delete check failed: {e}')
+            return False

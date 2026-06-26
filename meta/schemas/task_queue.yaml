@@ -159,3 +159,48 @@ category_config:
   create_permission: task_queue:create
   update_permission: task_queue:update
   delete_permission: task_queue:delete
+
+# ============================================
+# 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
+# ============================================
+
+ui_actions:
+  create:
+    label: 新建队列
+    icon: plus
+    type: primary
+    permission: "task_queue:create"
+    visible_when: true
+
+ui_badge:
+  enabled:
+    color_map:
+      true: success
+      false: info
+
+audit_levels:
+  - name: create
+    level: INFO
+    category: operation
+  - name: update
+    level: INFO
+    category: operation
+  - name: delete
+    level: WARN
+    category: destructive
+
+routes:
+  detail: /detail/task_queue/task_queue-detail
+  list: /task_queue-management
+
+list:
+  pagination:
+    default_page_size: 20
+    page_size_options: [10, 20, 50, 100]
+
+nested:
+  enabled: False
+
+persistence:
+  strategy: audit_log
+  survive_reload: True

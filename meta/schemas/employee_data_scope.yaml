@@ -60,3 +60,23 @@ indexes:
 
 relations: []
 actions: []
+
+# ============================================
+# 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
+# ============================================
+
+routes:
+  detail: /detail/employee_data_scope/employee_data_scope-detail
+  list: /employee_data_scope-management
+
+list:
+  pagination:
+    default_page_size: 20
+    page_size_options: [10, 20, 50, 100]
+
+nested:
+  enabled: False
+
+persistence:
+  strategy: audit_log
+  survive_reload: True

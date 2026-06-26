@@ -8,8 +8,12 @@
       <svg class="al-empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
         <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
       </svg>
-      <span class="al-empty-text">暂无变更记录</span>
-      <span class="al-empty-hint">当此对象被修改时，变更记录将显示在这里</span>
+      <span v-if="activeFilter || activeFieldFilter" class="al-empty-text">没有匹配当前过滤条件的记录</span>
+      <span v-else class="al-empty-text">暂无变更记录</span>
+      <span v-if="activeFilter || activeFieldFilter" class="al-empty-hint">
+        <a href="javascript:void(0)" @click="clearAllFilters">清除过滤条件</a> 查看全部 {{ total }} 条记录
+      </span>
+      <span v-else class="al-empty-hint">当此对象被修改时，变更记录将显示在这里</span>
     </div>
     <template v-else>
       <div v-if="showFilter" class="al-filter">
@@ -162,7 +166,7 @@
                     <span>删除记录</span>
                   </div>
                   <div class="al-detail" v-else>
-                    <span>{{ item.action }}</span>
+                    <span>{{ formatAction(item.action) }}</span>
                   </div>
                   <div v-if="item._source && item._source !== 'own'" class="al-source-badge">
                     {{ formatSource(item._source, item._child_type) }}
@@ -304,17 +308,35 @@ const fieldSearchText = ref('')
 const expandedGroups = ref(new Set())
 const allExpanded = ref(true)
 
-const filterOptions = [
-  { label: '全部', value: '' },
-  { label: '创建', value: 'CREATE' },
-  { label: '更新', value: 'UPDATE' },
-  { label: '删除', value: 'DELETE' },
-  { label: '添加关联', value: 'ASSOCIATE' },
-  { label: '移除关联', value: 'DISSOCIATE' },
-  { label: '关联操作', value: '_association_target' },
-  { label: '级联操作', value: '_cascade_child' },
-  { label: '子对象变更', value: '_child_object' }
-]
+const filterOptions = computed(() => {
+  const options = [
+    { label: '全部', value: '' },
+    { label: '创建', value: 'CREATE' },
+    { label: '更新', value: 'UPDATE' },
+    { label: '删除', value: 'DELETE' },
+    { label: '添加关联', value: 'ASSOCIATE' },
+    { label: '移除关联', value: 'DISSOCIATE' },
+  ]
+
+  // [FIX] 根据实际数据动态显示高级filter选项
+  if (!Array.isArray(props.logs) || props.logs.length === 0) return options
+
+  const hasAssociationTarget = props.logs.some(l => l._source === 'association_target')
+  const hasCascadeChild = props.logs.some(l => l._source === 'cascade_child')
+  const hasChildObject = props.logs.some(l => l._source === 'child_object')
+
+  if (hasAssociationTarget) {
+    options.push({ label: '关联操作', value: '_association_target' })
+  }
+  if (hasCascadeChild) {
+    options.push({ label: '级联操作', value: '_cascade_child' })
+  }
+  if (hasChildObject) {
+    options.push({ label: '子对象变更', value: '_child_object' })
+  }
+
+  return options
+})
 
 const availableFields = computed(() => {
   if (!Array.isArray(props.logs)) return []
@@ -556,6 +578,15 @@ function handleFilterChange(filterValue) {
     return
   }
   emit('filter-change', { action: filterValue || undefined, field: activeFieldFilter.value || undefined })
+}
+
+function clearAllFilters() {
+  activeFilter.value = ''
+  activeFieldFilter.value = ''
+  fieldSearchText.value = ''
+  showAll.value = false
+  allExpanded.value = true
+  emit('filter-change', { action: undefined, field: undefined })
 }
 
 function handleFieldFilterChange(fieldValue) {

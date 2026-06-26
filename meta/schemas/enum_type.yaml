@@ -471,3 +471,44 @@ validations:
     rule: mutability is not None and mutability != ''
     message: 可维护性不能为空
     severity: error
+
+# ============================================
+# 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
+# ============================================
+
+ui_actions:
+  export:
+    label: 导出
+    icon: download
+    type: default
+    permission: "enum_type:export"
+    visible_when: true
+
+ui_badge:
+  category:
+    color_map:
+      system: info
+      business: info
+  mutability:
+    color_map:
+      fullEditable: info
+      extensible: info
+      locked: info
+
+routes:
+  detail: /detail/enum_type
+  list: /enum_type-management
+
+list:
+  pagination:
+    default_page_size: 20
+    page_size_options: [10, 20, 50, 100]
+
+nested:
+  enabled: True
+  parent: None
+  children: [enum_value]
+
+persistence:
+  strategy: audit_log
+  survive_reload: True
