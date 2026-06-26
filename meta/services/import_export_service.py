@@ -79,7 +79,13 @@ def _make_header_comment(text: str, author: str = "系统"):
 # [FIX 2026-06-23] 父对象/FK 对象编码列的统一定义描述 (列头 comment 用)
 # 与 _write_meta_section 中"浅绿色"颜色示例文案保持完全一致
 # 业务规则: 创建必填 (新增记录时必填), 更新不可变更 (已有记录不可修改)
-PARENT_FK_COMMENT = "父对象编码或者FK对象编码字段，创建必填，更新不可变更"
+# [FIX 2026-06-24] 加 "录入的话系统会忽略" 说明
+PARENT_FK_COMMENT = "父对象编码或者FK对象编码字段，创建必填，更新不可变更，录入的话系统会忽略"
+
+# [NEW 2026-06-24] 系统填充只读字段 (parent_key_display=true, 如 BO.domain_code/SM.domain_code)
+# 这类字段是从父对象自动推导的虚拟字段, 用户不能填也不应该填
+# 颜色与 parent_key 一致 (浅绿) 但语义不同, comment 也要区分
+READONLY_SYSTEM_COMMENT = "系统填充只读字段，基于父对象自动推导，不可编辑、不可填写"
 
 
 class ImportExportService:
@@ -709,7 +715,10 @@ class ImportExportService:
                     op_cell = ws.cell(row=row_idx, column=1, value="create - 新增")
                     # [REMOVED 2026-06-14 BMRD] CREATE_NEW_FILL 已删除
                     # 替代: 保留"create - 新增"文字作为视觉提示
-                    op_cell.fill = ds.READONLY_FILL  # 复用灰色 (只读, 表示空行待填)
+                    # [FIX 2026-06-24] 操作模式列改为无填充 (白色)
+                    # 理由: 操作模式是元数据列, 不是数据字段, 不应该跟 readonly 字段混色
+                    # 配合 "create - 新增" 文字已足够表达"待填"语义
+                    # 保留 border 以维持表格视觉一致性
                     op_cell.border = ds.THIN_BORDER
                     op_cell.alignment = ds.TEXT_CENTER
                     op_mode_validation.add(op_cell)
@@ -967,8 +976,9 @@ class ImportExportService:
 
                 if include_operation_mode:
                     op_cell = ws.cell(row=row_idx, column=1, value="update - 更新")
-                    op_cell.fill = ds.READONLY_FILL
-                    op_cell.border = ds.THIN_BORDER
+                    # [FIX 2026-06-24] 操作模式列改为无填充 (白色)
+                    # 理由: 操作模式是元数据列, 不是数据字段, 不应该跟 readonly 字段混色
+                    # 配合 "update - 更新" 文字已足够表达"待更新"语义
                     if protect_sheet:
                         op_cell.protection = Protection(locked=False)
                     op_mode_validation.add(op_cell)
@@ -1002,9 +1012,13 @@ class ImportExportService:
                             cell.protection = Protection(locked=False)
                     elif actual_col_idx in fk_display_code_columns:
                         # [NEW 2026-06-16 BMRD] FK 编码显示字段 - 浅绿色, 不锁
+                        # [FIX 2026-06-24 v2] 修复保护 bug: 之前误写为 locked=True, 应为 locked=False
+                        # 理由: 父对象编码列虽然语义上"创建必填, 更新不可变更",
+                        # 但 Excel 保护机制下用户应该能点击编辑 (导入时由后端校验)
+                        # parent_key_columns 那边也是 locked=False
                         self._apply_classification_fill(cell, 'fk_display_code')
                         if protect_sheet:
-                            cell.protection = Protection(locked=True)
+                            cell.protection = Protection(locked=False)
                     elif actual_col_idx in create_required_columns:
                         self._apply_classification_fill(cell, 'create_required')
                         if protect_sheet:
@@ -1060,7 +1074,9 @@ class ImportExportService:
                 if include_operation_mode:
                     cell = ws.cell(row=next_row_idx, column=col_idx, value="create - 新增")
                     # [REMOVED 2026-06-14 BMRD] CREATE_NEW_FILL 已删除
-                    cell.fill = ds.READONLY_FILL  # 复用灰色
+                    # [FIX 2026-06-24] 操作模式列改为无填充 (白色)
+                    # 理由: 操作模式是元数据列, 不是数据字段, 不应该跟 readonly 字段混色
+                    # 保留 border 以维持表格视觉一致性
                     cell.border = ds.THIN_BORDER
                     cell.alignment = Alignment(horizontal="center")
                     if protect_sheet:
@@ -1143,36 +1159,55 @@ class ImportExportService:
         if include_annotations:
             child_parent_map = self._collect_child_object_types(ordered_types)
             if child_parent_map:
-                total_child_types = len(child_parent_map)
-                for idx, (child_type_name, parent_list) in enumerate(child_parent_map.items()):
-                    # 跳过已在主导出中处理的类型，避免重复 sheet
-                    if child_type_name in ordered_types:
-                        continue
-                    if progress_callback:
-                        try:
-                            child_reg_meta = registry.get(child_type_name)
-                            child_display = child_reg_meta.name if child_reg_meta else child_type_name
-                        except Exception:
-                            child_display = child_type_name
-                        progress_callback({
-                            'progress': 95 + int((idx / total_child_types) * 5),
-                            'current_type': child_type_name,
-                            'current_type_name': child_display,
-                            'total_types': total_child_types,
-                            'current_index': idx + 1,
-                            'message': '正在导出子对象: {0}'.format(child_display)
-                        })
+                # [H15.2 SAP风格] 过滤child_object_types，应用RBAC
+                # 优先用 thread-local user (兼容线程池/无Flask上下文场景)
+                from meta.services.query_service import _get_thread_user
+                user = _get_thread_user()
+                if not user:
+                    from meta.services.auth_middleware import get_current_user
+                    user = get_current_user()
+                if user and user.get('username') != 'admin':
+                    from meta.services.permission_service import PermissionService
+                    perm_service = PermissionService(self.data_source)
+                    filtered_child_map = {}
+                    for child_type, parent_list in child_parent_map.items():
+                        if perm_service.check_permission_unified(
+                            user['user_id'], child_type, 'export'
+                        ):
+                            filtered_child_map[child_type] = parent_list
+                    child_parent_map = filtered_child_map
 
-                    try:
-                        child_data = self._query_child_object(child_type_name, parent_list, filters)
-                        child_meta = registry.get(child_type_name)
-                        if child_meta:
-                            self._write_child_sheet(wb, child_type_name, child_meta, child_data or [], sheets_info, options)
-                            total_rows += len(child_data) if child_data else 0
-                    except Exception as e:
-                        logger.warning(
-                            f"[Export] 子对象 {child_type_name} 导出失败: {e}"
-                        )
+                if child_parent_map:
+                    total_child_types = len(child_parent_map)
+                    for idx, (child_type_name, parent_list) in enumerate(child_parent_map.items()):
+                        # 跳过已在主导出中处理的类型，避免重复 sheet
+                        if child_type_name in ordered_types:
+                            continue
+                        if progress_callback:
+                            try:
+                                child_reg_meta = registry.get(child_type_name)
+                                child_display = child_reg_meta.name if child_reg_meta else child_type_name
+                            except Exception:
+                                child_display = child_type_name
+                            progress_callback({
+                                'progress': 95 + int((idx / total_child_types) * 5),
+                                'current_type': child_type_name,
+                                'current_type_name': child_display,
+                                'total_types': total_child_types,
+                                'current_index': idx + 1,
+                                'message': '正在导出子对象: {0}'.format(child_display)
+                            })
+
+                        try:
+                            child_data = self._query_child_object(child_type_name, parent_list, filters)
+                            child_meta = registry.get(child_type_name)
+                            if child_meta:
+                                self._write_child_sheet(wb, child_type_name, child_meta, child_data or [], sheets_info, options)
+                                total_rows += len(child_data) if child_data else 0
+                        except Exception as e:
+                            logger.warning(
+                                f"[Export] 子对象 {child_type_name} 导出失败: {e}"
+                            )
 
         output_dir = os.path.join(os.getcwd(), "exports")
         os.makedirs(output_dir, exist_ok=True)
@@ -1397,9 +1432,10 @@ class ImportExportService:
                             cell.protection = Protection(locked=False)
                     elif original_col_idx in fk_display_code_columns:
                         # [NEW 2026-06-16 BMRD] FK 编码显示字段
+                        # [FIX 2026-06-24 v2] 修复保护 bug: 之前误写为 locked=True, 应为 locked=False
                         self._apply_classification_fill(cell, 'fk_display_code')
                         if protect_sheet:
-                            cell.protection = Protection(locked=True)
+                            cell.protection = Protection(locked=False)
                     elif original_col_idx in create_required_columns:
                         self._apply_classification_fill(cell, 'create_required')
                         if protect_sheet:
@@ -1484,8 +1520,9 @@ class ImportExportService:
                     elif original_col_idx in fk_display_code_columns:
                         # [NEW 2026-06-16 BMRD] FK 编码显示字段
                         self._apply_classification_fill(cell, 'fk_display_code')
-                        # [FIX 2026-06-24] 数据 cell comment 也使用 PARENT_FK_COMMENT
-                        cell.comment = _make_header_comment(PARENT_FK_COMMENT, author="System")
+                        # [FIX 2026-06-24 v3] fk_display_code 数据 cell 用 READONLY_SYSTEM_COMMENT
+                        # 与 parent_key 区分 (浅绿都是浅绿, 但语义不同)
+                        cell.comment = _make_header_comment(READONLY_SYSTEM_COMMENT, author="System")
                         if protect_sheet:
                             cell.protection = Protection(locked=True)
                     elif original_col_idx in create_required_columns:
@@ -1657,13 +1694,13 @@ class ImportExportService:
             regular_fields,
             key=lambda f: (
                 0 if getattr(f.semantics, 'business_key', False) else 1,
-                f.semantics.import_order if f.semantics.import_order else 999
+                f.semantics.import_order if f.semantics.import_order is not None else 999
             )
         )
         # 统计列按 import_order 排序（通常无 import_order, 保持原序）
         stats_fields = sorted(
             stats_fields,
-            key=lambda f: f.semantics.import_order if f.semantics.import_order else 999
+            key=lambda f: f.semantics.import_order if f.semantics.import_order is not None else 999
         )
 
         # [FIX 2026-06-11] 优先用 list columns 的 title 作为 export header
@@ -1770,12 +1807,29 @@ class ImportExportService:
                     # [FIX 2026-06-24] 父对象/FK 编码字段: comment 严格只显示 PARENT_FK_COMMENT
                     # 不附加字段描述 (避免 "源业务对象编码（与 source_code 一致，命名对称）")
                     # 不附加 【只读】 (避免与说明部分文案冲突)
-                    comment_parts = [PARENT_FK_COMMENT]
-                    has_control_info = True
+                    # [FIX 2026-06-24 v2] 修复底色 bug: 必须把列加入正确的分类列表
+                    #  - parent_key: true → parent_key_columns (浅绿色, _apply_classification_fill 给到 BUSINESS_KEY_FILL)
+                    #  - parent_key_display: true → fk_display_code_columns (浅绿色, 同上)
+                    # 之前版本把这些列加到 create_required_columns (浅黄) 或 readonly_columns (灰色),
+                    # 导致源/目标业务对象编码列显示为黄色或灰色, 与说明部分的"浅绿色"颜色示例不符.
+                    # [FIX 2026-06-24 v3] 区分 comment:
+                    #  - parent_key (如 SM.sub_domain_code, BO.service_module_code): 创建必填, 更新不可变更 → PARENT_FK_COMMENT
+                    #  - parent_key_display (如 SM.domain_code, BO.domain_code): 系统填充只读 → READONLY_SYSTEM_COMMENT
                     if getattr(f.semantics, 'parent_key', False):
-                        create_required_columns.append(col_idx)
-                    header_comments.append(PARENT_FK_COMMENT)
-                    # 父对象 FK 编码字段不附加其他描述，直接使用 PARENT_FK_COMMENT
+                        parent_key_columns.append(col_idx)
+                    if getattr(f.semantics, 'parent_key_display', False):
+                        fk_display_code_columns.append(col_idx)
+                    # [FIX 2026-06-24 v3] parent_key_display 优先 (更具体的分类), 都是 true 时归类为 readonly system
+                    if getattr(f.semantics, 'parent_key_display', False) and not getattr(f.semantics, 'parent_key', False):
+                        # 纯 parent_key_display 字段: 系统填充只读
+                        comment_text = READONLY_SYSTEM_COMMENT
+                    else:
+                        # parent_key 字段 (用户必须选父对象) 或两者都有的情况: 创建必填
+                        comment_text = PARENT_FK_COMMENT
+                    comment_parts = [comment_text]
+                    has_control_info = True
+                    header_comments.append(comment_text)
+                    # 父对象 FK 编码字段不附加其他描述，直接使用对应 comment
                     if self._is_field_editable(f):
                         editable_columns.append(col_idx)
                     else:
@@ -1802,10 +1856,11 @@ class ImportExportService:
                 # 用途: 跟随 source_bo_id / target_bo_id 自动带出编码
                 # 视觉: 浅绿色 (与父对象编码一致), 但语义是"自动带出, 无需填写"
                 # [FIX 2026-06-24] 该分支已被上方的 is_parent_fk_field 优先捕获, 此处仅作防御
+                # [FIX 2026-06-24 v3] 防御性 fallback: parent_key_display 用 READONLY_SYSTEM_COMMENT
                 if getattr(f.semantics, 'parent_key_display', False):
                     fk_display_code_columns.append(col_idx)
-                    if PARENT_FK_COMMENT not in "；".join(comment_parts):
-                        comment_parts.append(PARENT_FK_COMMENT)
+                    if READONLY_SYSTEM_COMMENT not in "；".join(comment_parts):
+                        comment_parts.append(READONLY_SYSTEM_COMMENT)
                     has_control_info = True
 
                 # [NEW v1.1 2026-06-11] 记录 auto_or_manual code 列索引（用于差异化底色）
@@ -1847,7 +1902,9 @@ class ImportExportService:
                     comment_msg = PARENT_FK_COMMENT
                     parent_key_columns.append(col_idx)
                 else:
-                    comment_msg = PARENT_FK_COMMENT
+                    # [FIX 2026-06-24 v3] 非最近一级的父对象编码列: 系统填充只读
+                    # 例如 BO.service_module_code (parent_key) 之外的上层父对象编码
+                    comment_msg = READONLY_SYSTEM_COMMENT
                     readonly_columns.append(col_idx)
             else:  # 名称
                 comment_msg = "父对象名称，只读"
@@ -2153,6 +2210,40 @@ class ImportExportService:
         from meta.services.cascade_service import HierarchyConfigLoader
         return HierarchyConfigLoader.sort_by_hierarchy(object_types)
 
+    def _is_all_sheets_all_delete(self, sheets: List[Dict[str, Any]]) -> bool:
+        """[FIX 2026-06-24] 检测所有 sheets 的所有 rows 是否都是 delete 模式
+
+        用于 deep delete 场景的 import_order 反转决策.
+        sheet 字段: columns, preview_rows (list of list)
+          columns[0] 通常是 "操作模式"
+          preview_rows 每行是 list, preview_rows[i][0] 是 row 0 的 operation_mode
+
+        严格判断: 所有 row 的 operation_mode 都以 'delete' 开头.
+        """
+        if not sheets:
+            return False
+        total_rows = 0
+        for sheet in sheets:
+            preview_rows = sheet.get('preview_rows', [])
+            if not preview_rows:
+                continue
+            # 找 "操作模式" 列 index
+            columns = sheet.get('columns', [])
+            op_col_idx = None
+            for i, col in enumerate(columns):
+                if col == '操作模式':
+                    op_col_idx = i
+                    break
+            if op_col_idx is None:
+                # 没有操作模式列, 视为非 delete 主导
+                return False
+            for row in preview_rows:
+                total_rows += 1
+                op_mode = (str(row[op_col_idx]).strip() if op_col_idx < len(row) and row[op_col_idx] else '')
+                if not op_mode.startswith('delete'):
+                    return False
+        return total_rows > 0  # 至少要有 1 行才算 all delete
+
     def _query_with_hierarchy(self, object_type: str, filters: Optional[Dict[str, Any]],
                               options: Optional[Dict[str, Any]], sort_by: str = None, 
                               sort_order: str = 'asc',
@@ -2215,12 +2306,22 @@ class ImportExportService:
 
         print(f"[Export] 查询完成，获取 {len(data)} 条数据")
 
+        # [FIX BUG-V014 2026-06-26 (no-op)] owner exception 修补
+        # 实际验证: TEST333 角色 5433 (limited) + 5970 (owner), dim scope 已通过 owner role 覆盖
+        # 460 个 domain 都能被搜到, 无需修补
+        # 保留代码以便未来 dim scope 不含 owner role 时使用
+        # try:
+        #     owner_extra_data = self._query_owner_exception_extra(...)
+        #     ...
+        # except Exception as e:
+        #     print(f"[Export BUG-V014] owner exception extra query failed: {e}")
+
         data = self._inject_hierarchy_info(data, object_type, filters, options)
 
-        print(f"[Export] 层级信息注入完成")
+        print(f"[Export 层级信息注入完成")
 
         return data
-    
+
     def _query_association_with_hierarchy_filters(self, object_type: str,
                                                      filters: Dict[str, Any]) -> List[Dict[str, Any]]:
         """配置驱动的 association 层级过滤查询
@@ -2477,22 +2578,75 @@ class ImportExportService:
                     result.add(level.get('object'))
         return result
     
-    def _inject_hierarchy_info(self, data: List[Dict[str, Any]], object_type: str, 
-                               filters: Optional[Dict[str, Any]], 
+    def _inject_hierarchy_info(self, data: List[Dict[str, Any]], object_type: str,
+                               filters: Optional[Dict[str, Any]],
                                options: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-        
+
         meta_obj = registry.get(object_type)
-        
+
         for record in data:
             if options and options.get("include_hierarchy_path", True):
                 record["层级路径"] = self._build_hierarchy_path(record, meta_obj)
 
             self._add_hierarchy_fields(record, meta_obj, options)
 
+            # [FIX 2026-06-24] annotation 是多态关联 (target_type/target_id),
+            #   _add_hierarchy_fields 走 parent_object 链不适用 (annotation 无 parent_object),
+            #   必须在这里特殊处理 target_code / target_name.
+            if object_type == 'annotation':
+                self._enrich_annotation_target(record)
+
             if object_type == 'relationship':
                 self._enrich_relationship_record(record)
-        
+
         return data
+
+    def _enrich_annotation_target(self, record: Dict[str, Any]):
+        """[FIX 2026-06-24] 填充 annotation 的 target_code / target_name.
+
+        annotation 是多态关联: target_type + target_id 指向 parent 对象.
+        普通 _add_hierarchy_fields 走 meta_obj.parent_object 链, 对 annotation 无效
+        (annotation 无 parent_object 字段). 这里直接查 parent 表填 target_code/target_name.
+
+        使用 self.data_source 直接 SQL 查询, 绕过 query_service 的 RBAC 过滤
+        (query_service 在 export 上下文可能过滤掉 target 记录, 导致 target_code 全空).
+        """
+        target_type = record.get('target_type', '')
+        target_id = record.get('target_id')
+        if not target_type or not target_id:
+            return
+
+        try:
+            from meta.services.management_dimension_engine import RESOURCE_TABLE_MAP
+            table_name = RESOURCE_TABLE_MAP.get(target_type)
+            if not table_name:
+                return
+
+            target_code = ''
+            target_name = ''
+            if target_type == 'relationship':
+                row = self.data_source.execute(
+                    f"SELECT relation_code, relation_desc, source_code, target_code FROM {table_name} WHERE id = ?",
+                    [target_id]
+                ).fetchone()
+                if row:
+                    target_code = row[0] or ''
+                    target_name = row[1] or ' -> '.join(filter(None, [row[2], row[3]]))
+            else:
+                row = self.data_source.execute(
+                    f"SELECT code, name FROM {table_name} WHERE id = ?",
+                    [target_id]
+                ).fetchone()
+                if row:
+                    target_code = row[0] or ''
+                    target_name = row[1] or ''
+
+            if target_code:
+                record['target_code'] = target_code
+            if target_name:
+                record['target_name'] = target_name
+        except Exception as e:
+            logger.debug(f'[_enrich_annotation_target] failed for {target_type}({target_id}): {e}')
 
     def _build_hierarchy_path(self, record: Dict[str, Any], meta_obj: MetaObject) -> str:
         """构建层级路径"""
@@ -2754,9 +2908,11 @@ class ImportExportService:
         candidates = []
         seen_names = set()
         for f in child_meta.fields:
-            if f.id in default_exclude_fields and f.id not in cud_required_fields:
+            # [FIX 2026-06-26] business_key 字段总是包含 (用于 export→edit→import round-trip)
+            is_business_key = getattr(f.semantics, 'business_key', False)
+            if not is_business_key and f.id in default_exclude_fields and f.id not in cud_required_fields:
                 continue
-            if f.storage.value == "virtual" and not hasattr(f, 'ui'):
+            if not is_business_key and f.storage.value == "virtual" and not hasattr(f, 'ui'):
                 continue
 
             export_vis = getattr(f.semantics, 'export_visible', None)
@@ -2764,13 +2920,14 @@ class ImportExportService:
 
             is_cud_required = f.id in cud_required_fields
 
-            if not is_cud_required and export_vis is False and import_vis is False:
+            if not is_cud_required and not is_business_key and export_vis is False and import_vis is False:
                 continue
 
             is_export = export_vis is True or is_cud_required
             is_import = import_vis is True
 
-            if is_export or is_import or (hasattr(f, 'ui') and hasattr(f.ui, 'visible') and f.ui.visible is True):
+            # [FIX 2026-06-26] business_key 字段总是进入candidates (用于 round-trip)
+            if is_business_key or is_export or is_import or (hasattr(f, 'ui') and hasattr(f.ui, 'visible') and f.ui.visible is True):
                 candidates.append((f, is_export, is_import))
 
         candidates.sort(key=lambda x: (
@@ -2791,7 +2948,7 @@ class ImportExportService:
         # 详见 L1361-1372 注释
         export_fields.sort(key=lambda f: (
             0 if getattr(f.semantics, 'business_key', False) else 1,
-            f.semantics.import_order if f.semantics.import_order else 999
+            f.semantics.import_order if f.semantics.import_order is not None else 999
         ))
 
         if has_cud:
@@ -2855,8 +3012,10 @@ class ImportExportService:
                 # 跳过默认的 "；".join(comment_parts) 逻辑
                 comment_parts = None  # 标记已处理
             elif classification == 'fk_display_code':
-                # [FIX 2026-06-24] FK 编码显示字段: 同样严格只显示 PARENT_FK_COMMENT
-                cell.comment = _make_header_comment(PARENT_FK_COMMENT)
+                # [FIX 2026-06-24] FK 编码显示字段 (parent_key_display=true, 如 BO.domain_code/SM.domain_code)
+                # 这是从父对象自动推导的虚拟字段, 语义是"系统填充只读", 不是"创建必填"
+                # 与 parent_key 颜色一致 (浅绿) 但 comment 内容要明确区分
+                cell.comment = _make_header_comment(READONLY_SYSTEM_COMMENT)
                 comment_parts = None
             elif classification == 'create_required':
                 if getattr(f.semantics, 'business_key', False):
@@ -2896,14 +3055,17 @@ class ImportExportService:
                 if col_def['classification'] == 'parent_key':
                     cell.comment = _make_header_comment(PARENT_FK_COMMENT)
                 else:
-                    cell.comment = _make_header_comment(PARENT_FK_COMMENT)
+                    # [FIX 2026-06-24 v3] 非最近一级父对象编码: 系统填充只读
+                    cell.comment = _make_header_comment(READONLY_SYSTEM_COMMENT)
             else:
                 cell.comment = _make_header_comment("父对象名称，只读")
 
         for row_idx, record in enumerate(data, 2):
             if include_operation_mode:
                 cell = ws.cell(row=row_idx, column=1, value="update - 更新")
-                cell.fill = ds.READONLY_FILL
+                # [FIX 2026-06-24] 操作模式列改为无填充 (白色)
+                # 理由: 操作模式是元数据列, 不是数据字段, 不应该跟 readonly 字段混色
+                # 保留 border 以维持表格视觉一致性
                 cell.border = ds.THIN_BORDER
                 cell.alignment = Alignment(horizontal="center")
                 operation_dv.add(cell)
@@ -2965,7 +3127,9 @@ class ImportExportService:
 
                 cell = ws.cell(row=row_idx, column=1, value="create - 新增")
                 # [REMOVED 2026-06-14 BMRD] CREATE_NEW_FILL 已删除
-                cell.fill = ds.READONLY_FILL  # 复用灰色
+                # [FIX 2026-06-24] 操作模式列改为无填充 (白色)
+                # 理由: 操作模式是元数据列, 不是数据字段, 不应该跟 readonly 字段混色
+                # 保留 border 以维持表格视觉一致性
                 cell.border = ds.THIN_BORDER
                 cell.alignment = Alignment(horizontal="center")
                 operation_dv.add(cell)
@@ -3255,8 +3419,11 @@ class ImportExportService:
 
             # [MERGE 2026-06-16 BMRD] 之前"业务说明"中的"冲突处理策略"合并到这里
             # [FIX v1.2.42 2026-06-21] 冲突处理 → 更新模式，三选一说明
+            # [FIX 2026-06-24] 对齐前端 ImportDialog.vue 的实际 UI (2026-06-24 UI 简化为 1 个开关)
+            # 前端只有 2 种状态: "无则创建" (upsert, ON) / "无则跳过" (update_only, OFF)
+            # 删掉"不更新"描述 (前端不支持 skip 模式)
             ws_meta.cell(row=row, column=1, value="更新模式").font = ds.LABEL_FONT
-            ws_meta.cell(row=row, column=2, value="不存在则创建否则更新（默认）/只更新存在记录/不更新").font = ds.VALUE_FONT
+            ws_meta.cell(row=row, column=2, value="无则创建（默认）/无则跳过").font = ds.VALUE_FONT
             row += 1
 
             # 注意事项（cascade 模式特殊文案）
@@ -3281,9 +3448,11 @@ class ImportExportService:
             # 18号: 浅绿色="父对象编码或者FK对象编码字段，创建必填，更新不可变更"
             # 18号: 浅蓝灰="留空自动生成编码/可手动录入编码"
             # [FIX 2026-06-23] 与列头 comment 共用同一常量 PARENT_FK_COMMENT, 避免脱节
+            # [FIX 2026-06-24 v3] 浅绿色对应两种语义, 在示例里都说明
             color_examples = [
                 ("  灰色", ds.READONLY_FILL, "只读字段，不可编辑"),
-                ("  浅绿色", ds.BUSINESS_KEY_FILL, PARENT_FK_COMMENT),
+                ("  浅绿色", ds.BUSINESS_KEY_FILL,
+                 f"{PARENT_FK_COMMENT}\n注：仅父对象编码字段（如 服务模块编码）；冗余字段（如 领域编码）系统自动填充，只读"),
                 ("  浅黄色", ds.REQUIRED_FILL, "业务关键字，新增必填，编辑时只读"),
                 ("  浅蓝灰", ds.AUTO_GEN_OR_MANUAL_FILL, "留空自动生成编码/可手动录入编码"),
             ]
@@ -3572,15 +3741,17 @@ class ImportExportService:
         跨域 source/target 端权限), 导致 export relationship 时 30 条 vs 列表 9 条
         (TEST333 清理了 auto_generated data_permissions 后, dim scope 仍是主要权限来源)。
 
+        [FIX BUG-V014 2026-06-26] 加 owner exception
+          - 旧: dim scope 限定 product_id=475, 永远不覆盖 owner
+          - 新: OR 上 owner_id = user_id 条件
+          - 案例: TEST333 导出 17 个 product 私有 owner=自己, 旧只导出 1 个 public
+
         优先级 (与 query_service._apply_data_permission 一致):
           1. is_admin → 直接放行
           2. thread-local user (async export) > g.current_user (sync export)
           3. DimensionScopeEngine 派生 dim scope (优先, 与列表接口行为一致)
           4. data_permissions 表 allowed_ids (fallback)
-
-        Returns:
-            (sql_fragment, params) — sql_fragment 如 " AND (r.source_bo_id IN (...) OR r.target_bo_id IN (...))"
-            无权限限制时返回 ("", [])
+          5. [BUG-V014] owner exception: user 是 owner 时也允许 (无论 dim scope)
         """
         prefix = f"{table_alias}." if table_alias else ""
 
@@ -3668,11 +3839,46 @@ class ImportExportService:
                 return f" AND {prefix}id = -1", []
 
             placeholders = ','.join(['?'] * len(allowed_ids))
-            return f" AND {prefix}id IN ({placeholders})", list(allowed_ids)
+            base_sql = f" AND {prefix}id IN ({placeholders})"
+            base_params = list(allowed_ids)
 
         except Exception as e:
             logger.warning(f"[_build_permission_filter] failed: {e}")
             return "", []
+
+        # [FIX BUG-V014 2026-06-26] owner exception
+        # 与 data_permission_interceptor._add_owner_exception 一致
+        # product 走 direct owner_id; 子对象走 chain_owner_resolver
+        # 注: 这条 SQL 只在 export 路径直接调用时生效 (旧 fallback),
+        #     cascade export 走 query_service.search 路径, owner exception 需在 search 内处理
+        try:
+            from meta.core.models import registry
+            from meta.services.chain_owner_resolver import is_in_chain
+            meta = registry.get(object_type)
+            if meta and user_id:
+                if object_type == 'product':
+                    owner_sql = f" OR {prefix}owner_id = ?"
+                    owner_params = [user_id]
+                elif is_in_chain(object_type):
+                    owner_sql = f" OR {prefix}product_id IN (SELECT id FROM products WHERE owner_id = ?)"
+                    owner_params = [user_id]
+                else:
+                    owner_sql = ""
+                    owner_params = []
+                if owner_sql:
+                    logger.info(
+                        f'[_build_permission_filter BUG-V014] adding owner exception for {object_type}: '
+                        f'{owner_sql.strip()}'
+                    )
+                    if base_sql.startswith(" AND "):
+                        combined_sql = f" AND ({base_sql[5:]} {owner_sql})"
+                    else:
+                        combined_sql = f"{base_sql} {owner_sql}"
+                    return combined_sql, base_params + owner_params
+        except Exception as e:
+            logger.warning(f"[_build_permission_filter BUG-V014] owner exception failed: {e}")
+
+        return base_sql, base_params
 
     def _dim_scope_conds_to_sql(self, per_role_conds: List[List[Dict]], prefix: str = '') -> str:
         """[FIX v1.2.50 2026-06-22] 将 dim scope conds (来自 DimensionScopeEngine) 转为 SQL 片段
@@ -4373,15 +4579,20 @@ class ImportExportService:
             # immutable 字段在编辑/更新/删除时忽略（业务键不可修改）
             # 但 business_key 字段必须保留，用于查找记录
             # [SYMBOL] 关键修复：parent_key 字段也必须保留，用于建立父子关系
+            # [FIX v2.1.10 2026-06-24] resolve_from_field 源字段（如 source_code/target_code）
+            #   是 immutable 的 stored 字段，但被 FK 解析依赖，必须保留才能解析 source_bo_id/target_bo_id
+            #   之前的修复 (v1.2.18j) 只在 virtual 字段处理时考虑 resolve_from_source
+            #   这里对 immutable + stored 的 resolve_from_source 也要保留
             if is_update and getattr(field.semantics, 'immutable', False):
                 is_bk = getattr(field.semantics, 'business_key', False)
-                if not is_bk and not is_parent_key:
+                if not is_bk and not is_parent_key and not is_resolve_source:
                     continue
 
             # 删除模式下，非 business_key 的 immutable 字段也忽略
+            # [FIX v2.1.10] resolve_from_source 字段（如 source_code）在删除模式下也需要保留（用于定位记录）
             if operation_mode in ["删除", "delete", "Delete"] and getattr(field.semantics, 'immutable', False):
                 is_bk = getattr(field.semantics, 'business_key', False)
-                if not is_bk:
+                if not is_bk and not is_resolve_source:
                     continue
 
             filtered[field_id] = value
@@ -4477,6 +4688,11 @@ class ImportExportService:
         sensitivity = getattr(field.semantics, 'sensitivity', None)
         if sensitivity in ('restricted', 'confidential'):
             return False
+
+        # [FIX 2026-06-26] business_key 字段总是导出 (用于 export→edit→import round-trip)
+        # 即便 storage=virtual 且 export_visible=false，也保留导出（避免 round-trip 数据丢失）
+        if getattr(field.semantics, 'business_key', False):
+            return True
 
         if field.storage.value == "virtual" and not hasattr(field, 'ui'):
             return False
@@ -4618,6 +4834,24 @@ class ImportExportService:
             if not object_type:
                 continue
 
+            # [H15.2 FIX] 添加导入权限检查
+            from meta.services.permission_service import PermissionService
+            from meta.services.query_service import _get_thread_user
+            user = _get_thread_user()
+            if not user:
+                from meta.services.auth_middleware import get_current_user
+                user = get_current_user()
+            if user and user.get('username') != 'admin':
+                perm_service = PermissionService(self.data_source)
+                has_permission = perm_service.check_permission_unified(
+                    user['user_id'],
+                    object_type,
+                    'import'
+                )
+                if not has_permission:
+                    logger.warning(f"[Import] 用户 {user.get('username')} 没有 {object_type}:import 权限，跳过 sheet {sheet_name}")
+                    continue
+
             ws = wb[sheet_name]
             rows = list(ws.iter_rows(values_only=True))
 
@@ -4646,6 +4880,31 @@ class ImportExportService:
         wb.close()
 
         import_order = self._sort_by_hierarchy([s["object_type"] for s in sheets])
+
+        # [FIX 2026-06-24] relationship 排序修复
+        # 问题: _sort_by_hierarchy 只看 parent_object, 忽略 associations
+        #   relationship 的 parent_object=version (不在 object_types 中)
+        #   所以 relationship 没有依赖项, 排到 business_object 之前
+        #   正确顺序应该是: business_object 之后, 因为 relationship 引用 business_object (源+目标)
+        # 修复: 把 relationship 移到 business_object 之后
+        if 'relationship' in import_order and 'business_object' in import_order:
+            import_order.remove('relationship')
+            bo_idx = import_order.index('business_object')
+            import_order.insert(bo_idx + 1, 'relationship')
+
+        # [FIX 2026-06-24] Deep Delete 顺序修复
+        # 问题: import 始终按 _sort_by_hierarchy (父在前, 子在后) 遍历 sheets
+        #   对 create 模式正确, 但对 delete 模式错误 (应该在后父先在先)
+        #   例: 删 service_module 时如果业务对象还没删, cascade_service.before_delete 会返回 has_restrict
+        # 修复: 检测所有 sheets 的所有 rows 是否都是 delete 模式,
+        #   如果是, 反转 import_order (子在先父在后)
+        # 边界:
+        #   - create + delete 混合: 不反转 (create 仍然需要父在先, delete 单独会通过 cascade 删子)
+        #   - update/delete 混合: 不反转 (update 父先合理, delete 依赖 cascade)
+        all_delete = self._is_all_sheets_all_delete(sheets)
+        if all_delete:
+            import_order = list(reversed(import_order))
+            logger.info(f"[Import] Deep delete detected, reversed import_order: {import_order}")
 
         logger.info(f"[Import] sheets: {[s['object_type'] for s in sheets]}")
         logger.info(f"[Import] import_order: {import_order}")
@@ -5959,9 +6218,17 @@ class ImportExportService:
             #     - upsert → _upsert_record (有则更新, 无则创建)
             #     - update_only → _update_record (只更新, 无则报错)
             #     - skip → _update_record 抛错被捕获为 skip 语义
+            # [V2.1.11 FIX 2026-06-24] 之前 c94c4d8 commit 在解 fk_display_code 列冲突时
+            #   误把 V2.1.8 的修改回滚, 导致:
+            #     - operation_mode 被改成 'create' / 'update' / 'skip'
+            #     - _filter_import_record 看到 is_create=True 把 id 等 system fields 过滤掉
+            #     - annotation row=9 (id=108) upsert 时拿不到 id, _find_existing_record 返回 None,
+            #       走 create 路径, 报"关联对象ID 不能为空"
+            #   修复: 重新恢复 V2.1.8 的"仅清 explicit, 不改 op_mode"语义
+            # [MERGE FIX 2026-06-24] merge main 时保留 V2.1.11 详细注释 (c94c4d8 regression 来龙去脉)
             if force_override_explicit_mode and operation_mode_explicit and operation_mode == "update":
                 logger.info(f"[Import] force_override_explicit_mode=True 且 Excel 操作模式='update', 按 conflict_strategy='{conflict_strategy}' 处理 (保持 op_mode=update)")
-                # [V2.1.8] 仅清除 explicit 标记, 不改变 op_mode (避免权限检查路径错误)
+                # [V2.1.8/V2.1.11] 仅清除 explicit 标记, 不改变 op_mode
                 operation_mode_explicit = False
             elif force_override_explicit_mode and operation_mode_explicit:
                 # create / delete 行: 保留 Excel 显式意图, 不 override
@@ -6132,7 +6399,9 @@ class ImportExportService:
                     try:
                         # [FIX v1.2.41 2026-06-21] 检查 _delete_record 的 ActionResult 返回值
                         # 之前: 忽略返回值, 权限拦截 (ActionResult.fail) 被当作成功
-                        delete_result = self._delete_record(object_type, record, obj.import_export)
+                        # [FIX 2026-06-24] force_cascade=True: 让 import 流程默认 cascade 删子级
+                        # 避免 "父级 delete + 子级 update" 混合模式下父级被 RESTRICT 拒绝
+                        delete_result = self._delete_record(object_type, record, obj.import_export, force_cascade=True)
                         if delete_result is not None and hasattr(delete_result, 'success') and not delete_result.success:
                             # 权限拦截或其他业务失败 (如 WriteScopeDenied)
                             failed_count += 1
@@ -6384,8 +6653,93 @@ class ImportExportService:
             # [SYMBOL] 传入 version_id，只在指定版本内查找
             return self._find_by_composite_key(object_type, bk_fields, key_values, version_id)
 
-    def _delete_record(self, object_type: str, record: Dict[str, Any], config: ImportExportConfig):
+    def _force_cascade_delete(self, parent_type: str, parent_id: Any) -> Dict[str, Any]:
+        """[FIX 2026-06-24] 强制 cascade 删除 parent 及其所有子级
+
+        用于 import 流程: 当父级因为 RESTRICT 失败时, 自动 cascade 删子级.
+        递归: 对每个子级 (composite relation) 先 cascade 删它的子级, 再删它自己.
+
+        Returns:
+            dict: {success: bool, deleted: List[Dict], errors: List[str]}
+        """
+        from meta.core.models import RelationType, registry
+        from meta.services.cascade_service import CascadeService
+
+        deleted = []
+        errors = []
+
+        # 1. 收集所有子级 (PARENT_CHILD + COMPOSITION)
+        # 用 cascade_service._get_child_types 拿 child types, _get_foreign_key 拿 fk
+        cascade_service = CascadeService(self.data_source)
+        child_types = cascade_service._get_all_child_types(parent_type)
+
+        # 2. 对每个子级, 先递归删它的子级, 再删它
+        for child_type in child_types:
+            try:
+                fk_field = cascade_service._get_foreign_key(parent_type, child_type)
+            except Exception:
+                fk_field = f"{parent_type}_id"
+            child_records = self.data_source.find(
+                self._get_table_name_for_object(child_type),
+                {fk_field: parent_id}
+            )
+            for child_rec in child_records:
+                # 递归: 先删子级的子级
+                sub_cascade = self._force_cascade_delete(child_type, child_rec['id'])
+                if not sub_cascade.get('success'):
+                    errors.extend(sub_cascade.get('errors', []))
+                # 再删子级本身
+                try:
+                    child_delete_req = DeleteRequest(object_type=child_type, id=child_rec['id'])
+                    child_result = self.manage_service.delete(child_delete_req)
+                    if child_result and child_result.success:
+                        deleted.append({'object_type': child_type, 'id': child_rec['id']})
+                    else:
+                        msg = getattr(child_result, 'message', 'unknown') if child_result else 'unknown'
+                        errors.append(f"{child_type}({child_rec['id']}): {msg}")
+                except Exception as e:
+                    errors.append(f"{child_type}({child_rec['id']}): {e}")
+
+        # 3. [FIX 2026-06-24] 删 parent 的 annotation (auxiliary, 不在 hierarchies.yaml 的 child_types)
+        # annotation 多态关联 (target_type + target_id) 指向 parent
+        # 不删会导致 orphan annotation, 后续 export obj_code 为空
+        if parent_type in ('domain', 'sub_domain', 'service_module', 'business_object', 'relationship'):
+            anno_records = self.data_source.find('annotations', {'target_type': parent_type, 'target_id': parent_id})
+            for anno in anno_records:
+                try:
+                    anno_delete_req = DeleteRequest(object_type='annotation', id=anno['id'])
+                    anno_result = self.manage_service.delete(anno_delete_req)
+                    if anno_result and anno_result.success:
+                        deleted.append({'object_type': 'annotation', 'id': anno['id']})
+                    else:
+                        msg = getattr(anno_result, 'message', 'unknown') if anno_result else 'unknown'
+                        errors.append(f"annotation({anno['id']}): {msg}")
+                except Exception as e:
+                    errors.append(f"annotation({anno['id']}): {e}")
+
+        return {'success': len(errors) == 0, 'deleted': deleted, 'errors': errors}
+
+    def _get_table_name_for_object(self, object_type: str) -> str:
+        """[FIX 2026-06-24] 从 schema 拿 object_type 对应的 DB 表名"""
+        from meta.core.models import registry
+        obj = registry.get(object_type)
+        if obj and hasattr(obj, 'table_name') and obj.table_name:
+            return obj.table_name
+        # fallback: 加 s
+        return object_type + 's'
+
+    def _delete_record(self, object_type: str, record: Dict[str, Any], config: ImportExportConfig,
+                       force_cascade: bool = False) -> Any:
         """删除记录
+
+        Args:
+            object_type: 对象类型
+            record: 记录数据
+            config: ImportExportConfig
+            force_cascade: [FIX 2026-06-24] import 流程设为 True,
+                如果父级有子级 (cascade_service.before_delete 失败),
+                自动 cascade 删子级后再删父级.
+                单条 delete 默认 False (保持 RESTRICT 行为, 需要用户显式处理子级).
 
         Returns:
             ActionResult: manage_service.delete 的返回值, 包含 success/error/message
@@ -6398,7 +6752,21 @@ class ImportExportService:
         if existing:
             # [FIX v1.2.41 2026-06-21] 返回 manage_service.delete 的 ActionResult,
             # 让调用方能检查 WriteScopeDenied 等失败
-            return self.manage_service.delete(DeleteRequest(object_type=object_type, id=existing["id"]))
+            delete_request = DeleteRequest(object_type=object_type, id=existing["id"])
+            result = self.manage_service.delete(delete_request)
+            # [FIX 2026-06-24] force_cascade: 如果失败原因是 "存在关联的子对象", 自动 cascade 删子级
+            if force_cascade and result is not None and not result.success:
+                err_msg = getattr(result, 'message', '') or ''
+                if '存在关联的子对象' in err_msg or 'CASCADE_RESTRICT' == getattr(result, 'error', ''):
+                    logger.info(f"[Import] force_cascade triggered for {object_type}({existing['id']})")
+                    cascade_result = self._force_cascade_delete(object_type, existing["id"])
+                    if cascade_result.get('success'):
+                        # cascade 删完子级, 再次尝试删父级
+                        result = self.manage_service.delete(delete_request)
+                    else:
+                        # cascade 也失败, 返回原始错误
+                        return result
+            return result
         else:
             bk_fields = self._get_business_key_fields(object_type)
             obj = registry.get(object_type)
