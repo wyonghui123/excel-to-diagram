@@ -1694,13 +1694,13 @@ class ImportExportService:
             regular_fields,
             key=lambda f: (
                 0 if getattr(f.semantics, 'business_key', False) else 1,
-                f.semantics.import_order if f.semantics.import_order else 999
+                f.semantics.import_order if f.semantics.import_order is not None else 999
             )
         )
         # 统计列按 import_order 排序（通常无 import_order, 保持原序）
         stats_fields = sorted(
             stats_fields,
-            key=lambda f: f.semantics.import_order if f.semantics.import_order else 999
+            key=lambda f: f.semantics.import_order if f.semantics.import_order is not None else 999
         )
 
         # [FIX 2026-06-11] 优先用 list columns 的 title 作为 export header
@@ -2935,7 +2935,7 @@ class ImportExportService:
         # 详见 L1361-1372 注释
         export_fields.sort(key=lambda f: (
             0 if getattr(f.semantics, 'business_key', False) else 1,
-            f.semantics.import_order if f.semantics.import_order else 999
+            f.semantics.import_order if f.semantics.import_order is not None else 999
         ))
 
         if has_cud:
@@ -4638,6 +4638,11 @@ class ImportExportService:
         sensitivity = getattr(field.semantics, 'sensitivity', None)
         if sensitivity in ('restricted', 'confidential'):
             return False
+
+        # [FIX 2026-06-26] business_key 字段总是导出 (用于 export→edit→import round-trip)
+        # 即便 storage=virtual 且 export_visible=false，也保留导出（避免 round-trip 数据丢失）
+        if getattr(field.semantics, 'business_key', False):
+            return True
 
         if field.storage.value == "virtual" and not hasattr(field, 'ui'):
             return False

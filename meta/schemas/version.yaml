@@ -1,45 +1,35 @@
-# ============================================
-# 产品版本元模型
-# 层级: 2 (产品 -> 版本)
-# 说明: 产品版本是产品线的软件版本，如 v1.0、2024-Q4 等
-# ============================================
-
 id: version
 name: 产品版本
 table_name: versions
 description: 产品版本是产品线的软件版本，如 v1.0、2024-Q4 等。每个版本包含独立的领域模型数据。
 display_name_field: name
 parent_object: product
-# [CHANGED 2026-06-13] 移除 naming_aspect - version 不需要独立的 code 字段
-# 原因：
-#   1. naming_aspect 提供 code 字段（business_key=true），与 name 语义重叠
-#   2. 行业实践（SAP/Salesforce/Oracle/Jira）均不需要独立的版本编码
-#   3. 版本的自然名称（v1.0/2024-Q4）本身就是标识
-#   4. 唯一性改为 (product_id, name) 联合约束
-# 影响：version 对象不再继承 code 字段，仅使用 name 作为业务键
-aspects: [audit_aspect, owner_aspect]
-
-# 管理维度绑定（Spec v1.3 数据权限统一模型）
+aspects:
+- audit_aspect
+- owner_aspect
 dimension_bindings:
-  - dimension: version
-    field: id
-  - dimension: product
-    field: product_id
-
+- dimension: version
+  field: id
+- dimension: product
+  field: product_id
 deletability:
-  condition: "self.child_count == 0"
-  message: "存在领域的版本不能删除"
-
+  condition: self.child_count == 0
+  message: 存在领域的版本不能删除
+  on_blocked:
+    http_status: 409
+    error_code: VERSION_HAS_DOMAINS
+    hint: 请手动迁移或删除领域后重试
+  blocked_check:
+    related_association: version_to_domains
 authorization:
   check: true
-  # [V1.1.2 2026-06-11] visibility 已上移到 product, version 的授权走 product 链
-  scope: "product_id IN (SELECT id FROM products WHERE visibility = 'public' OR owner_id = $user.id)"
+  scope: product_id IN (SELECT id FROM products WHERE visibility = 'public' OR owner_id
+    = $user.id)
   auto_owner: true
   auto_permission: admin
   inherit_to_children: true
   allow_transfer: true
   transfer_keep_permissions: true
-
 hierarchy:
   enabled: true
   hierarchy_id: biz_hierarchy
@@ -47,34 +37,14 @@ hierarchy:
   parent_field: product_id
   path_field: hierarchy_path
   depth_field: hierarchy_depth
-
-# ────────────────────────────────────────────
-# KeyTemplate 自动编码
-# ────────────────────────────────────────────
-# [REMOVED 2026-06-10] 移除 version 的 key_template。
-# 原因：
-#   1. version code 是有业务含义的版本名（v1.0 / 2024-Q4 / R2024.1），
-#      不是 BO/REL 那样的系统枚举
-#   2. 自动生成 `{product_code}_{SEQ:2}` (e.g. SCM_01) 与 field.examples
-#      (v1.0/2024Q4/R2024.1) 设计意图冲突
-#   3. 实际数据中用户已多次手动覆盖 (V1/V2)，证明自动建议无价值
-# 决策参考：.trae/specs/key-template-form-interaction/ §11.7
-
-# ────────────────────────────────────────────
-# 导入导出配置
-# ────────────────────────────────────────────
 import_export:
   import_enabled: true
   export_enabled: true
   cascade_export: true
   cascade_import: true
   conflict_strategy: upsert
-  conflict_key: "product_id,name"
-  description_for_agent: "产品版本是产品线的软件版本。导出时会级联包含所有子对象。唯一性由 (product_id, name) 联合保证。"
-
-# ────────────────────────────────────────────
-# 语义标注
-# ────────────────────────────────────────────
+  conflict_key: product_id,name
+  description_for_agent: 产品版本是产品线的软件版本。导出时会级联包含所有子对象。唯一性由 (product_id, name) 联合保证。
 semantics:
   meaning: 产品线的软件版本
   business_key: true
@@ -82,23 +52,12 @@ semantics:
   category: core_entity
   hierarchy_level: 2
   aliases:
-    - 版本
-    - Version
-    - 产品版本
+  - 版本
+  - Version
+  - 产品版本
   custom:
     color_coding: secondary
     icon: version
-
-# ────────────────────────────────────────────
-# Aspect 引用
-# ────────────────────────────────────────────
-# [CHANGED 2026-06-13] 移除 naming_aspect - 与第20行保持一致
-# 注意：此处的 aspects 会覆盖第20行的配置，因此需要包含完整的列表
-aspects: [audit_aspect, owner_aspect]
-
-# ────────────────────────────────────────────
-# 审计配置
-# ────────────────────────────────────────────
 audit:
   enabled: true
   create:
@@ -110,30 +69,26 @@ audit:
   delete:
     enabled: true
     fields: business_only
-
-# ────────────────────────────────────────────
-# UI 视图配置
-# ────────────────────────────────────────────
 ui_view_config:
   skip_auto_menu: true
   filter:
     layout: sidebar
     filters:
-      - key: product_id
-        title: 产品
-        type: select
-        source: product
-        display_field: name
-        position: 0
-      - key: is_current
-        title: 当前版本
-        type: select
-        position: 1
-      - key: description
-        title: 描述搜索
-        type: text
-        placeholder: 搜索版本描述...
-        position: 100
+    - key: product_id
+      title: 产品
+      type: select
+      source: product
+      display_field: name
+      position: 0
+    - key: is_current
+      title: 当前版本
+      type: select
+      position: 1
+    - key: description
+      title: 描述搜索
+      type: text
+      placeholder: 搜索版本描述...
+      position: 100
   list:
     pageSize: 20
     inlineEdit:
@@ -141,457 +96,440 @@ ui_view_config:
       mode: quick
       autoSave: false
     columns:
-      - key: name
-        title: 版本名称
-        width: 180
-        position: 1
-        importance: high
-        sortable: true
-        i18n_key: version.field.name
-      # [REMOVED 2026-06-13] 删除 code 列 - code 字段已废弃, name 作为唯一业务键
-      # 原 code 列与 name 语义重叠, 行业实践(SAP/Salesforce/Oracle)均不需要独立版本编码
-      # [V1.1.2 2026-06-11] 删 visibility 列 - 已上移到 product
-      - key: is_current
-        title: 当前版本
-        width: 90
-        position: 4
-        importance: medium
-      # [V1.1.4 2026-06-11] 删 owner_id_display 列 - 顶层 owner 已在 product
-      # [FIX 2026-06-14] BUG-V008 扩展: 补 FK 链路列 product_name
-      # 后端通过 redundancy join_path 自动填充 (version_id -> products.name)
-      - key: product_name
-        title: 所属产品
-        width: 150
-        position: 5
-        importance: high
-        sortable: true
-      - key: child_count
-        title: 领域数量
-        width: 80
-        position: 6
-        importance: medium
-        computed: true
-        computation:
-          type: count_children
-          child_object: domain
-      - key: created_at
-        title: 创建时间
-        width: 180
-        position: 90
-        importance: low
-        sortable: true
-      - key: updated_at
-        title: 更新时间
-        width: 180
-        position: 91
-        importance: low
-        sortable: true
+    - key: name
+      title: 版本名称
+      width: 180
+      position: 1
+      importance: high
+      sortable: true
+      i18n_key: version.field.name
+    - key: is_current
+      title: 当前版本
+      width: 90
+      position: 4
+      importance: medium
+    - key: product_name
+      title: 所属产品
+      width: 150
+      position: 5
+      importance: high
+      sortable: true
+    - key: child_count
+      title: 领域数量
+      width: 80
+      position: 6
+      importance: medium
+      computed: true
+      computation:
+        type: count_children
+        child_object: domain
+    - key: created_at
+      title: 创建时间
+      width: 180
+      position: 90
+      importance: low
+      sortable: true
+    - key: updated_at
+      title: 更新时间
+      width: 180
+      position: 91
+      importance: low
+      sortable: true
     selectable: true
     batch_actions:
-      - id: batch_delete
+    - id: batch_delete
   detail:
     facets:
-      - title: 基本信息
-        type: fieldGroup
-        fields:
-          - name
-          - is_current
-          - description
-          - product_name
-      - title: 系统信息
-        type: fieldGroup
-        fields:
-          - created_at
-          - updated_at
-          - created_by
-          - updated_by
+    - title: 基本信息
+      type: fieldGroup
+      fields:
+      - name
+      - is_current
+      - description
+      - product_name
+    - title: 系统信息
+      type: fieldGroup
+      fields:
+      - created_at
+      - updated_at
+      - created_by
+      - updated_by
     showChangeHistory: true
   form:
     sections:
-      - title: 基本信息
-        fields:
-          - name
-          - description
-          - is_current
-          - product_id
+    - title: 基本信息
+      fields:
+      - name
+      - description
+      - is_current
+      - product_id
   change_notification:
     enabled: true
     events:
-      - type: create
-        channels: [in_app]
-        track_fields: [name, product_id]
-        payload: [id, name]
-      - type: update
-        channels: [in_app]
-        track_fields: [name, is_current]
-        payload: [id, name]
-      - type: delete
-        channels: [in_app]
-        track_fields: []
-        payload: [id, name]
-
-# ────────────────────────────────────────────
-# 字段定义
-# ────────────────────────────────────────────
+    - type: create
+      channels:
+      - in_app
+      track_fields:
+      - name
+      - product_id
+      payload:
+      - id
+      - name
+    - type: update
+      channels:
+      - in_app
+      track_fields:
+      - name
+      - is_current
+      payload:
+      - id
+      - name
+    - type: delete
+      channels:
+      - in_app
+      track_fields: []
+      payload:
+      - id
+      - name
 fields:
-  # [V1.1.2 2026-06-11] 删 visibility 字段定义 - 已上移到 product
-  # DB 列 versions.visibility 仍保留 (向后兼容, 但已无 metadata 引用)
-  # V2 任务: 评估是否真正 DROP COLUMN
-  - id: product_code
-    name: 产品编码
-    type: string
-    description: 所属产品编码
-    semantics:
-      meaning: 产品编码，用于跨环境数据迁移
-      business_key: true
-      import_order: 0
-      virtual: true
-      export_visible: false
-      import_visible: false
-    ui:
-      visible: false
-
-  - id: id
-    name: ID
-    type: integer
-    db_column: id
-    required: true
-    unique: true
-    description: 技术主键
-    ui:
-      visible: false
-      editable: false
-    semantics:
-      meaning: 自增主键，系统内部使用
-      analytics:
-        category: measure
-        aggregation: count
-        display_name: 版本数量
-
-  - id: product_id
-    name: 产品
-    type: integer
-    db_column: product_id
-    required: true
-    description: 所属产品
-    ui:
-      widget: select
-      relation: product
-      display_field: product_name
-    semantics:
-      meaning: 关联的产品线
-      analytics:
-        category: dimension
-        type: foreign_key
-        display_name: 产品
-    value_help:
-      source:
-        type: bo
-        target_bo: product
-        value_field: id
-        display_field: name
-        code_field: code
-        apply_target_permissions: false
-      behavior:
-        validation: true
-        binding_strength: strict
-      presentation:
-        result_type: dropdown
-        display_format: "{code} - {name}"
-        columns:
-          - field: code
-            label: 编码
-            width: 120
-          - field: name
-            label: 名称
-            width: 200
-
-  - id: name
-    name: 版本名称
-    type: string
-    db_column: name
-    required: true
-    description: 版本名称，如 v1.0、2024-Q4
-    semantics:
-      meaning: 版本的显示名称和业务键（产品内唯一）
-      display_name: true
-      business_key: true
-      immutable: true
-      pattern: "^[A-Za-z0-9][A-Za-z0-9_.\\-]*$"
-      data_category: code
-      import_visible: true
-      export_visible: true
-      import_order: 1
-      examples:
-        - v1.0
-        - 2024-Q4
-        - R2024.1
-    ui:
-      visible: true
-      editable: true
-      widget: input
-      fieldGroup: 基本信息
-      fieldGroupPosition: 10
-      i18n_key: version.field.name
-
-  # [REMOVED 2026-06-13] 删除 code 字段
-  # 原因:
-  #   1. code 与 name 语义重叠, 用户实际使用中几乎必然填一样的内容
-  #   2. 行业实践(SAP/Salesforce/Oracle/Jira)均不需要独立的版本编码字段
-  #   3. 版本的自然名称(v1.0/2024-Q4)本身就是标识
-  #   4. 唯一性改为 (product_id, name) 联合约束, 替代原 code 的全局唯一
-  # 迁移: name 字段继承原 code 的 pattern/immutable/business_key 属性
-
-  - id: description
-    name: 版本描述
-    type: text
-    db_column: description
-    description: 版本描述
-    ui:
-      render_hints:
-        searchable: true
-    semantics:
-      meaning: 版本的详细描述
-      data_category: text
-      import_visible: true
-      export_visible: true
-      import_order: 30
-
-  - id: is_current
-    name: 是否当前版本
-    type: boolean
-    db_column: is_current
-    default: false
-    description: 是否为当前活跃版本
-    enum_values:
-      - value: 1
-        label: 是
-        color: success
-      - value: 0
-        label: 否
-        color: info
-    ui:
-      widget: switch
-    semantics:
-      meaning: 标记是否为当前使用的版本
-      analytics:
-        category: dimension
-        type: boolean
-        display_name: 是否当前版本
-
-  - id: product_name
-    name: 产品
-    type: string
-    description: 所属产品名称
-    storage: virtual
-    ui:
-      visible: true
-      editable: false
-    semantics:
-      meaning: 关联产品的显示名称
-      # 冗余字段一致性声明（Type-B: 虚拟冗余）
-      redundancy:
-        type: virtual
-        source_field: product_id
-        derived_from: product.name
-        join_path:
-          - table: products
-            from: product_id
-            to: id
-            select: name
-
-  # [V1.1.4 2026-06-11] 删 owner_id 字段定义 - DB 列 V1.1.1 已删, 顶层 owner 在 product
-  - id: child_count
-    name: 领域数量
-    type: integer
-    description: 版本下的领域数量
-    storage: virtual
-    computed: true
-    semantics:
-      meaning: 版本包含的领域数量
-      analytics:
-        category: measure
-        aggregation: sum
-        display_name: 领域总数
-    computation:
-      type: count_children
-      child_object: domain
-    ui:
-      visible: true
-      editable: false
-
-# ────────────────────────────────────────────
-# 关联关系
-# ────────────────────────────────────────────
-relations:
-  - id: version_to_product
-    name: 归属产品
-    type: parent_child
-    target: product
-    cardinality: "N:1"
-    description: 版本归属的产品线
-    semantics:
-      meaning: 版本与产品线的层级关系
-
-  - id: version_to_domains
-    name: 包含领域
-    type: parent_child
-    target: domain
-    cardinality: "1:N"
-    description: 一个版本包含多个领域
-    semantics:
-      meaning: 版本与领域的层级关系
-
-# ────────────────────────────────────────────
-# 操作定义
-# ────────────────────────────────────────────
-actions:
-  - id: version_create
-    name: 创建版本
-    type: crud
-    method: POST
-    path: /api/v1/versions
-    description: 创建新的版本
-
-  - id: version_read
-    name: 查询版本
-    type: crud
-    method: GET
-    path: /api/v1/versions/{id}
-    description: 查询单个版本
-
-  - id: version_update
-    name: 更新版本
-    type: crud
-    method: PUT
-    path: /api/v1/versions/{id}
-    description: 更新版本信息
-
-  - id: version_delete
-    name: 删除版本
-    type: crud
-    method: DELETE
-    path: /api/v1/versions/{id}
-    description: 删除版本
-
-  - id: version_list
-    name: 列表查询
-    type: crud
-    method: GET
-    path: /api/v1/versions
-    description: 查询版本列表
-
-  - id: set_current
-    name: 设为当前版本
-    type: business
-    method: POST
-    path: /api/v1/versions/{id}/set-current
-    description: 将版本设为当前活跃版本
+- id: product_code
+  name: 产品编码
+  type: string
+  description: 所属产品编码
+  semantics:
+    meaning: 产品编码，用于跨环境数据迁移
+    business_key: true
+    import_order: 0
+    virtual: true
+    export_visible: false
+    import_visible: false
+  ui:
+    visible: false
+- id: id
+  name: ID
+  type: integer
+  db_column: id
+  required: true
+  unique: true
+  description: 技术主键
+  ui:
+    visible: false
+    editable: false
+  semantics:
+    meaning: 自增主键，系统内部使用
+    import_order: 999
+    analytics:
+      category: measure
+      aggregation: count
+      display_name: 版本数量
+- id: product_id
+  name: 产品
+  type: integer
+  db_column: product_id
+  required: true
+  description: 所属产品
+  ui:
+    widget: select
+    relation: product
+    display_field: product_name
+  semantics:
+    meaning: 关联的产品线
+    analytics:
+      category: dimension
+      type: foreign_key
+      display_name: 产品
+    import_order: 999
+  value_help:
+    source:
+      type: bo
+      target_bo: product
+      value_field: id
+      display_field: name
+      code_field: code
+      apply_target_permissions: false
     behavior:
-      effects:
-        - type: set_fields
-          target: self
-          fields:
-            is_current: true
-        - type: trigger
-          handler: meta.services.action_handlers.clear_other_current_versions
-
-  - id: compare
-    name: 版本对比
-    type: business
-    method: POST
-    path: /api/v1/versions/compare
-    description: 对比两个版本的差异
-
-# ────────────────────────────────────────────
-# 校验规则
-# ────────────────────────────────────────────
+      validation: true
+      binding_strength: strict
+    presentation:
+      result_type: dropdown
+      display_format: '{code} - {name}'
+      columns:
+      - field: code
+        label: 编码
+        width: 120
+      - field: name
+        label: 名称
+        width: 200
+- id: name
+  name: 版本名称
+  type: string
+  db_column: name
+  required: true
+  description: 版本名称，如 v1.0、2024-Q4
+  semantics:
+    meaning: 版本的显示名称和业务键（产品内唯一）
+    display_name: true
+    business_key: true
+    immutable: true
+    pattern: ^[A-Za-z0-9][A-Za-z0-9_.\-]*$
+    data_category: code
+    import_visible: true
+    export_visible: true
+    import_order: 20
+    examples:
+    - v1.0
+    - 2024-Q4
+    - R2024.1
+  ui:
+    visible: true
+    editable: true
+    widget: input
+    fieldGroup: 基本信息
+    fieldGroupPosition: 10
+    i18n_key: version.field.name
+- id: description
+  name: 版本描述
+  type: text
+  db_column: description
+  description: 版本描述
+  ui:
+    render_hints:
+      searchable: true
+  semantics:
+    meaning: 版本的详细描述
+    data_category: text
+    import_visible: true
+    export_visible: true
+    import_order: 30
+- id: is_current
+  name: 是否当前版本
+  type: boolean
+  db_column: is_current
+  default: false
+  description: 是否为当前活跃版本
+  enum_values:
+  - value: 1
+    label: 是
+    color: success
+  - value: 0
+    label: 否
+    color: info
+  ui:
+    widget: switch
+  semantics:
+    meaning: 标记是否为当前使用的版本
+    import_order: 80
+    analytics:
+      category: dimension
+      type: boolean
+      display_name: 是否当前版本
+- id: product_name
+  name: 产品
+  type: string
+  description: 所属产品名称
+  storage: virtual
+  ui:
+    visible: true
+    editable: false
+  semantics:
+    meaning: 关联产品的显示名称
+    redundancy:
+      type: virtual
+      source_field: product_id
+      derived_from: product.name
+      join_path:
+      - table: products
+        from: product_id
+        to: id
+        select: name
+    import_order: 95
+- id: child_count
+  name: 领域数量
+  type: integer
+  description: 版本下的领域数量
+  storage: virtual
+  computed: true
+  semantics:
+    meaning: 版本包含的领域数量
+    analytics:
+      category: measure
+      aggregation: sum
+      display_name: 领域总数
+    import_order: 95
+  computation:
+    type: count_children
+    child_object: domain
+  ui:
+    visible: true
+    editable: false
+relations:
+- id: version_to_product
+  name: 归属产品
+  type: parent_child
+  target: product
+  cardinality: N:1
+  description: 版本归属的产品线
+  semantics:
+    meaning: 版本与产品线的层级关系
+- id: version_to_domains
+  name: 包含领域
+  type: composition
+  target: domain
+  cardinality: 1:N
+  cascade_delete: false
+  ownership: false
+  on_delete: RESTRICT
+  on_delete_message: 版本包含 {count} 个领域, 请手动迁移或删除领域后重试
+  description: 一个版本包含多个领域 (version 删不级联删 domain)
+  semantics:
+    meaning: 版本与领域的层级关系, 但删除行为非级联 (阻止)
+actions:
+- id: version_create
+  name: 创建版本
+  type: crud
+  method: POST
+  path: /api/v1/versions
+  description: 创建新的版本
+- id: version_read
+  name: 查询版本
+  type: crud
+  method: GET
+  path: /api/v1/versions/{id}
+  description: 查询单个版本
+- id: version_update
+  name: 更新版本
+  type: crud
+  method: PUT
+  path: /api/v1/versions/{id}
+  description: 更新版本信息
+- id: version_delete
+  name: 删除版本
+  type: crud
+  method: DELETE
+  path: /api/v1/versions/{id}
+  description: 删除版本
+- id: version_list
+  name: 列表查询
+  type: crud
+  method: GET
+  path: /api/v1/versions
+  description: 查询版本列表
+- id: set_current
+  name: 设为当前版本
+  type: business
+  method: POST
+  path: /api/v1/versions/{id}/set-current
+  description: 将版本设为当前活跃版本
+  behavior:
+    effects:
+    - type: set_fields
+      target: self
+      fields:
+        is_current: true
+    - type: trigger
+      handler: meta.services.action_handlers.clear_other_current_versions
+- id: compare
+  name: 版本对比
+  type: business
+  method: POST
+  path: /api/v1/versions/compare
+  description: 对比两个版本的差异
 validations:
-  - id: name_required
-    name: 名称必填
-    type: field
-    rule: name is not None and name != ''
-    message: 版本名称不能为空
-    severity: error
-
-  - id: product_id_required
-    name: 产品ID必填
-    type: field
-    rule: product_id is not None
-    message: 产品ID不能为空
-    severity: error
-
-  - id: only_one_current_per_product
-    name: 每个产品只能有一个当前版本
-    type: business
-    rule: |
-      if is_current:
-          existing = data_source.query("SELECT id FROM versions WHERE product_id = ? AND is_current = 1 AND id != ?", product_id, id)
-          if existing:
-              return False
-      return True
-    message: 每个产品只能有一个当前版本，请先将其他版本设为非当前版本
-    severity: error
-
-# ────────────────────────────────────────────
-# 查询定义
-# ────────────────────────────────────────────
+- id: name_required
+  name: 名称必填
+  type: field
+  rule: name is not None and name != ''
+  message: 版本名称不能为空
+  severity: error
+- id: product_id_required
+  name: 产品ID必填
+  type: field
+  rule: product_id is not None
+  message: 产品ID不能为空
+  severity: error
+- id: only_one_current_per_product
+  name: 每个产品只能有一个当前版本
+  type: business
+  rule: "if is_current:\n    existing = data_source.query(\"SELECT id FROM versions\
+    \ WHERE product_id = ? AND is_current = 1 AND id != ?\", product_id, id)\n   \
+    \ if existing:\n        return False\nreturn True\n"
+  message: 每个产品只能有一个当前版本，请先将其他版本设为非当前版本
+  severity: error
 queries:
-  - id: list_by_product
-    name: 按产品查询版本
-    filters:
-      - field: product_id
-        operator: eq
-        param: product_id
-    sorts:
-      - field: created_at
-        direction: desc
-
-  - id: current_versions
-    name: 当前版本
-    filters:
-      - field: is_current
-        operator: eq
-        value: true
-
-# ────────────────────────────────────────────
-# 状态转换规则
-# 同产品仅能有一个当前版本
-#
-# 🆕 v2 (2026-06-05 Spec): action 声明增加 kind/audit 字段
-#   - kind: 'instance' (绑实例) | 'static' (不绑实例)
-#   - audit: true (默认自动记录) | false (opt-out)
-# ────────────────────────────────────────────
+- id: list_by_product
+  name: 按产品查询版本
+  filters:
+  - field: product_id
+    operator: eq
+    param: product_id
+  sorts:
+  - field: created_at
+    direction: desc
+- id: current_versions
+  name: 当前版本
+  filters:
+  - field: is_current
+    operator: eq
+    value: true
 rules:
-  - id: set_current_version
-    name: 设为当前版本
-    kind: instance        # 🆕 v2: 此 action 绑定到具体 version 实例
-    audit: true           # 🆕 v2: 自动写 audit_log（默认 true）
-    type: state_transition
-    state_field: is_current
-    from_states: [false]
-    to_state: true
-    triggers: [before_update]
-    handler: clear_other_current_versions   # 🆕 v2: 显式指定 handler
-    ui_hints:
-      label: 设为当前
-      icon: check_circle
-      highlight: true
-      confirm_message: "确定要设为当前版本吗？同产品的其他版本将自动取消当前标记。"
-
-  - id: unset_current_version
-    name: 取消当前版本
-    type: state_transition
-    state_field: is_current
-    from_states: [true]
-    to_state: false
-    triggers: [before_update]
-    ui_hints:
-      label: 取消当前
-      icon: close
-
-  # [V1.1.2 2026-06-11] 删 publish_version state_transition
-  # 原 state_field: visibility (version 自己的可见性)
-  # 现在 visibility 在 product 级别, 发布动作需要改到 product 上做
-  # V2 任务: 在 product 级别加 publish_product state_transition
-  # ID 保留 'publish_version' 以便迁移检查
+- id: set_current_version
+  name: 设为当前版本
+  kind: instance
+  audit: true
+  type: state_transition
+  state_field: is_current
+  from_states:
+  - false
+  to_state: true
+  triggers:
+  - before_update
+  handler: clear_other_current_versions
+  ui_hints:
+    label: 设为当前
+    icon: check_circle
+    highlight: true
+    confirm_message: 确定要设为当前版本吗？同产品的其他版本将自动取消当前标记。
+- id: unset_current_version
+  name: 取消当前版本
+  type: state_transition
+  state_field: is_current
+  from_states:
+  - true
+  to_state: false
+  triggers:
+  - before_update
+  ui_hints:
+    label: 取消当前
+    icon: close
+ui_badge:
+  is_current:
+    color_map:
+      1: info
+audit_levels:
+- name: create
+  level: INFO
+  category: operation
+- name: update
+  level: INFO
+  category: operation
+- name: delete
+  level: WARN
+  category: destructive
+routes:
+  detail: /detail/version/version-detail
+  list: /version-management
+list:
+  pagination:
+    default_page_size: 20
+    page_size_options:
+    - 10
+    - 20
+    - 50
+    - 100
+nested:
+  enabled: true
+  parent: product
+  children: []
+persistence:
+  strategy: audit_log
+  survive_reload: true
