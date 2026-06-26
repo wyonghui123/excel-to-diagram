@@ -91,7 +91,11 @@ class OwnerChainInterceptor(Interceptor):
 
     def before_action(self, context: 'ActionContext') -> None:
         # [V1.1.8] 从 context 取 user_id (而不是 g.current_user)
+        # [FIX BUG-V010 2026-06-26] ActionContext 没有 user_id 属性, fallback 到 user_info
         user_id = getattr(context, 'user_id', None)
+        if not user_id:
+            user_info = getattr(context, 'user_info', None) or {}
+            user_id = user_info.get('user_id') or user_info.get('id')
         if not user_id:
             return  # 未登录, 留给后续拦截器处理
 
@@ -121,11 +125,21 @@ class OwnerChainInterceptor(Interceptor):
                 continue  # record 不存在, 留给后续拦截器
 
             # 检查 owner
-            check = self._check_owner_chain(context, object_type, record, user_id)
+            check = self._check_owner_chain(context, object_type, record, user_id, user_info)
+            # [DEBUG BUG-V010 2026-06-26] 输出 owner chain 检查详情
+            logger.warning(f'[BUG-V010 DEBUG] object={object_type} target_id={target_id} user_id={user_id} check={check}')
             if check['matched']:
-                # 把 owner_chain_match 标记放到 context 上 (后续拦截器共享)
-                context._owner_chain_match = True
-                context._owner_chain_root = check.get('chain_root')
+                # [FIX BUG-V010 2026-06-26] ActionContext 是 @dataclass, 动态属性丢失
+                # 之前直接 setattr 不可靠, 改用 extra dict (ActionContext 已定义 extra 字段)
+                context.extra['_owner_chain_match'] = True
+                context.extra['_owner_chain_root'] = check.get('chain_root')
+                # 保留 setattr 作为 fallback (部分环境可能有效)
+                try:
+                    context._owner_chain_match = True
+                    context._owner_chain_root = check.get('chain_root')
+                except Exception:
+                    pass
+                logger.warning(f'[BUG-V010 DEBUG] set extra._owner_chain_match=True, extra={context.extra}')
                 logger.debug(
                     f'OwnerChainInterceptor: {object_type}({target_id}) owner matched, '
                     f'user={user_id} chain_root={check.get("chain_root")}'
@@ -189,7 +203,8 @@ class OwnerChainInterceptor(Interceptor):
     # ========================================================================
     def _check_owner_chain(
         self, context: 'ActionContext', object_type: str,
-        record: Dict[str, Any], user_id: int
+        record: Dict[str, Any], user_id: Optional[int],
+        user_info: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """检查 record 是否属于 user (含沿 chain 向上)
 
@@ -220,15 +235,32 @@ class OwnerChainInterceptor(Interceptor):
             }
 
         # 路径 3: fallback to created_by
+        # [FIX 2026-06-24] created_by 是字符串 (用户名), 不能与 user_id (整数) 直接比较
+        #   之前 `if created_by == user_id` 永远 False, fallback 机制从未生效
+        #   修复: 与 username 比较 (g.current_user.username)
         created_by = record.get('created_by')
-        if created_by == user_id:
-            return {
-                'matched': True,
-                'chain_root': {
-                    'object_type': object_type, 'id': record.get('id'),
-                    'created_by': user_id, 'fallback': 'created_by',
-                },
-            }
+        if created_by:
+            username = (user_info or {}).get('username') if user_info else None
+            if username and created_by == username:
+                return {
+                    'matched': True,
+                    'chain_root': {
+                        'object_type': object_type, 'id': record.get('id'),
+                        'created_by': created_by, 'fallback': 'created_by',
+                    },
+                }
+            # 兼容: 如果 created_by 是整数 (老数据), 也允许与 user_id 比较
+            try:
+                if int(created_by) == user_id:
+                    return {
+                        'matched': True,
+                        'chain_root': {
+                            'object_type': object_type, 'id': record.get('id'),
+                            'created_by': user_id, 'fallback': 'created_by',
+                        },
+                    }
+            except (TypeError, ValueError):
+                pass
 
         return {
             'matched': False,

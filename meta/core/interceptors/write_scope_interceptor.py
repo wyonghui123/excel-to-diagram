@@ -438,7 +438,11 @@ class WriteScopeInterceptor(Interceptor):
         #   注: 如果 owner 命中, PermissionInterceptor 放行后写权限拦截器仍会执行,
         #       但 dim scope + visibility 检查不会拒绝 owner 的写入 (因为 dim scope
         #       检查的是 "非 owner 用户的范围控制", owner 的检查已在上游完成)
-        owner_match = bool(getattr(context, '_owner_chain_match', False))
+        # [FIX BUG-V010 2026-06-26] context 是 @dataclass, 优先读 extra dict (setattr 不可靠)
+        owner_match = (
+            bool(context.extra.get('_owner_chain_match', False))
+            or bool(getattr(context, '_owner_chain_match', False))
+        )
         if owner_match:
             # owner 命中, 写权限拦截器放行 (不需再 dim scope + visibility)
             logger.debug(
@@ -759,6 +763,68 @@ class WriteScopeInterceptor(Interceptor):
         perm_check_type = perm_object_type or object_type
         # [V2.1 2026-06-22] target_perm: 'service_module:update' 等
         target_perm = f'{perm_check_type}:{target_perm_suffix}'
+
+        # [FIX v2.1.12 2026-06-24] annotation update/delete 也走 parent cascade
+        # 之前: 只有 annotation create (create_parent 路径) 才走 _check_dim_scope_for_annotation_create
+        #   走 cascade 检查 parent.dim_scope
+        # 现在: annotation update/delete (primary 路径) 之前走普通 _check_dim_scope,
+        #   但 annotation 本身没有 version_id/domain_id 等字段, 永远 fail
+        # 修复: 检测到 annotation + update/delete 时, 提前递归检查 parent.dim_scope
+        # 复用 _check_ancestor_dim_scope 的 annotation 分支 (line 1097+)
+        if object_type == 'annotation' and target_perm_suffix in ('update', 'delete') and not is_create:
+            # [FIX v2.1.13 2026-06-24] cascade 场景跳过 annotation perm check
+            # 原因: V2.1.12 修复要求 role 有 annotation:update perm 才能 cascade,
+            #   但通常 role 配的是 parent 类型 perm (e.g. service_module:update),
+            #   没配 annotation:update, 导致 cascade 永远 fail.
+            # 修复: cascade 场景下, perm check 改为检查 parent 类型的 perm (parent_type:update)
+            #   而非 annotation:update. 因为 cascade 已经走 parent dim_scope 路径,
+            #   parent 类型 perm 校验是隐含的 (parent 已通过其他路径校验).
+            logger.info(f"[WriteScope ANNOTATION] _check_dim_scope cascade-to-parent for {target_perm}")
+            try:
+                from meta.services.dimension_scope_engine import DimensionScopeEngine
+                engine = DimensionScopeEngine(context.data_source)
+            except Exception as e:
+                logger.warning(f"[WriteScope ANNOTATION] engine init failed: {type(e).__name__}: {e}", exc_info=True)
+                return {'matched': False, 'roles_checked': []}
+            roles_checked = []
+            for role_id in role_ids:
+                try:
+                    # [V2.1.13] cascade perm check 用 parent 类型 perm
+                    # 从 annotation.record.target_type 获取 parent 类型
+                    if _WRITE_SCOPE_V2_1_PERM_CHECK:
+                        parent_type = record.get('target_type')
+                        if not parent_type:
+                            params_target_type = context.params.get('target_type') if hasattr(context, 'params') else None
+                            if isinstance(params_target_type, str) and ' - ' in params_target_type:
+                                params_target_type = params_target_type.split(' - ')[0].strip()
+                            parent_type = params_target_type or parent_type
+                        parent_perm = f'{parent_type}:{target_perm_suffix}' if parent_type else target_perm
+                        role_perm_codes = self._get_role_perm_codes(context, role_id)
+                        if not self._role_has_perm(role_id, parent_perm, role_perm_codes):
+                            roles_checked.append({
+                                'role_id': role_id, 'cond': None,
+                                'skipped': 'missing_parent_perm', 'perm_required': parent_perm,
+                            })
+                            continue
+
+                    expanded = engine.expand_dimension_values(role_id)
+                    parent_match = self._check_ancestor_dim_scope(
+                        context, object_type, record, expanded
+                    )
+                    entry = {
+                        'role_id': role_id, 'cond': None,
+                        'direct_dim': False, 'parent_match': parent_match,
+                        'cascade': 'annotation-to-parent',
+                    }
+                    if _WRITE_SCOPE_V2_1_PERM_CHECK:
+                        entry['perm_check'] = 'passed_via_parent'
+                    roles_checked.append(entry)
+                    if parent_match:
+                        return {'matched': True, 'roles_checked': roles_checked}
+                except Exception as e:
+                    logger.debug(f'annotation cascade check failed for role {role_id}: {e}')
+                    continue
+            return {'matched': False, 'roles_checked': roles_checked}
 
         roles_checked = []
         try:

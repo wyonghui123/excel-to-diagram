@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 Action 执行器 - 基于元模型定义执行 CRUD 操作
 
@@ -899,6 +899,7 @@ class ActionExecutor:
     # 此方法在 _do_create/_do_update/_do_delete 入口显式调用 WriteScopeInterceptor,
     # 复用 BOFramework 路径已有的 5 步校验 (admin/owner/dim_scope/visibility/fk_scope)。
     _write_scope_interceptor = None  # 类级单例, 避免每次 new
+    _owner_chain_interceptor = None  # [FIX BUG-V010 2026-06-26] 类级单例, 同 ctx 跑 owner chain
 
     def _check_write_scope(self, meta_object: MetaObject, action: str,
                            params: Dict[str, Any]) -> Optional[ActionResult]:
@@ -947,15 +948,21 @@ class ActionExecutor:
 
         # 构造 ActionContext 并调用 WriteScopeInterceptor.before_action
         # [FIX v1.2.20 2026-06-20] lazy import 拦截器符号, 避免循环导入
+        # [FIX BUG-V010 2026-06-26] 同步跑 OwnerChainInterceptor, 让 ctx 有 _owner_chain_match
         try:
             from meta.core.interceptors.write_scope_interceptor import (
                 WriteScopeInterceptor as _WSI,
                 WriteScopeDenied as _WSD,
                 ScopeViolationError as _SVE,
             )
+            from meta.core.interceptors.owner_chain_interceptor import (
+                OwnerChainInterceptor as _OCI,
+            )
 
             if ActionExecutor._write_scope_interceptor is None:
                 ActionExecutor._write_scope_interceptor = _WSI()
+            if ActionExecutor._owner_chain_interceptor is None:
+                ActionExecutor._owner_chain_interceptor = _OCI()
 
             # [FIX v1.2.20 2026-06-20] 把完整 user_info 传入 context
             # WriteScopeInterceptor 会在 flask.g 不可用 (worker thread) 时 fallback 读此字段
@@ -969,6 +976,9 @@ class ActionExecutor:
                 ip_address=user_info.get('ip_address'),
                 user_info=user_info,
             )
+            # [FIX BUG-V010 2026-06-26] 先跑 OwnerChainInterceptor 设置 _owner_chain_match
+            # 这样 WriteScopeInterceptor 的 owner_match check 才会命中
+            ActionExecutor._owner_chain_interceptor.before_action(ctx)
             ActionExecutor._write_scope_interceptor.before_action(ctx)
         except _WSD as e:
             logger.warning(
