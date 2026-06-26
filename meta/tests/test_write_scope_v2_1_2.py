@@ -372,3 +372,262 @@ class TestV2_1_2TEST333WScenario:
                             passed = [r for r in result['roles_checked']
                                       if r.get('perm_check') == 'passed']
                             assert len(passed) == 1  # role 5970 通过 perm 检查
+
+
+# ============================================================================
+# Post-V2.1 扩展 (Agent B): V2.1.2 role-specific perm 边界 + 优先级
+# ============================================================================
+
+class TestV2_1_2_RoleSpecificPerm:
+    """[V2.1.2] role-specific perm 边界 + 优先级测试 (Agent B)"""
+
+    def setup_method(self):
+        self.interceptor = WriteScopeInterceptor()
+
+    def test_role_specific_perm_check(self, app_ctx, set_current_user):
+        """角色级 perm vs 用户级 perm 区分"""
+        # 用户有 service_module:update (来自 role B), 但 role A 没有
+        set_current_user({
+            'permissions': ['service_module:update'],
+            '_role_ids_cache': [100, 200],
+        })
+        role_perm_codes_map = {
+            100: set(),  # role A 无任何 perm
+            200: {'service_module:update'},  # role B 有
+        }
+
+        def mock_get_role_perms(ctx, role_id):
+            return role_perm_codes_map.get(role_id, set())
+
+        with patch.object(
+            self.interceptor, '_get_user_role_ids', return_value=[100, 200]
+        ):
+            with patch.object(
+                self.interceptor, '_get_role_perm_codes',
+                side_effect=mock_get_role_perms
+            ):
+                with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
+                    mock_engine = mock_engine_cls.return_value
+                    mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                    mock_engine.derive_data_conditions.return_value = {
+                        'service_module': 'service_module.id IN (1)'
+                    }
+                    with patch.object(
+                        self.interceptor, '_record_matches_cond', return_value=True
+                    ):
+                        with patch(
+                            'meta.core.interceptors.write_scope_interceptor._WRITE_SCOPE_V2_1_PERM_CHECK',
+                            True,
+                        ):
+                            ctx = MockActionContext(object_type='service_module', action='crud_update')
+                            record = {'id': 1}
+                            result = self.interceptor._check_dim_scope(
+                                ctx, 'service_module', record, user_id=333
+                            )
+                            # role 100 无 perm → skipped
+                            # role 200 有 perm + dim → matched
+                            assert result['matched'] is True
+                            skipped = [r for r in result['roles_checked']
+                                       if r.get('skipped') == 'missing_functional_perm']
+                            assert any(r['role_id'] == 100 for r in skipped)
+
+    def test_role_perm_higher_priority(self, app_ctx, set_current_user):
+        """角色 perm 优先于默认 perm
+
+        即使用户整体有 perm (来自默认), role 自身 perm 才是 V2.1.2 的判定依据
+        """
+        set_current_user({
+            'permissions': ['service_module:update'],
+            '_role_ids_cache': [100],
+        })
+        # role 自身无 service_module:update
+        with patch.object(
+            self.interceptor, '_get_user_role_ids', return_value=[100]
+        ):
+            with patch.object(
+                self.interceptor, '_get_role_perm_codes',
+                return_value={'service_module:read'}  # role 只有 read, 没有 update
+            ):
+                with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
+                    mock_engine = mock_engine_cls.return_value
+                    mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                    with patch(
+                        'meta.core.interceptors.write_scope_interceptor._WRITE_SCOPE_V2_1_PERM_CHECK',
+                        True,
+                    ):
+                        ctx = MockActionContext(object_type='service_module', action='crud_update')
+                        record = {'id': 1}
+                        result = self.interceptor._check_dim_scope(
+                            ctx, 'service_module', record, user_id=333
+                        )
+                        # role 缺 service_module:update → skipped
+                        assert result['matched'] is False
+                        skipped = [r for r in result['roles_checked']
+                                   if r.get('skipped') == 'missing_functional_perm']
+                        assert len(skipped) == 1
+
+    def test_role_specific_perm_no_user_wide_fallback(self, app_ctx, set_current_user):
+        """V2.1.2 不应回退到 user 全量 perm 检查
+
+        即使用户级 perm 含 service_module:update,
+        但 role 自身不含时, V2.1.2 应拒绝
+        """
+        set_current_user({
+            'permissions': ['service_module:update'],  # user 级有
+            '_role_ids_cache': [100],
+        })
+        # role 自身没有
+        with patch.object(
+            self.interceptor, '_get_user_role_ids', return_value=[100]
+        ):
+            with patch.object(
+                self.interceptor, '_get_role_perm_codes',
+                return_value=set()  # role 没有任何 perm
+            ):
+                with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
+                    mock_engine = mock_engine_cls.return_value
+                    mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                    with patch(
+                        'meta.core.interceptors.write_scope_interceptor._WRITE_SCOPE_V2_1_PERM_CHECK',
+                        True,
+                    ):
+                        ctx = MockActionContext(object_type='service_module', action='crud_update')
+                        record = {'id': 1}
+                        result = self.interceptor._check_dim_scope(
+                            ctx, 'service_module', record, user_id=333
+                        )
+                        # role 无 perm → skip → matched=False
+                        assert result['matched'] is False
+
+    def test_role_wildcard_short_circuit(self, app_ctx, set_current_user):
+        """role 含 '*' 通配 → 跳过 perm 检查"""
+        set_current_user({
+            'permissions': ['*'],
+            '_role_ids_cache': [1],
+        })
+        with patch.object(
+            self.interceptor, '_get_user_role_ids', return_value=[1]
+        ):
+            with patch.object(
+                self.interceptor, '_get_role_perm_codes',
+                return_value={'*'}
+            ):
+                with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
+                    mock_engine = mock_engine_cls.return_value
+                    mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                    mock_engine.derive_data_conditions.return_value = {
+                        'service_module': 'service_module.id IN (1)'
+                    }
+                    with patch.object(
+                        self.interceptor, '_record_matches_cond', return_value=True
+                    ):
+                        with patch(
+                            'meta.core.interceptors.write_scope_interceptor._WRITE_SCOPE_V2_1_PERM_CHECK',
+                            True,
+                        ):
+                            ctx = MockActionContext(object_type='service_module', action='crud_update')
+                            record = {'id': 1}
+                            result = self.interceptor._check_dim_scope(
+                                ctx, 'service_module', record, user_id=1
+                            )
+                            # '*' 通配 → perm check 通过
+                            assert result['matched'] is True
+                            passed = [r for r in result['roles_checked']
+                                      if r.get('perm_check') == 'passed']
+                            assert len(passed) >= 1
+
+    def test_role_specific_perm_with_create_suffix(self, app_ctx, set_current_user):
+        """V2.1.2 create 操作时检查 :create perm"""
+        set_current_user({
+            'permissions': ['service_module:create'],  # 有 create
+            '_role_ids_cache': [100],
+        })
+        with patch.object(
+            self.interceptor, '_get_user_role_ids', return_value=[100]
+        ):
+            with patch.object(
+                self.interceptor, '_get_role_perm_codes',
+                return_value={'service_module:create'}
+            ):
+                with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
+                    mock_engine = mock_engine_cls.return_value
+                    mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                    mock_engine.derive_data_conditions.return_value = {
+                        'service_module': 'service_module.id IN (1)'
+                    }
+                    with patch.object(
+                        self.interceptor, '_record_matches_cond', return_value=True
+                    ):
+                        with patch(
+                            'meta.core.interceptors.write_scope_interceptor._WRITE_SCOPE_V2_1_PERM_CHECK',
+                            True,
+                        ):
+                            ctx = MockActionContext(object_type='service_module', action='crud_create')
+                            record = {'id': 1}
+                            result = self.interceptor._check_dim_scope(
+                                ctx, 'service_module', record,
+                                user_id=333, is_create=True, target_perm_suffix='create'
+                            )
+                            assert result['matched'] is True
+                            passed = [r for r in result['roles_checked']
+                                      if r.get('perm_check') == 'passed']
+                            assert len(passed) >= 1
+
+    def test_role_specific_perm_no_short_circuit_to_user_wide(self, app_ctx, set_current_user):
+        """[关键修复] V2.1.2 不应被 user 全量 perm 短路
+
+        之前 V2.1 bug: 用 user 全量 perm, 导致 read-only role 的 dim scope 命中也放行
+        V2.1.2 修复: 必须用 role-specific perm
+        """
+        # 用户全量有 service_module:update (来自 role B)
+        set_current_user({
+            'permissions': ['service_module:update', 'service_module:read'],
+            '_role_ids_cache': [5433, 5970],  # role A (read) + role B (write)
+        })
+        # role A 自己只有 read, 没有 update
+        role_perm_codes_map = {
+            5433: {'service_module:read'},
+            5970: {'service_module:update', 'service_module:read'},
+        }
+
+        def mock_get_role_perms(ctx, role_id):
+            return role_perm_codes_map.get(role_id, set())
+
+        with patch.object(
+            self.interceptor, '_get_user_role_ids', return_value=[5433, 5970]
+        ):
+            with patch.object(
+                self.interceptor, '_get_role_perm_codes',
+                side_effect=mock_get_role_perms
+            ):
+                with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
+                    mock_engine = mock_engine_cls.return_value
+                    # role A dim scope 假设覆盖了 1 (从某个继承)
+                    dim_scope_map = {
+                        5433: {'service_module': {1}},  # role A 也覆盖了 1
+                        5970: {'service_module': {1}},  # role B 也覆盖了 1
+                    }
+                    def expand_side_effect(role_id):
+                        return dim_scope_map.get(role_id, {})
+                    mock_engine.expand_dimension_values.side_effect = expand_side_effect
+                    mock_engine.derive_data_conditions.return_value = {
+                        'service_module': 'service_module.id IN (1)'
+                    }
+                    with patch.object(
+                        self.interceptor, '_record_matches_cond', return_value=True
+                    ):
+                        with patch(
+                            'meta.core.interceptors.write_scope_interceptor._WRITE_SCOPE_V2_1_PERM_CHECK',
+                            True,
+                        ):
+                            ctx = MockActionContext(object_type='service_module', action='crud_update')
+                            record = {'id': 1}
+                            result = self.interceptor._check_dim_scope(
+                                ctx, 'service_module', record, user_id=333
+                            )
+                            # role A 因缺 service_module:update 被 skip
+                            # role B 通过 → matched=True
+                            assert result['matched'] is True
+                            skipped = [r for r in result['roles_checked']
+                                       if r.get('skipped') == 'missing_functional_perm']
+                            assert any(r['role_id'] == 5433 for r in skipped)
