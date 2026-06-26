@@ -97,7 +97,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, provide, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, provide, inject, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useTabStore } from '@/stores/tabStore'
 import DetailPage from '@/components/common/DetailPage/DetailPage.vue'
@@ -117,6 +117,11 @@ const route = useRoute()
 const tabStore = useTabStore()
 const pageRef = ref(null)
 const detailPageRef = ref(null)
+
+// [FIX BUG-V015b 2026-06-26] 注入 refreshCoordinator 用于保存后通知 list 刷新
+// 原 BUG: GenericObjectList 没 provide, 所以这里 inject 是 null,
+//        需要靠 window 事件总线兜底 (MetaListPage 监听 CustomEvent).
+const coordinator = inject('refreshCoordinator', null)
 
 // [FIX 2026-06-18] 关键修复：objectType/id 缓存上次的有效值
 //   原因：app 顶部 tab 切走时，route.params.objectType/id 变 undefined，
@@ -256,6 +261,43 @@ function handleSaved(savedData) {
     const newPath = `${basePath}/${savedData.id}`
     const oldTabId = route.path
     tabStore.replaceTabId(oldTabId, newPath, newPath)
+
+    // [FIX BUG-V015a 2026-06-26] 保存后从 add 模式切到 view 模式
+    // 原 BUG:
+    //   lastValidMode 缓存 'add' 模式,URL 从 /detail/product?mode=add 变 /detail/product/520 后,
+    //   `route.query.mode` 不再有 'add',但 lastValidMode 仍是 'add' → mode 计算属性继续返回 'add'
+    //   → DetailPage 仍然处于 internalEditing=true (表单态), 不重新 fetchData,
+    //   "基本信息"区域显示空白空表单.
+    // 修复:
+    //   1) 重置 lastValidMode 为 'view', 让 mode 立刻退到 view 模式
+    //   2) DetailPage 的 watch 会看到 mode 从 'add' 变 'view', 但 id 从 undefined 变 '520'
+    //      → 进入 "newObject !== oldObject" 分支, 重新 fetchData 加载详情数据
+    //   3) 详情页从"新建空表单"无缝切到"520 的浏览态"
+    lastValidMode.value = 'view'
+    lastValidId.value = savedData.id
+    detailPageMountKey.value++  // 强制 remount DetailPage, 避免残留 add 模式的 form data
+
+    // [FIX BUG-V015b 2026-06-26] 同步通知 list 刷新
+    // 原 BUG:
+    //   ObjectDetailPage 是独立全屏页面, 不在 MetaListPage 的 drawer 里.
+    //   MetaListPage 缓存 + keep-alive, onActivated 不自动刷新 (SAP Fiori 风格).
+    //   GenericObjectList 没 provide refreshCoordinator, 所以即使 boService.create
+    //   调用 _coordinator?.refreshAll() 也是空操作.
+    //   结果: 保存成功回到 list 后, 列表里看不到新增的数据 (需手动刷新整个浏览器).
+    // 修复: 直接从 coordinator 列表里 trigger, 包含 GenericObjectList 的 MetaListPage.
+    if (coordinator && typeof coordinator.refreshAll === 'function') {
+      coordinator.refreshAll().catch(err => console.warn('[BUG-V015b] refreshAll failed:', err))
+    } else {
+      // 兼容路径: 从顶层 store / 全局事件总线触发
+      try {
+        window.dispatchEvent(new CustomEvent('excel-diagram:list-refresh', {
+          detail: { objectType: objectType.value, action: 'create', id: savedData.id }
+        }))
+      } catch (e) {
+        console.warn('[BUG-V015b] window event dispatch failed:', e)
+      }
+    }
+
     router.replace({ path: newPath }).catch(() => {})
   }
 }

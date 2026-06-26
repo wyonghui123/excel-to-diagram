@@ -1753,6 +1753,25 @@ watch(() => props.objectType, (newType, oldType) => {
   loadPermissions()
 })
 
+// [FIX BUG-V015b 2026-06-26] 兜底：监听 window 事件总线
+// 原 BUG: GenericObjectList 没 provide refreshCoordinator,
+//        ObjectDetailPage.handleSaved 拿不到 coordinator → 无法通知 list 刷新.
+// 修复: 即便没 coordinator, 也监听 'excel-diagram:list-refresh' 事件,
+//       收到事件后 forceRefresh. 这是 GenericObjectList 路径的唯一可用机制.
+const _windowEventHandler = (evt) => {
+  const targetType = evt.detail?.objectType
+  if (!targetType || targetType === props.objectType) {
+    console.debug('[MetaListPage] excel-diagram:list-refresh → forceRefresh', evt.detail)
+    forceRefresh()
+  }
+}
+onMounted(() => {
+  window.addEventListener('excel-diagram:list-refresh', _windowEventHandler)
+})
+onUnmounted(() => {
+  window.removeEventListener('excel-diagram:list-refresh', _windowEventHandler)
+})
+
 watch(() => props.columnsOverride, (newVal, oldVal) => {
   if (newVal && Array.isArray(newVal) && newVal.length > 0 && !oldVal) {
     init(newVal)
