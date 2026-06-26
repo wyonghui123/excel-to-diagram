@@ -2035,6 +2035,39 @@ class ActionExecutor:
 
         try:
             self._cleanup_m2m_tables(meta_object, id_value)
+            # [FIX BUG-V014 2026-06-26] 同步调用 CascadeInterceptor.before_action
+            # 旧问题: manage_service.batch_delete → executor.execute(meta_obj, "crud_delete")
+            #         走 _do_delete 路径, 绕过了 BOFramework 拦截器链.
+            #         当 product.yaml associations[].cascade_delete=true 时,
+            #         _do_delete 直接 SQL DELETE → FK constraint failed
+            #         (实际需要先 DELETE versions WHERE product_id=?)
+            # 修复: 直接构造 ActionContext 同步跑 CascadeInterceptor, 让 batch_delete 也能级联.
+            # 与 BOFramework 路径行为一致 (CascadeInterceptor.priority=48).
+            try:
+                from meta.core.action_context import ActionContext
+                from meta.core.interceptors.cascade_interceptor import CascadeInterceptor
+                from meta.core.interceptors.audit_interceptor import AuditInterceptor
+
+                # 构造 CascadeInterceptor 需要的最小 ctx
+                cascade_ctx = ActionContext(
+                    meta_object=meta_object,
+                    action='crud_delete',
+                    params={'id': id_value},
+                    data_source=self.ds,
+                    old_data=original_data,
+                )
+                # [BUG-V014] 同步运行 before_action:
+                # 1. 清理 annotations (target_type/object_id)
+                # 2. 清理 association 关联表
+                # 3. 递归级联删除 composition children
+                CascadeInterceptor().before_action(cascade_ctx)
+                logger.info(
+                    f'[BUG-V014] CascadeInterceptor.before_action executed for '
+                    f'{meta_object.id}({id_value})'
+                )
+            except Exception as cascade_err:
+                logger.warning(f'[BUG-V014] CascadeInterceptor failed (continue): {cascade_err}')
+
             with self.ds.transaction():
                 if meta_object.soft_delete:
                     delete_field = meta_object.soft_delete_field
