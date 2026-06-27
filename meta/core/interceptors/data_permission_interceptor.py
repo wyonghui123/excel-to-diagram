@@ -895,7 +895,7 @@ class DataPermissionInterceptor(Interceptor):
         # - product: 直接用 owner_id (DB 列存在)
         # - 子对象 (version/domain/...): 用 chain_owner_resolver 走 product 链追溯
         from meta.core.models import registry
-        from meta.services.chain_owner_resolver import is_in_chain
+        from meta.services.chain_owner_resolver import is_in_chain, build_owner_exception_subquery
         meta = registry.get(context.object_type)
         if not meta:
             return
@@ -914,14 +914,19 @@ class DataPermissionInterceptor(Interceptor):
             })
         elif is_in_chain(object_type):
             # 子对象 (version/domain/...) 用 chain_owner_resolver 走 product 链
-            # SQL: product_id IN (SELECT id FROM products WHERE owner_id = ?)
-            owner_conds.append({
-                'field': 'product_id',
-                'operator': 'in_subquery',
-                'subquery': 'SELECT id FROM products WHERE owner_id = ?',
-                'value': user_id,
-                'source': 'owner_exception_chain',
-            })
+            # [FIX v1.2.35 BUG-V026 2026-06-27] 之前错误地用 product_id 直查,
+            # 但 domain/sub_domain 等子表本身没有 product_id 列 (走 version_id -> versions.product_id 链)
+            # 导致 owner exception 触发时 SQL "no such column: product_id" 400 错误
+            chain_subquery = build_owner_exception_subquery(
+                context.data_source, object_type, user_id
+            )
+            if chain_subquery:
+                owner_conds.append({
+                    'field': 'id',
+                    'operator': 'in_subquery',
+                    'value': chain_subquery,
+                    'source': 'owner_exception_chain',
+                })
         else:
             # 其他 (无 owner 关系) 跳过
             return
