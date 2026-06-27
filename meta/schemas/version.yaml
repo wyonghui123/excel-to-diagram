@@ -414,19 +414,6 @@ fields:
     semantics:
       export_visible: false
       import_visible: false
-  # [BUG-V023 2026-06-27] 覆盖 owner_aspect 继承的 visibility 字段
-  # 原因: visibility 已在 V1.1.2 上移到 product 层管理, version 不应单独展示
-  # 行为: version sheet 中不展示"可见性"列; product sheet 中保留 (由 product.yaml 定义)
-  - id: visibility
-    name: 可见性
-    type: string
-    default: draft
-    description: 可见性 (覆盖 owner_aspect 继承, 不导出 - 由 product 层管理)
-    ui:
-      visible: false
-    semantics:
-      export_visible: false
-      import_visible: false
   - id: child_count
     name: 领域数量
     type: integer

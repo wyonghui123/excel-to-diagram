@@ -943,7 +943,7 @@ class ImportExportService:
             
             # [NEW v1.2.3 2026-06-17] 选中对象导出按 'create' 模式处理 (模板可填父对象)
             headers, editable_columns, readonly_columns, parent_key_columns, create_required_columns, header_comments, header_to_field, enum_value_maps, bo_display_fields, fk_display_code_columns = self._get_export_headers_with_editable(obj, options, mode='create')
-            
+
             bo_display_maps = self._build_bo_display_maps(sheet_data, bo_display_fields)
 
             # 根据 include_operation_mode 选项决定是否包含操作模式列
