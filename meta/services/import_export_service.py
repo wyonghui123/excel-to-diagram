@@ -1158,7 +1158,7 @@ class ImportExportService:
         
         if include_annotations:
             child_parent_map = self._collect_child_object_types(ordered_types)
-            if child_parent_map:
+        if child_parent_map:
                 # [H15.2 SAP风格] 过滤child_object_types，应用RBAC
                 # 优先用 thread-local user (兼容线程池/无Flask上下文场景)
                 from meta.services.query_service import _get_thread_user
@@ -2768,11 +2768,17 @@ class ImportExportService:
         扫描每个选中类型的 ui_view_config.child_sections 配置，
         收集所有 child_object 类型并记录父对象映射。
 
+        [FIX v1.2.36 BUG-V027 2026-06-27] 自动包含 polymorphic children:
+          - annotation (target_type/target_id) 自动跟随所有 parent 类型
+          - 之前必须每个 yaml 的 child_sections 显式声明 child_object: annotation,
+            但 yaml 历史从未声明, 导致导出丢失"备注信息" sheet
+          - 现在扫描所有 selected_types 时, 自动追加 annotation 作为 child
+
         Returns:
             Dict[str, List[str]]: {child_object_type: [parent_type_1, parent_type_2, ...]}
         """
         from meta.core.models import registry
-        
+
         child_parent_map = {}
         for obj_type in selected_types:
             meta_obj = registry.get(obj_type)
@@ -2786,6 +2792,16 @@ class ImportExportService:
                         child_parent_map[child_type] = []
                     if obj_type not in child_parent_map[child_type]:
                         child_parent_map[child_type].append(obj_type)
+
+            # [FIX v1.2.36 BUG-V027] 自动追加 polymorphic child: annotation
+            # annotation 通过 target_type+target_id 多态关联到所有 parent 对象
+            # yaml 显式配置不是必需的 (避免每个 yaml 都加同样的 child_sections)
+            annotation_meta = registry.get('annotation')
+            if annotation_meta and 'annotation' not in child_parent_map:
+                child_parent_map['annotation'] = []
+            if annotation_meta and obj_type not in child_parent_map.get('annotation', []):
+                child_parent_map.setdefault('annotation', []).append(obj_type)
+
         return child_parent_map
 
     def _query_child_object(self, child_type: str, parent_types: List[str],
