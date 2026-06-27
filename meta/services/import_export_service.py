@@ -2903,16 +2903,24 @@ class ImportExportService:
 
         default_exclude_fields = self._build_default_exclude_fields(child_meta)
 
-        cud_required_fields = {'id'} if has_cud else set()
+        # [FIX BUG-V024 2026-06-27] id 不进 candidates (但保留 cud 能力)
+        # 原代码 cud_required_fields = {'id'} 让 id 在 export 中显示 (因为 is_export = is_cud_required)
+        # 但用户要求 "没有 ID 列" - id 是系统内部字段, 不应该出现在面向用户的导出 sheet
+        # cud 操作通过 行级 value 而非列 id 完成 (round-trip 通过业务键 product_code/name)
+        # id 列仅在 import 时临时使用, 内部完成匹配后隐藏
+        cud_required_fields = set() if has_cud else set()
 
         candidates = []
         seen_names = set()
         for f in child_meta.fields:
-            # [FIX 2026-06-26] business_key 字段总是包含 (用于 export→edit→import round-trip)
-            is_business_key = getattr(f.semantics, 'business_key', False)
-            if not is_business_key and f.id in default_exclude_fields and f.id not in cud_required_fields:
+            # [REMOVED BUG-V023 2026-06-27] 删 is_business_key 早返回
+            # 原代码让 product_code (virtual, export_visible=False, business_key=True) 提前入列
+            # 造成: (1) 子对象 sheet 出现冗余的"产品编码"列 (parent_fk 已提供);
+            #       (2) 顺序破坏: product_code 在 import_order=0 处插入, 推后其他字段
+            # 还原 10:24 之前行为: virtual+无 ui 的字段被 continue, export_visible=false 被 continue
+            if f.id in default_exclude_fields and f.id not in cud_required_fields:
                 continue
-            if not is_business_key and f.storage.value == "virtual" and not hasattr(f, 'ui'):
+            if f.storage.value == "virtual" and not hasattr(f, 'ui'):
                 continue
 
             export_vis = getattr(f.semantics, 'export_visible', None)
@@ -2920,14 +2928,13 @@ class ImportExportService:
 
             is_cud_required = f.id in cud_required_fields
 
-            if not is_cud_required and not is_business_key and export_vis is False and import_vis is False:
+            if not is_cud_required and export_vis is False and import_vis is False:
                 continue
 
             is_export = export_vis is True or is_cud_required
             is_import = import_vis is True
 
-            # [FIX 2026-06-26] business_key 字段总是进入candidates (用于 round-trip)
-            if is_business_key or is_export or is_import or (hasattr(f, 'ui') and hasattr(f.ui, 'visible') and f.ui.visible is True):
+            if is_export or is_import or (hasattr(f, 'ui') and hasattr(f.ui, 'visible') and f.ui.visible is True):
                 candidates.append((f, is_export, is_import))
 
         candidates.sort(key=lambda x: (
@@ -2946,18 +2953,32 @@ class ImportExportService:
 
         # [REWRITE 2026-06-16 BMRD] sort key 简化为 (business_key, import_order)
         # 详见 L1361-1372 注释
+        # [FIX BUG-V024 2026-06-27] counting 列 (computed=True, storage=virtual) 排最后:
+        # sort key 改为 (business_key, import_order, is_counting)
+        # - business_key 字段最先
+        # - 然后按 import_order
+        # - counting 列 (computed=True, virtual) 排到最后
+        # 这样 child_count 等统计列不会挤在中间, 让 sheet 更符合用户预期
         export_fields.sort(key=lambda f: (
             0 if getattr(f.semantics, 'business_key', False) else 1,
-            f.semantics.import_order if f.semantics.import_order is not None else 999
+            f.semantics.import_order if f.semantics.import_order is not None else 999,
+            # [BUG-V024] counting 列排最后 (computed=True && storage=virtual)
+            1 if (getattr(f, 'computed', False) and f.storage.value == 'virtual') else 0,
         ))
 
-        if has_cud:
-            id_in_export = any(f.id == 'id' for f in export_fields)
-            if not id_in_export:
-                for f in child_meta.fields:
-                    if f.id == 'id':
-                        export_fields.insert(0, f)
-                        break
+        # [REMOVED BUG-V024 2026-06-27] 移除 id 强制 insert(0)
+        # 原代码逻辑: 如果 id 不在 export_fields 里, 强制插到第1位
+        # 但 version.yaml 没有 export_visible=False 的 id 字段, id 默认 io=999 应排在最后
+        # 用户的预期是: "counting 列都是最后, 没有 ID 列"
+        # 原因: id 是系统内部字段, 不应该出现在面向用户的导出 sheet 中
+        # cud 操作通过 行级 value 而非列 id 完成 (round-trip 通过业务键 product_code/name)
+        # if has_cud:
+        #     id_in_export = any(f.id == 'id' for f in export_fields)
+        #     if not id_in_export:
+        #         for f in child_meta.fields:
+        #             if f.id == 'id':
+        #                 export_fields.insert(0, f)
+        #                 break
 
         ws = wb.create_sheet(title=sheet_name)
         col_offset = 0
@@ -4693,6 +4714,15 @@ class ImportExportService:
         7. 显式 export_visible: true → 导出
         8. ui.visible: true → 导出
         9. 以上都不满足 → 导出（默认导出）
+
+        [FIX BUG-V023 2026-06-27] 删除 business_key 早返回 (line 4706-4709):
+        原代码让 product_code (virtual, export_visible=False, business_key=True) 提前返回 True
+        导致 product_code 出现在子对象 sheet 中, 破坏列顺序并造成冗余 (product_code 已在 parent_fk 列提供)
+        还原 10:24 之前行为: virtual 且无 export_visible=True 的字段被排除
+        round-trip 改用 _write_child_sheet 的 is_business_key 早返回 (更精确控制)
+
+        [FIX BUG-V024 2026-06-27] counting 列 (computed=True, storage=virtual) 保留导出但排最后:
+        保持 child_count 等统计字段导出, 但排序时使用 storage 优先级确保放最后
         """
         default_exclude_fields = self._build_default_exclude_fields(meta_obj)
 
@@ -4703,10 +4733,9 @@ class ImportExportService:
         if sensitivity in ('restricted', 'confidential'):
             return False
 
-        # [FIX 2026-06-26] business_key 字段总是导出 (用于 export→edit→import round-trip)
-        # 即便 storage=virtual 且 export_visible=false，也保留导出（避免 round-trip 数据丢失）
-        if getattr(field.semantics, 'business_key', False):
-            return True
+        # [REMOVED BUG-V023 2026-06-27] business_key 早返回已删除 (理由见 docstring)
+        # if getattr(field.semantics, 'business_key', False):
+        #     return True
 
         if field.storage.value == "virtual" and not hasattr(field, 'ui'):
             return False
