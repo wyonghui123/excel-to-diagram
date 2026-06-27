@@ -401,17 +401,10 @@ fields:
             select: name
 
   # [V1.1.4 2026-06-11] 删 owner_id 字段定义 - DB 列 V1.1.1 已删, 顶层 owner 在 product
-  # [FIX 2026-06-26] 重新加入 owner_id 但 export_visible: false, 覆盖 owner_aspect 继承
-  # 理由: 产品版本的负责人继承自产品线, 不应单独显示 (避免冗余和误以为每个版本有不同负责人)
-  - id: owner_id
-    name: 负责人
-    type: integer
-    description: 版本负责人ID (覆盖 owner_aspect, 不导出)
-    ui:
-      visible: false
-    semantics:
-      export_visible: false
-      import_visible: false
+  # [FIX BUG-V022 2026-06-27] BUG-V019 又把 owner_id 加回来 (画蛇添足)
+  # 原因: 即使 export_visible: false, 字段顺序仍然插入 product_name 和 child_count 之间
+  #       破坏原字段顺序, 且与 owner_aspect 重复定义。删除还原 V1.1.4 状态。
+  # 现在 owner_id 完全通过 owner_aspect 继承, 不重复定义。
   - id: child_count
     name: 领域数量
     type: integer
