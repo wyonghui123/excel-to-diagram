@@ -249,8 +249,8 @@ function collectAllKeys(nodes) {
 
 /**
  * [BUG-V034 修复 2026-06-29] 计算"初始展开 keys":
- *   - 所有 root 节点 (domain) 都默认展开 (UX: 顶层看得见)
- *   - 选中节点的"路径"展开 (即父链上每个节点的 id)
+ *   - 默认情况下, 不展开任何节点 (UX: 大树 1 级节点可能 500+, 全展开会卡)
+ *   - 仅展开选中节点的"路径" (从选中节点往上找 parent 直到 root)
  *   - 不展开 bo 叶子节点 (避免 2850 BO 全展开卡顿)
  *
  * @param {Array} nodes - treeData
@@ -263,13 +263,7 @@ function collectInitialExpandedKeys(nodes, selectedKeys) {
   const keys = new Set()
   const selectedSet = new Set(selectedKeys || [])
 
-  // 1. 所有 root 节点 (domain) 默认展开
-  nodes.forEach(node => {
-    if (!node.children?.length) return  // leaf (BO), 跳过
-    keys.add(node.id)
-  })
-
-  // 2. 选中节点路径: 从选中节点往上找 parent 直到 root, 沿途所有节点都加入
+  // 选中节点路径: 从选中节点往上找 parent 直到 root, 沿途所有节点都加入
   function findPathToRoot(targetId) {
     const path = []
     function walk(n, ancestors) {
@@ -292,9 +286,7 @@ function collectInitialExpandedKeys(nodes, selectedKeys) {
     findPathToRoot(sk).forEach(k => keys.add(k))
   })
 
-  // 3. 移除 BO 叶子 (避免 2850 叶子节点展开卡顿)
-  // BO id 形如 "bo_xxx" 或包含在选中的 BO id
-  // 这里过滤掉 children 为 [] 的节点
+  // 仅保留可展开的节点 (有 children 的父节点)
   const result = []
   function filterExpandable(n) {
     if (keys.has(n.id) && n.children?.length) {
