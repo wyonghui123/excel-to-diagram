@@ -52,6 +52,8 @@
             :indent="16"
             :key="treeKey"
             @check="handleBoCheck"
+            @node-expand="onNodeExpand"
+            @node-collapse="onNodeCollapse"
           >
         <template #default="{ data }">
           <span class="oss-node">
@@ -351,6 +353,20 @@ const checkedBoIds = ref([])
 const guard = createScopeGuard()
 const trace = createTrace('ObjectScopeSection')
 
+/**
+ * [BUG-V034 v3 修复 2026-06-29] 跨 :data 重建持久化用户展开状态
+ * 通过 el-tree @node-expand / @node-collapse 事件持续追踪,
+ * installStoreSetDataHook 在 setData 内部读取并恢复展开。
+ * 参见 RelationScopeSection.vue 同名实现 (该组件已用同样方案修复 BUG-V034)
+ */
+const userExpandedKeys = ref(new Set())
+function onNodeExpand(data) {
+  if (data?.id != null) userExpandedKeys.value.add(String(data.id))
+}
+function onNodeCollapse(data) {
+  if (data?.id != null) userExpandedKeys.value.delete(String(data.id))
+}
+
 // 当 scopeIds 从 [A,B] 变到 [B] 时，需要显式调用 setCheckedKeys 同步树状态
 // guard.enter/exit 紧贴 setCheckedKeys，消除 nextTick 窗口期用户点击被忽略的竞态
 watch(objectCheckedNodeKeys, (newKeys) => {
@@ -366,6 +382,79 @@ watch(objectCheckedNodeKeys, (newKeys) => {
     await nextTick()
     guard.exit()
   })
+})
+
+/**
+ * 安装 el-tree store.setData 钩子，跨 :data 重建恢复用户展开状态。
+ *
+ * 解决问题 (BUG-V034 v3): 用户手动展开节点后, 任何触发 treeData 重建的操作
+ * (silent reload, setCheckedKeys 等) 都会调用 store.setData → 重置 node.expanded → 用户展开丢失。
+ *
+ * 实现思路：
+ * 1) 拦截 store.setData，从旧 store 抓取所有 expanded=true 的节点 key
+ * 2) 合并 userExpandedKeys (通过 @node-expand/@node-collapse 跨重建持久化)
+ * 3) 调用原 setData 重建 store
+ * 4) 在 nextTick 中用 node.expand() 恢复展开 (el-tree 2.15+ 没有 setExpandedKeys)
+ */
+let storeSetDataHooked = false
+function installStoreSetDataHook() {
+  if (storeSetDataHooked) return
+  if (!treeRef.value?.store) return
+  const store = treeRef.value.store
+  const origSetData = store.setData.bind(store)
+  store.setData = function (newData) {
+    // 1) 抓取当前 store 中所有"用户展开过的节点 key"
+    const savedExpandedKeys = []
+    const oldNodesMap = treeRef.value?.store?.nodesMap
+    if (oldNodesMap) {
+      for (const [key, node] of Object.entries(oldNodesMap)) {
+        if (node.expanded) savedExpandedKeys.push(key)
+      }
+    }
+    // 合并 userExpandedKeys（@node-expand/@node-collapse 跨重建持久化）
+    const allSavedExpanded = [...new Set([...savedExpandedKeys, ...userExpandedKeys.value])]
+
+    // 2) 执行原 setData → 重建 store.nodesMap
+    const result = origSetData(newData)
+
+    // 3) 收集新树的所有有效 data.id
+    const allDataIds = new Set()
+    const collectIds = (nodes) => {
+      for (const n of (nodes || [])) {
+        if (n.id != null) allDataIds.add(String(n.id))
+        if (n.children) collectIds(n.children)
+      }
+    }
+    collectIds(newData)
+
+    // 4) 过滤出在新树中仍有效的 keys
+    const validExpanded = allSavedExpanded.filter(k => allDataIds.has(String(k)))
+
+    // 5) 在 nextTick 中恢复展开
+    if (validExpanded.length > 0) {
+      nextTick(() => {
+        const newStore = treeRef.value?.store
+        if (newStore?.nodesMap) {
+          for (const key of validExpanded) {
+            const node = newStore.nodesMap[key]
+            if (node && !node.isLeaf && typeof node.expand === 'function' && !node.expanded) {
+              node.expand()
+            }
+          }
+        }
+      })
+    }
+
+    return result
+  }
+  storeSetDataHooked = true
+}
+
+// 一旦 treeRef 可用就安装钩子, 拦截 store.setData 跨数据重建恢复展开状态
+watch(treeRef, (val) => {
+  if (val) {
+    installStoreSetDataHook()
+  }
 })
 
 function emitTypedScopeChange(_checkedNodes) {
