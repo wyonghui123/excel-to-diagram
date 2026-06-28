@@ -247,6 +247,66 @@ function collectAllKeys(nodes) {
   return keys
 }
 
+/**
+ * [BUG-V034 修复 2026-06-29] 计算"初始展开 keys":
+ *   - 所有 root 节点 (domain) 都默认展开 (UX: 顶层看得见)
+ *   - 选中节点的"路径"展开 (即父链上每个节点的 id)
+ *   - 不展开 bo 叶子节点 (避免 2850 BO 全展开卡顿)
+ *
+ * @param {Array} nodes - treeData
+ * @param {Array} selectedKeys - 当前 el-tree checked keys
+ * @returns {Array<string>} initial expanded keys
+ */
+function collectInitialExpandedKeys(nodes, selectedKeys) {
+  if (!nodes?.length) return []
+
+  const keys = new Set()
+  const selectedSet = new Set(selectedKeys || [])
+
+  // 1. 所有 root 节点 (domain) 默认展开
+  nodes.forEach(node => {
+    if (!node.children?.length) return  // leaf (BO), 跳过
+    keys.add(node.id)
+  })
+
+  // 2. 选中节点路径: 从选中节点往上找 parent 直到 root, 沿途所有节点都加入
+  function findPathToRoot(targetId) {
+    const path = []
+    function walk(n, ancestors) {
+      if (n.id === targetId) {
+        path.push(...ancestors.map(a => a.id))
+        path.push(n.id)
+        return true
+      }
+      if (n.children?.length) {
+        for (const c of n.children) {
+          if (walk(c, [...ancestors, n])) return true
+        }
+      }
+      return false
+    }
+    walk({ id: '__root__', children: nodes }, [])
+    return path
+  }
+  selectedSet.forEach(sk => {
+    findPathToRoot(sk).forEach(k => keys.add(k))
+  })
+
+  // 3. 移除 BO 叶子 (避免 2850 叶子节点展开卡顿)
+  // BO id 形如 "bo_xxx" 或包含在选中的 BO id
+  // 这里过滤掉 children 为 [] 的节点
+  const result = []
+  function filterExpandable(n) {
+    if (keys.has(n.id) && n.children?.length) {
+      result.push(n.id)
+    }
+    n.children?.forEach(filterExpandable)
+  }
+  filterExpandable({ id: '__root__', children: nodes })
+
+  return result
+}
+
 function collectAllScope(nodes) {
   const domainIds = []
   const subDomainIds = []
@@ -367,17 +427,20 @@ async function loadTreeData(options = {}) {
   if (!silent) loading.value = true
   if (!silent) isAllExpanded.value = false
   try {
-    const [domainResult, subDomainResult, serviceModuleResult, boResult] = await Promise.all([
+    // [BUG-V028 修复 2026-06-29] 不再拉全量 BO 客户端聚合
+    // 原因: /api/v2/bo/<type> 受 MAX_USER_PAGE_SIZE=500 限制, V863 实际 2850 BO 被截断为 500,
+    //       导致 233/277 (84%) SM count 错显示 0
+    // 修复: service_module API 已通过 computation_service._batch_count_children 自动填充 child_count
+    //       (见 meta/services/computation_service.py:208), 直接用 sm.child_count 即可
+    const [domainResult, subDomainResult, serviceModuleResult] = await Promise.all([
       boService.query('domain', { version_id: props.versionId, page_size: 1000 }),
       boService.query('sub_domain', { version_id: props.versionId, page_size: 1000 }),
-      boService.query('service_module', { version_id: props.versionId, page_size: 5000 }),
-      boService.query('business_object', { version_id: props.versionId, page_size: 10000 })
+      boService.query('service_module', { version_id: props.versionId, page_size: 5000 })
     ])
 
     const domains = domainResult.data?.items || domainResult.data || []
     const subDomains = subDomainResult.data?.items || subDomainResult.data || []
     const serviceModules = serviceModuleResult.data?.items || serviceModuleResult.data || []
-    const businessObjects = boResult.data?.items || boResult.data || []
 
     // === 修复核心: silent 模式下保留用户已选状态，避免 el-tree store 重建导致 checked 丢失 ===
     // 根因: 上游 watch(combinedFilters) → coordinator.refreshAll() → scopeTree.refresh()
@@ -393,7 +456,7 @@ async function loadTreeData(options = {}) {
 
       if (hasSelection) {
         const oldKeys = collectAllKeys(treeData.value)
-        const newTree = buildHierarchyTree(domains, subDomains, serviceModules, businessObjects)
+        const newTree = buildHierarchyTree(domains, subDomains, serviceModules)
         const newKeys = collectAllKeys(newTree)
         const sameStructure =
           oldKeys.length === newKeys.length &&
@@ -406,8 +469,9 @@ async function loadTreeData(options = {}) {
 
         // 树结构变化 (新增/删除节点), 需要重建但要恢复已选状态
         treeData.value = newTree
-        const allKeys = collectAllKeys(newTree)
-        defaultExpandedKeys.value = allKeys
+        // [BUG-V034 修复 2026-06-29] 不再 defaultExpandedKeys = allKeys (全部展开),
+        // 改为只展开 root 节点 + 当前已选节点路径, 避免 2850 BO 节点全展开导致的卡顿
+        defaultExpandedKeys.value = collectInitialExpandedKeys(newTree, currentCheckedKeys)
 
         // 等待 el-tree store 重建完成 (多次 nextTick 确保)
         await nextTick()
@@ -423,11 +487,11 @@ async function loadTreeData(options = {}) {
       }
     }
 
-    const tree = buildHierarchyTree(domains, subDomains, serviceModules, businessObjects)
+    const tree = buildHierarchyTree(domains, subDomains, serviceModules)
     treeData.value = tree
 
-    const allKeys = collectAllKeys(tree)
-    defaultExpandedKeys.value = allKeys
+    // [BUG-V034 修复 2026-06-29] 首次加载只展开 root + 已选路径, 不展开全部
+    defaultExpandedKeys.value = collectInitialExpandedKeys(tree, [])
 
     emit('load', treeData.value)
   } catch (error) {
@@ -448,11 +512,14 @@ async function loadTreeData(options = {}) {
   }
 }
 
-function buildHierarchyTree(domains, subDomains, serviceModules, businessObjects) {
+function buildHierarchyTree(domains, subDomains, serviceModules) {
+  // [BUG-V028 修复 2026-06-29] 不再拉全量 BO 客户端聚合
+  // 原因: /api/v2/bo/business_object 受 MAX_USER_PAGE_SIZE=500 限制, V863 实际 2850 BO 被截断为 500,
+  //       导致 233/277 (84%) SM count 错显示 0
+  // 修复: service_module API 已通过 computation_service._batch_count_children 自动填充 child_count
+  //       (见 meta/services/computation_service.py:208), 直接用 sm.child_count 即可
   const subDomainMap = new Map()
   const serviceModuleMap = new Map()
-  // v39: 构建 service_module_id → BO 数量 的映射
-  const boCountBySm = new Map()
 
   for (const sd of subDomains) {
     const list = subDomainMap.get(sd.domain_id) || []
@@ -466,28 +533,20 @@ function buildHierarchyTree(domains, subDomains, serviceModules, businessObjects
     serviceModuleMap.set(sm.sub_domain_id, list)
   }
 
-  // v39: 统计每个 service_module 下的 BO 数量
-  for (const bo of (businessObjects || [])) {
-    const smId = bo.service_module_id
-    if (smId != null) {
-      boCountBySm.set(smId, (boCountBySm.get(smId) || 0) + 1)
-    }
-  }
-
   return domains.map(domain => {
     const domainSubDomains = subDomainMap.get(domain.id) || []
-    // v39: 先计算域内所有 BO 总数
     let domainBoCount = 0
     const subDomainNodes = []
 
     for (const subDomain of domainSubDomains) {
       const moduleList = serviceModuleMap.get(subDomain.id) || []
-      // v39: 计算子域内所有 BO 总数
       let subDomainBoCount = 0
       const serviceModuleNodes = []
 
       for (const module of moduleList) {
-        const boCount = boCountBySm.get(module.id) || 0
+        // [BUG-V028 修复] 使用 service_module API 自动填充的 child_count (见 yaml service_module.yaml:669)
+        // 原实现: boCountBySm.get(module.id) || 0 (受 500 cap 影响, 84% 错显示 0)
+        const boCount = module.child_count || 0
         subDomainBoCount += boCount
         serviceModuleNodes.push({
           id: `sm_${module.id}`,
@@ -495,7 +554,7 @@ function buildHierarchyTree(domains, subDomains, serviceModules, businessObjects
           name: module.name,
           code: module.code,
           type: 'service_module',
-          count: boCount, // v39: 模块内 BO 数量
+          count: boCount, // v39: 模块内 BO 数量 (从 child_count 计算字段读取)
           children: []
         })
       }
