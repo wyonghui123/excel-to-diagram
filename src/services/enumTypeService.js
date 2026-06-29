@@ -9,7 +9,9 @@
 
 import EnumService from '@/services/enumService'
 
-const enumService = new EnumService()
+// [FIX 2026-06-29] EnumService 是对象字面量, 不是类 (enumService.js:38)
+//   错误用法: new EnumService() → TypeError: EnumService is not a constructor
+//   正确用法: 直接 import 后当对象调用 (RelationFilterSection 也是这样)
 
 /**
  * 获取指定 enum_type 的所有值
@@ -25,7 +27,7 @@ export async function fetchEnumTypeValues(enumTypeCode) {
     //   - 自动降级 (高速端点 404 -> 标准端点)
     //   - 自动缓存
     //   - throwError=false 让失败时不抛异常, 而是返回空数组
-    const items = await enumService.loadOptions(enumTypeCode, {
+    const items = await EnumService.loadOptions(enumTypeCode, {
       cache: true,
       throwError: false,
       useHighSpeedEndpoint: true,
