@@ -16,21 +16,26 @@ import EnumService from '@/services/enumService'
 /**
  * 获取指定 enum_type 的所有值
  * @param {string} enumTypeCode - 枚举类型代码 (如 'annotation_category')
+ * @param {Object} [options] - 透传给 EnumService.loadOptions 的选项
+ * @param {boolean} [options.cache=true] - 是否缓存 (默认 true)
+ * @param {boolean} [options.throwError=false] - 是否抛错
+ * @param {boolean} [options.useHighSpeedEndpoint=true] - 是否走高速端点
  * @returns {Promise<Array<{value: string, label: string}>>} 枚举选项
  *
  * 主线不受影响: 失败时返回空数组, 调用方需自行处理 UI 降级
  */
-export async function fetchEnumTypeValues(enumTypeCode) {
+export async function fetchEnumTypeValues(enumTypeCode, options = {}) {
   try {
     // [FIX 2026-06-29] 改用 EnumService.loadOptions
     //   - 与 RelationFilterSection 一致 (Vue 组件已经在用)
     //   - 自动降级 (高速端点 404 -> 标准端点)
-    //   - 自动缓存
+    //   - 自动缓存 (除非调用方传 cache: false)
     //   - throwError=false 让失败时不抛异常, 而是返回空数组
+    const { cache = true, throwError = false, useHighSpeedEndpoint = true } = options
     const items = await EnumService.loadOptions(enumTypeCode, {
-      cache: true,
-      throwError: false,
-      useHighSpeedEndpoint: true,
+      cache,
+      throwError,
+      useHighSpeedEndpoint,
     })
 
     if (!Array.isArray(items)) {

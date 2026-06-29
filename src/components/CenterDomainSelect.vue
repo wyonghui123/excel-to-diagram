@@ -331,8 +331,12 @@ export default {
   },
   async mounted() {
     // [V_NEW 2026-06-29] 加载 enum_type 选项 - 失败时显示空选项 (含"暂无配置"占位)
+    // [FIX 2026-06-29 v3] 强制 cache: false 避免之前失败调用缓存了空数组
+    //   之前 useHighSpeedEndpoint: true 默认调用过失败路径, EnumService 缓存了 []
+    //   导致第二次打开页面 enumOptions 是 [] 看不到任何选项
     try {
-      this.enumOptions = await fetchEnumTypeValues('annotation_category')
+      this.enumOptions = await fetchEnumTypeValues('annotation_category', { cache: false })
+      console.log('[CenterDomainSelect] enumOptions loaded:', this.enumOptions.length, 'items:', this.enumOptions.map(o => `${o.value}:${o.label}`))
     } catch (e) {
       console.warn('[CenterDomainSelect] failed to load annotation_category enum:', e)
       this.enumOptions = []
