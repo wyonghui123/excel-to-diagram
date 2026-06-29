@@ -1784,6 +1784,8 @@ function handleMetaListAction(action, row) {
 
 defineExpose({
   tableRef,
+  // [FIX 2026-06-29] 暴露 onRowAction 让 MOMP/GenericObjectList 等父组件可在 dblclick 时触发 action
+  onRowAction,
   metaConfig,
   data,
   loading,
