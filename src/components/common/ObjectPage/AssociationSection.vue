@@ -568,9 +568,15 @@ const annotationMeta = computed(() => ({
 let categoriesLoaded = false
 
 async function loadAnnotationCategories() {
-  if (categoriesLoaded && annotationCategories.value.length > 0) return
+  // [FIX 2026-06-29] 始终调用 API, 不依赖缓存
+  //   之前: categoriesLoaded 模块级共享, 第一次失败后即使再打开也不会重试
+  //   弹窗可能保持默认 4 个 (defaultCategories), 即使数据库有 6 个
   try {
-    const items = await EnumService.loadOptions('annotation_category', { useHighSpeedEndpoint: false })
+    const items = await EnumService.loadOptions('annotation_category', {
+      useHighSpeedEndpoint: false,
+      cache: false,  // [FIX] 每次弹窗打开都重新加载, 避免缓存了 4 个的版本
+      throwError: false
+    })
     if (items && items.length > 0) {
       annotationCategories.value = items.map(item => {
         const config = CATEGORY_CONFIG[item.value]
@@ -579,9 +585,10 @@ async function loadAnnotationCategories() {
           name: config ? config.label : item.label
         }
       })
+      categoriesLoaded = true
     }
-    categoriesLoaded = true
   } catch {
+    // 失败时保持默认 4 个 (annotationCategories.value 初始化时已是 defaultCategories)
     categoriesLoaded = false
   }
 }

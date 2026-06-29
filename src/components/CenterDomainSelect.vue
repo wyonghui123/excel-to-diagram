@@ -393,9 +393,10 @@ export default {
   align-items: flex-start;
 }
 
-/* [V_NEW 2026-06-29] 备注类型多选样式 - el-select 全宽 */
+/* [V_NEW 2026-06-29] 备注类型多选样式 - 限定宽度不撑满整行 */
 .annotation-category-filter {
   width: 100%;
+  max-width: 320px;
 }
 
 .form-label-hint {
