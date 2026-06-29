@@ -156,12 +156,20 @@ watch(rawMode, (newMode) => {
   }
 }, { immediate: true })
 const mode = computed(() => lastValidMode.value || rawMode.value || 'view')
-// [FIX 2026-06-18] 重命名为 detailPageMountKey：仅用于强制 remount DetailPage
-//   (PermissionConfigPanel saved 后)，平时稳定不变。
-//   之前叫 detailPageKey 时配合 v-if="objectType && (id || mode === 'add')"，
-//   在 app 顶部 tab 切走时 (route 变化 → id 变 undefined) 会 unmount DetailPage，
-//   切回时 remount 丢失 internalEditing 等内部状态。
-const detailPageMountKey = ref(0)
+// [FIX 2026-06-29] detailPageMountKey 用 objectType+id 派生, 切不同对象时强制 remount DetailPage
+//   之前用 ref(0) 常量, 配合 detailPageEverMounted=true, keep-alive + 永远同 key → DetailPage 永不重建
+//   导致: 用户从 TTT01 失败回滚 → 进 DEMOPROD 详情 → 仍显示 TTT01 数据 (内部 data 缓存)
+//   必须 refresh 才能看到 DEMOPROD
+//   修复: key 包含 objectType+id, 切不同对象 → key 变 → Vue 强制重建 → 加载新 data
+//   副作用: internalEditing 等状态会重置 (用户期望: 进新对象就该重置, 所以正确)
+//   注意: route params 变化 (undefined → 有效 → undefined) 不会触发此 key 变 (因为 lastValid 缓存)
+//         只在 newType&&newId 都有效时才更新 key, 切走不更新
+const detailPageMountKey = computed(() => {
+  const t = lastValidObjectType.value || rawObjectType.value
+  const i = lastValidId.value || rawId.value
+  if (!t || !i) return 0
+  return `${t}-${i}`
+})
 // [FIX 2026-06-18] 首次 mount 后设为 true，v-if 用这个标记
 //   目的：ObjectDetailPage 被 keep-alive 缓存，detailPageEverMounted 不会重置，
 //   保证切走再切回时 DetailPage 不被销毁
