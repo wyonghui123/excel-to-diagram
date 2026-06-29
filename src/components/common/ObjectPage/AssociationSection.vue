@@ -389,7 +389,10 @@ function handleToolbarAction(action, section) {
     console.debug('[AssociationSection] Emitting open-assign with section:', section)
     emit('open-assign', section)
   } else if (action.key === 'create') {
+    console.log('[AssociationSection] create branch → handleAnnotationCreate')
     handleAnnotationCreate(section)
+  } else {
+    console.log('[AssociationSection] unhandled action.key:', action.key)
   }
 }
 
@@ -568,6 +571,7 @@ const annotationMeta = computed(() => ({
 let categoriesLoaded = false
 
 async function loadAnnotationCategories() {
+  console.log('[AssociationSection] loadAnnotationCategories START')
   // [FIX 2026-06-29] 始终调用 API, 不依赖缓存
   //   之前: categoriesLoaded 模块级共享, 第一次失败后即使再打开也不会重试
   //   弹窗可能保持默认 4 个 (defaultCategories), 即使数据库有 6 个
@@ -577,6 +581,7 @@ async function loadAnnotationCategories() {
       cache: false,  // [FIX] 每次弹窗打开都重新加载, 避免缓存了 4 个的版本
       throwError: false
     })
+    console.log('[AssociationSection] loadAnnotationCategories items:', items?.length, items?.slice(0, 2))
     if (items && items.length > 0) {
       annotationCategories.value = items.map(item => {
         const config = CATEGORY_CONFIG[item.value]
@@ -585,19 +590,26 @@ async function loadAnnotationCategories() {
           name: config ? config.label : item.label
         }
       })
+      console.log('[AssociationSection] annotationCategories.value.length=', annotationCategories.value.length)
       categoriesLoaded = true
+    } else {
+      console.log('[AssociationSection] items EMPTY, annotationCategories stays default 4')
     }
-  } catch {
+  } catch (e) {
+    console.error('[AssociationSection] loadAnnotationCategories ERROR:', e)
     // 失败时保持默认 4 个 (annotationCategories.value 初始化时已是 defaultCategories)
     categoriesLoaded = false
   }
 }
 
 async function handleAnnotationCreate(section) {
+  console.log('[AssociationSection] handleAnnotationCreate START')
   await loadAnnotationCategories()
+  console.log('[AssociationSection] handleAnnotationCreate AFTER load, annotationCategories.length=', annotationCategories.value.length)
   annotationEditingId.value = null
   annotationEntityData.value = null
   annotationFormVisible.value = true
+  console.log('[AssociationSection] handleAnnotationCreate END, visible=', annotationFormVisible.value)
 }
 
 async function handleAnnotationEdit(row, section) {
