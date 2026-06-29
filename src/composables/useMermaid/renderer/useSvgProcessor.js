@@ -270,12 +270,12 @@ export function useSvgProcessor(options) {
       const sampleLink = diagramData.links?.[0]
       if (sampleLink) {
         console.log('[renderAnnotationOverlay] sample link keys:', Object.keys(sampleLink))
-        console.log('[renderAnnotationOverlay] sample link annotation* fields:', Object.fromEntries(Object.entries(sampleLink).filter(([k]) => k.toLowerCase().includes('annot'))))
+        console.log('[renderAnnotationOverlay] sample link annotation* fields:', JSON.stringify(Object.fromEntries(Object.entries(sampleLink).filter(([k]) => k.toLowerCase().includes('annot')))))
       }
       const sampleNode = diagramData.nodes?.[0]
       if (sampleNode) {
         console.log('[renderAnnotationOverlay] sample node keys:', Object.keys(sampleNode))
-        console.log('[renderAnnotationOverlay] sample node annotation* fields:', Object.fromEntries(Object.entries(sampleNode).filter(([k]) => k.toLowerCase().includes('annot'))))
+        console.log('[renderAnnotationOverlay] sample node annotation* fields:', JSON.stringify(Object.fromEntries(Object.entries(sampleNode).filter(([k]) => k.toLowerCase().includes('annot')))))
       }
     }
     console.log('[renderAnnotationOverlay] annotationList length:', annotationList.length)
