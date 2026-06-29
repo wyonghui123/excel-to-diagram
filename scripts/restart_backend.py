@@ -107,8 +107,10 @@ def start_backend():
     log_out = REPO_DIR / "backend.out"
     log_err = REPO_DIR / "backend.err"
 
-    # Kill existing first
-    kill_existing_backend()
+    # Kill existing only if port is actually listening
+    # (不要杀正在启动但还没 listen 的进程, waitress 启动需要 10-35 秒)
+    if is_port_listening(BACKEND_PORT):
+        kill_existing_backend()
 
     # Use CREATE_NO_WINDOW flag (0x08000000) + DETACHED_PROCESS (0x00000008)
     # to ensure no console window is shown
