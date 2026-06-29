@@ -81,6 +81,32 @@
       </div>
     </div>
 
+    <!-- [V_NEW 2026-06-29] 备注类型多选 - 备注文本是辅助信息, 不影响主路径 -->
+    <!-- 主线不受影响: 默认空选择 = 不过滤, 显示全部备注 -->
+    <div class="form-row">
+      <div class="form-item full-width">
+        <label class="form-label">
+          备注类型过滤
+          <span class="form-label-hint">(不选=显示全部)</span>
+        </label>
+        <select
+          v-model="annotationCategoryFilterLocal"
+          multiple
+          class="form-select annotation-category-multi"
+          :disabled="enumOptions.length === 0"
+          :title="enumOptions.length === 0 ? '暂无备注类型配置（请在 enum_type 配置 annotation_category）' : ''"
+          @change="onAnnotationCategoryFilterChange"
+        >
+          <option v-if="enumOptions.length === 0" disabled value="">暂无配置</option>
+          <option
+            v-for="opt in enumOptions"
+            :key="opt.value"
+            :value="opt.value"
+          >{{ opt.label }}</option>
+        </select>
+      </div>
+    </div>
+
     <!-- 隐藏的颜色选择器（用于颜色分配） -->
     <input
       type="color"
@@ -93,6 +119,8 @@
 </template>
 
 <script>
+import { fetchEnumTypeValues } from '@/services/enumTypeService'
+
 const COLOR_SCHEMES = [
   {
     value: 'default',
@@ -165,6 +193,11 @@ export default {
     businessObjects: {
       type: Array,
       default: () => []
+    },
+    // [V_NEW 2026-06-29] annotation 备注类型过滤 - 备注文本是辅助信息
+    annotationCategoryFilter: {
+      type: Array,
+      default: () => []
     }
   },
   emits: [
@@ -173,7 +206,8 @@ export default {
     'update:nodeTextColor',
     'update:centerScopeColor',
     'update:customColors',
-    'update:centerScopeHighlight'
+    'update:centerScopeHighlight',
+    'update:annotationCategoryFilter'
   ],
   data() {
     return {
@@ -183,7 +217,11 @@ export default {
         { value: 'white', label: '白色', preview: '#FFFFFF' }
       ],
       currentEditingItem: null,
-      currentEditingColor: '#000000'
+      currentEditingColor: '#000000',
+      // [V_NEW 2026-06-29] 备注类型选项 (从 enum_type API 加载)
+      enumOptions: [],
+      // 本地副本, 避免直接修改 prop
+      annotationCategoryFilterLocal: []
     }
   },
   computed: {
@@ -273,6 +311,24 @@ export default {
       return items;
     }
   },
+  watch: {
+    // [V_NEW 2026-06-29] prop 变化时同步到本地副本
+    annotationCategoryFilter: {
+      immediate: true,
+      handler(newVal) {
+        this.annotationCategoryFilterLocal = Array.isArray(newVal) ? [...newVal] : []
+      }
+    }
+  },
+  async mounted() {
+    // [V_NEW 2026-06-29] 加载 enum_type 选项 - 失败时显示空选项
+    try {
+      this.enumOptions = await fetchEnumTypeValues('annotation_category')
+    } catch (e) {
+      console.warn('[ServiceModuleConfig] failed to load annotation_category enum:', e)
+      this.enumOptions = []
+    }
+  },
   methods: {
     openColorPicker(itemName, currentColor) {
       this.currentEditingItem = itemName;
@@ -290,6 +346,12 @@ export default {
         const newColors = { ...this.customColors, [this.currentEditingItem]: newColor };
         this.$emit('update:customColors', newColors);
       }
+    },
+    // [V_NEW 2026-06-29] annotation 备注类型过滤变化处理
+    onAnnotationCategoryFilterChange(event) {
+      const selected = Array.from(event.target.selectedOptions).map(opt => opt.value)
+      this.annotationCategoryFilterLocal = selected
+      this.$emit('update:annotationCategoryFilter', selected)
     }
   }
 }
@@ -301,6 +363,28 @@ export default {
   background: #fafafa;
   border-radius: 6px;
   border: 1px solid #e8e8e8;
+}
+
+/* [V_NEW 2026-06-29] 备注类型多选样式 - 显示选中的标签 */
+.annotation-category-multi {
+  min-height: 64px;
+}
+
+.annotation-category-multi option {
+  padding: 4px 8px;
+}
+
+.annotation-category-multi option:checked {
+  background: var(--color-primary, #ea580c) linear-gradient(0deg, var(--color-primary, #ea580c) 0%, var(--color-primary, #ea580c) 100%);
+  color: white;
+}
+
+.form-label-hint {
+  margin-left: 8px;
+  font-size: 12px;
+  color: #999;
+  font-weight: normal;
+}
 }
 
 .form-row {
