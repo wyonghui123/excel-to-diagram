@@ -158,13 +158,18 @@ function computedServiceModuleRelations(relationships, businessObjects, serviceM
     }
     
     // 收集业务对象关系的备注
-    if (rel.annotationContent) {
+    // [FIX 2026-06-29] 后端返回 annotationContents/Categories 数组
+    //   每个关系可能有多条 annotation, 这里把每条都收下来
+    const relContents = rel.annotationContents || []
+    const relCategories = rel.annotationCategories || []
+    relContents.forEach((content, idx) => {
+      if (!content) return
       relation.businessObjectRelationships.push({
         relationCode: boRelCode,
-        annotationContent: rel.annotationContent,
-        annotationCategory: rel.annotationCategory || 'info'
+        annotationContent: content,
+        annotationCategory: relCategories[idx] || 'info'
       })
-    }
+    })
   })
 
   // 处理备注内容
@@ -172,7 +177,7 @@ function computedServiceModuleRelations(relationships, businessObjects, serviceM
   moduleRelationMap.forEach((rel) => {
     // 去重后的业务对象关系编码
     const uniqueBoCodes = [...new Set(rel.businessObjectRelationshipCodes.filter(Boolean))]
-    
+
     // 构建备注内容：关系备注内容 + 业务对象关系编码
     const boAnnotations = rel.businessObjectRelationships
       .filter(boRel => boRel.annotationContent)
@@ -180,7 +185,7 @@ function computedServiceModuleRelations(relationships, businessObjects, serviceM
         const code = boRel.relationCode || ''
         return code ? `${boRel.annotationContent} ${code}` : boRel.annotationContent
       })
-    
+
     // 去重并用分号连接
     const uniqueAnnotations = [...new Set(boAnnotations)]
     
@@ -237,6 +242,12 @@ export function useDiagramData() {
     hideLinkLabelTails: configStore.hideLinkLabelTails,
     annotationPanelPosition: configStore.annotationPanelPosition,
     showAnnotationIcons: configStore.showAnnotationIcons,
+    // [FIX 2026-06-29 v3] 加上 annotationCategoryFilter
+    //   之前漏了这行, 传给 StepDisplay/MermaidComponent 的 annotationConfig 没有 filter 字段
+    //   useSvgProcessor.renderAnnotationOverlay 拿 annotationConfig.annotationCategoryFilter 时是 undefined
+    //   → || [] → 永远空数组 → 永远不过滤
+    // 主线不受影响: 默认 [] = 不过滤 (向后兼容)
+    annotationCategoryFilter: configStore.annotationCategoryFilter,
     assignmentMode: configStore.assignmentMode
   }))
   const diagramData = ref(null)
@@ -738,7 +749,12 @@ export function useDiagramData() {
           subDomainMap.get(sm.subDomain).nodes.push({
             id: sm.code,
             name: sm.name,
-            code: sm.code
+            code: sm.code,
+            // [FIX 2026-06-29] 透传 annotation 数组字段
+            //   之前只 push id/name/code, annotation 字段全丢, 图表显示没数字标记
+            //   archDataConverter 输出 sm.annotationContents/Categories 是数组
+            annotationContents: sm.annotationContents || [],
+            annotationCategories: sm.annotationCategories || []
           })
         })
       }

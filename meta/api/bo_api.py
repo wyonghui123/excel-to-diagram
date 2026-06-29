@@ -1897,6 +1897,72 @@ def get_architecture_preview():
         #   - 对象范围外: source 和 target 都不在 center_scope (如跨权限域但不在选中范围内)
         relationships = [r for r in relationships if r.get('scope_type') != 'external']
 
+        # ── [V_NEW 2026-06-29] annotation 聚合 - 备注文本是辅助信息, 不影响主路径
+        # 主线不受影响: 失败时所有 BO/Rel/SM/SD/D 都返回空 annotation_content/category
+        # 这样前端 archDataConverter 即使没拿到字段也不会报错
+        try:
+            from meta.services.preview_service import aggregate_annotations_for_targets
+
+            _ds_ann = _get_data_source()
+
+            # BO annotations
+            bo_ids = [b.get('id') for b in business_objects if b.get('id')]
+            bo_ann = aggregate_annotations_for_targets('business_object', bo_ids, _ds_ann)
+            for b in business_objects:
+                ann = bo_ann.get(b.get('id'), {'contents': [], 'categories': []})
+                b['annotation_contents'] = ann['contents']
+                b['annotation_categories'] = ann['categories']
+
+            # Relationship annotations
+            rel_ids = [r.get('id') for r in relationships if r.get('id')]
+            rel_ann = aggregate_annotations_for_targets('relationship', rel_ids, _ds_ann)
+            for r in relationships:
+                ann = rel_ann.get(r.get('id'), {'contents': [], 'categories': []})
+                r['annotation_contents'] = ann['contents']
+                r['annotation_categories'] = ann['categories']
+
+            # SubDomain annotations
+            sd_ids = [sd.get('id') for sd in sub_domains if sd.get('id')]
+            sd_ann = aggregate_annotations_for_targets('sub_domain', sd_ids, _ds_ann)
+            for sd in sub_domains:
+                ann = sd_ann.get(sd.get('id'), {'contents': [], 'categories': []})
+                sd['annotation_contents'] = ann['contents']
+                sd['annotation_categories'] = ann['categories']
+
+            # ServiceModule annotations
+            sm_ids = [m.get('id') for m in modules if m.get('id')]
+            sm_ann = aggregate_annotations_for_targets('service_module', sm_ids, _ds_ann)
+            for m in modules:
+                ann = sm_ann.get(m.get('id'), {'contents': [], 'categories': []})
+                m['annotation_contents'] = ann['contents']
+                m['annotation_categories'] = ann['categories']
+
+            # Domain annotations
+            d_ids = [d.get('id') for d in domains if d.get('id')]
+            d_ann = aggregate_annotations_for_targets('domain', d_ids, _ds_ann)
+            for d in domains:
+                ann = d_ann.get(d.get('id'), {'contents': [], 'categories': []})
+                d['annotation_contents'] = ann['contents']
+                d['annotation_categories'] = ann['categories']
+        except Exception as e:
+            # 主线不受影响: annotation 聚合失败时, 给所有对象填空数组
+            logger.warning(f'[bo_api.get_architecture_preview] annotation aggregation failed: {e}')
+            for b in business_objects:
+                b.setdefault('annotation_contents', [])
+                b.setdefault('annotation_categories', [])
+            for r in relationships:
+                r.setdefault('annotation_contents', [])
+                r.setdefault('annotation_categories', [])
+            for sd in sub_domains:
+                sd.setdefault('annotation_contents', [])
+                sd.setdefault('annotation_categories', [])
+            for m in modules:
+                m.setdefault('annotation_contents', [])
+                m.setdefault('annotation_categories', [])
+            for d in domains:
+                d.setdefault('annotation_contents', [])
+                d.setdefault('annotation_categories', [])
+
         return jsonify({
             'success': True,
             'data': {

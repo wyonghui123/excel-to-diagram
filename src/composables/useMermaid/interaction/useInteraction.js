@@ -107,21 +107,21 @@ export function useInteraction() {
       if (!mermaidContainerElRef?.value) return
       // 只在 mermaid-container 内的 mousedown 触发拖动
       if (!mermaidContainerElRef.value.contains(e.target)) return
-      if (e.target.closest('.toolbar') || e.target.closest('.toolbar-btn')) return
-      e.preventDefault()  // 阻止默认行为（防文本选择等）
+      // [FIX 2026-06-29 v8] 不在 toolbar/annotation panel 等可点击区域才走拖动逻辑
+      //   之前 e.preventDefault() 阻止了 click 事件, 导致 annotation header 等可点击元素无响应
+      const isInToolbar = e.target.closest('.toolbar') || e.target.closest('.toolbar-btn')
+      const isInAnnotation = e.target.closest('.annotation-dock-panel') || e.target.closest('.annotation-header')
+      if (isInToolbar || isInAnnotation) return  // 不阻止默认, 让 click 事件正常触发
 
       dragState.isDragging = true
       dragState.startX = e.clientX - translateX.value
       dragState.startY = e.clientY - translateY.value
       mermaidContainerElRef.value.style.cursor = 'grabbing'
       mermaidContainerElRef.value.classList.add('dragging')
-      // 关键修复 v13：加 log 让用户能验证 mousedown 触发
-      console.log('[drag] mousedown', { startX: dragState.startX, startY: dragState.startY, target: e.target.tagName })
+      // [v13 log 已移除, 避免 console spam]
     }
 
     const handleMouseMove = (e) => {
-      // 关键诊断 v17：log 每次 mousemove 触发，让用户能看到 mousemove 次数
-      console.log('[drag] mousemove, isDragging=', dragState.isDragging, 'e.clientX=', e.clientX)
       if (!dragState.isDragging) {
         return
       }
@@ -131,9 +131,6 @@ export function useInteraction() {
     }
 
     const handleMouseUp = () => {
-      if (dragState.isDragging) {
-        console.log('[drag] mouseup, final translate:', translateX.value, translateY.value)
-      }
       if (dragState.isDragging && mermaidContainerElRef?.value) {
         mermaidContainerElRef.value.classList.remove('dragging')
         mermaidContainerElRef.value.style.cursor = 'grab'
