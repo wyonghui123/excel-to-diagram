@@ -570,18 +570,13 @@ function Start-Service($svcName) {
     try {
         # 🆕 v3.8: waitress 模式 - FLASK_DEBUG 必须 false (生产模式)
         # 避开 startup_checks 的 CORS 检查 (或显式设 CORS_ALLOWED_ORIGINS)
-        # [BUG-V035 2026-06-29] FLASK_ENV 不能设为 'production', 否则:
-        #   1. auth_api.dev_login() 中 _is_production() 返回 True → abort(404)
-        #   2. errorhandler(Exception) 捕获 NotFound → 返回 500 + error: 'NotFound'
-        #   3. dev-login 不可用 → 前端无法登录 → 所有需要 cookie 的接口连锁失败
-        # 本地开发环境必须用 'development'
+        # [fix-svc 2026-06-29] 回滚 64f528d 中的 dev 配置:
+        #   - FLASK_ENV: development → production (生产模式)
+        #   - DEV_MODE: 移除 (生产不应启用 YAML 热加载)
+        # 如需 dev_login, 请用其他方式启用 (例如临时 env: FLASK_ENV=development DEV_MODE=true)
         $env:FLASK_DEBUG = 'false'
         $env:TESTING = 'false'
-        $env:FLASK_ENV = 'development'
-        # [BUG-V036 2026-06-29] DEV_MODE=true 启用 YAML 热加载 (_ensure_fresh_meta)
-        # FLASK_DEBUG=false 时 errorhandler(Exception) 不返回 traceback (安全)
-        # DEV_MODE=true 独立于 FLASK_DEBUG, 仅控制 YAML 热加载 (开发效率)
-        $env:DEV_MODE = 'true'
+        $env:FLASK_ENV = 'production'
         $env:CORS_ALLOWED_ORIGINS = 'http://localhost:5173,http://localhost:3010,http://localhost:3004'
         # 🆕 v3.18: 注入 AGENT_PORT 给 waitress_server.py 用
         $env:AGENT_PORT = $port.ToString()
