@@ -389,10 +389,7 @@ function handleToolbarAction(action, section) {
     console.debug('[AssociationSection] Emitting open-assign with section:', section)
     emit('open-assign', section)
   } else if (action.key === 'create') {
-    console.log('[AssociationSection] create branch → handleAnnotationCreate')
     handleAnnotationCreate(section)
-  } else {
-    console.log('[AssociationSection] unhandled action.key:', action.key)
   }
 }
 
@@ -575,23 +572,13 @@ async function loadAnnotationCategories() {
   // [FIX 2026-06-29] 始终调用 API, 不依赖缓存
   //   之前: categoriesLoaded 模块级共享, 第一次失败后即使再打开也不会重试
   //   弹窗可能保持默认 4 个 (defaultCategories), 即使数据库有 6 个
+  // [FIX-2 2026-06-29 v2] EnumService._extractValuesArray 递归找数组 (兼容双层包装)
   try {
-    // [DEBUG] 直接 fetch, 不通过 EnumService, 看 API 真实响应
-    const directResp = await fetch('/api/v1/enum-types/annotation_category/values?is_active=true&pageSize=1000', {
-      headers: { 'Accept': 'application/json' }
-    })
-    const directJson = await directResp.json()
-    console.log('[DEBUG] direct API status:', directResp.status)
-    console.log('[DEBUG] direct API body.data type:', typeof directJson.data, 'isArray:', Array.isArray(directJson.data))
-    console.log('[DEBUG] direct API body.data.data type:', typeof directJson.data?.data, 'isArray:', Array.isArray(directJson.data?.data))
-    console.log('[DEBUG] direct API count:', directJson.data?.data?.length)
-
     const items = await EnumService.loadOptions('annotation_category', {
       useHighSpeedEndpoint: false,
       cache: false,
       throwError: false
     })
-    console.log('[AssociationSection] loadAnnotationCategories items:', items?.length, items?.slice(0, 2))
     if (items && items.length > 0) {
       annotationCategories.value = items.map(item => {
         const config = CATEGORY_CONFIG[item.value]
@@ -600,26 +587,19 @@ async function loadAnnotationCategories() {
           name: config ? config.label : item.label
         }
       })
-      console.log('[AssociationSection] annotationCategories.value.length=', annotationCategories.value.length)
       categoriesLoaded = true
-    } else {
-      console.log('[AssociationSection] items EMPTY, annotationCategories stays default 4')
     }
-  } catch (e) {
-    console.error('[AssociationSection] loadAnnotationCategories ERROR:', e)
+  } catch {
     // 失败时保持默认 4 个 (annotationCategories.value 初始化时已是 defaultCategories)
     categoriesLoaded = false
   }
 }
 
 async function handleAnnotationCreate(section) {
-  console.log('[AssociationSection] handleAnnotationCreate START')
   await loadAnnotationCategories()
-  console.log('[AssociationSection] handleAnnotationCreate AFTER load, annotationCategories.length=', annotationCategories.value.length)
   annotationEditingId.value = null
   annotationEntityData.value = null
   annotationFormVisible.value = true
-  console.log('[AssociationSection] handleAnnotationCreate END, visible=', annotationFormVisible.value)
 }
 
 async function handleAnnotationEdit(row, section) {
