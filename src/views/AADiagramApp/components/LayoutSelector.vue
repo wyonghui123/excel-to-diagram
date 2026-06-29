@@ -4,6 +4,27 @@
       <div class="global-group-header">
         <h3 class="section-title">分组控制</h3>
         <div class="header-actions">
+          <!-- [V_NEW 2026-06-29] annotation 备注类型多选 - 备注文本是辅助信息, 不影响主路径 -->
+          <!-- 主线不受影响: 默认空选择 = 不过滤, 显示全部备注 -->
+          <el-select
+            v-model="annotationCategoryFilter"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            placeholder="备注类型 (不选=全部)"
+            class="annotation-category-filter"
+            :loading="enumLoading"
+            :disabled="enumOptions.length === 0"
+            style="min-width: 180px; margin-right: var(--spacing-sm);"
+            @change="handleAnnotationFilterChange"
+          >
+            <el-option
+              v-for="opt in enumOptions"
+              :key="opt.value"
+              :label="opt.label"
+              :value="opt.value"
+            />
+          </el-select>
           <div class="direction-toggle">
             <button
               class="direction-btn"
@@ -125,6 +146,7 @@
 import LayoutControlPanel from './LayoutControlPanel.vue'
 import { AppIcon } from '@/components/common/AppIcon'
 import { useDiagramConfigStore } from '@/stores/diagramConfigStore'
+import { fetchEnumTypeValues } from '@/services/enumTypeService'
 
 export default {
   name: 'LayoutSelector',
@@ -161,7 +183,14 @@ export default {
     return {
       showVirtualLayerDialog: false,
       virtualLayerCount: 3,
-      advancedMode: false
+      advancedMode: false,
+      // [V_NEW 2026-06-29] annotation 备注类型多选 - 备注文本是辅助信息, 不影响主路径
+      // enumLoading: 加载 enum_type 状态 (true = 加载中, false = 已加载/失败)
+      // enumOptions: 动态加载的 enum_type 值列表 (失败为空数组, UI 显示禁用)
+      enumOptions: [],
+      enumLoading: false,
+      // [V_NEW 2026-06-29] 强制重新渲染 key - 用于 store annotationCategoryFilter 改变时触发 v-model 更新
+      annotationCategoryFilterRenderKey: 0
     }
   },
   watch: {
@@ -207,6 +236,25 @@ export default {
       const groups = this.diagramConfigStore.layoutControlConfig?.groups
       if (!groups || groups.length === 0) return false
       return groups.some(g => g._isVirtualLayer)
+    },
+    // [V_NEW 2026-06-29] annotation 备注类型多选
+    // 双向绑定到 store.annotationCategoryFilter, 默认空 = 不过滤
+    annotationCategoryFilter: {
+      get() {
+        return this.diagramConfigStore.annotationCategoryFilter || []
+      },
+      set(value) {
+        this.diagramConfigStore.setAnnotationCategoryFilter(value)
+      }
+    }
+  },
+  async mounted() {
+    // [V_NEW 2026-06-29] 加载 enum_type 选项 - 失败时 UI 禁用, 不影响其他功能
+    this.enumLoading = true
+    try {
+      this.enumOptions = await fetchEnumTypeValues('annotation_category')
+    } finally {
+      this.enumLoading = false
     }
   },
   methods: {
@@ -222,6 +270,13 @@ export default {
         overallDirection: direction
       }
       this.diagramConfigStore.updateLayoutControlConfig(newConfig)
+    },
+    // [V_NEW 2026-06-29] annotation category 过滤变化处理
+    // store 已通过 setter 自动更新, 这里仅打 log + 触发 chart 重新渲染
+    handleAnnotationFilterChange(values) {
+      // 触发 watch 重渲染 (让 parent 组件知道配置已变)
+      this.annotationCategoryFilterRenderKey++
+      console.log('[LayoutSelector] annotationCategoryFilter changed:', values)
     },
     handleAddGroup() {
       this.$emit('add-group')
