@@ -29,6 +29,8 @@ modified_files:
   - docs/SOP-USER-DEPLOYMENT.md
   # 上轮 worktree 遗留改动
   - src/services/relationClassifier.js
+  # Phase 1 性能优化 - smChildCount 引用缓存
+  - src/components/common/RelationScopeTree/RelationScopeTree.vue
   # 自动合并 (9)
   - meta/core/action_executor.py
   - meta/core/interceptors/cascade_interceptor.py

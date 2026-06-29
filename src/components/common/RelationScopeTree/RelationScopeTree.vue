@@ -265,8 +265,23 @@ const allBusinessObjects = shallowRef([])
 //       原 boIdsBySm 永远为空, 选 1 SM (58 BO) → flattenSelectedBoIds 空 → 兜底返回 1
 // 修复: 从 treeData 提取每个 SM 节点的 child_count, 实现"SM id → BO 数"映射
 //       flattenSelectedBoIds 返回 SM id (不展开为具体 bo id, 因为没有 id 列表; 但 chip 关心的是 count)
+// [perf-2026-06-29] 显式引用缓存: Vue computed 已基于 reactive 依赖缓存,
+//   但每次依赖变化都需 reactive 系统追踪 + dirty check + 重新执行 getter.
+//   加引用短路可在 treeData 引用未变时立即返回, 避免 walk() 整棵树 (971 domain 场景 ~5ms).
+//   注意: _smCachedTreeData/_smCachedMap 是 setup() 闭包变量, 组件实例独立, 不会跨实例污染.
+let _smCachedTreeData = null
+let _smCachedMap = null
 const smChildCount = computed(() => {
-  if (!treeData.value || treeData.value.length === 0) return new Map()
+  // 引用相等短路: treeData 未变时直接返回缓存
+  if (treeData.value === _smCachedTreeData && _smCachedMap) {
+    return _smCachedMap
+  }
+
+  if (!treeData.value || treeData.value.length === 0) {
+    _smCachedTreeData = treeData.value
+    _smCachedMap = new Map()
+    return _smCachedMap
+  }
   const map = new Map()
   function walk(nodes) {
     if (!nodes) return
@@ -280,6 +295,8 @@ const smChildCount = computed(() => {
     }
   }
   walk(treeData.value)
+  _smCachedTreeData = treeData.value
+  _smCachedMap = map
   return map
 })
 
