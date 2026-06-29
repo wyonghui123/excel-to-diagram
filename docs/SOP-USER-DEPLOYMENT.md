@@ -666,6 +666,8 @@ ssh root@172.20.59.7 "openssl version"
 # 期望: OpenSSL 1.1.1w  11 Sep 2023
 ```
 
+> **Python 兼容性**：3.9.25 处于 `>=3.9,<3.14` 范围内，与本应用 100% 兼容。详细兼容矩阵见 [DEPLOYMENT_STANDARDS.md §2.2.2](./DEPLOYMENT_STANDARDS.md#222-python-兼容性范围)。
+
 ### 11.2 端口分配
 
 | 端口 | 服务 | 进程 | 健康检查 |

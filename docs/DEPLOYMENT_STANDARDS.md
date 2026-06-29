@@ -147,7 +147,8 @@ changes:
   - "修复数据库路径问题"
 
 requirements:
-  python: ">=3.8"
+  python: ">=3.9,<3.14"           # 兼容 3.9.25 ~ 3.13.x；3.14.x 跳过（gevent socket 问题）
+  python_tested: "3.9.25"         # 2026-06 实际验证版本
   disk_space: "500MB"
 
 dependencies:
@@ -492,6 +493,7 @@ _data_source = get_data_source("sqlite", database="architecture.db")
 | 2026-04-28 | v1.0 | 初始版本 | DevOps |
 | 2026-04-28 | v1.1 | 增加代码规范章节（API数据库路径规范） | DevOps |
 | 2026-06-29 | v1.2 | 固化远程实际版本：Python 3.9.25、OpenSSH 10.3p1、OpenSSL 1.1.1w；新增 2.2.1 版本验证命令 | DevOps |
+| 2026-06-29 | v1.3 | 新增 §2.2.2 Python 兼容性范围（AST 扫描结果：3.9.25 / 3.10~3.12 / 3.13 全兼容，3.14 不推荐）；MANIFEST §3.2 requirements 改为 `python: ">=3.9,<3.14"` + `python_tested: "3.9.25"` | DevOps |
 
 ---
 

@@ -24,6 +24,11 @@ modified_files:
   - meta/schemas/product.yaml
   - meta/schemas/version.yaml
   - meta/services/import_export_service.py
+  # 部署文档固化 (2026-06-29 Python 兼容性扫描)
+  - docs/DEPLOYMENT_STANDARDS.md
+  - docs/SOP-USER-DEPLOYMENT.md
+  # 上轮 worktree 遗留改动
+  - src/services/relationClassifier.js
   # 自动合并 (9)
   - meta/core/action_executor.py
   - meta/core/interceptors/cascade_interceptor.py

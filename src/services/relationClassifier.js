@@ -201,12 +201,10 @@ export function buildRelationScopeTree(filterParams, allRelationships, businessO
     return true
   })
 
-  uniqueRelations.forEach(rel => {
-    const srcBo = getBoInfo(rel, 'source')
-    const tgtBo = getBoInfo(rel, 'target')
-    rel._sourceBo = srcBo
-    rel._targetBo = tgtBo
-  })
+  // [perf-2026-06-29] 单次遍历合并: 原代码先 forEach 解析 srcBo/tgtBo (mutate rel._sourceBo/_targetBo),
+  //   再 forEach 分类统计. 两次遍历 5634 rel × 2 = 11268 次循环, 但中间无副作用.
+  //   合并为 1 次遍历, 对每条 rel: 解析 → mutate → 过滤 → 分类 → 统计. 行为等价.
+  //   关键不变量: mutate 永远在过滤前完成, 下游消费者仍能读取 _sourceBo/_targetBo.
 
   const categoryStats = {
     [ScopeType.INTERNAL]: {
@@ -230,8 +228,11 @@ export function buildRelationScopeTree(filterParams, allRelationships, businessO
   }
 
   uniqueRelations.forEach(rel => {
-    const srcBo = rel._sourceBo
-    const tgtBo = rel._targetBo
+    // [perf-2026-06-29] 单次遍历: 解析 + mutate (保留原第 1 次遍历行为, 下游消费者依赖 _sourceBo/_targetBo)
+    const srcBo = getBoInfo(rel, 'source')
+    const tgtBo = getBoInfo(rel, 'target')
+    rel._sourceBo = srcBo
+    rel._targetBo = tgtBo
 
     // 树构建仍需 srcBo/tgtBo，后端分类结果不能替代层级信息
     if (!srcBo || !tgtBo) return
