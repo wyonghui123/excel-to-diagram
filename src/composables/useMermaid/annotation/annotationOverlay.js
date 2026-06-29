@@ -211,7 +211,10 @@ export function useAnnotationOverlay() {
     addListener(header, 'click', onHeaderClick);
 
     annotations.forEach(ann => {
-      const categoryConfig = getCategoryConfig(ann.category);
+      // [FIX 2026-06-29 v5] categoryConfig 可能 null (ann.category 不在 CATEGORY_CONFIG 中)
+      //   兜底链: getCategoryConfig(ann.category) -> getCategoryConfig('info') -> inline default
+      //   修复 'Cannot read properties of null (reading border)' 错误
+      const categoryConfig = getCategoryConfig(ann.category) || getCategoryConfig('info') || { label: ann.category || '信息', bg: '#e6f7ff', border: '#1677ff' };
       const item = document.createElement('div');
       item.className = `annotation-item annotation-${ann.targetType}`;
       item.setAttribute('data-target-id', ann.targetId);
