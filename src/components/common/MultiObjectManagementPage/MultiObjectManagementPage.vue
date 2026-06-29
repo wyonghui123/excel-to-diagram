@@ -60,6 +60,7 @@
                 :options="listOptions"
                 :enable-detail="true"
                 :enable-auto-crud="true"
+                @row-dblclick="(payload) => handleRowDblClick(tab.name, payload)"
               >
                 <template v-for="(_, slotName) in $slots" :key="slotName" #[slotName]="slotProps">
                   <slot :name="slotName" v-bind="slotProps" />
@@ -445,6 +446,14 @@ const tabsExtraContext = computed(() => {
 
 function handleToolbarChange(payload) {
   page.handleToolbarChange(payload)
+}
+
+// [FIX 2026-06-29] 行双击 → 触发该 tab 对应 MetaListPage 的 detail action
+//   - 复用现有 rowActions 中的 detail 按钮逻辑
+function handleRowDblClick(tabName, { row }) {
+  if (!row) return
+  const ref = metaListPageRefs[tabName]
+  ref?.onRowAction?.({ action: { key: 'detail' }, row })
 }
 
 defineExpose({
