@@ -294,16 +294,20 @@
             </div>
           </div>
 
-          <!-- [NEW v1.2.12 2026-06-19] 级联失败 banner (business_object 失败时显示) -->
+          <!-- [FIX 2026-06-29] 级联失败 banner 改为模糊描述, 不量化下游条数
+               原因: 之前的描述 "下游对象类型全部失败 (共 N 条)" 会让用户以为所有 N 条都是因为
+               主对象失败导致的, 但实际许多下游 (如 annotation) 失败与主对象无直接或间接关系
+               (例: 备注信息失败是 VALIDATION_FAILED - 关联对象ID 不能为空, 与业务对象是否
+               失败无关, 是独立的 validation 失败)
+               改为: 仅提示存在级联失败 + 让用户检查主对象, 不暴露具体下游数字 -->
           <div v-if="hasCascadeFailure" class="cascade-failure-banner" data-testid="cascade-banner">
             <div class="cascade-failure-banner__title">
               <el-icon><Warning /></el-icon>
-              <span>检测到级联失败</span>
+              <span>检测到存在级联失败</span>
             </div>
             <div class="cascade-failure-banner__detail">
-              主对象类型 <strong>{{ cascadeRootTypeName }}</strong> 有 {{ cascadeRootFailed }} 条导入失败，
-              导致依赖它的 <strong>{{ cascadeDependentCount }}</strong> 个下游对象类型全部失败
-              （共 <strong>{{ cascadeDependentFailed }}</strong> 条）。请先修复主对象类型的失败原因。
+              主对象类型 <strong>{{ cascadeRootTypeName }}</strong> 存在导入失败，
+              可能影响依赖它的下游对象类型。请优先检查并修复主对象类型的失败原因。
             </div>
           </div>
 
@@ -1357,6 +1361,10 @@ function restoreDialog() {
 }
 
 // 最小化浮动卡片摘要
+// [FIX 2026-06-29] 之前用 importResult.value.totalSuccess/totalFailed 但后端不返这两个字段
+//   导致 mini-float 卡片始终显示 "0 成功 | 0 失败"
+//   修复: 与 dialog 内的 totalCreatedCount/totalFailedCount 一样, 用 Object.values(results).reduce()
+//   聚合各 object_type 的 created/updated/deleted/skipped/failed 真实数据
 const miniSummary = computed(() => {
   if (currentStep.value === 1 && previewResult.value) {
     const errs = previewResult.value.totalErrors ?? 0
@@ -1364,10 +1372,18 @@ const miniSummary = computed(() => {
     const rows = previewResult.value.totalRows ?? 0
     return { step: '数据校验', detail: `${rows} 行 | ${errs} 错误 | ${warns} 告警` }
   }
-  if (currentStep.value === 3 && importResult.value) {
-    const ok = importResult.value.totalSuccess ?? 0
-    const fail = importResult.value.totalFailed ?? 0
-    return { step: '导入结果', detail: `${ok} 成功 | ${fail} 失败` }
+  if (currentStep.value === 3 && importResult.value?.results) {
+    // [FIX] 用与 dialog 一致的 reduce 逻辑计算成功/失败
+    //   success = created + updated
+    //   failed = failed
+    //   skipped = skipped (实际可能就是 0)
+    const results = Object.values(importResult.value.results)
+    const created = results.reduce((sum, r) => sum + (r.created || 0), 0)
+    const updated = results.reduce((sum, r) => sum + (r.updated || 0), 0)
+    const failed = results.reduce((sum, r) => sum + (r.failed || 0), 0)
+    const skipped = results.reduce((sum, r) => sum + (r.skipped || 0), 0)
+    const ok = created + updated
+    return { step: '导入结果', detail: `${ok} 成功 | ${failed} 失败 | ${skipped} 跳过` }
   }
   return { step: '导入中', detail: '处理中...' }
 })
