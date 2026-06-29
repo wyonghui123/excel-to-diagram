@@ -288,6 +288,7 @@ export function buildServiceModuleDiagramData({
     containers: sortedContainers,
     centerSubDomain: actualCenterSubDomain,
     centerSubDomainColor,
+    centerScopeColor,
     colorGroupBy,
     colorScheme,
     nodeTextColor,
