@@ -570,6 +570,7 @@ function getActionIcon(action) {
 }
 import { boService } from '@/services/boService'
 import { metaService } from '@/services/metaService'
+import { objectTypeService } from '@/services/objectTypeService'
 import { useListActionStore } from '@/stores/listActionStore'
 
 // [FR-004] 声明组件名以支持 keep-alive include 白名单匹配
@@ -893,6 +894,8 @@ const secondaryToolbarActions = computed(() =>
 )
 
 const showDetailDrawer = ref(false)
+// [FIX 2026-06-29] 保存当前详情行用于 title 显示 (objectType + objectName 格式)
+const currentDetailRow = ref(null)
 const selectedDetailId = ref(null)
 const detailEditMode = ref(false)
 const detailCreateMode = ref(false)
@@ -907,7 +910,22 @@ const detailTitle = computed(() => {
   if (detailCreateMode.value) {
     return `新建 ${metaConfig.value?.name || ''}`
   }
-  return metaConfig.value?.detail?.title || `${metaConfig.value?.name || '详情'}`
+  // [FIX 2026-06-29] 标题优先用 metaConfig.detail.title 或 metaConfig.name,
+  //                  并自动追加 row.name (来自 rowActions 触发的当前行)
+  //   1) 优先 metaConfig.detail.title (后端配置)
+  //   2) 否则 metaConfig.name (前端元数据)
+  //   3) 否则用 objectTypeService.getDetailLabel 自动产出 "关系详情"
+  //   4) 追加 row.name (如果有)
+  const base = metaConfig.value?.detail?.title
+    || metaConfig.value?.name
+    || objectTypeService.getDetailLabel(props.objectType, '')
+  // 尝试从当前 currentDetailRow 获取对象名
+  const targetRow = currentDetailRow.value
+  const targetName = targetRow?.name || targetRow?.code || targetRow?.title || ''
+  if (targetName && base) {
+    return `${base} ${targetName}`
+  }
+  return base || '详情'
 })
 
 const showDeleteConfirm = ref(false)
@@ -1492,12 +1510,14 @@ function openCreateDrawer() {
   detailCreateMode.value = true
   detailEditMode.value = false
   selectedDetailId.value = null
+  currentDetailRow.value = null  // [FIX 2026-06-29] 清空 current row
   showDetailDrawer.value = true
 }
 
 function openDetailDrawer(row, editMode = false) {
   detailCreateMode.value = false
   selectedDetailId.value = row.id
+  currentDetailRow.value = row  // [FIX 2026-06-29] 保存当前行供 title 使用
   detailEditMode.value = editMode
   showDetailDrawer.value = true
 }
