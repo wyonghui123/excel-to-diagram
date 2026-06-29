@@ -79,7 +79,11 @@ export function transformColumns(yamlColumns, options = {}) {
       maxTags: col.maxTags || 2,
 
       businessKey: col.business_key || col.businessKey || false,
-      valueHelpConfig: col.value_help_config || col.valueHelpConfig || null,
+      // [BUG-V036 2026-06-29] YAML column 配置使用 `value_help` (snake_case),
+      //   后端 API 可能返回 `value_help_config`, 前端转换后是 `valueHelpConfig`。
+      //   三种命名都要支持, 否则 YAML 中配置的 FK 列头过滤和 FK link 都会丢失。
+      //   与 filterService.js L95 的逻辑保持一致。
+      valueHelpConfig: col.value_help_config || col.valueHelpConfig || col.value_help || null,
 
       editable: col.editable !== false,
       immutable: col.immutable === true,
