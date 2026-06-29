@@ -134,7 +134,7 @@ export function useMermaidConfig() {
     }
 
     // rankdir 应该与 overallDirection 同步，而不是使用 calculateOptimalLayout 的自动计算
-    const rankdir = layoutControlConfig?.overallDirection || 'LR'
+    const rankdir = layoutControlConfig?.overallDirection || 'TB'
 
     const baseConfig = {
       startOnLoad: false,

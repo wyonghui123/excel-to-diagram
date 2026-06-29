@@ -7,21 +7,21 @@
           <div class="direction-toggle">
             <button
               class="direction-btn"
-              :class="{ active: diagramConfigStore.layoutControlConfig?.overallDirection === 'LR' }"
-              @click="updateOverallDirection('LR')"
-              title="水平排列 (Left to Right)"
-            >
-              <AppIcon name="arrow-right" size="sm" />
-              <span class="direction-label">水平</span>
-            </button>
-            <button
-              class="direction-btn"
               :class="{ active: diagramConfigStore.layoutControlConfig?.overallDirection === 'TB' }"
               @click="updateOverallDirection('TB')"
-              title="垂直排列 (Top to Bottom)"
+              title="垂直排列（整体从上到下）"
             >
               <AppIcon name="arrow-down" size="sm" />
               <span class="direction-label">垂直</span>
+            </button>
+            <button
+              class="direction-btn"
+              :class="{ active: diagramConfigStore.layoutControlConfig?.overallDirection === 'LR' }"
+              @click="updateOverallDirection('LR')"
+              title="水平排列（整体从左到右）"
+            >
+              <AppIcon name="arrow-right" size="sm" />
+              <span class="direction-label">水平</span>
             </button>
           </div>
           <button class="action-btn auto-group-btn" @click="handleAutoGroup" title="基于领域自动分组">

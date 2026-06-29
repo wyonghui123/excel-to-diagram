@@ -50,7 +50,7 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
   // 分组控制配置
   const layoutControlConfig = ref({
     enabled: false,
-    overallDirection: 'LR',
+    overallDirection: 'TB',
     groups: [],
     engine: 'elk',
     preserveOrder: true
@@ -220,7 +220,7 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     useUnifiedRenderer.value = false
     layoutControlConfig.value = {
       enabled: false,
-      overallDirection: 'LR',
+      overallDirection: 'TB',
       groups: [],
       engine: 'elk',
       preserveOrder: true
