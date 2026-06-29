@@ -12,7 +12,8 @@
 10. [八、快捷命令速查](#八-快捷命令速查)
 11. [九、版本记录](#九-版本记录)
 12. [十、代码开发规范（重要 ⚠️）](#十-代码开发规范（重要-）)
-13. [十一、附录：常用命令速查](#十一-附录：常用命令速查)
+13. [十一、服务器环境要求](#十一-服务器环境要求)
+14. [十二、附录：常用命令速查](#十二-附录：常用命令速查)
 
 ---
 # 用户傻瓜化部署 SOP
@@ -588,6 +589,7 @@ API代理：[✅/❌]
 |------|------|----------|------|
 | 2026-04-28 | v1.0 | 初始版本 | DevOps |
 | 2026-04-28 | v1.1 | 增加代码开发规范提醒 | DevOps |
+| 2026-06-29 | v1.2 | 新增 §11 服务器环境要求；固化远程实际版本（Python 3.9.25 / OpenSSH 10.3p1 / OpenSSL 1.1.1w）；新增版本验证命令、端口分配、关键目录、升级影响说明 | DevOps |
 
 ---
 
@@ -623,7 +625,86 @@ _data_source = get_data_source("sqlite", database="meta/architecture.db")
 
 ---
 
-## 十一、附录：常用命令速查
+## 十一、服务器环境要求
+
+> **当前远程服务器实际版本**（2026-06-29 核实）：
+> - **Python 3.9.25**（`python` / `python3` 均生效，2026-06 升级）
+> - **OpenSSH 10.3p1** / **OpenSSL 1.1.1w**（2026-06 升级）
+
+| 项目 | 要求 | 备注 |
+|------|------|------|
+| 服务器 IP | `172.20.59.7` | 堡垒机 + 内网 |
+| 操作系统 | CentOS 7.x | 或兼容版本 |
+| Python | **3.9.25** (Conda) | `/opt/miniconda3-py39/bin/python` |
+| OpenSSH | **10.3p1** | 2026-06 升级，已应用 |
+| OpenSSL | **1.1.1w** (11 Sep 2023) | 随 OpenSSH 升级 |
+| 磁盘空间 | ≥2GB | 部署包 + 日志 + 备份 |
+| 内存 | ≥2GB | 推荐 4GB+ |
+| 网络 | 内网可达 | 无需访问外网 |
+
+### 11.1 版本验证命令
+
+部署前/后，执行以下命令验证远程版本一致性：
+
+```bash
+# Python（python 与 python3 输出版本必须一致）
+ssh root@172.20.59.7 "python -V; python3 -V"
+# 期望输出：
+#   Python 3.9.25
+#   Python 3.9.25
+
+# SSH / OpenSSL（本地执行显示客户端；远程显示服务端）
+ssh -V
+# 期望: OpenSSH_10.3p1, OpenSSL 1.1.1w 11 Sep 2023
+
+ssh root@172.20.59.7 "sshd -V 2>&1 | head -1"
+# 期望: OpenSSH_10.3p1 ...
+
+ssh root@172.20.59.7 "openssl version"
+# 期望: OpenSSL 1.1.1w  11 Sep 2023
+```
+
+### 11.2 端口分配
+
+| 端口 | 服务 | 进程 | 健康检查 |
+|------|------|------|----------|
+| 8081 | 前端 | `server.py`（带代理）| `/health` |
+| 5001 | 后端 | `meta/server.py` | `/api/v1/health` |
+| 8080 | Admin | - | - |
+
+### 11.3 关键目录
+
+```
+/opt/app/
+├── excel-to-diagram/                  # 主应用
+│   ├── dist/                          # 前端静态文件
+│   └── meta/                          # 后端代码
+├── shared/
+│   ├── data/architecture.db           # SQLite 数据库
+│   └── logs/                          # 日志目录
+├── deployments/v{YYYYMMDD}_{序号}/    # 历史版本
+├── backups/                           # 备份目录
+├── scripts/                           # 运维脚本
+│   ├── ci-cd-test.sh
+│   ├── health-check.sh
+│   ├── post-deploy-verify.sh
+│   └── rollback-enhanced.sh
+└── state/                             # 状态文件
+```
+
+### 11.4 升级影响
+
+| 升级项 | 影响 | 注意事项 |
+|--------|------|----------|
+| OpenSSH 10.x | 旧 ssh-rsa/ssh-dss 算法被禁用 | 客户端需升级；密钥推荐 ed25519 |
+| OpenSSL 1.1.1w | 修复 CVE-2023-XXXX 系列漏洞 | Python `ssl` 模块已包含对应补丁 |
+| Python 3.9.25 | 修复 3.9.x 安全补丁 | 项目依赖（Flask/Waitress）兼容，无需调整 |
+
+> 完整规范见 [DEPLOYMENT_STANDARDS.md §2.2](./DEPLOYMENT_STANDARDS.md#22-服务器环境要求)
+
+---
+
+## 十二、附录：常用命令速查
 
 ### 服务器端命令
 
