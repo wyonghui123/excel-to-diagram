@@ -258,7 +258,9 @@ export function useSvgProcessor(options) {
   const renderAnnotationOverlay = (svgEl, diagramData, diagramType, annotationConfig, nodeColorMappings) => {
     if (!annotationConfig) return
 
-    const annotationList = annotation.parseAnnotationsFromData(diagramData, diagramType)
+    // [V_NEW 2026-06-29] 传递 annotation category 过滤 - 主线不受影响 (空数组 = 不过滤)
+    const annotationFilter = annotationConfig.annotationCategoryFilter || []
+    const annotationList = annotation.parseAnnotationsFromData(diagramData, diagramType, { filter: annotationFilter })
 
     annotation.setConfig({
       panelPosition: annotationConfig.annotationPanelPosition || 'bottom',
