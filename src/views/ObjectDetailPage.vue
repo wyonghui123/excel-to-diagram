@@ -155,7 +155,19 @@ watch(rawMode, (newMode) => {
     lastValidMode.value = newMode
   }
 }, { immediate: true })
-const mode = computed(() => lastValidMode.value || rawMode.value || 'view')
+// [FIX v2 2026-06-29] 进有效 id 时强制 'view', 即使 lastValidMode='add' (新建失败场景)
+// 例: 用户在 /detail/product?mode=add 失败 → 回 list → 进 DEMOPROD (id=533)
+//   - lastValidMode='add' (新建缓存), rawMode=undefined (URL 无 ?mode=)
+//   - 不强制 view → mode='add' → DetailPage 进入"新建"模式但有 id → 显示空表单 ✗
+//   - 强制 view → mode='view' → DetailPage 正常加载 533 详情 ✓
+const mode = computed(() => {
+  const currentId = lastValidId.value || rawId.value
+  const queryMode = rawMode.value
+  if (currentId && currentId !== 'new' && !queryMode) {
+    return 'view'
+  }
+  return lastValidMode.value || queryMode || 'view'
+})
 // [FIX 2026-06-29] detailPageMountKey 用 objectType+id 派生, 切不同对象时强制 remount DetailPage
 //   之前用 ref(0) 常量, 配合 detailPageEverMounted=true, keep-alive + 永远同 key → DetailPage 永不重建
 //   导致: 用户从 TTT01 失败回滚 → 进 DEMOPROD 详情 → 仍显示 TTT01 数据 (内部 data 缓存)
