@@ -749,7 +749,12 @@ export function useDiagramData() {
           subDomainMap.get(sm.subDomain).nodes.push({
             id: sm.code,
             name: sm.name,
-            code: sm.code
+            code: sm.code,
+            // [FIX 2026-06-29] 透传 annotation 数组字段
+            //   之前只 push id/name/code, annotation 字段全丢, 图表显示没数字标记
+            //   archDataConverter 输出 sm.annotationContents/Categories 是数组
+            annotationContents: sm.annotationContents || [],
+            annotationCategories: sm.annotationCategories || []
           })
         })
       }

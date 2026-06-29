@@ -29,12 +29,20 @@ async function fetchPreviewData(versionId, hierarchyFilter = {}) {
   }
 
   const data = result.data
+  // [FIX 2026-06-29 v2] 把后端 snake_case 字段转成驼峰
+  //   之前直接透传 snake_case (annotation_contents), 但下游代码用驼峰
+  //   (annotationContents) → 字段找不到 → annotationList.length = 0
+  const normalizeAnnotation = (item) => ({
+    ...item,
+    annotationContents: item.annotation_contents || item.annotationContents || [],
+    annotationCategories: item.annotation_categories || item.annotationCategories || []
+  })
   return {
     domains: data.domains || [],
     subDomains: data.sub_domains || [],
-    serviceModules: data.service_modules || [],
-    businessObjects: data.business_objects || [],
-    relationships: data.relationships || [],
+    serviceModules: (data.service_modules || []).map(normalizeAnnotation),
+    businessObjects: (data.business_objects || []).map(normalizeAnnotation),
+    relationships: (data.relationships || []).map(normalizeAnnotation),
     centerScope: data.center_scope || []
   }
 }
