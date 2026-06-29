@@ -267,10 +267,7 @@ def read_bo(object_type, obj_id):
         return jsonify({'success': False, 'message': '对象不存在或无访问权限'}), 404
 
     bo = _get_bo()
-    import sys
-    print(f"[DBG-READ-BO] START: object_type={object_type}, obj_id={obj_id}", file=sys.stderr, flush=True)
     result = bo.read(object_type, obj_id)
-    print(f"[DBG-READ-BO] END: success={result.success}, data_keys={list(result.data.keys()) if isinstance(result.data, dict) else 'N/A'}", file=sys.stderr, flush=True)
     if result.success:
         _attach_change_history(result.data, object_type, obj_id)
         return jsonify({'success': True, 'data': result.data})
@@ -2311,8 +2308,12 @@ def _load_annotation_categories():
 def get_view_config(object_type, view_name='default'):
     try:
         from meta.services.view_config_service import view_config_service
-        from meta.api.meta_api import _dataclass_to_dict
-        
+        from meta.api.meta_api import _dataclass_to_dict, _ensure_fresh_meta
+
+        # [BUG-V036 2026-06-29] 调用 _ensure_fresh_meta() 确保 YAML 修改被热加载
+        # 否则 DEV_MODE=False 时 YAML 修改不会生效, 导致 column 的 value_help/filter_type 等配置丢失
+        _ensure_fresh_meta()
+
         # 先获取原始配置
         original_config = view_config_service.get_view_config(object_type, view_name)
         logger.info(f"[bo_api] original_config: {original_config}")
