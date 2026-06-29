@@ -262,6 +262,24 @@ export function useSvgProcessor(options) {
     const annotationFilter = annotationConfig.annotationCategoryFilter || []
     const annotationList = annotation.parseAnnotationsFromData(diagramData, diagramType, { filter: annotationFilter })
 
+    // [DEBUG 2026-06-29] 诊断 annotation 是否真的解析出来
+    console.log('[renderAnnotationOverlay] START, filter:', annotationFilter, 'diagramData keys:', diagramData ? Object.keys(diagramData) : 'NULL')
+    if (diagramData) {
+      console.log('[renderAnnotationOverlay] nodes count:', diagramData.nodes?.length, 'links count:', diagramData.links?.length, 'serviceModules count:', diagramData.serviceModules?.length)
+      const sampleLink = diagramData.links?.[0]
+      if (sampleLink) {
+        console.log('[renderAnnotationOverlay] sample link annotationContents:', sampleLink.annotationContents, 'annotationCategories:', sampleLink.annotationCategories)
+      }
+      const sampleNode = diagramData.nodes?.[0]
+      if (sampleNode) {
+        console.log('[renderAnnotationOverlay] sample node annotationContents:', sampleNode.annotationContents, 'annotationCategories:', sampleNode.annotationCategories)
+      }
+    }
+    console.log('[renderAnnotationOverlay] annotationList length:', annotationList.length)
+    if (annotationList.length > 0) {
+      console.log('[renderAnnotationOverlay] sample annotation:', annotationList[0])
+    }
+
     annotation.setConfig({
       panelPosition: annotationConfig.annotationPanelPosition || 'bottom',
       showIcons: annotationConfig.showAnnotationIcons || false
