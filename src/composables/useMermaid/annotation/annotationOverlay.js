@@ -189,6 +189,8 @@ export function useAnnotationOverlay() {
 
     // 循环切换状态：collapsed -> compact -> detail -> collapsed
     const onHeaderClick = () => {
+      // [DEBUG 2026-06-29] 诊断 header 点击
+      console.log('[annotationHeader] click, beforeState:', currentState)
       if (currentState === 'collapsed') {
         currentState = 'compact';
         list.style.display = 'flex';
@@ -205,6 +207,7 @@ export function useAnnotationOverlay() {
       }
       sessionStorage.setItem('annotationPanelState', currentState);
       titleSpan.textContent = getTitleText();
+      console.log('[annotationHeader] afterState:', currentState)
       updatePanel();
       updateContentStyles();
     };
