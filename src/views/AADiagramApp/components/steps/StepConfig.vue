@@ -17,12 +17,14 @@
             :center-scope-bo-codes="centerScopeBoCodes"
             :business-objects="businessObjects"
             :center-scope-highlight="configStore.centerScopeHighlight"
+            :annotation-category-filter="configStore.annotationCategoryFilter"
             @update:colorGroupBy="configStore.updateColorGroupBy"
             @update:colorScheme="configStore.updateColorScheme"
             @update:nodeTextColor="configStore.updateNodeTextColor"
             @update:centerScopeColor="configStore.updateCenterScopeColor"
             @update:customColors="configStore.updateCustomColors"
             @update:centerScopeHighlight="configStore.updateCenterScopeHighlight"
+            @update:annotationCategoryFilter="configStore.setAnnotationCategoryFilter"
           />
         </template>
 
@@ -40,12 +42,14 @@
             :center-scope="configStore.centerScope"
             :center-scope-highlight="configStore.centerScopeHighlight"
             :business-objects="businessObjects"
+            :annotation-category-filter="configStore.annotationCategoryFilter"
             @update:colorGroupBy="configStore.updateColorGroupBy"
             @update:colorScheme="configStore.updateColorScheme"
             @update:nodeTextColor="configStore.updateNodeTextColor"
             @update:centerScopeColor="configStore.updateCenterScopeColor"
             @update:customColors="configStore.updateCustomColors"
             @update:centerScopeHighlight="configStore.updateCenterScopeHighlight"
+            @update:annotationCategoryFilter="configStore.setAnnotationCategoryFilter"
           />
         </template>
 
