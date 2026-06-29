@@ -552,7 +552,12 @@ def create_app(db_path=None):
 
     @app.before_request
     def setup_trace():
-        print(f"[BEFORE_REQUEST] {request.method} {request.path}", flush=True)
+        try:
+            print(f"[BEFORE_REQUEST] {request.method} {request.path}", flush=True)
+        except (OSError, ValueError):
+            # [FIX 2026-06-29] Windows 下后台进程 stdout 可能已关闭/管道断开,
+            # 静默吞掉 print 错误, 不影响业务
+            pass
         g.trace_id = get_or_create_trace_id()
         g.transaction_id = str(secrets.token_hex(16))
         g.agent_id = request.headers.get('X-Agent-Id')
