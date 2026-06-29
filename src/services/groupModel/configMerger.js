@@ -339,7 +339,7 @@ export function groupModelToUserConfig(groups) {
 
   return {
     enabled: true,
-    overallDirection: 'LR',
+    overallDirection: 'TB',
     groups: groups.map(convertGroup)
   }
 }

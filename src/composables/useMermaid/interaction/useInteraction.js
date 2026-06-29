@@ -64,27 +64,38 @@ export function useInteraction() {
     // 事件触不到或 transform 视觉上没效果
     // mermaid-container 在真全屏时占满整个屏幕，事件能稳定触发
     const minScale = 0.3
-    const maxScale = 3
+    const maxScale = 10
 
     const handleWheel = (e) => {
       e.preventDefault()
 
-      const rect = mermaidContentRef.value.getBoundingClientRect()
-      const mouseX = e.clientX - rect.left
-      const mouseY = e.clientY - rect.top
-
       const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1
       const newScale = Math.max(minScale, Math.min(maxScale, scale.value * zoomFactor))
+      if (newScale === scale.value) return
 
-      const centerX = rect.width / 2
-      const centerY = rect.height / 2
+      // 以图表可视区域（mermaid-wrapper）中央作为缩放中心
+      // 参考 HTML 导出缩放中心修复 pattern (MermaidComponent.vue line 1449-1477)
+      const wrapperRect = mermaidWrapperRef.value.getBoundingClientRect()
+      const cx = wrapperRect.left + wrapperRect.width / 2
+      const cy = wrapperRect.top + wrapperRect.height / 2
 
-      const offsetX = mouseX - centerX
-      const offsetY = mouseY - centerY
+      // .mermaid-content 元素未变换时中心视口位置 O
+      // transform-origin: center center 让缩放绕 O 进行，但 translate 会平移整个元素
+      // 所以变换后 rect 中心 = O + translate，反推 O = 变换后 rect 中心 - translate
+      const contentRect = mermaidContentRef.value.getBoundingClientRect()
+      const ox = contentRect.left + contentRect.width / 2 - translateX.value
+      const oy = contentRect.top + contentRect.height / 2 - translateY.value
 
-      const scaleDiff = newScale - scale.value
-      translateX.value = translateX.value - offsetX * scaleDiff
-      translateY.value = translateY.value - offsetY * scaleDiff
+      // 视口点 v 与内容点 c 的关系（transform-origin: center, transform: translate(t) scale(s)）：
+      //   v = (c - o) * s + o + t   =>   c = (v - o - t) / s + o
+      // 求屏幕中央 (cx, cy) 对应的内容点
+      const xContent = (cx - ox - translateX.value) / scale.value + ox
+      const yContent = (cy - oy - translateY.value) / scale.value + oy
+
+      // 缩放后让该内容点仍对应屏幕中央
+      //   t = v - (c - o) * s - o
+      translateX.value = cx - (xContent - ox) * newScale - ox
+      translateY.value = cy - (yContent - oy) * newScale - oy
 
       scale.value = newScale
       updateTransform(mermaidContentRef)
