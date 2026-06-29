@@ -189,6 +189,7 @@ export function useAnnotationOverlay() {
 
     // 循环切换状态：collapsed -> compact -> detail -> collapsed
     const onHeaderClick = () => {
+      console.log('[annotation-header-click]', { from: currentState, to: '?' })
       if (currentState === 'collapsed') {
         currentState = 'compact';
         list.style.display = 'flex';
@@ -208,9 +209,14 @@ export function useAnnotationOverlay() {
       updatePanel();
       updateContentStyles();
     };
-    // [FIX 2026-06-29 v7] 用原生 addEventListener (避开 addListener 包装的 _cleanupFns 时序问题)
+    // [FIX 2026-06-29 v9] onclick 属性 + addEventListener 双重保险
+    //   之前只用 addEventListener, 但 addListener 包装有 _cleanupFns 时序问题
+    //   改用 onclick 属性 (HTML 绑定, 不依赖 event system)
+    //   + addEventListener 兜底
+    header.onclick = onHeaderClick
     header.addEventListener('click', onHeaderClick)
-    _cleanupFns.push(() => header.removeEventListener('click', onHeaderClick))
+    header.setAttribute('data-click-bound', 'true')
+    console.log('[overlayAnnotationPanel] header click listener attached via onclick+addEventListener, header.outerHTML:', header.outerHTML.substring(0, 200))
 
     annotations.forEach(ann => {
       // [FIX 2026-06-29 v5] categoryConfig 可能 null (ann.category 不在 CATEGORY_CONFIG 中)
