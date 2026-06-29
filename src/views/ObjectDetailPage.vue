@@ -142,7 +142,17 @@ watch([rawObjectType, rawId], ([newType, newId]) => {
   }
 }, { immediate: true })
 const objectType = computed(() => lastValidObjectType.value || rawObjectType.value)
-const id = computed(() => lastValidId.value || rawId.value)
+// [FIX v2b 2026-06-29] mode='add' 时强制 id='new' (而不是 lastValidId 缓存的 id)
+//   例: 用户从 DEMOPROD (id=533) 详情回 list → 点"新建"
+//     URL=/detail/product?mode=add, lastValidId='533' (详情缓存), rawId=undefined
+//     旧 id = lastValidId.value || rawId.value = '533'
+//     → DetailPage 收到 id='533', mode='add' → 进入"新建"模式但加载 533 数据 → 显示 DEMOPROD 预填 ✗
+//   修复: queryMode='add' 时, id 必须是 'new' (告诉 DetailPage 这是新建)
+//         id='new' → DetailPage 不 fetch 533 数据 → 表单空白 ✓
+const id = computed(() => {
+  if (rawMode.value === 'add') return 'new'
+  return lastValidId.value || rawId.value
+})
 // [FIX 2026-06-18] mode 也需要缓存：add 模式下 route.query.mode='add'，
 //   切走时 query 清空 → mode 退到 'view'，切回时又变 'add'，触发
 //   DetailPage watch 的 "same object mode change" 分支走
