@@ -1,6 +1,15 @@
 /**
  * Enum Type 服务 - 从后端 enum_types API 加载枚举值
+ *
+ * [FIX 2026-06-29] 改用项目现有 EnumService.loadOptions (RelationFilterSection 同款)
+ *   原因: 自行实现的 fetch 调用与 RelationFilterSection 不一致,
+ *         后端 enum_types 表里也确实没有 annotation_category 记录,
+ *         EnumService 会自动降级到标准端点 + 缓存
  */
+
+import EnumService from '@/services/enumService'
+
+const enumService = new EnumService()
 
 /**
  * 获取指定 enum_type 的所有值
@@ -11,27 +20,25 @@
  */
 export async function fetchEnumTypeValues(enumTypeCode) {
   try {
-    // [FIX 2026-06-29] 改用正确的 API 端点: /api/v1/enums/{id}/options
-    //   之前用 /api/v1/enum_types/{code} 不存在, 一直返回 404
-    const response = await fetch(`/api/v1/enums/${enumTypeCode}/options`)
+    // [FIX 2026-06-29] 改用 EnumService.loadOptions
+    //   - 与 RelationFilterSection 一致 (Vue 组件已经在用)
+    //   - 自动降级 (高速端点 404 -> 标准端点)
+    //   - 自动缓存
+    //   - throwError=false 让失败时不抛异常, 而是返回空数组
+    const items = await enumService.loadOptions(enumTypeCode, {
+      cache: true,
+      throwError: false,
+      useHighSpeedEndpoint: true,
+    })
 
-    if (!response.ok) {
-      console.warn(`[enumTypeService] Failed to load ${enumTypeCode}: HTTP ${response.status}`)
+    if (!Array.isArray(items)) {
       return []
     }
 
-    const json = await response.json()
-    // 兼容多种响应格式: { data: { values: [...] } } 或 { data: [...] } 或 [...]
-    const values = json?.data?.values || json?.data || []
-
-    if (!Array.isArray(values)) {
-      return []
-    }
-
-    // 该 API 返回 [{code, name}, ...] 格式
-    return values.map((v) => ({
-      value: v.code,
-      label: v.name || v.code,
+    // EnumService._normalizeEnumValues 已统一格式为 {value, label, count}
+    return items.map((v) => ({
+      value: v.value || v.code,
+      label: v.label || v.name || v.code,
     }))
   } catch (e) {
     console.error(`[enumTypeService] Error loading ${enumTypeCode}:`, e)

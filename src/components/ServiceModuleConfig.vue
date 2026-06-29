@@ -82,6 +82,7 @@
     </div>
 
     <!-- [V_NEW 2026-06-29] 备注类型多选 - 备注文本是辅助信息, 不影响主路径 -->
+    <!-- [FIX 2026-06-29] 改用 el-select (与 RelationFilterSection 一致), 不再用原生 select -->
     <!-- 主线不受影响: 默认空选择 = 不过滤, 显示全部备注 -->
     <div class="form-row">
       <div class="form-item full-width">
@@ -89,21 +90,27 @@
           备注类型过滤
           <span class="form-label-hint">(不选=显示全部)</span>
         </label>
-        <div v-if="enumOptions.length > 0">
-          <select
-            v-model="annotationCategoryFilterLocal"
-            multiple
-            class="form-select annotation-category-multi"
-            @change="onAnnotationCategoryFilterChange"
-          >
-            <option
-              v-for="opt in enumOptions"
-              :key="opt.value"
-              :value="opt.value"
-            >{{ opt.label }}</option>
-          </select>
-        </div>
-        <div v-else class="annotation-category-empty" title="暂无备注类型配置（请在 enum_types 表配置 annotation_category 后重启服务）">
+        <el-select
+          v-model="annotationCategoryFilterLocal"
+          multiple
+          collapse-tags
+          collapse-tags-tooltip
+          :max-collapse-tags="2"
+          filterable
+          clearable
+          placeholder="请选择备注类型"
+          size="small"
+          class="annotation-category-filter"
+          @change="onAnnotationCategoryFilterChange"
+        >
+          <el-option
+            v-for="opt in enumOptions"
+            :key="opt.value"
+            :label="opt.label"
+            :value="opt.value"
+          />
+        </el-select>
+        <div v-if="enumOptions.length === 0" class="annotation-category-empty" title="暂无备注类型配置（请在 enum_types 表配置 annotation_category 后重启服务）">
           暂无配置（所有备注将显示）
         </div>
       </div>
@@ -350,10 +357,10 @@ export default {
       }
     },
     // [V_NEW 2026-06-29] annotation 备注类型过滤变化处理
-    onAnnotationCategoryFilterChange(event) {
-      const selected = Array.from(event.target.selectedOptions).map(opt => opt.value)
-      this.annotationCategoryFilterLocal = selected
-      this.$emit('update:annotationCategoryFilter', selected)
+    // [FIX 2026-06-29] 改用 el-select 后, @change 直接传 value (不是 event)
+    onAnnotationCategoryFilterChange(values) {
+      this.annotationCategoryFilterLocal = Array.isArray(values) ? values : []
+      this.$emit('update:annotationCategoryFilter', this.annotationCategoryFilterLocal)
     }
   }
 }
@@ -367,18 +374,9 @@ export default {
   border: 1px solid #e8e8e8;
 }
 
-/* [V_NEW 2026-06-29] 备注类型多选样式 - 显示选中的标签 */
-.annotation-category-multi {
-  min-height: 64px;
-}
-
-.annotation-category-multi option {
-  padding: 4px 8px;
-}
-
-.annotation-category-multi option:checked {
-  background: var(--color-primary, #ea580c) linear-gradient(0deg, var(--color-primary, #ea580c) 0%, var(--color-primary, #ea580c) 100%);
-  color: white;
+/* [V_NEW 2026-06-29] 备注类型多选样式 - el-select 全宽 */
+.annotation-category-filter {
+  width: 100%;
 }
 
 .form-label-hint {
@@ -388,7 +386,7 @@ export default {
   font-weight: normal;
 }
 
-/* [V_NEW 2026-06-29] 备注文本为空时的占位提示 - 比 disabled select 更清楚 */
+/* [V_NEW 2026-06-29] 备注文本为空时的占位提示 */
 .annotation-category-empty {
   padding: 8px 12px;
   background: #f5f5f5;
@@ -397,6 +395,7 @@ export default {
   color: #999;
   font-size: 13px;
   min-height: 32px;
+  margin-top: 8px;
 }
 
 .form-row {
