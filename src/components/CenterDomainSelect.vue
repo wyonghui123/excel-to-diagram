@@ -87,7 +87,6 @@
       <div class="form-item full-width">
         <label class="form-label">
           备注类型过滤
-          <span class="form-label-hint">(不选=显示全部)</span>
         </label>
         <el-select
           v-model="annotationCategoryFilterLocal"
@@ -397,13 +396,6 @@ export default {
 .annotation-category-filter {
   width: 100%;
   max-width: 320px;
-}
-
-.form-label-hint {
-  margin-left: 8px;
-  font-size: 12px;
-  color: #999;
-  font-weight: normal;
 }
 
 .form-item.full-width {

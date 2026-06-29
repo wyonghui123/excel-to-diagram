@@ -81,14 +81,13 @@
       </div>
     </div>
 
-    <!-- [V_NEW 2026-06-29] 备注类型多选 - 备注文本是辅助信息, 不影响主路径 -->
+    <!-- [V_NEW 2026-06-29] 备注类型多选 - 备注文类是辅助信息, 不影响主路径 -->
     <!-- [FIX 2026-06-29] 改用 el-select (与 RelationFilterSection 一致), 不再用原生 select -->
     <!-- 主线不受影响: 默认空选择 = 不过滤, 显示全部备注 -->
     <div class="form-row">
       <div class="form-item full-width">
         <label class="form-label">
           备注类型过滤
-          <span class="form-label-hint">(不选=显示全部)</span>
         </label>
         <el-select
           v-model="annotationCategoryFilterLocal"
@@ -378,13 +377,6 @@ export default {
 .annotation-category-filter {
   width: 100%;
   max-width: 320px;
-}
-
-.form-label-hint {
-  margin-left: 8px;
-  font-size: 12px;
-  color: #999;
-  font-weight: normal;
 }
 
 /* [V_NEW 2026-06-29] 备注文本为空时的占位提示 */

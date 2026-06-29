@@ -121,7 +121,7 @@ const EnumService = {
         return [];
       }
 
-      const values = this._normalizeEnumValues(result.data?.data || []);
+      const values = this._normalizeEnumValues(this._extractValuesArray(result));
 
       if (cache) {
         this._addToCache(enumTypeId, values);
@@ -199,6 +199,38 @@ const EnumService = {
     };
   },
   
+  /**
+   * 提取 values 数组 - 兼容两种后端响应结构
+   *
+   * 高速端点 (/enums/{id}/options) 响应: {data: [{code, name}, ...], success: true, message}
+   * 标准端点 (/enum-types/{id}/values) 响应: {data: {data: [{code, name}, ...], total: 6, ...}, ...}
+   *
+   * [FIX 2026-06-29] 之前固定取 result.data?.data, 标准端点会拿到 {data: [...]} 对象 (不是数组),
+   *   导致 _normalizeEnumValues 返回 [], 弹窗保持默认 4 个 categories
+   *
+   * @param {Object} result - _loadFromHighSpeedEndpoint / _loadFromStandardEndpoint 返回
+   * @returns {Array} values 数组
+   * @private
+   */
+  _extractValuesArray(result) {
+    if (!result || !result.data) return []
+
+    const data = result.data
+
+    // 标准端点: data = {data: [...], total: 6}
+    if (!Array.isArray(data) && Array.isArray(data.data)) {
+      return data.data
+    }
+
+    // 高速端点: data = [...]
+    if (Array.isArray(data)) {
+      return data
+    }
+
+    // 兜底: 兼容某些情况下 data 直接就是 values 数组
+    return []
+  },
+
   /**
    * 规范化枚举值格式
    *
