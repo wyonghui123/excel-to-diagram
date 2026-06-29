@@ -67,6 +67,8 @@ export function useInteraction() {
     const maxScale = 10
 
     const handleWheel = (e) => {
+      // [FIX 2026-06-29] 诊断 zoom - 看是不是 ctrlKey/wheel event
+      console.log('[wheel] event fired, ctrlKey:', e.ctrlKey, 'deltaY:', e.deltaY, 'target:', (e.target?.tagName || 'unknown'))
       e.preventDefault()
 
       const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1

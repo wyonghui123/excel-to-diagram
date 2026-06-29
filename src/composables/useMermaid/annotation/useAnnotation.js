@@ -141,8 +141,11 @@ export function useAnnotation() {
   const buildNumberMap = (annotationList) => {
     const map = new Map();
     annotationList.forEach(ann => {
-      const typeConfig = getTypeConfig(ann.targetType);
-      const categoryConfig = getCategoryConfig(ann.category);
+      const typeConfig = getTypeConfig(ann.targetType) || { bg: '#e7f3ff', border: '#0066cc', position: 'top-right' };
+      // [FIX 2026-06-29 v4] categoryConfig 可能为 null (category 不在 CATEGORY_CONFIG 中)
+      //   兜底为 DEFAULT_CATEGORY_CONFIG[DEFAULT_CATEGORY] (即 'info')
+      //   主线不受影响: 之前 info 是有效的所以不会 null, 现在用户用自定义 enum (TEST) 触发 null
+      const categoryConfig = getCategoryConfig(ann.category) || getCategoryConfig('info') || { label: ann.category || '信息', bg: '#e6f7ff', border: '#1677ff' };
       const entry = {
         number: ann.number,
         displayNumber: toCircleNumber(ann.number),
