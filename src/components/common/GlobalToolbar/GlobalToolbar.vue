@@ -3,19 +3,10 @@
     <div class="gt-context">
       <template v-if="compact && hasSelection">
         <span class="gt-compact-label">{{ selectedProduct?.name }} / {{ selectedVersion?.name }}</span>
-        <el-dropdown trigger="click" :teleported="false" popper-class="app-tooltip-popper" @command="handleDropdownCommand">
-          <el-button type="primary" link size="small" class="gt-switch-btn">
-            <el-icon><Switch /></el-icon>
-            切换
-          </el-button>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item command="changeProduct">切换产品</el-dropdown-item>
-              <el-dropdown-item command="changeVersion">切换版本</el-dropdown-item>
-              <el-dropdown-item divided command="clear">清除选择</el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
+        <el-button type="primary" link size="small" class="gt-switch-btn" @click="openSwitchDialog">
+          <el-icon><Switch /></el-icon>
+          切换
+        </el-button>
       </template>
       <template v-else>
         <div class="gt-selector">
@@ -87,28 +78,45 @@
       </el-tooltip>
     </div>
 
-    <el-dialog v-model="showChangeDialog" :title="changeDialogType === 'product' ? '切换产品' : '切换版本'" width="400px">
-      <el-select
-        v-if="changeDialogType === 'product'"
-        v-model="dialogSelectValue"
-        placeholder="请选择产品"
-        filterable
-        style="width: 100%"
-      >
-        <el-option v-for="p in products" :key="p.id" :label="p.name" :value="p.id" />
-      </el-select>
-      <el-select
-        v-else
-        v-model="dialogSelectValue"
-        placeholder="请选择版本"
-        filterable
-        style="width: 100%"
-      >
-        <el-option v-for="v in versions" :key="v.id" :label="v.name" :value="v.id" />
-      </el-select>
+    <el-dialog v-model="showSwitchDialog" title="切换产品版本" width="440px" :close-on-click-modal="false">
+      <div class="gt-switch-dialog">
+        <div class="gt-switch-field">
+          <label class="gt-switch-label">产品 <span class="gt-required">*</span></label>
+          <el-select
+            v-model="dialogProductId"
+            placeholder="请选择产品"
+            :loading="loadingProducts"
+            filterable
+            clearable
+            style="width: 100%"
+            @change="onDialogProductChange"
+          >
+            <el-option v-for="p in products" :key="p.id" :label="p.name" :value="p.id" />
+          </el-select>
+        </div>
+        <div class="gt-switch-field">
+          <label class="gt-switch-label">版本 <span class="gt-required">*</span></label>
+          <el-select
+            v-model="dialogVersionId"
+            placeholder="请选择版本"
+            :loading="loadingDialogVersions"
+            :disabled="!dialogProductId"
+            filterable
+            clearable
+            style="width: 100%"
+          >
+            <el-option v-for="v in dialogVersions" :key="v.id" :label="v.name" :value="v.id" />
+          </el-select>
+        </div>
+      </div>
       <template #footer>
-        <el-button @click="showChangeDialog = false">取消</el-button>
-        <el-button type="primary" @click="confirmChange">确定</el-button>
+        <div class="gt-switch-footer">
+          <el-button v-if="hasSelection" link type="danger" @click="clearSelection">清除选择</el-button>
+          <span class="gt-switch-footer-right">
+            <el-button @click="showSwitchDialog = false">取消</el-button>
+            <el-button type="primary" :disabled="!dialogProductId || !dialogVersionId" @click="confirmSwitch">确定</el-button>
+          </span>
+        </div>
       </template>
     </el-dialog>
   </div>
@@ -148,6 +156,7 @@ const {
   loadingProducts,
   loadingVersions,
   fetchProducts,
+  fetchVersions,
   selectProduct,
   selectVersion,
   clearContext
@@ -155,9 +164,11 @@ const {
 
 const localProductId = ref(selectedProductId.value)
 const localVersionId = ref(selectedVersionId.value)
-const showChangeDialog = ref(false)
-const changeDialogType = ref('product')
-const dialogSelectValue = ref(null)
+const showSwitchDialog = ref(false)
+const dialogProductId = ref(null)
+const dialogVersionId = ref(null)
+const dialogVersions = ref([])
+const loadingDialogVersions = ref(false)
 
 const hasSelection = computed(() => !!selectedProductId.value && !!selectedVersionId.value)
 
@@ -202,40 +213,53 @@ function onVisibleChange(visible) {
   }
 }
 
-function handleDropdownCommand(command) {
-  if (command === 'changeProduct') {
-    changeDialogType.value = 'product'
-    dialogSelectValue.value = selectedProductId.value
-    showChangeDialog.value = true
-  } else if (command === 'changeVersion') {
-    changeDialogType.value = 'version'
-    dialogSelectValue.value = selectedVersionId.value
-    showChangeDialog.value = true
-  } else if (command === 'clear') {
-    clearContext()
-    localProductId.value = null
-    localVersionId.value = null
-    emit('change', { productId: null, versionId: null })
+function openSwitchDialog() {
+  dialogProductId.value = selectedProductId.value
+  dialogVersionId.value = selectedVersionId.value
+  dialogVersions.value = versions.value ? [...versions.value] : []
+  showSwitchDialog.value = true
+}
+
+async function onDialogProductChange(productId) {
+  dialogVersionId.value = null
+  if (!productId) {
+    dialogVersions.value = []
+    return
+  }
+  loadingDialogVersions.value = true
+  try {
+    await fetchVersions(productId)
+    dialogVersions.value = versions.value ? [...versions.value] : []
+  } finally {
+    loadingDialogVersions.value = false
   }
 }
 
-function confirmChange() {
-  if (changeDialogType.value === 'product') {
-    const product = products.value.find(p => p.id === dialogSelectValue.value)
-    if (product) {
-      selectProduct(product)
-      localProductId.value = dialogSelectValue.value
-      localVersionId.value = null
-    }
-  } else {
-    const version = versions.value.find(v => v.id === dialogSelectValue.value)
-    if (version) {
-      selectVersion(version)
-      localVersionId.value = dialogSelectValue.value
-    }
+async function confirmSwitch() {
+  const product = products.value.find(p => p.id === dialogProductId.value)
+  if (!product) {
+    return
   }
-  showChangeDialog.value = false
+  await selectProduct(product)
+  const version = dialogVersions.value.find(v => v.id === dialogVersionId.value)
+  if (version) {
+    await selectVersion(version)
+  }
+  localProductId.value = dialogProductId.value
+  localVersionId.value = dialogVersionId.value
+  showSwitchDialog.value = false
   emit('change', { productId: selectedProductId.value, versionId: selectedVersionId.value })
+}
+
+function clearSelection() {
+  clearContext()
+  localProductId.value = null
+  localVersionId.value = null
+  dialogProductId.value = null
+  dialogVersionId.value = null
+  dialogVersions.value = []
+  showSwitchDialog.value = false
+  emit('change', { productId: null, versionId: null })
 }
 
 function handleAction(action) {
@@ -355,5 +379,39 @@ defineExpose({
     opacity: 0.5;
     cursor: not-allowed;
   }
+}
+
+/* 切换产品版本弹窗 */
+.gt-switch-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.gt-switch-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gt-switch-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #303133;
+}
+
+.gt-required {
+  color: var(--color-danger, #f56c6c);
+}
+
+.gt-switch-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.gt-switch-footer-right {
+  display: flex;
+  gap: 8px;
 }
 </style>
