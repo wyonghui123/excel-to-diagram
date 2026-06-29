@@ -242,6 +242,12 @@ export function useDiagramData() {
     hideLinkLabelTails: configStore.hideLinkLabelTails,
     annotationPanelPosition: configStore.annotationPanelPosition,
     showAnnotationIcons: configStore.showAnnotationIcons,
+    // [FIX 2026-06-29 v3] 加上 annotationCategoryFilter
+    //   之前漏了这行, 传给 StepDisplay/MermaidComponent 的 annotationConfig 没有 filter 字段
+    //   useSvgProcessor.renderAnnotationOverlay 拿 annotationConfig.annotationCategoryFilter 时是 undefined
+    //   → || [] → 永远空数组 → 永远不过滤
+    // 主线不受影响: 默认 [] = 不过滤 (向后兼容)
+    annotationCategoryFilter: configStore.annotationCategoryFilter,
     assignmentMode: configStore.assignmentMode
   }))
   const diagramData = ref(null)
