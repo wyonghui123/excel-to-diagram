@@ -1156,6 +1156,10 @@ class ImportExportService:
                 'message': '导出完成'
             })
         
+        # [任务B Bug2 修复 2026-06-29] 初始化 child_parent_map, 避免
+        #   include_annotations=False 时 L1160 被跳过导致 L1161 NameError
+        #   使后端导出崩溃, 前端弹窗重置无下载
+        child_parent_map = {}
         if include_annotations:
             child_parent_map = self._collect_child_object_types(ordered_types)
         if child_parent_map:

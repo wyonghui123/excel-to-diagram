@@ -90,7 +90,7 @@
       v-model:visible="page.exportDialogVisible"
       :object-type="page.activeTab"
       :filters="page.exportFilters"
-      :object-types="page.objectTypes"
+      :object-types="page.exportObjectTypes"
       :object-type-labels="page.objectTypeLabels"
       :sort-info="currentSortInfo"
       :default-sort="currentDefaultSort"
@@ -98,6 +98,7 @@
       :total-count="currentTotalCount"
       :multi-type-mode="true"
       :show-export-options="true"
+      :default-unselected-types="['annotation', 'relationship']"
       :menu-code="menuCode"
       @success="page.handleExportSuccess"
     />
