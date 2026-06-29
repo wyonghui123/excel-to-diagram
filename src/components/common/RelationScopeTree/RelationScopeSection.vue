@@ -84,6 +84,13 @@ import { apiV1, apiV2 } from '@/utils/httpClient'
 
 const USE_FILTERSOURCE = import.meta.env.VITE_FEATURE_SCOPETREE_FILTERSOURCE !== 'false'
 
+// [性能优化 2026-06-29] 关系数据 version 级缓存
+//   背景: 每次 OSS 选择变化都触发 loadRelationships 全量重拉 (V863: 12 次串行 HTTP 拉 5634 rel + 6 次 HTTP 拉 2850 BO)
+//   优化: relationship 和 BO 数据只随 version_id 变化, OSS 变化时跳过 HTTP 只重建树
+//   安全: 编辑/新增/删除后 refreshAll 传 force=true 强制重拉; 手动刷新按钮也 force=true
+//   禁用: 设置 VITE_FEATURE_RELATION_CACHE=false 即可回退到原逻辑
+const USE_RELATION_CACHE = import.meta.env.VITE_FEATURE_RELATION_CACHE !== 'false'
+
 const props = defineProps({
   versionId: {
     type: Number,
@@ -132,6 +139,8 @@ const classifierLoading = ref(false)
 const allRelationships = ref([])
 const businessObjects = ref([])
 const loadError = ref('')
+// [性能优化] 记录上次成功加载的 version_id, 作为缓存 key
+const cachedVersionId = ref(null)
 const guard = createScopeGuard()
 
 // [FIX] 标记：handleClassifierCheck 正在处理用户勾选操作
@@ -442,7 +451,8 @@ function getClassifierNodeIcon(data) {
 
 const metaObject = inject('metaObject', ref(null))
 
-async function loadRelationships() {
+async function loadRelationships(options = {}) {
+  const { force = false } = options
   if (!props.versionId) return
 
   const isStaleRefresh = props.stale
@@ -466,6 +476,37 @@ async function loadRelationships() {
     }
   }
 
+  // [性能优化 2026-06-29] version 级缓存命中判断
+  //   命中条件: feature flag 开启 + silent refresh + 非强制 + version 未变 + 已有缓存
+  //   命中行为: 跳过 HTTP, 用缓存的 relationship + BO 只重建树
+  //   失效: force=true (编辑/手动刷新) / version 变化 / 首次加载 (无缓存)
+  const versionUnchanged = cachedVersionId.value === props.versionId
+  const hasCachedData = allRelationships.value.length > 0 && businessObjects.value.length > 0
+  const canUseCache = USE_RELATION_CACHE && isSilentRefresh && !force && versionUnchanged && hasCachedData
+
+  if (canUseCache) {
+    trace.log('loadRelationships→cache hit', {
+      relCount: allRelationships.value.length,
+      boCount: businessObjects.value.length,
+      versionId: props.versionId
+    })
+    // 用缓存数据只重建树 (buildRelationScopeTree 是纯函数, 依赖 selectedIds + rel + BO)
+    if (USE_FILTERSOURCE) {
+      classifierTreeData.value = buildRelationScopeTree(
+        {
+          domainIds: props.selectedDomainIds || [],
+          subDomainIds: props.selectedSubDomainIds || [],
+          serviceModuleIds: props.selectedServiceModuleIds || [],
+          businessObjectIds: props.selectedBoIds || []
+        },
+        allRelationships.value,
+        businessObjects.value
+      )
+    }
+    emit('load', { relationships: allRelationships.value })
+    return
+  }
+
   if (!isSilentRefresh) {
     classifierLoading.value = true
   }
@@ -477,13 +518,32 @@ async function loadRelationships() {
     //         但调 /api/v2/bo/relationship?version_id=764 返回 11 条 (跟 list 表格一致)
     //   原因: v1/v2 端点权限过滤或查询路径不同
     //   修复: el-tree 跟 list 表格一样用 v2 端点, 避免 el-tree 永远拿不到关系数据
-    const result = await apiV2.get('/bo/relationship', { params: { version_id: props.versionId, page_size: 10000 } })
-
-    if (!result.success) {
-      throw new Error(result.message || `服务端错误`)
+    //
+    // [BUG-V032 修复 2026-06-29] 分页拉全量 Relationship, 不受 MAX_USER_PAGE_SIZE=500 限制
+    //   根因: 一次性 page_size=10000 实际被 cap 为 500 (V863 5634 rel → 500 rel),
+    //         关系范围树 count 严重偏小
+    //   修复: 循环分页拉全量
+    const REL_PAGE_SIZE = 500
+    let newRelationships = []
+    let relPage = 1
+    let relHasMore = true
+    while (relHasMore) {
+      const r = await apiV2.get('/bo/relationship', {
+        params: { version_id: props.versionId, page: relPage, page_size: REL_PAGE_SIZE }
+      })
+      if (!r.success) throw new Error(r.message || `服务端错误`)
+      const items = r.data?.items || r.data || []
+      if (items.length === 0) { relHasMore = false; break }
+      newRelationships = newRelationships.concat(items)
+      const total = r.data?.total
+      if (total != null) {
+        relHasMore = newRelationships.length < total
+      } else {
+        relHasMore = items.length >= REL_PAGE_SIZE
+      }
+      relPage++
+      if (relPage > 30) relHasMore = false  // 防御: 最多 15000 rel
     }
-
-    const newRelationships = result.data?.items || result.data || []
 
     // 准备新 businessObjects
     let newBusinessObjects
@@ -498,6 +558,7 @@ async function loadRelationships() {
     allRelationships.value = newRelationships
     console.log('[RelationScopeSection] ASSIGNED allRelationships: ' + newRelationships.length)
     businessObjects.value = newBusinessObjects
+    cachedVersionId.value = props.versionId  // [性能优化] 记录缓存 key
     console.log('[RelationScopeSection] after assign: treeData=' + (classifierTreeData.value?.length || 0))
 
     if (USE_FILTERSOURCE) {
@@ -531,15 +592,44 @@ async function loadRelationships() {
 
 async function loadBusinessObjectsWithHierarchy() {
   try {
-    const [boResult, smResult, sdResult] = await Promise.all([
-      boService.query('business_object', { version_id: props.versionId, page_size: 10000 }),
+    // [BUG-V032 修复 2026-06-29] 分页拉全量 BO, 不受 MAX_USER_PAGE_SIZE=500 限制
+    // 根因: 一次性 page_size=10000 实际被 cap 为 500 (V863 2850 BO → 500 BO),
+    //       前端 relationClassifier 拿不到完整 sub_domain_id, 范围内/范围内与外部分类错乱
+    // 修复: 内部循环分页 (每页 500), 拼接全部 BO
+    const PAGE_SIZE = 500
+    let allBos = []
+    let page = 1
+    let hasMore = true
+    while (hasMore) {
+      const r = await boService.query('business_object', {
+        version_id: props.versionId,
+        page: page,
+        page_size: PAGE_SIZE
+      })
+      const items = (r?.data?.items || r?.data || r || [])
+      if (items.length === 0) {
+        hasMore = false
+        break
+      }
+      allBos = allBos.concat(items)
+      const total = r?.data?.total
+      if (total != null) {
+        hasMore = allBos.length < total
+      } else {
+        hasMore = items.length >= PAGE_SIZE
+      }
+      page++
+      if (page > 20) hasMore = false  // 防御: 最多 10000 BO
+    }
+
+    const [smResult, sdResult] = await Promise.all([
       boService.query('service_module', { version_id: props.versionId, page_size: 5000 }),
       boService.query('sub_domain', { version_id: props.versionId, page_size: 1000 })
     ])
 
-    const bos = (boResult.data?.items || boResult.data || boResult || [])
     const sms = (smResult.data?.items || smResult.data || smResult || [])
     const sds = (sdResult.data?.items || sdResult.data || sdResult || [])
+    const bos = allBos
 
     const smById = new Map()
     sms.forEach(sm => {
@@ -741,7 +831,7 @@ function handleClear() {
 }
 
 async function handleRefresh() {
-  await loadRelationships()
+  await loadRelationships({ force: true })
 }
 
 function clear() {
@@ -860,6 +950,17 @@ watch(relationTreeRef, (val) => {
 
 onMounted(() => {
   loadRelationships()
+})
+
+// [性能优化] version_id 变化时清缓存, 确保切换 version 后拉新数据
+//   注意: 父组件 RelationScopeTree 也会在 version 变化时清空 selectedBoIds 等,
+//   但子组件不会重新挂载 (无 :key 绑定 version), 需要显式 watch 清缓存。
+watch(() => props.versionId, (newVal, oldVal) => {
+  if (oldVal != null && newVal !== oldVal) {
+    cachedVersionId.value = null
+    allRelationships.value = []
+    businessObjects.value = []
+  }
 })
 
 defineExpose({

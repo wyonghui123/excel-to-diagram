@@ -259,21 +259,22 @@ const effectiveServiceModuleIds = computed(() => {
 //   修复需要先在 load 时 query BO list, 构建 boIdsBySm 反向索引
 const allBusinessObjects = shallowRef([])
 
-// 用 treeData 反向构建: service_module_id → bo_ids[]
-const boIdsBySm = computed(() => {
+// 用 treeData 反向构建: service_module_id → bo_count (用 child_count, 不是实际 bo id 列表)
+// [BUG-V033 修复 2026-06-29] 改用 service_module.child_count 聚合, 不再依赖 treeData 中的 BO 节点
+// 根因: buildHierarchyTree 不展开 BO children (避免 500 cap), treeData 中没有 type=business_object 节点,
+//       原 boIdsBySm 永远为空, 选 1 SM (58 BO) → flattenSelectedBoIds 空 → 兜底返回 1
+// 修复: 从 treeData 提取每个 SM 节点的 child_count, 实现"SM id → BO 数"映射
+//       flattenSelectedBoIds 返回 SM id (不展开为具体 bo id, 因为没有 id 列表; 但 chip 关心的是 count)
+const smChildCount = computed(() => {
   if (!treeData.value || treeData.value.length === 0) return new Map()
   const map = new Map()
   function walk(nodes) {
     if (!nodes) return
     for (const n of nodes) {
-      if (n.type === 'business_object') {
-        // hierarchyMap 反查 sm id
-        const info = hierarchyMap.value[n.id]
-        if (info?.serviceModuleId != null) {
-          const list = map.get(info.serviceModuleId) || []
-          list.push(n.id)
-          map.set(info.serviceModuleId, list)
-        }
+      if (n.type === 'service_module') {
+        // [BUG-V033] 优先用 SM 节点的 child_count (由 BUG-V028 修复保证正确)
+        const cnt = n.count || 0
+        if (cnt > 0) map.set(n.originalId || n.id, cnt)
       }
       if (n.children) walk(n.children)
     }
@@ -282,25 +283,24 @@ const boIdsBySm = computed(() => {
   return map
 })
 
-// 扁平展开所有受影响的 BO id
+// 扁平展开所有受影响的 BO id (实际返回 Set of SM id + bo id, chip 只关心 size)
+// [BUG-V033 修复] 选 SM 时, 累加 child_count 作为该 SM 的"等效 BO 数"贡献
 const flattenSelectedBoIds = computed(() => {
   const result = new Set()
   // 直接选的 BO
   for (const id of selectedBoIds.value) result.add(id)
   // 选的 service_module
   for (const smId of selectedServiceModuleIds.value) {
-    const bos = boIdsBySm.value.get(smId) || []
-    for (const boId of bos) result.add(boId)
+    const cnt = smChildCount.value.get(smId) || 0
+    if (cnt > 0) {
+      // 用 SM id + 虚拟 placeholder 模拟 BO 数 (chip 只关心 size)
+      for (let i = 0; i < cnt; i++) result.add(`__sm_${smId}_${i}__`)
+    }
   }
   // 选的 sub_domain
   for (const sdId of selectedSubDomainIds.value) {
     const info = hierarchyMap.value[sdId]
     if (!info) continue
-    // 找 sd 内所有 SM, 再找每个 SM 的 BO
-    for (const n of (treeData.value || [])) {
-      // 简化: 从 boIdsBySm 反向查 (hierarchyMap 的 bo → smId 但 sd → [smIds] 没存)
-      // 用 treeData 二次 walk
-    }
     walkSubDomain(info)
   }
   // 选的 domain
@@ -311,20 +311,25 @@ const flattenSelectedBoIds = computed(() => {
 
   function walkSubDomain(info) {
     if (!info) return
-    // treeData 中找 sm_*, type=service_module, 看 hierarchyMap[smId]?.subDomainId === info.subDomainId
-    for (const smId of (boIdsBySm.value.keys())) {
+    for (const smId of (smChildCount.value.keys())) {
       const smInfo = hierarchyMap.value[smId]
       if (smInfo?.subDomainId === info.subDomainId) {
-        for (const boId of (boIdsBySm.value.get(smId) || [])) result.add(boId)
+        const cnt = smChildCount.value.get(smId) || 0
+        if (cnt > 0) {
+          for (let i = 0; i < cnt; i++) result.add(`__sm_${smId}_${i}__`)
+        }
       }
     }
   }
   function walkDomain(info) {
     if (!info) return
-    for (const smId of (boIdsBySm.value.keys())) {
+    for (const smId of (smChildCount.value.keys())) {
       const smInfo = hierarchyMap.value[smId]
       if (smInfo?.domainId === info.domainId) {
-        for (const boId of (boIdsBySm.value.get(smId) || [])) result.add(boId)
+        const cnt = smChildCount.value.get(smId) || 0
+        if (cnt > 0) {
+          for (let i = 0; i < cnt; i++) result.add(`__sm_${smId}_${i}__`)
+        }
       }
     }
   }
@@ -428,8 +433,8 @@ function handleObjectScopeChange({ boIds, domainIds, subDomainIds, serviceModule
     exposed.exposed.forceClearChecked()
   }
   // 同步加载 RSS 树：此时 scopeIds 已更新为空 codes，新树无选中节点
-  // 传入 true 表示 silent refresh（不显示 loading）
-  relationScopeRef.value?.loadRelationships?.(true)
+  // [性能优化] 不传 force (默认 false), OSS 变化时命中 version 级缓存只重建树
+  relationScopeRef.value?.loadRelationships?.()
   trace.log('handleObjectScopeChange→clearRSS', { boCount: localSelectedBoCount.value })
 
   if ((boIds && boIds.length > 0) || (domainIds && domainIds.length > 0) ||
@@ -551,7 +556,8 @@ function loadTreeData() {
 
 async function refresh() {
   objectScopeRef.value?.loadTreeData({ silent: true })
-  await relationScopeRef.value?.loadRelationships()
+  // [性能优化] 编辑/新增/删除后触发, force=true 跳过缓存强制重拉
+  await relationScopeRef.value?.loadRelationships({ force: true })
 }
 
 async function loadRelationTypes() {
