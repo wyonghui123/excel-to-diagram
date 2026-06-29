@@ -178,19 +178,23 @@ const mode = computed(() => {
   }
   return lastValidMode.value || queryMode || 'view'
 })
-// [FIX 2026-06-29] detailPageMountKey 用 objectType+id 派生, 切不同对象时强制 remount DetailPage
+// [FIX 2026-06-29] detailPageMountKey 用 objectType+id+mode 派生, 切不同对象/模式时强制 remount DetailPage
 //   之前用 ref(0) 常量, 配合 detailPageEverMounted=true, keep-alive + 永远同 key → DetailPage 永不重建
 //   导致: 用户从 TTT01 失败回滚 → 进 DEMOPROD 详情 → 仍显示 TTT01 数据 (内部 data 缓存)
 //   必须 refresh 才能看到 DEMOPROD
-//   修复: key 包含 objectType+id, 切不同对象 → key 变 → Vue 强制重建 → 加载新 data
+//   修复: key 包含 objectType+id+mode, 切不同对象/模式 → key 变 → Vue 强制重建 → 加载新 data
 //   副作用: internalEditing 等状态会重置 (用户期望: 进新对象就该重置, 所以正确)
 //   注意: route params 变化 (undefined → 有效 → undefined) 不会触发此 key 变 (因为 lastValid 缓存)
 //         只在 newType&&newId 都有效时才更新 key, 切走不更新
+//   [FIX v3 2026-06-29] key 加入 mode, 确保 view→add 切换时强制 remount
+//     - 之前: DEMOPROD 详情 (product-533) → 新建 (product-533) 同 key → 组件复用 → 表单残留 DEMOPROD 数据
+//     - 修复后: DEMOPROD 详情 (product-533-view) → 新建 (product-533-add) key 不同 → 强制重建 → 空白表单
 const detailPageMountKey = computed(() => {
   const t = lastValidObjectType.value || rawObjectType.value
   const i = lastValidId.value || rawId.value
   if (!t || !i) return 0
-  return `${t}-${i}`
+  const m = mode.value
+  return `${t}-${i}-${m}`
 })
 // [FIX 2026-06-18] 首次 mount 后设为 true，v-if 用这个标记
 //   目的：ObjectDetailPage 被 keep-alive 缓存，detailPageEverMounted 不会重置，
@@ -255,7 +259,11 @@ const pageTitle = computed(() => {
 })
 
 const objectName = ref('')
-const displayTitle = computed(() => objectName.value ? `${pageTitle.value} ${objectName.value}` : pageTitle.value)
+// [FIX 2026-06-29] mode='add' 时不拼接 objectName，避免从详情页切回新建时显示旧产品名
+const displayTitle = computed(() => {
+  if (mode.value === 'add') return pageTitle.value
+  return objectName.value ? `${pageTitle.value} ${objectName.value}` : pageTitle.value
+})
 
 const dirty = ref(false)
 const showConfirmDialog = ref(false)
