@@ -576,9 +576,19 @@ async function loadAnnotationCategories() {
   //   之前: categoriesLoaded 模块级共享, 第一次失败后即使再打开也不会重试
   //   弹窗可能保持默认 4 个 (defaultCategories), 即使数据库有 6 个
   try {
+    // [DEBUG] 直接 fetch, 不通过 EnumService, 看 API 真实响应
+    const directResp = await fetch('/api/v1/enum-types/annotation_category/values?is_active=true&pageSize=1000', {
+      headers: { 'Accept': 'application/json' }
+    })
+    const directJson = await directResp.json()
+    console.log('[DEBUG] direct API status:', directResp.status)
+    console.log('[DEBUG] direct API body.data type:', typeof directJson.data, 'isArray:', Array.isArray(directJson.data))
+    console.log('[DEBUG] direct API body.data.data type:', typeof directJson.data?.data, 'isArray:', Array.isArray(directJson.data?.data))
+    console.log('[DEBUG] direct API count:', directJson.data?.data?.length)
+
     const items = await EnumService.loadOptions('annotation_category', {
       useHighSpeedEndpoint: false,
-      cache: false,  // [FIX] 每次弹窗打开都重新加载, 避免缓存了 4 个的版本
+      cache: false,
       throwError: false
     })
     console.log('[AssociationSection] loadAnnotationCategories items:', items?.length, items?.slice(0, 2))
