@@ -813,6 +813,23 @@ export default {
       }
     )
 
+    // [FIX 2026-06-29] 监听 annotationConfig 变化 (用户切换备注类型过滤)
+    // 之前没监听, filter 变更不会触发重新渲染, annotation overlay 不会更新
+    // 只重跑 renderAnnotationOverlay 而不重跑整个 mermaid 渲染 (性能)
+    watch(
+      () => props.annotationConfig,
+      (newVal, oldVal) => {
+        if (!newVal || !mermaidContainer.value) return
+        const svgEl = mermaidContainer.value.querySelector('svg')
+        if (!svgEl) return
+        console.log('[MermaidComponent] annotationConfig changed, filter:', newVal.annotationCategoryFilter, 'panel:', newVal.annotationPanelPosition, 'icons:', newVal.showAnnotationIcons)
+        // 重跑 processSvg (它内部会调 renderAnnotationOverlay)
+        // 主线不受影响: annotation overlay 移除+重新渲染, 其他 SVG 元素不动 (renderAnnotationOverlay 内部 removeAnnotationLayers 后重画)
+        svgProcessor.processSvg(svgEl, props, relationDescriptions, mermaidContainer, nodeColorMappings)
+      },
+      { deep: true }
+    )
+
     // 关键修复 v14：用 debounced window resize 替代 ResizeObserver
     // ResizeObserver 监听 mermaid-container 会触发 setupCanvasLayout 死循环
     // （mermaid 渲染过程中 container 尺寸会被 SVG 推大，触发 observer 重算，再推大...）
