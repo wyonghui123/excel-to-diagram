@@ -1909,59 +1909,59 @@ def get_architecture_preview():
             bo_ids = [b.get('id') for b in business_objects if b.get('id')]
             bo_ann = aggregate_annotations_for_targets('business_object', bo_ids, _ds_ann)
             for b in business_objects:
-                ann = bo_ann.get(b.get('id'), {'content': '', 'category': ''})
-                b['annotation_content'] = ann['content']
-                b['annotation_category'] = ann['category']
+                ann = bo_ann.get(b.get('id'), {'contents': [], 'categories': []})
+                b['annotation_contents'] = ann['contents']
+                b['annotation_categories'] = ann['categories']
 
             # Relationship annotations
             rel_ids = [r.get('id') for r in relationships if r.get('id')]
             rel_ann = aggregate_annotations_for_targets('relationship', rel_ids, _ds_ann)
             for r in relationships:
-                ann = rel_ann.get(r.get('id'), {'content': '', 'category': ''})
-                r['annotation_content'] = ann['content']
-                r['annotation_category'] = ann['category']
+                ann = rel_ann.get(r.get('id'), {'contents': [], 'categories': []})
+                r['annotation_contents'] = ann['contents']
+                r['annotation_categories'] = ann['categories']
 
             # SubDomain annotations
             sd_ids = [sd.get('id') for sd in sub_domains if sd.get('id')]
             sd_ann = aggregate_annotations_for_targets('sub_domain', sd_ids, _ds_ann)
             for sd in sub_domains:
-                ann = sd_ann.get(sd.get('id'), {'content': '', 'category': ''})
-                sd['annotation_content'] = ann['content']
-                sd['annotation_category'] = ann['category']
+                ann = sd_ann.get(sd.get('id'), {'contents': [], 'categories': []})
+                sd['annotation_contents'] = ann['contents']
+                sd['annotation_categories'] = ann['categories']
 
             # ServiceModule annotations
             sm_ids = [m.get('id') for m in modules if m.get('id')]
             sm_ann = aggregate_annotations_for_targets('service_module', sm_ids, _ds_ann)
             for m in modules:
-                ann = sm_ann.get(m.get('id'), {'content': '', 'category': ''})
-                m['annotation_content'] = ann['content']
-                m['annotation_category'] = ann['category']
+                ann = sm_ann.get(m.get('id'), {'contents': [], 'categories': []})
+                m['annotation_contents'] = ann['contents']
+                m['annotation_categories'] = ann['categories']
 
             # Domain annotations
             d_ids = [d.get('id') for d in domains if d.get('id')]
             d_ann = aggregate_annotations_for_targets('domain', d_ids, _ds_ann)
             for d in domains:
-                ann = d_ann.get(d.get('id'), {'content': '', 'category': ''})
-                d['annotation_content'] = ann['content']
-                d['annotation_category'] = ann['category']
+                ann = d_ann.get(d.get('id'), {'contents': [], 'categories': []})
+                d['annotation_contents'] = ann['contents']
+                d['annotation_categories'] = ann['categories']
         except Exception as e:
-            # 主线不受影响: annotation 聚合失败时, 给所有对象填空字段
+            # 主线不受影响: annotation 聚合失败时, 给所有对象填空数组
             logger.warning(f'[bo_api.get_architecture_preview] annotation aggregation failed: {e}')
             for b in business_objects:
-                b.setdefault('annotation_content', '')
-                b.setdefault('annotation_category', '')
+                b.setdefault('annotation_contents', [])
+                b.setdefault('annotation_categories', [])
             for r in relationships:
-                r.setdefault('annotation_content', '')
-                r.setdefault('annotation_category', '')
+                r.setdefault('annotation_contents', [])
+                r.setdefault('annotation_categories', [])
             for sd in sub_domains:
-                sd.setdefault('annotation_content', '')
-                sd.setdefault('annotation_category', '')
+                sd.setdefault('annotation_contents', [])
+                sd.setdefault('annotation_categories', [])
             for m in modules:
-                m.setdefault('annotation_content', '')
-                m.setdefault('annotation_category', '')
+                m.setdefault('annotation_contents', [])
+                m.setdefault('annotation_categories', [])
             for d in domains:
-                d.setdefault('annotation_content', '')
-                d.setdefault('annotation_category', '')
+                d.setdefault('annotation_contents', [])
+                d.setdefault('annotation_categories', [])
 
         return jsonify({
             'success': True,

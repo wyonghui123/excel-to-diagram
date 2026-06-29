@@ -105,8 +105,12 @@ function buildDomainProducts(domains, subDomains, serviceModules, businessObject
       domainId: dId,
       subDomainId: sdId,
       serviceModuleId: smId,
-      annotationContent: bo.annotation_content || bo.annotationContent || '',
-      annotationCategory: bo.annotation_category || bo.annotationCategory || 'info'
+      // [FIX 2026-06-29] 后端返回的是数组 (annotation_contents, annotation_categories)
+      //   而不是之前拼接的字符串 (annotation_content, annotation_category)
+      //   单条时也是数组形式 [content], 多条时 [c1, c2, c3]
+      //   这样前端 useAnnotation.parseAnnotationsFromData 可以逐条渲染
+      annotationContents: bo.annotation_contents || [],
+      annotationCategories: bo.annotation_categories || []
     })
   }
 
@@ -159,7 +163,11 @@ function buildServiceModules(serviceModules, businessObjects, subDomains, domain
       subDomainId: sm.sub_domain_id,
       domain: d?.name || sm.domain_name || '',
       domainId,
-      businessObjects: smBOs.map(bo => bo.code)
+      businessObjects: smBOs.map(bo => bo.code),
+      // [FIX 2026-06-29] 后端返回 annotation_contents/categories 数组
+      // 不传 annotationContents 数组, useAnnotation.parseAnnotationsFromData 就不会渲染
+      annotationContents: sm.annotation_contents || [],
+      annotationCategories: sm.annotation_categories || []
     }
   })
 }
@@ -187,8 +195,9 @@ function buildRelationships(rawRelationships) {
     sourceId: rel.source_bo_id || rel.sourceId || null,
     targetId: rel.target_bo_id || rel.targetId || null,
     relationDesc: rel.relation_desc || rel.relationDesc || '',
-    annotationContent: rel.annotation_content || rel.annotationContent || '',
-    annotationCategory: rel.annotation_category || rel.annotationCategory || 'info',
+    // [FIX 2026-06-29] 改为数组形式, 后端返回 annotation_contents/categories
+    annotationContents: rel.annotation_contents || [],
+    annotationCategories: rel.annotation_categories || [],
     // 后端分类结果（scope_type + category_type 下沉到后端计算）
     scopeType: rel.scope_type || null,
     categoryType: rel.category_type || null
@@ -261,8 +270,9 @@ export async function buildPreviewDataFromArchData(api, versionId, hierarchyFilt
       domainId: dId,
       subDomainId: sdId,
       serviceModuleId: smId,
-      annotationContent: bo.annotation_content || bo.annotationContent || '',
-      annotationCategory: bo.annotation_category || bo.annotationCategory || 'info'
+      // [FIX 2026-06-29] 改为数组形式
+      annotationContents: bo.annotation_contents || [],
+      annotationCategories: bo.annotation_categories || []
     }
   })
 

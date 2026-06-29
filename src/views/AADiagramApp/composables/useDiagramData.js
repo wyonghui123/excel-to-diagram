@@ -158,13 +158,18 @@ function computedServiceModuleRelations(relationships, businessObjects, serviceM
     }
     
     // 收集业务对象关系的备注
-    if (rel.annotationContent) {
+    // [FIX 2026-06-29] 后端返回 annotationContents/Categories 数组
+    //   每个关系可能有多条 annotation, 这里把每条都收下来
+    const relContents = rel.annotationContents || []
+    const relCategories = rel.annotationCategories || []
+    relContents.forEach((content, idx) => {
+      if (!content) return
       relation.businessObjectRelationships.push({
         relationCode: boRelCode,
-        annotationContent: rel.annotationContent,
-        annotationCategory: rel.annotationCategory || 'info'
+        annotationContent: content,
+        annotationCategory: relCategories[idx] || 'info'
       })
-    }
+    })
   })
 
   // 处理备注内容
@@ -172,7 +177,7 @@ function computedServiceModuleRelations(relationships, businessObjects, serviceM
   moduleRelationMap.forEach((rel) => {
     // 去重后的业务对象关系编码
     const uniqueBoCodes = [...new Set(rel.businessObjectRelationshipCodes.filter(Boolean))]
-    
+
     // 构建备注内容：关系备注内容 + 业务对象关系编码
     const boAnnotations = rel.businessObjectRelationships
       .filter(boRel => boRel.annotationContent)
@@ -180,7 +185,7 @@ function computedServiceModuleRelations(relationships, businessObjects, serviceM
         const code = boRel.relationCode || ''
         return code ? `${boRel.annotationContent} ${code}` : boRel.annotationContent
       })
-    
+
     // 去重并用分号连接
     const uniqueAnnotations = [...new Set(boAnnotations)]
     

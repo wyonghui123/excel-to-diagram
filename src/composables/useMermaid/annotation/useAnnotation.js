@@ -34,36 +34,51 @@ export function useAnnotation() {
     const result = [];
     let number = 1;
 
+    // [FIX 2026-06-29] 辅助函数 - 从 annotation 数组生成 annotation entries
+    // 后端返回 annotationContents (数组) + annotationCategories (数组)
+    // 每个 target 可能有多条 annotation, 每条生成一个 entry
+    function pushAnnotation(targetType, targetId, targetName, contents, categories, extra = {}) {
+      if (!Array.isArray(contents) || contents.length === 0) return
+      contents.forEach((content, idx) => {
+        if (!content) return  // 跳过空内容
+        const category = (Array.isArray(categories) && categories[idx]) || DEFAULT_CATEGORY
+        result.push({
+          id: `ANN${String(number).padStart(3, '0')}`,
+          number: number++,
+          targetType,
+          targetId,
+          targetName,
+          category,
+          content,
+          ...extra
+        })
+      })
+    }
+
     if (diagramType === 'serviceModule' && data.containers) {
       const nodeMap = new Map();
       data.nodes?.forEach(node => nodeMap.set(node.id, node));
 
       data.containers.forEach(container => {
-        if (container.annotationContent) {
-          result.push({
-            id: `ANN${String(number).padStart(3, '0')}`,
-            number: number++,
-            targetType: 'container',
-            targetId: container.id,
-            targetName: container.fullTitle || container.name || container.id,
-            category: container.annotationCategory || DEFAULT_CATEGORY,
-            content: container.annotationContent
-          });
-        }
+        pushAnnotation(
+          'container',
+          container.id,
+          container.fullTitle || container.name || container.id,
+          container.annotationContents,
+          container.annotationCategories
+        )
         if (container.nodes) {
           container.nodes.forEach(nodeItem => {
             const nodeId = typeof nodeItem === 'string' ? nodeItem : (nodeItem.id || nodeItem.code);
             const nodeData = nodeMap.get(nodeId);
-            if (nodeData?.annotationContent) {
-              result.push({
-                id: `ANN${String(number).padStart(3, '0')}`,
-                number: number++,
-                targetType: 'node',
-                targetId: nodeId,
-                targetName: nodeData.name,
-                category: nodeData.annotationCategory || DEFAULT_CATEGORY,
-                content: nodeData.annotationContent
-              });
+            if (nodeData) {
+              pushAnnotation(
+                'node',
+                nodeId,
+                nodeData.name,
+                nodeData.annotationContents,
+                nodeData.annotationCategories
+              )
             }
           });
         }
@@ -72,51 +87,41 @@ export function useAnnotation() {
       // 处理服务模块（容器）备注
       if (data.serviceModules) {
         data.serviceModules.forEach(sm => {
-          if (sm.annotationContent) {
-            result.push({
-              id: `ANN${String(number).padStart(3, '0')}`,
-              number: number++,
-              targetType: 'container',
-              targetId: sm.code,
-              targetName: sm.name,
-              category: sm.annotationCategory || DEFAULT_CATEGORY,
-              content: sm.annotationContent
-            });
-          }
+          pushAnnotation(
+            'container',
+            sm.code,
+            sm.name,
+            sm.annotationContents,
+            sm.annotationCategories
+          )
         });
       }
-      
+
       // 处理业务对象（节点）备注
       data.nodes.forEach(node => {
-        if (node.annotationContent) {
-          result.push({
-            id: `ANN${String(number).padStart(3, '0')}`,
-            number: number++,
-            targetType: 'node',
-            targetId: node.code || node.id || node.name,
-            targetName: node.name || node.originalName,
-            category: node.annotationCategory || DEFAULT_CATEGORY,
-            content: node.annotationContent
-          });
-        }
+        pushAnnotation(
+          'node',
+          node.code || node.id || node.name,
+          node.name || node.originalName,
+          node.annotationContents,
+          node.annotationCategories
+        )
       });
     }
 
     if (data.links) {
       data.links.forEach(link => {
-        if (link.annotationContent) {
-          result.push({
-            id: `ANN${String(number).padStart(3, '0')}`,
-            number: number++,
-            targetType: 'relation',
-            targetId: link.relationCode || `${link.source}-${link.target}`,
-            targetName: `${link.label || link.relationDesc || ''}`,
+        pushAnnotation(
+          'relation',
+          link.relationCode || `${link.source}-${link.target}`,
+          `${link.label || link.relationDesc || ''}`,
+          link.annotationContents,
+          link.annotationCategories,
+          {
             sourceBOName: link.sourceName || link.source || '',
-            targetBOName: link.targetName || link.target || '',
-            category: link.annotationCategory || DEFAULT_CATEGORY,
-            content: link.annotationContent
-          });
-        }
+            targetBOName: link.targetName || link.target || ''
+          }
+        )
       });
     }
 
