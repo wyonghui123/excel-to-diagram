@@ -1325,19 +1325,40 @@ def get_architecture_preview():
         # 构建版本过滤条件
         version_filter = {'version_id': version_id} if version_id else {}
 
-        # 查询各层级数据（大 page_size 获取全量）
-        domain_result = bo.query('domain', version_filter.copy(), page_size=5000)
-        sub_domain_result = bo.query('sub_domain', version_filter.copy(), page_size=5000)
-        module_result = bo.query('service_module', version_filter.copy(), page_size=5000)
-        bo_result = bo.query('business_object', version_filter.copy(), page_size=5000)
-        rel_result = bo.query('relationship', version_filter.copy(), page_size=10000)
+        # [BUG-V032 修复 2026-06-29] 循环分页拿全量, 绕过 MAX_USER_PAGE_SIZE=500 cap
+        # 根因: bo.query → query_bo (line 463) 把 page_size 强制 min(_, 500),
+        #       V863 有 2850 BO/5634 Rel, 单次 5000 实际被截到 500, 导致后续按 ID 过滤时大量缺失
+        # 修复: 用分页循环 (每页 500), 直到 last_page < page_size 才停
+        _PAGE_SIZE_INTERNAL = 500
+        _MAX_PAGES = 100  # 防御死循环: 上限 50000 行
+        _data_source_local = _get_data_source()
 
-        # 提取数据
-        domains = domain_result.data if domain_result.success else []
-        sub_domains = sub_domain_result.data if sub_domain_result.success else []
-        modules = module_result.data if module_result.success else []
-        business_objects = bo_result.data if bo_result.success else []
-        relationships = rel_result.data if rel_result.success else []
+        def _fetch_all_by_version(object_type, version_filter_arg):
+            """循环分页拉全量, 过滤条件 = version_filter_arg (或 page_size 内部 cap 500)"""
+            from meta.core.query_builder import QueryBuilder
+            from meta.core.models import registry
+            meta_obj = registry.get(object_type)
+            if not meta_obj:
+                return []
+            all_data = []
+            for page_idx in range(_MAX_PAGES):
+                builder = QueryBuilder(_data_source_local, meta_obj)
+                for k, v in version_filter_arg.items():
+                    builder.where_eq(k, v)
+                builder.page(page_idx + 1, _PAGE_SIZE_INTERNAL)
+                rows = builder.execute()
+                if not rows:
+                    break
+                all_data.extend(rows)
+                if len(rows) < _PAGE_SIZE_INTERNAL:
+                    break
+            return all_data
+
+        domains = _fetch_all_by_version('domain', version_filter.copy())
+        sub_domains = _fetch_all_by_version('sub_domain', version_filter.copy())
+        modules = _fetch_all_by_version('service_module', version_filter.copy())
+        business_objects = _fetch_all_by_version('business_object', version_filter.copy())
+        relationships = _fetch_all_by_version('relationship', version_filter.copy())
 
         # 解析过滤 ID 列表
         domain_id_list = [int(x) for x in domain_ids.split(',') if x.strip()]
@@ -1510,9 +1531,10 @@ def get_architecture_preview():
             if d_id and (domain_id_set is None or d_id not in domain_id_set):
                 referenced_domain_ids.add(d_id)
         if referenced_sm_ids or referenced_sub_domain_ids or referenced_domain_ids:
-            extra_modules = [m for m in module_result.data if m.get('id') in referenced_sm_ids]
-            extra_sub_domains = [sd for sd in sub_domain_result.data if sd.get('id') in referenced_sub_domain_ids]
-            extra_domains = [d for d in domain_result.data if d.get('id') in referenced_domain_ids]
+            # [BUG-V032 修复] 改用 modules/sub_domains/domains (list) 替代 .data (ActionResult)
+            extra_modules = [m for m in modules if m.get('id') in referenced_sm_ids]
+            extra_sub_domains = [sd for sd in sub_domains if sd.get('id') in referenced_sub_domain_ids]
+            extra_domains = [d for d in domains if d.get('id') in referenced_domain_ids]
             seen = {m.get('id') for m in modules}
             for m in extra_modules:
                 if m.get('id') not in seen:
