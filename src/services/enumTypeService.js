@@ -11,7 +11,9 @@
  */
 export async function fetchEnumTypeValues(enumTypeCode) {
   try {
-    const response = await fetch(`/api/v1/enum_types/${enumTypeCode}`)
+    // [FIX 2026-06-29] 改用正确的 API 端点: /api/v1/enums/{id}/options
+    //   之前用 /api/v1/enum_types/{code} 不存在, 一直返回 404
+    const response = await fetch(`/api/v1/enums/${enumTypeCode}/options`)
 
     if (!response.ok) {
       console.warn(`[enumTypeService] Failed to load ${enumTypeCode}: HTTP ${response.status}`)
@@ -26,9 +28,10 @@ export async function fetchEnumTypeValues(enumTypeCode) {
       return []
     }
 
+    // 该 API 返回 [{code, name}, ...] 格式
     return values.map((v) => ({
-      value: v.code || v.value,
-      label: v.display_name || v.label || v.code || v.value,
+      value: v.code,
+      label: v.name || v.code,
     }))
   } catch (e) {
     console.error(`[enumTypeService] Error loading ${enumTypeCode}:`, e)

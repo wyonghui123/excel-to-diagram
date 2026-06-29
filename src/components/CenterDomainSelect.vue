@@ -88,21 +88,23 @@
           备注类型过滤
           <span class="form-label-hint">(不选=显示全部)</span>
         </label>
-        <select
-          v-model="annotationCategoryFilterLocal"
-          multiple
-          class="form-select annotation-category-multi"
-          :disabled="enumOptions.length === 0"
-          :title="enumOptions.length === 0 ? '暂无备注类型配置（请在 enum_type 配置 annotation_category）' : ''"
-          @change="onAnnotationCategoryFilterChange"
-        >
-          <option v-if="enumOptions.length === 0" disabled value="">暂无配置</option>
-          <option
-            v-for="opt in enumOptions"
-            :key="opt.value"
-            :value="opt.value"
-          >{{ opt.label }}</option>
-        </select>
+        <div v-if="enumOptions.length > 0">
+          <select
+            v-model="annotationCategoryFilterLocal"
+            multiple
+            class="form-select annotation-category-multi"
+            @change="onAnnotationCategoryFilterChange"
+          >
+            <option
+              v-for="opt in enumOptions"
+              :key="opt.value"
+              :value="opt.value"
+            >{{ opt.label }}</option>
+          </select>
+        </div>
+        <div v-else class="annotation-category-empty" title="暂无备注类型配置（请在 enum_types 表配置 annotation_category 后重启服务）">
+          暂无配置（所有备注将显示）
+        </div>
       </div>
     </div>
 
@@ -407,6 +409,17 @@ export default {
 
 .form-item.full-width {
   flex: 1 1 100%;
+}
+
+/* [V_NEW 2026-06-29] 备注文本为空时的占位提示 - 比 disabled select 更清楚 */
+.annotation-category-empty {
+  padding: 8px 12px;
+  background: #f5f5f5;
+  border: 1px dashed #d9d9d9;
+  border-radius: 4px;
+  color: #999;
+  font-size: 13px;
+  min-height: 32px;
 }
 
 .form-row:last-of-type {
