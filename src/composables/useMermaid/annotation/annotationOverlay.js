@@ -98,7 +98,6 @@ export function useAnnotationOverlay() {
     // 状态：'collapsed'(收起), 'compact'(简洁), 'detail'(详情)
     const savedState = sessionStorage.getItem('annotationPanelState') || 'compact';
     let currentState = savedState;
-    console.log('[overlayAnnotationPanel] start, currentState:', currentState, 'savedState:', savedState)
 
     const panel = document.createElement('div');
     panel.className = 'annotation-dock-panel';
@@ -190,8 +189,6 @@ export function useAnnotationOverlay() {
 
     // 循环切换状态：collapsed -> compact -> detail -> collapsed
     const onHeaderClick = () => {
-      // [DEBUG 2026-06-29] 诊断 header 点击
-      console.log('[annotationHeader] click, beforeState:', currentState)
       if (currentState === 'collapsed') {
         currentState = 'compact';
         list.style.display = 'flex';
@@ -208,19 +205,12 @@ export function useAnnotationOverlay() {
       }
       sessionStorage.setItem('annotationPanelState', currentState);
       titleSpan.textContent = getTitleText();
-      console.log('[annotationHeader] afterState:', currentState)
       updatePanel();
       updateContentStyles();
     };
-    // [FIX 2026-06-29 v7] 用原生 addEventListener + 手动 removeEventListener, 不用 addListener 包装
-    //   addListener 内部 push 到 _cleanupFns 但 _cleanupFns 是模块级 let
-    //   每次调用 useAnnotationOverlay() 共享同一个 _cleanupFns 数组
-    //   可能存在时序问题: 上一次 cleanup 后 _cleanupFns 被清空, 但 listener 没真的 remove?
-    //   简化: 直接 addEventListener 看看 click 是否触发
-    const _hClickHandler = onHeaderClick
-    header.addEventListener('click', _hClickHandler)
-    console.log('[overlayAnnotationPanel] header click listener attached, tagName:', header.tagName, 'children:', header.children.length)
-    _cleanupFns.push(() => header.removeEventListener('click', _hClickHandler))
+    // [FIX 2026-06-29 v7] 用原生 addEventListener (避开 addListener 包装的 _cleanupFns 时序问题)
+    header.addEventListener('click', onHeaderClick)
+    _cleanupFns.push(() => header.removeEventListener('click', onHeaderClick))
 
     annotations.forEach(ann => {
       // [FIX 2026-06-29 v5] categoryConfig 可能 null (ann.category 不在 CATEGORY_CONFIG 中)

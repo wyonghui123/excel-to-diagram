@@ -262,26 +262,7 @@ export function useSvgProcessor(options) {
     const annotationFilter = annotationConfig.annotationCategoryFilter || []
     const annotationList = annotation.parseAnnotationsFromData(diagramData, diagramType, { filter: annotationFilter })
 
-    // [DEBUG 2026-06-29] 诊断 annotation 是否真的解析出来
-    console.log('[renderAnnotationOverlay] START, filter:', annotationFilter, 'diagramData keys:', diagramData ? Object.keys(diagramData) : 'NULL')
-    if (diagramData) {
-      console.log('[renderAnnotationOverlay] nodes count:', diagramData.nodes?.length, 'links count:', diagramData.links?.length, 'serviceModules count:', diagramData.serviceModules?.length)
-      // [FIX 2026-06-29 v2] 详细诊断：把所有可能的 annotation 字段名都列出来
-      const sampleLink = diagramData.links?.[0]
-      if (sampleLink) {
-        console.log('[renderAnnotationOverlay] sample link keys:', Object.keys(sampleLink))
-        console.log('[renderAnnotationOverlay] sample link annotation* fields:', JSON.stringify(Object.fromEntries(Object.entries(sampleLink).filter(([k]) => k.toLowerCase().includes('annot')))))
-      }
-      const sampleNode = diagramData.nodes?.[0]
-      if (sampleNode) {
-        console.log('[renderAnnotationOverlay] sample node keys:', Object.keys(sampleNode))
-        console.log('[renderAnnotationOverlay] sample node annotation* fields:', JSON.stringify(Object.fromEntries(Object.entries(sampleNode).filter(([k]) => k.toLowerCase().includes('annot')))))
-      }
-    }
-    console.log('[renderAnnotationOverlay] annotationList length:', annotationList.length)
-    if (annotationList.length > 0) {
-      console.log('[renderAnnotationOverlay] sample annotation:', annotationList[0])
-    }
+    // [DEBUG 2026-06-29 已清理, 避免 console spam]
 
     annotation.setConfig({
       panelPosition: annotationConfig.annotationPanelPosition || 'bottom',
