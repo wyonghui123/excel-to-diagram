@@ -385,7 +385,6 @@ export default {
   color: #999;
   font-weight: normal;
 }
-}
 
 .form-row {
   display: flex;
