@@ -27,7 +27,10 @@ export function useAnnotation() {
     return annotationCount.value >= 5;
   });
 
-  const parseAnnotationsFromData = (data, diagramType) => {
+  const parseAnnotationsFromData = (data, diagramType, options = {}) => {
+    // [V_NEW 2026-06-29] annotation category 过滤
+    // 主线不受影响: filter 为空/undefined = 不过滤 (向后兼容)
+    const { filter = [] } = options;
     const result = [];
     let number = 1;
 
@@ -117,8 +120,17 @@ export function useAnnotation() {
       });
     }
 
-    annotations.value = result;
-    return result;
+    // [V_NEW 2026-06-29] 应用 category 过滤
+    //   filter = [] => 不过滤 (向后兼容)
+    //   filter 非空 => 只保留 category 在 filter 中的 annotation
+    //   空 category 的 annotation 始终保留 (兼容无 category 数据)
+    // 主线不受影响: 默认 [] = 不过滤
+    const filteredResult = (Array.isArray(filter) && filter.length > 0)
+      ? result.filter(ann => !ann.category || filter.includes(ann.category))
+      : result;
+
+    annotations.value = filteredResult;
+    return filteredResult;
   };
 
   const buildNumberMap = (annotationList) => {
