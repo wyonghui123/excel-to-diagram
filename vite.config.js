@@ -59,7 +59,7 @@ export default defineConfig({
   },
   server: {
     host: true,
-    port: 3004,
+    port: 3005,
     // [FIX 2026-06-12 #13] 根治 MetaListPage toolbar/table "又这样了" 复发
     // 根因: 浏览器缓存 Vite 编译产物 (SCSS 改完后旧 CSS 被缓存)
     // 用户反馈"我刷新后现在又好了" 确认是缓存问题
@@ -82,7 +82,7 @@ export default defineConfig({
     proxy: {
       // [FR-009] 合并所有 /api/* 到统一代理规则 (原来 5 条独立规则, target 相同)
       '/api': {
-        target: 'http://localhost:3010',
+        target: 'http://localhost:3004',
         changeOrigin: true,
         ws: true,
         // [FIX BUG-V029 2026-06-28] 30s→180s
@@ -101,7 +101,7 @@ export default defineConfig({
         }
       },
       '/socket.io': {
-        target: 'http://localhost:3010',
+        target: 'http://localhost:3004',
         changeOrigin: true,
         ws: true,
       }

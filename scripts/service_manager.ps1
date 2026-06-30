@@ -53,6 +53,27 @@ function Read-EnvPort($key, $default) {
     return $default
 }
 
+# [fix-svc 2026-06-30] 读取 .env 中的 bool 变量
+function Read-EnvBool($key, $default) {
+    if (Test-Path $envFile) {
+        try {
+            $lines = Get-Content $envFile -ErrorAction Stop
+            foreach ($line in $lines) {
+                $trimmed = $line.Trim()
+                if ($trimmed -and -not $trimmed.StartsWith('#')) {
+                    $parts = $trimmed -split '=', 2
+                    if ($parts.Length -eq 2 -and $parts[0].Trim() -eq $key) {
+                        $val = $parts[1].Trim().ToLower()
+                        if ($val -eq 'true') { return $true }
+                        if ($val -eq 'false') { return $false }
+                    }
+                }
+            }
+        } catch {}
+    }
+    return $default
+}
+
 $flaskPort = Read-EnvPort 'FLASK_PORT' $Port
 $vitePort  = Read-EnvPort 'VITE_DEV_PORT' 3004
 
@@ -574,10 +595,11 @@ function Start-Service($svcName) {
         #   - FLASK_ENV: development → production (生产模式)
         #   - DEV_MODE: 移除 (生产不应启用 YAML 热加载)
         # 如需 dev_login, 请用其他方式启用 (例如临时 env: FLASK_ENV=development DEV_MODE=true)
-        $env:FLASK_DEBUG = 'false'
+        # [fix-svc 2026-06-30] 从 .env 读取 FLASK_DEBUG (Read-EnvBool 读取 FLASK_DEBUG=true 时跳过 startup_checks)
+        $env:FLASK_DEBUG = Read-EnvBool 'FLASK_DEBUG' $false
         $env:TESTING = 'false'
         $env:FLASK_ENV = 'production'
-        $env:CORS_ALLOWED_ORIGINS = 'http://localhost:5173,http://localhost:3010,http://localhost:3004'
+        $env:CORS_ALLOWED_ORIGINS = 'http://localhost:5173,http://localhost:3010,http://localhost:3004,http://localhost:3005'
         # 🆕 v3.18: 注入 AGENT_PORT 给 waitress_server.py 用
         $env:AGENT_PORT = $port.ToString()
 
