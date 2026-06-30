@@ -10,6 +10,33 @@ PORTS:      Frontend 8081 / Backend 5001
 ADMIN:      admin / Admin@2026!Init  (CHANGE ON FIRST LOGIN!)
 
 ================================================================================
+PHASE 0 - BEFORE BASTION: VERIFY (run this on Web SSH first)
+================================================================================
+
+# Quick 8-line sanity check (paste as ONE block):
+
+echo "=== DEPLOY STATE CHECK ===" && \
+ls -la /tmp/deploy-v20260630_001.zip 2>&1 | head -1 && \
+ls -ld /opt/app/deployments/v20260630_001/ 2>&1 | head -1 && \
+ls -la /opt/app/shared/data/architecture.db 2>&1 | head -1 && \
+ps -ef | grep -E "server\.py" | grep -v grep | wc -l && \
+ss -tlnp 2>/dev/null | grep -E ":8081|:5001" && \
+curl -s http://localhost:8081/health 2>&1 | head -1 && \
+curl -s http://localhost:5001/api/v1/health 2>&1 | head -1 && \
+echo "=== DONE ==="
+
+# Expected output:
+#   -r--r--r-- .../deploy-v20260630_001.zip    [if uploaded]
+#   drwxr-xr-x .../deployments/v20260630_001  [if unpacked]
+#   -rw-r--r-- .../architecture.db            [if DB created]
+#   2                                       [if both services running]
+#   LISTEN ... :8081  and  LISTEN ... :5001  [if ports bound]
+#   {"status":"ok"}                          [if frontend up]
+#   {"status":"ok","db":"ok"}                [if backend up]
+
+# DEEPER CHECK (independent, 10 steps): bash /tmp/HEALTH-CHECK-20260630_001.sh
+
+================================================================================
 PHASE A - BASTION UPLOAD (your bastion web UI)
 ================================================================================
 1. Login to bastion
