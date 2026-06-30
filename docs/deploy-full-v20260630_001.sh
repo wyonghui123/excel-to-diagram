@@ -143,7 +143,25 @@ fi
 rm -rf "$DEPLOY_DIR"
 mkdir -p "$DEPLOY_DIR"
 
-# Move package contents (PowerShell-zipped versions might have 'frontend_dist_files' or 'frontend')
+# Normalize directory names: handle either meta/ or backend/, dist/ or frontend_dist_files/
+# Two cases:
+#   Case A: zip has meta/ + backend/ (code in meta/, wheels in backend/)
+#           -> rename meta/ -> meta_/, move backend/* into meta/, re-rename to backend/
+#   Case B: zip has only meta/ (or only backend/) -> simple rename
+if [[ -d "tmp_extract/meta" ]] && [[ -d "tmp_extract/backend" ]]; then
+    # Case A: merge wheels into meta, then rename all to backend
+    info "Zip has both meta/ and backend/ - merging"
+    cp -rn "tmp_extract/backend/"* "tmp_extract/meta/" 2>/dev/null || true
+    cp -rn "tmp_extract/backend"/.[!.]* "tmp_extract/meta/" 2>/dev/null || true
+    rm -rf "tmp_extract/backend"
+    mv "tmp_extract/meta" "tmp_extract/backend"
+elif [[ -d "tmp_extract/meta" ]] && [[ ! -d "tmp_extract/backend" ]]; then
+    mv "tmp_extract/meta" "tmp_extract/backend"
+fi
+
+[[ -d "tmp_extract/dist" && ! -d "tmp_extract/frontend_dist_files" ]] && mv "tmp_extract/dist" "tmp_extract/frontend_dist_files"
+
+# Move package contents
 DEPLOY_CONTENT_FOUND=0
 for sub in frontend_dist_files frontend; do
     if [[ -d "tmp_extract/$sub" ]]; then
@@ -161,6 +179,13 @@ done
 if [[ "$DEPLOY_CONTENT_FOUND" -eq 0 ]]; then
     die "Deploy dir is empty after unzip - zip may be malformed"
 fi
+
+# Verify critical files exist
+[[ ! -f "$DEPLOY_DIR/backend/requirements.txt" ]] && die "backend/requirements.txt MISSING after unpack"
+[[ ! -d "$DEPLOY_DIR/backend/wheels" ]] || [[ -z "$(ls -A "$DEPLOY_DIR/backend/wheels" 2>/dev/null)" ]] && die "backend/wheels/ directory missing or empty"
+
+info "Verified: backend/ + requirements.txt + wheels/"
+ls -la "$DEPLOY_DIR/backend" | head -5
 
 # Move root-level deploy helpers
 for f in tmp_extract/DEPLOY-* tmp_extract/deploy-*.sh tmp_extract/HEALTH-CHECK-*.sh; do
