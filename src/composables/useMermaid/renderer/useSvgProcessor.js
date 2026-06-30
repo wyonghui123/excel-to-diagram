@@ -247,9 +247,10 @@ export function useSvgProcessor(options) {
 
   /**
    * 添加 Tooltip
+   * [FIX 2026-06-30] 透传 annotationFilter, 让 tooltip 弹窗只展示过滤后的备注
    */
-  const addTooltips = (svgEl, relationDescriptions, diagramType, hideTails = false) => {
-    tooltip.addMouseOverTooltips(svgEl, relationDescriptions, diagramType, hideTails)
+  const addTooltips = (svgEl, relationDescriptions, diagramType, hideTails = false, annotationFilter = []) => {
+    tooltip.addMouseOverTooltips(svgEl, relationDescriptions, diagramType, hideTails, annotationFilter)
   }
 
   /**
@@ -559,7 +560,8 @@ export function useSvgProcessor(options) {
     }
 
     applyStyleFixes(svgEl, props.diagramType, mermaidContainer, props.diagramData?.textColor)
-    addTooltips(svgEl, relationDescriptions, props.diagramType, hideTails)
+    // [FIX 2026-06-30] 透传 annotationCategoryFilter, 让 tooltip 弹窗只展示过滤后的备注
+    addTooltips(svgEl, relationDescriptions, props.diagramType, hideTails, props.annotationConfig?.annotationCategoryFilter || [])
 
     // 注意：之前 v22 加的 fixNodeRectSize 会修改 rect/foreignObject width/height
     // 但 mermaid ELK layout 是基于原 width 算 edge endpoint 位置

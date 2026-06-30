@@ -405,14 +405,14 @@ export function useBusinessObjectSyntax() {
 
     const overallDirection = effectiveLayoutControlConfig?.overallDirection || 'TB'
 
-    // ELK布局使用与配置一致的方向，不再反�?    // ELK的elk.direction配置会控制实际布局方向
+    // ELK布局使用与配置一致的方向，不再反向    // ELK的elk.direction配置会控制实际布局方向
     let actualDirection = overallDirection
 
     let graphKeyword
     let elkInitDirective = ''
     if (layoutEngine === 'elk') {
       graphKeyword = `flowchart-elk ${actualDirection}`
-      // ELK配置通过mermaid.initialize传递，不需要在代码中重复配�?      elkInitDirective = ''
+      // ELK配置通过mermaid.initialize传递，不需要在代码中重复配置      elkInitDirective = ''
     } else {
       graphKeyword = `flowchart ${actualDirection}`
     }
@@ -429,7 +429,7 @@ export function useBusinessObjectSyntax() {
 
     const objectToModuleMap = new Map()
     
-    // 首先从顶�?businessObjects 数组获取服务模块信息
+    // 首先从顶层businessObjects 数组获取服务模块信息
     const boServiceModuleMap = new Map()
     if (data.businessObjects) {
       data.businessObjects.forEach(bo => {
@@ -625,7 +625,7 @@ export function useBusinessObjectSyntax() {
 
     const nodeColorMap = new Map()
     const centerScopeBoCodes = data.centerScope || []
-    const centerScopeHighlight = data.centerScopeHighlight !== false  // 默认�?true
+    const centerScopeHighlight = data.centerScopeHighlight !== false  // 默认为true
     const centerScopeColor = data.centerScopeColor || '#EDEDED'
     const centerColorMap = {
       'gray': '#808080',
@@ -646,10 +646,10 @@ export function useBusinessObjectSyntax() {
         groupKey = group.info.domain
       }
       const groupColor = colorMap.get(groupKey)
-      // 如果 groupColor 不存在，使用第一个颜色作为默�?      const defaultColor = colors[0]
+      // 如果 groupColor 不存在，使用第一个颜色作为默认      const defaultColor = colors[0]
       group.nodes.forEach(node => {
         const nodeCode = node.code || node.name
-        // 只有�?centerScopeHighlight �?true 时，才对中心范围节点特殊处理
+        // 只有当centerScopeHighlight 为true 时，才对中心范围节点特殊处理
         if (centerScopeHighlight && centerScopeBoCodes.includes(nodeCode)) {
           nodeColorMap.set(node.id, centerColor)
         } else {
@@ -765,7 +765,7 @@ export function useBusinessObjectSyntax() {
 
         const definedNodes = new Set()
 
-        // 提前处理 links 数据，用�?ELK 自动分组
+        // 提前处理 links 数据，用于ELK 自动分组
         const processedLinks = []
         data.links.forEach(link => {
           let sourceId = null
@@ -877,12 +877,12 @@ export function useBusinessObjectSyntax() {
             const isSourceCenter = centerScopeHighlight && centerScopeBoCodes.includes(linkSourceCode)
             const isTargetCenter = centerScopeHighlight && centerScopeBoCodes.includes(linkTargetCode)
 
-            // 新的颜色规则�?            // 1. 如果源和目标中有一个非中心范围的节点，则采用该节点颜色
+            // 新的颜色规则：            // 1. 如果源和目标中有一个非中心范围的节点，则采用该节点颜色
             // 2. 如果两个都是非中心范围则采用黑色
             // 3. 如果两个都是中心范围则采用该节点颜色
             let linkColor
             if (!isSourceCenter && !isTargetCenter) {
-              // 两个都是非中心范�?-> 黑色
+              // 两个都是非中心范围-> 黑色
               linkColor = '#000000'
             } else if (isSourceCenter && isTargetCenter) {
               // 两个都是中心范围 -> 采用源节点颜色（或目标节点颜色）
@@ -947,8 +947,11 @@ export function useBusinessObjectSyntax() {
                 relationType: link.relationType || '',
                 // [v34 双向支持] 关系方向 (推/拉/双向)
                 relationDirection: link.relationDirection || '',
+                // [FIX 2026-06-30] 透传统数数组, 供 tooltip 按类别过滤
                 annotationContent: link.annotationContent || '',
                 annotationCategory: link.annotationCategory || 'info',
+                annotationContents: link.annotationContents || [],
+                annotationCategories: link.annotationCategories || [],
                 sourceCode: link.sourceCode,
                 targetCode: link.targetCode
               })
@@ -1121,8 +1124,11 @@ export function useBusinessObjectSyntax() {
             relationType: link.relationType || '',
             // [v34 双向支持] 关系方向 (推/拉/双向)
             relationDirection: link.relationDirection || '',
+            // [FIX 2026-06-30] 透传统数数组, 供 tooltip 按类别过滤
             annotationContent: link.annotationContent || '',
             annotationCategory: link.annotationCategory || 'info',
+            annotationContents: link.annotationContents || [],
+            annotationCategories: link.annotationCategories || [],
             sourceCode: link.sourceCode,
             targetCode: link.targetCode
           })
@@ -1157,7 +1163,7 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
         code += generateGroupMermaid(child, nodeMap, definedNodes, actualDirection)
       })
     }
-    // 注意：禁用的分组不应该有 containers（已�?buildVirtualContainers 中清除）
+    // 注意：禁用的分组不应该有 containers（已经buildVirtualContainers 中清除）
     if (group.containers && group.containers.length > 0) {
       group.containers.forEach((container, idx) => {
         if (container.nodes && container.nodes.length > 0) {

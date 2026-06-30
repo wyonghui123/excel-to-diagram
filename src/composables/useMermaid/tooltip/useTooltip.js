@@ -177,13 +177,16 @@ export function useTooltip() {
   // [v34 双向支持] 关系类型 (BusinessRelationType 枚举 code → 中文名)
   // [v39 双向支持增强] 关系方向 (direction 枚举) 也走相同解析逻辑
   // 导出供单测覆盖 (useTooltip.spec.js)
-  const formatTooltipText = (relation) => {
+  // [FIX 2026-06-30] 新增 annotationFilter 参数:
+  //   - undefined (未传): 走老逻辑, 用 relation.annotationContent (向后兼容单测)
+  //   - [] (空数组, 用户未选类别): 不展示备注行
+  //   - 非空数组: 只展示 relation.annotationContents 中 category 在 filter 内的备注
+  const formatTooltipText = (relation, annotationFilter) => {
     if (!relation) return '无关系说明'
     const relationCode = relation.relationCode || ''
     const relationDesc = relation.relationDesc || '无关系说明'
     const sourceName = relation.sourceName || ''
     const targetName = relation.targetName || ''
-    const annotationContent = relation.annotationContent || ''
 
     // [v34 双向支持] 关系类型 + 关系方向 - 从 relationDescriptions 透传
     const relationType = relation.relationType || ''
@@ -219,8 +222,34 @@ export function useTooltip() {
     }
 
     text += `\n${relationDesc}`
-    if (annotationContent) {
-      text += `\n备注: ${annotationContent}`
+
+    // [FIX 2026-06-30] 备注内容按 category filter 过滤
+    //   annotationFilter === undefined: 老逻辑 (单测兼容, 直接用 annotationContent)
+    //   annotationFilter === []: 不展示任何备注 (用户未选类别)
+    //   annotationFilter 非空: 用 annotationContents/Categories 数组过滤后拼接
+    let annotationLine = ''
+    if (annotationFilter === undefined) {
+      // 老逻辑: 单测路径, relation.annotationContent 是单字符串
+      annotationLine = relation.annotationContent || ''
+    } else if (Array.isArray(annotationFilter) && annotationFilter.length > 0) {
+      // 过滤模式: 优先用复数数组, fallback 到单数字段
+      const contents = relation.annotationContents
+      const categories = relation.annotationCategories
+      if (Array.isArray(contents) && contents.length > 0 && Array.isArray(categories)) {
+        const matched = contents
+          .map((c, idx) => ({ content: c, category: categories[idx] || 'info' }))
+          .filter(item => item.content && item.category && annotationFilter.includes(item.category))
+          .map(item => item.content)
+        annotationLine = matched.join('; ')
+      } else if (relation.annotationContent && relation.annotationCategory && annotationFilter.includes(relation.annotationCategory)) {
+        // fallback: 单数字段, 仅当 category 匹配时展示
+        annotationLine = relation.annotationContent
+      }
+    }
+    // annotationFilter === [] 时 annotationLine 保持空字符串
+
+    if (annotationLine) {
+      text += `\n备注: ${annotationLine}`
     }
     return text
   }
@@ -383,13 +412,13 @@ export function useTooltip() {
     return Array.from(allEdgeLabels).filter(el => el.getBBox)
   }
 
-  const setupLabelEvents = (label, index, tooltip, relationDescriptions, pathToRelationMap, labels, selectedElements, svg, realEdgePaths) => {
+  const setupLabelEvents = (label, index, tooltip, relationDescriptions, pathToRelationMap, labels, selectedElements, svg, realEdgePaths, annotationFilter) => {
     const onEnter = (e) => {
       let tooltipText = '无关系说明'
       const labelText = label.textContent || label.innerHTML
       const relation = relationDescriptions.find(r => r.relationCode && r.relationCode.trim() === labelText.trim())
       if (relation) {
-        tooltipText = formatTooltipText(relation)
+        tooltipText = formatTooltipText(relation, annotationFilter)
       }
       showTooltip(tooltip, tooltipText, e.clientX, e.clientY)
     }
@@ -423,10 +452,10 @@ export function useTooltip() {
     addListener(label, 'click', onClick)
   }
 
-  const setupPathEvents = (path, tooltip, pathToRelationMap, labels, selectedElements, svg) => {
+  const setupPathEvents = (path, tooltip, pathToRelationMap, labels, selectedElements, svg, annotationFilter) => {
     const onEnter = (e) => {
       const relation = pathToRelationMap.get(path)
-      const tooltipText = relation ? formatTooltipText(relation) : '无关系说明'
+      const tooltipText = relation ? formatTooltipText(relation, annotationFilter) : '无关系说明'
       showTooltip(tooltip, tooltipText, e.clientX, e.clientY)
     }
     const onMove = (e) => {
@@ -704,7 +733,7 @@ export function useTooltip() {
     addListener(svg, 'click', onClick)
   }
 
-  const addMouseOverTooltips = (svg, relationDescriptions, diagramType, hideTails = false) => {
+  const addMouseOverTooltips = (svg, relationDescriptions, diagramType, hideTails = false, annotationFilter = []) => {
     if (!svg) return
 
     // 先清理本实例上一次的监听器和装饰元素（不跨实例）
@@ -721,11 +750,11 @@ export function useTooltip() {
     const { pathToRelationMap, realEdgePaths } = matchPathsToRelations(svg, edgeLabels, relationDescriptions)
 
     edgeLabels.forEach((label, index) => {
-      setupLabelEvents(label, index, tooltip, relationDescriptions, pathToRelationMap, edgeLabels, selectedElements, svg, realEdgePaths)
+      setupLabelEvents(label, index, tooltip, relationDescriptions, pathToRelationMap, edgeLabels, selectedElements, svg, realEdgePaths, annotationFilter)
     })
 
     realEdgePaths.forEach((edgePathInfo) => {
-      setupPathEvents(edgePathInfo.path, tooltip, pathToRelationMap, edgeLabels, selectedElements, svg)
+      setupPathEvents(edgePathInfo.path, tooltip, pathToRelationMap, edgeLabels, selectedElements, svg, annotationFilter)
     })
 
     addTrailingDottedLines(svg, edgeLabels, diagramType, hideTails)
