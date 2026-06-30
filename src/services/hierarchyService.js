@@ -225,21 +225,24 @@ export function buildHierarchyFilterParams({ levels, scopeIds, objectType }) {
   const typeScope = scopeIds[objectType]
   if (!typeScope) return filters
 
-  // 直接选区 / 有效选区
-  if (typeScope.selected.length > 0) {
-    filters.id__in = typeScope.selected.join(',')
-  } else if (typeScope.effective.length > 0) {
+  // effective 优先
+  // [FIX 2026-06-30] effective = selected + SM推导(跨域)
+  // hierarchyMap ID冲突修复后, SM→domain推导正确, 不再膨胀
+  // 例: 选财务云+销售报价SM → effective=[2205,2200] → 2 domain
+  if (typeScope.effective.length > 0) {
     filters.id__in = typeScope.effective.join(',')
+  } else if (typeScope.selected.length > 0) {
+    filters.id__in = typeScope.selected.join(',')
   }
 
   // 父级 FK 回退
   const parentType = getParentType(levels, objectType)
   if (parentType && scopeIds[parentType]) {
     const parentScope = scopeIds[parentType]
-    const parentIds = parentScope.selected.length > 0
-      ? parentScope.selected
-      : parentScope.effective.length > 0
-        ? parentScope.effective
+    const parentIds = parentScope.effective.length > 0
+      ? parentScope.effective
+      : parentScope.selected.length > 0
+        ? parentScope.selected
         : []
     if (parentIds.length > 0) {
       const fkField = getFKField(levels, objectType)

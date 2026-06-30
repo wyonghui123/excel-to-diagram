@@ -207,11 +207,16 @@ const hierarchyMap = computed(() => {
       //   之前用 node.id (字符串如 'd_1'), 导致 effective ids 推导永远查不到
       const oid = node.originalId
       if (oid == null) continue
+      // [FIX 2026-06-30] ID 冲突处理:
+      //   sub_domain 和 service_module 可能共享同一 originalId (如 347 既是
+      //   "项目过程"子域 又是 "现金流预测"SM), 先到的 sub_domain 会阻止后到的 SM
+      //   写入正确的 domainId, 导致 SM→domain 推导错误。
+      //   规则: domain/sub_domain → 先到先得; SM/BO → 始终覆盖
       if (node.type === 'domain') {
-        map[oid] = { domainId: oid }
+        if (!map[oid]) map[oid] = { domainId: oid }
         walk(node.children, oid, null)
       } else if (node.type === 'sub_domain') {
-        map[oid] = { domainId, subDomainId: oid }
+        if (!map[oid]) map[oid] = { domainId, subDomainId: oid }
         walk(node.children, domainId, oid)
       } else if (node.type === 'service_module') {
         map[oid] = { domainId, subDomainId, serviceModuleId: oid }
@@ -228,11 +233,13 @@ const hierarchyMap = computed(() => {
 
 const effectiveDomainIds = computed(() => {
   const ids = new Set([...selectedDomainIds.value])
-  for (const id of selectedSubDomainIds.value) {
-    const info = hierarchyMap.value[id]
-    if (info?.domainId != null) ids.add(info.domainId)
-  }
-  for (const id of selectedServiceModuleIds.value) {
+  // [FIX 2026-06-30] 去掉从 sub_domain 推导 domain 的逻辑
+  //   根因: check-strictly=false 会级联选中父级 domain 下所有子域,
+  //   hierarchyMap 对这些子域的 domainId 映射可能发散(非单一 domain),
+  //   导致 effective 膨胀(如 1→6 个 domain)。
+  //   SM 推导仍需保留：选「采购管理」SM 可跨 domain 推导出「供应链云」。
+  const sm_ids = selectedServiceModuleIds.value
+  for (const id of sm_ids) {
     const info = hierarchyMap.value[id]
     if (info?.domainId != null) ids.add(info.domainId)
   }
