@@ -1,0 +1,11 @@
+# MD5 checksums for v20260630_001 deploy files
+# Use on server: cd /tmp && md5sum -c MD5SUMS-20260630_001.txt
+# Or compare manually: md5sum <file>
+#
+# Generated: 2026-06-30
+f697ddae80fe404cd1db2a5dd4c2bab1  deploy-v20260630_001.zip
+3fe724030f594f8ea1220a1703bc174d  deploy-full-v20260630_001.sh
+05669478a5f3f3f232633e658ee59e8b  deploy-rollback-v20260630_001.sh
+b17f38b817ae941f995f4a7c243f7d1e  HEALTH-CHECK-20260630_001.sh
+2d69573c28a471db825d34987d782935  DEPLOY-CHEATSHEET-20260630_001.txt
+e4d0124558bef95feb37755d3fa0f18a  DEPLOY-MANUAL-20260630_001.md

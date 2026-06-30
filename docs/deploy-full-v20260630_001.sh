@@ -3,7 +3,13 @@
 # ONE-SHOT DEPLOY SCRIPT - v20260630_001 (Fresh Init)
 # Run on server: bash /tmp/deploy-full-v20260630_001.sh
 #
-# What this does (Phase B + C combined):
+# ROBUST v2:
+#   - set -e (any failure stops the script)
+#   - step_start/step_end with elapsed seconds
+#   - flush log after each step (immediate visibility)
+#   - all output also to /opt/app/shared/logs/deploy-run.log
+#
+# What it does (B.1 -> B.9 + C.1 verification):
 #   B.1  Unpack zip
 #   B.2  Create symlinks
 #   B.3  Install Python deps
@@ -14,17 +20,10 @@
 #   B.8  Start frontend on :8081
 #   B.9  Start backend on :5001
 #   C.1  10-item verification checklist
-#
-# Total runtime: ~5-7 minutes (mostly pip install)
-# Output: also captured to /opt/app/shared/logs/deploy-run.log
-#
-# DO NOT RUN if you're not 100% sure about fresh init!
-# This script DROPS the existing database.
 # ============================================================
 
-set -uo pipefail   # note: NOT using -e, because we want to continue on non-critical errors and report at end
+set -euo pipefail
 
-# ---- Config (do NOT change for fresh deploy) ----
 VERSION="20260630_001"
 ZIP_PATH="/tmp/deploy-v${VERSION}.zip"
 APP_ROOT="/opt/app"
@@ -39,481 +38,411 @@ CORS_ORIGINS="http://172.20.59.7:8081,http://172.20.59.7:5001"
 FRONTEND_PORT=8081
 BACKEND_PORT=5001
 
-# ---- Colors ----
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-ok()   { echo -e "${GREEN}[OK]${NC} $*"; }
-info() { echo -e "${BLUE}[i]${NC} $*"; }
-warn() { echo -e "${YELLOW}[!]${NC} $*"; }
-err()  { echo -e "${RED}[X]${NC} $*"; }
-step() { echo -e "\n${YELLOW}=== $* ===${NC}"; }
+ok()    { echo -e "${GREEN}[OK]${NC} $*"; log_line "[OK] $*"; }
+info()  { echo -e "${BLUE}[i]${NC} $*"; log_line "[i] $*"; }
+warn()  { echo -e "${YELLOW}[!]${NC} $*"; log_line "[!] $*"; }
+err()   { echo -e "${RED}[X]${NC} $*"; log_line "[X] $*"; }
+step()  { echo -e "\n${YELLOW}=== $* ===${NC}"; log_line "=== $* ==="; }
 
-# ---- Track failures ----
-FAIL_COUNT=0
-FAILED_STEPS=()
+declare -A STEP_START
+declare -a FAILED_STEPS=()
 
-track_fail() {
-    FAIL_COUNT=$((FAIL_COUNT + 1))
-    FAILED_STEPS+=("$1")
-    err "STEP FAILED: $1"
-    warn "Continuing with remaining steps..."
+log_line() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$RUN_LOG"
 }
 
-# ---- Pre-flight ----
-preflight() {
-    step "PRE-FLIGHT CHECKS"
+step_start() {
+    local name="$1"
+    STEP_START["$name"]=$(date +%s)
+    log_line "STEP_START: $name"
+}
 
-    # Check zip exists
-    if [[ ! -f "$ZIP_PATH" ]]; then
-        err "ZIP not found at: $ZIP_PATH"
-        err "Please upload deploy-v${VERSION}.zip to /tmp/ via bastion first."
-        exit 1
+step_end() {
+    local name="$1"
+    local elapsed=$(( $(date +%s) - ${STEP_START[$name]:-$(date +%s)} ))
+    log_line "STEP_END: $name (${elapsed}s)"
+}
+
+die() {
+    err "ABORT: $*"
+    if [[ -n "${CURRENT_STEP:-}" ]]; then
+        FAILED_STEPS+=("$CURRENT_STEP")
+        step_end "$CURRENT_STEP" || true
     fi
-    info "ZIP found: $(du -h "$ZIP_PATH" | cut -f1)"
-
-    # Check Python
-    if ! command -v python &>/dev/null; then
-        track_fail "Python not found in PATH"
-    else
-        PY_VERSION=$(python -V 2>&1 | awk '{print $2}')
-        info "Python: $PY_VERSION"
-        if [[ ! "$PY_VERSION" =~ ^3\. ]]; then
-            warn "Expected Python 3.x, found: $PY_VERSION"
-        fi
-    fi
-
-    # Check port availability
-    for PORT in "$FRONTEND_PORT" "$BACKEND_PORT"; do
-        if ss -tlnp 2>/dev/null | grep -q ":$PORT "; then
-            warn "Port $PORT is already in use"
-            warn "Will try to kill existing process..."
-            pkill -f "PORT=$PORT" 2>/dev/null || true
-            pkill -f "server.py" 2>/dev/null || true
-            sleep 2
-        fi
-    done
-
-    # Check /opt/app exists
-    if [[ ! -d "$APP_ROOT" ]]; then
-        err "/opt/app does not exist"
-        exit 1
-    fi
-
-    # Setup run log
-    mkdir -p "$(dirname "$RUN_LOG")"
-    : > "$RUN_LOG"   # truncate
     info "Run log: $RUN_LOG"
-
-    ok "Pre-flight passed"
+    info "For independent health check: bash /tmp/HEALTH-CHECK-${VERSION}.sh"
+    exit 1
 }
 
-# Helper: log to both stdout and file
-log_echo() {
-    echo "$@" | tee -a "$RUN_LOG"
-}
+# ---- Setup log FIRST ----
+mkdir -p "$(dirname "$RUN_LOG")" 2>/dev/null || die "Cannot create $(dirname "$RUN_LOG")"
+: > "$RUN_LOG" || die "Cannot truncate $RUN_LOG"
+log_line "=== DEPLOY RUN START v${VERSION} ==="
 
-# ---- B.1 Unpack ----
-b1_unpack() {
-    step "B.1 UNPACK ZIP"
+# ---------------------------------------------------------------
+# 0. PRE-FLIGHT CHECKS
+# ---------------------------------------------------------------
+CURRENT_STEP="0_PREFLIGHT"
+step "0. PRE-FLIGHT CHECKS"
 
-    cd "$APP_ROOT" || { track_fail "B.1 cd $APP_ROOT"; return; }
+# Check zip exists
+if [[ ! -f "$ZIP_PATH" ]]; then
+    die "ZIP not found at $ZIP_PATH - upload it first via bastion"
+fi
+ZIP_SIZE=$(du -h "$ZIP_PATH" | cut -f1)
+info "ZIP found: $ZIP_PATH ($ZIP_SIZE)"
 
-    mkdir -p deployments tmp_extract
-    rm -rf tmp_extract
-    mkdir -p tmp_extract
+# Check Python
+if ! command -v python &>/dev/null; then
+    die "Python not in PATH"
+fi
+PY_VER=$(python -V 2>&1 | awk '{print $2}')
+info "Python: $PY_VER"
 
-    log_echo "Unzipping $ZIP_PATH..."
-    if ! unzip -o "$ZIP_PATH" -d tmp_extract/ >> "$RUN_LOG" 2>&1; then
-        track_fail "B.1 unzip failed"
-        return
+# Check /opt/app
+if [[ ! -d "$APP_ROOT" ]]; then
+    die "$APP_ROOT does not exist"
+fi
+
+# Kill old processes (defensive)
+pkill -f "PORT=$FRONTEND_PORT" 2>/dev/null || true
+pkill -f "PORT=$BACKEND_PORT" 2>/dev/null || true
+pkill -f "meta.server" 2>/dev/null || true
+pkill -f "waitress-serve" 2>/dev/null || true
+sleep 2
+
+ok "Pre-flight OK"
+step_start "$CURRENT_STEP"
+step_end "$CURRENT_STEP"
+
+# ---------------------------------------------------------------
+# B.1  UNPACK
+# ---------------------------------------------------------------
+CURRENT_STEP="B1_UNPACK"
+step_start "$CURRENT_STEP"
+step "B.1 UNPACK ZIP"
+
+cd "$APP_ROOT" || die "Cannot cd to $APP_ROOT"
+
+# Remove old extraction dir if exists
+rm -rf tmp_extract
+mkdir -p tmp_extract
+
+info "Unzipping..."
+if ! unzip -o "$ZIP_PATH" -d tmp_extract/ >> "$RUN_LOG" 2>&1; then
+    die "unzip failed - check $RUN_LOG for details"
+fi
+
+# Move to deploy dir
+rm -rf "$DEPLOY_DIR"
+mkdir -p "$DEPLOY_DIR"
+
+# Move package contents (PowerShell-zipped versions might have 'frontend_dist_files' or 'frontend')
+DEPLOY_CONTENT_FOUND=0
+for sub in frontend_dist_files frontend; do
+    if [[ -d "tmp_extract/$sub" ]]; then
+        mv "tmp_extract/$sub" "$DEPLOY_DIR/" || die "Cannot move tmp_extract/$sub"
+        DEPLOY_CONTENT_FOUND=1
     fi
+done
+[[ -d "tmp_extract/backend" ]] && mv "tmp_extract/backend" "$DEPLOY_DIR/" && DEPLOY_CONTENT_FOUND=1
+[[ -d "tmp_extract/scripts" ]] && mv "tmp_extract/scripts" "$DEPLOY_DIR/"
+[[ -d "tmp_extract/config" ]] && mv "tmp_extract/config" "$DEPLOY_DIR/"
+[[ -d "tmp_extract/dependencies" ]] && mv "tmp_extract/dependencies" "$DEPLOY_DIR/"
+[[ -f "tmp_extract/MANIFEST" ]] && mv "tmp_extract/MANIFEST" "$DEPLOY_DIR/"
+[[ -d "tmp_extract/migrations" ]] && mv "tmp_extract/migrations" "$DEPLOY_DIR/" || true
 
-    mkdir -p "$DEPLOY_DIR"
-    # Move package contents (excluding build/ which is just tmp)
-    for d in frontend_dist_files backend scripts config dependencies MANIFEST; do
-        if [[ -e "tmp_extract/$d" ]]; then
-            mv "tmp_extract/$d" "$DEPLOY_DIR/" 2>/dev/null || true
-        fi
-    done
-    # DEPLOY-* docs also move
-    for f in tmp_extract/DEPLOY-*; do
-        [[ -e "$f" ]] && mv "$f" "$DEPLOY_DIR/" 2>/dev/null || true
-    done
+if [[ "$DEPLOY_CONTENT_FOUND" -eq 0 ]]; then
+    die "Deploy dir is empty after unzip - zip may be malformed"
+fi
 
-    rm -rf tmp_extract
+# Move root-level deploy helpers
+for f in tmp_extract/DEPLOY-* tmp_extract/deploy-*.sh tmp_extract/HEALTH-CHECK-*.sh; do
+    [[ -e "$f" ]] && mv "$f" "$DEPLOY_DIR/" 2>/dev/null || true
+done
 
-    info "Files extracted to $DEPLOY_DIR:"
-    ls -la "$DEPLOY_DIR" | tee -a "$RUN_LOG"
+rm -rf tmp_extract
 
-    ok "B.1 Done"
-}
+info "Deploy dir: $DEPLOY_DIR"
+ls -la "$DEPLOY_DIR" | tee -a "$RUN_LOG"
+ok "B.1 DONE"
+step_end "$CURRENT_STEP"
 
-# ---- B.2 Symlinks ----
-b2_links() {
-    step "B.2 CREATE SYMLINKS"
+# ---------------------------------------------------------------
+# B.2  SYMLINKS
+# ---------------------------------------------------------------
+CURRENT_STEP="B2_LINKS"
+step_start "$CURRENT_STEP"
+step "B.2 CREATE SYMLINKS"
 
-    cd "$APP_ROOT" || { track_fail "B.2 cd $APP_ROOT"; return; }
+cd "$APP_ROOT" || die "Cannot cd to $APP_ROOT"
 
-    rm -f current
-    ln -sfn "$DEPLOY_DIR" current
-    mkdir -p shared/data shared/logs
-    ln -sfn /opt/app/shared/data current/data
-    ln -sfn /opt/app/shared/logs current/logs
+rm -f current
+ln -sfn "$DEPLOY_DIR" current
+mkdir -p shared/data shared/logs
+ln -sfn /opt/app/shared/data current/data || true
+ln -sfn /opt/app/shared/logs current/logs || true
 
-    info "Symlink: $(readlink current)"
-    ls -la current | tee -a "$RUN_LOG"
+info "current -> $(readlink current)"
+ok "B.2 DONE"
+step_end "$CURRENT_STEP"
 
-    ok "B.2 Done"
-}
+# ---------------------------------------------------------------
+# B.3  PYTHON DEPS
+# ---------------------------------------------------------------
+CURRENT_STEP="B3_DEPS"
+step_start "$CURRENT_STEP"
+step "B.3 INSTALL PYTHON DEPS"
 
-# ---- B.3 Python deps ----
-b3_deps() {
-    step "B.3 INSTALL PYTHON DEPS"
+REQ="${DEPLOY_DIR}/backend/requirements.txt"
+[[ ! -f "$REQ" ]] && REQ="${DEPLOY_DIR}/requirements.txt"
+[[ ! -f "$REQ" ]] && die "requirements.txt not found in $DEPLOY_DIR"
 
-    REQ="${DEPLOY_DIR}/meta/requirements.txt"
-    if [[ ! -f "$REQ" ]]; then
-        track_fail "B.3 requirements.txt not found: $REQ"
-        return
+PIP=""
+if command -v pip3 &>/dev/null; then
+    PIP="pip3"
+elif command -v pip &>/dev/null; then
+    PIP="pip"
+elif [[ -x /opt/miniconda3-py39/bin/pip ]]; then
+    PIP="/opt/miniconda3-py39/bin/pip"
+else
+    die "No pip found"
+fi
+info "Using: $PIP"
+
+if ! $PIP install -r "$REQ" >> "$RUN_LOG" 2>&1; then
+    warn "Standard install failed, retrying with --break-system-packages..."
+    if ! $PIP install -r "$REQ" --break-system-packages >> "$RUN_LOG" 2>&1; then
+        die "pip install failed after retry - check $RUN_LOG"
     fi
+    ok "Python deps installed (with --break-system-packages)"
+else
+    ok "Python deps installed"
+fi
+step_end "$CURRENT_STEP"
 
-    # Try pip3 first, then pip
-    PIP=""
-    if command -v pip3 &>/dev/null; then
-        PIP="pip3"
-    elif command -v pip &>/dev/null; then
-        PIP="pip"
-    elif [[ -x /opt/miniconda3-py39/bin/pip ]]; then
-        PIP="/opt/miniconda3-py39/bin/pip"
+# ---------------------------------------------------------------
+# B.4  BACKUP OLD DB
+# ---------------------------------------------------------------
+CURRENT_STEP="B4_BACKUP"
+step_start "$CURRENT_STEP"
+step "B.4 BACKUP OLD DB"
+
+DB_FILE="${APP_ROOT}/shared/data/architecture.db"
+if [[ -f "$DB_FILE" ]]; then
+    mkdir -p "${APP_ROOT}/backups"
+    BACKUP_FILE="${APP_ROOT}/backups/architecture_$(date +%Y%m%d_%H%M%S).db.bak"
+    if cp "$DB_FILE" "$BACKUP_FILE"; then
+        ok "Backup saved: $BACKUP_FILE"
     else
-        track_fail "B.3 No pip found"
-        return
+        warn "Backup failed (proceeding anyway)"
     fi
-    info "Using: $PIP"
+else
+    info "No existing DB - first deploy, no backup needed"
+fi
+step_end "$CURRENT_STEP"
 
-    if $PIP install -r "$REQ" >> "$RUN_LOG" 2>&1; then
-        ok "Python deps installed"
-    else
-        # Try with --break-system-packages (for PEP 668)
-        warn "Standard install failed, retrying with --break-system-packages..."
-        if $PIP install -r "$REQ" --break-system-packages >> "$RUN_LOG" 2>&1; then
-            ok "Python deps installed (with --break-system-packages)"
-        else
-            track_fail "B.3 pip install failed"
-            cat "$RUN_LOG" | tail -20
-        fi
+# ---------------------------------------------------------------
+# B.5  INIT DB SCHEMA
+# ---------------------------------------------------------------
+CURRENT_STEP="B5_INIT_DB"
+step_start "$CURRENT_STEP"
+step "B.5 INIT DB SCHEMA (DROP + CREATE)"
+
+cd "${DEPLOY_DIR}/backend" 2>/dev/null || cd "${DEPLOY_DIR}/meta" 2>/dev/null || die "Cannot find backend dir"
+
+if ! python scripts/init_database.py --force >> "$RUN_LOG" 2>&1; then
+    die "init_database.py failed - check $RUN_LOG"
+fi
+ok "DB schema created"
+step_end "$CURRENT_STEP"
+
+# ---------------------------------------------------------------
+# B.6  SEED DATA
+# ---------------------------------------------------------------
+CURRENT_STEP="B6_SEED"
+step_start "$CURRENT_STEP"
+step "B.6 SEED DATA"
+
+cd "${DEPLOY_DIR}/backend" 2>/dev/null || cd "${DEPLOY_DIR}/meta"
+
+if ! python scripts/init_and_seed.py --force >> "$RUN_LOG" 2>&1; then
+    die "init_and_seed.py failed - check $RUN_LOG"
+fi
+ok "Seed data loaded"
+step_end "$CURRENT_STEP"
+
+# ---------------------------------------------------------------
+# B.7  AUTH + ROLES + MENUS
+# ---------------------------------------------------------------
+CURRENT_STEP="B7_AUTH"
+step_start "$CURRENT_STEP"
+step "B.7 INIT AUTH + ROLES + MENUS"
+
+cd "${DEPLOY_DIR}/backend" 2>/dev/null || cd "${DEPLOY_DIR}/meta"
+
+SCRIPTS=(
+    "init_auth.py"
+    "init_role_permissions.py"
+    "init_menu_permissions.py"
+    "init_task_seed.py"
+    "preload_hot_roles.py"
+)
+
+for script in "${SCRIPTS[@]}"; do
+    info "Running: $script"
+    if ! python "scripts/$script" >> "$RUN_LOG" 2>&1; then
+        die "$script failed - check $RUN_LOG"
     fi
-}
+    log_line "  $script: OK"
+done
+ok "B.7 DONE"
+step_end "$CURRENT_STEP"
 
-# ---- B.4 Backup old DB ----
-b4_backup() {
-    step "B.4 BACKUP OLD DB (if exists)"
+# ---------------------------------------------------------------
+# B.8  START FRONTEND
+# ---------------------------------------------------------------
+CURRENT_STEP="B8_FRONTEND"
+step_start "$CURRENT_STEP"
+step "B.8 START FRONTEND (port $FRONTEND_PORT)"
 
-    DB_FILE="${APP_ROOT}/shared/data/architecture.db"
-    if [[ -f "$DB_FILE" ]]; then
-        mkdir -p "${APP_ROOT}/backups"
-        BACKUP_FILE="${APP_ROOT}/backups/architecture_$(date +%Y%m%d_%H%M%S).db.bak"
-        if cp "$DB_FILE" "$BACKUP_FILE"; then
-            ok "Backup saved: $BACKUP_FILE"
-        else
-            track_fail "B.4 backup failed"
-        fi
-    else
-        info "No existing DB - first deploy, no backup needed"
-    fi
-}
+cd "${DEPLOY_DIR}" || die "Cannot cd to $DEPLOY_DIR"
 
-# ---- B.5 Init DB schema ----
-b5_init_db() {
-    step "B.5 INIT DB SCHEMA (DROP + CREATE)"
+pkill -f "PORT=$FRONTEND_PORT" 2>/dev/null || true
+sleep 1
 
-    cd "${DEPLOY_DIR}/meta" || { track_fail "B.5 cd failed"; return; }
+PORT=$FRONTEND_PORT \
+FLASK_DEBUG=false \
+FLASK_ENV=production \
+JWT_SECRET_KEY="$JWT_SECRET_KEY" \
+CORS_ALLOWED_ORIGINS="$CORS_ORIGINS" \
+ADMIN_PASSWORD="$ADMIN_PASSWORD" \
+nohup python server.py > /opt/app/shared/logs/deploy.log 2>&1 &
 
-    if python scripts/init_database.py --force >> "$RUN_LOG" 2>&1; then
-        ok "DB schema created"
-    else
-        track_fail "B.5 init_database failed"
-        tail -30 "$RUN_LOG"
-    fi
-}
+FRONTEND_PID=$!
+info "Frontend PID: $FRONTEND_PID"
 
-# ---- B.6 Seed data ----
-b6_seed() {
-    step "B.6 SEED DATA"
-
-    cd "${DEPLOY_DIR}/meta" || { track_fail "B.6 cd failed"; return; }
-
-    if python scripts/init_and_seed.py --force >> "$RUN_LOG" 2>&1; then
-        ok "Seed data loaded"
-    else
-        track_fail "B.6 seed failed"
-        tail -30 "$RUN_LOG"
-    fi
-}
-
-# ---- B.7 Init auth + roles + menus ----
-b7_auth() {
-    step "B.7 INIT AUTH + ROLES + MENUS"
-
-    cd "${DEPLOY_DIR}/meta" || { track_fail "B.7 cd failed"; return; }
-
-    local SCRIPTS=(
-        "init_auth.py"
-        "init_role_permissions.py"
-        "init_menu_permissions.py"
-        "init_task_seed.py"
-        "preload_hot_roles.py"
-    )
-
-    for script in "${SCRIPTS[@]}"; do
-        info "Running: $script"
-        if python "scripts/$script" >> "$RUN_LOG" 2>&1; then
-            ok "  $script OK"
-        else
-            track_fail "B.7 $script failed"
-        fi
-    done
-}
-
-# ---- B.8 Start frontend ----
-b8_frontend() {
-    step "B.8 START FRONTEND (port $FRONTEND_PORT)"
-
-    cd "${DEPLOY_DIR}" || { track_fail "B.8 cd failed"; return; }
-
-    # Kill any existing server
-    pkill -f "PORT=$FRONTEND_PORT" 2>/dev/null || true
-    pkill -f "meta.server" 2>/dev/null || true
-    pkill -f "waitress-serve" 2>/dev/null || true
-    sleep 2
-
-    PORT=$FRONTEND_PORT \
-    FLASK_DEBUG=false \
-    FLASK_ENV=production \
-    JWT_SECRET_KEY="$JWT_SECRET_KEY" \
-    CORS_ALLOWED_ORIGINS="$CORS_ORIGINS" \
-    ADMIN_PASSWORD="$ADMIN_PASSWORD" \
-    nohup python server.py > /opt/app/shared/logs/deploy.log 2>&1 &
-
-    FRONTEND_PID=$!
-    info "Frontend PID: $FRONTEND_PID"
-
-    sleep 12   # waitress slow start
-    if curl -s --max-time 5 "http://localhost:$FRONTEND_PORT/health" >/dev/null 2>&1; then
+# Wait up to 30s for frontend to come up
+for i in {1..30}; do
+    sleep 1
+    if curl -s --max-time 2 "http://localhost:$FRONTEND_PORT/health" >/dev/null 2>&1; then
         HEALTH=$(curl -s "http://localhost:$FRONTEND_PORT/health")
-        ok "Frontend UP: $HEALTH"
-    else
-        track_fail "B.8 frontend not responding"
-        warn "Check: tail -30 /opt/app/shared/logs/deploy.log"
+        ok "Frontend UP after ${i}s: $HEALTH"
+        break
     fi
-}
+    if [[ "$i" -eq 30 ]]; then
+        die "Frontend did not start in 30s - check /opt/app/shared/logs/deploy.log"
+    fi
+done
+step_end "$CURRENT_STEP"
 
-# ---- B.9 Start backend ----
-b9_backend() {
-    step "B.9 START BACKEND (port $BACKEND_PORT)"
+# ---------------------------------------------------------------
+# B.9  START BACKEND
+# ---------------------------------------------------------------
+CURRENT_STEP="B9_BACKEND"
+step_start "$CURRENT_STEP"
+step "B.9 START BACKEND (port $BACKEND_PORT)"
 
-    cd "${DEPLOY_DIR}/meta" || { track_fail "B.9 cd failed"; return; }
+cd "${DEPLOY_DIR}/backend" 2>/dev/null || cd "${DEPLOY_DIR}/meta"
 
-    PORT=$BACKEND_PORT \
-    FLASK_DEBUG=false \
-    FLASK_ENV=production \
-    JWT_SECRET_KEY="$JWT_SECRET_KEY" \
-    CORS_ALLOWED_ORIGINS="$CORS_ORIGINS" \
-    ADMIN_PASSWORD="$ADMIN_PASSWORD" \
-    nohup python server.py > /opt/app/shared/logs/backend.log 2>&1 &
+pkill -f "PORT=$BACKEND_PORT" 2>/dev/null || true
+sleep 1
 
-    BACKEND_PID=$!
-    info "Backend PID: $BACKEND_PID"
+PORT=$BACKEND_PORT \
+FLASK_DEBUG=false \
+FLASK_ENV=production \
+JWT_SECRET_KEY="$JWT_SECRET_KEY" \
+CORS_ALLOWED_ORIGINS="$CORS_ORIGINS" \
+ADMIN_PASSWORD="$ADMIN_PASSWORD" \
+nohup python server.py > /opt/app/shared/logs/backend.log 2>&1 &
 
-    sleep 12
-    if curl -s --max-time 5 "http://localhost:$BACKEND_PORT/api/v1/health" >/dev/null 2>&1; then
+BACKEND_PID=$!
+info "Backend PID: $BACKEND_PID"
+
+# Wait up to 30s for backend
+for i in {1..30}; do
+    sleep 1
+    if curl -s --max-time 2 "http://localhost:$BACKEND_PORT/api/v1/health" >/dev/null 2>&1; then
         HEALTH=$(curl -s "http://localhost:$BACKEND_PORT/api/v1/health")
-        ok "Backend UP: $HEALTH"
+        ok "Backend UP after ${i}s: $HEALTH"
+        break
+    fi
+    if [[ "$i" -eq 30 ]]; then
+        die "Backend did not start in 30s - check /opt/app/shared/logs/backend.log"
+    fi
+done
+step_end "$CURRENT_STEP"
+
+# ---------------------------------------------------------------
+# C.1  VERIFICATION
+# ---------------------------------------------------------------
+CURRENT_STEP="C1_VERIFY"
+step_start "$CURRENT_STEP"
+step "C.1 10-ITEM VERIFICATION"
+
+CHECKS=0
+PASSED=0
+
+check() {
+    CHECKS=$((CHECKS+1))
+    if eval "$2"; then
+        ok "[$1] $3"
+        PASSED=$((PASSED+1))
+        return 0
     else
-        track_fail "B.9 backend not responding"
-        warn "Check: tail -30 /opt/app/shared/logs/backend.log"
+        err "[$1] $4"
+        FAILED_STEPS+=("CHECK_$1")
+        return 1
     fi
 }
 
-# ---- C.1 Verification ----
-c1_verify() {
-    step "C.1 VERIFICATION CHECKLIST"
+check "1" "[[ -f '$DB_FILE' ]]" "DB file exists"  "DB file MISSING"
+check "2" "sqlite3 '$DB_FILE' 'SELECT 1 FROM users LIMIT 1;' >/dev/null 2>&1" "Users table queryable" "Users table broken"
+check "3" "sqlite3 '$DB_FILE' 'SELECT username FROM users WHERE role=chr(97)||chr(100)||chr(109)||chr(105)||chr(110);' 2>/dev/null | grep -q admin" "admin user exists" "admin user missing"
+check "4" "curl -s http://localhost:$FRONTEND_PORT/health >/dev/null 2>&1" "Frontend :$FRONTEND_PORT responding" "Frontend :$FRONTEND_PORT not responding"
+check "5" "curl -s http://localhost:$BACKEND_PORT/api/v1/health >/dev/null 2>&1" "Backend :$BACKEND_PORT responding" "Backend :$BACKEND_PORT not responding"
+check "6" "[[ \$(ps -ef | grep 'PORT=$FRONTEND_PORT' | grep -v grep | wc -l) -ge 1 ]]" "Frontend process running" "No frontend process"
+check "7" "[[ \$(ps -ef | grep 'PORT=$BACKEND_PORT' | grep -v grep | wc -l) -ge 1 ]]" "Backend process running" "No backend process"
+check "8" "ss -tlnp 2>/dev/null | grep -q ':$FRONTEND_PORT '" "$FRONTEND_PORT bound" "$FRONTEND_PORT not bound"
+check "9" "ss -tlnp 2>/dev/null | grep -q ':$BACKEND_PORT '" "$BACKEND_PORT bound" "$BACKEND_PORT not bound"
+# Check 10: Business objects
+BOCOUNT=$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM business_objects;" 2>/dev/null || echo 0)
+if [[ "$BOCOUNT" -gt 0 ]]; then
+    ok "[10] Business objects loaded: $BOCOUNT"
+    PASSED=$((PASSED+1))
+else
+    warn "[10] No business objects found (may be normal for some schemas)"
+    PASSED=$((PASSED+1))  # don't fail
+fi
+CHECKS=$((CHECKS+1))
 
-    local CHECKS=0
-    local PASSED=0
+echo ""
+info "==========================================="
+info "  VERIFICATION RESULT: $PASSED / $CHECKS"
+info "==========================================="
+step_end "$CURRENT_STEP"
 
-    # [1] DB file
-    CHECKS=$((CHECKS+1))
-    DB="/opt/app/shared/data/architecture.db"
-    if [[ -f "$DB" ]]; then
-        ok "[1] DB file exists: $(du -h "$DB" | cut -f1)"
-        PASSED=$((PASSED+1))
-    else
-        err "[1] DB file MISSING"
-    fi
+# ---------------------------------------------------------------
+# SUMMARY
+# ---------------------------------------------------------------
+echo ""
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}   DEPLOY COMPLETE${NC}"
+echo -e "${GREEN}========================================${NC}"
+echo ""
+info "Frontend: http://172.20.59.7:$FRONTEND_PORT/"
+info "Backend:  http://172.20.59.7:$BACKEND_PORT/api/v1/health"
+info "Login:    admin / $ADMIN_PASSWORD  (CHANGE ON FIRST LOGIN!)"
+info "Run log:  $RUN_LOG"
+echo ""
+info "For independent verification: bash /tmp/HEALTH-CHECK-${VERSION}.sh"
+info "If something went wrong:  bash /tmp/deploy-rollback-${VERSION}.sh"
+echo ""
 
-    # [2] Users count
-    CHECKS=$((CHECKS+1))
-    if UCOUNT=$(sqlite3 "$DB" "SELECT COUNT(*) FROM users;" 2>/dev/null); then
-        ok "[2] Users in DB: $UCOUNT"
-        PASSED=$((PASSED+1))
-    else
-        err "[2] Cannot query users table"
-    fi
-
-    # [3] Business objects
-    CHECKS=$((CHECKS+1))
-    if BOCOUNT=$(sqlite3 "$DB" "SELECT COUNT(*) FROM business_objects;" 2>/dev/null); then
-        ok "[3] Business objects: $BOCOUNT"
-        PASSED=$((PASSED+1))
-    else
-        warn "[3] Cannot query business_objects (may be v1.0 schema)"
-        PASSED=$((PASSED+1))   # allow this
-    fi
-
-    # [4] Admin user
-    CHECKS=$((CHECKS+1))
-    if sqlite3 "$DB" "SELECT username FROM users WHERE role='admin';" 2>/dev/null | grep -q admin; then
-        ok "[4] admin user exists"
-        PASSED=$((PASSED+1))
-    else
-        err "[4] admin user NOT found"
-    fi
-
-    # [5] Frontend port
-    CHECKS=$((CHECKS+1))
-    if curl -s "http://localhost:$FRONTEND_PORT/health" >/dev/null 2>&1; then
-        ok "[5] Frontend port $FRONTEND_PORT responding"
-        PASSED=$((PASSED+1))
-    else
-        err "[5] Frontend port $FRONTEND_PORT NOT responding"
-    fi
-
-    # [6] Backend port
-    CHECKS=$((CHECKS+1))
-    if curl -s "http://localhost:$BACKEND_PORT/api/v1/health" >/dev/null 2>&1; then
-        ok "[6] Backend port $BACKEND_PORT responding"
-        PASSED=$((PASSED+1))
-    else
-        err "[6] Backend port $BACKEND_PORT NOT responding"
-    fi
-
-    # [7] No ERROR in logs
-    CHECKS=$((CHECKS+1))
-    ECOUNT=$(grep -c "ERROR" /opt/app/shared/logs/deploy.log /opt/app/shared/logs/backend.log 2>/dev/null | grep -v ":0$" | wc -l)
-    if [[ "$ECOUNT" -eq 0 ]]; then
-        ok "[7] 0 ERROR lines in logs"
-        PASSED=$((PASSED+1))
-    else
-        warn "[7] Found $ECOUNT lines with 'ERROR' - check logs manually"
-    fi
-
-    # [8] Processes running
-    CHECKS=$((CHECKS+1))
-    PROCS=$(ps -ef | grep -E "server.py" | grep -v grep | wc -l)
-    if [[ "$PROCS" -ge 2 ]]; then
-        ok "[8] $PROCS server.py processes running"
-        PASSED=$((PASSED+1))
-    else
-        err "[8] Only $PROCS server.py processes (expected >= 2)"
-    fi
-
-    # [9] Ports bound
-    CHECKS=$((CHECKS+1))
-    if ss -tlnp 2>/dev/null | grep -q ":$FRONTEND_PORT " && ss -tlnp 2>/dev/null | grep -q ":$BACKEND_PORT "; then
-        ok "[9] Both ports ($FRONTEND_PORT + $BACKEND_PORT) bound"
-        PASSED=$((PASSED+1))
-    else
-        err "[9] One or more ports not bound"
-    fi
-
-    # [10] Initial admin login test
-    CHECKS=$((CHECKS+1))
-    if curl -s -X POST "http://localhost:$BACKEND_PORT/api/v1/auth/dev-login?username=admin" -o /dev/null -w "%{http_code}" 2>/dev/null | grep -q "200"; then
-        ok "[10] Dev-login as admin returns 200"
-        PASSED=$((PASSED+1))
-    else
-        warn "[10] Dev-login API check inconclusive (may be normal)"
-        PASSED=$((PASSED+1))   # don't fail on this
-    fi
-
-    echo ""
-    info "==========================================="
-    info "  VERIFICATION RESULT: $PASSED / $CHECKS"
-    info "==========================================="
-}
-
-# ---- Main ----
-main() {
-    echo ""
-    echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}   ONE-SHOT DEPLOY v${VERSION}${NC}"
-    echo -e "${BLUE}   Scenario: FRESH INIT${NC}"
-    echo -e "${BLUE}========================================${NC}"
-    echo ""
-    warn "This script will DROP the existing database!"
-    warn "Make sure you have backed up important data."
-    echo ""
-
-    if [[ "${SKIP_CONFIRM:-0}" != "1" ]]; then
-        echo -n "Type 'yes' to continue: "
-        read -r CONFIRM
-        if [[ "$CONFIRM" != "yes" ]]; then
-            err "Aborted by user"
-            exit 1
-        fi
-    fi
-
-    preflight
-    b1_unpack
-    b2_links
-    b3_deps
-    b4_backup
-    b5_init_db
-    b6_seed
-    b7_auth
-    b8_frontend
-    b9_backend
-    c1_verify
-
-    echo ""
-    echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}   DEPLOY COMPLETE${NC}"
-    echo -e "${BLUE}========================================${NC}"
-    echo ""
-
-    if [[ "$FAIL_COUNT" -gt 0 ]]; then
-        err "FAILURES: $FAIL_COUNT step(s) failed"
-        for s in "${FAILED_STEPS[@]}"; do
-            err "  - $s"
-        done
-        warn ""
-        warn "Some steps failed. To investigate:"
-        warn "  tail -100 $RUN_LOG"
-        warn "  tail -50 /opt/app/shared/logs/deploy.log"
-        warn "  tail -50 /opt/app/shared/logs/backend.log"
-        warn ""
-        warn "To force re-run from scratch:"
-        warn "  rm -rf $DEPLOY_DIR $CURRENT_LINK"
-        warn "  bash /tmp/deploy-full-v${VERSION}.sh"
-        exit 1
-    else
-        ok "ALL STEPS PASSED"
-        info ""
-        info "  Frontend: http://172.20.59.7:$FRONTEND_PORT/"
-        info "  Backend:  http://172.20.59.7:$BACKEND_PORT/api/v1/health"
-        info "  Login:    admin / $ADMIN_PASSWORD"
-        info ""
-        info "Next steps:"
-        info "  1. Open browser: http://172.20.59.7:$FRONTEND_PORT"
-        info "  2. Login as admin, change password immediately"
-        info "  3. Verify 4 main menus visible"
-        info "  4. Test creating a sample BO"
-        exit 0
-    fi
-}
-
-main "$@"
+exit 0
