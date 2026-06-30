@@ -18,7 +18,27 @@ PHASE A - BASTION UPLOAD (your bastion web UI)
 4. Verify: /tmp/deploy-v20260630_001.zip exists, 12.89 MB
 
 ================================================================================
-PHASE B - WEB SSH TERMINAL (paste each block then Enter)
+PHASE B - WEB SSH TERMINAL (choose mode)
+================================================================================
+
+>>> EASY MODE (RECOMMENDED): ONE-SHOT SCRIPT <<<
+Just paste these 3 lines (copy each separately), wait for prompts:
+
+# Step 1: Make script executable
+chmod +x /tmp/deploy-full-v20260630_001.sh
+
+# Step 2: Run (will ask "Type 'yes to continue:'", type yes)
+bash /tmp/deploy-full-v20260630_001.sh
+
+# Step 3: Wait ~5-7 minutes for all 9 steps + verification
+
+Script does ALL of B.1-B.9 + C.1 verification automatically.
+Type 'yes' at the prompt to confirm fresh init (DB will be dropped).
+Output also saved to /opt/app/shared/logs/deploy-run.log.
+
+================================================================================
+>>> MANUAL MODE (if script fails) <<<
+Each block pasted individually. Use this if EASY MODE gives an error.
 ================================================================================
 
 [B.1] UNPACK -----------------------------------------
@@ -116,7 +136,18 @@ echo "Browser: http://172.20.59.7:8081/ -> login admin / Admin@2026!Init"
 ================================================================================
 ROLLBACK (if anything wrong)
 ================================================================================
-/opt/app/scripts/rollback-enhanced.sh -a -f
+>>> EASY: Use the bundled rollback script
+bash /tmp/deploy-rollback-v20260630_001.sh
+
+>>> MANUAL: Stop services only
+pkill -9 -f server.py; sleep 2
+rm -f /opt/app/current
+
+>>> NUCLEAR: Reset everything to known-empty state
+pkill -9 -f server.py; sleep 2
+rm -f /opt/app/shared/data/architecture.db
+rm -f /opt/app/current
+# Then re-run EASY MODE from B.1
 
 ================================================================================
 STUCK? GET LOGS:

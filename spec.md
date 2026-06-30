@@ -50,6 +50,11 @@ modified_files:
   - src/components/common/ObjectPage/AssociationSection.vue
 
 new_files:
+  # 部署脚本 (2026-06-30 one-shot deploy + rollback)
+  - docs/deploy-full-v20260630_001.sh
+  - docs/deploy-rollback-v20260630_001.sh
+  - docs/DEPLOY-MANUAL-20260630_001.md
+  - docs/DEPLOY-CHEATSHEET-20260630_001.txt
   # IE 智能体的 e2e 测试 (21)
   - e2e/business-flow/bmrd-rule-validation.spec.js
   - e2e/business-flow/bug-v010-owner-trace.spec.js
