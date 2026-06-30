@@ -55,10 +55,35 @@ if sys.platform == "win32":
 
 DEFAULT_LOG_DIR = PROJECT_ROOT / "scripts" / "logs"
 
+# V2026.06.30: 支持 per-port 日志文件 (backend_v1218h.out 等)
+# service_manager per-port 隔离会生成 backend_<version>.out/err
+# 改为传目录路径，运行时用 _find_latest_log 解析
 LOG_SOURCES = {
-    "out": DEFAULT_LOG_DIR / "backend.out",
-    "err": DEFAULT_LOG_DIR / "backend.err",
+    "out": DEFAULT_LOG_DIR,
+    "err": DEFAULT_LOG_DIR,
 }
+
+
+def _find_latest_log(log_dir: Path, ext: str = ".out") -> Optional[Path]:
+    """查找目录下最新的 backend_*.{ext} 日志
+
+    优先级：
+    1. backend_v*.{ext} (per-port 版本化文件)
+    2. backend_*.{ext} (通用命名)
+    3. backend.{ext} (单文件 fallback，向后兼容)
+
+    返回 mtime 最新的文件。
+    """
+    if not log_dir.exists():
+        return None
+
+    candidates: list = []
+    for pattern in (f"backend_v*{ext}", f"backend_*{ext}", f"backend{ext}"):
+        candidates.extend(log_dir.glob(pattern))
+
+    if not candidates:
+        return None
+    return max(candidates, key=lambda p: p.stat().st_mtime)
 
 LEVEL_PATTERNS = {
     "ERROR": re.compile(r'\b(ERROR|FATAL|CRITICAL|Traceback|Exception)\b', re.IGNORECASE),
@@ -246,8 +271,13 @@ def main():
 
     args = parser.parse_args()
 
-    # Step 1: 读取日志
-    log_path = LOG_SOURCES[args.source]
+    # Step 1: 读取日志（V2026.06.30: 支持 per-port backend_v*.out）
+    log_dir = LOG_SOURCES[args.source]
+    ext = ".err" if args.source == "err" else ".out"
+    log_path = _find_latest_log(log_dir, ext)
+    if log_path is None:
+        _log(f"日志目录 {log_dir} 下无 backend*{ext} 文件", "FAIL")
+        return 1
     lines = read_log_safe(log_path, args.max_lines)
 
     if not lines:
