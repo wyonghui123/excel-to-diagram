@@ -401,6 +401,19 @@ fields:
             select: name
 
   # [V1.1.4 2026-06-11] 删 owner_id 字段定义 - DB 列 V1.1.1 已删, 顶层 owner 在 product
+  # [FIX 2026-06-26] BUG-V019 重新加入 owner_id (覆盖 owner_aspect, 避免版本被重复继承负责人)
+  # 原因: owner_aspect 自动继承 owner_id 给所有对象, 但 version 的负责人应在 product 层管理
+  # export_visible: false 让 export 不显示该字段 (避免冗余)
+  # [BUG-V023 2026-06-27] 补充: product sheet 中 owner 列展示 (product.yaml 已定义 owner_id)
+  - id: owner_id
+    name: 负责人
+    type: integer
+    description: 版本负责人ID (覆盖 owner_aspect 继承, 不导出)
+    ui:
+      visible: false
+    semantics:
+      export_visible: false
+      import_visible: false
   - id: child_count
     name: 领域数量
     type: integer

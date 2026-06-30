@@ -188,6 +188,12 @@ const props = defineProps({
   multiTypeMode: {
     type: Boolean,
     default: false
+  },
+  // [任务B 2026-06-29] 导出对话框默认不勾选的对象类型
+  //   annotation (备注信息) 默认不导出, 用户需要时手动勾选
+  defaultUnselectedTypes: {
+    type: Array,
+    default: () => ['annotation']
   }
 })
 
@@ -198,7 +204,7 @@ const message = useCrudMessage()
 const loading = ref(false)
 const exportScope = ref('current')
 const withFilters = ref(true)
-const localExportMode = ref(props.defaultExportMode || 'single')
+const localExportMode = ref(props.defaultExportMode || 'cascade')
 
 const exporting = ref(false)
 const exportProgress = ref(0)
@@ -308,9 +314,12 @@ async function loadSchema() {
 function resetState() {
   exportScope.value = 'current'
   withFilters.value = true
-  localExportMode.value = props.defaultExportMode || 'single'
+  localExportMode.value = props.defaultExportMode || 'cascade'
   // [H15.2 修复] 使用availableMultiTypes（已过滤RBAC）作为初始值，而非全部objectTypes
-  selectedMultiTypes.value = availableMultiTypes.value.map(t => t.value)
+  // [任务B 2026-06-29] 排除 defaultUnselectedTypes (如 annotation 默认不勾选)
+  selectedMultiTypes.value = availableMultiTypes.value
+    .filter(t => !props.defaultUnselectedTypes.includes(t.value))
+    .map(t => t.value)
   localOptions.value = {
     includeHierarchyPath: props.exportOptions?.includeHierarchyPath ?? false,
     protectSheet: props.exportOptions?.protectSheet ?? false,
@@ -372,6 +381,14 @@ async function handleExportSync() {
       protect_sheet: localOptions.value.protectSheet,
       mark_readonly: localOptions.value.markReadonly,
       include_operation_mode: true
+    }
+
+    // [任务B 2026-06-29] multiTypeMode 下, 若用户未勾选 annotation,
+    //   传 include_annotations: false 阻止后端 export_selected_types
+    //   自动把 annotation 作为 polymorphic child 追加导出
+    //   (后端 import_export_service.py L822-823/L2796-2803 默认自动追加)
+    if (props.multiTypeMode && !selectedMultiTypes.value.includes('annotation')) {
+      params.options.include_annotations = false
     }
 
     const { boService } = await import('@/services/boService')
@@ -447,6 +464,14 @@ async function handleExportAsync() {
       protect_sheet: localOptions.value.protectSheet,
       mark_readonly: localOptions.value.markReadonly,
       include_operation_mode: true
+    }
+
+    // [任务B 2026-06-29] multiTypeMode 下, 若用户未勾选 annotation,
+    //   传 include_annotations: false 阻止后端 export_selected_types
+    //   自动把 annotation 作为 polymorphic child 追加导出
+    //   (后端 import_export_service.py L822-823/L2796-2803 默认自动追加)
+    if (props.multiTypeMode && !selectedMultiTypes.value.includes('annotation')) {
+      params.options.include_annotations = false
     }
 
     const { boService } = await import('@/services/boService')

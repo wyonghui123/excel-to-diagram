@@ -85,8 +85,13 @@ export default defineConfig({
         target: 'http://localhost:3010',
         changeOrigin: true,
         ws: true,
-        timeout: 30000,       // 代理请求超时 30s (大文件上传等)
-        proxyTimeout: 30000,  // 后端响应超时 30s
+        // [FIX BUG-V029 2026-06-28] 30s→180s
+        //   原因: Excel 导入预检测对 1.34MB / 23839 行文件需 63.7s,
+        //         30s proxy 超时强制断连导致前端报 ERR_EMPTY_RESPONSE
+        //   验证: 直连 3010 63.7s 成功, 经 3004 proxy 30.0s 报 RemoteDisconnected
+        //   选值: 180s (3 min) 留 2-3x headroom, 仍能在挂死时及时终止
+        timeout: 180000,      // 代理请求超时 180s (大文件上传 / Excel 导入预检测)
+        proxyTimeout: 180000, // 后端响应超时 180s
         configure: (proxy) => {
           proxy.on('error', (err) => {
             // 代理连接错误日志 (不阻塞,仅输出)

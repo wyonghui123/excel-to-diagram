@@ -12,13 +12,15 @@
 10. [八、快捷命令速查](#八-快捷命令速查)
 11. [九、版本记录](#九-版本记录)
 12. [十、代码开发规范（重要 ⚠️）](#十-代码开发规范（重要-）)
-13. [十一、附录：常用命令速查](#十一-附录：常用命令速查)
+13. [十一、服务器环境要求](#十一-服务器环境要求)
+14. [十二、🆕 全新初始化部署 SOP](#十二-全新初始化部署-sop)
+15. [十三、附录：常用命令速查](#十三-附录常用命令速查)
 
 ---
 # 用户傻瓜化部署 SOP
 
-> 版本: v1.1
-> 更新日期: 2026-04-29
+> 版本: v1.3
+> 更新日期: 2026-06-29
 > 状态: 生效中
 
 ---
@@ -588,6 +590,8 @@ API代理：[✅/❌]
 |------|------|----------|------|
 | 2026-04-28 | v1.0 | 初始版本 | DevOps |
 | 2026-04-28 | v1.1 | 增加代码开发规范提醒 | DevOps |
+| 2026-06-29 | v1.2 | 新增 §11 服务器环境要求；固化远程实际版本（Python 3.9.25 / OpenSSH 10.3p1 / OpenSSL 1.1.1w）；新增版本验证命令、端口分配、关键目录、升级影响说明 | DevOps |
+| 2026-06-29 | v1.3 | 🆕 新增 §十二「全新初始化部署 SOP」：适用首次部署/不保留旧数据场景，6 步流程（打包→上传→备份→全删全建→seed+init→启动+校验）；含 7 个初始化脚本顺序、检查清单、关键风险；原 §十二 附录顺延为 §十三 | DevOps |
 
 ---
 
@@ -623,7 +627,299 @@ _data_source = get_data_source("sqlite", database="meta/architecture.db")
 
 ---
 
-## 十一、附录：常用命令速查
+## 十一、服务器环境要求
+
+> **当前远程服务器实际版本**（2026-06-29 核实）：
+> - **Python 3.9.25**（`python` / `python3` 均生效，2026-06 升级）
+> - **OpenSSH 10.3p1** / **OpenSSL 1.1.1w**（2026-06 升级）
+
+| 项目 | 要求 | 备注 |
+|------|------|------|
+| 服务器 IP | `172.20.59.7` | 堡垒机 + 内网 |
+| 操作系统 | CentOS 7.x | 或兼容版本 |
+| Python | **3.9.25** (Conda) | `/opt/miniconda3-py39/bin/python` |
+| OpenSSH | **10.3p1** | 2026-06 升级，已应用 |
+| OpenSSL | **1.1.1w** (11 Sep 2023) | 随 OpenSSH 升级 |
+| 磁盘空间 | ≥2GB | 部署包 + 日志 + 备份 |
+| 内存 | ≥2GB | 推荐 4GB+ |
+| 网络 | 内网可达 | 无需访问外网 |
+
+### 11.1 版本验证命令
+
+部署前/后，执行以下命令验证远程版本一致性：
+
+```bash
+# Python（python 与 python3 输出版本必须一致）
+ssh root@172.20.59.7 "python -V; python3 -V"
+# 期望输出：
+#   Python 3.9.25
+#   Python 3.9.25
+
+# SSH / OpenSSL（本地执行显示客户端；远程显示服务端）
+ssh -V
+# 期望: OpenSSH_10.3p1, OpenSSL 1.1.1w 11 Sep 2023
+
+ssh root@172.20.59.7 "sshd -V 2>&1 | head -1"
+# 期望: OpenSSH_10.3p1 ...
+
+ssh root@172.20.59.7 "openssl version"
+# 期望: OpenSSL 1.1.1w  11 Sep 2023
+```
+
+> **Python 兼容性**：3.9.25 处于 `>=3.9,<3.14` 范围内，与本应用 100% 兼容。详细兼容矩阵见 [DEPLOYMENT_STANDARDS.md §2.2.2](./DEPLOYMENT_STANDARDS.md#222-python-兼容性范围)。
+
+### 11.2 端口分配
+
+| 端口 | 服务 | 进程 | 健康检查 |
+|------|------|------|----------|
+| 8081 | 前端 | `server.py`（带代理）| `/health` |
+| 5001 | 后端 | `meta/server.py` | `/api/v1/health` |
+| 8080 | Admin | - | - |
+
+### 11.3 关键目录
+
+```
+/opt/app/
+├── excel-to-diagram/                  # 主应用
+│   ├── dist/                          # 前端静态文件
+│   └── meta/                          # 后端代码
+├── shared/
+│   ├── data/architecture.db           # SQLite 数据库
+│   └── logs/                          # 日志目录
+├── deployments/v{YYYYMMDD}_{序号}/    # 历史版本
+├── backups/                           # 备份目录
+├── scripts/                           # 运维脚本
+│   ├── ci-cd-test.sh
+│   ├── health-check.sh
+│   ├── post-deploy-verify.sh
+│   └── rollback-enhanced.sh
+└── state/                             # 状态文件
+```
+
+### 11.4 升级影响
+
+| 升级项 | 影响 | 注意事项 |
+|--------|------|----------|
+| OpenSSH 10.x | 旧 ssh-rsa/ssh-dss 算法被禁用 | 客户端需升级；密钥推荐 ed25519 |
+| OpenSSL 1.1.1w | 修复 CVE-2023-XXXX 系列漏洞 | Python `ssl` 模块已包含对应补丁 |
+| Python 3.9.25 | 修复 3.9.x 安全补丁 | 项目依赖（Flask/Waitress）兼容，无需调整 |
+
+> 完整规范见 [DEPLOYMENT_STANDARDS.md §2.2](./DEPLOYMENT_STANDARDS.md#22-服务器环境要求)
+
+---
+
+## 十二、🆕 全新初始化部署 SOP
+
+> **适用场景**：
+> - 远程服务器首次部署本系统
+> - 历史数据无需保留，全新启用新版本
+> - DB schema 已发生重大变化（V2.1 permission / write_scope / cascade 4 层等），不沿用旧 schema
+>
+> **核心差异**（vs 普通升级部署）：
+> - ❌ **不要**做 schema migration
+> - ❌ **不要**保留旧数据
+> - ❌ **不要**做回滚（无前置版本可回退）
+> - ✅ **全删全建**：删旧库 → 建新 schema → 灌 seed → 启动服务
+
+### 12.1 流程总览
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    全新初始化部署流程（6 步，约 15 分钟）                       │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  Step 1:  本地打包  (build-deploy-package.sh)                               │
+│      │                                                                       │
+│      ↓                                                                       │
+│  Step 2:  上传到堡垒机  (scp)                                                │
+│      │                                                                       │
+│      ↓                                                                       │
+│  Step 3:  SSH 登录远程 + 备份旧库  (可选)                                   │
+│      │                                                                       │
+│      ↓                                                                       │
+│  Step 4:  全删全建  (init_database --force)                                  │
+│      │                                                                       │
+│      ↓                                                                       │
+│  Step 5:  灌 Seed + 初始化  (init_and_seed + init_auth + 6 init 脚本)         │
+│      │                                                                       │
+│      ↓                                                                       │
+│  Step 6:  启动服务 + 健康检查  (ci-cd-test.sh + health-check.sh)            │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 12.2 Step 1: 本地打包
+
+```bash
+cd d:\filework\release-prep-worktree
+bash scripts/build-deploy-package.sh
+# 输出: deploy-vYYYYMMDD_NNN.zip + DEPLOY-README-YYYYMMDD_NNN.txt
+```
+
+> **注**：本 worktree 是 `release/pre-2026-06-29` 分支，已含 28 BUG-V 修复，**直接打包即可**。无需先合并到 main。
+
+### 12.3 Step 2: 上传到堡垒机
+
+```bash
+scp d:\filework\release-prep-worktree\deploy-v*.zip root@172.20.59.7:/opt/app/
+```
+
+> **注意**：远程 OpenSSH 已升级到 10.3p1（2026-06），客户端需使用 ed25519 密钥。ssh-rsa 旧密钥可能失败。
+
+### 12.4 Step 3: 备份旧库（可选但建议）
+
+```bash
+ssh root@172.20.59.7
+cd /opt/app/shared/data
+if [ -f architecture.db ]; then
+    cp architecture.db architecture_$(date +%Y%m%d).db.bak
+    ls -la /opt/app/backups/  # 移到统一备份目录
+    mv architecture_*.db.bak /opt/app/backups/
+fi
+```
+
+### 12.5 Step 4: 全删全建（核心）
+
+```bash
+ssh root@172.20.59.7
+cd /opt/app
+mkdir -p deployments/v$(date +%Y%m%d)_001
+unzip -o deploy-v*.zip -d deployments/v$(date +%Y%m%d)_001/
+ln -sfn deployments/v$(date +%Y%m%d)_001 current
+ln -sfn /opt/app/shared/data current/data
+ln -sfn /opt/app/shared/logs current/logs
+
+# 【关键】初始化数据库 - 删旧库，全新创建
+cd /opt/app/current/meta
+python scripts/init_database.py --force
+
+# 灌种子数据（4 域 8 子域 16 服务模块 + BO 模板）
+python scripts/init_and_seed.py --force
+```
+
+### 12.6 Step 5: 初始化权限与菜单
+
+```bash
+cd /opt/app/current/meta
+
+# 5.1 初始化权限表
+python scripts/init_auth_tables.py
+
+# 5.2 创建初始用户（admin / system / tester 等）
+python scripts/init_auth.py
+
+# 5.3 初始化角色权限（5 标准动作：read/create/update/delete/list）
+python scripts/init_role_permissions.py
+
+# 5.4 初始化菜单权限（按 menu_permissions.required_permissions 展开）
+python scripts/init_menu_permissions.py
+
+# 5.5 初始化任务调度 + 种子任务
+python scripts/init_task_menus.py
+python scripts/init_task_seed.py
+
+# 5.6 初始化权限包
+python scripts/init_permission_bundles.py
+
+# 5.7 预热热门角色
+python scripts/preload_hot_roles.py
+```
+
+### 12.7 Step 6: 启动服务 + 验证
+
+> **🆕 关键：生产环境启动必须设置 4 个 env vars**（`startup_checks` 会强制校验）：
+> - `FLASK_DEBUG=false`（生产模式开关）
+> - `JWT_SECRET_KEY`（32+ 字符强密钥）
+> - `CORS_ALLOWED_ORIGINS`（允许的跨域来源）
+> - `ADMIN_PASSWORD`（admin 初始密码，<首次登录后改>）
+
+```bash
+# 6.0 生成强密钥（生产环境首次部署）
+export JWT_SECRET_KEY=$(python -c "import secrets; print(secrets.token_urlsafe(48))")
+echo "JWT_SECRET_KEY=$JWT_SECRET_KEY" >> /opt/app/.env
+
+# 6.1 启动（生产模式，4 个 env vars 必设）
+cd /opt/app/current
+
+# 前端 (8081)
+PORT=8081 \
+FLASK_DEBUG=false \
+FLASK_ENV=production \
+JWT_SECRET_KEY="$JWT_SECRET_KEY" \
+CORS_ALLOWED_ORIGINS="http://172.20.59.7:8081,http://172.20.59.7:5001,http://localhost:8081,http://localhost:5001" \
+ADMIN_PASSWORD="ChangeMe@2026!Init" \
+nohup python server.py > /opt/app/shared/logs/deploy.log 2>&1 &
+
+# 后端 (5001)
+cd /opt/app/current/meta
+PORT=5001 \
+FLASK_DEBUG=false \
+FLASK_ENV=production \
+JWT_SECRET_KEY="$JWT_SECRET_KEY" \
+CORS_ALLOWED_ORIGINS="http://172.20.59.7:8081,http://172.20.59.7:5001,http://localhost:8081,http://localhost:5001" \
+ADMIN_PASSWORD="ChangeMe@2026!Init" \
+nohup python server.py > /opt/app/shared/logs/backend.log 2>&1 &
+
+# 6.2 等待 15s（waitress 启动慢，commit 5e87523 已调 watchdog 40s）
+sleep 15
+
+# 6.3 健康检查
+curl -s http://localhost:8081/health
+curl -s http://localhost:5001/api/v1/health
+
+# 6.4 startup_checks 日志确认
+tail -50 /opt/app/shared/logs/backend.log | grep -E "StartupCheck|ERROR|WARNING"
+# 期望: 0 errors, 0 warnings
+
+# 6.5 自动化测试验证
+bash /opt/app/scripts/ci-cd-test.sh
+bash /opt/app/scripts/health-check.sh
+```
+
+> **CORS 重要说明**：
+> - 远程 4 个 origin 必须包含：`http://172.20.59.7:8081`（前端外网）、`http://172.20.59.7:5001`（后端外网）
+> - 本地 `service_manager.ps1` 写死的是 `localhost:5173/3010/3004`（dev 专用），**远程不能用**
+> - 如需新增 origin（如新增 admin UI），追加到 `CORS_ALLOWED_ORIGINS` 即可
+> - dev 模式（FLASK_DEBUG=true）会跳过 CORS 校验，但生产模式严禁开启 DEBUG
+
+### 12.8 初始化后的检查清单
+
+| # | 检查项 | 期望 | 命令 |
+|---|--------|------|------|
+| 1 | 数据库文件存在 | ✓ | `ls -la /opt/app/shared/data/architecture.db` |
+| 2 | 数据库可读 | ✓ | `sqlite3 /opt/app/shared/data/architecture.db "SELECT COUNT(*) FROM products;"` 期望 ≥ 1 |
+| 3 | 种子 BO 已建 | ✓ | `sqlite3 ... "SELECT code FROM business_objects LIMIT 5"` |
+| 4 | admin 用户存在 | ✓ | `sqlite3 ... "SELECT username FROM users WHERE role='admin'"` |
+| 5 | 前端端口 | 8081 | `curl -s http://localhost:8081/health` |
+| 6 | 后端端口 | 5001 | `curl -s http://localhost:5001/api/v1/health` |
+| 7 | 前端 dev-login | 200 | `curl -X POST 'http://localhost:3010/api/v1/auth/dev-login?username=admin'` |
+| 8 | 权限 5 动作同步 | ✓ | `python scripts/init_role_permissions.py` 二次跑应提示 "无变更" |
+| 9 | 菜单可显示 | ✓ | 浏览器访问 `http://172.20.59.7:8081/`，用 admin 登录，看到 4 个一级菜单 |
+| 10 | audit 业务化 | ✓ | 操作一次，audit_log 应出现 `action` + `trace_id` |
+
+### 12.9 关键风险与注意
+
+| 风险 | 影响 | 缓解 |
+|------|------|------|
+| **OpenSSH 10 密钥不兼容** | scp 失败 | 用 ed25519 密钥；旧 ssh-rsa 需在 sshd_config 加 `PubkeyAcceptedAlgorithms=+ssh-rsa` |
+| **init_database.py 误删** | 数据全丢 | 已加 `--force` 双重保护（参数 + 交互确认），但**初始化时仍会删旧库**（预期行为） |
+| **port 占用** | 启动失败 | 远程 `pkill -f "server.py"` 后再启动 |
+| **waitress 启动慢** | 健康检查超时 | `wait_time` 已从 15s → 40s（commit `5e87523`） |
+| **CORS 校验** | 前端跨域失败 | 通过 `start_backend_stable.ps1` 启动（FLASK_ENV=production） |
+
+### 12.10 初始化完成后
+
+1. **登录 admin**，跑一遍核心业务流：
+   - 创建 Product → 创建 Version → 录入 Domain/Sub-Domain/Service Module → 创建 BO
+   - 验证 Permission 5 动作（read/list/create/update/delete）
+   - 验证 RBAC 导入导出（admin/tester/user 三角色）
+2. **生成 release notes**（`/opt/app/deployments/v{date}_001/RELEASE-NOTES.md`）
+3. **通知用户**：访问地址 `http://172.20.59.7:8081/`，admin 账号 + 默认密码（见 §十二.5.2 init_auth.py 输出）
+4. **删除历史部署目录**（如需要）：`rm -rf /opt/app/deployments/v{更早的版本}/`
+
+---
+
+## 十三、附录：常用命令速查
 
 ### 服务器端命令
 

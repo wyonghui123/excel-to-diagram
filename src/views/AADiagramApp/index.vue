@@ -370,7 +370,11 @@ export default {
           // DEBUG 临时暴露
           selectedRelationNodeIds,
           relationCategoryTree,
-          filteredRelations
+          filteredRelations,
+          // [BUG-V033 诊断] 暴露 available* 和 relationFilteredBoCodes
+          availableSubDomains,
+          availableDomains,
+          availableServiceModules
         }
         console.log('[AADiagramApp] window.__diagramApp exposed (new)')
       }

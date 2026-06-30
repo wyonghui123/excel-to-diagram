@@ -57,10 +57,19 @@ export function registerCategoryConfigs(configs) {
 /**
  * 获取分类配置
  * @param {string} category - 分类编码
- * @returns {object|null} 配置对象
+ * @returns {object} 配置对象 (永远不返回 null, 兜底为 info 或 inline default)
+ *
+ * [FIX 2026-06-29 v6] 永远不返回 null
+ *   之前 _dynamicCategoryConfig[category] || DEFAULT_CATEGORY_CONFIG[category] || null
+ *   如果 category 不在两个 config 中, 返回 null
+ *   调用方要分别兜底 (line 147/217) 容易遗漏导致 null.bg / null.border 报错
+ *   改为永远兜底为 DEFAULT_CATEGORY_CONFIG['info'], 还不存在则 inline 默认值
  */
 export function getCategoryConfig(category) {
-  return _dynamicCategoryConfig[category] || DEFAULT_CATEGORY_CONFIG[category] || null;
+  return _dynamicCategoryConfig[category]
+      || DEFAULT_CATEGORY_CONFIG[category]
+      || DEFAULT_CATEGORY_CONFIG[DEFAULT_CATEGORY]
+      || { label: category || DEFAULT_CATEGORY, bg: '#e6f7ff', border: '#1677ff' };
 }
 
 export function getTypeConfig(targetType) {

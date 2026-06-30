@@ -81,13 +81,35 @@ audience: 运维、开发者
 
 ### 2.2 服务器环境要求
 
+> **当前远程服务器实际版本**（2026-06-29 核实）：
+> - Python 3.9.25（`python` / `python3` 已统一）
+> - OpenSSH 10.3p1 / OpenSSL 1.1.1w（2026-06 升级，已应用）
+
 | 项目 | 要求 | 备注 |
 |------|------|------|
 | 操作系统 | CentOS 7.x | 或兼容版本 |
-| Python | 3.9+ (Conda) | `/opt/miniconda3-py39/bin/python` |
+| Python | 3.9.25 (Conda) | `/opt/miniconda3-py39/bin/python` (`python` / `python3` 均生效) |
+| OpenSSH | 10.3p1 | 2026-06 已升级 |
+| OpenSSL | 1.1.1w (11 Sep 2023) | 随 OpenSSH 升级 |
 | 磁盘空间 | ≥2GB | 部署包 + 日志 + 备份 |
 | 内存 | ≥2GB | 推荐4GB+ |
 | 网络 | 内网可达 | 无需访问外网 |
+
+#### 2.2.1 版本验证命令
+
+远程升级后，执行以下命令验证版本一致性：
+
+```bash
+# Python（python 与 python3 输出版本必须一致）
+ssh root@172.20.59.7 "python -V; python3 -V"
+# 期望: Python 3.9.25 / Python 3.9.25
+
+# SSH / OpenSSL
+ssh -V
+# 期望: OpenSSH_10.3p1, OpenSSL 1.1.1w 11 Sep 2023
+```
+
+> 注：`ssh -V` 在本地执行即可（显示客户端版本）；服务端版本用 `ssh root@172.20.59.7 "sshd -V"` 或 `cat /etc/redhat-release`。
 
 ---
 
@@ -125,7 +147,8 @@ changes:
   - "修复数据库路径问题"
 
 requirements:
-  python: ">=3.8"
+  python: ">=3.9,<3.14"           # 兼容 3.9.25 ~ 3.13.x；3.14.x 跳过（gevent socket 问题）
+  python_tested: "3.9.25"         # 2026-06 实际验证版本
   disk_space: "500MB"
 
 dependencies:
@@ -469,6 +492,8 @@ _data_source = get_data_source("sqlite", database="architecture.db")
 |------|------|----------|------|
 | 2026-04-28 | v1.0 | 初始版本 | DevOps |
 | 2026-04-28 | v1.1 | 增加代码规范章节（API数据库路径规范） | DevOps |
+| 2026-06-29 | v1.2 | 固化远程实际版本：Python 3.9.25、OpenSSH 10.3p1、OpenSSL 1.1.1w；新增 2.2.1 版本验证命令 | DevOps |
+| 2026-06-29 | v1.3 | 新增 §2.2.2 Python 兼容性范围（AST 扫描结果：3.9.25 / 3.10~3.12 / 3.13 全兼容，3.14 不推荐）；MANIFEST §3.2 requirements 改为 `python: ">=3.9,<3.14"` + `python_tested: "3.9.25"` | DevOps |
 
 ---
 

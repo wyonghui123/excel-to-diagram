@@ -46,7 +46,7 @@ function buildLegacyLayoutControlConfig(filteredDomainProducts, filteredContaine
     const groups = buildDomainGroups(filteredDomainProducts, filteredContainers)
     layoutControlConfig = {
       enabled: groups.length > 0,
-      overallDirection: 'LR',
+      overallDirection: 'TB',
       groups: groups,
       engine: 'dagre',
       preserveOrder: true
@@ -158,13 +158,18 @@ function computedServiceModuleRelations(relationships, businessObjects, serviceM
     }
     
     // 收集业务对象关系的备注
-    if (rel.annotationContent) {
+    // [FIX 2026-06-29] 后端返回 annotationContents/Categories 数组
+    //   每个关系可能有多条 annotation, 这里把每条都收下来
+    const relContents = rel.annotationContents || []
+    const relCategories = rel.annotationCategories || []
+    relContents.forEach((content, idx) => {
+      if (!content) return
       relation.businessObjectRelationships.push({
         relationCode: boRelCode,
-        annotationContent: rel.annotationContent,
-        annotationCategory: rel.annotationCategory || 'info'
+        annotationContent: content,
+        annotationCategory: relCategories[idx] || 'info'
       })
-    }
+    })
   })
 
   // 处理备注内容
@@ -172,7 +177,7 @@ function computedServiceModuleRelations(relationships, businessObjects, serviceM
   moduleRelationMap.forEach((rel) => {
     // 去重后的业务对象关系编码
     const uniqueBoCodes = [...new Set(rel.businessObjectRelationshipCodes.filter(Boolean))]
-    
+
     // 构建备注内容：关系备注内容 + 业务对象关系编码
     const boAnnotations = rel.businessObjectRelationships
       .filter(boRel => boRel.annotationContent)
@@ -180,7 +185,7 @@ function computedServiceModuleRelations(relationships, businessObjects, serviceM
         const code = boRel.relationCode || ''
         return code ? `${boRel.annotationContent} ${code}` : boRel.annotationContent
       })
-    
+
     // 去重并用分号连接
     const uniqueAnnotations = [...new Set(boAnnotations)]
     
@@ -237,6 +242,12 @@ export function useDiagramData() {
     hideLinkLabelTails: configStore.hideLinkLabelTails,
     annotationPanelPosition: configStore.annotationPanelPosition,
     showAnnotationIcons: configStore.showAnnotationIcons,
+    // [FIX 2026-06-29 v3] 加上 annotationCategoryFilter
+    //   之前漏了这行, 传给 StepDisplay/MermaidComponent 的 annotationConfig 没有 filter 字段
+    //   useSvgProcessor.renderAnnotationOverlay 拿 annotationConfig.annotationCategoryFilter 时是 undefined
+    //   → || [] → 永远空数组 → 永远不过滤
+    // 主线不受影响: 默认 [] = 不过滤 (向后兼容)
+    annotationCategoryFilter: configStore.annotationCategoryFilter,
     assignmentMode: configStore.assignmentMode
   }))
   const diagramData = ref(null)
@@ -532,11 +543,15 @@ export function useDiagramData() {
   const availableSubDomains = computed(() => {
     if (!previewData.value?.domainProducts) return []
 
-    // 中心范围 + 关系范围（并集）
-    const centerBoCodes = centerScope.value ? new Set(centerScope.value) : new Set()
-    const relationBoCodes = relationFilteredBoCodes.value ? new Set(relationFilteredBoCodes.value) : new Set()
-
-    const allBoCodes = new Set([...centerBoCodes, ...relationBoCodes])
+    // [BUG-V033 修复 2026-06-29] 颜色配置应显示 "中心 ∪ 关系范围" 的所有子领域
+    //   - CenterDomainSelect 内部 isFullyInCenterScope 会自动过滤完全在中心的 (用 centerScopeColor)
+    //   - 剩下外部的分配颜色组合
+    //   - 之前误改成只用 centerScope → 外部项被过滤 → 颜色项缺失
+    //   - relationFilteredBoCodes = centerScope + 用户选中的关系引入的 BO (BUG-V032 已修复, 不再全量)
+    // [BUG-V033 二轮修复 2026-06-29] relationFilteredBoCodes 返回 Array (非 Set), 用 .length 而非 .size
+    const allBoCodes = relationFilteredBoCodes.value && relationFilteredBoCodes.value.length > 0
+      ? new Set(relationFilteredBoCodes.value)
+      : (centerScope.value ? new Set(centerScope.value) : new Set())
 
     if (allBoCodes.size === 0) {
       return extractSubDomains(previewData.value.domainProducts)
@@ -634,11 +649,11 @@ export function useDiagramData() {
   const availableDomains = computed(() => {
     if (!previewData.value?.domainProducts) return []
 
-    // 中心范围 + 关系范围（并集）
-    const centerBoCodes = centerScope.value ? new Set(centerScope.value) : new Set()
-    const relationBoCodes = relationFilteredBoCodes.value ? new Set(relationFilteredBoCodes.value) : new Set()
-
-    const allBoCodes = new Set([...centerBoCodes, ...relationBoCodes])
+    // [BUG-V033 修复] 颜色配置显示 "中心 ∪ 关系范围" 的所有领域
+    // [BUG-V033 二轮修复] relationFilteredBoCodes 返回 Array, 用 .length
+    const allBoCodes = relationFilteredBoCodes.value && relationFilteredBoCodes.value.length > 0
+      ? new Set(relationFilteredBoCodes.value)
+      : (centerScope.value ? new Set(centerScope.value) : new Set())
 
     if (allBoCodes.size === 0) {
       return previewData.value.domainProducts.map(domain => domain.name)
@@ -658,16 +673,18 @@ export function useDiagramData() {
   const availableServiceModules = computed(() => {
     if (!previewData.value?.businessObjects?.length) return []
 
-    // v29: 对齐 availableDomains/availableSubDomains — 从 allBoCodes (center+relation) 提取 SM
-    //   不再依赖 previewData.serviceModules (可能是空或旧格式)
-    const centerBoCodes = centerScope.value ? new Set(centerScope.value) : new Set()
-    const relationBoCodes = relationFilteredBoCodes.value ? new Set(relationFilteredBoCodes.value) : new Set()
+    // [BUG-V033 修复] 颜色配置显示 "中心 ∪ 关系范围" 的所有服务模块
+    //   - CenterDomainSelect 内部 isFullyInCenterScope 自动过滤完全在中心的
+    //   - 剩下外部的分配颜色
+    // [BUG-V033 二轮修复] relationFilteredBoCodes 返回 Array, 用 .length
+    const allBoCodes = relationFilteredBoCodes.value && relationFilteredBoCodes.value.length > 0
+      ? new Set(relationFilteredBoCodes.value)
+      : (centerScope.value ? new Set(centerScope.value) : new Set())
 
-    const allBoCodes = new Set([...centerBoCodes, ...relationBoCodes])
+    const smMap = new Map()
 
     if (allBoCodes.size === 0) {
-      // 兜底: 全量返回 (保持与domains/subdomains一致)
-      const smMap = new Map()
+      // 兜底: 全量返回
       previewData.value.businessObjects.forEach(bo => {
         const name = bo.serviceModuleName || bo.serviceModule
         const code = bo.serviceModule || bo.serviceModuleName
@@ -678,7 +695,6 @@ export function useDiagramData() {
       return Array.from(smMap.values())
     }
 
-    const smMap = new Map()
     previewData.value.businessObjects.forEach(bo => {
       if (allBoCodes.has(bo.code)) {
         const name = bo.serviceModuleName || bo.serviceModule
@@ -733,7 +749,12 @@ export function useDiagramData() {
           subDomainMap.get(sm.subDomain).nodes.push({
             id: sm.code,
             name: sm.name,
-            code: sm.code
+            code: sm.code,
+            // [FIX 2026-06-29] 透传 annotation 数组字段
+            //   之前只 push id/name/code, annotation 字段全丢, 图表显示没数字标记
+            //   archDataConverter 输出 sm.annotationContents/Categories 是数组
+            annotationContents: sm.annotationContents || [],
+            annotationCategories: sm.annotationCategories || []
           })
         })
       }
@@ -1788,7 +1809,7 @@ export function useDiagramData() {
       configStore.setChartTypeChanged(true)
       configStore.updateLayoutControlConfig({
         enabled: false,
-        overallDirection: 'LR',
+        overallDirection: 'TB',
         groups: [],
         engine: 'elk',
         preserveOrder: true
@@ -1935,6 +1956,18 @@ export function useDiagramData() {
     }
   )
 
+  // [修复 2026-06-29] 监听 centerScopeColor 变化, 重新生成 diagramData
+  //   之前缺少此 watch, 用户改中心范围颜色后 diagramData.centerScopeColor 不更新
+  //   导致 PDF/HTML 导出的 legend 中心范围颜色还是旧值
+  watch(
+    () => diagramConfig.value?.centerScopeColor,
+    (newColor, oldColor) => {
+      if (newColor !== oldColor && previewData.value) {
+        generateDiagram()
+      }
+    }
+  )
+
   watch(
     centerScope,
     (newScope, oldScope) => {
@@ -2045,7 +2078,7 @@ export function useDiagramData() {
 
   async function initFromArchDataManager(archData) {
     const { versionId, hierarchyFilter, relationTypeFilter, relationIds: archRelationIds, relationCategoryTypes } = archData
-    
+
     loading.value = true
     try {
       const result = await buildPreviewDataFromArchData(null, versionId, hierarchyFilter)

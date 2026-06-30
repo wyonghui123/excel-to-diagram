@@ -1,10 +1,10 @@
 <template>
   <el-dialog
-    :model-value="visible"
+    :model-value="visible && !isMinimized"
     :title="dialogTitle"
     width="680px"
     :close-on-click-modal="false"
-    @update:model-value="$emit('update:visible', $event)"
+    @update:model-value="handleDialogUpdate"
     @close="handleClose"
   >
     <div class="import-dialog-content">
@@ -162,6 +162,11 @@
                 <div class="sheet-collapse__content">
                   <el-tabs v-model="sheet.activeTab" class="sheet-tabs">
                     <el-tab-pane label="错误" name="errors">
+                      <div v-if="sheet.errors.length > 0" class="tab-toolbar">
+                        <el-button link size="small" @click="copyRowsToClipboard(sheet.errors, COPY_HEADERS.previewError)">
+                          <el-icon><CopyDocument /></el-icon> 复制到剪贴板
+                        </el-button>
+                      </div>
                       <el-table
                         v-if="sheet.errors.length > 0"
                         :data="sheet.errors"
@@ -177,6 +182,11 @@
                       <p v-else class="tip">无错误</p>
                     </el-tab-pane>
                     <el-tab-pane label="告警" name="warnings">
+                      <div v-if="sheet.warnings.length > 0" class="tab-toolbar">
+                        <el-button link size="small" @click="copyRowsToClipboard(sheet.warnings, COPY_HEADERS.previewWarning)">
+                          <el-icon><CopyDocument /></el-icon> 复制到剪贴板
+                        </el-button>
+                      </div>
                       <el-table
                         v-if="sheet.warnings.length > 0"
                         :data="sheet.warnings"
@@ -284,16 +294,20 @@
             </div>
           </div>
 
-          <!-- [NEW v1.2.12 2026-06-19] 级联失败 banner (business_object 失败时显示) -->
+          <!-- [FIX 2026-06-29] 级联失败 banner 改为模糊描述, 不量化下游条数
+               原因: 之前的描述 "下游对象类型全部失败 (共 N 条)" 会让用户以为所有 N 条都是因为
+               主对象失败导致的, 但实际许多下游 (如 annotation) 失败与主对象无直接或间接关系
+               (例: 备注信息失败是 VALIDATION_FAILED - 关联对象ID 不能为空, 与业务对象是否
+               失败无关, 是独立的 validation 失败)
+               改为: 仅提示存在级联失败 + 让用户检查主对象, 不暴露具体下游数字 -->
           <div v-if="hasCascadeFailure" class="cascade-failure-banner" data-testid="cascade-banner">
             <div class="cascade-failure-banner__title">
               <el-icon><Warning /></el-icon>
-              <span>检测到级联失败</span>
+              <span>检测到存在级联失败</span>
             </div>
             <div class="cascade-failure-banner__detail">
-              主对象类型 <strong>{{ cascadeRootTypeName }}</strong> 有 {{ cascadeRootFailed }} 条导入失败，
-              导致依赖它的 <strong>{{ cascadeDependentCount }}</strong> 个下游对象类型全部失败
-              （共 <strong>{{ cascadeDependentFailed }}</strong> 条）。请先修复主对象类型的失败原因。
+              主对象类型 <strong>{{ cascadeRootTypeName }}</strong> 存在导入失败，
+              可能影响依赖它的下游对象类型。请优先检查并修复主对象类型的失败原因。
             </div>
           </div>
 
@@ -320,6 +334,11 @@
                 <div class="sheet-collapse__content">
                   <el-tabs v-model="row.activeTab" class="sheet-tabs">
                     <el-tab-pane :label="`成功 (${row.successCount})`" name="success">
+                      <div v-if="getTypeSuccesses(row.typeId).length > 0" class="tab-toolbar">
+                        <el-button link size="small" @click="copyRowsToClipboard(getTypeSuccesses(row.typeId), COPY_HEADERS.importSuccess)">
+                          <el-icon><CopyDocument /></el-icon> 复制到剪贴板
+                        </el-button>
+                      </div>
                       <el-table
                         v-if="getTypeSuccesses(row.typeId).length > 0"
                         :data="getTypeSuccesses(row.typeId)"
@@ -340,6 +359,11 @@
                       <p v-else class="tip">无成功记录</p>
                     </el-tab-pane>
                     <el-tab-pane :label="`失败 (${row.failed})`" name="errors">
+                      <div v-if="getTypeErrors(row.typeId).length > 0" class="tab-toolbar">
+                        <el-button link size="small" @click="copyRowsToClipboard(getTypeErrors(row.typeId), COPY_HEADERS.importError)">
+                          <el-icon><CopyDocument /></el-icon> 复制到剪贴板
+                        </el-button>
+                      </div>
                       <el-table
                         v-if="getTypeErrors(row.typeId).length > 0"
                         :data="getTypeErrors(row.typeId)"
@@ -374,6 +398,11 @@
                       <p v-else class="tip">无失败记录</p>
                     </el-tab-pane>
                     <el-tab-pane :label="`告警 (${row.warning})`" name="warnings">
+                      <div v-if="getTypeWarnings(row.typeId).length > 0" class="tab-toolbar">
+                        <el-button link size="small" @click="copyRowsToClipboard(getTypeWarnings(row.typeId), COPY_HEADERS.importWarning)">
+                          <el-icon><CopyDocument /></el-icon> 复制到剪贴板
+                        </el-button>
+                      </div>
                       <el-table
                         v-if="getTypeWarnings(row.typeId).length > 0"
                         :data="getTypeWarnings(row.typeId)"
@@ -398,6 +427,11 @@
                       <p v-else class="tip">无告警</p>
                     </el-tab-pane>
                     <el-tab-pane :label="`跳过 (${row.skipped})`" name="skipped">
+                      <div v-if="getTypeSkipped(row.typeId).length > 0" class="tab-toolbar">
+                        <el-button link size="small" @click="copyRowsToClipboard(getTypeSkipped(row.typeId), COPY_HEADERS.importSkipped)">
+                          <el-icon><CopyDocument /></el-icon> 复制到剪贴板
+                        </el-button>
+                      </div>
                       <el-table
                         v-if="getTypeSkipped(row.typeId).length > 0"
                         :data="getTypeSkipped(row.typeId)"
@@ -429,6 +463,13 @@
     <template #footer>
       <el-button v-if="currentStep > 0 && currentStep < 3" @click="prevStep">上一步</el-button>
       <el-button @click="handleClose">{{ currentStep === 3 ? '关闭' : '取消' }}</el-button>
+      <!-- [NEW v1.2.32] 最小化: 隐藏弹窗, 保留状态, 右下角浮动卡片可恢复 -->
+      <el-button
+        v-if="currentStep === 1 || currentStep === 3"
+        link
+        type="primary"
+        @click="minimizeDialog"
+      >最小化</el-button>
       <el-button
         v-if="currentStep === 0"
         type="primary"
@@ -447,13 +488,33 @@
       </el-button>
     </template>
   </el-dialog>
+
+  <!-- [NEW v1.2.32] 最小化浮动卡片: 右下角悬浮, 点击恢复弹窗 -->
+  <Teleport to="body">
+    <Transition name="mini-slide">
+      <div
+        v-if="isMinimized && visible"
+        class="import-mini-float"
+        @click="restoreDialog"
+      >
+        <div class="import-mini-float__icon">
+          <el-icon :size="20"><UploadFilled /></el-icon>
+        </div>
+        <div class="import-mini-float__body">
+          <div class="import-mini-float__title">{{ miniSummary.step }}</div>
+          <div class="import-mini-float__detail">{{ miniSummary.detail }}</div>
+        </div>
+        <div class="import-mini-float__action">展开</div>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { useCrudMessage } from '@/composables/useCrudMessage'
 // [NEW v1.2.12 2026-06-19] Warning icon: 级联失败 banner
-import { UploadFilled, Download, Filter, Warning, QuestionFilled } from '@element-plus/icons-vue'
+import { UploadFilled, Download, Filter, Warning, QuestionFilled, CopyDocument } from '@element-plus/icons-vue'
 import { boService } from '@/services/boService'
 import { metaService } from '@/services/metaService'
 import { objectTypeService } from '@/services/objectTypeService'
@@ -499,6 +560,8 @@ const message = useCrudMessage()
 
 const uploadRef = ref(null)
 const currentStep = ref(0)
+// [NEW v1.2.32 2026-06-25] 最小化模式: 弹窗隐藏, 右下角浮动卡片可恢复
+const isMinimized = ref(false)
 const selectedFile = ref(null)
 const fileList = ref([])
 const createIfNotExists = ref(true)  // ON = upsert (有则更新无则创建), OFF = update_only (无则跳过)
@@ -926,6 +989,86 @@ watch(importResultsTable, (rows) => {
   }
 }, { immediate: true })
 
+// [NEW v1.2.31 2026-06-25] 一键复制明细到剪贴板 (TSV 格式, Excel 可直接粘贴)
+const COPY_HEADERS = {
+  previewError: [
+    { prop: 'row', label: '行号' },
+    { prop: 'field', label: '字段' },
+    { prop: 'value', label: '值' },
+    { prop: 'message', label: '错误信息' }
+  ],
+  previewWarning: [
+    { prop: 'row', label: '行号' },
+    { prop: 'field', label: '字段' },
+    { prop: 'value', label: '值' },
+    { prop: 'message', label: '告警信息' }
+  ],
+  importSuccess: [
+    { prop: 'row', label: '行号' },
+    { prop: 'operation', label: '操作' },
+    { prop: 'code', label: '业务编码' },
+    { prop: 'name', label: '名称' }
+  ],
+  importError: [
+    { prop: 'row', label: '行号' },
+    { prop: 'operation', label: '操作' },
+    { prop: 'field', label: '字段' },
+    { prop: 'message', label: '错误信息' }
+  ],
+  importWarning: [
+    { prop: 'row', label: '行号' },
+    { prop: 'operation', label: '操作' },
+    { prop: 'field', label: '字段' },
+    { prop: 'message', label: '告警信息' }
+  ],
+  importSkipped: [
+    { prop: 'row', label: '行号' },
+    { prop: 'operation', label: '操作' },
+    { prop: 'code', label: '业务编码' },
+    { prop: 'name', label: '名称' }
+  ]
+}
+
+function escapeTSV(val) {
+  const s = String(val ?? '')
+  if (s.includes('\t') || s.includes('\n') || s.includes('"')) {
+    return '"' + s.replace(/"/g, '""') + '"'
+  }
+  return s
+}
+
+function rowsToTSV(rows, headers) {
+  const headerLine = headers.map(h => escapeTSV(h.label)).join('\t')
+  const dataLines = rows.map(row =>
+    headers.map(h => escapeTSV(row[h.prop])).join('\t')
+  )
+  return [headerLine, ...dataLines].join('\n')
+}
+
+async function copyRowsToClipboard(rows, headers) {
+  if (!rows || rows.length === 0) return
+  const tsv = rowsToTSV(rows, headers)
+  try {
+    await navigator.clipboard.writeText(tsv)
+    message.success(`已复制 ${rows.length} 条记录到剪贴板，可粘贴到 Excel`)
+  } catch {
+    // fallback for non-secure contexts
+    const textarea = document.createElement('textarea')
+    textarea.value = tsv
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    try {
+      document.execCommand('copy')
+      message.success(`已复制 ${rows.length} 条记录到剪贴板，可粘贴到 Excel`)
+    } catch {
+      message.error('复制失败，请手动选择表格内容复制')
+    }
+    document.body.removeChild(textarea)
+  }
+}
+
 // 操作模式映射
 function operationLabel(op) {
   const map = { create: '新增', update: '更新', delete: '删除', skip: '跳过', upsert: 'upsert' }
@@ -1203,11 +1346,57 @@ async function downloadTemplate() {
   }
 }
 
+// [NEW v1.2.32 2026-06-25] 最小化/恢复: 弹窗隐藏到右下角浮动卡片
+function handleDialogUpdate(val) {
+  if (!val && isMinimized.value) return  // 最小化导致的隐藏, 不通知父组件
+  emit('update:visible', val)
+}
+
+function minimizeDialog() {
+  isMinimized.value = true
+}
+
+function restoreDialog() {
+  isMinimized.value = false
+}
+
+// 最小化浮动卡片摘要
+// [FIX 2026-06-29] 之前用 importResult.value.totalSuccess/totalFailed 但后端不返这两个字段
+//   导致 mini-float 卡片始终显示 "0 成功 | 0 失败"
+//   修复: 与 dialog 内的 totalCreatedCount/totalFailedCount 一样, 用 Object.values(results).reduce()
+//   聚合各 object_type 的 created/updated/deleted/skipped/failed 真实数据
+const miniSummary = computed(() => {
+  if (currentStep.value === 1 && previewResult.value) {
+    const errs = previewResult.value.totalErrors ?? 0
+    const warns = previewResult.value.totalWarnings ?? 0
+    const rows = previewResult.value.totalRows ?? 0
+    return { step: '数据校验', detail: `${rows} 行 | ${errs} 错误 | ${warns} 告警` }
+  }
+  if (currentStep.value === 3 && importResult.value?.results) {
+    // [FIX] 用与 dialog 一致的 reduce 逻辑计算成功/失败
+    //   success = created + updated
+    //   failed = failed
+    //   skipped = skipped (实际可能就是 0)
+    const results = Object.values(importResult.value.results)
+    const created = results.reduce((sum, r) => sum + (r.created || 0), 0)
+    const updated = results.reduce((sum, r) => sum + (r.updated || 0), 0)
+    const failed = results.reduce((sum, r) => sum + (r.failed || 0), 0)
+    const skipped = results.reduce((sum, r) => sum + (r.skipped || 0), 0)
+    const ok = created + updated
+    return { step: '导入结果', detail: `${ok} 成功 | ${failed} 失败 | ${skipped} 跳过` }
+  }
+  return { step: '导入中', detail: '处理中...' }
+})
+
 function handleClose() {
+  // [v1.2.32] 最小化导致的关闭, 不执行清理, 不通知父组件
+  if (isMinimized.value) return
   // [NEW v1.2.3 2026-06-17] 第 4 步点"关闭"时通知父组件导入完成，让父组件刷新列表
   if (currentStep.value === 3 && importResult.value) {
     emit('success', importResult.value)
   }
+  // [NEW v1.2.32 2026-06-25] 关闭时重置最小化状态
+  isMinimized.value = false
   selectedFile.value = null
   fileList.value = []
   if (uploadRef.value) {
@@ -1314,30 +1503,45 @@ function handleClose() {
 }
 
 // [NEW v1.2.14 2026-06-19] 紧凑顶部摘要: alert + 统计条 一行展示
+// [v1.2.30 2026-06-25] 简约风: alert 去掉彩色背景, 改为白底 + 3px 左侧色条
 .preview-summary,
 .import-summary {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--spacing-sm);
+  gap: var(--spacing-md);
   margin-bottom: var(--spacing-md);
-  padding: var(--spacing-xs) var(--spacing-sm);
-  background: var(--el-fill-color-blank, #fff);
-  border: 1px solid var(--el-border-color-light, #e4e7ed);
-  border-radius: var(--radius-sm, 4px);
+  padding: 0;
 
   &__alert {
     flex: 1 1 auto;
-    min-width: 200px;
+    min-width: 240px;
     margin-bottom: 0 !important;
-    padding: 4px var(--spacing-sm);
+    padding: 0;
 
-    :deep(.el-alert__content) {
-      padding: 0 var(--spacing-xs);
+    :deep(.el-alert) {
+      background-color: var(--el-fill-color-blank, #fff) !important;
+      border: 1px solid var(--el-border-color-lighter, #ebeef5) !important;
+      border-left-width: 3px !important;
+      border-radius: var(--radius-sm, 4px) !important;
+      padding: 8px 12px !important;
+    }
+
+    :deep(.el-alert--success) {
+      border-left-color: var(--el-color-success, #67c23a) !important;
+    }
+
+    :deep(.el-alert--warning) {
+      border-left-color: var(--el-color-warning, #e6a23c) !important;
+    }
+
+    :deep(.el-alert--error) {
+      border-left-color: var(--el-color-danger, #f56c6c) !important;
     }
 
     :deep(.el-alert__title) {
-      font-size: var(--el-font-size-base, 14px);
+      font-size: var(--el-font-size-base, 14px) !important;
+      font-weight: 500 !important;
     }
   }
 }
@@ -1416,9 +1620,10 @@ function handleClose() {
 }
 
 // [NEW v1.2.3 2026-06-17] 错误信息展开详情
+// [v1.2.30 2026-06-25] 简约风: 错误消息白底 + 3px 红色左边条
 .error-detail {
   padding: var(--spacing-sm) var(--spacing-md);
-  background: var(--el-fill-color-light, #f5f7fa);
+  background: var(--el-fill-color-blank, #fff);
   border-radius: var(--radius-sm, 4px);
   font-size: var(--el-font-size-small, 13px);
 
@@ -1438,8 +1643,10 @@ function handleClose() {
 
   &__message {
     padding: var(--spacing-xs) var(--spacing-sm);
-    background: var(--el-color-danger-light-9, #fef0f0);
+    background: var(--el-fill-color-blank, #fff);
+    border: 1px solid var(--el-border-color-lighter, #ebeef5);
     border-left: 3px solid var(--el-color-danger, #f56c6c);
+    border-radius: var(--radius-sm, 4px);
     color: var(--el-text-color-primary, #303133);
     word-break: break-all;
     white-space: pre-wrap;
@@ -1449,7 +1656,7 @@ function handleClose() {
   &__value {
     padding: var(--spacing-xs) var(--spacing-sm);
     background: var(--el-bg-color, #fff);
-    border: 1px solid var(--el-border-color-light, #e4e7ed);
+    border: 1px solid var(--el-border-color-lighter, #ebeef5);
     border-radius: var(--radius-sm, 2px);
     color: var(--el-text-color-primary, #303133);
     word-break: break-all;
@@ -1525,15 +1732,16 @@ function handleClose() {
 }
 
 // [NEW v1.2.13 2026-06-19] 总览统计条 - 紧凑 inline 布局
+// [v1.2.30 2026-06-25] 简约风: 去掉 6 色背景块, 改为白底 + 细分割线 + 文字色
 .overview-strip {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--spacing-xs);
   margin-bottom: var(--spacing-md);
-  padding: var(--spacing-xs) var(--spacing-sm);
-  background: var(--el-fill-color-blank, #fff);
-  border: 1px solid var(--el-border-color-light, #e4e7ed);
+  padding: 0;
+  border: 1px solid var(--el-border-color-lighter, #ebeef5);
   border-radius: var(--radius-sm, 4px);
+  background: var(--el-fill-color-blank, #fff);
+  overflow: hidden;
 
   &--result {
     // 6 列场景, 允许换行但保持紧凑
@@ -1543,51 +1751,65 @@ function handleClose() {
     .overview-strip__item {
       flex-direction: row;
       gap: var(--spacing-xs);
-      padding: 2px 8px;
+      padding: 6px 12px;
+      border-right: 1px solid var(--el-border-color-lighter, #ebeef5);
+
+      &:last-child {
+        border-right: none;
+      }
     }
     .overview-strip__value {
       font-size: 14px;
-      font-weight: 600;
     }
     .overview-strip__label {
       margin-top: 0;
-      font-size: var(--el-font-size-small, 12px);
     }
   }
 
   &__item {
-    display: inline-flex;
+    flex: 1 1 auto;
+    min-width: 80px;
+    display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 2px 8px;
-    border-radius: var(--radius-sm, 4px);
+    padding: var(--spacing-sm) var(--spacing-md);
     text-align: center;
+    border-right: 1px solid var(--el-border-color-lighter, #ebeef5);
     transition: all 0.2s;
 
-    &--success { background: var(--el-color-success-light-9, #f0f9eb); }
-    &--primary { background: var(--el-color-primary-light-9, #ecf5ff); }
-    &--info    { background: var(--el-color-info-light-9, #f4f4f5); }
-    &--warning { background: var(--el-color-warning-light-9, #fdf6ec); }
-    &--danger  { background: var(--el-color-danger-light-9, #fef0f0); }
-    &--orange  { background: rgba(234, 88, 12, 0.08); }
+    &:last-child {
+      border-right: none;
+    }
+
+    // [v1.2.30 简约风] 去掉所有彩色背景块, 只保留透明
+    &--success,
+    &--primary,
+    &--info,
+    &--warning,
+    &--danger,
+    &--orange {
+      background: transparent !important;
+    }
   }
 
   &__value {
-    font-size: 14px;
+    font-size: 18px;
     font-weight: 600;
     line-height: 1.2;
+    color: var(--el-text-color-primary, #303133);
 
+    // [v1.2.30 简约风] 只用文字色传达状态, 不带背景
     &--success { color: var(--el-color-success, #67c23a); }
-    &--primary { color: var(--el-color-primary, #409eff); }
-    &--info    { color: var(--el-color-info, #909399); }
+    &--primary { color: var(--yonyou-orange-600, #ea580c); }
+    &--info    { color: var(--el-text-color-secondary, #909399); }
     &--warning { color: var(--el-color-warning, #e6a23c); }
     &--danger  { color: var(--el-color-danger, #f56c6c); }
     &--orange  { color: var(--yonyou-orange-600, #ea580c); }
   }
 
   &__label {
-    margin-top: 0;
+    margin-top: 2px;
     font-size: var(--el-font-size-small, 12px);
     color: var(--el-text-color-secondary, #909399);
   }
@@ -1633,12 +1855,13 @@ function handleClose() {
 }
 
 // [NEW v1.2.12 2026-06-19] 级联失败 banner
+// [v1.2.30 2026-06-25] 简约风: 白底 + 3px 黄色左边条, 去掉黄色背景
 .cascade-failure-banner {
   margin-bottom: var(--spacing-md);
-  padding: var(--spacing-md);
-  background: rgba(230, 162, 60, 0.1);
-  border: 1px solid rgba(230, 162, 60, 0.4);
-  border-left: 4px solid var(--el-color-warning, #e6a23c);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--el-fill-color-blank, #fff);
+  border: 1px solid var(--el-border-color-lighter, #ebeef5);
+  border-left: 3px solid var(--el-color-warning, #e6a23c);
   border-radius: var(--radius-sm, 4px);
   color: var(--el-text-color-primary, #303133);
 
@@ -1646,9 +1869,10 @@ function handleClose() {
     display: flex;
     align-items: center;
     gap: var(--spacing-xs);
-    font-weight: 600;
+    font-weight: 500;
     color: var(--el-color-warning, #b88230);
     margin-bottom: var(--spacing-xs);
+    font-size: var(--el-font-size-base, 14px);
   }
 
   &__detail {
@@ -1692,5 +1916,124 @@ function handleClose() {
   margin-top: var(--spacing-xs);
   color: var(--el-text-color-secondary, #909399);
   font-size: var(--el-font-size-small, 12px);
+}
+
+// [v1.2.30 2026-06-25] 简约风: el-tag 透明化, 只用文字色传达状态
+// 适用范围: 折叠标题的统计标签 (1 失败 / 1 告警 / 1 跳过)
+//          表格行内操作标签 (创建 / 更新 / 删除 / 跳过)
+:deep(.el-tag) {
+  background-color: transparent !important;
+  border: 1px solid transparent !important;
+  padding: 0 var(--spacing-xs) !important;
+  height: auto !important;
+  line-height: 1.6 !important;
+  font-size: var(--el-font-size-small, 12px) !important;
+  font-weight: 500 !important;
+  border-radius: var(--radius-sm, 4px) !important;
+  vertical-align: baseline !important;
+
+  &.el-tag--success {
+    color: var(--el-color-success, #67c23a) !important;
+  }
+
+  &.el-tag--primary {
+    color: var(--yonyou-orange-600, #ea580c) !important;
+  }
+
+  &.el-tag--warning {
+    color: var(--el-color-warning, #e6a23c) !important;
+  }
+
+  &.el-tag--danger {
+    color: var(--el-color-danger, #f56c6c) !important;
+  }
+
+  &.el-tag--info {
+    color: var(--el-text-color-secondary, #909399) !important;
+  }
+}
+
+// [NEW v1.2.31 2026-06-25] tab 内复制按钮工具条
+.tab-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--spacing-xs, 4px);
+}
+
+// [NEW v1.2.32 2026-06-25] 最小化浮动卡片
+.import-mini-float {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  min-width: 240px;
+  background: var(--el-bg-color, #fff);
+  border: 1px solid var(--el-border-color-light, #e4e7ed);
+  border-radius: var(--radius-md, 6px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+  transition: box-shadow 0.2s, transform 0.2s;
+  user-select: none;
+
+  &:hover {
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+    transform: translateY(-2px);
+  }
+
+  &__icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: rgba(234, 88, 12, 0.1);
+    color: var(--yonyou-orange-600, #ea580c);
+    flex-shrink: 0;
+  }
+
+  &__body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--el-text-color-primary, #303133);
+    line-height: 1.4;
+  }
+
+  &__detail {
+    font-size: 12px;
+    color: var(--el-text-color-secondary, #909399);
+    line-height: 1.4;
+    margin-top: 2px;
+  }
+
+  &__action {
+    font-size: 12px;
+    color: var(--yonyou-orange-600, #ea580c);
+    font-weight: 500;
+    flex-shrink: 0;
+    padding-left: 8px;
+    border-left: 1px solid var(--el-border-color-lighter, #ebeef5);
+  }
+}
+
+// 浮动卡片入场/出场动画
+.mini-slide-enter-active,
+.mini-slide-leave-active {
+  transition: all 0.3s ease;
+}
+
+.mini-slide-enter-from,
+.mini-slide-leave-to {
+  opacity: 0;
+  transform: translateY(20px);
 }
 </style>

@@ -487,8 +487,9 @@ fields:
 - id: source_domain_id
   name: 源领域
   type: integer
-  description: 源业务对象所属领域（用于级联筛选业务对象）
-  storage: virtual
+  description: 源业务对象所属领域（用于级联筛选业务对象，由 DB trigger 自动从 source_bo_id 推导并维护）
+  storage: stored
+  db_column: source_domain_id
   ui:
     widget: select
     relation: domain
@@ -497,14 +498,15 @@ fields:
     cascade_group: relationship
     cascade_level: 2
   semantics:
-    meaning: Search Help - 用于级联筛选源端业务对象
+    meaning: Search Help - 用于级联筛选源端业务对象（由 trigger 维护）
     search_help_for: source_bo_id
     immutable: true
     export_visible: false
     redundancy:
-      type: virtual
+      type: stored
       source_field: source_bo_id
       derived_from: sub_domain.domain_id
+      maintained_by: db_trigger
       join_path:
       - table: business_objects
         from: source_bo_id
@@ -548,8 +550,9 @@ fields:
 - id: source_sub_domain_id
   name: 源子领域
   type: integer
-  description: 源业务对象所属子领域（用于级联筛选业务对象）
-  storage: virtual
+  description: 源业务对象所属子领域（用于级联筛选业务对象，由 DB trigger 自动从 source_bo_id 推导并维护）
+  storage: stored
+  db_column: source_sub_domain_id
   ui:
     widget: select
     relation: sub_domain
@@ -558,14 +561,15 @@ fields:
     cascade_group: relationship
     cascade_level: 3
   semantics:
-    meaning: Search Help - 用于级联筛选源端业务对象
+    meaning: Search Help - 用于级联筛选源端业务对象（由 trigger 维护）
     search_help_for: source_bo_id
     immutable: true
     export_visible: false
     redundancy:
-      type: virtual
+      type: stored
       source_field: source_bo_id
       derived_from: service_module.sub_domain_id
+      maintained_by: db_trigger
       join_path:
       - table: business_objects
         from: source_bo_id
@@ -606,8 +610,9 @@ fields:
 - id: source_service_module_id
   name: 源服务模块
   type: integer
-  description: 源业务对象所属服务模块（用于级联筛选业务对象）
-  storage: virtual
+  description: 源业务对象所属服务模块（用于级联筛选业务对象，由 DB trigger 自动从 source_bo_id 推导并维护）
+  storage: stored
+  db_column: source_service_module_id
   ui:
     widget: select
     relation: service_module
@@ -616,14 +621,15 @@ fields:
     cascade_group: relationship
     cascade_level: 4
   semantics:
-    meaning: Search Help - 用于级联筛选源端业务对象
+    meaning: Search Help - 用于级联筛选源端业务对象（由 trigger 维护）
     search_help_for: source_bo_id
     immutable: true
     export_visible: false
     redundancy:
-      type: virtual
+      type: stored
       source_field: source_bo_id
       derived_from: business_object.service_module_id
+      maintained_by: db_trigger
       join_path:
       - table: business_objects
         from: source_bo_id
@@ -660,8 +666,9 @@ fields:
 - id: target_domain_id
   name: 目标领域
   type: integer
-  description: 目标业务对象所属领域（用于级联筛选业务对象）
-  storage: virtual
+  description: 目标业务对象所属领域（用于级联筛选业务对象，由 DB trigger 自动从 target_bo_id 推导并维护）
+  storage: stored
+  db_column: target_domain_id
   ui:
     widget: select
     relation: domain
@@ -670,14 +677,15 @@ fields:
     cascade_group: relationship
     cascade_level: 2
   semantics:
-    meaning: Search Help - 用于级联筛选目标端业务对象
+    meaning: Search Help - 用于级联筛选目标端业务对象（由 trigger 维护）
     search_help_for: target_bo_id
     immutable: true
     export_visible: false
     redundancy:
-      type: virtual
+      type: stored
       source_field: target_bo_id
       derived_from: sub_domain.domain_id
+      maintained_by: db_trigger
       join_path:
       - table: business_objects
         from: target_bo_id
@@ -721,8 +729,9 @@ fields:
 - id: target_sub_domain_id
   name: 目标子领域
   type: integer
-  description: 目标业务对象所属子领域（用于级联筛选业务对象）
-  storage: virtual
+  description: 目标业务对象所属子领域（用于级联筛选业务对象，由 DB trigger 自动从 target_bo_id 推导并维护）
+  storage: stored
+  db_column: target_sub_domain_id
   ui:
     widget: select
     relation: sub_domain
@@ -731,14 +740,15 @@ fields:
     cascade_group: relationship
     cascade_level: 3
   semantics:
-    meaning: Search Help - 用于级联筛选目标端业务对象
+    meaning: Search Help - 用于级联筛选目标端业务对象（由 trigger 维护）
     search_help_for: target_bo_id
     immutable: true
     export_visible: false
     redundancy:
-      type: virtual
+      type: stored
       source_field: target_bo_id
       derived_from: service_module.sub_domain_id
+      maintained_by: db_trigger
       join_path:
       - table: business_objects
         from: target_bo_id
@@ -778,8 +788,9 @@ fields:
 - id: target_service_module_id
   name: 目标服务模块
   type: integer
-  description: 目标业务对象所属服务模块（用于级联筛选业务对象）
-  storage: virtual
+  description: 目标业务对象所属服务模块（用于级联筛选业务对象，由 DB trigger 自动从 target_bo_id 推导并维护）
+  storage: stored
+  db_column: target_service_module_id
   ui:
     widget: select
     relation: service_module
@@ -788,14 +799,15 @@ fields:
     cascade_group: relationship
     cascade_level: 4
   semantics:
-    meaning: Search Help - 用于级联筛选目标端业务对象
+    meaning: Search Help - 用于级联筛选目标端业务对象（由 trigger 维护）
     search_help_for: target_bo_id
     immutable: true
     export_visible: false
     redundancy:
-      type: virtual
+      type: stored
       source_field: target_bo_id
       derived_from: business_object.service_module_id
+      maintained_by: db_trigger
       join_path:
       - table: business_objects
         from: target_bo_id
@@ -1026,8 +1038,11 @@ fields:
   name: 关系类型
   type: string
   db_column: relation_type
-  required: true
-  description: 关系类型（操作语义）
+  # [FIX 2026-06-28 临时] required: true → false
+  #   原因: 业务方反馈部分场景下关系类型允许留空 (例如纯引用关系, 操作语义未定义)
+  #   计划: 后续根据数据情况决定是否恢复, 见 BUG-V029 关联讨论
+  required: false
+  description: 关系类型（操作语义），临时允许为空
   ui:
     widget: select
     enum_type: relation_type

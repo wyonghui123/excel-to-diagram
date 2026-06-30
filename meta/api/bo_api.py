@@ -267,10 +267,7 @@ def read_bo(object_type, obj_id):
         return jsonify({'success': False, 'message': '对象不存在或无访问权限'}), 404
 
     bo = _get_bo()
-    import sys
-    print(f"[DBG-READ-BO] START: object_type={object_type}, obj_id={obj_id}", file=sys.stderr, flush=True)
     result = bo.read(object_type, obj_id)
-    print(f"[DBG-READ-BO] END: success={result.success}, data_keys={list(result.data.keys()) if isinstance(result.data, dict) else 'N/A'}", file=sys.stderr, flush=True)
     if result.success:
         _attach_change_history(result.data, object_type, obj_id)
         return jsonify({'success': True, 'data': result.data})
@@ -1325,19 +1322,40 @@ def get_architecture_preview():
         # 构建版本过滤条件
         version_filter = {'version_id': version_id} if version_id else {}
 
-        # 查询各层级数据（大 page_size 获取全量）
-        domain_result = bo.query('domain', version_filter.copy(), page_size=5000)
-        sub_domain_result = bo.query('sub_domain', version_filter.copy(), page_size=5000)
-        module_result = bo.query('service_module', version_filter.copy(), page_size=5000)
-        bo_result = bo.query('business_object', version_filter.copy(), page_size=5000)
-        rel_result = bo.query('relationship', version_filter.copy(), page_size=10000)
+        # [BUG-V032 修复 2026-06-29] 循环分页拿全量, 绕过 MAX_USER_PAGE_SIZE=500 cap
+        # 根因: bo.query → query_bo (line 463) 把 page_size 强制 min(_, 500),
+        #       V863 有 2850 BO/5634 Rel, 单次 5000 实际被截到 500, 导致后续按 ID 过滤时大量缺失
+        # 修复: 用分页循环 (每页 500), 直到 last_page < page_size 才停
+        _PAGE_SIZE_INTERNAL = 500
+        _MAX_PAGES = 100  # 防御死循环: 上限 50000 行
+        _data_source_local = _get_data_source()
 
-        # 提取数据
-        domains = domain_result.data if domain_result.success else []
-        sub_domains = sub_domain_result.data if sub_domain_result.success else []
-        modules = module_result.data if module_result.success else []
-        business_objects = bo_result.data if bo_result.success else []
-        relationships = rel_result.data if rel_result.success else []
+        def _fetch_all_by_version(object_type, version_filter_arg):
+            """循环分页拉全量, 过滤条件 = version_filter_arg (或 page_size 内部 cap 500)"""
+            from meta.core.query_builder import QueryBuilder
+            from meta.core.models import registry
+            meta_obj = registry.get(object_type)
+            if not meta_obj:
+                return []
+            all_data = []
+            for page_idx in range(_MAX_PAGES):
+                builder = QueryBuilder(_data_source_local, meta_obj)
+                for k, v in version_filter_arg.items():
+                    builder.where_eq(k, v)
+                builder.page(page_idx + 1, _PAGE_SIZE_INTERNAL)
+                rows = builder.execute()
+                if not rows:
+                    break
+                all_data.extend(rows)
+                if len(rows) < _PAGE_SIZE_INTERNAL:
+                    break
+            return all_data
+
+        domains = _fetch_all_by_version('domain', version_filter.copy())
+        sub_domains = _fetch_all_by_version('sub_domain', version_filter.copy())
+        modules = _fetch_all_by_version('service_module', version_filter.copy())
+        business_objects = _fetch_all_by_version('business_object', version_filter.copy())
+        relationships = _fetch_all_by_version('relationship', version_filter.copy())
 
         # 解析过滤 ID 列表
         domain_id_list = [int(x) for x in domain_ids.split(',') if x.strip()]
@@ -1510,9 +1528,10 @@ def get_architecture_preview():
             if d_id and (domain_id_set is None or d_id not in domain_id_set):
                 referenced_domain_ids.add(d_id)
         if referenced_sm_ids or referenced_sub_domain_ids or referenced_domain_ids:
-            extra_modules = [m for m in module_result.data if m.get('id') in referenced_sm_ids]
-            extra_sub_domains = [sd for sd in sub_domain_result.data if sd.get('id') in referenced_sub_domain_ids]
-            extra_domains = [d for d in domain_result.data if d.get('id') in referenced_domain_ids]
+            # [BUG-V032 修复] 改用 modules/sub_domains/domains (list) 替代 .data (ActionResult)
+            extra_modules = [m for m in modules if m.get('id') in referenced_sm_ids]
+            extra_sub_domains = [sd for sd in sub_domains if sd.get('id') in referenced_sub_domain_ids]
+            extra_domains = [d for d in domains if d.get('id') in referenced_domain_ids]
             seen = {m.get('id') for m in modules}
             for m in extra_modules:
                 if m.get('id') not in seen:
@@ -1877,6 +1896,72 @@ def get_architecture_preview():
         #   - 权限域外: source 和 target 都不在 dim scope (如库存管理→销售管理, 对采购管理用户)
         #   - 对象范围外: source 和 target 都不在 center_scope (如跨权限域但不在选中范围内)
         relationships = [r for r in relationships if r.get('scope_type') != 'external']
+
+        # ── [V_NEW 2026-06-29] annotation 聚合 - 备注文本是辅助信息, 不影响主路径
+        # 主线不受影响: 失败时所有 BO/Rel/SM/SD/D 都返回空 annotation_content/category
+        # 这样前端 archDataConverter 即使没拿到字段也不会报错
+        try:
+            from meta.services.preview_service import aggregate_annotations_for_targets
+
+            _ds_ann = _get_data_source()
+
+            # BO annotations
+            bo_ids = [b.get('id') for b in business_objects if b.get('id')]
+            bo_ann = aggregate_annotations_for_targets('business_object', bo_ids, _ds_ann)
+            for b in business_objects:
+                ann = bo_ann.get(b.get('id'), {'contents': [], 'categories': []})
+                b['annotation_contents'] = ann['contents']
+                b['annotation_categories'] = ann['categories']
+
+            # Relationship annotations
+            rel_ids = [r.get('id') for r in relationships if r.get('id')]
+            rel_ann = aggregate_annotations_for_targets('relationship', rel_ids, _ds_ann)
+            for r in relationships:
+                ann = rel_ann.get(r.get('id'), {'contents': [], 'categories': []})
+                r['annotation_contents'] = ann['contents']
+                r['annotation_categories'] = ann['categories']
+
+            # SubDomain annotations
+            sd_ids = [sd.get('id') for sd in sub_domains if sd.get('id')]
+            sd_ann = aggregate_annotations_for_targets('sub_domain', sd_ids, _ds_ann)
+            for sd in sub_domains:
+                ann = sd_ann.get(sd.get('id'), {'contents': [], 'categories': []})
+                sd['annotation_contents'] = ann['contents']
+                sd['annotation_categories'] = ann['categories']
+
+            # ServiceModule annotations
+            sm_ids = [m.get('id') for m in modules if m.get('id')]
+            sm_ann = aggregate_annotations_for_targets('service_module', sm_ids, _ds_ann)
+            for m in modules:
+                ann = sm_ann.get(m.get('id'), {'contents': [], 'categories': []})
+                m['annotation_contents'] = ann['contents']
+                m['annotation_categories'] = ann['categories']
+
+            # Domain annotations
+            d_ids = [d.get('id') for d in domains if d.get('id')]
+            d_ann = aggregate_annotations_for_targets('domain', d_ids, _ds_ann)
+            for d in domains:
+                ann = d_ann.get(d.get('id'), {'contents': [], 'categories': []})
+                d['annotation_contents'] = ann['contents']
+                d['annotation_categories'] = ann['categories']
+        except Exception as e:
+            # 主线不受影响: annotation 聚合失败时, 给所有对象填空数组
+            logger.warning(f'[bo_api.get_architecture_preview] annotation aggregation failed: {e}')
+            for b in business_objects:
+                b.setdefault('annotation_contents', [])
+                b.setdefault('annotation_categories', [])
+            for r in relationships:
+                r.setdefault('annotation_contents', [])
+                r.setdefault('annotation_categories', [])
+            for sd in sub_domains:
+                sd.setdefault('annotation_contents', [])
+                sd.setdefault('annotation_categories', [])
+            for m in modules:
+                m.setdefault('annotation_contents', [])
+                m.setdefault('annotation_categories', [])
+            for d in domains:
+                d.setdefault('annotation_contents', [])
+                d.setdefault('annotation_categories', [])
 
         return jsonify({
             'success': True,
@@ -2289,8 +2374,12 @@ def _load_annotation_categories():
 def get_view_config(object_type, view_name='default'):
     try:
         from meta.services.view_config_service import view_config_service
-        from meta.api.meta_api import _dataclass_to_dict
-        
+        from meta.api.meta_api import _dataclass_to_dict, _ensure_fresh_meta
+
+        # [BUG-V036 2026-06-29] 调用 _ensure_fresh_meta() 确保 YAML 修改被热加载
+        # 否则 DEV_MODE=False 时 YAML 修改不会生效, 导致 column 的 value_help/filter_type 等配置丢失
+        _ensure_fresh_meta()
+
         # 先获取原始配置
         original_config = view_config_service.get_view_config(object_type, view_name)
         logger.info(f"[bo_api] original_config: {original_config}")

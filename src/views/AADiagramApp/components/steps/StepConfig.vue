@@ -17,12 +17,14 @@
             :center-scope-bo-codes="centerScopeBoCodes"
             :business-objects="businessObjects"
             :center-scope-highlight="configStore.centerScopeHighlight"
+            :annotation-category-filter="configStore.annotationCategoryFilter"
             @update:colorGroupBy="configStore.updateColorGroupBy"
             @update:colorScheme="configStore.updateColorScheme"
             @update:nodeTextColor="configStore.updateNodeTextColor"
             @update:centerScopeColor="configStore.updateCenterScopeColor"
             @update:customColors="configStore.updateCustomColors"
             @update:centerScopeHighlight="configStore.updateCenterScopeHighlight"
+            @update:annotationCategoryFilter="configStore.setAnnotationCategoryFilter"
           />
         </template>
 
@@ -40,12 +42,14 @@
             :center-scope="configStore.centerScope"
             :center-scope-highlight="configStore.centerScopeHighlight"
             :business-objects="businessObjects"
+            :annotation-category-filter="configStore.annotationCategoryFilter"
             @update:colorGroupBy="configStore.updateColorGroupBy"
             @update:colorScheme="configStore.updateColorScheme"
             @update:nodeTextColor="configStore.updateNodeTextColor"
             @update:centerScopeColor="configStore.updateCenterScopeColor"
             @update:customColors="configStore.updateCustomColors"
             @update:centerScopeHighlight="configStore.updateCenterScopeHighlight"
+            @update:annotationCategoryFilter="configStore.setAnnotationCategoryFilter"
           />
         </template>
 
@@ -224,13 +228,10 @@ export default {
     const enableLegacyMode = ref(false)
 
     const passedDomainProducts = computed(() => {
-      console.log('[StepConfig] computed passedDomainProducts')
-      console.log('[StepConfig] props.domainProducts (from index.vue, filtered):', props.domainProducts?.length)
-      console.log('[StepConfig] props.previewData?.domainProducts (original):', props.previewData?.domainProducts?.length)
       // 优先使用 props.domainProducts（从 index.vue 传入的 filteredDomainProducts）
       // 只有当 domainProducts 为空时才 fallback 到 previewData?.domainProducts
-      return props.domainProducts?.length > 0 
-        ? props.domainProducts 
+      return props.domainProducts?.length > 0
+        ? props.domainProducts
         : (props.previewData?.domainProducts || [])
     })
     const passedCenterScope = computed(() => configStore.centerScope || [])
@@ -322,7 +323,7 @@ export default {
     return {
       localLayoutControlConfig: {
         enabled: true,
-        overallDirection: 'LR',
+        overallDirection: 'TB',
         groups: [],
         engine: 'elk',
         preserveOrder: true
@@ -332,21 +333,15 @@ export default {
   watch: {
     'configStore.centerScope': {
       immediate: true,
-      handler(newVal) {
-        console.log('[StepConfig] WATCH configStore.centerScope:', newVal?.length, 'newVal:', newVal?.slice?.(0, 5))
-      }
+      handler() {}
     },
     'configStore.centerScopeMarkers': {
       immediate: true,
-      handler(newVal) {
-        console.log('[StepConfig] WATCH configStore.centerScopeMarkers:', 'domains:', newVal?.domains?.size, 'subDomains:', newVal?.subDomains?.size, 'serviceModules:', newVal?.serviceModules?.size)
-      }
+      handler() {}
     },
     'configStore.centerScopeColor': {
       immediate: true,
-      handler(newVal, oldVal) {
-        console.log('[StepConfig] WATCH configStore.centerScopeColor:', 'old:', oldVal, 'new:', newVal)
-      }
+      handler() {}
     }
   },
   methods: {

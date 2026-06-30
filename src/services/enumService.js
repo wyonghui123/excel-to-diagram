@@ -121,7 +121,7 @@ const EnumService = {
         return [];
       }
 
-      const values = this._normalizeEnumValues(result.data?.data || []);
+      const values = this._normalizeEnumValues(this._extractValuesArray(result));
 
       if (cache) {
         this._addToCache(enumTypeId, values);
@@ -199,6 +199,46 @@ const EnumService = {
     };
   },
   
+  /**
+   * 提取 values 数组 - 兼容双层包装的双端点响应结构
+   *
+   * 高速端点 (/enums/{id}/options) backend: {data: [{code, name}, ...]}
+   *   → apiV1.get 返回 result.data = [{code, name}, ...]
+   *   → _loadFromHighSpeedEndpoint 包装 data: { data: result.data } = {data: [...]}
+   *   → enumApiResult.data = {data: [{...}, ...]}  ← 包装 1 层
+   *
+   * 标准端点 (/enum-types/{id}/values) backend: {data: {data: [...], total: 6, ...}}
+   *   → apiV1.get 返回 result.data = {data: [...], total: 6, ...}
+   *   → _loadFromStandardEndpoint 包装 data: { data: result.data } = {data: {data: [...]}}
+   *   → enumApiResult.data = {data: {data: [{...}, ...]}}  ← 包装 2 层
+   *
+   * [FIX 2026-06-29 v2] 之前只剥 1 层, 标准端点拿到 {data: [...]} 对象 (非数组),
+   *   _normalizeEnumValues 返回 [], 弹窗保持默认 4 个 categories
+   *   [FIX 实际根因] _extractValuesArray 需要递归或更智能地找到数组
+   *
+   * @param {Object} result - _loadFromHighSpeedEndpoint / _loadFromStandardEndpoint 返回
+   * @returns {Array} values 数组
+   * @private
+   */
+  _extractValuesArray(result) {
+    if (!result || !result.data) return []
+
+    // 递归查找数组: data → data.data → data.data.data (depth < 5 防爆栈)
+    // 高速端点: {data: [{...}]} → 数组在 depth=1
+    // 标准端点: {data: {data: [...]}} → 数组在 depth=2
+    let current = result.data
+    let depth = 0
+    while (current && !Array.isArray(current) && depth < 5) {
+      if (current.data === undefined || current.data === null) {
+        return []
+      }
+      current = current.data
+      depth++
+    }
+
+    return Array.isArray(current) ? current : []
+  },
+
   /**
    * 规范化枚举值格式
    *

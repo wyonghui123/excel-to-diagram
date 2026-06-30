@@ -621,6 +621,19 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
     objectTypes: objectTypes.filter(t => t !== 'relationship')
   }))
 
+  // [任务B 2026-06-29] 导出对话框可选类型: 在原 objectTypes 基础上额外暴露 annotation
+  //   - annotation 不作为页面 Tab (RelationshipManagement.vue objectTypes 不含 annotation)
+  //   - 仅在导出对话框作为可勾选类型, 默认不勾选 (ExportDialog defaultUnselectedTypes)
+  //   - relationship 也出现在导出对话框, 默认不勾选
+  //   - 后端 manage_api.py 已种入 annotation:export 权限, export_import_api.py 走 selected_types 路径
+  const exportObjectTypes = computed(() => {
+    const base = [...objectTypes]
+    if (!base.includes('annotation')) {
+      base.push('annotation')
+    }
+    return base
+  })
+
   const objectTypeLabels = computed(() => {
     const labels = {}
     for (const type of objectTypes) {
@@ -629,6 +642,10 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
       } else {
         labels[type] = hierarchyService.getLabel(levels.value, type) || type
       }
+    }
+    // annotation 不在 objectTypes 内, 单独补标签 (schema name = "备注信息")
+    if (!labels['annotation']) {
+      labels['annotation'] = '备注信息'
     }
     return labels
   })
@@ -911,6 +928,7 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
     handleExportSuccess,
     importContext,
     exportContext,
+    exportObjectTypes,
     objectTypeLabels,
     baseFilters,
     exportFilters

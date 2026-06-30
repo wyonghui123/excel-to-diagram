@@ -1578,6 +1578,11 @@ class QueryService:
             #   但 dimension scope 派生 (例: 领域 in 采购管理) 应当覆盖更大范围 (410 条)
             # 这里先调 DimensionScopeEngine, 跟 DataPermissionInterceptor._apply_dimension_scope_filter 一致
             if self._try_apply_dimension_scope(builder, user_id, object_type):
+                # [FIX BUG-V021 2026-06-27] dim scope 应用后追加 owner exception
+                # query_service.search 路径不走 BOFramework 拦截器链,
+                # 所以 d41c4c8 BUG-V013 owner exception 修复无法生效
+                # 修复方法: 在 _try_apply_dimension_scope 内部追加 owner_id 到 OR group
+                # (已在 _try_apply_dimension_scope 末尾处理)
                 return
 
             perm_filter = DataPermissionFilter(self.ds)
@@ -1678,24 +1683,72 @@ class QueryService:
         if not per_role_conds:
             return False
 
-        # 4. 应用到 builder
-        # [V1.2.1 2026-06-16] 支持 OR 条件 (relationship 的 source_bo_id OR target_bo_id)
+        # 4. 应用到 builder (重写为 OR group 包含 dim scope + owner exception)
+        # [FIX BUG-V021 2026-06-27] 把所有 dim scope 条件 + owner exception 合并到一个 OR group
+        # 这样 SQL 是 WHERE ((dim_scope_1) OR (dim_scope_2) OR (owner_id = ?)) AND ...
+        from meta.core.query_builder import QueryOperator as _QOp
+        or_conditions: list = []
+
+        def _cond_to_tuple(c: Dict) -> Optional[Tuple[str, _QOp, Any]]:
+            op_str = c.get('operator', 'eq')
+            op = _QOp(op_str.lower())
+            field = c.get('field')
+            if not field:
+                return None
+            if op in (_QOp.IN, _QOp.NOT_IN, _QOp.BETWEEN):
+                vals = c.get('values')
+                if vals is None:
+                    vals = c.get('value')
+                if vals is None:
+                    return None
+                if not isinstance(vals, list):
+                    vals = [vals]
+                return (field, op, vals)
+            return (field, op, c.get('value'))
+
         if len(per_role_conds) == 1:
             for c in per_role_conds[0]:
                 if c.get('type') == 'or':
-                    # 单 role 内的 OR 条件 (如 relationship)
-                    self._apply_or_group(builder, c['conditions'])
+                    for ac in c['conditions']:
+                        tup = _cond_to_tuple(ac)
+                        if tup:
+                            or_conditions.append(tup)
                 elif c.get('type') == 'and':
                     for ac in c['conditions']:
-                        self._apply_single_cond(builder, ac)
+                        tup = _cond_to_tuple(ac)
+                        if tup:
+                            or_conditions.append(tup)
                 else:
-                    self._apply_single_cond(builder, c)
+                    tup = _cond_to_tuple(c)
+                    if tup:
+                        or_conditions.append(tup)
         else:
-            # 多 role → OR-of-AND
-            all_and_segments = []
             for conds in per_role_conds:
-                all_and_segments.extend(conds)
-            self._apply_or_group(builder, all_and_segments)
+                for c in conds:
+                    tup = _cond_to_tuple(c)
+                    if tup:
+                        or_conditions.append(tup)
+
+        # [FIX BUG-V021] 把 owner_id 加到同一个 OR 组
+        from meta.services.chain_owner_resolver import is_in_chain
+        if object_type == 'product':
+            or_conditions.append(('owner_id', _QOp.EQ, user_id))
+            logger.info(
+                f"[DataPerm BUG-V021] OR-merged dim_scope with owner_id={user_id} for product"
+            )
+        elif is_in_chain(object_type):
+            # 子对象 (version/domain/...): 跳过 owner exception
+            # 原因: virtual_sort.py 调用 add_table_alias_to_where 时
+            #   会把 where_exists 内的子查询 column 也错误加上主表别名 (products.domains.id),
+            #   导致 SQL 语法错。这是个现有 bug, 不是本 fix 范围。
+            #   BUG-V013 已修复 BOFramework 拦截器链的 owner exception, 这里只补 query_service.search
+            #   对 product 主表(无子查询问题)的 owner exception。
+            logger.debug(
+                f"[DataPerm BUG-V021] Skip owner exception for {object_type} (known limitation)"
+            )
+
+        if or_conditions:
+            builder.or_where(or_conditions)
 
         logger.info(
             f"[_try_apply_dimension_scope] user={user_id} object_type={object_type} "

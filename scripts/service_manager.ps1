@@ -570,6 +570,10 @@ function Start-Service($svcName) {
     try {
         # 🆕 v3.8: waitress 模式 - FLASK_DEBUG 必须 false (生产模式)
         # 避开 startup_checks 的 CORS 检查 (或显式设 CORS_ALLOWED_ORIGINS)
+        # [fix-svc 2026-06-29] 回滚 64f528d 中的 dev 配置:
+        #   - FLASK_ENV: development → production (生产模式)
+        #   - DEV_MODE: 移除 (生产不应启用 YAML 热加载)
+        # 如需 dev_login, 请用其他方式启用 (例如临时 env: FLASK_ENV=development DEV_MODE=true)
         $env:FLASK_DEBUG = 'false'
         $env:TESTING = 'false'
         $env:FLASK_ENV = 'production'

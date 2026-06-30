@@ -142,7 +142,17 @@ watch([rawObjectType, rawId], ([newType, newId]) => {
   }
 }, { immediate: true })
 const objectType = computed(() => lastValidObjectType.value || rawObjectType.value)
-const id = computed(() => lastValidId.value || rawId.value)
+// [FIX v2b 2026-06-29] mode='add' 时强制 id='new' (而不是 lastValidId 缓存的 id)
+//   例: 用户从 DEMOPROD (id=533) 详情回 list → 点"新建"
+//     URL=/detail/product?mode=add, lastValidId='533' (详情缓存), rawId=undefined
+//     旧 id = lastValidId.value || rawId.value = '533'
+//     → DetailPage 收到 id='533', mode='add' → 进入"新建"模式但加载 533 数据 → 显示 DEMOPROD 预填 ✗
+//   修复: queryMode='add' 时, id 必须是 'new' (告诉 DetailPage 这是新建)
+//         id='new' → DetailPage 不 fetch 533 数据 → 表单空白 ✓
+const id = computed(() => {
+  if (rawMode.value === 'add') return 'new'
+  return lastValidId.value || rawId.value
+})
 // [FIX 2026-06-18] mode 也需要缓存：add 模式下 route.query.mode='add'，
 //   切走时 query 清空 → mode 退到 'view'，切回时又变 'add'，触发
 //   DetailPage watch 的 "same object mode change" 分支走
@@ -155,13 +165,37 @@ watch(rawMode, (newMode) => {
     lastValidMode.value = newMode
   }
 }, { immediate: true })
-const mode = computed(() => lastValidMode.value || rawMode.value || 'view')
-// [FIX 2026-06-18] 重命名为 detailPageMountKey：仅用于强制 remount DetailPage
-//   (PermissionConfigPanel saved 后)，平时稳定不变。
-//   之前叫 detailPageKey 时配合 v-if="objectType && (id || mode === 'add')"，
-//   在 app 顶部 tab 切走时 (route 变化 → id 变 undefined) 会 unmount DetailPage，
-//   切回时 remount 丢失 internalEditing 等内部状态。
-const detailPageMountKey = ref(0)
+// [FIX v2 2026-06-29] 进有效 id 时强制 'view', 即使 lastValidMode='add' (新建失败场景)
+// 例: 用户在 /detail/product?mode=add 失败 → 回 list → 进 DEMOPROD (id=533)
+//   - lastValidMode='add' (新建缓存), rawMode=undefined (URL 无 ?mode=)
+//   - 不强制 view → mode='add' → DetailPage 进入"新建"模式但有 id → 显示空表单 ✗
+//   - 强制 view → mode='view' → DetailPage 正常加载 533 详情 ✓
+const mode = computed(() => {
+  const currentId = lastValidId.value || rawId.value
+  const queryMode = rawMode.value
+  if (currentId && currentId !== 'new' && !queryMode) {
+    return 'view'
+  }
+  return lastValidMode.value || queryMode || 'view'
+})
+// [FIX 2026-06-29] detailPageMountKey 用 objectType+id+mode 派生, 切不同对象/模式时强制 remount DetailPage
+//   之前用 ref(0) 常量, 配合 detailPageEverMounted=true, keep-alive + 永远同 key → DetailPage 永不重建
+//   导致: 用户从 TTT01 失败回滚 → 进 DEMOPROD 详情 → 仍显示 TTT01 数据 (内部 data 缓存)
+//   必须 refresh 才能看到 DEMOPROD
+//   修复: key 包含 objectType+id+mode, 切不同对象/模式 → key 变 → Vue 强制重建 → 加载新 data
+//   副作用: internalEditing 等状态会重置 (用户期望: 进新对象就该重置, 所以正确)
+//   注意: route params 变化 (undefined → 有效 → undefined) 不会触发此 key 变 (因为 lastValid 缓存)
+//         只在 newType&&newId 都有效时才更新 key, 切走不更新
+//   [FIX v3 2026-06-29] key 加入 mode, 确保 view→add 切换时强制 remount
+//     - 之前: DEMOPROD 详情 (product-533) → 新建 (product-533) 同 key → 组件复用 → 表单残留 DEMOPROD 数据
+//     - 修复后: DEMOPROD 详情 (product-533-view) → 新建 (product-533-add) key 不同 → 强制重建 → 空白表单
+const detailPageMountKey = computed(() => {
+  const t = lastValidObjectType.value || rawObjectType.value
+  const i = lastValidId.value || rawId.value
+  if (!t || !i) return 0
+  const m = mode.value
+  return `${t}-${i}-${m}`
+})
 // [FIX 2026-06-18] 首次 mount 后设为 true，v-if 用这个标记
 //   目的：ObjectDetailPage 被 keep-alive 缓存，detailPageEverMounted 不会重置，
 //   保证切走再切回时 DetailPage 不被销毁
@@ -225,7 +259,11 @@ const pageTitle = computed(() => {
 })
 
 const objectName = ref('')
-const displayTitle = computed(() => objectName.value ? `${pageTitle.value} ${objectName.value}` : pageTitle.value)
+// [FIX 2026-06-29] mode='add' 时不拼接 objectName，避免从详情页切回新建时显示旧产品名
+const displayTitle = computed(() => {
+  if (mode.value === 'add') return pageTitle.value
+  return objectName.value ? `${pageTitle.value} ${objectName.value}` : pageTitle.value
+})
 
 const dirty = ref(false)
 const showConfirmDialog = ref(false)

@@ -403,7 +403,7 @@ export function useBusinessObjectSyntax() {
 
     const effectiveLayoutControlConfig = layoutControlConfig
 
-    const overallDirection = effectiveLayoutControlConfig?.overallDirection || 'LR'
+    const overallDirection = effectiveLayoutControlConfig?.overallDirection || 'TB'
 
     // ELK布局使用与配置一致的方向，不再反�?    // ELK的elk.direction配置会控制实际布局方向
     let actualDirection = overallDirection
@@ -968,7 +968,8 @@ export function useBusinessObjectSyntax() {
 
     let subgraphId = 1
     
-    const subgraphDirection = actualDirection === 'TB' ? 'LR' : 'TB'
+    // subgraph 内部方向跟随整体方向：LR=水平排列，TB=垂直排列
+    const subgraphDirection = actualDirection
     
     const reversedGroups = Array.from(optimizedGroups.entries()).reverse()
     let groupIndex = 0
@@ -1165,7 +1166,7 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
             const containerId = `${groupId}_C${idx + 1}`
             const containerTitle = formatContainerTitle(container.fullTitle || container.name || 'Container')
             code += `  subgraph ${containerId}["${containerTitle}"]\n`
-            code += `    direction ${actualDirection === 'TB' ? 'LR' : 'TB'}\n`
+            code += `    direction ${actualDirection}\n`
             
             container.nodes.forEach(nodeId => {
               const node = nodeMap.get(nodeId)
@@ -1194,7 +1195,7 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
   }
 
   code += `  subgraph ${groupId}["${groupTitle}"]\n`
-  code += `    direction ${actualDirection === 'TB' ? 'LR' : 'TB'}\n`
+  code += `    direction ${actualDirection}\n`
 
   if (group.children && group.children.length > 0) {
     group.children.forEach(child => {
@@ -1224,7 +1225,7 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
           const containerId = `${groupId}_C${idx + 1}`
           const containerTitle = formatContainerTitle(container.fullTitle || container.name || 'Container')
           code += `    subgraph ${containerId}["${containerTitle}"]\n`
-          code += `      direction ${actualDirection === 'TB' ? 'LR' : 'TB'}\n`
+          code += `      direction ${actualDirection}\n`
           
           container.nodes.forEach(nodeId => {
             const node = nodeMap.get(nodeId)

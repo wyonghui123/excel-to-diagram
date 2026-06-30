@@ -60,6 +60,7 @@
                 :options="listOptions"
                 :enable-detail="true"
                 :enable-auto-crud="true"
+                @row-dblclick="(payload) => handleRowDblClick(tab.name, payload)"
               >
                 <template v-for="(_, slotName) in $slots" :key="slotName" #[slotName]="slotProps">
                   <slot :name="slotName" v-bind="slotProps" />
@@ -90,15 +91,15 @@
       v-model:visible="page.exportDialogVisible"
       :object-type="page.activeTab"
       :filters="page.exportFilters"
-      :object-types="page.objectTypes"
+      :object-types="page.exportObjectTypes"
       :object-type-labels="page.objectTypeLabels"
       :sort-info="currentSortInfo"
       :default-sort="currentDefaultSort"
       :current-count="currentListCount"
       :total-count="currentTotalCount"
       :multi-type-mode="true"
-      :show-export-mode="true"
       :show-export-options="true"
+      :default-unselected-types="['annotation', 'relationship']"
       :menu-code="menuCode"
       @success="page.handleExportSuccess"
     />
@@ -445,6 +446,14 @@ const tabsExtraContext = computed(() => {
 
 function handleToolbarChange(payload) {
   page.handleToolbarChange(payload)
+}
+
+// [FIX 2026-06-29] 行双击 → 触发该 tab 对应 MetaListPage 的 detail action
+//   - 复用现有 rowActions 中的 detail 按钮逻辑
+function handleRowDblClick(tabName, { row }) {
+  if (!row) return
+  const ref = metaListPageRefs[tabName]
+  ref?.onRowAction?.({ action: { key: 'detail' }, row })
 }
 
 defineExpose({

@@ -192,14 +192,52 @@ ui_view_config:
       position: 10
       importance: medium
       sortable: true
+      searchable: false
+      filterable: true
+      filter_type: value_help
+      filter_placeholder: 选择子领域
+      api_param_key: sub_domain_id
       i18n_key: service_module.field.sub_domain_name
+      value_help:
+        source:
+          type: bo
+          target_bo: sub_domain
+          value_field: id
+          display_field: name
+          code_field: code
+        behavior:
+          multiple: true
+          allow_clear: true
+          parameter_bindings:
+          - local_field: version_id
+            target_field: version_id
+            required: true
     - key: domain_name
       title: 领域
       width: 120
       position: 11
       importance: medium
       sortable: true
+      searchable: false
+      filterable: true
+      filter_type: value_help
+      filter_placeholder: 选择领域
+      api_param_key: domain_id
       i18n_key: service_module.field.domain_name
+      value_help:
+        source:
+          type: bo
+          target_bo: domain
+          value_field: id
+          display_field: name
+          code_field: code
+        behavior:
+          multiple: true
+          allow_clear: true
+          parameter_bindings:
+          - local_field: version_id
+            target_field: version_id
+            required: true
     - key: version_name
       title: 所属版本
       width: 150
@@ -420,8 +458,9 @@ fields:
 - id: domain_id
   name: 领域
   type: integer
-  description: 所属领域（用于级联筛选子领域）
-  storage: virtual
+  description: 所属领域（用于级联筛选子领域，由 DB trigger 自动从 sub_domain_id 推导并维护）
+  storage: stored
+  db_column: domain_id
   ui:
     widget: select
     relation: domain
@@ -430,12 +469,13 @@ fields:
     cascade_group: hierarchy
     cascade_level: 2
   semantics:
-    meaning: 用于级联筛选子领域（从子领域推导）
+    meaning: 用于级联筛选子领域（从子领域推导，由 trigger 维护）
     immutable: true
     redundancy:
-      type: virtual
+      type: stored
       source_field: sub_domain_id
       derived_from: domain.id
+      maintained_by: db_trigger
       join_path:
       - table: sub_domains
         from: sub_domain_id

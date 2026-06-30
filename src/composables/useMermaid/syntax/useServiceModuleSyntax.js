@@ -214,7 +214,7 @@ export function useServiceModuleSyntax() {
 
     console.log('[useServiceModuleSyntax] Final effectiveLayoutControlConfig:', effectiveLayoutControlConfig)
 
-    const overallDirection = effectiveLayoutControlConfig?.overallDirection || 'LR'
+    const overallDirection = effectiveLayoutControlConfig?.overallDirection || 'TB'
 
     // ELK布局使用与配置一致的方向，不再反转
     // ELK的elk.direction配置会控制实际布局方向
@@ -350,8 +350,8 @@ export function useServiceModuleSyntax() {
           const containerTitle = formatContainerTitle(container.fullTitle || container.name || 'Container')
 
           mermaidCode += `  subgraph ${containerId}["${containerTitle}"]\n`
-          // subgraph 内部方向：整体 TB 时内部 LR，整体 LR 时内部 TB（使用 actualDirection 已考虑 ELK 反转）
-          mermaidCode += `    direction ${actualDirection === 'TB' ? 'LR' : 'TB'}\n`
+          // subgraph 内部方向跟随整体方向：LR=水平排列，TB=垂直排列
+          mermaidCode += `    direction ${actualDirection}\n`
 
           // 反转节点顺序
           const reversedNodes = [...(container.nodes || [])].reverse()
@@ -380,8 +380,8 @@ export function useServiceModuleSyntax() {
         const containerTitle = formatContainerTitle(container.fullTitle || container.name || 'Container')
 
         mermaidCode += `  subgraph ${containerId}["${containerTitle}"]\n`
-        // subgraph 内部方向：整体 TB 时内部 LR，整体 LR 时内部 TB（使用 actualDirection 已考虑 ELK 反转）
-        mermaidCode += `    direction ${actualDirection === 'TB' ? 'LR' : 'TB'}\n`
+        // subgraph 内部方向跟随整体方向：LR=水平排列，TB=垂直排列
+        mermaidCode += `    direction ${actualDirection}\n`
 
         // 反转节点顺序
         const reversedNodes = [...(container.nodes || [])].reverse()

@@ -81,6 +81,40 @@
       </div>
     </div>
 
+    <!-- [V_NEW 2026-06-29] 备注类型多选 - 备注文类是辅助信息, 不影响主路径 -->
+    <!-- [FIX 2026-06-29] 改用 el-select (与 RelationFilterSection 一致), 不再用原生 select -->
+    <!-- 主线不受影响: 默认空选择 = 不过滤, 显示全部备注 -->
+    <div class="form-row">
+      <div class="form-item full-width">
+        <label class="form-label">
+          备注类型过滤
+        </label>
+        <el-select
+          v-model="annotationCategoryFilterLocal"
+          multiple
+          collapse-tags
+          collapse-tags-tooltip
+          :max-collapse-tags="2"
+          filterable
+          clearable
+          placeholder="请选择备注类型"
+          size="small"
+          class="annotation-category-filter"
+          @change="onAnnotationCategoryFilterChange"
+        >
+          <el-option
+            v-for="opt in enumOptions"
+            :key="opt.value"
+            :label="opt.label"
+            :value="opt.value"
+          />
+        </el-select>
+        <div v-if="enumOptions.length === 0" class="annotation-category-empty" title="暂无备注类型配置（请在 enum_types 表配置 annotation_category 后重启服务）">
+          暂无配置（所有备注将显示）
+        </div>
+      </div>
+    </div>
+
     <!-- 隐藏的颜色选择器（用于颜色分配） -->
     <input
       type="color"
@@ -93,6 +127,8 @@
 </template>
 
 <script>
+import { fetchEnumTypeValues } from '@/services/enumTypeService'
+
 const COLOR_SCHEMES = [
   {
     value: 'default',
@@ -165,6 +201,11 @@ export default {
     businessObjects: {
       type: Array,
       default: () => []
+    },
+    // [V_NEW 2026-06-29] annotation 备注类型过滤 - 备注文本是辅助信息
+    annotationCategoryFilter: {
+      type: Array,
+      default: () => []
     }
   },
   emits: [
@@ -173,7 +214,8 @@ export default {
     'update:nodeTextColor',
     'update:centerScopeColor',
     'update:customColors',
-    'update:centerScopeHighlight'
+    'update:centerScopeHighlight',
+    'update:annotationCategoryFilter'
   ],
   data() {
     return {
@@ -183,7 +225,11 @@ export default {
         { value: 'white', label: '白色', preview: '#FFFFFF' }
       ],
       currentEditingItem: null,
-      currentEditingColor: '#000000'
+      currentEditingColor: '#000000',
+      // [V_NEW 2026-06-29] 备注类型选项 (从 enum_type API 加载)
+      enumOptions: [],
+      // 本地副本, 避免直接修改 prop
+      annotationCategoryFilterLocal: []
     }
   },
   computed: {
@@ -273,6 +319,24 @@ export default {
       return items;
     }
   },
+  watch: {
+    // [V_NEW 2026-06-29] prop 变化时同步到本地副本
+    annotationCategoryFilter: {
+      immediate: true,
+      handler(newVal) {
+        this.annotationCategoryFilterLocal = Array.isArray(newVal) ? [...newVal] : []
+      }
+    }
+  },
+  async mounted() {
+    // [V_NEW 2026-06-29] 加载 enum_type 选项 - 失败时显示空选项
+    try {
+      this.enumOptions = await fetchEnumTypeValues('annotation_category')
+    } catch (e) {
+      console.warn('[ServiceModuleConfig] failed to load annotation_category enum:', e)
+      this.enumOptions = []
+    }
+  },
   methods: {
     openColorPicker(itemName, currentColor) {
       this.currentEditingItem = itemName;
@@ -290,6 +354,12 @@ export default {
         const newColors = { ...this.customColors, [this.currentEditingItem]: newColor };
         this.$emit('update:customColors', newColors);
       }
+    },
+    // [V_NEW 2026-06-29] annotation 备注类型过滤变化处理
+    // [FIX 2026-06-29] 改用 el-select 后, @change 直接传 value (不是 event)
+    onAnnotationCategoryFilterChange(values) {
+      this.annotationCategoryFilterLocal = Array.isArray(values) ? values : []
+      this.$emit('update:annotationCategoryFilter', this.annotationCategoryFilterLocal)
     }
   }
 }
@@ -301,6 +371,24 @@ export default {
   background: #fafafa;
   border-radius: 6px;
   border: 1px solid #e8e8e8;
+}
+
+/* [V_NEW 2026-06-29] 备注类型多选样式 - 限定宽度不撑满整行 */
+.annotation-category-filter {
+  width: 100%;
+  max-width: 320px;
+}
+
+/* [V_NEW 2026-06-29] 备注文本为空时的占位提示 */
+.annotation-category-empty {
+  padding: 8px 12px;
+  background: #f5f5f5;
+  border: 1px dashed #d9d9d9;
+  border-radius: 4px;
+  color: #999;
+  font-size: 13px;
+  min-height: 32px;
+  margin-top: 8px;
 }
 
 .form-row {

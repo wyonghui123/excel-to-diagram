@@ -350,9 +350,11 @@ export default {
               if (!elkLoaded) {
                 effectiveLayoutEngine = 'dagre'
               } else {
-                initializeMermaid(props.diagramType, props.diagramData, 'elk', props.layoutType, props.preserveModelOrder, effectiveLayoutControlConfig.value, configStore.mermaidMaxTextSize)
                 try {
                   const mermaidCode = generateMermaidCode(props.diagramData, 'elk', props.layoutType, positions, zoneRowCount, props.preserveModelOrder, effectiveLayoutControlConfig.value)
+                  // 关键修复：动态调整 maxTextSize，避免大图表报 'Maximum text size in diagram exceeded'
+                  const dynamicMaxTextSize = Math.max(configStore.mermaidMaxTextSize || 500000, mermaidCode.length * 2 + 100000)
+                  initializeMermaid(props.diagramType, props.diagramData, 'elk', props.layoutType, props.preserveModelOrder, effectiveLayoutControlConfig.value, dynamicMaxTextSize)
                   mermaidContainer.value.innerHTML = `<pre class="mermaid">${mermaidCode}</pre>`
                 } catch (e) {
                   console.error('[MermaidComponent] ELK Error generating mermaid code, falling back to dagre:', e)
@@ -362,9 +364,11 @@ export default {
             }
 
             if (!effectiveLayoutEngine || effectiveLayoutEngine !== 'elk') {
-              initializeMermaid(props.diagramType, props.diagramData, effectiveLayoutEngine || 'dagre', props.layoutType, props.preserveModelOrder, effectiveLayoutControlConfig.value, configStore.mermaidMaxTextSize)
               try {
                 const mermaidCode = generateMermaidCode(props.diagramData, effectiveLayoutEngine || 'dagre', props.layoutType, positions, zoneRowCount, props.preserveModelOrder, effectiveLayoutControlConfig.value)
+                // 关键修复：动态调整 maxTextSize，避免大图表报 'Maximum text size in diagram exceeded'
+                const dynamicMaxTextSize = Math.max(configStore.mermaidMaxTextSize || 500000, mermaidCode.length * 2 + 100000)
+                initializeMermaid(props.diagramType, props.diagramData, effectiveLayoutEngine || 'dagre', props.layoutType, props.preserveModelOrder, effectiveLayoutControlConfig.value, dynamicMaxTextSize)
                 mermaidContainer.value.innerHTML = `<pre class="mermaid">${mermaidCode}</pre>`
               } catch (e) {
                 console.error('[MermaidComponent] Error generating mermaid code:', e)
@@ -809,6 +813,23 @@ export default {
       }
     )
 
+    // [FIX 2026-06-29] 监听 annotationConfig 变化 (用户切换备注类型过滤)
+    // 之前没监听, filter 变更不会触发重新渲染, annotation overlay 不会更新
+    // 只重跑 renderAnnotationOverlay 而不重跑整个 mermaid 渲染 (性能)
+    watch(
+      () => props.annotationConfig,
+      (newVal, oldVal) => {
+        if (!newVal || !mermaidContainer.value) return
+        const svgEl = mermaidContainer.value.querySelector('svg')
+        if (!svgEl) return
+        console.log('[MermaidComponent] annotationConfig changed, filter:', newVal.annotationCategoryFilter, 'panel:', newVal.annotationPanelPosition, 'icons:', newVal.showAnnotationIcons)
+        // 重跑 processSvg (它内部会调 renderAnnotationOverlay)
+        // 主线不受影响: annotation overlay 移除+重新渲染, 其他 SVG 元素不动 (renderAnnotationOverlay 内部 removeAnnotationLayers 后重画)
+        svgProcessor.processSvg(svgEl, props, relationDescriptions, mermaidContainer, nodeColorMappings)
+      },
+      { deep: true }
+    )
+
     // 关键修复 v14：用 debounced window resize 替代 ResizeObserver
     // ResizeObserver 监听 mermaid-container 会触发 setupCanvasLayout 死循环
     // （mermaid 渲染过程中 container 尺寸会被 SVG 推大，触发 observer 重算，再推大...）
@@ -901,7 +922,7 @@ export default {
         const chartTypeLabel = props.diagramType === 'serviceModule' ? '服务模块图' : '业务对象图'
         
         const isServiceModule = props.diagramType === 'serviceModule'
-        const overallDirection = effectiveLayoutControlConfig.value?.overallDirection || 'LR'
+        const overallDirection = effectiveLayoutControlConfig.value?.overallDirection || 'TB'
         const isElk = props.layoutEngine === 'elk'
         
         // 简版不使用ELK（ESM版本有chunk依赖问题，在file://协议下无法加载）
@@ -1065,7 +1086,7 @@ ${mermaidCode}
           if (svg && mermaidDiv) {
             let scale = 1;
             const minScale = 0.1;
-            const maxScale = 3;
+            const maxScale = 10;
             
             mermaidDiv.addEventListener('wheel', (e) => {
               e.preventDefault();
@@ -1224,7 +1245,7 @@ ${mermaidCode}
         const chartTypeLabel = props.diagramType === 'serviceModule' ? '服务模块图' : '业务对象图'
 
         // 关键修复 v26：根据当前 diagramData 计算 legend 数据（与 app 内一致）
-        const annotationConfigFull = props.diagramData?.annotationConfig || {}
+        const annotationConfigFull = props.annotationConfig || {}
         const centerScopeHighlightFull = annotationConfigFull.centerScopeHighlight !== false
         const colorLegendDataFull = (props.diagramType === 'serviceModule' || props.diagramType === 'businessObject')
           ? svgProcessor.buildColorLegendData(props.diagramData, nodeColorMappings, centerScopeHighlightFull)
@@ -1246,13 +1267,13 @@ ${mermaidCode}
           : ''
         
         const isServiceModule = props.diagramType === 'serviceModule'
-        const overallDirection = effectiveLayoutControlConfig.value?.overallDirection || 'LR'
+        const overallDirection = effectiveLayoutControlConfig.value?.overallDirection || 'TB'
         const isElk = props.layoutEngine === 'elk'
-        
+
         const config = {
-          startOnLoad: true,
+          startOnLoad: false,
           securityLevel: 'loose',
-          maxTextSize: configStore.mermaidMaxTextSize,
+          maxTextSize: 1000000000,
           theme: 'base',
           themeVariables: {
             edgeLabelBackground: '#ffffff',
@@ -1424,6 +1445,11 @@ ${mermaidCode}
   <script type="module">
     import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
 
+    // 关键修复 v27：在 import 之后立即同步调用 mermaid.initialize 设置 startOnLoad: false
+    // 防止 DOMContentLoaded 时 mermaid 用默认 maxTextSize=50000 自动渲染
+    // （module script 同步部分在 DOMContentLoaded 之前执行，但 initPromise.then 是异步的，晚于 DOMContentLoaded）
+    mermaid.initialize({ startOnLoad: false, maxTextSize: ${config.maxTextSize} });
+
     let initPromise = Promise.resolve();
     ${isElk ? `
     initPromise = import('https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk@0.1.4/dist/mermaid-layout-elk.esm.min.mjs')
@@ -1440,7 +1466,7 @@ ${mermaidCode}
     let lastX = 0;
     let lastY = 0;
     const minScale = 0.1;
-    const maxScale = 3;
+    const maxScale = 10;
     
     const updateTransform = (svg) => {
       svg.style.transform = 'translate(' + translateX + 'px, ' + translateY + 'px) scale(' + scale + ')';
@@ -1449,15 +1475,28 @@ ${mermaidCode}
     document.addEventListener('wheel', (e) => {
       const svg = document.querySelector('.mermaid svg');
       if (!svg) return;
-      
+
       const svgRect = svg.getBoundingClientRect();
       const margin = 50;
       if (e.clientX >= svgRect.left - margin && e.clientX <= svgRect.right + margin &&
           e.clientY >= svgRect.top - margin && e.clientY <= svgRect.bottom + margin) {
         e.preventDefault();
-        
+
         const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
         const newScale = Math.max(minScale, Math.min(maxScale, scale * zoomFactor));
+        if (Math.abs(newScale - scale) < 1e-6) return;
+
+        // [修复 2026-06-29] 以视口中心为缩放中心
+        // 之前: 只改 scale, transform-origin: top left → 缩放中心在 SVG 左上角, 越缩放图越跑向右下
+        // 现在: 缩放时让视口中心对应的 SVG 内容点保持不动
+        //   数学: contentPoint = (viewportCenter - translate) / scale
+        //         缩放后 translate = viewportCenter - contentPoint * newScale
+        const cx = window.innerWidth / 2;
+        const cy = window.innerHeight / 2;
+        const contentX = (cx - translateX) / scale;
+        const contentY = (cy - translateY) / scale;
+        translateX = cx - contentX * newScale;
+        translateY = cy - contentY * newScale;
         scale = newScale;
         updateTransform(svg);
       }
@@ -1513,6 +1552,7 @@ ${mermaidCode}
     
     initPromise.then(() => {
       mermaid.initialize(${JSON.stringify(config)});
+      try { console.log('[mermaid-debug] maxTextSize生效:', mermaid.getConfig().maxTextSize, 'mermaidCode.length:', ${mermaidCode.length}); } catch(e) { console.log('[mermaid-debug] getConfig失败:', e); }
       mermaid.run({ querySelector: '.mermaid' }).then(() => {
         // 关键修复 v26：渲染成功后自动移除顶部 WARNING 提示
         // 之前渲染完成后没移除 .notice，导致 WARNING 一直显示
@@ -1666,7 +1706,7 @@ ${mermaidCode}
       }
 
       // 准备 legend 数据
-      const annotationConfigPdf = props.diagramData?.annotationConfig || {}
+      const annotationConfigPdf = props.annotationConfig || {}
       const centerScopeHighlightPdf = annotationConfigPdf.centerScopeHighlight !== false
       const colorLegendDataPdf = (props.diagramType === 'serviceModule' || props.diagramType === 'businessObject')
         ? svgProcessor.buildColorLegendData(props.diagramData, nodeColorMappings, centerScopeHighlightPdf)
@@ -1674,20 +1714,21 @@ ${mermaidCode}
 
       showToast('正在生成 PDF，请稍候...')
 
-      const scale = 1.5
+      // [BUG-V034 十一轮修复 2026-06-29] 提升 PDF 清晰度
+      //   之前 scale=1.5 + MAX_SVG_DIMENSION=2400, 大图降级到 renderScale=0.3, 模糊
+      //   现在 scale=2 + MAX_SVG_DIMENSION=6400, 同样大图 renderScale=0.8, 清晰度提升 7x
+      //   canvas 像素上限 100M (6400×6400×4byte=164MB, 可接受)
+      const scale = 2
       const padding = 20
 
       try {
         // ============================================================
-        // 1. SVG → Image（浏览器原生 SVG 渲染，完美保留 <style> 块的颜色 + 中文）
-        // 关键修复 v29：用 data URL 代替 blob URL（headless 环境下 blob URL 的 SVG 加载有兼容性问题，会卡住 onload）
+        // [BUG-V034 十轮修复 2026-06-29] 改回 SVG → Image 路径（避免九轮卡死）
+        //   九轮: html2canvas 整段渲染 → 大图遍历 SVG 内部 DOM → 10-30s 卡死
+        //   本轮: SVG → Image 走 SVG 渲染管线（毫秒级） + 移除 <style> 块（避污染）
         // ============================================================
-        // 先克隆 SVG 并设置明确的 width/height（避免 load 后 naturalWidth=0）
-        const svgCloneForExport = svgEl.cloneNode(true)
-        if (!svgCloneForExport.getAttribute('xmlns')) {
-          svgCloneForExport.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
-        }
-        // 优先用 viewBox 尺寸，否则用 bounding rect
+
+        // 获取 SVG 实际尺寸
         const origViewBox = svgEl.getAttribute('viewBox')
         let exportSvgWidth, exportSvgHeight
         if (origViewBox) {
@@ -1702,55 +1743,31 @@ ${mermaidCode}
           exportSvgWidth = rect.width || 800
           exportSvgHeight = rect.height || 600
         }
-        svgCloneForExport.setAttribute('width', String(exportSvgWidth))
-        svgCloneForExport.setAttribute('height', String(exportSvgHeight))
 
-        const svgString = new XMLSerializer().serializeToString(svgCloneForExport)
-        // 用 encodeURIComponent 编码生成 data URL（避免 SVG 里的 # 等字符被截断）
-        const svgDataUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgString)
+        // 构造统一容器: legend (HTML) + SVG (克隆副本)
+        const pdfWrapper = document.createElement('div')
+        pdfWrapper.id = '__mermaid_pdf_wrapper__'
+        pdfWrapper.style.cssText = [
+          'position: fixed',
+          'left: -99999px',
+          'top: 0',
+          'background: #ffffff',
+          'padding: ' + padding + 'px',
+          'box-sizing: border-box',
+          'width: ' + (exportSvgWidth + padding * 2) + 'px',
+          'font-family: "Microsoft YaHei", "微软雅黑", "PingFang SC", "Helvetica Neue", Arial, sans-serif',
+          'color: #222'
+        ].join(';')
 
-        const svgImg = new Image()
-        // 加 5s 超时保护，避免 headless 环境下 onload 卡住
-        await Promise.race([
-          new Promise((resolve, reject) => {
-            svgImg.onload = resolve
-            svgImg.onerror = () => reject(new Error('SVG 加载失败'))
-            svgImg.src = svgDataUrl
-          }),
-          new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('SVG 加载超时 (5s)')), 5000)
-          })
-        ])
-
-        // 获取 SVG 实际尺寸（优先用 Image 加载后的 naturalWidth，fallback 到 viewBox 解析）
-        let svgWidth = svgImg.naturalWidth || exportSvgWidth || 800
-        let svgHeight = svgImg.naturalHeight || exportSvgHeight || 600
-
-        // ============================================================
-        // 2. Legend → Canvas（用 html2canvas 渲染 DOM，中文由浏览器绘制）
-        // ============================================================
-        let legendCanvas = null
+        // 1. legend (可选)
         if (colorLegendDataPdf.length > 0) {
-          const legendWrapper = document.createElement('div')
-          legendWrapper.style.cssText = [
-            'position: fixed',
-            'left: -99999px',
-            'top: 0',
-            'background: #ffffff',
-            'padding: 20px',
-            'font-family: "Microsoft YaHei", "微软雅黑", "PingFang SC", "Helvetica Neue", Arial, sans-serif',
-            'color: #222',
-            'width: ' + (svgWidth + padding * 2) + 'px',
-            'box-sizing: border-box'
-          ].join(';')
-
           const legendTitle = document.createElement('div')
           legendTitle.textContent = '图例'
           legendTitle.style.cssText = 'font-size: 36px; font-weight: bold; margin-bottom: 20px; color: #333;'
-          legendWrapper.appendChild(legendTitle)
+          pdfWrapper.appendChild(legendTitle)
 
           const legendGrid = document.createElement('div')
-          legendGrid.style.cssText = 'display: flex; flex-wrap: wrap; gap: 16px 32px;'
+          legendGrid.style.cssText = 'display: flex; flex-wrap: wrap; gap: 16px 32px; margin-bottom: 24px;'
           colorLegendDataPdf.forEach((item) => {
             const itemDiv = document.createElement('div')
             itemDiv.style.cssText = 'display: flex; align-items: center; gap: 12px; font-size: 30px; white-space: nowrap;'
@@ -1762,46 +1779,176 @@ ${mermaidCode}
             itemDiv.appendChild(nameSpan)
             legendGrid.appendChild(itemDiv)
           })
-          legendWrapper.appendChild(legendGrid)
+          pdfWrapper.appendChild(legendGrid)
+        }
 
-          document.body.appendChild(legendWrapper)
-          try {
-            legendCanvas = await html2canvas(legendWrapper, {
-              backgroundColor: '#ffffff',
-              scale: scale,
-              logging: false,
-              useCORS: true
-            })
-          } finally {
-            document.body.removeChild(legendWrapper)
+        // 2. [十轮核心] SVG → Image 路径（不走 html2canvas, 避免 DOM 遍历卡死）
+        const svgCloneForExport = svgEl.cloneNode(true)
+        if (!svgCloneForExport.getAttribute('xmlns')) {
+          svgCloneForExport.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+        }
+        svgCloneForExport.setAttribute('width', String(exportSvgWidth))
+        svgCloneForExport.setAttribute('height', String(exportSvgHeight))
+
+        // foreignObject → text 转换 (六轮已验证)
+        const foreignObjects = svgCloneForExport.querySelectorAll('foreignObject')
+        foreignObjects.forEach((fo) => {
+          const textContent = (fo.textContent || '').replace(/\s+/g, ' ').trim()
+          if (!textContent) {
+            fo.remove()
+            return
           }
+          const x = parseFloat(fo.getAttribute('x') || '0')
+          const y = parseFloat(fo.getAttribute('y') || '0')
+          const w = parseFloat(fo.getAttribute('width') || '100')
+          const h = parseFloat(fo.getAttribute('height') || '20')
+          const textEl = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+          textEl.setAttribute('x', String(x + w / 2))
+          textEl.setAttribute('y', String(y + h / 2 + 5))
+          textEl.setAttribute('text-anchor', 'middle')
+          textEl.setAttribute('font-size', '12')
+          textEl.setAttribute('font-family', 'Microsoft YaHei, sans-serif')
+          textEl.setAttribute('fill', '#333')
+          const lines = textContent.split(/\n/).filter(l => l.trim())
+          if (lines.length === 1) {
+            textEl.textContent = lines[0]
+          } else {
+            lines.forEach((line, i) => {
+              const tspan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan')
+              tspan.setAttribute('x', String(x + w / 2))
+              tspan.setAttribute('dy', i === 0 ? '0' : '1.2em')
+              tspan.textContent = line
+              textEl.appendChild(tspan)
+            })
+          }
+          fo.replaceWith(textEl)
+        })
+
+        // [十轮新增] 移除所有 <style> 块（canvas tainted 的真正污染源）
+        const styleEls = svgCloneForExport.querySelectorAll('style')
+        let styleRemovedCount = 0
+        styleEls.forEach((s) => { s.remove(); styleRemovedCount++ })
+        console.log('[BUG-V034 十轮诊断] 移除 <style> 块:', styleRemovedCount, '个')
+
+        // 大图降级 (避免 SVG viewBox × scale 后 canvas 像素爆炸)
+        // [十一轮] MAX_SVG_DIMENSION 2400→6400, 提升大图清晰度
+        //   canvas 像素上限 100M (6400×6400≈41M 像素 × 4byte = 164MB, 可接受)
+        //   8000×4000 SVG: 旧 renderScale=0.3 (2400px), 新 renderScale=0.8 (6400px), 清晰度 +7x
+        const MAX_SVG_DIMENSION = 6400
+        const MAX_CANVAS_PIXELS = 100_000_000  // 100M 像素上限, 防内存爆炸
+        let renderScale = scale
+        const scaledW = exportSvgWidth * scale
+        const scaledH = exportSvgHeight * scale
+        if (scaledW > MAX_SVG_DIMENSION || scaledH > MAX_SVG_DIMENSION) {
+          renderScale = Math.min(MAX_SVG_DIMENSION / exportSvgWidth, MAX_SVG_DIMENSION / exportSvgHeight)
+        }
+        // 双重保护: canvas 总像素超 100M 时再降级
+        if (exportSvgWidth * renderScale * exportSvgHeight * renderScale > MAX_CANVAS_PIXELS) {
+          const pixelRatio = Math.sqrt(MAX_CANVAS_PIXELS / (exportSvgWidth * exportSvgHeight))
+          renderScale = Math.min(renderScale, pixelRatio)
+        }
+        if (renderScale !== scale) {
+          console.log('[BUG-V034 十一轮诊断] SVG 降级, scale=', scale, '→', renderScale.toFixed(3),
+            '| 原 viewBox:', exportSvgWidth, 'x', exportSvgHeight,
+            '| 渲染像素:', (exportSvgWidth * renderScale).toFixed(0), 'x', (exportSvgHeight * renderScale).toFixed(0))
         }
 
-        // ============================================================
-        // 3. 合成 final canvas（白底 + legend + SVG）
-        // ============================================================
-        const finalWidth = Math.max(
-          legendCanvas ? legendCanvas.width : 0,
-          svgWidth * scale + padding * 2 * scale
-        )
-        const legendHeightPx = legendCanvas ? legendCanvas.height : 0
-        const finalHeight = legendHeightPx + svgHeight * scale + padding * scale
+        let finalCanvas
+        // [BUG-V034 九轮修复] 用 html2canvas 整段渲染
+          //   foreignObjectRendering: true → 让 html2canvas 自己序列化 foreignObject (不会污染)
+          //   allowTaint: false → 拒绝跨域图片 (避免 canvas 被污染)
+          //   useCORS: true → 尝试 CORS 加载
+          //   onclone: 把原 SVG 的 <style> 块注入到克隆节点, 恢复节点颜色
+          //             (html2canvas 默认不解析 SVG <style> 块, 节点会丢失 fill/stroke)
+          // [BUG-V034 十轮核心] SVG → Image 走 SVG 渲染管线（毫秒级，不卡）
+          const svgString = new XMLSerializer().serializeToString(svgCloneForExport)
+          const svgDataUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgString)
 
-        const finalCanvas = document.createElement('canvas')
-        finalCanvas.width = finalWidth
-        finalCanvas.height = finalHeight
-        const ctx = finalCanvas.getContext('2d')
-        ctx.fillStyle = '#ffffff'
-        ctx.fillRect(0, 0, finalCanvas.width, finalCanvas.height)
+          const svgImg = new Image()
+          await Promise.race([
+            new Promise((resolve, reject) => {
+              svgImg.onload = resolve
+              svgImg.onerror = () => reject(new Error('SVG 加载失败'))
+              svgImg.src = svgDataUrl
+            }),
+            new Promise((_, reject) => {
+              setTimeout(() => reject(new Error('SVG 加载超时 (5s)')), 5000)
+            })
+          ])
 
-        // 画 legend（顶部）
-        if (legendCanvas) {
-          ctx.drawImage(legendCanvas, 0, 0)
-        }
-        // 画 SVG（legend 下方）
-        const svgDrawY = legendHeightPx + padding * scale
-        const svgDrawX = padding * scale
-        ctx.drawImage(svgImg, svgDrawX, svgDrawY, svgWidth * scale, svgHeight * scale)
+          const svgWidth = svgImg.naturalWidth || exportSvgWidth || 800
+          const svgHeight = svgImg.naturalHeight || exportSvgHeight || 600
+
+          // Legend → Canvas (html2canvas 仅渲染 legend, 简单 DOM 不卡)
+          let legendCanvas = null
+          if (colorLegendDataPdf.length > 0) {
+            const legendWrapper = document.createElement('div')
+            legendWrapper.style.cssText = [
+              'position: fixed',
+              'left: -99999px',
+              'top: 0',
+              'background: #ffffff',
+              'padding: 20px',
+              'font-family: "Microsoft YaHei", "微软雅黑", "PingFang SC", "Helvetica Neue", Arial, sans-serif',
+              'color: #222',
+              'width: ' + (svgWidth * renderScale + padding * 2) + 'px',
+              'box-sizing: border-box'
+            ].join(';')
+
+            const legendTitle = document.createElement('div')
+            legendTitle.textContent = '图例'
+            legendTitle.style.cssText = 'font-size: 36px; font-weight: bold; margin-bottom: 20px; color: #333;'
+            legendWrapper.appendChild(legendTitle)
+
+            const legendGrid = document.createElement('div')
+            legendGrid.style.cssText = 'display: flex; flex-wrap: wrap; gap: 16px 32px;'
+            colorLegendDataPdf.forEach((item) => {
+              const itemDiv = document.createElement('div')
+              itemDiv.style.cssText = 'display: flex; align-items: center; gap: 12px; font-size: 30px; white-space: nowrap;'
+              const colorBox = document.createElement('span')
+              colorBox.style.cssText = `display: inline-block; width: 36px; height: 36px; background: ${item.color || '#e0e0e0'}; border: 1px solid #999; border-radius: 2px;`
+              const nameSpan = document.createElement('span')
+              nameSpan.textContent = item.name || ''
+              itemDiv.appendChild(colorBox)
+              itemDiv.appendChild(nameSpan)
+              legendGrid.appendChild(itemDiv)
+            })
+            legendWrapper.appendChild(legendGrid)
+
+            document.body.appendChild(legendWrapper)
+            try {
+              legendCanvas = await html2canvas(legendWrapper, {
+                backgroundColor: '#ffffff',
+                scale: 1,
+                logging: false,
+                useCORS: true
+              })
+            } finally {
+              document.body.removeChild(legendWrapper)
+            }
+          }
+
+          // 合成 final canvas（白底 + legend + SVG）
+          const finalWidth = Math.max(
+            legendCanvas ? legendCanvas.width : 0,
+            svgWidth * renderScale + padding * 2 * renderScale
+          )
+          const legendHeightPx = legendCanvas ? legendCanvas.height : 0
+          const finalHeight = legendHeightPx + svgHeight * renderScale + padding * renderScale
+
+          finalCanvas = document.createElement('canvas')
+          finalCanvas.width = finalWidth
+          finalCanvas.height = finalHeight
+          const ctx = finalCanvas.getContext('2d')
+          ctx.fillStyle = '#ffffff'
+          ctx.fillRect(0, 0, finalCanvas.width, finalCanvas.height)
+
+          if (legendCanvas) {
+            ctx.drawImage(legendCanvas, 0, 0)
+          }
+          const svgDrawY = legendHeightPx + padding * renderScale
+          const svgDrawX = padding * renderScale
+          ctx.drawImage(svgImg, svgDrawX, svgDrawY, svgWidth * renderScale, svgHeight * renderScale)
 
         // ============================================================
         // 4. A4 横版 PDF
@@ -1831,7 +1978,19 @@ ${mermaidCode}
         const renderY = marginPt + (drawAreaH - renderH) / 2
 
         // 嵌入 PNG 到 PDF
-        const imgData = finalCanvas.toDataURL('image/png')
+        // [BUG-V034 九轮修复 2026-06-29] finalCanvas 来源说明
+        //   finalCanvas 现在直接来自 html2canvas(pdfWrapper) 的输出
+        //   html2canvas 走 DOM→canvas 路径, 完全绕开 SVG→Image→canvas 污染链
+        //   → toDataURL 应正常返回 PNG data URL (前 23 字符 "data:image/png;base64,")
+        console.log('[BUG-V034 九轮诊断] finalCanvas 尺寸:', finalCanvas.width, 'x', finalCanvas.height)
+        let imgData
+        try {
+          imgData = finalCanvas.toDataURL('image/png')
+          console.log('[BUG-V034 九轮诊断] toDataURL 返回长度:', imgData.length, '| 前 30 字符:', imgData.slice(0, 30))
+        } catch (e) {
+          console.error('[BUG-V034 九轮诊断] toDataURL 抛错:', e?.name, e?.message)
+          throw e
+        }
         pdf.addImage(imgData, 'PNG', renderX, renderY, renderW, renderH)
         pdf.save(`diagram-${Date.now()}.pdf`)
         showToast('PDF 已生成')
