@@ -31,6 +31,8 @@ modified_files:
   - src/services/relationClassifier.js
   # Phase 1 性能优化 - smChildCount 引用缓存
   - src/components/common/RelationScopeTree/RelationScopeTree.vue
+  # Phase 1 性能优化 - refreshAll 并行化 (串行 await → Promise.all)
+  - src/composables/useRefreshCoordinator.js
   # 自动合并 (9)
   - meta/core/action_executor.py
   - meta/core/interceptors/cascade_interceptor.py
