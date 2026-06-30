@@ -28,8 +28,7 @@ export function useAnnotation() {
   });
 
   const parseAnnotationsFromData = (data, diagramType, options = {}) => {
-    // [V_NEW 2026-06-29] annotation category 过滤
-    // 主线不受影响: filter 为空/undefined = 不过滤 (向后兼容)
+    // [FIX 2026-06-30] annotation category 过滤 - 不选类型时不展示任何备注
     const { filter = [] } = options;
     const result = [];
     let number = 1;
@@ -125,14 +124,12 @@ export function useAnnotation() {
       });
     }
 
-    // [V_NEW 2026-06-29] 应用 category 过滤
-    //   filter = [] => 不过滤 (向后兼容)
-    //   filter 非空 => 只保留 category 在 filter 中的 annotation
-    //   空 category 的 annotation 始终保留 (兼容无 category 数据)
-    // 主线不受影响: 默认 [] = 不过滤
+    // [FIX 2026-06-30] 应用 category 过滤 - 用户需求: 不选备注类型时不展示任何备注
+    //   filter = [] (用户未选) => 不展示任何 annotation
+    //   filter 非空 => 只保留 category 在 filter 中的 annotation (无 category 的不保留)
     const filteredResult = (Array.isArray(filter) && filter.length > 0)
-      ? result.filter(ann => !ann.category || filter.includes(ann.category))
-      : result;
+      ? result.filter(ann => ann.category && filter.includes(ann.category))
+      : [];
 
     annotations.value = filteredResult;
     return filteredResult;

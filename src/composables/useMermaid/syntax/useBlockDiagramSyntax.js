@@ -195,7 +195,11 @@ export function useBlockDiagramSyntax() {
             relationCode: linkLabel,
             label: linkLabel,
             relationDesc: link.tooltip || '',
+            // [FIX 2026-06-30] 透传统数数组, 供 tooltip 按类别过滤
             annotationContent: link.annotationContent || '',
+            annotationCategory: link.annotationCategory || 'info',
+            annotationContents: link.annotationContents || [],
+            annotationCategories: link.annotationCategories || [],
             sourceCode: sourceNode.code,
             targetCode: targetNode.code
           })

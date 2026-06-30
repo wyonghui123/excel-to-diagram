@@ -157,7 +157,11 @@ const treeProps = computed(() => ({
 }))
 
 const objectCheckedNodeKeys = computed(() => {
-  return scopeToNodeKeys(treeData.value, props.scopeIds)
+  const allKeys = scopeToNodeKeys(treeData.value, props.scopeIds)
+  // [FIX 2026-06-30] 只返回叶子节点 key, 避免 :default-checked-keys 含父节点 key
+  //   导致 el-tree 重建时 (loadTreeData silent 模式 sameStructure=false)
+  //   在 check-strictly=false 下父节点 checked → 向下级联勾选整个子树
+  return collectLeafKeys(allKeys, treeData.value)
 })
 
 function getNodeIcon(data) {
@@ -247,6 +251,44 @@ function collectAllKeys(nodes) {
     }
   })
   return keys
+}
+
+/**
+ * [FIX 2026-06-30] 从 keys 中收集叶子节点 key
+ *   - key 对应叶子节点 (无 children): 直接保留
+ *   - key 对应父节点 (有 children): 直接跳过 (不保留, 不推导)
+ *
+ * 用于 setCheckedKeys 前过滤, 避免父节点 key 被 setCheckedKeys 后
+ * 在 check-strictly=false 下向下级联勾选整个子树。
+ *
+ * 为什么不推导父节点的子节点 key?
+ *   - 用户勾选叶子节点时, el-tree 向上传播会让父节点 checked, checkedNodes 含父节点,
+ *     但父节点 checked 是向上传播的副作用, 不应触发向下级联。
+ *     collectLeafKeys 过滤掉父节点 key, setCheckedKeys 只设置叶子, el-tree 自动向上传播
+ *     处理父节点三态 (indeterminate/checked), 不会向下级联。
+ *   - 用户勾选父节点时, el-tree 内部已向下级联勾选所有子节点, checkedNodes 已含所有子节点,
+ *     emit scope 已含所有子节点 id, scopeToNodeKeys 返回所有叶子 key,
+ *     collectLeafKeys 保留这些叶子 key, setCheckedKeys 设置所有叶子, 视觉上整个子树 checked。
+ *
+ * @param {Array<string>} keys - 待过滤的 node key 数组 (可能含父节点 key)
+ * @param {Array} nodes - treeData
+ * @returns {Array<string>} 只含叶子节点的 key 数组
+ */
+function collectLeafKeys(keys, nodes) {
+  if (!nodes?.length || !keys?.length) return []
+  const keySet = new Set(keys)
+  const leafKeys = []
+  function walk(nodeList) {
+    for (const node of nodeList) {
+      if (!node.children || node.children.length === 0) {
+        if (keySet.has(node.id)) leafKeys.push(node.id)
+      } else {
+        walk(node.children)
+      }
+    }
+  }
+  walk(nodes)
+  return leafKeys
 }
 
 /**
@@ -374,8 +416,14 @@ watch(objectCheckedNodeKeys, (newKeys) => {
   nextTick(async () => {
     if (!treeRef.value) return
     guard.enter()
-    treeRef.value.setCheckedKeys(newKeys || [])
-    trace.log('watch→setCheckedKeys', { keyCount: (newKeys || []).length })
+    // [FIX 2026-06-30] 只 setCheckedKeys 叶子节点, 避免父节点 checked 向下级联勾选整个子树
+    //   之前 setCheckedKeys 含父节点 key (如 'd_1'), 在 check-strictly=false 下
+    //   父节点 checked → 向下级联 → 整个供应链云子树被勾选
+    //   现在只 setCheckedKeys 叶子节点, el-tree 自动向上传播处理父节点状态 (indeterminate/checked)
+    //   若 newKeys 含父节点 key, collectLeafKeys 会推导其所有叶子子节点 key
+    const leafKeys = collectLeafKeys(newKeys || [], treeData.value)
+    treeRef.value.setCheckedKeys(leafKeys)
+    trace.log('watch→setCheckedKeys', { leafCount: leafKeys.length, totalKeys: (newKeys || []).length })
     // 等 el-tree 内部把 setCheckedKeys 触发的 @check 事件派发完，再退出保护区
     // (el-tree 的 check emit 是同步的, 但事件监听器可能在微任务中处理; 多 nextTick 保险)
     await nextTick()
@@ -527,10 +575,14 @@ async function loadTreeData(options = {}) {
     // 根因: 上游 watch(combinedFilters) → coordinator.refreshAll() → scopeTree.refresh()
     //       → loadTreeData({ silent: true }) → treeData.value = newArray → el-tree watch(props.data)
     //       → store.setData → 重建所有 Node, checked 状态被重置
-    // 
+    //
     // 使用 :default-checked-keys 后，store.setData 内部 _initDefaultCheckedNodes() 会自动从 prop 恢复
     // FR-001: 不再需要手动 save/restore
-    if (silent && treeRef.value && !USE_FILTERSOURCE) {
+    //
+    // [FIX 2026-06-30] 去掉 !USE_FILTERSOURCE 条件, 让 sameStructure 短路保护对所有模式生效
+    //   之前 USE_FILTERSOURCE=true 时跳过短路保护, 每次勾选都重建 treeData → 树收起
+    //   现在结构不变时直接 return, 保留 checked + 展开状态
+    if (silent && treeRef.value) {
       const currentCheckedKeys = treeRef.value.getCheckedKeys?.() || []
       const currentCheckedNodes = treeRef.value.getCheckedNodes?.() || []
       const hasSelection = currentCheckedKeys.length > 0
@@ -549,6 +601,10 @@ async function loadTreeData(options = {}) {
         }
 
         // 树结构变化 (新增/删除节点), 需要重建但要恢复已选状态
+        // [FIX 2026-06-30] guard.enter() 提前到 treeData.value=newTree 之前,
+        //   防止 el-tree 重建时 :default-checked-keys 触发 @check 事件,
+        //   handleBoCheck 在 guard 之外 emit scope-change 污染 scopeIds
+        guard.enter()
         treeData.value = newTree
         // [BUG-V034 修复 2026-06-29] 不再 defaultExpandedKeys = allKeys (全部展开),
         // 改为只展开 root 节点 + 当前已选节点路径, 避免 2850 BO 节点全展开导致的卡顿
@@ -557,8 +613,9 @@ async function loadTreeData(options = {}) {
         // 等待 el-tree store 重建完成 (多次 nextTick 确保)
         await nextTick()
         await nextTick()
-        guard.enter()
-        treeRef.value.setCheckedKeys(currentCheckedKeys)
+        // [FIX 2026-06-30] 只 setCheckedKeys 叶子节点, 避免父节点 checked 向下级联
+        const leafCheckedKeys = collectLeafKeys(currentCheckedKeys, newTree)
+        treeRef.value.setCheckedKeys(leafCheckedKeys)
         // 等待 setCheckedKeys 触发的 @check 事件被处理完
         await nextTick()
         await nextTick()

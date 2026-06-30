@@ -203,17 +203,21 @@ const hierarchyMap = computed(() => {
   function walk(nodes, domainId, subDomainId, serviceModuleId) {
     if (!nodes) return
     for (const node of nodes) {
+      // [FIX 2026-06-30] 用 originalId (数字) 作 key/value, 与 selectedXxxIds 类型对齐
+      //   之前用 node.id (字符串如 'd_1'), 导致 effective ids 推导永远查不到
+      const oid = node.originalId
+      if (oid == null) continue
       if (node.type === 'domain') {
-        map[node.id] = { domainId: node.id }
-        walk(node.children, node.id, null)
+        map[oid] = { domainId: oid }
+        walk(node.children, oid, null)
       } else if (node.type === 'sub_domain') {
-        map[node.id] = { domainId, subDomainId: node.id }
-        walk(node.children, domainId, node.id)
+        map[oid] = { domainId, subDomainId: oid }
+        walk(node.children, domainId, oid)
       } else if (node.type === 'service_module') {
-        map[node.id] = { domainId, subDomainId, serviceModuleId: node.id }
-        walk(node.children, domainId, subDomainId, node.id)
+        map[oid] = { domainId, subDomainId, serviceModuleId: oid }
+        walk(node.children, domainId, subDomainId, oid)
       } else if (node.type === 'business_object') {
-        map[node.id] = { domainId, subDomainId, serviceModuleId }
+        map[oid] = { domainId, subDomainId, serviceModuleId }
         walk(node.children, domainId, subDomainId, serviceModuleId)
       }
     }
