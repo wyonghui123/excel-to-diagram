@@ -279,9 +279,12 @@ def migrate_enum_class(ds, enum_class: type) -> tuple:
     dim_config = ENUM_DIMENSION_CONFIG.get(enum_type_id, {})
 
     # AnnotationCategory 和 DimensionKey 作为业务枚举，可编辑
+    # [FIX 2026-06-30] mutability 必须是 3 值空间 (fullEditable/extensible/locked)
+    #   之前错误使用了 'fully_editable' (snake_case 历史遗留), 导致这些 enum_type
+    #   后续通过 BO Action 修改时触发 INVALID_MUTABILITY 校验失败
     if enum_class.__name__ in ('AnnotationCategory', 'DimensionKey'):
         category = 'business'
-        mutability = 'fully_editable'
+        mutability = 'fullEditable'
     elif dim_config:
         category = dim_config.get('category', 'system')
         mutability = dim_config.get('mutability', 'locked')

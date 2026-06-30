@@ -436,8 +436,10 @@ class SecureEnumAdmin(IEnumAdmin):
                 raise ValidationError(f"无效的类型ID格式: {data['id']}")
         
         # mutability 校验
+        # [FIX 2026-06-30] v3.18 enum-mgmt-spec 规范化为 3 值: fullEditable/extensible/locked
+        #   之前错误将 'fully_editable' 加入白名单 (snake_case 历史遗留), 应移除
         if 'mutability' in data and data['mutability']:
-            valid_mutabilities = ['locked', 'extensible', 'fully_editable']
+            valid_mutabilities = ['locked', 'extensible', 'fullEditable']
             if data['mutability'] not in valid_mutabilities:
                 raise ValidationError(
                     f"无效的可变性值: {data['mutability']}, "

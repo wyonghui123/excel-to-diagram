@@ -33,6 +33,9 @@ modified_files:
   - src/components/common/RelationScopeTree/RelationScopeTree.vue
   # Phase 1 性能优化 - refreshAll 并行化 (串行 await → Promise.all)
   - src/composables/useRefreshCoordinator.js
+  # Bug fix 2026-06-30 - enum_types.mutability 字段错值 (fully_editable → fullEditable)
+  - meta/scripts/migrate_enums.py
+  - meta/core/enums/secure_admin.py
   # 自动合并 (9)
   - meta/core/action_executor.py
   - meta/core/interceptors/cascade_interceptor.py
@@ -94,6 +97,8 @@ new_files:
   # IE 其他新文件 (2)
   - meta/tests/test_excel_format.py
   - scripts/test_ie_assertor.js
+  # Bug fix 2026-06-30 - enum_types.mutability 一次性 DB 修复脚本
+  - fix_enum_mutability_db.py
 
 deleted_files: []
 ```
