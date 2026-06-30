@@ -194,15 +194,21 @@ ok "B.2 DONE"
 step_end "$CURRENT_STEP"
 
 # ---------------------------------------------------------------
-# B.3  PYTHON DEPS
+# B.3  PYTHON DEPS (offline, --no-index --find-links)
 # ---------------------------------------------------------------
 CURRENT_STEP="B3_DEPS"
 step_start "$CURRENT_STEP"
-step "B.3 INSTALL PYTHON DEPS"
+step "B.3 INSTALL PYTHON DEPS (offline wheels)"
 
 REQ="${DEPLOY_DIR}/backend/requirements.txt"
 [[ ! -f "$REQ" ]] && REQ="${DEPLOY_DIR}/requirements.txt"
 [[ ! -f "$REQ" ]] && die "requirements.txt not found in $DEPLOY_DIR"
+
+WHEELS_DIR="${DEPLOY_DIR}/wheels"
+if [[ ! -d "$WHEELS_DIR" ]] || [[ -z "$(ls -A "$WHEELS_DIR" 2>/dev/null)" ]]; then
+    die "wheels/ directory missing or empty in $DEPLOY_DIR - cannot install offline"
+fi
+info "Found wheels: $(ls "$WHEELS_DIR" | wc -l) whl files"
 
 PIP=""
 if command -v pip3 &>/dev/null; then
@@ -216,14 +222,18 @@ else
 fi
 info "Using: $PIP"
 
-if ! $PIP install -r "$REQ" >> "$RUN_LOG" 2>&1; then
-    warn "Standard install failed, retrying with --break-system-packages..."
-    if ! $PIP install -r "$REQ" --break-system-packages >> "$RUN_LOG" 2>&1; then
-        die "pip install failed after retry - check $RUN_LOG"
-    fi
-    ok "Python deps installed (with --break-system-packages)"
+# First try: --no-index --find-links (offline, no network)
+if $PIP install --no-index --find-links "$WHEELS_DIR" -r "$REQ" >> "$RUN_LOG" 2>&1; then
+    ok "Python deps installed (offline, --no-index)"
 else
-    ok "Python deps installed"
+    warn "Offline install failed, retrying with --user..."
+    if $PIP install --no-index --find-links "$WHEELS_DIR" --user -r "$REQ" >> "$RUN_LOG" 2>&1; then
+        ok "Python deps installed (offline, --user)"
+    elif $PIP install --no-index --find-links "$WHEELS_DIR" --break-system-packages -r "$REQ" >> "$RUN_LOG" 2>&1; then
+        ok "Python deps installed (offline, --break-system-packages)"
+    else
+        die "pip install failed (all attempts) - check $RUN_LOG"
+    fi
 fi
 step_end "$CURRENT_STEP"
 

@@ -1,11 +1,13 @@
-# MD5 checksums for v20260630_001 deploy files
+# MD5 checksums for v20260630_001 deploy files (LF line endings)
 # Use on server: cd /tmp && md5sum -c MD5SUMS-20260630_001.txt
-# Or compare manually: md5sum <file>
-#
-# Generated: 2026-06-30
-f697ddae80fe404cd1db2a5dd4c2bab1  deploy-v20260630_001.zip
-3fe724030f594f8ea1220a1703bc174d  deploy-full-v20260630_001.sh
+# IMPORTANT: The deploy zip now includes Python wheels (17 whl files)
+# for offline pip install in environments WITHOUT PyPI access.
+# Refreshed at: 2026-06-30 (offline wheels support)
+
+737464cbd15b908ab1a861afd33c621c  deploy-v20260630_001.zip
+71d30a56126abf430911948f7c294b43  deploy-full-v20260630_001.sh
 05669478a5f3f3f232633e658ee59e8b  deploy-rollback-v20260630_001.sh
 b17f38b817ae941f995f4a7c243f7d1e  HEALTH-CHECK-20260630_001.sh
 2d69573c28a471db825d34987d782935  DEPLOY-CHEATSHEET-20260630_001.txt
 e4d0124558bef95feb37755d3fa0f18a  DEPLOY-MANUAL-20260630_001.md
+0dcd570a714866103cbbe9f832dbceae  UPLOAD-GUIDE-20260630_001.md

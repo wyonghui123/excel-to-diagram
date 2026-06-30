@@ -13,6 +13,15 @@ ADMIN:      admin / Admin@2026!Init  (CHANGE ON FIRST LOGIN!)
 PHASE 0 - BEFORE BASTION: VERIFY (run this on Web SSH first)
 ================================================================================
 
+NOTE: This v20260630_001 build is for OFFLINE-only server environments.
+The deploy zip contains 17 Python wheel files inside backend/wheels/
+so pip install works WITHOUT PyPI access.
+
+Expected after upload:
+- deploy-v20260630_001.zip → ~15.2 MB (was 13.4 MB, increased by ~1.6 MB for wheels)
+
+================================================================================
+
 # Quick 8-line sanity check (paste as ONE block):
 
 echo "=== DEPLOY STATE CHECK ===" && \
