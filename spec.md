@@ -27,6 +27,8 @@ modified_files:
   # 部署文档固化 (2026-06-29 Python 兼容性扫描)
   - docs/DEPLOYMENT_STANDARDS.md
   - docs/SOP-USER-DEPLOYMENT.md
+  # 部署脚本 (2026-06-30 PowerShell 打包脚本)
+  - scripts/build-deploy-package.ps1
   # 上轮 worktree 遗留改动
   - src/services/relationClassifier.js
   # Phase 1 性能优化 - smChildCount 引用缓存
