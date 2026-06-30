@@ -1,0 +1,128 @@
+================================================================================
+                        DEPLOY CHEAT SHEET - v20260630_001
+                        (Print this for Web SSH reference)
+================================================================================
+
+VERSION:    v20260630_001 (Fresh Init)
+SERVER:     172.20.59.7
+DIR:        /opt/app/current -> /opt/app/deployments/v20260630_001
+PORTS:      Frontend 8081 / Backend 5001
+ADMIN:      admin / Admin@2026!Init  (CHANGE ON FIRST LOGIN!)
+
+================================================================================
+PHASE A - BASTION UPLOAD (your bastion web UI)
+================================================================================
+1. Login to bastion
+2. File Transfer -> Target server (172.20.59.7) -> /tmp/
+3. Upload: d:\filework\excel-to-diagram\deploy-v20260630_001.zip
+4. Verify: /tmp/deploy-v20260630_001.zip exists, 12.89 MB
+
+================================================================================
+PHASE B - WEB SSH TERMINAL (paste each block then Enter)
+================================================================================
+
+[B.1] UNPACK -----------------------------------------
+cd /opt/app && \
+mkdir -p tmp_extract && \
+unzip -o /tmp/deploy-v20260630_001.zip -d tmp_extract/ && \
+mkdir -p deployments/v20260630_001 && \
+mv tmp_extract/frontend_dist_files tmp_extract/backend tmp_extract/scripts tmp_extract/config tmp_extract/dependencies tmp_extract/MANIFEST deployments/v20260630_001/ 2>/dev/null; \
+ls deployments/v20260630_001/ && echo "=== B.1 OK ==="
+
+[B.2] LINKS -------------------------------------------
+cd /opt/app && \
+rm -f current && \
+ln -sfn /opt/app/deployments/v20260630_001 current && \
+ln -sfn /opt/app/shared/data current/data && \
+ln -sfn /opt/app/shared/logs current/logs && \
+mkdir -p shared/data shared/logs && \
+ls -la current | head -3 && echo "=== B.2 OK ==="
+
+[B.3] DEPS --------------------------------------------
+pip3 install -r /opt/app/current/meta/requirements.txt 2>&1 | tail -3
+echo "=== B.3 OK ==="
+
+[B.4] BACKUP OLD DB -----------------------------------
+if [ -f /opt/app/shared/data/architecture.db ]; then
+  mkdir -p /opt/app/backups
+  cp /opt/app/shared/data/architecture.db /opt/app/backups/architecture_$(date +%Y%m%d_%H%M%S).db.bak
+  echo "Backup OK"
+else
+  echo "First deploy - no backup needed"
+fi
+echo "=== B.4 OK ==="
+
+[B.5] INIT DB SCHEMA ----------------------------------
+cd /opt/app/current/meta && \
+python scripts/init_database.py --force 2>&1 | tail -5
+echo "=== B.5 OK ==="
+
+[B.6] SEED DATA ---------------------------------------
+cd /opt/app/current/meta && \
+python scripts/init_and_seed.py --force 2>&1 | tail -5
+echo "=== B.6 OK ==="
+
+[B.7] AUTH + ROLES + MENUS ---------------------------
+cd /opt/app/current/meta
+python scripts/init_auth.py 2>&1 | tail -2
+python scripts/init_role_permissions.py 2>&1 | tail -2
+python scripts/init_menu_permissions.py 2>&1 | tail -2
+python scripts/init_task_seed.py 2>&1 | tail -2
+python scripts/preload_hot_roles.py 2>&1 | tail -2
+echo "=== B.7 OK ==="
+
+[B.8] START FRONTEND (8081) --------------------------
+cd /opt/app/current
+pkill -f "meta.server" 2>/dev/null; pkill -f "waitress-serve" 2>/dev/null; sleep 2
+PORT=8081 \
+FLASK_DEBUG=false \
+FLASK_ENV=production \
+JWT_SECRET_KEY="j688XXn1fOFrIMFNqmRwmiuKq40KFBFOY0fw0GfoySM_0nbYPof6-5osHHR9Uwbx" \
+CORS_ALLOWED_ORIGINS="http://172.20.59.7:8081,http://172.20.59.7:5001" \
+ADMIN_PASSWORD="Admin@2026!Init" \
+nohup python server.py > /opt/app/shared/logs/deploy.log 2>&1 &
+echo "Frontend PID=$!"
+sleep 10
+curl -s http://localhost:8081/health && echo
+echo "=== B.8 OK ==="
+
+[B.9] START BACKEND (5001) ---------------------------
+cd /opt/app/current/meta
+PORT=5001 \
+FLASK_DEBUG=false \
+FLASK_ENV=production \
+JWT_SECRET_KEY="j688XXn1fOFrIMFNqmRwmiuKq40KFBFOY0fw0GfoySM_0nbYPof6-5osHHR9Uwbx" \
+CORS_ALLOWED_ORIGINS="http://172.20.59.7:8081,http://172.20.59.7:5001" \
+ADMIN_PASSWORD="Admin@2026!Init" \
+nohup python server.py > /opt/app/shared/logs/backend.log 2>&1 &
+echo "Backend PID=$!"
+sleep 10
+curl -s http://localhost:5001/api/v1/health && echo
+echo "=== B.9 OK ==="
+
+================================================================================
+PHASE C - VERIFY (paste this block)
+================================================================================
+[VERIFY] ------------------------------------------------
+echo "DB FILE: $(ls -la /opt/app/shared/data/architecture.db | awk '{print $5}') bytes"
+echo "ADMIN: $(sqlite3 /opt/app/shared/data/architecture.db 'SELECT username FROM users WHERE role=\"admin\";')"
+echo "BOs: $(sqlite3 /opt/app/shared/data/architecture.db 'SELECT COUNT(*) FROM business_objects;')"
+echo "PORTS:" && ss -tlnp | grep -E "8081|5001"
+echo "PROCS:" && ps -ef | grep -E "server.py" | grep -v grep | wc -l
+echo "ERRORS:" && grep -c "ERROR" /opt/app/shared/logs/*.log 2>/dev/null | tail -2
+echo "=== VERIFY DONE ==="
+echo "Browser: http://172.20.59.7:8081/ -> login admin / Admin@2026!Init"
+
+================================================================================
+ROLLBACK (if anything wrong)
+================================================================================
+/opt/app/scripts/rollback-enhanced.sh -a -f
+
+================================================================================
+STUCK? GET LOGS:
+================================================================================
+tail -50 /opt/app/shared/logs/deploy.log
+tail -50 /opt/app/shared/logs/backend.log
+
+Copy last 50 lines and paste back to AI assistant.
+================================================================================
