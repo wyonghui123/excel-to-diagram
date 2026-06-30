@@ -55,6 +55,8 @@ new_files:
   - docs/deploy-rollback-v20260630_001.sh
   - docs/DEPLOY-MANUAL-20260630_001.md
   - docs/DEPLOY-CHEATSHEET-20260630_001.txt
+  # 部署 bundle 说明 (2026-06-30)
+  - README_BUNDLE.txt
   # IE 智能体的 e2e 测试 (21)
   - e2e/business-flow/bmrd-rule-validation.spec.js
   - e2e/business-flow/bug-v010-owner-trace.spec.js
