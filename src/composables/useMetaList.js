@@ -117,7 +117,7 @@ export function useMetaList(objectTypeOrRef, options = {}) {
     // - 'always': 始终显示
     // - 'manual': 手动控制（需要用户点击按钮显示）
     filterDisplayMode: options.filterDisplayMode || 'hover',
-    // 行可维护性：'locked' | 'extensible' | 'fully_editable' | null
+    // 行可维护性：'locked' | 'extensible' | 'fullEditable' | null
     rowMutability: options.rowMutability || null,
     // 自定义数据获取器 (params) => Promise<{success, data}>
     fetcher: options.fetcher || null,

@@ -409,7 +409,7 @@ class FieldPolicyEngine:
         
         mutability 控制对象级别的新增和修改权限：
         - locked: 完全锁定，所有字段不可编辑
-        - fully_editable: 完全可编辑，所有字段可编辑
+        - fullEditable: 完全可编辑，所有字段可编辑
         - extensible: 可扩展，非系统字段可编辑
         
         Args:
@@ -428,7 +428,7 @@ class FieldPolicyEngine:
         
         if mutability == 'locked':
             return False
-        elif mutability == 'fully_editable':
+        elif mutability == 'fullEditable':
             return True
         elif mutability == 'extensible':
             is_system = getattr(field, 'is_system', None)
@@ -460,7 +460,7 @@ class FieldPolicyEngine:
         if mutability == 'locked':
             return False
         
-        if mutability == 'fully_editable':
+        if mutability == 'fullEditable':
             return True
         
         if mutability == 'extensible':

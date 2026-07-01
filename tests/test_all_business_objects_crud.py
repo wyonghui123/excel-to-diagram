@@ -644,7 +644,7 @@ class TestEnumTypeAndValueCRUD(TestBase):
             'name': 'Status Enum',
             'description': 'Enum for status values',
             'category': 'business',  # 业务枚举
-            'mutability': 'fully_editable'  # 完全可编辑
+            'mutability': 'fullEditable'  # 完全可编辑
         }
         req = CreateRequest(object_type='enum_type', data=enum_data)
         result = self.__class__.manage_service.create(req)

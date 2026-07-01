@@ -872,7 +872,7 @@ const computedSections = computed(() => {
         useMetaList: cs.useMetaList !== undefined ? cs.useMetaList : false,
         enableDetail: cs.enableDetail !== undefined ? cs.enableDetail : true,
         enableAutoCrud: cs.enableAutoCrud !== undefined ? cs.enableAutoCrud : false,
-        rowMutability: cs.rowMutability || 'fully_editable'
+        rowMutability: cs.rowMutability || 'fullEditable'
       })
     } else if (cs.child_object) {
       sections.push({
@@ -890,7 +890,7 @@ const computedSections = computed(() => {
         useMetaList: cs.useMetaList !== undefined ? cs.useMetaList : false,
         enableDetail: cs.enableDetail !== undefined ? cs.enableDetail : true,
         enableAutoCrud: cs.enableAutoCrud !== undefined ? cs.enableAutoCrud : false,
-        rowMutability: cs.rowMutability || 'fully_editable',
+        rowMutability: cs.rowMutability || 'fullEditable',
         inlineEdit: cs.inlineEdit || null,
         columns: cs.columns || null
       })

@@ -216,7 +216,7 @@ const props = defineProps({
   rowMutability: {
     type: String,
     default: null,
-    validator: (v) => [null, 'locked', 'extensible', 'fully_editable'].includes(v)
+    validator: (v) => [null, 'locked', 'extensible', 'fullEditable'].includes(v)
   },
   toolbarActions: {
     type: Array,

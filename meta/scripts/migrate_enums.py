@@ -281,7 +281,7 @@ def migrate_enum_class(ds, enum_class: type) -> tuple:
     # AnnotationCategory 和 DimensionKey 作为业务枚举，可编辑
     if enum_class.__name__ in ('AnnotationCategory', 'DimensionKey'):
         category = 'business'
-        mutability = 'fully_editable'
+        mutability = 'fullEditable'
     elif dim_config:
         category = dim_config.get('category', 'system')
         mutability = dim_config.get('mutability', 'locked')

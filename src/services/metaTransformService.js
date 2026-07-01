@@ -438,7 +438,7 @@ export function getDefaultOrdering(metaConfig) {
  * @param {Array} rowActions - 行操作配置数组
  * @param {Object} row - 当前行数据
  * @param {string} objectType - 对象类型
- * @param {string|null} rowMutability - 行可维护性 ('locked'|'extensible'|'fully_editable'|null)
+ * @param {string|null} rowMutability - 行可维护性 ('locked'|'extensible'|'fullEditable'|null)
  * @param {Function} checkPermission - 权限检查函数
  * @param {Function} evaluateCondition - 条件评估函数
  * @returns {Array} 过滤后的行操作

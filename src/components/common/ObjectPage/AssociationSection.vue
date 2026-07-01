@@ -76,7 +76,7 @@
       :initial-filters="associationFilters"
       :enable-detail="section.enableDetail !== undefined ? section.enableDetail : true"
       :enable-auto-crud="section.enableAutoCrud !== undefined ? section.enableAutoCrud : !section.readonly"
-      :row-mutability="section.rowMutability || (section.readonly ? 'locked' : 'fully_editable')"
+      :row-mutability="section.rowMutability || (section.readonly ? 'locked' : 'fullEditable')"
       :external-editing="editing"
       :exclude-column-keys="excludedColumnKeys"
       @request-edit="$emit('request-edit')"
