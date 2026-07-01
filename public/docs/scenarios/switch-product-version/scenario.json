@@ -1,0 +1,95 @@
+{
+  "scenario_id": "switch-product-version",
+  "title": "切换产品版本",
+  "summary": "在架构数据管理中切换产品与版本，筛选目标子域并生成对应的应用架构图表。",
+  "total_steps": 6,
+  "steps": [
+    {
+      "step_no": 1,
+      "title": "进入架构数据管理",
+      "action": "在顶部导航打开「架构数据管理」页，可见工具栏含「产品」「版本」两个下拉。",
+      "expected": "进入 /system/archdata 页面，工具栏显示「产品/版本请选择」。",
+      "tip": "",
+      "screenshot": "step_001.png",
+      "event_ref": {
+        "seq": 1,
+        "type": "click",
+        "page_url": "/system/archdata"
+      }
+    },
+    {
+      "step_no": 2,
+      "title": "选择产品与版本",
+      "action": "在工具栏点开「产品」下拉，选择「TTTTT000」；再点开「版本」下拉，选择「V11」。",
+      "expected": "下拉关闭，工具栏右侧的「图表视图」按钮变为可用。",
+      "tip": "切换前先确认你拥有该产品版本的访问权限，否则下拉项会显示为空。",
+      "screenshot": "step_004.png",
+      "event_ref": {
+        "seq": 5,
+        "type": "click",
+        "page_url": "/system/archdata"
+      }
+    },
+    {
+      "step_no": 3,
+      "title": "筛选分类域",
+      "action": "在分类树中依次选择「供应链云(141)」「采购供应(93)」「库存管理(58)」。",
+      "expected": "左侧分类树高亮三级节点，右侧对象/关系面板开始加载目标数据。",
+      "tip": "括号中的数字是当前版本下该节点的子项数量，可用于快速判断数据规模。",
+      "screenshot": "step_008.png",
+      "video": "step_003.webm",
+      "subtitles": [
+        { "start": 0, "end": 2.36, "text": "进入「架构数据管理」页面" },
+        { "start": 2.36, "end": 9.45, "text": "在工具栏选择产品 TTTTT000" },
+        { "start": 9.45, "end": 15.04, "text": "选择产品版本 V11" },
+        { "start": 15.04, "end": 16.57, "text": "在「分类域」树中找到「供应链云(141)」" },
+        { "start": 16.57, "end": 19.51, "text": "点击节点前的 checkbox 勾选" },
+        { "start": 19.51, "end": 27.41, "text": "子节点自动级联勾选，右侧加载数据" }
+      ],
+      "event_ref": {
+        "seq": 8,
+        "type": "click",
+        "page_url": "/system/archdata"
+      }
+    },
+    {
+      "step_no": 4,
+      "title": "选择关系范围",
+      "action": "在上方 Tab 依次点击「领域」「子领域」「服务模块」「业务对象」「关系范围」逐层定位；再勾选目标关系范围（如「范围内(3)」「范围内与外部(396)」「跨领域(297)」等）。",
+      "expected": "Tab 切换到「关系范围」后，下方列表展示当前产品版本下可选的关系范围项。",
+      "tip": "如果关系范围列表为空，说明前序分类筛选过窄，可返回上一步放宽筛选。",
+      "screenshot": "step_019.png",
+      "event_ref": {
+        "seq": 19,
+        "type": "click",
+        "page_url": "/system/archdata?tab=relationship"
+      }
+    },
+    {
+      "step_no": 5,
+      "title": "进入图表视图配置",
+      "action": "在右侧操作区点击「图表视图」按钮，在新页签点击「下一步」进入图表配置页。",
+      "expected": "页面切换到 /archdata-chart，可配置颜色分组维度、备注类型等图表参数。",
+      "tip": "「下一步」按钮仅在已选产品/版本且对象/关系范围非空时才可点击。",
+      "screenshot": "step_047.png",
+      "event_ref": {
+        "seq": 47,
+        "type": "click",
+        "page_url": "/archdata-chart"
+      }
+    },
+    {
+      "step_no": 6,
+      "title": "生成并查看图表",
+      "action": "在图表配置页选择「颜色分组维度（如按领域区分颜色）」，点击「生成图表」按钮，渲染完成后可在 Mermaid 图表上点击节点查看详情，并切换「彩色 HTML」或「全屏」查看不同视图。",
+      "expected": "Mermaid 架构图渲染完成，可点击节点查看对象/关系详情。",
+      "tip": "首次渲染约 3-5 秒，若节点较多请耐心等待；遇到「#mermaid-xxx」样式名属正常现象，是 Mermaid 内部生成的 DOM id。",
+      "screenshot": "step_053.png",
+      "event_ref": {
+        "seq": 53,
+        "type": "click",
+        "page_url": "/archdata-chart"
+      }
+    }
+  ]
+}

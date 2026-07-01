@@ -1,0 +1,1287 @@
+{
+  "version": "1.0",
+  "metadata": {
+    "recorded_at": "2026-06-30T03:54:37.136648+00:00",
+    "base_url": "http://localhost:3005/",
+    "event_count": 73,
+    "duration_ms": 306229.0,
+    "screenshot_dir": "D:\\filework\\excel-to-diagram\\public\\docs\\scenarios\\switch-product-version"
+  },
+  "events": [
+    {
+      "seq": 0,
+      "type": "navigate",
+      "timestamp": 1782791370906,
+      "target": {
+        "selector": "",
+        "fallback_selectors": [],
+        "text": "",
+        "tag": "",
+        "classes": []
+      },
+      "page_url": "/",
+      "value": "/"
+    },
+    {
+      "seq": 1,
+      "type": "click",
+      "timestamp": 1782791375823,
+      "target": {
+        "selector": "div.el-select__selection:has-text(\"请选择\")",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/div[1]/div[1]/div[1]/div/div/div[1]"
+        ],
+        "text": "请选择",
+        "tag": "div",
+        "classes": [
+          "el-select__selection"
+        ]
+      },
+      "page_url": "/system/archdata",
+      "value": null
+    },
+    {
+      "seq": 2,
+      "type": "input",
+      "timestamp": 1782791379312,
+      "target": {
+        "selector": "#el-id-4131-20",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"el-id-4131-20\"]"
+        ],
+        "text": "",
+        "tag": "input",
+        "classes": [
+          "el-select__input",
+          "is-small"
+        ]
+      },
+      "page_url": "/system/archdata",
+      "value": "TTT"
+    },
+    {
+      "seq": 3,
+      "type": "click",
+      "timestamp": 1782791380312,
+      "target": {
+        "selector": "#el-id-4131-36",
+        "fallback_selectors": [
+          "li.el-select-dropdown__item:has-text(\"TTTTT000\")",
+          "xpath=//*[@id=\"el-id-4131-36\"]"
+        ],
+        "text": "TTTTT000",
+        "tag": "li",
+        "classes": [
+          "el-select-dropdown__item",
+          "is-hovering"
+        ]
+      },
+      "page_url": "/system/archdata",
+      "value": "TTTTT000"
+    },
+    {
+      "seq": 4,
+      "type": "click",
+      "timestamp": 1782791381275,
+      "target": {
+        "selector": "div.el-select__selection:has-text(\"请选择\")",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/div[1]/div[1]/div[2]/div/div/div[1]"
+        ],
+        "text": "请选择",
+        "tag": "div",
+        "classes": [
+          "el-select__selection"
+        ]
+      },
+      "page_url": "/system/archdata",
+      "value": null
+    },
+    {
+      "seq": 5,
+      "type": "click",
+      "timestamp": 1782791382395,
+      "target": {
+        "selector": "#el-id-4131-272",
+        "fallback_selectors": [
+          "li.el-select-dropdown__item:has-text(\"V11\")",
+          "xpath=//*[@id=\"el-id-4131-272\"]"
+        ],
+        "text": "V11",
+        "tag": "li",
+        "classes": [
+          "el-select-dropdown__item",
+          "is-hovering"
+        ]
+      },
+      "page_url": "/system/archdata",
+      "value": "V11"
+    },
+    {
+      "seq": 6,
+      "type": "click",
+      "timestamp": 1782791385259,
+      "target": {
+        "selector": "div.el-tree-node__content:has-text(\"供应链云(141)\")",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/div[2]/aside/div/div/div/div[1]/div/div[2]/div/div[3]/div/div[11]/div"
+        ],
+        "text": "供应链云(141)",
+        "tag": "div",
+        "classes": [
+          "el-tree-node__content"
+        ]
+      },
+      "page_url": "/system/archdata",
+      "value": null
+    },
+    {
+      "seq": 7,
+      "type": "click",
+      "timestamp": 1782791387335,
+      "target": {
+        "selector": "div.el-tree-node__content:has-text(\"采购供应(93)\")",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/div[2]/aside/div/div/div/div[1]/div/div[2]/div/div[3]/div/div[11]/div[2]/div[2]/div"
+        ],
+        "text": "采购供应(93)",
+        "tag": "div",
+        "classes": [
+          "el-tree-node__content"
+        ]
+      },
+      "page_url": "/system/archdata",
+      "value": null
+    },
+    {
+      "seq": 8,
+      "type": "click",
+      "timestamp": 1782791390205,
+      "target": {
+        "selector": "div.el-tree-node__content:has-text(\"库存管理(58)\")",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/div[2]/aside/div/div/div/div[1]/div/div[2]/div/div[3]/div/div[11]/div[2]/div[2]/div[2]/div[6]/div"
+        ],
+        "text": "库存管理(58)",
+        "tag": "div",
+        "classes": [
+          "el-tree-node__content"
+        ]
+      },
+      "page_url": "/system/archdata",
+      "value": null
+    },
+    {
+      "seq": 9,
+      "type": "check",
+      "timestamp": 1782791390208,
+      "target": {
+        "selector": "#el-id-4131-1919",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"el-id-4131-1919\"]"
+        ],
+        "text": "",
+        "tag": "input",
+        "classes": [
+          "el-checkbox__original"
+        ]
+      },
+      "page_url": "/system/archdata",
+      "value": true
+    },
+    {
+      "seq": 10,
+      "type": "input",
+      "timestamp": 1782791390994,
+      "target": {
+        "selector": "#el-id-4131-1919",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"el-id-4131-1919\"]"
+        ],
+        "text": "",
+        "tag": "input",
+        "classes": [
+          "el-checkbox__original"
+        ]
+      },
+      "page_url": "/system/archdata",
+      "value": "on"
+    },
+    {
+      "seq": 11,
+      "type": "click",
+      "timestamp": 1782791394711,
+      "target": {
+        "selector": "#tab-domain",
+        "fallback_selectors": [
+          "div.el-tabs__item:has-text(\"领域\")",
+          "xpath=//*[@id=\"tab-domain\"]"
+        ],
+        "text": "领域",
+        "tag": "div",
+        "classes": [
+          "el-tabs__item",
+          "is-top",
+          "is-focus"
+        ]
+      },
+      "page_url": "/system/archdata",
+      "value": null
+    },
+    {
+      "seq": 12,
+      "type": "click",
+      "timestamp": 1782791397051,
+      "target": {
+        "selector": "#tab-sub_domain",
+        "fallback_selectors": [
+          "div.el-tabs__item:has-text(\"子领域\")",
+          "xpath=//*[@id=\"tab-sub_domain\"]"
+        ],
+        "text": "子领域",
+        "tag": "div",
+        "classes": [
+          "el-tabs__item",
+          "is-top",
+          "is-focus"
+        ]
+      },
+      "page_url": "/system/archdata?tab=domain",
+      "value": null
+    },
+    {
+      "seq": 13,
+      "type": "click",
+      "timestamp": 1782791399339,
+      "target": {
+        "selector": "#tab-service_module",
+        "fallback_selectors": [
+          "div.el-tabs__item:has-text(\"服务模块\")",
+          "xpath=//*[@id=\"tab-service_module\"]"
+        ],
+        "text": "服务模块",
+        "tag": "div",
+        "classes": [
+          "el-tabs__item",
+          "is-top",
+          "is-focus"
+        ]
+      },
+      "page_url": "/system/archdata?tab=sub_domain",
+      "value": null
+    },
+    {
+      "seq": 14,
+      "type": "click",
+      "timestamp": 1782791402724,
+      "target": {
+        "selector": "#tab-business_object",
+        "fallback_selectors": [
+          "div.el-tabs__item:has-text(\"业务对象\")",
+          "xpath=//*[@id=\"tab-business_object\"]"
+        ],
+        "text": "业务对象",
+        "tag": "div",
+        "classes": [
+          "el-tabs__item",
+          "is-top",
+          "is-focus"
+        ]
+      },
+      "page_url": "/system/archdata?tab=service_module",
+      "value": null
+    },
+    {
+      "seq": 15,
+      "type": "click",
+      "timestamp": 1782791406779,
+      "target": {
+        "selector": "#tab-relationship",
+        "fallback_selectors": [
+          "div.el-tabs__item:has-text(\"关联关系\")",
+          "xpath=//*[@id=\"tab-relationship\"]"
+        ],
+        "text": "关联关系",
+        "tag": "div",
+        "classes": [
+          "el-tabs__item",
+          "is-top",
+          "is-focus"
+        ]
+      },
+      "page_url": "/system/archdata?tab=business_object",
+      "value": null
+    },
+    {
+      "seq": 16,
+      "type": "click",
+      "timestamp": 1782791436069,
+      "target": {
+        "selector": "span.collapsible-panel__badge",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/div[2]/aside/div/div/div/div[1]/div/div[1]/div[1]/span[2]"
+        ],
+        "text": "58 对象",
+        "tag": "span",
+        "classes": [
+          "collapsible-panel__badge"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": null
+    },
+    {
+      "seq": 17,
+      "type": "click",
+      "timestamp": 1782791437215,
+      "target": {
+        "selector": "div.collapsible-panel__header-left:has-text(\"关系范围\")",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/div[2]/aside/div/div/div/div[2]/div/div[1]/div[1]"
+        ],
+        "text": "关系范围",
+        "tag": "div",
+        "classes": [
+          "collapsible-panel__header-left"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": null
+    },
+    {
+      "seq": 18,
+      "type": "click",
+      "timestamp": 1782791439348,
+      "target": {
+        "selector": "div.el-tree-node__content:has-text(\"范围内与外部(396)\")",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/div[2]/aside/div/div/div/div[2]/div/div[2]/div/div[2]/div[3]/div[2]/div"
+        ],
+        "text": "范围内与外部(396)",
+        "tag": "div",
+        "classes": [
+          "el-tree-node__content"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": null
+    },
+    {
+      "seq": 19,
+      "type": "click",
+      "timestamp": 1782791445984,
+      "target": {
+        "selector": "div.el-tree-node__content:has-text(\"范围内(3)\")",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/div[2]/aside/div/div/div/div[2]/div/div[2]/div/div[2]/div[3]/div[1]/div"
+        ],
+        "text": "范围内(3)",
+        "tag": "div",
+        "classes": [
+          "el-tree-node__content"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": null
+    },
+    {
+      "seq": 20,
+      "type": "check",
+      "timestamp": 1782791445986,
+      "target": {
+        "selector": "#el-id-4131-1921",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"el-id-4131-1921\"]"
+        ],
+        "text": "",
+        "tag": "input",
+        "classes": [
+          "el-checkbox__original"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": true
+    },
+    {
+      "seq": 21,
+      "type": "input",
+      "timestamp": 1782791446395,
+      "target": {
+        "selector": "#el-id-4131-1921",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"el-id-4131-1921\"]"
+        ],
+        "text": "",
+        "tag": "input",
+        "classes": [
+          "el-checkbox__original"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": "on"
+    },
+    {
+      "seq": 22,
+      "type": "click",
+      "timestamp": 1782791452415,
+      "target": {
+        "selector": "div.el-tree-node__content:has-text(\"同子领域跨服务模块(59)\")",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/div[2]/aside/div/div/div/div[2]/div/div[2]/div/div[2]/div[3]/div[2]/div[2]/div[3]/div"
+        ],
+        "text": "同子领域跨服务模块(59)",
+        "tag": "div",
+        "classes": [
+          "el-tree-node__content"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": null
+    },
+    {
+      "seq": 23,
+      "type": "click",
+      "timestamp": 1782791453936,
+      "target": {
+        "selector": "div.el-tree-node__content:has-text(\"同领域跨子领域(40)\")",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/div[2]/aside/div/div/div/div[2]/div/div[2]/div/div[2]/div[3]/div[2]/div[2]/div[2]/div"
+        ],
+        "text": "同领域跨子领域(40)",
+        "tag": "div",
+        "classes": [
+          "el-tree-node__content"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": null
+    },
+    {
+      "seq": 24,
+      "type": "click",
+      "timestamp": 1782791455440,
+      "target": {
+        "selector": "div.el-tree-node__content:has-text(\"供应链云-供应链云(40)\")",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/div[2]/aside/div/div/div/div[2]/div/div[2]/div/div[2]/div[3]/div[2]/div[2]/div[2]/div[2]/div/div"
+        ],
+        "text": "供应链云-供应链云(40)",
+        "tag": "div",
+        "classes": [
+          "el-tree-node__content"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": null
+    },
+    {
+      "seq": 25,
+      "type": "click",
+      "timestamp": 1782791458951,
+      "target": {
+        "selector": "div.el-tree-node__content:has-text(\"跨领域(297)\")",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/div[2]/aside/div/div/div/div[2]/div/div[2]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div"
+        ],
+        "text": "跨领域(297)",
+        "tag": "div",
+        "classes": [
+          "el-tree-node__content"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": null
+    },
+    {
+      "seq": 26,
+      "type": "click",
+      "timestamp": 1782791460775,
+      "target": {
+        "selector": "div.el-tree-node__content:has-text(\"供应链云-财务云(68)\")",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/div[2]/aside/div/div/div/div[2]/div/div[2]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[2]/div[1]/div"
+        ],
+        "text": "供应链云-财务云(68)",
+        "tag": "div",
+        "classes": [
+          "el-tree-node__content"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": null
+    },
+    {
+      "seq": 27,
+      "type": "click",
+      "timestamp": 1782791463394,
+      "target": {
+        "selector": "div.el-tree-node__content:has-text(\"采购供应-企业绩效(9)\")",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/div[2]/aside/div/div/div/div[2]/div/div[2]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[2]/div[1]/div[2]/div[1]/div"
+        ],
+        "text": "采购供应-企业绩效(9)",
+        "tag": "div",
+        "classes": [
+          "el-tree-node__content"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": null
+    },
+    {
+      "seq": 28,
+      "type": "click",
+      "timestamp": 1782791473763,
+      "target": {
+        "selector": "div.el-tree-node__content:has-text(\"采购供应-财务会计(38)\")",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/div[2]/aside/div/div/div/div[2]/div/div[2]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[2]/div[1]/div[2]/div[3]/div"
+        ],
+        "text": "采购供应-财务会计(38)",
+        "tag": "div",
+        "classes": [
+          "el-tree-node__content"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": null
+    },
+    {
+      "seq": 29,
+      "type": "check",
+      "timestamp": 1782791473765,
+      "target": {
+        "selector": "#el-id-4131-14463",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"el-id-4131-14463\"]"
+        ],
+        "text": "",
+        "tag": "input",
+        "classes": [
+          "el-checkbox__original"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": true
+    },
+    {
+      "seq": 30,
+      "type": "input",
+      "timestamp": 1782791474166,
+      "target": {
+        "selector": "#el-id-4131-14463",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"el-id-4131-14463\"]"
+        ],
+        "text": "",
+        "tag": "input",
+        "classes": [
+          "el-checkbox__original"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": "on"
+    },
+    {
+      "seq": 31,
+      "type": "click",
+      "timestamp": 1782791476779,
+      "target": {
+        "selector": "div.el-tree-node__content:has-text(\"采购供应-管理会计(16)\")",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/div[2]/aside/div/div/div/div[2]/div/div[2]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[2]/div[1]/div[2]/div[4]/div"
+        ],
+        "text": "采购供应-管理会计(16)",
+        "tag": "div",
+        "classes": [
+          "el-tree-node__content"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": null
+    },
+    {
+      "seq": 32,
+      "type": "check",
+      "timestamp": 1782791476780,
+      "target": {
+        "selector": "#el-id-4131-14464",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"el-id-4131-14464\"]"
+        ],
+        "text": "",
+        "tag": "input",
+        "classes": [
+          "el-checkbox__original"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": true
+    },
+    {
+      "seq": 33,
+      "type": "input",
+      "timestamp": 1782791477186,
+      "target": {
+        "selector": "#el-id-4131-14464",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"el-id-4131-14464\"]"
+        ],
+        "text": "",
+        "tag": "input",
+        "classes": [
+          "el-checkbox__original"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": "on"
+    },
+    {
+      "seq": 34,
+      "type": "click",
+      "timestamp": 1782791482369,
+      "target": {
+        "selector": "div.el-tree-node__content:has-text(\"采购供应-销售(30)\")",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/div[2]/aside/div/div/div/div[2]/div/div[2]/div/div[2]/div[3]/div[2]/div[2]/div[2]/div[2]/div/div[2]/div[1]/div"
+        ],
+        "text": "采购供应-销售(30)",
+        "tag": "div",
+        "classes": [
+          "el-tree-node__content"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": null
+    },
+    {
+      "seq": 35,
+      "type": "check",
+      "timestamp": 1782791482371,
+      "target": {
+        "selector": "#el-id-4131-14450",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"el-id-4131-14450\"]"
+        ],
+        "text": "",
+        "tag": "input",
+        "classes": [
+          "el-checkbox__original"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": true
+    },
+    {
+      "seq": 36,
+      "type": "input",
+      "timestamp": 1782791482784,
+      "target": {
+        "selector": "#el-id-4131-14450",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"el-id-4131-14450\"]"
+        ],
+        "text": "",
+        "tag": "input",
+        "classes": [
+          "el-checkbox__original"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": "on"
+    },
+    {
+      "seq": 37,
+      "type": "click",
+      "timestamp": 1782791488660,
+      "target": {
+        "selector": "div.el-tree-node__content:has-text(\"项目云-供应链云(2)\")",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/div[2]/aside/div/div/div/div[2]/div/div[2]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[2]/div[2]/div"
+        ],
+        "text": "项目云-供应链云(2)",
+        "tag": "div",
+        "classes": [
+          "el-tree-node__content"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": null
+    },
+    {
+      "seq": 38,
+      "type": "check",
+      "timestamp": 1782791488661,
+      "target": {
+        "selector": "#el-id-4131-14454",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"el-id-4131-14454\"]"
+        ],
+        "text": "",
+        "tag": "input",
+        "classes": [
+          "el-checkbox__original"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": true
+    },
+    {
+      "seq": 39,
+      "type": "input",
+      "timestamp": 1782791489393,
+      "target": {
+        "selector": "#el-id-4131-14454",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"el-id-4131-14454\"]"
+        ],
+        "text": "",
+        "tag": "input",
+        "classes": [
+          "el-checkbox__original"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": "on"
+    },
+    {
+      "seq": 40,
+      "type": "click",
+      "timestamp": 1782791491725,
+      "target": {
+        "selector": "div.el-tree-node__content:has-text(\"供应链云-资产云(51)\")",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/div[2]/aside/div/div/div/div[2]/div/div[2]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[2]/div[3]/div"
+        ],
+        "text": "供应链云-资产云(51)",
+        "tag": "div",
+        "classes": [
+          "el-tree-node__content"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": null
+    },
+    {
+      "seq": 41,
+      "type": "check",
+      "timestamp": 1782791491726,
+      "target": {
+        "selector": "#el-id-4131-14455",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"el-id-4131-14455\"]"
+        ],
+        "text": "",
+        "tag": "input",
+        "classes": [
+          "el-checkbox__original"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": true
+    },
+    {
+      "seq": 42,
+      "type": "input",
+      "timestamp": 1782791492193,
+      "target": {
+        "selector": "#el-id-4131-14455",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"el-id-4131-14455\"]"
+        ],
+        "text": "",
+        "tag": "input",
+        "classes": [
+          "el-checkbox__original"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": "on"
+    },
+    {
+      "seq": 43,
+      "type": "click",
+      "timestamp": 1782791495915,
+      "target": {
+        "selector": "div.el-tree-node__content:has-text(\"供应链云-制造云(129)\")",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/div[2]/aside/div/div/div/div[2]/div/div[2]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[2]/div[5]/div"
+        ],
+        "text": "供应链云-制造云(129)",
+        "tag": "div",
+        "classes": [
+          "el-tree-node__content"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": null
+    },
+    {
+      "seq": 44,
+      "type": "check",
+      "timestamp": 1782791495916,
+      "target": {
+        "selector": "#el-id-4131-14457",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"el-id-4131-14457\"]"
+        ],
+        "text": "",
+        "tag": "input",
+        "classes": [
+          "el-checkbox__original"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": true
+    },
+    {
+      "seq": 45,
+      "type": "input",
+      "timestamp": 1782791496327,
+      "target": {
+        "selector": "#el-id-4131-14457",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"el-id-4131-14457\"]"
+        ],
+        "text": "",
+        "tag": "input",
+        "classes": [
+          "el-checkbox__original"
+        ]
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": "on"
+    },
+    {
+      "seq": 46,
+      "type": "click",
+      "timestamp": 1782791503124,
+      "target": {
+        "selector": "button:has-text(\"图表视图\")",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/div[1]/div[3]/button[3]/span"
+        ],
+        "text": "图表视图",
+        "tag": "span",
+        "classes": []
+      },
+      "page_url": "/system/archdata?tab=relationship",
+      "value": null
+    },
+    {
+      "seq": 47,
+      "type": "click",
+      "timestamp": 1782791508615,
+      "target": {
+        "selector": "button:has-text(\"下一步\")",
+        "fallback_selectors": [
+          "button.nav-btn.nav-btn--next",
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/nav/button[3]"
+        ],
+        "text": "下一步",
+        "tag": "button",
+        "classes": [
+          "nav-btn",
+          "nav-btn--next"
+        ]
+      },
+      "page_url": "/archdata-chart",
+      "value": null
+    },
+    {
+      "seq": 48,
+      "type": "click",
+      "timestamp": 1782791511051,
+      "target": {
+        "selector": "xpath=//*[@id=\"app\"]/div/div[2]/main/div/main/div/div/div/div[1]/div[2]/div[1]/select",
+        "fallback_selectors": [],
+        "text": "按领域区分颜色按子领域区分颜色按服务模块区分颜色",
+        "tag": "select",
+        "classes": [
+          "form-select"
+        ]
+      },
+      "page_url": "/archdata-chart",
+      "value": null
+    },
+    {
+      "seq": 49,
+      "type": "click",
+      "timestamp": 1782791512166,
+      "target": {
+        "selector": "xpath=//*[@id=\"app\"]/div/div[2]/main/div/main/div/div/div/div[1]/div[2]/div[1]/select",
+        "fallback_selectors": [],
+        "text": "按领域区分颜色按子领域区分颜色按服务模块区分颜色",
+        "tag": "select",
+        "classes": [
+          "form-select"
+        ]
+      },
+      "page_url": "/archdata-chart",
+      "value": null
+    },
+    {
+      "seq": 50,
+      "type": "click",
+      "timestamp": 1782791515963,
+      "target": {
+        "selector": "input.form-color-picker",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/main/div/div/div/div[1]/div[1]/div[2]/input"
+        ],
+        "text": "",
+        "tag": "input",
+        "classes": [
+          "form-color-picker"
+        ]
+      },
+      "page_url": "/archdata-chart",
+      "value": null
+    },
+    {
+      "seq": 51,
+      "type": "input",
+      "timestamp": 1782791517732,
+      "target": {
+        "selector": "input.form-color-picker",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/main/div/div/div/div[1]/div[1]/div[2]/input"
+        ],
+        "text": "",
+        "tag": "input",
+        "classes": [
+          "form-color-picker"
+        ]
+      },
+      "page_url": "/archdata-chart",
+      "value": "#ddacac"
+    },
+    {
+      "seq": 52,
+      "type": "click",
+      "timestamp": 1782791518523,
+      "target": {
+        "selector": "div.center-domain-select",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/main/div/div/div/div[1]"
+        ],
+        "text": "范围内节点颜色颜色分组维度按领域区分颜色按子领域区分颜色按服务模块区分颜色颜色组合默认组合鲜艳组合柔和组合暖色组合冷色组合商务组合自然组合颜色分配制造云财务云供应链云含中心资产云项目云业务对象标题文字",
+        "tag": "div",
+        "classes": [
+          "center-domain-select"
+        ]
+      },
+      "page_url": "/archdata-chart",
+      "value": null
+    },
+    {
+      "seq": 53,
+      "type": "click",
+      "timestamp": 1782791519971,
+      "target": {
+        "selector": "button:has-text(\"生成图表\")",
+        "fallback_selectors": [
+          "span.nav-btn__text:has-text(\"生成图表\")",
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/nav/button[2]/span"
+        ],
+        "text": "生成图表",
+        "tag": "span",
+        "classes": [
+          "nav-btn__text"
+        ]
+      },
+      "page_url": "/archdata-chart",
+      "value": null
+    },
+    {
+      "seq": 54,
+      "type": "click",
+      "timestamp": 1782791527100,
+      "target": {
+        "selector": "xpath=//*[@id=\"G_SM_INV\"]/rect",
+        "fallback_selectors": [],
+        "text": "",
+        "tag": "rect",
+        "classes": []
+      },
+      "page_url": "/archdata-chart",
+      "value": null
+    },
+    {
+      "seq": 55,
+      "type": "click",
+      "timestamp": 1782791528942,
+      "target": {
+        "selector": "#mermaid-1782791520453",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"mermaid-1782791520453\"]"
+        ],
+        "text": "#mermaid-1782791520453{font-family:\"trebuchet ms\",verdana,arial,sans-serif;font-size:16px;fill:#0000",
+        "tag": "svg",
+        "classes": []
+      },
+      "page_url": "/archdata-chart",
+      "value": null
+    },
+    {
+      "seq": 56,
+      "type": "click",
+      "timestamp": 1782791529764,
+      "target": {
+        "selector": "xpath=//*[@id=\"G_SM_INV\"]/rect",
+        "fallback_selectors": [],
+        "text": "",
+        "tag": "rect",
+        "classes": []
+      },
+      "page_url": "/archdata-chart",
+      "value": null
+    },
+    {
+      "seq": 57,
+      "type": "click",
+      "timestamp": 1782791531059,
+      "target": {
+        "selector": "#mermaid-1782791520453",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"mermaid-1782791520453\"]"
+        ],
+        "text": "#mermaid-1782791520453{font-family:\"trebuchet ms\",verdana,arial,sans-serif;font-size:16px;fill:#0000",
+        "tag": "svg",
+        "classes": []
+      },
+      "page_url": "/archdata-chart",
+      "value": null
+    },
+    {
+      "seq": 58,
+      "type": "click",
+      "timestamp": 1782791533104,
+      "target": {
+        "selector": "xpath=//*[@id=\"G_SM_INV\"]/rect",
+        "fallback_selectors": [],
+        "text": "",
+        "tag": "rect",
+        "classes": []
+      },
+      "page_url": "/archdata-chart",
+      "value": null
+    },
+    {
+      "seq": 59,
+      "type": "click",
+      "timestamp": 1782791535359,
+      "target": {
+        "selector": "xpath=//*[@id=\"G_SM_INV\"]/rect",
+        "fallback_selectors": [],
+        "text": "",
+        "tag": "rect",
+        "classes": []
+      },
+      "page_url": "/archdata-chart",
+      "value": null
+    },
+    {
+      "seq": 60,
+      "type": "click",
+      "timestamp": 1782791538132,
+      "target": {
+        "selector": "xpath=//*[@id=\"G_SM_INV\"]/rect",
+        "fallback_selectors": [],
+        "text": "",
+        "tag": "rect",
+        "classes": []
+      },
+      "page_url": "/archdata-chart",
+      "value": null
+    },
+    {
+      "seq": 61,
+      "type": "click",
+      "timestamp": 1782791545351,
+      "target": {
+        "selector": "xpath=//*[@id=\"G_SM_INV\"]/rect",
+        "fallback_selectors": [],
+        "text": "",
+        "tag": "rect",
+        "classes": []
+      },
+      "page_url": "/archdata-chart",
+      "value": null
+    },
+    {
+      "seq": 62,
+      "type": "click",
+      "timestamp": 1782791546155,
+      "target": {
+        "selector": "#mermaid-1782791520453",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"mermaid-1782791520453\"]"
+        ],
+        "text": "#mermaid-1782791520453{font-family:\"trebuchet ms\",verdana,arial,sans-serif;font-size:16px;fill:#0000",
+        "tag": "svg",
+        "classes": []
+      },
+      "page_url": "/archdata-chart",
+      "value": null
+    },
+    {
+      "seq": 63,
+      "type": "click",
+      "timestamp": 1782791547164,
+      "target": {
+        "selector": "#mermaid-1782791520453",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"mermaid-1782791520453\"]"
+        ],
+        "text": "#mermaid-1782791520453{font-family:\"trebuchet ms\",verdana,arial,sans-serif;font-size:16px;fill:#0000",
+        "tag": "svg",
+        "classes": []
+      },
+      "page_url": "/archdata-chart",
+      "value": null
+    },
+    {
+      "seq": 64,
+      "type": "click",
+      "timestamp": 1782791642702,
+      "target": {
+        "selector": "button:has-text(\"彩色HTML\")",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/main/div/div/div[2]/div/div/div[1]/div[2]/button[2]/span"
+        ],
+        "text": "彩色HTML",
+        "tag": "span",
+        "classes": [
+          "toolbar-btn-label"
+        ]
+      },
+      "page_url": "/archdata-chart",
+      "value": null
+    },
+    {
+      "seq": 65,
+      "type": "click",
+      "timestamp": 1782791647670,
+      "target": {
+        "selector": "button:has-text(\"全屏\")",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"app\"]/div/div[2]/main/div/main/div/div/div[2]/div/div/div[1]/div[1]/button[2]"
+        ],
+        "text": "全屏",
+        "tag": "button",
+        "classes": [
+          "toolbar-btn"
+        ]
+      },
+      "page_url": "/archdata-chart",
+      "value": null
+    },
+    {
+      "seq": 66,
+      "type": "click",
+      "timestamp": 1782791650435,
+      "target": {
+        "selector": "xpath=//*[@id=\"G_SM_INV\"]/rect",
+        "fallback_selectors": [],
+        "text": "",
+        "tag": "rect",
+        "classes": []
+      },
+      "page_url": "/archdata-chart",
+      "value": null
+    },
+    {
+      "seq": 67,
+      "type": "click",
+      "timestamp": 1782791651440,
+      "target": {
+        "selector": "#mermaid-1782791520453",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"mermaid-1782791520453\"]"
+        ],
+        "text": "#mermaid-1782791520453{font-family:\"trebuchet ms\",verdana,arial,sans-serif;font-size:16px;fill:#0000",
+        "tag": "svg",
+        "classes": []
+      },
+      "page_url": "/archdata-chart",
+      "value": null
+    },
+    {
+      "seq": 68,
+      "type": "click",
+      "timestamp": 1782791653764,
+      "target": {
+        "selector": "#mermaid-1782791520453",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"mermaid-1782791520453\"]"
+        ],
+        "text": "#mermaid-1782791520453{font-family:\"trebuchet ms\",verdana,arial,sans-serif;font-size:16px;fill:#0000",
+        "tag": "svg",
+        "classes": []
+      },
+      "page_url": "/archdata-chart",
+      "value": null
+    },
+    {
+      "seq": 69,
+      "type": "click",
+      "timestamp": 1782791655388,
+      "target": {
+        "selector": "#mermaid-1782791520453",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"mermaid-1782791520453\"]"
+        ],
+        "text": "#mermaid-1782791520453{font-family:\"trebuchet ms\",verdana,arial,sans-serif;font-size:16px;fill:#0000",
+        "tag": "svg",
+        "classes": []
+      },
+      "page_url": "/archdata-chart",
+      "value": null
+    },
+    {
+      "seq": 70,
+      "type": "click",
+      "timestamp": 1782791656260,
+      "target": {
+        "selector": "#mermaid-1782791520453",
+        "fallback_selectors": [
+          "xpath=//*[@id=\"mermaid-1782791520453\"]"
+        ],
+        "text": "#mermaid-1782791520453{font-family:\"trebuchet ms\",verdana,arial,sans-serif;font-size:16px;fill:#0000",
+        "tag": "svg",
+        "classes": []
+      },
+      "page_url": "/archdata-chart",
+      "value": null
+    },
+    {
+      "seq": 71,
+      "type": "click",
+      "timestamp": 1782791657171,
+      "target": {
+        "selector": "xpath=//*[@id=\"G_SD_MM\"]/rect",
+        "fallback_selectors": [],
+        "text": "",
+        "tag": "rect",
+        "classes": []
+      },
+      "page_url": "/archdata-chart",
+      "value": null
+    },
+    {
+      "seq": 72,
+      "type": "click",
+      "timestamp": 1782791658154,
+      "target": {
+        "selector": "xpath=//*[@id=\"G_SM_INV\"]/rect",
+        "fallback_selectors": [],
+        "text": "",
+        "tag": "rect",
+        "classes": []
+      },
+      "page_url": "/archdata-chart",
+      "value": null
+    }
+  ]
+}
