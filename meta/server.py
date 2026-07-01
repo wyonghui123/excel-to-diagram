@@ -70,7 +70,10 @@ def kill_processes_on_port(port):
 
 def get_pid_file_path():
     """获取PID文件路径"""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    try:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+    except NameError:
+        script_dir = os.getcwd()
     return os.path.join(script_dir, 'server.pid')
 
 
@@ -711,8 +714,11 @@ def create_app(db_path=None):
     app.register_blueprint(schema_dashboard_bp)
 
     # M14 v1.0.0: Telemetry Dashboard Blueprint (p50/p95/p99 stats + slow traces)
-    from telemetry import telemetry_bp
-    app.register_blueprint(telemetry_bp)
+    try:
+        from telemetry import telemetry_bp
+        app.register_blueprint(telemetry_bp)
+    except ImportError:
+        pass
 
     # v3 BO Action: 注册业务 Action 处理器
     # [FR-5.2] 提取到 meta/services/bo_action_registrations.py
@@ -839,7 +845,7 @@ def create_app(db_path=None):
 
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 3010))
+    port = int(os.environ.get('PORT', 3011))
     
     is_reloader = os.environ.get('WERKZEUG_RUN_MAIN') == 'true'
     if not is_reloader:
