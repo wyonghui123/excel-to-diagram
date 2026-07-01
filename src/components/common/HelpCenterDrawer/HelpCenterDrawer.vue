@@ -1,5 +1,7 @@
 <!--
-  HelpCenterDrawer - P1 阶段，iframe 嵌入 /docs/user-guide/index.html
+  HelpCenterDrawer - P2 升级：双 tab（操作场景 / 章节手册）
+  - 操作场景: 内嵌 HelpAccordion，渲染 scenario.json
+  - 章节手册: 保留 P1 时期的 iframe /docs/user-guide/index.html
 -->
 <template>
   <Teleport to="body">
@@ -46,24 +48,41 @@
           </div>
 
           <div class="help-drawer__body">
-            <iframe
-              v-if="modelValue"
-              :key="iframeKey"
-              :src="helpUrl"
-              class="help-drawer__iframe"
-              title="帮助文档"
-              referrerpolicy="no-referrer-when-downgrade"
-              @load="handleIframeLoad"
-              @error="handleIframeError"
-            ></iframe>
-
-            <div v-if="loadError" class="help-drawer__fallback">
-              <el-icon :size="48" class="help-drawer__fallback-icon"><Warning /></el-icon>
-              <p class="help-drawer__fallback-title">无法加载帮助文档</p>
-              <p class="help-drawer__fallback-desc">{{ loadError }}</p>
-              <el-button type="primary" @click="retry">重试</el-button>
-              <el-button @click="openInNewTab">新窗口打开</el-button>
-            </div>
+            <el-tabs v-model="activeTab" class="help-drawer__tabs">
+              <el-tab-pane label="操作场景" name="scenarios">
+                <el-tabs v-model="activeScenario" tab-position="left" class="help-drawer__scenario-tabs">
+                  <el-tab-pane
+                    v-for="s in scenarios"
+                    :key="s.id"
+                    :label="s.label"
+                    :name="s.id"
+                  >
+                    <HelpAccordion :scenario-id="s.id" />
+                  </el-tab-pane>
+                </el-tabs>
+              </el-tab-pane>
+              <el-tab-pane label="章节手册" name="manual">
+                <div class="help-drawer__manual-wrap">
+                  <iframe
+                    v-if="modelValue"
+                    :key="iframeKey"
+                    :src="helpUrl"
+                    class="help-drawer__iframe"
+                    title="帮助文档"
+                    referrerpolicy="no-referrer-when-downgrade"
+                    @load="handleIframeLoad"
+                    @error="handleIframeError"
+                  ></iframe>
+                  <div v-if="loadError" class="help-drawer__fallback">
+                    <el-icon :size="48" class="help-drawer__fallback-icon"><Warning /></el-icon>
+                    <p class="help-drawer__fallback-title">无法加载帮助文档</p>
+                    <p class="help-drawer__fallback-desc">{{ loadError }}</p>
+                    <el-button type="primary" @click="retry">重试</el-button>
+                    <el-button @click="openInNewTab">新窗口打开</el-button>
+                  </div>
+                </div>
+              </el-tab-pane>
+            </el-tabs>
           </div>
         </div>
       </div>
@@ -74,6 +93,7 @@
 <script setup>
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { QuestionFilled, Warning } from '@element-plus/icons-vue'
+import { HelpAccordion } from '@/components/common/HelpAccordion'
 
 const props = defineProps({
   modelValue: {
@@ -98,6 +118,13 @@ const wrapperStyle = computed(() => ({
 
 const iframeKey = ref(0)
 const loadError = ref('')
+const activeTab = ref('scenarios')
+
+const scenarios = [
+  { id: 'archdata-management', label: '架构数据管理' },
+  { id: 'switch-product-version', label: '切换产品版本' },
+]
+const activeScenario = ref('archdata-management')
 
 function handleClose() {
   emit('update:modelValue', false)
@@ -238,6 +265,50 @@ onUnmounted(() => {
   background: var(--el-fill-color-blank, #ffffff);
 }
 
+.help-drawer__tabs {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.help-drawer__tabs :deep(.el-tabs__header) {
+  margin: 0 24px;
+  border-bottom: 1px solid var(--el-border-color-lighter, #f0f0f0);
+}
+
+.help-drawer__tabs :deep(.el-tabs__nav-wrap)::after {
+  background-color: transparent;
+}
+
+.help-drawer__tabs :deep(.el-tabs__item) {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--el-text-color-regular, #4e5969);
+}
+
+.help-drawer__tabs :deep(.el-tabs__item.is-active) {
+  color: var(--yonyou-orange-600, #ea580c);
+  font-weight: 600;
+}
+
+.help-drawer__tabs :deep(.el-tabs__active-bar) {
+  background-color: var(--yonyou-orange-600, #ea580c);
+}
+
+.help-drawer__tabs :deep(.el-tabs__content) {
+  flex: 1;
+  overflow: hidden;
+}
+
+.help-drawer__tabs :deep(.el-tab-pane) {
+  height: 100%;
+}
+
+.help-drawer__manual-wrap {
+  height: 100%;
+  position: relative;
+}
+
 .help-drawer__iframe {
   width: 100%;
   height: 100%;
@@ -293,5 +364,36 @@ onUnmounted(() => {
 .help-drawer-enter-from .help-drawer__wrapper,
 .help-drawer-leave-to .help-drawer__wrapper {
   transform: translateX(100%);
+}
+
+/* 场景左侧 tab 列表 */
+.help-drawer__scenario-tabs {
+  height: 100%;
+}
+.help-drawer__scenario-tabs :deep(.el-tabs__header) {
+  margin-right: 0;
+  padding-top: 8px;
+  min-width: 130px;
+  border-right: 1px solid var(--el-border-color-lighter, #f0f0f0);
+}
+.help-drawer__scenario-tabs :deep(.el-tabs__item) {
+  font-size: 13px;
+  height: 36px;
+  line-height: 36px;
+  padding: 0 16px;
+  text-align: left;
+}
+.help-drawer__scenario-tabs :deep(.el-tabs__item.is-active) {
+  color: var(--yonyou-orange-600, #ea580c);
+}
+.help-drawer__scenario-tabs :deep(.el-tabs__active-bar) {
+  background-color: var(--yonyou-orange-600, #ea580c);
+}
+.help-drawer__scenario-tabs :deep(.el-tabs__content) {
+  flex: 1;
+  overflow: hidden;
+}
+.help-drawer__scenario-tabs :deep(.el-tab-pane) {
+  height: 100%;
 }
 </style>

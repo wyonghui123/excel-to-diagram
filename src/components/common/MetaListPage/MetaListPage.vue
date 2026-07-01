@@ -1732,6 +1732,16 @@ onMounted(() => {
   }
 })
 
+// [FIX 2026-06-30] 监听 initialFilters 变化, 重新应用过滤并刷新数据
+//   之前只在 onMounted 应用一次, scope tree 勾选后 Tab 不刷新 → 显示全部
+watch(() => props.initialFilters, (newFilters) => {
+  if (!newFilters || Object.keys(newFilters).length === 0) return
+  setContextFilters(newFilters)
+  if (props.options.autoLoad !== false) {
+    refresh()
+  }
+}, { deep: true })
+
 // [FR-004] 路由级 keep-alive 恢复时刷新数据
 // [FR-005] SAP Fiori iAppState 模式：路由切回时保留状态，不自动刷新
 // 数据变更由 refreshCoordinator 处理，用户可手动点刷新按钮
