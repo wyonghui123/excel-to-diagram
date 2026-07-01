@@ -4009,6 +4009,7 @@ class ImportExportService:
                                  filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """查询备注信息（内部实现，供 _query_child_object 调用）"""
         from meta.core.models import registry
+        from collections import defaultdict
 
         category_labels = {
             "important": "重要",
@@ -4031,6 +4032,53 @@ class ImportExportService:
             result = self.query_service.search(search_request)
             annotations = result.data or []
 
+            # [perf-2026-06-30] 批量查询 target 对象: 按 target_type 分组收集 target_id,
+            #   一次 IN 查询替代 N 次单条查询 (18887 annotation → 7 次批量查询 vs 18887 次)
+            target_ids_by_type = defaultdict(set)
+            for ann in annotations:
+                ttype = ann.get("target_type", "")
+                tid = ann.get("target_id")
+                if ttype and tid:
+                    target_ids_by_type[ttype].add(tid)
+
+            # 批量查每个 target_type 的对象，构建 (type, id) → (code, name) lookup
+            target_lookup = {}
+            for ttype, ids in target_ids_by_type.items():
+                try:
+                    target_obj = registry.get(ttype)
+                    if not target_obj:
+                        continue
+                    batch_result = self.query_service.search(SearchRequest(
+                        object_type=ttype,
+                        conditions=[QueryCondition(field="id", operator=QueryOperator.IN, values=list(ids))],
+                        page=1,
+                        page_size=len(ids),
+                    ))
+                    if not batch_result.data:
+                        continue
+
+                    bk_fields = [f for f in target_obj.fields
+                                if getattr(f.semantics, 'business_key', False)
+                                and not getattr(f.semantics, 'virtual', False)]
+                    name_field = next((f for f in target_obj.fields if f.id == "name" or "name" in f.id.lower()), None)
+
+                    for item in batch_result.data:
+                        item_id = item.get("id")
+                        if item_id is None:
+                            continue
+                        if ttype == "relationship":
+                            code = item.get("relation_code", "")
+                            name = item.get("relation_desc", "") or " -> ".join(filter(None, [item.get("source_code", ""), item.get("target_code", "")]))
+                        elif bk_fields:
+                            code = item.get(bk_fields[0].id, "")
+                            name = item.get(name_field.id, "") if name_field else ""
+                        else:
+                            code = item.get("code", "")
+                            name = item.get("name", "")
+                        target_lookup[(ttype, item_id)] = (code, name)
+                except Exception:
+                    pass
+
             enriched_annotations = []
             for ann in annotations:
                 target_type = ann.get("target_type", "")
@@ -4038,37 +4086,10 @@ class ImportExportService:
 
                 target_code = ""
                 target_name = ""
-
                 if target_type and target_id:
-                    try:
-                        target_obj = registry.get(target_type)
-                        if target_obj:
-                            target_search = SearchRequest(
-                                object_type=target_type,
-                                conditions=[QueryCondition(field="id", operator=QueryOperator.EQ, value=target_id)],
-                                page=1,
-                                page_size=1,
-                            )
-                            target_result = self.query_service.search(target_search)
-                            if target_result.data:
-                                target_data = target_result.data[0]
-
-                                bk_fields = [f for f in target_obj.fields
-                                            if getattr(f.semantics, 'business_key', False)
-                                            and not getattr(f.semantics, 'virtual', False)]
-                                name_field = next((f for f in target_obj.fields if f.id == "name" or "name" in f.id.lower()), None)
-
-                                if target_type == "relationship":
-                                    target_code = target_data.get("relation_code", "")
-                                    target_name = target_data.get("relation_desc", "") or " -> ".join(filter(None, [target_data.get("source_code", ""), target_data.get("target_code", "")]))
-                                elif bk_fields:
-                                    target_code = target_data.get(bk_fields[0].id, "")
-                                    target_name = target_data.get(name_field.id, "") if name_field else ""
-                                else:
-                                    target_code = target_data.get("code", "")
-                                    target_name = target_data.get("name", "")
-                    except Exception:
-                        pass
+                    looked_up = target_lookup.get((target_type, target_id))
+                    if looked_up:
+                        target_code, target_name = looked_up
 
                 created_at_raw = ann.get("created_at", "")
                 created_at_formatted = ""
