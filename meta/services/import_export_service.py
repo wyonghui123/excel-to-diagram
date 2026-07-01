@@ -2588,24 +2588,245 @@ class ImportExportService:
 
         meta_obj = registry.get(object_type)
 
-        for record in data:
-            if options and options.get("include_hierarchy_path", True):
-                record["层级路径"] = self._build_hierarchy_path(record, meta_obj)
+        # [perf-2026-06-30] Batch 预加载: 解决 _enrich_annotation_target /
+        #   _enrich_relationship_record / _add_hierarchy_fields 的 N+1 问题.
+        #   TTTTT000/V11: ~18887 annotation/relationship, 每条 ~1-2 次 SQL → 37000+ 查询
+        #   优化后: 1-7 次批量 IN 查询替代 N 次单条查询.
+        enrichment_cache = self._build_enrichment_cache(data, object_type, meta_obj)
+        # [perf-2026-06-30] 设置实例变量供 _add_hierarchy_fields / _get_parent_record 使用
+        self._current_enrichment_cache = enrichment_cache
+        try:
+            for record in data:
+                if options and options.get("include_hierarchy_path", True):
+                    record["层级路径"] = self._build_hierarchy_path(record, meta_obj)
 
-            self._add_hierarchy_fields(record, meta_obj, options)
+                self._add_hierarchy_fields(record, meta_obj, options, enrichment_cache)
 
-            # [FIX 2026-06-24] annotation 是多态关联 (target_type/target_id),
-            #   _add_hierarchy_fields 走 parent_object 链不适用 (annotation 无 parent_object),
-            #   必须在这里特殊处理 target_code / target_name.
-            if object_type == 'annotation':
-                self._enrich_annotation_target(record)
+                # [FIX 2026-06-24] annotation 是多态关联 (target_type/target_id),
+                #   _add_hierarchy_fields 走 parent_object 链不适用 (annotation 无 parent_object),
+                #   必须在这里特殊处理 target_code / target_name.
+                if object_type == 'annotation':
+                    self._enrich_annotation_target(record, enrichment_cache)
 
-            if object_type == 'relationship':
-                self._enrich_relationship_record(record)
+                if object_type == 'relationship':
+                    self._enrich_relationship_record(record, enrichment_cache)
+        finally:
+            self._current_enrichment_cache = None
 
         return data
 
-    def _enrich_annotation_target(self, record: Dict[str, Any]):
+    def _build_enrichment_cache(self, data: List[Dict[str, Any]], object_type: str,
+                                 meta_obj) -> Dict[str, Any]:
+        """[perf-2026-06-30] 批量预加载 enrichment 所需的目标/层级数据.
+
+        Returns:
+            dict 含 4 个子缓存:
+              - 'target_by_id': {(target_type, target_id): (code, name)}  (annotation 用)
+              - 'bo_with_hierarchy': {bo_id: {id, code, name, sub_domain_name, domain_name}}
+                                     (relationship source/target BO 用, 含 JOIN 层级)
+              - 'parent_by_type_id': {(object_type, id): {id, code, name, ...}}
+                                     (任何含父级字段的对象, _add_hierarchy_fields 用)
+        """
+        cache = {
+            'target_by_id': {},
+            'bo_with_hierarchy': {},
+            'parent_by_type_id': {},
+        }
+        if not data:
+            return cache
+
+        try:
+            from meta.services.management_dimension_engine import RESOURCE_TABLE_MAP
+
+            # === 1. annotation target 收集 ===
+            if object_type == 'annotation':
+                target_ids_by_type = {}
+                for record in data:
+                    ttype = record.get('target_type', '')
+                    tid = record.get('target_id')
+                    if ttype and tid is not None and RESOURCE_TABLE_MAP.get(ttype):
+                        target_ids_by_type.setdefault(ttype, set()).add(tid)
+                # 批量查
+                for ttype, ids in target_ids_by_type.items():
+                    try:
+                        if ttype == 'relationship':
+                            rows = self.data_source.execute(
+                                f"SELECT id, relation_code, relation_desc, source_code, target_code "
+                                f"FROM {RESOURCE_TABLE_MAP[ttype]} WHERE id IN ({','.join('?' * len(ids))})",
+                                list(ids)
+                            ).fetchall()
+                            for row in rows:
+                                code = row[1] or ''
+                                name = row[2] or ' -> '.join(filter(None, [row[3], row[4]]))
+                                cache['target_by_id'][(ttype, row[0])] = (code, name)
+                        else:
+                            rows = self.data_source.execute(
+                                f"SELECT id, code, name FROM {RESOURCE_TABLE_MAP[ttype]} "
+                                f"WHERE id IN ({','.join('?' * len(ids))})",
+                                list(ids)
+                            ).fetchall()
+                            for row in rows:
+                                cache['target_by_id'][(ttype, row[0])] = (row[1] or '', row[2] or '')
+                    except Exception as e:
+                        logger.debug(f"[EnrichmentCache] target 预加载 {ttype} 失败: {e}")
+
+            # === 2. relationship BO (含层级 JOIN) 收集 ===
+            if object_type == 'relationship':
+                bo_ids = set()
+                for record in data:
+                    sid = record.get('source_bo_id')
+                    tid = record.get('target_bo_id')
+                    if sid:
+                        bo_ids.add(sid)
+                    if tid:
+                        bo_ids.add(tid)
+                if bo_ids:
+                    # 动态构建 LEFT JOIN 链 (bo → sm → sd → d)
+                    sql = self._build_hierarchy_join_sql('business_object', list(bo_ids))
+                    if sql:
+                        try:
+                            rows = self.data_source.execute(sql).fetchall()
+                            for row in rows:
+                                # SELECT 顺序: id, code, name, sm_name, sd_name, d_name
+                                cache['bo_with_hierarchy'][row[0]] = {
+                                    'id': row[0],
+                                    'code': row[1] or '',
+                                    'name': row[2] or '',
+                                    'sub_domain_name': row[3] or '',
+                                    'domain_name': row[4] or '',
+                                }
+                        except Exception as e:
+                            logger.debug(f"[EnrichmentCache] BO 预加载失败: {e}")
+
+            # === 3. _add_hierarchy_fields 父级链收集 ===
+            # 收集当前 object_type 所有非根父级 chain
+            from meta.services.config_driven_hierarchy_filter import HierarchyConfigLoader
+            levels = HierarchyConfigLoader.get_levels()
+            object_to_level = {l.get('object'): l for l in levels if l.get('object')}
+            chain = []  # [(parent_object, fk_field), ...]
+            current = object_type
+            while current:
+                lvl = object_to_level.get(current, {})
+                parent_obj = lvl.get('parent_object')
+                if not parent_obj or parent_obj == 'version':
+                    break
+                fk = lvl.get('foreign_key_field')
+                if not fk:
+                    break
+                chain.append((parent_obj, fk))
+                current = parent_obj
+
+            # 收集所有父级 ids (按 parent_object 分组)
+            parent_ids_by_type = {}
+            for record in data:
+                for parent_obj, fk in chain:
+                    pid = record.get(fk)
+                    if pid:
+                        parent_ids_by_type.setdefault(parent_obj, set()).add(pid)
+
+            # 批量查每个 parent_object
+            for parent_obj, ids in parent_ids_by_type.items():
+                if not ids:
+                    continue
+                # 找 parent_obj 的 table_name
+                parent_level = object_to_level.get(parent_obj, {})
+                parent_table = parent_level.get('table_name')
+                if not parent_table:
+                    # fallback: 用 query_service
+                    try:
+                        result = self.query_service.search(SearchRequest(
+                            object_type=parent_obj,
+                            conditions=[QueryCondition(field="id", operator=QueryOperator.IN,
+                                                       values=list(ids))],
+                            page=1,
+                            page_size=len(ids),
+                        ))
+                        for item in result.data or []:
+                            cache['parent_by_type_id'][(parent_obj, item.get('id'))] = item
+                    except Exception as e:
+                        logger.debug(f"[EnrichmentCache] parent (fallback) {parent_obj} 预加载失败: {e}")
+                    continue
+                # 直接 SQL 查
+                try:
+                    sql = f"SELECT id, code, name FROM {parent_table} WHERE id IN ({','.join('?' * len(ids))})"
+                    rows = self.data_source.execute(sql, list(ids)).fetchall()
+                    for row in rows:
+                        cache['parent_by_type_id'][(parent_obj, row[0])] = {
+                            'id': row[0], 'code': row[1] or '', 'name': row[2] or ''
+                        }
+                except Exception as e:
+                    logger.debug(f"[EnrichmentCache] parent {parent_obj} 预加载失败: {e}")
+
+        except Exception as e:
+            logger.warning(f"[EnrichmentCache] 构建缓存失败: {e}")
+
+        logger.info(f"[EnrichmentCache] object_type={object_type}, records={len(data)}, "
+                    f"target_cache={len(cache['target_by_id'])}, "
+                    f"bo_cache={len(cache['bo_with_hierarchy'])}, "
+                    f"parent_cache={len(cache['parent_by_type_id'])}")
+        return cache
+
+    def _build_hierarchy_join_sql(self, object_type: str, ids: list) -> Optional[str]:
+        """[perf-2026-06-30] 构建 BO + 层级链 LEFT JOIN SQL, 一次查所有 BO 及其层级.
+
+        Returns SQL 字符串 或 None (无法构建时)
+
+        注意: meta.core.models.registry 可能未在测试/独立调用中加载, 所以
+        本方法优先从 hierarchies.yaml 读 table_name, 失败时再 fallback 到 registry.
+        """
+        try:
+            from meta.services.config_driven_hierarchy_filter import HierarchyConfigLoader
+            levels = HierarchyConfigLoader.get_levels()
+            object_to_level = {l.get('object'): l for l in levels if l.get('object')}
+            # [FIX 2026-06-30] 优先用 yaml 的 table_name (registry 可能未加载)
+            level = object_to_level.get(object_type, {})
+            table_name = level.get('table_name')
+            if not table_name:
+                meta_obj = registry.get(object_type)
+                if meta_obj:
+                    table_name = meta_obj.table_name
+            if not table_name:
+                return None
+
+            join_parts = []
+            select_parts = ["t0.id", "t0.code", "t0.name"]
+            table_idx = 0
+            current = object_type
+            while current:
+                level = object_to_level.get(current, {})
+                parent_object = level.get('parent_object')
+                if not parent_object or parent_object == 'version':
+                    break
+                parent_level = object_to_level.get(parent_object, {})
+                parent_table = parent_level.get('table_name')
+                fk_field = level.get('foreign_key_field')
+                if not parent_table or not fk_field:
+                    break
+                table_idx += 1
+                parent_alias = "t{0}".format(table_idx)
+                child_alias = "t{0}".format(table_idx - 1)
+                join_parts.append(
+                    "LEFT JOIN {0} {1} ON {2}.{3} = {1}.id".format(
+                        parent_table, parent_alias, child_alias, fk_field
+                    )
+                )
+                name_key = parent_object + '_name'
+                select_parts.append("{0}.name as {1}".format(parent_alias, name_key))
+                current = parent_object
+
+            sql = ("SELECT {0} FROM {1} t0 {2} "
+                   "WHERE t0.id IN ({3})").format(
+                ', '.join(select_parts),
+                table_name,
+                ' '.join(join_parts),
+                ','.join('?' * len(ids))
+            )
+            return sql
+        except Exception:
+            return None
+
+    def _enrich_annotation_target(self, record: Dict[str, Any],
+                                  enrichment_cache: Optional[Dict[str, Any]] = None):
         """[FIX 2026-06-24] 填充 annotation 的 target_code / target_name.
 
         annotation 是多态关联: target_type + target_id 指向 parent 对象.
@@ -2614,11 +2835,24 @@ class ImportExportService:
 
         使用 self.data_source 直接 SQL 查询, 绕过 query_service 的 RBAC 过滤
         (query_service 在 export 上下文可能过滤掉 target 记录, 导致 target_code 全空).
+
+        [perf-2026-06-30] 支持 enrichment_cache 批量预加载, 避免 N+1.
         """
         target_type = record.get('target_type', '')
         target_id = record.get('target_id')
         if not target_type or not target_id:
             return
+
+        # [perf-2026-06-30] 优先从缓存查
+        if enrichment_cache is not None:
+            cached = enrichment_cache.get('target_by_id', {}).get((target_type, target_id))
+            if cached:
+                target_code, target_name = cached
+                if target_code:
+                    record['target_code'] = target_code
+                if target_name:
+                    record['target_name'] = target_name
+                return
 
         try:
             from meta.services.management_dimension_engine import RESOURCE_TABLE_MAP
@@ -4147,10 +4381,13 @@ class ImportExportService:
         except Exception:
             return {}
 
-    def _add_hierarchy_fields(self, record: Dict[str, Any], meta_obj: MetaObject, options: Dict[str, Any]):
+    def _add_hierarchy_fields(self, record: Dict[str, Any], meta_obj: MetaObject, options: Dict[str, Any],
+                              enrichment_cache: Optional[Dict[str, Any]] = None):
         """添加层级字段（编码和名称）- 向上追溯所有父对象
 
         注意：遇到 context_field 时停止追溯，这是上下文边界
+
+        [perf-2026-06-30] 支持 enrichment_cache 批量预加载, 避免 N+1.
         """
         current_record = record
         for current_obj, parent_obj, parent_fk_field_id, is_context_boundary in self._iter_parent_chain(
@@ -4160,7 +4397,14 @@ class ImportExportService:
             parent_id = current_record.get(parent_fk_field_id)
             if not parent_id:
                 break
-            parent_record = self._get_parent_record(parent_obj.id, parent_id)
+            # [perf-2026-06-30] 优先从 enrichment_cache 查父级
+            cached_parent = None
+            if enrichment_cache is not None:
+                cached_parent = enrichment_cache.get('parent_by_type_id', {}).get((parent_obj.id, parent_id))
+                if cached_parent is None and parent_obj.id == 'business_object':
+                    # BO 父级: 在 bo_with_hierarchy 缓存中按 bo_id 查
+                    cached_parent = enrichment_cache.get('bo_with_hierarchy', {}).get(parent_id)
+            parent_record = cached_parent if cached_parent is not None else self._get_parent_record(parent_obj.id, parent_id)
             bk_fields = [f for f in parent_obj.fields
                         if getattr(f.semantics, 'business_key', False)
                         and not getattr(f.semantics, 'virtual', False)]
@@ -4178,17 +4422,20 @@ class ImportExportService:
         """添加层级名称列（保留兼容性）"""
         pass
 
-    def _enrich_relationship_record(self, record: Dict[str, Any]):
+    def _enrich_relationship_record(self, record: Dict[str, Any],
+                                    enrichment_cache: Optional[Dict[str, Any]] = None):
         """填充关系记录的 virtual 字段 - 兼容入口"""
-        self._enrich_association_record('relationship', record)
+        self._enrich_association_record('relationship', record, enrichment_cache)
 
-    def _enrich_association_record(self, object_type: str, record: Dict[str, Any]):
+    def _enrich_association_record(self, object_type: str, record: Dict[str, Any],
+                                    enrichment_cache: Optional[Dict[str, Any]] = None):
         """填充 association 记录的 virtual 字段（配置驱动）
 
         从 hierarchies.yaml 的 association_filter_config 读取 source/target 列名和实体类型，
         动态填充层级名称字段。
-        """
 
+        [perf-2026-06-30] 支持 enrichment_cache 批量预加载, 避免 N+1.
+        """
         from meta.services.config_driven_hierarchy_filter import HierarchyConfigLoader
         filter_config = HierarchyConfigLoader.get_association_filter_config(object_type)
         if not filter_config:
@@ -4214,7 +4461,12 @@ class ImportExportService:
                 record['relation_type_name'] = relation_code
 
         if source_id and source_entity:
-            source_entity_data = self._get_entity_with_hierarchy(source_entity, source_id)
+            # [perf-2026-06-30] 优先从缓存查 BO + 层级
+            source_entity_data = None
+            if enrichment_cache is not None:
+                source_entity_data = enrichment_cache.get('bo_with_hierarchy', {}).get(source_id)
+            if source_entity_data is None:
+                source_entity_data = self._get_entity_with_hierarchy(source_entity, source_id)
             if source_entity_data:
                 record[source_prefix + '_bo_name'] = source_entity_data.get('name', '')
                 record[source_prefix + '_bo_code'] = source_entity_data.get('code', '')
@@ -4224,7 +4476,12 @@ class ImportExportService:
                         record[source_prefix + '_' + key] = value
 
         if target_id and source_entity:
-            target_entity_data = self._get_entity_with_hierarchy(source_entity, target_id)
+            # [perf-2026-06-30] 优先从缓存查 BO + 层级
+            target_entity_data = None
+            if enrichment_cache is not None:
+                target_entity_data = enrichment_cache.get('bo_with_hierarchy', {}).get(target_id)
+            if target_entity_data is None:
+                target_entity_data = self._get_entity_with_hierarchy(source_entity, target_id)
             if target_entity_data:
                 record[target_prefix + '_bo_name'] = target_entity_data.get('name', '')
                 record[target_prefix + '_bo_code'] = target_entity_data.get('code', '')
