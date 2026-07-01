@@ -195,3 +195,7 @@ meta/architecture.db.pre_*
 /scripts/probe_*.py
 /scripts/list_*.py
 
+
+# Verification artifacts (debug scripts, screenshots)
+.verify/
+
