@@ -486,9 +486,9 @@ def insert_data():
             used_codes.add(rel_unique_code)
 
             cursor.execute("""
-                INSERT INTO relationships (version_id, source_bo_id, target_bo_id, source_code, target_code, code, relation_code, relation_type, relation_direction, relation_desc, created_at, created_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (v1_id, source_id, target_id, source_code, target_code, rel_unique_code, rel_code, relation_type, relation_direction, rel_desc, now, 'system'))
+                INSERT INTO relationships (version_id, source_bo_id, target_bo_id, source_code, target_code, code, relation_code, relation_type, relation_desc, created_at, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (v1_id, source_id, target_id, source_code, target_code, rel_unique_code, rel_code, relation_type, rel_desc, now, 'system'))
             rel_count += 1
             dir_str = f", {relation_direction}" if relation_direction else ""
             print(f"创建关系{rel_code}{dir_str}: {source_code} -> {target_code} (code={rel_unique_code})")
