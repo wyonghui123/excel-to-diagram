@@ -38,20 +38,20 @@ export default defineConfig({
             if (id.includes('/echarts/') || id.includes('/zrender/')) {
               return 'vendor-echarts'
             }
-            // Mermaid + 全部子依赖 + misc (mermaid 与 misc 有循环依赖, 合并)
+            // Mermaid + 全部子依赖 (FIX 2026-07-01: 合并到 vendor-pdf 打破循环)
             if (id.includes('/mermaid/') || id.includes('/@mermaid-js/') || id.includes('/d3-') || id.includes('/dagre') || id.includes('/elkjs/') || id.includes('/katex/') || id.includes('/web-worker/') || id.includes('/stylis/') || id.includes('/cytoscape')) {
-              return 'vendor-mermaid'
+              return 'vendor-pdf'
             }
             // XLSX
             if (id.includes('/xlsx/') || id.includes('/codepage/')) {
               return 'vendor-xlsx'
             }
-            // PDF 导出
+            // PDF 导出 (FIX 2026-07-01: 全部进 vendor-pdf 避免循环)
             if (id.includes('/html2canvas/') || id.includes('/jspdf/') || id.includes('/canvg/')) {
               return 'vendor-pdf'
             }
-            // 其他第三方库 (与 mermaid 合并, 避免循环)
-            return 'vendor-mermaid'
+            // 其他第三方库 (FIX 2026-07-01: 改 fallback 到 vendor-pdf 打破循环)
+            return 'vendor-pdf'
           }
         }
       }
@@ -59,7 +59,7 @@ export default defineConfig({
   },
   server: {
     host: true,
-    port: 3004,
+    port: 3006,
     // [FIX 2026-06-12 #13] 根治 MetaListPage toolbar/table "又这样了" 复发
     // 根因: 浏览器缓存 Vite 编译产物 (SCSS 改完后旧 CSS 被缓存)
     // 用户反馈"我刷新后现在又好了" 确认是缓存问题
@@ -82,7 +82,7 @@ export default defineConfig({
     proxy: {
       // [FR-009] 合并所有 /api/* 到统一代理规则 (原来 5 条独立规则, target 相同)
       '/api': {
-        target: 'http://localhost:3010',
+        target: 'http://localhost:3011',
         changeOrigin: true,
         ws: true,
         // [FIX BUG-V029 2026-06-28] 30s→180s
@@ -101,7 +101,7 @@ export default defineConfig({
         }
       },
       '/socket.io': {
-        target: 'http://localhost:3010',
+        target: 'http://localhost:3011',
         changeOrigin: true,
         ws: true,
       }
