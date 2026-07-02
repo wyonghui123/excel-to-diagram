@@ -916,7 +916,18 @@ class ImportExportService:
                 'current_index': 0,
                 'message': '开始导出，共 {0} 种对象类型'.format(total_types)
             })
-        
+
+        # [FIX 2026-07-02] 收集每个 type 的实际记录 id 集合, 供 annotation 子对象查询
+        #   按 target_id 过滤, 避免导出选中范围外的备注 (原 bug: 只过滤 target_type)
+        parent_record_ids_by_type = {}
+
+        # [FIX 2026-07-02] 补全层级 filter: 从 service_module_id 反推 sub_domain_id,
+        #   从 sub_domain_id 反推 domain_id.
+        #   原bug: 用户选了 PUM(属MM子领域) 和 SP(子领域), filter 中 sub_domain_id=[SP]
+        #   不含MM, 导致查 BO 时 sub_domain_id IN (SP) 排除了 PUM(MM) 下的 BO.
+        #   补全后 sub_domain_id=[SP,MM], 确保层级链完整.
+        filters = self._enrich_export_filters(filters)
+
         for i, ot in enumerate(ordered_types):
             obj = registry.get(ot)
             if obj is None:
@@ -936,9 +947,13 @@ class ImportExportService:
                     'current_index': current_index,
                     'message': '正在导出: {0} ({1}/{2})'.format(type_name, current_index, total_types)
                 })
-            
+
             sheet_data = self._query_with_hierarchy(ot, filters, options, sort_by=sort_by, sort_order=sort_order, page=page, page_size=page_size)
-            
+
+            # [FIX 2026-07-02] 收集实际记录 id, 供 annotation 按 target_id 过滤
+            if sheet_data:
+                parent_record_ids_by_type[ot] = {r.get('id') for r in sheet_data if r.get('id') is not None}
+
             ws = wb.create_sheet(title=obj.name)
             
             # [NEW v1.2.3 2026-06-17] 选中对象导出按 'create' 模式处理 (模板可填父对象)
@@ -1091,7 +1106,10 @@ class ImportExportService:
 
                     original_col_idx = col_idx - 2 if include_operation_mode else col_idx - 1
                     # [NEW v1.1 2026-06-11] auto_or_manual_code 差异化底色
-                    auto_cols = (getattr(self, '_auto_or_manual_code_columns', {}) or {}).get(meta_obj.name, [])
+                    # [FIX 2026-07-02] 历史bug修复: 此处之前引用未定义的 meta_obj (来自上一级循环),
+                    #   导致 sheet_data 为空时 + empty_rows_count > 0 时抛出 NameError.
+                    #   实际变量名是 obj (line 656: obj = registry.get(ot)).
+                    auto_cols = (getattr(self, '_auto_or_manual_code_columns', {}) or {}).get(obj.name, [])
                     if original_col_idx in auto_cols:
                         self._apply_classification_fill(cell, 'auto_or_manual_code')
                     elif original_col_idx in parent_key_columns:
@@ -1203,7 +1221,7 @@ class ImportExportService:
                             })
 
                         try:
-                            child_data = self._query_child_object(child_type_name, parent_list, filters)
+                            child_data = self._query_child_object(child_type_name, parent_list, filters, parent_record_ids_by_type)
                             child_meta = registry.get(child_type_name)
                             if child_meta:
                                 self._write_child_sheet(wb, child_type_name, child_meta, child_data or [], sheets_info, options)
@@ -2248,6 +2266,79 @@ class ImportExportService:
                     return False
         return total_rows > 0  # 至少要有 1 行才算 all delete
 
+    def _enrich_export_filters(self, filters: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """[FIX 2026-07-02] 补全层级 filter, 确保层级链完整.
+
+        场景: 用户在树形选择器中同时选了 SP(子领域) 和 PUM(服务模块, 属 MM 子领域).
+        前端 exportFilters 生成的 filter:
+            {domain_id: [MFG], sub_domain_id: [SP], service_module_id: [PUM, ...]}
+        sub_domain_id 只有 SP, 不含 MM(PUM 的父级).
+        导致:
+        - 子领域 sheet 只有 SP, 缺失 MM
+        - 业务对象查询被 sub_domain_id IN (SP) 过滤, 排除了 PUM(MM) 下的 BO
+
+        修复: 从 service_module_id 反推 sub_domain_id, 从 sub_domain_id 反推 domain_id,
+        合并到 filter 中. 补全后 sub_domain_id=[SP, MM], domain_id=[MFG, SCM].
+
+        [FIX 2026-07-02 v2] 修正 key 名: subdomain_id -> sub_domain_id
+        原因: hierarchies.yaml 中 filter_param='sub_domain_id'(有下划线),
+        前端也使用 sub_domain_id. 之前用 subdomain_id(无下划线) 导致
+        resolve_conditions 无法识别, sub_domain_id 未被补全.
+        """
+        if not filters:
+            return filters
+
+        enriched = dict(filters)
+        logger.info(f"[EnrichFilters] 输入 filters: {enriched}")
+
+        try:
+            sm_ids = enriched.get('service_module_id')
+            if sm_ids:
+                ids_list = list(sm_ids) if isinstance(sm_ids, (list, tuple, set)) else [sm_ids]
+                result = self.query_service.search(SearchRequest(
+                    object_type='service_module',
+                    conditions=[QueryCondition(field='id', operator=QueryOperator.IN, values=ids_list)],
+                    page=1, page_size=len(ids_list),
+                ))
+                sd_ids_from_sm = set()
+                for r in (result.data or []):
+                    sd_id = r.get('sub_domain_id')
+                    if sd_id is not None:
+                        sd_ids_from_sm.add(sd_id)
+
+                logger.info(f"[EnrichFilters] service_module -> sub_domain_id: {sd_ids_from_sm}")
+                if sd_ids_from_sm:
+                    existing_sd = enriched.get('sub_domain_id')
+                    existing_set = set(existing_sd) if existing_sd else set()
+                    merged = existing_set | sd_ids_from_sm
+                    enriched['sub_domain_id'] = list(merged)
+
+            sd_ids = enriched.get('sub_domain_id')
+            if sd_ids:
+                ids_list = list(sd_ids) if isinstance(sd_ids, (list, tuple, set)) else [sd_ids]
+                result = self.query_service.search(SearchRequest(
+                    object_type='sub_domain',
+                    conditions=[QueryCondition(field='id', operator=QueryOperator.IN, values=ids_list)],
+                    page=1, page_size=len(ids_list),
+                ))
+                d_ids_from_sd = set()
+                for r in (result.data or []):
+                    d_id = r.get('domain_id')
+                    if d_id is not None:
+                        d_ids_from_sd.add(d_id)
+
+                logger.info(f"[EnrichFilters] sub_domain -> domain_id: {d_ids_from_sd}")
+                if d_ids_from_sd:
+                    existing_d = enriched.get('domain_id')
+                    existing_set = set(existing_d) if existing_d else set()
+                    merged = existing_set | d_ids_from_sd
+                    enriched['domain_id'] = list(merged)
+        except Exception as e:
+            logger.warning(f"[EnrichFilters] 补全层级 filter 失败: {e}")
+
+        logger.info(f"[EnrichFilters] 输出 filters: {enriched}")
+        return enriched
+
     def _query_with_hierarchy(self, object_type: str, filters: Optional[Dict[str, Any]],
                               options: Optional[Dict[str, Any]], sort_by: str = None, 
                               sort_order: str = 'asc',
@@ -2273,6 +2364,31 @@ class ImportExportService:
                 key: self._normalize_scalar_id(value) if key in ('version_id', 'product_id') else value
                 for key, value in filters.items()
             }
+            # [FIX 2026-07-02 v3] 命名空间隔离: 多 sheet 导出共用一个 filters,
+            #   实体 sheet 不能用同一个 id__in (关系 sheet 的 id__in 是关系 ID).
+            #   前端 exportFilters 现在输出:
+            #     - ${objectType}_id__in: 实体 ID (各类型用自己的 key, 不覆盖)
+            #     - relation_id__in: 关系 ID (只在 association sheet 识别)
+            #     - id__in: 兼容旧版, 但仅用于当前 sheet 正好匹配 object_type 时
+            #   把当前 sheet 的 entity_id__in 映射回 id__in 让 resolve_conditions 识别.
+            #
+            #   [FIX 2026-07-02 v3] 同时处理 FK 回退字段的命名空间:
+            #     前端 buildHierarchyFilterParams 输出 FK 字段如 service_module_id__in (通用 key),
+            #     这对所有 sheet 都生效. 但同一 filter 里的 service_module_id__in 应该是
+            #     "service_module 这个类型的 id 列表" (来自 scope), 而不是 "当前 sheet 的 service_module_id FK 列表".
+            #     多 sheet 共用同一个 FK 字段语义是 OK 的, 但不能和实体的 id__in 混淆.
+            if not self._is_association_type(object_type):
+                # 实体 sheet: 把当前 type 对应的 entity_id__in 映射回 id__in
+                entity_id_key = f'{object_type}_id__in'
+                if entity_id_key in normalized_filters:
+                    normalized_filters['id__in'] = normalized_filters.pop(entity_id_key)
+            else:
+                # association sheet: 移除 entity_id__in (与关系 sheet 无关), 只保留关系过滤
+                # 关系 sheet 不需要 entity_id__in (这是其他 sheet 的精确 ID)
+                entity_id_keys_to_remove = [k for k in normalized_filters if k.endswith('_id__in') and k != 'relation_id__in']
+                for k in entity_id_keys_to_remove:
+                    normalized_filters.pop(k, None)
+
             args_dict = {}
             for key, value in normalized_filters.items():
                 if isinstance(value, list):
@@ -2281,10 +2397,16 @@ class ImportExportService:
                     args_dict[key] = [str(value)] if value is not None else []
 
             conditions = self.hierarchy_filter.resolve_conditions(object_type, args_dict)
+            print(f"[Export DEBUG] {object_type} conditions from filters {normalized_filters}: {conditions}")
 
         if self._is_association_type(object_type) and filters:
-            return self._query_association_with_hierarchy_filters(object_type, normalized_filters)
-        
+            print(f"[Export DEBUG] association_type detected, calling _query_association_with_hierarchy_filters for {object_type}")
+            result = self._query_association_with_hierarchy_filters(object_type, normalized_filters)
+            print(f"[Export DEBUG] _query_association_with_hierarchy_filters returned {len(result)} records")
+            return result
+
+        print(f"[Export DEBUG] NOT association_type: {object_type}, is_association={self._is_association_type(object_type)}, has_filters={bool(filters)}")
+
         MAX_EXPORT_LIMIT = self._get_export_limit(object_type)
 
         if page is not None and page_size is not None:
@@ -2348,6 +2470,30 @@ class ImportExportService:
         if not isinstance(relation_codes, list):
             relation_codes = [relation_codes] if relation_codes else []
 
+        # [FIX 2026-07-02] 优先支持 id__in 精确ID过滤 (与 UI 列表对齐)
+        #   背景: UI 表格通过 scopeSource.selectedRelationIds 拿到精确关系ID列表,
+        #   通过 id__in=<逗号串或数组> 传给后端; 但 _query_association_with_hierarchy_filters
+        #   之前只识别 level_ids (子领域/服务模块/业务对象), 忽略 id__in, 导致 UI 显示 168 条
+        #   而导出返回 216 条 (误用 relation_codes 反查匹配更多记录).
+        #   修复: 在最前面处理 id__in, 直接按精确ID查询, 跳过 level 层级反查.
+        # [FIX 2026-07-02 v2] 兼容 relation_id__in: 多 sheet 导出场景下,
+        #   实体 sheet 的 id__in = 实体 ID, 关系 sheet 的 id__in = 关系 ID,
+        #   两个语义不同但共用 filter 字段会互相覆盖. 前端把关系 ID 写到 relation_id__in
+        #   避免污染实体 sheet. 这里同时识别 id__in 和 relation_id__in (兼容旧版).
+        id_filter_raw = filters.get('relation_id__in') or filters.get('id__in') or filters.get('id')
+        if id_filter_raw:
+            # 支持 '1,2,3' (逗号字符串) 或 [1,2,3] (数组) 两种格式
+            if isinstance(id_filter_raw, str):
+                id_list = [int(x) for x in id_filter_raw.split(',') if x.strip().lstrip('-').isdigit()]
+            elif isinstance(id_filter_raw, list):
+                id_list = [self._normalize_scalar_id(v) for v in id_filter_raw if self._normalize_scalar_id(v) is not None]
+            else:
+                id_list = [id_filter_raw]
+            if id_list:
+                return self._query_association_by_id(
+                    object_type, table_name, version_id, id_list, relation_codes
+                )
+
         filter_levels = filter_config.get('hierarchy_filter_levels', [])
 
         for level_config in filter_levels:
@@ -2374,6 +2520,65 @@ class ImportExportService:
             return self._query_association_by_version(object_type, table_name, version_id, relation_codes)
 
         return []
+
+    def _query_association_by_id(self, object_type: str, table_name: str,
+                                   version_id: Optional[int], id_list: List[int],
+                                   relation_codes: List[str]) -> List[Dict[str, Any]]:
+        """[FIX 2026-07-02] 按精确关系ID列表查询 association (支持 UI 表格 168 vs 导出对齐)
+
+        与 _query_association_by_level 区别: 直接按 r.id IN (...) 过滤, 不经过子领域/服务模块反查,
+        保证 UI 表格与导出共用同一份"精确ID"语义, 避免层级反查引入额外记录.
+        """
+        from meta.core.enrichment_engine import enrich_records
+
+        if not id_list:
+            return []
+
+        # [FIX FR-001] 软删除过滤
+        soft_delete_filter = ""
+        meta_obj = registry.get(object_type)
+        if meta_obj and any(f.id == 'is_deleted' for f in meta_obj.fields):
+            soft_delete_filter = " AND (r.is_deleted IS NULL OR r.is_deleted = 0)"
+
+        # [FIX FR-002] 数据权限过滤
+        perm_filter_sql, perm_params = self._build_permission_filter(object_type, 'r')
+
+        # 收集所有 WHERE 子句和参数, 在最后拼接, 避免 AND 顺序问题
+        where_clauses = [f"r.id IN ({','.join(['?'] * len(id_list))})"]
+        params = list(id_list)
+
+        if version_id is not None:
+            where_clauses.append("r.version_id = ?")
+            params.append(version_id)
+
+        if relation_codes:
+            code_placeholders = ','.join(['?'] * len(relation_codes))
+            where_clauses.append(f"r.relation_code IN ({code_placeholders})")
+            params.extend(relation_codes)
+
+        # perm_filter_sql 已包含 WHERE 关键字, 需拆出条件
+        perm_where = perm_filter_sql.replace('WHERE', '').strip() if perm_filter_sql else ''
+        if perm_where:
+            where_clauses.append(f"({perm_where})")
+        params.extend(perm_params)
+
+        sql = f"""
+            SELECT r.* FROM {table_name} r
+            WHERE {' AND '.join(where_clauses)}
+            {soft_delete_filter}
+            ORDER BY r.id ASC
+        """
+
+        cursor = self.data_source.execute(sql, tuple(params))
+        columns = [desc[0] for desc in cursor.description]
+        data = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+        # [FIX 2026-06-14 BMRD] direct SQL 路径 - 先计算 hierarchy_scope
+        data = self._ensure_hierarchy_scope_computed(object_type, data)
+
+        data = enrich_records(object_type, data)
+
+        return data
 
     def _query_association_by_level(self, object_type: str, table_name: str,
                                       version_id: int, level_ids: List[int],
@@ -2595,8 +2800,14 @@ class ImportExportService:
         enrichment_cache = self._build_enrichment_cache(data, object_type, meta_obj)
         # [perf-2026-06-30] 设置实例变量供 _add_hierarchy_fields / _get_parent_record 使用
         self._current_enrichment_cache = enrichment_cache
+        # [diag-2026-07-02] 统计 fallback 查询次数 (缓存未命中走 page_size=1)
+        self._parent_fallback_count = 0
+        import time as _time
+        _t0 = _time.time()
         try:
-            for record in data:
+            for i, record in enumerate(data):
+                if i > 0 and i % 500 == 0:
+                    logger.info(f"[HierProgress] {object_type} {i}/{len(data)} elapsed={_time.time()-_t0:.1f}s fallback={self._parent_fallback_count}")
                 if options and options.get("include_hierarchy_path", True):
                     record["层级路径"] = self._build_hierarchy_path(record, meta_obj)
 
@@ -2611,9 +2822,37 @@ class ImportExportService:
                 if object_type == 'relationship':
                     self._enrich_relationship_record(record, enrichment_cache)
         finally:
+            logger.info(f"[HierProgress] {object_type} DONE total={len(data)} elapsed={_time.time()-_t0:.1f}s fallback={self._parent_fallback_count}")
             self._current_enrichment_cache = None
 
         return data
+
+    def _get_table_columns_set(self, table_name: str) -> set:
+        """[perf-2026-07-02] 用 PRAGMA table_info 获取表的实际列名集合.
+
+        versions 表没有 code 列 (业务键是 name), 其他层级表都有.
+        用于链式预加载构建动态 SELECT, 避免硬编码 'id, code, name' 导致的
+        "no such column: code" 错误.
+
+        结果缓存到 self._table_columns_cache, 整个 export 流程只查一次 PRAGMA.
+        """
+        if not hasattr(self, '_table_columns_cache'):
+            self._table_columns_cache = {}
+        if table_name in self._table_columns_cache:
+            return self._table_columns_cache[table_name]
+        cols = set()
+        try:
+            rows = self.data_source.execute(
+                f"PRAGMA table_info({table_name})"
+            ).fetchall()
+            for row in rows:
+                # row: (cid, name, type, notnull, dflt_value, pk)
+                if row and row[1]:
+                    cols.add(row[1])
+        except Exception as e:
+            logger.debug(f"[TableCols] PRAGMA table_info({table_name}) 失败: {e}")
+        self._table_columns_cache[table_name] = cols
+        return cols
 
     def _build_enrichment_cache(self, data: List[Dict[str, Any]], object_type: str,
                                  meta_obj) -> Dict[str, Any]:
@@ -2698,8 +2937,13 @@ class ImportExportService:
                         except Exception as e:
                             logger.debug(f"[EnrichmentCache] BO 预加载失败: {e}")
 
-            # === 3. _add_hierarchy_fields 父级链收集 ===
-            # 收集当前 object_type 所有非根父级 chain
+            # === 3. _add_hierarchy_fields / _build_hierarchy_path 父级链收集 ===
+            # [perf-2026-07-02] 链式批量预加载: 逐层向上收集 id 并批量查询,
+            #   之前只在 parent_obj == 'version' 时 break, 且只从 data 收集 id,
+            #   导致 BO 记录里只有 service_module_id, 上面的 sub_domain/domain/version/product
+            #   全部走 page_size=1 查询 (3230 BO × 5 层 = 16150 次).
+            # 现在改成链式: 先批量查 service_module (拿到 sub_domain_id), 再批量查 sub_domain,
+            #   逐层向上, 每层 1 次批量 IN 查询, 5 层共 5 次查询.
             from meta.services.config_driven_hierarchy_filter import HierarchyConfigLoader
             levels = HierarchyConfigLoader.get_levels()
             object_to_level = {l.get('object'): l for l in levels if l.get('object')}
@@ -2708,7 +2952,7 @@ class ImportExportService:
             while current:
                 lvl = object_to_level.get(current, {})
                 parent_obj = lvl.get('parent_object')
-                if not parent_obj or parent_obj == 'version':
+                if not parent_obj:
                     break
                 fk = lvl.get('foreign_key_field')
                 if not fk:
@@ -2716,23 +2960,28 @@ class ImportExportService:
                 chain.append((parent_obj, fk))
                 current = parent_obj
 
-            # 收集所有父级 ids (按 parent_object 分组)
-            parent_ids_by_type = {}
-            for record in data:
-                for parent_obj, fk in chain:
-                    pid = record.get(fk)
+            # 链式批量预加载: 逐层向上
+            current_records = data
+            logger.debug(f"[EnrichmentCache] object_type={object_type}, chain={chain}, data_keys={list(data[0].keys())[:15] if data else []}")
+            for parent_obj, fk_field in chain:
+                # 从当前层记录收集 parent_obj 的 id
+                ids = set()
+                for rec in current_records:
+                    pid = rec.get(fk_field)
                     if pid:
-                        parent_ids_by_type.setdefault(parent_obj, set()).add(pid)
-
-            # 批量查每个 parent_object
-            for parent_obj, ids in parent_ids_by_type.items():
+                        ids.add(pid)
+                logger.debug(f"[EnrichmentCache] chain step: parent_obj={parent_obj}, fk_field={fk_field}, ids_count={len(ids)}, current_records={len(current_records)}")
                 if not ids:
-                    continue
-                # 找 parent_obj 的 table_name
+                    break
+
                 parent_level = object_to_level.get(parent_obj, {})
                 parent_table = parent_level.get('table_name')
+                # 这一层自身的 parent_fk (用于下一层上溯), 如 service_module 的 sub_domain_id
+                parent_fk_field = parent_level.get('foreign_key_field')
+
+                next_records = []
                 if not parent_table:
-                    # fallback: 用 query_service
+                    # fallback: query_service
                     try:
                         result = self.query_service.search(SearchRequest(
                             object_type=parent_obj,
@@ -2741,21 +2990,49 @@ class ImportExportService:
                             page=1,
                             page_size=len(ids),
                         ))
-                        for item in result.data or []:
+                        next_records = result.data or []
+                        for item in next_records:
                             cache['parent_by_type_id'][(parent_obj, item.get('id'))] = item
                     except Exception as e:
                         logger.debug(f"[EnrichmentCache] parent (fallback) {parent_obj} 预加载失败: {e}")
-                    continue
-                # 直接 SQL 查
-                try:
-                    sql = f"SELECT id, code, name FROM {parent_table} WHERE id IN ({','.join('?' * len(ids))})"
-                    rows = self.data_source.execute(sql, list(ids)).fetchall()
-                    for row in rows:
-                        cache['parent_by_type_id'][(parent_obj, row[0])] = {
-                            'id': row[0], 'code': row[1] or '', 'name': row[2] or ''
-                        }
-                except Exception as e:
-                    logger.debug(f"[EnrichmentCache] parent {parent_obj} 预加载失败: {e}")
+                        break
+                else:
+                    # [perf-2026-07-02] 动态构建 select_cols 适配实际表 schema.
+                    #   versions 表没有 code 列 (业务键是 name), 硬编码 'id, code, name'
+                    #   会触发 "no such column: code", 导致整层 fallback 到 page_size=1
+                    #   查询 (3230 BO × 2 层 = 6460+ 次查询).
+                    cols = self._get_table_columns_set(parent_table)
+                    select_cols = ['id']
+                    if 'code' in cols:
+                        select_cols.append('code')
+                    if 'name' in cols:
+                        select_cols.append('name')
+                    if parent_fk_field and parent_fk_field in cols and parent_fk_field not in select_cols:
+                        select_cols.append(parent_fk_field)
+                    col_index = {c: i for i, c in enumerate(select_cols)}
+
+                    try:
+                        sql = (
+                            f"SELECT {', '.join(select_cols)} FROM {parent_table} "
+                            f"WHERE id IN ({','.join('?' * len(ids))})"
+                        )
+                        rows = self.data_source.execute(sql, list(ids)).fetchall()
+                        for row in rows:
+                            rec = {'id': row[col_index['id']]}
+                            if 'code' in col_index:
+                                rec['code'] = row[col_index['code']] or ''
+                            if 'name' in col_index:
+                                rec['name'] = row[col_index['name']] or ''
+                            if parent_fk_field and parent_fk_field in col_index:
+                                rec[parent_fk_field] = row[col_index[parent_fk_field]]
+                            cache['parent_by_type_id'][(parent_obj, rec['id'])] = rec
+                            next_records.append(rec)
+                    except Exception as e:
+                        logger.warning(f"[EnrichmentCache] parent {parent_obj} 预加载失败: {e}, sql={sql if 'sql' in dir() else 'N/A'}")
+                        break
+
+                # 下一层的 current_records 是这一层返回的记录
+                current_records = next_records
 
         except Exception as e:
             logger.warning(f"[EnrichmentCache] 构建缓存失败: {e}")
@@ -3043,7 +3320,8 @@ class ImportExportService:
         return child_parent_map
 
     def _query_child_object(self, child_type: str, parent_types: List[str],
-                            filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+                            filters: Optional[Dict[str, Any]] = None,
+                            parent_record_ids_by_type: Optional[Dict[str, set]] = None) -> List[Dict[str, Any]]:
         """通用子对象查询
 
         自动判断关联类型：
@@ -3054,6 +3332,8 @@ class ImportExportService:
             child_type: 子对象类型 ID（如 'annotation', 'enum_value', 'version'）
             parent_types: 父对象类型 ID 列表
             filters: 导出过滤条件
+            parent_record_ids_by_type: 各父对象类型实际查询到的记录 id 集合,
+                用于 annotation 按 target_id 过滤 (避免导出选中范围外的备注)
 
         Returns:
             List[Dict]: 增强后的子对象数据列表
@@ -3065,7 +3345,7 @@ class ImportExportService:
             return []
 
         if child_type == 'annotation':
-            return self._query_annotations_impl(parent_types, filters)
+            return self._query_annotations_impl(parent_types, filters, parent_record_ids_by_type)
 
         parent_object = getattr(child_meta, 'parent_object', None)
         if parent_object and parent_object in parent_types:
@@ -3335,6 +3615,29 @@ class ImportExportService:
             else:
                 cell.comment = _make_header_comment("父对象名称，只读")
 
+        # [perf-2026-07-02] 预计算 enum_map, 避免 28318 行 × N 字段重复调 get_field/value_help
+        field_enum_maps = {}
+        for f in export_fields:
+            enum_map = None
+            if f.enum_values:
+                enum_map = {ev.get('value'): ev.get('label', ev.get('value'))
+                            for ev in f.enum_values}
+            if not enum_map:
+                enum_map = self._get_enum_value_map_from_value_help(f)
+            if enum_map:
+                field_enum_maps[f.id] = enum_map
+
+        # [perf-2026-07-02] 列宽追踪: 在数据写入时记录 max_length, 避免二次遍历 28318 行
+        col_max_lengths = {}
+        for col_idx, f in enumerate(export_fields):
+            actual_col = col_idx + 1 + col_offset
+            col_max_lengths[actual_col] = len(f.name or f.id)
+        if include_operation_mode:
+            col_max_lengths[1] = len("操作模式")
+        for pfk_idx, col_def in enumerate(parent_fk_columns):
+            actual_col = len(export_fields) + 1 + pfk_idx + col_offset
+            col_max_lengths[actual_col] = len(col_def.get('header_name', ''))
+
         for row_idx, record in enumerate(data, 2):
             if include_operation_mode:
                 cell = ws.cell(row=row_idx, column=1, value="update - 更新")
@@ -3343,37 +3646,34 @@ class ImportExportService:
                 # 保留 border 以维持表格视觉一致性
                 cell.border = ds.THIN_BORDER
                 cell.alignment = Alignment(horizontal="center")
-                operation_dv.add(cell)
+                # [perf-2026-07-02] 延迟 DV.add 到批量范围添加
 
             for col_idx, field_id in enumerate(field_ids):
                 actual_col = col_idx + 1 + col_offset
                 value = record.get(field_id, "")
 
-                # Resolve enum label for display
-                # [FIX 2026-06-11] 修复 child sheet enum 解析：覆盖 value_help → DB 路径
-                # 原逻辑只检查静态 enum_values，导致仅有 value_help 的字段
-                # (annotation.target_type/category, relationship.relation_type/direction)
-                # 在 child sheet 中只显示原始 key
-                field_obj = child_meta.get_field(field_id)
-                if field_obj and value not in (None, ""):
-                    enum_map = None
-                    if field_obj.enum_values:
-                        enum_map = {ev.get('value'): ev.get('label', ev.get('value'))
-                                    for ev in field_obj.enum_values}
-                    if not enum_map:
-                        enum_map = self._get_enum_value_map_from_value_help(field_obj)
-                    if enum_map and value in enum_map:
+                # [perf-2026-07-02] 用预计算 enum_map 替代每行调 get_field/value_help
+                # 原 28318 行 × 每字段 get_field() + _get_enum_value_map_from_value_help() = ~170k 次调用
+                if field_id in field_enum_maps and value not in (None, ""):
+                    enum_map = field_enum_maps[field_id]
+                    if value in enum_map:
                         label = enum_map[value]
                         if label != value:
                             value = f"{value} - {label}"
 
-                cell = ws.cell(row=row_idx, column=actual_col, value=_safe_cell_value(value))
+                safe_val = _safe_cell_value(value)
+                cell = ws.cell(row=row_idx, column=actual_col, value=safe_val)
                 cell.border = ds.THIN_BORDER
 
                 classification = field_classifications[field_id]
                 self._apply_classification_fill(cell, classification)
-                if actual_col in enum_validations:
-                    enum_validations[actual_col].add(cell)
+                # [perf-2026-07-02] 延迟 DV.add 到批量范围添加
+
+                # 追踪列宽
+                if safe_val is not None:
+                    val_len = len(str(safe_val))
+                    if val_len > col_max_lengths.get(actual_col, 0):
+                        col_max_lengths[actual_col] = val_len
 
             # [FIX 2026-06-08] 填充 parent FK 列（SSOT）
             for pfk_idx, col_def in enumerate(parent_fk_columns):
@@ -3382,13 +3682,18 @@ class ImportExportService:
                 parent_id = record.get(parent_fk_field_id)
                 value_map = parent_fk_value_maps.get(pfk_idx, {})
                 value = value_map.get(parent_id, "")
-                cell = ws.cell(row=row_idx, column=actual_col, value=_safe_cell_value(value))
+                safe_val = _safe_cell_value(value)
+                cell = ws.cell(row=row_idx, column=actual_col, value=safe_val)
                 cell.border = ds.THIN_BORDER
                 # 与主导出保持一致：parent_key 用 BUSINESS_KEY_FILL（浅绿色），readonly 用 READONLY_FILL（灰色）
                 if col_def['classification'] == 'parent_key':
                     cell.fill = ds.BUSINESS_KEY_FILL
                 else:
                     cell.fill = ds.READONLY_FILL
+                if safe_val is not None:
+                    val_len = len(str(safe_val))
+                    if val_len > col_max_lengths.get(actual_col, 0):
+                        col_max_lengths[actual_col] = val_len
 
         # [FIX] 有数据时不追加新增行，无数据时添加空白新增行 (v3.18)
         if len(data) > 0:
@@ -3407,7 +3712,6 @@ class ImportExportService:
                 # 保留 border 以维持表格视觉一致性
                 cell.border = ds.THIN_BORDER
                 cell.alignment = Alignment(horizontal="center")
-                operation_dv.add(cell)
 
                 for col_idx, field_id in enumerate(field_ids):
                     actual_col = col_idx + 1 + col_offset
@@ -3419,21 +3723,32 @@ class ImportExportService:
                     if classification == 'parent_key':
                         # [FIX 2026-06-24] 子 sheet 数据 cell comment 也使用 PARENT_FK_COMMENT
                         cell.comment = _make_header_comment(PARENT_FK_COMMENT, author="System")
-                    if actual_col in enum_validations:
-                        enum_validations[actual_col].add(cell)
 
-        total_rows_in_sheet = 2 + len(data) + empty_rows_count
+        # [perf-2026-07-02] 批量 DataValidation 范围添加
+        # 原代码每行每字段调 dv.add(cell), 28318 行 × (2 enum 列 + 1 操作模式) = 84954 次 add,
+        # openpyxl 内部 sqref 字符串拼接是 O(N²), 导出卡死数分钟.
+        # 改为一次范围添加 "A2:A28319", O(1) 操作.
+        last_data_row = 1 + len(data) + empty_rows_count
+        if last_data_row >= 2:
+            if include_operation_mode:
+                op_col_letter = get_column_letter(1)
+                operation_dv.add(f"{op_col_letter}2:{op_col_letter}{last_data_row}")
+            for actual_col, dv in enum_validations.items():
+                col_letter = get_column_letter(actual_col)
+                dv.add(f"{col_letter}2:{col_letter}{last_data_row}")
+
+        # [perf-2026-07-02] 用写入时追踪的 col_max_lengths 替代二次遍历
+        # 原 9 列 × 28318 行 = 254,862 次 ws.cell().value 读取, 现在零次额外读取
         for col_idx, f in enumerate(export_fields):
             actual_col = col_idx + 1 + col_offset
             col_letter = get_column_letter(actual_col)
-            max_length = len(f.name or f.id)
-            for row in range(2, total_rows_in_sheet):
-                try:
-                    cell_val = ws.cell(row=row, column=actual_col).value
-                    if cell_val is not None:
-                        max_length = max(max_length, len(str(cell_val)))
-                except Exception:
-                    pass
+            max_length = col_max_lengths.get(actual_col, len(f.name or f.id))
+            adjusted_width = min(max(max_length + 2, 8), 50)
+            ws.column_dimensions[col_letter].width = adjusted_width
+        for pfk_idx, col_def in enumerate(parent_fk_columns):
+            actual_col = len(export_fields) + 1 + pfk_idx + col_offset
+            col_letter = get_column_letter(actual_col)
+            max_length = col_max_lengths.get(actual_col, len(col_def.get('header_name', '')))
             adjusted_width = min(max(max_length + 2, 8), 50)
             ws.column_dimensions[col_letter].width = adjusted_width
 
@@ -4240,8 +4555,15 @@ class ImportExportService:
         return ' OR '.join(all_segments)
 
     def _query_annotations_impl(self, parent_types: List[str],
-                                 filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-        """查询备注信息（内部实现，供 _query_child_object 调用）"""
+                                 filters: Optional[Dict[str, Any]] = None,
+                                 parent_record_ids_by_type: Optional[Dict[str, set]] = None) -> List[Dict[str, Any]]:
+        """查询备注信息（内部实现，供 _query_child_object 调用）
+
+        [FIX 2026-07-02] 按 target_id 过滤: 当 parent_record_ids_by_type 提供时,
+            按 target_type 分组查询, 每组用 target_id IN (...) 限定到选中范围的
+            实际父对象 id. 避免导出选中范围外的备注.
+            无 parent_record_ids_by_type 时回退到原行为 (仅按 target_type 过滤).
+        """
         from meta.core.models import registry
         from collections import defaultdict
 
@@ -4255,16 +4577,37 @@ class ImportExportService:
         type_labels = self._build_type_labels()
 
         try:
-            conditions = [QueryCondition(field="target_type", operator=QueryOperator.IN, values=parent_types)]
-
-            search_request = SearchRequest(
-                object_type="annotation",
-                conditions=conditions,
-                page=1,
-                page_size=100000,
-            )
-            result = self.query_service.search(search_request)
-            annotations = result.data or []
+            # [FIX 2026-07-02] 按 target_type 分组查询, 每组用 target_id IN (...) 过滤
+            #   原 bug: 只用 target_type IN parent_types, 导致导出全部 annotation
+            annotations = []
+            if parent_record_ids_by_type:
+                for ttype in parent_types:
+                    ids = parent_record_ids_by_type.get(ttype)
+                    if not ids:
+                        continue
+                    ids_list = list(ids)
+                    search_request = SearchRequest(
+                        object_type="annotation",
+                        conditions=[
+                            QueryCondition(field="target_type", operator=QueryOperator.EQ, value=ttype),
+                            QueryCondition(field="target_id", operator=QueryOperator.IN, values=ids_list),
+                        ],
+                        page=1,
+                        page_size=len(ids_list) * 10,
+                    )
+                    result = self.query_service.search(search_request)
+                    if result.data:
+                        annotations.extend(result.data)
+            else:
+                conditions = [QueryCondition(field="target_type", operator=QueryOperator.IN, values=parent_types)]
+                search_request = SearchRequest(
+                    object_type="annotation",
+                    conditions=conditions,
+                    page=1,
+                    page_size=100000,
+                )
+                result = self.query_service.search(search_request)
+                annotations = result.data or []
 
             # [perf-2026-06-30] 批量查询 target 对象: 按 target_type 分组收集 target_id,
             #   一次 IN 查询替代 N 次单条查询 (18887 annotation → 7 次批量查询 vs 18887 次)
@@ -4301,8 +4644,30 @@ class ImportExportService:
                         if item_id is None:
                             continue
                         if ttype == "relationship":
-                            code = item.get("relation_code", "")
-                            name = item.get("relation_desc", "") or " -> ".join(filter(None, [item.get("source_code", ""), item.get("target_code", "")]))
+                            # [FIX 2026-07-02 v2] 关系编码重写:
+                            #   code 字段是必有 (business_key=true, key_template 生成:
+                            #     pattern: '{source_code}-{target_code}-{SEQ:2}'
+                            #     separator: '-'
+                            #   关系 record 上同时存在:
+                            #     - code            (必有, key_template 生成, 例: ORDER-USER-01)
+                            #     - relation_code   (历史字段 default='', 与新字段名不同)
+                            #
+                            #   之前主路径用 relation_code (经常空), fallback 用 " -> " 拼 source→target,
+                            #   导致导出 sheet 出现 "XXX -> YYY" 这种不正确编码.
+                            #   改为: 直接读 'code' (主路径), 永远不会是 ' -> '.
+                            #
+                            #   relation_code 是历史字段, 这里不再 fallback 到它 (避免误导).
+                            #   如果 code 真为空 (理论上不可能, 因为 bk=true), 降级用 source-target 拼接 (separator='-').
+                            code = item.get("code", "")
+                            if not code:
+                                src = item.get("source_code", "") or ""
+                                tgt = item.get("target_code", "") or ""
+                                if src and tgt:
+                                    code = f"{src}-{tgt}"
+                                elif src or tgt:
+                                    code = src or tgt
+                            # name 也用 '-' 与 key_template separator 一致
+                            name = item.get("relation_desc", "") or " - ".join(filter(None, [item.get("source_code", ""), item.get("target_code", "")]))
                         elif bk_fields:
                             code = item.get(bk_fields[0].id, "")
                             name = item.get(name_field.id, "") if name_field else ""
@@ -4360,15 +4725,31 @@ class ImportExportService:
         except Exception:
             return []
 
-    def _query_annotations(self, object_types: List[str], filters: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _query_annotations(self, object_types: List[str], filters: Optional[Dict[str, Any]],
+                           parent_record_ids_by_type: Optional[Dict[str, set]] = None) -> List[Dict[str, Any]]:
         """查询备注信息（已废弃，请使用 _query_child_object）
 
         保留此方法用于向后兼容。
         """
-        return self._query_annotations_impl(object_types, filters)
+        return self._query_annotations_impl(object_types, filters, parent_record_ids_by_type)
 
     def _get_parent_record(self, object_type: str, record_id: int) -> Dict[str, Any]:
-        """获取父记录"""
+        """获取父记录
+
+        [perf-2026-07-02] 优先从 self._current_enrichment_cache 取, 命中直接返回,
+        避免走 query_service.search 的 page_size=1 查询.
+        之前 _build_hierarchy_path 在每条记录上走 5 层链,
+        3230 BO × 5 层 = 16150 次 page_size=1 查询, 导出卡死 15+ 分钟.
+        """
+        if getattr(self, '_current_enrichment_cache', None) is not None:
+            cached = self._current_enrichment_cache.get('parent_by_type_id', {}).get((object_type, record_id))
+            if cached is not None:
+                return cached
+            # [diag-2026-07-02] 缓存未命中, 走 fallback
+            if hasattr(self, '_parent_fallback_count'):
+                self._parent_fallback_count += 1
+                if self._parent_fallback_count <= 5:
+                    logger.warning(f"[ParentFallback] #{self._parent_fallback_count} object_type={object_type} id={record_id} not in cache")
         try:
             search_request = SearchRequest(
                 object_type=object_type,

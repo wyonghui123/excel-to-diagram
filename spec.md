@@ -124,6 +124,8 @@ forbidden_files:
   - meta/server.py
   - vite.config.js
   - stats.html
+  - waitress_server.py
+  - src/composables/useMultiObjectPage.js
 ```
 
 ---

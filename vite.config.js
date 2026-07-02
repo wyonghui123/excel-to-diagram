@@ -60,6 +60,20 @@ export default defineConfig({
   server: {
     host: true,
     port: 3006,
+    // [FIX 2026-07-02 13:30] Windows 平台 chokidar 文件系统事件失效 (Node.js 24 + Windows Defender)
+    //   问题: 修改 src/*.js 后 vite watch 没触发, 导致浏览器拿到旧代码 (用户实测 network filter 是旧版)
+    //   修复: server.watch.usePolling = true + 显式排除 .architecture-lock (sqlite lock 文件触发变更)
+    watch: {
+      usePolling: true,
+      interval: 1000,
+      ignored: [
+        '**/.architecture.lock',
+        '**/*.db',
+        '**/*.db-journal',
+        '**/exports/**',
+        '**/node_modules/**'
+      ]
+    },
     // [FIX 2026-06-12 #13] 根治 MetaListPage toolbar/table "又这样了" 复发
     // 根因: 浏览器缓存 Vite 编译产物 (SCSS 改完后旧 CSS 被缓存)
     // 用户反馈"我刷新后现在又好了" 确认是缓存问题

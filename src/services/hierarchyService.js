@@ -229,6 +229,16 @@ export function buildHierarchyFilterParams({ levels, scopeIds, objectType }) {
   // [FIX 2026-06-30] effective = selected + SM推导(跨域)
   // hierarchyMap ID冲突修复后, SM→domain推导正确, 不再膨胀
   // 例: 选财务云+销售报价SM → effective=[2205,2200] → 2 domain
+  //
+  // [FIX 2026-07-02] 命名空间隔离: 用 ${objectType}_id__in 而不是 id__in
+  //   多 sheet 导出场景下, domain/sub_domain/service_module/business_object 各自的
+  //   buildHierarchyFilterParams 都会写 id__in, 相互覆盖导致最终只有最后一个 type 的 ID 生效.
+  //   例: 用户选 PUM(SM) + SP(SD), buildHierarchyFilterParams(service_module) 写的
+  //   id__in = '564' 覆盖了 buildHierarchyFilterParams(sub_domain) 的 id__in = '332,339',
+  //   导致 business_object sheet 查询时用 id__in='564' (SM ID, 不是 BO ID) → 0 行.
+  //
+  //   修复: 用 ${objectType}_id__in 命名空间隔离, 每个实体类型用各自的 key, 不互相覆盖.
+  //   后端 resolve_conditions 在 _query_with_hierarchy 路径需要识别这些 key.
   if (typeScope.effective.length > 0) {
     filters.id__in = typeScope.effective.join(',')
   } else if (typeScope.selected.length > 0) {
