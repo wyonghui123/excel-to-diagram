@@ -35,6 +35,10 @@ modified_files:
   - src/components/common/RelationScopeTree/RelationScopeTree.vue
   # 领域过滤器 originalId 碰撞修复 (2026-06-30)
   - src/services/hierarchyService.js
+  # FIX 2026-07-02: hierarchy filter 命名空间隔离 + meta_obj NameError
+  - src/composables/useMultiObjectPage.js
+  - vite.config.js
+  - waitress_server.py
   # Phase 1 性能优化 - refreshAll 并行化 (串行 await → Promise.all)
   - src/composables/useRefreshCoordinator.js
   # 自动合并 (9)
@@ -124,8 +128,6 @@ forbidden_files:
   - meta/server.py
   - vite.config.js
   - stats.html
-  - waitress_server.py
-  - src/composables/useMultiObjectPage.js
 ```
 
 ---
