@@ -116,6 +116,10 @@ new_files:
   - tools/unified_server.py
   - tools/serve_frontend.py
   - tools/test_deploy_generalized.py
+  # 部署前 precheck + 部署后 smoke test (2026-07-03)
+  - tools/precheck.sh
+  - tools/smoke_test.sh
+  - tools/test_precheck_smoke.py
   # IE 其他新文件 (2)
   - meta/tests/test_excel_format.py
   - scripts/test_ie_assertor.js

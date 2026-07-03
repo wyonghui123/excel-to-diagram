@@ -51,6 +51,8 @@ deploy.sh - 通用部署脚本 (任意版本)
   --unified PATH           unified_server.py 路径
   --no-systemd             不用 systemd (默认)
   --skip-unzip             跳过 unzip (假设已解)
+  --skip-precheck          跳过 precheck (默认跑, 7 项检查)
+  --skip-smoke             跳过 smoke test (默认跑, 5 项真实测试)
   --help, -h               显示此帮助
 
 示例:
@@ -72,8 +74,25 @@ UNIFIED_SCRIPT="${ARG_UNIFIED:-$SCRIPT_DIR/unified_server.py}"
 USE_SYSTEMD="${ARG_NO_SYSTEMD:-true}"
 USE_SYSTEMD=$([ "$USE_SYSTEMD" = "true" ] && echo "no" || echo "yes")  # 反转: 默认 no (用 nohup), --systemd 启用
 SKIP_UNZIP="${ARG_SKIP_UNZIP:-false}"
+SKIP_PRECHECK="${ARG_SKIP_PRECHECK:-false}"
+SKIP_SMOKE="${ARG_SKIP_SMOKE:-false}"
 
 detect_remote_env
+
+# ========================= PHASE 0: precheck (可选跳过) =========================
+if [ "$SKIP_PRECHECK" != "true" ]; then
+    banner "PHASE 0: precheck"
+    PRECHECK_ARGS="--version $VERSION --port $BACKEND_PORT --frontend-port $FRONTEND_PORT"
+    [ -n "$ZIP_PATH" ] && PRECHECK_ARGS="$PRECHECK_ARGS --zip $ZIP_PATH"
+    [ -n "$DB_SOURCE" ] && PRECHECK_ARGS="$PRECHECK_ARGS --db-source $DB_SOURCE"
+    bash "$SCRIPT_DIR/precheck.sh" $PRECHECK_ARGS
+    if [ $? -ne 0 ]; then
+        err "precheck 失败, 建议修复后重试, 或加 --skip-precheck 跳过"
+        exit 1
+    fi
+    ok "precheck PASS, 继续部署"
+fi
+
 parse_version "$VERSION" || exit 1
 
 VERSION_PATH="$DEPLOYMENTS_DIR/$VERSION"
@@ -275,6 +294,18 @@ elif echo "$LOGIN_RESP" | grep -q "success.*true"; then
 else
     warn "login 失败 (可能 admin/admin123 未 init)"
     echo "$LOGIN_RESP" | head -c 200
+fi
+
+# ========================= PHASE 6.5: smoke test (5 项真实功能) =========================
+if [ "$SKIP_SMOKE" != "true" ]; then
+    banner "PHASE 6.5: smoke test (5 项真实功能)"
+    bash "$SCRIPT_DIR/smoke_test.sh" --port $BACKEND_PORT --frontend-port $FRONTEND_PORT
+    if [ $? -ne 0 ]; then
+        err "smoke test 失败, 部署可能有问题"
+        echo "  建议回滚: bash /tmp/rollback.sh --to <v> --port <p>"
+    fi
+else
+    warn "跳过 smoke test (--skip-smoke)"
 fi
 
 # ========================= PHASE 7: 切 current 链接 =========================
