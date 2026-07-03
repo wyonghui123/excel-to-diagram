@@ -273,7 +273,7 @@ if [ "$STARTED" = false ]; then
         FLASK_SECRET_KEY="$FLASK_SECRET" \
         CORS_ALLOWED_ORIGINS="$CORS_ORIGINS" \
         FLASK_DEBUG=false FLASK_ENV=production \
-        $PY server.py > $LOG_DIR/backend-${VERSION}.log 2>&1 &
+        -- $PY server.py > $LOG_DIR/backend-${VERSION}.log 2>&1 &
     BACKEND_PID=$!
     ok "nohup 启 backend PID=$BACKEND_PID"
     sleep 12

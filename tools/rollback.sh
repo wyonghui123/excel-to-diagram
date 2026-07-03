@@ -134,7 +134,7 @@ if [ "$STARTED" = false ]; then
     : "${FLASK_SECRET_KEY:=$(python3 -c "import secrets;print(secrets.token_urlsafe(48))" 2>/dev/null || echo "rollback-flask-key-$(date +%s)-$(hostname)-placeholder")}"
     : "${CORS_ALLOWED_ORIGINS:=http://172.20.59.7:8081,http://172.20.59.7:${BACKEND_PORT}}"
     export JWT_SECRET_KEY FLASK_SECRET_KEY CORS_ALLOWED_ORIGINS
-    nohup env PORT=${BACKEND_PORT} JWT_SECRET_KEY="$JWT_SECRET_KEY" FLASK_SECRET_KEY="$FLASK_SECRET_KEY" CORS_ALLOWED_ORIGINS="$CORS_ALLOWED_ORIGINS" $PY server.py > $LOG_DIR/backend-${VERSION}-rollback.log 2>&1 &
+    nohup env PORT=${BACKEND_PORT} JWT_SECRET_KEY="$JWT_SECRET_KEY" FLASK_SECRET_KEY="$FLASK_SECRET_KEY" CORS_ALLOWED_ORIGINS="$CORS_ALLOWED_ORIGINS" -- $PY server.py > $LOG_DIR/backend-${VERSION}-rollback.log 2>&1 &
     PID=$!
     ok "nohup 启 backend PID=$PID (env: PORT=$BACKEND_PORT, CORS=...)"
     sleep 8
