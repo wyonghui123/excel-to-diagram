@@ -8,8 +8,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 DB="${DB_PATH:-/opt/app/deployments/meta/architecture.db}"
 PY="${PY:-/opt/miniconda3-py39/bin/python}"
-USERNAME="${1:-admin}"
-NEW_PASSWORD="${2:-admin123}"
+
+# [FIX 2026-07-03] 智能检测: 只在 admin 不存在或 --force 时重置
+USERNAME="admin"
+NEW_PASSWORD="admin123"
+FORCE=false
+SEED_ONLY_IF_MISSING=true  # 默认安全模式
+if [ "${1:-}" = "--force" ]; then
+    FORCE=true
+    SEED_ONLY_IF_MISSING=false
+    warn "--force 模式: 会覆盖用户改的密码!"
+fi
 
 banner "RESET ADMIN PASSWORD"
 
@@ -17,6 +26,47 @@ if [ ! -f "$DB" ]; then
     die "db 不存在: $DB"
 fi
 ok "db: $DB"
+
+# [FIX 2026-07-03] 检查 admin 是否存在 + 当前密码是否对
+EXISTING=$($PY -c "
+import sqlite3
+conn = sqlite3.connect('$DB')
+c = conn.cursor()
+c.execute('SELECT id, password_hash FROM users WHERE username=?', ('$USERNAME',))
+row = c.fetchone()
+if not row:
+    print('NOT_FOUND')
+else:
+    print(f'FOUND:{row[1][:8]}...')
+")
+if [[ "$EXISTING" == NOT_FOUND* ]]; then
+    if [ "$SEED_ONLY_IF_MISSING" = "true" ] || [ "$FORCE" = "true" ]; then
+        warn "admin 用户不存在, 将创建 + 设置密码为 $NEW_PASSWORD"
+        SEED_MODE=true
+    else
+        die "admin 不存在且非 seed 模式, 退出"
+    fi
+else
+    ok "admin 存在 ($EXISTING)"
+    if [ "$FORCE" = "true" ]; then
+        warn "--force: 将覆盖用户可能改过的密码为 $NEW_PASSWORD"
+    elif [ "$SEED_ONLY_IF_MISSING" = "true" ]; then
+        # 智能模式: 只在用户密码不匹配默认 admin123 时, 不自动重置
+        # 先测试 login
+        LOGIN_TEST=$(curl -s -X POST http://127.0.0.1:5001/api/v1/auth/login \
+            -H "Content-Type: application/json" \
+            -d "{\"username\":\"$USERNAME\",\"password\":\"$NEW_PASSWORD\"}" 2>/dev/null)
+        if echo "$LOGIN_TEST" | grep -q '"success":true'; then
+            ok "admin 密码已经是 $NEW_PASSWORD, 跳过重置"
+            banner "RESET ADMIN PASSWORD SKIPPED (密码正确)"
+            exit 0
+        else
+            warn "admin 密码不是 $NEW_PASSWORD (用户可能改过), 不自动重置 (用 --force 重置)"
+            banner "RESET ADMIN PASSWORD SKIPPED (需要 --force)"
+            exit 0
+        fi
+    fi
+fi
 
 # 用 python 算 SHA-256 密码 hash (跟 meta/scripts 一致)
 HASH=$($PY -c "
