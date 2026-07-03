@@ -80,6 +80,9 @@ systemctl reset-failed excel-backend.service 2>/dev/null || true
 
 hr; echo "[stop] 所有 server 进程"
 stop_all_servers
+# 额外杀 unified (stop_all_servers 可能没覆盖)
+pkill -9 -f "unified_server" 2>/dev/null || true
+sleep 1
 ps -ef | grep -E "python.*server\.py|unified_server" | grep -v grep | head -3 || echo "(无)"
 
 # ========================= PHASE 2: 改 service =========================
@@ -127,6 +130,31 @@ if [ "$STARTED" = false ]; then
     PID=$!
     ok "nohup 启 backend PID=$PID"
     sleep 8
+fi
+
+# ========================= PHASE 3.5: 启 unified_server (8081) =========================
+banner "PHASE 3.5: 启 unified_server ($FRONTEND_PORT)"
+# unified 脚本位置: 优先 $SCRIPT_DIR (deploy_bundle/), 备选 $VERSION_PATH (旧 nohup)
+UNIFIED_SCRIPT="${ARG_UNIFIED:-$SCRIPT_DIR/unified_server.py}"
+if [ ! -f "$UNIFIED_SCRIPT" ]; then
+    UNIFIED_SCRIPT="$VERSION_PATH/unified_server.py"
+fi
+if [ -f "$UNIFIED_SCRIPT" ]; then
+    hr; echo "[start] unified: $UNIFIED_SCRIPT"
+    # 启 unified (假设 5000 端口, BACKEND_URL=http://127.0.0.1:${BACKEND_PORT})
+    cd "$SCRIPT_DIR" 2>/dev/null || cd /
+    nohup env BACKEND_PORT=$BACKEND_PORT PYTHONUNBUFFERED=1 $PY "$UNIFIED_SCRIPT" "$VERSION_PATH" > $LOG_DIR/frontend-${VERSION}-rollback.log 2>&1 &
+    PID=$!
+    ok "nohup 启 unified PID=$PID, log: $LOG_DIR/frontend-${VERSION}-rollback.log"
+    sleep 5
+    if is_port_listening $FRONTEND_PORT; then
+        ok "unified 监听 $FRONTEND_PORT"
+    else
+        warn "unified 启动后 $FRONTEND_PORT 未监听, 查 log"
+    fi
+else
+    warn "unified 脚本不存在: $UNIFIED_SCRIPT"
+    warn "前端 $FRONTEND_PORT 不会启, 需手动启"
 fi
 
 # ========================= PHASE 4: 切链接 =========================
