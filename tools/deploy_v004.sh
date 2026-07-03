@@ -189,19 +189,26 @@ if ! ss -tlnp 2>/dev/null | grep -q ":${V004_PORT} "; then
 fi
 
 # ========================= PHASE 5: 启 v004 frontend (8081) =========================
-banner "PHASE 5: 启 v004 frontend on 8081"
+banner "PHASE 5: 启 v004 unified server (frontend + reverse proxy) on 8081"
 
-hr; echo "[start] frontend via nohup"
-cd "$V004_PATH" || err "cd v004 失败"
-nohup env \
-    PORT=${FRONTEND_PORT} \
-    JWT_SECRET_KEY="deploy-v20260703-key-must-be-32-chars-min-do-not-use-in-prod" \
-    FLASK_SECRET_KEY="deploy-v20260703-flask-key-must-be-32-chars-min-do-not-use" \
-    CORS_ALLOWED_ORIGINS="http://172.20.59.7:${FRONTEND_PORT},http://172.20.59.7:${V004_PORT}" \
-    FLASK_DEBUG=false FLASK_ENV=production \
-    $PY meta/server.py > $LOG_DIR/frontend.log 2>&1 &
-FRONTEND_PID=$!
-ok "nohup 启 frontend PID=$FRONTEND_PID"
+# v004 server.py 只 serve API, 不 serve 静态文件
+# 前端用相对路径 /api/v1, /api/v2 调后端
+# 用 unified_server.py: 8081 同时 serve static + reverse proxy /api → 5001
+UNIFIED_SCRIPT="/tmp/unified_server.py"
+if [ ! -f "$UNIFIED_SCRIPT" ]; then
+    err "unified_server.py 不在 $UNIFIED_SCRIPT (请先 MobaXterm SFTP 上传)"
+    echo "  来源: D:\\filework\\release-prep-worktree\\tools\\unified_server.py"
+fi
+if [ ! -d "$V004_PATH/frontend_dist_files" ]; then
+    err "frontend_dist_files 不存在: $V004_PATH/frontend_dist_files"
+fi
+if [ -f "$UNIFIED_SCRIPT" ] && [ -d "$V004_PATH/frontend_dist_files" ]; then
+    cd "$V004_PATH" || err "cd v004 失败"
+    nohup $PY "$UNIFIED_SCRIPT" "$V004_PATH/frontend_dist_files" > $LOG_DIR/frontend.log 2>&1 &
+    FRONTEND_PID=$!
+    ok "nohup 启 unified_server PID=$FRONTEND_PID (前端+API代理, 8081 → 5001)"
+    sleep 3
+fi
 
 # ========================= PHASE 6: 端到端验证 =========================
 banner "PHASE 6: 端到端验证"

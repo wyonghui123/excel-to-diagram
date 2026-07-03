@@ -112,6 +112,8 @@ new_files:
   # 远端堡垒机一键部署脚本 (2026-07-03)
   - tools/deploy_v004.sh
   - tools/rollback_v003.sh
+  - tools/unified_server.py
+  - tools/serve_frontend.py
   # IE 其他新文件 (2)
   - meta/tests/test_excel_format.py
   - scripts/test_ie_assertor.js
