@@ -39,12 +39,52 @@ def list_zips(repo_root: Path) -> List[Path]:
     return sorted(repo_root.glob("deploy-v*.zip"), key=lambda p: p.stat().st_mtime, reverse=True)
 
 
+def md5_file(path: Path) -> str:
+    import hashlib
+    h = hashlib.md5()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def check_bundle_vs_remote(bundle: Optional[Path], remote: str):
+    """本地 vs 远端 bundle 对比 (输出本地 MD5, 让用户到远端对比)"""
+    if not bundle or not bundle.exists():
+        print(f"{RED}本地 bundle 不存在, 先跑: python tools/rebuild_bundle.py{NC}")
+        return 1
+
+    print(f"{CYAN}=== 本地 vs 远端 bundle 对比 ==={NC}\n")
+    print(f"本地 bundle: {bundle.resolve()}")
+    print()
+
+    # 计算本地所有文件 MD5
+    local_files = sorted([f for f in bundle.glob("**/*") if f.is_file()])
+    print(f"{CYAN}本地文件 (用于远端对比):{NC}")
+    for f in local_files:
+        rel = f.relative_to(bundle)
+        m = md5_file(f)
+        print(f"  md5sum /tmp/deploy_bundle/{rel}     # {m}")
+    print()
+    print(f"{YELLOW}到远端堡垒机跑以下命令对比:{NC}")
+    print(f"  ssh {remote}")
+    print(f"  cd /tmp/deploy_bundle/")
+    print(r"  for f in $(find . -type f); do md5sum $f; done")
+    print()
+    print(f"{YELLOW}或者 (Windows 用户, 用 MobaXterm SFTP 拖新 bundle 覆盖后):{NC}")
+    print(f"  python tools/rebuild_bundle.py  # 重新生成")
+    print(f"  MobaXterm SFTP: 拖 deploy_bundle/ → 远端 /tmp/")
+    return 0
+
+
 def main():
-    parser = argparse.ArgumentParser(description="重建 _deploy_bundle/")
+    parser = argparse.ArgumentParser(description="重建 deploy_bundle/ (SFTP 一键上传到远端)")
     parser.add_argument("--zip", help="zip 路径 (默认: 最新 deploy-v*.zip)")
-    parser.add_argument("--output", default="_deploy_bundle", help="输出目录 (默认 _deploy_bundle)")
+    parser.add_argument("--output", default="deploy_bundle", help="输出目录 (默认 deploy_bundle, 无下划线避免 IDE 隐藏)")
     parser.add_argument("--clean", action="store_true", help="只清空输出目录")
     parser.add_argument("--list", action="store_true", help="只列出 deploy-v*.zip")
+    parser.add_argument("--check", action="store_true", help="本地 vs 远端 bundle 版本对比 (需 --remote)")
+    parser.add_argument("--remote", help="远端 SSH (user@host) 用于 --check")
     args = parser.parse_args()
 
     repo_root = Path(__file__).parent.parent
@@ -55,6 +95,13 @@ def main():
         for z in list_zips(repo_root):
             print(f"  {z.name}  ({z.stat().st_size:,} bytes)")
         return 0
+
+    if args.check:
+        if not args.remote:
+            print(f"{RED}--check 需要 --remote user@host{NC}")
+            return 1
+        # 比较本地 vs 远端 bundle 版本
+        return check_bundle_vs_remote(bundle if bundle.exists() else None, args.remote)
 
     # 决定 zip
     zip_path = None

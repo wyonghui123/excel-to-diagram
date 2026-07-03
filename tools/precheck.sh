@@ -50,6 +50,16 @@ DB_SOURCE="${ARG_DB_SOURCE:-}"
 
 detect_remote_env
 
+# zip 路径优先级: --zip > SCRIPT_DIR/../deploy-{VERSION}.zip (bundle 目录) > $DEPLOY_ROOT/deploy-{VERSION}.zip
+BUNDLE_DIR="$(dirname "$SCRIPT_DIR")"
+if [ -z "$ZIP_PATH" ]; then
+    if [ -f "$BUNDLE_DIR/deploy-${VERSION}.zip" ]; then
+        ZIP_PATH="$BUNDLE_DIR/deploy-${VERSION}.zip"
+    else
+        ZIP_PATH="$DEPLOY_ROOT/deploy-${VERSION}.zip"
+    fi
+fi
+
 WARN_COUNT=0
 CHECK_PASSED=0
 CHECK_FAILED=0
@@ -118,12 +128,26 @@ fi
 # ============================================================
 hr; echo "[Check 4/7] 端口占用"
 if is_port_listening $BACKEND_PORT; then
-    run_check "backend 端口 $BACKEND_PORT 已被占用" fail "杀掉旧进程或换端口 (--port)"
+    # 看是哪个进程
+    PORT_PID=$(ss -tlnp 2>/dev/null | grep ":$BACKEND_PORT " | grep -oP 'pid=\K[0-9]+' | head -1)
+    PORT_PROC=$(ps -p "$PORT_PID" -o args= 2>/dev/null | head -c 100 || echo "?")
+    if [ "${ARG_AUTO_KILL:-false}" = "true" ]; then
+        info "  端口被 PID $PORT_PID 占用: $PORT_PROC, 自动杀..."
+        kill -9 $PORT_PID 2>/dev/null && ok "  杀掉 PID $PORT_PID" || err "  杀失败"
+        sleep 1
+        if is_port_listening $BACKEND_PORT; then
+            run_check "backend 端口 $BACKEND_PORT 仍被占用" fail "auto-kill 失败"
+        else
+            run_check "backend 端口 $BACKEND_PORT 杀后空闲" pass
+        fi
+    else
+        run_check "backend 端口 $BACKEND_PORT 已被占用" fail "杀掉旧进程 (PID $PORT_PID: $PORT_PROC) 或换端口 (--port), 或加 --auto-kill"
+    fi
 else
     run_check "backend 端口 $BACKEND_PORT 空闲" pass
 fi
 if is_port_listening $FRONTEND_PORT; then
-    run_check "frontend 端口 $FRONTEND_PORT 已被占用" warn "可能旧 unified_server, 部署时会停"
+    run_check "frontend 端口 $FRONTEND_PORT 已被占用" warn "可能旧 unified_server, deploy 会停"
 else
     run_check "frontend 端口 $FRONTEND_PORT 空闲" pass
 fi
@@ -132,10 +156,7 @@ fi
 # Check 5: zip 文件
 # ============================================================
 hr; echo "[Check 5/7] zip 文件"
-if [ -z "$ZIP_PATH" ]; then
-    ZIP_PATH="$DEPLOY_ROOT/deploy-${VERSION}.zip"
-    info "默认 zip 路径: $ZIP_PATH"
-fi
+info "zip 路径: $ZIP_PATH"
 if [ -f "$ZIP_PATH" ]; then
     ZIP_SIZE=$(stat -c%s "$ZIP_PATH" 2>/dev/null)
     if [ "$ZIP_SIZE" -gt 1024 ]; then

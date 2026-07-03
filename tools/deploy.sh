@@ -2,8 +2,17 @@
 # ============================================================
 # deploy.sh - 通用部署脚本 (任意版本)
 # ============================================================
+# Bundle Version: 2.1.0 (2026-07-03 12:00)
+#   - 修复 precheck zip 路径 (bundle 优先)
+#   - 加 auto-kill
+#   - 加 diagnose 集成
+# ============================================================
+DEPLOY_BUNDLE_VERSION="2.1.0"
+DEPLOY_BUNDLE_BUILD="20260703_1200"
+
+# ============================================================
 # 用法:
-#   deploy.sh --version <v> --port <p> --zip <zip>
+#   deploy.sh --version <v> --port <p> [--zip <z>]
 #
 # 必填:
 #   --version VERSION      版本号 (任意字符串, 如 v20260703_002)
@@ -63,6 +72,12 @@ EOF
 }
 
 parse_args "$@"
+
+# 自检: 提示 bundle 版本
+info "=========================================="
+info "  deploy.sh Bundle Version: $DEPLOY_BUNDLE_VERSION ($DEPLOY_BUNDLE_BUILD)"
+info "  本地: $(dirname $SCRIPT_DIR)/deploy_bundle/"
+info "=========================================="
 
 # 必填参数
 VERSION="${ARG_VERSION:?--version 必填}"
