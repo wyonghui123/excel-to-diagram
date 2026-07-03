@@ -136,6 +136,19 @@ const rawId = computed(() => route.params.id)
 const lastValidObjectType = ref(null)
 const lastValidId = ref(null)
 watch([rawObjectType, rawId], ([newType, newId]) => {
+  // [BUG-V037 cherry-pick 2026-07-03] 跨对象切换时立即同步 lastValidObjectType
+  //   例: /detail/user/123 → /detail/user_group?mode=add
+  //     - rawId=undefined (URL 无 id 段), 当前 watch 不刷新 lastValidObjectType
+  //     - 旧: objectType='user' (缓存), id='123' (缓存), 表现为显示"新建用户(123)"
+  //   修复: rawObjectType 切到不同有效对象立即同步 lastValidObjectType;
+  //         add 模式 (newId=undefined) 同时清空 lastValidId 防止 id 缓存污染;
+  //         tab 切走 (newType=undefined) 不进任何分支, 保护缓存 (2026-06-18 v1 fix).
+  //   来源: feat/annotation-category-filter @ 797edb8
+  //   验证: Vue reactive simulation 49/49 通过
+  if (newType && newType !== lastValidObjectType.value) {
+    lastValidObjectType.value = newType
+    if (!newId) lastValidId.value = null
+  }
   if (newType && newId) {
     lastValidObjectType.value = newType
     lastValidId.value = newId
