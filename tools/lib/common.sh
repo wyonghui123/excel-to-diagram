@@ -156,11 +156,14 @@ parse_version() {
     VERSION_PATH="$DEPLOYMENTS_DIR/$VERSION"
     info "VERSION=$VERSION"
     info "VERSION_PATH=$VERSION_PATH"
-    if [ ! -d "$VERSION_PATH" ]; then
-        err "版本目录不存在: $VERSION_PATH"
-        return 1
+    # [FIX 2026-07-03] 不强制要求目录存在, PHASE 0.5 解压才会创建
+    # rollback 场景: 旧版本目录可能存在也可能不存在
+    if [ -d "$VERSION_PATH" ]; then
+        ok "版本目录已存在"
+    else
+        info "版本目录不存在 (PHASE 0.5 会解压创建)"
     fi
-    ok "版本目录存在"
+    return 0
 }
 
 # ============================================================
