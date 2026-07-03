@@ -1,125 +1,107 @@
-# Excel-to-Diagram
+# Excel-to-Diagram 部署基础设施 (SOP)
 
-元数据驱动的业务对象管理平台。
+> **目标**：一次建设，长期使用，部署/回滚/验证全流程自动化
 
-## 核心特性
+---
 
-- **YAML 单一事实原则**：配置即文档，减少冗余
-- **元数据驱动 UI**：通过 YAML 配置自动生成页面
-- **组件单一引用**：使用 `MetaListPage` 一行代码构建列表页
+## 5 分钟上手
 
-## 快速开始
-
-### 新增业务对象
-
-1. 复制模板：
-   ```bash
-   cp meta/schemas/_template.yaml meta/schemas/your_object.yaml
-   ```
-
-2. 修改配置：
-   ```yaml
-   id: your_object
-   name: 你的对象
-   table_name: your_objects
-   ```
-
-3. 重启后端自动加载
-
-### 页面组件
-
-```vue
-<!-- 一行代码构建列表页 -->
-<MetaListPage
-  object-type="your_object"
-  enable-detail
-  enable-auto-crud
-/>
-```
-
-## 架构文档
-
-| 文档 | 说明 |
-|------|------|
-| [核心设计原则](docs/architecture/01-principles.md) | YAML 单一事实原则、元数据驱动架构 |
-| [YAML 配置规范](docs/architecture/02-yaml-conventions.md) | 字段、关联、视图配置 |
-| [元数据驱动 UI](docs/architecture/03-meta-driven-ui.md) | 组件使用、插槽机制 |
-| [API 契约](docs/architecture/04-api-contracts.md) | REST API 规范 |
-| [常见模式](docs/architecture/05-patterns.md) | 代码模板和最佳实践 |
-
-## YAML 单一事实原则
-
-> **核心原则**：YAML 只配置例外情况，字段权限默认由后端智能推导。
-
-```yaml
-# ✅ 正确：最小配置
-fields:
-  - id: name
-    required: true  # 唯一需要配置的
-
-# ❌ 错误：冗余配置
-fields:
-  - id: name
-    ui:
-      visible: true      # 冗余！
-      editable: true     # 冗余！
-```
-
-### 默认推导规则
-
-| 属性 | 默认值 | 推导规则 |
-|------|--------|---------|
-| `visible` | `true` | 系统字段(id, created_at) 自动隐藏 |
-| `editable` | `true` | 业务键(computed, business_key) 自动只读 |
-| `export_visible` | `true` | 所有字段默认可导出 |
-| `import_visible` | `true` | 所有字段默认可导入 |
-
-## 目录结构
-
-```
-meta/
-├── schemas/           # YAML 元数据配置
-│   ├── _template.yaml # 新对象模板
-│   ├── user.yaml
-│   ├── role.yaml
-│   └── user_group.yaml
-├── core/              # 核心框架
-│   ├── bo_framework.py
-│   └── models.py
-└── services/         # 服务层
-    ├── query_service.py
-    └── import_export_service.py
-
-src/
-├── components/common/ # 通用组件
-│   ├── MetaListPage/
-│   ├── DetailPage/
-│   └── AssociationPanel/
-└── composables/      # 组合式函数
-    ├── useMetaList.js
-    └── useDetail.js
-```
-
-## 开发指南
-
-### 后端启动
+### 1. 准备部署包（本地）
 
 ```bash
-python dev.py
+# 重建 _deploy_bundle/ (包含 zip + 所有脚本)
+python tools/rebuild_bundle.py
+# 输出: _deploy_bundle/ 目录 (~18.4 MB)
 ```
 
-### 前端启动
+### 2. 上传到远端（一次性）
+
+**MobaXterm SFTP**：拖 `_deploy_bundle/` → 远端 `/tmp/`
+
+### 3. 一键部署（堡垒机终端）
 
 ```bash
-npm run dev
+bash /tmp/_deploy_bundle/deploy.sh --version v20260703_002 --port 5001
 ```
 
-### YAML 配置检查
+**自动完成**：
+- precheck（7 项健康检查）
+- 解压 zip
+- 备份 + 复制 db
+- 启 v004 backend（5001）
+- 启 unified server（8081）
+- smoke test（5 项真实功能）
+- 切 current 链接
+
+### 4. 出问题回滚
 
 ```bash
-python -c "from meta.core.models import registry; print([m.id for m in registry.all()])"
+bash /tmp/_deploy_bundle/rollback.sh --to v20260630_003 --port 5000
 ```
 
-## License
+---
 
-MIT
+## 工具清单
+
+```
+tools/
+  ├── deploy.sh            # 通用部署 (任何版本可用)
+  ├── rollback.sh          # 通用回滚
+  ├── precheck.sh          # 部署前 7 项检查
+  ├── smoke_test.sh        # 部署后 5 项真实测试
+  ├── unified_server.py    # 静态文件 + API 代理 (单端口 serve)
+  ├── lib/common.sh        # 共享库 (17 函数)
+  ├── rebuild_bundle.py    # 自动生成 _deploy_bundle/
+  │
+  ├── e2e_sop_drill.py     # SOP 端到端演练
+  ├── self_test.py         # 工具自检
+  ├── test_deploy_generalized.py  # 通用性测试 (40 PASS)
+  ├── test_precheck_smoke.py      # precheck+smoke 测试 (12 PASS)
+  │
+  ├── precheck_remote.sh   # 远端事实采集
+  ├── diff_local_remote.py # 本地 vs 远端 diff
+  ├── verify_deploy.py     # Playwright 端到端验证
+  │
+  └── repackage_zip.py     # 重新打包工具
+```
+
+---
+
+## 部署 v005 流程（未来示例）
+
+```bash
+# 本地
+python tools/rebuild_bundle.py --zip deploy-v20260801_001.zip
+
+# SFTP 上传 _deploy_bundle/
+
+# 远端
+bash /tmp/_deploy_bundle/deploy.sh --version v20260801_001 --port 5002
+```
+
+**脚本自动适配**——不需改代码，只改参数。
+
+---
+
+## 测试覆盖
+
+| 测试 | 工具 | PASS |
+|------|------|------|
+| 通用化 (无版本 hardcode) | test_deploy_generalized.py | 40/0 |
+| precheck + smoke 逻辑 | test_precheck_smoke.py | 12/0 |
+| SOP 端到端 | e2e_sop_drill.py | 18/0 |
+| 工具自检 | self_test.py | 26/0 |
+
+---
+
+## 关键设计原则
+
+1. **通用** - 一套脚本适用所有版本
+2. **健壮** - 7 项 precheck + 5 项 smoke
+3. **可逆** - 任何部署都能回滚
+4. **可观察** - 统一日志入口 + 端口 + 状态
+5. **低门槛** - 堡垒机一命令搞定
+
+---
+
+详细见 [DEPLOYMENT.md](DEPLOYMENT.md) 和 [TROUBLESHOOTING.md](TROUBLESHOOTING.md)

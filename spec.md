@@ -120,6 +120,11 @@ new_files:
   - tools/precheck.sh
   - tools/smoke_test.sh
   - tools/test_precheck_smoke.py
+  # 基础设施 SOP 文档 + 自动化 (2026-07-03)
+  - README.md
+  - DEPLOYMENT.md
+  - TROUBLESHOOTING.md
+  - tools/rebuild_bundle.py
   # IE 其他新文件 (2)
   - meta/tests/test_excel_format.py
   - scripts/test_ie_assertor.js
