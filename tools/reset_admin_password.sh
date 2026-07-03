@@ -68,16 +68,21 @@ else
     fi
 fi
 
-# 用 python 算 SHA-256 密码 hash (跟 meta/scripts 一致)
+# 用 python 算 PBKDF2-SHA256 密码 hash (跟 meta/services/auth_provider.py _hash_password_pbdkdf2 一致)
 HASH=$($PY -c "
-import hashlib
-print(hashlib.sha256('$NEW_PASSWORD'.encode()).hexdigest())
-" 2>/dev/null)
+import hashlib, secrets
+# PBKDF2\$<iterations>\$<salt>\$<hash>
+salt = secrets.token_hex(16)
+iterations = 100000
+pw = '$NEW_PASSWORD'.encode('utf-8')
+h = hashlib.pbkdf2_hmac('sha256', pw, salt.encode('utf-8'), iterations).hex()
+print(f'PBKDF2\${iterations}\${salt}\${h}')
+")
 
-if [ -z "$HASH" ] || [ "${#HASH}" -ne 64 ]; then
-    die "算 hash 失败: $HASH"
+if [ -z "$HASH" ]; then
+    die "算 hash 失败"
 fi
-ok "新 hash: $HASH (64 chars)"
+ok "新 hash: ${HASH:0:30}..."
 
 # 备份 db
 BACKUP="/opt/app/backups/architecture_$(date +%Y%m%d_%H%M%S).db"
@@ -134,13 +139,26 @@ if not row:
     print('USER_NOT_FOUND')
 else:
     h = row[0]
-    import hashlib
-    if h == hashlib.sha256('$NEW_PASSWORD'.encode()).hexdigest():
-        print('LOGIN_OK')
-    elif h == hashlib.sha256(('$NEW_PASSWORD'+'fixed_salt').encode()).hexdigest():
-        print('LOGIN_OK_SALT')
+    # 验证 PBKDF2 hash
+    if h and h.startswith('PBKDF2$'):
+        parts = h.split('$')
+        if len(parts) == 4:
+            iters, salt, hhex = int(parts[1]), parts[2], parts[3]
+            calc = hashlib.pbkdf2_hmac('sha256', '$NEW_PASSWORD'.encode('utf-8'), salt.encode('utf-8'), iters).hex()
+            if calc == hhex:
+                print('LOGIN_OK')
+            else:
+                print(f'PBKDF2_MISMATCH: db[:30]={h[:30]}...')
+        else:
+            print(f'PBKDF2_FMT_ERR: {h[:30]}...')
+    elif h and len(h) == 64:
+        # 老格式纯 SHA-256
+        if h == hashlib.sha256('$NEW_PASSWORD'.encode()).hexdigest():
+            print('LOGIN_OK_SHA256_LEGACY')
+        else:
+            print(f'SHA256_MISMATCH: db[:16]={h[:16]}...')
     else:
-        print(f'HASH_MISMATCH: db={h[:16]}...')
+        print(f'HASH_UNKNOWN: db={h[:30] if h else None}...')
 ")
 echo "$LOGIN"
 

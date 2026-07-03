@@ -65,12 +65,18 @@ else:
 ")
 info "deploy_test 状态: $EXISTING"
 
-# 5. 计算 hash (SHA-256)
+# 5. 计算 hash (PBKDF2-SHA256, 跟 auth_provider.py 一致)
 HASH=$($PY -c "
-import hashlib
-print(hashlib.sha256('$DEPLOY_PASSWORD'.encode()).hexdigest())
+import hashlib, secrets
+# 跟 meta/services/auth_provider.py _hash_password_pbdkdf2 一致
+salt = secrets.token_hex(16)  # 32 chars hex
+iterations = 100000
+pw = '$DEPLOY_PASSWORD'.encode('utf-8')
+salt_bytes = salt.encode('utf-8')
+h = hashlib.pbkdf2_hmac('sha256', pw, salt_bytes, iterations).hex()
+print(f'PBKDF2\${iterations}\${salt}\${h}')
 ")
-ok "新 hash: ${HASH:0:16}..."
+ok "新 hash: ${HASH:0:30}..."
 
 # 6. 按模式处理
 if [ "$MODE" = "check" ]; then
