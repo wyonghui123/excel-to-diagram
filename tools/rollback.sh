@@ -148,8 +148,10 @@ banner "PHASE 3.5: 启 frontend ($FRONTEND_PORT)"
 # 通过 unified_server.py 是否存在判断
 
 UNIFIED_SCRIPT=""
-# 优先级: 用户指定 > 远端 VERSION_PATH > 远端当前 backend 路径
-for cand in "$ARG_UNIFIED" "$VERSION_PATH/unified_server.py" "$SCRIPT_DIR/unified_server.py"; do
+# 优先级: 用户指定 > VERSION_PATH (v004+ 把 unified 放在版本目录)
+# 注意: $SCRIPT_DIR/deploy_bundle/ 永远自带 unified_server.py, 不能据此判断 v004
+# 只有 VERSION_PATH 里的 unified 才代表 v004+ 架构
+for cand in "$ARG_UNIFIED" "$VERSION_PATH/unified_server.py"; do
     if [ -n "$cand" ] && [ -f "$cand" ]; then
         UNIFIED_SCRIPT="$cand"
         break
