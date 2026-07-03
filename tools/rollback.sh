@@ -175,9 +175,14 @@ done
 
 if [ -n "$UNIFIED_SCRIPT" ]; then
     # v004+ 架构: 启 unified
-    hr; echo "[start] unified: $UNIFIED_SCRIPT"
+    # frontend_dist_files 在 zip 解压根目录 ($DEPLOYMENTS_DIR), 不在 $VERSION_PATH 下
+    UNIFIED_FRONTEND_DIR="$DEPLOYMENTS_DIR/frontend_dist_files"
+    if [ ! -d "$UNIFIED_FRONTEND_DIR" ]; then
+        UNIFIED_FRONTEND_DIR="$VERSION_PATH"  # 兜底
+    fi
+    hr; echo "[start] unified: $UNIFIED_SCRIPT, frontend_dir=$UNIFIED_FRONTEND_DIR"
     cd "$SCRIPT_DIR" 2>/dev/null || cd /
-    nohup env BACKEND_PORT=$BACKEND_PORT PYTHONUNBUFFERED=1 $PY "$UNIFIED_SCRIPT" "$VERSION_PATH" > $LOG_DIR/frontend-${VERSION}-rollback.log 2>&1 &
+    nohup env BACKEND_PORT=$BACKEND_PORT PYTHONUNBUFFERED=1 $PY "$UNIFIED_SCRIPT" "$UNIFIED_FRONTEND_DIR" > $LOG_DIR/frontend-${VERSION}-rollback.log 2>&1 &
     PID=$!
     ok "nohup 启 unified PID=$PID, log: $LOG_DIR/frontend-${VERSION}-rollback.log"
     sleep 5

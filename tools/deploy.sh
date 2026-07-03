@@ -134,7 +134,9 @@ VERSION_PATH="$DEPLOYMENTS_DIR/$VERSION"
 ENTRY=$(detect_entry_point "$VERSION_PATH")
 info "ENTRY=$ENTRY"
 SERVER_DIR="$VERSION_PATH/$ENTRY"
-FRONTEND_DIR="$VERSION_PATH/frontend_dist_files"
+# frontend_dist_files 在 zip 根目录 (DEPLOYMENTS_DIR), 不在 VERSION_PATH 下
+# 因为 PHASE 0.5 unzip $ZIP_PATH -d $DEPLOYMENTS_DIR/ 解压根目录
+FRONTEND_DIR="$DEPLOYMENTS_DIR/frontend_dist_files"
 
 # JWT/FLASK/CORS 密钥 (>=32 字符, 满足 startup_checks 强制)
 SECRET_SUFFIX="${VERSION}-$(date +%s)-do-not-use-in-prod-without-rotation"
@@ -298,7 +300,7 @@ if [ ! -f "$UNIFIED_SCRIPT" ]; then
 elif [ ! -d "$FRONTEND_DIR" ]; then
     err "frontend_dist_files 不存在: $FRONTEND_DIR"
 else
-    cd "$VERSION_PATH" || err "cd $VERSION_PATH 失败"
+    cd "$DEPLOYMENTS_DIR" || err "cd $DEPLOYMENTS_DIR 失败"
     BACKEND_PORT=$BACKEND_PORT nohup $PY "$UNIFIED_SCRIPT" "$FRONTEND_DIR" > $LOG_DIR/frontend-${VERSION}.log 2>&1 &
     FRONTEND_PID=$!
     ok "nohup 启 unified_server PID=$FRONTEND_PID (8081 → $BACKEND_PORT)"
