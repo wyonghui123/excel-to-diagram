@@ -267,13 +267,14 @@ fi
 if [ "$STARTED" = false ]; then
     hr; echo "[start] backend via nohup (fallback)"
     cd "$SERVER_DIR" || err "cd $SERVER_DIR 失败"
-    nohup env \
-        PORT=${BACKEND_PORT} \
-        JWT_SECRET_KEY="$JWT_SECRET" \
-        FLASK_SECRET_KEY="$FLASK_SECRET" \
-        CORS_ALLOWED_ORIGINS="$CORS_ORIGINS" \
-        FLASK_DEBUG=false FLASK_ENV=production \
-        -- $PY server.py > $LOG_DIR/backend-${VERSION}.log 2>&1 &
+    # 直接 export env vars + exec (避免 env 命令把 $PY 路径当成 env 变量)
+    export PORT=${BACKEND_PORT}
+    export JWT_SECRET_KEY="$JWT_SECRET"
+    export FLASK_SECRET_KEY="$FLASK_SECRET"
+    export CORS_ALLOWED_ORIGINS="$CORS_ORIGINS"
+    export FLASK_DEBUG=false
+    export FLASK_ENV=production
+    nohup "$PY" server.py > "$LOG_DIR/backend-${VERSION}.log" 2>&1 &
     BACKEND_PID=$!
     ok "nohup 启 backend PID=$BACKEND_PID"
     sleep 12
