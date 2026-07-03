@@ -387,9 +387,13 @@ async function handleExportSync() {
     //   传 include_annotations: false 阻止后端 export_selected_types
     //   自动把 annotation 作为 polymorphic child 追加导出
     //   (后端 import_export_service.py L822-823/L2796-2803 默认自动追加)
-    if (props.multiTypeMode && !selectedMultiTypes.value.includes('annotation')) {
-      params.options.include_annotations = false
-    }
+    // [BUG-FIX 2026-07-03] 取消 multiTypeMode 限制, 所有 mode 默认 include_annotations=false
+    //   之前: single mode (无 multiTypeMode) 不传, 后端 hard-code 自动追加 annotation sheet
+    //   现在: single/multi 都默认 false, 只在用户显式勾选 annotation 时才传 true
+    const userPickedAnnotation = props.multiTypeMode
+      && selectedMultiTypes.value.includes('annotation')
+    params.options = params.options || {}
+    params.options.include_annotations = userPickedAnnotation
 
     const { boService } = await import('@/services/boService')
     // [NEW v3.20 2026-06-19] 透传 menuCode → 后端走"架构数据"前缀
@@ -470,9 +474,13 @@ async function handleExportAsync() {
     //   传 include_annotations: false 阻止后端 export_selected_types
     //   自动把 annotation 作为 polymorphic child 追加导出
     //   (后端 import_export_service.py L822-823/L2796-2803 默认自动追加)
-    if (props.multiTypeMode && !selectedMultiTypes.value.includes('annotation')) {
-      params.options.include_annotations = false
-    }
+    // [BUG-FIX 2026-07-03] 取消 multiTypeMode 限制, 所有 mode 默认 include_annotations=false
+    //   之前: single mode (无 multiTypeMode) 不传, 后端 hard-code 自动追加 annotation sheet
+    //   现在: single/multi 都默认 false, 只在用户显式勾选 annotation 时才传 true
+    const userPickedAnnotationAsync = props.multiTypeMode
+      && selectedMultiTypes.value.includes('annotation')
+    params.options = params.options || {}
+    params.options.include_annotations = userPickedAnnotationAsync
 
     const { boService } = await import('@/services/boService')
     const startResult = await boService.exportDataAsync(effectiveObjectType, {
