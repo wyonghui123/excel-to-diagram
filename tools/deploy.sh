@@ -131,11 +131,12 @@ fi
 parse_version "$VERSION" || exit 1
 
 VERSION_PATH="$DEPLOYMENTS_DIR/$VERSION"
-# [FIX 2026-07-03] parse_version 不强制要求目录存在 (PHASE 0.5 解压才会创建)
-# 但 detect_entry_point 需要目录存在, 所以延后到 PHASE 0.5 后
-ENTRY=""
-info "ENTRY=待 PHASE 0.5 后检测"
-SERVER_DIR=""
+# [FIX 2026-07-03] zip 顶层是 frontend_dist_files/ + meta/ (不在子目录)
+# 跟 v002 部署保持一致: 共享 meta/ 和 frontend_dist_files/ 在 DEPLOYMENTS_DIR 根
+# VERSION_PATH 只是用于标识版本 (current 链接)
+ENTRY="meta"
+info "ENTRY=$ENTRY (zip 顶层 meta/, 共享在 DEPLOYMENTS_DIR/meta/)"
+SERVER_DIR="$DEPLOYMENTS_DIR/meta"
 # frontend_dist_files 在 zip 根目录 (DEPLOYMENTS_DIR), 不在 VERSION_PATH 下
 # 因为 PHASE 0.5 unzip $ZIP_PATH -d $DEPLOYMENTS_DIR/ 解压根目录
 FRONTEND_DIR="$DEPLOYMENTS_DIR/frontend_dist_files"
@@ -190,12 +191,11 @@ else
     ok "已解压 (跳过)"
 fi
 
-# [FIX 2026-07-03] PHASE 0.5 后检测 entry (目录现在存在)
-if [ -z "$ENTRY" ] || [ ! -d "$VERSION_PATH/$ENTRY" ]; then
-    ENTRY=$(detect_entry_point "$VERSION_PATH" 2>/dev/null) || die "解压后仍找不到 $VERSION_PATH/meta 或 $VERSION_PATH/backend"
-    info "ENTRY=$ENTRY"
-    SERVER_DIR="$VERSION_PATH/$ENTRY"
+# [FIX 2026-07-03] PHASE 0.5 后检测 entry (现在解到 DEPLOYMENTS_DIR)
+if [ ! -d "$SERVER_DIR" ]; then
+    die "解压后 SERVER_DIR 仍缺: $SERVER_DIR (期望 zip 含 meta/)"
 fi
+ok "SERVER_DIR=$SERVER_DIR"
 
 # ========================= PHASE 1: 停旧 =========================
 banner "PHASE 1: 停旧服务"
