@@ -22,7 +22,7 @@ if ($zipSrc) {
 }
 
 # copy deploy tools
-$tools = @("deploy.sh", "precheck.sh", "smoke_test.sh", "rollback.sh", "diagnose.sh", "unified_server.py")
+$tools = @("deploy.sh", "precheck.sh", "smoke_test.sh", "rollback.sh", "diagnose.sh", "status.sh", "restart.sh", "unified_server.py")
 foreach ($f in $tools) {
     $src = Join-Path "$repoRoot/tools" $f
     if (Test-Path $src) {
