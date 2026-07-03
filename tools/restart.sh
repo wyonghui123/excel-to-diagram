@@ -247,7 +247,7 @@ fi
 LOGIN=$(curl -s -X POST --max-time 5 \
     "http://127.0.0.1:${BACKEND_PORT}/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"username":"admin","password":"admin123"}' 2>/dev/null)
+    -d '{"username":"deploy_test","password":"DeployTest@2026!"}' 2>/dev/null)
 LOGIN_RESULT=$(/opt/miniconda3-py39/bin/python -c "
 import json
 try:

@@ -247,6 +247,15 @@ if [ -n "$DB_SOURCE" ] && [ -f "$DB_SOURCE" ]; then
     fi
 fi
 
+# ========================= PHASE 2.5: 部署验证专用用户 (deploy_test) =========================
+banner "PHASE 2.5: 重置 deploy_test 验证用户"
+# 部署验证专用用户 (跟 admin 业务用户分离, 每次 deploy 自动重置密码)
+if [ -f "$SCRIPT_DIR/reset_deploy_test_user.sh" ]; then
+    bash "$SCRIPT_DIR/reset_deploy_test_user.sh" || warn "deploy_test 重置失败 (不影响部署)"
+else
+    warn "reset_deploy_test_user.sh 不存在, 跳过"
+fi
+
 # ========================= PHASE 3: systemd service =========================
 banner "PHASE 3: systemd service"
 SERVICE_FILE="/etc/systemd/system/excel-backend.service"
