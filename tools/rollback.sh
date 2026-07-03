@@ -141,10 +141,14 @@ if [ "$STARTED" = false ]; then
     : "${JWT_SECRET_KEY:=$(python3 -c "import secrets;print(secrets.token_urlsafe(48))" 2>/dev/null || echo "rollback-jwt-key-$(date +%s)-$(hostname)-placeholder")}"
     : "${FLASK_SECRET_KEY:=$(python3 -c "import secrets;print(secrets.token_urlsafe(48))" 2>/dev/null || echo "rollback-flask-key-$(date +%s)-$(hostname)-placeholder")}"
     : "${CORS_ALLOWED_ORIGINS:=http://172.20.59.7:8081,http://172.20.59.7:${BACKEND_PORT}}"
-    export JWT_SECRET_KEY FLASK_SECRET_KEY CORS_ALLOWED_ORIGINS
-    nohup env PORT=${BACKEND_PORT} JWT_SECRET_KEY="$JWT_SECRET_KEY" FLASK_SECRET_KEY="$FLASK_SECRET_KEY" CORS_ALLOWED_ORIGINS="$CORS_ALLOWED_ORIGINS" -- $PY server.py > $LOG_DIR/backend-${VERSION}-rollback.log 2>&1 &
+    export PORT=${BACKEND_PORT} JWT_SECRET_KEY FLASK_SECRET_KEY CORS_ALLOWED_ORIGINS
+    # 简化: 用 shell 变量直接传给 nohup (env vars 来自当前 shell, 不需要 env 命令)
+    # 之前 env 命令有 BUG: $PY 是路径不是合法 env 名, env 报错 "No such file or directory"
+    # 现在用 export env vars + 直接 exec
+    cd "$SERVER_DIR" || die "cd $SERVER_DIR 失败"
+    nohup /opt/miniconda3-py39/bin/python server.py > "$LOG_DIR/backend-${VERSION}-rollback.log" 2>&1 &
     PID=$!
-    ok "nohup 启 backend PID=$PID (env: PORT=$BACKEND_PORT, CORS=...)"
+    ok "nohup 启 backend PID=$PID (env vars 已 export, PORT=$BACKEND_PORT)"
     sleep 8
 fi
 
