@@ -109,6 +109,9 @@ new_files:
   # SOP 端到端演练器 (2026-07-03)
   - tools/e2e_sop_drill.py
   - tools/_test_v4_startup.py
+  # 远端堡垒机一键部署脚本 (2026-07-03)
+  - tools/deploy_v004.sh
+  - tools/rollback_v003.sh
   # IE 其他新文件 (2)
   - meta/tests/test_excel_format.py
   - scripts/test_ie_assertor.js
