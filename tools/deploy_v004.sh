@@ -68,6 +68,26 @@ ps -ef | grep -E "python.*server\.py" | grep -v grep | head -5
 hr; echo "[check] 当前端口"
 ss -tlnp 2>/dev/null | grep -E ":(${V003_PORT}|${V004_PORT}|${FRONTEND_PORT})" || echo "(无监听)"
 
+# ========================= PHASE 0.5: 解压 zip (如果 v004 还没部署) =========================
+ZIP_PATH="/opt/app/deploy-v20260703_002.zip"
+if [ ! -d "$V004_PATH/meta" ]; then
+    banner "PHASE 0.5: 解压 v004 zip"
+    if [ -f "$ZIP_PATH" ]; then
+        cd /opt/app
+        unzip -q -o "$ZIP_PATH" -d /opt/app/deployments/ && ok "解压到 /opt/app/deployments/" || err "unzip 失败"
+        [ -d "$V004_PATH/meta" ] && ok "v004 已就绪" || err "解压后 v004 仍缺"
+    else
+        err "zip 不存在: $ZIP_PATH (请先用 MobaXterm SFTP 上传)"
+        echo "  上传路径: D:\\filework\\release-prep-worktree\\deploy-v20260703_002.zip"
+        echo "  目标: /opt/app/deploy-v20260703_002.zip"
+        echo ""
+        echo "  **没有 zip, 部署无法继续**"
+        exit 1
+    fi
+else
+    ok "v004 已解压 (跳过)"
+fi
+
 # ========================= PHASE 1: 停 v003 旧服务 =========================
 banner "PHASE 1: 停 v003 旧服务"
 
