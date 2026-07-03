@@ -214,12 +214,13 @@ banner "PHASE 2: 备份 + 复制 db"
 # 找 db 源
 if [ -z "$DB_SOURCE" ]; then
     CUR=$(current_version)
-    if [ -n "$CUR" ] && [ -f "$DEPLOYMENTS_DIR/$CUR/$ENTRY/architecture.db" ]; then
-        DB_SOURCE="$DEPLOYMENTS_DIR/$CUR/$ENTRY/architecture.db"
-        info "db 源: current ($CUR)"
-    elif [ -f "$VERSION_PATH/$ENTRY/architecture.db" ]; then
-        DB_SOURCE="$VERSION_PATH/$ENTRY/architecture.db"
-        info "db 源: zip 内置"
+    # [FIX 2026-07-03] 共享 SERVER_DIR (DEPLOYMENTS_DIR/$ENTRY, 不在子目录)
+    if [ -n "$CUR" ] && [ -f "$SERVER_DIR/architecture.db" ]; then
+        DB_SOURCE="$SERVER_DIR/architecture.db"
+        info "db 源: current ($CUR) - $SERVER_DIR"
+    elif [ -f "$SERVER_DIR/architecture.db" ]; then
+        DB_SOURCE="$SERVER_DIR/architecture.db"
+        info "db 源: zip 内置 - $SERVER_DIR"
     else
         warn "找不到 db 源, 跳过 db 复制"
     fi
@@ -230,7 +231,8 @@ fi
 if [ -n "$DB_SOURCE" ] && [ -f "$DB_SOURCE" ]; then
     BACKUP_DB="$BACKUP_DIR/architecture_$(basename $(dirname $DB_SOURCE))_$(date +%Y%m%d_%H%M%S).db"
     cp -p "$DB_SOURCE" "$BACKUP_DB" && ok "备份: $BACKUP_DB" || err "备份失败"
-    DB_DEST="$VERSION_PATH/$ENTRY/architecture.db"
+    # [FIX 2026-07-03] DB_DEST 共享在 SERVER_DIR 根 (跟 v002 一致)
+    DB_DEST="$SERVER_DIR/architecture.db"
     if [ "$DB_SOURCE" != "$DB_DEST" ]; then
         cp -p "$DB_SOURCE" "$DB_DEST" && ok "复制到 $DB_DEST" || err "复制失败"
     else
