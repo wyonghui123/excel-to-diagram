@@ -140,16 +140,25 @@ if [ "$STARTED" = false ]; then
     sleep 8
 fi
 
-# ========================= PHASE 3.5: 启 unified_server (8081) =========================
-banner "PHASE 3.5: 启 unified_server ($FRONTEND_PORT)"
-# unified 脚本位置: 优先 $SCRIPT_DIR (deploy_bundle/), 备选 $VERSION_PATH (旧 nohup)
-UNIFIED_SCRIPT="${ARG_UNIFIED:-$SCRIPT_DIR/unified_server.py}"
-if [ ! -f "$UNIFIED_SCRIPT" ]; then
-    UNIFIED_SCRIPT="$VERSION_PATH/unified_server.py"
-fi
-if [ -f "$UNIFIED_SCRIPT" ]; then
+# ========================= PHASE 3.5: 启 frontend (8081) =========================
+banner "PHASE 3.5: 启 frontend ($FRONTEND_PORT)"
+# 架构检测:
+#   - v004+:  server.py (backend) + unified_server.py (frontend 8081) 分开
+#   - v003:   server.py 单进程同时服务 backend + frontend (无 unified)
+# 通过 unified_server.py 是否存在判断
+
+UNIFIED_SCRIPT=""
+# 优先级: 用户指定 > 远端 VERSION_PATH > 远端当前 backend 路径
+for cand in "$ARG_UNIFIED" "$VERSION_PATH/unified_server.py" "$SCRIPT_DIR/unified_server.py"; do
+    if [ -n "$cand" ] && [ -f "$cand" ]; then
+        UNIFIED_SCRIPT="$cand"
+        break
+    fi
+done
+
+if [ -n "$UNIFIED_SCRIPT" ]; then
+    # v004+ 架构: 启 unified
     hr; echo "[start] unified: $UNIFIED_SCRIPT"
-    # 启 unified (假设 5000 端口, BACKEND_URL=http://127.0.0.1:${BACKEND_PORT})
     cd "$SCRIPT_DIR" 2>/dev/null || cd /
     nohup env BACKEND_PORT=$BACKEND_PORT PYTHONUNBUFFERED=1 $PY "$UNIFIED_SCRIPT" "$VERSION_PATH" > $LOG_DIR/frontend-${VERSION}-rollback.log 2>&1 &
     PID=$!
@@ -161,8 +170,22 @@ if [ -f "$UNIFIED_SCRIPT" ]; then
         warn "unified 启动后 $FRONTEND_PORT 未监听, 查 log"
     fi
 else
-    warn "unified 脚本不存在: $UNIFIED_SCRIPT"
-    warn "前端 $FRONTEND_PORT 不会启, 需手动启"
+    # v003 架构: 单 server.py 同时服务 backend + frontend
+    hr; echo "[架构检测] v003-style: $VERSION 用单 server.py 同时服务 $BACKEND_PORT (frontend + API)"
+    if ! is_port_listening $FRONTEND_PORT; then
+        if is_port_listening $BACKEND_PORT; then
+            # backend 已在 5000 跑, 前端共用 5000
+            # 调整: FRONTEND_PORT 也指 5000 (或添加映射)
+            warn "$FRONTEND_PORT 空闲但 $BACKEND_PORT 在监听"
+            warn "$VERSION 是单进程架构, 前端通过 $BACKEND_PORT 访问"
+            warn "如要 8081 前端分离, 需手动配 nginx/HAProxy"
+        else
+            err "$VERSION 用单进程, 但 $BACKEND_PORT 未在监听"
+            err "请检查 PHASE 3 backend 启动状态"
+        fi
+    else
+        ok "$FRONTEND_PORT 在监听 (v003 风格 backend 同时服务 frontend)"
+    fi
 fi
 
 # ========================= PHASE 4: 切链接 =========================
