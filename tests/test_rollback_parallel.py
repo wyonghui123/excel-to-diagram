@@ -2,6 +2,7 @@
 """
 test_rollback_parallel.py - 并行验证 rollback 流程, 不影响 current 部署
   v3 用 5002/8082 (测试端口, 避开 5001/8081 业务)
+  通过临时改 v3 .env 强制 PORT=5002, 避开 v3 server.py 强 check 8081
   启 v3 backend + unified, 跑健康检查, 清理
   验证 current 5001/8081 不受影响
 """
@@ -11,6 +12,7 @@ import time
 import signal
 import socket
 import subprocess
+import shutil
 import urllib.request
 import json
 from pathlib import Path
@@ -67,7 +69,6 @@ def banner(s):
 
 
 def port_listening(port):
-    """检查端口是否在监听"""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(2)
@@ -77,10 +78,8 @@ def port_listening(port):
 
 
 def http_get(url, timeout=HEALTH_TIMEOUT):
-    """GET URL, 返回 (status, body)"""
     try:
-        req = urllib.request.Request(url)
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
             return r.status, r.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as e:
         return e.code, e.read().decode("utf-8", errors="replace")
@@ -88,14 +87,10 @@ def http_get(url, timeout=HEALTH_TIMEOUT):
         return 0, str(e)
 
 
-def http_post(url, data, headers=None, timeout=HEALTH_TIMEOUT):
-    """POST URL, 返回 (status, body)"""
+def http_post(url, data, timeout=HEALTH_TIMEOUT):
     try:
         body = json.dumps(data).encode("utf-8")
-        h = {"Content-Type": "application/json"}
-        if headers:
-            h.update(headers)
-        req = urllib.request.Request(url, data=body, headers=h, method="POST")
+        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.status, r.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as e:
@@ -105,10 +100,7 @@ def http_post(url, data, headers=None, timeout=HEALTH_TIMEOUT):
 
 
 def kill_port(port):
-    """杀掉监听 port 的进程"""
     subprocess.run(["fuser", "-k", f"{port}/tcp"], stderr=subprocess.DEVNULL)
-    time.sleep(1)
-    subprocess.run(["pkill", "-9", "-f", f":{port}"], stderr=subprocess.DEVNULL)
     time.sleep(1)
 
 
@@ -160,17 +152,19 @@ if port_listening(V3_FRONTEND_PORT):
     kill_port(V3_FRONTEND_PORT)
 
 if port_listening(V3_BACKEND_PORT) or port_listening(V3_FRONTEND_PORT):
-    fail("5002/8082 杀不干净 - 不能测试")
+    fail("5002/8082 杀不干净")
     sys.exit(1)
 pass_("5002/8082 干净")
 
 # ============================================================
-# PHASE 2: 检查 v3 文件
+# PHASE 2: 检查 v3 文件 + 备份 .env
 # ============================================================
-banner("PHASE 2: 验证 v3 部署文件")
+banner("PHASE 2: 验证 v3 部署文件 + 备份 .env")
 
 V3_PATH = Path(DEPLOYMENTS_DIR) / V3_VERSION
 V3_SERVER = V3_PATH / "meta" / "server.py"
+V3_ENV = V3_PATH / ".env"
+V3_ENV_BACKUP = Path("/tmp") / f".env.v3.backup.{int(time.time())}"
 
 if not V3_PATH.is_dir():
     fail(f"v3 路径不存在: {V3_PATH}")
@@ -179,6 +173,29 @@ if not V3_SERVER.is_file():
     fail(f"v3 server.py 不存在: {V3_SERVER}")
     sys.exit(1)
 pass_(f"v3 文件在: {V3_PATH}")
+
+# 备份 .env
+ENV_MODIFIED = False
+if V3_ENV.is_file():
+    shutil.copy(V3_ENV, V3_ENV_BACKUP)
+    info(f"备份 .env → {V3_ENV_BACKUP}")
+
+    # 强制改 PORT=5002
+    lines = V3_ENV.read_text(encoding="utf-8", errors="replace").split("\n")
+    new_lines = []
+    port_found = False
+    for line in lines:
+        if line.strip().startswith("PORT="):
+            new_lines.append(f"PORT={V3_BACKEND_PORT}")
+            port_found = True
+        else:
+            new_lines.append(line)
+    if not port_found:
+        new_lines.append(f"PORT={V3_BACKEND_PORT}")
+    V3_ENV.write_text("\n".join(new_lines), encoding="utf-8")
+    ENV_MODIFIED = True
+    info(f"改 .env: PORT={V3_BACKEND_PORT}")
+    pass_("v3 .env 改 PORT=5002")
 
 # ============================================================
 # PHASE 3: 启 v3 backend 5002
@@ -206,17 +223,18 @@ v3_proc = subprocess.Popen(
     stderr=subprocess.STDOUT,
 )
 info(f"v3 backend PID={v3_proc.pid}")
-time.sleep(6)
+time.sleep(8)
 
 if not port_listening(V3_BACKEND_PORT):
     fail(f"v3 backend {V3_BACKEND_PORT} 没启")
     with open("/tmp/v3-backend-test.log") as f:
-        log(f.read()[-1000:])
+        log(f.read()[-1500:])
     kill_pid(v3_proc.pid)
+    if ENV_MODIFIED:
+        shutil.copy(V3_ENV_BACKUP, V3_ENV)
     sys.exit(1)
 pass_(f"v3 backend {V3_BACKEND_PORT} listening")
 
-# 健康
 status, body = http_get(f"http://127.0.0.1:{V3_BACKEND_PORT}/api/v1/enum-types")
 if status == 200:
     pass_("v3 backend health 200")
@@ -225,6 +243,8 @@ else:
     with open("/tmp/v3-backend-test.log") as f:
         log(f.read()[-500:])
     kill_pid(v3_proc.pid)
+    if ENV_MODIFIED:
+        shutil.copy(V3_ENV_BACKUP, V3_ENV)
     sys.exit(1)
 
 # ============================================================
@@ -245,9 +265,11 @@ time.sleep(5)
 if not port_listening(V3_FRONTEND_PORT):
     fail(f"v3 unified {V3_FRONTEND_PORT} 没启")
     with open("/tmp/v3-frontend-test.log") as f:
-        log(f.read()[-1000:])
+        log(f.read()[-1500:])
     kill_pid(v3_proc.pid)
     kill_pid(unified_proc.pid)
+    if ENV_MODIFIED:
+        shutil.copy(V3_ENV_BACKUP, V3_ENV)
     sys.exit(1)
 pass_(f"v3 unified {V3_FRONTEND_PORT} listening")
 
@@ -256,14 +278,12 @@ pass_(f"v3 unified {V3_FRONTEND_PORT} listening")
 # ============================================================
 banner("PHASE 5: 验证 v3 unified 8082 业务")
 
-# 5a: GET /
 status, _ = http_get(f"http://127.0.0.1:{V3_FRONTEND_PORT}/")
 if status == 200:
     pass_("v3 unified GET / 200")
 else:
     fail(f"v3 unified GET / {status}")
 
-# 5b: login
 status, body = http_post(
     f"http://127.0.0.1:{V3_FRONTEND_PORT}/api/v1/auth/login",
     {"username": "admin", "password": "admin123"},
@@ -280,13 +300,7 @@ if token:
 else:
     fail(f"v3 login FAIL: {body[:200]}")
 
-# 5c: BO endpoint (with token)
 if token:
-    status, _ = http_get(
-        f"http://127.0.0.1:{V3_FRONTEND_PORT}/api/v1/menu-permission/visible",
-        timeout=HEALTH_TIMEOUT,
-    )
-    # 用 urllib 加 header
     try:
         req = urllib.request.Request(
             f"http://127.0.0.1:{V3_FRONTEND_PORT}/api/v1/menu-permission/visible",
@@ -301,7 +315,6 @@ if token:
     else:
         warn(f"v3 BO endpoint {status} (v3 可能用不同 endpoint)")
 
-# 5d: 无 token 应该 401
 status, _ = http_get(f"http://127.0.0.1:{V3_FRONTEND_PORT}/api/v1/users/me")
 if status == 401:
     pass_("v3 无 token BO endpoint 401 (符合预期)")
@@ -325,7 +338,6 @@ if status == 200:
 else:
     fail(f"current {V4_FRONTEND_PORT} 受影响 (got: {status})")
 
-# current 链接
 try:
     current_link = os.readlink("/opt/app/current")
     if V4_VERSION in current_link:
@@ -338,13 +350,17 @@ except Exception as e:
 # ============================================================
 # PHASE 7: 清理
 # ============================================================
-banner("PHASE 7: 清理 v3 5002/8082")
+banner("PHASE 7: 清理 v3 5002/8082 + 恢复 .env")
+
+# 恢复 .env 第一
+if ENV_MODIFIED:
+    shutil.copy(V3_ENV_BACKUP, V3_ENV)
+    V3_ENV_BACKUP.unlink(missing_ok=True)
+    pass_(".env 恢复")
 
 kill_pid(v3_proc.pid)
 kill_pid(unified_proc.pid)
 time.sleep(2)
-
-# 兜底用 fuser
 kill_port(V3_BACKEND_PORT)
 kill_port(V3_FRONTEND_PORT)
 
@@ -358,7 +374,6 @@ if port_listening(V3_FRONTEND_PORT):
 else:
     pass_("v3 8082 killed")
 
-# 清理 log
 v3_log.close()
 unified_log.close()
 try:
