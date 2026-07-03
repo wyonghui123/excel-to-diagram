@@ -68,12 +68,9 @@ USE_SYSTEMD=$([ "$USE_SYSTEMD" = "true" ] && echo "no" || echo "yes")
 
 # 解析版本路径
 VERSION_PATH="$DEPLOY_ROOT/deployments/$VERSION"
-if [ ! -d "$VERSION_PATH" ]; then
-    die "版本目录不存在: $VERSION_PATH"
-fi
-
-ENTRY=$(detect_entry_point "$VERSION_PATH") || die "找不到 server.py 入口"
-SERVER_DIR="$VERSION_PATH/$ENTRY"
+# [FIX 2026-07-03] 共享 DEPLOYMENTS_DIR 根 (zip 顶层是 meta/, 不在子目录)
+# rollback 也用 SERVER_DIR=$DEPLOYMENTS_DIR/$ENTRY (根共享)
+SERVER_DIR="$DEPLOY_ROOT/deployments/meta"
 
 mkdir -p "$LOG_DIR"
 

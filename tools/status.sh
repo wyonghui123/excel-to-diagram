@@ -179,12 +179,13 @@ banner "版本 + 文件"
 
 if [ -d "$DEPLOYMENTS_DIR/$CURRENT_VERSION" ]; then
     VERSION_PATH="$DEPLOYMENTS_DIR/$CURRENT_VERSION"
-    ENTRY=$(find "$VERSION_PATH" -name "server.py" -type f 2>/dev/null | head -1)
-    if [ -n "$ENTRY" ]; then
+    # [FIX 2026-07-03] 共享 DEPLOYMENTS_DIR 根 (zip 顶层是 meta/, 不在子目录)
+    SERVER_DIR="$DEPLOYMENTS_DIR/meta"
+    if [ -f "$SERVER_DIR/server.py" ]; then
         ok "版本路径: $VERSION_PATH"
-        ok "server.py: $ENTRY"
+        ok "server.py: $SERVER_DIR/server.py (根共享)"
     else
-        fail "$VERSION_PATH 没 server.py"
+        fail "$SERVER_DIR 没 server.py"
     fi
 else
     fail "版本路径不存在: $DEPLOYMENTS_DIR/$CURRENT_VERSION"

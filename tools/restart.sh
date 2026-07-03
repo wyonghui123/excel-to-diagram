@@ -98,19 +98,12 @@ if [ ! -L "$DEPLOY_ROOT/current" ]; then
 fi
 CURRENT_LINK=$(readlink "$DEPLOY_ROOT/current")
 CURRENT_VERSION=$(basename "$CURRENT_LINK")
-VERSION_PATH="$DEPLOYMENTS_DIR/$CURRENT_VERSION"
+# [FIX 2026-07-03] 共享 DEPLOYMENTS_DIR 根 (zip 顶层是 meta/, 不在子目录)
+VERSION_PATH="$DEPLOYMENTS_DIR/$CURRENT_VERSION"  # 保留用于 current 链接
+ENTRY="meta"
+SERVER_DIR="$DEPLOYMENTS_DIR/$ENTRY"
 ok "current: $CURRENT_VERSION"
-ok "version_path: $VERSION_PATH"
-
-# 检测 entry
-ENTRY=$(find "$VERSION_PATH" -name "server.py" -type f 2>/dev/null | head -1)
-if [ -z "$ENTRY" ]; then
-    fail "server.py 找不到: $VERSION_PATH"
-    exit 2
-fi
-SERVER_DIR=$(dirname "$ENTRY")
-ok "entry: $ENTRY"
-ok "server_dir: $SERVER_DIR"
+ok "server_dir: $SERVER_DIR (根共享, zip 顶层 meta/)"
 
 # ============================================================
 # PHASE 1: 停旧进程
