@@ -131,18 +131,47 @@ const coordinator = inject('refreshCoordinator', null)
 //   修复：route 切走时 objectType 变 undefined 不向下传；用 lastValidObjectType
 //   缓存上次的有效值，DetailPage 的 props 保持稳定，状态完整保留。
 //   真正"切到不同对象"靠 effectiveObjectType !== lastValidObjectType 判断。
+//
+//   [FIX BUG-V037 2026-07-03] 跨对象 + add 场景：rawObjectType 真切到不同有效值
+//   时必须立即同步 lastValidObjectType 与 lastValidId，否则
+//   "详情页 → 列表 → 新建另一个对象" 会拿到上一个对象的缓存。
+//   例: /detail/user/123 → /detail/user_group?mode=add
+//     - rawId=undefined (URL 无 id 段)
+//     - 旧 watch 不刷新 lastValidObjectType → objectType='user' (缓存) ❌
+//     - 同时 lastValidId='123' (详情缓存) → id='123' ❌ (新建应为空)
+//     - 表现: 进入"新建用户"页 (显示 123 详情内容), 而非"新建用户组"
+//   修复: rawObjectType 真切到不同对象 (newType 有效且与缓存不同) 立即同步;
+//         add 模式 (newId=undefined) 同时清空 lastValidId 防止它污染新建表单;
+//         tab 切走 (newType=undefined) 不进任何分支, 保留缓存.
 const rawObjectType = computed(() => route.params.objectType)
 const rawId = computed(() => route.params.id)
 const lastValidObjectType = ref(null)
 const lastValidId = ref(null)
 watch([rawObjectType, rawId], ([newType, newId]) => {
+  // [BUG-V037] 切到不同有效对象 → 立即同步 lastValidObjectType
+  if (newType && newType !== lastValidObjectType.value) {
+    lastValidObjectType.value = newType
+    // add 模式无 id 段 → 清空 lastValidId, 防 "详情→新建" 错对象残留缓存 id
+    if (!newId) lastValidId.value = null
+  }
   if (newType && newId) {
     lastValidObjectType.value = newType
     lastValidId.value = newId
   }
 }, { immediate: true })
 const objectType = computed(() => lastValidObjectType.value || rawObjectType.value)
-const id = computed(() => lastValidId.value || rawId.value)
+// [FIX v2b 2026-06-29] mode='add' 时强制 id='new' (而不是 lastValidId 缓存的 id)
+//   例: 用户从 DEMOPROD (id=533) 详情回 list → 点"新建"
+//     URL=/detail/product?mode=add, lastValidId='533' (详情缓存), rawId=undefined
+//     旧 id = lastValidId.value || rawId.value = '533'
+//     → DetailPage 收到 id='533', mode='add' → 进入"新建"模式但加载 533 数据 → 显示 DEMOPROD 预填 ✗
+//   修复: queryMode='add' 时, id 必须是 'new' (告诉 DetailPage 这是新建)
+//         id='new' → DetailPage 不 fetch 533 数据 → 表单空白 ✓
+//   [BUG-V037 2026-07-03] 同样适用于跨对象新增: 上一个对象的 lastValidId 残留 → 错对象新建
+const id = computed(() => {
+  if (rawMode.value === 'add') return 'new'
+  return lastValidId.value || rawId.value
+})
 // [FIX 2026-06-18] mode 也需要缓存：add 模式下 route.query.mode='add'，
 //   切走时 query 清空 → mode 退到 'view'，切回时又变 'add'，触发
 //   DetailPage watch 的 "same object mode change" 分支走
@@ -155,7 +184,20 @@ watch(rawMode, (newMode) => {
     lastValidMode.value = newMode
   }
 }, { immediate: true })
-const mode = computed(() => lastValidMode.value || rawMode.value || 'view')
+// [FIX v2 2026-06-29] 进有效 id 时强制 'view', 即使 lastValidMode='add' (新建失败场景)
+//   例: 用户在 /detail/product?mode=add 失败 → 回 list → 进 DEMOPROD (id=533)
+//     - lastValidMode='add' (新建缓存), rawMode=undefined (URL 无 ?mode=)
+//     - 不强制 view → mode='add' → DetailPage 进入"新建"模式但有 id → 显示空表单 ✗
+//     - 强制 view → mode='view' → DetailPage 正常加载 533 详情 ✓
+//   [BUG-V037 2026-07-03] 同样适用于跨对象: 新建 A 失败 → 进 B 详情 (lastValidMode 残留 'add')
+const mode = computed(() => {
+  const currentId = id.value
+  const queryMode = rawMode.value
+  if (currentId && currentId !== 'new' && !queryMode) {
+    return 'view'
+  }
+  return lastValidMode.value || queryMode || 'view'
+})
 // [FIX 2026-06-29] detailPageMountKey 用 objectType+id 派生, 切不同对象时强制 remount DetailPage
 //   之前用 ref(0) 常量, 配合 detailPageEverMounted=true, keep-alive + 永远同 key → DetailPage 永不重建
 //   导致: 用户从 TTT01 失败回滚 → 进 DEMOPROD 详情 → 仍显示 TTT01 数据 (内部 data 缓存)
@@ -164,11 +206,17 @@ const mode = computed(() => lastValidMode.value || rawMode.value || 'view')
 //   副作用: internalEditing 等状态会重置 (用户期望: 进新对象就该重置, 所以正确)
 //   注意: route params 变化 (undefined → 有效 → undefined) 不会触发此 key 变 (因为 lastValid 缓存)
 //         只在 newType&&newId 都有效时才更新 key, 切走不更新
+//   [FIX v3 2026-06-29] key 加入 mode, 确保 view→add 切换时强制 remount
+//     - 之前: DEMOPROD 详情 (product-533) → 新建 (product-533) 同 key → 组件复用 → 表单残留 DEMOPROD 数据
+//     - 修复后: DEMOPROD 详情 (product-533-view) → 新建 (product-533-add) key 不同 → 强制重建 → 空白表单
+//   [BUG-V037 2026-07-03] key 加入 mode 同样解决跨对象 add: user/123-view → user_group-add
+//     → key 全异 → Vue 强制重建 → 加载 user_group 元数据 (而不是 user 缓存)
 const detailPageMountKey = computed(() => {
   const t = lastValidObjectType.value || rawObjectType.value
   const i = lastValidId.value || rawId.value
   if (!t || !i) return 0
-  return `${t}-${i}`
+  const m = mode.value
+  return `${t}-${i}-${m}`
 })
 // [FIX 2026-06-18] 首次 mount 后设为 true，v-if 用这个标记
 //   目的：ObjectDetailPage 被 keep-alive 缓存，detailPageEverMounted 不会重置，
