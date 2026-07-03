@@ -170,7 +170,6 @@ case "$LOGIN_RESULT" in
     FAIL:*) fail "login FAIL: ${LOGIN_RESULT#FAIL:}" ;;
     *) fail "login FAIL (parse: $LOGIN_RESULT)" ;;
 esac
-fi
 
 # ============================================================
 # 版本 + 文件
