@@ -176,18 +176,20 @@ esac
 # ============================================================
 banner "版本 + 文件"
 
-if [ -d "$DEPLOYMENTS_DIR/$CURRENT_VERSION" ]; then
-    VERSION_PATH="$DEPLOYMENTS_DIR/$CURRENT_VERSION"
-    # [FIX 2026-07-03] 共享 DEPLOYMENTS_DIR 根 (zip 顶层是 meta/, 不在子目录)
-    SERVER_DIR="$DEPLOYMENTS_DIR/meta"
-    if [ -f "$SERVER_DIR/server.py" ]; then
-        ok "版本路径: $VERSION_PATH"
-        ok "server.py: $SERVER_DIR/server.py (根共享)"
+# [FIX 2026-07-03] current 链接指向子目录 (e.g. v20260703_003), 但实际业务跑在 SERVER_DIR
+# 共享根模式: 即使子目录不存在, 只要 SERVER_DIR 完整就 OK
+SERVER_DIR="$DEPLOYMENTS_DIR/meta"
+if [ -f "$SERVER_DIR/server.py" ]; then
+    if [ -d "$DEPLOYMENTS_DIR/$CURRENT_VERSION" ]; then
+        ok "版本子目录: $DEPLOYMENTS_DIR/$CURRENT_VERSION"
     else
-        fail "$SERVER_DIR 没 server.py"
+        # 子目录不存在但 SERVER_DIR 在 - 说明是 current 链接遗留指向不存在的子目录
+        # 这不影响业务 (业务跑在共享 SERVER_DIR), 只 warn
+        warn "版本子目录不存在: $DEPLOYMENTS_DIR/$CURRENT_VERSION (current 链接残留, 不影响业务)"
     fi
+    ok "server.py: $SERVER_DIR/server.py (根共享)"
 else
-    fail "版本路径不存在: $DEPLOYMENTS_DIR/$CURRENT_VERSION"
+    fail "SERVER_DIR 缺 server.py: $SERVER_DIR"
 fi
 
 # frontend_dist_files
