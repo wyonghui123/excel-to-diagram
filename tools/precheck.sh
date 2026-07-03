@@ -200,7 +200,7 @@ fi
 # ============================================================
 # Check 7: 网络 + 时间
 # ============================================================
-hr; echo "[Check 7/7] 网络 + 时间"
+hr; echo "[Check 7/8] 网络 + 时间"
 # 网络测 (host)
 if ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1; then
     run_check "外网可达" pass "可以下载依赖"
@@ -210,6 +210,21 @@ fi
 # 本机时间
 INFO_TIME=$(date -Iseconds 2>/dev/null || date)
 run_check "本机时间: $INFO_TIME" pass
+
+# ============================================================
+# Check 8: frontend_dist_files (避免 8081 404 灾难)
+# ============================================================
+hr; echo "[Check 8/8] frontend_dist_files"
+FRONTEND_DIR="$DEPLOYMENTS_DIR/frontend_dist_files"
+if [ -d "$FRONTEND_DIR" ]; then
+    if [ -f "$FRONTEND_DIR/index.html" ]; then
+        run_check "frontend_dist_files 已解压: $FRONTEND_DIR" pass
+    else
+        run_check "frontend_dist_files 缺 index.html: $FRONTEND_DIR" fail "deploy 时会重新解压"
+    fi
+else
+    run_check "frontend_dist_files 缺: $FRONTEND_DIR" fail "deploy 时 PHASE 0.5 会重新解压"
+fi
 
 # ============================================================
 # SUMMARY
