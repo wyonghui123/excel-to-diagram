@@ -1,4 +1,4 @@
-# DEPLOY_SOP.md - Excel to Diagram 部署标准操作流程 (SOP v2.0)
+# DEPLOY_SOP.md - Excel to Diagram 部署标准操作流程 (SOP v2.1)
 
 > **核心原则**: 事实优先于推理, 验证先于执行, 单步可回滚。
 
@@ -27,6 +27,8 @@
 | `tools/deploy_step.sh` | 单步部署 + 验证 | 每个 step 必跑 |
 | `tools/verify_deploy.py` | Playwright 端到端验证 | 部署后必跑 |
 | `tools/rollback.sh` | 一键回滚 | 出问题必跑 |
+| `tools/mock_remote.sh` | Mock 远端环境 (Linux 部署) | 演练用 |
+| `tools/self_test.py` | **SOP 自身演练 (跨平台)** | **修改 SOP 后必跑** |
 
 ---
 
@@ -236,6 +238,46 @@ bash tools/rollback.sh
 | 日期 | 改动 | 原因 |
 |------|------|------|
 | 2026-07-03 | 初始 v2.0 | 反思 v004 部署失败, 重写 SOP |
+| 2026-07-03 | v2.1: 加 self_test.py + mock backend 验证 | SOP 工具需要演练才能信 |
+
+---
+
+## 🧪 Self-Test (SOP 自身验证)
+
+**目的**: 任何修改 SOP 工具后, 跑 self_test 验证自身可用。
+
+```bash
+# 跨平台 (Windows/Linux/macOS)
+python tools/self_test.py
+
+# 或 Linux + bash
+bash tools/self_test.sh
+```
+
+**预期输出**:
+```
+PASSED:  26
+FAILED:  0
+WARNINGS: 2  # bash 不存在等环境警告
+ALL TESTS PASSED ✓
+```
+
+**self_test 覆盖**:
+1. 所有 6 个 SOP 工具文件存在
+2. Python 文件 syntax check
+3. Shell 文件 syntax check (有 bash 时)
+4. 工具 help 信息
+5. Mock 环境创建 (mock_remote.sh 替代)
+6. Mock v003 backend 启动 + API
+7. Mock v004 backend (telemetry 缺失, try/except 验证)
+8. diff_local_remote.py 跑本地
+9. verify_deploy.py 静态检查
+10. 清理 mock 环境
+
+**self_test 失败的修复**:
+- 检查 [PASS]/[FAIL] 数量
+- 看 traceback 找具体哪个 step 失败
+- 修复后重跑
 
 ---
 

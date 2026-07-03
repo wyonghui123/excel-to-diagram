@@ -31,8 +31,8 @@ hr
 echo -e "${CYAN}  REMOTE DEPLOYMENT PRE-CHECK (PHASE 0)${NC}"
 echo -e "${CYAN}  Host:    $(hostname -f 2>/dev/null || hostname)${NC}"
 echo -e "${CYAN}  Time:    $(date -Iseconds 2>/dev/null || date)${NC}"
-echo -e "${CYAN}  OS:      $(uname -a)${NC}"
-echo -e "${CYAN}  User:    $(whoami)${NC}"
+echo -e "${CYAN}  OS:      $(uname -a 2>/dev/null || echo 'unknown')${NC}"
+echo -e "${CYAN}  User:    $(whoami 2>/dev/null || echo 'unknown')${NC}"
 hr
 
 # ============================================================
@@ -53,7 +53,7 @@ if command -v systemctl >/dev/null 2>&1; then
         echo ""
     done
 else
-    echo "  systemctl not found"
+    echo "  systemctl not found (可能不是 systemd 系统)"
 fi
 
 # ============================================================

@@ -13,6 +13,7 @@ import argparse
 import os
 import sys
 import json
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
@@ -32,18 +33,22 @@ def get_local_structure(root: Path) -> Dict:
 
 def get_remote_structure(ssh_target: str, remote_root: str) -> Dict:
     """通过 SSH 拉取远端目录结构"""
+    # 检查 ssh 是否存在
+    if not shutil.which("ssh"):
+        return {"files": [], "dirs": [], "error": "ssh 命令不存在"}
     ssh_cmd = [
         "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+        "-o", "StrictHostKeyChecking=accept-new",
         ssh_target,
-        f"cd {remote_root} && find . -type f -o -type d"
+        f"cd {remote_root} && find . -type f -o -type d 2>/dev/null"
     ]
     try:
         result = subprocess.run(
             ssh_cmd, capture_output=True, text=True, timeout=30
         )
         if result.returncode != 0:
-            print(f"SSH failed: {result.stderr}", file=sys.stderr)
-            return {"files": [], "dirs": [], "error": result.stderr}
+            err = result.stderr.strip() or f"SSH exit {result.returncode}"
+            return {"files": [], "dirs": [], "error": err}
         files = []
         dirs = []
         for line in result.stdout.strip().split("\n"):
@@ -57,7 +62,9 @@ def get_remote_structure(ssh_target: str, remote_root: str) -> Dict:
                 files.append(rel)
         return {"files": files, "dirs": dirs}
     except subprocess.TimeoutExpired:
-        return {"files": [], "dirs": [], "error": "SSH timeout"}
+        return {"files": [], "dirs": [], "error": "SSH timeout (30s)"}
+    except FileNotFoundError:
+        return {"files": [], "dirs": [], "error": "ssh 不在 PATH"}
 
 
 def get_local_imports(root: Path) -> List[str]:
