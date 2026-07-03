@@ -171,8 +171,8 @@ def t9():
     required = [
         "deploy.sh", "precheck.sh", "smoke_test.sh", "rollback.sh",
         "diagnose.sh", "status.sh", "restart.sh", "watch.sh",
-        "deploy_history.sh",  # NEW
-        "unified_server.py", "deploy-v20260703_002.zip",
+        "deploy_history.sh",
+        "unified_server.py",
     ]
     missing = []
     for f in required:
@@ -180,9 +180,14 @@ def t9():
             missing.append(f)
     if missing:
         raise AssertionError(f"deploy_bundle/ 缺: {missing}")
-    print(f"  deploy_bundle/ 含 10 工具 + zip + 26 测试")
+    # 检查 zip 存在 (任一 deploy-v*.zip)
+    zips = list(DEPLOY_BUNDLE.glob("deploy-v*.zip"))
+    if not zips:
+        raise AssertionError("deploy_bundle/ 缺 deploy-v*.zip")
+    latest_zip = max(zips, key=lambda p: p.stat().st_mtime)
+    print(f"  deploy_bundle/ 含 10 工具 + {latest_zip.name} + 27 测试")
 
-test("deploy_bundle/ 完整 (10 工具 + 26 测试 + zip)", t9)
+test("deploy_bundle/ 完整 (10 工具 + 27 测试 + zip)", t9)
 
 
 # ============================================================
