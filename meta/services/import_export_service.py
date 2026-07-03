@@ -5389,8 +5389,10 @@ class ImportExportService:
                         field_value = record.get(field.name) or record.get(field.id)
                         if field_value and str(field_value).strip():
                             field_value_str = str(field_value).strip()
-                            # _validate_enum_value 内部会拆解 "CODE - LABEL" 格式
-                            if not self._validate_enum_value(enum_type_ref, field_value_str):
+                            # [BUG-V040 2026-07-04] 把当前 field 作为 meta_field 传过去,
+                            # 让 _validate_enum_value 走 validate_enum_value_with_field 路径,
+                            # 兼容 schema inline enum_values (例 user.status 无 DB seed).
+                            if not self._validate_enum_value(enum_type_ref, field_value_str, meta_field=field):
                                 field_label = field.name or field.id
                                 errors.append({
                                     "sheet": sheet["name"],
@@ -5614,15 +5616,22 @@ class ImportExportService:
             "warnings": warnings[:20]  # [NEW v1.2.16 2026-06-20] 区分 warnings
         }
 
-    def _validate_enum_value(self, enum_type_id: str, code: str) -> bool:
+    def _validate_enum_value(self, enum_type_id: str, code: str, meta_field=None) -> bool:
         """验证枚举值是否有效
 
         [FR-006] 委托到 enum_resolver.validate_enum_value
         [FIX 2026-06-16 BMRD] 如果 value 是 "CODE - LABEL" 格式 (从下拉框选择的值),
         先拆解成 CODE 再验证, 避免 "REFERENCES - 引用" 整个字符串被传过去.
+        [FIX BUG-V040 2026-07-04] 增加 meta_field 参数: 优先查 inline enum_values 兼容
+        schema 内联枚举 (例 user.yaml status: [active, inactive, locked] 无 DB seed)
         """
-        from meta.core.enum_resolver import validate_enum_value
         code = self._parse_enum_display_to_code(code)
+        # [BUG-V040 2026-07-04] 如果有 meta_field 上下文, 委托给 inline-aware 验证
+        if meta_field is not None:
+            from meta.core.enum_resolver import validate_enum_value_with_field
+            return validate_enum_value_with_field(meta_field, code, self.data_source)
+        # 否则用原 DB-only 验证 (向后兼容测试和现有调用方)
+        from meta.core.enum_resolver import validate_enum_value
         return validate_enum_value(enum_type_id, code, self.data_source)
 
     def _parse_enum_display_to_code(self, value) -> str:

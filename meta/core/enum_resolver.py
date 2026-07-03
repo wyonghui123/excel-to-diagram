@@ -86,7 +86,7 @@ def get_enum_type_id(meta_field) -> Optional[str]:
 
 
 def validate_enum_value(enum_type_id: str, code: str, data_source) -> bool:
-    """验证枚举值是否有效
+    """验证枚举值是否有效 (DB only)
 
     Args:
         enum_type_id: 枚举类型 ID（如 'relation_type'）
@@ -96,6 +96,12 @@ def validate_enum_value(enum_type_id: str, code: str, data_source) -> bool:
     Returns:
         True 表示有效，False 表示无效。
         验证异常时默认返回 True（与现有行为一致，避免误报）。
+
+    [BUG-V040 2026-07-04] 此函数仅查 DB enum_values 表, 不查 schema inline enum_values.
+    对于仅在 schema inline enum_values 中定义、且没有 DB seed 的枚举
+    (例 user.yaml status 字段 inline {active, inactive, locked}),
+    此函数会一直返回 False → 误报"枚举值无效".
+    推荐使用 validate_enum_value_with_field(meta_field, ...) 替代本函数.
     """
     try:
         sql = "SELECT COUNT(*) FROM enum_values WHERE enum_type_id = ? AND code = ? AND is_active = 1"
@@ -104,3 +110,46 @@ def validate_enum_value(enum_type_id: str, code: str, data_source) -> bool:
         return result[0] > 0 if result else False
     except Exception:
         return True
+
+
+def validate_enum_value_with_field(meta_field, code: str, data_source) -> bool:
+    """[NEW BUG-V040 2026-07-04] 验证枚举值, 兼容 schema inline enum_values
+
+    优先级:
+      1. schema inline enum_values (例 user.yaml status: [active, inactive, locked])
+      2. DB enum_values 表 (例 relation_type, direction 等已 seed 的枚举)
+
+    背景:
+      之前 import_export_service._validate_enum_value 只走 validate_enum_value (仅查 DB),
+      对于只在 schema inline 声明的 enum 字段, DB 没有 seed 记录 → 误报"枚举值无效".
+      导出 Excel 时 schema inline enum_values 序列化为 "CODE - LABEL" 格式,
+      用户拿这个 Excel 再导入时 _parse_enum_display_to_code 拆出 CODE,
+      然后 _validate_enum_value 查 DB 失败, 用户无法导入 → BUG-V040.
+
+    Args:
+        meta_field: MetaField 实例 (含 enum_values inline list 和 value_help)
+        code: 枚举值编码 (已通过 _parse_enum_display_to_code 拆解)
+        data_source: 数据源实例
+
+    Returns:
+        True 表示有效, False 表示无效.
+        无法判断时返回 True (与 validate_enum_value 默认行为一致, 避免误报).
+    """
+    # 1. 优先: meta_field.inline enum_values (静态 schema 内联)
+    static_enum = getattr(meta_field, 'enum_values', None)
+    if static_enum:
+        for v in static_enum:
+            if isinstance(v, dict):
+                vcode = v.get('value')
+                if vcode is not None and str(vcode) == str(code):
+                    return True
+        # 如果有 static enum 但 code 不在列表中 → 确定无效 (无需再查 DB)
+        return False
+
+    # 2. fallback: DB enum_values 表
+    enum_type_id = get_enum_type_id(meta_field)
+    if enum_type_id:
+        return validate_enum_value(enum_type_id, code, data_source)
+
+    # 3. 实在查不到 enum_type_id, fallback True (避免误报)
+    return True
