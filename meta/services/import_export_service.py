@@ -873,18 +873,24 @@ class ImportExportService:
         ws_meta.cell(row=5, column=2, value=", ".join(included_names)).font = ds.VALUE_FONT
 
         # 上下文信息（仅 selected_types 模式有）
-        ws_meta.cell(row=7, column=1, value="上下文信息").font = ds.SECTION_FONT
-        ws_meta.cell(row=7, column=1).fill = ds.SECTION_FILL
-        ws_meta.cell(row=8, column=1, value="产品编码").font = ds.LABEL_FONT
-        ws_meta.cell(row=8, column=2, value=product_code).font = ds.VALUE_FONT
-        ws_meta.cell(row=9, column=1, value="产品名称").font = ds.LABEL_FONT
-        ws_meta.cell(row=9, column=2, value=product_name).font = ds.VALUE_FONT
-        ws_meta.cell(row=10, column=1, value="版本编码").font = ds.LABEL_FONT
-        ws_meta.cell(row=10, column=2, value=version_code).font = ds.VALUE_FONT
-        ws_meta.cell(row=11, column=1, value="版本名称").font = ds.LABEL_FONT
-        ws_meta.cell(row=11, column=2, value=version_name).font = ds.VALUE_FONT
-        ws_meta.cell(row=12, column=1, value="版本ID").font = ds.LABEL_FONT
-        ws_meta.cell(row=12, column=2, value=str(filters.get('version_id', '')) if filters else '').font = ds.VALUE_FONT
+        # [BUG-FIX 2026-07-03] 只有 filters 含 version_id 时才写"上下文信息" section
+        #   之前是无条件写, 导致 single mode (无 version_id) 出现 5 行空字符串
+        #   浪费 6 行 (含 section header), 让用户误以为导出包含上下文信息
+        #   修复后: 单对象导出 (无 version_id) 跳过整个 section, 行布局紧凑
+        has_version_ctx = bool(filters and self._normalize_scalar_id(filters.get('version_id')))
+        if has_version_ctx:
+            ws_meta.cell(row=7, column=1, value="上下文信息").font = ds.SECTION_FONT
+            ws_meta.cell(row=7, column=1).fill = ds.SECTION_FILL
+            ws_meta.cell(row=8, column=1, value="产品编码").font = ds.LABEL_FONT
+            ws_meta.cell(row=8, column=2, value=product_code).font = ds.VALUE_FONT
+            ws_meta.cell(row=9, column=1, value="产品名称").font = ds.LABEL_FONT
+            ws_meta.cell(row=9, column=2, value=product_name).font = ds.VALUE_FONT
+            ws_meta.cell(row=10, column=1, value="版本编码").font = ds.LABEL_FONT
+            ws_meta.cell(row=10, column=2, value=version_code).font = ds.VALUE_FONT
+            ws_meta.cell(row=11, column=1, value="版本名称").font = ds.LABEL_FONT
+            ws_meta.cell(row=11, column=2, value=version_name).font = ds.VALUE_FONT
+            ws_meta.cell(row=12, column=1, value="版本ID").font = ds.LABEL_FONT
+            ws_meta.cell(row=12, column=2, value=str(filters.get('version_id', '')) if filters else '').font = ds.VALUE_FONT
 
         # 检查是否有任何对象支持 CUD 操作
         has_cud = any(_has_cud_actions(registry.get(ot)) for ot in ordered_types if registry.get(ot))
@@ -892,9 +898,13 @@ class ImportExportService:
         # 检查是否所有对象都是只读的
         all_readonly = all(not _has_cud_actions(registry.get(ot)) for ot in ordered_types if registry.get(ot))
 
-        # [SSOT 2026-06-08] 使用 _write_meta_sheet_operations（从 row 14 开始）
+        # [SSOT 2026-06-08] 使用 _write_meta_sheet_operations
+        # [BUG-FIX 2026-07-03] start_row 根据是否有 version_id 调整:
+        #   - 有 version_id (写满 row 7-12): 从 row 14 开始
+        #   - 无 version_id (跳过 上下文 section): 从 row 7 开始, 节省 6 行
+        ops_start_row = 14 if has_version_ctx else 7
         last_row = self._write_meta_sheet_operations(
-            ws_meta, has_cud=has_cud, all_readonly=all_readonly, start_row=14,
+            ws_meta, has_cud=has_cud, all_readonly=all_readonly, start_row=ops_start_row,
             is_cascade=False, has_child_sheets=True,
             objects=selected_types,
         )
@@ -1177,9 +1187,11 @@ class ImportExportService:
         # [任务B Bug2 修复 2026-06-29] 初始化 child_parent_map, 避免
         #   include_annotations=False 时 L1160 被跳过导致 L1161 NameError
         #   使后端导出崩溃, 前端弹窗重置无下载
+        # [BUG-FIX 2026-07-03] 把 options 透传给 _collect_child_object_types,
+        #   让 include_annotations 选项生效 (annotation 自动追加可关闭)
         child_parent_map = {}
         if include_annotations:
-            child_parent_map = self._collect_child_object_types(ordered_types)
+            child_parent_map = self._collect_child_object_types(ordered_types, options=options)
         if child_parent_map:
                 # [H15.2 SAP风格] 过滤child_object_types，应用RBAC
                 # 优先用 thread-local user (兼容线程池/无Flask上下文场景)
@@ -3277,7 +3289,8 @@ class ImportExportService:
         
         return ('', '')
 
-    def _collect_child_object_types(self, selected_types: List[str]) -> Dict[str, List[str]]:
+    def _collect_child_object_types(self, selected_types: List[str],
+                                     options: Optional[Dict[str, Any]] = None) -> Dict[str, List[str]]:
         """从 child_sections 配置收集子对象类型及其父对象映射
 
         扫描每个选中类型的 ui_view_config.child_sections 配置，
@@ -3289,10 +3302,25 @@ class ImportExportService:
             但 yaml 历史从未声明, 导致导出丢失"备注信息" sheet
           - 现在扫描所有 selected_types 时, 自动追加 annotation 作为 child
 
+        [BUG-FIX 2026-07-03] annotation 自动追加可被 options.include_annotations=false 关闭
+          - 之前是 hard-code 永远追加, 即使 single mode (导出无 version_id 单对象)
+            也会带出"备注信息" sheet, 与用户预期不符
+          - 修复后: caller (如 ExportDialog) 可在 options 显式传 include_annotations=false
+            关闭这个行为; 默认仍为 True 保持 BUG-V027 修复效果
+
+        Args:
+            selected_types: 选中的对象类型列表
+            options: 导出选项, 用于控制 include_annotations / include_child_objects
+
         Returns:
             Dict[str, List[str]]: {child_object_type: [parent_type_1, parent_type_2, ...]}
         """
         from meta.core.models import registry
+
+        options = options or {}
+        # [BUG-FIX 2026-07-03] 默认 True 保持向后兼容, 但 caller 可通过 options 关闭
+        include_annotations = options.get("include_child_objects",
+                                          options.get("include_annotations", True))
 
         child_parent_map = {}
         for obj_type in selected_types:
@@ -3303,19 +3331,26 @@ class ImportExportService:
             for section in child_sections:
                 child_type = section.get('child_object')
                 if child_type:
+                    # [BUG-FIX 2026-07-03] annotation 即使 yaml 显式声明 (如 domain.yaml L234-235)
+                    #   也走 include_annotations 守卫. 之前: yaml 显式声明会绕过此守卫,
+                    #   导致 single/multi 模式无法关闭 annotation 自动追加.
+                    if child_type == 'annotation' and not include_annotations:
+                        continue
                     if child_type not in child_parent_map:
                         child_parent_map[child_type] = []
                     if obj_type not in child_parent_map[child_type]:
                         child_parent_map[child_type].append(obj_type)
 
             # [FIX v1.2.36 BUG-V027] 自动追加 polymorphic child: annotation
+            # [BUG-FIX 2026-07-03] 仅在 include_annotations=True 时追加
             # annotation 通过 target_type+target_id 多态关联到所有 parent 对象
             # yaml 显式配置不是必需的 (避免每个 yaml 都加同样的 child_sections)
-            annotation_meta = registry.get('annotation')
-            if annotation_meta and 'annotation' not in child_parent_map:
-                child_parent_map['annotation'] = []
-            if annotation_meta and obj_type not in child_parent_map.get('annotation', []):
-                child_parent_map.setdefault('annotation', []).append(obj_type)
+            if include_annotations:
+                annotation_meta = registry.get('annotation')
+                if annotation_meta and 'annotation' not in child_parent_map:
+                    child_parent_map['annotation'] = []
+                if annotation_meta and obj_type not in child_parent_map.get('annotation', []):
+                    child_parent_map.setdefault('annotation', []).append(obj_type)
 
         return child_parent_map
 
