@@ -1228,6 +1228,32 @@ async function startPreview() {
 }
 
 async function startImport() {
+  // [FIX BUG-V039 2026-07-03] context 检查顺序修正 + 范围放宽
+  // 原代码: 先切 currentStep=2 (第3步执行导入)，再检查 product_version context，
+  //       → context 缺失时用户看到 "进度条 + toast 警告" 同时出现, 体验混乱
+  //       → 且不论 multiTypeMode 一律强制要求 product_version context,
+  //          但单类型导入后端可从 Excel 层级编码列反向解析 context,
+  //          强制要求是过度约束 (与 BUG-V038 导出 "上下文信息 section"
+  //          仅在 version_id 存在时展示 是同一个思路, 不应无 context 时强显)
+  // 新行为:
+  //   1. 检查放在 step 切换前: 缺失时直接 return, 不进入第 3 步
+  //   2. 仅在 multiTypeMode=true (多个对象类型级联导入) 要求 product_version context
+  //   3. 单类型模式 (multiTypeMode=false) 即使没有 product_version context 也能导入,
+  //      后端从 Excel 的 product_code/version_code 列解析顶层
+  const hasVersionCtx = Boolean(props.context?.version_id)
+  const hasProductCtx = Boolean(props.context?.product_id)
+  // 多类型模式 (multiTypeMode=true) 或 props.objectTypes.length > 1
+  //   → 必须有至少一个 product_version context 才能锁定级联导入的顶层
+  const requiresCtx = Boolean(props.multiTypeMode) ||
+                      (Array.isArray(props.objectTypes) && props.objectTypes.length > 1)
+
+  if (requiresCtx && !hasVersionCtx && !hasProductCtx) {
+    message.warning(
+      '导入多个对象类型时，请先在顶部导航栏选择产品/版本上下文（用于锁定级联导入的顶层范围）'
+    )
+    return  // 直接返回，保持在第 2 步 (preview) ，不进入第 3 步
+  }
+
   currentStep.value = 2
   importing.value = true
   importResult.value = null
@@ -1236,12 +1262,6 @@ async function startImport() {
   currentIndex.value = 0
   // [FIX v1.2.12 2026-06-17] totalTypes: 多对象模式用选中数, 单对象模式 = 1
   totalTypes.value = props.multiTypeMode ? selectedMultiTypes.value.length : 1
-
-  if (!props.context?.version_id && !props.context?.product_id) {
-    message.warning('请先在顶部导航栏选择产品和版本上下文后再导入')
-    importing.value = false
-    return
-  }
 
   try {
     const response = await boService.importDataAsync(
