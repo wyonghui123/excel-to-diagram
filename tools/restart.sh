@@ -250,16 +250,19 @@ else
     fail "frontend ${FRONTEND_PORT}/ $FHEALTH"
 fi
 
-# login
+# login (v3/v4 自适应: v3 有 token 字段, v4 可能没但 success=true)
 LOGIN=$(curl -s -X POST --max-time 5 \
     "http://127.0.0.1:${BACKEND_PORT}/api/v1/auth/login" \
     -H "Content-Type: application/json" \
     -d '{"username":"admin","password":"admin123"}' 2>/dev/null)
 TOKEN=$(echo "$LOGIN" | grep -o '"token":"[^"]*"' | head -1 | cut -d'"' -f4)
+SUCCESS=$(echo "$LOGIN" | grep -o '"success":true' | head -1)
 if [ -n "$TOKEN" ]; then
     ok "login OK (token len=${#TOKEN})"
+elif [ -n "$SUCCESS" ]; then
+    ok "login OK (success=true, no token field in body - v4 风格)"
 else
-    fail "login FAIL"
+    fail "login FAIL (response: $LOGIN)"
 fi
 
 # current 链接
