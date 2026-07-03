@@ -125,6 +125,9 @@ new_files:
   - DEPLOYMENT.md
   - TROUBLESHOOTING.md
   - tools/rebuild_bundle.py
+  # 失败时一键诊断 (2026-07-03)
+  - tools/diagnose.sh
+  - tools/test_diagnose.py
   # IE 其他新文件 (2)
   - meta/tests/test_excel_format.py
   - scripts/test_ie_assertor.js

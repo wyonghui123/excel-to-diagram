@@ -68,7 +68,16 @@ parse_args "$@"
 VERSION="${ARG_VERSION:?--version 必填}"
 BACKEND_PORT="${ARG_PORT:?--port 必填}"
 FRONTEND_PORT="${ARG_FRONTEND_PORT:-8081}"
-ZIP_PATH="${ARG_ZIP:-$DEPLOY_ROOT/deploy-${VERSION}.zip}"
+# zip 路径优先级: --zip > SCRIPT_DIR/../deploy-{VERSION}.zip (与脚本同 bundle) > $DEPLOY_ROOT/deploy-{VERSION}.zip
+BUNDLE_DIR="$(dirname "$SCRIPT_DIR")"
+ZIP_PATH="${ARG_ZIP:-}"
+if [ -z "$ZIP_PATH" ]; then
+    if [ -f "$BUNDLE_DIR/deploy-${VERSION}.zip" ]; then
+        ZIP_PATH="$BUNDLE_DIR/deploy-${VERSION}.zip"
+    else
+        ZIP_PATH="$DEPLOY_ROOT/deploy-${VERSION}.zip"
+    fi
+fi
 DB_SOURCE="${ARG_DB_SOURCE:-}"
 UNIFIED_SCRIPT="${ARG_UNIFIED:-$SCRIPT_DIR/unified_server.py}"
 USE_SYSTEMD="${ARG_NO_SYSTEMD:-true}"
@@ -300,9 +309,16 @@ fi
 if [ "$SKIP_SMOKE" != "true" ]; then
     banner "PHASE 6.5: smoke test (5 项真实功能)"
     bash "$SCRIPT_DIR/smoke_test.sh" --port $BACKEND_PORT --frontend-port $FRONTEND_PORT
-    if [ $? -ne 0 ]; then
-        err "smoke test 失败, 部署可能有问题"
-        echo "  建议回滚: bash /tmp/rollback.sh --to <v> --port <p>"
+    SMOKE_RC=$?
+    if [ $SMOKE_RC -ne 0 ]; then
+        err "smoke test 失败 (exit $SMOKE_RC), 自动跑 diagnose 定位"
+        echo ""
+        bash "$SCRIPT_DIR/diagnose.sh" --port $BACKEND_PORT --frontend-port $FRONTEND_PORT --to $VERSION
+        echo ""
+        err "部署有问题, 建议:"
+        echo "  1. 看上面 diagnose 输出定位"
+        echo "  2. 回滚: bash /tmp/rollback.sh --to <v> --port <p>"
+        # 不自动 exit, 让 PHASE 7 切链接 (用户决定)
     fi
 else
     warn "跳过 smoke test (--skip-smoke)"

@@ -144,6 +144,9 @@ if wait_for_health $BACKEND_PORT /health 30; then
     ok "backend health OK on $BACKEND_PORT"
 else
     err "backend health failed"
+    echo ""
+    echo "  自动跑 diagnose 定位:"
+    bash "$SCRIPT_DIR/diagnose.sh" --port $BACKEND_PORT --frontend-port $FRONTEND_PORT --to $VERSION
 fi
 
 # ========================= SUMMARY =========================

@@ -92,6 +92,7 @@ def main():
         "precheck.sh",
         "smoke_test.sh",
         "rollback.sh",
+        "diagnose.sh",
         "unified_server.py",
     ]
     for fname in deploy_tools:
