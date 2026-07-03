@@ -66,30 +66,33 @@ $readme = @"
 
 One-click deploy bundle. SFTP to /tmp/ on remote.
 
-## Upload
+## 完整文档 (AI Agent 必读)
+D:\filework\release-prep-worktree\DEPLOY_INFRASTRUCTURE.md
+
+## 上传
 MobaXterm SFTP: drag deploy_bundle/ to /tmp/
 
-## Deploy
+## 部署
 bash /tmp/deploy_bundle/deploy.sh --version v20260703_002 --port 5001
 
-## Rollback
+## 回滚
 bash /tmp/deploy_bundle/rollback.sh --to <v> --port <p>
 
-## Status / Restart
+## 状态 / 重启
 bash /tmp/deploy_bundle/status.sh
 bash /tmp/deploy_bundle/restart.sh
 
-## Watch (健康监控)
+## 监控
 bash /tmp/deploy_bundle/watch.sh --loop 30
-bash /tmp/deploy_bundle/watch.sh --auto-recover   # 失败时自动 restart
-bash /tmp/deploy_bundle/watch.sh --rollback-on-fail   # 失败时自动 rollback
+bash /tmp/deploy_bundle/watch.sh --auto-recover
+bash /tmp/deploy_bundle/watch.sh --rollback-on-fail
 
-## History (部署历史)
-bash /tmp/deploy_bundle/deploy_history.sh                      # 列出所有版本
-bash /tmp/deploy_bundle/deploy_history.sh --info v20260703_002 # 详情
-bash /tmp/deploy_bundle/deploy_history.sh --switch v20260630_003 --port 5000  # 一键切版本
+## 历史
+bash /tmp/deploy_bundle/deploy_history.sh
+bash /tmp/deploy_bundle/deploy_history.sh --info v20260703_002
+bash /tmp/deploy_bundle/deploy_history.sh --switch v20260630_003 --port 5000
 
-## Tests (deployable)
+## 测试 (远端)
 /opt/miniconda3-py39/bin/python /tmp/deploy_bundle/tests/test_rollback_parallel.py
 /opt/miniconda3-py39/bin/python /tmp/deploy_bundle/tests/test_frontend_dir.py
 "@

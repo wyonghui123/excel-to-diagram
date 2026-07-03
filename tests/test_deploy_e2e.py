@@ -217,6 +217,63 @@ test("deploy_history.sh 三大功能", t11)
 
 
 # ============================================================
+# TEST 12: 项目文档 (DEPLOY_INFRASTRUCTURE.md)
+# ============================================================
+def t12():
+    """AI Agent 必读的部署基础设施文档"""
+    doc = ROOT / "DEPLOY_INFRASTRUCTURE.md"
+    if not doc.is_file():
+        raise AssertionError("DEPLOY_INFRASTRUCTURE.md 不存在 (项目根)")
+    content = doc.read_text(encoding="utf-8")
+    # 必含章节
+    required_sections = [
+        "项目元数据", "远端服务器", "端口约定", "部署架构",
+        "部署工具", "部署 bundle", "部署流程", "回滚流程",
+        "监控流程", "测试流程", "已修复的关键 BUG",
+        "AI Agent 部署规范", "DO", "DON'T",
+        "快速诊断清单",
+    ]
+    for sec in required_sections:
+        if sec not in content:
+            raise AssertionError(f"DEPLOY_INFRASTRUCTURE.md 缺 '{sec}' 章节")
+    # 必含关键信息
+    required_info = [
+        "172.20.59.7", "/opt/app", "5001", "8081", "v20260703_002",
+        "deploy.sh", "rollback.sh", "watch.sh", "deploy_history.sh",
+        "frontend_dist_files", "TOKEN_CACHE", "data.token",
+        "rebuild_bundle.ps1", "test_deploy_e2e",
+    ]
+    for info in required_info:
+        if info not in content:
+            raise AssertionError(f"DEPLOY_INFRASTRUCTURE.md 缺关键信息 '{info}'")
+    size_kb = doc.stat().st_size / 1024
+    print(f"  DEPLOY_INFRASTRUCTURE.md ({size_kb:.1f}KB) 含 14 章节 + 14 关键信息")
+
+test("DEPLOY_INFRASTRUCTURE.md AI Agent 规范", t12)
+
+
+# ============================================================
+# TEST 13: lib/common.sh 含项目元数据
+# ============================================================
+def t13():
+    """lib/common.sh 头含项目元数据 (AI Agent 应能识别)"""
+    common = (TOOLS / "lib" / "common.sh").read_text(encoding="utf-8")
+    required = [
+        "PROJECT_NAME", "REMOTE_HOST", "REMOTE_PY", "REMOTE_DEPLOY_ROOT",
+        "VERSION_REGEX", "VERSION_FORMAT",
+        "BIP-Backend", "172.20.59.7", "/opt/miniconda3-py39/bin/python",
+        "v3: /api/v1/auth/login", "v4: /api/v2/action/user.authenticate",
+        "unified_server.py", "token 持久化",
+    ]
+    for r in required:
+        if r not in common:
+            raise AssertionError(f"lib/common.sh 缺 {r}")
+    print(f"  lib/common.sh 含项目元数据 (供 AI Agent 识别)")
+
+test("lib/common.sh 项目元数据", t13)
+
+
+# ============================================================
 print()
 print("=" * 60)
 print(f"TEST DEPLOY E2E: PASS={PASS}  FAIL={FAIL}")

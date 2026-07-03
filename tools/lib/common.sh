@@ -1,10 +1,60 @@
 #!/bin/bash
 # lib/common.sh - 通用工具函数 (供 deploy.sh / rollback.sh / precheck.sh 共享)
-# 单一来源: 颜色 + 日志 + 路径
+# 单一来源: 颜色 + 日志 + 路径 + 项目元数据 + 服务器环境
+#
+# 项目: BIP (Business Intelligence Platform) - Excel-to-Diagram 后端
+# 远端: 172.20.59.7 (生产) - MobaXterm SSH root@172.20.59.7
+# 路径约定: /opt/app/{deployments,shared,current,backups}/
+# 端口约定: 5001 (v4 backend) / 8081 (v4 unified frontend) / 5000 (v3 backend 单进程)
+# Python: /opt/miniconda3-py39/bin/python (conda py39 env)
+# 用户: root (容器)
+# 包管理: pip (requirements.txt in meta/)
+# 数据库: SQLite (meta/architecture.db)
+# 前端: 前端 dist 在 frontend_dist_files/ (zip 顶层, 不在版本目录)
+# 部署架构:
+#   - v003 (2026-06-30 之前): server.py 单进程 (同时服务 API + frontend on 5000)
+#   - v004+ (2026-07-02 起): server.py (backend on 5001) + unified_server.py (frontend 8081) 分开
+# Token 兼容:
+#   - v3: /api/v1/auth/login 返回 {data: {token}}
+#   - v4: /api/v2/action/user.authenticate 返回 {data: {token}}
+#   - unified_server.py 自动 token 持久化 (按 client IP, 避免前端 boService 401)
+# 日志: /opt/app/shared/logs/ (backend-*.log, frontend-*.log, watch-*.log)
+#
+# 部署 bundle: 包含 9 工具 + zip + 25 测试
+# 部署流程: rebuild → SFTP 拖 → deploy.sh (PHASE 0-7)
+# 回滚: rollback.sh --to <v> --port <p>
+# 监控: watch.sh --loop 30 [--auto-recover] [--rollback-on-fail]
+# 测试: tests/test_*.py (本地 PASS 11/11, 远端 e2e)
 
 # 严格模式: 不开 -e (让每步独立失败), 不开 -u (函数参数可能未传)
 # set -e
 # set -u
+
+# ============================================================
+# 项目元数据 (供 AI Agent 识别)
+# ============================================================
+PROJECT_NAME="BIP-Backend"
+PROJECT_DESC="Excel-to-Diagram Architecture Management Backend (Excel 架构管理后端)"
+PROJECT_REPO="release/pre-2026-06-29"
+PROJECT_DEFAULT_VERSION="v20260703_002"
+PROJECT_DEFAULT_BACKEND_PORT=5001
+PROJECT_DEFAULT_FRONTEND_PORT=8081
+
+# 远端服务器
+REMOTE_HOST="172.20.59.7"
+REMOTE_USER="root"
+REMOTE_PY="/opt/miniconda3-py39/bin/python"
+REMOTE_DEPLOY_ROOT="/opt/app"
+REMOTE_DEPLOYMENTS_DIR="/opt/app/deployments"
+REMOTE_LOG_DIR="/opt/app/shared/logs"
+REMOTE_BACKUP_DIR="/opt/app/backups"
+REMOTE_CURRENT_LINK="/opt/app/current"
+REMOTE_FRONTEND_DIR="/opt/app/deployments/frontend_dist_files"
+REMOTE_DEPLOY_BUNDLE="/tmp/deploy_bundle"
+
+# 版本号格式
+VERSION_REGEX="^v[0-9]{8}_[0-9]{3}$"
+VERSION_FORMAT="vYYYYMMDD_NNN"  # 例: v20260703_002
 
 # 颜色
 RED='\033[0;31m'
