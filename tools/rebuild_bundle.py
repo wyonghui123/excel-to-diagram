@@ -195,13 +195,26 @@ bash /tmp/_deploy_bundle/rollback.sh --to <v> --port <p>
 
     # 5. 总大小
     total_size = sum(f.stat().st_size for f in bundle.glob("**/*") if f.is_file())
+    file_count = sum(1 for f in bundle.glob("**/*") if f.is_file())
     print(f"\n{GREEN}Bundle 大小: {total_size:,} bytes ({total_size/1024/1024:.2f} MB){NC}")
     print(f"{CYAN}路径: {bundle}{NC}")
+    print(f"{CYAN}文件数: {file_count}{NC}")
+    print()
+    print(f"{YELLOW}完整文件清单 (强制刷新 IDE/Explorer 缓存后可见):{NC}")
+    for f in sorted(bundle.glob("**/*")):
+        if f.is_file():
+            rel = f.relative_to(bundle)
+            size = f.stat().st_size
+            print(f"  {rel}  ({size:,} bytes)")
     print()
     print(f"{YELLOW}下一步:{NC}")
     print(f"  1. MobaXterm SFTP: 拖 {bundle.name}/ 目录 → 远端 /tmp/")
     print(f"  2. 堡垒机 SSH 进 172.20.59.7")
-    print(f"  3. 跑: bash /tmp/_deploy_bundle/deploy.sh --version {version} --port 5001")
+    print(f"  3. 跑: bash /tmp/{bundle.name}/deploy.sh --version {version} --port 5001")
+    print()
+    if file_count < 9:
+        print(f"{RED}⚠️  警告: 文件数 {file_count} < 9, 可能有文件丢失!{NC}")
+        return 1
     return 0
 
 

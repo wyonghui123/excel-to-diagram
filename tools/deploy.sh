@@ -83,14 +83,22 @@ info "=========================================="
 VERSION="${ARG_VERSION:?--version 必填}"
 BACKEND_PORT="${ARG_PORT:?--port 必填}"
 FRONTEND_PORT="${ARG_FRONTEND_PORT:-8081}"
-# zip 路径优先级: --zip > SCRIPT_DIR/../deploy-{VERSION}.zip (与脚本同 bundle) > $DEPLOY_ROOT/deploy-{VERSION}.zip
-BUNDLE_DIR="$(dirname "$SCRIPT_DIR")"
+# zip 路径优先级: --zip > $SCRIPT_DIR/deploy-{VERSION}.zip (与脚本同目录) > $DEPLOY_ROOT/deploy-{VERSION}.zip > 智能搜索
 ZIP_PATH="${ARG_ZIP:-}"
 if [ -z "$ZIP_PATH" ]; then
-    if [ -f "$BUNDLE_DIR/deploy-${VERSION}.zip" ]; then
-        ZIP_PATH="$BUNDLE_DIR/deploy-${VERSION}.zip"
-    else
+    if [ -f "$SCRIPT_DIR/deploy-${VERSION}.zip" ]; then
+        ZIP_PATH="$SCRIPT_DIR/deploy-${VERSION}.zip"
+    elif [ -f "$DEPLOY_ROOT/deploy-${VERSION}.zip" ]; then
         ZIP_PATH="$DEPLOY_ROOT/deploy-${VERSION}.zip"
+    else
+        # 智能搜索: 任何位置的 deploy-{VERSION}.zip
+        FOUND=$(find / -name "deploy-${VERSION}.zip" -type f 2>/dev/null | head -1)
+        if [ -n "$FOUND" ]; then
+            ZIP_PATH="$FOUND"
+            warn "智能搜索找到 zip: $ZIP_PATH"
+        else
+            ZIP_PATH="$DEPLOY_ROOT/deploy-${VERSION}.zip"  # fallback
+        fi
     fi
 fi
 DB_SOURCE="${ARG_DB_SOURCE:-}"

@@ -207,14 +207,14 @@ for i in 1 2 3; do
 done
 [ "$code" != "200" ] && [ "$code" != "410" ] && { err "  backend /health = $code (3 attempts)"; DIAG_FAIL=$((DIAG_FAIL+1)); }
 
-hr; echo "[4b] backend $BACKEND_PORT /api/v1/health"
-code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "http://127.0.0.1:$BACKEND_PORT/api/v1/health" 2>/dev/null || echo "000")
+hr; echo "[4b] backend $BACKEND_PORT /api/v2/bo/health (BO 端点, 需 auth)"
+code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "http://127.0.0.1:$BACKEND_PORT/api/v2/bo/health" 2>/dev/null)
 case "$code" in
-    200) ok "  api/v1/health = 200" ;;
-    410) warn "  api/v1/health = 410 (server alive, db 未 init)"; DIAG_WARN=$((DIAG_WARN+1)) ;;
-    301|302) info "  api/v1/health = $code (redirect)" ;;
-    000) err "  api/v1/health 不可达"; DIAG_FAIL=$((DIAG_FAIL+1)) ;;
-    *) warn "  api/v1/health = $code"; DIAG_WARN=$((DIAG_WARN+1)) ;;
+    200) ok "  api/v2/bo/health = 200 (无需 auth)" ;;
+    401|403) ok "  api/v2/bo/health = $code (alive, 需 auth - 预期)" ;;
+    410) warn "  api/v2/bo/health = 410 (server alive, db 未 init)"; DIAG_WARN=$((DIAG_WARN+1)) ;;
+    000) err "  api/v2/bo/health 不可达"; DIAG_FAIL=$((DIAG_FAIL+1)) ;;
+    *) warn "  api/v2/bo/health = $code"; DIAG_WARN=$((DIAG_WARN+1)) ;;
 esac
 
 hr; echo "[4c] frontend $FRONTEND_PORT /"

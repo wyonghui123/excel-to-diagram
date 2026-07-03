@@ -50,12 +50,14 @@ DB_SOURCE="${ARG_DB_SOURCE:-}"
 
 detect_remote_env
 
-# zip 路径优先级: --zip > SCRIPT_DIR/../deploy-{VERSION}.zip (bundle 目录) > $DEPLOY_ROOT/deploy-{VERSION}.zip
-BUNDLE_DIR="$(dirname "$SCRIPT_DIR")"
+# zip 路径优先级: --zip > $SCRIPT_DIR/deploy-{VERSION}.zip (同目录) > $DEPLOY_ROOT/deploy-{VERSION}.zip
 if [ -z "$ZIP_PATH" ]; then
-    if [ -f "$BUNDLE_DIR/deploy-${VERSION}.zip" ]; then
-        ZIP_PATH="$BUNDLE_DIR/deploy-${VERSION}.zip"
+    if [ -f "$SCRIPT_DIR/deploy-${VERSION}.zip" ]; then
+        ZIP_PATH="$SCRIPT_DIR/deploy-${VERSION}.zip"
+    elif [ -f "$DEPLOY_ROOT/deploy-${VERSION}.zip" ]; then
+        ZIP_PATH="$DEPLOY_ROOT/deploy-${VERSION}.zip"
     else
+        # 默认 fallback (远端标准位置)
         ZIP_PATH="$DEPLOY_ROOT/deploy-${VERSION}.zip"
     fi
 fi

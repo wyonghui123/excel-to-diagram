@@ -62,7 +62,7 @@ banner "SMOKE TEST - 部署后 5 项真实功能测试"
 # Test 1: backend health
 # ============================================================
 hr; echo "[Test 1/5] backend /health on $BACKEND_PORT"
-code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://127.0.0.1:$BACKEND_PORT/health" 2>/dev/null || echo "000")
+code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://127.0.0.1:$BACKEND_PORT/health" 2>/dev/null)
 if [ "$code" = "200" ]; then
     run_test "backend /health" "$code" "200"
 else
@@ -74,6 +74,17 @@ else
         run_test "backend /health" "$code" "200" "可能 backend 没启"
     fi
 fi
+
+# Test 1b: /api/v2/bo/health (v004 BO 端点, 需 auth)
+hr; echo "[Test 1b] backend /api/v2/bo/health on $BACKEND_PORT (BO 端点, 需 auth)"
+code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://127.0.0.1:$BACKEND_PORT/api/v2/bo/health" 2>/dev/null)
+case "$code" in
+    200) run_test "backend /api/v2/bo/health" "$code" "200" ;;
+    401|403) ok "backend /api/v2/bo/health = $code (alive, 需 auth - 预期)"; TEST_PASSED=$((TEST_PASSED+1)) ;;
+    410) warn "backend /api/v2/bo/health = 410 (server alive, db 未 init)"; TEST_PASSED=$((TEST_PASSED+1)) ;;
+    000) run_test "backend /api/v2/bo/health" "$code" "200" "v004 BO 端点不可达" ;;
+    *) run_test "backend /api/v2/bo/health" "$code" "200|401" "v004 BO 端点异常" ;;
+esac
 
 # ============================================================
 # Test 2: frontend /
