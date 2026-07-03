@@ -24,6 +24,10 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
 
+# Bundle Version (用于本地 vs 远端对比)
+ROLLBACK_BUNDLE_VERSION="2.5.0"
+ROLLBACK_BUNDLE_BUILD="20260703_1340"
+
 show_help() {
     cat <<'EOF'
 rollback.sh - 通用回滚脚本 (任意 → 任意)
@@ -71,6 +75,10 @@ SERVER_DIR="$VERSION_PATH/$ENTRY"
 mkdir -p "$LOG_DIR"
 
 banner "回滚到 $VERSION ($BACKEND_PORT)"
+info "=========================================="
+info "  rollback.sh Bundle Version: $ROLLBACK_BUNDLE_VERSION ($ROLLBACK_BUNDLE_BUILD)"
+info "  本地: $SCRIPT_DIR"
+info "=========================================="
 
 # ========================= PHASE 1: 停所有 =========================
 banner "PHASE 1: 停所有"
