@@ -73,6 +73,9 @@ EOF
 
 parse_args "$@"
 
+# 初始化 FAIL_FLAG (避免上阶段 err 遗留)
+FAIL_FLAG=0
+
 # 自检: 提示 bundle 版本
 info "=========================================="
 info "  deploy.sh Bundle Version: $DEPLOY_BUNDLE_VERSION ($DEPLOY_BUNDLE_BUILD)"

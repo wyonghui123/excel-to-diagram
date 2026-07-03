@@ -24,6 +24,9 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
 
+# 初始化 FAIL_FLAG (避免上一轮 err 遗留)
+FAIL_FLAG=0
+
 # Bundle Version (用于本地 vs 远端对比)
 ROLLBACK_BUNDLE_VERSION="2.5.0"
 ROLLBACK_BUNDLE_BUILD="20260703_1340"
