@@ -101,13 +101,16 @@ User=root
 WorkingDirectory=$SERVER_DIR
 ExecStart=$PY server.py
 Environment="PORT=${BACKEND_PORT}"
+Environment="JWT_SECRET_KEY=${JWT_SECRET_KEY:-rollback-jwt-placeholder-key-must-be-32-chars-min}"
+Environment="FLASK_SECRET_KEY=${FLASK_SECRET_KEY:-rollback-flask-placeholder-key-must-be-32-chars-min}"
+Environment="CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://172.20.59.7:8081,http://172.20.59.7:${BACKEND_PORT}}"
 Restart=always
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 EOF
-    ok "写 service"
+    ok "写 service (含 JWT/FLASK/CORS env)"
     systemctl daemon-reload && ok "daemon-reload" || err "daemon-reload 失败"
 fi
 
@@ -126,9 +129,14 @@ fi
 if [ "$STARTED" = false ]; then
     hr; echo "[start] nohup (fallback)"
     cd "$SERVER_DIR" || die "cd $SERVER_DIR 失败"
-    nohup env PORT=${BACKEND_PORT} $PY server.py > $LOG_DIR/backend-${VERSION}-rollback.log 2>&1 &
+    # 生成/复用 v003 需要的环境变量 (startup_checks 强校验 >= 32 字符)
+    : "${JWT_SECRET_KEY:=$(python3 -c "import secrets;print(secrets.token_urlsafe(48))" 2>/dev/null || echo "rollback-jwt-key-$(date +%s)-$(hostname)-placeholder")}"
+    : "${FLASK_SECRET_KEY:=$(python3 -c "import secrets;print(secrets.token_urlsafe(48))" 2>/dev/null || echo "rollback-flask-key-$(date +%s)-$(hostname)-placeholder")}"
+    : "${CORS_ALLOWED_ORIGINS:=http://172.20.59.7:8081,http://172.20.59.7:${BACKEND_PORT}}"
+    export JWT_SECRET_KEY FLASK_SECRET_KEY CORS_ALLOWED_ORIGINS
+    nohup env PORT=${BACKEND_PORT} JWT_SECRET_KEY="$JWT_SECRET_KEY" FLASK_SECRET_KEY="$FLASK_SECRET_KEY" CORS_ALLOWED_ORIGINS="$CORS_ALLOWED_ORIGINS" $PY server.py > $LOG_DIR/backend-${VERSION}-rollback.log 2>&1 &
     PID=$!
-    ok "nohup 启 backend PID=$PID"
+    ok "nohup 启 backend PID=$PID (env: PORT=$BACKEND_PORT, CORS=...)"
     sleep 8
 fi
 
