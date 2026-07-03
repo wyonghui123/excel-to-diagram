@@ -106,6 +106,9 @@ new_files:
   - scripts/generate-pm-boundary.js
   - scripts/generate-test888-333-permission.js
   - scripts/generate-update-delete-permission.js
+  # SOP 端到端演练器 (2026-07-03)
+  - tools/e2e_sop_drill.py
+  - tools/_test_v4_startup.py
   # IE 其他新文件 (2)
   - meta/tests/test_excel_format.py
   - scripts/test_ie_assertor.js
