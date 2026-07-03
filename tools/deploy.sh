@@ -167,9 +167,9 @@ banner "PHASE 0.5: 解压 zip"
 # 触发条件: backend 缺 OR frontend_dist_files 缺 (避免 8081 404 灾难)
 NEED_UNZIP=false
 if [ "$SKIP_UNZIP" != "true" ]; then
-    if [ ! -d "$VERSION_PATH/$ENTRY" ]; then
+    if [ ! -d "$SERVER_DIR" ]; then
         NEED_UNZIP=true
-        info "触发解压: $VERSION_PATH/$ENTRY 不存在"
+        info "触发解压: $SERVER_DIR 不存在"
     elif [ ! -d "$DEPLOYMENTS_DIR/frontend_dist_files" ]; then
         NEED_UNZIP=true
         info "触发解压: $DEPLOYMENTS_DIR/frontend_dist_files 不存在 (避免 8081 404)"
@@ -179,7 +179,8 @@ if [ "$NEED_UNZIP" = "true" ]; then
     if [ -f "$ZIP_PATH" ]; then
         cd $DEPLOY_ROOT
         unzip -q -o "$ZIP_PATH" -d $DEPLOYMENTS_DIR/ && ok "解压 $ZIP_PATH → $DEPLOYMENTS_DIR/" || err "unzip 失败"
-        [ -d "$VERSION_PATH/$ENTRY" ] && ok "$VERSION_PATH/$ENTRY 已就绪" || err "解压后 $VERSION_PATH/$ENTRY 仍缺"
+        # [FIX 2026-07-03] zip 顶层是 frontend_dist_files/ + meta/ (不在子目录)
+        [ -d "$SERVER_DIR" ] && ok "$SERVER_DIR 已就绪" || err "解压后 $SERVER_DIR 仍缺"
         [ -d "$DEPLOYMENTS_DIR/frontend_dist_files" ] && ok "$DEPLOYMENTS_DIR/frontend_dist_files 已就绪" || err "解压后 frontend_dist_files 仍缺"
     else
         err "zip 不存在: $ZIP_PATH (请 MobaXterm SFTP 上传)"
