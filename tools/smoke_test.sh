@@ -15,6 +15,9 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
 
+# 不开 set -u (函数参数可选)
+set +u
+
 show_help() {
     cat <<'EOF'
 smoke_test.sh - 部署后真实功能测试

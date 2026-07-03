@@ -2,8 +2,9 @@
 # lib/common.sh - 通用工具函数 (供 deploy.sh / rollback.sh / precheck.sh 共享)
 # 单一来源: 颜色 + 日志 + 路径
 
-# 严格模式 (不开 -e 让每步独立失败)
-set -u
+# 严格模式: 不开 -e (让每步独立失败), 不开 -u (函数参数可能未传)
+# set -e
+# set -u
 
 # 颜色
 RED='\033[0;31m'

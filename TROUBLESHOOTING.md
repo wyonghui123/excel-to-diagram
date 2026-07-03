@@ -386,5 +386,7 @@ free -h
 8. ✅ **zip 没上传** → precheck.sh Check 5 验证
 9. ✅ **health 410 误判** → smoke_test 接受 200/410
 10. ✅ **回滚后没切链接** → rollback.sh PHASE 4 切
+11. ✅ **`set -u` 太严** → common.sh 注释掉 `set -u`，函数可选参数不崩
+12. ✅ **`run_check "$name"` 缺 $3** → `local detail="${3:-}"` 兜底
 
 **所有坑都被新 deploy.sh + precheck + smoke 防住了**。
