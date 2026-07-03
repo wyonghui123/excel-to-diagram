@@ -250,20 +250,31 @@ else
     fail "frontend ${FRONTEND_PORT}/ $FHEALTH"
 fi
 
-# login (v3/v4 自适应: v3 有 token 字段, v4 可能没但 success=true)
+# login (v3/v4 自适应, python 解析)
 LOGIN=$(curl -s -X POST --max-time 5 \
     "http://127.0.0.1:${BACKEND_PORT}/api/v1/auth/login" \
     -H "Content-Type: application/json" \
     -d '{"username":"admin","password":"admin123"}' 2>/dev/null)
-TOKEN=$(echo "$LOGIN" | grep -o '"token":"[^"]*"' | head -1 | cut -d'"' -f4)
-SUCCESS=$(echo "$LOGIN" | grep -o '"success":true' | head -1)
-if [ -n "$TOKEN" ]; then
-    ok "login OK (token len=${#TOKEN})"
-elif [ -n "$SUCCESS" ]; then
-    ok "login OK (success=true, no token field in body - v4 风格)"
-else
-    fail "login FAIL (response: $LOGIN)"
-fi
+LOGIN_RESULT=$(/opt/miniconda3-py39/bin/python -c "
+import json
+try:
+    d = json.loads('''$LOGIN'''.replace('\\\\', '').replace(\"'\", '\"'))
+    tok = d.get('data', {}).get('token') or d.get('token', '')
+    if d.get('success') and tok:
+        print(f'OK_TOKEN:{len(tok)}')
+    elif d.get('success'):
+        print('OK_SUCCESS')
+    else:
+        print(f'FAIL:{d.get(\"message\", \"unknown\")[:80]}')
+except Exception as e:
+    print(f'PARSE_ERR:{e}')
+" 2>/dev/null)
+case "$LOGIN_RESULT" in
+    OK_TOKEN:*) ok "login OK (token len=${LOGIN_RESULT#OK_TOKEN:})" ;;
+    OK_SUCCESS) ok "login OK (success=true)" ;;
+    FAIL:*) fail "login FAIL: ${LOGIN_RESULT#FAIL:}" ;;
+    *) fail "login FAIL (parse: $LOGIN_RESULT)" ;;
+esac
 
 # current 链接
 if readlink "$DEPLOY_ROOT/current" | grep -q "$CURRENT_VERSION"; then
