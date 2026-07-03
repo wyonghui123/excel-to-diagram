@@ -170,7 +170,8 @@ test("watch.sh 监控+恢复", t8)
 def t9():
     required = [
         "deploy.sh", "precheck.sh", "smoke_test.sh", "rollback.sh",
-        "diagnose.sh", "status.sh", "restart.sh", "watch.sh",  # NEW
+        "diagnose.sh", "status.sh", "restart.sh", "watch.sh",
+        "deploy_history.sh",  # NEW
         "unified_server.py", "deploy-v20260703_002.zip",
     ]
     missing = []
@@ -179,26 +180,40 @@ def t9():
             missing.append(f)
     if missing:
         raise AssertionError(f"deploy_bundle/ 缺: {missing}")
-    print(f"  deploy_bundle/ 含 9 工具 + zip + 25 测试")
+    print(f"  deploy_bundle/ 含 10 工具 + zip + 26 测试")
 
-test("deploy_bundle/ 完整 (9 工具 + 25 测试 + zip)", t9)
+test("deploy_bundle/ 完整 (10 工具 + 26 测试 + zip)", t9)
 
 
 # ============================================================
-# TEST 10: rebuild_bundle.ps1 复制所有 8 工具
+# TEST 10: rebuild_bundle.ps1 复制所有 工具
 # ============================================================
 def t10():
     rb = (TOOLS / "rebuild_bundle.ps1").read_text(encoding="utf-8")
     required = [
         "deploy.sh", "precheck.sh", "smoke_test.sh", "rollback.sh",
-        "diagnose.sh", "status.sh", "restart.sh", "unified_server.py",
+        "diagnose.sh", "status.sh", "restart.sh", "watch.sh",
+        "deploy_history.sh", "unified_server.py",
     ]
     for f in required:
         if f not in rb:
             raise AssertionError(f"rebuild_bundle.ps1 数组缺 {f}")
-    print(f"  rebuild_bundle.ps1 $tools 含 8 个核心文件")
+    print(f"  rebuild_bundle.ps1 $tools 含 10 个核心文件")
 
-test("rebuild_bundle.ps1 复制所有 8 工具", t10)
+test("rebuild_bundle.ps1 复制所有 10 工具", t10)
+
+
+# ============================================================
+# TEST 11: deploy_history.sh 含 list/info/switch
+# ============================================================
+def t11():
+    h = (TOOLS / "deploy_history.sh").read_text(encoding="utf-8")
+    for k in ["list_versions", "info_version", "switch_version", "--info", "--switch"]:
+        if k not in h:
+            raise AssertionError(f"deploy_history.sh 缺 {k}")
+    print(f"  deploy_history.sh 含 list/info/switch 三大功能")
+
+test("deploy_history.sh 三大功能", t11)
 
 
 # ============================================================

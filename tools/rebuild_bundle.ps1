@@ -22,7 +22,7 @@ if ($zipSrc) {
 }
 
 # copy deploy tools
-$tools = @("deploy.sh", "precheck.sh", "smoke_test.sh", "rollback.sh", "diagnose.sh", "status.sh", "restart.sh", "watch.sh", "unified_server.py")
+$tools = @("deploy.sh", "precheck.sh", "smoke_test.sh", "rollback.sh", "diagnose.sh", "status.sh", "restart.sh", "watch.sh", "deploy_history.sh", "unified_server.py")
 foreach ($f in $tools) {
     $src = Join-Path "$repoRoot/tools" $f
     if (Test-Path $src) {
@@ -83,6 +83,11 @@ bash /tmp/deploy_bundle/restart.sh
 bash /tmp/deploy_bundle/watch.sh --loop 30
 bash /tmp/deploy_bundle/watch.sh --auto-recover   # 失败时自动 restart
 bash /tmp/deploy_bundle/watch.sh --rollback-on-fail   # 失败时自动 rollback
+
+## History (部署历史)
+bash /tmp/deploy_bundle/deploy_history.sh                      # 列出所有版本
+bash /tmp/deploy_bundle/deploy_history.sh --info v20260703_002 # 详情
+bash /tmp/deploy_bundle/deploy_history.sh --switch v20260630_003 --port 5000  # 一键切版本
 
 ## Tests (deployable)
 /opt/miniconda3-py39/bin/python /tmp/deploy_bundle/tests/test_rollback_parallel.py
