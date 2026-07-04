@@ -276,6 +276,16 @@ else
     fail "current 链接被改"
 fi
 
+# [CHG 2026-07-04] 部署健康检查 (C1-C6)
+# restart 后跑: 验证重启真加载了新代码, 而不是某个旧进程残留.
+hr; banner "部署健康检查 (C1-C6)"
+LOCAL_ZIP=$(ls -1t /tmp/deploy_bundle/deploy-v*.zip 2>/dev/null | head -1)
+if [ -x "$SCRIPT_DIR/lib/check_deploy_health.sh" ]; then
+    bash "$SCRIPT_DIR/lib/check_deploy_health.sh" "$LOCAL_ZIP" || true
+else
+    warn "check_deploy_health.sh 不存在 (跳过 C1-C6)"
+fi
+
 # ============================================================
 # SUMMARY
 # ============================================================

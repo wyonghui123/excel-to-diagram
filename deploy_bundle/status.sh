@@ -233,6 +233,19 @@ if [ -d "$LOG_DIR" ]; then
 fi
 
 # ============================================================
+# [CHG 2026-07-04] 部署健康检查 (一键 6 类 BUG)
+# 解决 "远端跑的代码 != zip 内的代码" 不可见根因.
+# 集成后, 任何 status 调用都会暴露进程身份 / MANIFEST / dist hash 问题.
+# ============================================================
+banner "部署健康检查 (C1-C6)"
+LOCAL_ZIP=$(ls -1t /tmp/deploy_bundle/deploy-v*.zip 2>/dev/null | head -1)
+if [ -x "$SCRIPT_DIR/lib/check_deploy_health.sh" ]; then
+    bash "$SCRIPT_DIR/lib/check_deploy_health.sh" "$LOCAL_ZIP" || true
+else
+    warn "check_deploy_health.sh 不存在 (跳过 C1-C6)"
+fi
+
+# ============================================================
 # SUMMARY
 # ============================================================
 banner "SUMMARY"

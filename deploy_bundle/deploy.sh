@@ -357,17 +357,29 @@ hr; echo "[verify] backend /api/v1/health"
 code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://127.0.0.1:$BACKEND_PORT/api/v1/health || echo "000")
 [ "$code" = "200" ] && ok "backend health = 200" || warn "backend health = $code (可能 410 表示 server alive 但 db 未 init)"
 
-hr; echo "[verify] login (通过 unified server)"
+hr; echo "[verify] login (通过 unified server, 部署验证专用用户 deploy_test)"
 LOGIN_RESP=$(curl -s --max-time 5 -X POST http://127.0.0.1:$FRONTEND_PORT/api/v1/auth/login \
     -H "Content-Type: application/json" \
-    -d '{"username":"admin","password":"admin123"}' 2>/dev/null)
+    -d '{"username":"deploy_test","password":"DeployTest@2026!"}' 2>/dev/null)
 if echo "$LOGIN_RESP" | grep -q "token"; then
-    ok "login 成功 (通过 8081)"
+    ok "login 成功 (deploy_test, 通过 8081)"
 elif echo "$LOGIN_RESP" | grep -q "success.*true"; then
-    ok "login 成功 (alternate)"
+    ok "login 成功 (deploy_test, alternate)"
 else
-    warn "login 失败 (可能 admin/admin123 未 init)"
+    warn "login 失败 (deploy_test 未 init 或 PHASE 2.5 失败)"
     echo "$LOGIN_RESP" | head -c 200
+fi
+
+# [CHG 2026-07-04] 部署健康检查 (一键 6 类 BUG 验证)
+# 集成点: deploy 后立刻跑, 确保部署生效, 不留"远端跑旧代码"隐患.
+hr; echo "[verify] 部署健康检查 (C1-C6)"
+if [ -x "$SCRIPT_DIR/lib/check_deploy_health.sh" ]; then
+    # 默认找当前 deploy-v*.zip
+    DEPLOY_ZIP=$(ls -1t $SCRIPT_DIR/deploy-v*.zip 2>/dev/null | head -1)
+    bash "$SCRIPT_DIR/lib/check_deploy_health.sh" "$DEPLOY_ZIP" || DEPLOY_HEALTH_FAIL=1
+    [ -n "$DEPLOY_HEALTH_FAIL" ] && warn "部署健康检查有 FAIL (但不阻塞, 见 SUMMARY)"
+else
+    warn "check_deploy_health.sh 不存在 (跳过 C1-C6)"
 fi
 
 # ========================= PHASE 6.5: smoke test (5 项真实功能) =========================

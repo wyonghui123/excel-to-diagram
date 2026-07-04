@@ -23,6 +23,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 TOOLS = ROOT / "tools"
 DEPLOY_BUNDLE = ROOT / "deploy_bundle"
+TESTS = ROOT / "tests"
 
 PASS = 0
 FAIL = 0
@@ -219,6 +220,56 @@ def t11():
     print(f"  deploy_history.sh 含 list/info/switch 三大功能")
 
 test("deploy_history.sh 三大功能", t11)
+
+
+# ============================================================
+# TEST 14: check_deploy_health.sh 存在且含 6 类检查 (C1-C6)
+# ============================================================
+def t14():
+    h = (DEPLOY_BUNDLE / "lib" / "check_deploy_health.sh")
+    if not h.exists():
+        raise AssertionError("check_deploy_health.sh 不存在")
+    body = h.read_text(encoding="utf-8")
+    for ck in ["C1", "C2", "C3", "C4", "C5", "C6"]:
+        if ck not in body:
+            raise AssertionError(f"check_deploy_health.sh 缺检查项 {ck}")
+    print(f"  check_deploy_health.sh 含 6 类检查 (C1-C6)")
+
+test("check_deploy_health.sh 6 类检查", t14)
+
+
+# ============================================================
+# TEST 15: check_deploy_health.sh 集成到 deploy.sh / status.sh / restart.sh / diagnose.sh
+# ============================================================
+def t15():
+    for tool in ["deploy.sh", "status.sh", "restart.sh", "diagnose.sh"]:
+        body = (DEPLOY_BUNDLE / tool).read_text(encoding="utf-8")
+        if "check_deploy_health.sh" not in body:
+            raise AssertionError(f"{tool} 没集成 check_deploy_health.sh")
+    print(f"  4 个核心工具 (deploy/status/restart/diagnose) 都集成 check_deploy_health.sh")
+
+test("4 工具集成 check_deploy_health.sh", t15)
+
+
+# ============================================================
+# TEST 16: check_health_local.py 存在且可 dryrun
+# ============================================================
+def t16():
+    import subprocess
+    p = TESTS / "check_health_local.py"
+    if not p.exists():
+        raise AssertionError("check_health_local.py 不存在")
+    # 跑一次 mock-remote dryrun, 期望 exit code 0 或 1 (取决于 zip MANIFEST)
+    r = subprocess.run(
+        [sys.executable, str(p), "--mock-remote"],
+        capture_output=True, text=True, timeout=60,
+    )
+    # 即使有 FAIL, 只要脚本能跑出 SUMMARY 就 PASS
+    if "SUMMARY:" not in r.stdout and "SUMMARY:" not in r.stderr:
+        raise AssertionError(f"check_health_local.py 没输出 SUMMARY: {r.stdout[:200]}")
+    print(f"  check_health_local.py mock-remote dryrun 跑通 (rc={r.returncode})")
+
+test("check_health_local.py dryrun", t16)
 
 
 # ============================================================

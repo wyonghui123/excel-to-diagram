@@ -33,6 +33,20 @@ modified_files:
   - src/services/relationClassifier.js
   # Phase 1 性能优化 - smChildCount 引用缓存
   - src/components/common/RelationScopeTree/RelationScopeTree.vue
+  # [FIX 2026-07-04 deploy agent] 一键 6 类 BUG 健康检查 + MANIFEST 完整化
+  - .gitignore
+  - tools/deploy.sh
+  - tools/status.sh
+  - tools/restart.sh
+  - tools/diagnose.sh
+  - tools/rebuild_zip.py
+  - tools/rebuild_bundle.ps1
+  - deploy_bundle/deploy.sh
+  - deploy_bundle/status.sh
+  - deploy_bundle/restart.sh
+  - deploy_bundle/diagnose.sh
+  - deploy_bundle/README.txt
+  - tests/test_deploy_e2e.py
   # 领域过滤器 originalId 碰撞修复 (2026-06-30)
   - src/services/hierarchyService.js
   # FIX 2026-07-02: hierarchy filter 命名空间隔离 + meta_obj NameError
@@ -65,6 +79,12 @@ new_files:
   - docs/DEPLOY-CHEATSHEET-20260630_001.txt
   # 部署 bundle 说明 (2026-06-30)
   - README_BUNDLE.txt
+  # [FIX 2026-07-04 deploy agent] 一键 6 类 BUG 健康检查
+  - tools/lib/check_deploy_health.sh
+  - deploy_bundle/lib/check_deploy_health.sh
+  - tests/check_health_local.py
+  - tests/test_manifest_alignment.py
+  - tests/test_export_no_annotation.py
   # IE 智能体的 e2e 测试 (21)
   - e2e/business-flow/bmrd-rule-validation.spec.js
   - e2e/business-flow/bug-v010-owner-trace.spec.js

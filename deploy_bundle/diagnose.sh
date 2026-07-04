@@ -339,6 +339,19 @@ else
 fi
 
 # ============================================================
+# [CHG 2026-07-04] 部署健康检查 (C1-C6)
+# 深度诊断场景, 跟现有 DIAGNOSE STEPS 互补: 本节专注"代码身份",
+# 现有 STEPS 专注"服务/端口/进程/日志".
+# ============================================================
+banner "部署健康检查 (C1-C6 - 代码身份)"
+LOCAL_ZIP=$(ls -1t /tmp/deploy_bundle/deploy-v*.zip 2>/dev/null | head -1)
+if [ -x "$SCRIPT_DIR/lib/check_deploy_health.sh" ]; then
+    bash "$SCRIPT_DIR/lib/check_deploy_health.sh" "$LOCAL_ZIP" || true
+else
+    warn "check_deploy_health.sh 不存在 (跳过 C1-C6)"
+fi
+
+# ============================================================
 # SUMMARY
 # ============================================================
 banner "DIAGNOSE SUMMARY"

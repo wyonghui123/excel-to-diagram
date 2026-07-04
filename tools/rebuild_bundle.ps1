@@ -43,6 +43,13 @@ if (Test-Path $libSrc) {
     Write-Host "  + lib/common.sh" -ForegroundColor Green
 }
 
+# [CHG 2026-07-04] copy lib/check_deploy_health.sh (一键 6 类 BUG 验证)
+$checkHealthSrc = Join-Path "$repoRoot/tools/lib" "check_deploy_health.sh"
+if (Test-Path $checkHealthSrc) {
+    Copy-Item $checkHealthSrc "$libDst/check_deploy_health.sh" -Force
+    Write-Host "  + lib/check_deploy_health.sh" -ForegroundColor Green
+}
+
 # copy tests/ (deployable test scripts)
 $testsSrc = "$repoRoot/tests"
 $testsDst = "$bundle/tests"
