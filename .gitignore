@@ -88,6 +88,7 @@ probe_*.py
 # 只有 root 目录下的 check_*.py 才被忽略
 !/scripts/debug/check_*.py
 !/scripts/debug/inspect/check_*.py
+!/scripts/check_rules_consistency.py
 
 # DB 监控日志 (运行时生成, 每天数十MB, 不应入仓)
 meta/db_monitor_logs/
