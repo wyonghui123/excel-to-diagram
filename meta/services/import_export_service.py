@@ -6835,22 +6835,54 @@ class ImportExportService:
                 name_col_idx = headers.index(nn)
                 break
 
+        # [BUG-V041 2026-07-04] 业务键字段发现: 找 obj 的 business_key 字段
+        # 之前只查 record.code, 对没有 code 字段的对象 (例 user 只有 username, business_key=true)
+        # 业务编码展示为空, 因为 row[code_col_idx] 找不到, record.get("code") 也是空.
+        # 修复: 找 obj 的 business_key 字段 (通常是第一个非 virtual), 优先用 record[bk_field_id]
+        _bk_field_ids = []
+        for _f in obj.fields:
+            try:
+                if getattr(_f.semantics, 'business_key', False) and _f.storage.value != 'virtual':
+                    _bk_field_ids.append(_f.id)
+            except Exception:
+                pass
+
         def _get_row_code(row, record=None):
-            """从原 Excel 行取业务编码 (兜底). 优先级: record.code > row[code_col]"""
+            """从原 Excel 行取业务编码 (兜底). 优先级:
+              1) record.code / record.id_code (向后兼容历史调用)
+              2) record[business_key_field] (例 user.username, 修复 BUG-V041)
+              3) row[code_col_idx] (Excel 列兜底)
+            """
             if record:
                 rec_code = record.get("code") or record.get("id_code")
                 if rec_code and isinstance(rec_code, str) and rec_code.strip():
                     return rec_code.strip()
+                # [BUG-V041 2026-07-04] 业务键字段回退 (无 code 字段的对象: user/role 等)
+                for bk_id in _bk_field_ids:
+                    bk_val = record.get(bk_id)
+                    if bk_val and isinstance(bk_val, str) and bk_val.strip():
+                        return bk_val.strip()
+                    if bk_val is not None and not isinstance(bk_val, str):
+                        return str(bk_val).strip()
             if code_col_idx >= 0 and code_col_idx < len(row):
                 v = row[code_col_idx]
                 return str(v).strip() if v is not None else ""
             return ""
         def _get_row_name(row, record=None):
-            """从原 Excel 行取名称 (兜底). 优先级: record.name > row[name_col]"""
+            """从原 Excel 行取名称 (兜底). 优先级:
+              1) record.name / record.display_name
+              2) record[business_key_field] (若无 name 字段, 用 business_key 兜底)
+              3) row[name_col_idx]
+            """
             if record:
                 rec_name = record.get("name") or record.get("display_name")
                 if rec_name and isinstance(rec_name, str) and rec_name.strip():
                     return rec_name.strip()
+                # [BUG-V041 2026-07-04] business_key 字段回退 (无 name 字段的对象)
+                for bk_id in _bk_field_ids:
+                    bk_val = record.get(bk_id)
+                    if bk_val and isinstance(bk_val, str) and bk_val.strip():
+                        return bk_val.strip()
             if name_col_idx >= 0 and name_col_idx < len(row):
                 v = row[name_col_idx]
                 return str(v).strip() if v is not None else ""
