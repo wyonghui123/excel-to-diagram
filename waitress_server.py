@@ -39,10 +39,14 @@ import signal
 # 背景: .env 中约定 FLASK_PORT=3011 (前端 vite 代理 target), 但 waitress_server.py
 #   之前只读 AGENT_PORT 环境变量, 导致默认启动在 3010, 触发前端 500.
 #   修复: 加载 .env 后, 把 FLASK_PORT 同步到 AGENT_PORT (兼容两套命名).
+# [FIX V043 2026-07-04] override=True: 强制覆盖父进程 env
+#   背景: PM 启动 3011 的 PowerShell session 有 FLASK_ENV=production,
+#         被 3011 继承 → _is_production() True → dev-login 500.
+#   修复: override=True 让 .env 显式声明的非生产环境强制生效.
 from dotenv import load_dotenv
 _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
 if os.path.exists(_env_path):
-    load_dotenv(_env_path)
+    load_dotenv(_env_path, override=True)
     # [兼容] .env 写的是 FLASK_PORT, 代码用 AGENT_PORT. 双向同步.
     if not os.environ.get('AGENT_PORT') and os.environ.get('FLASK_PORT'):
         os.environ['AGENT_PORT'] = os.environ['FLASK_PORT']
