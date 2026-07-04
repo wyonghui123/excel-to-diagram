@@ -17,7 +17,7 @@ globs: "meta/tests/**/*,tests/e2e/**/*"
 > **DOM 存在 ≠ 视觉可见**
 >
 > 任何前端 UI 测试，必须用 `assert_visible` 做 5 步视觉验证，不能只看 DOM 存在。
-> 详见 [可测试性铁律完整文档](../../../docs/lessons-learned/testing/testability-iron-rules.md)
+> 详见 [可测试性铁律完整文档](../../docs/lessons-learned/testing/testability-iron-rules.md)
 
 ### 5 步视觉验证（缺一不可）
 
