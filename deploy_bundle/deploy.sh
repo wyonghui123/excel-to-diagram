@@ -238,9 +238,37 @@ if [ -n "$DB_SOURCE" ] && [ -f "$DB_SOURCE" ]; then
     # [FIX 2026-07-03] DB_DEST 共享在 SERVER_DIR 根 (跟 v002 一致)
     DB_DEST="$SERVER_DIR/architecture.db"
     if [ "$DB_SOURCE" != "$DB_DEST" ]; then
-        cp -p "$DB_SOURCE" "$DB_DEST" && ok "复制到 $DB_DEST" || err "复制失败"
+        # [CHG 2026-07-04] 不用 cp, 改用 sqlite3 .backup API 避免半途复制导致 disk image malformed
+        # cp 二进制复制: SQLite 写入时复制可能得到中间态, 服务启动后报 "database disk image is malformed"
+        # sqlite3 .backup: SQLite 内部 checkpoint 机制, 保证一致性
+        if command -v sqlite3 >/dev/null 2>&1; then
+            sqlite3 "$DB_SOURCE" ".backup '$DB_DEST'" && ok "复制 (sqlite3 .backup 一致性): $DB_DEST" || {
+                err "sqlite3 .backup 失败, 退化用 cp"
+                cp -p "$DB_SOURCE" "$DB_DEST"
+            }
+        else
+            warn "sqlite3 不存在, 用 cp (可能复制不完整)"
+            cp -p "$DB_SOURCE" "$DB_DEST" && ok "复制 (cp): $DB_DEST" || err "复制失败"
+        fi
     else
         ok "db 已在 $DB_DEST"
+    fi
+    # [CHG 2026-07-04] 复制后立即验证完整性 (防半途)
+    if command -v sqlite3 >/dev/null 2>&1; then
+        IC=$(sqlite3 "$DB_DEST" "PRAGMA integrity_check;" 2>/dev/null | head -1)
+        if [ "$IC" != "ok" ]; then
+            err "DB 完整性检查失败: $IC"
+            err "尝试从备份恢复: $BACKUP_DB"
+            cp -p "$BACKUP_DB" "$DB_DEST" 2>/dev/null
+            IC2=$(sqlite3 "$DB_DEST" "PRAGMA integrity_check;" 2>/dev/null | head -1)
+            if [ "$IC2" = "ok" ]; then
+                ok "从备份恢复成功"
+            else
+                err "备份也不完整: $IC2, 必须用更早的 .bak 恢复"
+            fi
+        else
+            ok "DB 完整性 = ok"
+        fi
     fi
     # 报告
     info "db 大小: $(stat -c%s "$DB_DEST") bytes"
