@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+﻿from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 import os
@@ -6549,7 +6549,7 @@ class ImportExportService:
                         else:
                             deleted_count += 1
                             success_count += 1
-                            _record_success_item(successes, row_num, "delete", record, _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
+                            _record_success_item(successes, row_num, "delete", record, _MAX_DETAIL, code_override=_get_row_code(row, record), name_override=_get_row_name(row, record))
                     except ValueError as ve:
                         # [FIX v1.2.18 2026-06-20] 删除不存在的记录只推到 warnings (不再推 skipped)
                         # 原因: skipped 会让前端合并入 "成功" tab, 但删除失败不是成功也不是 skip, 是告警
@@ -6566,7 +6566,7 @@ class ImportExportService:
                 elif operation_mode == "skip":
                     logger.info(f"[Import] 跳过记录")
                     skipped_count += 1
-                    _record_skipped_item(skipped_items, row_num, "skip", record, "操作模式为跳过", _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
+                    _record_skipped_item(skipped_items, row_num, "skip", record, "操作模式为跳过", _MAX_DETAIL, code_override=_get_row_code(row, record), name_override=_get_row_name(row, record))
                     continue
                 elif operation_mode == "create":
                     logger.info(f"[Import] 执行新增操作")
@@ -6596,7 +6596,7 @@ class ImportExportService:
                                 created_count += 1
                             else:
                                 updated_count += 1
-                            _record_success_item(successes, row_num, op, record, _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
+                            _record_success_item(successes, row_num, op, record, _MAX_DETAIL, code_override=_get_row_code(row, record), name_override=_get_row_name(row, record))
                         else:
                             failed_count += 1
                             errors.append({"row": row_num, "operation": operation_mode, "field": "编码", "value": record.get("code", ""), "message": upsert_result.get("error", "Upsert failed")})
@@ -6605,7 +6605,7 @@ class ImportExportService:
                         if result.success:
                             success_count += 1
                             created_count += 1
-                            _record_success_item(successes, row_num, "create", record, _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
+                            _record_success_item(successes, row_num, "create", record, _MAX_DETAIL, code_override=_get_row_code(row, record), name_override=_get_row_name(row, record))
                         else:
                             failed_count += 1
                             errors.append({"row": row_num, "operation": operation_mode, "field": "编码", "value": record.get("code", ""), "message": result.message or "创建失败"})
@@ -6624,7 +6624,7 @@ class ImportExportService:
                                 created_count += 1
                             else:
                                 updated_count += 1
-                            _record_success_item(successes, row_num, op, record, _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
+                            _record_success_item(successes, row_num, op, record, _MAX_DETAIL, code_override=_get_row_code(row, record), name_override=_get_row_name(row, record))
                         else:
                             failed_count += 1
                             errors.append({"row": row_num, "operation": operation_mode, "field": "编码", "value": record.get("code", ""), "message": upsert_result.get("error", "Upsert failed")})
@@ -6642,7 +6642,7 @@ class ImportExportService:
                         if update_result and update_result.success:
                             success_count += 1
                             updated_count += 1
-                            _record_success_item(successes, row_num, "update", record, _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
+                            _record_success_item(successes, row_num, "update", record, _MAX_DETAIL, code_override=_get_row_code(row, record), name_override=_get_row_name(row, record))
                         else:
                             # [WriteScope] DENY, FK scope violation, 业务校验失败
                             failed_count += 1
@@ -6663,7 +6663,7 @@ class ImportExportService:
                                 created_count += 1
                             else:
                                 updated_count += 1
-                            _record_success_item(successes, row_num, op, record, _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
+                            _record_success_item(successes, row_num, op, record, _MAX_DETAIL, code_override=_get_row_code(row, record), name_override=_get_row_name(row, record))
                         else:
                             failed_count += 1
                             errors.append({"row": row_num, "operation": operation_mode, "field": "编码", "value": record.get("code", ""), "message": upsert_result.get("error", "Upsert failed")})
@@ -6679,22 +6679,22 @@ class ImportExportService:
                             else:
                                 success_count += 1
                                 updated_count += 1
-                                _record_success_item(successes, row_num, "update", record, _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
+                                _record_success_item(successes, row_num, "update", record, _MAX_DETAIL, code_override=_get_row_code(row, record), name_override=_get_row_name(row, record))
                         else:
                             logger.info(f"[Import] 记录不存在，跳过 (update_only)")
                             skipped_count += 1
-                            _record_skipped_item(skipped_items, row_num, "skip", record, "记录不存在，跳过更新", _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
+                            _record_skipped_item(skipped_items, row_num, "skip", record, "记录不存在，跳过更新", _MAX_DETAIL, code_override=_get_row_code(row, record), name_override=_get_row_name(row, record))
                     elif conflict_strategy == "skip":
                         if self._record_exists(object_type, record, obj.import_export):
                             logger.info(f"[Import] 记录已存在，跳过")
                             skipped_count += 1
-                            _record_skipped_item(skipped_items, row_num, "skip", record, "记录已存在", _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
+                            _record_skipped_item(skipped_items, row_num, "skip", record, "记录已存在", _MAX_DETAIL, code_override=_get_row_code(row, record), name_override=_get_row_name(row, record))
                             continue
                         result = self.manage_service.create(CreateRequest(object_type=object_type, data=record))
                         if result.success:
                             success_count += 1
                             created_count += 1
-                            _record_success_item(successes, row_num, "create", record, _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
+                            _record_success_item(successes, row_num, "create", record, _MAX_DETAIL, code_override=_get_row_code(row, record), name_override=_get_row_name(row, record))
                         else:
                             failed_count += 1
                             errors.append({"row": row_num, "operation": operation_mode, "field": "编码", "value": record.get("code", ""), "message": result.message or "创建失败"})
@@ -6703,7 +6703,7 @@ class ImportExportService:
                         if result.success:
                             success_count += 1
                             created_count += 1
-                            _record_success_item(successes, row_num, "create", record, _MAX_DETAIL, code_override=_get_row_code(row), name_override=_get_row_name(row))
+                            _record_success_item(successes, row_num, "create", record, _MAX_DETAIL, code_override=_get_row_code(row, record), name_override=_get_row_name(row, record))
                         else:
                             failed_count += 1
                             errors.append({"row": row_num, "operation": operation_mode, "field": "编码", "value": record.get("code", ""), "message": result.message or "创建失败"})
