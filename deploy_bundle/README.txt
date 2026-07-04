@@ -21,4 +21,4 @@ bash /tmp/_deploy_bundle/rollback.sh --to <v> --port <p>
 - deploy-v20260703_004.zip  代码包
 - README.txt           本文件
 
-生成时间: 2026-07-04 13:43:58
+生成时间: 2026-07-04 14:08:41

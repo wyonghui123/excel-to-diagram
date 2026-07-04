@@ -8,7 +8,7 @@
 # 测试项 (5 项):
 #   1. backend health (200/410)
 #   2. frontend / (200)
-#   3. /api/v1/auth/login (返回 token)
+#   3. /api/v1/auth/login (用 deploy_test / DeployTest@2026!, 每次 deploy 重置)
 #   4. /api/v1/enum-types (返回 mutability 字段)
 #   5. /api/v1/users/me (用 token 访问, 不应 401)
 # ============================================================
@@ -95,11 +95,13 @@ run_test "frontend /" "$code" "200" "检查 unified_server 启了没"
 
 # ============================================================
 # Test 3: login (通过 frontend unified_server, 模拟真实流程)
+# 用 deploy_test (部署验证专用用户, 每次 deploy 重置, PBKDF2)
+# 不动 admin 业务用户
 # ============================================================
-hr; echo "[Test 3/5] /api/v1/auth/login (通过 $FRONTEND_PORT)"
+hr; echo "[Test 3/5] /api/v1/auth/login (通过 $FRONTEND_PORT, 用 deploy_test)"
 LOGIN_RESP=$(curl -s --max-time 5 -X POST "http://127.0.0.1:$FRONTEND_PORT/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"username":"admin","password":"admin123"}' 2>/dev/null)
+    -d '{"username":"deploy_test","password":"DeployTest@2026!"}' 2>/dev/null)
 
 if echo "$LOGIN_RESP" | grep -q '"token"'; then
     ok "login 返回 token"

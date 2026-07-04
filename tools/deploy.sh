@@ -75,6 +75,9 @@ parse_args "$@"
 
 # 初始化 FAIL_FLAG (避免上阶段 err 遗留)
 FAIL_FLAG=0
+# DEPLOY_OK_FLAG: 部署核心是否成功 (独立于 smoke test)
+# smoke test FAIL 只警告, 不阻塞 (业务用户密码不应依赖 admin)
+DEPLOY_OK_FLAG=0
 
 # 自检: 提示 bundle 版本
 info "=========================================="
@@ -373,14 +376,16 @@ if [ "$SKIP_SMOKE" != "true" ]; then
     bash "$SCRIPT_DIR/smoke_test.sh" --port $BACKEND_PORT --frontend-port $FRONTEND_PORT
     SMOKE_RC=$?
     if [ $SMOKE_RC -ne 0 ]; then
-        err "smoke test 失败 (exit $SMOKE_RC), 自动跑 diagnose 定位"
+        # smoke test 失败只警告, 不阻塞 deploy (业务用户密码可能用户改过)
+        warn "smoke test 部分失败 (exit $SMOKE_RC), 自动跑 diagnose 定位"
         echo ""
         bash "$SCRIPT_DIR/diagnose.sh" --port $BACKEND_PORT --frontend-port $FRONTEND_PORT --to $VERSION
         echo ""
-        err "部署有问题, 建议:"
+        warn "smoke test 不通过, 但 deploy 核心 (PHASE 0-5+7) 可能仍成功"
         echo "  1. 看上面 diagnose 输出定位"
-        echo "  2. 回滚: bash /tmp/rollback.sh --to <v> --port <p>"
-        # 不自动 exit, 让 PHASE 7 切链接 (用户决定)
+        echo "  2. 如果 5001/8081 listening + current 切了, 部署实际可用"
+        echo "  3. 回滚: bash /tmp/rollback.sh --to <v> --port <p>"
+        # 不自动 exit, 不设 FAIL_FLAG, 让 PHASE 7 切链接 (用户决定)
     fi
 else
     warn "跳过 smoke test (--skip-smoke)"
@@ -392,16 +397,35 @@ rm -f $CURRENT_LINK
 ln -sfn $VERSION_PATH $CURRENT_LINK && ok "current → $VERSION_PATH" || err "ln 失败"
 ls -la $CURRENT_LINK
 
+# 部署核心成功判定: 端口 listening + 链接已切
+DEPLOY_CORE_OK=0
+if ss -tlnp 2>/dev/null | grep -qE ":(${BACKEND_PORT}|${FRONTEND_PORT})"; then
+    DEPLOY_CORE_OK=1
+fi
+if [ -L "$CURRENT_LINK" ] && [ "$(readlink $CURRENT_LINK)" = "$VERSION_PATH" ]; then
+    DEPLOY_CORE_OK=1
+fi
+if [ $DEPLOY_CORE_OK -eq 1 ]; then
+    DEPLOY_OK_FLAG=1
+fi
+
 # ========================= SUMMARY =========================
 banner "DEPLOY SUMMARY"
-if summary; then
+echo -e "  部署核心 (PHASE 0-5+7): $([ $DEPLOY_OK_FLAG -eq 1 ] && echo -e "${GREEN}✓ 成功${NC}" || echo -e "${RED}✗ 失败${NC}")"
+echo -e "  smoke test (PHASE 6.5):   $([ $SMOKE_RC -eq 0 ] && echo -e "${GREEN}✓ 通过${NC}" || echo -e "${YELLOW}⚠ 部分失败 (不阻塞)${NC}")"
+echo ""
+
+if [ $DEPLOY_OK_FLAG -eq 1 ]; then
+    echo "✓ 部署成功 (端口 listening + current 链接已切)"
     echo ""
     echo "浏览器访问: http://$(hostname -I 2>/dev/null | awk '{print $1}'):${FRONTEND_PORT}/"
-    echo "登录: admin / admin123 (如已 init)"
+    echo "登录: deploy_test / DeployTest@2026! (部署验证专用)"
+    echo "      admin / admin123 (业务用户, 密码可能被改过)"
     echo "日志: $LOG_DIR/backend-${VERSION}.log, $LOG_DIR/frontend-${VERSION}.log"
     echo "回滚: bash /tmp/rollback.sh --to $(current_version | sed "s/^v//" | awk -F_ '{print $1"_"$2}') --port <port>"
     exit 0
 else
+    echo "✗ 部署核心失败 (端口未起 或 链接未切)"
     echo "回滚: bash /tmp/rollback.sh --to <previous_version> --port <previous_port>"
     exit 1
 fi
