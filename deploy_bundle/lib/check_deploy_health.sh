@@ -107,13 +107,23 @@ fi
 # C1: 远端 MANIFEST.git.head 与本地 zip MANIFEST.git.head 一致
 # ============================================================
 if [ -n "${LOCAL_ZIP}" ] && [ -f "${LOCAL_ZIP}" ]; then
-    if [ ! -f "${REMOTE_CURRENT}/MANIFEST" ]; then
-        print_check "C1" FAIL "远端 ${REMOTE_CURRENT}/MANIFEST 不存在"
-    else
+    # [CHG 2026-07-04] 处理多层软链 + 真实路径
+    # /opt/app/current (软链) -> /opt/app/deployments/v20260703_005 (目录)
+    # current/MANIFEST (软链) -> ../../deployments/v20260703_005/MANIFEST
+    # 退化: cat 能穿透软链, 但 -f 不能穿透断链
+    REAL_CURRENT=$(readlink -f "${REMOTE_CURRENT}" 2>/dev/null)
+    if [ -z "${REAL_CURRENT}" ] || [ ! -d "${REAL_CURRENT}" ]; then
+        print_check "C1" FAIL "远端 ${REMOTE_CURRENT} 链接的 target 不存在 (current 链接断链!)"
+        REAL_CURRENT=""
+    fi
+
+    if [ -n "${REAL_CURRENT}" ] && [ ! -f "${REAL_CURRENT}/MANIFEST" ]; then
+        print_check "C1" FAIL "远端 ${REAL_CURRENT}/MANIFEST 不存在 (current 链接或 MANIFEST 文件缺失)"
+    elif [ -n "${REAL_CURRENT}" ]; then
         # 从 zip 内 MANIFEST 提取 git.head
         local_head=$(unzip -p "${LOCAL_ZIP}" MANIFEST 2>/dev/null | grep -E "^  head:" | head -1 | sed 's/.*head: *"\?\([^"]*\)"\?/\1/')
-        # 从远端 MANIFEST 提取 git.head
-        remote_head=$(grep -E "^  head:" "${REMOTE_CURRENT}/MANIFEST" | head -1 | sed 's/.*head: *"\?\([^"]*\)"\?/\1/')
+        # 从远端 MANIFEST 提取 git.head (用 REAL_CURRENT 穿透软链)
+        remote_head=$(grep -E "^  head:" "${REAL_CURRENT}/MANIFEST" 2>/dev/null | head -1 | sed 's/.*head: *"\?\([^"]*\)"\?/\1/')
 
         if [ -z "${local_head}" ] && [ -z "${remote_head}" ]; then
             print_check "C1" FAIL "两侧 git.head 都为空 - rebuild_zip.py 没写 git SHA 或远端 MANIFEST 被破坏"
@@ -134,15 +144,15 @@ fi
 # ============================================================
 # C2: 远端 MANIFEST.git.head 非空
 # ============================================================
-if [ -f "${REMOTE_CURRENT}/MANIFEST" ]; then
-    head_val=$(grep -E "^  head:" "${REMOTE_CURRENT}/MANIFEST" | head -1 | sed 's/.*head: *"\?\([^"]*\)"\?/\1/')
+if [ -n "${REAL_CURRENT}" ] && [ -f "${REAL_CURRENT}/MANIFEST" ]; then
+    head_val=$(grep -E "^  head:" "${REAL_CURRENT}/MANIFEST" 2>/dev/null | head -1 | sed 's/.*head: *"\?\([^"]*\)"\?/\1/')
     if [ -z "${head_val}" ]; then
         print_check "C2" FAIL "MANIFEST.git.head 为空 (rebuild_zip.py 退化, 必须重新打 zip 部署)"
     else
         print_check "C2" PASS "MANIFEST.git.head = ${head_val}"
     fi
 else
-    print_check "C2" FAIL "MANIFEST 不存在"
+    print_check "C2" FAIL "MANIFEST 不存在 (current 链接断链或 target 目录不存在)"
 fi
 
 # ============================================================
@@ -271,20 +281,32 @@ for service_def in "${SERVICES[@]}"; do
         echo "       cwd=${proc_cwd}" >&2
         [ -n "${loaded_files}" ] && echo "       loaded: ${loaded_files}" >&2
 
+        # [CHG 2026-07-04] 修复 C3 误报:
+        # 之前只看 loaded_files (maps 里 .py 路径), cwd 不算
+        # 实际: cwd=/opt/app/deployments/meta 或 /opt/app/deployments 都是合法的
+        #       (因为 /opt/app/deployments/meta 才是真业务路径, 不是 deploy.sh 会单独 cp 的)
+        # 现在: loaded_files OR cwd 在 /opt/app/(current|deployments)/* 下 → PASS
         code_paths_ok=0
         if [ -n "${loaded_files}" ]; then
             while IFS= read -r fp; do
                 case "${fp}" in
-                    */opt/app/deployments/meta/*|*/opt/app/current/meta/*|*/opt/app/deployments/frontend_dist_files/*)
+                    */opt/app/deployments/*|*/opt/app/current/*)
                         code_paths_ok=1 ;;
                 esac
             done <<< "${loaded_files}"
+        fi
+        # 退化判定: cwd 在 /opt/app/(current|deployments) 下 → PASS
+        if [ "${code_paths_ok}" -eq 0 ] && [ -n "${proc_cwd}" ]; then
+            case "${proc_cwd}" in
+                /opt/app/current|/opt/app/current/*|/opt/app/deployments|/opt/app/deployments/*)
+                    code_paths_ok=1 ;;
+            esac
         fi
 
         if [ "${code_paths_ok}" -eq 0 ]; then
             print_check "C3" FAIL "${svc_name} PID=${pid} 加载的代码路径不在 /opt/app/deployments/* 下 (服务跑的是别的代码!)"
         else
-            print_check "C3" PASS "${svc_name} PID=${pid} 加载的代码路径在 /opt/app/deployments/*"
+            print_check "C3" PASS "${svc_name} PID=${pid} 加载的代码路径在 /opt/app/(current|deployments)/* 下"
         fi
 
         # C4: 启动时间
@@ -299,7 +321,25 @@ for service_def in "${SERVICES[@]}"; do
 
         current_target=""
         if [ -L "${REMOTE_CURRENT}" ]; then
-            current_target=$(readlink "${REMOTE_CURRENT}")
+            # [CHG 2026-07-04] 用 readlink -f 转绝对路径
+            # 软链可能是相对的 (e.g. "deployments/v20260703_005"), readlink 原样返回
+            # 相对路径 + stat 会失败, 必须转绝对
+            current_target=$(readlink -f "${REMOTE_CURRENT}" 2>/dev/null)
+            if [ -z "${current_target}" ] || [ ! -d "${current_target}" ]; then
+                # 退化: readlink 原样 + 拼绝对路径 (不能 local, 在子 shell 里)
+                rel=$(readlink "${REMOTE_CURRENT}")
+                if [[ "${rel}" == /* ]]; then
+                    current_target="${rel}"
+                else
+                    current_target="$(dirname ${REMOTE_CURRENT})/${rel}"
+                fi
+            fi
+        elif [ -d "${REMOTE_CURRENT}" ]; then
+            current_target="${REMOTE_CURRENT}"
+        fi
+        # [CHG 2026-07-04] 安全网: 如果 readlink 失败, 退化用 REAL_CURRENT
+        if [ -z "${current_target}" ] && [ -n "${REAL_CURRENT}" ] && [ -d "${REAL_CURRENT}" ]; then
+            current_target="${REAL_CURRENT}"
         fi
         target_mtime=""
         if [ -n "${current_target}" ] && [ -d "${current_target}" ]; then
@@ -317,6 +357,12 @@ for service_def in "${SERVICES[@]}"; do
 
         if [ -z "${proc_start_unix}" ]; then
             print_check "C4" WARN "${svc_name} PID=${pid} 无法计算启动 unix 时间 (跳过)"
+            continue
+        fi
+
+        # [CHG 2026-07-04] target_mtime 空时 (current 链接断链 / target 目录不存在) 走 WARN
+        if [ -z "${target_mtime}" ]; then
+            print_check "C4" WARN "${svc_name} PID=${pid} target_mtime 拿不到 (current 链接断链, 跳过)"
             continue
         fi
 

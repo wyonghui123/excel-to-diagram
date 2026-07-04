@@ -258,6 +258,8 @@ def build_mock_remote(zip_path: Path, mock_root: Path) -> None:
     构造 /opt/app 镜像 (mock remote_root):
       - current 链接指向最新版本目录
       - 包含 meta/ + frontend_dist_files/
+
+    模拟真实远端布局: /opt/app/{deployments/, current -> deployments/VERSION/}
     """
     mock_root.mkdir(parents=True, exist_ok=True)
     deployments = mock_root / "deployments"
@@ -277,7 +279,7 @@ def build_mock_remote(zip_path: Path, mock_root: Path) -> None:
     with zipfile.ZipFile(zip_path, "r") as zf:
         zf.extractall(target)
 
-    # 创建 current 链接
+    # 创建 current 链接 (相对路径, 跟真实远端一样)
     current = mock_root / "current"
     if current.exists() or current.is_symlink():
         if current.is_symlink():
@@ -286,7 +288,9 @@ def build_mock_remote(zip_path: Path, mock_root: Path) -> None:
             shutil.rmtree(current)
     # 在 Windows 上不支持符号链接, 退化为 junction 或 copy
     try:
-        os.symlink(str(target), str(current))
+        # 相对软链 (跟真实远端部署后一样)
+        rel_target = os.path.relpath(str(target), str(mock_root))
+        os.symlink(rel_target, str(current))
     except (OSError, NotImplementedError):
         # 退化: 复制一份 (测试场景够用)
         shutil.copytree(str(target), str(current))
@@ -299,6 +303,9 @@ def main() -> int:
                         help="构造 /opt/app 镜像 (temp dir), 跑全套检查")
     parser.add_argument("--remote-root", default=None,
                         help="使用指定的 mock 远端根目录 (跟 --mock-remote 配合)")
+    parser.add_argument("--scenario", default="normal",
+                        choices=["normal", "broken-link"],
+                        help="mock 场景: normal=正常, broken-link=模拟远端 current 链接断链")
     args = parser.parse_args()
 
     zip_path = Path(args.zip) if args.zip else (ROOT / "deploy-v20260703_004.zip")
@@ -313,7 +320,21 @@ def main() -> int:
         else:
             mock_root = Path(tempfile.mkdtemp(prefix="check_health_mock_"))
         print(f"Mock 远端根: {mock_root}")
-        build_mock_remote(zip_path, mock_root)
+        if args.scenario == "broken-link":
+            # 模拟真实事故: zip 传上去了, 但 PHASE 0.5 解压失败, current 链接断链
+            # Windows 不支持创建软链到不存在 target (OSError 1314), 退化方案:
+            # 把 current 改为空目录 (跟断链效果类似: MANIFEST 不存在)
+            build_mock_remote(zip_path, mock_root)
+            current = mock_root / "current"
+            if current.is_symlink():
+                current.unlink()
+            elif current.exists():
+                shutil.rmtree(current)
+            current.mkdir()
+            # 不放任何文件 → MANIFEST 不存在 → C1/C2 FAIL
+            print(f"  [scenario=broken-link] 模拟 current 断链/空 (MANIFEST 不存在)")
+        else:
+            build_mock_remote(zip_path, mock_root)
         rc = check_health_local(zip_path, mock_root, counters)
     else:
         # 直接对当前 /opt/app (如果存在) 检查
@@ -339,7 +360,7 @@ def main() -> int:
         print()
         print("建议处理顺序 (按优先级):")
         print("  1. C1/C2 FAIL: MANIFEST 问题, 重新跑 rebuild_zip.py 打 zip 再部署")
-        print("  2. C3 FAIL: 远端服务加载的代码路径不对, 检查启动命令")
+        print("  2. C3 FAIL: 远端服务加载了 /opt/app 之外的代码, 检查启动命令")
         print("  3. C4 FAIL: 服务没重启, 跑 restart.sh 强制重启")
         print("  4. C5 FAIL: DB 损坏, 从 backups 恢复")
         print("  5. C6 FAIL: frontend_dist_files 没替换, 重新跑 deploy.sh 解压")
