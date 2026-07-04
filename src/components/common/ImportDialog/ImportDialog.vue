@@ -1325,6 +1325,23 @@ async function pollImportProgress(taskId) {
           } else if (hasErrors) {
             message.warning(`导入完成，但有 ${data.result.errors.length} 条错误`)
           }
+          // [FIX BUG-V044 2026-07-04] importDataAsync 路径没清 list cache,
+          //   用户关闭弹窗后 await loadList() 时 BOCrudService 的 query cache 还命中旧数据,
+          //   list 显示过期, 必须 F5 整页刷新才看到新数据。
+          //   修法: 异步 task 完成时主动清掉 list cache + 触发 coordinator 刷新。
+          //   - 多对象模式 (multiTypeMode) 时, 同时清所有选中 types 的 cache
+          //   - 单对象模式只清当前 objectType 的 cache
+          try {
+            if (props.multiTypeMode && selectedMultiTypes.value.length) {
+              for (const t of selectedMultiTypes.value) {
+                boService.clearCache(t)
+              }
+            } else if (props.objectType) {
+              boService.clearCache(props.objectType)
+            }
+          } catch (e) {
+            console.warn('[ImportDialog] clearCache failed (non-fatal):', e)
+          }
           // [FIX 2026-06-17] 不在此处 emit success，否则父组件会立刻关闭 dialog
           // 用户在第 4 步点"关闭"按钮时再 emit，让用户先看到完整结果
         } else if (data.status === 'failed') {

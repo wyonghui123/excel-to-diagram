@@ -49,6 +49,8 @@ modified_files:
   - e2e/screenplay/questions/BusinessRuleAssertor.js
   - src/components/bo/ActionExecutor.vue
   - src/components/common/ObjectPage/AssociationSection.vue
+  # [FIX BUG-V044 2026-07-04 dev agent] importDataAsync 路径未清 list cache, 关闭弹窗后 list 显示旧数据
+  - src/components/common/ImportDialog/ImportDialog.vue
 
 new_files:
   # IE 智能体的 e2e 测试 (21)
