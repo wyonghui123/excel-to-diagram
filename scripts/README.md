@@ -1,12 +1,15 @@
 # Integration Scripts README
 
-> 最后更新: 2026-07-04
-> 适用范围: 协调智能体 (PM) 日常维护 integration 环境 (3007/3018)
-> 上游文档: [../INFRA_HANDOVER.md](../INFRA_HANDOVER.md) (SOP v3.2)
+> 最后更新: 2026-07-04 (v3.3 加 O11)
+> 适用范围: 协调智能体 (PM) 日常维护 integration 环境 (3007/3018) + release 同步
+> 上游文档:
+> - [../INFRA_HANDOVER.md](../INFRA_HANDOVER.md) (SOP v3.2)
+> - [../.trae/rules/development-workflow.md](../.trae/rules/development-workflow.md) (v3.3 完整流程)
+> - [../.trae/rules/release-sync-workflow.md](../.trae/rules/release-sync-workflow.md) (v3.3 同步流程)
 
 ---
 
-## 1. 脚本清单 (5 件套)
+## 1. 脚本清单 (6 件套)
 
 | 脚本 | O 编号 | 功能 | 何时用 |
 |---|---|---|---|
@@ -16,6 +19,7 @@
 | [`status-integration.ps1`](./status-integration.ps1) | O9 | 一键查 4 端口/进程/DB/锁/Git 同步 | **随时** |
 | [`sync-integration-db.ps1`](./sync-integration-db.ps1) | O10 | 从 release 拉最新 DB → integration | release 有新 BUG cherry-pick 后 |
 | [`check-sha-consistency.ps1`](./check-sha-consistency.ps1) | O12 | 上线前 SHA 一致性检查 (PASS/FAIL) | 并行 BUG 上线前 checklist |
+| **`rebuild-frontend-dist.ps1`** | **O11** | **一键 rebuild frontend (build + cp + 重启 3006/3007)** | **前端改动后 (v3.3 新)** |
 
 ---
 
@@ -189,6 +193,7 @@ pwsh -File D:\filework\scripts\sync-integration-db.ps1
 pwsh -File D:\filework\scripts\check-sha-consistency.ps1
     [-DbStaleThresholdMinutes <min>]   # 默认 60
     [-RequireFrontend]                 # 额外检查前端 dist SHA 文件
+    [-Strict]                          # 严格模式: SHA 必须完全相同 (默认允许"内容等价")
     [-Json]                            # 输出 JSON (CI 用)
 ```
 
@@ -196,10 +201,50 @@ pwsh -File D:\filework\scripts\check-sha-consistency.ps1
 - `0` = PASS 或 WARN (可继续, WARN 建议 review)
 - `1` = FAIL (**禁止部署**)
 
-**检查项**:
-1. Git HEAD SHA: release == integration
-2. DB sync recency: integration DB 时间 vs release DB 时间 (默认 60 分钟阈值)
+**检查项 (v3.3 升级)**:
+1. **Git HEAD SHA** (默认"内容等价"):
+   - release HEAD 是 integration HEAD 的祖先 → PASS
+   - integration HEAD 是 release HEAD 的祖先 → PASS
+   - 都不在对方历史 (diverged) → **WARN** (列出独有 commit 数)
+   - `-Strict` 模式: SHA 必须完全相同 → 否则 FAIL
+2. **DB sync recency**: integration DB 时间 vs release DB 时间 (默认 60 分钟阈值)
 3. (可选) Frontend dist SHA 文件
+
+**v3.3 关键变化**:cherry-pick 后 SHA 必然不同, 但内容等价 → 默认视为 PASS, 解决了 V044 sync 误报。
+
+### 4.6 rebuild-frontend-dist.ps1 (v3.3 新)
+
+```powershell
+pwsh -File D:\filework\scripts\rebuild-frontend-dist.ps1
+    [-ReleasePath <path>]              # 默认 D:\filework\release-prep-worktree
+    [-FrontendPort <port>]             # 默认 3006 (主前端)
+    [-BuildTimeoutSec <sec>]           # 默认 180
+    [-RestartTimeoutSec <sec>]         # 默认 30
+    [-SkipBuild]                       # 跳过 npm run build
+    [-SkipRestart]                     # 不重启前端服务
+    [-Force]                           # 跳过确认
+```
+
+**用法示例**:
+
+```powershell
+# 1. 标准: build + cp + 重启主 3006 (要确认)
+pwsh -File D:\filework\scripts\rebuild-frontend-dist.ps1
+
+# 2. 给 integration 3007 rebuild:
+pwsh -File D:\filework\scripts\rebuild-frontend-dist.ps1 `
+    -ReleasePath "D:\filework\integration-worktree" `
+    -FrontendPort "3007" `
+    -Force
+
+# 3. 只 build + cp, 不重启 (高级用法, 手动启 3006)
+pwsh -File D:\filework\scripts\rebuild-frontend-dist.ps1 -SkipRestart
+```
+
+**触发时机** (release-sync-workflow.md §3 Step 4):
+- 协调智能体 cherry-pick 一个 frontend fix 到 release 后
+- 用户报告前端问题需要紧急修复后
+- PM 要求"刷新 3006"
 
 ---
 
@@ -253,14 +298,31 @@ A: start 必须先启后端, stop 必须先停前端。
 | 2026-07-04 | 协调智能体 | O7/O8/O9/O10/O12 完成 |
 | 2026-07-04 | 协调智能体 | sync-integration-db 加固: integrity_check + auto-rollback (历史事故: 246MB 坏 DB 静默写入) |
 | 2026-07-04 | 开发智能体 | INFRA_HANDOVER.md v2 (4 遗漏已修) |
+| 2026-07-04 | 协调智能体 | **v3.3 升级**: 加 O11 rebuild-frontend-dist, check-sha 支持内容等价, 加 2 个 workflow SOP |
 
 ---
 
 ## 7. 相关文件
 
 - [INFRA_HANDOVER.md](../INFRA_HANDOVER.md) - 完整 SOP (含 C1-C4 约束、6 步准备、10 优化项、故障排查)
+- [../.trae/rules/development-workflow.md](../.trae/rules/development-workflow.md) - v3.3 多 Agent 协作流程 (开发/e2e/协调/PM 职责分工)
+- [../.trae/rules/release-sync-workflow.md](../.trae/rules/release-sync-workflow.md) - v3.3 协调智能体的标准 sync 流程
 - [PARALLEL_DEV_SOP.md](../excel-to-diagram/PARALLEL_DEV_SOP.md) - v3.2 并行开发规范
 - [DEPLOY_HANDOVER_BUG_V###.md](../excel-to-diagram/) - 各 BUG 的部署交接文档
+
+---
+
+## 8. v3.3 新工作流速查 (PM 视角)
+
+PM 日常只需要看 §8 这张表就够了:
+
+| 时机 | PM 做什么 | 协调智能体做什么 |
+|---|---|---|
+| 开发智能体报告 BUG fix 完成 | 等 e2e agent 跑完 integration | 等 "e2e PASS" 通知 |
+| e2e agent 报告 e2e PASS | 等协调智能体 cherry-pick | cherry-pick → rebuild → 重启主服务 → check-sha |
+| 协调智能体报告 "主 3006 已就绪" | **在 3006 上人工验证** | 等 PM 反馈 |
+| PM 验证 PASS | 通知部署智能体 | 等部署触发 |
+| PM 验证 FAIL | 反馈协调智能体 revert | revert → rebuild → 重启 → 通知 PM 重测 |
 
 ---
 
