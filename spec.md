@@ -88,6 +88,7 @@ new_files:
   - deploy_bundle/lib/check_deploy_health.sh
   - deploy_bundle/smoke_test.sh
   - deploy_bundle/deploy-v20260703_005.zip
+  - deploy_bundle/deploy-v20260703_006.zip
   - tests/check_health_local.py
   - tests/test_manifest_alignment.py
   - tests/test_export_no_annotation.py
