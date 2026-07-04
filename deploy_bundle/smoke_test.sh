@@ -103,16 +103,43 @@ LOGIN_RESP=$(curl -s --max-time 5 -X POST "http://127.0.0.1:$FRONTEND_PORT/api/v
     -H "Content-Type: application/json" \
     -d '{"username":"deploy_test","password":"DeployTest@2026!"}' 2>/dev/null)
 
+# [CHG 2026-07-04] 提取 token: 用 python3 优先, 退化 python, 最后 grep 兜底
+# 之前用 'python' 在某些远端 (没有 /usr/bin/python, 只有 python3) 时静默失败, 吞 stderr
+extract_token() {
+    local resp="$1"
+    # 优先 python3
+    if command -v python3 >/dev/null 2>&1; then
+        echo "$resp" | python3 -c "import sys, json; print(json.load(sys.stdin).get('data', {}).get('token', ''))" 2>/dev/null
+        return
+    fi
+    # 退化 python (py2 也支持 json.load)
+    if command -v python >/dev/null 2>&1; then
+        echo "$resp" | python -c "import sys, json; print(json.load(sys.stdin).get('data', {}).get('token', ''))" 2>/dev/null
+        return
+    fi
+    # 退化 jq
+    if command -v jq >/dev/null 2>&1; then
+        echo "$resp" | jq -r '.data.token // ""' 2>/dev/null
+        return
+    fi
+    # 退化: 文本匹配 (不精确但能拿值)
+    echo "$resp" | grep -oE '"token"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 | sed 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/'
+}
+
 if echo "$LOGIN_RESP" | grep -q '"token"'; then
     ok "login 返回 token"
     TEST_PASSED=$((TEST_PASSED+1))
     # 提取 token 给 test 5 用
-    TOKEN=$(echo "$LOGIN_RESP" | python -c "import sys, json; print(json.load(sys.stdin).get('data', {}).get('token', ''))" 2>/dev/null)
+    TOKEN=$(extract_token "$LOGIN_RESP")
     info "  token length: ${#TOKEN}"
+    if [ -z "$TOKEN" ] || [ "${#TOKEN}" -lt 50 ]; then
+        warn "  token 解析失败 (长度 < 50), test 5 会失败"
+        info "  response 前 200 字符: $(echo $LOGIN_RESP | head -c 200)"
+    fi
 elif echo "$LOGIN_RESP" | grep -q '"success":true'; then
     ok "login 成功 (alternate format)"
     TEST_PASSED=$((TEST_PASSED+1))
-    TOKEN=$(echo "$LOGIN_RESP" | python -c "import sys, json; print(json.load(sys.stdin).get('data', {}).get('token', ''))" 2>/dev/null)
+    TOKEN=$(extract_token "$LOGIN_RESP")
 else
     err "login 失败"
     info "  response: $(echo $LOGIN_RESP | head -c 200)"

@@ -86,6 +86,7 @@ new_files:
   # [FIX 2026-07-04 deploy agent] 一键 6 类 BUG 健康检查
   - tools/lib/check_deploy_health.sh
   - deploy_bundle/lib/check_deploy_health.sh
+  - deploy_bundle/smoke_test.sh
   - deploy_bundle/deploy-v20260703_005.zip
   - tests/check_health_local.py
   - tests/test_manifest_alignment.py
