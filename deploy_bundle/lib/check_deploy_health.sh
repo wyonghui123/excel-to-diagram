@@ -223,66 +223,112 @@ check_process_identity() {
     eval "${service_name}_PID=${pid}"
 }
 
-echo "[C3/C4] 进程身份 + 启动时间检查:"
-check_process_identity ${BACKEND_PORT} "backend"
-BACKEND_PID_RESULT="${backend_PID:-}"
-check_process_identity ${FRONTEND_PORT} "unified"
-FRONTEND_PID_RESULT="${unified_PID:-}"
+echo "[C3/C4] 进程身份 + 启动时间检查 (表驱动 + 并行):"
 
-# ============================================================
-# C4: 进程启动时间 >= 当前 zip 解压时间 (重启真加载了新代码)
-# ============================================================
-check_process_starttime() {
-    local pid="$1"
-    local service_name="$2"
-    if [ -z "${pid}" ] || [ ! -d "/proc/${pid}" ]; then
-        return
-    fi
+# [CHG 2026-07-04] 表驱动 + 并行优化:
+# 之前: backend 一段 / unified 一段 (重复代码)
+# 现在: SERVICES 数组定义, 后台 & 并行跑, wait 收齐
+SERVICES=(
+    "backend:${BACKEND_PORT}:meta/server.py"
+    "unified:${FRONTEND_PORT}:unified_server.py"
+)
+PIDS_RESULT_DIR=$(mktemp -d)
+trap "rm -rf '${PIDS_RESULT_DIR}'" EXIT
 
-    # 进程启动时间 (jiffies since boot)
-    local starttime=""
-    if [ -r "/proc/${pid}/stat" ]; then
-        starttime=$(awk '{print $22}' "/proc/${pid}/stat" 2>/dev/null)
-    fi
+# 在子 shell 里跑 (并行)
+for service_def in "${SERVICES[@]}"; do
+    IFS=':' read -r svc_name svc_port svc_pattern <<< "${service_def}"
+    (
+        # C3: 进程身份
+        pid=""
+        if command -v lsof >/dev/null 2>&1; then
+            pid=$(lsof -ti tcp:${svc_port} 2>/dev/null | head -1)
+        elif [ -d /proc ]; then
+            port_hex=$(printf "%04X" ${svc_port})
+            for p in /proc/[0-9]*; do
+                if [ -r "${p}/net/tcp" ] && grep -qE ":${port_hex} .* 0A" "${p}/net/tcp" 2>/dev/null; then
+                    cand_pid=$(basename ${p})
+                    [ -r "${p}/cmdline" ] && pid="${cand_pid}" && break
+                fi
+            done
+        fi
 
-    # 当前 current 链接指向的部署目录的修改时间
-    local current_target=""
-    if [ -L "${REMOTE_CURRENT}" ]; then
-        current_target=$(readlink "${REMOTE_CURRENT}")
-    fi
-    local target_mtime=""
-    if [ -n "${current_target}" ] && [ -d "${current_target}" ]; then
-        target_mtime=$(stat -c %Y "${current_target}" 2>/dev/null || stat -f %m "${current_target}" 2>/dev/null)
-    fi
+        if [ -z "${pid}" ]; then
+            print_check "C3" FAIL "${svc_name} 端口 ${svc_port} 没找到监听进程"
+            echo "${svc_name}_PID=" > "${PIDS_RESULT_DIR}/${svc_name}"
+            continue
+        fi
 
-    if [ -z "${starttime}" ] || [ -z "${target_mtime}" ]; then
-        print_check "C4" WARN "${service_name} PID=${pid} 无法读 starttime 或 target_mtime (跳过)"
-        return
-    fi
+        # 加载路径检查
+        loaded_files=""
+        if [ -d "/proc/${pid}/maps" ]; then
+            loaded_files=$(grep -E "(server\.py|unified_server\.py)" "/proc/${pid}/maps" 2>/dev/null | awk '{print $NF}' | sort -u | head -5)
+        fi
+        proc_cwd=""
+        [ -L "/proc/${pid}/cwd" ] && proc_cwd=$(readlink "/proc/${pid}/cwd" 2>/dev/null)
 
-    # 进程启动时间是 jiffies, 需要转秒. 取 uptime * HZ + starttime
-    local uptime_secs=$(awk '{print $1}' /proc/uptime 2>/dev/null)
-    local hz=$(getconf CLK_TCK 2>/dev/null || echo 100)
-    local proc_start_unix=$(awk -v u="${uptime_secs}" -v s="${starttime}" -v h="${hz}" 'BEGIN { printf "%d", u - s/h }' 2>/dev/null)
+        echo "${svc_name} PID=${pid}" >&2
+        echo "       cwd=${proc_cwd}" >&2
+        [ -n "${loaded_files}" ] && echo "       loaded: ${loaded_files}" >&2
 
-    if [ -z "${proc_start_unix}" ]; then
-        print_check "C4" WARN "${service_name} PID=${pid} 无法计算启动 unix 时间 (跳过)"
-        return
-    fi
+        code_paths_ok=0
+        if [ -n "${loaded_files}" ]; then
+            while IFS= read -r fp; do
+                case "${fp}" in
+                    */opt/app/deployments/meta/*|*/opt/app/current/meta/*|*/opt/app/deployments/frontend_dist_files/*)
+                        code_paths_ok=1 ;;
+                esac
+            done <<< "${loaded_files}"
+        fi
 
-    # 进程启动时间 应 >= current 链接指向目录的 mtime
-    # (意味着 current 切换之后, 进程才启动)
-    if [ "${proc_start_unix}" -lt "${target_mtime}" ]; then
-        local diff=$((target_mtime - proc_start_unix))
-        print_check "C4" FAIL "${service_name} PID=${pid} 启动时间早于 current 切换 ${diff}s (服务是旧版本, 没重启加载新代码!)"
-    else
-        print_check "C4" PASS "${service_name} PID=${pid} 启动时间 >= current 切换"
-    fi
-}
+        if [ "${code_paths_ok}" -eq 0 ]; then
+            print_check "C3" FAIL "${svc_name} PID=${pid} 加载的代码路径不在 /opt/app/deployments/* 下 (服务跑的是别的代码!)"
+        else
+            print_check "C3" PASS "${svc_name} PID=${pid} 加载的代码路径在 /opt/app/deployments/*"
+        fi
 
-echo ""
-check_process_starttime "${BACKEND_PID_RESULT}" "backend"
-check_process_starttime "${FRONTEND_PID_RESULT}" "unified"
+        # C4: 启动时间
+        if [ -z "${pid}" ] || [ ! -d "/proc/${pid}" ]; then
+            continue
+        fi
+
+        starttime=""
+        if [ -r "/proc/${pid}/stat" ]; then
+            starttime=$(awk '{print $22}' "/proc/${pid}/stat" 2>/dev/null)
+        fi
+
+        current_target=""
+        if [ -L "${REMOTE_CURRENT}" ]; then
+            current_target=$(readlink "${REMOTE_CURRENT}")
+        fi
+        target_mtime=""
+        if [ -n "${current_target}" ] && [ -d "${current_target}" ]; then
+            target_mtime=$(stat -c %Y "${current_target}" 2>/dev/null || stat -f %m "${current_target}" 2>/dev/null)
+        fi
+
+        if [ -z "${starttime}" ] || [ -z "${target_mtime}" ]; then
+            print_check "C4" WARN "${svc_name} PID=${pid} 无法读 starttime 或 target_mtime (跳过)"
+            continue
+        fi
+
+        uptime_secs=$(awk '{print $1}' /proc/uptime 2>/dev/null)
+        hz=$(getconf CLK_TCK 2>/dev/null || echo 100)
+        proc_start_unix=$(awk -v u="${uptime_secs}" -v s="${starttime}" -v h="${hz}" 'BEGIN { printf "%d", u - s/h }' 2>/dev/null)
+
+        if [ -z "${proc_start_unix}" ]; then
+            print_check "C4" WARN "${svc_name} PID=${pid} 无法计算启动 unix 时间 (跳过)"
+            continue
+        fi
+
+        if [ "${proc_start_unix}" -lt "${target_mtime}" ]; then
+            diff=$((target_mtime - proc_start_unix))
+            print_check "C4" FAIL "${svc_name} PID=${pid} 启动时间早于 current 切换 ${diff}s (服务是旧版本, 没重启加载新代码!)"
+        else
+            print_check "C4" PASS "${svc_name} PID=${pid} 启动时间 >= current 切换"
+        fi
+    ) &
+done
+wait
 
 # ============================================================
 # C5: db integrity_check 通过

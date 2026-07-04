@@ -239,10 +239,43 @@ wait_for_health() {
 # 工具函数: 杀掉所有 server.py 进程 (除参数外)
 # ============================================================
 stop_all_servers() {
-    pkill -9 -f "python.*server.py" 2>/dev/null && ok "杀残留 server.py" || true
-    pkill -9 -f "unified_server.py" 2>/dev/null && ok "杀残留 unified_server" || true
-    pkill -9 -f "http.server" 2>/dev/null && ok "杀残留 http.server" || true
-    sleep 2
+    # [CHG 2026-07-04] grace period 模式:
+    # 1. 先 SIGTERM (允许进程 graceful shutdown: 关 DB conn / flush log / 回应在飞请求)
+    # 2. 等 GRACE_PERIOD 秒 (默认 5)
+    # 3. 还活着的 PID 才 SIGKILL (避免卡死的进程拖整个 deploy)
+    # 之前直接 pkill -9 会让 HTTP 请求 502, DB 事务半成品, 是部署告警的常见来源
+    local GRACE_PERIOD="${GRACE_PERIOD:-5}"
+    local pattern pids
+
+    for pattern in "python.*server.py" "unified_server.py" "http.server"; do
+        pids=$(pgrep -f "$pattern" 2>/dev/null | tr '\n' ' ')
+        if [ -n "$pids" ]; then
+            info "  优雅停 [$(echo $pattern | head -c 30)] PIDs: $pids"
+            kill -15 $pids 2>/dev/null
+            # 等 grace period (每 0.5s 检查一次)
+            local waited=0
+            while [ $waited -lt $GRACE_PERIOD ]; do
+                sleep 0.5
+                waited=$((waited + 1))
+                local still_alive=""
+                for p in $pids; do
+                    kill -0 $p 2>/dev/null && still_alive="$still_alive $p"
+                done
+                if [ -z "$still_alive" ]; then
+                    ok "  全部 graceful 退出 (waited ${waited}/$((GRACE_PERIOD*2)) *0.5s)"
+                    break
+                fi
+                pids="$still_alive"
+            done
+            # 超时, SIGKILL 残留
+            if [ -n "$pids" ]; then
+                warn "  超时未退出, 强杀: $pids"
+                kill -9 $pids 2>/dev/null
+                sleep 1
+            fi
+        fi
+    done
+    sleep 1
 }
 
 # ============================================================

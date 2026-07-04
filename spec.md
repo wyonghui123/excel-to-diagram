@@ -39,12 +39,16 @@ modified_files:
   - tools/status.sh
   - tools/restart.sh
   - tools/diagnose.sh
+  - tools/precheck.sh
+  - tools/lib/common.sh
   - tools/rebuild_zip.py
   - tools/rebuild_bundle.ps1
   - deploy_bundle/deploy.sh
   - deploy_bundle/status.sh
   - deploy_bundle/restart.sh
   - deploy_bundle/diagnose.sh
+  - deploy_bundle/precheck.sh
+  - deploy_bundle/lib/common.sh
   - deploy_bundle/README.txt
   - tests/test_deploy_e2e.py
   # 领域过滤器 originalId 碰撞修复 (2026-06-30)
@@ -82,6 +86,7 @@ new_files:
   # [FIX 2026-07-04 deploy agent] 一键 6 类 BUG 健康检查
   - tools/lib/check_deploy_health.sh
   - deploy_bundle/lib/check_deploy_health.sh
+  - deploy_bundle/deploy-v20260703_005.zip
   - tests/check_health_local.py
   - tests/test_manifest_alignment.py
   - tests/test_export_no_annotation.py

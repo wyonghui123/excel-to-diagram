@@ -119,23 +119,67 @@ if command -v systemctl >/dev/null 2>&1; then
     if systemctl is-system-running >/dev/null 2>&1; then
         run_check "systemd 可用且在运行" pass
     else
-        run_check "systemd 存在但未运行 (容器环境?)" warn "将用 nohup 启 backend"
+        run_check "systemd 存在但未运行 (容器环境？)" warn "将用 nohup 启 backend"
     fi
 else
     run_check "systemctl 不可用" warn "将用 nohup 启 backend"
 fi
 
 # ============================================================
-# Check 4: 端口占用
+# Check 4: 端口占用 (智能判定 - 2026-07-04)
 # ============================================================
-hr; echo "[Check 4/7] 端口占用"
+# 之前: 端口被占 → 直接 FAIL (误报率高, 实际 deploy PHASE 1 会自动停)
+# 现在: 端口被占 → 检查 PID 加载的代码路径
+#   - PID 加载 /opt/app/current/* 代码 → WARN (deploy 会自动处理)
+#   - PID 加载其他路径代码 → FAIL (需要人工干预)
+#   - 进程不存在/无法读 → FAIL (回退到严格判定)
+hr; echo "[Check 4/7] 端口占用 (智能判定)"
+
+# Helper: 看 PID 加载的代码路径是否在 current 下
+pid_loaded_from_current() {
+    local pid="$1"
+    if [ -z "$pid" ] || [ ! -d "/proc/$pid" ]; then
+        return 1
+    fi
+    # 优先 /proc/PID/maps (Linux), 退化 /proc/PID/exe + cmdline
+    if [ -r "/proc/$pid/maps" ]; then
+        # grep server.py / unified_server.py / python
+        local loaded
+        loaded=$(grep -E "(server\.py|unified_server\.py)" "/proc/$pid/maps" 2>/dev/null | awk '{print $NF}' | sort -u | head -3)
+        if [ -z "$loaded" ]; then
+            # 退化: 看 cwd
+            local cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null)
+            if [ -n "$cwd" ]; then
+                loaded="$cwd"
+            fi
+        fi
+        if [ -z "$loaded" ]; then
+            return 1  # 无法判定 → 严格
+        fi
+        # 检查任一加载路径在 /opt/app/current/ 或 /opt/app/deployments/ 下
+        echo "$loaded" | while IFS= read -r p; do
+            case "$p" in
+                /opt/app/current/*|/opt/app/deployments/*)
+                    exit 0 ;;
+            esac
+        done
+        # 上面 while 是子 shell, 用更简单方式:
+        if echo "$loaded" | grep -qE "/opt/app/(current|deployments)/"; then
+            return 0
+        fi
+        return 1
+    fi
+    return 1  # 非 Linux 或不可读
+}
+
 if is_port_listening $BACKEND_PORT; then
-    # 看是哪个进程
     PORT_PID=$(ss -tlnp 2>/dev/null | grep ":$BACKEND_PORT " | grep -oP 'pid=\K[0-9]+' | head -1)
     PORT_PROC=$(ps -p "$PORT_PID" -o args= 2>/dev/null | head -c 100 || echo "?")
     if [ "${ARG_AUTO_KILL:-false}" = "true" ]; then
         info "  端口被 PID $PORT_PID 占用: $PORT_PROC, 自动杀..."
-        kill -9 $PORT_PID 2>/dev/null && ok "  杀掉 PID $PORT_PID" || err "  杀失败"
+        kill -15 $PORT_PID 2>/dev/null
+        sleep 2
+        kill -0 $PORT_PID 2>/dev/null && kill -9 $PORT_PID 2>/dev/null
         sleep 1
         if is_port_listening $BACKEND_PORT; then
             run_check "backend 端口 $BACKEND_PORT 仍被占用" fail "auto-kill 失败"
@@ -143,13 +187,25 @@ if is_port_listening $BACKEND_PORT; then
             run_check "backend 端口 $BACKEND_PORT 杀后空闲" pass
         fi
     else
-        run_check "backend 端口 $BACKEND_PORT 已被占用" fail "杀掉旧进程 (PID $PORT_PID: $PORT_PROC) 或换端口 (--port), 或加 --auto-kill"
+        # 智能判定: PID 加载的代码是否在 current 下
+        if pid_loaded_from_current "$PORT_PID"; then
+            run_check "backend 端口 $BACKEND_PORT 被 PID $PORT_PID 占用 (加载 /opt/app/current/* 代码)" warn "deploy.sh PHASE 1 会自动停旧, 可继续"
+            info "  PID $PORT_PID 加载的代码在 /opt/app/current 下, deploy 会处理"
+        else
+            run_check "backend 端口 $BACKEND_PORT 被 PID $PORT_PID 占用 (代码路径异常)" fail "杀掉旧进程 ($PORT_PROC) 或换端口 (--port), 或加 --auto-kill"
+        fi
     fi
 else
     run_check "backend 端口 $BACKEND_PORT 空闲" pass
 fi
+
 if is_port_listening $FRONTEND_PORT; then
-    run_check "frontend 端口 $FRONTEND_PORT 已被占用" warn "可能旧 unified_server, deploy 会停"
+    PORT_PID=$(ss -tlnp 2>/dev/null | grep ":$FRONTEND_PORT " | grep -oP 'pid=\K[0-9]+' | head -1)
+    if [ -n "$PORT_PID" ] && pid_loaded_from_current "$PORT_PID"; then
+        run_check "frontend 端口 $FRONTEND_PORT 被 PID $PORT_PID 占用 (加载 /opt/app/current/* 代码)" warn "deploy.sh PHASE 1 会自动停旧, 可继续"
+    else
+        run_check "frontend 端口 $FRONTEND_PORT 被 PID $PORT_PID 占用 (代码路径异常)" warn "可能旧 unified_server, 杀掉旧进程 (PID $PORT_PID) 后重跑"
+    fi
 else
     run_check "frontend 端口 $FRONTEND_PORT 空闲" pass
 fi

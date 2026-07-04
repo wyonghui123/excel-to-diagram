@@ -239,6 +239,62 @@ test("check_deploy_health.sh 6 类检查", t14)
 
 
 # ============================================================
+# TEST 17: precheck.sh 智能端口判定 (2026-07-04 优化)
+# ============================================================
+def t17():
+    body = (DEPLOY_BUNDLE / "precheck.sh").read_text(encoding="utf-8")
+    # 必须含 pid_loaded_from_current 函数
+    if "pid_loaded_from_current" not in body:
+        raise AssertionError("precheck.sh 缺 pid_loaded_from_current 智能判定函数")
+    # 必须含 "加载 /opt/app/current/* 代码" 字样
+    if "加载 /opt/app/current/* 代码" not in body:
+        raise AssertionError("precheck.sh 缺智能判定输出标记")
+    print(f"  precheck.sh 含智能端口判定 (current 代码 → WARN, 异常 → FAIL)")
+
+test("precheck.sh 智能端口判定", t17)
+
+
+# ============================================================
+# TEST 18: stop_all_servers grace period (2026-07-04 优化)
+# ============================================================
+def t18():
+    body = (DEPLOY_BUNDLE / "lib" / "common.sh").read_text(encoding="utf-8")
+    # 必须含 GRACE_PERIOD
+    if "GRACE_PERIOD" not in body:
+        raise AssertionError("stop_all_servers 缺 GRACE_PERIOD 机制")
+    # 必须含 SIGTERM (15) 后 SIGKILL (9) 的两步
+    if "kill -15" not in body or "kill -9" not in body:
+        raise AssertionError("stop_all_servers 缺 SIGTERM → SIGKILL 两步")
+    # 不应再直接用 pkill -9 -f (已经替换)
+    if "pkill -9 -f" in body:
+        raise AssertionError("stop_all_servers 仍在直接 pkill -9 -f (没换 grace period)")
+    print(f"  stop_all_servers 含 grace period (SIGTERM → 等 → SIGKILL)")
+
+test("stop_all_servers grace period", t18)
+
+
+# ============================================================
+# TEST 19: check_deploy_health.sh 表驱动多 service (2026-07-04 优化)
+# ============================================================
+def t19():
+    body = (DEPLOY_BUNDLE / "lib" / "check_deploy_health.sh").read_text(encoding="utf-8")
+    # 必须含 SERVICES 数组
+    if "SERVICES=(" not in body:
+        raise AssertionError("check_deploy_health.sh 缺 SERVICES 表驱动数组")
+    # 必须含 backend 和 unified 两项
+    if "backend:${BACKEND_PORT}" not in body:
+        raise AssertionError("check_deploy_health.sh SERVICES 数组缺 backend")
+    if "unified:${FRONTEND_PORT}" not in body:
+        raise AssertionError("check_deploy_health.sh SERVICES 数组缺 unified")
+    # 必须含后台并行 (用 ` &` 和 `wait`)
+    if " ) &" not in body and ") &" not in body:
+        raise AssertionError("check_deploy_health.sh 没后台并行")
+    print(f"  check_deploy_health.sh 表驱动多 service + 后台并行")
+
+test("check_deploy_health.sh 表驱动并行", t19)
+
+
+# ============================================================
 # TEST 15: check_deploy_health.sh 集成到 deploy.sh / status.sh / restart.sh / diagnose.sh
 # ============================================================
 def t15():
