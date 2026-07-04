@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>第 3 章 · AA 图生成 · BIP 帮助中心</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body class="page-chapter" style="--c: #7c3aed">
+  <header class="chapter-header">
+    <div class="chapter-header__inner">
+      <div class="chapter-header__crumbs">
+        <a href="./index.html">帮助中心</a>
+        <span class="sep">/</span>
+        <span>第 3 章</span>
+      </div>
+      <div class="chapter-header__eyebrow">CHAPTER 03 · PURPLE</div>
+      <h1 class="chapter-header__title">AA 图生成</h1>
+      <p class="chapter-header__desc">
+        从 Excel 到可视化关系图，六步向导一气呵成。
+        选中心、定范围、画关系，三分钟内得到一张能讲故事的图。
+      </p>
+    </div>
+  </header>
+
+  <main class="chapter-main">
+
+    <section class="story-card" aria-label="7 段式故事卡">
+      <h2 class="story-card__title">故事卡 <small>把第 2 章的层级树"画"成关系图</small></h2>
+      <p class="story-card__desc">把"想给老板看架构图"这条主线，拆成 7 个节点。</p>
+      <div class="story">
+        <div class="story__node">
+          <div class="story__node-num">1</div>
+          <div class="story__node-title">痛点</div>
+          <div class="story__node-desc">手画 PPT 画两周，节点一改全散架。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">2</div>
+          <div class="story__node-title">召唤</div>
+          <div class="story__node-desc">6 步向导，1 张图自动生成。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">3</div>
+          <div class="story__node-title">入门</div>
+          <div class="story__node-desc">3 分钟走完 6 步出第一张图。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">4</div>
+          <div class="story__node-title">探索</div>
+          <div class="story__node-desc">布局算法、颜色分组、标签策略。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">5</div>
+          <div class="story__node-title">进阶</div>
+          <div class="story__node-desc">预设保存、差异对比、批量出图。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">6</div>
+          <div class="story__node-title">实战</div>
+          <div class="story__node-desc">用 Excel 生成"供应链"主题图。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">7</div>
+          <div class="story__node-title">回顾</div>
+          <div class="story__node-desc">速查表 + 引出第 4 章的权限。</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">3 · 入门：6 步向导</h2>
+      <ol>
+        <li><strong>导入</strong>：上传 Excel 或选已有产品版本。</li>
+        <li><strong>中心</strong>：勾选要在图中心显示的业务对象。</li>
+        <li><strong>关系</strong>：选择要展示的关联类型（引用 / 依赖 / 组合）。</li>
+        <li><strong>类型</strong>：业务对象图 / 服务模块图 二选一。</li>
+        <li><strong>配置</strong>：布局算法（ELK / Dagre）、颜色分组、标签。</li>
+        <li><strong>展示</strong>：生成图，导出 PNG / SVG / PDF。</li>
+      </ol>
+      <div class="callout"><strong>提示：</strong>每步都可"上一步"返回修改；当前进度自动保存在浏览器，刷新不丢。</div>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">4 · 探索：布局算法怎么选</h2>
+      <table class="tip-table">
+        <thead><tr><th>算法</th><th>节点规模</th><th>特点</th><th>推荐场景</th></tr></thead>
+        <tbody>
+          <tr><td>Dagre</td><td>&lt; 50</td><td>速度快、树状整齐</td><td>单一模块概览</td></tr>
+          <tr><td>ELK</td><td>50 ~ 300</td><td>分层清晰、避让好</td><td>复杂依赖关系</td></tr>
+          <tr><td>D3 Force</td><td>任意</td><td>力导向、有机分布</td><td>聚类分析</td></tr>
+        </tbody>
+      </table>
+      <p><strong>颜色分组</strong>：可按子领域、按状态、按责任人上色；同一节点最多支持 3 层分组叠加。</p>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">5 · 进阶：预设与对比</h2>
+      <ul>
+        <li><strong>保存预设</strong>：把"中心 + 关系 + 配置"打包成一个预设，下次一键复用。</li>
+        <li><strong>差异对比</strong>：同预设不同时间点跑两次，红色高亮新增节点、灰色标删除节点。</li>
+        <li><strong>批量出图</strong>：勾选 N 个产品版本，依次生成 PNG 自动打包成 ZIP。</li>
+      </ul>
+      <div class="callout"><strong>性能提示：</strong>超过 200 个节点建议拆成多张子图分别导出，避免单图渲染卡顿。</div>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">6 · 实战：Excel 生成"供应链"主题图</h2>
+      <p>Excel 模板字段：</p>
+      <table class="tip-table">
+        <thead><tr><th>对象编码</th><th>对象名称</th><th>关联对象编码</th><th>关联类型</th></tr></thead>
+        <tbody>
+          <tr><td>PO_001</td><td>采购订单</td><td>SO_001</td><td>引用</td></tr>
+          <tr><td>PO_001</td><td>采购订单</td><td>WH_001</td><td>依赖</td></tr>
+          <tr><td>SO_001</td><td>销售订单</td><td>WH_001</td><td>依赖</td></tr>
+          <tr><td>WH_001</td><td>入库单</td><td>PO_001</td><td>组合</td></tr>
+        </tbody>
+      </table>
+      <p>上传后在第 2 步勾选 <code>PO_001</code> 作为中心，第 5 步选 ELK + 按"关联类型"上色，即可得到 4 节点 4 边的关系图。</p>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">7 · 回顾 &amp; 衔接</h2>
+      <p>本章关键词：<strong>6 步向导</strong>、<strong>3 种布局</strong>、<strong>预设可复用</strong>。</p>
+      <div class="callout"><strong>下一章预告：</strong>图画好之后，谁能看到、谁能编辑？第 4 章「权限管理」解答这一切。</div>
+    </section>
+
+    <nav class="chapter-nav" aria-label="章节导航">
+      <a href="./chapter2.html">
+        <span class="chapter-nav__label">← 上一章</span>
+        <span class="chapter-nav__title">第 2 章 · 架构数据管理</span>
+      </a>
+      <a href="./chapter4.html">
+        <span class="chapter-nav__label">下一章 →</span>
+        <span class="chapter-nav__title chapter-nav__title--next">第 4 章 · 权限管理</span>
+      </a>
+    </nav>
+  </main>
+</body>
+</html>

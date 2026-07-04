@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>第 2 章 · 架构数据管理 · BIP 帮助中心</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body class="page-chapter" style="--c: #2563eb">
+  <header class="chapter-header">
+    <div class="chapter-header__inner">
+      <div class="chapter-header__crumbs">
+        <a href="./index.html">帮助中心</a>
+        <span class="sep">/</span>
+        <span>第 2 章</span>
+      </div>
+      <div class="chapter-header__eyebrow">CHAPTER 02 · BLUE</div>
+      <h1 class="chapter-header__title">架构数据管理</h1>
+      <p class="chapter-header__desc">
+        领域 · 子领域 · 业务对象，一棵树管好全量元数据。
+        让"谁属于谁"和"哪里能改"用同一张图说话。
+      </p>
+    </div>
+  </header>
+
+  <main class="chapter-main">
+
+    <section class="story-card" aria-label="7 段式故事卡">
+      <h2 class="story-card__title">故事卡 <small>从一张混乱的 Excel 到一棵清晰的产品树</small></h2>
+      <p class="story-card__desc">把"业务对象全在一张表里"这条痛线，拆成 7 个节点。</p>
+      <div class="story">
+        <div class="story__node">
+          <div class="story__node-num">1</div>
+          <div class="story__node-title">痛点</div>
+          <div class="story__node-desc">业务对象在 5 个 Excel 里，找不到归属。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">2</div>
+          <div class="story__node-title">召唤</div>
+          <div class="story__node-desc">一棵树，4 层结构，路径即语义。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">3</div>
+          <div class="story__node-title">入门</div>
+          <div class="story__node-desc">拖拽 5 步把对象挂到树上。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">4</div>
+          <div class="story__node-title">探索</div>
+          <div class="story__node-desc">关键操作：搜索、筛选、批量编辑。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">5</div>
+          <div class="story__node-title">进阶</div>
+          <div class="story__node-desc">版本快照、跨版本对比。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">6</div>
+          <div class="story__node-title">实战</div>
+          <div class="story__node-desc">从 V8.0 到 V8.1 一次完整迁移。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">7</div>
+          <div class="story__node-title">回顾</div>
+          <div class="story__node-desc">速查表 + 引出第 3 章的 AA 图。</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">3 · 入门：5 步挂上第一个对象</h2>
+      <ol>
+        <li>进入「<strong>架构数据管理</strong>」，左侧为层级树。</li>
+        <li>点击目标「<strong>子领域</strong>」节点，右侧出列表。</li>
+        <li>列表右上「<strong>+ 新建业务对象</strong>」。</li>
+        <li>填写编码、名称、责任人，必填项标红星。</li>
+        <li>保存后对象自动归属到该子领域，路径：<code>产品线 / 版本 / 领域 / 子领域 / 业务对象</code>。</li>
+      </ol>
+      <div class="callout"><strong>提示：</strong>对象编码建议与代码仓库中的实体名保持一致，便于溯源。</div>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">4 · 探索：常用操作</h2>
+      <table class="tip-table">
+        <thead><tr><th>操作</th><th>快捷入口</th><th>适用场景</th></tr></thead>
+        <tbody>
+          <tr><td>模糊搜索</td><td>顶栏 🔍</td><td>只知道名称/编码关键字</td></tr>
+          <tr><td>高级筛选</td><td>列表上方「筛选」</td><td>按责任人/状态/标签多条件</td></tr>
+          <tr><td>批量编辑</td><td>勾选 → 「批量操作」</td><td>同一负责人的对象统一改派</td></tr>
+          <tr><td>拖拽移动</td><td>树节点按住拖动</td><td>调整父子归属</td></tr>
+          <tr><td>导出 Excel</td><td>列表右上「⤓」</td><td>线下评审或备份</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">5 · 进阶：版本快照与对比</h2>
+      <p>每次产品版本发布时，系统会自动生成一份<strong>快照</strong>。快照不可修改，只能对比。</p>
+      <ul>
+        <li>路径：对象详情 → 「<strong>历史版本</strong>」。</li>
+        <li>对比维度：字段值变更、归属路径变更、负责人变更。</li>
+        <li>对比结果可导出 PDF，作为变更评审的附件。</li>
+      </ul>
+      <div class="callout"><strong>权限提示：</strong>查看历史快照需要 <code>arch:history:view</code>，导出 PDF 需要 <code>arch:export</code>。</div>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">6 · 实战：V8.0 → V8.1 迁移</h2>
+      <p>需求：V8.0 的"供应链"子领域拆分为"采购"和"仓储"两个子领域，业务对象按 7:3 比例迁移。</p>
+      <table class="tip-table">
+        <thead><tr><th>步骤</th><th>操作</th><th>结果</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>在 V8.1 下新建「采购」「仓储」两个子领域</td><td>空节点</td></tr>
+          <tr><td>2</td><td>用「批量移动」勾选 7 条对象 → 采购</td><td>7 条归属变更</td></tr>
+          <tr><td>3</td><td>同样操作 3 条 → 仓储</td><td>合计 10 条迁移完成</td></tr>
+          <tr><td>4</td><td>V8.0 的"供应链"节点标记为「归档」</td><td>默认不显示</td></tr>
+          <tr><td>5</td><td>点击「生成变更报告」</td><td>PDF 自动下载</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">7 · 回顾 &amp; 衔接</h2>
+      <p>本章关键词：<strong>路径即语义</strong>、<strong>快照可对比</strong>、<strong>变更可审计</strong>。</p>
+      <div class="callout"><strong>下一章预告：</strong>有了清晰的层级树，第 3 章的「AA 图生成」就能把这些节点"画"成关系图。</div>
+    </section>
+
+    <nav class="chapter-nav" aria-label="章节导航">
+      <a href="./chapter1.html">
+        <span class="chapter-nav__label">← 上一章</span>
+        <span class="chapter-nav__title">第 1 章 · 产品版本管理</span>
+      </a>
+      <a href="./chapter3.html">
+        <span class="chapter-nav__label">下一章 →</span>
+        <span class="chapter-nav__title chapter-nav__title--next">第 3 章 · AA 图生成</span>
+      </a>
+    </nav>
+  </main>
+</body>
+</html>

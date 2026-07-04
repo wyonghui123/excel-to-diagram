@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>第 4 章 · 权限管理 · BIP 帮助中心</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body class="page-chapter" style="--c: #16a34a">
+  <header class="chapter-header">
+    <div class="chapter-header__inner">
+      <div class="chapter-header__crumbs">
+        <a href="./index.html">帮助中心</a>
+        <span class="sep">/</span>
+        <span>第 4 章</span>
+      </div>
+      <div class="chapter-header__eyebrow">CHAPTER 04 · GREEN</div>
+      <h1 class="chapter-header__title">权限管理</h1>
+      <p class="chapter-header__desc">
+        角色、菜单、数据权限，构建立体防御体系。
+        让"谁能看、谁能改"从口口相传变成可审计的配置。
+      </p>
+    </div>
+  </header>
+
+  <main class="chapter-main">
+
+    <section class="story-card" aria-label="7 段式故事卡">
+      <h2 class="story-card__title">故事卡 <small>从"开发能登生产？"到权限零事故</small></h2>
+      <p class="story-card__desc">把"权限总出错"这条主线，拆成 7 个节点。</p>
+      <div class="story">
+        <div class="story__node">
+          <div class="story__node-num">1</div>
+          <div class="story__node-title">痛点</div>
+          <div class="story__node-desc">权限写在代码里，临时账号满天飞。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">2</div>
+          <div class="story__node-title">召唤</div>
+          <div class="story__node-desc">角色 + 菜单 + 数据范围三件套。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">3</div>
+          <div class="story__node-title">入门</div>
+          <div class="story__node-desc">5 步建第一个"产品经理"角色。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">4</div>
+          <div class="story__node-title">探索</div>
+          <div class="story__node-desc">菜单权限 vs 数据权限差异。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">5</div>
+          <div class="story__node-title">进阶</div>
+          <div class="story__node-desc">字段级权限、行列级规则。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">6</div>
+          <div class="story__node-title">实战</div>
+          <div class="story__node-desc">"财务只能看本部门"配置全流程。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">7</div>
+          <div class="story__node-title">回顾</div>
+          <div class="story__node-desc">速查表 + 引出第 5 章的审计。</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">3 · 入门：5 步建第一个角色</h2>
+      <ol>
+        <li>进入「<strong>系统管理 → 角色管理</strong>」。</li>
+        <li>右上「<strong>+ 新建角色</strong>」，输入名称（如 <code>产品经理</code>）与编码。</li>
+        <li>切到「<strong>菜单权限</strong>」标签，勾选该角色可见的菜单。</li>
+        <li>切到「<strong>数据范围</strong>」标签，按需设置"全部/本部门/本用户"。</li>
+        <li>保存，把用户拖到该角色的成员列表。</li>
+      </ol>
+      <div class="callout"><strong>原则：</strong>角色用「能做什么」描述（如 <code>product_manager</code>），不要用部门名。</div>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">4 · 探索：菜单权限 vs 数据权限</h2>
+      <table class="tip-table">
+        <thead><tr><th>维度</th><th>菜单权限</th><th>数据权限</th></tr></thead>
+        <tbody>
+          <tr><td>管什么</td><td>页面/按钮可见性</td><td>同页面内能看哪些行</td></tr>
+          <tr><td>颗粒度</td><td>菜单项 + 操作按钮</td><td>行级 / 列级 / 字段级</td></tr>
+          <tr><td>典型场景</td><td>"不能进系统配置页"</td><td>"只能看本部门订单"</td></tr>
+          <tr><td>存储位置</td><td>role.menu_perms (JSON)</td><td>role.data_scope (DSL)</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">5 · 进阶：字段级权限</h2>
+      <p>字段级权限用于"同一行数据，不同角色看到不同字段"——例如员工表里薪资字段仅 HR 可见。</p>
+      <ul>
+        <li>配置位置：业务对象详情 → 「<strong>字段权限</strong>」标签。</li>
+        <li>支持 READ / WRITE / HIDDEN 三种策略。</li>
+        <li>优先级：HIDDEN &gt; WRITE &gt; READ；多角色取并集。</li>
+      </ul>
+      <div class="callout"><strong>小心：</strong>HIDDEN 不是加密，后端 API 仍会返回；务必配合服务端校验。</div>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">6 · 实战：财务仅看本部门</h2>
+      <p>需求：财务角色 <code>finance_user</code> 登录后只能看本部门的报销单。</p>
+      <table class="tip-table">
+        <thead><tr><th>步骤</th><th>操作</th><th>DSL / 配置</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>新建角色 finance_user</td><td>勾选「报销管理」菜单</td></tr>
+          <tr><td>2</td><td>数据范围选「本部门」</td><td>scope = DEPT</td></tr>
+          <tr><td>3</td><td>报销对象字段权限</td><td>金额 → READ；备注 → HIDDEN</td></tr>
+          <tr><td>4</td><td>把 3 个财务账号加入</td><td>用户列表拖入</td></tr>
+          <tr><td>5</td><td>财务登录验证</td><td>只能看到本部门 + 金额不能改</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">7 · 回顾 &amp; 衔接</h2>
+      <p>本章关键词：<strong>角色命名规范</strong>、<strong>三种维度</strong>、<strong>前后端双重校验</strong>。</p>
+      <div class="callout"><strong>下一章预告：</strong>权限配好了，"谁动了什么"的全链路可追溯，就交给第 5 章「审计日志」。</div>
+    </section>
+
+    <nav class="chapter-nav" aria-label="章节导航">
+      <a href="./chapter3.html">
+        <span class="chapter-nav__label">← 上一章</span>
+        <span class="chapter-nav__title">第 3 章 · AA 图生成</span>
+      </a>
+      <a href="./chapter5.html">
+        <span class="chapter-nav__label">下一章 →</span>
+        <span class="chapter-nav__title chapter-nav__title--next">第 5 章 · 审计日志</span>
+      </a>
+    </nav>
+  </main>
+</body>
+</html>

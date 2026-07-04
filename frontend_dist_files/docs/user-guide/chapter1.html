@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>第 1 章 · 产品版本管理 · BIP 帮助中心</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body class="page-chapter" style="--c: #ea580c">
+  <header class="chapter-header">
+    <div class="chapter-header__inner">
+      <div class="chapter-header__crumbs">
+        <a href="./index.html">帮助中心</a>
+        <span class="sep">/</span>
+        <span>第 1 章</span>
+      </div>
+      <div class="chapter-header__eyebrow">CHAPTER 01 · ORANGE</div>
+      <h1 class="chapter-header__title">产品版本管理</h1>
+      <p class="chapter-header__desc">
+        从产品线到版本号，搭建第一份可追溯的产品档案。3 分钟建好骨架，
+        5 分钟就能回答"线上跑的是哪个版本"。
+      </p>
+    </div>
+  </header>
+
+  <main class="chapter-main">
+
+    <section class="story-card" aria-label="7 段式故事卡">
+      <h2 class="story-card__title">故事卡 <small>从痛点入门到日常复用</small></h2>
+      <p class="story-card__desc">把"上线突然出问题"这条主线，拆成 7 个节点，跟着走一次就上手。</p>
+      <div class="story">
+        <div class="story__node">
+          <div class="story__node-num">1</div>
+          <div class="story__node-title">痛点</div>
+          <div class="story__node-desc">"线上到底跑的是哪个版本？" 没人答得上。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">2</div>
+          <div class="story__node-title">召唤</div>
+          <div class="story__node-desc">一条产品线 + N 个版本，状态、负责人一目了然。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">3</div>
+          <div class="story__node-title">入门</div>
+          <div class="story__node-desc">5 步创建第一个产品版本。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">4</div>
+          <div class="story__node-title">探索</div>
+          <div class="story__node-desc">关键字段：状态 / 责任人 / 生效日期。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">5</div>
+          <div class="story__node-title">进阶</div>
+          <div class="story__node-desc">草稿、发布、归档三态流转与权限边界。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">6</div>
+          <div class="story__node-title">实战</div>
+          <div class="story__node-desc">从 Excel 批量导入 30 条历史版本。</div>
+        </div>
+        <div class="story__node">
+          <div class="story__node-num">7</div>
+          <div class="story__node-title">回顾</div>
+          <div class="story__node-desc">速查表 + 引出第 2 章的架构数据。</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">3 · 入门：5 步创建第一个产品版本</h2>
+      <ol>
+        <li>左侧菜单点击「<strong>产品版本管理</strong>」，进入列表页。</li>
+        <li>右上角点击「<strong>+ 新建产品</strong>」。</li>
+        <li>填写<strong>产品线名称</strong>（必填，例如 <code>NC Cloud</code>）和<strong>产品编码</strong>。</li>
+        <li>在产品详情页点击「<strong>+ 新建版本</strong>」，填写版本号（如 <code>V8.0</code>）。</li>
+        <li>选择<strong>状态</strong>为「草稿」保存，正式上线时再切到「发布」。</li>
+      </ol>
+      <div class="callout"><strong>提示：</strong>产品编码一旦保存不可修改；版本号支持后续再编辑。</div>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">4 · 探索：关键字段速查</h2>
+      <table class="tip-table">
+        <thead>
+          <tr><th>字段</th><th>是否必填</th><th>说明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>产品线名称</td><td>是</td><td>建议与官方品牌保持一致</td></tr>
+          <tr><td>产品编码</td><td>是</td><td>全局唯一，创建后不可改</td></tr>
+          <tr><td>负责人</td><td>是</td><td>从用户下拉选择，可多人协作</td></tr>
+          <tr><td>版本号</td><td>是</td><td>支持 V*.*.* 格式，自动识别大小版本</td></tr>
+          <tr><td>生效日期</td><td>否</td><td>用于筛选"已上线"版本</td></tr>
+          <tr><td>备注</td><td>否</td><td>支持 markdown</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">5 · 进阶：状态流转与权限</h2>
+      <p>产品版本有三种状态：</p>
+      <ul>
+        <li><strong>草稿 (DRAFT)</strong>：仅创建者与管理员可见，可任意修改。</li>
+        <li><strong>发布 (RELEASED)</strong>：全员可见，主要字段冻结；如需修改请走变更流程。</li>
+        <li><strong>归档 (ARCHIVED)</strong>：默认隐藏，需在筛选条件主动勾选才显示。</li>
+      </ul>
+      <div class="callout"><strong>权限提示：</strong>状态切换需要 <code>product:release</code> 权限，普通用户可在自己名下版本之间切换草稿/归档。</div>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">6 · 实战：批量导入历史版本</h2>
+      <p>在产品详情页右上角点击「<strong>导入</strong>」，下载模板 Excel，按下表填充后上传：</p>
+      <table class="tip-table">
+        <thead><tr><th>产品编码</th><th>版本号</th><th>状态</th><th>生效日期</th></tr></thead>
+        <tbody>
+          <tr><td>NC</td><td>V7.5</td><td>RELEASED</td><td>2024-12-01</td></tr>
+          <tr><td>NC</td><td>V7.6</td><td>RELEASED</td><td>2025-06-15</td></tr>
+          <tr><td>NC</td><td>V8.0</td><td>RELEASED</td><td>2026-01-10</td></tr>
+        </tbody>
+      </table>
+      <p>导入完成后页面会提示成功条数 / 失败原因；失败的行会给出原 Excel 行号，便于定位。</p>
+    </section>
+
+    <section class="section">
+      <h2 class="section__title">7 · 回顾 &amp; 衔接</h2>
+      <p>本章速记：<strong>产品线 → 版本 → 状态 → 负责人</strong>。版本一旦发布就成了后续章节的"地基"——
+      第 2 章的<strong>架构数据管理</strong>会在版本之上挂领域、子领域和业务对象。</p>
+      <div class="callout"><strong>下一章预告：</strong>「架构数据管理」教你画出一棵 4 层的元数据树。</div>
+    </section>
+
+    <nav class="chapter-nav" aria-label="章节导航">
+      <a href="./index.html">
+        <span class="chapter-nav__label">← 目录</span>
+        <span class="chapter-nav__title">返回帮助首页</span>
+      </a>
+      <a href="./chapter2.html">
+        <span class="chapter-nav__label">下一章 →</span>
+        <span class="chapter-nav__title chapter-nav__title--next">第 2 章 · 架构数据管理</span>
+      </a>
+    </nav>
+  </main>
+</body>
+</html>
