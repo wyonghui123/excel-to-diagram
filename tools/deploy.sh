@@ -181,7 +181,8 @@ fi
 if [ "$NEED_UNZIP" = "true" ]; then
     if [ -f "$ZIP_PATH" ]; then
         cd $DEPLOY_ROOT
-        unzip -q -o "$ZIP_PATH" -d $DEPLOYMENTS_DIR/ && ok "解压 $ZIP_PATH → $DEPLOYMENTS_DIR/" || err "unzip 失败"
+        # [FIX 2026-07-04] 不用 -q, 让 unzip 输出可见, 错误可诊断
+        unzip -o "$ZIP_PATH" -d $DEPLOYMENTS_DIR/ 2>&1 | tail -20 && ok "解压 $ZIP_PATH → $DEPLOYMENTS_DIR/" || { err "unzip 失败"; die "解压失败, 部署终止"; }
         # [FIX 2026-07-03] zip 顶层是 frontend_dist_files/ + meta/ (不在子目录)
         [ -d "$SERVER_DIR" ] && ok "$SERVER_DIR 已就绪" || err "解压后 $SERVER_DIR 仍缺"
         [ -d "$DEPLOYMENTS_DIR/frontend_dist_files" ] && ok "$DEPLOYMENTS_DIR/frontend_dist_files 已就绪" || err "解压后 frontend_dist_files 仍缺"
@@ -189,10 +190,57 @@ if [ "$NEED_UNZIP" = "true" ]; then
         err "zip 不存在: $ZIP_PATH (请 MobaXterm SFTP 上传)"
         die "缺 zip, 部署无法继续"
     fi
+
+    # [BUG-FIX 2026-07-04] 验证 frontend dist hash 跟 zip 一致
+    # 之前: deploy.sh 报告 "frontend_dist_files 已就绪" 但远端跑的是老 dist
+    # 真因: root frontend_dist_files 没被覆盖 (unzip silent failed OR
+    #       shared root 没被替换), 旧 unified_server 进程继续 serve 旧 dist
+    # 现在: 解压后立即计算 zip 内 index.html 引用的 JS hash, 跟 root 实际的一致
+    ZIP_INDEX_HASH=$(unzip -p "$ZIP_PATH" frontend_dist_files/index.html 2>/dev/null | grep -oE 'index-[A-Za-z0-9_-]+\.js' | head -1)
+    if [ -z "$ZIP_INDEX_HASH" ]; then
+        warn "无法从 zip 提取 index.html 引用的 JS hash, 跳过 dist hash 校验"
+    else
+        info "zip 内 index.html 引用: $ZIP_INDEX_HASH"
+        ACTUAL_INDEX_HASH=$(grep -oE 'index-[A-Za-z0-9_-]+\.js' "$DEPLOYMENTS_DIR/frontend_dist_files/index.html" 2>/dev/null | head -1)
+        if [ -n "$ACTUAL_INDEX_HASH" ]; then
+            info "root index.html 引用: $ACTUAL_INDEX_HASH"
+            if [ "$ZIP_INDEX_HASH" = "$ACTUAL_INDEX_HASH" ]; then
+                ok "dist hash 一致 (zip=$ZIP_INDEX_HASH == root=$ACTUAL_INDEX_HASH)"
+            else
+                err "DIST HASH 不一致!"
+                err "  zip 期望: $ZIP_INDEX_HASH"
+                err "  root 实际: $ACTUAL_INDEX_HASH"
+                err "  → unified_server 会 serve 旧 dist, 部署后用户看不到新代码"
+                err "  → 修复: 手动 cp zip 内的 index.html 覆盖 root"
+                die "dist hash 校验失败, 部署终止, 请排查 unzip/权限问题"
+            fi
+        else
+            warn "root frontend_dist_files/index.html 不存在, 无法对比 dist hash"
+        fi
+    fi
 elif [ "$SKIP_UNZIP" = "true" ]; then
     ok "跳过 unzip (--skip-unzip)"
+    # [BUG-FIX 2026-07-04] 即使跳过 unzip, 也验证 root dist 跟 zip 一致
+    ZIP_INDEX_HASH=$(unzip -p "$ZIP_PATH" frontend_dist_files/index.html 2>/dev/null | grep -oE 'index-[A-Za-z0-9_-]+\.js' | head -1)
+    ACTUAL_INDEX_HASH=$(grep -oE 'index-[A-Za-z0-9_-]+\.js' "$DEPLOYMENTS_DIR/frontend_dist_files/index.html" 2>/dev/null | head -1)
+    if [ -n "$ZIP_INDEX_HASH" ] && [ -n "$ACTUAL_INDEX_HASH" ] && [ "$ZIP_INDEX_HASH" != "$ACTUAL_INDEX_HASH" ]; then
+        err "DIST HASH 不一致 (即使 --skip-unzip 也检测到)!"
+        err "  zip 期望: $ZIP_INDEX_HASH"
+        err "  root 实际: $ACTUAL_INDEX_HASH"
+        die "dist hash 不匹配, 请去掉 --skip-unzip 让脚本重新解压"
+    fi
 else
     ok "已解压 (跳过)"
+    # [BUG-FIX 2026-07-04] 跳过解压时, 也应该验证 dist 一致 (防止 silent stale dist)
+    ZIP_INDEX_HASH=$(unzip -p "$ZIP_PATH" frontend_dist_files/index.html 2>/dev/null | grep -oE 'index-[A-Za-z0-9_-]+\.js' | head -1)
+    ACTUAL_INDEX_HASH=$(grep -oE 'index-[A-Za-z0-9_-]+\.js' "$DEPLOYMENTS_DIR/frontend_dist_files/index.html" 2>/dev/null | head -1)
+    if [ -n "$ZIP_INDEX_HASH" ] && [ -n "$ACTUAL_INDEX_HASH" ] && [ "$ZIP_INDEX_HASH" != "$ACTUAL_INDEX_HASH" ]; then
+        err "DIST HASH 不一致!"
+        err "  zip 期望: $ZIP_INDEX_HASH"
+        err "  root 实际: $ACTUAL_INDEX_HASH"
+        err "  → 建议: 不要传 --skip-unzip, 重新跑部署让脚本解压"
+        die "root frontend_dist_files 还是旧 dist, 部署会失败"
+    fi
 fi
 
 # [FIX 2026-07-03] PHASE 0.5 后检测 entry (现在解到 DEPLOYMENTS_DIR)
@@ -323,6 +371,26 @@ fi
 # ========================= PHASE 4: 启 backend =========================
 banner "PHASE 4: 启 backend on $BACKEND_PORT"
 
+# [BUG-FIX 2026-07-04] 在启动前先 kill 旧进程 (grace period)
+# 之前: 旧 backend/unified 进程继续在跑, 加载的 dist 还是旧的
+# 现在: SIGTERM → 5s wait → SIGKILL (用 lib/common.sh 的 stop_all_servers, 已在 L42 source)
+if declare -f stop_all_servers >/dev/null 2>&1; then
+    info "清理旧 backend + unified 进程 (grace period)"
+    stop_all_servers
+    # 验证端口已空
+    sleep 2
+    if ss -tlnp 2>/dev/null | grep -qE ":(${BACKEND_PORT}|${FRONTEND_PORT})"; then
+        warn "端口仍占用: $(ss -tlnp 2>/dev/null | grep -E ":(${BACKEND_PORT}|${FRONTEND_PORT})" | head -3)"
+    else
+        ok "端口已清空"
+    fi
+else
+    warn "stop_all_servers 函数不可用, 退化用 pkill"
+    pkill -15 -f "server\.py" 2>/dev/null; pkill -15 -f "unified_server\.py" 2>/dev/null
+    sleep 5
+    pkill -9 -f "server\.py" 2>/dev/null; pkill -9 -f "unified_server\.py" 2>/dev/null
+fi
+
 STARTED=false
 if [ "$USE_SYSTEMD" = "yes" ] && [ -f "$SERVICE_FILE" ]; then
     systemctl start excel-backend.service && ok "systemd start" || err "systemd start 失败"
@@ -380,6 +448,29 @@ ss -tlnp 2>/dev/null | grep -E ":(${BACKEND_PORT}|${FRONTEND_PORT})"
 hr; echo "[verify] frontend /"
 code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://127.0.0.1:$FRONTEND_PORT/ || echo "000")
 [ "$code" = "200" ] && ok "frontend / = 200" || err "frontend / = $code"
+
+# [BUG-FIX 2026-07-04] PHASE 5 后立即验证 unified_server serve 的 dist 跟 zip 一致
+# 之前: PHASE 5 启了 unified_server, 但如果服务是旧的 (没 kill 干净) 仍然 serve 老 dist
+# 现在: 拉一次 /, 看 index.html 引用的 JS hash, 跟 zip 内的比对
+hr; echo "[verify] frontend dist hash 跟 zip 一致"
+SERVED_INDEX_HTML=$(curl -s --max-time 5 http://127.0.0.1:$FRONTEND_PORT/ 2>/dev/null)
+SERVED_INDEX_HASH=$(echo "$SERVED_INDEX_HTML" | grep -oE 'index-[A-Za-z0-9_-]+\.js' | head -1)
+ZIP_INDEX_HASH=$(unzip -p "$ZIP_PATH" frontend_dist_files/index.html 2>/dev/null | grep -oE 'index-[A-Za-z0-9_-]+\.js' | head -1)
+if [ -n "$SERVED_INDEX_HASH" ] && [ -n "$ZIP_INDEX_HASH" ]; then
+    if [ "$SERVED_INDEX_HASH" = "$ZIP_INDEX_HASH" ]; then
+        ok "serve dist 一致 (served=$SERVED_INDEX_HASH == zip=$ZIP_INDEX_HASH)"
+    else
+        err "SERVE DIST HASH 不一致!"
+        err "  served (远端 8081 返回): $SERVED_INDEX_HASH"
+        err "  zip 期望: $ZIP_INDEX_HASH"
+        err "  → 用户访问会看到旧 dist, 部署失败"
+        err "  → 修复: kill unified_server, 重新跑 deploy"
+    fi
+elif [ -n "$SERVED_INDEX_HASH" ]; then
+    warn "served dist: $SERVED_INDEX_HASH (无法对比 zip: $ZIP_INDEX_HASH)"
+else
+    warn "无法获取 served dist hash (front-end / 返回异常)"
+fi
 
 hr; echo "[verify] backend /api/v1/health"
 code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://127.0.0.1:$BACKEND_PORT/api/v1/health || echo "000")
