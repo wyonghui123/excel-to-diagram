@@ -15,12 +15,17 @@ import sqlite3
 import sys
 import argparse
 from pathlib import Path
+from datetime import datetime
 
 # __file__ = meta/scripts/migrate_v318_audit.py
 # parent.parent = meta/, parent.parent.parent = project_root
 DB_PATH = Path(__file__).parent.parent / "architecture.db"
 
 FIELDS_TO_ADD = [
+    # [BUG-V042 2026-07-04] action_kind 也是 v2 必加列 (BatchContext 写入 instance/static)
+    # 原脚本遗漏此列, 导致 release DB 缺 action_kind, 后续触发 'table audit_logs has no column named action_kind' 错误
+    # (见 audit_logs._error 历史记录 id 80512-80663)
+    ("action_kind", "VARCHAR(20) DEFAULT 'instance'"),
     ("outcome", "VARCHAR(20) DEFAULT 'success'"),
     ("cascade_root_id", "INTEGER"),
     ("cascade_root_action", "VARCHAR(50)"),
@@ -34,9 +39,13 @@ INDEXES_TO_ADD = [
     ("idx_audit_cascade", "(cascade_root_action, object_type)"),
     ("idx_audit_retention", "(retention_until)"),
     ("idx_audit_hash", "(row_hash)"),
+    # [BUG-V042 2026-07-04] action_kind 也需索引 (按类型过滤)
+    ("idx_audit_action_kind", "(action_kind)"),
 ]
 
 BACKFILL_SQL = [
+    # action_kind: 历史记录视为 instance (单条操作)
+    "UPDATE audit_logs SET action_kind='instance' WHERE action_kind IS NULL",
     # outcome
     "UPDATE audit_logs SET outcome='blocked' WHERE action='DELETE_BLOCKED'",
     "UPDATE audit_logs SET outcome='failure' WHERE action='AUDIT_WRITE_FAILED'",
@@ -54,12 +63,15 @@ ROLLBACK_SQL = [
     "DROP INDEX IF EXISTS idx_audit_cascade",
     "DROP INDEX IF EXISTS idx_audit_retention",
     "DROP INDEX IF EXISTS idx_audit_hash",
+    "DROP INDEX IF EXISTS idx_audit_action_kind",
     "ALTER TABLE audit_logs DROP COLUMN outcome",
     "ALTER TABLE audit_logs DROP COLUMN cascade_root_id",
     "ALTER TABLE audit_logs DROP COLUMN cascade_root_action",
     "ALTER TABLE audit_logs DROP COLUMN retention_until",
     "ALTER TABLE audit_logs DROP COLUMN prev_hash",
     "ALTER TABLE audit_logs DROP COLUMN row_hash",
+    # [BUG-V042 2026-07-04] 把新增的 action_kind 也回滚掉
+    "ALTER TABLE audit_logs DROP COLUMN action_kind",
 ]
 
 
@@ -109,6 +121,26 @@ def migrate(apply: bool):
         else:
             for sql in BACKFILL_SQL:
                 print(f"  [DRY]  {sql[:80]}")
+
+        # 4. [BUG-V042 2026-07-04] 登记到 schema_migrations 表, 避免下次重复跑
+        #    且让运维有迁移审计
+        if apply:
+            try:
+                # 检查是否已记录
+                cur = conn.execute(
+                    "SELECT id FROM schema_migrations WHERE migration_name=?",
+                    ("migrate_v318_audit.py",)
+                )
+                if cur.fetchone() is None:
+                    conn.execute(
+                        "INSERT INTO schema_migrations (migration_name, executed_at) VALUES (?, ?)",
+                        ("migrate_v318_audit.py", datetime.now().isoformat())
+                    )
+                    print("  [SCHEMA_MIGRATIONS] 记录已添加")
+                else:
+                    print("  [SCHEMA_MIGRATIONS] 已存在, 跳过")
+            except Exception as e:
+                print(f"  [SCHEMA_MIGRATIONS] 跳过 (可能表不存在): {e}")
 
         conn.commit()
         print(f"\n{'='*50}\n  {'APPLIED' if apply else 'DRY-RUN'} (no errors)\n{'='*50}")
