@@ -36,6 +36,14 @@
 - **禁止** 在主工作树 commit（会导致其他 Agent 工作被 stash 回滚）
 - 端口隔离：`AGENT_PORT` 环境变量（3010-3019）
 
+### 7. Integration 验证（v3.2 试跑期新增）
+- 若任务涉及并行 BUG / integration 验证 / 3007-3018 服务：
+  - **必读**: [`INFRA_HANDOVER.md`](../INFRA_HANDOVER.md) （含 C1-C4 约束、代码同步 §4.2、故障排查 §6）
+  - **必读**: [`scripts/README.md`](../scripts/README.md) （5 脚本用法）
+  - **不做**: 不直接启停 integration 3007/3018（协调智能体主理）
+  - **不做**: 不同步 integration DB（cp 时机由协调智能体决定）
+- 上线前协调智能体必须跑 `check-sha-consistency.ps1`，exit 0 才放行
+
 ## 技术栈
 
 - **前端**: Vue 3 + TypeScript + Vite + Element Plus + Pinia
