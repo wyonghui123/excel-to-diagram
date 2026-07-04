@@ -42,7 +42,8 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-ZIP_PATH = ROOT / "deploy-v20260703_004.zip"
+DEFAULT_ZIP = ROOT / "deploy-v20260703_004.zip"
+ZIP_PATH = DEFAULT_ZIP  # overridden by main() if --zip given
 
 
 def _read_zip_member(name: str) -> str:
@@ -206,6 +207,18 @@ def test_no_annotation_logic():
 
 
 def main():
+    # [CHG 2026-07-04] 支持 --zip 覆盖默认 v004
+    import argparse
+    parser = argparse.ArgumentParser(description="验证 list 导出无勾选 → 0 annotation sheet")
+    parser.add_argument("--zip", default=None, help="指定 zip 路径 (默认: deploy-v20260703_004.zip)")
+    args = parser.parse_args()
+    if args.zip:
+        global ZIP_PATH
+        zp = Path(args.zip)
+        if not zp.is_absolute():
+            zp = ROOT / zp
+        ZIP_PATH = zp
+
     print("=" * 80)
     print("test_export_no_annotation.py - 验证 list 导出无勾选 → 0 annotation sheet")
     print("=" * 80)
