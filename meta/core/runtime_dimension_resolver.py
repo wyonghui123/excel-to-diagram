@@ -213,7 +213,10 @@ class RuntimeDimensionResolver:
             if not parent_field or not child_table or not current_ids:
                 return None
             try:
-                conn = sqlite3.connect(self._db_path)
+                # [FIX v007 2026-07-05] check_same_thread=False 允许多线程共享连接
+                #   背景: Flask threaded mode 子线程 (Thread-2) 调 sqlite3 默认检查
+                #         创建线程必须 = 连接线程, 否则 ProgrammingError
+                conn = sqlite3.connect(self._db_path, check_same_thread=False)
                 cursor = conn.cursor()
                 ph = ','.join('?' * len(current_ids))
                 cursor.execute(
@@ -298,7 +301,8 @@ class RuntimeDimensionResolver:
     def _get_user_roles(self, user_id: int) -> List[int]:
         """获取用户的角色 ID 列表"""
         try:
-            conn = sqlite3.connect(self._db_path)
+            # [FIX v007 2026-07-05] check_same_thread=False
+            conn = sqlite3.connect(self._db_path, check_same_thread=False)
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT DISTINCT gr.role_id
@@ -318,7 +322,8 @@ class RuntimeDimensionResolver:
         if not role_ids:
             return []
         try:
-            conn = sqlite3.connect(self._db_path)
+            # [FIX v007 2026-07-05] check_same_thread=False
+            conn = sqlite3.connect(self._db_path, check_same_thread=False)
             cursor = conn.cursor()
             placeholders = ','.join('?' * len(role_ids))
             cursor.execute(f"""

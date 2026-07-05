@@ -23,6 +23,7 @@
 import asyncio
 import logging
 import time
+import threading
 from collections import OrderedDict
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Set
@@ -116,8 +117,11 @@ class EnumCacheManager:
         # 统计信息
         self.stats = CacheStats() if enable_stats else None
         
-        # 锁（用于异步安全）
-        self._lock = asyncio.Lock()
+        # 锁（用于同步+异步安全）
+        # [FIX v007 2026-07-05] asyncio.Lock() 在非 event loop 线程 (e.g. Flask werkzeug
+        #   子线程) 创建时抛 RuntimeError "There is no current event loop in thread"
+        #   改 threading.Lock 跨线程同步, 兼容 sync + async 路径, 不需要 event loop
+        self._lock = threading.Lock()
         
         logger.info(f"[OK] EnumCacheManager 初始化完成 (TTL={ttl_seconds}s, MaxSize={max_size})")
     
