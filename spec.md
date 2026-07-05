@@ -247,6 +247,13 @@ decisions:
   - 修复 1: waitress_server.py 启动时 RLIMIT_NOFILE = 65536
   - 修复 2: import_export_service.py: import_cascade 结束 wb.close() + gc.collect()
   - 通知协调智能体 cherry-pick
+  # V049 补充 2026-07-05 (接手协调智能体): 修 V049 不完整部分
+  - 补充 1: meta/server.py 启动时也 setrlimit (yonaa 跑的是 Flask dev server 不是 waitress,
+            仅改 waitress_server.py 不会生效, 必须 server.py 一起改)
+  - 补充 2: _import_sheet (L6808) 加 try/finally + gc.collect, 跟 import_cascade 保持一致
+            (V049 dev-agent 只改了 import_cascade, _import_sheet 仍是 leak 路径)
+  - 真端到端验证: tools/_test_v049_fd_leak.py (3/3 PASS, FD delta = 0)
+  - 文档: DEPLOY_HANDOVER_BUG_V049.md §3 加 systemd unit 改 (LimitNOFILE=65536)
 
 blockers: []
 

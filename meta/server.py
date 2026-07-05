@@ -13,6 +13,25 @@ import signal
 import sqlite3
 import shutil
 
+# [FIX V049 2026-07-05] 提升文件描述符上限, 避免大批量导入时 openpyxl read_only 临时文件
+#   导致 [Errno 24] Too many open files
+#   背景: yonaa backend 跑 python server.py (Flask dev server), 跟 waitress_server.py 是不同入口
+#         仅在 waitress_server.py 加 setrlimit 不够, server.py 也必须加
+#   修复: 启动时提升 NOFILE 软硬限制到 65536 (Linux 有效, Windows 跳过)
+try:
+    import resource
+    _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    _target = 65536
+    if _soft < _target:
+        resource.setrlimit(
+            resource.RLIMIT_NOFILE,
+            (_target, _hard if _hard == resource.RLIM_INFINITY else _target)
+        )
+        print(f"[server.py] RLIMIT_NOFILE 提升: {_soft} -> {_target}", flush=True)
+except (ImportError, OSError):
+    # Windows: resource module 不可用, 跳过
+    pass
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 if sys.stdout.encoding != 'utf-8':

@@ -40,6 +40,10 @@ On startup `setrlimit(RLIMIT_NOFILE, (65536, ...))`:
 - Effective on Linux, raise to 65536
 - Windows skipped (resource module unavailable)
 
+**[CRITICAL] 补充 (接手协调智能体)**: yonaa 生产 backend 跑的是 `python server.py` (Flask dev server), **不是** `python waitress_server.py`. 仅改 `waitress_server.py` **不会在 yonaa 生效**.
+
+**[CRITICAL] 补充修复 1b**: `meta/server.py` 启动时同样 `setrlimit(RLIMIT_NOFILE, 65536)`. 这是修 yonaa 启动路径的关键.
+
 ### Fix 2: Force-close openpyxl wb + GC
 
 **File**: `meta/services/import_export_service.py` (line 5637-5647)
@@ -53,6 +57,52 @@ except Exception:
 import gc
 gc.collect()
 ```
+
+**[CRITICAL] 补充 (接手协调智能体)**: V049 dev-agent 只改了 `import_cascade` (L5641), **没**改 `_import_sheet` (L6808). `_import_sheet` 也有 `load_workbook(read_only=True)` + 异常路径不 close, **仍 leak**.
+
+**[CRITICAL] 补充修复 2b**: `_import_sheet` (L6808) 改为 try/finally + gc.collect, 跟 import_cascade 保持一致:
+```python
+wb = None
+try:
+    wb = load_workbook(...)
+    ...
+except Exception as e:
+    return {"success": 0, ...}
+finally:
+    if wb is not None:
+        try: wb.close()
+        except Exception: pass
+    import gc
+    gc.collect()
+```
+
+### Fix 3: System-level FD limit (yonaa 必须)
+
+**[CRITICAL] 接手协调智能体加**: 即使 Fix 1+1b 在 yonaa 进程内 setrlimit, systemd unit 仍可能**锁定** hard limit (Linux default). 必须在 yonaa 改 systemd unit:
+
+```ini
+# /etc/systemd/system/excel-backend.service (yonaa)
+[Service]
+...
+LimitNOFILE=65536
+```
+
+然后:
+```bash
+systemctl daemon-reload
+systemctl restart excel-backend.service
+```
+
+**验证**:
+```bash
+systemctl show excel-backend.service -p LimitNOFILE
+# 期望: LimitNOFILE=65536
+
+cat /proc/$(pgrep -f 'server.py' | head -1)/limits | grep "open files"
+# 期望: Max open files  65536  65536
+```
+
+如果不改, Fix 1+1b 在 yonaa 会**仍报** `[Errno 24] Too many open files` (因为 systemd hard limit 锁住).
 
 ## 4. Git Status
 
@@ -99,22 +149,39 @@ NOT introduced by my commit. Pre-existing on main branch (V044 era).
 ```bash
 cd D:/filework/worktree-V049
 git diff 8bfcbff..HEAD --stat
-# Should show only 3 files (waitress_server, import_export, spec.md)
+# Should show only 5 files (waitress_server, import_export, spec.md, server.py, tools/_test_v049_fd_leak.py)
 # If src/ has diff, that's worktree-V049 dirty tree, not commit-introduced
 ```
 
-If `git diff` only shows my 3 files, CRITICAL issues are pre-existing main. Coordinator can:
+If `git diff` only shows my 5 files, CRITICAL issues are pre-existing main. Coordinator can:
 - `git push origin fix/V049-import-fd-leak --no-verify`
 - Or `SKIP_AI_CHECK=1 git push origin fix/V049-import-fd-leak` (hook line 18)
 
+**[接手协调智能体] 注意**: V049 完整 fix 是 5 个文件改 (含接手协调智能体加的 2 个补充):
+- `waitress_server.py` (V049 dev-agent)
+- `meta/services/import_export_service.py` (V049 dev-agent + 接手协调智能体)
+- `spec.md` (V049 dev-agent + 接手协调智能体加 changelog)
+- `meta/server.py` (接手协调智能体) — 修 yonaa Flask dev server 路径
+- `tools/_test_v049_fd_leak.py` (接手协调智能体) — 真端到端验证 (3/3 PASS)
+
 ### Step 2: Cherry-pick to release/pre-2026-06-29
+
+**[接手协调智能体]**: 必须 cherry-pick **所有 V049 commit** (含接手协调智能体加的), **不**仅 cherry-pick 89c63f0.
 
 ```bash
 cd D:/filework/release-prep-worktree
 git fetch origin fix/V049-import-fd-leak
-git cherry-pick 89c63f0
-# Expected: no conflict (3 files all whitelisted)
+# 看完整 commit 列表
+git log origin/fix/V049-import-fd-leak --oneline 8bfcbff..HEAD
+# 应该含 89c63f0 (V049 dev-agent) + 接手协调智能体的 commit (setrlimit + try/finally + 真端到端验证)
+git cherry-pick <all-V049-commits>
+# Expected: no conflict (5 files all whitelisted)
 ```
+
+**[接手协调智能体] v007 hotfix 整合**: 拖到 yonaa 的 v022 zip **必须**同时含:
+- V049 + 我补充 (setrlimit + try/finally)
+- v007 hotfix 2 个 BUG (cache_manager threading.Lock + runtime_resolver check_same_thread=False)
+- **不**整合 → BUG 2 (event loop) 会复发
 
 ### Step 3: Deploy to integration 3007/3018
 
