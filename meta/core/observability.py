@@ -34,6 +34,12 @@ OBS_COUNTERS = {
     'audit_write_success': 'v007_15_audit_write_success_total',
     'audit_write_failure': 'v007_15_audit_write_failure_total',
     'audit_write_exhausted': 'v007_15_audit_write_exhausted_total',
+    # [V007.15 L4.5] audit async queue
+    'audit_async_enqueued': 'v007_15_audit_async_enqueued_total',
+    'audit_async_flushed': 'v007_15_audit_async_flushed_total',
+    'audit_async_failed': 'v007_15_audit_async_failed_total',
+    'audit_async_batch_count': 'v007_15_audit_async_batch_count_total',
+    'audit_async_dropped_queue_full': 'v007_15_audit_async_dropped_queue_full_total',
     # orphan detector
     'orphan_detector_runs': 'v007_15_orphan_detector_runs_total',
     'orphan_detector_clean': 'v007_15_orphan_detector_clean_total',
