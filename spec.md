@@ -39,7 +39,10 @@ modified_files:
   - deploy_bundle/diagnose.sh
   - deploy_bundle/precheck.sh
   - deploy_bundle/lib/common.sh
+  - deploy_bundle/lib/check_deploy_health.sh
   - deploy_bundle/README.txt
+  - deploy_bundle/unified_server.py
+  - deploy_bundle/deploy-v20260704_007.zip
   - tests/test_deploy_e2e.py
   # 领域过滤器 originalId 碰撞修复 (2026-06-30)
   - src/services/hierarchyService.js

@@ -433,6 +433,8 @@ elif [ ! -d "$FRONTEND_DIR" ]; then
     err "frontend_dist_files 不存在: $FRONTEND_DIR"
 else
     cd "$DEPLOYMENTS_DIR" || err "cd $DEPLOYMENTS_DIR 失败"
+    # [FIX 2026-07-05] Windows 打包的 unified_server.py 缺 execute 权限, 启动前修复
+    chmod +x "$UNIFIED_SCRIPT" 2>/dev/null || true
     BACKEND_PORT=$BACKEND_PORT nohup $PY "$UNIFIED_SCRIPT" "$FRONTEND_DIR" > $LOG_DIR/frontend-${VERSION}.log 2>&1 &
     FRONTEND_PID=$!
     ok "nohup 启 unified_server PID=$FRONTEND_PID (8081 → $BACKEND_PORT)"
