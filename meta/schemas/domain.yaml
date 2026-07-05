@@ -18,6 +18,13 @@ dimension_bindings:
   field: version_id
 audit:
   enabled: true
+  # [FIX BUG-V046 2026-07-04 dev agent] 详情页"操作日志" tab 默认显示所有子对象日志
+  # 但 PM 决定: 领域 详情页 不显示 sub_domain / service_module / business_object / relationship
+  # 的子对象日志 (因为这些是领域的主业务子对象, 不是"备注/打标"类)
+  # 只显示自身 + annotation 类型的子对象日志
+  # 修法: yaml 配 excluded_child_object_types, 后端 audit_api 据此加 SQL 过滤
+  history:
+    excluded_child_object_types: [sub_domain, service_module, business_object, relationship]
   create:
     enabled: true
     fields: all

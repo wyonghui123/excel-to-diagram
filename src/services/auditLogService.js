@@ -227,6 +227,11 @@ export function buildLogFilter(filters = {}) {
     out.parent_object_id = String(filters.parentObjectId)
   }
   if (filters.transactionId) out.transaction_id = filters.transactionId
+  // [FIX BUG-V046 2026-07-04 dev agent] 详情页"操作日志" tab 排除特定子对象类型
+  // 多个用逗号分隔: "sub_domain,service_module,business_object,relationship"
+  if (filters.excludedObjectTypes && filters.excludedObjectTypes.length > 0) {
+    out.excluded_object_types = filters.excludedObjectTypes.join(',')
+  }
   return out
 }
 

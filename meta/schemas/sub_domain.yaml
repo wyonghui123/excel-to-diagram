@@ -21,6 +21,10 @@ dimension_bindings:
   through: domain->version
 audit:
   enabled: true
+  # [FIX BUG-V046 2026-07-04 dev agent] 同 domain.yaml. 子领域 详情页"操作日志" tab
+  # 不显示 service_module / business_object / relationship 的子对象日志
+  history:
+    excluded_child_object_types: [service_module, business_object, relationship]
   create:
     enabled: true
     fields: all
