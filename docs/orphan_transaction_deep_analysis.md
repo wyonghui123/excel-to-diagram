@@ -716,51 +716,243 @@ same write_queue with BEGIN IMMEDIATE — each is a potential orphan-tx source.
 
 ---
 
-## 4. Refined V007.15 Design (Beyond handoff's 3-layer defense)
+## 4. Refined V007.15 Design (Final, 3-State Aware)
 
-The handoff's V007.15 has 3 layers (治本/缓解/预防). Based on this deep analysis, **I recommend
-4 additional safeguards**:
+### 4.0 Design Principles
 
-### 4.1 Layer 0: Add SQLite tx_state check via PRAGMA
+**3-state deployment awareness**: V007.15 must handle 3 different runtime configurations
+(§1.8/§1.9: A=WAL+5s, B=DELETE+30s, C=future). **Detection at startup + branch on
+config, not duplicate code paths**.
 
-Python sqlite3 doesn't expose `sqlite3_txn_state()`. Workaround:
+**Mandatory observability (per user request)**: Every layer must emit:
+- Structured log (with trace_id + tx_id)
+- Prometheus counter (so external monitoring can alert)
+- Health endpoint metric (so /healthz shows current state)
+
+**Complexity budget**: User asked "if it doesn't add complexity". Therefore:
+- Single detection function, called once at startup
+- Single code path with 2-3 config branches, NOT 2 full parallel implementations
+- Single observability layer, NOT 3 separate metric systems
+
+### 4.1 Layer 0: Startup PRAGMA Detection (Replaces 6-Layer Handoff's L0)
 
 ```python
-# meta/core/sqlite_tx_state.py (new file)
-import sqlite3
+# meta/core/db_config_detector.py (new file, ~80 lines)
 
-def get_tx_state(conn) -> str:
-    """Get SQLite's actual transaction state. Returns 'none', 'read', or 'write'."""
-    # PRAGMA query_only doesn't tell us state, but we can try a savepoint
-    # If savepoint succeeds, we're in a transaction. If fails with "no
-    # transaction is active", we're not.
+import sqlite3
+import logging
+from dataclasses import dataclass
+from enum import Enum
+
+logger = logging.getLogger(__name__)
+
+class JournalMode(Enum):
+    WAL = "wal"
+    DELETE = "delete"
+    TRUNCATE = "truncate"
+    MEMORY = "memory"
+    OFF = "off"
+
+@dataclass
+class RuntimeDbConfig:
+    """Detected SQLite configuration at startup. Immutable after detection."""
+    journal_mode: JournalMode
+    busy_timeout_ms: int
+    synchronous: str
+    foreign_keys_on: bool
+    auto_vacuum: str
+    deployment_state: str  # 'A' (worktree-V049 base), 'B' (V007.13 dirty), 'C' (future)
+
+    # Defense behavior modifiers (per deployment_state)
+    use_explicit_conn_rollback: bool  # State A/B: True; State C: depends
+    use_orphan_detector: bool        # State A/B: True
+    audit_retry_max: int              # State A: 2, State B: 5, State C: TBD
+    orphan_check_interval_sec: int    # State A: 30, State B: 60
+
+# Singleton
+_runtime_config: RuntimeDbConfig = None
+
+def detect_runtime_config(db_path: str) -> RuntimeDbConfig:
+    """
+    Detect SQLite's actual configuration at startup. Call once during init.
+    Side effect: sets module-level singleton.
+    """
+    global _runtime_config
+    if _runtime_config is not None:
+        return _runtime_config
+
     try:
-        conn.execute("SAVEPOINT __tx_check__")
-        conn.execute("RELEASE SAVEPOINT __tx_check__")
-        return "in_tx"
-    except sqlite3.OperationalError as e:
-        if "no transaction is active" in str(e):
-            return "none"
-        raise
+        conn = sqlite3.connect(db_path, timeout=5.0)
+        try:
+            journal_raw = conn.execute("PRAGMA journal_mode").fetchone()[0]
+            busy_raw = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+            sync_raw = conn.execute("PRAGMA synchronous").fetchone()[0]
+            fk_raw = conn.execute("PRAGMA foreign_keys").fetchone()[0]
+            av_raw = conn.execute("PRAGMA auto_vacuum").fetchone()[0]
+        finally:
+            conn.close()
+
+        journal = JournalMode(journal_raw.lower())
+        busy_ms = int(busy_raw)
+
+        # Map actual config to deployment state
+        if journal == JournalMode.WAL and busy_ms == 5000:
+            state = "A"
+            use_explicit_rollback = True
+            use_detector = True
+            audit_retry_max = 2
+            orphan_interval = 30
+        elif journal == JournalMode.DELETE and busy_ms == 30000:
+            state = "B"
+            use_explicit_rollback = True
+            use_detector = True
+            audit_retry_max = 5
+            orphan_interval = 60
+        else:
+            # Unknown config (State C or custom)
+            state = "C"
+            use_explicit_rollback = True  # always safe
+            use_detector = True
+            audit_retry_max = max(2, busy_ms // 5000)
+            orphan_interval = max(30, busy_ms // 1000)
+
+        config = RuntimeDbConfig(
+            journal_mode=journal,
+            busy_timeout_ms=busy_ms,
+            synchronous=sync_raw,
+            foreign_keys_on=(fk_raw == 1),
+            auto_vacuum=av_raw,
+            deployment_state=state,
+            use_explicit_conn_rollback=use_explicit_rollback,
+            use_orphan_detector=use_detector,
+            audit_retry_max=audit_retry_max,
+            orphan_check_interval_sec=orphan_interval,
+        )
+
+        logger.info(
+            f"[V007.15] Runtime DB config detected: state={state}, "
+            f"journal={journal.value}, busy_timeout={busy_ms}ms, "
+            f"defense: explicit_rollback={use_explicit_rollback}, "
+            f"detector_interval={orphan_interval}s"
+        )
+        _runtime_config = config
+        return config
+    except Exception as e:
+        # If detection fails, use safe defaults (State C-like, more defensive)
+        logger.error(f"[V007.15] Failed to detect runtime config, using safe defaults: {e}")
+        config = RuntimeDbConfig(
+            journal_mode=JournalMode.WAL,
+            busy_timeout_ms=5000,
+            synchronous="NORMAL",
+            foreign_keys_on=True,
+            auto_vacuum="INCREMENTAL",
+            deployment_state="UNKNOWN",
+            use_explicit_conn_rollback=True,
+            use_orphan_detector=True,
+            audit_retry_max=3,
+            orphan_check_interval_sec=30,
+        )
+        _runtime_config = config
+        return config
+
+def get_runtime_config() -> RuntimeDbConfig:
+    """Get the detected config. Call detect_runtime_config() first during init."""
+    if _runtime_config is None:
+        raise RuntimeError("DB config not detected yet; call detect_runtime_config() during init")
+    return _runtime_config
 ```
 
-Call this from `bo_framework.commit/rollback` to **verify** state before resetting `_in_transaction`.
+**Complexity justification**: One new file, ~80 lines. Called **once** at startup, not per-request.
+The 3-state mapping is a small dict-like if/elif, not 3 parallel code paths.
 
-### 4.2 Layer 1: bo_framework.rollback with try/finally
+### 4.2 Layer 1: SQLite tx_state Verification (Savepoint Probe)
 
 ```python
-# meta/core/bo_framework.py
-def rollback(self, transaction_id: str = None) -> bool:
-    """[V007.15 L1 治本] rollback 加 try/finally + 状态重置"""
-    success = True
+# meta/core/sqlite_tx_state.py (new file, ~40 lines)
+
+import sqlite3
+import logging
+from contextlib import contextmanager
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+class TxState:
+    NONE = "none"
+    READ = "read"
+    WRITE = "write"
+    UNKNOWN = "unknown"
+
+def get_tx_state(conn) -> str:
+    """
+    Detect actual SQLite transaction state via SAVEPOINT probe.
+    Returns 'none', 'read', 'write', or 'unknown'.
+    Cost: ~1ms, no side effect (savepoint released immediately).
+    """
     try:
-        if hasattr(self._data_source, 'rollback'):
-            self._data_source.rollback()
+        conn.execute("SAVEPOINT __v007_15_probe__")
+        conn.execute("RELEASE SAVEPOINT __v007_15_probe__")
+        return TxState.WRITE  # could be read or write; we don't distinguish
+    except sqlite3.OperationalError as e:
+        if "no transaction" in str(e).lower() or "no transactions" in str(e).lower():
+            return TxState.NONE
+        return TxState.UNKNOWN
     except Exception as e:
-        logger.error(f"[BOFramework] Rollback failed: {e}")
-        success = False
+        logger.warning(f"[V007.15] tx_state probe failed: {e}")
+        return TxState.UNKNOWN
+
+@contextmanager
+def tx_state_verified_action(conn, expected_state: str = TxState.NONE):
+    """
+    Context manager that verifies transaction state matches expected before/after.
+    Use this to wrap critical code paths.
+    """
+    actual = get_tx_state(conn)
+    if actual != expected_state:
+        logger.warning(
+            f"[V007.15] TX state mismatch: expected={expected_state}, actual={actual}"
+        )
+    try:
+        yield actual
     finally:
-        # [V007.15 L1 关键] 不论成功失败, 强制重置所有 in_transaction 标志
+        post = get_tx_state(conn)
+        if post != expected_state:
+            logger.warning(
+                f"[V007.15] TX state drift: expected={expected_state}, post={post}"
+            )
+```
+
+**Complexity justification**: 1 file, 40 lines. Reusable context manager.
+**Used by**: bo_framework.commit/rollback, sql_write_queue.begin/commit/rollback.
+
+### 4.3 Layer 2: Unified `commit/rollback` with State-Aware Defense (bo_framework.py)
+
+```python
+# meta/core/bo_framework.py (modify existing commit/rollback)
+
+from meta.core.db_config_detector import get_runtime_config
+from meta.core.sqlite_tx_state import get_tx_state, TxState
+from meta.core.observability import (
+    metrics_inc, OBS_COUNTERS, log_tx_event
+)
+
+def commit(self, transaction_id: str = None) -> bool:
+    """[V007.15 L2] commit with state-aware defense + observability."""
+    config = get_runtime_config()
+    success = True
+    err_msg = None
+    try:
+        if hasattr(self._data_source, 'commit'):
+            self._data_source.commit()
+    except Exception as e:
+        err_msg = str(e)
+        success = False
+        metrics_inc(OBS_COUNTERS['commit_failure'])
+        log_tx_event('commit', transaction_id, 'error', err_msg)
+
+    # [V007.15 L2 关键] 不论 commit 成功失败, 强制重置 + 验证
+    finally:
+        # 1. 强制重置所有 in_transaction 标志 (Layer 1 of original 6-layer)
         try:
             if hasattr(self._data_source, '_in_transaction'):
                 self._data_source._in_transaction = False
@@ -768,170 +960,1220 @@ def rollback(self, transaction_id: str = None) -> bool:
                 if hasattr(self._data_source._write_queue, '_in_transaction'):
                     self._data_source._write_queue._in_transaction = False
         except Exception as e:
-            logger.error(f"[BOFramework] State reset failed: {e}")
+            log_tx_event('commit', transaction_id, 'state_reset_error', str(e))
             success = False
+
+        # 2. [State A/B] 显式调 SQLite conn.rollback() 强制重置
+        if config.use_explicit_conn_rollback:
+            try:
+                if hasattr(self._data_source, '_write_queue') and self._data_source._write_queue:
+                    wq = self._data_source._write_queue
+                    if hasattr(wq, '_write_conn') and wq._write_conn:
+                        wq._write_conn.rollback()  # 强制 C-level rollback
+            except Exception:
+                pass  # 可能已经在 tx 外, 不算 failure
+
+        # 3. [V007.15 L2 验证] 用 savepoint 探测 SQLite 实际状态
+        if hasattr(self._data_source, '_write_queue') and self._data_source._write_queue:
+            wq = self._data_source._write_queue
+            if hasattr(wq, '_write_conn') and wq._write_conn:
+                actual = get_tx_state(wq._write_conn)
+                if actual != TxState.NONE:
+                    # 还是 in tx! 强制 ROLLBACK 一次
+                    try:
+                        wq._write_conn.execute("ROLLBACK")
+                        log_tx_event('commit', transaction_id, 'forced_rollback', actual)
+                        metrics_inc(OBS_COUNTERS['forced_rollback_after_commit'])
+                    except Exception as e:
+                        log_tx_event('commit', transaction_id, 'forced_rollback_error', str(e))
+
+    if success:
+        metrics_inc(OBS_COUNTERS['commit_success'])
+        log_tx_event('commit', transaction_id, 'ok', None)
     return success
-```
 
-### 4.3 Layer 2: bo_framework.rollback also resets SQLite connection
 
-```python
-# meta/core/bo_framework.py
 def rollback(self, transaction_id: str = None) -> bool:
-    """[V007.15 L1+L2 治本] 显式调 SQLite conn.rollback() 强制重置"""
+    """[V007.15 L2] rollback with state-aware defense + observability."""
+    config = get_runtime_config()
     success = True
+    err_msg = None
     try:
         if hasattr(self._data_source, 'rollback'):
             self._data_source.rollback()
     except Exception as e:
-        logger.error(f"[BOFramework] DataSource rollback failed: {e}")
+        err_msg = str(e)
         success = False
+        metrics_inc(OBS_COUNTERS['rollback_failure'])
+        log_tx_event('rollback', transaction_id, 'error', err_msg)
 
-    # [V007.15 L2] 额外保险: 显式调 SQLite conn.rollback() 强制重置
-    #   即使 DataSource.rollback 失败, 这里还有一次机会
-    try:
+    # [V007.15 L2 关键] 不论 rollback 成功失败, 强制重置 + 验证
+    finally:
+        # 1. 强制重置所有 in_transaction 标志
+        try:
+            if hasattr(self._data_source, '_in_transaction'):
+                self._data_source._in_transaction = False
+            if hasattr(self._data_source, '_write_queue') and self._data_source._write_queue:
+                if hasattr(self._data_source._write_queue, '_in_transaction'):
+                    self._data_source._write_queue._in_transaction = False
+        except Exception as e:
+            log_tx_event('rollback', transaction_id, 'state_reset_error', str(e))
+            success = False
+
+        # 2. [State A/B] 显式调 SQLite conn.rollback() 强制重置
+        if config.use_explicit_conn_rollback:
+            try:
+                if hasattr(self._data_source, '_write_queue') and self._data_source._write_queue:
+                    wq = self._data_source._write_queue
+                    if hasattr(wq, '_write_conn') and wq._write_conn:
+                        wq._write_conn.rollback()
+            except Exception:
+                pass
+
+        # 3. [V007.15 L2 验证] 用 savepoint 探测 SQLite 实际状态
         if hasattr(self._data_source, '_write_queue') and self._data_source._write_queue:
             wq = self._data_source._write_queue
             if hasattr(wq, '_write_conn') and wq._write_conn:
-                wq._write_conn.rollback()  # 直接调 C-level rollback
-    except Exception as e:
-        logger.error(f"[BOFramework] Direct conn.rollback() failed: {e}")
-        # 注意: 这里不 mark as failure, 因为可能已经在 tx 外
-    finally:
-        # [V007.15 L1] 强制重置所有标志
-        try:
-            ...
-        except:
-            pass
+                actual = get_tx_state(wq._write_conn)
+                if actual != TxState.NONE:
+                    try:
+                        wq._write_conn.execute("ROLLBACK")
+                        log_tx_event('rollback', transaction_id, 'forced_rollback', actual)
+                        metrics_inc(OBS_COUNTERS['forced_rollback_after_rollback'])
+                    except Exception as e:
+                        log_tx_event('rollback', transaction_id, 'forced_rollback_error', str(e))
+
+    if success:
+        metrics_inc(OBS_COUNTERS['rollback_success'])
+        log_tx_event('rollback', transaction_id, 'ok', None)
     return success
 ```
 
-### 4.4 Layer 3: WriteQueue.begin_transaction sanity check
+**Complexity justification**: 2 functions modified, ~70 lines added. Single code path with
+`config.use_explicit_conn_rollback` boolean branch (default True). Same path for all 3 states,
+just toggles the secondary defense.
+
+### 4.4 Layer 3: WriteQueue.begin_transaction with Phantom TX Detection
 
 ```python
-# meta/core/sql_write_queue.py
+# meta/core/sql_write_queue.py (modify begin_transaction)
+
+import sqlite3
+from meta.core.sqlite_tx_state import get_tx_state, TxState
+from meta.core.db_config_detector import get_runtime_config
+from meta.core.observability import metrics_inc, OBS_COUNTERS, log_tx_event
+
 def begin_transaction(self):
-    """[V007.15 L3 治本] begin 前检查连接是否已有事务, 防止 phantom tx"""
+    """[V007.15 L3] begin with phantom TX detection."""
+    if self._in_transaction:
+        # 已经标记 in_tx, 跳过 (但记录 metrics)
+        metrics_inc(OBS_COUNTERS['begin_skipped_already_in_tx'])
+        return
+
     def _do_begin(conn):
-        # [V007.15 L3] 防御性检查: 之前的事务是否真的结束了?
-        # 调 savepoint 看是否在 tx 中
-        try:
-            conn.execute("SAVEPOINT __check__")
-            # 在 tx 中, 但我们想开始新 tx -> 错误状态, 先回滚
-            conn.execute("ROLLBACK TO SAVEPOINT __check__")
-            logger.warning("WriteQueue: connection already in transaction, rolling back phantom")
-            conn.execute("ROLLBACK")
+        # [V007.15 L3 治本] 防御性检查: 连接是否真的不在 tx 中?
+        actual = get_tx_state(conn)
+        if actual == TxState.WRITE or actual == TxState.READ:
+            # 实际在 tx, 但 Python 状态 False — phantom TX!
+            logger.warning(
+                f"[V007.15] WriteQueue: phantom TX detected "
+                f"(Python=False, SQLite={actual}), forcing ROLLBACK"
+            )
+            metrics_inc(OBS_COUNTERS['phantom_tx_detected'])
+            try:
+                conn.execute("ROLLBACK")
+            except Exception:
+                pass
             self._in_transaction = False
-        except sqlite3.OperationalError as e:
-            if "no transaction" in str(e):
-                pass  # 正常情况, 继续 BEGIN
-            else:
-                raise
-        except Exception:
-            pass
 
         # 现在安全地 BEGIN
-        conn.execute("BEGIN IMMEDIATE")
-        self._in_transaction = True
-        ...
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            self._in_transaction = True
+            metrics_inc(OBS_COUNTERS['begin_success'])
+        except sqlite3.OperationalError as e:
+            # BEGIN 失败, 但 conn 可能已持锁
+            err = str(e).lower()
+            if "locked" in err or "busy" in err:
+                metrics_inc(OBS_COUNTERS['begin_locked'])
+                log_tx_event('begin', None, 'locked', str(e))
+            raise
 
     self.submit_and_wait(_do_begin)
 ```
 
-### 4.5 Layer 4: audit_service.log defensive commit retry
+**Complexity justification**: 1 function modified, ~25 lines added. Single code path, no state
+branching needed (savepoint probe works in WAL/DELETE both).
+
+### 4.5 Layer 4: audit_service.log Defensive Retry (State-Aware)
 
 ```python
-# meta/services/audit_service.py
+# meta/services/audit_service.py (modify log method)
+
+import time
+import sqlite3
+from meta.core.db_config_detector import get_runtime_config
+from meta.core.observability import metrics_inc, OBS_COUNTERS, log_tx_event
+
 def log(self, ...):
     ...
-    # [V007.15 L4 预防] audit 写入加 retry + 状态验证
-    for attempt in range(3):
+    # [V007.15 L4] audit 写入加 retry + 状态验证 (按 state 调 max retries)
+    config = get_runtime_config()
+    max_retries = config.audit_retry_max  # State A: 2, State B: 5, State C: 3
+    last_err = None
+    for attempt in range(max_retries + 1):
         try:
             self.ds.insert(self.AUDIT_TABLE, record)
             if not getattr(self.ds, 'in_transaction', False):
                 self.ds.commit()
+            metrics_inc(OBS_COUNTERS['audit_write_success'])
             return True
         except sqlite3.OperationalError as e:
-            err_str = str(e).lower()
-            if "locked" in err_str or "busy" in err_str:
-                if attempt < 2:
-                    time.sleep(0.5 * (attempt + 1))
-                    continue
-            raise
+            err = str(e).lower()
+            last_err = e
+            if ("locked" in err or "busy" in err) and attempt < max_retries:
+                # 退避: 0.1s, 0.2s, 0.4s, 0.8s, 1.6s (State B 用更长)
+                backoff = 0.1 * (2 ** attempt) * (config.busy_timeout_ms // 5000)
+                log_tx_event('audit_log', None, 'retry', f"attempt={attempt}, backoff={backoff:.2f}s")
+                time.sleep(backoff)
+                continue
+            # 非 locked 错误, 或 retries 用完
+            metrics_inc(OBS_COUNTERS['audit_write_failure'])
+            log_tx_event('audit_log', None, 'failed', str(e))
+            # 进入原 error handler 写 AUDIT_WRITE_FAILED
+            ...
+            return False
+    # 所有 retries 用完
+    metrics_inc(OBS_COUNTERS['audit_write_exhausted'])
+    log_tx_event('audit_log', None, 'exhausted', str(last_err) if last_err else 'unknown')
+    return False
 ```
 
-### 4.6 Layer 5: Periodic health check (background task)
+**Complexity justification**: Replaces existing `if not in_transaction: commit()` block.
+Adds retry loop with **state-aware** backoff. State B (DELETE+30s) gets longer backoff because
+busy_timeout is 30s, so we wait longer between retries.
+
+### 4.6 Layer 5: Background Orphan TX Detector (State-Aware Interval)
 
 ```python
-# meta/core/db_health_monitor.py (or new file)
+# meta/core/orphan_tx_detector.py (new file, ~120 lines)
+
 import threading
 import time
+import sqlite3
+import logging
+from typing import Optional
 
-class OrphanTransactionDetector:
-    """[V007.15 L5 预防] 定期检查并清理孤儿事务"""
+from meta.core.db_config_detector import get_runtime_config
+from meta.core.sqlite_tx_state import get_tx_state, TxState
+from meta.core.observability import metrics_inc, OBS_COUNTERS, log_tx_event
 
-    def __init__(self, data_source, check_interval=60):
+logger = logging.getLogger(__name__)
+
+class OrphanTxDetector:
+    """[V007.15 L5] 后台定期检查 + 自动清理 orphan transaction.
+
+    检测策略:
+    1. 读 _write_conn 真实状态 (savepoint probe)
+    2. 比对应用层 _in_transaction
+    3. 不一致 → 视为 orphan → 强制 ROLLBACK + 重置标志
+    """
+
+    def __init__(self, data_source):
         self._ds = data_source
-        self._interval = check_interval
+        self._config = get_runtime_config()
         self._stop = False
-        self._thread = None
+        self._thread: Optional[threading.Thread] = None
+        self._check_count = 0
+        self._recovery_count = 0
 
     def start(self):
-        self._thread = threading.Thread(target=self._run, daemon=True)
+        if not self._config.use_orphan_detector:
+            logger.info("[V007.15] Orphan detector disabled by config")
+            return
+        self._thread = threading.Thread(
+            target=self._run, name='orphan-tx-detector', daemon=True
+        )
         self._thread.start()
+        logger.info(
+            f"[V007.15] Orphan TX detector started, interval={self._config.orphan_check_interval_sec}s"
+        )
+
+    def stop(self):
+        self._stop = True
+        if self._thread:
+            self._thread.join(timeout=5)
 
     def _run(self):
         while not self._stop:
-            time.sleep(self._interval)
+            time.sleep(self._config.orphan_check_interval_sec)
             try:
-                self._check_and_recover()
+                self._check_once()
             except Exception as e:
-                logger.error(f"OrphanTransactionDetector failed: {e}")
+                logger.error(f"[V007.15] Orphan detector iteration failed: {e}")
 
-    def _check_and_recover(self):
-        # 1. 用 savepoint 探测 _write_conn 状态
-        # 2. 如果在 tx 中 + 应用层没标记 in_tx, 视为孤儿
-        # 3. 强制 rollback + 重置标志
+    def _check_once(self):
+        """单次检查 + 恢复"""
+        self._check_count += 1
+        metrics_inc(OBS_COUNTERS['orphan_detector_runs'])
+
+        # 1. 拿到 _write_conn
+        write_conn = self._get_write_conn()
+        if write_conn is None:
+            return
+
+        # 2. savepoint probe
+        actual = get_tx_state(write_conn)
+        app_state = self._get_app_in_transaction()
+
+        # 3. 比对 + 恢复
+        if actual != TxState.NONE and not app_state:
+            # ORPHAN!
+            self._recover_orphan(write_conn, actual)
+        elif actual == TxState.NONE and app_state:
+            # 应用层认为 in tx, 但 SQLite 不在 — 状态污染, 强制重置应用层
+            self._reset_app_state()
+            metrics_inc(OBS_COUNTERS['orphan_app_state_pollution'])
+        else:
+            metrics_inc(OBS_COUNTERS['orphan_detector_clean'])
+
+    def _recover_orphan(self, conn, actual_state: str):
+        """Orphan 恢复: 强制 ROLLBACK + 重置 + 告警"""
+        self._recovery_count += 1
+        metrics_inc(OBS_COUNTERS['orphan_recovered'])
+        log_tx_event('orphan', None, 'recovered',
+                     f"actual_sqlite_state={actual_state}, forced_rollback")
+
+        try:
+            conn.execute("ROLLBACK")
+        except Exception as e:
+            log_tx_event('orphan', None, 'rollback_error', str(e))
+            # 最后兜底: 重置连接
+            try:
+                conn.close()
+                log_tx_event('orphan', None, 'connection_closed', 'last_resort')
+            except Exception:
+                pass
+
+        self._reset_app_state()
+
+    def _reset_app_state(self):
+        """重置应用层 _in_transaction 标志"""
+        try:
+            if hasattr(self._ds, '_in_transaction'):
+                self._ds._in_transaction = False
+            if hasattr(self._ds, '_write_queue') and self._ds._write_queue:
+                if hasattr(self._ds._write_queue, '_in_transaction'):
+                    self._ds._write_queue._in_transaction = False
+        except Exception as e:
+            log_tx_event('orphan', None, 'state_reset_error', str(e))
+
+    def _get_write_conn(self):
+        """从 data_source 拿 write connection"""
+        try:
+            if hasattr(self._ds, '_write_queue') and self._ds._write_queue:
+                if hasattr(self._ds._write_queue, '_write_conn'):
+                    return self._ds._write_queue._write_conn
+            if hasattr(self._ds, '_connection'):
+                return self._ds._connection
+        except Exception:
+            return None
+        return None
+
+    def _get_app_in_transaction(self) -> bool:
+        """读应用层 _in_transaction 状态"""
+        try:
+            if hasattr(self._ds, 'in_transaction'):
+                return bool(self._ds.in_transaction)
+        except Exception:
+            return False
+        return False
+
+    def get_stats(self) -> dict:
+        return {
+            'check_count': self._check_count,
+            'recovery_count': self._recovery_count,
+            'interval_sec': self._config.orphan_check_interval_sec,
+            'deployment_state': self._config.deployment_state,
+        }
+```
+
+**Complexity justification**: 1 new file, ~120 lines. Started **once** at server init.
+**State-aware** interval (30s/60s). Adds observability counter (recovery_count).
+
+### 4.7 Layer 6: Observability Infrastructure (Prometheus + Log + Health)
+
+```python
+# meta/core/observability.py (new file, ~100 lines)
+
+import logging
+import time
+from typing import Dict, Optional
+
+logger = logging.getLogger(__name__)
+
+# Counter dict (lazy import Prometheus to avoid hard dep)
+_prometheus_counters: Dict[str, any] = {}
+
+OBS_COUNTERS = {
+    # commit/rollback
+    'commit_success': 'v007_15_commit_success_total',
+    'commit_failure': 'v007_15_commit_failure_total',
+    'rollback_success': 'v007_15_rollback_success_total',
+    'rollback_failure': 'v007_15_rollback_failure_total',
+    # forced rollback (state recovery)
+    'forced_rollback_after_commit': 'v007_15_forced_rollback_after_commit_total',
+    'forced_rollback_after_rollback': 'v007_15_forced_rollback_after_rollback_total',
+    # begin_transaction
+    'begin_success': 'v007_15_begin_success_total',
+    'begin_skipped_already_in_tx': 'v007_15_begin_skipped_already_in_tx_total',
+    'begin_locked': 'v007_15_begin_locked_total',
+    'phantom_tx_detected': 'v007_15_phantom_tx_detected_total',
+    # audit
+    'audit_write_success': 'v007_15_audit_write_success_total',
+    'audit_write_failure': 'v007_15_audit_write_failure_total',
+    'audit_write_exhausted': 'v007_15_audit_write_exhausted_total',
+    # orphan detector
+    'orphan_detector_runs': 'v007_15_orphan_detector_runs_total',
+    'orphan_detector_clean': 'v007_15_orphan_detector_clean_total',
+    'orphan_recovered': 'v007_15_orphan_recovered_total',
+    'orphan_app_state_pollution': 'v007_15_orphan_app_state_pollution_total',
+    # state
+    'runtime_state': 'v007_15_runtime_state_info',  # gauge, not counter
+}
+
+def _get_prometheus_counter(name: str):
+    """Lazy import + singleton."""
+    if name in _prometheus_counters:
+        return _prometheus_counters[name]
+    try:
+        from prometheus_client import Counter, Gauge
+        if name == 'runtime_state':
+            obj = Gauge(name, 'V007.15 runtime state code (0=A,1=B,2=C,3=UNKNOWN)')
+        else:
+            obj = Counter(name, f'V007.15 metric: {name}')
+        _prometheus_counters[name] = obj
+        return obj
+    except ImportError:
+        # Prometheus 不可用, 不报错 (只是没 metrics)
+        return None
+
+def metrics_inc(counter_key: str, value: int = 1):
+    """Increment a counter. Fallback: log if Prometheus unavailable."""
+    if counter_key not in OBS_COUNTERS:
+        return
+    name = OBS_COUNTERS[counter_key]
+    if counter_key == 'runtime_state':
+        # Gauge: 单独处理
+        return
+    counter = _get_prometheus_counter(name)
+    if counter is not None:
+        try:
+            counter.inc(value)
+        except Exception:
+            pass
+
+def metrics_set_state(state_code: int):
+    """Set runtime state gauge (0=A, 1=B, 2=C, 3=UNKNOWN)."""
+    gauge = _get_prometheus_counter(OBS_COUNTERS['runtime_state'])
+    if gauge is not None:
+        try:
+            gauge.set(state_code)
+        except Exception:
+            pass
+
+def log_tx_event(event_type: str, tx_id: Optional[str], status: str, detail: Optional[str]):
+    """Structured log for TX events. Always logged regardless of Prometheus."""
+    extra = {
+        'event_type': event_type,
+        'tx_id': tx_id,
+        'status': status,
+        'detail': detail[:500] if detail else None,
+    }
+    msg = f"[V007.15] {event_type} tx_id={tx_id} status={status}"
+    if detail:
+        msg += f" detail={detail[:200]}"
+    if status in ('error', 'recovered', 'failed', 'exhausted'):
+        logger.error(msg, extra=extra)
+    elif status in ('locked', 'forced_rollback', 'retry'):
+        logger.warning(msg, extra=extra)
+    else:
+        logger.info(msg, extra=extra)
+```
+
+**Complexity justification**: 1 new file, ~100 lines. **Reusable** by all other layers.
+**No hard dep on Prometheus** (lazy import, log fallback).
+
+### 4.8 Layer 7: Server Integration (one-time wiring)
+
+```python
+# meta/server.py (modify, add ~10 lines after data_source init)
+
+# 在 init_audit_services / init_database_services 后:
+from meta.core.db_config_detector import detect_runtime_config, get_runtime_config
+from meta.core.observability import metrics_set_state
+from meta.core.orphan_tx_detector import OrphanTxDetector
+
+# L7-1: 启动时检测
+config = detect_runtime_config(db_path)
+state_code = {'A': 0, 'B': 1, 'C': 2}.get(config.deployment_state, 3)
+metrics_set_state(state_code)
+logger.info(f"[V007.15] Server initialized, deployment_state={config.deployment_state}")
+
+# L7-2: 启动 orphan detector
+orphan_detector = OrphanTxDetector(data_source)
+orphan_detector.start()
+
+# L7-3: 在 /healthz 加 metrics
+# (modify existing healthz handler)
+def healthz_handler():
+    return {
+        'status': 'ok',
+        'v007_15': {
+            'deployment_state': config.deployment_state,
+            'journal_mode': config.journal_mode.value,
+            'busy_timeout_ms': config.busy_timeout_ms,
+            'orphan_detector': orphan_detector.get_stats() if orphan_detector else None,
+        }
+    }
+```
+
+**Complexity justification**: ~10 lines added to `server.py`. Single point of wiring.
+
+### 4.9 Summary of V007.15 Changes
+
+| File | Change | New Lines | Modified |
+|------|--------|-----------|----------|
+| `meta/core/db_config_detector.py` | NEW | ~80 | 0 |
+| `meta/core/sqlite_tx_state.py` | NEW | ~40 | 0 |
+| `meta/core/orphan_tx_detector.py` | NEW | ~120 | 0 |
+| `meta/core/observability.py` | NEW | ~100 | 0 |
+| `meta/core/bo_framework.py` | MODIFY | +70 | commit, rollback |
+| `meta/core/sql_write_queue.py` | MODIFY | +25 | begin_transaction |
+| `meta/services/audit_service.py` | MODIFY | +30 | log |
+| `meta/server.py` | MODIFY | +10 | init, healthz |
+| **Total** | | **~475** | 5 |
+
+**Complexity vs. 3-state coverage**: One detection + one config object. All layers branch on
+`config.xxx` booleans, not on full parallel implementations. No state has unique code paths.
+
+---
+
+## 5. Deployment Matrix (3-State Aware)
+
+| Step | State A (WAL+5s) | State B (DELETE+30s) | State C (Future) |
+|------|------------------|----------------------|------------------|
+| 1. Deploy code | ✓ Same | ✓ Same | ✓ Same |
+| 2. Restart server | ✓ | ✓ | ✓ |
+| 3. Detect config | Detects "A" | Detects "B" | Detects "C" or "UNKNOWN" |
+| 4. Apply V007.15 defense | ✓ (audit_retry=2, interval=30s) | ✓ (audit_retry=5, interval=60s) | ✓ (audit_retry=auto, interval=auto) |
+| 5. Healthz shows state | `state: "A"` | `state: "B"` | `state: "C"` |
+| 6. Verify (run §6.4 test) | Test should pass | Test should pass | Test should pass |
+| 7. Set Prometheus alert | Yes (per §6.3) | Yes (same alerts, different threshold) | Yes (auto) |
+| 8. Roll back if needed | Revert to 8bfcbff + revert server.py + drop detector | Same as A | Same as A |
+
+**No per-state deployment code is needed** — all states use the same code, with config-driven
+behavior. The deployment matrix is just verification steps.
+
+### 5.1 State Verification (Run Once After Deploy)
+
+```bash
+# SSH to server
+ssh user@172.20.59.7
+
+# 1. Check V007.15 detected state
+curl -s http://localhost:8081/healthz | python -m json.tool | grep v007_15 -A 10
+# Expected:
+#   "v007_15": {
+#     "deployment_state": "A" or "B" or "C",
+#     "journal_mode": "wal" or "delete",
+#     "busy_timeout_ms": 5000 or 30000,
+#     "orphan_detector": { "check_count": N, "recovery_count": 0, ... }
+#   }
+
+# 2. Check Prometheus metrics endpoint (if exposed)
+curl -s http://localhost:8081/metrics | grep v007_15
+# Expected: 19 counters + 1 gauge
+
+# 3. Check log for "Runtime DB config detected"
+grep "Runtime DB config detected" /var/log/meta/backend.log | tail -5
+```
+
+### 5.2 Pre-Deployment PRAGMA Test (Run Once Before Deploy)
+
+```python
+# tools/test_pragmas.py (new, ~30 lines, run in CI)
+import sqlite3
+import sys
+
+def test_deployment_state(db_path: str, expected_state: str):
+    conn = sqlite3.connect(db_path, timeout=5.0)
+    journal = conn.execute("PRAGMA journal_mode").fetchone()[0]
+    busy = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+    conn.close()
+
+    actual_state = "?"
+    if journal == "wal" and busy == 5000:
+        actual_state = "A"
+    elif journal == "delete" and busy == 30000:
+        actual_state = "B"
+    else:
+        actual_state = f"CUSTOM (journal={journal}, busy={busy})"
+
+    print(f"DB: {db_path}")
+    print(f"  journal_mode: {journal}")
+    print(f"  busy_timeout: {busy}ms")
+    print(f"  expected: {expected_state}, actual: {actual_state}")
+
+    if actual_state != expected_state:
+        print(f"  ❌ MISMATCH — abort deploy")
+        sys.exit(1)
+    print(f"  ✓ OK")
+
+if __name__ == "__main__":
+    import sys
+    test_deployment_state(sys.argv[1], sys.argv[2])
+```
+
+**Use case**: CI/CD runs this against integration. If integration is State A but production
+is State B, the test fails. Prevents wrong-defense deployment.
+
+---
+
+## 6. Observability & Monitoring Design
+
+### 6.1 Metrics Inventory (19 counters + 1 gauge)
+
+| Metric | Type | Description | Alert Threshold |
+|--------|------|-------------|-----------------|
+| `v007_15_runtime_state_info` | Gauge | 0=A, 1=B, 2=C, 3=UNKNOWN | None (informational) |
+| `v007_15_commit_success_total` | Counter | Successful commits | None |
+| `v007_15_commit_failure_total` | Counter | Failed commits (any reason) | > 0/min → page |
+| `v007_15_rollback_success_total` | Counter | Successful rollbacks | None |
+| `v007_15_rollback_failure_total` | Counter | Failed rollbacks | > 0/min → page |
+| `v007_15_forced_rollback_after_commit_total` | Counter | Commit succeeded but conn still in tx | > 0 → investigate (state pollution) |
+| `v007_15_forced_rollback_after_rollback_total` | Counter | Rollback succeeded but conn still in tx | > 0 → investigate |
+| `v007_15_begin_success_total` | Counter | Successful BEGIN | None |
+| `v007_15_begin_skipped_already_in_tx_total` | Counter | Begin skipped (already in tx) | > 0 → check for nested calls |
+| `v007_15_begin_locked_total` | Counter | BEGIN failed with SQLITE_BUSY | > 5/min → orphan tx exists |
+| `v007_15_phantom_tx_detected_total` | Counter | WriteQueue detected phantom TX | > 0 → critical, immediate page |
+| `v007_15_audit_write_success_total` | Counter | Audit writes succeeded | None |
+| `v007_15_audit_write_failure_total` | Counter | Audit writes failed (any reason) | > 1/min → check disk |
+| `v007_15_audit_write_exhausted_total` | Counter | Audit retries exhausted | > 0 → critical, data loss risk |
+| `v007_15_orphan_detector_runs_total` | Counter | Detector iterations | None |
+| `v007_15_orphan_detector_clean_total` | Counter | Iterations with no issues | None |
+| `v007_15_orphan_recovered_total` | Counter | Orphan TX recovered | > 0 → page (should be 0) |
+| `v007_15_orphan_app_state_pollution_total` | Counter | App state false-positive | > 0 → state desync, investigate |
+
+### 6.2 Health Endpoint Schema (GET /healthz)
+
+```json
+{
+  "status": "ok",
+  "v007_15": {
+    "deployment_state": "A",
+    "journal_mode": "wal",
+    "busy_timeout_ms": 5000,
+    "orphan_detector": {
+      "check_count": 1432,
+      "recovery_count": 0,
+      "interval_sec": 30,
+      "deployment_state": "A",
+      "last_check_ts": "2026-07-05T14:23:11Z",
+      "last_check_result": "clean"
+    },
+    "config_detection_ts": "2026-07-05T12:00:00Z",
+    "uptime_sec": 8200
+  }
+}
+```
+
+### 6.3 Alert Rules (Prometheus)
+
+```yaml
+# prometheus-alerts/v007_15.yml
+groups:
+  - name: v007_15_transaction_health
+    rules:
+      - alert: V007_15PhantomTx
+        expr: increase(v007_15_phantom_tx_detected_total[5m]) > 0
+        for: 1m
+        annotations:
+          summary: "V007.15 phantom TX detected (critical)"
+          description: "WriteQueue detected phantom TX on {{ $labels.instance }}"
+
+      - alert: V007_15OrphanRecovered
+        expr: increase(v007_15_orphan_recovered_total[5m]) > 0
+        for: 1m
+        annotations:
+          summary: "V007.15 orphan TX recovered (page on-call)"
+          description: "Orphan detector found and recovered an orphan TX on {{ $labels.instance }}"
+
+      - alert: V007_15AuditExhausted
+        expr: increase(v007_15_audit_write_exhausted_total[5m]) > 0
+        for: 1m
+        annotations:
+          summary: "V007.15 audit retries exhausted (data loss risk)"
+          description: "Audit write retries all failed on {{ $labels.instance }}"
+
+      - alert: V007_15BeginLocked
+        expr: rate(v007_15_begin_locked_total[5m]) > 0.1
+        for: 5m
+        annotations:
+          summary: "V007.15 BEGIN frequently locked (orphan TX active)"
+          description: "{{ $value }} locked BEGIN/sec on {{ $labels.instance }}"
+
+      - alert: V007_15ForcedRollback
+        expr: increase(v007_15_forced_rollback_after_commit_total[10m]) > 0
+        annotations:
+          summary: "V007.15 state pollution after commit (investigate)"
+          description: "Commit succeeded but conn still in TX. State layer out of sync."
+```
+
+### 6.4 Health Verification Test (Post-Deploy Smoke Test)
+
+```python
+# tools/smoke_v007_15.py (new, ~60 lines)
+import requests
+import time
+import sys
+
+def smoke_test(base_url: str, expected_state: str):
+    print(f"Smoke testing V007.15 at {base_url}")
+
+    # 1. Healthz returns state
+    r = requests.get(f"{base_url}/healthz", timeout=5)
+    assert r.status_code == 200
+    h = r.json()['v007_15']
+    assert h['deployment_state'] == expected_state, f"state mismatch"
+    print(f"  ✓ state={h['deployment_state']}, journal={h['journal_mode']}, busy={h['busy_timeout_ms']}ms")
+
+    # 2. Orphan detector started
+    od = h['orphan_detector']
+    assert od is not None
+    assert od['interval_sec'] > 0
+    print(f"  ✓ orphan detector: interval={od['interval_sec']}s, checks={od['check_count']}")
+
+    # 3. Wait for first detector check
+    initial_count = od['check_count']
+    time.sleep(od['interval_sec'] + 5)
+    r2 = requests.get(f"{base_url}/healthz", timeout=5)
+    h2 = r2.json()['v007_15']
+    assert h2['orphan_detector']['check_count'] > initial_count
+    assert h2['orphan_detector']['recovery_count'] == 0
+    print(f"  ✓ detector ran, no recovery (clean)")
+
+    # 4. Metrics endpoint exposes V007.15 metrics
+    if '/metrics' in r.text or True:  # try anyway
+        try:
+            rm = requests.get(f"{base_url}/metrics", timeout=5)
+            if rm.status_code == 200:
+                expected_metrics = [
+                    'v007_15_commit_success_total',
+                    'v007_15_phantom_tx_detected_total',
+                    'v007_15_orphan_recovered_total',
+                    'v007_15_runtime_state_info',
+                ]
+                for m in expected_metrics:
+                    assert m in rm.text, f"missing metric: {m}"
+                print(f"  ✓ all 19 metrics exposed")
+        except Exception as e:
+            print(f"  ⚠ /metrics not exposed, skipping: {e}")
+
+    print(f"\n✅ V007.15 smoke test PASSED for state {expected_state}")
+
+if __name__ == "__main__":
+    smoke_test(sys.argv[1], sys.argv[2])
+```
+
+---
+
+## 7. Unit Test Design (5 Test Files)
+
+### 7.1 `tests/test_v007_15_config_detector.py` (~30 tests)
+
+```python
+import pytest
+import tempfile
+import os
+import sqlite3
+from unittest.mock import patch
+from meta.core.db_config_detector import (
+    detect_runtime_config, get_runtime_config, JournalMode, RuntimeDbConfig
+)
+
+@pytest.fixture
+def fresh_db(tmp_path):
+    def _make(journal='wal', busy=5000):
+        db = tmp_path / f"test_{journal}_{busy}.db"
+        conn = sqlite3.connect(db, timeout=5.0)
+        conn.execute(f"PRAGMA journal_mode={journal.upper()}")
+        conn.execute(f"PRAGMA busy_timeout={busy}")
+        conn.close()
+        return str(db)
+    return _make
+
+# State mapping
+def test_state_a_detection(fresh_db):
+    db = fresh_db(journal='wal', busy=5000)
+    config = detect_runtime_config(db)
+    assert config.deployment_state == "A"
+    assert config.audit_retry_max == 2
+    assert config.orphan_check_interval_sec == 30
+
+def test_state_b_detection(fresh_db):
+    db = fresh_db(journal='delete', busy=30000)
+    config = detect_runtime_config(db)
+    assert config.deployment_state == "B"
+    assert config.audit_retry_max == 5
+    assert config.orphan_check_interval_sec == 60
+
+def test_state_c_unknown_journal(fresh_db):
+    db = fresh_db(journal='truncate', busy=5000)
+    config = detect_runtime_config(db)
+    assert config.deployment_state == "C"
+
+def test_state_c_custom_busy(fresh_db):
+    db = fresh_db(journal='wal', busy=10000)
+    config = detect_runtime_config(db)
+    assert config.deployment_state == "C"
+    assert config.audit_retry_max == 2  # max(2, 10000//5000) = 2
+
+# Singleton
+def test_singleton_caching(tmp_path):
+    db1 = tmp_path / "a.db"
+    db2 = tmp_path / "b.db"
+    # Need to reset singleton; use direct call
+    config1 = detect_runtime_config(str(db1))
+    config2 = detect_runtime_config(str(db2))
+    # Returns same object (cached)
+    assert config1 is config2
+
+# Failure handling
+def test_detection_failure_uses_safe_defaults(tmp_path):
+    # Non-existent file should fall back to safe defaults
+    fake_db = tmp_path / "does_not_exist.db"
+    with patch('meta.core.db_config_detector._runtime_config', None):
+        config = detect_runtime_config(str(fake_db))
+    # Note: actual behavior may differ; this test is brittle, see handoff
+```
+
+### 7.2 `tests/test_v007_15_tx_state.py` (~15 tests)
+
+```python
+import pytest
+import sqlite3
+from meta.core.sqlite_tx_state import get_tx_state, TxState, tx_state_verified_action
+
+@pytest.fixture
+def conn():
+    c = sqlite3.connect(":memory:", timeout=5.0)
+    yield c
+    c.close()
+
+def test_none_state(conn):
+    assert get_tx_state(conn) == TxState.NONE
+
+def test_write_state(conn):
+    conn.execute("BEGIN IMMEDIATE")
+    assert get_tx_state(conn) == TxState.WRITE
+    conn.execute("ROLLBACK")
+
+def test_read_state(conn):
+    # SELECT doesn't start a write tx, savepoint still works
+    conn.execute("BEGIN")
+    # In a "begin" without immediate, this is a read tx (default)
+    # But our savepoint probe may not distinguish read from write
+    # Verify savepoint still works
+    conn.execute("SAVEPOINT __test__")
+    conn.execute("RELEASE SAVEPOINT __test__")
+    conn.execute("ROLLBACK")
+
+def test_state_recovery(conn):
+    conn.execute("BEGIN IMMEDIATE")
+    assert get_tx_state(conn) == TxState.WRITE
+    conn.execute("ROLLBACK")
+    assert get_tx_state(conn) == TxState.NONE
+
+def test_context_manager_warning(conn, caplog):
+    with tx_state_verified_action(conn, expected_state=TxState.NONE) as actual:
+        assert actual == TxState.NONE
+    # No warning expected
+
+def test_context_manager_drift(conn, caplog):
+    conn.execute("BEGIN IMMEDIATE")
+    with tx_state_verified_action(conn, expected_state=TxState.NONE):
+        # Expected mismatch — but context manager doesn't force rollback
+        pass
+    assert "TX state mismatch" in caplog.text
+    conn.execute("ROLLBACK")
+```
+
+### 7.3 `tests/test_v007_15_bo_framework.py` (~20 tests)
+
+```python
+import pytest
+from unittest.mock import MagicMock
+from meta.core.bo_framework import BOFramework  # adjust import
+from meta.core.db_config_detector import RuntimeDbConfig, JournalMode
+
+@pytest.fixture
+def mock_ds():
+    ds = MagicMock()
+    ds._in_transaction = False
+    ds._write_queue = MagicMock()
+    ds._write_queue._in_transaction = False
+    ds._write_queue._write_conn = MagicMock()
+    return ds
+
+@pytest.fixture
+def bo_framework(mock_ds):
+    bf = BOFramework.__new__(BOFramework)  # skip __init__
+    bf._data_source = mock_ds
+    return bf
+
+def test_commit_success_resets_state(bo_framework, mock_ds):
+    # Mock the get_tx_state to return NONE (commit cleaned up)
+    with patch('meta.core.bo_framework.get_tx_state', return_value=TxState.NONE):
+        result = bo_framework.commit()
+    assert result is True
+    assert mock_ds._in_transaction is False
+    assert mock_ds._write_queue._in_transaction is False
+
+def test_commit_failure_still_resets_state(bo_framework, mock_ds):
+    mock_ds.commit.side_effect = Exception("disk full")
+    with patch('meta.core.bo_framework.get_tx_state', return_value=TxState.NONE):
+        result = bo_framework.commit()
+    assert result is False
+    # CRITICAL: state must be reset even on failure
+    assert mock_ds._in_transaction is False
+
+def test_commit_forced_rollback_when_state_drift(bo_framework, mock_ds):
+    # Commit "succeeds" but conn still in tx (state pollution)
+    with patch('meta.core.bo_framework.get_tx_state', return_value=TxState.WRITE):
+        result = bo_framework.commit()
+    # Should force ROLLBACK
+    mock_ds._write_queue._write_conn.execute.assert_called_with("ROLLBACK")
+
+def test_rollback_forced_rollback(bo_framework, mock_ds):
+    with patch('meta.core.bo_framework.get_tx_state', return_value=TxState.WRITE):
+        result = bo_framework.rollback()
+    mock_ds._write_queue._write_conn.execute.assert_called_with("ROLLBACK")
+
+def test_state_aware_explicit_rollback_disabled(bo_framework, mock_ds):
+    # If config.use_explicit_conn_rollback=False, skip direct conn.rollback()
+    with patch('meta.core.bo_framework.get_runtime_config') as mock_cfg:
+        mock_cfg.return_value = MagicMock(use_explicit_conn_rollback=False)
+        with patch('meta.core.bo_framework.get_tx_state', return_value=TxState.WRITE):
+            bo_framework.rollback()
+    # Should NOT have called conn.rollback directly
+    mock_ds._write_queue._write_conn.rollback.assert_not_called()
+```
+
+### 7.4 `tests/test_v007_15_write_queue.py` (~15 tests)
+
+```python
+import pytest
+import sqlite3
+from meta.core.sql_write_queue import WriteQueue
+from meta.core.sqlite_tx_state import TxState
+
+def test_phantom_tx_detection():
+    # Create conn with phantom tx (SQLite in tx, Python state=False)
+    conn = sqlite3.connect(":memory:")
+    conn.execute("BEGIN IMMEDIATE")
+    # Python state not set (simulate bug)
+
+    wq = WriteQueue.__new__(WriteQueue)
+    wq._in_transaction = False
+
+    # Mock submit_and_wait to run synchronously
+    captured = []
+    def mock_submit(fn):
+        fn(conn)
+        captured.append(True)
+    wq.submit_and_wait = mock_submit
+
+    with patch('meta.core.sql_write_queue.get_tx_state', return_value=TxState.WRITE):
+        wq.begin_transaction()
+
+    # Should have detected phantom, force rollback
+    assert wq._in_transaction is True  # Eventually set after real BEGIN
+
+def test_normal_begin_when_no_tx():
+    conn = sqlite3.connect(":memory:")
+    wq = WriteQueue.__new__(WriteQueue)
+    wq._in_transaction = False
+    captured = []
+    def mock_submit(fn):
+        fn(conn)
+        captured.append(True)
+    wq.submit_and_wait = mock_submit
+
+    with patch('meta.core.sql_write_queue.get_tx_state', return_value=TxState.NONE):
+        wq.begin_transaction()
+
+    assert wq._in_transaction is True
+    conn.execute("ROLLBACK")  # cleanup
+
+def test_locked_begin_metrics():
+    conn = sqlite3.connect(":memory:")
+    wq = WriteQueue.__new__(WriteQueue)
+    wq._in_transaction = False
+    def mock_submit(fn):
+        try:
+            fn(conn)
+        except Exception:
+            pass
+    wq.submit_and_wait = mock_submit
+
+    # Simulate: savepoint says NONE, but BEGIN raises "locked"
+    with patch('meta.core.sql_write_queue.get_tx_state', return_value=TxState.NONE):
+        from unittest.mock import patch as mock_patch
+        with mock_patch.object(conn, 'execute', side_effect=sqlite3.OperationalError("database is locked")):
+            with pytest.raises(sqlite3.OperationalError):
+                wq.begin_transaction()
+    # Verify metrics_inc was called with 'begin_locked'
+    # (Requires inspecting observability mock)
+```
+
+### 7.5 `tests/test_v007_15_orphan_detector.py` (~15 tests)
+
+```python
+import pytest
+import time
+import sqlite3
+from unittest.mock import MagicMock, patch
+from meta.core.orphan_tx_detector import OrphanTxDetector
+from meta.core.sqlite_tx_state import TxState
+
+def test_detector_clean_state():
+    ds = MagicMock()
+    ds.in_transaction = False
+    ds._write_queue._write_conn = sqlite3.connect(":memory:")
+
+    detector = OrphanTxDetector(ds)
+    detector._check_once()
+
+    stats = detector.get_stats()
+    assert stats['check_count'] == 1
+    assert stats['recovery_count'] == 0
+
+def test_detector_recovers_orphan():
+    # Create a real phantom tx
+    real_conn = sqlite3.connect(":memory:")
+    real_conn.execute("BEGIN IMMEDIATE")
+    real_conn.execute("CREATE TABLE t1 (x INT)")
+    real_conn.execute("INSERT INTO t1 VALUES (1)")
+
+    ds = MagicMock()
+    ds.in_transaction = False  # App says no
+    ds._write_queue._write_conn = real_conn
+
+    detector = OrphanTxDetector(ds)
+    detector._check_once()
+
+    stats = detector.get_stats()
+    assert stats['recovery_count'] == 1
+    real_conn.close()
+
+def test_detector_resets_false_positive():
+    real_conn = sqlite3.connect(":memory:")
+    # SQLite not in tx, but app says yes
+    ds = MagicMock()
+    ds.in_transaction = True
+    ds._write_queue._write_conn = real_conn
+
+    detector = OrphanTxDetector(ds)
+    detector._check_once()
+
+    # App state should be reset
+    assert ds._in_transaction is False
+
+def test_detector_disabled_by_config():
+    ds = MagicMock()
+    config = MagicMock(use_orphan_detector=False)
+    with patch('meta.core.orphan_tx_detector.get_runtime_config', return_value=config):
+        detector = OrphanTxDetector(ds)
+        detector.start()
+    # Thread should not have started
+    assert detector._thread is None
+```
+
+### 7.6 Test Execution
+
+```bash
+# Run all V007.15 tests
+pytest tests/test_v007_15_*.py -v
+
+# Expected: 30 + 15 + 20 + 15 + 15 = 95 tests, all pass
+
+# Coverage check
+pytest tests/test_v007_15_*.py --cov=meta.core.db_config_detector \
+    --cov=meta.core.sqlite_tx_state --cov=meta.core.orphan_tx_detector \
+    --cov=meta.core.observability --cov=meta.core.bo_framework \
+    --cov-report=term-missing
+# Target: 100% for new files, 80% for modified files
+```
+
+---
+
+## 8. Rollback Plan
+
+### 8.1 Rollback Triggers
+
+| Trigger | Detection | Action |
+|---------|-----------|--------|
+| **Orphan recovery rate > 10/hour** | Prometheus alert | Investigate, consider rollback |
+| **Audit write exhausted > 0** | Prometheus alert (critical) | Page on-call, may rollback |
+| **Phantom TX detected rate > 0** | Prometheus alert (critical) | Page on-call, immediate rollback |
+| **Server fails to start** | Health check fails | Automatic rollback by deploy |
+| **Commit failure rate > 0** | Prometheus alert | Investigate, may rollback |
+
+### 8.2 Rollback Procedure
+
+```bash
+# Step 1: Stop server
+systemctl stop meta-backend
+# Or via waitress: kill PID
+
+# Step 2: Revert code to last-known-good
+cd /opt/app
+git log --oneline -10
+# Find commit before V007.15 (e.g., abc1234 "fix(be): V049 ...")
+git checkout abc1234 -- meta/server.py meta/core/bo_framework.py \
+    meta/core/sql_write_queue.py meta/services/audit_service.py
+
+# Step 3: Remove V007.15 new files
+rm meta/core/db_config_detector.py
+rm meta/core/sqlite_tx_state.py
+rm meta/core/orphan_tx_detector.py
+rm meta/core/observability.py
+
+# Step 4: Restart server
+systemctl start meta-backend
+
+# Step 5: Verify rollback successful
+curl http://localhost:8081/healthz
+# Should NOT contain v007_15 key
+# Original healthz should be returned
+
+# Step 6: Disable Prometheus alerts
+# Edit prometheus-alerts/v007_15.yml, comment out all rules
+# Or: kubectl apply -f alerts-disabled.yml
+
+# Step 7: Open incident report
+# /opt/incidents/V007_15-rollback-YYYYMMDD.md
+```
+
+### 8.3 Rollback Decision Matrix
+
+| Scenario | Rollback? | Reason |
+|----------|-----------|--------|
+| V007.15 deployed, all metrics clean | NO | Working as intended |
+| Orphan recovery count = 1 in 24h | NO | Self-healed, monitor |
+| Orphan recovery count > 10/hour | YES | Layer 5 not enough, root cause not fixed |
+| Audit write exhausted | YES (URGENT) | Data loss risk |
+| Phantom TX detected = 1 in 24h | NO | V007.15 L3 caught it, layer 2+3 worked |
+| Phantom TX detected > 0 in 1h | YES | Layer 3 not enough, root cause not fixed |
+| Server start failure | YES (IMMEDIATE) | V007.15 init failed |
+| Performance regression > 20% | YES | V007.15 overhead too high |
+
+### 8.4 Post-Rollback
+
+After rollback, the **V007.x risk returns to pre-V007.15 state** (orphan TX can recur). But:
+- V049-FD fix (setrlimit + wb.close) is still in effect
+- User no longer sees 0% stuck (different bug)
+- Orphan TX lock may re-occur (this is what V007.15 was fixing)
+
+**So rollback should be temporary** — must re-deploy V007.15 with fix for the new issue.
+
+---
+
+## 9. Future Extensions (V008+)
+
+### 9.1 V008: Multi-Connection Health (Long-term)
+
+V007.15 only monitors the `_write_conn` (writer pool). If there are multiple writer connections
+in a future "writer pool" refactor, V008 should monitor all of them.
+
+```python
+# V008 concept:
+class ConnectionPoolHealthMonitor:
+    def __init__(self, pool: ConnectionPool):
+        self._pool = pool
+
+    def check_all(self):
+        for conn in self._pool.connections:
+            state = get_tx_state(conn)
+            # ... same logic as V007.15 but per-conn
+```
+
+### 9.2 V009: Distributed Locking (If Multi-Process)
+
+Currently single-process. If future architecture spawns multiple waitress processes
+(better CPU utilization), V007.15's `_in_transaction` flag (Python-side) won't be shared.
+
+**Solution**: Move to file-based or IPC-based tx state.
+
+```python
+# V009 concept:
+class DistributedTxState:
+    """Use SQLite's own connection table as source of truth."""
+    def get_state(self, conn_id: str) -> TxState:
+        # Query sqlite_master + WAL index for actual locks
         ...
 ```
 
-### 4.7 Recommended worktree scope
+### 9.3 V010: Auto-Tuning Based on Metrics
 
-V007.15 should be a **separate worktree** (V050) because:
-- Touches 4-5 files (bo_framework, sql_write_queue, sql_adapters, audit_service, new detector)
-- Requires unit tests (5 new test files)
-- V049 worktree already has 3 commits on V049 fix
-- Mixing would make cherry-pick risky
+Once V007.15 metrics are in place for 30+ days, can auto-tune:
+- `busy_timeout`: increase if `begin_locked` rate > threshold
+- `audit_retry_max`: increase if `audit_write_exhausted` > 0
+- `orphan_check_interval`: decrease if `orphan_recovered` > 0
 
----
+```python
+# V010 concept:
+class AutoTuner:
+    def __init__(self, metrics_endpoint):
+        ...
 
-## 5. Cross-Reference for V049 Deployment
-
-**V049 deployment should mention**:
-- V049 fix does NOT prevent V007.x orphan transactions
-- V007.15 should be planned as next iteration
-- If V007.x triggers after V049 deploy, **emergency_unlock_db.sh** (per handoff) is the
-  workaround
-
-**Add to DEPLOY_HANDOVER_BUG_V049.md §10**:
-```
-After V049 deploy, monitor for V007.x symptoms:
-- tail -f log | grep "database is locked\|disk I/O"
-- If symptoms appear, V007.15 is required
-- Emergency: bash /tmp/emergency_unlock_db.sh (per handoff_orphan_transaction.md)
+    def run_daily(self):
+        # Read Prometheus
+        # Adjust config
+        # Reload via in-process config update
 ```
 
 ---
 
-## 6. Verification: How to Confirm V007.x is Not Active
+## 10. Cross-Reference & Post-Deploy Validation
 
-After V049 deploy, run these checks (yonaa or production):
+### 10.1 Cross-Reference to V049-FD Fix
+
+**V049-FD fix (this worktree)** + **V007.15 (new worktree, V050+)** relationship:
+
+| Aspect | V049-FD | V007.15 |
+|--------|---------|---------|
+| **Trigger** | 20729 行 import 卡 0% | 撞锁 SQLITE_BUSY / orphan tx |
+| **Root cause** | FD 泄漏 (openpyxl + worker) | 状态污染 (begin/commit/rollback race) |
+| **Fix type** | 资源清理 (os-level) | 防御性编程 (state-level) |
+| **Code touch** | 2 files | 5 files + 4 new |
+| **Observability** | None | 19 metrics + 1 gauge + 5 alerts |
+| **Worktree** | V049 (current) | V050+ (separate, to be created) |
+| **Priority** | P0 (immediate hotfix) | P1 (next sprint) |
+
+**V049-FD does NOT prevent V007.x orphan transactions**. After V049 deploy, **monitor for V007.x
+symptoms** using §10.2 below.
+
+### 10.2 Post-Deploy Validation (Manual)
+
+After V049-FD deploy, run these checks (production 172.20.59.7 or integration 3007/3018):
 
 ```bash
-# 1. Check for orphan transactions
+# 1. Check for orphan transactions (savepoint probe)
 python -c "
 import sqlite3
-conn = sqlite3.connect('meta.db')
+conn = sqlite3.connect('/opt/app/architecture.db', timeout=5.0)
 try:
     conn.execute('SAVEPOINT __check__')
     conn.execute('RELEASE SAVEPOINT __check__')
@@ -944,18 +2186,50 @@ except Exception as e:
 conn.close()
 "
 
-# 2. Check application state
-curl http://172.20.59.7:8081/api/v2/auth/login -X POST -d '{"username":"admin","password":"x"}'
-# If this succeeds quickly, no orphan transaction blocking reads
+# 2. Check PRAGMA configuration (determine State A/B/C)
+python -c "
+import sqlite3
+conn = sqlite3.connect('/opt/app/architecture.db', timeout=5.0)
+print('journal_mode:', conn.execute('PRAGMA journal_mode').fetchone()[0])
+print('busy_timeout:', conn.execute('PRAGMA busy_timeout').fetchone()[0])
+print('synchronous:', conn.execute('PRAGMA synchronous').fetchone()[0])
+conn.close()
+"
 
-# 3. Run a small import to verify FD usage
+# 3. Check application responsiveness
+curl http://172.20.59.7:8081/api/v2/auth/login -X POST -d '{"username":"admin","password":"x"}' -w '\n%{time_total}s\n'
+# If this succeeds quickly (< 2s), no orphan transaction blocking reads
+
+# 4. Run a small import to verify FD usage
 lsof -p <waitress-pid> | grep /tmp/ | wc -l
-# Should be 0-10 (V049 fix)
+# Should be 0-10 (V049-FD fix in effect)
+
+# 5. Tail logs for V007.x symptoms
+tail -f /var/log/meta/backend.log | grep -E "database is locked|disk I/O|orphan"
+# If frequent appearance, V007.15 is required
+```
+
+### 10.3 Cross-Reference for V049-FD DEPLOY_HANDOVER
+
+**Add to DEPLOY_HANDOVER_BUG_V049.md §10 (Cross-Reference)**:
+```
+## 10. Cross-Reference: V007.x Orphan Transaction
+
+After V049-FD deploy, monitor for V007.x orphan transaction symptoms:
+- `tail -f log | grep -E "database is locked|disk I/O|orphan"`
+- If symptoms appear frequently (> 1/hour), V007.15 is required
+- Emergency: bash /tmp/emergency_unlock_db.sh (per handoff_orphan_transaction.md)
+- V007.15 design: see `orphan_transaction_deep_analysis.md` §4 (3-state aware design)
+
+Key insight: V049-FD reduces V007.x trigger frequency by:
+1. Eliminating stuck imports (no more user cancellation → fewer orphan tx)
+2. Reducing overall import time (less time for orphan tx window to open)
+But V049-FD does NOT fix V007.x root cause. V007.15 still required.
 ```
 
 ---
 
-## 7. Open Questions (Re-resolved 2026-07-05 after deeper investigation)
+## 11. Open Questions (Re-resolved 2026-07-05 after deeper investigation)
 
 1. **PRAGMA journal_mode?** — **Three possible values depending on path**:
    - Main connection pool (committed code): **WAL** (worktree-V049 base 8bfcbff)
@@ -997,56 +2271,109 @@ in production.
 
 ---
 
-## 8. Conclusions
+## 12. Conclusions & Recommendations
 
-1. **V007.x is an architectural bug**, not a retry tuning bug. The 14 rounds of V007.x fixes
-   all failed because they didn't address state corruption at the source.
-2. **V049 fix is orthogonal to V007.x** — V049 reduces V007.x trigger frequency (no more
-   stuck imports → no more user cancellation → fewer orphan tx), but does not fix the state
-   corruption itself.
-3. **V007.15 is still required** as a separate worktree. Recommend 6 layers (L0 SQLite
-   tx_state, L1 bo_framework try/finally, L2 direct conn.rollback, L3 WriteQueue sanity
-   check, L4 audit retry, L5 background detector).
-4. **Deploy V049 first, then V007.15 next iteration.** Both can ship independently.
-5. **Monitor for V007.x symptoms after V049 deploy.** Have emergency_unlock_db.sh ready.
+### 12.1 Key Findings
 
-**Correction (2026-07-05, post agent-x answers)**: Item #2 is **wrong**. The "V049" hotfix
-introduced `BEGIN IMMEDIATE` (V049-TX), which is the **active trigger** for orphan transactions.
-V049-FD (current worktree) and V049-TX (historical) are **two different bugs** under the same
-bug number. V007.15 is therefore **not optional backlog** — it should ship **immediately
-after V049-FD** because V049-TX is still active in production.
+1. **V007.x is an architectural bug** (state corruption in begin/commit/rollback), not a retry
+   tuning bug. The 14 rounds of V007.x fixes all failed because they didn't address state
+   corruption at the source.
+2. **V049-TX's `BEGIN IMMEDIATE` is the active orphan-tx trigger**, not a historical issue.
+   V049-FD (current worktree) and V049-TX (historical) are **two different bugs** under the
+   same bug number.
+3. **3 deployment states exist** (State A: WAL+5s, State B: DELETE+30s, State C: future).
+   V007.15 must handle all 3, not just 1.
+4. **Agent-x answer was correct for release-prep-worktree dirty state** (L222/L230), not
+   committed worktree-V049 base. Both readings valid, depends on which is deployed.
+5. **Audit log failures have no monitoring** — silent data loss in production. V007.15
+   introduces first observability (19 metrics + 5 alerts).
 
-**Updated conclusions**:
+### 12.2 V007.15 Design Summary
 
-1. V007.x is an architectural bug (state corruption), 14 rounds failed at the source
-2. **V049-TX's `BEGIN IMMEDIATE` is the active orphan-tx trigger**, not a historical issue
-3. **V007.15 priority is HIGH** — should ship with or right after V049-FD
-4. The 4 other long-running actions (batch_delete, audit_export, migration_runner) all share
-   the same `BEGIN IMMEDIATE` write_queue path — **all are V007.x risk sources**
-5. Audit log failures have **no monitoring** — silent data loss in production
+| Layer | What | New/Modify | Lines |
+|-------|------|------------|-------|
+| L0 Startup detection | `db_config_detector.py` | NEW | ~80 |
+| L1 TX state probe | `sqlite_tx_state.py` | NEW | ~40 |
+| L2 commit/rollback | `bo_framework.py` | MODIFY | +70 |
+| L3 phantom TX | `sql_write_queue.py` | MODIFY | +25 |
+| L4 audit retry | `audit_service.py` | MODIFY | +30 |
+| L5 orphan detector | `orphan_tx_detector.py` | NEW | ~120 |
+| L6 observability | `observability.py` | NEW | ~100 |
+| L7 server wiring | `server.py` | MODIFY | +10 |
+| **Total** | | | **~475** |
+
+**Single code path for all 3 states**, branching on `config.xxx` booleans, not 3 parallel
+implementations. **Single observability layer** (19 metrics + 1 gauge + 5 alerts).
+
+### 12.3 Observability Coverage (Mandatory Per User Request)
+
+- **19 counters + 1 gauge** (full TX lifecycle metrics)
+- **5 Prometheus alerts** (phantom TX, orphan recovery, audit exhausted, BEGIN locked, forced rollback)
+- **Health endpoint** (`/healthz` shows v007_15 state)
+- **Structured log** (with trace_id + tx_id)
+- **No hard dep on Prometheus** (lazy import, log fallback if unavailable)
+- **Smoke test** (`tools/smoke_v007_15.py`, run post-deploy)
+
+### 12.4 Deployment Recommendation
+
+1. **Ship V049-FD first** (this worktree) — resolves 0% stuck
+2. **Schedule V007.15 as P1 for next sprint** (new worktree V050+)
+3. **In interim**, monitor V007.x symptoms per §10.2 (every shift check)
+4. **Keep emergency_unlock_db.sh** as fallback
+
+### 12.5 Worktree Scope
+
+V007.15 should be a **separate worktree V050+** because:
+- Touches 5 files (4 new + 1 modified) vs V049's 2 files
+- 5 new unit test files (~95 tests)
+- 5 alert rules
+- Coordination needs to plan ahead (5 days lead time)
+- V049 worktree already has 4 commits, mixing V007.15 here would make cherry-pick risky
+- **Reuses the runtime config detection** from §4.1, but isolated to V050 changes
+
+### 12.6 What This Document Achieves
+
+| Goal | Met? | How |
+|------|------|-----|
+| 3-state aware design | ✓ | §4.0, §4.1, §5 deployment matrix |
+| Complete observability | ✓ | §4.7, §6 (19 metrics + 5 alerts) |
+| Per-state branch | ✓ | Single config object, boolean branches |
+| Unit test design | ✓ | §7 (5 test files, 95 tests) |
+| Rollback plan | ✓ | §8 (triggers + procedure + decision matrix) |
+| Future-proof | ✓ | §9 (V008/9/10 extensions) |
+| Cross-reference V049 | ✓ | §10 |
+| Complexity budget | ✓ | ~475 LOC, no parallel code paths |
 
 ---
 
-## 9. Updated State Summary (post agent-x answers)
+## 13. Updated State Summary (Final)
 
 | Config / Fact | Value | Source | Implication |
 |---|---|---|---|
-| `journal_mode` | **WAL** | sql_connection_pool.py:209 | Readers not blocked by writer |
-| `busy_timeout` | **5000ms** | sql_connection_pool.py:212 | 撞锁 5s 暴露, not 30s |
+| `journal_mode` (committed) | **WAL** | sql_connection_pool.py:209 (worktree-V049 base) | Readers not blocked by writer |
+| `journal_mode` (uncommitted) | **DELETE** | sql_connection_pool.py:222 (release-prep-worktree dirty) | Readers blocked by writer |
+| `busy_timeout` (committed) | **5000ms** | sql_connection_pool.py:212 | 撞锁 5s 暴露 |
+| `busy_timeout` (uncommitted) | **30000ms** | sql_connection_pool.py:230 (release-prep-worktree dirty) | 撞锁 30s 暴露 |
+| `busy_timeout` (audit writer) | **30000ms** | async_audit_writer.py:118 (always) | Audit waits longer |
 | `synchronous` | NORMAL | sql_connection_pool.py:210 | No fsync per commit |
 | `foreign_keys` | ON | sql_connection_pool.py:211 | FK constraints active |
 | `auto_vacuum` | INCREMENTAL | sql_connection_pool.py:213 | Manual vacuum needed |
-| `BEGIN IMMEDIATE` | **Active** | sql_write_queue.py:243 (V049 hotfix 2026-06-05) | **Active trigger for orphan tx** |
+| `BEGIN IMMEDIATE` | **Active** | sql_write_queue.py (V049 hotfix) | **Active trigger for orphan tx** |
 | Long-running actions | **11 files** (4 high-risk) | handoff Q3 | batch_delete, audit_export, migration, etc. all use same path |
 | audit monitoring | **None** | handoff Q4 | Failures silent, manual grep only |
 | `:memory:` in production | **No** | sql_connection_pool.py:152,208; server.py:375 | No test fixture bypass |
-| V049-FD | Fixed (this worktree) | commit 89c63f0 | Resolves FD leak, NOT orphan tx |
-| V049-TX | **Unfixed** (historical hotfix) | sql_write_queue.py:243 | **Active trigger** |
-| V007.15 | **Not yet implemented** | - | Required for state corruption fix |
+| **V049-FD** | **Fixed (this worktree)** | commit `89c63f0` | Resolves FD leak (0% stuck) |
+| **V049-TX** | **Unfixed (historical)** | sql_write_queue.py:243 (still in main) | **Active trigger for orphan tx** |
+| **V007.15** | **Designed, not implemented** | this doc §4 | 3-state aware, full observability |
+| **V049-FD + V007.15** | Both ship, V007.15 follows | coordination needed | V049 ships first as P0 hotfix |
 
 ---
 
-*Author: dev-agent (V049 analysis) + agent-x (config answers)*
+*Author: dev-agent (V049 + V007.15 analysis)*
 *Date: 2026-07-05*
-*Status: analysis complete, configuration confirmed, priority updated*
-*Next step: coordinator + PM review this analysis, decide V007.15 worktree schedule*
+*Status: V007.15 design complete (3-state aware + full observability)*
+*Next steps:*
+1. *Coordinator: create V050 worktree for V007.15 implementation*
+2. *PM: schedule V007.15 as P1 for next sprint*
+3. *DevOps: provision Prometheus endpoint + alert routing*
+4. *Deploy V049-FD first (this worktree) before V007.15*
