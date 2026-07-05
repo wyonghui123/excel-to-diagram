@@ -158,7 +158,56 @@ except:
 
 This is the **root mismatch** between Python's bookkeeping and SQLite's actual connection state.
 
-### 1.8 Summary: SQLite Reality
+### 1.8 Actual Production Configuration (Updated 2026-07-05)
+
+**Correction**: My initial analysis assumed production was in DELETE mode with busy_timeout=30s
+(per handoff_orphan_transaction.md V007.11/V007.13). **Verification against current code
+(`meta/core/sql_connection_pool.py:209-212`) shows**:
+
+```python
+conn.execute("PRAGMA journal_mode=WAL")       # L209 - WAL active
+conn.execute("PRAGMA synchronous=NORMAL")      # L210
+conn.execute("PRAGMA foreign_keys = ON")        # L211
+conn.execute("PRAGMA busy_timeout = 5000")     # L212 - 5 seconds (not 30)
+```
+
+V007.11 and V007.13 were **attempted but reverted** (per handoff §14-round history: "V007.11
+busy_timeout=30000 救不了", "V007.13 journal_mode=DELETE 触发新问题"). The handoff's "5 个问题
+答案" section describes the **aspirational post-V007.15 target state**, not current production.
+
+**Actual current production (172.20.59.7) state**:
+
+| Config | Actual value | Implication |
+|---|---|---|
+| `journal_mode` | **WAL** | Readers do NOT block on write transaction (per WAL §1) |
+| `busy_timeout` | **5000ms (5s)** | 撞锁 5s 后报 SQLITE_BUSY, faster exposure of orphan tx |
+| `synchronous` | NORMAL | No fsync per commit, faster but power-loss risk |
+| `foreign_keys` | ON | FK constraints enforced |
+| `auto_vacuum` | INCREMENTAL | Manual `PRAGMA incremental_vacuum` needed |
+| `BEGIN IMMEDIATE` | **Active** (V049 hotfix) | This is the **new** trigger factor |
+
+**Re-calibration**: The "audit 撞锁" path is **not** the WAL-vs-DELETE blocking I initially
+described. In WAL mode:
+
+- Writer holds EXCLUSIVE lock from BEGIN IMMEDIATE until COMMIT/ROLLBACK
+- **Readers can proceed** (WAL feature: writers don't block readers)
+- BUT: **readers see historical snapshot**, not the in-progress transaction
+- AND: a **second writer** (e.g., concurrent import_cascade) would block on the EXCLUSIVE lock
+- 5s busy_timeout means concurrent writer errors out after 5s
+
+So the actual "audit 撞锁" is more likely:
+- An **audit_service.log call concurrent with the orphan transaction's write** — but
+  audit_service.log is itself a write, not a read
+- More likely: **other connection in the reader pool tried to do a SELECT** during the
+  orphan tx, but **wal-index** is locked or the read-mark prevents the read
+- Or: a concurrent long-running action (batch_delete, migration) **trying to BEGIN IMMEDIATE**
+  blocks on the orphan tx's EXCLUSIVE lock, 5s busy_timeout, then SQLITE_BUSY
+
+**The lock holder**: The orphan transaction's connection is in the write_queue. Reader pool
+connections are different. So reader-pool SELECTs should work in WAL mode. The "audit 撞锁"
+is likely a **second writer** (not reader) hitting the orphan writer's lock.
+
+### 1.9 Summary: SQLite Reality
 
 1. **BEGIN IMMEDIATE holds EXCLUSIVE lock until COMMIT/ROLLBACK**, no exception.
 2. **COMMIT can fail with SQLITE_BUSY** (e.g., if reader holds a lock), and **transaction remains active**.
@@ -608,6 +657,32 @@ V049's code paths are:
 
 V049 is **isolated from the transaction machinery**. So V049 cannot directly cause V007.x.
 
+**Correction (2026-07-05)**: This §3.4 analysis is **incomplete**. The "V049" bug is actually
+**two separate issues** being conflated:
+
+1. **V049-FD**: FD leak in openpyxl read_only mode → "Too many open files" → import hangs
+   at 0% (current worktree-V049 work, fixes `waitress_server.py` setrlimit + `import_export_service.py`
+   wb.close)
+2. **V049-TX**: A **previous** "V049 hotfix" that introduced `BEGIN IMMEDIATE` in
+   `sql_write_queue.py:243` (date 2026-06-05 per code comment) — this is the **active trigger
+   factor for orphan transactions**
+
+`BEGIN IMMEDIATE` is a **separate change** from the FD fix, but they share the V049 bug
+number because both relate to the V049 import session. **My current worktree-V049 fixes the
+FD issue only, not the BEGIN IMMEDIATE issue.**
+
+**The orphan transaction is triggered by V049-TX's BEGIN IMMEDIATE**, not by V049-FD. V049-FD
+fix **does not address** V007.x. This is a critical clarification:
+
+- V049-FD (this worktree): fixes import hang due to FD leak
+- V049-TX (NOT this worktree): introduces BEGIN IMMEDIATE, which is the orphan-tx trigger
+- V007.15 (future worktree): should address the BEGIN IMMEDIATE + state corruption combo
+
+**Updated V007.15 priority**: Should ship **with or immediately after V049-FD**, because
+**V049-TX is the active trigger** for orphan transactions in production. Long-running actions
+identified by agent x (batch_delete, audit_export, migration_runner) **all** go through the
+same write_queue with BEGIN IMMEDIATE — each is a potential orphan-tx source.
+
 ---
 
 ## 4. Refined V007.15 Design (Beyond handoff's 3-layer defense)
@@ -849,17 +924,34 @@ lsof -p <waitress-pid> | grep /tmp/ | wc -l
 
 ---
 
-## 7. Open Questions
+## 7. Open Questions (Resolved 2026-07-05 by agent x)
 
-1. **What is current `PRAGMA journal_mode` on production 172.20.59.7?** (handoff V007.13 set
-   DELETE; not sure if still active)
-2. **What is current `busy_timeout`?** (handoff says 30s, V007.11; verify)
-3. **How many long-running actions are there beyond import_cascade?** (e.g., export, cascade
-   delete) — each could be a V007.x trigger
-4. **Is there monitoring on `audit_service.log` failures?** (orphaned audit writes would be silent
-   if L4 not implemented)
-5. **Does production use `:memory:` databases for any test paths?** (already disallowed by
-   sql_adapters L664-668, but verify no test fixture bypasses)
+1. **PRAGMA journal_mode on production 172.20.59.7?** — **WAL** (per
+   `meta/core/sql_connection_pool.py:209`; V007.13 DELETE was reverted)
+2. **busy_timeout actual value?** — **5000ms** (per
+   `meta/core/sql_connection_pool.py:212`; V007.11 30s was reverted)
+3. **Long-running actions beyond import_cascade?** — **11 files** identified (4 high-risk:
+   `async_import_service`, `batch_delete`, `audit_export`, `migration_runner`); see
+   `handoff_orphan_transaction.md` Q3
+4. **audit_service.log monitoring?** — **None** (handoff Q4); failures are silent unless
+   grepped from log
+5. **:memory: in production?** — **No** (per `sql_connection_pool.py:152,208` explicit check
+   + `server.py:375` fixed `db_path`)
+
+**Critical implication of #1 + #2 (now resolved)**:
+
+- The "撞锁 30s" the user described in V007.x history is **stale** — current production
+  busy_timeout is 5s, so users actually see "撞锁 5s" before SQLITE_BUSY surfaces
+- WAL mode means **readers are NOT blocked by orphan write** (per WAL §1) — this changes the
+  root-cause analysis significantly
+- The 5s busy_timeout means orphan transactions are **exposed quickly** (5s after they start
+  blocking other writers)
+- V049's `BEGIN IMMEDIATE` change is **the active trigger factor** — the orphan tx is
+  introduced by V049's hotfix, not by historical code
+
+**This changes the V007.15 priority**: it is now **directly related to V049**, not an
+independent legacy issue. **V007.15 should ship with or right after V049**, not as a separate
+"long-term backlog" item.
 
 ---
 
@@ -876,9 +968,43 @@ lsof -p <waitress-pid> | grep /tmp/ | wc -l
 4. **Deploy V049 first, then V007.15 next iteration.** Both can ship independently.
 5. **Monitor for V007.x symptoms after V049 deploy.** Have emergency_unlock_db.sh ready.
 
+**Correction (2026-07-05, post agent-x answers)**: Item #2 is **wrong**. The "V049" hotfix
+introduced `BEGIN IMMEDIATE` (V049-TX), which is the **active trigger** for orphan transactions.
+V049-FD (current worktree) and V049-TX (historical) are **two different bugs** under the same
+bug number. V007.15 is therefore **not optional backlog** — it should ship **immediately
+after V049-FD** because V049-TX is still active in production.
+
+**Updated conclusions**:
+
+1. V007.x is an architectural bug (state corruption), 14 rounds failed at the source
+2. **V049-TX's `BEGIN IMMEDIATE` is the active orphan-tx trigger**, not a historical issue
+3. **V007.15 priority is HIGH** — should ship with or right after V049-FD
+4. The 4 other long-running actions (batch_delete, audit_export, migration_runner) all share
+   the same `BEGIN IMMEDIATE` write_queue path — **all are V007.x risk sources**
+5. Audit log failures have **no monitoring** — silent data loss in production
+
 ---
 
-*Author: dev-agent (V049/V050 planning)*
+## 9. Updated State Summary (post agent-x answers)
+
+| Config / Fact | Value | Source | Implication |
+|---|---|---|---|
+| `journal_mode` | **WAL** | sql_connection_pool.py:209 | Readers not blocked by writer |
+| `busy_timeout` | **5000ms** | sql_connection_pool.py:212 | 撞锁 5s 暴露, not 30s |
+| `synchronous` | NORMAL | sql_connection_pool.py:210 | No fsync per commit |
+| `foreign_keys` | ON | sql_connection_pool.py:211 | FK constraints active |
+| `auto_vacuum` | INCREMENTAL | sql_connection_pool.py:213 | Manual vacuum needed |
+| `BEGIN IMMEDIATE` | **Active** | sql_write_queue.py:243 (V049 hotfix 2026-06-05) | **Active trigger for orphan tx** |
+| Long-running actions | **11 files** (4 high-risk) | handoff Q3 | batch_delete, audit_export, migration, etc. all use same path |
+| audit monitoring | **None** | handoff Q4 | Failures silent, manual grep only |
+| `:memory:` in production | **No** | sql_connection_pool.py:152,208; server.py:375 | No test fixture bypass |
+| V049-FD | Fixed (this worktree) | commit 89c63f0 | Resolves FD leak, NOT orphan tx |
+| V049-TX | **Unfixed** (historical hotfix) | sql_write_queue.py:243 | **Active trigger** |
+| V007.15 | **Not yet implemented** | - | Required for state corruption fix |
+
+---
+
+*Author: dev-agent (V049 analysis) + agent-x (config answers)*
 *Date: 2026-07-05*
-*Status: analysis complete, no code changes in this doc*
-*Next step: coordinator + PM review this analysis, decide if V007.15 worktree is in scope*
+*Status: analysis complete, configuration confirmed, priority updated*
+*Next step: coordinator + PM review this analysis, decide V007.15 worktree schedule*
