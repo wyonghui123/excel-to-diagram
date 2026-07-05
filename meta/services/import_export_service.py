@@ -1,4 +1,4 @@
-﻿from dataclasses import dataclass, field
+from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 import os
@@ -5633,8 +5633,16 @@ class ImportExportService:
                 "columns": headers,
                 "preview_rows": data_rows
             })
-        
-        wb.close()
+
+        # [FIX V049 2026-07-05] 强制 close + gc, 避免 openpyxl 临时文件泄漏
+        #   背景: read_only 模式每个 wb 持有 3-5 个临时文件 FD
+        #   Linux ulimit -n 默认 1024, 累积到导入主流程 + _import_sheet 二次 load + 并发 → 超限
+        try:
+            wb.close()
+        except Exception:
+            pass
+        import gc
+        gc.collect()
 
         import_order = self._sort_by_hierarchy([s["object_type"] for s in sheets])
 
