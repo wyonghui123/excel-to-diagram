@@ -33,6 +33,7 @@ modified_files:
   - tools/lib/common.sh
   - tools/rebuild_zip.py
   - tools/rebuild_bundle.ps1
+  - tools/build_v007_15_zip.py  # [V007.15] LF normalize + Python direct zip (workaround sandbox fake-success)
   - deploy_bundle/deploy.sh
   - deploy_bundle/status.sh
   - deploy_bundle/restart.sh
