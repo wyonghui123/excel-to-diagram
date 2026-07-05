@@ -35,33 +35,12 @@ STAGING.mkdir(parents=True)
 # Copy frontend_dist_files
 if FRONTEND_DIST.exists():
     shutil.copytree(FRONTEND_DIST, STAGING / 'frontend_dist_files')
-    # [V007.15 部署修复] 强制文本文件 LF
-    for f in (STAGING / 'frontend_dist_files').rglob('*'):
-        if f.is_file():
-            try:
-                data = f.read_bytes()
-                normalized = normalize_to_lf(data, f.name)
-                if data != normalized:
-                    f.write_bytes(normalized)
-            except:
-                pass
-    print(f"[OK] Copied frontend_dist_files (LF normalized)")
+    print(f"[OK] Copied frontend_dist_files")
 
 # Copy meta (with exclusions)
 EXCLUDE_SUFFIXES = {'.db', '.db-wal', '.db-shm', '.bak', '.backup', '.pyc', '.lock'}
 EXCLUDE_DIRS = {'backups', 'logs', 'screenshots', 'db_monitor_logs', '__pycache__', 'meta'}
 EXCLUDE_FILES = {'.env'}
-
-def normalize_to_lf(data: bytes, name: str) -> bytes:
-    """[V007.15 部署修复] Windows CRLF → Unix LF (yonaa bash 需要)
-    沙箱 + git autocrlf 把 .sh 转 CRLF, 但 yonaa bash 报 /bin/bash^M 错误.
-    修法: copy 时强制转 LF, 但保留 .pyc 等二进制.
-    """
-    # 二进制文件不转
-    if name.endswith(('.pyc', '.png', '.jpg', '.jpeg', '.gif', '.ico', '.webm', '.webp', '.woff', '.woff2', '.ttf', '.eot', '.mp4', '.mp3', '.wav', '.vtt', '.zip', '.gz', '.tar', '.pdf')):
-        return data
-    # 文本文件: CRLF → LF
-    return data.replace(b'\r\n', b'\n').replace(b'\r', b'\n')
 
 def should_exclude(path: Path) -> bool:
     name = path.name.lower()
@@ -94,10 +73,7 @@ for src_file in META.rglob('*'):
         dest.mkdir(exist_ok=True)
     else:
         dest.parent.mkdir(exist_ok=True)
-        # [V007.15 部署修复] 强制 CRLF → LF (yonaa Linux 需要)
-        data = src_file.read_bytes()
-        normalized = normalize_to_lf(data, src_file.name)
-        dest.write_bytes(normalized)
+        shutil.copy(src_file, dest)
         file_count += 1
 
 print(f"[OK] Copied meta: {file_count} files (excluded {excluded_count})")

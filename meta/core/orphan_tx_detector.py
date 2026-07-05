@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 [V007.15 L5] 后台定期检查 + 自动清理 orphan transaction
 
