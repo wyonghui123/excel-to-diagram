@@ -168,6 +168,92 @@ Lessons:
 
 ---
 
+## 9. Post-Deploy Verification (for deploy agent)
+
+> **CRITICAL**: 2 patches alone are enough. But production may have hard limit locked.
+> **deploy agent must run these 3 steps after deploy to confirm**.
+
+### Step 1: Confirm patch 1 (setrlimit) actually took effect
+
+```bash
+# SSH to production
+ssh user@172.20.59.7
+
+# Find waitress process
+ps aux | grep waitress
+
+# Check FD limit (replace <pid> with actual)
+cat /proc/<pid>/limits | grep "open files"
+```
+
+**Expected output** (one of these):
+- `Max open files  65536  65536` (soft 65536, hard 65536, best case)
+- `Max open files  65536  4096` (soft 65536, hard 4096, patch 1 effective)
+
+**Bad output** (patch 1 NOT effective):
+- `Max open files  1024  4096` (setrlimit failed, hard limit locked)
+
+### Step 2: If patch 1 failed (hard limit locked)
+
+Production hard limit may be locked by:
+- systemd unit (LimitNOFILE=)
+- docker container (--ulimit nofile=)
+- /etc/security/limits.conf
+
+**Fix at infra level** (depending on production startup method):
+
+**Option A: systemd unit**
+```ini
+# /etc/systemd/system/meta-backend.service
+[Service]
+LimitNOFILE=65536
+```
+Then `systemctl daemon-reload && systemctl restart meta-backend`
+
+**Option B: docker run**
+```bash
+docker run --ulimit nofile=65536:65536 ...
+```
+
+**Option C: limits.conf**
+```
+# /etc/security/limits.conf
+meta_user  hard  nofile  65536
+meta_user  soft  nofile  65536
+```
+
+**Option D: launch script (before waitress)**
+```bash
+ulimit -n 65536
+exec python waitress_server.py
+```
+
+### Step 3: Run user scenario to confirm fix
+
+```bash
+# Use playwright or curl to reproduce user's scenario
+# 1. Login (or use dev-login if dev env)
+# 2. POST /api/v2/bo/export-import/import/async with user's Excel
+# 3. Poll /import/status/<task_id>
+# 4. Expect: completes in 18-26s (not stuck at 0%)
+```
+
+**Success criteria**:
+- Progress 0% -> 100% within 30s
+- No [Errno 24] error
+- Result has business_object/relationship/annotation rows
+
+### Step 4: Optional - verify FD usage stays low
+
+```bash
+# During a large import, watch FD
+lsof -p <pid> | grep /tmp/ | wc -l
+# Should be 0-10 (patch 2 close + gc)
+# If 100+, patch 2 not effective, need deeper investigation
+```
+
+---
+
 *Author: dev-agent (V049)*
 *Date: 2026-07-05*
 *Status: dev done, awaiting coordinator push + cherry-pick + integration deploy*
