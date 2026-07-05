@@ -160,52 +160,83 @@ This is the **root mismatch** between Python's bookkeeping and SQLite's actual c
 
 ### 1.8 Actual Production Configuration (Updated 2026-07-05)
 
-**Correction**: My initial analysis assumed production was in DELETE mode with busy_timeout=30s
-(per handoff_orphan_transaction.md V007.11/V007.13). **Verification against current code
-(`meta/core/sql_connection_pool.py:209-212`) shows**:
+**Three-state reality (NOT two-state)**:
 
-```python
-conn.execute("PRAGMA journal_mode=WAL")       # L209 - WAL active
-conn.execute("PRAGMA synchronous=NORMAL")      # L210
-conn.execute("PRAGMA foreign_keys = ON")        # L211
-conn.execute("PRAGMA busy_timeout = 5000")     # L212 - 5 seconds (not 30)
+The codebase has **THREE** different SQL connection configurations, depending on which code
+path is in use:
+
+| Path | File | journal_mode | busy_timeout | synchronous |
+|------|------|--------------|--------------|-------------|
+| **Main connection pool** (worktree-V049 base 8bfcbff) | sql_connection_pool.py:209-212 | **WAL** | **5000ms** | NORMAL |
+| **Main connection pool** (release-prep-worktree dirty changes) | sql_connection_pool.py:222, 230 | **DELETE** | **30000ms** | NORMAL |
+| **Async audit writer** (v3.18 Layer 1) | async_audit_writer.py:117-118 | **WAL** | **30000ms** | (default) |
+| **Migration scripts** (not production runtime) | recover_db.py, fix_and_migrate.py | **DELETE** | (default) | (default) |
+
+**V007.11 + V007.13 + V007.6 exist as dirty changes in release-prep-worktree** (per
+`git diff HEAD` showing 64 lines of uncommitted changes to `sql_connection_pool.py`). They
+have NOT been committed to git. They have NOT been deployed (per handoff §"V007.13 触发新问题").
+
+**My initial §1.5 (WAL not blocking readers) was correct for worktree-V049 base, but incorrect
+for what release-prep-worktree is preparing**. The actual deployment target is **in between**:
+
+- If release-prep-worktree's dirty changes are committed + deployed: **DELETE + 30s** (current
+  "intended" state)
+- If they are NOT deployed: **WAL + 5s** (worktree-V049 base state)
+- async_audit_writer is always **WAL + 30s** regardless
+
+**This 3-way split is itself a V007.x risk factor**: same code, different configs, different
+behaviors. Audit writes via async_audit_writer use WAL + 30s (long wait, but WAL allows
+readers to proceed), but main transactions use (worktree-V049 base) WAL + 5s (short wait, can
+fail fast) OR (release-prep-worktree dirty) DELETE + 30s (write blocks readers, longer wait).
+
+**Verification commands** (to confirm on any deployment):
+```bash
+# Check actual main connection config
+python -c "
+import sqlite3
+conn = sqlite3.connect('architecture.db')
+print('journal_mode:', conn.execute('PRAGMA journal_mode').fetchone()[0])
+print('busy_timeout:', conn.execute('PRAGMA busy_timeout').fetchone()[0])
+print('synchronous:', conn.execute('PRAGMA synchronous').fetchone()[0])
+"
+
+# Check audit writer thread config
+grep -n "PRAGMA" meta/services/async_audit_writer.py
+
+# Check if V007.11/V007.13 dirty changes are committed
+cd release-prep-worktree
+git diff HEAD meta/core/sql_connection_pool.py | head -80
 ```
 
-V007.11 and V007.13 were **attempted but reverted** (per handoff §14-round history: "V007.11
-busy_timeout=30000 救不了", "V007.13 journal_mode=DELETE 触发新问题"). The handoff's "5 个问题
-答案" section describes the **aspirational post-V007.15 target state**, not current production.
+### 1.9 Re-calibrated Implications
 
-**Actual current production (172.20.59.7) state**:
+**Three possible deployment states**:
 
-| Config | Actual value | Implication |
-|---|---|---|
-| `journal_mode` | **WAL** | Readers do NOT block on write transaction (per WAL §1) |
-| `busy_timeout` | **5000ms (5s)** | 撞锁 5s 后报 SQLITE_BUSY, faster exposure of orphan tx |
-| `synchronous` | NORMAL | No fsync per commit, faster but power-loss risk |
-| `foreign_keys` | ON | FK constraints enforced |
-| `auto_vacuum` | INCREMENTAL | Manual `PRAGMA incremental_vacuum` needed |
-| `BEGIN IMMEDIATE` | **Active** (V049 hotfix) | This is the **new** trigger factor |
+**State A (worktree-V049 base, uncommitted by my worktree)**:
+- Main: WAL + 5000ms
+- Audit: WAL + 30000ms
+- "撞锁" exposure: 5s on main path, 30s on audit path
+- Readers: NOT blocked (WAL)
+- Second writer: blocked, 5s timeout
+- **This is the "v015 老代码" state that handoff mentions "yonaa 仍跑 V015 老代码"**
 
-**Re-calibration**: The "audit 撞锁" path is **not** the WAL-vs-DELETE blocking I initially
-described. In WAL mode:
+**State B (release-prep-worktree dirty, not yet committed/deployed)**:
+- Main: DELETE + 30000ms
+- Audit: WAL + 30000ms (still uses different conn)
+- "撞锁" exposure: 30s
+- Readers: BLOCKED by writer (DELETE)
+- Second writer: blocked, 30s timeout
+- **This is the "intended" state for V007.11+V007.13 hotfix**
 
-- Writer holds EXCLUSIVE lock from BEGIN IMMEDIATE until COMMIT/ROLLBACK
-- **Readers can proceed** (WAL feature: writers don't block readers)
-- BUT: **readers see historical snapshot**, not the in-progress transaction
-- AND: a **second writer** (e.g., concurrent import_cascade) would block on the EXCLUSIVE lock
-- 5s busy_timeout means concurrent writer errors out after 5s
+**State C (after V007.15 ships, future state)**:
+- Likely: 6-layer defense as proposed
+- Main + audit: consistent config
+- Background detector catches orphan tx automatically
+- **This is the aspirational target state**
 
-So the actual "audit 撞锁" is more likely:
-- An **audit_service.log call concurrent with the orphan transaction's write** — but
-  audit_service.log is itself a write, not a read
-- More likely: **other connection in the reader pool tried to do a SELECT** during the
-  orphan tx, but **wal-index** is locked or the read-mark prevents the read
-- Or: a concurrent long-running action (batch_delete, migration) **trying to BEGIN IMMEDIATE**
-  blocks on the orphan tx's EXCLUSIVE lock, 5s busy_timeout, then SQLITE_BUSY
-
-**The lock holder**: The orphan transaction's connection is in the write_queue. Reader pool
-connections are different. So reader-pool SELECTs should work in WAL mode. The "audit 撞锁"
-is likely a **second writer** (not reader) hitting the orphan writer's lock.
+**For analysis purposes**, we need to know which state production 172.20.59.7 is in. The
+handoff's "5 个问题答案" implies State B (DELETE + 30s, with code L222/L230 cited), but the
+V049-TX worktree base is State A. The user needs to clarify which is deployed.
 
 ### 1.9 Summary: SQLite Reality
 
@@ -924,34 +955,45 @@ lsof -p <waitress-pid> | grep /tmp/ | wc -l
 
 ---
 
-## 7. Open Questions (Resolved 2026-07-05 by agent x)
+## 7. Open Questions (Re-resolved 2026-07-05 after deeper investigation)
 
-1. **PRAGMA journal_mode on production 172.20.59.7?** — **WAL** (per
-   `meta/core/sql_connection_pool.py:209`; V007.13 DELETE was reverted)
-2. **busy_timeout actual value?** — **5000ms** (per
-   `meta/core/sql_connection_pool.py:212`; V007.11 30s was reverted)
-3. **Long-running actions beyond import_cascade?** — **11 files** identified (4 high-risk:
-   `async_import_service`, `batch_delete`, `audit_export`, `migration_runner`); see
-   `handoff_orphan_transaction.md` Q3
-4. **audit_service.log monitoring?** — **None** (handoff Q4); failures are silent unless
-   grepped from log
-5. **:memory: in production?** — **No** (per `sql_connection_pool.py:152,208` explicit check
-   + `server.py:375` fixed `db_path`)
+1. **PRAGMA journal_mode?** — **Three possible values depending on path**:
+   - Main connection pool (committed code): **WAL** (worktree-V049 base 8bfcbff)
+   - Main connection pool (release-prep-worktree dirty): **DELETE** (V007.13 uncommitted)
+   - async_audit_writer: **WAL** (v3.18 Layer 1, committed)
+   - Migration scripts: **DELETE** (one-off, not production runtime)
+   - **Production 172.20.59.7 actual**: needs verification with the `python -c "PRAGMA ..."`
+     command in §1.8
+2. **busy_timeout actual value?** — **Three possible values**:
+   - Main connection pool (committed): **5000ms** (worktree-V049 base)
+   - Main connection pool (release-prep-worktree dirty): **30000ms** (V007.11 uncommitted)
+   - async_audit_writer: **30000ms** (committed, v3.18 Layer 1)
+3. **Long-running actions beyond import_cascade?** — **11 files** identified (4 high-risk);
+   see `handoff_orphan_transaction.md` Q3
+4. **audit_service.log monitoring?** — **None** (handoff Q4)
+5. **:memory: in production?** — **No** (per `sql_connection_pool.py:152,208`)
 
-**Critical implication of #1 + #2 (now resolved)**:
+**The agent-x answer "证据: 代码 L222 DELETE / L230 busy_timeout=30000" is correct for
+release-prep-worktree's DIRTY state, but those changes are NOT committed to git, NOT deployed
+to production**. This is why my §1.8 "correction" earlier was wrong — I was looking at
+worktree-V049's committed code (8bfcbff), not release-prep-worktree's working tree.
 
-- The "撞锁 30s" the user described in V007.x history is **stale** — current production
-  busy_timeout is 5s, so users actually see "撞锁 5s" before SQLITE_BUSY surfaces
-- WAL mode means **readers are NOT blocked by orphan write** (per WAL §1) — this changes the
-  root-cause analysis significantly
-- The 5s busy_timeout means orphan transactions are **exposed quickly** (5s after they start
-  blocking other writers)
-- V049's `BEGIN IMMEDIATE` change is **the active trigger factor** — the orphan tx is
-  introduced by V049's hotfix, not by historical code
+**Correct picture (3 deployment states)**:
 
-**This changes the V007.15 priority**: it is now **directly related to V049**, not an
-independent legacy issue. **V007.15 should ship with or right after V049**, not as a separate
-"long-term backlog" item.
+| State | journal_mode | busy_timeout | Status | Implication |
+|---|---|---|---|---|
+| **A** (worktree-V049 base, committed) | WAL | 5000ms | code at 8bfcbff | Readers not blocked, fast lock-exposure |
+| **B** (release-prep-worktree dirty, uncommitted) | DELETE | 30000ms | uncommitted in working tree | Readers blocked, 30s lock-exposure |
+| **C** (after V007.15 ships) | (decided by V007.15) | (decided by V007.15) | (not yet designed) | Aspirational target |
+
+**Action item for user/PM**: Run the verification command in §1.8 on production
+172.20.59.7 to confirm which state is actually deployed. Until then, all analysis
+involves "if State X then Y" conditional reasoning.
+
+**My §1.8 earlier ("WAL + 5s confirmed, not DELETE + 30s") was wrong because I read the wrong
+file**. Agent x's answer (DELETE + 30s, code L222/L230) was correct for release-prep-worktree
+but the changes are uncommitted. Both readings are valid; the question is which deployment is
+in production.
 
 ---
 
