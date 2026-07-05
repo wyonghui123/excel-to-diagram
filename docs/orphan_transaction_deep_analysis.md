@@ -2371,9 +2371,436 @@ V007.15 should be a **separate worktree V050+** because:
 
 *Author: dev-agent (V049 + V007.15 analysis)*
 *Date: 2026-07-05*
-*Status: V007.15 design complete (3-state aware + full observability)*
+*Status: V007.15 design complete (3-state aware + full observability) + §14 SAP LUW analysis (open questions for design decision)*
 *Next steps:*
 1. *Coordinator: create V050 worktree for V007.15 implementation*
 2. *PM: schedule V007.15 as P1 for next sprint*
 3. *DevOps: provision Prometheus endpoint + alert routing*
 4. *Deploy V049-FD first (this worktree) before V007.15*
+5. *User: review §14 SAP LUW analysis, answer 5 open questions, decide transaction model*
+
+---
+
+## 14. SAP Transaction Model Analysis (NEW: 2026-07-05, post user review)
+
+### 14.1 Source Documents Reviewed
+
+After user feedback, I reviewed these architectural documents:
+
+| Doc | Path | Key Content |
+|-----|------|-------------|
+| **Audit Log Best Practices** | `docs/audit-log-best-practices.md` | SAP 6mo+ retention, audit_log table schema (v1) |
+| **Spec Audit Log v2 (Action-Aware)** | `docs/specs/spec-audit-log-v2-action-aware.md` | ActionKind/ActionOutcome enums, batch 1+N, audit_interceptor design, action_dispatcher is empty shell (line 12-18 `NotImplementedError`) |
+| **Spec Audit Log Recovery** | `docs/specs/spec-audit-log-recovery.md` | Workday/Salesforce/Dynamics/SAP comparison, audit_log is single source of truth |
+| **DB Corruption Prevention Design** | `docs/db-corruption-prevention-design.md` | 3 plans: WAL TRUNCATE, Migration atomicity, BEGIN IMMEDIATE (= V049-TX hotfix) |
+| **SAP Deep Authorization Analysis** | `docs/sap-deep-authorization-analysis.md` | SAP CAP permissions (NOT transactions) |
+| **ARCHITECTURE_V2** | `docs/ARCHITECTURE_V2.md` | X-Trace-Id + X-Transaction-Id headers defined, but **no SAP LUW semantics** |
+
+### 14.2 V007.15 Design vs Actual Architecture: Gap Analysis
+
+| V007.15 Design Assumption | Actual Architecture State | Gap |
+|---------------------------|---------------------------|-----|
+| `bo_framework.commit/rollback` 配 `BEGIN IMMEDIATE` | `action_dispatcher.py` **is empty shell** (NotImplementedError), no transaction boundary exists | ❌ **Critical**: V007.15 modifies code that may not even be called |
+| audit_log 关联业务事务 via `transaction_id` | `transaction_id` is just a string column, no rollback linkage | ❌ **Weak coupling**: audit_log failure does NOT rollback business |
+| 1+N batch aggregation (BatchAuditContext) | spec-audit-log-v2 §4.7 has similar design, **but header does NOT participate in rollback** | ⚠️ **Partial alignment** |
+| ActionKind (Instance/Static) | spec-audit-log-v2 §1.1 has defined 2 kinds | ✅ **Aligned** |
+| ActionOutcome 4 状态 | spec-audit-log-v2 §1.2 has defined 4 outcomes | ✅ **Aligned** |
+| SAP LUW (Logical Unit of Work) | **Not defined in architecture docs**, only `X-Transaction-Id` header | ❌ **Missing**: no LUW concept in current codebase |
+
+### 14.3 SAP Transaction Model Concepts (Reference)
+
+From SAP S/4HANA + Workday research:
+
+| Concept | Meaning | Our Equivalent (Missing) |
+|---------|---------|--------------------------|
+| **DB LUW** | Database-level transaction (BEGIN ... COMMIT/ROLLBACK) | `sql_write_queue.begin/commit/rollback` (with state corruption issue) |
+| **SAP LUW** | Business-level transaction (1 user action = 1 SAP LUW) | **NOT DEFINED** — no concept in our code |
+| **LUW Boundary** | Where SAP LUW starts/ends: usually 1 HTTP request = 1 LUW | **Implicit** — but no explicit demarcation |
+| **Savepoint** | Sub-transaction within SAP LUW (rollback to savepoint, not entire LUW) | **Available via SQLite** but not used |
+| **Update Module** | All DB ops queued, executed in 1 DB LUW at commit | `WriteQueue` does similar (single-thread) |
+| **Bundling** | Multiple HTTP requests = 1 SAP LUW (TPM-style) | **NOT supported** |
+| **Commit/rollback hooks** | BEFORE COMMIT/ROLLBACK triggers | **NOT supported** |
+
+### 14.4 Batch Import Scenarios — Transaction Model Analysis
+
+User asked: "在批量导入的场景下再检查下这个事务逻辑". Here are 4 critical scenarios:
+
+#### Scenario 1: 20729 行导入，前 10000 行成功，第 10001 行 FK 约束失败
+
+**Current behavior** (pre-V007.15):
+- V049-TX `BEGIN IMMEDIATE` started at sheet level (line 6801 of `import_export_service.py`)
+- 10000 rows committed individually within the LUW? Or all 20729 in 1 COMMIT?
+- Line 10001 FK fail → ROLLBACK → **all 10000 prior rows LOST**?
+- Or auto-commit per row? Then partial state remains
+
+**V007.15 design**:
+- §4.3 `bo_framework.commit/rollback` 配 `BEGIN IMMEDIATE`
+- §4.5 `audit_service.log` retry — but **audit is OUTSIDE the business TX**
+- If business TX rolls back, audit_log has phantom "success" records
+
+**SAP-style ideal**:
+- 1 SAP LUW = 1 import sheet
+- All 20729 rows in 1 DB LUW
+- Failure → ROLLBACK all (clean state)
+- audit_log rows for the 10000 "successful" are also rolled back (atomicity)
+- OR: savepoint every 1000 rows (7 sub-LUWs), commit per sub-LUW (progress preserved)
+
+#### Scenario 2: Audit_log write fails in the middle of import
+
+**Current behavior**:
+- `async_audit_writer.py:118` uses **separate connection** (WAL + 30s)
+- Audit write is async, NOT in the same TX as business
+- Audit failure → business continues, **silent data loss** (per §6 handoff Q4)
+
+**V007.15 design**:
+- §4.5 retries 2-5 times → eventually fails → records `audit_write_exhausted`
+- Business TX still commits → **data and audit are desynced**
+
+**SAP-style ideal**:
+- Audit write **synchronous** in same DB LUW as business
+- If audit fails → business ROLLBACK (atomicity)
+- OR: audit in separate TX but tracked: "if audit fails, mark business for compensation"
+
+#### Scenario 3: User clicks "Cancel" mid-import (50%)
+
+**Current behavior**:
+- UI sends cancel request → server kills thread? or sets cancellation flag?
+- Thread may be in middle of BEGIN IMMEDIATE + 10000 rows
+- Killing thread = conn dropped = **SQLite auto-rollback (good)**
+- But if conn is back in pool, next request picks up **orphan TX** (this is the V007.x bug!)
+
+**V007.15 design**:
+- §4.6 OrphanTxDetector every 30-60s catches orphan
+- §4.2 bo_framework forces ROLLBACK on cancel
+- But: 30-60s window means **subsequent writes blocked for 30-60s**
+
+**SAP-style ideal**:
+- Cancel = explicit `rollback` (synchronous) within ms
+- Connection returned to pool cleanly
+- Next request: no orphan
+
+#### Scenario 4: batch_delete 1000 records, halfway through permission denied
+
+**Current behavior**:
+- `deletion_service.py` 1000 records in 1 batch
+- Permission check at start? Or per-record?
+- If per-record: 500 succeed, 501 denied → 500 committed? 1 rolled back? partial state?
+
+**V007.15 design**:
+- Same as Scenario 1 — `BEGIN IMMEDIATE` at batch level
+- Failure → ROLLBACK all
+
+**SAP-style ideal**:
+- 1 SAP LUW per batch
+- If ANY record fails → ROLLBACK all (atomicity)
+- Or: error handler with skip-list (50 ok, 500 fail, 50 ok, continue with error report)
+
+### 14.5 Missing Design Decisions (5 Open Questions)
+
+For V007.15 to be complete, these decisions must be made:
+
+| # | Question | Current state | Decision needed |
+|---|----------|---------------|-----------------|
+| **Q1** | **LUW boundary**: Is 1 HTTP request = 1 SAP LUW? Or per-action? Or per-import-sheet? | Not defined | User/architect to decide |
+| **Q2** | **Audit atomicity**: If business TX commits but audit fails, what happens? | Silent data loss (current) | Option A: rollback business, Option B: retry async, Option C: mark for compensation |
+| **Q3** | **Savepoint granularity**: In 20729-row import, savepoint per 100/1000/10000? | Not used | User to decide granularity |
+| **Q4** | **Cancel behavior**: User cancel mid-import = immediate rollback, or graceful drain? | Not defined | UX vs data integrity trade-off |
+| **Q5** | **Action nesting**: 1 business action calls 5 internal actions, all in 1 SAP LUW? Or sub-LUW each? | `action_dispatcher.py` is empty shell, no nesting model | Architectural decision required |
+
+### 14.6 Recommended V007.15 Augmentation
+
+To address SAP LUW concerns, V007.15 should add:
+
+#### L8: SAP LUW Boundary Manager (NEW)
+
+```python
+# meta/core/sap_luw_manager.py (new, ~150 lines)
+
+import contextlib
+import threading
+import logging
+from enum import Enum
+from typing import Optional
+from uuid import uuid4
+
+logger = logging.getLogger(__name__)
+
+class LuwState(Enum):
+    NONE = "none"
+    ACTIVE = "active"
+    ROLLBACK_ONLY = "rollback_only"  # Marked for rollback by exception
+
+class SapLuW:
+    """[V007.15 L8] SAP-style Logical Unit of Work manager.
+
+    Tracks 1 business-level LUW per HTTP request.
+    Wraps 1 DB LUW (BEGIN ... COMMIT/ROLLBACK).
+    Tracks nested action calls (sub-LUW via savepoint).
+    """
+
+    def __init__(self, luw_id: str, write_conn):
+        self.luw_id = luw_id
+        self.write_conn = write_conn
+        self.state = LuwState.NONE
+        self.savepoint_stack = []  # for nested actions
+        self.audit_records = []  # batched for atomic flush
+        self.rollback_only_reason: Optional[str] = None
+
+    def begin(self):
+        if self.state == LuwState.ACTIVE:
+            raise RuntimeError(f"LUW {self.luw_id} already active")
+        self.write_conn.execute("BEGIN IMMEDIATE")
+        self.state = LuwState.ACTIVE
+        logger.debug(f"LUW {self.luw_id} BEGIN")
+
+    def mark_rollback_only(self, reason: str):
+        """Mark LUW for rollback. Subsequent commits will fail with clear error."""
+        self.rollback_only_reason = reason
+        self.state = LuwState.ROLLBACK_ONLY
+        logger.warning(f"LUW {self.luw_id} marked ROLLBACK_ONLY: {reason}")
+
+    def commit(self):
+        if self.state == LuwState.ROLLBACK_ONLY:
+            # Cannot commit, must rollback
+            logger.error(f"LUW {self.luw_id} cannot commit (marked ROLLBACK_ONLY: {self.rollback_only_reason})")
+            self.rollback()
+            return False
+        if self.state != LuwState.ACTIVE:
+            raise RuntimeError(f"LUW {self.luw_id} not active")
+        # Flush audit records in same DB LUW (atomicity!)
+        self._flush_audit_records()
+        self.write_conn.execute("COMMIT")
+        self.state = LuwState.NONE
+        logger.debug(f"LUW {self.luw_id} COMMIT")
+        return True
+
+    def rollback(self):
+        if self.state == LuwState.NONE:
+            return  # Nothing to rollback
+        self.write_conn.execute("ROLLBACK")
+        # Clear audit records (not flushed = not persisted)
+        self.audit_records.clear()
+        self.state = LuwState.NONE
+        logger.debug(f"LUW {self.luw_id} ROLLBACK")
+
+    def savepoint(self, name: str = None):
+        """Nested action boundary. Returns savepoint name for rollback_to()."""
+        sp_name = name or f"sp_{len(self.savepoint_stack)}"
+        self.write_conn.execute(f"SAVEPOINT {sp_name}")
+        self.savepoint_stack.append(sp_name)
+        return sp_name
+
+    def rollback_to_savepoint(self, sp_name: str):
+        """Rollback to a savepoint, but keep LUW active. Used for sub-action failure."""
+        if sp_name not in self.savepoint_stack:
+            raise RuntimeError(f"Savepoint {sp_name} not in stack")
+        self.write_conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name}")
+        # Pop everything above this savepoint
+        idx = self.savepoint_stack.index(sp_name)
+        self.savepoint_stack = self.savepoint_stack[:idx + 1]
+
+    def release_savepoint(self, sp_name: str):
+        if sp_name not in self.savepoint_stack:
+            return
+        self.write_conn.execute(f"RELEASE SAVEPOINT {sp_name}")
+        self.savepoint_stack.remove(sp_name)
+
+    def add_audit(self, record: dict):
+        """Buffer audit record. Flushed atomically on commit."""
+        record['luw_id'] = self.luw_id
+        self.audit_records.append(record)
+
+    def _flush_audit_records(self):
+        """Insert all buffered audit records in same DB LUW."""
+        for record in self.audit_records:
+            self.write_conn.execute(
+                "INSERT INTO audit_logs (object_type, object_id, action, action_kind, outcome, transaction_id, ...) VALUES (?, ?, ?, ?, ?, ?, ...)",
+                (...)
+            )
+        # If any insert fails, raise -> caller will ROLLBACK entire LUW (atomicity)
+```
+
+#### L9: SAP-LUW-Aware Audit Hook (NEW)
+
+```python
+# meta/services/sap_luw_audit.py (new, ~80 lines)
+
+class SapLuwAuditHook:
+    """[V007.15 L9] Replaces async_audit_writer for business-critical operations.
+
+    Instead of async write, buffer in LUW and flush atomically on commit.
+    Async write retained for non-critical audit (e.g., read events).
+    """
+
+    def log(self, record: dict, critical: bool = True):
+        if not critical:
+            # Non-critical: still async (fast path)
+            return self._async_log(record)
+        # Critical: buffer in current LUW
+        from flask import g
+        luw = g.current_luw
+        if luw is None:
+            # No active LUW (rare), fall back to async
+            return self._async_log(record)
+        luw.add_audit(record)
+
+    def _async_log(self, record):
+        # Use existing async_audit_writer (unchanged)
+        ...
+```
+
+#### L10: Server Wiring (UPDATED §4.8)
+
+```python
+# meta/server.py (modify, ~30 lines added)
+
+from meta.core.sap_luw_manager import SapLuW, SapLuwContext
+import uuid
+
+@app.before_request
+def sap_luw_before_request():
+    """Start SAP LUW at request start, before any interceptor."""
+    g.luw_id = str(uuid.uuid4())
+    g.current_luw = SapLuW(g.luw_id, write_conn)
+    g.current_luw.begin()
+
+@app.after_request
+def sap_luw_after_request(response):
+    """End SAP LUW at request end (success or failure)."""
+    if g.current_luw is None:
+        return response
+    try:
+        if response.status_code >= 400:
+            # Request failed, rollback
+            g.current_luw.mark_rollback_only(f"HTTP {response.status_code}")
+            g.current_luw.rollback()
+        else:
+            # Request succeeded, commit
+            g.current_luw.commit()
+    except Exception as e:
+        logger.error(f"SAP LUW end failed: {e}")
+        g.current_luw.rollback()
+    finally:
+        g.current_luw = None
+
+@app.teardown_request
+def sap_luw_teardown(exception):
+    """Last-resort cleanup."""
+    if g.current_luw is not None:
+        # Unhandled exception, force rollback
+        g.current_luw.mark_rollback_only(f"unhandled: {exception}")
+        g.current_luw.rollback()
+        g.current_luw = None
+```
+
+### 14.7 Updated V007.15 Layer Summary
+
+| Layer | What | New/Modify | Lines | SAP LUW? |
+|-------|------|------------|-------|----------|
+| L0 | `db_config_detector.py` | NEW | ~80 | - |
+| L1 | `sqlite_tx_state.py` | NEW | ~40 | - |
+| L2 | `bo_framework.py` (commit/rollback) | MODIFY | +70 | ✓ |
+| L3 | `sql_write_queue.py` (begin) | MODIFY | +25 | ✓ |
+| L4 | `audit_service.py` (retry) | MODIFY | +30 | - |
+| L5 | `orphan_tx_detector.py` | NEW | ~120 | - |
+| L6 | `observability.py` | NEW | ~100 | ✓ |
+| L7 | `server.py` (init + healthz) | MODIFY | +10 | - |
+| **L8** | **`sap_luw_manager.py`** | **NEW** | **~150** | **✓ 核心** |
+| **L9** | **`sap_luw_audit.py`** | **NEW** | **~80** | **✓ 核心** |
+| **L10** | **`server.py` (LUW wiring)** | **MODIFY** | **+30** | **✓ 核心** |
+| **Total** | | | **~735** | |
+
+**Complexity increase**: +260 lines for SAP LUW support (L8+L9+L10).
+
+**Benefit**:
+- Atomic audit (no silent data loss)
+- 1 business action = 1 SAP LUW
+- Savepoint for sub-actions
+- Mark ROLLBACK_ONLY for explicit failure handling
+- Aligns with `transaction_id` in audit_log (now meaningful)
+
+### 14.8 What User Must Decide Before V007.15 Implementation
+
+**Question 1: Do we want SAP LUW (L8+L9+L10) in V007.15?**
+
+| Option | Pros | Cons |
+|--------|------|------|
+| **A: Yes, full SAP LUW (L8-L10)** | Atomic audit, clean rollback, sub-LUW support | +260 lines, more complex |
+| **B: No, keep V007.15 simple (L0-L7 only)** | Faster to ship, less risk | Audit still async (silent data loss possible) |
+| **C: Defer L8-L10 to V008** | Compromise: ship L0-L7 now, L8-L10 next sprint | Audit atomicity issue remains for 1+ sprint |
+
+**Question 2: Savepoint granularity for batch import?**
+
+| Option | Granularity | Rollback cost | Re-import cost |
+|--------|-------------|---------------|----------------|
+| Per-row | 1 savepoint/row | Low (1 row) | High (re-process all) |
+| Per-100-row | 1 savepoint/100 | Medium (100 rows) | Medium |
+| Per-sheet | 1 savepoint/sheet | High (whole sheet) | Low (resume sheet) |
+| Per-import | 1 savepoint/whole import | Whole import | Re-import from scratch |
+
+**Question 3: Audit atomicity policy?**
+
+| Policy | If business commits but audit fails |
+|--------|-------------------------------------|
+| **Strict** | Rollback business (no audit = no commit) |
+| **Lenient** | Async retry audit; mark record "audit_pending" for manual review |
+| **Hybrid** | Critical actions: strict. Non-critical: lenient. |
+
+**Question 4: action_dispatcher.py scope?**
+
+| Option | Scope |
+|--------|-------|
+| **A: Empty shell fix only** | Implement `execute_sync` (per spec-audit-log-v2 §4.4) but no LUW |
+| **B: LUW-aware dispatcher** | Each dispatch creates/uses SAP LUW from g.current_luw |
+| **C: Defer to V008** | Keep empty, focus V007.15 on orphan TX only |
+
+**Question 5: Async audit writer for non-critical paths?**
+
+| Action | Current | Recommended |
+|--------|---------|-------------|
+| User CREATE/UPDATE/DELETE | async_audit_writer (best-effort) | **Move to L9 SapLuwAuditHook (atomic)** |
+| User LOGIN/LOGOUT | async_audit_writer | Keep async (non-critical) |
+| Read events | not audited | Keep none |
+| System health events | not audited | Add to L6 observability (Prometheus) |
+
+### 14.9 My Recommendation
+
+| Decision | Recommended | Reason |
+|----------|-------------|--------|
+| Q1: SAP LUW in V007.15? | **B (defer to V008)** | V007.15 focus on orphan TX, SAP LUW is architectural change needs more design |
+| Q2: Savepoint granularity | **Per-1000-row** | 20729 row import = 20 savepoints, 0.5s rollback, balance |
+| Q3: Audit atomicity | **Hybrid** | Critical (CRUD): strict. Non-critical: lenient. |
+| Q4: action_dispatcher scope | **A (empty shell fix only)** | Smallest scope, per spec-audit-log-v2 §4.4 |
+| Q5: Async vs sync audit | **Critical → L9 (sync), Non-critical → async (existing)** | Solves Q3 |
+
+**If user picks A (full LUW in V007.15)**: 3 more files, +260 lines, ship V007.15 in 1 sprint + 1 buffer sprint.
+
+**If user picks B (defer)**: V007.15 ships in 1 sprint as planned. V008 (LUW) in next quarter.
+
+### 14.10 Open Question for User
+
+> **"§14.5 的 5 个 Q，我应该选哪组答案？特别是 Q1 (LUW in V007.15 or defer?)"**
+
+Your answer determines:
+- V007.15 scope (L0-L7 vs L0-L10)
+- Effort estimate (1 sprint vs 1 sprint + 1 buffer)
+- Audit atomicity guarantee
+- Whether V007.15 needs architecture review or can be straight dev work
+
+### 14.11 What I Cannot Decide Without User Input
+
+| Aspect | Why I can't decide |
+|--------|---------------------|
+| Savepoint granularity | Product decision (UX vs data integrity trade-off) |
+| Audit atomicity policy | Compliance/operations decision (legal team input needed) |
+| LUW scope (L8-L10 now or later) | Roadmap planning (PM/architect) |
+| action_dispatcher fix scope | Spec-audit-log-v2 is design, but not implemented yet — when to implement is a sprint planning decision |
+
+I will mark these as "TBD-pending-user" and wait for direction.
+
+---
+
+*Author: dev-agent (V049 + V007.15 + SAP LUW analysis)*
+*Date: 2026-07-05*
+*Status: V007.15 design extended with SAP LUW analysis (L8-L10 optional)*
+*Awaiting user decision on §14.5 Q1-Q5 before finalizing scope*
