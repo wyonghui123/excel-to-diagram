@@ -44,4 +44,13 @@ class SchemaLoader:
                 'name': getattr(assoc, 'name', ''),
                 'target_type': getattr(assoc, 'target_type', ''),
             })
+        # [FIX BUG-V046 2026-07-04 dev agent] 暴露 audit.history 配置
+        # 让前端 HistorySection 读取 audit.history.excluded_child_object_types
+        # 并传给后端 audit_api
+        audit_config = getattr(meta, 'audit', None)
+        if audit_config is not None:
+            history_config = getattr(audit_config, 'history', None)
+            if history_config is not None:
+                excluded = getattr(history_config, 'excluded_child_object_types', None) or []
+                result['audit_history_excluded_child_object_types'] = list(excluded)
         return result

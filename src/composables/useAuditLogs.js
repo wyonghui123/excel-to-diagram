@@ -20,7 +20,7 @@ import { ref, computed, unref, onMounted, shallowRef } from 'vue'
 import * as auditLogService from '@/services/auditLogService'
 
 export function useAuditLogs(objectType, objectId, options = {}) {
-  const { pageSize = 20, autoLoad = true, parentObjectType, parentObjectId } = options
+  const { pageSize = 20, autoLoad = true, parentObjectType, parentObjectId, excludedObjectTypes } = options
 
   // [M2 PR-2.1] 审计日志数据是 API 整体返回后整体替换，无 push/splice 原地修改 → shallowRef
   //   性能: 1000+ 条日志 reactive 创建 1000+ Proxy → shallowRef 0 Proxy
@@ -37,6 +37,13 @@ export function useAuditLogs(objectType, objectId, options = {}) {
   // [FIX 2026-06-12] parentObjectType/parentObjectId 也支持响应式 ref
   const resolvedParentObjectType = computed(() => unref(parentObjectType))
   const resolvedParentObjectId = computed(() => unref(parentObjectId))
+  // [FIX BUG-V046 2026-07-04 dev agent] excludedObjectTypes 也支持响应式 ref
+  const resolvedExcludedObjectTypes = computed(() => {
+    const raw = unref(excludedObjectTypes)
+    if (Array.isArray(raw)) return raw
+    if (raw == null) return []
+    return [String(raw)]
+  })
 
   async function loadLogs(params = {}) {
     const type = resolvedObjectType.value
@@ -52,6 +59,8 @@ export function useAuditLogs(objectType, objectId, options = {}) {
       filters: { ...filters.value, ...(params.filters || {}) },
       parentObjectType: resolvedParentObjectType.value,
       parentObjectId: resolvedParentObjectId.value,
+      // [FIX BUG-V046 2026-07-04 dev agent] 排除特定子对象类型
+      excludedObjectTypes: resolvedExcludedObjectTypes.value,
     })
 
     if (result.success) {

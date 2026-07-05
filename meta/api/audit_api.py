@@ -125,6 +125,13 @@ def get_audit_logs():
         # 例如: RoleDetailDrawer 通过 parent_object_type='role' + parent_object_id=3606 拉日志
         parent_object_type = request.args.get('parent_object_type', '')
         parent_object_id = request.args.get('parent_object_id', '')
+        # [FIX BUG-V046 2026-07-04 dev agent] 详情页"操作日志" tab 支持排除特定子对象类型
+        # PM 用法:
+        #   - domain 详情页: ?object_type=domain&object_id=683&excluded_object_types=sub_domain,service_module,business_object,relationship
+        #   - 默认: 全部显示 (向后兼容)
+        #   - yaml 配 audit.history.excluded_child_object_types: [sub_domain, ...] 由前端 HistorySection 读
+        excluded_object_types = request.args.get('excluded_object_types', '')
+        excluded_types = [t.strip() for t in excluded_object_types.split(',') if t.strip()]
         user_name = request.args.get('user_name', '')
         start_date = request.args.get('start_date', '')
         end_date = request.args.get('end_date', '')
@@ -206,6 +213,25 @@ def get_audit_logs():
             # 仅 parent_object_type 查询 (罕见)
             conditions.append("parent_object_type = ?")
             params.append(parent_object_type)
+
+        # [FIX BUG-V046 2026-07-04 dev agent] 排除特定 object_type
+        # 注意: 只对 child (parent_object 联合部分) 过滤, 不影响 self 部分
+        # SQL: AND (object_type NOT IN (...) OR object_id = self_id 走 self 部分)
+        # 但 OR 联合时, 子对象日志的 object_type 在联合, 所以 NOT IN 同时过滤
+        # 但这样会过滤 self 部分. 我们的需求是: self 保持, 只过滤 child
+        # 解法: 在 OR 联合的 child 部分加 NOT IN, 不动 self 部分
+        # 简化: 用子查询 OR NOT IN excluded (子查询: object_id != self_id AND object_type IN excluded)
+        if excluded_types:
+            placeholders = ','.join(['?'] * len(excluded_types))
+            # 这个条件过滤"既不是 self, 又是 excluded type" 的子对象日志
+            # 适用于 OR 联合查询时, 保持 self 正常返回, 但 child 排除
+            # 自对象日志的 object_id 必然 != self_id (因为是不同对象)
+            # 注意: 如果 self 本身是 excluded (很少见), 也保留 (但前端不会这样配)
+            conditions.append(
+                f"NOT (object_id != ? AND object_type IN ({placeholders}))"
+            )
+            params.append(str(object_id) if object_id else '')
+            params.extend(excluded_types)
 
         if user_name:
             conditions.append("user_name LIKE ?")

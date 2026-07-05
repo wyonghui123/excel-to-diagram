@@ -36,6 +36,17 @@ modified_files:
   # Bug fix 2026-06-30 - enum_types.mutability 字段错值 (fully_editable → fullEditable)
   - meta/scripts/migrate_enums.py
   - meta/core/enums/secure_admin.py
+  # [FIX BUG-V044 2026-07-04 dev agent] importDataAsync 路径未清 list cache
+  - src/components/common/ImportDialog/ImportDialog.vue
+  # [FIX BUG-V046 2026-07-04 dev agent] 详情页"操作日志" tab 排除特定子对象类型
+  - meta/schemas/domain.yaml
+  - meta/schemas/sub_domain.yaml
+  - meta/schemas/service_module.yaml
+  - meta/api/audit_api.py
+  - meta/schemas/schema_loader.py
+  - src/components/common/ObjectPage/HistorySection.vue
+  - src/composables/useAuditLogs.js
+  - src/services/auditLogService.js
   # 自动合并 (9)
   - meta/core/action_executor.py
   - meta/core/interceptors/cascade_interceptor.py
