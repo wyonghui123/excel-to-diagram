@@ -1,22 +1,12 @@
----
-# Integration Task Spec - RBAC + IE merge
+# T-2026-07-05-001 & T-2026-07-05-002
 
-> **Task ID**: T-INTEGRATION-RBAC-IE-2026-06-26
-> **协调者**: coordinator agent
-> **Worktree**: d:/filework/integration-worktree/
-> **风险等级**: medium
-> **目标**: 把 IE 智能体的 23 个 commits (feat/ie-model-driven) 整合到 RBAC 智能体的分支
+## T-001: ImportDialog 最小化按钮风格统一
+
+### 1. 任务描述（一句话）
 
 ---
 
-## 1. 任务描述
-
-> 协调者分析显示 IE 智能体的 V010-V014 修复对 RBAC 智能体不可替代, 需安全整合
-> 验证: 整合后 0 conflict markers, 0 syntax errors, 5 个核心修复保留
-
----
-
-## 2. 改动文件白名单 (50 个文件)
+### 2. 改动文件白名单 (T-001)
 
 ```yaml
 modified_files:
@@ -164,37 +154,7 @@ new_files:
 deleted_files: []
 ```
 
----
-
-## 3. 禁止改文件黑名单
-
-```yaml
-forbidden_files:
-  - .agent-status.json
-  - service_manager.ps1
-  - scripts/agent_bootstrap.ps1
-  - .git/hooks/pre-commit
-  - healthy-baseline-2026-06-17
-  - multi-agent-coordination.md
-  - meta/server.py
-  - vite.config.js
-  - stats.html
-```
-
----
-
-## 4. 依赖关系
-
-```yaml
-depends_on:
-  - branch: fix/export-import-rbac (HEAD d85c61b)
-  - branch: feat/ie-model-driven (HEAD ff79092)
-  - merge-base: 8d6ebeb
-```
-
----
-
-## 5. 完成标准
+### 5. 完成标准 (T-001)
 
 ```yaml
 acceptance_criteria:
@@ -208,45 +168,74 @@ acceptance_criteria:
   - commit message 含铁律声明
 ```
 
----
-
-## 6. 风险评估
+### 6. 风险评估 (T-001)
 
 ```yaml
-risk_level: medium
+risk_level: low
+```
 
-reason: |
-  - 3 个手动解决冲突, 选 IE 注释 + HEAD 逻辑
-  - 11 处 mojibake 是 IE 智能体原数据问题
-  - 自动合并文件未人工审查
-  - 整合 worktree 隔离, 主分支不受影响
+### 7. 工作日志 (T-001)
 
-mitigation:
-  - 回滚: git reset --hard refs/backup/integration-pre-merge-2026-06-26
-  - 测试: IE 自己的 21 个 e2e spec
-  - 隔离: integration-worktree 独立
-  - 验证: 8 项验证 (markers / YAML / Python / function)
+```yaml
+decisions:
+  - 2026-07-05 03:50: 决定去掉 link + type="primary"，
+    让"最小化"按钮回归普通 el-button 样式与"关闭"按钮对齐。
+    依据: YON_EP_GUIDE.md 规定 Link 按钮仅用于表格操作列 (详情/编辑/删除)，
+    弹窗底部按钮应为填充样式。
 ```
 
 ---
 
-## 7. 工作日志
+## T-002: 切换产品/版本下拉不显示新创建的数据
+
+### 1. 任务描述
+
+修复 admin 创建新产品/版本后，架构数据管理页面"切换产品/版本"弹窗下拉中找不到新数据。
+
+### 2. 根因
+
+`useVersionContext.js` 是单例, `products`/`versions` 仅在 `init()` 首次调用时 fetch 一次。GlobalToolbar 下拉/弹窗都直接读单例, 外部数据变更不感知。
+
+### 3. 改动白名单
+
+```yaml
+modified_files:
+  - src/components/common/GlobalToolbar/GlobalToolbar.vue
+```
+
+### 4. 修复
+
+`handleDropdownCommand` 改 async, 打开弹窗前:
+- 切换产品 → `await fetchProducts()`
+- 切换版本 → `await fetchVersions(selectedProductId.value)`
+
+### 5. 完成标准
+
+```yaml
+acceptance_criteria:
+  - [x] handleDropdownCommand async 化
+  - [x] changeProduct 分支 await fetchProducts()
+  - [x] changeVersion 分支 await fetchVersions()
+  - [x] vite build 通过
+  - [x] commit message 含铁律声明
+```
+
+### 6. 风险
+
+```yaml
+risk_level: low
+mitigation:
+  - 回滚: revert commit
+  - 失败: dialog 用旧数据打开, 不崩
+```
+
+### 7. 工作日志
 
 ```yaml
 decisions:
-  - 协调者分析 3 个活跃分支, 决定整合 RBAC + IE
-  - 创建 integration-worktree
-  - merge --no-commit 发现 3 个冲突, 全部解决
-  - 8 项验证全部 PASS
-  - pre-commit 拦截 GBK mojibake, 修复 11 处
-  - pre-commit 拦截 spec.md 白名单, 更新本 spec
-
-blockers: []
-
+  - 选择"打开弹窗时刷新"而非 TTL/路由监听, 触发点最精确
 insights:
-  - RBAC 智能体已包含 IE 的 V010 修复 (context.extra dict) - 自动合并
-  - IE 的 V014 是 no-op 调查 - 无代码改动
-  - RBAC 的 V013 ≠ IE 的 V013 - 不同 BUG
+  - 紧凑下拉 (line 23-60) 同样读单例, 暂不修以避免无谓 API 请求
 ```
 
 ---

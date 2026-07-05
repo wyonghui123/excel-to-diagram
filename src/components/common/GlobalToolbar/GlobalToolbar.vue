@@ -213,25 +213,29 @@ function onVisibleChange(visible) {
   }
 }
 
-function openSwitchDialog() {
-  dialogProductId.value = selectedProductId.value
-  dialogVersionId.value = selectedVersionId.value
-  dialogVersions.value = versions.value ? [...versions.value] : []
-  showSwitchDialog.value = true
-}
-
-async function onDialogProductChange(productId) {
-  dialogVersionId.value = null
-  if (!productId) {
-    dialogVersions.value = []
-    return
-  }
-  loadingDialogVersions.value = true
-  try {
-    await fetchVersions(productId)
-    dialogVersions.value = versions.value ? [...versions.value] : []
-  } finally {
-    loadingDialogVersions.value = false
+async function handleDropdownCommand(command) {
+  if (command === 'changeProduct') {
+    changeDialogType.value = 'product'
+    dialogSelectValue.value = selectedProductId.value
+    // [FIX 2026-07-05 T-002] 打开"切换产品"弹窗前刷新 products
+    //   根因: useVersionContext 是单例, admin 创建新产品后单例不感知
+    //   弹窗打开 = 用户明确需要最新数据, 此时触发 fetchProducts
+    await fetchProducts()
+    showChangeDialog.value = true
+  } else if (command === 'changeVersion') {
+    changeDialogType.value = 'version'
+    dialogSelectValue.value = selectedVersionId.value
+    // [FIX 2026-07-05 T-002] 打开"切换版本"弹窗前刷新当前产品的 versions
+    //   根因同上, 单例 versions 不会自动更新
+    if (selectedProductId.value) {
+      await fetchVersions(selectedProductId.value)
+    }
+    showChangeDialog.value = true
+  } else if (command === 'clear') {
+    clearContext()
+    localProductId.value = null
+    localVersionId.value = null
+    emit('change', { productId: null, versionId: null })
   }
 }
 
