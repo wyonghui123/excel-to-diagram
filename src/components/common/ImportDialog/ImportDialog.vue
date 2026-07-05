@@ -1307,7 +1307,13 @@ async function pollImportProgress(taskId) {
         const field = schema.value?.fields?.find(f => f.id === data.current_type)
         currentTypeName.value = field?.name || data.current_type_name || ''
 
-        currentIndex.value = data.current_index || 0
+        // [FIX 2026-07-05 T-003] 防御: 跳过行级进度回调的类型级字段覆盖
+        //   根因: backend _import_sheet 行级回调硬编码 total_types=0, current_index=0
+        //         (L6325-6326 import_export_service.py) 会把外层正确的 1-5 覆盖为 0
+        //   策略: total_types === 0 表示是行级进度, 不更新类型级字段
+        if (data.total_types && data.total_types > 0) {
+          currentIndex.value = data.current_index || 0
+        }
 
         if (data.status === 'completed') {
           const hasErrors = data.result?.errors?.length > 0

@@ -242,9 +242,64 @@ insights:
 
 ---
 
-## 8. 完成后 Checklist
+## T-003: 导入进度显示 0/5 (行级回调覆盖类型级)
 
-- [x] spec.md 已填写完整
-- [x] 所有 acceptance_criteria 已勾选
-- [ ] commit 成功推送
-- [ ] 通知用户 ready for review T-INTEGRATION-RBAC-IE-2026-06-26
+### 1. 任务描述
+
+多对象类型导入时, 第 5 个类型 (业务对象) 进度显示 "正在导入 业务对象 (0/5)" 但实际 4 个类型已导入完成.
+
+### 2. 根因
+
+`meta/services/import_export_service.py` L6317-6329 `_import_sheet` 的行级进度回调**硬编码**了:
+```python
+'total_types': 0,
+'current_index': 0,
+```
+
+外层主循环 (L5041-5064) 计算的真实 `current_index` (1-5) **没有传**进 `_import_sheet`. 当后端切到行级进度时, 回调中的 0/0 覆盖了前端缓存的 4/5, 导致显示 (0/5).
+
+### 3. 改动 (Frontend 防御性修复)
+
+```yaml
+modified_files:
+  - src/components/common/ImportDialog/ImportDialog.vue
+```
+
+在 `pollImportProgress` 中, 收到 `total_types === 0` 的回调时**不更新** `currentIndex` (这是行级进度信号, 不是类型级).
+
+```js
+if (data.total_types && data.total_types > 0) {
+  currentIndex.value = data.current_index || 0
+}
+```
+
+### 4. 可选的后端彻底修复 (待用户决定)
+
+在 `_import_sheet` 接收 `current_index` 和 `total_types` 参数, 行级回调也使用真实值 (见 backend L5069 + L6325-6326).
+
+### 5. 完成标准
+
+```yaml
+acceptance_criteria:
+  - [x] pollImportProgress 中加 total_types > 0 守卫
+  - [x] vite build 通过
+  - [x] commit message 含铁律声明
+```
+
+### 6. 风险
+
+```yaml
+risk_level: low
+mitigation:
+  - 回滚: revert commit
+```
+
+### 7. 工作日志
+
+```yaml
+decisions:
+  - 选择前端防御性修复, 不动后端 (历史教训: export_import_api.py 误改被纠正)
+  - 前端守卫语义清晰: total_types=0 即行级进度
+insights:
+  - 59% 与 4/5 (80%) 不符, 是后端进度计算策略 (基于行而非类型), 不在 T-003 范围
+```
