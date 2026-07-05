@@ -6805,13 +6805,24 @@ class ImportExportService:
         if not obj:
             return {"success": 0, "failed": 0, "errors": [{"message": "Object not found"}]}
         
+        wb = None
         try:
             wb = load_workbook(file_path, read_only=True, data_only=True)
             ws = wb[sheet_info["name"]]
             rows = list(ws.iter_rows(values_only=True))
-            wb.close()
         except Exception as e:
             return {"success": 0, "failed": 0, "errors": [{"message": str(e)}]}
+        finally:
+            # [FIX V049 2026-07-05] 即使 exceptions 也强制关闭 wb, 避免 FD leak
+            #   背景: read_only 模式每个 wb 持有 3-5 个临时文件 FD, except 路径不 close 会泄漏
+            #   跟 import_cascade 的修复 (line 5641) 保持一致
+            if wb is not None:
+                try:
+                    wb.close()
+                except Exception:
+                    pass
+            import gc
+            gc.collect()
         
         if len(rows) < 2:
             return {"success": 0, "failed": 0, "errors": []}
