@@ -378,6 +378,30 @@ def create_app(db_path=None):
     init_monitor(db_path)
     logging.getLogger(__name__).info("DBHealthMonitor initialized")
 
+    # [V007.15 L7-1] 启动时检测 PRAGMA 配置
+    try:
+        from meta.core.db_config_detector import detect_runtime_config, get_runtime_config
+        from meta.core.observability import metrics_set_state
+        v007_15_config = detect_runtime_config(db_path)
+        state_code = {'A': 0, 'B': 1, 'C': 2}.get(v007_15_config.deployment_state, 3)
+        metrics_set_state(state_code)
+        logging.getLogger(__name__).info(
+            f"[V007.15 L7] Server initialized, deployment_state={v007_15_config.deployment_state}, "
+            f"journal={v007_15_config.journal_mode.value}, busy_timeout={v007_15_config.busy_timeout_ms}ms"
+        )
+    except Exception as e:
+        logging.getLogger(__name__).error(f"[V007.15 L7-1] Failed to init config detector: {e}")
+        v007_15_config = None
+
+    # [V007.15 L7-2] 启动 orphan detector (daemon thread)
+    v007_15_orphan_detector = None
+    try:
+        from meta.core.orphan_tx_detector import OrphanTxDetector
+        v007_15_orphan_detector = OrphanTxDetector(data_source)
+        v007_15_orphan_detector.start()
+    except Exception as e:
+        logging.getLogger(__name__).error(f"[V007.15 L7-2] Failed to start orphan detector: {e}")
+
     init_manage_services(data_source)
     init_auth_services(data_source)
     from meta.scripts.init_auth import init_auth_system
@@ -848,7 +872,21 @@ def create_app(db_path=None):
 
     @app.route('/health')
     def health():
-        return jsonify({'status': 'ok', 'service': 'arch-data-manage-api'})
+        # [V007.15 L7-3] /healthz 加 v007_15 段 (state + orphan_detector stats)
+        response = {'status': 'ok', 'service': 'arch-data-manage-api'}
+        try:
+            cfg = get_runtime_config()
+            response['v007_15'] = {
+                'deployment_state': cfg.deployment_state,
+                'journal_mode': cfg.journal_mode.value,
+                'busy_timeout_ms': cfg.busy_timeout_ms,
+                'orphan_detector': v007_15_orphan_detector.get_stats() if v007_15_orphan_detector else None,
+            }
+        except RuntimeError:
+            response['v007_15'] = 'not_initialized'
+        except Exception as e:
+            response['v007_15'] = f'error: {e}'
+        return jsonify(response)
 
     # M9 v3.5 P3: GraphQL 协议层 (Phase D1 POC) - 0 mutation / 0 subscription
     # 复用 bo_framework，0 业务逻辑改动，v1+v2 API 继续工作

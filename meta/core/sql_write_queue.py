@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 SQLite 写入队列
 
@@ -17,6 +17,11 @@ from typing import Any, Callable, Optional, Dict, List
 from dataclasses import dataclass, field
 from queue import Queue, Empty
 from concurrent.futures import Future, CancelledError
+
+# [V007.15 L3] phantom TX detection
+import sqlite3
+from meta.core.sqlite_tx_state import get_tx_state, TxState
+from meta.core.observability import metrics_inc, OBS_COUNTERS, log_tx_event
 
 logger = logging.getLogger(__name__)
 
@@ -228,27 +233,52 @@ class WriteQueue:
     def begin_transaction(self):
         """
         开始显式事务
-        
+
         优化：增加事务状态检测，避免嵌套事务问题。
+
+        [V007.15 L3] 加 phantom TX 检测:
+        - 用 savepoint probe 探测 SQLite 真实状态
+        - 如果 SQLite in tx 但 Python state=False → phantom, 强制 ROLLBACK
+        - 然后正常 BEGIN IMMEDIATE
         """
         if self._in_transaction:
-            logger.debug("WriteQueue: Already in transaction, skipping BEGIN")
+            # 已经标记 in_tx, 跳过
+            metrics_inc('begin_skipped_already_in_tx')
             return
-        
+
         def _do_begin(conn):
+            # [V007.15 L3 治本] 防御性检查: 连接是否真的不在 tx 中?
+            actual = get_tx_state(conn)
+            if actual == TxState.WRITE or actual == TxState.READ:
+                # 实际在 tx, 但 Python 状态 False — phantom TX!
+                logger.warning(
+                    f"[V007.15 L3] WriteQueue: phantom TX detected "
+                    f"(Python=False, SQLite={actual}), forcing ROLLBACK"
+                )
+                metrics_inc('phantom_tx_detected')
+                try:
+                    conn.execute("ROLLBACK")
+                except Exception:
+                    pass
+                self._in_transaction = False
+
             try:
-                # 检查连接的实际事务状态
-                # SQLite没有直接的PRAGMA查询事务状态，但我们可以通过尝试BEGIN来检测
                 # 2026-06-05 修复：使用 BEGIN IMMEDIATE 防止多进程写冲突
                 conn.execute("BEGIN IMMEDIATE")
                 self._in_transaction = True
+                metrics_inc('begin_success')
                 logger.debug("WriteQueue: Transaction started")
             except Exception as e:
-                error_str = str(e)
+                error_str = str(e).lower()
                 if "cannot start a transaction within a transaction" in error_str:
                     # 连接已经在事务中，更新状态
                     logger.warning("WriteQueue: Connection already in transaction, updating state")
                     self._in_transaction = True
+                elif "locked" in error_str or "busy" in error_str:
+                    metrics_inc('begin_locked')
+                    log_tx_event('begin', None, 'locked', str(e))
+                    logger.error("WriteQueue: Failed to begin transaction (locked): %s", error_str)
+                    raise
                 else:
                     logger.error("WriteQueue: Failed to begin transaction: %s", error_str)
                     raise
@@ -424,3 +454,4 @@ class WriteQueue:
             stats["throughput_per_sec"] = 0.0
 
         return stats
+
