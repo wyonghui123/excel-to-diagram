@@ -35,6 +35,26 @@ import sqlite3
 import atexit
 import signal
 
+# [FIX V049 2026-07-05] 提升文件描述符上限, 避免大批量导入时 openpyxl read_only 临时文件
+#   导致 [Errno 24] Too many open files
+#   背景: openpyxl read_only 模式创建 ~3-5 个临时文件 / load_workbook;
+#         import_cascade + _import_sheet 双重 load_workbook + 多 sheet = ~12 FD/导入.
+#         Linux 默认 ulimit -n = 1024, 并发导入 + 日志/DB/网络 → 超过 1024.
+#   修复: 启动时提升 NOFILE 软硬限制到 65536 (Linux 有效, Windows 跳过)
+try:
+    import resource
+    _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    _target = 65536
+    if _soft < _target:
+        resource.setrlimit(
+            resource.RLIMIT_NOFILE,
+            (_target, _hard if _hard == resource.RLIM_INFINITY else _target)
+        )
+        print(f"[waitress] RLIMIT_NOFILE 提升: {_soft} -> {_target}", flush=True)
+except (ImportError, OSError):
+    # Windows: resource module 不可用, 跳过
+    pass
+
 # [FIX 2026-07-02] 启动时加载 .env, 确保 AGENT_PORT 与 vite 代理一致
 # 背景: .env 中约定 FLASK_PORT=3011 (前端 vite 代理 target), 但 waitress_server.py
 #   之前只读 AGENT_PORT 环境变量, 导致默认启动在 3010, 触发前端 500.

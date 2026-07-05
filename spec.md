@@ -240,6 +240,13 @@ decisions:
   - 8 项验证全部 PASS
   - pre-commit 拦截 GBK mojibake, 修复 11 处
   - pre-commit 拦截 spec.md 白名单, 更新本 spec
+  # V049 2026-07-05 (dev-agent): 修复生产导入卡死 0% 不动
+  - 创建 worktree-V049 (分支 fix/V049-import-fd-leak)
+  - 根因: openpyxl read_only 临时文件泄漏 → Linux ulimit 1024 超限
+  - 用户给真实错误 [Errno 24] Too many open files: /tmp/tmpeci25jgz
+  - 修复 1: waitress_server.py 启动时 RLIMIT_NOFILE = 65536
+  - 修复 2: import_export_service.py: import_cascade 结束 wb.close() + gc.collect()
+  - 通知协调智能体 cherry-pick
 
 blockers: []
 
@@ -247,6 +254,12 @@ insights:
   - RBAC 智能体已包含 IE 的 V010 修复 (context.extra dict) - 自动合并
   - IE 的 V014 是 no-op 调查 - 无代码改动
   - RBAC 的 V013 ≠ IE 的 V013 - 不同 BUG
+  # V049 复盘:
+  - 错误: 我之前在 release-prep-worktree (release 分支) 直接改代码, 违反 L5
+  - 修正: 已 git checkout 还原 release-prep-worktree, 改在 worktree-V049
+  - 教训: 第一时间读 SOP_INFRASTRUCTURE.md + development-workflow.md
+  - 教训: 用户说"卡死"先看真实错误码, 不要 cProfile 瞎跑
+  - 教训: production ≠ integration, 必须分清
 ```
 
 ---
