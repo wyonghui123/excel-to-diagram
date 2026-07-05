@@ -16,8 +16,8 @@ import shutil
 from pathlib import Path
 import sys
 
-ROOT = Path('d:/filework/worktree-V050')
-WORKTREE = Path('d:/filework/worktree-V050')
+ROOT = Path(sys.argv[1] if len(sys.argv) > 1 else '.').resolve()
+WORKTREE = ROOT
 META = WORKTREE / 'meta'
 FRONTEND_DIST = WORKTREE / 'frontend_dist_files'
 DIST = WORKTREE / 'dist'
@@ -46,9 +46,13 @@ def should_exclude(path: Path) -> bool:
     name = path.name.lower()
     if path.is_dir() and name in EXCLUDE_DIRS:
         return True
-    for suf in EXCLUDE_SUFFIXES:
+    # endswith for .db, .db-wal, .db-shm, .pyc, .lock (binary signature)
+    for suf in ('.db', '.db-wal', '.db-shm', '.pyc', '.lock'):
         if name.endswith(suf):
             return True
+    # 'in' for .bak, .backup, .corrupt, .baseline (covers *.db.bak, *.db.bak.fix, *.db.backup_*, *.db.pre-*, *.db.corrupted, *.db.baseline)
+    if '.bak' in name or '.backup' in name or '.corrupt' in name or '.baseline' in name:
+        return True
     if path.name in EXCLUDE_FILES or path.name.startswith('.env.'):
         return True
     if path.name.startswith('tmp_') or path.name.startswith('_tmp') or path.name.startswith('temp_'):
