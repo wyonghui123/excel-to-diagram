@@ -586,35 +586,49 @@ class BOFramework:
         事务提交后，flush 缓存的审计记录到数据库。
 
         [SPR-07 T-S09-02] 用 drain_pending_audits() 替代 getattr 私有访问, 同时获得原子性.
+
+        [V007.15 L4.5 优化] 不再同步写 audit_logs, 而是入队到全局 AuditAsyncQueue
+        - 1 个事务写多条 audit (vs 原来 1 条 1 个事务)
+        - 失败不重试 (避免 retry 死循环)
+        - 失败自动 fallback 到原同步路径
         """
         # [SPR-07 T-S09-02] drain_pending_audits() 原子获取并清空, 替代 getattr + clear 两步
         pending = context.drain_pending_audits()
         if not pending:
             return
 
-        # 导入 StructuredLogger（延迟导入避免循环依赖）
-        # 不传入 async_writer，直接同步写入
-        from meta.services.structured_logger import StructuredLogger
-        structured_logger = StructuredLogger(async_writer=None)
-
-        flushed = 0
-        for audit_params in pending:
-            try:
-                structured_logger.log_business(**audit_params)
-                flushed += 1
-            except Exception as e:
-                logger.error(
-                    f"[BOFramework] Failed to flush audit record: {e}, "
-                    f"action={audit_params.get('action')}, "
-                    f"object_type={audit_params.get('object_type')}, "
-                    f"object_id={audit_params.get('object_id')}"
+        # [V007.15 L4.5] 入队到全局 audit_async_queue
+        from meta.core.audit_async_queue import get_global_queue
+        queue = get_global_queue()
+        if queue is None:
+            # 队列未初始化 (单测 / 早期启动), 走原同步路径
+            from meta.services.structured_logger import StructuredLogger
+            structured_logger = StructuredLogger(async_writer=None)
+            flushed = 0
+            for audit_params in pending:
+                try:
+                    structured_logger.log_business(**audit_params)
+                    flushed += 1
+                except Exception as e:
+                    logger.error(
+                        f"[BOFramework] Failed to flush audit record: {e}, "
+                        f"action={audit_params.get('action')}, "
+                        f"object_type={audit_params.get('object_type')}, "
+                        f"object_id={audit_params.get('object_id')}"
+                    )
+            if flushed > 0:
+                logger.info(
+                    f"[BOFramework] Flushed {flushed}/{len(pending)} pending audit records "
+                    f"after transaction commit (sync fallback)"
                 )
+            return
 
-        if flushed > 0:
-            logger.info(
-                f"[BOFramework] Flushed {flushed}/{len(pending)} pending audit records "
-                f"after transaction commit"
-            )
+        # 批量入队 (O(1) per audit, 总 O(N))
+        for audit_params in pending:
+            queue.enqueue(audit_params)
+        logger.debug(
+            f"[BOFramework L4.5] Enqueued {len(pending)} audit records to async queue"
+        )
 
     @staticmethod
     def _infer_navigation(assoc: dict):

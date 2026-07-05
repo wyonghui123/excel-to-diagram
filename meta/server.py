@@ -301,6 +301,14 @@ def _cleanup_resources(data_source):
             logger.warning("Final WAL checkpoint TRUNCATE failed: %s", e)
 
     if data_source and hasattr(data_source, '_write_queue') and data_source._write_queue:
+        # [V007.15 L4.5] Stop audit_async_queue first (force flush pending audits)
+        try:
+            from meta.core.audit_async_queue import stop_global_queue
+            stop_global_queue(timeout=5.0)
+            logger.info("Audit async queue stopped")
+        except Exception as e:
+            logger.warning("Audit async queue stop failed: %s", e)
+
         try:
             data_source._write_queue.flush(timeout=30)
         except Exception:
@@ -876,12 +884,20 @@ def create_app(db_path=None):
         response = {'status': 'ok', 'service': 'arch-data-manage-api'}
         try:
             cfg = get_runtime_config()
-            response['v007_15'] = {
+            v007_15_section = {
                 'deployment_state': cfg.deployment_state,
                 'journal_mode': cfg.journal_mode.value,
                 'busy_timeout_ms': cfg.busy_timeout_ms,
                 'orphan_detector': v007_15_orphan_detector.get_stats() if v007_15_orphan_detector else None,
             }
+            # [V007.15 L4.5] audit_async_queue 段
+            try:
+                from meta.core.audit_async_queue import get_global_queue
+                q = get_global_queue()
+                v007_15_section['audit_async_queue'] = q.get_stats() if q else 'not_initialized'
+            except Exception as e:
+                v007_15_section['audit_async_queue'] = f'error: {e}'
+            response['v007_15'] = v007_15_section
         except RuntimeError:
             response['v007_15'] = 'not_initialized'
         except Exception as e:
@@ -943,12 +959,26 @@ if __name__ == '__main__':
     
     # 写入PID文件
     write_pid_file()
-    
+
     # 注册清理函数
     atexit.register(cleanup_pid_file)
-    
-    # 创建Flask应用
+
+    # [V007.15 L4.5] 创建Flask应用后初始化 audit_async_queue
     app = create_app()
+
+    try:
+        from meta.core.audit_async_queue import init_global_queue
+        # 从 data_source 拿 write_queue
+        with app.app_context():
+            from flask import current_app, g
+            data_source = getattr(g, 'data_source', None) or current_app.config.get('data_source')
+            if data_source and hasattr(data_source, '_write_queue') and data_source._write_queue:
+                init_global_queue(data_source._write_queue)
+                print("[L4.5] AuditAsyncQueue initialized")
+            else:
+                print("[L4.5] WARNING: WriteQueue not found, audit async queue disabled")
+    except Exception as e:
+        print(f"[L4.5] AuditAsyncQueue init failed: {e}")
     
     debug_mode = os.environ.get('FLASK_DEBUG', 'True').lower() == 'true'
     print(f"[SERVER] Debug mode: {debug_mode}")
