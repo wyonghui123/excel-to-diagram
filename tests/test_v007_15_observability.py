@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+﻿﻿# -*- coding: utf-8 -*-
 """
 [V007.15 L6] Tests for observability module
 """
