@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 import logging
 import os
 from typing import Any, Dict, List, Optional
@@ -14,6 +14,11 @@ from meta.core.deep_insert_engine import DeepInsertEngine
 from meta.services.display_name_service import DisplayNameService
 from meta.core.ui_config.config_builder import UIConfigBuilder
 from meta.core.ui_config.value_help_formatter import value_help_to_dict as _value_help_to_dict_impl
+
+# [V007.15 L2] observability + state verification
+from meta.core.sqlite_tx_state import get_tx_state, TxState
+from meta.core.db_config_detector import get_runtime_config
+from meta.core.observability import metrics_inc, OBS_COUNTERS, log_tx_event
 
 logger = logging.getLogger(__name__)
 
@@ -455,24 +460,123 @@ class BOFramework:
         return transaction_id
 
     def commit(self, transaction_id: str = None) -> bool:
+        """
+        [V007.15 L2] commit with state-aware defense + observability.
+
+        Changes from v1:
+        - try/finally ensures state reset on success AND failure
+        - SQLite state verification after commit
+        - Prometheus metrics + structured log
+        """
+        config = get_runtime_config()
+        success = True
+        err_msg = None
         try:
             if hasattr(self._data_source, 'commit'):
                 self._data_source.commit()
             logger.info(f"[BOFramework] Transaction committed: {transaction_id}")
-            return True
         except Exception as e:
+            err_msg = str(e)
+            success = False
             logger.error(f"[BOFramework] Commit failed: {e}")
-            return False
+            metrics_inc('commit_failure')
+            log_tx_event('commit', transaction_id, 'error', err_msg)
+        finally:
+            # [V007.15 L2 关键] 强制重置所有 in_transaction 标志
+            try:
+                if hasattr(self._data_source, '_in_transaction'):
+                    self._data_source._in_transaction = False
+                if hasattr(self._data_source, '_write_queue') and self._data_source._write_queue:
+                    if hasattr(self._data_source._write_queue, '_in_transaction'):
+                        self._data_source._write_queue._in_transaction = False
+            except Exception as e:
+                log_tx_event('commit', transaction_id, 'state_reset_error', str(e))
+                success = False
+
+            # [V007.15 L2] 显式调 conn.rollback() 强制重置 (防御性)
+            if config.use_explicit_conn_rollback:
+                try:
+                    if hasattr(self._data_source, '_write_queue') and self._data_source._write_queue:
+                        wq = self._data_source._write_queue
+                        if hasattr(wq, '_write_conn') and wq._write_conn:
+                            wq._write_conn.rollback()
+                except Exception:
+                    pass  # 可能在 tx 外, 不算 failure
+
+            # [V007.15 L2 验证] 用 savepoint probe 验证 SQLite 实际状态
+            if hasattr(self._data_source, '_write_queue') and self._data_source._write_queue:
+                wq = self._data_source._write_queue
+                if hasattr(wq, '_write_conn') and wq._write_conn:
+                    actual = get_tx_state(wq._write_conn)
+                    if actual != TxState.NONE:
+                        try:
+                            wq._write_conn.execute("ROLLBACK")
+                            log_tx_event('commit', transaction_id, 'forced_rollback', actual)
+                            metrics_inc('forced_rollback_after_commit')
+                        except Exception as e:
+                            log_tx_event('commit', transaction_id, 'forced_rollback_error', str(e))
+
+        if success:
+            metrics_inc('commit_success')
+            log_tx_event('commit', transaction_id, 'ok', None)
+        return success
 
     def rollback(self, transaction_id: str = None) -> bool:
+        """
+        [V007.15 L2] rollback with state-aware defense + observability.
+        """
+        config = get_runtime_config()
+        success = True
+        err_msg = None
         try:
             if hasattr(self._data_source, 'rollback'):
                 self._data_source.rollback()
             logger.info(f"[BOFramework] Transaction rolled back: {transaction_id}")
-            return True
         except Exception as e:
+            err_msg = str(e)
+            success = False
             logger.error(f"[BOFramework] Rollback failed: {e}")
-            return False
+            metrics_inc('rollback_failure')
+            log_tx_event('rollback', transaction_id, 'error', err_msg)
+        finally:
+            # [V007.15 L2 关键] 强制重置所有 in_transaction 标志
+            try:
+                if hasattr(self._data_source, '_in_transaction'):
+                    self._data_source._in_transaction = False
+                if hasattr(self._data_source, '_write_queue') and self._data_source._write_queue:
+                    if hasattr(self._data_source._write_queue, '_in_transaction'):
+                        self._data_source._write_queue._in_transaction = False
+            except Exception as e:
+                log_tx_event('rollback', transaction_id, 'state_reset_error', str(e))
+                success = False
+
+            # [V007.15 L2] 显式 conn.rollback() 兜底
+            if config.use_explicit_conn_rollback:
+                try:
+                    if hasattr(self._data_source, '_write_queue') and self._data_source._write_queue:
+                        wq = self._data_source._write_queue
+                        if hasattr(wq, '_write_conn') and wq._write_conn:
+                            wq._write_conn.rollback()
+                except Exception:
+                    pass
+
+            # [V007.15 L2 验证] savepoint probe
+            if hasattr(self._data_source, '_write_queue') and self._data_source._write_queue:
+                wq = self._data_source._write_queue
+                if hasattr(wq, '_write_conn') and wq._write_conn:
+                    actual = get_tx_state(wq._write_conn)
+                    if actual != TxState.NONE:
+                        try:
+                            wq._write_conn.execute("ROLLBACK")
+                            log_tx_event('rollback', transaction_id, 'forced_rollback', actual)
+                            metrics_inc('forced_rollback_after_rollback')
+                        except Exception as e:
+                            log_tx_event('rollback', transaction_id, 'forced_rollback_error', str(e))
+
+        if success:
+            metrics_inc('rollback_success')
+            log_tx_event('rollback', transaction_id, 'ok', None)
+        return success
 
     def transaction(self):
         return TransactionContext(self)
@@ -603,3 +707,4 @@ class TransactionContext:
 
 
 bo_framework = BOFramework()
+
