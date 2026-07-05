@@ -150,6 +150,8 @@ new_files:
   # IE 其他新文件 (2)
   - meta/tests/test_excel_format.py
   - scripts/test_ie_assertor.js
+  # T-002 E2E 真实流程验证 (2026-07-05, 验证 fetchProducts fix 生效)
+  - test_t002_v9_real.py
 
 deleted_files: []
 ```
