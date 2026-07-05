@@ -151,6 +151,46 @@
 
 ---
 
+## P2 - BUG-V049 长期修复 (2026-07-05 新增)
+
+> **背景**: 生产 172.20.59.7:8081 全局导入卡死 0% 不动, 根因 `[Errno 24] Too many open files` (openpyxl read_only 临时文件泄漏)
+> **当前修复**: setrlimit + wb.close() 临时缓解 (commit 89c63f0)
+> **方向**: 彻底重构, 消除依赖
+
+### 14. 重构 import_cascade 消除二次 load_workbook
+- **问题**: `import_cascade` 调 `load_workbook` 解析每个 sheet, 然后 `_import_sheet` 又调 `load_workbook` 解析同一个 sheet。双重 IO + 双重临时文件
+- **现状**: `import_cascade` 解析后把 `rows` 存到 `sheet_info["preview_rows"]`, 但没传给 `_import_sheet`
+- **方向**: 修改 `import_cascade` 把 `sheet_info` 直接传给 `_import_sheet`, `_import_sheet` 优先使用内存 rows, 没有再 load
+- **文件**: `meta/services/import_export_service.py:5576` (import_cascade) + `meta/services/import_export_service.py:6801` (_import_sheet)
+- **状态**: 待处理
+- **优先级**: 高 (单 sheet 导入节省 1 次 IO, 多 sheet 节省 3-4 次)
+- **预期收益**: 单次导入 IO 减少 50%, FD 消耗减少 50%
+
+### 15. 替换 openpyxl read_only 为 zipfile + xml.etree
+- **问题**: openpyxl read_only 模式创建 3-5 个临时文件 / load_workbook, 不可控
+- **现状**: 临时文件路径 `/tmp/tmpXXXXXX`, 不可预测, 难追踪
+- **方向**: 自己用 zipfile 解压 .xlsx (本质是 zip) + xml.etree 解析 sheetN.xml + sharedStrings.xml, 整个过程在内存完成, 0 临时文件
+- **文件**: 新建 `meta/utils/xlsx_reader.py` (替代 openpyxl read_only 路径)
+- **状态**: 待处理
+- **优先级**: 中 (彻底解决 FD 泄漏, 但工作量大)
+- **预期收益**: 0 临时文件, FD 不增长; 启动更快 (无 zipfile 临时解压)
+- **风险**: 兼容性测试 (公式、样式、空 cell、日期格式)
+
+### 16. 进程级 ulimit 永久提升 (写进 systemd unit)
+- **问题**: 当前 setrlimit 在 Python 进程内调用, 可能被 systemd / docker / hard limit 锁住
+- **现状**: 临时 setrlimit 在 `waitress_server.py:36-55` (commit 89c63f0)
+- **方向**: 
+  1. **systemd unit** 加 `LimitNOFILE=65536`
+  2. **docker compose** 加 `ulimits: nofile: 65536:65536`
+  3. **deploy.sh** 加 `ulimit -n 65536` 在启动 waitress 前
+  4. **k8s** 加 `securityContext.sysctls` 或 `pod.spec.containers.resources.limits`
+- **文件**: `tools/systemd/meta-backend.service` (新建) + `tools/deploy.sh` + `docker-compose.yml` (如有)
+- **状态**: 待处理
+- **优先级**: 中 (临时 setrlimit 95% 情况有效, 但基础设施层修复更可靠)
+- **预期收益**: 不会因为 Python setrlimit 失败导致再次卡死
+
+---
+
 ## 已完成记录
 
 | 日期 | 任务 | 说明 |
@@ -158,3 +198,5 @@
 | 2026-06-09 | v1.0.4 dimension scope 修复 | 详见变更记录 |
 | 2026-06-09 | /api/v1/relationships 兼容性修复 | special_routes_api.py L89-117 |
 | 2026-06-09 | 全面 API 权限排查 | 确认所有高风险点 |
+| 2026-07-05 | BUG-V049 setrlimit 修复 | waiter_server.py:36-55 + import_export_service.py:5637-5647 (commit 89c63f0) |
+| 2026-07-05 | BUG-V049 DEPLOY_HANDOVER | DEPLOY_HANDOVER_BUG_V049.md 通知部署智能体 (commit d55cf4f + c328e8a) |
