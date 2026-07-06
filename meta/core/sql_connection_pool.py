@@ -57,6 +57,13 @@ class PooledConnection:
     last_used_at: float = field(default_factory=time.time)
     in_use: bool = False
     usage_count: int = 0
+    # [V007.16] 跟踪 connection 健康状态
+    # 上次是否报 disk I/O error 或 database is locked
+    last_io_error: bool = False
+    # 连续错误次数 (用于熔断: 连续 3 次错误强制重建)
+    consecutive_errors: int = 0
+    # 上次错误信息 (debug 用)
+    last_error_msg: str = ""
 
     def touch(self):
         self.last_used_at = time.time()
@@ -68,15 +75,53 @@ class PooledConnection:
     def is_idle_expired(self, idle_timeout: float) -> bool:
         return (not self.in_use) and ((time.time() - self.last_used_at) > idle_timeout)
 
+    def mark_error(self, error_msg: str = ""):
+        """[V007.16] 标记 connection 出现错误"""
+        self.last_io_error = True
+        self.consecutive_errors += 1
+        if error_msg:
+            self.last_error_msg = error_msg
+
+    def clear_error(self):
+        """[V007.16] 清除错误标记 (execute 成功后调)"""
+        self.last_io_error = False
+        self.consecutive_errors = 0
+        self.last_error_msg = ""
+
     def is_valid(self) -> bool:
+        """[V007.16] 检测 connection 是否真的健康
+
+        修复: 之前版本只检查 'closed' / 'cannot operate' 错误,
+        导致 disk I/O error / database is locked 都被误判为 valid,
+        坏 connection 永久缓存, 反复报 disk I/O error.
+
+        现在: 任何 sqlite3.Error (OperationalError, DatabaseError 等) 都视为 invalid.
+        """
         try:
-            self.connection.execute("SELECT 1")
-            return True
-        except Exception as e:
-            err_str = str(e).lower()
-            if "closed" in err_str or "cannot operate" in err_str:
+            cursor = self.connection.execute("SELECT 1")
+            result = cursor.fetchone()
+            if not result or result[0] != 1:
+                logger.debug(
+                    "[V007.16] is_valid: SELECT 1 returned unexpected result: %s", result
+                )
                 return False
             return True
+        except sqlite3.Error as e:
+            # 任何 sqlite3 错误 (包括 disk I/O error, database is locked) 都视为 invalid
+            err_str = str(e).lower()
+            logger.debug(
+                "[V007.16] is_valid: connection INVALID, error: %s", err_str
+            )
+            # 同步标记 last_io_error, 让 reader() 知道要重建
+            self.last_io_error = True
+            self.last_error_msg = err_str
+            return False
+        except Exception as e:
+            # 未知错误 (如 ProgrammingError) 也算 invalid
+            logger.debug(
+                "[V007.16] is_valid: unknown error: %s", str(e)
+            )
+            return False
 
 
 class SQLiteConnectionPool:
@@ -306,14 +351,25 @@ class SQLiteConnectionPool:
     @contextmanager
     def reader(self, timeout: float = None):
         thread_id = threading.get_ident()
-        
+
         with self._condition:
             if thread_id in self._thread_connections:
                 pc = self._thread_connections[thread_id]
-                if pc.is_valid():
+                # [V007.16] 修复: 不仅检查 is_valid, 还检查 last_io_error 和熔断
+                # is_valid() 内部会同步设置 last_io_error, 但保险起见双重检查
+                if (pc.is_valid()
+                    and not pc.last_io_error
+                    and pc.consecutive_errors < 3):
                     yield pc.connection
                     return
                 else:
+                    # [V007.16] 坏 connection, 关闭 + 移除 + 重建
+                    if pc.last_io_error or pc.consecutive_errors >= 3:
+                        logger.warning(
+                            "[V007.16] reader: rebuilding bad connection "
+                            "(last_io_error=%s, consecutive_errors=%d, last_err=%s)",
+                            pc.last_io_error, pc.consecutive_errors, pc.last_error_msg
+                        )
                     try:
                         pc.connection.close()
                     except Exception:
@@ -321,8 +377,12 @@ class SQLiteConnectionPool:
                     del self._thread_connections[thread_id]
                     if pc in self._readers:
                         self._readers.remove(pc)
-            
+                    self._stats["recycle_count"] += 1
+
             pc = self._create_pooled_connection()
+            pc.last_io_error = False
+            pc.consecutive_errors = 0
+            pc.last_error_msg = ""
             self._readers.append(pc)
             self._thread_connections[thread_id] = pc
             yield pc.connection
@@ -339,7 +399,11 @@ class SQLiteConnectionPool:
     def _try_get_available(self) -> Optional[PooledConnection]:
         while self._available:
             pc = self._available.popleft()
-            if pc.is_valid() and not pc.is_expired(self._config.max_lifetime):
+            # [V007.16] 修复: 增加 last_io_error + 熔断检查
+            if (pc.is_valid()
+                and not pc.is_expired(self._config.max_lifetime)
+                and not pc.last_io_error
+                and pc.consecutive_errors < 3):
                 return pc
             else:
                 self._recycle_connection_unlocked(pc)

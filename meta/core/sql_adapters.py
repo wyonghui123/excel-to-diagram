@@ -789,7 +789,10 @@ class SQLiteAdapter(SQLDataSource):
             if params:
                 return cursor.execute(command, params)
             return cursor.execute(command)
-        
+
+        # [V007.16] 修复: disk I/O error 时, 标记 thread-local connection 为 bad,
+        # 触发 reader() contextmanager 在下次 acquire 时重建 connection.
+        # 之前: is_valid() 不检测 disk I/O error, 坏 connection 永久缓存.
         max_retries = 3
         last_error = None
         for attempt in range(max_retries):
@@ -798,13 +801,33 @@ class SQLiteAdapter(SQLDataSource):
                 with self._pool.reader() as conn:
                     cursor = conn.cursor()
                     if params:
-                        return cursor.execute(command, params)
-                    return cursor.execute(command)
+                        result = cursor.execute(command, params)
+                    else:
+                        result = cursor.execute(command)
+                    # 成功! 清除该 connection 的错误标记
+                    if hasattr(self._pool, '_thread_connections'):
+                        tid = threading.get_ident()
+                        if tid in self._pool._thread_connections:
+                            self._pool._thread_connections[tid].clear_error()
+                    return result
             except Exception as e:
                 last_error = e
                 err_str = str(e).lower()
+                # [V007.16] 标记 thread-local connection 为 bad (触发重建)
+                if "disk i/o error" in err_str or "database is locked" in err_str:
+                    if hasattr(self._pool, '_thread_connections'):
+                        tid = threading.get_ident()
+                        if tid in self._pool._thread_connections:
+                            self._pool._thread_connections[tid].mark_error(err_str)
+                            logger.warning(
+                                "[V007.16] _execute_via_read_pool: marked bad connection "
+                                "(tid=%d, attempt=%d, err=%s)",
+                                tid, attempt, err_str
+                            )
                 if "closed database" in err_str or "operational" in err_str:
                     if attempt < max_retries - 1:
+                        # 短暂退避后重试 (新 connection)
+                        time.sleep(0.05 * (attempt + 1))
                         continue
                 raise
         raise last_error
