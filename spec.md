@@ -100,7 +100,26 @@ modified_files:
   - meta/schemas/schema_loader.py
   - meta/core/models.py
   - meta/core/yaml_loader.py
+[FIX UX-V054 2026-07-06 dev agent] Element Plus .el-drawer__body 紧凑化 (PM 反馈 V053 改了 header 但空白仍在)
+  # 根因: PM 看到的"标题与编辑/删除按钮之间空白"实际是 .el-drawer__body padding-top: 20px
+  #       + header margin-bottom: 12px (V053 已减) = 32px 空白, V053 没改 body
+  # 修法: .el-drawer__body padding: 20px -> 12px 16px
+>>>>>>> 75b408c (fix(fe): UX-V054 .el-drawer__body 紧凑化 (修 V053 改错位置))
 
+
+  # [FIX UX-V052 2026-07-06 dev agent] 侧边弹窗详情页面 .odp-title-bar 高度太大浪费垂直空间 (参考 SAP Fiori Object Page)
+  # 修复: padding 8px->4px, __left 加 flex:1, title 加 ellipsis
+  # 注: V051 改错文件 (ObjectPageHeader.vue 已被 ObjectDetailPage 替代), 此 V052 正确修实际组件
+  - src/views/ObjectDetailPage.vue
+  # [FIX UX-V053 2026-07-06 dev agent] Element Plus .el-drawer__header 紧凑化 (PM 反馈 V052 仍看不到效果)
+  # PM 证据: <header class="el-drawer__header"> - 是 EP 默认 drawer header, 不是 ObjectPage
+  # 根因: EP 默认 margin-bottom: 32px + padding: 20px 16px (合计 ~72px 空白)
+  # 修法: 全局 yon-ep.scss 加 .el-drawer__header 紧凑化
+  - src/styles/yon-ep.scss
+  # [FIX UX-V054 2026-07-06 dev agent] Element Plus .el-drawer__body 紧凑化 (PM 反馈 V053 改了 header 但空白仍在)
+  # 根因: PM 看到的"标题与编辑/删除按钮之间空白"实际是 .el-drawer__body padding-top: 20px
+  #       + header margin-bottom: 12px (V053 已减) = 32px 空白, V053 没改 body
+  # 修法: .el-drawer__body padding: 20px -> 12px 16px
 new_files:
   # 部署脚本 (2026-06-30 one-shot deploy + rollback)
   - docs/deploy-full-v20260630_001.sh

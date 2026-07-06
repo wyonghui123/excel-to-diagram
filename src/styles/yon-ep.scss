@@ -1,4 +1,4 @@
-/**
+﻿/**
  * [!!!] [!!!] [!!!] 强制性规范警告 [!!!] [!!!] [!!!]
  *
  * 【修改此文件前必须阅读】
@@ -768,4 +768,42 @@ html :root {
 .app-popover-popper,
 .row-action-popper {
   z-index: var(--z-index-select) !important;
+}
+ 75b408c (fix(fe): UX-V054 .el-drawer__body 紧凑化 (修 V053 改错位置))
+
+// ============================================
+// 47. [FIX UX-V053 2026-07-06 dev agent] Drawer header 紧凑化
+// ============================================
+// PM 报告: 侧边弹窗详情页面 (领域详情 财务管理) 编辑/删除按钮上方空白过大
+// 根因: Element Plus el-drawer__header 默认样式:
+//   - padding: 20px 16px (上下 20px + 左右 16px)
+//   - margin-bottom: 32px  ← 这就是 PM 看到的"空白"
+// 修法: 紧凑化 (参考 SAP Fiori Object Page)
+//   - padding: 20px -> 8px (减 24px 上下空白)
+//   - margin-bottom: 32px -> 12px (减 20px 空白)
+//   - 保留 :first-child flex:1 (标题占满)
+//   - __title font-size: 16px -> 14px (与 ObjectPage 一致)
+.el-drawer__header {
+  padding: 8px 16px !important;
+  margin-bottom: 12px !important;
+}
+
+.el-drawer__title {
+  font-size: 14px !important;
+  font-weight: 600;
+}
+
+// ============================================
+// 48. [FIX UX-V054 2026-07-06 dev agent] Drawer body 紧凑化 (修 V053 改错位置)
+// ============================================
+// PM 反馈: V053 改了 header 但"标题与编辑/删除按钮之间仍有空白"
+// 根因: V053 只改了 .el-drawer__header, 但 .el-drawer__body 默认 padding: 20px (var(--el-drawer-padding-primary))
+//       ObjectPage header 紧贴 body padding, body padding-top + header margin-bottom = 20+12 = 32px 空白
+//       这才是 PM 看到的"标题与编辑/删除按钮之间空白"
+// 修法: 减 .el-drawer__body padding 到 12px (上下左右)
+//   - padding-top: 20px -> 12px (减 8px)
+//   - padding-left/right: 20px -> 16px (减 4px)
+//   - padding-bottom: 20px -> 12px (减 8px)
+.el-drawer__body {
+  padding: 12px 16px !important;
 }
