@@ -109,6 +109,10 @@ modified_files:
   # 根因: EP 默认 margin-bottom: 32px + padding: 20px 16px (合计 ~72px 空白)
   # 修法: 全局 yon-ep.scss 加 .el-drawer__header 紧凑化
   - src/styles/yon-ep.scss
+  # [FIX UX-V054 2026-07-06 dev agent] Element Plus .el-drawer__body 紧凑化 (PM 反馈 V053 改了 header 但空白仍在)
+  # 根因: PM 看到的"标题与编辑/删除按钮之间空白"实际是 .el-drawer__body padding-top: 20px
+  #       + header margin-bottom: 12px (V053 已减) = 32px 空白, V053 没改 body
+  # 修法: .el-drawer__body padding: 20px -> 12px 16px
 
 new_files:
   # 部署脚本 (2026-06-30 one-shot deploy + rollback)
