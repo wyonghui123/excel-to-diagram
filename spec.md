@@ -100,9 +100,10 @@ modified_files:
   - meta/schemas/schema_loader.py
   - meta/core/models.py
   - meta/core/yaml_loader.py
-  # [FIX UX-V051 2026-07-06 dev agent] ObjectPageHeader 高度太大浪费垂直空间 (参考 SAP Fiori Object Page)
-  # 修复: 减 padding + min-height, actions 同行紧凑显示, 减 header-right 与 header 的 padding
-  - src/components/common/ObjectPage/ObjectPageHeader.vue
+  # [FIX UX-V052 2026-07-06 dev agent] 侧边弹窗详情页面 .odp-title-bar 高度太大浪费垂直空间 (参考 SAP Fiori Object Page)
+  # 修复: padding 8px->4px, __left 加 flex:1, title 加 ellipsis
+  # 注: V051 改错文件 (ObjectPageHeader.vue 已被 ObjectDetailPage 替代), 此 V052 正确修实际组件
+  - src/views/ObjectDetailPage.vue
 
 new_files:
   # 部署脚本 (2026-06-30 one-shot deploy + rollback)

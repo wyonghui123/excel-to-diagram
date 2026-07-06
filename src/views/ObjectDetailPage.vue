@@ -501,28 +501,41 @@ function updateTabLabel() {
   flex-direction: column;
 }
 
+/* [FIX UX-V052 2026-07-06 dev agent] SAP Fiori Object Page 风格紧凑 title bar
+   PM 报告: 侧边弹窗详情页面 .odp-title-bar 高度太大浪费垂直空间
+   修法:
+   - padding 8px -> 4px (减 8px 上下空白)
+   - __left 加 flex: 1 (让 title 自然占满, 避免和 right 距离过宽)
+   - __right 不再需要 margin-left: auto (left 已 flex:1)
+*/
 .odp-title-bar {
   display: flex;
   align-items: center;
-  padding: 8px var(--spacing-md);
+  padding: 4px var(--spacing-md);
   flex-shrink: 0;
 
   &__left {
     display: flex;
     align-items: center;
     gap: 8px;
+    flex: 1;
+    min-width: 0;
   }
 
   &__sep {
     width: 1px;
     height: 14px;
     background: var(--color-border);
+    flex-shrink: 0;
   }
 
   &__title {
     font-size: 14px;
     font-weight: 600;
     color: var(--color-text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   &__right {
@@ -530,7 +543,6 @@ function updateTabLabel() {
     align-items: center;
     gap: 12px;
     flex: 0 0 auto;
-    margin-left: auto;
   }
 }
 
