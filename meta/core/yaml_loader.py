@@ -363,14 +363,14 @@ def parse_audit_action_config(data: Dict[str, Any]) -> "AuditActionConfig":
 
 def parse_audit_config(data: Dict[str, Any]) -> "AuditConfig":
     """解析审计日志配置"""
-    from meta.core.models import AuditConfig, AuditActionConfig
+    from meta.core.models import AuditConfig, AuditActionConfig, AuditHistoryConfig
     if not data:
         return AuditConfig()
-    
+
     config = AuditConfig(
         enabled=data.get("enabled", True),
     )
-    
+
     if "create" in data:
         config.create = parse_audit_action_config(data["create"])
     if "update" in data:
@@ -379,11 +379,18 @@ def parse_audit_config(data: Dict[str, Any]) -> "AuditConfig":
         config.delete = parse_audit_action_config(data["delete"])
     if "associate" in data:
         config.associate = parse_audit_action_config(data["associate"])
-    
+
     if "actions" in data:
         for action_name, action_data in data["actions"].items():
             config.actions[action_name] = parse_audit_action_config(action_data)
-    
+
+    # [FIX BUG-V048 2026-07-06 dev agent] 解析 audit.history (V046 yaml 配置的入口)
+    # 例: audit: { history: { excluded_child_object_types: [sub_domain, ...] } }
+    if "history" in data and isinstance(data["history"], dict):
+        config.history = AuditHistoryConfig(
+            excluded_child_object_types=list(data["history"].get("excluded_child_object_types", []) or [])
+        )
+
     return config
 
 
