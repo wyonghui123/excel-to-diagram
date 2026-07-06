@@ -121,6 +121,11 @@ class EnumCacheManager:
         # [FIX v007 2026-07-05] asyncio.Lock() 在非 event loop 线程 (e.g. Flask werkzeug
         #   子线程) 创建时抛 RuntimeError "There is no current event loop in thread"
         #   改 threading.Lock 跨线程同步, 兼容 sync + async 路径, 不需要 event loop
+        # [FIX v007.21 2026-07-06] 之前用 `async with self._lock:` 调用 threading.Lock,
+        #   Python 3.13 容忍, 3.14 抛 TypeError:
+        #   "_thread.lock object does not support the asynchronous context manager protocol"
+        #   修复: set/invalidate/invalidate_all 全部改 `with self._lock:`
+        #   (handoff: HANDOFF_DIM_EMPTY_V050.md)
         self._lock = threading.Lock()
         
         logger.info(f"[OK] EnumCacheManager 初始化完成 (TTL={ttl_seconds}s, MaxSize={max_size})")
@@ -193,7 +198,7 @@ class EnumCacheManager:
             data: 要缓存的数据
             ttl: 自定义TTL（可选，默认使用全局TTL）
         """
-        async with self._lock:
+        with self._lock:
             now = datetime.now()
             expires_at = now + timedelta(seconds=(ttl or self.ttl_seconds))
             
@@ -235,7 +240,7 @@ class EnumCacheManager:
         Args:
             enum_type_id: 枚举类型ID（如 'order_status'）
         """
-        async with self._lock:
+        with self._lock:
             # 收集要删除的键
             keys_to_remove = [
                 k for k in self._l1_cache.keys() 
@@ -258,7 +263,7 @@ class EnumCacheManager:
         
         用于系统维护或紧急情况。
         """
-        async with self._lock:
+        with self._lock:
             count = len(self._l1_cache)
             self._l1_cache.clear()
             

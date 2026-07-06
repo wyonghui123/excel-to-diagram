@@ -397,3 +397,57 @@ decisions:
 insights:
   - 59% 与 4/5 (80%) 不符, 是后端进度计算策略 (基于行而非类型), 不在 T-003 范围
 ```
+
+---
+
+## T-004: 角色权限页"管理维度为空"修复 (V007.21)
+
+### 1. 任务描述（一句话）
+
+修复 Python 3.14 严格模式下 `meta/core/enums/cache_manager.py` 的
+`async with threading.Lock()` TypeError，导致角色权限页管理维度为空。
+
+### 2. 改动文件白名单 (T-004)
+
+```yaml
+modified_files:
+  - meta/core/enums/cache_manager.py
+```
+
+### 3. 修复说明
+
+3 处 `async with self._lock:` → `with self._lock:`:
+- L196 (set)
+- L238 (invalidate)
+- L261 (invalidate_all) ← handoff 漏了
+
+`_lock` 是 `threading.Lock()` (非 asyncio.Lock), Python 3.14 严格模式拒绝
+将 `_thread.lock` 当 async context manager 用。
+
+### 4. 完成标准
+
+```yaml
+acceptance_criteria:
+  - [x] Python 3.14 复现 TypeError -> 修复后 3 个方法都不再抛
+  - [x] 角色权限页管理维度显示 4 个 (产品/版本/领域/子领域)
+  - [x] commit message 含铁律声明
+```
+
+### 5. 风险
+
+```yaml
+risk_level: low
+mitigation:
+  - 改的是 lock context manager 形式, 行为不变
+  - 短临界区, 不会引入死锁
+```
+
+### 6. 工作日志
+
+```yaml
+decisions:
+  - 改 `with` 而非改回 `asyncio.Lock()`: 保留 V007 (5782731) 的 threading.Lock 决策
+  - 修复 3 处而非 handoff 说的 2 处: 实际代码还有 invalidate_all
+insights:
+  - handoff 文档可能漏列同模式 bug, agent 接手必须 grep 全量验证
+```
