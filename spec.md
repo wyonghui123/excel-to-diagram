@@ -100,6 +100,9 @@ modified_files:
   - meta/schemas/schema_loader.py
   - meta/core/models.py
   - meta/core/yaml_loader.py
+  # [FIX UX-V051 2026-07-06 dev agent] ObjectPageHeader 高度太大浪费垂直空间 (参考 SAP Fiori Object Page)
+  # 修复: 减 padding + min-height, actions 同行紧凑显示, 减 header-right 与 header 的 padding
+  - src/components/common/ObjectPage/ObjectPageHeader.vue
 
 new_files:
   # 部署脚本 (2026-06-30 one-shot deploy + rollback)

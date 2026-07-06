@@ -131,6 +131,11 @@ function handleStateTransitionRefresh(payload = {}) {
 </script>
 
 <style scoped>
+/* [FIX UX-V051 2026-07-06 dev agent] SAP Fiori Object Page 风格紧凑 header
+   - 减 min-height: 36px -> 32px (padding 不变时, 视觉高约 44px)
+   - 减 size-md/lg padding-sm -> padding-xs (上下空白从 ~32px 减到 ~16px)
+   - header-left 紧贴 title (gap 减半)
+*/
 .object-page__header {
   display: flex;
   align-items: center;
@@ -139,26 +144,26 @@ function handleStateTransitionRefresh(payload = {}) {
   border-bottom: 1px solid var(--color-border-secondary);
   flex-shrink: 0;
   z-index: var(--z-index-sticky);
-  min-height: 36px;
-  padding: var(--spacing-xs) var(--spacing-md);
+  min-height: 32px;
+  padding: 4px var(--spacing-md);
 }
 
 .object-page__header--sm {
-  padding: var(--spacing-xs) var(--spacing-md);
+  padding: 4px var(--spacing-md);
 }
 
 .object-page__header--md {
-  padding: var(--spacing-sm) var(--spacing-md);
+  padding: 4px var(--spacing-md);
 }
 
 .object-page__header--lg {
-  padding: var(--spacing-sm) var(--spacing-lg);
+  padding: 4px var(--spacing-lg);
 }
 
 .object-page__header-left {
   display: flex;
   align-items: center;
-  gap: var(--spacing-sm);
+  gap: var(--spacing-xs);
   flex: 1;
   min-width: 0;
 }
