@@ -56,11 +56,15 @@ export function useAuditLogs(objectType, objectId, options = {}) {
     const result = await auditLogService.getLogsByObject(type, id, {
       page: params.page || currentPage.value,
       pageSize: params.pageSize || pageSize,
-      filters: { ...filters.value, ...(params.filters || {}) },
+      filters: {
+        ...filters.value,
+        ...(params.filters || {}),
+        // [FIX BUG-V048.2 2026-07-06 coordinator] excludedObjectTypes 必须放 filters 里
+        // 原代码放在顶层 options, 被 getLogsByObject 的 destructure 默默丢弃, 实际永远不传给后端
+        excludedObjectTypes: resolvedExcludedObjectTypes.value,
+      },
       parentObjectType: resolvedParentObjectType.value,
       parentObjectId: resolvedParentObjectId.value,
-      // [FIX BUG-V046 2026-07-04 dev agent] 排除特定子对象类型
-      excludedObjectTypes: resolvedExcludedObjectTypes.value,
     })
 
     if (result.success) {
