@@ -5776,7 +5776,7 @@ class ImportExportService:
         # 保护: try/except 兜底, audit 失败不影响 ImportResult 返回
         import time as _v720_time
         _v720_start_time = getattr(self, '_v007_20_import_start', None)
-        _v720_duration = (time.time() - _v720_start_time) if _v720_start_time else 0.0
+        _v720_duration = (_v720_time.time() - _v720_start_time) if _v720_start_time else 0.0
         try:
             audit_service = None
             executor = getattr(self.manage_service, 'executor', None)
