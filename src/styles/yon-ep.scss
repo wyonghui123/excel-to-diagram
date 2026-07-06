@@ -791,3 +791,18 @@ html :root {
   font-size: 14px !important;
   font-weight: 600;
 }
+
+// ============================================
+// 48. [FIX UX-V054 2026-07-06 dev agent] Drawer body 紧凑化 (修 V053 改错位置)
+// ============================================
+// PM 反馈: V053 改了 header 但"标题与编辑/删除按钮之间仍有空白"
+// 根因: V053 只改了 .el-drawer__header, 但 .el-drawer__body 默认 padding: 20px (var(--el-drawer-padding-primary))
+//       ObjectPage header 紧贴 body padding, body padding-top + header margin-bottom = 20+12 = 32px 空白
+//       这才是 PM 看到的"标题与编辑/删除按钮之间空白"
+// 修法: 减 .el-drawer__body padding 到 12px (上下左右)
+//   - padding-top: 20px -> 12px (减 8px)
+//   - padding-left/right: 20px -> 16px (减 4px)
+//   - padding-bottom: 20px -> 12px (减 8px)
+.el-drawer__body {
+  padding: 12px 16px !important;
+}
