@@ -520,3 +520,46 @@ insights:
   - vite.config.js target 与 3007 实际启动的 worktree 不一致 -> 高危配置漂移
   - 验证 3007 进程启动时 cwd + node_modules 路径才能确定它属于哪个 worktree
 ```
+
+---
+
+## T-006: BUG-V007.21-r2 GlobalToolbar openSwitchDialog ReferenceError [2026-07-06]
+
+### 1. 任务描述（一句话）
+
+修复 GlobalToolbar.vue openSwitchDialog 函数体引用未定义变量 `command` 导致
+架构数据管理页面点"切换"按钮报 "command is not defined" 的问题。
+
+### 2. 改动文件白名单 (T-006)
+
+```yaml
+modified_files:
+  - src/components/common/GlobalToolbar/GlobalToolbar.vue
+```
+
+### 3. 根因
+
+- d776211 (V050) 把 el-dropdown 改为 @click + openSwitchDialog 函数
+- 旧 handleDropdownCommand(command) 形参被函数体引用 (L217/L225/L234)
+- 改 @click 后 openSwitchDialog 无形参, 但函数体仍引用 command
+- V007.21 修复后产品列表可见, 用户能选产品 → 才能触发此 bug
+- 之前无产品数据, 此 bug 未触发
+
+### 4. 完成标准
+
+```yaml
+acceptance_criteria:
+  - [x] /system/archdata?productId=533&versionId=884 点"切换"按钮不报错
+  - [x] 弹窗"切换产品版本"正常显示
+  - [x] console errors: 0
+  - [x] page errors: 0
+```
+
+### 5. 风险
+
+```yaml
+risk_level: low
+mitigation:
+  - 旧 if/else 分支(changeProduct/changeVersion/clear)从未被触发, 无功能损失
+  - 保留 T-002 修复点: fetchProducts/fetchVersions 在弹窗打开前触发
+```

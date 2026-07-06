@@ -213,16 +213,19 @@ function onVisibleChange(visible) {
   }
 }
 
-function openSwitchDialog() {
+async function openSwitchDialog() {
+  // [FIX 2026-07-06 BUG-V007.21-r2] 弹窗合并后, command 参数不再需要
+  //   旧代码从 el-dropdown 接收 command 形参, 改用 @click 后忘了删引用 → ReferenceError
+  //   修复: 函数不再依赖外部 command, 统一行为: 打开弹窗 + 刷新数据
+  // [FIX 2026-07-05 T-002] 打开弹窗前先刷新数据, 避免单例不感知
+  await fetchProducts()
+  if (selectedProductId.value) {
+    await fetchVersions(selectedProductId.value)
+  }
   dialogProductId.value = selectedProductId.value
   dialogVersionId.value = selectedVersionId.value
   dialogVersions.value = versions.value ? [...versions.value] : []
   showSwitchDialog.value = true
-  // [FIX BUG-V047 2026-07-05 dev agent] 弹窗打开时刷新 products
-  // 原因: useVersionContext 是单例, admin 创建新产品/版本后单例不感知
-  // 之前 commit 77b6d6f 尝试修这个但改坏了 toolbar (删了 openSwitchDialog 函数, 函数未定义)
-  // 现在重做: 弹窗打开 = 用户主动切换, 触发 fetchProducts 拉最新
-  fetchProducts()
 }
 
 async function onDialogProductChange(productId) {
