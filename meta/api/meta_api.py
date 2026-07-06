@@ -41,6 +41,21 @@ def _ensure_fresh_meta():
     return _last_version
 
 
+
+
+# [FIX BUG-V048 2026-07-06 dev agent] 加 /<object_type>/ui-config endpoint
+# 背景: V046 fix 在 schema_loader.py 暴露了 audit_history_excluded_child_object_types,
+#       但后端没有任何 API endpoint 调用 SchemaLoader.load_schema()。
+#       前端 HistorySection 通过 metaService.getUIConfig() 调 /meta/<type>/ui-config,
+#       但 meta_api.py 只有 /view-config/... 路由, /ui-config 返回 404。
+# 修法: 调 SchemaLoader.load_schema() 返回 dict (含 audit_history_excluded_child_object_types)
+#       并作为 /<object_type>/ui-config endpoint 的响应。
+from meta.schemas.schema_loader import SchemaLoader
+import os as _os
+_ui_config_schema_dir = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "schemas")
+_ui_config_loader = SchemaLoader(_ui_config_schema_dir)
+
+
 def _dataclass_to_dict(obj: Any) -> Any:
     """递归转换 dataclass 为 dict"""
     if hasattr(obj, '__dataclass_fields__'):
@@ -188,6 +203,30 @@ def get_view_config(object_type: str):
         'object_type': object_type,
         'view_name': view_name or 'default',
     })
+
+
+@meta_bp.route('/<object_type>/ui-config', methods=['GET'])
+def get_ui_config(object_type: str):
+    """[FIX BUG-V048 2026-07-06 dev agent] 获取对象类型的 UI 配置 (含 audit_history_excluded_child_object_types)
+    """
+    try:
+        config = _ui_config_loader.load_schema(object_type)
+        if not config:
+            return jsonify({
+                'success': False,
+                'error': f'UI config not found for: {object_type}',
+            }), 404
+        return jsonify({
+            'success': True,
+            'data': config,
+            'object_type': object_type,
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'object_type': object_type,
+        }), 500
 
 
 @meta_bp.route('/<object_type>/view-config/<view_name>', methods=['GET'])

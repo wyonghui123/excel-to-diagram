@@ -799,18 +799,30 @@ class AuditActionConfig:
 
 
 @dataclass
+class AuditHistoryConfig:
+    """[FIX BUG-V048 2026-07-06 dev agent] 审计历史 tab 的配置
+    用于详情页"操作日志" tab 显示控制 (如排除特定子对象类型日志)
+    """
+    excluded_child_object_types: List[str] = field(default_factory=list)
+
+
+@dataclass
 class AuditConfig:
     """审计日志配置"""
     enabled: bool = True
-    
+
     create: AuditActionConfig = field(default_factory=lambda: AuditActionConfig(enabled=True, fields="all"))
     update: AuditActionConfig = field(default_factory=lambda: AuditActionConfig(enabled=True, fields="changed_only", exclude=["id", "created_at", "updated_at"]))
     delete: AuditActionConfig = field(default_factory=lambda: AuditActionConfig(enabled=True, fields="business_only", exclude=["id", "created_at", "updated_at"]))
-    
+
     associate: AuditActionConfig = field(default_factory=lambda: AuditActionConfig(enabled=True))
     dissociate: AuditActionConfig = field(default_factory=lambda: AuditActionConfig(enabled=True))
-    
+
     actions: Dict[str, AuditActionConfig] = field(default_factory=dict)
+
+    # [FIX BUG-V048 2026-07-06 dev agent] 详情页"操作日志" tab 配置
+    # 之前 V046 在 yaml 配 audit.history.excluded_child_object_types 但 AuditConfig 没这个字段, 完全被忽略
+    history: AuditHistoryConfig = field(default_factory=AuditHistoryConfig)
     
     def get_action_config(self, action: str) -> AuditActionConfig:
         """获取动作的审计配置"""
