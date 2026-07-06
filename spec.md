@@ -91,6 +91,15 @@ modified_files:
   - src/services/auditLogService.js
   # [FIX BUG-V047 2026-07-05 dev agent] GlobalToolbar 切回 d776211 + 加 fetchProducts (修 77b6d6f 改坏)
   - src/components/common/GlobalToolbar/GlobalToolbar.vue
+  # [FIX BUG-V048 2026-07-06 dev agent] V046 fix 没生效 - 后端没有 /ui-config endpoint
+  # 前端调 metaService.getUIConfig() → /meta/${type}/ui-config, 但 meta_api 只有 /view-config
+  # 修复: 在 meta_api.py 加 /<object_type>/ui-config endpoint, 调 schema_loader 暴露 audit_history_excluded_child_object_types
+  # 同时修 schema_loader.py 的 bug (MetaObject 没有 label 属性, 用 getattr + name 兜底)
+  # 同时给 AuditConfig 加 history: AuditHistoryConfig 字段 (V046 配的 audit.history 才会被解析)
+  - meta/api/meta_api.py
+  - meta/schemas/schema_loader.py
+  - meta/core/models.py
+  - meta/core/yaml_loader.py
 
 new_files:
   # 部署脚本 (2026-06-30 one-shot deploy + rollback)

@@ -20,7 +20,8 @@ class SchemaLoader:
         result = {
             'id': meta.id,
             'table_name': meta.table_name,
-            'label': meta.label,
+            # [FIX BUG-V048 2026-07-06 dev agent] MetaObject 没有 label 字段, 用 name 兜底
+            'label': getattr(meta, 'label', None) or getattr(meta, 'name', ''),
             'labels': getattr(meta, 'labels', {}),
             'description': getattr(meta, 'description', ''),
             'fields': [],
