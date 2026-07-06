@@ -104,6 +104,11 @@ modified_files:
   # 修复: padding 8px->4px, __left 加 flex:1, title 加 ellipsis
   # 注: V051 改错文件 (ObjectPageHeader.vue 已被 ObjectDetailPage 替代), 此 V052 正确修实际组件
   - src/views/ObjectDetailPage.vue
+  # [FIX UX-V053 2026-07-06 dev agent] Element Plus .el-drawer__header 紧凑化 (PM 反馈 V052 仍看不到效果)
+  # PM 证据: <header class="el-drawer__header"> - 是 EP 默认 drawer header, 不是 ObjectPage
+  # 根因: EP 默认 margin-bottom: 32px + padding: 20px 16px (合计 ~72px 空白)
+  # 修法: 全局 yon-ep.scss 加 .el-drawer__header 紧凑化
+  - src/styles/yon-ep.scss
 
 new_files:
   # 部署脚本 (2026-06-30 one-shot deploy + rollback)
