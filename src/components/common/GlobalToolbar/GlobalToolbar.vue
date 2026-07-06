@@ -214,29 +214,18 @@ function onVisibleChange(visible) {
 }
 
 async function openSwitchDialog() {
-  if (command === 'changeProduct') {
-    changeDialogType.value = 'product'
-    dialogSelectValue.value = selectedProductId.value
-    // [FIX 2026-07-05 T-002] 打开"切换产品"弹窗前刷新 products
-    //   根因: useVersionContext 是单例, admin 创建新产品后单例不感知
-    //   弹窗打开 = 用户明确需要最新数据, 此时触发 fetchProducts
-    await fetchProducts()
-    showChangeDialog.value = true
-  } else if (command === 'changeVersion') {
-    changeDialogType.value = 'version'
-    dialogSelectValue.value = selectedVersionId.value
-    // [FIX 2026-07-05 T-002] 打开"切换版本"弹窗前刷新当前产品的 versions
-    //   根因同上, 单例 versions 不会自动更新
-    if (selectedProductId.value) {
-      await fetchVersions(selectedProductId.value)
-    }
-    showChangeDialog.value = true
-  } else if (command === 'clear') {
-    clearContext()
-    localProductId.value = null
-    localVersionId.value = null
-    emit('change', { productId: null, versionId: null })
+  // [FIX 2026-07-06 BUG-V007.21-r2] 弹窗合并后, command 参数不再需要
+  //   旧代码从 el-dropdown 接收 command 形参, 改用 @click 后忘了删引用 → ReferenceError
+  //   修复: 函数不再依赖外部 command, 统一行为: 打开弹窗 + 刷新数据
+  // [FIX 2026-07-05 T-002] 打开弹窗前先刷新数据, 避免单例不感知
+  await fetchProducts()
+  if (selectedProductId.value) {
+    await fetchVersions(selectedProductId.value)
   }
+  dialogProductId.value = selectedProductId.value
+  dialogVersionId.value = selectedVersionId.value
+  dialogVersions.value = versions.value ? [...versions.value] : []
+  showSwitchDialog.value = true
 }
 
 async function onDialogProductChange(productId) {
