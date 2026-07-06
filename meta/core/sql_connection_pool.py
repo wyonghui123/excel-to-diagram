@@ -254,7 +254,14 @@ class SQLiteConnectionPool:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
             conn.execute("PRAGMA foreign_keys = ON")
-            conn.execute("PRAGMA busy_timeout = 5000")
+            # [V007.20 2026-07-06] busy_timeout: 5000 → 30000 (30s)
+            # 背景: yonaa 1w+ annotation import 卡 40% (HANDOFF_V007_20_BUSY_TIMEOUT.md)
+            #       WriteQueue 单写线程 + audit_async_queue + async_audit_writer 三条
+            #       路径同时写 audit_logs, 撞锁频率高.
+            #       busy_timeout=5000 (5s) 不够, 撞锁等不及.
+            # 修法: 30s 等待, 让 write_queue retry 接管短撞锁 (< 30s)
+            #       WriteQueue._write_loop 也加了 retry + backoff (V007.20 L2)
+            conn.execute("PRAGMA busy_timeout = 30000")
             conn.execute("PRAGMA auto_vacuum = INCREMENTAL")
             conn.execute(
                 "PRAGMA wal_autocheckpoint = {0}".format(

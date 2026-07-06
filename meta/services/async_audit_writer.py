@@ -408,15 +408,23 @@ class AsyncAuditWriter:
         # [v3.18 Layer 3] 从 audit_fn 闭包提取 obj 信息, 强制写 AUDIT_WRITE_FAILED 一条 audit
         obj_info = self._extract_obj_info(audit_fn)
 
+        # [V007.20 2026-07-06] _persist_failed 改写 .failed-audit.log 文件而非 audit_logs
+        # 背景: yonaa 1w+ annotation import (HANDOFF_V007_20_BUSY_TIMEOUT.md) 撞锁后,
+        #       _persist_failed 又调 _write_failed_record 再写 1 次 audit_logs,
+        #       如果数据库仍锁着, 又撞锁, 失败链递归放大.
+        # 修法: 失败的 audit 不再写 audit_logs, 改写独立 .failed-audit-{date}.log 文件
+        #       /opt/app/shared/logs/failed-audit-YYYY-MM-DD.log
+        #       ops 可以离线 grep / 离线回灌 (separate process, no lock contention)
+        # 保留 _write_failed_record 函数定义但不再调用, 兼容老 caller
         try:
-            self._write_failed_record(
+            self._write_failed_to_log_file(
                 trace_id, transaction_id, error_message,
                 obj_info=obj_info,
                 user_id=user_id, user_name=user_name,
                 ip_address=ip_address, user_agent=user_agent,
             )
         except Exception as e:
-            logger.error("Failed to persist audit failure record: %s", str(e))
+            logger.error("Failed to persist audit failure to log file: %s", str(e))
 
     @staticmethod
     def _extract_obj_info(audit_fn: Callable) -> Dict[str, Any]:
@@ -526,6 +534,59 @@ class AsyncAuditWriter:
             )
         except Exception as e:
             logger.error("Failed to insert AUDIT_WRITE_FAILED record: %s", str(e))
+
+    def _write_failed_to_log_file(self, trace_id: str = None,
+                                   transaction_id: str = None,
+                                   error_message: str = "",
+                                   obj_info: Dict[str, Any] = None,
+                                   user_id: Any = None, user_name: str = None,
+                                   ip_address: str = None, user_agent: str = None):
+        # [V007.20 2026-07-06] 失败 audit 写 .failed-audit-{date}.log 文件
+        # 默认路径: /opt/app/shared/logs/failed-audit-YYYY-MM-DD.log
+        # 可通过环境变量 AUDIT_FAILED_LOG_DIR 覆盖 (用于测试 / 单元测试)
+        # 文件不存在时自动创建; 写入失败用 logger 兜底 (不抛异常)
+        import os as _os
+        log_dir = _os.environ.get(
+            "AUDIT_FAILED_LOG_DIR",
+            _os.environ.get("META_LOG_DIR", "/opt/app/shared/logs")
+        )
+        if not obj_info:
+            obj_info = {"object_type": "__audit_failure__", "object_id": "0", "action": "UNKNOWN"}
+
+        failed_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "trace_id": trace_id,
+            "transaction_id": transaction_id,
+            "object_type": obj_info.get("object_type"),
+            "object_id": str(obj_info.get("object_id", "")),
+            "original_action": obj_info.get("action", "UNKNOWN"),
+            "error_message": (error_message or "")[:1000],
+            "user_id": user_id,
+            "user_name": user_name or "system",
+            "ip_address": ip_address or "",
+            "user_agent": user_agent or "",
+            "failure_kind": "AUDIT_WRITE_FAILED",
+        }
+
+        try:
+            _os.makedirs(log_dir, exist_ok=True)
+            date_str = datetime.now().strftime("%Y-%m-%d")
+            log_file = _os.path.join(log_dir, f"failed-audit-{date_str}.log")
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(failed_entry, ensure_ascii=False) + "\n")
+            logger.warning(
+                "[V007.20] Audit write failure logged to file: %s | object_type=%s object_id=%s action=%s",
+                log_file,
+                obj_info.get("object_type"),
+                obj_info.get("object_id"),
+                obj_info.get("action"),
+            )
+        except Exception as e:
+            # 文件写失败 (磁盘满 / 权限问题), 至少 logger 兜底
+            logger.error(
+                "[V007.20] Failed to write audit failure log file (dir=%s): %s | entry=%s",
+                log_dir, str(e), json.dumps(failed_entry, ensure_ascii=False)[:500],
+            )
 
     def get_stats(self) -> Dict[str, Any]:
         with self._stats_lock:

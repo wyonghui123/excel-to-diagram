@@ -24,11 +24,8 @@ DIST = WORKTREE / 'dist'
 OUT = WORKTREE / 'deploy_bundle' / 'deploy-v20260704_007.zip'
 STAGING = WORKTREE / 'deploy_bundle' / '.staging_v007_15'
 
-# [FIX V007.17 2026-07-06] 顶层 Python package 列表 (server.py 在 meta/server.py,
+# [V007.17 2026-07-06] 顶层 Python package (server.py 在 meta/server.py,
 #   但 telemetry/ mcp/ 是 worktree 顶层 Python package, 必须 zip)
-# 根因: V007.15 zip 缺 telemetry/ mcp/, yonaa server.py 启动报
-#   "ModuleNotFoundError: No module named 'telemetry'" / 'mcp'
-# 修法: build 脚本加这些顶层 package 到复制列表
 TELEMETRY = WORKTREE / 'telemetry'
 MCP = WORKTREE / 'mcp'
 
@@ -107,6 +104,22 @@ for src_file in META.rglob('*'):
         file_count += 1
 
 print(f"[OK] Copied meta: {file_count} files (excluded {excluded_count})")
+
+# [V007.17 2026-07-06] Copy 顶层 Python package: telemetry
+if TELEMETRY.exists():
+    shutil.copytree(TELEMETRY, STAGING / 'telemetry')
+    t_count = sum(1 for _ in (STAGING / 'telemetry').rglob('*') if _.is_file())
+    print(f"[OK] Copied telemetry: {t_count} files")
+else:
+    print(f"[WARN] telemetry/ not found in WORKTREE ({WORKTREE})")
+
+# [V007.17 2026-07-06] Copy 顶层 Python package: mcp
+if MCP.exists():
+    shutil.copytree(MCP, STAGING / 'mcp')
+    m_count = sum(1 for _ in (STAGING / 'mcp').rglob('*') if _.is_file())
+    print(f"[OK] Copied mcp: {m_count} files")
+else:
+    print(f"[WARN] mcp/ not found in WORKTREE ({WORKTREE})")
 
 # Write zip directly
 print(f"[INFO] Writing zip to {OUT}")

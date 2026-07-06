@@ -5562,6 +5562,10 @@ class ImportExportService:
 
         context = context or {}
 
+        # [V007.20] 记录 import 开始时间, 用于 BATCH_IMPORT summary audit 的 duration
+        import time as _v720_start_time_mod
+        self._v007_20_import_start = _v720_start_time_mod.time()
+
         if not os.path.exists(file_path):
             trace_id = self._get_current_trace_id()
             if mode == "preview":
@@ -5763,7 +5767,60 @@ class ImportExportService:
                 'current_index': total_types,
                 'message': '导入完成'
             })
-        
+
+        # [V007.20 2026-07-06] 写 1 条 BATCH_IMPORT summary audit log
+        # 背景: import_cascade 内部所有 manage_service.create 都传 skip_audit=True,
+        #       不写细粒度 audit (1w+ 行会撞锁). 但导入本身是一次业务事件, 必须有 audit.
+        # 修法: import_cascade 返回前写 1 条 BATCH_IMPORT summary, 含
+        #       file_path / total_types / total_rows / success_count / failed_count / duration
+        # 保护: try/except 兜底, audit 失败不影响 ImportResult 返回
+        import time as _v720_time
+        _v720_start_time = getattr(self, '_v007_20_import_start', None)
+        _v720_duration = (time.time() - _v720_start_time) if _v720_start_time else 0.0
+        try:
+            audit_service = None
+            executor = getattr(self.manage_service, 'executor', None)
+            if executor is not None:
+                audit_logger = getattr(executor, 'audit_logger', None)
+                if audit_logger is not None:
+                    audit_service = getattr(audit_logger, 'audit_service', None)
+            if audit_service is not None:
+                total_success = sum(
+                    len([r for r in v.get('successes', [])])
+                    for v in results.values() if isinstance(v, dict)
+                )
+                total_failed = sum(
+                    len([e for e in v.get('errors', [])])
+                    for v in results.values() if isinstance(v, dict)
+                )
+                audit_service.log(
+                    object_type='BATCH_IMPORT',
+                    object_id=os.path.basename(file_path) if file_path else 'unknown',
+                    action='IMPORT',
+                    outcome='success' if len(all_errors) == 0 else 'partial',
+                    extra_data={
+                        'file_path': file_path,
+                        'object_types': list(results.keys()),
+                        'total_object_types': total_types,
+                        'success_count': total_success,
+                        'failed_count': total_failed,
+                        'duration_seconds': round(_v720_duration, 3),
+                        'mode': mode,
+                        'conflict_strategy': conflict_strategy,
+                    },
+                    log_category='BATCH_IMPORT',
+                    log_level='INFO',
+                )
+                logger.info(
+                    "[V007.20] BATCH_IMPORT summary audit written: "
+                    "file=%s types=%d success=%d failed=%d duration=%.2fs",
+                    os.path.basename(file_path) if file_path else 'unknown',
+                    total_types, total_success, total_failed, _v720_duration,
+                )
+        except Exception as _audit_err:
+            # audit 写失败不影响 ImportResult 返回
+            logger.warning("[V007.20] BATCH_IMPORT summary audit failed (non-fatal): %s", _audit_err)
+
         return ImportResult(
             success=len(all_errors) == 0,
             results=results,
@@ -7279,7 +7336,17 @@ class ImportExportService:
                             failed_count += 1
                             errors.append({"row": row_num, "operation": operation_mode, "field": "编码", "value": record.get("code", ""), "message": upsert_result.get("error", "Upsert failed")})
                     else:
-                        result = self.manage_service.create(CreateRequest(object_type=object_type, data=record))
+                        # [V007.20 2026-07-06] 批量导入传 skip_audit=True
+                        # 背景: 1w+ annotation import 每条默认带 audit (CREATE), 业务
+                        #       INSERT + audit INSERT 都走 WriteQueue 单写线程,
+                        #       撞锁 + write_queue 排队爆, 业务卡 40% (HANDOFF_V007_20_BUSY_TIMEOUT.md)
+                        # 修法: 批量导入不写细粒度 audit (导入本身就是审计事件),
+                        #       在 import_cascade 结束时写 1 条 BATCH_IMPORT summary
+                        result = self.manage_service.create(CreateRequest(
+                            object_type=object_type,
+                            data=record,
+                            skip_audit=True,
+                        ))
                         if result.success:
                             success_count += 1
                             created_count += 1
@@ -7368,7 +7435,12 @@ class ImportExportService:
                             skipped_count += 1
                             _record_skipped_item(skipped_items, row_num, "skip", record, "记录已存在", _MAX_DETAIL, code_override=_get_row_code(row, record), name_override=_get_row_name(row, record))
                             continue
-                        result = self.manage_service.create(CreateRequest(object_type=object_type, data=record))
+                        # [V007.20] skip 分支 create 也传 skip_audit=True (第 3 处)
+                        result = self.manage_service.create(CreateRequest(
+                            object_type=object_type,
+                            data=record,
+                            skip_audit=True,
+                        ))
                         if result.success:
                             success_count += 1
                             created_count += 1
@@ -7377,7 +7449,12 @@ class ImportExportService:
                             failed_count += 1
                             errors.append({"row": row_num, "operation": operation_mode, "field": "编码", "value": record.get("code", ""), "message": result.message or "创建失败"})
                     else:
-                        result = self.manage_service.create(CreateRequest(object_type=object_type, data=record))
+                        # [V007.20] else 分支 create 也传 skip_audit=True (第 4 处)
+                        result = self.manage_service.create(CreateRequest(
+                            object_type=object_type,
+                            data=record,
+                            skip_audit=True,
+                        ))
                         if result.success:
                             success_count += 1
                             created_count += 1
@@ -7695,7 +7772,13 @@ class ImportExportService:
                     record['code'] = kt_code
                     logger.info(f"[Upsert] Key template auto-generated code: {kt_code}")
 
-            result = self.manage_service.create(CreateRequest(object_type=object_type, data=record))
+            # [V007.20] _upsert_record 内部 create 也传 skip_audit=True
+            # (虽然 _upsert_record 是单条, 但 import_cascade 会反复调用, 仍可能撞锁)
+            result = self.manage_service.create(CreateRequest(
+                object_type=object_type,
+                data=record,
+                skip_audit=True,
+            ))
             if result.success:
                 return {"success": True, "error": None, "operation": "create"}
             else:

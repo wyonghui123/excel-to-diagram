@@ -401,19 +401,68 @@ class WriteQueue:
                 wait_time = time.time() - op.submitted_at
                 self._stats["total_wait_time"] += wait_time
 
-                try:
-                    with self._pool.writer() as conn:
-                        op.execute(conn)
-                    self._stats["completed_count"] += 1
-                    exec_time = op.completed_at - op.started_at
-                    self._stats["total_exec_time"] += exec_time
-                    self._recent_latencies.append(exec_time)
-                    if len(self._recent_latencies) > self._max_recent:
-                        self._recent_latencies.pop(0)
-                except Exception as e:
-                    self._stats["failed_count"] += 1
-                    logger.error("Write operation failed: %s", str(e))
-                    logger.debug("Traceback: %s", traceback.format_exc())
+                # [V007.20 2026-07-06] 撞锁重试机制
+                # 背景: yonaa 1w+ annotation import 卡 40% (HANDOFF_V007_20_BUSY_TIMEOUT.md)
+                #       WriteQueue 单写线程 + audit_async_queue + async_audit_writer 三条
+                #       路径同时写 audit_logs, 撞锁 (SQLITE_BUSY 'database is locked') 频率高.
+                #       之前: 撞锁 1 次就 fail, audit 写失败链递归放大.
+                # 修法: 撞锁视为暂时性错误, sleep + 重试 N 次 (指数 backoff)
+                #       配合 busy_timeout=30000 (sql_connection_pool.py V007.20 L4)
+                # 注意: 不用 op.execute() 因为 WriteOperation.execute 失败时
+                #       永久 set_exception 到 future (第 2 次会 raise InvalidStateError).
+                #       retry 时直接调 op.func 拿到结果, 全部 attempt 成功后才 set_result.
+                _retryable_errors = ("database is locked", "disk i/o error", "database is busy")
+                _max_retries = 5
+                _op_success = False
+                for attempt in range(_max_retries + 1):
+                    try:
+                        op.started_at = time.time()
+                        with self._pool.writer() as conn:
+                            result = op.func(conn, *op.args, **op.kwargs)
+                        op.completed_at = time.time()
+                        # 全部 attempt 成功后才标记 future 完成
+                        if not op.future.done():
+                            op.future.set_result(result)
+                        _op_success = True
+                        exec_time = op.completed_at - op.started_at
+                        self._stats["completed_count"] += 1
+                        self._stats["total_exec_time"] += exec_time
+                        self._recent_latencies.append(exec_time)
+                        if len(self._recent_latencies) > self._max_recent:
+                            self._recent_latencies.pop(0)
+                        if attempt > 0:
+                            self._stats["retry_success_count"] = \
+                                self._stats.get("retry_success_count", 0) + 1
+                            logger.info(
+                                "WriteQueue retry success after %d attempts: %s",
+                                attempt, str(op.func)[:80]
+                            )
+                        break  # 成功, 退出 retry loop
+                    except Exception as e:
+                        err_str = str(e).lower()
+                        is_retryable = any(re in err_str for re in _retryable_errors)
+                        if is_retryable and attempt < _max_retries:
+                            # 撞锁重试: 指数 backoff 50ms * 2^attempt + 随机抖动
+                            import random as _random
+                            delay = 0.05 * (2 ** attempt) + _random.uniform(0, 0.02)
+                            self._stats["retry_count"] = \
+                                self._stats.get("retry_count", 0) + 1
+                            logger.warning(
+                                "WriteQueue retryable error (attempt %d/%d, sleep %.3fs): %s | op=%s",
+                                attempt + 1, _max_retries, delay, err_str,
+                                str(op.func)[:80]
+                            )
+                            time.sleep(delay)
+                            # 注意: 不重新入队 (_queue.put), 立即重试避免其他 op 插队
+                            # 因为撞锁通常很快释放 (其他 connection commit)
+                            continue
+                        # 不可重试 或 已达 max_retries
+                        if not op.future.done():
+                            op.future.set_exception(e)
+                        self._stats["failed_count"] += 1
+                        logger.error("Write operation failed: %s", str(e))
+                        logger.debug("Traceback: %s", traceback.format_exc())
+                        break
 
             except Exception as e:
                 logger.error("Write loop error: %s", str(e))
