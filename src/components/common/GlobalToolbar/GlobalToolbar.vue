@@ -218,6 +218,11 @@ function openSwitchDialog() {
   dialogVersionId.value = selectedVersionId.value
   dialogVersions.value = versions.value ? [...versions.value] : []
   showSwitchDialog.value = true
+  // [FIX BUG-V047 2026-07-05 dev agent] 弹窗打开时刷新 products
+  // 原因: useVersionContext 是单例, admin 创建新产品/版本后单例不感知
+  // 之前 commit 77b6d6f 尝试修这个但改坏了 toolbar (删了 openSwitchDialog 函数, 函数未定义)
+  // 现在重做: 弹窗打开 = 用户主动切换, 触发 fetchProducts 拉最新
+  fetchProducts()
 }
 
 async function onDialogProductChange(productId) {

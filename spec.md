@@ -49,6 +49,17 @@ modified_files:
   - e2e/screenplay/questions/BusinessRuleAssertor.js
   - src/components/bo/ActionExecutor.vue
   - src/components/common/ObjectPage/AssociationSection.vue
+  # [FIX BUG-V046 2026-07-04 dev agent] 详情页"操作日志" tab 排除特定子对象类型
+  - meta/schemas/domain.yaml
+  - meta/schemas/sub_domain.yaml
+  - meta/schemas/service_module.yaml
+  - meta/api/audit_api.py
+  - meta/schemas/schema_loader.py
+  - src/components/common/ObjectPage/HistorySection.vue
+  - src/composables/useAuditLogs.js
+  - src/services/auditLogService.js
+  # [FIX BUG-V047 2026-07-05 dev agent] GlobalToolbar 切回 d776211 + 加 fetchProducts (修 77b6d6f 改坏)
+  - src/components/common/GlobalToolbar/GlobalToolbar.vue
 
 new_files:
   # IE 智能体的 e2e 测试 (21)
