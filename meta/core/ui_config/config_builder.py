@@ -172,6 +172,18 @@ class UIConfigBuilder:
         if cascade_select:
             config['cascade_select'] = _make_json_safe(cascade_select)
 
+        # [FIX BUG-V048.1 2026-07-06 coordinator] 注入 audit_history_excluded_child_object_types
+        # V048 在 yaml_loader 解析了 audit.history.excluded_child_object_types 到 meta_obj.audit.history,
+        # 但 UIConfigBuilder._inject_meta 没有把它注入 UI Config, 导致前端 getUIConfig() 读不到。
+        # 前端 HistorySection 依赖此字段过滤操作日志 tab 中的子对象类型。
+        audit_config = getattr(meta_obj, 'audit', None)
+        if audit_config:
+            history = getattr(audit_config, 'history', None)
+            if history:
+                excluded = getattr(history, 'excluded_child_object_types', None) or []
+                if excluded:
+                    config['audit_history_excluded_child_object_types'] = list(excluded)
+
     def _inject_display_names(self, config, object_type, meta_obj):
         dns = self._dns
         display_field = getattr(meta_obj, 'display_name_field', None) or dns._infer_display_name_field(meta_obj)
