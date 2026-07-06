@@ -466,3 +466,57 @@ decisions:
 insights:
   - handoff 文档可能漏列同模式 bug, agent 接手必须 grep 全量验证
 ```
+
+---
+
+## T-005: 3007 vite proxy 错误指向 3011 (空 db) [2026-07-06]
+
+### 1. 任务描述（一句话）
+
+修复 integration-worktree 的 vite.config.js proxy target 错误指向
+3011 (worktree-V050 空 db) 的问题, 改为 3018 (integration backend 真数据)。
+
+### 2. 改动文件白名单 (T-005)
+
+```yaml
+modified_files:
+  - vite.config.js  # 改 proxy target 3011 -> 3018 (api + socket.io)
+```
+
+### 3. 根因
+
+- 3007 vite 是 integration-worktree 的前端
+- vite.config.js 写死 proxy target=3011 (worktree-V050 主 backend)
+- 3011 用的 db 是 worktree-V050/meta/architecture.db (baseline 测试空库, 0 products)
+- 实际数据在 integration-worktree/meta/architecture.db (250 products)
+- 修复: 改 target=3018
+
+### 4. 完成标准
+
+```yaml
+acceptance_criteria:
+  - [x] 3007/api/v2/bo/product: 200, total=250
+  - [x] 3007/api/v2/bo/version: 200, total=261
+  - [x] 3007/api/v2/bo/management_dimension: 4 dimensions (V007.21 fix 兼容)
+  - [x] 浏览器 console 无错误
+```
+
+### 5. 风险
+
+```yaml
+risk_level: low
+mitigation:
+  - 3018 已部署 V007.21 修复, 已验证可服务
+  - 3011 仍保留, 供 worktree-V050 dev 测试
+```
+
+### 6. 工作日志
+
+```yaml
+decisions:
+  - 改 vite.config.js 而非复制 db: 跨 worktree 拷贝 db 风险高
+  - 保留 3011: dev 路径不能断
+insights:
+  - vite.config.js target 与 3007 实际启动的 worktree 不一致 -> 高危配置漂移
+  - 验证 3007 进程启动时 cwd + node_modules 路径才能确定它属于哪个 worktree
+```

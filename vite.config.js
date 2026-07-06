@@ -95,8 +95,12 @@ export default defineConfig({
     },
     proxy: {
       // [FR-009] 合并所有 /api/* 到统一代理规则 (原来 5 条独立规则, target 相同)
+      // [FIX 2026-07-06] 改为 3018 (integration backend) 而不是 3011 (主 backend 空 db)
+      //   背景: 3007 vite 是 integration-worktree 的前端, 应该代理到 integration 后端
+      //   但 vite.config.js 之前写死 3011, 导致 3007 用户看到 worktree-V050 空 db (0 products)
+      //   修复: 指 3018 (integration backend, db 是真实数据 250 products)
       '/api': {
-        target: 'http://localhost:3011',
+        target: 'http://localhost:3018',
         changeOrigin: true,
         ws: true,
         // [FIX BUG-V029 2026-06-28] 30s→180s
@@ -115,7 +119,7 @@ export default defineConfig({
         }
       },
       '/socket.io': {
-        target: 'http://localhost:3011',
+        target: 'http://localhost:3018',
         changeOrigin: true,
         ws: true,
       }
