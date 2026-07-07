@@ -354,6 +354,78 @@ curl http://localhost:3007/api/v1/auth/dev-login?username=admin
 | #1 没本机 dry-run | 我看心情跑 | rebuild_zip.py 强制跑 |
 | #2 没验 yonaa 端 | 12 项 invariant 全源头 | verify V12 + V13 + dry-run + 部署后 MD5 验证 |
 
+## 5.6 可观测性: log_service v3.5 + V007.35 部署集成 ✅
+
+**核心**: 整合 dev-agent v3.5 (13 endpoints) + 部署智能体 V007.35 部署保障
+**资产**: `tools/log_service.py` (集成 dev-agent 15238 字节 v3.5 + 部署智能体 PHASE 8 包装)
+**文档**: `docs/HANDOFF_LOG_SERVICE.md` (346 行, 含 dev-agent §1-9 + 部署智能体 §10-11 增量)
+
+### dev-agent v3.5 贡献 (接手自 b1877e8)
+- **13 endpoints**: 9 个 v3 + 4 个新 IO 诊断 (`/api/sqlite`, `/api/sqlite/load`, `/api/iostat`, `/api/proc/io`)
+- 4 个 P0/P1/P2 follow-up tasks
+- systemd unit file 模板
+- 10/10 pytest 通过 (`tests/test_log_service_v3_5.py`)
+
+### 部署智能体 V007.35 集成 (本次提交)
+- **PHASE 8 自动启动**: deploy.sh 部署后自动 `nohup python3 log_service.py`
+- **基线 fd 采集**: 部署后立即 `/api/system` 取 total_fds, 作后置对照
+- **降级策略**: log_service 不可达 → 用 `lsof+ss` 老方法, 5min 阈值检测仍工作
+- **AUTO-DELTA**: rebuild_zip.py V8c invariant 自动扫描 working tree 全文件, 不再漏
+- **3 段后置检查**: 30s/5min/30min, 5min fd 增量 >5000 或 v2 BOAction 失败 → 自动回滚
+- **§11 标准 6 步诊断流程**: 整合进 HANDOFF_LOG_SERVICE.md, 供后续诊断复用
+
+### 13 个端点 (v3.5 dev-agent 主贡献)
+| # | 端点 | 类型 | 用途 |
+|---|------|------|------|
+| 1 | `/api/log` | 读 | 读日志 (file/lines/grep) |
+| 2 | `/api/find` | 读 | 查找文件 |
+| 3 | `/api/proc` | 读 | 进程列表 |
+| 4 | `/api/system` | 读 | load/mem/disk/fd |
+| 5 | `/api/dmesg` | 读 | 内核日志 |
+| 6 | `/api/db/health` | 读 | db 完整性 + 表统计 |
+| 7 | `/api/fd` | 读 | 进程 fd 列表 |
+| 8 | `/api/env` | 读 | 进程环境变量 |
+| 9 | `/api/exec` | 写 | 白名单命令执行 |
+| **10** | **`/api/sqlite`** | **新** | **只读 SQL (白名单 SELECT/PRAGMA)** |
+| **11** | **`/api/sqlite/load`** | **新** | **SQLite 层压测, 区分 db vs server** |
+| **12** | **`/api/iostat`** | **新** | **磁盘 I/O 抖动 (1s × N 采样)** |
+| **13** | **`/api/proc/io`** | **新** | **server.py 真实 I/O 字节数** |
+
+## 5.7 远程监控能力 (V007.35 新认知) ✅
+
+**关键认知**: 我**不需要 SSH** 就能监控 yonaa。**任何 HTTP 端口我都可直接调**。
+
+| yonaa 服务 | 端口 | 协议 | 远程可达? |
+|------------|------|------|----------|
+| backend (Flask) | 5001 | HTTP | ✅ `Invoke-RestMethod http://172.20.59.7:5001/...` |
+| unified (前端 proxy) | 8081 | HTTP | ✅ |
+| **log_service (V007.35)** | **9101** | **HTTP** | ✅ **主要监控入口** |
+| node_exporter | 9100 | HTTP/Prom | ✅ |
+
+**使用模式**:
+```powershell
+$BASE = "http://172.20.59.7:9101"
+Invoke-RestMethod "$BASE/api/log?file=...&lines=200" -TimeoutSec 10
+Invoke-RestMethod "$BASE/api/db/health"
+Invoke-RestMethod "$BASE/api/system"
+```
+
+**反思 (失职)**: V007.35 之前, 我多次说"我不能远程执行 yonaa"或"必须 SSH"。
+**错因**: 被 SSH 思维绑架, 没区分"远程"和"SSH"。任何 yonaa HTTP 端口我都能调。
+**修正**: 涉及 yonaa 时, 先想"HTTP 可达吗", 再问用户。
+
+**什么时候真正需要 SSH**:
+- 文件编辑 (vim/nano)
+- systemd 操作
+- 进程 kill / 启停
+- 防火墙修改
+
+**什么时候 HTTP 就够**:
+- 读 log/db/进程/系统信息
+- 查询业务数据
+- 监控状态
+- 触发可观测的 API
+
 ## 6. 常见问题排查手册
 
 ### 6.1 integration 3018 启动失败 (P0 RuntimeError)
