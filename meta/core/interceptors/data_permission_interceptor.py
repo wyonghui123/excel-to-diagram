@@ -322,17 +322,30 @@ class DataPermissionInterceptor(Interceptor):
         # 5. [FIX v1.0.5 2026-06-10] 多 role → OR 关系; 单 role → 直接 append 各 AND 段
         #   v1.0.5 移除 v1.0.4 的 owner OR 短路逻辑（修复 TESET68 bug）
         #   owner 例外改由 _apply_scope_filter_after_dimension + _add_owner_exception 处理
+        #
+        # [FIX v1.2.30 2026-07-07] bug fix: 多 role 时 OR 组必须包成 OR-of-AND 结构
+        #   原 bug: `for conds in per_role_conditions: or_group_conditions.extend(conds)`
+        #   把每个 role 内部的 AND 段(eg. [{id,eq,703}, {version_id,eq,764}])平铺
+        #   到 or_group_conditions, AND 信息丢失, SQL 解析成
+        #     id=703 OR version_id=764 OR id=2200 OR version_id=863
+        #   永远为真 → 13 个域全返
+        #   实测: wyonghui 经 TEST888 组 → role 5970 (domain=703) + role 11821 (domain=2200)
+        #         都看到 13 个域
+        #   修复: OR-of-AND 嵌套, 每个 role 一组 AND
         if len(per_role_conditions) == 1:
+            # 单 role: 该 role 自己的 AND 段直接 append (外层 query_conditions 是 AND)
             for c in per_role_conditions[0]:
                 context.extra['query_conditions'].append(c)
         else:
             # 多 role: OR-of-AND
-            or_group_conditions = []
-            for conds in per_role_conditions:
-                or_group_conditions.extend(conds)
+            # 每个 role 的 conds 作为一个 AND 组, 用 {'type': 'and', 'conditions': conds} 包裹
+            # 这样 SQL 解析 = (AND 组 1) OR (AND 组 2) OR ...
             context.extra['query_conditions'].append({
                 'type': 'or',
-                'conditions': or_group_conditions,
+                'conditions': [
+                    {'type': 'and', 'conditions': conds}
+                    for conds in per_role_conditions
+                ],
             })
 
         logger.info(
