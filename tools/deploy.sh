@@ -63,6 +63,7 @@ deploy.sh - 通用部署脚本 (任意版本)
   --skip-unzip             跳过 unzip (假设已解)
   --skip-precheck          跳过 precheck (默认跑, 7 项检查)
   --skip-smoke             跳过 smoke test (默认跑, 5 项真实测试)
+  --skip-v00725-postcheck  跳过 V007.25 后置健康检查 (默认跑, 30s/5min/30min)
   --help, -h               显示此帮助
 
 示例:
@@ -115,6 +116,7 @@ USE_SYSTEMD=$([ "$USE_SYSTEMD" = "true" ] && echo "no" || echo "yes")  # 反转:
 SKIP_UNZIP="${ARG_SKIP_UNZIP:-false}"
 SKIP_PRECHECK="${ARG_SKIP_PRECHECK:-false}"
 SKIP_SMOKE="${ARG_SKIP_SMOKE:-false}"
+SKIP_V00725_POSTCHECK="${ARG_SKIP_V00725_POSTCHECK:-no}"
 
 detect_remote_env
 
@@ -146,6 +148,10 @@ SERVER_DIR="$DEPLOYMENTS_DIR/meta"
 FRONTEND_DIR="$DEPLOYMENTS_DIR/frontend_dist_files"
 
 # JWT/FLASK/CORS 密钥 (>=32 字符, 满足 startup_checks 强制)
+# [V007.36 BUG-FIX] 手动启动 server.py 时, 必须同时 export 以下 5 个 env vars:
+#   PORT, JWT_SECRET_KEY, FLASK_SECRET_KEY, CORS_ALLOWED_ORIGINS, FLASK_DEBUG
+# 缺失任一, server.py:create_app() 会在 run_startup_checks() 抛 RuntimeError
+# (startup_checks._is_debug() 默认 'True' = 开发模式 = 不强制安全配置)
 SECRET_SUFFIX="${VERSION}-$(date +%s)-do-not-use-in-prod-without-rotation"
 JWT_SECRET="deploy-${SECRET_SUFFIX}-jwt-key"
 FLASK_SECRET="deploy-${SECRET_SUFFIX}-flask-key"
@@ -181,8 +187,9 @@ if [ "$SKIP_UNZIP" != "true" ]; then
     # [FIX 2026-07-07] 14:44 部署 bug 修复: 检查 backend 关键文件 hash
     #   之前: 只检查 frontend dist, 不检查 backend. 14:44 部署时, yonaa 上 /opt/app/deployments/meta/
     #   仍是 V007.21 旧版, 但 PHASE 0.5 跳过 unzip, 部署后 backend 仍跑 V007.21 (datasource.py 无 V007.24)
-    #   修法: 对比 zip 内 server.py + datasource.py MD5 vs yonaa root, 不匹配则强制解压
-    for CRITICAL_FILE in meta/server.py meta/core/datasource.py; do
+    #   [V007.35 FIX 2026-07-07 22:24] 补 V007.34 (sql_adapters.py) + V007.35 (sql_connection_pool.py)
+    #   失职: V007.34/V007.35 修复进了 zip, 但 yonaa 仍跑旧版, 业务测试碰巧 PASS, 但修复没生效
+    for CRITICAL_FILE in meta/server.py meta/core/datasource.py meta/core/sql_adapters.py meta/core/sql_connection_pool.py; do
         if [ -f "$DEPLOYMENTS_DIR/$CRITICAL_FILE" ]; then
             ZIP_MD5=$(unzip -p "$ZIP_PATH" "$CRITICAL_FILE" 2>/dev/null | md5sum | awk '{print $1}')
             ROOT_MD5=$(md5sum "$DEPLOYMENTS_DIR/$CRITICAL_FILE" 2>/dev/null | awk '{print $1}')
@@ -562,8 +569,9 @@ fi
 # [FIX 2026-07-07] 14:44 部署 bug: yonaa PHASE 0.5 跳过了 unzip, backend 跑旧代码
 # 修法: PHASE 6.55 立即验证 yonaa /opt/app/deployments/ 关键文件 MD5 = zip MD5
 banner "PHASE 6.55: yonaa 部署后 MD5 验证 [V007.25]"
+# [V007.35 FIX 2026-07-07 22:24] 补 V007.34 + V007.35 关键文件
 MD5_MISMATCH=0
-for CRITICAL_FILE in meta/server.py meta/core/datasource.py; do
+for CRITICAL_FILE in meta/server.py meta/core/datasource.py meta/core/sql_adapters.py meta/core/sql_connection_pool.py; do
     if [ -f "$DEPLOYMENTS_DIR/$CRITICAL_FILE" ]; then
         ZIP_MD5=$(unzip -p "$ZIP_PATH" "$CRITICAL_FILE" 2>/dev/null | md5sum | awk '{print $1}')
         ROOT_MD5=$(md5sum "$DEPLOYMENTS_DIR/$CRITICAL_FILE" 2>/dev/null | awk '{print $1}')
@@ -633,10 +641,194 @@ if [ $DEPLOY_CORE_OK -eq 1 ]; then
     DEPLOY_OK_FLAG=1
 fi
 
+# ========================= PHASE 8: 启动 log_service + 后置健康检查 [V007.35] =========================
+# [V007.35] 用 log_service API 替代 server.py /_metrics 做保底检查
+#   - 30s:  db 完整性 + fd 基线
+#   - 5min: fd 增量检测 (泄漏告警 + 自动回滚)
+#   - 30min: 最终报告 (仅记录, 不回滚)
+if [ "$SKIP_V00725_POSTCHECK" = "yes" ]; then
+    warn "跳过 V007.25 后置健康检查 (--skip-v00725-postcheck)"
+else
+    banner "PHASE 8: log_service + 后置健康检查 [V007.35]"
+
+    LOG_SERVICE_PORT=9101
+    LOG_SERVICE_LOG="/tmp/log_service_${VERSION}.log"
+
+    # [8a] 确保 log_service 运行
+    hr; echo "[8a] 启动 log_service on ${LOG_SERVICE_PORT}"
+    if curl -s "http://localhost:${LOG_SERVICE_PORT}/api/health" >/dev/null 2>&1; then
+        ok "log_service 已在运行 (端口 ${LOG_SERVICE_PORT})"
+    else
+        LOG_SERVICE_SCRIPT="${SCRIPT_DIR}/log_service.py"
+        if [ -f "$LOG_SERVICE_SCRIPT" ]; then
+            if pkill -f "log_service.py" 2>/dev/null; then
+                echo "  [INFO] 已停旧 log_service"
+                sleep 1
+            fi
+            nohup python3 "$LOG_SERVICE_SCRIPT" > "$LOG_SERVICE_LOG" 2>&1 &
+            LOG_SVC_PID=$!
+            sleep 2
+            if kill -0 "$LOG_SVC_PID" 2>/dev/null && curl -s "http://localhost:${LOG_SERVICE_PORT}/api/health" >/dev/null 2>&1; then
+                ok "log_service 启动成功 PID=${LOG_SVC_PID} (端口 ${LOG_SERVICE_PORT})"
+            else
+                warn "log_service 启动失败 (PID=$LOG_SVC_PID), 后置检查将降级用 system 命令"
+            fi
+        else
+            warn "log_service.py 不在 bundle 中, 后置检查降级用 system 命令"
+        fi
+    fi
+
+    # [8b] 获取基线数据 (部署后立即)
+    hr; echo "[8b] 采集基线数据"
+    LS_URL="http://localhost:${LOG_SERVICE_PORT}"
+    BASELINE_FD=$(curl -s "${LS_URL}/api/system" 2>/dev/null | python3 -c "
+import sys,json
+try: d=json.load(sys.stdin); print(d.get('total_fds',0))
+except: print(0)" 2>/dev/null || echo 0)
+    BASELINE_FD=$(echo "$BASELINE_FD" | tr -d '\n\r')
+    BASELINE_FD=${BASELINE_FD:-0}
+    echo "  基线 total_fds: $BASELINE_FD"
+    echo "$BASELINE_FD" > /tmp/v00725_fd_baseline_${VERSION}.txt
+
+    # [8c] 生成后置检查脚本
+    POSTCHECK_LOG="/tmp/v00725_postcheck_${VERSION}.log"
+    cat > /tmp/v00725_postcheck_${VERSION}.sh << POSTCHECK_EOF
+#!/bin/bash
+# [V007.35] 后置 30s/5min/30min 健康检查 (用 log_service API)
+LS_URL="http://localhost:${LOG_SERVICE_PORT}"
+VERSION="${VERSION}"
+BACKEND_PORT="${BACKEND_PORT}"
+FRONTEND_PORT="${FRONTEND_PORT}"
+LOG_DIR="${LOG_DIR}"
+BASELINE_FD=\$(cat /tmp/v00725_fd_baseline_\${VERSION}.txt 2>/dev/null || echo 0)
+ROLLBACK_SCRIPT="${SCRIPT_DIR}/rollback.sh"
+
+postcheck_log() { echo "\$(date '+%F %T') [\$1] \$2" | tee -a "$POSTCHECK_LOG"; }
+
+# ── 30s 检查 ──
+sleep 30
+postcheck_log "30s-check" "===== [V007.35/30s] 部署后 30 秒检查 ====="
+if curl -s "\${LS_URL}/api/health" >/dev/null 2>&1; then
+    # 检查 backend 存活 (用 process API)
+    BACKEND_ALIVE=\$(curl -s "\${LS_URL}/api/process?name=server" 2>/dev/null | python3 -c "
+import sys,json
+try: d=json.load(sys.stdin); procs=[p for p in d.get('processes',[]) if 'server.py' in p.get('cmd','')]; print(len(procs) if procs else '0')
+except: print('0')" 2>/dev/null || echo 0)
+    if [ "\$BACKEND_ALIVE" -gt 0 ]; then
+        postcheck_log "30s-check" "  [OK] backend 进程存活"
+    else
+        postcheck_log "30s-check" "  [X] backend 进程不存在!"
+    fi
+
+    # db 完整性
+    DB_OK=\$(curl -s "\${LS_URL}/api/db/health" 2>/dev/null | python3 -c "
+import sys,json
+try: d=json.load(sys.stdin); print('ok' if d.get('integrity')=='ok' else d.get('integrity','fail'))
+except: print('fail')" 2>/dev/null || echo fail)
+    if [ "\$DB_OK" = "ok" ]; then
+        postcheck_log "30s-check" "  [OK] db integrity=ok"
+    else
+        postcheck_log "30s-check" "  [X] db integrity=\$DB_OK"
+    fi
+
+    # 当前 fd
+    CURRENT_FD=\$(curl -s "\${LS_URL}/api/system" 2>/dev/null | python3 -c "
+import sys,json
+try: d=json.load(sys.stdin); print(d.get('total_fds',0))
+except: print(0)" 2>/dev/null || echo 0)
+    FD_DIFF=\$((CURRENT_FD - BASELINE_FD))
+    postcheck_log "30s-check" "  [INFO] 当前 fd=\$CURRENT_FD (基线=\$BASELINE_FD, 增量=\$FD_DIFF)"
+else
+    postcheck_log "30s-check" "  [X] log_service 不可达 (端口 ${LOG_SERVICE_PORT}) — 降级检查跳过"
+fi
+
+# ── 5min 检查 ──
+sleep 270  # 30s + 270s = 5min
+postcheck_log "5min-check" "===== [V007.35/5min] 部署后 5 分钟检查 ====="
+SHOULD_ROLLBACK=0
+if curl -s "\${LS_URL}/api/health" >/dev/null 2>&1; then
+    # fd 增量检测
+    CURRENT_FD=\$(curl -s "\${LS_URL}/api/system" 2>/dev/null | python3 -c "
+import sys,json
+try: d=json.load(sys.stdin); print(d.get('total_fds',0))
+except: print(0)" 2>/dev/null || echo 0)
+    FD_INCREASE=\$((CURRENT_FD - BASELINE_FD))
+    postcheck_log "5min-check" "  [INFO] 当前 fd=\$CURRENT_FD (基线=\$BASELINE_FD, 增量=\$FD_INCREASE)"
+    if [ "\$FD_INCREASE" -gt 5000 ]; then
+        postcheck_log "5min-check" "  [X] fd 增长 \$FD_INCREASE > 5000 (严重泄漏!) → 触发自动回滚"
+        SHOULD_ROLLBACK=1
+    elif [ "\$FD_INCREASE" -gt 1000 ]; then
+        postcheck_log "5min-check" "  [WARN] fd 增长 \$FD_INCREASE > 1000 (轻度泄漏, 30min 再判)"
+    fi
+
+    # 后端 fd 详情
+    BACKEND_FD=\$(curl -s "\${LS_URL}/api/process?name=server" 2>/dev/null | python3 -c "
+import sys,json
+try: d=json.load(sys.stdin); procs=[p for p in d.get('processes',[]) if 'server.py' in p.get('cmd','')]; print(procs[0].get('fd_count',0) if procs else 0)
+except: print(0)" 2>/dev/null || echo 0)
+    postcheck_log "5min-check" "  [INFO] backend fd_count=\$BACKEND_FD"
+
+    # db 表计数 (关注 audit_logs 增长)
+    AUDIT_COUNT=\$(curl -s "\${LS_URL}/api/db/health" 2>/dev/null | python3 -c "
+import sys,json
+try: d=json.load(sys.stdin); print(d.get('audit_logs',0))
+except: print(0)" 2>/dev/null || echo 0)
+    postcheck_log "5min-check" "  [INFO] audit_logs 行数: \$AUDIT_COUNT"
+else
+    postcheck_log "5min-check" "  [X] log_service 不可达, 改用 ss + ps 降级检查"
+    # 降级: 用传统命令
+    FD_NOW=\$(lsof 2>/dev/null | grep -c architecture || echo 0)
+    postcheck_log "5min-check" "  [INFO] 降级 fd=\$FD_NOW"
+    if [ "\$FD_NOW" -gt 500 ]; then
+        postcheck_log "5min-check" "  [X] 降级 fd=\$FD_NOW > 500 → 触发自动回滚"
+        SHOULD_ROLLBACK=1
+    fi
+fi
+
+# 5min 自动回滚
+if [ "\$SHOULD_ROLLBACK" -eq 1 ]; then
+    postcheck_log "5min-check" "  [ROLLBACK] 执行自动回滚..."
+    if [ -f "\$ROLLBACK_SCRIPT" ]; then
+        bash "\$ROLLBACK_SCRIPT" --to "\$VERSION" --port "\$BACKEND_PORT" >> "$POSTCHECK_LOG" 2>&1
+        postcheck_log "5min-check" "  [ROLLBACK] 回滚完成 (详见 $POSTCHECK_LOG)"
+    else
+        postcheck_log "5min-check" "  [ROLLBACK] rollback.sh 不存在, 无法自动回滚!"
+    fi
+fi
+
+# ── 30min 检查 ──
+sleep 1500  # 5min + 25min = 30min
+postcheck_log "30min-check" "===== [V007.35/30min] 部署后 30 分钟最终报告 ====="
+if curl -s "\${LS_URL}/api/health" >/dev/null 2>&1; then
+    SYS_INFO=\$(curl -s "\${LS_URL}/api/system" 2>/dev/null)
+    FD_FINAL=\$(echo "\$SYS_INFO" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('total_fds',0))" 2>/dev/null || echo 0)
+    LOAD=\$(echo "\$SYS_INFO" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('load',[0,0,0])[0])" 2>/dev/null || echo 0)
+    postcheck_log "30min-check" "  [INFO] load_1m=\$LOAD, total_fds=\$FD_FINAL (基线=\$BASELINE_FD)"
+    postcheck_log "30min-check" "  [INFO] 完整系统信息: \$SYS_INFO"
+else
+    postcheck_log "30min-check" "  [X] log_service 不可达, 跳过 30min 报告"
+fi
+postcheck_log "30min-check" "===== 后置检查完成 ====="
+POSTCHECK_EOF
+
+    chmod +x /tmp/v00725_postcheck_${VERSION}.sh
+    nohup bash /tmp/v00725_postcheck_${VERSION}.sh &
+    POSTCHECK_PID=$!
+    echo ""
+    ok "3 段后置健康检查已在后台启动 (pid=${POSTCHECK_PID}, log=${POSTCHECK_LOG})"
+    echo "  检查时间点: 部署后 30s / 5min / 30min"
+    echo "  30s / 5min 失败会自动回滚"
+    echo "  30min 仅记录, 不回滚"
+    echo "  跳过方式: --skip-v00725-postcheck"
+fi
+
 # ========================= SUMMARY =========================
 banner "DEPLOY SUMMARY"
 echo -e "  部署核心 (PHASE 0-5+7): $([ $DEPLOY_OK_FLAG -eq 1 ] && echo -e "${GREEN}✓ 成功${NC}" || echo -e "${RED}✗ 失败${NC}")"
 echo -e "  smoke test (PHASE 6.5):   $([ $SMOKE_RC -eq 0 ] && echo -e "${GREEN}✓ 通过${NC}" || echo -e "${YELLOW}⚠ 部分失败 (不阻塞)${NC}")"
+if [ "$SKIP_V00725_POSTCHECK" != "yes" ]; then
+    echo -e "  后置检查 (PHASE 8):       ${GREEN}✓ 已启动 (30s/5min/30min)${NC}"
+fi
 echo ""
 
 if [ $DEPLOY_OK_FLAG -eq 1 ]; then

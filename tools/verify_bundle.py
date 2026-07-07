@@ -198,6 +198,50 @@ def check_v8_zip_v00724_code() -> tuple:
         return (False, f"读 datasource.py 失败: {e}")
 
 
+def check_v8b_zip_v00734_v00735() -> tuple:
+    """V8b. [V007.35 FIX 22:24] zip 内含 V007.34 (sql_adapters retry) + V007.35 (sql_connection_pool mmap)"""
+    if not zip_path.exists():
+        return (True, "无 zip, 跳过")
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            ad = zf.read("meta/core/sql_adapters.py").decode("utf-8", errors="ignore")
+            pool = zf.read("meta/core/sql_connection_pool.py").decode("utf-8", errors="ignore")
+        # V007.34: 读路径 retry 标记
+        v34 = ad.count("V007.34")
+        # V007.35: mmap_size / cache_size PRAGMA
+        v35 = pool.count("V007.35") + pool.count("mmap_size") + pool.count("cache_size")
+        if v34 == 0:
+            return (False, f"sql_adapters.py 缺 V007.34 读路径 retry 标记")
+        if v35 < 1:
+            return (False, f"sql_connection_pool.py 缺 V007.35 mmap/cache PRAGMA")
+        return (True, f"V007.34={v34} 标记 + V007.35={v35} 标记 (retry+mmap 都在)")
+    except Exception as e:
+        return (False, f"读 sql_*.py 失败: {e}")
+
+
+def check_v8c_zip_startup_checks_default() -> tuple:
+    """V8c. [V007.36 BUG-FIX] startup_checks._is_debug() 默认值必须 'True' (跟 server.py:983 一致)
+    之前默认 'false' 导致手动启动时 _is_production_safe() 错判, 阻断启动
+    """
+    if not zip_path.exists():
+        return (True, "无 zip, 跳过")
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            sc = zf.read("meta/core/startup_checks.py").decode("utf-8", errors="ignore")
+        # 检查 _is_debug() 默认 'True' 不是 'false' (精确匹配 .get('FLASK_DEBUG', '...') 形式)
+        import re
+        # 匹配 .get('FLASK_DEBUG', 'XXX') 但 'XXX' 必须是单词边界, 排除注释里的引用
+        m = re.search(r"\.get\(['\"]FLASK_DEBUG['\"]\s*,\s*['\"]([a-zA-Z]+)['\"]\)", sc)
+        if not m:
+            return (False, "找不到 .get('FLASK_DEBUG', ...) 调用")
+        default = m.group(1).lower()
+        if default != 'true':
+            return (False, f"_is_debug() 默认 '{m.group(1)}' (应为 'True'/'true')")
+        return (True, f"_is_debug() 默认 '{m.group(1)}' (跟 server.py:983 一致)")
+    except Exception as e:
+        return (False, f"读 startup_checks.py 失败: {e}")
+
+
 def check_v9_zip_required_files() -> tuple:
     """V9. zip 含所有必需文件"""
     if not zip_path.exists():
@@ -386,6 +430,8 @@ def main():
         ("V11", "mtime 稳定性 (防 force_lf 漂移)", check_v11_mtime_stable),
         ("V12", "本机 unzip E2E 验证 (V007.24 部署后含代码)", check_v12_unzip_e2e),
         ("V13", "本机 PHASE 0.5 模拟 (解压后 MD5 一致)", check_v13_deploy_e2e),
+        ("V8b", "V007.34 + V007.35 修复代码 (V007.35 FIX 22:24)", check_v8b_zip_v00734_v00735),
+        ("V8c", "_is_debug() 默认 'True' (V007.36 BUG-FIX 防御)", check_v8c_zip_startup_checks_default),
     ]
 
     results = []
