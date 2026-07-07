@@ -268,6 +268,14 @@ class SQLiteConnectionPool:
                     self._config.wal_auto_checkpoint
                 )
             )
+            # [V007.35 2026-07-07] Windows/Linux 一致性
+            # 背景: V007.34 disk I/O 只在 Linux 触发, Windows 不触发.
+            #       SQLite 在两者上的默认 mmap_size 和 cache_size 可能不同,
+            #       导致并发行为不一致.
+            # 修法: 显式设定 mmap_size=256MB, cache_size=-2000 (2MB),
+            #       消除平台差异, 让 Windows 开发环境尽量贴近 Linux.
+            conn.execute("PRAGMA mmap_size = 268435456")
+            conn.execute("PRAGMA cache_size = -2000")
         return conn
 
     def _create_pooled_connection(self) -> PooledConnection:

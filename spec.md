@@ -125,6 +125,10 @@ modified_files:
   # 修法: mark_error 后 continue + 指数 backoff + jitter (对齐 V007.20 写路径)
   - meta/core/sql_adapters.py
   - tests/test_v007_34_read_retry.py
+  # [FIX V007.35 2026-07-07] Windows/Linux SQLite 一致性
+  # mmap_size=256MB, cache_size=-2000 (2MB), 消除平台差异
+  - meta/core/sql_connection_pool.py
+  - tests/test_v007_35_platform_consistency.py
 new_files:
   # 部署脚本 (2026-06-30 one-shot deploy + rollback)
   - docs/deploy-full-v20260630_001.sh
