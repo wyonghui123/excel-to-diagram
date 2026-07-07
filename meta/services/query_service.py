@@ -1691,10 +1691,20 @@ class QueryService:
 
         def _cond_to_tuple(c: Dict) -> Optional[Tuple[str, _QOp, Any]]:
             op_str = c.get('operator', 'eq')
-            op = _QOp(op_str.lower())
             field = c.get('field')
             if not field:
                 return None
+            # [FIX BUG-V027 2026-07-07] operator 不在 QueryOperator 枚举内 (例: in_subquery)
+            # 之前 _QOp(op_str.lower()) 在 in_subquery 时抛 ValueError, 多 role 分支静默失败
+            # 修复: 把 in_subquery 当 raw tuple 直传, 由 _tup_to_sql 走 IN(subquery) SQL
+            try:
+                op = _QOp(op_str.lower())
+            except ValueError:
+                # 未知 operator (例: in_subquery) - 用 EQ 包装, value 跟着 op_str
+                op = _QOp.EQ
+                # 把 op_str 和 value 合并进 val, 让 _tup_to_sql 决定
+                val = c.get('value')
+                return (field, op, (op_str, val))  # tuple-typed 标记
             if op in (_QOp.IN, _QOp.NOT_IN, _QOp.BETWEEN):
                 vals = c.get('values')
                 if vals is None:
@@ -1705,6 +1715,39 @@ class QueryService:
                     vals = [vals]
                 return (field, op, vals)
             return (field, op, c.get('value'))
+
+        def _tup_to_sql(tup: Tuple) -> Tuple[str, list]:
+            """把 _cond_to_tuple 输出转成 (sql-fragment, params)"""
+            field, op, val = tup
+            col = builder._get_db_column(field) if hasattr(builder, '_get_db_column') else field
+            # [FIX BUG-V027] 处理 in_subquery / 任意 raw operator
+            if isinstance(val, tuple):
+                raw_op, raw_val = val
+                if raw_op == 'in_subquery' and isinstance(raw_val, str):
+                    return f"{col} IN ({raw_val})", []
+                # 其它未知 operator: 跳过 (返回 None - 调用方过滤)
+                return None
+            if op == _QOp.IN:
+                placeholders = ','.join('?' * len(val))
+                return f"{col} IN ({placeholders})", list(val)
+            if op == _QOp.NOT_IN:
+                placeholders = ','.join('?' * len(val))
+                return f"{col} NOT IN ({placeholders})", list(val)
+            if op == _QOp.EQ:
+                return f"{col} = ?", [val]
+            if op == _QOp.NE:
+                return f"{col} != ?", [val]
+            if op == _QOp.GT:
+                return f"{col} > ?", [val]
+            if op == _QOp.GE:
+                return f"{col} >= ?", [val]
+            if op == _QOp.LT:
+                return f"{col} < ?", [val]
+            if op == _QOp.LE:
+                return f"{col} <= ?", [val]
+            if op == _QOp.LIKE:
+                return f"{col} LIKE ?", [val]
+            return f"{col} {op.value} ?", [val]
 
         if len(per_role_conds) == 1:
             for c in per_role_conds[0]:
@@ -1723,13 +1766,69 @@ class QueryService:
                     if tup:
                         or_conditions.append(tup)
         else:
+            # [FIX BUG-V027 2026-07-07] multi-role: OR-of-AND
+            #   原 bug: 平铺每个 role 的 AND 段到 or_conditions 列表, 或 = `or_where` 平铺,
+            #     SQL 退化为 (r1.c1 OR r1.c2 OR r2.c1 OR r2.c2 OR ...) 永远为真 → 返回全部 BO
+            #   修复: 用 `where_raw` 注入 OR-of-AND,
+            #     SQL = (r1.c1 AND r1.c2 AND ...) OR (r2.c1 AND r2.c2 AND ...) OR (owner=?)
+            #   对齐 DPI v1.2.30 (`data_permission_interceptor.py:339-349`)
             for conds in per_role_conds:
                 for c in conds:
                     tup = _cond_to_tuple(c)
                     if tup:
                         or_conditions.append(tup)
+            # 不要落到下面 builder.or_where(or_conditions) - 会同时建两个 OR 组
+            # 收集所有 role 的 AND 段到 raw OR-of-AND
+            or_raw_parts: list = []
+            or_raw_params: list = []
+            for conds in per_role_conds:
+                # 一个 role 的所有 leaf cond 视为 AND 关系
+                and_clauses: list = []
+                for c in conds:
+                    tup = _cond_to_tuple(c)
+                    if tup:
+                        res = _tup_to_sql(tup)
+                        if res is None:
+                            # 跳过 _tup_to_sql 拒绝的 cond (未知 operator)
+                            continue
+                        clause, ps = res
+                        and_clauses.append((clause, ps))
+                if and_clauses:
+                    if len(and_clauses) == 1:
+                        or_raw_parts.append(and_clauses[0][0])
+                        or_raw_params.extend(and_clauses[0][1])
+                    else:
+                        joined_sql = ' AND '.join(c for c, _ in and_clauses)
+                        or_raw_parts.append(f"({joined_sql})")
+                        for _, ps in and_clauses:
+                            or_raw_params.extend(ps)
 
-        # [FIX BUG-V021] 把 owner_id 加到同一个 OR 组
+            # [FIX BUG-V021] 把 owner_id 加到同一个 OR 组 (multi-role 路径)
+            from meta.services.chain_owner_resolver import is_in_chain
+            if object_type == 'product':
+                or_raw_parts.append(f"{builder._get_db_column('owner_id') if hasattr(builder, '_get_db_column') else 'owner_id'} = ?")
+                or_raw_params.append(user_id)
+                logger.info(
+                    f"[DataPerm BUG-V027] OR-of-AND dim_scope with owner_id={user_id} for product"
+                )
+            elif is_in_chain(object_type):
+                # 子对象 (version/domain/...): 跳过 owner exception (已知限制, 同 BUG-V021)
+                logger.debug(
+                    f"[DataPerm BUG-V027] Skip owner exception for {object_type} (known limitation)"
+                )
+
+            if or_raw_parts:
+                raw_sql = ' OR '.join(or_raw_parts)
+                builder.where_raw(f"({raw_sql})", or_raw_params)
+                logger.info(
+                    f"[_try_apply_dimension_scope BUG-V027] user={user_id} object_type={object_type} "
+                    f"multi_role={len(per_role_conds)} OR-of-AND injected ({len(or_raw_parts)} parts)"
+                )
+            # 清空 or_conditions 避免下面 or_where 再插入 (已经用 where_raw 注入)
+            or_conditions = []
+            return True
+
+        # [FIX BUG-V021] 单 role 路径: 把 owner_id 加到同一个 OR 组
         from meta.services.chain_owner_resolver import is_in_chain
         if object_type == 'product':
             or_conditions.append(('owner_id', _QOp.EQ, user_id))
