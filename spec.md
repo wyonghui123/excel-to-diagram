@@ -120,6 +120,11 @@ modified_files:
   # 根因: PM 看到的"标题与编辑/删除按钮之间空白"实际是 .el-drawer__body padding-top: 20px
   #       + header margin-bottom: 12px (V053 已减) = 32px 空白, V053 没改 body
   # 修法: .el-drawer__body padding: 20px -> 12px 16px
+  # [FIX V007.34 2026-07-07] 读路径 disk I/O / database is locked 重试
+  # V007.16 加了 mark_error 但忘加 continue, 读路径重试用同一坏 conn
+  # 修法: mark_error 后 continue + 指数 backoff + jitter (对齐 V007.20 写路径)
+  - meta/core/sql_adapters.py
+  - tests/test_v007_34_read_retry.py
 new_files:
   # 部署脚本 (2026-06-30 one-shot deploy + rollback)
   - docs/deploy-full-v20260630_001.sh

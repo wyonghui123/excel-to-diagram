@@ -824,6 +824,22 @@ class SQLiteAdapter(SQLDataSource):
                                 "(tid=%d, attempt=%d, err=%s)",
                                 tid, attempt, err_str
                             )
+                    # [V007.34 FIX] disk I/O / database is locked 触发重试
+                    # 跟 V007.20 写路径完全一致: 6 retries + 指数 backoff + jitter
+                    # 背景: 17:42:36 10+ 并发 _do_list 全部 disk I/O error (HANDOFF_V007_34)
+                    #       之前: mark_error 后没 continue, fall through 到 'operational' 重试
+                    #             但用同一坏 conn, 3 次都失败
+                    # 修法: 显式 retry, 让 reader() 重建 conn 后用新 conn 执行
+                    if attempt < max_retries - 1:
+                        import random as _random
+                        delay = 0.05 * (2 ** attempt) + _random.uniform(0, 0.02)
+                        logger.warning(
+                            "[V007.34] _execute_via_read_pool: retrying after disk I/O "
+                            "(attempt %d/%d, sleep %.3fs): %s",
+                            attempt + 1, max_retries, delay, err_str
+                        )
+                        time.sleep(delay)
+                        continue
                 if "closed database" in err_str or "operational" in err_str:
                     if attempt < max_retries - 1:
                         # 短暂退避后重试 (新 connection)
