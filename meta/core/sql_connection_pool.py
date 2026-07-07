@@ -154,6 +154,14 @@ class SQLiteConnectionPool:
         self._shutdown = False
         self._thread_local = threading.local()
         self._thread_connections: Dict[int, PooledConnection] = {}
+        # [V007.37 BUG-FIX] PRAGMA journal_mode 幂等保护
+        # 背景: yonaa 后端导出 Excel 场景, _create_connection 被频繁调用
+        #       每次都执行 "PRAGMA journal_mode=WAL", 但 db 已是 WAL 模式,
+        #       重复执行会触发 db 元数据写入 → disk I/O error (V007.37 HANDOFF §3)
+        # 修法: db 级幂等标志, 只在首次创建时执行 journal_mode PRAGMA
+        #       (其他 PRAGMA 是 per-connection, 不去重)
+        self._journal_mode_applied: bool = False
+        self._journal_mode_lock = threading.Lock()
 
         self._stats = {
             "acquire_count": 0,
@@ -251,7 +259,16 @@ class SQLiteConnectionPool:
         )
         conn.row_factory = None
         if self._db_path != ":memory:":
-            conn.execute("PRAGMA journal_mode=WAL")
+            # [V007.37 BUG-FIX] PRAGMA journal_mode=WAL 幂等保护
+            # db 已是 WAL 模式时, 重复 PRAGMA 触发 db 元数据写入 → disk I/O error
+            # 只在首次 _create_connection 调用时执行 (db 级一次性)
+            # 其他 PRAGMA (synchronous/foreign_keys/busy_timeout/auto_vacuum/mmap/cache)
+            # 是 per-connection 配置, 每次都执行
+            with self._journal_mode_lock:
+                if not self._journal_mode_applied:
+                    conn.execute("PRAGMA journal_mode=WAL")
+                    self._journal_mode_applied = True
+                # else: 跳过, db 已是 WAL 模式
             conn.execute("PRAGMA synchronous=NORMAL")
             conn.execute("PRAGMA foreign_keys = ON")
             # [V007.20 2026-07-06] busy_timeout: 5000 → 30000 (30s)

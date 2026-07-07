@@ -1577,7 +1577,8 @@ class QueryService:
             #   (例: TEST333 创建 RACE 领域后, 该条自动授予 admin → allowed_ids=[683])
             #   但 dimension scope 派生 (例: 领域 in 采购管理) 应当覆盖更大范围 (410 条)
             # 这里先调 DimensionScopeEngine, 跟 DataPermissionInterceptor._apply_dimension_scope_filter 一致
-            if self._try_apply_dimension_scope(builder, user_id, object_type):
+            # [V007.37 BUG-FIX] 包裹 retry (export 场景高频触发 disk I/O error)
+            if self._try_apply_dimension_scope_with_retry(builder, user_id, object_type):
                 # [FIX BUG-V021 2026-06-27] dim scope 应用后追加 owner exception
                 # query_service.search 路径不走 BOFramework 拦截器链,
                 # 所以 d41c4c8 BUG-V013 owner exception 修复无法生效
@@ -1854,6 +1855,42 @@ class QueryService:
             f"roles_with_scope={len(per_role_conds)} (override allowed_ids)"
         )
         return True
+
+    def _try_apply_dimension_scope_with_retry(self, builder, user_id, object_type, max_retries=5):
+        """[V007.37 BUG-FIX] dimension scope 应用重试
+
+        背景: V007.37 HANDOFF §7.2 — 导出 Excel 场景触发 _create_connection,
+              新连接可能撞 disk I/O error. _try_apply_dimension_scope 本身不重试,
+              失败直接 return False, 后续走 allowed_ids fallback, 触发 IO error 上抛.
+
+        修法: 包裹一层 retry + 指数 backoff, 跟 V007.34 read 路径一致 (5 次).
+        """
+        import time as _time
+        import random as _random
+        last_err = None
+        for attempt in range(max_retries):
+            try:
+                if self._try_apply_dimension_scope(builder, user_id, object_type):
+                    return True
+                return False  # 没应用上 (没维度权限, 不是错误)
+            except Exception as e:
+                last_err = e
+                err_str = str(e).lower()
+                # 只对 disk I/O / database locked 重试
+                if ('disk i/o' not in err_str and
+                        'database is locked' not in err_str and
+                        'database is busy' not in err_str):
+                    raise  # 其他错误不重试, 直接抛
+                if attempt < max_retries - 1:
+                    delay = 0.05 * (2 ** attempt) + _random.uniform(0, 0.02)
+                    logger.warning(
+                        "[V007.37] _try_apply_dimension_scope retry %d/%d sleep %.3fs: %s",
+                        attempt + 1, max_retries, delay, e
+                    )
+                    _time.sleep(delay)
+        # 重试耗尽
+        logger.error("[V007.37] _try_apply_dimension_scope retry exhausted: %s", last_err)
+        raise last_err
 
     def _apply_single_cond(self, builder: QueryBuilder, cond: Dict) -> None:
         """[FIX 2026-06-14] 应用单条 dimension scope 条件到 QueryBuilder

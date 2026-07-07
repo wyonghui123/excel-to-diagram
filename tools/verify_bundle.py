@@ -242,6 +242,53 @@ def check_v8c_zip_startup_checks_default() -> tuple:
         return (False, f"读 startup_checks.py 失败: {e}")
 
 
+def check_v8d_zip_pool_pragma_idempotent() -> tuple:
+    """V8d. [V007.37 BUG-FIX] sql_connection_pool._create_connection 的 PRAGMA journal_mode=WAL
+    必须只在首次创建时执行 (防止重复执行触发 disk I/O error, 见 V007.37 HANDOFF §4)
+    """
+    if not zip_path.exists():
+        return (True, "无 zip, 跳过")
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            pool = zf.read("meta/core/sql_connection_pool.py").decode("utf-8", errors="ignore")
+        # 检查 PRAGMA journal_mode=WAL 仍存在 (功能未丢)
+        if "PRAGMA journal_mode=WAL" not in pool and 'PRAGMA journal_mode = WAL' not in pool:
+            return (False, "找不到 PRAGMA journal_mode=WAL 调用 (期望保留, 只是去重)")
+        # 检查幂等保护: 标志位
+        markers = ["_journal_mode_applied", "_journal_mode_set", "journal_mode_applied"]
+        if not any(m in pool for m in markers):
+            return (False, "PRAGMA journal_mode=WAL 没有幂等保护 (V007.37 BUG 复发)")
+        # 检查有 if 条件包裹 (确保不是死代码)
+        import re
+        for marker in markers:
+            idx = pool.find(marker)
+            if idx > 0:
+                context = pool[max(0, idx - 200):idx + 200]
+                if "if not" in context or "if not self" in context:
+                    return (True, f"PRAGMA journal_mode=WAL 有幂等保护标记 ({marker}) + if 包裹")
+        return (False, f"幂等标记存在但缺少 if 条件包裹")
+    except Exception as e:
+        return (False, f"读 sql_connection_pool.py 失败: {e}")
+
+
+def check_v8e_zip_query_service_retry() -> tuple:
+    """V8e. [V007.37 BUG-FIX] query_service 导出路径 retry 包裹
+    _try_apply_dimension_scope 调用必须包在 _try_apply_dimension_scope_with_retry 里
+    """
+    if not zip_path.exists():
+        return (True, "无 zip, 跳过")
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            qs = zf.read("meta/services/query_service.py").decode("utf-8", errors="ignore")
+        if "_try_apply_dimension_scope_with_retry" not in qs:
+            return (False, "找不到 _try_apply_dimension_scope_with_retry (V007.37 BUG 复发)")
+        if "V007.37" not in qs:
+            return (False, "query_service.py 缺少 V007.37 标记")
+        return (True, "_try_apply_dimension_scope_with_retry 已包裹 (V007.37)")
+    except Exception as e:
+        return (False, f"读 query_service.py 失败: {e}")
+
+
 def check_v9_zip_required_files() -> tuple:
     """V9. zip 含所有必需文件"""
     if not zip_path.exists():
@@ -432,6 +479,8 @@ def main():
         ("V13", "本机 PHASE 0.5 模拟 (解压后 MD5 一致)", check_v13_deploy_e2e),
         ("V8b", "V007.34 + V007.35 修复代码 (V007.35 FIX 22:24)", check_v8b_zip_v00734_v00735),
         ("V8c", "_is_debug() 默认 'True' (V007.36 BUG-FIX 防御)", check_v8c_zip_startup_checks_default),
+        ("V8d", "PRAGMA journal_mode 幂等保护 (V007.37 BUG-FIX)", check_v8d_zip_pool_pragma_idempotent),
+        ("V8e", "query_service 导出 retry 包裹 (V007.37 BUG-FIX)", check_v8e_zip_query_service_retry),
     ]
 
     results = []
