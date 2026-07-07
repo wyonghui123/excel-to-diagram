@@ -445,6 +445,79 @@ Get-NetTCPConnection -State Listen -LocalPort 3007 | Select-Object OwningProcess
 Stop-Process -Id $pid -Force
 ```
 
+### 6.6 生产 disk I/O error (2026-07-07 紧急事件)
+
+**症状**: 远程生产 server.py 登录返回 `sqlite3.OperationalError: disk I/O error`
+
+**根因**: server.py 启动时 `_safe_cleanup_wal_shm` + `wal_checkpoint(TRUNCATE)` 流程有竞态:
+- 多线程 sqlite handles 引用 wal inode
+- TRUNCATE 让 inode 被 unlink
+- sqlite 句柄仍持有 inode (fd 显示 `(deleted)`)
+- 后续 IO 操作 OS 拒绝
+
+**诊断命令** (一次性):
+```bash
+echo "===== 1. 进程与端口 ====="
+ps aux | grep -E "python|server\.py" | grep -v grep
+ss -tlnp | grep -E ":(5001|8081|3011)"
+echo ""
+echo "===== 2. 复制 env ====="
+SERVER_PID=$(pgrep -f "server\.py" | head -1)
+cat /proc/$SERVER_PID/environ 2>/dev/null | tr '\0' '\n' | grep -iE "JWT|FLASK|CORS|SECRET|MODE|PORT"
+echo ""
+echo "===== 3. fd (deleted) 检测 ====="
+ls -la /proc/$SERVER_PID/fd/ 2>/dev/null | grep -E "architecture.*(deleted)"
+echo ""
+echo "===== 4. db 完整性 ====="
+sqlite3 /opt/app/deployments/meta/architecture.db "PRAGMA integrity_check; SELECT count(*) FROM users;"
+```
+
+**恢复** (运维操作, 无代码 fix):
+```bash
+# 1. 优雅停服
+kill -TERM $(pgrep -f "server\.py")
+sleep 30
+kill -9 $(pgrep -f "server\.py") 2>/dev/null
+sleep 5
+
+# 2. 清残留 wal + shm
+rm -f /opt/app/deployments/meta/architecture.db-wal
+rm -f /opt/app/deployments/meta/architecture.db-shm
+
+# 3. 用 setsid env <完整env> 启动 (端口 = 5001, 不是 3011)
+cd /opt/app/deployments/meta
+setsid env \
+  BACKEND_PORT=5001 \
+  FLASK_SECRET_KEY='<从 /proc/1931/environ 复制>' \
+  FLASK_ENV=production \
+  CORS_ALLOWED_ORIGINS='<从 1931 复制>' \
+  ARG_PORT=5001 \
+  FLASK_DEBUG=false \
+  PORT=5001 \
+  JWT_SECRET_KEY='<从 1931 复制>' \
+  /opt/miniconda3-py39/bin/python server.py \
+  > /opt/app/shared/logs/backend-v$(date +%Y%m%d_%H%M%S).log 2>&1 < /dev/null &
+disown
+sleep 60
+
+# 4. 验证
+curl -v -X POST http://localhost:5001/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"<password>"}' 2>&1 | tail -20
+```
+
+**端口混淆陷阱**: 生产 server.py 实际监听 **5001** (PORT 环境变量决定), 不是 3011。8081 是 unified_server 反向代理。
+
+**env 来源**: 必须从同服务器上的 `unified_server.py` (PID 1931) 复制完整 env, 不能用 .env 文件 (deploy-v20260707_001 前缀 secret key 每次部署变化)。
+
+**详细记录**: 见 [DEPLOY_HANDOVER_BUG_V007_21_PROD.md](./DEPLOY_HANDOVER_BUG_V007_21_PROD.md)
+
+**后续 TODO** (P1/P2):
+- 加 systemd / supervisor 配置自动重启 server.py
+- 修 `_safe_cleanup_wal_shm` + `wal_checkpoint(TRUNCATE)` 竞态
+- `SQLiteConnectionPool._create_connection` 加 self-test (PRAGMA quick_check)
+- 部署时自动 dump env 到 `.env.deploy-<version>` 备份
+
 ### 6.5 DB 同步错误 (看到旧数据)
 
 **症状**: integration 服务上看不到 release 刚 cherry-pick 的 fix
