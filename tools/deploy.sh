@@ -1,6 +1,7 @@
 #!/bin/bash
 # ============================================================
 # deploy.sh - 通用部署脚本 (任意版本)
+# [V007.25] 14:44 部署 bug 全修复: PHASE 0.5 backend hash + PHASE 6.55 MD5 + admin login + baseline fix
 # ============================================================
 # Bundle Version: 2.1.0 (2026-07-03 12:00)
 #   - 修复 precheck zip 路径 (bundle 优先)
@@ -177,6 +178,24 @@ if [ "$SKIP_UNZIP" != "true" ]; then
         NEED_UNZIP=true
         info "触发解压: $DEPLOYMENTS_DIR/frontend_dist_files 不存在 (避免 8081 404)"
     fi
+    # [FIX 2026-07-07] 14:44 部署 bug 修复: 检查 backend 关键文件 hash
+    #   之前: 只检查 frontend dist, 不检查 backend. 14:44 部署时, yonaa 上 /opt/app/deployments/meta/
+    #   仍是 V007.21 旧版, 但 PHASE 0.5 跳过 unzip, 部署后 backend 仍跑 V007.21 (datasource.py 无 V007.24)
+    #   修法: 对比 zip 内 server.py + datasource.py MD5 vs yonaa root, 不匹配则强制解压
+    for CRITICAL_FILE in meta/server.py meta/core/datasource.py; do
+        if [ -f "$DEPLOYMENTS_DIR/$CRITICAL_FILE" ]; then
+            ZIP_MD5=$(unzip -p "$ZIP_PATH" "$CRITICAL_FILE" 2>/dev/null | md5sum | awk '{print $1}')
+            ROOT_MD5=$(md5sum "$DEPLOYMENTS_DIR/$CRITICAL_FILE" 2>/dev/null | awk '{print $1}')
+            if [ -n "$ZIP_MD5" ] && [ -n "$ROOT_MD5" ] && [ "$ZIP_MD5" != "$ROOT_MD5" ]; then
+                NEED_UNZIP=true
+                info "触发解压: $CRITICAL_FILE hash 不一致 (zip=${ZIP_MD5:0:8}, root=${ROOT_MD5:0:8})"
+            fi
+        else
+            # yonaa 上文件不存在, 必须解压
+            NEED_UNZIP=true
+            info "触发解压: $CRITICAL_FILE 不存在 (yonaa)"
+        fi
+    done
 fi
 if [ "$NEED_UNZIP" = "true" ]; then
     if [ -f "$ZIP_PATH" ]; then
@@ -522,6 +541,78 @@ if [ "$SKIP_SMOKE" != "true" ]; then
     fi
 else
     warn "跳过 smoke test (--skip-smoke)"
+fi
+
+# ========================= V007.25 fd 增量检查 (后置 PHASE 6.6) =========================
+# [V007.25] 验证 V007.24 修复: 100 个 v2 BOAction 请求后, fd 数应不增长
+# baseline newline fix: tr -d '\\n\\r' (避免 [: integer expression expected)
+FD_AFTER=$(lsof 2>/dev/null | grep -c "architecture" 2>/dev/null || echo 0)
+FD_BASELINE=$(cat /tmp/v00725_fd_baseline_$VERSION.txt 2>/dev/null | tr -d '\n\r' || echo 0)
+if [ -n "$FD_BASELINE" ] && [ "$FD_BASELINE" -gt 0 ]; then
+    FD_DIFF=$((FD_AFTER - FD_BASELINE))
+    echo "  fd 增量: $FD_DIFF (基线: $FD_BASELINE, 当前: $FD_AFTER)"
+    if [ "$FD_DIFF" -gt 10 ]; then
+        warn "  fd 增量 $FD_DIFF > 10 (V007.24 修复后应 ≤ 2)"
+    else
+        ok "  fd 增量 $FD_DIFF ≤ 10 (V007.24 修复有效)"
+    fi
+fi
+
+# ========================= PHASE 6.55: 部署后 MD5 验证 (V007.25 强制) =========================
+# [FIX 2026-07-07] 14:44 部署 bug: yonaa PHASE 0.5 跳过了 unzip, backend 跑旧代码
+# 修法: PHASE 6.55 立即验证 yonaa /opt/app/deployments/ 关键文件 MD5 = zip MD5
+banner "PHASE 6.55: yonaa 部署后 MD5 验证 [V007.25]"
+MD5_MISMATCH=0
+for CRITICAL_FILE in meta/server.py meta/core/datasource.py; do
+    if [ -f "$DEPLOYMENTS_DIR/$CRITICAL_FILE" ]; then
+        ZIP_MD5=$(unzip -p "$ZIP_PATH" "$CRITICAL_FILE" 2>/dev/null | md5sum | awk '{print $1}')
+        ROOT_MD5=$(md5sum "$DEPLOYMENTS_DIR/$CRITICAL_FILE" 2>/dev/null | awk '{print $1}')
+        if [ -n "$ZIP_MD5" ] && [ -n "$ROOT_MD5" ] && [ "$ZIP_MD5" != "$ROOT_MD5" ]; then
+            err "  [X] $CRITICAL_FILE MD5 不匹配 (zip=${ZIP_MD5:0:8}, yonaa=${ROOT_MD5:0:8})"
+            MD5_MISMATCH=$((MD5_MISMATCH + 1))
+        else
+            ok "  [OK] $CRITICAL_FILE MD5 一致 (${ZIP_MD5:0:8})"
+        fi
+    else
+        err "  [X] $CRITICAL_FILE 不存在 (PHASE 0.5 unzip 失败!)"
+        MD5_MISMATCH=$((MD5_MISMATCH + 1))
+    fi
+done
+if [ "$MD5_MISMATCH" -gt 0 ]; then
+    err "MD5 验证失败 ($MD5_MISMATCH/2 不匹配) → V007.24 修复没进入 yonaa"
+    V00725_MD5_FAIL_FLAG=1
+else
+    ok "MD5 验证通过 (V007.24 修复 100% 在 yonaa 部署目录中)"
+    V00725_MD5_FAIL_FLAG=0
+fi
+
+# ========================= PHASE 6.6: V007.25 v2 BOAction 验证 (5 次连续) =========================
+# [V007.25] 强制 5 次连续 v2 BOAction login 验证 (V007.24 修复必跑)
+banner "PHASE 6.6: V007.25 v2 BOAction 验证 (5 次连续)"
+V2_SUCCESS=0
+V2_FAILED=0
+for i in 1 2 3 4 5; do
+    # [V007.25 fix] 用 admin/admin123 (确保 yonaa 存在), 而非 deploy_test (可能不存在)
+    RESP=$(curl -s -X POST "http://localhost:$BACKEND_PORT/api/v2/action/user.authenticate" \
+        -H "Content-Type: application/json" \
+        -d '{"username":"admin","password":"admin123"}' 2>&1)
+    if echo "$RESP" | grep -q '"success":true'; then
+        echo "  [$i/5] [OK] v2 BOAction 成功"
+        V2_SUCCESS=$((V2_SUCCESS + 1))
+    else
+        echo "  [$i/5] [X] v2 BOAction 失败: $RESP"
+        V2_FAILED=$((V2_FAILED + 1))
+    fi
+done
+echo "  结果: 成功 $V2_SUCCESS / 5, 失败 $V2_FAILED / 5"
+if [ "$V2_FAILED" -gt 0 ]; then
+    err "v2 BOAction 验证失败 ($V2_FAILED/5)"
+    err "  极可能是 V007.24 类问题 (fd 泄漏 / lazy data_source)"
+    warn "未自动回滚, 请人工确认是否继续"
+    V00725_V2_FAIL_FLAG=1
+else
+    ok "v2 BOAction 5/5 PASS"
+    V00725_V2_FAIL_FLAG=0
 fi
 
 # ========================= PHASE 7: 切 current 链接 =========================

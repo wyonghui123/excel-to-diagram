@@ -320,6 +320,40 @@ curl http://localhost:3007/api/v1/auth/dev-login?username=admin
 
 ---
 
+## 5.5 根本避免: 强制 dry-run (避免 14:44 类 bug)
+
+**问题**: 14:44 部署失败根因 — 协调智能体没在本机跑过完整 deploy.sh 流程, 漏了 PHASE 0.5 backend hash 检查.
+
+**根本解决** (不是"我下次会跑"):
+
+| 机制 | 文件 | 行为 |
+|------|------|------|
+| 1. rebuild_zip.py 内部自动 dry-run | [tools/rebuild_zip.py](file:///D:/filework/release-prep-worktree/tools/rebuild_zip.py) | 打包后**必须**跑 deploy_dry_run, 跑不过 exit 1 |
+| 2. dry-run 静态扫描 deploy.sh | rebuild_zip.py deploy_dry_run() Step 6 | 强制 deploy.sh 含 "14:44 部署 bug 修复" 字符串, 不含则 fail |
+| 3. dry-run 真实解压 + MD5 验证 | rebuild_zip.py deploy_dry_run() Step 4 | 模拟 yonaa PHASE 0.5 unzip + PHASE 6.55 验证 |
+| 4. dry-run 第二次部署模拟 | rebuild_zip.py deploy_dry_run() Step 5 | 模拟"已部署旧版, 部署新 zip" 场景, 验证 backend hash 检查逻辑可发现 |
+| 5. 跳过保护 | --skip-dry-run | 显式标记"强烈不推荐", 避免意外 |
+
+**测试验证**:
+- 故意删掉 deploy.sh 的 14:44 修复 → rebuild_zip.py 立即失败, log 报 "14:44 bug 会复发"
+- 故意替换 zip 内 datasource.py 为旧版 → dry-run 报告 backend hash 不一致, 强制修复
+- 故意让 zip 缺 V007.24 代码 → dry-run 报告 zip 不可部署
+
+**核心保证**:
+> "打包成功" = deploy.sh + zip 至少满足基本修复要求
+> 不依赖任何人的"记得跑", 完全由程序强制
+
+**为什么能根本避免**:
+- **之前**: 协调智能体手动跑 dry-run, 经常忘 (14:44 失败就是)
+- **现在**: rebuild_zip.py 强制 dry-run, 跳过需显式 `--skip-dry-run` (强烈不推荐)
+- 协调智能体**没机会**绕过这个检查而不被记录
+
+**对照失职清单**:
+| 失职 | 之前 | 现在 |
+|------|------|------|
+| #1 没本机 dry-run | 我看心情跑 | rebuild_zip.py 强制跑 |
+| #2 没验 yonaa 端 | 12 项 invariant 全源头 | verify V12 + V13 + dry-run + 部署后 MD5 验证 |
+
 ## 6. 常见问题排查手册
 
 ### 6.1 integration 3018 启动失败 (P0 RuntimeError)
