@@ -290,15 +290,13 @@ def _preflight_db_integrity_check(db_path):
 def _cleanup_resources(data_source):
     logger = logging.getLogger(__name__)
 
-    # [V007.39 BUG-FIX] TRUNCATE → PASSIVE (TRUNCATE 截断 WAL → 读连接失效 → disk I/O error)
-    if data_source and hasattr(data_source, '_db_path'):
-        try:
-            conn = sqlite3.connect(data_source._db_path, timeout=10)
-            conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
-            conn.close()
-            logger.info("Final WAL checkpoint PASSIVE completed")
-        except Exception as e:
-            logger.warning("Final WAL checkpoint PASSIVE failed: %s", e)
+    # [V007.43 BUG-FIX 2026-07-08] shutdown 顺序: 先 pool/write_queue, 后 checkpoint
+    # 之前 (V007.39) 在 line 296 先用 sqlite3.connect 新建连接做 PASSIVE checkpoint,
+    #   但此时 line 321 的 connection pool 还有活动 reader/writer 连接, 新连接与旧连接
+    #   抢同一 DB 文件 → disk I/O error (PASSIVE 在并发 reader 时无法完成)
+    # 修复: 先 stop write_queue, 再 shutdown pool (关闭所有活动连接), 最后做 PASSIVE
+    # SQLite 官方: "passive mode might leave the checkpoint unfinished if there are
+    #   concurrent readers or writers" — 必须在无并发时才完整
 
     if data_source and hasattr(data_source, '_write_queue') and data_source._write_queue:
         # [V007.15 L4.5] Stop audit_async_queue first (force flush pending audits)
@@ -318,12 +316,29 @@ def _cleanup_resources(data_source):
         except Exception:
             pass
         logger.info("Write queue stopped")
+
+    # [V007.43] 必须在所有读/写连接关闭后才做 PASSIVE checkpoint
     if data_source and hasattr(data_source, '_pool') and data_source._pool:
         try:
             data_source._pool.shutdown()
             logger.info("Connection pool shut down")
         except Exception:
             pass
+
+    # [V007.43] Pool 已空, PASSIVE checkpoint 才能完整 (无并发 reader/writer)
+    # SQLite 默认行为: 最后一个连接关闭时自动做 checkpoint — 但只在 PRAGMA journal_mode=WAL
+    #   下生效。显式调用是为确保 log_service 拉取的 wal_checkpoint 状态准确。
+    # 用 timeout=30 给 OS 足够时间释放 fd, 并发风险已消除。
+    if data_source and hasattr(data_source, '_db_path'):
+        try:
+            conn = sqlite3.connect(data_source._db_path, timeout=30)
+            conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+            conn.close()
+            logger.info("Final WAL checkpoint PASSIVE completed")
+        except Exception as e:
+            # V007.43: shutdown 时 checkpoint 失败不应再 spam WARNING
+            # OS 已关闭 fd, 留给下个进程启动时 PREFLIGHT 处理
+            logger.debug("Final WAL checkpoint PASSIVE skipped (pool already closed): %s", e)
 
 
 def _signal_handler(signum, frame, data_source=None):
