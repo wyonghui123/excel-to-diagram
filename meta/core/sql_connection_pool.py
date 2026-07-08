@@ -162,6 +162,11 @@ class SQLiteConnectionPool:
         #       (其他 PRAGMA 是 per-connection, 不去重)
         self._journal_mode_applied: bool = False
         self._journal_mode_lock = threading.Lock()
+        # [V007.38 BUG-FIX] PRAGMA auto_vacuum 幂等保护 (跟 journal_mode 同样原理)
+        # auto_vacuum 是 db 持久化设置, 重复执行触发 db 头写 → disk I/O error
+        # _create_connection 已引用 _auto_vacuum_applied 但 __init__ 没初始化,
+        # 会触发 AttributeError; 这里补上初始化
+        self._auto_vacuum_applied: bool = False
 
         self._stats = {
             "acquire_count": 0,
@@ -179,6 +184,12 @@ class SQLiteConnectionPool:
         # 修法: 暴露 force_passive_checkpoint 方法, task_scheduler 写后调用
         #       PASSIVE 模式不阻塞读, 但让 WAL 文件 checkpoint, 减少后续视图失效
         self._last_passive_checkpoint = 0.0
+        # 线程锁: 保护 _last_passive_checkpoint 节流 + acquire_writer 调用
+        # 避免 task_scheduler 后台线程 + Flask 请求线程并发
+        self._checkpoint_lock = threading.RLock()
+        # [V007.38 BUG-FIX] writer 连接获取锁
+        # acquire_writer 之前没有锁, 多线程会同时拿同一个 writer 连接
+        self._writer_lock = threading.RLock()
 
     @property
     def db_path(self) -> str:
@@ -238,28 +249,32 @@ class SQLiteConnectionPool:
         Returns:
             True  - 成功执行 checkpoint
             False - 不需要 (距离上次 < 30s) 或失败
+
+        线程安全: 用 _checkpoint_lock 保护节流 + 实际执行的原子性
+        避免 task_scheduler 后台线程 + Flask 请求线程同时调
         """
-        now = time.time()
-        # 节流: 30s 内最多一次 (避免过度 checkpoint)
-        if now - self._last_passive_checkpoint < 30.0:
-            return False
-        try:
-            pc = self.acquire_writer()
+        with self._checkpoint_lock:
+            now = time.time()
+            # 节流: 30s 内最多一次 (避免过度 checkpoint)
+            if now - self._last_passive_checkpoint < 30.0:
+                return False
             try:
-                # PASSIVE = 不等待写锁, 不阻塞, 仅推已 commit 的 WAL → db
-                # busy_timeout 30s 保证不被卡死
-                pc.connection.execute("PRAGMA wal_checkpoint(PASSIVE)")
-                self._last_passive_checkpoint = now
-                logger.debug(
-                    "[V007.38] force_passive_checkpoint done at %s",
-                    time.strftime('%Y-%m-%d %H:%M:%S')
-                )
-                return True
-            finally:
-                self.release_writer()
-        except Exception as e:
-            logger.warning("[V007.38] force_passive_checkpoint failed: %s", e)
-            return False
+                pc = self.acquire_writer()
+                try:
+                    # PASSIVE = 不等待写锁, 不阻塞, 仅推已 commit 的 WAL → db
+                    # busy_timeout 30s 保证不被卡死
+                    pc.connection.execute("PRAGMA wal_checkpoint(PASSIVE)")
+                    self._last_passive_checkpoint = now
+                    logger.debug(
+                        "[V007.38] force_passive_checkpoint done at %s",
+                        time.strftime('%Y-%m-%d %H:%M:%S')
+                    )
+                    return True
+                finally:
+                    self.release_writer()
+            except Exception as e:
+                logger.warning("[V007.38] force_passive_checkpoint failed: %s", e)
+                return False
 
     def shutdown(self):
         self._shutdown = True
@@ -314,7 +329,13 @@ class SQLiteConnectionPool:
             # 修法: 30s 等待, 让 write_queue retry 接管短撞锁 (< 30s)
             #       WriteQueue._write_loop 也加了 retry + backoff (V007.20 L2)
             conn.execute("PRAGMA busy_timeout = 30000")
-            conn.execute("PRAGMA auto_vacuum = INCREMENTAL")
+            # [V007.38 BUG-FIX] PRAGMA auto_vacuum 幂等保护
+            # auto_vacuum 跟 journal_mode 一样是 db 持久化设置, 重复执行触发 db 头写 → disk I/O error
+            with self._journal_mode_lock:
+                if not self._auto_vacuum_applied:
+                    conn.execute("PRAGMA auto_vacuum = INCREMENTAL")
+                    self._auto_vacuum_applied = True
+                # else: 跳过, db 已是 INCREMENTAL 模式
             conn.execute(
                 "PRAGMA wal_autocheckpoint = {0}".format(
                     self._config.wal_auto_checkpoint
@@ -402,25 +423,32 @@ class SQLiteConnectionPool:
                 self._condition.notify()
 
     def acquire_writer(self) -> PooledConnection:
-        if not self._writer_conn:
-            raise RuntimeError("Writer connection not initialized")
-        if not self._writer_conn.is_valid():
-            logger.warning("Writer connection invalid, reconnecting...")
-            try:
-                self._writer_conn.connection.close()
-            except Exception:
-                pass
-            self._writer_conn = PooledConnection(
-                connection=self._create_connection()
-            )
-        self._writer_conn.in_use = True
-        self._writer_conn.touch()
-        return self._writer_conn
+        # [V007.38 BUG-FIX] 加线程锁
+        # 背景: acquire_writer 之前没有锁, 多线程 (WriteQueue 单线程 + force_passive_checkpoint
+        #       后台线程) 同时调用会拿同一个 writer 连接, 事务边界破坏 → 不可预测写错误
+        # 修法: 加 _writer_lock 保护, 但不要在持锁时做长操作 (PRAGMA checkpoint)
+        with self._writer_lock:
+            if not self._writer_conn:
+                raise RuntimeError("Writer connection not initialized")
+            if not self._writer_conn.is_valid():
+                logger.warning("Writer connection invalid, reconnecting...")
+                try:
+                    self._writer_conn.connection.close()
+                except Exception:
+                    pass
+                self._writer_conn = PooledConnection(
+                    connection=self._create_connection()
+                )
+            self._writer_conn.in_use = True
+            self._writer_conn.touch()
+            return self._writer_conn
 
     def release_writer(self):
-        if self._writer_conn:
-            self._writer_conn.in_use = False
-            self._writer_conn.last_used_at = time.time()
+        # [V007.38 BUG-FIX] release_writer 也加锁, 跟 acquire_writer 配对
+        with self._writer_lock:
+            if self._writer_conn:
+                self._writer_conn.in_use = False
+                self._writer_conn.last_used_at = time.time()
 
     @contextmanager
     def reader(self, timeout: float = None):

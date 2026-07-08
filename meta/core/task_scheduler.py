@@ -3,6 +3,7 @@ import os
 import logging
 import threading
 import time
+import random
 from datetime import datetime, timedelta
 from typing import Dict, Optional
 
@@ -13,6 +14,54 @@ from meta.core.task_handler import TaskHandler, TaskResult, TaskExecutionContext
 logger = logging.getLogger(__name__)
 
 DISABLE_TASK_SCHEDULER = os.environ.get('DISABLE_TASK_SCHEDULER', '').lower() in ('true', '1', 'yes')
+
+# [V007.38 BUG-FIX] 共享 retry 包裹器
+# 写路径 (_create_execution_record, _update_execution_status, _handle_execution_failure) 都可能撞
+# disk I/O error, 之前每个都只 logger.error 静默吞, 现在统一 retry
+TASK_DB_RETRY_MAX = 5  # 跟 V007.34 一致
+TASK_DB_RETRY_BASE_DELAY = 0.05  # 50ms 起步, 指数 backoff
+
+
+def _is_retryable_db_error(err_str: str) -> bool:
+    """[V007.38] 判断 db error 是否可重试"""
+    err_lower = err_str.lower()
+    return (
+        'disk i/o' in err_lower or
+        'database is locked' in err_lower or
+        'database is busy' in err_lower
+    )
+
+
+def _retry_db_write(func, *args, **kwargs):
+    """[V007.38] 统一 db 写操作 retry 包裹器
+
+    Args:
+        func: 实际执行 db 操作的 callable, 返回值会被传递
+        *args, **kwargs: 传给 func
+
+    Returns:
+        func 的返回值, 或最后一次异常的 re-raise
+    """
+    last_error = None
+    for attempt in range(TASK_DB_RETRY_MAX):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            last_error = e
+            err_str = str(e).lower()
+            is_retryable = _is_retryable_db_error(err_str)
+            if is_retryable and attempt < TASK_DB_RETRY_MAX - 1:
+                delay = TASK_DB_RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 0.02)
+                logger.warning(
+                    "[V007.38] db write retry %d/%d sleep %.3fs: %s",
+                    attempt + 1, TASK_DB_RETRY_MAX, delay, err_str
+                )
+                time.sleep(delay)
+                continue
+            # 不可恢复 或 重试耗尽
+            raise
+    # 理论不会到这, 但保险
+    raise last_error
 
 
 class TaskScheduler:
@@ -209,80 +258,97 @@ class TaskScheduler:
         #       但 WriteQueue retry 仅 retry 锁竞争, 不覆盖 disk I/O error 重建连接场景
         #       V007.35 mmap_size=256MB 让视图频繁失效, 写 task_executions 时撞 disk I/O error
         #       task_scheduler 之前只是 logger.error 静默吞掉, 后续 task 没记录 → 用户看不到
-        # 修法: 5 次 retry + 指数 backoff + jitter, 只对可恢复错误 (disk I/O / locked) 重试
-        import time as _time
-        import random as _random
-        max_retries = 5
-        last_error = None
-        for attempt in range(max_retries):
+        # 修法: 用 _retry_db_write 统一包裹, 5 次 retry + 指数 backoff + jitter
+        #       写后强制 PASSIVE checkpoint 减少 mmap 视图失效影响
+        # [V007.38 BUG-FIX] 必须用 cursor.lastrowid, 不能用 SELECT last_insert_rowid()
+        # 原因: data_source.execute 走读/写池, 每次可能不同 connection
+        #       SELECT last_insert_rowid() 拿到的是 connection 自身 lastrowid, 不是 INSERT 后的
+        #       V007.37 之前用单 connection 没问题, V007.38 retry 重建连接会丢 rowid
+        def _do_insert():
+            cursor = self.data_source.execute(
+                "INSERT INTO task_executions "
+                "(name, task_id, task_type, handler, status, trigger_type, "
+                " queue, priority, timeout, max_retries, queued_at, created_at) "
+                "VALUES (?, ?, ?, ?, 'pending', 'cron', ?, ?, ?, ?, ?, ?)",
+                (
+                    task.get('name', ''),
+                    task.get('id'),
+                    task.get('category', 'business'),
+                    task.get('handler', ''),
+                    task.get('queue', 'business'),
+                    task.get('priority', 50),
+                    task.get('timeout', 300),
+                    task.get('max_retries', 3),
+                    datetime.now().isoformat(),
+                    datetime.now().isoformat(),
+                )
+            )
+            self.data_source.commit()
+            # cursor.lastrowid 才是 INSERT 的实际 id
+            if cursor and hasattr(cursor, 'lastrowid') and cursor.lastrowid:
+                return cursor.lastrowid
+            # 兜底: 如果 cursor 没 lastrowid 属性 (V007.20 之前), 用 SELECT (但有限制)
+            # 不再 fallback 到 SELECT last_insert_rowid, 因为多连接下不准确
+            return 0
+
+        try:
+            execution_id = _retry_db_write(_do_insert)
+        except Exception as e:
+            logger.error(
+                "[V007.38] Failed to create execution record after %d retries: %s | task=%s",
+                TASK_DB_RETRY_MAX, e, task.get('name', '?')
+            )
+            # [V007.38 BUG-FIX] 重试耗尽时记录 dead letter, 避免 task 静默丢失
+            self._record_dead_letter(task, str(e))
+            return 0
+
+        # [V007.38 BUG-FIX] 写后强制 PASSIVE checkpoint
+        # 减少 mmap 视图失效影响 (避免 20 个读连接全部 mark_error)
+        if self.data_source and hasattr(self.data_source, '_pool') and self.data_source._pool:
             try:
-                self.data_source.execute(
-                    "INSERT INTO task_executions "
-                    "(name, task_id, task_type, handler, status, trigger_type, "
-                    " queue, priority, timeout, max_retries, queued_at, created_at) "
-                    "VALUES (?, ?, ?, ?, 'pending', 'cron', ?, ?, ?, ?, ?, ?)",
-                    (
-                        task.get('name', ''),
-                        task.get('id'),
-                        task.get('category', 'business'),
-                        task.get('handler', ''),
-                        task.get('queue', 'business'),
-                        task.get('priority', 50),
-                        task.get('timeout', 300),
-                        task.get('max_retries', 3),
-                        datetime.now().isoformat(),
-                        datetime.now().isoformat(),
+                self.data_source._pool.force_passive_checkpoint()
+            except Exception:
+                pass  # 静默失败, 主流程不阻塞
+
+        logger.info(
+            "[V007.38] _create_execution_record success task=%s id=%d",
+            task.get('name', '?'), execution_id
+        )
+        return execution_id
+
+    def _record_dead_letter(self, task: dict, error_msg: str):
+        """[V007.38] 写失败时记录 dead letter, 避免 task 静默丢失
+
+        即使 execution_record 写不进 db, 也要留个 evidence 给排查
+        """
+        try:
+            logger.error(
+                "[V007.38] DEAD_LETTER task=%s handler=%s error=%s",
+                task.get('name', '?'), task.get('handler', '?'), error_msg[:200]
+            )
+            # 写到本地文件 (兜底)
+            import os
+            dead_letter_path = "/opt/app/deployments/logs/task_scheduler_dead_letter.log"
+            try:
+                os.makedirs(os.path.dirname(dead_letter_path), exist_ok=True)
+                with open(dead_letter_path, 'a') as f:
+                    f.write(
+                        f"{datetime.now().isoformat()}\ttask={task.get('name', '?')}\t"
+                        f"handler={task.get('handler', '?')}\terror={error_msg[:200]}\n"
                     )
-                )
-                self.data_source.commit()
-
-                result = self.data_source.query("SELECT last_insert_rowid() as id")
-
-                # [V007.38 BUG-FIX] 写后强制 PASSIVE checkpoint
-                # 减少 mmap 视图失效影响 (避免 20 个读连接全部 mark_error)
-                if self.data_source and hasattr(self.data_source, '_pool') and self.data_source._pool:
-                    try:
-                        self.data_source._pool.force_passive_checkpoint()
-                    except Exception:
-                        pass  # 静默失败, 主流程不阻塞
-
-                if attempt > 0:
-                    logger.info(
-                        "[V007.38] _create_execution_record retry success after %d attempts (id=%s)",
-                        attempt + 1, result[0]['id'] if result else 'N/A'
-                    )
-                return result[0]['id'] if result else 0
-
-            except Exception as e:
-                last_error = e
-                err_str = str(e).lower()
-                # 只对可恢复错误重试: disk I/O error / database is locked / database is busy
-                is_retryable = (
-                    'disk i/o' in err_str or
-                    'database is locked' in err_str or
-                    'database is busy' in err_str
-                )
-                if is_retryable and attempt < max_retries - 1:
-                    delay = 0.05 * (2 ** attempt) + _random.uniform(0, 0.02)
-                    logger.warning(
-                        "[V007.38] _create_execution_record retry %d/%d sleep %.3fs: %s | task=%s",
-                        attempt + 1, max_retries, delay, err_str,
-                        task.get('name', '?')
-                    )
-                    _time.sleep(delay)
-                    continue
-                # 不可恢复错误 或 重试耗尽
-                logger.error(
-                    "[V007.38] Failed to create execution record (attempts=%d, retryable=%s): %s | task=%s",
-                    attempt + 1, is_retryable, e, task.get('name', '?')
-                )
-                return 0
+            except OSError:
+                # 写不进文件也无所谓, 日志里已记录
+                pass
+        except Exception:
+            # dead letter 自身失败不能影响主流程
+            pass
     
     def _update_execution_status(self, execution_id: int, status: str, **kwargs):
-        try:
+        # [V007.38 BUG-FIX] 写路径加 retry (跟 _create_execution_record 同样的磁盘抖动)
+        def _do_update():
             set_clauses = ["status = ?"]
             params = [status]
-            
+
             field_mapping = {
                 'started_at': 'started_at',
                 'completed_at': 'completed_at',
@@ -291,36 +357,42 @@ class TaskScheduler:
                 'retry_count': 'retry_count',
                 'result': 'result',
             }
-            
+
             for key, value in kwargs.items():
                 db_field = field_mapping.get(key, key)
                 set_clauses.append(f"{db_field} = ?")
                 params.append(value)
-            
+
             params.append(execution_id)
-            
+
             sql = f"UPDATE task_executions SET {', '.join(set_clauses)} WHERE id = ?"
             self.data_source.execute(sql, tuple(params))
             self.data_source.commit()
-            
+
+        try:
+            _retry_db_write(_do_update)
         except Exception as e:
-            logger.error("Failed to update execution status: %s", e)
+            logger.error(
+                "[V007.38] Failed to update execution status id=%d status=%s: %s",
+                execution_id, status, e
+            )
     
     def _handle_execution_failure(self, execution_id: int, error: str, duration_ms: int):
-        try:
+        # [V007.38 BUG-FIX] 写路径加 retry (跟 _create_execution_record 同样的磁盘抖动)
+        def _do_handle():
             row = self.data_source.query(
                 "SELECT retry_count, max_retries FROM task_executions WHERE id = ?",
                 (execution_id,)
             )
             if not row:
                 return
-            
+
             current = row[0]
             retry_count = current.get('retry_count', 0) + 1
             max_retries = current.get('max_retries', 3)
-            
+
             now = datetime.now().isoformat()
-            
+
             if retry_count < max_retries:
                 self._update_execution_status(
                     execution_id, 'pending',
@@ -337,8 +409,14 @@ class TaskScheduler:
                     error_message=error,
                     retry_count=retry_count,
                 )
+
+        try:
+            _retry_db_write(_do_handle)
         except Exception as e:
-            logger.error("Failed to handle execution failure: %s", e)
+            logger.error(
+                "[V007.38] Failed to handle execution failure id=%d: %s",
+                execution_id, e
+            )
     
     def trigger_task(self, task_code: str, params: dict = None):
         task = None

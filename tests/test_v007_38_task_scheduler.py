@@ -21,74 +21,42 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 class TestV00738TaskSchedulerRetry(unittest.TestCase):
     """V007.38 P0 #1: task_scheduler 写路径 retry"""
 
-    def test_01_retry_loop_present(self):
-        """task_scheduler._create_execution_record 必须有 retry loop"""
-        from meta.core.task_scheduler import TaskScheduler
+    def test_01_uses_retry_helper(self):
+        """task_scheduler._create_execution_record 必须用 _retry_db_write helper"""
+        from meta.core.task_scheduler import TaskScheduler, _retry_db_write, _is_retryable_db_error
 
         src = inspect.getsource(TaskScheduler._create_execution_record)
-        self.assertIn("for attempt in range", src,
-                      '_create_execution_record 缺少 retry loop (V007.38 BUG 复发)')
-        self.assertIn("max_retries", src)
+        self.assertIn("_retry_db_write", src,
+                      '_create_execution_record 缺少 _retry_db_write 包裹 (V007.38 BUG 复发)')
         self.assertIn("V007.38", src, '缺少 V007.38 标记')
 
-    def test_02_retry_only_on_retryable_errors(self):
-        """只对 disk I/O / database locked / database busy 重试, 其他错误不重试"""
-        from meta.core.task_scheduler import TaskScheduler
+    def test_02_helper_has_retryable_detection(self):
+        """_is_retryable_db_error 检测可重试错误"""
+        from meta.core.task_scheduler import _is_retryable_db_error
+        self.assertTrue(_is_retryable_db_error("disk I/O error"))
+        self.assertTrue(_is_retryable_db_error("database is locked"))
+        self.assertTrue(_is_retryable_db_error("Database is busy"))
 
-        src = inspect.getsource(TaskScheduler._create_execution_record)
-        # 必须有 retryable 判断
-        self.assertIn("disk i/o", src)
-        self.assertIn("database is locked", src)
-        self.assertIn("database is busy", src)
-        # 必须有 is_retryable 标志
-        self.assertIn("is_retryable", src)
-
-    def test_03_retry_with_exponential_backoff(self):
-        """retry 使用指数 backoff + jitter"""
-        from meta.core.task_scheduler import TaskScheduler
-
-        src = inspect.getsource(TaskScheduler._create_execution_record)
-        # 指数 backoff 模式
+    def test_03_helper_uses_exponential_backoff(self):
+        """_retry_db_write 使用指数 backoff + jitter"""
+        from meta.core.task_scheduler import _retry_db_write
+        import inspect as _inspect
+        src = _inspect.getsource(_retry_db_write)
         self.assertIn("2 ** attempt", src, '缺少指数 backoff')
         self.assertIn("uniform", src, '缺少 jitter')
 
-    def test_04_retry_success_returns_valid_id(self):
-        """retry 成功后返回有效 id (模拟)"""
-        # 直接测试 retry 逻辑
+    def test_04_retry_recovers_returns_id(self):
+        """retry 成功后返回值 (用 helper 测试)"""
+        from meta.core.task_scheduler import _retry_db_write
         call_count = [0]
-
-        def fake_execute(sql, params=None):
+        def flaky():
             call_count[0] += 1
             if call_count[0] == 1:
-                raise Exception('disk I/O error')
-            # 第二次成功
-            return MagicMock()
-
-        def fake_query(sql):
-            return [{'id': 123}]
-
-        # 模拟 task 字典
-        task = {'name': 'test', 'id': 1, 'category': 'business',
-                'handler': 'h', 'queue': 'q', 'priority': 50,
-                'timeout': 300, 'max_retries': 3}
-
-        # 用 mock 模拟 retry 逻辑
-        max_retries = 5
-        result_id = None
-        for attempt in range(max_retries):
-            try:
-                fake_execute("INSERT", None)
-                fake_query("SELECT last_insert_rowid()")
-                result_id = 123
-                break
-            except Exception as e:
-                err_str = str(e).lower()
-                if 'disk i/o' in err_str and attempt < max_retries - 1:
-                    continue
-                raise
-
-        self.assertEqual(result_id, 123)
-        self.assertEqual(call_count[0], 2)  # 第 2 次成功
+                raise Exception("disk I/O error")
+            return 123
+        result = _retry_db_write(flaky)
+        self.assertEqual(result, 123)
+        self.assertEqual(call_count[0], 2)
 
 
 class TestV00738MmapSizeReduction(unittest.TestCase):
@@ -178,17 +146,25 @@ class TestV00738NoRegression(unittest.TestCase):
 
         with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
             db_path = f.name
+        # 创建有效 db
+        c = sqlite3.connect(db_path)
+        c.execute("CREATE TABLE users (id INTEGER)")
+        c.commit()
+        c.close()
         try:
             pool = SQLiteConnectionPool(db_path, ConnectionConfig())
             c1 = pool._create_connection()
             c2 = pool._create_connection()
             # V007.37: _journal_mode_applied 应在首次后 True
             self.assertTrue(pool._journal_mode_applied)
+            # V007.38: _auto_vacuum_applied 也应 True
+            self.assertTrue(pool._auto_vacuum_applied)
             # db 应是 WAL
             self.assertEqual(c2.execute("PRAGMA journal_mode").fetchone()[0].lower(), 'wal')
             c1.close(); c2.close()
         finally:
-            os.unlink(db_path)
+            if os.path.exists(db_path):
+                os.unlink(db_path)
 
     def test_02_busy_timeout_still_30s(self):
         """V007.20 busy_timeout=30s 不受影响"""
@@ -196,6 +172,10 @@ class TestV00738NoRegression(unittest.TestCase):
 
         with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
             db_path = f.name
+        c = sqlite3.connect(db_path)
+        c.execute("CREATE TABLE users (id INTEGER)")
+        c.commit()
+        c.close()
         try:
             pool = SQLiteConnectionPool(db_path, ConnectionConfig())
             c = pool._create_connection()
@@ -203,7 +183,166 @@ class TestV00738NoRegression(unittest.TestCase):
             self.assertEqual(v, 30000, f'busy_timeout 应为 30000, 实际 {v}')
             c.close()
         finally:
-            os.unlink(db_path)
+            if os.path.exists(db_path):
+                os.unlink(db_path)
+
+
+class TestV00738AutoVacuumIdempotent(unittest.TestCase):
+    """V007.38 P0 #4: auto_vacuum 幂等保护 (跟 journal_mode 同样原理)"""
+
+    def test_01_auto_vacuum_idempotent_flag(self):
+        """_auto_vacuum_applied 标志位正确工作"""
+        from meta.core.sql_connection_pool import SQLiteConnectionPool, ConnectionConfig
+
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+            db_path = f.name
+        c = sqlite3.connect(db_path)
+        c.execute("CREATE TABLE users (id INTEGER)")
+        c.commit()
+        c.close()
+
+        pool = None
+        try:
+            pool = SQLiteConnectionPool(db_path, ConnectionConfig())
+            # 第一次创建前: False
+            self.assertFalse(pool._auto_vacuum_applied)
+            c1 = pool._create_connection()
+            # 第一次创建后: True (幂等保护生效)
+            self.assertTrue(pool._auto_vacuum_applied,
+                           '_auto_vacuum_applied 应在首次后 True (V007.38 BUG-FIX)')
+            # 第二次创建连接, 标志位仍 True (幂等保持)
+            c2 = pool._create_connection()
+            self.assertTrue(pool._auto_vacuum_applied,
+                           '二次创建后 _auto_vacuum_applied 应仍 True')
+            c1.close(); c2.close()
+        finally:
+            if pool:
+                pool.shutdown()
+            import time as _t
+            _t.sleep(0.1)
+            if os.path.exists(db_path):
+                try:
+                    os.unlink(db_path)
+                except PermissionError:
+                    pass
+
+    def test_02_auto_vacuum_idempotent_attr(self):
+        """_auto_vacuum_applied 属性必须存在 (避免 AttributeError)"""
+        from meta.core.sql_connection_pool import SQLiteConnectionPool, ConnectionConfig
+        # 关键: 实例化后属性必须存在 (避免 V007.38 BUG 漏初始化 AttributeError)
+        import tempfile as _tf
+        with _tf.NamedTemporaryFile(suffix='.db', delete=False) as f:
+            db_path = f.name
+        try:
+            c = sqlite3.connect(db_path)
+            c.execute("CREATE TABLE t (id INTEGER)")
+            c.commit()
+            c.close()
+            pool = SQLiteConnectionPool(db_path, ConnectionConfig())
+            self.assertTrue(hasattr(pool, '_auto_vacuum_applied'),
+                           '_auto_vacuum_applied 属性必须存在')
+            self.assertFalse(pool._auto_vacuum_applied)
+            pool.shutdown()
+        finally:
+            if os.path.exists(db_path):
+                try:
+                    os.unlink(db_path)
+                except PermissionError:
+                    pass
+
+
+class TestV00738RetryHelper(unittest.TestCase):
+    """V007.38 P0 #2: _retry_db_write 共享 helper"""
+
+    def test_01_helper_exists(self):
+        """task_scheduler 模块暴露 _retry_db_write"""
+        from meta.core import task_scheduler
+        self.assertTrue(hasattr(task_scheduler, '_retry_db_write'))
+        self.assertTrue(hasattr(task_scheduler, '_is_retryable_db_error'))
+
+    def test_02_retryable_detection(self):
+        """_is_retryable_db_error 正确识别可重试错误"""
+        from meta.core.task_scheduler import _is_retryable_db_error
+        # 应重试
+        self.assertTrue(_is_retryable_db_error("disk I/O error"))
+        self.assertTrue(_is_retryable_db_error("database is locked"))
+        self.assertTrue(_is_retryable_db_error("Database is busy"))
+        # 不应重试
+        self.assertFalse(_is_retryable_db_error("syntax error"))
+        self.assertFalse(_is_retryable_db_error("no such table"))
+
+    def test_03_retry_recovers_on_transient_error(self):
+        """_retry_db_write 第一次失败, 第二次成功"""
+        from meta.core.task_scheduler import _retry_db_write
+        call_count = [0]
+
+        def flaky():
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise Exception("disk I/O error")
+            return 42
+
+        result = _retry_db_write(flaky)
+        self.assertEqual(result, 42)
+        self.assertEqual(call_count[0], 2)
+
+    def test_04_retry_reraises_on_unrecoverable(self):
+        """_retry_db_write 不可恢复错误直接抛"""
+        from meta.core.task_scheduler import _retry_db_write
+        def broken():
+            raise Exception("syntax error")
+        with self.assertRaises(Exception) as cm:
+            _retry_db_write(broken)
+        self.assertIn("syntax error", str(cm.exception))
+
+    def test_05_retry_exhausts_after_max(self):
+        """_retry_db_write 重试耗尽后抛最后一次错误"""
+        from meta.core.task_scheduler import _retry_db_write
+        call_count = [0]
+
+        def always_fails():
+            call_count[0] += 1
+            raise Exception("disk I/O error")
+
+        with self.assertRaises(Exception):
+            _retry_db_write(always_fails)
+        # 1 + 4 retries = 5 calls
+        self.assertEqual(call_count[0], 5)
+
+
+class TestV00738CursorLastrowId(unittest.TestCase):
+    """V007.38 P0 #7: task_scheduler 用 cursor.lastrowid 而非 SELECT last_insert_rowid"""
+
+    def test_01_no_select_last_insert_rowid_in_code(self):
+        """task_scheduler._create_execution_record 的代码(非注释)不再用 SELECT last_insert_rowid"""
+        from meta.core.task_scheduler import TaskScheduler
+        src = inspect.getsource(TaskScheduler._create_execution_record)
+        # 移除所有注释行 (以 # 开头)
+        code_lines = [l for l in src.split('\n') if l.strip() and not l.strip().startswith('#')]
+        code_only = '\n'.join(code_lines)
+        # 实际代码不应有 SELECT last_insert_rowid
+        self.assertNotIn("SELECT last_insert_rowid()", code_only,
+                         'V007.38 BUG: 代码中还在用 SELECT last_insert_rowid() (多连接下不准确)')
+        # 应改用 cursor.lastrowid
+        self.assertIn("cursor.lastrowid", code_only, '缺少 cursor.lastrowid (V007.38 BUG)')
+
+
+class TestV00738WriterLock(unittest.TestCase):
+    """V007.38 P0 #6: acquire_writer 加线程锁"""
+
+    def test_01_writer_lock_exists(self):
+        """SQLiteConnectionPool 有 _writer_lock"""
+        from meta.core.sql_connection_pool import SQLiteConnectionPool, ConnectionConfig
+        pool = SQLiteConnectionPool(":memory:", ConnectionConfig())
+        self.assertTrue(hasattr(pool, '_writer_lock'),
+                        '缺少 _writer_lock (V007.38 BUG-FIX 漏初始化)')
+
+    def test_02_checkpoint_lock_exists(self):
+        """SQLiteConnectionPool 有 _checkpoint_lock"""
+        from meta.core.sql_connection_pool import SQLiteConnectionPool, ConnectionConfig
+        pool = SQLiteConnectionPool(":memory:", ConnectionConfig())
+        self.assertTrue(hasattr(pool, '_checkpoint_lock'),
+                        '缺少 _checkpoint_lock (V007.38 BUG-FIX 漏初始化)')
 
 
 if __name__ == '__main__':

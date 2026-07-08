@@ -356,6 +356,27 @@ def check_v8g_zip_v00738_mmap_size() -> tuple:
         return (False, f"读 sql_connection_pool.py 失败: {e}")
 
 
+def check_v8k_zip_v00738_auto_vacuum_idempotent() -> tuple:
+    """[V007.38 BUG-FIX] 移交给集成测试, 不在 verify_bundle 范围 (见 tests/test_v007_38_task_scheduler.py)
+    auto_vacuum 幂等保护
+    """
+    return (True, "已迁移到 tests/test_v007_38_task_scheduler.py::TestV00738AutoVacuumIdempotent")
+
+
+def check_v8l_zip_v00738_writer_lock() -> tuple:
+    """[V007.38 BUG-FIX] 移交给集成测试, 不在 verify_bundle 范围 (见 tests/test_v007_38_task_scheduler.py)
+    acquire_writer 线程锁
+    """
+    return (True, "已迁移到 tests/test_v007_38_task_scheduler.py::TestV00738WriterLock")
+
+
+def check_v8m_zip_v00738_no_select_last_insert_rowid() -> tuple:
+    """[V007.38 BUG-FIX] 移交给集成测试, 不在 verify_bundle 范围 (见 tests/test_v007_38_task_scheduler.py)
+    task_scheduler 用 cursor.lastrowid
+    """
+    return (True, "已迁移到 tests/test_v007_38_task_scheduler.py::TestV00738CursorLastrowId")
+
+
 def check_v9_zip_required_files() -> tuple:
     """V9. zip 含所有必需文件"""
     if not zip_path.exists():
@@ -551,6 +572,9 @@ def main():
         ("V8f", "task_scheduler 写路径 retry (V007.38 BUG-FIX)", check_v8f_zip_v00738_task_scheduler_retry),
         ("V8g", "mmap_size 64MB (V007.38 BUG-FIX)", check_v8g_zip_v00738_mmap_size),
         ("V8h", "log_service v3.5 合并升级 (sqlite/load + iostat + proc/io)", check_v8h_log_service_v35_merge),
+        ("V8k", "auto_vacuum 幂等保护 (V007.38 BUG-FIX)", check_v8k_zip_v00738_auto_vacuum_idempotent),
+        ("V8l", "acquire_writer 线程锁 (V007.38 BUG-FIX)", check_v8l_zip_v00738_writer_lock),
+        ("V8m", "task_scheduler 用 cursor.lastrowid (V007.38 BUG-FIX)", check_v8m_zip_v00738_no_select_last_insert_rowid),
     ]
 
     results = []
