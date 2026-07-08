@@ -219,7 +219,7 @@ def check_v8b_zip_v00734_v00735() -> tuple:
         return (False, f"读 sql_*.py 失败: {e}")
 
 
-def check_v8e_zip_log_service_v35_endpoints() -> tuple:
+def check_v8h_log_service_v35_merge() -> tuple:
     """V8e. log_service 必须含 v3.5 新端点 (合并升级 V007.37)
     排查 disk I/O error 真因必需: sqlite (直查), sqlite/load (压力), iostat (磁盘抖动), proc/io (进程字节)
     """
@@ -279,15 +279,18 @@ def check_v8d_zip_pool_pragma_idempotent() -> tuple:
         markers = ["_journal_mode_applied", "_journal_mode_set", "journal_mode_applied"]
         if not any(m in pool for m in markers):
             return (False, "PRAGMA journal_mode=WAL 没有幂等保护 (V007.37 BUG 复发)")
-        # 检查有 if 条件包裹 (确保不是死代码)
-        import re
+        # 检查有 if 条件包裹 (跳过定义处的 marker, 找所有出现位置)
         for marker in markers:
-            idx = pool.find(marker)
-            if idx > 0:
+            search_start = 0
+            while True:
+                idx = pool.find(marker, search_start)
+                if idx < 0:
+                    break
                 context = pool[max(0, idx - 200):idx + 200]
-                if "if not" in context or "if not self" in context:
+                if ("if not" in context or "if not self" in context) and "PRAGMA journal_mode" in pool[max(0, idx - 400):idx + 400]:
                     return (True, f"PRAGMA journal_mode=WAL 有幂等保护标记 ({marker}) + if 包裹")
-        return (False, f"幂等标记存在但缺少 if 条件包裹")
+                search_start = idx + 1
+        return (False, f"幂等标记存在但缺少 if 条件包裹 (V007.37 BUG 复发)")
     except Exception as e:
         return (False, f"读 sql_connection_pool.py 失败: {e}")
 
@@ -543,7 +546,7 @@ def main():
         ("V13", "本机 PHASE 0.5 模拟 (解压后 MD5 一致)", check_v13_deploy_e2e),
         ("V8b", "V007.34 + V007.35 修复代码 (V007.35 FIX 22:24)", check_v8b_zip_v00734_v00735),
         ("V8c", "_is_debug() 默认 'True' (V007.36 BUG-FIX 防御)", check_v8c_zip_startup_checks_default),
-    ]    ("V8d", "PRAGMA journal_mode 幂等保护 (V007.37 BUG-FIX)", check_v8d_zip_pool_pragma_idempotent),
+        ("V8d", "PRAGMA journal_mode 幂等保护 (V007.37 BUG-FIX)", check_v8d_zip_pool_pragma_idempotent),
         ("V8e", "query_service 导出 retry 包裹 (V007.37 BUG-FIX)", check_v8e_zip_query_service_retry),
         ("V8f", "task_scheduler 写路径 retry (V007.38 BUG-FIX)", check_v8f_zip_v00738_task_scheduler_retry),
         ("V8g", "mmap_size 64MB (V007.38 BUG-FIX)", check_v8g_zip_v00738_mmap_size),
