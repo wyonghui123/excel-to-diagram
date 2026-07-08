@@ -287,8 +287,20 @@ def _preflight_db_integrity_check(db_path):
         return False
 
 
+_cleanup_done = False
+
 def _cleanup_resources(data_source):
+    global _cleanup_done
+    if _cleanup_done:
+        return
+    _cleanup_done = True
+
     logger = logging.getLogger(__name__)
+
+    # [V007.44 BUG-FIX] 幂等守卫: atexit + signal handler 双重调用
+    # _signal_handler → _cleanup_resources → sys.exit(0) → atexit → _cleanup_resources
+    # 第二次调用时 pool 已关闭, PASSIVE checkpoint 会触发 disk I/O error
+    # 解决: 全局标志位, 第二次调用直接跳过
 
     # [V007.43 BUG-FIX 2026-07-08] shutdown 顺序: 先 pool/write_queue, 后 checkpoint
     # 之前 (V007.39) 在 line 296 先用 sqlite3.connect 新建连接做 PASSIVE checkpoint,

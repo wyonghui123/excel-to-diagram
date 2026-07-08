@@ -130,9 +130,11 @@ class AsyncAuditWriter:
                     pass
             except Exception as e:
                 logger.error("Failed to open thread-local SQLite via safe_connect: %s", str(e))
-                # 降级到原裸连接 (不阻断, 仅记录)
+                # [V007.44 BUG-FIX] 降级裸连接也必须加 mmap_size=0
                 conn = _sqlite3.connect(db_path, check_same_thread=False, timeout=30.0)
                 conn.execute("PRAGMA busy_timeout=30000")
+                conn.execute("PRAGMA mmap_size = 0")
+                conn.execute("PRAGMA cache_size = -2000")
                 self._tls.cm_gen = None
                 self._tls.cm = None
             # 包成 ds-like 适配器, 跟 action_executor.ds 接口一致
