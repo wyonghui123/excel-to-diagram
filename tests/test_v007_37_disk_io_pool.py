@@ -159,10 +159,11 @@ class TestV00737NoRegression(unittest.TestCase):
             c1 = pool._create_connection()
             c2 = pool._create_connection()
             # mmap_size 应每次都设 (per-connection, 不去重)
+            # [V007.38] mmap_size 从 256MB 减小到 64MB (V007.35 副作用缓解)
             v1 = c1.execute("PRAGMA mmap_size").fetchone()[0]
             v2 = c2.execute("PRAGMA mmap_size").fetchone()[0]
-            self.assertEqual(v1, 268435456)
-            self.assertEqual(v2, 268435456)
+            self.assertEqual(v1, 67108864)  # 64MB (was 268435456 = 256MB)
+            self.assertEqual(v2, 67108864)
             c1.close(); c2.close()
         finally:
             os.unlink(db_path)

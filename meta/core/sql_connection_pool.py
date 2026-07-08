@@ -173,6 +173,12 @@ class SQLiteConnectionPool:
             "error_count": 0,
             "total_wait_time": 0.0,
         }
+        # [V007.38 BUG-FIX] task_scheduler 写后强制 PASSIVE checkpoint
+        # 背景: task_scheduler 每 2 分钟写 task_executions, 让 mmap 视图失效,
+        #       触发 20 个读连接 mark_error → 雪崩.
+        # 修法: 暴露 force_passive_checkpoint 方法, task_scheduler 写后调用
+        #       PASSIVE 模式不阻塞读, 但让 WAL 文件 checkpoint, 减少后续视图失效
+        self._last_passive_checkpoint = 0.0
 
     @property
     def db_path(self) -> str:
@@ -224,6 +230,35 @@ class SQLiteConnectionPool:
             return True
         except Exception as e:
             logger.error("Connection pool init failed: %s", str(e))
+            return False
+
+    def force_passive_checkpoint(self) -> bool:
+        """[V007.38] 强制 PASSIVE checkpoint (不阻塞读, 但推 WAL → db)
+
+        Returns:
+            True  - 成功执行 checkpoint
+            False - 不需要 (距离上次 < 30s) 或失败
+        """
+        now = time.time()
+        # 节流: 30s 内最多一次 (避免过度 checkpoint)
+        if now - self._last_passive_checkpoint < 30.0:
+            return False
+        try:
+            pc = self.acquire_writer()
+            try:
+                # PASSIVE = 不等待写锁, 不阻塞, 仅推已 commit 的 WAL → db
+                # busy_timeout 30s 保证不被卡死
+                pc.connection.execute("PRAGMA wal_checkpoint(PASSIVE)")
+                self._last_passive_checkpoint = now
+                logger.debug(
+                    "[V007.38] force_passive_checkpoint done at %s",
+                    time.strftime('%Y-%m-%d %H:%M:%S')
+                )
+                return True
+            finally:
+                self.release_writer()
+        except Exception as e:
+            logger.warning("[V007.38] force_passive_checkpoint failed: %s", e)
             return False
 
     def shutdown(self):
@@ -291,7 +326,14 @@ class SQLiteConnectionPool:
             #       导致并发行为不一致.
             # 修法: 显式设定 mmap_size=256MB, cache_size=-2000 (2MB),
             #       消除平台差异, 让 Windows 开发环境尽量贴近 Linux.
-            conn.execute("PRAGMA mmap_size = 268435456")
+            #
+            # [V007.38 BUG-FIX] mmap_size 256MB → 64MB
+            # 背景: V007.35 引入 mmap_size=256MB 后, 写操作 (task_scheduler)
+            #       会让整个 96MB mmap 视图失效, 触发 20 个读连接全部 mark_error
+            #       → 频繁 _create_connection → 重复 PRAGMA journal_mode → disk I/O error
+            # 修法: 减小到 64MB (db 96MB 的 67%), 视图失效时重读代价从 96MB → 64MB
+            #       减少 mark_error 频度, 缓解雪崩
+            conn.execute("PRAGMA mmap_size = 67108864")  # 64MB (was 256MB)
             conn.execute("PRAGMA cache_size = -2000")
         return conn
 

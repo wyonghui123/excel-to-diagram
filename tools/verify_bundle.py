@@ -219,10 +219,31 @@ def check_v8b_zip_v00734_v00735() -> tuple:
         return (False, f"读 sql_*.py 失败: {e}")
 
 
-def check_v8c_zip_startup_checks_default() -> tuple:
-    """V8c. [V007.36 BUG-FIX] startup_checks._is_debug() 默认值必须 'True' (跟 server.py:983 一致)
-    之前默认 'false' 导致手动启动时 _is_production_safe() 错判, 阻断启动
+def check_v8e_zip_log_service_v35_endpoints() -> tuple:
+    """V8e. log_service 必须含 v3.5 新端点 (合并升级 V007.37)
+    排查 disk I/O error 真因必需: sqlite (直查), sqlite/load (压力), iostat (磁盘抖动), proc/io (进程字节)
     """
+    if not zip_path.exists():
+        return (True, "无 zip, 跳过")
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            ls = zf.read("tools/log_service.py").decode("utf-8", errors="ignore")
+        needed = ["/api/sqlite", "/api/sqlite/load", "/api/iostat", "/api/proc/io"]
+        missing = [n for n in needed if n not in ls]
+        if missing:
+            return (False, f"log_service.py 缺 v3.5 端点 (V007.37 BUG 复发): {missing}")
+        # 检查 v3.5 端点的实现方法也存在
+        methods = ["def _sqlite", "def _sqlite_load", "def _iostat", "def _proc_io"]
+        missing_m = [m for m in methods if m not in ls]
+        if missing_m:
+            return (False, f"log_service.py 缺 v3.5 端点实现: {missing_m}")
+        return (True, f"log_service.py 含 {len(needed)} 个 v3.5 端点 + 实现")
+    except Exception as e:
+        return (False, f"读 log_service.py 失败: {e}")
+
+
+def check_v8c_zip_startup_checks_default() -> tuple:
+    """V8c. [V007.36 BUG-FIX] startup_checks._is_debug() 默认值必须 'True' (跟 server.py:983 一致)"""
     if not zip_path.exists():
         return (True, "无 zip, 跳过")
     try:
@@ -287,6 +308,49 @@ def check_v8e_zip_query_service_retry() -> tuple:
         return (True, "_try_apply_dimension_scope_with_retry 已包裹 (V007.37)")
     except Exception as e:
         return (False, f"读 query_service.py 失败: {e}")
+
+
+def check_v8f_zip_v00738_task_scheduler_retry() -> tuple:
+    """V8f. [V007.38 BUG-FIX] task_scheduler 写路径必须 retry disk I/O error
+    _create_execution_record 必须有 retry + backoff 包裹
+    """
+    if not zip_path.exists():
+        return (True, "无 zip, 跳过")
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            ts = zf.read("meta/core/task_scheduler.py").decode("utf-8", errors="ignore")
+        if "V007.38" not in ts:
+            return (False, "task_scheduler.py 缺少 V007.38 标记")
+        if "max_retries" not in ts or "_create_execution_record" not in ts:
+            return (False, "task_scheduler retry 结构不完整")
+        # 确认 retry 在 _create_execution_record 里
+        idx = ts.find("_create_execution_record")
+        if idx > 0:
+            context = ts[idx:idx + 3000]  # 看函数体
+            if "for attempt in range" not in context:
+                return (False, "_create_execution_record 没有 retry loop")
+        return (True, "_create_execution_record 已加 retry (V007.38)")
+    except Exception as e:
+        return (False, f"读 task_scheduler.py 失败: {e}")
+
+
+def check_v8g_zip_v00738_mmap_size() -> tuple:
+    """V8g. [V007.38 BUG-FIX] sql_connection_pool mmap_size 必须 ≤ 128MB
+    256MB mmap 让写视图失效代价过大, 触发雪崩 (V007.38 BUG-FIX)
+    """
+    if not zip_path.exists():
+        return (True, "无 zip, 跳过")
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            pool = zf.read("meta/core/sql_connection_pool.py").decode("utf-8", errors="ignore")
+        # 检查没有 268435456 (256MB) 但有 67108864 (64MB) 或更小
+        if "PRAGMA mmap_size = 268435456" in pool:
+            return (False, "mmap_size 仍是 256MB (V007.38 BUG 复发)")
+        if "PRAGMA mmap_size = 67108864" not in pool:
+            return (False, "mmap_size 不是 64MB, 期望 67108864 (V007.38 BUG)")
+        return (True, "mmap_size 已改为 64MB (V007.38 BUG-FIX)")
+    except Exception as e:
+        return (False, f"读 sql_connection_pool.py 失败: {e}")
 
 
 def check_v9_zip_required_files() -> tuple:
@@ -479,8 +543,11 @@ def main():
         ("V13", "本机 PHASE 0.5 模拟 (解压后 MD5 一致)", check_v13_deploy_e2e),
         ("V8b", "V007.34 + V007.35 修复代码 (V007.35 FIX 22:24)", check_v8b_zip_v00734_v00735),
         ("V8c", "_is_debug() 默认 'True' (V007.36 BUG-FIX 防御)", check_v8c_zip_startup_checks_default),
-        ("V8d", "PRAGMA journal_mode 幂等保护 (V007.37 BUG-FIX)", check_v8d_zip_pool_pragma_idempotent),
+    ]    ("V8d", "PRAGMA journal_mode 幂等保护 (V007.37 BUG-FIX)", check_v8d_zip_pool_pragma_idempotent),
         ("V8e", "query_service 导出 retry 包裹 (V007.37 BUG-FIX)", check_v8e_zip_query_service_retry),
+        ("V8f", "task_scheduler 写路径 retry (V007.38 BUG-FIX)", check_v8f_zip_v00738_task_scheduler_retry),
+        ("V8g", "mmap_size 64MB (V007.38 BUG-FIX)", check_v8g_zip_v00738_mmap_size),
+        ("V8h", "log_service v3.5 合并升级 (sqlite/load + iostat + proc/io)", check_v8h_log_service_v35_merge),
     ]
 
     results = []
