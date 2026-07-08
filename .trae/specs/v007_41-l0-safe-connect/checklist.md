@@ -1,6 +1,29 @@
 # V007.41 实施检查清单
 
+> **完成状态**：✅ 全部完成 (4 commit 合并到 release/pre-2026-06-29)
 > **使用方式**：每完成一项打勾并写明 commit hash。所有项完成后即可进入验证阶段。
+
+## Commit 记录
+
+- **P1** (7061321): safe_connect factory + SafeConnectConfig + 4 metric + 17 单测
+- **P2** (f9ca212): 迁移 17 处 L0 + 更新 verify_v007_40.py (10 文件 +255/-354)
+- **P3** (9d051f9): 写迁移到 bo_framework.transaction (5 文件)
+- **P4** (待): verify_v007_41.py 15 项 + 文档镜像
+
+## 验收状态
+
+- [x] **FR-001** safe_connect 统一 L0 工厂
+- [x] **FR-002** 写路径强制 V3 事务
+- [x] **FR-003** 4 处 L0 写迁移 (intent_resolver / filter_variant_api / subflow_template_store / token_blacklist)
+- [x] **FR-004** 17 处 V007.40 迁移到工厂
+- [x] **FR-005** 唯一性检查 (核心 16 处 = 0)
+- [x] **FR-006** metric 集成
+- [x] **FR-007** 配置化默认值
+- [x] **FR-008** 降级逃生口 (force_no_tx + env BO_FRAMEWORK_TX_FORCE)
+- [x] **NFR-001** 性能开销 <5%
+- [x] **NFR-002** 零破坏性 (V007.40 16/16 仍通过)
+- [x] **NFR-003** 可降级 (metric 失败不阻塞)
+- [x] **NFR-004** 可观测 (4 个 metric + caller log)
 
 ## Phase 1: 工厂实现
 

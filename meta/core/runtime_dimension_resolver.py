@@ -297,23 +297,16 @@ class RuntimeDimensionResolver:
     def _get_user_roles(self, user_id: int) -> List[int]:
         """获取用户的角色 ID 列表"""
         try:
-            # [FIX v007 2026-07-05] check_same_thread=False
-            # [V007.40 BUG-FIX] 加 timeout=30.0 + PRAGMA busy_timeout=30000
-            conn = sqlite3.connect(
-                self._db_path,
-                timeout=30.0,
-                check_same_thread=False,
-            )
-            conn.execute("PRAGMA busy_timeout = 30000")
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT DISTINCT gr.role_id
-                FROM user_group_members ugm
-                JOIN group_roles gr ON ugm.group_id = gr.group_id
-                WHERE ugm.user_id = ?
-            """, (user_id,))
-            roles = [row[0] for row in cursor.fetchall()]
-            conn.close()
+            # [V007.41 BUG-FIX] 用 safe_connect_for_read 统一 L0 入口
+            with safe_connect_for_read(self._db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT DISTINCT gr.role_id
+                    FROM user_group_members ugm
+                    JOIN group_roles gr ON ugm.group_id = gr.group_id
+                    WHERE ugm.user_id = ?
+                """, (user_id,))
+                roles = [row[0] for row in cursor.fetchall()]
             return roles
         except Exception as e:
             logger.error(f"Failed to get user roles: {e}")
