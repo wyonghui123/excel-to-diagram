@@ -287,7 +287,20 @@ def _preflight_db_integrity_check(db_path):
         return False
 
 
+# [V007.46 BUG-FIX] 幂等守卫: atexit + signal handler 双重调用防护
+# 背景: atexit.register(_cleanup_resources) + signal.SIGTERM 触发 sys.exit(0) →
+#       atexit 再次调 _cleanup_resources → 第二次 shutdown 时 PASSIVE checkpoint
+#       在 pool 已关闭状态下执行 → disk I/O error
+# V007.44 dev-agent 910022e 改了 deploy_bundle/ 但工作树 meta/ 没改, 部署时回滚
+_cleanup_done = False
+
+
 def _cleanup_resources(data_source):
+    global _cleanup_done
+    if _cleanup_done:
+        logging.getLogger(__name__).info("[V007.46] _cleanup_resources already called, skipping (idempotent guard)")
+        return
+    _cleanup_done = True
     logger = logging.getLogger(__name__)
 
     # [V007.43 BUG-FIX 2026-07-08] shutdown 顺序: 先 pool/write_queue, 后 checkpoint

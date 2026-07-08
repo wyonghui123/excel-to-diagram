@@ -4554,8 +4554,16 @@ class ImportExportService:
                 return f"{fq_field} IN ({c.get('value')})"
             return '1=1'
 
-        def _flatten(conds: List[Dict]) -> str:
-            """将一组 conds 转为 SQL 字符串 (顶层 OR 拼接, 嵌套 group 按 type)"""
+        def _flatten(conds: List[Dict], leaf_op: str = 'OR') -> str:
+            """将一组 conds 转为 SQL 字符串 (顶层 OR 拼接, 嵌套 group 按 type)
+
+            [V007.46 BUG-FIX] leaf_op 参数控制裸 leaf 条件(无 type 标记)的拼接方式:
+              - 多角色路径: leaf_op='OR' (顶层 OR-of-AND)
+              - 单角色路径: leaf_op='AND' (同一 role 内多个 leaf 是 AND 关系)
+            背景: 与 BUG-V027-pt2 (query_service._try_apply_dimension_scope) 完全同源,
+                  但 export 路径未被覆盖. V007.44 dev-agent 改了 deploy_bundle 但工作树
+                  未改, 部署时回滚. 之前对所有 leaf 用 OR 拼接, 单角色时错.
+            """
             parts = []
             for c in conds:
                 t = c.get('type')
@@ -4573,11 +4581,12 @@ class ImportExportService:
                     parts.append(_cond_to_sql(c))
             if not parts:
                 return ''
-            # 顶层 OR 拼接 (line 1692 调用方语义: OR-of-AND across roles)
-            return ' OR '.join(parts)
+            # [V007.46 BUG-FIX] 顶层拼接按 leaf_op (OR/AND)
+            return f' {leaf_op} '.join(parts)
 
         if len(per_role_conds) == 1:
-            return _flatten(per_role_conds[0])
+            # [V007.46 BUG-FIX] 单角色: 裸 leaf 条件之间是 AND 关系
+            return _flatten(per_role_conds[0], leaf_op='AND')
 
         # 多 role → OR-of-AND across roles
         all_segments = []

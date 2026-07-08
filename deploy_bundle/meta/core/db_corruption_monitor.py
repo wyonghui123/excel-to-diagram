@@ -59,9 +59,12 @@ class DBCorruptionMonitor:
     def check_and_log_integrity(self) -> bool:
         """检查完整性并记录结果"""
         try:
-            conn = sqlite3.connect(self.db_path, timeout=5)
-            result = conn.execute("PRAGMA integrity_check").fetchone()
-            conn.close()
+            # [V007.46 BUG-FIX] 改用 safe_connect_for_read: 加 mmap_size=0 + busy_timeout
+            # 背景: integrity_check 全表扫描大 DB, mmap 模式触发 SIGBUS-like IO error
+            #       V007.42 P5 mmap=0 修复了 sql_connection_pool, 但本类 4 处裸连接漏了
+            from meta.core.safe_connect import safe_connect_for_read
+            with safe_connect_for_read(self.db_path) as conn:
+                result = conn.execute("PRAGMA integrity_check").fetchone()
 
             is_ok = result[0] == "ok"
 
@@ -116,28 +119,31 @@ class DBCorruptionMonitor:
 
     def _get_wal_mode(self) -> str:
         try:
-            conn = sqlite3.connect(self.db_path, timeout=5)
-            result = conn.execute("PRAGMA journal_mode").fetchone()
-            conn.close()
+            # [V007.46 BUG-FIX] 改用 safe_connect_for_read: 加 mmap_size=0
+            from meta.core.safe_connect import safe_connect_for_read
+            with safe_connect_for_read(self.db_path) as conn:
+                result = conn.execute("PRAGMA journal_mode").fetchone()
             return result[0]
         except:
             return "unknown"
 
     def _get_pending_wal_frames(self) -> int:
         try:
-            conn = sqlite3.connect(self.db_path, timeout=5)
-            cursor = conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
-            busy, log_frames, checkpointed = cursor.fetchone()
-            conn.close()
+            # [V007.46 BUG-FIX] 改用 safe_connect_for_read: 加 mmap_size=0
+            from meta.core.safe_connect import safe_connect_for_read
+            with safe_connect_for_read(self.db_path) as conn:
+                cursor = conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+                busy, log_frames, checkpointed = cursor.fetchone()
             return max(0, log_frames - checkpointed)
         except:
             return -1
 
     def _check_integrity(self) -> str:
         try:
-            conn = sqlite3.connect(self.db_path, timeout=5)
-            result = conn.execute("PRAGMA integrity_check").fetchone()
-            conn.close()
+            # [V007.46 BUG-FIX] 改用 safe_connect_for_read: 加 mmap_size=0
+            from meta.core.safe_connect import safe_connect_for_read
+            with safe_connect_for_read(self.db_path) as conn:
+                result = conn.execute("PRAGMA integrity_check").fetchone()
             return result[0]
         except Exception as e:
             return f"error: {e}"

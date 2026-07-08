@@ -64,7 +64,7 @@ def _is_enforce_disabled() -> bool:
 
 
 def _open_safe_connection(db_path: str) -> sqlite3.Connection:
-    """内部: 创建配好三件套的连接 (不负责事务探测)."""
+    """内部: 创建配好安全三件套 + mmap_size=0 的连接."""
     # Lazy import config: 避免循环依赖
     from meta.core.sql_config import get_safe_connect_config
     cfg = get_safe_connect_config()
@@ -75,6 +75,14 @@ def _open_safe_connection(db_path: str) -> sqlite3.Connection:
         check_same_thread=cfg.check_same_thread,
     )
     conn.execute(f"PRAGMA busy_timeout = {cfg.busy_timeout_ms}")
+    # [V007.46 BUG-FIX] 禁用 mmap: 108MB DB 上 mmap 导致 disk I/O error
+    # V007.42 P5 在 sql_connection_pool.py 加了 mmap_size=0, 但本工厂漏了
+    # 所有通过 safe_connect_for_read/write 创建的连接都没有禁用 mmap
+    # → 之前 V007.44 dev-agent 910022e 改了 deploy_bundle/ 但工作树 meta/ 没改
+    # → 部署 agent 42d9bb4 接手时工作树 deploy_bundle 也回滚了
+    # → 当前部署代码 safe_connect 工厂仍无 mmap_size=0
+    conn.execute("PRAGMA mmap_size = 0")
+    conn.execute("PRAGMA cache_size = -2000")
     conn.row_factory = sqlite3.Row
     return conn
 

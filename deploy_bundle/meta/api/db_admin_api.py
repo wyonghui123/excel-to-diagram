@@ -146,22 +146,22 @@ def db_health():
     # 2. DB 完整性
     db_path = _get_db_path()
     try:
-        conn = sqlite3.connect(db_path, timeout=5)
-        try:
+        # [V007.46 BUG-FIX] 改用 safe_connect_for_read: 加 mmap_size=0
+        from meta.core.safe_connect import safe_connect_for_read
+        with safe_connect_for_read(db_path) as conn:
             check = conn.execute('PRAGMA integrity_check').fetchone()[0]
-            result['data']['integrity'] = check
-            if check != 'ok':
-                result['data']['status'] = 'critical'
-        finally:
-            conn.close()
+        result['data']['integrity'] = check
+        if check != 'ok':
+            result['data']['status'] = 'critical'
     except Exception as e:
         result['data']['integrity'] = f'error: {e}'
         result['data']['status'] = 'critical'
 
     # 3. WAL 模式
     try:
-        conn = sqlite3.connect(db_path, timeout=5)
-        try:
+        # [V007.46 BUG-FIX] 改用 safe_connect_for_read
+        from meta.core.safe_connect import safe_connect_for_read
+        with safe_connect_for_read(db_path) as conn:
             journal_mode = conn.execute('PRAGMA journal_mode').fetchone()[0]
             wal_info = {
                 'journal_mode': journal_mode,
@@ -179,8 +179,6 @@ def db_health():
                     'checkpointed_pages': busy[2] if busy else None,
                 }
             result['data']['wal_info'] = wal_info
-        finally:
-            conn.close()
     except Exception as e:
         result['data']['wal_info'] = {'error': str(e)}
 
