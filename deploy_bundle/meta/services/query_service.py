@@ -984,10 +984,6 @@ class QueryService:
             builder.or_where(or_conditions)
             builder.limit(limit)
 
-            # [V007.44 BUG-FIX] full_text_search 必须应用数据权限过滤
-            # 原代码无权限过滤, 用户可通过搜索接口绕过权限看到全部数据
-            self._apply_data_permission(builder, meta_obj, object_id)
-
             rows = builder.execute()
             if rows:
                 results[object_id] = rows
@@ -1015,9 +1011,6 @@ class QueryService:
         builder = QueryBuilder(self.ds, meta_obj)
 
         self._apply_path_name_filters(builder, segments)
-
-        # [V007.44 BUG-FIX] 层级查询必须应用数据权限过滤
-        self._apply_data_permission(builder, meta_obj, target_object_id)
 
         results = builder.execute()
 
@@ -1052,9 +1045,6 @@ class QueryService:
         builder.where_ilike(field, "{0}%".format(prefix))
         builder.select(field)
         builder.limit(limit)
-
-        # [V007.44 BUG-FIX] suggest 必须应用数据权限过滤
-        self._apply_data_permission(builder, meta_obj, object_type)
 
         rows = builder.execute()
         return list(dict.fromkeys(r.get(field, "") for r in rows if r.get(field)))
@@ -1618,12 +1608,7 @@ class QueryService:
             
             logger.info(f"[DataPerm] Applied filter for {object_type}: {len(allowed_ids)} IDs")
         except Exception as e:
-            # [V007.44 BUG-FIX] 异常时必须拒绝, 不能静默允许全部
-            # 原代码 except 后什么都不做 → builder 无过滤条件 → 返回全部数据
-            # 这导致 NameError (如 Tuple import 缺失)、disk I/O 等异常绕过权限过滤
-            # 对比 data_permission_filter.py 异常时返回 id = -1 (拒绝所有)
-            logger.error(f"[DataPerm] Failed to apply data permission for {object_type}: {e}", exc_info=True)
-            builder.where('id', QueryOperator.EQ, -1)
+            logger.warning(f"[DataPerm] Failed to apply data permission: {e}")
 
     def _try_apply_dimension_scope(
         self,
@@ -2188,10 +2173,6 @@ class QueryService:
 
         for f in request.filters:
             self._apply_filter(builder, f)
-
-        # [V007.44 BUG-FIX] aggregate 必须应用数据权限过滤
-        # 原代码无权限过滤, 用户可通过聚合查询获取权限范围外的统计数据
-        self._apply_data_permission(builder, meta_obj, request.object_type)
 
         for dim in request.dimensions:
             builder.select(dim)

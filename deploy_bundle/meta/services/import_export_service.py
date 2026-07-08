@@ -4554,15 +4554,8 @@ class ImportExportService:
                 return f"{fq_field} IN ({c.get('value')})"
             return '1=1'
 
-        def _flatten(conds: List[Dict], leaf_op: str = 'OR') -> str:
-            """将一组 conds 转为 SQL 字符串
-
-            [V007.44 BUG-FIX] leaf_op 参数控制裸 leaf 条件(无 type 标记)的拼接方式:
-              - 多角色路径: leaf_op='OR' (顶层 OR-of-AND, 每个 role 的结果 OR 拼接)
-              - 单角色路径: leaf_op='AND' (同一 role 内多个 leaf 是 AND 关系)
-              原代码对所有 leaf 都用 OR 拼接, 单角色时 domain_id=8 OR version_id=3
-              应为 domain_id=8 AND version_id=3, 与 query_service.py BUG-V027-pt2 同源
-            """
+        def _flatten(conds: List[Dict]) -> str:
+            """将一组 conds 转为 SQL 字符串 (顶层 OR 拼接, 嵌套 group 按 type)"""
             parts = []
             for c in conds:
                 t = c.get('type')
@@ -4580,11 +4573,11 @@ class ImportExportService:
                     parts.append(_cond_to_sql(c))
             if not parts:
                 return ''
-            return f' {leaf_op} '.join(parts)
+            # 顶层 OR 拼接 (line 1692 调用方语义: OR-of-AND across roles)
+            return ' OR '.join(parts)
 
         if len(per_role_conds) == 1:
-            # [V007.44 BUG-FIX] 单角色: 裸 leaf 条件之间是 AND 关系
-            return _flatten(per_role_conds[0], leaf_op='AND')
+            return _flatten(per_role_conds[0])
 
         # 多 role → OR-of-AND across roles
         all_segments = []

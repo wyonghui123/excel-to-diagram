@@ -77,31 +77,31 @@ def build_diagnostics() -> dict:
             'architecture.db'
         )
         if os.path.exists(db_path):
-            # [V007.44 BUG-FIX] 改用 safe_connect_for_read: 加 mmap_size=0 + busy_timeout
-            from meta.core.safe_connect import safe_connect_for_read
-            with safe_connect_for_read(db_path) as conn:
-                try:
-                    # audit_log 表可能不存在, 容错
-                    one_hour_ago = (datetime.utcnow() - timedelta(hours=1)).isoformat()
-                    rows = conn.execute(
-                        "SELECT log_id, object_type, action, message, created_at "
-                        "FROM audit_logs "
-                        "WHERE created_at > ? AND (log_level = 'ERROR' OR log_level = 'WARN') "
-                        "ORDER BY created_at DESC LIMIT 20",
-                        (one_hour_ago,)
-                    ).fetchall()
-                    for r in rows:
-                        recent_errors.append({
-                            'log_id': r[0],
-                            'object_type': r[1],
-                            'action': r[2],
-                            'message': r[3],
-                            'ts': r[4],
-                            'trace_id': trace_id,
-                        })
-                except Exception:
-                    # audit_logs 表可能字段不同, 静默
-                    pass
+            conn = sqlite3.connect(db_path, timeout=5)
+            try:
+                # audit_log 表可能不存在, 容错
+                one_hour_ago = (datetime.utcnow() - timedelta(hours=1)).isoformat()
+                rows = conn.execute(
+                    "SELECT log_id, object_type, action, message, created_at "
+                    "FROM audit_logs "
+                    "WHERE created_at > ? AND (log_level = 'ERROR' OR log_level = 'WARN') "
+                    "ORDER BY created_at DESC LIMIT 20",
+                    (one_hour_ago,)
+                ).fetchall()
+                for r in rows:
+                    recent_errors.append({
+                        'log_id': r[0],
+                        'object_type': r[1],
+                        'action': r[2],
+                        'message': r[3],
+                        'ts': r[4],
+                        'trace_id': trace_id,
+                    })
+            except Exception:
+                # audit_logs 表可能字段不同, 静默
+                pass
+            finally:
+                conn.close()
     except Exception:
         pass
 
