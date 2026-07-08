@@ -1,0 +1,14 @@
+output_lines=11
+
+2026-07-08 11:34:23,634 - meta.core.sql_adapters - WARNING - [283343a1-c6ed-4f8b-b546-276af912bb73] - [V007.34] _execute_via_read_pool: retrying after disk I/O (attempt 1/3, sleep 0.069s): disk i/o error
+2026-07-08 11:34:23,635 - meta.core.sql_adapters - WARNING - [bf33b892-45ce-4f48-a41a-b65c77bc2f68] - [V007.34] _execute_via_read_pool: retrying after disk I/O (attempt 1/3, sleep 0.062s): disk i/o error
+2026-07-08 11:34:23,636 - meta.core.sql_adapters - WARNING - [25d1ad93-f807-418d-85b2-d2ff3d6eace6] - [V007.34] _execute_via_read_pool: retrying after disk I/O (attempt 1/3, sleep 0.053s): disk i/o error
+2026-07-08 11:34:23,684 - meta.core.sql_adapters - WARNING - [90dde64e-b7b1-4fca-9ebf-a39ffaf48812] - [V007.34] _execute_via_read_pool: retrying after disk I/O (attempt 2/3, sleep 0.102s): disk i/o error
+2026-07-08 11:34:23,690 - meta.core.sql_adapters - WARNING - [25d1ad93-f807-418d-85b2-d2ff3d6eace6] - [V007.34] _execute_via_read_pool: retrying after disk I/O (attempt 2/3, sleep 0.119s): disk i/o error
+2026-07-08 11:34:23,698 - meta.core.sql_adapters - WARNING - [bf33b892-45ce-4f48-a41a-b65c77bc2f68] - [V007.34] _execute_via_read_pool: retrying after disk I/O (attempt 2/3, sleep 0.112s): disk i/o error
+2026-07-08 11:34:23,704 - meta.core.sql_adapters - WARNING - [283343a1-c6ed-4f8b-b546-276af912bb73] - [V007.34] _execute_via_read_pool: retrying after disk I/O (attempt 2/3, sleep 0.109s): disk i/o error
+2026-07-08 11:34:28,999 - meta.core.sql_adapters - WARNING - [03cac0ee-daf2-49b9-9bd7-92d320c2a366] - [V007.34] _execute_via_read_pool: retrying after disk I/O (attempt 1/3, sleep 0.066s): disk i/o error
+2026-07-08 11:34:29,066 - meta.core.sql_adapters - WARNING - [03cac0ee-daf2-49b9-9bd7-92d320c2a366] - [V007.34] _execute_via_read_pool: retrying after disk I/O (attempt 2/3, sleep 0.105s): disk i/o error
+2026-07-08 11:34:29,179 - meta.api.bo_api - ERROR - [03cac0ee-daf2-49b9-9bd7-92d320c2a366] - [bo_api] architecture preview error: disk I/O error
+sqlite3.OperationalError: disk I/O error
+

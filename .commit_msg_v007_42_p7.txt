@@ -1,0 +1,18 @@
+fix(be): V007.42 P7 - verify + docs
+
+[V007.42] Phase 7: 集成验证 + spec 文档
+
+- verify_v007_42.py: 17 项集成验证脚本 (Test 1-17)
+  - Test 1-7: FR-001/002/008/009 retry/限流/mmap/max_readers
+  - Test 8-10: FR-002 限流器逃生口 + FR-003 WAL/health_check
+  - Test 11-14: FR-005/006/010 实现
+  - Test 15: V007.41 回归 (safe_connect)
+  - Test 16-17: FR-011/012 新增功能
+  - 17/17 通过
+
+- .trae/specs/v007_42-disk-io-systematic-fix/:
+  - spec.md: 12 个 FR + 4 个 NFR + 5 个设计决策
+  - checklist.md: P5/P6/P7 三阶段检查清单 (含 FR-011/012)
+  - tasks.md: 15 个 Task 执行版
+  - implementation_plan.md: 实施计划 + 关键代码预览
+  - verification.md: V.1-V.7 七大类验证 + 性能基线对比

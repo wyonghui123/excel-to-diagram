@@ -1,0 +1,44 @@
+fix(be): V007.42 P5 - mmap fix + retry upgrade + I/O rate limiter
+
+[V007.42] Phase 5: mmap 修正 + Retry 升级 + I/O 限流 + 版本守卫 + 心跳
+
+- sql_connection_pool.py:
+  - ConnectionConfig.mmap_size=0 (禁用, FR-008)
+  - SQLiteConnectionPool._io_error_count/_io_rate_limit_active (FR-002)
+  - _record_io_error/_check_io_rate_limit 方法
+  - _create_connection PRAGMA mmap_size 读取 config + env
+  - SQLITE_MMAP_SIZE / SQLITE_IO_RATE_LIMIT_* 环境变量支持
+
+- sql_adapters.py:
+  - _execute_via_read_pool: Decorrelated Jitter (base=200ms, cap=2s)
+  - max_retries=3 (硬限, 不改为 5, SQLITE_IOERR 是 hard error)
+  - SQLITE_READ_RETRY_MAX/BASE_MS 环境变量
+  - 集成 I/O 限流器 (每执行前 check, 失败时 record)
+  - ConnectionConfig max_readers 20→10 (FR-009, D3 修正)
+
+- observability.py: 新增 10 个 metric (FR-007):
+  - read_retry_total / read_retry_success_total (FR-001)
+  - io_rate_limit_triggered_total (FR-002)
+  - wal_checkpoint_busy_total (FR-003)
+  - pool_shrink_total / pool_expand_total (FR-004)
+  - reader_errored_total
+  - long_transaction_total (FR-006)
+  - sqlite_version_compliant (FR-011)
+  - heartbeat_check_failed_total (FR-012)
+
+- sqlite_version_guard.py: FR-011 版本基线检查
+  - 检测 sqlite3.sqlite_version < 3.51.3 -> WARNING
+  - SQLITE_REQUIRE_MIN_VERSION=strict 可强制 raise
+  - get_version_info() 返回结构化诊断信息
+
+- db_heartbeat.py: FR-012 后台心跳线程
+  - daemon 线程, 每 30s PRAGMA quick_check
+  - 失败时 WARNING + metric, 连续 3 次升级 ERROR
+  - SQLITE_HEARTBEAT_INTERVAL / DISABLE 环境变量
+  - start_global_heartbeat / stop_global_heartbeat 单例管理
+
+- test_v007_42_read_retry.py + test_v007_42_heartbeat.py:
+  - 17 项单元测试
+  - 兼容无 monkeypatch fixture 环境
+
+verify_v007_42.py: 17/17 集成验证通过

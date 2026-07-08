@@ -1,0 +1,462 @@
+# 销售订单 BO（事务型）- 增强版字段元数据示例
+# 展示 EnumReference, DimensionReference, FieldDependency 的使用
+
+id: sales_order
+name: 销售订单
+bo_category: transactional           # ← BO分类（Phase 1 新增）
+bo_sub_category: document
+table_name: sales_orders
+description: "销售订单业务对象，展示增强的字段元数据模型"
+
+fields:
+  # ══════════════════════════════════════════════════════════
+  # 基础字段（保持原有语法）
+  # ══════════════════════════════════════════════════════════
+
+  - id: order_no
+    name: 订单编号
+    type: string
+    db_column: order_no
+    required: true
+    unique: true
+    semantics:
+      business_key: true
+      immutable: true
+      pattern: "^SO\\d{10}$"
+    ui:
+      widget: input
+      list:
+        width: 150
+        sortable: true
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    required: true
+    semantics:
+      data_category: date_time
+    ui:
+      widget: datetime_picker
+      filterable: true
+
+  # ══════════════════════════════════════════════════════════
+  # 枚举引用字段（增强版 - Phase 2 新增）
+  # 使用 enum_reference 替代简单的 enum_type_ref
+  # ══════════════════════════════════════════════════════════
+
+  - id: status
+    name: 订单状态
+    type: string
+    db_column: status
+    required: true
+    enum_reference:                              # ← 结构化配置（替代 enum_type_ref: string）
+      enum_type_id: order_status
+      binding_strength: strict                   # 严格绑定：只允许枚举值
+      filter_by_dimension:                        # 条件过滤：根据订单类型动态过滤选项
+        field: order_type
+        mapping:
+          SALES_ORDER: [pending, confirmed, shipping, completed, cancelled]
+          RETURN_ORDER: [pending_return, returned, rejected]
+          EXCHANGE_ORDER: [pending_exchange, processing, completed]
+      cascade_update: false                       # 不级联更新已有数据
+      i18n_join_fields: [name, name_en]           # 多语言JOIN字段
+      default_value_code: pending                 # 默认值
+      sort_by: sort_order                         # 按排序权重排列
+      value_filter:                               # 额外过滤条件
+        is_active: true
+    ui:
+      widget: select
+      relation: enum_value                        # 渲染时关联枚举值
+      list:
+        render_type: badge                       # 列表页显示为标签
+        color_mapping:                            # 状态颜色映射
+          pending: warning
+          confirmed: info
+          shipping: primary
+          completed: success
+          cancelled: danger
+
+  - id: priority
+    name: 优先级
+    type: string
+    db_column: priority
+    required: false
+    enum_reference:
+      enum_type_id: order_priority
+      binding_strength: loose                     # 松散绑定：推荐但不强制
+      display_format: "{name} ({code})"            # 显示格式模板
+      role_filter:                                # 权限过滤：不同角色看到不同选项
+        admin: ["all"]
+        manager: ["high", "medium", "low"]
+        user: ["normal"]
+    ui:
+      widget: select
+      filterable: true
+
+  # ══════════════════════════════════════════════════════════
+  # 维度引用字段（Phase 2 新增）
+  # 引用主数据BO，支持 Search Help 和冗余策略
+  # ══════════════════════════════════════════════════════════
+
+  - id: customer_id
+    name: 客户ID
+    type: integer
+    db_column: customer_id
+    required: true
+    dimension_reference:                          # ← 维度引用（引用客户主数据BO）
+      target_bo: customer                         # 目标BO ID
+      reference_type: foreign_key                # 外键引用类型
+      display_field: customer_name               # 显示名称字段
+      code_field: customer_code                  # 编码字段
+      search_help:                                # Search Help 配置（借鉴 SAP @Consumption.valueHelpDefinition）
+        enabled: true
+        min_length: 1                             # 最小输入长度触发搜索
+        additional_bindings:                      # 额外的搜索条件
+          - source_field: customer_code
+            target_field: code
+      redundancy:                                 # 冗余策略
+        strategy: denormalized                    # 反范式存储
+        stored_field: customer_name              # 冗余存储到哪个字段
+        sync_on_write: true                       # 写入时同步更新
+      on_delete: restrict                          # 级联删除策略
+      apply_target_permissions: true              # 应用目标BO的数据权限
+    ui:
+      widget: lookup                              # 查找组件
+      relation: dimension_value                  # 关联维度值
+      list:
+        display_field: customer_name             # 列表显示客户名称而非ID
+
+  - id: product_id
+    name: 产品
+    type: integer
+    db_column: product_id
+    required: true
+    dimension_reference:
+      target_bo: product
+      reference_type: foreign_key
+      display_field: product_name
+      code_field: product_sku
+      search_help:
+        enabled: true
+        min_length: 0                             # 点击即弹出搜索框
+      redundancy:
+        strategy: denormalized
+        stored_field: product_name
+        sync_on_write: true
+      on_delete: restrict
+    ui:
+      widget: lookup
+      filterable: true
+
+  - id: sales_region
+    name: 销售区域
+    type: string
+    db_column: sales_region
+    required: true
+    dimension_reference:
+      target_bo: organization_region
+      reference_type: foreign_key
+      display_field: region_name
+      code_field: region_code
+      search_help:
+        enabled: true
+        min_length: 1
+      redundancy:
+        strategy: none                             # 不做冗余，每次运行时查询
+      on_delete: set_null
+      apply_target_permissions: false
+    ui:
+      widget: select_with_search                  # 带搜索的下拉框
+      filterable: true
+
+  # ══════════════════════════════════════════════════════════
+  # 字段依赖关系（Phase 2 新增）
+  # 声明式的字段间依赖，用于 UI 联动和权限控制
+  # ══════════════════════════════════════════════════════════
+
+  - id: discount_rate
+    name: 折扣率
+    type: float
+    db_column: discount_rate
+    required: false
+    default: 0.00
+    dependencies:                                 # ← 字段依赖声明
+      - depends_on_field: customer_level          # 依赖客户等级字段
+        dependency_type: visibility               # 依赖类型：可见性
+        condition_expression: "{customer_level} in ['VIP', 'SVIP']"  # 条件表达式
+        when_true:                                # 条件满足时
+          visible: true
+          editable: true
+          required: true
+        when_false:                               # 条件不满足时
+          visible: false
+          editable: false
+          value: 0.00                             # 强制设为0
+    ui:
+      widget: number_input
+      format: percentage
+
+  - id: rejection_reason
+    name: 拒绝原因
+    type: text
+    db_column: rejection_reason
+    required: false
+    dependencies:
+      - depends_on_field: status                  # 依赖状态字段
+        dependency_type: required                 # 依赖类型：必填性
+        condition_expression: "{status} in ['cancelled', 'rejected']"
+        when_true:
+          visible: true
+          editable: true
+          required: true                          # 拒绝时必填原因
+        when_false:
+          visible: false
+          editable: false
+          required: false
+    ui:
+      widget: textarea
+      rows: 3
+
+  - id: expected_delivery_date
+    name: 期望交付日期
+    type: date
+    db_column: expected_delivery_date
+    required: true
+    dependencies:
+      - depends_on_field: priority
+        dependency_type: readonly                # 依赖类型：只读
+        condition_expression: "{priority} == 'urgent'"
+        when_true:
+          editable: true
+        when_false:
+          readonly: true                          # 非紧急订单不可修改交付日期
+    ui:
+      widget: date_picker
+      filterable: true
+
+  # ══════════════════════════════════════════════════════════
+  # 普通字段（无特殊关联）
+  # ══════════════════════════════════════════════════════════
+
+  - id: total_amount
+    name: 订单总金额
+    type: decimal
+    db_column: total_amount
+    required: true
+    semantics:
+      data_category: amount
+      immutable: false
+    ui:
+      widget: currency_input
+      currency_field: currency_code
+      format: "#,##0.00"
+      list:
+        align: right
+        summary_function: sum                    # 列表汇总函数
+
+  - id: currency_code
+    name: 币种
+    type: string
+    db_column: currency_code
+    required: true
+    enum_reference:
+      enum_type_id: currency
+      binding_strength: strict
+      default_value_code: CNY
+    ui:
+      widget: select
+      list:
+        width: 80
+
+  - id: remarks
+    name: 备注
+    type: text
+    db_column: remarks
+    required: false
+    ui:
+      widget: textarea
+      rows: 2
+
+
+# ══════════════════════════════════════════════════════════════
+# BO级别配置
+# ══════════════════════════════════════════════════════════════
+
+view_config:
+  list:
+    title: 销售订单列表
+    default_sort:
+      field: created_at
+      direction: desc
+    page_size: 20
+    columns:
+      - order_no
+      - status
+      - customer_id (display as customer_name)
+      - total_amount
+      - created_at
+    filters:
+      - status
+      - created_at (date range)
+      - customer_id
+  
+  detail:
+    title: 订单详情
+    layout: tabs
+    sections:
+      - label: 基本信息
+        fields:
+          - order_no
+          - status
+          - customer_id
+          - created_at
+      
+      - label: 产品信息
+        fields:
+          - product_id
+          - quantity
+          - unit_price
+          - discount_rate
+          - total_amount
+      
+      - label: 其他信息
+        fields:
+          - priority
+          - expected_delivery_date
+          - rejection_reason
+          - remarks
+
+  form:
+    title: 编辑订单
+    layout: vertical
+    sections:
+      - label: 基本信息
+        fields:
+          - order_no (readonly if editing)
+          - status
+          - customer_id
+          - priority
+      
+      - label: 产品与金额
+        fields:
+          - product_id
+          - discount_rate (conditional on customer_level)
+          - total_amount
+          - currency_code
+      
+      - label: 时间与其他
+        fields:
+          - expected_delivery_date (conditional on priority)
+          - rejection_reason (conditional on status)
+          - remarks
+
+
+# ══════════════════════════════════════════════════════════════
+# 关联关系定义
+# ══════════════════════════════════════════════════════════════
+
+relationships:
+  - id: rel_customer
+    name: 所属客户
+    source_field: customer_id
+    target_object: customer
+    target_field: id
+    relation_type: reference
+    cardinality: N:1
+    description: "订单属于某个客户"
+
+  - id: rel_product
+    name: 关联产品
+    source_field: product_id
+    target_object: product
+    target_field: id
+    relation_type: reference
+    cardinality: N:1
+    description: "订单关联的产品"
+
+  - id: rel_lines
+    name: 订单明细行
+    source_field: id
+    target_object: order_line
+    target_field: order_id
+    relation_type: composition
+    cardinality: 1:N
+    cascade_delete: true
+    ownership: true
+    description: "订单包含多个明细行"
+
+
+# ══════════════════════════════════════════════════════════════
+# 权限配置
+# ══════════════════════════════════════════════════════════════
+
+permissions:
+  create:
+    roles: [sales_manager, sales_person]
+    condition: ""
+  
+  read:
+    roles: [admin, sales_manager, sales_person, finance]
+    data_scope: own_department  # 只能查看本部门订单
+  
+  update:
+    roles: [sales_manager, sales_person]
+    condition: "{status} in ['pending', 'confirmed']"  # 只有特定状态可编辑
+    field_permissions:
+      discount_rate: [sales_manager]  # 折扣率只有经理可改
+      rejection_reason: [sales_manager, admin]
+  
+  delete:
+    roles: [admin, sales_manager]
+    condition: "{status} == 'pending'"  # 只有待处理状态可删除
+
+
+# ══════════════════════════════════════════════════════════════
+# 审计和版本控制
+# ══════════════════════════════════════════════════════════════
+
+audit_config:
+  enable_audit: true
+  audit_level: detailed  # 详细审计（事务型BO特征）
+  track_changes:
+    - status
+    - total_amount
+    - customer_id
+    - discount_rate
+
+versioning:
+  enable_versioning: false  # 事务型BO通常不做版本控制
+  keep_history_days: 90     # 保留90天变更历史
+
+
+# ══════════════════════════════════════════════════════════════
+# 导入导出配置
+# ══════════════════════════════════════════════════════════════
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  supported_formats: [excel, csv, json]
+  export_templates:
+    - name: 标准导出
+      fields: [order_no, status, customer_id, total_amount, created_at]
+    - name: 财务导出
+      fields: [order_no, status, total_amount, currency_code, discount_rate, created_at]
+      roles: [finance]
+
+
+# ══════════════════════════════════════════════════════════════
+# 扩展元数据（自定义属性）
+# ══════════════════════════════════════════════════════════════
+
+metadata:
+  tags: [sales, core-business-process]
+  owner_team: sales_team
+  sla_response_hours: 24
+  approval_required_for:
+    - total_amount > 50000
+    - discount_rate > 0.15
+  integration_endpoints:
+    sap_sync: /api/v1/sync/sales-order/{id}
+    erp_push: /api/v1/erp/orders/push

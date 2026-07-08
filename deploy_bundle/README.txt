@@ -1,33 +1,24 @@
-﻿# deploy_bundle/
+# _deploy_bundle/
 
-One-click deploy bundle. SFTP to /tmp/ on remote.
+一键部署包 (MobaXterm SFTP 拖到 /tmp/)
 
-## 瀹屾暣鏂囨。 (AI Agent 蹇呰)
-D:\filework\release-prep-worktree\DEPLOY_INFRASTRUCTURE.md
+## 上传
+MobaXterm SFTP: 拖 _deploy_bundle/ → 远端 /tmp/
 
-## 涓婁紶
-MobaXterm SFTP: drag deploy_bundle/ to /tmp/
+## 部署
+bash /tmp/_deploy_bundle/deploy.sh --version v20260707_002 --port 5001
 
-## 閮ㄧ讲
-bash /tmp/deploy_bundle/deploy.sh --version v20260703_002 --port 5001
+## 回滚
+bash /tmp/_deploy_bundle/rollback.sh --to <v> --port <p>
 
-## 鍥炴粴
-bash /tmp/deploy_bundle/rollback.sh --to <v> --port <p>
+## 文件清单
+- deploy.sh            部署入口 (含 precheck + smoke)
+- precheck.sh          部署前 7 项检查
+- smoke_test.sh        部署后 5 项真实功能测试
+- rollback.sh          通用回滚
+- unified_server.py    静态文件 + API 代理
+- lib/common.sh        共享库
+- deploy-v20260707_002.zip  代码包
+- README.txt           本文件
 
-## 鐘舵€?/ 閲嶅惎
-bash /tmp/deploy_bundle/status.sh
-bash /tmp/deploy_bundle/restart.sh
-
-## 鐩戞帶
-bash /tmp/deploy_bundle/watch.sh --loop 30
-bash /tmp/deploy_bundle/watch.sh --auto-recover
-bash /tmp/deploy_bundle/watch.sh --rollback-on-fail
-
-## 鍘嗗彶
-bash /tmp/deploy_bundle/deploy_history.sh
-bash /tmp/deploy_bundle/deploy_history.sh --info v20260703_002
-bash /tmp/deploy_bundle/deploy_history.sh --switch v20260630_003 --port 5000
-
-## 娴嬭瘯 (杩滅)
-/opt/miniconda3-py39/bin/python /tmp/deploy_bundle/tests/test_rollback_parallel.py
-/opt/miniconda3-py39/bin/python /tmp/deploy_bundle/tests/test_frontend_dir.py
+生成时间: 2026-07-07 19:18:32

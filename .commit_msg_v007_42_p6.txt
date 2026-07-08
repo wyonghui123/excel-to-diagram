@@ -1,0 +1,25 @@
+fix(be): V007.42 P6 - WAL monitor + import fix + long-tx guard + audit unify
+
+[V007.42] Phase 6: WAL 监控 + Import Fix + 长事务防护 + 审计统一
+
+- sql_connection_pool.py health_check() 增强 (FR-003):
+  - 新增 reader_health 字段 (healthy/errored 统计)
+  - 新增 checkpoint_busy 字段 (PRAGMA wal_checkpoint(PASSIVE) busy 值)
+  - 新增 io_rate_limit 状态字段
+  - busy > 0 时触发 metric wal_checkpoint_busy_total
+
+- async_import_service.py 新增 get_all_tasks() (FR-005):
+  - 返回 Dict[task_id, task_info] 快照
+  - 解决 import_handlers.py:16 每 30s AttributeError
+  - 包含 id/status/created_at/started_at/completed_at/progress/result/error
+
+- bo_framework.py TransactionContext 长事务检测 (FR-006):
+  - __enter__ 记录 self._start_time
+  - __exit__ 检查持续时间
+  - >30s: WARNING
+  - >120s: ERROR + metric long_transaction_total
+
+- async_audit_writer.py 裸连接统一 (FR-010):
+  - 主路径改用 safe_connect_for_write(force_no_tx=True)
+  - 降级路径保留裸连接 (不阻断)
+  - 统一 PRAGMA busy_timeout + mmap_size 配置

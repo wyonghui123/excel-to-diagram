@@ -1,0 +1,31 @@
+fix(be): V007.43 P0 - add get_bo_framework() + V8q invariant
+
+[V007.43 P0] 紧急修复 V007.42 部署 ImportError 回归
+
+背景:
+  HANDOFF_V007_42_IMPORT_ERROR.md 报告 yonaa 部署后:
+  - backend 5001 未监听
+  - ImportError: cannot import name 'get_bo_framework'
+  - 业务中断, 已回滚到 v20260708_005 (V007.40)
+
+  根因 (V007.41 P3 commit 9d051f9):
+  - meta/api/intent_api.py:26 写了 `from meta.core.bo_framework import get_bo_framework`
+  - 但当时没在 bo_framework.py 实现这个函数
+  - V007.42 P5/P6/P7 三个 commit 没发现也没修复
+
+修复:
+  1. meta/core/bo_framework.py 末尾加 get_bo_framework() 函数:
+     - 返回全局单例 bo_framework
+     - 完整 V007.43 P0 BUG-FIX 注释
+
+  2. tools/verify_bundle.py 新增 V8q invariant:
+     - 扫描 meta/api/* 中的 `from meta.core.bo_framework import X`
+     - 验证 bo_framework.py 有对应 def X (函数) 或变量赋值 (单例)
+     - 防止类似 ImportError 再次发生
+
+验证:
+  - get_bo_framework() 返回 bo_framework 单例 ✓
+  - meta.api.intent_api 完整 import 成功 ✓
+  - 11 个关键 API 模块全部 import ✓
+  - meta.server 完整模块 import 成功 ✓
+  - V8q invariant 逻辑验证 (修复后应通过)

@@ -1,0 +1,24 @@
+============================================================
+V007.41 safe_connect 单测 - 直接调用模式
+============================================================
+  [PASS] TestSafeConnectForRead.test_contextmanager_closes_on_exception
+  [PASS] TestSafeConnectForRead.test_contextmanager_closes_on_exit
+  [PASS] TestSafeConnectForRead.test_default_params
+  [PASS] TestSafeConnectForWrite.test_enforce_disabled_via_env
+  [PASS] TestSafeConnectForWrite.test_force_no_tx_bypasses_check
+  [PASS] TestSafeConnectForWrite.test_in_outer_tx_succeeds
+  [PASS] TestSafeConnectForWrite.test_no_outer_tx_raises
+  [PASS] TestSafeConnectCompat.test_invalid_mode_raises
+  [PASS] TestSafeConnectCompat.test_mode_auto_defaults_to_read
+  [PASS] TestSafeConnectCompat.test_mode_read
+  [PASS] TestSafeConnectCompat.test_mode_write_force_no_tx
+  [PASS] TestSafeConnectConfig.test_default_values_match_v007_40
+  [PASS] TestSafeConnectConfig.test_env_timeout_override
+  [PASS] TestSafeConnectMetrics.test_metrics_inc_no_error
+  [PASS] TestSafeConnectMetrics.test_metrics_registered_in_obs_counters
+  [PASS] TestSafeConnectIntegration.test_full_read_workflow
+  [PASS] TestSafeConnectIntegration.test_no_legacy_helpers_in_safe_connect
+
+============================================================
+结果: passed=17, failed=0
+============================================================

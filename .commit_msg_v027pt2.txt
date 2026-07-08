@@ -1,0 +1,26 @@
+fix(permission): BUG-V027-pt2 单 role 路径 AND 段也走 where_raw
+
+[BUG-V027-pt2 2026-07-08] 生产环境 wyonghui (单 role SCMEDIT) 导出
+- 领域 11 (应 1)
+- 子领域 68 (应 5)
+- 服务模块 409 (应 ~21)
+- 业务对象 3228 (应 ~155)
+- 备注列也丢
+
+[ROOT CAUSE] BUG-V027 多 role 修复 (bb53b0a) 只覆盖了 OR-of-AND 分支.
+单 role 路径 (per_role_conds == 1) 仍然把 AND 段的所有 leaf cond 平铺
+到 or_conditions 列表, 调 `or_where` 时退化为 OR 拼接:
+  domain   : (id=8 OR version_id=3)      → 11  (应 1)
+  sub_domain: (domain_id=8 OR id IN (...))→ 68  (应 5)
+  service   : (sub_domain_id IN (...) OR sub_domain_id IN (...))→ 409 (应 21)
+  BO        : (in(...) OR in_subquery)    → 3228 (应 155)
+
+[FIX] 单 role 路径改用 where_raw 注入 (c1 AND c2 AND ...) 复合 SQL,
+  与多 role 路径 OR-of-AND 风格保持一致. 嵌套 OR/AND 段也用括号明确
+  分组. owner exception 改为 AND-merge 到同一个 AND group.
+
+[NOTE] BUG-V021 owner exception 仅在 product 类型生效 (无子查询问题).
+  子对象 (version/domain/...) 已知限制同 BUG-V021, 跳过 owner exception.
+
+[FILES]
+M meta/services/query_service.py

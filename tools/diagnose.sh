@@ -352,6 +352,171 @@ else
 fi
 
 # ============================================================
+# PHASE 8: V007.25 增强诊断 (fd 泄漏 / disk I/O 趋势 / pid 健康 / 部署历史)
+# 修复 7/7 漏洞 #5: 部署无 fd 状态检查
+# ============================================================
+banner "[8/?] V007.25 增强诊断"
+
+# [8a] fd 泄漏检测
+hr; echo "[8a] fd 泄漏检测 [V007.25]"
+BACKEND_PID=$(cat /opt/app/deployments/meta/server.pid 2>/dev/null)
+if [ -n "$BACKEND_PID" ] && kill -0 "$BACKEND_PID" 2>/dev/null; then
+    DB_FDS=$(ls -la /proc/$BACKEND_PID/fd/ 2>/dev/null | grep -c "architecture" 2>/dev/null || echo 0)
+    WAL_FDS=$(ls -la /proc/$BACKEND_PID/fd/ 2>/dev/null | grep -c "wal" 2>/dev/null || echo 0)
+    TOTAL_FDS=$(ls -la /proc/$BACKEND_PID/fd/ 2>/dev/null | wc -l)
+    echo "  backend PID: $BACKEND_PID"
+    echo "  db fd: $DB_FDS | wal fd: $WAL_FDS | total fd: $TOTAL_FDS"
+
+    # V007.24 metric 优先 (如果已部署)
+    POOL_INIT=$(curl -s "http://localhost:$BACKEND_PORT/_metrics" 2>/dev/null | grep "^v007_24_pool_init_count" | awk '{print $2}')
+    if [ -n "$POOL_INIT" ]; then
+        echo "  [V007.24] pool_init_count: $POOL_INIT"
+        if [ "$(echo "$POOL_INIT > 5" | bc -l 2>/dev/null)" = "1" ]; then
+            err "  🚨 fd 泄漏检测: pool_init_count=$POOL_INIT > 5"
+            DIAG_FAIL=$((DIAG_FAIL+1))
+        else
+            ok "  pool_init_count 正常 (≤ 5)"
+        fi
+    else
+        # 降级: 用系统 fd
+        if [ "$DB_FDS" -gt 50 ]; then
+            err "  🚨 fd 泄漏检测: db fd=$DB_FDS > 50 (V007.24 修复后 < 5)"
+            err "    建议: 检查 30+ 个 api/*.py 的 lazy init, 部署 V007.24"
+            DIAG_FAIL=$((DIAG_FAIL+1))
+        elif [ "$DB_FDS" -gt 30 ]; then
+            warn "  ⚠️ db fd=$DB_FDS 偏高, 建议检查"
+            DIAG_WARN=$((DIAG_WARN+1))
+        else
+            ok "  db fd 正常 (≤ 30)"
+        fi
+    fi
+else
+    warn "  backend 进程不在 (pid=$BACKEND_PID), 跳过 fd 检查"
+    DIAG_WARN=$((DIAG_WARN+1))
+fi
+
+# [8b] disk I/O error 趋势
+hr; echo "[8b] disk I/O error 趋势 [V007.25]"
+if [ -d "$LOG_DIR" ]; then
+    CURRENT_LOG=$(ls -t $LOG_DIR/backend-*.log 2>/dev/null | head -1)
+    if [ -n "$CURRENT_LOG" ]; then
+        CURRENT_DISK_IO=$(grep -c "disk I/O error" "$CURRENT_LOG" 2>/dev/null || echo 0)
+        echo "  当前 ($CURRENT_LOG): $CURRENT_DISK_IO 次"
+        if [ "$CURRENT_DISK_IO" -gt 0 ]; then
+            err "  🚨 当前 log 有 disk I/O error (V007.24 类问题)"
+            DIAG_FAIL=$((DIAG_FAIL+1))
+            echo "    建议: 1) 排查 fd 泄漏  2) 部署 V007.24  3) 考虑回滚"
+        else
+            ok "  当前 log 无 disk I/O error"
+        fi
+
+        # 历史 7 天
+        echo "  历史 7 天:"
+        for log_file in $(ls -t $LOG_DIR/backend-*.log 2>/dev/null | head -7); do
+            COUNT=$(grep -c "disk I/O error" "$log_file" 2>/dev/null || echo 0)
+            DEPLOY_ID=$(echo "$log_file" | sed 's/.*backend-v\([0-9_]*\)\.log/\1/')
+            echo "    - $DEPLOY_ID: $COUNT 次"
+        done
+    fi
+else
+    warn "  log 目录不存在: $LOG_DIR"
+    DIAG_WARN=$((DIAG_WARN+1))
+fi
+
+# [8c] pid 健康检查
+hr; echo "[8c] backend pid 健康检查 [V007.25]"
+PID_FILE="/opt/app/deployments/meta/server.pid"
+if [ -f "$PID_FILE" ]; then
+    PID=$(cat "$PID_FILE")
+    if kill -0 "$PID" 2>/dev/null; then
+        ok "  pid 文件存在 ($PID), 进程存活"
+        # 启动时间
+        START_TIME=$(ps -o lstart= -p "$PID" 2>/dev/null | xargs)
+        echo "  启动时间: $START_TIME"
+        # 内存/CPU
+        RSS=$(ps -o rss= -p "$PID" 2>/dev/null | tr -d ' ' || echo "?")
+        CPU=$(ps -o pcpu= -p "$PID" 2>/dev/null | tr -d ' ' || echo "?")
+        echo "  内存: ${RSS} KB, CPU: ${CPU}%"
+    else
+        err "  pid 文件存在 ($PID), 但进程已死 (stale pid file)"
+        DIAG_FAIL=$((DIAG_FAIL+1))
+    fi
+else
+    warn "  pid 文件不存在: $PID_FILE"
+    DIAG_WARN=$((DIAG_WARN+1))
+fi
+
+# [8d] Connection pool init 次数 (V007.24 预警)
+hr; echo "[8d] Connection pool init 次数 [V007.25]"
+if [ -n "$CURRENT_LOG" ] && [ -f "$CURRENT_LOG" ]; then
+    POOL_INITS=$(grep -c "Connection pool initialized" "$CURRENT_LOG" 2>/dev/null || echo 0)
+    echo "  Connection pool init 次数: $POOL_INITS"
+    if [ "$POOL_INITS" -gt 5 ]; then
+        err "  🚨 Connection pool init 次数 $POOL_INITS > 5, 可能是 lazy data_source 问题 (V007.24)"
+        err "    建议: 部署 V007.24 (datasource.py 缓存)"
+        DIAG_FAIL=$((DIAG_FAIL+1))
+    elif [ "$POOL_INITS" -gt 2 ]; then
+        warn "  Connection pool init 次数 $POOL_INITS 偏高 (期望 1-2: main + async)"
+        DIAG_WARN=$((DIAG_WARN+1))
+    else
+        ok "  Connection pool init 次数正常 (≤ 2)"
+    fi
+fi
+
+# [8e] 部署历史回溯
+hr; echo "[8e] 部署历史 [V007.25]"
+DEPLOY_LOG="/opt/app/shared/logs/deploy_history.log"
+if [ -f "$DEPLOY_LOG" ]; then
+    echo "  最近 10 次部署:"
+    tail -10 "$DEPLOY_LOG" | while IFS='|' read -r time info; do
+        echo "    $time | $info"
+    done
+else
+    info "  无部署历史 (deploy_history.log 不存在, 可能是 V007.25 之前的部署)"
+fi
+
+# [8f] systemd 服务健康检查 (V007.25 P1, DEPLOY_HANDOVER TODO #1)
+hr; echo "[8f] systemd excel-backend 服务健康 [V007.25]"
+if command -v systemctl >/dev/null 2>&1; then
+    if [ -f /etc/systemd/system/excel-backend.service ]; then
+        if systemctl is-active excel-backend.service >/dev/null 2>&1; then
+            ok "  excel-backend.service: active"
+
+            # 检查 service 文件是否最新 (V007.25 标记)
+            if grep -q "V007.25 enhanced" /etc/systemd/system/excel-backend.service 2>/dev/null; then
+                ok "  service 文件含 V007.25 enhanced 标记"
+            else
+                warn "  service 文件不含 V007.25 enhanced 标记 (可能是旧版)"
+            fi
+
+            # 启动时间
+            SERVICE_START=$(systemctl show excel-backend.service -p ActiveEnterTimestamp --value 2>/dev/null)
+            if [ -n "$SERVICE_START" ]; then
+                echo "  启动时间: $SERVICE_START"
+            fi
+
+            # 重启次数 (NRestarts)
+            RESTART_COUNT=$(systemctl show excel-backend.service -p NRestarts --value 2>/dev/null)
+            if [ -n "$RESTART_COUNT" ] && [ "$RESTART_COUNT" -gt 0 ]; then
+                warn "  service 已重启 $RESTART_COUNT 次 (可能不稳定)"
+                DIAG_WARN=$((DIAG_WARN+1))
+            else
+                ok "  service 重启次数: 0 (稳定)"
+            fi
+        else
+            warn "  excel-backend.service: not active (但 service 文件存在)"
+            DIAG_WARN=$((DIAG_WARN+1))
+            echo "    建议: systemctl start excel-backend.service"
+        fi
+    else
+        info "  excel-backend.service 文件不存在 (V007.25 之前的部署)"
+        echo "    建议: 跑 deploy.sh --systemd 自动安装"
+    fi
+else
+    info "  systemctl 不可用 (非 systemd 系统)"
+fi
+
+# ============================================================
 # SUMMARY
 # ============================================================
 banner "DIAGNOSE SUMMARY"
