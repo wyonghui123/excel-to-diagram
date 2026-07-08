@@ -166,7 +166,8 @@ def database_integrity_check():
 def database_wal_checkpoint():
     if not is_admin():
         return jsonify({"error": "您没有执行此操作的权限，需要管理员权限"}), 403
-    mode = request.args.get('mode', 'TRUNCATE')
+    # [V007.39 BUG-FIX] 默认 TRUNCATE → PASSIVE (TRUNCATE 截断 WAL → 读连接失效 → disk I/O error)
+    mode = request.args.get('mode', 'PASSIVE')
     if mode not in ('PASSIVE', 'TRUNCATE', 'RESTART', 'FULL'):
         return jsonify({"error": "Invalid checkpoint mode: {0}".format(mode)}), 400
     ds = _get_data_source()

@@ -290,15 +290,15 @@ def _preflight_db_integrity_check(db_path):
 def _cleanup_resources(data_source):
     logger = logging.getLogger(__name__)
 
-    # [DECORATIVE] v3.18: 关闭时强制 TRUNCATE checkpoint（防止 WAL 残留导致损坏）
+    # [V007.39 BUG-FIX] TRUNCATE → PASSIVE (TRUNCATE 截断 WAL → 读连接失效 → disk I/O error)
     if data_source and hasattr(data_source, '_db_path'):
         try:
             conn = sqlite3.connect(data_source._db_path, timeout=10)
-            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
             conn.close()
-            logger.info("Final WAL checkpoint TRUNCATE completed")
+            logger.info("Final WAL checkpoint PASSIVE completed")
         except Exception as e:
-            logger.warning("Final WAL checkpoint TRUNCATE failed: %s", e)
+            logger.warning("Final WAL checkpoint PASSIVE failed: %s", e)
 
     if data_source and hasattr(data_source, '_write_queue') and data_source._write_queue:
         # [V007.15 L4.5] Stop audit_async_queue first (force flush pending audits)
@@ -371,14 +371,14 @@ def create_app(db_path=None):
     _preflight_db_check(db_path)
     _preflight_db_integrity_check(db_path)  # Fix 2026-06-05: 清理 _bak_* 残留
 
-    # [DECORATIVE] v3.18: 启动时强制 TRUNCATE checkpoint（清理残留 WAL，防止损坏）
+    # [V007.39 BUG-FIX] TRUNCATE → PASSIVE (启动时无并发读, 但保持一致性避免意外)
     try:
         conn = sqlite3.connect(db_path, timeout=10)
-        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
         conn.close()
-        logging.getLogger(__name__).info("[PREFLIGHT] WAL checkpoint TRUNCATE completed")
+        logging.getLogger(__name__).info("[PREFLIGHT] WAL checkpoint PASSIVE completed")
     except Exception as e:
-        logging.getLogger(__name__).warning("[PREFLIGHT] WAL checkpoint TRUNCATE failed: %s", e)
+        logging.getLogger(__name__).warning("[PREFLIGHT] WAL checkpoint PASSIVE failed: %s", e)
 
     data_source = get_data_source("sqlite", database=db_path)
 

@@ -114,7 +114,8 @@ class AsyncAuditWriter:
 
             # 打开独立连接 (worker thread 自己的, 跨线程安全)
             conn = _sqlite3.connect(db_path, check_same_thread=False, timeout=30.0)
-            conn.execute("PRAGMA journal_mode=WAL")
+            # [V007.39 BUG-FIX] 删除 PRAGMA journal_mode=WAL — 这是 db 持久化设置,
+            # pool._create_connection 已执行且有幂等保护, 重复执行触发 db 头写 → disk I/O error
             conn.execute("PRAGMA busy_timeout=30000")
             # 包成 ds-like 适配器, 跟 action_executor.ds 接口一致
             ds = _ThreadLocalDS(conn, db_path)

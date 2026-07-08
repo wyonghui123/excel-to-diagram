@@ -480,8 +480,8 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
                 "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
             ).fetchall()
             r = {"tables": [t[0] for t in tables], "table_count": len(tables)}
-            # WAL checkpoint 状态
-            wal_frames = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
+            # [V007.39 BUG-FIX] TRUNCATE → PASSIVE (TRUNCATE 截断 WAL → 读连接失效 → disk I/O error)
+            wal_frames = conn.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchall()
             r["wal_checkpoint"] = [list(row) for row in wal_frames]
             conn.close()
             self._json(200, r)

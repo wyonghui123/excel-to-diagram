@@ -35,8 +35,9 @@ class WriteQueueConfig:
     operation_timeout: float = 60.0
     # [DECORATIVE] v3.18 P0 调优: 间隔从 50 降到 10, 防止 WAL 膨胀导致 checkpoint 失败
     checkpoint_interval: int = 10
-    # [DECORATIVE] v3.18 P0 调优: 模式从 FULL 改为 TRUNCATE (FULL 会阻塞读,TRUNCATE 更激进但不会因 busy 失败)
-    checkpoint_mode: str = "TRUNCATE"  # PASSIVE → FULL → TRUNCATE
+    # [V007.39 BUG-FIX] TRUNCATE 截断 WAL 文件 → 读连接 mmap 视图失效 → disk I/O error
+    # 改为 PASSIVE: 不阻塞读, 不截断 WAL, 写入后 WAL 自然增长由 force_passive_checkpoint 管理
+    checkpoint_mode: str = "PASSIVE"
 
 
 @dataclass
@@ -247,7 +248,7 @@ class WriteQueue:
             return
 
         def _do_begin(conn):
-            # [V007.15 L3 治本] 防御性检查: 连接是否真的不在 tx 中?
+            # [V007.15 L3 治本] 防御性检查: 连接是否真的不在 tx 中
             actual = get_tx_state(conn)
             if actual == TxState.WRITE or actual == TxState.READ:
                 # 实际在 tx, 但 Python 状态 False — phantom TX!
@@ -370,7 +371,7 @@ class WriteQueue:
 
         self.submit_and_wait(_do_release)
 
-    def checkpoint(self, mode: str = "TRUNCATE"):
+    def checkpoint(self, mode: str = "PASSIVE"):
         def _do_checkpoint(conn):
             conn.execute("PRAGMA wal_checkpoint({0})".format(mode))
             self._stats["checkpoint_count"] += 1

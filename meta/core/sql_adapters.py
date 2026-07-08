@@ -909,17 +909,9 @@ class SQLiteAdapter(SQLDataSource):
                 result = cursor.execute(command)
             if auto_commit:
                 conn.commit()
-                self._commit_counter += 1
-                if self._commit_counter >= self._write_queue._config.checkpoint_interval:
-                    self._commit_counter = 0
-                    try:
-                        conn.execute(
-                            "PRAGMA wal_checkpoint({0})".format(
-                                self._write_queue._config.checkpoint_mode
-                            )
-                        )
-                    except Exception:
-                        pass
+                # [V007.39 BUG-FIX] 删除 _do_write 里的重复 checkpoint 逻辑
+                # WriteQueue.commit() 已经在每 N 次 commit 后自动执行 checkpoint,
+                # 这里再执行一次是双重触发, 且 except Exception: pass 静默吞掉 disk I/O error
             return result
 
         return self._write_queue.submit_and_wait(_do_write)

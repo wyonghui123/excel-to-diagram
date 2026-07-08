@@ -171,7 +171,8 @@ def db_health():
                     os.path.getsize(db_path + '-wal') if os.path.exists(db_path + '-wal') else 0
                 )
                 # checkpoint stats
-                busy = conn.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()
+                # [V007.39 BUG-FIX] TRUNCATE → PASSIVE (TRUNCATE 截断 WAL → 读连接失效 → disk I/O error)
+                busy = conn.execute('PRAGMA wal_checkpoint(PASSIVE)').fetchone()
                 wal_info['checkpoint'] = {
                     'busy': busy[0] if busy else None,
                     'log_pages': busy[1] if busy else None,

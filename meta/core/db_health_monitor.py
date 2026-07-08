@@ -89,8 +89,8 @@ class DBHealthMonitor:
 
         try:
             with sqlite3.connect(self._db_path, timeout=5) as conn:
-                # [DECORATIVE] v3.18: PASSIVE → FULL（强制刷写，防止 WAL 残留导致损坏）
-                cursor = conn.execute("PRAGMA wal_checkpoint(FULL)")
+                # [V007.39 BUG-FIX] FULL → PASSIVE (FULL 阻塞读 → disk I/O error)
+                cursor = conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
                 busy, log_frames, checkpointed = cursor.fetchone()
                 snap.wal_pending_frames = log_frames - checkpointed
                 if snap.wal_pending_frames < 0:
