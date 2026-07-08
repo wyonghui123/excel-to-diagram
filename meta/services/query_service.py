@@ -984,6 +984,10 @@ class QueryService:
             builder.or_where(or_conditions)
             builder.limit(limit)
 
+            # [V007.46 BUG-FIX] full_text_search 补 _apply_data_permission
+            # 背景: V007.44 dev-agent 910022e 改了 deploy_bundle 但工作树未改, 部署时回滚
+            self._apply_data_permission(builder, meta_obj, object_id)
+
             rows = builder.execute()
             if rows:
                 results[object_id] = rows
@@ -1025,6 +1029,9 @@ class QueryService:
                         parent_field = self._get_parent_field(child_obj, target_object_id)
                         if parent_field:
                             child_builder.where_in(parent_field, parent_ids)
+                            # [V007.46 BUG-FIX] query_by_hierarchy_path 补 _apply_data_permission
+                            # 背景: 子对象查询同样需要权限过滤
+                            self._apply_data_permission(child_builder, child_obj, target_object_id)
                             children = child_builder.execute()
                             results.extend(children)
 
@@ -1045,6 +1052,10 @@ class QueryService:
         builder.where_ilike(field, "{0}%".format(prefix))
         builder.select(field)
         builder.limit(limit)
+
+        # [V007.46 BUG-FIX] suggest 补 _apply_data_permission
+        # 背景: 前缀搜索建议接口同样需要权限过滤
+        self._apply_data_permission(builder, meta_obj, object_type)
 
         rows = builder.execute()
         return list(dict.fromkeys(r.get(field, "") for r in rows if r.get(field)))
@@ -1605,10 +1616,16 @@ class QueryService:
                 builder.where('id', QueryOperator.EQ, allowed_ids[0])
             else:
                 builder.where_in('id', allowed_ids)
-            
+
             logger.info(f"[DataPerm] Applied filter for {object_type}: {len(allowed_ids)} IDs")
         except Exception as e:
-            logger.warning(f"[DataPerm] Failed to apply data permission: {e}")
+            # [V007.46 BUG-FIX] 异常时必须拒绝, 不能静默允许全部
+            # 背景: 原 except 路径什么都不做 → builder 无过滤 → 返回全部数据
+            #       NameError/disk I/O 等异常绕过权限过滤
+            # 与 data_permission_filter.py 异常时返回 id = -1 行为对齐
+            # V007.44 dev-agent 910022e 改了 deploy_bundle 但工作树 meta/ 未改
+            logger.error(f"[DataPerm] Failed to apply data permission for {object_type}: {e}", exc_info=True)
+            builder.where('id', QueryOperator.EQ, -1)
 
     def _try_apply_dimension_scope(
         self,
@@ -2199,6 +2216,10 @@ class QueryService:
 
         if request.dimensions:
             builder.group_by(*request.dimensions)
+
+        # [V007.46 BUG-FIX] aggregate 补 _apply_data_permission
+        # 背景: 聚合接口必须基于已过滤的 records, 否则会泄露未授权的聚合数据
+        self._apply_data_permission(builder, meta_obj, request.object_type)
 
         try:
             data = builder.execute()

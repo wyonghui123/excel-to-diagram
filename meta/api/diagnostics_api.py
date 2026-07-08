@@ -77,7 +77,11 @@ def build_diagnostics() -> dict:
             'architecture.db'
         )
         if os.path.exists(db_path):
-            conn = sqlite3.connect(db_path, timeout=5)
+            # [V007.46 BUG-FIX] 改用 safe_connect_for_read: 加 mmap_size=0
+            # 背景: diagnostics_api 高频调, 跟连接池并发访问 108MB DB 触发 disk I/O
+            from meta.core.safe_connect import safe_connect_for_read
+            conn_cm = safe_connect_for_read(db_path)
+            conn = conn_cm.__enter__()
             try:
                 # audit_log 表可能不存在, 容错
                 one_hour_ago = (datetime.utcnow() - timedelta(hours=1)).isoformat()
@@ -101,7 +105,11 @@ def build_diagnostics() -> dict:
                 # audit_logs 表可能字段不同, 静默
                 pass
             finally:
-                conn.close()
+                # [V007.46] 配套: conn_cm 也要 close
+                try:
+                    conn_cm.__exit__(None, None, None)
+                except Exception:
+                    pass
     except Exception:
         pass
 

@@ -88,7 +88,13 @@ class DBHealthMonitor:
             snap.integrity_status = self._check_integrity_readonly()
 
         try:
-            with sqlite3.connect(self._db_path, timeout=5) as conn:
+            # [V007.46 BUG-FIX] 改用 safe_connect_for_read: 加 mmap_size=0 + busy_timeout
+            # 背景: V007.44 commit 910022e 改了 deploy_bundle 但工作树 meta/ 没改
+            #       → 部署 agent 42d9bb4 接手时把工作树 deploy_bundle 也回滚了
+            #       → 当前代码裸 sqlite3.connect(timeout=5) 无 mmap_size=0
+            #       → 是 v005 138 个 disk I/O error 持续的直接根因
+            from meta.core.safe_connect import safe_connect_for_read
+            with safe_connect_for_read(self._db_path) as conn:
                 # [V007.39 BUG-FIX] FULL → PASSIVE (FULL 阻塞读 → disk I/O error)
                 cursor = conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
                 busy, log_frames, checkpointed = cursor.fetchone()
@@ -204,7 +210,9 @@ class DBHealthMonitor:
 
     def _check_integrity_readonly(self) -> str:
         try:
-            with sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True, timeout=5) as conn:
+            # [V007.46 BUG-FIX] 改用 safe_connect_for_read: 加 mmap_size=0
+            from meta.core.safe_connect import safe_connect_for_read
+            with safe_connect_for_read(self._db_path) as conn:
                 r = conn.execute("PRAGMA integrity_check").fetchone()
                 return r[0]
         except Exception as e:
