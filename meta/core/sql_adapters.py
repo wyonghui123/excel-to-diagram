@@ -860,31 +860,21 @@ class SQLiteAdapter(SQLDataSource):
         对于依赖相关子查询（如 computed *_count 过滤）的 SQL，
         必须用新连接才能读到最新数据。
 
+        [V007.41 BUG-FIX] 改用 safe_connect_for_read 统一 L0 入口
+        背景: 第4次全面检查发现 fresh_connection() 漏修, V007.41 统一改工厂.
+
         用法：
             with registry.ds.fresh_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(sql, params)
                 ...
         """
-        import sqlite3 as _sqlite3
         if not self._db_path:
             raise RuntimeError("SQL adapter not connected; call connect() first")
-        # [V007.40 BUG-FIX] 加 timeout=30.0 + check_same_thread=False
-        #   + PRAGMA busy_timeout=30000 跟 sql_connection_pool 一致
-        #   背景: 第4次全面检查发现 fresh_connection() 漏修, 默认 timeout=5s
-        #         撞 lock / disk I/O error 时 5s 抛错, 调用方 5xx.
-        #   修法: 跟 pool 路径保持一致.
-        conn = _sqlite3.connect(
-            self._db_path,
-            timeout=30.0,
-            check_same_thread=False,
-        )
-        conn.execute("PRAGMA busy_timeout = 30000")
-        conn.row_factory = _sqlite3.Row
-        try:
+        # [V007.41 BUG-FIX] 用 safe_connect_for_read 统一 L0 入口
+        from meta.core.safe_connect import safe_connect_for_read
+        with safe_connect_for_read(self._db_path) as conn:
             yield conn
-        finally:
-            conn.close()
 
     def _execute_via_write_queue(self, command: str, params: Optional[tuple]) -> Any:
         # [DECORATIVE] v3.18: 记录 DB 操作到监控日志（含 trace_id）

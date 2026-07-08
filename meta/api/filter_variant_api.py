@@ -8,8 +8,9 @@ from flask import Blueprint, request, jsonify
 import os
 import json
 import logging
-import sqlite3
 from datetime import datetime
+
+from meta.core.safe_connect import safe_connect_for_read, safe_connect_for_write
 
 logger = logging.getLogger(__name__)
 
@@ -43,30 +44,39 @@ def _is_admin():
     return getattr(g, 'is_admin', False)
 
 
-def _execute_query(sql, params=(), fetch=True):
-    """执行数据库查询
+def _execute_read_query(sql, params=()):
+    """[V007.41] L0 只读查询
 
-    [V007.40 BUG-FIX] 加 timeout + PRAGMA busy_timeout
-    背景: 这是高频 API 路径, _execute_query 在每个 list/save/delete 请求都调.
-          之前 sqlite3.connect() 默认 timeout=5s, 撞 lock / disk I/O error 时
-          会失败 → 每次请求 500, 高峰期会风暴式重试.
-    修法: timeout=30.0 + PRAGMA busy_timeout=30000, 跟 sql_connection_pool 一致.
+    用 safe_connect_for_read 统一入口, timeout + busy_timeout 已封装.
     """
     db_path = _get_db_path()
-    conn = sqlite3.connect(db_path, timeout=30.0, check_same_thread=False)
-    conn.execute("PRAGMA busy_timeout = 30000")
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    try:
+    with safe_connect_for_read(db_path) as conn:
+        cursor = conn.cursor()
         cursor.execute(sql, params)
-        if fetch:
-            rows = cursor.fetchall()
-            return [dict(row) for row in rows]
-        else:
-            conn.commit()
-            return cursor.lastrowid
-    finally:
-        conn.close()
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+
+def _execute_write_query(sql, params=()):
+    """[V007.41] L0 写查询 (force_no_tx)
+
+    Phase 2: 用 force_no_tx=True 保持 V007.40 简单语义.
+    Phase 3: 调用方应改用 bo_framework.transaction() 包裹.
+    """
+    db_path = _get_db_path()
+    with safe_connect_for_write(db_path, force_no_tx=True) as conn:
+        cursor = conn.cursor()
+        cursor.execute(sql, params)
+        conn.commit()
+        return cursor.lastrowid
+
+
+# 兼容旧调用 (V007.40 接口). 内部根据 fetch 决定走 read 还是 write.
+def _execute_query(sql, params=(), fetch=True):
+    """[V007.41] 兼容旧调用, 内部拆分 read/write."""
+    if fetch:
+        return _execute_read_query(sql, params)
+    return _execute_write_query(sql, params)
 
 
 def _init_table():

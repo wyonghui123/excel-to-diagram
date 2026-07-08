@@ -19,12 +19,12 @@ DimScopeOverlapDetector — Section 1 / Section 3 重叠加检测器
 - Section 3 的 value 与 Section 1 的 dimension_values 范围有交集
 """
 import json
-import sqlite3
 import os
 import logging
 from typing import List, Dict, Any, Optional
 
 from meta.core.feature_flags import is_enabled
+from meta.core.safe_connect import safe_connect_for_read
 
 logger = logging.getLogger(__name__)
 
@@ -197,15 +197,9 @@ class DimScopeOverlapDetector:
     ) -> List[Dict[str, Any]]:
         """获取角色的条件规则"""
         try:
-            # [V007.40 BUG-FIX] 加 timeout=30.0 + check_same_thread=False
-            #   + PRAGMA busy_timeout=30000 跟 sql_connection_pool 一致
-            conn = sqlite3.connect(
-                self._db_path,
-                timeout=30.0,
-                check_same_thread=False,
-            )
-            conn.execute("PRAGMA busy_timeout = 30000")
-            cursor = conn.cursor()
+            # [V007.41 BUG-FIX] 用 safe_connect_for_read 统一 L0 入口
+            with safe_connect_for_read(self._db_path) as conn:
+                cursor = conn.cursor()
             cursor.execute("""
                 SELECT resource_type, condition, permission_level, is_denied,
                        analysis_mode
@@ -225,7 +219,6 @@ class DimScopeOverlapDetector:
                 parsed['is_denied'] = row[3]
                 parsed['analysis_mode'] = row[4]
                 rules.append(parsed)
-            conn.close()
             return rules
         except Exception as e:
             logger.error(f"Failed to get condition rules: {e}")

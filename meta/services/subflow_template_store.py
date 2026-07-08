@@ -14,29 +14,14 @@ Subflow Template Store (v3.7)
 import json
 import logging
 import os
-import sqlite3
 import threading
 from typing import Any, Dict, List, Optional
+
+from meta.core.safe_connect import safe_connect_for_read, safe_connect_for_write
 
 logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
-
-
-# [V007.40 BUG-FIX] 统一直接连接 helper
-# 背景: subflow_template_store.py 4 处 sqlite3.connect() 都没有 timeout, 撞
-#       lock / disk I/O error 时直接 5s 抛错, template CRUD 失败.
-# 修法: 集中到 _safe_connect() helper, 统一加 timeout=30.0 + check_same_thread=False
-#       + PRAGMA busy_timeout=30000, 跟 sql_connection_pool 一致.
-def _safe_connect(db_path: str) -> sqlite3.Connection:
-    """[V007.40] 统一的 sqlite3 直接连接 helper"""
-    conn = sqlite3.connect(
-        db_path,
-        timeout=30.0,
-        check_same_thread=False,
-    )
-    conn.execute("PRAGMA busy_timeout = 30000")
-    return conn
 
 
 class SubflowTemplateStore:
@@ -54,22 +39,21 @@ class SubflowTemplateStore:
     def _ensure_table(cls):
         """确保 subflow_templates 表存在"""
         try:
-            # [V007.40 BUG-FIX] 用 _safe_connect() 统一加 timeout
-            conn = _safe_connect(cls._get_db_path())
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS subflow_templates (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT UNIQUE NOT NULL,
-                    description TEXT,
-                    steps_json TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    created_by INTEGER,
-                    is_active INTEGER DEFAULT 1
-                )
-            """)
-            conn.commit()
-            conn.close()
+            # [V007.41 BUG-FIX] 用 safe_connect_for_write 统一 L0 入口
+            with safe_connect_for_write(cls._get_db_path(), force_no_tx=True) as conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS subflow_templates (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT UNIQUE NOT NULL,
+                        description TEXT,
+                        steps_json TEXT NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        created_by INTEGER,
+                        is_active INTEGER DEFAULT 1
+                    )
+                """)
+                conn.commit()
         except Exception as e:
             logger.exception(f"[TemplateStore] ensure_table failed: {e}")
 
@@ -78,12 +62,11 @@ class SubflowTemplateStore:
         """从 DB 加载到内存"""
         cls._ensure_table()
         try:
-            # [V007.40 BUG-FIX] 用 _safe_connect() 统一加 timeout
-            conn = _safe_connect(cls._get_db_path())
-            rows = conn.execute(
-                "SELECT name, description, steps_json, created_at FROM subflow_templates WHERE is_active=1"
-            ).fetchall()
-            conn.close()
+            # [V007.41 BUG-FIX] 用 safe_connect_for_read 统一 L0 入口
+            with safe_connect_for_read(cls._get_db_path()) as conn:
+                rows = conn.execute(
+                    "SELECT name, description, steps_json, created_at FROM subflow_templates WHERE is_active=1"
+                ).fetchall()
             cls._cache = {}
             cls._cache_meta = {}
             for r in rows:
@@ -128,29 +111,28 @@ class SubflowTemplateStore:
 
             try:
                 cls._ensure_table()
-                # [V007.40 BUG-FIX] 用 _safe_connect() 统一加 timeout
-                conn = _safe_connect(cls._get_db_path())
-                # 存在则更新, 不存在则插入
-                cursor = conn.execute(
-                    "SELECT id FROM subflow_templates WHERE name = ?", [name]
-                )
-                if cursor.fetchone():
-                    conn.execute(
-                        """UPDATE subflow_templates
-                           SET steps_json = ?, description = ?, updated_at = CURRENT_TIMESTAMP
-                           WHERE name = ?""",
-                        [steps_json, description, name]
+                # [V007.41 BUG-FIX] 用 safe_connect_for_write 统一 L0 入口
+                with safe_connect_for_write(cls._get_db_path(), force_no_tx=True) as conn:
+                    # 存在则更新, 不存在则插入
+                    cursor = conn.execute(
+                        "SELECT id FROM subflow_templates WHERE name = ?", [name]
                     )
-                    op = 'updated'
-                else:
-                    conn.execute(
-                        """INSERT INTO subflow_templates
-                           (name, description, steps_json, created_by) VALUES (?, ?, ?, ?)""",
-                        [name, description, steps_json, created_by]
-                    )
-                    op = 'created'
-                conn.commit()
-                conn.close()
+                    if cursor.fetchone():
+                        conn.execute(
+                            """UPDATE subflow_templates
+                               SET steps_json = ?, description = ?, updated_at = CURRENT_TIMESTAMP
+                               WHERE name = ?""",
+                            [steps_json, description, name]
+                        )
+                        op = 'updated'
+                    else:
+                        conn.execute(
+                            """INSERT INTO subflow_templates
+                               (name, description, steps_json, created_by) VALUES (?, ?, ?, ?)""",
+                            [name, description, steps_json, created_by]
+                        )
+                        op = 'created'
+                    conn.commit()
 
                 # 更新缓存
                 cls._cache[name] = steps
@@ -169,16 +151,14 @@ class SubflowTemplateStore:
         with _lock:
             try:
                 cls._ensure_table()
-                # [V007.40 BUG-FIX] 用 _safe_connect() 统一加 timeout
-                conn = _safe_connect(cls._get_db_path())
-                cursor = conn.execute("SELECT id FROM subflow_templates WHERE name = ?", [name])
-                if not cursor.fetchone():
-                    conn.close()
-                    return {'success': False, 'message': f'模板 {name} 不存在'}
+                # [V007.41 BUG-FIX] 用 safe_connect_for_write 统一 L0 入口
+                with safe_connect_for_write(cls._get_db_path(), force_no_tx=True) as conn:
+                    cursor = conn.execute("SELECT id FROM subflow_templates WHERE name = ?", [name])
+                    if not cursor.fetchone():
+                        return {'success': False, 'message': f'模板 {name} 不存在'}
 
-                conn.execute("DELETE FROM subflow_templates WHERE name = ?", [name])
-                conn.commit()
-                conn.close()
+                    conn.execute("DELETE FROM subflow_templates WHERE name = ?", [name])
+                    conn.commit()
 
                 cls._cache.pop(name, None)
                 cls._cache_meta.pop(name, None)

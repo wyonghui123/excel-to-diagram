@@ -28,7 +28,6 @@ Spec v1.3 (data-permission-unified-model) 引入运行时动态展开：
 """
 import json
 import re
-import sqlite3
 import os
 import logging
 from typing import List, Dict, Any, Optional
@@ -213,28 +212,15 @@ class RuntimeDimensionResolver:
             if not parent_field or not child_table or not current_ids:
                 return None
             try:
-                # [FIX v007 2026-07-05] check_same_thread=False 允许多线程共享连接
-                #   背景: Flask threaded mode 子线程 (Thread-2) 调 sqlite3 默认检查
-                #         创建线程必须 = 连接线程, 否则 ProgrammingError
-                # [V007.40 BUG-FIX] 加 timeout=30.0 + PRAGMA busy_timeout=30000
-                #   背景: V007.40 第4次全面检查遗漏点. _try_resolve_upward 之前只加了
-                #         check_same_thread=False, 没加 timeout / busy_timeout. 撞 lock /
-                #         disk I/O error 时仍会 5s 抛错, 数据权限解析失败 → 上层 5xx.
-                #   修法: 跟 _get_user_roles / _get_role_dim_scopes 保持一致.
-                conn = sqlite3.connect(
-                    self._db_path,
-                    timeout=30.0,
-                    check_same_thread=False,
-                )
-                conn.execute("PRAGMA busy_timeout = 30000")
-                cursor = conn.cursor()
-                ph = ','.join('?' * len(current_ids))
-                cursor.execute(
-                    f"SELECT DISTINCT {parent_field} FROM {child_table} WHERE id IN ({ph})",
-                    current_ids
-                )
-                rows = cursor.fetchall()
-                conn.close()
+                # [V007.41 BUG-FIX] 用 safe_connect_for_read 统一 L0 入口
+                with safe_connect_for_read(self._db_path) as conn:
+                    cursor = conn.cursor()
+                    ph = ','.join('?' * len(current_ids))
+                    cursor.execute(
+                        f"SELECT DISTINCT {parent_field} FROM {child_table} WHERE id IN ({ph})",
+                        current_ids
+                    )
+                    rows = cursor.fetchall()
                 current_ids = [r[0] for r in rows if r[0] is not None]
             except Exception as e:
                 logger.warning(f'_try_resolve_upward error: {e}')
@@ -338,33 +324,26 @@ class RuntimeDimensionResolver:
         if not role_ids:
             return []
         try:
-            # [FIX v007 2026-07-05] check_same_thread=False
-            # [V007.40 BUG-FIX] 加 timeout=30.0 + PRAGMA busy_timeout=30000
-            conn = sqlite3.connect(
-                self._db_path,
-                timeout=30.0,
-                check_same_thread=False,
-            )
-            conn.execute("PRAGMA busy_timeout = 30000")
-            cursor = conn.cursor()
-            placeholders = ','.join('?' * len(role_ids))
-            cursor.execute(f"""
-                SELECT role_id, dimension_code, dimension_values, inherit_children,
-                       scope_mode, bo_id
-                FROM role_dimension_scopes
-                WHERE role_id IN ({placeholders})
-            """, role_ids)
-            scopes = []
-            for row in cursor.fetchall():
-                scopes.append({
-                    'role_id': row[0],
-                    'dimension_code': row[1],
-                    'dimension_values': row[2],
-                    'inherit_children': row[3],
-                    'scope_mode': row[4],
-                    'bo_id': row[5],
-                })
-            conn.close()
+            # [V007.41 BUG-FIX] 用 safe_connect_for_read 统一 L0 入口
+            with safe_connect_for_read(self._db_path) as conn:
+                cursor = conn.cursor()
+                placeholders = ','.join('?' * len(role_ids))
+                cursor.execute(f"""
+                    SELECT role_id, dimension_code, dimension_values, inherit_children,
+                           scope_mode, bo_id
+                    FROM role_dimension_scopes
+                    WHERE role_id IN ({placeholders})
+                """, role_ids)
+                scopes = []
+                for row in cursor.fetchall():
+                    scopes.append({
+                        'role_id': row[0],
+                        'dimension_code': row[1],
+                        'dimension_values': row[2],
+                        'inherit_children': row[3],
+                        'scope_mode': row[4],
+                        'bo_id': row[5],
+                    })
             return scopes
         except Exception as e:
             logger.error(f"Failed to get role dim scopes: {e}")

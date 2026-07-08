@@ -7,6 +7,7 @@ from meta.core.datasource import get_data_source
 from meta.core.models import registry
 from meta.core.table_name_validator import invalidate_cache as invalidate_table_cache
 from meta.core.startup_checks import run_startup_checks
+from meta.core.safe_connect import safe_connect_for_read
 
 logger = logging.getLogger(__name__)
 
@@ -701,20 +702,10 @@ def _init_audit_service(ds, db_path):
         enhance_audit_log(db_path)
 
         # [FR-008/009] 性能索引 v3: relationships + audit_logs 覆盖索引
-        import sqlite3
-        # [V007.40 BUG-FIX] 加 timeout=30.0 + check_same_thread=False
-        #   + PRAGMA busy_timeout=30000 跟 sql_connection_pool 一致
-        conn = sqlite3.connect(
-            db_path,
-            timeout=30.0,
-            check_same_thread=False,
-        )
-        conn.execute("PRAGMA busy_timeout = 30000")
-        try:
+        # [V007.41 BUG-FIX] 用 safe_connect_for_read 统一 L0 入口
+        with safe_connect_for_read(db_path) as conn:
             from meta.migrations.add_performance_indexes_v3 import create_indexes as create_v3_indexes
             create_v3_indexes(conn)
-        finally:
-            conn.close()
 
         from meta.services.async_audit_writer import async_audit_writer
         async_audit_writer.set_data_source(ds)

@@ -36,27 +36,7 @@ def _get_db_path() -> str:
     return os.path.join(current, 'architecture.db')
 
 
-# [V007.40 BUG-FIX] 统一直接连接 helper
-# 背景: intent_resolver.py 6 处 sqlite3.connect(self._db_path) 都没有 timeout, 撞
-#       lock / disk I/O error 时直接 5s 抛错, grant/deny/revoke/has_intent 都失败.
-# 修法: 集中到 _safe_connect() helper, 统一加 timeout=30.0 + check_same_thread=False
-#       + PRAGMA busy_timeout=30000, 跟 sql_connection_pool 一致.
-def _safe_connect(db_path: str) -> sqlite3.Connection:
-    """[V007.40] 统一的 sqlite3 直接连接 helper
-
-    用法:
-        with _safe_connect(self._db_path) as conn:
-            cursor = conn.cursor()
-            ...
-    """
-    conn = sqlite3.connect(
-        db_path,
-        timeout=30.0,
-        check_same_thread=False,
-    )
-    conn.execute("PRAGMA busy_timeout = 30000")
-    return conn
-
+from meta.core.safe_connect import safe_connect_for_read
 
 # ============================================================
 # Role Intent DAO
@@ -93,16 +73,17 @@ class RoleIntentDAO:
         """
         params_hash = self.make_parameters_hash(parameters)
         try:
-            # [V007.40 BUG-FIX] 用 _safe_connect() 统一加 timeout
-            conn = _safe_connect(self._db_path)
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT OR REPLACE INTO role_intents
-                (role_id, bo_id, action_name, parameters_hash, granted, source, updated_at)
-                VALUES (?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)
-            """, (role_id, bo_id, action_name, params_hash, source))
-            conn.commit()
-            conn.close()
+            # [V007.41 BUG-FIX] 用 safe_connect_for_write 统一 L0 写入口
+            # Phase 2: 用 force_no_tx 保持 V007.40 简单语义
+            # Phase 3: 调用方应改用 bo_framework.transaction() 包裹
+            with safe_connect_for_write(self._db_path, force_no_tx=True) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO role_intents
+                    (role_id, bo_id, action_name, parameters_hash, granted, source, updated_at)
+                    VALUES (?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)
+                """, (role_id, bo_id, action_name, params_hash, source))
+                conn.commit()
             return True
         except Exception as e:  # noqa: BLE001
             logger.error(f"Failed to grant intent: {e}")
@@ -118,16 +99,17 @@ class RoleIntentDAO:
         """拒绝 Intent 权限（grant=0）"""
         params_hash = self.make_parameters_hash(parameters)
         try:
-            # [V007.40 BUG-FIX] 用 _safe_connect() 统一加 timeout
-            conn = _safe_connect(self._db_path)
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT OR REPLACE INTO role_intents
-                (role_id, bo_id, action_name, parameters_hash, granted, source, updated_at)
-                VALUES (?, ?, ?, ?, 0, 'manual', CURRENT_TIMESTAMP)
-            """, (role_id, bo_id, action_name, params_hash))
-            conn.commit()
-            conn.close()
+            # [V007.41 BUG-FIX] 用 safe_connect_for_write 统一 L0 写入口
+            # Phase 2: force_no_tx=True 保持 V007.40 语义
+            # Phase 3: 调用方应改用 bo_framework.transaction() 包裹
+            with safe_connect_for_write(self._db_path, force_no_tx=True) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO role_intents
+                    (role_id, bo_id, action_name, parameters_hash, granted, source, updated_at)
+                    VALUES (?, ?, ?, ?, 0, 'manual', CURRENT_TIMESTAMP)
+                """, (role_id, bo_id, action_name, params_hash))
+                conn.commit()
             return True
         except Exception as e:  # noqa: BLE001
             logger.error(f"Failed to deny intent: {e}")
@@ -143,16 +125,15 @@ class RoleIntentDAO:
         """撤销 Intent 权限"""
         params_hash = self.make_parameters_hash(parameters)
         try:
-            # [V007.40 BUG-FIX] 用 _safe_connect() 统一加 timeout
-            conn = _safe_connect(self._db_path)
-            cursor = conn.cursor()
-            cursor.execute("""
-                DELETE FROM role_intents
-                WHERE role_id = ? AND bo_id = ? AND action_name = ?
-                  AND parameters_hash = ?
-            """, (role_id, bo_id, action_name, params_hash))
-            conn.commit()
-            conn.close()
+            # [V007.41 BUG-FIX] 用 safe_connect_for_write 统一 L0 写入口
+            with safe_connect_for_write(self._db_path, force_no_tx=True) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    DELETE FROM role_intents
+                    WHERE role_id = ? AND bo_id = ? AND action_name = ?
+                      AND parameters_hash = ?
+                """, (role_id, bo_id, action_name, params_hash))
+                conn.commit()
             return True
         except Exception as e:  # noqa: BLE001
             logger.error(f"Failed to revoke intent: {e}")
@@ -161,18 +142,17 @@ class RoleIntentDAO:
     def list_for_role(self, role_id: int) -> List[Dict[str, Any]]:
         """列出角色的所有 Intent 权限"""
         try:
-            # [V007.40 BUG-FIX] 用 _safe_connect() 统一加 timeout
-            conn = _safe_connect(self._db_path)
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, role_id, bo_id, action_name, parameters_hash,
-                       granted, source, created_at, updated_at
-                FROM role_intents
-                WHERE role_id = ?
-                ORDER BY bo_id, action_name
-            """, (role_id,))
-            rows = cursor.fetchall()
-            conn.close()
+            # [V007.41 BUG-FIX] 用 safe_connect_for_read 统一 L0 只读入口
+            with safe_connect_for_read(self._db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT id, role_id, bo_id, action_name, parameters_hash,
+                           granted, source, created_at, updated_at
+                    FROM role_intents
+                    WHERE role_id = ?
+                    ORDER BY bo_id, action_name
+                """, (role_id,))
+                rows = cursor.fetchall()
             return [
                 {
                     'id': r[0],
@@ -203,18 +183,17 @@ class RoleIntentDAO:
             return False
         params_hash = self.make_parameters_hash(parameters)
         try:
-            # [V007.40 BUG-FIX] 用 _safe_connect() 统一加 timeout
-            conn = _safe_connect(self._db_path)
-            cursor = conn.cursor()
-            placeholders = ','.join('?' * len(role_ids))
-            cursor.execute(f"""
-                SELECT COUNT(*) FROM role_intents
-                WHERE role_id IN ({placeholders})
-                  AND bo_id = ? AND action_name = ?
-                  AND parameters_hash = ? AND granted = 1
-            """, (*role_ids, bo_id, action_name, params_hash))
-            count = cursor.fetchone()[0]
-            conn.close()
+            # [V007.41 BUG-FIX] 用 safe_connect_for_read 统一 L0 只读入口
+            with safe_connect_for_read(self._db_path) as conn:
+                cursor = conn.cursor()
+                placeholders = ','.join('?' * len(role_ids))
+                cursor.execute(f"""
+                    SELECT COUNT(*) FROM role_intents
+                    WHERE role_id IN ({placeholders})
+                      AND bo_id = ? AND action_name = ?
+                      AND parameters_hash = ? AND granted = 1
+                """, (*role_ids, bo_id, action_name, params_hash))
+                count = cursor.fetchone()[0]
             return count > 0
         except Exception as e:  # noqa: BLE001
             logger.error(f"Failed to check intent: {e}")
@@ -453,21 +432,20 @@ class IntentPermissionChecker:
         if not role_ids or not perm_code:
             return False
         try:
-            # [V007.40 BUG-FIX] 用 _safe_connect() 统一加 timeout
-            conn = _safe_connect(self._db_path)
-            cursor = conn.cursor()
-            placeholders = ','.join('?' * len(role_ids))
-            cursor.execute(
-                f"""
-                SELECT COUNT(*) FROM role_permissions rp
-                JOIN permissions p ON rp.permission_id = p.id
-                WHERE rp.role_id IN ({placeholders})
-                  AND p.code = ? AND rp.granted = 1
-                """,
-                (*role_ids, perm_code),
-            )
-            count = cursor.fetchone()[0]
-            conn.close()
+            # [V007.41 BUG-FIX] 用 safe_connect_for_read 统一 L0 只读入口
+            with safe_connect_for_read(self._db_path) as conn:
+                cursor = conn.cursor()
+                placeholders = ','.join('?' * len(role_ids))
+                cursor.execute(
+                    f"""
+                    SELECT COUNT(*) FROM role_permissions rp
+                    JOIN permissions p ON rp.permission_id = p.id
+                    WHERE rp.role_id IN ({placeholders})
+                      AND p.code = ? AND rp.granted = 1
+                    """,
+                    (*role_ids, perm_code),
+                )
+                count = cursor.fetchone()[0]
             return count > 0
         except Exception as e:  # noqa: BLE001
             logger.error(

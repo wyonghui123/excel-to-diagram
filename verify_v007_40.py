@@ -71,10 +71,12 @@ print(f'  [OK] stop() calls flush() + set_exception')
 print("\n[Test 6] token_blacklist_service.py 最高频热路径")
 with open(os.path.join(BASE, 'meta/services/token_blacklist_service.py'), 'r', encoding='utf-8') as f:
     content = f.read()
-assert 'timeout=30.0' in content, 'FAIL: missing timeout=30.0'
-assert 'busy_timeout = 30000' in content, 'FAIL: missing PRAGMA busy_timeout'
+# [V007.41 BUG-FIX] 验证脚本更新: 旧 V007.40 检查 timeout=30.0 字面量,
+#   现在改检查 safe_connect_for_read/write 引用 (三件套已封装到工厂)
+assert 'safe_connect_for_read' in content or 'safe_connect_for_write' in content, \
+    'FAIL: missing safe_connect_* usage'
 assert 'is_blacklisted' in content and 'range(5)' in content, 'FAIL: is_blacklisted missing retry loop'
-print(f'  [OK] timeout=30.0 + PRAGMA busy_timeout + retry loop in is_blacklisted')
+print(f'  [OK] safe_connect_for_read/write + retry loop in is_blacklisted')
 
 # Test 7: intent_resolver
 print("\n[Test 7] intent_resolver.py 6 处安全连接")
@@ -94,64 +96,79 @@ for i, line in enumerate(content.split('\n'), 1):
     if 'sqlite3.connect(self._db_path)' in line and not line.strip().startswith('#'):
         print(f"  DEBUG: code line {i}: {line[:100]!r}")
 print(f"  DEBUG: code direct count = {code_direct}")
-assert 'def _safe_connect' in content, 'FAIL: missing _safe_connect helper'
+# [V007.41 BUG-FIX] 验证脚本更新: 旧 V007.40 检查 _safe_connect 本地 helper,
+#   V007.41 改用 safe_connect_for_read/write 统一工厂
+assert 'safe_connect_for_read' in content or 'safe_connect_for_write' in content, \
+    'FAIL: missing safe_connect_* usage'
 direct_count = code_direct  # 只统计代码行, 排除注释
 assert direct_count == 0, f'FAIL: still has {direct_count} direct sqlite3.connect'
-helper_count = content.count('_safe_connect(self._db_path)')
-print(f'  [OK] _safe_connect helper defined, {helper_count} 处调用, 0 处直接连接')
+helper_count = (
+    content.count('safe_connect_for_read(self._db_path)') +
+    content.count('safe_connect_for_write(self._db_path')
+)
+print(f'  [OK] safe_connect_for_read/write 调用 {helper_count} 处, 0 处直接连接')
 
 # Test 8: subflow_template_store
 print("\n[Test 8] subflow_template_store.py 4 处安全连接")
 with open(os.path.join(BASE, 'meta/services/subflow_template_store.py'), 'r', encoding='utf-8') as f:
     content = f.read()
-assert 'def _safe_connect' in content, 'FAIL: missing _safe_connect helper'
+# [V007.41 BUG-FIX] 验证脚本更新: 同 Test 7
+assert 'safe_connect_for_read' in content or 'safe_connect_for_write' in content, \
+    'FAIL: missing safe_connect_* usage'
 direct_count = content.count('sqlite3.connect(cls._get_db_path())')
 assert direct_count == 0, f'FAIL: still has {direct_count} direct sqlite3.connect'
-helper_count = content.count('_safe_connect(cls._get_db_path())')
-print(f'  [OK] _safe_connect helper defined, {helper_count} 处调用, 0 处直接连接')
+helper_count = (
+    content.count('safe_connect_for_read(cls._get_db_path())') +
+    content.count('safe_connect_for_write(cls._get_db_path()')
+)
+print(f'  [OK] safe_connect_for_read/write 调用 {helper_count} 处, 0 处直接连接')
 
 # Test 9: filter_variant_api
 print("\n[Test 9] filter_variant_api.py 高频 API")
 with open(os.path.join(BASE, 'meta/api/filter_variant_api.py'), 'r', encoding='utf-8') as f:
     content = f.read()
-assert 'timeout=30.0' in content, 'FAIL: missing timeout=30.0'
+# [V007.41 BUG-FIX] 验证脚本更新: 旧 V007.40 检查 timeout=30.0 字面量,
+#   现在改检查 safe_connect_for_read/write 引用 (三件套已封装到工厂)
+assert 'safe_connect_for_read' in content or 'safe_connect_for_write' in content, \
+    'FAIL: missing safe_connect_* usage'
 assert '_table_initialized' in content, 'FAIL: missing _table_initialized'
-print(f'  [OK] timeout=30.0 + _table_initialized (避免每请求都 CREATE TABLE)')
+print(f'  [OK] safe_connect_for_read/write + _table_initialized (避免每请求都 CREATE TABLE)')
 
 # Test 10: audit_export
 print("\n[Test 10] audit_export.py export 路径")
 with open(os.path.join(BASE, 'meta/services/audit_export.py'), 'r', encoding='utf-8') as f:
     content = f.read()
-assert 'timeout=30.0' in content, 'FAIL: missing timeout=30.0'
-assert 'busy_timeout = 30000' in content, 'FAIL: missing PRAGMA busy_timeout'
-print(f'  [OK] timeout=30.0 + PRAGMA busy_timeout + with context manager')
+# [V007.41 BUG-FIX] 验证脚本更新: 旧 V007.40 检查 timeout=30.0 字面量
+assert 'safe_connect_for_read' in content or 'safe_connect_for_write' in content, \
+    'FAIL: missing safe_connect_* usage'
+print(f'  [OK] safe_connect_for_read/write (with context manager)')
 
 # Test 11: runtime_dimension_resolver
 print("\n[Test 11] runtime_dimension_resolver.py 3 处安全连接")
 with open(os.path.join(BASE, 'meta/core/runtime_dimension_resolver.py'), 'r', encoding='utf-8') as f:
     content = f.read()
-timeout_count = content.count('timeout=30.0')
-busy_count = content.count('PRAGMA busy_timeout = 30000')
-assert timeout_count >= 3, f'FAIL: only {timeout_count} timeout=30.0 (expected >= 3)'
-assert busy_count >= 3, f'FAIL: only {busy_count} busy_timeout (expected >= 3)'
-print(f'  [OK] {timeout_count} 处 timeout=30.0 + {busy_count} 处 PRAGMA busy_timeout')
+# [V007.41 BUG-FIX] 验证脚本更新: 旧 V007.40 检查 timeout=30.0 字面量
+sc_count = content.count('safe_connect_for_read') + content.count('safe_connect_for_write')
+assert sc_count >= 3, f'FAIL: only {sc_count} safe_connect_* calls (expected >= 3)'
+print(f'  [OK] {sc_count} 处 safe_connect_for_read/write')
 
 # Test 12: dim_scope_overlap_detector
 print("\n[Test 12] dim_scope_overlap_detector.py 2 处安全连接")
 with open(os.path.join(BASE, 'meta/core/dim_scope_overlap_detector.py'), 'r', encoding='utf-8') as f:
     content = f.read()
-timeout_count = content.count('timeout=30.0')
-busy_count = content.count('PRAGMA busy_timeout = 30000')
-assert timeout_count >= 2, f'FAIL: only {timeout_count} timeout=30.0 (expected >= 2)'
-assert busy_count >= 2, f'FAIL: only {busy_count} busy_timeout (expected >= 2)'
-print(f'  [OK] {timeout_count} 处 timeout=30.0 + {busy_count} 处 PRAGMA busy_timeout')
+# [V007.41 BUG-FIX] 验证脚本更新: 旧 V007.40 检查 timeout=30.0 字面量
+sc_count = content.count('safe_connect_for_read') + content.count('safe_connect_for_write')
+assert sc_count >= 2, f'FAIL: only {sc_count} safe_connect_* calls (expected >= 2)'
+print(f'  [OK] {sc_count} 处 safe_connect_for_read/write')
 
 # Test 13: app_builder
 print("\n[Test 13] app_builder.py 启动期连接")
 with open(os.path.join(BASE, 'meta/core/app_builder.py'), 'r', encoding='utf-8') as f:
     content = f.read()
-assert 'timeout=30.0' in content, 'FAIL: missing timeout=30.0'
-print(f'  [OK] app_builder.py 启动期连接已加 timeout=30.0')
+# [V007.41 BUG-FIX] 验证脚本更新: 旧 V007.40 检查 timeout=30.0 字面量
+assert 'safe_connect_for_read' in content or 'safe_connect_for_write' in content or 'timeout=30.0' in content, \
+    'FAIL: missing safe_connect_* usage or timeout=30.0'
+print(f'  [OK] app_builder.py 启动期连接已用 safe_connect 或 timeout=30.0')
 
 # Test 14: test_sql_config.py 断言已修
 print("\n[Test 14] tests/test_sql_config.py 断言")
