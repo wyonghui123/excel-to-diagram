@@ -31,6 +31,7 @@ verify_bundle.py - 独立 bundle 一致性验证 (V007.25 L2 invariant)
 import os
 import sys
 import json
+import subprocess
 import zipfile
 import hashlib
 import argparse
@@ -219,8 +220,54 @@ def check_v8b_zip_v00734_v00735() -> tuple:
         return (False, f"读 sql_*.py 失败: {e}")
 
 
+def check_v8o_zip_not_behind_working_tree() -> tuple:
+    """V8o. zip 必须包含 working tree 全部 fix commit (防部署疏忽)
+    任何 fix(be): commit 都必须在最新 zip 内, 否则 zip 已 stale
+    """
+    if not zip_path.exists():
+        return (True, "无 zip, 跳过")
+    try:
+        # 读 zip deploy_id 中的 HEAD
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            # MANIFEST 文件名可能多种: MANIFEST (无后缀, yaml 格式), 在根或 tools/ 或 meta/
+            manifest = ""
+            for p in ["MANIFEST", "MANIFEST.json", "tools/MANIFEST.json", "meta/MANIFEST.json", "meta/MANIFEST"]:
+                if p in zf.namelist():
+                    manifest = zf.read(p).decode("utf-8", errors="ignore")
+                    break
+        # 用 regex 提取 head 字段 (兼容 yaml/json)
+        import re
+        m = re.search(r'^\s*head:\s*["\']?([0-9a-f]{40})(?:-dirty)?["\']?', manifest, re.MULTILINE)
+        zip_head = m.group(1) if m else "unknown"
+        # 读 working tree HEAD
+        try:
+            wt_head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=str(ROOT), text=True).strip()
+        except Exception as e:
+            return (True, f"读 working tree HEAD 失败 (跳过): {e}")
+        if zip_head == "unknown":
+            return (True, f"manifest 无 git_commit, 跳过")
+        # 算 working tree HEAD 是否包含 zip HEAD
+        try:
+            merge_base = subprocess.check_output(["git", "merge-base", zip_head, wt_head], cwd=str(ROOT), text=True).strip()
+            # 如果 merge_base == zip_head, 说明 zip HEAD 在 wt HEAD 之前 (zip 落后)
+            if merge_base == zip_head and zip_head != wt_head:
+                # 计算落后几个 commit
+                try:
+                    count = int(subprocess.check_output(
+                        ["git", "rev-list", "--count", f"{zip_head}..{wt_head}"],
+                        cwd=str(ROOT), text=True).strip())
+                    return (False, f"zip HEAD={zip_head[:8]} 落后 working tree HEAD={wt_head[:8]} ({count} 个 commit 未打包) — 部署疏忽 BUG 复发")
+                except Exception:
+                    return (False, f"zip HEAD={zip_head[:8]} 落后 working tree HEAD={wt_head[:8]} — 部署疏忽 BUG 复发")
+            return (True, f"zip HEAD={zip_head[:8]} 不落后 working tree HEAD={wt_head[:8]}")
+        except subprocess.CalledProcessError as e:
+            return (True, f"merge-base 失败 (跳过): {e}")
+    except Exception as e:
+        return (False, f"读 zip manifest 失败: {e}")
+
+
 def check_v8h_log_service_v35_merge() -> tuple:
-    """V8e. log_service 必须含 v3.5 新端点 (合并升级 V007.37)
+    """V8h. log_service 必须含 v3.5 新端点 (合并升级 V007.37)
     排查 disk I/O error 真因必需: sqlite (直查), sqlite/load (压力), iostat (磁盘抖动), proc/io (进程字节)
     """
     if not zip_path.exists():
@@ -572,6 +619,7 @@ def main():
         ("V8f", "task_scheduler 写路径 retry (V007.38 BUG-FIX)", check_v8f_zip_v00738_task_scheduler_retry),
         ("V8g", "mmap_size 64MB (V007.38 BUG-FIX)", check_v8g_zip_v00738_mmap_size),
         ("V8h", "log_service v3.5 合并升级 (sqlite/load + iostat + proc/io)", check_v8h_log_service_v35_merge),
+        ("V8o", "zip 不落后 working tree (防部署疏忽)", check_v8o_zip_not_behind_working_tree),
         ("V8k", "auto_vacuum 幂等保护 (V007.38 BUG-FIX)", check_v8k_zip_v00738_auto_vacuum_idempotent),
         ("V8l", "acquire_writer 线程锁 (V007.38 BUG-FIX)", check_v8l_zip_v00738_writer_lock),
         ("V8m", "task_scheduler 用 cursor.lastrowid (V007.38 BUG-FIX)", check_v8m_zip_v00738_no_select_last_insert_rowid),
