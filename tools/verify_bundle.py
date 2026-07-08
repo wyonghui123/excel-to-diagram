@@ -722,6 +722,7 @@ def main():
         ("V8h", "log_service v3.5 合并升级 (sqlite/load + iostat + proc/io)", check_v8h_log_service_v35_merge),
         ("V8o", "zip 不落后 working tree (防部署疏忽)", check_v8o_zip_not_behind_working_tree),
         ("V8p", "health_check() 含 V007.42 P6 4 字段 (FR-003)", check_v8p_zip_v00742_health_fields),
+        ("V8q", "bo_framework import 一致性 (V007.43 P0 BUG-FIX)", check_v8q_zip_bo_framework_import_consistency),
         ("V8k", "auto_vacuum 幂等保护 (V007.38 BUG-FIX)", check_v8k_zip_v00738_auto_vacuum_idempotent),
         ("V8l", "acquire_writer 线程锁 (V007.38 BUG-FIX)", check_v8l_zip_v00738_writer_lock),
         ("V8m", "task_scheduler 用 cursor.lastrowid (V007.38 BUG-FIX)", check_v8m_zip_v00738_no_select_last_insert_rowid),
