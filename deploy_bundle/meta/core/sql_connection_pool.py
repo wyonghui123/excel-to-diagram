@@ -168,6 +168,12 @@ class SQLiteConnectionPool:
         #       (其他 PRAGMA 是 per-connection, 不去重)
         self._journal_mode_applied: bool = False
         self._journal_mode_lock = threading.Lock()
+        # [V007.47 BUG-FIX 2026-07-08] synchronous 幂等标志
+        # 见 _create_connection 注释
+        self._synchronous_applied: bool = False
+        # [V007.47 BUG-FIX 2026-07-08] wal_autocheckpoint 幂等标志
+        # wal_autocheckpoint 是 db-level 持久化 PRAGMA, 重复设值会写 db header
+        self._wal_autocheckpoint_applied: bool = False
         # [V007.38 BUG-FIX] PRAGMA auto_vacuum 幂等保护 (跟 journal_mode 同样原理)
         # auto_vacuum 是 db 持久化设置, 重复执行触发 db 头写 → disk I/O error
         # _create_connection 已引用 _auto_vacuum_applied 但 __init__ 没初始化,
@@ -383,7 +389,20 @@ class SQLiteConnectionPool:
                     conn.execute("PRAGMA journal_mode=WAL")
                     self._journal_mode_applied = True
                 # else: 跳过, db 已是 WAL 模式
-            conn.execute("PRAGMA synchronous=NORMAL")
+            # [V007.47 BUG-FIX 2026-07-08] synchronous 幂等保护
+            # 背景: 跟 journal_mode 一样, synchronous 是 db-level 持久化 PRAGMA
+            #       V007.42 注释说 "其他 PRAGMA 是 per-connection" 是错的
+            #       yonaa Python 3.14.3 + SQLite 3.50.4 < 3.51.3, WAL-reset race 频繁
+            #       重复 PRAGMA synchronous=NORMAL 在 race 期间会写 db header
+            #       → disk I/O error → useDiagramData Failed to initialize
+            # 修法: 跟 journal_mode/auto_vacuum 一样, 加 _synchronous_applied 锁保护
+            with self._journal_mode_lock:
+                if not self._synchronous_applied:
+                    conn.execute("PRAGMA synchronous=NORMAL")
+                    self._synchronous_applied = True
+                # else: 跳过, db 已是 NORMAL 模式
+            # [V007.47 BUG-FIX 2026-07-08] auto_vacuum 也复用 _journal_mode_lock
+            # (已有 _auto_vacuum_applied, 但要共用同一锁避免 db header 写并发)
             conn.execute("PRAGMA foreign_keys = ON")
             # [V007.20 2026-07-06] busy_timeout: 5000 → 30000 (30s)
             # 背景: yonaa 1w+ annotation import 卡 40% (HANDOFF_V007_20_BUSY_TIMEOUT.md)
@@ -400,11 +419,17 @@ class SQLiteConnectionPool:
                     conn.execute("PRAGMA auto_vacuum = INCREMENTAL")
                     self._auto_vacuum_applied = True
                 # else: 跳过, db 已是 INCREMENTAL 模式
-            conn.execute(
-                "PRAGMA wal_autocheckpoint = {0}".format(
-                    self._config.wal_auto_checkpoint
-                )
-            )
+            # [V007.47 BUG-FIX 2026-07-08] wal_autocheckpoint 幂等保护
+            # wal_autocheckpoint 是 db-level 持久化 PRAGMA
+            with self._journal_mode_lock:
+                if not self._wal_autocheckpoint_applied:
+                    conn.execute(
+                        "PRAGMA wal_autocheckpoint = {0}".format(
+                            self._config.wal_auto_checkpoint
+                        )
+                    )
+                    self._wal_autocheckpoint_applied = True
+                # else: 跳过, db 已是配置值
             # [V007.42 FR-008] mmap_size 可配置化 + 默认值改为 0 (禁用)
             # 背景:
             #   V007.35 引入 mmap_size=256MB → V007.38 降到 64MB, 但 disk I/O error 持续

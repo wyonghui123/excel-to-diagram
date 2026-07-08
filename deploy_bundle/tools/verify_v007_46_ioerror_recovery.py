@@ -124,6 +124,36 @@ def check_v8ab():
     return False
 
 
+def check_v8ad():
+    """V8ad: pool._create_connection 对 db-level 持久化 PRAGMA 都有幂等保护
+    (journal_mode/synchronous/auto_vacuum/wal_autocheckpoint 4 个)"""
+    f = META_DIR / "core" / "sql_connection_pool.py"
+    content = f.read_text(encoding="utf-8")
+    issues = []
+    for pragma_attr in ["_journal_mode_applied", "_synchronous_applied",
+                         "_auto_vacuum_applied", "_wal_autocheckpoint_applied"]:
+        if pragma_attr not in content:
+            issues.append(f"缺 {pragma_attr} 初始化")
+    # 检查每个 PRAGMA 后面 10 行内是否有 _<pragma>_applied 检查
+    for pragma in ["journal_mode", "synchronous", "auto_vacuum", "wal_autocheckpoint"]:
+        attr_name = f"_{pragma}_applied"
+        # 找 PRAGMA 行 (允许 {0} format)
+        m = re.search(rf'PRAGMA {pragma}\s*=\s*[\w{{}}]+', content)
+        if not m:
+            issues.append(f"PRAGMA {pragma} 设置语句未找到")
+            continue
+        # 找 PRAGMA 行后面的 1000 chars, 看有 _applied 标志
+        pos = m.end()
+        window = content[pos:pos+1000]
+        if attr_name not in window:
+            issues.append(f"PRAGMA {pragma} 缺 {attr_name} 幂等检查")
+    if not issues:
+        PASSED.append("V8ad: 4 个 db-level PRAGMA 全部有幂等保护 (journal_mode/synchronous/auto_vacuum/wal_autocheckpoint)")
+        return True
+    FAILED.append("V8ad: " + "; ".join(issues))
+    return False
+
+
 def check_v8ac():
     """V8ac: db_health_monitor 2 处裸连接 + async_audit_writer 降级路径 mmap_size=0"""
     issues = []
@@ -166,6 +196,7 @@ def main():
     check_v8aa()
     check_v8ab()
     check_v8ac()
+    check_v8ad()
     print()
     print("-" * 60)
     print(f"PASSED ({len(PASSED)}):")
