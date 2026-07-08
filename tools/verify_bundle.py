@@ -385,20 +385,45 @@ def check_v8f_zip_v00738_task_scheduler_retry() -> tuple:
 
 
 def check_v8g_zip_v00738_mmap_size() -> tuple:
-    """V8g. [V007.38 BUG-FIX] sql_connection_pool mmap_size 必须 ≤ 128MB
-    256MB mmap 让写视图失效代价过大, 触发雪崩 (V007.38 BUG-FIX)
+    """V8g. [V007.38/V007.42] mmap_size 必须明确 (64MB=67108864 或 0=禁用)
+    V007.38: 改为 64MB (性能)
+    V007.42 P5: 改为 0 (禁用, mmap 在 WAL+并发下反效果, FR-008)
+    必须是这两种之一, 不能有中间值 (避免退化)
     """
     if not zip_path.exists():
         return (True, "无 zip, 跳过")
     try:
         with zipfile.ZipFile(zip_path, "r") as zf:
             pool = zf.read("meta/core/sql_connection_pool.py").decode("utf-8", errors="ignore")
-        # 检查没有 268435456 (256MB) 但有 67108864 (64MB) 或更小
-        if "PRAGMA mmap_size = 268435456" in pool:
-            return (False, "mmap_size 仍是 256MB (V007.38 BUG 复发)")
-        if "PRAGMA mmap_size = 67108864" not in pool:
-            return (False, "mmap_size 不是 64MB, 期望 67108864 (V007.38 BUG)")
-        return (True, "mmap_size 已改为 64MB (V007.38 BUG-FIX)")
+        # 找 ConnectionConfig.mmap_size: int = XXX (实际赋值, 排除注释)
+        import re
+        m = re.search(r'mmap_size\s*[:=]\s*(?:int\s*[=:])?\s*(\d+)', pool)
+        if not m:
+            return (False, "找不到 mmap_size 赋值 (V007.38/V007.42 BUG 复发)")
+        val = int(m.group(1))
+        if val not in (0, 67108864):
+            return (False, f"mmap_size={val} 既不是 0 (V007.42 禁用) 也不是 67108864 (V007.38 64MB), 异常值")
+        desc = "0 (V007.42 禁用)" if val == 0 else "64MB (V007.38)"
+        return (True, f"mmap_size={val} ({desc})")
+    except Exception as e:
+        return (False, f"读 sql_connection_pool.py 失败: {e}")
+
+
+def check_v8p_zip_v00742_health_fields() -> tuple:
+    """V8p. [V007.42 FR-003] sql_connection_pool.health_check() 必须含 4 字段
+    V007.42 P6: health_check() 增强, 必须返回 reader_health + checkpoint_busy + io_rate_limit + max_readers
+    防退化: 任何 health_check 简化都会暴露问题
+    """
+    if not zip_path.exists():
+        return (True, "无 zip, 跳过")
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            sc = zf.read("meta/core/sql_connection_pool.py").decode("utf-8", errors="ignore")
+        needed = ["reader_health", "checkpoint_busy", "io_rate_limit", "max_readers"]
+        missing = [n for n in needed if n not in sc]
+        if missing:
+            return (False, f"health_check() 缺 V007.42 P6 字段 (FR-003 BUG 复发): {missing}")
+        return (True, f"health_check() 含全部 4 个 V007.42 P6 字段 (reader_health/checkpoint_busy/io_rate_limit/max_readers)")
     except Exception as e:
         return (False, f"读 sql_connection_pool.py 失败: {e}")
 
@@ -620,6 +645,7 @@ def main():
         ("V8g", "mmap_size 64MB (V007.38 BUG-FIX)", check_v8g_zip_v00738_mmap_size),
         ("V8h", "log_service v3.5 合并升级 (sqlite/load + iostat + proc/io)", check_v8h_log_service_v35_merge),
         ("V8o", "zip 不落后 working tree (防部署疏忽)", check_v8o_zip_not_behind_working_tree),
+        ("V8p", "health_check() 含 V007.42 P6 4 字段 (FR-003)", check_v8p_zip_v00742_health_fields),
         ("V8k", "auto_vacuum 幂等保护 (V007.38 BUG-FIX)", check_v8k_zip_v00738_auto_vacuum_idempotent),
         ("V8l", "acquire_writer 线程锁 (V007.38 BUG-FIX)", check_v8l_zip_v00738_writer_lock),
         ("V8m", "task_scheduler 用 cursor.lastrowid (V007.38 BUG-FIX)", check_v8m_zip_v00738_no_select_last_insert_rowid),
