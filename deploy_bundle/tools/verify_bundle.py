@@ -685,6 +685,65 @@ def check_v13_deploy_e2e() -> tuple:
         return (False, f"PHASE 0.5 模拟失败: {e}")
 
 
+def check_v8u_zip_audit_logs_schema_completeness() -> tuple:
+    """V8u. [V007.45 P0 BUG-FIX] audit_logs 表必须有 created_at_epoch 列 + 复合索引
+
+    背景: V007.4x dev-agent 改 audit_derived_fields.py 用 MAX(created_at_epoch) 优化聚合,
+          但漏写 migration. 部署到 yonaa 后 audit_logs 表缺这一列, 导致:
+          1. _execute_audit_query 每次都打 WARNING "no such column: created_at_epoch"
+          2. fallback 走 MAX(created_at) TEXT 聚合, 264K 行全表扫描
+          3. 关系范围等 updated_at 排序慢, 前端"持续转"
+    防退化: zip 必须含 V007.45 migration 脚本, 且 audit_derived_fields 引用与 migration 一致.
+    """
+    if not zip_path.exists():
+        return (True, "无 zip, 跳过")
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            # 1. 找 V007.45 migration
+            migration_files = [
+                n for n in zf.namelist()
+                if "migrations" in n and n.endswith(".py")
+                and "v007_45" in n.lower()
+            ]
+            # 兼容旧路径: meta/scripts/migration_ssot_stage1.py
+            legacy_migration = any(
+                "migration_ssot_stage1" in n for n in zf.namelist()
+            )
+
+            # 2. 检查代码引用 created_at_epoch
+            ad_content = ""
+            if "meta/core/audit_derived_fields.py" in zf.namelist():
+                ad_content = zf.read(
+                    "meta/core/audit_derived_fields.py"
+                ).decode("utf-8", errors="ignore")
+
+            uses_epoch = "created_at_epoch" in ad_content
+
+        # 3. 决策
+        if uses_epoch and not migration_files and not legacy_migration:
+            return (
+                False,
+                "audit_derived_fields 引用 created_at_epoch 但 zip 无 V007.45 migration (V007.45 BUG)",
+            )
+
+        if migration_files:
+            return (
+                True,
+                f"V007.45 migration 存在 ({len(migration_files)} 个)",
+            )
+        if legacy_migration:
+            return (
+                True,
+                "legacy migration_ssot_stage1 存在 (兼容)",
+            )
+        return (
+            True,
+            "audit_derived_fields 未引用 created_at_epoch, 跳过",
+        )
+    except Exception as e:
+        return (False, f"V8u 检查失败: {e}")
+
+
 def check_v8q_zip_bo_framework_import_consistency() -> tuple:
     """V8q. [V007.43 P0 BUG-FIX] intent_api 引用 bo_framework 函数时, bo_framework.py 必须有同名函数
 
@@ -803,6 +862,7 @@ def main():
         ("V8q", "bo_framework import 一致性 (V007.43 P0 BUG-FIX)", check_v8q_zip_bo_framework_import_consistency),
         ("V8s", "deploy_bundle/ 完整 (V007.44 P0 部署失职 BUG-FIX)", check_v8s_deploy_bundle_completeness),
         ("V8t", "zip 含 backend 启动最低 API 路径 (V007.44 P0)", check_v8t_zip_min_endpoint_coverage),
+        ("V8u", "audit_logs schema 完整性 (V007.45 P0 BUG-FIX)", check_v8u_zip_audit_logs_schema_completeness),
         ("V8k", "auto_vacuum 幂等保护 (V007.38 BUG-FIX)", check_v8k_zip_v00738_auto_vacuum_idempotent),
         ("V8l", "acquire_writer 线程锁 (V007.38 BUG-FIX)", check_v8l_zip_v00738_writer_lock),
         ("V8m", "task_scheduler 用 cursor.lastrowid (V007.38 BUG-FIX)", check_v8m_zip_v00738_no_select_last_insert_rowid),
