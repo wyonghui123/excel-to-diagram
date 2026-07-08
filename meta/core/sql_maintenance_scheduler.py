@@ -82,7 +82,15 @@ class MaintenanceScheduler:
             return {"action": "integrity_check", "result": result}
 
         def _checkpoint():
-            ds.checkpoint("TRUNCATE")
+            # [V007.40 BUG-FIX] TRUNCATE → PASSIVE
+            # 背景: maintenance scheduler 每 300 秒执行一次 checkpoint.
+            #       V007.39 修了 sql_write_queue / server.py / db_admin_api 的 checkpoint 调用,
+            #       但漏了 maintenance scheduler 的默认 _checkpoint 任务.
+            #       TRUNCATE 截断 WAL 文件 → 读连接 mmap 视图失效 → disk I/O error.
+            #       这是 5 分钟一次的定时炸弹, 周期性触发 I/O error.
+            # 修法: 改 PASSIVE, 不阻塞读, 不截断 WAL.
+            #       如果需要彻底清理 WAL, 由 admin API 显式触发 RESTART (低峰期 2-5 点).
+            ds.checkpoint("PASSIVE")
             return {"action": "checkpoint", "status": "completed"}
 
         def _record_db_size():

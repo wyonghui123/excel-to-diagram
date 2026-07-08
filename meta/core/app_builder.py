@@ -702,7 +702,14 @@ def _init_audit_service(ds, db_path):
 
         # [FR-008/009] 性能索引 v3: relationships + audit_logs 覆盖索引
         import sqlite3
-        conn = sqlite3.connect(db_path)
+        # [V007.40 BUG-FIX] 加 timeout=30.0 + check_same_thread=False
+        #   + PRAGMA busy_timeout=30000 跟 sql_connection_pool 一致
+        conn = sqlite3.connect(
+            db_path,
+            timeout=30.0,
+            check_same_thread=False,
+        )
+        conn.execute("PRAGMA busy_timeout = 30000")
         try:
             from meta.migrations.add_performance_indexes_v3 import create_indexes as create_v3_indexes
             create_v3_indexes(conn)

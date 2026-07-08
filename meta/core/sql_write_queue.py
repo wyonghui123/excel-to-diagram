@@ -144,11 +144,42 @@ class WriteQueue:
         logger.info("WriteQueue started")
 
     def stop(self, timeout: float = 10.0):
-        self._running = False
+        # [V007.40 BUG-FIX] drain in-flight operations before stopping
+        # 背景: V007.39 之前, stop() 直接 _running=False + put None + join,
+        #       正在执行的 op 会被中断 → 数据丢失 + future 永久 hang.
+        # 修法: 先 flush() 等待当前 op 完成, 再 _running=False + drain queue.
+        #       超时后强制退出 (避免 hang 死等).
+        logger.info("WriteQueue stopping: waiting for in-flight ops (timeout=%.1fs)", timeout)
         try:
-            self._queue.put_nowait(None)
-        except Exception:
-            pass
+            # 1. flush 等待 in-flight 完成
+            self.flush(timeout=timeout)
+        except Exception as e:
+            logger.warning("WriteQueue flush during stop failed: %s", e)
+        # 2. 停止 _write_loop
+        self._running = False
+        # 3. 排空剩余 queue (失败的 op 设 exception, 防止 caller hang)
+        drained = 0
+        failed = 0
+        while True:
+            try:
+                op = self._queue.get_nowait()
+            except Empty:
+                break
+            if op is None:
+                continue
+            # 设置 exception 让 future 不要永久 hang
+            if not op.future.done():
+                op.future.set_exception(
+                    RuntimeError("WriteQueue stopped before operation completed")
+                )
+                failed += 1
+            drained += 1
+        if drained or failed:
+            logger.info(
+                "WriteQueue stop: drained %d ops, %d set to failed state",
+                drained, failed,
+            )
+        # 4. join thread
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=timeout)
         logger.info("WriteQueue stopped")

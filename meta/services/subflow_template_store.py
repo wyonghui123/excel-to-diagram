@@ -23,6 +23,22 @@ logger = logging.getLogger(__name__)
 _lock = threading.Lock()
 
 
+# [V007.40 BUG-FIX] 统一直接连接 helper
+# 背景: subflow_template_store.py 4 处 sqlite3.connect() 都没有 timeout, 撞
+#       lock / disk I/O error 时直接 5s 抛错, template CRUD 失败.
+# 修法: 集中到 _safe_connect() helper, 统一加 timeout=30.0 + check_same_thread=False
+#       + PRAGMA busy_timeout=30000, 跟 sql_connection_pool 一致.
+def _safe_connect(db_path: str) -> sqlite3.Connection:
+    """[V007.40] 统一的 sqlite3 直接连接 helper"""
+    conn = sqlite3.connect(
+        db_path,
+        timeout=30.0,
+        check_same_thread=False,
+    )
+    conn.execute("PRAGMA busy_timeout = 30000")
+    return conn
+
+
 class SubflowTemplateStore:
     _cache: Dict[str, List[Dict[str, Any]]] = {}
     _cache_meta: Dict[str, Dict[str, Any]] = {}  # name -> {description, created_at, ...}
@@ -38,7 +54,8 @@ class SubflowTemplateStore:
     def _ensure_table(cls):
         """确保 subflow_templates 表存在"""
         try:
-            conn = sqlite3.connect(cls._get_db_path())
+            # [V007.40 BUG-FIX] 用 _safe_connect() 统一加 timeout
+            conn = _safe_connect(cls._get_db_path())
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS subflow_templates (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -61,7 +78,8 @@ class SubflowTemplateStore:
         """从 DB 加载到内存"""
         cls._ensure_table()
         try:
-            conn = sqlite3.connect(cls._get_db_path())
+            # [V007.40 BUG-FIX] 用 _safe_connect() 统一加 timeout
+            conn = _safe_connect(cls._get_db_path())
             rows = conn.execute(
                 "SELECT name, description, steps_json, created_at FROM subflow_templates WHERE is_active=1"
             ).fetchall()
@@ -110,7 +128,8 @@ class SubflowTemplateStore:
 
             try:
                 cls._ensure_table()
-                conn = sqlite3.connect(cls._get_db_path())
+                # [V007.40 BUG-FIX] 用 _safe_connect() 统一加 timeout
+                conn = _safe_connect(cls._get_db_path())
                 # 存在则更新, 不存在则插入
                 cursor = conn.execute(
                     "SELECT id FROM subflow_templates WHERE name = ?", [name]
@@ -150,7 +169,8 @@ class SubflowTemplateStore:
         with _lock:
             try:
                 cls._ensure_table()
-                conn = sqlite3.connect(cls._get_db_path())
+                # [V007.40 BUG-FIX] 用 _safe_connect() 统一加 timeout
+                conn = _safe_connect(cls._get_db_path())
                 cursor = conn.execute("SELECT id FROM subflow_templates WHERE name = ?", [name])
                 if not cursor.fetchone():
                     conn.close()

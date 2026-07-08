@@ -7,11 +7,21 @@
 from flask import Blueprint, request, jsonify
 import os
 import json
+import logging
+import sqlite3
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 filter_variant_bp = Blueprint('filter_variant', __name__, url_prefix='/api/v1/filter-variants')
 
 _db_path = None
+# [V007.40 BUG-FIX] _init_table 一次性执行标志
+# 背景: before_request 每次请求都调 _init_table → CREATE TABLE IF NOT EXISTS.
+#       虽然 IF NOT EXISTS 是幂等的, 但 db 仍会执行 schema check + 写 db header
+#       → 高频请求场景加重 mmap 视图失效风险.
+# 修法: 加 _table_initialized 标志, 首次初始化后不再重复执行.
+_table_initialized = False
 
 
 def _get_db_path():
@@ -34,10 +44,17 @@ def _is_admin():
 
 
 def _execute_query(sql, params=(), fetch=True):
-    """执行数据库查询"""
-    import sqlite3
+    """执行数据库查询
+
+    [V007.40 BUG-FIX] 加 timeout + PRAGMA busy_timeout
+    背景: 这是高频 API 路径, _execute_query 在每个 list/save/delete 请求都调.
+          之前 sqlite3.connect() 默认 timeout=5s, 撞 lock / disk I/O error 时
+          会失败 → 每次请求 500, 高峰期会风暴式重试.
+    修法: timeout=30.0 + PRAGMA busy_timeout=30000, 跟 sql_connection_pool 一致.
+    """
     db_path = _get_db_path()
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=30.0, check_same_thread=False)
+    conn.execute("PRAGMA busy_timeout = 30000")
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     try:
@@ -53,7 +70,16 @@ def _execute_query(sql, params=(), fetch=True):
 
 
 def _init_table():
-    """初始化过滤变体表"""
+    """初始化过滤变体表
+
+    [V007.40 BUG-FIX] 改成一次性执行
+    背景: before_request 每次请求都调, 触发 CREATE TABLE IF NOT EXISTS.
+          IF NOT EXISTS 是幂等的, 但 db 仍会执行 schema check + 写 db header.
+    修法: 加 _table_initialized 标志, 首次初始化后不再重复执行.
+    """
+    global _table_initialized
+    if _table_initialized:
+        return
     sql = '''
     CREATE TABLE IF NOT EXISTS filter_variants (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,9 +94,11 @@ def _init_table():
     )
     '''
     _execute_query(sql, fetch=False)
-    
+
     _execute_query('CREATE INDEX IF NOT EXISTS idx_fv_user_obj ON filter_variants(user_id, object_type)', fetch=False)
     _execute_query('CREATE INDEX IF NOT EXISTS idx_fv_shared ON filter_variants(is_shared, object_type)', fetch=False)
+
+    _table_initialized = True
 
 
 @filter_variant_bp.before_request

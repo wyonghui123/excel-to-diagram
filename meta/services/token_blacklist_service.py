@@ -35,7 +35,22 @@ class TokenBlacklistService:
         self._ensure_table()
 
     def _get_connection(self):
-        return sqlite3.connect(self._db_path, check_same_thread=False)
+        # [V007.40 BUG-FIX] 加 timeout + check_same_thread=False + PRAGMA busy_timeout
+        # 背景: 这是最高频热路径, 每条 API 请求都调 is_blacklisted().
+        #       之前 sqlite3.connect() 默认 timeout=5s, 撞 lock / disk I/O error 时
+        #       会失败 → 每次请求 500, 高峰期会风暴式重试, 加重 db 压力.
+        # 修法:
+        #   - timeout=30.0 跟其他模块一致 (sql_connection_pool.py db_timeout=30.0)
+        #   - check_same_thread=False 允许多线程共享 (Flask threaded mode 子线程)
+        #   - PRAGMA busy_timeout=30000 撞锁等 30s, 让 write_queue retry 接管短撞锁
+        #   - 用 context manager 风格, 调用方负责 close (避免连接泄漏)
+        conn = sqlite3.connect(
+            self._db_path,
+            timeout=30.0,
+            check_same_thread=False,
+        )
+        conn.execute("PRAGMA busy_timeout = 30000")
+        return conn
 
     def _ensure_table(self):
         conn = self._get_connection()
@@ -78,20 +93,54 @@ class TokenBlacklistService:
             conn.close()
 
     def is_blacklisted(self, token: str) -> bool:
-        try:
-            self._cleanup_expired()
-            token_hash = self._hash_token(token)
-            conn = self._get_connection()
+        # [V007.40 BUG-FIX] 包裹 retry 处理 disk I/O error
+        # 背景: 这是最高频热路径, 每条 API 请求都调.
+        #       _get_connection 撞 disk I/O / locked 时, 直接 5xx 返回 → 用户体验差.
+        # 修法: 5 次 retry + 指数 backoff, 跟 V007.34 read 路径一致.
+        import time as _time
+        import random as _random
+        last_err = None
+        for attempt in range(5):
             try:
-                cursor = conn.execute(
-                    'SELECT 1 FROM token_blacklist WHERE token_hash = ?',
-                    (token_hash,)
+                self._cleanup_expired()
+                token_hash = self._hash_token(token)
+                conn = self._get_connection()
+                try:
+                    cursor = conn.execute(
+                        'SELECT 1 FROM token_blacklist WHERE token_hash = ?',
+                        (token_hash,)
+                    )
+                    return cursor.fetchone() is not None
+                finally:
+                    conn.close()
+            except Exception as e:
+                last_err = e
+                err_str = str(e).lower()
+                is_retryable = (
+                    'disk i/o' in err_str or
+                    'database is locked' in err_str or
+                    'database is busy' in err_str
                 )
-                return cursor.fetchone() is not None
-            finally:
-                conn.close()
-        except Exception:
-            return False
+                if not is_retryable:
+                    # [V007.40] 不可重试错误: 降级为"未黑名单"(不要 500)
+                    logger.warning(
+                        "[V007.40] is_blacklisted non-retryable error: %s | "
+                        "fallback to False (not blacklisted)", e
+                    )
+                    return False
+                if attempt < 4:
+                    delay = 0.05 * (2 ** attempt) + _random.uniform(0, 0.02)
+                    logger.warning(
+                        "[V007.40] is_blacklisted retry %d/5 sleep %.3fs: %s",
+                        attempt + 1, 5, delay, e
+                    )
+                    _time.sleep(delay)
+                    continue
+        # 重试耗尽: 降级为"未黑名单", 避免 500
+        logger.error(
+            "[V007.40] is_blacklisted retry exhausted: %s | fallback to False", last_err
+        )
+        return False
 
     @classmethod
     def reset(cls):

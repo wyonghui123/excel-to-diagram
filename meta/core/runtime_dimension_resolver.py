@@ -216,7 +216,17 @@ class RuntimeDimensionResolver:
                 # [FIX v007 2026-07-05] check_same_thread=False 允许多线程共享连接
                 #   背景: Flask threaded mode 子线程 (Thread-2) 调 sqlite3 默认检查
                 #         创建线程必须 = 连接线程, 否则 ProgrammingError
-                conn = sqlite3.connect(self._db_path, check_same_thread=False)
+                # [V007.40 BUG-FIX] 加 timeout=30.0 + PRAGMA busy_timeout=30000
+                #   背景: V007.40 第4次全面检查遗漏点. _try_resolve_upward 之前只加了
+                #         check_same_thread=False, 没加 timeout / busy_timeout. 撞 lock /
+                #         disk I/O error 时仍会 5s 抛错, 数据权限解析失败 → 上层 5xx.
+                #   修法: 跟 _get_user_roles / _get_role_dim_scopes 保持一致.
+                conn = sqlite3.connect(
+                    self._db_path,
+                    timeout=30.0,
+                    check_same_thread=False,
+                )
+                conn.execute("PRAGMA busy_timeout = 30000")
                 cursor = conn.cursor()
                 ph = ','.join('?' * len(current_ids))
                 cursor.execute(
@@ -302,7 +312,13 @@ class RuntimeDimensionResolver:
         """获取用户的角色 ID 列表"""
         try:
             # [FIX v007 2026-07-05] check_same_thread=False
-            conn = sqlite3.connect(self._db_path, check_same_thread=False)
+            # [V007.40 BUG-FIX] 加 timeout=30.0 + PRAGMA busy_timeout=30000
+            conn = sqlite3.connect(
+                self._db_path,
+                timeout=30.0,
+                check_same_thread=False,
+            )
+            conn.execute("PRAGMA busy_timeout = 30000")
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT DISTINCT gr.role_id
@@ -323,7 +339,13 @@ class RuntimeDimensionResolver:
             return []
         try:
             # [FIX v007 2026-07-05] check_same_thread=False
-            conn = sqlite3.connect(self._db_path, check_same_thread=False)
+            # [V007.40 BUG-FIX] 加 timeout=30.0 + PRAGMA busy_timeout=30000
+            conn = sqlite3.connect(
+                self._db_path,
+                timeout=30.0,
+                check_same_thread=False,
+            )
+            conn.execute("PRAGMA busy_timeout = 30000")
             cursor = conn.cursor()
             placeholders = ','.join('?' * len(role_ids))
             cursor.execute(f"""

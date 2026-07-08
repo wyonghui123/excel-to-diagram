@@ -66,19 +66,29 @@ def audit_export_handler(params: Dict[str, Any], context: Dict[str, Any]) -> 'Ac
     # 查数据
     try:
         import sqlite3
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.execute(
-            f"""SELECT id, object_type, object_id, action, field_name, old_value, new_value,
-                       user_id, user_name, ip_address, created_at
-                FROM audit_logs
-                WHERE {where_clause}
-                ORDER BY created_at DESC
-                LIMIT 10000""",
-            sql_params
-        )
-        rows = cursor.fetchall()
-        conn.close()
+        # [V007.40 BUG-FIX] 用 _safe_connect() 统一加 timeout + context manager
+        # 背景: audit export 是 V007.37 高频触发 disk I/O error 的场景.
+        #       之前 sqlite3.connect(db_path) 默认 timeout=5s, 撞 lock / disk I/O
+        #       时直接失败 → 整个 export 500, 用户体验差.
+        # 修法: timeout=30.0 + check_same_thread=False + PRAGMA busy_timeout=30000
+        #       + 用 with 自动 close (避免连接泄漏).
+        with sqlite3.connect(
+            db_path,
+            timeout=30.0,
+            check_same_thread=False,
+        ) as conn:
+            conn.execute("PRAGMA busy_timeout = 30000")
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                f"""SELECT id, object_type, object_id, action, field_name, old_value, new_value,
+                           user_id, user_name, ip_address, created_at
+                    FROM audit_logs
+                    WHERE {where_clause}
+                    ORDER BY created_at DESC
+                    LIMIT 10000""",
+                sql_params
+            )
+            rows = cursor.fetchall()
     except Exception as e:
         logger.exception(f"[audit.export] query failed: {e}")
         return ActionResult(success=False, data=None, message=f'查询失败: {e}')

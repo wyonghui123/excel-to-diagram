@@ -47,6 +47,9 @@ OBS_COUNTERS = {
     'orphan_app_state_pollution': 'v007_15_orphan_app_state_pollution_total',
     # state
     'runtime_state': 'v007_15_runtime_state_info',
+    # [V007.24] DataSource 缓存 (fd 泄漏检测)
+    'pool_init_count': 'v007_24_pool_init_count',
+    'pool_init_leak_warning': 'v007_24_pool_init_leak_warning_total',
 }
 
 

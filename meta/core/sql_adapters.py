@@ -683,7 +683,11 @@ class SQLiteAdapter(SQLDataSource):
         )
         queue_config = WriteQueueConfig(
             checkpoint_interval=kwargs.get("checkpoint_interval", 50),
-            checkpoint_mode=kwargs.get("checkpoint_mode", "TRUNCATE"),
+            # [V007.40 BUG-FIX] 默认 TRUNCATE → PASSIVE
+            # 背景: V007.39 修了 sql_config.py 的 WriteQueueConfig 默认值,
+            #       但 sql_adapters.py 这里又显式传 "TRUNCATE" 覆盖了默认值.
+            #       修法: 改 PASSIVE, 与 sql_config.py 默认值一致.
+            checkpoint_mode=kwargs.get("checkpoint_mode", "PASSIVE"),
         )
 
         # [DECORATIVE] v3.13: 池初始化失败时, 直接 raise (不再 fallback to legacy)
@@ -865,7 +869,17 @@ class SQLiteAdapter(SQLDataSource):
         import sqlite3 as _sqlite3
         if not self._db_path:
             raise RuntimeError("SQL adapter not connected; call connect() first")
-        conn = _sqlite3.connect(self._db_path)
+        # [V007.40 BUG-FIX] 加 timeout=30.0 + check_same_thread=False
+        #   + PRAGMA busy_timeout=30000 跟 sql_connection_pool 一致
+        #   背景: 第4次全面检查发现 fresh_connection() 漏修, 默认 timeout=5s
+        #         撞 lock / disk I/O error 时 5s 抛错, 调用方 5xx.
+        #   修法: 跟 pool 路径保持一致.
+        conn = _sqlite3.connect(
+            self._db_path,
+            timeout=30.0,
+            check_same_thread=False,
+        )
+        conn.execute("PRAGMA busy_timeout = 30000")
         conn.row_factory = _sqlite3.Row
         try:
             yield conn
@@ -1000,8 +1014,13 @@ class SQLiteAdapter(SQLDataSource):
         elif self._connection:
             self._connection.execute(f"RELEASE SAVEPOINT {savepoint_name}")
 
-    def checkpoint(self, mode: str = "TRUNCATE") -> None:
-        """执行 WAL checkpoint ([DECORATIVE] v3.13: 池唯一路径)"""
+    def checkpoint(self, mode: str = "PASSIVE") -> None:
+        """执行 WAL checkpoint ([DECORATIVE] v3.13: 池唯一路径)
+
+        [V007.40 BUG-FIX] 默认 TRUNCATE → PASSIVE
+        背景: 这是另一处顶层 checkpoint 入口 (写连接 adapter, line 1007),
+              V007.39 漏修. 改 PASSIVE 跟 sql_adapters.py:1003 保持一致.
+        """
         if self._write_queue:
             self._write_queue.checkpoint(mode)
 

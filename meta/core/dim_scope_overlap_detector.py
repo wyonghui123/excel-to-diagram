@@ -158,7 +158,16 @@ class DimScopeOverlapDetector:
     ) -> List[Dict[str, Any]]:
         """获取角色的管理维度范围"""
         try:
-            conn = sqlite3.connect(self._db_path)
+            # [V007.40 BUG-FIX] 加 timeout=30.0 + check_same_thread=False
+            #   + PRAGMA busy_timeout=30000 跟 sql_connection_pool 一致
+            #   背景: 第4次全面检查发现 _get_dim_scopes 漏修, 之前只修了
+            #         _get_condition_rules. 撞 lock / disk I/O error 时 5s 抛错.
+            conn = sqlite3.connect(
+                self._db_path,
+                timeout=30.0,
+                check_same_thread=False,
+            )
+            conn.execute("PRAGMA busy_timeout = 30000")
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT dimension_code, dimension_values, inherit_children,
@@ -188,7 +197,14 @@ class DimScopeOverlapDetector:
     ) -> List[Dict[str, Any]]:
         """获取角色的条件规则"""
         try:
-            conn = sqlite3.connect(self._db_path)
+            # [V007.40 BUG-FIX] 加 timeout=30.0 + check_same_thread=False
+            #   + PRAGMA busy_timeout=30000 跟 sql_connection_pool 一致
+            conn = sqlite3.connect(
+                self._db_path,
+                timeout=30.0,
+                check_same_thread=False,
+            )
+            conn.execute("PRAGMA busy_timeout = 30000")
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT resource_type, condition, permission_level, is_denied,
