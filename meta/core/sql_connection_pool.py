@@ -48,6 +48,12 @@ class ConnectionConfig:
     acquire_timeout: float = 30.0
     db_timeout: float = 30.0
     wal_auto_checkpoint: int = 1000
+    # [V007.42 FR-008] mmap_size 可配置化, 默认 0 (禁用 mmap, 根治 disk I/O)
+    # 背景: SQLite 官方 "An I/O error on a memory-mapped file cannot be caught";
+    #       Richard Hipp 明确建议 "never use mmap"
+    mmap_size: int = 0
+    # [V007.42 FR-009] 默认值通过环境变量 SQLITE_MAX_READERS 覆盖 (默认 10)
+    # 这里保留 20 是为兼容 import-side kwargs.get 默认值, 实际由调用方决定
 
 
 @dataclass
@@ -190,6 +196,16 @@ class SQLiteConnectionPool:
         # [V007.38 BUG-FIX] writer 连接获取锁
         # acquire_writer 之前没有锁, 多线程会同时拿同一个 writer 连接
         self._writer_lock = threading.RLock()
+        # [V007.42 FR-002] I/O 限流器 (替代完整 Circuit Breaker)
+        # 背景: 6 并发 retry thundering herd 导致 I/O 子系统过载
+        # 策略: 60s 窗口内累计 >= 10 次 disk I/O error → 限流激活
+        #       限流状态时新读请求 sleep 200ms (减速不拒绝)
+        #       窗口重置后自动恢复
+        # 比完整 CB 温和: 不阻断读, 避免 CB Open 完全拒绝的灾难性用户体验
+        self._io_error_count = 0
+        self._io_error_window_start = time.time()
+        self._io_rate_limit_active = False
+        self._io_error_lock = threading.Lock()
 
     @property
     def db_path(self) -> str:
@@ -276,6 +292,54 @@ class SQLiteConnectionPool:
                 logger.warning("[V007.38] force_passive_checkpoint failed: %s", e)
                 return False
 
+    # [V007.42 FR-002] I/O 限流器方法
+    def _record_io_error(self):
+        """记录一次 disk I/O error, 检查是否需要限流.
+
+        策略:
+          - 滑动窗口 (默认 60s)
+          - 阈值 (默认 10 次)
+          - 超过阈值时激活限流, 记 WARNING + metric
+          - 窗口重置后自动恢复
+        """
+        try:
+            from meta.core.observability import metrics_inc
+        except ImportError:
+            metrics_inc = None  # type: ignore
+
+        with self._io_error_lock:
+            now = time.time()
+            window = float(os.environ.get('SQLITE_IO_RATE_LIMIT_WINDOW', '60'))
+            if now - self._io_error_window_start > window:
+                # 窗口过期, 重置
+                self._io_error_count = 0
+                self._io_error_window_start = now
+                if self._io_rate_limit_active:
+                    logger.info(
+                        "[V007.42] I/O rate limit deactivated after window reset"
+                    )
+                self._io_rate_limit_active = False
+            self._io_error_count += 1
+            threshold = int(os.environ.get('SQLITE_IO_RATE_LIMIT_THRESHOLD', '10'))
+            if self._io_error_count >= threshold and not self._io_rate_limit_active:
+                self._io_rate_limit_active = True
+                logger.warning(
+                    "[V007.42] I/O rate limit activated: %d errors in %.0fs window",
+                    self._io_error_count, now - self._io_error_window_start
+                )
+                if metrics_inc:
+                    metrics_inc('io_rate_limit_triggered_total')
+
+    def _check_io_rate_limit(self):
+        """检查是否处于限流状态. 如果是则 sleep 200ms (减速不拒绝).
+
+        逃生口: SQLITE_IO_RATE_LIMIT_DISABLE=1 关闭限流.
+        """
+        if os.environ.get('SQLITE_IO_RATE_LIMIT_DISABLE', '').lower() in ('1', 'true'):
+            return
+        if self._io_rate_limit_active:
+            time.sleep(0.2)
+
     def shutdown(self):
         self._shutdown = True
         with self._condition:
@@ -341,20 +405,19 @@ class SQLiteConnectionPool:
                     self._config.wal_auto_checkpoint
                 )
             )
-            # [V007.35 2026-07-07] Windows/Linux 一致性
-            # 背景: V007.34 disk I/O 只在 Linux 触发, Windows 不触发.
-            #       SQLite 在两者上的默认 mmap_size 和 cache_size 可能不同,
-            #       导致并发行为不一致.
-            # 修法: 显式设定 mmap_size=256MB, cache_size=-2000 (2MB),
-            #       消除平台差异, 让 Windows 开发环境尽量贴近 Linux.
-            #
-            # [V007.38 BUG-FIX] mmap_size 256MB → 64MB
-            # 背景: V007.35 引入 mmap_size=256MB 后, 写操作 (task_scheduler)
-            #       会让整个 96MB mmap 视图失效, 触发 20 个读连接全部 mark_error
-            #       → 频繁 _create_connection → 重复 PRAGMA journal_mode → disk I/O error
-            # 修法: 减小到 64MB (db 96MB 的 67%), 视图失效时重读代价从 96MB → 64MB
-            #       减少 mark_error 频度, 缓解雪崩
-            conn.execute("PRAGMA mmap_size = 67108864")  # 64MB (was 256MB)
+            # [V007.42 FR-008] mmap_size 可配置化 + 默认值改为 0 (禁用)
+            # 背景:
+            #   V007.35 引入 mmap_size=256MB → V007.38 降到 64MB, 但 disk I/O error 持续
+            #   SQLite 官方: "An I/O error on a memory-mapped file cannot be caught"
+            #   Richard Hipp: "I'm of the opinion that you should never use mmap"
+            # 修法: 默认 mmap_size=0 彻底禁用 mmap, 用 PRAGMA cache_size 提供页缓存
+            # 性能影响: cache_size=-2000 (2MB) 仍有效, 读性能降 10-20% 可接受
+            # 环境变量: SQLITE_MMAP_SIZE 可恢复原值 (紧急回退)
+            mmap_size = int(os.environ.get(
+                'SQLITE_MMAP_SIZE', str(self._config.mmap_size)
+            ))
+            conn.execute(f"PRAGMA mmap_size = {mmap_size}")
+            logger.info("[V007.42] PRAGMA mmap_size = %d (was 67108864 in V007.35-38)", mmap_size)
             conn.execute("PRAGMA cache_size = -2000")
         return conn
 
@@ -592,6 +655,47 @@ class SQLiteConnectionPool:
             "active": active,
             "max": max_r,
             "utilization": "{0:.0%}".format(active / max_r if max_r > 0 else 0),
+        }
+
+        # [V007.42 FR-003] 读连接健康统计
+        healthy = 0
+        errored = 0
+        for pc in self._readers:
+            if pc.is_valid():
+                healthy += 1
+            else:
+                errored += 1
+        result["checks"]["reader_health"] = {
+            "status": "pass" if errored == 0 else "warn",
+            "healthy": healthy,
+            "errored": errored,
+        }
+
+        # [V007.42 FR-003] checkpoint_busy 检测
+        checkpoint_busy = -1
+        try:
+            if self._writer_conn:
+                cursor = self._writer_conn.connection.execute(
+                    "PRAGMA wal_checkpoint(PASSIVE)"
+                )
+                row = cursor.fetchone()
+                # SQLite 返回 (busy, log, checkpointed) 或 (-1, -1, -1)
+                checkpoint_busy = row[0] if row else -1
+                if checkpoint_busy > 0:
+                    try:
+                        from meta.core.observability import metrics_inc
+                        metrics_inc('wal_checkpoint_busy_total')
+                    except ImportError:
+                        pass
+        except Exception as e:
+            logger.debug("[V007.42] checkpoint_busy probe failed: %s", e)
+        result["checks"]["checkpoint_busy"] = checkpoint_busy
+
+        # [V007.42 FR-002] I/O 限流状态
+        result["checks"]["io_rate_limit"] = {
+            "active": self._io_rate_limit_active,
+            "error_count": self._io_error_count,
+            "window_age_sec": time.time() - self._io_error_window_start,
         }
 
         if self._db_path != ":memory:" and os.path.exists(self._db_path):

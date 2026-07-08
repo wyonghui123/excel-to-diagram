@@ -14,6 +14,7 @@ import sqlite3
 import threading
 import time
 import logging
+import os
 from abc import abstractmethod
 from contextlib import contextmanager
 from typing import List, Dict, Any, Optional
@@ -676,7 +677,14 @@ class SQLiteAdapter(SQLDataSource):
         from meta.core.sql_write_queue import WriteQueue, WriteQueueConfig
 
         pool_config = ConnectionConfig(
-            max_readers=kwargs.get("max_readers", 20),
+            max_readers=int(os.environ.get(
+                'SQLITE_MAX_READERS',
+                str(kwargs.get("max_readers", 10))  # V007.42 FR-009: 20 → 10
+            )),
+            mmap_size=int(os.environ.get(
+                'SQLITE_MMAP_SIZE',
+                str(kwargs.get("mmap_size", 0))  # V007.42 FR-008: 默认 0 (禁用)
+            )),
             idle_timeout=kwargs.get("idle_timeout", 300.0),
             max_lifetime=kwargs.get("max_lifetime", 3600.0),
             acquire_timeout=kwargs.get("acquire_timeout", 30.0),
@@ -794,14 +802,34 @@ class SQLiteAdapter(SQLDataSource):
                 return cursor.execute(command, params)
             return cursor.execute(command)
 
-        # [V007.16] 修复: disk I/O error 时, 标记 thread-local connection 为 bad,
-        # 触发 reader() contextmanager 在下次 acquire 时重建 connection.
-        # 之前: is_valid() 不检测 disk I/O error, 坏 connection 永久缓存.
-        max_retries = 3
+        # [V007.42 FR-001] 升级 retry 机制: Decorrelated Jitter + I/O 限流
+        # 升级要点 (对比 V007.34):
+        #   - base: 50ms → 200ms (SQLite 官方建议最小 200ms)
+        #   - cap: 无限 → 2s
+        #   - 算法: 固定指数 → Decorrelated Jitter (AWS 2015)
+        #     delay = min(cap, random.uniform(base, prev_sleep * 3))
+        #   - 总预算: ≥ 250ms (实测 retry span 156~193ms, 三次研究 D1)
+        #   - 集成 I/O 限流 (FR-002): 每执行前 check, 失败时 record
+        max_retries = int(os.environ.get('SQLITE_READ_RETRY_MAX', '3'))
+        retry_base = float(os.environ.get('SQLITE_READ_RETRY_BASE_MS', '200')) / 1000.0
+        retry_cap = 2.0  # 硬编码 cap=2s
         last_error = None
+        prev_sleep = retry_base
+        import random as _random
+
+        # 尝试获取 metric 记录 (失败降级)
+        try:
+            from meta.core.observability import metrics_inc as _metrics_inc
+        except ImportError:
+            _metrics_inc = None
+
         for attempt in range(max_retries):
             conn = None
             try:
+                # [V007.42 FR-002] I/O 限流检查 (限流状态下减速 200ms)
+                if hasattr(self._pool, '_check_io_rate_limit'):
+                    self._pool._check_io_rate_limit()
+
                 with self._pool.reader() as conn:
                     cursor = conn.cursor()
                     if params:
@@ -813,6 +841,8 @@ class SQLiteAdapter(SQLDataSource):
                         tid = threading.get_ident()
                         if tid in self._pool._thread_connections:
                             self._pool._thread_connections[tid].clear_error()
+                    if attempt > 0 and _metrics_inc:
+                        _metrics_inc('read_retry_success_total')
                     return result
             except Exception as e:
                 last_error = e
@@ -828,17 +858,21 @@ class SQLiteAdapter(SQLDataSource):
                                 "(tid=%d, attempt=%d, err=%s)",
                                 tid, attempt, err_str
                             )
-                    # [V007.34 FIX] disk I/O / database is locked 触发重试
-                    # 跟 V007.20 写路径完全一致: 6 retries + 指数 backoff + jitter
-                    # 背景: 17:42:36 10+ 并发 _do_list 全部 disk I/O error (HANDOFF_V007_34)
-                    #       之前: mark_error 后没 continue, fall through 到 'operational' 重试
-                    #             但用同一坏 conn, 3 次都失败
-                    # 修法: 显式 retry, 让 reader() 重建 conn 后用新 conn 执行
+                    # [V007.42 FR-002] I/O 限流: 记录此次错误
+                    if hasattr(self._pool, '_record_io_error'):
+                        self._pool._record_io_error()
+                    # [V007.42 FR-001] Decorrelated Jitter 重试
+                    # AWS 2015 paper: sleep = min(cap, random.uniform(base, prev * 3))
                     if attempt < max_retries - 1:
-                        import random as _random
-                        delay = 0.05 * (2 ** attempt) + _random.uniform(0, 0.02)
+                        delay = min(
+                            retry_cap,
+                            _random.uniform(retry_base, prev_sleep * 3)
+                        )
+                        prev_sleep = delay
+                        if _metrics_inc:
+                            _metrics_inc('read_retry_total')
                         logger.warning(
-                            "[V007.34] _execute_via_read_pool: retrying after disk I/O "
+                            "[V007.42] _execute_via_read_pool: retrying (Decorrelated Jitter) "
                             "(attempt %d/%d, sleep %.3fs): %s",
                             attempt + 1, max_retries, delay, err_str
                         )

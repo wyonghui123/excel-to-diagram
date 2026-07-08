@@ -55,6 +55,25 @@ OBS_COUNTERS = {
     'safe_connect_write_total': 'v007_41_safe_connect_write_total',
     'safe_connect_write_no_tx_total': 'v007_41_safe_connect_write_no_tx_total',
     'safe_connect_tx_state_unknown_total': 'v007_41_safe_connect_tx_state_unknown_total',
+    # [V007.42] Disk I/O 系统性修复 metrics
+    # FR-001: read_retry
+    'read_retry_total': 'v007_42_read_retry_total',
+    'read_retry_success_total': 'v007_42_read_retry_success_total',
+    # FR-002: I/O 限流器
+    'io_rate_limit_triggered_total': 'v007_42_io_rate_limit_triggered_total',
+    # FR-003: WAL checkpoint 监控
+    'wal_checkpoint_busy_total': 'v007_42_wal_checkpoint_busy_total',
+    # FR-004: 读连接池缩容
+    'pool_shrink_total': 'v007_42_pool_shrink_total',
+    'pool_expand_total': 'v007_42_pool_expand_total',
+    # 读连接健康
+    'reader_errored_total': 'v007_42_reader_errored_total',
+    # FR-006: 长事务
+    'long_transaction_total': 'v007_42_long_transaction_total',
+    # FR-011: SQLite 版本基线
+    'sqlite_version_compliant': 'v007_42_sqlite_version_compliant',
+    # FR-012: 心跳检查
+    'heartbeat_check_failed_total': 'v007_42_heartbeat_check_failed_total',
 }
 
 
