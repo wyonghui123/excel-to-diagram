@@ -68,22 +68,26 @@ class RoleIntentDAO:
     ) -> bool:
         """授予 Intent 权限
 
+        [V007.41 BUG-FIX] 调用方必须在外层事务中:
+            with bo_framework.transaction() as txn:
+                dao.grant(role_id=..., bo_id=..., action_name=...)
+            # txn 退出时统一 commit; dao 不再自己 commit
+
         Returns:
             True if 成功
         """
         params_hash = self.make_parameters_hash(parameters)
         try:
             # [V007.41 BUG-FIX] 用 safe_connect_for_write 统一 L0 写入口
-            # Phase 2: 用 force_no_tx 保持 V007.40 简单语义
-            # Phase 3: 调用方应改用 bo_framework.transaction() 包裹
-            with safe_connect_for_write(self._db_path, force_no_tx=True) as conn:
+            # 不再 force_no_tx=True: 强制调用方在外层事务中, 根治 silent partial commit
+            with safe_connect_for_write(self._db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     INSERT OR REPLACE INTO role_intents
                     (role_id, bo_id, action_name, parameters_hash, granted, source, updated_at)
                     VALUES (?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)
                 """, (role_id, bo_id, action_name, params_hash, source))
-                conn.commit()
+                # [V007.41] 不再 conn.commit(): 让外层 bo_framework.transaction() 负责
             return True
         except Exception as e:  # noqa: BLE001
             logger.error(f"Failed to grant intent: {e}")
@@ -96,20 +100,21 @@ class RoleIntentDAO:
         action_name: str,
         parameters: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        """拒绝 Intent 权限（grant=0）"""
+        """拒绝 Intent 权限（grant=0）
+
+        [V007.41 BUG-FIX] 调用方必须在外层事务中.
+        """
         params_hash = self.make_parameters_hash(parameters)
         try:
             # [V007.41 BUG-FIX] 用 safe_connect_for_write 统一 L0 写入口
-            # Phase 2: force_no_tx=True 保持 V007.40 语义
-            # Phase 3: 调用方应改用 bo_framework.transaction() 包裹
-            with safe_connect_for_write(self._db_path, force_no_tx=True) as conn:
+            with safe_connect_for_write(self._db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     INSERT OR REPLACE INTO role_intents
                     (role_id, bo_id, action_name, parameters_hash, granted, source, updated_at)
                     VALUES (?, ?, ?, ?, 0, 'manual', CURRENT_TIMESTAMP)
                 """, (role_id, bo_id, action_name, params_hash))
-                conn.commit()
+                # [V007.41] 不再 conn.commit(): 让外层 bo_framework.transaction() 负责
             return True
         except Exception as e:  # noqa: BLE001
             logger.error(f"Failed to deny intent: {e}")
@@ -122,18 +127,21 @@ class RoleIntentDAO:
         action_name: str,
         parameters: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        """撤销 Intent 权限"""
+        """撤销 Intent 权限
+
+        [V007.41 BUG-FIX] 调用方必须在外层事务中.
+        """
         params_hash = self.make_parameters_hash(parameters)
         try:
             # [V007.41 BUG-FIX] 用 safe_connect_for_write 统一 L0 写入口
-            with safe_connect_for_write(self._db_path, force_no_tx=True) as conn:
+            with safe_connect_for_write(self._db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     DELETE FROM role_intents
                     WHERE role_id = ? AND bo_id = ? AND action_name = ?
                       AND parameters_hash = ?
                 """, (role_id, bo_id, action_name, params_hash))
-                conn.commit()
+                # [V007.41] 不再 conn.commit(): 让外层 bo_framework.transaction() 负责
             return True
         except Exception as e:  # noqa: BLE001
             logger.error(f"Failed to revoke intent: {e}")

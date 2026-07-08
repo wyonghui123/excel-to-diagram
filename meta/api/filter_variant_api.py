@@ -11,6 +11,7 @@ import logging
 from datetime import datetime
 
 from meta.core.safe_connect import safe_connect_for_read, safe_connect_for_write
+from meta.core.bo_framework import bo_framework
 
 logger = logging.getLogger(__name__)
 
@@ -216,24 +217,26 @@ def create_variant():
     if is_shared and not _is_admin():
         return jsonify({'success': False, 'message': '只有管理员可以创建共享变体'}), 403
     
-    if is_default:
-        _execute_query(
-            'UPDATE filter_variants SET is_default = 0 WHERE user_id = ? AND object_type = ?',
-            (user_id, object_type),
+    # [V007.41 BUG-FIX] 用 bo_framework.transaction() 包裹, 根治 silent partial commit
+    with bo_framework.transaction() as txn:
+        if is_default:
+            _execute_query(
+                'UPDATE filter_variants SET is_default = 0 WHERE user_id = ? AND object_type = ?',
+                (user_id, object_type),
+                fetch=False
+            )
+
+        now = datetime.now().isoformat()
+        sql = '''
+            INSERT INTO filter_variants (name, object_type, filters, user_id, is_shared, is_default, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        '''
+        variant_id = _execute_query(
+            sql,
+            (name, object_type, json.dumps(filters), user_id, is_shared, is_default, now, now),
             fetch=False
         )
-    
-    now = datetime.now().isoformat()
-    sql = '''
-        INSERT INTO filter_variants (name, object_type, filters, user_id, is_shared, is_default, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    '''
-    variant_id = _execute_query(
-        sql,
-        (name, object_type, json.dumps(filters), user_id, is_shared, is_default, now, now),
-        fetch=False
-    )
-    
+
     return jsonify({
         'success': True,
         'data': {
@@ -269,21 +272,23 @@ def update_variant(variant_id):
     
     if is_shared and not _is_admin():
         return jsonify({'success': False, 'message': '只有管理员可以创建共享变体'}), 403
-    
-    if is_default:
+
+    # [V007.41 BUG-FIX] 用 bo_framework.transaction() 包裹
+    with bo_framework.transaction() as txn:
+        if is_default:
+            _execute_query(
+                'UPDATE filter_variants SET is_default = 0 WHERE user_id = ? AND object_type = ?',
+                (user_id, existing['object_type']),
+                fetch=False
+            )
+
+        now = datetime.now().isoformat()
         _execute_query(
-            'UPDATE filter_variants SET is_default = 0 WHERE user_id = ? AND object_type = ?',
-            (user_id, existing['object_type']),
+            'UPDATE filter_variants SET name = ?, filters = ?, is_shared = ?, is_default = ?, updated_at = ? WHERE id = ?',
+            (name, json.dumps(filters), is_shared, is_default, now, variant_id),
             fetch=False
         )
-    
-    now = datetime.now().isoformat()
-    _execute_query(
-        'UPDATE filter_variants SET name = ?, filters = ?, is_shared = ?, is_default = ?, updated_at = ? WHERE id = ?',
-        (name, json.dumps(filters), is_shared, is_default, now, variant_id),
-        fetch=False
-    )
-    
+
     return jsonify({
         'success': True,
         'data': {
@@ -331,19 +336,21 @@ def set_default_variant(variant_id):
         return jsonify({'success': False, 'message': '变体不存在或无权访问'}), 404
     
     existing = existing[0]
-    
-    _execute_query(
-        'UPDATE filter_variants SET is_default = 0 WHERE user_id = ? AND object_type = ?',
-        (user_id, existing['object_type']),
-        fetch=False
-    )
-    
-    _execute_query(
-        'UPDATE filter_variants SET is_default = 1 WHERE id = ?',
-        (variant_id,),
-        fetch=False
-    )
-    
+
+    # [V007.41 BUG-FIX] 用 bo_framework.transaction() 包裹
+    with bo_framework.transaction() as txn:
+        _execute_query(
+            'UPDATE filter_variants SET is_default = 0 WHERE user_id = ? AND object_type = ?',
+            (user_id, existing['object_type']),
+            fetch=False
+        )
+
+        _execute_query(
+            'UPDATE filter_variants SET is_default = 1 WHERE id = ?',
+            (variant_id,),
+            fetch=False
+        )
+
     return jsonify({
         'success': True,
         'message': '已设置为默认变体'

@@ -103,7 +103,13 @@ class SubflowTemplateStore:
     @classmethod
     def set(cls, name: str, steps: List[Dict[str, Any]], description: str = '',
            created_by: Optional[int] = None) -> Dict[str, Any]:
-        """创建/更新模板"""
+        """创建/更新模板
+
+        [V007.41 BUG-FIX] 决策 A: 保留 force_no_tx=True + 全局锁
+        理由: subflow_template 是 admin 配置, 并发低, 全局锁已串行化.
+              cleanup / add_to_blacklist 类似.
+              业务上没有 silent partial commit 风险 (cache 同步 in critical section).
+        """
         with _lock:
             if not cls._cache:
                 cls._load_cache()
@@ -112,6 +118,7 @@ class SubflowTemplateStore:
             try:
                 cls._ensure_table()
                 # [V007.41 BUG-FIX] 用 safe_connect_for_write 统一 L0 入口
+                # 决策 A: 保留 force_no_tx=True (admin + 全局锁)
                 with safe_connect_for_write(cls._get_db_path(), force_no_tx=True) as conn:
                     # 存在则更新, 不存在则插入
                     cursor = conn.execute(
@@ -134,7 +141,7 @@ class SubflowTemplateStore:
                         op = 'created'
                     conn.commit()
 
-                # 更新缓存
+                # 更新缓存 (in critical section)
                 cls._cache[name] = steps
                 cls._cache_meta[name] = {
                     'description': description,
@@ -147,7 +154,10 @@ class SubflowTemplateStore:
 
     @classmethod
     def delete(cls, name: str) -> Dict[str, Any]:
-        """删除模板"""
+        """删除模板
+
+        [V007.41 BUG-FIX] 决策 A: 保留 force_no_tx=True + 全局锁
+        """
         with _lock:
             try:
                 cls._ensure_table()

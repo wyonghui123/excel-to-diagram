@@ -23,6 +23,7 @@ from meta.core.intent_resolver import (
     get_role_intent_dao,
 )
 from meta.core.bo_schema_loader import get_bo_schema_loader
+from meta.core.bo_framework import get_bo_framework
 
 logger = logging.getLogger(__name__)
 
@@ -237,21 +238,25 @@ def grant_or_deny_intent(role_id, bo_id, action_name):
         source = payload.get("source", "manual")
 
         dao = get_role_intent_dao()
-        if granted:
-            dao.grant(
-                role_id=int(role_id),
-                bo_id=bo_id,
-                action_name=action_name,
-                parameters=parameters,
-                source=source,
-            )
-        else:
-            dao.deny(
-                role_id=int(role_id),
-                bo_id=bo_id,
-                action_name=action_name,
-                parameters=parameters,
-            )
+        # [V007.41 BUG-FIX] 用 bo_framework.transaction() 包裹 grant/deny
+        # 背景: dao.grant/deny 内部已不再自己 commit, 必须有外层事务.
+        #       否则会触发 safe_connect_for_write 的 None tx raise.
+        with bo_framework.transaction() as txn:
+            if granted:
+                dao.grant(
+                    role_id=int(role_id),
+                    bo_id=bo_id,
+                    action_name=action_name,
+                    parameters=parameters,
+                    source=source,
+                )
+            else:
+                dao.deny(
+                    role_id=int(role_id),
+                    bo_id=bo_id,
+                    action_name=action_name,
+                    parameters=parameters,
+                )
 
         return jsonify({
             "success": True,
@@ -269,6 +274,8 @@ def grant_or_deny_intent(role_id, bo_id, action_name):
 def revoke_intent(role_id, bo_id, action_name):
     """撤销 Intent 权限（FR-017 AC-4）
 
+    [V007.41 BUG-FIX] 用 bo_framework.transaction() 包裹 revoke
+
     Response:
         {
             "success": true,
@@ -277,11 +284,12 @@ def revoke_intent(role_id, bo_id, action_name):
     """
     try:
         dao = get_role_intent_dao()
-        dao.revoke(
-            role_id=int(role_id),
-            bo_id=bo_id,
-            action_name=action_name,
-        )
+        with get_bo_framework().transaction() as txn:
+            dao.revoke(
+                role_id=int(role_id),
+                bo_id=bo_id,
+                action_name=action_name,
+            )
         return jsonify({
             "success": True,
             "data": {
