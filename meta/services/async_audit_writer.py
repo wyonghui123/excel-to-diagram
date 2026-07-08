@@ -113,10 +113,28 @@ class AsyncAuditWriter:
                 db_path = str(Path(__file__).parent.parent / 'architecture.db')
 
             # 打开独立连接 (worker thread 自己的, 跨线程安全)
-            conn = _sqlite3.connect(db_path, check_same_thread=False, timeout=30.0)
-            # [V007.39 BUG-FIX] 删除 PRAGMA journal_mode=WAL — 这是 db 持久化设置,
-            # pool._create_connection 已执行且有幂等保护, 重复执行触发 db 头写 → disk I/O error
-            conn.execute("PRAGMA busy_timeout=30000")
+            # [V007.42 FR-010] 统一到 safe_connect_for_write + force_no_tx=True
+            # 原因: 审计写入是独立事务, 不参与业务事务; 但需要 L0 工厂统一配置
+            #       (PRAGMA busy_timeout + mmap_size=0)
+            from meta.core.safe_connect import safe_connect_for_write as _scfw
+            try:
+                # safe_connect_for_write 是 generator (with 语义)
+                # 这里手动 next() 拿到 conn, 保留 generator 以便 cleanup
+                cm_gen = _scfw(db_path, force_no_tx=True)
+                conn = next(cm_gen)
+                self._tls.cm_gen = cm_gen  # 保留 generator, cleanup 时 close
+                self._tls.cm = None
+                try:
+                    conn.row_factory = _sqlite3.Row
+                except Exception:
+                    pass
+            except Exception as e:
+                logger.error("Failed to open thread-local SQLite via safe_connect: %s", str(e))
+                # 降级到原裸连接 (不阻断, 仅记录)
+                conn = _sqlite3.connect(db_path, check_same_thread=False, timeout=30.0)
+                conn.execute("PRAGMA busy_timeout=30000")
+                self._tls.cm_gen = None
+                self._tls.cm = None
             # 包成 ds-like 适配器, 跟 action_executor.ds 接口一致
             ds = _ThreadLocalDS(conn, db_path)
             self._tls.ds = ds

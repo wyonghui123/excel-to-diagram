@@ -180,6 +180,34 @@ class AsyncImportService:
                 'error': task.error
             }
 
+    def get_all_tasks(self) -> Dict[str, Dict[str, Any]]:
+        """[V007.42 FR-005] 获取所有任务 (ImportQueueHandler 用).
+
+        背景: import_handlers.py:16 调用 service.get_all_tasks() 但
+              AsyncImportService 无此方法, 触发 AttributeError 每 30s 一次.
+
+        Returns:
+            Dict[task_id, task_info] - 所有任务的快照
+        """
+        with self._task_lock:
+            return {
+                task_id: {
+                    'id': t.id,
+                    'status': t.status.value,
+                    'created_at': t.created_at.isoformat() if t.created_at else None,
+                    'started_at': t.started_at.isoformat() if t.started_at else None,
+                    'completed_at': t.completed_at.isoformat() if t.completed_at else None,
+                    'total_sheets': t.total_sheets,
+                    'processed_sheets': t.processed_sheets,
+                    'current_sheet': t.current_sheet,
+                    'total_rows': t.total_rows,
+                    'processed_rows': t.processed_rows,
+                    'result': t.result,
+                    'error': t.error,
+                }
+                for task_id, t in self._tasks.items()
+            }
+
     def cancel_task(self, task_id: str) -> bool:
         """
         取消任务（仅对 PENDING 状态有效）

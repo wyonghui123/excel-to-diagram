@@ -696,12 +696,37 @@ class TransactionContext:
         self.transaction_id = None
         # [SPR-03] 事务结果标志：默认 commit; 调用方通过 set_outcome(False) 触发 rollback
         self._should_commit = True
+        # [V007.42 FR-006] 长事务检测: __enter__ 时记录开始时间
+        self._start_time = None
 
     def __enter__(self):
         self.transaction_id = self.bo_framework.begin_transaction()
+        # [V007.42 FR-006] 记录开始时间
+        import time as _time
+        self._start_time = _time.time()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        # [V007.42 FR-006] 长事务检测
+        if self._start_time is not None:
+            import time as _time
+            duration = _time.time() - self._start_time
+            if duration > 30:
+                logger.warning(
+                    "[V007.42] long transaction: %.1fs, txn=%s",
+                    duration, self.transaction_id
+                )
+            if duration > 120:
+                logger.error(
+                    "[V007.42] very long transaction: %.1fs, txn=%s",
+                    duration, self.transaction_id
+                )
+                try:
+                    from meta.core.observability import metrics_inc
+                    metrics_inc('long_transaction_total')
+                except ImportError:
+                    pass
+
         if exc_type is not None:
             # 异常路径：始终 rollback
             self.bo_framework.rollback(self.transaction_id)
