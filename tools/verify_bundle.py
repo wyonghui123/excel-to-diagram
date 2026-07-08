@@ -428,6 +428,84 @@ def check_v8p_zip_v00742_health_fields() -> tuple:
         return (False, f"读 sql_connection_pool.py 失败: {e}")
 
 
+def check_v8s_deploy_bundle_completeness() -> tuple:
+    """V8s. [V007.44 P0 部署失职 BUG-FIX] deploy_bundle/ 必须含 5 关键 py 文件
+    V007.43 部署失败真因: 我之前打包时, deploy_bundle/meta/ 几乎空 (只 startup_checks.py)
+    bo_framework.py / sql_connection_pool.py / safe_connect.py / intent_api.py / query_service.py 全缺失
+    yonaa 部署时 PHASE 0.5 解压实际没替换 yonaa 实际 meta/
+    部署智能体失职: 没检查 deploy_bundle/ 完整性
+
+    防退化: deploy_bundle/meta/core/{bo_framework,sql_connection_pool,safe_connect}.py 必须存在
+    + deploy_bundle/meta/{api,services} 目录必须存在
+    + 5 关键文件 size > 阈值 (bo_framework > 30K, query_service > 80K)
+    """
+    deploy_bundle = ROOT / "deploy_bundle"
+    needed = [
+        ("meta/core/bo_framework.py", 30000),       # V007.43 P0 加 get_bo_framework 后 size ~34K
+        ("meta/core/sql_connection_pool.py", 20000),  # V007.40 P5 + V007.42 P5 mmap=0 后 size ~29K
+        ("meta/core/safe_connect.py", 5000),         # V007.41 P1 safe_connect factory
+        ("meta/api/intent_api.py", 5000),            # V007.41 P3 调用 get_bo_framework
+        ("meta/services/query_service.py", 80000),   # v027-pt2 fix
+    ]
+    needed_dirs = ["meta/api", "meta/services", "meta/core", "tools"]
+    missing_files = []
+    small_files = []
+    missing_dirs = []
+    for d in needed_dirs:
+        if not (deploy_bundle / d).is_dir():
+            missing_dirs.append(d)
+    for rel, min_size in needed:
+        p = deploy_bundle / rel
+        if not p.exists():
+            missing_files.append(f"{rel} (不存在)")
+        elif p.stat().st_size < min_size:
+            small_files.append(f"{rel} (size={p.stat().st_size} < {min_size})")
+    issues = []
+    if missing_dirs:
+        issues.append(f"缺目录: {missing_dirs}")
+    if missing_files:
+        issues.append(f"缺文件: {missing_files}")
+    if small_files:
+        issues.append(f"文件过小 (可能是旧版): {small_files}")
+    if issues:
+        return (False, f"deploy_bundle/ 不完整 (V007.43 BUG 复发): {'; '.join(issues)}")
+    return (True, f"deploy_bundle/ 完整 (5 关键文件全在, size 全部达标)")
+
+
+def check_v8t_zip_min_endpoint_coverage() -> tuple:
+    """V8t. [V007.44 P0 部署失职 BUG-FIX] zip 必须含 backend 启动最低 API 路径
+    V007.42 部署失败: server.py 启动秒死, 但我之前只检查了 invariant, 没检查 zip 实际能不能跑
+    防退化: zip 内必须含 server.py (启动入口) + meta/api/{auth,bo_api,intent_api,role_api,user_api}.py
+    + meta/services/{query_service,async_audit_writer}.py
+    + meta/core/{bo_framework,sql_connection_pool,safe_connect,startup_checks}.py
+    """
+    if not zip_path.exists():
+        return (True, "无 zip, 跳过")
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            names = set(zf.namelist())
+        needed = [
+            "meta/server.py",
+            "meta/core/bo_framework.py",
+            "meta/core/sql_connection_pool.py",
+            "meta/core/safe_connect.py",
+            "meta/core/startup_checks.py",
+            "meta/api/auth_api.py",
+            "meta/api/bo_api.py",
+            "meta/api/intent_api.py",
+            "meta/api/role_api.py",
+            "meta/api/user_api.py",
+            "meta/services/query_service.py",
+            "meta/services/async_audit_writer.py",
+        ]
+        missing = [n for n in needed if n not in names]
+        if missing:
+            return (False, f"zip 缺 backend 启动最低 API 路径 (V007.42 BUG 复发): {missing}")
+        return (True, f"zip 含全部 12 个 backend 启动最低 API 路径")
+    except Exception as e:
+        return (False, f"读 zip 失败: {e}")
+
+
 def check_v8k_zip_v00738_auto_vacuum_idempotent() -> tuple:
     """[V007.38 BUG-FIX] 移交给集成测试, 不在 verify_bundle 范围 (见 tests/test_v007_38_task_scheduler.py)
     auto_vacuum 幂等保护
@@ -723,6 +801,8 @@ def main():
         ("V8o", "zip 不落后 working tree (防部署疏忽)", check_v8o_zip_not_behind_working_tree),
         ("V8p", "health_check() 含 V007.42 P6 4 字段 (FR-003)", check_v8p_zip_v00742_health_fields),
         ("V8q", "bo_framework import 一致性 (V007.43 P0 BUG-FIX)", check_v8q_zip_bo_framework_import_consistency),
+        ("V8s", "deploy_bundle/ 完整 (V007.44 P0 部署失职 BUG-FIX)", check_v8s_deploy_bundle_completeness),
+        ("V8t", "zip 含 backend 启动最低 API 路径 (V007.44 P0)", check_v8t_zip_min_endpoint_coverage),
         ("V8k", "auto_vacuum 幂等保护 (V007.38 BUG-FIX)", check_v8k_zip_v00738_auto_vacuum_idempotent),
         ("V8l", "acquire_writer 线程锁 (V007.38 BUG-FIX)", check_v8l_zip_v00738_writer_lock),
         ("V8m", "task_scheduler 用 cursor.lastrowid (V007.38 BUG-FIX)", check_v8m_zip_v00738_no_select_last_insert_rowid),
