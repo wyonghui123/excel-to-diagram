@@ -1751,21 +1751,94 @@ class QueryService:
             return f"{col} {op.value} ?", [val]
 
         if len(per_role_conds) == 1:
+            # [FIX BUG-V027-pt2 2026-07-08] 单 role 也必须按 AND 关系处理
+            # 原 bug (与多 role 同源): 把 AND 段的 leaf cond 平铺到 or_conditions,
+            #   `or_where` 把它们全当 OR 拼, SQL 退化为 (id=8 OR version_id=3) 永远为真
+            #   → 领域 11 (应 1), 子领域 68 (应 5), BO 3228 (应 155)
+            # 修复: 用 where_raw 注入 (c1 AND c2 AND ...) 正确表达 AND 关系
+            and_clauses: list = []
+            and_params: list = []
             for c in per_role_conds[0]:
                 if c.get('type') == 'or':
+                    # 嵌套 OR 子段, 内部仍是 list of leaf (按 OR)
+                    or_sub_clauses: list = []
+                    or_sub_params: list = []
                     for ac in c['conditions']:
                         tup = _cond_to_tuple(ac)
-                        if tup:
-                            or_conditions.append(tup)
+                        if not tup:
+                            continue
+                        res = _tup_to_sql(tup)
+                        if res is None:
+                            continue
+                        clause, ps = res
+                        or_sub_clauses.append(clause)
+                        or_sub_params.extend(ps)
+                    if or_sub_clauses:
+                        if len(or_sub_clauses) == 1:
+                            and_clauses.append(or_sub_clauses[0])
+                            and_params.extend(or_sub_params)
+                        else:
+                            and_clauses.append(f"({' OR '.join(or_sub_clauses)})")
+                            and_params.extend(or_sub_params)
                 elif c.get('type') == 'and':
+                    sub_and_clauses: list = []
+                    sub_and_params: list = []
                     for ac in c['conditions']:
                         tup = _cond_to_tuple(ac)
-                        if tup:
-                            or_conditions.append(tup)
+                        if not tup:
+                            continue
+                        res = _tup_to_sql(tup)
+                        if res is None:
+                            continue
+                        clause, ps = res
+                        sub_and_clauses.append(clause)
+                        sub_and_params.extend(ps)
+                    if sub_and_clauses:
+                        if len(sub_and_clauses) == 1:
+                            and_clauses.append(sub_and_clauses[0])
+                            and_params.extend(sub_and_params)
+                        else:
+                            and_clauses.append(f"({' AND '.join(sub_and_clauses)})")
+                            and_params.extend(sub_and_params)
                 else:
                     tup = _cond_to_tuple(c)
-                    if tup:
-                        or_conditions.append(tup)
+                    if not tup:
+                        continue
+                    res = _tup_to_sql(tup)
+                    if res is None:
+                        continue
+                    clause, ps = res
+                    and_clauses.append(clause)
+                    and_params.extend(ps)
+
+            if and_clauses:
+                from meta.services.chain_owner_resolver import is_in_chain
+                owner_added = False
+                if object_type == 'product':
+                    and_clauses.append(
+                        f"{builder._get_db_column('owner_id') if hasattr(builder, '_get_db_column') else 'owner_id'} = ?"
+                    )
+                    and_params.append(user_id)
+                    owner_added = True
+                    logger.info(
+                        f"[DataPerm BUG-V021] AND-merged dim_scope with owner_id={user_id} for product"
+                    )
+                elif is_in_chain(object_type):
+                    logger.debug(
+                        f"[DataPerm BUG-V021] Skip owner exception for {object_type} (known limitation)"
+                    )
+
+                if len(and_clauses) == 1 and not owner_added:
+                    builder.where_raw(and_clauses[0], and_params)
+                else:
+                    raw_sql = ' AND '.join(and_clauses)
+                    builder.where_raw(f"({raw_sql})", and_params)
+
+                logger.info(
+                    f"[_try_apply_dimension_scope] user={user_id} object_type={object_type} "
+                    f"single_role AND-merged ({len(and_clauses)} parts)"
+                )
+            return True
         else:
             # [FIX BUG-V027 2026-07-07] multi-role: OR-of-AND
             #   原 bug: 平铺每个 role 的 AND 段到 or_conditions 列表, 或 = `or_where` 平铺,

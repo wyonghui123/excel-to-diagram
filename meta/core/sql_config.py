@@ -60,6 +60,28 @@ class MonitorConfig:
     metrics_collect_interval_seconds: float = 15.0
 
 
+# [V007.41 BUG-FIX] safe_connect 工厂配置
+# 背景: V007.40 在 17 个文件复制 timeout + check_same_thread + busy_timeout 三件套,
+#       V007.41 集中到 meta/core/safe_connect.py, 配置项集中在本类.
+# 默认值与 V007.40 / sql_connection_pool.py db_timeout=30.0 保持一致.
+@dataclass
+class SafeConnectConfig:
+    """V007.41 L0 裸连接工厂配置
+
+    字段:
+        timeout: sqlite3.connect() 的 timeout 参数 (秒)
+        busy_timeout_ms: PRAGMA busy_timeout (毫秒)
+        check_same_thread: 是否允许多线程共享
+        enforce_write_in_tx: safe_connect_for_write 是否强制外层事务
+        tx_state_unknown_passthrough: tx_state 探测 UNKNOWN 时是否降级放行
+    """
+    timeout: float = 30.0
+    busy_timeout_ms: int = 30000
+    check_same_thread: bool = False
+    enforce_write_in_tx: bool = True
+    tx_state_unknown_passthrough: bool = True
+
+
 @dataclass
 class DatabaseConfig:
     db_path: str = ""
@@ -68,6 +90,7 @@ class DatabaseConfig:
     write_queue: WriteQueueConfig = field(default_factory=WriteQueueConfig)
     checkpoint: CheckpointConfig = field(default_factory=CheckpointConfig)
     monitor: MonitorConfig = field(default_factory=MonitorConfig)
+    safe_connect: SafeConnectConfig = field(default_factory=SafeConnectConfig)
 
     @classmethod
     def from_env(cls) -> "DatabaseConfig":
@@ -136,3 +159,46 @@ def get_database_config() -> DatabaseConfig:
 def set_database_config(config: DatabaseConfig):
     global _default_config
     _default_config = config
+
+
+# [V007.41] safe_connect 单例配置 + 工厂函数
+_default_safe_connect_config: Optional[SafeConnectConfig] = None
+
+
+def get_safe_connect_config() -> SafeConnectConfig:
+    """[V007.41] 获取 safe_connect 工厂配置 (单例).
+
+    支持环境变量覆盖:
+        SAFE_CONNECT_TIMEOUT          - 覆盖 timeout (秒, float)
+        SAFE_CONNECT_BUSY_TIMEOUT_MS  - 覆盖 busy_timeout_ms (int)
+        SAFE_CONNECT_ENFORCE_TX       - 'false'/'0'/'no'/'off' 关闭强制事务检查
+    """
+    global _default_safe_connect_config
+    if _default_safe_connect_config is None:
+        _default_safe_connect_config = SafeConnectConfig()
+
+        timeout_env = os.environ.get('SAFE_CONNECT_TIMEOUT')
+        if timeout_env:
+            try:
+                _default_safe_connect_config.timeout = float(timeout_env)
+            except ValueError:
+                pass
+
+        busy_env = os.environ.get('SAFE_CONNECT_BUSY_TIMEOUT_MS')
+        if busy_env:
+            try:
+                _default_safe_connect_config.busy_timeout_ms = int(busy_env)
+            except ValueError:
+                pass
+
+        enforce_env = os.environ.get('SAFE_CONNECT_ENFORCE_TX', '').strip().lower()
+        if enforce_env in ('false', '0', 'no', 'off'):
+            _default_safe_connect_config.enforce_write_in_tx = False
+
+    return _default_safe_connect_config
+
+
+def set_safe_connect_config(config: SafeConnectConfig) -> None:
+    """[V007.41] 重置 safe_connect 工厂配置 (测试 / 紧急覆盖用)."""
+    global _default_safe_connect_config
+    _default_safe_connect_config = config

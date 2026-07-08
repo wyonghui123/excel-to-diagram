@@ -50,6 +50,11 @@ OBS_COUNTERS = {
     # [V007.24] DataSource 缓存 (fd 泄漏检测)
     'pool_init_count': 'v007_24_pool_init_count',
     'pool_init_leak_warning': 'v007_24_pool_init_leak_warning_total',
+    # [V007.41] safe_connect L0 工厂 (read/write/no_tx/unknown 分类)
+    'safe_connect_read_total': 'v007_41_safe_connect_read_total',
+    'safe_connect_write_total': 'v007_41_safe_connect_write_total',
+    'safe_connect_write_no_tx_total': 'v007_41_safe_connect_write_no_tx_total',
+    'safe_connect_tx_state_unknown_total': 'v007_41_safe_connect_tx_state_unknown_total',
 }
 
 
