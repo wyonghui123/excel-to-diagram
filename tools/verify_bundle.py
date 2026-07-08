@@ -607,6 +607,82 @@ def check_v13_deploy_e2e() -> tuple:
         return (False, f"PHASE 0.5 模拟失败: {e}")
 
 
+def check_v8q_zip_bo_framework_import_consistency() -> tuple:
+    """V8q. [V007.43 P0 BUG-FIX] intent_api 引用 bo_framework 函数时, bo_framework.py 必须有同名函数
+
+    背景: V007.41 P3 (commit 9d051f9) 在 meta/api/intent_api.py:26 写了
+          `from meta.core.bo_framework import get_bo_framework`,
+          但 bo_framework.py 没实现这个函数, 导致 V007.42 部署 yonaa 启动 ImportError,
+          backend 5001 死亡, 业务中断。
+
+    修法: invariant 扫描所有 `from meta.core.bo_framework import <X>` 的 X,
+          验证 bo_framework.py 都有对应的 def/class X.
+
+    排除: BOFramework 类导入 + bo_framework 单例变量 (不是函数定义).
+    """
+    if not zip_path.exists():
+        return (True, "无 zip, 跳过")
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            # 收集所有引用
+            imported_names = set()
+            api_modules = [
+                "meta/api/intent_api.py",
+                "meta/api/bo_api.py",
+                "meta/api/user_api.py",
+                "meta/api/role_api.py",
+                "meta/api/user_group_api.py",
+                "meta/api/filter_variant_api.py",
+            ]
+            for mod_path in api_modules:
+                if mod_path not in zf.namelist():
+                    continue
+                content = zf.read(mod_path).decode("utf-8", errors="ignore")
+                # 找 `from meta.core.bo_framework import X` (X 含逗号分隔多个)
+                import re
+                for m in re.finditer(
+                    r'from\s+meta\.core\.bo_framework\s+import\s+([^\n]+)',
+                    content
+                ):
+                    names_str = m.group(1)
+                    # 处理可能的 `from ... import (a, b)` 格式
+                    names_str = names_str.strip().strip("()")
+                    for name in names_str.split(","):
+                        name = name.strip().split(" as ")[0].strip()
+                        if name:
+                            imported_names.add(name)
+
+            # 检查 bo_framework.py
+            bf_content = zf.read("meta/core/bo_framework.py").decode("utf-8", errors="ignore")
+            missing = []
+            for name in imported_names:
+                # 排除类 (class X) 和已知单例 (bo_framework)
+                if name == "BOFramework":
+                    continue
+                if name == "bo_framework":
+                    # 单例变量赋值
+                    if re.search(r'^\s*bo_framework\s*=', bf_content, re.MULTILINE):
+                        continue
+                    else:
+                        missing.append(f"bo_framework 单例变量未定义")
+                else:
+                    # 函数定义
+                    if not re.search(rf'^\s*def\s+{name}\s*\(', bf_content, re.MULTILINE):
+                        missing.append(f"{name} 函数未定义")
+
+            if missing:
+                return (
+                    False,
+                    f"bo_framework import 一致性失败: {missing} (V007.41 P3 BUG 复发)",
+                )
+            return (
+                True,
+                f"bo_framework import 一致性通过: {imported_names} 全部存在",
+            )
+    except Exception as e:
+        return (False, f"V8q 检查失败: {e}")
+
+
 def main():
     global zip_path
     parser = argparse.ArgumentParser(description="[V007.25] bundle 一致性验证 (L2 invariant)")

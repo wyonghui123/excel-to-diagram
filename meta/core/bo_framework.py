@@ -745,5 +745,17 @@ class TransactionContext:
         self._should_commit = bool(success)
 
 
+def get_bo_framework() -> BOFramework:
+    """[V007.43 P0 BUG-FIX] 单例获取函数.
+
+    背景: V007.41 P3 (commit 9d051f9) 引入 meta/api/intent_api.py:26 调用
+          `from meta.core.bo_framework import get_bo_framework`,
+          但当时没在 bo_framework.py 实现这个函数。
+          V007.42 部署后 yonaa 启动 ImportError 导致 5001 backend 死亡。
+    修法: 加这个函数返回全局单例 bo_framework。
+    """
+    return bo_framework
+
+
 bo_framework = BOFramework()
 
