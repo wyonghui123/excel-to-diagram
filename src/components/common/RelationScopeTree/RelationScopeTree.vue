@@ -311,56 +311,43 @@ const smChildCount = computed(() => {
   return map
 })
 
-// 扁平展开所有受影响的 BO id (实际返回 Set of SM id + bo id, chip 只关心 size)
-// [BUG-V033 修复] 选 SM 时, 累加 child_count 作为该 SM 的"等效 BO 数"贡献
-const flattenSelectedBoIds = computed(() => {
-  const result = new Set()
-  // 直接选的 BO
-  for (const id of selectedBoIds.value) result.add(id)
-  // 选的 service_module
-  for (const smId of selectedServiceModuleIds.value) {
-    const cnt = smChildCount.value.get(smId) || 0
-    if (cnt > 0) {
-      // 用 SM id + 虚拟 placeholder 模拟 BO 数 (chip 只关心 size)
-      for (let i = 0; i < cnt; i++) result.add(`__sm_${smId}_${i}__`)
+// [BUG-V048 修复 2026-07-08] sub_domain / domain 节点的 BO count
+//   smChildCount 只覆盖 service_module 节点. 但 el-tree 在用户选 domain/SD 时,
+//     node.count 字段也累加了 BO 总数 (见 ObjectScopeSection.buildHierarchyTree),
+//     用 SD/domain 的 count 直接 chip 累加可避免双重计数.
+//   例: 选财务云 domain → 树节点 domainBoCount = 1610 → chip = 1610 (直接用 node.count)
+const sdChildCount = computed(() => {
+  const map = new Map()
+  if (!treeData.value || treeData.value.length === 0) return map
+  function walk(nodes) {
+    if (!nodes) return
+    for (const n of nodes) {
+      if (n.type === 'sub_domain') {
+        const cnt = n.count || 0
+        if (cnt > 0) map.set(n.originalId || n.id, cnt)
+      }
+      if (n.children) walk(n.children)
     }
   }
-  // 选的 sub_domain
-  for (const sdId of selectedSubDomainIds.value) {
-    const info = hierarchyMap.value[sdId]
-    if (!info) continue
-    walkSubDomain(info)
-  }
-  // 选的 domain
-  for (const dId of selectedDomainIds.value) {
-    walkDomain(hierarchyMap.value[dId])
-  }
-  return [...result]
+  walk(treeData.value)
+  return map
+})
 
-  function walkSubDomain(info) {
-    if (!info) return
-    for (const smId of (smChildCount.value.keys())) {
-      const smInfo = hierarchyMap.value[smId]
-      if (smInfo?.subDomainId === info.subDomainId) {
-        const cnt = smChildCount.value.get(smId) || 0
-        if (cnt > 0) {
-          for (let i = 0; i < cnt; i++) result.add(`__sm_${smId}_${i}__`)
-        }
+const domainChildCount = computed(() => {
+  const map = new Map()
+  if (!treeData.value || treeData.value.length === 0) return map
+  function walk(nodes) {
+    if (!nodes) return
+    for (const n of nodes) {
+      if (n.type === 'domain') {
+        const cnt = n.count || 0
+        if (cnt > 0) map.set(n.originalId || n.id, cnt)
       }
+      if (n.children) walk(n.children)
     }
   }
-  function walkDomain(info) {
-    if (!info) return
-    for (const smId of (smChildCount.value.keys())) {
-      const smInfo = hierarchyMap.value[smId]
-      if (smInfo?.domainId === info.domainId) {
-        const cnt = smChildCount.value.get(smId) || 0
-        if (cnt > 0) {
-          for (let i = 0; i < cnt; i++) result.add(`__sm_${smId}_${i}__`)
-        }
-      }
-    }
-  }
+  walk(treeData.value)
+  return map
 })
 
 // 关键修复 v39: chip 数字从"4 源 id 总数"改为"扁平去重 BO 总数"
@@ -371,17 +358,58 @@ const flattenSelectedBoIds = computed(() => {
 // 关键修复 v39.1: 始终使用扁平去重 BO 总数, 不再依赖 localSelectedBoCount
 //   之前逻辑: localSelectedBoCount > 0 时直接返回, 导致显示 4 源 id 总数而非 BO 数
 //   现在逻辑: 始终使用 flattenSelectedBoIds 计算扁平去重 BO 总数
+// 关键修复 V048: 用 SD/domain 节点 count 精确累加, 避免双重计数
+//   之前 bug (v39.1): flattenSelectedBoIds 用 placeholder `__sm_${id}_${i}__`
+//     → 真实 BO id 与 placeholder 命名空间不同 → Set 去重失效
+//     → 例: 已选 422 BO + 选财务云 domain (1610 BO) → chip = 422 + 1610 = 2032
+//   修复: 改用树节点本身的 count (smChildCount / sdChildCount / domainChildCount),
+//     按"未被祖先覆盖"原则累加: 选 SM 时加 child_count, 但 SM 所属 SD/domain 被选则跳过;
+//     选 SD 时加 SD count, 但 SD 所属 domain 被选则跳过; 选 domain 时直接累加.
+//   精确公式: chip = Σ(sm.cnt where sm.selected && sm.sd ∉ sel && sm.domain ∉ sel)
+//                  + Σ(sd.cnt where sd.selected && sd.domain ∉ sel)
+//                  + Σ(domain.cnt where domain.selected)
+//                  + (selectedBoIds 不在任何祖先下时的 fallback)
 const selectedBoCount = computed(() => {
-  // 始终使用扁平去重 BO 总数
-  const flatBoIds = flattenSelectedBoIds.value
-  if (flatBoIds && flatBoIds.length > 0) {
-    return new Set(flatBoIds).size
+  const selectedDomainSet = new Set(selectedDomainIds.value)
+  const selectedSubDomainSet = new Set(selectedSubDomainIds.value)
+
+  let total = 0
+
+  // 1. 选中的 SM (只在所属 SD/domain 未被选中时累加)
+  for (const smId of selectedServiceModuleIds.value) {
+    const info = hierarchyMap.value[smId]
+    if (!info) continue
+    // 祖先被勾时, 该 SM 已被覆盖, 跳过
+    if (selectedSubDomainSet.has(info.subDomainId)) continue
+    if (selectedDomainSet.has(info.domainId)) continue
+    total += smChildCount.value.get(smId) || 0
   }
-  // 兜底: 4 源 id 总数 (旧行为, 兼容性)
-  return (selectedBoIds.value?.length || 0) +
-    (selectedDomainIds.value?.length || 0) +
-    (selectedSubDomainIds.value?.length || 0) +
-    (selectedServiceModuleIds.value?.length || 0)
+
+  // 2. 选中的 SD (只在所属 domain 未被选中时累加)
+  for (const sdId of selectedSubDomainIds.value) {
+    const info = hierarchyMap.value[sdId]
+    if (!info) continue
+    if (selectedDomainSet.has(info.domainId)) continue
+    total += sdChildCount.value.get(sdId) || 0
+  }
+
+  // 3. 选中的 domain (直接累加)
+  for (const dId of selectedDomainIds.value) {
+    total += domainChildCount.value.get(dId) || 0
+  }
+
+  // 4. 兜底: 只选了 BO (无任何祖先), 用 selectedBoIds.length
+  if (
+    total === 0 &&
+    selectedBoIds.value.length > 0 &&
+    selectedDomainIds.value.length === 0 &&
+    selectedSubDomainIds.value.length === 0 &&
+    selectedServiceModuleIds.value.length === 0
+  ) {
+    total = selectedBoIds.value.length
+  }
+
+  return total
 })
 
 // 关键修复 v40: 关系范围 chip 从 "selectedRelationCodes 数(节点数/关系类型编码数)" 改为
