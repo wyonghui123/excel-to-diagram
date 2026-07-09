@@ -820,6 +820,72 @@ def check_v8q_zip_bo_framework_import_consistency() -> tuple:
         return (False, f"V8q 检查失败: {e}")
 
 
+def check_v8ag_zip_v00746_8_files_marks() -> tuple:
+    """V8ag. [V007.46 部署失职 BUG-FIX] zip 内 8 关键文件必须真存在
+    防止 V007.46 部署时漏 5/8 文件 (5 个 MISS) 的灾难重演
+    V007.46 真因: dev-agent 没改 diagnostics.py, 改了 async_audit_writer.py (不是 service)
+    """
+    if not zip_path.exists():
+        return (True, "无 zip, 跳过")
+    try:
+        # V007.46 真改的 7 文件 (有 V007.46 标记)
+        files_marks = {
+            "meta/core/safe_connect.py": ["V007.46", "mmap_size"],
+            "meta/core/sql_connection_pool.py": ["io_rate_limit"],
+            "meta/core/db_health_monitor.py": ["V007.46"],
+            "meta/services/import_export_service.py": ["V007.46"],
+            "meta/services/query_service.py": ["V007.46"],
+            "meta/services/async_audit_writer.py": ["V007.46"],  # 真名是 writer
+            "meta/server.py": ["V007.46", "_cleanup_done"],
+        }
+        # V007.46 应改但 dev-agent 没真改的 1 文件 (只检查存在)
+        files_just_exists = [
+            "meta/core/diagnostics.py",
+        ]
+        missing_files = []
+        missing_marks = []
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            names = zf.namelist()
+            for fpath, marks in files_marks.items():
+                if fpath not in names:
+                    missing_files.append(fpath)
+                    continue
+                content = zf.read(fpath).decode("utf-8", errors="ignore")
+                for m in marks:
+                    if m not in content:
+                        missing_marks.append(f"{fpath}[:{m}]")
+            for fpath in files_just_exists:
+                if fpath not in names:
+                    missing_files.append(fpath)
+        if missing_files:
+            return (False, f"V007.46 zip 内缺关键文件: {missing_files}")
+        if missing_marks:
+            return (False, f"V007.46 关键文件缺标记: {missing_marks[:3]} (总 {len(missing_marks)} 处)")
+        return (True, f"V007.46 8 关键文件全在 + 7 真改文件有 V007.46 标记")
+    except Exception as e:
+        return (False, f"V8ag 检查失败: {e}")
+
+
+def check_v8ah_zip_v00747_pragmas_idempotent() -> tuple:
+    """V8ah. [V007.47 部署失职 BUG-FIX] sql_connection_pool 必须含 V007.47 PRAGMA 幂等
+    防止 V007.47 部署时 PRAGMA idempotent 代码未真在 yonaa
+    """
+    if not zip_path.exists():
+        return (True, "无 zip, 跳过")
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            if "meta/core/sql_connection_pool.py" not in zf.namelist():
+                return (False, "zip 内缺 meta/core/sql_connection_pool.py")
+            content = zf.read("meta/core/sql_connection_pool.py").decode("utf-8", errors="ignore")
+        needed = ["_synchronous_applied", "_wal_autocheckpoint_applied", "V007.47"]
+        missing = [n for n in needed if n not in content]
+        if missing:
+            return (False, f"sql_connection_pool.py 缺 V007.47 PRAGMA 幂等: {missing}")
+        return (True, f"V007.47 PRAGMA 幂等 ({len(needed)} 项) 全在")
+    except Exception as e:
+        return (False, f"V8ah 检查失败: {e}")
+
+
 def main():
     global zip_path
     parser = argparse.ArgumentParser(description="[V007.25] bundle 一致性验证 (L2 invariant)")
@@ -866,6 +932,8 @@ def main():
         ("V8k", "auto_vacuum 幂等保护 (V007.38 BUG-FIX)", check_v8k_zip_v00738_auto_vacuum_idempotent),
         ("V8l", "acquire_writer 线程锁 (V007.38 BUG-FIX)", check_v8l_zip_v00738_writer_lock),
         ("V8m", "task_scheduler 用 cursor.lastrowid (V007.38 BUG-FIX)", check_v8m_zip_v00738_no_select_last_insert_rowid),
+        ("V8ag", "V007.46 8 关键文件标记完整 (防部署漏文件)", check_v8ag_zip_v00746_8_files_marks),
+        ("V8ah", "V007.47 sql_connection_pool 标记在 zip (db-level PRAGMA 幂等)", check_v8ah_zip_v00747_pragmas_idempotent),
     ]
 
     results = []
