@@ -11,6 +11,7 @@
  */
 import { MAX_RECURSION_DEPTH, checkDepth, checkCycle, createVisitedSet } from '../../../services/groupModel/safetyUtils.js'
 import { formatContainerTitle } from '../../../utils/formatContainerTitle.js'
+import { sanitizeMermaidLabel } from '../syntax/_shared/arrowHelper.js'
 
 // [v1.1.15 回退] 颜色由用户/系统颜色配置控制, 不在样式表中硬编码
 const LEVEL_STYLES = {
@@ -178,7 +179,10 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
         if (!definedNodes.has(actualNodeId)) {
           const node = nodeMap.get(actualNodeId)
           if (node) {
-            const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+            // [V007.52 P0] 转义 disabled group directNodes
+            const safeName = sanitizeMermaidLabel(node.name || '')
+            const safeCode = sanitizeMermaidLabel(node.code || '')
+            const displayText = safeCode ? `${safeName}\\n(${safeCode})` : safeName
             code += `${indent}${actualNodeId}["${displayText}"]\n`
             definedNodes.add(actualNodeId)
           }
@@ -196,7 +200,10 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
               if (!definedNodes.has(actualNodeId)) {
                 const node = nodeMap.get(actualNodeId)
                 if (node) {
-                  const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+                  // [V007.52 P0] 转义 disabled group _isDirectNodesContainer 节点
+                  const safeName = sanitizeMermaidLabel(node.name || '')
+                  const safeCode = sanitizeMermaidLabel(node.code || '')
+                  const displayText = safeCode ? `${safeName}\\n(${safeCode})` : safeName
                   code += `${indent}${actualNodeId}["${displayText}"]\n`
                   definedNodes.add(actualNodeId)
                 }
@@ -217,18 +224,21 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
             const containerCode = generateContainerCode(container, idx, nodeMap, definedNodes, indent, containerId, layoutEngine, links, containerDepth + 1)
             code += containerCode
           } else {
-            container.nodes.forEach(nodeId => {
-              const actualNodeId = typeof nodeId === 'object' ? (nodeId.id || nodeId.code || nodeId.name) : nodeId
-              if (!definedNodes.has(actualNodeId)) {
-                const node = nodeMap.get(actualNodeId)
-                if (node) {
-                  const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
-                  code += `${indent}${actualNodeId}["${displayText}"]\n`
-                  definedNodes.add(actualNodeId)
-                }
+          container.nodes.forEach(nodeId => {
+            const actualNodeId = typeof nodeId === 'object' ? (nodeId.id || nodeId.code || nodeId.name) : nodeId
+            if (!definedNodes.has(actualNodeId)) {
+              const node = nodeMap.get(actualNodeId)
+              if (node) {
+                // [V007.52 P0] 转义 disabled container 内节点 label
+                const safeName = sanitizeMermaidLabel(node.name || '')
+                const safeCode = sanitizeMermaidLabel(node.code || '')
+                const displayText = safeCode ? `${safeName}\\n(${safeCode})` : safeName
+                code += `${indent}${actualNodeId}["${displayText}"]\n`
+                definedNodes.add(actualNodeId)
               }
-            })
-          }
+            }
+          })
+        }
         }
       })
     }
@@ -252,7 +262,9 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
   if (group.visible === false) {
     code += `${indent}subgraph ${groupId}[ ]\n`
   } else {
-    code += `${indent}subgraph ${groupId}["${groupTitle}"]\n`
+    // [V007.52 P0] 转义 groupTitle 防 mermaid 11.13 syntax error
+    const safeGroupTitle = sanitizeMermaidLabel(groupTitle)
+    code += `${indent}subgraph ${groupId}["${safeGroupTitle}"]\n`
   }
 
   let direction = group.direction || 'TB'
@@ -268,7 +280,10 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
       if (!definedNodes.has(actualNodeId)) {
         const node = nodeMap.get(actualNodeId)
         if (node) {
-          const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+          // [V007.52 P0] 转义 enabled group directNodes
+          const safeName = sanitizeMermaidLabel(node.name || '')
+          const safeCode = sanitizeMermaidLabel(node.code || '')
+          const displayText = safeCode ? `${safeName}\\n(${safeCode})` : safeName
           code += `${indent}  ${actualNodeId}["${displayText}"]\n`
           definedNodes.add(actualNodeId)
         }
@@ -293,7 +308,10 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
             if (!definedNodes.has(actualNodeId)) {
               const node = nodeMap.get(actualNodeId)
               if (node) {
-                const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+                // [V007.52 P0] 转义 enabled group _isDirectNodesContainer 节点
+                const safeName = sanitizeMermaidLabel(node.name || '')
+                const safeCode = sanitizeMermaidLabel(node.code || '')
+                const displayText = safeCode ? `${safeName}\\n(${safeCode})` : safeName
                 code += `${indent}  ${actualNodeId}["${displayText}"]\n`
                 definedNodes.add(actualNodeId)
               }
@@ -334,7 +352,10 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
                 if (!definedNodes.has(actualNodeId)) {
                   const node = nodeMap.get(actualNodeId)
                   if (node) {
-                    const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+                    // [V007.52 P0] 转义 disabled 嵌套容器内节点 label
+                    const safeName = sanitizeMermaidLabel(node.name || '')
+                    const safeCode = sanitizeMermaidLabel(node.code || '')
+                    const displayText = safeCode ? `${safeName}\\n(${safeCode})` : safeName
                     innerCode += `${subInnerIndent}${actualNodeId}["${displayText}"]\n`
                     definedNodes.add(actualNodeId)
                   }
@@ -355,7 +376,9 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
         })
 
         // 用外层 wrapper 包装
-        let wrappedSubCode = `${subIndent}subgraph ${subGroupId}["${containerData.title || containerData.name}"]\n${subIndent}  direction ${subDirection}\n`
+        // [V007.52 P0] 转义 containerData.title / name 防 mermaid 11.13 syntax error
+        const safeSubGroupTitle = sanitizeMermaidLabel(containerData.title || containerData.name || '')
+        let wrappedSubCode = `${subIndent}subgraph ${subGroupId}["${safeSubGroupTitle}"]\n${subIndent}  direction ${subDirection}\n`
         wrappedSubCode += innerCode
         wrappedSubCode += `${subIndent}end\n`
         containerCodes.push(wrappedSubCode)
@@ -371,7 +394,10 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
             if (!definedNodes.has(actualNodeId)) {
               const node = nodeMap.get(actualNodeId)
               if (node) {
-                const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+                // [V007.52 P0] 转义 disabled container 内节点 label
+                const safeName = sanitizeMermaidLabel(node.name || '')
+                const safeCode = sanitizeMermaidLabel(node.code || '')
+                const displayText = safeCode ? `${safeName}\\n(${safeCode})` : safeName
                 code += `${indent}  ${actualNodeId}["${displayText}"]\n`
                 definedNodes.add(actualNodeId)
               }
@@ -489,7 +515,10 @@ function generateContainerCode(container, index, nodeMap, definedNodes, indent =
         if (definedNodes && !definedNodes.has(nodeId)) {
           const node = nodeMap.get(nodeId)
           if (node) {
-            const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+            // [V007.52 P0] 转义虚拟容器内节点 label
+            const safeName = sanitizeMermaidLabel(node.name || '')
+            const safeCode = sanitizeMermaidLabel(node.code || '')
+            const displayText = safeCode ? `${safeName}\\n(${safeCode})` : safeName
             code += `${indent}${nodeId}["${displayText}"]\n`
             definedNodes.add(nodeId)
           }
@@ -506,8 +535,10 @@ function generateContainerCode(container, index, nodeMap, definedNodes, indent =
   // 使用 fullTitle 而不是 name，这样会显示完整路径
   const rawContainerName = container.fullTitle || container.name || container.title || 'Container'
   const containerName = formatContainerTitle(rawContainerName)
-  
-  code += `${indent}  subgraph ${actualContainerId}["${containerName}"]\n`
+  // [V007.52 P0] 转义 containerName 防 mermaid 11.13 syntax error
+  const safeContainerName = sanitizeMermaidLabel(containerName)
+
+  code += `${indent}  subgraph ${actualContainerId}["${safeContainerName}"]\n`
 
   // 注意：当容器内节点有外部连线时，此 direction 设置会被 ELK 忽略
   // 容器会继承父图的方向。这是 Mermaid + ELK 的已知限制。
@@ -553,7 +584,10 @@ function generateContainerCode(container, index, nodeMap, definedNodes, indent =
         if (definedNodes && !definedNodes.has(nodeId)) {
           const node = nodeMap.get(nodeId)
           if (node) {
-            const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+            // [V007.52 P0] 转义 ELK inner 子容器内节点 label
+            const safeName = sanitizeMermaidLabel(node.name || '')
+            const safeCode = sanitizeMermaidLabel(node.code || '')
+            const displayText = safeCode ? `${safeName}\\n(${safeCode})` : safeName
             code += `${indent}      ${nodeId}["${displayText}"]\n`
             definedNodes.add(nodeId)
           }
@@ -571,7 +605,10 @@ function generateContainerCode(container, index, nodeMap, definedNodes, indent =
         if (definedNodes && !definedNodes.has(nodeId)) {
           const node = nodeMap.get(nodeId)
           if (node) {
-            const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+            // [V007.52 P0] 转义 ELK boundary 子容器内节点 label
+            const safeName = sanitizeMermaidLabel(node.name || '')
+            const safeCode = sanitizeMermaidLabel(node.code || '')
+            const displayText = safeCode ? `${safeName}\\n(${safeCode})` : safeName
             code += `${indent}      ${nodeId}["${displayText}"]\n`
             definedNodes.add(nodeId)
           }
@@ -594,7 +631,10 @@ function generateContainerCode(container, index, nodeMap, definedNodes, indent =
       if (definedNodes && !definedNodes.has(nodeId)) {
         const node = nodeMap.get(nodeId)
         if (node) {
-          const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+          // [V007.52 P0] 转义默认容器内节点 label
+          const safeName = sanitizeMermaidLabel(node.name || '')
+          const safeCode = sanitizeMermaidLabel(node.code || '')
+          const displayText = safeCode ? `${safeName}\\n(${safeCode})` : safeName
           code += `${indent}    ${nodeId}["${displayText}"]\n`
           definedNodes.add(nodeId)
         }

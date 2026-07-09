@@ -263,9 +263,12 @@ export class MermaidGenerator {
       if (!this.definedNodes.has(nodeId)) {
         const node = this.getNodeData(nodeId)
         if (node) {
-          const displayText = node.code
-            ? `${node.name}\\n(${node.code})`
-            : node.name
+          // [V007.52 P0] 转义 directNodes 节点 label
+          const safeNodeName = sanitizeMermaidLabel(node.name || '')
+          const safeNodeCode = sanitizeMermaidLabel(node.code || '')
+          const displayText = safeNodeCode
+            ? `${safeNodeName}\\n(${safeNodeCode})`
+            : safeNodeName
           code += `${indent}${nodeId}["${displayText}"]\n`
           this.definedNodes.add(nodeId)
         }

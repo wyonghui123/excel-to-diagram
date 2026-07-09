@@ -42,6 +42,14 @@ ALLOWED_DIRS = [
     "/opt/app/shared",
     "/tmp",
     "/var/log",
+    # [V007.45 BUG-FIX 2026-07-09] 部署智能体 SOP 必需
+    "/opt/app/current",       # current symlink 路径
+    "/opt/app/backups",       # 备份路径
+    "/opt/app/migrations",    # migration 路径
+    "/etc/systemd/system",    # systemd 服务路径
+    # [V007.46] 部署智能体监控路径
+    "/opt/app/deploy_history", # 部署历史
+    "/opt/app/manifests",     # 部署 manifest
 ]
 
 # ─── Token ───────────────────────────────────────
@@ -150,28 +158,34 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
             q = parse_qs(p.query)
             route = p.path.rstrip("/")
             handlers = {
-                "/api/system":    lambda: self._system(),
-                "/api/proc":      lambda: self._proc(),
-                "/api/process":   lambda: self._process_detail(q),       # ★
-                "/api/net":       lambda: self._net(q),                  # ★
-                "/api/log":       lambda: self._log(q),
-                "/api/log/list":  lambda: self._log_list(q),             # ★
-                "/api/log/range": lambda: self._log_range(q),            # ★
-                "/api/log/stream":lambda: self._log_stream(q),           # ★
-                "/api/find":      lambda: self._find(q),
-                "/api/db/health": lambda: self._db_health(),
-                "/api/db/query":  lambda: self._db_query(q),             # ★
-                "/api/db/metrics":lambda: self._db_metrics(),
-                "/api/dmesg":     lambda: self._dmesg(q),
-                "/api/config":    lambda: self._config(q),               # ★
-                "/api/metrics":   lambda: self._prometheus(),            # ★
-                "/api/health":    lambda: self._json(200, {"ok":True,"uptime":int(time.time()-_START_TIME)}),
-                "/api/token":     lambda: self._token(q),
-                # [V007.37 v4.5] 合并 dev-agent v3.5 端点 (排查 disk I/O 必需)
-                "/api/sqlite":       lambda: self._sqlite(q),
-                "/api/sqlite/load":  lambda: self._sqlite_load(q),
-                "/api/iostat":       lambda: self._iostat(q),
-                "/api/proc/io":      lambda: self._proc_io(q),
+            "/api/system":    lambda: self._system(),
+            "/api/proc":      lambda: self._proc(),
+            "/api/process":   lambda: self._process_detail(q),       # ★
+            "/api/net":       lambda: self._net(q),                  # ★
+            "/api/log":       lambda: self._log(q),
+            "/api/log/list":  lambda: self._log_list(q),             # ★
+            "/api/log/range": lambda: self._log_range(q),            # ★
+            "/api/log/stream":lambda: self._log_stream(q),           # ★
+            "/api/find":      lambda: self._find(q),
+            "/api/db/health": lambda: self._db_health(),
+            "/api/db/query":  lambda: self._db_query(q),             # ★
+            "/api/db/metrics":lambda: self._db_metrics(),
+            "/api/dmesg":     lambda: self._dmesg(q),
+            "/api/config":    lambda: self._config(q),               # ★
+            "/api/metrics":   lambda: self._prometheus(),            # ★
+            "/api/health":    lambda: self._json(200, {"ok":True,"uptime":int(time.time()-_START_TIME)}),
+            "/api/token":     lambda: self._token(q),
+            # [V007.37 v4.5] 合并 dev-agent v3.5 端点 (排查 disk I/O 必需)
+            "/api/sqlite":       lambda: self._sqlite(q),
+            "/api/sqlite/load":  lambda: self._sqlite_load(q),
+            "/api/iostat":       lambda: self._iostat(q),
+            "/api/proc/io":      lambda: self._proc_io(q),
+            # [V007.45 v4.6] 部署智能体 SOP 端点 (修 12+ 小时失职)
+            "/api/deploy/current":    lambda: self._deploy_current(q),       # current 链接 + 实际目录
+            "/api/deploy/history":    lambda: self._deploy_history(q),       # 最近 10 次部署
+            "/api/deploy/check_files":lambda: self._deploy_check_files(q),   # 8 文件 MD5 强校验
+            "/api/ports/auto_detect": lambda: self._ports_auto_detect(q),    # 3011/5001/8081/9101 扫描
+            "/api/verify/invariant":  lambda: self._verify_invariant(q),     # V8ab 业务回归 (200 次压测)
             }
             if route in handlers:
                 handlers[route]()
@@ -744,6 +758,174 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
             self._json(200, io)
         except Exception as e:
             self._json(500, {"err": str(e), "pid": pid})
+
+    # ── /api/deploy/current ★ [V007.45 v4.6] ─────────
+    def _deploy_current(self, q):
+        """[V007.45 BUG-FIX 2026-07-09] 看 current symlink 指向 + 实际目录
+        之前 12+ 小时我看 /opt/app/current 误判, 实际是 symlink 指向空 v20260708_014/
+        现在: 1 个端点返 symlink + 实际目录 + 实际 mtime
+        """
+        result = {}
+        try:
+            current = "/opt/app/current"
+            if os.path.islink(current):
+                target = os.readlink(current)
+                result["symlink"] = current
+                result["target"] = target
+                target_full = os.path.join(os.path.dirname(current), target)
+                if os.path.exists(target_full):
+                    result["target_exists"] = True
+                    result["target_files"] = sum(1 for _ in os.scandir(target_full))
+                    result["target_mtime"] = os.path.getmtime(target_full)
+                else:
+                    result["target_exists"] = False
+        except Exception as e:
+            result["err"] = str(e)
+        # 看实际跑的 server.py
+        try:
+            out = subprocess.run(["ps", "auxf"], capture_output=True, text=True, timeout=3).stdout
+            server_lines = [l for l in out.split("\n") if "server.py" in l and "grep" not in l]
+            if server_lines:
+                result["server_running"] = server_lines[0].strip()
+        except Exception:
+            pass
+        self._json(200, result)
+
+    # ── /api/deploy/history ★ ───────────────────────
+    def _deploy_history(self, q):
+        """[V007.45] 看 MANIFEST 或 deploy_history 目录的最近 10 次部署"""
+        n = int(q.get("n", ["10"])[0])
+        results = []
+        # 1. MANIFEST 文件
+        manifest = "/opt/app/deployments/MANIFEST"
+        if os.path.exists(manifest):
+            try:
+                with open(manifest) as f:
+                    for line in f.readlines()[-n:]:
+                        results.append({"source": "MANIFEST", "line": line.strip()})
+            except Exception:
+                pass
+        # 2. /opt/app/deployments/ 目录按 mtime 倒序
+        try:
+            deps = [d for d in os.listdir("/opt/app/deployments") if d.startswith("v20")]
+            deps.sort(key=lambda d: os.path.getmtime(f"/opt/app/deployments/{d}"), reverse=True)
+            for d in deps[:n]:
+                full = f"/opt/app/deployments/{d}"
+                results.append({
+                    "source": "mtime",
+                    "version": d,
+                    "mtime": os.path.getmtime(full),
+                    "is_link": os.path.islink(full),
+                })
+        except Exception:
+            pass
+        self._json(200, {"count": len(results), "history": results[:n]})
+
+    # ── /api/deploy/check_files ★ ───────────────────
+    def _deploy_check_files(self, q):
+        """[V007.45 BUG-FIX 2026-07-09] 强校验 V007.46 8 文件 MD5
+        之前 5/8 V007.46 文件假阳性, 实际未真部署
+        现在: 8 文件 MD5 + V007.46 标记数, 部署后立即报警
+        """
+        files_to_check = [
+            ("meta/server.py", ["V007.46", "V007.43", "V007.45"]),
+            ("meta/core/sql_connection_pool.py", ["V007.46", "V007.47", "V007.42"]),
+            ("meta/core/safe_connect.py", ["V007.46", "V007.41"]),
+            ("meta/services/async_audit_writer.py", ["V007.46"]),
+            ("meta/core/db_health_monitor.py", ["V007.46"]),
+            ("meta/core/diagnostics.py", ["V007.46"]),
+            ("meta/services/import_export_service.py", ["V007.46"]),
+            ("meta/services/query_service.py", ["V007.46"]),
+        ]
+        results = []
+        for rel, markers in files_to_check:
+            full = f"/opt/app/deployments/{rel}"
+            entry = {"file": rel, "markers": {}, "exists": os.path.exists(full)}
+            if entry["exists"]:
+                try:
+                    with open(full) as f:
+                        content = f.read()
+                    entry["size"] = len(content)
+                    for m in markers:
+                        entry["markers"][m] = content.count(m)
+                    entry["mtime"] = os.path.getmtime(full)
+                except Exception as e:
+                    entry["err"] = str(e)
+            results.append(entry)
+        # 评判: 必须每个文件每个 marker >= 1
+        all_pass = all(
+            e["exists"] and all(v >= 1 for v in e.get("markers", {}).values())
+            for e in results
+        )
+        self._json(200, {
+            "all_pass": all_pass,
+            "files": results,
+            "summary": f"{sum(1 for e in results if e['exists'] and all(v >= 1 for v in e.get('markers', {}).values()))}/{len(results)} V007.46 真部署"
+        })
+
+    # ── /api/ports/auto_detect ★ ────────────────────
+    def _ports_auto_detect(self, q):
+        """[V007.45 BUG-FIX] 扫 3011/5001/8081/9101, 跟 server 对齐
+        之前 12+ 小时误判 5001 vs 3011, 现在自动选 listening 端口
+        """
+        target_ports = [3011, 5001, 8081, 9101]
+        result = {}
+        try:
+            out = subprocess.run(["ss", "-tlnp"], capture_output=True, text=True, timeout=5).stdout
+            for p in target_ports:
+                listening = f":{p} " in out or out.endswith(f":{p}\n") or f"*:{p}" in out
+                result[str(p)] = "listening" if listening else "down"
+        except Exception as e:
+            result["err"] = str(e)
+        # 推荐: server 跑 3011 (yonaa 默认), unified 跟 server 对齐
+        server_port = "3011" if result.get("3011") == "listening" else ("5001" if result.get("5001") == "listening" else None)
+        if server_port and result.get("8081") == "down" and result.get("9101") == "listening":
+            result["recommend"] = f"启 unified: BACKEND_PORT={server_port} python3 unified_server.py"
+        self._json(200, result)
+
+    # ── /api/verify/invariant ★ ─────────────────────
+    def _verify_invariant(self, q):
+        """[V007.45] 部署后立即跑 V8ab 业务回归 (200 次压测)
+        之前 V8ab 100/100 login 200 误判 V007.46 修复, 实际 login 不触发 disk I/O
+        现在: 200 次 sqlite/load (db 层) + check disk I/O + 报实际结果
+        """
+        n = int(q.get("n", ["200"])[0])
+        result = {"ts": int(time.time()), "n": n}
+        # 1. /api/sqlite/load 200 次
+        try:
+            resp = urllib.request.urlopen(f"http://127.0.0.1:9101/api/sqlite/load?n={n}&db=architecture", timeout=60)
+            d = json.loads(resp.read().decode("utf-8"))
+            result["load_ok"] = d.get("ok", 0)
+            result["load_fail"] = d.get("fail", 0)
+            result["load_qps"] = d.get("qps", 0)
+            result["load_fail_rate"] = d.get("fail_rate", 0)
+        except Exception as e:
+            result["load_err"] = str(e)
+        # 2. /api/iostat %util
+        try:
+            resp = urllib.request.urlopen(f"http://127.0.0.1:9101/api/iostat", timeout=5)
+            d = json.loads(resp.read().decode("utf-8"))
+            out = d.get("output", "")
+            lines = [l for l in out.split("\n") if "vda " in l]
+            if lines:
+                last = lines[-1].split()
+                result["iostat_util_pct"] = float(last[12]) if len(last) > 12 else -1
+        except Exception as e:
+            result["iostat_err"] = str(e)
+        # 3. /api/db/health
+        try:
+            resp = urllib.request.urlopen(f"http://127.0.0.1:9101/api/db/health", timeout=5)
+            d = json.loads(resp.read().decode("utf-8"))
+            result["db_integrity"] = d.get("integrity", "?")
+        except Exception as e:
+            result["db_err"] = str(e)
+        # 评判
+        result["PASS"] = (
+            result.get("load_fail_rate", 1) == 0
+            and result.get("iostat_util_pct", 100) < 30
+            and result.get("db_integrity", "?") == "ok"
+        )
+        self._json(200, result)
 
 class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True

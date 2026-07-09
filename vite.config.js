@@ -125,6 +125,41 @@ export default defineConfig({
       }
     }
   },
+  // [V007.53] preview 模式代理: 让 vite preview 也转发 /api/* 和 /socket.io 到后端 3018
+  //   背景: 用户在 3006 看到 "响应解析失败 (status=404)"
+  //   根因: vite preview 默认不带 proxy, 所有 /api/* 走 SPA fallback 返回 index.html
+  //         前端 fetch 把 HTML 当 JSON 解析, 报 PARSE_ERROR (用户误以为 404)
+  //   修复: 复用 server.proxy 同样的规则到 preview
+  //   注意: 与 server.proxy 配置完全相同, 避免在 dev / preview 行为不一致
+  preview: {
+    host: true,
+    port: 3006,
+    headers: {
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+    },
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3018',
+        changeOrigin: true,
+        ws: true,
+        timeout: 180000,
+        proxyTimeout: 180000,
+        configure: (proxy) => {
+          proxy.on('error', (err) => {
+            // eslint-disable-next-line no-console
+            console.error('[Vite Preview Proxy] Connection error:', err.message)
+          })
+        }
+      },
+      '/socket.io': {
+        target: 'http://localhost:3018',
+        changeOrigin: true,
+        ws: true,
+      }
+    }
+  },
   css: {
     preprocessorOptions: {
       scss: {

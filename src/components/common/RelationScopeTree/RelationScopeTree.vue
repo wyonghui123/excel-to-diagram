@@ -476,10 +476,13 @@ const computedCategories = computed(() => {
 })
 
 function handleObjectScopeChange({ boIds, domainIds, subDomainIds, serviceModuleIds }) {
-  selectedBoIds.value = boIds || []
-  selectedDomainIds.value = domainIds || []
-  selectedSubDomainIds.value = subDomainIds || []
-  selectedServiceModuleIds.value = serviceModuleIds || []
+  // [BUG-V048c 修复 2026-07-09] 去重 domain/subDomain/SM/BO ids，避免重复累加
+  //   之前: treeNodesToScope 返回的数组可能含重复 id (el-tree 在某些情况下返回重复节点)
+  //   修复: 用 Set 去重后再赋值
+  selectedBoIds.value = [...new Set((boIds || []).map(normalizeId))]
+  selectedDomainIds.value = [...new Set((domainIds || []).map(normalizeId))]
+  selectedSubDomainIds.value = [...new Set((subDomainIds || []).map(normalizeId))]
+  selectedServiceModuleIds.value = [...new Set((serviceModuleIds || []).map(normalizeId))]
   localSelectedBoCount.value = (boIds || []).length + (domainIds || []).length + (subDomainIds || []).length + (serviceModuleIds || []).length
 
   // OSS 变更时清空 relationCodes。

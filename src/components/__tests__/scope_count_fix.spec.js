@@ -318,6 +318,47 @@ describe('selectedBoCount V048 (按树节点 count 精确累加)', () => {
     //   domain loop: domainChildCount.get(1) = 4
     expect(result).toBe(4)
   })
+
+  // ========================================
+  // V048c 修复: selectedDomainIds 去重
+  // ========================================
+  it('V048c bug 复现: selectedDomainIds 含重复 id → selectedBoCount 累加两次', () => {
+    // 如果 selectedDomainIds 含重复 id (如 [1, 1])
+    // selectedBoCount 会累加两次 domain count
+    // 这是 bug 状态，期望 8 (4+4) 而不是 4
+    const result = selectedBoCountV048({
+      selectedDomainIds: [1, 1],  // 重复 id
+      treeData,
+      hierarchyMap,
+    })
+    // Bug 状态: domain loop 执行两次 → 4 + 4 = 8
+    expect(result).toBe(8)
+    // 修复: handleObjectScopeChange 用 Set 去重: selectedDomainIds.value = [...new Set(domainIds.map(normalizeId))]
+    // 这样就不会出现重复 id
+  })
+
+  it('V048c 修复: handleObjectScopeChange 去重后 selectedDomainIds 无重复', () => {
+    // 模拟 handleObjectScopeChange 的去重逻辑
+    const normalizeId = (v) => {
+      if (v == null) return v
+      if (typeof v === 'number') return v
+      const s = String(v)
+      const numStr = s.replace(/^(d|s|sm)_/, '')
+      const n = Number(numStr)
+      return Number.isNaN(n) ? s : n
+    }
+    const rawDomainIds = [1, 1, 'd_1', 1]  // 含重复
+    const dedupedDomainIds = [...new Set(rawDomainIds.map(normalizeId))]
+    expect(dedupedDomainIds).toEqual([1])  // 去重后只剩 1 个
+
+    // 用去重后的 id 调用 selectedBoCount
+    const result = selectedBoCountV048({
+      selectedDomainIds: dedupedDomainIds,
+      treeData,
+      hierarchyMap,
+    })
+    expect(result).toBe(4)  // 正确: 只累加一次
+  })
 })
 
 // ============================================================

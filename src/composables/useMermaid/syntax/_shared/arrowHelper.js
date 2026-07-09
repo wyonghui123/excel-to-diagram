@@ -83,6 +83,16 @@ export function sanitizeLabel(label) {
  * - 换行 → <br/> (mermaid 标准换行符)
  * - 反斜杠 → #92; (避免转义冲突)
  * - 方括号 [ ] ( ) { }: mermaid 11.13 在 [...] 内部需要转义
+ *
+ * [V007.54] 2026-07-09 HTML 实体转义 (< > &):
+ *   背景: MermaidComponent.vue L342 用 innerHTML 注入 mermaid 代码:
+ *     container.innerHTML = `<pre class="mermaid">${mermaidCode}</pre>`
+ *   如果 BO 名称含 < 或 > 或 <br>, 浏览器会把 mermaidCode 当 HTML 解析,
+ *   mermaid.run() 拿到的 textContent 残缺不全 → Syntax error in text
+ *   验证: tools/test_br_in_label.mjs 显示 "BO</pre>名称" → textContent 截断
+ *   修复: 把 < > & 转成 HTML 实体, mermaid 11.13 也接受 (&lt; &gt; &amp;)
+ *   顺序: 先转 < > & (HTML 实体), 再转 [ ] { } ( ) ' " \ 等
+ *
  * - 前后空白 trim
  *
  * 使用场景:
@@ -95,7 +105,10 @@ export function sanitizeMermaidLabel(label) {
   const raw = String(label)
   if (!raw) return ''
   return raw
-    .replace(/\\/g, '#92;')          // 反斜杠
+    .replace(/&/g, '&amp;')           // [V007.54] & (HTML 实体) - 必须在 < > 之前转
+    .replace(/</g, '&lt;')            // [V007.54] < (HTML 标签起始)
+    .replace(/>/g, '&gt;')            // [V007.54] > (HTML 标签结束)
+    .replace(/\\/g, '#92;')           // 反斜杠
     .replace(/"/g, '#quot;')          // 双引号 (mermaid 11.13 官方)
     .replace(/'/g, '#apos;')          // 单引号
     .replace(/[\r\n]+/g, '<br/>')    // 换行

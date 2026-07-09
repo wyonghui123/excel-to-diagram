@@ -16,6 +16,7 @@
  */
 
 import { LAYOUT_TEMPLATES, COLOR_SCHEMES } from '@/constants/diagram'
+import { sanitizeMermaidLabel } from '../composables/useMermaid/syntax/_shared/arrowHelper.js'
 
 export { LAYOUT_TEMPLATES }
 
@@ -439,14 +440,18 @@ export function generateServiceModuleMermaidCode(diagramData) {
   // 生成子图（容器）
   containers.forEach(container => {
     const containerId = container.id.replace(/[^a-zA-Z0-9]/g, '_');
-    code += `    subgraph ${containerId}["${container.fullTitle}"]\n`;
+    // [V007.52 P0] 转义 container.fullTitle / node.name / node.code 防 mermaid 11.13 syntax error
+    const safeContainerTitle = sanitizeMermaidLabel(container.fullTitle || '')
+    code += `    subgraph ${containerId}["${safeContainerTitle}"]\n`;
 
     // 容器内的节点
     container.nodes.forEach(nodeId => {
       const node = nodes.find(n => n.id === nodeId);
       if (node) {
-        const nodeLabel = `${node.name}<br/>${node.code}`;
-        code += `        ${node.code}["${nodeLabel}"]\n`;
+        const safeNodeName = sanitizeMermaidLabel(node.name || '')
+        const safeNodeCode = sanitizeMermaidLabel(node.code || '')
+        const nodeLabel = `${safeNodeName}<br/>${safeNodeCode}`;
+        code += `        ${safeNodeCode}["${nodeLabel}"]\n`;
       }
     });
 

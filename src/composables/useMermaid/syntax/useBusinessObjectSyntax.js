@@ -811,7 +811,10 @@ export function useBusinessObjectSyntax() {
             const id = nodeNameToIdMap.get(key)
             if (id && !definedNodes.has(id)) {
               // v21: use " · " separator (single-line), rect auto-calculates width
-              const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+              // [V007.52 P0] 转义 node.name / node.code 防 mermaid 11.13 syntax error
+              const safeName = sanitizeMermaidLabel(node.name || '')
+              const safeCode = sanitizeMermaidLabel(node.code || '')
+              const displayText = safeCode ? `${safeName} · (${safeCode})` : safeName
               mermaidCode += `  ${id}["${displayText}"]:::node\n`
               definedNodes.add(id)
             }
@@ -1004,7 +1007,10 @@ export function useBusinessObjectSyntax() {
         const centerMark = node.isCenter ? '◆' : ''
         // 关键修复 v21：mermaid 11 不支持 ["...\n..."] 换行语法（只支持 <br/>）
         // 改成 " · " 单行分隔符，避免 <br/> 换行 + max-width 切第二行问题
-        const displayText = node.code ? `${centerMark}${node.name || node.originalName} · (${node.code})` : centerMark + (node.name || node.originalName)
+        // [V007.52 P0] 转义 node.name / node.code 防 mermaid 11.13 syntax error
+        const safeName = sanitizeMermaidLabel(node.name || node.originalName || '')
+        const safeCode = sanitizeMermaidLabel(node.code || '')
+        const displayText = safeCode ? `${centerMark}${safeName} · (${safeCode})` : centerMark + safeName
         mermaidCode += `    ${node.id}["${displayText}"]:::node\n`
       })
 
@@ -1198,7 +1204,10 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
             container.nodes.forEach(nodeId => {
               const node = nodeMap.get(nodeId)
               if (node && !definedNodes.has(nodeId)) {
-                const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+                // [V007.52 P0] 转义 disabled container 内节点 label
+                const safeName = sanitizeMermaidLabel(node.name || '')
+                const safeCode = sanitizeMermaidLabel(node.code || '')
+                const displayText = safeCode ? `${safeName} · (${safeCode})` : safeName
                 code += `  ${nodeId}["${displayText}"]\n`
                 definedNodes.add(nodeId)
               }
@@ -1228,7 +1237,10 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
           container.nodes.forEach(nodeId => {
             const node = nodeMap.get(nodeId)
             if (node && !definedNodes.has(nodeId)) {
-              const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+              // [V007.52 P0] 转义 directNodesContainer 内节点 label
+              const safeName = sanitizeMermaidLabel(node.name || '')
+              const safeCode = sanitizeMermaidLabel(node.code || '')
+              const displayText = safeCode ? `${safeName} · (${safeCode})` : safeName
               code += `    ${nodeId}["${displayText}"]\n`
               definedNodes.add(nodeId)
             }
@@ -1250,7 +1262,10 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
           container.nodes.forEach(nodeId => {
             const node = nodeMap.get(nodeId)
             if (node && !definedNodes.has(nodeId)) {
-              const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+              // [V007.52 P0] 转义子组 enabled container 内节点 label
+              const safeName = sanitizeMermaidLabel(node.name || '')
+              const safeCode = sanitizeMermaidLabel(node.code || '')
+              const displayText = safeCode ? `${safeName} · (${safeCode})` : safeName
               code += `      ${nodeId}["${displayText}"]\n`
               definedNodes.add(nodeId)
             }
@@ -1261,7 +1276,10 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
           container.nodes.forEach(nodeId => {
             const node = nodeMap.get(nodeId)
             if (node && !definedNodes.has(nodeId)) {
-              const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+              // [V007.52 P0] 转义子组 disabled container 内节点 label
+              const safeName = sanitizeMermaidLabel(node.name || '')
+              const safeCode = sanitizeMermaidLabel(node.code || '')
+              const displayText = safeCode ? `${safeName} · (${safeCode})` : safeName
               code += `    ${nodeId}["${displayText}"]\n`
               definedNodes.add(nodeId)
             }

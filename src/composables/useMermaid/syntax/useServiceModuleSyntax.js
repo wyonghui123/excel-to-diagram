@@ -338,7 +338,10 @@ export function useServiceModuleSyntax() {
         // 渲染未分组的节点（不在 definedNodes 中的节点）
         nodes.forEach(node => {
           if (!definedNodes.has(node.id)) {
-            const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+            // [V007.52 P0] 转义 node.name / node.code 防 mermaid 11.13 syntax error
+            const safeName = sanitizeMermaidLabel(node.name || '')
+            const safeCode = sanitizeMermaidLabel(node.code || '')
+            const displayText = safeCode ? `${safeName}\\n(${safeCode})` : safeName
             mermaidCode += `  ${node.id}["${displayText}"]\n`
             definedNodes.add(node.id)
           }
