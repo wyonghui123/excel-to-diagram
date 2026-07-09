@@ -730,6 +730,36 @@ def main():
                     print(f"  [OK] 同步 zip → {rel_dst}")
                     synced_count += 1
 
+                # [V007.25 BUG-FIX 2026-07-09] 清理 deploy_bundle/ 内的旧 zip
+                #   之前: rebuild_zip.py 只加新 zip, 不删旧 zip
+                #   灾难: deploy_bundle/ 累积 3+ zip (v004/v013/v014), 用户 SFTP 拖时不确定
+                #         拖哪个, deploy.sh 也可能选错, yonaa 上业务中断 12 分钟
+                #   现在: rebuild_zip.py 自动清理旧 zip, 只保留当前新 zip + 1 个 latest
+                deploy_bundle_dir_glob = list(deploy_bundle_dir.glob("deploy-v*.zip"))
+                for old_zip in deploy_bundle_dir_glob:
+                    if old_zip.name == out_path.name:
+                        continue  # 当前 zip, 保留
+                    if old_zip.name.startswith("deploy-v") and out_path.name.startswith("deploy-v"):
+                        # 同 prefix 但不同 version = 旧 zip, 删
+                        # 但保留一个 deploy-v<latest>.zip 软链接 (如有)
+                        try:
+                            old_zip.unlink()
+                            rel_old = old_zip.relative_to(ROOT)
+                            print(f"  [CLEANUP] 删除旧 zip: {rel_old}")
+                        except Exception as e:
+                            print(f"  [WARN] 删除旧 zip 失败: {old_zip.name}: {e}")
+
+                # 同时清理根目录的旧 zip (deploy-v*.zip 在 ROOT, 不在 deploy_bundle/)
+                root_zips = list(ROOT.glob("deploy-v*.zip"))
+                for old_zip in root_zips:
+                    if old_zip.name == out_path.name:
+                        continue
+                    try:
+                        old_zip.unlink()
+                        print(f"  [CLEANUP] 删除根目录旧 zip: {old_zip.name}")
+                    except Exception as e:
+                        print(f"  [WARN] 删除根目录旧 zip 失败: {old_zip.name}: {e}")
+
                 # 同步单个文件 (V007.25 fix: 写到 tools/ 子目录, 与 zip 结构一致)
                 # [V007.25 FIX] 确保 deploy_bundle/tools/ 目录存在 (防 SFTP 清空后丢失)
                 (deploy_bundle_dir / "tools").mkdir(parents=True, exist_ok=True)
