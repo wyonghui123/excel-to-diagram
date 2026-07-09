@@ -176,9 +176,23 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
             if route in handlers:
                 handlers[route]()
             elif route in ("/", "/api"):
-                self._json(200, self._help())
+                # [V007.45] 列所有端点 (修 12+ 小时"假端点"误诊)
+                # 之前用 /api/sandbox /api/diag/disk_io /api/path 全 404, 但 mock 假数据被误信
+                # 现在返完整端点表, 部署智能体直接看
+                self._json(200, {
+                    "service": "log_service v4",
+                    "endpoints": sorted(handlers.keys()) + ["/", "/api"],
+                    "note": "v4 has 21 endpoints; common: /api/system /api/proc /api/process /api/log /api/db/health /api/sqlite/load /api/iostat /api/dmesg",
+                })
             else:
-                self._json(404, {"error": "not found"})
+                # [V007.45] 404 时返"可能相似端点"建议, 避免假端点
+                similar = [k for k in handlers.keys() if any(part in route for part in k.split('/'))]
+                self._json(404, {
+                    "error": "not found",
+                    "route": route,
+                    "similar": similar[:5],
+                    "hint": f"GET /api 列全部端点"
+                })
         except Exception as e:
             self._json(500, {"error": str(e), "type": type(e).__name__})
 

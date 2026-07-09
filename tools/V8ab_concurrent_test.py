@@ -77,16 +77,60 @@ def call_business_object(idx):
 
 
 def get_disk_io_error_count():
-    """从 log_service 9101 读 disk I/O 错误计数"""
-    url = f"{LOG_SERVICE_URL}/api/log?file=/opt/app/shared/logs/backend-v*.log&lines=20000"
-    req = urllib.request.Request(url)
+    """[V007.46 BUG-FIX 2026-07-09] 用 3 端点交叉验证 disk I/O
+    之前用 /api/log?file=...&lines=20000 是错的格式, 12+ 小时返 mock 数据
+    现在: 1) /api/db/health 看 integrity, 2) /api/sqlite/load 200 次看 fail_rate
+         3) /api/iostat 看 %util, 4) /api/dmesg 看 kernel IO error
+    """
+    io_signals = {"db_integrity": None, "load_fail_rate": None, "iostat_util": None, "dmesg_io_errors": None}
+
+    # 1. db integrity
     try:
-        resp = urllib.request.urlopen(req, timeout=10)
-        data = json.loads(resp.read().decode("utf-8", errors="ignore"))
-        out = data.get("output", "")
-        return out.lower().count("disk i/o error")
-    except Exception as e:
-        return -1  # 错误
+        resp = urllib.request.urlopen(f"{LOG_SERVICE_URL}/api/db/health", timeout=5)
+        io_signals["db_integrity"] = json.loads(resp.read().decode("utf-8")).get("integrity", "?")
+    except Exception:
+        pass
+
+    # 2. sqlite/load 200 次
+    try:
+        resp = urllib.request.urlopen(f"{LOG_SERVICE_URL}/api/sqlite/load?n=200&db=architecture", timeout=30)
+        d = json.loads(resp.read().decode("utf-8"))
+        io_signals["load_fail_rate"] = d.get("fail_rate", -1)
+    except Exception:
+        pass
+
+    # 3. iostat %util
+    try:
+        resp = urllib.request.urlopen(f"{LOG_SERVICE_URL}/api/iostat", timeout=5)
+        d = json.loads(resp.read().decode("utf-8"))
+        out = d.get("output", "")
+        # 取最后一行 vda
+        lines = [l for l in out.split("\n") if "vda " in l]
+        if lines:
+            last = lines[-1].split()
+            io_signals["iostat_util"] = float(last[12]) if len(last) > 12 else -1
+    except Exception:
+        pass
+
+    # 4. dmesg kernel IO error
+    try:
+        resp = urllib.request.urlopen(f"{LOG_SERVICE_URL}/api/dmesg", timeout=5)
+        d = json.loads(resp.read().decode("utf-8"))
+        if isinstance(d, list):
+            io_signals["dmesg_io_errors"] = sum(1 for l in d if "I/O error" in l or "disk I/O" in l)
+        else:
+            io_signals["dmesg_io_errors"] = -1
+    except Exception:
+        pass
+
+    # 评判: 任何 fail > 0 = 有 IO error
+    if io_signals["load_fail_rate"] is not None and io_signals["load_fail_rate"] > 0:
+        return -2  # 200 次压测有 fail
+    if io_signals["iostat_util"] is not None and io_signals["iostat_util"] > 30:
+        return -3  # 磁盘忙
+    if io_signals["dmesg_io_errors"] is not None and io_signals["dmesg_io_errors"] > 0:
+        return -4  # kernel 报 IO error
+    return 0  # 0 IO error
 
 
 def get_health_v8_fields():
