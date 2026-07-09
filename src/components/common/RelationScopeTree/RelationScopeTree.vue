@@ -369,33 +369,53 @@ const domainChildCount = computed(() => {
 //                  + Σ(sd.cnt where sd.selected && sd.domain ∉ sel)
 //                  + Σ(domain.cnt where domain.selected)
 //                  + (selectedBoIds 不在任何祖先下时的 fallback)
+// [BUG-V048b 修复 2026-07-08] ID 类型规范化: 兼容数字/字符串/带前缀 id
+//   之前 bug: emit 链路上 node.data?.originalId 是数字, 但 fallback 到 node.id 时
+//     是 prefixed 字符串 ('d_5'), 与 hierarchyMap 的数字 key 5 不匹配
+//     → Set.has(5) 返回 false (因为 Set 里是 'd_5') → 跳过逻辑失效
+//     → SD 累加 + domain 累加 → 双重计数 (用户报告 141→282)
+//   修复: 用 normalizeId 把所有 id 转成数字, Set.has 比较统一
+function normalizeId(v) {
+  if (v == null) return v
+  if (typeof v === 'number') return v
+  // 字符串可能是 'd_5' / '5' / 'sm_5' / 's_5'
+  const s = String(v)
+  // 去前缀
+  const numStr = s.replace(/^(d|s|sm)_/, '')
+  const n = Number(numStr)
+  return Number.isNaN(n) ? s : n
+}
+
 const selectedBoCount = computed(() => {
-  const selectedDomainSet = new Set(selectedDomainIds.value)
-  const selectedSubDomainSet = new Set(selectedSubDomainIds.value)
+  const selectedDomainSet = new Set(selectedDomainIds.value.map(normalizeId))
+  const selectedSubDomainSet = new Set(selectedSubDomainIds.value.map(normalizeId))
 
   let total = 0
 
   // 1. 选中的 SM (只在所属 SD/domain 未被选中时累加)
   for (const smId of selectedServiceModuleIds.value) {
-    const info = hierarchyMap.value[smId]
+    const nId = normalizeId(smId)
+    const info = hierarchyMap.value[nId] || hierarchyMap.value[smId] || hierarchyMap.value[`sm_${nId}`]
     if (!info) continue
     // 祖先被勾时, 该 SM 已被覆盖, 跳过
     if (selectedSubDomainSet.has(info.subDomainId)) continue
     if (selectedDomainSet.has(info.domainId)) continue
-    total += smChildCount.value.get(smId) || 0
+    total += smChildCount.value.get(nId) || smChildCount.value.get(smId) || 0
   }
 
   // 2. 选中的 SD (只在所属 domain 未被选中时累加)
   for (const sdId of selectedSubDomainIds.value) {
-    const info = hierarchyMap.value[sdId]
+    const nId = normalizeId(sdId)
+    const info = hierarchyMap.value[nId] || hierarchyMap.value[sdId] || hierarchyMap.value[`s_${nId}`]
     if (!info) continue
     if (selectedDomainSet.has(info.domainId)) continue
-    total += sdChildCount.value.get(sdId) || 0
+    total += sdChildCount.value.get(nId) || sdChildCount.value.get(sdId) || 0
   }
 
   // 3. 选中的 domain (直接累加)
   for (const dId of selectedDomainIds.value) {
-    total += domainChildCount.value.get(dId) || 0
+    const nId = normalizeId(dId)
+    total += domainChildCount.value.get(nId) || domainChildCount.value.get(dId) || 0
   }
 
   // 4. 兜底: 只选了 BO (无任何祖先), 用 selectedBoIds.length

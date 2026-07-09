@@ -37,30 +37,43 @@ describe('selectedBoCount V048 (按树节点 count 精确累加)', () => {
     const sdChildCount = buildCountMap(treeData, 'sub_domain')
     const domainChildCount = buildCountMap(treeData, 'domain')
 
-    const selectedDomainSet = new Set(selectedDomainIds)
-    const selectedSubDomainSet = new Set(selectedSubDomainIds)
+    // [V048b] ID 类型规范化: 兼容数字/字符串/带前缀 id
+    const normalizeId = (v) => {
+      if (v == null) return v
+      if (typeof v === 'number') return v
+      const s = String(v)
+      const numStr = s.replace(/^(d|s|sm)_/, '')
+      const n = Number(numStr)
+      return Number.isNaN(n) ? s : n
+    }
+
+    const selectedDomainSet = new Set(selectedDomainIds.map(normalizeId))
+    const selectedSubDomainSet = new Set(selectedSubDomainIds.map(normalizeId))
     let total = 0
 
     // 1. 选中的 SM (只在所属 SD/domain 未被选中时累加)
     for (const smId of selectedServiceModuleIds) {
-      const info = hierarchyMap[smId]
+      const nId = normalizeId(smId)
+      const info = hierarchyMap[nId] || hierarchyMap[smId] || hierarchyMap[`sm_${nId}`]
       if (!info) continue
       if (selectedSubDomainSet.has(info.subDomainId)) continue
       if (selectedDomainSet.has(info.domainId)) continue
-      total += smChildCount.get(smId) || 0
+      total += smChildCount.get(nId) || smChildCount.get(smId) || 0
     }
 
     // 2. 选中的 SD (只在所属 domain 未被选中时累加)
     for (const sdId of selectedSubDomainIds) {
-      const info = hierarchyMap[sdId]
+      const nId = normalizeId(sdId)
+      const info = hierarchyMap[nId] || hierarchyMap[sdId] || hierarchyMap[`s_${nId}`]
       if (!info) continue
       if (selectedDomainSet.has(info.domainId)) continue
-      total += sdChildCount.get(sdId) || 0
+      total += sdChildCount.get(nId) || sdChildCount.get(sdId) || 0
     }
 
     // 3. 选中的 domain (直接累加)
     for (const dId of selectedDomainIds) {
-      total += domainChildCount.get(dId) || 0
+      const nId = normalizeId(dId)
+      total += domainChildCount.get(nId) || domainChildCount.get(dId) || 0
     }
 
     // 4. 兜底: 只选了 BO (无任何祖先) → 用 selectedBoIds.length
@@ -280,6 +293,30 @@ describe('selectedBoCount V048 (按树节点 count 精确累加)', () => {
       hierarchyMap,
     })
     expect(v48Result).not.toBe(7) // 不等于 v39 的双重计数结果
+  })
+
+  // ========================================
+  // V048b: ID 类型规范化 (兼容 emit 字符串 id)
+  // ========================================
+  it('V048b: emit 字符串 id (带前缀 d_/s_/sm_) → 仍然 141 (不双重计数)', () => {
+    // 模拟 emit 用了 node.id fallback (prefixed 字符串) 而不是 node.data.originalId
+    const result = selectedBoCountV048({
+      selectedDomainIds: ['d_1'],  // 字符串
+      selectedSubDomainIds: ['s_10', 's_11'],  // 字符串
+      selectedServiceModuleIds: ['sm_100', 'sm_101', 'sm_102'],  // 字符串
+      treeData,
+      hierarchyMap,
+    })
+    // hierarchyMap key 是数字, emit 是字符串 → V048 原始算法会 fail (返回 0)
+    // V048b normalize 后应能正确处理
+    // 实际生产中 hierarchyMap 实际可能不兼容字符串, 但 selectedBoCount 本身应该正确
+    // 这里我们期望: 用 normalize 后 Set 跳过逻辑生效
+    //   selectedDomainSet = {1} (normalize 'd_1' = 1)
+    //   selectedSubDomainSet = {10, 11}
+    //   SM loop: info.domainId=1 in Set → continue
+    //   SD loop: info.domainId=1 in Set → continue
+    //   domain loop: domainChildCount.get(1) = 4
+    expect(result).toBe(4)
   })
 })
 
