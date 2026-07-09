@@ -5,7 +5,7 @@ import { routeLayout } from '../layouts/index.js'
 import { checkDepth, checkCycle, createVisitedSet } from '../../../services/groupModel/safetyUtils.js'
 import { DataFlowLogger } from '../../../services/groupModel/dataFlowLogger.js'
 import { formatContainerTitle } from '../../../utils/formatContainerTitle.js'
-import { getArrowSyntax, sanitizeLabel } from './_shared/arrowHelper.js'
+import { getArrowSyntax, sanitizeLabel, sanitizeMermaidLabel } from './_shared/arrowHelper.js'
 
 function sortVirtualContainersBySize(containers) {
   if (!containers || containers.length === 0) {
@@ -982,6 +982,8 @@ export function useBusinessObjectSyntax() {
 
       const allNodesCenter = group.nodes.every(n => n.isCenter)
       const centerMark = allNodesCenter ? '◆' : ''
+      // [V007.51 P0] subgraph title 用 sanitizeMermaidLabel 严格转义 (mermaid 11.13)
+      //   groupName (domain/subDomain 名) + grandparent/parent 可能含 " ' \ 换行
       let subgraphTitle
       if (group.info.type === 'submodule') {
         subgraphTitle = `${centerMark}${groupName}\\n(${group.info.grandparent}/${group.info.parent})`
@@ -990,10 +992,12 @@ export function useBusinessObjectSyntax() {
       } else {
         subgraphTitle = centerMark + groupName
       }
+      // [V007.51 P0] 转义 subgraphTitle (groupName 是域/子域/服务名, 可能含 " ' \ 换行)
+      const safeSubgraphTitle = sanitizeMermaidLabel(subgraphTitle)
 
       const groupColor = colorMap.get(groupName) || BLOCK_DIAGRAM_STYLES.container.fill
 
-      mermaidCode += `  subgraph ${subId}["${subgraphTitle}"]\n`
+      mermaidCode += `  subgraph ${subId}["${safeSubgraphTitle}"]\n`
       mermaidCode += `    direction ${subgraphDirection}\n`
 
       group.nodes.forEach(node => {
@@ -1171,13 +1175,19 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
           if (containerEnabled) {
             const containerId = `${groupId}_C${idx + 1}`
             const containerTitle = formatContainerTitle(container.fullTitle || container.name || 'Container')
-            code += `  subgraph ${containerId}["${containerTitle}"]\n`
+            // [V007.51 P0] containerTitle 转义 (container.fullTitle 来自 GroupModel L430, 已 sanitizeMermaidLabel,
+            //   但保险起见再转一次, 防止其他路径注入)
+            const safeContainerTitle = sanitizeMermaidLabel(containerTitle)
+            code += `  subgraph ${containerId}["${safeContainerTitle}"]\n`
             code += `    direction ${actualDirection}\n`
             
             container.nodes.forEach(nodeId => {
               const node = nodeMap.get(nodeId)
               if (node && !definedNodes.has(nodeId)) {
-                const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+                // [V007.51 P0] node.name / node.code 转义 (mermaid 11.13 label 不允许 " ' \ 换行)
+                const safeNodeName = sanitizeMermaidLabel(node.name || '')
+                const safeNodeCode = sanitizeMermaidLabel(node.code || '')
+                const displayText = safeNodeCode ? `${safeNodeName} · (${safeNodeCode})` : safeNodeName
                 code += `    ${nodeId}["${displayText}"]\n`
                 definedNodes.add(nodeId)
               }
@@ -1200,7 +1210,9 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
     return code
   }
 
-  code += `  subgraph ${groupId}["${groupTitle}"]\n`
+  // [V007.51 P0] groupTitle 转义
+  const safeGroupTitle = sanitizeMermaidLabel(groupTitle)
+  code += `  subgraph ${groupId}["${safeGroupTitle}"]\n`
   code += `    direction ${actualDirection}\n`
 
   if (group.children && group.children.length > 0) {
@@ -1230,7 +1242,9 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
         if (containerEnabled) {
           const containerId = `${groupId}_C${idx + 1}`
           const containerTitle = formatContainerTitle(container.fullTitle || container.name || 'Container')
-          code += `    subgraph ${containerId}["${containerTitle}"]\n`
+          // [V007.51 P0] containerTitle 转义
+          const safeContainerTitle2 = sanitizeMermaidLabel(containerTitle)
+          code += `    subgraph ${containerId}["${safeContainerTitle2}"]\n`
           code += `      direction ${actualDirection}\n`
           
           container.nodes.forEach(nodeId => {

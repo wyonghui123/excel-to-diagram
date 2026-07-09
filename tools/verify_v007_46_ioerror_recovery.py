@@ -237,6 +237,79 @@ def check_v8af():
     return False
 
 
+def check_v8ag():
+    """V8ag: StepScopeSummary 步骤 1 关系数量告警 (V007.50 P0)
+    useDiagramData.js 已有 V007.49 BO 图渲染告警, V007.50 把告警提前到
+    StepChartType 内 StepScopeSummary 卡片 (步骤 0/1 类型选择页就看到)"""
+    issues = []
+    # 1. StepScopeSummary.vue 含 V007.50 改动
+    sss = WORKTREE_ROOT / "src" / "views" / "AADiagramApp" / "components" / "steps" / "StepScopeSummary.vue"
+    if not sss.exists():
+        issues.append("StepScopeSummary.vue 不存在")
+    else:
+        sss_content = sss.read_text(encoding="utf-8")
+        # import ElNotification
+        if "ElNotification" not in sss_content:
+            issues.append("StepScopeSummary.vue 缺 ElNotification import")
+        # warnTooManyRelationshipsStep1 函数
+        if "warnTooManyRelationshipsStep1" not in sss_content:
+            issues.append("StepScopeSummary.vue 缺 warnTooManyRelationshipsStep1 函数")
+        if "RELATIONSHIP_WARN_THRESHOLD" not in sss_content:
+            issues.append("StepScopeSummary.vue 缺 RELATIONSHIP_WARN_THRESHOLD 常量")
+        # watch total.objectRelations
+        if "watch:" not in sss_content:
+            issues.append("StepScopeSummary.vue 缺 watch 块")
+        if "'total.objectRelations'" not in sss_content and '"total.objectRelations"' not in sss_content:
+            issues.append("StepScopeSummary.vue 缺 watch 'total.objectRelations'")
+        # chartType prop
+        if "chartType" not in sss_content:
+            issues.append("StepScopeSummary.vue 缺 chartType prop")
+    # 2. StepChartType.vue 传 :chart-type="chartType"
+    sct = WORKTREE_ROOT / "src" / "views" / "AADiagramApp" / "components" / "steps" / "StepChartType.vue"
+    if not sct.exists():
+        issues.append("StepChartType.vue 不存在")
+    else:
+        sct_content = sct.read_text(encoding="utf-8")
+        if ":chart-type=\"chartType\"" not in sct_content and ':chart-type="chartType"' not in sct_content:
+            issues.append("StepChartType.vue 缺 :chart-type=\"chartType\" 传参")
+    if not issues:
+        PASSED.append("V8ag: StepScopeSummary 步骤 1 告警 (ElNotification + watch total.objectRelations + chartType prop + 状态机防重复)")
+        return True
+    FAILED.append("V8ag: " + "; ".join(issues))
+    return False
+
+
+def check_v8ah():
+    """V8ah: mermaid 11.13 label 严格转义覆盖 useBusinessObjectSyntax + useServiceModuleSyntax
+    (V007.48 修了 UnifiedRenderer + MermaidGenerator, V007.51 补 useBusinessObjectSyntax + useServiceModuleSyntax)"""
+    issues = []
+    # 1. useBusinessObjectSyntax.js
+    bos = WORKTREE_ROOT / "src" / "composables" / "useMermaid" / "syntax" / "useBusinessObjectSyntax.js"
+    if not bos.exists():
+        issues.append("useBusinessObjectSyntax.js 不存在")
+    else:
+        bos_content = bos.read_text(encoding="utf-8")
+        if "sanitizeMermaidLabel" not in bos_content:
+            issues.append("useBusinessObjectSyntax.js 缺 sanitizeMermaidLabel")
+        elif bos_content.count("sanitizeMermaidLabel(") < 4:
+            issues.append(f"useBusinessObjectSyntax.js sanitizeMermaidLabel( 调用 < 4 (实际 {bos_content.count('sanitizeMermaidLabel(')})")
+    # 2. useServiceModuleSyntax.js
+    sms = WORKTREE_ROOT / "src" / "composables" / "useMermaid" / "syntax" / "useServiceModuleSyntax.js"
+    if not sms.exists():
+        issues.append("useServiceModuleSyntax.js 不存在")
+    else:
+        sms_content = sms.read_text(encoding="utf-8")
+        if "sanitizeMermaidLabel" not in sms_content:
+            issues.append("useServiceModuleSyntax.js 缺 sanitizeMermaidLabel")
+        elif sms_content.count("sanitizeMermaidLabel(") < 3:
+            issues.append(f"useServiceModuleSyntax.js sanitizeMermaidLabel( 调用 < 3 (实际 {sms_content.count('sanitizeMermaidLabel(')})")
+    if not issues:
+        PASSED.append("V8ah: mermaid 11.13 label 严格转义 (sanitizeMermaidLabel) 覆盖 useBusinessObjectSyntax + useServiceModuleSyntax (V007.51 P0)")
+        return True
+    FAILED.append("V8ah: " + "; ".join(issues))
+    return False
+
+
 def check_v8ac():
     """V8ac: db_health_monitor 2 处裸连接 + async_audit_writer 降级路径 mmap_size=0"""
     issues = []
@@ -282,6 +355,8 @@ def main():
     check_v8ad()
     check_v8ae()
     check_v8af()
+    check_v8ag()
+    check_v8ah()
     print()
     print("-" * 60)
     print(f"PASSED ({len(PASSED)}):")
