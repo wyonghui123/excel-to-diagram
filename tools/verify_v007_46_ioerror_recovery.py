@@ -154,6 +154,49 @@ def check_v8ad():
     return False
 
 
+def check_v8ae():
+    """V8ae: mermaid 11.13.0 label 严格转义 (subgraph/node 全部走 sanitizeMermaidLabel)
+    防止 BO 名称含 " 时 syntax error"""
+    issues = []
+    # 1. arrowHelper.js 含 sanitizeMermaidLabel 函数
+    arrow_helper = WORKTREE_ROOT / "src" / "composables" / "useMermaid" / "syntax" / "_shared" / "arrowHelper.js"
+    if not arrow_helper.exists():
+        issues.append("arrowHelper.js 不存在")
+    else:
+        ah_content = arrow_helper.read_text(encoding="utf-8")
+        if "export function sanitizeMermaidLabel" not in ah_content:
+            issues.append("arrowHelper.js 缺 export function sanitizeMermaidLabel")
+        if "#quot;" not in ah_content:
+            issues.append("arrowHelper.js sanitizeMermaidLabel 缺 #quot; 转义")
+        if "<br/>" not in ah_content:
+            issues.append("arrowHelper.js sanitizeMermaidLabel 缺 <br/> 换行转义")
+    # 2. UnifiedRenderer.js 用 sanitizeMermaidLabel
+    ur = WORKTREE_ROOT / "src" / "services" / "groupModel" / "UnifiedRenderer.js"
+    if not ur.exists():
+        issues.append("UnifiedRenderer.js 不存在")
+    else:
+        ur_content = ur.read_text(encoding="utf-8")
+        if "sanitizeMermaidLabel" not in ur_content:
+            issues.append("UnifiedRenderer.js 缺 sanitizeMermaidLabel 调用")
+        if ur_content.count("sanitizeMermaidLabel(") < 3:
+            issues.append(f"UnifiedRenderer.js sanitizeMermaidLabel 调用次数 < 3 (实际 {ur_content.count('sanitizeMermaidLabel(')})")
+    # 3. MermaidGenerator.js 用 sanitizeMermaidLabel
+    mg = WORKTREE_ROOT / "src" / "services" / "groupModel" / "MermaidGenerator.js"
+    if not mg.exists():
+        issues.append("MermaidGenerator.js 不存在")
+    else:
+        mg_content = mg.read_text(encoding="utf-8")
+        if "sanitizeMermaidLabel" not in mg_content:
+            issues.append("MermaidGenerator.js 缺 sanitizeMermaidLabel 调用")
+        if mg_content.count("sanitizeMermaidLabel(") < 3:
+            issues.append(f"MermaidGenerator.js sanitizeMermaidLabel 调用次数 < 3 (实际 {mg_content.count('sanitizeMermaidLabel(')})")
+    if not issues:
+        PASSED.append("V8ae: mermaid 11.13 label 严格转义 (sanitizeMermaidLabel) 覆盖 UnifiedRenderer + MermaidGenerator")
+        return True
+    FAILED.append("V8ae: " + "; ".join(issues))
+    return False
+
+
 def check_v8ac():
     """V8ac: db_health_monitor 2 处裸连接 + async_audit_writer 降级路径 mmap_size=0"""
     issues = []
@@ -197,6 +240,7 @@ def main():
     check_v8ab()
     check_v8ac()
     check_v8ad()
+    check_v8ae()
     print()
     print("-" * 60)
     print(f"PASSED ({len(PASSED)}):")

@@ -58,6 +58,12 @@ export function getArrowSyntax(sourceId, targetId, label, link) {
  * - 换行 → 空格
  * - " → '
  * - 前后空白 trim
+ *
+ * [V007.48 P0] 保留向后兼容:
+ *   - BO link label (-->"text"|) 用 sanitizeLabel
+ *   - subgraph/node label 用 sanitizeMermaidLabel (新) - 转义更严
+ *     因为 link label 在 mermaid 11.13 是单引号字符串, 允许 ", ', |
+ *     但 subgraph["text"] 内部 text 用 #quot; 转义 ", <br/> 转 换行
  */
 export function sanitizeLabel(label) {
   if (!label) return ''
@@ -67,6 +73,38 @@ export function sanitizeLabel(label) {
     .replace(/\|/g, '/')
     .replace(/[\r\n]+/g, ' ')
     .replace(/"/g, "'")
+    .trim()
+}
+
+/**
+ * mermaid subgraph/node label 严格转义
+ * - " → #quot; (mermaid 11.13 官方转义)
+ * - ' → #apos;
+ * - 换行 → <br/> (mermaid 标准换行符)
+ * - 反斜杠 → #92; (避免转义冲突)
+ * - 方括号 [ ] ( ) { }: mermaid 11.13 在 [...] 内部需要转义
+ * - 前后空白 trim
+ *
+ * 使用场景:
+ *   subgraph G_xxx["label"]
+ *   node_id["label"]
+ *   都不允许 label 直接含 " ' 反斜杠
+ */
+export function sanitizeMermaidLabel(label) {
+  if (label === null || label === undefined) return ''
+  const raw = String(label)
+  if (!raw) return ''
+  return raw
+    .replace(/\\/g, '#92;')          // 反斜杠
+    .replace(/"/g, '#quot;')          // 双引号 (mermaid 11.13 官方)
+    .replace(/'/g, '#apos;')          // 单引号
+    .replace(/[\r\n]+/g, '<br/>')    // 换行
+    .replace(/\[/g, '#91;')           // 方括号 [
+    .replace(/\]/g, '#93;')           // 方括号 ]
+    .replace(/\{/g, '#123;')          // 大括号 {
+    .replace(/\}/g, '#125;')          // 大括号 }
+    .replace(/\(/g, '#40;')           // 小括号 (
+    .replace(/\)/g, '#41;')           // 小括号 )
     .trim()
 }
 
