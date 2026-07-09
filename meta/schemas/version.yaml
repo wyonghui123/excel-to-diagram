@@ -461,6 +461,23 @@ relations:
       meaning: 版本与领域的层级关系, 但删除行为非级联 (阻止)
 
 # ────────────────────────────────────────────
+# 索引定义
+# ────────────────────────────────────────────
+# [FIX BUG-V049 2026-07-09] 添加 (product_id, name) 联合唯一索引
+# 根因: 2026-06-13 移除 naming_aspect/code 字段后，index_rule_engine 对
+#   business_key=True 的 name 字段自动创建 uidx_versions_name 单字段全局唯一索引，
+#   导致不同产品的同名版本(如 V1)被拦截。version.yaml 虽在 import_export.conflict_key
+#   声明了 "product_id,name" 联合唯一，但引擎不读 conflict_key。
+# 修复: 显式定义 (product_id, name) 联合唯一索引，引擎 _get_fields_in_composite_unique
+#   检测到 name 属于复合唯一索引后，跳过单字段唯一索引创建。
+indexes:
+  - name: uidx_versions_product_name
+    fields: [product_id, name]
+    type: unique
+    priority: high
+    description: "产品+版本名称联合唯一索引（同一产品内版本名唯一，不同产品可有同名版本）"
+
+# ────────────────────────────────────────────
 # 操作定义
 # ────────────────────────────────────────────
 actions:
