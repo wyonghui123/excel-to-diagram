@@ -1,4 +1,5 @@
 import { ref, computed, watch, watchEffect, nextTick } from 'vue'
+import { ElNotification } from 'element-plus'
 import { useExcelParser } from '../../../composables/useExcelParser.js'
 import { useDiagramConfigStore } from '../../../stores/diagramConfigStore.js'
 import { useChartArchDataStore } from '../../../stores/chartArchDataStore'
@@ -26,6 +27,62 @@ import {
   getSelectedRelationIds
 } from '../../../services/relationClassifier.js'
 import { buildPreviewDataFromArchData, convertToRelationNodeIds } from '../../../services/archDataConverter.js'
+
+/**
+ * [V007.49 P0 2026-07-09] 业务对象图 (BO diagram) 关系数量告警
+ *
+ * 触发条件:
+ *   - 用户在架构管理页面选 业务对象图 + 关系数量 > RELATIONSHIP_WARN_THRESHOLD (默认 100)
+ *   - 例如 财务云 1610 BO + 范围内与外部 关系 (689 关系) 渲染 600+ 节点时浏览器卡顿
+ *
+ * 告警形式:
+ *   - ElNotification 右下角通知
+ *   - 只展示文字建议: "关系数量多 (xxx), 建议缩小对象和关系范围, 或采用服务模块图"
+ *   - 不提供跳转按钮 (用户手动切换 chartType)
+ *
+ * 防重复:
+ *   - module-level _lastWarnedKey 记录 上次告警的 (chartType, threshold) 组合
+ *   - 数量从 ≤threshold → >threshold 才告警
+ *   - 用户关闭告警后, 再次从 ≤threshold → >threshold 仍会告警 (典型情况: 用户调整范围)
+ */
+const RELATIONSHIP_WARN_THRESHOLD = 100
+let _lastWarnedKey = null  // 上次告警的 key, null 表示未告警
+
+/**
+ * 显示关系数量告警 (V007.49 P0)
+ * @param {number} count - 实际关系数量
+ * @param {string} chartType - 当前图表类型 (businessObject | serviceModule)
+ */
+function warnTooManyRelationships(count, chartType) {
+  // 只在 BO 图告警
+  if (chartType !== 'businessObject') return
+  // [V007.49 P0 修复] 防重复告警逻辑
+  // 关键: 已在 above 状态 (数量 > threshold) 就不再告警
+  // 即使 count 不同 (200 vs 300) 也不重复, 因为用户已看到告警
+  const isAbove = count > RELATIONSHIP_WARN_THRESHOLD
+  const wasAbove = _lastWarnedKey === 'bo:above'
+  if (wasAbove && isAbove) {
+    // 已经在 above 状态, 数量变化 (200→300) 不重复告警
+    return
+  }
+  if (!isAbove) {
+    // 数量回到阈值下, 重置状态允许下次再告警
+    if (wasAbove) {
+      _lastWarnedKey = null
+    }
+    return
+  }
+  // 第一次越过阈值 (≤100 → >100), 告警
+  _lastWarnedKey = 'bo:above'
+  ElNotification({
+    title: '业务对象图关系数量过多',
+    message: `当前关系数量 ${count} 条, 超过推荐阈值 ${RELATIONSHIP_WARN_THRESHOLD} 条, 可能影响图表加载和渲染性能。建议缩小对象和关系范围, 或采用服务模块图查看整体结构。`,
+    type: 'warning',
+    duration: 8000,
+    position: 'bottom-right',
+    showClose: true,
+  })
+}
 
 /**
  * @deprecated 旧版非分组控制逻辑，仅在用户启用"启用旧版非分组控制"时使用
@@ -1647,6 +1704,11 @@ export function useDiagramData() {
       }
     } else {
       // 业务对象图
+      // [V007.49 P0 2026-07-09] 关系数量告警 (财务云 600+ BO 节点)
+      //   finalRelationships 包含所有 active 关系 (filteredRelationships + internalRelationFilter)
+      //   超过 100 触发右下角 ElNotification 建议
+      warnTooManyRelationships(finalRelationships.length, 'businessObject')
+
       const useLegacy = diagramConfig.value.useLegacyGroupControl
 
       if (!useLegacy) {

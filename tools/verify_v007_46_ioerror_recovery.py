@@ -197,6 +197,46 @@ def check_v8ae():
     return False
 
 
+def check_v8af():
+    """V8af: 业务对象图 关系数量告警 (财务云 600+ 节点 + 689 关系)
+    useDiagramData.js 在 BO 图入口调 warnTooManyRelationships"""
+    issues = []
+    ud = WORKTREE_ROOT / "src" / "views" / "AADiagramApp" / "composables" / "useDiagramData.js"
+    if not ud.exists():
+        issues.append("useDiagramData.js 不存在")
+    else:
+        ud_content = ud.read_text(encoding="utf-8")
+        # 1. import ElNotification
+        if "ElNotification" not in ud_content:
+            issues.append("useDiagramData.js 缺 ElNotification import")
+        if "from 'element-plus'" not in ud_content:
+            issues.append("useDiagramData.js 缺 from 'element-plus'")
+        # 2. RELATIONSHIP_WARN_THRESHOLD 常量
+        if "RELATIONSHIP_WARN_THRESHOLD" not in ud_content:
+            issues.append("useDiagramData.js 缺 RELATIONSHIP_WARN_THRESHOLD 常量")
+        # 3. warnTooManyRelationships 函数 + 调用
+        if "function warnTooManyRelationships" not in ud_content:
+            issues.append("useDiagramData.js 缺 warnTooManyRelationships 函数")
+        if "warnTooManyRelationships(finalRelationships.length" not in ud_content:
+            issues.append("useDiagramData.js BO 图入口未调 warnTooManyRelationships(finalRelationships.length, ...)")
+        # 4. 阈值 = 100
+        m = re.search(r"RELATIONSHIP_WARN_THRESHOLD\s*=\s*(\d+)", ud_content)
+        if not m:
+            issues.append("RELATIONSHIP_WARN_THRESHOLD 缺值")
+        elif int(m.group(1)) != 100:
+            issues.append(f"RELATIONSHIP_WARN_THRESHOLD = {m.group(1)} (应 100)")
+        # 5. 防重复: wasAbove / isAbove 状态机 (避免 count 200/300 重复告警)
+        if "_lastWarnedKey" not in ud_content:
+            issues.append("useDiagramData.js 缺 _lastWarnedKey 状态变量")
+        if "wasAbove" not in ud_content or "isAbove" not in ud_content:
+            issues.append("useDiagramData.js 缺 wasAbove/isAbove 状态机判断")
+    if not issues:
+        PASSED.append("V8af: BO 图关系数量告警 (ElNotification + 阈值 100 + warnTooManyRelationships + wasAbove/isAbove 防重复)")
+        return True
+    FAILED.append("V8af: " + "; ".join(issues))
+    return False
+
+
 def check_v8ac():
     """V8ac: db_health_monitor 2 处裸连接 + async_audit_writer 降级路径 mmap_size=0"""
     issues = []
@@ -241,6 +281,7 @@ def main():
     check_v8ac()
     check_v8ad()
     check_v8ae()
+    check_v8af()
     print()
     print("-" * 60)
     print(f"PASSED ({len(PASSED)}):")
