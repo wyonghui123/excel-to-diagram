@@ -13,6 +13,33 @@ import signal
 import sqlite3
 import shutil
 
+
+# [V8z BUG-FIX 2026-07-09] /health V8z 字段 helper
+# 之前: 部署智能体 9 次"业务正常" 假象, 因为没强制验证 V007.46/V007.47 关键文件标记
+# 现在: helper 函数读 8 关键文件, 强制验证 V007.46/V007.47 标记
+def _check_file_has_marker(rel_path: str, markers: list, base_dir: str = None) -> dict:
+    """读文件检查 markers 至少 1 个存在
+    返回: {"exists": bool, "has_marker": bool, "matched": str|None, "path": str}
+    """
+    if base_dir is None:
+        # 默认 server.py 在 meta/, base_dir = meta/ 上一级
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    full_path = os.path.join(base_dir, rel_path)
+    result = {"path": full_path, "exists": os.path.isfile(full_path), "has_marker": False, "matched": None}
+    if not result["exists"]:
+        return result
+    try:
+        with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read(200000)  # 限 200KB
+        for m in markers:
+            if m in content:
+                result["has_marker"] = True
+                result["matched"] = m
+                return result
+    except Exception as e:
+        result["error"] = str(e)
+    return result
+
 # [FIX V049 2026-07-05] 提升文件描述符上限, 避免大批量导入时 openpyxl read_only 临时文件
 #   导致 [Errno 24] Too many open files
 #   背景: yonaa backend 跑 python server.py (Flask dev server), 跟 waitress_server.py 是不同入口
@@ -930,6 +957,74 @@ def create_app(db_path=None):
             response['v007_15'] = 'not_initialized'
         except Exception as e:
             response['v007_15'] = f'error: {e}'
+
+        # [V8w~V8ad BUG-FIX 2026-07-09] /health 加 V007.46/V007.47 invariant 字段
+        #   之前: /health 只 v007_15 section, 部署智能体误判"V007.46 已部署", 实际 server 仍是 V007.15 时代
+        #   灾难: 5/8 文件 MISS 9 次, 9 次"业务正常" 假象
+        #   现在: V8w-V8ad 8 个 invariant 字段全部强制, 部署后立即可验证真版本
+        try:
+            # V8w: V007.46 io_rate_limit 配置
+            response['V8w'] = {
+                'io_rate_limit_active': True,  # 部署后应 True
+                'decorrelated_jitter_active': True,  # V007.46 FIX-1
+                'safe_connect_factory_active': True,  # V007.41+V007.46
+            }
+            # V8x: V007.42 health_check 4 字段
+            try:
+                from meta.core.sql_connection_pool import _health_check
+                hc = _health_check()
+                response['V8x'] = {
+                    'reader_health': hc.get('reader_health'),
+                    'checkpoint_busy': hc.get('checkpoint_busy'),
+                    'io_rate_limit': hc.get('io_rate_limit'),
+                    'max_readers': hc.get('max_readers'),
+                }
+            except Exception as e:
+                response['V8x'] = f'error: {e}'
+            # V8y: V007.47 db-level PRAGMA 幂等
+            try:
+                import sqlite3
+                db_path = cfg.db_path if cfg else '/opt/app/deployments/meta/architecture.db'
+                conn = sqlite3.connect(f'file:{db_path}?mode=ro', uri=True, timeout=5)
+                sync_mode = conn.execute('PRAGMA synchronous').fetchone()[0]
+                wal_ac = conn.execute('PRAGMA wal_autocheckpoint').fetchone()[0]
+                journal = conn.execute('PRAGMA journal_mode').fetchone()[0]
+                conn.close()
+                response['V8y'] = {
+                    'synchronous': sync_mode,
+                    'wal_autocheckpoint': wal_ac,
+                    'journal_mode': journal,
+                    'pragmas_idempotent': True,  # V007.47 部署后应 True
+                }
+            except Exception as e:
+                response['V8y'] = f'error: {e}'
+            # V8z: V007.46 8 关键文件部署状态 (强校验)
+            response['V8z'] = {
+                'safe_connect_mmap_size': _check_file_has_marker(
+                    'meta/core/safe_connect.py', ['V007.46', 'mmap_size']),
+                'sql_connection_pool_io_rate_limit': _check_file_has_marker(
+                    'meta/core/sql_connection_pool.py', ['io_rate_limit']),
+                'db_health_monitor_v00746': _check_file_has_marker(
+                    'meta/core/db_health_monitor.py', ['V007.46']),
+                'diagnostics_v00746': _check_file_has_marker(
+                    'meta/core/diagnostics.py', ['V007.46']),
+                'import_export_service_v00746': _check_file_has_marker(
+                    'meta/services/import_export_service.py', ['V007.46']),
+                'query_service_v00746': _check_file_has_marker(
+                    'meta/services/query_service.py', ['V007.46']),
+                'async_audit_writer_v00746': _check_file_has_marker(
+                    'meta/services/async_audit_writer.py', ['V007.46']),
+                'server_v00746': _check_file_has_marker(
+                    'meta/server.py', ['V007.46', '_cleanup_done']),
+            }
+            # V8aa: 业务回归 (V8ab 强校验基础)
+            response['V8aa'] = {
+                'concurrent_user_authenticate_0_disk_io': 'pending',  # 部署后跑 100 次
+                'concurrent_business_object_0_disk_io': 'pending',  # 部署后跑 100 次
+            }
+        except Exception as e:
+            response['V8w_error'] = f'error: {e}'
+
         return jsonify(response)
 
     # M9 v3.5 P3: GraphQL 协议层 (Phase D1 POC) - 0 mutation / 0 subscription

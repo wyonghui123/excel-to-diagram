@@ -118,6 +118,15 @@ class PooledConnection:
             logger.debug(
                 "[V007.16] is_valid: connection INVALID, error: %s", err_str
             )
+            # [V007.46 BUG-FIX 2026-07-09] disk I/O 错误立即记录到 diagnostics
+            # 之前: 部署智能体 9 次"业务正常" 假象, 实际 disk I/O 持续
+            # 现在: 任何 disk I/O error 立即 record, /health V8y 显示
+            if 'disk' in err_str and 'i/o' in err_str:
+                try:
+                    from meta.core.diagnostics import record_disk_io_error
+                    record_disk_io_error(caller='sql_connection_pool.is_valid', err=err_str)
+                except Exception:
+                    pass
             # 同步标记 last_io_error, 让 reader() 知道要重建
             self.last_io_error = True
             self.last_error_msg = err_str

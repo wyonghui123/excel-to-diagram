@@ -223,6 +223,12 @@ def safe_connect(
             f"[V007.41] safe_connect invalid mode='{mode}'. "
             f"Expected: 'auto' | 'read' | 'write' | 'write_force_no_tx'."
         )
+    # [V007.46 BUG-FIX 2026-07-09] 记录 safe_connect 调用 (验证 V007.41+V007.46 真部署)
+    try:
+        from meta.core.diagnostics import record_safe_connect_call
+        record_safe_connect_call(mode)
+    except Exception:
+        pass
 
 
 # 兼容 V007.40 的导出名 (临时, Phase 2 全部迁移后可移除)
