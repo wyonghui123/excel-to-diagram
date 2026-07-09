@@ -196,6 +196,42 @@ const relationCodesClearTrigger = ref(0)  // OSS 变更时切换，触发 Relati
 const _restoreProtectionConsumed = ref(false)
 const treeData = shallowRef([])
 
+// [BUG-V048d 修复 2026-07-09] SD/SM 独立 parent 映射，避免 hierarchyMap ID 碰撞
+//   根因: hierarchyMap 中 SD 条目被不同 domain 的 SM 覆盖 (51 个碰撞)
+//   例: SD 299 (供应链云 2200) 被 SM 299 (协同云 2202) 覆盖 → domainId=2202 ≠ 2200
+//   导致 SD loop 的 selectedDomainSet.has(info.domainId) 失败 → 双重计数 141+141=282
+//   修复: 直接从 treeData 构建 sdDomainMap / smParentMap，不走 hierarchyMap
+const sdDomainMap = computed(() => {
+  const map = {}
+  if (!treeData.value || treeData.value.length === 0) return map
+  for (const domain of treeData.value) {
+    if (domain.type !== 'domain') continue
+    for (const sd of (domain.children || [])) {
+      if (sd.type === 'sub_domain' && sd.originalId != null) {
+        map[sd.originalId] = domain.originalId
+      }
+    }
+  }
+  return map
+})
+
+const smParentMap = computed(() => {
+  const map = {}
+  if (!treeData.value || treeData.value.length === 0) return map
+  for (const domain of treeData.value) {
+    if (domain.type !== 'domain') continue
+    for (const sd of (domain.children || [])) {
+      if (sd.type !== 'sub_domain') continue
+      for (const sm of (sd.children || [])) {
+        if (sm.type === 'service_module' && sm.originalId != null) {
+          map[sm.originalId] = { domainId: domain.originalId, subDomainId: sd.originalId }
+        }
+      }
+    }
+  }
+  return map
+})
+
 const hierarchyMap = computed(() => {
   if (!treeData.value || treeData.value.length === 0) return {}
 
@@ -393,9 +429,10 @@ const selectedBoCount = computed(() => {
   let total = 0
 
   // 1. 选中的 SM (只在所属 SD/domain 未被选中时累加)
+  // [BUG-V048d] 用 smParentMap 替代 hierarchyMap，避免 ID 碰撞
   for (const smId of selectedServiceModuleIds.value) {
     const nId = normalizeId(smId)
-    const info = hierarchyMap.value[nId] || hierarchyMap.value[smId] || hierarchyMap.value[`sm_${nId}`]
+    const info = smParentMap.value[nId] || smParentMap.value[smId]
     if (!info) continue
     // 祖先被勾时, 该 SM 已被覆盖, 跳过
     if (selectedSubDomainSet.has(info.subDomainId)) continue
@@ -404,11 +441,11 @@ const selectedBoCount = computed(() => {
   }
 
   // 2. 选中的 SD (只在所属 domain 未被选中时累加)
+  // [BUG-V048d] 用 sdDomainMap 替代 hierarchyMap，避免 ID 碰撞
   for (const sdId of selectedSubDomainIds.value) {
     const nId = normalizeId(sdId)
-    const info = hierarchyMap.value[nId] || hierarchyMap.value[sdId] || hierarchyMap.value[`s_${nId}`]
-    if (!info) continue
-    if (selectedDomainSet.has(info.domainId)) continue
+    const domainId = sdDomainMap.value[nId] ?? sdDomainMap.value[sdId]
+    if (domainId != null && selectedDomainSet.has(domainId)) continue
     total += sdChildCount.value.get(nId) || sdChildCount.value.get(sdId) || 0
   }
 
