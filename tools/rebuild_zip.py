@@ -488,9 +488,17 @@ def main():
 
     # 检查源
     dist = ROOT / "dist"
+    frontend_dist = ROOT / "frontend_dist_files"
     meta = ROOT / "meta"
+    # [V007.49 BUG-FIX 2026-07-09] dist/ 跟 frontend_dist_files/ 二选一, 哪个在就用哪个
+    #   背景: yonaa 之前部署 (v015-v017) 全部用 frontend_dist_files/ (5/9 zip), 不是 dist/
+    #   之前检查 dist/ 不存在就 fail, 但实际 frontend_dist_files/ 在 = 真实前端就绪
+    #   修复: dist 不存在时, 用 frontend_dist_files 作为 fallback
+    if not dist.exists() and frontend_dist.exists():
+        print(f"[V007.49 BUG-FIX] dist/ 不存在, 改用 frontend_dist_files/ ({frontend_dist.stat().st_size / 1024 / 1024:.1f} MB)")
+        dist = frontend_dist  # 临时替代
     if not dist.exists():
-        print(f"[FAIL] dist/ 不存在, 请先跑: npm run build")
+        print(f"[FAIL] dist/ 不存在, 请先跑: npm run build (或用 frontend_dist_files/)")
         sys.exit(1)
     if not meta.exists():
         print(f"[FAIL] meta/ 不存在")

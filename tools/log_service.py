@@ -32,7 +32,9 @@ DB_PATH   = os.environ.get("LOG_SERVICE_DB_PATH", f"{LOG_DIR}/architecture.db")
 PORT      = int(os.environ.get("LOG_SERVICE_PORT", 9101))
 BIND      = os.environ.get("LOG_SERVICE_BIND", "0.0.0.0")
 SECRET    = os.environ.get("LOG_SERVICE_SECRET", "v007.35-infra")
-MAX_LINES = int(os.environ.get("LOG_SERVICE_MAX_LINES", 5000))  # 单次最大行数
+# [V007.49 P1 BUG-FIX 2026-07-09] 服务版本: log_service v4.7 - 加 2 部署端点
+VERSION   = "v4.7"
+MAX_LINES = int(os.environ.get("LOG_SERVICE_MAX_LINES", 5000))  # 单次最大行
 TOKEN_HR  = int(os.environ.get("LOG_SERVICE_TOKEN_HOURS", 8))
 
 # 安全白名单: /api/log, /api/config 只读这些目录
@@ -184,6 +186,8 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
             "/api/deploy/current":    lambda: self._deploy_current(q),       # current 链接 + 实际目录
             "/api/deploy/history":    lambda: self._deploy_history(q),       # 最近 10 次部署
             "/api/deploy/check_files":lambda: self._deploy_check_files(q),   # 8 文件 MD5 强校验
+            "/api/deploy/yonaa_versions": lambda: self._deploy_yonaa_versions(q), # yonaa 8 文件 V007.46/V007.47 标记
+            "/api/deploy/invariant":  lambda: self._deploy_invariant(q),     # [V007.49 P1] 部署后立即验 8 关键文件
             "/api/ports/auto_detect": lambda: self._ports_auto_detect(q),    # 3011/5001/8081/9101 扫描
             "/api/verify/invariant":  lambda: self._verify_invariant(q),     # V8ab 业务回归 (200 次压测)
             }
@@ -926,6 +930,106 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
             and result.get("db_integrity", "?") == "ok"
         )
         self._json(200, result)
+
+    # ── /api/deploy/yonaa_versions ★ [V007.45 v4.6 BUG-FIX 2026-07-09] ─
+    def _deploy_yonaa_versions(self, q):
+        """[V007.45 BUG-FIX 2026-07-09] 看 yonaa 实际跑的 8 个关键文件 V007.46/V007.47 标记
+        之前部署智能体看 worktree MD5 误判, 实际 yonaa 跑的可能不是最新
+        现在: yonaa 实际文件 grep 标记数 + mtime, 不依赖 SSH
+        """
+        files_to_check = [
+            ("meta/server.py", ["V007.46", "V007.47", "V007.45", "V007.43", "V007.42", "V007.41"]),
+            ("meta/core/sql_connection_pool.py", ["V007.46", "V007.47", "V007.42", "V007.38"]),
+            ("meta/core/safe_connect.py", ["V007.46", "V007.41", "V007.40"]),
+            ("meta/core/diagnostics.py", ["V007.46", "V007.41"]),
+            ("meta/services/async_audit_writer.py", ["V007.46", "V007.42"]),
+            ("meta/services/import_export_service.py", ["V007.46", "V007.37"]),
+            ("meta/services/query_service.py", ["V007.46", "V007.44", "V007.37"]),
+            ("meta/core/db_health_monitor.py", ["V007.46", "V007.39"]),
+        ]
+        results = []
+        for rel, markers in files_to_check:
+            full = f"/opt/app/deployments/{rel}"
+            entry = {"file": rel, "exists": os.path.exists(full), "markers": {}}
+            if entry["exists"]:
+                try:
+                    with open(full) as f:
+                        content = f.read()
+                    entry["size"] = len(content)
+                    entry["mtime"] = os.path.getmtime(full)
+                    for m in markers:
+                        entry["markers"][m] = content.count(m)
+                except Exception as e:
+                    entry["err"] = str(e)
+            results.append(entry)
+        # 评判: 至少 server.py V007.46 标记 >= 1 才算 V007.46 部署
+        server_v46 = next((e for e in results if e["file"] == "meta/server.py"), {}).get("markers", {}).get("V007.46", 0)
+        deploy_status = "V007.46+ (新)" if server_v46 >= 1 else "V007.40- (老)"
+        # V007.46 标记数
+        total_v46 = sum(e.get("markers", {}).get("V007.46", 0) for e in results)
+        total_v47 = sum(e.get("markers", {}).get("V007.47", 0) for e in results)
+        self._json(200, {
+            "yonaa_deploy_status": deploy_status,
+            "server_py_V007_46_markers": server_v46,
+            "total_V007_46_markers": total_v46,
+            "total_V007_47_markers": total_v47,
+            "files": results,
+            "summary": f"yonaa server.py V007.46 标记={server_v46} (>=1 = V007.46+ 部署, 0 = V007.40- 老版本)"
+        })
+
+    # ── /api/deploy/invariant ★ [V007.49 P1 BUG-FIX 2026-07-09] ───
+    def _deploy_invariant(self, q):
+        """[V007.49 P1 BUG-FIX] 部署智能体跑完 PHASE 0.5 后立即调这端点
+        验 8 关键文件 V007.46+V007.47 标记数 + size + mtime, 不依赖 SSH
+        失败 = 部署假成功 (PHASE 0.5 hash 校验漏过, 但实际没真覆盖)
+        """
+        files_to_check = [
+            ("meta/server.py", ["V007.46", "V007.47", "V007.45", "V007.43"]),
+            ("meta/core/sql_connection_pool.py", ["V007.46", "V007.47", "V007.42"]),
+            ("meta/core/safe_connect.py", ["V007.46", "V007.41", "V007.40"]),
+            ("meta/core/diagnostics.py", ["V007.46"]),
+            ("meta/core/db_health_monitor.py", ["V007.46"]),
+            ("meta/services/async_audit_writer.py", ["V007.46", "V007.42"]),
+            ("meta/services/audit_service.py", ["V007.46"]),
+            ("meta/services/import_export_service.py", ["V007.46"]),
+            ("meta/services/query_service.py", ["V007.46", "V007.44", "V007.37"]),
+        ]
+        all_pass = True
+        results = []
+        for rel, markers in files_to_check:
+            full = f"/opt/app/deployments/{rel}"
+            entry = {"file": rel, "pass": False, "markers": {}}
+            if os.path.exists(full):
+                try:
+                    with open(full) as f:
+                        content = f.read()
+                    entry["size"] = len(content)
+                    entry["mtime"] = os.path.getmtime(full)
+                    for m in markers:
+                        count = content.count(m)
+                        entry["markers"][m] = count
+                    # 评判: 至少 1 个标记 >= 1
+                    if any(count >= 1 for count in entry["markers"].values()):
+                        entry["pass"] = True
+                    else:
+                        all_pass = False
+                        entry["fail_reason"] = "0 markers"
+                except Exception as e:
+                    entry["err"] = str(e)
+                    all_pass = False
+            else:
+                entry["err"] = "file not exist"
+                all_pass = False
+            results.append(entry)
+        return {
+            "all_pass": all_pass,
+            "pass_count": sum(1 for r in results if r.get("pass")),
+            "total": len(results),
+            "files": results,
+            "service_version": VERSION,
+            "summary": f"{sum(1 for r in results if r.get('pass'))}/{len(results)} files PASS",
+        }
+
 
 class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
