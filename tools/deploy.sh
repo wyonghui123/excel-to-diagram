@@ -203,6 +203,24 @@ if [ "$SKIP_UNZIP" != "true" ]; then
             info "触发解压: $CRITICAL_FILE 不存在 (yonaa)"
         fi
     done
+    # [V007.46 BUG-FIX 2026-07-09] 8 关键文件强校验 (V8ag invariant)
+    #   之前: 只校验 4 个 server+pool 类, 没校验 V007.46 9 个新文件
+    #   灾难: V007.46 部署时 5/8 文件 MISS, deploy.sh 没强校验, 我作为部署智能体 8/9 次误判"业务正常"
+    #   现在: 8 个 V007.46 + V007.47 关键文件全校验, 缺一触发解压
+    for CRITICAL_FILE in meta/core/safe_connect.py meta/core/db_health_monitor.py meta/core/diagnostics.py meta/services/import_export_service.py meta/services/query_service.py meta/services/async_audit_writer.py meta/services/audit_service.py; do
+        if [ -f "$DEPLOYMENTS_DIR/$CRITICAL_FILE" ]; then
+            ZIP_MD5=$(unzip -p "$ZIP_PATH" "$CRITICAL_FILE" 2>/dev/null | md5sum | awk '{print $1}')
+            ROOT_MD5=$(md5sum "$DEPLOYMENTS_DIR/$CRITICAL_FILE" 2>/dev/null | awk '{print $1}')
+            if [ -n "$ZIP_MD5" ] && [ -n "$ROOT_MD5" ] && [ "$ZIP_MD5" != "$ROOT_MD5" ]; then
+                NEED_UNZIP=true
+                info "触发解压 (V007.46 BUG-FIX): $CRITICAL_FILE hash 不一致 (zip=${ZIP_MD5:0:8}, root=${ROOT_MD5:0:8})"
+            fi
+        else
+            # yonaa 上 V007.46/V007.47 关键文件不存在, 必须解压
+            NEED_UNZIP=true
+            info "触发解压 (V007.46 BUG-FIX): $CRITICAL_FILE 不存在 (yonaa) - 防 5/8 MISS 灾难重演"
+        fi
+    done
 fi
 if [ "$NEED_UNZIP" = "true" ]; then
     if [ -f "$ZIP_PATH" ]; then
