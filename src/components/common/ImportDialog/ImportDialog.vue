@@ -65,10 +65,10 @@
           <el-form-item label="更新模式">
             <el-switch v-model="createIfNotExists" />
             <span class="conflict-sub-label">
-              {{ createIfNotExists ? '无则创建' : '无则跳过' }}
+              {{ createIfNotExists ? '无则创建' : '有则跳过' }}
             </span>
             <el-tooltip
-              content="勾选: 不存在则创建 (upsert); 不勾选: 仅更新, 不存在则跳过 (update_only)"
+              content="勾选: 不存在则创建 (upsert); 不勾选: 已存在则跳过, 仅导入新行 (skip)"
               placement="top">
               <el-icon class="conflict-help"><QuestionFilled /></el-icon>
             </el-tooltip>
@@ -564,10 +564,12 @@ const currentStep = ref(0)
 const isMinimized = ref(false)
 const selectedFile = ref(null)
 const fileList = ref([])
-const createIfNotExists = ref(true)  // ON = upsert (有则更新无则创建), OFF = update_only (无则跳过)
-// [FIX 2026-06-24] UI 简化为: 仅 1 个开关, 默认 upsert
+const createIfNotExists = ref(true)  // ON = upsert (有则更新无则创建), OFF = skip (有则跳过无则创建)
+// [FIX 2026-07-10] UI 简化为: 仅 1 个开关, 默认 upsert
+//   OFF = skip (已存在则跳过, 不存在则创建) - 用户期望"导入新行"的行为
+//   之前 OFF = update_only (无则跳过), 容易让用户误以为找不到的就不会创建
 const conflictStrategy = computed(() => {
-  return createIfNotExists.value ? 'upsert' : 'update_only'
+  return createIfNotExists.value ? 'upsert' : 'skip'
 })
 
 const previewing = ref(false)

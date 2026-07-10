@@ -25,18 +25,60 @@ def init_audit_services(data_source=None):
 
 
 def _require_audit_log_read():
-    """[BMRD-2026-06-14] 审计日志读权限校验 — admin/* 旁路, 否则需要 audit_log:read."""
+    """[BMRD-2026-06-14] 审计日志读权限校验 — admin/* 旁路, 否则需要 audit_log:read.
+
+    [FIX BUG-V052.2 2026-07-10 dev agent] 统一权限 code 为短名.
+    历史: 系统曾因 schema yaml action.id 误用 'audit_log_read' (非标准), 导致
+          permission code 变成 'audit_log:audit_log_read' (双重前缀).
+    修复: 改 yaml 为 'crud_read' + DB code 改为 'audit_log:read',
+          删除兼容代码, 只认 'audit_log:read' 短名.
+          list 权限隐含读权限 (列表查询 → 可以看详情).
+    """
     user = get_current_user()
     if user and is_admin(user):
         return None
     if user:
         perms = user.get('permissions', []) or []
-        if '*' in perms or 'admin' in perms or 'audit_log:read' in perms:
+        if '*' in perms or 'admin' in perms \
+                or 'audit_log:read' in perms \
+                or 'audit_log:list' in perms:
             return None
     return jsonify({
         'success': False,
         'message': '缺少权限: audit_log:read',
         'error_code': 'permission.audit_log.read.missing',
+    }), 403
+
+
+def _require_audit_log_write():
+    """[FIX BUG-V052.2 2026-07-10 dev agent] audit_log:delete 权限校验 — 写操作 (delete 端点)"""
+    user = get_current_user()
+    if user and is_admin(user):
+        return None
+    if user:
+        perms = user.get('permissions', []) or []
+        if '*' in perms or 'admin' in perms or 'audit_log:delete' in perms:
+            return None
+    return jsonify({
+        'success': False,
+        'message': '缺少权限: audit_log:delete',
+        'error_code': 'permission.audit_log.delete.missing',
+    }), 403
+
+
+def _require_audit_log_export():
+    """[FIX BUG-V052.2 2026-07-10 dev agent] audit_log:export 权限校验 — 导出端点"""
+    user = get_current_user()
+    if user and is_admin(user):
+        return None
+    if user:
+        perms = user.get('permissions', []) or []
+        if '*' in perms or 'admin' in perms or 'audit_log:export' in perms:
+            return None
+    return jsonify({
+        'success': False,
+        'message': '缺少权限: audit_log:export',
+        'error_code': 'permission.audit_log.export.missing',
     }), 403
 
 # 业务对象元数据定义 - 定义各对象类型的business key配置

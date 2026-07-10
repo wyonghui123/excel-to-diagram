@@ -34,6 +34,10 @@ class JournalMode(Enum):
 @dataclass
 class RuntimeDbConfig:
     """检测到的 SQLite 运行时配置 (immutable after detection)"""
+    # [V007.50 BUG-FIX 2026-07-09] 添加 db_path (供 /health V8y 访问)
+    #   背景: V8y 用 cfg.db_path 获取 PRAGMA, 但 RuntimeDbConfig 缺此字段 → AttributeError
+    #   detect_runtime_config 在入参已持 db_path, 写入即可
+    db_path: str
     journal_mode: JournalMode
     busy_timeout_ms: int
     synchronous: str
@@ -102,6 +106,7 @@ def detect_runtime_config(db_path: str) -> RuntimeDbConfig:
             orphan_interval = max(30, busy_ms // 1000)
 
         config = RuntimeDbConfig(
+            db_path=db_path,  # [V007.50] 传递给 health V8y 使用
             journal_mode=journal,
             busy_timeout_ms=busy_ms,
             synchronous=sync_raw,
@@ -125,6 +130,7 @@ def detect_runtime_config(db_path: str) -> RuntimeDbConfig:
         # Detection failed, use safe defaults
         logger.error(f"[V007.15 L0] Failed to detect runtime config, using safe defaults: {e}")
         config = RuntimeDbConfig(
+            db_path=db_path,  # [V007.50] 传递给 health V8y 使用
             journal_mode=JournalMode.WAL,
             busy_timeout_ms=5000,
             synchronous="NORMAL",

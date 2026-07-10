@@ -538,6 +538,21 @@ actions:
     path: /api/v1/versions/compare
     description: 对比两个版本的差异
 
+  # [FIX 2026-07-10] BUG-V051: 补全 import/export actions
+  #   委托给统一 export-import 端点
+  - id: import
+    name: 导入
+    type: business
+    method: POST
+    path: /api/v1/export-import/import
+    description: 通过统一导入端点从Excel批量导入版本
+  - id: export
+    name: 导出
+    type: business
+    method: GET
+    path: /api/v1/export-import/export
+    description: 通过统一导出端点导出版本到Excel
+
 # ────────────────────────────────────────────
 # 校验规则
 # ────────────────────────────────────────────

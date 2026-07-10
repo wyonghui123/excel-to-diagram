@@ -47,7 +47,8 @@ logger = logging.getLogger(__name__)
 
 # [TBD-B] 关联操作字段名约定: 跟现有 object_id/record_id 一致
 _ASSOCIATE_SRC_KEY = 'src_id'
-_ASSOCIATE_DST_KEY = 'target_id'
+# [FIX BUG-V050 2026-07-10] 原值 'target_id' 是错的, bo.associate() 传 'tgt_id'
+_ASSOCIATE_DST_KEY = 'tgt_id'
 
 # [性能] 链向上追溯: 用单次 SQL JOIN 查 owner, 避免 N+1
 # HIERARCHY_CHAIN 顺序: product → version → domain → sub_domain (从顶层到底层)
@@ -358,12 +359,26 @@ class WriteScopeInterceptor(Interceptor):
             [(side, {'type': bo, 'id': int}), ...]
         """
         if context.action in ('associate', 'dissociate'):
-            return [
-                ('src', {'type': context.object_type,
-                         'id': context.params.get(_ASSOCIATE_SRC_KEY)}),
-                ('dst', {'type': context.object_type,
-                         'id': context.params.get(_ASSOCIATE_DST_KEY)}),
-            ]
+            # [FIX BUG-V050 2026-07-10] 兼容多种字段名
+            #   - bo.associate() 传 src_id/tgt_id
+            #   - 旧代码只识别 src_id/tgt_id (已正确)
+            #   但前端可能传 source_id/target_id/source_bo_id/target_bo_id
+            src_id = (
+                context.params.get(_ASSOCIATE_SRC_KEY)
+                or context.params.get('source_id')
+                or context.params.get('source_bo_id')
+            )
+            dst_id = (
+                context.params.get(_ASSOCIATE_DST_KEY)
+                or context.params.get('target_id')
+                or context.params.get('target_bo_id')
+            )
+            targets = []
+            if src_id:
+                targets.append(('src', {'type': context.object_type, 'id': src_id}))
+            if dst_id:
+                targets.append(('dst', {'type': context.object_type, 'id': dst_id}))
+            return targets
         # [H14.1 2026-06-15] create 操作: 新 record 没 id, 用 parent (e.g. version_id) 加载
         #   例: 创建 domain 时, parent_type=version, parent_id 从 params.version_id 取
         #   顶层 BO (product) create 无 parent → 跳过 (让 functional perm 阶段处理)
@@ -2280,9 +2295,16 @@ class WriteScopeInterceptor(Interceptor):
 
     def _is_fk_value_in_scope(self, user_id: int, target_bo: str, fk_value: Any,
                                data_source) -> bool:
-        """检查 FK 值是否在用户的 dim scope 内
+        """检查 FK 值是否在用户的权限范围内
 
-        使用 DimensionScopeEngine 派生条件, 然后查询数据库验证。
+        检查 3 种权限路径:
+        1. 显式 data_permissions (DataPermissionService.get_allowed_resource_ids)
+        2. Owner chain (用户是 product owner 即可引用该 product 下的所有层级对象)
+        3. Dim scope (DimensionScopeEngine 派生条件)
+
+        [FIX BUG-V050 2026-07-10] 之前只检查 dim scope, 但用户在自己拥有的 product 下
+        创建的子对象 (如 TEST001 service_module) 不在 dim scope 内 (在另一个 domain),
+        导致创建 business_object 引用时 FK 校验失败。
         """
         # [FIX v1.2.30 2026-06-20] 跳过非整数 FK 值 (字符串名称/非 ID)
         #   例: source_domain_id='采购管理' (domain NAME, 不是 id)
@@ -2292,6 +2314,33 @@ class WriteScopeInterceptor(Interceptor):
             if isinstance(fk_value, bool):
                 return True  # bool 是 int 子类, 显式排除
             return True  # 字符串等非整数值放行, 让 FK 解析阶段报错
+
+        # [FIX BUG-V050] 检查 0: 显式 data_permissions
+        try:
+            from meta.services.data_permission_service import DataPermissionService
+            dpf = DataPermissionService(data_source)
+            allowed_ids = dpf.get_allowed_resource_ids(user_id, target_bo)
+            if allowed_ids and fk_value in allowed_ids:
+                logger.debug(f'[_is_fk_value_in_scope BUG-V050] user={user_id} FK={fk_value} target={target_bo} matched data_permissions')
+                return True
+        except Exception as e:
+            logger.debug(f'[_is_fk_value_in_scope BUG-V050] data_permission check failed: {e}')
+
+        # [FIX BUG-V050] 检查 1: owner chain (用户是 product owner 即可引用该 product 下的子对象)
+        try:
+            from meta.services.chain_owner_resolver import build_owner_exception_subquery
+            owner_subquery = build_owner_exception_subquery(None, target_bo, user_id)
+            if owner_subquery:
+                table_name = self._get_table_name_for_bo(target_bo)
+                if table_name:
+                    sql = f"SELECT COUNT(*) FROM {table_name} WHERE id = ? AND id IN ({owner_subquery})"
+                    cursor = data_source.execute(sql, [fk_value])
+                    if cursor.fetchone()[0] > 0:
+                        logger.debug(f'[_is_fk_value_in_scope BUG-V050] user={user_id} FK={fk_value} target={target_bo} matched owner_chain')
+                        return True
+        except Exception as e:
+            logger.debug(f'[_is_fk_value_in_scope BUG-V050] owner_chain check failed: {e}')
+
         # 1. 获取用户的 role_ids
         role_ids = self._get_user_role_ids_direct(user_id, data_source)
         if not role_ids:

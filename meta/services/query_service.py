@@ -1829,32 +1829,40 @@ class QueryService:
                     and_params.extend(ps)
 
             if and_clauses:
-                from meta.services.chain_owner_resolver import is_in_chain
-                owner_added = False
+                from meta.services.chain_owner_resolver import build_owner_exception_subquery
+
+                dim_scope_sql = ' AND '.join(and_clauses)
+                dim_scope_params = list(and_params)
+
+                owner_clause = None
+                owner_params: list = []
                 if object_type == 'product':
-                    and_clauses.append(
-                        f"{builder._get_db_column('owner_id') if hasattr(builder, '_get_db_column') else 'owner_id'} = ?"
-                    )
-                    and_params.append(user_id)
-                    owner_added = True
-                    logger.info(
-                        f"[DataPerm BUG-V021] AND-merged dim_scope with owner_id={user_id} for product"
-                    )
-                elif is_in_chain(object_type):
-                    logger.debug(
-                        f"[DataPerm BUG-V021] Skip owner exception for {object_type} (known limitation)"
-                    )
-
-                if len(and_clauses) == 1 and not owner_added:
-                    builder.where_raw(and_clauses[0], and_params)
+                    owner_col = builder._get_db_column('owner_id') if hasattr(builder, '_get_db_column') else 'owner_id'
+                    owner_clause = f"{owner_col} = ?"
+                    owner_params = [user_id]
                 else:
-                    raw_sql = ' AND '.join(and_clauses)
-                    builder.where_raw(f"({raw_sql})", and_params)
+                    # [FIX BUG-V050] 不再用 is_in_chain 门禁, 直接调用 build_owner_exception_subquery
+                    owner_subquery = build_owner_exception_subquery(self.ds, object_type, user_id)
+                    if owner_subquery:
+                        id_col = builder._get_db_column('id') if hasattr(builder, '_get_db_column') else 'id'
+                        owner_clause = f"{id_col} IN ({owner_subquery})"
 
-                logger.info(
-                    f"[_try_apply_dimension_scope] user={user_id} object_type={object_type} "
-                    f"single_role AND-merged ({len(and_clauses)} parts)"
-                )
+                if owner_clause:
+                    raw_sql = f"({dim_scope_sql} OR {owner_clause})"
+                    builder.where_raw(raw_sql, dim_scope_params + owner_params)
+                    logger.info(
+                        f"[_try_apply_dimension_scope] user={user_id} object_type={object_type} "
+                        f"single_role dim_scope OR owner_exception"
+                    )
+                else:
+                    if len(and_clauses) == 1:
+                        builder.where_raw(and_clauses[0], and_params)
+                    else:
+                        builder.where_raw(f"({dim_scope_sql})", dim_scope_params)
+                    logger.info(
+                        f"[_try_apply_dimension_scope] user={user_id} object_type={object_type} "
+                        f"single_role AND-merged ({len(and_clauses)} parts)"
+                    )
             return True
         else:
             # [FIX BUG-V027 2026-07-07] multi-role: OR-of-AND
@@ -1895,18 +1903,22 @@ class QueryService:
                             or_raw_params.extend(ps)
 
             # [FIX BUG-V021] 把 owner_id 加到同一个 OR 组 (multi-role 路径)
-            from meta.services.chain_owner_resolver import is_in_chain
+            from meta.services.chain_owner_resolver import build_owner_exception_subquery
             if object_type == 'product':
                 or_raw_parts.append(f"{builder._get_db_column('owner_id') if hasattr(builder, '_get_db_column') else 'owner_id'} = ?")
                 or_raw_params.append(user_id)
                 logger.info(
-                    f"[DataPerm BUG-V027] OR-of-AND dim_scope with owner_id={user_id} for product"
+                    f"[DataPerm] OR-of-AND dim_scope with owner_id={user_id} for product"
                 )
-            elif is_in_chain(object_type):
-                # 子对象 (version/domain/...): 跳过 owner exception (已知限制, 同 BUG-V021)
-                logger.debug(
-                    f"[DataPerm BUG-V027] Skip owner exception for {object_type} (known limitation)"
-                )
+            else:
+                # [FIX BUG-V050] 不再用 is_in_chain 门禁, 直接调用 build_owner_exception_subquery
+                owner_subquery = build_owner_exception_subquery(self.ds, object_type, user_id)
+                if owner_subquery:
+                    id_col = builder._get_db_column('id') if hasattr(builder, '_get_db_column') else 'id'
+                    or_raw_parts.append(f"{id_col} IN ({owner_subquery})")
+                    logger.info(
+                        f"[DataPerm] OR-of-AND dim_scope with chain owner exception for {object_type} user={user_id}"
+                    )
 
             if or_raw_parts:
                 raw_sql = ' OR '.join(or_raw_parts)
@@ -1920,21 +1932,18 @@ class QueryService:
             return True
 
         # [FIX BUG-V021] 单 role 路径: 把 owner_id 加到同一个 OR 组
-        from meta.services.chain_owner_resolver import is_in_chain
+        from meta.services.chain_owner_resolver import build_owner_exception_subquery
         if object_type == 'product':
             or_conditions.append(('owner_id', _QOp.EQ, user_id))
             logger.info(
                 f"[DataPerm BUG-V021] OR-merged dim_scope with owner_id={user_id} for product"
             )
-        elif is_in_chain(object_type):
-            # 子对象 (version/domain/...): 跳过 owner exception
-            # 原因: virtual_sort.py 调用 add_table_alias_to_where 时
-            #   会把 where_exists 内的子查询 column 也错误加上主表别名 (products.domains.id),
-            #   导致 SQL 语法错。这是个现有 bug, 不是本 fix 范围。
-            #   BUG-V013 已修复 BOFramework 拦截器链的 owner exception, 这里只补 query_service.search
-            #   对 product 主表(无子查询问题)的 owner exception。
+        else:
+            # [FIX BUG-V050] 子对象 (version/domain/.../service_module/business_object)
+            # 注意: virtual_sort.py 的 add_table_alias_to_where 会给子查询加别名导致 SQL 错
+            # 所以这里仍跳过 owner exception, 依赖 BOFramework 拦截器链处理 (BUG-V013)
             logger.debug(
-                f"[DataPerm BUG-V021] Skip owner exception for {object_type} (known limitation)"
+                f"[DataPerm BUG-V021] Skip owner exception for {object_type} in query_service.search (handled by BOFramework interceptor)"
             )
 
         if or_conditions:

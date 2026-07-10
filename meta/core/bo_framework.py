@@ -394,7 +394,30 @@ class BOFramework:
             'name': meta_obj.name,
             'table_name': getattr(meta_obj, 'table_name', ''),
             'description': getattr(meta_obj, 'description', ''),
+            # [FIX BUG-V051.2 2026-07-10 dev agent] 暴露更多对象级字段
+            'label': getattr(meta_obj, 'label', None) or meta_obj.name,
+            'labels': getattr(meta_obj, 'labels', {}) or {},
+            'display_name_field': getattr(meta_obj, 'display_name_field', None),
+            'parent_object': getattr(meta_obj, 'parent_object', None) or '',
+            'aspects': list(getattr(meta_obj, 'aspects', None) or []),
+            'is_view': getattr(meta_obj, 'is_view', False),
+            'persistent': getattr(meta_obj, 'persistent', True),
+            'bo_category': str(meta_obj.bo_category) if getattr(meta_obj, 'bo_category', None) else None,
+            'bo_sub_category': str(meta_obj.bo_sub_category) if getattr(meta_obj, 'bo_sub_category', None) else None,
+            'key_template': getattr(meta_obj, 'key_template', None) or {},
+            'cascade_select': getattr(meta_obj, 'cascade_select', None) or [],
+            'deletability': self._make_json_safe(getattr(meta_obj, 'deletability', None)) if getattr(meta_obj, 'deletability', None) else {},
+            'addability': self._make_json_safe(getattr(meta_obj, 'addability', None)) if getattr(meta_obj, 'addability', None) else {},
         }
+        ui_view_config = getattr(meta_obj, 'ui_view_config', None)
+        if ui_view_config:
+            schema['ui_view_config'] = self._make_json_safe(ui_view_config)
+        ui_view_configs = getattr(meta_obj, 'ui_view_configs', None)
+        if ui_view_configs:
+            schema['ui_view_configs'] = self._make_json_safe(ui_view_configs)
+        audit_cfg = getattr(meta_obj, 'audit', None)
+        if audit_cfg:
+            schema['audit_enabled'] = getattr(audit_cfg, 'enabled', True)
 
         fields_schema = []
         for f in meta_obj.fields:
@@ -405,6 +428,7 @@ class BOFramework:
                 'required': getattr(f, 'required', False),
                 'unique': getattr(f, 'unique', False),
                 'description': getattr(f, 'description', ''),
+                'computed': getattr(f, 'computed', False),
             }
             default = getattr(f, 'default', None)
             if default is not None:
@@ -424,6 +448,12 @@ class BOFramework:
             ui = getattr(f, 'ui', None)
             if ui:
                 fs['ui'] = self._make_json_safe(self._ui_to_dict(ui))
+            semantics = getattr(f, 'semantics', None)
+            if semantics:
+                fs['semantics'] = self._make_json_safe(semantics)
+            permission = getattr(f, 'permission', None)
+            if permission:
+                fs['permission'] = self._make_json_safe(permission)
             fields_schema.append(fs)
         schema['fields'] = fields_schema
 

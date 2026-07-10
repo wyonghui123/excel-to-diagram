@@ -164,12 +164,21 @@ def init_menu_permissions(db_path):
                 {'bo_id': 'audit_log', 'role': 'derived', 'include_actions': ['read', 'export']},
             ]),
             'required_permissions': json.dumps([
+                # [FIX 2026-07-10] BUG-V051: 补全所有架构对象的导入导出权限
+                # 之前 required_permissions 只配了部分 export/import (e.g. domain:export/import),
+                # 漏了 sub_domain:import, service_module:import, business_object:import/export,
+                # relationship:import, audit_log:export
+                # 导致: 1) 用户勾选这些权限保存没效果 (DB 不存在)  2) 详细权限列表显示不到
+                # [FIX-2 2026-07-10] 移除 batch_import (与 import 重复, 委托给统一 export-import 端点)
                 'domain:create', 'domain:read', 'domain:update', 'domain:delete', 'domain:export', 'domain:import',
                 'sub_domain:create', 'sub_domain:read', 'sub_domain:update', 'sub_domain:delete',
+                'sub_domain:export', 'sub_domain:import',
                 'service_module:create', 'service_module:read', 'service_module:update', 'service_module:delete',
+                'service_module:export', 'service_module:import',
                 'business_object:create', 'business_object:read', 'business_object:update', 'business_object:delete',
+                'business_object:export', 'business_object:import',
                 # 🆕 关系对象 (derived) 的最低权限
-                'relationship:read', 'relationship:export',
+                'relationship:read', 'relationship:export', 'relationship:import',
                 # 🆕 审计日志 (derived) 的最低权限 (操作日志 tab 必需)
                 'audit_log:read', 'audit_log:export',
             ]),
@@ -194,7 +203,12 @@ def init_menu_permissions(db_path):
                 {'bo_id': 'version', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list', 'export', 'import']},
             ]),
             'required_permissions': json.dumps([
+                # [FIX 2026-07-10] BUG-V051: 补全 product/version 的 import/export/set_current/compare
                 'product:create', 'product:read', 'product:update', 'product:delete',
+                'product:import', 'product:export',
+                'version:create', 'version:read', 'version:update', 'version:delete',
+                'version:import', 'version:export',
+                'version:set_current', 'version:compare',
             ]),
             'data_permission_hint': json.dumps({
                 'resource_types': ['product'],

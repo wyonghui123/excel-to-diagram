@@ -4489,20 +4489,23 @@ class ImportExportService:
         #     cascade export 走 query_service.search 路径, owner exception 需在 search 内处理
         try:
             from meta.core.models import registry
-            from meta.services.chain_owner_resolver import is_in_chain
+            from meta.services.chain_owner_resolver import build_owner_exception_subquery
             meta = registry.get(object_type)
             if meta and user_id:
                 if object_type == 'product':
                     # product 直接用 owner_id
                     owner_sql = f" OR {prefix}owner_id = ?"
                     owner_params = [user_id]
-                elif is_in_chain(object_type):
-                    # 子对象 (version/domain/...) 用 chain_owner_resolver
-                    owner_sql = f" OR {prefix}product_id IN (SELECT id FROM products WHERE owner_id = ?)"
-                    owner_params = [user_id]
                 else:
-                    owner_sql = ""
-                    owner_params = []
+                    # [FIX BUG-V050] 使用 build_owner_exception_subquery 代替硬编码 product_id
+                    # 支持 version/domain/sub_domain + service_module/business_object
+                    owner_subquery = build_owner_exception_subquery(None, object_type, user_id)
+                    if owner_subquery:
+                        owner_sql = f" OR {prefix}id IN ({owner_subquery})"
+                        owner_params = []
+                    else:
+                        owner_sql = ""
+                        owner_params = []
                 if owner_sql:
                     logger.info(
                         f'[_build_permission_filter BUG-V014] adding owner exception for {object_type}: '
@@ -6321,6 +6324,65 @@ class ImportExportService:
                                             })
                                             invalid_count += 1
                                             logger.warning(f"[Validate] 引用完整性错误: {obj.name}.{field_label} -> {resolve_to}.{source_value_str} (版本ID: {version_id})")
+
+                # [FIX 2026-07-10] 关系对象"源+目标+类型+方向"重复检查降级为 warning (Preview阶段)
+                # 背景: 业务上允许同一对 src+tgt 存在多条不同方向/类型的关系
+                #   所以导入时遇到重复组合只告警, 不阻止保存
+                # Preview 阶段 record 中 FK 字段尚未解析, 直接从 row 取 code 查重
+                if sheet["object_type"] == "relationship":
+                    src_code_idx = -1
+                    tgt_code_idx = -1
+                    type_idx = -1
+                    dir_idx = -1
+                    for i, h in enumerate(sheet.get("columns", [])):
+                        hs = str(h) if h else ""
+                        if "源业务对象编码" in hs or hs == "source_code":
+                            src_code_idx = i
+                        elif "目标业务对象编码" in hs or hs == "target_code":
+                            tgt_code_idx = i
+                        elif "关系类型" in hs and "方向" not in hs:
+                            type_idx = i
+                        elif hs == "方向" or hs == "relation_direction":
+                            dir_idx = i
+
+                    if src_code_idx >= 0 and tgt_code_idx >= 0 and src_code_idx < len(row) and tgt_code_idx < len(row):
+                        src_v = row[src_code_idx]
+                        tgt_v = row[tgt_code_idx]
+                        if src_v and tgt_v:
+                            src_code_val = str(src_v).split(' - ')[0].strip()
+                            tgt_code_val = str(tgt_v).split(' - ')[0].strip()
+                            type_val = None
+                            dir_val = None
+                            if type_idx >= 0 and type_idx < len(row) and row[type_idx]:
+                                type_val = str(row[type_idx]).split(' - ')[0].strip()
+                            if dir_idx >= 0 and dir_idx < len(row) and row[dir_idx]:
+                                dir_val = str(row[dir_idx]).split(' - ')[0].strip()
+
+                            try:
+                                dup_q = f"""SELECT r.id, r.code FROM {obj.table_name} r
+                                    JOIN business_objects src ON r.source_bo_id = src.id
+                                    JOIN business_objects tgt ON r.target_bo_id = tgt.id
+                                    WHERE r.version_id = ? AND src.code = ? AND tgt.code = ?"""
+                                dup_p = [version_id, src_code_val, tgt_code_val]
+                                if type_val:
+                                    dup_q += " AND r.relation_type = ?"
+                                    dup_p.append(type_val)
+                                if dir_val:
+                                    dup_q += " AND r.relation_direction = ?"
+                                    dup_p.append(dir_val)
+                                dup_c = self.data_source.execute(dup_q, tuple(dup_p))
+                                dup_r = dup_c.fetchone()
+                                if dup_r:
+                                    warnings.append({
+                                        "sheet": sheet["name"],
+                                        "row": row_num,
+                                        "field": "关系组合",
+                                        "value": f"{src_code_val}->{tgt_code_val} ({type_val or '-'}, {dir_val or '-'})",
+                                        "message": f"【重复关系告警】已存在相同 源+目标+类型+方向 的关系 (code={dup_r[1]}, id={dup_r[0]}), 但仍会创建新记录",
+                                        "severity": "warning"
+                                    })
+                            except Exception as e:
+                                logger.warning(f"[Validate-Preview] 关系重复检测异常: {e}")
                 
                 # [FIX FR-004] addability 检查：新增模式下验证 addability 条件
                 # 避免预览通过但执行时被 manage_service.create() 的 addability 拒绝
@@ -6845,15 +6907,23 @@ class ImportExportService:
         logger.info(f"[Import] 前端传入的版本ID: {frontend_version_id}, context keys: {list(context.keys())}")
 
         meta = self._read_meta_sheet(file_path)
-        excel_product_code = meta.get('product_code')
-        excel_version_code = meta.get('version_code')
+        excel_product_code = meta.get('产品编码') or meta.get('产品线编码')
+        excel_version_code = meta.get('版本编码')
+        # [FIX BUG-V053 2026-07-10] 直接读 "版本ID" 字段 (v1.2.x export 写在 row 12)
+        excel_version_id = meta.get('版本ID')
+        if excel_version_id and str(excel_version_id).strip().isdigit():
+            excel_version_id = int(str(excel_version_id).strip())
 
-        logger.info(f"[Import] Excel元数据表信息: product_code={excel_product_code}, version_code={excel_version_code}")
+        logger.info(f"[Import] Excel元数据表信息: product_code={excel_product_code}, version_code={excel_version_code}, version_id={excel_version_id}")
 
         if frontend_version_id:
             logger.info(f"[Import] 使用前端传入的version_id={frontend_version_id}，忽略Excel元数据表中的版本")
             if excel_product_code or excel_version_code:
                 logger.warning(f"[Import] [WARNING] 前端传入的版本ID({frontend_version_id})与Excel元数据表版本({excel_version_code})可能不一致，将使用前端版本")
+        elif excel_version_id:
+            # [FIX BUG-V053 2026-07-10] 优先用 "版本ID" 直接作为 version_id (最精确)
+            context['version_id'] = excel_version_id
+            logger.info(f"[Import] 从Excel元数据表《版本ID》直接读取 version_id={excel_version_id}")
         elif excel_product_code and excel_version_code:
             resolved_version_id = self._resolve_version_id(excel_product_code, excel_version_code)
             if resolved_version_id:
@@ -7318,19 +7388,63 @@ class ImportExportService:
                         record['version_id'] = context.get('version_id')
                     logger.info(f"[Import] 新增数据中version_id={record.get('version_id')}")
 
-                    # [FIX v1.2.33 2026-06-21] 如果 code 为空且对象有 key_template，自动生成 code
-                    # 此逻辑与 _upsert_record (L6114-6122) 一致，但显式 create 路径不经过 _upsert_record
-                    code_value = record.get('code', '')
-                    if (not code_value or not str(code_value).strip()):
-                        kt_code = self._auto_generate_code_from_key_template(object_type, record)
-                        if kt_code:
-                            record['code'] = kt_code
-                            logger.info(f"[Import] Key template auto-generated code: {kt_code}")
+                    # [FIX 2026-07-10] 关系对象"源+目标+类型+方向"重复检查降级为 warning
+                    # 背景: 业务上允许同一对 src+tgt 存在多条不同方向/类型的关系
+                    #   例如 (A->B, GENERATES+PUSH) 和 (A->B, REFERENCES+PUSH) 都是合法的
+                    #   所以导入时遇到重复组合只告警, 不阻止保存
+                    if object_type == "relationship":
+                        source_bo_id = record.get('source_bo_id')
+                        target_bo_id = record.get('target_bo_id')
+                        rel_type = record.get('relation_type')
+                        rel_dir = record.get('relation_direction')
+                        if source_bo_id and target_bo_id and (rel_type or rel_dir):
+                            try:
+                                dup_query = f"""SELECT id, code FROM {obj.table_name}
+                                    WHERE version_id = ? AND source_bo_id = ?
+                                    AND target_bo_id = ?"""
+                                dup_params = [record.get('version_id'), source_bo_id, target_bo_id]
+                                if rel_type:
+                                    dup_query += " AND relation_type = ?"
+                                    dup_params.append(rel_type)
+                                if rel_dir:
+                                    dup_query += " AND relation_direction = ?"
+                                    dup_params.append(rel_dir)
+                                dup_cursor = self.data_source.execute(dup_query, tuple(dup_params))
+                                dup_rows = dup_cursor.fetchall()
+                                for dup_row in dup_rows:
+                                    warnings.append({
+                                        "row": row_num,
+                                        "operation": operation_mode,
+                                        "field": "关系组合",
+                                        "value": f"{record.get('source_code','?')}->{record.get('target_code','?')} ({rel_type or '-'}, {rel_dir or '-'})",
+                                        "message": f"【重复关系告警】已存在相同 源+目标+类型+方向 的关系 (code={dup_row[1]}, id={dup_row[0]}), 但仍会创建新记录",
+                                        "severity": "warning"
+                                    })
+                                    break
+                            except Exception as e:
+                                logger.warning(f"[Import] 关系重复检测异常: {e}")
+
+                    # [FIX BUG-V053b 2026-07-10] upsert 路径不要先生成 code
+                    # 原因: 如果先生成 code, _upsert_record 内部 _find_existing_record 会用错
+                    #   误的新 code 查找 (找不到), 然后走 create 分支, 撞上 unique index 冲突
+                    # 修复: 仅当直接 create 分支才先生成 code; upsert 分支让 _upsert_record 内部处理
+                    #   (找到已存在记录则 update, 找不到则 _upsert_record 内部生成新 code)
+                    is_upsert_path = (conflict_strategy == "upsert" and not operation_mode_explicit)
+
+                    if not is_upsert_path:
+                        # [FIX v1.2.33 2026-06-21] 如果 code 为空且对象有 key_template，自动生成 code
+                        # 此逻辑与 _upsert_record (L6114-6122) 一致，但显式 create 路径不经过 _upsert_record
+                        code_value = record.get('code', '')
+                        if (not code_value or not str(code_value).strip()):
+                            kt_code = self._auto_generate_code_from_key_template(object_type, record)
+                            if kt_code:
+                                record['code'] = kt_code
+                                logger.info(f"[Import] Key template auto-generated code: {kt_code}")
 
                     # [FIX v1.2.18l 2026-06-20] 当 Excel 中显式填写了 create 时，按 create 语义执行（不 upsert）
                     # conflict_strategy=upsert 只在未显式指定操作模式时生效
-                    if conflict_strategy == "upsert" and not operation_mode_explicit:
-                        logger.info(f"[Import] conflict_strategy=upsert，使用 upsert 处理可能已存在的记录")
+                    if is_upsert_path:
+                        logger.info(f"[Import] conflict_strategy=upsert，使用 upsert 处理可能已存在的记录 (code 保留为空，由 _upsert_record 内部处理)")
                         upsert_result = self._upsert_record(object_type, record, obj.import_export)
                         if upsert_result["success"]:
                             success_count += 1
@@ -7529,7 +7643,8 @@ class ImportExportService:
             key_value = record.get(conflict_key)
             if key_value is not None:
                 return self._find_by_key(object_type, conflict_key, key_value, version_id)
-            return None
+            # [FIX BUG-V053b 2026-07-10] conflict_key 也为空时, 回退用 unique index 查找
+            return self._find_by_unique_index(object_type, record, version_id)
 
         bk_fields = self._get_business_key_fields(object_type)
 
@@ -7541,7 +7656,15 @@ class ImportExportService:
 
         if len(bk_fields) == 1:
             key_value = record.get(bk_fields[0].id)
-            if key_value is None:
+            # [FIX BUG-V053b 2026-07-10] key 为空时回退用 unique index 查找
+            #   场景: relationship.code 是 business_key, 但 Excel 没填 code (由 key_template 自动生成)
+            #   重复导入时 record.code='', _find_by_key 返回 None, 走 create 分支
+            #   但实际记录已存在 → unique index 冲突
+            #   修复: code 为空时改用 (source_bo_id, target_bo_id, relation_type, version_id) 查找
+            if key_value is None or (isinstance(key_value, str) and not key_value.strip()):
+                existing = self._find_by_unique_index(object_type, record, version_id)
+                if existing:
+                    return existing
                 return None
             # [SYMBOL] 传入 version_id，只在指定版本内查找
             return self._find_by_key(object_type, bk_fields[0].id, key_value, version_id)
@@ -7550,11 +7673,85 @@ class ImportExportService:
             for bk_field in bk_fields:
                 key_values.append(record.get(bk_field.id))
 
-            if all(v is None for v in key_values):
+            if all(v is None or (isinstance(v, str) and not v.strip()) for v in key_values):
+                # 组合键也全为空, 同样回退到 unique index
+                existing = self._find_by_unique_index(object_type, record, version_id)
+                if existing:
+                    return existing
                 return None
 
             # [SYMBOL] 传入 version_id，只在指定版本内查找
             return self._find_by_composite_key(object_type, bk_fields, key_values, version_id)
+
+    def _find_by_unique_index(self, object_type: str, record: Dict[str, Any],
+                              version_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        """[FIX BUG-V053b 2026-07-10] 用 unique index 字段查找已存在记录
+
+        背景: relationship 等对象的 business_key (code) 在重复导入时为空 (由 key_template 自动生成),
+              此时用 code 字段查找会失败, 走 create 分支撞上 unique index。
+        修复: 用 unique index 字段 (含 version_id) 查找。
+
+        Returns:
+            dict 或 None
+        """
+        try:
+            obj_meta = registry.get(object_type)
+            if not obj_meta:
+                return None
+            indexes = getattr(obj_meta, 'indexes', None) or []
+            table_name = obj_meta.table_name
+
+            for index in indexes:
+                index_type_str = ''
+                index_fields = []
+                if isinstance(index, dict):
+                    index_type_str = index.get('type', '')
+                    index_fields = index.get('fields', [])
+                else:
+                    idx_type = getattr(index, 'index_type', None)
+                    index_type_str = getattr(idx_type, 'value', idx_type) or ''
+                    index_fields = list(getattr(index, 'fields', []) or [])
+
+                if index_type_str != 'unique':
+                    continue
+                if not index_fields:
+                    continue
+
+                where_clauses = []
+                params = []
+                all_present = True
+                for idx_field in index_fields:
+                    value = record.get(idx_field)
+                    if value is None or value == '':
+                        # version_id 用传入参数
+                        if idx_field == 'version_id' and version_id is not None:
+                            value = version_id
+                        else:
+                            all_present = False
+                            break
+                    where_clauses.append(f"{idx_field} = ?")
+                    params.append(value)
+
+                if not all_present:
+                    continue
+
+                query = f"SELECT id, code FROM {table_name} WHERE {' AND '.join(where_clauses)} LIMIT 1"
+                cursor = self.data_source.execute(query, tuple(params))
+                row = cursor.fetchone()
+                if row:
+                    # 返回完整记录
+                    row_id = row[0]
+                    full_query = f"SELECT * FROM {table_name} WHERE id = ?"
+                    full_cursor = self.data_source.execute(full_query, (row_id,))
+                    full_row = full_cursor.fetchone()
+                    if full_row:
+                        col_names = [d[0] for d in full_cursor.description]
+                        return dict(zip(col_names, full_row))
+                    return {'id': row_id, 'code': row[1]}
+            return None
+        except Exception as e:
+            logger.warning(f"[Import] _find_by_unique_index failed: {e}")
+            return None
 
     def _force_cascade_delete(self, parent_type: str, parent_id: Any) -> Dict[str, Any]:
         """[FIX 2026-06-24] 强制 cascade 删除 parent 及其所有子级
@@ -7737,6 +7934,16 @@ class ImportExportService:
                 record['version_id'] = record_version_id
                 logger.info(f"[Upsert] 强制设置 record.version_id={record_version_id}")
 
+            # [FIX BUG-V053b 2026-07-10] UPDATE 时强制 business_key 字段保持原值
+            # 背景: 重复导入时 record.code 可能为空 (由 key_template 自动生成), 走 update 分支
+            #   会触发 "关系编码 是业务关键字，不能为空" 校验失败
+            # 修复: 用 existing.code 覆盖 record.code (如果有差异)
+            existing_code = existing.get('code')
+            record_code = record.get('code')
+            if existing_code and (not record_code or not str(record_code).strip()):
+                record['code'] = existing_code
+                logger.info(f"[Upsert] business_key code 强制使用 DB 原值: 原值={existing_code}, Excel新值='{record_code}'")
+
             # [FIX v1.2.18 2026-06-20] UPDATE 时强制 parent_key 字段保持原值, 避免 PARENT_FIELD_IMMUTABLE
             # parent_key 字段（如 sub_domain_id）在 hierarchy_validation 中被标记为 immutable
             # 即便用户 Excel 里填了新领域 (PROCUREMENT), DB 原值是其他, 也以 DB 为准
@@ -7889,10 +8096,10 @@ class ImportExportService:
 
     def _read_meta_sheet(self, file_path: str) -> Dict[str, str]:
         """从 Excel 文件的元数据 Sheet 读取上下文信息
-        
+
         Args:
             file_path: Excel 文件路径
-            
+
         Returns:
             dict: 包含 product_code, version_code, version_id 等信息的字典
         """
@@ -7900,17 +8107,26 @@ class ImportExportService:
         try:
             from openpyxl import load_workbook
             wb = load_workbook(file_path, read_only=True)
-            
-            if '元数据' in wb.sheetnames:
-                ws = wb['元数据']
-                for row in ws.iter_rows(min_row=1, max_row=10, max_col=2):
-                    if row[0].value and row[1].value:
-                        meta[str(row[0].value)] = str(row[1].value)
-            
+
+            # [FIX BUG-V053 2026-07-10] 兼容 2 种 sheet name:
+            #   - "说明" (v1.2.x+ export 写出的 sheet, 同时是用户惯用名)
+            #   - "元数据" (旧版 import 期待名)
+            # 之前只读 "元数据", 因为 export 实际写 "说明", 导致 product_code/version_code 永远 None,
+            # 进而 import 时无法从 Excel 推断 version_id → record.version_id=None → 创建失败 "版本 不能为空"
+            for sheet_name in ('元数据', '说明'):
+                if sheet_name in wb.sheetnames:
+                    ws = wb[sheet_name]
+                    for row in ws.iter_rows(min_row=1, max_row=20, max_col=2):
+                        if row[0].value and row[1].value:
+                            key = str(row[0].value).strip()
+                            if key in ('产品编码', '产品线编码', '版本编码', '版本ID'):
+                                meta[key] = str(row[1].value).strip()
+                    break  # 找到第一个就停
+
             wb.close()
         except Exception as e:
             logger.warning(f"Failed to read meta sheet: {e}")
-        
+
         return meta
 
     def _resolve_version_id(self, product_code: str, version_code: str) -> Optional[int]:

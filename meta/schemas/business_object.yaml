@@ -982,18 +982,20 @@ actions:
   method: GET
   path: /api/v1/business_objects
   description: 查询业务对象列表
-- id: batch_import
-  name: 批量导入
+# [FIX 2026-07-10] BUG-V051: import/export 委托给统一 export-import 端点
+#   移除 batch_import (2026-07-10 BUG-V051 后续): 跟 import 重复
+- id: import
+  name: 导入
   type: business
   method: POST
-  path: /api/v1/business_objects/import
-  description: 从Excel批量导入业务对象
+  path: /api/v1/export-import/import
+  description: 通过统一导入端点从Excel导入业务对象
 - id: export
   name: 导出
   type: business
   method: GET
-  path: /api/v1/business_objects/export
-  description: 导出业务对象到Excel
+  path: /api/v1/export-import/export
+  description: 通过统一导出端点导出业务对象到Excel
 indexes:
 - name: uidx_business_objects_version_code
   fields:

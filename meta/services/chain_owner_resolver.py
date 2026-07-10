@@ -89,11 +89,8 @@ def resolve_root_owner(
             logger.debug(f'resolve_root_owner (product) failed: {e}')
             return None
 
-    # 不在 chain 的 BO: 返回 None
-    if not is_in_chain(object_type):
-        return None
-
-    # version/domain/sub_domain: 沿 chain 向上 SQL JOIN
+    # [FIX BUG-V050 2026-07-10] 不再用 is_in_chain 门禁, 直接按 object_type 分支
+    # 支持 service_module/business_object
     try:
         if object_type == 'version':
             sql = (
@@ -115,6 +112,59 @@ def resolve_root_owner(
                 "  SELECT d.version_id FROM domains d "
                 "  WHERE d.id = ("
                 "    SELECT sd.domain_id FROM sub_domains sd WHERE sd.id = ?"
+                "  )"
+                ") "
+                "WHERE p.id = v.product_id"
+            )
+        elif object_type == 'service_module':
+            sql = (
+                "SELECT p.owner_id FROM products p "
+                "JOIN versions v ON v.id = ("
+                "  SELECT d.version_id FROM domains d "
+                "  WHERE d.id = ("
+                "    SELECT sd.domain_id FROM sub_domains sd "
+                "    WHERE sd.id = ("
+                "      SELECT sm.sub_domain_id FROM service_modules sm WHERE sm.id = ?"
+                "    )"
+                "  )"
+                ") "
+                "WHERE p.id = v.product_id"
+            )
+        elif object_type == 'business_object':
+            sql = (
+                "SELECT p.owner_id FROM products p "
+                "JOIN versions v ON v.id = ("
+                "  SELECT d.version_id FROM domains d "
+                "  WHERE d.id = ("
+                "    SELECT sd.domain_id FROM sub_domains sd "
+                "    WHERE sd.id = ("
+                "      SELECT sm.sub_domain_id FROM service_modules sm "
+                "      WHERE sm.id = ("
+                "        SELECT bo.service_module_id FROM business_objects bo WHERE bo.id = ?"
+                "      )"
+                "    )"
+                "  )"
+                ") "
+                "WHERE p.id = v.product_id"
+            )
+        # [FIX BUG-V050 2026-07-10] relationship: 沿 source_bo_id 业务链追溯
+        #   source_bo/target_bo 任一端 → BO → SM → SD → D → V → product.owner_id
+        elif object_type == 'relationship':
+            sql = (
+                "SELECT p.owner_id FROM products p "
+                "JOIN versions v ON v.id = ("
+                "  SELECT d.version_id FROM domains d "
+                "  WHERE d.id = ("
+                "    SELECT sd.domain_id FROM sub_domains sd "
+                "    WHERE sd.id = ("
+                "      SELECT sm.sub_domain_id FROM service_modules sm "
+                "      WHERE sm.id = ("
+                "        SELECT bo.service_module_id FROM business_objects bo "
+                "        WHERE bo.id = ("
+                "          SELECT r.source_bo_id FROM relationships r WHERE r.id = ?"
+                "        )"
+                "      )"
+                "    )"
                 "  )"
                 ") "
                 "WHERE p.id = v.product_id"
@@ -147,9 +197,7 @@ def resolve_root_product_id(
     if object_type == 'product':
         return record_id
 
-    if not is_in_chain(object_type):
-        return None
-
+    # [FIX BUG-V050 2026-07-10] 不再用 is_in_chain 门禁, 支持 service_module/business_object
     try:
         if object_type == 'version':
             sql = "SELECT product_id FROM versions WHERE id = ?"
@@ -163,6 +211,31 @@ def resolve_root_product_id(
                 "SELECT v.product_id FROM sub_domains sd "
                 "JOIN domains d ON d.id = sd.domain_id "
                 "JOIN versions v ON v.id = d.version_id WHERE sd.id = ?"
+            )
+        elif object_type == 'service_module':
+            sql = (
+                "SELECT v.product_id FROM service_modules sm "
+                "JOIN sub_domains sd ON sd.id = sm.sub_domain_id "
+                "JOIN domains d ON d.id = sd.domain_id "
+                "JOIN versions v ON v.id = d.version_id WHERE sm.id = ?"
+            )
+        elif object_type == 'business_object':
+            sql = (
+                "SELECT v.product_id FROM business_objects bo "
+                "JOIN service_modules sm ON sm.id = bo.service_module_id "
+                "JOIN sub_domains sd ON sd.id = sm.sub_domain_id "
+                "JOIN domains d ON d.id = sd.domain_id "
+                "JOIN versions v ON v.id = d.version_id WHERE bo.id = ?"
+            )
+        # [FIX BUG-V050 2026-07-10] relationship
+        elif object_type == 'relationship':
+            sql = (
+                "SELECT v.product_id FROM relationships r "
+                "JOIN business_objects bo ON bo.id = r.source_bo_id "
+                "JOIN service_modules sm ON sm.id = bo.service_module_id "
+                "JOIN sub_domains sd ON sd.id = sm.sub_domain_id "
+                "JOIN domains d ON d.id = sd.domain_id "
+                "JOIN versions v ON v.id = d.version_id WHERE r.id = ?"
             )
         else:
             return None
@@ -201,10 +274,10 @@ def build_owner_exception_subquery(
     if not user_id or not object_type:
         return None
 
-    if not is_in_chain(object_type):
-        return None
-
-    # owner 子查询: SELECT id FROM products WHERE owner_id = $user
+    # [FIX BUG-V050 2026-07-10] 支持 service_module 和 business_object 的 owner exception
+    # 之前 is_in_chain 不包含 service_module/business_object, 导致用户创建的 SM/BO
+    # 在 dimension scope 路径下不可见 (owner exception 未添加)
+    # 现在直接按 object_type 分支, 不再依赖 is_in_chain 作为前置门禁
     user_owned_products = (
         f"SELECT id FROM products WHERE owner_id = {int(user_id)}"
     )
@@ -237,6 +310,64 @@ def build_owner_exception_subquery(
             f"  WHERE version_id IN ("
             f"    SELECT id FROM versions "
             f"    WHERE product_id IN ({user_owned_products})"
+            f"  )"
+            f")"
+        )
+
+    # [FIX BUG-V050] service_module: sub_domain_id -> sub_domains -> domains -> versions -> products
+    if object_type == 'service_module':
+        return (
+            f"SELECT id FROM service_modules "
+            f"WHERE sub_domain_id IN ("
+            f"  SELECT id FROM sub_domains "
+            f"  WHERE domain_id IN ("
+            f"    SELECT id FROM domains "
+            f"    WHERE version_id IN ("
+            f"      SELECT id FROM versions "
+            f"      WHERE product_id IN ({user_owned_products})"
+            f"    )"
+            f"  )"
+            f")"
+        )
+
+    # [FIX BUG-V050] business_object: service_module_id -> service_modules -> ... -> products
+    if object_type == 'business_object':
+        return (
+            f"SELECT id FROM business_objects "
+            f"WHERE service_module_id IN ("
+            f"  SELECT id FROM service_modules "
+            f"  WHERE sub_domain_id IN ("
+            f"    SELECT id FROM sub_domains "
+            f"    WHERE domain_id IN ("
+            f"      SELECT id FROM domains "
+            f"      WHERE version_id IN ("
+            f"        SELECT id FROM versions "
+            f"        WHERE product_id IN ({user_owned_products})"
+            f"      )"
+            f"    )"
+            f"  )"
+            f")"
+        )
+
+    # [FIX BUG-V050 2026-07-10] relationship: source_bo_id 在 user owned product 业务链上
+    #   source_bo -> sm -> sd -> d -> v -> product
+    if object_type == 'relationship':
+        return (
+            f"SELECT id FROM relationships "
+            f"WHERE source_bo_id IN ("
+            f"  SELECT id FROM business_objects "
+            f"  WHERE service_module_id IN ("
+            f"    SELECT id FROM service_modules "
+            f"    WHERE sub_domain_id IN ("
+            f"      SELECT id FROM sub_domains "
+            f"      WHERE domain_id IN ("
+            f"        SELECT id FROM domains "
+            f"        WHERE version_id IN ("
+            f"          SELECT id FROM versions "
+            f"          WHERE product_id IN ({user_owned_products})"
+            f"        )"
+            f"      )"
+            f"    )"
             f"  )"
             f")"
         )

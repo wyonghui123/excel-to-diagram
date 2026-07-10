@@ -741,5 +741,50 @@ class SQLiteConnectionPool:
                 "db_size_bytes": db_size,
                 "wal_size_bytes": wal_size,
             }
-
         return result
+
+
+# [V007.50 BUG-FIX 2026-07-09] 模块级 _health_check (供 server.py /health V8x 导入)
+#   背景: V007.46/V007.47 部署时, /health V8x 尝试 import _health_check → ModuleNotFoundError
+#         deploy.sh 只看 status=200, 不解析 JSON, 误判"业务正常" — 12+ 小时才发现
+#   现在: _health_check 始终存在, 返回实际 pool 状态或 'not_available' 标记
+#   _set_pool: server init 时把 pool 引用注入, _health_check 读取即可
+_pool_ref: 'Optional[SQLiteConnectionPool]' = None
+
+
+def _set_pool(pool: 'SQLiteConnectionPool') -> None:
+    """[V007.50] 注入连接池引用 (server init 时调用)"""
+    global _pool_ref
+    _pool_ref = pool
+
+
+def _health_check() -> dict:
+    """[V007.50] 模块级健康检查 (供 /health V8x)
+
+    Returns dict with keys: reader_health, checkpoint_busy, io_rate_limit, max_readers
+    若 pool 未初始化, 返回 'not_initialized' 标记而非抛异常
+    """
+    if _pool_ref is None:
+        return {
+            'reader_health': 'not_initialized',
+            'checkpoint_busy': 'not_initialized',
+            'io_rate_limit': 'not_initialized',
+            'max_readers': 'not_initialized',
+        }
+    try:
+        hc = _pool_ref.health_check()
+        checks = hc.get('checks', {})
+        return {
+            'reader_health': checks.get('reader_health', {}),
+            'checkpoint_busy': checks.get('checkpoint_busy', -1),
+            'io_rate_limit': checks.get('io_rate_limit', {}),
+            'max_readers': _pool_ref._config.max_readers,
+        }
+    except Exception as e:
+        logger.warning('[V007.50] _health_check failed: %s', e)
+        return {
+            'reader_health': {'error': str(e)},
+            'checkpoint_busy': -1,
+            'io_rate_limit': {'error': str(e)},
+            'max_readers': 0,
+        }

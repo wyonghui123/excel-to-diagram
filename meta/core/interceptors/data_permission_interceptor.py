@@ -788,6 +788,72 @@ class DataPermissionInterceptor(Interceptor):
                 f'[_apply_scope_filter_after_dimension] Skipping visibility+owner for '
                 f'{context.object_type} (association BO, dim scope OR-derived is sufficient)'
             )
+            # [FIX BUG-V050 2026-07-10] relationship 必须叠加 allowed_ids (data_permissions) 兜底
+            # 原因: dim scope 派生只考虑 dim scope 配置, 不考虑用户显式 data_permissions 表授权
+            # 场景: wyonghui 有 business_object/4653,4654,4655 + relationship/5934 admin perm
+            #       但 5934 涉及 BO 不在 dim scope (domain=703,2200) 内 → dim scope 派生不匹配
+            #       之前会看不到自己创建的关系
+            # 修复: 在 dim scope 派生条件上 OR 上 allowed_ids (data_permissions 显式授权)
+            #
+            # [FIX BUG-V050b 2026-07-10] 同时扩展"用户能看的 BO"为 allowed_ids
+            # 原因: 用户可能被授予 business_object/4653,4654,4655 但未单独授权涉及这些 BO 的新关系
+            #       (如 relationship/5978, 5979 是用户自己新建的, 没在 data_permissions 关系白名单里)
+            #       业务上, 能看 BO 应该隐含能看涉及该 BO 的关系 (否则用户管理自己的数据会受限)
+            # 修复: 拿用户的 business_object allowed_ids, 派生"涉及这些 BO 的关系"作为 allowed_ids 一部分
+            if 'query_conditions' not in context.extra:
+                context.extra['query_conditions'] = []
+            existing_conds = context.extra['query_conditions']
+            try:
+                perm_filter = self._get_perm_filter(context)
+                if perm_filter:
+                    allowed_ids = set(perm_filter.perm_service.get_allowed_resource_ids(
+                        context.user_id, context.object_type
+                    ) or [])
+                    # 扩展: 用户能看的 business_object → 涉及这些 BO 的关系
+                    bo_allowed_ids = perm_filter.perm_service.get_allowed_resource_ids(
+                        context.user_id, 'business_object'
+                    ) or []
+                    if bo_allowed_ids:
+                        try:
+                            # 查 DB: 涉及这些 BO 的所有关系 id
+                            bo_ids_str = ','.join(str(i) for i in bo_allowed_ids)
+                            rel_cursor = context.data_source.execute(
+                                f"SELECT id FROM relationships WHERE "
+                                f"version_id IS NOT NULL AND "
+                                f"(source_bo_id IN ({bo_ids_str}) OR target_bo_id IN ({bo_ids_str}))"
+                            )
+                            rows = rel_cursor.fetchall()
+                            for row in rows:
+                                allowed_ids.add(row[0])
+                            logger.warning(
+                                f'[_apply_scope_filter_after_dimension BUG-V050b] '
+                                f'BO-expand: bo_count={len(bo_allowed_ids)} '
+                                f'-> rel_count={len(rows)} (added to allowed_ids, total={len(allowed_ids)})'
+                            )
+                        except Exception as e:
+                            import traceback
+                            logger.warning(f'[_apply_scope_filter_after_dimension BUG-V050b] BO-expand failed: {e}\n{traceback.format_exc()}')
+                    if allowed_ids:
+                        # 把 dim scope 派生条件包成 AND 组, 然后与 allowed_ids IN 做 OR
+                        # SQL: WHERE (dim_scope_conds AND) OR id IN (allowed_ids)
+                        if existing_conds:
+                            context.extra['query_conditions'] = [{
+                                'type': 'or',
+                                'conditions': [
+                                    {'type': 'and', 'conditions': existing_conds},
+                                    {'field': 'id', 'operator': 'in', 'value': list(allowed_ids)},
+                                ],
+                            }]
+                        else:
+                            context.extra['query_conditions'] = [{
+                                'field': 'id', 'operator': 'in', 'value': list(allowed_ids),
+                            }]
+                        logger.warning(
+                            f'[_apply_scope_filter_after_dimension BUG-V050] relationship '
+                            f'OR-merged allowed_ids={sorted(allowed_ids)}'
+                        )
+            except Exception as e:
+                logger.debug(f'[_apply_scope_filter_after_dimension BUG-V050] allowed_ids check failed: {e}')
             return
 
         # [FIX v1.0.8] 检查 BO 是否有 visibility 字段
@@ -925,11 +991,11 @@ class DataPermissionInterceptor(Interceptor):
                 'value': user_id,
                 'source': 'owner_exception',
             })
-        elif is_in_chain(object_type):
-            # 子对象 (version/domain/...) 用 chain_owner_resolver 走 product 链
-            # [FIX v1.2.35 BUG-V026 2026-06-27] 之前错误地用 product_id 直查,
-            # 但 domain/sub_domain 等子表本身没有 product_id 列 (走 version_id -> versions.product_id 链)
-            # 导致 owner exception 触发时 SQL "no such column: product_id" 400 错误
+        else:
+            # [FIX BUG-V050 2026-07-10] 不再用 is_in_chain 门禁, 直接调用 build_owner_exception_subquery
+            # 支持 version/domain/sub_domain + service_module/business_object
+            # 之前 is_in_chain 不包含 service_module/business_object, 导致用户创建的 SM/BO
+            # 在 dimension scope 路径下不可见 (owner exception 未添加)
             chain_subquery = build_owner_exception_subquery(
                 context.data_source, object_type, user_id
             )
@@ -940,9 +1006,9 @@ class DataPermissionInterceptor(Interceptor):
                     'value': chain_subquery,
                     'source': 'owner_exception_chain',
                 })
-        else:
-            # 其他 (无 owner 关系) 跳过
-            return
+            else:
+                # 无法解析 owner 链 (如 relationship, annotation) 跳过
+                return
 
         if len(owner_conds) == 1:
             owner_cond = owner_conds[0]

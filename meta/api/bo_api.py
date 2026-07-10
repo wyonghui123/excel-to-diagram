@@ -334,6 +334,40 @@ def _check_single_bo_in_dim_scope(object_type: str, obj_id: int):
             except Exception as e:
                 logger.debug(f'[_check_single_bo_in_dim_scope] owner check failed: {e}')
 
+        # [FIX BUG-V050 2026-07-10] owner chain 兜底: 关联型 BO (relationship) 无 owner_id 字段
+        #   走 chain_owner_resolver 沿 source_bo_id/target_bo_id 业务链追溯到 product.owner_id
+        #   跟 DataPermissionInterceptor._add_owner_exception 行为一致
+        if object_type == 'relationship' and user_id:
+            try:
+                from meta.services.chain_owner_resolver import resolve_root_owner
+                root_owner = resolve_root_owner(ds, 'relationship', obj_id)
+                if root_owner == user_id:
+                    logger.info(
+                        f'[_check_single_bo_in_dim_scope BUG-V050] ALLOW via owner_chain '
+                        f'object_type={object_type} obj_id={obj_id} user={user_id}'
+                    )
+                    return False
+            except Exception as e:
+                logger.debug(f'[_check_single_bo_in_dim_scope BUG-V050] owner_chain check failed: {e}')
+
+        # [FIX BUG-V050 2026-07-10] data_permissions 显式授权兜底
+        #   跟 _apply_scope_filter_after_dimension 的 allowed_ids OR 兜底一致
+        #   场景: 用户在自己 owned product 下创建关系, dim scope 派生不匹配,
+        #         但 data_permissions 表有显式授权 (create 时 auto-grant)
+        if user_id:
+            try:
+                from meta.services.data_permission_service import DataPermissionService
+                dps = DataPermissionService(ds)
+                allowed_ids = dps.get_allowed_resource_ids(user_id, object_type)
+                if allowed_ids and obj_id in allowed_ids:
+                    logger.info(
+                        f'[_check_single_bo_in_dim_scope BUG-V050] ALLOW via data_permissions '
+                        f'object_type={object_type} obj_id={obj_id} user={user_id}'
+                    )
+                    return False
+            except Exception as e:
+                logger.debug(f'[_check_single_bo_in_dim_scope BUG-V050] data_permissions check failed: {e}')
+
         # 拿 user 的所有 role_id
         cursor = ds.execute(
             """SELECT DISTINCT gr.role_id
