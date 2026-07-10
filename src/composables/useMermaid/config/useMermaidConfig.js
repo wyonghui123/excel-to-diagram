@@ -140,6 +140,10 @@ export function useMermaidConfig() {
       startOnLoad: false,
       securityLevel: 'loose',
       maxTextSize: maxTextSize,
+      // [V007.61] maxEdges 是 top-level secure config, 不能放在 flowchart 内
+      //   mermaid 11.13.0 报 "Edge limit exceeded. 500 edges found, but the limit is 500"
+      //   放在 flowchart.maxEdges 无效 (被忽略), 必须在顶层
+      maxEdges: 10000,
       theme: 'base',
       themeVariables: {
         edgeLabelBackground: '#ffffff',
@@ -160,6 +164,10 @@ export function useMermaidConfig() {
         useMaxWidth: false,
         htmlLabels: true,
         diagramPadding: 20,
+        // [V007.59] mermaid 11.13.0 默认 maxEdges=500, 超过就报
+        //   "Edge limit exceeded" 错误 (用户场景 3299 关系会触发).
+        //   显式提升到 10000, 留足 headroom. 大图会自动切 elk (MermaidComponent.vue V007.59)
+        maxEdges: 10000,
         // 关键修复 v32：wrappingWidth 决定 mermaid 给 foreignObject 内 div 设的 max-width
         //   之前 200 太窄，对中文 edge label（如 "供应链云>采购订单"）会右边截断
         //   提升到 500 后能容纳 ~25 个中文字符

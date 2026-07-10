@@ -345,7 +345,20 @@ export default {
             const positions = props.layoutPositions || []
             const zoneRowCount = props.zoneRowCount || 3
 
-            if (props.layoutEngine === 'elk') {
+            // [V007.59] 关系数大图自动切 elk
+            //   根因 (Playwright 验证): mermaid 11.13.0 + dagre 在 ≥ 2000 关系时
+            //   dagre 内部用递归 DFS 处理 edge routing, 触发 "Maximum call stack size
+            //   exceeded", mermaid 把它包装成模糊的 "Syntax error in text".
+            //   阈值: 1500 边 (< 1500 边 dagre 仍稳定; ≥ 1500 自动 elk)
+            //   验证: tools/test_mermaid_volume.py 1000 边 dagre PASS, 2000 边 dagre FAIL
+            const relationshipCount = props.diagramData?.links?.length || 0
+            const DAGRE_REL_LIMIT = 1500
+            if (effectiveLayoutEngine !== 'elk' && relationshipCount >= DAGRE_REL_LIMIT) {
+              console.log(`[V007.59] ${relationshipCount} 关系 >= ${DAGRE_REL_LIMIT} 阈值, 自动切换 elk 布局 (避免 dagre stack overflow)`)
+              effectiveLayoutEngine = 'elk'
+            }
+
+            if (effectiveLayoutEngine === 'elk') {
               const elkLoaded = await loadElkLayouts(true)
               if (!elkLoaded) {
                 effectiveLayoutEngine = 'dagre'
@@ -366,7 +379,15 @@ export default {
             if (!effectiveLayoutEngine || effectiveLayoutEngine !== 'elk') {
               try {
                 const mermaidCode = generateMermaidCode(props.diagramData, effectiveLayoutEngine || 'dagre', props.layoutType, positions, zoneRowCount, props.preserveModelOrder, effectiveLayoutControlConfig.value)
-                // 关键修复：动态调整 maxTextSize，避免大图表报 'Maximum text size in diagram exceeded'
+                // [V007.55 DEBUG] 暴露 mermaidCode 到 window, Playwright 可抓
+                if (typeof window !== 'undefined') {
+                  window.__lastMermaidCode = mermaidCode
+                  window.__lastMermaidCodeLen = mermaidCode.length
+                  console.log('[V007.55 DEBUG] mermaidCode length:', mermaidCode.length)
+                }
+                // [V007.59] 关系数 >= 1000 时主动降低 maxTextSize, 给 dagre stack 留余量
+                //   maxTextSize 越大 mermaid 内部 lexer/parser 递归越深, 容易爆栈
+                //   经验值: 1000 边 dagre 用默认 500000 还能 PASS, 2000 边即使 maxTextSize 很小也 FAIL (dagre 自身递归)
                 const dynamicMaxTextSize = Math.max(configStore.mermaidMaxTextSize || 500000, mermaidCode.length * 2 + 100000)
                 initializeMermaid(props.diagramType, props.diagramData, effectiveLayoutEngine || 'dagre', props.layoutType, props.preserveModelOrder, effectiveLayoutControlConfig.value, dynamicMaxTextSize)
                 mermaidContainer.value.innerHTML = `<pre class="mermaid">${mermaidCode}</pre>`
@@ -382,6 +403,29 @@ export default {
 
       nextTick(() => {
           const preEl = mermaidContainer.value?.querySelector('pre.mermaid')
+          // [V007.60] mermaid.run() 在 parse 失败时不 reject promise, 只把
+          //   "Syntax error in text" 插入 DOM. 用户看不到真实错误.
+          //   显式调 mermaid.parse() 捕获真实错误 (RangeError / 具体语法位置)
+          const codeToParse = lastMermaidCodeRef || window.__lastMermaidCode || ''
+          if (codeToParse) {
+            mermaid.parse(codeToParse, { suppressErrors: false })
+              .then(() => {
+                console.log('[V007.60] mermaid.parse() OK, code length:', codeToParse.length)
+              })
+              .catch((parseErr) => {
+                const detail = {
+                  name: parseErr?.name,
+                  message: parseErr?.message?.slice(0, 500),
+                  hash: parseErr?.hash,
+                  stack: parseErr?.stack?.split('\n').slice(0, 10).join('\n'),
+                  codeLen: codeToParse.length,
+                }
+                console.error('[V007.60] mermaid.parse() FAIL:', JSON.stringify(detail, null, 2))
+                if (typeof window !== 'undefined') {
+                  window.__mermaidParseError = detail
+                }
+              })
+          }
           mermaid.run()
             .then(() => {
               const preElAfter = mermaidContainer.value?.querySelector('pre.mermaid')
@@ -619,7 +663,21 @@ export default {
                   }, 800)
                 }
             }).catch((err) => {
-              console.error('[MermaidComponent] mermaid.run() rejected:', err)
+              // [V007.57] 详细打印 mermaid.run 错误 (之前的日志只显示 Object, 看不到 Syntax error 详情)
+              const errDetail = {
+                message: err?.message || String(err),
+                hash: err?.hash,
+                str: err?.str,
+                name: err?.name,
+                stack: err?.stack?.split('\n').slice(0, 5).join('\n'),
+              }
+              console.error('[V007.57 MermaidComponent] mermaid.run() rejected DETAIL:', JSON.stringify(errDetail, null, 2))
+              console.error('[V007.57 MermaidComponent] mermaid.run() rejected RAW:', err)
+              // 暴露到 window, Playwright 可抓
+              if (typeof window !== 'undefined') {
+                window.__mermaidLastError = errDetail
+                window.__mermaidLastErrorRaw = err
+              }
               isRendering = false
             })
         })

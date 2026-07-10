@@ -57,6 +57,11 @@ export function getArrowSyntax(sourceId, targetId, label, link) {
  * - | → /
  * - 换行 → 空格
  * - " → '
+ * - [V007.58] < > & → mermaid #XX; 语法 (防 innerHTML 解码)
+ *   背景: MermaidComponent.vue 用 innerHTML 注入 mermaid 代码,
+ *     V007.55 用 HTML 实体 (&amp; &lt; &gt;) 但 innerHTML 会解码回原字符,
+ *     导致转义无效. 改用 mermaid 原生 #60; #62; #38; 语法, innerHTML 不解码.
+ *     Playwright 测试 28/28 PASS 验证: innerHTML + #60; → textContent 保持 #60;
  * - 前后空白 trim
  *
  * [V007.48 P0] 保留向后兼容:
@@ -70,9 +75,12 @@ export function sanitizeLabel(label) {
   const raw = String(label).trim()
   if (!raw) return ''
   return raw
-    .replace(/\|/g, '/')
-    .replace(/[\r\n]+/g, ' ')
-    .replace(/"/g, "'")
+    .replace(/&/g, '#38;')            // [V007.58] & → mermaid 语法 (innerHTML 不解码)
+    .replace(/</g, '#60;')            // [V007.58] < → mermaid 语法 (innerHTML 不解码)
+    .replace(/>/g, '#62;')            // [V007.58] > → mermaid 语法 (innerHTML 不解码)
+    .replace(/\|/g, '/')              // | → / (link label 不能含 |)
+    .replace(/[\r\n]+/g, ' ')         // 换行 → 空格
+    .replace(/"/g, "'")               // " → '
     .trim()
 }
 
@@ -84,14 +92,12 @@ export function sanitizeLabel(label) {
  * - 反斜杠 → #92; (避免转义冲突)
  * - 方括号 [ ] ( ) { }: mermaid 11.13 在 [...] 内部需要转义
  *
- * [V007.54] 2026-07-09 HTML 实体转义 (< > &):
- *   背景: MermaidComponent.vue L342 用 innerHTML 注入 mermaid 代码:
+ * [V007.58] 2026-07-09 修复: HTML 实体 → mermaid #XX; 语法
+ *   背景: MermaidComponent.vue 用 innerHTML 注入 mermaid 代码:
  *     container.innerHTML = `<pre class="mermaid">${mermaidCode}</pre>`
- *   如果 BO 名称含 < 或 > 或 <br>, 浏览器会把 mermaidCode 当 HTML 解析,
- *   mermaid.run() 拿到的 textContent 残缺不全 → Syntax error in text
- *   验证: tools/test_br_in_label.mjs 显示 "BO</pre>名称" → textContent 截断
- *   修复: 把 < > & 转成 HTML 实体, mermaid 11.13 也接受 (&lt; &gt; &amp;)
- *   顺序: 先转 < > & (HTML 实体), 再转 [ ] { } ( ) ' " \ 等
+ *   V007.54 用 HTML 实体 (&amp; &lt; &gt;), 但 innerHTML 会解码回原字符,
+ *   导致转义完全无效. 改用 mermaid 原生 #38; #60; #62; 语法, innerHTML 不解码.
+ *   Playwright 测试 28/28 PASS 验证.
  *
  * - 前后空白 trim
  *
@@ -105,9 +111,9 @@ export function sanitizeMermaidLabel(label) {
   const raw = String(label)
   if (!raw) return ''
   return raw
-    .replace(/&/g, '&amp;')           // [V007.54] & (HTML 实体) - 必须在 < > 之前转
-    .replace(/</g, '&lt;')            // [V007.54] < (HTML 标签起始)
-    .replace(/>/g, '&gt;')            // [V007.54] > (HTML 标签结束)
+    .replace(/&/g, '#38;')            // [V007.58] & → mermaid 语法 (innerHTML 不解码)
+    .replace(/</g, '#60;')            // [V007.58] < → mermaid 语法 (innerHTML 不解码)
+    .replace(/>/g, '#62;')            // [V007.58] > → mermaid 语法 (innerHTML 不解码)
     .replace(/\\/g, '#92;')           // 反斜杠
     .replace(/"/g, '#quot;')          // 双引号 (mermaid 11.13 官方)
     .replace(/'/g, '#apos;')          // 单引号
