@@ -28,8 +28,17 @@ if sys.stdout.encoding != 'utf-8':
 
 def init_menu_permissions(db_path):
     """初始化菜单权限表和 menus 导航表数据（元数据驱动）"""
+    # [V007.49] 幂等保护: 已有数据时跳过, 避免 server 启动耗时 30s+
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM menu_permissions")
+    perm_count = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM menus")
+    menu_count = cursor.fetchone()[0]
+    if perm_count > 0 and menu_count > 0:
+        print(f"[SKIP] init_menu_permissions: 已有 {perm_count} 权限 + {menu_count} 导航, 跳过")
+        conn.close()
+        return
 
     print("=" * 60)
     print("初始化菜单权限表 & menus 导航表")

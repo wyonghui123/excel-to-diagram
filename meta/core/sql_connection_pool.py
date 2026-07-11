@@ -388,16 +388,18 @@ class SQLiteConnectionPool:
         )
         conn.row_factory = None
         if self._db_path != ":memory:":
-            # [V007.37 BUG-FIX] PRAGMA journal_mode=WAL 幂等保护
-            # db 已是 WAL 模式时, 重复 PRAGMA 触发 db 元数据写入 → disk I/O error
-            # 只在首次 _create_connection 调用时执行 (db 级一次性)
-            # 其他 PRAGMA (synchronous/foreign_keys/busy_timeout/auto_vacuum/mmap/cache)
-            # 是 per-connection 配置, 每次都执行
+            # [V007.49 BUG-FIX] journal_mode: WAL → DELETE
+            # 根因: WAL 模式下并发读写持续触发 disk I/O error
+            #   - SQLite 3.7.17 (旧) 和 3.50.4 (新) 都触发, 不是版本问题
+            #   - WAL 写锁持有时, 并发读拿到坏 page → OperationalError
+            #   - V007.48 重试也无效 (3 次重试全部失败)
+            #   - DELETE 模式: 写时用 rollback journal, 读等写完, 无坏 page
+            #   - project_memory 2026-07-07 教训: "journal_mode 必须使用 DELETE 而非 WAL"
+            # 性能代价: 写时读被阻塞 (busy_timeout 内等待), 但 disk I/O error 彻底消除
             with self._journal_mode_lock:
                 if not self._journal_mode_applied:
-                    conn.execute("PRAGMA journal_mode=WAL")
+                    conn.execute("PRAGMA journal_mode=DELETE")
                     self._journal_mode_applied = True
-                # else: 跳过, db 已是 WAL 模式
             # [V007.47 BUG-FIX 2026-07-08] synchronous 幂等保护
             # 背景: 跟 journal_mode 一样, synchronous 是 db-level 持久化 PRAGMA
             #       V007.42 注释说 "其他 PRAGMA 是 per-connection" 是错的
@@ -428,17 +430,10 @@ class SQLiteConnectionPool:
                     conn.execute("PRAGMA auto_vacuum = INCREMENTAL")
                     self._auto_vacuum_applied = True
                 # else: 跳过, db 已是 INCREMENTAL 模式
-            # [V007.47 BUG-FIX 2026-07-08] wal_autocheckpoint 幂等保护
-            # wal_autocheckpoint 是 db-level 持久化 PRAGMA
-            with self._journal_mode_lock:
-                if not self._wal_autocheckpoint_applied:
-                    conn.execute(
-                        "PRAGMA wal_autocheckpoint = {0}".format(
-                            self._config.wal_auto_checkpoint
-                        )
-                    )
-                    self._wal_autocheckpoint_applied = True
-                # else: 跳过, db 已是配置值
+            # [V007.49] wal_autocheckpoint 跳过 — DELETE 模式无 WAL
+            # with self._journal_mode_lock:
+            #     if not self._wal_autocheckpoint_applied:
+            #         conn.execute("PRAGMA wal_autocheckpoint = ...")
             # [V007.42 FR-008] mmap_size 可配置化 + 默认值改为 0 (禁用)
             # 背景:
             #   V007.35 引入 mmap_size=256MB → V007.38 降到 64MB, 但 disk I/O error 持续

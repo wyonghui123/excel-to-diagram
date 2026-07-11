@@ -1,3 +1,13 @@
+# [V007.49] SQLite 升级: monkey-patch sqlite3 → sqlean (3.50.4)
+# yonaa CentOS 7 系统 libsqlite3 是 3.7.17, WAL 并发 bug 未修复
+# sqlean.py 是 drop-in replacement, 内置 SQLite 3.50.4, 无外部依赖
+try:
+    import sqlean
+    import sys as _sys_for_sqlean
+    _sys_for_sqlean.modules['sqlite3'] = sqlean
+except ImportError:
+    pass  # fallback 到系统 sqlite3
+
 from flask import Flask, jsonify
 from flask import request, g
 from flask_socketio import SocketIO

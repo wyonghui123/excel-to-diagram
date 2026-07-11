@@ -25,6 +25,10 @@
           <AppIcon name="export" size="sm" />
           <span class="toolbar-btn-label">彩色HTML</span>
         </button>
+        <button class="toolbar-btn" @click="exportAsHtmlSimple" title="导出 HTML（简版 - 单文件、依赖轻、双击即可打开）">
+          <AppIcon name="export" size="sm" />
+          <span class="toolbar-btn-label">简版HTML</span>
+        </button>
         <button class="toolbar-btn toolbar-btn--primary" @click="exportAsPdf" title="导出 PDF（横版矢量图）">
           <AppIcon name="export" size="sm" />
           <span class="toolbar-btn-label">PDF</span>
@@ -1001,6 +1005,9 @@ export default {
           startOnLoad: true,
           securityLevel: 'loose',
           maxTextSize: configStore.mermaidMaxTextSize,
+          // [V007.62] maxEdges 是 top-level secure config, 必须在 mermaid.initialize 设置
+          //   mermaid 11.13.0 默认 maxEdges=500, 超过报 "Edge limit exceeded"
+          maxEdges: 10000,
           theme: 'base',
           themeVariables: {
             edgeLabelBackground: '#ffffff',
@@ -1332,6 +1339,8 @@ ${mermaidCode}
           startOnLoad: false,
           securityLevel: 'loose',
           maxTextSize: 1000000000,
+          // [V007.62] maxEdges 是 top-level secure config, 必须在 mermaid.initialize 设置
+          maxEdges: 10000,
           theme: 'base',
           themeVariables: {
             edgeLabelBackground: '#ffffff',
@@ -1506,7 +1515,7 @@ ${mermaidCode}
     // 关键修复 v27：在 import 之后立即同步调用 mermaid.initialize 设置 startOnLoad: false
     // 防止 DOMContentLoaded 时 mermaid 用默认 maxTextSize=50000 自动渲染
     // （module script 同步部分在 DOMContentLoaded 之前执行，但 initPromise.then 是异步的，晚于 DOMContentLoaded）
-    mermaid.initialize({ startOnLoad: false, maxTextSize: ${config.maxTextSize} });
+    mermaid.initialize({ startOnLoad: false, maxTextSize: ${config.maxTextSize}, maxEdges: ${config.maxEdges || 10000} });
 
     let initPromise = Promise.resolve();
     ${isElk ? `

@@ -34,7 +34,9 @@ from __future__ import annotations
 
 import logging
 import os
+import random as _random
 import sqlite3
+import time
 from contextlib import contextmanager
 from typing import Iterator, Optional
 
@@ -75,42 +77,195 @@ def _open_safe_connection(db_path: str) -> sqlite3.Connection:
         check_same_thread=cfg.check_same_thread,
     )
     conn.execute(f"PRAGMA busy_timeout = {cfg.busy_timeout_ms}")
+    # [V007.49 BUG-FIX] journal_mode=DELETE: WAL 模式并发读写触发 disk I/O error
+    # journal_mode 是 DB-level 持久化 PRAGMA, 首次设后自动继承, 此处做幂等保护
+    conn.execute("PRAGMA journal_mode=DELETE")
     # [V007.46 BUG-FIX] 禁用 mmap: 108MB DB 上 mmap 导致 disk I/O error
-    # V007.42 P5 在 sql_connection_pool.py 加了 mmap_size=0, 但本工厂漏了
-    # 所有通过 safe_connect_for_read/write 创建的连接都没有禁用 mmap
-    # → 之前 V007.44 dev-agent 910022e 改了 deploy_bundle/ 但工作树 meta/ 没改
-    # → 部署 agent 42d9bb4 接手时工作树 deploy_bundle 也回滚了
-    # → 当前部署代码 safe_connect 工厂仍无 mmap_size=0
     conn.execute("PRAGMA mmap_size = 0")
     conn.execute("PRAGMA cache_size = -2000")
     conn.row_factory = sqlite3.Row
     return conn
 
 
+class _RetryingReadConnection:
+    """[V007.48] Proxy sqlite3.Connection with disk I/O error retry.
+
+    背景: safe_connect_for_read() 创建的裸连接无重试保护,
+    WAL 写锁持有时读连接拿到坏 page → 直接抛 disk I/O error.
+    sql_adapters.py 的读池有 Decorrelated Jitter 重试, 但 safe_connect 走的直连没有.
+
+    修法: 用代理类包装 execute(), 返回 _RetryingCursor,
+    cursor 的 fetchone/fetchall 也在 disk I/O error 时重连重试.
+    """
+
+    _RETRYABLE_ERRORS = ("disk i/o", "database is locked")
+
+    def __init__(self, conn: sqlite3.Connection, db_path: str):
+        object.__setattr__(self, '_conn', conn)
+        object.__setattr__(self, '_db_path', db_path)
+        object.__setattr__(self, '_max_retries', int(os.environ.get('SAFE_CONNECT_READ_RETRY_MAX', '3')))
+        object.__setattr__(self, '_retry_base', float(os.environ.get('SAFE_CONNECT_READ_RETRY_BASE_MS', '200')) / 1000.0)
+        object.__setattr__(self, '_retry_cap', 2.0)
+
+    def execute(self, sql: str, params=None):
+        """Execute SQL, return _RetryingCursor (with retry on fetch)."""
+        return _RetryingCursor(self, sql, params)
+
+    def _raw_execute(self, sql: str, params=None):
+        """Direct execute on underlying connection (no retry wrapper)."""
+        if params is not None:
+            return self._conn.execute(sql, params)
+        return self._conn.execute(sql)
+
+    def _reconnect(self):
+        """Close bad connection, open new one."""
+        try:
+            self._conn.close()
+        except Exception:
+            pass
+        object.__setattr__(self, '_conn', _open_safe_connection(self._db_path))
+
+    def close(self):
+        try:
+            self._conn.close()
+        except Exception:
+            pass
+
+    def cursor(self):
+        """Return raw cursor (callers that use cursor().execute() bypass retry)."""
+        return self._conn.cursor()
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def __iter__(self):
+        return iter(self._conn)
+
+
+class _RetryingCursor:
+    """[V007.48] Cursor proxy: fetchone/fetchall retry on disk I/O error.
+
+    On retryable error, reconnects and re-executes the original SQL,
+    then retries the fetch. Uses Decorrelated Jitter (AWS 2015)
+    matching sql_adapters.py pattern.
+    """
+
+    def __init__(self, conn_proxy: _RetryingReadConnection, sql: str, params):
+        self._proxy = conn_proxy
+        self._sql = sql
+        self._params = params
+        self._cursor = None
+        self._needs_execute = True
+
+    def _ensure_executed(self):
+        if not self._needs_execute:
+            return
+        self._cursor = self._proxy._raw_execute(self._sql, self._params)
+        self._needs_execute = False
+
+    def fetchone(self):
+        return self._fetch_with_retry('fetchone')
+
+    def fetchall(self):
+        return self._fetch_with_retry('fetchall')
+
+    def fetchmany(self, size=None):
+        return self._fetch_with_retry('fetchmany', size)
+
+    def _fetch_with_retry(self, method: str, *args):
+        max_retries = self._proxy._max_retries
+        retry_base = self._proxy._retry_base
+        retry_cap = self._proxy._retry_cap
+        prev_sleep = retry_base
+        last_error = None
+
+        for attempt in range(max_retries):
+            try:
+                self._ensure_executed()
+                if method == 'fetchone':
+                    result = self._cursor.fetchone()
+                elif method == 'fetchall':
+                    result = self._cursor.fetchall()
+                else:
+                    result = self._cursor.fetchmany(args[0]) if args else self._cursor.fetchmany()
+                if attempt > 0:
+                    _bump_counter('safe_connect_read_retry_success_total')
+                return result
+            except sqlite3.OperationalError as e:
+                last_error = e
+                err_str = str(e).lower()
+                is_retryable = any(tok in err_str for tok in _RetryingReadConnection._RETRYABLE_ERRORS)
+
+                if is_retryable and attempt < max_retries - 1:
+                    delay = min(retry_cap, _random.uniform(retry_base, prev_sleep * 3))
+                    prev_sleep = delay
+                    _bump_counter('safe_connect_read_retry_total')
+                    logger.warning(
+                        "[V007.48] safe_connect_for_read: retrying %s "
+                        "(attempt %d/%d, sleep %.3fs): %s",
+                        method, attempt + 1, max_retries, delay, err_str
+                    )
+                    time.sleep(delay)
+                    self._proxy._reconnect()
+                    self._cursor = None
+                    self._needs_execute = True
+                    continue
+
+                if "closed database" in err_str and attempt < max_retries - 1:
+                    time.sleep(0.05 * (attempt + 1))
+                    self._proxy._reconnect()
+                    self._cursor = None
+                    self._needs_execute = True
+                    continue
+
+                raise
+        raise last_error
+
+    def close(self):
+        if self._cursor:
+            try:
+                self._cursor.close()
+            except Exception:
+                pass
+
+    def __getattr__(self, name):
+        self._ensure_executed()
+        return getattr(self._cursor, name)
+
+    def __iter__(self):
+        self._ensure_executed()
+        return iter(self._cursor)
+
+
 @contextmanager
 def safe_connect_for_read(db_path: str) -> Iterator[sqlite3.Connection]:
-    """[V007.41] L0 只读裸连接工厂.
+    """[V007.41+V007.48] L0 只读裸连接工厂 (含 disk I/O error 重试).
 
     等价于:
         conn = sqlite3.connect(db_path, timeout=30.0, check_same_thread=False)
         conn.execute("PRAGMA busy_timeout = 30000")
         conn.row_factory = sqlite3.Row
 
+    [V007.48] 返回 _RetryingReadConnection 代理:
+        conn.execute("SELECT ...").fetchone() 在 disk I/O error 时自动重连重试
+        重试策略: Decorrelated Jitter (同 sql_adapters.py), 默认 3 次, base=200ms, cap=2s
+        环境变量: SAFE_CONNECT_READ_RETRY_MAX (默认 3), SAFE_CONNECT_READ_RETRY_BASE_MS (默认 200)
+
     Yields:
-        sqlite3.Connection (row_factory=sqlite3.Row)
+        _RetryingReadConnection (兼容 sqlite3.Connection 接口)
 
     Note:
         自动 close; 即使业务代码 raise 也会清理连接.
     """
     _bump_counter('safe_connect_read_total')
     conn = _open_safe_connection(db_path)
+    proxy = _RetryingReadConnection(conn, db_path)
     try:
-        yield conn
+        yield proxy
     finally:
         try:
-            conn.close()
+            proxy.close()
         except Exception:
-            # 双保险: close 失败不阻塞调用方
             pass
 
 
