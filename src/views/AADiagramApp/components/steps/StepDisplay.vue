@@ -1,12 +1,8 @@
 <template>
   <div class="step-display">
     <div class="display-panel">
-      <!-- 紧凑工具栏：保留飞书按钮和图表类型 badge -->
-      <div v-if="feishuEnabled || chartTypeText" class="toolbar-compact">
-        <div class="chart-type-badge" :class="chartType">
-          <AppIcon :name="chartTypeIcon" size="sm" class="badge-icon" />
-          <span class="badge-text">{{ chartTypeText }}</span>
-        </div>
+      <!-- 紧凑工具栏：仅飞书按钮 (v54 类型信息移到 StepNavigator 类型步骤) -->
+      <div v-if="feishuEnabled" class="toolbar-compact">
         <div class="toolbar-compact__actions">
           <AppButton
             v-if="feishuEnabled"
@@ -122,12 +118,7 @@ export default {
     }
   },
   computed: {
-    chartTypeText() {
-      return this.chartType === 'businessObject' ? '业务对象图' : '服务模块图'
-    },
-    chartTypeIcon() {
-      return this.chartType === 'businessObject' ? 'arrow-right' : 'lightning'
-    },
+    // [v54] chartTypeText / chartTypeIcon 已删除 - 类型信息在 StepNavigator 类型步骤展示
     layoutConfig() {
       console.log('[StepDisplay.layoutConfig] annotationConfig:', this.annotationConfig)
       console.log('[StepDisplay.layoutConfig] annotationConfig?.layoutControlConfig:', this.annotationConfig?.layoutControlConfig)
@@ -161,19 +152,15 @@ export default {
   flex-direction: column;
 }
 
-/* 紧凑工具栏 */
+/* 紧凑工具栏 - [v54] 移除类型标签, 类型信息在 StepNavigator 类型步骤展示 */
 .toolbar-compact {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   padding: 6px var(--spacing-lg);
   background: var(--color-bg-primary);
   border-bottom: 1px solid var(--color-border);
   gap: var(--spacing-sm);
-
-  .chart-type-badge {
-    flex-shrink: 0;
-  }
 
   &__actions {
     display: flex;
@@ -190,31 +177,6 @@ export default {
   background: var(--color-bg-primary);
   color: var(--color-text-primary);
   border: none;
-}
-
-.chart-type-badge {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  padding: var(--spacing-sm) var(--spacing-md);
-  background: var(--color-bg-secondary);
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-md);
-  font-weight: 500;
-
-  &.businessObject {
-    background: rgba(234, 88, 12, 0.1);
-    color: var(--color-primary);
-  }
-
-  &.serviceModule {
-    background: rgba(82, 196, 26, 0.1);
-    color: var(--color-success);
-  }
-}
-
-.badge-icon {
-  font-size: var(--font-size-lg);
 }
 
 .panel-body {

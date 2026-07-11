@@ -14,7 +14,7 @@ import { isBidirectionalLink } from '../syntax/_shared/arrowHelper.js'
  * @param {Object} options.interaction - interaction composable
  */
 export function useSvgProcessor(options) {
-  const { svgStyle, tooltip, annotation, annotationOverlay } = {
+  const { svgStyle, tooltip, annotation, annotationOverlay, interaction } = {
     svgStyle: useSvgStyle(),
     tooltip: useTooltip(),
     annotation: useAnnotation(),
@@ -115,9 +115,6 @@ export function useSvgProcessor(options) {
       if (!labelText) return
 
       // [v40.1 关键修复] 同时匹配 3 个字段 (优先级: code > relationCode > relationDesc)
-      //   code: 关系实例编码 (arch data 路径下的 label 文本)
-      //   relationCode: 关系类型编码 (Excel 导入 / 旧版本下的 label 文本)
-      //   relationDesc: 关系描述 (兜底)
       const matchedLink = diagramData.links.find(link => {
         if (link.code && link.code === labelText) return true
         if (link.relationCode && link.relationCode === labelText) return true
@@ -125,10 +122,19 @@ export function useSvgProcessor(options) {
         return false
       })
 
-      if (matchedLink && matchedLink.relationCode) {
+      if (matchedLink) {
         const edgeGroup = edgeLabel.closest('g')
         if (edgeGroup) {
-          edgeGroup.setAttribute('data-relation-code', matchedLink.relationCode)
+          if (matchedLink.relationCode) {
+            edgeGroup.setAttribute('data-relation-code', matchedLink.relationCode)
+          }
+          // data-link-code: 唯一标识每个关系实例，用于 annotation 精确匹配
+          const linkCode = matchedLink.code
+            || (matchedLink.relationCode ? `${matchedLink.relationCode}__${matchedLink.source || ''}__${matchedLink.target || ''}` : '')
+            || `${matchedLink.source}-${matchedLink.target}`
+          if (linkCode) {
+            edgeGroup.setAttribute('data-link-code', linkCode)
+          }
         }
       }
     })
@@ -279,7 +285,7 @@ export function useSvgProcessor(options) {
         position: annotationConfig.annotationPanelPosition || 'bottom',
         showIcons: annotationConfig.showAnnotationIcons || false
       })
-      annotationOverlay.bindAnnotationInteraction(svgEl, annotationList)
+      annotationOverlay.bindAnnotationInteraction(svgEl, annotationList, interaction)
     }
 
     // 渲染颜色图例
@@ -418,7 +424,9 @@ export function useSvgProcessor(options) {
     draggable.style.marginLeft = '0'
     draggable.style.marginTop = '0'
     draggable.style.boxSizing = 'border-box'
-    draggable.style.backgroundColor = '#F0F0F0'
+    // [v51] 背景色从 #F0F0F0 灰色改为 #FFFFFF 白色
+    //   灰色背景在拖拽边缘/小尺寸时看起来脏, 白色更清爽, 图表更突出
+    draggable.style.backgroundColor = '#FFFFFF'
 
     // 关键修复 v4：mermaid-content 不再 absolute 居中
     // 改用 CSS flex 居中（display: flex + align-items/justify-content: center）

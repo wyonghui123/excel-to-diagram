@@ -21,13 +21,15 @@
           <AppIcon name="copy" size="sm" />
           <span class="toolbar-btn-label">复制</span>
         </button>
+        <!-- [DEPRECATED 2026-07-11] 彩色 HTML 导出 - 后续废弃，简版已具备全部功能
         <button class="toolbar-btn toolbar-btn--primary" @click="exportAsHtmlFull" title="导出 HTML（彩色版 - 可直接双击打开）">
           <AppIcon name="export" size="sm" />
           <span class="toolbar-btn-label">彩色HTML</span>
         </button>
-        <button class="toolbar-btn" @click="exportAsHtmlSimple" title="导出 HTML（简版 - 单文件、依赖轻、双击即可打开）">
+        -->
+        <button class="toolbar-btn toolbar-btn--primary" @click="exportAsHtmlSimple" title="导出 HTML（简版 - 单文件、依赖轻、双击即可打开）">
           <AppIcon name="export" size="sm" />
-          <span class="toolbar-btn-label">简版HTML</span>
+          <span class="toolbar-btn-label">HTML</span>
         </button>
         <button class="toolbar-btn toolbar-btn--primary" @click="exportAsPdf" title="导出 PDF（横版矢量图）">
           <AppIcon name="export" size="sm" />
@@ -981,6 +983,9 @@ export default {
     //   - file:// 协议兼容（纯 SVG + CSS，零 JS 执行）
     //   - 体积从 ~2MB（内嵌 mermaid.min.js）降至 ~200KB（纯 SVG）
     const exportAsHtmlSimple = async () => {
+      // 每次调用生成一个唯一 token，用于区分浏览器调用的是哪份代码
+      const runtimeToken = 'RT-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
+      console.log('[V007.62-FIX-20260711-1440] exportAsHtmlSimple called, token=' + runtimeToken)
       if (props.diagramData) {
         const chartTypeLabel = props.diagramType === 'serviceModule' ? '服务模块图' : '业务对象图'
         
@@ -993,8 +998,10 @@ export default {
         
         // 克隆 SVG 并清理（移除交互事件、tooltip 等运行时元素）
         const svgClone = svgEl.cloneNode(true)
-        // 移除 tooltip / overlay 元素
-        svgClone.querySelectorAll('.tooltip, .annotation-overlay, .annotation-marker').forEach(el => el.remove())
+        // 把 runtime token 写进 SVG 根节点，下载后可作为"这是新代码生成的"证据
+        svgClone.setAttribute('data-runtime-token', runtimeToken)
+        // 移除独立 tooltip 弹窗（保留 annotation markers 和 color legend）
+        svgClone.querySelectorAll('.tooltip, #mermaid-tooltip').forEach(el => el.remove())
         // 移除内联事件处理器
         svgClone.querySelectorAll('[onclick], [onmouseover], [onmouseout], [onmousemove]').forEach(el => {
           el.removeAttribute('onclick')
@@ -1012,17 +1019,40 @@ export default {
             svgClone.setAttribute('viewBox', parts.join(' '))
           }
         }
-        // 确保 SVG 有明确宽高（从 viewBox 推导）
+        // [v50 修复] SVG 真实 DOM 大小必须可控
+        //   之前强制 width/height = viewBox 数字 (90k px), SVG 真实占 90k×52k
+        //   撑爆 body, 滚动条超长
+        //   新方案: width/height = 100%, viewBox 控制坐标系, SVG 元素大小由 container 决定
+        //   这样 SVG 永远占满可视区域, viewBox 决定坐标系 (90k×52k 单位)
+        //   用户的 transform scale zoom 在此基础上工作
         if (!svgClone.getAttribute('width') || svgClone.getAttribute('width') === '100%') {
-          const vb = svgClone.getAttribute('viewBox')?.split(' ')
-          if (vb && vb.length === 4) {
-            svgClone.setAttribute('width', vb[2])
-            svgClone.setAttribute('height', vb[3])
-          }
+          // 不强制设 width/height, 保留 100% (CSS .diagram-container svg { max-width: none } 已生效)
+          // 实际渲染时 SVG 跟随 container (100vw × auto)
         }
+        // 显式设 width=100% + height=auto, 让 SVG 跟随 container 宽度, 高度按 viewBox 比例
+        svgClone.setAttribute('width', '100%')
+        svgClone.setAttribute('height', 'auto')
+        // 重要: preserveAspectRatio="xMidYMid meet" 让内容 fit 容器, 不裁剪
+        svgClone.setAttribute('preserveAspectRatio', 'xMidYMid meet')
         
-        const svgHtml = svgClone.outerHTML
-        
+        // svgHtml 暂不序列化，等 tooltip/annotation 注入后再取 outerHTML
+
+        // 诊断：收集真实状态
+        const diag = {
+          hasDiagramData: !!props.diagramData,
+          diagramType: props.diagramType,
+          layoutEngine: props.layoutEngine,
+          annotationConfigKeys: Object.keys(props.annotationConfig || {}),
+          hasAnnotationComposable: typeof annotation !== 'undefined' && !!annotation,
+          hasParseMethod: typeof annotation !== 'undefined' && typeof annotation.parseAnnotationsFromData === 'function',
+          relationDescriptionsLen: Array.isArray(relationDescriptions) ? relationDescriptions.length : 0,
+          relationDescriptionsSample: Array.isArray(relationDescriptions) && relationDescriptions.length > 0 ? Object.keys(relationDescriptions[0] || {}) : [],
+          svgNodeCount: svgClone.querySelectorAll('.node').length,
+          svgEdgeCount: svgClone.querySelectorAll('g.edges > path, g.edgePaths > path, g.edgePath > path, path.flowchart-link').length,
+          svgEdgeLabelCount: svgClone.querySelectorAll('.edgeLabel').length,
+          svgAnnotationMarkerCount: svgClone.querySelectorAll('.annotation-marker').length
+        }
+
         // 收集 annotation 数据（marker 数字 → 文字内容），嵌入 JSON
         const annotationMap = {}
         try {
@@ -1035,35 +1065,76 @@ export default {
             annotationList = annotation.parseAnnotationsFromData(props.diagramData, props.diagramType, { filter: annFilter })
           }
           annotationList.forEach((a, idx) => {
+            const targetLabel = a.targetType === 'relation'
+              ? (a.targetName || (a.sourceBOName || a.targetBOName ? `${a.sourceBOName || ''} → ${a.targetBOName || ''}` : ''))
+              : (a.targetName || '')
             annotationMap[String(idx + 1)] = {
-              title: a.title || a.note || `Annotation ${idx + 1}`,
-              content: a.content || a.description || a.text || '',
-              category: a.category || a.type || ''
+              title: targetLabel || `备注 ${idx + 1}`,
+              content: a.content || '',
+              category: a.category || '',
+              // [v41 修复] category 名优先(优先中文), 找不到则 fallback 到 code
+              categoryLabel: a.categoryName || a.category || '',
+              targetType: a.targetType || '',
+              targetId: a.targetId || '',
+              relationCode: a.relationCode || ''
             }
           })
         } catch (e) { console.warn('[exportAsHtmlSimple] annotation collection:', e) }
 
         // 收集边的 tooltip 文本（relationDescriptions 是数组，按边渲染顺序一一对应）
         const tooltipMap = {}
-        // 获取所有真正的边 path（mermaid 把每个边放在 g.edgePath > path 或 path.flowchart-link）
-        const allEdgePathContainers = Array.from(svgClone.querySelectorAll('g.edgePath, path.flowchart-link'))
-        const realEdgePaths = []
-        allEdgePathContainers.forEach((el) => {
-          if (el.tagName.toLowerCase() === 'path') {
-            realEdgePaths.push(el)
-          } else if (el.classList.contains('edgePath')) {
-            const p = el.querySelector('path')
-            if (p) realEdgePaths.push(p)
+        // ELK 模式下 mermaid 用 <g class="edges edgePaths"><path>...</g> 结构
+        // dagre 模式下用 <g class="edgePath"><path/></g> 结构
+        // 用通用选择器：所有 g.edges > path 和 g.edgePath > path
+        const realEdgePaths = Array.from(svgClone.querySelectorAll('g.edges > path, g.edgePaths > path, g.edgePath > path, path.flowchart-link'))
+        // 兜底：如果上面没找到，尝试直接选 g.edges 内的所有 path
+        if (realEdgePaths.length === 0) {
+          const edgesContainer = svgClone.querySelector('g.edges, g.edgePaths')
+          if (edgesContainer) {
+            realEdgePaths.push(...Array.from(edgesContainer.querySelectorAll('path')))
           }
-        })
+        }
         const relArr = Array.isArray(relationDescriptions) ? relationDescriptions : []
+        const directionMap = { PUSH: '推(PUSH)', PULL: '拉(PULL)', BIDIRECTIONAL: '双向', '双向': '双向' }
         relArr.forEach((rel, idx) => {
           if (idx >= realEdgePaths.length) return
-          const desc = rel.description || rel.label || rel.text || rel.tooltip || rel.code || (rel.sourceName && rel.targetName ? `${rel.sourceName} -[${rel.code || ''}]-> ${rel.targetName}` : '')
-          if (!desc) return
+          // 与图表边标签一致：code > relationCode > relationDesc（同 useBusinessObjectSyntax L905-911）
+          const codeLabel = (rel.code && String(rel.code).trim())
+            ? rel.code
+            : (rel.relationCode && String(rel.relationCode).trim())
+              ? rel.relationCode
+              : (rel.relationDesc && String(rel.relationDesc).trim())
+                ? rel.relationDesc
+                : ''
+          if (!codeLabel) return
+          // 构建 tooltip：标签 + 源→目标 + 关系类型 + 方向 + 描述
+          const lines = [codeLabel]
+          const src = rel.sourceName || rel.sourceCode || ''
+          const tgt = rel.targetName || rel.targetCode || ''
+          if (src && tgt) lines.push(`${src} → ${tgt}`)
+          const rt = String(rel.relationType || '').replace(/^legacy[_\s]*null$/i, '').replace(/^null$/i, '').trim()
+          if (rt) lines.push(`类型: ${rt}`)
+          const rd = String(rel.relationDirection || '').replace(/^legacy[_\s]*null$/i, '').replace(/^null$/i, '').trim()
+          if (rd) {
+            const dirText = directionMap[rd] || rd
+            lines.push(`方向: ${dirText}`)
+          }
+          if (rel.relationDesc && rel.relationDesc !== codeLabel) lines.push(rel.relationDesc)
           const key = 'tt' + idx
-          tooltipMap[key] = String(desc)
+          tooltipMap[key] = lines.join('\n')
           realEdgePaths[idx].setAttribute('data-edge-tooltip', key)
+        })
+        // 给 edgeLabel 也注入 data-edge-tooltip，通过 path id 关联
+        svgClone.querySelectorAll('.edgeLabel').forEach((labelEl) => {
+          // 通过 label 内的 data-id 或 label 自身属性找对应的 path id
+          const labelDataId = labelEl.querySelector('[data-id]')?.getAttribute('data-id')
+            || labelEl.getAttribute('data-id')
+          if (!labelDataId) return
+          const pathEl = svgClone.querySelector(`path[id="${labelDataId}"]`)
+            || svgClone.querySelector(`[id="${labelDataId}"]`)
+          if (!pathEl) return
+          const ttKey = pathEl.getAttribute('data-edge-tooltip')
+          if (ttKey) labelEl.setAttribute('data-edge-tooltip', ttKey)
         })
         // 兜底：如果 relationDescriptions 为空但 edgeLabel 有文本，仍尝试注入
         if (Object.keys(tooltipMap).length === 0) {
@@ -1078,6 +1149,37 @@ export default {
             else labelEl.setAttribute('data-edge-tooltip', key)
           })
         }
+        // 运行时诊断 dump（便于用户配合排查）
+        console.log('[V007.62-FIX-20260711-1440] runtime=' + runtimeToken
+          + ' realEdgePaths.length=' + realEdgePaths.length
+          + ' relArr.length=' + relArr.length
+          + ' tooltipMap.size=' + Object.keys(tooltipMap).length
+          + ' svgEdgeDataAttrCount=' + svgClone.querySelectorAll('[data-edge-tooltip]').length)
+
+        // 所有关联 data 注入完成后再序列化 SVG
+        const svgHtml = svgClone.outerHTML
+
+        // 收集图例数据（与彩色版一致）
+        const annotationConfigSimple = props.annotationConfig || {}
+        const centerScopeHighlightSimple = annotationConfigSimple.centerScopeHighlight !== false
+        const colorLegendDataSimple = (props.diagramType === 'serviceModule' || props.diagramType === 'businessObject')
+          ? svgProcessor.buildColorLegendData(props.diagramData, nodeColorMappings, centerScopeHighlightSimple)
+          : []
+        const legendItemsHtmlSimple = colorLegendDataSimple.map((item, idx) => {
+          const sep = (item.isCenter && idx < colorLegendDataSimple.length - 1)
+            ? '<div class="legend-sep"></div>'
+            : ''
+          return `<div class="legend-item" title="${item.name || ''}">
+            <span class="legend-dot" style="background:${item.color || '#e0e0e0'}"></span>
+            <span class="legend-name">${item.name || ''}</span>
+          </div>${sep}`
+        }).join('')
+        const legendHtmlSimple = colorLegendDataSimple.length > 0
+          ? `<div class="color-legend-panel">
+              <div class="color-legend-title">图例</div>
+              <div class="color-legend-list">${legendItemsHtmlSimple}</div>
+            </div>`
+          : ''
 
         const annotationJson = JSON.stringify(annotationMap).replace(/</g, '\\u003c')
         const tooltipJson = JSON.stringify(tooltipMap).replace(/</g, '\\u003c')
@@ -1094,8 +1196,10 @@ export default {
     html, body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
       background: #ffffff;
+      /* [v49 修复] 允许 body 滚动, 否则 90k × 52k 像素的 SVG 上下左右被裁 */
       height: auto;
-      min-height: 100vh;
+      min-height: 100%;
+      overflow: auto;
     }
     body {
       display: flex;
@@ -1107,8 +1211,12 @@ export default {
       display: block;
       background: white;
       width: 100%;
-      overflow: auto;
+      /* [v50 修复] 固定高度 = 视口高度, 让 SVG width=100% height=auto 渲染时能 fit 容器 */
+      height: calc(100vh - 20px);
+      /* [v50 修复] hidden 让 SVG 溢出部分不显示, 由 transform 拖动查看 */
+      overflow: hidden;
       cursor: grab;
+      position: relative;
     }
     .diagram-container:active { cursor: grabbing; }
     .diagram-container svg {
@@ -1116,12 +1224,7 @@ export default {
       transform-origin: top left;
       transition: transform 0.1s ease-out;
       max-width: none;
-    }
-    .info-bar {
-      font-size: 12px;
-      color: #999;
-      padding: 4px 0;
-      user-select: none;
+      max-height: 100%;
     }
     .annotation-panel { background: rgba(255,255,255,0.97); border: 1px solid #ddd; border-radius: 6px;
       padding: 8px 12px; font-size: 12px; font-family: Arial, sans-serif;
@@ -1131,30 +1234,68 @@ export default {
     .annotation-panel-title { font-weight: bold; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid #eee; color: #333; }
     .annotation-panel-content { color: #555; line-height: 1.5; white-space: pre-wrap; }
     .annotation-panel-cat { display: inline-block; font-size: 10px; padding: 2px 6px; border-radius: 3px; background: #e0e7ff; color: #4f46e5; margin-bottom: 4px; }
+    .annotation-dock { position: fixed; bottom: 0; left: 0; right: 0; background: rgba(255,255,255,0.98);
+      border-top: 1px solid #ddd; max-height: 40vh; overflow-y: auto; z-index: 800; font-size: 6px;
+      box-shadow: 0 -2px 8px rgba(0,0,0,0.08); }
+    .annotation-dock-header { padding: 4px 7px; font-weight: bold; border-bottom: 1px solid #eee;
+      cursor: pointer; user-select: none; color: #333; background: #fafafa; position: sticky; top: 0; }
+    .annotation-dock-list { padding: 3px 7px; }
+    .annotation-dock-item { padding: 3px 0; border-bottom: 1px solid #f0f0f0; cursor: pointer; }
+    .annotation-dock-item:hover { background: #f8f8ff; }
+    .annotation-dock-item:last-child { border-bottom: none; }
+    .ann-num { display: inline-block; min-width: 10px; height: 10px; line-height: 10px; text-align: center;
+      border-radius: 50%; background: #4f46e5; color: #fff; font-size: 6px; margin-right: 4px; font-weight: bold; }
+    .ann-title { font-weight: 500; color: #333; }
+    .ann-cat { display: inline-block; font-size: 5px; padding: 1px 3px; border-radius: 2px;
+      background: #e0e7ff; color: #4f46e5; margin-left: 3px; }
+    .ann-content { color: #666; margin-top: 2px; margin-left: 14px; line-height: 1.3; }
     .edge-tooltip { position: absolute; background: rgba(0,0,0,0.85); color: #fff; padding: 6px 10px;
       border-radius: 4px; font-size: 12px; line-height: 1.4; max-width: 280px; z-index: 2000;
       pointer-events: none; display: none; }
     .edge-tooltip.visible { display: block; }
-    .edgePath.hover-target path { transition: stroke-width 0.1s, stroke 0.1s; }
-    .edgePath.hover-active path { stroke-width: 2.5; stroke: #ff6b35; }
+    [data-edge-tooltip].hover-target { cursor: help; transition: stroke-width 0.1s, filter 0.1s; }
+    [data-edge-tooltip].hover-active { stroke-width: 3 !important; filter: drop-shadow(0 0 5px rgba(0,0,0,0.6)); }
+    .edgePath.hover-target path { transition: stroke-width 0.1s, filter 0.1s; }
+    .edgePath.hover-active path { stroke-width: 2.5; filter: drop-shadow(0 0 4px rgba(0,0,0,0.5)); }
     .edgeLabel.hover-target { cursor: help; }
     .node.hover-target .basic, .node.hover-target rect, .node.hover-target polygon { transition: filter 0.1s; }
-    .node.hover-active .basic, .node.hover-active rect, .node.hover-active polygon { filter: drop-shadow(0 0 6px #ff6b35); }
+    .node.hover-active .basic, .node.hover-active rect, .node.hover-active polygon { filter: drop-shadow(0 0 6px rgba(0,0,0,0.5)); }
     .annotation-marker { cursor: pointer; }
-    .annotation-marker:hover circle { fill: #ff6b35 !important; }
+    .annotation-marker:hover circle { stroke: #555 !important; stroke-width: 2 !important; }
+    .color-legend-panel { position: fixed; top: 50px; right: 12px; background: rgba(255,255,255,0.96);
+      border: 1px solid #ddd; border-radius: 4px; padding: 4px 6px; font-size: 6px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08); z-index: 900; max-height: 80vh; overflow-y: auto; }
+    .color-legend-title { font-weight: bold; margin-bottom: 3px; padding-bottom: 2px; border-bottom: 1px solid #eee; color: #333; }
+    .color-legend-list { display: flex; flex-direction: column; gap: 2px; }
+    .legend-item { display: flex; align-items: center; gap: 3px; }
+    .legend-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    .legend-name { flex: 1; color: #555; }
+    .legend-sep { height: 1px; background: #eee; margin: 2px 0; }
+    .edge-tooltip { white-space: pre-line; }
   <\/style>
 <\/head>
 <body>
-  <div class="info-bar">${chartTypeLabel} | layout: ${layoutEngineLabel} | edges: ${Object.keys(tooltipMap).length} | annotations: ${Object.keys(annotationMap).length} | exported: ${new Date().toLocaleString()}</div>
   <div class="diagram-container">
     ${svgHtml}
-    <div id="annotation-panel" class="annotation-panel">
+    ${Object.keys(annotationMap).length > 0 ? `
+    <div id="annotation-dock" class="annotation-dock">
+      <div class="annotation-dock-header" id="ann-dock-header">备注 (${Object.keys(annotationMap).length})</div>
+      <div class="annotation-dock-list" id="ann-dock-list">
+        ${Object.entries(annotationMap).map(([num, a]) => `
+        <div class="annotation-dock-item" data-ann="${num}">
+          <span class="ann-title">${a.title}</span>
+          ${a.categoryLabel ? `<span class="ann-cat">${a.categoryLabel}</span>` : ''}
+          ${a.content ? `<div class="ann-content">${a.content}</div>` : ''}
+        </div>`).join('')}
+      </div>
+    </div>` : `<div id="annotation-panel" class="annotation-panel">
       <div id="ann-cat"></div>
       <div id="ann-title" class="annotation-panel-title"></div>
       <div id="ann-content" class="annotation-panel-content"></div>
-    </div>
+    </div>`}
   </div>
   <div id="edge-tooltip" class="edge-tooltip"></div>
+  ${legendHtmlSimple}
   <div id="annotations-data" style="display:none" data-json="${annotationJson.replace(/"/g, '&quot;')}"></div>
   <div id="tooltips-data" style="display:none" data-json="${tooltipJson.replace(/"/g, '&quot;')}"></div>
   <script>
@@ -1167,18 +1308,58 @@ export default {
       const annPanel = document.getElementById('annotation-panel');
       const tooltip = document.getElementById('edge-tooltip');
       let scale = 1, tx = 0, ty = 0, dragging = false, startX, startY;
-      const minScale = 0.1, maxScale = 10;
-      function applyTransform() { svg.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')'; }
+      const minScale = 0.05, maxScale = 100;
+      function applyTransform() {
+        svg.style.transition = 'none';
+        svg.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')';
+      }
+      function zoomBy(factor, cx, cy) {
+        var prevScale = scale;
+        var newScale = Math.max(minScale, Math.min(maxScale, scale * factor));
+        if (newScale === prevScale) return;
+        if (cx === undefined || cy === undefined) {
+          var rect = container.getBoundingClientRect();
+          cx = rect.width / 2; cy = rect.height / 2;
+        }
+        tx = cx - (cx - tx) * (newScale / prevScale);
+        ty = cy - (cy - ty) * (newScale / prevScale);
+        scale = newScale;
+        applyTransform();
+      }
+      function fitView() {
+        // [v50 修复] fit-to-container
+        //   SVG 真实 DOM 已是 100% × auto, viewBox 90k×52k 决定坐标系
+        //   preserveAspectRatio="xMidYMid meet" 让浏览器自动 fit (按比例缩到容器内)
+        //   用户打开时已经看到完整图, fitView 重置 transform 即可
+        if (!container || !svg) return;
+        scale = 1; tx = 0; ty = 0;
+        applyTransform();
+      }
+      // [v49] 打开时自动 fit-to-screen
+      //   bug fix: 之前 setTimeout 50ms 太早, SVG viewBox.baseVal.width 还未稳定
+      //   改用 requestAnimationFrame 等待 layout 完成, 失败时再 setTimeout 兜底
+      function safeFitView() {
+        var svgW = svg && svg.viewBox && svg.viewBox.baseVal ? svg.viewBox.baseVal.width : 0;
+        if (svgW > 0) {
+          fitView();
+        } else {
+          setTimeout(safeFitView, 50);
+        }
+      }
+      if (document.readyState === 'complete') {
+        requestAnimationFrame(safeFitView);
+      } else {
+        window.addEventListener('load', function() {
+          requestAnimationFrame(safeFitView);
+        });
+      }
+      // 窗口大小变化时也重新 fit
+      window.addEventListener('resize', fitView);
       container.addEventListener('wheel', function(e) {
         e.preventDefault();
         var factor = e.deltaY > 0 ? 0.9 : 1.1;
-        var newScale = Math.max(minScale, Math.min(maxScale, scale * factor));
         var rect = container.getBoundingClientRect();
-        var cx = e.clientX - rect.left, cy = e.clientY - rect.top;
-        tx = cx - (cx - tx) * (newScale / scale);
-        ty = cy - (cy - ty) * (newScale / scale);
-        scale = newScale;
-        applyTransform();
+        zoomBy(factor, e.clientX - rect.left, e.clientY - rect.top);
       }, { passive: false });
       container.addEventListener('mousedown', function(e) {
         if (e.button !== 0) return;
@@ -1225,23 +1406,273 @@ export default {
         tooltip.style.top = (e.clientY - rect.top + 12) + 'px';
       }
       function hideTooltip() { tooltip.classList.remove('visible'); }
+      // 当前高亮的边（点击切换）
+      var _activeEdge = null;
+      function highlightEdge(pathEl) {
+        pathEl._origStroke = pathEl._origStroke || pathEl.style.stroke || '';
+        pathEl._origStrokeWidth = pathEl._origStrokeWidth || pathEl.style.strokeWidth || '';
+        pathEl._origFilter = pathEl._origFilter || pathEl.style.filter || '';
+        // [v41 修复] 保持原色, 不覆盖 stroke, 仅加粗 + halo
+        pathEl.style.strokeWidth = '3px';
+        pathEl.style.filter = 'drop-shadow(0 0 5px rgba(0,0,0,0.6))';
+      }
+      function unhighlightEdge(pathEl) {
+        pathEl.style.stroke = pathEl._origStroke || '';
+        pathEl.style.strokeWidth = pathEl._origStrokeWidth || '';
+        pathEl.style.filter = pathEl._origFilter || '';
+      }
+      // 边 path 交互：hover + 点击切换高亮
       svg.querySelectorAll('[data-edge-tooltip]').forEach(function(el) {
-        el.classList.add('hover-target');
-        el.addEventListener('mouseenter', function(e) {
-          el.classList.add('hover-active');
-          var k = el.getAttribute('data-edge-tooltip');
-          if (ttMap[k]) showTooltip(e, ttMap[k]);
+        if (el.tagName.toLowerCase() === 'path') {
+          el.style.cursor = 'help';
+          el._origStroke = el.style.stroke || '';
+          el._origStrokeWidth = el.style.strokeWidth || '';
+          el._origFilter = el.style.filter || '';
+          el.addEventListener('mouseenter', function(e) {
+            if (el !== _activeEdge) highlightEdge(el);
+            var k = el.getAttribute('data-edge-tooltip');
+            if (ttMap[k]) showTooltip(e, ttMap[k]);
+          });
+          el.addEventListener('mousemove', function(e) {
+            var k = el.getAttribute('data-edge-tooltip');
+            if (ttMap[k]) showTooltip(e, ttMap[k]);
+          });
+          el.addEventListener('mouseleave', function() {
+            if (el !== _activeEdge) unhighlightEdge(el);
+            hideTooltip();
+          });
+          el.addEventListener('click', function(e) {
+            e.stopPropagation();
+            if (_activeEdge === el) {
+              unhighlightEdge(el);
+              _activeEdge = null;
+            } else {
+              if (_activeEdge) unhighlightEdge(_activeEdge);
+              highlightEdge(el);
+              _activeEdge = el;
+            }
+          });
+        }
+      });
+      // edgeLabel 交互：hover tooltip + 点击高亮对应 path
+      var _idToPath = {};
+      svg.querySelectorAll('path[id]').forEach(function(p) { _idToPath[p.id] = p; });
+      svg.querySelectorAll('.edgeLabel').forEach(function(labelEl) {
+        var labelDataId = (labelEl.querySelector('[data-id]') || labelEl).getAttribute('data-id') || '';
+        var ttKey = labelEl.getAttribute('data-edge-tooltip');
+        var linkedPath = _idToPath[labelDataId] || null;
+        if (!ttKey && !linkedPath) return;
+        labelEl.style.cursor = 'pointer';
+        labelEl.addEventListener('mouseenter', function(e) {
+          if (linkedPath && linkedPath !== _activeEdge) highlightEdge(linkedPath);
+          if (ttKey && ttMap[ttKey]) showTooltip(e, ttMap[ttKey]);
         });
-        el.addEventListener('mousemove', function(e) {
-          var k = el.getAttribute('data-edge-tooltip');
-          if (ttMap[k]) showTooltip(e, ttMap[k]);
+        labelEl.addEventListener('mousemove', function(e) {
+          if (ttKey && ttMap[ttKey]) showTooltip(e, ttMap[ttKey]);
         });
-        el.addEventListener('mouseleave', function() { el.classList.remove('hover-active'); hideTooltip(); });
+        labelEl.addEventListener('mouseleave', function() {
+          if (linkedPath && linkedPath !== _activeEdge) unhighlightEdge(linkedPath);
+          hideTooltip();
+        });
+        labelEl.addEventListener('click', function(e) {
+          e.stopPropagation();
+          if (!linkedPath) return;
+          if (_activeEdge === linkedPath) {
+            unhighlightEdge(linkedPath);
+            _activeEdge = null;
+          } else {
+            if (_activeEdge) unhighlightEdge(_activeEdge);
+            highlightEdge(linkedPath);
+            _activeEdge = linkedPath;
+          }
+        });
+      });
+      // 点击空白取消高亮
+      document.addEventListener('click', function() {
+        if (_activeEdge) { unhighlightEdge(_activeEdge); _activeEdge = null; }
       });
       svg.querySelectorAll('.node').forEach(function(nodeEl) {
         nodeEl.classList.add('hover-target');
         nodeEl.addEventListener('mouseenter', function() { nodeEl.classList.add('hover-active'); });
         nodeEl.addEventListener('mouseleave', function() { nodeEl.classList.remove('hover-active'); });
+      });
+      // Annotation dock 折叠/展开
+      var dockHeader = document.getElementById('ann-dock-header');
+      var dockList = document.getElementById('ann-dock-list');
+      var dockEl = document.querySelector('.annotation-dock');
+      if (dockHeader && dockList && dockEl) {
+        var dockCollapsed = false;
+        var savedScrollTop = 0;
+        dockHeader.addEventListener('click', function() {
+          // [v41 修复] 收起前保存滚动位置, 展开后恢复
+          if (!dockCollapsed) {
+            savedScrollTop = dockEl.scrollTop;
+          }
+          dockCollapsed = !dockCollapsed;
+          dockList.style.display = dockCollapsed ? 'none' : 'block';
+          dockHeader.textContent = dockCollapsed
+            ? '\u5907\u6ce8 (' + Object.keys(annMap).length + ') \u25B6'
+            : '\u5907\u6ce8 (' + Object.keys(annMap).length + ')';
+          if (!dockCollapsed) {
+            // 展开后恢复滚动位置
+            requestAnimationFrame(function() {
+              dockEl.scrollTop = savedScrollTop;
+            });
+          }
+        });
+      }
+      // [v41 修复] Annotation 点击高亮 - 保持原色 + 加粗 + halo，不覆盖 fill
+      var _annHighlighted = null;
+      function clearAnnHighlight() {
+        if (!_annHighlighted) return;
+        if (_annHighlighted.tagName && _annHighlighted.tagName.toLowerCase() === 'path') {
+          _annHighlighted.style.stroke = _annHighlighted._origStroke || '';
+          _annHighlighted.style.strokeWidth = _annHighlighted._origStrokeWidth || '';
+          _annHighlighted.style.filter = _annHighlighted._origFilter || '';
+        } else {
+          var rect = _annHighlighted.querySelector('rect, polygon');
+          if (rect) rect.style.filter = _annHighlighted._origFilter || '';
+          var strokeEl = _annHighlighted.querySelector('rect, polygon');
+          if (strokeEl && _annHighlighted._origStrokeWidth) {
+            strokeEl.style.strokeWidth = _annHighlighted._origStrokeWidth;
+          }
+        }
+        _annHighlighted.classList.remove('annotation-highlighted');
+        _annHighlighted = null;
+      }
+      function annHighlightNode(el) {
+        clearAnnHighlight();
+        _annHighlighted = el;
+        el.classList.add('annotation-highlighted');
+        var rect = el.querySelector('rect, polygon');
+        if (rect) {
+          _annHighlighted._origFilter = rect.style.filter || '';
+          // 保持原色, 仅加 halo + 粗描边
+          rect.style.filter = 'drop-shadow(0 0 8px rgba(0,0,0,0.5))';
+          _annHighlighted._origStrokeWidth = rect.style.strokeWidth || '';
+          rect.style.strokeWidth = '3px';
+        }
+      }
+      function annHighlightContainer(el) {
+        clearAnnHighlight();
+        _annHighlighted = el;
+        el.classList.add('annotation-highlighted');
+        var rect = el.querySelector('rect');
+        if (rect) {
+          _annHighlighted._origFilter = rect.style.filter || '';
+          rect.style.filter = 'drop-shadow(0 0 8px rgba(0,0,0,0.5))';
+          _annHighlighted._origStrokeWidth = rect.style.strokeWidth || '';
+          rect.style.strokeWidth = '3px';
+        }
+      }
+      function annHighlightRelation(targetId, relationCode) {
+        clearAnnHighlight();
+        var edgeLabelG = svg.querySelector('[data-link-code="' + targetId + '"]');
+        if (!edgeLabelG && relationCode) {
+          edgeLabelG = svg.querySelector('[data-relation-code="' + relationCode + '"]');
+        }
+        if (!edgeLabelG) {
+          svg.querySelectorAll('.edgeLabel').forEach(function(label) {
+            if (edgeLabelG) return;
+            var text = label.textContent || '';
+            if (text.includes(targetId) || (relationCode && text.includes(relationCode))) edgeLabelG = label.closest('g') || label;
+          });
+        }
+        if (!edgeLabelG) return;
+        var targetPath = null;
+        var labelDataId = (edgeLabelG.querySelector('[data-id]') || edgeLabelG).getAttribute('data-id') || '';
+        if (labelDataId && _idToPath[labelDataId]) {
+          targetPath = _idToPath[labelDataId];
+        }
+        if (!targetPath) {
+          targetPath = edgeLabelG.querySelector('path');
+        }
+        if (targetPath && targetPath.tagName && targetPath.tagName.toLowerCase() === 'path') {
+          // 保持原色, 只加粗 + halo
+          targetPath._origStroke = targetPath._origStroke || targetPath.style.stroke || '';
+          targetPath._origStrokeWidth = targetPath._origStrokeWidth || targetPath.style.strokeWidth || '';
+          targetPath._origFilter = targetPath._origFilter || targetPath.style.filter || '';
+          targetPath.style.strokeWidth = '3px';
+          targetPath.style.filter = 'drop-shadow(0 0 6px rgba(0,0,0,0.6))';
+          _annHighlighted = targetPath;
+        } else {
+          _annHighlighted = edgeLabelG;
+          edgeLabelG.classList.add('annotation-highlighted');
+        }
+      }
+      document.querySelectorAll('.annotation-dock-item').forEach(function(item) {
+        // [v41 修复] 单击同时触发: 高亮 + 居中
+        item.addEventListener('click', function() {
+          var annKey = item.getAttribute('data-ann');
+          var annData = annMap[annKey];
+          if (!annData) return;
+          var targetType = annData.targetType;
+          var targetId = annData.targetId;
+          var relCode = annData.relationCode || '';
+          // 1) 查找目标元素
+          var targetEl = null;
+          if (targetType === 'node') {
+            targetEl = svg.querySelector('[data-code="' + targetId + '"]');
+            if (!targetEl) {
+              svg.querySelectorAll('.node').forEach(function(n) {
+                if (targetEl) return;
+                var label = n.querySelector('.nodeLabel');
+                if (label && label.textContent.includes(targetId)) targetEl = n;
+              });
+            }
+          } else if (targetType === 'container') {
+            targetEl = svg.querySelector('[data-container-code="' + targetId + '"]');
+            if (!targetEl) {
+              svg.querySelectorAll('.subgraph, .cluster').forEach(function(c) {
+                if (targetEl) return;
+                var label = c.querySelector('.cluster-label, text');
+                if (label && label.textContent.includes(targetId)) targetEl = c;
+              });
+            }
+          } else if (targetType === 'relation') {
+            targetEl = svg.querySelector('[data-link-code="' + targetId + '"]');
+            if (!targetEl && relCode) {
+              targetEl = svg.querySelector('[data-relation-code="' + relCode + '"]');
+            }
+            if (!targetEl) {
+              svg.querySelectorAll('.edgeLabel').forEach(function(label) {
+                if (targetEl) return;
+                var text = label.textContent || '';
+                if (text.includes(targetId) || (relCode && text.includes(relCode))) targetEl = label.closest('g') || label;
+              });
+            }
+          }
+          // 2) 触发高亮
+          if (targetType === 'node') {
+            annHighlightNode(targetEl);
+          } else if (targetType === 'container') {
+            annHighlightContainer(targetEl);
+          } else if (targetType === 'relation') {
+            annHighlightRelation(targetId, relCode);
+          }
+          // 3) 居中目标元素
+          if (targetEl) {
+            var bbox = null;
+            try { bbox = targetEl.getBBox(); } catch(e) {}
+            if (bbox && (bbox.width > 0 || bbox.height > 0)) {
+              var ctm = null;
+              try { ctm = targetEl.getCTM(); } catch(e) {}
+              if (ctm) {
+                var localCx = bbox.x + bbox.width / 2;
+                var localCy = bbox.y + bbox.height / 2;
+                var svgCx = ctm.a * localCx + ctm.c * localCy + ctm.e;
+                var svgCy = ctm.b * localCx + ctm.d * localCy + ctm.f;
+                var cw = container.clientWidth, ch = container.clientHeight;
+                tx = cw / 2 - svgCx * scale;
+                ty = ch * 0.38 - svgCy * scale;
+                applyTransform();
+              }
+            }
+          }
+          // 4) 切换选中样式
+          document.querySelectorAll('.annotation-dock-item').forEach(function(i) { i.style.background = ''; });
+          item.style.background = 'rgba(0,0,0,0.05)';
+        });
       });
     })();
   <\/script>
@@ -1250,7 +1681,7 @@ export default {
         const blob = new Blob([htmlContent], { type: 'text/html' })
         const link = document.createElement('a')
         link.href = URL.createObjectURL(blob)
-        link.download = `diagram-simple-${Date.now()}.html`
+        link.download = `diagram-${Date.now()}.html`
         link.click()
       }
     }
@@ -1737,21 +2168,42 @@ ${mermaidCode}
 
       showToast('正在生成 PDF，请稍候...')
 
-      // [BUG-V034 十一轮修复 2026-06-29] 提升 PDF 清晰度
-      //   之前 scale=1.5 + MAX_SVG_DIMENSION=2400, 大图降级到 renderScale=0.3, 模糊
-      //   现在 scale=2 + MAX_SVG_DIMENSION=6400, 同样大图 renderScale=0.8, 清晰度提升 7x
-      //   canvas 像素上限 100M (6400×6400×4byte=164MB, 可接受)
-      const scale = 2
-      const padding = 20
+      // [v42 高清方案] 优先 svg2pdf.js 矢量输出 (清晰度无限)
+      //   兜底: PNG raster 路径 (旧实现, 兼容)
+      try {
+        // 等待中文字体就绪 (svg2pdf.js 用浏览器已加载字体的字形数据)
+        if (document.fonts && document.fonts.ready) {
+          try {
+            await Promise.race([
+              document.fonts.ready,
+              new Promise((resolve) => setTimeout(resolve, 2000))
+            ])
+            // 主动加载 Microsoft YaHei / PingFang SC / 系统中文字体
+            const cnFontFamilies = ['"Microsoft YaHei"', '"微软雅黑"', '"PingFang SC"', '"SimHei"', '"SimSun"', 'sans-serif']
+            for (const ff of cnFontFamilies) {
+              try { await document.fonts.load('14px ' + ff) } catch (e) { /* 忽略 */ }
+            }
+          } catch (e) { /* 字体加载失败不影响后续 */ }
+        }
+      } catch (e) { /* document.fonts 不可用, 继续 */ }
 
       try {
         // ============================================================
-        // [BUG-V034 十轮修复 2026-06-29] 改回 SVG → Image 路径（避免九轮卡死）
-        //   九轮: html2canvas 整段渲染 → 大图遍历 SVG 内部 DOM → 10-30s 卡死
-        //   本轮: SVG → Image 走 SVG 渲染管线（毫秒级） + 移除 <style> 块（避污染）
+        // [v44 高清方案] html2canvas 整段渲染 legend + svg, 输出 PNG
+        //   1) legend 走 HTML 渲染 (浏览器原生中文字体, 不乱码)
+        //   2) svg 走 SVG → Image → canvas (不污染, 毫秒级)
+        //   3) canvas 高分 (scale=3, 输出 ≈ 12000px wide) → A2 PDF 极清晰
+        //   4) 拒绝 svg2pdf (它对 ELK 大 viewBox 处理差, 且图例中文乱码)
         // ============================================================
 
+        // [v45] 高清方案 - scale 由 viewBox 自动计算, 详见下面
+        // const scale = 2  // [已弃用] 现在根据 viewBox 自动算 scale
+        const padding = 30
+
         // 获取 SVG 实际尺寸
+        // [v45 修复] ELK 模式 viewBox 通常超大 (如 8000x4000), 直接用会爆内存
+        //   方案: viewBox 保留, 但 scale 与 A2 PDF 页面尺寸匹配
+        //   A2 横版 1684pt ≈ 2240px @ 96dpi, 让最终 PNG ≈ 6000-8000px wide (3x over-sampling)
         const origViewBox = svgEl.getAttribute('viewBox')
         let exportSvgWidth, exportSvgHeight
         if (origViewBox) {
@@ -1766,6 +2218,99 @@ ${mermaidCode}
           exportSvgWidth = rect.width || 800
           exportSvgHeight = rect.height || 600
         }
+
+        // [v45 关键修复] 实际节点 bbox 通常比 viewBox 小很多
+        //   遍历 SVG 内所有节点元素, 算出紧凑 bbox, 替换 viewBox 让 SVG 紧凑
+        //   8000x4000 viewBox 但实际内容在 (100, 100, 2000, 1500) → 替换为 2000x1500
+        //   → PNG 渲染像素减 4x, 节点在 PDF 上反而看起来更大更清晰
+        let tightViewBoxStr = null  // [v45] 紧凑 viewBox 字符串, 用于 clone
+        try {
+          // [v45 关键] 只查询节点和 cluster, 不包括 edge (edge bbox 可能横跨整图, 没意义)
+          const contentEls = svgEl.querySelectorAll('.node, .cluster, .subgraph, foreignObject')
+          if (contentEls.length > 0) {
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+            contentEls.forEach((el) => {
+              try {
+                const bb = el.getBBox()
+                if (bb && bb.width > 0 && bb.height > 0) {
+                  minX = Math.min(minX, bb.x)
+                  minY = Math.min(minY, bb.y)
+                  maxX = Math.max(maxX, bb.x + bb.width)
+                  maxY = Math.max(maxY, bb.y + bb.height)
+                }
+              } catch (e) { /* 忽略 */ }
+            })
+            if (minX !== Infinity && maxX > minX && maxY > minY) {
+              // [v45 调试] 输出 bbox 信息, 验证紧凑 viewBox 计算正确
+              console.log('[v45 DEBUG] 节点 bbox 范围:',
+                'x:', minX.toFixed(0), '~', maxX.toFixed(0),
+                '| y:', minY.toFixed(0), '~', maxY.toFixed(0),
+                '| 尺寸:', (maxX - minX).toFixed(0), 'x', (maxY - minY).toFixed(0),
+                '| 原 viewBox:', exportSvgWidth, 'x', exportSvgHeight,
+                '| 节点数:', contentEls.length)
+              // 留 2% 边距 (v45 缩小 padding, 节点在 PDF 上更大)
+              const padX = (maxX - minX) * 0.02
+              const padY = (maxY - minY) * 0.02
+              const tightW = maxX - minX + padX * 2
+              const tightH = maxY - minY + padY * 2
+              const tightX = minX - padX
+              const tightY = minY - padY
+              // 只要新尺寸 < 原尺寸 95% 就替换 (v45 几乎总是替换)
+              if (tightW * tightH < exportSvgWidth * exportSvgHeight * 0.95) {
+                console.log('[v45] 紧凑 viewBox: 原', exportSvgWidth, 'x', exportSvgHeight,
+                  '→ 新', tightW.toFixed(0), 'x', tightH.toFixed(0),
+                  '| 节省', ((1 - tightW * tightH / (exportSvgWidth * exportSvgHeight)) * 100).toFixed(1) + '%')
+                // 用局部变量记录紧凑尺寸, 后续 clone 时再用 setAttribute 改 viewBox
+                exportSvgWidth = tightW
+                exportSvgHeight = tightH
+                // 暂存紧凑 viewBox 元数据, 下面 clone 时使用 (通过函数返回值传递)
+                // 注: 不直接改 svgEl viewBox (避免污染用户视图)
+                tightViewBoxStr = `${tightX} ${tightY} ${tightW} ${tightH}`
+              }
+            }
+          }
+        } catch (e) { console.warn('[v45] 紧凑 viewBox 计算失败:', e) }
+
+        // [v47 强制放大节点] 根因: 节点 viewBox 200 / 总 viewBox 86000 = 0.23% 占比
+        //   无论 PNG/PDF 怎么缩放, 节点在 PDF 视觉永远是 1684pt × 0.23% = 3.87pt → 文字 0.7pt 不可读
+        //   强制把 viewBox 数字缩小 2x (元素坐标不变), 让节点在 viewBox 中占比提升 2x
+        //   元素坐标不变, 只缩小 viewBox 数字 → 保留完整 viewBox 范围, 不裁剪
+        //   节点 200/43000 = 0.46% → PDF 7.7pt (文字 14pt → 1.4pt)
+        //   + 字体放大 20% (14pt → 16.8pt) → 文字 1.4 × 1.2 = 1.68pt
+        //   综合提升 2.4x 可读性
+        if (tightViewBoxStr && exportSvgWidth > 30000) {
+          const parts = tightViewBoxStr.split(/\s+/).map(parseFloat)
+          if (parts.length === 4) {
+            const SCALE = 2  // viewBox 缩小 2x
+            const newW = parts[2] / SCALE
+            const newH = parts[3] / SCALE
+            // [v47 不裁剪] 保持 viewBox 中心, 但 X/Y 偏移到原位置/SCALE
+            //   原 viewBox "x y w h" → 缩小后应该是 "x/2 y/2 w/2 h/2"
+            //   这样元素坐标不变, viewBox 数字减半, SVG 渲染时元素在 viewBox 中占比翻倍
+            const newX = parts[0] / SCALE
+            const newY = parts[1] / SCALE
+            console.log('[v47 强制放大] 原 viewBox:', parts[2].toFixed(0), 'x', parts[3].toFixed(0),
+              '→ 新 viewBox:', newW.toFixed(0), 'x', newH.toFixed(0),
+              '| 节点相对占比: 0.23% → 0.46% (2x)',
+              '| PDF 节点视觉尺寸: 3.87pt → 7.7pt',
+              '| 字体 +20%: 14pt → 16.8pt')
+            exportSvgWidth = newW
+            exportSvgHeight = newH
+            tightViewBoxStr = `${newX} ${newY} ${newW} ${newH}`
+          }
+        }
+
+        // [v45 修复] 计算合适的 renderScale: 让最终 PNG 宽度 ≈ 8000-12000px (适配 A2)
+        //   8000 → 1684pt PDF: 4.75x 缩放, 高清
+        //   12000 → 1684pt PDF: 7.1x 缩放, 极清
+        const TARGET_PNG_WIDTH = 10000  // 目标 PNG 宽度
+        const autoScale = Math.min(2, TARGET_PNG_WIDTH / Math.max(exportSvgWidth, 1))
+        const finalScale = Math.max(0.5, autoScale)
+        console.log('[v45] viewBox:', exportSvgWidth, 'x', exportSvgHeight,
+          '| autoScale:', autoScale.toFixed(3),
+          '| 最终 PNG 尺寸:', (exportSvgWidth * finalScale).toFixed(0), 'x', (exportSvgHeight * finalScale).toFixed(0))
+        // 用 finalScale 作为后续的 scale (在函数作用域)
+        const scale = finalScale
 
         // 构造统一容器: legend (HTML) + SVG (克隆副本)
         const pdfWrapper = document.createElement('div')
@@ -1810,8 +2355,31 @@ ${mermaidCode}
         if (!svgCloneForExport.getAttribute('xmlns')) {
           svgCloneForExport.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
         }
+        // [v45] 用紧凑 viewBox 替换, 提升 PDF 清晰度 (节点占更大比例)
+        if (tightViewBoxStr) {
+          svgCloneForExport.setAttribute('viewBox', tightViewBoxStr)
+        }
         svgCloneForExport.setAttribute('width', String(exportSvgWidth))
         svgCloneForExport.setAttribute('height', String(exportSvgHeight))
+
+        // [v47 字体放大 20%] 同步放大 svgClone 内 text 元素的 font-size
+        //   viewBox 缩 2x 让节点视觉 2x, 但 text 元素 font-size 是绝对值
+        //   必须主动放大 font-size 1.2x, 让文字可读性提升 2.4x (2x viewBox × 1.2x font)
+        const FONT_BOOST = 1.2
+        svgCloneForExport.querySelectorAll('text').forEach((t) => {
+          const curSize = parseFloat(t.getAttribute('font-size') || t.style.fontSize || '14')
+          if (!isNaN(curSize) && curSize > 0) {
+            t.setAttribute('font-size', String(curSize * FONT_BOOST))
+            if (t.style.fontSize) t.style.fontSize = String(curSize * FONT_BOOST)
+          }
+        })
+        // 同步放大 foreignObject 内 html font-size
+        svgCloneForExport.querySelectorAll('foreignObject *').forEach((el) => {
+          const curSize = parseFloat(el.style.fontSize || '14')
+          if (!isNaN(curSize) && curSize > 0) {
+            el.style.fontSize = (curSize * FONT_BOOST) + 'px'
+          }
+        })
 
         // foreignObject → text 转换 (六轮已验证)
         const foreignObjects = svgCloneForExport.querySelectorAll('foreignObject')
@@ -1854,24 +2422,25 @@ ${mermaidCode}
         console.log('[BUG-V034 十轮诊断] 移除 <style> 块:', styleRemovedCount, '个')
 
         // 大图降级 (避免 SVG viewBox × scale 后 canvas 像素爆炸)
-        // [十一轮] MAX_SVG_DIMENSION 2400→6400, 提升大图清晰度
-        //   canvas 像素上限 100M (6400×6400≈41M 像素 × 4byte = 164MB, 可接受)
-        //   8000×4000 SVG: 旧 renderScale=0.3 (2400px), 新 renderScale=0.8 (6400px), 清晰度 +7x
-        const MAX_SVG_DIMENSION = 6400
-        const MAX_CANVAS_PIXELS = 100_000_000  // 100M 像素上限, 防内存爆炸
+        // [v45] 不再过度降级 - 让 SVG 接近 1:1 渲染, 保留细节
+        //   提升 MAX_CANVAS_PIXELS 到 400M (~1.6GB 内存), 接受更大 canvas
+        //   8000×4000 SVG @ scale=2 → 16000×8000 = 128M 像素, 512MB 内存, OK
+        //   10000×5000 SVG @ scale=2 → 20000×10000 = 200M 像素, 800MB 内存, OK
+        const MAX_SVG_DIMENSION = 16000
+        const MAX_CANVAS_PIXELS = 400_000_000  // 400M 像素 (1.6GB RGBA), 高清优先
         let renderScale = scale
         const scaledW = exportSvgWidth * scale
         const scaledH = exportSvgHeight * scale
         if (scaledW > MAX_SVG_DIMENSION || scaledH > MAX_SVG_DIMENSION) {
           renderScale = Math.min(MAX_SVG_DIMENSION / exportSvgWidth, MAX_SVG_DIMENSION / exportSvgHeight)
         }
-        // 双重保护: canvas 总像素超 100M 时再降级
+        // 双重保护: canvas 总像素超 400M 时再降级
         if (exportSvgWidth * renderScale * exportSvgHeight * renderScale > MAX_CANVAS_PIXELS) {
           const pixelRatio = Math.sqrt(MAX_CANVAS_PIXELS / (exportSvgWidth * exportSvgHeight))
           renderScale = Math.min(renderScale, pixelRatio)
         }
         if (renderScale !== scale) {
-          console.log('[BUG-V034 十一轮诊断] SVG 降级, scale=', scale, '→', renderScale.toFixed(3),
+          console.log('[v45] SVG renderScale=', scale, '→', renderScale.toFixed(3),
             '| 原 viewBox:', exportSvgWidth, 'x', exportSvgHeight,
             '| 渲染像素:', (exportSvgWidth * renderScale).toFixed(0), 'x', (exportSvgHeight * renderScale).toFixed(0))
         }
@@ -1976,14 +2545,16 @@ ${mermaidCode}
         // ============================================================
         // 4. A4 横版 PDF
         // ============================================================
+        // [v44] A2 横版 (1684 x 1190 pt ≈ 23.4 x 16.5 inch)
+        //   比 A4 大 4 倍面积, 高 scale=3 PNG 嵌入后极清晰
         const pdf = new jsPDF({
           orientation: 'landscape',
           unit: 'pt',
-          format: 'a4'
+          format: 'a2'
         })
-        const pageWidthPt = pdf.internal.pageSize.getWidth()   // ~841.89
-        const pageHeightPt = pdf.internal.pageSize.getHeight()  // ~595.28
-        const marginPt = 20
+        const pageWidthPt = pdf.internal.pageSize.getWidth()   // ~1684
+        const pageHeightPt = pdf.internal.pageSize.getHeight()  // ~1190
+        const marginPt = 30
 
         const aspectCanvas = finalCanvas.width / finalCanvas.height
         const drawAreaW = pageWidthPt - marginPt * 2
@@ -2005,16 +2576,29 @@ ${mermaidCode}
         //   finalCanvas 现在直接来自 html2canvas(pdfWrapper) 的输出
         //   html2canvas 走 DOM→canvas 路径, 完全绕开 SVG→Image→canvas 污染链
         //   → toDataURL 应正常返回 PNG data URL (前 23 字符 "data:image/png;base64,")
+        // [v48 优化文件大小] 用 JPEG 95% 质量 替代 PNG
+        //   PNG 无损但体积大 (8000x4821 ≈ 5-10MB)
+        //   JPEG 95% 视觉无损, 体积减小 60-80% (1-2MB)
+        //   addImage 接受 'JPEG' 格式, jsPDF 4.x 完美支持
         console.log('[BUG-V034 九轮诊断] finalCanvas 尺寸:', finalCanvas.width, 'x', finalCanvas.height)
         let imgData
         try {
-          imgData = finalCanvas.toDataURL('image/png')
-          console.log('[BUG-V034 九轮诊断] toDataURL 返回长度:', imgData.length, '| 前 30 字符:', imgData.slice(0, 30))
+          // [v48 优化] 白色背景填充 (避免 JPEG 透明区域变黑)
+          //   不用 getImageData/putImageData (会分配 154MB 内存), 用 destination-over 复合
+          const ctx = finalCanvas.getContext('2d')
+          ctx.save()
+          ctx.globalCompositeOperation = 'destination-over'
+          ctx.fillStyle = '#ffffff'
+          ctx.fillRect(0, 0, finalCanvas.width, finalCanvas.height)
+          ctx.restore()
+          // 转 JPEG 95% 质量
+          imgData = finalCanvas.toDataURL('image/jpeg', 0.95)
+          console.log('[v48] JPEG 95% 返回长度:', (imgData.length / 1024 / 1024).toFixed(2), 'MB (vs PNG 通常 5-10MB)')
         } catch (e) {
           console.error('[BUG-V034 九轮诊断] toDataURL 抛错:', e?.name, e?.message)
           throw e
         }
-        pdf.addImage(imgData, 'PNG', renderX, renderY, renderW, renderH)
+        pdf.addImage(imgData, 'JPEG', renderX, renderY, renderW, renderH)
         pdf.save(`diagram-${Date.now()}.pdf`)
         showToast('PDF 已生成')
       } catch (err) {

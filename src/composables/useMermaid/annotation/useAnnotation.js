@@ -41,6 +41,8 @@ export function useAnnotation() {
       contents.forEach((content, idx) => {
         if (!content) return  // 跳过空内容
         const category = (Array.isArray(categories) && categories[idx]) || DEFAULT_CATEGORY
+        const categoryConfig = getCategoryConfig(category)
+        const categoryName = categoryConfig ? categoryConfig.label : category
         result.push({
           id: `ANN${String(number).padStart(3, '0')}`,
           number: number++,
@@ -48,6 +50,7 @@ export function useAnnotation() {
           targetId,
           targetName,
           category,
+          categoryName,
           content,
           ...extra
         })
@@ -110,15 +113,26 @@ export function useAnnotation() {
 
     if (data.links) {
       data.links.forEach(link => {
+        // targetId 必须唯一：link.code（实例编码）> relationCode+source+target 组合 > source-target
+        const relTargetId = link.code
+          || (link.relationCode ? `${link.relationCode}__${link.source || ''}__${link.target || ''}` : '')
+          || `${link.source}-${link.target}`
+        // targetName：与图表边标签优先级一致 code > relationCode > relationDesc
+        const relLabel = (link.code && String(link.code).trim())
+          || (link.relationCode && String(link.relationCode).trim())
+          || (link.relationDesc && String(link.relationDesc).trim())
+          || (link.label && String(link.label).trim())
+          || ''
         pushAnnotation(
           'relation',
-          link.relationCode || `${link.source}-${link.target}`,
-          `${link.label || link.relationDesc || ''}`,
+          relTargetId,
+          relLabel,
           link.annotationContents,
           link.annotationCategories,
           {
             sourceBOName: link.sourceName || link.source || '',
-            targetBOName: link.targetName || link.target || ''
+            targetBOName: link.targetName || link.target || '',
+            relationCode: link.relationCode || ''
           }
         )
       });

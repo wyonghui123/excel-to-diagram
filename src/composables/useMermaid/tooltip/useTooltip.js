@@ -189,8 +189,10 @@ export function useTooltip() {
     const targetName = relation.targetName || ''
 
     // [v34 双向支持] 关系类型 + 关系方向 - 从 relationDescriptions 透传
-    const relationType = relation.relationType || ''
-    const relationDirection = relation.relationDirection || ''
+    // 过滤 legacy_null / null 等无效值
+    const _cleanEnum = (v) => String(v || '').replace(/^legacy[_\s]*null$/i, '').replace(/^null$/i, '').trim()
+    const relationType = _cleanEnum(relation.relationType)
+    const relationDirection = _cleanEnum(relation.relationDirection)
 
     let text = `${relationCode}\n${sourceName} → ${targetName}`
 
