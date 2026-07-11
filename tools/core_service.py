@@ -8,11 +8,13 @@
     1. 极简 (~150 行) - 越少代码越少 bug
     2. 不做服务管理 - 避免 pkill/Popen 误杀自身
     3. 调用方决定生命周期 - 通过 exec pkill 停服务, exec bash start.sh 启服务
+    4. [v1.2] 审计日志 - 所有 upload/exec 记录到 /var/log/core_service_audit.log
 
   端点:
     GET  /api                      服务信息
     POST /api/upload?path=PATH     上传文件 (500MB)
     GET  /api/exec?cmd=CMD         执行命令 (白名单, bg=true 后台)
+    GET  /api/audit?lines=N        查看最近审计日志 (token, 默认 50)
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ import http.server, socketserver
 from urllib.parse import urlparse, parse_qs
 
 # --- config ---
-VERSION         = "v1.1"
+VERSION         = "v1.2"
 PORT            = int(os.environ.get("CORE_SERVICE_PORT", 9200))
 BIND            = os.environ.get("CORE_SERVICE_BIND", "0.0.0.0")
 SECRET          = os.environ.get("CORE_SERVICE_SECRET", "v007.52-core")
@@ -98,6 +100,24 @@ _limiter = _Limiter()
 
 # --- handler ---
 class CoreHandler(http.server.BaseHTTPRequestHandler):
+    # [V007.53] audit log - 记录所有敏感操作到 /var/log/core_service_audit.log
+    AUDIT_LOG = "/var/log/core_service_audit.log"
+    AUDIT_LOCK = threading.Lock()
+
+    @classmethod
+    def _audit(cls, action, client_ip, detail):
+        """线程安全审计日志 - 写入 /var/log/core_service_audit.log"""
+        try:
+            import datetime as _dt
+            ts = _dt.datetime.now().isoformat(timespec='seconds')
+            line = json.dumps({"ts": ts, "ip": client_ip, "action": action, **detail},
+                              ensure_ascii=False)
+            with cls.AUDIT_LOCK:
+                with open(cls.AUDIT_LOG, "a") as f:
+                    f.write(line + "\n")
+        except Exception:
+            pass  # audit 失败不影响主流程
+
     def log_message(self, *a, **kw):
         pass
 
@@ -120,6 +140,8 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
                 return self._root(q)
             elif route == "/api/exec":
                 return self._exec(q)
+            elif route == "/api/audit":
+                return self._audit_log(q)
             return self._json(404, {"error": "not found", "route": route})
         except Exception as e:
             return self._json(500, {"error": str(e)})
@@ -143,26 +165,62 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
             "version": VERSION,
             "uptime_sec": int(time.time() - _START_TIME),
             "port": PORT,
-            "endpoints": ["/api", "/api/upload", "/api/exec"],
+            "endpoints": ["/api", "/api/upload", "/api/exec", "/api/audit"],
             "allowed_dirs": ALLOWED_DIRS,
             "exec_whitelist_count": len(EXEC_WHITELIST),
+            "audit_log": self.AUDIT_LOG,
             "usage": {
                 "upload": "POST /api/upload?path=/tmp/file.sh&token=XXX  (body=raw bytes)",
                 "exec":   "GET  /api/exec?cmd=ls+/tmp&token=XXX  (bg=true for background)",
+                "audit":  "GET  /api/audit?lines=50&token=XXX  (recent audit entries)",
                 "token":  "SHA256(secret:hour)[:16], valid 8h",
             },
         })
 
+    # ── GET /api/audit ─────────────────────────────────────
+    def _audit_log(self, q):
+        """[V007.53 v1.2] 返回最近 N 条审计日志 (默认 50, max 500)"""
+        if not _check_token(q):
+            return self._json(403, {"error": "token required"})
+        try:
+            n = min(int(q.get("lines", ["50"])[0]), 500)
+        except ValueError:
+            n = 50
+        if not os.path.exists(self.AUDIT_LOG):
+            return self._json(200, {"file": self.AUDIT_LOG, "count": 0, "entries": []})
+        try:
+            with open(self.AUDIT_LOG, "r") as f:
+                lines = f.readlines()[-n:]
+            entries = []
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entries.append(json.loads(line))
+                except Exception:
+                    entries.append({"raw": line})  # 容错
+            return self._json(200, {
+                "file": self.AUDIT_LOG,
+                "count": len(entries),
+                "entries": entries,
+            })
+        except Exception as e:
+            return self._json(500, {"error": str(e)})
+
     def _upload(self, q):
         if not _check_token(q):
+            self._audit("upload_denied", self.client_address[0], {"reason": "no_token"})
             return self._json(403, {"error": "token required"})
         target = q.get("path", [""])[0]
         if not target:
             return self._json(400, {"error": "path param required"})
         if not _path_allowed(target):
+            self._audit("upload_denied", self.client_address[0], {"reason": "path_not_allowed", "path": target})
             return self._json(403, {"error": f"path not allowed: {target}"})
         clen = int(self.headers.get("Content-Length", 0))
         if clen > MAX_UPLOAD_MB * 1024 * 1024:
+            self._audit("upload_denied", self.client_address[0], {"reason": "too_large", "size": clen})
             return self._json(413, {"error": f"too large: {clen} bytes"})
         try:
             body = self.rfile.read(clen)
@@ -175,13 +233,16 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
             exe = target.endswith((".sh", ".py"))
             if exe:
                 os.chmod(target, 0o755)
+            self._audit("upload_ok", self.client_address[0], {"path": target, "size": len(body), "executable": exe})
             return self._json(200, {"action": "uploaded", "path": target,
                                     "size": len(body), "executable": exe})
         except Exception as e:
+            self._audit("upload_fail", self.client_address[0], {"path": target, "err": str(e)})
             return self._json(500, {"error": str(e)})
 
     def _exec(self, q):
         if not _check_token(q):
+            self._audit("exec_denied", self.client_address[0], {"reason": "no_token"})
             return self._json(403, {"error": "token required"})
         cmd = q.get("cmd", [""])[0]
         timeout = min(int(q.get("timeout", ["30"])[0]), 120)
@@ -190,9 +251,11 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
             return self._json(400, {"error": "cmd param required"})
         for pat in EXEC_BLACKLIST:
             if pat in cmd.lower():
+                self._audit("exec_denied", self.client_address[0], {"reason": "blacklist", "pattern": pat, "cmd": cmd[:200]})
                 return self._json(403, {"error": f"blacklisted: {pat}"})
         base = os.path.basename(cmd.split()[0]) if cmd.split() else ""
         if base not in EXEC_WHITELIST:
+            self._audit("exec_denied", self.client_address[0], {"reason": "not_whitelisted", "base": base, "cmd": cmd[:200]})
             return self._json(403, {"error": f"not whitelisted: {base}"})
         try:
             if bg:
@@ -200,20 +263,25 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
                     proc = subprocess.Popen(cmd, shell=True, stdout=devnull,
                                             stderr=devnull, close_fds=True,
                                             start_new_session=True)
+                self._audit("exec_ok", self.client_address[0], {"mode": "bg", "cmd": cmd[:200], "pid": proc.pid})
                 return self._json(200, {"mode": "background", "cmd": cmd, "pid": proc.pid})
             t0 = time.time()
             r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
             out = r.stdout or ""
             err = r.stderr or ""
+            elapsed = round((time.time() - t0) * 1000, 1)
+            self._audit("exec_ok", self.client_address[0], {"mode": "sync", "cmd": cmd[:200], "exit_code": r.returncode, "elapsed_ms": elapsed})
             return self._json(200, {
                 "cmd": cmd, "exit_code": r.returncode,
                 "stdout": out[:50000], "stderr": err[:10000],
-                "elapsed_ms": round((time.time() - t0) * 1000, 1),
+                "elapsed_ms": elapsed,
                 "truncated_stdout": len(out) > 50000,
             })
         except subprocess.TimeoutExpired:
+            self._audit("exec_fail", self.client_address[0], {"reason": "timeout", "cmd": cmd[:200], "timeout": timeout})
             return self._json(408, {"error": f"timeout after {timeout}s"})
         except Exception as e:
+            self._audit("exec_fail", self.client_address[0], {"cmd": cmd[:200], "err": str(e)})
             return self._json(500, {"error": str(e)})
 
 

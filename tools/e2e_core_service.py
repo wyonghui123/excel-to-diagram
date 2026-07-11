@@ -45,7 +45,7 @@ def check(name, ok, detail=""):
     else:  FAIL += 1
 
 def main():
-    print(f"[E2E] core_service v1.1 end-to-end test")
+    print(f"[E2E] core_service v1.2 end-to-end test")
     print(f"[E2E] target: {CORE_URL}")
     print(f"[E2E] token: {token()}")
     print()
@@ -54,8 +54,8 @@ def main():
     print("=== [1] /api metadata ===")
     code, body = call("GET", "/api")
     check("200 OK", code == 200, str(code))
-    check("version=v1.1", '"version": "v1.1"' in body)
-    check("endpoints=3", '"endpoints": ["/api", "/api/upload", "/api/exec"]' in body)
+    check("version=v1.2", '"version": "v1.2"' in body)
+    check("endpoints=4", '"endpoints": ["/api", "/api/upload", "/api/exec", "/api/audit"]' in body)
     print()
 
     # 2. 无 token 拦截
@@ -116,6 +116,16 @@ def main():
     check("exec shutdown 403", code == 403, str(code))
     print()
 
+    # 8.5. audit log 端点 (放在限流前, 因为限流会耗尽 bucket)
+    print("=== [8.5] audit log ===")
+    code, body = call("GET", "/api/audit", {"lines": "30", "token": t})
+    check("audit 200", code == 200, str(code))
+    check("audit has entries", '"entries":' in body and '"count":' in body)
+    check("audit has exec_ok", '"action": "exec_ok"' in body)
+    check("audit has exec_denied", '"action": "exec_denied"' in body)
+    check("audit has upload_denied (path whitelist)", '"reason": "path_not_allowed"' in body)
+    print()
+
     # 9. rate limit
     print("=== [9] rate limit (25 reqs/sec) ===")
     rate_ok = 0
@@ -126,6 +136,8 @@ def main():
         elif code == 429: rate_blocked += 1
     check(f"rate_limit (ok={rate_ok}, blocked={rate_blocked})", rate_ok <= 20 and rate_blocked >= 5)
     print()
+
+    # audit 已在 [8.5] 测过, 这里跳过 (限流后 IP 被 ban)
 
     # 总结
     print(f"=== [SUMMARY] ===")
