@@ -1,5 +1,5 @@
 """
-[V007.59] core_service.py - 极简元能力服务
+[V007.60] core_service.py - 极简元能力服务
   只做两件事: 上传文件 + 执行命令
   监听: 9200
   依赖: Python 3.6+ 标准库, 无第三方依赖
@@ -15,6 +15,7 @@
     8. [v1.6] 批量上传 (multipart/form-data) - /api/upload_multi, 不依赖第三方
     9. [v1.7] 监控指标 - /api/metrics (Prometheus 格式)
    10. [v1.8] 健康检查 - /api/health (liveness) + /api/ready (readiness), 无需 token
+   11. [v1.9] 请求 ID 追踪 - 每个请求分配唯一 ID, 写入 X-Request-Id 响应头 + audit log
 
   端点:
     GET   /api                          服务信息
@@ -34,7 +35,7 @@ import http.server, socketserver
 from urllib.parse import urlparse, parse_qs
 
 # --- config ---
-VERSION         = "v1.8"
+VERSION         = "v1.9"
 PORT            = int(os.environ.get("CORE_SERVICE_PORT", 9200))
 BIND            = os.environ.get("CORE_SERVICE_BIND", "0.0.0.0")
 TOKEN_HR        = 8
@@ -192,7 +193,27 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
         try:
             import datetime as _dt
             ts = _dt.datetime.now().isoformat(timespec='seconds')
-            line = json.dumps({"ts": ts, "ip": client_ip, "action": action, **detail},
+            # [V007.60 v1.9] 附加 request_id (如果有)
+            extra = {}
+            # 向上 2 层 frame: [0]=_audit 本身, [1]=instance method, [2]=更外层
+            # 在 instance method 里 self 是局部变量
+            try:
+                import sys as _sys
+                # 先看 [1] 是不是 instance method (有 self)
+                frame1 = _sys._getframe(1)
+                rid = None
+                if "self" in frame1.f_locals:
+                    rid = getattr(frame1.f_locals["self"], "request_id", None)
+                if not rid:
+                    # 再看 [2] 是不是 do_GET/do_POST
+                    frame2 = _sys._getframe(2)
+                    if "self" in frame2.f_locals:
+                        rid = getattr(frame2.f_locals["self"], "request_id", None)
+                if rid:
+                    extra["request_id"] = rid
+            except Exception:
+                pass
+            line = json.dumps({"ts": ts, "ip": client_ip, "action": action, **extra, **detail},
                               ensure_ascii=False)
             with cls.AUDIT_LOCK:
                 # 轮转检查 (只在需要时检查, 避免每次都 stat)
@@ -237,11 +258,34 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a, **kw):
         pass
 
-    def _json(self, code, data):
+    # [V007.60 v1.9] 给每个请求分配唯一 ID
+    def _assign_request_id(self):
+        """[V007.60 v1.9] 分配 request_id
+        优先级:
+        1. 客户端传的 X-Request-Id (用于跨服务关联)
+        2. 自动生成: ts-millis + random 4 字符
+        存到 self.request_id, 后续 _json / _audit / log 自动附加
+        """
+        import secrets
+        # 检查客户端传的
+        client_id = self.headers.get("X-Request-Id", "").strip()
+        if client_id and len(client_id) <= 64 and all(c.isalnum() or c in "-_" for c in client_id):
+            self.request_id = client_id
+        else:
+            ts = int(time.time() * 1000)
+            rnd = secrets.token_hex(3)  # 6 字符
+            self.request_id = f"req-{ts}-{rnd}"
+
+    def _json(self, code, data, request_id=None):
         body = json.dumps(data, ensure_ascii=False).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        # [V007.60 v1.9] 总是返回 X-Request-Id (便于客户端关联日志)
+        if request_id is None:
+            request_id = getattr(self, "request_id", None)
+        if request_id:
+            self.send_header("X-Request-Id", request_id)
         self.end_headers()
         self.wfile.write(body)
         # [V007.58 v1.7] 按 status 计数
@@ -253,6 +297,7 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
             self._inc("requests_5xx")
 
     def do_GET(self):
+        self._assign_request_id()  # [V007.60 v1.9]
         p = urlparse(self.path)
         q = parse_qs(p.query)
         route = p.path.rstrip("/")

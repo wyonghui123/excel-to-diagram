@@ -51,6 +51,23 @@ def call(method, path, query=None, body=None, headers=None):
     except urllib.error.HTTPError as e:
         return e.code, e.read().decode()
 
+
+def call_with_headers(method, path, query=None, body=None, headers=None):
+    """[V007.60 v1.9] 返回 (code, body, headers_dict) - 用于检查 X-Request-Id 等 header"""
+    url = CORE_URL + path
+    if query:
+        url += "?" + urllib.parse.urlencode(query)
+    req = urllib.request.Request(url, method=method)
+    if headers:
+        for k, v in headers.items():
+            req.add_header(k, v)
+    data = body if isinstance(body, bytes) else (body.encode() if body else None)
+    try:
+        with urllib.request.urlopen(req, data=data, timeout=10, context=_ssl_ctx) as r:
+            return r.status, r.read().decode(), dict(r.headers)
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode(), dict(e.headers)
+
 PASS = 0
 FAIL = 0
 def check(name, ok, detail=""):
@@ -70,7 +87,7 @@ def main():
     print("=== [1] /api metadata ===")
     code, body = call("GET", "/api")
     check("200 OK", code == 200, str(code))
-    check("version=v1.8", '"version": "v1.8"' in body)
+    check("version=v1.9", '"version": "v1.9"' in body)
     check("endpoints=4", '"endpoints": ["/api", "/api/upload", "/api/exec", "/api/audit"]' in body)
     check("3 token levels", '"token_levels":' in body)
     print()
@@ -303,8 +320,8 @@ def main():
         check("path traversal blocked", False, str(e))
     print()
 
-    # 14. metrics 端点 (v1.7 新功能) - Prometheus 格式
-    print("=== [14] metrics endpoint (v1.7) ===")
+    # 14. metrics 端点 (v1.9 新功能) - Prometheus 格式
+    print("=== [14] metrics endpoint (v1.9) ===")
     code, body = call("GET", "/api/metrics", {"token": token("admin")})
     check("metrics 200 (admin)", code == 200, str(code))
     check("metrics has uptime", "core_service_uptime_seconds" in body)
@@ -315,7 +332,7 @@ def main():
     check("metrics has audit_log_bytes", "core_service_audit_log_bytes" in body)
     check("metrics has by_route", "core_service_requests_by_route" in body)
     check("metrics has info", "core_service_info" in body)
-    check("metrics version v1.8", 'version="v1.8"' in body)
+    check("metrics version v1.9", 'version="v1.9"' in body)
     # read token 也可以访问 metrics (只读)
     code, body = call("GET", "/api/metrics", {"token": token("read")})
     check("metrics 200 (read)", code == 200, str(code))
@@ -337,8 +354,8 @@ def main():
         check("Content-Type check", False, str(e))
     print()
 
-    # 15. health/ready 端点 (v1.8 新功能)
-    print("=== [15] health/ready probes (v1.8) ===")
+    # 15. health/ready 端点 (v1.9 新功能)
+    print("=== [15] health/ready probes (v1.9) ===")
     # /api/health 无需 token, 公开
     code, body = call("GET", "/api/health", {})
     check("health 200 no-token", code == 200, str(code))
@@ -352,7 +369,7 @@ def main():
     check("ready 200 (yonaa healthy)", code == 200, f"code={code} body={body[:200]}")
     check("ready status=ready", '"status": "ready"' in body, body[:200])
     check("ready checks present", '"checks":' in body and "audit_log_writable" in body)
-    check("ready version=v1.8", '"version": "v1.8"' in body)
+    check("ready version=v1.9", '"version": "v1.9"' in body)
     # 30 health check 不会被限流 (因为不走 rate limit)
     rate_limited = 0
     for i in range(30):
@@ -360,6 +377,41 @@ def main():
         if code == 429:
             rate_limited += 1
     check("health 30 calls no rate limit", rate_limited == 0, f"rate_limited={rate_limited}")
+    print()
+
+    # 16. 请求 ID 追踪 (v1.9 新功能)
+    print("=== [16] request_id tracing (v1.9) ===")
+    # 自动生成 X-Request-Id
+    code, body, headers = call_with_headers("GET", "/api/exec", {"cmd": "ls /tmp", "token": token("admin")})
+    auto_id = headers.get("X-Request-Id") or headers.get("x-request-id")
+    check("auto-gen X-Request-Id", auto_id and auto_id.startswith("req-"), f"got {auto_id}")
+    check("auto id has timestamp", auto_id and len(auto_id.split("-")) >= 3, f"got {auto_id}")
+    # 客户端传 X-Request-Id
+    custom_id = "my-custom-trace-12345"
+    code, body, headers = call_with_headers("GET", "/api/exec", {"cmd": "ls /tmp", "token": token("admin")},
+                                            headers={"X-Request-Id": custom_id})
+    check("custom X-Request-Id echoed", headers.get("X-Request-Id") == custom_id, f"got {headers.get('X-Request-Id')}")
+    # 不合法字符被拒绝, 自动生成
+    code, body, headers = call_with_headers("GET", "/api/exec", {"cmd": "ls /tmp", "token": token("admin")},
+                                            headers={"X-Request-Id": "bad id with spaces!"})
+    bad_id = headers.get("X-Request-Id")
+    check("invalid X-Request-Id auto-gen", bad_id and bad_id.startswith("req-"), f"got {bad_id}")
+    # health 端点也有 X-Request-Id
+    code, body, headers = call_with_headers("GET", "/api/health", {})
+    health_id = headers.get("X-Request-Id")
+    check("health has X-Request-Id", health_id is not None, f"got {health_id}")
+    # audit log 中能找到 X-Request-Id (关联日志)
+    code, body, _ = call_with_headers("GET", "/api/audit", {"lines": "500", "token": token("admin")})
+    # 查找 custom_id 是否在 audit 中
+    import json as _json2
+    try:
+        data = _json2.loads(body)
+        entries = data.get("entries", [])
+        found_custom = any(e.get("request_id") == custom_id for e in entries)
+        check("audit has request_id field", any("request_id" in e for e in entries), "")
+        check("audit contains custom request_id", found_custom, f"custom_id={custom_id}")
+    except Exception as e:
+        check("audit parse", False, str(e))
     print()
 
     # 11. HTTPS 验证 (v1.4 新功能)
@@ -383,7 +435,7 @@ def main():
     resp = buf.decode()
     check("HTTPS response HTTP/1.x", "HTTP/1." in resp)
     check("HTTPS response 200", " 200 " in resp)
-    check("HTTPS body has version", '"version": "v1.8"' in resp)
+    check("HTTPS body has version", '"version": "v1.9"' in resp)
     ssock.close()
     # HTTP 应该被拒
     import urllib.error
