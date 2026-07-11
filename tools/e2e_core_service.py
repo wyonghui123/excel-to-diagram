@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+"""
+[V007.52] e2e_core_service.py - core_service v1.1 端到端验证
+  验证流程:
+    1. /api 返回元信息 (version v1.1, 3 endpoints)
+    2. 无 token 时 upload/exec 返回 403
+    3. 有 token 时 upload 写文件成功
+    4. exec 同步执行白名单命令成功
+    5. exec bg=true 后台启动成功
+    6. 路径白名单拦截非允许路径
+    7. 命令白名单拦截非白名单命令
+    8. 黑名单拦截危险命令
+"""
+import sys, time, hashlib, urllib.request, urllib.parse, tempfile, os
+
+CORE_URL = "http://172.20.59.7:9200"
+SECRET = "v007.52-core"
+
+def token() -> str:
+    h = int(time.time()) // 3600
+    return hashlib.sha256(f"{SECRET}:{h}".encode()).hexdigest()[:16]
+
+def call(method, path, query=None, body=None, headers=None):
+    url = CORE_URL + path
+    if query:
+        url += "?" + urllib.parse.urlencode(query)
+    req = urllib.request.Request(url, method=method)
+    if headers:
+        for k, v in headers.items():
+            req.add_header(k, v)
+    data = body if isinstance(body, bytes) else (body.encode() if body else None)
+    try:
+        with urllib.request.urlopen(req, data=data, timeout=10) as r:
+            return r.status, r.read().decode()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode()
+
+PASS = 0
+FAIL = 0
+def check(name, ok, detail=""):
+    global PASS, FAIL
+    icon = "[OK]" if ok else "[FAIL]"
+    print(f"  {icon} {name}{(': ' + detail) if detail else ''}")
+    if ok: PASS += 1
+    else:  FAIL += 1
+
+def main():
+    print(f"[E2E] core_service v1.1 end-to-end test")
+    print(f"[E2E] target: {CORE_URL}")
+    print(f"[E2E] token: {token()}")
+    print()
+
+    # 1. /api 返回元信息
+    print("=== [1] /api metadata ===")
+    code, body = call("GET", "/api")
+    check("200 OK", code == 200, str(code))
+    check("version=v1.1", '"version": "v1.1"' in body)
+    check("endpoints=3", '"endpoints": ["/api", "/api/upload", "/api/exec"]' in body)
+    print()
+
+    # 2. 无 token 拦截
+    print("=== [2] no-token rejection ===")
+    code, body = call("POST", "/api/upload", {"path": "/tmp/e2e_test.txt"}, body=b"data")
+    check("upload 403 without token", code == 403, str(code))
+    code, body = call("GET", "/api/exec", {"cmd": "ls /tmp"})
+    check("exec 403 without token", code == 403, str(code))
+    print()
+
+    # 3. upload 成功
+    print("=== [3] upload with token ===")
+    t = token()
+    test_path = "/tmp/e2e_core_service_test.txt"
+    content = f"e2e test at {int(time.time())}\n".encode()
+    code, body = call("POST", "/api/upload", {"path": test_path, "token": t}, body=content)
+    check("upload 200", code == 200, str(code))
+    check("uploaded response", '"action": "uploaded"' in body)
+    print()
+
+    # 4. exec 同步
+    print("=== [4] exec sync (whitelist) ===")
+    code, body = call("GET", "/api/exec",
+                      {"cmd": f"cat {test_path}", "token": t})
+    check("exec 200", code == 200, str(code))
+    check("exec content match", "e2e test at" in body)
+    print()
+
+    # 5. exec bg=true
+    print("=== [5] exec background ===")
+    code, body = call("GET", "/api/exec",
+                      {"cmd": "sleep 5", "bg": "true", "token": t})
+    check("bg exec 200", code == 200, str(code))
+    check("bg has pid", '"pid":' in body)
+    print()
+
+    # 6. 路径白名单
+    print("=== [6] path whitelist ===")
+    code, body = call("POST", "/api/upload",
+                      {"path": "/etc/passwd", "token": t}, body=b"hacker")
+    check("upload /etc/passwd 403", code == 403, str(code))
+    print()
+
+    # 7. 命令白名单
+    print("=== [7] cmd whitelist ===")
+    code, body = call("GET", "/api/exec",
+                      {"cmd": "not_a_real_command --evil", "token": t})
+    check("exec unknown cmd 403", code == 403, str(code))
+    print()
+
+    # 8. 黑名单
+    print("=== [8] blacklist ===")
+    code, body = call("GET", "/api/exec",
+                      {"cmd": "rm -rf / --force", "token": t})
+    check("exec rm -rf / 403", code == 403, str(code))
+    code, body = call("GET", "/api/exec",
+                      {"cmd": "shutdown now", "token": t})
+    check("exec shutdown 403", code == 403, str(code))
+    print()
+
+    # 9. rate limit
+    print("=== [9] rate limit (25 reqs/sec) ===")
+    rate_ok = 0
+    rate_blocked = 0
+    for i in range(25):
+        code, _ = call("GET", "/api", {})
+        if code == 200: rate_ok += 1
+        elif code == 429: rate_blocked += 1
+    check(f"rate_limit (ok={rate_ok}, blocked={rate_blocked})", rate_ok <= 20 and rate_blocked >= 5)
+    print()
+
+    # 总结
+    print(f"=== [SUMMARY] ===")
+    print(f"  PASS: {PASS}")
+    print(f"  FAIL: {FAIL}")
+    print(f"  total: {PASS + FAIL}")
+    print()
+    if FAIL == 0:
+        print(f"  [OK] ALL TESTS PASSED")
+        return 0
+    print(f"  [FAIL] {FAIL} test(s) failed")
+    return 1
+
+if __name__ == "__main__":
+    sys.exit(main())
