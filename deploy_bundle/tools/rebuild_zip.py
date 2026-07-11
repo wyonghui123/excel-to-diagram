@@ -98,6 +98,110 @@ def check_db_integrity_before_zip() -> bool:
         return False
 
 
+def check_source_functional_completeness() -> bool:
+    """[V007.50] 打包前源码功能完整性校验 (P0, 强制)
+
+    背景: V007.46/V007.47 打包时, 关键函数/属性缺失 (_health_check, db_path),
+         health V8x/V8y 报 error, 但 deploy.sh 只看 status=200, 误判 9 次"业务正常"
+        根源: zip 内代码有注释但缺功能实现
+    现在: 模拟 /health 检查, 验证所有 V8x~V8z 依赖的函数/属性在源码中存在
+    """
+    print(f"[V007.50] ========== 源码功能完整性校验 ==========")
+    all_pass = True
+
+    # 检查 1: sql_connection_pool.py 含 _health_check 函数
+    pool_file = ROOT / "meta" / "core" / "sql_connection_pool.py"
+    if pool_file.exists():
+        content = pool_file.read_text(encoding="utf-8", errors="replace")
+        if "def _health_check" not in content:
+            print(f"  [X] sql_connection_pool.py 缺 _health_check 函数 → health V8x 会报 error")
+            all_pass = False
+        else:
+            print(f"  [OK] sql_connection_pool.py 含 _health_check()")
+        if "def _set_pool" not in content:
+            print(f"  [X] sql_connection_pool.py 缺 _set_pool 函数 → pool 引用无法注入")
+            all_pass = False
+        else:
+            print(f"  [OK] sql_connection_pool.py 含 _set_pool()")
+    else:
+        print(f"  [X] sql_connection_pool.py 不存在")
+        all_pass = False
+
+    # 检查 2: db_config_detector.py RuntimeDbConfig 含 db_path
+    detector_file = ROOT / "meta" / "core" / "db_config_detector.py"
+    if detector_file.exists():
+        content = detector_file.read_text(encoding="utf-8", errors="replace")
+        # 检查 dataclass 字段
+        if "db_path: str" not in content and "db_path" not in content:
+            print(f"  [X] RuntimeDbConfig 缺 db_path 字段 → health V8y 会报 AttributeError")
+            all_pass = False
+        else:
+            print(f"  [OK] RuntimeDbConfig 含 db_path")
+        # 检查 detect_runtime_config 传递 db_path
+        if "db_path=db_path" not in content:
+            print(f"  [WARN] detect_runtime_config 可能未传 db_path 到 RuntimeDbConfig")
+    else:
+        print(f"  [X] db_config_detector.py 不存在")
+        all_pass = False
+
+    # 检查 3: server.py /health 含 V8x/V8y/V8z 验证逻辑
+    server_file = ROOT / "meta" / "server.py"
+    if server_file.exists():
+        content = server_file.read_text(encoding="utf-8", errors="replace")
+        for check in ["V8x", "V8y", "V8z"]:
+            if check not in content:
+                print(f"  [WARN] server.py /health 缺 {check} 验证段")
+        else:
+            print(f"  [OK] server.py /health 含 V8x/V8y/V8z 验证")
+    else:
+        print(f"  [WARN] server.py 不存在 (跳过)")
+    
+    # 检查 4: MermaidComponent.vue 含 V007.58-61 修复
+    mermaid_file = ROOT / "src" / "components" / "MermaidComponent.vue"
+    if mermaid_file.exists():
+        content = mermaid_file.read_text(encoding="utf-8", errors="replace")
+        checks = [("V007.59", "elk 自动切换"), ("V007.60", "mermaid.parse 诊断")]
+        for tag, desc in checks:
+            if tag not in content:
+                print(f"  [X] MermaidComponent.vue 缺 {tag} ({desc})")
+                all_pass = False
+            else:
+                print(f"  [OK] MermaidComponent.vue 含 {tag} ({desc})")
+    else:
+        print(f"  [WARN] MermaidComponent.vue 不存在 (跳过前端检查)")
+
+    # 检查 5: useMermaidConfig.js 含 maxEdges (V007.61)
+    config_file = ROOT / "src" / "composables" / "useMermaid" / "config" / "useMermaidConfig.js"
+    if config_file.exists():
+        content = config_file.read_text(encoding="utf-8", errors="replace")
+        if "maxEdges" not in content:
+            print(f"  [X] useMermaidConfig.js 缺 maxEdges → V007.61 修复缺失, BO 大图会报 Syntax error")
+            all_pass = False
+        else:
+            print(f"  [OK] useMermaidConfig.js 含 maxEdges (V007.61)")
+    else:
+        print(f"  [WARN] useMermaidConfig.js 不存在 (跳过)")
+
+    # 检查 6: arrowHelper.js 含 HTML entity 转义 (V007.58)
+    arrow_file = ROOT / "src" / "composables" / "useMermaid" / "syntax" / "_shared" / "arrowHelper.js"
+    if arrow_file.exists():
+        content = arrow_file.read_text(encoding="utf-8", errors="replace")
+        if "#38;" not in content or "#60;" not in content:
+            print(f"  [X] arrowHelper.js 缺 mermaid 原生转义 → V007.58 修复缺失, &/<> 会触发 syntax error")
+            all_pass = False
+        else:
+            print(f"  [OK] arrowHelper.js 含 #38;/#60; 转义 (V007.58)")
+    else:
+        print(f"  [WARN] arrowHelper.js 不存在 (跳过)")
+
+    if all_pass:
+        print(f"  [OK] 源码功能完整性校验通过")
+    else:
+        print(f"  [X] 源码功能完整性校验 FAIL → zip 部署后功能缺失")
+        print(f"  修复: 1) 检查 above [X] 项 2) 补全缺失函数/属性 3) 重打包")
+    return all_pass
+
+
 def generate_enhanced_manifest(manifest_text: str, version: str) -> str:
     """[V007.25] 增强 MANIFEST (含 git SHA256 + 部署 ID)
 
@@ -485,6 +589,17 @@ def main():
         print(f"[V007.25] [OK] db 完整性检查通过")
     else:
         print(f"[V007.25] [SKIP] 跳过 db 完整性检查 (--skip-db-check)")
+
+    # [V007.50] 打包前源码功能完整性校验 (P0, 强制, 防 V007.46/V007.47 功能缺失复发)
+    #   背景: V007.46 打包时 _health_check/db_path 缺失, deploy.sh 发现不了, 部署 9 次失败
+    if not args.skip_db_check:  # 复用 skip-db-check (功能完整性跟 db 同等重要)
+        print(f"[V007.50] ========== 打包前源码功能完整性校验 ==========")
+        if not check_source_functional_completeness():
+            print(f"[V007.50] [X] 源码功能完整性校验 FAIL — zip 部署后 /health 会报 error")
+            print(f"  修复: 1) 检查 above [X] 项 2) 补全缺失函数/属性 3) 重打包")
+            sys.exit(1)
+    else:
+        print(f"[V007.50] [SKIP] 跳过源码功能完整性校验 (--skip-db-check)")
 
     # 检查源
     dist = ROOT / "dist"

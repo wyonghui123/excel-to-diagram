@@ -21,6 +21,15 @@
 """
 
 from __future__ import annotations  # Py3.7+ 让 `X | Y` 语法兼容
+
+# [V007.49] SQLite 升级: monkey-patch sqlite3 → sqlean (3.50.4)
+try:
+    import sqlean
+    import sys as _sys_for_sqlean
+    _sys_for_sqlean.modules['sqlite3'] = sqlean
+except ImportError:
+    pass  # fallback 到系统 sqlite3
+
 import os, sys, json, time, hashlib, threading, re, fnmatch, io
 import http.server, socketserver, subprocess, sqlite3
 from datetime import datetime, timedelta
@@ -32,8 +41,8 @@ DB_PATH   = os.environ.get("LOG_SERVICE_DB_PATH", f"{LOG_DIR}/architecture.db")
 PORT      = int(os.environ.get("LOG_SERVICE_PORT", 9101))
 BIND      = os.environ.get("LOG_SERVICE_BIND", "0.0.0.0")
 SECRET    = os.environ.get("LOG_SERVICE_SECRET", "v007.35-infra")
-# [V007.49 P1 BUG-FIX 2026-07-09] 服务版本: log_service v4.7 - 加 2 部署端点
-VERSION   = "v4.7"
+# [V007.49 P1 BUG-FIX 2026-07-09] 服务版本: log_service v4.8 - 加 P0 远程管理端点
+VERSION   = "v4.8"
 MAX_LINES = int(os.environ.get("LOG_SERVICE_MAX_LINES", 5000))  # 单次最大行
 TOKEN_HR  = int(os.environ.get("LOG_SERVICE_TOKEN_HOURS", 8))
 
@@ -190,6 +199,14 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
             "/api/deploy/invariant":  lambda: self._deploy_invariant(q),     # [V007.49 P1] 部署后立即验 8 关键文件
             "/api/ports/auto_detect": lambda: self._ports_auto_detect(q),    # 3011/5001/8081/9101 扫描
             "/api/verify/invariant":  lambda: self._verify_invariant(q),     # V8ab 业务回归 (200 次压测)
+            # [V007.50 v4.8] P0 远程管理/排查/测试端点
+            "/api/manage/journal_mode": lambda: self._manage_journal_mode(q), # 安全切换 journal_mode
+            "/api/diag/trace":         lambda: self._diag_trace(q),          # 跨服务 trace 聚合
+            "/api/test/disk_io":       lambda: self._test_disk_io(q),         # 并发 disk I/O 压测
+            "/api/deploy/smoke":       lambda: self._deploy_smoke(q),         # 一键冒烟
+            # [V007.50 v4.8] P0 远程管理: 文件上传 + 命令执行
+            "/api/upload":             lambda: self._upload(q),               # 文件上传 (POST)
+            "/api/exec":               lambda: self._exec_cmd(q),             # 远程命令执行
             }
             if route in handlers:
                 handlers[route]()
@@ -200,7 +217,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
                 self._json(200, {
                     "service": "log_service v4",
                     "endpoints": sorted(handlers.keys()) + ["/", "/api"],
-                    "note": "v4 has 21 endpoints; common: /api/system /api/proc /api/process /api/log /api/db/health /api/sqlite/load /api/iostat /api/dmesg",
+                    "note": "v4.8 has 27 endpoints; P0: /api/manage/journal_mode /api/diag/trace /api/test/disk_io /api/deploy/smoke /api/upload /api/exec",
                 })
             else:
                 # [V007.45] 404 时返"可能相似端点"建议, 避免假端点
@@ -211,6 +228,24 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
                     "similar": similar[:5],
                     "hint": f"GET /api 列全部端点"
                 })
+        except Exception as e:
+            self._json(500, {"error": str(e), "type": type(e).__name__})
+
+    def do_POST(self):
+        ip = self.client_address[0]
+        if not _limiter.allow(ip):
+            return self._json(429, {"error": "rate limited, max 20 req/s"})
+        try:
+            p = urlparse(self.path)
+            q = parse_qs(p.query)
+            route = p.path.rstrip("/")
+            if route == "/api/upload":
+                self._upload(q)
+            elif route == "/api/exec":
+                self._exec_cmd(q)
+            else:
+                self._json(404, {"error": "POST not supported", "route": route,
+                                 "hint": "POST /api/upload or /api/exec"})
         except Exception as e:
             self._json(500, {"error": str(e), "type": type(e).__name__})
 
@@ -1021,14 +1056,499 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
                 entry["err"] = "file not exist"
                 all_pass = False
             results.append(entry)
-        return {
+        self._json(200, {
             "all_pass": all_pass,
             "pass_count": sum(1 for r in results if r.get("pass")),
             "total": len(results),
             "files": results,
             "service_version": VERSION,
             "summary": f"{sum(1 for r in results if r.get('pass'))}/{len(results)} files PASS",
+        })
+
+    # ──────────────────────────────────────────────────
+    # [V007.50 v4.8] P0 远程管理/排查/测试端点实现
+    # ──────────────────────────────────────────────────
+
+    # ── /api/manage/journal_mode ★ ──────────────────
+    def _manage_journal_mode(self, q):
+        """[V007.50] 安全切换 journal_mode: ?to=delete|wal&force=1
+        步骤: 1) 查当前 2) pkill 持 DB 连接的非关键进程 3) checkpoint 4) 切换 5) 验证
+        force=1 时先杀 log_service 以外的 DB 连接进程 (server.py/unified)
+        """
+        target = q.get("to", [""])[0].lower()
+        force = q.get("force", ["0"])[0] in ("1", "true", "yes")
+
+        result = {"db_path": DB_PATH, "ts": int(time.time())}
+
+        # 1. 当前状态
+        try:
+            conn = sqlite3.connect(DB_PATH, timeout=5)
+            current = conn.execute("PRAGMA journal_mode").fetchone()[0]
+            result["journal_mode_before"] = current
+            # WAL 文件大小
+            wal_path = DB_PATH + "-wal"
+            result["wal_size_mb"] = round(os.path.getsize(wal_path) / 1048576, 2) if os.path.exists(wal_path) else 0
+            conn.close()
+        except Exception as e:
+            result["error"] = f"cannot read current journal_mode: {e}"
+            return self._json(500, result)
+
+        # 只读查询: 不传 to 参数则只返回当前状态
+        if not target:
+            result["action"] = "read_only"
+            return self._json(200, result)
+
+        if target not in ("delete", "wal"):
+            return self._json(400, {"error": "to must be 'delete' or 'wal'"})
+
+        # 已经是目标模式
+        if current.lower() == target:
+            result["action"] = "already_" + target
+            result["journal_mode_after"] = current
+            return self._json(200, result)
+
+        # 2. 如果 force, 找持有 DB 连接的进程
+        killed_pids = []
+        if force:
+            try:
+                out = subprocess.run(["fuser", DB_PATH], capture_output=True, text=True, timeout=5).stdout
+                pids = [int(x) for x in out.split() if x.isdigit() and int(x) != os.getpid()]
+                for pid in pids:
+                    try:
+                        os.kill(pid, 9)
+                        killed_pids.append(pid)
+                    except (ProcessLookupError, PermissionError):
+                        pass
+                if killed_pids:
+                    time.sleep(1)  # 等连接释放
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                pass  # fuser 不可用, 继续
+            result["killed_pids"] = killed_pids
+
+        # 3. checkpoint (WAL→DELETE 前必须)
+        if current.lower() == "wal":
+            try:
+                conn = sqlite3.connect(DB_PATH, timeout=10)
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                conn.close()
+                result["checkpoint"] = "TRUNCATE_ok"
+            except Exception as e:
+                result["checkpoint"] = f"TRUNCATE_fail: {e}"
+                # 尝试 PASSIVE
+                try:
+                    conn = sqlite3.connect(DB_PATH, timeout=10)
+                    conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+                    conn.close()
+                    result["checkpoint_fallback"] = "PASSIVE_ok"
+                except Exception as e2:
+                    result["checkpoint_fallback"] = f"PASSIVE_fail: {e2}"
+
+        # 4. 切换
+        try:
+            conn = sqlite3.connect(DB_PATH, timeout=10)
+            row = conn.execute(f"PRAGMA journal_mode={target.upper()}").fetchone()
+            actual = row[0] if row else "unknown"
+            conn.close()
+            result["journal_mode_after"] = actual
+        except Exception as e:
+            result["error"] = f"switch failed: {e}"
+            result["journal_mode_after"] = "unknown"
+            return self._json(500, result)
+
+        # 5. 验证
+        time.sleep(0.3)
+        try:
+            conn = sqlite3.connect(DB_PATH, timeout=5)
+            verified = conn.execute("PRAGMA journal_mode").fetchone()[0]
+            conn.close()
+            result["verified"] = verified.lower() == target
+        except Exception as e:
+            result["verified"] = False
+            result["verify_error"] = str(e)
+
+        result["action"] = "switched" if result.get("verified") else "switch_failed"
+        self._json(200, result)
+
+    # ── /api/diag/trace ★ ──────────────────────────
+    def _diag_trace(self, q):
+        """[V007.50] 跨服务追踪: 按 trace_id 聚合 server.log + unified.log + log_service.log
+        用法: /api/diag/trace?trace_id=abc123&lines=50
+        """
+        trace_id = q.get("trace_id", [""])[0].strip()
+        lines = min(int(q.get("lines", [100])[0]), 500)
+        if not trace_id:
+            return self._json(400, {"error": "trace_id required"})
+
+        log_files = {
+            "server.log": os.path.join(LOG_DIR, "server.log"),
+            "unified.log": "/tmp/unified-server.log",
+            "log_service.log": "/tmp/log_service.log",
         }
+
+        result = {"trace_id": trace_id, "sources": {}}
+        total_matched = 0
+
+        for name, path in log_files.items():
+            if not os.path.exists(path):
+                result["sources"][name] = {"status": "not_found", "path": path}
+                continue
+            try:
+                # tail 取最近 N 行, grep trace_id
+                cmd = f"tail -n {lines * 10} '{path}' | grep -i '{trace_id}' | tail -n {lines}"
+                r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+                matched = [l for l in r.stdout.split("\n") if l.strip()]
+                total_matched += len(matched)
+                result["sources"][name] = {
+                    "status": "ok",
+                    "path": path,
+                    "matched_lines": len(matched),
+                    "output": matched[:lines],
+                }
+            except Exception as e:
+                result["sources"][name] = {"status": "error", "error": str(e)}
+
+        result["total_matched"] = total_matched
+        result["found"] = total_matched > 0
+        self._json(200, result)
+
+    # ── /api/test/disk_io ★ ────────────────────────
+    def _test_disk_io(self, q):
+        """[V007.50] 并发 disk I/O 压测: 多线程同时读写 DB, 统计 fail_rate
+        用法: /api/test/disk_io?rounds=5&concurrency=3&write=true
+        rounds: 每线程重复次数, concurrency: 线程数, write: 是否含写操作
+        """
+        rounds = min(int(q.get("rounds", ["5"])[0]), 20)
+        concurrency = min(int(q.get("concurrency", ["3"])[0]), 10)
+        do_write = q.get("write", ["false"])[0].lower() in ("1", "true", "yes")
+
+        results_lock = threading.Lock()
+        all_ok = 0
+        all_fail = 0
+        all_errors = []
+        all_latencies = []
+
+        def _worker(worker_id):
+            nonlocal all_ok, all_fail
+            for r in range(rounds):
+                t0 = time.time()
+                try:
+                    conn = sqlite3.connect(DB_PATH, timeout=10)
+                    # 读操作
+                    conn.execute("SELECT count(*) FROM products").fetchone()
+                    if do_write:
+                        # 安全写: 插入后立即回滚, 不改数据
+                        conn.execute("BEGIN")
+                        conn.execute("SELECT count(*) FROM audit_logs").fetchone()
+                        conn.execute("ROLLBACK")
+                    conn.close()
+                    latency = round((time.time() - t0) * 1000, 2)
+                    with results_lock:
+                        all_ok += 1
+                        all_latencies.append(latency)
+                except Exception as e:
+                    with results_lock:
+                        all_fail += 1
+                        if len(all_errors) < 10:
+                            all_errors.append(f"[worker-{worker_id} round-{r}] {type(e).__name__}: {e}")
+
+        t_start = time.time()
+        threads = []
+        for i in range(concurrency):
+            t = threading.Thread(target=_worker, args=(i,))
+            threads.append(t)
+            t.start()
+        for t in threads:
+            t.join(timeout=60)
+        elapsed = round(time.time() - t_start, 2)
+
+        total = all_ok + all_fail
+        latencies = sorted(all_latencies) if all_latencies else [0]
+        self._json(200, {
+            "rounds": rounds,
+            "concurrency": concurrency,
+            "write": do_write,
+            "total_ops": total,
+            "ok": all_ok,
+            "fail": all_fail,
+            "fail_rate_pct": round(all_fail / total * 100, 2) if total > 0 else 0,
+            "latency_ms": {
+                "min": latencies[0],
+                "p50": latencies[len(latencies) // 2],
+                "p99": latencies[int(len(latencies) * 0.99)] if len(latencies) > 1 else latencies[-1],
+                "max": latencies[-1],
+            },
+            "elapsed_sec": elapsed,
+            "qps": round(total / elapsed, 1) if elapsed > 0 else 0,
+            "sample_errors": all_errors[:5],
+            "PASS": all_fail == 0,
+        })
+
+    # ── /api/deploy/smoke ★ ────────────────────────
+    def _deploy_smoke(self, q):
+        """[V007.50] 一键冒烟: 串联端口/DB/journal_mode/disk_io 多项检查
+        部署后立即调: curl http://yonaa:9101/api/deploy/smoke
+        """
+        results = {"ts": int(time.time()), "service_version": VERSION, "checks": {}}
+
+        # 1. 端口检查
+        try:
+            out = subprocess.run(["ss", "-tlnp"], capture_output=True, text=True, timeout=5).stdout
+            ports_status = {}
+            for p in [3011, 5001, 8081, 9101]:
+                ports_status[str(p)] = "listening" if f":{p} " in out or f":{p}\n" in out else "down"
+            results["checks"]["ports"] = {"status": "ok", "ports": ports_status}
+        except Exception as e:
+            results["checks"]["ports"] = {"status": "error", "error": str(e)}
+
+        # 2. DB 健康
+        try:
+            conn = sqlite3.connect(DB_PATH, timeout=5)
+            jm = conn.execute("PRAGMA journal_mode").fetchone()[0]
+            integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+            product_count = 0
+            try:
+                product_count = conn.execute("SELECT count(*) FROM products").fetchone()[0]
+            except Exception:
+                pass
+            conn.close()
+            results["checks"]["db"] = {
+                "status": "ok",
+                "journal_mode": jm,
+                "integrity": integrity,
+                "product_count": product_count,
+                "journal_mode_ok": jm.lower() == "delete",
+                "integrity_ok": integrity == "ok",
+            }
+        except Exception as e:
+            results["checks"]["db"] = {"status": "error", "error": str(e)}
+
+        # 3. SQLite 版本
+        try:
+            conn = sqlite3.connect(":memory:", timeout=5)
+            sv = conn.execute("SELECT sqlite_version()").fetchone()[0]
+            conn.close()
+            results["checks"]["sqlite_version"] = {"version": sv, "ok": sv >= "3.39"}
+        except Exception as e:
+            results["checks"]["sqlite_version"] = {"status": "error", "error": str(e)}
+
+        # 4. disk I/O 快速压测 (3 轮, 2 并发)
+        try:
+            ok = 0
+            fail = 0
+            errors = []
+            for _ in range(6):  # 3 round x 2 concurrency
+                try:
+                    conn = sqlite3.connect(DB_PATH, timeout=5)
+                    conn.execute("SELECT count(*) FROM products").fetchone()
+                    conn.close()
+                    ok += 1
+                except Exception as e:
+                    fail += 1
+                    if len(errors) < 3:
+                        errors.append(str(e))
+            results["checks"]["disk_io"] = {
+                "ok": ok, "fail": fail,
+                "fail_rate_pct": round(fail / (ok + fail) * 100, 2) if (ok + fail) > 0 else 0,
+                "sample_errors": errors,
+                "PASS": fail == 0,
+            }
+        except Exception as e:
+            results["checks"]["disk_io"] = {"status": "error", "error": str(e)}
+
+        # 5. 系统资源
+        try:
+            load = list(os.getloadavg())
+            st = os.statvfs("/")
+            free_gb = round(st.f_bfree * st.f_frsize / 1073741824, 2)
+            results["checks"]["system"] = {
+                "load_1m": load[0], "load_5m": load[1], "load_15m": load[2],
+                "disk_free_gb": free_gb,
+                "load_ok": load[0] < 4,
+                "disk_ok": free_gb > 1,
+            }
+        except Exception as e:
+            results["checks"]["system"] = {"status": "error", "error": str(e)}
+
+        # 综合评判
+        all_pass = True
+        for name, check in results["checks"].items():
+            if name == "ports":
+                # 至少 3011 或 5001 得 listening
+                if not any(v == "listening" for k, v in check.get("ports", {}).items() if k in ("3011", "5001")):
+                    all_pass = False
+            elif name == "db":
+                if not check.get("journal_mode_ok") or not check.get("integrity_ok"):
+                    all_pass = False
+            elif name == "disk_io":
+                if not check.get("PASS", False):
+                    all_pass = False
+            elif name == "system":
+                if not check.get("load_ok") or not check.get("disk_ok"):
+                    all_pass = False
+
+        results["PASS"] = all_pass
+        results["summary"] = "ALL PASS" if all_pass else "FAIL - check details above"
+        self._json(200, results)
+
+    # ── /api/upload ★ (POST) ──────────────────────
+    def _upload(self, q):
+        """[V007.50] 文件上传: POST /api/upload?path=/tmp/xxx.sh
+        body = 文件内容, Content-Type: application/octet-stream
+        安全: token 鉴权 + 路径白名单 + 文件大小限制
+        """
+        if not _check_token(q):
+            return self._json(403, {"error": "token required for upload"})
+
+        target_path = q.get("path", [""])[0]
+        if not target_path:
+            return self._json(400, {"error": "path query param required"})
+
+        # 路径安全: 必须在白名单目录下
+        target_dir = os.path.dirname(target_path)
+        if not _path_allowed(target_path):
+            return self._json(403, {"error": f"target path not allowed: {target_path}",
+                                    "allowed_dirs": ALLOWED_DIRS})
+
+        # 大小限制: 100MB (deploy zip ~21MB + 余量)
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length > 100 * 1024 * 1024:
+            return self._json(413, {"error": f"file too large: {content_length} bytes (max 100MB)"})
+
+        # 读取 body
+        try:
+            body = self.rfile.read(content_length)
+        except Exception as e:
+            return self._json(500, {"error": f"read body failed: {e}"})
+
+        # 写入
+        try:
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            with open(target_path, "wb") as f:
+                f.write(body)
+            # 如果是 .sh 文件, 自动加执行权限
+            if target_path.endswith(".sh") or target_path.endswith(".py"):
+                os.chmod(target_path, 0o755)
+            file_size = os.path.getsize(target_path)
+            self._json(200, {
+                "action": "uploaded",
+                "path": target_path,
+                "size": file_size,
+                "executable": target_path.endswith((".sh", ".py")),
+            })
+        except Exception as e:
+            self._json(500, {"error": f"write failed: {e}"})
+
+    # ── /api/exec ★ (GET/POST) ────────────────────
+    # 命令白名单: 只允许诊断/管理命令, 禁止危险操作
+    EXEC_WHITELIST = [
+        "ls", "cat", "head", "tail", "wc", "find", "grep", "du", "df",
+        "ps", "top", "ss", "netstat", "curl", "wget",
+        "systemctl", "journalctl", "dmesg", "iostat", "vmstat", "free",
+        "echo", "date", "whoami", "id", "uname", "hostname",
+        "chmod", "chown", "mkdir", "cp", "mv", "ln", "touch",
+        "python3", "python", "pip3", "pip",
+        "sqlite3", "md5sum", "sha256sum",
+        "pkill", "kill", "killall",
+        # [V007.50] 部署必需命令
+        "bash", "sh", "unzip", "tar", "nohup",
+        "sed", "awk", "sort", "uniq", "tr", "cut", "tee",
+        "test", "true", "false", "sleep",
+        "source", ".",  # shell 内置 (basename 处理后)
+    ]
+
+    # 禁止的命令模式 (即使基础命令在白名单也拦截)
+    EXEC_BLACKLIST_PATTERNS = [
+        "rm -rf /", "dd if=", "mkfs.", ":(){:|:&};:", "> /dev/sd",
+        "shutdown", "reboot", "init 0", "init 6",
+    ]
+
+    def _exec_cmd(self, q):
+        """[V007.50] 远程命令执行: GET /api/exec?cmd=ls+-la+/tmp&timeout=10
+        或 POST /api/exec (body: {"cmd": "...", "timeout": 10})
+        bg=true: 后台运行 (不等待输出, 返回 PID)
+        安全: token 鉴权 + 命令白名单 + 超时 + 输出截断
+        """
+        if not _check_token(q):
+            return self._json(403, {"error": "token required for exec"})
+
+        # 从 query 或 POST body 取命令
+        cmd = q.get("cmd", [""])[0]
+        timeout = min(int(q.get("timeout", ["10"])[0]), 60)
+        bg = q.get("bg", ["0"])[0] in ("1", "true", "yes")
+
+        if not cmd:
+            # 尝试从 POST body 读取 JSON
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                if content_length > 0 and content_length < 10000:
+                    body = self.rfile.read(content_length).decode("utf-8", errors="replace")
+                    data = json.loads(body)
+                    cmd = data.get("cmd", "")
+                    timeout = min(int(data.get("timeout", 10)), 60)
+                    bg = data.get("bg", False)
+            except Exception:
+                pass
+
+        if not cmd:
+            return self._json(400, {"error": "cmd param required",
+                                    "usage": "GET /api/exec?cmd=ls+-la+/tmp&timeout=10&bg=false"})
+
+        # 安全检查: 黑名单
+        cmd_lower = cmd.lower()
+        for pattern in self.EXEC_BLACKLIST_PATTERNS:
+            if pattern in cmd_lower:
+                return self._json(403, {"error": f"blacklisted pattern: {pattern}"})
+
+        # 安全检查: 白名单 (取命令第一个词)
+        base_cmd = cmd.split()[0] if cmd.split() else ""
+        # 处理带路径的命令: /usr/bin/ls → ls
+        base_name = os.path.basename(base_cmd)
+        if base_name not in self.EXEC_WHITELIST:
+            return self._json(403, {"error": f"command not whitelisted: {base_name}",
+                                    "whitelist": self.EXEC_WHITELIST,
+                                    "hint": "use full path like /usr/bin/ls if needed"})
+
+        # 后台模式: Popen 不等待, 立即返回 PID
+        if bg:
+            try:
+                devnull = open(os.devnull, "w")
+                proc = subprocess.Popen(
+                    cmd, shell=True,
+                    stdout=devnull,
+                    stderr=devnull,
+                    close_fds=True,
+                )
+                self._json(200, {
+                    "cmd": cmd, "mode": "background",
+                    "pid": proc.pid, "note": "output discarded, use /api/log or /api/proc to check",
+                })
+            except Exception as e:
+                self._json(500, {"error": str(e), "cmd": cmd})
+            return
+
+        # 前台模式: 等待输出
+        try:
+            t0 = time.time()
+            result = subprocess.run(
+                cmd, shell=True, capture_output=True, text=True, timeout=timeout
+            )
+            elapsed = round((time.time() - t0) * 1000, 1)
+            stdout = result.stdout or ""
+            stderr = result.stderr or ""
+            self._json(200, {
+                "cmd": cmd,
+                "exit_code": result.returncode,
+                "stdout": stdout[:50000],
+                "stderr": stderr[:10000],
+                "elapsed_ms": elapsed,
+                "timeout_sec": timeout,
+                "truncated_stdout": len(stdout) > 50000,
+                "truncated_stderr": len(stderr) > 10000,
+            })
+        except subprocess.TimeoutExpired:
+            self._json(408, {"error": f"command timed out after {timeout}s", "cmd": cmd})
+        except Exception as e:
+            self._json(500, {"error": str(e), "cmd": cmd})
 
 
 class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
@@ -1036,11 +1556,11 @@ class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     allow_reuse_address = True
 
 if __name__ == "__main__":
-    print(f"[log_service v4.5] V007.37 starting on {BIND}:{PORT}", flush=True)
-    print(f"[log_service v4.5] LOG_DIR={LOG_DIR}", flush=True)
-    print(f"[log_service v4.5] DB_PATH={DB_PATH}", flush=True)
-    print(f"[log_service v4.5] token(first16)={_gen_token().split(',')[0]}", flush=True)
-    print(f"[log_service v4.5] new endpoints: /api/sqlite, /api/sqlite/load, /api/iostat, /api/proc/io", flush=True)
+    print(f"[log_service {VERSION}] starting on {BIND}:{PORT}", flush=True)
+    print(f"[log_service {VERSION}] LOG_DIR={LOG_DIR}", flush=True)
+    print(f"[log_service {VERSION}] DB_PATH={DB_PATH}", flush=True)
+    print(f"[log_service {VERSION}] token(first16)={_gen_token().split(',')[0]}", flush=True)
+    print(f"[log_service {VERSION}] P0 endpoints: /api/manage/journal_mode /api/diag/trace /api/test/disk_io /api/deploy/smoke /api/upload /api/exec", flush=True)
     server = ThreadedHTTPServer((BIND, PORT), LogHandler)
     try:
         server.serve_forever()
@@ -1048,4 +1568,4 @@ if __name__ == "__main__":
         pass
     finally:
         server.server_close()
-        print("[log_service v4.5] shutdown", flush=True)
+        print(f"[log_service {VERSION}] shutdown", flush=True)

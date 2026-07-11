@@ -522,6 +522,45 @@ hr; echo "[verify] backend /api/v1/health"
 code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://127.0.0.1:$BACKEND_PORT/api/v1/health || echo "000")
 [ "$code" = "200" ] && ok "backend health = 200" || warn "backend health = $code (可能 410 表示 server alive 但 db 未 init)"
 
+# [V007.50 BUG-FIX 2026-07-09] health JSON 错误扫描 (防 V007.46/V007.47 类"部署了但功能未生效" bug)
+#   背景: V007.46/V007.47 P0 修复 9 次部署, 8 次误判"业务正常"
+#   真因: health 返回 200 但 body 含 V8x/V8y error 字段 — deploy.sh 只看状态码, 不解析 JSON
+#   灾难: 12+ 小时无人发现, 直到用户手动查日志
+#   现在: health 200 后立即解析 JSON, 扫描所有 "error:" 值, 发现即阻断
+hr; echo "[verify] health JSON 错误扫描 [V007.50]"
+HEALTH_JSON=$(curl -s --max-time 10 http://127.0.0.1:$BACKEND_PORT/api/v1/health 2>/dev/null)
+HEALTH_ERRORS=$(echo "$HEALTH_JSON" | python3 -c "
+import sys, json, re
+try:
+    d = json.load(sys.stdin)
+    errs = []
+    for k, v in d.items():
+        if isinstance(v, str) and v.startswith('error:'):
+            errs.append(f'{k}: {v}')
+    print('\n'.join(errs)) if errs else print('OK')
+except Exception as e:
+    print(f'PARSE_FAIL: {e}')
+" 2>/dev/null)
+if [ "$HEALTH_ERRORS" = "OK" ]; then
+    ok "health JSON 无 error 字段 (功能代码 100% 生效)"
+elif echo "$HEALTH_ERRORS" | grep -q "PARSE_FAIL"; then
+    warn "health JSON 解析失败: $HEALTH_ERRORS (不阻塞, 人工判断)"
+else
+    err "health JSON 含 error 字段 → 部署功能未生效!"
+    echo "$HEALTH_ERRORS" | while read line; do
+        err "  [X] $line"
+    done
+    err ""
+    err "这表示: 代码文件已部署, 但关键函数/属性缺失 → zip 打包不完整"
+    err "修复: 1) rebuild_zip.py 重新打包 2) 检查 worktree 源码是否真含这些函数"
+    err "跳过: --skip-v00750-health-check (不推荐)"
+    if [ "${ARG_SKIP_V00750_HEALTH_CHECK:-false}" != "true" ]; then
+        die "health JSON 错误扫描 FAIL → 部署功能未生效, 终止部署"
+    else
+        warn "跳过 health 错误扫描 (--skip-v00750-health-check)"
+    fi
+fi
+
 hr; echo "[verify] login (通过 unified server, 部署验证专用用户 deploy_test)"
 LOGIN_RESP=$(curl -s --max-time 5 -X POST http://127.0.0.1:$FRONTEND_PORT/api/v1/auth/login \
     -H "Content-Type: application/json" \

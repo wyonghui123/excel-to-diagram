@@ -91,11 +91,20 @@ SERVER_PID=$!
 echo "[INFO] server.py PID=$SERVER_PID"
 sleep 8
 
-# 5.1 验证 5001
-if ss -tlnp 2>/dev/null | grep -q ":5001"; then
-    echo "[OK] 5001 listening"
+# 5.1 验证 server.py 启了 (auto-detect 5001/3011, 因为 yonaa server 默认 3011)
+# [V007.48 BUG-FIX 2026-07-09] 之前写死 5001 误判, yonaa server 实际跑 3011
+DETECTED_PORT=""
+for p in 5001 3011; do
+    if ss -tlnp 2>/dev/null | grep -q ":${p} "; then
+        DETECTED_PORT=$p
+        break
+    fi
+done
+if [ -n "$DETECTED_PORT" ]; then
+    echo "[OK] server.py listening on $DETECTED_PORT"
+    export SERVER_PORT=$DETECTED_PORT
 else
-    echo "[FAIL] 5001 没 listening, 自动回退"
+    echo "[FAIL] server.py 没 listening (5001/3011 都没)"
     echo "  log:"
     tail -30 /tmp/server-$VERSION.log
     echo "  回退中..."
@@ -104,18 +113,28 @@ else
     cp -rf $BACKUP_DIR/* $DEPLOY_DIR/ 2>/dev/null
     nohup $PY -u $DEPLOY_DIR/server.py > /tmp/server-recover.log 2>&1 &
     sleep 8
-    if ss -tlnp 2>/dev/null | grep -q ":5001"; then
-        echo "[OK] 回退成功, 5001 listening (旧版)"
+    # [V007.46 BUG-FIX 2026-07-09] 自动检测 3011 (server 默认) 或 5001
+    #   yonaa 实际: server 跑 3011 (os.environ.get('PORT', 3011)), unified 之前配 5001 失败
+    #   现在: 启 server 后自动扫 3011 + 5001, 用实际 listening 端口
+    DETECTED_PORT=""
+    for p in 3011 5001; do
+        if ss -tlnp 2>/dev/null | grep -q ":${p}"; then
+            DETECTED_PORT=$p
+            break
+        fi
+    done
+    if [ -n "$DETECTED_PORT" ]; then
+        echo "[OK] 回退成功, ${DETECTED_PORT} listening (旧版)"
     else
-        echo "[FATAL] 回退失败, 业务死"
+        echo "[FATAL] 回退失败, 业务死 (3011/5001 都没 listening)"
         exit 1
     fi
 fi
 echo ""
 
-# ============== 6. 启 unified ==============
-echo "[Step 6] 启 unified (8081)"
-nohup env BACKEND_PORT=5001 python3 /tmp/deploy_bundle/tools/unified_server.py $DEPLOY_ROOT/deployments/frontend_dist_files > /tmp/unified-$VERSION.log 2>&1 &
+# ============== 6. 启 unified (BACKEND_PORT 跟 server 对齐) ==============
+echo "[Step 6] 启 unified (8081) 代理 ${DETECTED_PORT:-5001}"
+nohup env BACKEND_PORT=${DETECTED_PORT:-5001} python3 /tmp/deploy_bundle/tools/unified_server.py $DEPLOY_ROOT/deployments/frontend_dist_files > /tmp/unified-$VERSION.log 2>&1 &
 sleep 3
 if ss -tlnp 2>/dev/null | grep -q ":8081"; then
     echo "[OK] 8081 listening"

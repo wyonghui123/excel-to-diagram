@@ -467,5 +467,204 @@ curl -s "http://172.20.59.7:9101/api/log?file=/opt/app/shared/logs/backend-*.log
 
 **整合时间**: 2026-07-07 23:35
 **整合方**: 部署智能体 (V007.35 部署保障)
+
+---
+
+## 12. V4.8 升级 (2026-07-11) — P0 远程管理/排查/测试端点
+
+> 由 AI Assistant 追加, log_service v4.7 → v4.8, 新增 6 个 P0 端点
+
+### 12.1 版本演进
+
+| 版本 | 端点数 | 新增 | 日期 |
+|------|--------|------|------|
+| v3.5 | 4 | sqlite/load, iostat, proc/io, sqlite | 2026-07-07 |
+| v4 | 18 | log/stream, log/list, log/range, db/query, config, metrics 等 | 2026-07-08 |
+| v4.5 | 22 | 合并 dev-agent v3.5 端点 | 2026-07-08 |
+| v4.6 | 24 | deploy/current, deploy/history, deploy/check_files | 2026-07-09 |
+| v4.7 | 25 | deploy/invariant | 2026-07-09 |
+| **v4.8** | **27** | **manage/journal_mode, diag/trace, test/disk_io, deploy/smoke, upload, exec** | 2026-07-11 |
+
+### 12.2 新增 P0 端点清单
+
+#### 远程管理
+
+| 端点 | 方法 | 功能 | 用法 |
+|------|------|------|------|
+| `/api/manage/journal_mode` | GET | 安全切换 journal_mode | `?to=delete&force=1` |
+| `/api/upload` | POST | 文件上传到服务器 | `?path=/tmp/xxx.sh` + body |
+| `/api/exec` | GET/POST | 远程命令执行 (白名单) | `?cmd=ls+-la+/tmp&timeout=10` |
+
+#### 排查诊断
+
+| 端点 | 方法 | 功能 | 用法 |
+|------|------|------|------|
+| `/api/diag/trace` | GET | 跨服务 trace 聚合 | `?trace_id=abc123&lines=50` |
+
+#### 自动测试
+
+| 端点 | 方法 | 功能 | 用法 |
+|------|------|------|------|
+| `/api/test/disk_io` | GET | 并发 disk I/O 压测 | `?rounds=5&concurrency=3&write=true` |
+| `/api/deploy/smoke` | GET | 一键冒烟 (5 项检查) | 无参数 |
+
+### 12.3 各端点详细说明
+
+#### `/api/manage/journal_mode` — 安全切换 journal_mode
+
+**场景**: WAL 模式导致 disk I/O error, 需远程切换到 DELETE 模式
+
+```
+# 只读查询当前模式
+curl 'http://yonaa:9101/api/manage/journal_mode'
+
+# 切换到 DELETE (需先释放连接)
+curl 'http://yonaa:9101/api/manage/journal_mode?to=delete&force=1'
+
+# 切换回 WAL
+curl 'http://yonaa:9101/api/manage/journal_mode?to=wal'
+```
+
+**流程**: 查当前 → force 时杀持 DB 连接进程 → checkpoint → 切换 → 验证
+
+#### `/api/upload` — 文件上传
+
+**场景**: 远程上传脚本/配置到 yonaa, 无需 SFTP 客户端
+
+```bash
+# 上传脚本
+TOKEN=$(curl -s 'http://yonaa:9101/api/token?token=...' | jq -r .token)
+curl -X POST "http://yonaa:9101/api/upload?path=/tmp/diag.sh&token=$TOKEN" \
+  --data-binary @local_diag.sh
+
+# 上传后自动加执行权限 (.sh/.py)
+```
+
+**安全**: token 鉴权 + 路径白名单 + 10MB 大小限制 + .sh/.py 自动 chmod 755
+
+#### `/api/exec` — 远程命令执行
+
+**场景**: 远程运行诊断命令, 无需 SSH
+
+```bash
+# 查进程
+curl "http://yonaa:9101/api/exec?cmd=ps+auxf&token=$TOKEN"
+
+# 查磁盘
+curl "http://yonaa:9101/api/exec?cmd=df+-h&token=$TOKEN"
+
+# 重启服务
+curl "http://yonaa:9101/api/exec?cmd=systemctl+restart+log-service&token=$TOKEN"
+```
+
+**安全**: token 鉴权 + 命令白名单 (30+ 常用命令) + 黑名单模式拦截 + 超时 60s + 输出截断 50KB
+
+**白名单**: ls, cat, head, tail, wc, find, grep, du, df, ps, top, ss, netstat, curl, wget, systemctl, journalctl, dmesg, iostat, vmstat, free, echo, date, whoami, id, uname, hostname, chmod, chown, mkdir, cp, mv, ln, touch, python3, python, pip3, pip, sqlite3, md5sum, sha256sum, pkill, kill, killall
+
+#### `/api/diag/trace` — 跨服务追踪
+
+**场景**: 一个请求经过 server→unified→log_service, 按 trace_id 聚合所有日志
+
+```bash
+curl "http://yonaa:9101/api/diag/trace?trace_id=abc123def456"
+```
+
+扫描 server.log + unified.log + log_service.log, 返回匹配行。
+
+#### `/api/test/disk_io` — 并发 disk I/O 压测
+
+**场景**: 部署后验证 disk I/O 稳定性
+
+```bash
+# 5 轮 x 3 并发 纯读
+curl "http://yonaa:9101/api/test/disk_io?rounds=5&concurrency=3"
+
+# 含写操作 (安全: BEGIN → SELECT → ROLLBACK)
+curl "http://yonaa:9101/api/test/disk_io?rounds=5&concurrency=3&write=true"
+```
+
+返回: ok/fail 计数、fail_rate、延迟分布 (min/p50/p99/max)、QPS。
+
+#### `/api/deploy/smoke` — 一键冒烟
+
+**场景**: 部署后立即验证, 5 项检查一键完成
+
+```bash
+curl "http://yonaa:9101/api/deploy/smoke"
+```
+
+检查项:
+1. **端口**: 3011/5001/8081/9101 是否 listening
+2. **DB**: journal_mode=delete + integrity=ok + product_count
+3. **SQLite 版本**: >= 3.39 (sqlean)
+4. **disk I/O**: 6 次快速读写, fail=0 才 PASS
+5. **系统资源**: load < 4 + disk_free > 1GB
+
+### 12.4 完整端点清单 (v4.8, 27 个)
+
+| 分类 | 端点 |
+|------|------|
+| **系统** | /api/system, /api/proc, /api/process, /api/net, /api/dmesg |
+| **日志** | /api/log, /api/log/list, /api/log/range, /api/log/stream, /api/find |
+| **数据库** | /api/db/health, /api/db/query, /api/db/metrics |
+| **SQLite** | /api/sqlite, /api/sqlite/load |
+| **I/O** | /api/iostat, /api/proc/io |
+| **配置** | /api/config |
+| **指标** | /api/metrics |
+| **部署** | /api/deploy/current, /api/deploy/history, /api/deploy/check_files, /api/deploy/yonaa_versions, /api/deploy/invariant, /api/deploy/smoke |
+| **端口** | /api/ports/auto_detect |
+| **验证** | /api/verify/invariant |
+| **管理** | /api/manage/journal_mode |
+| **诊断** | /api/diag/trace |
+| **测试** | /api/test/disk_io |
+| **远程操作** | /api/upload, /api/exec |
+| **自检** | /api/health, /api/token |
+
+### 12.5 安全模型
+
+| 层 | 机制 | 适用端点 |
+|----|------|---------|
+| 限流 | 令牌桶 20 req/s/IP | 全部 |
+| Token 鉴权 | SHA256(hourly secret) | /api/upload, /api/exec |
+| 路径白名单 | ALLOWED_DIRS 9 个目录 | /api/upload, /api/log, /api/config |
+| 命令白名单 | 30+ 常用命令 | /api/exec |
+| 命令黑名单 | rm -rf /, dd, mkfs 等 | /api/exec |
+| 文件大小 | 10MB 上限 | /api/upload |
+| SQL 只读 | SELECT/PRAGMA/EXPLAIN only | /api/db/query, /api/sqlite |
+| 输出截断 | stdout 50KB, stderr 10KB | /api/exec |
+| 超时 | 最大 60s | /api/exec |
+
+### 12.6 远程运维速查
+
+```bash
+LS="http://172.20.59.7:9101"
+TOKEN=$(curl -s "$LS/api/health" | python3 -c "import sys; print('ok')" 2>/dev/null)
+
+# 一键冒烟
+curl -s "$LS/api/deploy/smoke" | python3 -m json.tool
+
+# DB 健康
+curl -s "$LS/api/db/health" | python3 -m json.tool
+
+# journal_mode 查询
+curl -s "$LS/api/manage/journal_mode" | python3 -m json.tool
+
+# disk I/O 压测
+curl -s "$LS/api/test/disk_io?rounds=5&concurrency=3" | python3 -m json.tool
+
+# 远程执行命令
+curl -s "$LS/api/exec?cmd=ps+auxf&token=$TOKEN" | python3 -m json.tool
+
+# 上传文件
+curl -X POST "$LS/api/upload?path=/tmp/diag.sh&token=$TOKEN" --data-binary @diag.sh
+
+# trace 追踪
+curl -s "$LS/api/diag/trace?trace_id=abc123" | python3 -m json.tool
+```
+
+---
+
+**v4.8 更新时间**: 2026-07-11
+**v4.8 更新方**: AI Assistant (P0 远程管理增强)
 **基础文档**: v3.5 (commit 120c18a by 开发智能体)
 **新增章节**: §10 部署集成 + §11 标准 6 步诊断流程

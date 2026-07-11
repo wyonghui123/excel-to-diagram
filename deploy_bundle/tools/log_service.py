@@ -21,6 +21,15 @@
 """
 
 from __future__ import annotations  # Py3.7+ 让 `X | Y` 语法兼容
+
+# [V007.49] SQLite 升级: monkey-patch sqlite3 → sqlean (3.50.4)
+try:
+    import sqlean
+    import sys as _sys_for_sqlean
+    _sys_for_sqlean.modules['sqlite3'] = sqlean
+except ImportError:
+    pass  # fallback 到系统 sqlite3
+
 import os, sys, json, time, hashlib, threading, re, fnmatch, io
 import http.server, socketserver, subprocess, sqlite3
 from datetime import datetime, timedelta

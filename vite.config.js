@@ -100,7 +100,7 @@ export default defineConfig({
       //   但 vite.config.js 之前写死 3011, 导致 3007 用户看到 worktree-V050 空 db (0 products)
       //   修复: 指 3018 (integration backend, db 是真实数据 250 products)
       '/api': {
-        target: 'http://localhost:3018',
+        target: 'http://localhost:3011',
         changeOrigin: true,
         ws: true,
         // [FIX BUG-V029 2026-06-28] 30s→180s
@@ -119,7 +119,7 @@ export default defineConfig({
         }
       },
       '/socket.io': {
-        target: 'http://localhost:3018',
+        target: 'http://localhost:3011',
         changeOrigin: true,
         ws: true,
       }
@@ -141,7 +141,7 @@ export default defineConfig({
     },
     proxy: {
       '/api': {
-        target: 'http://localhost:3018',
+        target: 'http://localhost:3011',
         changeOrigin: true,
         ws: true,
         timeout: 180000,
@@ -154,7 +154,7 @@ export default defineConfig({
         }
       },
       '/socket.io': {
-        target: 'http://localhost:3018',
+        target: 'http://localhost:3011',
         changeOrigin: true,
         ws: true,
       }
