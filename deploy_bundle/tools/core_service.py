@@ -1,5 +1,5 @@
 """
-[V007.57] core_service.py - 极简元能力服务
+[V007.58] core_service.py - 极简元能力服务
   只做两件事: 上传文件 + 执行命令
   监听: 9200
   依赖: Python 3.6+ 标准库, 无第三方依赖
@@ -13,6 +13,7 @@
     6. [v1.4] HTTPS 支持 - 当 CORE_SERVICE_SSL_CERTFILE 设置时自动启用 TLS 1.2+
     7. [v1.5] audit log 轮转 - 10MB 自动 rotate, 保留 3 个 backup
     8. [v1.6] 批量上传 (multipart/form-data) - /api/upload_multi, 不依赖第三方
+    9. [v1.7] 监控指标 - /api/metrics (Prometheus 格式)
 
   端点:
     GET   /api                          服务信息
@@ -21,6 +22,7 @@
     GET   /api/exec?cmd=CMD             执行命令 (白名单, bg=true 后台)
     GET   /api/audit?lines=N            查看最近审计日志 (token, 默认 50)
     POST  /api/audit/rotate             手动触发 audit 轮转 (admin only)
+    GET   /api/metrics                  Prometheus 监控指标 (read+)
 """
 
 from __future__ import annotations
@@ -29,7 +31,7 @@ import http.server, socketserver
 from urllib.parse import urlparse, parse_qs
 
 # --- config ---
-VERSION         = "v1.6"
+VERSION         = "v1.7"
 PORT            = int(os.environ.get("CORE_SERVICE_PORT", 9200))
 BIND            = os.environ.get("CORE_SERVICE_BIND", "0.0.0.0")
 TOKEN_HR        = 8
@@ -140,6 +142,33 @@ _limiter = _Limiter()
 
 # --- handler ---
 class CoreHandler(http.server.BaseHTTPRequestHandler):
+    # [V007.58 v1.7] 全局计数器 (类变量, 线程安全用 LOCK)
+    _counter_lock = threading.Lock()
+    _counters = {
+        "requests_total": 0,
+        "requests_2xx": 0,
+        "requests_4xx": 0,
+        "requests_5xx": 0,
+        "upload_total": 0,
+        "upload_bytes_total": 0,
+        "exec_total": 0,
+        "exec_bg_total": 0,
+        "audit_total": 0,
+        "rotate_total": 0,
+        "rate_limited": 0,
+        "by_route": {},   # 路由命中数
+        "by_action": {},  # audit 事件数
+    }
+
+    @classmethod
+    def _inc(cls, key, value=1, sub_key=None, sub_dict=None):
+        """[V007.58 v1.7] 线程安全计数器"""
+        with cls._counter_lock:
+            if sub_dict and sub_key is not None:
+                d = cls._counters.setdefault(sub_dict, {})
+                d[sub_key] = d.get(sub_key, 0) + value
+            else:
+                cls._counters[key] = cls._counters.get(key, 0) + value
     # [V007.53] audit log - 记录所有敏感操作到 /var/log/core_service_audit.log
     AUDIT_LOG = os.environ.get("CORE_SERVICE_AUDIT_LOG", "/var/log/core_service_audit.log")
     AUDIT_LOCK = threading.Lock()
@@ -155,6 +184,8 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
         - 文件超过 AUDIT_MAX_BYTES 自动 rotate: .log → .log.1 → .log.2 ...
         - 保留最近 AUDIT_BACKUP_KEEP 个 backup, 老的删除
         """
+        # [V007.58 v1.7] 计数 audit 事件
+        cls._inc("audit_total", sub_key=action, sub_dict="by_action")
         try:
             import datetime as _dt
             ts = _dt.datetime.now().isoformat(timespec='seconds')
@@ -210,16 +241,36 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+        # [V007.58 v1.7] 按 status 计数
+        if 200 <= code < 300:
+            self._inc("requests_2xx")
+        elif 400 <= code < 500:
+            self._inc("requests_4xx")
+        elif 500 <= code < 600:
+            self._inc("requests_5xx")
 
     def do_GET(self):
         if not _limiter.allow(self.client_address[0]):
+            self._inc("rate_limited")
             return self._json(429, {"error": "rate limited"})
         try:
             p = urlparse(self.path)
             q = parse_qs(p.query)
             route = p.path.rstrip("/")
+            self._inc("requests_total", sub_key=route, sub_dict="by_route")
+            # 路由级计数
+            if route == "/api/exec":
+                self._inc("exec_total")
+                if q.get("bg", ["0"])[0] in ("1", "true", "yes"):
+                    self._inc("exec_bg_total")
+            elif route == "/api/audit":
+                self._inc("audit_total")
+            elif route == "/api/metrics":
+                pass  # 自己计
             if route in ("", "/", "/api"):
                 return self._root(q)
+            elif route == "/api/metrics":
+                return self._metrics(q)
             elif route == "/api/exec":
                 return self._exec(q)
             elif route == "/api/audit":
@@ -228,15 +279,20 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
                 return self._audit_rotate_endpoint(q)
             return self._json(404, {"error": "not found", "route": route})
         except Exception as e:
+            self._inc("requests_5xx")
             return self._json(500, {"error": str(e)})
 
     def do_POST(self):
         if not _limiter.allow(self.client_address[0]):
+            self._inc("rate_limited")
             return self._json(429, {"error": "rate limited"})
         try:
             p = urlparse(self.path)
             q = parse_qs(p.query)
             route = p.path.rstrip("/")
+            self._inc("requests_total", sub_key=route, sub_dict="by_route")
+            if route == "/api/upload":
+                self._inc("upload_total")
             if route == "/api/upload":
                 return self._upload(q)
             elif route == "/api/upload_multi":
@@ -344,6 +400,7 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
             existed = os.path.exists(self.AUDIT_LOG)
             size_before = os.path.getsize(self.AUDIT_LOG) if existed else 0
             self._rotate_audit()
+            self._inc("rotate_total")
             self._audit("audit_rotate_ok", self.client_address[0],
                         {"size_before": size_before})
             return self._json(200, {
@@ -353,6 +410,88 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
             })
         except Exception as e:
             return self._json(500, {"error": str(e)})
+
+    # ── GET /api/metrics (read+ token) ────────────────────
+    def _metrics(self, q):
+        """[V007.58 v1.7] 监控指标 (Prometheus 格式)
+        包含:
+        - core_service_uptime_seconds
+        - core_service_requests_total (with status label)
+        - core_service_upload_total / _bytes_total
+        - core_service_exec_total (with mode label)
+        - core_service_audit_total (with action label)
+        - core_service_audit_log_bytes
+        - core_service_requests_by_route
+        - core_service_rate_limited_total
+        """
+        # read+ 权限 (read token 也可访问, 只读)
+        level = _check_token(q)
+        if not level:
+            return self._json(403, {"error": "token required"})
+        # 收集指标
+        c = self._counters
+        lines = []
+        # HELP/TYPE
+        lines.append("# HELP core_service_uptime_seconds Service uptime in seconds")
+        lines.append("# TYPE core_service_uptime_seconds gauge")
+        lines.append(f'core_service_uptime_seconds {int(time.time() - _START_TIME)}')
+        # 通用请求计数
+        lines.append("# HELP core_service_requests_total Total HTTP requests by status")
+        lines.append("# TYPE core_service_requests_total counter")
+        lines.append(f'core_service_requests_total{{status="2xx"}} {c.get("requests_2xx", 0)}')
+        lines.append(f'core_service_requests_total{{status="4xx"}} {c.get("requests_4xx", 0)}')
+        lines.append(f'core_service_requests_total{{status="5xx"}} {c.get("requests_5xx", 0)}')
+        # 限流
+        lines.append("# HELP core_service_rate_limited_total Total 429 rate-limit responses")
+        lines.append("# TYPE core_service_rate_limited_total counter")
+        lines.append(f'core_service_rate_limited_total {c.get("rate_limited", 0)}')
+        # upload
+        lines.append("# HELP core_service_upload_total Total single-file upload requests")
+        lines.append("# TYPE core_service_upload_total counter")
+        lines.append(f'core_service_upload_total {c.get("upload_total", 0)}')
+        lines.append("# HELP core_service_upload_bytes_total Total bytes uploaded (single-file)")
+        lines.append("# TYPE core_service_upload_bytes_total counter")
+        lines.append(f'core_service_upload_bytes_total {c.get("upload_bytes_total", 0)}')
+        # exec
+        lines.append("# HELP core_service_exec_total Total exec calls by mode")
+        lines.append("# TYPE core_service_exec_total counter")
+        lines.append(f'core_service_exec_total{{mode="sync"}} {c.get("exec_total", 0)}')
+        lines.append(f'core_service_exec_total{{mode="bg"}} {c.get("exec_bg_total", 0)}')
+        # audit
+        lines.append("# HELP core_service_audit_total Total audit events by action")
+        lines.append("# TYPE core_service_audit_total counter")
+        for action, cnt in sorted(c.get("by_action", {}).items()):
+            # 安全的 label 值 (转义引号)
+            safe_action = action.replace('"', '\\"')
+            lines.append(f'core_service_audit_total{{action="{safe_action}"}} {cnt}')
+        # audit log 大小
+        log_size = 0
+        if os.path.exists(self.AUDIT_LOG):
+            try:
+                log_size = os.path.getsize(self.AUDIT_LOG)
+            except OSError:
+                pass
+        lines.append("# HELP core_service_audit_log_bytes Current audit log file size")
+        lines.append("# TYPE core_service_audit_log_bytes gauge")
+        lines.append(f'core_service_audit_log_bytes {log_size}')
+        # 路由命中 (方便看哪个端点用得多)
+        lines.append("# HELP core_service_requests_by_route Total requests by route")
+        lines.append("# TYPE core_service_requests_by_route counter")
+        for route, cnt in sorted(c.get("by_route", {}).items()):
+            safe_route = route.replace('"', '\\"')
+            lines.append(f'core_service_requests_by_route{{route="{safe_route}"}} {cnt}')
+        # 进程信息
+        lines.append("# HELP core_service_info Service version and build info")
+        lines.append("# TYPE core_service_info gauge")
+        lines.append(f'core_service_info{{version="{VERSION}",python="{sys.version.split()[0]}"}} 1')
+        # 输出 (text/plain; version=0.0.4 是 Prometheus 期望的 MIME)
+        body = ("\n".join(lines) + "\n").encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+        self._inc("metrics_total", sub_key="/api/metrics", sub_dict="by_route")
 
     def _upload(self, q):
         """[V007.54 v1.3] 需要 write+ 权限 (admin 也可)"""
@@ -387,6 +526,7 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
                 os.chmod(target, 0o755)
             self._audit("upload_ok", self.client_address[0],
                         {"level": level, "path": target, "size": len(body), "executable": exe})
+            self._inc("upload_bytes_total", value=len(body))
             return self._json(200, {"action": "uploaded", "path": target,
                                     "size": len(body), "executable": exe})
         except Exception as e:

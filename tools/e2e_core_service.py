@@ -61,7 +61,7 @@ def check(name, ok, detail=""):
     else:  FAIL += 1
 
 def main():
-    print(f"[E2E] core_service v1.5 end-to-end test (HTTPS)")
+    print(f"[E2E] core_service v1.7 end-to-end test (HTTPS)")
     print(f"[E2E] target: {CORE_URL}")
     print(f"[E2E] token: {token()}")
     print()
@@ -70,7 +70,7 @@ def main():
     print("=== [1] /api metadata ===")
     code, body = call("GET", "/api")
     check("200 OK", code == 200, str(code))
-    check("version=v1.6", '"version": "v1.6"' in body)
+    check("version=v1.7", '"version": "v1.7"' in body)
     check("endpoints=4", '"endpoints": ["/api", "/api/upload", "/api/exec", "/api/audit"]' in body)
     check("3 token levels", '"token_levels":' in body)
     print()
@@ -303,6 +303,40 @@ def main():
         check("path traversal blocked", False, str(e))
     print()
 
+    # 14. metrics 端点 (v1.7 新功能) - Prometheus 格式
+    print("=== [14] metrics endpoint (v1.7) ===")
+    code, body = call("GET", "/api/metrics", {"token": token("admin")})
+    check("metrics 200 (admin)", code == 200, str(code))
+    check("metrics has uptime", "core_service_uptime_seconds" in body)
+    check("metrics has requests", "core_service_requests_total" in body)
+    check("metrics has upload", "core_service_upload_total" in body)
+    check("metrics has exec", "core_service_exec_total" in body)
+    check("metrics has audit_total", "core_service_audit_total" in body)
+    check("metrics has audit_log_bytes", "core_service_audit_log_bytes" in body)
+    check("metrics has by_route", "core_service_requests_by_route" in body)
+    check("metrics has info", "core_service_info" in body)
+    check("metrics version v1.7", 'version="v1.7"' in body)
+    # read token 也可以访问 metrics (只读)
+    code, body = call("GET", "/api/metrics", {"token": token("read")})
+    check("metrics 200 (read)", code == 200, str(code))
+    # no token 拒绝
+    code, _ = call("GET", "/api/metrics", {})
+    check("metrics 403 no-token", code == 403, str(code))
+    # Content-Type 是 Prometheus 格式
+    # (用低层 urllib 验证 header)
+    import urllib.request as _ur
+    req = _ur.Request(
+        f"{CORE_URL}/api/metrics?token={token('admin')}",
+        method="GET",
+    )
+    try:
+        with _ur.urlopen(req, timeout=10, context=_ssl_ctx) as r:
+            ctype = r.headers.get("Content-Type", "")
+            check("Content-Type prometheus", "text/plain" in ctype and "version=" in ctype, ctype)
+    except Exception as e:
+        check("Content-Type check", False, str(e))
+    print()
+
     # 11. HTTPS 验证 (v1.4 新功能)
     print("=== [11] HTTPS validation ===")
     # 用 ssl 模块直接验证 TLS 连接
@@ -324,7 +358,7 @@ def main():
     resp = buf.decode()
     check("HTTPS response HTTP/1.x", "HTTP/1." in resp)
     check("HTTPS response 200", " 200 " in resp)
-    check("HTTPS body has version", '"version": "v1.6"' in resp)
+    check("HTTPS body has version", '"version": "v1.7"' in resp)
     ssock.close()
     # HTTP 应该被拒
     import urllib.error
