@@ -14,11 +14,18 @@
 import sys, time, hashlib, urllib.request, urllib.parse, tempfile, os
 
 CORE_URL = "http://172.20.59.7:9200"
-SECRET = "v007.52-core"
+SECRETS = {
+    "admin": "v007.52-core",           # legacy = admin (兼容 v1.1/v1.2)
+    "write": "v007.52-core-write",     # write-only (v1.3)
+    "read":  "v007.52-core-read",      # readonly (v1.3)
+}
 
-def token() -> str:
+# --- token ---
+def token(level: str = "admin") -> str:
     h = int(time.time()) // 3600
-    return hashlib.sha256(f"{SECRET}:{h}".encode()).hexdigest()[:16]
+    secret = SECRETS[level]
+    return hashlib.sha256(f"{secret}:{h}".encode()).hexdigest()[:16]
+
 
 def call(method, path, query=None, body=None, headers=None):
     url = CORE_URL + path
@@ -45,7 +52,7 @@ def check(name, ok, detail=""):
     else:  FAIL += 1
 
 def main():
-    print(f"[E2E] core_service v1.2 end-to-end test")
+    print(f"[E2E] core_service v1.3 end-to-end test")
     print(f"[E2E] target: {CORE_URL}")
     print(f"[E2E] token: {token()}")
     print()
@@ -54,7 +61,7 @@ def main():
     print("=== [1] /api metadata ===")
     code, body = call("GET", "/api")
     check("200 OK", code == 200, str(code))
-    check("version=v1.2", '"version": "v1.2"' in body)
+    check("version=v1.3", '"version": "v1.3"' in body)
     check("endpoints=4", '"endpoints": ["/api", "/api/upload", "/api/exec", "/api/audit"]' in body)
     print()
 
@@ -68,7 +75,7 @@ def main():
 
     # 3. upload 成功
     print("=== [3] upload with token ===")
-    t = token()
+    t = token("admin")  # admin for full tests
     test_path = "/tmp/e2e_core_service_test.txt"
     content = f"e2e test at {int(time.time())}\n".encode()
     code, body = call("POST", "/api/upload", {"path": test_path, "token": t}, body=content)
@@ -124,6 +131,41 @@ def main():
     check("audit has exec_ok", '"action": "exec_ok"' in body)
     check("audit has exec_denied", '"action": "exec_denied"' in body)
     check("audit has upload_denied (path whitelist)", '"reason": "path_not_allowed"' in body)
+    print()
+
+    # 8.6. 三级权限隔离 (v1.3 新功能)
+    print("=== [8.6] three-level permission ===")
+    # admin: 可 upload
+    code, _ = call("POST", "/api/upload", {"path": "/tmp/perm_test_admin.txt", "token": token("admin")},
+                   body=b"admin test")
+    check("admin upload ok", code == 200, str(code))
+    # write: 可 upload
+    code, _ = call("POST", "/api/upload", {"path": "/tmp/perm_test_write.txt", "token": token("write")},
+                   body=b"write test")
+    check("write upload ok", code == 200, str(code))
+    # read: 不可 upload
+    code, body = call("POST", "/api/upload", {"path": "/tmp/perm_test_read.txt", "token": token("read")},
+                      body=b"read test")
+    check("read upload denied", code == 403, str(code))
+    check("read upload msg", "insufficient permission" in body and "'read'" in body)
+    # admin: 可 exec 完整白名单 (bash)
+    code, _ = call("GET", "/api/exec", {"cmd": "bash --version", "token": token("admin")})
+    check("admin exec bash", code == 200, str(code))
+    # write: 可 exec 完整白名单 (bash)
+    code, _ = call("GET", "/api/exec", {"cmd": "bash --version", "token": token("write")})
+    check("write exec bash", code == 200, str(code))
+    # read: 不可 exec bash
+    code, body = call("GET", "/api/exec", {"cmd": "bash --version", "token": token("read")})
+    check("read exec bash denied", code == 403, str(code))
+    check("read readonly_allowed list", '"readonly_allowed"' in body)
+    # read: 可 exec ls (in readonly subset)
+    code, body = call("GET", "/api/exec", {"cmd": "ls /tmp", "token": token("read")})
+    check("read exec ls ok", code == 200, str(code))
+    # read: 不可 exec bg=true (用 ls 测 readonly 但 bg=true, 应该被 readonly_cannot_bg 拦截)
+    code, body = call("GET", "/api/exec", {"cmd": "ls", "bg": "true", "token": token("read")})
+    check("read cannot bg", code == 403, str(code))
+    check("read bg msg", "background" in body or "background" in body.lower())
+    # 所有 level 都可 audit (audit 已在 [8.5] 用 admin 验证, 这里跳过避免限流)
     print()
 
     # 9. rate limit

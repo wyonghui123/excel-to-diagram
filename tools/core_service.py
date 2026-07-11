@@ -23,13 +23,35 @@ import http.server, socketserver
 from urllib.parse import urlparse, parse_qs
 
 # --- config ---
-VERSION         = "v1.2"
+VERSION         = "v1.3"
 PORT            = int(os.environ.get("CORE_SERVICE_PORT", 9200))
 BIND            = os.environ.get("CORE_SERVICE_BIND", "0.0.0.0")
-SECRET          = os.environ.get("CORE_SERVICE_SECRET", "v007.52-core")
 TOKEN_HR        = 8
 MAX_UPLOAD_MB   = 500
 _START_TIME     = time.time()
+
+# [V007.54 v1.3] 三级 token 权限:
+#   admin: 全权限 (upload + exec + audit read)
+#   write: 可写 (upload + exec)
+#   read:  只读 (audit + 允许的只读 exec: ls/cat/grep/ps 等)
+SECRETS = {
+    "admin": os.environ.get("CORE_SERVICE_ADMIN_SECRET", "v007.52-core-admin"),
+    "write": os.environ.get("CORE_SERVICE_WRITE_SECRET", "v007.52-core-write"),
+    "read":  os.environ.get("CORE_SERVICE_READ_SECRET",  "v007.52-core-read"),
+}
+# 向后兼容: 如果设置了单一 SECRET, 当作 admin
+_single_secret = os.environ.get("CORE_SERVICE_SECRET")
+if _single_secret:
+    SECRETS["admin"] = _single_secret
+
+# [V007.54 v1.3] read 权限允许的命令 (子集)
+EXEC_WHITELIST_READONLY = {
+    "ls", "cat", "head", "tail", "wc", "find", "grep", "du", "df",
+    "ps", "top", "ss", "netstat", "curl", "wget",
+    "echo", "date", "whoami", "id", "uname", "hostname",
+    "md5sum", "sha256sum", "pgrep",
+    "test", "true", "false",
+}
 
 ALLOWED_DIRS = [
     "/opt/app/deployments",
@@ -57,16 +79,28 @@ EXEC_BLACKLIST = ["rm -rf /", "dd if=", "mkfs.", ":(){:|:&};:", "> /dev/sd",
                   "shutdown", "reboot", "init 0", "init 6"]
 
 # --- token ---
-def _gen_token() -> str:
+def _gen_tokens() -> dict:
+    """为每个权限等级生成当前小时的 token 列表 (含历史 8 小时漂移)"""
     now = int(time.time())
-    return ",".join(
-        hashlib.sha256(f"{SECRET}:{(now - off * 3600) // 3600}".encode()).hexdigest()[:16]
-        for off in range(TOKEN_HR + 1)
-    )
+    out = {}
+    for level, secret in SECRETS.items():
+        tokens = set()
+        for off in range(TOKEN_HR + 1):
+            h = (now - off * 3600) // 3600
+            tokens.add(hashlib.sha256(f"{secret}:{h}".encode()).hexdigest()[:16])
+        out[level] = tokens
+    return out
 
-def _check_token(params: dict) -> bool:
+def _check_token(params: dict) -> str:
+    """返回 token 的权限等级, 无效返回 '' """
     t = params.get("token", [""])[0]
-    return bool(t) and t in _gen_token().split(",")
+    if not t:
+        return ""
+    tokens = _gen_tokens()
+    for level in ("admin", "write", "read"):
+        if t in tokens[level]:
+            return level
+    return ""
 
 # --- path ---
 def _path_allowed(fp: str) -> bool:
@@ -168,19 +202,34 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
             "endpoints": ["/api", "/api/upload", "/api/exec", "/api/audit"],
             "allowed_dirs": ALLOWED_DIRS,
             "exec_whitelist_count": len(EXEC_WHITELIST),
+            "exec_readonly_count": len(EXEC_WHITELIST_READONLY),
             "audit_log": self.AUDIT_LOG,
+            "token_levels": {
+                "admin": {"permission": "full", "endpoints": "all",
+                          "exec_whitelist_count": len(EXEC_WHITELIST),
+                          "secret_env": "CORE_SERVICE_ADMIN_SECRET"},
+                "write": {"permission": "write+exec", "endpoints": "upload+exec+audit",
+                          "exec_whitelist_count": len(EXEC_WHITELIST),
+                          "secret_env": "CORE_SERVICE_WRITE_SECRET"},
+                "read":  {"permission": "readonly", "endpoints": "exec(readonly)+audit",
+                          "exec_whitelist_count": len(EXEC_WHITELIST_READONLY),
+                          "secret_env": "CORE_SERVICE_READ_SECRET",
+                          "no_background": True},
+            },
             "usage": {
-                "upload": "POST /api/upload?path=/tmp/file.sh&token=XXX  (body=raw bytes)",
-                "exec":   "GET  /api/exec?cmd=ls+/tmp&token=XXX  (bg=true for background)",
-                "audit":  "GET  /api/audit?lines=50&token=XXX  (recent audit entries)",
-                "token":  "SHA256(secret:hour)[:16], valid 8h",
+                "upload": "POST /api/upload?path=/tmp/file.sh&token=XXX  (need write+admin)",
+                "exec":   "GET  /api/exec?cmd=ls+/tmp&token=XXX  (bg=true need write+admin)",
+                "audit":  "GET  /api/audit?lines=50&token=XXX  (need read+)",
+                "token":  "SHA256(secret:hour)[:16], valid 8h. 3 levels: admin/write/read",
             },
         })
 
     # ── GET /api/audit ─────────────────────────────────────
     def _audit_log(self, q):
-        """[V007.53 v1.2] 返回最近 N 条审计日志 (默认 50, max 500)"""
-        if not _check_token(q):
+        """[V007.53 v1.2] 返回最近 N 条审计日志 (默认 50, max 500)
+        [V007.54 v1.3] 需要 read+ 权限"""
+        level = _check_token(q)
+        if not level:
             return self._json(403, {"error": "token required"})
         try:
             n = min(int(q.get("lines", ["50"])[0]), 500)
@@ -209,9 +258,15 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
             return self._json(500, {"error": str(e)})
 
     def _upload(self, q):
-        if not _check_token(q):
+        """[V007.54 v1.3] 需要 write+ 权限 (admin 也可)"""
+        level = _check_token(q)
+        if not level:
             self._audit("upload_denied", self.client_address[0], {"reason": "no_token"})
             return self._json(403, {"error": "token required"})
+        if level not in ("write", "admin"):
+            self._audit("upload_denied", self.client_address[0],
+                        {"reason": "insufficient_permission", "level": level, "required": "write"})
+            return self._json(403, {"error": f"insufficient permission: have '{level}', need 'write' or 'admin'"})
         target = q.get("path", [""])[0]
         if not target:
             return self._json(400, {"error": "path param required"})
@@ -233,7 +288,8 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
             exe = target.endswith((".sh", ".py"))
             if exe:
                 os.chmod(target, 0o755)
-            self._audit("upload_ok", self.client_address[0], {"path": target, "size": len(body), "executable": exe})
+            self._audit("upload_ok", self.client_address[0],
+                        {"level": level, "path": target, "size": len(body), "executable": exe})
             return self._json(200, {"action": "uploaded", "path": target,
                                     "size": len(body), "executable": exe})
         except Exception as e:
@@ -241,7 +297,9 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
             return self._json(500, {"error": str(e)})
 
     def _exec(self, q):
-        if not _check_token(q):
+        """[V007.54 v1.3] read 只能用只读子集, write/admin 可用全白名单"""
+        level = _check_token(q)
+        if not level:
             self._audit("exec_denied", self.client_address[0], {"reason": "no_token"})
             return self._json(403, {"error": "token required"})
         cmd = q.get("cmd", [""])[0]
@@ -254,9 +312,25 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
                 self._audit("exec_denied", self.client_address[0], {"reason": "blacklist", "pattern": pat, "cmd": cmd[:200]})
                 return self._json(403, {"error": f"blacklisted: {pat}"})
         base = os.path.basename(cmd.split()[0]) if cmd.split() else ""
-        if base not in EXEC_WHITELIST:
-            self._audit("exec_denied", self.client_address[0], {"reason": "not_whitelisted", "base": base, "cmd": cmd[:200]})
-            return self._json(403, {"error": f"not whitelisted: {base}"})
+        # [V007.54 v1.3] read 权限只能用只读子集
+        if level == "read":
+            if base not in EXEC_WHITELIST_READONLY:
+                self._audit("exec_denied", self.client_address[0],
+                            {"reason": "readonly_violation", "level": level, "base": base, "cmd": cmd[:200]})
+                return self._json(403, {
+                    "error": f"readonly token cannot exec '{base}'",
+                    "readonly_allowed": sorted(EXEC_WHITELIST_READONLY),
+                    "hint": "use write/admin token for full whitelist",
+                })
+            if bg:
+                self._audit("exec_denied", self.client_address[0],
+                            {"reason": "readonly_cannot_bg", "cmd": cmd[:200]})
+                return self._json(403, {"error": "readonly token cannot exec in background"})
+        else:
+            # write/admin
+            if base not in EXEC_WHITELIST:
+                self._audit("exec_denied", self.client_address[0], {"reason": "not_whitelisted", "base": base, "cmd": cmd[:200]})
+                return self._json(403, {"error": f"not whitelisted: {base}"})
         try:
             if bg:
                 with open(os.devnull, "w") as devnull:
