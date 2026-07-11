@@ -23,7 +23,7 @@ import http.server, socketserver
 from urllib.parse import urlparse, parse_qs
 
 # --- config ---
-VERSION         = "v1.3"
+VERSION         = "v1.4"
 PORT            = int(os.environ.get("CORE_SERVICE_PORT", 9200))
 BIND            = os.environ.get("CORE_SERVICE_BIND", "0.0.0.0")
 TOKEN_HR        = 8
@@ -369,12 +369,46 @@ class _Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
             f.write(traceback.format_exc())
 
 
+# [V007.55 v1.4] HTTPS 支持: 当 SSL_CERTFILE 环境变量设置时启用 TLS
+# 用 stdlib ssl 包装, 不引入第三方依赖
+def _make_ssl_context():
+    certfile = os.environ.get("CORE_SERVICE_SSL_CERTFILE", "")
+    keyfile = os.environ.get("CORE_SERVICE_SSL_KEYFILE", "")
+    if not certfile or not os.path.exists(certfile):
+        return None
+    import ssl
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(certfile, keyfile or None)
+    # 强制 TLS 1.2+ (禁用 SSLv3/TLS 1.0/1.1)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    # 安全的 cipher suites (避免弱加密)
+    try:
+        ctx.set_ciphers("ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:!aNULL:!MD5:!3DES")
+    except ssl.SSLError:
+        pass  # 旧 Python 可能不支持
+    return ctx
+
+
 def main():
     print(f"[core_service {VERSION}] port={PORT}", flush=True)
     print(f"  allowed_dirs: {ALLOWED_DIRS}", flush=True)
     print(f"  exec_whitelist: {len(EXEC_WHITELIST)} commands", flush=True)
+    print(f"  token_levels: {list(SECRETS.keys())}")
     server = _Server((BIND, PORT), CoreHandler)
-    print(f"[core_service] listening on {BIND}:{PORT}", flush=True)
+    ssl_ctx = _make_ssl_context()
+    if ssl_ctx:
+        try:
+            # 把 socket 包成 TLS socket
+            server.socket = ssl_ctx.wrap_socket(server.socket, server_side=True)
+            print(f"[core_service] listening on {BIND}:{PORT} (HTTPS/TLS)", flush=True)
+        except Exception as e:
+            # SSL 初始化失败, 回退 HTTP (而不是 crash)
+            print(f"[core_service] SSL init failed: {e}, falling back to HTTP", flush=True)
+            sys.stderr.write(f"[core_service] SSL fallback: {e}\n")
+            server = _Server((BIND, PORT), CoreHandler)  # 重建 socket
+            print(f"[core_service] listening on {BIND}:{PORT} (HTTP, fallback)", flush=True)
+    else:
+        print(f"[core_service] listening on {BIND}:{PORT} (HTTP, no TLS)", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

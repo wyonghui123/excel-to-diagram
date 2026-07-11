@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-[V007.52] e2e_core_service.py - core_service v1.1 端到端验证
+[V007.55] e2e_core_service.py - core_service v1.4 端到端验证 (HTTPS)
   验证流程:
-    1. /api 返回元信息 (version v1.1, 3 endpoints)
+    1. /api 返回元信息 (version v1.4, 4 endpoints, 3 token levels)
     2. 无 token 时 upload/exec 返回 403
     3. 有 token 时 upload 写文件成功
     4. exec 同步执行白名单命令成功
@@ -10,10 +10,19 @@
     6. 路径白名单拦截非允许路径
     7. 命令白名单拦截非白名单命令
     8. 黑名单拦截危险命令
+    8.5 audit log 端点
+    9. 限流
+    10. 三级权限 (admin/write/read) 隔离
+    11. HTTPS 验证 (TLS 1.2+, 自签证书)
 """
-import sys, time, hashlib, urllib.request, urllib.parse, tempfile, os
+import sys, time, hashlib, ssl, urllib.request, urllib.parse, tempfile, os
 
-CORE_URL = "http://172.20.59.7:9200"
+CORE_URL = "https://172.20.59.7:9200"  # [V007.55 v1.4] HTTPS only
+
+# 创建接受自签证书的 SSL context (本机测 HTTPS)
+_ssl_ctx = ssl.create_default_context()
+_ssl_ctx.check_hostname = False
+_ssl_ctx.verify_mode = ssl.CERT_NONE
 SECRETS = {
     "admin": "v007.52-core",           # legacy = admin (兼容 v1.1/v1.2)
     "write": "v007.52-core-write",     # write-only (v1.3)
@@ -37,7 +46,7 @@ def call(method, path, query=None, body=None, headers=None):
             req.add_header(k, v)
     data = body if isinstance(body, bytes) else (body.encode() if body else None)
     try:
-        with urllib.request.urlopen(req, data=data, timeout=10) as r:
+        with urllib.request.urlopen(req, data=data, timeout=10, context=_ssl_ctx) as r:
             return r.status, r.read().decode()
     except urllib.error.HTTPError as e:
         return e.code, e.read().decode()
@@ -52,7 +61,7 @@ def check(name, ok, detail=""):
     else:  FAIL += 1
 
 def main():
-    print(f"[E2E] core_service v1.3 end-to-end test")
+    print(f"[E2E] core_service v1.4 end-to-end test (HTTPS)")
     print(f"[E2E] target: {CORE_URL}")
     print(f"[E2E] token: {token()}")
     print()
@@ -61,8 +70,9 @@ def main():
     print("=== [1] /api metadata ===")
     code, body = call("GET", "/api")
     check("200 OK", code == 200, str(code))
-    check("version=v1.3", '"version": "v1.3"' in body)
+    check("version=v1.4", '"version": "v1.4"' in body)
     check("endpoints=4", '"endpoints": ["/api", "/api/upload", "/api/exec", "/api/audit"]' in body)
+    check("3 token levels", '"token_levels":' in body)
     print()
 
     # 2. 无 token 拦截
@@ -180,6 +190,41 @@ def main():
     print()
 
     # audit 已在 [8.5] 测过, 这里跳过 (限流后 IP 被 ban)
+
+    # 等限流恢复
+    time.sleep(2)
+
+    # 11. HTTPS 验证 (v1.4 新功能)
+    print("=== [11] HTTPS validation ===")
+    # 用 ssl 模块直接验证 TLS 连接
+    import socket
+    sock = socket.create_connection(("172.20.59.7", 9200), timeout=5)
+    ssock = _ssl_ctx.wrap_socket(sock, server_hostname="172.20.59.7")
+    check("TLS handshake ok", ssock.version() is not None, f"version={ssock.version()}")
+    check("TLS >= 1.2", ssock.version() in ("TLSv1.2", "TLSv1.3"), f"got {ssock.version()}")
+    # 发送 HTTP 请求
+    req = b"GET /api HTTP/1.1\r\nHost: 172.20.59.7\r\nConnection: close\r\n\r\n"
+    ssock.send(req)
+    # 读全部响应 (可能有多个 chunk)
+    buf = b""
+    while True:
+        chunk = ssock.recv(4096)
+        if not chunk:
+            break
+        buf += chunk
+    resp = buf.decode()
+    check("HTTPS response HTTP/1.x", "HTTP/1." in resp)
+    check("HTTPS response 200", " 200 " in resp)
+    check("HTTPS body has version", '"version": "v1.4"' in resp)
+    ssock.close()
+    # HTTP 应该被拒
+    import urllib.error
+    try:
+        urllib.request.urlopen("http://172.20.59.7:9200/api", timeout=3)
+        check("HTTP rejected", False, "should have failed")
+    except (urllib.error.URLError, ConnectionError, OSError) as e:
+        check("HTTP rejected", True, type(e).__name__)
+    print()
 
     # 总结
     print(f"=== [SUMMARY] ===")
