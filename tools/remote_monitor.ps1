@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿# remote_monitor.ps1 - yonaa 远程监控 (SSH-less, 纯 HTTP)
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿# remote_monitor.ps1 - yonaa 远程监控 (SSH-less, 纯 HTTP)
 # 用法:
 #   powershell -ExecutionPolicy Bypass -File remote_monitor.ps1 -Mode once
 #   powershell -ExecutionPolicy Bypass -File remote_monitor.ps1 -Mode watch -Interval 60

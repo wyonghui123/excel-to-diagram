@@ -180,18 +180,45 @@ else
 fi
 echo ""
 
-# ============== 7. 启 log_service (如果死了) ==============
-echo "[Step 7] 启 log_service (9101)"
-# [V007.49] 用 miniconda python 启动, 确保 sqlean monkey-patch 生效
-if ! ss -tlnp 2>/dev/null | grep -q ":9101"; then
-    echo "[INFO] log_service 死了, 重启 (用 $PY)"
-    nohup $PY /tmp/deploy_bundle/tools/log_service.py > /tmp/log_service-$VERSION.log 2>&1 &
-    sleep 3
-fi
-if ss -tlnp 2>/dev/null | grep -q ":9101"; then
-    echo "[OK] 9101 listening"
+# ============== 7. 同步 log_service 代码 + 重启 ==============
+echo "[Step 7] 同步 log_service 代码 + 重启 (9101)"
+# [BUG-FIX 2026-07-11] 同步: 旧版 log_service 永远 listening, ss 检测不到死,
+#   导致新版代码永远不被加载. 修法: 强制从 zip 解压目录复制新版到 /tmp/deploy_bundle/tools/
+LOG_SVC_ZIP_PATH="/opt/app/deployments/meta/deploy_bundle/tools/log_service.py"
+LOG_SVC_DEPLOY_PATH="/tmp/deploy_bundle/tools/log_service.py"
+if [ -f "$LOG_SVC_ZIP_PATH" ]; then
+    cp -f "$LOG_SVC_ZIP_PATH" "$LOG_SVC_DEPLOY_PATH" && echo "  [OK] log_service.py 已同步新版本" || echo "  [WARN] 同步失败"
 else
-    echo "[WARN] 9101 没 listening (log_service 不是关键)"
+    echo "  [WARN] 未找到 $LOG_SVC_ZIP_PATH, 跳过同步"
+fi
+
+# [BUG-FIX 2026-07-11] 用 pgrep 检测, 不依赖 ss PID 输出 (ss 在某些环境返回空 PID)
+EXISTING_PID=$(pgrep -f "log_service.py" | head -1)
+if [ -n "$EXISTING_PID" ]; then
+    echo "  [INFO] 杀旧 log_service PID=$EXISTING_PID"
+    kill -9 $EXISTING_PID 2>/dev/null
+    sleep 2
+fi
+
+echo "  [INFO] 用 $PY 启动新版 log_service"
+nohup $PY $LOG_SVC_DEPLOY_PATH > /tmp/log_service-$VERSION.log 2>&1 &
+sleep 3
+NEW_PID=$(pgrep -f "log_service.py" | head -1)
+if [ -n "$NEW_PID" ]; then
+    echo "  [OK] log_service PID=$NEW_PID listening on 9101"
+    # 打印版本号确认是新版
+    curl -s --max-time 5 http://127.0.0.1:9101/api 2>/dev/null | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print('    endpoints:', len(d.get('endpoints', [])))
+    print('    note:', d.get('note'))
+except Exception as e:
+    print('    [WARN] /api 解析失败:', e)
+"
+else
+    echo "  [WARN] 9101 没 listening (log_service 启动失败)"
+    tail -20 /tmp/log_service-$VERSION.log
 fi
 echo ""
 

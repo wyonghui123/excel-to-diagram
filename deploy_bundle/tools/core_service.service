@@ -1,0 +1,18 @@
+[Unit]
+Description=core_service - meta-capability service (upload/exec/service-mgmt)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/app
+ExecStart=/usr/bin/python3 /opt/app/shared/core_service.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/core_service.log
+StandardError=append:/var/log/core_service.log
+Environment=CORE_SERVICE_PORT=9200
+Environment=CORE_SERVICE_SERVICES=/opt/app/shared/services.json
+
+[Install]
+WantedBy=multi-user.target
