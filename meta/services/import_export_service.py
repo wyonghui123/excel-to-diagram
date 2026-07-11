@@ -5621,6 +5621,40 @@ class ImportExportService:
                     object_type,
                     'import'
                 )
+                # [FIX BUG-V054 2026-07-11] owner chain 豁免: 如果用户是目标 product 的 owner,
+                # 即使没有 domain:import / business_object:import 等功能权限, 也应允许导入
+                # (与 UI 创建路径一致: bo_framework 拦截器链中 OwnerChainInterceptor 命中后
+                #  PermissionInterceptor 直接放行, 不检查 domain:create 等功能权限)
+                if not has_permission:
+                    try:
+                        from meta.services.chain_owner_resolver import resolve_root_product_id
+                        version_id = context.get('version_id')
+                        product_id = context.get('product_id')
+                        user_id = user.get('user_id') or user.get('id')
+                        is_owner = False
+                        if version_id:
+                            # 从 version 追溯 product.owner_id
+                            root_pid = resolve_root_product_id(self.data_source, 'version', version_id)
+                            if root_pid:
+                                row = self.data_source.execute(
+                                    'SELECT owner_id FROM products WHERE id = ?', [root_pid]
+                                ).fetchone()
+                                if row and row[0] == user_id:
+                                    is_owner = True
+                        elif product_id:
+                            row = self.data_source.execute(
+                                'SELECT owner_id FROM products WHERE id = ?', [product_id]
+                            ).fetchone()
+                            if row and row[0] == user_id:
+                                is_owner = True
+                        if is_owner:
+                            logger.info(
+                                f'[Import BUG-V054] 用户 {user.get("username")} 是 product owner, '
+                                f'豁免 {object_type}:import 权限检查'
+                            )
+                            has_permission = True
+                    except Exception as e:
+                        logger.debug(f'[Import BUG-V054] owner chain check failed: {e}')
                 if not has_permission:
                     logger.warning(f"[Import] 用户 {user.get('username')} 没有 {object_type}:import 权限，跳过 sheet {sheet_name}")
                     continue
