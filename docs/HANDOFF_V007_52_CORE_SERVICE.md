@@ -404,9 +404,174 @@ launched PID=11681
 
 ---
 
-## 十一、未来改进 (P2)
+## 十一、版本演进 (v1.2 / v1.3 / v1.4)
 
-1. **HTTPS 支持**：core_service 目前是 HTTP，可加 TLS
+> 2026-07-11 在 v1.1 基础上连续迭代三个版本, 完整记录于此
+
+### 11.1 v1.2 - 审计日志 (audit log)
+
+**新增端点**：`GET /api/audit?lines=N` (默认 50, max 500)
+
+**审计事件类型** (9 种 action):
+- `upload_ok` / `upload_denied` / `upload_fail`
+- `exec_ok` / `exec_denied` / `exec_fail`
+- (隐式: `noop` 等)
+
+**审计字段**:
+```json
+{
+  "ts": "2026-07-11T22:30:00",
+  "ip": "10.8.0.108",
+  "action": "exec_denied",
+  "level": "read",
+  "reason": "readonly_violation",
+  "base": "bash",
+  "cmd": "bash --version"
+}
+```
+
+**特点**:
+- 线程安全 (threading.Lock)
+- 容错 (写入失败不影响主流程)
+- 日志路径 `/var/log/core_service_audit.log`
+
+### 11.2 v1.3 - 三级权限 (admin/write/read)
+
+**3 个独立 secret**:
+
+| 权限 | secret | upload | exec 全白名单 (56) | exec readonly (27) | bg=true | audit |
+|------|--------|--------|------|------|------|------|
+| **admin** | `CORE_SERVICE_ADMIN_SECRET` (默认 `v007.52-core-admin`) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **write** | `CORE_SERVICE_WRITE_SECRET` (默认 `v007.52-core-write`) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **read** | `CORE_SERVICE_READ_SECRET` (默认 `v007.52-core-read`) | ✗ | ✗ | ✓ | ✗ | ✓ |
+
+**向后兼容**:
+- `CORE_SERVICE_SECRET` 环境变量覆盖 admin secret (默认 `v007.52-core`)
+- start_core.sh 用 `CORE_SERVICE_SECRET=v007.52-core` 保持兼容
+
+**read 权限的 27 个只读命令**:
+`ls, cat, head, tail, wc, find, grep, du, df, ps, top, ss, netstat, curl, wget, echo, date, whoami, id, uname, hostname, md5sum, sha256sum, pgrep, test, true, false`
+
+**read 权限额外限制**:
+- 不可 `bg=true` 后台执行
+- 不可 upload
+- 黑名单照常拦截 (`rm -rf /` 等)
+
+**错误响应示例**:
+```json
+{
+  "error": "readonly token cannot exec 'bash'",
+  "readonly_allowed": ["ls", "cat", "head", ...],
+  "hint": "use write/admin token for full whitelist"
+}
+```
+
+### 11.3 v1.4 - HTTPS 支持 (TLS 1.2+, 自签证书)
+
+**TLS 配置**:
+- `CORE_SERVICE_SSL_CERTFILE` 启用 TLS
+- `CORE_SERVICE_SSL_KEYFILE` 设置私钥
+- 强制 TLS 1.2+ (禁用 SSLv3/TLS 1.0/1.1)
+- 安全 cipher suites (ECDHE+AESGCM 优先)
+
+**降级行为**:
+- SSL init 失败 → fallback HTTP (不 crash)
+- 适合 cert 临时丢失场景
+
+**证书生成 (本地)**:
+```python
+# 本机用 cryptography 生成自签证书 (CN=172.20.59.7)
+# 上传到 yonaa: /opt/app/shared/core_service.{crt,key}
+# key 权限 600 (仅 root 可读)
+```
+
+**Python 选择**:
+- yonaa 上 `/usr/bin/python3` **没有 _ssl 模块** (system Python 编译时未带)
+- 用 `/opt/miniconda3-py39/bin/python` (有 OpenSSL 3.0.9)
+- start_core.sh 改用 miniconda python
+
+**部署到 yonaa**:
+```bash
+# 1. 本机生成 cert + key
+python generate_cert.py  # 输出 core_service.{crt,key}
+
+# 2. 上传到 yonaa
+POST https://172.20.59.7:9200/api/upload?path=/opt/app/shared/core_service.crt
+POST https://172.20.59.7:9200/api/upload?path=/opt/app/shared/core_service.key
+chmod 600 /opt/app/shared/core_service.key
+chmod 644 /opt/app/shared/core_service.crt
+
+# 3. 重启 (用 miniconda python)
+bash /opt/app/shared/start_core.sh
+```
+
+**测试方法**:
+```python
+# 用 ssl context 跳过自签验证
+import ssl
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
+
+# HTTPS 可访问
+urllib.request.urlopen("https://172.20.59.7:9200/api", context=ctx)
+
+# HTTP 被拒
+urllib.request.urlopen("http://172.20.59.7:9200/api")  # ConnectionRefusedError
+```
+
+### 11.4 systemd unit (双保险)
+
+**systemd service 文件**:
+- 路径: `/etc/systemd/system/core_service.service`
+- 部署: `deploy_bundle/tools/core_service.service`
+- 用 miniconda python (有 _ssl)
+- 自动重启 (RestartSec=5)
+- 安全加固 (NoNewPrivileges, ProtectSystem, PrivateTmp)
+
+**已知踩坑**:
+- ❌ `StandardOutput=append:/var/log/x.log` (systemd 不支持 `append:`)
+- ✅ 直接让进程自己 append 到 log 文件 (默认 stdout/stderr → systemd journal)
+
+**双保险机制**:
+1. systemd (Restart=always, RestartSec=5) - 主守护
+2. cron watchdog (`* * * * * core_service_watchdog.sh`) - 备守护
+3. log_service `/api/exec` - 紧急救命稻草 (token: `v007.35-infra`)
+
+### 11.5 v1.2 → v1.4 e2e 测试演进
+
+| 版本 | 测试数 | 新增 |
+|------|--------|------|
+| v1.1 | 16 case | [1]-[9] 基础功能 |
+| v1.2 | 21 case | [8.5] audit log (+5) |
+| v1.3 | 32 case | [8.6] three-level permission (+11) |
+| v1.4 | **39 case** | [11] HTTPS validation (+6, 含 HTTP 拒绝测试) |
+
+**新增测试细节**:
+- [8.5] audit: 200/entries/exec_ok/exec_denied/upload_denied
+- [8.6] three-level: admin/write/read upload + exec + readonly_allowed + bg
+- [11] HTTPS: TLS handshake/TLS 1.2+/HTTP 200/HTTP 1.x/version/HTTP rejected
+
+### 11.6 真实事件记录
+
+**watchdog 自动恢复**:
+- 2026-07-11 20:57:01 cron 检测 9200 死, 7 秒内自动拉起新 PID 11681
+- systemd service 启起来后也是 auto-restart, 多重保险
+
+**SSH 不通事件**:
+- 2026-07-11 22:25 升级 v1.4 后 SSH 暂时 reset (Connection reset by port 22)
+- 通过 log_service `/api/exec` (token `v007.35-infra`) 绕过 SSH 恢复了 core_service
+- 这是元能力基础设施的关键价值: SSH 不通也能管理服务
+
+---
+
+## 十二、未来改进 (P3)
+
+1. **批量上传 (multipart)**: 当前一次只传一个文件
+2. **细粒度权限**: 不同 read token 对应不同 readonly 命令子集
+3. **审计日志轮转**: 当前 audit log 单文件无限增长
+4. **HTTPS 自签证书自动续期**: 当前 365 天手动生成
+5. **L4 反代**: 在 core_service 前加 nginx, 支持 HTTP→HTTPS 自动跳转
 2. **细粒度 token**：不同 token 对应不同权限（只读 / 写文件 / 执行）
 3. **审计日志**：所有 upload/exec 调用记录到 `/var/log/core_service_audit.log`
 4. **systemd unit**：除 cron 外加 systemd 双保险
@@ -440,12 +605,16 @@ curl http://127.0.0.1:9101/api  # 应该看到 v4.8 (27 个端点)
 
 ---
 
-## 十三、关键 commit
+## 十四、关键 commit
 
 | Hash | 标题 |
 |------|------|
 | `17c4bb6` | feat: core_service v1.1 + log_service v4.10 + smart_deploy bug fix |
 | `b60644b` | test: e2e_core_service.py - 16 case 端到端测试 |
+| `f8cd710` | docs: HANDOFF_V007_52_CORE_SERVICE - 元能力基础设施完整交接文档 |
+| `f1f54d0` | feat: core_service v1.2 - audit log + 4th endpoint |
+| `9c0e024` | feat: core_service v1.3 - 三级权限 (admin/write/read) |
+| `3452fd8` | feat: core_service v1.4 - HTTPS 支持 (TLS 1.2+, 自签证书) |
 
 ---
 
@@ -466,7 +635,7 @@ curl http://127.0.0.1:9101/api  # 应该看到 v4.8 (27 个端点)
 
 ---
 
-## 十五、维护要点
+## 十六、维护要点
 
 1. **修改 core_service.py 后**：必须用 `--data-binary @file` 上传 (避免 PowerShell 编码 bug)
 2. **新加启动脚本**：用 base64 写文件，再 chmod +x (避免 upload 编码 bug)
