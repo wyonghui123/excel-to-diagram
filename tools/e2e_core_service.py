@@ -70,7 +70,7 @@ def main():
     print("=== [1] /api metadata ===")
     code, body = call("GET", "/api")
     check("200 OK", code == 200, str(code))
-    check("version=v1.7", '"version": "v1.7"' in body)
+    check("version=v1.8", '"version": "v1.8"' in body)
     check("endpoints=4", '"endpoints": ["/api", "/api/upload", "/api/exec", "/api/audit"]' in body)
     check("3 token levels", '"token_levels":' in body)
     print()
@@ -315,7 +315,7 @@ def main():
     check("metrics has audit_log_bytes", "core_service_audit_log_bytes" in body)
     check("metrics has by_route", "core_service_requests_by_route" in body)
     check("metrics has info", "core_service_info" in body)
-    check("metrics version v1.7", 'version="v1.7"' in body)
+    check("metrics version v1.8", 'version="v1.8"' in body)
     # read token 也可以访问 metrics (只读)
     code, body = call("GET", "/api/metrics", {"token": token("read")})
     check("metrics 200 (read)", code == 200, str(code))
@@ -335,6 +335,31 @@ def main():
             check("Content-Type prometheus", "text/plain" in ctype and "version=" in ctype, ctype)
     except Exception as e:
         check("Content-Type check", False, str(e))
+    print()
+
+    # 15. health/ready 端点 (v1.8 新功能)
+    print("=== [15] health/ready probes (v1.8) ===")
+    # /api/health 无需 token, 公开
+    code, body = call("GET", "/api/health", {})
+    check("health 200 no-token", code == 200, str(code))
+    check("health status=alive", '"status": "alive"' in body)
+    check("health has uptime", '"uptime_sec":' in body)
+    # /api/live 是 alias
+    code, body = call("GET", "/api/live", {})
+    check("live alias ok", code == 200 and '"status": "alive"' in body, f"code={code}")
+    # /api/ready
+    code, body = call("GET", "/api/ready", {})
+    check("ready 200 (yonaa healthy)", code == 200, f"code={code} body={body[:200]}")
+    check("ready status=ready", '"status": "ready"' in body, body[:200])
+    check("ready checks present", '"checks":' in body and "audit_log_writable" in body)
+    check("ready version=v1.8", '"version": "v1.8"' in body)
+    # 30 health check 不会被限流 (因为不走 rate limit)
+    rate_limited = 0
+    for i in range(30):
+        code, _ = call("GET", "/api/health", {})
+        if code == 429:
+            rate_limited += 1
+    check("health 30 calls no rate limit", rate_limited == 0, f"rate_limited={rate_limited}")
     print()
 
     # 11. HTTPS 验证 (v1.4 新功能)
@@ -358,7 +383,7 @@ def main():
     resp = buf.decode()
     check("HTTPS response HTTP/1.x", "HTTP/1." in resp)
     check("HTTPS response 200", " 200 " in resp)
-    check("HTTPS body has version", '"version": "v1.7"' in resp)
+    check("HTTPS body has version", '"version": "v1.8"' in resp)
     ssock.close()
     # HTTP 应该被拒
     import urllib.error

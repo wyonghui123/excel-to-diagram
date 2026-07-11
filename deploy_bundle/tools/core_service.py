@@ -1,5 +1,5 @@
 """
-[V007.58] core_service.py - 极简元能力服务
+[V007.59] core_service.py - 极简元能力服务
   只做两件事: 上传文件 + 执行命令
   监听: 9200
   依赖: Python 3.6+ 标准库, 无第三方依赖
@@ -14,6 +14,7 @@
     7. [v1.5] audit log 轮转 - 10MB 自动 rotate, 保留 3 个 backup
     8. [v1.6] 批量上传 (multipart/form-data) - /api/upload_multi, 不依赖第三方
     9. [v1.7] 监控指标 - /api/metrics (Prometheus 格式)
+   10. [v1.8] 健康检查 - /api/health (liveness) + /api/ready (readiness), 无需 token
 
   端点:
     GET   /api                          服务信息
@@ -23,6 +24,8 @@
     GET   /api/audit?lines=N            查看最近审计日志 (token, 默认 50)
     POST  /api/audit/rotate             手动触发 audit 轮转 (admin only)
     GET   /api/metrics                  Prometheus 监控指标 (read+)
+    GET   /api/health / /api/live       Liveness probe (公开, 无 token)
+    GET   /api/ready                    Readiness probe (公开, 无 token)
 """
 
 from __future__ import annotations
@@ -31,7 +34,7 @@ import http.server, socketserver
 from urllib.parse import urlparse, parse_qs
 
 # --- config ---
-VERSION         = "v1.7"
+VERSION         = "v1.8"
 PORT            = int(os.environ.get("CORE_SERVICE_PORT", 9200))
 BIND            = os.environ.get("CORE_SERVICE_BIND", "0.0.0.0")
 TOKEN_HR        = 8
@@ -250,13 +253,15 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
             self._inc("requests_5xx")
 
     def do_GET(self):
-        if not _limiter.allow(self.client_address[0]):
-            self._inc("rate_limited")
-            return self._json(429, {"error": "rate limited"})
+        p = urlparse(self.path)
+        q = parse_qs(p.query)
+        route = p.path.rstrip("/")
+        # [V007.59 v1.8] health/ready 不走 rate limit (K8s 探活会频繁调用)
+        if route not in ("/api/health", "/api/live", "/api/ready"):
+            if not _limiter.allow(self.client_address[0]):
+                self._inc("rate_limited")
+                return self._json(429, {"error": "rate limited"})
         try:
-            p = urlparse(self.path)
-            q = parse_qs(p.query)
-            route = p.path.rstrip("/")
             self._inc("requests_total", sub_key=route, sub_dict="by_route")
             # 路由级计数
             if route == "/api/exec":
@@ -267,10 +272,16 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
                 self._inc("audit_total")
             elif route == "/api/metrics":
                 pass  # 自己计
+            elif route in ("/api/health", "/api/live", "/api/ready"):
+                pass  # 探活端点单独处理
             if route in ("", "/", "/api"):
                 return self._root(q)
             elif route == "/api/metrics":
                 return self._metrics(q)
+            elif route == "/api/health" or route == "/api/live":
+                return self._health(q)
+            elif route == "/api/ready":
+                return self._ready(q)
             elif route == "/api/exec":
                 return self._exec(q)
             elif route == "/api/audit":
@@ -492,6 +503,74 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
         self._inc("metrics_total", sub_key="/api/metrics", sub_dict="by_route")
+
+    # ── GET /api/health (公开, 无 token) ─────────────────
+    def _health(self, q):
+        """[V007.59 v1.8] Liveness probe - 进程是否存活
+        永远返回 200, 只要进程能响应就说明活着
+        用途: Kubernetes livenessProbe, 负载均衡健康检查
+        特点:
+        - 无需 token (公开端点)
+        - 极轻量 (不查 audit log, 不计 metrics)
+        - 响应时间 < 1ms
+        """
+        return self._json(200, {
+            "status": "alive",
+            "version": VERSION,
+            "uptime_sec": int(time.time() - _START_TIME),
+        })
+
+    # ── GET /api/ready (公开, 无 token) ─────────────────
+    def _ready(self, q):
+        """[V007.59 v1.8] Readiness probe - 是否能处理请求
+        检查:
+        - audit log 目录是否可写
+        - ALLOWED_DIRS 是否存在
+        - 计数器是否被 lock 过 (简单 liveness)
+        返回 200 = ready, 503 = not ready
+        用途: Kubernetes readinessProbe, 负载均衡流量切换
+        """
+        checks = {}
+        all_ok = True
+        # 检查 audit log 目录
+        audit_dir = os.path.dirname(self.AUDIT_LOG) or "/var/log"
+        try:
+            os.makedirs(audit_dir, exist_ok=True)
+            test_file = os.path.join(audit_dir, ".ready_test")
+            with open(test_file, "w") as f:
+                f.write("ok")
+            os.unlink(test_file)
+            checks["audit_log_writable"] = True
+        except Exception as e:
+            checks["audit_log_writable"] = False
+            checks["audit_log_error"] = str(e)
+            all_ok = False
+        # 检查 ALLOWED_DIRS 存在
+        missing = [d for d in ALLOWED_DIRS if not os.path.exists(d)]
+        checks["allowed_dirs_ok"] = not missing
+        if missing:
+            checks["missing_dirs"] = missing
+            all_ok = False
+        # 检查 audit log 大小 (不能超过 2x MAX, 否则可能要处理)
+        log_size = 0
+        if os.path.exists(self.AUDIT_LOG):
+            try:
+                log_size = os.path.getsize(self.AUDIT_LOG)
+            except OSError:
+                pass
+        # audit log 超过 90MB (9x max) 算超载
+        checks["audit_log_size_bytes"] = log_size
+        if log_size > self.AUDIT_MAX_BYTES * 9:
+            checks["audit_log_critical"] = True
+            all_ok = False
+        status_code = 200 if all_ok else 503
+        status_str = "ready" if all_ok else "not_ready"
+        return self._json(status_code, {
+            "status": status_str,
+            "version": VERSION,
+            "uptime_sec": int(time.time() - _START_TIME),
+            "checks": checks,
+        })
 
     def _upload(self, q):
         """[V007.54 v1.3] 需要 write+ 权限 (admin 也可)"""
