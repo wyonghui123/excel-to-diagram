@@ -975,97 +975,114 @@ export default {
       }
     }
 
-    // 导出为 HTML 文件（简洁版 - 内嵌库，离线可用）
+    // 导出为 HTML 文件（简洁版 - 预渲染静态 SVG，离线可用，支持 ELK 布局）
+    // [V007.62] 改为预渲染模式：从前端已渲染的 SVG 直接嵌入 HTML，无需 mermaid.js 运行时
+    //   - 保留当前布局引擎（dagre/ELK）的渲染结果
+    //   - file:// 协议兼容（纯 SVG + CSS，零 JS 执行）
+    //   - 体积从 ~2MB（内嵌 mermaid.min.js）降至 ~200KB（纯 SVG）
     const exportAsHtmlSimple = async () => {
       if (props.diagramData) {
-        const positions = props.layoutPositions || []
-        const zoneRowCount = props.zoneRowCount || 3
-        const mermaidCode = generateMermaidCode(props.diagramData, props.layoutEngine, props.layoutType, positions, zoneRowCount, props.preserveModelOrder, effectiveLayoutControlConfig.value)
         const chartTypeLabel = props.diagramType === 'serviceModule' ? '服务模块图' : '业务对象图'
         
-        const isServiceModule = props.diagramType === 'serviceModule'
-        const overallDirection = effectiveLayoutControlConfig.value?.overallDirection || 'TB'
-        const isElk = props.layoutEngine === 'elk'
-        
-        // 简版不使用ELK（ESM版本有chunk依赖问题，在file://协议下无法加载）
-        const useElk = false
-        
-        let mermaidScript = ''
-        try {
-          // eslint-disable-next-line no-restricted-globals -- CDN 外部资源，不走 httpClient
-          const mermaidResponse = await fetch('https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js')
-          mermaidScript = await mermaidResponse.text()
-        } catch (e) {
-          console.error('获取库失败:', e)
-          showToast('获取库失败，请检查网络')
+        // 从 DOM 获取已渲染的 SVG
+        const svgEl = mermaidContainer.value?.querySelector('svg')
+        if (!svgEl) {
+          showToast('图表尚未渲染，请稍候重试')
           return
         }
         
-        const config = {
-          startOnLoad: true,
-          securityLevel: 'loose',
-          maxTextSize: configStore.mermaidMaxTextSize,
-          // [V007.62] maxEdges 是 top-level secure config, 必须在 mermaid.initialize 设置
-          //   mermaid 11.13.0 默认 maxEdges=500, 超过报 "Edge limit exceeded"
-          maxEdges: 10000,
-          theme: 'base',
-          themeVariables: {
-            edgeLabelBackground: '#ffffff',
-            edgeLabelColor: '#000000',
-            primaryColor: '#ffffff',
-            primaryTextColor: '#000000',
-            primaryBorderColor: '#333333',
-            lineColor: '#333333',
-            secondaryColor: '#f0f0f0',
-            tertiaryColor: '#ffffff'
-          },
-          flowchart: {
-            curve: 'basis',
-            padding: isServiceModule ? 25 : 20,
-            nodeSpacing: isServiceModule ? 120 : 80,
-            rankSpacing: isServiceModule ? 150 : 100,
-            arrowMarkerAbsolute: true,
-            useMaxWidth: false,
-            htmlLabels: true,
-            diagramPadding: isServiceModule ? 40 : 20,
-            wrappingWidth: isServiceModule ? 400 : 200,
-            labelPosition: 'c',
-            defaultLinkLength: isServiceModule ? 60 : 50,
-            arrowHeadWidth: isServiceModule ? 8 : 6,
-            arrowHeadHeight: 6,
-            rankdir: overallDirection,
-            subGraphTitleMargin: { top: 15, bottom: 15 }
+        // 克隆 SVG 并清理（移除交互事件、tooltip 等运行时元素）
+        const svgClone = svgEl.cloneNode(true)
+        // 移除 tooltip / overlay 元素
+        svgClone.querySelectorAll('.tooltip, .annotation-overlay, .annotation-marker').forEach(el => el.remove())
+        // 移除内联事件处理器
+        svgClone.querySelectorAll('[onclick], [onmouseover], [onmouseout], [onmousemove]').forEach(el => {
+          el.removeAttribute('onclick')
+          el.removeAttribute('onmouseover')
+          el.removeAttribute('onmouseout')
+          el.removeAttribute('onmousemove')
+        })
+        // 修复 viewBox：确保起点为 0,0
+        const viewBox = svgClone.getAttribute('viewBox')
+        if (viewBox) {
+          const parts = viewBox.split(' ')
+          if (parts.length === 4) {
+            parts[0] = '0'
+            parts[1] = '0'
+            svgClone.setAttribute('viewBox', parts.join(' '))
+          }
+        }
+        // 确保 SVG 有明确宽高（从 viewBox 推导）
+        if (!svgClone.getAttribute('width') || svgClone.getAttribute('width') === '100%') {
+          const vb = svgClone.getAttribute('viewBox')?.split(' ')
+          if (vb && vb.length === 4) {
+            svgClone.setAttribute('width', vb[2])
+            svgClone.setAttribute('height', vb[3])
           }
         }
         
-        // 简版强制使用dagre布局（ELK的ESM版本有chunk依赖问题）
-        if (useElk) {
-          config.layout = 'elk'
-          config.elk = {
-            'elk.direction': overallDirection === 'TB' ? 'DOWN' : 'RIGHT',
-            'elk.spacing.nodeNode': 100,
-            'elk.layered.spacing.nodeNodeBetweenLayers': 150,
-            'elk.padding': '[top=40,left=80,right=80,bottom=40]',
-            'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
-            'elk.algorithm': 'layered',
-            'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
-            'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
-            'elk.layered.spacing.edgeNodeBetweenLayers': 60,
-            'elk.layered.componentsSpacing': 200,
-            'elk.layered.spacing.baseValue': 50,
-            'elk.contentAlignment': 'CENTER',
-            'elk.alignment': 'CENTER',
-            'elk.spacing.componentComponent': 250,
-            'elk.layered.spacing.componentComponent': 250,
-            'elk.spacing.parentParent': 50,
-            'elk.padding.nodes': '[top=30,left=50,right=50,bottom=30]',
-            'elk.layered.cycleBreaking.strategy': 'GREEDY_MODEL_ORDER',
-            'elk.layered.layering.strategy': 'NETWORK_SIMPLEX'
+        const svgHtml = svgClone.outerHTML
+        
+        // 收集 annotation 数据（marker 数字 → 文字内容），嵌入 JSON
+        const annotationMap = {}
+        try {
+          const annCfg = props.annotationConfig || {}
+          const annFilter = annCfg.annotationCategoryFilter || []
+          let annotationList = []
+          if (typeof window.__getAnnotationList === 'function') {
+            annotationList = window.__getAnnotationList(props.diagramData, props.diagramType, annFilter)
+          } else if (annotation && typeof annotation.parseAnnotationsFromData === 'function') {
+            annotationList = annotation.parseAnnotationsFromData(props.diagramData, props.diagramType, { filter: annFilter })
           }
+          annotationList.forEach((a, idx) => {
+            annotationMap[String(idx + 1)] = {
+              title: a.title || a.note || `Annotation ${idx + 1}`,
+              content: a.content || a.description || a.text || '',
+              category: a.category || a.type || ''
+            }
+          })
+        } catch (e) { console.warn('[exportAsHtmlSimple] annotation collection:', e) }
+
+        // 收集边的 tooltip 文本（relationDescriptions 是数组，按边渲染顺序一一对应）
+        const tooltipMap = {}
+        // 获取所有真正的边 path（mermaid 把每个边放在 g.edgePath > path 或 path.flowchart-link）
+        const allEdgePathContainers = Array.from(svgClone.querySelectorAll('g.edgePath, path.flowchart-link'))
+        const realEdgePaths = []
+        allEdgePathContainers.forEach((el) => {
+          if (el.tagName.toLowerCase() === 'path') {
+            realEdgePaths.push(el)
+          } else if (el.classList.contains('edgePath')) {
+            const p = el.querySelector('path')
+            if (p) realEdgePaths.push(p)
+          }
+        })
+        const relArr = Array.isArray(relationDescriptions) ? relationDescriptions : []
+        relArr.forEach((rel, idx) => {
+          if (idx >= realEdgePaths.length) return
+          const desc = rel.description || rel.label || rel.text || rel.tooltip || rel.code || (rel.sourceName && rel.targetName ? `${rel.sourceName} -[${rel.code || ''}]-> ${rel.targetName}` : '')
+          if (!desc) return
+          const key = 'tt' + idx
+          tooltipMap[key] = String(desc)
+          realEdgePaths[idx].setAttribute('data-edge-tooltip', key)
+        })
+        // 兜底：如果 relationDescriptions 为空但 edgeLabel 有文本，仍尝试注入
+        if (Object.keys(tooltipMap).length === 0) {
+          let fallbackIdx = 0
+          svgClone.querySelectorAll('.edgeLabel').forEach((labelEl) => {
+            const txt = labelEl.textContent?.trim()
+            if (!txt) return
+            const key = 'tt' + (fallbackIdx++)
+            tooltipMap[key] = txt
+            const edgePath = labelEl.closest('g.edgeContainer')?.querySelector('.edgePath') || labelEl.parentElement?.querySelector('.edgePath')
+            if (edgePath) edgePath.setAttribute('data-edge-tooltip', key)
+            else labelEl.setAttribute('data-edge-tooltip', key)
+          })
         }
-        
-        const mermaidBase64 = btoa(unescape(encodeURIComponent(mermaidScript)))
-        
+
+        const annotationJson = JSON.stringify(annotationMap).replace(/</g, '\\u003c')
+        const tooltipJson = JSON.stringify(tooltipMap).replace(/</g, '\\u003c')
+        const layoutEngineLabel = props.layoutEngine === 'elk' ? 'ELK' : 'dagre'
+
         const htmlContent = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -1086,208 +1103,147 @@ export default {
       align-items: flex-start;
       padding: 10px;
     }
-    pre.mermaid { 
+    .diagram-container {
       display: block;
-      background: white; 
+      background: white;
       width: 100%;
-      margin: 0;
-      padding: 0;
-      border: none;
-      overflow: visible;
-      line-height: 0;
-    }
-    pre.mermaid svg {
-      display: block;
+      overflow: auto;
       cursor: grab;
+    }
+    .diagram-container:active { cursor: grabbing; }
+    .diagram-container svg {
+      display: block;
       transform-origin: top left;
       transition: transform 0.1s ease-out;
       max-width: none;
     }
-    pre.mermaid svg:active {
-      cursor: grabbing;
+    .info-bar {
+      font-size: 12px;
+      color: #999;
+      padding: 4px 0;
+      user-select: none;
     }
+    .annotation-panel { background: rgba(255,255,255,0.97); border: 1px solid #ddd; border-radius: 6px;
+      padding: 8px 12px; font-size: 12px; font-family: Arial, sans-serif;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15); max-width: 320px; z-index: 1000;
+      display: none; position: absolute; pointer-events: auto; }
+    .annotation-panel.visible { display: block; }
+    .annotation-panel-title { font-weight: bold; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid #eee; color: #333; }
+    .annotation-panel-content { color: #555; line-height: 1.5; white-space: pre-wrap; }
+    .annotation-panel-cat { display: inline-block; font-size: 10px; padding: 2px 6px; border-radius: 3px; background: #e0e7ff; color: #4f46e5; margin-bottom: 4px; }
+    .edge-tooltip { position: absolute; background: rgba(0,0,0,0.85); color: #fff; padding: 6px 10px;
+      border-radius: 4px; font-size: 12px; line-height: 1.4; max-width: 280px; z-index: 2000;
+      pointer-events: none; display: none; }
+    .edge-tooltip.visible { display: block; }
+    .edgePath.hover-target path { transition: stroke-width 0.1s, stroke 0.1s; }
+    .edgePath.hover-active path { stroke-width: 2.5; stroke: #ff6b35; }
+    .edgeLabel.hover-target { cursor: help; }
+    .node.hover-target .basic, .node.hover-target rect, .node.hover-target polygon { transition: filter 0.1s; }
+    .node.hover-active .basic, .node.hover-active rect, .node.hover-active polygon { filter: drop-shadow(0 0 6px #ff6b35); }
+    .annotation-marker { cursor: pointer; }
+    .annotation-marker:hover circle { fill: #ff6b35 !important; }
   <\/style>
 <\/head>
 <body>
-  <pre class="mermaid">
-${mermaidCode}
-  <\/pre>
+  <div class="info-bar">${chartTypeLabel} | layout: ${layoutEngineLabel} | edges: ${Object.keys(tooltipMap).length} | annotations: ${Object.keys(annotationMap).length} | exported: ${new Date().toLocaleString()}</div>
+  <div class="diagram-container">
+    ${svgHtml}
+    <div id="annotation-panel" class="annotation-panel">
+      <div id="ann-cat"></div>
+      <div id="ann-title" class="annotation-panel-title"></div>
+      <div id="ann-content" class="annotation-panel-content"></div>
+    </div>
+  </div>
+  <div id="edge-tooltip" class="edge-tooltip"></div>
+  <div id="annotations-data" style="display:none" data-json="${annotationJson.replace(/"/g, '&quot;')}"></div>
+  <div id="tooltips-data" style="display:none" data-json="${tooltipJson.replace(/"/g, '&quot;')}"></div>
   <script>
-    const mermaidBase64 = "${mermaidBase64}";
-    const mermaidCode = decodeURIComponent(escape(atob(mermaidBase64)));
-    const mermaidBlob = new Blob([mermaidCode], { type: 'text/javascript' });
-    const mermaidUrl = URL.createObjectURL(mermaidBlob);
-    const script = document.createElement('script');
-    script.src = mermaidUrl;
-    script.onload = () => {
-      mermaid.initialize(${JSON.stringify(config)});
-      // 手动触发渲染
-      mermaid.run({
-        querySelector: '.mermaid'
-      }).then(() => {
-        // 渲染完成后修改容器颜色，增加嵌套容器区分度
-        setTimeout(() => {
-          const svg = document.querySelector('.mermaid svg');
-          const mermaidDiv = document.querySelector('.mermaid');
-          // 滚动到SVG位置
-          if (svg) {
-            svg.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          }
-          
-          // 修复SVG顶部空白：调整viewBox
-          {
-            const viewBox = svg.getAttribute('viewBox');
-            if (viewBox) {
-              const parts = viewBox.split(' ');
-              if (parts.length === 4) {
-                parts[0] = '0';
-                parts[1] = '0';
-                svg.setAttribute('viewBox', parts.join(' '));
-              }
-            }
-          }
-          
-          // 添加滚轮缩放功能
-          if (svg && mermaidDiv) {
-            let scale = 1;
-            const minScale = 0.1;
-            const maxScale = 10;
-            
-            mermaidDiv.addEventListener('wheel', (e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              
-              const rect = svg.getBoundingClientRect();
-              const mouseX = e.clientX - rect.left;
-              const mouseY = e.clientY - rect.top;
-              
-              const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-              const newScale = Math.max(minScale, Math.min(maxScale, scale * zoomFactor));
-              
-              // 以鼠标位置为中心缩放
-              const offsetX = mouseX - rect.width / 2;
-              const offsetY = mouseY - rect.height / 2;
-              const scaleDiff = newScale - scale;
-              
-              svg.style.transform = 'scale(' + newScale + ')';
-              scale = newScale;
-            }, { passive: false });
-          }
-          
-          if (svg) {
-            // 获取所有子图（容器）- 尝试多种选择器
-            let subgraphs = Array.from(svg.querySelectorAll('.cluster'));
-            // 如果找不到，尝试其他选择器
-            if (subgraphs.length === 0) {
-              // flowchart-elk 使用不同的class名
-              subgraphs = Array.from(svg.querySelectorAll('g.cluster'));
-            }
-            
-            if (subgraphs.length === 0) {
-              // 尝试通过rect元素查找容器
-              const allRects = svg.querySelectorAll('rect');
-              // 收集所有rect及其尺寸信息
-              const rectInfos = [];
-              allRects.forEach(rect => {
-                const width = parseFloat(rect.getAttribute('width')) || 0;
-                const height = parseFloat(rect.getAttribute('height')) || 0;
-                const area = width * height;
-                const parent = rect.closest('g');
-                rectInfos.push({ rect, width, height, area, parent });
-              });
-              
-              // 按面积排序，找出大尺寸的容器
-              rectInfos.sort((a, b) => b.area - a.area);
-              
-              // 计算面积分布，找出容器阈值
-              const areas = rectInfos.map(r => r.area);
-              const maxArea = Math.max(...areas);
-              const minArea = Math.min(...areas);
-              const avgArea = areas.reduce((a, b) => a + b, 0) / areas.length;
-              
-              // 容器通常是面积较大的元素（大于平均面积的2倍）
-              const containerThreshold = avgArea * 2;
-              const containerGroups = new Set();
-              
-              rectInfos.forEach(info => {
-                if (info.area >= containerThreshold && info.parent) {
-                  containerGroups.add(info.parent);
-                }
-              });
-              
-              subgraphs = Array.from(containerGroups);
-            }
-            
-            // 计算每个容器的嵌套层级
-            const getNestingLevel = (subgraph) => {
-              let level = 0;
-              let parent = subgraph.parentElement;
-              while (parent) {
-                if (parent.tagName === 'g' && subgraphs.includes(parent)) {
-                  level++;
-                }
-                parent = parent.parentElement;
-              }
-              return level;
-            };
-            
-            // 为每个容器计算层级
-            const containerLevels = new Map();
-            subgraphs.forEach(subgraph => {
-              containerLevels.set(subgraph, getNestingLevel(subgraph));
-            });
-            
-            // 按层级分组
-            const levelGroups = new Map();
-            subgraphs.forEach(subgraph => {
-              const level = containerLevels.get(subgraph);
-              if (!levelGroups.has(level)) {
-                levelGroups.set(level, []);
-              }
-              levelGroups.get(level).push(subgraph);
-            });
-            
-            // 按层级分配颜色（外层浅色，内层深色）
-            const colors = ['#ffffff', '#e0e0e0', '#c0c0c0', '#a0a0a0'];
-            const maxLevel = Math.max(...containerLevels.values());
-            
-            subgraphs.forEach((subgraph, index) => {
-              const rect = subgraph.querySelector('rect');
-              if (rect) {
-                const level = containerLevels.get(subgraph);
-                // 根据层级选择颜色（外层=0用白色，内层递增）
-                const colorIndex = Math.min(level, colors.length - 1);
-                const color = colors[colorIndex];
-                rect.setAttribute('fill', color);
-                rect.setAttribute('stroke', '#666666');
-                rect.setAttribute('stroke-width', '2');
-                rect.style.fill = color;
-                rect.style.stroke = '#666666';
-                rect.style.strokeWidth = '2px';
-                rect.style.opacity = '1';
-                rect.setAttribute('opacity', '1');
-              }
-            });
-            
-            // 修复容器标题斜体
-            const clusterLabels = svg.querySelectorAll('.cluster-label, .label');
-            clusterLabels.forEach(label => {
-              const texts = label.querySelectorAll('text, tspan');
-              texts.forEach(text => {
-                text.style.fontStyle = 'italic';
-                text.setAttribute('font-style', 'italic');
-                // 使用skewX模拟斜体效果
-                text.style.transform = 'skewX(-10deg)';
-                text.style.transformOrigin = 'center';
-              });
-            });
-          }
-        }, 500);
-      }).catch(err => {
-        console.error('Mermaid渲染失败:', err);
+    (function() {
+      const container = document.querySelector('.diagram-container');
+      const svg = container ? container.querySelector('svg') : null;
+      if (!container || !svg) return;
+      const annMap = JSON.parse(document.getElementById('annotations-data').getAttribute('data-json') || '{}');
+      const ttMap = JSON.parse(document.getElementById('tooltips-data').getAttribute('data-json') || '{}');
+      const annPanel = document.getElementById('annotation-panel');
+      const tooltip = document.getElementById('edge-tooltip');
+      let scale = 1, tx = 0, ty = 0, dragging = false, startX, startY;
+      const minScale = 0.1, maxScale = 10;
+      function applyTransform() { svg.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')'; }
+      container.addEventListener('wheel', function(e) {
+        e.preventDefault();
+        var factor = e.deltaY > 0 ? 0.9 : 1.1;
+        var newScale = Math.max(minScale, Math.min(maxScale, scale * factor));
+        var rect = container.getBoundingClientRect();
+        var cx = e.clientX - rect.left, cy = e.clientY - rect.top;
+        tx = cx - (cx - tx) * (newScale / scale);
+        ty = cy - (cy - ty) * (newScale / scale);
+        scale = newScale;
+        applyTransform();
+      }, { passive: false });
+      container.addEventListener('mousedown', function(e) {
+        if (e.button !== 0) return;
+        if (e.target.closest('.annotation-marker, [data-edge-tooltip], .edgeLabel, .node')) return;
+        dragging = true; startX = e.clientX - tx; startY = e.clientY - ty;
+        e.preventDefault();
       });
-    };
-    document.head.appendChild(script);
+      window.addEventListener('mousemove', function(e) {
+        if (!dragging) return;
+        tx = e.clientX - startX; ty = e.clientY - startY;
+        applyTransform();
+      });
+      window.addEventListener('mouseup', function() { dragging = false; });
+      svg.querySelectorAll('.annotation-marker').forEach(function(marker) {
+        marker.addEventListener('click', function(e) {
+          e.stopPropagation();
+          var t = marker.querySelector('text, tspan');
+          var numText = t ? t.textContent.trim() : '';
+          var data = annMap[numText];
+          if (!data) return;
+          document.getElementById('ann-title').textContent = data.title || '';
+          document.getElementById('ann-content').textContent = data.content || '';
+          var catEl = document.getElementById('ann-cat');
+          catEl.innerHTML = data.category ? '<span class="annotation-panel-cat">' + data.category + '</span>' : '';
+          annPanel.classList.add('visible');
+          var rect = container.getBoundingClientRect();
+          var mx = e.clientX - rect.left + 12, my = e.clientY - rect.top + 12;
+          annPanel.style.left = mx + 'px'; annPanel.style.top = my + 'px';
+          setTimeout(function() {
+            var pr = annPanel.getBoundingClientRect();
+            if (pr.right > rect.right) annPanel.style.left = (mx - pr.width - 24) + 'px';
+            if (pr.bottom > rect.bottom) annPanel.style.top = (my - pr.height - 24) + 'px';
+          }, 0);
+        });
+      });
+      document.addEventListener('click', function(e) {
+        if (!e.target.closest('.annotation-marker, #annotation-panel')) annPanel.classList.remove('visible');
+      });
+      function showTooltip(e, txt) {
+        tooltip.textContent = txt;
+        tooltip.classList.add('visible');
+        var rect = container.getBoundingClientRect();
+        tooltip.style.left = (e.clientX - rect.left + 12) + 'px';
+        tooltip.style.top = (e.clientY - rect.top + 12) + 'px';
+      }
+      function hideTooltip() { tooltip.classList.remove('visible'); }
+      svg.querySelectorAll('[data-edge-tooltip]').forEach(function(el) {
+        el.classList.add('hover-target');
+        el.addEventListener('mouseenter', function(e) {
+          el.classList.add('hover-active');
+          var k = el.getAttribute('data-edge-tooltip');
+          if (ttMap[k]) showTooltip(e, ttMap[k]);
+        });
+        el.addEventListener('mousemove', function(e) {
+          var k = el.getAttribute('data-edge-tooltip');
+          if (ttMap[k]) showTooltip(e, ttMap[k]);
+        });
+        el.addEventListener('mouseleave', function() { el.classList.remove('hover-active'); hideTooltip(); });
+      });
+      svg.querySelectorAll('.node').forEach(function(nodeEl) {
+        nodeEl.classList.add('hover-target');
+        nodeEl.addEventListener('mouseenter', function() { nodeEl.classList.add('hover-active'); });
+        nodeEl.addEventListener('mouseleave', function() { nodeEl.classList.remove('hover-active'); });
+      });
+    })();
   <\/script>
 <\/body>
 <\/html>`
