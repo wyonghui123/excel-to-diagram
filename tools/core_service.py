@@ -1,5 +1,5 @@
 """
-[V007.53] core_service.py - 极简元能力服务
+[V007.56] core_service.py - 极简元能力服务
   只做两件事: 上传文件 + 执行命令
   监听: 9200
   依赖: Python 3.6+ 标准库, 无第三方依赖
@@ -9,6 +9,9 @@
     2. 不做服务管理 - 避免 pkill/Popen 误杀自身
     3. 调用方决定生命周期 - 通过 exec pkill 停服务, exec bash start.sh 启服务
     4. [v1.2] 审计日志 - 所有 upload/exec 记录到 /var/log/core_service_audit.log
+    5. [v1.3] 三级权限 - admin (full) / write (upload+exec) / read (exec readonly + audit)
+    6. [v1.4] HTTPS 支持 - 当 CORE_SERVICE_SSL_CERTFILE 设置时自动启用 TLS 1.2+
+    7. [v1.5] audit log 轮转 - 10MB 自动 rotate, 保留 3 个 backup
 
   端点:
     GET  /api                      服务信息
@@ -23,7 +26,7 @@ import http.server, socketserver
 from urllib.parse import urlparse, parse_qs
 
 # --- config ---
-VERSION         = "v1.4"
+VERSION         = "v1.5"
 PORT            = int(os.environ.get("CORE_SERVICE_PORT", 9200))
 BIND            = os.environ.get("CORE_SERVICE_BIND", "0.0.0.0")
 TOKEN_HR        = 8
@@ -135,22 +138,64 @@ _limiter = _Limiter()
 # --- handler ---
 class CoreHandler(http.server.BaseHTTPRequestHandler):
     # [V007.53] audit log - 记录所有敏感操作到 /var/log/core_service_audit.log
-    AUDIT_LOG = "/var/log/core_service_audit.log"
+    AUDIT_LOG = os.environ.get("CORE_SERVICE_AUDIT_LOG", "/var/log/core_service_audit.log")
     AUDIT_LOCK = threading.Lock()
+    # [V007.56 v1.5] audit log 轮转
+    AUDIT_MAX_BYTES = int(os.environ.get("CORE_SERVICE_AUDIT_MAX_BYTES", 10 * 1024 * 1024))  # 10MB
+    AUDIT_BACKUP_KEEP = int(os.environ.get("CORE_SERVICE_AUDIT_BACKUPS", 3))  # 保留 3 个 backup
 
     @classmethod
     def _audit(cls, action, client_ip, detail):
-        """线程安全审计日志 - 写入 /var/log/core_service_audit.log"""
+        """线程安全审计日志 + 自动轮转
+        - 线程安全 (threading.Lock)
+        - 写入失败不影响主流程
+        - 文件超过 AUDIT_MAX_BYTES 自动 rotate: .log → .log.1 → .log.2 ...
+        - 保留最近 AUDIT_BACKUP_KEEP 个 backup, 老的删除
+        """
         try:
             import datetime as _dt
             ts = _dt.datetime.now().isoformat(timespec='seconds')
             line = json.dumps({"ts": ts, "ip": client_ip, "action": action, **detail},
                               ensure_ascii=False)
             with cls.AUDIT_LOCK:
+                # 轮转检查 (只在需要时检查, 避免每次都 stat)
+                if os.path.exists(cls.AUDIT_LOG):
+                    try:
+                        size = os.path.getsize(cls.AUDIT_LOG)
+                        if size >= cls.AUDIT_MAX_BYTES:
+                            cls._rotate_audit()
+                    except OSError:
+                        pass
                 with open(cls.AUDIT_LOG, "a") as f:
                     f.write(line + "\n")
         except Exception:
             pass  # audit 失败不影响主流程
+
+    @classmethod
+    def _rotate_audit(cls):
+        """[V007.56 v1.5] 轮转 audit log
+        算法:
+          1. 删除最老的 backup (如果超过 keep 数)
+          2. 把 .log.N 改名为 .log.(N+1)
+          3. 把当前 .log 改名为 .log.1
+          4. 下次写会创建新的 .log
+        """
+        try:
+            # 1. 删除最老的
+            oldest = f"{cls.AUDIT_LOG}.{cls.AUDIT_BACKUP_KEEP}"
+            if os.path.exists(oldest):
+                os.unlink(oldest)
+            # 2-3. 逐个 rename
+            for i in range(cls.AUDIT_BACKUP_KEEP - 1, 0, -1):
+                src = f"{cls.AUDIT_LOG}.{i}"
+                dst = f"{cls.AUDIT_LOG}.{i + 1}"
+                if os.path.exists(src):
+                    os.rename(src, dst)
+            # 4. 当前 .log → .log.1
+            if os.path.exists(cls.AUDIT_LOG):
+                os.rename(cls.AUDIT_LOG, f"{cls.AUDIT_LOG}.1")
+        except Exception as e:
+            sys.stderr.write(f"[core_service] audit rotate failed: {e}\n")
 
     def log_message(self, *a, **kw):
         pass
@@ -176,6 +221,8 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
                 return self._exec(q)
             elif route == "/api/audit":
                 return self._audit_log(q)
+            elif route == "/api/audit/rotate":
+                return self._audit_rotate_endpoint(q)
             return self._json(404, {"error": "not found", "route": route})
         except Exception as e:
             return self._json(500, {"error": str(e)})
@@ -189,6 +236,8 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
             route = p.path.rstrip("/")
             if route == "/api/upload":
                 return self._upload(q)
+            elif route == "/api/audit/rotate":
+                return self._audit_rotate_endpoint(q)
             return self._json(404, {"error": "POST not found", "route": route})
         except Exception as e:
             return self._json(500, {"error": str(e)})
@@ -238,10 +287,24 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
         if not os.path.exists(self.AUDIT_LOG):
             return self._json(200, {"file": self.AUDIT_LOG, "count": 0, "entries": []})
         try:
-            with open(self.AUDIT_LOG, "r") as f:
-                lines = f.readlines()[-n:]
+            # [V007.56 v1.5] 合并当前 + 所有 backup (从最老到最新)
+            all_files = [self.AUDIT_LOG]
+            for i in range(1, self.AUDIT_BACKUP_KEEP + 1):
+                p = f"{self.AUDIT_LOG}.{i}"
+                if os.path.exists(p):
+                    all_files.append(p)
+            # 读取 (顺序: 最老 backup 先, 当前 log 最后, 保证最新在尾巴)
+            all_lines = []
+            for f in sorted(all_files, key=lambda x: (x.count("."), x)):
+                try:
+                    with open(f, "r") as fh:
+                        all_lines.extend(fh.readlines())
+                except OSError:
+                    continue
+            # 取最后 n 条
+            recent = all_lines[-n:]
             entries = []
-            for line in lines:
+            for line in recent:
                 line = line.strip()
                 if not line:
                     continue
@@ -251,8 +314,37 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
                     entries.append({"raw": line})  # 容错
             return self._json(200, {
                 "file": self.AUDIT_LOG,
+                "backup_files": [f for f in all_files if f != self.AUDIT_LOG],
                 "count": len(entries),
                 "entries": entries,
+            })
+        except Exception as e:
+            return self._json(500, {"error": str(e)})
+
+    # ── POST /api/audit/rotate (admin only) ───────────────
+    def _audit_rotate_endpoint(self, q):
+        """[V007.56 v1.5] 手动触发 audit log 轮转
+        需要 admin 权限, 用于测试和紧急情况
+        """
+        level = _check_token(q)
+        if not level:
+            self._audit("audit_rotate_denied", self.client_address[0], {"reason": "no_token"})
+            return self._json(403, {"error": "token required"})
+        if level != "admin":
+            self._audit("audit_rotate_denied", self.client_address[0],
+                        {"reason": "not_admin", "level": level})
+            return self._json(403, {"error": f"admin required, have '{level}'"})
+        # 执行轮转
+        try:
+            existed = os.path.exists(self.AUDIT_LOG)
+            size_before = os.path.getsize(self.AUDIT_LOG) if existed else 0
+            self._rotate_audit()
+            self._audit("audit_rotate_ok", self.client_address[0],
+                        {"size_before": size_before})
+            return self._json(200, {
+                "rotated": True,
+                "size_before": size_before,
+                "backups_kept": self.AUDIT_BACKUP_KEEP,
             })
         except Exception as e:
             return self._json(500, {"error": str(e)})

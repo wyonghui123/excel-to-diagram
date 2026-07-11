@@ -61,7 +61,7 @@ def check(name, ok, detail=""):
     else:  FAIL += 1
 
 def main():
-    print(f"[E2E] core_service v1.4 end-to-end test (HTTPS)")
+    print(f"[E2E] core_service v1.5 end-to-end test (HTTPS)")
     print(f"[E2E] target: {CORE_URL}")
     print(f"[E2E] token: {token()}")
     print()
@@ -70,7 +70,7 @@ def main():
     print("=== [1] /api metadata ===")
     code, body = call("GET", "/api")
     check("200 OK", code == 200, str(code))
-    check("version=v1.4", '"version": "v1.4"' in body)
+    check("version=v1.5", '"version": "v1.5"' in body)
     check("endpoints=4", '"endpoints": ["/api", "/api/upload", "/api/exec", "/api/audit"]' in body)
     check("3 token levels", '"token_levels":' in body)
     print()
@@ -135,7 +135,7 @@ def main():
 
     # 8.5. audit log 端点 (放在限流前, 因为限流会耗尽 bucket)
     print("=== [8.5] audit log ===")
-    code, body = call("GET", "/api/audit", {"lines": "30", "token": t})
+    code, body = call("GET", "/api/audit", {"lines": "500", "token": t})
     check("audit 200", code == 200, str(code))
     check("audit has entries", '"entries":' in body and '"count":' in body)
     check("audit has exec_ok", '"action": "exec_ok"' in body)
@@ -194,6 +194,30 @@ def main():
     # 等限流恢复
     time.sleep(2)
 
+    # 12. audit log 轮转 (v1.5 新功能) - 通过 audit 端点验证
+    # 等限流桶恢复 (rate limit = 20 req/s, [9] 用了 25)
+    time.sleep(2)
+    print("=== [12] audit log rotation ===")
+    # 触发 5 个 audit 事件 (避免限流)
+    for i in range(5):
+        call("GET", "/api/exec", {"cmd": "ls /tmp", "token": token("admin")})
+    time.sleep(0.5)
+    # 检查 audit 端点能返回最近 N 条 (支持旋转后的 backup)
+    code, body = call("GET", "/api/audit", {"lines": "5", "token": token("admin")})
+    check("audit latest 5 ok", code == 200 and '"entries":' in body, f"code={code} body={body[:200]}")
+    # 测试 max lines 限制
+    code, body = call("GET", "/api/audit", {"lines": "501", "token": token("admin")})
+    check("audit cap 500", code == 200 and '"count":' in body, f"code={code}")
+    # manual rotate endpoint (admin only)
+    code, body = call("POST", "/api/audit/rotate", {"token": token("admin")})
+    check("admin rotate ok", code == 200 and '"rotated": true' in body, str(code) + " " + body[:200])
+    time.sleep(0.5)
+    code, body = call("POST", "/api/audit/rotate", {"token": token("read")})
+    check("read rotate denied", code == 403 and "admin required" in body, f"code={code} body={body[:200]}")
+    code, body = call("POST", "/api/audit/rotate", {})  # no token
+    check("no-token rotate denied", code == 403, f"code={code}")
+    print()
+
     # 11. HTTPS 验证 (v1.4 新功能)
     print("=== [11] HTTPS validation ===")
     # 用 ssl 模块直接验证 TLS 连接
@@ -215,7 +239,7 @@ def main():
     resp = buf.decode()
     check("HTTPS response HTTP/1.x", "HTTP/1." in resp)
     check("HTTPS response 200", " 200 " in resp)
-    check("HTTPS body has version", '"version": "v1.4"' in resp)
+    check("HTTPS body has version", '"version": "v1.5"' in resp)
     ssock.close()
     # HTTP 应该被拒
     import urllib.error
