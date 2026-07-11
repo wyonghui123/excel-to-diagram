@@ -70,7 +70,7 @@ def main():
     print("=== [1] /api metadata ===")
     code, body = call("GET", "/api")
     check("200 OK", code == 200, str(code))
-    check("version=v1.5", '"version": "v1.5"' in body)
+    check("version=v1.6", '"version": "v1.6"' in body)
     check("endpoints=4", '"endpoints": ["/api", "/api/upload", "/api/exec", "/api/audit"]' in body)
     check("3 token levels", '"token_levels":' in body)
     print()
@@ -218,6 +218,91 @@ def main():
     check("no-token rotate denied", code == 403, f"code={code}")
     print()
 
+    # 等限流恢复
+    time.sleep(2)
+
+    # 13. 批量上传 (multipart/form-data) (v1.6 新功能)
+    import uuid as _uuid
+    import urllib.request as _ur
+    import urllib.error as _ue
+    print("=== [13] multipart upload (v1.6) ===")
+    boundary = "----TestB" + _uuid.uuid4().hex
+    # 构造 2 个文件的 multipart body
+    body = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="file"; filename="e2e_a.txt"\r\n'
+        f"Content-Type: text/plain\r\n"
+        f"\r\n"
+        f"hello from e2e test A\n"
+        f"\r\n"
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="file"; filename="e2e_b.txt"\r\n'
+        f"Content-Type: text/plain\r\n"
+        f"\r\n"
+        f"hello from e2e test B\n"
+        f"\r\n"
+        f"--{boundary}--\r\n"
+    ).encode("latin-1")
+    # 构造 multipart 请求 (直接用 urllib 而非 call helper)
+    try:
+        req = _ur.Request(
+            f"{CORE_URL}/api/upload_multi?base_dir=/tmp/e2e_batch&token={token('admin')}",
+            data=body, method="POST",
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        )
+        with _ur.urlopen(req, timeout=10, context=_ssl_ctx) as r:
+            resp_body = r.read().decode()
+            check("admin upload_multi 200", r.status == 200, str(r.status))
+            check("uploaded 2 files", '"ok": 2' in resp_body and '"total": 2' in resp_body, resp_body[:300])
+            check("e2e_a.txt in results", "e2e_a.txt" in resp_body)
+            check("e2e_b.txt in results", "e2e_b.txt" in resp_body)
+    except Exception as e:
+        check("admin upload_multi", False, str(e))
+    # read token 拒绝
+    boundary2 = "----T" + _uuid.uuid4().hex
+    body2 = (
+        f"--{boundary2}\r\n"
+        f'Content-Disposition: form-data; name="file"; filename="r.txt"\r\n'
+        f"Content-Type: text/plain\r\n"
+        f"\r\n"
+        f"test\r\n"
+        f"\r\n"
+        f"--{boundary2}--\r\n"
+    ).encode("latin-1")
+    try:
+        req = _ur.Request(
+            f"{CORE_URL}/api/upload_multi?base_dir=/tmp&token={token('read')}",
+            data=body2, method="POST",
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary2}"},
+        )
+        with _ur.urlopen(req, timeout=10, context=_ssl_ctx) as r:
+            check("read upload_multi denied", False, f"should 403 got {r.status}")
+    except _ue.HTTPError as e:
+        check("read upload_multi denied", e.code == 403, str(e.code))
+    # 路径穿越拦截
+    boundary3 = "----T" + _uuid.uuid4().hex
+    body3 = (
+        f"--{boundary3}\r\n"
+        f'Content-Disposition: form-data; name="file"; filename="../bad.txt"\r\n'
+        f"Content-Type: text/plain\r\n"
+        f"\r\n"
+        f"x\r\n"
+        f"\r\n"
+        f"--{boundary3}--\r\n"
+    ).encode("latin-1")
+    try:
+        req = _ur.Request(
+            f"{CORE_URL}/api/upload_multi?base_dir=/tmp&token={token('admin')}",
+            data=body3, method="POST",
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary3}"},
+        )
+        with _ur.urlopen(req, timeout=10, context=_ssl_ctx) as r:
+            resp_body = r.read().decode()
+            check("path traversal blocked", '"fail": 1' in resp_body and "invalid filename" in resp_body, resp_body[:200])
+    except Exception as e:
+        check("path traversal blocked", False, str(e))
+    print()
+
     # 11. HTTPS 验证 (v1.4 新功能)
     print("=== [11] HTTPS validation ===")
     # 用 ssl 模块直接验证 TLS 连接
@@ -239,7 +324,7 @@ def main():
     resp = buf.decode()
     check("HTTPS response HTTP/1.x", "HTTP/1." in resp)
     check("HTTPS response 200", " 200 " in resp)
-    check("HTTPS body has version", '"version": "v1.5"' in resp)
+    check("HTTPS body has version", '"version": "v1.6"' in resp)
     ssock.close()
     # HTTP 应该被拒
     import urllib.error

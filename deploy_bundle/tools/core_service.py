@@ -1,5 +1,5 @@
 """
-[V007.56] core_service.py - 极简元能力服务
+[V007.57] core_service.py - 极简元能力服务
   只做两件事: 上传文件 + 执行命令
   监听: 9200
   依赖: Python 3.6+ 标准库, 无第三方依赖
@@ -12,12 +12,15 @@
     5. [v1.3] 三级权限 - admin (full) / write (upload+exec) / read (exec readonly + audit)
     6. [v1.4] HTTPS 支持 - 当 CORE_SERVICE_SSL_CERTFILE 设置时自动启用 TLS 1.2+
     7. [v1.5] audit log 轮转 - 10MB 自动 rotate, 保留 3 个 backup
+    8. [v1.6] 批量上传 (multipart/form-data) - /api/upload_multi, 不依赖第三方
 
   端点:
-    GET  /api                      服务信息
-    POST /api/upload?path=PATH     上传文件 (500MB)
-    GET  /api/exec?cmd=CMD         执行命令 (白名单, bg=true 后台)
-    GET  /api/audit?lines=N        查看最近审计日志 (token, 默认 50)
+    GET   /api                          服务信息
+    POST  /api/upload?path=PATH         上传单文件 (500MB)
+    POST  /api/upload_multi?base_dir=DIR 批量上传 (multipart/form-data)
+    GET   /api/exec?cmd=CMD             执行命令 (白名单, bg=true 后台)
+    GET   /api/audit?lines=N            查看最近审计日志 (token, 默认 50)
+    POST  /api/audit/rotate             手动触发 audit 轮转 (admin only)
 """
 
 from __future__ import annotations
@@ -26,7 +29,7 @@ import http.server, socketserver
 from urllib.parse import urlparse, parse_qs
 
 # --- config ---
-VERSION         = "v1.5"
+VERSION         = "v1.6"
 PORT            = int(os.environ.get("CORE_SERVICE_PORT", 9200))
 BIND            = os.environ.get("CORE_SERVICE_BIND", "0.0.0.0")
 TOKEN_HR        = 8
@@ -236,6 +239,8 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
             route = p.path.rstrip("/")
             if route == "/api/upload":
                 return self._upload(q)
+            elif route == "/api/upload_multi":
+                return self._upload_multi(q)
             elif route == "/api/audit/rotate":
                 return self._audit_rotate_endpoint(q)
             return self._json(404, {"error": "POST not found", "route": route})
@@ -387,6 +392,167 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self._audit("upload_fail", self.client_address[0], {"path": target, "err": str(e)})
             return self._json(500, {"error": str(e)})
+
+    def _upload_multi(self, q):
+        """[V007.57 v1.6] multipart/form-data 批量上传
+        POST /api/upload_multi?base_dir=/tmp/batch&token=XXX
+        Content-Type: multipart/form-data; boundary=BOUNDARY
+        Body: 标准 multipart (每个 part 有 filename)
+
+        特点:
+        - 不依赖第三方 (手写 multipart parser)
+        - 写权限 (write/admin)
+        - 文件名前缀 base_dir 必须在 ALLOWED_DIRS 内
+        - 返回每个文件的成功/失败状态
+
+        支持两种调用方式:
+        1. 客户端指定 base_dir (推荐, 路径白名单)
+        2. 客户端用 X-Path header 单独指定 (更灵活, 但不安全)
+
+        当前实现: 强制要求 base_dir 参数, 文件名从 multipart part 的 filename 取
+        """
+        level = _check_token(q)
+        if not level:
+            self._audit("upload_multi_denied", self.client_address[0], {"reason": "no_token"})
+            return self._json(403, {"error": "token required"})
+        if level not in ("write", "admin"):
+            self._audit("upload_multi_denied", self.client_address[0],
+                        {"reason": "insufficient_permission", "level": level, "required": "write"})
+            return self._json(403, {"error": f"insufficient permission: have '{level}', need 'write' or 'admin'"})
+
+        base_dir = q.get("base_dir", ["/tmp"])[0]
+        if not _path_allowed(base_dir):
+            self._audit("upload_multi_denied", self.client_address[0],
+                        {"reason": "base_dir_not_allowed", "base_dir": base_dir})
+            return self._json(403, {"error": f"base_dir not allowed: {base_dir}"})
+
+        # Content-Type 必须含 multipart
+        ctype = self.headers.get("Content-Type", "")
+        if "multipart/form-data" not in ctype:
+            return self._json(400, {"error": "Content-Type must be multipart/form-data",
+                                    "got": ctype[:100]})
+
+        # 提取 boundary
+        import re
+        m = re.search(r'boundary=(?:"([^"]+)"|([^\s;]+))', ctype)
+        if not m:
+            return self._json(400, {"error": "missing boundary in Content-Type"})
+        boundary = m.group(1) or m.group(2)
+        boundary_bytes = b"--" + boundary.encode("latin-1")
+
+        # 读取 body (有 size 限制)
+        clen = int(self.headers.get("Content-Length", 0))
+        if clen > MAX_UPLOAD_MB * 1024 * 1024:
+            self._audit("upload_multi_denied", self.client_address[0],
+                        {"reason": "too_large", "size": clen})
+            return self._json(413, {"error": f"too large: {clen} bytes"})
+        try:
+            body = self.rfile.read(clen)
+        except Exception as e:
+            return self._json(500, {"error": f"read failed: {e}"})
+
+        # 解析 multipart
+        try:
+            parts = self._parse_multipart(body, boundary_bytes)
+        except Exception as e:
+            return self._json(400, {"error": f"multipart parse failed: {e}"})
+
+        if not parts:
+            return self._json(400, {"error": "no parts in multipart body"})
+
+        # 写文件
+        results = []
+        ok_count = 0
+        fail_count = 0
+        for part in parts:
+            filename = part["filename"]
+            data = part["data"]
+            # 拼接 target path
+            # 安全检查: filename 不能含 .. 或 / (防止路径穿越)
+            if "/" in filename or "\\" in filename or ".." in filename or filename.startswith("."):
+                results.append({"filename": filename, "ok": False, "error": "invalid filename"})
+                fail_count += 1
+                continue
+            target = os.path.join(base_dir, filename)
+            if not _path_allowed(target):
+                results.append({"filename": filename, "ok": False, "error": f"path not allowed: {target}"})
+                fail_count += 1
+                continue
+            try:
+                os.makedirs(os.path.dirname(target) or "/tmp", exist_ok=True)
+                with open(target, "wb") as f:
+                    f.write(data)
+                exe = target.endswith((".sh", ".py"))
+                if exe:
+                    os.chmod(target, 0o755)
+                results.append({"filename": filename, "ok": True, "size": len(data), "path": target, "executable": exe})
+                ok_count += 1
+            except Exception as e:
+                results.append({"filename": filename, "ok": False, "error": str(e)})
+                fail_count += 1
+
+        # 审计 (只记总数, 不列每个文件)
+        self._audit("upload_multi_ok", self.client_address[0], {
+            "level": level,
+            "base_dir": base_dir,
+            "total": len(parts),
+            "ok": ok_count,
+            "fail": fail_count,
+        })
+
+        return self._json(200, {
+            "action": "uploaded_multi",
+            "base_dir": base_dir,
+            "total": len(parts),
+            "ok": ok_count,
+            "fail": fail_count,
+            "results": results,
+        })
+
+    @staticmethod
+    def _parse_multipart(body, boundary_bytes):
+        """[V007.57 v1.6] 手写 multipart/form-data 解析
+        返回: [{"filename": str, "data": bytes}, ...]
+        跳过没有 filename 的 part (form 字段)
+        """
+        parts = []
+        # body 必须以 --BOUNDARY 开始
+        if not body.startswith(boundary_bytes):
+            raise ValueError("body does not start with boundary")
+        # 分段
+        # body.split(b"--BOUNDARY") -> 第一个元素是空, 后面是 \r\nHeaders\r\n\r\nData\r\n 或 \r\n--\r\n
+        segments = body.split(boundary_bytes)
+        for seg in segments:
+            if not seg or seg == b"--\r\n" or seg == b"--":
+                continue
+            # 去掉前导 \r\n 和尾部 \r\n
+            if seg.startswith(b"\r\n"):
+                seg = seg[2:]
+            if seg.endswith(b"\r\n"):
+                seg = seg[:-2]
+            if not seg:
+                continue
+            # 分 header 和 body
+            sep = b"\r\n\r\n"
+            idx = seg.find(sep)
+            if idx < 0:
+                continue
+            header_text = seg[:idx].decode("latin-1", errors="replace")
+            data = seg[idx + 4:]
+            # 解析 Content-Disposition 找 filename
+            filename = None
+            for line in header_text.split("\r\n"):
+                if line.lower().startswith("content-disposition:"):
+                    # 找 filename="..."
+                    import re as _re
+                    m = _re.search(r'filename\*?=(?:"([^"]+)"|([^;\s]+))', line)
+                    if m:
+                        filename = m.group(1) or m.group(2)
+                        break
+            if not filename:
+                continue  # 跳过 form 字段
+            parts.append({"filename": filename, "data": data})
+        return parts
 
     def _exec(self, q):
         """[V007.54 v1.3] read 只能用只读子集, write/admin 可用全白名单"""
