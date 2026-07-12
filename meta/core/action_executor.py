@@ -1325,6 +1325,42 @@ class ActionExecutor:
             except Exception as e:
                 logger.warning(f"[M2M Cleanup] Failed to clean {through}: {e}")
 
+    def _cascade_pre_delete_role(self, role_id: int) -> None:
+        """[FIX BUG-V061 2026-07-12] 角色删除前先清空所有引用此角色的中间表.
+
+        已知会被引用的表 (本地 DB 验证):
+        - role_permissions          (角色-权限 M2M)
+        - role_menu_permissions     (角色-菜单 M2M)  -- 不是 role_menus
+        - permission_rules          (角色级条件权限 1:N)
+        - role_data_permissions     (角色级数据权限 1:N)
+        - role_dimension_scopes     (角色级维度范围 1:N)
+        - user_roles                (角色-用户 M2M)
+        - group_roles               (角色-用户组 M2M, DB FK 已 ON DELETE CASCADE)
+        """
+        CASCADE_TABLES_FOR_ROLE = [
+            'role_permissions',
+            'role_menu_permissions',
+            'permission_rules',
+            'role_data_permissions',
+            'role_dimension_scopes',
+            'user_roles',
+            # group_roles: DB 已 ON DELETE CASCADE, 不必手动删除
+        ]
+        for table in CASCADE_TABLES_FOR_ROLE:
+            try:
+                cursor = self.ds.execute(
+                    f"DELETE FROM {table} WHERE role_id = ?", (role_id,)
+                )
+                deleted = cursor.rowcount if hasattr(cursor, 'rowcount') else None
+                logger.info(
+                    f"[BUG-V061] cascade role_delete: deleted role_id={role_id} from {table} "
+                    f"(rowcount={deleted})"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[BUG-V061] Failed to clean {table} for role_id={role_id}: {e}"
+                )
+
     def _resolve_parent_info(self, meta_object: MetaObject, data: Dict[str, Any]) -> tuple:
         """解析对象的父对象信息 (parent_object_type, parent_object_id)
 
@@ -1989,6 +2025,15 @@ class ActionExecutor:
                     error="CANNOT_DELETE",
                     message=msg
                 )
+
+            # [FIX BUG-V061 2026-07-12] 角色删除支持级联清理子表
+            # 背景: _check_reverse_fk_references 只能从 other_obj.relations[] (且为 dict) 读
+            #       cascade_delete, 但 role 引用表 (role_permissions / role_menu_permissions /
+            #       permission_rules / role_data_permissions / role_dimension_scopes)
+            #       schema 中均无 relations 节, 导致删除角色永远卡在 FK check.
+            # 修复: role 删除前先清空所有引用此 role 的中间表, 再走 FK check.
+            if meta_object.id == 'role':
+                self._cascade_pre_delete_role(id_value)
 
             ref_errors = self._check_reverse_fk_references(meta_object, id_value)
             if ref_errors:
