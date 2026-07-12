@@ -161,11 +161,11 @@ def init_menu_permissions(db_path):
                 {'bo_id': 'sub_domain', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list', 'export', 'import']},
                 {'bo_id': 'service_module', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list', 'export', 'import']},
                 {'bo_id': 'business_object', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list', 'export', 'import']},
-                # 🆕 BMRD-2026-06-14 方案A: 关系对象随架构数据自动带入 (FR-013 轻量版)
-                # 关系数据是跨层级的纽带, 架构数据管理页操作 domain/sub_domain/... 时必然要查阅
-                # 其相互之间的关系, role='derived' 表示派生而非主 BO
-                # [H14.1] relationship yaml 支持 import, 补全
-                {'bo_id': 'relationship', 'role': 'derived', 'include_actions': ['read', 'export', 'import']},
+                # [FIX BUG-V056 2026-07-12] relationship 补全 create/update/delete
+                # 之前只有 read/export/import, 导致: 1) 用户无法在角色详情页勾选关系的编辑/管理权限
+                # 2) 关系编辑权限不出现在 JWT permissions 中, 创建/更新关系被拒
+                # relationship 不再是纯派生对象, 用户需要手动创建/编辑/删除关系
+                {'bo_id': 'relationship', 'role': 'derived', 'include_actions': ['create', 'read', 'update', 'delete', 'list', 'export', 'import']},
                 # 🆕 BMRD-2026-06-14 审计日志自动带入
                 # domain 详情页"操作日志" tab 需要 read 权限, 紧化 v1 endpoint 后
                 # (v1 现在也校验 audit_log:read) 必须显式 grant 才能看到
@@ -186,8 +186,9 @@ def init_menu_permissions(db_path):
                 'service_module:export', 'service_module:import',
                 'business_object:create', 'business_object:read', 'business_object:update', 'business_object:delete',
                 'business_object:export', 'business_object:import',
-                # 🆕 关系对象 (derived) 的最低权限
-                'relationship:read', 'relationship:export', 'relationship:import',
+                # [FIX BUG-V056 2026-07-12] 关系对象补全 create/update/delete
+                'relationship:create', 'relationship:read', 'relationship:update', 'relationship:delete',
+                'relationship:export', 'relationship:import',
                 # 🆕 审计日志 (derived) 的最低权限 (操作日志 tab 必需)
                 'audit_log:read', 'audit_log:export',
             ]),
