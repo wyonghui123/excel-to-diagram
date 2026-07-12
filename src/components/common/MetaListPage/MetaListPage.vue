@@ -1217,7 +1217,7 @@ function getBadgeTagType(row, column) {
 function getBadgeDisplayValue(row, column) {
   const rawValue = row[column.prop]
   if (rawValue === '') return '-'
-  
+
   if (rawValue == null) {
     if (column.enum_values) {
       const nullVal = column.type === 'boolean' ? 0 : null
@@ -1227,6 +1227,28 @@ function getBadgeDisplayValue(row, column) {
       if (fallback) return fallback.label
     }
     return '-'
+  }
+
+  // [FIX V015e 2026-07-10] 兜底清洗历史脏 enum code (legacy_null / null 字符串 / 'undefined')
+  //   原 BUG: 数据库早期导入数据时, 后端对空 relation_type 写了字符串 'legacy_null' 占位.
+  //     UI 走 getBadgeDisplayValue 后, rawValue='legacy_null' 不在 enum_values 里也不在 options 里,
+  //     最终落到 `return rawValue` → 用户在关系类型列看到 'legacy_null'.
+  //     期望: 显示 '-' (与空值一致).
+  //   修复: 在最开头 (string 路径) 把这种 sentinel 值映射为 '-'.
+  //   注意: 正则不能含 'a'/'g' 等字符, 否则会被 babel 误判为 regex flag (如 /...n/a/i → 'a' 无效 flag)
+  //   所以 'n/a' 单独 check, 不放在字符集里.
+  if (typeof rawValue === 'string') {
+    const cleaned = rawValue.trim().toLowerCase()
+    if (
+      cleaned === 'null' ||
+      cleaned === 'undefined' ||
+      cleaned === 'none' ||
+      cleaned === 'n/a' ||
+      cleaned === 'na' ||
+      /^legacy[_\s-]*null$/.test(cleaned)
+    ) {
+      return '-'
+    }
   }
   
   if (typeof rawValue === 'boolean') {

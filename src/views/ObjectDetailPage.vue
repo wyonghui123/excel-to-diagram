@@ -356,6 +356,22 @@ function handleSaved(savedData) {
 
     router.replace({ path: newPath }).catch(() => {})
   }
+  // [FIX V015d 2026-07-10] edit 模式保存后也通知 list 刷新
+  // 原 BUG:
+  //   handleSaved 只在 mode === 'add' 分支里 dispatch 'excel-diagram:list-refresh' 事件.
+  //   edit 模式保存后回到 list (e.g. 用户组编辑名称/描述), list 完全不知道要刷新,
+  //   看到的还是缓存的旧数据. 必须手动 Ctrl+Shift+R 硬刷新整个浏览器才能看到变更.
+  //   复现: /detail/user_group/<id> 改 name/description 保存 → 返回 list → 仍是旧值.
+  // 修复: 移出 add 分支, edit/add 都 dispatch 事件 (action='update' | 'create').
+  //       MetaListPage._windowEventHandler 已匹配 objectType, list 会 forceRefresh.
+  //       add 分支仍保留 (因为有 coordinator.refreshAll() 兜底).
+  try {
+    window.dispatchEvent(new CustomEvent('excel-diagram:list-refresh', {
+      detail: { objectType: objectType.value, action: mode.value === 'add' ? 'create' : 'update', id: savedData?.id }
+    }))
+  } catch (e) {
+    console.warn('[BUG-V015d] window event dispatch failed:', e)
+  }
 }
 
 function handleClose() {

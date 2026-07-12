@@ -29,6 +29,10 @@
         <el-icon :size="14"><CircleClose /></el-icon>
         清空
       </AppButton>
+      <AppButton variant="text" size="sm" @click="handleRefresh" :disabled="loading || refreshing" data-testid="oss-refresh-btn">
+        <el-icon :size="14" :class="{ 'is-loading': refreshing }"><RefreshRight /></el-icon>
+        刷新
+      </AppButton>
     </div>
 
     <div class="oss-tree-container">
@@ -74,7 +78,7 @@
 
 <script setup>
 import { ref, computed, watch, inject, onMounted, nextTick, shallowRef } from 'vue'
-import { Search, Loading, Folder, FolderOpened, Document, Box, Expand, Fold, Select, CircleClose } from '@element-plus/icons-vue'
+import { Search, Loading, Folder, FolderOpened, Document, Box, Expand, Fold, Select, CircleClose, RefreshRight } from '@element-plus/icons-vue'
 import { boService } from '@/services/boService'
 import { AppButton } from '@/components/common/AppButton'
 import { AppInput } from '@/components/common/AppInput'
@@ -108,6 +112,7 @@ const emit = defineEmits(['scope-change', 'load'])
 const treeRef = shallowRef(null)
 const treeData = shallowRef([])
 const loading = ref(false)
+const refreshing = ref(false)  // [FIX V015f 2026-07-10] 手动刷新按钮 loading 状态
 const searchQuery = ref('')
 const defaultExpandedKeys = shallowRef([])
 const treeKey = ref(1)
@@ -369,6 +374,25 @@ function handleClear() {
   treeRef.value?.setCheckedKeys([])
   checkedBoIds.value = []
   emit('scope-change', { boIds: [], domainIds: [], subDomainIds: [], serviceModuleIds: [] })
+}
+
+// [FIX V015f 2026-07-10] 对象范围刷新按钮
+//   背景: 用户在 BO 详情页编辑业务对象后回到列表, 即使我前几轮修了列表刷新逻辑,
+//     这里 ObjectScopeSection 树本身的数据 (domain/sub_domain/service_module) 还是旧缓存,
+//     关联显示 (新增的 SM、新改名的 domain) 看不到.
+//   方案: 跟 RelationScopeSection 一致, 加 RefreshRight 图标的"刷新"按钮, 调
+//     loadTreeData({ silent: true }) 强制重拉三个 boService.query, silent 模式保留
+//     用户已选状态 (避免误清). 父级 coordinator 也通过 silent 调 loadTreeData,
+//     这里行为完全一致.
+//   loading 期间禁用按钮, 避免重复触发.
+async function handleRefresh() {
+  if (loading.value || refreshing.value) return
+  refreshing.value = true
+  try {
+    await loadTreeData({ silent: true })
+  } finally {
+    refreshing.value = false
+  }
 }
 
 function handleBoCheck(data, checkedInfo) {
