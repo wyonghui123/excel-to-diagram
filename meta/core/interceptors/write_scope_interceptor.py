@@ -1105,6 +1105,11 @@ class WriteScopeInterceptor(Interceptor):
 
         不走 _check_parent_dim_scope (语义: parent 下是否有 scope 内的 child),
         因为 annotation 不是 HIERARCHY_CHAIN 的 child.
+
+        [FIX BUG-V058 2026-07-12] 添加 V2.1 perm check:
+          annotation 的写权限跟随 parent, dim scope 检查前需校验 role 是否有
+          parent_type:create 权限. 否则 biz 角色 (BO read + MFG dim scope)
+          会在 MFG BO 下误放行 annotation create.
         """
         role_ids = self._get_user_role_ids(context, user_id)
         if not role_ids:
@@ -1120,6 +1125,18 @@ class WriteScopeInterceptor(Interceptor):
 
         for role_id in role_ids:
             try:
+                # [FIX BUG-V058] V2.1 perm check: annotation 写权限跟随 parent
+                if _WRITE_SCOPE_V2_1_PERM_CHECK:
+                    parent_perm = f'{object_type}:create'
+                    role_perm_codes = self._get_role_perm_codes(context, role_id)
+                    if not self._role_has_perm(role_id, parent_perm, role_perm_codes):
+                        roles_checked.append({
+                            'role_id': role_id, 'cond': None,
+                            'skipped': 'missing_parent_perm',
+                            'perm_required': parent_perm,
+                        })
+                        continue
+
                 expanded = engine.expand_dimension_values(role_id)
                 # 检查 parent 对象是否在直接声明的维度中
                 if object_type in expanded and expanded[object_type]:
