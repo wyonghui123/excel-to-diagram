@@ -1712,6 +1712,17 @@ class WriteScopeInterceptor(Interceptor):
                 if sd_row and sd_row[0] in domain_ids:
                     return True
 
+            # [FIX BUG-V059.2 2026-07-12] 步进到 sub_domain 后, 也检查 sub_domain 自身的 dim scope
+            # 场景: BO create under SM, dim scope 声明在 sub_domain=[299,339] (非 domain 层级)
+            # 之前只检查 domain 层级的 dim scope, 漏掉了 sub_domain 层级的直接匹配
+            if effective_object_type == 'sub_domain' and 'sub_domain' in expanded and expanded['sub_domain']:
+                sd_ids = expanded['sub_domain']
+                if current_id in sd_ids:
+                    logger.debug(
+                        f'_check_parent_dim_scope: sub_domain({current_id}) direct match in scope'
+                    )
+                    return True
+
         # 找 effective_object_type 在 chain 中的位置
         try:
             obj_idx = HIERARCHY_CHAIN.index(effective_object_type)
