@@ -265,8 +265,12 @@ _WRITE_SCOPE_REL_FUNCTIONAL_PERM_SOFT_WARN = os.environ.get(
 # [V2.1 2026-06-22] 写权限 × Dim Scope 联动校验开关
 # 启用后, _check_dim_scope 在 role 循环前增加 perm 前置检查
 # Spec: .trae/specs/auth-permission-system/write-scope-perm-link-v2.1-spec.md
+# [FIX BUG-V055 2026-07-12] 默认值改为 true: 写权限 dim scope 必须与功能权限联动
+#   根因: 关闭时, role A (read + dim scope 含制造云) + role B (create + dim scope 仅供应链云)
+#   的场景下, role A 的 dim scope 误放行 create 操作 (role A 没有 create 权限)
+#   开启后, dim scope 检查前先校验该 role 是否有对应功能权限, 无则跳过
 _WRITE_SCOPE_V2_1_PERM_CHECK = os.environ.get(
-    'WRITE_SCOPE_V2_1_PERM_CHECK', 'false'
+    'WRITE_SCOPE_V2_1_PERM_CHECK', 'true'
 ).lower() in ('true', '1', 'yes')
 
 # [V2.1 2026-06-22] action → perm 后缀映射
