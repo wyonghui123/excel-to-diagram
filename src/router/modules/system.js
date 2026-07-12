@@ -24,7 +24,10 @@ export default [
   {
     path: '/system/role-detail/:roleId',
     name: 'RolePermissionDetail',
-    component: () => import('@/views/SystemManagement/RoleDetail.vue'),
+    // [FIX 2026-07-12] 路由原本指向 RoleDetail.vue (简化版, 无联动)
+    // 改为 RolePermissionDetail.vue, 含 PermissionConfigPanel + useMenuPermission
+    // 修复: 角色详情中勾掉 "管理/编辑" 后对应 "删除" 等操作明细不联动的问题
+    component: () => import('@/views/SystemManagement/RolePermissionDetail.vue'),
     meta: { title: '角色详情', requiresAuth: true, requiresAdmin: true }
   },
   {
