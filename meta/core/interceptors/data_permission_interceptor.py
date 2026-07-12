@@ -546,16 +546,21 @@ class DataPermissionInterceptor(Interceptor):
             return
 
         perm_filter = self._get_perm_filter(context)
+        allowed_ids = None
         if perm_filter:
             try:
                 allowed_ids = perm_filter.perm_service.get_allowed_resource_ids(
                     context.user_id, context.object_type
                 )
-                if allowed_ids:
-                    logger.debug(f"[DataPermInterceptor] User has explicit data permissions for {context.object_type}, skipping scope")
-                    return
             except Exception:
                 pass
+
+        # [FIX 2026-07-12] 不再因 allowed_ids 而跳过 YAML scope 过滤
+        # 之前: if allowed_ids → return (跳过, 只用 data_permissions 过滤)
+        # Bug: 用户有 sub_domain/388 的 data_permission 向上传播到 product 537,
+        #      导致 DEMO 用户只能看到 1 个产品 (537), 看不到 4 个 public 产品
+        # 修复: allowed_ids 与 YAML scope 合并为 OR 条件
+        #       即: 产品可见 ⇔ YAML scope 命中 OR 用户有显式 data_permission
 
         resolved = scope_expr
 
@@ -600,6 +605,16 @@ class DataPermissionInterceptor(Interceptor):
                             'operator': c['operator'],
                             'value': c['value'],
                         })
+                    # [FIX 2026-07-12] 将 data_permission 的 allowed_ids 合并到 OR group
+                    # 语义: 产品可见 ⇔ (YAML scope 条件) OR (id IN allowed_ids)
+                    if allowed_ids:
+                        for rid in allowed_ids:
+                            or_conditions.append({
+                                'field': 'id',
+                                'operator': 'eq',
+                                'value': rid,
+                            })
+                        context.extra['_data_perms_merged'] = True
                     context.extra['query_conditions'].append({
                         'type': 'or',
                         'conditions': or_conditions,
@@ -610,6 +625,17 @@ class DataPermissionInterceptor(Interceptor):
                         'operator': cond_item['operator'],
                         'value': cond_item['value'],
                     })
+                    # [FIX 2026-07-12] 单条件时, allowed_ids 单独作为 OR 条件追加
+                    if allowed_ids:
+                        or_conditions_extra = [
+                            {'field': 'id', 'operator': 'eq', 'value': rid}
+                            for rid in allowed_ids
+                        ]
+                        context.extra['query_conditions'].append({
+                            'type': 'or',
+                            'conditions': or_conditions_extra,
+                        })
+                        context.extra['_data_perms_merged'] = True
         except Exception:
             parts = resolved.split('=', 1)
             if len(parts) == 2:
@@ -620,6 +646,17 @@ class DataPermissionInterceptor(Interceptor):
                     'operator': 'eq',
                     'value': value,
                 })
+            # [FIX 2026-07-12] 异常降级也合并 allowed_ids
+            if allowed_ids:
+                or_conditions_extra = [
+                    {'field': 'id', 'operator': 'eq', 'value': rid}
+                    for rid in allowed_ids
+                ]
+                context.extra['query_conditions'].append({
+                    'type': 'or',
+                    'conditions': or_conditions_extra,
+                })
+                context.extra['_data_perms_merged'] = True
 
     @staticmethod
     def _parse_scope_expression(expr: str):
@@ -698,6 +735,11 @@ class DataPermissionInterceptor(Interceptor):
 
     def _apply_data_permission_filter(self, context: 'ActionContext') -> None:
         if not context.user_id:
+            return
+
+        # [FIX 2026-07-12] 如果 scope filter 已经合并了 data_permission 条件，跳过
+        # 避免重复添加 id = xxx 条件，导致 scope 的 OR 条件被覆盖
+        if context.extra.get('_data_perms_merged'):
             return
 
         perm_filter = self._get_perm_filter(context)
