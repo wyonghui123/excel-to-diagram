@@ -1271,6 +1271,18 @@ class WriteScopeInterceptor(Interceptor):
                 logger.info(f'[WriteScope EXT_CHAIN] ABORT: object_type={object_type} not in HIERARCHY_CHAIN after {visited} steps')
                 return False  # visited 用尽仍未进入 chain, 异常
 
+            # [FIX BUG-V059 2026-07-12] EXT_CHAIN 步进后检查步进目标层级的直接匹配
+            # 场景: service_module delete, EXT_CHAIN 步进到 sub_domain(299)
+            # dim scope 声明在 sub_domain=[299], 但 ancestor 循环从 obj_idx-1 开始
+            # (跳过 sub_domain 自身), 导致 sub_domain 级别的 dim scope 永远不会被匹配
+            # 修复: 步进后先检查 current_id 是否在 expanded[object_type] 中
+            if object_type in expanded and expanded[object_type]:
+                if current_id in expanded[object_type]:
+                    logger.debug(
+                        f'[WriteScope EXT_CHAIN] direct match: {object_type}({current_id}) in dim scope'
+                    )
+                    return True
+
         obj_dim = object_type
 
         # 找 object_type (或锚点 dim) 在 chain 中的位置
