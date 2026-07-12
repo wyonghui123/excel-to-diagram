@@ -1325,6 +1325,10 @@ class WriteScopeInterceptor(Interceptor):
         - delete: 同时检查 source_bo_id 和 target_bo_id 链 (两端都必须在 scope 内)
         - 原因: 删除关系影响两端, 需要两端都有写权限
         - 参考: 用户反馈 "实例的删除权限难道不是依赖源和目标来的吗, 参考写的权限"
+        [FIX BUG-V057 2026-07-12] delete 改为与 create/update 一致: 任一端在 scope 即可
+        - 关系的写权限基于源业务对象 (owner chain + dim scope 都只沿 source_bo_id 追溯)
+        - delete 不应比 create/update 更严格: 用户可以在自己 scope 内删除关系
+        - 实际场景: ITTF01(SCM) → ECN10(MFG), SCM 用户应可删除此关系 (源端在 scope)
         """
         # [V1.2.0] Functional perm gate: 防止"只读 user 误创关系"
         # 仅对 relationship 操作生效 (object_type 在 _check_dim_scope 调用前已路由到此)
@@ -1463,26 +1467,18 @@ class WriteScopeInterceptor(Interceptor):
                 break  # 每个 bo_id 只有一行
 
         # 判定最终结果
-        if is_delete_path:
-            # delete: source 和 target 都必须在 scope 内
-            src_ok = side_matches.get('source', False)
-            tgt_ok = side_matches.get('target', False)
-            if src_ok and tgt_ok:
-                return True
-            # 设置失败侧信息用于错误消息
-            if not src_ok and not tgt_ok:
-                context._rel_failed_side = f'源业务对象({src_code})和目标业务对象({tgt_code})'
-            elif not src_ok:
-                context._rel_failed_side = f'源业务对象({src_code})'
-            else:
-                context._rel_failed_side = f'目标业务对象({tgt_code})'
-            return False
-        else:
-            # create/update: 任一端 (source 或 target) 的 chain 在 scope 内即可
-            if side_matches.get('source', False) or side_matches.get('target', False):
-                return True
+        # [FIX BUG-V057 2026-07-12] 统一 create/update/delete: 任一端在 scope 即可
+        #   关系的写权限基于源业务对象, delete 不应比 create/update 更严格
+        if side_matches.get('source', False) or side_matches.get('target', False):
+            return True
+        # 设置失败侧信息
+        if not side_matches.get('source', False) and not side_matches.get('target', False):
             context._rel_failed_side = f'源业务对象({src_code})和目标业务对象({tgt_code})都不在用户 scope 内'
-            return False
+        elif not side_matches.get('source', False):
+            context._rel_failed_side = f'源业务对象({src_code})'
+        else:
+            context._rel_failed_side = f'目标业务对象({tgt_code})'
+        return False
 
     # ========================================================================
     # [V1.2.0 2026-06-15] 跨领域关系 functional perm 校验辅助方法
