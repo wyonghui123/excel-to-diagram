@@ -61,7 +61,7 @@
         :meta="annotationMeta"
         :entity-data="annotationEntityData"
         :saving="annotationSaving"
-        z-index="10000"
+        :z-index="9990"
         @close="handleAnnotationDialogClose"
         @save="handleAnnotationSave"
         @update:visible="annotationFormVisible = $event"
@@ -152,9 +152,29 @@ const RELATION_DIRECTION_NAME_MAP = Object.freeze({
 })
 
 function getRelationTypeName(typeCode, typeName) {
+  // [FIX V015e 2026-07-10] 兜底清洗历史脏 enum code (legacy_null / null 字符串等)
+  //   原 BUG: 数据库早期导入数据时, 后端对空 relation_type 写了字符串 'legacy_null' 占位.
+  //     详情页 getRelationTypeName 走 RELATION_TYPE_NAME_MAP[typeCode] 找不到,
+  //     fallback 到 typeCode || '' → 直接显示 'legacy_null'.
+  //   修复: 把 sentinel 值映射为 '-' (与空值/列表页保持一致).
+  const isLegacyNull = (v) => {
+    if (v == null) return false
+    const s = String(v).trim().toLowerCase()
+    return s === 'null' || s === 'undefined' || s === 'none' || s === 'n/a' || s === 'na' ||
+           /^legacy[_\s-]*null$/.test(s)
+  }
+  if (isLegacyNull(typeCode) || isLegacyNull(typeName)) return '-'
   return typeName || RELATION_TYPE_NAME_MAP[typeCode] || typeCode || ''
 }
 function getRelationDirectionName(dirCode, dirName) {
+  // 同 V015e: 兜底清洗 legacy_null
+  const isLegacyNull = (v) => {
+    if (v == null) return false
+    const s = String(v).trim().toLowerCase()
+    return s === 'null' || s === 'undefined' || s === 'none' || s === 'n/a' || s === 'na' ||
+           /^legacy[_\s-]*null$/.test(s)
+  }
+  if (isLegacyNull(dirCode) || isLegacyNull(dirName)) return '-'
   return dirName || RELATION_DIRECTION_NAME_MAP[dirCode] || dirCode || '-'
 }
 
@@ -666,7 +686,12 @@ async function handleAnnotationSave(formData) {
     refresh()
     emit('refresh')
   } catch (e) {
-    message.saveFailed('备注')
+    const backendMsg = e?.message || ''
+    if (backendMsg && backendMsg !== 'undefined') {
+      message.error(backendMsg)
+    } else {
+      message.saveFailed('备注')
+    }
   } finally {
     annotationSaving.value = false
   }
@@ -678,7 +703,12 @@ async function handleAnnotationDelete(row, section) {
     message.success('备注已删除')
     refresh()
   } else {
-    message.error('删除失败', result)
+    const backendMsg = result?.message || ''
+    if (backendMsg && backendMsg !== 'undefined') {
+      message.error(backendMsg)
+    } else {
+      message.error('删除备注失败')
+    }
   }
 }
 

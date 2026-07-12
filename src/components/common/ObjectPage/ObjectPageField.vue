@@ -309,13 +309,13 @@ function isFkField(key) {
 function getFieldDisplayValue(key) {
   // [DECORATIVE] [NEW] v1.3 / FR-6.5: 优先后端 display_values
   const dv = props.formData?.display_values?.[key]
-  if (dv !== undefined && dv !== null) return dv
+  if (dv !== undefined && dv !== null) return _isLegacyNull(dv) ? '' : dv
 
   const displayKey = props.formData[`${key}_display`]
     ? `${key}_display`
     : `${key.replace(/_id$/, '')}_name`
   const displayValue = props.formData[displayKey]
-  if (displayValue) return displayValue
+  if (displayValue) return _isLegacyNull(displayValue) ? '' : displayValue
   const value = props.formData[key]
   return value ?? ''
 }
@@ -349,11 +349,27 @@ function getEnumOptions(key) {
 }
 
 function getEnumLabel(key, value) {
+  // [FIX V015e 2026-07-10] 兜底清洗历史脏 enum code (legacy_null / null 字符串等)
+  //   详情页 read 模式下 enum 字段显示. 数据库早期导入数据时后端对空 enum 字段
+  //     写了字符串 'legacy_null' 占位, 此处 enum options 找不到 → fallback 到 value
+  //     → 用户在详情页看到 'legacy_null'. 期望显示 '-'.
+  if (_isLegacyNull(value)) return '-'
   const options = getEnumOptions(key)
   const fieldDef = props.fieldDefs[key]
   const isBoolean = fieldDef?.type === 'boolean'
   const found = options.find(o => _isEnumMatch(o.value, value, isBoolean))
-  return found?.label ?? value
+  if (found?.label != null) {
+    return _isLegacyNull(found.label) ? '-' : found.label
+  }
+  return value
+}
+
+// [FIX V015e 2026-07-10] shared helper: 识别后端写入的历史脏 enum 占位符
+function _isLegacyNull(v) {
+  if (v == null) return false
+  const s = String(v).trim().toLowerCase()
+  return s === 'null' || s === 'undefined' || s === 'none' || s === 'n/a' || s === 'na' ||
+         /^legacy[_\s-]*null$/.test(s)
 }
 
 function getEnumColor(key, value) {
@@ -373,12 +389,12 @@ function formatReadValue(key) {
   // 让 virtual FK 字段（如 domain_name / sub_domain_name / service_module_name）即使
   // formData[key] 在某些边界场景下为空，也能正确显示后端注入的 display 值。
   const dv = props.formData?.display_values?.[key]
-  if (dv != null && dv !== '') return dv
+  if (dv != null && dv !== '') return _isLegacyNull(dv) ? '-' : dv
   const displayKey = props.formData[`${key}_display`]
     ? `${key}_display`
     : `${key.replace(/_id$/, '')}_name`
   const displayValue = props.formData[displayKey]
-  if (displayValue != null && displayValue !== '') return displayValue
+  if (displayValue != null && displayValue !== '') return _isLegacyNull(displayValue) ? '-' : displayValue
 
   const value = props.formData[key]
   if (value == null || value === '') return '-'
@@ -408,9 +424,16 @@ function formatReadValue(key) {
       }
       return o === value
     })
-    if (opt && typeof opt === 'object') return opt.label ?? value
+    if (opt && typeof opt === 'object') {
+      // [FIX V015e 2026-07-10] enum label 兜底清洗
+      if (_isLegacyNull(opt.label)) return '-'
+      return opt.label ?? value
+    }
   }
 
+  // [FIX V015e 2026-07-10] 兜底清洗历史脏 enum code (legacy_null / null 字符串等)
+  //   如果 value 本身就是后端写入的脏占位符 (且 enum options 没匹配), 显示 '-'
+  if (_isLegacyNull(value)) return '-'
   return value
 }
 
