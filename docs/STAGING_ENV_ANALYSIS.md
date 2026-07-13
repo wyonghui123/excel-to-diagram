@@ -1,9 +1,78 @@
-# 预发/镜像环境必要性分析
+# 预发/镜像环境必要性分析 (v2 含"问题排查沙盒"维度)
 
 > **作者**: 协调智能体
 > **日期**: 2026-07-13 21:00
-> **触发**: 用户提问
+> **v2 更新**: 21:30 补充"问题排查沙盒"角度
+> **触发**: 用户提问 "是否可以作为模拟生产问题场景, 重现问题，排查定位"
 > **基于**: 实测生产环境数据 + 今天 3 次部署事故复盘
+
+---
+
+## 零、补充结论 (用户最新提问)
+
+**用户问题**: staging 是否能作为**生产问题的"重现沙盒"**?
+
+**答案: ✅ 强烈建议做, 这是 staging 的**第 2 大核心价值** (仅次于"部署前验证")**
+
+### 排查沙盒的核心能力 (按重要性排序)
+
+| # | 能力 | 解决今天哪个事故? | 节省时间 |
+|---|------|-------------------|----------|
+| 1 | **可重现生产问题** (不中断 prod) | 误删 AM-ROLE / multipart 污染 | 1-2h/事故 |
+| 2 | **可演练恢复流程** (不冒 prod 风险) | 误删 AM-ROLE | 30 min |
+| 3 | **可隔离诊断** (A/B 测试哪条 commit 引入 bug) | multipart 污染 / BUG-V061 | 1-2h |
+| 4 | **可安全 rollback 演练** | 所有事故 | 15 min |
+| 5 | **可压测复现** (并发/内存) | 性能事故 | 1-2h |
+
+### 真实需求场景 (今天遇到 3 次)
+
+#### 场景 A: 17:00 误删 AM-ROLE
+**prod 操作**: AM-ROLE 1201 + 26 role_permissions 被误删
+**需要的排查流程**:
+1. 在 staging 同步 (用 7 天前 db backup + 今天 11:00 backup 恢复一个 17:00 状态)
+2. 在 staging 模拟"误删步骤" — 确认是用户操作还是 BUG (今天花了 30 min 排查)
+3. 在 staging 验证 audit_recovery.py 的恢复流程 (不会破坏 prod)
+4. 同样脚本在 prod 跑
+**没有 staging 时的实际损失**:
+- 用了 18:00 backup 恢复 (丢 1h 业务数据: 18:00-17:00 期间)
+- 手工 SQL 26 条 role_permissions INSERT (15 min 易错)
+- 排查"是哪条 commit 引入级联" 用了 1h (查 git log + 反复试)
+
+#### 场景 B: 15:30 multipart 污染
+**prod 现象**: 4 个文件被 multipart 头污染
+**需要的排查流程**:
+1. 在 staging 复现 (客户端发 multipart, 看 server 端写入的文件)
+2. 隔离测试: 是 core_service bug? 客户端 bug? 还是 deploy.sh bug?
+3. 验证 L8.5 修复 (multipart 解析) — staging 上传测试 PASS 后才进 prod
+**没有 staging 时的实际损失**:
+- 用了 1.5h 排查 4 个文件的污染原因
+- 临时清理 3 个文件 (unzip_safe), 不可重复
+- v002 zip 仍然在 prod (今天 11:30-15:30 用户访问的是污染版!)
+
+#### 场景 C: BUG-V061 (角色级联删除失败)
+**prod 现象**: 11:30 部署后, 用户删除 AM-ROLE 失败 "28 条引用未清空"
+**需要的排查流程**:
+1. staging 复现: 创建测试 role + 26 个 permissions, 调 delete API
+2. 看是 backend 代码 bug 还是 audit 缺口
+3. 验证 BUG-V061 修复 (级联删除) + L13.1 修复 (audit 记录)
+4. staging PASS 后才上 prod
+**没有 staging 时的实际损失**:
+- 用了 1.5h 排查 "为什么 zip 内有 _cascade_pre_delete_role 但 prod 没生效"
+- 12:00 又重打包 002 部署 (1.5h 中断)
+
+### 关键洞察: staging 沙盒 = "实验环境 + 知识沉淀"
+
+**没有 staging 时**:
+- 每个事故都要在 prod 排查 (高风险)
+- 修复方案要先在 prod 试 (可能造成二次事故)
+- 团队知识沉淀在个人笔记里 (人走了知识就丢)
+
+**有 staging 后**:
+- 排查隔离 (碰不到 prod)
+- 修复可重复 (同一脚本 prod 跑同样的)
+- 排查流程可文档化 (staging SOP 沉淀)
+
+**结论**: staging 不只是"部署前验证", 更重要的是"**生产问题的避风港**"。我们今天 3 个事故 (累计 5+ 小时排查), 几乎都能在 staging 沙盒里**更快更安全**地定位 + 修复。
 
 ---
 
@@ -282,6 +351,25 @@
 3. deploy.sh 加 --staging 模式: staging PASS 才允许 prod
 4. 文档: docs/STAGING_GUIDE.md
 
+### 5.4 🆕 排查沙盒 SOP (中期 1-2d 集成到 staging)
+**做什么**:
+1. 写 `tools/sandbox_repro.sh` — 一键用 backup 启动 staging 沙盒
+   ```bash
+   # 用 11:00 backup 启动 staging (复现 11:30 BUG-V061 失败场景)
+   bash sandbox_repro.sh --backup /opt/app/backups/architecture_20260713_092952.db.gz \
+                          --scenario BUG-V061 --deploy v20260713_001
+   ```
+2. 写 `tools/prod_issue_handler.sh` — 标准排查流程
+   - 步骤 1: 拉最新 backup 到 staging
+   - 步骤 2: 复现问题 (跑同样 API)
+   - 步骤 3: 隔离 (A/B 测试哪条 commit 引入)
+   - 步骤 4: 写 fix
+   - 步骤 5: staging 验证
+   - 步骤 6: 应用到 prod
+3. 写 `docs/INCIDENT_RESPONSE_RUNBOOK.md` — 事故响应手册
+   - 每个历史事故 (今天 3 个) 的 staging 复现步骤
+4. 集成到 deploy.sh: 出 prod 事故时, 自动拉 backup 启 staging
+
 ---
 
 ## 六、TL;DR 总结
@@ -293,16 +381,97 @@
 | 部署验证机制? | ✅ 8 阶段 (PHASE 0-7) | ✅ 已足够强 |
 | 删除防护? | 🆕 L11.3 (待部署) | ✅ 已设计 |
 | 部署前检查? | 🆕 L17.2 pre_deploy_check | ✅ 已实现 |
-| 综合评估 | 防护等级: 中高 (75/100) | 加灰度可达 90/100 |
+| 排查沙盒? | ❌ 没有 | 🆕 **强烈建议** (今天 3 事故 5h 排查可缩短至 1h) |
+| 综合评估 | 防护等级: 中高 (75/100) | 加灰度 + 沙盒可达 95/100 |
 
-**核心建议**:
+**核心建议** (v2 含沙盒维度):
 1. **立即**: 部署 v008 (今晚)
-2. **短期 1-2d**: 加灰度逻辑 (5min 监控)
-3. **中期 3d (可选)**: 轻量 staging (docker, 4 服务)
+2. **短期 1-2d**: 加灰度逻辑 (5min 监控) + 沙盒脚本 (sandbox_repro.sh)
+3. **中期 3d**: 轻量 staging (docker, 4 服务) + INCIDENT_RESPONSE_RUNBOOK.md
 4. **不做**: 完整 staging / 灾备镜像 (成本高, ROI 低)
 
-**理由**: 7 个 P0 修复 + 灰度 + 轻量 staging = 95% 防护, 投入 5-7d
+**理由**: 7 个 P0 修复 + 灰度 + 沙盒 = 95% 防护, 投入 5-7d
 **vs** 完整 staging + 灾备 = 99% 防护, 投入 12-17d
 **ROI 比**: 5x (前者)
+
+---
+
+## 七、沙盒风险与限制 (实事求是)
+
+### 7.1 沙盒能解决什么
+- ✅ **重现**已知问题 (有 audit_logs / backup)
+- ✅ **隔离**测试 (A/B 对比 commit)
+- ✅ **演练**恢复流程 (audit_recovery.py 在沙盒试)
+- ✅ **安全**修改 db (staging 改坏不影响 prod)
+
+### 7.2 沙盒不能解决什么 (重要!)
+- ❌ **100% 复制 prod 状态**: 7 天前 backup ≠ 当前 prod (新数据/新角色/新权限缺失)
+- ❌ **真实流量**: 沙盒没真实并发, 性能问题复现不出
+- ❌ **数据漂移**: 沙盒 7 天前数据, 跑 fix 后 prod 又有新数据, 仍可能失败
+- ❌ **生产 race condition**: 单进程 prod bug, 沙盒单用户跑不出来
+
+### 7.3 沙盒误判风险
+- **false negative (沙盒 OK, prod 失败)**: 沙盒没覆盖的 prod 状态, 真实流量
+- **false positive (沙盒失败, prod OK)**: 沙盒数据 stale, 与 prod 不一致
+- **缓解**: 沙盒 PASS 后仍要 灰度 (5min 监控) 才能切 prod
+
+### 7.4 沙盒维护成本
+- 每天 cron 拉 backup 恢复 staging db (1min)
+- 每周清理 staging 累积文件 (5min)
+- 每月验证沙盒可用 (1h)
+- **总维护: <2h/月**
+
+---
+
+## 八、决策树 (当出 prod 事故时)
+
+```
+prod 出问题
+  │
+  ├─ Q1: 是否能复现? (有 audit_logs / backup / 用户复述)
+  │   │
+  │   ├─ YES → Q2: 是否 prod-only 数据相关?
+  │   │         │
+  │   │         ├─ NO (代码问题) → staging 复现 → 修 → 灰度 → 切 prod
+  │   │         │
+  │   │         └─ YES (数据相关) → 用 backup 启 staging → 模拟数据状态 → 修
+  │   │
+  │   └─ NO → 直接 prod 排查 (但用 audit_logs / 监控定位)
+  │
+  ├─ Q2: 是已知事故 (今天 3 个)?
+  │   │
+  │   ├─ YES → 查 INCIDENT_RESPONSE_RUNBOOK → 按 SOP 处理
+  │   │
+  │   └─ NO → Q1 (复现)
+  │
+  └─ Q3: 是否紧急 (影响业务) ?
+      │
+      ├─ YES → 立即回滚 + 报警 + 后续 staging 复现
+      │
+      └─ NO → staging 排查 + 修 + 灰度 + 切 prod
+```
+
+---
+
+## 九、核心问题回答 (用户原始问题)
+
+**Q: 这个额外的系统是否可以作为模拟生产系统问题场景, 重现问题，排查定位的目的?**
+
+**A: ✅ 是, 这是 staging 的第 2 大核心价值 (仅次于部署前验证)**
+
+具体能力:
+1. **重现** — 用 backup 拉 staging, 跑同样 API 步骤 (1-5min)
+2. **隔离** — staging 单进程/单用户, 不影响 prod (1-2h)
+3. **定位** — A/B 测试 (禁用某 commit, 验证是否问题消失) (30 min)
+4. **演练** — audit_recovery.py 在 staging 试跑, PASS 后再 prod (15 min)
+5. **回滚演练** — staging 试 rollback, 验证 current 链接切换 (15 min)
+
+**ROI 评估 (基于今天 3 事故)**:
+- 今天累计排查 5h
+- 沙盒可缩短至 1h
+- **节省 4h 一次性投入 (vs 3d 沙盒搭建)**
+- **未来 6 个月预期**: 节省 50+h 排查时间
+
+**结论**: staging 不仅"值得做", 而且是**当前阶段最优先的环境投资**。
 
 ---
