@@ -1,27 +1,28 @@
 <!--
-  HelpCenterDrawer - P3 简化
-  - 删除"切换产品版本" subtab: 只保留 "archdata-management"
-  - 删除"章节手册" tab: 整个 HelpCenterDrawer 只展示"操作场景"
-  - 新增最大化按钮: 抽屉可展开至全屏
-  - 新增 URL 自动展开: ?help=archdata-management&step=2 直接打开对应步骤
+  PublicHelpDrawer - P3 公开版帮助中心
+  - 不需要登录: 任何用户访问 ?help=&step= 都能看
+  - 体验与登录后 HelpCenterDrawer 完全一致: 支持最大化、URL ?step= 自动展开
+  - URL ?max=1 时默认最大化, 适合文档 / 演示 / 录屏场景
+  - 独立挂载到 body, 不受 AppRootLayout 控制
+  - 关闭时清理 URL 中的 ?help=&step= query, 避免刷新又重新打开
 -->
 <template>
   <Teleport to="body">
-    <Transition name="help-drawer">
-      <div v-if="modelValue" class="help-drawer" role="dialog" aria-label="Help Center">
-        <div class="help-drawer__mask" @click="handleClose"></div>
-        <div class="help-drawer__wrapper" :style="wrapperStyle" :class="{ 'is-maximized': isMaximized }">
-          <div class="help-drawer__header">
-            <div class="help-drawer__title">
-              <el-icon class="help-drawer__title-icon" :size="20">
+    <Transition name="public-help-fade">
+      <div v-if="visible" class="public-help-drawer" role="dialog" aria-label="Help Center">
+        <div class="public-help-drawer__mask" @click="handleClose"></div>
+        <div class="public-help-drawer__wrapper" :style="wrapperStyle" :class="{ 'is-maximized': isMaximized }">
+          <div class="public-help-drawer__header">
+            <div class="public-help-drawer__title">
+              <el-icon class="public-help-drawer__title-icon" :size="20">
                 <QuestionFilled />
               </el-icon>
               <span>操作场景</span>
             </div>
-            <div class="help-drawer__header-actions">
+            <div class="public-help-drawer__header-actions">
               <button
                 type="button"
-                class="help-drawer__header-btn"
+                class="public-help-drawer__header-btn"
                 :aria-label="isMaximized ? 'Restore' : 'Maximize'"
                 :title="isMaximized ? '还原' : '最大化'"
                 @click="toggleMaximize"
@@ -41,7 +42,7 @@
               </button>
               <button
                 type="button"
-                class="help-drawer__close"
+                class="public-help-drawer__close"
                 aria-label="Close help center"
                 @click="handleClose"
               >
@@ -55,7 +56,7 @@
             </div>
           </div>
 
-          <div class="help-drawer__body">
+          <div class="public-help-drawer__body">
             <HelpAccordion :scenario-id="scenarioId" :initial-step="initialStep" />
           </div>
         </div>
@@ -70,28 +71,16 @@ import { QuestionFilled } from '@element-plus/icons-vue'
 import { HelpAccordion } from '@/components/common/HelpAccordion'
 
 const props = defineProps({
-  modelValue: {
-    type: Boolean,
-    default: false
-  },
   width: {
     type: [Number, String],
     default: 880
-  },
-  scenarioId: {
-    type: String,
-    default: 'archdata-management'
-  },
-  // [FIX P3 2026-06-30] initial-step 提升为 prop, 由父组件从 URL 解析传入
-  initialStep: {
-    type: Number,
-    default: null
   }
 })
 
-const emit = defineEmits(['update:modelValue', 'close'])
-
-// [FIX P3 2026-06-30] 最大化状态
+const visible = ref(false)
+const scenarioId = ref(null)
+const initialStep = ref(null)
+// [FIX P3 2026-06-30] 公开版支持最大化, 与登录版体验一致
 const isMaximized = ref(false)
 
 function toggleMaximize() {
@@ -105,13 +94,33 @@ const wrapperStyle = computed(() => {
   }
 })
 
+function readUrl() {
+  const params = new URLSearchParams(window.location.search)
+  const help = params.get('help')
+  const step = parseInt(params.get('step'), 10)
+  if (help) {
+    scenarioId.value = help
+    initialStep.value = Number.isFinite(step) ? step : null
+    // [FIX P3 2026-06-30] URL ?max=1 时默认最大化
+    //   用于公开文档/演示/录屏场景, 一打开就是全屏
+    isMaximized.value = params.get('max') === '1'
+    return true
+  }
+  return false
+}
+
 function handleClose() {
-  emit('update:modelValue', false)
-  emit('close')
+  visible.value = false
+  // 清理 URL 中的 help/max query, 避免刷新又重新打开
+  const url = new URL(window.location.href)
+  url.searchParams.delete('help')
+  url.searchParams.delete('step')
+  url.searchParams.delete('max')
+  window.history.replaceState({}, '', url.toString())
 }
 
 function handleKeydown(e) {
-  if (!props.modelValue) return
+  if (!visible.value) return
   if (e.key === 'Escape') {
     // 先还原最大化, 再关闭
     if (isMaximized.value) {
@@ -122,19 +131,19 @@ function handleKeydown(e) {
   }
 }
 
-watch(
-  () => props.modelValue,
-  (val) => {
-    if (val) {
-      document.body.style.overflow = 'hidden'
-    } else {
-      document.body.style.overflow = ''
-      isMaximized.value = false
-    }
+watch(visible, (val) => {
+  if (val) {
+    document.body.style.overflow = 'hidden'
+  } else {
+    document.body.style.overflow = ''
+    isMaximized.value = false
   }
-)
+})
 
 onMounted(() => {
+  if (readUrl()) {
+    visible.value = true
+  }
   document.addEventListener('keydown', handleKeydown)
 })
 
@@ -145,7 +154,7 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.help-drawer {
+.public-help-drawer {
   position: fixed;
   top: 0;
   right: 0;
@@ -156,13 +165,13 @@ onUnmounted(() => {
   justify-content: flex-end;
 }
 
-.help-drawer__mask {
+.public-help-drawer__mask {
   position: absolute;
   inset: 0;
   background: rgba(0, 0, 0, 0.35);
 }
 
-.help-drawer__wrapper {
+.public-help-drawer__wrapper {
   position: relative;
   display: flex;
   flex-direction: column;
@@ -174,13 +183,13 @@ onUnmounted(() => {
 }
 
 /* [FIX P3 2026-06-30] 最大化 */
-.help-drawer__wrapper.is-maximized {
+.public-help-drawer__wrapper.is-maximized {
   width: 100% !important;
   max-width: 100vw;
   height: 100%;
 }
 
-.help-drawer__header {
+.public-help-drawer__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -190,7 +199,7 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
-.help-drawer__title {
+.public-help-drawer__title {
   display: flex;
   align-items: center;
   gap: var(--spacing-sm, 8px);
@@ -199,18 +208,18 @@ onUnmounted(() => {
   color: var(--yonyou-orange-600, #ea580c);
 }
 
-.help-drawer__title-icon {
+.public-help-drawer__title-icon {
   color: var(--yonyou-orange-600, #ea580c);
 }
 
-.help-drawer__header-actions {
+.public-help-drawer__header-actions {
   display: flex;
   align-items: center;
   gap: var(--spacing-xs, 4px);
 }
 
-.help-drawer__header-btn,
-.help-drawer__close {
+.public-help-drawer__header-btn,
+.public-help-drawer__close {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -225,36 +234,36 @@ onUnmounted(() => {
   transition: all 0.2s;
 }
 
-.help-drawer__header-btn:hover,
-.help-drawer__close:hover {
+.public-help-drawer__header-btn:hover,
+.public-help-drawer__close:hover {
   background: var(--el-fill-color-light, #f5f7fa);
   color: var(--yonyou-orange-600, #ea580c);
 }
 
-.help-drawer__body {
+.public-help-drawer__body {
   flex: 1;
   position: relative;
   overflow: hidden;
   background: var(--el-fill-color-blank, #ffffff);
 }
 
-.help-drawer-enter-active,
-.help-drawer-leave-active {
+.public-help-fade-enter-active,
+.public-help-fade-leave-active {
   transition: opacity 0.25s ease;
 }
 
-.help-drawer-enter-active .help-drawer__wrapper,
-.help-drawer-leave-active .help-drawer__wrapper {
+.public-help-fade-enter-active .public-help-drawer__wrapper,
+.public-help-fade-leave-active .public-help-drawer__wrapper {
   transition: transform 0.25s ease, width 0.25s ease, max-width 0.25s ease;
 }
 
-.help-drawer-enter-from,
-.help-drawer-leave-to {
+.public-help-fade-enter-from,
+.public-help-fade-leave-to {
   opacity: 0;
 }
 
-.help-drawer-enter-from .help-drawer__wrapper,
-.help-drawer-leave-to .help-drawer__wrapper {
+.public-help-fade-enter-from .public-help-drawer__wrapper,
+.public-help-fade-leave-to .public-help-drawer__wrapper {
   transform: translateX(100%);
 }
 </style>

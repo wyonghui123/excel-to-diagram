@@ -13,7 +13,7 @@
         <AppCollapse
           v-for="(step, idx) in scenario.steps"
           :key="step.step_no"
-          :default-expanded="idx === 0"
+          :default-expanded="defaultExpandedSet.has(step.step_no) || (!hasInitialStep && idx === 0)"
           size="md"
           class="help-accordion__step"
         >
@@ -100,13 +100,18 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, reactive, onBeforeUnmount, nextTick } from 'vue'
+import { ref, watch, onMounted, reactive, onBeforeUnmount, nextTick, computed } from 'vue'
 import { AppCollapse } from '@/components/common'
 
 const props = defineProps({
   scenarioId: {
     type: String,
     required: true
+  },
+  // [FIX P3 2026-06-30] URL ?step= 指定初始展开的步骤, 传 null 则默认展开第 1 步
+  initialStep: {
+    type: Number,
+    default: null
   }
 })
 
@@ -210,6 +215,13 @@ async function loadScenario() {
     loading.value = false
   }
 }
+
+// [FIX P3 2026-06-30] 计算初始展开: URL ?step=2 时只展开 step_no=2, 否则展开第 1 步
+const hasInitialStep = computed(() => Number.isFinite(props.initialStep))
+const defaultExpandedSet = computed(() => {
+  if (!hasInitialStep.value) return new Set()
+  return new Set([props.initialStep])
+})
 
 watch(() => props.scenarioId, loadScenario)
 onMounted(() => {
@@ -442,6 +454,7 @@ onBeforeUnmount(() => {
   font-size: 14px;
   color: var(--el-text-color-primary, #1d2129);
   line-height: 1.6;
+  white-space: pre-line;
 }
 
 .help-accordion__tip {

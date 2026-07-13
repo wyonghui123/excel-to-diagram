@@ -1,58 +1,64 @@
-// HelpCenterDrawer - P1 iframe embed unit tests
-import { describe, it, expect, vi, afterEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+// HelpCenterDrawer - P3 unit tests
+//   1) 操作场景 Tab + HelpAccordion 渲染
+//   2) 最大化/还原
+//   3) URL ?help=&step= 自动展开
+//   4) 关闭 (close 按钮 / mask / Escape)
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import HelpCenterDrawer from '../HelpCenterDrawer.vue'
 
-describe('HelpCenterDrawer - P1 iframe', () => {
+// mock fetch: scenario.json
+const fakeScenario = {
+  scenario_id: 'archdata-management',
+  title: '架构数据管理',
+  summary: '...',
+  total_steps: 4,
+  steps: [
+    { step_no: 1, title: 'S1', action: 'A1', expected: 'E1', tip: 'T1', screenshot: '', video: '' },
+    { step_no: 2, title: 'S2', action: 'A2', expected: 'E2', tip: 'T2', screenshot: '', video: 'x.mp4' },
+    { step_no: 3, title: 'S3', action: 'A3', expected: 'E3', tip: '', screenshot: '', video: '' },
+    { step_no: 4, title: 'S4', action: 'A4', expected: 'E4', tip: '', screenshot: '', video: '' }
+  ]
+}
+
+describe('HelpCenterDrawer - P3', () => {
   let wrapper
+  let originalFetch
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => fakeScenario
+    }))
+  })
 
   afterEach(() => {
     if (wrapper) {
       wrapper.unmount()
       wrapper = null
     }
+    globalThis.fetch = originalFetch
     document.body.style.overflow = ''
+    // 清理 URL query
+    if (window.history && window.history.replaceState) {
+      window.history.replaceState({}, '', window.location.pathname)
+    }
   })
 
   it('does not render drawer content when modelValue is false', () => {
-    wrapper = mount(HelpCenterDrawer, {
-      props: { modelValue: false }
-    })
+    wrapper = mount(HelpCenterDrawer, { props: { modelValue: false } })
     expect(document.querySelector('.help-drawer')).toBeNull()
   })
 
-  it('renders drawer with iframe when modelValue is true', async () => {
+  it('renders drawer with 操作场景 title when modelValue is true', async () => {
     wrapper = mount(HelpCenterDrawer, {
       props: { modelValue: true, attachTo: document.body }
     })
     await nextTick()
     expect(document.querySelector('.help-drawer')).toBeTruthy()
-    const iframe = document.querySelector('.help-drawer__iframe')
-    expect(iframe).toBeTruthy()
-    expect(iframe.tagName).toBe('IFRAME')
-  })
-
-  it('uses default helpUrl pointing to /docs/user-guide/index.html', async () => {
-    wrapper = mount(HelpCenterDrawer, {
-      props: { modelValue: true, attachTo: document.body }
-    })
-    await nextTick()
-    const iframe = document.querySelector('.help-drawer__iframe')
-    expect(iframe.getAttribute('src')).toBe('/docs/user-guide/index.html')
-  })
-
-  it('respects custom helpUrl prop', async () => {
-    wrapper = mount(HelpCenterDrawer, {
-      props: {
-        modelValue: true,
-        helpUrl: '/custom/help/index.html',
-        attachTo: document.body
-      }
-    })
-    await nextTick()
-    const iframe = document.querySelector('.help-drawer__iframe')
-    expect(iframe.getAttribute('src')).toBe('/custom/help/index.html')
+    expect(document.querySelector('.help-drawer__title').textContent).toContain('操作场景')
   })
 
   it('emits update:modelValue false when close button clicked', async () => {
@@ -60,13 +66,10 @@ describe('HelpCenterDrawer - P1 iframe', () => {
       props: { modelValue: true, attachTo: document.body }
     })
     await nextTick()
-
     const closeBtn = document.querySelector('.help-drawer__close')
     expect(closeBtn).toBeTruthy()
     closeBtn.click()
     await nextTick()
-
-    expect(wrapper.emitted('update:modelValue')).toBeTruthy()
     expect(wrapper.emitted('update:modelValue')[0]).toEqual([false])
   })
 
@@ -75,87 +78,100 @@ describe('HelpCenterDrawer - P1 iframe', () => {
       props: { modelValue: true, attachTo: document.body }
     })
     await nextTick()
-
-    const mask = document.querySelector('.help-drawer__mask')
-    expect(mask).toBeTruthy()
-    mask.click()
+    document.querySelector('.help-drawer__mask').click()
     await nextTick()
-
-    expect(wrapper.emitted('update:modelValue')).toBeTruthy()
     expect(wrapper.emitted('update:modelValue')[0]).toEqual([false])
   })
 
-  it('opens helpUrl in new tab when header action button clicked', async () => {
-    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
-
+  it('toggles maximize class on header button click', async () => {
     wrapper = mount(HelpCenterDrawer, {
       props: { modelValue: true, attachTo: document.body }
     })
     await nextTick()
-
     const btn = document.querySelector('.help-drawer__header-btn')
     expect(btn).toBeTruthy()
+    const wrap = document.querySelector('.help-drawer__wrapper')
+    expect(wrap.classList.contains('is-maximized')).toBe(false)
     btn.click()
     await nextTick()
-
-    expect(openSpy).toHaveBeenCalled()
-    expect(openSpy.mock.calls[0][0]).toBe('/docs/user-guide/index.html')
-    openSpy.mockRestore()
+    expect(wrap.classList.contains('is-maximized')).toBe(true)
+    btn.click()
+    await nextTick()
+    expect(wrap.classList.contains('is-maximized')).toBe(false)
   })
 
-  it('applies custom width from prop', async () => {
+  it('applies custom width when not maximized', async () => {
     wrapper = mount(HelpCenterDrawer, {
       props: { modelValue: true, width: 1200, attachTo: document.body }
     })
     await nextTick()
-
-    const drawerWrapper = document.querySelector('.help-drawer__wrapper')
-    expect(drawerWrapper.style.width).toBe('1200px')
+    const wrap = document.querySelector('.help-drawer__wrapper')
+    expect(wrap.style.width).toBe('1200px')
   })
 
-  it('bumps iframe key when drawer is reopened', async () => {
+  it('overrides width to 100% when maximized', async () => {
+    wrapper = mount(HelpCenterDrawer, {
+      props: { modelValue: true, width: 1200, attachTo: document.body }
+    })
+    await nextTick()
+    document.querySelector('.help-drawer__header-btn').click()
+    await nextTick()
+    const wrap = document.querySelector('.help-drawer__wrapper')
+    expect(wrap.classList.contains('is-maximized')).toBe(true)
+    // 100% from CSS class
+    expect(wrap.style.width).not.toBe('1200px')
+  })
+
+  it('Escape first restores maximize, then closes on second Escape', async () => {
     wrapper = mount(HelpCenterDrawer, {
       props: { modelValue: true, attachTo: document.body }
     })
     await nextTick()
-    const iframeEl1 = document.querySelector('.help-drawer__iframe')
-    expect(iframeEl1).toBeTruthy()
-
-    await wrapper.setProps({ modelValue: false })
+    // 最大化
+    document.querySelector('.help-drawer__header-btn').click()
     await nextTick()
-    expect(document.querySelector('.help-drawer__iframe')).toBeNull()
-
-    await wrapper.setProps({ modelValue: true })
+    expect(document.querySelector('.help-drawer__wrapper').classList.contains('is-maximized')).toBe(true)
+    // 第一次 Escape: 还原最大化
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     await nextTick()
-    const iframeEl2 = document.querySelector('.help-drawer__iframe')
-    expect(iframeEl2).toBeTruthy()
+    expect(document.querySelector('.help-drawer__wrapper').classList.contains('is-maximized')).toBe(false)
+    expect(wrapper.emitted('update:modelValue')).toBeFalsy()
+    // 第二次 Escape: 关闭
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await nextTick()
+    expect(wrapper.emitted('update:modelValue')[0]).toEqual([false])
   })
 
   it('locks body scroll when drawer opens and restores on close', async () => {
-    wrapper = mount(HelpCenterDrawer, {
-      props: { modelValue: false }
-    })
-
+    wrapper = mount(HelpCenterDrawer, { props: { modelValue: false } })
     await wrapper.setProps({ modelValue: true })
     await nextTick()
     expect(document.body.style.overflow).toBe('hidden')
-
     await wrapper.setProps({ modelValue: false })
     await nextTick()
     expect(document.body.style.overflow).toBe('')
   })
 
-  it('closes drawer when Escape is pressed', async () => {
+  it('uses default scenarioId archdata-management', async () => {
     wrapper = mount(HelpCenterDrawer, {
       props: { modelValue: true, attachTo: document.body }
     })
     await nextTick()
+    await flushPromises()
+    expect(globalThis.fetch).toHaveBeenCalledWith('/docs/scenarios/archdata-management/scenario.json')
+  })
 
-    const evt = new KeyboardEvent('keydown', { key: 'Escape' })
-    document.dispatchEvent(evt)
+  it('passes initialStep prop down to HelpAccordion', async () => {
+    window.history.replaceState({}, '', '?help=archdata-management&step=2')
+    wrapper = mount(HelpCenterDrawer, {
+      props: { modelValue: true, initialStep: 2, attachTo: document.body }
+    })
     await nextTick()
-
-    expect(wrapper.emitted('update:modelValue')).toBeTruthy()
-    expect(wrapper.emitted('update:modelValue')[0]).toEqual([false])
+    await flushPromises()
+    await nextTick()
+    const collapses = document.querySelectorAll('.app-collapse')
+    expect(collapses.length).toBe(4)
+    expect(collapses[1].classList.contains('app-collapse--expanded')).toBe(true)
+    expect(collapses[0].classList.contains('app-collapse--expanded')).toBe(false)
   })
 })
