@@ -18,10 +18,15 @@ os.environ.setdefault('ALLOW_RAW_SQL', '1')
 from meta.tests.factories.role import RoleFactory  # noqa: E402
 from meta.tests.factories.permission import PermissionFactory  # noqa: E402
 
-pytestmark = pytest.mark.integration
-
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DB_PATH = os.path.join(_PROJECT_ROOT, 'meta', 'architecture.db')
+
+import sys
+_admin_token_path = os.path.join(_PROJECT_ROOT, 'tests', 'fixtures')
+if _admin_token_path not in sys.path:
+    sys.path.insert(0, _admin_token_path)
+
+pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
