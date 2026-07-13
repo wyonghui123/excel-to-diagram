@@ -64,6 +64,7 @@ ALLOWED_DIRS = [
     "/opt/app/deployments",
     "/opt/app/shared",
     "/opt/app/backups",
+    "/opt/app/staging",       # [V007.49-D 2026-07-13] staging 隔离环境
     "/tmp",
     "/var/log",
 ]
@@ -498,7 +499,8 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
         danger_level = "info"
         try:
             import sqlite3
-            db_path = "/opt/app/deployments/meta/architecture.db"
+            # [V007.49-D 2026-07-13] 支持 staging 环境 (CORE_SERVICE_DB_PATH 覆盖默认)
+            db_path = os.environ.get("CORE_SERVICE_DB_PATH", "/opt/app/deployments/meta/architecture.db")
             conn = sqlite3.connect(db_path)
             cur = conn.cursor()
             if object_type == "role" and action == "delete":
