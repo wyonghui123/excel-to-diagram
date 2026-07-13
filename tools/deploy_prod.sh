@@ -6,6 +6,7 @@
 PROD_DIR=/opt/app/deployments
 STAGING_DIR=/opt/app/staging
 LOG=/var/log/deploy_prod_$(date +%Y%m%d_%H%M%S).log
+DEPLOY_START_TS=$(date +%s)
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a $LOG; }
 
@@ -84,7 +85,7 @@ done
 
 # 阶段 7: DORA metric 记录
 log "=== STEP 6: DORA metric ==="
-DEPLOY_TIME=$(($(date +%s) - $(stat -c %Y $LOG)))
+DEPLOY_TIME=$(($(date +%s) - $DEPLOY_START_TS))
 echo "deploy_$NEW_VER,success,$DEPLOY_TIME,$(date)" >> /var/log/deploy_metrics.log
 log "  deploy_time: ${DEPLOY_TIME}s"
 

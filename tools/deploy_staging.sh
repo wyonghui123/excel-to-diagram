@@ -71,9 +71,10 @@ done
 
 # 阶段 6: 写 marker
 log "=== STEP 6: success marker ==="
-touch /opt/app/staging/data/last_smoke_ok
-echo "$NEW_VER" > /opt/app/staging/data/last_staging_ver
-log "  marker: /opt/app/staging/data/last_smoke_ok"
+mkdir -p $STAGING_DIR/data
+touch $STAGING_DIR/data/last_smoke_ok
+echo "$NEW_VER" > $STAGING_DIR/data/last_staging_ver
+log "  marker: $STAGING_DIR/data/last_smoke_ok"
 log "  version: $NEW_VER"
 
 log "=== STAGING DEPLOY SUCCESS ==="
