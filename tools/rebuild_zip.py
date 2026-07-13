@@ -29,6 +29,12 @@ from pathlib import Path
 from datetime import datetime
 
 ROOT = Path(__file__).resolve().parent.parent
+# [V007.49-B 2026-07-13] ROOT 自适应: deploy_bundle/tools/ 路径下需向上 2 层
+# 之前 ROOT 永远 = parent.parent, 导致从 deploy_bundle/tools/ 调用时 ROOT=deploy_bundle,
+# 找不到 deploy_bundle/ 嵌套目录, 跳过所有同步. 修复: 探测是否在 deploy_bundle 内,
+# 是则再向上 1 层.
+if ROOT.name == "deploy_bundle":
+    ROOT = ROOT.parent
 DEFAULT_VERSION = "v20260703_004"
 
 
