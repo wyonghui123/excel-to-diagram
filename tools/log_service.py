@@ -246,6 +246,8 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
             # [V007.53 v4.11] SQLite disk I/O error 专项监控
             "/api/disk/errors":        lambda: self._disk_errors(q),          # dmesg I/O 错误扫描
             "/api/disk/check":         lambda: self._disk_check(q),           # SQLite IO 综合健康检查
+            # [V007.49-D 2026-07-13] SQLite readonly 检测 (修补 root 绕过 chmod 的漏洞)
+            "/api/db/can_write":       lambda: self._db_can_write(q),         # 检测 db 当前是否可写
             }
             if route in handlers:
                 handlers[route]()
@@ -2074,6 +2076,110 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
         if has_issues and not quick:
             self._emit_alert(status, "disk_io", "; ".join(issues), result)
         self._json(200, result)
+
+    # ── /api/db/can_write ★ [V007.49-D 2026-07-13] ──────────
+    def _db_can_write(self, q):
+        """[V007.49-D] 检测 db 当前是否真正可写 (修补 root 绕过 chmod 的漏洞)
+        背景: 2026-07-13 chaos 测试发现, chmod 555 拦截不了 root 用户的 SQLite INSERT
+              实际场景: 云盘切换只读时, 我们服务是 root 跑, chmod 不生效
+        方法: 真实写测试 (PRAGMA query_only + TEMP SAVEPOINT)
+        用法: GET /api/db/can_write?token=XXX
+        返回: { "can_write": bool, "mode": "r/w/rw", "errors": [], "tested_at": ... }
+        """
+        result = {
+            "db_path": DB_PATH,
+            "tested_at": datetime.now().isoformat(),
+            "can_write": False,
+            "mode": "unknown",
+            "errors": [],
+            "checks": {},
+        }
+        # 检查 1: PRAGMA query_only (SQLite 3.8+)
+        try:
+            conn = sqlite3.connect(DB_PATH, timeout=5)
+            try:
+                row = conn.execute("PRAGMA query_only").fetchone()
+                query_only = bool(row[0]) if row else False
+                result["checks"]["query_only_pragma"] = query_only
+                if query_only:
+                    result["errors"].append("PRAGMA query_only=1 (db opened in read-only mode)")
+            except Exception as e:
+                result["checks"]["query_only_pragma"] = f"ERR: {e}"
+            finally:
+                conn.close()
+        except Exception as e:
+            result["errors"].append(f"connect failed: {e}")
+            return self._json(200, result)
+
+        # 检查 2: 文件权限
+        try:
+            import stat as stat_mod
+            st = os.stat(DB_PATH)
+            file_mode = stat_mod.filemode(st.st_mode)
+            writable_by_user = bool(st.st_mode & stat_mod.S_IWUSR)
+            result["checks"]["file_mode"] = file_mode
+            result["checks"]["file_writable_by_user"] = writable_by_user
+            if not writable_by_user:
+                result["errors"].append(f"file mode {file_mode} - no user write bit")
+                # [V007.49-D] 即使 root 可绕过, 也标记 can_write=false
+                # 因为如果文件本身没写权限, 强烈暗示云盘/权限问题
+                result["can_write"] = False
+                result["mode"] = "r"
+        except Exception as e:
+            result["errors"].append(f"stat failed: {e}")
+
+        # 检查 3: 真实写测试 (用真实 INSERT, 不放 SAVEPOINT, 避免 root 绕过)
+        # 只在 file_writable=True 时跑 (因为 root 可绕过文件权限, 但我们要测的是 SQLite 层)
+        if not writable_by_user:
+            result["checks"]["real_write_test"] = "SKIPPED (file not writable, root can bypass but considered unsafe)"
+        else:
+            try:
+                conn = sqlite3.connect(DB_PATH, timeout=5)
+                try:
+                    conn.execute("BEGIN IMMEDIATE")
+                    conn.execute("""
+                        INSERT INTO audit_logs (object_type, object_id, action, field_name, user_name, created_at)
+                        VALUES ('can_write_test', 88888, 'CAN_WRITE_TEST', 'test', 'system', datetime('now'))
+                    """)
+                    conn.execute("COMMIT")
+                    # 立即删测试行, 不污染
+                    conn.execute("DELETE FROM audit_logs WHERE object_type='can_write_test' AND object_id=88888")
+                    conn.commit()
+                    result["checks"]["real_write_test"] = "PASS"
+                    result["can_write"] = True
+                    result["mode"] = "rw"
+                except sqlite3.OperationalError as e:
+                    conn.rollback()
+                    result["checks"]["real_write_test"] = f"FAIL: {e}"
+                    result["errors"].append(f"real write failed: {e}")
+                    result["can_write"] = False
+                    result["mode"] = "r"
+                finally:
+                    conn.close()
+            except Exception as e:
+                result["errors"].append(f"write test connect failed: {e}")
+                result["can_write"] = False
+
+        # 检查 4: 磁盘剩余空间
+        try:
+            import shutil
+            usage = shutil.disk_usage(os.path.dirname(DB_PATH))
+            free_mb = usage.free / 1024 / 1024
+            total_mb = usage.total / 1024 / 1024
+            result["checks"]["disk_free_mb"] = round(free_mb, 1)
+            result["checks"]["disk_total_mb"] = round(total_mb, 1)
+            if free_mb < 100:
+                result["errors"].append(f"disk space low: {free_mb:.0f}MB < 100MB required")
+                result["can_write"] = False
+        except Exception as e:
+            result["errors"].append(f"disk check failed: {e}")
+
+        if result["can_write"]:
+            result["status"] = "ok"
+        else:
+            result["status"] = "readonly_or_full"
+
+        return self._json(200, result)
 
     # ── /api/health/inspect ★ ──────────────────────────────────
     def _health_inspect(self, q):
