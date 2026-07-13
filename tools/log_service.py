@@ -10,6 +10,7 @@
     - 配置读取:     /api/config ★
     - 指标导出:     /api/metrics (Prometheus) ★
     - 自检:        /api/health, /api/token
+    - [V007.53] SQLite I/O 专项: /api/disk/errors ★, /api/disk/check ★
 
   usage:
     nohup python3 log_service.py > /tmp/log_service.log 2>&1 &
@@ -43,8 +44,8 @@ BIND      = os.environ.get("LOG_SERVICE_BIND", "0.0.0.0")
 SECRET    = os.environ.get("LOG_SERVICE_SECRET", "v007.35-infra")
 # [V007.49 P1 BUG-FIX 2026-07-09] 服务版本: log_service v4.8 - 加 P0 远程管理端点
 # [V007.51 2026-07-11] 服务版本: log_service v4.9 - P1 基础设施 (看门狗+归档+巡检+告警)
-# [V007.52 2026-07-11] 服务版本: log_service v4.10 - supervisor pid 匹配修复 (排除 self + core_service)
-VERSION   = "v4.10"
+# [V007.53 2026-07-12] 服务版本: log_service v4.11 - SQLite disk I/O error 专项监控 (/api/disk/errors + /api/disk/check)
+VERSION   = "v4.11"
 MAX_LINES = int(os.environ.get("LOG_SERVICE_MAX_LINES", 5000))  # 单次最大行
 TOKEN_HR  = int(os.environ.get("LOG_SERVICE_TOKEN_HOURS", 8))
 
@@ -242,6 +243,9 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
             "/api/disk/forecast":      lambda: self._disk_forecast(q),        # 磁盘满预测
             "/api/health/inspect":     lambda: self._health_inspect(q),       # 周期性健康巡检
             "/api/alert/sse":          lambda: self._alert_sse(q),            # SSE 实时告警推流
+            # [V007.53 v4.11] SQLite disk I/O error 专项监控
+            "/api/disk/errors":        lambda: self._disk_errors(q),          # dmesg I/O 错误扫描
+            "/api/disk/check":         lambda: self._disk_check(q),           # SQLite IO 综合健康检查
             }
             if route in handlers:
                 handlers[route]()
@@ -252,7 +256,7 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
                 self._json(200, {
                     "service": "log_service v4",
                     "endpoints": sorted(handlers.keys()) + ["/", "/api"],
-                    "note": "v4.9 has 32 endpoints; P1: /api/service/supervisor /api/log/archive /api/disk/forecast /api/health/inspect /api/alert/sse",
+                    "note": "v4.11 has 43 endpoints; V007.53: /api/disk/errors /api/disk/check (SQLite disk IO monitoring)",
                 })
             else:
                 # [V007.45] 404 时返"可能相似端点"建议, 避免假端点
@@ -600,6 +604,67 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
             all_lines = [l for l in all_lines if grep.lower() in l.lower()]
         out = "\n".join(all_lines[-lines:])
         self._json(200, {"output": out, "total": len(r.stdout.split("\n"))})
+
+    # ── /api/disk/errors ★ [V007.53 v4.11] ────────
+    def _disk_errors(self, q):
+        """扫描 dmesg 中的磁盘 I/O 错误模式, 支持时间窗口过滤
+        用法: GET /api/disk/errors?hours=24&token=XXX
+        返回: error_count, patterns (分类计数), samples (样例), has_errors
+        """
+        hours = int(q.get("hours", ["24"])[0])
+        grep_only = q.get("grep", [""])[0]
+
+        # I/O 错误关键模式 (SQLite disk I/O error + kernel 层)
+        IO_PATTERNS = {
+            "disk_io_error":    re.compile(r"disk I/O error", re.I),
+            "io_error":         re.compile(r"\bI/O error\b", re.I),
+            "blk_update":       re.compile(r"blk_update_request.*I/O error", re.I),
+            "buffer_io":        re.compile(r"Buffer I/O error", re.I),
+            "ext4_error":       re.compile(r"EXT4-fs error", re.I),
+            "ext4_warning":     re.compile(r"EXT4-fs warning", re.I),
+            "read_error":       re.compile(r"\bread error\b", re.I),
+            "write_error":      re.compile(r"\bwrite error\b", re.I),
+            "sector_error":     re.compile(r"sector.*error", re.I),
+            "sqlite_io":        re.compile(r"disk I/O error", re.I),  # SQLite 特有
+        }
+
+        r = subprocess.run(["dmesg"], capture_output=True, text=True, timeout=5)
+        all_lines = r.stdout.split("\n")
+
+        # 时间过滤: 解析 dmesg 时间戳 [seconds.microseconds]
+        dmesg_now_match = re.search(r"\[\s*(\d+\.\d+)\]", all_lines[-1]) if all_lines else None
+        dmesg_now = float(dmesg_now_match.group(1)) if dmesg_now_match else 0
+        cutoff = dmesg_now - hours * 3600
+
+        matched = {}  # pattern_name -> {"count": N, "samples": [...]}
+        for name, pat in IO_PATTERNS.items():
+            hits = []
+            for line in all_lines:
+                if pat.search(line):
+                    # 时间过滤
+                    ts_match = re.search(r"\[\s*(\d+\.\d+)\]", line)
+                    if ts_match:
+                        ts = float(ts_match.group(1))
+                        if ts < cutoff:
+                            continue
+                    hits.append(line.strip())
+            if hits:
+                matched[name] = {"count": len(hits), "samples": hits[-5:]}
+
+        if grep_only:
+            matched = {k: v for k, v in matched.items() if grep_only.lower() in k.lower()}
+
+        total_errors = sum(v["count"] for v in matched.values())
+        self._json(200, {
+            "check_ts": datetime.now().isoformat(),
+            "window_hours": hours,
+            "dmesg_uptime_sec": dmesg_now,
+            "total_errors": total_errors,
+            "has_errors": total_errors > 0,
+            "patterns": {k: {"count": v["count"]} for k, v in matched.items()},
+            "samples": {k: v["samples"] for k, v in matched.items() if v["samples"]},
+            "status": "WARNING" if total_errors > 0 else "OK",
+        })
 
     # ── /api/config ★ ─────────────────────────────
     def _config(self, q):
@@ -1888,6 +1953,128 @@ class LogHandler(http.server.BaseHTTPRequestHandler):
                              {"free_gb": round(free_gb, 2), "used_pct": result["used_pct"]})
         return self._json(200, result)
 
+    # ── /api/disk/check ★ [V007.53 v4.11] ──────────
+    def _disk_check(self, q):
+        """SQLite disk I/O 综合健康检查: 4 路信号交叉验证
+        信号:
+          1) DB integrity (PRAGMA integrity_check)
+          2) iostat %util (磁盘繁忙度)
+          3) dmesg I/O 错误数 (内核层)
+          4) SQLite 快速压测 (30 次 SELECT, 看失败率)
+        用法: GET /api/disk/check?quick=true  (quick 模式跳过压测)
+        """
+        quick = q.get("quick", ["false"])[0].lower() in ("1", "true", "yes")
+        signals = {}
+        issues = []
+
+        # 信号1: DB integrity
+        try:
+            with _sqlite_open_ro(DB_PATH, timeout=5) as conn:
+                cur = conn.execute("PRAGMA integrity_check").fetchone()
+                signals["db_integrity"] = cur[0] if cur else "unknown"
+                if signals["db_integrity"] != "ok":
+                    issues.append(f"DB integrity: {signals['db_integrity']}")
+        except Exception as e:
+            signals["db_integrity"] = f"error: {e}"
+            issues.append(signals["db_integrity"])
+
+        # 信号2: iostat %util
+        try:
+            r = subprocess.run(["iostat", "-x", "1", "2"], capture_output=True, text=True, timeout=10)
+            vda_lines = [l for l in r.stdout.split("\n") if "vda " in l]
+            if vda_lines:
+                parts = vda_lines[-1].split()
+                util = float(parts[-1]) if len(parts) > 12 else -1
+                await_val = float(parts[-2]) if len(parts) > 11 else -1
+                signals["iostat"] = {"util_pct": util, "await_ms": await_val}
+                if util > 50:
+                    issues.append(f"iostat %util={util} > 50%")
+                elif util > 30:
+                    issues.append(f"iostat %util={util} > 30% (elevated)")
+        except Exception as e:
+            signals["iostat"] = f"error: {e}"
+
+        # 信号3: dmesg I/O 错误数 (近1小时)
+        try:
+            io_pattern = re.compile(r"disk I/O error|I/O error|blk_update_request|Buffer I/O error", re.I)
+            r = subprocess.run(["dmesg"], capture_output=True, text=True, timeout=5)
+            all_lines = r.stdout.split("\n")
+            # 时间过滤: 近1小时
+            last_ts = 0
+            for line in reversed(all_lines):
+                m = re.search(r"\[\s*(\d+\.\d+)\]", line)
+                if m:
+                    last_ts = float(m.group(1))
+                    break
+            cutoff = last_ts - 3600
+            dmesg_errors = 0
+            dmesg_samples = []
+            for line in all_lines:
+                if io_pattern.search(line):
+                    ts_match = re.search(r"\[\s*(\d+\.\d+)\]", line)
+                    if ts_match and float(ts_match.group(1)) >= cutoff:
+                        dmesg_errors += 1
+                        if len(dmesg_samples) < 5:
+                            dmesg_samples.append(line.strip())
+            signals["dmesg_io_errors_1h"] = dmesg_errors
+            if dmesg_errors > 0:
+                issues.append(f"dmesg I/O errors in last hour: {dmesg_errors}")
+                signals["dmesg_samples"] = dmesg_samples
+        except Exception as e:
+            signals["dmesg_io_errors_1h"] = f"error: {e}"
+
+        # 信号4: SQLite 快速压测 (30 SELECT)
+        if not quick:
+            try:
+                ok = 0
+                fail = 0
+                t0 = time.time()
+                for _ in range(30):
+                    try:
+                        conn = sqlite3.connect(DB_PATH, timeout=10)
+                        conn.execute("SELECT count(*) FROM products").fetchone()
+                        conn.close()
+                        ok += 1
+                    except Exception:
+                        fail += 1
+                elapsed = time.time() - t0
+                fail_rate = round(fail / 30 * 100, 1)
+                signals["sqlite_stress"] = {
+                    "ops": 30, "ok": ok, "fail": fail,
+                    "fail_rate_pct": fail_rate, "elapsed_sec": round(elapsed, 2)
+                }
+                if fail > 0:
+                    issues.append(f"SQLite stress: {fail}/30 failed ({fail_rate}%)")
+            except Exception as e:
+                signals["sqlite_stress"] = f"error: {e}"
+        else:
+            signals["sqlite_stress"] = "skipped (quick mode)"
+
+        # 综合评判
+        has_issues = len(issues) > 0
+        score = 100
+        if any("integrity" in i for i in issues):
+            score -= 40
+        if any("dmesg" in i for i in issues):
+            score -= 30
+        if any("util=" in i for i in issues):
+            score -= max(10, min(20, len([i for i in issues if "util=" in i]) * 10))
+        if any("SQLite stress" in i for i in issues):
+            score -= 20
+        status = "critical" if score < 40 else ("warning" if score < 70 else "healthy")
+
+        result = {
+            "check_ts": datetime.now().isoformat(),
+            "score": score,
+            "status": status,
+            "has_issues": has_issues,
+            "issues": issues,
+            "signals": signals,
+        }
+        if has_issues and not quick:
+            self._emit_alert(status, "disk_io", "; ".join(issues), result)
+        self._json(200, result)
+
     # ── /api/health/inspect ★ ──────────────────────────────────
     def _health_inspect(self, q):
         """[V007.51] /api/health/inspect?depth=normal|deep
@@ -2044,7 +2231,7 @@ if __name__ == "__main__":
     print(f"[log_service {VERSION}] LOG_DIR={LOG_DIR}", flush=True)
     print(f"[log_service {VERSION}] DB_PATH={DB_PATH}", flush=True)
     print(f"[log_service {VERSION}] token(first16)={_gen_token().split(',')[0]}", flush=True)
-    print(f"[log_service {VERSION}] P0 endpoints: /api/manage/journal_mode /api/diag/trace /api/test/disk_io /api/deploy/smoke /api/upload /api/exec", flush=True)
+    print(f"[log_service {VERSION}] P0 endpoints: /api/manage/journal_mode /api/diag/trace /api/test/disk_io /api/deploy/smoke /api/upload /api/exec /api/disk/errors /api/disk/check", flush=True)
     server = ThreadedHTTPServer((BIND, PORT), LogHandler)
     try:
         server.serve_forever()

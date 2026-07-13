@@ -27,22 +27,19 @@ if sys.stdout.encoding != 'utf-8':
 
 
 def init_menu_permissions(db_path):
-    """初始化菜单权限表和 menus 导航表数据（元数据驱动）"""
-    # [V007.49] 幂等保护: 已有数据时跳过, 避免 server 启动耗时 30s+
+    """初始化菜单权限表和 menus 导航表数据（元数据驱动）
+
+    [V007.49-A] 增量更新模式（2026-07-12 修复）：
+        修复原 "已有数据就跳过" 的问题。原逻辑会导致 BUG-V056 类的"代码已部署
+        但 DB 数据未更新"的问题。改为：每次启动都执行 UPSERT 检测新增/变更
+        的菜单权限声明、bo_bindings、required_permissions，并展开到角色。
+    """
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM menu_permissions")
     perm_count = cursor.fetchone()[0]
     cursor.execute("SELECT COUNT(*) FROM menus")
     menu_count = cursor.fetchone()[0]
-    if perm_count > 0 and menu_count > 0:
-        print(f"[SKIP] init_menu_permissions: 已有 {perm_count} 权限 + {menu_count} 导航, 跳过")
-        conn.close()
-        return
-
-    print("=" * 60)
-    print("初始化菜单权限表 & menus 导航表")
-    print("=" * 60)
 
     # ========== 步骤1：创建 menu_permissions 表（权限） ==========
     print("\n[步骤1] 创建 menu_permissions 表...")
@@ -115,7 +112,7 @@ def init_menu_permissions(db_path):
 
     print("  [OK] 两表创建完成")
 
-    # ========== 步骤3：检查 menu_permissions 是否已有数据 ==========
+    # ========== 步骤3：检查现有数据（[V007.49-A] 仅记录，不再跳过） ==========
     print("\n[步骤3] 检查现有数据...")
     cursor.execute("SELECT COUNT(*) FROM menu_permissions")
     perm_count = cursor.fetchone()[0]
@@ -123,13 +120,13 @@ def init_menu_permissions(db_path):
     menus_count = cursor.fetchone()[0]
 
     if perm_count > 0:
-        print(f"  ⏭️  已有 {perm_count} 条权限数据")
+        print(f"  [INFO] 已有 {perm_count} 条权限数据，将进行增量 UPSERT")
 
     if menus_count > 0:
-        print(f"  ⏭️  已有 {menus_count} 条导航数据")
+        print(f"  [INFO] 已有 {menus_count} 条导航数据，将进行增量 UPSERT")
 
     # ========== 步骤4：系统菜单定义（元数据驱动） ==========
-    print("\n[步骤4] 插入系统菜单数据...")
+    print("\n[步骤4] 同步系统菜单数据...")
 
     system_menus = [
         {
@@ -327,13 +324,21 @@ def init_menu_permissions(db_path):
     conn.commit()
 
     # ========== 步骤5：写入/更新 menu_permissions 表（权限） ==========
+    # [V007.49-A] 增量更新：每次启动都会 UPSERT，触发条件由 7.5 检测权限变更日志输出
     print("\n[步骤5] 同步 menu_permissions 表...")
+    perm_new = 0
+    perm_updated = 0
     for menu in system_menus:
         cursor.execute(
-            "SELECT menu_code FROM menu_permissions WHERE menu_code = ?",
+            "SELECT menu_code, required_permissions FROM menu_permissions WHERE menu_code = ?",
             [menu['menu_code']]
         )
-        if cursor.fetchone():
+        existing = cursor.fetchone()
+        if existing:
+            old_perms_str = existing[1]
+            old_perms = set(json.loads(old_perms_str) if old_perms_str else [])
+            new_perms = set(menu['required_permissions'])
+            added = new_perms - old_perms
             cursor.execute("""
                 UPDATE menu_permissions SET
                     menu_name = ?, menu_path = ?,
@@ -351,7 +356,11 @@ def init_menu_permissions(db_path):
                 menu.get('data_permission_hint'),
                 menu['menu_code'],
             ])
-            print(f"  [OK] perm: {menu['menu_name']} ({menu['menu_code']})")
+            if added:
+                print(f"  [UPDATE] perm: {menu['menu_name']} (+{len(added)} perms: {sorted(added)})")
+                perm_updated += 1
+            else:
+                print(f"  [SKIP]   perm: {menu['menu_name']} (无变化)")
         else:
             cursor.execute("""
                 INSERT INTO menu_permissions
@@ -368,16 +377,25 @@ def init_menu_permissions(db_path):
                 menu['sort_order'],
                 menu.get('data_permission_hint')
             ])
-            print(f"  [OK] perm: {menu['menu_name']} ({menu['menu_code']})")
+            print(f"  [NEW]    perm: {menu['menu_name']} ({menu['menu_code']})")
+            perm_new += 1
+    print(f"  [SUMMARY] menu_permissions: +{perm_new} 新增, ~{perm_updated} 更新")
 
     # ========== 步骤6：同步 menus 导航表（每次启动 UPSERT） ==========
+    # [V007.49-A] 增量更新：每次启动都同步 bo_bindings 等关键字段
     print("\n[步骤6] 同步 menus 导航表...")
+    nav_new = 0
+    nav_updated = 0
     for menu in system_menus:
         cursor.execute(
-            "SELECT menu_code FROM menus WHERE menu_code = ?",
+            "SELECT menu_code, bo_bindings FROM menus WHERE menu_code = ?",
             [menu['menu_code']]
         )
-        if cursor.fetchone():
+        existing = cursor.fetchone()
+        if existing:
+            old_bindings = existing[1]
+            new_bindings = json.dumps(menu.get('bo_bindings', '[]'), ensure_ascii=False)
+            bindings_changed = old_bindings != new_bindings
             cursor.execute("""
                 UPDATE menus SET
                     menu_name = ?, menu_path = ?, page_type = ?,
@@ -401,7 +419,11 @@ def init_menu_permissions(db_path):
                 menu['sort_order'],
                 menu['menu_code'],
             ])
-            print(f"  [OK] nav:  {menu['menu_name']} ({menu['menu_code']}) [{menu.get('page_type')}]")
+            if bindings_changed:
+                print(f"  [UPDATE] nav:  {menu['menu_name']} (bo_bindings changed)")
+                nav_updated += 1
+            else:
+                print(f"  [SKIP]   nav:  {menu['menu_name']}")
         else:
             cursor.execute("""
                 INSERT INTO menus
@@ -425,7 +447,9 @@ def init_menu_permissions(db_path):
                 menu.get('description', ''),
                 menu['sort_order'],
             ])
-            print(f"  [OK] nav:  {menu['menu_name']} ({menu['menu_code']}) [{menu.get('page_type')}]")
+            print(f"  [NEW]    nav:  {menu['menu_name']} ({menu['menu_code']})")
+            nav_new += 1
+    print(f"  [SUMMARY] menus: +{nav_new} 新增, ~{nav_updated} 更新")
 
     # ========== 步骤6.5: yaml import_export → menu bo_bindings 自动对齐 ==========
     # [H14.1] 单一事实源同步: 从 meta/schemas/*.yaml 读 import_export.import_enabled /
