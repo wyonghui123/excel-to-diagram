@@ -1328,6 +1328,10 @@ class ActionExecutor:
     def _cascade_pre_delete_role(self, role_id: int) -> None:
         """[FIX BUG-V061 2026-07-12] 角色删除前先清空所有引用此角色的中间表.
 
+        [L13.1 fix 2026-07-13] 补全 audit_logs: 每个级联删除都写 DISSOCIATE 审计
+        之前只有 role_permissions 写 (且仅 26/28), role_menu_permissions / role_dimension_scopes
+        完全没审计. 现在所有 7 张表都审计, 配合 audit_recovery.py 可 100% 恢复.
+
         已知会被引用的表 (本地 DB 验证):
         - role_permissions          (角色-权限 M2M)
         - role_menu_permissions     (角色-菜单 M2M)  -- 不是 role_menus
@@ -1338,16 +1342,25 @@ class ActionExecutor:
         - group_roles               (角色-用户组 M2M, DB FK 已 ON DELETE CASCADE)
         """
         CASCADE_TABLES_FOR_ROLE = [
-            'role_permissions',
-            'role_menu_permissions',
-            'permission_rules',
-            'role_data_permissions',
-            'role_dimension_scopes',
-            'user_roles',
+            ('role_permissions', 'permission_id'),
+            ('role_menu_permissions', 'menu_id'),
+            ('permission_rules', 'rule_id'),
+            ('role_data_permissions', 'data_permission_id'),
+            ('role_dimension_scopes', 'scope_id'),
+            ('user_roles', 'user_id'),
             # group_roles: DB 已 ON DELETE CASCADE, 不必手动删除
         ]
-        for table in CASCADE_TABLES_FOR_ROLE:
+        for table, target_col in CASCADE_TABLES_FOR_ROLE:
             try:
+                # [L13.1] 先 SELECT 出所有要删除的 row (记录 target_id 用于 audit)
+                try:
+                    sel_cursor = self.ds.execute(
+                        f"SELECT {target_col} FROM {table} WHERE role_id = ?", (role_id,)
+                    )
+                    target_ids = [row[0] for row in sel_cursor.fetchall()] if hasattr(sel_cursor, 'fetchall') else []
+                except Exception:
+                    target_ids = []
+
                 cursor = self.ds.execute(
                     f"DELETE FROM {table} WHERE role_id = ?", (role_id,)
                 )
@@ -1356,6 +1369,33 @@ class ActionExecutor:
                     f"[BUG-V061] cascade role_delete: deleted role_id={role_id} from {table} "
                     f"(rowcount={deleted})"
                 )
+
+                # [L13.1] 写 audit DISSOCIATE 记录 (每条关联 1 行)
+                if target_ids and hasattr(self, 'audit_logger') and self.audit_logger and self.audit_logger.enabled:
+                    from flask import has_request_context, g as _g
+                    user_id = None
+                    user_name = None
+                    if has_request_context():
+                        user_id = getattr(_g, 'current_user_id', None) or getattr(_g, 'user_id', None)
+                        user_name = getattr(_g, 'current_user_name', None) or getattr(_g, 'user_name', None)
+                    for tid in target_ids:
+                        try:
+                            self.audit_logger.log(
+                                object_type='role',
+                                object_id=role_id,
+                                action='DISSOCIATE',
+                                field_name=target_col,
+                                old_value=json.dumps({"target_type": target_col.replace('_id', ''), "target_id": tid}),
+                                extra_data={
+                                    "cascade_reason": f"role#{role_id} deletion",
+                                    "through_table": table,
+                                    "fk_column": "role_id",
+                                },
+                                user_id=user_id,
+                                user_name=user_name,
+                            )
+                        except Exception as audit_err:
+                            logger.warning(f"[L13.1] audit log failed for {table} role#{role_id} -> {tid}: {audit_err}")
             except Exception as e:
                 logger.warning(
                     f"[BUG-V061] Failed to clean {table} for role_id={role_id}: {e}"
