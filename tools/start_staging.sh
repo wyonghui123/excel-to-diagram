@@ -7,9 +7,10 @@
 # 不在 staging 用 setsid - 直接 nohup (简单)
 # 复用生产 .py 文件, 通过 env var 切换端口 + db
 
-pkill -9 -f "CORE_SERVICE_PORT=19200" 2>/dev/null
-pkill -9 -f "LOG_SERVICE_PORT=19101" 2>/dev/null
-sleep 2
+# [V007.49-D] 关键: 杀 staging 进程 (不能用 pkill -f 匹配 env var, 要按路径杀)
+pkill -9 -f "/opt/app/staging/bin/core_service.py" 2>/dev/null
+pkill -9 -f "/opt/app/staging/bin/log_service.py" 2>/dev/null
+sleep 3
 
 LOG_DIR=/opt/app/staging/logs
 mkdir -p $LOG_DIR
