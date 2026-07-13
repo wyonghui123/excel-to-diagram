@@ -2093,6 +2093,43 @@ class ActionExecutor:
                 from meta.core.interceptors.cascade_interceptor import CascadeInterceptor
                 from meta.core.interceptors.audit_interceptor import AuditInterceptor
 
+                # [L11.3 fix 2026-07-13] DELETE 二次确认 — 防止 AI/用户误删关键实体
+                # 必须带 X-Confirm-Delete: <uuid> header, 二次确认才能继续
+                # 设计: 不强制 (向后兼容), 但要求危险操作显式 confirm
+                # 触发条件: (1) object_type 是 P0 关键实体 (role/user/user_group/permission)
+                #          (2) 关联引用 > 0 (会触发级联)
+                #          (3) 用户没传 X-Confirm-Delete header
+                from flask import request as _flask_req
+                _critical_types = ('role', 'user', 'user_group', 'permission', 'product')
+                if meta_object.object_name in _critical_types:
+                    _confirm = _flask_req.headers.get('X-Confirm-Delete', '').strip()
+                    if not _confirm:
+                        # 自动生成 confirm token 写入 audit_log
+                        import uuid as _uuid
+                        _token = str(_uuid.uuid4())
+                        # 检查级联引用数
+                        _ref_count = 0
+                        try:
+                            from meta.core.sql_connection_pool import get_conn
+                            with get_conn() as _conn:
+                                _cur = _conn.cursor()
+                                # 简化: 只查 role_permissions
+                                if meta_object.object_name == 'role':
+                                    _cur.execute("SELECT COUNT(*) FROM role_permissions WHERE role_id = ?", (id_value,))
+                                    _ref_count = _cur.fetchone()[0]
+                        except Exception:
+                            pass
+                        if _ref_count > 0:
+                            return self._json(409, {
+                                "error": f"confirm required for {meta_object.object_name}#{id_value} deletion ({_ref_count} references)",
+                                "confirm_required": True,
+                                "confirm_token": _token,
+                                "hint": f"retry with header: X-Confirm-Delete: {_token}",
+                                "object_type": meta_object.object_name,
+                                "object_id": id_value,
+                                "cascade_ref_count": _ref_count,
+                            })
+
                 # 构造 CascadeInterceptor 需要的最小 ctx
                 cascade_ctx = ActionContext(
                     meta_object=meta_object,

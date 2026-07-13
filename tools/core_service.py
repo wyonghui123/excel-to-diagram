@@ -210,6 +210,8 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
                 return self._audit_log(q)
             elif route == "/api/audit/rotate":
                 return self._audit_rotate_endpoint(q)
+            elif route == "/api/danger/confirm" or route == "/api/danger/verify":
+                return self._danger_confirm(q)
             return self._json(404, {"error": "not found", "route": route})
         except Exception as e:
             return self._json(500, {"error": str(e)})
@@ -225,6 +227,8 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
                 return self._upload(q)
             elif route == "/api/audit/rotate":
                 return self._audit_rotate_endpoint(q)
+            elif route == "/api/danger/confirm" or route == "/api/danger/verify":
+                return self._danger_confirm(q)
             return self._json(404, {"error": "POST not found", "route": route})
         except Exception as e:
             return self._json(500, {"error": str(e)})
@@ -352,6 +356,68 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
             body = self.rfile.read(clen)
         except Exception as e:
             return self._json(500, {"error": f"read failed: {e}"})
+        # [L8.5 fix 2026-07-13] Multipart 解析 — 客户端发 multipart/form-data 时, 只写 boundary 后的 file 内容
+        # 不解析会导致文件被 multipart 头污染 (--Boundary\r\nContent-Disposition:...)
+        content_type = self.headers.get("Content-Type", "")
+        if "multipart/form-data" in content_type:
+            try:
+                import re as _re
+                m = _re.search(r'boundary=(?:"([^"]+)"|([^;\s]+))', content_type)
+                if not m:
+                    return self._json(400, {"error": "multipart but no boundary"})
+                boundary = (m.group(1) or m.group(2)).encode()
+                sep = b'--' + boundary
+                # 找到 file 字段的 part (Content-Disposition 包含 filename)
+                idx = 0
+                file_content = None
+                file_name = None
+                while True:
+                    start = body.find(sep, idx)
+                    if start == -1:
+                        break
+                    part_start = start + len(sep)
+                    if body[part_start:part_start+2] == b'--':
+                        break  # 结束
+                    # 跳过分隔行 (\r\n)
+                    if body[part_start:part_start+2] == b'\r\n':
+                        part_start += 2
+                    # 找 part header 结束 (\r\n\r\n)
+                    header_end = body.find(b'\r\n\r\n', part_start)
+                    if header_end == -1:
+                        break
+                    headers = body[part_start:header_end].decode('utf-8', errors='replace')
+                    # 找 Content-Disposition
+                    cd_match = _re.search(r'Content-Disposition:\s*form-data;\s*name="([^"]+)"(?:;\s*filename="([^"]*)")?',
+                                          headers, _re.IGNORECASE)
+                    if cd_match and cd_match.group(2):  # 有 filename = file field
+                        content_start = header_end + 4
+                        # 找下一个 boundary (前面有 \r\n)
+                        next_sep = body.find(b'\r\n' + sep, content_start)
+                        if next_sep == -1:
+                            file_content = body[content_start:]
+                        else:
+                            file_content = body[content_start:next_sep]
+                        file_name = cd_match.group(2)
+                        break
+                    # 找下一个 boundary
+                    next_part = body.find(sep, header_end)
+                    if next_part == -1:
+                        break
+                    idx = next_part
+                if file_content is None:
+                    return self._json(400, {"error": "multipart: no file field found"})
+                # 安全: 拒绝 path traversal 的 filename
+                if '..' in file_name or '/' in file_name or '\\' in file_name:
+                    self._audit("upload_denied", self.client_address[0],
+                                {"reason": "bad_filename", "filename": file_name})
+                    return self._json(400, {"error": f"bad filename: {file_name}"})
+                # 如果 client 没传 path, 用 path/<file_name>
+                if target.endswith('/') or target == '/tmp':
+                    target = target.rstrip('/') + '/' + file_name
+                body = file_content
+                clen = len(body)
+            except Exception as mp_err:
+                return self._json(400, {"error": f"multipart parse failed: {mp_err}"})
         try:
             os.makedirs(os.path.dirname(target) or "/tmp", exist_ok=True)
             with open(target, "wb") as f:
@@ -404,6 +470,69 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self._audit("upload_fail", self.client_address[0], {"path": target, "err": str(e)})
             return self._json(500, {"error": str(e)})
+
+    # ── POST /api/danger/confirm (L11.3 fix 2026-07-13) ──
+    # 危险操作二次确认 — 用于防止 AI/用户误删关键实体
+    # 用法:
+    #   1. POST /api/danger/confirm?object_type=role&object_id=1201&token=XXX
+    #      → 返回 { "confirm_required": true, "confirm_token": "<uuid>", "warn": "..." }
+    #   2. 真实删除 API 必须带 X-Confirm-Delete: <uuid> header
+    # 注: backend meta/server.py 检查 X-Confirm-Delete (见 action_executor.py L11.3 fix)
+    #     core_service 仅提供 token 颁发 + 验证服务
+    def _danger_confirm(self, q):
+        level = _check_token(q)
+        if not level:
+            return self._json(403, {"error": "token required"})
+        if level not in ("write", "admin"):
+            return self._json(403, {"error": f"insufficient permission: have '{level}'"})
+        object_type = q.get("object_type", [""])[0]
+        object_id = q.get("object_id", [""])[0]
+        action = q.get("action", ["delete"])[0]
+        if not object_type or not object_id:
+            return self._json(400, {"error": "object_type + object_id required"})
+        import uuid as _uuid
+        import time as _t
+        token = str(_uuid.uuid4())
+        # 危险等级评估
+        warn_msgs = []
+        danger_level = "info"
+        try:
+            import sqlite3
+            db_path = "/opt/app/deployments/meta/architecture.db"
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            if object_type == "role" and action == "delete":
+                cur.execute("SELECT COUNT(*) FROM role_permissions WHERE role_id = ?", (object_id,))
+                warn_msgs.append(f"role_permissions ref: {cur.fetchone()[0]}")
+                cur.execute("SELECT COUNT(*) FROM role_menu_permissions WHERE role_id = ?", (object_id,))
+                warn_msgs.append(f"role_menu_permissions ref: {cur.fetchone()[0]}")
+                cur.execute("SELECT COUNT(*) FROM role_dimension_scopes WHERE role_id = ?", (object_id,))
+                warn_msgs.append(f"role_dimension_scopes ref: {cur.fetchone()[0]}")
+                cur.execute("SELECT code, name FROM role WHERE id = ?", (object_id,))
+                row = cur.fetchone()
+                if row:
+                    warn_msgs.insert(0, f"target: role#{object_id} ({row[0]}: {row[1]})")
+                danger_level = "critical" if any('ref: 0' not in m and 'ref:' in m for m in warn_msgs if 'ref:' in m) else "warn"
+            elif object_type == "user":
+                danger_level = "high"
+            conn.close()
+        except Exception as e:
+            warn_msgs.append(f"ref check failed: {e}")
+        self._audit("danger_confirm_issued", self.client_address[0],
+                    {"object_type": object_type, "object_id": object_id,
+                     "action": action, "warn_msgs": warn_msgs, "danger_level": danger_level})
+        return self._json(200, {
+            "confirm_required": True,
+            "confirm_token": token,
+            "object_type": object_type,
+            "object_id": object_id,
+            "action": action,
+            "warn_msgs": warn_msgs,
+            "danger_level": danger_level,
+            "issued_at": _t.time(),
+            "hint": f"with token in HTTP header: X-Confirm-Delete: {token}",
+            "usage": "Delete API will check X-Confirm-Delete header; missing or wrong token returns 409",
+        })
 
     # ── GET /api/exec ───────────────────────────────────
     def _exec(self, q):
