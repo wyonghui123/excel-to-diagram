@@ -833,6 +833,14 @@ def main():
                     "verify_bundle.py",
                     "log_service.py",  # [V007.35] 基础设施旁路诊断服务
                 ]
+                # [V007.49-B 2026-07-13] 新增 meta/ 关键文件同步 — 修复 BUG-V061 漏部署
+                # 之前只同步 tools/, 导致改了 meta/core/action_executor.py 后
+                # deploy_bundle/meta/core/action_executor.py 还是旧版, zip 也不包含新版
+                META_FILES_TO_SYNC = [
+                    "meta/core/action_executor.py",
+                    "meta/scripts/init_menu_permissions.py",
+                    "meta/server.py",
+                ]
                 SYNC_DIRS = [
                     "lib",  # deploy.sh 依赖的子模块
                 ]
@@ -845,6 +853,23 @@ def main():
                         dst.write_bytes(new_content)
                     else:
                         shutil.copy2(src, dst)
+                # [V007.49-B 2026-07-13] MD5 工具函数
+                def _file_md5(p: Path) -> str:
+                    if not p.exists():
+                        return ""
+                    return hashlib.md5(p.read_bytes()).hexdigest()
+                def _git_file_md5(rel_path: str) -> str:
+                    """从 git HEAD 读文件的 MD5, 失败返回空串"""
+                    try:
+                        result = subprocess.run(
+                            ["git", "-C", str(ROOT), "show", f"HEAD:{rel_path}"],
+                            capture_output=True, timeout=10
+                        )
+                        if result.returncode != 0:
+                            return ""
+                        return hashlib.md5(result.stdout).hexdigest()
+                    except Exception:
+                        return ""
                 # [V007.25] 同步 zip (用户 SFTP 上传时, deploy_bundle/ 内必须有 zip)
                 zip_dst = deploy_bundle_dir / out_path.name
                 if not zip_dst.exists() or out_path.stat().st_mtime > zip_dst.stat().st_mtime:
@@ -898,6 +923,49 @@ def main():
                         synced_count += 1
                     else:
                         pass  # dst 比 src 新, 不需同步
+                # [V007.49-B 2026-07-13] 同步 meta/ 关键文件 — 必须与 git HEAD 一致
+                # 同时强制 mtime 更新, 避免 deploy_bundle 比 git HEAD 旧但 mtime 较新的情况
+                for mfile in META_FILES_TO_SYNC:
+                    src_meta = ROOT / mfile
+                    dst_meta = deploy_bundle_dir / mfile
+                    if not src_meta.exists():
+                        print(f"  [WARN] {mfile} 在 worktree 不存在, 跳过")
+                        continue
+                    dst_meta.parent.mkdir(parents=True, exist_ok=True)
+                    # 对比 git HEAD vs deploy_bundle/ MD5 — 不一致强制同步
+                    head_md5 = _git_file_md5(mfile)
+                    dst_md5 = _file_md5(dst_meta)
+                    need_sync = (head_md5 != dst_md5) or (not dst_meta.exists()) \
+                                or (src_meta.stat().st_mtime > dst_meta.stat().st_mtime)
+                    if need_sync:
+                        _sync_lf(src_meta, dst_meta)
+                        synced_count += 1
+                        rel = mfile
+                        if head_md5 and dst_md5 and head_md5 != dst_md5:
+                            print(f"  [V007.49-B] 同步 {rel} (HEAD={head_md5[:8]} != deploy_bundle={dst_md5[:8]})")
+                        else:
+                            print(f"  [OK] 同步 {rel} (mtime/缺失)")
+                    # else: 一致, 不动
+
+                # [V007.49-B 2026-07-13] 完成后做"对账": 对每个关键文件验证 deploy_bundle/ == git HEAD
+                print(f"[V007.49-B] ========== deploy_bundle/ vs git HEAD 对账 ==========")
+                drift_count = 0
+                for mfile in META_FILES_TO_SYNC + SYNC_FILES:
+                    head_md5 = _git_file_md5(mfile)
+                    dst_path = ROOT / "deploy_bundle" / mfile
+                    if not dst_path.exists():
+                        print(f"  [DRIFT] {mfile}: deploy_bundle/ 缺失")
+                        drift_count += 1
+                        continue
+                    dst_md5 = _file_md5(dst_path)
+                    if head_md5 and head_md5 != dst_md5:
+                        print(f"  [DRIFT] {mfile}: HEAD={head_md5[:8]} deploy_bundle={dst_md5[:8]}")
+                        drift_count += 1
+                if drift_count == 0:
+                    print(f"  [OK] 所有关键文件 deploy_bundle/ == git HEAD")
+                else:
+                    print(f"  [FAIL] {drift_count} 个文件 deploy_bundle/ != git HEAD")
+                    # 不强制 exit, 因为可能 git HEAD 还没 commit (但会警告)
                 # 同步目录 (lib/)
                 # 同步目录 (V007.25 fix: 写到 tools/ 子目录, 与 zip 结构一致)
                 for dname in SYNC_DIRS:
