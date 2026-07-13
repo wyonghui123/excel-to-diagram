@@ -309,21 +309,27 @@ export function useMenuPermission(roleId: Ref<string>) {
         .filter(m => m.assigned)
         .map(m => m.menu_code)
 
-      // [FIX v1.0.2] 收集所有需要落库的功能权限
+      // [FIX v1.0.2 + BUG-V062] 收集所有需要落库的功能权限
       // source:
       //   'include' - 用户手动 include
       //   'exclude' - 用户手动 exclude
       //   'auto'    - 来自自动推导推荐 (applyDerived 已确认)
-      //   'unbound' - 来自 bo_bindings 派生但未勾选, 不写入
-      // 'auto' 必须写入, 因为用户看到推荐后没再手动改 = 接受推荐
+      //   'manual'  - 后端 GET 推得, 菜单未分配时
+      //   ''        - 来自 bo_bindings 派生 (unbound), 不写入
       // 关键: 这里不能 filter `p.granted === true` !
       //   用户取消勾选 = source='exclude', granted=false,
       //   必须传给后端做 DELETE, 否则后端不知道要 ungrant
       //   之前版本有 `p.granted` 过滤, 导致取消勾选静默丢失
+      // [BUG-V062] 之前 filter 排除了 'manual' 源, 导致后端 PFCG auto-sync
+      //   把用户没传 = 没拒绝的权限也自动 sync 进 role_permissions,
+      //   刷新后所有权限都显示 granted. 修复: 把 'manual' 也纳入 explicit set.
+      //   这样用户没操作过的权限 = granted=false = 进入 explicit_denied,
+      //   后端不会 auto-sync 它们进 role_permissions.
       const permissions = menus.value
         .flatMap(m => m.required_permissions || [])
         .filter(p =>
-          p.source === 'include' || p.source === 'exclude' || p.source === 'auto'
+          p.source === 'include' || p.source === 'exclude' ||
+          p.source === 'auto'   || p.source === 'manual'
         )
         .map(p => ({ code: p.code, granted: !!p.granted }))
 
