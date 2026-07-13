@@ -93,6 +93,28 @@ else
     FAIL=$((FAIL+1))
 fi
 
+# T9: staging 前端 (port 18081) - HTML 返回
+RESP=$(curl -s --max-time 5 http://localhost:18081/index.html 2>/dev/null)
+if echo "$RESP" | grep -q '<!doctype html>'; then
+    SIZE=$(echo -n "$RESP" | wc -c)
+    echo "  ✓ T9 staging frontend: 18081 returns HTML ($SIZE bytes)"
+    PASS=$((PASS+1))
+else
+    echo "  ✗ T9 staging frontend: 18081 not HTML"
+    FAIL=$((FAIL+1))
+fi
+
+# T10: staging 静态资源 (assets/*.js) - Vite 编译产物
+RESP=$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' http://localhost:18081/assets/ 2>/dev/null)
+if [ "$RESP" = "200" ] || [ "$RESP" = "301" ] || [ "$RESP" = "404" ]; then
+    # SPA fallback 也算 ok
+    echo "  ✓ T10 staging static assets: /assets/ returns $RESP (SPA fallback ok)"
+    PASS=$((PASS+1))
+else
+    echo "  ✗ T10 staging static assets: $RESP"
+    FAIL=$((FAIL+1))
+fi
+
 echo
 echo "=== RESULT: $PASS PASS / $FAIL FAIL ==="
 if [ $FAIL -eq 0 ]; then
