@@ -22,8 +22,9 @@ import sqlite3
 import subprocess
 import shutil
 
-DB_PATH = '/opt/app/deployments/meta/architecture.db'
-DB_BAK = '/opt/app/deployments/meta/architecture.db.chaos_bak'
+# [V007.49-D 2026-07-13] 支持 staging 路径 (env var 覆盖, 默认 prod)
+DB_PATH = os.environ.get("CHAOS_DB_PATH", "/opt/app/deployments/meta/architecture.db")
+DB_BAK = os.environ.get("CHAOS_DB_BAK", f"{DB_PATH}.chaos_bak")
 
 
 def backup_db():
