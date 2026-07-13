@@ -359,10 +359,48 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
             exe = target.endswith((".sh", ".py"))
             if exe:
                 os.chmod(target, 0o755)
+            # [V007.49-B 2026-07-13] Upload 契约校验 — 防止"假成功"bug (observability v?/api/upload_multi 报告 200 但实际未写盘)
+            # 立即读回磁盘, 验证 size + md5 必须与上传的一致, 不一致返回 500 + audit.
+            try:
+                verified_size = os.path.getsize(target)
+                import hashlib
+                with open(target, "rb") as f:
+                    verified_md5 = hashlib.md5(f.read()).hexdigest()
+                expected_md5 = hashlib.md5(body).hexdigest()
+                contract_ok = (verified_size == len(body)) and (verified_md5 == expected_md5)
+            except Exception as verify_err:
+                contract_ok = False
+                verified_size = -1
+                verified_md5 = ""
+                expected_md5 = hashlib.md5(body).hexdigest()
+                self._audit("upload_verify_error", self.client_address[0],
+                            {"path": target, "err": str(verify_err)})
+            if not contract_ok:
+                # 删除可疑文件, 避免下次读取拿到残缺数据
+                try:
+                    os.remove(target)
+                except Exception:
+                    pass
+                self._audit("upload_contract_violated", self.client_address[0],
+                            {"path": target, "sent_size": len(body),
+                             "verified_size": verified_size, "expected_md5": expected_md5,
+                             "verified_md5": verified_md5})
+                return self._json(500, {
+                    "error": "upload contract violated (file on disk != uploaded data)",
+                    "path": target,
+                    "sent_size": len(body),
+                    "verified_size": verified_size,
+                    "expected_md5": expected_md5,
+                    "verified_md5": verified_md5,
+                    "hint": "file removed, please retry",
+                })
             self._audit("upload_ok", self.client_address[0],
-                        {"level": level, "path": target, "size": len(body), "executable": exe})
+                        {"level": level, "path": target, "size": len(body),
+                         "verified_size": verified_size, "md5": verified_md5, "executable": exe})
             return self._json(200, {"action": "uploaded", "path": target,
-                                    "size": len(body), "executable": exe})
+                                    "size": len(body), "verified_size": verified_size,
+                                    "md5": verified_md5, "executable": exe,
+                                    "contract": "ok"})
         except Exception as e:
             self._audit("upload_fail", self.client_address[0], {"path": target, "err": str(e)})
             return self._json(500, {"error": str(e)})
