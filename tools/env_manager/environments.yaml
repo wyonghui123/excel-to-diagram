@@ -1,0 +1,145 @@
+# environments.yaml — 远程环境注册表 (V007.50 2026-07-14)
+#
+# 设计原则:
+#   - 一个环境 = 一个 {name, root_path, ports, db_path, secret}
+#   - 加新环境: 在 environments 列表加一段, 跑 env_manager.sh render 即生成所有脚本
+#   - 优化基础设施: 改 lib/*.sh, 重跑 render 即作用于所有环境
+#   - staging 当前承担: prod 双胞胎 + 远程 e2e + 问题复现沙盒 (3 角色)
+#
+# Schema 字段说明:
+#   name:          环境标识 (小写英文)
+#   description:   环境用途描述
+#   host:          远程主机 (yonaa)
+#   root_path:     环境根目录 (如 /opt/app/staging)
+#   db_path:       独立 db 文件路径
+#   ports:
+#     backend:     Flask 后端端口
+#     unified:     前端代理端口
+#     log_service: log_service 端口
+#     core_service:core_service 端口
+#   secret:        Token SECRET (SHA256[:16] 算法)
+#   shared_pkgs:   从 prod 共享的 Python 包 (symlink)
+#   systemd_unit:  systemd unit 名称前缀
+#   db_source:     db 来源 (sync_from_prod / none)
+#   ssl_cert:      SSL 证书路径 (可选)
+#   log_dir:       日志目录
+
+environments:
+  prod:
+    description: "生产环境 - 用户/AI 真实使用"
+    host: "172.20.59.7"
+    root_path: "/opt/app"
+    db_path: "/opt/app/deployments/meta/architecture.db"
+    ports:
+      backend: 3011
+      unified: 8081
+      log_service: 9101
+      core_service: 9200
+    secret: "v007.35-infra"
+    shared_pkgs: []   # prod 不共享，自己拥有
+    systemd_unit: ""  # 沿用历史 unit
+    db_source: "none"
+    ssl_cert: "/opt/app/shared/core_service.crt"
+    log_dir: "/opt/app/shared/logs"
+    browser_url: "http://172.20.59.7:8081"
+
+  staging:
+    description: "staging - prod 双胞胎 + 远程 e2e + 问题复现沙盒 (3 角色)"
+    host: "172.20.59.7"
+    root_path: "/opt/app/staging"
+    db_path: "/opt/app/staging/meta/architecture.db"
+    ports:
+      backend: 13011
+      unified: 18081
+      log_service: 19101
+      core_service: 19200
+    secret: "v007.35-infra-staging"  # staging 单独 secret
+    shared_pkgs:
+      - telemetry
+      - mcp
+      - rls
+      - schema
+      - config
+      - tools
+    systemd_unit: "staging"  # staging_core_service.service
+    db_source: "sync_from_prod"   # 每天 0 3 cron 同步 prod 7 天前 backup
+    ssl_cert: "/opt/app/shared/core_service.crt"  # 复用 prod 证书 (仅内网)
+    log_dir: "/opt/app/staging/logs"
+    browser_url: "http://172.20.59.7:18081"
+
+# 未来新增环境示例 (注释保留, 不启用):
+#   test:
+#     description: "test 环境 - 集成测试 (如需)"
+#     host: "172.20.59.7"
+#     root_path: "/opt/app/test"
+#     db_path: "/opt/app/test/meta/architecture.db"
+#     ports:
+#       backend: 23011
+#       unified: 28081
+#       log_service: 29101
+#       core_service: 29200
+#     secret: "v007.35-infra-test"
+#     shared_pkgs: [telemetry, mcp, rls, schema, config, tools]
+#     systemd_unit: "test"
+#     db_source: "sync_from_prod"
+#     ssl_cert: "/opt/app/shared/core_service.crt"
+#     log_dir: "/opt/app/test/logs"
+#     browser_url: "http://172.20.59.7:28081"
+
+# 全局配置
+common:
+  python_bin: "/opt/miniconda3-py39/bin/python"
+  python3_bin: "/opt/miniconda3-py39/bin/python3"
+  prod_root: "/opt/app"
+  prod_deployments: "/opt/app/deployments"
+  shared_dir: "/opt/app/shared"
+  token_algorithm: "SHA256(secret:hour)[:16]"
+  token_window_hours: 3   # ±1h 容错
+  db_backup_dir: "/opt/app/backups"
+  logrotate_dir: "/etc/logrotate.d"
+  cron_file: "/etc/cron.d/yonaa-services"
+
+# ops_scheduler 任务模板 (每个环境注册一份)
+ops_scheduler_tasks:
+  - name: "{env}_db_backup"
+    desc: "{env} db backup"
+    interval_sec: 21600   # 6h
+    command: "/bin/bash /opt/app/shared/db_backup.sh --env={env}"
+
+  - name: "{env}_health_inspect"
+    desc: "{env} health inspection"
+    interval_sec: 1800   # 30m
+    command: "curl -sf http://127.0.0.1:{log_port}/api/health/inspect"
+
+  - name: "{env}_disk_io_check"
+    desc: "{env} SQLite disk I/O health check"
+    interval_sec: 300   # 5m
+    command: "curl -sf 'http://127.0.0.1:{log_port}/api/disk/check?quick=true'"
+
+# e2e 测试模板 (8 项 smoke + staging 扩展项)
+e2e_tests:
+  common:
+    - name: "T1: 4 端口健康"
+      check: "all_ports_alive"
+    - name: "T2: 登录接口"
+      check: "login"
+    - name: "T3: 业务对象列表"
+      check: "bo_list"
+    - name: "T4: db 完整性"
+      check: "db_integrity"
+    - name: "T5: 进程 fd 只有 1 个 .db"
+      check: "single_db_fd"
+    - name: "T6: symlink 正确"
+      check: "symlink_correct"
+    - name: "T7: 共享 Python 包可达"
+      check: "shared_pkgs_importable"
+    - name: "T8: prod 不受影响"
+      check: "prod_unchanged"
+
+  staging_extra:
+    - name: "T9: 7 天前 backup 同步"
+      check: "db_sync_age"
+    - name: "T10: chaos 演练 (6 场景)"
+      check: "chaos_drill"
+    - name: "T11: rollback 演练"
+      check: "rollback_drill"
