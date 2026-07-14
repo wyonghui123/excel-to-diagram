@@ -297,6 +297,15 @@ else
 fi
 fi  # [L17] 关闭 if [ "$DEPLOYMENT_MODE" != "delta" ]
 
+# [L8.6] 检测/剥离 multipart 污染文件
+if [ -f "$SCRIPT_DIR/../tools/unzip_safe.py" ]; then
+    UNZIP_SAFE_PY=$REMOTE_PY  # remote python
+    $REMOTE_PY "$SCRIPT_DIR/../tools/unzip_safe.py" "$DEPLOYMENTS_DIR" --recursive 2>&1 | head -20
+    if [ ${PIPESTATUS[0]} -ne 0 ]; then
+        warn "[L8.6] 发现 multipart 污染文件, 已尝试自动剥离 (请人工确认)"
+    fi
+fi
+
 # [FIX 2026-07-03] PHASE 0.5 后检测 entry (现在解到 DEPLOYMENTS_DIR)
 if [ ! -d "$SERVER_DIR" ]; then
     die "解压后 SERVER_DIR 仍缺: $SERVER_DIR (期望 zip 含 meta/)"
