@@ -61,6 +61,7 @@ case "$CMD" in
 
         # 同时复制 lib/ (脚本 source ${SCRIPT_DIR}/lib/env_common.sh)
         log_info "render: lib/env_common.sh"
+        rm -rf "${OUT_DIR}/lib"
         cp -r "${ENV_MANAGER_DIR}/lib" "${OUT_DIR}/lib"
 
         # 同时复制 environments.yaml (脚本需要)

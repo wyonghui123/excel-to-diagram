@@ -98,15 +98,42 @@ else
     check_warn "db_link 不是 symlink (可能 prod 直接用文件)"
 fi
 
-# 5. 进程 fd 只有 1 个 .db
+# 5. 进程 fd 检查 (穿透 symlink, 看 fd 是否都指向同一真实 db)
 log_info "[5/7] 进程 fd 检查"
 backend_pid=$(proc_alive_by_path "${ENV_DEPLOY_CURRENT}/server.py")
 if [ -n "$backend_pid" ]; then
+    # 拿所有 .db fd 的真实路径 (穿透 symlink)
+    real_db="${ENV_META_DIR}/architecture.db"
+    expected_real=$(readlink -f "$real_db" 2>/dev/null)
     fd_count=$(ls -la /proc/$backend_pid/fd/ 2>/dev/null | grep -c '\.db' || echo 0)
+
+    # 检查有多少 fd 指向非预期的 db
+    # ls -la 输出格式: lrwx------ 1 root root 64 Jul 14 10:11 3 -> /path/to/file
+    # 第 9 列是 fd number (如 "3"), 第 11 列是 target
+    wrong_count=0
+    unique_targets=""
+    while read -r fd_line; do
+        # 解析: fd_number target
+        fd_num=$(echo "$fd_line" | awk '{print $9}')
+        fd_target_raw=$(echo "$fd_line" | sed 's/.*-> //')
+        fd_real=$(readlink -f "/proc/$backend_pid/fd/$fd_num" 2>/dev/null)
+        if [ -z "$fd_real" ]; then
+            # 退化: 直接用 target
+            fd_real="$fd_target_raw"
+        fi
+        if [ "$fd_real" != "$expected_real" ] && [ -n "$fd_real" ]; then
+            wrong_count=$((wrong_count+1))
+        fi
+        unique_targets="$unique_targets $fd_real"
+    done < <(ls -la /proc/$backend_pid/fd/ 2>/dev/null | grep '\.db' | awk -F'-> ' '{print $1, $2}')
+
     if [ "$fd_count" -le "1" ]; then
         check_ok "backend PID $backend_pid 只有 $fd_count 个 .db fd"
+    elif [ "$wrong_count" -eq "0" ]; then
+        # 多个 fd 但都指向同一真实 db, 这是 connection pool 正常行为
+        check_ok "backend PID $backend_pid 有 $fd_count 个 .db fd, 都指向同一真实 db (sql_connection_pool)"
     else
-        check_fail "backend PID $backend_pid 有 $fd_count 个 .db fd (DataSource 双 instance!)"
+        check_fail "backend PID $backend_pid 有 $wrong_count 个 fd 指向不同 db (DataSource 双 instance!)"
     fi
 fi
 
