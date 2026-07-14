@@ -41,6 +41,12 @@ TOKEN_HR        = 8
 MAX_UPLOAD_MB   = 500
 _START_TIME     = time.time()
 
+# [V007.55 L12] Exec session 全局状态
+SESSIONS        = {}   # sid -> {cwd, env, history, last_used, created_at}
+SESSION_TTL     = 3600  # 1h
+SESSION_MAX     = 50
+SESSION_HISTORY = 100
+
 # [V007.54 v1.3] 三级 token 权限
 SECRETS = {
     "admin": os.environ.get("CORE_SERVICE_ADMIN_SECRET", "v007.52-core-admin"),
@@ -215,6 +221,19 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
                 return self._danger_confirm(q)
             elif route == "/api/isolation_check":
                 return self._isolation_check(q)
+            elif route == "/api/exec/session":
+                return self._exec_session_create(q)
+            elif route.startswith("/api/exec/session/"):
+                parts = route.split("/")
+                if len(parts) >= 5:
+                    sid = parts[4]
+                    action = parts[5] if len(parts) > 5 else None
+                    if action == "state":
+                        return self._exec_session_state(q, sid)
+                    if action == "destroy":
+                        return self._exec_session_destroy(q, sid)
+                    return self._exec_session_run(q, sid)
+                return self._json(404, {"error": "session id required"})
             return self._json(404, {"error": "not found", "route": route})
         except Exception as e:
             return self._json(500, {"error": str(e)})
@@ -390,6 +409,110 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
             "isolation_warning": bool(tmp_isolated and systemd_isolated),
             "dirs": isolation_status,
         })
+
+    # ── /api/exec/session (L12 SSH 替代) ──────────────────────────────
+    @staticmethod
+    def _gc_sessions():
+        """清理过期 session (TTL 1h)"""
+        now = time.time()
+        expired = [sid for sid, s in SESSIONS.items() if now - s["last_used"] > SESSION_TTL]
+        for sid in expired:
+            del SESSIONS[sid]
+
+    def _exec_session_create(self, q):
+        """创建新 exec session"""
+        level = _check_token(q)
+        if not level:
+            return self._json(403, {"error": "token required"})
+
+        self._gc_sessions()
+        if len(SESSIONS) >= SESSION_MAX:
+            return self._json(429, {"error": "too many sessions", "max": SESSION_MAX})
+
+        sid = hashlib.sha256(os.urandom(16)).hexdigest()[:16]
+        now = time.time()
+        SESSIONS[sid] = {
+            "cwd": "/opt/app",
+            "env": {},
+            "history": [],
+            "created_at": now,
+            "last_used": now,
+        }
+        return self._json(200, {"session_id": sid, "cwd": "/opt/app"})
+
+    def _exec_session_run(self, q, sid):
+        """在 session 内执行命令"""
+        level = _check_token(q)
+        if not level:
+            return self._json(403, {"error": "token required"})
+
+        if sid not in SESSIONS:
+            return self._json(404, {"error": "session not found"})
+
+        s = SESSIONS[sid]
+        cmd = q.get("cmd", [""])[0]
+        if not cmd:
+            return self._json(400, {"error": "cmd required"})
+
+        full_env = {**os.environ, **s["env"]}
+        try:
+            proc = subprocess.run(
+                cmd, shell=True, cwd=s["cwd"], env=full_env,
+                capture_output=True, text=True, timeout=30
+            )
+            exit_code = proc.returncode
+            stdout, stderr = proc.stdout, proc.stderr
+        except subprocess.TimeoutExpired:
+            return self._json(504, {"error": "timeout (30s)"})
+        except Exception as e:
+            return self._json(500, {"error": str(e)})
+
+        # 更新状态
+        s["last_used"] = time.time()
+        s["history"].append({
+            "cmd": cmd, "exit_code": exit_code,
+            "ts": time.time(),
+        })
+        if len(s["history"]) > SESSION_HISTORY:
+            s["history"] = s["history"][-SESSION_HISTORY:]
+
+        # 跟踪 cd
+        if cmd.strip().startswith("cd ") and exit_code == 0:
+            new_path = cmd[3:].strip()
+            s["cwd"] = os.path.abspath(os.path.join(s["cwd"], new_path))
+
+        return self._json(200, {
+            "stdout": stdout, "stderr": stderr,
+            "exit_code": exit_code, "cwd": s["cwd"],
+        })
+
+    def _exec_session_state(self, q, sid):
+        """查询 session 状态"""
+        level = _check_token(q)
+        if not level:
+            return self._json(403, {"error": "token required"})
+
+        if sid not in SESSIONS:
+            return self._json(404, {"error": "session not found"})
+        s = SESSIONS[sid]
+        s["last_used"] = time.time()  # touch
+        return self._json(200, {
+            "cwd": s["cwd"],
+            "env_keys": list(s["env"].keys()),
+            "history_count": len(s["history"]),
+            "last_used": s["last_used"],
+            "age_sec": time.time() - s["created_at"],
+        })
+
+    def _exec_session_destroy(self, q, sid):
+        """销毁 session"""
+        level = _check_token(q)
+        if not level:
+            return self._json(403, {"error": "token required"})
+
+        if sid in SESSIONS:
+            del SESSIONS[sid]
+        return self._json(200, {"ok": True, "destroyed": sid})
 
     # ── POST /api/audit/rotate (admin only) ───────────────
     def _audit_rotate_endpoint(self, q):
