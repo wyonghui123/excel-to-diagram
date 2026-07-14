@@ -1,8 +1,9 @@
-# Incident Response Runbook (V007.49-D 2026-07-13)
+# Incident Response Runbook (V007.50 2026-07-14)
 
 > **目标**: 出事故时 5 分钟上手, 用 staging 排查 + 修复
-> **适用**: yonaa 任何事故 (db 损坏 / 误删 / 部署失败 / 性能问题)
+> **适用**: yonaa 任何事故 (db 损坏 / 误删 / 部署失败 / 性能问题 / DB 路径冲突)
 > **作者**: 协调智能体
+> **更新**: 2026-07-14 — 补充 V007.50 DB 路径冲突事故类型、4 端口架构
 
 ---
 
@@ -229,6 +230,47 @@ curl -s 'http://localhost:19101/api/test/disk_io?rounds=10&concurrency=5&write=t
 
 ---
 
+### 事故 7: DB 路径冲突 / DataSource 双 instance (V007.50 新增)
+
+**症状**: staging 重新部署后测试数据丢失，或 API 返回数据不一致
+
+**根因**: 20+ 个 API/service 模块用 `__file__` 路径计算 `architecture.db` 位置，不读环境变量。导致 DataSource cache key 不同，创建了第二个 instance 用了部署包内 db。
+
+**Step 1 (1 min)**: 确认是否是 DB 路径冲突
+```bash
+# 检查进程 fd 中是否有多个 .db 文件
+ls -la /proc/$(pgrep -f 'staging/deploy/current/server.py')/fd/ | grep '\.db'
+# 如果看到 2 个不同的 .db 路径, 就是这个问题
+```
+
+**Step 2 (2 min)**: 确认 symlink 状态
+```bash
+ls -la /opt/app/staging/deploy/current/architecture.db
+# 应该是 symlink → /opt/app/staging/meta/architecture.db
+# 如果是普通文件, 说明 symlink 没建
+```
+
+**Step 3 (5 min)**: 修复 — 重跑 start_staging.sh
+```bash
+# start_staging.sh 第 0.3 步会自动修复 symlink
+bash /opt/app/staging/scripts/start_staging.sh
+# 看到 [V007.50] Replaced ... with symlink → ... 表示修复成功
+```
+
+**Step 4 (2 min)**: 验证
+```bash
+# 再次检查进程 fd
+ls -la /proc/$(pgrep -f 'staging/deploy/current/server.py')/fd/ | grep '\.db'
+# 应只看到 /opt/app/staging/meta/architecture.db
+
+# 检查 API 返回数据一致
+curl -s 'http://localhost:13011/api/v2/bo/list?page=1&page_size=1' | python3 -m json.tool
+```
+
+**预防**: 每次部署到 staging 后，都应跑一次 DB 路径验证（见 [DEPLOY_SOP_V2.md](../DEPLOY_SOP_V2.md) 4.4 节）。
+
+---
+
 ## 三、staging 在事故响应的核心价值
 
 | 价值 | 描述 | 节省 |
@@ -267,11 +309,16 @@ curl -s 'http://localhost:19101/api/test/disk_io?rounds=10&concurrency=5&write=t
 
 ## 六、相关文档
 
-- [STAGING_GUIDE.md](STAGING_GUIDE.md) - staging 怎么用
-- [STAGING_V2_DETAILED_PLAN.md](STAGING_V2_DETAILED_PLAN.md) - 3 天实施计划
-- [SQLITE_IO_ERROR_DESIGN.md](SQLITE_IO_ERROR_DESIGN.md) - SQLite 防护
-- [HANDOFF_object_recovery.md](HANDOFF_object_recovery.md) - L13 对象恢复
+- [STAGING_GUIDE.md](STAGING_GUIDE.md) — staging 怎么用（V007.50 4 端口架构）
+- [STAGING_V2_DETAILED_PLAN.md](STAGING_V2_DETAILED_PLAN.md) — 3 天实施计划
+- [SQLITE_IO_ERROR_DESIGN.md](SQLITE_IO_ERROR_DESIGN.md) — SQLite 防护
+- [HANDOFF_object_recovery.md](HANDOFF_object_recovery.md) — L13 对象恢复
+- [../DEPLOY_SOP_V2.md](../DEPLOY_SOP_V2.md) — 部署 SOP（含 V007.50 DB 路径验证）
+- [../DEPLOYMENT.md](../DEPLOYMENT.md) — 完整部署指南
+- [OPS_MANUAL.md](OPS_MANUAL.md) — 远程运维服务手册（4 端口架构）
+- [PERFORMANCE_BASELINE.md](PERFORMANCE_BASELINE.md) — 性能基线（2026-07-14）
+- [PROD_SYMLINK_ISSUE.md](PROD_SYMLINK_ISSUE.md) — prod current symlink 断链问题
 
 ---
 
-**协调智能体 v2026-07-13 - 5 分钟上手, 完整事故响应**
+**协调智能体 v2026-07-14 V007.50 - 7 类事故 + DB 路径冲突排查**

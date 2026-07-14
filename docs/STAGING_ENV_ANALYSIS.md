@@ -3,8 +3,44 @@
 > **作者**: 协调智能体
 > **日期**: 2026-07-13 21:00
 > **v2 更新**: 21:30 补充"问题排查沙盒"角度
+> **V007.50 更新**: 2026-07-14 — 方案 D 已实施，补充实测性能数据
 > **触发**: 用户提问 "是否可以作为模拟生产问题场景, 重现问题，排查定位"
 > **基于**: 实测生产环境数据 + 今天 3 次部署事故复盘
+
+---
+
+## V007.50 实施状态 (2026-07-14 更新)
+
+**方案 D（轻量 staging）已实施完成**，实际部署架构：
+
+| 服务 | prod 端口 | staging 端口 | 状态 |
+|------|----------|-------------|------|
+| unified (前端代理) | 8081 | 18081 | ✅ 运行中 |
+| server.py (后端) | 3011 | 13011 | ✅ 运行中 |
+| log_service | 9101 | 19101 | ✅ 运行中 |
+| core_service | 9200 | 19200 | ✅ 运行中 |
+
+**V007.50 DB 路径统一修复**:
+- 问题: 20+ 个 API/service 模块用 `__file__` 路径计算 db 位置，导致 DataSource 双 instance
+- 修复: `deploy/current/architecture.db` → symlink 指向 `/opt/app/staging/meta/architecture.db`
+- 验证: 进程 fd 只有 1 个 .db 文件 ✅
+
+**2026-07-14 性能基线** (详见 [PERFORMANCE_BASELINE.md](PERFORMANCE_BASELINE.md)):
+- prod login: ~133ms
+- prod business_object (500条/页): ~126ms (684KB)
+- prod static HTML: ~3ms
+- prod static JS: ~2.6ms
+- staging 性能与 prod 基本一致
+
+**已实现的 staging 能力**:
+- ✅ 8 项 smoke test (`staging_e2e_test.sh`)
+- ✅ 自动部署 + 5 min 监控 (`deploy_staging.sh`)
+- ✅ DB 7 天前 backup 同步 (`sync_staging_db.sh`, cron 0 3)
+- ✅ 事故响应沙盒 (见 [INCIDENT_RESPONSE_RUNBOOK.md](INCIDENT_RESPONSE_RUNBOOK.md))
+- ✅ chaos 演练 (`sqlite_chaos.py`, 6 场景)
+- ✅ 版本清理指南 (见 [STAGING_GUIDE.md](STAGING_GUIDE.md) 第 10 节)
+
+**下文为原始分析文档（保留作为决策依据）**：
 
 ---
 

@@ -1,4 +1,6 @@
-# DEPLOY HANDOVER V007.44 — 统一修复 disk I/O + 权限过滤
+# [ARCHIVED] DEPLOY HANDOVER V007.44 — 统一修复 disk I/O + 权限过滤
+
+> **归档日期**: 2026-07-14 | **取代文档**: [../../DEPLOYMENT.md](../../DEPLOYMENT.md) + [SQLITE_IO_ERROR_DESIGN.md](../SQLITE_IO_ERROR_DESIGN.md)
 
 > 日期: 2026-07-08 | 版本: V007.44 | 作者: AI Assistant
 

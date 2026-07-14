@@ -1,4 +1,7 @@
-# HANDOVER: 基于 audit_logs 的对象恢复框架 (L13)
+# [ARCHIVED] HANDOVER: 基于 audit_logs 的对象恢复框架 (L13)
+
+> **归档日期**: 2026-07-14 | **取代文档**: [INCIDENT_RESPONSE_RUNBOOK.md](INCIDENT_RESPONSE_RUNBOOK.md) 事故 1
+> 本文档内容已整合到事故响应手册，不再单独维护。
 
 > **作者**: 协调智能体 (基础设施深度分析)
 > **创建日期**: 2026-07-13
