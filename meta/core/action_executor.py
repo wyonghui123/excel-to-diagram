@@ -1665,7 +1665,7 @@ class ActionExecutor:
             try:
                 rows = self.ds.query(
                     "SELECT MAX(created_at_epoch) as max_epoch, MAX(created_at) as max_iso "
-                    "FROM audit_logs WHERE object_type = ? AND object_id = ? "
+                    "FROM v_audit_all WHERE object_type = ? AND object_id = ? "
                     "AND action IN ('CREATE', 'UPDATE')",
                     [object_type, object_id]
                 )

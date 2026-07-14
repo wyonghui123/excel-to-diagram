@@ -59,9 +59,11 @@ class AuditRecovery:
         cursor = self.conn.cursor()
 
         # 1. 查主实体最新 DELETE 记录
+        # [V007.50] 改用 v_audit_all 覆盖已归档到 audit_logs_archive 的 DELETE 记录
+        # 否则被删除超过 180 天的对象，DELETE 记录已归档，恢复框架完全找不到数据
         cursor.execute("""
             SELECT id, extra_data, user_name, created_at, retention_until
-            FROM audit_logs
+            FROM v_audit_all
             WHERE action = 'DELETE' AND field_name = '_record'
               AND object_type = ? AND object_id = ?
               AND created_at > datetime('now', ?)
@@ -88,9 +90,10 @@ class AuditRecovery:
             return result
 
         # 2. 查所有 DISSOCIATE 关联记录 (按 cascade_reason 过滤)
+        # [V007.50] 同样改用 v_audit_all 覆盖已归档记录
         cursor.execute("""
             SELECT id, field_name, old_value, extra_data, created_at
-            FROM audit_logs
+            FROM v_audit_all
             WHERE action = 'DISSOCIATE' AND object_type = ?
               AND object_id = ?
               AND json_extract(extra_data, '$.cascade_reason') LIKE ?

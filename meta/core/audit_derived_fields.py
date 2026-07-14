@@ -6,6 +6,10 @@ Audit-Derived Virtual Fields — SSOT 单一事实实现
 v1.4 updated_at 统一规则：所有 object 的 `updated_at` 是**计算字段**，
 不存储在业务表中，从 audit_logs 表实时派生。
 
+【V007.51 Phase 2 更新 2026-07-14】
+v2.0 物化列优先：有物化 updated_at 列的表直接从列读取，
+无物化列的表仍走 v_audit_all 实时派生。
+
 历史：项目内有 2 份重复实现：
   - meta.services.query_service.QueryService._enrich_audit_virtual_fields
   - meta.core.interceptors.persistence_interceptor.PersistenceInterceptor._enrich_audit_virtual_fields
@@ -13,10 +17,11 @@ v1.4 updated_at 统一规则：所有 object 的 `updated_at` 是**计算字段*
 v1.4 抽取为 SSOT helper，未来 2 处实现应改为调用本模块。
 
 派生规则（SSOT）：
-  1. 只查询 action='UPDATE' 的审计日志
-  2. 取每个 object_id 的 MAX(created_at_epoch) | MAX(created_at)
-  3. 没有 UPDATE 记录时，fallback 为该 record 自己的 created_at
-  4. 测试环境优雅降级（audit_logs 表缺失时直接 fallback）
+  1. 优先从物化列读取（V007.51 新增，零 SQL 开销）
+  2. 只查询 action='UPDATE' 的审计日志
+  3. 取每个 object_id 的 MAX(created_at_epoch) | MAX(created_at)
+  4. 没有 UPDATE 记录时，fallback 为该 record 自己的 created_at
+  5. 测试环境优雅降级（audit_logs 表缺失时直接 fallback）
 """
 import logging
 from datetime import datetime
@@ -26,9 +31,10 @@ logger = logging.getLogger(__name__)
 
 
 # 派生 SQL（不带 WHERE/IN 列表，由调用方拼接）
+# [V007.50] 改用 v_audit_all VIEW，覆盖已归档到 audit_logs_archive 的记录
 _AUDIT_DERIVE_SELECT_SQL = (
     "SELECT object_id, MAX(created_at_epoch) as max_epoch, MAX(created_at) as max_iso "
-    "FROM audit_logs "
+    "FROM v_audit_all "
     "WHERE object_type = ? AND object_id IN ({placeholders}) "
     "AND action = 'UPDATE' "
     "GROUP BY object_id"
@@ -36,6 +42,23 @@ _AUDIT_DERIVE_SELECT_SQL = (
 
 # Fallback SQL（测试环境 audit_logs 缺少 created_at_epoch 列时）
 _AUDIT_DERIVE_SELECT_SQL_FALLBACK = (
+    "SELECT object_id, NULL as max_epoch, MAX(created_at) as max_iso "
+    "FROM v_audit_all "
+    "WHERE object_type = ? AND object_id IN ({placeholders}) "
+    "AND action = 'UPDATE' "
+    "GROUP BY object_id"
+)
+
+# [V007.50] v_audit_all VIEW 不存在时的兜底 SQL (查热表 audit_logs)
+# 仅在异常路径使用：测试环境未运行迁移 / 旧版部署未升级
+_AUDIT_DERIVE_SELECT_SQL_NO_VIEW = (
+    "SELECT object_id, MAX(created_at_epoch) as max_epoch, MAX(created_at) as max_iso "
+    "FROM audit_logs "
+    "WHERE object_type = ? AND object_id IN ({placeholders}) "
+    "AND action = 'UPDATE' "
+    "GROUP BY object_id"
+)
+_AUDIT_DERIVE_SELECT_SQL_NO_VIEW_FALLBACK = (
     "SELECT object_id, NULL as max_epoch, MAX(created_at) as max_iso "
     "FROM audit_logs "
     "WHERE object_type = ? AND object_id IN ({placeholders}) "
@@ -55,6 +78,8 @@ def _execute_audit_query(ds, object_type: str, object_ids: List[str], use_fallba
 
     Returns:
         cursor（调用方负责 fetchall）
+
+    [V007.50] v_audit_all VIEW 不存在时自动回退到 audit_logs (热表)
     """
     if not object_ids:
         return None
@@ -67,6 +92,28 @@ def _execute_audit_query(ds, object_type: str, object_ids: List[str], use_fallba
         else:
             return ds.execute(sql, [object_type] + object_ids)
     except Exception as e:
+        err_msg = str(e).lower()
+        if "no such table: v_audit_all" in err_msg:
+            # VIEW 不存在，回退到 audit_logs (热表)
+            logger.warning(
+                "[audit_derived_fields] v_audit_all not found, fallback to audit_logs"
+            )
+            fallback_sql = (
+                _AUDIT_DERIVE_SELECT_SQL_NO_VIEW_FALLBACK
+                if use_fallback
+                else _AUDIT_DERIVE_SELECT_SQL_NO_VIEW
+            )
+            fallback_sql = fallback_sql.format(placeholders=placeholders)
+            try:
+                if hasattr(ds, 'query'):
+                    return ds.query(fallback_sql, [object_type] + object_ids)
+                else:
+                    return ds.execute(fallback_sql, [object_type] + object_ids)
+            except Exception as e2:
+                logger.warning(
+                    "[audit_derived_fields] Fallback to audit_logs also failed: %s", e2
+                )
+                return None
         logger.warning("[audit_derived_fields] Query failed (object_type=%s): %s", object_type, e)
         return None
 
@@ -124,6 +171,28 @@ def _get_audit_field_value(ds, object_type: str, object_id: str) -> Optional[str
     return result_map.get(object_id)
 
 
+def _object_type_to_table_name(object_type: str) -> str:
+    """[V007.52] object_type -> table_name 反查（SSOT）"""
+    try:
+        from meta.core.materialization_registry import get_registry
+        entry = get_registry().get_by_object_type(object_type)
+        if entry:
+            return entry['name']
+    except Exception:
+        pass
+    _fallback_map = {
+        'enum_type': 'enum_types',
+        'enum_value': 'enum_values',
+        'user': 'users',
+        'role': 'roles',
+        'user_group': 'user_groups',
+        'product': 'products',
+        'version': 'versions',
+        'domain': 'domains',
+    }
+    return _fallback_map.get(object_type, object_type + 's')
+
+
 def enrich_audit_virtual_fields(
     ds,
     object_type: str,
@@ -131,6 +200,10 @@ def enrich_audit_virtual_fields(
     field_ids: Optional[Iterable[str]] = None,
 ) -> List[Dict[str, Any]]:
     """SSOT: 批量为 records 注入派生 virtual 字段（如 updated_at）
+
+    [V007.51 Phase 2] 物化列优先策略：
+      1. 如果 record 已有 'updated_at' 字段（来自物化列），直接使用
+      2. 否则走 v_audit_all 实时派生
 
     用法：
         from meta.core.audit_derived_fields import enrich_audit_virtual_fields
@@ -155,54 +228,34 @@ def enrich_audit_virtual_fields(
         return records
 
     target_fields = list(field_ids) if field_ids else ['updated_at']
-    object_ids = [str(r.get('id')) for r in records if r.get('id') is not None]
-    if not object_ids:
-        for record in records:
+
+    # [V007.52 SSOT] 通过 MaterializationRegistry 统一读取
+    # - materialized 策略：直接读表列（零 SQL 开销）
+    # - audit_derived 策略：聚合 v_audit_all
+    # - none / 未注册：fallback 到 created_at
+    from meta.core.materialization_registry import get_updated_at
+
+    for record in records:
+        rid = record.get('id')
+        if rid is None:
             for f in target_fields:
                 record[f] = record.get('created_at')
-        return records
+            continue
 
-    # 1. 尝试带 created_at_epoch 的查询
-    cursor = _execute_audit_query(ds, object_type, object_ids, use_fallback=False)
-    rows = None
-    if cursor is not None:
-        try:
-            rows = cursor.fetchall() if hasattr(cursor, 'fetchall') else cursor
-        except Exception:
-            rows = None
-
-    # 2. 如果失败（缺列），fallback
-    if not rows:
-        try:
-            cursor = _execute_audit_query(ds, object_type, object_ids, use_fallback=True)
-            if cursor is not None:
-                rows = cursor.fetchall() if hasattr(cursor, 'fetchall') else cursor
-        except Exception as e:
-            logger.warning(
-                "[audit_derived_fields] Fallback query also failed (object_type=%s): %s",
-                object_type, e
-            )
-            # 测试环境优雅降级
-            import os
-            if os.environ.get('TESTING', '').lower() in ('true', '1', 'yes'):
-                rows = []
-            else:
-                rows = None
-
-    if not rows:
-        rows = []
-
-    result_map = _normalize_rows(rows)
-
-    # 3. 注入派生字段
-    for record in records:
-        oid = str(record.get('id'))
         for f in target_fields:
-            if oid in result_map and result_map[oid] is not None:
-                record[f] = result_map[oid]
+            if f == 'updated_at':
+                # 统一入口：从 SSOT 选择最优路径
+                value = get_updated_at(
+                    ds=ds,
+                    table_name=_object_type_to_table_name(object_type),
+                    object_id=rid,
+                    object_type=object_type,
+                    fallback=record.get('created_at'),
+                )
+                record[f] = value
             else:
-                # 没有 UPDATE 审计记录 → fallback 为 created_at
-                record[f] = record.get('created_at')
+                # 其他虚拟字段暂未 SSOT 化，保持原样
+                record[f] = record.get(f) or record.get('created_at')
 
     return records
 

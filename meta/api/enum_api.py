@@ -88,59 +88,48 @@ def _ensure_enum_tables(ds):
         logger.warning(f"Failed to ensure enum tables: {e}")
 
 
-# [FIX 2026-06-04] 批量从 audit_logs 实时计算 updated_at（virtual 字段）。
-# 遵循 aspects.yaml 中 audit_aspect 的 derive_rule：
-#   updated_at = MAX(audit_logs.created_at) WHERE action='UPDATE'
-#   若无 UPDATE 日志则 fallback 到记录自身的 created_at
-# 一次性 GROUP BY 批量查询，避免 N+1。
+# [V007.52 SSOT] 统一的 updated_at 派生（v_audit_all 或物化列自动选择）
+# 早期版本手动实现 v_audit_all 聚合查询，V007.52 改为调用
+# MaterializationRegistry.get_updated_at() 统一入口。
 def _enrich_updated_at(records, object_type):
-    """为 records 列表中每条记录计算 updated_at（virtual 字段，来自 audit_logs）"""
+    """为 records 列表中每条记录计算 updated_at
+
+    [V007.52 SSOT] 通过 MaterializationRegistry 选择最优路径：
+    - materialized 表（enum_types/users）：直接读列
+    - audit_derived 表（罕见 enum 用到）：聚合 v_audit_all
+    - none / 未注册：fallback 到 created_at
+    """
     if not records:
         return records
-    # 提取 id 列表（用字符串以避免 int/str 类型不匹配）
-    record_ids = []
+
+    from meta.core.materialization_registry import get_updated_at, get_registry
+
+    registry = get_registry()
+    entry = registry.get_by_object_type(object_type)
+    table_name = entry["name"] if entry else None
+
     for r in records:
+        # 已有物化值不覆盖
+        if r.get('updated_at') is not None:
+            continue
         rid = r.get('id')
-        if rid is not None:
-            record_ids.append(str(rid))
-
-    if not record_ids:
-        for r in records:
+        if rid is None:
             r['updated_at'] = r.get('created_at')
-        return records
+            continue
 
-    # 批量查询：每个 object_id 最近一次 UPDATE 的时间
-    placeholders = ','.join(['?'] * len(record_ids))
-    update_times = {}
-    try:
-        cursor = _data_source.execute(
-            f"SELECT object_id, MAX(created_at) as max_update_at "
-            f"FROM audit_logs "
-            f"WHERE object_type = ? AND object_id IN ({placeholders}) "
-            f"AND action = 'UPDATE' "
-            f"GROUP BY object_id",
-            [object_type] + record_ids
-        )
-        for row in cursor.fetchall():
-            if isinstance(row, dict):
-                oid = str(row.get('object_id'))
-                ts = row.get('max_update_at')
-            else:
-                oid = str(row[0])
-                ts = row[1] if len(row) > 1 else None
-            if ts:
-                update_times[oid] = ts
-    except Exception as e:
-        logger.debug(f"[_enrich_updated_at] audit_logs query skipped: {e}")
-        update_times = {}
-
-    # 应用：UPDATE 时间存在则用之，否则 fallback 到 created_at
-    for record in records:
-        rid = str(record.get('id'))
-        if rid in update_times:
-            record['updated_at'] = update_times[rid]
+        if table_name:
+            # 物化列 / audit_derived / none 都由 registry 决定路径
+            r['updated_at'] = get_updated_at(
+                ds=_data_source,
+                table_name=table_name,
+                object_id=rid,
+                object_type=object_type,
+                fallback=r.get('created_at'),
+            )
         else:
-            record['updated_at'] = record.get('created_at')
+            # 未注册的 object_type：fallback 到 created_at
+            r['updated_at'] = r.get('created_at')
+
     return records
 
 
@@ -336,7 +325,7 @@ def get_enum_type(enum_type_id):
         try:
             logger.info(f"正在查询枚举类型 {enum_type_id} 的变更历史...")
             cursor = ds.execute("""
-                SELECT * FROM audit_logs
+                SELECT * FROM v_audit_all
                 WHERE object_type = 'enum_type' AND object_id = ?
                 ORDER BY created_at DESC
                 LIMIT 50
@@ -576,7 +565,7 @@ def get_enum_type_history(enum_type_id):
         page_size = request.args.get('page_size', request.args.get('pageSize', 20), type=int)
         
         cursor = ds.execute("""
-            SELECT * FROM audit_logs 
+            SELECT * FROM v_audit_all 
             WHERE object_type = 'enum_type' AND object_id = ?
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?
@@ -589,7 +578,7 @@ def get_enum_type_history(enum_type_id):
             result.append(row_dict)
         
         cursor = ds.execute("""
-            SELECT COUNT(*) as total FROM audit_logs 
+            SELECT COUNT(*) as total FROM v_audit_all 
             WHERE object_type = 'enum_type' AND object_id = ?
         """, [enum_type_id])
         total = cursor.fetchone()[0]

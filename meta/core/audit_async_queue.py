@@ -263,6 +263,45 @@ class AuditAsyncQueue:
             result_timeout=60.0
         )
 
+        # [V007.51 V007.52 SSOT] Phase 2: 审计写入成功后，刷新物化 updated_at 列
+        # 用独立连接（不在 WriteQueue 事务内），失败不影响审计主流程
+        self._refresh_materialized_columns(batch)
+
+    def _refresh_materialized_columns(self, batch: List[Dict[str, Any]]) -> None:
+        """[V007.51 V007.52 SSOT] 审计批量写入成功后，刷新受影响对象的物化 updated_at
+
+        只处理 action='UPDATE' 且 object_type 在 SSOT 注册的 audit_callback 列表中。
+        用独立短连接执行，失败仅 warning 不阻断。
+        """
+        update_items = []
+        for audit in batch:
+            if audit.get('action') != 'UPDATE':
+                continue
+            obj_type = audit.get('object_type')
+            obj_id = audit.get('object_id')
+            if obj_type and obj_id:
+                update_items.append((obj_type, obj_id))
+
+        if not update_items:
+            return
+
+        try:
+            from meta.migrations.v007_51_add_updated_at_materialized import (
+                batch_refresh_materialized_updated_at,
+            )
+
+            def _do_refresh(conn):
+                batch_refresh_materialized_updated_at(conn, update_items)
+
+            self._write_queue.submit_and_wait(
+                _do_refresh,
+                result_timeout=30.0
+            )
+        except Exception as e:
+            logger.warning(
+                "[V007.51] _refresh_materialized_columns failed: %s", e
+            )
+
     def _mark_batch_failed(self, batch: List[Dict[str, Any]], error_msg: str) -> None:
         """整批失败, 记录 failed status (供审计追溯)
 

@@ -1,0 +1,228 @@
+# ─────────────────────────────────────────────────────────────
+# [V007.52 SSOT] 审计 updated_at 物化策略注册表
+# ─────────────────────────────────────────────────────────────
+#
+# 设计目的:
+#   统一声明每个表的 updated_at 来源，避免散落在 5 个不同位置:
+#     - 物理列 + 业务表 UPDATE 触发器 (roles, user_groups)
+#     - 物理列 + 审计反写 (enum_types, enum_values, users)
+#     - 物理列但应用层显式写 (ai_async_tasks, filter_variants, ...)
+#     - 无列，靠 v_audit_all 聚合 (products, versions, domains, ...)
+#     - 不需要 updated_at (中间表)
+#
+# 读端统一通过 materialization_registry.get_updated_at(table, id) 获取，
+# 自动根据 strategy 选择最优路径。
+#
+# 版本: v007.52
+# 日期: 2026-07-14
+# ─────────────────────────────────────────────────────────────
+
+audit_materialization:
+
+  # ─── 策略: business_trigger ──────────────────────────────
+  # 业务表自身 UPDATE 时触发器自动更新 updated_at。
+  # 读时直接 SELECT column（零 SQL 开销）。
+  # 示例: roles, user_groups
+  # - name: roles
+  #   strategy: business_trigger
+  #   object_type: role
+  #   trigger: trg_roles_updated_at
+  #   notes: 触发器在 business_table UPDATE 时自动写
+
+  # ─── 策略: audit_callback ────────────────────────────────
+  # V007.51 Phase 2 引入：审计异步写入后由 application 层回调更新。
+  # 读时直接 SELECT column（零 SQL 开销）。
+  # 示例: enum_types, enum_values, users
+  - name: enum_types
+    strategy: audit_callback
+    object_type: enum_type
+    notes: V007.51 添加物化列，由 AuditAsyncQueue._refresh_materialized_columns 刷新
+
+  - name: enum_values
+    strategy: audit_callback
+    object_type: enum_value
+    notes: V007.51 添加物化列
+
+  - name: users
+    strategy: audit_callback
+    object_type: user
+    notes: V007.51 添加物化列，user_api 高频查询+排序
+
+  # ─── 策略: application_explicit ──────────────────────────
+  # 物理列存在但不是审计派生。Application 层显式写。
+  # 读时直接 SELECT column。
+  # 示例: ai_async_tasks, filter_variants, scheduled_tasks, ...
+  - name: ai_async_tasks
+    strategy: application_explicit
+    object_type: ai_async_task
+    notes: 应用层任务调度时更新，不走审计派生
+
+  - name: filter_variants
+    strategy: application_explicit
+    object_type: filter_variant
+    notes: 用户保存过滤变体时更新
+
+  - name: scheduled_tasks
+    strategy: application_explicit
+    object_type: scheduled_task
+    notes: 任务调度器更新
+
+  - name: task_workers
+    strategy: application_explicit
+    object_type: task_worker
+    notes: worker 心跳更新
+
+  - name: task_definitions
+    strategy: application_explicit
+    object_type: task_definition
+    notes: 任务定义变更时更新
+
+  - name: permission_bundles
+    strategy: application_explicit
+    object_type: permission_bundle
+    notes: 权限包变更时更新
+
+  # roles / user_groups 走 business_trigger（V007.51 不再覆盖）
+  - name: roles
+    strategy: business_trigger
+    object_type: role
+    trigger: trg_roles_updated_at
+    notes: 历史触发器，业务表 UPDATE 时自动写
+
+  - name: user_groups
+    strategy: business_trigger
+    object_type: user_group
+    trigger: trg_user_groups_updated_at
+    notes: 历史触发器
+
+  # ─── 策略: audit_derived ─────────────────────────────────
+  # 无物化列，靠 v_audit_all 实时聚合 MAX(created_at) WHERE action='UPDATE'
+  # 性能较差（每次 GROUP BY object_id），但保证最终一致。
+  # 示例: products, versions, domains, service_modules, ...
+  - name: products
+    strategy: audit_derived
+    object_type: product
+    notes: V007.51 暂不物化（低频查询），从 v_audit_all 聚合
+
+  - name: versions
+    strategy: audit_derived
+    object_type: version
+    notes: 从 v_audit_all 聚合
+
+  - name: domains
+    strategy: audit_derived
+    object_type: domain
+    notes: 从 v_audit_all 聚合
+
+  - name: service_modules
+    strategy: audit_derived
+    object_type: service_module
+    notes: 从 v_audit_all 聚合
+
+  - name: business_objects
+    strategy: audit_derived
+    object_type: business_object
+    notes: 从 v_audit_all 聚合
+
+  - name: sub_domains
+    strategy: audit_derived
+    object_type: sub_domain
+    notes: 从 v_audit_all 聚合
+
+  - name: relationships
+    strategy: audit_derived
+    object_type: relationship
+    notes: 从 v_audit_all 聚合
+
+  - name: annotations
+    strategy: audit_derived
+    object_type: annotation
+    notes: 从 v_audit_all 聚合
+
+  - name: menus
+    strategy: audit_derived
+    object_type: menu
+    notes: 从 v_audit_all 聚合
+
+  - name: menu_permissions
+    strategy: audit_derived
+    object_type: menu_permission
+    notes: 从 v_audit_all 聚合
+
+  - name: permissions
+    strategy: audit_derived
+    object_type: permission
+    notes: 从 v_audit_all 聚合
+
+  - name: permission_rules
+    strategy: audit_derived
+    object_type: permission_rule
+    notes: 从 v_audit_all 聚合
+
+  - name: user_group_members
+    strategy: audit_derived
+    object_type: user_group_member
+    notes: 从 v_audit_all 聚合
+
+  # ─── 策略: none ──────────────────────────────────────────
+  # 不需要 updated_at（中间表/关系表/无 UI 显示）
+  # 示例: cascading_relationships, change_events 等
+  - name: group_data_permissions
+    strategy: none
+    object_type: group_data_permission
+    notes: 中间表，不需要 updated_at
+
+  - name: change_events
+    strategy: none
+    object_type: change_event
+    notes: 事件表，通过 created_at 排序
+
+  - name: change_subscriptions
+    strategy: none
+    object_type: change_subscription
+    notes: 订阅配置表
+
+  - name: data_permissions
+    strategy: none
+    object_type: data_permission
+    notes: 中间表
+
+  - name: dimension_object_mappings
+    strategy: none
+    object_type: dimension_object_mapping
+    notes: 中间表
+
+  - name: employee_data_scopes
+    strategy: none
+    object_type: employee_data_scope
+    notes: 范围配置表
+
+  - name: hierarchies
+    strategy: none
+    object_type: hierarchy
+    notes: 层级表
+
+  - name: role_data_permissions
+    strategy: none
+    object_type: role_data_permission
+    notes: 中间表
+
+  - name: role_dimension_scopes
+    strategy: none
+    object_type: role_dimension_scope
+    notes: 范围配置表
+
+  - name: role_permissions
+    strategy: none
+    object_type: role_permission
+    notes: 中间表
+
+  - name: task_executions
+    strategy: none
+    object_type: task_execution
+    notes: 执行历史表，通过 created_at 排序
+
+  - name: task_queues
+    strategy: none
+    object_type: task_queue
+    notes: 队列配置表

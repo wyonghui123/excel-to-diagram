@@ -309,7 +309,7 @@ def get_audit_logs():
         offset = (page - 1) * page_size
 
         # 查询总数
-        count_sql = f"SELECT COUNT(*) FROM audit_logs WHERE {where_clause}"
+        count_sql = f"SELECT COUNT(*) FROM v_audit_all WHERE {where_clause}"
         cursor = _data_source.execute(count_sql, params)
         total = cursor.fetchone()[0]
 
@@ -318,7 +318,7 @@ def get_audit_logs():
             SELECT id, object_type, object_id, action, field_name, old_value, new_value,
                    user_id, user_name, ip_address, user_agent, created_at, trace_id,
                    transaction_id, status, extra_data, parent_object_type, parent_object_id
-            FROM audit_logs
+            FROM v_audit_all
             WHERE {where_clause}
             ORDER BY {sort_field} {sort_direction}
             LIMIT ? OFFSET ?
@@ -378,7 +378,7 @@ def get_audit_log_detail(log_id):
                    user_id, user_name, ip_address, user_agent, created_at, trace_id,
                    transaction_id, status, retry_count, error_message, agent_id,
                    agent_session_id, tool_call_id, agent_reasoning, extra_data
-            FROM audit_logs
+            FROM v_audit_all
             WHERE id = ?
         """, [log_id])
         
@@ -463,7 +463,7 @@ def export_audit_logs():
         query_sql = f"""
             SELECT id, object_type, object_id, action, field_name, old_value, new_value,
                    user_id, user_name, ip_address, created_at
-            FROM audit_logs
+            FROM v_audit_all
             WHERE {where_clause}
             ORDER BY created_at DESC
             LIMIT 10000
@@ -512,7 +512,7 @@ def get_failed_audit_logs():
         cursor = _data_source.execute("""
             SELECT id, object_type, object_id, action, field_name, error_message,
                    retry_count, created_at
-            FROM audit_logs
+            FROM v_audit_all
             WHERE status = 'failed'
             ORDER BY created_at DESC
             LIMIT 100
@@ -543,7 +543,7 @@ def get_audit_overview():
         # 按操作类型统计
         cursor = _data_source.execute("""
             SELECT action, COUNT(*) as count
-            FROM audit_logs
+            FROM v_audit_all
             GROUP BY action
             ORDER BY count DESC
         """)
@@ -552,7 +552,7 @@ def get_audit_overview():
         # 按对象类型统计
         cursor = _data_source.execute("""
             SELECT object_type, COUNT(*) as count
-            FROM audit_logs
+            FROM v_audit_all
             GROUP BY object_type
             ORDER BY count DESC
             LIMIT 10
@@ -562,7 +562,7 @@ def get_audit_overview():
         # 按用户统计
         cursor = _data_source.execute("""
             SELECT user_name, COUNT(*) as count
-            FROM audit_logs
+            FROM v_audit_all
             WHERE user_name IS NOT NULL AND user_name != ''
             GROUP BY user_name
             ORDER BY count DESC
@@ -571,28 +571,28 @@ def get_audit_overview():
         user_stats = [{'user_name': row[0], 'count': row[1]} for row in cursor.fetchall()]
         
         # 总数
-        cursor = _data_source.execute("SELECT COUNT(*) FROM audit_logs")
+        cursor = _data_source.execute("SELECT COUNT(*) FROM v_audit_all")
         total = cursor.fetchone()[0]
         
         # 失败数
-        cursor = _data_source.execute("SELECT COUNT(*) FROM audit_logs WHERE status = 'failed'")
+        cursor = _data_source.execute("SELECT COUNT(*) FROM v_audit_all WHERE status = 'failed'")
         failed = cursor.fetchone()[0]
         
         today_str = datetime.now().strftime('%Y-%m-%d')
 
         cursor = _data_source.execute(
-            "SELECT COUNT(*) FROM audit_logs WHERE created_at >= ?", [today_str]
+            "SELECT COUNT(*) FROM v_audit_all WHERE created_at >= ?", [today_str]
         )
         today_count = cursor.fetchone()[0]
 
         cursor = _data_source.execute(
-            "SELECT COUNT(*) FROM audit_logs WHERE log_category = 'security'"
+            "SELECT COUNT(*) FROM v_audit_all WHERE log_category = 'security'"
         )
         security_count = cursor.fetchone()[0]
 
         cursor = _data_source.execute("""
             SELECT COALESCE(log_category, 'business'), COUNT(*) as count
-            FROM audit_logs
+            FROM v_audit_all
             GROUP BY log_category
             ORDER BY count DESC
         """)
@@ -605,7 +605,7 @@ def get_audit_overview():
             from datetime import timedelta
             day = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
             cursor = _data_source.execute(
-                "SELECT COUNT(*) FROM audit_logs WHERE created_at >= ? AND created_at < ?",
+                "SELECT COUNT(*) FROM v_audit_all WHERE created_at >= ? AND created_at < ?",
                 [day, (datetime.now() - timedelta(days=i - 1)).strftime('%Y-%m-%d') if i > 0 else (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')]
             )
             count = cursor.fetchone()[0]

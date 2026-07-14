@@ -497,6 +497,23 @@ def create_app(db_path=None):
     from meta.migrations.enhance_audit_log_v2 import enhance_audit_log
     enhance_audit_log(db_path)
 
+    # [V007.50] 创建 v_audit_all VIEW，统一热/冷审计日志查询入口
+    # 必须在 enhance_audit_log 之后 (依赖 audit_logs 列已对齐)
+    try:
+        from meta.migrations.v007_50_add_audit_union_view import migrate as v007_50_migrate
+        from pathlib import Path
+        v007_50_migrate(Path(db_path), skip_backup=True)
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[V007.50] v_audit_all migration failed: {e}")
+
+    # [V007.51] Phase 2: 物化 updated_at 列 + Backfill
+    try:
+        from meta.migrations.v007_51_add_updated_at_materialized import migrate as v007_51_migrate
+        from pathlib import Path
+        v007_51_migrate(Path(db_path), skip_backup=True)
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[V007.51] materialized updated_at migration failed: {e}")
+
     from meta.services.async_audit_writer import async_audit_writer
     async_audit_writer.set_data_source(data_source)
 
@@ -1051,7 +1068,7 @@ def create_app(db_path=None):
 
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 3011))
+    port = int(os.environ.get('PORT', 5000))
     
     is_reloader = os.environ.get('WERKZEUG_RUN_MAIN') == 'true'
     if not is_reloader:

@@ -430,7 +430,7 @@ def _read_audit_log_via_v1(obj_id):
                    user_id, user_name, ip_address, user_agent, created_at, trace_id,
                    transaction_id, status, retry_count, error_message, agent_id,
                    agent_session_id, tool_call_id, agent_reasoning, extra_data
-            FROM audit_logs WHERE id = ?
+            FROM v_audit_all WHERE id = ?
         """, [obj_id])
         row = cursor.fetchone()
         if not row:

@@ -87,7 +87,7 @@ def build_diagnostics() -> dict:
                 one_hour_ago = (datetime.utcnow() - timedelta(hours=1)).isoformat()
                 rows = conn.execute(
                     "SELECT log_id, object_type, action, message, created_at "
-                    "FROM audit_logs "
+                    "FROM v_audit_all "
                     "WHERE created_at > ? AND (log_level = 'ERROR' OR log_level = 'WARN') "
                     "ORDER BY created_at DESC LIMIT 20",
                     (one_hour_ago,)

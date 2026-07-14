@@ -100,7 +100,7 @@ def _get_latest_change_time(object_type: str, object_id: int) -> str:
         ISO 格式的时间字符串，如果不存在则返回 None
     """
     cursor = _data_source.execute("""
-        SELECT created_at FROM audit_logs 
+        SELECT created_at FROM v_audit_all 
         WHERE object_type = ? AND object_id = ?
         ORDER BY 
             CASE action 
@@ -153,7 +153,7 @@ def list_roles():
         # 批量获取 updated_at (参照 _enrich_updated_at 模式)
         cursor = _data_source.execute(
             f"SELECT object_id, MAX(created_at) as max_update_at "
-            f"FROM audit_logs WHERE object_type = 'role' "
+            f"FROM v_audit_all WHERE object_type = 'role' "
             f"AND object_id IN ({placeholders}) AND action = 'UPDATE' "
             f"GROUP BY object_id",
             role_ids
@@ -571,7 +571,7 @@ def get_role_logs(role_id):
         offset = (page - 1) * page_size
 
         cursor = _data_source.execute("""
-            SELECT * FROM audit_logs
+            SELECT * FROM v_audit_all
             WHERE object_type = 'role' AND object_id = ?
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?
@@ -583,7 +583,7 @@ def get_role_logs(role_id):
             logs.append(dict(zip(columns, row)))
 
         cursor = _data_source.execute(
-            "SELECT COUNT(*) as total FROM audit_logs WHERE object_type = 'role' AND object_id = ?",
+            "SELECT COUNT(*) as total FROM v_audit_all WHERE object_type = 'role' AND object_id = ?",
             [role_id]
         )
         total = cursor.fetchone()[0]

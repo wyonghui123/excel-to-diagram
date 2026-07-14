@@ -70,7 +70,7 @@ def audit_export_handler(params: Dict[str, Any], context: Dict[str, Any]) -> 'Ac
             cursor = conn.execute(
                 f"""SELECT id, object_type, object_id, action, field_name, old_value, new_value,
                            user_id, user_name, ip_address, created_at
-                    FROM audit_logs
+                    FROM v_audit_all
                     WHERE {where_clause}
                     ORDER BY created_at DESC
                     LIMIT 10000""",

@@ -186,7 +186,7 @@ fields:
       analytics:
         category: measure
     computation:
-      formula: 'DATEDIFF(NOW(), COALESCE((SELECT MAX(created_at) FROM audit_logs WHERE object_type=''user'' AND object_id=user.id AND field_name=''状态'' AND action=''UPDATE''), user.created_at), "days")'
+      formula: 'DATEDIFF(NOW(), COALESCE((SELECT MAX(created_at) FROM v_audit_all WHERE object_type=''user'' AND object_id=user.id AND field_name=''状态'' AND action=''UPDATE''), user.created_at), "days")'
     ui:
       widget: number
       editable: false
