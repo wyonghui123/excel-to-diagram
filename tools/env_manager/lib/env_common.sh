@@ -27,29 +27,29 @@ load_env_config() {
     #                 ...
 
     ENV_NAME="$env_name"
-    ENV_DESC=$(awk -v env="^  $env_name:" '
-        $0 ~ env { in_env=1; next }
-        in_env && /^[a-z]/ { exit }
-        in_env && /description:/ { gsub(/.*description: */,""); gsub(/["'\'']/,""); print; exit }
-    ' "$yaml")
+    # 通用 awk 提取: 匹配 field 后, 去前缀 + 去引号
+    _extract() {
+        local env_pat="$1" field="$2" yaml="$3"
+        awk -v env="$env_pat" -v f="$field:" '
+            $0 ~ env { in_env=1; next }
+            in_env && /^[a-z]/ { exit }
+            in_env && $0 ~ f {
+                val = $0
+                sub(/.*'"$field"': */, "", val)
+                gsub(/["'\'']/, "", val)
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", val)
+                print val
+                exit
+            }
+        ' "$yaml"
+    }
 
-    ENV_ROOT=$(awk -v env="^  $env_name:" '
-        $0 ~ env { in_env=1; next }
-        in_env && /^[a-z]/ { exit }
-        in_env && /root_path:/ { gsub(/.*root_path: */,""); print; exit }
-    ' "$yaml")
-
-    ENV_DB=$(awk -v env="^  $env_name:" '
-        $0 ~ env { in_env=1; next }
-        in_env && /^[a-z]/ { exit }
-        in_env && /db_path:/ { gsub(/.*db_path: */,""); print; exit }
-    ' "$yaml")
-
-    ENV_SECRET=$(awk -v env="^  $env_name:" '
-        $0 ~ env { in_env=1; next }
-        in_env && /^[a-z]/ { exit }
-        in_env && /secret:/ { gsub(/.*secret: */,""); gsub(/["'\'']/,""); print; exit }
-    ' "$yaml")
+    ENV_DESC=$(_extract "^  $env_name:" "description" "$yaml")
+    ENV_ROOT=$(_extract "^  $env_name:" "root_path" "$yaml")
+    ENV_DB=$(_extract "^  $env_name:" "db_path" "$yaml")
+    ENV_SECRET=$(_extract "^  $env_name:" "secret" "$yaml")
+    ENV_LOG_DIR=$(_extract "^  $env_name:" "log_dir" "$yaml")
+    ENV_BROWSER_URL=$(_extract "^  $env_name:" "browser_url" "$yaml")
 
     ENV_BACKEND_PORT=$(awk -v env="^  $env_name:" '
         $0 ~ env { in_env=1; next }
@@ -69,18 +69,6 @@ load_env_config() {
     ENV_CORE_PORT=$(awk -v env="^  $env_name:" '
         $0 ~ env { in_env=1; next }
         in_env && /core_service:/ { gsub(/.*core_service: */,""); print; exit }
-    ' "$yaml")
-
-    ENV_LOG_DIR=$(awk -v env="^  $env_name:" '
-        $0 ~ env { in_env=1; next }
-        in_env && /^[a-z]/ { exit }
-        in_env && /log_dir:/ { gsub(/.*log_dir: */,""); print; exit }
-    ' "$yaml")
-
-    ENV_BROWSER_URL=$(awk -v env="^  $env_name:" '
-        $0 ~ env { in_env=1; next }
-        in_env && /^[a-z]/ { exit }
-        in_env && /browser_url:/ { gsub(/.*browser_url: */,""); gsub(/["'\'']/,""); print; exit }
     ' "$yaml")
 
     ENV_SHARED_PKGS=$(awk -v env="^  $env_name:" '

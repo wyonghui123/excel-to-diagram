@@ -37,6 +37,7 @@ FAIL=0
 
 check_ok() { PASS=$((PASS+1)); log_ok "$1"; }
 check_fail() { FAIL=$((FAIL+1)); log_error "$1"; }
+check_warn() { PASS=$((PASS+1)); log_warn "$1 (warning)"; }
 
 echo "==============================================================="
 echo "健康检查: $ENV_NAME ($ENV_DESC)"

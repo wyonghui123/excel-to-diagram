@@ -59,6 +59,14 @@ case "$CMD" in
             chmod +x "${OUT_DIR}/$tmpl"
         done
 
+        # 同时复制 lib/ (脚本 source ${SCRIPT_DIR}/lib/env_common.sh)
+        log_info "render: lib/env_common.sh"
+        cp -r "${ENV_MANAGER_DIR}/lib" "${OUT_DIR}/lib"
+
+        # 同时复制 environments.yaml (脚本需要)
+        log_info "render: environments.yaml"
+        cp "${ENVIRONMENTS_FILE}" "${OUT_DIR}/environments.yaml"
+
         log_ok "生成完成: $OUT_DIR"
         echo ""
         echo "生成的文件:"
