@@ -60,25 +60,27 @@
 ```
 tcp  0  0  0.0.0.0:9101   0.0.0.0:*   LISTEN  31939/python  log_service
 tcp  0  0  0.0.0.0:9200   0.0.0.0:*   LISTEN  21353/python  core_service
-tcp  0  0  0.0.0.0:9201   0.0.0.0:*   LISTEN  26361/python  observability
-tcp  0  0  0.0.0.0:9202   0.0.0.0:*   LISTEN  28060/python  ops_scheduler
-tcp  0  0  0.0.0.0:9203   0.0.0.0:*   LISTEN  24725/python  config_service
-tcp  0  0  0.0.0.0:9204   0.0.0.0:*   LISTEN  24722/python  dbops_service
-tcp  0  0  0.0.0.0:9205   0.0.0.0:*   LISTEN  24724/python  error_aggregator
-tcp  0  0  0.0.0.0:9206   0.0.0.0:*   LISTEN  24726/python  health_service
-tcp  0  0  0.0.0.0:9207   0.0.0.0:*   LISTEN  24727/python  slo_service
-tcp  0  0  0.0.0.0:9208   0.0.0.0:*   LISTEN  24720/python  debug_service
-tcp  0  0  0.0.0.0:9209   0.0.0.0:*   LISTEN  24723/python  supervisor
-tcp  0  0  0.0.0.0:3011   0.0.0.0:*   LISTEN  14286/python  server.py
-tcp  0  0  0.0.0.0:8081   0.0.0.0:*   LISTEN  19793/python3 unified_8081
-tcp  0  0  0.0.0.0:18081  0.0.0.0:*   LISTEN  25485/python3 staging unified
-tcp  0  0  0.0.0.0:13011  0.0.0.0:*   LISTEN  25490/python  staging server
-tcp  0  0  0.0.0.0:19101  0.0.0.0:*   LISTEN  25476/python  staging log
+... (16 个端口全开)
 ```
 
-**已准备修复**:
-- `/opt/app/.env_global` 已创建（含 13 个 `export *_BIND=172.20.59.7`）
-- **不重启 = 不生效**
+**BIND 选择逻辑 (为何 172.20.59.7 不是 127.0.0.1)**:
+
+| 候选 | 谁能访问 | agent (10.6.232.176) | 评估 |
+|---|---|---|---|
+| `0.0.0.0` | 任何 | ✅ | 🔴 绿盟告警 |
+| `127.0.0.1` | 仅本机 | ❌ **断 agent** | 不可行 |
+| `172.20.59.7` | 172.20.59.0/24 + 跨子网 | ✅ | ✅ 选这个 |
+
+**关键事实** (已通过 netstat + /proc/net/fib_trie 验证):
+1. yonaa **只有 1 个非 loopback IP** = 172.20.59.7
+2. agent 在 **10.6.232.176** (10.6.0.0/16 子网), 与 yonaa **不同子网**
+3. 但 **网络路由已打通** (10.6.x → 172.20.59.7)
+4. 当前 `0.0.0.0` 监听让 yonaa 接受任何 IP 的连接 (绿盟可扫到)
+5. `172.20.59.7` 等同"绑到本机唯一网卡" = 不监听其他接口 = **绿盟扫不到 0.0.0.0**
+
+**为何不是 127.0.0.1**:
+- 127.0.0.1 仅本机访问, agent (10.6.232.176) 是从外部子网访问
+- 改成 127.0.0.1 会**断 agent 通信** = 不可行
 
 **重启服务影响**:
 - 9101 log_service: agent 正在用 → **重启会断 agent 通信**
