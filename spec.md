@@ -11,6 +11,7 @@ deploy.sh PHASE 0.5 智能提取, 部署包从 ~80MB 降至 ~1-5MB.
 - tools/tests/test_delta_manifest.py
 - deploy_bundle/lib/smart_extract.sh
 - deploy_bundle/lib/sha256_compare.sh
+- deploy_bundle/deploy.sh
 - deploy_bundle/tools/post_deploy_check.py
 - docs/superpowers/plans/2026-07-14-smart-delta-deploy.md
 - docs/superpowers/specs/2026-07-14-smart-delta-deploy-design.md

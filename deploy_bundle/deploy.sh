@@ -41,6 +41,8 @@ DEPLOY_BUNDLE_BUILD="20260703_1200"
 # ============================================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
+# [L17] 智能 delta 部署 - lazy source smart_extract.sh
+# (only sourced when deployment_type=delta detected in PHASE 0.5)
 
 show_help() {
     cat <<'EOF'
@@ -168,7 +170,39 @@ ss -tlnp 2>/dev/null | grep -E ":(${BACKEND_PORT}|${FRONTEND_PORT})" || echo "(�
 
 # ========================= PHASE 0.5: 解压 zip =========================
 banner "PHASE 0.5: 解压 zip"
-# 触发条件: backend 缺 OR frontend_dist_files 缺 (避免 8081 404 灾难)
+
+# [L17] 检测 zip 内 MANIFEST 的 deployment_type, 决定全量 or delta 解压
+DEPLOYMENT_MODE="full"
+if [ -f "$ZIP_PATH" ]; then
+    DEPLOYMENT_MODE=$(unzip -p "$ZIP_PATH" MANIFEST 2>/dev/null | $REMOTE_PY -c "
+import yaml, sys
+try:
+    m = yaml.safe_load(sys.stdin)
+    dt = m.get('deployment_type', 'full')
+    print(dt)
+except Exception:
+    print('full')
+" 2>/dev/null || echo "full")
+    info "[L17] deployment_type=$DEPLOYMENT_MODE (from MANIFEST in zip)"
+fi
+
+if [ "$DEPLOYMENT_MODE" = "delta" ]; then
+    # [L17] Delta 解压路径: 只解压 changed files
+    info "  delta 模式: 只解压变更文件"
+    source "$SCRIPT_DIR/lib/smart_extract.sh"
+    smart_extract "$ZIP_PATH" "$DEPLOYMENTS_DIR" "delta"
+    SMART_RC=$?
+    if [ $SMART_RC -ne 0 ]; then
+        err "smart_extract 失败 (rc=$SMART_RC), 退化到全量解压"
+        DEPLOYMENT_MODE="full"
+    else
+        ok "delta 解压完成"
+    fi
+fi
+
+if [ "$DEPLOYMENT_MODE" != "delta" ]; then
+    # 全量解压路径 (原有逻辑)
+    # 触发条件: backend 缺 OR frontend_dist_files 缺 (避免 8081 404 灾难)
 NEED_UNZIP=false
 if [ "$SKIP_UNZIP" != "true" ]; then
     if [ ! -d "$SERVER_DIR" ]; then
@@ -261,6 +295,7 @@ else
         die "root frontend_dist_files 还是旧 dist, 部署会失败"
     fi
 fi
+fi  # [L17] 关闭 if [ "$DEPLOYMENT_MODE" != "delta" ]
 
 # [FIX 2026-07-03] PHASE 0.5 后检测 entry (现在解到 DEPLOYMENTS_DIR)
 if [ ! -d "$SERVER_DIR" ]; then
