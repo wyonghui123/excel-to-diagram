@@ -9,6 +9,7 @@ from manifest_utils import (
     generate_manifest,
     compute_delta,
     build_delta_zip,
+    verify_delta_manifest,
 )
 
 _SHA_A = "a" * 64
@@ -125,3 +126,34 @@ def test_build_delta_zip(tmp_path):
 
     # 验证 zip 大小远小于全量 (粗略: < 5KB)
     assert delta_zip.stat().st_size < 5000
+
+
+# ─── Test 5: verify_delta_manifest ──────────────────────────────────────
+
+def test_verify_delta_manifest(tmp_path):
+    """验证 yonaa 上所有文件 sha256 == 新 MANIFEST"""
+    # 准备 deploy 目录
+    deploy = tmp_path / "deploy"
+    deploy.mkdir()
+    (deploy / "meta").mkdir()
+    (deploy / "meta" / "server.py").write_text("v1")
+
+    # 生成 MANIFEST
+    m = generate_manifest(deploy, version="v1")
+
+    # 1. 第一次验证: 全部一致
+    result = verify_delta_manifest(deploy, m)
+    assert result["ok"] is True
+    assert result["mismatched"] == []
+
+    # 2. 改 server.py, 验证失败
+    (deploy / "meta" / "server.py").write_text("v2 (modified)")
+    result = verify_delta_manifest(deploy, m)
+    assert result["ok"] is False
+    assert "meta/server.py" in result["mismatched"]
+
+    # 3. 删 server.py, 验证 missing
+    (deploy / "meta" / "server.py").unlink()
+    result = verify_delta_manifest(deploy, m)
+    assert result["ok"] is False
+    assert "meta/server.py" in result["missing"]

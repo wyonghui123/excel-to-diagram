@@ -229,3 +229,43 @@ deleted: {len(delta['deleted'])}
         "deleted": delta["deleted"],
         "zip_size": output_zip.stat().st_size,
     }
+
+
+def verify_delta_manifest(deploy_dir: Path, manifest: Manifest) -> dict:
+    """验证 yonaa 上所有文件 sha256 == MANIFEST 声明
+
+    Args:
+        deploy_dir: 部署目录 (如 /opt/app/deployments/)
+        manifest: 新 MANIFEST
+
+    Returns:
+        {
+            "ok": bool,
+            "checked": N,
+            "mismatched": [path1, ...],  # sha256 不一致
+            "missing": [path1, ...],      # 文件不存在
+        }
+    """
+    mismatched = []
+    missing = []
+    checked = 0
+
+    for entry in manifest.files:
+        local = deploy_dir / Path(entry.path)
+        if not local.exists():
+            missing.append(entry.path)
+            continue
+        actual = hashlib.sha256()
+        with open(local, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                actual.update(chunk)
+        if actual.hexdigest() != entry.sha256:
+            mismatched.append(entry.path)
+        checked += 1
+
+    return {
+        "ok": len(mismatched) == 0 and len(missing) == 0,
+        "checked": checked,
+        "mismatched": mismatched,
+        "missing": missing,
+    }
