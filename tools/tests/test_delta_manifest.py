@@ -8,6 +8,7 @@ from manifest_utils import (
     parse_manifest,
     generate_manifest,
     compute_delta,
+    build_delta_zip,
 )
 
 _SHA_A = "a" * 64
@@ -81,3 +82,46 @@ def test_compute_delta():
     assert "b.py" in delta["modified"]
     assert "d.py" in delta["added"]
     assert "c.py" in delta["deleted"]
+
+
+# ─── Test 4: build_delta_zip ──────────────────────────────────────────────
+
+def test_build_delta_zip(tmp_path):
+    """生成 delta zip: 只含 changed files"""
+    # 准备源目录 (含多个文件)
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "meta").mkdir()
+    (src / "meta" / "server.py").write_text("server content v1")
+    (src / "meta" / "datasource.py").write_text("datasource content v1")
+    (src / "frontend").mkdir()
+    (src / "frontend" / "index.html").write_text("<html>v1</html>")
+
+    # 旧 MANIFEST (server.py 是 v1)
+    old_manifest = generate_manifest(src, version="v1")
+
+    # 修改 server.py 为 v2
+    (src / "meta" / "server.py").write_text("server content v2 (CHANGED)")
+
+    # 生成新 MANIFEST + delta zip
+    new_manifest = generate_manifest(src, version="v2")
+    delta_zip = tmp_path / "delta.zip"
+
+    build_delta_zip(src, old_manifest, new_manifest, delta_zip)
+
+    # 验证 zip 内容
+    import zipfile
+    with zipfile.ZipFile(delta_zip) as zf:
+        names = zf.namelist()
+        assert "MANIFEST" in names
+        assert "DELETED.txt" in names
+        # server.py 应该在 changed/
+        changed_files = [n for n in names if n.startswith("changed/")]
+        assert any("server.py" in n for n in changed_files)
+        # datasource.py 不应该在 changed/ (没改)
+        assert not any("datasource.py" in n for n in changed_files)
+        # index.html 不应该在 changed/
+        assert not any("index.html" in n for n in changed_files)
+
+    # 验证 zip 大小远小于全量 (粗略: < 5KB)
+    assert delta_zip.stat().st_size < 5000

@@ -174,3 +174,58 @@ def compute_delta(old: Manifest, new: Manifest) -> dict:
     deleted = [p for p in old_map if p not in new_map]
 
     return {"modified": modified, "added": added, "deleted": deleted}
+
+
+def build_delta_zip(src_dir: Path, old_manifest: Optional[Manifest],
+                    new_manifest: Manifest, output_zip: Path) -> dict:
+    """生成 delta zip (只含 changed files)
+
+    Args:
+        src_dir: 源目录
+        old_manifest: 旧 MANIFEST (None = 全量)
+        new_manifest: 新 MANIFEST
+        output_zip: 输出的 zip 路径
+
+    Returns:
+        {"modified": [...], "added": [...], "deleted": [...], "zip_size": N}
+    """
+    if old_manifest is None:
+        # 全量模式: 包含所有文件
+        delta = {"modified": [f.path for f in new_manifest.files],
+                 "added": [], "deleted": []}
+    else:
+        delta = compute_delta(old_manifest, new_manifest)
+
+    with zipfile.ZipFile(output_zip, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+        # 1. 写 MANIFEST
+        zf.writestr("MANIFEST", new_manifest.to_yaml())
+
+        # 2. 写 CHANGES summary
+        changes_text = f"""# Delta deploy changes
+# Old: {old_manifest.version if old_manifest else 'N/A'}
+# New: {new_manifest.version}
+# Type: {new_manifest.deployment_type}
+modified: {len(delta['modified'])}
+added: {len(delta['added'])}
+deleted: {len(delta['deleted'])}
+"""
+        zf.writestr("CHANGES", changes_text)
+
+        # 3. 写 DELETED.txt
+        deleted_text = "\n".join(delta["deleted"])
+        zf.writestr("DELETED.txt", deleted_text)
+
+        # 4. 写 changed/ (modified + added)
+        changed_paths = set(delta["modified"] + delta["added"])
+        for entry in new_manifest.files:
+            if entry.path in changed_paths:
+                src_file = src_dir / Path(entry.path)
+                if src_file.exists():
+                    zf.write(src_file, f"changed/{entry.path}")
+
+    return {
+        "modified": delta["modified"],
+        "added": delta["added"],
+        "deleted": delta["deleted"],
+        "zip_size": output_zip.stat().st_size,
+    }

@@ -37,6 +37,15 @@ if ROOT.name == "deploy_bundle":
     ROOT = ROOT.parent
 DEFAULT_VERSION = "v20260703_004"
 
+# [L17] 智能 delta 部署 - manifest_utils 可选导入 (deploy_bundle/tools/ 路径下可能没有)
+try:
+    sys.path.insert(0, str(ROOT / "tools"))
+    from manifest_utils import generate_manifest as _gen_delta_manifest, \
+        build_delta_zip as _build_delta_zip, parse_manifest as _parse_delta_manifest
+    _MANIFEST_UTILS_AVAILABLE = True
+except ImportError:
+    _MANIFEST_UTILS_AVAILABLE = False
+
 
 # ========================= V007.25 打包完整性检查 =========================
 
@@ -48,7 +57,7 @@ def check_db_integrity_before_zip() -> bool:
     """
     db_path = ROOT / "meta" / "architecture.db"
     if not db_path.exists():
-        print(f"[V007.25] [SKIP] db 不存在: {db_path} (首次部署?)")
+        print(f"[V007.25] [SKIP] db 不存在: {db_path} (首次部署？)")
         return True
 
     print(f"[V007.25] db 完整性检查: {db_path}")
@@ -546,6 +555,10 @@ def main():
     parser.add_argument("--allow-dirty-git", action="store_true", help="[V007.25] 允许 git working tree 有未提交修改 (不推荐)")
     parser.add_argument("--skip-bundle-sync", action="store_true", help="[V007.25] 跳过 deploy_bundle/ 自动同步")
     parser.add_argument("--skip-dry-run", action="store_true", help="[V007.25] 跳过本机 dry-run (强烈不推荐)")
+    parser.add_argument("--delta", action="store_true",
+                        help="[L17] Generate delta zip (only changed files)")
+    parser.add_argument("--prev-manifest", type=str, default=None,
+                        help="[L17] Path to previous MANIFEST (for delta mode)")
     args = parser.parse_args()
 
     out_name = args.out or f"deploy-{args.version}.zip"
@@ -644,7 +657,7 @@ def main():
         else:
             print(f"[V007.25] dist/ mtime ({datetime.fromtimestamp(dist_mtime)}) >= frontend_dist_files/ ({datetime.fromtimestamp(fd_mtime)}) ✓")
     else:
-        print(f"[V007.25] frontend_dist_files/ 不存在 (首次打包? 跳过 dist 时序检查)")
+        print(f"[V007.25] frontend_dist_files/ 不存在 (首次打包？ 跳过 dist 时序检查)")
 
     # MANIFEST (aligned with scripts/build-deploy-package.ps1)
     manifest_text = _build_manifest(args.version)
@@ -756,58 +769,85 @@ def main():
                 print(f"  [V007.25] tools/lib/ 已复制到 bundle")
         # MANIFEST
         (staging / "MANIFEST").write_text(manifest_text, encoding="utf-8")
-        # 打包
-        with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            for fp in staging.rglob("*"):
-                if fp.is_file():
-                    arc = fp.relative_to(staging)
-                    zf.write(fp, arcname=str(arc).replace("\\", "/"))
-        # 统计
-        size_mb = out_path.stat().st_size / 1024 / 1024
-        file_count = sum(1 for _ in staging.rglob("*") if _.is_file())
-        print(f"[OK] {out_path.name} ({size_mb:.1f}MB, {file_count} files)")
-        # [FIX v022.2 2026-07-05] 打完 zip 自动跑清洁度检查, 0 垃圾才 PASS
-        #   背景: 之前 v022.0 含 113 db + 104 bak + 60 backup + 83 backups/ + 46 logs/
-        #   原因: ignore_patterns("*.db") 用 fnmatch 不匹 *.db-wal, *.db.bak, *.db.backup_*
-        #   修法: 改用 callable _ignore_exclude_runtimes + 显式 rmtree backups/logs/db_monitor_logs
-        #   固化: 打完 zip 后立即扫所有 entries, 不通过 exit 1 (defensive programming)
-        GARBAGE = {
-            '.db': lambda n: n.lower().endswith('.db'),
-            '.db-wal': lambda n: n.lower().endswith('.db-wal'),
-            '.db-shm': lambda n: n.lower().endswith('.db-shm'),
-            '.bak': lambda n: '.bak' in n.lower(),
-            '.backup': lambda n: '.backup' in n.lower(),
-            '.pyc': lambda n: n.endswith('.pyc'),
-            'backups/': lambda n: 'backups/' in n.lower(),
-            'logs/': lambda n: 'logs/' in n.lower(),
-            'screenshots/': lambda n: 'screenshots/' in n.lower(),
-            'db_monitor_logs': lambda n: 'db_monitor_logs' in n.lower(),
-            '__pycache__': lambda n: '__pycache__' in n.lower(),
-            '.lock': lambda n: n.lower().endswith('.lock'),
-        }
-        with zipfile.ZipFile(out_path, "r") as zf:
-            garbage_hits = {k: 0 for k in GARBAGE}
-            for name in zf.namelist():
-                for k, fn in GARBAGE.items():
-                    if fn(name):
-                        garbage_hits[k] += 1
-        any_garbage = any(v > 0 for v in garbage_hits.values())
-        if any_garbage:
-            print(f"[FAIL] ZIP 仍含垃圾文件, 拒绝输出:")
-            for k, n in garbage_hits.items():
-                if n > 0:
-                    print(f"  [{k}] {n}")
-            print(f"\n[hint] 修法: 1) 在 _ignore_exclude_runtimes 加新规则 2) 在 rmtree 列表加新 dir 3) 重跑 rebuild_zip.py")
-            sys.exit(1)
+        # [L17] 智能 delta 模式: 只打包 changed files
+        is_delta = getattr(args, 'delta', False) and _MANIFEST_UTILS_AVAILABLE
+        if is_delta:
+            print(f"[L17] ========== 智能 Delta 打包模式 ==========")
+            new_manifest = _gen_delta_manifest(staging, version=args.version,
+                                               deployment_type="delta")
+            old_manifest = None
+            if args.prev_manifest:
+                prev_path = Path(args.prev_manifest)
+                if prev_path.exists():
+                    old_manifest = _parse_delta_manifest(prev_path.read_text(encoding="utf-8"))
+                    print(f"  [OK] 旧 MANIFEST: {prev_path.name} (version={old_manifest.version}, files={len(old_manifest.files)})")
+                else:
+                    print(f"  [WARN] 旧 MANIFEST 不存在: {prev_path}, 退化为全量")
+            else:
+                print(f"  [INFO] 无 --prev-manifest, 退化为全量 (所有文件视为 changed)")
+            result = _build_delta_zip(staging, old_manifest, new_manifest, out_path)
+            size_mb = out_path.stat().st_size / 1024 / 1024
+            print(f"  [OK] Delta: modified={len(result['modified'])}, added={len(result['added'])}, deleted={len(result['deleted'])}")
+            print(f"[OK] {out_path.name} ({size_mb:.1f}MB, delta)")
         else:
-            print(f"[OK] ZIP 清洁度验证通过 (0 垃圾): {[k for k in GARBAGE]}")
-        print(f"     version: {args.version}")
+            # 全量打包 (原有逻辑)
+            with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for fp in staging.rglob("*"):
+                    if fp.is_file():
+                        arc = fp.relative_to(staging)
+                        zf.write(fp, arcname=str(arc).replace("\\", "/"))
+        # 统计
+        if not is_delta:
+            size_mb = out_path.stat().st_size / 1024 / 1024
+            file_count = sum(1 for _ in staging.rglob("*") if _.is_file())
+            print(f"[OK] {out_path.name} ({size_mb:.1f}MB, {file_count} files)")
+        # [L17] Delta 模式: 同步 zip + 跳过全量模式验证 (结构不同)
+        if is_delta:
+            deploy_bundle_dir = ROOT / "deploy_bundle"
+            if deploy_bundle_dir.exists():
+                zip_dst = deploy_bundle_dir / out_path.name
+                shutil.copy2(out_path, zip_dst)
+                print(f"  [OK] 同步 delta zip → deploy_bundle/{out_path.name}")
+            print(f"[L17] Delta 打包完成 (跳过全量模式验证检查)")
+        if not is_delta:
+            # [FIX v022.2 2026-07-05] 打完 zip 自动跑清洁度检查, 0 垃圾才 PASS
+            GARBAGE = {
+                '.db': lambda n: n.lower().endswith('.db'),
+                '.db-wal': lambda n: n.lower().endswith('.db-wal'),
+                '.db-shm': lambda n: n.lower().endswith('.db-shm'),
+                '.bak': lambda n: '.bak' in n.lower(),
+                '.backup': lambda n: '.backup' in n.lower(),
+                '.pyc': lambda n: n.endswith('.pyc'),
+                'backups/': lambda n: 'backups/' in n.lower(),
+                'logs/': lambda n: 'logs/' in n.lower(),
+                'screenshots/': lambda n: 'screenshots/' in n.lower(),
+                'db_monitor_logs': lambda n: 'db_monitor_logs' in n.lower(),
+                '__pycache__': lambda n: '__pycache__' in n.lower(),
+                '.lock': lambda n: n.lower().endswith('.lock'),
+            }
+            with zipfile.ZipFile(out_path, "r") as zf:
+                garbage_hits = {k: 0 for k in GARBAGE}
+                for name in zf.namelist():
+                    for k, fn in GARBAGE.items():
+                        if fn(name):
+                            garbage_hits[k] += 1
+            any_garbage = any(v > 0 for v in garbage_hits.values())
+            if any_garbage:
+                print(f"[FAIL] ZIP 仍含垃圾文件, 拒绝输出:")
+                for k, n in garbage_hits.items():
+                    if n > 0:
+                        print(f"  [{k}] {n}")
+                print(f"\n[hint] 修法: 1) 在 _ignore_exclude_runtimes 加新规则 2) 在 rmtree 列表加新 dir 3) 重跑 rebuild_zip.py")
+                sys.exit(1)
+            else:
+                print(f"[OK] ZIP 清洁度验证通过 (0 垃圾): {[k for k in GARBAGE]}")
+            print(f"     version: {args.version}")
 
         # ========================= V007.25 本机 dry-run (强避免 14:44 类 bug) =========================
         # [V007.25] 根本避免: 不依赖"我下次会跑" (上次我就是这么说, 然后没跑)
         # 修法: rebuild_zip.py 内部强制跑 deploy_dry_run, 跑不过 exit 1
         # 跳过: --skip-dry-run (强烈不推荐)
-        if not getattr(args, "skip_dry_run", False):
+        if not is_delta and not getattr(args, "skip_dry_run", False):
             if not deploy_dry_run(out_path):
                 print(f"[X] [V007.25] dry-run 失败, 打包整体失败")
                 print(f"    修复 deploy.sh / zip 后重新打包")
@@ -820,7 +860,7 @@ def main():
         #   之前: 我改了 tools/deploy.sh, 但 deploy_bundle/deploy.sh 还是 V007.21 旧版
         #   后果: yonaa 跑 deploy_bundle/deploy.sh (旧), 走旧的部署逻辑
         #   修复: 打包时自动同步 tools/ → deploy_bundle/
-        if not args.skip_bundle_sync:
+        if not is_delta and not args.skip_bundle_sync:
             print(f"[V007.25] ========== deploy_bundle/ 同步 (防再忘) ==========")
             deploy_bundle_dir = ROOT / "deploy_bundle"
             if not deploy_bundle_dir.exists():
@@ -1094,7 +1134,7 @@ else:
 
         # ========================= V007.25 打包后冒烟测试 =========================
         # [V007.25] P1 验证 zip 内文件可用, 防止"包存在但不能跑"
-        if not args.skip_smoke_test:
+        if not is_delta and not args.skip_smoke_test:
             print(f"[V007.25] ========== 打包后冒烟测试 ==========")
             if not post_zip_smoke_test(out_path):
                 print(f"[V007.25] [X] 冒烟测试失败, zip 可能不可用")

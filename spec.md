@@ -1,32 +1,28 @@
-# SPEC: wyonghui 在 TTTTT000/V11 下能看到 13 个域（应为 1 个供应链云）
+# SPEC: L17 智能 Delta 部署实现
 
 ## 任务概述
-定位 user_id=10006 (wyonghui) 通过 TEST888 用户组 → scmgrp 角色 → role_dimension_scopes[domain=2200] 配置
-应该仅看到 TTTTT000 / V11 下的 1 个供应链云域，实际可见 13 个域。
+实现 content-addressed delta 部署: rebuild_zip.py --delta 只打包 changed files,
+deploy.sh PHASE 0.5 智能提取, 部署包从 ~80MB 降至 ~1-5MB.
 
 ## 涉及文件（白名单）
-- d:\filework\agent-dpiprint-worktree\meta\core\interceptors\data_permission_interceptor.py
-- d:\filework\agent-dpiprint-worktree\meta\services\dimension_scope_engine.py
-- d:\filework\agent-dpiprint-worktree\meta\core\interceptors\base.py  (查询/条件定义)
+- tools/manifest_utils.py
+- tools/rebuild_zip.py
+- tools/tests/conftest.py
+- tools/tests/test_delta_manifest.py
+- deploy_bundle/lib/smart_extract.sh
+- deploy_bundle/lib/sha256_compare.sh
+- deploy_bundle/tools/post_deploy_check.py
+- docs/superpowers/plans/2026-07-14-smart-delta-deploy.md
+- docs/superpowers/specs/2026-07-14-smart-delta-deploy-design.md
 
 ## 涉及文件（黑名单，绝对禁止修改）
 - d:\filework\excel-to-diagram\**    (主工作树)
-- d:\filework\integration-worktree\**  (integration 主仓, 别人在跑)
 - d:\filework\.git\**                  (git metadata)
-- meta/server.py 除非必要（本任务只关心 interceptor 层）
-
-## 调查步骤
-1. 在 DPI 关键路径加 print (logger.info 改成 print 也可)
-2. 启动 worktree 后端到端口 3015 (AGENT_PORT)
-3. dev-login wyonghui, 调 `GET /api/v2/bo/domain?version_id=863`
-4. 收集 stdout, 定位根因
-5. 修复方案：
-   - 若 dimension scope 没真被 SQL 消费 → 在 DPI 内强制包 QueryCondition
-   - 若 derive_data_conditions 没产出 domain cond → 在 engine 加 fallback
-   - 若两者都没问题 → 必有第三方原因，继续追
+- meta/server.py (后端服务不改动)
+- src/ (前端不改动)
 
 ## 完成标准
-- [ ] Wyonghui 经 TEST888 组 → 调 `GET /api/v2/bo/domain?version_id=863` 返回 = 1 个域(2200 供应链云)
-- [ ] 不影响 admin / 其他角色
-- [ ] 单测覆盖 `test_dimension_scope_for_user_via_group.py`
-- [ ] commit + handover to PM
+- [ ] manifest_utils.py: FileEntry/Manifest/parse/generate/compute_delta/build_delta_zip
+- [ ] rebuild_zip.py --delta 集成, is_delta guards 跳过全量检查
+- [ ] test_delta_manifest.py 4/4 PASS
+- [ ] Delta zip 比 full zip 小 90%+
