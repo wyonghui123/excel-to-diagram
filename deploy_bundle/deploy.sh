@@ -297,13 +297,18 @@ else
 fi
 fi  # [L17] 关闭 if [ "$DEPLOYMENT_MODE" != "delta" ]
 
-# [L8.6] 检测/剥离 multipart 污染文件
-if [ -f "$SCRIPT_DIR/../tools/unzip_safe.py" ]; then
-    UNZIP_SAFE_PY=$REMOTE_PY  # remote python
-    $REMOTE_PY "$SCRIPT_DIR/../tools/unzip_safe.py" "$DEPLOYMENTS_DIR" --recursive 2>&1 | head -20
-    if [ ${PIPESTATUS[0]} -ne 0 ]; then
-        warn "[L8.6] 发现 multipart 污染文件, 已尝试自动剥离 (请人工确认)"
+# [L8.6] Magic number 污染检测 + multipart 剥离 — 在解压后立即跑, 早发现
+if [ -f "$SCRIPT_DIR/unzip_safe.py" ]; then
+    info "[L8.6] 检测文件 magic number 污染..."
+    if $REMOTE_PY "$SCRIPT_DIR/unzip_safe.py" "$DEPLOYMENTS_DIR" --recursive --check 2>&1 | tee /tmp/unzip_safe_check.log; then
+        ok "[L8.6] 未发现 magic number 污染"
+    else
+        UNZIP_SAFE_RC=$?
+        warn "[L8.6] 检测到污染 (rc=$UNZIP_SAFE_RC), 详情见 /tmp/unzip_safe_check.log"
+        warn "[L8.6] 部署继续, 但建议人工 review 污染文件"
     fi
+else
+    info "[L8.6] unzip_safe.py 不存在, 跳过污染检测"
 fi
 
 # [FIX 2026-07-03] PHASE 0.5 后检测 entry (现在解到 DEPLOYMENTS_DIR)
