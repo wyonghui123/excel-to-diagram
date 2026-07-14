@@ -213,6 +213,8 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
                 return self._audit_rotate_endpoint(q)
             elif route == "/api/danger/confirm" or route == "/api/danger/verify":
                 return self._danger_confirm(q)
+            elif route == "/api/isolation_check":
+                return self._isolation_check(q)
             return self._json(404, {"error": "not found", "route": route})
         except Exception as e:
             return self._json(500, {"error": str(e)})
@@ -308,6 +310,86 @@ class CoreHandler(http.server.BaseHTTPRequestHandler):
             })
         except Exception as e:
             return self._json(500, {"error": str(e)})
+
+    # ── GET /api/isolation_check ──────────────────────────────
+    def _isolation_check(self, q):
+        """[L8.8] 检测 /tmp 隔离状态 (PrivateTmp)
+
+        Returns:
+            tmp_isolated: bool
+            systemd_private_tmp: bool
+            test_file_real_path: 实际写入路径
+            dirs: 各目录隔离状态
+        """
+        level = _check_token(q)
+        if not level:
+            return self._json(403, {"error": "token required"})
+
+        # 1. /tmp inode vs / inode
+        tmp_inode = root_inode = None
+        tmp_isolated = None
+        try:
+            tmp_inode = os.stat("/tmp").st_ino
+            root_inode = os.stat("/").st_ino
+            tmp_isolated = (tmp_inode != root_inode)
+        except Exception:
+            pass
+
+        # 2. systemd PrivateTmp
+        systemd_isolated = None
+        try:
+            svc = os.environ.get("SERVICE_NAME", "core_service.service")
+            out = subprocess.run(
+                ["systemctl", "show", svc, "-p", "PrivateTmp"],
+                capture_output=True, text=True, timeout=5
+            ).stdout
+            if out:
+                # 输出形如: PrivateTmp=yes
+                for line in out.splitlines():
+                    if line.startswith("PrivateTmp="):
+                        val = line.split("=", 1)[1].strip().lower()
+                        systemd_isolated = (val == "yes")
+                        break
+        except Exception:
+            pass
+
+        # 3. 实际写入测试
+        test_file = f"/tmp/_isolation_test_{os.getpid()}_{int(time.time())}"
+        real_path = ""
+        try:
+            with open(test_file, "w") as f:
+                f.write("test")
+            real_path = os.path.realpath(test_file)
+        finally:
+            try:
+                os.remove(test_file)
+            except Exception:
+                pass
+
+        # 4. 各目录隔离状态
+        dirs = ["/tmp", "/var/tmp", "/opt/app/shared", "/opt/app/deployments"]
+        isolation_status = {}
+        for d in dirs:
+            try:
+                isolation_status[d] = {
+                    "exists": os.path.exists(d),
+                    "writable": os.access(d, os.W_OK) if os.path.exists(d) else False,
+                    "inode": os.stat(d).st_ino if os.path.exists(d) else None,
+                }
+            except Exception as ex:
+                isolation_status[d] = {"error": str(ex)}
+
+        return self._json(200, {
+            "service": "core_service",
+            "pid": os.getpid(),
+            "tmp_isolated": tmp_isolated,
+            "tmp_inode": tmp_inode,
+            "root_inode": root_inode,
+            "systemd_private_tmp": systemd_isolated,
+            "test_file_real_path": real_path,
+            "isolation_warning": bool(tmp_isolated and systemd_isolated),
+            "dirs": isolation_status,
+        })
 
     # ── POST /api/audit/rotate (admin only) ───────────────
     def _audit_rotate_endpoint(self, q):
