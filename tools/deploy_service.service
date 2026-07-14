@@ -1,0 +1,17 @@
+[Unit]
+Description=Deploy Service (V007.65 deploy_service)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/opt/miniconda3-py39/bin/python -u /opt/app/shared/deploy_service.py
+Environment="DEPLOY_SERVICE_PORT=9205"
+Environment="DEPLOY_SERVICE_SECRET=v007.65-deploy"
+Environment="DEPLOY_SCRIPT_DIR=/opt/app/shared"
+Environment="DEPLOY_LOG_DIR=/opt/app/deploy_logs"
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
