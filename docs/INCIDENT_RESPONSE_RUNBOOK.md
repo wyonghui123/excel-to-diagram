@@ -345,6 +345,8 @@ python tools/monitor_migrations.py --check-regression
 
 **V007.57**: 改 nobody 用户 — 阿里云 HIPS 不杀非 root 启的进程 (治本)
 
+**V007.58**: IM 告警 (agent 端) — yonaa 端 5 分钟内推到运维手机 (飞书/钉钉/微信)
+
 ### 9.0 nobody 用户验证 (V007.57)
 
 ```bash
@@ -415,6 +417,7 @@ python tools/install_log_service_systemd.py --target prod
 - **cron `*/5 * * * *`**: 自动跑 `--check-log-service`
 - **告警 log**: `tail -f /var/log/monitor_alert.log`
 - **手动 watch**: `python tools/remote_capability_probe.py --watch 3 --auto-restart-log`
+- **IM 推送 (V007.58)**: agent 端 daemon `python tools/alert_monitor.py --daemon` (Windows 任务计划), 详见 [INCIDENT_ALERT_SETUP.md](INCIDENT_ALERT_SETUP.md)
 
 ### 9.6 应急 (systemd 不可用时)
 

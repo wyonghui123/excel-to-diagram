@@ -544,6 +544,9 @@ cat /opt/app/state/deployment_history.json
 | `tools/find_log_service_killer.py` | **V007.56** 探查 SIGKILL 元凶 (journal + aegis + cgroup + auditd) | systemd 守护下还是被杀时 |
 | `tools/deploy_log_service_systemd.py` | **V007.57** 上传 service + daemon-reload + restart (支持 nobody 用户) | 改 unit 文件后重发 |
 | `tools/chown_log_service_dirs.py` + `chown_readable.py` + `fix_staging_chown.py` | **V007.57** nobody 用户下, chown DB/log/scripts 给 nobody 可写可读 | 改 nobody 后必跑一次 |
+| `tools/monitor_hips.py` | **V007.57** 监控 nobody log_service 是否被 HIPS 杀 (2 分钟 12 次检查) | 验证 nobody 修复是否生效 | 
+| `tools/alert_monitor.py` + `alert_monitor.bat` | **V007.58** agent 端 IM 告警 (5min 轮询 7 端口 + 飞书/钉钉/微信 webhook) | 服务器无公网, agent 主动轮询 | **agent 端** |
+| `docs/INCIDENT_ALERT_SETUP.md` | **V007.58** IM 告警配置 5 分钟上手 (含网络拓扑/IM webhook 获取/Windows 任务计划) | 第一次配 IM | **运维** |
 | `tools/rebuild_bundle.ps1` | 本地 rebuild (保留) | 保留 |
 
 **新端口 (agent 入口, 7 个)**:

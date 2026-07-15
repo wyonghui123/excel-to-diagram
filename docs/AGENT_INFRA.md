@@ -133,6 +133,7 @@ docs/
 | **migration lint** | **0 FAIL**, 8 WARN, exit 0 ✅ |
 | **migration runner** | idempotent (重复列自动跳过) ✅ |
 | **9101/19101 log_service** | **alive (10+ 端点, V007.55 systemd 守护 + V007.57 nobody 用户, 进程死后 5s 自动重启, HIPS 不杀)** ✅ |
+| **IM 告警链路** | **V007.58 alert_monitor.py (agent 端 5min 轮询 → 飞书/钉钉/微信 webhook), 服务器无公网, 走 agent 中转** ⚠️ 待运维填 webhook |
 | **本会话 commit 数** | 6 (80e5498 → 366cb85) + 文档 + log_service 启停工具 |
 
 ---

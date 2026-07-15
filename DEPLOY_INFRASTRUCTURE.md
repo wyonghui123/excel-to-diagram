@@ -109,6 +109,8 @@
 | 25 | `tools/deploy_log_service_systemd.py` | **V007.57** 上传 service + daemon-reload + restart (支持 nobody 用户切换) | service 文件改了 | **agent** |
 | 26 | `tools/chown_log_service_dirs.py` + `chown_readable.py` + `fix_staging_chown.py` | **V007.57** chown DB/log/scripts 给 nobody 可写可读 (改 nobody 后必跑) | 切 nobody 时 / 文件 owner 乱了 | **agent** |
 | 27 | `tools/monitor_hips.py` | **V007.57** 监控 nobody log_service 是否被 HIPS 杀 (2 分钟 12 次检查) | 验证 nobody 修复是否生效 | **agent** |
+| 28 | `tools/alert_monitor.py` + `alert_monitor.bat` | **V007.58** agent 端 IM 告警 (5min 轮询 7 端口 + 飞书/钉钉/微信 webhook) | 服务器无公网, agent 主动轮询 | **agent 端** |
+| 29 | `docs/INCIDENT_ALERT_SETUP.md` | **V007.58** IM 告警配置 5 分钟上手 (网络拓扑 + IM webhook 获取 + Windows 任务计划) | 第一次配 IM | **运维** |
 
 **关键差异**：
 - **§1.1 工具**: 需要 SFTP 上传到 `/tmp/`, 远端 SSH 跑 (人)

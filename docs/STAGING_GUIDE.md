@@ -54,6 +54,12 @@ python tools/find_log_service_killer.py                      # V007.56 探查 SI
 tail -f /var/log/monitor_alert.log                            # 告警
 
 # V007.56 删除了: python tools/restart_log_service.py
+
+# V007.58: IM 告警 (agent 端轮询)
+# 服务器无公网, 走 agent 中转
+# 详见: docs/INCIDENT_ALERT_SETUP.md
+python tools/alert_monitor.py --check-now  # agent 端跑一次
+```
 ```
 
 ---

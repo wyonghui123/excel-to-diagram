@@ -195,6 +195,7 @@ python tools/staging_deploy_orchestrator.py
 - ✅ V007.55 完成: systemd unit 守护 log_service (install_log_service_systemd.py) + cron 告警 (setup_log_service_cron.py)
 - ✅ V007.56 完成: 探查 SIGKILL 元凶 (find_log_service_killer.py, 找到是阿里云 HIPS), 删除 restart_log_service.py
 - ✅ V007.57 完成: log_service 改 nobody 用户运行 (service 文件 User=nobody + chown DB/log 目录), 2 分钟监控 0 杀进程事件, HIPS 不再杀
+- ✅ V007.58 完成: IM 告警链路 (alert_monitor.py + alert_monitor.bat + INCIDENT_ALERT_SETUP.md), agent 端 5min 轮询 7 端口 → 飞书/钉钉/微信 webhook (服务器无公网, 走 agent 中转)
 - ⚠️ 自动监控: watch.sh 需手工启动, 没 cron
 - ⚠️ 通知: 手工 (无 IM 集成)
 

@@ -1,0 +1,22 @@
+{
+  "im": {
+    "default": "feishu",
+    "feishu": {
+      "webhook": "https://open.feishu.cn/open-apis/bot/v2/hook/<替换为你的token>",
+      "secret": ""
+    },
+    "dingtalk": {
+      "webhook": "https://oapi.dingtalk.com/robot/send?access_token=<替换>",
+      "secret": ""
+    },
+    "wecom": {
+      "webhook": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=<替换>"
+    }
+  },
+  "alert": {
+    "interval_sec": 300,
+    "cooldown_sec": 600,
+    "at_all_on_fail": true,
+    "at_all_on_recovery": false
+  }
+}
