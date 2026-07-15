@@ -214,7 +214,8 @@ def yuploaderun(local_path, remote_path='/tmp/agent.py', port=19200, secret=None
     up = yupload(local_path, remote_path, port=port, secret=secret)
     if up.get('error'):
         return up
-    cmd = f'/opt/miniconda3-py39/bin/python3 {remote_path}'
+    # 用 PATH 中的 python3 (staging 是 /usr/bin/python3, prod 也是), 不用 miniconda 绝对路径
+    cmd = f'python3 {remote_path}'
     if cleanup:
         cmd += f'; rm -f {remote_path}'
     return yexec(cmd, port=port, secret=secret, timeout=120)

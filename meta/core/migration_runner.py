@@ -481,9 +481,36 @@ class MigrationRunner:
     # SQL 执行
     # ------------------------------------------------------------------
 
+    # 幂等迁移容忍的错误模式 (大小写不敏感子串匹配)
+    # 迁移文件多次跑或被部分应用后, 这些错误表示 schema 已经是目标状态
+    _IDEMPOTENT_ERRORS = (
+        "duplicate column",       # ALTER TABLE ADD COLUMN
+        "duplicate column name",  # SQLite 同上
+        "already exists",         # CREATE TABLE/INDEX
+        "duplicate index name",   # CREATE INDEX
+        "index already exists",   # 同上
+        "table already exists",   # CREATE TABLE
+        "no such column",         # DROP COLUMN 已不存在
+        "no such index",          # DROP INDEX 已不存在
+    )
+
+    def _is_idempotent_error(self, err_msg: str) -> bool:
+        """判断错误是否属于幂等迁移可容忍的"""
+        low = err_msg.lower()
+        return any(pat in low for pat in self._IDEMPOTENT_ERRORS)
+
     def execute_sql_file(self, sql_file_path: str) -> bool:
         """
         执行 SQL 文件
+
+        幂等策略: 对于 ALTER TABLE ADD COLUMN / CREATE INDEX 重复错误自动跳过.
+        迁移文件应该写成可重复跑的 (IF NOT EXISTS / 重复 ALTER 也兼容),
+        这样在 staging/prod 已经手工应用过部分 schema 时也能通过.
+
+        策略:
+          1. 优先用 sqlite3.Connection.executescript() 一次性跑全部 (它能处理 trigger 块 BEGIN/END)
+          2. 捕获 sqlite3 错, 如果是 idempotent 错误, 重新走分语句模式跳过该语句
+          3. 仍然错就 fail
 
         Args:
             sql_file_path: SQL 文件路径
@@ -495,22 +522,72 @@ class MigrationRunner:
             with open(sql_file_path, 'r', encoding='utf-8') as f:
                 sql_content = f.read()
 
+            # 尝试 1: 用 executescript 一次性执行 (能处理 trigger BEGIN/END 块)
+            try:
+                # 获取底层 sqlite3 连接 (绕开 DataSource 包装)
+                conn = self._get_raw_sqlite_connection()
+                conn.executescript(sql_content)
+                conn.commit()
+                logger.info("SQL file executed successfully (executescript): %s", sql_file_path)
+                return True
+            except Exception as script_err:
+                err_str = str(script_err)
+                if not self._is_idempotent_error(err_str):
+                    # 非幂等错误, 整文件失败
+                    logger.error("Failed to execute SQL file %s: %s", sql_file_path, err_str[:300])
+                    return False
+                # idempotent 错: 走分语句模式, 跳过重复列
+                logger.info(
+                    "executescript hit idempotent error (%s), falling back to per-statement mode",
+                    err_str[:200],
+                )
+
+            # 尝试 2: 分语句模式 (用于 idempotent 错误容错)
             statements = self._parse_sql_statements(sql_content)
 
             for statement in statements:
                 statement = statement.strip()
                 if statement and not statement.startswith('--'):
-                    self.data_source.execute(statement)
+                    try:
+                        self.data_source.execute(statement)
+                    except Exception as stmt_err:
+                        if self._is_idempotent_error(str(stmt_err)):
+                            logger.info(
+                                "SQL statement skipped (idempotent): %s... err=%s",
+                                statement[:60].replace('\n', ' '),
+                                str(stmt_err)[:100],
+                            )
+                            continue
+                        raise
 
             if not self.data_source.in_transaction:
                 self.data_source.commit()
 
-            logger.info("SQL file executed successfully: %s", sql_file_path)
+            logger.info("SQL file executed successfully (per-statement): %s", sql_file_path)
             return True
 
         except Exception as e:
             logger.error("Failed to execute SQL file %s: %s", sql_file_path, str(e))
             return False
+
+    def _get_raw_sqlite_connection(self) -> "sqlite3.Connection":
+        """获取底层 sqlite3 连接 (用于 executescript 处理 trigger BEGIN/END 块)
+
+        走 DataSource.get_connection() 会返回带事务管理的连接;
+        直接读 self.data_source.connection 拿到 sqlite3.Connection
+        """
+        # 尝试常见属性名
+        for attr in ('_conn', 'connection', 'conn', '_connection'):
+            obj = getattr(self.data_source, attr, None)
+            if obj is not None and hasattr(obj, 'executescript'):
+                return obj
+        # fallback: 从 datasource 拿 db_path 自己连接
+        # 这种情况在生产环境是异常路径, 用临时连接
+        import sqlite3
+        db_path = getattr(self.data_source, 'database', None) or getattr(self.data_source, 'db_path', None)
+        if db_path and os.path.exists(db_path):
+            return sqlite3.connect(db_path)
+        raise RuntimeError("Cannot get raw sqlite3 connection from DataSource")
 
     def _parse_sql_statements(self, sql_content: str) -> List[str]:
         """将 SQL 文件内容分割为独立的语句"""
