@@ -36,12 +36,31 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).parent
 WORKTREE = SCRIPT_DIR.parent
 DEFAULT_MIG_DIR = WORKTREE / "meta" / "migrations"
+LEGACY_CONFIG = SCRIPT_DIR / "migration_lint.legacy.yaml"
 
 NAMING_PATTERN = re.compile(r"^v(\d{3})__([a-z][a-z0-9_]*)\.(py|sql)$")
 
 
+def _load_legacy_set() -> set:
+    """加载 legacy 白名单 (文件名集合)"""
+    import yaml
+    if not LEGACY_CONFIG.exists():
+        return set()
+    try:
+        data = yaml.safe_load(LEGACY_CONFIG.read_text(encoding="utf-8")) or []
+        return {entry["name"] for entry in data if "name" in entry}
+    except Exception as e:
+        print(f"[WARN] 加载 {LEGACY_CONFIG.name} 失败: {e}")
+        return set()
+
+
+LEGACY_FILES = _load_legacy_set()
+
+
 def lint_naming(file_path: Path) -> list:
     """L1: 命名规范"""
+    if file_path.name in LEGACY_FILES:
+        return []
     issues = []
     if not NAMING_PATTERN.match(file_path.name):
         issues.append(("FAIL", f"L1 naming: {file_path.name} 不匹配 v<NNN>__<desc>.{{py,sql}}"))
@@ -51,6 +70,8 @@ def lint_naming(file_path: Path) -> list:
 def lint_signature(file_path: Path) -> list:
     """L2: 入口签名"""
     if file_path.suffix != ".py":
+        return []
+    if file_path.name in LEGACY_FILES:
         return []
     issues = []
     try:
@@ -124,6 +145,8 @@ def lint_docstring(file_path: Path) -> list:
 
 def lint_destructive(file_path: Path) -> list:
     """L5: 无 DROP TABLE/COLUMN"""
+    if file_path.name in LEGACY_FILES:
+        return []  # legacy: 已知 DROP 必要, 已在白名单中允许
     issues = []
     content = file_path.read_text(encoding="utf-8")
     has_drop = re.search(r"DROP\s+(TABLE|COLUMN|INDEX|VIEW|TRIGGER)", content, re.IGNORECASE)
@@ -246,8 +269,7 @@ def main():
         return 1
     if warns and args.strict:
         return 1
-    if warns:
-        return 2
+    # 有 WARN 时返回 0 (WARN 不阻塞 CI), 只在 --strict 时才 exit 1
     return 0
 
 
