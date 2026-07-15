@@ -101,9 +101,11 @@
 | `5001` | v4 backend API | HTTP | 用户 (浏览器/app) | — |
 | `8081` | v4 unified (frontend + API 代理) | HTTP | 用户 (浏览器) | — |
 | `5000` | v3 backend (旧) | HTTP | 用户 | — |
-| **9200** | **prod core_service (exec + upload)** | HTTP | **agent** | yonaa_exec.py |
-| **19200** | **staging core_service (exec + upload)** | HTTP | **agent** | yonaa_exec.py |
-| **9201** | observability (4 端点: health/ready/metrics/upload) | HTTP | agent | yonaa_exec.py |
+| **9200** | **prod core_service (exec + upload + audit)** | HTTP | **agent** | yonaa_exec.py |
+| **19200** | **staging core_service (exec + upload + audit)** | HTTP | **agent** | yonaa_exec.py |
+| **9201** | observability (4 端点: health/ready/metrics/upload_multi) | HTTP | agent | yonaa_exec.py |
+| **9101** | **prod log_service (10+ 端点, 本会话重启)** | HTTP | agent | yonaa_exec.py + restart_log_service.py |
+| **19101** | **staging log_service (10+ 端点, 本会话重启)** | HTTP | agent | yonaa_exec.py + restart_log_service.py |
 | 8082 / 5002 | 测试端口 (临时) | HTTP | — | — |
 
 **9200/19200 secret 算式** (Python):
@@ -327,9 +329,15 @@ bash /tmp/deploy_bundle/rollback.sh --to v20260630_003 --port 5000
 |------|------|------|
 | prod | 18 SUCCESS, 0 FAILED | ✅ 健康 |
 | staging | 18 SUCCESS, 0 FAILED | ✅ 健康 |
-| 9200/19200 | alive | ✅ exec/upload OK |
-| 9201 | alive (4 端点) | ✅ 探活 |
-| 9101/19101 | dead | ❌ 已知, 不影响 |
+| 9200/19200 (core_service) | alive | ✅ exec/upload OK |
+| 9201 (observability) | alive (4 端点) | ✅ 探活 |
+| 9101/19101 (log_service) | **alive (10+ 端点)** | ✅ **本会话重启** |
+
+**log_service 端点 (19101/9101)**:
+- `/api/alert/sse` `/api/config` `/api/db/can_write` `/api/db/health` `/api/db/metrics` `/api/db/query`
+- `/api/deploy/{check_files,current,history,invariant,smoke,yonaa_versions}`
+- `/api/diag/trace` `/api/disk/{check,errors,forecast}` `/api/dmesg` `/api/exec` `/api/find` ...
+- 自动启停: `python tools/restart_log_service.py`
 
 ---
 

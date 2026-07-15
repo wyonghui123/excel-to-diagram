@@ -522,4 +522,70 @@ cat /opt/app/state/deployment_history.json
 | 端口占用 | 旧进程未退出 | `fuser -k 8081/tcp` |
 | 数据库连接失败 | 路径错误 | 检查配置文件 |
 | API返回404 | 后端未启动 | 检查后端进程 |
-| 代理不工作 | server.py版本旧 | 重新部署 |
+
+---
+
+## 十三、补遗: 新增能力 (2026-07-15)
+
+> 本节记录 v1.3 之后新增的能力, 详见主文档 [DEPLOY_INFRASTRUCTURE.md](../../DEPLOY_INFRASTRUCTURE.md) 与 [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md)。
+
+### §13.1 远端操作 (agent 自动化)
+
+**新增 5 个工具**, 替代原 SSH/SFTP 流程:
+
+| 工具 | 用途 | 替代什么 |
+|------|------|----------|
+| `tools/yonaa_exec.py` | HTTP exec + upload (限流 + 跨小时 token + 错误分类 + bg 后台) | SSH 命令 |
+| `tools/remote_capability_probe.py` | 30s 扫 7 端口 × 6 secret | 手工 `nc` / `curl` |
+| `tools/staging_deploy_orchestrator.py` | 一键 staging 部署 (10 步自动) | SFTP + SSH 5 条命令 |
+| `tools/restart_log_service.py` | 一键启停 log_service (9101/19101) | 手工 `nohup ...` |
+| `tools/rebuild_bundle.ps1` | 本地 rebuild (保留) | 保留 |
+
+**新端口 (agent 入口, 7 个)**:
+- 9200 (prod core_service), 19200 (staging core_service)
+- 9201 (observability, 5 端点)
+- **9101 (prod log_service, 10+ 端点, 本会话重启)**
+- **19101 (staging log_service, 10+ 端点, 本会话重启)**
+- 8081 (frontend), 3011 (backend)
+
+**认证**: `SHA256(secret+hour)[:16]`, secret = `v007.52-core-write` (9200/19200) 或 `v007.35-infra` (9201/9101/19101)
+
+### §13.2 Migration 升级 (P0/P1/P1.5)
+
+| 工具 | 用途 |
+|------|------|
+| `meta/core/migration_runner.py` | 实际跑 schema migration (含 idempotent SQL) |
+| `tools/backfill_schema_migrations.py` | 把已应用 schema 写到 schema_migrations 表 |
+| `tools/migration_lint.py` + `migration_lint.legacy.yaml` | lint migration 文件 (5 规则) |
+| `tools/monitor_migrations.py` | 监控 (WARN/CRIT/FAIL) |
+
+**关键变更**:
+- ✅ migration_runner **idempotent**: `duplicate column` / `already exists` 自动跳过
+- ✅ **executescript**: 处理 trigger `BEGIN/END` 块
+- ✅ lint 升级: 26 个 V007.46 老文件**白名单豁免** (P1.5 legacy 机制)
+- ✅ lint 退出码 0 (WARN 不阻塞 CI)
+- ✅ test_utils 去除 pytest 硬依赖 (远端 system Python 也能跑)
+
+**当前状态**:
+- prod: 18 migration SUCCESS, **0 FAILED**
+- staging: 18 migration SUCCESS, **0 FAILED**
+- lint: **0 FAIL, 8 WARN, exit 0**
+
+### §13.3 老 staging 架构下线 (2026-07-15)
+
+| 旧端口 | 旧服务 | 新状态 |
+|------|------|------|
+| 13011 | meta_backend | ❌ dead (改用 core_service exec) |
+| 18081 | unified | ❌ dead (agent 不通过 unified 调) |
+| **19101** | **staging log_service** | ✅ **alive (本会话重启)** |
+| **9101** | **prod log_service** | ✅ **alive (本会话重启)** |
+| **19200** | **staging core_service** | ✅ alive |
+| **9200** | **prod core_service** | ✅ alive |
+| **9201** | **observability** | ✅ alive (5 端点) |
+
+**新部署架构**: 2 服务 = `core_service.py` (exec + upload + audit) + `log_service.py` (10+ 端点), 通过 env var 切 port + db path。
+
+**log_service 重启工具**: `python tools/restart_log_service.py [--env prod|staging] [--stop]`
+
+详见 [STAGING_GUIDE.md](STAGING_GUIDE.md)。
+

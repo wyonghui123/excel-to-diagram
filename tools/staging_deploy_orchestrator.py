@@ -155,6 +155,12 @@ files_to_upload = [
      f'{REMOTE_BASE}/tools/monitor_migrations.py'),
     (f'{LOCAL}/tools/rename_migrations_flyway.py',
      f'{REMOTE_BASE}/tools/rename_migrations_flyway.py'),
+    (f'{LOCAL}/tools/log_service.py',                       # [V007.61+ 2026-07-15] 启 log_service 19101
+     f'{REMOTE_BASE}/tools/log_service.py'),
+    (f'{LOCAL}/tools/yonaa_exec.py',                        # agent 远端操作工具
+     f'{REMOTE_BASE}/tools/yonaa_exec.py'),
+    (f'{LOCAL}/tools/remote_capability_probe.py',           # 能力探测
+     f'{REMOTE_BASE}/tools/remote_capability_probe.py'),
 ]
 for local, remote in files_to_upload:
     if not os.path.exists(local):
@@ -227,6 +233,26 @@ python3 tools/monitor_migrations.py 2>&1
 ' 2>&1'''
 r = exec_cmd(final_cmd, timeout=60)
 show(r, 5000)
+
+# === Step 10: 启 log_service (19101) ===
+# [V007.61+ 2026-07-15] log_service 独立于 core_service, 部署后必须启
+step('Step 10: 启 log_service 19101 (独立于 core_service)')
+log_start_cmd = (
+    "bash -c 'cd /opt/app/staging/deploy && setsid nohup env "
+    "LOG_SERVICE_PORT=19101 "
+    "LOG_SERVICE_BIND=0.0.0.0 "
+    "LOG_SERVICE_LOG_DIR=/opt/app/staging/deploy/meta "
+    "LOG_SERVICE_DB_PATH=/opt/app/staging/deploy/meta/architecture.db "
+    "LOG_SERVICE_SECRET=v007.35-infra "
+    "/opt/miniconda3-py39/bin/python /opt/app/staging/deploy/tools/log_service.py "
+    ">> /opt/app/staging/deploy/logs/log_service.log 2>&1 < /dev/null &'"
+)
+r = exec_cmd(log_start_cmd, timeout=5)
+show(r, 500)
+sleep_between(2.0)
+# 验证 log_service 端点
+r = exec_cmd("bash -c 'curl -s --max-time 5 http://127.0.0.1:19101/api | head -c 300'", timeout=10)
+show(r, 500)
 
 print('\n' + '='*70)
 print('部署编排完成')

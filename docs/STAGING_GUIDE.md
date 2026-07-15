@@ -1,250 +1,207 @@
-# staging 使用指南 (V007.50 2026-07-14)
+# STAGING_GUIDE.md
 
-> **目标**: 让团队 5 分钟上手 staging 环境
-> **适用**: yonaa 部署维护、问题排查、新功能验证
-> **作者**: 协调智能体
-> **更新**: 2026-07-14 — 补充 V007.50 DB 路径统一修复、4 端口架构
-
----
-
-## 一、staging 是什么? (3 句话)
-
-1. staging 是**生产环境的双胞胎**, 在同一台机器的不同端口 (13011/18081/19101/19200) 跑
-2. 用 **7 天前的 db 备份**, 与生产隔离 (改东西不会影响真实用户)
-3. 每次改代码, 先在 staging 跑通 8 项 smoke test, 才能部署到生产
+> **目标读者**: AI Agent / 工程师
+> **最后更新**: 2026-07-15 (重写, 反映新架构)
+> **本文件用途**: staging 环境 5 分钟上手
 
 ---
 
-## 二、目录结构 (一眼看懂)
+## §0. 一图全貌
 
 ```
-/opt/app/staging/
-├── bin/                 staging 服务 (core_service + log_service + unified_18081)
-├── meta/                staging db (V007.50: 独立文件, deploy/current/architecture.db 是 symlink 指向这里)
-├── logs/                staging 日志
-├── deploy/current       staging 当前版本 (软链接)
-├── deploy/v20260713_*   staging 历史版本
-└── scripts/             staging 管理脚本
-    ├── start_staging.sh         启动 (V007.50: 含 DB 路径统一修复)
-    ├── stop_staging.sh          停止
-    ├── staging_health_check.sh  健康检查
-    ├── staging_e2e_test.sh      8 项 smoke test
-    └── deploy_staging.sh        自动部署 (含 5 min 监控)
+agent (公司内网 10.6.x)
+  │
+  │ HTTP 19200 (core_service: exec + upload, secret=v007.52-core-write)
+  │
+  ▼
+yonaa 172.20.59.7
+  /opt/app/staging/deploy/
+  ├── meta/core/migration_runner.py     ← runner
+  ├── meta/architecture.db              ← DB (SQLite, 18 migration SUCCESS)
+  ├── tools/
+  │   ├── backfill_schema_migrations.py
+  │   ├── migration_lint.py
+  │   └── monitor_migrations.py
+  └── ...
 ```
 
-### 2.1 V007.50 DB 路径统一机制 (重要)
+**重要变更 (2026-07-15)**:
+- ✅ 新 2 服务架构: **`core_service.py` 19200 + `log_service.py` 19101**
+  - core_service: exec + upload + audit (4 端点)
+  - log_service: **10+ 端点** (alert/sse, config, db/*, deploy/*, disk/*, dmesg, exec, find...)
+- ❌ 旧 4 服务架构 (core 19200 + log 19101 + unified 18081 + backend 13011) **部分下线**
+  - ✅ 19101 log_service **已重启** (本会话, 自动工具: `tools/restart_log_service.py`)
+  - ❌ unified 18081 dead (不需要, agent 不通过 unified 调)
+  - ❌ meta_backend 13011 dead (改用 core_service exec 调 Python)
 
-**问题根因**: 20+ 个 API/service 模块用 `__file__` 路径计算 `architecture.db` 位置，不读环境变量。导致 DataSource cache key 不同，创建了第二个 instance 用部署包内 db（重新部署会丢失测试数据）。
-
-**修复方案**: `start_staging.sh` 第 0.3 步把 `deploy/current/architecture.db` 替换为 symlink：
-```
-/opt/app/staging/deploy/current/architecture.db  (symlink)
-  → /opt/app/staging/meta/architecture.db  (真实文件)
-```
-
-这样 `__file__` 路径和环境变量路径都指向同一个文件，确保只有一个 DataSource instance。
-
-**验证方法**:
+**log_service 重启**:
 ```bash
-# 检查进程 fd 中只有 1 个 .db 文件
-ls -la /proc/$(pgrep -f 'staging/deploy/current/server.py')/fd/ | grep '\.db'
-# 应只看到 /opt/app/staging/meta/architecture.db
-```
+# 一键启 (prod + staging)
+python tools/restart_log_service.py
 
----
+# 只 prod
+python tools/restart_log_service.py --env prod
 
-## 三、3 个最常用命令
+# 只 staging
+python tools/restart_log_service.py --env staging
 
-### 3.1 启动 staging
-```bash
-bash /opt/app/staging/scripts/start_staging.sh
-```
-输出 (4 个服务):
-```
-[V007.50] Replaced .../architecture.db with symlink → /opt/app/staging/meta/architecture.db
-started core_service_staging PID=... port=19200
-started log_service_staging PID=... port=19101
-started unified_18081 PID=... port=18081
-started meta_backend PID=... port=13011
-```
-
-### 3.2 跑 8 项 smoke test
-```bash
-bash /opt/app/staging/scripts/staging_e2e_test.sh
-```
-输出: `✓ T1 /api` ... `✓ T8 prod unchanged` + `=== STAGING OK ===`
-
-### 3.3 部署到 staging
-```bash
-bash /opt/app/staging/scripts/deploy_staging.sh
-```
-流程: 准备版本 → 软链接切换 → 重启 → 8 项 smoke → 5 min 健康监控
-
----
-
-## 四、完整部署流程 (从代码到生产)
-
-```
-步骤 1: 改代码
-  ↓
-步骤 2: 部署到 staging
-  bash /opt/app/staging/scripts/deploy_staging.sh
-  (自动: 8 smoke test + 5 min 监控, 失败自动回退)
-  ↓
-步骤 3: staging OK 后, 部署到生产
-  bash /opt/app/shared/deploy_prod.sh
-  (自动: 校验 staging marker + 备份 db + 5 min 监控 + 失败自动回退)
-  ↓
-步骤 4: 5 min 后无问题, 部署完成
+# 杀 (不启)
+python tools/restart_log_service.py --stop
 ```
 
 ---
 
-## 五、staging vs 生产 (关键差异)
+## §1. 5 个最常用操作
 
-| 维度 | staging | 生产 |
-|------|---------|------|
-| 前端代理端口 | **18081** (unified_18081.py) | **8081** (unified_8081.py) |
-| 后端 server.py 端口 | **13011** | **3011** |
-| log_service 端口 | 19101 | 9101 |
-| core_service 端口 | 19200 | 9200 |
-| db 路径 | /opt/app/staging/meta/architecture.db | /opt/app/deployments/meta/architecture.db |
-| db symlink | deploy/current/architecture.db → staging/meta/ | 无 (直接用 meta/architecture.db) |
-| db 来源 | 7 天前 backup (每天 3 点 cron 同步) | 真实数据 |
-| 用途 | 测试 + 演练 | 用户/AI 真实使用 |
-| 隔离 | 完全独立 | 共享资源 |
-| 谁能访问 | 运维/AI | 所有人 |
-| 浏览器入口 | http://172.20.59.7:18081 | http://172.20.59.7:8081 |
+### §1.1 一键 staging 部署 (推荐 — agent 自动)
 
----
-
-## 六、staging 5 大用途 (按使用频率)
-
-### 6.1 部署前验证 (核心) ⭐
-- 改一行代码前, 先在 staging 看会不会破坏
-- 8 项 smoke test 拦住 70% 部署 bug
-
-### 6.2 事故排查沙盒 (重要) ⭐
-- 用户报"删错了" → 在 staging 复现 (用 7 天前 db)
-- 修代码 → 在 staging 验证 → 才动生产
-
-### 6.3 chaos 演练 (推荐)
 ```bash
-CHAOS_DB_PATH=/opt/app/staging/meta/architecture.db \
-CHAOS_DB_BAK=/opt/app/staging/meta/architecture.db.chaos_bak \
-  /opt/miniconda3-py39/bin/python3 /opt/app/staging/bin/sqlite_chaos.py readonly
-```
-6 场景: readonly / busy / extlock / corrupt / deleted / full
+# 默认 dry-run: 只打包 + 上传, 不跑 P0
+python tools/staging_deploy_orchestrator.py
 
-### 6.4 数据恢复演练 (新功能)
-- 在 staging 用 7 天前 backup 模拟"误删" → 跑 `audit_recovery.py` → 验证恢复
-
-### 6.5 训练新人 (低频)
-- 新人在 staging 试错, 不影响生产
-
----
-
-## 七、紧急情况
-
-### 7.1 staging 干扰了生产
-```bash
-bash /opt/app/staging/scripts/stop_staging.sh
-# 验证 prod 正常
-curl http://172.20.59.7:9101/api
+# 实际跑 P0: 上传 + backfill + 跑 migration + 验证
+EXCLUDE_RUN_PENDING=0 python tools/staging_deploy_orchestrator.py
 ```
 
-### 7.2 部署失败需要回退
-```bash
-# staging 回退
-bash /opt/app/shared/rollback_v2.sh staging
+**内部 6 步**:
+1. rebuild deploy bundle
+2. yupload 到 `/opt/app/staging/tmp/`
+3. 远端跑 `backfill_schema_migrations.py --dry-run`
+4. 远端跑 `backfill_schema_migrations.py` (实际)
+5. 远端跑 `migration_runner`
+6. 远端跑 `monitor_migrations.py`
 
-# 生产回退
-bash /opt/app/shared/rollback_v2.sh prod
+### §1.2 看 staging 状态 (1 条命令)
+
+```bash
+python tools/yonaa_exec.py exec "python3 tools/monitor_migrations.py" 19200
 ```
 
-### 7.3 staging db 损坏
+**预期输出**:
+```
+[INFO] Migrations: 18 SUCCESS, 0 FAILED, 0 SKIP
+[WARN] NULL checksum: 3 (legacy files)
+[OK] 全部健康
+```
+
+### §1.3 看 staging 进程
+
 ```bash
-# 重新同步
-bash /opt/app/shared/sync_staging_db.sh
+python tools/yonaa_exec.py exec "ps -ef | grep -E 'core_service|staging' | grep -v grep" 19200
+# 应看到: 1 个 core_service.py 进程, port 19200
+```
+
+### §1.4 重启 staging (1 条命令)
+
+```bash
+# Agent 走 core_service exec (不需要 SSH)
+python tools/yonaa_exec.py exec "pkill -9 -f core_service.py; sleep 2; cd /opt/app/staging/bin && setsid nohup env CORE_SERVICE_PORT=19200 CORE_SERVICE_BIND=0.0.0.0 CORE_SERVICE_SECRET=v007.52-core-write /usr/bin/python3 /opt/app/staging/bin/core_service.py > /opt/app/staging/logs/core_service.log 2>&1 < /dev/null &" 19200
+```
+
+(更稳的做法: 走 `start_staging.sh`, 但要先看 §4 兼容性)
+
+### §1.5 跑 staging smoke test (远端)
+
+```bash
+python tools/yonaa_exec.py exec "bash /opt/app/staging/scripts/staging_e2e_test.sh" 19200
 ```
 
 ---
 
-## 八、监控 + 告警
+## §2. 路径速查 (远端 staging)
 
-| 指标 | 怎么查 | 阈值 |
-|------|--------|------|
-| staging UP | `bash /opt/app/staging/scripts/staging_health_check.sh` | 4/4 OK (18081/13011/19101/19200) |
-| 8 项 smoke | `bash /opt/app/staging/scripts/staging_e2e_test.sh` | 8/8 PASS |
-| 部署历史 | `cat /var/log/deploy_metrics.log` | success 行 |
-| chaos 演练 | `bash /opt/app/staging/bin/sqlite_chaos.py all` | BUG-CONFIRMED 出现 |
-| staging db 大小 | `du -h /opt/app/staging/meta/architecture.db` | < 200MB |
-| staging 同步状态 | `ls -la /opt/app/staging/meta/architecture.db` | mtime 24h 内 |
-
----
-
-## 九、staging 限制 (诚实)
-
-- ⚠️ **不是 100% 复制生产** (7 天前 db, 不含最新数据)
-- ⚠️ **无真实流量** (并发/性能问题复现不出)
-- ⚠️ **资源是共享的** (CPU/内存与生产同台机器, 极端情况可能互相影响)
-- ⚠️ **chmod 拦不住 root** (我们已经通过 `/api/db/can_write` 修补)
+| 用途 | 路径 |
+|------|------|
+| **部署根** | `/opt/app/staging/deploy/` |
+| **DB** | `/opt/app/staging/deploy/meta/architecture.db` |
+| **Migration runner** | `/opt/app/staging/deploy/meta/core/migration_runner.py` |
+| **Tools** | `/opt/app/staging/deploy/tools/` |
+| **Logs** | `/opt/app/staging/logs/core_service.log` |
+| **Backups** | `/opt/app/staging/backups/architecture.db.pre_p0_*` |
+| **Token (auth)** | `v007.52-core-write` (与 prod 同) |
 
 ---
 
-## 十、版本清理 (V007.50 新增)
+## §3. 端口速查
 
-staging 部署会在 `deploy/` 下积累历史版本目录，占用磁盘空间。
+| 端口 | 服务 | 状态 | 何时用 |
+|------|------|------|--------|
+| **19200** | core_service (staging) | ✅ alive | exec + upload + audit |
+| **19101** | log_service (staging) | ✅ alive (本会话重启) | log / db / deploy / disk / dmesg / SSE |
+| ~~13011~~ | meta_backend | ❌ dead | — |
+| ~~18081~~ | unified | ❌ dead | — |
 
-### 10.1 查看历史版本
+---
+
+## §4. 老脚本兼容 (start_staging.sh 等)
+
+**老脚本** (如 `tools/start_staging.sh` / `staging_e2e_test.sh`) 仍存在, **会**启 4 个老服务 (其中 3 个会立即 fail).
+
+**两种处理**:
+1. **不用老脚本**: 全部走 agent 工具 (yonaa_exec + orchestrator)
+2. **改老脚本**: 把启 4 服务改成只启 1 个 core_service
+
+**注意**: 旧 `CORE_SERVICE_SECRET=staging-v007.49-d` 已**过时** — 实际 yonaa 上跑的是 `v007.52-core-write` (在 system service / systemd / nohup 命令行里改过)。
+
+---
+
+## §5. 故障排查
+
+| 症状 | 原因 | 解决 |
+|------|------|------|
+| agent 连不上 19200 | 不在内网 | `python tools/remote_capability_probe.py` |
+| exec 403 | secret 错 / 时钟漂 | `python tools/yonaa_exec.py exec "echo OK" 19200` 看返回 |
+| exec 200 但 `ModuleNotFoundError: yaml` | 缺 pyyaml | `python tools/yonaa_exec.py exec "python3 -m pip install pyyaml -i http://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com" 19200` |
+| migration FAIL: `duplicate column` | 已 idempotent | 应当 SUCCESS, 检查 runner 版本 |
+| migration FAIL: `No module: pytest` | test_utils 硬依赖 | 已修 (try/except), 重新 `yupload meta/tests/test_utils.py` |
+| log 满 | audit log 10MB rotate | 自动; 手动: `python tools/yonaa_exec.py exec "tail -100 /opt/app/staging/logs/core_service.log" 19200` |
+
+---
+
+## §6. 与 prod 的差异
+
+| 项 | staging | prod |
+|---|---|---|
+| core_service Port | 19200 | 9200 |
+| log_service Port | 19101 | 9101 |
+| Secret (core) | v007.52-core-write | v007.52-core-write (同) |
+| Secret (log) | v007.35-infra | v007.35-infra (同) |
+| DB 路径 | `/opt/app/staging/deploy/meta/architecture.db` | `/opt/app/deployments/meta/architecture.db` |
+| Backups | `/opt/app/staging/backups/` | `/opt/app/backups/` |
+| 用户 | 测试 (无真实用户) | 真实用户 |
+| migration 数量 | 18 (同 prod) | 18 |
+| 自动 deploy | ❌ 手动 | ❌ 手动 |
+
+**结论**: 几乎一样, 只差 port + path。
+
+---
+
+## §7. 完整命令速查 (复制粘贴)
 
 ```bash
-ls -la /opt/app/staging/deploy/ | grep 'v2026'
-# 输出示例:
-# drwxr-xr-x  v20260713_223437_staging  (671M, 旧版本)
-# drwxr-xr-x  v20260713_223807_staging  (当前版本)
-# lrwxrwxrwx  current -> v20260713_223807_staging
-```
+# 探测能力
+python tools/remote_capability_probe.py
 
-### 10.2 查看各版本大小
+# 看状态
+python tools/yonaa_exec.py exec "python3 tools/monitor_migrations.py" 19200
+python tools/yonaa_exec.py exec "python3 -m meta.core.migration_runner --status" 19200
 
-```bash
-du -sh /opt/app/staging/deploy/v2026*/ 2>/dev/null
-```
+# 看进程
+python tools/yonaa_exec.py exec "ps -ef | grep core_service | grep -v grep" 19200
 
-### 10.3 清理旧版本
+# 看 log
+python tools/yonaa_exec.py exec "tail -50 /opt/app/staging/logs/core_service.log" 19200
 
-**保留策略**: 只保留 `current` 指向的当前版本 + 上 1 个版本（用于回退）。
+# 重启
+python tools/yonaa_exec.py exec "pkill -9 -f core_service.py" 19200
+# (然后 SSH 启, 或加 systemd)
 
-```bash
-# 找到当前版本
-CURRENT=$(readlink /opt/app/staging/deploy/current | xargs basename)
-echo "当前版本: $CURRENT"
-
-# 列出可清理的旧版本 (排除当前版本)
-ls /opt/app/staging/deploy/ | grep 'v2026' | grep -v "$CURRENT"
-# 确认后删除
-# rm -rf /opt/app/staging/deploy/v20260713_223437_staging/
-```
-
-### 10.4 自动清理 (推荐加入 cron)
-
-```bash
-# 加入 crontab, 每周日凌晨 4 点清理
-echo "0 4 * * 0 /opt/app/staging/scripts/cleanup_old_versions.sh >> /opt/app/staging/logs/cleanup.log 2>&1" | crontab -
+# 一键部署
+EXCLUDE_RUN_PENDING=0 python tools/staging_deploy_orchestrator.py
 ```
 
 ---
 
-## 十一、相关文档
-
-- [STAGING_V2_DETAILED_PLAN.md](STAGING_V2_DETAILED_PLAN.md) - 完整 3 天实施计划
-- [INCIDENT_RESPONSE_RUNBOOK.md](INCIDENT_RESPONSE_RUNBOOK.md) - 事故响应 (用 staging 排查)
-- [SQLITE_IO_ERROR_DESIGN.md](SQLITE_IO_ERROR_DESIGN.md) - SQLite 防护 + chaos 工具
-- [HANDOFF_object_recovery.md](HANDOFF_object_recovery.md) - 对象恢复 (L13)
-- [PERFORMANCE_BASELINE.md](PERFORMANCE_BASELINE.md) - 性能基线 (2026-07-14)
-- [PROD_SYMLINK_ISSUE.md](PROD_SYMLINK_ISSUE.md) - prod current symlink 断链问题
-
----
-
-**协调智能体 v2026-07-14 V007.50 - 4 端口架构 + DB 路径统一**
+**总入口**: [DEPLOY_INFRASTRUCTURE.md §3.1](file:///d:/filework/release-prep-worktree/DEPLOY_INFRASTRUCTURE.md#%C2%A73-%E9%83%A8%E7%BD%B2%E6%B5%81%E7%A8%8B)
+**Migration 实战**: [MIGRATION_GUIDE.md](file:///d:/filework/release-prep-worktree/docs/MIGRATION_GUIDE.md)
+**5 分钟速查**: [docs/AGENT_INFRA.md](file:///d:/filework/release-prep-worktree/docs/AGENT_INFRA.md)

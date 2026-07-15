@@ -128,26 +128,31 @@ def sleep_between(sec=None):
     time.sleep(sec)
 
 
-def yexec(cmd, port=19200, secret=None, timeout=60, retries=2):
+def yexec(cmd, port=19200, secret=None, timeout=60, retries=2, bg=False):
     """GET /api/exec?cmd=...&token=...
 
     Args:
         cmd: 要执行的命令 (不要 'cd X &&', 应该用 'bash -c "cd X && ..."')
         port: 端口 (默认 19200 staging core_service)
         secret: secret 字符串 / alias / None (None 时从 env/KNOWN_SECRETS 取)
-        timeout: 命令超时 (秒)
+        timeout: 命令超时 (秒, max 120)
         retries: 重试次数 (transient 错误: 429 / network)
+        bg: 后台跑 (返回 Popen pid, 不等结果; 启服务用)
 
     Returns:
         dict: {'cmd': str, 'exit_code': int, 'stdout': str, 'stderr': str, 'elapsed_ms': float, ...}
         失败: {'error': True, 'error_class': str, 'reason': str, ...}
+        bg=True: {'mode': 'background', 'cmd': str, 'pid': int, ...}
     """
     secret = _resolve_secret(secret)
     last_err = None
     for attempt in range(retries):
         for tk in _gen_tokens(secret):
-            params = urllib.parse.urlencode({'cmd': cmd, 'timeout': str(timeout), 'token': tk})
-            status, body = _http_get(HOST, port, f'/api/exec?{params}', timeout)
+            params = urllib.parse.urlencode({
+                'cmd': cmd, 'timeout': str(timeout), 'token': tk,
+                'bg': '1' if bg else '0',
+            })
+            status, body = _http_get(HOST, port, f'/api/exec?{params}', timeout=timeout + 10)
             if status == 200:
                 try:
                     import json
