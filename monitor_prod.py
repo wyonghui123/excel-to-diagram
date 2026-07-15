@@ -361,6 +361,84 @@ try:
 except Exception as e:
     section('post_deploy_check (L15.2)', False, str(e)[:100])
 
+# ========== 7.5 [P1.7] Migration 健康检查 (tool: tools/monitor_migrations.py) ==========
+try:
+    # 通过 script_remote 调远端运行
+    mig_check_py = """
+import sys, json
+sys.path.insert(0, '/opt/app/deployments/meta')
+try:
+    from tools.monitor_migrations import (
+        check_schema_migrations_health, check_migration_alerts, check_backup_residue
+    )
+    from pathlib import Path
+except Exception:
+    # 退而求其次: 命令行调用
+    import subprocess
+    res = subprocess.run(
+        [sys.executable, '/opt/app/deployments/tools/monitor_migrations.py'],
+        capture_output=True, text=True, timeout=15,
+    )
+    print(res.stdout[:2000])
+    sys.exit(res.returncode)
+
+db_path = Path('/opt/app/deployments/meta/architecture.db')
+log_path = Path('/opt/app/shared/logs/migrations.log')
+
+db_h = check_schema_migrations_health(db_path)
+log_h = check_migration_alerts(log_path)
+bak_h = check_backup_residue(db_path, 5)
+
+result = {
+    'schema_ok': db_h['ok'],
+    'schema_errors': db_h['errors'],
+    'schema_warnings': db_h['warnings'],
+    'stats': db_h['stats'],
+    'alerts_recent_failed': log_h.get('stats', {}).get('recent_failed', 0),
+    'lock_held': db_h['stats'].get('lock_held', False),
+    'lock_age_seconds': db_h['stats'].get('lock_age_seconds'),
+    'backup_count': bak_h['stats'].get('backup_count', 0),
+}
+print(json.dumps(result, default=str))
+"""
+    res = script_remote(mig_check_py, secret='v007.35-infra')
+    if res.get('error'):
+        section('migration_health (P1.7)', False, f'exec failed: {res.get("status")}')
+    else:
+        body = res.get('stdout', '') if isinstance(res, dict) else ''
+        # 提取 JSON 行
+        mig_json = None
+        for line in reversed(body.split('\n')):
+            line = line.strip()
+            if line.startswith('{') and 'schema_ok' in line:
+                try:
+                    mig_json = json.loads(line)
+                    break
+                except Exception:
+                    continue
+        if mig_json is None:
+            section('migration_health (P1.7)', None, 'no JSON parsed (远端无 monitor_migrations.py?)')
+        else:
+            schema_ok = mig_json.get('schema_ok', False)
+            failed = mig_json.get('stats', {}).get('failed', 0)
+            rolled_back = mig_json.get('stats', {}).get('rolled_back', 0)
+            total = mig_json.get('stats', {}).get('total', 0)
+            lock_age = mig_json.get('lock_age_seconds', 0) or 0
+            bak_count = mig_json.get('backup_count', 0)
+            recent_failed = mig_json.get('alerts_recent_failed', 0)
+            detail = (
+                f"total={total} failed={failed} rolled_back={rolled_back} "
+                f"recent_alerts={recent_failed} lock_age={lock_age:.0f}s bak={bak_count}"
+            )
+            ok = schema_ok and not mig_json.get('schema_errors', [])
+            section('migration_health (P1.7)', ok, detail)
+            for err in mig_json.get('schema_errors', []):
+                section('migration ERROR', False, err[:120])
+            for warn in mig_json.get('schema_warnings', []):
+                section('migration WARN', None, warn[:120])
+except Exception as e:
+    section('migration_health (P1.7)', False, str(e)[:100])
+
 # ========== 8. 总结 ==========
 print('\n' + '=' * 70)
 print('汇总')

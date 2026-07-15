@@ -34,6 +34,7 @@ DEPLOY_BUNDLE_BUILD="20260703_1200"
 #   PHASE 1: 停旧服务
 #   PHASE 2: 备份 + 复制 db
 #   PHASE 2.5: 重置 deploy_test 验证用户
+#   PHASE 2.55: Migration Lint [P1.6] (FAIL 则 exit 1)
 #   PHASE 2.6: 执行 database migrations (P0 新增, 7 步流程)
 #   PHASE 3: 写 systemd service
 #   PHASE 4: 启 backend
@@ -403,6 +404,31 @@ if [ -f "$SCRIPT_DIR/reset_deploy_test_user.sh" ]; then
     bash "$SCRIPT_DIR/reset_deploy_test_user.sh" || warn "deploy_test 重置失败 (不影响部署)"
 else
     warn "reset_deploy_test_user.sh 不存在, 跳过"
+fi
+
+# ========================= [P1.6] PHASE 2.55: Migration Lint =========================
+# [P1] spec §7.2.8 集成: deploy.sh 部署前最后一道质量检查
+banner "PHASE 2.55: Migration Lint [P1.6]"
+if [ -f "$SCRIPT_DIR/../tools/migration_lint.py" ]; then
+    MIGRATIONS_DIR="${SERVER_DIR}/migrations"
+    cd "$SCRIPT_DIR/.."
+    LINT_OUTPUT=$($PY tools/migration_lint.py --migrations-dir "$MIGRATIONS_DIR" 2>&1)
+    LINT_RC=$?
+    cd - >/dev/null 2>&1
+    if [ $LINT_RC -eq 0 ]; then
+        ok "PHASE 2.55: Migration Lint PASS"
+    elif [ $LINT_RC -eq 2 ]; then
+        warn "PHASE 2.55: Migration Lint WARN (only warnings, continue)"
+        echo "$LINT_OUTPUT" | grep '\[WARN\]' | head -5
+    else
+        err "PHASE 2.55: Migration Lint FAIL (RC=$LINT_RC)"
+        echo "$LINT_OUTPUT" | grep '\[FAIL\]' | head -10
+        echo "Fix migration lint errors before deploying:"
+        echo "  python tools/migration_lint.py --migrations-dir $MIGRATIONS_DIR"
+        die "Migration Lint FAIL, 部署终止"
+    fi
+else
+    warn "PHASE 2.55: tools/migration_lint.py 不存在, 跳过"
 fi
 
 # ========================= PHASE 2.6: database migrations (P0 新增) =========================

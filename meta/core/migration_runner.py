@@ -10,10 +10,12 @@
 - 多实例并发协调 (migration_lock 表 + heartbeat 僵尸锁检测)
 - 执行超时保护 (300s, Unix SIGALRM)
 - 自动备份 DB (保留最近 5 个)
+- P1: prerequisites + verify() + rollback() + schema_migrations 6 字段增强
 
 增强历史:
   v1.0: 基础框架 (仅 .sql, 无 checksum/lock/backup/audit)
   v1.1 (P0): 支持 .py + checksum + migration_lock + 超时 + 备份 + 审计日志
+  v1.2 (P1): schema_migrations 6 字段增强 + prerequisites + verify + rollback + migration status API
 """
 
 import os
@@ -49,9 +51,27 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     migration_name VARCHAR(255) NOT NULL UNIQUE,
     executed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    checksum VARCHAR(64)
+    checksum VARCHAR(64),
+    executed_by VARCHAR(64),
+    execution_time_ms INTEGER,
+    backup_path VARCHAR(512),
+    status VARCHAR(16) DEFAULT 'SUCCESS',
+    error_message TEXT,
+    environment VARCHAR(16)
 );
 """
+
+# [P1] schema_migrations 表 6 字段增强 - 给历史 DB 补齐时用的 ALTER TABLE ADD COLUMN.
+# 如果表已存在但缺字段, ensure_migrations_table() 启动时会逐个 ALTER ADD.
+# 注意: SQLite 的 ALTER TABLE ADD COLUMN 在 ROLLBACK 后列仍会保留 (SQLite 限制).
+P1_COLUMNS = (
+    ("executed_by", "VARCHAR(64)"),
+    ("execution_time_ms", "INTEGER"),
+    ("backup_path", "VARCHAR(512)"),
+    ("status", "VARCHAR(16) DEFAULT 'SUCCESS'"),
+    ("error_message", "TEXT"),
+    ("environment", "VARCHAR(16)"),
+)
 
 MIGRATION_LOCK_TABLE = """
 CREATE TABLE IF NOT EXISTS migration_lock (
@@ -99,7 +119,38 @@ class MigrationRunner:
         self.data_source.execute(MIGRATION_LOCK_TABLE)
         if not self.data_source.in_transaction:
             self.data_source.commit()
+        # [P1] schema_migrations 6 字段增强 - 给历史 DB 补齐
+        self._ensure_p1_columns()
         logger.info("Migration tracking table + lock table ensured")
+
+    def _ensure_p1_columns(self):
+        """[P1] 给历史 schema_migrations 表 ALTER ADD 6 个新字段 (幂等).
+
+        跳过已存在的字段 (检查 sqlite_master 列名).
+        """
+        try:
+            # 读现有列名 (cursor.description 在某些 adapter 上不可用, 用 pragma table_info)
+            rows = self.data_source.execute("PRAGMA table_info(schema_migrations)").fetchall()
+            existing = {r[1] for r in rows} if rows else set()
+            for col_name, col_def in P1_COLUMNS:
+                if col_name in existing:
+                    continue
+                sql = f"ALTER TABLE schema_migrations ADD COLUMN {col_name} {col_def}"
+                try:
+                    self.data_source.execute(sql)
+                    if not self.data_source.in_transaction:
+                        self.data_source.commit()
+                    logger.info("[P1] Added column schema_migrations.%s", col_name)
+                except Exception as e:
+                    # ALTER ADD COLUMN 在 ROLLBACK 后列仍保留 (SQLite 限制),
+                    # 但 column 已存在时报 'duplicate column name', 此时 OK
+                    err_msg = str(e).lower()
+                    if 'duplicate' in err_msg or 'already exists' in err_msg:
+                        logger.debug("[P1] Column %s already exists (concurrent add?)", col_name)
+                    else:
+                        logger.warning("[P1] Failed to add column %s: %s", col_name, e)
+        except Exception as e:
+            logger.warning("[P1] _ensure_p1_columns failed (table may be new): %s", e)
 
     # ------------------------------------------------------------------
     # 查询 / 记录
@@ -125,13 +176,39 @@ class MigrationRunner:
         row = cursor.fetchone()
         return row[0] if row else None
 
-    def record_migration(self, migration_name: str, checksum: str = None):
-        """记录迁移执行"""
-        sql = "INSERT INTO schema_migrations (migration_name, checksum) VALUES (?, ?)"
-        self.data_source.execute(sql, (migration_name, checksum))
+    def record_migration(self, migration_name: str, checksum: str = None,
+                         executed_by: Optional[str] = None,
+                         execution_time_ms: Optional[int] = None,
+                         backup_path: Optional[str] = None,
+                         status: str = "SUCCESS",
+                         error_message: Optional[str] = None,
+                         environment: Optional[str] = None):
+        """记录迁移执行 (P1: 支持 6 个新字段)
+
+        Args:
+            migration_name: 迁移名
+            checksum: SHA256 文件 checksum
+            executed_by: 执行人/工具 ('deploy.sh' / 'server.py' / 'manual')
+            execution_time_ms: 执行耗时毫秒
+            backup_path: 备份 DB 文件路径
+            status: SUCCESS / FAILED / ROLLED_BACK
+            error_message: 失败原因
+            environment: staging / prod / dev
+        """
+        sql = (
+            "INSERT INTO schema_migrations "
+            "(migration_name, checksum, executed_by, execution_time_ms, "
+            " backup_path, status, error_message, environment) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        self.data_source.execute(
+            sql,
+            (migration_name, checksum, executed_by, execution_time_ms,
+             backup_path, status, error_message, environment),
+        )
         if not self.data_source.in_transaction:
             self.data_source.commit()
-        logger.info("Migration recorded: %s", migration_name)
+        logger.info("Migration recorded: %s (status=%s)", migration_name, status)
 
     # ------------------------------------------------------------------
     # Checksum (SHA256)
@@ -567,6 +644,20 @@ class MigrationRunner:
             logger.error("Migration file not found: %s", file_path)
             return False
 
+        # 2.5 [P1] prerequisites 检查 (失败则跳过, 不阻断 - 让运维决定)
+        try:
+            ok, missing = self.check_prerequisites(migration_name)
+            if not ok:
+                logger.warning(
+                    "[P1] Migration %s prerequisites not met: %s. Skipping.",
+                    migration_name, missing,
+                )
+                self._log_audit(migration_name, "SKIPPED",
+                                error=f"prerequisites missing: {missing}")
+                return True  # 跳过, 不阻断 (让运维决定)
+        except Exception as e:
+            logger.debug("[P1] check_prerequisites error: %s", e)
+
         # 3. 备份 DB
         if not self._backup_db():
             logger.error("Backup failed, abort migration: %s", migration_name)
@@ -601,9 +692,42 @@ class MigrationRunner:
         # 5. 处理结果
         if success is True:
             checksum = self._compute_checksum(migration_name)
-            self.record_migration(migration_name, checksum)
+            backup_path = self._get_latest_backup_path(migration_name)
+            environment = os.environ.get("MIGRATION_ENV", "unknown")
+            executed_by = os.environ.get("MIGRATION_EXECUTED_BY", "deploy.sh")
+
+            # [P1] verify() 调用 (推荐, 非强制). 只警告不阻断.
+            verify_status = "NOT_IMPLEMENTED"
+            try:
+                ran, ok, msg = self.verify_migration(migration_name)
+                verify_status = "OK" if ok else "FAIL"
+                if ran and not ok:
+                    logger.warning("[P1] verify() reported problem: %s", msg)
+                    verify_status = f"FAIL: {msg}"
+            except Exception as e:
+                logger.debug("[P1] verify_migration error: %s", e)
+
+            try:
+                self.record_migration(
+                    migration_name, checksum,
+                    executed_by=executed_by,
+                    execution_time_ms=elapsed_ms,
+                    backup_path=backup_path,
+                    status="SUCCESS",
+                    environment=environment,
+                )
+            except Exception as e:
+                # [P1] 新字段未生效 (P0 阶段数据库无 P1 列) 时降级到 4 字段
+                logger.debug("[P1] record_migration full fields failed (%s), fallback to P0 fields", e)
+                self.data_source.execute(
+                    "INSERT INTO schema_migrations (migration_name, checksum) VALUES (?, ?)",
+                    (migration_name, checksum),
+                )
+                if not self.data_source.in_transaction:
+                    self.data_source.commit()
             self._log_audit(migration_name, "SUCCESS",
-                            checksum=checksum, elapsed_ms=elapsed_ms)
+                            checksum=checksum, elapsed_ms=elapsed_ms,
+                            error=f"verify={verify_status}")
             return True
         elif success is None:
             # 跳过 (签名不兼容), 不记录, 不算失败
@@ -612,8 +736,195 @@ class MigrationRunner:
             logger.info("Migration %s skipped (incompatible signature)", migration_name)
             return True  # 不阻断后续 migration
         else:
-            self._log_audit(migration_name, "FAILED", elapsed_ms=elapsed_ms)
+            # [P1] 失败时记录 FAILED + error_message
+            error_msg = "migration execution returned False"
+            try:
+                environment = os.environ.get("MIGRATION_ENV", "unknown")
+                executed_by = os.environ.get("MIGRATION_EXECUTED_BY", "deploy.sh")
+                self.record_migration(
+                    migration_name, self._compute_checksum(migration_name),
+                    executed_by=executed_by,
+                    execution_time_ms=elapsed_ms,
+                    status="FAILED",
+                    error_message=error_msg,
+                    environment=environment,
+                )
+            except Exception:
+                # 降级: 只记 name
+                logger.debug("[P1] record FAILED with full fields failed, skipping record")
+            self._log_audit(migration_name, "FAILED",
+                            error=error_msg, elapsed_ms=elapsed_ms)
             return False
+
+    def _get_latest_backup_path(self, migration_name: str) -> Optional[str]:
+        """[P1] 返回当前 migration 关联的最新备份路径 (若有)."""
+        try:
+            db_path = self._get_db_path()
+            baks = sorted(
+                [p for p in Path(db_path.parent).glob(Path(str(db_path)).name + ".bak.*")],
+                key=lambda p: p.name, reverse=True,
+            )
+            if baks:
+                return str(baks[0])
+        except Exception as e:
+            logger.debug("[P1] _get_latest_backup_path failed: %s", e)
+        return None
+
+    # ------------------------------------------------------------------
+    # [P1] prerequisites / verify / rollback
+    # ------------------------------------------------------------------
+
+    def _load_migration_module(self, migration_name: str):
+        """[P1] 动态 import 一个 .py migration 文件, 返回 module 对象.
+
+        Returns:
+            module 对象; 失败返回 None
+        """
+        if not migration_name.endswith('.py'):
+            return None
+        file_path = Path(self.migrations_dir) / migration_name
+        if not file_path.exists():
+            return None
+        spec = importlib.util.spec_from_file_location(
+            f"_migration_{migration_name.replace('.', '_').replace('/', '_')}",
+            str(file_path),
+        )
+        if spec is None or spec.loader is None:
+            return None
+        try:
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+        except Exception as e:
+            logger.debug("[P1] Failed to load module %s: %s", migration_name, e)
+            return None
+
+    def check_prerequisites(self, migration_name: str) -> tuple:
+        """[P1] 检查 migration 的 prerequisites 是否都已执行.
+
+        Returns:
+            (ok: bool, missing: list[str])
+        """
+        module = self._load_migration_module(migration_name)
+        if module is None or not hasattr(module, 'prerequisites'):
+            return True, []
+        try:
+            prereqs = module.prerequisites()
+        except Exception as e:
+            logger.warning("[P1] prerequisites() raised for %s: %s", migration_name, e)
+            return True, []
+        missing = []
+        for p in prereqs or []:
+            if not self.is_migration_executed(p):
+                missing.append(p)
+        return (len(missing) == 0), missing
+
+    def verify_migration(self, migration_name: str) -> tuple:
+        """[P1] 调用 migration 的 verify() 函数 (推荐, 非强制).
+
+        Returns:
+            (ran: bool, ok: bool, msg: str)
+        """
+        module = self._load_migration_module(migration_name)
+        if module is None or not hasattr(module, 'verify'):
+            return False, True, "verify() not implemented (skip)"
+        try:
+            db_path = self._get_db_path()
+            ok = module.verify(db_path)
+            return True, bool(ok), "verify() executed"
+        except Exception as e:
+            return True, False, f"verify() exception: {e}"
+
+    def rollback_migration(self, migration_name: str,
+                           backup_path: Optional[str] = None,
+                           force_backup: bool = False) -> bool:
+        """[P1] 回滚 migration. 3 策略优先级:
+        1. 如果 migration 提供 rollback() 函数 → 调用 (推荐)
+        2. 如果 force_backup / backup_path / 表内有 backup_path → 从备份恢复 (危险)
+        3. 都没有 → 拒绝, 提示手动处理
+        """
+        if not self.is_migration_executed(migration_name):
+            logger.warning("Migration %s not executed, nothing to rollback", migration_name)
+            return True
+
+        # 策略 1: 调用 rollback() 函数
+        module = self._load_migration_module(migration_name)
+        if module is not None and hasattr(module, 'rollback'):
+            logger.info("[Rollback] Strategy 1: Calling %s.rollback()", migration_name)
+            try:
+                db_path = self._get_db_path()
+                ok = module.rollback(db_path)
+                if ok:
+                    self._mark_rolled_back(migration_name)
+                    self._log_audit(migration_name, "ROLLED_BACK",
+                                    error=f"strategy=rollback_func backup=None")
+                    return True
+                logger.warning("[Rollback] rollback() returned False, fallback to backup")
+            except Exception as e:
+                logger.error("[Rollback] rollback() failed: %s, fallback to backup", e)
+
+        # 策略 2: 从备份恢复
+        if not backup_path:
+            rows = self.data_source.execute(
+                "SELECT backup_path FROM schema_migrations WHERE migration_name = ?",
+                (migration_name,),
+            ).fetchall()
+            if rows and rows[0][0]:
+                backup_path = rows[0][0]
+        if backup_path and os.path.exists(backup_path):
+            if not force_backup:
+                logger.error(
+                    "[Rollback] backup_path=%s but force_backup=False. "
+                    "Refusing to restore (use force_backup=True).",
+                    backup_path,
+                )
+                return False
+            logger.warning(
+                "[Rollback] Strategy 2: Restoring DB from %s. "
+                "WARNING: ALL changes after %s will be lost!",
+                backup_path, migration_name,
+            )
+            db_path = self._get_db_path()
+            shutil.copy2(backup_path, str(db_path))
+            # 从 schema_migrations 删除该 migration 及之后的所有记录
+            try:
+                self.data_source.execute(
+                    "DELETE FROM schema_migrations WHERE id >= "
+                    "(SELECT id FROM schema_migrations WHERE migration_name = ?)",
+                    (migration_name,),
+                )
+                if not self.data_source.in_transaction:
+                    self.data_source.commit()
+            except Exception as e:
+                logger.error("[Rollback] Failed to delete schema_migrations rows: %s", e)
+            self._log_audit(migration_name, "ROLLED_BACK_VIA_BACKUP",
+                            error=f"backup={backup_path}")
+            return True
+
+        # 策略 3: 拒绝
+        logger.error(
+            "[Rollback] Cannot rollback %s: no rollback() function and no backup_path. "
+            "Manual intervention required.", migration_name,
+        )
+        return False
+
+    def _mark_rolled_back(self, migration_name: str):
+        """[P1] 标记 migration 为 ROLLED_BACK (如果 status 列存在)"""
+        try:
+            rows = self.data_source.execute(
+                "PRAGMA table_info(schema_migrations)"
+            ).fetchall()
+            cols = {r[1] for r in rows} if rows else set()
+            if 'status' not in cols:
+                return
+            self.data_source.execute(
+                "UPDATE schema_migrations SET status = 'ROLLED_BACK' WHERE migration_name = ?",
+                (migration_name,),
+            )
+            if not self.data_source.in_transaction:
+                self.data_source.commit()
+        except Exception as e:
+            logger.debug("[P1] _mark_rolled_back failed: %s", e)
 
     # ------------------------------------------------------------------
     # 批量执行 (增强: .py + .sql 扫描 + migration_lock)
@@ -734,7 +1045,10 @@ def run_all_migrations(data_source, migrations_dir: str = None) -> int:
 # ----------------------------------------------------------------------
 
 def _cli_main():
-    """CLI 入口: python -m meta.core.migration_runner [--dry-run] [--db-path PATH]"""
+    """CLI 入口: python -m meta.core.migration_runner [--dry-run] [--db-path PATH]
+
+    P1 增加: --status / --rollback NAME [--force-backup]
+    """
     import argparse
 
     parser = argparse.ArgumentParser(description='Database migration runner')
@@ -744,6 +1058,12 @@ def _cli_main():
                         help='Migrations directory (default: meta/migrations/)')
     parser.add_argument('--db-path', default=None,
                         help='SQLite DB path (default: env SQLITE_DB_PATH or meta/architecture.db)')
+    parser.add_argument('--status', action='store_true',
+                        help='[P1] List executed migrations with status')
+    parser.add_argument('--rollback', metavar='NAME', default=None,
+                        help='[P1] Rollback a migration by name')
+    parser.add_argument('--force-backup', action='store_true',
+                        help='[P1] With --rollback, force restore from backup (DANGEROUS)')
     args = parser.parse_args()
 
     # 延迟导入, 避免循环依赖
@@ -764,8 +1084,9 @@ def _cli_main():
     ds = get_data_source("sqlite", database=db_path)
     runner = MigrationRunner(ds, args.migrations_dir)
 
+    runner.ensure_migrations_table()
+
     if args.dry_run:
-        runner.ensure_migrations_table()
         executed = set(runner.get_executed_migrations())
         if not os.path.exists(runner.migrations_dir):
             print("Migrations directory not found: %s" % runner.migrations_dir)
@@ -786,8 +1107,38 @@ def _cli_main():
         for f in pending:
             checksum = runner._compute_checksum(f)
             cs_short = checksum[:16] + "..." if checksum else "NULL"
-            print("  Would execute: %s (checksum=%s)" % (f, cs_short))
+            # [P1] 提示 prerequisites
+            ok, missing = runner.check_prerequisites(f)
+            prereq_str = ("prereqs=OK" if ok else f"prereqs=MISSING[{','.join(missing)}]")
+            print("  Would execute: %s (checksum=%s, %s)" % (f, cs_short, prereq_str))
         return 0
+
+    if args.status:
+        # [P1] 列出所有 executed + status
+        rows = runner.data_source.execute(
+            "SELECT migration_name, executed_by, execution_time_ms, status, environment, "
+            "executed_at FROM schema_migrations ORDER BY id"
+        ).fetchall()
+        print("=== Migration Status ===")
+        print("Executed: %d" % len(rows))
+        print()
+        print("%-50s %-12s %-10s %-10s %-16s" % ("name", "status", "time_ms", "env", "executed_at"))
+        print("-" * 100)
+        for r in rows:
+            name, by, ms, st, env, ts = r
+            print("%-50s %-12s %-10s %-10s %-16s" % (
+                name[:50], (st or "UNKNOWN"), str(ms or "?"), (env or "?"), ts or "?"
+            ))
+        return 0
+
+    if args.rollback:
+        ok = runner.rollback_migration(args.rollback, force_backup=args.force_backup)
+        if ok:
+            print("Rolled back: %s" % args.rollback)
+            return 0
+        else:
+            print("Rollback FAILED: %s (see logs/migrations.log)" % args.rollback)
+            return 1
 
     count = runner.run_pending_migrations()
     print("OK: executed %d migrations" % count)
