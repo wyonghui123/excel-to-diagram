@@ -132,7 +132,7 @@ docs/
 | **staging DB** | 18 migration SUCCESS, **0 FAILED** ✅ |
 | **migration lint** | **0 FAIL**, 8 WARN, exit 0 ✅ |
 | **migration runner** | idempotent (重复列自动跳过) ✅ |
-| **9101/19101 log_service** | **alive (10+ 端点, V007.55 systemd 守护, 进程死后 5s 自动重启)** ✅ |
+| **9101/19101 log_service** | **alive (10+ 端点, V007.55 systemd 守护 + V007.57 nobody 用户, 进程死后 5s 自动重启, HIPS 不杀)** ✅ |
 | **本会话 commit 数** | 6 (80e5498 → 366cb85) + 文档 + log_service 启停工具 |
 
 ---

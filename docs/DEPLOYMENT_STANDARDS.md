@@ -542,6 +542,8 @@ cat /opt/app/state/deployment_history.json
 | `tools/install_log_service_systemd.py` | **V007.55** 一键装 systemd unit 守护 log_service | 旧 restart_log_service.py |
 | `tools/setup_log_service_cron.py` | **V007.55** 装 cron `*/5 * * * *` 监控告警 | 手工写 crontab |
 | `tools/find_log_service_killer.py` | **V007.56** 探查 SIGKILL 元凶 (journal + aegis + cgroup + auditd) | systemd 守护下还是被杀时 |
+| `tools/deploy_log_service_systemd.py` | **V007.57** 上传 service + daemon-reload + restart (支持 nobody 用户) | 改 unit 文件后重发 |
+| `tools/chown_log_service_dirs.py` + `chown_readable.py` + `fix_staging_chown.py` | **V007.57** nobody 用户下, chown DB/log/scripts 给 nobody 可写可读 | 改 nobody 后必跑一次 |
 | `tools/rebuild_bundle.ps1` | 本地 rebuild (保留) | 保留 |
 
 **新端口 (agent 入口, 7 个)**:

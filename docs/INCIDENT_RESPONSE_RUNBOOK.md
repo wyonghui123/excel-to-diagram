@@ -335,13 +335,29 @@ python tools/monitor_migrations.py --check-regression
 
 ---
 
-## 九、log_service 死掉 (V007.55)
+## 九、log_service 死掉 (V007.55 + V007.57 nobody)
 
 **症状**: probe 显示 9101/19101 端口无响应, 或 `--check-log-service` 全 dead
 
 **之前**: 5s 死, 手工 restart (低效)
 
 **V007.55**: systemd 守护 — 5s 自动重启, 不用人工干预
+
+**V007.57**: 改 nobody 用户 — 阿里云 HIPS 不杀非 root 启的进程 (治本)
+
+### 9.0 nobody 用户验证 (V007.57)
+
+```bash
+# 验证进程是不是 nobody
+ps -ef | grep log_service.py | grep -v grep
+# 应看到: nobody   28433  ... /opt/app/deployments/tools/log_service.py
+# 不能是: root      XXXX  ... (HIPS 会继续杀)
+
+# 如果发现还是 root, 重发 service + 重 chown
+python tools/deploy_log_service_systemd.py
+python tools/chown_log_service_dirs.py
+python tools/chown_readable.py
+```
 
 ### 9.1 快速诊断
 

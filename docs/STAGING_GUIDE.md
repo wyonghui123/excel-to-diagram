@@ -34,10 +34,14 @@ yonaa 172.20.59.7
   - ❌ unified 18081 dead (不需要, agent 不通过 unified 调)
   - ❌ meta_backend 13011 dead (改用 core_service exec 调 Python)
 
-**log_service 管理 (V007.55 systemd)**:
+**log_service 管理 (V007.55 systemd + V007.57 nobody 用户)**:
 ```bash
 # V007.55 推荐: 一键装 (systemd unit + enable + start)
 python tools/install_log_service_systemd.py
+
+# V007.57 改 nobody 用户 (HIPS 不杀非 root 启的进程)
+# service 文件: User=nobody, Group=nobody
+# 远端必须先 chown: python tools/chown_log_service_dirs.py
 
 # 看状态/重启 (用 systemctl 直接调)
 systemctl status log_service_prod.service

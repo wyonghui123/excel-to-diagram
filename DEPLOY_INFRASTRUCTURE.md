@@ -106,6 +106,9 @@
 | 22 | `tools/install_log_service_systemd.py` + `log_service_*.service` | **V007.55** 一键装 systemd unit 守护 log_service (Restart=always 5s, enable 开机自启) | 新环境部署 | **agent** |
 | 23 | `tools/setup_log_service_cron.py` + `log_service_monitor.cron` | **V007.55** 装 cron `*/5 * * * *` 调 `--check-log-service` + 写 /var/log/monitor_alert.log | 第一次 / 监控失活 | **agent** |
 | 24 | `tools/find_log_service_killer.py` | **V007.56** 探查 log_service SIGKILL 元凶 (journal + aegis + cgroup + auditd) | systemd 守护下还是被杀时 | **agent** |
+| 25 | `tools/deploy_log_service_systemd.py` | **V007.57** 上传 service + daemon-reload + restart (支持 nobody 用户切换) | service 文件改了 | **agent** |
+| 26 | `tools/chown_log_service_dirs.py` + `chown_readable.py` + `fix_staging_chown.py` | **V007.57** chown DB/log/scripts 给 nobody 可写可读 (改 nobody 后必跑) | 切 nobody 时 / 文件 owner 乱了 | **agent** |
+| 27 | `tools/monitor_hips.py` | **V007.57** 监控 nobody log_service 是否被 HIPS 杀 (2 分钟 12 次检查) | 验证 nobody 修复是否生效 | **agent** |
 
 **关键差异**：
 - **§1.1 工具**: 需要 SFTP 上传到 `/tmp/`, 远端 SSH 跑 (人)
