@@ -134,11 +134,17 @@ detect_remote_env() {
     DEPLOYMENTS_DIR="$DEPLOY_ROOT/deployments"
     CURRENT_LINK="$DEPLOY_ROOT/current"
 
-    mkdir -p "$BACKUP_DIR" "$LOG_DIR"
+    # [P0] migration 相关路径
+    MIGRATION_LOG="${ARG_MIGRATION_LOG:-$LOG_DIR/migrations.log}"
+    ALERT_DIR="${ARG_ALERT_DIR:-/tmp/migration_alerts}"
+
+    mkdir -p "$BACKUP_DIR" "$LOG_DIR" "$ALERT_DIR"
 
     info "DEPLOY_ROOT=$DEPLOY_ROOT"
     info "BACKUP_DIR=$BACKUP_DIR"
     info "LOG_DIR=$LOG_DIR"
+    info "MIGRATION_LOG=$MIGRATION_LOG"
+    info "ALERT_DIR=$ALERT_DIR"
     info "PY=$PY"
 
     if [ ! -x "$PY" ]; then

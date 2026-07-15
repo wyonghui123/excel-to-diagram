@@ -1,0 +1,47 @@
+# Migration 文件重命名映射 (P1 使用)
+#
+# P0 阶段: 保持现有文件名不变, runner 用实际文件名扫描
+# P1 阶段: 按此映射重命名, 并同步更新 schema_migrations 表的 migration_name 字段
+#
+# 命名规范: v<NNN>__<description>.{py,sql}  (参考 Flyway)
+#   v<NNN>: 3 位版本号, 零填充 (v001, v002, ..., v999)
+#   __: 双下划线分隔符
+#   <description>: 蛇形命名, 简洁描述
+
+# 已执行的 5 个 migration (按执行顺序)
+mappings:
+  - old_name: "migrate_system_admin.py"
+    new_name: "v001__migrate_system_admin.py"
+    location: "scripts/"  # 注意: 不在 migrations/ 目录, runner 不扫描
+    notes: "无参签名 run_migration(), P1 需统一签名或保持硬编码"
+
+  - old_name: "add_change_notification_tables.sql"
+    new_name: "v003__add_change_notification_tables.sql"
+    location: "migrations/"
+    notes: "已通过 runner 登记, 唯一有 schema_migrations 记录的旧 migration"
+
+  - old_name: "enhance_audit_log_v2.py"
+    new_name: "v004__enhance_audit_log_v2.py"
+    location: "migrations/"
+    notes: "签名 enhance_audit_log(db_path), 不兼容新规范 migrate(db_path, skip_backup)"
+
+  - old_name: "v007_50_add_audit_union_view.py"
+    new_name: "v005__add_audit_union_view.py"
+    location: "migrations/"
+    notes: "签名 migrate(db_path, skip_backup), 项目内部最佳实践模板"
+
+  - old_name: "v007_51_add_updated_at_materialized.py"
+    new_name: "v006__add_updated_at_materialized.py"
+    location: "migrations/"
+    notes: "签名 migrate(db_path, skip_backup), Expand-Contract 模式的 Expand 阶段"
+
+# P1 重命名时的 schema_migrations 表更新 SQL:
+# UPDATE schema_migrations SET migration_name = 'v003__add_change_notification_tables.sql'
+#   WHERE migration_name = 'add_change_notification_tables.sql';
+# UPDATE schema_migrations SET migration_name = 'v004__enhance_audit_log_v2.py'
+#   WHERE migration_name = 'enhance_audit_log_v2.py';
+# UPDATE schema_migrations SET migration_name = 'v005__add_audit_union_view.py'
+#   WHERE migration_name = 'v007_50_add_audit_union_view.py';
+# UPDATE schema_migrations SET migration_name = 'v006__add_updated_at_materialized.py'
+#   WHERE migration_name = 'v007_51_add_updated_at_materialized.py';
+# (v001__migrate_system_admin 不在 migrations/ 目录, 不需要更新 runner 扫描)

@@ -33,6 +33,8 @@ DEPLOY_BUNDLE_BUILD="20260703_1200"
 #   PHASE 0.5: 解压 zip (如需要)
 #   PHASE 1: 停旧服务
 #   PHASE 2: 备份 + 复制 db
+#   PHASE 2.5: 重置 deploy_test 验证用户
+#   PHASE 2.6: 执行 database migrations (P0 新增, 7 步流程)
 #   PHASE 3: 写 systemd service
 #   PHASE 4: 启 backend
 #   PHASE 5: 启 unified server (前端+API proxy)
@@ -402,6 +404,124 @@ if [ -f "$SCRIPT_DIR/reset_deploy_test_user.sh" ]; then
 else
     warn "reset_deploy_test_user.sh 不存在, 跳过"
 fi
+
+# ========================= PHASE 2.6: database migrations (P0 新增) =========================
+# 7 步流程: integrity → disk → backfill check → dry-run → execute (retry) → verify count → verify failed
+# 必须在 PHASE 2 (db 复制) 之后, PHASE 4 (启 backend) 之前执行
+banner "PHASE 2.6: 执行 database migrations [P0]"
+MIGRATION_DB_PATH="${DB_DEST:-$SERVER_DIR/architecture.db}"
+ALERT_DIR="${ALERT_DIR:-/tmp/migration_alerts}"
+
+# 2.6.1: 预检 - DB 完整性
+if [ -f "$MIGRATION_DB_PATH" ]; then
+    if command -v sqlite3 >/dev/null 2>&1; then
+        MIG_INTEGRITY=$(sqlite3 "$MIGRATION_DB_PATH" "PRAGMA integrity_check;" 2>/dev/null | head -1)
+        if [ "$MIG_INTEGRITY" != "ok" ]; then
+            err "PHASE 2.6.1: DB integrity_check FAILED: $MIG_INTEGRITY"
+            err "Aborting deployment, manual intervention required"
+            exit 1
+        fi
+        ok "PHASE 2.6.1: DB integrity OK"
+    else
+        warn "PHASE 2.6.1: sqlite3 CLI 不存在, 跳过完整性检查"
+    fi
+fi
+
+# 2.6.2: 预检 - 磁盘空间 (至少留 DB 大小 3x: 备份+新DB+临时)
+MIG_DB_SIZE_MB=$(du -m "$MIGRATION_DB_PATH" 2>/dev/null | cut -f1 || echo "0")
+MIG_FREE_MB=$(df -m . | tail -1 | awk '{print $4}')
+MIG_REQUIRED_MB=$((MIG_DB_SIZE_MB * 3 + 100))
+if [ "$MIG_FREE_MB" -lt "$MIG_REQUIRED_MB" ]; then
+    err "PHASE 2.6.2: Insufficient disk space (free: ${MIG_FREE_MB}MB, required: ${MIG_REQUIRED_MB}MB)"
+    exit 1
+fi
+ok "PHASE 2.6.2: Disk space OK (free: ${MIG_FREE_MB}MB, required: ${MIG_REQUIRED_MB}MB)"
+
+# 2.6.3: 预检 - P0.5 补登记是否已执行 (schema_migrations 表记录数 >= 5)
+MIG_REGISTERED=0
+if command -v sqlite3 >/dev/null 2>&1; then
+    MIG_REGISTERED=$(sqlite3 "$MIGRATION_DB_PATH" "SELECT count(*) FROM schema_migrations;" 2>/dev/null || echo "0")
+fi
+if [ "$MIG_REGISTERED" -lt 5 ]; then
+    err "PHASE 2.6.3: schema_migrations has only $MIG_REGISTERED records (< 5)"
+    err "P0.5 backfill_schema_migrations.py must be run first!"
+    err "Run: $PY tools/backfill_schema_migrations.py --db-path $MIGRATION_DB_PATH"
+    exit 1
+fi
+ok "PHASE 2.6.3: schema_migrations has $MIG_REGISTERED records (>= 5, OK)"
+
+# 2.6.4: Dry-run 预览 (只打印, 不执行)
+info "PHASE 2.6.4: Dry-run preview..."
+PYTHONPATH="${DEPLOYMENTS_DIR}:${PYTHONPATH:-}" $PY -m meta.core.migration_runner \
+    --dry-run --db-path "$MIGRATION_DB_PATH" > /tmp/migration_dryrun.log 2>&1 || true
+cat /tmp/migration_dryrun.log
+MIG_PENDING=$(grep "Pending:" /tmp/migration_dryrun.log | grep -oE '[0-9]+' || echo "0")
+info "PHASE 2.6.4: Dry-run found $MIG_PENDING pending migrations"
+
+# 2.6.5: 执行 migration (带并发锁重试, 最多 3 次)
+info "PHASE 2.6.5: Executing migrations (with lock retry)..."
+MIG_MAX_RETRIES=3
+MIG_RETRY=0
+MIG_SUCCESS=false
+while [ $MIG_RETRY -lt $MIG_MAX_RETRIES ]; do
+    MIG_RETRY=$((MIG_RETRY + 1))
+    info "PHASE 2.6.5: Attempt $MIG_RETRY/$MIG_MAX_RETRIES..."
+
+    PYTHONPATH="${DEPLOYMENTS_DIR}:${PYTHONPATH:-}" $PY -m meta.core.migration_runner \
+        --db-path "$MIGRATION_DB_PATH" > /tmp/migration_run.log 2>&1
+    MIG_RC=$?
+    cat /tmp/migration_run.log
+
+    if [ $MIG_RC -eq 0 ]; then
+        MIG_SUCCESS=true
+        break
+    else
+        if grep -q "MigrationLock" /tmp/migration_run.log; then
+            warn "PHASE 2.6.5: Lock conflict detected, will retry in 60s"
+            sleep 60
+        else
+            err "PHASE 2.6.5: Non-lock failure (rc=$MIG_RC), no retry"
+            break
+        fi
+    fi
+done
+
+if [ "$MIG_SUCCESS" != "true" ]; then
+    err "PHASE 2.6.5: Migration failed after $MIG_RETRY attempts"
+    err "Check /tmp/migration_run.log for details"
+
+    # 写告警文件 (被 monitor_prod.py 读取)
+    mkdir -p "$ALERT_DIR"
+    cat > "$ALERT_DIR/migration_failed.$(date +%Y%m%d_%H%M%S).alert" <<MIG_ALERT_EOF
+alert_type: migration_failed
+timestamp: $(date -Iseconds)
+host: $(hostname)
+deploy_version: ${VERSION:-unknown}
+db_path: $MIGRATION_DB_PATH
+pending_count: $MIG_PENDING
+retry_count: $MIG_RETRY
+log_file: /tmp/migration_run.log
+MIG_ALERT_EOF
+    warn "Alert written to $ALERT_DIR/"
+    exit 1
+fi
+
+# 2.6.6: 验证 - schema_migrations 记录数
+if command -v sqlite3 >/dev/null 2>&1; then
+    MIG_NEW_COUNT=$(sqlite3 "$MIGRATION_DB_PATH" "SELECT count(*) FROM schema_migrations;" 2>/dev/null || echo "0")
+    ok "PHASE 2.6.6: schema_migrations now has $MIG_NEW_COUNT records (was $MIG_REGISTERED)"
+fi
+
+# 2.6.7: 验证 - 无 FAILED 状态的 migration (P1 才有 status 列, 此时表无该列则跳过)
+if command -v sqlite3 >/dev/null 2>&1; then
+    MIG_FAILED_COUNT=$(sqlite3 "$MIGRATION_DB_PATH" "SELECT count(*) FROM schema_migrations WHERE status='FAILED';" 2>/dev/null || echo "0")
+    if [ "$MIG_FAILED_COUNT" -gt 0 ]; then
+        warn "PHASE 2.6.7: $MIG_FAILED_COUNT migrations have FAILED status"
+        warn "Check logs/migrations.log for details"
+    fi
+fi
+
+ok "PHASE 2.6: Migrations completed successfully"
 
 # ========================= PHASE 3: systemd service =========================
 banner "PHASE 3: systemd service"

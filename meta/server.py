@@ -207,7 +207,7 @@ from meta.api.audit_management_api import audit_mgmt_bp, init_audit_mgmt_service
 from meta.api.meta_utility_routes_api import meta_util_bp
 from meta.core.datasource import get_data_source
 from meta.core.yaml_loader import register_from_directory, get_yaml_schema_dir
-from meta.core.migration_runner import init_change_notification_tables
+from meta.core.migration_runner import init_change_notification_tables, run_all_migrations
 from meta.services.view_config_service import view_config_service
 from meta.services.menu_auto_generator import menu_auto_generator
 from meta.core.task_scheduler import TaskScheduler
@@ -479,8 +479,6 @@ def create_app(db_path=None):
     init_auth_services(data_source)
     from meta.scripts.init_auth import init_auth_system
     init_auth_system()
-    from meta.scripts.migrate_system_admin import run_migration
-    run_migration()
     init_user_services(data_source)
     init_role_services(data_source)
     init_data_perm_services(data_source)
@@ -489,30 +487,22 @@ def create_app(db_path=None):
     init_association_services(data_source)
     init_user_group_services(data_source)
     
-    init_change_notification_tables(data_source)
+    # [P0] 统一通过 MigrationRunner 执行所有 pending migrations
+    # 旧代码 (已删除): 5 个硬编码 import + 调用, 绕过 runner 无版本追踪
+    # 新代码: run_all_migrations 统一入口, 支持 .py/.sql + checksum + backup + audit log + lock
+    # 注意: 激活前必须先跑 tools/backfill_schema_migrations.py 补登记历史 migration
+    try:
+        _migration_executed = run_all_migrations(data_source)
+        logging.getLogger(__name__).info(
+            f"[Migration] Executed {_migration_executed} pending migrations via runner"
+        )
+    except Exception as e:
+        logging.getLogger(__name__).error(
+            f"[Migration] run_all_migrations failed: {e}", exc_info=True
+        )
 
     init_database_services(data_source=data_source)
     init_audit_services(data_source=data_source)
-
-    from meta.migrations.enhance_audit_log_v2 import enhance_audit_log
-    enhance_audit_log(db_path)
-
-    # [V007.50] 创建 v_audit_all VIEW，统一热/冷审计日志查询入口
-    # 必须在 enhance_audit_log 之后 (依赖 audit_logs 列已对齐)
-    try:
-        from meta.migrations.v007_50_add_audit_union_view import migrate as v007_50_migrate
-        from pathlib import Path
-        v007_50_migrate(Path(db_path), skip_backup=True)
-    except Exception as e:
-        logging.getLogger(__name__).warning(f"[V007.50] v_audit_all migration failed: {e}")
-
-    # [V007.51] Phase 2: 物化 updated_at 列 + Backfill
-    try:
-        from meta.migrations.v007_51_add_updated_at_materialized import migrate as v007_51_migrate
-        from pathlib import Path
-        v007_51_migrate(Path(db_path), skip_backup=True)
-    except Exception as e:
-        logging.getLogger(__name__).warning(f"[V007.51] materialized updated_at migration failed: {e}")
 
     from meta.services.async_audit_writer import async_audit_writer
     async_audit_writer.set_data_source(data_source)
