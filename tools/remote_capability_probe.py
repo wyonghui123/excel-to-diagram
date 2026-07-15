@@ -17,12 +17,19 @@ import json
 import os
 import sys
 import time
+
+# [V007.55] 强制 UTF-8 stdout (Windows PowerShell 默认 GBK 会让 ✓ 报错)
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+except Exception:
+    pass
 import urllib.parse
 
 # 让脚本能从 tools/ 目录 import yonaa_exec
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from yonaa_exec import (
-    HOST, KNOWN_PORTS, KNOWN_SECRETS, _gen_tokens, _http_get, _http_post, _classify_error
+    HOST, KNOWN_PORTS, KNOWN_SECRETS, _gen_tokens, _http_get, _http_post, _classify_error,
+    yexec,  # [V007.55] --check-log-service 用
 )
 
 # exec 白名单 (来自 tools/core_service.py L78-90)
@@ -41,17 +48,34 @@ EXEC_WHITELIST = {
 }
 
 
+# [V007.55] 每个端口的 health-check 路径
+# 大部分服务用 GET /api, 但 3011 (Flask) 没有 /api 路由 (会 404 → Flask 报 500 误判)
+# 8081 frontend 返回 HTML, 也是 200 但 body 不是 JSON
+PORT_HEALTH_PATHS = {
+    9101: '/api',          # prod log_service
+    19101: '/api',         # staging log_service
+    9200: '/api',          # prod core_service
+    19200: '/api',         # staging core_service
+    9201: '/api',          # observability
+    3011: '/health',       # backend (Flask, server.py 有 @app.route('/health'))
+    8081: '/',             # frontend (HTML, 200)
+}
+
+
 def probe_port(port, label):
-    """TCP + GET /api 健康检查"""
+    """TCP + GET {health_path} 健康检查
+    [V007.55] 不同端口用不同路径, 避免 3011 Flask 404→500 误判
+    """
+    path = PORT_HEALTH_PATHS.get(port, '/api')
     try:
         conn = http.client.HTTPConnection(HOST, port, timeout=5)
-        conn.request('GET', '/api')
+        conn.request('GET', path)
         resp = conn.getresponse()
         body = resp.read().decode('utf-8', errors='replace')
         conn.close()
-        return {'reachable': True, 'status': resp.status, 'body': body[:500]}
+        return {'reachable': True, 'status': resp.status, 'body': body[:500], 'path': path}
     except Exception as e:
-        return {'reachable': False, 'reason': str(e)[:100]}
+        return {'reachable': False, 'reason': str(e)[:100], 'path': path}
 
 
 def find_working_secret(port, test_cmd='echo YONAA_PROBE_OK'):
@@ -212,5 +236,157 @@ def main():
     print('='*70)
 
 
+def check_log_service():
+    """[V007.55] 单独检查 log_service 9101/19101 状态 (绕开 probe 的 full scan)
+
+    用法: python tools/remote_capability_probe.py --check-log-service
+    返回 exit code: 0=全活, 1=部分死, 2=全死
+    """
+    print('=== [V007.55] log_service 健康检查 ===\n')
+    log_ports = [
+        (9101, 'prod log_service'),
+        (19101, 'staging log_service'),
+    ]
+    alive = 0
+    dead = 0
+    for port, label in log_ports:
+        r = probe_port(port, label)
+        if r.get('reachable') and 200 <= r.get('status', 0) < 500:
+            alive += 1
+            print(f'  [✓] {label:25s} port={port:5d} status={r.get("status")} path={r.get("path", "?")}')
+        else:
+            dead += 1
+            reason = r.get('reason') or f'status={r.get("status")}'
+            print(f'  [✗] {label:25s} port={port:5d} {reason}')
+
+    # 进程检查 (通过 9200 远端)
+    print('\n  log_service 进程 (远端):')
+    r = yexec('bash -c "ps -ef | grep log_service | grep -v grep || echo NO_PROCESS"',
+              port=9200, secret='prod_write', timeout=10)
+    out = (r.get('stdout') or '').strip()
+    if out and 'NO_PROCESS' not in out:
+        for line in out.split('\n')[:5]:
+            print(f'    {line[:160]}')
+    else:
+        print('    (无)')
+
+    print(f'\n  总结: {alive} alive / {dead} dead / {alive + dead} total')
+    if dead == 0:
+        return 0
+    elif alive == 0:
+        return 2
+    else:
+        return 1
+
+
+def watch_loop(interval_sec):
+    """[V007.55] 持续监控模式: 每 N 秒跑一次 probe, 输出变化"""
+    import time
+    last_state = None
+    print(f'[watch] 每 {interval_sec}s 跑一次, Ctrl+C 退出\n')
+    while True:
+        # 清屏 (ANSI)
+        print('\033[2J\033[H', end='')
+        print(f'=== yonaa 远端监控 @ {time.strftime("%Y-%m-%d %H:%M:%S")} ===\n')
+        # 跑 log_service 检查
+        alive_n = 0
+        for port, label in [(9101, 'prod log_service'), (19101, 'staging log_service')]:
+            r = probe_port(port, label)
+            ok = r.get('reachable') and 200 <= r.get('status', 0) < 500
+            alive_n += int(ok)
+            status = f'✓ status={r.get("status")}' if ok else f'✗ {r.get("reason") or "?"}'
+            print(f'  {label:25s} port={port:5d} {status}')
+        # 跑核心端口
+        print()
+        for port, label in [(9200, 'prod core'), (19200, 'staging core'), (9201, 'observability')]:
+            r = probe_port(port, label)
+            ok = r.get('reachable') and 200 <= r.get('status', 0) < 500
+            status = f'✓ status={r.get("status")}' if ok else f'✗ {r.get("reason") or "?"}'
+            print(f'  {label:25s} port={port:5d} {status}')
+
+        print(f'\n  log_service: {alive_n}/2 alive')
+        if alive_n < last_state if last_state else False:
+            print(f'  [ALERT] log_service 数量下降! {last_state} -> {alive_n}')
+        last_state = alive_n
+        time.sleep(interval_sec)
+
+
+def watch_loop_with_auto_restart(interval_sec):
+    """[V007.55] 持续监控 + 自动重启 log_service (取代手工 restart)"""
+    import time
+    import subprocess
+    last_alive = 2  # 假设一开始都活
+    restart_count = 0
+    print(f'[watch+auto-restart] 每 {interval_sec}s 检查, log_service 死后自动 restart, Ctrl+C 退出\n',
+          flush=True)
+    try:
+        while True:
+            print('\033[2J\033[H', end='', flush=True)
+            print(f'=== yonaa 监控 @ {time.strftime("%Y-%m-%d %H:%M:%S")} '
+                  f'(restart_count={restart_count}) ===\n', flush=True)
+
+            # 1. 探活 log_service
+            alive_n = 0
+            dead_ports = []
+            for port, label in [(9101, 'prod log_service'), (19101, 'staging log_service')]:
+                r = probe_port(port, label)
+                ok = r.get('reachable') and 200 <= r.get('status', 0) < 500
+                alive_n += int(ok)
+                status = f'✓ status={r.get("status")}' if ok else f'✗ {r.get("reason") or "?"}'
+                print(f'  {label:25s} port={port:5d} {status}', flush=True)
+                if not ok:
+                    dead_ports.append(port)
+
+            # 2. 探活核心
+            print(flush=True)
+            for port, label in [(9200, 'prod core'), (19200, 'staging core'), (9201, 'observability')]:
+                r = probe_port(port, label)
+                ok = r.get('reachable') and 200 <= r.get('status', 0) < 500
+                status = f'✓ status={r.get("status")}' if ok else f'✗ {r.get("reason") or "?"}'
+                print(f'  {label:25s} port={port:5d} {status}', flush=True)
+
+            # 3. 自动重启 (如果 log_service 死了)
+            if dead_ports:
+                print(f'\n  [AUTO] 发现 {len(dead_ports)} 个 log_service 死了, 调 restart_log_service.py',
+                      flush=True)
+                try:
+                    result = subprocess.run(
+                        ['python', 'tools/restart_log_service.py'],
+                        capture_output=True, text=True, timeout=60, cwd='.',
+                    )
+                    restart_count += 1
+                    print(f'  [AUTO] restart #{restart_count} 完成 (exit={result.returncode})',
+                          flush=True)
+                except Exception as e:
+                    print(f'  [AUTO] restart 失败: {e}', flush=True)
+
+            print(f'\n  log_service: {alive_n}/2 alive (last={last_alive})', flush=True)
+            if alive_n < last_alive:
+                print(f'  [ALERT] log_service 数量下降! {last_alive} -> {alive_n}', flush=True)
+            last_alive = alive_n
+            time.sleep(interval_sec)
+    except KeyboardInterrupt:
+        print('\n[watch] 退出', flush=True)
+
+
 if __name__ == '__main__':
-    main()
+    import argparse
+    parser = argparse.ArgumentParser(description='yonaa 远端能力扫描')
+    parser.add_argument('--quick', action='store_true', help='只 TCP 探活')
+    parser.add_argument('--check-log-service', action='store_true',
+                        help='[V007.55] 单独检查 log_service 9101/19101 状态')
+    parser.add_argument('--watch', type=int, default=0, metavar='SEC',
+                        help='[V007.55] 持续监控, 每 SEC 秒跑一次')
+    parser.add_argument('--auto-restart-log', action='store_true',
+                        help='[V007.55] --watch 模式下, log_service 死后自动 restart')
+    args = parser.parse_args()
+
+    if args.check_log_service:
+        sys.exit(check_log_service())
+    if args.watch > 0:
+        if args.auto_restart_log:
+            watch_loop_with_auto_restart(args.watch)
+        else:
+            watch_loop(args.watch)
+    else:
+        main()
