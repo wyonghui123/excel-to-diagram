@@ -207,31 +207,48 @@ python tools/yonaa_exec.py upload tools/migration_lint.py /opt/app/staging/deplo
 
 ## §3. 部署流程
 
+> **节奏约定**: 详细见 [docs/DEPLOY_RHYTHM.md](file:///d:/filework/release-prep-worktree/docs/DEPLOY_RHYTHM.md)
+> 默认: **每天 1-3 次 staging 部署**, **每天 21:00 一次 prod 部署**
+> Hotfix: P0 故障时立即, 跳过等待窗口
+
 ### §3.1 Staging 一键 (agent 自动) — **推荐**
 
 ```bash
-# 默认 dry-run 模式: 只上传, 不跑 P0 (验证用)
+# 默认 daily 模式: 上传 + backfill + 跑 P0 + 验证
 python tools/staging_deploy_orchestrator.py
 
-# 实际跑: 上传 + backfill + 跑 P0 + 验证
-EXCLUDE_RUN_PENDING=0 python tools/staging_deploy_orchestrator.py
+# Hotfix 模式 (压缩观察期)
+DEPLOY_MODE=hotfix python tools/staging_deploy_orchestrator.py
 ```
 
-**内部流程** (agent 自动, 6 步):
-1. rebuild deploy bundle (`tools/rebuild_bundle.ps1` 等价物)
-2. yupload 到 `/opt/app/staging/tmp/`
-3. 远端跑 `tools/backfill_schema_migrations.py --db-path meta/architecture.db`
-4. 远端跑 `bash deploy.sh --version vXXX --port 9201 --zip ...`
-5. 远端跑 `python3 -m meta.core.migration_runner --status`
-6. 远端跑 `tools/monitor_migrations.py`
+**内部流程** (agent 自动, 10 步):
+1. 探测 9200/19200 通
+2. 上传新文件 (yupload)
+3. 跑 migration_lint
+4. 备份 DB
+5. backfill --dry-run
+6. migration_runner --dry-run
+7. 实际跑 migration_runner
+8. 验证 (--status + monitor)
+9. 启 log_service 19101
+10. 总结 + 节奏建议
 
-### §3.2 Prod 一键 (agent 自动) — 同样工具, 改 port
+### §3.2 Prod 一键 (agent 自动) — **新工具**
 
-**目前没有 prod_orchestrator**, staging 的脚本改 1 行参数即可:
-```python
-# 把 19200 → 9200, /opt/app/staging/deploy → /opt/app/deployments
-# 见 staging_deploy_orchestrator.py 顶部
+```bash
+# 默认 daily 模式: 上传 + 备份 + 跑 P0 + 验证
+python tools/prod_deploy_orchestrator.py
+
+# Hotfix 模式 (skip 等待窗口, 跳过 staging 检查)
+DEPLOY_MODE=hotfix python tools/prod_deploy_orchestrator.py
 ```
+
+**与 staging 的差异**:
+1. port: 9200 (prod core_service) vs 19200 (staging)
+2. deploy_root: `/opt/app/deployments` vs `/opt/app/staging/deploy`
+3. log_service: 9101 vs 19101
+4. **多 1 步**: 备份 prod DB (deploy.sh PHASE 2 自动)
+5. **多 1 步**: 验证 staging 0 FAILED (daily 模式)
 
 ### §3.3 传统 SFTP 流程 (人 SSH) — 保留作为 fallback
 

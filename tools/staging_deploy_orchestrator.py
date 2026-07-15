@@ -254,6 +254,18 @@ sleep_between(2.0)
 r = exec_cmd("bash -c 'curl -s --max-time 5 http://127.0.0.1:19101/api | head -c 300'", timeout=10)
 show(r, 500)
 
+# === Step 11: 总结 + 节奏建议 (按 mode 区分) ===
 print('\n' + '='*70)
-print('部署编排完成')
+mode = os.environ.get('DEPLOY_MODE', 'daily')
+if mode == 'hotfix':
+    print(' 部署完成 (HOTFIX 模式)')
+    print('   下一步: 立即部署到 PROD (skip 等待窗口)')
+    print('   命令: python tools/prod_deploy_orchestrator.py --mode hotfix')
+    print('   重点监控: 1-2h 盯 backend log + monitor_migrations')
+else:
+    print(' 部署完成 (DAILY 模式)')
+    print('   下一步: 等 PROD 窗口 (每天 21:00-22:00)')
+    print('   命令: python tools/prod_deploy_orchestrator.py --mode daily')
+    print('   监控: 24h 灰度观察, 出问题 → rollback')
 print('='*70)
+print('详情: docs/DEPLOY_RHYTHM.md')
