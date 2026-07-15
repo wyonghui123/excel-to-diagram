@@ -1,0 +1,21 @@
+[Unit]
+Description=Meta Architecture log_service (prod 9101)
+After=network.target
+Documentation=https://github.com/wyonghui123/excel-to-diagram
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/app/deployments
+Environment="LOG_SERVICE_PORT=9101"
+Environment="LOG_SERVICE_BIND=0.0.0.0"
+Environment="LOG_SERVICE_LOG_DIR=/opt/app/deployments/meta"
+Environment="LOG_SERVICE_DB_PATH=/opt/app/deployments/meta/architecture.db"
+Environment="LOG_SERVICE_SECRET=v007.35-infra"
+ExecStart=/opt/miniconda3-py39/bin/python /opt/app/deployments/tools/log_service.py
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
