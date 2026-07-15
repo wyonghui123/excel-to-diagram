@@ -403,9 +403,14 @@ python tools/install_log_service_systemd.py --target prod
 ### 9.6 应急 (systemd 不可用时)
 
 ```bash
-# 旧工具 deprecated, 但还能用
-python tools/restart_log_service.py --env prod
-python tools/restart_log_service.py --env prod --use-systemd  # 软迁移
+# V007.56 删除了 restart_log_service.py, 改用 systemctl
+systemctl restart log_service_prod.service
+systemctl restart log_service_staging.service
+
+# V007.56 探查 SIGKILL 元凶
+python tools/find_log_service_killer.py
+# 显示: journalctl + aegis (阿里云 HIPS) + cgroup + auditd
+# 结论: 阿里云 HIPS 是元凶 (systemd 守护下 5s 自动拉起, 用户无感)
 ```
 
 ---

@@ -398,20 +398,27 @@ def watch_loop_with_auto_restart(interval_sec):
                 status = f'✓ status={r.get("status")}' if ok else f'✗ {r.get("reason") or "?"}'
                 print(f'  {label:25s} port={port:5d} {status}', flush=True)
 
-            # 3. 自动重启 (如果 log_service 死了)
+            # 3. 自动重启 (如果 log_service 死了) - V007.56 改用 systemctl
             if dead_ports:
-                print(f'\n  [AUTO] 发现 {len(dead_ports)} 个 log_service 死了, 调 restart_log_service.py',
+                print(f'\n  [AUTO] 发现 {len(dead_ports)} 个 log_service 死了, 调 systemctl restart',
                       flush=True)
-                try:
-                    result = subprocess.run(
-                        ['python', 'tools/restart_log_service.py'],
-                        capture_output=True, text=True, timeout=60, cwd='.',
-                    )
-                    restart_count += 1
-                    print(f'  [AUTO] restart #{restart_count} 完成 (exit={result.returncode})',
-                          flush=True)
-                except Exception as e:
-                    print(f'  [AUTO] restart 失败: {e}', flush=True)
+                # 9101 = prod (systemctl restart log_service_prod.service)
+                # 19101 = staging (systemctl restart log_service_staging.service)
+                # 但 --auto-restart-log 跑在本地 (windows), 需要走 9200/19200 远端
+                from yonaa_exec import yexec
+                port_to_unit = {9101: 'log_service_prod', 19101: 'log_service_staging'}
+                port_to_ctl = {9101: 9200, 19101: 19200}
+                for port in dead_ports:
+                    unit = port_to_unit.get(port, 'log_service_prod')
+                    ctl = port_to_ctl.get(port, 9200)
+                    try:
+                        r = yexec(f"bash -c 'systemctl restart {unit}.service 2>&1; systemctl is-active {unit}.service 2>&1'",
+                                  port=ctl, secret='prod_write', timeout=15)
+                        restart_count += 1
+                        print(f'  [AUTO] {unit} restart #{restart_count}: {(r.get("stdout") or "").strip()[:200]}',
+                              flush=True)
+                    except Exception as e:
+                        print(f'  [AUTO] {unit} restart 失败: {e}', flush=True)
 
             print(f'\n  log_service: {alive_n}/2 alive (last={last_alive})', flush=True)
             if alive_n < last_alive:

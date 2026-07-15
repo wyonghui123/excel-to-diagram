@@ -538,9 +538,10 @@ cat /opt/app/state/deployment_history.json
 | `tools/yonaa_exec.py` | HTTP exec + upload (限流 + 跨小时 token + 错误分类 + bg 后台) | SSH 命令 |
 | `tools/remote_capability_probe.py` | 30s 扫 7 端口 × 6 secret | 手工 `nc` / `curl` |
 | `tools/staging_deploy_orchestrator.py` | 一键 staging 部署 (10 步自动) | SFTP + SSH 5 条命令 |
-| `tools/restart_log_service.py` | **~~deprecated V007.55~~** 手工启 log_service, 应急 only | 手工 `nohup ...` |
+| ~~`tools/restart_log_service.py`~~ | **~~删除 V007.56~~** 旧手工 restart 工具 (deprecated V007.55) | 已删除 |
 | `tools/install_log_service_systemd.py` | **V007.55** 一键装 systemd unit 守护 log_service | 旧 restart_log_service.py |
 | `tools/setup_log_service_cron.py` | **V007.55** 装 cron `*/5 * * * *` 监控告警 | 手工写 crontab |
+| `tools/find_log_service_killer.py` | **V007.56** 探查 SIGKILL 元凶 (journal + aegis + cgroup + auditd) | systemd 守护下还是被杀时 |
 | `tools/rebuild_bundle.ps1` | 本地 rebuild (保留) | 保留 |
 
 **新端口 (agent 入口, 7 个)**:

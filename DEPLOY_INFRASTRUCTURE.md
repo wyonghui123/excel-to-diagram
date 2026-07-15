@@ -102,9 +102,10 @@
 | 18 | `tools/staging_deploy_orchestrator.py` | 一键 staging 部署 (10 步, 含 Step 10.5 regression + DEPLOY_MODE=daily/hotfix) | 部署 staging | **agent** |
 | 19 | `tools/prod_deploy_orchestrator.py` | 一键 prod 部署 (daily 21:00 / hotfix 立即, 含备份 + lint + migration) | 部署 prod | **agent** |
 | 20 | `tools/rebuild_bundle.ps1` | 本地 rebuild deploy_bundle | 改了 `tools/X.sh` 后 | 本地 (人或 agent) |
-| 21 | `tools/restart_log_service.py` | **~~deprecated V007.55~~** 一键启停 log_service (旧, 手工 setsid+nohup, 进程 5s 内死) | 应急 only | **agent** |
+| 21 | ~~`tools/restart_log_service.py`~~ | **~~删除 V007.56~~** 旧手工 restart 工具 (历史 deprecated V007.55) | 删除 | — |
 | 22 | `tools/install_log_service_systemd.py` + `log_service_*.service` | **V007.55** 一键装 systemd unit 守护 log_service (Restart=always 5s, enable 开机自启) | 新环境部署 | **agent** |
 | 23 | `tools/setup_log_service_cron.py` + `log_service_monitor.cron` | **V007.55** 装 cron `*/5 * * * *` 调 `--check-log-service` + 写 /var/log/monitor_alert.log | 第一次 / 监控失活 | **agent** |
+| 24 | `tools/find_log_service_killer.py` | **V007.56** 探查 log_service SIGKILL 元凶 (journal + aegis + cgroup + auditd) | systemd 守护下还是被杀时 | **agent** |
 
 **关键差异**：
 - **§1.1 工具**: 需要 SFTP 上传到 `/tmp/`, 远端 SSH 跑 (人)

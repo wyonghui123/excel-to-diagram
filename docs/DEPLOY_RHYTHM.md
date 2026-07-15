@@ -193,6 +193,7 @@ python tools/staging_deploy_orchestrator.py
 - ✅ Hotfix 流程: 工具已支持 (`DEPLOY_MODE=hotfix`)
 - ✅ 回归测试: 集成到 staging_deploy_orchestrator Step 10.5 + monitor --check-regression
 - ✅ V007.55 完成: systemd unit 守护 log_service (install_log_service_systemd.py) + cron 告警 (setup_log_service_cron.py)
+- ✅ V007.56 完成: 探查 SIGKILL 元凶 (find_log_service_killer.py, 找到是阿里云 HIPS), 删除 restart_log_service.py
 - ⚠️ 自动监控: watch.sh 需手工启动, 没 cron
 - ⚠️ 通知: 手工 (无 IM 集成)
 

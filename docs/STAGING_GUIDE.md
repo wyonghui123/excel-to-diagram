@@ -39,18 +39,17 @@ yonaa 172.20.59.7
 # V007.55 推荐: 一键装 (systemd unit + enable + start)
 python tools/install_log_service_systemd.py
 
-# V007.55 推荐: 软迁移 (用 systemctl 代替旧工具)
-python tools/restart_log_service.py --use-systemd
-
-# 旧工具 (deprecated V007.55, 应急 only)
-# python tools/restart_log_service.py
-# python tools/restart_log_service.py --env staging
-# python tools/restart_log_service.py --stop
+# 看状态/重启 (用 systemctl 直接调)
+systemctl status log_service_prod.service
+systemctl restart log_service_staging.service
 
 # 监控
 python tools/remote_capability_probe.py --check-systemd      # 一键看 systemd 状态
 python tools/remote_capability_probe.py --check-log-service  # 看端口
+python tools/find_log_service_killer.py                      # V007.56 探查 SIGKILL 元凶
 tail -f /var/log/monitor_alert.log                            # 告警
+
+# V007.56 删除了: python tools/restart_log_service.py
 ```
 
 ---
