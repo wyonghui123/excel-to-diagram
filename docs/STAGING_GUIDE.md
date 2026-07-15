@@ -30,23 +30,27 @@ yonaa 172.20.59.7
   - core_service: exec + upload + audit (4 端点)
   - log_service: **10+ 端点** (alert/sse, config, db/*, deploy/*, disk/*, dmesg, exec, find...)
 - ❌ 旧 4 服务架构 (core 19200 + log 19101 + unified 18081 + backend 13011) **部分下线**
-  - ✅ 19101 log_service **已重启** (本会话, 自动工具: `tools/restart_log_service.py`)
+  - ✅ 19101 log_service **systemd 守护** (V007.55: `systemctl status log_service_staging.service`)
   - ❌ unified 18081 dead (不需要, agent 不通过 unified 调)
   - ❌ meta_backend 13011 dead (改用 core_service exec 调 Python)
 
-**log_service 重启**:
+**log_service 管理 (V007.55 systemd)**:
 ```bash
-# 一键启 (prod + staging)
-python tools/restart_log_service.py
+# V007.55 推荐: 一键装 (systemd unit + enable + start)
+python tools/install_log_service_systemd.py
 
-# 只 prod
-python tools/restart_log_service.py --env prod
+# V007.55 推荐: 软迁移 (用 systemctl 代替旧工具)
+python tools/restart_log_service.py --use-systemd
 
-# 只 staging
-python tools/restart_log_service.py --env staging
+# 旧工具 (deprecated V007.55, 应急 only)
+# python tools/restart_log_service.py
+# python tools/restart_log_service.py --env staging
+# python tools/restart_log_service.py --stop
 
-# 杀 (不启)
-python tools/restart_log_service.py --stop
+# 监控
+python tools/remote_capability_probe.py --check-systemd      # 一键看 systemd 状态
+python tools/remote_capability_probe.py --check-log-service  # 看端口
+tail -f /var/log/monitor_alert.log                            # 告警
 ```
 
 ---

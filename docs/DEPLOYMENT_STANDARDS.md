@@ -538,7 +538,9 @@ cat /opt/app/state/deployment_history.json
 | `tools/yonaa_exec.py` | HTTP exec + upload (限流 + 跨小时 token + 错误分类 + bg 后台) | SSH 命令 |
 | `tools/remote_capability_probe.py` | 30s 扫 7 端口 × 6 secret | 手工 `nc` / `curl` |
 | `tools/staging_deploy_orchestrator.py` | 一键 staging 部署 (10 步自动) | SFTP + SSH 5 条命令 |
-| `tools/restart_log_service.py` | 一键启停 log_service (9101/19101) | 手工 `nohup ...` |
+| `tools/restart_log_service.py` | **~~deprecated V007.55~~** 手工启 log_service, 应急 only | 手工 `nohup ...` |
+| `tools/install_log_service_systemd.py` | **V007.55** 一键装 systemd unit 守护 log_service | 旧 restart_log_service.py |
+| `tools/setup_log_service_cron.py` | **V007.55** 装 cron `*/5 * * * *` 监控告警 | 手工写 crontab |
 | `tools/rebuild_bundle.ps1` | 本地 rebuild (保留) | 保留 |
 
 **新端口 (agent 入口, 7 个)**:
@@ -586,7 +588,17 @@ cat /opt/app/state/deployment_history.json
 
 **新部署架构**: 2 服务 = `core_service.py` (exec + upload + audit) + `log_service.py` (10+ 端点), 通过 env var 切 port + db path。
 
-**log_service 重启工具**: `python tools/restart_log_service.py [--env prod|staging] [--stop]`
+**log_service 管理 (V007.55 systemd 守护)**:
+```bash
+# V007.55 推荐: 一键装 systemd unit
+python tools/install_log_service_systemd.py
+# 验证
+python tools/remote_capability_probe.py --check-systemd
+# 重启
+python tools/restart_log_service.py --use-systemd
+# 旧工具 (deprecated)
+# python tools/restart_log_service.py --env prod
+```
 
 详见 [STAGING_GUIDE.md](STAGING_GUIDE.md)。
 

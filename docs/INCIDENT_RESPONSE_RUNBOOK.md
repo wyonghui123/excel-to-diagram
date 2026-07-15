@@ -335,4 +335,79 @@ python tools/monitor_migrations.py --check-regression
 
 ---
 
-**协调智能体 v2026-07-14 V007.50 - 7 类事故 + DB 路径冲突排查**
+## 九、log_service 死掉 (V007.55)
+
+**症状**: probe 显示 9101/19101 端口无响应, 或 `--check-log-service` 全 dead
+
+**之前**: 5s 死, 手工 restart (低效)
+
+**V007.55**: systemd 守护 — 5s 自动重启, 不用人工干预
+
+### 9.1 快速诊断
+
+```bash
+# 一键看 systemd + 端口
+python tools/remote_capability_probe.py --check-systemd
+
+# 期望输出: 2 active / 0 failed / 2 total (exit 0)
+# 异常: failed_count > 0 (exit 1 或 2)
+```
+
+### 9.2 状态/启停
+
+```bash
+# 看 status
+systemctl status log_service_prod.service
+systemctl status log_service_staging.service
+
+# 重启
+systemctl restart log_service_prod.service
+systemctl restart log_service_staging.service
+
+# 停
+systemctl stop log_service_prod.service
+```
+
+### 9.3 杀进程后 systemd 自动拉起 (V007.55)
+
+```bash
+# 强杀
+pkill -9 -f /opt/app/deployments/tools/log_service.py
+
+# 等 5-8s
+sleep 8
+
+# 看新进程 (PID 应变)
+ps -ef | grep log_service | grep -v grep
+# 应看到新 PID, systemd 自动拉起
+```
+
+### 9.4 完全重装
+
+```bash
+# 卸
+python tools/install_log_service_systemd.py --uninstall
+
+# 装
+python tools/install_log_service_systemd.py
+# 或只装一个
+python tools/install_log_service_systemd.py --target prod
+```
+
+### 9.5 监控
+
+- **cron `*/5 * * * *`**: 自动跑 `--check-log-service`
+- **告警 log**: `tail -f /var/log/monitor_alert.log`
+- **手动 watch**: `python tools/remote_capability_probe.py --watch 3 --auto-restart-log`
+
+### 9.6 应急 (systemd 不可用时)
+
+```bash
+# 旧工具 deprecated, 但还能用
+python tools/restart_log_service.py --env prod
+python tools/restart_log_service.py --env prod --use-systemd  # 软迁移
+```
+
+---
+
+**协调智能体 v2026-07-15 V007.55 - 7 类事故 + DB 路径 + log_service 死掉**

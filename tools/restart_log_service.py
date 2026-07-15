@@ -1,13 +1,35 @@
 """tools/restart_log_service.py - 启停 log_service (9101 prod / 19101 staging)
 
-从 core_service (9200/19200) 启 log_service, 不需要 SSH.
-也可用于任意环境: 改 DEPLOYS 数组.
+!!! DEPRECATED !!! [V007.55 2026-07-15]
+本工具已被 install_log_service_systemd.py + systemd unit 取代。
 
+迁移指南:
+  python tools/restart_log_service.py                  →  python tools/install_log_service_systemd.py
+  # 或手动:
+  systemctl restart log_service_prod.service          # 重启 prod
+  systemctl restart log_service_staging.service       # 重启 staging
+  systemctl status log_service_prod.service           # 看状态
+  tail -f /var/log/monitor_alert.log                   # 看告警
+
+systemd 守护优势:
+  ✓ Restart=always 5s 自动拉起 (被 kill 自动恢复)
+  ✓ enable 开机自启
+  ✓ journald 统一日志
+  ✓ 不需要每分钟手工 restart (cron 跑会)
+
+本工具保留仅作应急 (systemd 不可用时手工 setsid+nohup)。
+新部署请用 install_log_service_systemd.py。
+
+---
+
+历史: 启 log_service 从 core_service (9200/19200), 不需要 SSH.
 用法:
   python tools/restart_log_service.py                # 启 prod + staging
   python tools/restart_log_service.py --env prod     # 只 prod
   python tools/restart_log_service.py --env staging  # 只 staging
   python tools/restart_log_service.py --stop         # 杀 (不启)
+
+!!! DEPRECATED !!! 请用 install_log_service_systemd.py
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -129,6 +151,17 @@ def stop_log_service(cfg):
 
 
 def main():
+    # [V007.55] 启动时打印 deprecation 警告
+    print('!!! DEPRECATED !!!', file=sys.stderr)
+    print('  本工具已被 install_log_service_systemd.py + systemd unit 取代。', file=sys.stderr)
+    print('  详见: docs/REGRESSION_TEST_SUITE.md / docs/DEPLOY_INFRASTRUCTURE.md', file=sys.stderr)
+    print('  systemd unit 已装 (prod 9101 / staging 19101), 进程死后 5s 自动重启。', file=sys.stderr)
+    print('  本工具仅作应急, 新部署请用 install_log_service_systemd.py。', file=sys.stderr)
+    print('', file=sys.stderr)
+    print('  如果只想重启: systemctl restart log_service_prod.service', file=sys.stderr)
+    print('  如果想看状态: systemctl status log_service_prod.service', file=sys.stderr)
+    print('', file=sys.stderr)
+
     only_env = None
     do_stop = False
     args = sys.argv[1:]
@@ -139,6 +172,16 @@ def main():
             only_env = args[i+1]; i += 2
         elif a == '--stop':
             do_stop = True; i += 1
+        elif a == '--use-systemd':
+            # [V007.55] 软迁移: 跳到 systemctl
+            print('  --use-systemd: 改用 systemctl restart (推荐)', file=sys.stderr)
+            for cfg in DEPLOYS:
+                if only_env and cfg['label'] != only_env:
+                    continue
+                r = yexec(f"bash -c 'systemctl restart log_service_{cfg['label']}.service 2>&1; systemctl status log_service_{cfg['label']}.service --no-pager 2>&1 | head -10'",
+                          port=cfg['ctl_port'], secret='prod_write', timeout=10)
+                print(f'  [{cfg["label"]}] {r.get("stdout", "").strip()[:500]}', file=sys.stderr)
+            sys.exit(0)
         else:
             i += 1
 

@@ -279,6 +279,59 @@ def check_log_service():
         return 1
 
 
+def check_systemd():
+    """[V007.55] 检查 systemd unit 守护状态 (V007.55 新装)
+
+    检查:
+      - log_service_prod.service  (prod  9101)
+      - log_service_staging.service  (staging 19101)
+
+    用法: python tools/remote_capability_probe.py --check-systemd
+    返回 exit code: 0=全活, 1=部分死, 2=全死
+    """
+    print('=== [V007.55] systemd unit 健康检查 ===\n')
+    targets = [
+        ('log_service_prod',    'prod log_service',    9200,  '9101'),
+        ('log_service_staging', 'staging log_service', 19200, '19101'),
+    ]
+    active_count = 0
+    failed_count = 0
+    for unit, label, ctl_port, log_port in targets:
+        # 1. systemctl is-active
+        r = yexec(f"bash -c 'systemctl is-active {unit}.service 2>&1; echo EXIT=$?'",
+                  port=ctl_port, secret='prod_write', timeout=10)
+        out = (r.get('stdout') or '').strip()
+        is_active = 'active' in out and 'inactive' not in out and 'failed' not in out
+        # 2. systemctl is-enabled
+        r2 = yexec(f"bash -c 'systemctl is-enabled {unit}.service 2>&1; echo EXIT=$?'",
+                   port=ctl_port, secret='prod_write', timeout=10)
+        out2 = (r2.get('stdout') or '').strip()
+        is_enabled = 'enabled' in out2
+        # 3. log_service 端口可达
+        r3 = probe_port(int(log_port), label)
+        port_ok = r3.get('reachable') and 200 <= r3.get('status', 0) < 500
+
+        # 输出
+        status_icon = '✓' if (is_active and is_enabled and port_ok) else '✗'
+        print(f'  [{status_icon}] {label:25s} unit={unit:25s}')
+        print(f'      is-active : {out.splitlines()[0] if out else "?"}')
+        print(f'      is-enabled: {out2.splitlines()[0] if out2 else "?"}')
+        print(f'      port {log_port:5s}    : {"✓ " + str(r3.get("status")) if port_ok else "✗ " + (r3.get("reason") or "?")}')
+
+        if is_active and is_enabled and port_ok:
+            active_count += 1
+        else:
+            failed_count += 1
+
+    print(f'\n  总结: {active_count} active / {failed_count} failed / {active_count + failed_count} total')
+    if failed_count == 0:
+        return 0
+    elif active_count == 0:
+        return 2
+    else:
+        return 1
+
+
 def watch_loop(interval_sec):
     """[V007.55] 持续监控模式: 每 N 秒跑一次 probe, 输出变化"""
     import time
@@ -375,6 +428,8 @@ if __name__ == '__main__':
     parser.add_argument('--quick', action='store_true', help='只 TCP 探活')
     parser.add_argument('--check-log-service', action='store_true',
                         help='[V007.55] 单独检查 log_service 9101/19101 状态')
+    parser.add_argument('--check-systemd', action='store_true',
+                        help='[V007.55] 检查 systemd unit 守护状态 (is-active + is-enabled + 端口)')
     parser.add_argument('--watch', type=int, default=0, metavar='SEC',
                         help='[V007.55] 持续监控, 每 SEC 秒跑一次')
     parser.add_argument('--auto-restart-log', action='store_true',
@@ -383,6 +438,8 @@ if __name__ == '__main__':
 
     if args.check_log_service:
         sys.exit(check_log_service())
+    if args.check_systemd:
+        sys.exit(check_systemd())
     if args.watch > 0:
         if args.auto_restart_log:
             watch_loop_with_auto_restart(args.watch)
