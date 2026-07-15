@@ -42,7 +42,7 @@
 2. **自动 cron** (1h): 每天凌晨 3 点拉最新 backup 到 staging
 3. **集成核心服务** (2h): 让 backend 启动时读 staging db
 4. **完整功能测试** (1h): 登录 + 创建角色 + 列表 + 详情
-5. **chaos 工具集成** (30min): 跑 sqlite_chaos.py 6 场景
+5. **回归测试工具集成** (30min): 跑 `regression_test_suite.py` 9 场景 (V007.55 取代 sqlite_chaos)
 
 **验证 (产品视角)**: 在 staging 能看到上周的数据, 改东西不会影响真实系统
 
@@ -108,7 +108,8 @@
 | 部署脚本兼容 staging/prod | 加 --target staging|prod 参数 |
 
 ### 2.5 立即可上传的工具 ✅
-- [sqlite_chaos.py](file:///d:/filework/release-prep-worktree/tools/sqlite_chaos.py) (commit `e1955bd`)
+- [regression_test_suite.py](file:///d:/filework/release-prep-worktree/tools/regression_test_suite.py) (V007.55, 9 场景, **取代 sqlite_chaos**)
+- ~~[sqlite_chaos.py](file:///d:/filework/release-prep-worktree/tools/sqlite_chaos.py)~~ (V007.55 **deprecated**, 用 `--redirect-to-regression` 软迁移)
 - [audit_recovery.py](file:///d:/filework/release-prep-worktree/tools/audit_recovery.py) (commit `79f9add`)
 - [pre_deploy_check.py](file:///d:/filework/release-prep-worktree/tools/pre_deploy_check.py) (commit `3455a90`)
 
@@ -186,7 +187,8 @@
 - [ ] 改端口: 9200→19200, 9101→19101, 3011→13011, 8081→18081
 - [ ] 启 4 个 staging 服务 (用 nohup, 不进 systemd)
 - [ ] 浏览器访问 `http://172.20.59.7:19101/api` 验证
-- [ ] 跑 sqlite_chaos.py readonly 场景 (非破坏)
+- [ ] 跑 `regression_test_suite.py --scenario R1` (readonly, 非破坏)
+- [ ] 跑 `monitor_migrations.py --check-regression` 完整验证 9 场景
 - [ ] 报告: Day 1 进度 + 风险
 
 ---

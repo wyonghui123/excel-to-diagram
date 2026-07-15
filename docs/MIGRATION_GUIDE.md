@@ -24,14 +24,16 @@
 │  ├── migration_lint.py            ← 写完必跑                     │
 │  ├── migration_lint.legacy.yaml   ← 26 个老文件白名单           │
 │  ├── backfill_schema_migrations.py ← 老环境首次部署用            │
-│  └── monitor_migrations.py        ← 健康监控                    │
+│  ├── monitor_migrations.py        ← 健康监控 (含 --check-regression) │
+│  └── regression_test_suite.py     ← 9 场景 sqlite io error 演练 │
 │                                                                  │
 │  meta/core/migration_runner.py     ← 实际跑 (deploy.sh PHASE 2.6) │
 └─────────────────────────────────────────────────────────────────┘
               │
               │ 部署时: deploy.sh → PHASE 2.6 → migration_runner
               │ 升级时: backfill_schema_migrations.py (一次性)
-              │ 跑后:   monitor_migrations.py
+              │ 跑后:   monitor_migrations.py --check-regression
+              │ chaos:  regression_test_suite.py (staging)
               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │ 远端 yonaa:172.20.59.7                                            │
@@ -175,7 +177,7 @@ python3 -m meta.core.migration_runner
 # 远端 prod
 python tools/yonaa_exec.py exec "python3 -m meta.core.migration_runner --status" 9200
 python tools/yonaa_exec.py exec "python3 -m meta.core.migration_runner" 9200
-python tools/yonaa_exec.py exec "python3 tools/monitor_migrations.py" 9200
+python tools/yonaa_exec.py exec "python3 tools/monitor_migrations.py --check-regression" 9200
 ```
 
 **预期输出** (本会话后):
@@ -218,6 +220,13 @@ python tools/yonaa_exec.py exec "python3 -m meta.core.migration_runner" 9200
 ### §4.1 健康监控
 
 ```bash
+# [V007.55] 加 --check-regression 跑回归测试 (staging 9 个 sqlite io error 场景)
+python tools/yonaa_exec.py exec "python3 tools/monitor_migrations.py --check-regression" 19200
+# staging: 输出 regression PASS/FAIL/SKIP
+# prod:    自动跳过 (db 不含 /staging/), 返回 WARN
+# 退出码: 0=OK / 1=FAIL / 2=WARN (CI/告警友好)
+
+# 不带 regression (只看 schema_migrations)
 python tools/yonaa_exec.py exec "python3 tools/monitor_migrations.py" 9200
 # 输出 3 级:
 #   OK    - 健康
@@ -301,7 +310,7 @@ CREATE TABLE migration_locks (
 - [ ] schema_migrations 表已建
   - 跑 `python3 -m meta.core.migration_runner --status` (它会 ensure_migrations_table)
 - [ ] 跑一次 `python3 -m meta.core.migration_runner` (幂等, 安全)
-- [ ] 跑 `python3 tools/monitor_migrations.py` (健康)
+- [ ] 跑 `python3 tools/monitor_migrations.py --check-regression` (健康 + 回归测试, 仅 staging)
 - [ ] 跑 `python3 tools/migration_lint.py` (规范)
 
 ---

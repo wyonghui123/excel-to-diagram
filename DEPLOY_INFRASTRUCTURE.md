@@ -63,14 +63,15 @@
 > 这 10 个工具都在 `deploy_bundle/`, **必须**通过 SFTP 上传到 `/tmp/deploy_bundle/` 才能远端跑。
 > 改 `tools/X.sh` 后必须 `rebuild_bundle.ps1` 重新打包, 并把新文件加到 `rebuild_bundle.ps1` 的 `$tools` 数组。
 
-### §1.2 Migration 工具 (meta/core/ + tools/) — 4 个
+### §1.2 Migration 工具 (meta/core/ + tools/) — 5 个
 
 | # | 工具 | 路径 | 用途 | 何时用 |
 |---|------|------|------|--------|
 | 11 | `migration_runner.py` | `meta/core/migration_runner.py` | 实际跑 schema migration | 部署时 (deploy.sh PHASE 2.6 调) |
 | 12 | `backfill_schema_migrations.py` | `tools/backfill_schema_migrations.py` | 把已应用的 schema 写到 schema_migrations 表 | 首次部署到新环境 / 升级后 |
 | 13 | `migration_lint.py` | `tools/migration_lint.py` + `migration_lint.legacy.yaml` | lint migration 文件规范 | CI / 提交前 |
-| 14 | `monitor_migrations.py` | `tools/monitor_migrations.py` | 监控 schema_migrations 健康 (WARN/CRIT/FAIL) | 部署后验证 |
+| 14 | `monitor_migrations.py` | `tools/monitor_migrations.py` | 监控 schema_migrations 健康 (WARN/CRIT/FAIL) **+ `--check-regression` 跑回归测试** | 部署后验证 / 告警 |
+| 15 | `regression_test_suite.py` | `tools/regression_test_suite.py` | **9 个 sqlite io error 场景 (R1-R9), 自动 restore + exit code** | staging 部署后 / 重大 schema 变更后 |
 
 **Runner 特性 (本会话升级)**：
 - ✅ **idempotent SQL**: `duplicate column` / `already exists` 等自动跳过
@@ -81,14 +82,27 @@
 - ✅ **legacy 白名单**: 26 个 V007.46 老文件自动豁免
 - ✅ **退出码 0**: CI 默认通过 (WARN 不阻塞)
 
+**Monitor + Regression 特性 (V007.55)**：
+- ✅ **`--check-regression`**: 调 regression_test_suite (staging only)
+- ✅ **9 场景覆盖**: 6 chaos + WAL 损坏 + timeout + root 防护
+- ✅ **JSON 报告 + exit code**: CI 集成友好
+- ✅ **prod 防护**: 拒绝在 prod 跑 (返回 WARN)
+
+**Regression vs Chaos**：
+- `sqlite_chaos.py` (V007.49-D) → **deprecated** (V007.55)
+- `regression_test_suite.py` (V007.55) → 替代, 9 场景 + exit code
+- 软迁移: `sqlite_chaos.py X --redirect-to-regression` 跳到新工具
+
 ### §1.3 远端操作工具 (tools/) — 本次新增 4 个
 
 | # | 工具 | 用途 | 何时用 | 谁能调 |
 |---|------|------|--------|--------|
-| 15 | `tools/yonaa_exec.py` | HTTP/Exec/Upload 一体 (限流 + 跨小时 token + 错误分类) | **agent 在公司内网时直接调** | **agent (不用 SSH!)** |
-| 16 | `tools/remote_capability_probe.py` | 30s 扫 5 端口 × 6 secret × 端点 + 白名单实测 | 第一次连接/排查网络/检查 secret | **agent** |
-| 17 | `tools/staging_deploy_orchestrator.py` | 一键 staging 部署 (打包 + 上传 + 远端 backfill + 跑 P0 + 验证) | 部署 staging | **agent** |
-| 18 | `tools/rebuild_bundle.ps1` | 本地 rebuild deploy_bundle | 改了 `tools/X.sh` 后 | 本地 (人或 agent) |
+| 16 | `tools/yonaa_exec.py` | HTTP/Exec/Upload 一体 (限流 + 跨小时 token + 错误分类) | **agent 在公司内网时直接调** | **agent (不用 SSH!)** |
+| 17 | `tools/remote_capability_probe.py` | 30s 扫 5 端口 × 6 secret × 端点 + 白名单实测 | 第一次连接/排查网络/检查 secret | **agent** |
+| 18 | `tools/staging_deploy_orchestrator.py` | 一键 staging 部署 (10 步, 含 Step 10.5 regression + DEPLOY_MODE=daily/hotfix) | 部署 staging | **agent** |
+| 19 | `tools/prod_deploy_orchestrator.py` | 一键 prod 部署 (daily 21:00 / hotfix 立即, 含备份 + lint + migration) | 部署 prod | **agent** |
+| 20 | `tools/rebuild_bundle.ps1` | 本地 rebuild deploy_bundle | 改了 `tools/X.sh` 后 | 本地 (人或 agent) |
+| 21 | `tools/restart_log_service.py` | 一键启停 log_service 9101/19101 | 端口挂了 | **agent** |
 
 **关键差异**：
 - **§1.1 工具**: 需要 SFTP 上传到 `/tmp/`, 远端 SSH 跑 (人)

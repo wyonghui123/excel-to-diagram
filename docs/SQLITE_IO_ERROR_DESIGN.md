@@ -2,6 +2,7 @@
 
 > **作者**: 协调智能体
 > **日期**: 2026-07-13 22:00
+> **最后更新**: 2026-07-15 (V007.55 集成 regression_test_suite)
 > **触发**: 用户提问 "是否可以提前测试 disk io error 的风险"
 > **聚焦**: SQLite 特有的 IO disk error (不是通用磁盘 IO)
 > **基于**: 实测 + chaos 注入测试
@@ -300,6 +301,47 @@ staging 部署后自动跑 `sqlite_chaos.py all`, 失败 abort
 | 故障注入演练 | ❌ 无 | 🆕 6 场景 chaos 工具 |
 | 投入 | - | 4-5d (含 staging) |
 | ROI | - | 60→90 防护 |
+
+---
+
+## 八、V007.55 (2026-07-15) 实现状态
+
+本文档 2026-07-13 提出 4 层防护建议, V007.55 实际落地情况:
+
+| # | 建议 | V007.55 状态 | 实际工具 |
+|---|------|------------|---------|
+| 1 | 监控告警 + cron | ✅ 集成 | `tools/monitor_migrations.py` + `--check-regression` |
+| 2 | staging chaos 沙盒 | ✅ **超出预期** | `tools/regression_test_suite.py` (9 场景, exit code) |
+| 3 | readonly 拦截 (应用层) | ⏳ 待定 | 业务层, 非基础设施工具 |
+| 4 | WAL 模式 | ⏳ 待定 | V007.38 提案 |
+| 5 | mmap_size 64MB | ⏳ 待定 | 配置项 |
+| 6 | busy_timeout retry | ⏳ 待定 | 业务层 |
+| 7 | corrupt 自动恢复 | ⏳ 待定 | 监控告警足够, 自动恢复风险大 |
+| 8 | 写前 check_free_mb | ⏳ 待定 | 业务层 |
+| 9 | 故障注入演练 | ✅ **超出预期** | `regression_test_suite.py` + `sqlite_chaos.py --redirect-to-regression` |
+
+**关键落地 (V007.55)**:
+- `tools/regression_test_suite.py` — 9 场景 sqlite io error (R1-R9), 自动 restore, JSON 报告, prod 防护
+- `tools/monitor_migrations.py --check-regression` — 集成到 monitor, 告警 exit code 1
+- `tools/sqlite_chaos.py` — 标记 **deprecated**, `--redirect-to-regression` 软迁移
+- 集成到 `tools/staging_deploy_orchestrator.py` Step 10.5 — 每次 staging 部署后自动跑
+
+**回归测试 9 场景覆盖**:
+| # | 场景 | 注入 | 期望 |
+|---|------|------|------|
+| R1 | readonly | chmod 555 | 写被阻 OR root 绕过 (SKIP) |
+| R2 | busy | 本地 exclusive 锁 | 其他 BLOCKED |
+| R3 | extlock | sqlite3 CLI 持锁 | 读应 OK (WAL) |
+| R4 | corrupt | 改 db 头 | integrity_check 失败 |
+| R5 | deleted | shutil.move | 立刻检测 |
+| R6 | full | setrlimit | 大写入失败 |
+| R7 | wal_corrupt | 写垃圾 -wal | sqlite 恢复 |
+| R8 | timeout | small timeout + write | 1s 后超时 |
+| R9 | readonly_root | chmod 555 + root | 应用层自检 (SKIP) |
+
+**期望结果**: 7 PASS / 0 FAIL / 2 SKIP (R1 R9 是 V007.49 已知 root 绕过)
+
+详见: [docs/REGRESSION_TEST_SUITE.md](REGRESSION_TEST_SUITE.md)
 
 **核心建议**:
 1. **立即 (1d)**: 写 chaos 工具 (中期 0.5d) + readonly 拦截 (短期 0.5d)

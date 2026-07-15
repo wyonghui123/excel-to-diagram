@@ -13,7 +13,8 @@
 |------|------|------|------|
 | **总入口** | [DEPLOY_INFRASTRUCTURE.md](file:///d:/filework/release-prep-worktree/DEPLOY_INFRASTRUCTURE.md) | 331 | 7 章节, 18 工具, 7 端口 — **永远先看这** |
 | **部署节奏** | [docs/DEPLOY_RHYTHM.md](file:///d:/filework/release-prep-worktree/docs/DEPLOY_RHYTHM.md) | 220 | **daily 21:00 / hotfix 立即** — 何时用哪个 |
-| **远端操作速查** | 本文件 §1 | — | 5 个 Python 函数 / 5 行 CLI |
+| **远端操作速查** | 本文件 §1 | — | 5 个 Python 函数 / 5 行 CLI / **回归测试 §1.4** |
+| **回归测试** | [docs/REGRESSION_TEST_SUITE.md](file:///d:/filework/release-prep-worktree/docs/REGRESSION_TEST_SUITE.md) | 250+ | 9 个 sqlite io error 场景 — staging 自动化 |
 | **Migration 操作** | [docs/MIGRATION_GUIDE.md](file:///d:/filework/release-prep-worktree/docs/MIGRATION_GUIDE.md) | 200+ | migration 创建/运行/lint 实战 |
 | **Migration 设计依据** | [docs/MIGRATION_SPEC.md](file:///d:/filework/release-prep-worktree/docs/MIGRATION_SPEC.md) | 1711 | 完整设计 spec (历史 design, 不必读) |
 | **staging 操作** | [docs/STAGING_GUIDE.md](file:///d:/filework/release-prep-worktree/docs/STAGING_GUIDE.md) | 200+ | staging 部署/排错 |
@@ -58,8 +59,8 @@ from remote_capability_probe import main as probe  # 30s 扫
 # 1. 第一次接入, 30s 验证能连
 python tools/remote_capability_probe.py
 
-# 2. 看 prod 当前状态
-python tools/yonaa_exec.py exec "python3 tools/monitor_migrations.py" 9200
+# 2. 看 prod 当前状态 (含 regression 告警)
+python tools/yonaa_exec.py exec "python3 tools/monitor_migrations.py --check-regression" 9200
 
 # 3. 看 prod 部署历史
 python tools/yonaa_exec.py exec "ls -la /opt/app/deployments/" 9200
@@ -71,7 +72,24 @@ python tools/yonaa_exec.py exec "python3 -m meta.core.migration_runner --status"
 python tools/migration_lint.py
 ```
 
-### 1.4 1 个公式: Token
+### 1.4 [V007.55] 回归测试 (staging chaos 演练)
+
+```bash
+# staging 跑全部 9 个 sqlite io error 场景
+python tools/yonaa_exec.py exec "python3 tools/regression_test_suite.py" 19200
+# 期望: 7 PASS / 0 FAIL / 2 SKIP / 9 total (R1 R9 root 防护 SKIP)
+
+# 跑单个场景
+python tools/yonaa_exec.py exec "python3 tools/regression_test_suite.py --scenario R5" 19200
+
+# 集成到 monitor (alert-friendly)
+python tools/yonaa_exec.py exec "python3 tools/monitor_migrations.py --check-regression" 19200
+# 退出码 0=OK / 1=FAIL / 2=WARN
+
+# 详见: docs/REGRESSION_TEST_SUITE.md
+```
+
+### 1.5 1 个公式: Token
 
 ```python
 import hashlib, time

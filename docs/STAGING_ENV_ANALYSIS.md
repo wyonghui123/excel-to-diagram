@@ -37,7 +37,7 @@
 - ✅ 自动部署 + 5 min 监控 (`deploy_staging.sh`)
 - ✅ DB 7 天前 backup 同步 (`sync_staging_db.sh`, cron 0 3)
 - ✅ 事故响应沙盒 (见 [INCIDENT_RESPONSE_RUNBOOK.md](INCIDENT_RESPONSE_RUNBOOK.md))
-- ✅ chaos 演练 (`sqlite_chaos.py`, 6 场景)
+- ✅ chaos 演练 (`regression_test_suite.py`, **9 场景 V007.55 取代 sqlite_chaos 的 6 场景**)
 - ✅ 版本清理指南 (见 [STAGING_GUIDE.md](STAGING_GUIDE.md) 第 10 节)
 
 **下文为原始分析文档（保留作为决策依据）**：

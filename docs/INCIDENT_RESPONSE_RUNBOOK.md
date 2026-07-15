@@ -287,13 +287,27 @@ curl -s 'http://localhost:13011/api/v2/bo/list?page=1&page_size=1' | python3 -m 
 | 工具 | 路径 | 用途 |
 |------|------|------|
 | `audit_recovery.py` | /opt/app/shared/ | 误删恢复 (L13) |
-| `sqlite_chaos.py` | /opt/app/staging/bin/ | chaos 演练 |
+| `regression_test_suite.py` | /opt/app/staging/deploy/tools/ | **9 个 sqlite io error 场景演练 (V007.55 取代 chaos)** |
+| ~~`sqlite_chaos.py`~~ | /opt/app/staging/bin/ | **DEPRECATED V007.55** — 改用 `regression_test_suite.py` |
 | `pre_deploy_check.py` | /opt/app/shared/ | 部署前检查 (L17) |
 | `rollback_v2.sh` | /opt/app/shared/ | 1 秒回退 |
 | `deploy_staging.sh` | /opt/app/staging/scripts/ | 自动部署 staging |
 | `deploy_prod.sh` | /opt/app/shared/ | 自动部署 prod (带 guardrail) |
 | `staging_e2e_test.sh` | /opt/app/staging/scripts/ | 8 项 smoke test |
 | `sync_staging_db.sh` | /opt/app/shared/ | staging db 同步 (cron 0 3) |
+
+**sqlite_chaos.py → regression_test_suite.py 迁移**:
+```bash
+# 老 (V007.49-D): 6 场景, 手动, 无 exit code
+python tools/sqlite_chaos.py readonly
+# 新 (V007.55): 9 场景, 自动 restore, exit code, prod 防护
+python tools/regression_test_suite.py --scenario R1
+# 软迁移: 自动跳转
+python tools/sqlite_chaos.py readonly --redirect-to-regression
+# 集成告警: monitor_migrations --check-regression
+python tools/monitor_migrations.py --check-regression
+# 详见: docs/REGRESSION_TEST_SUITE.md
+```
 
 ---
 

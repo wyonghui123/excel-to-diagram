@@ -74,14 +74,41 @@ EXCLUDE_RUN_PENDING=0 python tools/staging_deploy_orchestrator.py
 ### §1.2 看 staging 状态 (1 条命令)
 
 ```bash
-python tools/yonaa_exec.py exec "python3 tools/monitor_migrations.py" 19200
+# [V007.55] 加 --check-regression 跑回归测试 (sqlite io error 9 场景)
+python tools/yonaa_exec.py exec "python3 tools/monitor_migrations.py --check-regression" 19200
+# 退出码: 0=OK / 1=FAIL / 2=WARN (CI/告警友好)
 ```
 
 **预期输出**:
 ```
-[INFO] Migrations: 18 SUCCESS, 0 FAILED, 0 SKIP
-[WARN] NULL checksum: 3 (legacy files)
-[OK] 全部健康
+--- schema_migrations table ---
+[OK] schema_migrations: 15 records
+[INFO]   failed: 0
+...
+--- regression test (V007.55) ---
+[OK] regression: PASS=7 FAIL=0 SKIP=2
+[INFO]   regression_pass: 7
+[INFO]   regression_fail: 0
+[INFO]   regression_skip: 2
+[INFO]   regression_total: 9
+=== RESULT: WARN (issues found) ===
+```
+
+### §1.2.1 [V007.55] 单独跑回归测试
+
+```bash
+# 跑全部 9 场景 (staging only)
+python tools/yonaa_exec.py exec "python3 tools/regression_test_suite.py" 19200
+# 期望: 7 PASS / 0 FAIL / 2 SKIP (R1 R9 root 防护 SKIP)
+
+# 跑单个
+python tools/yonaa_exec.py exec "python3 tools/regression_test_suite.py --scenario R5" 19200
+# R5 = db deleted 场景
+
+# JSON 报告 (CI 解析)
+python tools/yonaa_exec.py exec "python3 tools/regression_test_suite.py --json /tmp/reg.json" 19200
+
+# 详见: docs/REGRESSION_TEST_SUITE.md
 ```
 
 ### §1.3 看 staging 进程

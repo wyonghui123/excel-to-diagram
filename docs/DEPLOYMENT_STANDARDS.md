@@ -557,7 +557,8 @@ cat /opt/app/state/deployment_history.json
 | `meta/core/migration_runner.py` | 实际跑 schema migration (含 idempotent SQL) |
 | `tools/backfill_schema_migrations.py` | 把已应用 schema 写到 schema_migrations 表 |
 | `tools/migration_lint.py` + `migration_lint.legacy.yaml` | lint migration 文件 (5 规则) |
-| `tools/monitor_migrations.py` | 监控 (WARN/CRIT/FAIL) |
+| `tools/monitor_migrations.py` | 监控 (WARN/CRIT/FAIL) + `--check-regression` 跑回归测试 |
+| `tools/regression_test_suite.py` | **9 个 sqlite io error 场景 (R1-R9), 自动 restore + exit code** (V007.55) |
 
 **关键变更**:
 - ✅ migration_runner **idempotent**: `duplicate column` / `already exists` 自动跳过

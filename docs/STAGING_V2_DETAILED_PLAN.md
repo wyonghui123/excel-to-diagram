@@ -216,23 +216,32 @@ echo "Sync done."
 0 3 * * * /opt/app/staging/scripts/sync_db.sh >> /opt/app/staging/data/logs/sync_db.log 2>&1
 ```
 
-#### 2.3 chaos 集成 (在 staging 跑 sqlite_chaos.py)
+#### 2.3 回归测试集成 (V007.55, 在 staging 跑 regression_test_suite.py)
+
+> **DEPRECATED**: `sqlite_chaos.py` V007.49-D 已 deprecated, 用 `regression_test_suite.py` 取代 (9 场景 + exit code)
 ```bash
 #!/bin/bash
 # /opt/app/staging/scripts/chaos_test.sh
 # 在 staging 跑 chaos 测试, 验证防护
 set -e
 STAGING_DIR=/opt/app/staging
-echo "=== Chaos Test on staging ==="
+echo "=== Regression Test on staging (V007.55) ==="
 echo "Time: $(date)"
 
-# 跑 6 场景 (不破坏性)
-for scenario in readonly busy extlock; do
-    echo "\n--- scenario: $scenario ---"
-    /opt/miniconda3-py39/bin/python3 $STAGING_DIR/bin/sqlite_chaos.py $scenario
-done
+# [V007.55] 改用 regression_test_suite.py (9 场景 + exit code)
+# 期望: 7 PASS / 0 FAIL / 2 SKIP
+/opt/miniconda3-py39/bin/python3 $STAGING_DIR/deploy/tools/regression_test_suite.py
+exit_code=$?
+echo "Regression test exit_code: $exit_code"
+exit $exit_code
+```
 
-echo "\nChaos test done. Check logs: $STAGING_DIR/data/logs/"
+**软迁移 (V007.56 前)**:
+```bash
+# 老脚本用 sqlite_chaos.py 的, 加 --redirect-to-regression 自动跳
+for scenario in readonly busy extlock; do
+    /opt/miniconda3-py39/bin/python3 $STAGING_DIR/deploy/tools/sqlite_chaos.py $scenario --redirect-to-regression
+done
 ```
 
 #### 2.4 完整功能测试 (端到端)
@@ -478,8 +487,11 @@ echo "Rollback done."
    cp /opt/app/shared/log_service.py /opt/app/staging/bin/
    cp /opt/app/shared/unified_server.py /opt/app/staging/bin/
    cp /opt/app/shared/meta_backend.py /opt/app/staging/bin/  # 找一下
-   cp /opt/app/shared/sqlite_chaos.py /opt/app/staging/bin/
-   ```
+   # [V007.55] sqlite_chaos.py DEPRECATED, 用 regression_test_suite.py 取代
+   # 旧脚本保留但加 --redirect-to-regression 自动跳
+   cp /opt/app/shared/sqlite_chaos.py /opt/app/staging/bin/  # 已 deprecated
+   cp /opt/app/shared/regression_test_suite.py /opt/app/staging/deploy/tools/
+```
 
 3. **改端口 + db path** (30min, 手工)
    - core_service: 9200 → 19200, db 改 staging path

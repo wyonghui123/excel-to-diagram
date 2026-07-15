@@ -59,7 +59,7 @@
 
 ```
   ┌────────────────────────────────────────────────────────┐
-  │ 固定窗口: 每天 21:00 - 22:00                            │
+  │ 固定窗口：每天 21:00 - 22:00                            │
   │                                                        │
   │ 原因:                                                  │
   │  - 21:00 后用户活跃度下降 (核心工作时间外)              │
@@ -176,17 +176,22 @@ python tools/staging_deploy_orchestrator.py
 
 ### §6.1 推荐自动化 (未来可做)
 
-- [ ] `staging_deploy_orchestrator.py --mode daily` (默认)
-- [ ] `staging_deploy_orchestrator.py --mode hotfix` (skip 观察提示)
-- [ ] `prod_deploy_orchestrator.py` (一键 prod 部署, 复制 staging + 加备份)
+- [x] `staging_deploy_orchestrator.py --mode daily` (V007.55 已支持)
+- [x] `staging_deploy_orchestrator.py --mode hotfix` (V007.55 已支持)
+- [x] `prod_deploy_orchestrator.py` (V007.55 一键 prod 部署, 含备份)
+- [x] `monitor_migrations.py --check-regression` (V007.55 回归测试告警)
+- [x] `regression_test_suite.py` (V007.55 9 场景 sqlite io error 演练)
+- [x] `sqlite_chaos.py` deprecated + `--redirect-to-regression` 软迁移
 - [ ] `watch.sh` 加 cron 任务 (每 6h 跑 monitor_migrations)
-- [ ] Slack/IM 通知 (部署开始/结束/失败)
+- [ ] Slack/IM 通知 (部署开始/结束/失败 + regression FAIL)
 - [ ] DB 自动备份到 OSS (7 天保留)
+- [ ] cron 每天 9 点跑 `monitor_migrations --check-regression` + 告警
 
 ### §6.2 当前状态 (2026-07-15)
 
 - ✅ 日常流程: 跑得通 (本会话已走 8 步)
-- ⚠️ Hotfix 流程: 需人判断, 工具未特殊支持
+- ✅ Hotfix 流程: 工具已支持 (`DEPLOY_MODE=hotfix`)
+- ✅ 回归测试: 集成到 staging_deploy_orchestrator Step 10.5 + monitor --check-regression
 - ⚠️ 自动监控: watch.sh 需手工启动, 没 cron
 - ⚠️ 通知: 手工 (无 IM 集成)
 
