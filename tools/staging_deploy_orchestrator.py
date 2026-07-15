@@ -254,6 +254,30 @@ sleep_between(2.0)
 r = exec_cmd("bash -c 'curl -s --max-time 5 http://127.0.0.1:19101/api | head -c 300'", timeout=10)
 show(r, 500)
 
+# === Step 10.5: 回归测试 (sqlite io error 场景) ===
+print('\n' + '='*70)
+print('Step 10.5: 回归测试 (regression_test_suite) - 验证 staging io 防护')
+print('='*70)
+r = exec_cmd(
+    "bash -c 'cd /opt/app/staging/deploy && python3 tools/regression_test_suite.py --json /tmp/regression_latest.json 2>&1; echo EXIT=$?'",
+    port=19200, timeout=120,
+)
+# 解析关键行
+out = r.get('stdout', '') or ''
+for line in out.split('\n'):
+    if 'RESULT:' in line or 'PASS' in line and '===' in line:
+        print(f'  {line.strip()}')
+# 取报告
+if out.strip().endswith('EXIT=0'):
+    r2 = exec_cmd("cat /tmp/regression_latest.json 2>&1 | head -c 200", port=19200, timeout=10)
+    print(f'  报告: {r2.get("stdout", "").strip()[:200]}')
+    print('  ✓ 回归测试通过, staging io 防护 OK')
+else:
+    print(f'  ✗ 回归测试有 FAIL, 请检查 staging 状态')
+    print(f'  详情: cd staging && python3 tools/regression_test_suite.py --json /tmp/reg.json')
+    if mode == 'daily':
+        print('  → daily 模式应暂停 prod 部署, 等修复后再继续')
+
 # === Step 11: 总结 + 节奏建议 (按 mode 区分) ===
 print('\n' + '='*70)
 mode = os.environ.get('DEPLOY_MODE', 'daily')
