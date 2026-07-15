@@ -1,293 +1,378 @@
 # DEPLOY_INFRASTRUCTURE.md
 
-> **目标读者**: AI Agent / 新接手工程师 / 运维 / 任何需要部署或维护本项目的人
-> **最后更新**: 2026-07-03
-> **本文件用途**: 让 AI Agent 在看到本项目时, 立刻能识别这是什么项目、怎么部署、怎么回滚、怎么监控
+> **目标读者**: AI Agent / 新接手工程师 / 运维
+> **最后更新**: 2026-07-15 (升级 5 个新能力, 见 §1.3)
+> **本文件用途**: AI Agent 看到本项目, 立刻能识别: 怎么部署、怎么回滚、怎么**自动**远端操作、怎么监控
 
 ---
 
-## 📋 项目元数据 (AI Agent 必读)
-
-| 字段 | 值 |
-|------|---|
-| **项目名** | BIP-Backend (Excel-to-Diagram Architecture Management Backend) |
-| **仓库** | `release/pre-2026-06-29` 分支 |
-| **远端服务器** | `172.20.59.7` (MobaXterm SSH `root@172.20.59.7`) |
-| **远端用户** | `root` (容器环境) |
-| **Python** | `/opt/miniconda3-py39/bin/python` (conda py39 env) |
-| **包管理** | pip (requirements.txt 在 `meta/`) |
-| **数据库** | SQLite (`meta/architecture.db`) |
-| **默认版本** | `v20260703_002` |
-| **默认 backend 端口** | `5001` |
-| **默认 frontend 端口** | `8081` |
-
----
-
-## 🏗️ 远端服务器环境
-
-### 路径约定
+## §0. 一图全貌 (1 分钟读完)
 
 ```
-/opt/app/                          # 部署根 (DEPLOY_ROOT)
-├── deployments/                   # 所有版本 (DEPLOYMENTS_DIR)
-│   ├── v20260630_003/             # v3 (单进程 5000)
-│   ├── v20260702_001/             # 中间版本
-│   ├── v20260703_002/             # 当前 default (v4, 5001)
-│   └── frontend_dist_files/       # 前端 dist (zip 顶层, 不在版本目录!)
-├── current → deployments/v20260703_002  # 软链 (CURRENT_LINK)
-├── shared/                        # 共享
-│   └── logs/                      # 日志 (LOG_DIR)
-│       ├── backend-v*.log
-│       ├── frontend-v*.log
-│       └── watch-YYYYMMDD.log
-├── backups/                       # db 备份
-└── tmp/deploy_bundle/             # 部署 bundle (远端解压目录, REPO_BUNDLE)
+┌─────────────────────────────────────────────────────────────────┐
+│  本地 (Windows / Agent 主机 10.6.232.176)                       │
+│                                                                  │
+│  ① rebuild bundle:    tools/rebuild_bundle.ps1                 │
+│  ② 一键 staging:      tools/staging_deploy_orchestrator.py      │
+│  ③ 远端操作 1 步:     tools/yonaa_exec.py (HTTP/Exec/Upload)    │
+│  ④ 远端能力扫 30s:    tools/remote_capability_probe.py          │
+│  ⑤ 测试 e2e 11/11:    tests/test_deploy_e2e.py                 │
+│                                                                  │
+│  所有 tools/ 都是纯 Python, agent 可直接调, 不需要 SFTP/SSH     │
+└─────────────────────────────────────────────────────────────────┘
+              │
+              │ HTTP 9200/19200/9201 (内网)
+              │ EXEC_WHITELIST bash/python3/ls/...
+              │ rate-limit 20 req/s (默认 sleep 1.2s)
+              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  远端 (yonaa 172.20.59.7)                                        │
+│                                                                  │
+│  ┌─ prod (9200)  ─┐  ┌─ staging (19200) ─┐  ┌─ obs (9201) ─┐   │
+│  │ core_service  │  │ core_service     │  │ 4 端点      │   │
+│  │ exec + upload │  │ exec + upload    │  │ 探活+upload │   │
+│  │ /opt/app/     │  │ /opt/app/staging │  │ 无 exec     │   │
+│  │ deployments/  │  │ /deploy/         │  │             │   │
+│  └───────────────┘  └──────────────────┘  └─────────────┘   │
+│                                                                  │
+│  DB: SQLite at meta/architecture.db                             │
+│  Schema: 18 migration SUCCESS, 0 FAILED (本会话升级后)          │
+│  backup: /opt/app/{backups,staging/backups}/                    │
+└─────────────────────────────────────────────────────────────────┘
 ```
-
-### 端口约定
-
-| 端口 | 用途 | 何时使用 |
-|------|------|----------|
-| `5000` | v3 backend (单进程) | 2026-06-30 之前的版本 |
-| `5001` | v4 backend (API only) | 2026-07-02 起的版本 (default) |
-| `5002` | 测试端口 (临时) | 部署测试时用, **生产不要用** |
-| `8081` | v4 unified (frontend + API 代理) | 2026-07-02 起的版本 (default) |
-| `8082` | 测试端口 (临时) | 部署测试时用, **生产不要用** |
-
-### 部署架构 (v3 vs v4)
-
-**v003 之前** (2026-06-30 之前):
-- 单进程: `nohup server.py > log 2>&1 &` 同时服务 API + frontend
-- 端口: 5000
-- 不需要 unified_server
-- frontend 静态文件由 server.py 自己 serve
-
-**v004 起** (2026-07-02 之后):
-- 双进程:
-  - `server.py` (backend only on 5001)
-  - `unified_server.py` (frontend + API 代理 on 8081)
-- unified_server.py 关键功能:
-  - 静态文件 fallback (SPA)
-  - API 代理 (透明转发)
-  - **Token 持久化** (按 client IP, 解决前端 boService 401)
-- 关键 BUG (已修): v4 给所有 BO endpoint 加 `@login_required`, 前端 boService 调时**不传 Authorization header** 导致 401, **unified 拦截 login 响应自动注入 token 解决**
-
-### API 兼容 (v3 vs v4)
-
-| 端点 | v3 | v4 |
-|------|----|----|
-| 登录 | `POST /api/v1/auth/login` | `POST /api/v2/action/user.authenticate` |
-| 用户信息 | `GET /api/v1/users/me` | `GET /api/v2/bo/product?page_size=10` 等 BO endpoints |
-| 枚举 | `GET /api/v1/enum-types` | `GET /api/v1/enum-types` (保持兼容) |
-| 健康 | `GET /api/v1/health` (410) | `GET /api/v2/bo/health` (需 auth, 401) |
-
-**关键**: **token 永远在 `data.token` 字段** (v3 和 v4 都一样, 不是顶层 `token`!)
 
 ---
 
-## 🛠️ 部署工具 (10 个, 在 `deploy_bundle/`)
+## §1. 能力清单 (12 工具, 找这个用)
 
-| # | 工具 | 用途 | 何时用 |
-|---|------|------|--------|
-| 1 | `deploy.sh` | 完整部署 (PHASE 0-7) | 部署新版本 |
-| 2 | `precheck.sh` | 8 项早期检查 (含 frontend_dist_files) | 部署前 |
-| 3 | `smoke_test.sh` | 5 项真实 API | 部署后 |
-| 4 | `rollback.sh` | 回滚 (v3/v4 架构自适应) | 出问题时 |
-| 5 | `diagnose.sh` | 7 步深度诊断 | 出问题时 |
-| 6 | `status.sh` | 一键状态 | 任何时候 |
-| 7 | `restart.sh` | 重启当前 (不切版本) | 代码/配置更新 |
-| 8 | `watch.sh` | 健康监控+自动恢复 | 长跑守护 |
-| 9 | `deploy_history.sh` | 部署历史+一键切版本 | 回溯 |
-| 10 | `unified_server.py` | frontend + API 代理 + token 持久化 | v4 必需 |
+### §1.1 旧工具 (deploy_bundle/) — 8 个 sh 脚本
 
-**所有 10 工具都通过本地 e2e 测试 (test_deploy_e2e.py 11/11 PASS)**。
+| # | 工具 | 用途 | 调用方式 | 何时用 |
+|---|------|------|----------|--------|
+| 1 | `deploy.sh` | 完整部署 (PHASE 0-7) | `bash deploy.sh --version vXXX --port 5001` | 部署新版本 |
+| 2 | `precheck.sh` | 8 项早期检查 | `bash precheck.sh` | 部署前 |
+| 3 | `smoke_test.sh` | 5 项真实 API | `bash smoke_test.sh` | 部署后 |
+| 4 | `rollback.sh` | 回滚 (v3/v4 自适应) | `bash rollback.sh --to vXXX --port 5000` | 出问题时 |
+| 5 | `diagnose.sh` | 7 步深度诊断 | `bash diagnose.sh` | 故障时 |
+| 6 | `status.sh` | 一键状态 | `bash status.sh` | 任何时候 |
+| 7 | `restart.sh` | 重启当前 (不切版本) | `bash restart.sh` | 代码/配置更新 |
+| 8 | `watch.sh` | 健康监控+自动恢复 | `bash watch.sh --loop 30 --auto-recover` | 长跑守护 |
+| 9 | `deploy_history.sh` | 部署历史+一键切版本 | `bash deploy_history.sh` | 回溯 |
+| 10 | `unified_server.py` | frontend + API 代理 | v4 必需, deploy.sh 自动启 | v4 架构 |
+
+> 这 10 个工具都在 `deploy_bundle/`, **必须**通过 SFTP 上传到 `/tmp/deploy_bundle/` 才能远端跑。
+> 改 `tools/X.sh` 后必须 `rebuild_bundle.ps1` 重新打包, 并把新文件加到 `rebuild_bundle.ps1` 的 `$tools` 数组。
+
+### §1.2 Migration 工具 (meta/core/ + tools/) — 4 个
+
+| # | 工具 | 路径 | 用途 | 何时用 |
+|---|------|------|------|--------|
+| 11 | `migration_runner.py` | `meta/core/migration_runner.py` | 实际跑 schema migration | 部署时 (deploy.sh PHASE 2.6 调) |
+| 12 | `backfill_schema_migrations.py` | `tools/backfill_schema_migrations.py` | 把已应用的 schema 写到 schema_migrations 表 | 首次部署到新环境 / 升级后 |
+| 13 | `migration_lint.py` | `tools/migration_lint.py` + `migration_lint.legacy.yaml` | lint migration 文件规范 | CI / 提交前 |
+| 14 | `monitor_migrations.py` | `tools/monitor_migrations.py` | 监控 schema_migrations 健康 (WARN/CRIT/FAIL) | 部署后验证 |
+
+**Runner 特性 (本会话升级)**：
+- ✅ **idempotent SQL**: `duplicate column` / `already exists` 等自动跳过
+- ✅ **executescript**: 处理 trigger BEGIN/END 块
+- ✅ **不依赖 pytest**: 远端 system Python 也能跑
+
+**Lint 特性 (本会话升级)**：
+- ✅ **legacy 白名单**: 26 个 V007.46 老文件自动豁免
+- ✅ **退出码 0**: CI 默认通过 (WARN 不阻塞)
+
+### §1.3 远端操作工具 (tools/) — 本次新增 4 个
+
+| # | 工具 | 用途 | 何时用 | 谁能调 |
+|---|------|------|--------|--------|
+| 15 | `tools/yonaa_exec.py` | HTTP/Exec/Upload 一体 (限流 + 跨小时 token + 错误分类) | **agent 在公司内网时直接调** | **agent (不用 SSH!)** |
+| 16 | `tools/remote_capability_probe.py` | 30s 扫 5 端口 × 6 secret × 端点 + 白名单实测 | 第一次连接/排查网络/检查 secret | **agent** |
+| 17 | `tools/staging_deploy_orchestrator.py` | 一键 staging 部署 (打包 + 上传 + 远端 backfill + 跑 P0 + 验证) | 部署 staging | **agent** |
+| 18 | `tools/rebuild_bundle.ps1` | 本地 rebuild deploy_bundle | 改了 `tools/X.sh` 后 | 本地 (人或 agent) |
+
+**关键差异**：
+- **§1.1 工具**: 需要 SFTP 上传到 `/tmp/`, 远端 SSH 跑 (人)
+- **§1.3 工具**: **agent 直接从 Windows 调**, 走 HTTP 9200/19200, **不需要 SSH, 不需要 SFTP**
+
+### §1.4 端口速查 (7 端口)
+
+| 端口 | 用途 | 协议 | 谁能连 | 走什么工具 |
+|------|------|------|--------|------------|
+| `5001` | v4 backend API | HTTP | 用户 (浏览器/app) | — |
+| `8081` | v4 unified (frontend + API 代理) | HTTP | 用户 (浏览器) | — |
+| `5000` | v3 backend (旧) | HTTP | 用户 | — |
+| **9200** | **prod core_service (exec + upload)** | HTTP | **agent** | yonaa_exec.py |
+| **19200** | **staging core_service (exec + upload)** | HTTP | **agent** | yonaa_exec.py |
+| **9201** | observability (4 端点: health/ready/metrics/upload) | HTTP | agent | yonaa_exec.py |
+| 8082 / 5002 | 测试端口 (临时) | HTTP | — | — |
+
+**9200/19200 secret 算式** (Python):
+```python
+import hashlib, time
+secret = "v007.52-core-write"  # prod + staging 同
+hour = int(time.time()) // 3600
+token = hashlib.sha256(f"{secret}:{hour}".encode()).hexdigest()[:16]
+```
+
+**9201 secret**: `v007.35-infra` (独立 secret)
+
+**EXEC_WHITELIST** (50+ 命令, 节选):
+```
+ls cat head tail wc find grep du df ps top ss netstat
+systemctl journalctl dmesg iostat free echo date whoami
+chmod chown mkdir cp mv ln touch python3 pip md5sum
+pkill kill killall pgrep bash sh unzip tar nohup
+sed awk sort uniq test sleep true false
+```
+
+**注意**: `cd` **不在白名单**, 用 `bash -c "cd /path && cmd"` 整段。
 
 ---
 
-## 📦 部署 bundle 结构 (deploy_bundle/)
+## §2. Agent 远端操作 (3 步, **不需要 SSH**)
 
-```
-deploy_bundle/
-├── deploy-v20260703_002.zip (19.3MB)  # 部署包 (含 frontend_dist_files/)
-├── deploy.sh, precheck.sh, smoke_test.sh, rollback.sh
-├── diagnose.sh, status.sh, restart.sh, watch.sh, deploy_history.sh
-├── unified_server.py
-├── lib/common.sh                       # 共用函数 + 项目元数据
-├── README.txt                          # 快速上手
-└── tests/                              # 26 个可部署 e2e 测试
-    ├── test_sop_local.py               # 本地 (Windows) 验证
-    ├── test_deploy_e2e.py              # 部署全流程 (11/11 PASS)
-    ├── test_frontend_dir.py            # unified 8081 服务
-    ├── test_rollback_parallel.py       # 并行 v3 验证
-    └── ... (22 个其他历史测试)
+**前提**: agent 主机必须在公司内网 (10.6.x 段, 能 HTTP 到 172.20.x)。
+
+### §2.1 第一次接入 — 能力探测
+
+```bash
+# 30 秒扫完所有端口 + secret + 端点
+python tools/remote_capability_probe.py
 ```
 
-**重要**: `frontend_dist_files/` 在 zip 顶层, **不在**版本目录 (`v20260703_002/frontend_dist_files/`)!
+**输出示例** (2026-07-15 实测):
+```
+[1] 端口探活
+  [✓] observability       port=9201   → observability 端口 (4 端点)
+  [✓] core_prod           port=9200   → core service (exec+upload)
+  [✓] core_staging        port=19200  → core service (exec+upload)
+  [✗] log_prod            port=9101   → log service (dead)
+
+[2] core_service 找 working secret
+  [✓] core_prod   port=9200  → secret=prod_write
+      白名单实测: bash ✓  python3 ✓  ls ✓  cd ✗
+      upload 端点: /api/upload → 200
+```
+
+### §2.2 任意远端命令
+
+```python
+# Python 调用
+import sys; sys.path.insert(0, 'tools')
+from yonaa_exec import yexec, yupload, yuploaderun
+
+# 1. 跑一条命令
+r = yexec("ls -la /opt/app/deployments/", port=9200, secret="prod_write")
+print(r["stdout"])
+
+# 2. 上传一个文件
+r = yupload("tools/migration_lint.py",
+            "/opt/app/deployments/tools/migration_lint.py",
+            port=9200, secret="prod_write")
+print(r)  # {'action': 'uploaded', 'size': ..., 'md5': ...}
+
+# 3. 上传并立即跑
+r = yuploaderun("tools/migration_lint.py", port=9200)
+print(r["stdout"])
+
+# 4. staging (换 port)
+r = yexec("python3 -m meta.core.migration_runner --status", port=19200, secret="prod_write")
+```
+
+**CLI 调用**:
+```bash
+python tools/yonaa_exec.py exec "ls /opt/app/staging" 19200 prod_write
+python tools/yonaa_exec.py upload tools/migration_lint.py /opt/app/staging/deploy/tools/migration_lint.py 19200
+```
+
+**关键参数**:
+- `port`: 9200=prod, 19200=staging, 9201=observability
+- `secret`: 默认 `prod_write` (9200/19200 共用), `v007.35-infra` (9201)
+- `timeout`: 命令执行超时 (秒)
+- 自动限流: 调用间隔 1.2 秒
+
+### §2.3 错误分类 (常见问题自查)
+
+| 错误类 | 含义 | 解决 |
+|--------|------|------|
+| `network` | 连接失败 (agent 不在内网) | 检查网络, 走 SFTP/SSH |
+| `auth` | 全部 token 403 | 换 secret, 或加 `env YONAA_SECRET=xxx` |
+| `rate_limit` | 触发 20 req/s 限制 | 脚本自动 sleep 2s 重试 |
+| `logic` (4xx) | 命令错 (白名单拒绝等) | 改命令 (e.g. `cd` 改 `bash -c`) |
+| `server` (5xx) | 远端服务 bug | 看远端 log |
 
 ---
 
-## 🚀 部署流程 (3 步, 用户最简)
+## §3. 部署流程
 
-### Step 1: 本地 rebuild bundle
+### §3.1 Staging 一键 (agent 自动) — **推荐**
 
+```bash
+# 默认 dry-run 模式: 只上传, 不跑 P0 (验证用)
+python tools/staging_deploy_orchestrator.py
+
+# 实际跑: 上传 + backfill + 跑 P0 + 验证
+EXCLUDE_RUN_PENDING=0 python tools/staging_deploy_orchestrator.py
+```
+
+**内部流程** (agent 自动, 6 步):
+1. rebuild deploy bundle (`tools/rebuild_bundle.ps1` 等价物)
+2. yupload 到 `/opt/app/staging/tmp/`
+3. 远端跑 `tools/backfill_schema_migrations.py --db-path meta/architecture.db`
+4. 远端跑 `bash deploy.sh --version vXXX --port 9201 --zip ...`
+5. 远端跑 `python3 -m meta.core.migration_runner --status`
+6. 远端跑 `tools/monitor_migrations.py`
+
+### §3.2 Prod 一键 (agent 自动) — 同样工具, 改 port
+
+**目前没有 prod_orchestrator**, staging 的脚本改 1 行参数即可:
+```python
+# 把 19200 → 9200, /opt/app/staging/deploy → /opt/app/deployments
+# 见 staging_deploy_orchestrator.py 顶部
+```
+
+### §3.3 传统 SFTP 流程 (人 SSH) — 保留作为 fallback
+
+**Step 1**: 本地 rebuild
 ```bash
 cd D:\filework\release-prep-worktree
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\rebuild_bundle.ps1
+Get-ChildItem deploy_bundle\ -Filter "*.sh"  # 验证 9 个 sh
 ```
 
-**重要**: rebuild 后**必须**验证:
-```bash
-Get-ChildItem deploy_bundle\ -Filter "*.sh" | Select Name
-# 应该看到 9 个 sh: deploy, precheck, smoke_test, rollback, diagnose, status, restart, watch, deploy_history
-```
+**Step 2**: SFTP (MobaXterm 面板)
+- 远端 → `/tmp/`
+- 本地 → `D:\filework\release-prep-worktree\deploy_bundle\`
+- **拖** `deploy_bundle/` 整个覆盖
 
-### Step 2: SFTP 拖到远端
-
-**MobaXterm SFTP 面板**:
-- 远端导航: `/tmp/`
-- 本地导航: `D:\filework\release-prep-worktree\deploy_bundle\`
-- **拖** `deploy_bundle/` 覆盖到 `/tmp/`
-
-### Step 3: 远端跑 deploy
-
+**Step 3**: SSH 远端跑
 ```bash
 ssh root@172.20.59.7
 bash /tmp/deploy_bundle/deploy.sh --version v20260703_002 --port 5001
 ```
 
-**deploy.sh PHASE 0-7**:
-- PHASE 0: 事实采集 + 参数校验
-- PHASE 0.5: 解压 zip (如 backend 缺 OR frontend_dist_files 缺)
-- PHASE 1: 停旧
-- PHASE 2: 备份 + 复制 db
-- PHASE 3: systemd service (或 fallback nohup)
-- PHASE 4: 启 backend
-- PHASE 5: 启 unified_server
-- PHASE 6: 端到端验证
-- PHASE 6.5: smoke test (5 项真实 API)
-- PHASE 7: 切 current 链接
+**deploy.sh 8 个 PHASE**:
+- 0: 事实采集 + 参数校验
+- 0.5: 解压 zip
+- 1: 停旧
+- 2: 备份 + 复制 db
+- 2.55: migration lint
+- 2.6: 跑 migration
+- 3: systemd service
+- 4-5: 启 backend + unified
+- 6-6.5: 验证 + smoke
+- 7: 切 current
 
 ---
 
-## 🔄 回滚流程 (1 步)
+## §4. 回滚 / 监控 / 测试
+
+### §4.1 回滚 (1 步)
 
 ```bash
-ssh root@172.20.59.7
+# agent 自动
+python -c "import sys; sys.path.insert(0,'tools'); from yonaa_exec import yexec; print(yexec('bash /opt/app/deployments/rollback.sh --to v20260630_003 --port 5000', port=9200))"
+
+# 或人 SSH
 bash /tmp/deploy_bundle/rollback.sh --to v20260630_003 --port 5000
 ```
 
-**rollback.sh 架构自动检测**:
-- v3 (无 unified_server.py): 单 server.py 进程
-- v4 (有 unified_server.py): 双进程 (backend + unified)
-- 端口自动: `--port 5000` (v3) 或 `--port 5001` (v4)
+**架构自动检测**: v3 (无 unified) → 单进程 5000, v4 (有 unified) → 双进程 5001+8081
+
+### §4.2 监控 (3 种)
+
+| 模式 | 命令 | 说明 |
+|------|------|------|
+| 单次 | `bash /tmp/deploy_bundle/watch.sh` | 立即报告 |
+| 循环 | `bash watch.sh --loop 30` | 每 30s 查一次 |
+| 自愈 | `bash watch.sh --loop 30 --auto-recover` | 失败自动 restart |
+| 强自愈 | `bash watch.sh --loop 30 --rollback-on-fail` | 失败自动 rollback |
+
+**Agent 监控 (推荐)**: `python tools/yonaa_exec.py exec "python3 tools/monitor_migrations.py" 9200`
+
+### §4.3 测试
+
+| 测试 | 命令 | 通过率 |
+|------|------|--------|
+| 本地 e2e | `python tests/test_deploy_e2e.py` | 11/11 |
+| Migration 单元 (P0) | `python tests/test_migration_runner_p0.py` | 29/29 |
+| Migration 单元 (P1) | `python tests/test_migration_runner_p1.py` | 27/27 |
+| Migration lint | `python tools/migration_lint.py` | 0 FAIL, 8 WARN |
+| 远端 monitor | `python tools/monitor_migrations.py` (远端) | 通过 |
 
 ---
 
-## 📊 监控流程 (1 步)
+## §5. 路径 / 端口 / 备份速查
 
-```bash
-# 单次检查
-bash /tmp/deploy_bundle/watch.sh
+### §5.1 关键路径
 
-# 循环监控 (每 30s)
-bash /tmp/deploy_bundle/watch.sh --loop 30
+| 用途 | 路径 |
+|------|------|
+| 远端部署根 | `/opt/app/deployments/` |
+| 远端 staging | `/opt/app/staging/deploy/` |
+| 远端 DB (prod) | `/opt/app/deployments/meta/architecture.db` |
+| 远端 DB (staging) | `/opt/app/staging/deploy/meta/architecture.db` |
+| 远端日志 | `/opt/app/shared/logs/backend-*.log` |
+| 远端备份 | `/opt/app/backups/architecture.db.pre_p0_*` |
+| 远端上传临时 | `/opt/app/staging/tmp/` |
+| 本地 bundle | `D:\filework\release-prep-worktree\deploy_bundle\` |
+| 本地项目根 | `D:\filework\release-prep-worktree\` |
+| 本地工具 | `D:\filework\release-prep-worktree\tools\` |
 
-# 失败时自动 restart
-bash /tmp/deploy_bundle/watch.sh --loop 30 --auto-recover
+### §5.2 端口速查 (同 §1.4)
 
-# 失败时自动 rollback
-bash /tmp/deploy_bundle/watch.sh --loop 30 --rollback-on-fail
-```
+### §5.3 当前状态 (2026-07-15)
 
----
-
-## 🧪 测试流程 (本地 + 远端)
-
-### 本地 (Windows) - 快速验证
-
-```bash
-cd D:\filework\release-prep-worktree
-python tests/test_deploy_e2e.py    # 11/11 PASS (验证 10 工具 + 关键逻辑)
-```
-
-### 远端 - 真实环境 e2e
-
-```bash
-ssh root@172.20.59.7
-/opt/miniconda3-py39/bin/python /tmp/deploy_bundle/tests/test_rollback_parallel.py
-/opt/miniconda3-py39/bin/python /tmp/deploy_bundle/tests/test_frontend_dir.py
-```
+| 环境 | DB | 状态 |
+|------|------|------|
+| prod | 18 SUCCESS, 0 FAILED | ✅ 健康 |
+| staging | 18 SUCCESS, 0 FAILED | ✅ 健康 |
+| 9200/19200 | alive | ✅ exec/upload OK |
+| 9201 | alive (4 端点) | ✅ 探活 |
+| 9101/19101 | dead | ❌ 已知, 不影响 |
 
 ---
 
-## ⚠️ 已修复的关键 BUG (AI Agent 应知晓)
-
-| # | BUG | 修复 | 影响 |
-|---|-----|------|------|
-| 1 | env BUG 反复 (8+ 次) | 改用 `nohup python server.py` 不带 `env` | 后端启失败 |
-| 2 | 8081 404 (frontend_dist_files 缺) | `deploy.sh` PHASE 0.5 强制解压 + `precheck.sh` Check 8/8 | 浏览器 404 |
-| 3 | v4 boService 401 (无 Authorization) | `unified_server.py` 加 token 持久化 (按 client IP) | 菜单加载失败 |
-| 4 | v3 server.py 强 check 8081 | 测试用 5002 + 临时改 .env | 并行测试失败 |
-| 5 | smoke /api/v1/health 410 | 改用 `/api/v1/enum-types` (兼容 v3/v4) | smoke FAIL |
-| 6 | login grep 漏 data.token | status.sh/restart.sh 改用 python json 解析 | login FAIL |
-| 7 | rebuild 没复制 status.sh | `rebuild_bundle.ps1` $tools 数组加全 | 文件缺失 |
-| 8 | rebuild 没复制 tests/ | `rebuild_bundle.ps1` 加 tests/ 复制 | 测试无法跑 |
-| 9 | 部署后没 SFTP 拖就跑 | AI Agent 应养成"先 SFTP 再跑" | No such file |
-
----
-
-## 🤖 AI Agent 部署规范
+## §6. AI Agent 部署规范
 
 ### ✅ DO (应该做的)
 
-1. **写完任何 tools/X.sh 后**:
-   - 改 `tools/rebuild_bundle.ps1` 的 `$tools` 数组 (加 X.sh)
-   - 跑 `rebuild_bundle.ps1` 验证 deploy_bundle/ 有 X.sh
-   - commit + 告诉用户 SFTP 拖
-2. **改完文件**:
-   - 本地先跑 `python tests/test_deploy_e2e.py` (11/11 PASS)
-   - 验证通过后再让用户 SFTP 拖
-3. **诊断问题时**:
-   - **先看 log** (`tail -50 /opt/app/shared/logs/backend-*.log`)
-   - **再跑 diagnose.sh** (`bash /tmp/deploy_bundle/diagnose.sh`)
-   - **最后**才让用户回滚
-4. **重启服务**:
-   - 用 `bash /tmp/deploy_bundle/restart.sh` (1 步)
-   - **不要**手动 `pkill + nohup` (容易忘 env vars)
+1. **优先用 agent 工具 (§1.3)**: 95% 任务不需要 SFTP/SSH
+2. **第一次连接时跑 capability_probe** (验证网络/secret)
+3. **改 tools/X.sh 后**: 加到 `rebuild_bundle.ps1` 的 `$tools` 数组 + 跑 e2e
+4. **改 migration 文件后**: 跑 `tools/migration_lint.py` 验证
+5. **诊断时先看 log**: `tail -50 /opt/app/shared/logs/backend-*.log`
+6. **重启用 restart.sh**: 不用手动 pkill + nohup
 
 ### ❌ DON'T (不要做的)
 
-1. **不要**让用户跑命令时**没** SFTP 拖过最新 deploy_bundle
-2. **不要**在没看 log 时猜根因
-3. **不要**写脚本时假设有 `bash` (容器可能没 git-bash, 用 Python)
-4. **不要**改 `tools/X.sh` 但忘了改 `rebuild_bundle.ps1` 复制
-5. **不要**让用户跑 `bash X.sh` 时**没**确认远端有该文件
-6. **不要**假设 v3 和 v4 架构相同 (v3 单进程, v4 双进程)
-7. **不要**假设 v3 和 v4 API 相同 (login 端点不同)
+1. **不要让用户跑命令前没 SFTP 拖过最新 deploy_bundle** (§1.1 工具)
+2. **不要让 agent 直接用 yexec 跑 `cd`**: 用 `bash -c "cd ... && cmd"`
+3. **不要**假设 v3 和 v4 架构/API 相同
+4. **不要在 prod 跑 P0**前不备份: deploy.sh PHASE 2 自动备份
+5. **不要改 schema_migrations 表手工**: 用 `backfill_schema_migrations.py`
 
----
-
-## 📞 快速诊断清单
+### 快速诊断
 
 | 症状 | 检查 | 命令 |
 |------|------|------|
-| 浏览器 404 | unified 启了? frontend_dist_files 在? | `ss -tlnp \| grep 8081` + `ls /opt/app/deployments/frontend_dist_files/` |
-| 浏览器 401 | unified token 注入? backend JWT 密钥? | `tail -f /opt/app/shared/logs/frontend-*.log` + `grep TOKEN_CACHE` |
-| backend 没启 | env vars? port 占用? .env? | `tail -50 /opt/app/shared/logs/backend-*.log` |
-| login FAIL | token 在 data.token? user_id 匹配? | `curl -X POST .../api/v1/auth/login -d '{...}' \| python -m json.tool` |
-| 想回滚 | current 指向哪? 有几个旧版本? | `bash /tmp/deploy_bundle/deploy_history.sh` |
-| 想监控 | watch 是否循环? | `bash /tmp/deploy_bundle/watch.sh --loop 30` |
+| agent 连不上 9200 | 内网？ | `python tools/remote_capability_probe.py` |
+| 9200 secret 403 | token 算错？ | `python tools/yonaa_exec.py exec "echo OK" 9200` |
+| deploy 失败 | 看 PHASE 几？ | `python tools/yonaa_exec.py exec "bash /tmp/deploy_bundle/diagnose.sh" 9200` |
+| migration FAIL | idempotent 跳过？ | `python tools/yonaa_exec.py exec "python3 -m meta.core.migration_runner --status" 9200` |
+| 想回滚 | current 指向哪？ | `python tools/yonaa_exec.py exec "ls -la /opt/app/deployments/current" 9200` |
 
 ---
 
-## 📝 版本历史
+## §7. 版本历史
 
-| 版本 | 日期 | 主要变化 |
-|------|------|----------|
-| v20260630_003 | 2026-06-30 | v3 架构 (单进程 5000) |
-| v20260702_001 | 2026-07-02 | 中间版本 (可能坏) |
-| v20260703_002 | 2026-07-03 | v4 架构 (5001+8081 双进程) + enum mutability 修复 |
+| 日期 | 变化 | 影响 |
+|------|------|------|
+| 2026-06-30 | v3 架构 (单进程 5000) | 初版 |
+| 2026-07-02 | v4 架构 (5001+8081 双进程) + token 持久化 | API + 端口变更 |
+| 2026-07-03 | enum mutability 修复 | 业务层 |
+| **2026-07-15** | **本会话升级 5 能力**: yonaa_exec + capability_probe + orchestrator + migration idempotent + lint legacy | agent 自动化 + lint 0 FAIL + DB 0 FAILED |
 
 ---
 
-**维护**: 任何部署相关变更 (新工具/新 BUG/新端口), **必须**更新本文档。
+**维护**: 任何部署/能力变更, **必须**更新本文件 (本文件是 agent 唯一的"事实来源")。
