@@ -2,9 +2,32 @@
 """
 sqlite_chaos.py - SQLite IO disk error 故障注入工具 [V007.49-D 2026-07-13]
 
-用途: 在 staging 沙盒演练 SQLite IO 故障, 提前发现防护漏洞
-       不能在 prod 跑 (会破坏生产数据)
+!!! DEPRECATED !!! [V007.55 2026-07-15]
+本工具已被 regression_test_suite.py 取代。
 
+迁移指南:
+  python tools/sqlite_chaos.py readonly    →  python tools/regression_test_suite.py --scenario R1
+  python tools/sqlite_chaos.py busy        →  python tools/regression_test_suite.py --scenario R2
+  python tools/sqlite_chaos.py extlock     →  python tools/regression_test_suite.py --scenario R3
+  python tools/sqlite_chaos.py corrupt     →  python tools/regression_test_suite.py --scenario R4
+  python tools/sqlite_chaos.py deleted     →  python tools/regression_test_suite.py --scenario R5
+  python tools/sqlite_chaos.py full        →  python tools/regression_test_suite.py --scenario R6
+  python tools/sqlite_chaos.py all         →  python tools/regression_test_suite.py
+  python tools/sqlite_chaos.py restore     →  (regression_test_suite 自动 restore)
+
+regression_test_suite.py 的优势:
+  ✓ 9 个场景 (本工具 6 个 + WAL corrupt + timeout + readonly_root)
+  ✓ 自动返回 exit code (CI 友好)
+  ✓ --json 报告
+  ✓ 每个场景独立 backup + restore
+  ✓ prod 硬防护 (拒绝在 prod 跑)
+
+本文件保留仅作历史参考, 不再接受新功能。新代码请用 regression_test_suite.py。
+本工具将在 V007.56 删除。
+
+---
+
+历史: [V007.49-D 2026-07-13] 首次引入, 当时发现 chmod 555 对 root 写无效 (重大发现)
 用法:
   python tools/sqlite_chaos.py readonly    # TEST 1: 模拟 db 只读
   python tools/sqlite_chaos.py busy        # TEST 2: 锁竞争
@@ -14,6 +37,8 @@ sqlite_chaos.py - SQLite IO disk error 故障注入工具 [V007.49-D 2026-07-13]
   python tools/sqlite_chaos.py full        # TEST 6: 模拟磁盘满 (需 staging)
   python tools/sqlite_chaos.py all         # 跑所有非破坏性场景
   python tools/sqlite_chaos.py restore     # 从 backup 恢复 db
+
+!!! DEPRECATED !!! 请用 regression_test_suite.py
 """
 import os
 import sys
@@ -194,9 +219,45 @@ def test_full():
 
 
 def main():
+    # [V007.55] 启动时打印 deprecation 警告
+    print('!!! DEPRECATED !!!', file=sys.stderr)
+    print('  本工具已被 regression_test_suite.py 取代。', file=sys.stderr)
+    print('  详见: docs/REGRESSION_TEST_SUITE.md', file=sys.stderr)
+    print('  本工具将在 V007.56 删除。', file=sys.stderr)
+    print('', file=sys.stderr)
+
     if len(sys.argv) < 2:
         print(__doc__)
         sys.exit(1)
+
+    # [V007.55] --redirect-to-regression 标志, 直接调用 regression_test_suite
+    if '--redirect-to-regression' in sys.argv:
+        scenario_map = {
+            'readonly': 'R1', 'busy': 'R2', 'extlock': 'R3',
+            'corrupt': 'R4', 'deleted': 'R5', 'full': 'R6', 'all': None,
+        }
+        # 推断 staging db 路径 (sqlite_chaos 默认 prod path, 改 staging)
+        # 启发: 调用方的工作目录含 'staging' 或 'deploy' 的
+        # 简单做法: 把 /opt/app/deployments/ → /opt/app/staging/deploy/
+        redirect_db = DB_PATH
+        if '/opt/app/deployments/' in redirect_db:
+            redirect_db = redirect_db.replace('/opt/app/deployments/', '/opt/app/staging/deploy/')
+            print(f'[redirect] 自动转换 db_path: prod → staging ({redirect_db})', file=sys.stderr)
+        for old, new in scenario_map.items():
+            if old in sys.argv:
+                suite = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'regression_test_suite.py')
+                if not os.path.exists(suite):
+                    print(f'[FATAL] regression_test_suite.py 不存在: {suite}', file=sys.stderr)
+                    sys.exit(2)
+                cmd = ['python3', suite]
+                if new:
+                    cmd += ['--scenario', new]
+                cmd += ['--db-path', redirect_db]
+                print(f'[redirect] 调 {cmd}', file=sys.stderr)
+                os.execvp('python3', cmd)
+        print('[FATAL] 未识别的 scenario', file=sys.stderr)
+        sys.exit(1)
+
     scenario = sys.argv[1].lower()
     print(f'[sqlite_chaos] scenario={scenario}  db={DB_PATH}')
 

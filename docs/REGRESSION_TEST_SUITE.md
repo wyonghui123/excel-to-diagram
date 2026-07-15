@@ -117,12 +117,43 @@ staging_regression:
     - if: $CI_PIPELINE_SOURCE == "schedule"  # 定时跑
 ```
 
-### §3.3 监控告警 (未来可加)
+### §3.3 监控告警 (V007.55 已集成)
 
-```python
-# tools/monitor_migrations.py 加 --check-regression
-# 失败 → 告警频道发消息
+```bash
+# [V007.55] 集成到 monitor_migrations.py
+# 用法:
+python tools/monitor_migrations.py --check-regression
+# - 自动调用 regression_test_suite.py
+# - 期望: 7 PASS / 0 FAIL / 2 SKIP
+# - FAIL 计入 monitor 退出码 1 (告警)
+
+# 退出码:
+#   0 = OK
+#   1 = FAIL (有 FAILED migration 或 regression FAIL)
+#   2 = WARN (只有 schema_migrations 警告 或 全 SKIP)
+#
+# 集成: 远端 cron / systemd timer 每天跑一次:
+#   0 9 * * * cd /opt/app/staging/deploy && python3 tools/monitor_migrations.py --check-regression || /usr/bin/curl -X POST http://im-api/alert -d "..."
 ```
+
+### §3.4 sqlite_chaos.py 迁移 (V007.55 deprecated)
+
+```bash
+# 老用法 (V007.49-D):
+python tools/sqlite_chaos.py readonly
+# 现在会打印 DEPRECATED 警告, 但仍能跑
+
+# 新用法 (V007.55):
+python tools/regression_test_suite.py --scenario R1
+
+# 自动迁移 (--redirect-to-regression):
+python tools/sqlite_chaos.py readonly --redirect-to-regression
+# 等价于: python tools/regression_test_suite.py --scenario R1
+# 自动把 prod db 改 staging (含 db_path 转换)
+# 适用: 写脚本批量迁移老命令
+```
+
+**计划删除**: V007.56 删除 sqlite_chaos.py
 
 ---
 

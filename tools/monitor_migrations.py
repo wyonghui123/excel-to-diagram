@@ -8,19 +8,24 @@
   - 未登记 (migration 在文件但不在表里, 警告)
   - checksum 不匹配数量
   - 最后执行时间 (监控停滞)
-  - 备份文件残留数量 (磁盘占用警告)
+  - 备份文件残留 (磁盘占用警告)
+  - [V007.55] --check-regression: 跑 regression_test_suite (staging sqlite io error)
+              集成回归测试, 7 PASS / 2 SKIP / 0 FAIL 期望
 
 退出码:
   0: 全部健康
-  1: 有 FATAL/FAILED
+  1: 有 FATAL/FAILED 或 regression FAIL
   2: 只有 WARN
 
 集成:
   - monitor_prod.py (远端 HTTP 调用时通过 script_remote 跑)
   - cron / systemd timer (每日自检)
+  - [V007.55] --check-regression 集成到 staging_deploy_orchestrator Step 10.5
 """
 import argparse
+import json
 import sqlite3
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -34,7 +39,7 @@ DEFAULT_LOG = WORKTREE / "logs" / "migrations.log"
 
 
 def section(title, ok=None, detail=''):
-    icon = '[OK]' if ok is True else ('[FAIL]' if ok is False else ('[WARN]' if ok is None else '[INFO]'))
+    icon = '[OK]' if ok is True else ('[FAIL]' if ok is False else ('[WARN]' if ok is None else ('[INFO]' if ok == 'info' else '[WARN]')))
     line = f"{icon} {title}: {detail}"
     print(line)
     return ok
@@ -190,12 +195,93 @@ def check_backup_residue(db_path: Path, max_retain: int = 5) -> dict:
     }
 
 
+def check_regression(db_path: Path, timeout: int = 120) -> dict:
+    """[V007.55] 跑 regression_test_suite.py 验证 sqlite io error 防护
+
+    仅在 staging 跑 (regression_test_suite.py 硬防护会拒绝 prod)
+    期望: 7 PASS / 0 FAIL / 2 SKIP (R1 R9 root 防护 SKIP)
+    """
+    suite = SCRIPT_DIR / "regression_test_suite.py"
+    if not suite.exists():
+        return {
+            "ok": False,
+            "errors": [f"regression_test_suite.py 不存在: {suite}"],
+            "warnings": [],
+            "stats": {"suite_path": str(suite)},
+        }
+    # 推断 staging db 路径 (基于传入 db_path)
+    # db_path 可能是 /opt/app/deployments/meta/architecture.db (prod) 或 staging
+    if "/staging/" not in str(db_path):
+        return {
+            "ok": None,  # WARN, 不跑 (因为 prod 不能跑)
+            "errors": [],
+            "warnings": ["--check-regression 仅在 staging 跑, 跳过 (db 不含 /staging/)"],
+            "stats": {"skipped": True, "reason": "non-staging db path"},
+        }
+    # 跑 regression_test_suite
+    try:
+        proc = subprocess.run(
+            ["python3", str(suite), "--json", "/tmp/regression_monitor.json"],
+            capture_output=True, text=True, timeout=timeout, cwd=str(suite.parent.parent),
+        )
+        # 解析 json
+        report_path = Path("/tmp/regression_monitor.json")
+        if not report_path.exists():
+            return {
+                "ok": False,
+                "errors": [f"regression_test_suite 未生成报告: {report_path}"],
+                "warnings": [proc.stdout[-500:] if proc.stdout else "", proc.stderr[-500:] if proc.stderr else ""],
+                "stats": {"exit_code": proc.returncode},
+            }
+        with open(report_path, encoding='utf-8') as f:
+            report = json.load(f)
+        summary = report.get("summary", {})
+        pass_n = summary.get("pass", 0)
+        fail_n = summary.get("fail", 0)
+        skip_n = summary.get("skip", 0)
+        ok = (fail_n == 0 and pass_n > 0)
+        return {
+            "ok": ok,
+            "errors": [f"regression FAIL: {fail_n} 个失败"] if fail_n else [],
+            "warnings": [
+                f"regression 全 SKIP ({skip_n} 个), 检查环境" if pass_n == 0 and skip_n > 0 else None
+            ] + [
+                f"regression PASS={pass_n} SKIP={skip_n} (期望 7/2)" if pass_n != 7 or skip_n != 2 else None
+            ],
+            "stats": {
+                "regression_pass": pass_n,
+                "regression_fail": fail_n,
+                "regression_skip": skip_n,
+                "regression_total": summary.get("total", 0),
+                "regression_run_id": report.get("run_id"),
+            },
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": False,
+            "errors": [f"regression_test_suite 超时 ({timeout}s)"],
+            "warnings": [],
+            "stats": {"timeout": timeout},
+        }
+    except Exception as e:
+        return {
+            "ok": False,
+            "errors": [f"regression_test_suite 异常: {e}"],
+            "warnings": [],
+            "stats": {"exception": str(e)},
+        }
+
+
 def main():
     parser = argparse.ArgumentParser(description="[P1.7] Migration 健康监控")
     parser.add_argument("--db-path", default=str(DEFAULT_DB))
     parser.add_argument("--log-path", default=str(DEFAULT_LOG))
     parser.add_argument("--max-retain", type=int, default=5,
                         help="最大备份保留数 (default: 5)")
+    parser.add_argument("--check-regression", action="store_true",
+                        help="[V007.55] 跑 regression_test_suite (staging sqlite io error)")
+    parser.add_argument("--regression-timeout", type=int, default=120,
+                        help="regression_test_suite 超时秒数 (default: 120)")
     args = parser.parse_args()
 
     db_path = Path(args.db_path)
@@ -217,7 +303,7 @@ def main():
         section("schema_migrations", True, f"{db_health['stats'].get('total', 0)} records")
     for k, v in db_health["stats"].items():
         if k not in ("total",):
-            section(f"  {k}", None, str(v))
+            section(f"  {k}", "info", str(v))
     print()
 
     # 2. 告警日志
@@ -232,7 +318,7 @@ def main():
         section("alert log", True, "recent 100 lines 无 FAILED/ROLLED_BACK")
     for k, v in alert_health["stats"].items():
         if k != "log_exists":
-            section(f"  {k}", None, str(v))
+            section(f"  {k}", "info", str(v))
     print()
 
     # 3. 备份残留
@@ -245,9 +331,32 @@ def main():
                                   f"{bak_health['stats'].get('backup_total_mb', 0)}MB")
     print()
 
+    # 4. [V007.55] regression 测试 (staging only)
+    regression_health = None
+    if args.check_regression:
+        print("--- regression test (V007.55) ---")
+        regression_health = check_regression(db_path, args.regression_timeout)
+        for e in regression_health["errors"]:
+            section("ERROR", False, e)
+        real_warnings = [w for w in regression_health["warnings"] if w]
+        for w in real_warnings:
+            section("WARN", None, w)
+        if not regression_health["errors"] and not real_warnings:
+            section("regression", True, f"PASS={regression_health['stats'].get('regression_pass')} "
+                                          f"FAIL={regression_health['stats'].get('regression_fail')} "
+                                          f"SKIP={regression_health['stats'].get('regression_skip')}")
+        for k, v in regression_health["stats"].items():
+            if k not in ("suite_path",):
+                section(f"  {k}", "info", str(v))
+        print()
+
     # 汇总
     fatal = bool(db_health["errors"]) or not alert_health["ok"]
-    warn = bool(db_health["warnings"]) or bak_health["warnings"] or alert_health["alerts"]
+    if regression_health is not None:
+        fatal = fatal or (regression_health["ok"] is False)
+    warn = (bool(db_health["warnings"]) or bak_health["warnings"]
+            or alert_health["alerts"]
+            or (regression_health is not None and regression_health["ok"] is None))
     if fatal:
         print("=== RESULT: FAIL (FATAL issues found) ===")
         return 1
