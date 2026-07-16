@@ -180,7 +180,16 @@ docs/
 
 ## 5. deploy_bundle/ 是什么 (V045 起的发布物目录, 57 commits)
 
-**TL;DR**: 这是"部署脚本 + 代码包"打包好的目录, 让你**用 MobaXterm 拖到远端 /tmp/ 直接跑 deploy.sh**。**是发布物, 不是源代码仓库**, 但因为要支持"git checkout 任意历史版本重新部署", 所以入 git 管理。
+### 5.0 一句话价值 (回答你之前的问题)
+
+> **deploy_bundle 是"每个发版时的发布物快照", git 管的是"时光机"**: 让你 1 年后能 `git checkout <老 commit>` 拿回**当时**的 deploy.sh + 当时打包的 zip, 重新跑一次"那一版的部署"。
+
+**为什么不只 git 管代码就够**? 因为**代码会变, 但"当时发布的包"不能变**:
+- 今天: `meta/server.py` 50077 bytes, md5=`2e2841b7...`
+- 明天改了 bug: `meta/server.py` 50100 bytes, md5=`abc...`
+- **1 年后想"再跑一次今天的部署"?** 代码 HEAD 早变了, 拿不回今天这一版
+
+`deploy_bundle/` 把"**今天发版用的全套**" 冻进 git: 当天的 deploy.sh + 当天的 zip + 当天的 MANIFEST + 当天的脚本。
 
 ### 5.1 文件清单 (10 项)
 
@@ -194,10 +203,20 @@ docs/
 | `unified_server.py` | 远端统一服务入口 | ✅ 是 | ✅ 必须 |
 | `lib/common.sh` | shell 共享库 | ✅ 是 | ✅ 必须 |
 | `README.txt` | 部署工作流文档 | ✅ 是 | ✅ 必须 |
-| `deploy-v20260707_002.zip` | **本次发布的代码快照 (zip ~30MB)** | ❌ 是构建产物 | ⚠️ 应该 `.gitignore` + git-lfs |
+| `deploy-v2026xxxx_xxx.zip` | **本次发布的代码快照 (zip ~30MB)** | ❌ 是构建产物 | ⚠️ 应该 `.gitignore` + git-lfs (但当前是入 git 的) |
 | `meta/ tools/ docs/ scripts/` (zip 内) | 源码副本 | ✅ 但**跟根目录重复** | ⚠️ 重复了, 用 rebuild_zip.py 自动同步 |
 
-### 5.2 怎么用 (V045 起的工作流)
+### 5.2 5 个 git 管理的实际价值
+
+| 价值 | 解释 | 重要度 |
+|------|------|--------|
+| **1. 历史版本可回滚** | yonaa 上 7 个版本目录 (`v20260630_003` ~ `v20260712_001`) 保留 9 天; 仓库有 57 commits, **可 `git checkout <老 commit>` 拿回历史 deploy_bundle** 拖回去 | ⭐⭐⭐ 核心 |
+| **2. 部署脚本单一可信源** | 改 `tools/deploy.sh` → 必须同步 `deploy_bundle/deploy.sh`; git 强制追踪差异 (历史 commit 8bfcbff 证实) | ⭐⭐⭐ 必要 |
+| **3. 完整发布包存档** | 每次发版 commit 一次 `chore(release): Vxxx 部署包 vxxx_xxx - 含 Vxxx/Vxxx fix` | ⭐⭐⭐ 核心 |
+| **4. 出问题可对账** | yonaa 上某文件 hash 不对, 跟 `git show HEAD:deploy_bundle/deploy-vXXX.zip` 对账 | ⭐⭐ 重要 |
+| **5. 部署文档跟代码同步** | `README.txt` 跟 `deploy.sh` 一起入 git | ⭐ 普通 |
+
+### 5.3 怎么用 (V045 起的工作流)
 
 ```bash
 # 1. MobaXterm SFTP 拖 deploy_bundle/ 到远端 /tmp/
@@ -206,13 +225,6 @@ bash /tmp/deploy_bundle/deploy.sh --version v20260707_002 --port 5001
 # 3. 出问题:
 bash /tmp/deploy_bundle/rollback.sh --to <v> --port <p>
 ```
-
-### 5.3 git 跟踪的合理性
-
-- ✅ 部署脚本 (`deploy.sh` / `precheck.sh` / `smoke_test.sh` / `rollback.sh` / `diagnose.sh` / `unified_server.py` / `lib/common.sh` / `README.txt`) **必须 git 跟踪** —— 因为改完要回滚到历史版本
-- ✅ 已有 commit 8bfcbff `同步 deploy_bundle/deploy.sh 跟 tools/deploy.sh` 证实需要双向同步
-- ⚠️ zip 文件 (30MB) 应该用 **git-lfs** 或放独立 release 仓库
-- ⚠️ 源码副本 (meta/ tools/ docs/ scripts/) 应该**不重复 commit**, 用 `rebuild_zip.py` 从根目录自动打包
 
 ### 5.4 源码 vs 发布物的边界
 
@@ -243,93 +255,75 @@ git HEAD 上 deploy_bundle 是"**只存脚本 + zip**"模式, 但 worktree 实�
 
 ## 6. 实际部署模式 (2026-07-16 当前)
 
-**TL;DR**: **现在主要是 "hash-driven full" (按需全量), L17 真 delta 刚接入 (V007.67, 2 天前) 还没成为主流**。
+### 6.1 直说答案 (3 句话)
 
-### 6.1 两种模式澄清
+| 问题 | 答案 | 证据 |
+|------|------|------|
+| **现在有没有采用 delta?** | **形式上没, 体验上部分有** | deploy.sh 仍是 `unzip -o` 全量 (line 229); 但 11 文件 hash 守卫让"非关键改动 5s 走完" |
+| **执行上有保障吗?** | **部分有, 部分没** | LF 保障 ✅, MANIFEST hash ✅, 11 文件 hash ⚠️ (不覆盖前端), deploy_history 9 天没新记录 ❌ |
+| **L17 真 delta?** | **代码写了, 没集成** | smart_extract.sh 在 deploy_bundle/ 不存在; rebuild_zip.py --delta 模式不默认 |
 
-| 模式 | 含义 | 工具/脚本 | 状态 |
-|------|------|----------|------|
-| **"全量" (full)** | 整个 zip 解压覆盖 yonaa | `deploy.sh` PHASE 0.5 默认 | **当前主流** |
-| **"按需全量" (hash-driven full)** | 解压前比较 zip 跟 yonaa 的 11 个关键文件 hash, 不一致才解压 | `deploy.sh` PHASE 0.5 (line 178-224) | **生产实际跑的** |
-| **"真 delta" (true delta)** | 只复制"上次以来变了"的文件, 不动其他 | `smart_extract.sh` + `sha256_compare.sh` (L17) | **代码有, deploy.sh 没集成** |
+### 6.2 部署流程真相 (拆成 3 步看)
 
-### 6.2 deploy.sh 现在的实际逻辑 (PHASE 0.5)
-
-```bash
-# deploy.sh line 175-224: PHASE 0.5 触发条件
-NEED_UNZIP=false
-# 1. 远端没部署过 → 解压
-if [ ! -d "$SERVER_DIR" ]; then NEED_UNZIP=true
-elif [ ! -d "$DEPLOYMENTS_DIR/frontend_dist_files" ]; then NEED_UNZIP=true
-fi
-# 2. 4 个 server 类关键文件 hash 不一致 → 解压 (V007.35)
-for CRITICAL_FILE in meta/server.py meta/core/datasource.py \
-                     meta/core/sql_adapters.py meta/core/sql_connection_pool.py; do
-    ZIP_MD5=$(unzip -p "$ZIP_PATH" "$CRITICAL_FILE" | md5sum)
-    ROOT_MD5=$(md5sum "$DEPLOYMENTS_DIR/$CRITICAL_FILE")
-    [ "$ZIP_MD5" != "$ROOT_MD5" ] && NEED_UNZIP=true
-done
-# 3. 7 个 V007.46+ 关键文件 hash 不一致 → 解压 (V007.46 BUG-FIX)
-for CRITICAL_FILE in meta/core/safe_connect.py meta/core/db_health_monitor.py \
-                     meta/services/audit_service.py ...; do
-    [ hash 不一致 ] && NEED_UNZIP=true
-done
-# 4. 触发则: unzip -o $ZIP_PATH -d $DEPLOYMENTS_DIR/ (全量解压)
+**Step 1: 打包** (`rebuild_zip.py`)
+```
+python tools/rebuild_zip.py --version v2026xxxx_xxx
+# 默认: 生成 30MB 全量 zip
+# 加上 --delta --prev-manifest: 生成 KB 级 delta zip (有这能力, 但不用)
 ```
 
-**核心**: deploy.sh 跟"真 delta"无关, 是个 **"11 文件 hash 守卫的全量解压器"**。
+**Step 2: 传包** (MobaXterm SFTP)
+```
+MobaXterm 拖 deploy-v2026xxxx_xxx.zip → /tmp/
+# 30MB 走 SSH, 即使只需 KB
+```
 
-### 6.3 L17 真 delta 部署: V007.67 (2026-07-14) 才接入
+**Step 3: 部署** (`deploy.sh PHASE 0.5`, line 175-224)
+```bash
+# 11 文件 hash 守卫:
+# - 4 server 类 (server.py, datasource.py, sql_adapters.py, sql_connection_pool.py)
+# - 7 V007.46+ 新增 (safe_connect.py, db_health_monitor.py, diagnostics.py, ...)
 
-| commit | 内容 | 时间 |
-|--------|------|------|
-| 941b850 | `feat(deploy): smart_extract.sh + sha256_compare.sh for delta extract [L17]` | V007.48+ |
-| 53c5962 | `feat(deploy): deploy.sh PHASE 0.5 集成 smart_extract delta 模式 [L17]` | V007.48+ |
-| 2bd689b | `feat(tools): rebuild_zip.py 支持 --delta 模式 + manifest_utils [L17]` | V007.49+ |
-| b257078 | `feat(tools): verify_delta_manifest 全量 sha256 验证 [L17]` | V007.49+ |
-| 0b7c540 | `deploy(delta): prod delta deploy 基础施设 (L17) [V007.67 2026-07-14]` | **V007.67 (2 天前)** |
-| dabe721 | `L13.3+L14.3+L17+L8.6: deploy infra todo 推进` | 持续 |
+if [ "$NEED_UNZIP" = "true" ]; then
+    unzip -o $ZIP_PATH -d $DEPLOYMENTS_DIR/   # 全量解压 (line 229)
+fi
+# 不一致才解压, 一致就 5s 跳过
+```
 
-**L17 = "Layer 17 = 智能 delta 部署"** — 是**完整子项目**, 至少 9 commits.
+**真相**: 体验上"平时不传代码", 但**底层仍是 unzip -o 全量能力**, **不是真 delta**。
 
-**`rebuild_zip.py --delta` 模式** (line 558-561): 用 `manifest_utils.build_delta_zip`, 只打包从 `--prev-manifest` 以来变了的文件。
-
-### 6.4 实际状态: 还没成为主流
-
-- **`smart_extract.sh` 在 deploy_bundle/ 不存在** (worktree 检查) —— 之前写过后又移走
-- `deploy.sh` PHASE 0.5 仍是 hash-driven full, 没用 smart_extract
-- `deploy_history.sh` 没有 delta/full 标记
-- 0b7c540 是 **"基础施设"** 接入, 还没常态化用
-
-**Agent 实际跑部署**:
-- 平时发版: `python tools/rebuild_zip.py --version v2026xxxx_xxx` (生成全量 zip) → MobaXterm 拖过去 → `bash deploy.sh` (PHASE 0.5 自动判定要不要解压)
-- 关键文件 hash 都没变 → **skip unzip, 5s 走完** (但 zip 还是有 30MB, 网络费)
-- 改了关键文件 → **触发全量解压** (跟 V045 起的"偶尔 full"语义对齐)
-
-**这才是**用户口中"主要 delta, 偶尔 full"的实际实现方式 —— "**按需全量**"。
-
-### 6.5 L17 delta 真正启用后是什么体验 (待 V007.68+)
+### 6.3 L17 真 delta 是什么 (V007.67 2 天前接入, 但没成为日常)
 
 ```bash
-# 平时发版:
+# 真 delta 应该这样:
 python tools/rebuild_zip.py --version v2026xxxx_xxx --delta \
     --prev-manifest shared/MANIFEST.prev
-# → 生成的 zip 只含 "上次以来变了" 的文件 (KB 级, 不是 30MB)
-# → MobaXterm 拖过去
+# → 生成 zip 只含 "上次以来变了" 的文件 (KB 级)
+
 bash deploy.sh
 # → smart_extract.sh: 只覆盖变了文件 (秒级)
 # → 99% 部署只动几 KB, 1% 重大重构才触 full
 ```
 
-### 6.6 Agent 决策
+**L17 状态**: commit 0b7c540 (V007.67, 2026-07-14) 接入基础施设; smart_extract.sh 在 deploy_bundle/ 找不到; deploy.sh 没调它。
+
+### 6.4 实际执行保障清单
+
+| 保障 | 状态 | 风险 |
+|------|------|------|
+| **打包 LF 保障** | ✅ rebuild_zip.py line 568-575 `force_lf_in_tree` | 无 |
+| **MANIFEST 完整性 hash** | ✅ V007.25 加的 `manifest_sha256` | 无 |
+| **远端 11 文件 hash 校验** | ⚠️ deploy.sh 守卫 | **前端 dist_files/ js/css 没校验** (V007.46 BUG-FIX 没覆盖) |
+| **deploy_history 记录** | ❌ yonaa 上 9 天没新记录 | **出事故时无审计** |
+| **真 delta (KB 级)** | ❌ 未启用 | **每次都传 30MB zip, 即使 1 行改动** |
+
+### 6.5 Agent 决策
 
 | 任务 | 应该用 |
 |------|-------|
-| **现在发版 (V007.67 前)** | `rebuild_zip.py` (全量) + `deploy.sh` (自动按需解压) — 已经是事实上的"delta 体验" |
-| **未来 L17 完整启用** | `rebuild_zip.py --delta --prev-manifest` + `smart_extract.sh` |
-| **手动强全量** | `bash deploy.sh --force-unzip` (跳过 hash 判定) |
-
-**记忆点**: 跟用户/Agent 沟通时, 描述成 **"按需全量 (hash-driven full), L17 真 delta 待 V007.68+"** 比 "delta 为主 full 偶尔" 更准确。
+| **现在发版 (日常)** | `rebuild_zip.py` (全量) + `deploy.sh` (按需解压) |
+| **下次发版"前端 dist 大改"** | 改 frontend_dist_files/ 后, **11 文件守卫不覆盖**, 可能跳 unzip → 灾难! **必须**手动 `bash deploy.sh --force-unzip` |
+| **L17 真 delta 启用 (V007.68+)** | 等 commit 把 smart_extract.sh 集成到 deploy.sh 后, 用 `--delta --prev-manifest` |
 
 ---
 
