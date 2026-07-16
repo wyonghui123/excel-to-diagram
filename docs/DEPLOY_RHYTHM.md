@@ -196,6 +196,7 @@ python tools/staging_deploy_orchestrator.py
 - ✅ V007.56 完成: 探查 SIGKILL 元凶 (find_log_service_killer.py, 找到是阿里云 HIPS), 删除 restart_log_service.py
 - ✅ V007.57 完成: log_service 改 nobody 用户运行 (service 文件 User=nobody + chown DB/log 目录), 2 分钟监控 0 杀进程事件, HIPS 不再杀
 - ✅ V007.58 完成: IM 告警链路 (alert_monitor.py + alert_monitor.bat + INCIDENT_ALERT_SETUP.md), agent 端 5min 轮询 7 端口 → 飞书/钉钉/微信 webhook (服务器无公网, 走 agent 中转)
+- ✅ V007.59 完成: 飞书应用机器人 API 支持 (lark_app, 不受管理员禁自定义机器人影响), `--list-chats` + `--test-lark-app` 子命令, 环境变量凭证 (LARK_APP_ID/SECRET/CHAT_ID), 端到端测试成功 (HAO 群, cli_a9362787bbb8dcb5)
 - ⚠️ 自动监控: watch.sh 需手工启动, 没 cron
 - ⚠️ 通知: 手工 (无 IM 集成)
 
