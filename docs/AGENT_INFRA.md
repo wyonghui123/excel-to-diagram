@@ -241,4 +241,96 @@ git HEAD 上 deploy_bundle 是"**只存脚本 + zip**"模式, 但 worktree 实�
 
 ---
 
+## 6. 实际部署模式 (2026-07-16 当前)
+
+**TL;DR**: **现在主要是 "hash-driven full" (按需全量), L17 真 delta 刚接入 (V007.67, 2 天前) 还没成为主流**。
+
+### 6.1 两种模式澄清
+
+| 模式 | 含义 | 工具/脚本 | 状态 |
+|------|------|----------|------|
+| **"全量" (full)** | 整个 zip 解压覆盖 yonaa | `deploy.sh` PHASE 0.5 默认 | **当前主流** |
+| **"按需全量" (hash-driven full)** | 解压前比较 zip 跟 yonaa 的 11 个关键文件 hash, 不一致才解压 | `deploy.sh` PHASE 0.5 (line 178-224) | **生产实际跑的** |
+| **"真 delta" (true delta)** | 只复制"上次以来变了"的文件, 不动其他 | `smart_extract.sh` + `sha256_compare.sh` (L17) | **代码有, deploy.sh 没集成** |
+
+### 6.2 deploy.sh 现在的实际逻辑 (PHASE 0.5)
+
+```bash
+# deploy.sh line 175-224: PHASE 0.5 触发条件
+NEED_UNZIP=false
+# 1. 远端没部署过 → 解压
+if [ ! -d "$SERVER_DIR" ]; then NEED_UNZIP=true
+elif [ ! -d "$DEPLOYMENTS_DIR/frontend_dist_files" ]; then NEED_UNZIP=true
+fi
+# 2. 4 个 server 类关键文件 hash 不一致 → 解压 (V007.35)
+for CRITICAL_FILE in meta/server.py meta/core/datasource.py \
+                     meta/core/sql_adapters.py meta/core/sql_connection_pool.py; do
+    ZIP_MD5=$(unzip -p "$ZIP_PATH" "$CRITICAL_FILE" | md5sum)
+    ROOT_MD5=$(md5sum "$DEPLOYMENTS_DIR/$CRITICAL_FILE")
+    [ "$ZIP_MD5" != "$ROOT_MD5" ] && NEED_UNZIP=true
+done
+# 3. 7 个 V007.46+ 关键文件 hash 不一致 → 解压 (V007.46 BUG-FIX)
+for CRITICAL_FILE in meta/core/safe_connect.py meta/core/db_health_monitor.py \
+                     meta/services/audit_service.py ...; do
+    [ hash 不一致 ] && NEED_UNZIP=true
+done
+# 4. 触发则: unzip -o $ZIP_PATH -d $DEPLOYMENTS_DIR/ (全量解压)
+```
+
+**核心**: deploy.sh 跟"真 delta"无关, 是个 **"11 文件 hash 守卫的全量解压器"**。
+
+### 6.3 L17 真 delta 部署: V007.67 (2026-07-14) 才接入
+
+| commit | 内容 | 时间 |
+|--------|------|------|
+| 941b850 | `feat(deploy): smart_extract.sh + sha256_compare.sh for delta extract [L17]` | V007.48+ |
+| 53c5962 | `feat(deploy): deploy.sh PHASE 0.5 集成 smart_extract delta 模式 [L17]` | V007.48+ |
+| 2bd689b | `feat(tools): rebuild_zip.py 支持 --delta 模式 + manifest_utils [L17]` | V007.49+ |
+| b257078 | `feat(tools): verify_delta_manifest 全量 sha256 验证 [L17]` | V007.49+ |
+| 0b7c540 | `deploy(delta): prod delta deploy 基础施设 (L17) [V007.67 2026-07-14]` | **V007.67 (2 天前)** |
+| dabe721 | `L13.3+L14.3+L17+L8.6: deploy infra todo 推进` | 持续 |
+
+**L17 = "Layer 17 = 智能 delta 部署"** — 是**完整子项目**, 至少 9 commits.
+
+**`rebuild_zip.py --delta` 模式** (line 558-561): 用 `manifest_utils.build_delta_zip`, 只打包从 `--prev-manifest` 以来变了的文件。
+
+### 6.4 实际状态: 还没成为主流
+
+- **`smart_extract.sh` 在 deploy_bundle/ 不存在** (worktree 检查) —— 之前写过后又移走
+- `deploy.sh` PHASE 0.5 仍是 hash-driven full, 没用 smart_extract
+- `deploy_history.sh` 没有 delta/full 标记
+- 0b7c540 是 **"基础施设"** 接入, 还没常态化用
+
+**Agent 实际跑部署**:
+- 平时发版: `python tools/rebuild_zip.py --version v2026xxxx_xxx` (生成全量 zip) → MobaXterm 拖过去 → `bash deploy.sh` (PHASE 0.5 自动判定要不要解压)
+- 关键文件 hash 都没变 → **skip unzip, 5s 走完** (但 zip 还是有 30MB, 网络费)
+- 改了关键文件 → **触发全量解压** (跟 V045 起的"偶尔 full"语义对齐)
+
+**这才是**用户口中"主要 delta, 偶尔 full"的实际实现方式 —— "**按需全量**"。
+
+### 6.5 L17 delta 真正启用后是什么体验 (待 V007.68+)
+
+```bash
+# 平时发版:
+python tools/rebuild_zip.py --version v2026xxxx_xxx --delta \
+    --prev-manifest shared/MANIFEST.prev
+# → 生成的 zip 只含 "上次以来变了" 的文件 (KB 级, 不是 30MB)
+# → MobaXterm 拖过去
+bash deploy.sh
+# → smart_extract.sh: 只覆盖变了文件 (秒级)
+# → 99% 部署只动几 KB, 1% 重大重构才触 full
+```
+
+### 6.6 Agent 决策
+
+| 任务 | 应该用 |
+|------|-------|
+| **现在发版 (V007.67 前)** | `rebuild_zip.py` (全量) + `deploy.sh` (自动按需解压) — 已经是事实上的"delta 体验" |
+| **未来 L17 完整启用** | `rebuild_zip.py --delta --prev-manifest` + `smart_extract.sh` |
+| **手动强全量** | `bash deploy.sh --force-unzip` (跳过 hash 判定) |
+
+**记忆点**: 跟用户/Agent 沟通时, 描述成 **"按需全量 (hash-driven full), L17 真 delta 待 V007.68+"** 比 "delta 为主 full 偶尔" 更准确。
+
+---
+
 **维护**: AGENT 接手时, **5 分钟读本文件 → 30 秒跑 capability_probe → 5 分钟读 DEPLOY_INFRASTRUCTURE §0+§1 → 3 分钟读 [MONITORING_QUICK_REFERENCE.md](file:///d:/filework/release-prep-worktree/docs/MONITORING_QUICK_REFERENCE.md)** = 完全 ready.
