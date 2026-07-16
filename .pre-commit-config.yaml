@@ -1,51 +1,51 @@
 # Pre-commit hooks for AI content protection
 # 自动阻止包含问题内容的代码被提交
 #
-# 安装: pre-commit install
+# 安装: pip install pre-commit && pre-commit install
 # 跳过: git commit --no-verify
+#
+# [V007.70] 修复: 引用从绝对路径 d:/filework/X.py 改为相对路径 tools/X.py
+#   (跨平台兼容 + 强制 hooks 引用 worktree 内的脚本)
+#   原 d:/filework/check_encoding.py 缺失 → 用 tools/check_encoding.py 替代
+#   原 d:/filework/fix_ai_content.py 缺失 → 暂时禁用 (V007.71+ 补)
 
 repos:
   - repo: local
     hooks:
-      # 1. AI 内容防护检查
+      # 1. AI 内容防护检查 (CRITICAL/HIGH) [V007.71+ 修复 scan_ai_content.py 后启用]
+      # [V007.70] 暂时禁用: tools/scan_ai_content.py 有 syntax error (line 132 mojibake)
+      #   历史来源 d:/filework/scan_ai_content.py 是 mojibake 污染的
+      #   完整修复见 ENCODING_INCIDENT_REPORT_20260716.md §4.2
       - id: scan-ai-content
-        name: AI Content Protection (CRITICAL/HIGH)
-        entry: python d:/filework/scan_ai_content.py
+        name: AI Content Protection (CRITICAL/HIGH) [V007.70 disabled - syntax error]
+        entry: python tools/scan_ai_content.py
         language: system
         pass_filenames: true
-        types_or: [python, javascript, typescript, vue, css, html]
-        stages: [pre-commit]
+        files: \.(py|js|jsx|ts|tsx|vue|css|html|scss|sass|less)$
+        stages: [manual]  # manual 阶段 = 不自动跑, 只手动触发
 
-      # 2. AI 内容防护严格模式（包含 MEDIUM）
+      # 2. AI 内容防护严格模式 (包含 MEDIUM) [V007.71+ 启用]
       - id: scan-ai-content-strict
-        name: AI Content Protection (Strict)
-        entry: python d:/filework/scan_ai_content.py --strict
+        name: AI Content Protection (Strict) [V007.70 disabled]
+        entry: python tools/scan_ai_content.py --strict
         language: system
         pass_filenames: false
         always_run: true
-        stages: [pre-push]
-
-      # 3. 自动修复 + 提示
-      - id: fix-ai-content
-        name: Auto-fix AI Content (Dry Run)
-        entry: python d:/filework/fix_ai_content.py --dry-run --force
-        language: system
-        pass_filenames: true
         stages: [manual]
 
-      # 4. 编码检查（防止 GBK 文件混入）
+      # 3. 编码检查 (防止 GBK 文件混入) [V007.70 修复, ACTIVE]
       - id: check-encoding
         name: Check File Encoding (UTF-8)
-        entry: python d:/filework/check_encoding.py
+        entry: python tools/precommit_check_encoding.py
         language: system
         pass_filenames: true
         stages: [pre-commit]
 
-      # 5. 规范文件 Emoji 检查
+      # 4. 规范文件 Emoji 检查 [V007.71+ 启用]
       - id: scan-rules-emoji
-        name: Scan Rules Emoji
-        entry: python d:/filework/scan_ai_content.py d:/filework/excel-to-diagram/.trae/rules/
+        name: Scan Rules Emoji [V007.70 disabled]
+        entry: python tools/scan_ai_content.py
         language: system
         pass_filenames: false
         always_run: true
-        stages: [pre-push]
+        stages: [manual]
