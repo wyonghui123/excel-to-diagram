@@ -214,7 +214,7 @@ curl -s 'http://localhost:9101/api/disk/check?quick=true' | python3 -m json.tool
 ```bash
 # SQLite 不支持 slow query log, 但可以看 db size
 ls -la /opt/app/deployments/meta/architecture.db
-# 看 audit_logs (今天事故后增了?)
+# 看 audit_logs (今天事故后增了？)
 sqlite3 /opt/app/deployments/meta/architecture.db "SELECT count(*) FROM audit_logs;"
 ```
 
@@ -464,8 +464,8 @@ python d:\filework\release-prep-worktree\tools\alert_monitor_v0760.py --check-on
 ```bash
 # yonaa 端 (直接查)
 curl http://localhost:9101/api/health                    # 业务 ok?
-curl http://localhost:9101/api/db/health                 # SQLite 完整?
-curl http://localhost:9101/api/db/can_write              # 可写?
+curl http://localhost:9101/api/db/health                 # SQLite 完整？
+curl http://localhost:9101/api/db/can_write              # 可写？
 curl http://localhost:9101/api/disk/check                # 综合磁盘
 systemctl status log_service_prod.service                # systemd
 journalctl -u log_service_prod --since "10 min ago"      # journal

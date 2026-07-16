@@ -112,7 +112,7 @@
 
 ---
 
-## 0. 为什么需要 agent 中转?
+## 0. 为什么需要 agent 中转？
 
 ```
 yonaa 服务器 (172.20.59.7, 阿里云 ECS)
@@ -277,7 +277,7 @@ Register-ScheduledTask -TaskName "yonaa_alert_monitor" -Action $action -Trigger 
 
 ---
 
-## 2. 监控什么?
+## 2. 监控什么？
 
 | 服务 | 端口 | 检查方式 | 重要度 |
 |------|------|---------|--------|
