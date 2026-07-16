@@ -1,0 +1,17 @@
+{
+  "failed_keys": [],
+  "last_alert_ts": 1784202001.5980022,
+  "check_last_run": {
+    "real_health": 1784203201.6849782,
+    "db_can_write": 1784203201.6849782,
+    "journal_err": 1784203201.6849782,
+    "backend_err": 1784203201.6849782,
+    "core_service_err": 1784203201.6849782,
+    "db_health": 1784202901.5987625,
+    "disk_errors": 1784202901.5987625,
+    "disk_check": 1784202901.5987625,
+    "disk_usage": 1784202901.5987625
+  },
+  "check_last_fail": {},
+  "last_heartbeat_ts": 1784203210.5182524
+}
