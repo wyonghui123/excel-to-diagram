@@ -421,8 +421,8 @@ fields:
       i18n_key: common.field.owner_id
     semantics:
       meaning: 产品线的负责人，关联用户表
-      export_visible: false
-      import_visible: false
+      export_visible: true
+      import_visible: true
       analytics:
         category: dimension
         type: foreign_key
@@ -603,6 +603,21 @@ actions:
     method: DELETE
     path: /api/v1/products/{id}
     description: 删除产品线
+
+  # [FIX 2026-07-10] BUG-V051: 补全 import/export actions
+  #   委托给统一 export-import 端点
+  - id: import
+    name: 导入
+    type: business
+    method: POST
+    path: /api/v1/export-import/import
+    description: 通过统一导入端点从Excel批量导入产品线
+  - id: export
+    name: 导出
+    type: business
+    method: GET
+    path: /api/v1/export-import/export
+    description: 通过统一导出端点导出产品线到Excel
 
 # ────────────────────────────────────────────
 # 校验规则

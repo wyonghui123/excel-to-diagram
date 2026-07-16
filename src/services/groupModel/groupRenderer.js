@@ -11,6 +11,7 @@
 
 import { GroupType, isTerminalGroup, traverseGroups } from './types.js'
 import { ChartType, getChartTypeConfig } from './chartTypeConfig.js'
+import { sanitizeMermaidLabel } from '../../composables/useMermaid/syntax/_shared/arrowHelper.js'
 
 /**
  * 渲染分组模型为 Mermaid 代码
@@ -74,16 +75,21 @@ export function renderGroupModelToMermaid(groups, options = {}) {
     const groupId = sanitizeId(group.id)
     const groupTitle = group.title
 
-    code += `${indent}subgraph ${groupId}["${groupTitle}"]\n`
+    // [V007.52 P0] 转义 groupTitle 防 mermaid 11.13 syntax error
+    const safeGroupTitle = sanitizeMermaidLabel(groupTitle)
+    code += `${indent}subgraph ${groupId}["${safeGroupTitle}"]\n`
     
-    const subDirection = group.layout.direction || (actualDirection === 'TB' ? 'LR' : 'TB')
+    const subDirection = group.layout.direction || actualDirection
     code += `${indent}  direction ${subDirection}\n`
 
     if (group._assignedNodes && group._assignedNodes.length > 0) {
       group._assignedNodes.forEach(nodeId => {
         if (!definedNodes.has(nodeId)) {
           const nodeCode = nodeIdMap.idToCodeMap.get(nodeId) || nodeId
-          const displayText = nodeCode !== nodeId ? `${nodeId}\\n(${nodeCode})` : nodeId
+          // [V007.52 P0] 转义 nodeId (作为 label) / nodeCode 防 mermaid 11.13 syntax error
+          const safeNodeId = sanitizeMermaidLabel(nodeId)
+          const safeNodeCode = sanitizeMermaidLabel(nodeCode)
+          const displayText = safeNodeCode !== nodeId ? `${safeNodeId}\\n(${safeNodeCode})` : safeNodeId
           code += `${indent}  ${nodeId}["${displayText}"]\n`
           definedNodes.add(nodeId)
         }
@@ -134,9 +140,12 @@ function renderTerminalNode(group, indent, definedNodes, nodeColorMappings, colo
   }
 
   let code = ''
-  const displayText = group.elementRef?.code 
-    ? `${group.title}\\n(${group.elementRef.code})`
-    : group.title
+  // [V007.52 P0] 转义 terminal node title / code 防 mermaid 11.13 syntax error
+  const safeTitle = sanitizeMermaidLabel(group.title || '')
+  const safeElementCode = sanitizeMermaidLabel(group.elementRef?.code || '')
+  const displayText = safeElementCode
+    ? `${safeTitle}\\n(${safeElementCode})`
+    : safeTitle
 
   code += `${indent}${group.id}["${displayText}"]\n`
   definedNodes.add(group.id)

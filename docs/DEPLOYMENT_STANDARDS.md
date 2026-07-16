@@ -81,13 +81,35 @@ audience: 运维、开发者
 
 ### 2.2 服务器环境要求
 
+> **当前远程服务器实际版本**（2026-06-29 核实）：
+> - Python 3.9.25（`python` / `python3` 已统一）
+> - OpenSSH 10.3p1 / OpenSSL 1.1.1w（2026-06 升级，已应用）
+
 | 项目 | 要求 | 备注 |
 |------|------|------|
 | 操作系统 | CentOS 7.x | 或兼容版本 |
-| Python | 3.9+ (Conda) | `/opt/miniconda3-py39/bin/python` |
+| Python | 3.9.25 (Conda) | `/opt/miniconda3-py39/bin/python` (`python` / `python3` 均生效) |
+| OpenSSH | 10.3p1 | 2026-06 已升级 |
+| OpenSSL | 1.1.1w (11 Sep 2023) | 随 OpenSSH 升级 |
 | 磁盘空间 | ≥2GB | 部署包 + 日志 + 备份 |
 | 内存 | ≥2GB | 推荐4GB+ |
 | 网络 | 内网可达 | 无需访问外网 |
+
+#### 2.2.1 版本验证命令
+
+远程升级后，执行以下命令验证版本一致性：
+
+```bash
+# Python（python 与 python3 输出版本必须一致）
+ssh root@172.20.59.7 "python -V; python3 -V"
+# 期望: Python 3.9.25 / Python 3.9.25
+
+# SSH / OpenSSL
+ssh -V
+# 期望: OpenSSH_10.3p1, OpenSSL 1.1.1w 11 Sep 2023
+```
+
+> 注：`ssh -V` 在本地执行即可（显示客户端版本）；服务端版本用 `ssh root@172.20.59.7 "sshd -V"` 或 `cat /etc/redhat-release`。
 
 ---
 
@@ -125,7 +147,8 @@ changes:
   - "修复数据库路径问题"
 
 requirements:
-  python: ">=3.8"
+  python: ">=3.9,<3.14"           # 兼容 3.9.25 ~ 3.13.x；3.14.x 跳过（gevent socket 问题）
+  python_tested: "3.9.25"         # 2026-06 实际验证版本
   disk_space: "500MB"
 
 dependencies:
@@ -469,6 +492,8 @@ _data_source = get_data_source("sqlite", database="architecture.db")
 |------|------|----------|------|
 | 2026-04-28 | v1.0 | 初始版本 | DevOps |
 | 2026-04-28 | v1.1 | 增加代码规范章节（API数据库路径规范） | DevOps |
+| 2026-06-29 | v1.2 | 固化远程实际版本：Python 3.9.25、OpenSSH 10.3p1、OpenSSL 1.1.1w；新增 2.2.1 版本验证命令 | DevOps |
+| 2026-06-29 | v1.3 | 新增 §2.2.2 Python 兼容性范围（AST 扫描结果：3.9.25 / 3.10~3.12 / 3.13 全兼容，3.14 不推荐）；MANIFEST §3.2 requirements 改为 `python: ">=3.9,<3.14"` + `python_tested: "3.9.25"` | DevOps |
 
 ---
 
@@ -497,4 +522,89 @@ cat /opt/app/state/deployment_history.json
 | 端口占用 | 旧进程未退出 | `fuser -k 8081/tcp` |
 | 数据库连接失败 | 路径错误 | 检查配置文件 |
 | API返回404 | 后端未启动 | 检查后端进程 |
-| 代理不工作 | server.py版本旧 | 重新部署 |
+
+---
+
+## 十三、补遗: 新增能力 (2026-07-15)
+
+> 本节记录 v1.3 之后新增的能力, 详见主文档 [DEPLOY_INFRASTRUCTURE.md](../../DEPLOY_INFRASTRUCTURE.md) 与 [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md)。
+
+### §13.1 远端操作 (agent 自动化)
+
+**新增 5 个工具**, 替代原 SSH/SFTP 流程:
+
+| 工具 | 用途 | 替代什么 |
+|------|------|----------|
+| `tools/yonaa_exec.py` | HTTP exec + upload (限流 + 跨小时 token + 错误分类 + bg 后台) | SSH 命令 |
+| `tools/remote_capability_probe.py` | 30s 扫 7 端口 × 6 secret | 手工 `nc` / `curl` |
+| `tools/staging_deploy_orchestrator.py` | 一键 staging 部署 (10 步自动) | SFTP + SSH 5 条命令 |
+| ~~`tools/restart_log_service.py`~~ | **~~删除 V007.56~~** 旧手工 restart 工具 (deprecated V007.55) | 已删除 |
+| `tools/install_log_service_systemd.py` | **V007.55** 一键装 systemd unit 守护 log_service | 旧 restart_log_service.py |
+| `tools/setup_log_service_cron.py` | **V007.55** 装 cron `*/5 * * * *` 监控告警 | 手工写 crontab |
+| `tools/find_log_service_killer.py` | **V007.56** 探查 SIGKILL 元凶 (journal + aegis + cgroup + auditd) | systemd 守护下还是被杀时 |
+| `tools/deploy_log_service_systemd.py` | **V007.57** 上传 service + daemon-reload + restart (支持 nobody 用户) | 改 unit 文件后重发 |
+| `tools/chown_log_service_dirs.py` + `chown_readable.py` + `fix_staging_chown.py` | **V007.57** nobody 用户下, chown DB/log/scripts 给 nobody 可写可读 | 改 nobody 后必跑一次 |
+| `tools/monitor_hips.py` | **V007.57** 监控 nobody log_service 是否被 HIPS 杀 (2 分钟 12 次检查) | 验证 nobody 修复是否生效 | 
+| `tools/alert_monitor.py` + `alert_monitor.bat` | **V007.58** agent 端 IM 告警 (5min 轮询 7 端口 + 飞书/钉钉/微信 webhook) | 服务器无公网, agent 主动轮询 | **agent 端** |
+| `docs/INCIDENT_ALERT_SETUP.md` | **V007.58** IM 告警配置 5 分钟上手 (含网络拓扑/IM webhook 获取/Windows 任务计划) | 第一次配 IM | **运维** |
+| `tools/rebuild_bundle.ps1` | 本地 rebuild (保留) | 保留 |
+
+**新端口 (agent 入口, 7 个)**:
+- 9200 (prod core_service), 19200 (staging core_service)
+- 9201 (observability, 5 端点)
+- **9101 (prod log_service, 10+ 端点, 本会话重启)**
+- **19101 (staging log_service, 10+ 端点, 本会话重启)**
+- 8081 (frontend), 3011 (backend)
+
+**认证**: `SHA256(secret+hour)[:16]`, secret = `v007.52-core-write` (9200/19200) 或 `v007.35-infra` (9201/9101/19101)
+
+### §13.2 Migration 升级 (P0/P1/P1.5)
+
+| 工具 | 用途 |
+|------|------|
+| `meta/core/migration_runner.py` | 实际跑 schema migration (含 idempotent SQL) |
+| `tools/backfill_schema_migrations.py` | 把已应用 schema 写到 schema_migrations 表 |
+| `tools/migration_lint.py` + `migration_lint.legacy.yaml` | lint migration 文件 (5 规则) |
+| `tools/monitor_migrations.py` | 监控 (WARN/CRIT/FAIL) + `--check-regression` 跑回归测试 |
+| `tools/regression_test_suite.py` | **9 个 sqlite io error 场景 (R1-R9), 自动 restore + exit code** (V007.55) |
+
+**关键变更**:
+- ✅ migration_runner **idempotent**: `duplicate column` / `already exists` 自动跳过
+- ✅ **executescript**: 处理 trigger `BEGIN/END` 块
+- ✅ lint 升级: 26 个 V007.46 老文件**白名单豁免** (P1.5 legacy 机制)
+- ✅ lint 退出码 0 (WARN 不阻塞 CI)
+- ✅ test_utils 去除 pytest 硬依赖 (远端 system Python 也能跑)
+
+**当前状态**:
+- prod: 18 migration SUCCESS, **0 FAILED**
+- staging: 18 migration SUCCESS, **0 FAILED**
+- lint: **0 FAIL, 8 WARN, exit 0**
+
+### §13.3 老 staging 架构下线 (2026-07-15)
+
+| 旧端口 | 旧服务 | 新状态 |
+|------|------|------|
+| 13011 | meta_backend | ❌ dead (改用 core_service exec) |
+| 18081 | unified | ❌ dead (agent 不通过 unified 调) |
+| **19101** | **staging log_service** | ✅ **alive (本会话重启)** |
+| **9101** | **prod log_service** | ✅ **alive (本会话重启)** |
+| **19200** | **staging core_service** | ✅ alive |
+| **9200** | **prod core_service** | ✅ alive |
+| **9201** | **observability** | ✅ alive (5 端点) |
+
+**新部署架构**: 2 服务 = `core_service.py` (exec + upload + audit) + `log_service.py` (10+ 端点), 通过 env var 切 port + db path。
+
+**log_service 管理 (V007.55 systemd 守护)**:
+```bash
+# V007.55 推荐: 一键装 systemd unit
+python tools/install_log_service_systemd.py
+# 验证
+python tools/remote_capability_probe.py --check-systemd
+# 重启
+python tools/restart_log_service.py --use-systemd
+# 旧工具 (deprecated)
+# python tools/restart_log_service.py --env prod
+```
+
+详见 [STAGING_GUIDE.md](STAGING_GUIDE.md)。
+

@@ -716,26 +716,40 @@ relations: []
 # 注意：审计日志是只读对象，不能有 create/update/delete 等写操作
 # ────────────────────────────────────────────
 actions:
-  - id: audit_log_list
+  # [FIX BUG-V052.2 2026-07-10 dev agent] 统一权限 code 为短名
+  # 原因: 之前 action.id 用 'audit_log_read' (非标准) → permission code 拼成
+  #       'audit_log:audit_log_read' (双重前缀) → DB 实际存的 code
+  # 修复: 改用 _standard_actions.yaml 里的标准 id 'crud_list'/'crud_read'/'crud_delete',
+  #       permission code 自动拼成 'audit_log:read'/'audit_log:list'/'audit_log:delete' (短名)
+  - id: crud_list
     name: 列表查询
     type: crud
     method: GET
     path: /api/v1/audit_logs
     description: 查询审计日志列表
 
-  - id: audit_log_read
+  - id: crud_read
     name: 查看日志详情
     type: crud
     method: GET
     path: /api/v1/audit_logs/{id}
     description: 查看审计日志详情
 
-  - id: audit_log_delete
+  - id: crud_delete
     name: 删除日志
     type: crud
     method: DELETE
     path: /api/v1/audit_logs/{id}
     description: 删除审计日志记录
+
+  # [FIX 2026-07-10] BUG-V051: 补全 export action
+  #   委托给统一 export-import 端点
+  - id: export
+    name: 导出
+    type: business
+    method: GET
+    path: /api/v1/export-import/export
+    description: 通过统一导出端点导出审计日志到Excel
 
 # ────────────────────────────────────────────
 # 查询定义

@@ -570,6 +570,7 @@ function getActionIcon(action) {
 }
 import { boService } from '@/services/boService'
 import { metaService } from '@/services/metaService'
+import { objectTypeService } from '@/services/objectTypeService'
 import { useListActionStore } from '@/stores/listActionStore'
 
 // [FR-004] 声明组件名以支持 keep-alive include 白名单匹配
@@ -611,7 +612,7 @@ const props = defineProps({
   rowMutability: {
     type: String,
     default: null,
-    validator: (v) => [null, 'locked', 'extensible', 'fully_editable'].includes(v)
+    validator: (v) => [null, 'locked', 'extensible', 'fullEditable'].includes(v)
   },
   externalEditing: {
     type: Boolean,
@@ -893,6 +894,8 @@ const secondaryToolbarActions = computed(() =>
 )
 
 const showDetailDrawer = ref(false)
+// [FIX 2026-06-29] 保存当前详情行用于 title 显示 (objectType + objectName 格式)
+const currentDetailRow = ref(null)
 const selectedDetailId = ref(null)
 const detailEditMode = ref(false)
 const detailCreateMode = ref(false)
@@ -907,7 +910,22 @@ const detailTitle = computed(() => {
   if (detailCreateMode.value) {
     return `新建 ${metaConfig.value?.name || ''}`
   }
-  return metaConfig.value?.detail?.title || `${metaConfig.value?.name || '详情'}`
+  // [FIX 2026-06-29] 标题优先用 metaConfig.detail.title 或 metaConfig.name,
+  //                  并自动追加 row.name (来自 rowActions 触发的当前行)
+  //   1) 优先 metaConfig.detail.title (后端配置)
+  //   2) 否则 metaConfig.name (前端元数据)
+  //   3) 否则用 objectTypeService.getDetailLabel 自动产出 "关系详情"
+  //   4) 追加 row.name (如果有)
+  const base = metaConfig.value?.detail?.title
+    || metaConfig.value?.name
+    || objectTypeService.getDetailLabel(props.objectType, '')
+  // 尝试从当前 currentDetailRow 获取对象名
+  const targetRow = currentDetailRow.value
+  const targetName = targetRow?.name || targetRow?.code || targetRow?.title || ''
+  if (targetName && base) {
+    return `${base} ${targetName}`
+  }
+  return base || '详情'
 })
 
 const showDeleteConfirm = ref(false)
@@ -1199,7 +1217,7 @@ function getBadgeTagType(row, column) {
 function getBadgeDisplayValue(row, column) {
   const rawValue = row[column.prop]
   if (rawValue === '') return '-'
-  
+
   if (rawValue == null) {
     if (column.enum_values) {
       const nullVal = column.type === 'boolean' ? 0 : null
@@ -1209,6 +1227,28 @@ function getBadgeDisplayValue(row, column) {
       if (fallback) return fallback.label
     }
     return '-'
+  }
+
+  // [FIX V015e 2026-07-10] 兜底清洗历史脏 enum code (legacy_null / null 字符串 / 'undefined')
+  //   原 BUG: 数据库早期导入数据时, 后端对空 relation_type 写了字符串 'legacy_null' 占位.
+  //     UI 走 getBadgeDisplayValue 后, rawValue='legacy_null' 不在 enum_values 里也不在 options 里,
+  //     最终落到 `return rawValue` → 用户在关系类型列看到 'legacy_null'.
+  //     期望: 显示 '-' (与空值一致).
+  //   修复: 在最开头 (string 路径) 把这种 sentinel 值映射为 '-'.
+  //   注意: 正则不能含 'a'/'g' 等字符, 否则会被 babel 误判为 regex flag (如 /...n/a/i → 'a' 无效 flag)
+  //   所以 'n/a' 单独 check, 不放在字符集里.
+  if (typeof rawValue === 'string') {
+    const cleaned = rawValue.trim().toLowerCase()
+    if (
+      cleaned === 'null' ||
+      cleaned === 'undefined' ||
+      cleaned === 'none' ||
+      cleaned === 'n/a' ||
+      cleaned === 'na' ||
+      /^legacy[_\s-]*null$/.test(cleaned)
+    ) {
+      return '-'
+    }
   }
   
   if (typeof rawValue === 'boolean') {
@@ -1492,12 +1532,14 @@ function openCreateDrawer() {
   detailCreateMode.value = true
   detailEditMode.value = false
   selectedDetailId.value = null
+  currentDetailRow.value = null  // [FIX 2026-06-29] 清空 current row
   showDetailDrawer.value = true
 }
 
 function openDetailDrawer(row, editMode = false) {
   detailCreateMode.value = false
   selectedDetailId.value = row.id
+  currentDetailRow.value = row  // [FIX 2026-06-29] 保存当前行供 title 使用
   detailEditMode.value = editMode
   showDetailDrawer.value = true
 }
@@ -1712,6 +1754,16 @@ onMounted(() => {
   }
 })
 
+// [FIX 2026-06-30] 监听 initialFilters 变化, 重新应用过滤并刷新数据
+//   之前只在 onMounted 应用一次, scope tree 勾选后 Tab 不刷新 → 显示全部
+watch(() => props.initialFilters, (newFilters) => {
+  if (!newFilters || Object.keys(newFilters).length === 0) return
+  setContextFilters(newFilters)
+  if (props.options.autoLoad !== false) {
+    refresh()
+  }
+}, { deep: true })
+
 // [FR-004] 路由级 keep-alive 恢复时刷新数据
 // [FR-005] SAP Fiori iAppState 模式：路由切回时保留状态，不自动刷新
 // 数据变更由 refreshCoordinator 处理，用户可手动点刷新按钮
@@ -1784,6 +1836,8 @@ function handleMetaListAction(action, row) {
 
 defineExpose({
   tableRef,
+  // [FIX 2026-06-29] 暴露 onRowAction 让 MOMP/GenericObjectList 等父组件可在 dblclick 时触发 action
+  onRowAction,
   metaConfig,
   data,
   loading,

@@ -4,6 +4,7 @@ import { useBlockDiagramSyntax, DIAGRAM_TYPES } from './useBlockDiagramSyntax.js
 import { routeLayout, DEPRECATED_LAYOUT_TYPES, isDeprecatedLayout, convertDeprecatedLayout } from '../layouts/index.js'
 import { formatContainerTitle } from '../../../utils/formatContainerTitle.js'
 import { GroupType } from '../../../services/groupModel/types.js'
+import { sanitizeMermaidLabel } from './_shared/arrowHelper.js'
 
 /**
  * 为网格布局排序容器，将中心容器放在中间位置
@@ -214,7 +215,7 @@ export function useServiceModuleSyntax() {
 
     console.log('[useServiceModuleSyntax] Final effectiveLayoutControlConfig:', effectiveLayoutControlConfig)
 
-    const overallDirection = effectiveLayoutControlConfig?.overallDirection || 'LR'
+    const overallDirection = effectiveLayoutControlConfig?.overallDirection || 'TB'
 
     // ELK布局使用与配置一致的方向，不再反转
     // ELK的elk.direction配置会控制实际布局方向
@@ -337,7 +338,10 @@ export function useServiceModuleSyntax() {
         // 渲染未分组的节点（不在 definedNodes 中的节点）
         nodes.forEach(node => {
           if (!definedNodes.has(node.id)) {
-            const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+            // [V007.52 P0] 转义 node.name / node.code 防 mermaid 11.13 syntax error
+            const safeName = sanitizeMermaidLabel(node.name || '')
+            const safeCode = sanitizeMermaidLabel(node.code || '')
+            const displayText = safeCode ? `${safeName}\\n(${safeCode})` : safeName
             mermaidCode += `  ${node.id}["${displayText}"]\n`
             definedNodes.add(node.id)
           }
@@ -348,10 +352,12 @@ export function useServiceModuleSyntax() {
         reversedContainers.forEach((container, index) => {
           const containerId = `C${sortedContainers.length - index}`
           const containerTitle = formatContainerTitle(container.fullTitle || container.name || 'Container')
+          // [V007.51 P0] containerTitle 转义 (mermaid 11.13 不允许 " ' \ 换行)
+          const safeContainerTitle = sanitizeMermaidLabel(containerTitle)
 
-          mermaidCode += `  subgraph ${containerId}["${containerTitle}"]\n`
-          // subgraph 内部方向：整体 TB 时内部 LR，整体 LR 时内部 TB（使用 actualDirection 已考虑 ELK 反转）
-          mermaidCode += `    direction ${actualDirection === 'TB' ? 'LR' : 'TB'}\n`
+          mermaidCode += `  subgraph ${containerId}["${safeContainerTitle}"]\n`
+          // subgraph 内部方向跟随整体方向：LR=水平排列，TB=垂直排列
+          mermaidCode += `    direction ${actualDirection}\n`
 
           // 反转节点顺序
           const reversedNodes = [...(container.nodes || [])].reverse()
@@ -359,7 +365,10 @@ export function useServiceModuleSyntax() {
             const node = nodeMap.get(nodeId)
             if (node) {
               if (!definedNodes.has(node.id)) {
-                const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+                // [V007.51 P0] node.name / node.code 转义
+                const safeNodeName = sanitizeMermaidLabel(node.name || '')
+                const safeNodeCode = sanitizeMermaidLabel(node.code || '')
+                const displayText = safeNodeCode ? `${safeNodeName}\\n(${safeNodeCode})` : safeNodeName
                 mermaidCode += `    ${node.id}["${displayText}"]\n`
                 definedNodes.add(node.id)
               } else {
@@ -378,10 +387,12 @@ export function useServiceModuleSyntax() {
       reversedContainers.forEach((container, index) => {
         const containerId = `C${sortedContainers.length - index}`
         const containerTitle = formatContainerTitle(container.fullTitle || container.name || 'Container')
+        // [V007.51 P0] containerTitle 转义
+        const safeContainerTitle2 = sanitizeMermaidLabel(containerTitle)
 
-        mermaidCode += `  subgraph ${containerId}["${containerTitle}"]\n`
-        // subgraph 内部方向：整体 TB 时内部 LR，整体 LR 时内部 TB（使用 actualDirection 已考虑 ELK 反转）
-        mermaidCode += `    direction ${actualDirection === 'TB' ? 'LR' : 'TB'}\n`
+        mermaidCode += `  subgraph ${containerId}["${safeContainerTitle2}"]\n`
+        // subgraph 内部方向跟随整体方向：LR=水平排列，TB=垂直排列
+        mermaidCode += `    direction ${actualDirection}\n`
 
         // 反转节点顺序
         const reversedNodes = [...(container.nodes || [])].reverse()
@@ -389,7 +400,10 @@ export function useServiceModuleSyntax() {
           const node = nodeMap.get(nodeId)
           if (node) {
             if (!definedNodes.has(node.id)) {
-              const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+              // [V007.51 P0] node.name / node.code 转义
+              const safeNodeName = sanitizeMermaidLabel(node.name || '')
+              const safeNodeCode = sanitizeMermaidLabel(node.code || '')
+              const displayText = safeNodeCode ? `${safeNodeName}\\n(${safeNodeCode})` : safeNodeName
               mermaidCode += `    ${node.id}["${displayText}"]\n`
               definedNodes.add(node.id)
             } else {

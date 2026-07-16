@@ -1,4 +1,5 @@
 import { ref, computed, watch, watchEffect, nextTick } from 'vue'
+import { ElNotification } from 'element-plus'
 import { useExcelParser } from '../../../composables/useExcelParser.js'
 import { useDiagramConfigStore } from '../../../stores/diagramConfigStore.js'
 import { useChartArchDataStore } from '../../../stores/chartArchDataStore'
@@ -28,6 +29,62 @@ import {
 import { buildPreviewDataFromArchData, convertToRelationNodeIds } from '../../../services/archDataConverter.js'
 
 /**
+ * [V007.49 P0 2026-07-09] 业务对象图 (BO diagram) 关系数量告警
+ *
+ * 触发条件:
+ *   - 用户在架构管理页面选 业务对象图 + 关系数量 > RELATIONSHIP_WARN_THRESHOLD (默认 100)
+ *   - 例如 财务云 1610 BO + 范围内与外部 关系 (689 关系) 渲染 600+ 节点时浏览器卡顿
+ *
+ * 告警形式:
+ *   - ElNotification 右下角通知
+ *   - 只展示文字建议: "关系数量多 (xxx), 建议缩小对象和关系范围, 或采用服务模块图"
+ *   - 不提供跳转按钮 (用户手动切换 chartType)
+ *
+ * 防重复:
+ *   - module-level _lastWarnedKey 记录 上次告警的 (chartType, threshold) 组合
+ *   - 数量从 ≤threshold → >threshold 才告警
+ *   - 用户关闭告警后, 再次从 ≤threshold → >threshold 仍会告警 (典型情况: 用户调整范围)
+ */
+const RELATIONSHIP_WARN_THRESHOLD = 100
+let _lastWarnedKey = null  // 上次告警的 key, null 表示未告警
+
+/**
+ * 显示关系数量告警 (V007.49 P0)
+ * @param {number} count - 实际关系数量
+ * @param {string} chartType - 当前图表类型 (businessObject | serviceModule)
+ */
+function warnTooManyRelationships(count, chartType) {
+  // 只在 BO 图告警
+  if (chartType !== 'businessObject') return
+  // [V007.49 P0 修复] 防重复告警逻辑
+  // 关键: 已在 above 状态 (数量 > threshold) 就不再告警
+  // 即使 count 不同 (200 vs 300) 也不重复, 因为用户已看到告警
+  const isAbove = count > RELATIONSHIP_WARN_THRESHOLD
+  const wasAbove = _lastWarnedKey === 'bo:above'
+  if (wasAbove && isAbove) {
+    // 已经在 above 状态, 数量变化 (200→300) 不重复告警
+    return
+  }
+  if (!isAbove) {
+    // 数量回到阈值下, 重置状态允许下次再告警
+    if (wasAbove) {
+      _lastWarnedKey = null
+    }
+    return
+  }
+  // 第一次越过阈值 (≤100 → >100), 告警
+  _lastWarnedKey = 'bo:above'
+  ElNotification({
+    title: '业务对象图关系数量过多',
+    message: `当前关系数量 ${count} 条, 超过推荐阈值 ${RELATIONSHIP_WARN_THRESHOLD} 条, 可能影响图表加载和渲染性能。建议缩小对象和关系范围, 或采用服务模块图查看整体结构。`,
+    type: 'warning',
+    duration: 8000,
+    position: 'bottom-right',
+    showClose: true,
+  })
+}
+
+/**
  * @deprecated 旧版非分组控制逻辑，仅在用户启用"启用旧版非分组控制"时使用
  * 此函数将在未来版本移除
  */
@@ -46,7 +103,7 @@ function buildLegacyLayoutControlConfig(filteredDomainProducts, filteredContaine
     const groups = buildDomainGroups(filteredDomainProducts, filteredContainers)
     layoutControlConfig = {
       enabled: groups.length > 0,
-      overallDirection: 'LR',
+      overallDirection: 'TB',
       groups: groups,
       engine: 'dagre',
       preserveOrder: true
@@ -158,13 +215,18 @@ function computedServiceModuleRelations(relationships, businessObjects, serviceM
     }
     
     // 收集业务对象关系的备注
-    if (rel.annotationContent) {
+    // [FIX 2026-06-29] 后端返回 annotationContents/Categories 数组
+    //   每个关系可能有多条 annotation, 这里把每条都收下来
+    const relContents = rel.annotationContents || []
+    const relCategories = rel.annotationCategories || []
+    relContents.forEach((content, idx) => {
+      if (!content) return
       relation.businessObjectRelationships.push({
         relationCode: boRelCode,
-        annotationContent: rel.annotationContent,
-        annotationCategory: rel.annotationCategory || 'info'
+        annotationContent: content,
+        annotationCategory: relCategories[idx] || 'info'
       })
-    }
+    })
   })
 
   // 处理备注内容
@@ -172,7 +234,7 @@ function computedServiceModuleRelations(relationships, businessObjects, serviceM
   moduleRelationMap.forEach((rel) => {
     // 去重后的业务对象关系编码
     const uniqueBoCodes = [...new Set(rel.businessObjectRelationshipCodes.filter(Boolean))]
-    
+
     // 构建备注内容：关系备注内容 + 业务对象关系编码
     const boAnnotations = rel.businessObjectRelationships
       .filter(boRel => boRel.annotationContent)
@@ -180,7 +242,7 @@ function computedServiceModuleRelations(relationships, businessObjects, serviceM
         const code = boRel.relationCode || ''
         return code ? `${boRel.annotationContent} ${code}` : boRel.annotationContent
       })
-    
+
     // 去重并用分号连接
     const uniqueAnnotations = [...new Set(boAnnotations)]
     
@@ -237,6 +299,12 @@ export function useDiagramData() {
     hideLinkLabelTails: configStore.hideLinkLabelTails,
     annotationPanelPosition: configStore.annotationPanelPosition,
     showAnnotationIcons: configStore.showAnnotationIcons,
+    // [FIX 2026-06-29 v3] 加上 annotationCategoryFilter
+    //   之前漏了这行, 传给 StepDisplay/MermaidComponent 的 annotationConfig 没有 filter 字段
+    //   useSvgProcessor.renderAnnotationOverlay 拿 annotationConfig.annotationCategoryFilter 时是 undefined
+    //   → || [] → 永远空数组 → 永远不过滤
+    // 主线不受影响: 默认 [] = 不过滤 (向后兼容)
+    annotationCategoryFilter: configStore.annotationCategoryFilter,
     assignmentMode: configStore.assignmentMode
   }))
   const diagramData = ref(null)
@@ -532,11 +600,15 @@ export function useDiagramData() {
   const availableSubDomains = computed(() => {
     if (!previewData.value?.domainProducts) return []
 
-    // 中心范围 + 关系范围（并集）
-    const centerBoCodes = centerScope.value ? new Set(centerScope.value) : new Set()
-    const relationBoCodes = relationFilteredBoCodes.value ? new Set(relationFilteredBoCodes.value) : new Set()
-
-    const allBoCodes = new Set([...centerBoCodes, ...relationBoCodes])
+    // [BUG-V033 修复 2026-06-29] 颜色配置应显示 "中心 ∪ 关系范围" 的所有子领域
+    //   - CenterDomainSelect 内部 isFullyInCenterScope 会自动过滤完全在中心的 (用 centerScopeColor)
+    //   - 剩下外部的分配颜色组合
+    //   - 之前误改成只用 centerScope → 外部项被过滤 → 颜色项缺失
+    //   - relationFilteredBoCodes = centerScope + 用户选中的关系引入的 BO (BUG-V032 已修复, 不再全量)
+    // [BUG-V033 二轮修复 2026-06-29] relationFilteredBoCodes 返回 Array (非 Set), 用 .length 而非 .size
+    const allBoCodes = relationFilteredBoCodes.value && relationFilteredBoCodes.value.length > 0
+      ? new Set(relationFilteredBoCodes.value)
+      : (centerScope.value ? new Set(centerScope.value) : new Set())
 
     if (allBoCodes.size === 0) {
       return extractSubDomains(previewData.value.domainProducts)
@@ -634,11 +706,11 @@ export function useDiagramData() {
   const availableDomains = computed(() => {
     if (!previewData.value?.domainProducts) return []
 
-    // 中心范围 + 关系范围（并集）
-    const centerBoCodes = centerScope.value ? new Set(centerScope.value) : new Set()
-    const relationBoCodes = relationFilteredBoCodes.value ? new Set(relationFilteredBoCodes.value) : new Set()
-
-    const allBoCodes = new Set([...centerBoCodes, ...relationBoCodes])
+    // [BUG-V033 修复] 颜色配置显示 "中心 ∪ 关系范围" 的所有领域
+    // [BUG-V033 二轮修复] relationFilteredBoCodes 返回 Array, 用 .length
+    const allBoCodes = relationFilteredBoCodes.value && relationFilteredBoCodes.value.length > 0
+      ? new Set(relationFilteredBoCodes.value)
+      : (centerScope.value ? new Set(centerScope.value) : new Set())
 
     if (allBoCodes.size === 0) {
       return previewData.value.domainProducts.map(domain => domain.name)
@@ -658,16 +730,18 @@ export function useDiagramData() {
   const availableServiceModules = computed(() => {
     if (!previewData.value?.businessObjects?.length) return []
 
-    // v29: 对齐 availableDomains/availableSubDomains — 从 allBoCodes (center+relation) 提取 SM
-    //   不再依赖 previewData.serviceModules (可能是空或旧格式)
-    const centerBoCodes = centerScope.value ? new Set(centerScope.value) : new Set()
-    const relationBoCodes = relationFilteredBoCodes.value ? new Set(relationFilteredBoCodes.value) : new Set()
+    // [BUG-V033 修复] 颜色配置显示 "中心 ∪ 关系范围" 的所有服务模块
+    //   - CenterDomainSelect 内部 isFullyInCenterScope 自动过滤完全在中心的
+    //   - 剩下外部的分配颜色
+    // [BUG-V033 二轮修复] relationFilteredBoCodes 返回 Array, 用 .length
+    const allBoCodes = relationFilteredBoCodes.value && relationFilteredBoCodes.value.length > 0
+      ? new Set(relationFilteredBoCodes.value)
+      : (centerScope.value ? new Set(centerScope.value) : new Set())
 
-    const allBoCodes = new Set([...centerBoCodes, ...relationBoCodes])
+    const smMap = new Map()
 
     if (allBoCodes.size === 0) {
-      // 兜底: 全量返回 (保持与domains/subdomains一致)
-      const smMap = new Map()
+      // 兜底: 全量返回
       previewData.value.businessObjects.forEach(bo => {
         const name = bo.serviceModuleName || bo.serviceModule
         const code = bo.serviceModule || bo.serviceModuleName
@@ -678,7 +752,6 @@ export function useDiagramData() {
       return Array.from(smMap.values())
     }
 
-    const smMap = new Map()
     previewData.value.businessObjects.forEach(bo => {
       if (allBoCodes.has(bo.code)) {
         const name = bo.serviceModuleName || bo.serviceModule
@@ -733,7 +806,12 @@ export function useDiagramData() {
           subDomainMap.get(sm.subDomain).nodes.push({
             id: sm.code,
             name: sm.name,
-            code: sm.code
+            code: sm.code,
+            // [FIX 2026-06-29] 透传 annotation 数组字段
+            //   之前只 push id/name/code, annotation 字段全丢, 图表显示没数字标记
+            //   archDataConverter 输出 sm.annotationContents/Categories 是数组
+            annotationContents: sm.annotationContents || [],
+            annotationCategories: sm.annotationCategories || []
           })
         })
       }
@@ -1626,6 +1704,11 @@ export function useDiagramData() {
       }
     } else {
       // 业务对象图
+      // [V007.49 P0 2026-07-09] 关系数量告警 (财务云 600+ BO 节点)
+      //   finalRelationships 包含所有 active 关系 (filteredRelationships + internalRelationFilter)
+      //   超过 100 触发右下角 ElNotification 建议
+      warnTooManyRelationships(finalRelationships.length, 'businessObject')
+
       const useLegacy = diagramConfig.value.useLegacyGroupControl
 
       if (!useLegacy) {
@@ -1788,7 +1871,7 @@ export function useDiagramData() {
       configStore.setChartTypeChanged(true)
       configStore.updateLayoutControlConfig({
         enabled: false,
-        overallDirection: 'LR',
+        overallDirection: 'TB',
         groups: [],
         engine: 'elk',
         preserveOrder: true
@@ -1935,6 +2018,18 @@ export function useDiagramData() {
     }
   )
 
+  // [修复 2026-06-29] 监听 centerScopeColor 变化, 重新生成 diagramData
+  //   之前缺少此 watch, 用户改中心范围颜色后 diagramData.centerScopeColor 不更新
+  //   导致 PDF/HTML 导出的 legend 中心范围颜色还是旧值
+  watch(
+    () => diagramConfig.value?.centerScopeColor,
+    (newColor, oldColor) => {
+      if (newColor !== oldColor && previewData.value) {
+        generateDiagram()
+      }
+    }
+  )
+
   watch(
     centerScope,
     (newScope, oldScope) => {
@@ -2045,7 +2140,7 @@ export function useDiagramData() {
 
   async function initFromArchDataManager(archData) {
     const { versionId, hierarchyFilter, relationTypeFilter, relationIds: archRelationIds, relationCategoryTypes } = archData
-    
+
     loading.value = true
     try {
       const result = await buildPreviewDataFromArchData(null, versionId, hierarchyFilter)

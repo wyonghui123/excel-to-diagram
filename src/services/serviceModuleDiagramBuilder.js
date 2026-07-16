@@ -16,6 +16,7 @@
  */
 
 import { LAYOUT_TEMPLATES, COLOR_SCHEMES } from '@/constants/diagram'
+import { sanitizeMermaidLabel } from '../composables/useMermaid/syntax/_shared/arrowHelper.js'
 
 export { LAYOUT_TEMPLATES }
 
@@ -231,8 +232,11 @@ export function buildServiceModuleDiagramData({
       subDomain: sm.subDomain,
       color: finalColor,
       textColor: nodeTextColor,
-      annotationCategory: sm.annotationCategory || 'info',
-      annotationContent: sm.annotationContent || '',
+      // [FIX 2026-06-29] archDataConverter 输出复数数组 annotationContents/Categories
+      //   单条时也是数组形式 [content], 多条时 [c1, c2, c3]
+      //   这样 useAnnotation.parseAnnotationsFromData 可以逐条渲染
+      annotationContents: sm.annotationContents || [],
+      annotationCategories: sm.annotationCategories || [],
       isCenter: isCenter
     }
   })
@@ -243,8 +247,9 @@ export function buildServiceModuleDiagramData({
     target: rel.targetServiceModuleCode,
     label: rel.serviceRelationshipCode,
     tooltip: `关系编码: ${rel.serviceRelationshipCode}\n业务对象关系: ${rel.businessObjectRelationshipCodes?.join(', ')}`,
-    annotationCategory: rel.annotationCategory || 'info',
-    annotationContent: rel.annotationContent || '',
+    // [FIX 2026-06-29] 复数数组形式
+    annotationContents: rel.annotationContents || [],
+    annotationCategories: rel.annotationCategories || [],
     // [v34 双向支持] 透传 relationType + relationDirection
     relationType: rel.relationType || '',
     relationDirection: rel.relationDirection || null
@@ -288,6 +293,7 @@ export function buildServiceModuleDiagramData({
     containers: sortedContainers,
     centerSubDomain: actualCenterSubDomain,
     centerSubDomainColor,
+    centerScopeColor,
     colorGroupBy,
     colorScheme,
     nodeTextColor,
@@ -434,14 +440,18 @@ export function generateServiceModuleMermaidCode(diagramData) {
   // 生成子图（容器）
   containers.forEach(container => {
     const containerId = container.id.replace(/[^a-zA-Z0-9]/g, '_');
-    code += `    subgraph ${containerId}["${container.fullTitle}"]\n`;
+    // [V007.52 P0] 转义 container.fullTitle / node.name / node.code 防 mermaid 11.13 syntax error
+    const safeContainerTitle = sanitizeMermaidLabel(container.fullTitle || '')
+    code += `    subgraph ${containerId}["${safeContainerTitle}"]\n`;
 
     // 容器内的节点
     container.nodes.forEach(nodeId => {
       const node = nodes.find(n => n.id === nodeId);
       if (node) {
-        const nodeLabel = `${node.name}<br/>${node.code}`;
-        code += `        ${node.code}["${nodeLabel}"]\n`;
+        const safeNodeName = sanitizeMermaidLabel(node.name || '')
+        const safeNodeCode = sanitizeMermaidLabel(node.code || '')
+        const nodeLabel = `${safeNodeName}<br/>${safeNodeCode}`;
+        code += `        ${safeNodeCode}["${nodeLabel}"]\n`;
       }
     });
 

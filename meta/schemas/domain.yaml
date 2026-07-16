@@ -18,6 +18,13 @@ dimension_bindings:
   field: version_id
 audit:
   enabled: true
+  # [FIX BUG-V046 2026-07-04 dev agent] 详情页"操作日志" tab 默认显示所有子对象日志
+  # 但 PM 决定: 领域 详情页 不显示 sub_domain / service_module / business_object / relationship
+  # 的子对象日志 (因为这些是领域的主业务子对象, 不是"备注/打标"类)
+  # 只显示自身 + annotation 类型的子对象日志
+  # 修法: yaml 配 excluded_child_object_types, 后端 audit_api 据此加 SQL 过滤
+  history:
+    excluded_child_object_types: [sub_domain, service_module, business_object, relationship]
   create:
     enabled: true
     fields: all
@@ -585,6 +592,20 @@ actions:
   method: GET
   path: /api/v1/domains
   description: 查询领域列表
+# [FIX 2026-07-10] BUG-V051: import_enabled=true 但 actions 缺 import/export, 补全
+#   委托给统一 export-import 端点 (不要为每个 BO 单独建 import/export 端点)
+- id: export
+  name: 导出
+  type: business
+  method: GET
+  path: /api/v1/export-import/export
+  description: 通过统一导出端点导出领域到Excel
+- id: import
+  name: 导入
+  type: business
+  method: POST
+  path: /api/v1/export-import/import
+  description: 通过统一导入端点从Excel批量导入领域
 validations:
 - id: version_id_required
   name: 版本ID必填

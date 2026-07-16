@@ -15,6 +15,11 @@ from meta.services.display_name_service import DisplayNameService
 from meta.core.ui_config.config_builder import UIConfigBuilder
 from meta.core.ui_config.value_help_formatter import value_help_to_dict as _value_help_to_dict_impl
 
+# [V007.15 L2] observability + state verification
+from meta.core.sqlite_tx_state import get_tx_state, TxState
+from meta.core.db_config_detector import get_runtime_config
+from meta.core.observability import metrics_inc, OBS_COUNTERS, log_tx_event
+
 logger = logging.getLogger(__name__)
 
 BO_INTERCEPTOR_MODE = os.environ.get('BO_INTERCEPTOR_MODE', 'sync')
@@ -389,7 +394,30 @@ class BOFramework:
             'name': meta_obj.name,
             'table_name': getattr(meta_obj, 'table_name', ''),
             'description': getattr(meta_obj, 'description', ''),
+            # [FIX BUG-V051.2 2026-07-10 dev agent] 暴露更多对象级字段
+            'label': getattr(meta_obj, 'label', None) or meta_obj.name,
+            'labels': getattr(meta_obj, 'labels', {}) or {},
+            'display_name_field': getattr(meta_obj, 'display_name_field', None),
+            'parent_object': getattr(meta_obj, 'parent_object', None) or '',
+            'aspects': list(getattr(meta_obj, 'aspects', None) or []),
+            'is_view': getattr(meta_obj, 'is_view', False),
+            'persistent': getattr(meta_obj, 'persistent', True),
+            'bo_category': str(meta_obj.bo_category) if getattr(meta_obj, 'bo_category', None) else None,
+            'bo_sub_category': str(meta_obj.bo_sub_category) if getattr(meta_obj, 'bo_sub_category', None) else None,
+            'key_template': getattr(meta_obj, 'key_template', None) or {},
+            'cascade_select': getattr(meta_obj, 'cascade_select', None) or [],
+            'deletability': self._make_json_safe(getattr(meta_obj, 'deletability', None)) if getattr(meta_obj, 'deletability', None) else {},
+            'addability': self._make_json_safe(getattr(meta_obj, 'addability', None)) if getattr(meta_obj, 'addability', None) else {},
         }
+        ui_view_config = getattr(meta_obj, 'ui_view_config', None)
+        if ui_view_config:
+            schema['ui_view_config'] = self._make_json_safe(ui_view_config)
+        ui_view_configs = getattr(meta_obj, 'ui_view_configs', None)
+        if ui_view_configs:
+            schema['ui_view_configs'] = self._make_json_safe(ui_view_configs)
+        audit_cfg = getattr(meta_obj, 'audit', None)
+        if audit_cfg:
+            schema['audit_enabled'] = getattr(audit_cfg, 'enabled', True)
 
         fields_schema = []
         for f in meta_obj.fields:
@@ -400,6 +428,7 @@ class BOFramework:
                 'required': getattr(f, 'required', False),
                 'unique': getattr(f, 'unique', False),
                 'description': getattr(f, 'description', ''),
+                'computed': getattr(f, 'computed', False),
             }
             default = getattr(f, 'default', None)
             if default is not None:
@@ -419,6 +448,12 @@ class BOFramework:
             ui = getattr(f, 'ui', None)
             if ui:
                 fs['ui'] = self._make_json_safe(self._ui_to_dict(ui))
+            semantics = getattr(f, 'semantics', None)
+            if semantics:
+                fs['semantics'] = self._make_json_safe(semantics)
+            permission = getattr(f, 'permission', None)
+            if permission:
+                fs['permission'] = self._make_json_safe(permission)
             fields_schema.append(fs)
         schema['fields'] = fields_schema
 
@@ -455,24 +490,123 @@ class BOFramework:
         return transaction_id
 
     def commit(self, transaction_id: str = None) -> bool:
+        """
+        [V007.15 L2] commit with state-aware defense + observability.
+
+        Changes from v1:
+        - try/finally ensures state reset on success AND failure
+        - SQLite state verification after commit
+        - Prometheus metrics + structured log
+        """
+        config = get_runtime_config()
+        success = True
+        err_msg = None
         try:
             if hasattr(self._data_source, 'commit'):
                 self._data_source.commit()
             logger.info(f"[BOFramework] Transaction committed: {transaction_id}")
-            return True
         except Exception as e:
+            err_msg = str(e)
+            success = False
             logger.error(f"[BOFramework] Commit failed: {e}")
-            return False
+            metrics_inc('commit_failure')
+            log_tx_event('commit', transaction_id, 'error', err_msg)
+        finally:
+            # [V007.15 L2 关键] 强制重置所有 in_transaction 标志
+            try:
+                if hasattr(self._data_source, '_in_transaction'):
+                    self._data_source._in_transaction = False
+                if hasattr(self._data_source, '_write_queue') and self._data_source._write_queue:
+                    if hasattr(self._data_source._write_queue, '_in_transaction'):
+                        self._data_source._write_queue._in_transaction = False
+            except Exception as e:
+                log_tx_event('commit', transaction_id, 'state_reset_error', str(e))
+                success = False
+
+            # [V007.15 L2] 显式调 conn.rollback() 强制重置 (防御性)
+            if config.use_explicit_conn_rollback:
+                try:
+                    if hasattr(self._data_source, '_write_queue') and self._data_source._write_queue:
+                        wq = self._data_source._write_queue
+                        if hasattr(wq, '_write_conn') and wq._write_conn:
+                            wq._write_conn.rollback()
+                except Exception:
+                    pass  # 可能在 tx 外, 不算 failure
+
+            # [V007.15 L2 验证] 用 savepoint probe 验证 SQLite 实际状态
+            if hasattr(self._data_source, '_write_queue') and self._data_source._write_queue:
+                wq = self._data_source._write_queue
+                if hasattr(wq, '_write_conn') and wq._write_conn:
+                    actual = get_tx_state(wq._write_conn)
+                    if actual != TxState.NONE:
+                        try:
+                            wq._write_conn.execute("ROLLBACK")
+                            log_tx_event('commit', transaction_id, 'forced_rollback', actual)
+                            metrics_inc('forced_rollback_after_commit')
+                        except Exception as e:
+                            log_tx_event('commit', transaction_id, 'forced_rollback_error', str(e))
+
+        if success:
+            metrics_inc('commit_success')
+            log_tx_event('commit', transaction_id, 'ok', None)
+        return success
 
     def rollback(self, transaction_id: str = None) -> bool:
+        """
+        [V007.15 L2] rollback with state-aware defense + observability.
+        """
+        config = get_runtime_config()
+        success = True
+        err_msg = None
         try:
             if hasattr(self._data_source, 'rollback'):
                 self._data_source.rollback()
             logger.info(f"[BOFramework] Transaction rolled back: {transaction_id}")
-            return True
         except Exception as e:
+            err_msg = str(e)
+            success = False
             logger.error(f"[BOFramework] Rollback failed: {e}")
-            return False
+            metrics_inc('rollback_failure')
+            log_tx_event('rollback', transaction_id, 'error', err_msg)
+        finally:
+            # [V007.15 L2 关键] 强制重置所有 in_transaction 标志
+            try:
+                if hasattr(self._data_source, '_in_transaction'):
+                    self._data_source._in_transaction = False
+                if hasattr(self._data_source, '_write_queue') and self._data_source._write_queue:
+                    if hasattr(self._data_source._write_queue, '_in_transaction'):
+                        self._data_source._write_queue._in_transaction = False
+            except Exception as e:
+                log_tx_event('rollback', transaction_id, 'state_reset_error', str(e))
+                success = False
+
+            # [V007.15 L2] 显式 conn.rollback() 兜底
+            if config.use_explicit_conn_rollback:
+                try:
+                    if hasattr(self._data_source, '_write_queue') and self._data_source._write_queue:
+                        wq = self._data_source._write_queue
+                        if hasattr(wq, '_write_conn') and wq._write_conn:
+                            wq._write_conn.rollback()
+                except Exception:
+                    pass
+
+            # [V007.15 L2 验证] savepoint probe
+            if hasattr(self._data_source, '_write_queue') and self._data_source._write_queue:
+                wq = self._data_source._write_queue
+                if hasattr(wq, '_write_conn') and wq._write_conn:
+                    actual = get_tx_state(wq._write_conn)
+                    if actual != TxState.NONE:
+                        try:
+                            wq._write_conn.execute("ROLLBACK")
+                            log_tx_event('rollback', transaction_id, 'forced_rollback', actual)
+                            metrics_inc('forced_rollback_after_rollback')
+                        except Exception as e:
+                            log_tx_event('rollback', transaction_id, 'forced_rollback_error', str(e))
+
+        if success:
+            metrics_inc('rollback_success')
+            log_tx_event('rollback', transaction_id, 'ok', None)
+        return success
 
     def transaction(self):
         return TransactionContext(self)
@@ -482,35 +616,49 @@ class BOFramework:
         事务提交后，flush 缓存的审计记录到数据库。
 
         [SPR-07 T-S09-02] 用 drain_pending_audits() 替代 getattr 私有访问, 同时获得原子性.
+
+        [V007.15 L4.5 优化] 不再同步写 audit_logs, 而是入队到全局 AuditAsyncQueue
+        - 1 个事务写多条 audit (vs 原来 1 条 1 个事务)
+        - 失败不重试 (避免 retry 死循环)
+        - 失败自动 fallback 到原同步路径
         """
         # [SPR-07 T-S09-02] drain_pending_audits() 原子获取并清空, 替代 getattr + clear 两步
         pending = context.drain_pending_audits()
         if not pending:
             return
 
-        # 导入 StructuredLogger（延迟导入避免循环依赖）
-        # 不传入 async_writer，直接同步写入
-        from meta.services.structured_logger import StructuredLogger
-        structured_logger = StructuredLogger(async_writer=None)
-
-        flushed = 0
-        for audit_params in pending:
-            try:
-                structured_logger.log_business(**audit_params)
-                flushed += 1
-            except Exception as e:
-                logger.error(
-                    f"[BOFramework] Failed to flush audit record: {e}, "
-                    f"action={audit_params.get('action')}, "
-                    f"object_type={audit_params.get('object_type')}, "
-                    f"object_id={audit_params.get('object_id')}"
+        # [V007.15 L4.5] 入队到全局 audit_async_queue
+        from meta.core.audit_async_queue import get_global_queue
+        queue = get_global_queue()
+        if queue is None:
+            # 队列未初始化 (单测 / 早期启动), 走原同步路径
+            from meta.services.structured_logger import StructuredLogger
+            structured_logger = StructuredLogger(async_writer=None)
+            flushed = 0
+            for audit_params in pending:
+                try:
+                    structured_logger.log_business(**audit_params)
+                    flushed += 1
+                except Exception as e:
+                    logger.error(
+                        f"[BOFramework] Failed to flush audit record: {e}, "
+                        f"action={audit_params.get('action')}, "
+                        f"object_type={audit_params.get('object_type')}, "
+                        f"object_id={audit_params.get('object_id')}"
+                    )
+            if flushed > 0:
+                logger.info(
+                    f"[BOFramework] Flushed {flushed}/{len(pending)} pending audit records "
+                    f"after transaction commit (sync fallback)"
                 )
+            return
 
-        if flushed > 0:
-            logger.info(
-                f"[BOFramework] Flushed {flushed}/{len(pending)} pending audit records "
-                f"after transaction commit"
-            )
+        # 批量入队 (O(1) per audit, 总 O(N))
+        for audit_params in pending:
+            queue.enqueue(audit_params)
+        logger.debug(
+            f"[BOFramework L4.5] Enqueued {len(pending)} audit records to async queue"
+        )
 
     @staticmethod
     def _infer_navigation(assoc: dict):
@@ -578,12 +726,37 @@ class TransactionContext:
         self.transaction_id = None
         # [SPR-03] 事务结果标志：默认 commit; 调用方通过 set_outcome(False) 触发 rollback
         self._should_commit = True
+        # [V007.42 FR-006] 长事务检测: __enter__ 时记录开始时间
+        self._start_time = None
 
     def __enter__(self):
         self.transaction_id = self.bo_framework.begin_transaction()
+        # [V007.42 FR-006] 记录开始时间
+        import time as _time
+        self._start_time = _time.time()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        # [V007.42 FR-006] 长事务检测
+        if self._start_time is not None:
+            import time as _time
+            duration = _time.time() - self._start_time
+            if duration > 30:
+                logger.warning(
+                    "[V007.42] long transaction: %.1fs, txn=%s",
+                    duration, self.transaction_id
+                )
+            if duration > 120:
+                logger.error(
+                    "[V007.42] very long transaction: %.1fs, txn=%s",
+                    duration, self.transaction_id
+                )
+                try:
+                    from meta.core.observability import metrics_inc
+                    metrics_inc('long_transaction_total')
+                except ImportError:
+                    pass
+
         if exc_type is not None:
             # 异常路径：始终 rollback
             self.bo_framework.rollback(self.transaction_id)
@@ -602,4 +775,17 @@ class TransactionContext:
         self._should_commit = bool(success)
 
 
+def get_bo_framework() -> BOFramework:
+    """[V007.43 P0 BUG-FIX] 单例获取函数.
+
+    背景: V007.41 P3 (commit 9d051f9) 引入 meta/api/intent_api.py:26 调用
+          `from meta.core.bo_framework import get_bo_framework`,
+          但当时没在 bo_framework.py 实现这个函数。
+          V007.42 部署后 yonaa 启动 ImportError 导致 5001 backend 死亡。
+    修法: 加这个函数返回全局单例 bo_framework。
+    """
+    return bo_framework
+
+
 bo_framework = BOFramework()
+

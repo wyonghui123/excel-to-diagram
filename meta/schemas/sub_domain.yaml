@@ -21,6 +21,10 @@ dimension_bindings:
   through: domain->version
 audit:
   enabled: true
+  # [FIX BUG-V046 2026-07-04 dev agent] 同 domain.yaml. 子领域 详情页"操作日志" tab
+  # 不显示 service_module / business_object / relationship 的子对象日志
+  history:
+    excluded_child_object_types: [service_module, business_object, relationship]
   create:
     enabled: true
     fields: all
@@ -723,6 +727,20 @@ actions:
   method: GET
   path: /api/v1/sub_domains
   description: 查询子领域列表
+# [FIX 2026-07-10] BUG-V051: 补全 import/export actions
+#   委托给统一 export-import 端点
+- id: export
+  name: 导出
+  type: business
+  method: GET
+  path: /api/v1/export-import/export
+  description: 通过统一导出端点导出子领域到Excel
+- id: import
+  name: 导入
+  type: business
+  method: POST
+  path: /api/v1/export-import/import
+  description: 通过统一导入端点从Excel批量导入子领域
 validations:
 - id: version_id_required
   name: 版本ID必填

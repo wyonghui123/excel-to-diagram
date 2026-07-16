@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import logging
 import threading
 
@@ -984,6 +984,10 @@ class QueryService:
             builder.or_where(or_conditions)
             builder.limit(limit)
 
+            # [V007.46 BUG-FIX] full_text_search 补 _apply_data_permission
+            # 背景: V007.44 dev-agent 910022e 改了 deploy_bundle 但工作树未改, 部署时回滚
+            self._apply_data_permission(builder, meta_obj, object_id)
+
             rows = builder.execute()
             if rows:
                 results[object_id] = rows
@@ -1025,6 +1029,9 @@ class QueryService:
                         parent_field = self._get_parent_field(child_obj, target_object_id)
                         if parent_field:
                             child_builder.where_in(parent_field, parent_ids)
+                            # [V007.46 BUG-FIX] query_by_hierarchy_path 补 _apply_data_permission
+                            # 背景: 子对象查询同样需要权限过滤
+                            self._apply_data_permission(child_builder, child_obj, target_object_id)
                             children = child_builder.execute()
                             results.extend(children)
 
@@ -1045,6 +1052,10 @@ class QueryService:
         builder.where_ilike(field, "{0}%".format(prefix))
         builder.select(field)
         builder.limit(limit)
+
+        # [V007.46 BUG-FIX] suggest 补 _apply_data_permission
+        # 背景: 前缀搜索建议接口同样需要权限过滤
+        self._apply_data_permission(builder, meta_obj, object_type)
 
         rows = builder.execute()
         return list(dict.fromkeys(r.get(field, "") for r in rows if r.get(field)))
@@ -1577,7 +1588,13 @@ class QueryService:
             #   (例: TEST333 创建 RACE 领域后, 该条自动授予 admin → allowed_ids=[683])
             #   但 dimension scope 派生 (例: 领域 in 采购管理) 应当覆盖更大范围 (410 条)
             # 这里先调 DimensionScopeEngine, 跟 DataPermissionInterceptor._apply_dimension_scope_filter 一致
-            if self._try_apply_dimension_scope(builder, user_id, object_type):
+            # [V007.37 BUG-FIX] 包裹 retry (export 场景高频触发 disk I/O error)
+            if self._try_apply_dimension_scope_with_retry(builder, user_id, object_type):
+                # [FIX BUG-V021 2026-06-27] dim scope 应用后追加 owner exception
+                # query_service.search 路径不走 BOFramework 拦截器链,
+                # 所以 d41c4c8 BUG-V013 owner exception 修复无法生效
+                # 修复方法: 在 _try_apply_dimension_scope 内部追加 owner_id 到 OR group
+                # (已在 _try_apply_dimension_scope 末尾处理)
                 return
 
             perm_filter = DataPermissionFilter(self.ds)
@@ -1599,10 +1616,16 @@ class QueryService:
                 builder.where('id', QueryOperator.EQ, allowed_ids[0])
             else:
                 builder.where_in('id', allowed_ids)
-            
+
             logger.info(f"[DataPerm] Applied filter for {object_type}: {len(allowed_ids)} IDs")
         except Exception as e:
-            logger.warning(f"[DataPerm] Failed to apply data permission: {e}")
+            # [V007.46 BUG-FIX] 异常时必须拒绝, 不能静默允许全部
+            # 背景: 原 except 路径什么都不做 → builder 无过滤 → 返回全部数据
+            #       NameError/disk I/O 等异常绕过权限过滤
+            # 与 data_permission_filter.py 异常时返回 id = -1 行为对齐
+            # V007.44 dev-agent 910022e 改了 deploy_bundle 但工作树 meta/ 未改
+            logger.error(f"[DataPerm] Failed to apply data permission for {object_type}: {e}", exc_info=True)
+            builder.where('id', QueryOperator.EQ, -1)
 
     def _try_apply_dimension_scope(
         self,
@@ -1678,30 +1701,295 @@ class QueryService:
         if not per_role_conds:
             return False
 
-        # 4. 应用到 builder
-        # [V1.2.1 2026-06-16] 支持 OR 条件 (relationship 的 source_bo_id OR target_bo_id)
+        # 4. 应用到 builder (重写为 OR group 包含 dim scope + owner exception)
+        # [FIX BUG-V021 2026-06-27] 把所有 dim scope 条件 + owner exception 合并到一个 OR group
+        # 这样 SQL 是 WHERE ((dim_scope_1) OR (dim_scope_2) OR (owner_id = ?)) AND ...
+        from meta.core.query_builder import QueryOperator as _QOp
+        or_conditions: list = []
+
+        def _cond_to_tuple(c: Dict) -> Optional[Tuple[str, _QOp, Any]]:
+            op_str = c.get('operator', 'eq')
+            field = c.get('field')
+            if not field:
+                return None
+            # [FIX BUG-V027 2026-07-07] operator 不在 QueryOperator 枚举内 (例: in_subquery)
+            # 之前 _QOp(op_str.lower()) 在 in_subquery 时抛 ValueError, 多 role 分支静默失败
+            # 修复: 把 in_subquery 当 raw tuple 直传, 由 _tup_to_sql 走 IN(subquery) SQL
+            try:
+                op = _QOp(op_str.lower())
+            except ValueError:
+                # 未知 operator (例: in_subquery) - 用 EQ 包装, value 跟着 op_str
+                op = _QOp.EQ
+                # 把 op_str 和 value 合并进 val, 让 _tup_to_sql 决定
+                val = c.get('value')
+                return (field, op, (op_str, val))  # tuple-typed 标记
+            if op in (_QOp.IN, _QOp.NOT_IN, _QOp.BETWEEN):
+                vals = c.get('values')
+                if vals is None:
+                    vals = c.get('value')
+                if vals is None:
+                    return None
+                if not isinstance(vals, list):
+                    vals = [vals]
+                return (field, op, vals)
+            return (field, op, c.get('value'))
+
+        def _tup_to_sql(tup: Tuple) -> Tuple[str, list]:
+            """把 _cond_to_tuple 输出转成 (sql-fragment, params)"""
+            field, op, val = tup
+            col = builder._get_db_column(field) if hasattr(builder, '_get_db_column') else field
+            # [FIX BUG-V027] 处理 in_subquery / 任意 raw operator
+            if isinstance(val, tuple):
+                raw_op, raw_val = val
+                if raw_op == 'in_subquery' and isinstance(raw_val, str):
+                    return f"{col} IN ({raw_val})", []
+                # 其它未知 operator: 跳过 (返回 None - 调用方过滤)
+                return None
+            if op == _QOp.IN:
+                placeholders = ','.join('?' * len(val))
+                return f"{col} IN ({placeholders})", list(val)
+            if op == _QOp.NOT_IN:
+                placeholders = ','.join('?' * len(val))
+                return f"{col} NOT IN ({placeholders})", list(val)
+            if op == _QOp.EQ:
+                return f"{col} = ?", [val]
+            if op == _QOp.NE:
+                return f"{col} != ?", [val]
+            if op == _QOp.GT:
+                return f"{col} > ?", [val]
+            if op == _QOp.GE:
+                return f"{col} >= ?", [val]
+            if op == _QOp.LT:
+                return f"{col} < ?", [val]
+            if op == _QOp.LE:
+                return f"{col} <= ?", [val]
+            if op == _QOp.LIKE:
+                return f"{col} LIKE ?", [val]
+            return f"{col} {op.value} ?", [val]
+
         if len(per_role_conds) == 1:
+            # [FIX BUG-V027-pt2 2026-07-08] 单 role 也必须按 AND 关系处理
+            # 原 bug (与多 role 同源): 把 AND 段的 leaf cond 平铺到 or_conditions,
+            #   `or_where` 把它们全当 OR 拼, SQL 退化为 (id=8 OR version_id=3) 永远为真
+            #   → 领域 11 (应 1), 子领域 68 (应 5), BO 3228 (应 155)
+            # 修复: 用 where_raw 注入 (c1 AND c2 AND ...) 正确表达 AND 关系
+            and_clauses: list = []
+            and_params: list = []
             for c in per_role_conds[0]:
                 if c.get('type') == 'or':
-                    # 单 role 内的 OR 条件 (如 relationship)
-                    self._apply_or_group(builder, c['conditions'])
-                elif c.get('type') == 'and':
+                    # 嵌套 OR 子段, 内部仍是 list of leaf (按 OR)
+                    or_sub_clauses: list = []
+                    or_sub_params: list = []
                     for ac in c['conditions']:
-                        self._apply_single_cond(builder, ac)
+                        tup = _cond_to_tuple(ac)
+                        if not tup:
+                            continue
+                        res = _tup_to_sql(tup)
+                        if res is None:
+                            continue
+                        clause, ps = res
+                        or_sub_clauses.append(clause)
+                        or_sub_params.extend(ps)
+                    if or_sub_clauses:
+                        if len(or_sub_clauses) == 1:
+                            and_clauses.append(or_sub_clauses[0])
+                            and_params.extend(or_sub_params)
+                        else:
+                            and_clauses.append(f"({' OR '.join(or_sub_clauses)})")
+                            and_params.extend(or_sub_params)
+                elif c.get('type') == 'and':
+                    sub_and_clauses: list = []
+                    sub_and_params: list = []
+                    for ac in c['conditions']:
+                        tup = _cond_to_tuple(ac)
+                        if not tup:
+                            continue
+                        res = _tup_to_sql(tup)
+                        if res is None:
+                            continue
+                        clause, ps = res
+                        sub_and_clauses.append(clause)
+                        sub_and_params.extend(ps)
+                    if sub_and_clauses:
+                        if len(sub_and_clauses) == 1:
+                            and_clauses.append(sub_and_clauses[0])
+                            and_params.extend(sub_and_params)
+                        else:
+                            and_clauses.append(f"({' AND '.join(sub_and_clauses)})")
+                            and_params.extend(sub_and_params)
                 else:
-                    self._apply_single_cond(builder, c)
+                    tup = _cond_to_tuple(c)
+                    if not tup:
+                        continue
+                    res = _tup_to_sql(tup)
+                    if res is None:
+                        continue
+                    clause, ps = res
+                    and_clauses.append(clause)
+                    and_params.extend(ps)
+
+            if and_clauses:
+                from meta.services.chain_owner_resolver import build_owner_exception_subquery
+
+                dim_scope_sql = ' AND '.join(and_clauses)
+                dim_scope_params = list(and_params)
+
+                owner_clause = None
+                owner_params: list = []
+                if object_type == 'product':
+                    owner_col = builder._get_db_column('owner_id') if hasattr(builder, '_get_db_column') else 'owner_id'
+                    owner_clause = f"{owner_col} = ?"
+                    owner_params = [user_id]
+                else:
+                    # [FIX BUG-V050] 不再用 is_in_chain 门禁, 直接调用 build_owner_exception_subquery
+                    owner_subquery = build_owner_exception_subquery(self.ds, object_type, user_id)
+                    if owner_subquery:
+                        id_col = builder._get_db_column('id') if hasattr(builder, '_get_db_column') else 'id'
+                        owner_clause = f"{id_col} IN ({owner_subquery})"
+
+                if owner_clause:
+                    raw_sql = f"({dim_scope_sql} OR {owner_clause})"
+                    builder.where_raw(raw_sql, dim_scope_params + owner_params)
+                    logger.info(
+                        f"[_try_apply_dimension_scope] user={user_id} object_type={object_type} "
+                        f"single_role dim_scope OR owner_exception"
+                    )
+                else:
+                    if len(and_clauses) == 1:
+                        builder.where_raw(and_clauses[0], and_params)
+                    else:
+                        builder.where_raw(f"({dim_scope_sql})", dim_scope_params)
+                    logger.info(
+                        f"[_try_apply_dimension_scope] user={user_id} object_type={object_type} "
+                        f"single_role AND-merged ({len(and_clauses)} parts)"
+                    )
+            return True
         else:
-            # 多 role → OR-of-AND
-            all_and_segments = []
+            # [FIX BUG-V027 2026-07-07] multi-role: OR-of-AND
+            #   原 bug: 平铺每个 role 的 AND 段到 or_conditions 列表, 或 = `or_where` 平铺,
+            #     SQL 退化为 (r1.c1 OR r1.c2 OR r2.c1 OR r2.c2 OR ...) 永远为真 → 返回全部 BO
+            #   修复: 用 `where_raw` 注入 OR-of-AND,
+            #     SQL = (r1.c1 AND r1.c2 AND ...) OR (r2.c1 AND r2.c2 AND ...) OR (owner=?)
+            #   对齐 DPI v1.2.30 (`data_permission_interceptor.py:339-349`)
             for conds in per_role_conds:
-                all_and_segments.extend(conds)
-            self._apply_or_group(builder, all_and_segments)
+                for c in conds:
+                    tup = _cond_to_tuple(c)
+                    if tup:
+                        or_conditions.append(tup)
+            # 不要落到下面 builder.or_where(or_conditions) - 会同时建两个 OR 组
+            # 收集所有 role 的 AND 段到 raw OR-of-AND
+            or_raw_parts: list = []
+            or_raw_params: list = []
+            for conds in per_role_conds:
+                # 一个 role 的所有 leaf cond 视为 AND 关系
+                and_clauses: list = []
+                for c in conds:
+                    tup = _cond_to_tuple(c)
+                    if tup:
+                        res = _tup_to_sql(tup)
+                        if res is None:
+                            # 跳过 _tup_to_sql 拒绝的 cond (未知 operator)
+                            continue
+                        clause, ps = res
+                        and_clauses.append((clause, ps))
+                if and_clauses:
+                    if len(and_clauses) == 1:
+                        or_raw_parts.append(and_clauses[0][0])
+                        or_raw_params.extend(and_clauses[0][1])
+                    else:
+                        joined_sql = ' AND '.join(c for c, _ in and_clauses)
+                        or_raw_parts.append(f"({joined_sql})")
+                        for _, ps in and_clauses:
+                            or_raw_params.extend(ps)
+
+            # [FIX BUG-V021] 把 owner_id 加到同一个 OR 组 (multi-role 路径)
+            from meta.services.chain_owner_resolver import build_owner_exception_subquery
+            if object_type == 'product':
+                or_raw_parts.append(f"{builder._get_db_column('owner_id') if hasattr(builder, '_get_db_column') else 'owner_id'} = ?")
+                or_raw_params.append(user_id)
+                logger.info(
+                    f"[DataPerm] OR-of-AND dim_scope with owner_id={user_id} for product"
+                )
+            else:
+                # [FIX BUG-V050] 不再用 is_in_chain 门禁, 直接调用 build_owner_exception_subquery
+                owner_subquery = build_owner_exception_subquery(self.ds, object_type, user_id)
+                if owner_subquery:
+                    id_col = builder._get_db_column('id') if hasattr(builder, '_get_db_column') else 'id'
+                    or_raw_parts.append(f"{id_col} IN ({owner_subquery})")
+                    logger.info(
+                        f"[DataPerm] OR-of-AND dim_scope with chain owner exception for {object_type} user={user_id}"
+                    )
+
+            if or_raw_parts:
+                raw_sql = ' OR '.join(or_raw_parts)
+                builder.where_raw(f"({raw_sql})", or_raw_params)
+                logger.info(
+                    f"[_try_apply_dimension_scope BUG-V027] user={user_id} object_type={object_type} "
+                    f"multi_role={len(per_role_conds)} OR-of-AND injected ({len(or_raw_parts)} parts)"
+                )
+            # 清空 or_conditions 避免下面 or_where 再插入 (已经用 where_raw 注入)
+            or_conditions = []
+            return True
+
+        # [FIX BUG-V021] 单 role 路径: 把 owner_id 加到同一个 OR 组
+        from meta.services.chain_owner_resolver import build_owner_exception_subquery
+        if object_type == 'product':
+            or_conditions.append(('owner_id', _QOp.EQ, user_id))
+            logger.info(
+                f"[DataPerm BUG-V021] OR-merged dim_scope with owner_id={user_id} for product"
+            )
+        else:
+            # [FIX BUG-V050] 子对象 (version/domain/.../service_module/business_object)
+            # 注意: virtual_sort.py 的 add_table_alias_to_where 会给子查询加别名导致 SQL 错
+            # 所以这里仍跳过 owner exception, 依赖 BOFramework 拦截器链处理 (BUG-V013)
+            logger.debug(
+                f"[DataPerm BUG-V021] Skip owner exception for {object_type} in query_service.search (handled by BOFramework interceptor)"
+            )
+
+        if or_conditions:
+            builder.or_where(or_conditions)
 
         logger.info(
             f"[_try_apply_dimension_scope] user={user_id} object_type={object_type} "
             f"roles_with_scope={len(per_role_conds)} (override allowed_ids)"
         )
         return True
+
+    def _try_apply_dimension_scope_with_retry(self, builder, user_id, object_type, max_retries=5):
+        """[V007.37 BUG-FIX] dimension scope 应用重试
+
+        背景: V007.37 HANDOFF §7.2 — 导出 Excel 场景触发 _create_connection,
+              新连接可能撞 disk I/O error. _try_apply_dimension_scope 本身不重试,
+              失败直接 return False, 后续走 allowed_ids fallback, 触发 IO error 上抛.
+
+        修法: 包裹一层 retry + 指数 backoff, 跟 V007.34 read 路径一致 (5 次).
+        """
+        import time as _time
+        import random as _random
+        last_err = None
+        for attempt in range(max_retries):
+            try:
+                if self._try_apply_dimension_scope(builder, user_id, object_type):
+                    return True
+                return False  # 没应用上 (没维度权限, 不是错误)
+            except Exception as e:
+                last_err = e
+                err_str = str(e).lower()
+                # 只对 disk I/O / database locked 重试
+                if ('disk i/o' not in err_str and
+                        'database is locked' not in err_str and
+                        'database is busy' not in err_str):
+                    raise  # 其他错误不重试, 直接抛
+                if attempt < max_retries - 1:
+                    delay = 0.05 * (2 ** attempt) + _random.uniform(0, 0.02)
+                    logger.warning(
+                        "[V007.37] _try_apply_dimension_scope retry %d/%d sleep %.3fs: %s",
+                        attempt + 1, max_retries, delay, e
+                    )
+                    _time.sleep(delay)
+        # 重试耗尽
+        logger.error("[V007.37] _try_apply_dimension_scope retry exhausted: %s", last_err)
+        raise last_err
 
     def _apply_single_cond(self, builder: QueryBuilder, cond: Dict) -> None:
         """[FIX 2026-06-14] 应用单条 dimension scope 条件到 QueryBuilder
@@ -1937,6 +2225,10 @@ class QueryService:
 
         if request.dimensions:
             builder.group_by(*request.dimensions)
+
+        # [V007.46 BUG-FIX] aggregate 补 _apply_data_permission
+        # 背景: 聚合接口必须基于已过滤的 records, 否则会泄露未授权的聚合数据
+        self._apply_data_permission(builder, meta_obj, request.object_type)
 
         try:
             data = builder.execute()

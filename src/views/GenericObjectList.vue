@@ -7,6 +7,7 @@
       :enable-detail="enableDetail"
       :enable-auto-crud="enableAutoCrud"
       @detail="(payload) => $emit('detail', payload)"
+      @row-dblclick="handleRowDblClick"
     >
       <template v-for="(_, slotName) in $slots" :key="slotName" #[slotName]="slotProps">
         <slot :name="slotName" v-bind="slotProps" />
@@ -53,6 +54,14 @@ const listOptions = computed(() => ({
   pageSize: props.pageSize,
   debug: props.debug
 }))
+
+// [FIX 2026-06-29] 行双击触发 detail action (与点击 detail 按钮行为一致)
+//   - Spec: docs/specs/useMetaList-refactor/spec-base-v1.0.0.md #15
+//   - Batch2 Agent dd01708 在 MetaListPage 加了 emit, 但 4 个 consumer 都没监听
+function handleRowDblClick({ row }) {
+  if (!row) return
+  metaListRef.value?.onRowAction?.({ action: { key: 'detail' }, row })
+}
 
 defineExpose({
   metaListRef

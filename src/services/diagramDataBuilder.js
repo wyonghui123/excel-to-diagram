@@ -37,8 +37,15 @@ export function buildNodes(businessObjects) {
     serviceModule: bo.serviceModule,
     serviceModuleName: bo.serviceModuleName,
     isCenter: bo.isCenter || false,
-    annotationCategory: bo.annotationCategory || 'info',
-    annotationContent: bo.annotationContent || ''
+    // [FIX 2026-06-29 v3] 复数数组形式 - 兼容单数/复数字段
+    //   后端返回 annotation_contents/categories (snake_case 数组)
+    //   archDataConverter.normalizeAnnotation 转换 annotationContents/Categories (驼峰数组)
+    //   之前用单数 annotationCategory/annotationContent (字符串), pushAnnotation 找不到数组 → 不渲染
+    annotationContents: bo.annotationContents || bo.annotation_contents || [],
+    annotationCategories: bo.annotationCategories || bo.annotation_categories || [],
+    // 保留单数字段以兼容其他代码
+    annotationCategory: bo.annotationCategories?.[0] || bo.annotation_category || bo.annotationCategory || 'info',
+    annotationContent: bo.annotationContents?.[0] || bo.annotation_content || bo.annotationContent || ''
   }));
 }
 
@@ -60,8 +67,13 @@ export function buildLinks(relationships) {
     code: rel.code || '',
     relationCode: rel.relationCode,
     relationDesc: rel.relationDesc,
-    annotationCategory: rel.annotationCategory || 'info',
-    annotationContent: rel.annotationContent || '',
+    // [FIX 2026-06-29 v3] 复数数组形式 - 兼容单数/复数字段
+    //   详见 buildNodes 注释
+    annotationContents: rel.annotationContents || rel.annotation_contents || [],
+    annotationCategories: rel.annotationCategories || rel.annotation_categories || [],
+    // 保留单数字段以兼容其他代码
+    annotationCategory: rel.annotationCategories?.[0] || rel.annotation_category || rel.annotationCategory || 'info',
+    annotationContent: rel.annotationContents?.[0] || rel.annotation_content || rel.annotationContent || '',
     // [v34 双向支持] 透传 relationType + relationDirection, 供箭头生成和 tooltip 使用
     relationType: rel.relationType || '',
     relationDirection: rel.relationDirection || null

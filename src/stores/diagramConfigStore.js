@@ -45,12 +45,15 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
   const hideLinkLabelTails = ref(null)
   const annotationPanelPosition = ref('bottom')
   const showAnnotationIcons = ref(false)
+  // [V_NEW 2026-06-29] annotation category 过滤 - 备注文本是辅助信息, 不影响主线
+  // 默认 [] = 不过滤 (向后兼容)
+  const annotationCategoryFilter = ref([])
   const useUnifiedRenderer = ref(true)
 
   // 分组控制配置
   const layoutControlConfig = ref({
     enabled: false,
-    overallDirection: 'LR',
+    overallDirection: 'TB',
     groups: [],
     engine: 'elk',
     preserveOrder: true
@@ -181,6 +184,15 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     showAnnotationIcons.value = value?.value ?? value ?? false
   }
 
+  // [V_NEW 2026-06-29] annotation category 过滤 - 主线不受影响 (空数组 = 不过滤)
+  function setAnnotationCategoryFilter(values) {
+    annotationCategoryFilter.value = Array.isArray(values) ? values : []
+  }
+
+  function clearAnnotationCategoryFilter() {
+    annotationCategoryFilter.value = []
+  }
+
   function updateAssignmentMode(value) {
     assignmentMode.value = value?.value ?? value ?? 'auto'
   }
@@ -217,10 +229,11 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     hideLinkLabelTails.value = null
     annotationPanelPosition.value = 'bottom'
     showAnnotationIcons.value = false
+    annotationCategoryFilter.value = []
     useUnifiedRenderer.value = false
     layoutControlConfig.value = {
       enabled: false,
-      overallDirection: 'LR',
+      overallDirection: 'TB',
       groups: [],
       engine: 'elk',
       preserveOrder: true
@@ -252,6 +265,7 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     hideLinkLabelTails,
     annotationPanelPosition,
     showAnnotationIcons,
+    annotationCategoryFilter,
     useUnifiedRenderer,
     layoutControlConfig,
     mermaidMaxTextSize,
@@ -286,6 +300,8 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     updateMermaidMaxTextSize,
     updateAnnotationPanelPosition,
     updateShowAnnotationIcons,
+    setAnnotationCategoryFilter,
+    clearAnnotationCategoryFilter,
     updateAssignmentMode,
     fallbackToLegacyRenderer,
     resetConfig

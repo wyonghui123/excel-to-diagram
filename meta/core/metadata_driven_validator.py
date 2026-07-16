@@ -489,16 +489,21 @@ class MetadataDrivenValidator:
             if not index_fields:
                 continue
 
-            is_bk_index = True
-            for idx_f in index_fields:
-                is_bk_field = any(
+            # [FIX BUG-V053 2026-07-10 dev agent] 区分"单字段 bk index"vs"复合 bk+scope index"
+            # 原因: 之前 is_bk_index 跳过逻辑把所有"含 bk 字段"的 unique index 都跳过了
+            #       包括复合 (version_id, code) 这种业务上需要校验的 index
+            # 修复: 仅当 index 的所有字段都是 bk (即"单字段 bk")时才跳过
+            #       复合 bk+scope (如 (version_id, code)) 应参与校验
+            bk_fields_in_index = sum(
+                1 for idx_f in index_fields
+                if any(
                     getattr(f.semantics, 'business_key', False) and f.id == idx_f
                     for f in meta_object.fields
                 )
-                if not is_bk_field and idx_f != 'version_id':
-                    is_bk_index = False
-                    break
-            if is_bk_index:
+            )
+            is_pure_bk_index = bk_fields_in_index == len(index_fields)
+            if is_pure_bk_index:
+                # 单字段 bk 跳过 (如 user.username) - 历史脏数据保护
                 continue
 
             where_clauses = []
@@ -506,7 +511,10 @@ class MetadataDrivenValidator:
             all_present = True
             for idx_field in index_fields:
                 value = data.get(idx_field)
-                if value is None:
+                # [FIX BUG-V053 2026-07-10] 空字符串视为"未设置" (跟 None 同等)
+                # 原因: yaml field.default='' 让 import 时 record['relation_code']='' (空)
+                # 但实际语义是"历史字段, 由 relation_type 替代", 应让"空"表示"不参与唯一性"
+                if value is None or (isinstance(value, str) and value == ''):
                     all_present = False
                     break
                 where_clauses.append(f"{idx_field} = ?")

@@ -140,7 +140,7 @@ const localConfig = ref({
   groups: [],
   engine: 'elk',
   preserveOrder: true,
-  overallDirection: 'LR'
+  overallDirection: 'TB'
 })
 
 const draggingContainer = ref(null)

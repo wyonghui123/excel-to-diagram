@@ -1,0 +1,195 @@
+================================================================================
+                        DEPLOY CHEAT SHEET - v20260630_001
+                        (Print this for Web SSH reference)
+================================================================================
+
+VERSION:    v20260630_001 (Fresh Init)
+SERVER:     172.20.59.7
+DIR:        /opt/app/current -> /opt/app/deployments/v20260630_001
+PORTS:      Frontend 8081 / Backend 5001
+ADMIN:      admin / Admin@2026!Init  (CHANGE ON FIRST LOGIN!)
+
+================================================================================
+PHASE 0 - BEFORE BASTION: VERIFY (run this on Web SSH first)
+================================================================================
+
+NOTE: This v20260630_001 build is for OFFLINE-only server environments.
+The deploy zip contains 17 Python wheel files inside backend/wheels/
+so pip install works WITHOUT PyPI access.
+
+Expected after upload:
+- deploy-v20260630_001.zip → ~15.2 MB (was 13.4 MB, increased by ~1.6 MB for wheels)
+
+================================================================================
+
+# Quick 8-line sanity check (paste as ONE block):
+
+echo "=== DEPLOY STATE CHECK ===" && \
+ls -la /tmp/deploy-v20260630_001.zip 2>&1 | head -1 && \
+ls -ld /opt/app/deployments/v20260630_001/ 2>&1 | head -1 && \
+ls -la /opt/app/shared/data/architecture.db 2>&1 | head -1 && \
+ps -ef | grep -E "server\.py" | grep -v grep | wc -l && \
+ss -tlnp 2>/dev/null | grep -E ":8081|:5001" && \
+curl -s http://localhost:8081/health 2>&1 | head -1 && \
+curl -s http://localhost:5001/api/v1/health 2>&1 | head -1 && \
+echo "=== DONE ==="
+
+# Expected output:
+#   -r--r--r-- .../deploy-v20260630_001.zip    [if uploaded]
+#   drwxr-xr-x .../deployments/v20260630_001  [if unpacked]
+#   -rw-r--r-- .../architecture.db            [if DB created]
+#   2                                       [if both services running]
+#   LISTEN ... :8081  and  LISTEN ... :5001  [if ports bound]
+#   {"status":"ok"}                          [if frontend up]
+#   {"status":"ok","db":"ok"}                [if backend up]
+
+# DEEPER CHECK (independent, 10 steps): bash /tmp/HEALTH-CHECK-20260630_001.sh
+
+================================================================================
+PHASE A - BASTION UPLOAD (your bastion web UI)
+================================================================================
+1. Login to bastion
+2. File Transfer -> Target server (172.20.59.7) -> /tmp/
+3. Upload: d:\filework\excel-to-diagram\deploy-v20260630_001.zip
+4. Verify: /tmp/deploy-v20260630_001.zip exists, 12.89 MB
+
+================================================================================
+PHASE B - WEB SSH TERMINAL (choose mode)
+================================================================================
+
+>>> EASY MODE (RECOMMENDED): ONE-SHOT SCRIPT <<<
+Just paste these 3 lines (copy each separately), wait for prompts:
+
+# Step 1: Make script executable
+chmod +x /tmp/deploy-full-v20260630_001.sh
+
+# Step 2: Run (will ask "Type 'yes to continue:'", type yes)
+bash /tmp/deploy-full-v20260630_001.sh
+
+# Step 3: Wait ~5-7 minutes for all 9 steps + verification
+
+Script does ALL of B.1-B.9 + C.1 verification automatically.
+Type 'yes' at the prompt to confirm fresh init (DB will be dropped).
+Output also saved to /opt/app/shared/logs/deploy-run.log.
+
+================================================================================
+>>> MANUAL MODE (if script fails) <<<
+Each block pasted individually. Use this if EASY MODE gives an error.
+================================================================================
+
+[B.1] UNPACK -----------------------------------------
+cd /opt/app && \
+mkdir -p tmp_extract && \
+unzip -o /tmp/deploy-v20260630_001.zip -d tmp_extract/ && \
+mkdir -p deployments/v20260630_001 && \
+mv tmp_extract/frontend_dist_files tmp_extract/backend tmp_extract/scripts tmp_extract/config tmp_extract/dependencies tmp_extract/MANIFEST deployments/v20260630_001/ 2>/dev/null; \
+ls deployments/v20260630_001/ && echo "=== B.1 OK ==="
+
+[B.2] LINKS -------------------------------------------
+cd /opt/app && \
+rm -f current && \
+ln -sfn /opt/app/deployments/v20260630_001 current && \
+ln -sfn /opt/app/shared/data current/data && \
+ln -sfn /opt/app/shared/logs current/logs && \
+mkdir -p shared/data shared/logs && \
+ls -la current | head -3 && echo "=== B.2 OK ==="
+
+[B.3] DEPS --------------------------------------------
+pip3 install -r /opt/app/current/meta/requirements.txt 2>&1 | tail -3
+echo "=== B.3 OK ==="
+
+[B.4] BACKUP OLD DB -----------------------------------
+if [ -f /opt/app/shared/data/architecture.db ]; then
+  mkdir -p /opt/app/backups
+  cp /opt/app/shared/data/architecture.db /opt/app/backups/architecture_$(date +%Y%m%d_%H%M%S).db.bak
+  echo "Backup OK"
+else
+  echo "First deploy - no backup needed"
+fi
+echo "=== B.4 OK ==="
+
+[B.5] INIT DB SCHEMA ----------------------------------
+cd /opt/app/current/meta && \
+python scripts/init_database.py --force 2>&1 | tail -5
+echo "=== B.5 OK ==="
+
+[B.6] SEED DATA ---------------------------------------
+cd /opt/app/current/meta && \
+python scripts/init_and_seed.py --force 2>&1 | tail -5
+echo "=== B.6 OK ==="
+
+[B.7] AUTH + ROLES + MENUS ---------------------------
+cd /opt/app/current/meta
+python scripts/init_auth.py 2>&1 | tail -2
+python scripts/init_role_permissions.py 2>&1 | tail -2
+python scripts/init_menu_permissions.py 2>&1 | tail -2
+python scripts/init_task_seed.py 2>&1 | tail -2
+python scripts/preload_hot_roles.py 2>&1 | tail -2
+echo "=== B.7 OK ==="
+
+[B.8] START FRONTEND (8081) --------------------------
+cd /opt/app/current
+pkill -f "meta.server" 2>/dev/null; pkill -f "waitress-serve" 2>/dev/null; sleep 2
+PORT=8081 \
+FLASK_DEBUG=false \
+FLASK_ENV=production \
+JWT_SECRET_KEY="j688XXn1fOFrIMFNqmRwmiuKq40KFBFOY0fw0GfoySM_0nbYPof6-5osHHR9Uwbx" \
+CORS_ALLOWED_ORIGINS="http://172.20.59.7:8081,http://172.20.59.7:5001" \
+ADMIN_PASSWORD="Admin@2026!Init" \
+nohup python server.py > /opt/app/shared/logs/deploy.log 2>&1 &
+echo "Frontend PID=$!"
+sleep 10
+curl -s http://localhost:8081/health && echo
+echo "=== B.8 OK ==="
+
+[B.9] START BACKEND (5001) ---------------------------
+cd /opt/app/current/meta
+PORT=5001 \
+FLASK_DEBUG=false \
+FLASK_ENV=production \
+JWT_SECRET_KEY="j688XXn1fOFrIMFNqmRwmiuKq40KFBFOY0fw0GfoySM_0nbYPof6-5osHHR9Uwbx" \
+CORS_ALLOWED_ORIGINS="http://172.20.59.7:8081,http://172.20.59.7:5001" \
+ADMIN_PASSWORD="Admin@2026!Init" \
+nohup python server.py > /opt/app/shared/logs/backend.log 2>&1 &
+echo "Backend PID=$!"
+sleep 10
+curl -s http://localhost:5001/api/v1/health && echo
+echo "=== B.9 OK ==="
+
+================================================================================
+PHASE C - VERIFY (paste this block)
+================================================================================
+[VERIFY] ------------------------------------------------
+echo "DB FILE: $(ls -la /opt/app/shared/data/architecture.db | awk '{print $5}') bytes"
+echo "ADMIN: $(sqlite3 /opt/app/shared/data/architecture.db 'SELECT username FROM users WHERE role=\"admin\";')"
+echo "BOs: $(sqlite3 /opt/app/shared/data/architecture.db 'SELECT COUNT(*) FROM business_objects;')"
+echo "PORTS:" && ss -tlnp | grep -E "8081|5001"
+echo "PROCS:" && ps -ef | grep -E "server.py" | grep -v grep | wc -l
+echo "ERRORS:" && grep -c "ERROR" /opt/app/shared/logs/*.log 2>/dev/null | tail -2
+echo "=== VERIFY DONE ==="
+echo "Browser: http://172.20.59.7:8081/ -> login admin / Admin@2026!Init"
+
+================================================================================
+ROLLBACK (if anything wrong)
+================================================================================
+>>> EASY: Use the bundled rollback script
+bash /tmp/deploy-rollback-v20260630_001.sh
+
+>>> MANUAL: Stop services only
+pkill -9 -f server.py; sleep 2
+rm -f /opt/app/current
+
+>>> NUCLEAR: Reset everything to known-empty state
+pkill -9 -f server.py; sleep 2
+rm -f /opt/app/shared/data/architecture.db
+rm -f /opt/app/current
+# Then re-run EASY MODE from B.1
+
+================================================================================
+STUCK? GET LOGS:
+================================================================================
+tail -50 /opt/app/shared/logs/deploy.log
+tail -50 /opt/app/shared/logs/backend.log
+
+Copy last 50 lines and paste back to AI assistant.
+================================================================================

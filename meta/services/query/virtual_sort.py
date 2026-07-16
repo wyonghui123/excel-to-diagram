@@ -93,18 +93,13 @@ def _build_audit_derived_order_join(
 ) -> Optional[Tuple[str, str, str]]:
     """构造 audit_logs 派生虚拟字段（如 updated_at）的排序 JOIN。
 
+    [V007.51 Phase 2] 物化列优先策略：
+      如果业务表已有物化 updated_at 列，直接用物化列排序（零 JOIN 开销）。
+      否则走 v_audit_all LEFT JOIN 子查询。
+
     适用场景：field.storage=VIRTUAL 且 field.derive_from_object='audit_logs'。
     这类字段（如 aspects.yaml 中的 updated_at）不存于业务表，而是从
     audit_logs 实时聚合（MAX(created_at) WHERE action='UPDATE'）。
-
-    生成 SQL 片段（会被 execute_virtual_field_query 包装进外层 SELECT）::
-
-        LEFT JOIN (
-            SELECT object_id, MAX(created_at) AS _audit_value
-            FROM audit_logs
-            WHERE object_type = '<obj_type>' AND action = 'UPDATE'
-            GROUP BY object_id
-        ) _audit_sort ON _audit_sort.object_id = <table_name>.id
 
     安全说明：
         - table_name 必须经过 validate_table_name() 校验（白名单）
@@ -120,7 +115,7 @@ def _build_audit_derived_order_join(
 
     Returns:
         (join_clause, order_alias, sort_direction) 三元组；
-        order_alias = '_audit_sort._audit_value'
+        物化列路径时 join_clause 为空字符串
     """
     table_name = validate_table_name(table_name)
     # obj_type 必须是安全标识符（字母数字下划线），非用户输入
@@ -128,18 +123,26 @@ def _build_audit_derived_order_join(
         logger.warning(f"[VirtualSort] Invalid obj_type: {obj_type!r}")
         return None
 
+    # [V007.51 Phase 2] 物化列优先：有 updated_at 列的表直接排序
+    if _table_has_materialized_updated_at(table_name, obj_type):
+        order_alias = f"COALESCE({table_name}.updated_at, {table_name}.created_at)"
+        logger.info(
+            f"[VirtualSort] Using materialized updated_at for {obj_type}.{sort_field}: "
+            f"order_by={order_alias} {sort_direction}"
+        )
+        # join_clause 为空字符串：execute_virtual_field_query 不需要额外 JOIN
+        return "", order_alias, sort_direction
+
+    # 回退：走 v_audit_all LEFT JOIN 子查询
     sub_alias = "_audit_sort"
     join_clause = (
         f"LEFT JOIN ("
         f"SELECT object_id, MAX(created_at) AS _audit_value "
-        f"FROM audit_logs "
+        f"FROM v_audit_all "
         f"WHERE object_type = '{obj_type}' AND action = 'UPDATE' "
         f"GROUP BY object_id"
         f") {sub_alias} ON {sub_alias}.object_id = {table_name}.id"
     )
-    # [FIX 2026-06-08] COALESCE 回退到 created_at：
-    # audit_logs JOIN 仅含 action='UPDATE' 的记录，无 UPDATE 的用户 _audit_value=NULL，
-    # 导致所有 NULL 值无序排列。用 COALESCE 回退到业务表的 created_at 保证排序确定。
     order_alias = f"COALESCE({sub_alias}._audit_value, {table_name}.created_at)"
 
     logger.info(
@@ -147,6 +150,30 @@ def _build_audit_derived_order_join(
         f"order_by={order_alias} {sort_direction}"
     )
     return join_clause, order_alias, sort_direction
+
+
+# [V007.51 V007.52 SSOT] 检查表是否有物化 updated_at 列
+# 从 MaterializationRegistry SSOT 读取（_audit_materialization.yaml）
+def _table_has_materialized_updated_at(table_name: str, obj_type: str) -> bool:
+    """检查表是否有物化 updated_at 列（V007.51 Phase 2）
+
+    [V007.52] SSOT 化：从 MaterializationRegistry 读取，
+    支持所有 materialization 策略（business_trigger / audit_callback /
+    application_explicit）的表都走物化列路径。
+
+    Args:
+        table_name: 业务表名
+        obj_type: 审计对象类型（暂未使用，保留接口兼容）
+
+    Returns:
+        True 如果该表有物化 updated_at 列
+    """
+    try:
+        from meta.core.materialization_registry import get_registry
+        return get_registry().is_materialized(table_name)
+    except Exception as e:
+        logger.warning("[VirtualSort] SSOT registry load failed: %s", e)
+        return False
 
 
 def execute_virtual_field_query(

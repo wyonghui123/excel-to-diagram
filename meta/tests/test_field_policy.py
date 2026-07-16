@@ -214,11 +214,11 @@ class TestFieldPolicyEngine:
         assert engine.determine_editable('name', context) is False
         assert engine.determine_editable('created_at', context) is False
 
-    def test_mutability_fully_editable(self):
-        """测试 mutability='fully_editable' - 所有字段可编辑"""
+    def test_mutability_fullEditable(self):
+        """测试 mutability='fullEditable' - 所有字段可编辑"""
         engine = FieldPolicyEngine()
         context = PolicyContext(
-            object_context=ObjectContext(mutability='fully_editable', object_type='user'),
+            object_context=ObjectContext(mutability='fullEditable', object_type='user'),
             action='update'
         )
         assert engine.determine_editable('code', context) is True

@@ -1,0 +1,5 @@
+content = open(r'd:\filework\release-prep-worktree\deploy_bundle\deploy.sh').read()
+print('长度:', len(content))
+print('包含 mv 逻辑:', 'mv "$DEPLOYMENTS_DIR/$item"' in content)
+print('包含 VERSION_PATH:', 'VERSION_PATH="$DEPLOYMENTS_DIR/$VERSION"' in content)
+print('包含自我修复 lib/ CRLF:', 'sed -i \'s/\\r$//' in content)

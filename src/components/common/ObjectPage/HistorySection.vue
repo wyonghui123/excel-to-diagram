@@ -33,6 +33,7 @@ import AuditLog from '../AuditLog/AuditLog.vue'
 import { AuditLogDetail } from '../AuditLogDetail'
 import AppIcon from '../AppIcon/AppIcon.vue'
 import { useAuditLogs } from '@/composables/useAuditLogs'
+import metaService from '@/services/metaService'
 
 const props = defineProps({
   objectType: {
@@ -78,6 +79,39 @@ const hasRealObjectId = computed(() => {
   return true
 })
 
+// [FIX BUG-V046 2026-07-04 dev agent] 从 entity meta 读 audit.history.excluded_child_object_types
+// 详情页"操作日志" tab 排除特定子对象类型
+// 例: domain.yaml 配 [sub_domain, service_module, business_object, relationship]
+//     → 领域详情页"操作日志" tab 不会显示这些子对象的操作日志
+const excludedChildObjectTypes = ref([])
+
+async function loadExcludedChildObjectTypes() {
+  if (!props.objectType) {
+    excludedChildObjectTypes.value = []
+    return
+  }
+  try {
+    const result = await metaService.getUIConfig(props.objectType, { forceRefresh: false })
+    if (result.success && result.data) {
+      const excluded = result.data.audit_history_excluded_child_object_types || []
+      excludedChildObjectTypes.value = Array.isArray(excluded) ? excluded : []
+    } else {
+      excludedChildObjectTypes.value = []
+    }
+  } catch (e) {
+    console.warn('[HistorySection] loadExcludedChildObjectTypes failed (non-fatal):', e)
+    excludedChildObjectTypes.value = []
+  }
+}
+
+watch(
+  () => props.objectType,
+  () => {
+    loadExcludedChildObjectTypes()
+  },
+  { immediate: true }
+)
+
 const {
   logs: auditLogs,
   total: auditLogsTotal,
@@ -93,6 +127,7 @@ const {
     pageSize: 20,
     parentObjectType: computed(() => props.parentObjectType),
     parentObjectId: computed(() => props.parentObjectId),
+    excludedObjectTypes: computed(() => excludedChildObjectTypes.value),
   }
 )
 

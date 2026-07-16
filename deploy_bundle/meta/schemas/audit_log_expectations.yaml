@@ -1,0 +1,513 @@
+# 审计日志内容期望 Schema
+# 
+# 定义每种 action 类型应包含的字段和格式要求
+# 用于自动化测试验证审计日志的信息架构是否合理
+
+# ────────────────────────────────────────────
+# 通用字段定义
+# ────────────────────────────────────────────
+
+common:
+  # 所有 action 必须包含的字段
+  required_fields:
+    - object_type      # 被操作对象类型
+    - object_id        # 被操作对象 ID
+    - action           # 操作类型
+    - user_id          # 操作人 ID
+    - created_at       # 操作时间
+  
+  # 建议包含的字段（缺失时产生 warning）
+  recommended_fields:
+    - user_name        # 操作人名称（便于阅读）
+    - trace_id         # 链路追踪 ID（便于关联日志系统）
+    - transaction_id   # 事务 ID（关联同一事务的多条记录）
+  
+  # 可选字段
+  optional_fields:
+    - ip_address       # 客户端 IP
+    - user_agent       # 浏览器信息
+    - parent_object_type  # 级联操作父对象类型
+    - parent_object_id    # 级联操作父对象 ID
+    - log_category     # 日志分类
+    - log_level        # 日志级别
+    - agent_id         # AI Agent ID
+    - agent_session_id # Agent 会话 ID
+    - tool_call_id     # 工具调用 ID
+
+# ────────────────────────────────────────────
+# 对象标识期望
+# ────────────────────────────────────────────
+
+object_identity:
+  # 期望在 extra_data 或直接字段中包含
+  expected_fields:
+    object_key:
+      description: 业务 Key（如 BO_001, VER_2024.R1）
+      required: false  # 建议有，但非强制
+      example: "BO_001"
+    
+    object_display_name:
+      description: 对象显示名称（便于阅读）
+      required: false
+      example: "客户管理"
+
+# ────────────────────────────────────────────
+# FK 值结构期望
+# ────────────────────────────────────────────
+
+fk_value_structure:
+  # 当字段名以 _id 结尾时（外键），其值应包含的结构
+  description: 外键字段值应包含目标对象的完整信息
+  
+  expected_format:
+    target_type:
+      description: 目标对象类型
+      required: true
+      example: "business_object"
+    
+    target_id:
+      description: 目标对象 ID
+      required: true
+      example: 123
+    
+    target_key:
+      description: 目标对象业务 Key
+      required: false
+      example: "BO_001"
+    
+    target_display:
+      description: 目标对象显示名称
+      required: false  # 建议有
+      example: "客户管理"
+  
+  example_json: |
+    {
+      "target_type": "business_object",
+      "target_id": 123,
+      "target_key": "BO_001",
+      "target_display": "客户管理"
+    }
+
+# ────────────────────────────────────────────
+# CREATE 操作期望
+# ────────────────────────────────────────────
+
+CREATE:
+  description: 创建对象操作
+  
+  # 字段覆盖期望
+  field_coverage:
+    # 应该记录哪些字段
+    scope: all_business_fields  # 所有业务字段
+    exclude:
+      - id              # 技术主键（创建前不存在）
+      - created_at      # 系统字段
+      - updated_at
+      - created_by
+      - updated_by
+  
+  # 值期望
+  value_expectations:
+    new_value:
+      required: true
+      description: 应包含创建时的字段值
+    
+    old_value:
+      required: false
+      expected: empty_or_null
+      description: 创建前无值，应为空
+  
+  # 关键字段检查（建议包含）
+  recommended_fields:
+    - name             # 对象名称
+    - code             # 对象编码
+    - key              # 业务 Key（如果有）
+  
+  # 验证规则
+  validation_rules:
+    - rule: each_field_has_new_value
+      description: 每个业务字段都应有 new_value 记录
+      severity: warning
+    
+    - rule: no_old_value
+      description: old_value 应为空
+      severity: warning
+    
+    - rule: has_key_field
+      description: 应包含关键标识字段（name/code/key）
+      severity: info
+
+# ────────────────────────────────────────────
+# UPDATE 操作期望
+# ────────────────────────────────────────────
+
+UPDATE:
+  description: 更新对象操作
+  
+  field_coverage:
+    scope: changed_only  # 只记录变更的字段
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  
+  value_expectations:
+    new_value:
+      required: true
+      description: 更新后的值
+    
+    old_value:
+      required: true
+      description: 更新前的值
+    
+    value_must_change:
+      description: old_value 和 new_value 应该不同
+      severity: warning
+  
+  validation_rules:
+    - rule: has_field_name
+      description: 必须有 field_name 标识变更字段
+      severity: error
+    
+    - rule: value_changed
+      description: old_value != new_value
+      severity: warning
+    
+    - rule: fk_has_target_info
+      description: 如果是 FK 字段，值应包含目标对象信息
+      severity: warning
+
+# ────────────────────────────────────────────
+# DELETE 操作期望
+# ────────────────────────────────────────────
+
+DELETE:
+  description: 删除对象操作
+  
+  field_coverage:
+    scope: business_only  # 只记录业务字段
+    exclude:
+      - id
+      - created_at
+      - updated_at
+      - created_by
+      - updated_by
+      - priority        # 可选排除冗余字段
+  
+  value_expectations:
+    old_value:
+      required: true
+      description: 应记录删除前的值（用于审计追溯）
+    
+    new_value:
+      required: false
+      expected: empty_or_null
+      description: 删除后无值，应为空
+  
+  # DELETE 特别要求：应记录所有业务字段以便追溯
+  validation_rules:
+    - rule: all_business_fields_recorded
+      description: 应记录所有业务字段的 old_value
+      severity: warning
+    
+    - rule: no_system_fields
+      description: 不应记录系统字段（id, created_at 等）
+      severity: warning
+    
+    - rule: fk_has_target_info
+      description: FK 字段的 old_value 应包含目标对象信息
+      severity: warning
+
+# ────────────────────────────────────────────
+# ASSOCIATE / ASSIGN 操作期望
+# ────────────────────────────────────
+
+ASSOCIATE:
+  description: 建立关联操作
+  
+  value_expectations:
+    field_name:
+      required: true
+      description: 关联字段名（如 parent_id, role_ids）
+    
+    new_value:
+      required: true
+      format: json
+      description: 应包含被关联目标的信息
+      expected_structure:
+        target_type: required      # 目标对象类型
+        target_id: required        # 目标对象 ID
+        target_key: recommended    # 目标对象业务 Key
+        target_display: recommended  # 目标对象显示名称
+    
+    old_value:
+      required: false
+      expected: empty_or_null
+  
+  validation_rules:
+    - rule: has_target_type
+      description: new_value 必须包含 target_type
+      severity: error
+    
+    - rule: has_target_id
+      description: new_value 必须包含 target_id
+      severity: error
+    
+    - rule: has_target_display
+      description: 建议包含 target_display 便于阅读
+      severity: warning
+
+ASSIGN:
+  # ASSIGN 是 ASSOCIATE 的别名
+  _alias: ASSOCIATE
+
+# ────────────────────────────────────────────
+# DISSOCIATE / REVOKE 操作期望
+# ────────────────────────────────────────────
+
+DISSOCIATE:
+  description: 移除关联操作
+  
+  value_expectations:
+    field_name:
+      required: true
+      description: 关联字段名
+    
+    old_value:
+      required: true
+      format: json
+      description: 应包含被移除关联目标的信息
+      expected_structure:
+        target_type: required
+        target_id: required
+        target_key: recommended
+        target_display: recommended
+    
+    new_value:
+      required: false
+      expected: empty_or_null
+  
+  validation_rules:
+    - rule: has_target_type
+      description: old_value 必须包含 target_type
+      severity: error
+    
+    - rule: has_target_id
+      description: old_value 必须包含 target_id
+      severity: error
+
+REVOKE:
+  _alias: DISSOCIATE
+
+# ────────────────────────────────────────────
+# LOGIN / LOGOUT 操作期望
+# ────────────────────────────────────────────
+
+LOGIN:
+  description: 用户登录
+  
+  value_expectations:
+    object_type:
+      expected: user
+    
+    field_name:
+      expected: session
+  
+  validation_rules:
+    - rule: has_user_info
+      description: 应记录登录用户信息
+      severity: info
+
+LOGOUT:
+  description: 用户登出
+  _similar: LOGIN
+
+# ────────────────────────────────────────────
+# 事务完整性期望
+# ────────────────────────────────────────────
+
+transaction_integrity:
+  description: 同一事务的多条审计记录应满足的约束
+  
+  rules:
+    - rule: same_user
+      description: 同一 transaction_id 的所有记录应有相同的 user_id
+      severity: error
+    
+    - rule: consistent_timestamp
+      description: 同一事务的记录时间应在合理范围内（如 1 分钟）
+      severity: warning
+    
+    - rule: complete_sequence
+      description: 事务应包含完整的操作序列（如 CREATE + ASSOCIATE）
+      severity: info
+
+# ────────────────────────────────────────────
+# 级联操作期望
+# ────────────────────────────────────────────
+
+cascade_operation:
+  description: 级联操作产生的审计记录
+  
+  expectations:
+    parent_object_type:
+      description: 应记录触发级联的父对象类型
+      required: true
+    
+    parent_object_id:
+      description: 应记录触发级联的父对象 ID
+      required: true
+    
+    cascade_marker:
+      description: 建议在 extra_data 中标记 cascade=true
+      required: false
+
+# ────────────────────────────────────────────
+# 自定义 Action 定义
+# ────────────────────────────────────────────
+
+custom_actions:
+  # 项目中使用的非标准 action 类型
+  # 这些 action 会产生 info 级别提示，不会阻止验证
+  
+  READ_OBJECT:
+    description: 读取对象操作（查询）
+    category: read
+    value_expectations:
+      new_value:
+        required: false
+        description: 读取操作通常不涉及值变化
+      old_value:
+        required: false
+    validation_rules:
+      - rule: has_object_info
+        description: 应记录被读取对象的信息
+        severity: info
+  
+  UPDATE_OBJECT:
+    description: 更新对象操作（UPDATE 的别名）
+    _alias: UPDATE
+  
+  BULK_CREATE:
+    description: 批量创建操作
+    category: write
+    value_expectations:
+      new_value:
+        required: true
+        format: json_array
+        description: 应包含创建的对象列表
+    validation_rules:
+      - rule: has_count
+        description: 应记录创建数量
+        severity: info
+  
+  BULK_DELETE:
+    description: 批量删除操作
+    category: write
+    value_expectations:
+      old_value:
+        required: true
+        format: json_array
+        description: 应包含删除的对象列表
+    validation_rules:
+      - rule: has_count
+        description: 应记录删除数量
+        severity: info
+  
+  IMPORT:
+    description: 导入操作
+    category: write
+    value_expectations:
+      new_value:
+        required: true
+        description: 应包含导入的数据摘要
+    validation_rules:
+      - rule: has_import_summary
+        description: 应记录导入统计（成功/失败数量）
+        severity: info
+  
+  EXPORT:
+    description: 导出操作
+    category: read
+    value_expectations:
+      new_value:
+        required: false
+        description: 可包含导出范围信息
+    validation_rules:
+      - rule: has_export_info
+        description: 应记录导出范围
+        severity: info
+  
+  EXECUTE:
+    description: 执行操作（如执行脚本、运行任务）
+    category: action
+    value_expectations:
+      new_value:
+        required: false
+        description: 可包含执行结果
+    validation_rules:
+      - rule: has_execution_info
+        description: 应记录执行上下文
+        severity: info
+
+# ────────────────────────────────────────────
+# Action 分类
+# ────────────────────────────────────────────
+
+action_categories:
+  write:
+    description: 写操作（修改数据）
+    actions:
+      - CREATE
+      - UPDATE
+      - DELETE
+      - BULK_CREATE
+      - BULK_DELETE
+      - IMPORT
+  
+  read:
+    description: 读操作（不修改数据）
+    actions:
+      - READ_OBJECT
+      - EXPORT
+  
+  relation:
+    description: 关系操作
+    actions:
+      - ASSOCIATE
+      - DISSOCIATE
+      - ASSIGN
+      - REVOKE
+  
+  auth:
+    description: 认证操作
+    actions:
+      - LOGIN
+      - LOGOUT
+  
+  action:
+    description: 执行操作
+    actions:
+      - EXECUTE
+
+# ────────────────────────────────────────────
+# 配置选项
+# ────────────────────────────────────────────
+
+config:
+  # 验证严格程度
+  strictness: warning  # error | warning | info
+  
+  # 未定义 action 的处理方式
+  undefined_action_handling: info  # error | warning | info | ignore
+  
+  # 是否检查对象标识
+  check_object_identity: true
+  
+  # 是否检查 FK 结构
+  check_fk_structure: true
+  
+  # 对象标识字段名（存储在 extra_data 中）
+  object_identity_fields:
+    key: audit_object_key
+    display_name: audit_object_display_name

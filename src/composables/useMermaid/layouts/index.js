@@ -95,7 +95,7 @@ export function convertDeprecatedLayout(layoutType, containers = [], config = {}
         layoutType: LAYOUT_TYPES.GROUPED,
         layoutControlConfig: {
           enabled: false,
-          overallDirection: 'TB',
+          overallDirection: 'LR',
           groups: []
         }
       }

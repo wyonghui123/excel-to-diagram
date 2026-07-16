@@ -1325,6 +1325,82 @@ class ActionExecutor:
             except Exception as e:
                 logger.warning(f"[M2M Cleanup] Failed to clean {through}: {e}")
 
+    def _cascade_pre_delete_role(self, role_id: int) -> None:
+        """[FIX BUG-V061 2026-07-12] 角色删除前先清空所有引用此角色的中间表.
+
+        [L13.1 fix 2026-07-13] 补全 audit_logs: 每个级联删除都写 DISSOCIATE 审计
+        之前只有 role_permissions 写 (且仅 26/28), role_menu_permissions / role_dimension_scopes
+        完全没审计. 现在所有 7 张表都审计, 配合 audit_recovery.py 可 100% 恢复.
+
+        已知会被引用的表 (本地 DB 验证):
+        - role_permissions          (角色-权限 M2M)
+        - role_menu_permissions     (角色-菜单 M2M)  -- 不是 role_menus
+        - permission_rules          (角色级条件权限 1:N)
+        - role_data_permissions     (角色级数据权限 1:N)
+        - role_dimension_scopes     (角色级维度范围 1:N)
+        - user_roles                (角色-用户 M2M)
+        - group_roles               (角色-用户组 M2M, DB FK 已 ON DELETE CASCADE)
+        """
+        CASCADE_TABLES_FOR_ROLE = [
+            ('role_permissions', 'permission_id'),
+            ('role_menu_permissions', 'menu_id'),
+            ('permission_rules', 'rule_id'),
+            ('role_data_permissions', 'data_permission_id'),
+            ('role_dimension_scopes', 'scope_id'),
+            ('user_roles', 'user_id'),
+            # group_roles: DB 已 ON DELETE CASCADE, 不必手动删除
+        ]
+        for table, target_col in CASCADE_TABLES_FOR_ROLE:
+            try:
+                # [L13.1] 先 SELECT 出所有要删除的 row (记录 target_id 用于 audit)
+                try:
+                    sel_cursor = self.ds.execute(
+                        f"SELECT {target_col} FROM {table} WHERE role_id = ?", (role_id,)
+                    )
+                    target_ids = [row[0] for row in sel_cursor.fetchall()] if hasattr(sel_cursor, 'fetchall') else []
+                except Exception:
+                    target_ids = []
+
+                cursor = self.ds.execute(
+                    f"DELETE FROM {table} WHERE role_id = ?", (role_id,)
+                )
+                deleted = cursor.rowcount if hasattr(cursor, 'rowcount') else None
+                logger.info(
+                    f"[BUG-V061] cascade role_delete: deleted role_id={role_id} from {table} "
+                    f"(rowcount={deleted})"
+                )
+
+                # [L13.1] 写 audit DISSOCIATE 记录 (每条关联 1 行)
+                if target_ids and hasattr(self, 'audit_logger') and self.audit_logger and self.audit_logger.enabled:
+                    from flask import has_request_context, g as _g
+                    user_id = None
+                    user_name = None
+                    if has_request_context():
+                        user_id = getattr(_g, 'current_user_id', None) or getattr(_g, 'user_id', None)
+                        user_name = getattr(_g, 'current_user_name', None) or getattr(_g, 'user_name', None)
+                    for tid in target_ids:
+                        try:
+                            self.audit_logger.log(
+                                object_type='role',
+                                object_id=role_id,
+                                action='DISSOCIATE',
+                                field_name=target_col,
+                                old_value=json.dumps({"target_type": target_col.replace('_id', ''), "target_id": tid}),
+                                extra_data={
+                                    "cascade_reason": f"role#{role_id} deletion",
+                                    "through_table": table,
+                                    "fk_column": "role_id",
+                                },
+                                user_id=user_id,
+                                user_name=user_name,
+                            )
+                        except Exception as audit_err:
+                            logger.warning(f"[L13.1] audit log failed for {table} role#{role_id} -> {tid}: {audit_err}")
+            except Exception as e:
+                logger.warning(
+                    f"[BUG-V061] Failed to clean {table} for role_id={role_id}: {e}"
+                )
+
     def _resolve_parent_info(self, meta_object: MetaObject, data: Dict[str, Any]) -> tuple:
         """解析对象的父对象信息 (parent_object_type, parent_object_id)
 
@@ -1589,7 +1665,7 @@ class ActionExecutor:
             try:
                 rows = self.ds.query(
                     "SELECT MAX(created_at_epoch) as max_epoch, MAX(created_at) as max_iso "
-                    "FROM audit_logs WHERE object_type = ? AND object_id = ? "
+                    "FROM v_audit_all WHERE object_type = ? AND object_id = ? "
                     "AND action IN ('CREATE', 'UPDATE')",
                     [object_type, object_id]
                 )
@@ -1990,6 +2066,15 @@ class ActionExecutor:
                     message=msg
                 )
 
+            # [FIX BUG-V061 2026-07-12] 角色删除支持级联清理子表
+            # 背景: _check_reverse_fk_references 只能从 other_obj.relations[] (且为 dict) 读
+            #       cascade_delete, 但 role 引用表 (role_permissions / role_menu_permissions /
+            #       permission_rules / role_data_permissions / role_dimension_scopes)
+            #       schema 中均无 relations 节, 导致删除角色永远卡在 FK check.
+            # 修复: role 删除前先清空所有引用此 role 的中间表, 再走 FK check.
+            if meta_object.id == 'role':
+                self._cascade_pre_delete_role(id_value)
+
             ref_errors = self._check_reverse_fk_references(meta_object, id_value)
             if ref_errors:
                 self._write_delete_blocked_audit(
@@ -2047,6 +2132,43 @@ class ActionExecutor:
                 from meta.core.action_context import ActionContext
                 from meta.core.interceptors.cascade_interceptor import CascadeInterceptor
                 from meta.core.interceptors.audit_interceptor import AuditInterceptor
+
+                # [L11.3 fix 2026-07-13] DELETE 二次确认 — 防止 AI/用户误删关键实体
+                # 必须带 X-Confirm-Delete: <uuid> header, 二次确认才能继续
+                # 设计: 不强制 (向后兼容), 但要求危险操作显式 confirm
+                # 触发条件: (1) object_type 是 P0 关键实体 (role/user/user_group/permission)
+                #          (2) 关联引用 > 0 (会触发级联)
+                #          (3) 用户没传 X-Confirm-Delete header
+                from flask import request as _flask_req
+                _critical_types = ('role', 'user', 'user_group', 'permission', 'product')
+                if meta_object.object_name in _critical_types:
+                    _confirm = _flask_req.headers.get('X-Confirm-Delete', '').strip()
+                    if not _confirm:
+                        # 自动生成 confirm token 写入 audit_log
+                        import uuid as _uuid
+                        _token = str(_uuid.uuid4())
+                        # 检查级联引用数
+                        _ref_count = 0
+                        try:
+                            from meta.core.sql_connection_pool import get_conn
+                            with get_conn() as _conn:
+                                _cur = _conn.cursor()
+                                # 简化: 只查 role_permissions
+                                if meta_object.object_name == 'role':
+                                    _cur.execute("SELECT COUNT(*) FROM role_permissions WHERE role_id = ?", (id_value,))
+                                    _ref_count = _cur.fetchone()[0]
+                        except Exception:
+                            pass
+                        if _ref_count > 0:
+                            return self._json(409, {
+                                "error": f"confirm required for {meta_object.object_name}#{id_value} deletion ({_ref_count} references)",
+                                "confirm_required": True,
+                                "confirm_token": _token,
+                                "hint": f"retry with header: X-Confirm-Delete: {_token}",
+                                "object_type": meta_object.object_name,
+                                "object_id": id_value,
+                                "cascade_ref_count": _ref_count,
+                            })
 
                 # 构造 CascadeInterceptor 需要的最小 ctx
                 cascade_ctx = ActionContext(

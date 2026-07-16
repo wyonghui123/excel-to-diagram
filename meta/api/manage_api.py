@@ -1265,7 +1265,7 @@ def get_state_history(object_type, id):
     
     sql = """
         SELECT id, old_value, new_value, user_name, created_at, action
-        FROM audit_logs
+        FROM v_audit_all
         WHERE object_type = ? AND object_id = ? AND field_name = ?
         ORDER BY created_at ASC
     """
@@ -1351,7 +1351,7 @@ def get_stage_metrics(object_type, id):
     # 原因: status_entered_at DB 字段已删除 (冗余且被 state_transition 规则反复覆盖),
     # 单一事实源改为 audit_logs 表 (最近一次 field 变化时间)
     sql_entered_at = """
-        SELECT created_at FROM audit_logs
+        SELECT created_at FROM v_audit_all
         WHERE object_type = ? AND object_id = ? AND field_name = ? AND action = 'UPDATE'
         ORDER BY created_at DESC LIMIT 1
     """
@@ -1386,7 +1386,7 @@ def get_stage_metrics(object_type, id):
     
     sql = """
         SELECT old_value, new_value, created_at
-        FROM audit_logs
+        FROM v_audit_all
         WHERE object_type = ? AND object_id = ? AND field_name = ?
         ORDER BY created_at ASC
     """

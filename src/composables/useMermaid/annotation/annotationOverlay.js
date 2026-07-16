@@ -137,6 +137,10 @@ export function useAnnotationOverlay() {
       flex-shrink: 0;
       cursor: pointer;
       user-select: none;
+      position: sticky;
+      top: 0;
+      background: rgba(248, 248, 248, 0.98);
+      z-index: 1;
     `;
     header.title = '点击循环切换：收起 → 简洁模式 → 详情模式 → 收起';
 
@@ -187,31 +191,47 @@ export function useAnnotationOverlay() {
       });
     };
 
+    // [v41 修复] 收起时用 max-height: 0 + overflow: hidden, 保留 scrollTop
     // 循环切换状态：collapsed -> compact -> detail -> collapsed
     const onHeaderClick = () => {
+      console.log('[annotation-header-click]', { from: currentState, to: '?' })
       if (currentState === 'collapsed') {
         currentState = 'compact';
-        list.style.display = 'flex';
-        list.style.flexDirection = 'row';
-        list.style.flexWrap = 'wrap';
       } else if (currentState === 'compact') {
         currentState = 'detail';
-        list.style.display = 'flex';
-        list.style.flexDirection = 'column';
-        list.style.flexWrap = 'none';
       } else {
         currentState = 'collapsed';
-        list.style.display = 'none';
+      }
+      list.style.display = 'flex';  // 始终保持 flex, 避免 scrollTop reset
+      list.style.flexDirection = currentState === 'detail' ? 'column' : 'row';
+      list.style.flexWrap = currentState === 'detail' ? 'none' : 'wrap';
+      // [v41 修复] collapsed 时用 max-height: 0 收起, 保留 scrollTop 不被 reset
+      if (currentState === 'collapsed') {
+        list.style.maxHeight = '0';
+        list.style.overflow = 'hidden';
+      } else {
+        list.style.maxHeight = '';
+        list.style.overflow = '';
       }
       sessionStorage.setItem('annotationPanelState', currentState);
       titleSpan.textContent = getTitleText();
       updatePanel();
       updateContentStyles();
     };
-    addListener(header, 'click', onHeaderClick);
+    // [FIX 2026-06-29 v9] onclick 属性 + addEventListener 双重保险
+    //   之前只用 addEventListener, 但 addListener 包装有 _cleanupFns 时序问题
+    //   改用 onclick 属性 (HTML 绑定, 不依赖 event system)
+    //   + addEventListener 兜底
+    header.onclick = onHeaderClick
+    header.addEventListener('click', onHeaderClick)
+    header.setAttribute('data-click-bound', 'true')
+    console.log('[overlayAnnotationPanel] header click listener attached via onclick+addEventListener, header.outerHTML:', header.outerHTML.substring(0, 200))
 
     annotations.forEach(ann => {
-      const categoryConfig = getCategoryConfig(ann.category);
+      // [FIX 2026-06-29 v5] categoryConfig 可能 null (ann.category 不在 CATEGORY_CONFIG 中)
+      //   兜底链: getCategoryConfig(ann.category) -> getCategoryConfig('info') -> inline default
+      //   修复 'Cannot read properties of null (reading border)' 错误
+      const categoryConfig = getCategoryConfig(ann.category) || getCategoryConfig('info') || { label: ann.category || '信息', bg: '#e6f7ff', border: '#1677ff' };
       const item = document.createElement('div');
       item.className = `annotation-item annotation-${ann.targetType}`;
       item.setAttribute('data-target-id', ann.targetId);
@@ -289,7 +309,7 @@ export function useAnnotationOverlay() {
     return panel;
   };
 
-  const bindAnnotationInteraction = (svg, annotations) => {
+  const bindAnnotationInteraction = (svg, annotations, interaction) => {
     // 先清理本实例上一次的监听器（panel header + svg 全局）
     cleanupListeners()
 
@@ -301,15 +321,94 @@ export function useAnnotationOverlay() {
       annotationMap.set(ann.targetId, ann);
     });
 
+    // 居中到目标元素（用 getBoundingClientRect 增量平移，避免坐标系换算）
+    const centerOnTarget = (targetEl) => {
+      if (!targetEl || !interaction) return
+      const contentEl = container.querySelector('.mermaid-content')
+      if (!contentEl) return
+      // 禁用 transition 防止中间值干扰
+      contentEl.style.transition = 'none'
+      void contentEl.getBoundingClientRect()
+      const elRect = targetEl.getBoundingClientRect()
+      if (elRect.width === 0 && elRect.height === 0) {
+        contentEl.style.transition = ''
+        return
+      }
+      const containerRect = container.getBoundingClientRect()
+      const cw = containerRect.width
+      const ch = containerRect.height
+      // 元素中心当前在容器中的位置
+      const screenCx = elRect.left + elRect.width / 2 - containerRect.left
+      const screenCy = elRect.top + elRect.height / 2 - containerRect.top
+      // 增量平移：把元素中心移到容器 (50%, 38%) 处
+      interaction.translateX.value += cw / 2 - screenCx
+      interaction.translateY.value += ch * 0.38 - screenCy
+      interaction.updateTransform()
+      requestAnimationFrame(() => { contentEl.style.transition = '' })
+    }
+
+    // 查找目标元素
+    const findTargetElement = (targetId, targetType, relationCode) => {
+      if (targetType === 'relation') {
+        let edgeEl = svg.querySelector('[data-link-code="' + targetId + '"]')
+        console.log('[findTargetElement] relation: data-link-code match:', !!edgeEl, 'targetId:', targetId)
+        if (!edgeEl && relationCode) {
+          edgeEl = svg.querySelector('[data-relation-code="' + relationCode + '"]')
+          console.log('[findTargetElement] relation: data-relation-code fallback:', !!edgeEl, 'relationCode:', relationCode)
+        }
+        if (!edgeEl) {
+          svg.querySelectorAll('.edgeLabel').forEach(label => {
+            if (edgeEl) return
+            const text = label.textContent || ''
+            if (text.includes(targetId) || (relationCode && text.includes(relationCode))) {
+              edgeEl = label.closest('g')
+            }
+          })
+          console.log('[findTargetElement] relation: text fallback:', !!edgeEl)
+        }
+        return edgeEl
+      } else if (targetType === 'container') {
+        let el = svg.querySelector('[data-container-code="' + targetId + '"]')
+        console.log('[findTargetElement] container: data-container-code match:', !!el, 'targetId:', targetId)
+        if (!el) {
+          svg.querySelectorAll('.subgraph, .cluster').forEach(c => {
+            if (el) return
+            const label = c.querySelector('.cluster-label, text')
+            if (label && label.textContent.includes(targetId)) el = c
+          })
+          console.log('[findTargetElement] container: text fallback:', !!el)
+        }
+        return el
+      } else {
+        let el = svg.querySelector('[data-code="' + targetId + '"]')
+        console.log('[findTargetElement] node: data-code match:', !!el, 'targetId:', targetId)
+        if (!el) {
+          svg.querySelectorAll('.node').forEach(node => {
+            if (el) return
+            const label = node.querySelector('.nodeLabel')
+            if (label && label.textContent.includes(targetId)) el = node
+          })
+          console.log('[findTargetElement] node: text fallback:', !!el)
+        }
+        return el
+      }
+    }
+
     container.querySelectorAll('.annotation-item').forEach(item => {
       const onItemClick = () => {
         const targetId = item.getAttribute('data-target-id');
         const ann = annotationMap.get(targetId);
         const targetType = ann ? ann.targetType : null;
+        const relationCode = ann ? ann.relationCode : '';
+        console.log('[annotation-click] targetId:', targetId, 'targetType:', targetType, 'relationCode:', relationCode);
         if (targetId && targetType) {
-          highlightTargetElement(svg, targetId, targetType);
+          highlightTargetElement(svg, targetId, targetType, relationCode);
           item.classList.add('annotation-item-selected');
           item.style.background = 'rgba(0, 0, 0, 0.05)';
+          // 居中到目标元素
+          const targetEl = findTargetElement(targetId, targetType, relationCode)
+          console.log('[annotation-click] found targetEl:', !!targetEl, targetEl?.tagName, targetEl?.getAttribute('data-code') || targetEl?.getAttribute('data-container-code') || targetEl?.getAttribute('data-link-code') || targetEl?.getAttribute('data-relation-code'));
+          if (targetEl) centerOnTarget(targetEl)
         }
       };
       const onItemMouseEnter = () => {
@@ -363,18 +462,24 @@ export function useAnnotationOverlay() {
     addListener(svg, 'click', onSvgClick);
   };
 
-  const highlightTargetElement = (svg, targetId, targetType) => {
+  const highlightTargetElement = (svg, targetId, targetType, relationCode) => {
     clearAllHighlights(svg);
 
     if (targetType === 'relation') {
-      // 关系连线：查找边组
-      let edgeEl = svg.querySelector(`[data-relation-code="${targetId}"]`);
+      // 优先用 data-link-code 精确匹配（每个关系实例唯一）
+      let edgeEl = svg.querySelector(`[data-link-code="${targetId}"]`);
 
+      // 兜底1：data-relation-code
+      if (!edgeEl && relationCode) {
+        edgeEl = svg.querySelector(`[data-relation-code="${relationCode}"]`);
+      }
+
+      // 兜底2：edgeLabel 文本匹配
       if (!edgeEl) {
         svg.querySelectorAll('.edgeLabel').forEach(label => {
           if (edgeEl) return;
           const text = label.textContent || '';
-          if (text.includes(targetId)) {
+          if (text.includes(targetId) || (relationCode && text.includes(relationCode))) {
             edgeEl = label.closest('g');
           }
         });

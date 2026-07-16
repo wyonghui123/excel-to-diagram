@@ -1,0 +1,47 @@
+fix(be): V007.45 P0 - audit_logs created_at_epoch migration + V8u invariant
+
+[V007.45 P0] 修复关系范围慢 + 消除 WARNING 日志噪音
+
+HANDOFF_V007_45_SCHEMA_MISSING.md 报告:
+  - 关系范围页面持续转非常慢
+  - backend log: no such column: created_at_epoch (object_type=relationship)
+
+经过代码审阅 + 本地实测, 修正后的根因:
+  - 列是给 audit_logs 表的, 不是 relationships 表 (HANDOFF 误判)
+  - virtual_sort.py 用的 SQL 是 MAX(created_at), 不是 created_at_epoch
+  - audit_derived_fields._execute_audit_query 有 try/except + fallback, 不会 500
+  - 真实根因: audit_logs 264K 行全表扫描 + 缺复合索引
+
+修复:
+  1. meta/migrations/v007_45_add_audit_logs_created_at_epoch.py:
+     - ALTER TABLE audit_logs ADD COLUMN created_at_epoch BIGINT
+     - Backfill: SET created_at_epoch = (strftime('%s', created_at) * 1000)
+     - CREATE INDEX idx_audit_ssot_updated
+       ON audit_logs(object_type, object_id, action, created_at_epoch DESC)
+     - 幂等: 列已存在/索引已存在不报错
+     - 自动备份 db.bak.v007_45.<ts>
+     - 支持 yonaa 部署: ARCH_DB_PATH=/opt/app/deployments/meta/architecture.db
+
+  2. tools/verify_bundle.py V8u invariant:
+     - 扫描 audit_derived_fields 是否引用 created_at_epoch
+     - 验证 zip 含 V007.45 migration 或 legacy migration_ssot_stage1
+     - 防退化: 代码引用 vs migration 一致性
+
+  3. docs/V007_45_FIX_PLAN.md:
+     - 与 HANDOFF 描述的偏差分析 (HANDOFF 部分有误)
+     - 真实根因 + 修复方案 A/B
+     - 部署执行清单
+     - V007.46+ 候选优化
+
+本地验证:
+  - migration 执行成功: 列已添加, 264415 行 backfill, 索引已创建
+  - 二次运行 idempotent: 0 行待 backfill, IF NOT EXISTS 生效
+  - test_enrich.py: WARNING 不再出现
+  - audit_derived_fields 走 created_at_epoch 路径成功
+
+部署命令:
+  SSH yonaa:
+    cd /opt/app/deployments/v20260708_xxx
+    /opt/miniconda3-py39/bin/python meta/migrations/v007_45_add_audit_logs_created_at_epoch.py
+
+不需重启 backend (audit_derived_fields 动态 query)

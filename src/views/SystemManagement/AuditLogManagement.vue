@@ -87,6 +87,7 @@
       }"
       @detail="handleViewDetail"
       @row-click="handleRowClick"
+      @row-dblclick="handleRowDblClick"
     >
       <template #cell-id="{ row }">
         <a class="id-link" @click.stop="handleViewDetail({ row })">{{ row.id }}</a>
@@ -243,6 +244,13 @@ function onOverviewTransitionEnd() {
 
 // [FIX 2026-06-11] 点击列表行 → 打开 detail drawer (统一入口, 复用 handleViewDetail)
 function handleRowClick(row) {
+  if (!row || !row.id) return
+  handleViewDetail({ row })
+}
+
+// [FIX 2026-06-29] 双击行 → 打开 detail drawer (与单击行为一致)
+//   - 审计日志有自己的 drawer (不走 MetaListPage 内置 detail),所以这里直接复用 handleViewDetail
+function handleRowDblClick({ row }) {
   if (!row || !row.id) return
   handleViewDetail({ row })
 }

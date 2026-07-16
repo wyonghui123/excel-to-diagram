@@ -142,7 +142,7 @@ def _build_user_order_sql(sort_by: str, sort_dir: str):
 
     Returns:
         (join_clause, order_by_sql):
-        - join_clause: 例如 "LEFT JOIN (SELECT ... FROM audit_logs ...) _audit_sort ON ..."
+        - join_clause: 例如 "LEFT JOIN (SELECT ... FROM v_audit_all ...) _audit_sort ON ..."
                        若无需 JOIN 则返回空串
         - order_by_sql: 例如 "_audit_sort._audit_value DESC" 或 "users.username ASC"
     """
@@ -237,29 +237,45 @@ def list_users():
     offset = (page - 1) * page_size
 
     # [FIX 2026-06-08] 构造 ORDER BY：物理字段直接排序，updated_at 走 audit JOIN
+    # [V007.51 Phase 2] 物化列优先：users 表有物化 updated_at 列，优先直接读取
     join_clause, order_by = _build_user_order_sql(sort_by, sort_dir)
 
-    # [_audit_sort 永远要存在] 因为 SELECT 列表引用了 _audit_sort._audit_value
-    # 即使用户没按 updated_at 排序，前端仍可能展示变更时间列。
-    # 因此：物理字段排序时也保留 LEFT JOIN（无额外成本，仅多一个子查询）。
+    # [V007.51] 检查是否可用物化列（零 JOIN 开销）
+    _use_materialized = False
     if not join_clause:
         audit_result = _build_audit_derived_order_join(
             table_name='users', obj_type='user',
-            sort_field='updated_at', sort_direction='asc',  # 方向不影响 JOIN 结构
+            sort_field='updated_at', sort_direction='asc',
         )
-        # 注意：_build_audit_derived_order_join 返回 3-tuple (join, order_alias, dir)
         if audit_result:
             join_clause = audit_result[0]
+            # V007.51: join_clause 为空字符串表示走物化列
+            if join_clause == "":
+                _use_materialized = True
+                order_by_materialized = audit_result[1]  # COALESCE(users.updated_at, users.created_at)
 
-    data_sql = f"""
-        SELECT users.id, users.username, users.email, users.display_name,
-               users.status, users.sso_provider, users.last_login_at, users.created_at,
-               _audit_sort._audit_value AS updated_at
-        FROM users {join_clause}
-        WHERE {where_clause}
-        ORDER BY {order_by}
-        LIMIT ? OFFSET ?
-    """
+    # [V007.51] 物化列路径：直接从 users.updated_at 读取，不需要 _audit_sort
+    if _use_materialized:
+        data_sql = f"""
+            SELECT users.id, users.username, users.email, users.display_name,
+                   users.status, users.sso_provider, users.last_login_at, users.created_at,
+                   COALESCE(users.updated_at, users.created_at) AS updated_at
+            FROM users
+            WHERE {where_clause}
+            ORDER BY {order_by}
+            LIMIT ? OFFSET ?
+        """
+    else:
+        # 回退：走 _audit_sort LEFT JOIN
+        data_sql = f"""
+            SELECT users.id, users.username, users.email, users.display_name,
+                   users.status, users.sso_provider, users.last_login_at, users.created_at,
+                   _audit_sort._audit_value AS updated_at
+            FROM users {join_clause}
+            WHERE {where_clause}
+            ORDER BY {order_by}
+            LIMIT ? OFFSET ?
+        """
     cursor = _data_source.execute(data_sql, tuple(params + [page_size, offset]))
     columns = [desc[0] for desc in cursor.description]
     users = [dict(zip(columns, row)) for row in cursor.fetchall()]
@@ -799,7 +815,7 @@ def get_user_logs(user_id):
         offset = (page - 1) * page_size
         
         cursor = ds.execute("""
-            SELECT * FROM audit_logs
+            SELECT * FROM v_audit_all
             WHERE object_type = 'user' AND object_id = ?
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?
@@ -811,7 +827,7 @@ def get_user_logs(user_id):
             logs.append(dict(zip(columns, row)))
         
         cursor = ds.execute(
-            "SELECT COUNT(*) as total FROM audit_logs WHERE object_type = 'user' AND object_id = ?",
+            "SELECT COUNT(*) as total FROM v_audit_all WHERE object_type = 'user' AND object_id = ?",
             [user_id]
         )
         total = cursor.fetchone()[0]

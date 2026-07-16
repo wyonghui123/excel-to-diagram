@@ -487,8 +487,9 @@ fields:
 - id: source_domain_id
   name: 源领域
   type: integer
-  description: 源业务对象所属领域（用于级联筛选业务对象）
-  storage: virtual
+  description: 源业务对象所属领域（用于级联筛选业务对象，由 DB trigger 自动从 source_bo_id 推导并维护）
+  storage: stored
+  db_column: source_domain_id
   ui:
     widget: select
     relation: domain
@@ -497,14 +498,15 @@ fields:
     cascade_group: relationship
     cascade_level: 2
   semantics:
-    meaning: Search Help - 用于级联筛选源端业务对象
+    meaning: Search Help - 用于级联筛选源端业务对象（由 trigger 维护）
     search_help_for: source_bo_id
     immutable: true
     export_visible: false
     redundancy:
-      type: virtual
+      type: stored
       source_field: source_bo_id
       derived_from: sub_domain.domain_id
+      maintained_by: db_trigger
       join_path:
       - table: business_objects
         from: source_bo_id
@@ -548,8 +550,9 @@ fields:
 - id: source_sub_domain_id
   name: 源子领域
   type: integer
-  description: 源业务对象所属子领域（用于级联筛选业务对象）
-  storage: virtual
+  description: 源业务对象所属子领域（用于级联筛选业务对象，由 DB trigger 自动从 source_bo_id 推导并维护）
+  storage: stored
+  db_column: source_sub_domain_id
   ui:
     widget: select
     relation: sub_domain
@@ -558,14 +561,15 @@ fields:
     cascade_group: relationship
     cascade_level: 3
   semantics:
-    meaning: Search Help - 用于级联筛选源端业务对象
+    meaning: Search Help - 用于级联筛选源端业务对象（由 trigger 维护）
     search_help_for: source_bo_id
     immutable: true
     export_visible: false
     redundancy:
-      type: virtual
+      type: stored
       source_field: source_bo_id
       derived_from: service_module.sub_domain_id
+      maintained_by: db_trigger
       join_path:
       - table: business_objects
         from: source_bo_id
@@ -606,8 +610,9 @@ fields:
 - id: source_service_module_id
   name: 源服务模块
   type: integer
-  description: 源业务对象所属服务模块（用于级联筛选业务对象）
-  storage: virtual
+  description: 源业务对象所属服务模块（用于级联筛选业务对象，由 DB trigger 自动从 source_bo_id 推导并维护）
+  storage: stored
+  db_column: source_service_module_id
   ui:
     widget: select
     relation: service_module
@@ -616,14 +621,15 @@ fields:
     cascade_group: relationship
     cascade_level: 4
   semantics:
-    meaning: Search Help - 用于级联筛选源端业务对象
+    meaning: Search Help - 用于级联筛选源端业务对象（由 trigger 维护）
     search_help_for: source_bo_id
     immutable: true
     export_visible: false
     redundancy:
-      type: virtual
+      type: stored
       source_field: source_bo_id
       derived_from: business_object.service_module_id
+      maintained_by: db_trigger
       join_path:
       - table: business_objects
         from: source_bo_id
@@ -660,8 +666,9 @@ fields:
 - id: target_domain_id
   name: 目标领域
   type: integer
-  description: 目标业务对象所属领域（用于级联筛选业务对象）
-  storage: virtual
+  description: 目标业务对象所属领域（用于级联筛选业务对象，由 DB trigger 自动从 target_bo_id 推导并维护）
+  storage: stored
+  db_column: target_domain_id
   ui:
     widget: select
     relation: domain
@@ -670,14 +677,15 @@ fields:
     cascade_group: relationship
     cascade_level: 2
   semantics:
-    meaning: Search Help - 用于级联筛选目标端业务对象
+    meaning: Search Help - 用于级联筛选目标端业务对象（由 trigger 维护）
     search_help_for: target_bo_id
     immutable: true
     export_visible: false
     redundancy:
-      type: virtual
+      type: stored
       source_field: target_bo_id
       derived_from: sub_domain.domain_id
+      maintained_by: db_trigger
       join_path:
       - table: business_objects
         from: target_bo_id
@@ -721,8 +729,9 @@ fields:
 - id: target_sub_domain_id
   name: 目标子领域
   type: integer
-  description: 目标业务对象所属子领域（用于级联筛选业务对象）
-  storage: virtual
+  description: 目标业务对象所属子领域（用于级联筛选业务对象，由 DB trigger 自动从 target_bo_id 推导并维护）
+  storage: stored
+  db_column: target_sub_domain_id
   ui:
     widget: select
     relation: sub_domain
@@ -731,14 +740,15 @@ fields:
     cascade_group: relationship
     cascade_level: 3
   semantics:
-    meaning: Search Help - 用于级联筛选目标端业务对象
+    meaning: Search Help - 用于级联筛选目标端业务对象（由 trigger 维护）
     search_help_for: target_bo_id
     immutable: true
     export_visible: false
     redundancy:
-      type: virtual
+      type: stored
       source_field: target_bo_id
       derived_from: service_module.sub_domain_id
+      maintained_by: db_trigger
       join_path:
       - table: business_objects
         from: target_bo_id
@@ -778,8 +788,9 @@ fields:
 - id: target_service_module_id
   name: 目标服务模块
   type: integer
-  description: 目标业务对象所属服务模块（用于级联筛选业务对象）
-  storage: virtual
+  description: 目标业务对象所属服务模块（用于级联筛选业务对象，由 DB trigger 自动从 target_bo_id 推导并维护）
+  storage: stored
+  db_column: target_service_module_id
   ui:
     widget: select
     relation: service_module
@@ -788,14 +799,15 @@ fields:
     cascade_group: relationship
     cascade_level: 4
   semantics:
-    meaning: Search Help - 用于级联筛选目标端业务对象
+    meaning: Search Help - 用于级联筛选目标端业务对象（由 trigger 维护）
     search_help_for: target_bo_id
     immutable: true
     export_visible: false
     redundancy:
-      type: virtual
+      type: stored
       source_field: target_bo_id
       derived_from: business_object.service_module_id
+      maintained_by: db_trigger
       join_path:
       - table: business_objects
         from: target_bo_id
@@ -1026,8 +1038,11 @@ fields:
   name: 关系类型
   type: string
   db_column: relation_type
-  required: true
-  description: 关系类型（操作语义）
+  # [FIX 2026-06-28 临时] required: true → false
+  #   原因: 业务方反馈部分场景下关系类型允许留空 (例如纯引用关系, 操作语义未定义)
+  #   计划: 后续根据数据情况决定是否恢复, 见 BUG-V029 关联讨论
+  required: false
+  description: 关系类型（操作语义），临时允许为空
   ui:
     widget: select
     enum_type: relation_type
@@ -1607,31 +1622,43 @@ actions:
   method: DELETE
   path: /api/v1/relationships/{id}
   description: 删除单个关系
-- id: batch_import
-  name: 批量导入
+# [FIX 2026-07-10] BUG-V051: import/export 委托给统一 export-import 端点
+#   移除 batch_import (2026-07-10 BUG-V051 后续): 跟 import 重复
+- id: import
+  name: 导入
   type: business
   method: POST
-  path: /api/v1/relationships/import
-  description: 从Excel批量导入关系
+  path: /api/v1/export-import/import
+  description: 通过统一导入端点从Excel导入关系
+- id: export
+  name: 导出
+  type: business
+  method: GET
+  path: /api/v1/export-import/export
+  description: 通过统一导出端点导出关系到Excel
 indexes:
-- name: uidx_relationships_version_source_target_type
+- name: idx_relationships_version_source_target_type_dir
   fields:
   - version_id
   - source_bo_id
   - target_bo_id
-  - relation_code
-  type: unique
-  priority: high
-  description: 版本+源+目标+类型唯一索引（防止重复关系）
-- name: uidx_relationships_version_source_target_direction
-  fields:
-  - version_id
-  - source_bo_id
-  - target_bo_id
+  - relation_type
   - relation_direction
+  type: composite
+  priority: medium
+  description: 版本+源+目标+类型+方向复合索引（业务上允许重复，仅用于查询性能，不做唯一性约束；重复检查降级为 import warning）
+# [FIX BUG-V053 2026-07-10 dev agent] 关系业务编码在版本内唯一（应用层校验）
+# 原因: 之前 DB 有 (version_id, src+tgt+type+direction) 唯一约束, 重复导入失败
+#       业务上同一对 (src,tgt) 可以有不同 type/direction 的关系, 因此去掉 DB 唯一约束
+#       但 code 字段是关系实例的业务标识符, 应在 (version_id, code) 上唯一
+#       DB 不加 unique constraint (避免历史脏数据), 用 _check_unique_indexes 应用层校验
+- name: uidx_relationships_version_code
+  fields:
+  - version_id
+  - code
   type: unique
   priority: high
-  description: 版本+源+目标+方向唯一索引（防同源同目标同方向重复关系，relation_direction 为空时跳过）
+  description: 关系业务编码在版本内唯一（应用层校验，DB 不加 unique constraint 以兼容历史脏数据）
 - name: idx_relationships_version_source
   fields:
   - version_id

@@ -1,12 +1,16 @@
-import pytest
-
-pytestmark = pytest.mark.integration
-
 # -*- coding: utf-8 -*-
 """
 测试工具模块
 提供测试所需的通用工具函数和规范
 """
+# 注意: pytest 是测试时依赖, 但 test_utils 被生产迁移脚本 (migrate() 调用方) 引用,
+# 不能在模块顶层 import pytest. 改为惰性 import: 仅在测试代码调用时加载.
+try:
+    import pytest  # noqa: F401  # 仅测试用
+    pytestmark = pytest.mark.integration
+except ImportError:
+    # 生产环境 / 部署环境 / 迁移 runner 环境无 pytest
+    pytestmark = []
 
 import os
 import sys

@@ -196,6 +196,42 @@ const relationCodesClearTrigger = ref(0)  // OSS 变更时切换，触发 Relati
 const _restoreProtectionConsumed = ref(false)
 const treeData = shallowRef([])
 
+// [BUG-V048d 修复 2026-07-09] SD/SM 独立 parent 映射，避免 hierarchyMap ID 碰撞
+//   根因: hierarchyMap 中 SD 条目被不同 domain 的 SM 覆盖 (51 个碰撞)
+//   例: SD 299 (供应链云 2200) 被 SM 299 (协同云 2202) 覆盖 → domainId=2202 ≠ 2200
+//   导致 SD loop 的 selectedDomainSet.has(info.domainId) 失败 → 双重计数 141+141=282
+//   修复: 直接从 treeData 构建 sdDomainMap / smParentMap，不走 hierarchyMap
+const sdDomainMap = computed(() => {
+  const map = {}
+  if (!treeData.value || treeData.value.length === 0) return map
+  for (const domain of treeData.value) {
+    if (domain.type !== 'domain') continue
+    for (const sd of (domain.children || [])) {
+      if (sd.type === 'sub_domain' && sd.originalId != null) {
+        map[sd.originalId] = domain.originalId
+      }
+    }
+  }
+  return map
+})
+
+const smParentMap = computed(() => {
+  const map = {}
+  if (!treeData.value || treeData.value.length === 0) return map
+  for (const domain of treeData.value) {
+    if (domain.type !== 'domain') continue
+    for (const sd of (domain.children || [])) {
+      if (sd.type !== 'sub_domain') continue
+      for (const sm of (sd.children || [])) {
+        if (sm.type === 'service_module' && sm.originalId != null) {
+          map[sm.originalId] = { domainId: domain.originalId, subDomainId: sd.originalId }
+        }
+      }
+    }
+  }
+  return map
+})
+
 const hierarchyMap = computed(() => {
   if (!treeData.value || treeData.value.length === 0) return {}
 
@@ -203,17 +239,26 @@ const hierarchyMap = computed(() => {
   function walk(nodes, domainId, subDomainId, serviceModuleId) {
     if (!nodes) return
     for (const node of nodes) {
+      // [FIX 2026-06-30] 用 originalId (数字) 作 key/value, 与 selectedXxxIds 类型对齐
+      //   之前用 node.id (字符串如 'd_1'), 导致 effective ids 推导永远查不到
+      const oid = node.originalId
+      if (oid == null) continue
+      // [FIX 2026-06-30] ID 冲突处理:
+      //   sub_domain 和 service_module 可能共享同一 originalId (如 347 既是
+      //   "项目过程"子域 又是 "现金流预测"SM), 先到的 sub_domain 会阻止后到的 SM
+      //   写入正确的 domainId, 导致 SM→domain 推导错误。
+      //   规则: domain/sub_domain → 先到先得; SM/BO → 始终覆盖
       if (node.type === 'domain') {
-        map[node.id] = { domainId: node.id }
-        walk(node.children, node.id, null)
+        if (!map[oid]) map[oid] = { domainId: oid }
+        walk(node.children, oid, null)
       } else if (node.type === 'sub_domain') {
-        map[node.id] = { domainId, subDomainId: node.id }
-        walk(node.children, domainId, node.id)
+        if (!map[oid]) map[oid] = { domainId, subDomainId: oid }
+        walk(node.children, domainId, oid)
       } else if (node.type === 'service_module') {
-        map[node.id] = { domainId, subDomainId, serviceModuleId: node.id }
-        walk(node.children, domainId, subDomainId, node.id)
+        map[oid] = { domainId, subDomainId, serviceModuleId: oid }
+        walk(node.children, domainId, subDomainId, oid)
       } else if (node.type === 'business_object') {
-        map[node.id] = { domainId, subDomainId, serviceModuleId }
+        map[oid] = { domainId, subDomainId, serviceModuleId }
         walk(node.children, domainId, subDomainId, serviceModuleId)
       }
     }
@@ -224,11 +269,13 @@ const hierarchyMap = computed(() => {
 
 const effectiveDomainIds = computed(() => {
   const ids = new Set([...selectedDomainIds.value])
-  for (const id of selectedSubDomainIds.value) {
-    const info = hierarchyMap.value[id]
-    if (info?.domainId != null) ids.add(info.domainId)
-  }
-  for (const id of selectedServiceModuleIds.value) {
+  // [FIX 2026-06-30] 去掉从 sub_domain 推导 domain 的逻辑
+  //   根因: check-strictly=false 会级联选中父级 domain 下所有子域,
+  //   hierarchyMap 对这些子域的 domainId 映射可能发散(非单一 domain),
+  //   导致 effective 膨胀(如 1→6 个 domain)。
+  //   SM 推导仍需保留：选「采购管理」SM 可跨 domain 推导出「供应链云」。
+  const sm_ids = selectedServiceModuleIds.value
+  for (const id of sm_ids) {
     const info = hierarchyMap.value[id]
     if (info?.domainId != null) ids.add(info.domainId)
   }
@@ -259,21 +306,61 @@ const effectiveServiceModuleIds = computed(() => {
 //   修复需要先在 load 时 query BO list, 构建 boIdsBySm 反向索引
 const allBusinessObjects = shallowRef([])
 
-// 用 treeData 反向构建: service_module_id → bo_ids[]
-const boIdsBySm = computed(() => {
-  if (!treeData.value || treeData.value.length === 0) return new Map()
+// 用 treeData 反向构建: service_module_id → bo_count (用 child_count, 不是实际 bo id 列表)
+// [BUG-V033 修复 2026-06-29] 改用 service_module.child_count 聚合, 不再依赖 treeData 中的 BO 节点
+// 根因: buildHierarchyTree 不展开 BO children (避免 500 cap), treeData 中没有 type=business_object 节点,
+//       原 boIdsBySm 永远为空, 选 1 SM (58 BO) → flattenSelectedBoIds 空 → 兜底返回 1
+// 修复: 从 treeData 提取每个 SM 节点的 child_count, 实现"SM id → BO 数"映射
+//       flattenSelectedBoIds 返回 SM id (不展开为具体 bo id, 因为没有 id 列表; 但 chip 关心的是 count)
+// [perf-2026-06-29] 显式引用缓存: Vue computed 已基于 reactive 依赖缓存,
+//   但每次依赖变化都需 reactive 系统追踪 + dirty check + 重新执行 getter.
+//   加引用短路可在 treeData 引用未变时立即返回, 避免 walk() 整棵树 (971 domain 场景 ~5ms).
+//   注意: _smCachedTreeData/_smCachedMap 是 setup() 闭包变量, 组件实例独立, 不会跨实例污染.
+let _smCachedTreeData = null
+let _smCachedMap = null
+const smChildCount = computed(() => {
+  // 引用相等短路: treeData 未变时直接返回缓存
+  if (treeData.value === _smCachedTreeData && _smCachedMap) {
+    return _smCachedMap
+  }
+
+  if (!treeData.value || treeData.value.length === 0) {
+    _smCachedTreeData = treeData.value
+    _smCachedMap = new Map()
+    return _smCachedMap
+  }
   const map = new Map()
   function walk(nodes) {
     if (!nodes) return
     for (const n of nodes) {
-      if (n.type === 'business_object') {
-        // hierarchyMap 反查 sm id
-        const info = hierarchyMap.value[n.id]
-        if (info?.serviceModuleId != null) {
-          const list = map.get(info.serviceModuleId) || []
-          list.push(n.id)
-          map.set(info.serviceModuleId, list)
-        }
+      if (n.type === 'service_module') {
+        // [BUG-V033] 优先用 SM 节点的 child_count (由 BUG-V028 修复保证正确)
+        const cnt = n.count || 0
+        if (cnt > 0) map.set(n.originalId || n.id, cnt)
+      }
+      if (n.children) walk(n.children)
+    }
+  }
+  walk(treeData.value)
+  _smCachedTreeData = treeData.value
+  _smCachedMap = map
+  return map
+})
+
+// [BUG-V048 修复 2026-07-08] sub_domain / domain 节点的 BO count
+//   smChildCount 只覆盖 service_module 节点. 但 el-tree 在用户选 domain/SD 时,
+//     node.count 字段也累加了 BO 总数 (见 ObjectScopeSection.buildHierarchyTree),
+//     用 SD/domain 的 count 直接 chip 累加可避免双重计数.
+//   例: 选财务云 domain → 树节点 domainBoCount = 1610 → chip = 1610 (直接用 node.count)
+const sdChildCount = computed(() => {
+  const map = new Map()
+  if (!treeData.value || treeData.value.length === 0) return map
+  function walk(nodes) {
+    if (!nodes) return
+    for (const n of nodes) {
+      if (n.type === 'sub_domain') {
+        const cnt = n.count || 0
+        if (cnt > 0) map.set(n.originalId || n.id, cnt)
       }
       if (n.children) walk(n.children)
     }
@@ -282,52 +369,21 @@ const boIdsBySm = computed(() => {
   return map
 })
 
-// 扁平展开所有受影响的 BO id
-const flattenSelectedBoIds = computed(() => {
-  const result = new Set()
-  // 直接选的 BO
-  for (const id of selectedBoIds.value) result.add(id)
-  // 选的 service_module
-  for (const smId of selectedServiceModuleIds.value) {
-    const bos = boIdsBySm.value.get(smId) || []
-    for (const boId of bos) result.add(boId)
-  }
-  // 选的 sub_domain
-  for (const sdId of selectedSubDomainIds.value) {
-    const info = hierarchyMap.value[sdId]
-    if (!info) continue
-    // 找 sd 内所有 SM, 再找每个 SM 的 BO
-    for (const n of (treeData.value || [])) {
-      // 简化: 从 boIdsBySm 反向查 (hierarchyMap 的 bo → smId 但 sd → [smIds] 没存)
-      // 用 treeData 二次 walk
-    }
-    walkSubDomain(info)
-  }
-  // 选的 domain
-  for (const dId of selectedDomainIds.value) {
-    walkDomain(hierarchyMap.value[dId])
-  }
-  return [...result]
-
-  function walkSubDomain(info) {
-    if (!info) return
-    // treeData 中找 sm_*, type=service_module, 看 hierarchyMap[smId]?.subDomainId === info.subDomainId
-    for (const smId of (boIdsBySm.value.keys())) {
-      const smInfo = hierarchyMap.value[smId]
-      if (smInfo?.subDomainId === info.subDomainId) {
-        for (const boId of (boIdsBySm.value.get(smId) || [])) result.add(boId)
+const domainChildCount = computed(() => {
+  const map = new Map()
+  if (!treeData.value || treeData.value.length === 0) return map
+  function walk(nodes) {
+    if (!nodes) return
+    for (const n of nodes) {
+      if (n.type === 'domain') {
+        const cnt = n.count || 0
+        if (cnt > 0) map.set(n.originalId || n.id, cnt)
       }
+      if (n.children) walk(n.children)
     }
   }
-  function walkDomain(info) {
-    if (!info) return
-    for (const smId of (boIdsBySm.value.keys())) {
-      const smInfo = hierarchyMap.value[smId]
-      if (smInfo?.domainId === info.domainId) {
-        for (const boId of (boIdsBySm.value.get(smId) || [])) result.add(boId)
-      }
-    }
-  }
+  walk(treeData.value)
+  return map
 })
 
 // 关键修复 v39: chip 数字从"4 源 id 总数"改为"扁平去重 BO 总数"
@@ -338,17 +394,79 @@ const flattenSelectedBoIds = computed(() => {
 // 关键修复 v39.1: 始终使用扁平去重 BO 总数, 不再依赖 localSelectedBoCount
 //   之前逻辑: localSelectedBoCount > 0 时直接返回, 导致显示 4 源 id 总数而非 BO 数
 //   现在逻辑: 始终使用 flattenSelectedBoIds 计算扁平去重 BO 总数
+// 关键修复 V048: 用 SD/domain 节点 count 精确累加, 避免双重计数
+//   之前 bug (v39.1): flattenSelectedBoIds 用 placeholder `__sm_${id}_${i}__`
+//     → 真实 BO id 与 placeholder 命名空间不同 → Set 去重失效
+//     → 例: 已选 422 BO + 选财务云 domain (1610 BO) → chip = 422 + 1610 = 2032
+//   修复: 改用树节点本身的 count (smChildCount / sdChildCount / domainChildCount),
+//     按"未被祖先覆盖"原则累加: 选 SM 时加 child_count, 但 SM 所属 SD/domain 被选则跳过;
+//     选 SD 时加 SD count, 但 SD 所属 domain 被选则跳过; 选 domain 时直接累加.
+//   精确公式: chip = Σ(sm.cnt where sm.selected && sm.sd ∉ sel && sm.domain ∉ sel)
+//                  + Σ(sd.cnt where sd.selected && sd.domain ∉ sel)
+//                  + Σ(domain.cnt where domain.selected)
+//                  + (selectedBoIds 不在任何祖先下时的 fallback)
+// [BUG-V048b 修复 2026-07-08] ID 类型规范化: 兼容数字/字符串/带前缀 id
+//   之前 bug: emit 链路上 node.data?.originalId 是数字, 但 fallback 到 node.id 时
+//     是 prefixed 字符串 ('d_5'), 与 hierarchyMap 的数字 key 5 不匹配
+//     → Set.has(5) 返回 false (因为 Set 里是 'd_5') → 跳过逻辑失效
+//     → SD 累加 + domain 累加 → 双重计数 (用户报告 141→282)
+//   修复: 用 normalizeId 把所有 id 转成数字, Set.has 比较统一
+function normalizeId(v) {
+  if (v == null) return v
+  if (typeof v === 'number') return v
+  // 字符串可能是 'd_5' / '5' / 'sm_5' / 's_5'
+  const s = String(v)
+  // 去前缀
+  const numStr = s.replace(/^(d|s|sm)_/, '')
+  const n = Number(numStr)
+  return Number.isNaN(n) ? s : n
+}
+
 const selectedBoCount = computed(() => {
-  // 始终使用扁平去重 BO 总数
-  const flatBoIds = flattenSelectedBoIds.value
-  if (flatBoIds && flatBoIds.length > 0) {
-    return new Set(flatBoIds).size
+  const selectedDomainSet = new Set(selectedDomainIds.value.map(normalizeId))
+  const selectedSubDomainSet = new Set(selectedSubDomainIds.value.map(normalizeId))
+
+  let total = 0
+
+  // 1. 选中的 SM (只在所属 SD/domain 未被选中时累加)
+  // [BUG-V048d] 用 smParentMap 替代 hierarchyMap，避免 ID 碰撞
+  for (const smId of selectedServiceModuleIds.value) {
+    const nId = normalizeId(smId)
+    const info = smParentMap.value[nId] || smParentMap.value[smId]
+    if (!info) continue
+    // 祖先被勾时, 该 SM 已被覆盖, 跳过
+    if (selectedSubDomainSet.has(info.subDomainId)) continue
+    if (selectedDomainSet.has(info.domainId)) continue
+    total += smChildCount.value.get(nId) || smChildCount.value.get(smId) || 0
   }
-  // 兜底: 4 源 id 总数 (旧行为, 兼容性)
-  return (selectedBoIds.value?.length || 0) +
-    (selectedDomainIds.value?.length || 0) +
-    (selectedSubDomainIds.value?.length || 0) +
-    (selectedServiceModuleIds.value?.length || 0)
+
+  // 2. 选中的 SD (只在所属 domain 未被选中时累加)
+  // [BUG-V048d] 用 sdDomainMap 替代 hierarchyMap，避免 ID 碰撞
+  for (const sdId of selectedSubDomainIds.value) {
+    const nId = normalizeId(sdId)
+    const domainId = sdDomainMap.value[nId] ?? sdDomainMap.value[sdId]
+    if (domainId != null && selectedDomainSet.has(domainId)) continue
+    total += sdChildCount.value.get(nId) || sdChildCount.value.get(sdId) || 0
+  }
+
+  // 3. 选中的 domain (直接累加)
+  for (const dId of selectedDomainIds.value) {
+    const nId = normalizeId(dId)
+    total += domainChildCount.value.get(nId) || domainChildCount.value.get(dId) || 0
+  }
+
+  // 4. 兜底: 只选了 BO (无任何祖先), 用 selectedBoIds.length
+  if (
+    total === 0 &&
+    selectedBoIds.value.length > 0 &&
+    selectedDomainIds.value.length === 0 &&
+    selectedSubDomainIds.value.length === 0 &&
+    selectedServiceModuleIds.value.length === 0
+  ) {
+    total = selectedBoIds.value.length
+  }
+
+  return total
 })
 
 // 关键修复 v40: 关系范围 chip 从 "selectedRelationCodes 数(节点数/关系类型编码数)" 改为
@@ -395,10 +513,13 @@ const computedCategories = computed(() => {
 })
 
 function handleObjectScopeChange({ boIds, domainIds, subDomainIds, serviceModuleIds }) {
-  selectedBoIds.value = boIds || []
-  selectedDomainIds.value = domainIds || []
-  selectedSubDomainIds.value = subDomainIds || []
-  selectedServiceModuleIds.value = serviceModuleIds || []
+  // [BUG-V048c 修复 2026-07-09] 去重 domain/subDomain/SM/BO ids，避免重复累加
+  //   之前: treeNodesToScope 返回的数组可能含重复 id (el-tree 在某些情况下返回重复节点)
+  //   修复: 用 Set 去重后再赋值
+  selectedBoIds.value = [...new Set((boIds || []).map(normalizeId))]
+  selectedDomainIds.value = [...new Set((domainIds || []).map(normalizeId))]
+  selectedSubDomainIds.value = [...new Set((subDomainIds || []).map(normalizeId))]
+  selectedServiceModuleIds.value = [...new Set((serviceModuleIds || []).map(normalizeId))]
   localSelectedBoCount.value = (boIds || []).length + (domainIds || []).length + (subDomainIds || []).length + (serviceModuleIds || []).length
 
   // OSS 变更时清空 relationCodes。
@@ -428,8 +549,8 @@ function handleObjectScopeChange({ boIds, domainIds, subDomainIds, serviceModule
     exposed.exposed.forceClearChecked()
   }
   // 同步加载 RSS 树：此时 scopeIds 已更新为空 codes，新树无选中节点
-  // 传入 true 表示 silent refresh（不显示 loading）
-  relationScopeRef.value?.loadRelationships?.(true)
+  // [性能优化] 不传 force (默认 false), OSS 变化时命中 version 级缓存只重建树
+  relationScopeRef.value?.loadRelationships?.()
   trace.log('handleObjectScopeChange→clearRSS', { boCount: localSelectedBoCount.value })
 
   if ((boIds && boIds.length > 0) || (domainIds && domainIds.length > 0) ||
@@ -551,7 +672,8 @@ function loadTreeData() {
 
 async function refresh() {
   objectScopeRef.value?.loadTreeData({ silent: true })
-  await relationScopeRef.value?.loadRelationships()
+  // [性能优化] 编辑/新增/删除后触发, force=true 跳过缓存强制重拉
+  await relationScopeRef.value?.loadRelationships({ force: true })
 }
 
 async function loadRelationTypes() {

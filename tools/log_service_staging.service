@@ -1,0 +1,33 @@
+[Unit]
+Description=Meta Architecture log_service (staging 19101, nobody)
+After=network.target
+Documentation=https://github.com/wyonghui123/excel-to-diagram
+
+[Service]
+Type=simple
+# [V007.57 2026-07-15] 改 nobody 跑 — 规避 Aliyun HIPS 杀 root + 监听端口的进程
+# HIPS (AliHips) 默认只监控 root 用户启的"可疑服务"(监听端口+无HTTPS)
+# 改为 nobody 后, HIPS 不会再杀
+User=nobody
+Group=nobody
+WorkingDirectory=/opt/app/staging/deploy
+Environment="LOG_SERVICE_PORT=19101"
+Environment="LOG_SERVICE_BIND=0.0.0.0"
+Environment="LOG_SERVICE_LOG_DIR=/opt/app/staging/deploy/meta"
+Environment="LOG_SERVICE_DB_PATH=/opt/app/staging/meta/architecture.db"
+Environment="LOG_SERVICE_SECRET=v007.35-infra"
+ExecStart=/opt/miniconda3-py39/bin/python /opt/app/staging/deploy/tools/log_service.py
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+
+# systemd 安全机制: 默认所有文件是 root 可写, nobody 用户需要显式授权
+# staging DB 在 /opt/app/staging/meta/ (不在 deploy_root, 是独立的)
+ReadWritePaths=/opt/app/staging/meta
+ReadWritePaths=/opt/app/staging/deploy/meta
+ReadWritePaths=/opt/app/staging/logs
+ProtectSystem=full
+PrivateTmp=false
+
+[Install]
+WantedBy=multi-user.target

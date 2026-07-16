@@ -172,7 +172,33 @@ class PermissionInterceptor(Interceptor):
 
         # 回退到现有逻辑
         if required not in permissions:
-            # [FIX FR-005 2026-06-23] 决策埋点 (annotation-permission-hardening)
+            # [FIX BUG-V058 2026-07-12] annotation 功能权限跟随 parent 对象
+            # annotation 是辅助对象, 写权限应继承自 parent (target_type)
+            # 例: 用户有 business_object:update 权限 → 应允许对该 BO 创建/更新/删除备注
+            # 与 WriteScopeInterceptor 的 annotation cascade 逻辑一致:
+            #   - WriteScopeInterceptor 对 annotation update/delete 已走 parent dim scope
+            #   - V2.1.13 已改 perm check 为 parent_type:update (非 annotation:update)
+            #   - 但 PermissionInterceptor 仍要求 annotation:create/update/delete → 被拒
+            if context.object_type == 'annotation' and suffix in ('create', 'update', 'delete'):
+                parent_type = None
+                # create: 从 params.target_type 获取
+                if hasattr(context, 'params') and context.params:
+                    parent_type = context.params.get('target_type')
+                # update/delete: 从 record 获取
+                if not parent_type and hasattr(context, 'record') and context.record:
+                    parent_type = context.record.get('target_type')
+                # 处理 "code - name" 格式
+                if isinstance(parent_type, str) and ' - ' in parent_type:
+                    parent_type = parent_type.split(' - ')[0].strip()
+                if parent_type:
+                    parent_perm = f'{parent_type}:{suffix}'
+                    if parent_perm in permissions:
+                        logger.info(
+                            f'PermissionInterceptor: annotation:{suffix} bypassed via '
+                            f'parent perm {parent_perm} for user {user_info.get("username")}'
+                        )
+                        return  # parent 有对应写权限, 允许 annotation 操作
+
             from meta.core.permission_audit import log_permission_decision
             log_permission_decision(
                 user_id=user_info.get('id'),

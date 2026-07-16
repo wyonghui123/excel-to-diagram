@@ -8,6 +8,7 @@
  */
 
 import { isTerminalGroup } from './types.js'
+import { sanitizeMermaidLabel } from '@/composables/useMermaid/syntax/_shared/arrowHelper.js'
 
 export class MermaidGenerator {
   /**
@@ -118,11 +119,13 @@ export class MermaidGenerator {
     }
     
     const indent = '  '.repeat(depth)
+    // [V007.48 P0] groupId 已 sanitized (a-zA-Z0-9 only), 安全
     const groupId = `G_${group.id.replace(/[^a-zA-Z0-9]/g, '_')}`
-    const displayTitle = this.model.getDisplayTitle(group.id)
-    
+    // [V007.48 P0] displayTitle 用 sanitizeMermaidLabel 转义 (mermaid 11.13 不允许 " ' \\ 换行)
+    const displayTitle = sanitizeMermaidLabel(this.model.getDisplayTitle(group.id))
+
     let code = ''
-    
+
     if (isTerminal) {
       // 终端分组：直接生成节点
       code += this.generateTerminalNodes(group, indent)
@@ -191,18 +194,22 @@ export class MermaidGenerator {
     
     const indent = '  '.repeat(depth)
     const rawTitle = container.fullTitle || container.name || 'Container'
-    const displayTitle = this.formatContainerTitle(rawTitle)
-    
+    // [V007.48 P0] formatContainerTitle 后 sanitize
+    const displayTitle = sanitizeMermaidLabel(this.formatContainerTitle(rawTitle))
+
     let code = `${indent}subgraph ${containerId}["${displayTitle}"]\n`
     code += `${indent}  direction ${container.direction || 'TB'}\n`
-    
+
     for (const nodeId of container.nodes) {
       if (!this.definedNodes.has(nodeId)) {
         const node = this.getNodeData(nodeId)
         if (node) {
-          const displayText = node.code 
-            ? `${node.name}\\n(${node.code})`
-            : node.name
+          // [V007.48 P0] node.name 和 node.code 都要转义
+          const safeNodeName = sanitizeMermaidLabel(node.name || '')
+          const safeNodeCode = sanitizeMermaidLabel(node.code || '')
+          const displayText = safeNodeCode
+            ? `${safeNodeName}\\n(${safeNodeCode})`
+            : safeNodeName
           code += `${indent}  ${nodeId}["${displayText}"]\n`
           this.definedNodes.add(nodeId)
         }
@@ -229,9 +236,12 @@ export class MermaidGenerator {
     for (const node of nodes) {
       const nodeId = node.id || node.code || node.name
       if (!this.definedNodes.has(nodeId)) {
-        const displayText = node.code
-          ? `${node.name}\\n(${node.code})`
-          : node.name
+        // [V007.48 P0] terminal node label 同样转义
+        const safeNodeName = sanitizeMermaidLabel(node.name || '')
+        const safeNodeCode = sanitizeMermaidLabel(node.code || '')
+        const displayText = safeNodeCode
+          ? `${safeNodeName}\\n(${safeNodeCode})`
+          : safeNodeName
         code += `${indent}${nodeId}["${displayText}"]\n`
         this.definedNodes.add(nodeId)
       }
@@ -253,9 +263,12 @@ export class MermaidGenerator {
       if (!this.definedNodes.has(nodeId)) {
         const node = this.getNodeData(nodeId)
         if (node) {
-          const displayText = node.code
-            ? `${node.name}\\n(${node.code})`
-            : node.name
+          // [V007.52 P0] 转义 directNodes 节点 label
+          const safeNodeName = sanitizeMermaidLabel(node.name || '')
+          const safeNodeCode = sanitizeMermaidLabel(node.code || '')
+          const displayText = safeNodeCode
+            ? `${safeNodeName}\\n(${safeNodeCode})`
+            : safeNodeName
           code += `${indent}${nodeId}["${displayText}"]\n`
           this.definedNodes.add(nodeId)
         }

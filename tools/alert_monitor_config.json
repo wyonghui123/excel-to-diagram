@@ -1,0 +1,27 @@
+{
+  "im": {
+    "default": "lark_app",
+    "lark_app": {
+      "app_id": "<从环境变量 LARK_APP_ID 读取>",
+      "app_secret": "<从环境变量 LARK_APP_SECRET 读取>",
+      "chat_id": "<从环境变量 LARK_CHAT_ID 读取>"
+    },
+    "feishu": {
+      "webhook": "https://open.feishu.cn/open-apis/bot/v2/hook/<替换为你的token>",
+      "secret": ""
+    },
+    "dingtalk": {
+      "webhook": "https://oapi.dingtalk.com/robot/send?access_token=<替换>",
+      "secret": ""
+    },
+    "wecom": {
+      "webhook": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=<替换>"
+    }
+  },
+  "alert": {
+    "interval_sec": 300,
+    "cooldown_sec": 600,
+    "at_all_on_fail": true,
+    "at_all_on_recovery": false
+  }
+}

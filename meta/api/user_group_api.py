@@ -505,7 +505,7 @@ def get_user_group_logs(group_id):
         offset = (page - 1) * page_size
 
         cursor = _data_source.execute("""
-            SELECT * FROM audit_logs
+            SELECT * FROM v_audit_all
             WHERE object_type = 'user_group' AND object_id = ?
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?
@@ -517,7 +517,7 @@ def get_user_group_logs(group_id):
             logs.append(dict(zip(columns, row)))
 
         cursor = _data_source.execute(
-            "SELECT COUNT(*) as total FROM audit_logs WHERE object_type = 'user_group' AND object_id = ?",
+            "SELECT COUNT(*) as total FROM v_audit_all WHERE object_type = 'user_group' AND object_id = ?",
             [group_id]
         )
         total = cursor.fetchone()[0]

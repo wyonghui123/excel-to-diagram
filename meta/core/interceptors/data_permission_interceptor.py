@@ -322,17 +322,30 @@ class DataPermissionInterceptor(Interceptor):
         # 5. [FIX v1.0.5 2026-06-10] 多 role → OR 关系; 单 role → 直接 append 各 AND 段
         #   v1.0.5 移除 v1.0.4 的 owner OR 短路逻辑（修复 TESET68 bug）
         #   owner 例外改由 _apply_scope_filter_after_dimension + _add_owner_exception 处理
+        #
+        # [FIX v1.2.30 2026-07-07] bug fix: 多 role 时 OR 组必须包成 OR-of-AND 结构
+        #   原 bug: `for conds in per_role_conditions: or_group_conditions.extend(conds)`
+        #   把每个 role 内部的 AND 段(eg. [{id,eq,703}, {version_id,eq,764}])平铺
+        #   到 or_group_conditions, AND 信息丢失, SQL 解析成
+        #     id=703 OR version_id=764 OR id=2200 OR version_id=863
+        #   永远为真 → 13 个域全返
+        #   实测: wyonghui 经 TEST888 组 → role 5970 (domain=703) + role 11821 (domain=2200)
+        #         都看到 13 个域
+        #   修复: OR-of-AND 嵌套, 每个 role 一组 AND
         if len(per_role_conditions) == 1:
+            # 单 role: 该 role 自己的 AND 段直接 append (外层 query_conditions 是 AND)
             for c in per_role_conditions[0]:
                 context.extra['query_conditions'].append(c)
         else:
             # 多 role: OR-of-AND
-            or_group_conditions = []
-            for conds in per_role_conditions:
-                or_group_conditions.extend(conds)
+            # 每个 role 的 conds 作为一个 AND 组, 用 {'type': 'and', 'conditions': conds} 包裹
+            # 这样 SQL 解析 = (AND 组 1) OR (AND 组 2) OR ...
             context.extra['query_conditions'].append({
                 'type': 'or',
-                'conditions': or_group_conditions,
+                'conditions': [
+                    {'type': 'and', 'conditions': conds}
+                    for conds in per_role_conditions
+                ],
             })
 
         logger.info(
@@ -533,16 +546,21 @@ class DataPermissionInterceptor(Interceptor):
             return
 
         perm_filter = self._get_perm_filter(context)
+        allowed_ids = None
         if perm_filter:
             try:
                 allowed_ids = perm_filter.perm_service.get_allowed_resource_ids(
                     context.user_id, context.object_type
                 )
-                if allowed_ids:
-                    logger.debug(f"[DataPermInterceptor] User has explicit data permissions for {context.object_type}, skipping scope")
-                    return
             except Exception:
                 pass
+
+        # [FIX 2026-07-12] 不再因 allowed_ids 而跳过 YAML scope 过滤
+        # 之前: if allowed_ids → return (跳过, 只用 data_permissions 过滤)
+        # Bug: 用户有 sub_domain/388 的 data_permission 向上传播到 product 537,
+        #      导致 DEMO 用户只能看到 1 个产品 (537), 看不到 4 个 public 产品
+        # 修复: allowed_ids 与 YAML scope 合并为 OR 条件
+        #       即: 产品可见 ⇔ YAML scope 命中 OR 用户有显式 data_permission
 
         resolved = scope_expr
 
@@ -587,6 +605,16 @@ class DataPermissionInterceptor(Interceptor):
                             'operator': c['operator'],
                             'value': c['value'],
                         })
+                    # [FIX 2026-07-12] 将 data_permission 的 allowed_ids 合并到 OR group
+                    # 语义: 产品可见 ⇔ (YAML scope 条件) OR (id IN allowed_ids)
+                    if allowed_ids:
+                        for rid in allowed_ids:
+                            or_conditions.append({
+                                'field': 'id',
+                                'operator': 'eq',
+                                'value': rid,
+                            })
+                        context.extra['_data_perms_merged'] = True
                     context.extra['query_conditions'].append({
                         'type': 'or',
                         'conditions': or_conditions,
@@ -597,6 +625,17 @@ class DataPermissionInterceptor(Interceptor):
                         'operator': cond_item['operator'],
                         'value': cond_item['value'],
                     })
+                    # [FIX 2026-07-12] 单条件时, allowed_ids 单独作为 OR 条件追加
+                    if allowed_ids:
+                        or_conditions_extra = [
+                            {'field': 'id', 'operator': 'eq', 'value': rid}
+                            for rid in allowed_ids
+                        ]
+                        context.extra['query_conditions'].append({
+                            'type': 'or',
+                            'conditions': or_conditions_extra,
+                        })
+                        context.extra['_data_perms_merged'] = True
         except Exception:
             parts = resolved.split('=', 1)
             if len(parts) == 2:
@@ -607,6 +646,17 @@ class DataPermissionInterceptor(Interceptor):
                     'operator': 'eq',
                     'value': value,
                 })
+            # [FIX 2026-07-12] 异常降级也合并 allowed_ids
+            if allowed_ids:
+                or_conditions_extra = [
+                    {'field': 'id', 'operator': 'eq', 'value': rid}
+                    for rid in allowed_ids
+                ]
+                context.extra['query_conditions'].append({
+                    'type': 'or',
+                    'conditions': or_conditions_extra,
+                })
+                context.extra['_data_perms_merged'] = True
 
     @staticmethod
     def _parse_scope_expression(expr: str):
@@ -685,6 +735,11 @@ class DataPermissionInterceptor(Interceptor):
 
     def _apply_data_permission_filter(self, context: 'ActionContext') -> None:
         if not context.user_id:
+            return
+
+        # [FIX 2026-07-12] 如果 scope filter 已经合并了 data_permission 条件，跳过
+        # 避免重复添加 id = xxx 条件，导致 scope 的 OR 条件被覆盖
+        if context.extra.get('_data_perms_merged'):
             return
 
         perm_filter = self._get_perm_filter(context)
@@ -775,6 +830,72 @@ class DataPermissionInterceptor(Interceptor):
                 f'[_apply_scope_filter_after_dimension] Skipping visibility+owner for '
                 f'{context.object_type} (association BO, dim scope OR-derived is sufficient)'
             )
+            # [FIX BUG-V050 2026-07-10] relationship 必须叠加 allowed_ids (data_permissions) 兜底
+            # 原因: dim scope 派生只考虑 dim scope 配置, 不考虑用户显式 data_permissions 表授权
+            # 场景: wyonghui 有 business_object/4653,4654,4655 + relationship/5934 admin perm
+            #       但 5934 涉及 BO 不在 dim scope (domain=703,2200) 内 → dim scope 派生不匹配
+            #       之前会看不到自己创建的关系
+            # 修复: 在 dim scope 派生条件上 OR 上 allowed_ids (data_permissions 显式授权)
+            #
+            # [FIX BUG-V050b 2026-07-10] 同时扩展"用户能看的 BO"为 allowed_ids
+            # 原因: 用户可能被授予 business_object/4653,4654,4655 但未单独授权涉及这些 BO 的新关系
+            #       (如 relationship/5978, 5979 是用户自己新建的, 没在 data_permissions 关系白名单里)
+            #       业务上, 能看 BO 应该隐含能看涉及该 BO 的关系 (否则用户管理自己的数据会受限)
+            # 修复: 拿用户的 business_object allowed_ids, 派生"涉及这些 BO 的关系"作为 allowed_ids 一部分
+            if 'query_conditions' not in context.extra:
+                context.extra['query_conditions'] = []
+            existing_conds = context.extra['query_conditions']
+            try:
+                perm_filter = self._get_perm_filter(context)
+                if perm_filter:
+                    allowed_ids = set(perm_filter.perm_service.get_allowed_resource_ids(
+                        context.user_id, context.object_type
+                    ) or [])
+                    # 扩展: 用户能看的 business_object → 涉及这些 BO 的关系
+                    bo_allowed_ids = perm_filter.perm_service.get_allowed_resource_ids(
+                        context.user_id, 'business_object'
+                    ) or []
+                    if bo_allowed_ids:
+                        try:
+                            # 查 DB: 涉及这些 BO 的所有关系 id
+                            bo_ids_str = ','.join(str(i) for i in bo_allowed_ids)
+                            rel_cursor = context.data_source.execute(
+                                f"SELECT id FROM relationships WHERE "
+                                f"version_id IS NOT NULL AND "
+                                f"(source_bo_id IN ({bo_ids_str}) OR target_bo_id IN ({bo_ids_str}))"
+                            )
+                            rows = rel_cursor.fetchall()
+                            for row in rows:
+                                allowed_ids.add(row[0])
+                            logger.warning(
+                                f'[_apply_scope_filter_after_dimension BUG-V050b] '
+                                f'BO-expand: bo_count={len(bo_allowed_ids)} '
+                                f'-> rel_count={len(rows)} (added to allowed_ids, total={len(allowed_ids)})'
+                            )
+                        except Exception as e:
+                            import traceback
+                            logger.warning(f'[_apply_scope_filter_after_dimension BUG-V050b] BO-expand failed: {e}\n{traceback.format_exc()}')
+                    if allowed_ids:
+                        # 把 dim scope 派生条件包成 AND 组, 然后与 allowed_ids IN 做 OR
+                        # SQL: WHERE (dim_scope_conds AND) OR id IN (allowed_ids)
+                        if existing_conds:
+                            context.extra['query_conditions'] = [{
+                                'type': 'or',
+                                'conditions': [
+                                    {'type': 'and', 'conditions': existing_conds},
+                                    {'field': 'id', 'operator': 'in', 'value': list(allowed_ids)},
+                                ],
+                            }]
+                        else:
+                            context.extra['query_conditions'] = [{
+                                'field': 'id', 'operator': 'in', 'value': list(allowed_ids),
+                            }]
+                        logger.warning(
+                            f'[_apply_scope_filter_after_dimension BUG-V050] relationship '
+                            f'OR-merged allowed_ids={sorted(allowed_ids)}'
+                        )
+            except Exception as e:
+                logger.debug(f'[_apply_scope_filter_after_dimension BUG-V050] allowed_ids check failed: {e}')
             return
 
         # [FIX v1.0.8] 检查 BO 是否有 visibility 字段
@@ -895,7 +1016,7 @@ class DataPermissionInterceptor(Interceptor):
         # - product: 直接用 owner_id (DB 列存在)
         # - 子对象 (version/domain/...): 用 chain_owner_resolver 走 product 链追溯
         from meta.core.models import registry
-        from meta.services.chain_owner_resolver import is_in_chain
+        from meta.services.chain_owner_resolver import is_in_chain, build_owner_exception_subquery
         meta = registry.get(context.object_type)
         if not meta:
             return
@@ -912,19 +1033,24 @@ class DataPermissionInterceptor(Interceptor):
                 'value': user_id,
                 'source': 'owner_exception',
             })
-        elif is_in_chain(object_type):
-            # 子对象 (version/domain/...) 用 chain_owner_resolver 走 product 链
-            # SQL: product_id IN (SELECT id FROM products WHERE owner_id = ?)
-            owner_conds.append({
-                'field': 'product_id',
-                'operator': 'in_subquery',
-                'subquery': 'SELECT id FROM products WHERE owner_id = ?',
-                'value': user_id,
-                'source': 'owner_exception_chain',
-            })
         else:
-            # 其他 (无 owner 关系) 跳过
-            return
+            # [FIX BUG-V050 2026-07-10] 不再用 is_in_chain 门禁, 直接调用 build_owner_exception_subquery
+            # 支持 version/domain/sub_domain + service_module/business_object
+            # 之前 is_in_chain 不包含 service_module/business_object, 导致用户创建的 SM/BO
+            # 在 dimension scope 路径下不可见 (owner exception 未添加)
+            chain_subquery = build_owner_exception_subquery(
+                context.data_source, object_type, user_id
+            )
+            if chain_subquery:
+                owner_conds.append({
+                    'field': 'id',
+                    'operator': 'in_subquery',
+                    'value': chain_subquery,
+                    'source': 'owner_exception_chain',
+                })
+            else:
+                # 无法解析 owner 链 (如 relationship, annotation) 跳过
+                return
 
         if len(owner_conds) == 1:
             owner_cond = owner_conds[0]

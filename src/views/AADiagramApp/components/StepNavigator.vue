@@ -36,6 +36,11 @@
           <span v-else class="step-number">{{ index + 1 }}</span>
         </div>
         <span class="step-title">{{ step.title }}</span>
+        <!-- [v54] 在"类型"步骤 (index=0) 旁显示当前已选类型  -->
+        <!--   直接从 Pinia store 读取, 绕过 prop 传递响应式问题 -->
+        <span v-if="index === 0" class="step-type-tag" :class="chartTypeTagClass">
+          {{ chartTypeTag }}
+        </span>
         <!-- 关键修复 v35: 导航统计显示规则 -->
         <!--   - 类型 (originalIndex=3): 不显示 (用户反馈"类型这边的统计去掉") -->
         <!--   - 配置 (originalIndex=4): 显示 5 指标 (用户反馈"配置这边的进行优化") -->
@@ -62,6 +67,7 @@
 
 <script>
 import { AppIcon } from '@/components/common/AppIcon'
+import { useDiagramConfigStore } from '@/stores/diagramConfigStore'
 
 export default {
   name: 'StepNavigator',
@@ -96,6 +102,32 @@ export default {
     showBackToArch: {
       type: Boolean,
       default: false
+    },
+    // [v54] 当前已选图表类型 (e.g. 'businessObject' / 'serviceModule')
+    //   在"类型"步骤 (index=0) 旁边显示对应中文标签
+    chartType: {
+      type: String,
+      default: ''
+    },
+    // [v54] 图表类型中文文本 (e.g. '业务对象图')
+    //   由父组件计算好传入, 避免 computed 在黑盒里失败
+    chartTypeText: {
+      type: String,
+      default: ''
+    }
+  },
+  computed: {
+    // [v54] 直接从 Pinia store 读取, 绕过 prop 响应式问题
+    chartTypeTag() {
+      const store = useDiagramConfigStore()
+      const t = store.chartType
+      if (t === 'businessObject') return '业务对象图'
+      if (t === 'serviceModule') return '服务模块图'
+      return ''
+    },
+    chartTypeTagClass() {
+      const store = useDiagramConfigStore()
+      return store.chartType || 'businessObject'
     }
   },
   emits: ['change', 'prev', 'next', 'back-to-arch'],
@@ -283,6 +315,20 @@ export default {
   font-size: 11px;
   color: var(--color-text-tertiary);
   margin-left: 2px;
+}
+
+/* [v54] 类型步骤旁的类型标签 - 浅灰系无颜色 */
+.step-type-tag {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 400;
+  padding: 1px 7px;
+  margin-left: 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--color-text-tertiary, #999);
+  vertical-align: middle;
+  line-height: 1.5;
 }
 
 .step-connector {

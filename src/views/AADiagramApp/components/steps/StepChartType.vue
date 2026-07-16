@@ -10,6 +10,7 @@
           :center="center"
           :incremental="incremental"
           :total="total"
+          :chart-type="chartType"
         />
 
         <h2 class="section-title">选择图表类型</h2>

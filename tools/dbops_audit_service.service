@@ -1,0 +1,26 @@
+[Unit]
+Description=Database Audit Recovery Service (V007.63 dbops_audit_service)
+Documentation=https://internal/docs/L13.3-audit-recovery
+After=network.target dbops_service.service
+# [L4 NSFOCUS] 不强制依赖, 万一 dbops_service V1.0 (9204) 挂了, audit_recovery 仍可独立启动
+
+[Service]
+Type=simple
+User=root
+ExecStart=/opt/miniconda3-py39/bin/python -u /opt/app/shared/dbops_audit_service.py
+# [L13.3] 端口 9214: 与 9204 dbops_service V1.0 共存
+Environment="DBOPS_AUDIT_SERVICE_PORT=9214"
+# [L4 NSFOCUS] BIND=172.20.59.7 读 .env_global, 也可在此处显式指定
+Environment="DBOPS_AUDIT_SERVICE_BIND=172.20.59.7"
+Environment="DBOPS_AUDIT_SERVICE_SECRET=v007.63-audit-recovery"
+Environment="DBOPS_SERVICE_DB_PATH=/opt/app/deployments/meta/architecture.db"
+# [L4 NSFOCUS] 从 .env_global source (BIND 已含, 但 service 是 systemd 不读 .env_global)
+EnvironmentFile=/opt/app/.env_global
+Restart=always
+RestartSec=5
+# [L11 安全] 不开放其他路径
+ProtectSystem=full
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

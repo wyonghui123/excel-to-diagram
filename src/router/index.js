@@ -113,6 +113,13 @@ router.beforeEach(async (to, from, next) => {
       }
     }
 
+    // [FIX P3 2026-06-30] URL ?help= 携带帮助中心参数时, 跳过登录校验
+    //   帮助中心是公开内容 (scenario.json 是静态资源), 未登录也可访问
+    if (to.query.help) {
+      next()
+      return
+    }
+
     if (!authStore.isLoggedIn) {
       next({ path: '/', query: { redirect: to.fullPath, reason: 'not_logged_in' } })
       return

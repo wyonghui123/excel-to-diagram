@@ -23,12 +23,12 @@
       <el-table :data="mergedRelationsData" v-loading="mergedRelationsLoading" size="small" max-height="400">
         <el-table-column label="关系类型" width="120">
           <template #default="{ row }">
-            <span>{{ row.relation_type_name || row.relation_type }}</span>
+            <span>{{ getRelationTypeName(row.relation_type, row.relation_type_name) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="方向" width="80">
           <template #default="{ row }">
-            <span>{{ row.relation_direction || '-' }}</span>
+            <span>{{ getRelationDirectionName(row.relation_direction, row.relation_direction_name) }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="source_bo_name" label="源对象" min-width="180" />
@@ -61,7 +61,7 @@
         :meta="annotationMeta"
         :entity-data="annotationEntityData"
         :saving="annotationSaving"
-        z-index="10000"
+        :z-index="9990"
         @close="handleAnnotationDialogClose"
         @save="handleAnnotationSave"
         @update:visible="annotationFormVisible = $event"
@@ -76,7 +76,7 @@
       :initial-filters="associationFilters"
       :enable-detail="section.enableDetail !== undefined ? section.enableDetail : true"
       :enable-auto-crud="section.enableAutoCrud !== undefined ? section.enableAutoCrud : !section.readonly"
-      :row-mutability="section.rowMutability || (section.readonly ? 'locked' : 'fully_editable')"
+      :row-mutability="section.rowMutability || (section.readonly ? 'locked' : 'fullEditable')"
       :external-editing="editing"
       :exclude-column-keys="excludedColumnKeys"
       @request-edit="$emit('request-edit')"
@@ -132,6 +132,51 @@ const props = defineProps({
 const emit = defineEmits(['request-edit', 'open-assign', 'refresh', 'embedded-action'])
 
 const message = useCrudMessage()
+
+// [FIX 2026-06-29] 前端兜底 enum 映射
+//   之前后端 relationship 序列化时没 join enum_values 表, relation_type_name 总是 null
+//   详情页直接显示 code (GENERATES/PULL 等) 不友好
+//   这里维护一份前端 enum 映射兜底, 即使后端不返 _name 也能显示中文
+//   未来后端真返回 _name 时, computed 会优先用后端的
+// [FIX 2026-06-29 v2] relation_direction 没有 enum 表
+//   业务约定: PUSH=推送 / PULL=拉取, 直接映射 (这两个是常量)
+const RELATION_TYPE_NAME_MAP = Object.freeze({
+  GENERATES: '生成',
+  UPDATES: '更新',
+  TRIGGERS: '触发',
+  REFERENCES: '引用'
+})
+const RELATION_DIRECTION_NAME_MAP = Object.freeze({
+  PUSH: '推送',
+  PULL: '拉取'
+})
+
+function getRelationTypeName(typeCode, typeName) {
+  // [FIX V015e 2026-07-10] 兜底清洗历史脏 enum code (legacy_null / null 字符串等)
+  //   原 BUG: 数据库早期导入数据时, 后端对空 relation_type 写了字符串 'legacy_null' 占位.
+  //     详情页 getRelationTypeName 走 RELATION_TYPE_NAME_MAP[typeCode] 找不到,
+  //     fallback 到 typeCode || '' → 直接显示 'legacy_null'.
+  //   修复: 把 sentinel 值映射为 '-' (与空值/列表页保持一致).
+  const isLegacyNull = (v) => {
+    if (v == null) return false
+    const s = String(v).trim().toLowerCase()
+    return s === 'null' || s === 'undefined' || s === 'none' || s === 'n/a' || s === 'na' ||
+           /^legacy[_\s-]*null$/.test(s)
+  }
+  if (isLegacyNull(typeCode) || isLegacyNull(typeName)) return '-'
+  return typeName || RELATION_TYPE_NAME_MAP[typeCode] || typeCode || ''
+}
+function getRelationDirectionName(dirCode, dirName) {
+  // 同 V015e: 兜底清洗 legacy_null
+  const isLegacyNull = (v) => {
+    if (v == null) return false
+    const s = String(v).trim().toLowerCase()
+    return s === 'null' || s === 'undefined' || s === 'none' || s === 'n/a' || s === 'na' ||
+           /^legacy[_\s-]*null$/.test(s)
+  }
+  if (isLegacyNull(dirCode) || isLegacyNull(dirName)) return '-'
+  return dirName || RELATION_DIRECTION_NAME_MAP[dirCode] || dirCode || '-'
+}
 
 const hasRealObjectId = computed(() => {
   const id = props.objectId
@@ -568,9 +613,17 @@ const annotationMeta = computed(() => ({
 let categoriesLoaded = false
 
 async function loadAnnotationCategories() {
-  if (categoriesLoaded && annotationCategories.value.length > 0) return
+  console.log('[AssociationSection] loadAnnotationCategories START')
+  // [FIX 2026-06-29] 始终调用 API, 不依赖缓存
+  //   之前: categoriesLoaded 模块级共享, 第一次失败后即使再打开也不会重试
+  //   弹窗可能保持默认 4 个 (defaultCategories), 即使数据库有 6 个
+  // [FIX-2 2026-06-29 v2] EnumService._extractValuesArray 递归找数组 (兼容双层包装)
   try {
-    const items = await EnumService.loadOptions('annotation_category', { useHighSpeedEndpoint: false })
+    const items = await EnumService.loadOptions('annotation_category', {
+      useHighSpeedEndpoint: false,
+      cache: false,
+      throwError: false
+    })
     if (items && items.length > 0) {
       annotationCategories.value = items.map(item => {
         const config = CATEGORY_CONFIG[item.value]
@@ -579,9 +632,10 @@ async function loadAnnotationCategories() {
           name: config ? config.label : item.label
         }
       })
+      categoriesLoaded = true
     }
-    categoriesLoaded = true
   } catch {
+    // 失败时保持默认 4 个 (annotationCategories.value 初始化时已是 defaultCategories)
     categoriesLoaded = false
   }
 }
@@ -632,7 +686,12 @@ async function handleAnnotationSave(formData) {
     refresh()
     emit('refresh')
   } catch (e) {
-    message.saveFailed('备注')
+    const backendMsg = e?.message || ''
+    if (backendMsg && backendMsg !== 'undefined') {
+      message.error(backendMsg)
+    } else {
+      message.saveFailed('备注')
+    }
   } finally {
     annotationSaving.value = false
   }
@@ -644,7 +703,12 @@ async function handleAnnotationDelete(row, section) {
     message.success('备注已删除')
     refresh()
   } else {
-    message.error('删除失败', result)
+    const backendMsg = result?.message || ''
+    if (backendMsg && backendMsg !== 'undefined') {
+      message.error(backendMsg)
+    } else {
+      message.error('删除备注失败')
+    }
   }
 }
 

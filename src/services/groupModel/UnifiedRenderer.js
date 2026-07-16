@@ -1,5 +1,5 @@
 import { isTerminalGroup } from './types.js'
-import { getArrowSyntax, sanitizeLabel } from '@/composables/useMermaid/syntax/_shared/arrowHelper.js'
+import { getArrowSyntax, sanitizeLabel, sanitizeMermaidLabel } from '@/composables/useMermaid/syntax/_shared/arrowHelper.js'
 
 export class UnifiedRenderer {
   static render(groupModel, links, chartType, options = {}) {
@@ -78,16 +78,26 @@ export class UnifiedRenderer {
     let code = ''
 
     const disabledPath = group._disabledAncestorPath
-    const displayTitle = disabledPath && disabledPath.length > 0
+    // [V007.48 P0 BUG-FIX 2026-07-09] mermaid 11.13.0 不允许 subgraph label 含 " ' \ 换行
+    //   之前用 raw displayTitle 注入, 财务云 disabledPath.join(' / ') 含 外部 domain 名
+    //   如果外部 domain name 含 " (用户输入 "BOSS" 系统) → 整个 mermaid syntax error
+    // 修复: 用 sanitizeMermaidLabel 转义 ("| → #quot;, 换行 → <br/>, 方括号 → #91; 等)
+    const rawDisplayTitle = disabledPath && disabledPath.length > 0
       ? `${group.title}（${disabledPath.join(' / ')}）`
       : (group.title || group.elementRef?.name || group.id)
+    const displayTitle = sanitizeMermaidLabel(rawDisplayTitle)
 
     console.log(`[UnifiedRenderer] renderGroup: id=${group.id}, type=${group.type}, isTerminal=${isTerminal}, title=${displayTitle}, children=${group.children?.length}, _disabledAncestorPath=${JSON.stringify(disabledPath)}`)
 
     if (isTerminal) {
-      const displayCode = group.elementRef?.code ? `\\n(${group.elementRef.code})` : ''
+      // [V007.48 P0] 同样转义 node label
+      // displayCode 强制换行 \\n → \n (mermaid 强制换行), code 字段也要转义 (可能含 ")
+      const rawCode = group.elementRef?.code || ''
+      const safeCode = sanitizeMermaidLabel(rawCode)
+      const displayCode = safeCode ? `\\n(${safeCode})` : ''
       const centerMark = group.isCenter ? '◆ ' : ''
-      code += `${indent}${group.id}["${centerMark}${group.title}${displayCode}"]\n`
+      const safeNodeTitle = sanitizeMermaidLabel(group.title || group.name || group.id)
+      code += `${indent}${group.id}["${centerMark}${safeNodeTitle}${displayCode}"]\n`
     } else {
       code += `${indent}subgraph ${group.id}["${displayTitle}"]\n`
       code += `${indent}  direction ${group.layout?.direction || 'TB'}\n`
@@ -107,14 +117,17 @@ export class UnifiedRenderer {
             const childIsTerminal = isTerminalGroup(child, chartType)
             if (childIsTerminal) {
               // 终端节点直接渲染，不递归
+              // [V007.48 P0] 同样转义 child node label
               const childTitle = child.title || child.name || child.id
               const childCode = child.elementRef?.code || child.code || ''
-              const displayCode = childCode ? `\\n(${childCode})` : ''
+              const safeChildCode = sanitizeMermaidLabel(childCode)
+              const displayCode = safeChildCode ? `\\n(${safeChildCode})` : ''
               const centerMark = child.isCenter ? '◆ ' : ''
               const childDisabledPath = child._disabledAncestorPath
-              const childDisplayTitle = childDisabledPath && childDisabledPath.length > 0
+              const rawChildDisplayTitle = childDisabledPath && childDisabledPath.length > 0
                 ? `${childTitle}（${childDisabledPath.join(' / ')}）`
                 : childTitle
+              const childDisplayTitle = sanitizeMermaidLabel(rawChildDisplayTitle)
               console.log(`[UnifiedRenderer]   rendering child ${child.id} as terminal: ${childDisplayTitle}`)
               code += `${indent}  ${child.id}["${centerMark}${childDisplayTitle}${displayCode}"]\n`
             } else if (!processedGroups.has(child.id)) {
@@ -135,14 +148,17 @@ export class UnifiedRenderer {
         group.containers.forEach(container => {
           const isContainerTerminal = isTerminalGroup(container, chartType)
           if (isContainerTerminal) {
+            // [V007.48 P0] 同样转义 container node label
             const containerTitle = container.title || container.name || container.id
             const containerCode = container.elementRef?.code || container.code || ''
-            const displayCode = containerCode ? `\\n(${containerCode})` : ''
+            const safeContainerCode = sanitizeMermaidLabel(containerCode)
+            const displayCode = safeContainerCode ? `\\n(${safeContainerCode})` : ''
             const centerMark = container.isCenter ? '◆ ' : ''
             const containerDisabledPath = container._disabledAncestorPath
-            const containerDisplayTitle = containerDisabledPath && containerDisabledPath.length > 0
+            const rawContainerDisplayTitle = containerDisabledPath && containerDisabledPath.length > 0
               ? `${containerTitle}（${containerDisabledPath.join(' / ')}）`
               : containerTitle
+            const containerDisplayTitle = sanitizeMermaidLabel(rawContainerDisplayTitle)
             console.log(`[UnifiedRenderer]   rendering container ${container.id} as terminal: ${containerDisplayTitle}`)
             code += `${indent}  ${container.id}["${centerMark}${containerDisplayTitle}${displayCode}"]\n`
           }

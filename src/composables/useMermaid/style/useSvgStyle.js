@@ -76,6 +76,21 @@ export function useSvgStyle() {
       svg.insertBefore(defs, svg.firstChild)
     }
 
+    // [v43 修复"刺猬"] 强制所有 mermaid 生成的 marker 用 userSpaceOnUse
+    //   markerUnits 默认是 strokeWidth, 会让 marker 随 stroke 宽度缩放,
+    //   在缩放/不同 stroke 宽度下显示为多个尖刺 (用户反馈"刺猬")
+    defs.querySelectorAll('marker').forEach((m) => {
+      m.setAttribute('markerUnits', 'userSpaceOnUse')
+      // 限制 marker 绝对尺寸, 防止过大造成视觉上的"刺猬"
+      const w = parseFloat(m.getAttribute('markerWidth')) || 10
+      const h = parseFloat(m.getAttribute('markerHeight')) || 10
+      m.setAttribute('markerWidth', String(Math.min(w, 8)))
+      m.setAttribute('markerHeight', String(Math.min(h, 8)))
+      // refX 调整到 marker tip 位置
+      if (!m.getAttribute('refX')) m.setAttribute('refX', '7')
+      if (!m.getAttribute('refY')) m.setAttribute('refY', '4')
+    })
+
     validateContainerTitles(svg)
 
     const paths = svg.querySelectorAll('.flowchart-link path, .edgePath path, path[class*="edge"]')
@@ -95,12 +110,13 @@ export function useSvgStyle() {
 
         const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker')
         marker.setAttribute('id', markerId)
-        marker.setAttribute('markerWidth', '8')
-        marker.setAttribute('markerHeight', '6')
-        marker.setAttribute('refX', '8')
-        marker.setAttribute('refY', '3')
+        marker.setAttribute('markerWidth', '10')
+        marker.setAttribute('markerHeight', '10')
+        marker.setAttribute('refX', '9')
+        marker.setAttribute('refY', '5')
         marker.setAttribute('orient', 'auto')
-        marker.setAttribute('markerUnits', 'strokeWidth')
+        // [v43 修复] markerUnits=userSpaceOnUse 防止箭头随 strokeWidth 缩放成"刺猬"
+        marker.setAttribute('markerUnits', 'userSpaceOnUse')
 
         const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon')
         polygon.setAttribute('points', '0 0, 8 3, 0 6')
@@ -123,12 +139,13 @@ export function useSvgStyle() {
         }
         const sourceMarker = document.createElementNS('http://www.w3.org/2000/svg', 'marker')
         sourceMarker.setAttribute('id', sourceMarkerId)
-        sourceMarker.setAttribute('markerWidth', '8')
-        sourceMarker.setAttribute('markerHeight', '6')
-        sourceMarker.setAttribute('refX', '0')           // source 端 refX=0
-        sourceMarker.setAttribute('refY', '3')
+        sourceMarker.setAttribute('markerWidth', '10')
+        sourceMarker.setAttribute('markerHeight', '10')
+        sourceMarker.setAttribute('refX', '1')           // source 端 refX=0
+        sourceMarker.setAttribute('refY', '5')
         sourceMarker.setAttribute('orient', 'auto')      // [V1.7] 不用 auto-start-reverse
-        sourceMarker.setAttribute('markerUnits', 'strokeWidth')
+        // [v43 修复] userSpaceOnUse 防止箭头随 strokeWidth 缩放
+        sourceMarker.setAttribute('markerUnits', 'userSpaceOnUse')
         const sourcePolygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon')
         // [V1.7 fix] 保持 V1.6 的 polygon '8 0, 0 3, 8 6' (tip 在 refX 0,3, base 在 marker x+ 方向 8,0/8,6)
         //   配合 'auto' 旋转后, base 在 source 节点外, tip 在 source 节点边

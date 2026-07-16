@@ -1,0 +1,493 @@
+# ============================================
+# 层级结构元模型
+# 定义业务对象的层级组织关系
+# 
+# 层级结构用于：
+# 1. 树形导航和展示
+# 2. 过滤参数构建
+# 3. 面包屑路径计算
+# 4. 上下文字段派生
+#
+# 【架构原则 - 权威来源】
+# 本文件是层级范围规则（hierarchy_scopes）的唯一权威来源。
+# 其他文件应通过 scope_rules_ref: hierarchies.hierarchy_scopes 引用，
+# 不应重复定义规则。详见：docs/ARCHITECTURE_PRINCIPLES.md
+# ============================================
+
+id: hierarchies
+name: 层级定义
+description: 业务对象的层级结构定义
+persistent: false
+
+# ────────────────────────────────────────────
+# 层级定义
+# ────────────────────────────────────────────
+hierarchies:
+  - id: biz_hierarchy
+    name: 业务层级
+    description: 产品-版本-领域-子领域-服务模块-业务对象的层级结构
+    root_object: product
+    ui_config:
+      default_expand_level: 2
+      show_count: true
+      allow_multi_select: true
+    levels:
+      - level: 0
+        object: product
+        kind: entity
+        display_name: 产品
+        table_name: products
+        parent_object: null
+        foreign_key_field: null
+        filter_field: id
+        filter_param: null
+        cardinality: 1:N
+        ui:
+          icon: inventory_2
+          color: "#9C27B0"
+        delete_behavior:
+          policy: RESTRICT
+          check_children: true
+          children_check_scope: direct
+          error_message: "该产品下存在版本，无法删除"
+        validations:
+          - type: has_children
+            object: version
+            message: "该产品下存在版本，无法删除"
+            
+      - level: 1
+        object: version
+        kind: entity
+        display_name: 版本
+        table_name: versions
+        parent_object: product
+        foreign_key_field: product_id
+        filter_field: id
+        filter_param: product_id
+        cardinality: N:1
+        ui:
+          icon: tag
+          color: "#FF9800"
+        delete_behavior:
+          policy: RESTRICT
+          check_children: true
+          children_check_scope: direct
+          error_message: "该版本下存在领域，无法删除"
+        validations:
+          - type: has_children
+            object: domain
+            message: "该版本下存在领域，无法删除"
+            
+      - level: 2
+        object: domain
+        kind: entity
+        display_name: 领域
+        table_name: domains
+        parent_object: version
+        foreign_key_field: version_id
+        filter_field: id
+        filter_param: version_id
+        cardinality: N:1
+        relation_type: fk
+        filter_mappings:
+          - target_object: domain
+            filter_field: id
+            priority: 1
+            trigger: selected
+          - target_object: domain
+            filter_field: id
+            priority: 2
+            trigger: effective
+          - target_object: sub_domain
+            filter_field: domain_id
+            priority: 3
+            trigger: parent
+        ui:
+          icon: business
+          color: "#4CAF50"
+        # 层级删除行为定义
+        delete_behavior:
+          policy: RESTRICT  # RESTRICT: 不允许删除有子节点的父节点
+          check_children: true
+          children_check_scope: direct  # direct: 只检查直接子节点
+          error_message: "该领域下存在子领域，无法删除"
+        validations:
+          - type: has_children
+            object: sub_domain
+            message: "该领域下存在子领域，无法删除"
+            
+      - level: 3
+        object: sub_domain
+        kind: entity
+        display_name: 子领域
+        table_name: sub_domains
+        parent_object: domain
+        foreign_key_field: domain_id
+        filter_field: id
+        filter_param: domain_id
+        cardinality: N:1
+        relation_type: fk
+        filter_mappings:
+          - target_object: sub_domain
+            filter_field: id
+            priority: 1
+            trigger: selected
+          - target_object: sub_domain
+            filter_field: id
+            priority: 2
+            trigger: effective
+          - target_object: service_module
+            filter_field: sub_domain_id
+            priority: 3
+            trigger: parent
+        ui:
+          icon: account_tree
+          color: "#2196F3"
+        delete_behavior:
+          policy: RESTRICT
+          check_children: true
+          children_check_scope: direct
+          error_message: "该子领域下存在服务模块，无法删除"
+        validations:
+          - type: has_children
+            object: service_module
+            message: "该子领域下存在服务模块，无法删除"
+            
+      - level: 4
+        object: service_module
+        kind: entity
+        display_name: 服务模块
+        table_name: service_modules
+        parent_object: sub_domain
+        foreign_key_field: sub_domain_id
+        filter_field: id
+        filter_param: sub_domain_id
+        cardinality: N:1
+        relation_type: fk
+        filter_mappings:
+          - target_object: service_module
+            filter_field: id
+            priority: 1
+            trigger: selected
+          - target_object: service_module
+            filter_field: id
+            priority: 2
+            trigger: effective
+          - target_object: business_object
+            filter_field: service_module_id
+            priority: 3
+            trigger: parent
+        ui:
+          icon: widgets
+          color: "#FF9800"
+        delete_behavior:
+          policy: RESTRICT
+          check_children: true
+          children_check_scope: direct
+          error_message: "该服务模块下存在业务对象，无法删除"
+        validations:
+          - type: has_children
+            object: business_object
+            message: "该服务模块下存在业务对象，无法删除"
+            
+      - level: 5
+        object: business_object
+        kind: entity
+        display_name: 业务对象
+        table_name: business_objects
+        parent_object: service_module
+        foreign_key_field: service_module_id
+        filter_field: id
+        filter_param: service_module_id
+        cardinality: N:1
+        relation_type: composition
+        filter_mappings:
+          - target_object: business_object
+            filter_field: id
+            priority: 1
+            trigger: selected
+          - target_object: business_object
+            filter_field: id
+            priority: 2
+            trigger: effective
+          - target_object: business_object
+            filter_field: service_module_id
+            priority: 3
+            trigger: parent
+        ui:
+          icon: description
+          color: "#9C27B0"
+        delete_behavior:
+          policy: RESTRICT
+          check_children: false
+          error_message: "无法删除"
+            
+      - level: 6
+        object: relationship
+        kind: association
+        display_name: 关系列表
+        source_entity: business_object
+        target_entity: business_object
+        association_cardinality: many_to_many
+        association_filter_config:
+          source_prefix: source
+          target_prefix: target
+          entity_id_field: bo_id
+          hierarchy_filter_levels:
+            - object: business_object
+              source_column: source_bo_id
+              target_column: target_bo_id
+              direct_filter: true
+            - object: service_module
+              source_column: source_service_module_id
+              target_column: target_service_module_id
+              fallback:
+                child_object: business_object
+                child_fk_field: service_module_id
+            - object: sub_domain
+              source_column: source_sub_domain_id
+              target_column: target_sub_domain_id
+              fallback:
+                child_object: service_module
+                child_fk_field: sub_domain_id
+            - object: domain
+              source_column: source_domain_id
+              target_column: target_domain_id
+              fallback:
+                child_object: sub_domain
+                child_fk_field: domain_id
+        filter_mappings:
+          - target_object: relationship
+            filter_field: relation_code
+            priority: 1
+            trigger: selected
+          - target_object: relationship
+            filter_field: category_types
+            priority: 2
+            trigger: effective
+          - target_object: relationship
+            filter_field: source_bo_id
+            priority: 3
+            trigger: entity_scope
+          - target_object: relationship
+            filter_field: target_bo_id
+            priority: 3
+            trigger: entity_scope
+        ui:
+          icon: link
+          color: "#E91E63"
+
+# ────────────────────────────────────────────
+# 上下文层级定义
+# 定义哪些层级是全局过滤上下文（自动注入所有 API 查询）
+# ────────────────────────────────────────────
+context_levels:
+  - object: version
+    context_field: version_id
+    derive_from: product
+    auto: true
+  - object: product
+    context_field: product_id
+    derive_from: null
+    auto: true
+
+# ────────────────────────────────────────────
+# 过滤模型依赖关系
+# 定义过滤模型之间的级联触发关系
+# ────────────────────────────────────────────
+filter_dependencies:
+  - id: object_tree_to_tabs
+    from: hierarchy_filter
+    to: tab_filters
+    trigger: onScopeChange
+    description: 对象树勾选 → 所有层级 Tab 过滤
+
+  - id: object_tree_to_association
+    from: hierarchy_filter
+    to: association_filter
+    trigger: onScopeChange
+    transfer: entity_scope
+    description: 对象树勾选 → association 的 entity_scope 过滤（source_bo_id__in + target_bo_id__in）
+
+# ────────────────────────────────────────────
+# 层级路径定义
+# 用于层级导航和路径展示
+# ────────────────────────────────────────────
+hierarchy_paths:
+  - id: full_path
+    name: 完整路径
+    description: 从领域到业务对象的完整路径
+    hierarchy: biz_hierarchy
+    path_template: "{domain} > {sub_domain} > {service_module} > {business_object}"
+    segments:
+      - object: domain
+        field: name
+        template: "{name}"
+      - object: sub_domain
+        field: name
+        template: "{name}"
+      - object: service_module
+        field: name
+        template: "{name}"
+      - object: business_object
+        field: code
+        template: "{code}"
+
+  - id: short_path
+    name: 短路径
+    description: 只显示业务对象的路径
+    hierarchy: biz_hierarchy
+    path_template: "{sub_domain} > {service_module} > {business_object}"
+    segments:
+      - object: sub_domain
+        field: name
+        template: "{name}"
+      - object: service_module
+        field: name
+        template: "{name}"
+      - object: business_object
+        field: name
+        template: "{name}"
+
+# ────────────────────────────────────────────
+# 层级范围计算规则
+# 用于定义关系的范围分类
+# ────────────────────────────────────────────
+hierarchy_scopes:
+  - id: cross_domain
+    name: 跨领域
+    description: 源和目标业务对象在不同领域
+    rule: source.domain_id != target.domain_id
+    color: "#F44336"
+    
+  - id: same_domain_cross_subdomain
+    name: 同领域跨子领域
+    description: 源和目标业务对象在同一领域但不同子领域
+    rule: source.domain_id == target.domain_id AND source.sub_domain_id != target.sub_domain_id
+    color: "#FF9800"
+    
+  - id: same_subdomain_cross_module
+    name: 同子领域跨服务模块
+    description: 源和目标业务对象在同一子领域但不同服务模块
+    rule: source.sub_domain_id == target.sub_domain_id AND source.service_module_id != target.service_module_id
+    color: "#FFC107"
+    
+  - id: same_module
+    name: 同服务模块
+    description: 源和目标业务对象在同一服务模块
+    rule: source.service_module_id == target.service_module_id
+    color: "#4CAF50"
+
+# ────────────────────────────────────────────
+# 维度定义
+# 定义可切换的视图维度
+# ────────────────────────────────────────────
+dimensions:
+  - id: product
+    name: 产品
+    object: product
+    hierarchy: biz_hierarchy
+    filter_param: id
+    ancestor_param: null
+    table_alias: p
+    description: 按产品维度展示
+
+  - id: version
+    name: 版本
+    object: version
+    hierarchy: biz_hierarchy
+    filter_param: product_id
+    ancestor_param: id
+    table_alias: v
+    description: 按版本维度展示
+
+  - id: domain
+    name: 领域
+    object: domain
+    hierarchy: biz_hierarchy
+    filter_param: id
+    ancestor_param: null
+    table_alias: d
+    description: 按领域维度展示
+
+  - id: sub_domain
+    name: 子领域
+    object: sub_domain
+    hierarchy: biz_hierarchy
+    filter_param: domain_id
+    ancestor_param: id
+    table_alias: sd
+    description: 按子领域维度展示
+    
+  # [REMOVED] service_module - 2026-06-03 按业务需求移除
+  # 原因: 层级过深(6层→4层)，授权到子领域已足够精确
+  # - id: service_module
+  #   name: 服务模块
+  #   object: service_module
+  #   hierarchy: biz_hierarchy
+  #   filter_param: sub_domain_id
+  #   ancestor_param: domain_id
+  #   table_alias: sm
+  #   description: 按服务模块维度展示
+    
+  # [REMOVED] business_object - 2026-06-03 按业务需求移除
+  # 原因: 粒度过细，授权到子领域已足够，不需要精确到单个业务对象
+  # - id: business_object
+  #   name: 业务对象
+  #   object: business_object
+  #   hierarchy: biz_hierarchy
+  #   filter_param: service_module_id
+  #   ancestor_param: sub_domain_id
+  #   table_alias: bo
+  #   description: 按业务对象维度展示
+
+# ────────────────────────────────────────────
+# API 参数映射
+# 定义层级过滤的 API 参数命名
+# ────────────────────────────────────────────
+api_mappings:
+  # 当按某维度展示时，传递哪些参数
+  by_dimension:
+    product:
+      api_params:
+        - param: id
+          source: dimension
+          field: checked_ids
+
+    version:
+      api_params:
+        - param: product_id
+          source: ancestor
+          field: product_ids
+
+    domain:
+      api_params:
+        - param: version_id
+          source: fixed
+        - param: id
+          source: dimension
+          field: checked_ids
+          
+    sub_domain:
+      api_params:
+        - param: version_id
+          source: fixed
+        - param: domain_id
+          source: ancestor
+          field: domain_ids
+          
+    service_module:
+      api_params:
+        - param: version_id
+          source: fixed
+        - param: sub_domain_id
+          source: ancestor
+          field: sub_domain_ids
+          
+    business_object:
+      api_params:
+        - param: version_id
+          source: fixed
+        - param: service_module_id
+          source: ancestor
+          field: service_module_ids

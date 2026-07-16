@@ -1,4 +1,5 @@
 import { sortContainersByPosition } from './positionUtils.js'
+import { sanitizeMermaidLabel } from '../syntax/_shared/arrowHelper.js'
 
 /**
  * 生成引导式网格布局的 Mermaid 语法
@@ -28,7 +29,9 @@ export function generateGridLayout(containers, rows, cols, positions = []) {
       const container = sortedContainers[idx]
 
       if (container) {
-        mermaid += `subgraph C${container.id || idx}["${container.name || container.fullTitle || 'Container'}"]\n`
+        // [V007.52 P0] 转义 container.name / container.fullTitle 防 mermaid 11.13 syntax error
+        const safeContainerTitle = sanitizeMermaidLabel(container.name || container.fullTitle || 'Container')
+        mermaid += `subgraph C${container.id || idx}["${safeContainerTitle}"]\n`
 
         if (container.nodes && Array.isArray(container.nodes)) {
           container.nodes.forEach(nodeId => {

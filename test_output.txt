@@ -1,1 +1,0 @@
-﻿[YAML Loader] Loaded: new_object from _template.yaml

@@ -1,0 +1,25 @@
+fix(permission): BUG-V027-pt3 import Tuple in query_service.py
+
+[BUG-V027-pt3 2026-07-08 17:55] 生产环境 v20260708_010 部署后
+导出结果仍错 (domain 11 / sub_domain 68 / service 409 / BO 3228)
+
+[ROOT CAUSE] query_service.py:1692-1720 内联函数用了 `Tuple` 类型注解
+(例: `Optional[Tuple[str, _QOp, Any]]`), 但文件顶部 `from typing import`
+只 import 了 `List, Dict, Any, Optional`, **没有 Tuple**!
+
+- 本地 3018 (Python 3.14) 类型注解是 lazy (PEP 649), 不报 NameError
+- 生产 (Python 3.9) 类型注解立即求值, 报 `name 'Tuple' is not defined`
+
+[DataPerm] Failed to apply data permission: name 'Tuple' is not defined
+(生产 backend-v20260708_010.log 12 处报错)
+
+[FIX] from typing import 末尾加 Tuple:
+  from typing import List, Dict, Any, Optional, Tuple
+
+[NOTE] BUG-V027-pt2 单 role 路径 AND-merge fix 在 Python 3.9 下
+被 Tuple 异常 catch 掉, exception 抛到 _apply_data_permission,
+触发 fallback 到 allowed_ids 全表, 产生 v027-pt1 同样的现象.
+
+[FILES]
+M deploy_bundle/meta/services/query_service.py
+M meta/services/query_service.py

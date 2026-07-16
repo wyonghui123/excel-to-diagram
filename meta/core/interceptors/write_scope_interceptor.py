@@ -47,7 +47,8 @@ logger = logging.getLogger(__name__)
 
 # [TBD-B] 关联操作字段名约定: 跟现有 object_id/record_id 一致
 _ASSOCIATE_SRC_KEY = 'src_id'
-_ASSOCIATE_DST_KEY = 'target_id'
+# [FIX BUG-V050 2026-07-10] 原值 'target_id' 是错的, bo.associate() 传 'tgt_id'
+_ASSOCIATE_DST_KEY = 'tgt_id'
 
 # [性能] 链向上追溯: 用单次 SQL JOIN 查 owner, 避免 N+1
 # HIERARCHY_CHAIN 顺序: product → version → domain → sub_domain (从顶层到底层)
@@ -264,8 +265,12 @@ _WRITE_SCOPE_REL_FUNCTIONAL_PERM_SOFT_WARN = os.environ.get(
 # [V2.1 2026-06-22] 写权限 × Dim Scope 联动校验开关
 # 启用后, _check_dim_scope 在 role 循环前增加 perm 前置检查
 # Spec: .trae/specs/auth-permission-system/write-scope-perm-link-v2.1-spec.md
+# [FIX BUG-V055 2026-07-12] 默认值改为 true: 写权限 dim scope 必须与功能权限联动
+#   根因: 关闭时, role A (read + dim scope 含制造云) + role B (create + dim scope 仅供应链云)
+#   的场景下, role A 的 dim scope 误放行 create 操作 (role A 没有 create 权限)
+#   开启后, dim scope 检查前先校验该 role 是否有对应功能权限, 无则跳过
 _WRITE_SCOPE_V2_1_PERM_CHECK = os.environ.get(
-    'WRITE_SCOPE_V2_1_PERM_CHECK', 'false'
+    'WRITE_SCOPE_V2_1_PERM_CHECK', 'true'
 ).lower() in ('true', '1', 'yes')
 
 # [V2.1 2026-06-22] action → perm 后缀映射
@@ -358,12 +363,26 @@ class WriteScopeInterceptor(Interceptor):
             [(side, {'type': bo, 'id': int}), ...]
         """
         if context.action in ('associate', 'dissociate'):
-            return [
-                ('src', {'type': context.object_type,
-                         'id': context.params.get(_ASSOCIATE_SRC_KEY)}),
-                ('dst', {'type': context.object_type,
-                         'id': context.params.get(_ASSOCIATE_DST_KEY)}),
-            ]
+            # [FIX BUG-V050 2026-07-10] 兼容多种字段名
+            #   - bo.associate() 传 src_id/tgt_id
+            #   - 旧代码只识别 src_id/tgt_id (已正确)
+            #   但前端可能传 source_id/target_id/source_bo_id/target_bo_id
+            src_id = (
+                context.params.get(_ASSOCIATE_SRC_KEY)
+                or context.params.get('source_id')
+                or context.params.get('source_bo_id')
+            )
+            dst_id = (
+                context.params.get(_ASSOCIATE_DST_KEY)
+                or context.params.get('target_id')
+                or context.params.get('target_bo_id')
+            )
+            targets = []
+            if src_id:
+                targets.append(('src', {'type': context.object_type, 'id': src_id}))
+            if dst_id:
+                targets.append(('dst', {'type': context.object_type, 'id': dst_id}))
+            return targets
         # [H14.1 2026-06-15] create 操作: 新 record 没 id, 用 parent (e.g. version_id) 加载
         #   例: 创建 domain 时, parent_type=version, parent_id 从 params.version_id 取
         #   顶层 BO (product) create 无 parent → 跳过 (让 functional perm 阶段处理)
@@ -1086,6 +1105,11 @@ class WriteScopeInterceptor(Interceptor):
 
         不走 _check_parent_dim_scope (语义: parent 下是否有 scope 内的 child),
         因为 annotation 不是 HIERARCHY_CHAIN 的 child.
+
+        [FIX BUG-V058 2026-07-12] 添加 V2.1 perm check:
+          annotation 的写权限跟随 parent, dim scope 检查前需校验 role 是否有
+          parent_type:create 权限. 否则 biz 角色 (BO read + MFG dim scope)
+          会在 MFG BO 下误放行 annotation create.
         """
         role_ids = self._get_user_role_ids(context, user_id)
         if not role_ids:
@@ -1101,6 +1125,18 @@ class WriteScopeInterceptor(Interceptor):
 
         for role_id in role_ids:
             try:
+                # [FIX BUG-V058] V2.1 perm check: annotation 写权限跟随 parent
+                if _WRITE_SCOPE_V2_1_PERM_CHECK:
+                    parent_perm = f'{object_type}:create'
+                    role_perm_codes = self._get_role_perm_codes(context, role_id)
+                    if not self._role_has_perm(role_id, parent_perm, role_perm_codes):
+                        roles_checked.append({
+                            'role_id': role_id, 'cond': None,
+                            'skipped': 'missing_parent_perm',
+                            'perm_required': parent_perm,
+                        })
+                        continue
+
                 expanded = engine.expand_dimension_values(role_id)
                 # 检查 parent 对象是否在直接声明的维度中
                 if object_type in expanded and expanded[object_type]:
@@ -1235,6 +1271,18 @@ class WriteScopeInterceptor(Interceptor):
                 logger.info(f'[WriteScope EXT_CHAIN] ABORT: object_type={object_type} not in HIERARCHY_CHAIN after {visited} steps')
                 return False  # visited 用尽仍未进入 chain, 异常
 
+            # [FIX BUG-V059 2026-07-12] EXT_CHAIN 步进后检查步进目标层级的直接匹配
+            # 场景: service_module delete, EXT_CHAIN 步进到 sub_domain(299)
+            # dim scope 声明在 sub_domain=[299], 但 ancestor 循环从 obj_idx-1 开始
+            # (跳过 sub_domain 自身), 导致 sub_domain 级别的 dim scope 永远不会被匹配
+            # 修复: 步进后先检查 current_id 是否在 expanded[object_type] 中
+            if object_type in expanded and expanded[object_type]:
+                if current_id in expanded[object_type]:
+                    logger.debug(
+                        f'[WriteScope EXT_CHAIN] direct match: {object_type}({current_id}) in dim scope'
+                    )
+                    return True
+
         obj_dim = object_type
 
         # 找 object_type (或锚点 dim) 在 chain 中的位置
@@ -1306,6 +1354,10 @@ class WriteScopeInterceptor(Interceptor):
         - delete: 同时检查 source_bo_id 和 target_bo_id 链 (两端都必须在 scope 内)
         - 原因: 删除关系影响两端, 需要两端都有写权限
         - 参考: 用户反馈 "实例的删除权限难道不是依赖源和目标来的吗, 参考写的权限"
+        [FIX BUG-V057 2026-07-12] delete 改为与 create/update 一致: 任一端在 scope 即可
+        - 关系的写权限基于源业务对象 (owner chain + dim scope 都只沿 source_bo_id 追溯)
+        - delete 不应比 create/update 更严格: 用户可以在自己 scope 内删除关系
+        - 实际场景: ITTF01(SCM) → ECN10(MFG), SCM 用户应可删除此关系 (源端在 scope)
         """
         # [V1.2.0] Functional perm gate: 防止"只读 user 误创关系"
         # 仅对 relationship 操作生效 (object_type 在 _check_dim_scope 调用前已路由到此)
@@ -1444,26 +1496,18 @@ class WriteScopeInterceptor(Interceptor):
                 break  # 每个 bo_id 只有一行
 
         # 判定最终结果
-        if is_delete_path:
-            # delete: source 和 target 都必须在 scope 内
-            src_ok = side_matches.get('source', False)
-            tgt_ok = side_matches.get('target', False)
-            if src_ok and tgt_ok:
-                return True
-            # 设置失败侧信息用于错误消息
-            if not src_ok and not tgt_ok:
-                context._rel_failed_side = f'源业务对象({src_code})和目标业务对象({tgt_code})'
-            elif not src_ok:
-                context._rel_failed_side = f'源业务对象({src_code})'
-            else:
-                context._rel_failed_side = f'目标业务对象({tgt_code})'
-            return False
-        else:
-            # create/update: 任一端 (source 或 target) 的 chain 在 scope 内即可
-            if side_matches.get('source', False) or side_matches.get('target', False):
-                return True
+        # [FIX BUG-V057 2026-07-12] 统一 create/update/delete: 任一端在 scope 即可
+        #   关系的写权限基于源业务对象, delete 不应比 create/update 更严格
+        if side_matches.get('source', False) or side_matches.get('target', False):
+            return True
+        # 设置失败侧信息
+        if not side_matches.get('source', False) and not side_matches.get('target', False):
             context._rel_failed_side = f'源业务对象({src_code})和目标业务对象({tgt_code})都不在用户 scope 内'
-            return False
+        elif not side_matches.get('source', False):
+            context._rel_failed_side = f'源业务对象({src_code})'
+        else:
+            context._rel_failed_side = f'目标业务对象({tgt_code})'
+        return False
 
     # ========================================================================
     # [V1.2.0 2026-06-15] 跨领域关系 functional perm 校验辅助方法
@@ -1666,6 +1710,17 @@ class WriteScopeInterceptor(Interceptor):
                     [current_id]
                 ).fetchone()
                 if sd_row and sd_row[0] in domain_ids:
+                    return True
+
+            # [FIX BUG-V059.2 2026-07-12] 步进到 sub_domain 后, 也检查 sub_domain 自身的 dim scope
+            # 场景: BO create under SM, dim scope 声明在 sub_domain=[299,339] (非 domain 层级)
+            # 之前只检查 domain 层级的 dim scope, 漏掉了 sub_domain 层级的直接匹配
+            if effective_object_type == 'sub_domain' and 'sub_domain' in expanded and expanded['sub_domain']:
+                sd_ids = expanded['sub_domain']
+                if current_id in sd_ids:
+                    logger.debug(
+                        f'_check_parent_dim_scope: sub_domain({current_id}) direct match in scope'
+                    )
                     return True
 
         # 找 effective_object_type 在 chain 中的位置
@@ -2280,9 +2335,16 @@ class WriteScopeInterceptor(Interceptor):
 
     def _is_fk_value_in_scope(self, user_id: int, target_bo: str, fk_value: Any,
                                data_source) -> bool:
-        """检查 FK 值是否在用户的 dim scope 内
+        """检查 FK 值是否在用户的权限范围内
 
-        使用 DimensionScopeEngine 派生条件, 然后查询数据库验证。
+        检查 3 种权限路径:
+        1. 显式 data_permissions (DataPermissionService.get_allowed_resource_ids)
+        2. Owner chain (用户是 product owner 即可引用该 product 下的所有层级对象)
+        3. Dim scope (DimensionScopeEngine 派生条件)
+
+        [FIX BUG-V050 2026-07-10] 之前只检查 dim scope, 但用户在自己拥有的 product 下
+        创建的子对象 (如 TEST001 service_module) 不在 dim scope 内 (在另一个 domain),
+        导致创建 business_object 引用时 FK 校验失败。
         """
         # [FIX v1.2.30 2026-06-20] 跳过非整数 FK 值 (字符串名称/非 ID)
         #   例: source_domain_id='采购管理' (domain NAME, 不是 id)
@@ -2292,6 +2354,33 @@ class WriteScopeInterceptor(Interceptor):
             if isinstance(fk_value, bool):
                 return True  # bool 是 int 子类, 显式排除
             return True  # 字符串等非整数值放行, 让 FK 解析阶段报错
+
+        # [FIX BUG-V050] 检查 0: 显式 data_permissions
+        try:
+            from meta.services.data_permission_service import DataPermissionService
+            dpf = DataPermissionService(data_source)
+            allowed_ids = dpf.get_allowed_resource_ids(user_id, target_bo)
+            if allowed_ids and fk_value in allowed_ids:
+                logger.debug(f'[_is_fk_value_in_scope BUG-V050] user={user_id} FK={fk_value} target={target_bo} matched data_permissions')
+                return True
+        except Exception as e:
+            logger.debug(f'[_is_fk_value_in_scope BUG-V050] data_permission check failed: {e}')
+
+        # [FIX BUG-V050] 检查 1: owner chain (用户是 product owner 即可引用该 product 下的子对象)
+        try:
+            from meta.services.chain_owner_resolver import build_owner_exception_subquery
+            owner_subquery = build_owner_exception_subquery(None, target_bo, user_id)
+            if owner_subquery:
+                table_name = self._get_table_name_for_bo(target_bo)
+                if table_name:
+                    sql = f"SELECT COUNT(*) FROM {table_name} WHERE id = ? AND id IN ({owner_subquery})"
+                    cursor = data_source.execute(sql, [fk_value])
+                    if cursor.fetchone()[0] > 0:
+                        logger.debug(f'[_is_fk_value_in_scope BUG-V050] user={user_id} FK={fk_value} target={target_bo} matched owner_chain')
+                        return True
+        except Exception as e:
+            logger.debug(f'[_is_fk_value_in_scope BUG-V050] owner_chain check failed: {e}')
+
         # 1. 获取用户的 role_ids
         role_ids = self._get_user_role_ids_direct(user_id, data_source)
         if not role_ids:

@@ -1,0 +1,40 @@
+fix(be): V007.43 shutdown order — close pool before WAL checkpoint PASSIVE
+
+[BUG-V007.43 2026-07-08 19:30] 生产 deploy v20260708_011 重启时
+持续出现 disk I/O error:
+  Final WAL checkpoint PASSIVE failed: disk I/O error
+
+[ROOT CAUSE] server.py:_cleanup_resources 顺序错误 (V007.39 引入):
+  1. line 296 新 sqlite3.connect + PRAGMA wal_checkpoint(PASSIVE)
+     ↑ 此时 connection pool 仍有活动 reader/writer
+     ↑ 新连接与旧 pool 抢同一 DB → disk I/O error
+  2. line 303-320 write_queue stop
+  3. line 321-326 pool shutdown ← 才关旧连接
+  4. sys.exit → atexit 再调 _cleanup_resources → 第二次成功 (pool 已空)
+
+SQLite 官方: "passive mode might leave the checkpoint unfinished
+if there are concurrent readers or writers"
+https://sqlite.org/c3ref/wal_checkpoint_v2.html
+
+V007.40 (7c71636) + V007.42 P5 (bf4a106) 修了运行时 disk I/O:
+  - 所有 TRUNCATE → PASSIVE
+  - mmap_size=0 (禁用 mmap)
+  - Decorrelated Jitter retry
+  - I/O rate limiter
+但都没修 shutdown 顺序, 所以重启时仍报 disk I/O error
+
+[FIX] 调整 _cleanup_resources 顺序:
+  1. write_queue stop (line 303-320)
+  2. connection pool shutdown (line 321-326)  ← 先关旧连接
+  3. PASSIVE checkpoint (用新连接, 此时无并发)  ← 最后
+  4. exception 降级 debug (避免 spam WARNING)
+
+[FILES]
+M deploy_bundle/meta/server.py
+M meta/server.py
+
+[NOTE] 单元测试:
+- 之前 E2E 测试均通过, 因为 dev-agent 的本地 Python 3.14
+  类型注解 lazy 求值掩盖了 v027-pt3 Tuple import 缺失
+- 生产 Python 3.9 立即求值暴露了 v027-pt3 (commit 76f7668)
+- 本次 v007.43 fix 也需本地验证 (V007.42 P5 已通过集成测试)

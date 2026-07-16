@@ -65,20 +65,18 @@ def audit_export_handler(params: Dict[str, Any], context: Dict[str, Any]) -> 'Ac
 
     # 查数据
     try:
-        import sqlite3
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.execute(
-            f"""SELECT id, object_type, object_id, action, field_name, old_value, new_value,
-                       user_id, user_name, ip_address, created_at
-                FROM audit_logs
-                WHERE {where_clause}
-                ORDER BY created_at DESC
-                LIMIT 10000""",
-            sql_params
-        )
-        rows = cursor.fetchall()
-        conn.close()
+        # [V007.41 BUG-FIX] 用 safe_connect_for_read 统一 L0 入口
+        with safe_connect_for_read(db_path) as conn:
+            cursor = conn.execute(
+                f"""SELECT id, object_type, object_id, action, field_name, old_value, new_value,
+                           user_id, user_name, ip_address, created_at
+                    FROM v_audit_all
+                    WHERE {where_clause}
+                    ORDER BY created_at DESC
+                    LIMIT 10000""",
+                sql_params
+            )
+            rows = cursor.fetchall()
     except Exception as e:
         logger.exception(f"[audit.export] query failed: {e}")
         return ActionResult(success=False, data=None, message=f'查询失败: {e}')

@@ -38,7 +38,7 @@ class PermissionAuditService:
         """
         try:
             query = """
-                SELECT * FROM audit_logs
+                SELECT * FROM v_audit_all
                 WHERE action IN ('data_permission_add', 'data_permission_remove',
                                 'role_permission_add', 'role_permission_remove',
                                 'user_role_add', 'user_role_remove')
@@ -166,7 +166,7 @@ class PermissionAuditService:
         # 近期变更数
         try:
             cursor = self.ds.execute(f"""
-                SELECT COUNT(*) FROM audit_logs
+                SELECT COUNT(*) FROM v_audit_all
                 WHERE action LIKE '%permission%'
                 AND created_at >= datetime('now', '-{days} days')
             """)

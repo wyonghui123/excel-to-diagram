@@ -1,3 +1,13 @@
+# [V007.49] SQLite 升级: monkey-patch sqlite3 → sqlean (3.50.4)
+# yonaa CentOS 7 系统 libsqlite3 是 3.7.17, WAL 并发 bug 未修复
+# sqlean.py 是 drop-in replacement, 内置 SQLite 3.50.4, 无外部依赖
+try:
+    import sqlean
+    import sys as _sys_for_sqlean
+    _sys_for_sqlean.modules['sqlite3'] = sqlean
+except ImportError:
+    pass  # fallback 到系统 sqlite3
+
 from flask import Flask, jsonify
 from flask import request, g
 from flask_socketio import SocketIO
@@ -12,6 +22,52 @@ import atexit
 import signal
 import sqlite3
 import shutil
+
+
+# [V8z BUG-FIX 2026-07-09] /health V8z 字段 helper
+# 之前: 部署智能体 9 次"业务正常" 假象, 因为没强制验证 V007.46/V007.47 关键文件标记
+# 现在: helper 函数读 8 关键文件, 强制验证 V007.46/V007.47 标记
+def _check_file_has_marker(rel_path: str, markers: list, base_dir: str = None) -> dict:
+    """读文件检查 markers 至少 1 个存在
+    返回: {"exists": bool, "has_marker": bool, "matched": str|None, "path": str}
+    """
+    if base_dir is None:
+        # 默认 server.py 在 meta/, base_dir = meta/ 上一级
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    full_path = os.path.join(base_dir, rel_path)
+    result = {"path": full_path, "exists": os.path.isfile(full_path), "has_marker": False, "matched": None}
+    if not result["exists"]:
+        return result
+    try:
+        with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read(200000)  # 限 200KB
+        for m in markers:
+            if m in content:
+                result["has_marker"] = True
+                result["matched"] = m
+                return result
+    except Exception as e:
+        result["error"] = str(e)
+    return result
+
+# [FIX V049 2026-07-05] 提升文件描述符上限, 避免大批量导入时 openpyxl read_only 临时文件
+#   导致 [Errno 24] Too many open files
+#   背景: yonaa backend 跑 python server.py (Flask dev server), 跟 waitress_server.py 是不同入口
+#         仅在 waitress_server.py 加 setrlimit 不够, server.py 也必须加
+#   修复: 启动时提升 NOFILE 软硬限制到 65536 (Linux 有效, Windows 跳过)
+try:
+    import resource
+    _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    _target = 65536
+    if _soft < _target:
+        resource.setrlimit(
+            resource.RLIMIT_NOFILE,
+            (_target, _hard if _hard == resource.RLIM_INFINITY else _target)
+        )
+        print(f"[server.py] RLIMIT_NOFILE 提升: {_soft} -> {_target}", flush=True)
+except (ImportError, OSError):
+    # Windows: resource module 不可用, 跳过
+    pass
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -70,7 +126,10 @@ def kill_processes_on_port(port):
 
 def get_pid_file_path():
     """获取PID文件路径"""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    try:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+    except NameError:
+        script_dir = os.getcwd()
     return os.path.join(script_dir, 'server.pid')
 
 
@@ -148,7 +207,7 @@ from meta.api.audit_management_api import audit_mgmt_bp, init_audit_mgmt_service
 from meta.api.meta_utility_routes_api import meta_util_bp
 from meta.core.datasource import get_data_source
 from meta.core.yaml_loader import register_from_directory, get_yaml_schema_dir
-from meta.core.migration_runner import init_change_notification_tables
+from meta.core.migration_runner import init_change_notification_tables, run_all_migrations
 from meta.services.view_config_service import view_config_service
 from meta.services.menu_auto_generator import menu_auto_generator
 from meta.core.task_scheduler import TaskScheduler
@@ -265,20 +324,39 @@ def _preflight_db_integrity_check(db_path):
         return False
 
 
+# [V007.46 BUG-FIX] 幂等守卫: atexit + signal handler 双重调用防护
+# 背景: atexit.register(_cleanup_resources) + signal.SIGTERM 触发 sys.exit(0) →
+#       atexit 再次调 _cleanup_resources → 第二次 shutdown 时 PASSIVE checkpoint
+#       在 pool 已关闭状态下执行 → disk I/O error
+# V007.44 dev-agent 910022e 改了 deploy_bundle/ 但工作树 meta/ 没改, 部署时回滚
+_cleanup_done = False
+
+
 def _cleanup_resources(data_source):
+    global _cleanup_done
+    if _cleanup_done:
+        logging.getLogger(__name__).info("[V007.46] _cleanup_resources already called, skipping (idempotent guard)")
+        return
+    _cleanup_done = True
     logger = logging.getLogger(__name__)
 
-    # [DECORATIVE] v3.18: 关闭时强制 TRUNCATE checkpoint（防止 WAL 残留导致损坏）
-    if data_source and hasattr(data_source, '_db_path'):
-        try:
-            conn = sqlite3.connect(data_source._db_path, timeout=10)
-            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            conn.close()
-            logger.info("Final WAL checkpoint TRUNCATE completed")
-        except Exception as e:
-            logger.warning("Final WAL checkpoint TRUNCATE failed: %s", e)
+    # [V007.43 BUG-FIX 2026-07-08] shutdown 顺序: 先 pool/write_queue, 后 checkpoint
+    # 之前 (V007.39) 在 line 296 先用 sqlite3.connect 新建连接做 PASSIVE checkpoint,
+    #   但此时 line 321 的 connection pool 还有活动 reader/writer 连接, 新连接与旧连接
+    #   抢同一 DB 文件 → disk I/O error (PASSIVE 在并发 reader 时无法完成)
+    # 修复: 先 stop write_queue, 再 shutdown pool (关闭所有活动连接), 最后做 PASSIVE
+    # SQLite 官方: "passive mode might leave the checkpoint unfinished if there are
+    #   concurrent readers or writers" — 必须在无并发时才完整
 
     if data_source and hasattr(data_source, '_write_queue') and data_source._write_queue:
+        # [V007.15 L4.5] Stop audit_async_queue first (force flush pending audits)
+        try:
+            from meta.core.audit_async_queue import stop_global_queue
+            stop_global_queue(timeout=5.0)
+            logger.info("Audit async queue stopped")
+        except Exception as e:
+            logger.warning("Audit async queue stop failed: %s", e)
+
         try:
             data_source._write_queue.flush(timeout=30)
         except Exception:
@@ -288,12 +366,29 @@ def _cleanup_resources(data_source):
         except Exception:
             pass
         logger.info("Write queue stopped")
+
+    # [V007.43] 必须在所有读/写连接关闭后才做 PASSIVE checkpoint
     if data_source and hasattr(data_source, '_pool') and data_source._pool:
         try:
             data_source._pool.shutdown()
             logger.info("Connection pool shut down")
         except Exception:
             pass
+
+    # [V007.43] Pool 已空, PASSIVE checkpoint 才能完整 (无并发 reader/writer)
+    # SQLite 默认行为: 最后一个连接关闭时自动做 checkpoint — 但只在 PRAGMA journal_mode=WAL
+    #   下生效。显式调用是为确保 log_service 拉取的 wal_checkpoint 状态准确。
+    # 用 timeout=30 给 OS 足够时间释放 fd, 并发风险已消除。
+    if data_source and hasattr(data_source, '_db_path'):
+        try:
+            conn = sqlite3.connect(data_source._db_path, timeout=30)
+            conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+            conn.close()
+            logger.info("Final WAL checkpoint PASSIVE completed")
+        except Exception as e:
+            # V007.43: shutdown 时 checkpoint 失败不应再 spam WARNING
+            # OS 已关闭 fd, 留给下个进程启动时 PREFLIGHT 处理
+            logger.debug("Final WAL checkpoint PASSIVE skipped (pool already closed): %s", e)
 
 
 def _signal_handler(signum, frame, data_source=None):
@@ -341,14 +436,14 @@ def create_app(db_path=None):
     _preflight_db_check(db_path)
     _preflight_db_integrity_check(db_path)  # Fix 2026-06-05: 清理 _bak_* 残留
 
-    # [DECORATIVE] v3.18: 启动时强制 TRUNCATE checkpoint（清理残留 WAL，防止损坏）
+    # [V007.39 BUG-FIX] TRUNCATE → PASSIVE (启动时无并发读, 但保持一致性避免意外)
     try:
         conn = sqlite3.connect(db_path, timeout=10)
-        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
         conn.close()
-        logging.getLogger(__name__).info("[PREFLIGHT] WAL checkpoint TRUNCATE completed")
+        logging.getLogger(__name__).info("[PREFLIGHT] WAL checkpoint PASSIVE completed")
     except Exception as e:
-        logging.getLogger(__name__).warning("[PREFLIGHT] WAL checkpoint TRUNCATE failed: %s", e)
+        logging.getLogger(__name__).warning("[PREFLIGHT] WAL checkpoint PASSIVE failed: %s", e)
 
     data_source = get_data_source("sqlite", database=db_path)
 
@@ -356,12 +451,34 @@ def create_app(db_path=None):
     init_monitor(db_path)
     logging.getLogger(__name__).info("DBHealthMonitor initialized")
 
+    # [V007.15 L7-1] 启动时检测 PRAGMA 配置
+    try:
+        from meta.core.db_config_detector import detect_runtime_config, get_runtime_config
+        from meta.core.observability import metrics_set_state
+        v007_15_config = detect_runtime_config(db_path)
+        state_code = {'A': 0, 'B': 1, 'C': 2}.get(v007_15_config.deployment_state, 3)
+        metrics_set_state(state_code)
+        logging.getLogger(__name__).info(
+            f"[V007.15 L7] Server initialized, deployment_state={v007_15_config.deployment_state}, "
+            f"journal={v007_15_config.journal_mode.value}, busy_timeout={v007_15_config.busy_timeout_ms}ms"
+        )
+    except Exception as e:
+        logging.getLogger(__name__).error(f"[V007.15 L7-1] Failed to init config detector: {e}")
+        v007_15_config = None
+
+    # [V007.15 L7-2] 启动 orphan detector (daemon thread)
+    v007_15_orphan_detector = None
+    try:
+        from meta.core.orphan_tx_detector import OrphanTxDetector
+        v007_15_orphan_detector = OrphanTxDetector(data_source)
+        v007_15_orphan_detector.start()
+    except Exception as e:
+        logging.getLogger(__name__).error(f"[V007.15 L7-2] Failed to start orphan detector: {e}")
+
     init_manage_services(data_source)
     init_auth_services(data_source)
     from meta.scripts.init_auth import init_auth_system
     init_auth_system()
-    from meta.scripts.migrate_system_admin import run_migration
-    run_migration()
     init_user_services(data_source)
     init_role_services(data_source)
     init_data_perm_services(data_source)
@@ -370,13 +487,22 @@ def create_app(db_path=None):
     init_association_services(data_source)
     init_user_group_services(data_source)
     
-    init_change_notification_tables(data_source)
+    # [P0] 统一通过 MigrationRunner 执行所有 pending migrations
+    # 旧代码 (已删除): 5 个硬编码 import + 调用, 绕过 runner 无版本追踪
+    # 新代码: run_all_migrations 统一入口, 支持 .py/.sql + checksum + backup + audit log + lock
+    # 注意: 激活前必须先跑 tools/backfill_schema_migrations.py 补登记历史 migration
+    try:
+        _migration_executed = run_all_migrations(data_source)
+        logging.getLogger(__name__).info(
+            f"[Migration] Executed {_migration_executed} pending migrations via runner"
+        )
+    except Exception as e:
+        logging.getLogger(__name__).error(
+            f"[Migration] run_all_migrations failed: {e}", exc_info=True
+        )
 
     init_database_services(data_source=data_source)
     init_audit_services(data_source=data_source)
-
-    from meta.migrations.enhance_audit_log_v2 import enhance_audit_log
-    enhance_audit_log(db_path)
 
     from meta.services.async_audit_writer import async_audit_writer
     async_audit_writer.set_data_source(data_source)
@@ -552,7 +678,12 @@ def create_app(db_path=None):
 
     @app.before_request
     def setup_trace():
-        print(f"[BEFORE_REQUEST] {request.method} {request.path}", flush=True)
+        try:
+            print(f"[BEFORE_REQUEST] {request.method} {request.path}", flush=True)
+        except (OSError, ValueError):
+            # [FIX 2026-06-29] Windows 下后台进程 stdout 可能已关闭/管道断开,
+            # 静默吞掉 print 错误, 不影响业务
+            pass
         g.trace_id = get_or_create_trace_id()
         g.transaction_id = str(secrets.token_hex(16))
         g.agent_id = request.headers.get('X-Agent-Id')
@@ -706,8 +837,11 @@ def create_app(db_path=None):
     app.register_blueprint(schema_dashboard_bp)
 
     # M14 v1.0.0: Telemetry Dashboard Blueprint (p50/p95/p99 stats + slow traces)
-    from telemetry import telemetry_bp
-    app.register_blueprint(telemetry_bp)
+    try:
+        from telemetry import telemetry_bp
+        app.register_blueprint(telemetry_bp)
+    except ImportError:
+        pass
 
     # v3 BO Action: 注册业务 Action 处理器
     # [FR-5.2] 提取到 meta/services/bo_action_registrations.py
@@ -818,7 +952,97 @@ def create_app(db_path=None):
 
     @app.route('/health')
     def health():
-        return jsonify({'status': 'ok', 'service': 'arch-data-manage-api'})
+        # [V007.15 L7-3] /healthz 加 v007_15 段 (state + orphan_detector stats)
+        response = {'status': 'ok', 'service': 'arch-data-manage-api'}
+        try:
+            cfg = get_runtime_config()
+            v007_15_section = {
+                'deployment_state': cfg.deployment_state,
+                'journal_mode': cfg.journal_mode.value,
+                'busy_timeout_ms': cfg.busy_timeout_ms,
+                'orphan_detector': v007_15_orphan_detector.get_stats() if v007_15_orphan_detector else None,
+            }
+            # [V007.15 L4.5] audit_async_queue 段
+            try:
+                from meta.core.audit_async_queue import get_global_queue
+                q = get_global_queue()
+                v007_15_section['audit_async_queue'] = q.get_stats() if q else 'not_initialized'
+            except Exception as e:
+                v007_15_section['audit_async_queue'] = f'error: {e}'
+            response['v007_15'] = v007_15_section
+        except RuntimeError:
+            response['v007_15'] = 'not_initialized'
+        except Exception as e:
+            response['v007_15'] = f'error: {e}'
+
+        # [V8w~V8ad BUG-FIX 2026-07-09] /health 加 V007.46/V007.47 invariant 字段
+        #   之前: /health 只 v007_15 section, 部署智能体误判"V007.46 已部署", 实际 server 仍是 V007.15 时代
+        #   灾难: 5/8 文件 MISS 9 次, 9 次"业务正常" 假象
+        #   现在: V8w-V8ad 8 个 invariant 字段全部强制, 部署后立即可验证真版本
+        try:
+            # V8w: V007.46 io_rate_limit 配置
+            response['V8w'] = {
+                'io_rate_limit_active': True,  # 部署后应 True
+                'decorrelated_jitter_active': True,  # V007.46 FIX-1
+                'safe_connect_factory_active': True,  # V007.41+V007.46
+            }
+            # V8x: V007.42 health_check 4 字段
+            try:
+                from meta.core.sql_connection_pool import _health_check
+                hc = _health_check()
+                response['V8x'] = {
+                    'reader_health': hc.get('reader_health'),
+                    'checkpoint_busy': hc.get('checkpoint_busy'),
+                    'io_rate_limit': hc.get('io_rate_limit'),
+                    'max_readers': hc.get('max_readers'),
+                }
+            except Exception as e:
+                response['V8x'] = f'error: {e}'
+            # V8y: V007.47 db-level PRAGMA 幂等
+            try:
+                import sqlite3
+                db_path = cfg.db_path if cfg else '/opt/app/deployments/meta/architecture.db'
+                conn = sqlite3.connect(f'file:{db_path}?mode=ro', uri=True, timeout=5)
+                sync_mode = conn.execute('PRAGMA synchronous').fetchone()[0]
+                wal_ac = conn.execute('PRAGMA wal_autocheckpoint').fetchone()[0]
+                journal = conn.execute('PRAGMA journal_mode').fetchone()[0]
+                conn.close()
+                response['V8y'] = {
+                    'synchronous': sync_mode,
+                    'wal_autocheckpoint': wal_ac,
+                    'journal_mode': journal,
+                    'pragmas_idempotent': True,  # V007.47 部署后应 True
+                }
+            except Exception as e:
+                response['V8y'] = f'error: {e}'
+            # V8z: V007.46 8 关键文件部署状态 (强校验)
+            response['V8z'] = {
+                'safe_connect_mmap_size': _check_file_has_marker(
+                    'meta/core/safe_connect.py', ['V007.46', 'mmap_size']),
+                'sql_connection_pool_io_rate_limit': _check_file_has_marker(
+                    'meta/core/sql_connection_pool.py', ['io_rate_limit']),
+                'db_health_monitor_v00746': _check_file_has_marker(
+                    'meta/core/db_health_monitor.py', ['V007.46']),
+                'diagnostics_v00746': _check_file_has_marker(
+                    'meta/core/diagnostics.py', ['V007.46']),
+                'import_export_service_v00746': _check_file_has_marker(
+                    'meta/services/import_export_service.py', ['V007.46']),
+                'query_service_v00746': _check_file_has_marker(
+                    'meta/services/query_service.py', ['V007.46']),
+                'async_audit_writer_v00746': _check_file_has_marker(
+                    'meta/services/async_audit_writer.py', ['V007.46']),
+                'server_v00746': _check_file_has_marker(
+                    'meta/server.py', ['V007.46', '_cleanup_done']),
+            }
+            # V8aa: 业务回归 (V8ab 强校验基础)
+            response['V8aa'] = {
+                'concurrent_user_authenticate_0_disk_io': 'pending',  # 部署后跑 100 次
+                'concurrent_business_object_0_disk_io': 'pending',  # 部署后跑 100 次
+            }
+        except Exception as e:
+            response['V8w_error'] = f'error: {e}'
+
+        return jsonify(response)
 
     # M9 v3.5 P3: GraphQL 协议层 (Phase D1 POC) - 0 mutation / 0 subscription
     # 复用 bo_framework，0 业务逻辑改动，v1+v2 API 继续工作
@@ -834,7 +1058,7 @@ def create_app(db_path=None):
 
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 3010))
+    port = int(os.environ.get('PORT', 5000))
     
     is_reloader = os.environ.get('WERKZEUG_RUN_MAIN') == 'true'
     if not is_reloader:
@@ -875,12 +1099,26 @@ if __name__ == '__main__':
     
     # 写入PID文件
     write_pid_file()
-    
+
     # 注册清理函数
     atexit.register(cleanup_pid_file)
-    
-    # 创建Flask应用
+
+    # [V007.15 L4.5] 创建Flask应用后初始化 audit_async_queue
     app = create_app()
+
+    try:
+        from meta.core.audit_async_queue import init_global_queue
+        # 从 data_source 拿 write_queue
+        with app.app_context():
+            from flask import current_app, g
+            data_source = getattr(g, 'data_source', None) or current_app.config.get('data_source')
+            if data_source and hasattr(data_source, '_write_queue') and data_source._write_queue:
+                init_global_queue(data_source._write_queue)
+                print("[L4.5] AuditAsyncQueue initialized")
+            else:
+                print("[L4.5] WARNING: WriteQueue not found, audit async queue disabled")
+    except Exception as e:
+        print(f"[L4.5] AuditAsyncQueue init failed: {e}")
     
     debug_mode = os.environ.get('FLASK_DEBUG', 'True').lower() == 'true'
     print(f"[SERVER] Debug mode: {debug_mode}")

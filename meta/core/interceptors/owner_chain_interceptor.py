@@ -48,6 +48,11 @@ _PARENT_FIELD_FOR_CREATE = {
     'sub_domain': ('domain', 'domain_id'),
     'business_object': ('version', 'version_id'),
     'service_module': ('version', 'version_id'),
+    # [FIX BUG-V050 2026-07-10] relationship 的 parent 是 source_bo
+    #   关系 owner 链沿 source_bo 追溯: source_bo -> sm -> sd -> d -> v -> product
+    #   之前 _get_targets 对 relationship 返回 [], OwnerChainInterceptor 跳过,
+    #   导致 _owner_chain_match=False, WriteScopeInterceptor 进入 dim scope 检查拒绝
+    'relationship': ('business_object', 'source_bo_id'),
 }
 
 
@@ -92,9 +97,11 @@ class OwnerChainInterceptor(Interceptor):
     def before_action(self, context: 'ActionContext') -> None:
         # [V1.1.8] 从 context 取 user_id (而不是 g.current_user)
         # [FIX BUG-V010 2026-06-26] ActionContext 没有 user_id 属性, fallback 到 user_info
+        # [FIX 2026-07-10 BUG-V052] 先无条件赋 user_info 默认值, 避免后面引用 UnboundLocalError
+        # (Python 静态分析: if 块内赋值会让变量变成 local, 后面 if 不进入会报错)
+        user_info = getattr(context, 'user_info', None) or {}
         user_id = getattr(context, 'user_id', None)
         if not user_id:
-            user_info = getattr(context, 'user_info', None) or {}
             user_id = user_info.get('user_id') or user_info.get('id')
         if not user_id:
             return  # 未登录, 留给后续拦截器处理
@@ -103,11 +110,15 @@ class OwnerChainInterceptor(Interceptor):
         try:
             from meta.services.auth_middleware import is_admin
             from flask import g
-            user_info = g.get('current_user') or {}
-            if is_admin(user_info):
+            g_user = g.get('current_user') or {}
+            if g_user and is_admin(g_user):
                 context._owner_chain_match = True
                 context._owner_chain_root = {'admin': True}
                 return
+            # [FIX 2026-07-10 BUG-V052] admin check 失败时, 用 g_user 覆盖 user_info
+            # (import 子线程 flask.g 不可用, fallback 保留 context 里的 user_info)
+            if g_user:
+                user_info = g_user
         except Exception:
             pass
 
@@ -126,8 +137,6 @@ class OwnerChainInterceptor(Interceptor):
 
             # 检查 owner
             check = self._check_owner_chain(context, object_type, record, user_id, user_info)
-            # [DEBUG BUG-V010 2026-06-26] 输出 owner chain 检查详情
-            logger.warning(f'[BUG-V010 DEBUG] object={object_type} target_id={target_id} user_id={user_id} check={check}')
             if check['matched']:
                 # [FIX BUG-V010 2026-06-26] ActionContext 是 @dataclass, 动态属性丢失
                 # 之前直接 setattr 不可靠, 改用 extra dict (ActionContext 已定义 extra 字段)
@@ -139,7 +148,6 @@ class OwnerChainInterceptor(Interceptor):
                     context._owner_chain_root = check.get('chain_root')
                 except Exception:
                     pass
-                logger.warning(f'[BUG-V010 DEBUG] set extra._owner_chain_match=True, extra={context.extra}')
                 logger.debug(
                     f'OwnerChainInterceptor: {object_type}({target_id}) owner matched, '
                     f'user={user_id} chain_root={check.get("chain_root")}'
@@ -159,13 +167,35 @@ class OwnerChainInterceptor(Interceptor):
     def _get_targets(self, context: 'ActionContext') -> List[tuple]:
         """获取要检查的 target 列表 [(side, {'type': ..., 'id': ...}), ...]"""
         if context.action in ('associate', 'dissociate'):
+            # [FIX BUG-V050 2026-07-10] 兼容多种字段名
+            #   - bo.associate() 传 src_id/tgt_id
+            #   - 旧代码期望 source_id/target_id/source_bo_id/target_bo_id
+            #   之前 src_id/tgt_id 都不被识别 → OwnerChainInterceptor 完全跳过 associate 路径
             return [
                 ('src', {'type': context.object_type,
-                         'id': context.params.get('source_id') or context.params.get('source_bo_id')}),
+                         'id': (
+                             context.params.get('source_id')
+                             or context.params.get('source_bo_id')
+                             or context.params.get('src_id')
+                         )}),
                 ('dst', {'type': context.object_type,
-                         'id': context.params.get('target_id') or context.params.get('target_bo_id')}),
+                         'id': (
+                             context.params.get('target_id')
+                             or context.params.get('target_bo_id')
+                             or context.params.get('tgt_id')
+                         )}),
             ]
         if context.action == 'crud_create':
+            # [FIX BUG-V050 2026-07-10] annotation 是多态辅助对象
+            #   - params: target_type='business_object', target_id=4653
+            #   - 需要从 target_type 派生 parent_type, 从 target_id 派生 parent_id
+            #   - 然后走 parent 的 owner chain
+            if context.object_type == 'annotation':
+                parent_type = context.params.get('target_type')
+                parent_id = context.params.get('target_id')
+                if parent_type and parent_id:
+                    return [('create_parent', {'type': parent_type, 'id': parent_id})]
+                return []
             # create: 检查 parent 的 owner (parent 是 owner 链上溯到的可写实体)
             parent_spec = _PARENT_FIELD_FOR_CREATE.get(context.object_type)
             if not parent_spec:

@@ -576,8 +576,9 @@ fields:
 - id: domain_id
   name: 领域
   type: integer
-  description: 所属领域（用于级联筛选，新建后不可变更）
-  storage: virtual
+  description: 所属领域（用于级联筛选，新建后不可变更，由 DB trigger 自动从 service_module_id 推导并维护）
+  storage: stored
+  db_column: domain_id
   editable: true
   ui:
     widget: select
@@ -587,12 +588,13 @@ fields:
     cascade_group: hierarchy
     cascade_level: 2
   semantics:
-    meaning: 用于级联筛选子领域
+    meaning: 用于级联筛选子领域（由 trigger 维护）
     immutable: true
     redundancy:
-      type: virtual
+      type: stored
       source_field: service_module_id
       derived_from: domain.id
+      maintained_by: db_trigger
       join_path:
       - table: service_modules
         from: service_module_id
@@ -632,8 +634,9 @@ fields:
 - id: sub_domain_id
   name: 子领域
   type: integer
-  description: 所属子领域（用于级联筛选，新建后不可变更）
-  storage: virtual
+  description: 所属子领域（用于级联筛选，新建后不可变更，由 DB trigger 自动从 service_module_id 推导并维护）
+  storage: stored
+  db_column: sub_domain_id
   editable: true
   ui:
     widget: select
@@ -643,12 +646,13 @@ fields:
     cascade_group: hierarchy
     cascade_level: 3
   semantics:
-    meaning: 用于级联筛选服务模块
+    meaning: 用于级联筛选服务模块（由 trigger 维护）
     immutable: true
     redundancy:
-      type: virtual
+      type: stored
       source_field: service_module_id
       derived_from: sub_domain.id
+      maintained_by: db_trigger
       join_path:
       - table: service_modules
         from: service_module_id
@@ -978,18 +982,20 @@ actions:
   method: GET
   path: /api/v1/business_objects
   description: 查询业务对象列表
-- id: batch_import
-  name: 批量导入
+# [FIX 2026-07-10] BUG-V051: import/export 委托给统一 export-import 端点
+#   移除 batch_import (2026-07-10 BUG-V051 后续): 跟 import 重复
+- id: import
+  name: 导入
   type: business
   method: POST
-  path: /api/v1/business_objects/import
-  description: 从Excel批量导入业务对象
+  path: /api/v1/export-import/import
+  description: 通过统一导入端点从Excel导入业务对象
 - id: export
   name: 导出
   type: business
   method: GET
-  path: /api/v1/business_objects/export
-  description: 导出业务对象到Excel
+  path: /api/v1/export-import/export
+  description: 通过统一导出端点导出业务对象到Excel
 indexes:
 - name: uidx_business_objects_version_code
   fields:

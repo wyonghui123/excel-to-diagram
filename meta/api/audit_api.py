@@ -25,18 +25,60 @@ def init_audit_services(data_source=None):
 
 
 def _require_audit_log_read():
-    """[BMRD-2026-06-14] 审计日志读权限校验 — admin/* 旁路, 否则需要 audit_log:read."""
+    """[BMRD-2026-06-14] 审计日志读权限校验 — admin/* 旁路, 否则需要 audit_log:read.
+
+    [FIX BUG-V052.2 2026-07-10 dev agent] 统一权限 code 为短名.
+    历史: 系统曾因 schema yaml action.id 误用 'audit_log_read' (非标准), 导致
+          permission code 变成 'audit_log:audit_log_read' (双重前缀).
+    修复: 改 yaml 为 'crud_read' + DB code 改为 'audit_log:read',
+          删除兼容代码, 只认 'audit_log:read' 短名.
+          list 权限隐含读权限 (列表查询 → 可以看详情).
+    """
     user = get_current_user()
     if user and is_admin(user):
         return None
     if user:
         perms = user.get('permissions', []) or []
-        if '*' in perms or 'admin' in perms or 'audit_log:read' in perms:
+        if '*' in perms or 'admin' in perms \
+                or 'audit_log:read' in perms \
+                or 'audit_log:list' in perms:
             return None
     return jsonify({
         'success': False,
         'message': '缺少权限: audit_log:read',
         'error_code': 'permission.audit_log.read.missing',
+    }), 403
+
+
+def _require_audit_log_write():
+    """[FIX BUG-V052.2 2026-07-10 dev agent] audit_log:delete 权限校验 — 写操作 (delete 端点)"""
+    user = get_current_user()
+    if user and is_admin(user):
+        return None
+    if user:
+        perms = user.get('permissions', []) or []
+        if '*' in perms or 'admin' in perms or 'audit_log:delete' in perms:
+            return None
+    return jsonify({
+        'success': False,
+        'message': '缺少权限: audit_log:delete',
+        'error_code': 'permission.audit_log.delete.missing',
+    }), 403
+
+
+def _require_audit_log_export():
+    """[FIX BUG-V052.2 2026-07-10 dev agent] audit_log:export 权限校验 — 导出端点"""
+    user = get_current_user()
+    if user and is_admin(user):
+        return None
+    if user:
+        perms = user.get('permissions', []) or []
+        if '*' in perms or 'admin' in perms or 'audit_log:export' in perms:
+            return None
+    return jsonify({
+        'success': False,
+        'message': '缺少权限: audit_log:export',
+        'error_code': 'permission.audit_log.export.missing',
     }), 403
 
 # 业务对象元数据定义 - 定义各对象类型的business key配置
@@ -125,6 +167,13 @@ def get_audit_logs():
         # 例如: RoleDetailDrawer 通过 parent_object_type='role' + parent_object_id=3606 拉日志
         parent_object_type = request.args.get('parent_object_type', '')
         parent_object_id = request.args.get('parent_object_id', '')
+        # [FIX BUG-V046 2026-07-04 dev agent] 详情页"操作日志" tab 支持排除特定子对象类型
+        # PM 用法:
+        #   - domain 详情页: ?object_type=domain&object_id=683&excluded_object_types=sub_domain,service_module,business_object,relationship
+        #   - 默认: 全部显示 (向后兼容)
+        #   - yaml 配 audit.history.excluded_child_object_types: [sub_domain, ...] 由前端 HistorySection 读
+        excluded_object_types = request.args.get('excluded_object_types', '')
+        excluded_types = [t.strip() for t in excluded_object_types.split(',') if t.strip()]
         user_name = request.args.get('user_name', '')
         start_date = request.args.get('start_date', '')
         end_date = request.args.get('end_date', '')
@@ -207,6 +256,25 @@ def get_audit_logs():
             conditions.append("parent_object_type = ?")
             params.append(parent_object_type)
 
+        # [FIX BUG-V046 2026-07-04 dev agent] 排除特定 object_type
+        # 注意: 只对 child (parent_object 联合部分) 过滤, 不影响 self 部分
+        # SQL: AND (object_type NOT IN (...) OR object_id = self_id 走 self 部分)
+        # 但 OR 联合时, 子对象日志的 object_type 在联合, 所以 NOT IN 同时过滤
+        # 但这样会过滤 self 部分. 我们的需求是: self 保持, 只过滤 child
+        # 解法: 在 OR 联合的 child 部分加 NOT IN, 不动 self 部分
+        # 简化: 用子查询 OR NOT IN excluded (子查询: object_id != self_id AND object_type IN excluded)
+        if excluded_types:
+            placeholders = ','.join(['?'] * len(excluded_types))
+            # 这个条件过滤"既不是 self, 又是 excluded type" 的子对象日志
+            # 适用于 OR 联合查询时, 保持 self 正常返回, 但 child 排除
+            # 自对象日志的 object_id 必然 != self_id (因为是不同对象)
+            # 注意: 如果 self 本身是 excluded (很少见), 也保留 (但前端不会这样配)
+            conditions.append(
+                f"NOT (object_id != ? AND object_type IN ({placeholders}))"
+            )
+            params.append(str(object_id) if object_id else '')
+            params.extend(excluded_types)
+
         if user_name:
             conditions.append("user_name LIKE ?")
             params.append(f"%{user_name}%")
@@ -241,7 +309,7 @@ def get_audit_logs():
         offset = (page - 1) * page_size
 
         # 查询总数
-        count_sql = f"SELECT COUNT(*) FROM audit_logs WHERE {where_clause}"
+        count_sql = f"SELECT COUNT(*) FROM v_audit_all WHERE {where_clause}"
         cursor = _data_source.execute(count_sql, params)
         total = cursor.fetchone()[0]
 
@@ -250,7 +318,7 @@ def get_audit_logs():
             SELECT id, object_type, object_id, action, field_name, old_value, new_value,
                    user_id, user_name, ip_address, user_agent, created_at, trace_id,
                    transaction_id, status, extra_data, parent_object_type, parent_object_id
-            FROM audit_logs
+            FROM v_audit_all
             WHERE {where_clause}
             ORDER BY {sort_field} {sort_direction}
             LIMIT ? OFFSET ?
@@ -310,7 +378,7 @@ def get_audit_log_detail(log_id):
                    user_id, user_name, ip_address, user_agent, created_at, trace_id,
                    transaction_id, status, retry_count, error_message, agent_id,
                    agent_session_id, tool_call_id, agent_reasoning, extra_data
-            FROM audit_logs
+            FROM v_audit_all
             WHERE id = ?
         """, [log_id])
         
@@ -395,7 +463,7 @@ def export_audit_logs():
         query_sql = f"""
             SELECT id, object_type, object_id, action, field_name, old_value, new_value,
                    user_id, user_name, ip_address, created_at
-            FROM audit_logs
+            FROM v_audit_all
             WHERE {where_clause}
             ORDER BY created_at DESC
             LIMIT 10000
@@ -444,7 +512,7 @@ def get_failed_audit_logs():
         cursor = _data_source.execute("""
             SELECT id, object_type, object_id, action, field_name, error_message,
                    retry_count, created_at
-            FROM audit_logs
+            FROM v_audit_all
             WHERE status = 'failed'
             ORDER BY created_at DESC
             LIMIT 100
@@ -475,7 +543,7 @@ def get_audit_overview():
         # 按操作类型统计
         cursor = _data_source.execute("""
             SELECT action, COUNT(*) as count
-            FROM audit_logs
+            FROM v_audit_all
             GROUP BY action
             ORDER BY count DESC
         """)
@@ -484,7 +552,7 @@ def get_audit_overview():
         # 按对象类型统计
         cursor = _data_source.execute("""
             SELECT object_type, COUNT(*) as count
-            FROM audit_logs
+            FROM v_audit_all
             GROUP BY object_type
             ORDER BY count DESC
             LIMIT 10
@@ -494,7 +562,7 @@ def get_audit_overview():
         # 按用户统计
         cursor = _data_source.execute("""
             SELECT user_name, COUNT(*) as count
-            FROM audit_logs
+            FROM v_audit_all
             WHERE user_name IS NOT NULL AND user_name != ''
             GROUP BY user_name
             ORDER BY count DESC
@@ -503,28 +571,28 @@ def get_audit_overview():
         user_stats = [{'user_name': row[0], 'count': row[1]} for row in cursor.fetchall()]
         
         # 总数
-        cursor = _data_source.execute("SELECT COUNT(*) FROM audit_logs")
+        cursor = _data_source.execute("SELECT COUNT(*) FROM v_audit_all")
         total = cursor.fetchone()[0]
         
         # 失败数
-        cursor = _data_source.execute("SELECT COUNT(*) FROM audit_logs WHERE status = 'failed'")
+        cursor = _data_source.execute("SELECT COUNT(*) FROM v_audit_all WHERE status = 'failed'")
         failed = cursor.fetchone()[0]
         
         today_str = datetime.now().strftime('%Y-%m-%d')
 
         cursor = _data_source.execute(
-            "SELECT COUNT(*) FROM audit_logs WHERE created_at >= ?", [today_str]
+            "SELECT COUNT(*) FROM v_audit_all WHERE created_at >= ?", [today_str]
         )
         today_count = cursor.fetchone()[0]
 
         cursor = _data_source.execute(
-            "SELECT COUNT(*) FROM audit_logs WHERE log_category = 'security'"
+            "SELECT COUNT(*) FROM v_audit_all WHERE log_category = 'security'"
         )
         security_count = cursor.fetchone()[0]
 
         cursor = _data_source.execute("""
             SELECT COALESCE(log_category, 'business'), COUNT(*) as count
-            FROM audit_logs
+            FROM v_audit_all
             GROUP BY log_category
             ORDER BY count DESC
         """)
@@ -537,7 +605,7 @@ def get_audit_overview():
             from datetime import timedelta
             day = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
             cursor = _data_source.execute(
-                "SELECT COUNT(*) FROM audit_logs WHERE created_at >= ? AND created_at < ?",
+                "SELECT COUNT(*) FROM v_audit_all WHERE created_at >= ? AND created_at < ?",
                 [day, (datetime.now() - timedelta(days=i - 1)).strftime('%Y-%m-%d') if i > 0 else (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')]
             )
             count = cursor.fetchone()[0]

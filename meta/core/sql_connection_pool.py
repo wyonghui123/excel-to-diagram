@@ -48,6 +48,12 @@ class ConnectionConfig:
     acquire_timeout: float = 30.0
     db_timeout: float = 30.0
     wal_auto_checkpoint: int = 1000
+    # [V007.42 FR-008] mmap_size 可配置化, 默认 0 (禁用 mmap, 根治 disk I/O)
+    # 背景: SQLite 官方 "An I/O error on a memory-mapped file cannot be caught";
+    #       Richard Hipp 明确建议 "never use mmap"
+    mmap_size: int = 0
+    # [V007.42 FR-009] 默认值通过环境变量 SQLITE_MAX_READERS 覆盖 (默认 10)
+    # 这里保留 20 是为兼容 import-side kwargs.get 默认值, 实际由调用方决定
 
 
 @dataclass
@@ -57,6 +63,13 @@ class PooledConnection:
     last_used_at: float = field(default_factory=time.time)
     in_use: bool = False
     usage_count: int = 0
+    # [V007.16] 跟踪 connection 健康状态
+    # 上次是否报 disk I/O error 或 database is locked
+    last_io_error: bool = False
+    # 连续错误次数 (用于熔断: 连续 3 次错误强制重建)
+    consecutive_errors: int = 0
+    # 上次错误信息 (debug 用)
+    last_error_msg: str = ""
 
     def touch(self):
         self.last_used_at = time.time()
@@ -68,15 +81,62 @@ class PooledConnection:
     def is_idle_expired(self, idle_timeout: float) -> bool:
         return (not self.in_use) and ((time.time() - self.last_used_at) > idle_timeout)
 
+    def mark_error(self, error_msg: str = ""):
+        """[V007.16] 标记 connection 出现错误"""
+        self.last_io_error = True
+        self.consecutive_errors += 1
+        if error_msg:
+            self.last_error_msg = error_msg
+
+    def clear_error(self):
+        """[V007.16] 清除错误标记 (execute 成功后调)"""
+        self.last_io_error = False
+        self.consecutive_errors = 0
+        self.last_error_msg = ""
+
     def is_valid(self) -> bool:
+        """[V007.16] 检测 connection 是否真的健康
+
+        修复: 之前版本只检查 'closed' / 'cannot operate' 错误,
+        导致 disk I/O error / database is locked 都被误判为 valid,
+        坏 connection 永久缓存, 反复报 disk I/O error.
+
+        现在: 任何 sqlite3.Error (OperationalError, DatabaseError 等) 都视为 invalid.
+        """
         try:
-            self.connection.execute("SELECT 1")
-            return True
-        except Exception as e:
-            err_str = str(e).lower()
-            if "closed" in err_str or "cannot operate" in err_str:
+            cursor = self.connection.execute("SELECT 1")
+            result = cursor.fetchone()
+            if not result or result[0] != 1:
+                logger.debug(
+                    "[V007.16] is_valid: SELECT 1 returned unexpected result: %s", result
+                )
                 return False
             return True
+        except sqlite3.Error as e:
+            # 任何 sqlite3 错误 (包括 disk I/O error, database is locked) 都视为 invalid
+            err_str = str(e).lower()
+            logger.debug(
+                "[V007.16] is_valid: connection INVALID, error: %s", err_str
+            )
+            # [V007.46 BUG-FIX 2026-07-09] disk I/O 错误立即记录到 diagnostics
+            # 之前: 部署智能体 9 次"业务正常" 假象, 实际 disk I/O 持续
+            # 现在: 任何 disk I/O error 立即 record, /health V8y 显示
+            if 'disk' in err_str and 'i/o' in err_str:
+                try:
+                    from meta.core.diagnostics import record_disk_io_error
+                    record_disk_io_error(caller='sql_connection_pool.is_valid', err=err_str)
+                except Exception:
+                    pass
+            # 同步标记 last_io_error, 让 reader() 知道要重建
+            self.last_io_error = True
+            self.last_error_msg = err_str
+            return False
+        except Exception as e:
+            # 未知错误 (如 ProgrammingError) 也算 invalid
+            logger.debug(
+                "[V007.16] is_valid: unknown error: %s", str(e)
+            )
+            return False
 
 
 class SQLiteConnectionPool:
@@ -109,6 +169,25 @@ class SQLiteConnectionPool:
         self._shutdown = False
         self._thread_local = threading.local()
         self._thread_connections: Dict[int, PooledConnection] = {}
+        # [V007.37 BUG-FIX] PRAGMA journal_mode 幂等保护
+        # 背景: yonaa 后端导出 Excel 场景, _create_connection 被频繁调用
+        #       每次都执行 "PRAGMA journal_mode=WAL", 但 db 已是 WAL 模式,
+        #       重复执行会触发 db 元数据写入 → disk I/O error (V007.37 HANDOFF §3)
+        # 修法: db 级幂等标志, 只在首次创建时执行 journal_mode PRAGMA
+        #       (其他 PRAGMA 是 per-connection, 不去重)
+        self._journal_mode_applied: bool = False
+        self._journal_mode_lock = threading.Lock()
+        # [V007.47 BUG-FIX 2026-07-08] synchronous 幂等标志
+        # 见 _create_connection 注释
+        self._synchronous_applied: bool = False
+        # [V007.47 BUG-FIX 2026-07-08] wal_autocheckpoint 幂等标志
+        # wal_autocheckpoint 是 db-level 持久化 PRAGMA, 重复设值会写 db header
+        self._wal_autocheckpoint_applied: bool = False
+        # [V007.38 BUG-FIX] PRAGMA auto_vacuum 幂等保护 (跟 journal_mode 同样原理)
+        # auto_vacuum 是 db 持久化设置, 重复执行触发 db 头写 → disk I/O error
+        # _create_connection 已引用 _auto_vacuum_applied 但 __init__ 没初始化,
+        # 会触发 AttributeError; 这里补上初始化
+        self._auto_vacuum_applied: bool = False
 
         self._stats = {
             "acquire_count": 0,
@@ -120,6 +199,28 @@ class SQLiteConnectionPool:
             "error_count": 0,
             "total_wait_time": 0.0,
         }
+        # [V007.38 BUG-FIX] task_scheduler 写后强制 PASSIVE checkpoint
+        # 背景: task_scheduler 每 2 分钟写 task_executions, 让 mmap 视图失效,
+        #       触发 20 个读连接 mark_error → 雪崩.
+        # 修法: 暴露 force_passive_checkpoint 方法, task_scheduler 写后调用
+        #       PASSIVE 模式不阻塞读, 但让 WAL 文件 checkpoint, 减少后续视图失效
+        self._last_passive_checkpoint = 0.0
+        # 线程锁: 保护 _last_passive_checkpoint 节流 + acquire_writer 调用
+        # 避免 task_scheduler 后台线程 + Flask 请求线程并发
+        self._checkpoint_lock = threading.RLock()
+        # [V007.38 BUG-FIX] writer 连接获取锁
+        # acquire_writer 之前没有锁, 多线程会同时拿同一个 writer 连接
+        self._writer_lock = threading.RLock()
+        # [V007.42 FR-002] I/O 限流器 (替代完整 Circuit Breaker)
+        # 背景: 6 并发 retry thundering herd 导致 I/O 子系统过载
+        # 策略: 60s 窗口内累计 >= 10 次 disk I/O error → 限流激活
+        #       限流状态时新读请求 sleep 200ms (减速不拒绝)
+        #       窗口重置后自动恢复
+        # 比完整 CB 温和: 不阻断读, 避免 CB Open 完全拒绝的灾难性用户体验
+        self._io_error_count = 0
+        self._io_error_window_start = time.time()
+        self._io_rate_limit_active = False
+        self._io_error_lock = threading.Lock()
 
     @property
     def db_path(self) -> str:
@@ -173,6 +274,87 @@ class SQLiteConnectionPool:
             logger.error("Connection pool init failed: %s", str(e))
             return False
 
+    def force_passive_checkpoint(self) -> bool:
+        """[V007.38] 强制 PASSIVE checkpoint (不阻塞读, 但推 WAL → db)
+
+        Returns:
+            True  - 成功执行 checkpoint
+            False - 不需要 (距离上次 < 30s) 或失败
+
+        线程安全: 用 _checkpoint_lock 保护节流 + 实际执行的原子性
+        避免 task_scheduler 后台线程 + Flask 请求线程同时调
+        """
+        with self._checkpoint_lock:
+            now = time.time()
+            # 节流: 30s 内最多一次 (避免过度 checkpoint)
+            if now - self._last_passive_checkpoint < 30.0:
+                return False
+            try:
+                pc = self.acquire_writer()
+                try:
+                    # PASSIVE = 不等待写锁, 不阻塞, 仅推已 commit 的 WAL → db
+                    # busy_timeout 30s 保证不被卡死
+                    pc.connection.execute("PRAGMA wal_checkpoint(PASSIVE)")
+                    self._last_passive_checkpoint = now
+                    logger.debug(
+                        "[V007.38] force_passive_checkpoint done at %s",
+                        time.strftime('%Y-%m-%d %H:%M:%S')
+                    )
+                    return True
+                finally:
+                    self.release_writer()
+            except Exception as e:
+                logger.warning("[V007.38] force_passive_checkpoint failed: %s", e)
+                return False
+
+    # [V007.42 FR-002] I/O 限流器方法
+    def _record_io_error(self):
+        """记录一次 disk I/O error, 检查是否需要限流.
+
+        策略:
+          - 滑动窗口 (默认 60s)
+          - 阈值 (默认 10 次)
+          - 超过阈值时激活限流, 记 WARNING + metric
+          - 窗口重置后自动恢复
+        """
+        try:
+            from meta.core.observability import metrics_inc
+        except ImportError:
+            metrics_inc = None  # type: ignore
+
+        with self._io_error_lock:
+            now = time.time()
+            window = float(os.environ.get('SQLITE_IO_RATE_LIMIT_WINDOW', '60'))
+            if now - self._io_error_window_start > window:
+                # 窗口过期, 重置
+                self._io_error_count = 0
+                self._io_error_window_start = now
+                if self._io_rate_limit_active:
+                    logger.info(
+                        "[V007.42] I/O rate limit deactivated after window reset"
+                    )
+                self._io_rate_limit_active = False
+            self._io_error_count += 1
+            threshold = int(os.environ.get('SQLITE_IO_RATE_LIMIT_THRESHOLD', '10'))
+            if self._io_error_count >= threshold and not self._io_rate_limit_active:
+                self._io_rate_limit_active = True
+                logger.warning(
+                    "[V007.42] I/O rate limit activated: %d errors in %.0fs window",
+                    self._io_error_count, now - self._io_error_window_start
+                )
+                if metrics_inc:
+                    metrics_inc('io_rate_limit_triggered_total')
+
+    def _check_io_rate_limit(self):
+        """检查是否处于限流状态. 如果是则 sleep 200ms (减速不拒绝).
+
+        逃生口: SQLITE_IO_RATE_LIMIT_DISABLE=1 关闭限流.
+        """
+        if os.environ.get('SQLITE_IO_RATE_LIMIT_DISABLE', '').lower() in ('1', 'true'):
+            return
+        if self._io_rate_limit_active:
+            time.sleep(0.2)
+
     def shutdown(self):
         self._shutdown = True
         with self._condition:
@@ -206,16 +388,66 @@ class SQLiteConnectionPool:
         )
         conn.row_factory = None
         if self._db_path != ":memory:":
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
+            # [V007.49 BUG-FIX] journal_mode: WAL → DELETE
+            # 根因: WAL 模式下并发读写持续触发 disk I/O error
+            #   - SQLite 3.7.17 (旧) 和 3.50.4 (新) 都触发, 不是版本问题
+            #   - WAL 写锁持有时, 并发读拿到坏 page → OperationalError
+            #   - V007.48 重试也无效 (3 次重试全部失败)
+            #   - DELETE 模式: 写时用 rollback journal, 读等写完, 无坏 page
+            #   - project_memory 2026-07-07 教训: "journal_mode 必须使用 DELETE 而非 WAL"
+            # 性能代价: 写时读被阻塞 (busy_timeout 内等待), 但 disk I/O error 彻底消除
+            with self._journal_mode_lock:
+                if not self._journal_mode_applied:
+                    conn.execute("PRAGMA journal_mode=DELETE")
+                    self._journal_mode_applied = True
+            # [V007.47 BUG-FIX 2026-07-08] synchronous 幂等保护
+            # 背景: 跟 journal_mode 一样, synchronous 是 db-level 持久化 PRAGMA
+            #       V007.42 注释说 "其他 PRAGMA 是 per-connection" 是错的
+            #       yonaa Python 3.14.3 + SQLite 3.50.4 < 3.51.3, WAL-reset race 频繁
+            #       重复 PRAGMA synchronous=NORMAL 在 race 期间会写 db header
+            #       → disk I/O error → useDiagramData Failed to initialize
+            # 修法: 跟 journal_mode/auto_vacuum 一样, 加 _synchronous_applied 锁保护
+            with self._journal_mode_lock:
+                if not self._synchronous_applied:
+                    conn.execute("PRAGMA synchronous=NORMAL")
+                    self._synchronous_applied = True
+                # else: 跳过, db 已是 NORMAL 模式
+            # [V007.47 BUG-FIX 2026-07-08] auto_vacuum 也复用 _journal_mode_lock
+            # (已有 _auto_vacuum_applied, 但要共用同一锁避免 db header 写并发)
             conn.execute("PRAGMA foreign_keys = ON")
-            conn.execute("PRAGMA busy_timeout = 5000")
-            conn.execute("PRAGMA auto_vacuum = INCREMENTAL")
-            conn.execute(
-                "PRAGMA wal_autocheckpoint = {0}".format(
-                    self._config.wal_auto_checkpoint
-                )
-            )
+            # [V007.20 2026-07-06] busy_timeout: 5000 → 30000 (30s)
+            # 背景: yonaa 1w+ annotation import 卡 40% (HANDOFF_V007_20_BUSY_TIMEOUT.md)
+            #       WriteQueue 单写线程 + audit_async_queue + async_audit_writer 三条
+            #       路径同时写 audit_logs, 撞锁频率高.
+            #       busy_timeout=5000 (5s) 不够, 撞锁等不及.
+            # 修法: 30s 等待, 让 write_queue retry 接管短撞锁 (< 30s)
+            #       WriteQueue._write_loop 也加了 retry + backoff (V007.20 L2)
+            conn.execute("PRAGMA busy_timeout = 30000")
+            # [V007.38 BUG-FIX] PRAGMA auto_vacuum 幂等保护
+            # auto_vacuum 跟 journal_mode 一样是 db 持久化设置, 重复执行触发 db 头写 → disk I/O error
+            with self._journal_mode_lock:
+                if not self._auto_vacuum_applied:
+                    conn.execute("PRAGMA auto_vacuum = INCREMENTAL")
+                    self._auto_vacuum_applied = True
+                # else: 跳过, db 已是 INCREMENTAL 模式
+            # [V007.49] wal_autocheckpoint 跳过 — DELETE 模式无 WAL
+            # with self._journal_mode_lock:
+            #     if not self._wal_autocheckpoint_applied:
+            #         conn.execute("PRAGMA wal_autocheckpoint = ...")
+            # [V007.42 FR-008] mmap_size 可配置化 + 默认值改为 0 (禁用)
+            # 背景:
+            #   V007.35 引入 mmap_size=256MB → V007.38 降到 64MB, 但 disk I/O error 持续
+            #   SQLite 官方: "An I/O error on a memory-mapped file cannot be caught"
+            #   Richard Hipp: "I'm of the opinion that you should never use mmap"
+            # 修法: 默认 mmap_size=0 彻底禁用 mmap, 用 PRAGMA cache_size 提供页缓存
+            # 性能影响: cache_size=-2000 (2MB) 仍有效, 读性能降 10-20% 可接受
+            # 环境变量: SQLITE_MMAP_SIZE 可恢复原值 (紧急回退)
+            mmap_size = int(os.environ.get(
+                'SQLITE_MMAP_SIZE', str(self._config.mmap_size)
+            ))
+            conn.execute(f"PRAGMA mmap_size = {mmap_size}")
+            logger.info("[V007.42] PRAGMA mmap_size = %d (was 67108864 in V007.35-38)", mmap_size)
+            conn.execute("PRAGMA cache_size = -2000")
         return conn
 
     def _create_pooled_connection(self) -> PooledConnection:
@@ -283,37 +515,55 @@ class SQLiteConnectionPool:
                 self._condition.notify()
 
     def acquire_writer(self) -> PooledConnection:
-        if not self._writer_conn:
-            raise RuntimeError("Writer connection not initialized")
-        if not self._writer_conn.is_valid():
-            logger.warning("Writer connection invalid, reconnecting...")
-            try:
-                self._writer_conn.connection.close()
-            except Exception:
-                pass
-            self._writer_conn = PooledConnection(
-                connection=self._create_connection()
-            )
-        self._writer_conn.in_use = True
-        self._writer_conn.touch()
-        return self._writer_conn
+        # [V007.38 BUG-FIX] 加线程锁
+        # 背景: acquire_writer 之前没有锁, 多线程 (WriteQueue 单线程 + force_passive_checkpoint
+        #       后台线程) 同时调用会拿同一个 writer 连接, 事务边界破坏 → 不可预测写错误
+        # 修法: 加 _writer_lock 保护, 但不要在持锁时做长操作 (PRAGMA checkpoint)
+        with self._writer_lock:
+            if not self._writer_conn:
+                raise RuntimeError("Writer connection not initialized")
+            if not self._writer_conn.is_valid():
+                logger.warning("Writer connection invalid, reconnecting...")
+                try:
+                    self._writer_conn.connection.close()
+                except Exception:
+                    pass
+                self._writer_conn = PooledConnection(
+                    connection=self._create_connection()
+                )
+            self._writer_conn.in_use = True
+            self._writer_conn.touch()
+            return self._writer_conn
 
     def release_writer(self):
-        if self._writer_conn:
-            self._writer_conn.in_use = False
-            self._writer_conn.last_used_at = time.time()
+        # [V007.38 BUG-FIX] release_writer 也加锁, 跟 acquire_writer 配对
+        with self._writer_lock:
+            if self._writer_conn:
+                self._writer_conn.in_use = False
+                self._writer_conn.last_used_at = time.time()
 
     @contextmanager
     def reader(self, timeout: float = None):
         thread_id = threading.get_ident()
-        
+
         with self._condition:
             if thread_id in self._thread_connections:
                 pc = self._thread_connections[thread_id]
-                if pc.is_valid():
+                # [V007.16] 修复: 不仅检查 is_valid, 还检查 last_io_error 和熔断
+                # is_valid() 内部会同步设置 last_io_error, 但保险起见双重检查
+                if (pc.is_valid()
+                    and not pc.last_io_error
+                    and pc.consecutive_errors < 3):
                     yield pc.connection
                     return
                 else:
+                    # [V007.16] 坏 connection, 关闭 + 移除 + 重建
+                    if pc.last_io_error or pc.consecutive_errors >= 3:
+                        logger.warning(
+                            "[V007.16] reader: rebuilding bad connection "
+                            "(last_io_error=%s, consecutive_errors=%d, last_err=%s)",
+                            pc.last_io_error, pc.consecutive_errors, pc.last_error_msg
+                        )
                     try:
                         pc.connection.close()
                     except Exception:
@@ -321,8 +571,12 @@ class SQLiteConnectionPool:
                     del self._thread_connections[thread_id]
                     if pc in self._readers:
                         self._readers.remove(pc)
-            
+                    self._stats["recycle_count"] += 1
+
             pc = self._create_pooled_connection()
+            pc.last_io_error = False
+            pc.consecutive_errors = 0
+            pc.last_error_msg = ""
             self._readers.append(pc)
             self._thread_connections[thread_id] = pc
             yield pc.connection
@@ -339,7 +593,11 @@ class SQLiteConnectionPool:
     def _try_get_available(self) -> Optional[PooledConnection]:
         while self._available:
             pc = self._available.popleft()
-            if pc.is_valid() and not pc.is_expired(self._config.max_lifetime):
+            # [V007.16] 修复: 增加 last_io_error + 熔断检查
+            if (pc.is_valid()
+                and not pc.is_expired(self._config.max_lifetime)
+                and not pc.last_io_error
+                and pc.consecutive_errors < 3):
                 return pc
             else:
                 self._recycle_connection_unlocked(pc)
@@ -428,6 +686,47 @@ class SQLiteConnectionPool:
             "utilization": "{0:.0%}".format(active / max_r if max_r > 0 else 0),
         }
 
+        # [V007.42 FR-003] 读连接健康统计
+        healthy = 0
+        errored = 0
+        for pc in self._readers:
+            if pc.is_valid():
+                healthy += 1
+            else:
+                errored += 1
+        result["checks"]["reader_health"] = {
+            "status": "pass" if errored == 0 else "warn",
+            "healthy": healthy,
+            "errored": errored,
+        }
+
+        # [V007.42 FR-003] checkpoint_busy 检测
+        checkpoint_busy = -1
+        try:
+            if self._writer_conn:
+                cursor = self._writer_conn.connection.execute(
+                    "PRAGMA wal_checkpoint(PASSIVE)"
+                )
+                row = cursor.fetchone()
+                # SQLite 返回 (busy, log, checkpointed) 或 (-1, -1, -1)
+                checkpoint_busy = row[0] if row else -1
+                if checkpoint_busy > 0:
+                    try:
+                        from meta.core.observability import metrics_inc
+                        metrics_inc('wal_checkpoint_busy_total')
+                    except ImportError:
+                        pass
+        except Exception as e:
+            logger.debug("[V007.42] checkpoint_busy probe failed: %s", e)
+        result["checks"]["checkpoint_busy"] = checkpoint_busy
+
+        # [V007.42 FR-002] I/O 限流状态
+        result["checks"]["io_rate_limit"] = {
+            "active": self._io_rate_limit_active,
+            "error_count": self._io_error_count,
+            "window_age_sec": time.time() - self._io_error_window_start,
+        }
+
         if self._db_path != ":memory:" and os.path.exists(self._db_path):
             db_size = os.path.getsize(self._db_path)
             wal_path = self._db_path + "-wal"
@@ -437,5 +736,50 @@ class SQLiteConnectionPool:
                 "db_size_bytes": db_size,
                 "wal_size_bytes": wal_size,
             }
-
         return result
+
+
+# [V007.50 BUG-FIX 2026-07-09] 模块级 _health_check (供 server.py /health V8x 导入)
+#   背景: V007.46/V007.47 部署时, /health V8x 尝试 import _health_check → ModuleNotFoundError
+#         deploy.sh 只看 status=200, 不解析 JSON, 误判"业务正常" — 12+ 小时才发现
+#   现在: _health_check 始终存在, 返回实际 pool 状态或 'not_available' 标记
+#   _set_pool: server init 时把 pool 引用注入, _health_check 读取即可
+_pool_ref: 'Optional[SQLiteConnectionPool]' = None
+
+
+def _set_pool(pool: 'SQLiteConnectionPool') -> None:
+    """[V007.50] 注入连接池引用 (server init 时调用)"""
+    global _pool_ref
+    _pool_ref = pool
+
+
+def _health_check() -> dict:
+    """[V007.50] 模块级健康检查 (供 /health V8x)
+
+    Returns dict with keys: reader_health, checkpoint_busy, io_rate_limit, max_readers
+    若 pool 未初始化, 返回 'not_initialized' 标记而非抛异常
+    """
+    if _pool_ref is None:
+        return {
+            'reader_health': 'not_initialized',
+            'checkpoint_busy': 'not_initialized',
+            'io_rate_limit': 'not_initialized',
+            'max_readers': 'not_initialized',
+        }
+    try:
+        hc = _pool_ref.health_check()
+        checks = hc.get('checks', {})
+        return {
+            'reader_health': checks.get('reader_health', {}),
+            'checkpoint_busy': checks.get('checkpoint_busy', -1),
+            'io_rate_limit': checks.get('io_rate_limit', {}),
+            'max_readers': _pool_ref._config.max_readers,
+        }
+    except Exception as e:
+        logger.warning('[V007.50] _health_check failed: %s', e)
+        return {
+            'reader_health': {'error': str(e)},
+            'checkpoint_busy': -1,
+            'io_rate_limit': {'error': str(e)},
+            'max_readers': 0,
+        }

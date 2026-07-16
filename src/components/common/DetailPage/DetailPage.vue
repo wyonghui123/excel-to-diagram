@@ -294,6 +294,21 @@ const cascade = useFormCascade(
 )
 const metaLoaded = ref(false)
 
+// [FIX 2026-06-29] 用于 drawer 标题加对象名 (objectType + objectName 格式)
+const objectName = ref('')
+function updateObjectName(data) {
+  if (!data) return
+  const primary = entityMeta.value?.display_name_field
+  const nameFields = primary ? [primary] : ['name', 'username', 'title', 'code', 'label']
+  for (const f of nameFields) {
+    if (data[f]) {
+      objectName.value = String(data[f])
+      return
+    }
+  }
+  objectName.value = ''
+}
+
 async function loadEntityMeta() {
   if (!props.objectType) {
     console.warn('[DetailPage] [WARNING] loadEntityMeta: objectType 为空，跳过')
@@ -348,12 +363,16 @@ const hasAuditAspect = computed(() => {
 })
 
 const drawerTitle = computed(() => {
-  const metaLabel = entityMeta.value?.name || entityMeta.value?.label
-  const objectLabel = metaLabel || objectTypeService.getLabel(props.objectType)
+  // [FIX 2026-06-29] 使用 getDetailLabel 自动产出 "objectLabel 详情 [objectName]" 格式
+  //   - add 模式: "新建objectLabel"
+  //   - view 模式 + 有 name: "objectLabel 详情 objectName"
+  //   - view 模式 + 无 name: "objectLabel 详情"
   if (effectiveMode.value === 'add') {
+    const metaLabel = entityMeta.value?.name || entityMeta.value?.label
+    const objectLabel = metaLabel || objectTypeService.getLabel(props.objectType)
     return `新建${objectLabel}`
   }
-  return `${objectLabel}详情`
+  return objectTypeService.getDetailLabel(props.objectType, objectName.value)
 })
 
 const dataSubtitle = computed(() => {
@@ -853,7 +872,7 @@ const computedSections = computed(() => {
         useMetaList: cs.useMetaList !== undefined ? cs.useMetaList : false,
         enableDetail: cs.enableDetail !== undefined ? cs.enableDetail : true,
         enableAutoCrud: cs.enableAutoCrud !== undefined ? cs.enableAutoCrud : false,
-        rowMutability: cs.rowMutability || 'fully_editable'
+        rowMutability: cs.rowMutability || 'fullEditable'
       })
     } else if (cs.child_object) {
       sections.push({
@@ -871,7 +890,7 @@ const computedSections = computed(() => {
         useMetaList: cs.useMetaList !== undefined ? cs.useMetaList : false,
         enableDetail: cs.enableDetail !== undefined ? cs.enableDetail : true,
         enableAutoCrud: cs.enableAutoCrud !== undefined ? cs.enableAutoCrud : false,
-        rowMutability: cs.rowMutability || 'fully_editable',
+        rowMutability: cs.rowMutability || 'fullEditable',
         inlineEdit: cs.inlineEdit || null,
         columns: cs.columns || null
       })
@@ -1105,6 +1124,8 @@ async function fetchData(options = {}) {
     if (result.success) {
       console.debug('[DetailPage] fetchData success, data:', result.data)
       data.value = result.data
+      // [FIX 2026-06-29] 更新对象名 (用于 drawer 标题)
+      updateObjectName(result.data)
       emit('loaded', result.data)
     } else {
       // [FIX 2026-06-14] 把 httpStatus/code 也带上, 让 403/404 等更明确

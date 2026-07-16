@@ -1,0 +1,44 @@
+{
+  "scenario_id": "archdata-management",
+  "title": "架构数据管理",
+  "summary": "在架构数据管理中进行对象范围过滤、关系范围筛选、数据维护与变更日志查看、列表视图统计分析。",
+  "total_steps": 4,
+  "steps": [
+    {
+      "step_no": 1,
+      "title": "对象范围过滤",
+      "action": "进入架构数据管理页面，选择产品和版本，通过对象范围树筛选关注的领域、服务模块、业务对象。",
+      "expected": "产品TTTTT000、版本V11已选中；分类域树高亮。",
+      "tip": "括号中的数字是子项数量，可用于判断数据规模。",
+      "screenshot": "step_001.png",
+      "video": "archdata_full.webm"
+    },
+    {
+      "step_no": 2,
+      "title": "关系范围过滤",
+      "action": "基于对象范围，系统自动分类四种关系范围：跨领域、同领域跨子领域、同子领域跨服务模块、服务模块内部。",
+      "expected": "关系范围面板展开，显示四类关系分类。",
+      "tip": "点击关系类别可展开查看具体关系对。",
+      "screenshot": "step_002.png",
+      "video": "archdata_full.webm"
+    },
+    {
+      "step_no": 3,
+      "title": "架构数据维护",
+      "action": "在数据列表中对业务对象、关联关系进行编辑操作，系统自动记录变更日志。",
+      "expected": "列表显示过滤后的数据。",
+      "tip": "变更日志记录所有新增、修改、删除操作。",
+      "screenshot": "step_003.png",
+      "video": "archdata_full.webm"
+    },
+    {
+      "step_no": 4,
+      "title": "列表视图与统计分析",
+      "action": "列表展示每个对象的关联对象数量和关系数量，直观判断对象关系复杂度。",
+      "expected": "列表加载完成，显示对象名称、关联对象数、关系数等列。",
+      "tip": "数量越大表示该对象关联越复杂。",
+      "screenshot": "step_004_bo.png",
+      "video": "archdata_full.webm"
+    }
+  ]
+}

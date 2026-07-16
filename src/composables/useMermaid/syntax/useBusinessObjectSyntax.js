@@ -5,7 +5,7 @@ import { routeLayout } from '../layouts/index.js'
 import { checkDepth, checkCycle, createVisitedSet } from '../../../services/groupModel/safetyUtils.js'
 import { DataFlowLogger } from '../../../services/groupModel/dataFlowLogger.js'
 import { formatContainerTitle } from '../../../utils/formatContainerTitle.js'
-import { getArrowSyntax, sanitizeLabel } from './_shared/arrowHelper.js'
+import { getArrowSyntax, sanitizeLabel, sanitizeMermaidLabel } from './_shared/arrowHelper.js'
 
 function sortVirtualContainersBySize(containers) {
   if (!containers || containers.length === 0) {
@@ -403,16 +403,16 @@ export function useBusinessObjectSyntax() {
 
     const effectiveLayoutControlConfig = layoutControlConfig
 
-    const overallDirection = effectiveLayoutControlConfig?.overallDirection || 'LR'
+    const overallDirection = effectiveLayoutControlConfig?.overallDirection || 'TB'
 
-    // ELK布局使用与配置一致的方向，不再反�?    // ELK的elk.direction配置会控制实际布局方向
+    // ELK布局使用与配置一致的方向，不再反向    // ELK的elk.direction配置会控制实际布局方向
     let actualDirection = overallDirection
 
     let graphKeyword
     let elkInitDirective = ''
     if (layoutEngine === 'elk') {
       graphKeyword = `flowchart-elk ${actualDirection}`
-      // ELK配置通过mermaid.initialize传递，不需要在代码中重复配�?      elkInitDirective = ''
+      // ELK配置通过mermaid.initialize传递，不需要在代码中重复配置      elkInitDirective = ''
     } else {
       graphKeyword = `flowchart ${actualDirection}`
     }
@@ -429,7 +429,7 @@ export function useBusinessObjectSyntax() {
 
     const objectToModuleMap = new Map()
     
-    // 首先从顶�?businessObjects 数组获取服务模块信息
+    // 首先从顶层businessObjects 数组获取服务模块信息
     const boServiceModuleMap = new Map()
     if (data.businessObjects) {
       data.businessObjects.forEach(bo => {
@@ -625,7 +625,7 @@ export function useBusinessObjectSyntax() {
 
     const nodeColorMap = new Map()
     const centerScopeBoCodes = data.centerScope || []
-    const centerScopeHighlight = data.centerScopeHighlight !== false  // 默认�?true
+    const centerScopeHighlight = data.centerScopeHighlight !== false  // 默认为true
     const centerScopeColor = data.centerScopeColor || '#EDEDED'
     const centerColorMap = {
       'gray': '#808080',
@@ -646,10 +646,10 @@ export function useBusinessObjectSyntax() {
         groupKey = group.info.domain
       }
       const groupColor = colorMap.get(groupKey)
-      // 如果 groupColor 不存在，使用第一个颜色作为默�?      const defaultColor = colors[0]
+      // 如果 groupColor 不存在，使用第一个颜色作为默认      const defaultColor = colors[0]
       group.nodes.forEach(node => {
         const nodeCode = node.code || node.name
-        // 只有�?centerScopeHighlight �?true 时，才对中心范围节点特殊处理
+        // 只有当centerScopeHighlight 为true 时，才对中心范围节点特殊处理
         if (centerScopeHighlight && centerScopeBoCodes.includes(nodeCode)) {
           nodeColorMap.set(node.id, centerColor)
         } else {
@@ -765,7 +765,7 @@ export function useBusinessObjectSyntax() {
 
         const definedNodes = new Set()
 
-        // 提前处理 links 数据，用�?ELK 自动分组
+        // 提前处理 links 数据，用于ELK 自动分组
         const processedLinks = []
         data.links.forEach(link => {
           let sourceId = null
@@ -811,7 +811,10 @@ export function useBusinessObjectSyntax() {
             const id = nodeNameToIdMap.get(key)
             if (id && !definedNodes.has(id)) {
               // v21: use " · " separator (single-line), rect auto-calculates width
-              const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+              // [V007.52 P0] 转义 node.name / node.code 防 mermaid 11.13 syntax error
+              const safeName = sanitizeMermaidLabel(node.name || '')
+              const safeCode = sanitizeMermaidLabel(node.code || '')
+              const displayText = safeCode ? `${safeName} · (${safeCode})` : safeName
               mermaidCode += `  ${id}["${displayText}"]:::node\n`
               definedNodes.add(id)
             }
@@ -877,12 +880,12 @@ export function useBusinessObjectSyntax() {
             const isSourceCenter = centerScopeHighlight && centerScopeBoCodes.includes(linkSourceCode)
             const isTargetCenter = centerScopeHighlight && centerScopeBoCodes.includes(linkTargetCode)
 
-            // 新的颜色规则�?            // 1. 如果源和目标中有一个非中心范围的节点，则采用该节点颜色
+            // 新的颜色规则：            // 1. 如果源和目标中有一个非中心范围的节点，则采用该节点颜色
             // 2. 如果两个都是非中心范围则采用黑色
             // 3. 如果两个都是中心范围则采用该节点颜色
             let linkColor
             if (!isSourceCenter && !isTargetCenter) {
-              // 两个都是非中心范�?-> 黑色
+              // 两个都是非中心范围-> 黑色
               linkColor = '#000000'
             } else if (isSourceCenter && isTargetCenter) {
               // 两个都是中心范围 -> 采用源节点颜色（或目标节点颜色）
@@ -947,8 +950,11 @@ export function useBusinessObjectSyntax() {
                 relationType: link.relationType || '',
                 // [v34 双向支持] 关系方向 (推/拉/双向)
                 relationDirection: link.relationDirection || '',
+                // [FIX 2026-06-30] 透传统数数组, 供 tooltip 按类别过滤
                 annotationContent: link.annotationContent || '',
                 annotationCategory: link.annotationCategory || 'info',
+                annotationContents: link.annotationContents || [],
+                annotationCategories: link.annotationCategories || [],
                 sourceCode: link.sourceCode,
                 targetCode: link.targetCode
               })
@@ -968,7 +974,8 @@ export function useBusinessObjectSyntax() {
 
     let subgraphId = 1
     
-    const subgraphDirection = actualDirection === 'TB' ? 'LR' : 'TB'
+    // subgraph 内部方向跟随整体方向：LR=水平排列，TB=垂直排列
+    const subgraphDirection = actualDirection
     
     const reversedGroups = Array.from(optimizedGroups.entries()).reverse()
     let groupIndex = 0
@@ -978,6 +985,8 @@ export function useBusinessObjectSyntax() {
 
       const allNodesCenter = group.nodes.every(n => n.isCenter)
       const centerMark = allNodesCenter ? '◆' : ''
+      // [V007.51 P0] subgraph title 用 sanitizeMermaidLabel 严格转义 (mermaid 11.13)
+      //   groupName (domain/subDomain 名) + grandparent/parent 可能含 " ' \ 换行
       let subgraphTitle
       if (group.info.type === 'submodule') {
         subgraphTitle = `${centerMark}${groupName}\\n(${group.info.grandparent}/${group.info.parent})`
@@ -986,17 +995,22 @@ export function useBusinessObjectSyntax() {
       } else {
         subgraphTitle = centerMark + groupName
       }
+      // [V007.51 P0] 转义 subgraphTitle (groupName 是域/子域/服务名, 可能含 " ' \ 换行)
+      const safeSubgraphTitle = sanitizeMermaidLabel(subgraphTitle)
 
       const groupColor = colorMap.get(groupName) || BLOCK_DIAGRAM_STYLES.container.fill
 
-      mermaidCode += `  subgraph ${subId}["${subgraphTitle}"]\n`
+      mermaidCode += `  subgraph ${subId}["${safeSubgraphTitle}"]\n`
       mermaidCode += `    direction ${subgraphDirection}\n`
 
       group.nodes.forEach(node => {
         const centerMark = node.isCenter ? '◆' : ''
         // 关键修复 v21：mermaid 11 不支持 ["...\n..."] 换行语法（只支持 <br/>）
         // 改成 " · " 单行分隔符，避免 <br/> 换行 + max-width 切第二行问题
-        const displayText = node.code ? `${centerMark}${node.name || node.originalName} · (${node.code})` : centerMark + (node.name || node.originalName)
+        // [V007.52 P0] 转义 node.name / node.code 防 mermaid 11.13 syntax error
+        const safeName = sanitizeMermaidLabel(node.name || node.originalName || '')
+        const safeCode = sanitizeMermaidLabel(node.code || '')
+        const displayText = safeCode ? `${centerMark}${safeName} · (${safeCode})` : centerMark + safeName
         mermaidCode += `    ${node.id}["${displayText}"]:::node\n`
       })
 
@@ -1120,8 +1134,11 @@ export function useBusinessObjectSyntax() {
             relationType: link.relationType || '',
             // [v34 双向支持] 关系方向 (推/拉/双向)
             relationDirection: link.relationDirection || '',
+            // [FIX 2026-06-30] 透传统数数组, 供 tooltip 按类别过滤
             annotationContent: link.annotationContent || '',
             annotationCategory: link.annotationCategory || 'info',
+            annotationContents: link.annotationContents || [],
+            annotationCategories: link.annotationCategories || [],
             sourceCode: link.sourceCode,
             targetCode: link.targetCode
           })
@@ -1156,7 +1173,7 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
         code += generateGroupMermaid(child, nodeMap, definedNodes, actualDirection)
       })
     }
-    // 注意：禁用的分组不应该有 containers（已�?buildVirtualContainers 中清除）
+    // 注意：禁用的分组不应该有 containers（已经buildVirtualContainers 中清除）
     if (group.containers && group.containers.length > 0) {
       group.containers.forEach((container, idx) => {
         if (container.nodes && container.nodes.length > 0) {
@@ -1164,13 +1181,19 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
           if (containerEnabled) {
             const containerId = `${groupId}_C${idx + 1}`
             const containerTitle = formatContainerTitle(container.fullTitle || container.name || 'Container')
-            code += `  subgraph ${containerId}["${containerTitle}"]\n`
-            code += `    direction ${actualDirection === 'TB' ? 'LR' : 'TB'}\n`
+            // [V007.51 P0] containerTitle 转义 (container.fullTitle 来自 GroupModel L430, 已 sanitizeMermaidLabel,
+            //   但保险起见再转一次, 防止其他路径注入)
+            const safeContainerTitle = sanitizeMermaidLabel(containerTitle)
+            code += `  subgraph ${containerId}["${safeContainerTitle}"]\n`
+            code += `    direction ${actualDirection}\n`
             
             container.nodes.forEach(nodeId => {
               const node = nodeMap.get(nodeId)
               if (node && !definedNodes.has(nodeId)) {
-                const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+                // [V007.51 P0] node.name / node.code 转义 (mermaid 11.13 label 不允许 " ' \ 换行)
+                const safeNodeName = sanitizeMermaidLabel(node.name || '')
+                const safeNodeCode = sanitizeMermaidLabel(node.code || '')
+                const displayText = safeNodeCode ? `${safeNodeName} · (${safeNodeCode})` : safeNodeName
                 code += `    ${nodeId}["${displayText}"]\n`
                 definedNodes.add(nodeId)
               }
@@ -1181,7 +1204,10 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
             container.nodes.forEach(nodeId => {
               const node = nodeMap.get(nodeId)
               if (node && !definedNodes.has(nodeId)) {
-                const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+                // [V007.52 P0] 转义 disabled container 内节点 label
+                const safeName = sanitizeMermaidLabel(node.name || '')
+                const safeCode = sanitizeMermaidLabel(node.code || '')
+                const displayText = safeCode ? `${safeName} · (${safeCode})` : safeName
                 code += `  ${nodeId}["${displayText}"]\n`
                 definedNodes.add(nodeId)
               }
@@ -1193,8 +1219,10 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
     return code
   }
 
-  code += `  subgraph ${groupId}["${groupTitle}"]\n`
-  code += `    direction ${actualDirection === 'TB' ? 'LR' : 'TB'}\n`
+  // [V007.51 P0] groupTitle 转义
+  const safeGroupTitle = sanitizeMermaidLabel(groupTitle)
+  code += `  subgraph ${groupId}["${safeGroupTitle}"]\n`
+  code += `    direction ${actualDirection}\n`
 
   if (group.children && group.children.length > 0) {
     group.children.forEach(child => {
@@ -1209,7 +1237,10 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
           container.nodes.forEach(nodeId => {
             const node = nodeMap.get(nodeId)
             if (node && !definedNodes.has(nodeId)) {
-              const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+              // [V007.52 P0] 转义 directNodesContainer 内节点 label
+              const safeName = sanitizeMermaidLabel(node.name || '')
+              const safeCode = sanitizeMermaidLabel(node.code || '')
+              const displayText = safeCode ? `${safeName} · (${safeCode})` : safeName
               code += `    ${nodeId}["${displayText}"]\n`
               definedNodes.add(nodeId)
             }
@@ -1223,13 +1254,18 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
         if (containerEnabled) {
           const containerId = `${groupId}_C${idx + 1}`
           const containerTitle = formatContainerTitle(container.fullTitle || container.name || 'Container')
-          code += `    subgraph ${containerId}["${containerTitle}"]\n`
-          code += `      direction ${actualDirection === 'TB' ? 'LR' : 'TB'}\n`
+          // [V007.51 P0] containerTitle 转义
+          const safeContainerTitle2 = sanitizeMermaidLabel(containerTitle)
+          code += `    subgraph ${containerId}["${safeContainerTitle2}"]\n`
+          code += `      direction ${actualDirection}\n`
           
           container.nodes.forEach(nodeId => {
             const node = nodeMap.get(nodeId)
             if (node && !definedNodes.has(nodeId)) {
-              const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+              // [V007.52 P0] 转义子组 enabled container 内节点 label
+              const safeName = sanitizeMermaidLabel(node.name || '')
+              const safeCode = sanitizeMermaidLabel(node.code || '')
+              const displayText = safeCode ? `${safeName} · (${safeCode})` : safeName
               code += `      ${nodeId}["${displayText}"]\n`
               definedNodes.add(nodeId)
             }
@@ -1240,7 +1276,10 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
           container.nodes.forEach(nodeId => {
             const node = nodeMap.get(nodeId)
             if (node && !definedNodes.has(nodeId)) {
-              const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+              // [V007.52 P0] 转义子组 disabled container 内节点 label
+              const safeName = sanitizeMermaidLabel(node.name || '')
+              const safeCode = sanitizeMermaidLabel(node.code || '')
+              const displayText = safeCode ? `${safeName} · (${safeCode})` : safeName
               code += `    ${nodeId}["${displayText}"]\n`
               definedNodes.add(nodeId)
             }

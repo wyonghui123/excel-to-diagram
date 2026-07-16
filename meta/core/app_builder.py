@@ -7,6 +7,7 @@ from meta.core.datasource import get_data_source
 from meta.core.models import registry
 from meta.core.table_name_validator import invalidate_cache as invalidate_table_cache
 from meta.core.startup_checks import run_startup_checks
+from meta.core.safe_connect import safe_connect_for_read
 
 logger = logging.getLogger(__name__)
 
@@ -694,20 +695,38 @@ def _init_database_service(ds):
 
 def _init_audit_service(ds, db_path):
     try:
-        from meta.services.audit_service import init_audit_services
+        # [V007.50 fix] init_audit_services 实际在 meta.api.audit_api 中
+        # 之前 from meta.services.audit_service import 是 bug
+        from meta.api.audit_api import init_audit_services
         init_audit_services(data_source=ds)
 
         from meta.migrations.enhance_audit_log_v2 import enhance_audit_log
         enhance_audit_log(db_path)
 
-        # [FR-008/009] 性能索引 v3: relationships + audit_logs 覆盖索引
-        import sqlite3
-        conn = sqlite3.connect(db_path)
+        # [V007.50] 创建 v_audit_all VIEW，统一热/冷审计日志查询入口
+        # 必须在 enhance_audit_log 之后 (依赖 audit_logs 列已对齐)
+        # 必须在 add_performance_indexes_v3 之前 (DDL 顺序)
         try:
+            from meta.migrations.v007_50_add_audit_union_view import migrate as v007_50_migrate
+            from pathlib import Path
+            v007_50_migrate(Path(db_path), skip_backup=True)
+        except Exception as e:
+            logger.warning(f"[AppBuilder] V007.50 v_audit_all migration failed: {e}")
+
+        # [V007.51] Phase 2: 物化 updated_at 列 + Backfill
+        # 必须在 v007_50 之后 (依赖 v_audit_all VIEW)
+        try:
+            from meta.migrations.v007_51_add_updated_at_materialized import migrate as v007_51_migrate
+            from pathlib import Path
+            v007_51_migrate(Path(db_path), skip_backup=True)
+        except Exception as e:
+            logger.warning(f"[AppBuilder] V007.51 materialized updated_at migration failed: {e}")
+
+        # [FR-008/009] 性能索引 v3: relationships + audit_logs 覆盖索引
+        # [V007.41 BUG-FIX] 用 safe_connect_for_read 统一 L0 入口
+        with safe_connect_for_read(db_path) as conn:
             from meta.migrations.add_performance_indexes_v3 import create_indexes as create_v3_indexes
             create_v3_indexes(conn)
-        finally:
-            conn.close()
 
         from meta.services.async_audit_writer import async_audit_writer
         async_audit_writer.set_data_source(ds)

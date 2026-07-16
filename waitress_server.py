@@ -35,6 +35,44 @@ import sqlite3
 import atexit
 import signal
 
+# [FIX V049 2026-07-05] 提升文件描述符上限, 避免大批量导入时 openpyxl read_only 临时文件
+#   导致 [Errno 24] Too many open files
+#   背景: openpyxl read_only 模式创建 ~3-5 个临时文件 / load_workbook;
+#         import_cascade + _import_sheet 双重 load_workbook + 多 sheet = ~12 FD/导入.
+#         Linux 默认 ulimit -n = 1024, 并发导入 + 日志/DB/网络 → 超过 1024.
+#   修复: 启动时提升 NOFILE 软硬限制到 65536 (Linux 有效, Windows 跳过)
+try:
+    import resource
+    _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    _target = 65536
+    if _soft < _target:
+        resource.setrlimit(
+            resource.RLIMIT_NOFILE,
+            (_target, _hard if _hard == resource.RLIM_INFINITY else _target)
+        )
+        print(f"[waitress] RLIMIT_NOFILE 提升: {_soft} -> {_target}", flush=True)
+except (ImportError, OSError):
+    # Windows: resource module 不可用, 跳过
+    pass
+
+# [FIX 2026-07-02] 启动时加载 .env, 确保 AGENT_PORT 与 vite 代理一致
+# 背景: .env 中约定 FLASK_PORT=3011 (前端 vite 代理 target), 但 waitress_server.py
+#   之前只读 AGENT_PORT 环境变量, 导致默认启动在 3010, 触发前端 500.
+#   修复: 加载 .env 后, 把 FLASK_PORT 同步到 AGENT_PORT (兼容两套命名).
+# [FIX V043 2026-07-04] override=True: 强制覆盖父进程 env
+#   背景: PM 启动 3011 的 PowerShell session 有 FLASK_ENV=production,
+#         被 3011 继承 → _is_production() True → dev-login 500.
+#   修复: override=True 让 .env 显式声明的非生产环境强制生效.
+from dotenv import load_dotenv
+_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+if os.path.exists(_env_path):
+    load_dotenv(_env_path, override=True)
+    # [兼容] .env 写的是 FLASK_PORT, 代码用 AGENT_PORT. 双向同步.
+    if not os.environ.get('AGENT_PORT') and os.environ.get('FLASK_PORT'):
+        os.environ['AGENT_PORT'] = os.environ['FLASK_PORT']
+    if not os.environ.get('FLASK_PORT') and os.environ.get('AGENT_PORT'):
+        os.environ['FLASK_PORT'] = os.environ['AGENT_PORT']
+
 # [DECORATIVE] v3.18 + v3.20: 多 agent 端口支持 (AGENT_PORT env, 默认 3010)
 # 🆕 v3.20: 增强 fallback - 错误处理 + 范围检查 + 启动日志
 _DEFAULT_PORT = 3010
@@ -186,13 +224,53 @@ def _check_db_integrity_at_startup():
         sys.exit(1)
 
 
+# [FIX 2026-07-02] 启动前端口冲突预检
+# 背景: 之前多次出现 vite 代理 (3011) 与后端实际端口 (3010) 不一致
+#   导致前端 500, 但后端日志看起来正常.
+# 修复: 启动前尝试绑定端口, 若被占用立即报错并打印占用进程.
+def _check_port_available(port):
+    """检测目标端口是否可用, 不可用时打印占用进程 PID + 命令行."""
+    import socket
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind(('0.0.0.0', port))
+        sock.close()
+        return True
+    except OSError as e:
+        sock.close()
+        print(f'[WAITRESS][P0 启动失败] 端口 {port} 已被占用: {e}')
+        # [诊断] 找出占用端口的进程
+        try:
+            import subprocess
+            result = subprocess.run(
+                ['powershell', '-NoProfile', '-Command',
+                 f'Get-NetTCPConnection -State Listen -LocalPort {port} -ErrorAction SilentlyContinue | ForEach-Object {{ Get-CimInstance Win32_Process -Filter "ProcessId=$($_.OwningProcess)" | Select-Object ProcessId, CommandLine | Format-List | Out-String }}'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.stdout.strip():
+                print(f'  占用进程详情:')
+                print('  ' + result.stdout.strip().replace('\n', '\n  '))
+        except Exception:
+            pass
+        return False
+
+
 # [DECORATIVE] v3.8: 启动前 hook
 def _on_starting():
     print('[WAITRESS] Starting v3.18 (1 process × 8 threads + DB lock)')
     print(f'[WAITRESS] Bind: 0.0.0.0:{AGENT_PORT}')
     print(f'[WAITRESS] PID: {os.getpid()}')
     print(f'[WAITRESS] AGENT_PORT: {AGENT_PORT}')
+    print(f'[WAITRESS] FLASK_PORT: {os.environ.get("FLASK_PORT", "not set")}')
     print(f'[WAITRESS] FLASK_DEBUG: {os.environ.get("FLASK_DEBUG", "not set")}')
+
+    # [FIX 2026-07-02] 端口冲突预检
+    if not _check_port_available(AGENT_PORT):
+        print(f'  解决方案:')
+        print(f'    1) 杀掉占用端口的进程, 或')
+        print(f'    2) 设置不同的 AGENT_PORT (需同步修改 vite.config.js proxy target)')
+        sys.exit(1)
 
     # [DECORATIVE] P0 防御检查
     _check_db_integrity_at_startup()

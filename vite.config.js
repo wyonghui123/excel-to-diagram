@@ -38,20 +38,20 @@ export default defineConfig({
             if (id.includes('/echarts/') || id.includes('/zrender/')) {
               return 'vendor-echarts'
             }
-            // Mermaid + 全部子依赖 + misc (mermaid 与 misc 有循环依赖, 合并)
+            // Mermaid + 全部子依赖 (FIX 2026-07-01: 合并到 vendor-pdf 打破循环)
             if (id.includes('/mermaid/') || id.includes('/@mermaid-js/') || id.includes('/d3-') || id.includes('/dagre') || id.includes('/elkjs/') || id.includes('/katex/') || id.includes('/web-worker/') || id.includes('/stylis/') || id.includes('/cytoscape')) {
-              return 'vendor-mermaid'
+              return 'vendor-pdf'
             }
             // XLSX
             if (id.includes('/xlsx/') || id.includes('/codepage/')) {
               return 'vendor-xlsx'
             }
-            // PDF 导出
+            // PDF 导出 (FIX 2026-07-01: 全部进 vendor-pdf 避免循环)
             if (id.includes('/html2canvas/') || id.includes('/jspdf/') || id.includes('/canvg/')) {
               return 'vendor-pdf'
             }
-            // 其他第三方库 (与 mermaid 合并, 避免循环)
-            return 'vendor-mermaid'
+            // 其他第三方库 (FIX 2026-07-01: 改 fallback 到 vendor-pdf 打破循环)
+            return 'vendor-pdf'
           }
         }
       }
@@ -59,7 +59,21 @@ export default defineConfig({
   },
   server: {
     host: true,
-    port: 3004,
+    port: 3006,
+    // [FIX 2026-07-02 13:30] Windows 平台 chokidar 文件系统事件失效 (Node.js 24 + Windows Defender)
+    //   问题: 修改 src/*.js 后 vite watch 没触发, 导致浏览器拿到旧代码 (用户实测 network filter 是旧版)
+    //   修复: server.watch.usePolling = true + 显式排除 .architecture-lock (sqlite lock 文件触发变更)
+    watch: {
+      usePolling: true,
+      interval: 1000,
+      ignored: [
+        '**/.architecture.lock',
+        '**/*.db',
+        '**/*.db-journal',
+        '**/exports/**',
+        '**/node_modules/**'
+      ]
+    },
     // [FIX 2026-06-12 #13] 根治 MetaListPage toolbar/table "又这样了" 复发
     // 根因: 浏览器缓存 Vite 编译产物 (SCSS 改完后旧 CSS 被缓存)
     // 用户反馈"我刷新后现在又好了" 确认是缓存问题
@@ -81,12 +95,21 @@ export default defineConfig({
     },
     proxy: {
       // [FR-009] 合并所有 /api/* 到统一代理规则 (原来 5 条独立规则, target 相同)
+      // [FIX 2026-07-06] 改为 3018 (integration backend) 而不是 3011 (主 backend 空 db)
+      //   背景: 3007 vite 是 integration-worktree 的前端, 应该代理到 integration 后端
+      //   但 vite.config.js 之前写死 3011, 导致 3007 用户看到 worktree-V050 空 db (0 products)
+      //   修复: 指 3018 (integration backend, db 是真实数据 250 products)
       '/api': {
-        target: 'http://localhost:3010',
+        target: 'http://localhost:3011',
         changeOrigin: true,
         ws: true,
-        timeout: 30000,       // 代理请求超时 30s (大文件上传等)
-        proxyTimeout: 30000,  // 后端响应超时 30s
+        // [FIX BUG-V029 2026-06-28] 30s→180s
+        //   原因: Excel 导入预检测对 1.34MB / 23839 行文件需 63.7s,
+        //         30s proxy 超时强制断连导致前端报 ERR_EMPTY_RESPONSE
+        //   验证: 直连 3010 63.7s 成功, 经 3004 proxy 30.0s 报 RemoteDisconnected
+        //   选值: 180s (3 min) 留 2-3x headroom, 仍能在挂死时及时终止
+        timeout: 180000,      // 代理请求超时 180s (大文件上传 / Excel 导入预检测)
+        proxyTimeout: 180000, // 后端响应超时 180s
         configure: (proxy) => {
           proxy.on('error', (err) => {
             // 代理连接错误日志 (不阻塞,仅输出)
@@ -96,7 +119,42 @@ export default defineConfig({
         }
       },
       '/socket.io': {
-        target: 'http://localhost:3010',
+        target: 'http://localhost:3011',
+        changeOrigin: true,
+        ws: true,
+      }
+    }
+  },
+  // [V007.53] preview 模式代理: 让 vite preview 也转发 /api/* 和 /socket.io 到后端 3018
+  //   背景: 用户在 3006 看到 "响应解析失败 (status=404)"
+  //   根因: vite preview 默认不带 proxy, 所有 /api/* 走 SPA fallback 返回 index.html
+  //         前端 fetch 把 HTML 当 JSON 解析, 报 PARSE_ERROR (用户误以为 404)
+  //   修复: 复用 server.proxy 同样的规则到 preview
+  //   注意: 与 server.proxy 配置完全相同, 避免在 dev / preview 行为不一致
+  preview: {
+    host: true,
+    port: 3006,
+    headers: {
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+    },
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3011',
+        changeOrigin: true,
+        ws: true,
+        timeout: 180000,
+        proxyTimeout: 180000,
+        configure: (proxy) => {
+          proxy.on('error', (err) => {
+            // eslint-disable-next-line no-console
+            console.error('[Vite Preview Proxy] Connection error:', err.message)
+          })
+        }
+      },
+      '/socket.io': {
+        target: 'http://localhost:3011',
         changeOrigin: true,
         ws: true,
       }
