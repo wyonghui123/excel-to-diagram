@@ -212,11 +212,121 @@ def _footer() -> str:
     return f'<sub>yonaa agent alert · {time.strftime("%Y-%m-%d %H:%M:%S")}</sub>'
 
 
+# ====== 飞书应用机器人 API (V007.59 2026-07-15) ======
+# 走 tenant_access_token + im/v1/messages API
+# 比 webhook 优势: 不被企业管理员禁, 可发丰富卡片, 可 @具体人
+_TOKEN_CACHE = {'token': '', 'expire_at': 0}
+
+
+def _lark_get_token(app_id: str, app_secret: str) -> str:
+    """拿 tenant_access_token (带缓存, 提前 5 分钟过期)"""
+    if _TOKEN_CACHE['token'] and time.time() < _TOKEN_CACHE['expire_at']:
+        return _TOKEN_CACHE['token']
+
+    url = 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal'
+    data = json.dumps({'app_id': app_id, 'app_secret': app_secret}).encode()
+    req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        body = json.loads(r.read().decode())
+    if body.get('code') != 0:
+        raise RuntimeError(f'lark get token fail: code={body.get("code")} msg={body.get("msg")}')
+    _TOKEN_CACHE['token'] = body['tenant_access_token']
+    _TOKEN_CACHE['expire_at'] = time.time() + body.get('expire', 7200) - 300  # 提前 5 分钟
+    return _TOKEN_CACHE['token']
+
+
+def _lark_list_chats(app_id: str, app_secret: str) -> list:
+    """列出应用机器人加入的所有群 (用来找 chat_id)"""
+    token = _lark_get_token(app_id, app_secret)
+    url = 'https://open.feishu.cn/open-apis/im/v1/chats?page_size=50'
+    req = urllib.request.Request(url, headers={'Authorization': f'Bearer {token}'})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        body = json.loads(r.read().decode())
+    if body.get('code') != 0:
+        raise RuntimeError(f'lark list chats fail: {body.get("msg")}')
+    return body.get('data', {}).get('items', [])
+
+
+def send_lark_app(app_id: str, app_secret: str, chat_id: str, title: str, content: str, at_all: bool = False) -> tuple:
+    """发飞书应用机器人消息 (interactive card)"""
+    try:
+        token = _lark_get_token(app_id, app_secret)
+    except Exception as e:
+        return False, f'lark get token fail: {e}'
+
+    url = f'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id'
+
+    # 内容 (interactive card) - V007.59 修复: @所有人 在 markdown 里用 <at id=all></at>
+    md_content = content[:3000]
+    if at_all:
+        md_content = f'<at id=all></at> {md_content}'
+
+    card_content = {
+        'config': {'wide_screen_mode': True},
+        'header': {
+            'title': {'tag': 'plain_text', 'content': title[:50]},
+            'template': 'red' if ('ALERT' in title or 'FAIL' in title or 'DEAD' in title) else 'blue',
+        },
+        'elements': [
+            {'tag': 'div', 'text': {'tag': 'lark_md', 'content': md_content}},
+            {'tag': 'hr'},
+            {'tag': 'note', 'elements': [{'tag': 'plain_text', 'content': f'yonaa agent alert · {time.strftime("%Y-%m-%d %H:%M:%S")}'}]},
+        ],
+    }
+
+    data = {
+        'receive_id': chat_id,
+        'msg_type': 'interactive',
+        'content': json.dumps(card_content, ensure_ascii=False),
+    }
+
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(data).encode('utf-8'),
+        headers={
+            'Content-Type': 'application/json; charset=utf-8',
+            'Authorization': f'Bearer {token}',
+        },
+        method='POST',
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = json.loads(resp.read().decode())
+            if body.get('code') == 0:
+                return True, f'msg_id={body.get("data", {}).get("message_id", "?")}'
+            return False, f'code={body.get("code")} msg={body.get("msg")}'
+    except urllib.error.HTTPError as e:
+        # 飞书 4xx 错误带详细 reason
+        try:
+            err_body = e.read().decode()
+            err_j = json.loads(err_body)
+            return False, f'HTTP {e.code} code={err_j.get("code")} msg={err_j.get("msg")}'
+        except Exception:
+            return False, f'HTTPError {e.code}: {e.reason}'
+    except urllib.error.URLError as e:
+        return False, f'URLError: {e}'
+    except Exception as e:
+        return False, f'{type(e).__name__}: {e}'
+
+
 def send_im(im_type: str, cfg: dict, title: str, content: str, at_all: bool = False) -> tuple:
     """统一发送入口"""
     im_cfg = cfg.get('im', {}).get(im_type, {})
     webhook = im_cfg.get('webhook', '')
     secret = im_cfg.get('secret', '')
+
+    # 飞书应用机器人走独立路径 (V007.59)
+    # 凭证优先从环境变量读 (LARK_APP_ID / LARK_APP_SECRET / LARK_CHAT_ID), 更安全
+    if im_type == 'lark_app':
+        app_id = os.environ.get('LARK_APP_ID') or im_cfg.get('app_id', '')
+        app_secret = os.environ.get('LARK_APP_SECRET') or im_cfg.get('app_secret', '')
+        chat_id = os.environ.get('LARK_CHAT_ID') or im_cfg.get('chat_id', '')
+        if not all([app_id, app_secret, chat_id]):
+            return False, 'lark_app 需要 app_id + app_secret + chat_id (可在 config 或 环境变量 LARK_APP_ID/LARK_APP_SECRET/LARK_CHAT_ID 配)'
+        if '<' in app_id or '替换' in app_id:
+            return False, f'lark_app 凭证未配置 (仍是占位符)'
+        return send_lark_app(app_id, app_secret, chat_id, title, content, at_all)
 
     if not webhook:
         return False, f'no webhook configured for {im_type}'
@@ -455,6 +565,8 @@ def main():
     parser.add_argument('--daemon', action='store_true', help='守护模式, 每 5 分钟跑一次')
     parser.add_argument('--simulate-fail', action='store_true', help='模拟失败 (发测试告警)')
     parser.add_argument('--test-im', action='store_true', help='测试 IM 推送 (发 hello 消息)')
+    parser.add_argument('--list-chats', action='store_true', help='列出飞书应用机器人加入的群 (用来找 chat_id)')
+    parser.add_argument('--test-lark-app', action='store_true', help='测试飞书应用机器人 API 推送')
     parser.add_argument('--init-config', action='store_true', help='初始化配置文件')
     args = parser.parse_args()
 
@@ -467,7 +579,14 @@ def main():
             return 1
         example = {
             'im': {
-                'default': 'feishu',  # 默认推送的 IM 类型
+                'default': 'lark_app',  # 默认推送的 IM 类型 (V007.59 推荐)
+                # 飞书应用机器人 (V007.59 推荐, 不受管理员禁自定义机器人影响)
+                'lark_app': {
+                    'app_id': '<替换为你的飞书 app_id>',
+                    'app_secret': '<替换为你的飞书 app_secret>',
+                    'chat_id': '<替换为你的群 chat_id>',
+                },
+                # 飞书 webhook (V007.58, 旧方案, 可能被禁)
                 'feishu': {
                     'webhook': 'https://open.feishu.cn/open-apis/bot/v2/hook/<替换为你的token>',
                     'secret': '',  # 可选, 飞书签名密钥
@@ -488,7 +607,8 @@ def main():
             },
         }
         save_config(example, args.config)
-        print(f'\n请编辑 {args.config} 填入真实的 webhook URL')
+        print(f'\n请编辑 {args.config} 填入真实的凭证')
+        print('V007.59 推荐用 lark_app (飞书应用机器人), 详见 docs/INCIDENT_ALERT_SETUP.md §1b')
         return 0
 
     cfg = load_config(args.config)
@@ -509,14 +629,70 @@ def main():
         print(f'  body: {body[:200]}')
         return 0 if ok else 2
 
+    # 列出飞书应用机器人群 (找 chat_id)
+    if args.list_chats:
+        lark_cfg = cfg.get('im', {}).get('lark_app', {})
+        app_id = lark_cfg.get('app_id', '')
+        app_secret = lark_cfg.get('app_secret', '')
+        if not app_id or '<' in app_id:
+            print('[FAIL] lark_app.app_id 未配置')
+            return 2
+        if not app_secret:
+            print('[FAIL] lark_app.app_secret 未配置')
+            return 2
+        try:
+            chats = _lark_list_chats(app_id, app_secret)
+            print(f'[OK] 找到 {len(chats)} 个群:\n')
+            for c in chats:
+                chat_id = c.get('chat_id', '?')
+                name = c.get('name', '?')
+                desc = c.get('description', '')
+                print(f'  chat_id: {chat_id}')
+                print(f'  name    : {name}')
+                print(f'  desc    : {desc[:50]}')
+                print()
+            print('复制上面的 chat_id 到 alert_monitor_config.json:')
+            print('  "lark_app": {')
+            print('    "app_id": "...",')
+            print('    "app_secret": "...",')
+            print(f'    "chat_id": "<粘上面 chat_id>"')
+            print('  }')
+            return 0
+        except Exception as e:
+            print(f'[FAIL] {e}')
+            return 2
+
+    # 测试飞书应用机器人 API
+    if args.test_lark_app:
+        title = '[TEST] yonaa 应用机器人连通测试'
+        content = f'''**测试推送**: agent → 飞书应用机器人 (V007.59)
+
+- agent 端: 公司电脑 (windows)
+- IM 类型: lark_app (飞书应用机器人 API)
+- 时间: {time.strftime("%Y-%m-%d %H:%M:%S")}
+
+收到此消息表示告警链路就绪 (走 open-apis/im/v1/messages, 不用 webhook).'''
+        ok, body = send_im('lark_app', cfg, title, content, False)
+        print(f'[LARK_APP] {"OK" if ok else "FAIL"}')
+        print(f'  body: {body[:300]}')
+        return 0 if ok else 2
+
     # 模拟失败
     if args.simulate_fail:
         title = '[ALERT] yonaa 服务异常 (模拟)'
-        content = '这是 agent 端模拟的告警, 用于验证推送链路.'
+        content = '''这是 agent 端模拟的告警, 用于验证推送链路.
+
+**场景**: 模拟 log_service 9101 端口死掉
+
+- 服务: log_service_prod
+- 端口: 9101
+- 期望: 5 分钟内能 @all 推送告警
+- 验证: 手机应收到红色卡片, 标题 [ALERT]'''
+
         im_type = cfg.get('im', {}).get('default', 'feishu')
         ok, body = send_im(im_type, cfg, title, content, True)
         print(f'[IM] {im_type}: {"OK" if ok else "FAIL"}')
-        print(f'  body: {body[:200]}')
+        print(f'  body: {body[:300]}')
         return 0 if ok else 2
 
     # 一次性检查

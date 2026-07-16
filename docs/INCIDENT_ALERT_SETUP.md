@@ -1,10 +1,10 @@
-# INCIDENT_ALERT_SETUP.md - IM 告警配置 (V007.58 2026-07-15)
+# INCIDENT_ALERT_SETUP.md - IM 告警配置 (V007.58+V007.59 2026-07-15)
 
 > **目标**: yonaa 端出事故时, 5 分钟内推到运维手机 (飞书/钉钉/微信)
 > **架构**: agent 端 (公司电脑, 有公网) 轮询 + 推送
 > **适用**: yonaa 在阿里云 air-gapped 环境, 服务器无法直连公网 IM
 > **作者**: AI Agent
-> **更新**: 2026-07-15
+> **更新**: 2026-07-15 (V007.59 加飞书应用机器人支持)
 
 ---
 
@@ -45,12 +45,47 @@ agent 电脑 (公司电脑, 有公网)
 
 ## 1. 5 分钟快速开始 (运维)
 
-### Step 1: 选 IM (任选一个, 推荐飞书)
+### Step 0: 选 IM (V007.59 推荐飞书应用机器人)
+
+**重要 V007.59 更新**: 飞书**自定义机器人 webhook** 在很多企业版被禁 (找不到入口), 改用 **飞书应用机器人 API** 走 `tenant_access_token` + `im/v1/messages`, **不被任何限制**。
+
+| IM | 推荐度 | 不被禁 | 难度 |
+|---|------|------|------|
+| **飞书应用机器人 (lark_app)** | ⭐⭐⭐⭐⭐ | ✅ | 中 (10 分钟) |
+| 钉钉 webhook | ⭐⭐⭐⭐ | ✅ | 低 (5 分钟) |
+| 飞书 webhook | ⭐⭐⭐ | ❌ 可能被禁 | 低 (5 分钟) |
+| 企业微信 webhook | ⭐⭐⭐ | ✅ | 低 (5 分钟) |
+
+### Step 1: 飞书应用机器人 (推荐, V007.59)
 
 #### 飞书 (Lark) webhook 获取
 1. 打开飞书 → 群 → 设置 → 群机器人 → 添加机器人 → 自定义机器人
 2. 安全设置: 选"签名校验", 复制 webhook URL + 签名密钥
 3. URL 格式: `https://open.feishu.cn/open-apis/bot/v2/hook/<token>`
+
+#### 飞书应用机器人 (V007.59 推荐) 获取
+
+1. 打开 [飞书开放平台](https://open.feishu.cn/app) → 创建企业自建应用
+2. 添加能力 → **机器人**
+3. 凭证与基础信息 → 拿 `App ID` (cli_xxx) + `App Secret`
+4. 权限管理 → 搜索 `im:message` → 勾选 `im:message:send_as_bot` 等
+5. 版本发布 → 创建版本 → 发布
+6. 飞书群 → 设置 → 群机器人 → 添加机器人 → 找到你的应用机器人 → 加入
+7. 用 alert_monitor.py 列群: `python tools/alert_monitor.py --list-chats` → 拿 `chat_id`
+
+#### 凭证安全 (强烈推荐用环境变量)
+
+⚠️ `app_secret` 是敏感凭证, **绝对不要 commit 到 git**!
+
+**推荐方式**: 用环境变量 (Windows 任务计划里设一次, 一直生效):
+```powershell
+$env:LARK_APP_ID="cli_xxx"
+$env:LARK_APP_SECRET="xxx"
+$env:LARK_CHAT_ID="oc_xxx"
+python tools/alert_monitor.py --test-lark-app
+```
+
+**或 Windows 任务计划**: 创建任务时 → 操作 → 编辑 → 勾选 "设置环境变量" → 填 3 个变量。
 
 #### 钉钉 webhook 获取
 1. 群 → 群设置 → 智能群助手 → 添加机器人 → 自定义
