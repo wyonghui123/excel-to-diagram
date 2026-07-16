@@ -269,6 +269,247 @@ Write-Host "=== 5. DIRTY ===" -ForegroundColor Cyan
 
 ---
 
+## 0.7. Worktree 路径迁移 SOP (V007.85 新增)  [!] 必读
+
+> **重要**: 每次迁移 worktree 路径 / 重命名 worktree / 改 worktree 物理位置, **必须先跑 5 步路径迁移 SOP**.
+> 不跑 SOP = 系统配置 (cron / xml / service / env) 还引用老路径 = 服务启动失败 (V007.83 教训).
+
+### 0.7.1 5 步路径迁移 SOP (强制)
+
+```bash
+# 每次 worktree 路径变更必跑 (5 步, 5 分钟内)
+echo "=== 1. 列出所有 worktree ===" && \
+  git worktree list && \
+echo "=== 2. 列出所有系统配置 (cron / xml / service / systemd / env) ===" && \
+  schtasks /Query /FO LIST 2>&1 | grep -i "command\|task to run" | head -20 && \
+  ls /etc/cron.d/ /etc/systemd/system/*.service 2>/dev/null && \
+echo "=== 3. grep 老路径 (搜所有配置) ===" && \
+  grep -rn "<OLD_PATH>" /etc/cron.d/ /etc/systemd/system/ 2>/dev/null && \
+  powershell -NoProfile -Command "Get-ScheduledTask | Where-Object {\$_.TaskPath -ne '\\Microsoft\\'} | ForEach-Object { (xml) [xml](Get-ScheduledTask -TaskName \$_.TaskName | Export-ScheduledTask); if (\$xml.Task.Actions.Exec.Command -like '*<OLD_PATH>*') { Write-Host \$_.TaskName } }" && \
+echo "=== 4. 更新所有配置 (脚本批量改) ===" && \
+  for f in $(grep -lr "<OLD_PATH>" /etc/cron.d/ /etc/systemd/system/ 2>/dev/null); do sed -i 's|<OLD_PATH>|<NEW_PATH>|g' "$f"; done && \
+echo "=== 5. reload + verify ===" && \
+  systemctl daemon-reload && \
+  schtasks /Query /TN "<TASK_NAME>" /V /FO LIST | grep "要运行的任务"
+```
+
+### 0.7.2 5 步输出解读
+
+| 步 | 看到 | 含义 | 行动 |
+|---|------|------|------|
+| 1. worktree list | 5 个 worktree | 当前状态 | 记录 |
+| 1. worktree list | 老 worktree 还在 | 删不彻底 | `git worktree remove` |
+| 2. 系统配置 | cron / xml / service | 系统层依赖 | 必须更新 |
+| 3. grep 老路径 | N 个匹配 | N 个待改 | 列清单 |
+| 4. sed 替换 | 全部替换完 | 路径一致 | ✅ 成功 |
+| 5. verify | 老路径没了 | 完成 | ✅ 结束 |
+
+### 0.7.3 4 步路径迁移硬规则 (V007.71 + V007.83 教训)
+
+#### 规则 1: 路径迁移前必查系统配置
+
+迁移前**必查**:
+- Windows: `schtasks /Query /FO LIST` + `Get-ScheduledTask` (所有任务)
+- Linux: `/etc/cron.d/` + `/etc/systemd/system/*.service` + `/opt/app/`
+- macOS: `~/Library/LaunchAgents/` + `/Library/LaunchDaemons/`
+- 全局: `.env` + `config/*.json` + `*.yaml` (如果引用 worktree 路径)
+
+#### 规则 2: 路径迁移必用脚本批量改, 不用手工
+
+| 错的 | 对的 |
+|------|------|
+| 手工 `vim` 每个 cron 文件 | `for f in $(grep -lr OLD); do sed -i 's|OLD|NEW|g' $f; done` |
+| 手工一个一个 schtasks /Create | 脚本批量 + 验证 |
+| 改完不 reload | `systemctl daemon-reload` + `schtasks /Run` 测试 |
+
+#### 规则 3: 改完必 verify (5 分钟内 + 30 分钟后 + 24 小时后)
+
+| 时间 | 验证 |
+|------|------|
+| 5 分钟内 | 跑 1 次, 看 schtasks /Query /TN /V /FO LIST "上次结果" |
+| 30 分钟后 | 跑 1 次, 看日志 /var/log/monitor.log 有新条目 |
+| 24 小时后 | 跑 1 次, 跨过重启/边界 |
+
+#### 规则 4: 路径迁移必写复盘
+
+**V007.71 + V007.83 双重教训**:
+- V007.71 迁 worktree 路径时**没**改 system config
+- V007.83 才发现 `\yonaa_alert_monitor` 失败 (老路径)
+- 2 周才有人报告 "告警没起来"
+
+**未来**: 每次 worktree 路径变更**必写** `docs/V00XXX_PATH_MIGRATION.md` 报告.
+
+### 0.7.4 V007.71 + V007.83 失败案例 (教训)
+
+| 时间 | 改动 | 影响 |
+|------|------|------|
+| V007.71 | worktree 路径迁移 (e.g. `release-prep-worktree/` → `worktrees/release-prep/`) | 删了老路径, 但**没**更新 system config (cron / schtasks) |
+| V007.83 | 电脑重启后用户报告 "告警没起来" | `\yonaa_alert_monitor` 失败 -2147024629 (老路径 ERROR_FILE_NOT_FOUND) |
+| 累计 | **2 周** 系统配置不一致, 告警监控 5 分钟跑一次但都失败 | 用户没收到任何告警 |
+
+**正确流程** (V007.85 SOP):
+1. 路径迁移前: 列出 5 个 worktree + 列出所有 system config
+2. 迁移: git worktree move / add / remove
+3. 路径迁移后: 跑 5 步 SOP 批量改 system config
+4. 验证: 立即 / 30 分钟 / 24 小时
+5. 写报告: `docs/V00XXX_PATH_MIGRATION.md`
+
+### 0.7.5 V007.85 自动检查脚本 (推荐)
+
+```python
+# tools/check_path_migration.py
+# 扫描所有 system config, 报告引用老路径的文件
+# 详情见 tools/check_path_migration.py (V007.85)
+
+import re
+import sys
+import platform
+from pathlib import Path
+
+# 老路径 patterns (V007.71 迁移过 + V007.85 新加)
+OLD_PATTERNS = [
+    r'D:\\filework\\release-prep-worktree\\',  # V007.71 老路径 (Windows)
+    r'D:/filework/release-prep-worktree/',     # V007.71 老路径 (POSIX-style)
+    r'd:\\filework\\release-prep-worktree\\',  # V007.71 老路径 (lowercase)
+    r'd:/filework/release-prep-worktree/',     # V007.71 老路径 (lowercase)
+    r'/opt/app/staging/deploy',                # V007.55 cron 老路径 (Linux)
+]
+
+# 新路径 (V007.71 后的标准)
+NEW_PATTERNS = [
+    r'D:\\filework\\worktrees\\release-prep\\',  # V007.71 新路径
+    r'/opt/app/deployments',                      # V007.55 cron 新路径
+]
+
+# 扫描目标
+SCAN_DIRS = [
+    Path('docs'),
+    Path('tools'),
+    Path('deploy_bundle'),
+    Path('.trae'),
+]
+
+def scan_file(filepath: Path) -> dict:
+    """扫描单个文件, 返回老路径匹配数"""
+    try:
+        content = filepath.read_bytes()
+        # Skip binary
+        if b'\x00' in content[:1024]:
+            return None
+        text = content.decode('utf-8', errors='replace')
+    except Exception:
+        return None
+
+    counts = {}
+    for pattern in OLD_PATTERNS:
+        matches = re.findall(pattern, text)
+        if matches:
+            counts[pattern] = len(matches)
+    return counts if counts else None
+
+
+def scan_scheduled_tasks() -> list:
+    """扫描 Windows 计划任务引用老路径"""
+    if platform.system() != 'Windows':
+        return []
+    import subprocess
+    result = subprocess.run(
+        ['schtasks', '/Query', '/FO', 'LIST'],
+        capture_output=True, text=True, encoding='gbk', errors='replace'
+    )
+    bad_tasks = []
+    for line in result.stdout.split('\n'):
+        for pattern in OLD_PATTERNS:
+            if re.search(pattern, line):
+                bad_tasks.append(line.strip())
+                break
+    return bad_tasks
+
+
+def main():
+    print('=== V007.85 Path Migration Check ===')
+    print()
+
+    # 1. Scan all files
+    print('--- 1. File scan ---')
+    total_matches = 0
+    for scan_dir in SCAN_DIRS:
+        if not scan_dir.exists():
+            continue
+        for filepath in scan_dir.rglob('*'):
+            if not filepath.is_file():
+                continue
+            result = scan_file(filepath)
+            if result:
+                for pattern, count in result.items():
+                    print(f'  [MATCH] {filepath}: {pattern} ({count}x)')
+                    total_matches += count
+
+    # 2. Scan scheduled tasks
+    print('--- 2. Scheduled tasks ---')
+    bad_tasks = scan_scheduled_tasks()
+    for task_line in bad_tasks:
+        print(f'  [BAD TASK] {task_line}')
+
+    print()
+    print(f'Total matches: {total_matches}')
+    print(f'Bad scheduled tasks: {len(bad_tasks)}')
+
+    if total_matches > 0 or len(bad_tasks) > 0:
+        print('[FAIL] 老路径还在, 需要路径迁移!')
+        sys.exit(1)
+    else:
+        print('[OK] 全部新路径, 干净!')
+        sys.exit(0)
+
+
+if __name__ == '__main__':
+    main()
+```
+
+### 0.7.6 Pre-commit hook (自动防护 V007.71 类似事故)
+
+加到 `.pre-commit-config.yaml`:
+```yaml
+  - repo: local
+    hooks:
+      - id: check-path-migration
+        name: Check path migration (V007.85)
+        entry: py tools/check_path_migration.py
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+```
+
+**效果**: 每次 commit 前自动跑 `check_path_migration.py`, 如果有老路径**直接 fail commit**.
+
+### 0.7.7 应急: 监控任务失败的快速恢复
+
+如果发现监控任务失败 (类似 V007.83):
+
+```powershell
+# 1. 手动跑一次, 确认脚本本身可用
+py "D:\filework\worktrees\release-prep\tools\alert_monitor_v0760.py" `
+   --config "D:\filework\worktrees\release-prep\tools\alert_monitor_config.json" `
+   --check-now
+
+# 2. 管理员 PowerShell 重置任务
+schtasks /End /TN "\yonaa_alert_monitor"
+schtasks /Delete /TN "\yonaa_alert_monitor" /F
+# (改 XML 后 recreate, 见 V007.83 报告 方案 A)
+```
+
+### 0.7.8 V007.83 完整复盘
+
+详见 [docs/V007.83_ALERT_MONITOR_INCIDENT.md](V007.83_ALERT_MONITOR_INCIDENT.md) — 5 章节:
+- 1. 诊断结果
+- 2. 修复指南 (方案 A + B)
+- 3. 应急监控
+- 4. 根因分析 (V007.71 路径迁移遗留)
+- 5. 未来防护 (= §0.7)
+
+---
+
 ## 1. Agent 必知 (3 分钟读完)
 
 ### 1.1 5 个最常用工具 (直接调, 不需 SSH)
