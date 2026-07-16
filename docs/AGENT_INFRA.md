@@ -16,6 +16,7 @@
 | **远端操作速查** | 本文件 §1 | — | 5 个 Python 函数 / 5 行 CLI / **回归测试 §1.4** |
 | **回归测试** | [docs/REGRESSION_TEST_SUITE.md](file:///d:/filework/release-prep-worktree/docs/REGRESSION_TEST_SUITE.md) | 250+ | 9 个 sqlite io error 场景 — staging 自动化 |
 | **告警与监控** | [docs/INCIDENT_ALERT_SETUP.md](file:///d:/filework/release-prep-worktree/docs/INCIDENT_ALERT_SETUP.md) | — | **9 项分层监控 + 飞书告警 (V007.58~V007.61)** |
+| **5min 监控速查** | [docs/MONITORING_QUICK_REFERENCE.md](file:///d:/filework/release-prep-worktree/docs/MONITORING_QUICK_REFERENCE.md) | 198 | **Agent 速查首选: 架构 / 9 项 / 端点 / 命令 / 故障排查 (V007.58~V007.63)** |
 | **事故响应** | [docs/INCIDENT_RESPONSE_RUNBOOK.md](file:///d:/filework/release-prep-worktree/docs/INCIDENT_RESPONSE_RUNBOOK.md) | 7 类事故 | 收到告警后怎么办 (含 V007.61 用户异常) |
 | **运维手册** | [docs/OPS_MANUAL.md](file:///d:/filework/release-prep-worktree/docs/OPS_MANUAL.md) | — | 运维日常操作 (含监控章节) |
 | **Migration 操作** | [docs/MIGRATION_GUIDE.md](file:///d:/filework/release-prep-worktree/docs/MIGRATION_GUIDE.md) | 200+ | migration 创建/运行/lint 实战 |
@@ -92,7 +93,24 @@ python tools/yonaa_exec.py exec "python3 tools/monitor_migrations.py --check-reg
 # 详见: docs/REGRESSION_TEST_SUITE.md
 ```
 
-### 1.5 1 个公式: Token
+### 1.5 [V007.58~V007.63] 监控速查 (5 min 看完)
+
+> **Agent 接手新需求前先看这**: 监控在哪、9 项怎么跑、收不到心跳怎么办
+
+- **架构**: yonaa (9200) 上 9 项检查 + 用户异常 (backend_err / core_service_err) + 每 30min 心跳
+- **log_service 9+ 业务端点**: 9101 `/api/db/health` `/api/db/can_write` `/api/disk/check` `/api/disk/errors` `/api/disk/journal_err` ...
+- **手动查**: `python tools/alert_monitor_v0760.py --check-now --config tools/alert_monitor_config.json`
+- **日志**: `tools/alert_monitor_v0760.log` (追加写, 任务调度每 5min)
+- **任务计划**: `schtasks /Query /TN "\yonaa_alert_monitor" /V /FO LIST` (Hidden + pythonw.exe, 无弹窗)
+- **心跳**: 30min 间隔, `[HEARTBEAT] lark_app: OK` 飞书, 蓝色卡片, 不 @ 全体
+- **告警**: 5min 触发 (聚合去重 5min), 红色卡片, @ 全体
+- **凭证**: 飞书 app secret 在 HKCU `HKCU:\Software\wyonghui_lark_app` (reg query), env 兜底
+
+**速查首选**: [MONITORING_QUICK_REFERENCE.md](file:///d:/filework/release-prep-worktree/docs/MONITORING_QUICK_REFERENCE.md)
+**配置细节**: [INCIDENT_ALERT_SETUP.md](file:///d:/filework/release-prep-worktree/docs/INCIDENT_ALERT_SETUP.md)
+**应急处理**: [INCIDENT_RESPONSE_RUNBOOK.md](file:///d:/filework/release-prep-worktree/docs/INCIDENT_RESPONSE_RUNBOOK.md) §9
+
+### 1.6 1 个公式: Token
 
 ```python
 import hashlib, time
@@ -157,6 +175,69 @@ docs/
 - 飞书收到红色卡片 + @全体 = **告警** → 查 §9.5 告警项→应急处理对照
 - 飞书收到蓝色卡片 = **恢复** 或 **心跳 (每 30min 一次)**
 - 什么消息都没收到 = 监控自己挂了 (盲区) → 查 `alert_monitor_v0760.log`
+
+---
+
+## 5. deploy_bundle/ 是什么 (V045 起的发布物目录, 57 commits)
+
+**TL;DR**: 这是"部署脚本 + 代码包"打包好的目录, 让你**用 MobaXterm 拖到远端 /tmp/ 直接跑 deploy.sh**。**是发布物, 不是源代码仓库**, 但因为要支持"git checkout 任意历史版本重新部署", 所以入 git 管理。
+
+### 5.1 文件清单 (10 项)
+
+| 文件 | 角色 | 是源代码? | git 跟踪? |
+|------|------|------|------|
+| `deploy.sh` | 部署入口 (含 precheck + smoke) | ✅ 是 | ✅ 必须 |
+| `precheck.sh` | 部署前 7 项检查 | ✅ 是 | ✅ 必须 |
+| `smoke_test.sh` | 部署后 5 项真实功能测试 | ✅ 是 | ✅ 必须 |
+| `rollback.sh` | 通用回滚 | ✅ 是 | ✅ 必须 |
+| `diagnose.sh` | 部署后诊断 | ✅ 是 | ✅ 必须 |
+| `unified_server.py` | 远端统一服务入口 | ✅ 是 | ✅ 必须 |
+| `lib/common.sh` | shell 共享库 | ✅ 是 | ✅ 必须 |
+| `README.txt` | 部署工作流文档 | ✅ 是 | ✅ 必须 |
+| `deploy-v20260707_002.zip` | **本次发布的代码快照 (zip ~30MB)** | ❌ 是构建产物 | ⚠️ 应该 `.gitignore` + git-lfs |
+| `meta/ tools/ docs/ scripts/` (zip 内) | 源码副本 | ✅ 但**跟根目录重复** | ⚠️ 重复了, 用 rebuild_zip.py 自动同步 |
+
+### 5.2 怎么用 (V045 起的工作流)
+
+```bash
+# 1. MobaXterm SFTP 拖 deploy_bundle/ 到远端 /tmp/
+# 2. 在远端跑:
+bash /tmp/deploy_bundle/deploy.sh --version v20260707_002 --port 5001
+# 3. 出问题:
+bash /tmp/deploy_bundle/rollback.sh --to <v> --port <p>
+```
+
+### 5.3 git 跟踪的合理性
+
+- ✅ 部署脚本 (`deploy.sh` / `precheck.sh` / `smoke_test.sh` / `rollback.sh` / `diagnose.sh` / `unified_server.py` / `lib/common.sh` / `README.txt`) **必须 git 跟踪** —— 因为改完要回滚到历史版本
+- ✅ 已有 commit 8bfcbff `同步 deploy_bundle/deploy.sh 跟 tools/deploy.sh` 证实需要双向同步
+- ⚠️ zip 文件 (30MB) 应该用 **git-lfs** 或放独立 release 仓库
+- ⚠️ 源码副本 (meta/ tools/ docs/ scripts/) 应该**不重复 commit**, 用 `rebuild_zip.py` 从根目录自动打包
+
+### 5.4 源码 vs 发布物的边界
+
+```
+仓库根 (源):                       deploy_bundle/ (发布物):
+  tools/deploy.sh     ──────同步──→  deploy.sh         [手动或工具同步]
+  tools/precheck.sh   ──────同步──→  precheck.sh
+  meta/ tools/ docs/  ────打包──→   deploy-vXXX.zip   [rebuild_zip.py]
+  README.md           ──────打包──→  (zip 内 docs/)
+```
+
+**核心原则**: 仓库根是 **source of truth**, deploy_bundle/ 是 **build artifact + 部署脚本生产版本**。
+
+### 5.5 历史 (57 commits, V045 至今)
+
+- 起始 commit 28d132f `chore(release): V045 部署包 v20260703_004 - 含 V043/V044 fix` (2026-07-03)
+- 每个发版 commit 一次 `chore(release): Vxxx 部署包 vxxx_xxx - 含 Vxxx/Vxxx fix`
+- 工具: `tools/rebuild_zip.py` (V007.49-B) 自动同步 meta/ + git HEAD 对账
+
+### 5.6 worktree 上的 600+ 文件 deleted 状态
+
+git HEAD 上 deploy_bundle 是"**只存脚本 + zip**"模式, 但 worktree 实际有 deploy_bundle/meta/.../ 等 600+ 文件 (历史 commit 可能没把源码副本删干净)。
+
+**不要执行 `git reset --hard`** —— 这会丢工作。  
+**正确做法**: 暂不动, 跟 V046+ commit 同步后, 用 `git checkout HEAD -- deploy_bundle/` 即可清理。
 
 ---
 
