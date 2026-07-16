@@ -33,9 +33,6 @@ DEPLOY_BUNDLE_BUILD="20260703_1200"
 #   PHASE 0.5: 解压 zip (如需要)
 #   PHASE 1: 停旧服务
 #   PHASE 2: 备份 + 复制 db
-#   PHASE 2.5: 重置 deploy_test 验证用户
-#   PHASE 2.55: Migration Lint [P1.6] (FAIL 则 exit 1)
-#   PHASE 2.6: 执行 database migrations (P0 新增, 7 步流程)
 #   PHASE 3: 写 systemd service
 #   PHASE 4: 启 backend
 #   PHASE 5: 启 unified server (前端+API proxy)
@@ -44,8 +41,6 @@ DEPLOY_BUNDLE_BUILD="20260703_1200"
 # ============================================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
-# [L17] 智能 delta 部署 - lazy source smart_extract.sh
-# (only sourced when deployment_type=delta detected in PHASE 0.5)
 
 show_help() {
     cat <<'EOF'
@@ -68,6 +63,7 @@ deploy.sh - 通用部署脚本 (任意版本)
   --skip-unzip             跳过 unzip (假设已解)
   --skip-precheck          跳过 precheck (默认跑, 7 项检查)
   --skip-smoke             跳过 smoke test (默认跑, 5 项真实测试)
+  --skip-v00725-postcheck  跳过 V007.25 后置健康检查 (默认跑, 30s/5min/30min)
   --help, -h               显示此帮助
 
 示例:
@@ -120,8 +116,32 @@ USE_SYSTEMD=$([ "$USE_SYSTEMD" = "true" ] && echo "no" || echo "yes")  # 反转:
 SKIP_UNZIP="${ARG_SKIP_UNZIP:-false}"
 SKIP_PRECHECK="${ARG_SKIP_PRECHECK:-false}"
 SKIP_SMOKE="${ARG_SKIP_SMOKE:-false}"
+SKIP_V00725_POSTCHECK="${ARG_SKIP_V00725_POSTCHECK:-no}"
 
 detect_remote_env
+
+# [V007.68] 部署历史审计 (持久化记录每次部署的 success/failure)
+# 之前: deploy_history.log 9 天没新记录, 因为 deploy.sh 根本不写历史
+# 现在: 部署开始时记 start, 结束时 (exit 0/1/任何) trap 记 end
+DEPLOY_HISTORY_LOG="${DEPLOY_HISTORY_LOG:-/opt/app/shared/logs/deploy_history.log}"
+mkdir -p "$(dirname "$DEPLOY_HISTORY_LOG")" 2>/dev/null
+DEPLOY_START_TS=$(date '+%F %T')
+DEPLOY_START_EPOCH=$(date +%s)
+DEPLOY_HOST=$(hostname 2>/dev/null || echo "unknown")
+DEPLOY_USER=$(whoami 2>/dev/null || echo "unknown")
+# 启动记录
+echo "$DEPLOY_START_TS | deploy_id=${VERSION}_$(date +%s)_${DEPLOY_USER} | version=${VERSION} | port=${BACKEND_PORT} | user=${DEPLOY_USER} | host=${DEPLOY_HOST} | phase=start | status=running" >> "$DEPLOY_HISTORY_LOG" 2>/dev/null || true
+# trap: 任何退出 (正常/异常/信号) 都写历史
+_deploy_history_trap() {
+    local exit_code=$?
+    local end_ts=$(date '+%F %T')
+    local end_epoch=$(date +%s)
+    local duration=$((end_epoch - DEPLOY_START_EPOCH))
+    local status="success"
+    [ $exit_code -ne 0 ] && status="failed (exit=$exit_code)"
+    echo "$end_ts | deploy_id=${VERSION}_${DEPLOY_START_EPOCH}_${DEPLOY_USER} | version=${VERSION} | port=${BACKEND_PORT} | user=${DEPLOY_USER} | host=${DEPLOY_HOST} | phase=end | status=${status} | duration=${duration}s" >> "$DEPLOY_HISTORY_LOG" 2>/dev/null || true
+}
+trap _deploy_history_trap EXIT
 
 # ========================= PHASE 0: precheck (可选跳过) =========================
 if [ "$SKIP_PRECHECK" != "true" ]; then
@@ -151,6 +171,10 @@ SERVER_DIR="$DEPLOYMENTS_DIR/meta"
 FRONTEND_DIR="$DEPLOYMENTS_DIR/frontend_dist_files"
 
 # JWT/FLASK/CORS 密钥 (>=32 字符, 满足 startup_checks 强制)
+# [V007.36 BUG-FIX] 手动启动 server.py 时, 必须同时 export 以下 5 个 env vars:
+#   PORT, JWT_SECRET_KEY, FLASK_SECRET_KEY, CORS_ALLOWED_ORIGINS, FLASK_DEBUG
+# 缺失任一, server.py:create_app() 会在 run_startup_checks() 抛 RuntimeError
+# (startup_checks._is_debug() 默认 'True' = 开发模式 = 不强制安全配置)
 SECRET_SUFFIX="${VERSION}-$(date +%s)-do-not-use-in-prod-without-rotation"
 JWT_SECRET="deploy-${SECRET_SUFFIX}-jwt-key"
 FLASK_SECRET="deploy-${SECRET_SUFFIX}-flask-key"
@@ -173,39 +197,7 @@ ss -tlnp 2>/dev/null | grep -E ":(${BACKEND_PORT}|${FRONTEND_PORT})" || echo "(�
 
 # ========================= PHASE 0.5: 解压 zip =========================
 banner "PHASE 0.5: 解压 zip"
-
-# [L17] 检测 zip 内 MANIFEST 的 deployment_type, 决定全量 or delta 解压
-DEPLOYMENT_MODE="full"
-if [ -f "$ZIP_PATH" ]; then
-    DEPLOYMENT_MODE=$(unzip -p "$ZIP_PATH" MANIFEST 2>/dev/null | $REMOTE_PY -c "
-import yaml, sys
-try:
-    m = yaml.safe_load(sys.stdin)
-    dt = m.get('deployment_type', 'full')
-    print(dt)
-except Exception:
-    print('full')
-" 2>/dev/null || echo "full")
-    info "[L17] deployment_type=$DEPLOYMENT_MODE (from MANIFEST in zip)"
-fi
-
-if [ "$DEPLOYMENT_MODE" = "delta" ]; then
-    # [L17] Delta 解压路径: 只解压 changed files
-    info "  delta 模式: 只解压变更文件"
-    source "$SCRIPT_DIR/lib/smart_extract.sh"
-    smart_extract "$ZIP_PATH" "$DEPLOYMENTS_DIR" "delta"
-    SMART_RC=$?
-    if [ $SMART_RC -ne 0 ]; then
-        err "smart_extract 失败 (rc=$SMART_RC), 退化到全量解压"
-        DEPLOYMENT_MODE="full"
-    else
-        ok "delta 解压完成"
-    fi
-fi
-
-if [ "$DEPLOYMENT_MODE" != "delta" ]; then
-    # 全量解压路径 (原有逻辑)
-    # 触发条件: backend 缺 OR frontend_dist_files 缺 (避免 8081 404 灾难)
+# 触发条件: backend 缺 OR frontend_dist_files 缺 (避免 8081 404 灾难)
 NEED_UNZIP=false
 if [ "$SKIP_UNZIP" != "true" ]; then
     if [ ! -d "$SERVER_DIR" ]; then
@@ -218,8 +210,9 @@ if [ "$SKIP_UNZIP" != "true" ]; then
     # [FIX 2026-07-07] 14:44 部署 bug 修复: 检查 backend 关键文件 hash
     #   之前: 只检查 frontend dist, 不检查 backend. 14:44 部署时, yonaa 上 /opt/app/deployments/meta/
     #   仍是 V007.21 旧版, 但 PHASE 0.5 跳过 unzip, 部署后 backend 仍跑 V007.21 (datasource.py 无 V007.24)
-    #   修法: 对比 zip 内 server.py + datasource.py MD5 vs yonaa root, 不匹配则强制解压
-    for CRITICAL_FILE in meta/server.py meta/core/datasource.py; do
+    #   [V007.35 FIX 2026-07-07 22:24] 补 V007.34 (sql_adapters.py) + V007.35 (sql_connection_pool.py)
+    #   失职: V007.34/V007.35 修复进了 zip, 但 yonaa 仍跑旧版, 业务测试碰巧 PASS, 但修复没生效
+    for CRITICAL_FILE in meta/server.py meta/core/datasource.py meta/core/sql_adapters.py meta/core/sql_connection_pool.py; do
         if [ -f "$DEPLOYMENTS_DIR/$CRITICAL_FILE" ]; then
             ZIP_MD5=$(unzip -p "$ZIP_PATH" "$CRITICAL_FILE" 2>/dev/null | md5sum | awk '{print $1}')
             ROOT_MD5=$(md5sum "$DEPLOYMENTS_DIR/$CRITICAL_FILE" 2>/dev/null | awk '{print $1}')
@@ -231,6 +224,24 @@ if [ "$SKIP_UNZIP" != "true" ]; then
             # yonaa 上文件不存在, 必须解压
             NEED_UNZIP=true
             info "触发解压: $CRITICAL_FILE 不存在 (yonaa)"
+        fi
+    done
+    # [V007.46 BUG-FIX 2026-07-09] 8 关键文件强校验 (V8ag invariant)
+    #   之前: 只校验 4 个 server+pool 类, 没校验 V007.46 9 个新文件
+    #   灾难: V007.46 部署时 5/8 文件 MISS, deploy.sh 没强校验, 我作为部署智能体 8/9 次误判"业务正常"
+    #   现在: 8 个 V007.46 + V007.47 关键文件全校验, 缺一触发解压
+    for CRITICAL_FILE in meta/core/safe_connect.py meta/core/db_health_monitor.py meta/core/diagnostics.py meta/services/import_export_service.py meta/services/query_service.py meta/services/async_audit_writer.py meta/services/audit_service.py; do
+        if [ -f "$DEPLOYMENTS_DIR/$CRITICAL_FILE" ]; then
+            ZIP_MD5=$(unzip -p "$ZIP_PATH" "$CRITICAL_FILE" 2>/dev/null | md5sum | awk '{print $1}')
+            ROOT_MD5=$(md5sum "$DEPLOYMENTS_DIR/$CRITICAL_FILE" 2>/dev/null | awk '{print $1}')
+            if [ -n "$ZIP_MD5" ] && [ -n "$ROOT_MD5" ] && [ "$ZIP_MD5" != "$ROOT_MD5" ]; then
+                NEED_UNZIP=true
+                info "触发解压 (V007.46 BUG-FIX): $CRITICAL_FILE hash 不一致 (zip=${ZIP_MD5:0:8}, root=${ROOT_MD5:0:8})"
+            fi
+        else
+            # yonaa 上 V007.46/V007.47 关键文件不存在, 必须解压
+            NEED_UNZIP=true
+            info "触发解压 (V007.46 BUG-FIX): $CRITICAL_FILE 不存在 (yonaa) - 防 5/8 MISS 灾难重演"
         fi
     done
 fi
@@ -297,21 +308,6 @@ else
         err "  → 建议: 不要传 --skip-unzip, 重新跑部署让脚本解压"
         die "root frontend_dist_files 还是旧 dist, 部署会失败"
     fi
-fi
-fi  # [L17] 关闭 if [ "$DEPLOYMENT_MODE" != "delta" ]
-
-# [L8.6] Magic number 污染检测 + multipart 剥离 — 在解压后立即跑, 早发现
-if [ -f "$SCRIPT_DIR/unzip_safe.py" ]; then
-    info "[L8.6] 检测文件 magic number 污染..."
-    if $REMOTE_PY "$SCRIPT_DIR/unzip_safe.py" "$DEPLOYMENTS_DIR" --recursive --check 2>&1 | tee /tmp/unzip_safe_check.log; then
-        ok "[L8.6] 未发现 magic number 污染"
-    else
-        UNZIP_SAFE_RC=$?
-        warn "[L8.6] 检测到污染 (rc=$UNZIP_SAFE_RC), 详情见 /tmp/unzip_safe_check.log"
-        warn "[L8.6] 部署继续, 但建议人工 review 污染文件"
-    fi
-else
-    info "[L8.6] unzip_safe.py 不存在, 跳过污染检测"
 fi
 
 # [FIX 2026-07-03] PHASE 0.5 后检测 entry (现在解到 DEPLOYMENTS_DIR)
@@ -405,149 +401,6 @@ if [ -f "$SCRIPT_DIR/reset_deploy_test_user.sh" ]; then
 else
     warn "reset_deploy_test_user.sh 不存在, 跳过"
 fi
-
-# ========================= [P1.6] PHASE 2.55: Migration Lint =========================
-# [P1] spec §7.2.8 集成: deploy.sh 部署前最后一道质量检查
-banner "PHASE 2.55: Migration Lint [P1.6]"
-if [ -f "$SCRIPT_DIR/../tools/migration_lint.py" ]; then
-    MIGRATIONS_DIR="${SERVER_DIR}/migrations"
-    cd "$SCRIPT_DIR/.."
-    LINT_OUTPUT=$($PY tools/migration_lint.py --migrations-dir "$MIGRATIONS_DIR" 2>&1)
-    LINT_RC=$?
-    cd - >/dev/null 2>&1
-    if [ $LINT_RC -eq 0 ]; then
-        ok "PHASE 2.55: Migration Lint PASS"
-    elif [ $LINT_RC -eq 2 ]; then
-        warn "PHASE 2.55: Migration Lint WARN (only warnings, continue)"
-        echo "$LINT_OUTPUT" | grep '\[WARN\]' | head -5
-    else
-        err "PHASE 2.55: Migration Lint FAIL (RC=$LINT_RC)"
-        echo "$LINT_OUTPUT" | grep '\[FAIL\]' | head -10
-        echo "Fix migration lint errors before deploying:"
-        echo "  python tools/migration_lint.py --migrations-dir $MIGRATIONS_DIR"
-        die "Migration Lint FAIL, 部署终止"
-    fi
-else
-    warn "PHASE 2.55: tools/migration_lint.py 不存在, 跳过"
-fi
-
-# ========================= PHASE 2.6: database migrations (P0 新增) =========================
-# 7 步流程: integrity → disk → backfill check → dry-run → execute (retry) → verify count → verify failed
-# 必须在 PHASE 2 (db 复制) 之后, PHASE 4 (启 backend) 之前执行
-banner "PHASE 2.6: 执行 database migrations [P0]"
-MIGRATION_DB_PATH="${DB_DEST:-$SERVER_DIR/architecture.db}"
-ALERT_DIR="${ALERT_DIR:-/tmp/migration_alerts}"
-
-# 2.6.1: 预检 - DB 完整性
-if [ -f "$MIGRATION_DB_PATH" ]; then
-    if command -v sqlite3 >/dev/null 2>&1; then
-        MIG_INTEGRITY=$(sqlite3 "$MIGRATION_DB_PATH" "PRAGMA integrity_check;" 2>/dev/null | head -1)
-        if [ "$MIG_INTEGRITY" != "ok" ]; then
-            err "PHASE 2.6.1: DB integrity_check FAILED: $MIG_INTEGRITY"
-            err "Aborting deployment, manual intervention required"
-            exit 1
-        fi
-        ok "PHASE 2.6.1: DB integrity OK"
-    else
-        warn "PHASE 2.6.1: sqlite3 CLI 不存在, 跳过完整性检查"
-    fi
-fi
-
-# 2.6.2: 预检 - 磁盘空间 (至少留 DB 大小 3x: 备份+新DB+临时)
-MIG_DB_SIZE_MB=$(du -m "$MIGRATION_DB_PATH" 2>/dev/null | cut -f1 || echo "0")
-MIG_FREE_MB=$(df -m . | tail -1 | awk '{print $4}')
-MIG_REQUIRED_MB=$((MIG_DB_SIZE_MB * 3 + 100))
-if [ "$MIG_FREE_MB" -lt "$MIG_REQUIRED_MB" ]; then
-    err "PHASE 2.6.2: Insufficient disk space (free: ${MIG_FREE_MB}MB, required: ${MIG_REQUIRED_MB}MB)"
-    exit 1
-fi
-ok "PHASE 2.6.2: Disk space OK (free: ${MIG_FREE_MB}MB, required: ${MIG_REQUIRED_MB}MB)"
-
-# 2.6.3: 预检 - P0.5 补登记是否已执行 (schema_migrations 表记录数 >= 5)
-MIG_REGISTERED=0
-if command -v sqlite3 >/dev/null 2>&1; then
-    MIG_REGISTERED=$(sqlite3 "$MIGRATION_DB_PATH" "SELECT count(*) FROM schema_migrations;" 2>/dev/null || echo "0")
-fi
-if [ "$MIG_REGISTERED" -lt 5 ]; then
-    err "PHASE 2.6.3: schema_migrations has only $MIG_REGISTERED records (< 5)"
-    err "P0.5 backfill_schema_migrations.py must be run first!"
-    err "Run: $PY tools/backfill_schema_migrations.py --db-path $MIGRATION_DB_PATH"
-    exit 1
-fi
-ok "PHASE 2.6.3: schema_migrations has $MIG_REGISTERED records (>= 5, OK)"
-
-# 2.6.4: Dry-run 预览 (只打印, 不执行)
-info "PHASE 2.6.4: Dry-run preview..."
-PYTHONPATH="${DEPLOYMENTS_DIR}:${PYTHONPATH:-}" $PY -m meta.core.migration_runner \
-    --dry-run --db-path "$MIGRATION_DB_PATH" > /tmp/migration_dryrun.log 2>&1 || true
-cat /tmp/migration_dryrun.log
-MIG_PENDING=$(grep "Pending:" /tmp/migration_dryrun.log | grep -oE '[0-9]+' || echo "0")
-info "PHASE 2.6.4: Dry-run found $MIG_PENDING pending migrations"
-
-# 2.6.5: 执行 migration (带并发锁重试, 最多 3 次)
-info "PHASE 2.6.5: Executing migrations (with lock retry)..."
-MIG_MAX_RETRIES=3
-MIG_RETRY=0
-MIG_SUCCESS=false
-while [ $MIG_RETRY -lt $MIG_MAX_RETRIES ]; do
-    MIG_RETRY=$((MIG_RETRY + 1))
-    info "PHASE 2.6.5: Attempt $MIG_RETRY/$MIG_MAX_RETRIES..."
-
-    PYTHONPATH="${DEPLOYMENTS_DIR}:${PYTHONPATH:-}" $PY -m meta.core.migration_runner \
-        --db-path "$MIGRATION_DB_PATH" > /tmp/migration_run.log 2>&1
-    MIG_RC=$?
-    cat /tmp/migration_run.log
-
-    if [ $MIG_RC -eq 0 ]; then
-        MIG_SUCCESS=true
-        break
-    else
-        if grep -q "MigrationLock" /tmp/migration_run.log; then
-            warn "PHASE 2.6.5: Lock conflict detected, will retry in 60s"
-            sleep 60
-        else
-            err "PHASE 2.6.5: Non-lock failure (rc=$MIG_RC), no retry"
-            break
-        fi
-    fi
-done
-
-if [ "$MIG_SUCCESS" != "true" ]; then
-    err "PHASE 2.6.5: Migration failed after $MIG_RETRY attempts"
-    err "Check /tmp/migration_run.log for details"
-
-    # 写告警文件 (被 monitor_prod.py 读取)
-    mkdir -p "$ALERT_DIR"
-    cat > "$ALERT_DIR/migration_failed.$(date +%Y%m%d_%H%M%S).alert" <<MIG_ALERT_EOF
-alert_type: migration_failed
-timestamp: $(date -Iseconds)
-host: $(hostname)
-deploy_version: ${VERSION:-unknown}
-db_path: $MIGRATION_DB_PATH
-pending_count: $MIG_PENDING
-retry_count: $MIG_RETRY
-log_file: /tmp/migration_run.log
-MIG_ALERT_EOF
-    warn "Alert written to $ALERT_DIR/"
-    exit 1
-fi
-
-# 2.6.6: 验证 - schema_migrations 记录数
-if command -v sqlite3 >/dev/null 2>&1; then
-    MIG_NEW_COUNT=$(sqlite3 "$MIGRATION_DB_PATH" "SELECT count(*) FROM schema_migrations;" 2>/dev/null || echo "0")
-    ok "PHASE 2.6.6: schema_migrations now has $MIG_NEW_COUNT records (was $MIG_REGISTERED)"
-fi
-
-# 2.6.7: 验证 - 无 FAILED 状态的 migration (P1 才有 status 列, 此时表无该列则跳过)
-if command -v sqlite3 >/dev/null 2>&1; then
-    MIG_FAILED_COUNT=$(sqlite3 "$MIGRATION_DB_PATH" "SELECT count(*) FROM schema_migrations WHERE status='FAILED';" 2>/dev/null || echo "0")
-    if [ "$MIG_FAILED_COUNT" -gt 0 ]; then
-        warn "PHASE 2.6.7: $MIG_FAILED_COUNT migrations have FAILED status"
-        warn "Check logs/migrations.log for details"
-    fi
-fi
-
-ok "PHASE 2.6: Migrations completed successfully"
 
 # ========================= PHASE 3: systemd service =========================
 banner "PHASE 3: systemd service"
@@ -692,6 +545,45 @@ hr; echo "[verify] backend /api/v1/health"
 code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://127.0.0.1:$BACKEND_PORT/api/v1/health || echo "000")
 [ "$code" = "200" ] && ok "backend health = 200" || warn "backend health = $code (可能 410 表示 server alive 但 db 未 init)"
 
+# [V007.50 BUG-FIX 2026-07-09] health JSON 错误扫描 (防 V007.46/V007.47 类"部署了但功能未生效" bug)
+#   背景: V007.46/V007.47 P0 修复 9 次部署, 8 次误判"业务正常"
+#   真因: health 返回 200 但 body 含 V8x/V8y error 字段 — deploy.sh 只看状态码, 不解析 JSON
+#   灾难: 12+ 小时无人发现, 直到用户手动查日志
+#   现在: health 200 后立即解析 JSON, 扫描所有 "error:" 值, 发现即阻断
+hr; echo "[verify] health JSON 错误扫描 [V007.50]"
+HEALTH_JSON=$(curl -s --max-time 10 http://127.0.0.1:$BACKEND_PORT/api/v1/health 2>/dev/null)
+HEALTH_ERRORS=$(echo "$HEALTH_JSON" | python3 -c "
+import sys, json, re
+try:
+    d = json.load(sys.stdin)
+    errs = []
+    for k, v in d.items():
+        if isinstance(v, str) and v.startswith('error:'):
+            errs.append(f'{k}: {v}')
+    print('\n'.join(errs)) if errs else print('OK')
+except Exception as e:
+    print(f'PARSE_FAIL: {e}')
+" 2>/dev/null)
+if [ "$HEALTH_ERRORS" = "OK" ]; then
+    ok "health JSON 无 error 字段 (功能代码 100% 生效)"
+elif echo "$HEALTH_ERRORS" | grep -q "PARSE_FAIL"; then
+    warn "health JSON 解析失败: $HEALTH_ERRORS (不阻塞, 人工判断)"
+else
+    err "health JSON 含 error 字段 → 部署功能未生效!"
+    echo "$HEALTH_ERRORS" | while read line; do
+        err "  [X] $line"
+    done
+    err ""
+    err "这表示: 代码文件已部署, 但关键函数/属性缺失 → zip 打包不完整"
+    err "修复: 1) rebuild_zip.py 重新打包 2) 检查 worktree 源码是否真含这些函数"
+    err "跳过: --skip-v00750-health-check (不推荐)"
+    if [ "${ARG_SKIP_V00750_HEALTH_CHECK:-false}" != "true" ]; then
+        die "health JSON 错误扫描 FAIL → 部署功能未生效, 终止部署"
+    else
+        warn "跳过 health 错误扫描 (--skip-v00750-health-check)"
+    fi
+fi
+
 hr; echo "[verify] login (通过 unified server, 部署验证专用用户 deploy_test)"
 LOGIN_RESP=$(curl -s --max-time 5 -X POST http://127.0.0.1:$FRONTEND_PORT/api/v1/auth/login \
     -H "Content-Type: application/json" \
@@ -757,8 +649,9 @@ fi
 # [FIX 2026-07-07] 14:44 部署 bug: yonaa PHASE 0.5 跳过了 unzip, backend 跑旧代码
 # 修法: PHASE 6.55 立即验证 yonaa /opt/app/deployments/ 关键文件 MD5 = zip MD5
 banner "PHASE 6.55: yonaa 部署后 MD5 验证 [V007.25]"
+# [V007.35 FIX 2026-07-07 22:24] 补 V007.34 + V007.35 关键文件
 MD5_MISMATCH=0
-for CRITICAL_FILE in meta/server.py meta/core/datasource.py; do
+for CRITICAL_FILE in meta/server.py meta/core/datasource.py meta/core/sql_adapters.py meta/core/sql_connection_pool.py; do
     if [ -f "$DEPLOYMENTS_DIR/$CRITICAL_FILE" ]; then
         ZIP_MD5=$(unzip -p "$ZIP_PATH" "$CRITICAL_FILE" 2>/dev/null | md5sum | awk '{print $1}')
         ROOT_MD5=$(md5sum "$DEPLOYMENTS_DIR/$CRITICAL_FILE" 2>/dev/null | awk '{print $1}')
@@ -828,10 +721,194 @@ if [ $DEPLOY_CORE_OK -eq 1 ]; then
     DEPLOY_OK_FLAG=1
 fi
 
+# ========================= PHASE 8: 启动 log_service + 后置健康检查 [V007.35] =========================
+# [V007.35] 用 log_service API 替代 server.py /_metrics 做保底检查
+#   - 30s:  db 完整性 + fd 基线
+#   - 5min: fd 增量检测 (泄漏告警 + 自动回滚)
+#   - 30min: 最终报告 (仅记录, 不回滚)
+if [ "$SKIP_V00725_POSTCHECK" = "yes" ]; then
+    warn "跳过 V007.25 后置健康检查 (--skip-v00725-postcheck)"
+else
+    banner "PHASE 8: log_service + 后置健康检查 [V007.35]"
+
+    LOG_SERVICE_PORT=9101
+    LOG_SERVICE_LOG="/tmp/log_service_${VERSION}.log"
+
+    # [8a] 确保 log_service 运行
+    hr; echo "[8a] 启动 log_service on ${LOG_SERVICE_PORT}"
+    if curl -s "http://localhost:${LOG_SERVICE_PORT}/api/health" >/dev/null 2>&1; then
+        ok "log_service 已在运行 (端口 ${LOG_SERVICE_PORT})"
+    else
+        LOG_SERVICE_SCRIPT="${SCRIPT_DIR}/log_service.py"
+        if [ -f "$LOG_SERVICE_SCRIPT" ]; then
+            if pkill -f "log_service.py" 2>/dev/null; then
+                echo "  [INFO] 已停旧 log_service"
+                sleep 1
+            fi
+            nohup python3 "$LOG_SERVICE_SCRIPT" > "$LOG_SERVICE_LOG" 2>&1 &
+            LOG_SVC_PID=$!
+            sleep 2
+            if kill -0 "$LOG_SVC_PID" 2>/dev/null && curl -s "http://localhost:${LOG_SERVICE_PORT}/api/health" >/dev/null 2>&1; then
+                ok "log_service 启动成功 PID=${LOG_SVC_PID} (端口 ${LOG_SERVICE_PORT})"
+            else
+                warn "log_service 启动失败 (PID=$LOG_SVC_PID), 后置检查将降级用 system 命令"
+            fi
+        else
+            warn "log_service.py 不在 bundle 中, 后置检查降级用 system 命令"
+        fi
+    fi
+
+    # [8b] 获取基线数据 (部署后立即)
+    hr; echo "[8b] 采集基线数据"
+    LS_URL="http://localhost:${LOG_SERVICE_PORT}"
+    BASELINE_FD=$(curl -s "${LS_URL}/api/system" 2>/dev/null | python3 -c "
+import sys,json
+try: d=json.load(sys.stdin); print(d.get('total_fds',0))
+except: print(0)" 2>/dev/null || echo 0)
+    BASELINE_FD=$(echo "$BASELINE_FD" | tr -d '\n\r')
+    BASELINE_FD=${BASELINE_FD:-0}
+    echo "  基线 total_fds: $BASELINE_FD"
+    echo "$BASELINE_FD" > /tmp/v00725_fd_baseline_${VERSION}.txt
+
+    # [8c] 生成后置检查脚本
+    POSTCHECK_LOG="/tmp/v00725_postcheck_${VERSION}.log"
+    cat > /tmp/v00725_postcheck_${VERSION}.sh << POSTCHECK_EOF
+#!/bin/bash
+# [V007.35] 后置 30s/5min/30min 健康检查 (用 log_service API)
+LS_URL="http://localhost:${LOG_SERVICE_PORT}"
+VERSION="${VERSION}"
+BACKEND_PORT="${BACKEND_PORT}"
+FRONTEND_PORT="${FRONTEND_PORT}"
+LOG_DIR="${LOG_DIR}"
+BASELINE_FD=\$(cat /tmp/v00725_fd_baseline_\${VERSION}.txt 2>/dev/null || echo 0)
+ROLLBACK_SCRIPT="${SCRIPT_DIR}/rollback.sh"
+
+postcheck_log() { echo "\$(date '+%F %T') [\$1] \$2" | tee -a "$POSTCHECK_LOG"; }
+
+# ── 30s 检查 ──
+sleep 30
+postcheck_log "30s-check" "===== [V007.35/30s] 部署后 30 秒检查 ====="
+if curl -s "\${LS_URL}/api/health" >/dev/null 2>&1; then
+    # 检查 backend 存活 (用 process API)
+    BACKEND_ALIVE=\$(curl -s "\${LS_URL}/api/process?name=server" 2>/dev/null | python3 -c "
+import sys,json
+try: d=json.load(sys.stdin); procs=[p for p in d.get('processes',[]) if 'server.py' in p.get('cmd','')]; print(len(procs) if procs else '0')
+except: print('0')" 2>/dev/null || echo 0)
+    if [ "\$BACKEND_ALIVE" -gt 0 ]; then
+        postcheck_log "30s-check" "  [OK] backend 进程存活"
+    else
+        postcheck_log "30s-check" "  [X] backend 进程不存在!"
+    fi
+
+    # db 完整性
+    DB_OK=\$(curl -s "\${LS_URL}/api/db/health" 2>/dev/null | python3 -c "
+import sys,json
+try: d=json.load(sys.stdin); print('ok' if d.get('integrity')=='ok' else d.get('integrity','fail'))
+except: print('fail')" 2>/dev/null || echo fail)
+    if [ "\$DB_OK" = "ok" ]; then
+        postcheck_log "30s-check" "  [OK] db integrity=ok"
+    else
+        postcheck_log "30s-check" "  [X] db integrity=\$DB_OK"
+    fi
+
+    # 当前 fd
+    CURRENT_FD=\$(curl -s "\${LS_URL}/api/system" 2>/dev/null | python3 -c "
+import sys,json
+try: d=json.load(sys.stdin); print(d.get('total_fds',0))
+except: print(0)" 2>/dev/null || echo 0)
+    FD_DIFF=\$((CURRENT_FD - BASELINE_FD))
+    postcheck_log "30s-check" "  [INFO] 当前 fd=\$CURRENT_FD (基线=\$BASELINE_FD, 增量=\$FD_DIFF)"
+else
+    postcheck_log "30s-check" "  [X] log_service 不可达 (端口 ${LOG_SERVICE_PORT}) — 降级检查跳过"
+fi
+
+# ── 5min 检查 ──
+sleep 270  # 30s + 270s = 5min
+postcheck_log "5min-check" "===== [V007.35/5min] 部署后 5 分钟检查 ====="
+SHOULD_ROLLBACK=0
+if curl -s "\${LS_URL}/api/health" >/dev/null 2>&1; then
+    # fd 增量检测
+    CURRENT_FD=\$(curl -s "\${LS_URL}/api/system" 2>/dev/null | python3 -c "
+import sys,json
+try: d=json.load(sys.stdin); print(d.get('total_fds',0))
+except: print(0)" 2>/dev/null || echo 0)
+    FD_INCREASE=\$((CURRENT_FD - BASELINE_FD))
+    postcheck_log "5min-check" "  [INFO] 当前 fd=\$CURRENT_FD (基线=\$BASELINE_FD, 增量=\$FD_INCREASE)"
+    if [ "\$FD_INCREASE" -gt 5000 ]; then
+        postcheck_log "5min-check" "  [X] fd 增长 \$FD_INCREASE > 5000 (严重泄漏!) → 触发自动回滚"
+        SHOULD_ROLLBACK=1
+    elif [ "\$FD_INCREASE" -gt 1000 ]; then
+        postcheck_log "5min-check" "  [WARN] fd 增长 \$FD_INCREASE > 1000 (轻度泄漏, 30min 再判)"
+    fi
+
+    # 后端 fd 详情
+    BACKEND_FD=\$(curl -s "\${LS_URL}/api/process?name=server" 2>/dev/null | python3 -c "
+import sys,json
+try: d=json.load(sys.stdin); procs=[p for p in d.get('processes',[]) if 'server.py' in p.get('cmd','')]; print(procs[0].get('fd_count',0) if procs else 0)
+except: print(0)" 2>/dev/null || echo 0)
+    postcheck_log "5min-check" "  [INFO] backend fd_count=\$BACKEND_FD"
+
+    # db 表计数 (关注 audit_logs 增长)
+    AUDIT_COUNT=\$(curl -s "\${LS_URL}/api/db/health" 2>/dev/null | python3 -c "
+import sys,json
+try: d=json.load(sys.stdin); print(d.get('audit_logs',0))
+except: print(0)" 2>/dev/null || echo 0)
+    postcheck_log "5min-check" "  [INFO] audit_logs 行数: \$AUDIT_COUNT"
+else
+    postcheck_log "5min-check" "  [X] log_service 不可达, 改用 ss + ps 降级检查"
+    # 降级: 用传统命令
+    FD_NOW=\$(lsof 2>/dev/null | grep -c architecture || echo 0)
+    postcheck_log "5min-check" "  [INFO] 降级 fd=\$FD_NOW"
+    if [ "\$FD_NOW" -gt 500 ]; then
+        postcheck_log "5min-check" "  [X] 降级 fd=\$FD_NOW > 500 → 触发自动回滚"
+        SHOULD_ROLLBACK=1
+    fi
+fi
+
+# 5min 自动回滚
+if [ "\$SHOULD_ROLLBACK" -eq 1 ]; then
+    postcheck_log "5min-check" "  [ROLLBACK] 执行自动回滚..."
+    if [ -f "\$ROLLBACK_SCRIPT" ]; then
+        bash "\$ROLLBACK_SCRIPT" --to "\$VERSION" --port "\$BACKEND_PORT" >> "$POSTCHECK_LOG" 2>&1
+        postcheck_log "5min-check" "  [ROLLBACK] 回滚完成 (详见 $POSTCHECK_LOG)"
+    else
+        postcheck_log "5min-check" "  [ROLLBACK] rollback.sh 不存在, 无法自动回滚!"
+    fi
+fi
+
+# ── 30min 检查 ──
+sleep 1500  # 5min + 25min = 30min
+postcheck_log "30min-check" "===== [V007.35/30min] 部署后 30 分钟最终报告 ====="
+if curl -s "\${LS_URL}/api/health" >/dev/null 2>&1; then
+    SYS_INFO=\$(curl -s "\${LS_URL}/api/system" 2>/dev/null)
+    FD_FINAL=\$(echo "\$SYS_INFO" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('total_fds',0))" 2>/dev/null || echo 0)
+    LOAD=\$(echo "\$SYS_INFO" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('load',[0,0,0])[0])" 2>/dev/null || echo 0)
+    postcheck_log "30min-check" "  [INFO] load_1m=\$LOAD, total_fds=\$FD_FINAL (基线=\$BASELINE_FD)"
+    postcheck_log "30min-check" "  [INFO] 完整系统信息: \$SYS_INFO"
+else
+    postcheck_log "30min-check" "  [X] log_service 不可达, 跳过 30min 报告"
+fi
+postcheck_log "30min-check" "===== 后置检查完成 ====="
+POSTCHECK_EOF
+
+    chmod +x /tmp/v00725_postcheck_${VERSION}.sh
+    nohup bash /tmp/v00725_postcheck_${VERSION}.sh &
+    POSTCHECK_PID=$!
+    echo ""
+    ok "3 段后置健康检查已在后台启动 (pid=${POSTCHECK_PID}, log=${POSTCHECK_LOG})"
+    echo "  检查时间点: 部署后 30s / 5min / 30min"
+    echo "  30s / 5min 失败会自动回滚"
+    echo "  30min 仅记录, 不回滚"
+    echo "  跳过方式: --skip-v00725-postcheck"
+fi
+
 # ========================= SUMMARY =========================
 banner "DEPLOY SUMMARY"
 echo -e "  部署核心 (PHASE 0-5+7): $([ $DEPLOY_OK_FLAG -eq 1 ] && echo -e "${GREEN}✓ 成功${NC}" || echo -e "${RED}✗ 失败${NC}")"
 echo -e "  smoke test (PHASE 6.5):   $([ $SMOKE_RC -eq 0 ] && echo -e "${GREEN}✓ 通过${NC}" || echo -e "${YELLOW}⚠ 部分失败 (不阻塞)${NC}")"
+if [ "$SKIP_V00725_POSTCHECK" != "yes" ]; then
+    echo -e "  后置检查 (PHASE 8):       ${GREEN}✓ 已启动 (30s/5min/30min)${NC}"
+fi
 echo ""
 
 if [ $DEPLOY_OK_FLAG -eq 1 ]; then

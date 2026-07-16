@@ -313,7 +313,7 @@ bash deploy.sh
 |------|------|------|
 | **打包 LF 保障** | ✅ rebuild_zip.py line 568-575 `force_lf_in_tree` | 无 |
 | **MANIFEST 完整性 hash** | ✅ V007.25 加的 `manifest_sha256` | 无 |
-| **远端 11 文件 hash 校验** | ⚠️ deploy.sh 守卫 | **前端 dist_files/ js/css 没校验** (V007.46 BUG-FIX 没覆盖) |
+| **远端 11 文件 hash + dist hash 校验** | ✅ deploy.sh 守卫 | 已覆盖 (V007.46 BUG-FIX 7 文件 + V007.25 BUG-FIX dist hash, line 243-263 + 279-287) |
 | **deploy_history 记录** | ❌ yonaa 上 9 天没新记录 | **出事故时无审计** |
 | **真 delta (KB 级)** | ❌ 未启用 | **每次都传 30MB zip, 即使 1 行改动** |
 
@@ -322,7 +322,7 @@ bash deploy.sh
 | 任务 | 应该用 |
 |------|-------|
 | **现在发版 (日常)** | `rebuild_zip.py` (全量) + `deploy.sh` (按需解压) |
-| **下次发版"前端 dist 大改"** | 改 frontend_dist_files/ 后, **11 文件守卫不覆盖**, 可能跳 unzip → 灾难! **必须**手动 `bash deploy.sh --force-unzip` |
+| **改了 frontend dist_files/ 关键 JS** | deploy.sh PHASE 0.5 else 分支 (line 276-287) 已校验 dist hash, **会触发解压** (V007.25 BUG-FIX 2026-07-04 加的) |
 | **L17 真 delta 启用 (V007.68+)** | 等 commit 把 smart_extract.sh 集成到 deploy.sh 后, 用 `--delta --prev-manifest` |
 
 ---

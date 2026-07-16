@@ -120,6 +120,29 @@ SKIP_V00725_POSTCHECK="${ARG_SKIP_V00725_POSTCHECK:-no}"
 
 detect_remote_env
 
+# [V007.68] 部署历史审计 (持久化记录每次部署的 success/failure)
+# 之前: deploy_history.log 9 天没新记录, 因为 deploy.sh 根本不写历史
+# 现在: 部署开始时记 start, 结束时 (exit 0/1/任何) trap 记 end
+DEPLOY_HISTORY_LOG="${DEPLOY_HISTORY_LOG:-/opt/app/shared/logs/deploy_history.log}"
+mkdir -p "$(dirname "$DEPLOY_HISTORY_LOG")" 2>/dev/null
+DEPLOY_START_TS=$(date '+%F %T')
+DEPLOY_START_EPOCH=$(date +%s)
+DEPLOY_HOST=$(hostname 2>/dev/null || echo "unknown")
+DEPLOY_USER=$(whoami 2>/dev/null || echo "unknown")
+# 启动记录
+echo "$DEPLOY_START_TS | deploy_id=${VERSION}_$(date +%s)_${DEPLOY_USER} | version=${VERSION} | port=${BACKEND_PORT} | user=${DEPLOY_USER} | host=${DEPLOY_HOST} | phase=start | status=running" >> "$DEPLOY_HISTORY_LOG" 2>/dev/null || true
+# trap: 任何退出 (正常/异常/信号) 都写历史
+_deploy_history_trap() {
+    local exit_code=$?
+    local end_ts=$(date '+%F %T')
+    local end_epoch=$(date +%s)
+    local duration=$((end_epoch - DEPLOY_START_EPOCH))
+    local status="success"
+    [ $exit_code -ne 0 ] && status="failed (exit=$exit_code)"
+    echo "$end_ts | deploy_id=${VERSION}_${DEPLOY_START_EPOCH}_${DEPLOY_USER} | version=${VERSION} | port=${BACKEND_PORT} | user=${DEPLOY_USER} | host=${DEPLOY_HOST} | phase=end | status=${status} | duration=${duration}s" >> "$DEPLOY_HISTORY_LOG" 2>/dev/null || true
+}
+trap _deploy_history_trap EXIT
+
 # ========================= PHASE 0: precheck (可选跳过) =========================
 if [ "$SKIP_PRECHECK" != "true" ]; then
     banner "PHASE 0: precheck"
