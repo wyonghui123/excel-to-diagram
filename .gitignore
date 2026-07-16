@@ -198,3 +198,25 @@ meta/architecture.db.pre_*
 
 # Verification artifacts (debug scripts, screenshots)
 .verify/
+
+# ===== v2026.07.16: V007.74 调查发现 — 临时诊断脚本路径扩展 =====
+# 之前 v3.24 的 /_*.py 只匹配 root 目录的临时脚本
+# 但 V007.74 调查发现 _v00774_*.py 在 tests/ 下也被 git 跟踪 (untracked)
+# 扩展到全 repo: tests/ 下的 _*.py 也算临时诊断脚本 (不应该是产品代码)
+
+# 扩展: tests/ 下的 _*.py 临时脚本 (V007.74 调查发现)
+/tests/_*.py
+/tests/_*.txt
+/tests/_*.log
+/tests/_*.patch
+/tests/_*.html
+
+# frontend_dist_files/ 是 V007.13 发版的 build output (80+ MB)
+/frontend_dist_files/
+/frontend_dist_files/**/*
+
+# 临时 manifest / state / PID 文件 (deploy 过程产物)
+*.lockfile
+*.state.json
+*.deploy_state
+
