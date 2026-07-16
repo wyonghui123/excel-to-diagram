@@ -141,6 +141,134 @@ git -C d:/filework/worktrees/release-prep log --oneline -1
 
 ---
 
+## 0.6. Agent 身份检查 SOP (V007.80 新增)  [!] 必读
+
+> **重要**: 每次 AI Agent session 重启 / 切换 worktree / 切换角色, **必须先跑 5 步身份检查 SOP**.
+> 错认身份 = 错认工作 = 错删 / 错 commit. 详情见 V007.76 [docs/V007.76_IDENTITY_CORRECTION.md](V007.76_IDENTITY_CORRECTION.md)
+
+### 0.6.1 5 步身份检查 SOP (强制)
+
+```bash
+# 每次 session 开始必跑 (5 步, 10 秒内)
+echo "=== 1. USER (git config) ===" && \
+  git -C "$(pwd)" config --get user.name && \
+  git -C "$(pwd)" config --get user.email && \
+echo "=== 2. WORKTREE ===" && \
+  basename $(pwd) && \
+echo "=== 3. BRANCH ===" && \
+  git -C "$(pwd)" branch --show-current && \
+echo "=== 4. HEAD AUTHOR ===" && \
+  git -C "$(pwd)" log -1 --pretty=format:"%an <%ae>" && echo && \
+echo "=== 5. DIRTY (未提交) ===" && \
+  git -C "$(pwd)" status --porcelain | wc -l
+```
+
+### 0.6.2 5 步输出解读
+
+| 步 | 看到 | 含义 | 行动 |
+|---|------|------|------|
+| 1. USER | `Dev Agent (V061 staging)` | **你是这个 agent** | ✅ 继续 |
+| 1. USER | 空 / 别的名字 | **git config 缺失** | ⚠️ 设 user.name/email |
+| 2. WORKTREE | `release-prep` | 部署工作区 | ✅ 部署 / 编码防护 / 文档 |
+| 2. WORKTREE | `agent-v061-staging` | V061 staging 工作区 | ✅ V061 staging 工作 |
+| 2. WORKTREE | `docs-handover` | 协调智能体工作区 | ❌ 切回自己的 worktree |
+| 3. BRANCH | `release/pre-2026-06-29` | PM 部署分支 | ✅ 部署相关 |
+| 3. BRANCH | `agent/v061-staging` | V061 staging 分支 | ✅ V061 staging |
+| 4. HEAD AUTHOR | `Dev Agent (V061 staging) <dev@archworkspace.local>` | **最近 commit 你的** | ✅ 这是你的工作 |
+| 4. HEAD AUTHOR | `coordinator <coordinator@...>` | **别人 commit** | ⚠️ 你在别人 worktree? |
+| 5. DIRTY | 0 | 干净 | ✅ 无 work-in-progress |
+| 5. DIRTY | 1-50 | 一些改动 | ⚠️ 1-3 个文件就 commit |
+| 5. DIRTY | 50-500 | 中等工作 | ⚠️ 拆分 phase commit |
+| 5. DIRTY | 500+ | **巨大累积** | 🔴 **这是你的, 必须 commit** |
+
+### 0.6.3 4 条铁律 (V007.76 教训)
+
+#### 铁律 1: 身份铁律 — 5 步 SOP
+
+**每次 session 必跑 5 步身份检查**. 不要"凭感觉"识别自己.
+
+#### 铁律 2: 归属铁律 — dirty 几乎都是你自己
+
+| 情况 | dirty 来源 |
+|------|------------|
+| **HEAD 是你的** + worktree 你在用 | **dirty = 你的 work-in-progress, 必须 commit** |
+| HEAD 是别人 + 你在用 | dirty 可能混 (前 session 残留), **小心处理** |
+| HEAD 是你 + dirty 巨大 (1000+) | 之前 session 没 commit, 巨大累积 |
+
+**默认假设: dirty 是你的**. **不要轻易说"不动它们"**.
+
+#### 铁律 3: 不要推测 — 看 config
+
+| 错的 | 对的 |
+|------|------|
+| "用 git shortlog 看哪个 author commit 多" | **用 git config 看自己** |
+| "我工作流是 dev agent, 不会做 PM 部署" | **看 worktree 是不是 release-prep** |
+| "V047 是主力, V008 是 V047 做的" | **V047 在别处, release-prep 是我** |
+
+#### 铁律 4: 公开致歉原则
+
+发现自己错了, **立刻公开致歉 + 修正 + 写文档**, 不藏着.
+
+### 0.6.4 5 步 SOP 失败案例 (V007.76 教训)
+
+**V007.74 / V007.75 错误**: 我 (V061 staging) 错认 714 个 dirty 是 "V047 / 协调智能体 / Deploy Agent" 的工作.
+
+**正确的 5 步 SOP 输出应该是**:
+```
+=== 1. USER (git config) ===
+Dev Agent (V061 staging)
+dev@archworkspace.local
+=== 2. WORKTREE ===
+release-prep
+=== 3. BRANCH ===
+release/pre-2026-06-29
+=== 4. HEAD AUTHOR ===
+Dev Agent (V061 staging) <dev@archworkspace.local>
+=== 5. DIRTY (未提交) ===
+714
+```
+
+**5 步立刻告诉**: 你是 V061 staging, 在 release-prep (部署工作区), HEAD 是你的, 714 dirty 是你的. **必须 commit**.
+
+### 0.6.5 自动检查脚本 (推荐)
+
+把以下内容保存为 `~/.trae/pre-session-check.sh` (Linux/Mac) 或 `%USERPROFILE%\.trae\pre-session-check.ps1` (Windows):
+
+**PowerShell 版本** (Windows):
+
+```powershell
+# pre-session-check.ps1
+$ErrorActionPreference = 'Stop'
+$Worktree = (Get-Location).Path
+Write-Host "=== 1. USER ===" -ForegroundColor Cyan
+git -C $Worktree config --get user.name
+git -C $Worktree config --get user.email
+Write-Host "=== 2. WORKTREE ===" -ForegroundColor Cyan
+Split-Path $Worktree -Leaf
+Write-Host "=== 3. BRANCH ===" -ForegroundColor Cyan
+git -C $Worktree branch --show-current
+Write-Host "=== 4. HEAD AUTHOR ===" -ForegroundColor Cyan
+git -C $Worktree log -1 --pretty=format:"%an <%ae>"
+Write-Host ""
+Write-Host "=== 5. DIRTY ===" -ForegroundColor Cyan
+(git -C $Worktree status --porcelain) | Measure-Object -Line
+```
+
+### 0.6.6 V007.76 完整复盘
+
+详见 [docs/V007.76_IDENTITY_CORRECTION.md](V007.76_IDENTITY_CORRECTION.md) — 包含 9 个章节:
+- 1. 错误 (V007.74 / V007.75 错认作者)
+- 2. 真正身份 (git config + worktree + HEAD author)
+- 3. 错认的 5 个根因
+- 4. 修正行动 (V007.76-V007.80)
+- 5. 4 条铁律
+- 6. V007.74 报告 diff
+- 7. V007.75 报告 diff
+- 8. V007.70-V007.80 时间线
+- 9. 公开致歉
+
+---
+
 ## 1. Agent 必知 (3 分钟读完)
 
 ### 1.1 5 个最常用工具 (直接调, 不需 SSH)
