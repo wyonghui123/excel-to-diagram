@@ -1,3 +1,13 @@
-# [V007.55 2026-07-15] log_service 监控
-# 每 5 分钟跑 probe --check-log-service, 失败写告警
+# [V007.55+V007.58 2026-07-15] log_service 监控 + IM 告警
+#
+# cron 格式: 分 时 日 月 周 命令
+# 每 5 分钟跑一次 probe, 失败时:
+#   1. 写 /var/log/monitor_alert.log (历史记录)
+#   2. 调 alert_im.py 推送 IM 告警 (V007.58 新增)
+#   3. 用本地锁文件 /tmp/.alert_im.lock 防重复推送 (10 分钟去重)
+
+# V007.55 旧版 (保留兼容)
 */5 * * * * root cd /opt/app/staging/deploy && /opt/miniconda3-py39/bin/python tools/remote_capability_probe.py --check-log-service >> /var/log/monitor.log 2>&1 || echo "[ALERT] $(date -Iseconds) log_service FAIL" >> /var/log/monitor_alert.log
+
+# V007.58: 失败时额外推送 IM (从 /opt/app/deployments/config/alert_im.json 读 webhook)
+*/5 * * * * root LOCKFILE=/tmp/.alert_im.lock; rm -f $LOCKFILE && flock -n /tmp/.alert_im.lock -c "cd /opt/app/staging/deploy && /opt/miniconda3-py39/bin/python tools/remote_capability_probe.py --check-log-service > /tmp/probe_out.txt 2>&1 || /opt/miniconda3-py39/bin/python tools/alert_im.py --from-config --type feishu --title '[ALERT] yonaa log_service FAIL' --content \"\$(cat /tmp/probe_out.txt | head -50)\" --at-all" >> /var/log/monitor.log 2>&1
