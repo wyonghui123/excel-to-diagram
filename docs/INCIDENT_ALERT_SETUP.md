@@ -1,10 +1,114 @@
-# INCIDENT_ALERT_SETUP.md - IM 告警配置 (V007.58+V007.59 2026-07-15)
+# INCIDENT_ALERT_SETUP.md - IM 告警配置 (V007.58 ~ V007.63 2026-07-16)
 
 > **目标**: yonaa 端出事故时, 5 分钟内推到运维手机 (飞书/钉钉/微信)
 > **架构**: agent 端 (公司电脑, 有公网) 轮询 + 推送
 > **适用**: yonaa 在阿里云 air-gapped 环境, 服务器无法直连公网 IM
 > **作者**: AI Agent
-> **更新**: 2026-07-15 (V007.59 加飞书应用机器人支持)
+> **更新**:
+> - 2026-07-15 V007.58: IM webhook 推送
+> - 2026-07-15 V007.59: 飞书应用机器人 (lark_app)
+> - 2026-07-16 V007.60: 7 项 P0 分层监控 + 故障演练验证
+> - 2026-07-16 V007.61: 9 项监控 + 用户使用异常 (HTTP 5xx + Traceback 按接口/类型分组)
+> - 2026-07-16 V007.62: Task Scheduler 改用 pythonw.exe (no-console), **不再弹 cmd 窗口**, 不再有 "no such directory" 错误
+> - 2026-07-16 **V007.63**: 心跳通知 (默认每 30 分钟, blue card), 让运维知道监控**在跑**而不只是**出问题时**才收到
+
+---
+
+## V007.60 升级摘要
+
+### 之前 (V007.59) — 只有端口心跳
+
+| 监控项 | 是什么 |
+|--------|--------|
+| port | 7 个服务端口能不能 TCP 连上 |
+| systemd | log_service 的 systemd unit 是不是 active |
+| process | `ps -ef` 进程在不在 |
+
+**盲区**：端口 200 但业务挂、SQLite 损坏、磁盘满、journal 错误爆表 — **都不知道**。
+
+### 现在 (V007.60) — 7 项 P0 + 分层调度
+
+| 检查项 | 分层 | 监控什么 | 阈值 |
+|--------|------|----------|------|
+| `real_health` | **L1 5min** | log_service `/api/health` 业务 ok | `{"ok": true}` 才算活 |
+| `db_can_write` | **L1 5min** | `/api/db/can_write` | can_write=true 且无 error |
+| `journal_err` | **L1 5min** | 最近 5min journalctl ERROR/Traceback 数 | >5 告警 |
+| `db_health` | **L2 15min** | `/api/db/health` PRAGMA integrity | integrity=ok 且 WAL<100MB |
+| `disk_errors` | **L2 15min** | `/api/disk/errors` dmesg+iostat | total_errors=0 |
+| `disk_check` | **L3 30min** | `/api/disk/check` 综合打分 | score>=80 且无 issue |
+| `disk_usage` | **L3 30min** | `/api/system` 磁盘使用率 | >85% warn, >95% fail |
+
+**架构**：
+- Windows Task Scheduler 每 5 分钟触发 (老节奏不变)
+- `alert_monitor_v0760.py` 内部按 `interval_sec` 决定跑不跑 (L1 总跑, L2/L3 各自定时)
+- 7 个检查项共用 V007.59 飞书通道 (`lark_app`)
+- state 文件升级: `check_last_run` + `failed_keys` 共存, 兼容 V007.59
+
+### 验证记录
+
+| 时间 | 操作 | 结果 |
+|------|------|------|
+| 11:46:02 | `DISK_WARN_PCT=40` 制造故障 | 2 failed (disk_usage prod+staging) → `[IM] lark_app: OK` |
+| 11:47:39 | 清除阈值再跑 | `[RECOVERY IM] lark_app: OK` → `[OK] 全部健康` |
+| 11:49:36 | Task Scheduler 跑 (手动 run) | `全部健康` |
+
+---
+
+## V007.61 升级摘要 (2026-07-16)
+
+### 之前 (V007.60) — 监控 server 自身, 看不到用户错误
+
+| 监控项 | 是什么 |
+|--------|--------|
+| port / systemd / process | 服务活着吗 |
+| real_health / db_health | log_service 内部业务 ok |
+| disk_xxx / journal_err | 系统层异常 |
+
+**盲区**：用户用 backend 时遇到 500 / IntegrityError / KeyError — **端口都活着，业务都挂**。
+
+### 现在 (V007.61) — 9 项 + 用户异常按接口分组
+
+| 检查项 | 分层 | 监控什么 | 阈值 |
+|--------|------|----------|------|
+| `real_health` | **L1 5min** | log_service /api/health 业务 ok | `{"ok":true}` |
+| `db_can_write` | L1 5min | SQLite 写权限 | can_write=true |
+| `journal_err` | L1 5min | journalctl ERROR/Traceback | >5 告警 |
+| `backend_err` | **L1 5min (新)** | backend.log 最近 5min HTTP 5xx + Traceback | **按接口/类型分组**, 总数 >3 告警 |
+| `core_service_err` | **L1 5min (新)** | core_service.log Traceback | **按类型分组**, 总数 >1 告警 |
+| `db_health` | L2 15min | SQLite integrity + WAL | integrity=ok, WAL<100MB |
+| `disk_errors` | L2 15min | dmesg + iostat | total_errors=0 |
+| `disk_check` | L3 30min | 综合磁盘打分 | score>=80 |
+| `disk_usage` | L3 30min | 磁盘使用率 | >85% warn, >95% fail |
+
+### V007.61 关键技术点
+
+**1. 时间窗口过滤（关键）**
+- **不用 awk**：`awk '$1" "$2 >= cutoff'` 在含非时间戳行（如 `[BEFORE_REQUEST]`）的混合日志中，字符串比较会失效
+- **不用 base64 inline**：`exec()` 被 sandbox 拦截
+- **解决方案**：`yuploaderun` 上传 Python 脚本到 yonaa 跑，脚本内 `datetime.strptime` 严格过滤
+
+**2. 异常分组逻辑**
+- HTTP 5xx：`werkzeug.* "METHOD /path HTTP/1.1" 5\d\d`
+- Traceback：最后一行匹配 `module.SomeError:` 或独立 `KeyError:` 
+- **过滤**：404 (NotFound) / 405 (MethodNotAllowed) / ConnectionReset / BrokenPipe — 这些是噪音
+
+**3. 告警消息格式（按接口+类型聚合）**
+```
+[ALERT] yonaa 2 服务异常
+✗ backend_err:prod (port ): 7 errors in 5min:
+  POST /api/v2/bo/save -> 500 (3x)
+  POST /api/v2/bo/import -> 502 (2x)
+  sqlalchemy.exc.IntegrityError (1x)
+  KeyError (1x)
+```
+
+### V007.61 验证记录
+
+| 时间 | 操作 | 结果 |
+|------|------|------|
+| 12:02 | 注入测试异常 (3x 500 + 2x 502 + 2x traceback) | backend.log 含 13 行测试数据 |
+| 12:18 | `python alert_monitor_v0760.py --check-now --force` | `[SUMMARY] 2 failed` → `[IM] lark_app: OK` 推飞书成功 |
+| 12:20 | 清理注入 + 再跑 | `[OK] 全部健康` |
 
 ---
 
@@ -264,13 +368,133 @@ Register-ScheduledTask -TaskName "yonaa_alert_monitor" -Action $action -Trigger 
 
 | 工具 | 用途 |
 |------|------|
-| `tools/alert_monitor.py` | agent 端守护 (5 分钟检查 + 推 IM) |
-| `tools/alert_monitor.bat` | Windows 任务计划包装 |
+| `tools/alert_monitor_v0760.py` | agent 端守护 (9 项检查 + 推 IM, V007.62) |
+| `tools/alert_monitor_v0760.bat` | 手动调试 wrapper (含 pythonw.exe fallback) |
 | `tools/alert_monitor_config.json` | webhook 配置 (本地, 不提交) |
-| `tools/alert_monitor_config_state.json` | 失败状态 (本地, 不提交) |
-| `tools/alert_monitor.log` | agent 运行日志 |
+| `tools/alert_monitor_config_state.json` | 失败状态 + cooldown (本地, 不提交) |
+| `tools/alert_monitor_v0760.log` | agent 运行日志 |
 | `tools/remote_capability_probe.py --check-systemd` | 备用检查 (server 端 systemd) |
 | `tools/find_log_service_killer.py` | 出事故时找元凶 |
+
+---
+
+## V007.62 升级摘要 (2026-07-16): 无弹窗 + 修路径错误
+
+### 之前的问题
+
+- **每 5 分钟弹一个 cmd 黑窗** — bat 默认带 console, Task Scheduler 启动时闪一下, 干扰正常工作
+- **偶发 "no such directory"** — bat 用 `cd /d "%~dp0"` 在 Task Scheduler 上下文里偶尔失败
+
+### 怎么修
+
+| 改动 | 文件 | 效果 |
+|------|------|------|
+| Task Scheduler 直接调 `pythonw.exe` (no-console) | `yonaa_alert_monitor_v0762.xml` | **完全不弹窗** |
+| Python 加 `--log-file` 参数自己写日志 | `alert_monitor_v0760.py` | 日志仍写 `alert_monitor_v0760.log`, 不依赖 shell 重定向 |
+| bat 用绝对路径 + `setlocal` | `alert_monitor_v0760.bat` | 手动跑也不会路径错 |
+| Task Scheduler 加 `<Hidden>true</Hidden>` | XML | 任务列表里也看不到 |
+
+### 验证结果
+
+```
+12:46:17  pythonw.exe 跑了一次 (新配置), log 写入 1062 bytes, 结果 0
+12:47:53  schtasks /run 手动触发, 无弹窗, log 写入 OK
+12:50:00  下次自动跑 (Hidden + pythonw, 完全静默)
+```
+
+### 日常命令 (V007.62 新)
+
+```powershell
+# 看任务计划状态 (Hidden 后用命令行看, GUI 看不到)
+schtasks /query /tn "yonaa_alert_monitor" /fo LIST
+
+# 手动跑 (无弹窗, 日志写入 log 文件)
+schtasks /run /tn "yonaa_alert_monitor"
+
+# 直接调 pythonw.exe (调试用)
+&C:\Users\Administrator\AppData\Local\Python\bin\pythonw.exe `
+    D:\filework\release-prep-worktree\tools\alert_monitor_v0760.py `
+    --config D:\filework\release-prep-worktree\tools\alert_monitor_config.json `
+    --log-file D:\filework\release-prep-worktree\tools\alert_monitor_v0760.log `
+    --check-now --force
+```
+
+---
+
+## V007.63 升级摘要 (2026-07-16): 心跳通知
+
+### 解决的问题
+
+- 之前: 监控正常时, 运维**完全不知道**监控在跑 (只有出故障才推消息)
+- 问题: 如果监控自己挂了 (比如 Task Scheduler 停了, 进程 crash), 运维没收到告警 → 以为"一切正常" → **盲区**
+- 现在: 每 30 分钟推一条"心跳"到飞书, 让运维知道监控**活着**
+
+### 心跳消息长什么样
+
+蓝色卡片, **不 @ 全体**:
+
+```
+[HEARTBEAT] yonaa 监控运行中 (正常)
+
+**yonaa 监控心跳**
+
+✓ 9 项检查通过 / 共 24 个子项 (failed: 0)
+• 上次告警: 2026-07-16 12:20:02
+• 任务已运行: 0h (Task Scheduler 持久化)
+• 当前模式: 全部健康
+```
+
+异常时 (有 failed 项):
+
+```
+[HEARTBEAT] yonaa 监控运行中 (2 项异常)
+
+**yonaa 监控心跳**
+
+✓ 9 项检查通过 / 共 24 个子项 (failed: 2)
+• 上次告警: 2026-07-16 13:15:00
+• 任务已运行: 0h
+• 当前模式: 异常
+```
+
+### 配置
+
+| 项 | 默认 | 怎么改 |
+|----|------|--------|
+| 频次 | 1800s (30 分钟) | 环境变量 `HEARTBEAT_INTERVAL_SEC=1800` |
+| 推哪个 IM | lark_app (跟告警同通道) | `alert_monitor_config.json` 的 `im.default` |
+| @ 全体 | 否 (跟告警区分) | 改 `_send_heartbeat()` 的 `at_all` 参数 |
+
+### 验证
+
+```
+$env:HEARTBEAT_INTERVAL_SEC='5'  # 临时设 5s 测试
+python alert_monitor_v0760.py --check-now --force
+[2026-07-16 12:56:20]   [HEARTBEAT] lark_app: OK  ← 飞书收到心跳
+
+# 立刻再跑 (距上次 < 5s) → 不推
+$env:HEARTBEAT_INTERVAL_SEC='300'  # 5 分钟
+python alert_monitor_v0760.py --check-now --force
+# → 没 [HEARTBEAT] 行 (去重正常)
+```
+
+### 完整生命周期 (V007.63)
+
+| 时刻 | 收到 | 颜色 | @ |
+|------|------|------|---|
+| 0:00 | 心跳 | 蓝 | — |
+| 0:05 | (没消息, 一切正常) | — | — |
+| 0:10 | (没消息) | — | — |
+| 0:15 | (没消息) | — | — |
+| 0:20 | (没消息) | — | — |
+| 0:25 | (没消息) | — | — |
+| **0:30** | **心跳** | 蓝 | — |
+| 0:35 | **告警: 2 项异常** | 红 | 全体 |
+| 0:40 | 恢复 | 蓝 | — |
+| 0:55 | (没消息) | — | — |
+| **1:00** | **心跳** | 蓝 | — |
+
+**关键**: 心跳和告警独立 — 不会因为告警"刷新"心跳时间, 也不会因为频繁告警而漏发心跳
 
 ---
 

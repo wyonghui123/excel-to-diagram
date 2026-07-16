@@ -310,6 +310,24 @@ def send_lark_app(app_id: str, app_secret: str, chat_id: str, title: str, conten
         return False, f'{type(e).__name__}: {e}'
 
 
+def _get_lark_cred_with_hkcu_fallback(name: str) -> str:
+    """凭证获取优先级: env var > HKCU\\Environment 注册表 > 空
+
+    Task Scheduler 启动的 bat 进程会继承系统 env, 但 LARK_* 是写在 HKCU 下的,
+    不会自动出现在系统 env 里. 所以这里加 HKCU 回退.
+    """
+    v = os.environ.get(name, '')
+    if v:
+        return v
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Environment') as k:
+            val, _ = winreg.QueryValueEx(k, name)
+            return str(val) if val else ''
+    except Exception:
+        return ''
+
+
 def send_im(im_type: str, cfg: dict, title: str, content: str, at_all: bool = False) -> tuple:
     """统一发送入口"""
     im_cfg = cfg.get('im', {}).get(im_type, {})
@@ -317,13 +335,13 @@ def send_im(im_type: str, cfg: dict, title: str, content: str, at_all: bool = Fa
     secret = im_cfg.get('secret', '')
 
     # 飞书应用机器人走独立路径 (V007.59)
-    # 凭证优先从环境变量读 (LARK_APP_ID / LARK_APP_SECRET / LARK_CHAT_ID), 更安全
+    # 凭证优先级: env var > HKCU 注册表 > config 占位符
     if im_type == 'lark_app':
-        app_id = os.environ.get('LARK_APP_ID') or im_cfg.get('app_id', '')
-        app_secret = os.environ.get('LARK_APP_SECRET') or im_cfg.get('app_secret', '')
-        chat_id = os.environ.get('LARK_CHAT_ID') or im_cfg.get('chat_id', '')
+        app_id     = _get_lark_cred_with_hkcu_fallback('LARK_APP_ID')     or im_cfg.get('app_id', '')
+        app_secret = _get_lark_cred_with_hkcu_fallback('LARK_APP_SECRET') or im_cfg.get('app_secret', '')
+        chat_id    = _get_lark_cred_with_hkcu_fallback('LARK_CHAT_ID')    or im_cfg.get('chat_id', '')
         if not all([app_id, app_secret, chat_id]):
-            return False, 'lark_app 需要 app_id + app_secret + chat_id (可在 config 或 环境变量 LARK_APP_ID/LARK_APP_SECRET/LARK_CHAT_ID 配)'
+            return False, 'lark_app 需要 app_id + app_secret + chat_id (可在 HKCU 环境变量 或 config 配)'
         if '<' in app_id or '替换' in app_id:
             return False, f'lark_app 凭证未配置 (仍是占位符)'
         return send_lark_app(app_id, app_secret, chat_id, title, content, at_all)

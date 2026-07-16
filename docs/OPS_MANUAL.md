@@ -2,8 +2,8 @@
 
 > **面向**: AI Agent / 自动化运维工具
 > **目的**: 让智能体快速了解 yonaa 生产服务器上所有运维服务的功能、端点、token、典型使用场景
-> **更新**: 2026-07-14 — 补充 prod/staging 完整端口架构
-> **适用版本**: log_service v4.11 / ops_scheduler v1.1 / health_supervisor v1.0
+> **更新**: 2026-07-16 — 加 §十一 告警与监控 (V007.58-V007.61)
+> **适用版本**: log_service v4.11 / alert_monitor_v0760 / Windows Task Scheduler
 
 ---
 
@@ -514,3 +514,136 @@ d:\filework\release-prep-worktree\
 
 **维护者**: AI Agent 协作时持续完善  
 **反馈**: 发现新陷阱请更新本文档 §7
+
+---
+
+## 十一、告警与监控 (V007.58 ~ V007.61, 2026-07-16 新增)
+
+> **重要**: 这台 Windows PC 是 Agent/运维服务机器 (有公网). yonaa 在阿里云 air-gapped 环境, 服务器本身无法直接推送 IM, 所以监控/告警架构是: yonaa ←(轮询)← Windows PC → 飞书 HAO 群.
+
+### 11.1 整体架构
+
+```
+┌──────────────────────┐    每5min     ┌──────────────────────┐    HTTP    ┌──────────────┐
+│  172.20.59.7 yonaa   │  ◄──poll──   │  这台 Windows PC     │ ──push──► │ 飞书 HAO 群  │
+│  9101 log_service    │              │  yonaa_alert_monitor │  lark_app  │ (运维手机)   │
+│  19101 staging log_s │              │  (Task Scheduler)   │            │              │
+│  9200/19200 core     │              │  alert_monitor_v0760 │            │              │
+│  9201 observability  │              │  + 9 项分层检查      │            │              │
+│  8081 frontend       │              │  + HKCU 凭证回退     │            │              │
+│  3011 backend        │              │                      │            │              │
+└──────────────────────┘              └──────────────────────┘            └──────────────┘
+```
+
+### 11.2 9 项分层监控 (alert_monitor_v0760.py)
+
+| 检查项 | 分层 | 监控什么 | 阈值 |
+|--------|------|----------|------|
+| `real_health` | L1 5min | log_service `/api/health` 业务 ok | `{"ok":true}` |
+| `db_can_write` | L1 5min | SQLite 写权限 (锁/权限) | can_write=true |
+| `journal_err` | L1 5min | journalctl ERROR/Traceback | >5 告警 |
+| `backend_err` | L1 5min | backend.log HTTP 5xx + Traceback | **按接口+类型分组**, >3 告警 |
+| `core_service_err` | L1 5min | core_service.log Traceback | **按类型分组**, >1 告警 |
+| `db_health` | L2 15min | SQLite integrity + WAL | integrity=ok, WAL<100MB |
+| `disk_errors` | L2 15min | dmesg + iostat | total_errors=0 |
+| `disk_check` | L3 30min | 综合磁盘打分 | score>=80 |
+| `disk_usage` | L3 30min | 磁盘使用率 | >85% warn, >95% fail |
+
+### 11.3 飞书告警消息长什么样
+
+**告警** (红色卡片, @全体):
+
+```
+[ALERT] yonaa 2 服务异常
+
+✗ backend_err:prod: 7 errors in 5min (>2 threshold):
+  POST /api/v2/bo/save -> 500 (3x)
+  POST /api/v2/bo/import -> 502 (2x)
+  sqlalchemy.exc.IntegrityError (1x)
+  KeyError (1x)
+
+✗ disk_usage:log_service:prod: WARNING used=85.3% free=7.2GB total=48.8GB
+
+yonaa agent alert · 2026-07-16 12:18:30
+```
+
+**恢复** (蓝色卡片):
+
+```
+[RECOVERY] yonaa 监控恢复
+
+✓ 之前告警的服务已恢复正常:
+  - backend_err:prod
+  - disk_usage:log_service:prod
+
+yonaa agent alert · 2026-07-16 12:20:15
+```
+
+### 11.4 日常运维命令 (Windows PC)
+
+```powershell
+# 查看任务计划状态
+schtasks /query /tn "yonaa_alert_monitor" /fo LIST
+
+# 手动跑一次 (测试用)
+schtasks /run /tn "yonaa_alert_monitor"
+
+# 查看最近运行日志
+Get-Content d:\filework\release-prep-worktree\tools\alert_monitor_v0760.log -Tail 30
+
+# 列出所有 9 项检查
+python d:\filework\release-prep-worktree\tools\alert_monitor_v0760.py --list-checks
+
+# 单跑一项检查
+python d:\filework\release-prep-worktree\tools\alert_monitor_v0760.py --check-one backend_err
+
+# 强制跑全部 (不管 interval)
+python d:\filework\release-prep-worktree\tools\alert_monitor_v0760.py --check-now --force
+
+# 停 / 启 / 卸载任务
+schtasks /change /tn "yonaa_alert_monitor" /disable
+schtasks /change /tn "yonaa_alert_monitor" /enable
+schtasks /delete /tn "yonaa_alert_monitor" /f
+```
+
+### 11.5 重设飞书凭证 (写到 HKCU)
+
+凭证写在 HKCU 环境变量 (`LARK_APP_ID` / `LARK_APP_SECRET` / `LARK_CHAT_ID`), Python 自动从注册表读. **不在 git 里, 不在 config 文件里**.
+
+```powershell
+# 编辑 _setup_lark_env.ps1, 替换 3 个值为新凭证, 然后:
+powershell -ExecutionPolicy Bypass -File d:\filework\release-prep-worktree\tools\_setup_lark_env.ps1
+```
+
+> 申请新飞书 App Bot 凭证的 7 步流程见 [INCIDENT_ALERT_SETUP.md](INCIDENT_ALERT_SETUP.md) §1.
+
+### 11.6 故障排查速查
+
+| 现象 | 排查 |
+|------|------|
+| 任务计划跑但飞书收不到 | 1) `schtasks /query` 看上次结果码; 2) `Get-Content alert_monitor_v0760.log -Tail 20` 看 [IM] 行; 3) `python ... --check-now --force` 手动跑 |
+| 飞书推了但内容错乱 | 检查 `alert_monitor_config.json` 的 `default` 字段 (`lark_app`), 不是 `feishu`/`dingtalk` |
+| 一直告警恢复不了 | 检查 state: `Get-Content alert_monitor_config_state.json`; failed_keys 是否还有; cooldown 默认 600s |
+| V007.61 用户异常报 404 一堆 | 是的, 我们**故意过滤** 404/405/ConnectionReset — 它们是噪音, 不告警 |
+| 想临时压低阈值 | `BACKEND_ERR_THRESHOLD=10 python ... --check-now --force` |
+
+### 11.7 关键文件清单
+
+| 文件 | 作用 |
+|------|------|
+| [alert_monitor_v0760.py](../../tools/alert_monitor_v0760.py) | 主监控 (9 项检查, 分层调度) |
+| [alert_monitor_v0760.bat](../../tools/alert_monitor_v0760.bat) | Task Scheduler 入口 |
+| [yonaa_alert_monitor_v0760.xml](../../tools/yonaa_alert_monitor_v0760.xml) | 任务定义 |
+| [alert_monitor_config.json](../../tools/alert_monitor_config.json) | 配置 (含 lark_app 占位符) |
+| [alert_monitor_config_state.json](../../tools/alert_monitor_config_state.json) | 状态 (失败追踪 + cooldown) |
+| [alert_monitor_v0760.log](../../tools/alert_monitor_v0760.log) | 运行日志 |
+| [_setup_lark_env.ps1](../../tools/_setup_lark_env.ps1) | 重设 HKCU 凭证 |
+
+---
+
+## 十二、变更日志
+
+| 日期 | 变更 |
+|------|------|
+| 2026-07-12 | 创建本文档 (基于今日运维经验) |
+| 2026-07-16 | 加 §十一 告警与监控 (V007.58-V007.61: 飞书应用机器人 + 9 项分层监控 + V007.61 用户异常分组) |

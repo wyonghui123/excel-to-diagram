@@ -412,12 +412,68 @@ python tools/install_log_service_systemd.py
 python tools/install_log_service_systemd.py --target prod
 ```
 
-### 9.5 监控
+### 9.5 监控 (V007.58 ~ V007.61, 2026-07-16 当前)
 
-- **cron `*/5 * * * *`**: 自动跑 `--check-log-service`
-- **告警 log**: `tail -f /var/log/monitor_alert.log`
-- **手动 watch**: `python tools/remote_capability_probe.py --watch 3 --auto-restart-log`
-- **IM 推送 (V007.58)**: agent 端 daemon `python tools/alert_monitor.py --daemon` (Windows 任务计划), 详见 [INCIDENT_ALERT_SETUP.md](INCIDENT_ALERT_SETUP.md)
+**架构**: yonaa ←(5min 轮询)← 这台 Windows PC → 飞书 HAO 群. yonaa 在阿里云 air-gapped 环境无法直连公网 IM.
+
+**9 项分层监控** (alert_monitor_v0760.py):
+
+| 检查项 | 监控什么 | 出问题时 |
+|--------|----------|----------|
+| `real_health` | log_service 业务 ok | 服务端口活但业务挂 |
+| `db_can_write` | SQLite 写权限 | 数据库锁/权限故障 |
+| `journal_err` | journalctl ERROR | 服务自身异常 |
+| **`backend_err`** (V007.61) | backend 5xx + Traceback | **用户使用过程中出错** |
+| **`core_service_err`** (V007.61) | core_service Traceback | exec/upload 失败 |
+| `db_health` | SQLite integrity | DB 损坏 |
+| `disk_errors` | 磁盘 IO 错误 | 硬件故障 |
+| `disk_check` | 综合磁盘打分 | 容量/IO 异常 |
+| `disk_usage` | 磁盘使用率 | 快满了 |
+
+**收到飞书告警后的第一反应**:
+
+1. **看告警消息内容**: 红色卡片 (告警) / 蓝色卡片 (恢复)
+   ```
+   [ALERT] yonaa 2 服务异常
+   ✗ backend_err:prod: 7 errors in 5min (>2 threshold):
+     POST /api/v2/bo/save -> 500 (3x)
+     sqlalchemy.exc.IntegrityError (1x)
+   ```
+2. **看告警时间**: 飞书卡片底部时间戳
+3. **根据失败项对号入座**:
+
+| 告警项 | 应急处理 |
+|--------|---------|
+| `real_health`/`port 不可达` | → §9.3 (systemd 自动拉起, 等 5-8s) |
+| `db_can_write`/`db_health` | → §10 (SQLite IO 错误) |
+| `disk_errors`/`disk_usage` | → §11 (磁盘满 / IO 错误) |
+| `journal_err` | → §9.6 + `journalctl -u X --since "10 min ago"` |
+| `backend_err` | → §13 (用户使用异常, 优先看数据库 / 业务代码) |
+| `core_service_err` | → §9 (log_service 死了) 类似 |
+
+**手动监控命令**:
+
+```powershell
+# Windows PC 上 (这台运维机器)
+schtasks /query /tn "yonaa_alert_monitor" /fo LIST      # 任务状态
+schtasks /run /tn "yonaa_alert_monitor"                   # 手动跑
+Get-Content d:\filework\release-prep-worktree\tools\alert_monitor_v0760.log -Tail 30
+python d:\filework\release-prep-worktree\tools\alert_monitor_v0760.py --check-one backend_err
+```
+
+```bash
+# yonaa 端 (直接查)
+curl http://localhost:9101/api/health                    # 业务 ok?
+curl http://localhost:9101/api/db/health                 # SQLite 完整?
+curl http://localhost:9101/api/db/can_write              # 可写?
+curl http://localhost:9101/api/disk/check                # 综合磁盘
+systemctl status log_service_prod.service                # systemd
+journalctl -u log_service_prod --since "10 min ago"      # journal
+tail -n 200 /opt/app/shared/logs/backend.log             # backend 异常
+```
+
+**详细配置**: [INCIDENT_ALERT_SETUP.md](INCIDENT_ALERT_SETUP.md) (V007.58~V007.61 全量, 含飞书 App Bot 申请)
+**日常运维**: [OPS_MANUAL.md §11](OPS_MANUAL.md)
 
 ### 9.6 应急 (systemd 不可用时)
 

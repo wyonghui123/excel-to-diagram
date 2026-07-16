@@ -1,8 +1,8 @@
 # AGENT_INFRA.md
 
 > **目标读者**: AI Agent (主入口)
-> **最后更新**: 2026-07-15
-> **本文件用途**: AI Agent 5 分钟接手本项目, 知道: 这是什么、怎么部署、怎么远端操作、找哪个文档
+> **最后更新**: 2026-07-16
+> **本文件用途**: AI Agent 5 分钟接手本项目, 知道: 这是什么、怎么部署、怎么远端操作、找哪个文档、**怎么监控告警**
 > **详细规范**: 见下方 §0 索引
 
 ---
@@ -15,6 +15,9 @@
 | **部署节奏** | [docs/DEPLOY_RHYTHM.md](file:///d:/filework/release-prep-worktree/docs/DEPLOY_RHYTHM.md) | 220 | **daily 21:00 / hotfix 立即** — 何时用哪个 |
 | **远端操作速查** | 本文件 §1 | — | 5 个 Python 函数 / 5 行 CLI / **回归测试 §1.4** |
 | **回归测试** | [docs/REGRESSION_TEST_SUITE.md](file:///d:/filework/release-prep-worktree/docs/REGRESSION_TEST_SUITE.md) | 250+ | 9 个 sqlite io error 场景 — staging 自动化 |
+| **告警与监控** | [docs/INCIDENT_ALERT_SETUP.md](file:///d:/filework/release-prep-worktree/docs/INCIDENT_ALERT_SETUP.md) | — | **9 项分层监控 + 飞书告警 (V007.58~V007.61)** |
+| **事故响应** | [docs/INCIDENT_RESPONSE_RUNBOOK.md](file:///d:/filework/release-prep-worktree/docs/INCIDENT_RESPONSE_RUNBOOK.md) | 7 类事故 | 收到告警后怎么办 (含 V007.61 用户异常) |
+| **运维手册** | [docs/OPS_MANUAL.md](file:///d:/filework/release-prep-worktree/docs/OPS_MANUAL.md) | — | 运维日常操作 (含监控章节) |
 | **Migration 操作** | [docs/MIGRATION_GUIDE.md](file:///d:/filework/release-prep-worktree/docs/MIGRATION_GUIDE.md) | 200+ | migration 创建/运行/lint 实战 |
 | **Migration 设计依据** | [docs/MIGRATION_SPEC.md](file:///d:/filework/release-prep-worktree/docs/MIGRATION_SPEC.md) | 1711 | 完整设计 spec (历史 design, 不必读) |
 | **staging 操作** | [docs/STAGING_GUIDE.md](file:///d:/filework/release-prep-worktree/docs/STAGING_GUIDE.md) | 200+ | staging 部署/排错 |
@@ -124,7 +127,7 @@ docs/
 
 ---
 
-## 3. 关键事实 (2026-07-15 当前)
+## 3. 关键事实 (2026-07-16 当前)
 
 | 项 | 状态 |
 |---|------|
@@ -133,9 +136,148 @@ docs/
 | **migration lint** | **0 FAIL**, 8 WARN, exit 0 ✅ |
 | **migration runner** | idempotent (重复列自动跳过) ✅ |
 | **9101/19101 log_service** | **alive (10+ 端点, V007.55 systemd 守护 + V007.57 nobody 用户, 进程死后 5s 自动重启, HIPS 不杀)** ✅ |
-| **IM 告警链路** | **V007.59 alert_monitor.py + 飞书应用机器人 API (cli_a9362787bbb8dcb5), 5min 轮询 → 飞书 HAO 群, 推送成功 ✓** ✅ |
-| **本会话 commit 数** | 6 (80e5498 → 366cb85) + 文档 + log_service 启停工具 |
+| **IM 告警链路** | **V007.61 alert_monitor_v0760.py + 飞书应用机器人 API + Windows Task Scheduler, 9 项分层监控每 5min 轮询 → 飞书 HAO 群, 推送成功 ✓** ✅ |
+| **本会话 commit 数** | V007.55-V007.61 (基础设施 7 步 + 9 项监控 + 飞书集成) |
 
 ---
 
-**维护**: AGENT 接手时, **5 分钟读本文件 → 30 秒跑 capability_probe → 5 分钟读 DEPLOY_INFRASTRUCTURE §0+§1** = 完全 ready。
+## 4. 告警与监控 (V007.58 ~ V007.61, 2026-07-16)
+
+### 4.1 整体架构
+
+```
+┌──────────────────────┐    每5min     ┌──────────────────────┐    HTTP    ┌──────────────┐
+│  172.20.59.7 yonaa   │  ◄──poll──   │  这台 Windows PC     │ ──push──► │ 飞书 HAO 群  │
+│  9101 log_service    │              │  yonaa_alert_monitor │  lark_app  │ (运维手机)   │
+│  19101 staging log_s │              │  (Task Scheduler)   │            │              │
+│  9200/19200 core     │              │  alert_monitor_v0760 │            │              │
+│  9201 observability  │              │  + 9 项分层检查      │            │              │
+│  8081 frontend       │              │  + HKCU 凭证回退     │            │              │
+│  3011 backend        │              │                      │            │              │
+└──────────────────────┘              └──────────────────────┘            └──────────────┘
+```
+
+**为什么 agent 在 Windows PC**: yonaa 在阿里云 air-gapped 环境, 服务器无法直连公网 IM. 这台 Windows 机器 (有公网) 跑监控脚本.
+
+### 4.2 9 项分层监控 (V007.61)
+
+| 检查项 | 分层 | 监控什么 | 阈值 |
+|--------|------|----------|------|
+| `real_health` | L1 5min | log_service `/api/health` 业务 ok | `{"ok":true}` |
+| `db_can_write` | L1 5min | SQLite 写权限 (锁/权限) | can_write=true |
+| `journal_err` | L1 5min | journalctl ERROR/Traceback | >5 告警 |
+| `backend_err` | **L1 5min (V007.61 新)** | backend.log HTTP 5xx + Traceback | **按接口+类型分组**, >3 告警 |
+| `core_service_err` | **L1 5min (V007.61 新)** | core_service.log Traceback | **按类型分组**, >1 告警 |
+| `db_health` | L2 15min | SQLite integrity + WAL | integrity=ok, WAL<100MB |
+| `disk_errors` | L2 15min | dmesg + iostat | total_errors=0 |
+| `disk_check` | L3 30min | 综合磁盘打分 | score>=80 |
+| `disk_usage` | L3 30min | 磁盘使用率 | >85% warn, >95% fail |
+
+**分层调度**: Task Scheduler 每 5 分钟触发, 每个检查项自带 `interval_sec` 决定跑不跑 (L1 必跑, L2/L3 各自定时).
+
+### 4.3 log_service 业务端点 (金矿, 平时不知道)
+
+log_service 不只是端口监听, **内部有完整业务健康端点** (V007.50 前后实现):
+
+| 端点 | 用途 |
+|------|------|
+| `GET /api/health` | 业务 ok + uptime |
+| `GET /api/health/inspect` | 深度检查 (注: 有误报 3011/8081 已知 bug, 不用) |
+| `GET /api/system` | load/disk/mem 综合 |
+| `GET /api/proc` | 全 python 进程列表 |
+| `GET /api/process` | log_service 自己进程 (rss, fd_count, etime) |
+| `GET /api/net` | TCP 监听列表 |
+| **`GET /api/db/health`** | SQLite integrity + size + wal |
+| **`GET /api/db/metrics`** | 表数/行数 |
+| **`GET /api/db/can_write`** | 写权限/锁检测 |
+| **`GET /api/disk/errors`** | 磁盘 IO 错误 (dmesg + iostat) |
+| **`GET /api/disk/check`** | 综合磁盘打分 (score + signals) |
+| **`GET /api/disk/forecast`** | 磁盘预测 |
+| `GET /api/log` | 错误日志 |
+| `GET /api/log/range` | 日志范围查询 |
+| `GET /api/metrics` | Prometheus 格式 |
+
+**直接用**: `curl http://localhost:9101/api/db/health` (yonaa 内) 或 `curl http://172.20.59.7:9101/api/db/health` (agent 端)
+
+### 4.4 日常运维命令 (复制粘贴)
+
+```powershell
+# 查看任务计划状态
+schtasks /query /tn "yonaa_alert_monitor" /fo LIST
+
+# 手动跑一次 (测试用)
+schtasks /run /tn "yonaa_alert_monitor"
+
+# 查看最近运行日志
+Get-Content d:\filework\release-prep-worktree\tools\alert_monitor_v0760.log -Tail 30
+
+# 列出所有 9 项检查
+python d:\filework\release-prep-worktree\tools\alert_monitor_v0760.py --list-checks
+
+# 单跑一项检查
+python d:\filework\release-prep-worktree\tools\alert_monitor_v0760.py --check-one backend_err
+
+# 强制跑全部 (不管 interval)
+python d:\filework\release-prep-worktree\tools\alert_monitor_v0760.py --check-now --force
+
+# 停 / 启 / 卸载任务
+schtasks /change /tn "yonaa_alert_monitor" /disable
+schtasks /change /tn "yonaa_alert_monitor" /enable
+schtasks /delete /tn "yonaa_alert_monitor" /f
+
+# 重设飞书凭证 (写到 HKCU)
+powershell -ExecutionPolicy Bypass -File d:\filework\release-prep-worktree\tools\_setup_lark_env.ps1
+```
+
+### 4.5 飞书告警消息长什么样
+
+告警 (红色卡片, @全体):
+
+```
+[ALERT] yonaa 2 服务异常
+
+✗ backend_err:prod (port ): 7 errors in 5min (>2 threshold):
+  POST /api/v2/bo/save -> 500 (3x)
+  POST /api/v2/bo/import -> 502 (2x)
+  sqlalchemy.exc.IntegrityError (1x)
+  KeyError (1x)
+
+✗ disk_usage:log_service:prod (port ): WARNING used=85.3% free=7.2GB total=48.8GB
+
+yonaa agent alert · 2026-07-16 12:18:30
+```
+
+恢复 (蓝色卡片):
+
+```
+[RECOVERY] yonaa 监控恢复
+
+✓ 之前告警的服务已恢复正常:
+  - backend_err:prod
+  - disk_usage:log_service:prod
+
+yonaa agent alert · 2026-07-16 12:20:15
+```
+
+### 4.6 关键文件
+
+| 文件 | 作用 |
+|------|------|
+| [alert_monitor_v0760.py](file:///d:/filework/release-prep-worktree/tools/alert_monitor_v0760.py) | 主监控 (9 项检查, 分层调度) |
+| [alert_monitor_v0760.bat](file:///d:/filework/release-prep-worktree/tools/alert_monitor_v0760.bat) | Task Scheduler 入口 |
+| [yonaa_alert_monitor_v0760.xml](file:///d:/filework/release-prep-worktree/tools/yonaa_alert_monitor_v0760.xml) | 任务定义 |
+| [alert_monitor_config.json](file:///d:/filework/release-prep-worktree/tools/alert_monitor_config.json) | 配置 (含 lark_app 占位符) |
+| [alert_monitor_config_state.json](file:///d:/filework/release-prep-worktree/tools/alert_monitor_config_state.json) | 状态 (失败追踪 + cooldown + check_last_run) |
+| [alert_monitor_v0760.log](file:///d:/filework/release-prep-worktree/tools/alert_monitor_v0760.log) | 运行日志 |
+
+**凭证**: 飞书 `app_id / app_secret / chat_id` 写在 HKCU 环境变量 (`LARK_APP_ID` 等), Python 自动从注册表读 — 不在 git 里, 不在 config 文件里.
+
+### 4.7 详细文档
+
+- **完整配置**: [INCIDENT_ALERT_SETUP.md](file:///d:/filework/release-prep-worktree/docs/INCIDENT_ALERT_SETUP.md) (V007.58~V007.61 升级摘要 + 飞书 App Bot 申请步骤)
+- **事故响应**: [INCIDENT_RESPONSE_RUNBOOK.md](file:///d:/filework/release-prep-worktree/docs/INCIDENT_RESPONSE_RUNBOOK.md) §9 (log_service 死了 / OOM / 磁盘满 怎么处理)
+- **运维命令**: [OPS_MANUAL.md](file:///d:/filework/release-prep-worktree/docs/OPS_MANUAL.md) 告警与监控章节
+
+---
+
+**维护**: AGENT 接手时, **5 分钟读本文件 → 30 秒跑 capability_probe → 5 分钟读 DEPLOY_INFRASTRUCTURE §0+§1 → 3 分钟读本文件 §4 (告警与监控)** = 完全 ready.
