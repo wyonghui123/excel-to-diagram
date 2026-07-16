@@ -432,9 +432,9 @@ print(result['stdout'])
 
 ### 7.3 推荐工具
 
-- `d:\filework\release-prep-worktree\tools\batch_upload.py` — 批量上传
-- `d:\filework\release-prep-worktree\tools\log_service.py` — log_service 源码 (端点参考)
-- `d:\filework\release-prep-worktree\tools\ops_scheduler_v1.1.py` — 调度器源码
+- `d:\filework\worktrees/release-prep\tools\batch_upload.py` — 批量上传
+- `d:\filework\worktrees/release-prep\tools\log_service.py` — log_service 源码 (端点参考)
+- `d:\filework\worktrees/release-prep\tools\ops_scheduler_v1.1.py` — 调度器源码
 
 ---
 
@@ -485,7 +485,7 @@ def get_token(secret: str) -> str:
 ### 9.2 本地工作区
 
 ```
-d:\filework\release-prep-worktree\
+d:\filework\worktrees/release-prep\
 ├── meta/                              # 后端代码 (源)
 ├── dist/                              # 前端构建产物
 ├── tools/
@@ -589,16 +589,16 @@ schtasks /query /tn "yonaa_alert_monitor" /fo LIST
 schtasks /run /tn "yonaa_alert_monitor"
 
 # 查看最近运行日志
-Get-Content d:\filework\release-prep-worktree\tools\alert_monitor_v0760.log -Tail 30
+Get-Content d:\filework\worktrees/release-prep\tools\alert_monitor_v0760.log -Tail 30
 
 # 列出所有 9 项检查
-python d:\filework\release-prep-worktree\tools\alert_monitor_v0760.py --list-checks
+python d:\filework\worktrees/release-prep\tools\alert_monitor_v0760.py --list-checks
 
 # 单跑一项检查
-python d:\filework\release-prep-worktree\tools\alert_monitor_v0760.py --check-one backend_err
+python d:\filework\worktrees/release-prep\tools\alert_monitor_v0760.py --check-one backend_err
 
 # 强制跑全部 (不管 interval)
-python d:\filework\release-prep-worktree\tools\alert_monitor_v0760.py --check-now --force
+python d:\filework\worktrees/release-prep\tools\alert_monitor_v0760.py --check-now --force
 
 # 停 / 启 / 卸载任务
 schtasks /change /tn "yonaa_alert_monitor" /disable
@@ -612,7 +612,7 @@ schtasks /delete /tn "yonaa_alert_monitor" /f
 
 ```powershell
 # 编辑 _setup_lark_env.ps1, 替换 3 个值为新凭证, 然后:
-powershell -ExecutionPolicy Bypass -File d:\filework\release-prep-worktree\tools\_setup_lark_env.ps1
+powershell -ExecutionPolicy Bypass -File d:\filework\worktrees/release-prep\tools\_setup_lark_env.ps1
 ```
 
 > 申请新飞书 App Bot 凭证的 7 步流程见 [INCIDENT_ALERT_SETUP.md](INCIDENT_ALERT_SETUP.md) §1.

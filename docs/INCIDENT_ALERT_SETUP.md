@@ -204,7 +204,7 @@ python tools/alert_monitor.py --test-lark-app
 
 ```bash
 # 在公司电脑 (agent 端) 上, 一次性生成配置
-cd d:\filework\release-prep-worktree\tools
+cd d:\filework\worktrees/release-prep\tools
 python alert_monitor.py --init-config
 
 # 编辑 alert_monitor_config.json, 填入 webhook URL
@@ -264,13 +264,13 @@ python alert_monitor.py --check-now
 2. 名称: `yonaa_alert_monitor`
 3. 触发器: 每 5 分钟
 4. 操作: 启动程序
-   - 程序: `d:\filework\release-prep-worktree\tools\alert_monitor.bat`
-   - 起始位置: `d:\filework\release-prep-worktree\tools`
+   - 程序: `d:\filework\worktrees/release-prep\tools\alert_monitor.bat`
+   - 起始位置: `d:\filework\worktrees/release-prep\tools`
 5. 完成 → 双击任务 → 属性 → 勾选"不管用户是否登录都要运行"
 
 或者用命令行注册:
 ```powershell
-$action = New-ScheduledTaskAction -Execute "d:\filework\release-prep-worktree\tools\alert_monitor.bat"
+$action = New-ScheduledTaskAction -Execute "d:\filework\worktrees/release-prep\tools\alert_monitor.bat"
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5)
 Register-ScheduledTask -TaskName "yonaa_alert_monitor" -Action $action -Trigger $trigger
 ```
@@ -413,9 +413,9 @@ schtasks /run /tn "yonaa_alert_monitor"
 
 # 直接调 pythonw.exe (调试用)
 &C:\Users\Administrator\AppData\Local\Python\bin\pythonw.exe `
-    D:\filework\release-prep-worktree\tools\alert_monitor_v0760.py `
-    --config D:\filework\release-prep-worktree\tools\alert_monitor_config.json `
-    --log-file D:\filework\release-prep-worktree\tools\alert_monitor_v0760.log `
+    D:\filework/\/worktrees/release-prep/tools\alert_monitor_v0760.py `
+    --config D:\filework/\/worktrees/release-prep/tools\alert_monitor_config.json `
+    --log-file D:\filework/\/worktrees/release-prep/tools\alert_monitor_v0760.log `
     --check-now --force
 ```
 

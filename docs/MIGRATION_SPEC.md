@@ -12,7 +12,7 @@
 |------|-----|------|
 | **Task ID** | T-MIGRATION-V1 | 全局唯一 |
 | **Agent 名称** | agent-migration-upgrade | |
-| **Worktree** | `d:\filework\release-prep-worktree\` | 复用现有 worktree |
+| **Worktree** | `d:\filework\worktrees/release-prep\` | 复用现有 worktree |
 | **基于 commit** | `42ae0aa` (NSFOCUS-L4 收尾) | 工作的起点 |
 | **风险等级** | 🔴 high | 涉及 schema/migration, 影响数据完整性 |
 | **预计完成时间** | 分阶段: P0(1d) + P1(3d) + P2(5d) | |
@@ -32,7 +32,7 @@
 
 **证据**:
 
-[meta/core/migration_runner.py](file:///d:/filework/release-prep-worktree/meta/core/migration_runner.py) 提供了完整框架:
+[meta/core/migration_runner.py](file:///d:/filework/worktrees/release-prep/meta/core/migration_runner.py) 提供了完整框架:
 
 | 行号 | 内容 | 评估 |
 |------|------|------|
@@ -52,7 +52,7 @@
 
 ### 2.2 实际执行模式: server.py 硬编码 import [RISK]
 
-**证据**: [meta/server.py:482-515](file:///d:/filework/release-prep-worktree/meta/server.py#L482-L515)
+**证据**: [meta/server.py:482-515](file:///d:/filework/worktrees/release-prep/meta/server.py#L482-L515)
 
 ```python
 # L482-483: 硬编码 import + 调用 (绕过 runner)
@@ -83,7 +83,7 @@ v007_51_migrate(Path(db_path), skip_backup=True)
 
 ### 2.3 deploy.sh 完全不调用 migration [RISK]
 
-**证据**: [deploy_bundle/deploy.sh](file:///d:/filework/release-prep-worktree/deploy_bundle/deploy.sh) grep 结果
+**证据**: [deploy_bundle/deploy.sh](file:///d:/filework/worktrees/release-prep/deploy_bundle/deploy.sh) grep 结果
 
 | 行号 | 内容 | 说明 |
 |------|------|------|
@@ -94,7 +94,7 @@ v007_51_migrate(Path(db_path), skip_backup=True)
 
 ### 2.4 文件结构混乱 [WARN]
 
-[meta/migrations/](file:///d:/filework/release-prep-worktree/meta/migrations) 目录有 30 个文件, **5 种命名风格混用**:
+[meta/migrations/](file:///d:/filework/worktrees/release-prep/meta/migrations) 目录有 30 个文件, **5 种命名风格混用**:
 
 | 命名风格 | 示例 | 数量 |
 |---------|------|------|
@@ -117,7 +117,7 @@ Grep 结果显示 migrations 目录有 4 种入口签名:
 
 ### 2.6 v007_50/v007_51 是项目内部最佳实践模板 [OK]
 
-[v007_50_add_audit_union_view.py](file:///d:/filework/release-prep-worktree/meta/migrations/v007_50_add_audit_union_view.py) 质量:
+[v007_50_add_audit_union_view.py](file:///d:/filework/worktrees/release-prep/meta/migrations/v007_50_add_audit_union_view.py) 质量:
 
 - 完整 docstring (L1-32): 背景、方案、部署、回滚说明
 - 幂等性: `IF NOT EXISTS`、`DROP IF EXISTS`、检查 VIEW 是否存在
@@ -553,7 +553,7 @@ blocks:
 
 #### 7.1.1 增强 MigrationRunner
 
-修改 [meta/core/migration_runner.py](file:///d:/filework/release-prep-worktree/meta/core/migration_runner.py):
+修改 [meta/core/migration_runner.py](file:///d:/filework/worktrees/release-prep/meta/core/migration_runner.py):
 
 ```python
 # L166-190: run_pending_migrations 扩展支持 .py
@@ -712,7 +712,7 @@ def _backup_db(self) -> bool:
 
 #### 7.1.2 server.py 改用 runner
 
-修改 [meta/server.py:482-515](file:///d:/filework/release-prep-worktree/meta/server.py#L482-L515):
+修改 [meta/server.py:482-515](file:///d:/filework/worktrees/release-prep/meta/server.py#L482-L515):
 
 ```python
 # 旧代码 (删除):
@@ -730,7 +730,7 @@ logging.getLogger(__name__).info(f"[Migration] Executed {executed} pending migra
 
 #### 7.1.3 deploy.sh 增加 PHASE 2.5
 
-修改 [deploy_bundle/deploy.sh](file:///d:/filework/release-prep-worktree/deploy_bundle/deploy.sh), 在 PHASE 2 (解压) 之后, PHASE 3 (启动 backend) 之前增加:
+修改 [deploy_bundle/deploy.sh](file:///d:/filework/worktrees/release-prep/deploy_bundle/deploy.sh), 在 PHASE 2 (解压) 之后, PHASE 3 (启动 backend) 之前增加:
 
 ```bash
 # ============================================================
@@ -1778,11 +1778,11 @@ insights:
 
 ### 12.3 项目内部参考
 
-- [meta/core/migration_runner.py](file:///d:/filework/release-prep-worktree/meta/core/migration_runner.py) — 现有框架
-- [meta/migrations/v007_50_add_audit_union_view.py](file:///d:/filework/release-prep-worktree/meta/migrations/v007_50_add_audit_union_view.py) — 内部最佳实践模板
-- [meta/server.py:482-515](file:///d:/filework/release-prep-worktree/meta/server.py#L482-L515) — 现有硬编码调用
-- [deploy_bundle/deploy.sh](file:///d:/filework/release-prep-worktree/deploy_bundle/deploy.sh) — 部署脚本
-- [spec_template.md](file:///d:/filework/release-prep-worktree/spec_template.md) — Spec 写作模板
+- [meta/core/migration_runner.py](file:///d:/filework/worktrees/release-prep/meta/core/migration_runner.py) — 现有框架
+- [meta/migrations/v007_50_add_audit_union_view.py](file:///d:/filework/worktrees/release-prep/meta/migrations/v007_50_add_audit_union_view.py) — 内部最佳实践模板
+- [meta/server.py:482-515](file:///d:/filework/worktrees/release-prep/meta/server.py#L482-L515) — 现有硬编码调用
+- [deploy_bundle/deploy.sh](file:///d:/filework/worktrees/release-prep/deploy_bundle/deploy.sh) — 部署脚本
+- [spec_template.md](file:///d:/filework/worktrees/release-prep/spec_template.md) — Spec 写作模板
 
 ### 12.4 外部资源
 

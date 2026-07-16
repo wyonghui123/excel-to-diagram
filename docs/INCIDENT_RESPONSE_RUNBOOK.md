@@ -457,8 +457,8 @@ python tools/install_log_service_systemd.py --target prod
 # Windows PC 上 (这台运维机器)
 schtasks /query /tn "yonaa_alert_monitor" /fo LIST      # 任务状态
 schtasks /run /tn "yonaa_alert_monitor"                   # 手动跑
-Get-Content d:\filework\release-prep-worktree\tools\alert_monitor_v0760.log -Tail 30
-python d:\filework\release-prep-worktree\tools\alert_monitor_v0760.py --check-one backend_err
+Get-Content d:\filework\worktrees/release-prep\tools\alert_monitor_v0760.log -Tail 30
+python d:\filework\worktrees/release-prep\tools\alert_monitor_v0760.py --check-one backend_err
 ```
 
 ```bash

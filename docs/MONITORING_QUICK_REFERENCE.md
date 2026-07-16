@@ -2,8 +2,8 @@
 
 > **面向**: 运维工程师 / AI Agent
 > **目的**: 1 张表 9 项检查 + 复制粘贴命令 + 告警/心跳消息长什么样, 5 分钟能上手
-> **完整配置**: [INCIDENT_ALERT_SETUP.md](file:///d:/filework/release-prep-worktree/docs/INCIDENT_ALERT_SETUP.md) (V007.58~V007.63 全量)
-> **事故响应**: [INCIDENT_RESPONSE_RUNBOOK.md](file:///d:/filework/release-prep-worktree/docs/INCIDENT_RESPONSE_RUNBOOK.md) §9 (告警项→应急处理对照)
+> **完整配置**: [INCIDENT_ALERT_SETUP.md](file:///d:/filework/worktrees/release-prep/docs/INCIDENT_ALERT_SETUP.md) (V007.58~V007.63 全量)
+> **事故响应**: [INCIDENT_RESPONSE_RUNBOOK.md](file:///d:/filework/worktrees/release-prep/docs/INCIDENT_RESPONSE_RUNBOOK.md) §9 (告警项→应急处理对照)
 
 ---
 
@@ -81,16 +81,16 @@ schtasks /query /tn "yonaa_alert_monitor" /fo LIST
 schtasks /run /tn "yonaa_alert_monitor"
 
 # 查看最近运行日志
-Get-Content d:\filework\release-prep-worktree\tools\alert_monitor_v0760.log -Tail 30
+Get-Content d:\filework\worktrees/release-prep\tools\alert_monitor_v0760.log -Tail 30
 
 # 列出所有 9 项检查
-python d:\filework\release-prep-worktree\tools\alert_monitor_v0760.py --list-checks
+python d:\filework\worktrees/release-prep\tools\alert_monitor_v0760.py --list-checks
 
 # 单跑一项检查
-python d:\filework\release-prep-worktree\tools\alert_monitor_v0760.py --check-one backend_err
+python d:\filework\worktrees/release-prep\tools\alert_monitor_v0760.py --check-one backend_err
 
 # 强制跑全部 (不管 interval)
-python d:\filework\release-prep-worktree\tools\alert_monitor_v0760.py --check-now --force
+python d:\filework\worktrees/release-prep\tools\alert_monitor_v0760.py --check-now --force
 
 # 停 / 启 / 卸载任务
 schtasks /change /tn "yonaa_alert_monitor" /disable
@@ -98,10 +98,10 @@ schtasks /change /tn "yonaa_alert_monitor" /enable
 schtasks /delete /tn "yonaa_alert_monitor" /f
 
 # 重设飞书凭证 (写到 HKCU)
-powershell -ExecutionPolicy Bypass -File d:\filework\release-prep-worktree\tools\_setup_lark_env.ps1
+powershell -ExecutionPolicy Bypass -File d:\filework\worktrees/release-prep\tools\_setup_lark_env.ps1
 
 # 临时改心跳间隔 (测试用)
-$env:HEARTBEAT_INTERVAL_SEC='10'; python d:\filework\release-prep-worktree\tools\alert_monitor_v0760.py --check-now --force
+$env:HEARTBEAT_INTERVAL_SEC='10'; python d:\filework\worktrees/release-prep\tools\alert_monitor_v0760.py --check-now --force
 ```
 
 ---
@@ -167,16 +167,16 @@ yonaa agent alert · 2026-07-16 12:20:15
 
 | 文件 | 作用 |
 |------|------|
-| [alert_monitor_v0760.py](file:///d:/filework/release-prep-worktree/tools/alert_monitor_v0760.py) | 主监控 (9 项检查, 分层调度, 心跳) |
-| [alert_monitor_v0760.bat](file:///d:/filework/release-prep-worktree/tools/alert_monitor_v0760.bat) | 手动调试 wrapper (用绝对路径 + pythonw) |
-| [yonaa_alert_monitor_v0762.xml](file:///d:/filework/release-prep-worktree/tools/yonaa_alert_monitor_v0762.xml) | **当前生效的任务** (Hidden + pythonw.exe) |
-| [yonaa_alert_monitor_v0760.xml](file:///d:/filework/release-prep-worktree/tools/yonaa_alert_monitor_v0760.xml) | v0760 任务定义 (含 bat) |
-| [alert_monitor_config.json](file:///d:/filework/release-prep-worktree/tools/alert_monitor_config.json) | 配置 (含 lark_app 占位符) |
-| [alert_monitor_config_state.json](file:///d:/filework/release-prep-worktree/tools/alert_monitor_config_state.json) | 状态 (失败追踪 + cooldown + check_last_run + last_heartbeat_ts) |
-| [alert_monitor_v0760.log](file:///d:/filework/release-prep-worktree/tools/alert_monitor_v0760.log) | 运行日志 (Task Scheduler 写入) |
-| [_setup_lark_env.ps1](file:///d:/filework/release-prep-worktree/tools/_setup_lark_env.ps1) | 重设 HKCU 凭证 |
-| [_swap_task_v0762.ps1](file:///d:/filework/release-prep-worktree/tools/_swap_task_v0762.ps1) | 升级到 v0762 任务 (提权跑) |
-| [_gen_v0760_task_xml.py](file:///d:/filework/release-prep-worktree/tools/_gen_v0760_task_xml.py) | 生成任务定义 XML |
+| [alert_monitor_v0760.py](file:///d:/filework/worktrees/release-prep/tools/alert_monitor_v0760.py) | 主监控 (9 项检查, 分层调度, 心跳) |
+| [alert_monitor_v0760.bat](file:///d:/filework/worktrees/release-prep/tools/alert_monitor_v0760.bat) | 手动调试 wrapper (用绝对路径 + pythonw) |
+| [yonaa_alert_monitor_v0762.xml](file:///d:/filework/worktrees/release-prep/tools/yonaa_alert_monitor_v0762.xml) | **当前生效的任务** (Hidden + pythonw.exe) |
+| [yonaa_alert_monitor_v0760.xml](file:///d:/filework/worktrees/release-prep/tools/yonaa_alert_monitor_v0760.xml) | v0760 任务定义 (含 bat) |
+| [alert_monitor_config.json](file:///d:/filework/worktrees/release-prep/tools/alert_monitor_config.json) | 配置 (含 lark_app 占位符) |
+| [alert_monitor_config_state.json](file:///d:/filework/worktrees/release-prep/tools/alert_monitor_config_state.json) | 状态 (失败追踪 + cooldown + check_last_run + last_heartbeat_ts) |
+| [alert_monitor_v0760.log](file:///d:/filework/worktrees/release-prep/tools/alert_monitor_v0760.log) | 运行日志 (Task Scheduler 写入) |
+| [_setup_lark_env.ps1](file:///d:/filework/worktrees/release-prep/tools/_setup_lark_env.ps1) | 重设 HKCU 凭证 |
+| [_swap_task_v0762.ps1](file:///d:/filework/worktrees/release-prep/tools/_swap_task_v0762.ps1) | 升级到 v0762 任务 (提权跑) |
+| [_gen_v0760_task_xml.py](file:///d:/filework/worktrees/release-prep/tools/_gen_v0760_task_xml.py) | 生成任务定义 XML |
 
 **凭证**: 飞书 `app_id / app_secret / chat_id` 写在 HKCU 环境变量 (`LARK_APP_ID` 等), Python 自动从注册表读 — **不在 git 里, 不在 config 文件里**.
 
@@ -195,4 +195,4 @@ yonaa agent alert · 2026-07-16 12:20:15
 
 ---
 
-**总入口**: [AGENT_INFRA.md](file:///d:/filework/release-prep-worktree/docs/AGENT_INFRA.md) | [DEPLOY_INFRASTRUCTURE.md](../DEPLOY_INFRASTRUCTURE.md) | [INCIDENT_RESPONSE_RUNBOOK.md](file:///d:/filework/release-prep-worktree/docs/INCIDENT_RESPONSE_RUNBOOK.md) §9
+**总入口**: [AGENT_INFRA.md](file:///d:/filework/worktrees/release-prep/docs/AGENT_INFRA.md) | [DEPLOY_INFRASTRUCTURE.md](../DEPLOY_INFRASTRUCTURE.md) | [INCIDENT_RESPONSE_RUNBOOK.md](file:///d:/filework/worktrees/release-prep/docs/INCIDENT_RESPONSE_RUNBOOK.md) §9

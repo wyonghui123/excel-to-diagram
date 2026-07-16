@@ -2,7 +2,7 @@
 
 > **目标读者**: AI Agent / 工程师 (写/跑 migration 的实战)
 > **最后更新**: 2026-07-15
-> **设计依据**: [docs/MIGRATION_SPEC.md](file:///d:/filework/release-prep-worktree/docs/MIGRATION_SPEC.md) (1711 行, 历史 design)
+> **设计依据**: [docs/MIGRATION_SPEC.md](file:///d:/filework/worktrees/release-prep/docs/MIGRATION_SPEC.md) (1711 行, 历史 design)
 > **本文件用途**: 5 分钟上手 + 实战 cookbook, 不重复 design 细节
 
 ---
@@ -315,5 +315,5 @@ CREATE TABLE migration_locks (
 
 ---
 
-**详细 design**: 见 [MIGRATION_SPEC.md](file:///d:/filework/release-prep-worktree/docs/MIGRATION_SPEC.md) (1711 行, 必读时再读)
-**总入口**: [DEPLOY_INFRASTRUCTURE.md](file:///d:/filework/release-prep-worktree/DEPLOY_INFRASTRUCTURE.md)
+**详细 design**: 见 [MIGRATION_SPEC.md](file:///d:/filework/worktrees/release-prep/docs/MIGRATION_SPEC.md) (1711 行, 必读时再读)
+**总入口**: [DEPLOY_INFRASTRUCTURE.md](file:///d:/filework/worktrees/release-prep/DEPLOY_INFRASTRUCTURE.md)

@@ -108,10 +108,10 @@
 | 部署脚本兼容 staging/prod | 加 --target staging|prod 参数 |
 
 ### 2.5 立即可上传的工具 ✅
-- [regression_test_suite.py](file:///d:/filework/release-prep-worktree/tools/regression_test_suite.py) (V007.55, 9 场景, **取代 sqlite_chaos**)
-- ~~[sqlite_chaos.py](file:///d:/filework/release-prep-worktree/tools/sqlite_chaos.py)~~ (V007.55 **deprecated**, 用 `--redirect-to-regression` 软迁移)
-- [audit_recovery.py](file:///d:/filework/release-prep-worktree/tools/audit_recovery.py) (commit `79f9add`)
-- [pre_deploy_check.py](file:///d:/filework/release-prep-worktree/tools/pre_deploy_check.py) (commit `3455a90`)
+- [regression_test_suite.py](file:///d:/filework/worktrees/release-prep/tools/regression_test_suite.py) (V007.55, 9 场景, **取代 sqlite_chaos**)
+- ~~[sqlite_chaos.py](file:///d:/filework/worktrees/release-prep/tools/sqlite_chaos.py)~~ (V007.55 **deprecated**, 用 `--redirect-to-regression` 软迁移)
+- [audit_recovery.py](file:///d:/filework/worktrees/release-prep/tools/audit_recovery.py) (commit `79f9add`)
+- [pre_deploy_check.py](file:///d:/filework/worktrees/release-prep/tools/pre_deploy_check.py) (commit `3455a90`)
 
 ---
 
@@ -213,4 +213,4 @@
 - 🆘 决策点: 方案 A vs B (产品经理选)
 - 🆘 决策点: 业务方能否访问 staging
 
-详细技术: [STAGING_ENV_ANALYSIS.md v2](file:///d:/filework/release-prep-worktree/docs/STAGING_ENV_ANALYSIS.md)
+详细技术: [STAGING_ENV_ANALYSIS.md v2](file:///d:/filework/worktrees/release-prep/docs/STAGING_ENV_ANALYSIS.md)

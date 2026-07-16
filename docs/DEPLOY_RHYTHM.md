@@ -92,7 +92,7 @@
 
 ```bash
 # === 1-2. 本地: 写代码 + 提交 + 本地 e2e ===
-cd d:\filework\release-prep-worktree
+cd d:\filework\worktrees/release-prep
 git status -s                  # 确认改了哪些
 $env:ALLOW_RAW_SQL="1"
 python -m pytest meta/tests/xxx -v

@@ -242,6 +242,6 @@ EXCLUDE_RUN_PENDING=0 python tools/staging_deploy_orchestrator.py
 
 ---
 
-**总入口**: [DEPLOY_INFRASTRUCTURE.md §3.1](file:///d:/filework/release-prep-worktree/DEPLOY_INFRASTRUCTURE.md#%C2%A73-%E9%83%A8%E7%BD%B2%E6%B5%81%E7%A8%8B)
-**Migration 实战**: [MIGRATION_GUIDE.md](file:///d:/filework/release-prep-worktree/docs/MIGRATION_GUIDE.md)
-**5 分钟速查**: [docs/AGENT_INFRA.md](file:///d:/filework/release-prep-worktree/docs/AGENT_INFRA.md)
+**总入口**: [DEPLOY_INFRASTRUCTURE.md §3.1](file:///d:/filework/worktrees/release-prep/DEPLOY_INFRASTRUCTURE.md#%C2%A73-%E9%83%A8%E7%BD%B2%E6%B5%81%E7%A8%8B)
+**Migration 实战**: [MIGRATION_GUIDE.md](file:///d:/filework/worktrees/release-prep/docs/MIGRATION_GUIDE.md)
+**5 分钟速查**: [docs/AGENT_INFRA.md](file:///d:/filework/worktrees/release-prep/docs/AGENT_INFRA.md)
