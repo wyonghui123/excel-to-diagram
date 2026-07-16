@@ -220,3 +220,15 @@ meta/architecture.db.pre_*
 *.state.json
 *.deploy_state
 
+# ===== v2026.07.16: V007.79 调查发现 — DB 备份 + MagicMock =====
+# DB 备份 (V007.50 之后 watchdog 生成的)
+meta/architecture.bak.*
+meta/architecture.db.bak.*
+
+# MagicMock 目录 (测试残留, V007.79 调查发现)
+/meta/tests/MagicMock/
+
+# 乱码文件名 (GBK mojibake 0xef 0xbf 0xbd, 风险)
+# 匹配 ASCII 字符 + 3 字节 mojibake 序列
+"*[0xef][0xbf][0xbd]*"
+
