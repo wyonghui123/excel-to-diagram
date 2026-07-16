@@ -1,9 +1,11 @@
 # AGENT_INFRA.md
 
 > **目标读者**: AI Agent (主入口)
-> **最后更新**: 2026-07-16
+> **最后更新**: 2026-07-16 (V007.71 worktree 路径迁移)
 > **本文件用途**: AI Agent 5 分钟接手本项目, 知道: 这是什么、怎么部署、怎么远端操作、找哪个文档、**怎么监控告警**
 > **详细规范**: 见下方 §0 索引
+> **[!] V007.71 重要更新**: 所有 worktree 路径从 `D:/filework/<name>-worktree/` 迁移到 `D:/filework/worktrees/<name>/` — 详见 §0.5
+> **如使用本文件碰到 FileNotFound**: 立即跳到 §0.5 检查路径是否需要更新
 
 ---
 
@@ -11,19 +13,131 @@
 
 | 场景 | 文档 | 行数 | 用途 |
 |------|------|------|------|
-| **总入口** | [DEPLOY_INFRASTRUCTURE.md](file:///d:/filework/release-prep-worktree/DEPLOY_INFRASTRUCTURE.md) | 331 | 7 章节, 18 工具, 7 端口 — **永远先看这** |
-| **部署节奏** | [docs/DEPLOY_RHYTHM.md](file:///d:/filework/release-prep-worktree/docs/DEPLOY_RHYTHM.md) | 220 | **daily 21:00 / hotfix 立即** — 何时用哪个 |
+| **总入口** | [DEPLOY_INFRASTRUCTURE.md](file:///d:/filework/worktrees/release-prep/DEPLOY_INFRASTRUCTURE.md) | 331 | 7 章节, 18 工具, 7 端口 — **永远先看这** |
+| **部署节奏** | [docs/DEPLOY_RHYTHM.md](file:///d:/filework/worktrees/release-prep/docs/DEPLOY_RHYTHM.md) | 220 | **daily 21:00 / hotfix 立即** — 何时用哪个 |
 | **远端操作速查** | 本文件 §1 | — | 5 个 Python 函数 / 5 行 CLI / **回归测试 §1.4** |
-| **回归测试** | [docs/REGRESSION_TEST_SUITE.md](file:///d:/filework/release-prep-worktree/docs/REGRESSION_TEST_SUITE.md) | 250+ | 9 个 sqlite io error 场景 — staging 自动化 |
-| **告警与监控** | [docs/INCIDENT_ALERT_SETUP.md](file:///d:/filework/release-prep-worktree/docs/INCIDENT_ALERT_SETUP.md) | — | **9 项分层监控 + 飞书告警 (V007.58~V007.61)** |
-| **5min 监控速查** | [docs/MONITORING_QUICK_REFERENCE.md](file:///d:/filework/release-prep-worktree/docs/MONITORING_QUICK_REFERENCE.md) | 198 | **Agent 速查首选: 架构 / 9 项 / 端点 / 命令 / 故障排查 (V007.58~V007.63)** |
-| **事故响应** | [docs/INCIDENT_RESPONSE_RUNBOOK.md](file:///d:/filework/release-prep-worktree/docs/INCIDENT_RESPONSE_RUNBOOK.md) | 7 类事故 | 收到告警后怎么办 (含 V007.61 用户异常) |
-| **运维手册** | [docs/OPS_MANUAL.md](file:///d:/filework/release-prep-worktree/docs/OPS_MANUAL.md) | — | 运维日常操作 (含监控章节) |
-| **Migration 操作** | [docs/MIGRATION_GUIDE.md](file:///d:/filework/release-prep-worktree/docs/MIGRATION_GUIDE.md) | 200+ | migration 创建/运行/lint 实战 |
-| **Migration 设计依据** | [docs/MIGRATION_SPEC.md](file:///d:/filework/release-prep-worktree/docs/MIGRATION_SPEC.md) | 1711 | 完整设计 spec (历史 design, 不必读) |
-| **staging 操作** | [docs/STAGING_GUIDE.md](file:///d:/filework/release-prep-worktree/docs/STAGING_GUIDE.md) | 200+ | staging 部署/排错 |
-| **部署规范** | [docs/DEPLOYMENT_STANDARDS.md](file:///d:/filework/release-prep-worktree/docs/DEPLOYMENT_STANDARDS.md) | 587 | 编码/部署/审计规范 |
-| **完整索引** | [docs/INDEX.md](file:///d:/filework/release-prep-worktree/docs/INDEX.md) | (待建) | 全部 docs/ 分类 |
+| **回归测试** | [docs/REGRESSION_TEST_SUITE.md](file:///d:/filework/worktrees/release-prep/docs/REGRESSION_TEST_SUITE.md) | 250+ | 9 个 sqlite io error 场景 — staging 自动化 |
+| **告警与监控** | [docs/INCIDENT_ALERT_SETUP.md](file:///d:/filework/worktrees/release-prep/docs/INCIDENT_ALERT_SETUP.md) | — | **9 项分层监控 + 飞书告警 (V007.58~V007.61)** |
+| **5min 监控速查** | [docs/MONITORING_QUICK_REFERENCE.md](file:///d:/filework/worktrees/release-prep/docs/MONITORING_QUICK_REFERENCE.md) | 198 | **Agent 速查首选: 架构 / 9 项 / 端点 / 命令 / 故障排查 (V007.58~V007.63)** |
+| **事故响应** | [docs/INCIDENT_RESPONSE_RUNBOOK.md](file:///d:/filework/worktrees/release-prep/docs/INCIDENT_RESPONSE_RUNBOOK.md) | 7 类事故 | 收到告警后怎么办 (含 V007.61 用户异常) |
+| **运维手册** | [docs/OPS_MANUAL.md](file:///d:/filework/worktrees/release-prep/docs/OPS_MANUAL.md) | — | 运维日常操作 (含监控章节) |
+| **Migration 操作** | [docs/MIGRATION_GUIDE.md](file:///d:/filework/worktrees/release-prep/docs/MIGRATION_GUIDE.md) | 200+ | migration 创建/运行/lint 实战 |
+| **Migration 设计依据** | [docs/MIGRATION_SPEC.md](file:///d:/filework/worktrees/release-prep/docs/MIGRATION_SPEC.md) | 1711 | 完整设计 spec (历史 design, 不必读) |
+| **staging 操作** | [docs/STAGING_GUIDE.md](file:///d:/filework/worktrees/release-prep/docs/STAGING_GUIDE.md) | 200+ | staging 部署/排错 |
+| **部署规范** | [docs/DEPLOYMENT_STANDARDS.md](file:///d:/filework/worktrees/release-prep/docs/DEPLOYMENT_STANDARDS.md) | 587 | 编码/部署/审计规范 |
+| **完整索引** | [docs/INDEX.md](file:///d:/filework/worktrees/release-prep/docs/INDEX.md) | (待建) | 全部 docs/ 分类 |
+
+---
+
+## 0.5. Worktree 路径 (V007.71 迁移)  [!] 必读
+
+> **2026-07-16 PM 部署智能体通知**: 所有 worktree 路径从 `D:/filework/<name>-worktree/` 迁移到 `D:/filework/worktrees/<name>/`
+> **触发原因**: 统一 worktree 目录结构, 避免散落顶层 (之前 5 个 worktree + sim/ 都在 `D:/filework/` 根)
+> **迁移执行方**: 另一个 dev Agent (V007.71)
+> **影响范围**: 所有 AI Agent 调用 `file:///d:/filework/...` 链接 + shell 路径
+
+### 0.5.1 完整路径映射 (4 个 worktree + 1 个主仓)
+
+| 用途 | 旧路径 (V007.70 之前) | **新路径 (V007.71+)** | 分支 | HEAD |
+|------|------|------|------|------|
+| **主仓库** | `D:/filework/excel-to-diagram/` | `D:/filework/excel-to-diagram/` (不变) | main / feat/annotation-category-filter | d2c8bcd |
+| **PM 部署用** | `D:/filework/release-prep-worktree/` | **`D:/filework/worktrees/release-prep/`** | release/pre-2026-06-29 | 790507f (V007.70) |
+| **Doc 整理** | `D:/filework/docs-handover-worktree/` | **`D:/filework/worktrees/docs-handover/`** | docs/deploy-history-2026-07-16 | 2d67624 |
+| **集成测试** | `D:/filework/integration-worktree/` | **`D:/filework/worktrees/integration/`** | integration/2026-07-04 | 2388bfd |
+| **V061 staging** | `D:/filework/worktree-V061-staging/` | **`D:/filework/worktrees/agent-v061-staging/`** | agent/v061-staging | c0190c7 |
+| **Orphan (已删)** | `D:/filework/sim/` | ❌ **不存在** (1.6 GB orphan 副本, 已废弃) | — | — |
+
+### 0.5.2 git worktree list 验证 (5 字段)
+
+```bash
+$ git -C D:/filework/excel-to-diagram worktree list
+D:/filework/excel-to-diagram             d2c8bcd [feat/annotation-category-filter]
+D:/filework/worktrees/agent-v061-staging c0190c7 [agent/v061-staging]
+D:/filework/worktrees/docs-handover      2d67624 [docs/deploy-history-2026-07-16]
+D:/filework/worktrees/integration        2388bfd [integration/2026-07-04]
+D:/filework/worktrees/release-prep       790507f [release/pre-2026-06-29]
+```
+
+### 0.5.3 常见错误 + 修复 (3 类)
+
+**错误 1: Agent 用老路径访问, 报 FileNotFound**
+
+```python
+# [X] 老路径 (V007.70 之前)
+Read: d:/filework/release-prep-worktree/docs/AGENT_INFRA.md
+# → FileNotFound
+
+# [OK] 新路径 (V007.71+)
+Read: d:/filework/worktrees/release-prep/docs/AGENT_INFRA.md
+```
+
+**错误 2: Agent 不知道迁移, 报"找不到 worktree"**
+
+```bash
+# [X] 老命令
+git -C d:/filework/release-prep-worktree log --oneline -5
+# → fatal: cannot change to 'd:/filework/release-prep-worktree': No such file or directory
+
+# [OK] 新命令
+git -C d:/filework/worktrees/release-prep log --oneline -5
+```
+
+**错误 3: Agent 创建新 worktree 用老路径, 跟 V007.71+ 命名冲突**
+
+```bash
+# [X] 老命名
+git worktree add d:/filework/release-prep-worktree -b new-feature
+# → 工作区污染 + worktree entry 冲突
+
+# [OK] 新命名 (统一 D:/filework/worktrees/<name>/)
+git worktree add d:/filework/worktrees/release-prep-newfeature -b new-feature
+# 或: 复用 release-prep 的话, 直接 cd 进去 + git checkout -b new-feature
+```
+
+### 0.5.4 5 个铁律 (新 worktree 操作)
+
+1. **新 worktree 一律放 `D:/filework/worktrees/`** (不放顶层)
+2. **worktree 物理目录名 = 分支名最后一段** (例: `release-prep` ↔ `release/pre-2026-06-29`)
+3. **worktree entry 名保持 git 命名 (dash 分隔)**, 不要改成 underscore
+4. **不要创建 orphan 副本** (像之前的 `sim/`, 1.6 GB 浪费)
+5. **老路径已废弃, 不要做兼容跳转**
+
+### 0.5.5 紧急回滚 (如发现迁移有问题)
+
+```bash
+# 1. 检查 git 状态
+git -C d:/filework/excel-to-diagram worktree list
+
+# 2. 如 release-prep 物理目录被破坏, 重建
+git -C d:/filework/excel-to-diagram worktree add \
+  d:/filework/worktrees/release-prep \
+  release/pre-2026-06-29
+
+# 3. 验证 HEAD
+git -C d:/filework/worktrees/release-prep log --oneline -1
+# 期望: 790507f V007.70
+```
+
+### 0.5.6 V007.71 已知未修复项 (留 V007.72+)
+
+**本次只更新 AGENT_INFRA.md**, 其他 docs/ 里的老路径引用 **未修复** (因为是 100+ commit diff 的 refactor, 不在 V007.71 范围):
+
+| 文件 | 老路径引用数 | 修复 |
+|------|------|------|
+| docs/MONITORING_QUICK_REFERENCE.md | 14 file:// + 20 文本 | ⏳ V007.72+ |
+| docs/MIGRATION_SPEC.md | 13 file:// + 17 文本 | ⏳ V007.72+ |
+| docs/OPS_MANUAL.md | 9 文本 | ⏳ V007.72+ |
+| docs/UPLOAD-GUIDE-20260630_001.md | 8 文本 | ⏳ V007.72+ |
+| docs/UPLOAD-GUIDE-20260630_002.md | 8 文本 | ⏳ V007.72+ |
+| docs/INCIDENT_ALERT_SETUP.md | 7 文本 | ⏳ V007.72+ |
+| docs/STAGING_DAY0_CHECKLIST.md | 5 file:// + 5 文本 | ⏳ V007.72+ |
+| 其他 10+ 文件 | < 5 each | ⏳ V007.72+ |
+| **总计** | **~120+ 老路径引用 (15 个 docs/)** | ⏳ V007.72+ |
+
+**Agent 处理策略**:
+- ✅ 优先用 AGENT_INFRA.md §0.5.1 表的 5 个核心路径 (本节已 100% 准确)
+- ⚠️ 访问其他 docs/ 时碰到 FileNotFound, 提示老路径, 手动转新路径
+- ⏳ 期望 V007.72 一次性修复 15 个 docs/
 
 ---
 
@@ -106,9 +220,9 @@ python tools/yonaa_exec.py exec "python3 tools/monitor_migrations.py --check-reg
 - **告警**: 5min 触发 (聚合去重 5min), 红色卡片, @ 全体
 - **凭证**: 飞书 app secret 在 HKCU `HKCU:\Software\wyonghui_lark_app` (reg query), env 兜底
 
-**速查首选**: [MONITORING_QUICK_REFERENCE.md](file:///d:/filework/release-prep-worktree/docs/MONITORING_QUICK_REFERENCE.md)
-**配置细节**: [INCIDENT_ALERT_SETUP.md](file:///d:/filework/release-prep-worktree/docs/INCIDENT_ALERT_SETUP.md)
-**应急处理**: [INCIDENT_RESPONSE_RUNBOOK.md](file:///d:/filework/release-prep-worktree/docs/INCIDENT_RESPONSE_RUNBOOK.md) §9
+**速查首选**: [MONITORING_QUICK_REFERENCE.md](file:///d:/filework/worktrees/release-prep/docs/MONITORING_QUICK_REFERENCE.md)
+**配置细节**: [INCIDENT_ALERT_SETUP.md](file:///d:/filework/worktrees/release-prep/docs/INCIDENT_ALERT_SETUP.md)
+**应急处理**: [INCIDENT_RESPONSE_RUNBOOK.md](file:///d:/filework/worktrees/release-prep/docs/INCIDENT_RESPONSE_RUNBOOK.md) §9
 
 ### 1.6 1 个公式: Token
 
@@ -165,11 +279,11 @@ docs/
 
 **9 项分层监控** + log_service 9+ 业务端点 + 告警/心跳消息样例 + 全部运维命令 — 详见:
 
-> 📖 **[docs/MONITORING_QUICK_REFERENCE.md](file:///d:/filework/release-prep-worktree/docs/MONITORING_QUICK_REFERENCE.md)** (V007.58~V007.63 完整版, 日常运维速查)
+> 📖 **[docs/MONITORING_QUICK_REFERENCE.md](file:///d:/filework/worktrees/release-prep/docs/MONITORING_QUICK_REFERENCE.md)** (V007.58~V007.63 完整版, 日常运维速查)
 
-- **告警配置**: [INCIDENT_ALERT_SETUP.md](file:///d:/filework/release-prep-worktree/docs/INCIDENT_ALERT_SETUP.md) (V007.58~V007.63 升级摘要 + 飞书 App Bot 申请 7 步)
-- **事故响应**: [INCIDENT_RESPONSE_RUNBOOK.md](file:///d:/filework/release-prep-worktree/docs/INCIDENT_RESPONSE_RUNBOOK.md) §9 (log_service 死了 / OOM / 磁盘满 怎么处理 + 告警项→应急处理对照)
-- **运维命令**: [OPS_MANUAL.md](file:///d:/filework/release-prep-worktree/docs/OPS_MANUAL.md) §十一 (告警与监控 + 故障排查速查)
+- **告警配置**: [INCIDENT_ALERT_SETUP.md](file:///d:/filework/worktrees/release-prep/docs/INCIDENT_ALERT_SETUP.md) (V007.58~V007.63 升级摘要 + 飞书 App Bot 申请 7 步)
+- **事故响应**: [INCIDENT_RESPONSE_RUNBOOK.md](file:///d:/filework/worktrees/release-prep/docs/INCIDENT_RESPONSE_RUNBOOK.md) §9 (log_service 死了 / OOM / 磁盘满 怎么处理 + 告警项→应急处理对照)
+- **运维命令**: [OPS_MANUAL.md](file:///d:/filework/worktrees/release-prep/docs/OPS_MANUAL.md) §十一 (告警与监控 + 故障排查速查)
 
 **30 秒速记**:
 - 飞书收到红色卡片 + @全体 = **告警** → 查 §9.5 告警项→应急处理对照
@@ -327,4 +441,4 @@ bash deploy.sh
 
 ---
 
-**维护**: AGENT 接手时, **5 分钟读本文件 → 30 秒跑 capability_probe → 5 分钟读 DEPLOY_INFRASTRUCTURE §0+§1 → 3 分钟读 [MONITORING_QUICK_REFERENCE.md](file:///d:/filework/release-prep-worktree/docs/MONITORING_QUICK_REFERENCE.md)** = 完全 ready.
+**维护**: AGENT 接手时, **5 分钟读本文件 → 30 秒跑 capability_probe → 5 分钟读 DEPLOY_INFRASTRUCTURE §0+§1 → 3 分钟读 [MONITORING_QUICK_REFERENCE.md](file:///d:/filework/worktrees/release-prep/docs/MONITORING_QUICK_REFERENCE.md)** = 完全 ready.
