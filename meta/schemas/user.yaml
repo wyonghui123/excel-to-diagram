@@ -93,7 +93,10 @@ fields:
   - id: password
     name: 密码
     type: string
-    db_column: password_hash
+    # [FIX 2026-07-17] yaml_driver 引擎发现 db_column 与 password_hash 字段冲突
+    # password 是 virtual 字段 (创建用户时的初始密码表单输入), 不会映射到 SQL 列
+    # 持久化列由 password_hash 字段承担 (db_column: password_hash)
+    # 不设置 db_column -> yaml_loader 默认使用 field.id="password", 但因 storage=VIRTUAL 被 SQL 生成跳过
     required: false
     semantics:
       meaning: 初始密码：admin 创建用户时可填，留空则后端自动生成 12 位强随机密码，首次登录强制改密

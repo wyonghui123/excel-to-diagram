@@ -1,0 +1,40 @@
+[33mc9e0db6[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mrelease/pre-2026-06-29[m[33m, [m[1;31morigin/release/pre-2026-06-29[m[33m)[m V007.86d: tools - .bat 编码检查 + 计划任务 XML 生成器 (V007.86c 教训防护)
+[33m1363164[m V007.86c: tools - 永久修复成功! v0760.bat 改 ASCII + 计划任务 exit 0
+[33m31a79f6[m V007.86b: tools - alert_monitor_v0760.bat 路径修复 + 修复计划任务 (v4 XML 用 .bat)
+[33m5010e78[m chore(docs): worktree path migration 跟进 - 替换 328 个旧路径引用
+[33m78b6d9e[m V007.86: docs - 远程监控掉线报告 (用户问题 + 守护进程启动)
+[33m85daed9[m V007.85b: tools - check_path_migration.py (V007.85 SOP 实际工具)
+[33m7d5b0bc[m V007.85: docs(AGENT_INFRA) - §0.7 路径迁移 SOP + tools/check_path_migration.py
+[33m9eb0699[m V007.84: monitor - alert_monitor_config_state.json 时间戳更新 (3 次 --check-now)
+[33mcb78ad8[m V007.83: docs - 飞书告警监控任务修复指南 (V007.71 worktree 迁移遗留)
+[33m690e2ae[m V007.82: cleanup - 删 _dry_run_smart_extract.py (V007.79 部署残留 - 终清理 2)
+[33m4668a18[m V007.81: cleanup - 删 3 个乱码/MagicMock 残留 (V007.13 部署 - 终清理)
+[33me0e1f8c[m V007.80: docs(AGENT_INFRA) - §0.6 身份检查 SOP (5 步强制 + 4 铁律)
+[33m68e526f[m V007.79d: docs - Phase 3d 加 1 规则 + 1 doc + 修订 .gitignore (V007.13 部署 - 收尾)
+[33m83dc714[m V007.79c: tools - Phase 3c 加 28 个 tools/ 新脚本 (V007.13 部署工具集)
+[33m0808342[m V007.79b: deploy - Phase 3b 加 6 部署脚本 + 43 测试 + 3 SOP (V007.13 部署包 - 拆包)
+[33m49f2e38[m V007.79a: deploy - Phase 3a 加 V007.13 新发版包 (2 个 zip, 80.72 MB)
+[33me3debc8[m V007.78: refactor - Phase 2 改 4 个有净变化的文件 (V008 重构 - refactor phase)
+[33md3bdf37[m V007.77: cleanup - Phase 1 删 603 dev 阶段文件 (V008 重构 - cleanup phase)
+[33mb10bd89[m V007.76: docs - 身份认知错误致歉 + 修订 V007.74/V007.75
+[33md141e46[m V007.75: docs(V007.74 report) - 修订 714 dirty 作者归属
+[33mc5e0eb7[m V007.74: docs/.gitignore - 714 个 dirty 调查复盘 + 防 untracked 污染
+[33m626e967[m V007.73: docs(INCIDENT_REPORT_V2) - 49 个疑似 mojibake 调查 (结论: 合法 UTF-8)
+[33mea68a3f[m V007.72: docs - operational docs 老路径批量更新 (worktree 迁移跟进)
+[33m8e12b07[m V007.71: docs(AGENT_INFRA) - worktree 路径迁移章节 (PM 部署智能体通知)
+[33m790507f[m V007.70: 修复 pre-commit 编码防护链 4 层失效 (2026-07-16 复盘)
+[33mccd92a3[m V007.69: L17 智能 delta 部署完整启用 (smart_extract.sh + deploy.sh 接入)
+[33m1ae8f44[m V007.68: deploy.sh 持久化 deploy_history.log 审计 + 同步 tools/deploy.sh + 修 AGENT_INFRA.md
+[33m164d491[m V007.67: docs(AGENT_INFRA) - §5 价值说清楚 + §6 直说答案 (按需全量不是真 delta)
+[33m14744fa[m V007.66: docs(AGENT_INFRA) - §6 实际部署模式 (按需全量 + L17 真 delta 待 V007.68+)
+[33m53bb647[m V007.65: docs(AGENT_INFRA) - 索引表加 MONITORING_QUICK_REFERENCE + §1.5 监控速查 + §5 deploy_bundle 角色说明
+[33m0131e46[m V007.64: 修 test_utils.py CRLF -> LF (对齐 .gitattributes eol=lf)
+[33m58e4d09[m docs: 拆 AGENT_INFRA.md §4 监控章节为独立速查文档 + 修 5 处全角问号
+[33m8a07074[m V007.60~V007.63: 9 项分层监控 + 飞书集成 + 无弹窗 + 心跳
+[33me4d6cb3[m V007.59: 飞书应用机器人 API 支持 (lark_app, 不受管理员禁自定义机器人影响)
+[33m930af11[m V007.58: IM 告警 (agent 端轮询, 飞书/钉钉/微信 webhook)
+[33md9df213[m chore: add .gitattributes to enforce LF eol (prevent CRLF contamination)
+[33mef876b3[m V007.57: log_service 改 nobody 用户运行, 规避阿里云 HIPS 杀进程
+[33m076d819[m feat+chore(ops+docs): find_log_service_killer (V007.56 阿里云 HIPS 元凶) + 真删 restart_log_service.py + 5 doc 同步
+[33m50972d0[m feat(ops+docs): restart_log_service deprecation + probe --check-systemd + 7 doc 同步 (V007.55)
+[33maeee335[m feat(ops+infra): systemd unit 守护 log_service + cron 告警 (V007.55)

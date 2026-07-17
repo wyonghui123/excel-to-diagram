@@ -1,13 +1,31 @@
 {
   "heal_history": [
     {
-      "ts": 1784262900.9493177,
+      "ts": 1784266800.9329255,
       "result": "OK",
       "exit_before": 2519049,
       "exit_after": 0
     },
     {
-      "ts": 1784263501.1348352,
+      "ts": 1784267700.9545202,
+      "result": "OK",
+      "exit_before": 2519049,
+      "exit_after": 0
+    },
+    {
+      "ts": 1784268900.9185116,
+      "result": "OK",
+      "exit_before": 2519049,
+      "exit_after": 0
+    },
+    {
+      "ts": 1784269500.9306123,
+      "result": "OK",
+      "exit_before": 2519049,
+      "exit_after": 0
+    },
+    {
+      "ts": 1784270100.9433157,
       "result": "OK",
       "exit_before": 2519049,
       "exit_after": 0

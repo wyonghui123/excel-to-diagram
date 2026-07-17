@@ -1,7 +1,8 @@
 # AGENT_INFRA.md
 
 > **目标读者**: AI Agent (主入口)
-> **最后更新**: 2026-07-16 (V007.71 worktree 路径迁移)
+> **最后更新**: 2026-07-17 (协调智能体新增 §0.8 协同边界)
+> **更新者**: coordinator (P0-2 协同边界文档化)
 > **本文件用途**: AI Agent 5 分钟接手本项目, 知道: 这是什么、怎么部署、怎么远端操作、找哪个文档、**怎么监控告警**
 > **详细规范**: 见下方 §0 索引
 > **[!] V007.71 重要更新**: 所有 worktree 路径从 `D:/filework/<name>-worktree/` 迁移到 `D:/filework/worktrees/<name>/` — 详见 §0.5
@@ -507,6 +508,100 @@ schtasks /Delete /TN "\yonaa_alert_monitor" /F
 - 3. 应急监控
 - 4. 根因分析 (V007.71 路径迁移遗留)
 - 5. 未来防护 (= §0.7)
+
+---
+
+## 0.8. 协调智能体 vs 开发智能体协同边界 (2026-07-17 新增)  [!] 必读
+
+> **背景**: 2026-07-17 协调智能体在 4 个 dev worktree 统一 commit + push 174 个文件 (path migration 704 个旧路径引用), 期间 PM 需 3 次批准才能执行 (因 L2 NoMain 在协调智能体身上未定义). 本节固化协同边界.
+>
+> **owner**: 协调智能体 (coordinator) 维护本节
+> **触发条件**: 协调智能体首次启动 / 任何全局重构任务 / 任何跨 wt 修改
+
+### 0.8.1 角色定义
+
+| 角色 | 启动方式 | 主要职责 | 主要工作目录 |
+|------|---------|---------|-------------|
+| **开发智能体 (dev agent)** | `scripts/agent_bootstrap.ps1 -AgentName X -Port 301X` | 在指定 wt 完成业务功能 (fix/feat/refactor) | 自己的 wt (worktrees/X/) |
+| **协调智能体 (coordinator)** | 手动启动 (PM 决策) | 跨 wt 维护 (branch/wt 治理, 全局重构, 状态同步) | 全部 wt 只读, 协调目录可写 |
+| **PM** | 人工 | 决策、批准、合并 | excel-to-diagram 主仓库 |
+
+### 0.8.2 协调智能体可做 (无需 PM 特批)
+
+| 行为 | 范围 | 工具 |
+|------|------|------|
+| **读取任何 wt 的状态** | `git status/log/diff/refs` | Read/RunCommand |
+| **写 `.agent-status.json`** | 全局协调状态 | Write/Edit |
+| **写 `.coord/ports.json`** | 端口分配 | Write/Edit |
+| **写 `.coord/paths.json`** | 路径配置 (单一真相源) | Write/Edit |
+| **清理 untracked 文件** | 在 dev wt 中 `git clean -fd` | RunCommand |
+| **删除 branch** | 确认无引用后 `git branch -d` | RunCommand |
+| **删除 worktree** | PM 决策后 `git worktree remove` | RunCommand |
+| **创建新 wt** | 用于协调目的 (如 docs-handover) | RunCommand |
+| **删除 merged commit 的 dead branch** | git unreachable + 30 天无 commit | RunCommand |
+
+### 0.8.3 协调智能体需 PM 特批
+
+| 行为 | 触发场景 | 决策记录位置 |
+|------|---------|-------------|
+| **commit dev wt 的 docs/ 改动** | 全局文档更新 (路径迁移等) | `.agent-status.json` `coordination_decisions` |
+| **commit dev wt 的 tools/ 改动** | 协调工具修复 (例如 `_ports_sync.py`) | `.agent-status.json` `coordination_decisions` |
+| **commit dev wt 的 .gitignore / .gitattributes** | 全局 ignore 规则 | `.agent-status.json` `coordination_decisions` |
+| **任何 push 到 origin** | 协调智能体 push 前需 PM 批准 | `.agent-status.json` `coordination_decisions` |
+| **commit 主仓库 `excel-to-diagram`** | 全局修复 (但 L2 仍生效, 仅 PM 强制) | `.agent-status.json` `coordination_decisions` |
+
+### 0.8.4 协调智能体禁止 (任何情况)
+
+| 行为 | 原因 |
+|------|------|
+| 任何 wt 的 `src/` 业务代码改动 | 业务 dev 工作, 协调智能体无领域知识 |
+| 任何 wt 的 `meta/` 后端代码改动 | 后端 dev 工作, 涉及权限/审计/事务 |
+| 任何 wt 的 `frontend/src/` 改动 | 前端 dev 工作, 涉及组件/状态 |
+| 修改 `.git/hooks/pre-commit` | 安全保护, 一旦绕过会导致 mojibake 等 |
+| 修改 `scripts/service_manager.py` | 服务管理是基础设施, 改动需架构评审 |
+| 修改 `scripts/agent_bootstrap.ps1` | agent 启动入口, 改动影响所有 agent |
+| 修改 `.agent_registry/` 或 `.coord/` | 除非 P0 维护, 否则通过 PM 决策 |
+| `--no-verify` 绕过 pre-commit hook | 编码防护链不可绕过 |
+
+### 0.8.5 决策记录协议
+
+每次协调智能体触发 §0.8.3 的行为, 必须在 `.agent-status.json` 加:
+
+```json
+{
+  "coordination_decisions": [
+    {
+      "ts": "2026-07-17T09:35:00+08:00",
+      "actor": "coordinator",
+      "action": "commit 4 wt + push",
+      "scope": "worktrees/release-prep, integration, agent-v061-staging, docs-handover",
+      "files_affected": 174,
+      "rationale": "path migration - 替换 704 个旧路径引用, 99.8% 修复率",
+      "pm_approved": true,
+      "pm_approval_method": "AskUserQuestion (3 次确认)",
+      "commits": ["5010e78", "4331332", "b9cce52", "c218a05", "d80c472"]
+    }
+  ]
+}
+```
+
+### 0.8.6 协同失效案例 (历史)
+
+| 日期 | 失效模式 | 修复 |
+|------|---------|------|
+| 2026-07-15 | dev agent 误 `git stash pop` 致 L3 违规 | V007.74 后明令 L3 |
+| 2026-07-15 | 13 个 wt 被 CRLF 传染 (~25000 文件) | `core.autocrlf=false` + `.gitattributes` |
+| 2026-07-17 | 协调智能体 4 wt commit 需 PM 反复批准 | 本节固化边界 |
+
+### 0.8.7 协同失效检测 (协调智能体自检清单)
+
+每次新会话开始, 协调智能体必须自检:
+
+- [ ] 是否读了 `D:/filework/.agent-status.json` (最近协调决策)
+- [ ] 是否读了 `D:/filework/.coord/paths.json` (路径配置)
+- [ ] 是否读了 `D:/filework/.coord/ports.json` (端口分配)
+- [ ] 是否跑了 `git -C D:/filework/excel-to-diagram worktree list` (wt 状态)
+- [ ] 是否检查 dev agent 是否有进行中的 task (`.trae/agents/*.json` 心跳 < 5 分钟)
 
 ---
 
