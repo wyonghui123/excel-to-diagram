@@ -1,5 +1,18 @@
 {
-  "heal_history": [],
+  "heal_history": [
+    {
+      "ts": 1784262900.9493177,
+      "result": "OK",
+      "exit_before": 2519049,
+      "exit_after": 0
+    },
+    {
+      "ts": 1784263501.1348352,
+      "result": "OK",
+      "exit_before": 2519049,
+      "exit_after": 0
+    }
+  ],
   "consecutive_fails": 0,
   "daemon_started_ts": 0
 }

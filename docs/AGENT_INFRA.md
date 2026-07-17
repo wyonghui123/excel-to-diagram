@@ -510,6 +510,128 @@ schtasks /Delete /TN "\yonaa_alert_monitor" /F
 
 ---
 
+## 0.9. 基础设施清单 SOP (V007.86h 新增)  [!] 必读
+
+> **重要**: Dev Agent 是基础设施的一部分 (V007.86f 用户提问). 每次 Agent 启动 / 接手任务,
+> **必读** `infra_manifest.json`, 知道"基础设施 = N 个组件" + 每个组件的 script / 任务名 / 日志路径.
+> 不读 manifest = Agent 失忆 (V007.76 教训) + 不知道哪些组件该管.
+
+### 0.9.1 infra_manifest.json 是什么 (Layer 4)
+
+**位置**: `D:\filework\worktrees\release-prep\infra_manifest.json`
+
+**作用**:
+- 列所有基础设施组件 (alert_monitor / alert_monitor_health / auto_heal / agent_health)
+- 每个组件的: script 路径 / 计划任务名 / 间隔 / 日志 / 状态 / 依赖
+- Agent 启动必读, 跟 V007.80 §0.6 身份检查 SOP 配合
+
+**结构**:
+```json
+{
+  "version": "v007.86h",
+  "worktree": {"root": "D:\\...", "branch": "release/...", "expected_head_at_v007.86h": "a6e2bcc"},
+  "components": {
+    "alert_monitor": {
+      "script": "tools/alert_monitor_v0760.py",
+      "task_name": "\\yonaa_alert_monitor",
+      "interval_sec": 300,
+      ...
+    },
+    "alert_monitor_health": {...},
+    "auto_heal": {...},
+    "agent_health": {...}
+  },
+  "alerts": {"im_type": "lark_app", ...},
+  "remote_services": {"log_service_prod": "172.20.59.7:9101", ...}
+}
+```
+
+### 0.9.2 check_agent_health.py 是什么 (Layer 3)
+
+**位置**: `tools/check_agent_health.py`
+
+**作用**:
+- 5 分钟跑一次 (新计划任务 `\yonaa_agent_health`)
+- 检查 Agent 自身健康 (5 项, 失败 -> 飞书告警)
+
+**5 项检查**:
+1. **git_clean**: 无未提交改动 > 30 min
+2. **git_synced**: 不比 origin 早 > 24h (ahead of origin 是正常的, behind 才异常)
+3. **plan_tasks_healthy**: 4 个 yonaa_* 计划任务都 exit 0/1 (或 267011 = 没跑过)
+4. **manifest_in_sync**: infra_manifest.json 里的 script 路径都存在
+5. **agent_identity**: V007.80 §0.6 身份检查 (worktree 存在 + HEAD SHA 有效 + 最近 3 commits)
+
+### 0.9.3 Agent 启动 SOP (V007.86h 强制)
+
+**Agent 启动 / 接手任务** 必跑 3 步:
+
+```bash
+# 1. 读 manifest
+cat infra_manifest.json | head -50
+
+# 2. 验证 worktree 跟 manifest 一致
+git -C <worktree> rev-parse HEAD   # 应该等于 manifest.worktree.expected_head_at_v007.86h
+git -C <worktree> branch --show-current   # 应该等于 manifest.worktree.branch
+
+# 3. 跑 agent_health 检查
+py tools/check_agent_health.py --no-alert
+# 期望: 5 项全 OK
+```
+
+**异常处理**:
+- HEAD 不对 -> 拉最新 (`git pull --rebase`)
+- 5 项 FAIL -> 飞书查告警 / 修 component
+- worktree 错 -> 切到 manifest.worktree.root
+
+### 0.9.4 V007.86h 4 个计划任务 (V007.86e style, 无 cmd 弹窗)
+
+| 任务 | 用途 | 间隔 | 跑的命令 |
+|------|------|------|----------|
+| `\yonaa_alert_monitor` | 远程服务监控 | 5 min | pythonw.exe alert_monitor_v0760.py --check-now |
+| `\yonaa_alert_monitor_health` | 心跳检查 (Layer 1) | 5 min | pythonw.exe check_alert_monitor_health.py --no-alert |
+| `\yonaa_auto_heal` | 任务自愈 (Layer 2) | 5 min | pythonw.exe auto_heal_scheduler.py --no-alert |
+| `\yonaa_agent_health` | Agent 健康 (Layer 3) | 5 min | pythonw.exe check_agent_health.py --no-alert |
+
+**每个任务都用 V007.86e style (pythonw.exe direct, no .bat wrapper, no cmd window popup)**.
+
+### 0.9.5 V007.86h 跟 V007.86 治理的完整链路
+
+| 阶段 | 版本 | 治的对象 | 链路 |
+|------|------|----------|------|
+| **报告** | V007.83 | 计划任务失败 | 起点 |
+| **临时** | V007.86 | daemon 备份 | 临时方案 |
+| **修复** | V007.86b/c/d/e | 5 阶段修复 (脚本 + 任务 + 编码 + 弹窗) | 单层 |
+| **识别** | V007.86f | "Agent 是基础设施" + 4 个盲点 | meta-level |
+| **P0 实施** | V007.86g | Layer 1 (心跳) + Layer 2 (自愈) | 1+2 |
+| **P1 实施** | **V007.86h** | **Layer 3 (Agent 健康) + Layer 4 (manifest)** | **3+4 ← 现在** |
+
+### 0.9.6 V007.86h 关键工具 (2 个新 + 1 个新任务)
+
+1. `infra_manifest.json` (Layer 4): 基础设施清单
+2. `tools/check_agent_health.py` (Layer 3): Agent 健康检查
+3. `\yonaa_agent_health` 计划任务: 5 min 跑一次, 复用 check_agent_health.py
+
+### 0.9.7 V007.86h 教训 (V007.86i+)
+
+1. **infra_manifest.json 必读**: Agent 启动先读, 不知道"基础设施 = N 个组件" = Agent 失忆
+2. **plan_tasks_healthy 检查**: 4 个 yonaa_* 任务都要健康, 任一失败 -> 飞书告警
+3. **never_run_codes (267011)**: 任务刚创建没跑过的 placeholder, 算正常 (等首次跑)
+4. **git_synced 检查**: 比 origin 早 > 24h = push 失败 / 忘记 push, 告警
+5. **manifest_in_sync 检查**: script 路径不存在 = manifest 跟实际不同步, 需修
+
+### 0.9.8 V007.86h 待用户操作 (1 分钟)
+
+**创建 yonaa_agent_health 计划任务** (sandbox UAC 被屏蔽, 需用户跑):
+
+```powershell
+# 打开管理员 PowerShell
+Start-Process "schtasks" "/Create /TN \yonaa_agent_health /XML D:\filework\worktrees\release-prep\tools\_yonaa_agent_health_v00786h.xml /F" -Verb RunAs -Wait
+```
+
+**期望**: schtasks /Query /FO LIST 显示 4 个 yonaa_* 任务.
+
+---
+
 ## 1. Agent 必知 (3 分钟读完)
 
 ### 1.1 5 个最常用工具 (直接调, 不需 SSH)

@@ -1,0 +1,104 @@
+{
+  "$schema": "V007.86h infra_manifest (see AGENT_INFRA.md §0.9)",
+  "version": "v007.86h",
+  "last_updated": "2026-07-17",
+  "purpose": "List all infrastructure components the Agent must know about. V007.86f identified that the Agent itself is part of infrastructure - this manifest makes that explicit and machine-readable.",
+  "worktree": {
+    "root": "D:\\filework\\worktrees\\release-prep",
+    "branch": "release/pre-2026-06-29",
+    "expected_head_at_v007.86h": "a6e2bcc"
+  },
+  "components": {
+    "alert_monitor": {
+      "id": "alert_monitor",
+      "version": "v0760",
+      "script": "tools/alert_monitor_v0760.py",
+      "task_name": "\\yonaa_alert_monitor",
+      "interval_sec": 300,
+      "purpose": "Poll 7 remote services (172.20.59.7) every 5 min, push alerts to Feishu",
+      "log_file": "tools/alert_monitor_v0760.log",
+      "state_file": "tools/alert_monitor_config_state.json",
+      "config_file": "tools/alert_monitor_config.json",
+      "expected_heartbeat_marker": "[HEARTBEAT-V00786F]",
+      "healthy_exit_codes": [0, 1],
+      "owner": "Dev Agent (V061 staging)",
+      "depends_on": ["172.20.59.7 reachable", "Lark app credentials"]
+    },
+    "alert_monitor_health": {
+      "id": "alert_monitor_health",
+      "version": "v007.86g",
+      "script": "tools/check_alert_monitor_health.py",
+      "task_name": "\\yonaa_alert_monitor_health",
+      "interval_sec": 300,
+      "purpose": "Layer 1 heartbeat: verify alert_monitor log/state within stale thresholds",
+      "log_file": "tools/check_alert_monitor_health.log",
+      "checks": [
+        "log_exists (>200B, <10MB)",
+        "log_recent (<10 min)",
+        "heartbeat_present ([HEARTBEAT-V00786F] <10 min)",
+        "no_error_patterns (Traceback/ERROR/FATAL)",
+        "state_recent (last_heartbeat_ts <15 min)"
+      ],
+      "depends_on": ["alert_monitor"]
+    },
+    "auto_heal": {
+      "id": "auto_heal",
+      "version": "v007.86g",
+      "script": "tools/auto_heal_scheduler.py",
+      "task_name": "\\yonaa_auto_heal",
+      "interval_sec": 300,
+      "purpose": "Layer 2 self-healing: restart alert_monitor on failure, daemon fallback after 3 consecutive fails",
+      "log_file": "tools/auto_heal.log",
+      "state_file": "tools/auto_heal_state.json",
+      "thresholds": {
+        "max_heals_per_hour": 6,
+        "cooldown_sec": 600,
+        "daemon_fallback_after": 3
+      },
+      "depends_on": ["alert_monitor"]
+    },
+    "agent_health": {
+      "id": "agent_health",
+      "version": "v007.86h",
+      "script": "tools/check_agent_health.py",
+      "task_name": "\\yonaa_agent_health",
+      "interval_sec": 300,
+      "purpose": "Layer 3 agent self-health: verify Dev Agent operational (git status, plan tasks, infra manifest sync)",
+      "log_file": "tools/check_agent_health.log",
+      "state_file": "tools/check_agent_health_state.json",
+      "checks": [
+        "git_clean (no uncommitted >30 min)",
+        "git_synced (not >24h ahead of origin)",
+        "plan_tasks_healthy (all 3 yonaa_* tasks exit 0/1)",
+        "manifest_in_sync (component scripts exist)",
+        "agent_id_check (V007.80 §0.6 SOP)"
+      ],
+      "depends_on": ["alert_monitor", "alert_monitor_health", "auto_heal", "infra_manifest"]
+    }
+  },
+  "alerts": {
+    "im_type": "lark_app",
+    "chat_id": "<from env LARK_CHAT_ID>",
+    "cooldown_sec": 600,
+    "at_all_on_fail": true,
+    "at_all_on_recovery": false
+  },
+  "remote_services": {
+    "log_service_prod": "172.20.59.7:9101",
+    "log_service_staging": "172.20.59.7:19101",
+    "core_service_prod": "172.20.59.7:9200",
+    "core_service_staging": "172.20.59.7:19200",
+    "observability": "172.20.59.7:9201",
+    "backend": "172.20.59.7:3011",
+    "frontend": "172.20.59.7:8081"
+  },
+  "history": {
+    "v007.86g": "Added alert_monitor_health + auto_heal (P0 Layer 1+2)",
+    "v007.86e": "Switched plan task to pythonw.exe direct (no cmd window)",
+    "v007.86d": "Added check_bat_encoding.py + generate_scheduled_task_xml.py",
+    "v007.86c": "Made v0760.bat ASCII only (avoid GBK decode failure)",
+    "v007.86b": "First plan task rebuild attempt (4 XML iterations)",
+    "v007.86": "User reported 'remote monitor gone', 13.5h/162 fails found",
+    "v007.83": "First report: V007.71 worktree migration left old path in plan task"
+  }
+}
