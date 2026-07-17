@@ -76,7 +76,7 @@ def test_auto_strip_multipart():
 
 - [ ] **Step 1.2: 跑测试, 确认失败**
 
-Run: `cd d:\filework\release-prep-worktree && python -m pytest tools/tests/test_unzip_safe.py -v`
+Run: `cd d:\filework\worktrees/release-prep && python -m pytest tools/tests/test_unzip_safe.py -v`
 Expected: FAIL (ModuleNotFoundError: No module named 'unzip_safe')
 
 - [ ] **Step 1.3: 实现 unzip_safe.py**
@@ -204,7 +204,7 @@ if __name__ == "__main__":
 
 - [ ] **Step 1.4: 跑测试, 确认 PASS**
 
-Run: `cd d:\filework\release-prep-worktree && python -m pytest tools/tests/test_unzip_safe.py -v`
+Run: `cd d:\filework\worktrees/release-prep && python -m pytest tools/tests/test_unzip_safe.py -v`
 Expected: 4 PASS
 
 - [ ] **Step 1.5: 集成到 deploy.sh PHASE 0.5 末尾**
@@ -223,7 +223,7 @@ fi
 - [ ] **Step 1.6: 提交**
 
 ```bash
-cd d:\filework\release-prep-worktree
+cd d:\filework\worktrees/release-prep
 git add tools/unzip_safe.py tools/tests/test_unzip_safe.py deploy_bundle/deploy.sh
 git commit --no-verify -m "feat(tools): unzip_safe - magic number 检测 + multipart 剥离 [L8.6]"
 ```
@@ -330,7 +330,7 @@ if route == "/api/isolation_check":
 - [ ] **Step 2.4: 提交**
 
 ```bash
-cd d:\filework\release-prep-worktree
+cd d:\filework\worktrees/release-prep
 git add tools/core_service.py
 git commit --no-verify -m "feat(core_service): /api/isolation_check 端点 [L8.8]"
 ```
@@ -467,7 +467,7 @@ if route.startswith("/api/exec/session/"):
 - [ ] **Step 3.4: 提交**
 
 ```bash
-cd d:\filework\release-prep-worktree
+cd d:\filework\worktrees/release-prep
 git add tools/core_service.py
 git commit --no-verify -m "feat(core_service): /api/exec/session 系列端点 [L12]"
 ```
@@ -663,7 +663,7 @@ curl "http://yonaa:9204/api/audit/recover/restore?object_type=role&object_id=1&t
 - [ ] **Step 3.6: 提交**
 
 ```bash
-cd d:\filework\release-prep-worktree
+cd d:\filework\worktrees/release-prep
 git add tools/dbops_service.py
 git commit --no-verify -m "feat(tools): dbops_service - 9204 audit_recovery HTTP API [L13.3]"
 ```
@@ -824,7 +824,7 @@ if __name__ == "__main__":
 
 - [ ] **Step 5.3: 跑测试, 确认 PASS**
 
-Run: `cd d:\filework\release-prep-worktree && python -m pytest tools/tests/test_audit_coverage.py -v`
+Run: `cd d:\filework\worktrees/release-prep && python -m pytest tools/tests/test_audit_coverage.py -v`
 Expected: PASS
 
 - [ ] **Step 5.4: 跑实测 (本地 yonaa) - 跳过 (远端无 db)**
@@ -857,7 +857,7 @@ python3 tools/audit_coverage_check.py --days 30 --json
 - [ ] **Step 5.6: 提交**
 
 ```bash
-cd d:\filework\release-prep-worktree
+cd d:\filework\worktrees/release-prep
 git add tools/audit_coverage_check.py tools/tests/test_audit_coverage.py tools/post_deploy_check.py
 git commit --no-verify -m "feat(tools): audit_coverage_check.py + post_deploy 集成 [L13.4]"
 ```
@@ -944,7 +944,7 @@ if __name__ == "__main__":
 - [ ] **Step 6.3: 跑实测 (本地直接执行)**
 
 ```bash
-cd d:\filework\release-prep-worktree
+cd d:\filework\worktrees/release-prep
 python monitor_prod.py 2>&1 | tail -30
 ```
 
@@ -953,7 +953,7 @@ Expected: 12+ section (4 new + 8 old)
 - [ ] **Step 6.4: 提交**
 
 ```bash
-cd d:\filework\release-prep-worktree
+cd d:\filework\worktrees/release-prep
 git add monitor_prod.py
 git commit --no-verify -m "feat(monitor): 集成 L15 + L8.8 + L13.4 [monitor_prod v1.1]"
 ```
@@ -1007,7 +1007,7 @@ curl -X POST "http://staging:9205/api/deploy/rollback?token=$TOKEN" \
 - [ ] **Step 7.4: 提交**
 
 ```bash
-cd d:\filework\release-prep-worktree
+cd d:\filework\worktrees/release-prep
 git add tools/deploy_service.py
 git commit --no-verify -m "feat(tools): deploy_service - 9205 部署编排服务 [L14]"
 ```
@@ -1053,7 +1053,7 @@ curl "http://staging:9205/api/deploy/status?token=$TOKEN"
 - [ ] **Step 8.2: 提交 docs + CHANGELOG**
 
 ```bash
-cd d:\filework\release-prep-worktree
+cd d:\filework\worktrees/release-prep
 git add docs/superpowers/specs/2026-07-14-remaining-todo-spec-design.md
 git add docs/superpowers/plans/2026-07-14-remaining-todo-impl.md
 git commit --no-verify -m "docs: 7 项未实现 todo spec + plan"

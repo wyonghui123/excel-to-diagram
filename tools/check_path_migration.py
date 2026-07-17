@@ -32,10 +32,10 @@ from typing import List, Dict, Optional
 # 每个老路径的来源都加注释, 未来再加新路径方便追责
 OLD_PATTERNS = {
     'V007.71 老路径 (Windows 4 种形式)': [
-        r'D:\\filework\\release-prep-worktree\\',
-        r'D:/filework/release-prep-worktree/',
-        r'd:\\filework\\release-prep-worktree\\',
-        r'd:/filework/release-prep-worktree/',
+        r'D:\\filework\\worktrees/release-prep\\',
+        r'D:/filework/worktrees/release-prep/',
+        r'd:\\filework\\worktrees/release-prep\\',
+        r'd:/filework/worktrees/release-prep/',
     ],
     'V007.55 cron 老路径 (Linux)': [
         r'/opt/app/staging/deploy',
@@ -197,7 +197,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
 V007.85 故事:
-  V007.71 worktree 路径迁移 (e.g. release-prep-worktree/ -> worktrees/release-prep/)
+  V007.71 worktree 路径迁移 (e.g. worktrees/release-prep/ -> worktrees/release-prep/)
   V007.83 电脑重启后 yonaa_alert_monitor 失败 (老路径 ERROR_FILE_NOT_FOUND)
   V007.85 加这个工具, 自动扫描老路径
 

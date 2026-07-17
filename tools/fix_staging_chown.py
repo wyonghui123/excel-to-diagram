@@ -3,7 +3,7 @@ chown staging 的 deploy/current 目录 (因为 meta 是软链接 → current)
 并确保所有 staging log_service 需要写的文件都是 nobody:nobody
 """
 import sys
-sys.path.insert(0, r'd:\filework\release-prep-worktree\tools')
+sys.path.insert(0, r'd:\filework\worktrees/release-prep\tools')
 from yonaa_exec import yexec
 
 # staging 真实的 DB 路径

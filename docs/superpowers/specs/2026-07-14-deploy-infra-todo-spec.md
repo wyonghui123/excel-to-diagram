@@ -297,7 +297,7 @@ def deploy_worker(version, zip_path, deployment_type="full"):
 - ⚠️ yonaa 上 `/opt/app/shared/monitor_prod.py` 是 V007.67 版 (已修复 base64，纯 HTTP)
 - ❌ **未更新** L8.8 isolation_check / L13.4 audit_coverage / L15.2 post_deploy 集成
 - ❌ **未集成** dbops_service / deploy_service 检查
-- ❌ 源码在 `d:\filework\release-prep-worktree\` 下未找到 (只在 yonaa 上有 V007.67 版)
+- ❌ 源码在 `d:\filework\worktrees/release-prep\` 下未找到 (只在 yonaa 上有 V007.67 版)
 
 ### 7.2 需要新增的检查 section
 

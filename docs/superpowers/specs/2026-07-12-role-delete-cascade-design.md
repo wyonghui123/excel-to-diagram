@@ -34,12 +34,12 @@
 
 1. 用户点删除 → 前端 `/api/v1/roles/{id}` DELETE
 2. 后端 `MetaActionExecutor.execute_action("crud_delete")`
-3. 走 `_do_delete` ([action_executor.py:2036](file:///d:/filework/release-prep-worktree/meta/core/action_executor.py#L2036-L2050))
-4. **先调 `_check_reverse_fk_references`** ([action_executor.py:1993](file:///d:/filework/release-prep-worktree/meta/core/action_executor.py#L1993))
+3. 走 `_do_delete` ([action_executor.py:2036](file:///d:/filework/worktrees/release-prep/meta/core/action_executor.py#L2036-L2050))
+4. **先调 `_check_reverse_fk_references`** ([action_executor.py:1993](file:///d:/filework/worktrees/release-prep/meta/core/action_executor.py#L1993))
 5. 遍历所有其他实体的字段，找引用此角色 (`target_object == 'role'`)
-6. **检查 `other_obj.relations[].cascade_delete == True`** ([action_executor.py:1131](file:///d:/filework/release-prep-worktree/meta/core/action_executor.py#L1127-L1136))
+6. **检查 `other_obj.relations[].cascade_delete == True`** ([action_executor.py:1131](file:///d:/filework/worktrees/release-prep/meta/core/action_executor.py#L1127-L1136))
 7. 当前 role.yaml 的 relations = `[]`（空数组）→ cascade_delete 永远 False
-8. → COUNT(*) > 0 → 报错（[validation_messages.py:59](file:///d:/filework/release-prep-worktree/meta/core/validation_messages.py#L59)）
+8. → COUNT(*) > 0 → 报错（[validation_messages.py:59](file:///d:/filework/worktrees/release-prep/meta/core/validation_messages.py#L59)）
 
 ### 1.3 实际 DB 结构（本地查证）
 
@@ -214,7 +214,7 @@ def test_system_role_protected(base_url, admin_token):
 |------|:--:|------|
 | 误删产品级业务数据 | 低 | 仅删 role 的引用，不删 product 本身 |
 | 用户误删角色 | 低 | UI 上已有二次确认弹窗 |
-| cascade_delete 字段不解析 | 中 | 已有 _check_reverse_fk_references 实现解析此字段 ([action_executor.py:1131](file:///d:/filework/release-prep-worktree/meta/core/action_executor.py#L1131))，仅 yaml 变更 |
+| cascade_delete 字段不解析 | 中 | 已有 _check_reverse_fk_references 实现解析此字段 ([action_executor.py:1131](file:///d:/filework/worktrees/release-prep/meta/core/action_executor.py#L1131))，仅 yaml 变更 |
 | 缓存不刷新 | 中 | 删除后 `menu_count/permission_count` 计算字段 cache TTL=600s，下次访问自动失效 |
 
 ---

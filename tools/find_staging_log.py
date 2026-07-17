@@ -1,6 +1,6 @@
 """查找 staging log_service.py 实际位置"""
 import sys
-sys.path.insert(0, r'd:\filework\release-prep-worktree\tools')
+sys.path.insert(0, r'd:\filework\worktrees/release-prep\tools')
 from yonaa_exec import yexec
 
 cmds = [

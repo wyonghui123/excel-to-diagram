@@ -64,7 +64,7 @@ if len(per_role_conds) == 1:
 - BUG-V027 修复者只关注了多 role OR-of-AND 问题，没意识到单 role 也有相同 OR 退化
 
 **为什么 3006 测试不出来**：
-- 3006 后端 3011 加载的是 release-prep-worktree HEAD `7061321`（V007.41 P1，11:26:38 提交）
+- 3006 后端 3011 加载的是 worktrees/release-prep HEAD `7061321`（V007.41 P1，11:26:38 提交）
 - **7061321 已含 v027-pt2 修复**（dev-agent 独立完成）
 - 生产 5001 还跑 v20260708_005 zip（HEAD `7c71636`，10:37:04 部署）— **落后 1 个 commit**
 
@@ -125,13 +125,13 @@ if len(per_role_conds) == 1:
 **目标环境**：生产 5001 (`172.20.59.7`)
 
 **当前部署**：v20260708_005 (git HEAD `7c71636-dirty`，部署时间 2026-07-08 10:37:04)
-**目标部署**：v20260708_006 (基于 release-prep-worktree HEAD `7061321`)
+**目标部署**：v20260708_006 (基于 worktrees/release-prep HEAD `7061321`)
 
 **部署步骤**：
 
-1. **构建新 zip**（在 release-prep-worktree）
+1. **构建新 zip**（在 worktrees/release-prep）
    ```bash
-   cd D:\filework\release-prep-worktree
+   cd D:\filework\worktrees/release-prep
    python tools/rebuild_zip.py
    # 生成 deploy-v20260708_006.zip
    ```
@@ -183,7 +183,7 @@ if len(per_role_conds) == 1:
 **本地 3018 (已验证修复生效)**：
 
 ```bash
-cd D:\filework\integration-worktree\meta
+cd D:\filework\worktrees/integration\meta
 python tests\test_export_cascade_v027pt2.py
 ```
 
@@ -227,8 +227,8 @@ nohup python server.py > /tmp/server.log 2>&1 &
 
 ## ✅ 已完成
 
-- [x] 修复代码已 commit 到 release-prep-worktree (7061321, V007.41 P1)
-- [x] 修复代码已 cherry-pick 到 integration-worktree (88d7ee3)
+- [x] 修复代码已 commit 到 worktrees/release-prep (7061321, V007.41 P1)
+- [x] 修复代码已 cherry-pick 到 worktrees/integration (88d7ee3)
 - [x] 本地 3018 重启加载修复，e2e 验证 BO=155 / 备注=841 ✅
 - [x] 单元测试 5/5 PASS
 

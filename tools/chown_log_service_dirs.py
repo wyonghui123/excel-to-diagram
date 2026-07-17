@@ -7,7 +7,7 @@ chown nobody:nobody 所有 log_service 需要写的目录
 - /opt/app/staging/logs  (staging 日志)
 """
 import sys
-sys.path.insert(0, r'd:\filework\release-prep-worktree\tools')
+sys.path.insert(0, r'd:\filework\worktrees/release-prep\tools')
 from yonaa_exec import yexec
 
 # 路径白名单 (按 prod / staging 拆分)

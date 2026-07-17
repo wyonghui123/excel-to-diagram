@@ -106,21 +106,21 @@ return raw
 
 - `npm run build` 成功（V007.54 之后的 dist 包含新转义逻辑）
 - 复制 dist → 2 个目标位置（`d:/filework/frontend_dist_files` 和
-  `release-prep-worktree/frontend_dist_files`，覆盖 vite preview 不同 cwd 的查找路径）
+  `worktrees/release-prep/frontend_dist_files`，覆盖 vite preview 不同 cwd 的查找路径）
 - 重启 vite preview：使用项目本地 `node node_modules/vite/bin/vite.js` 启动
-  (让 cwd = release-prep-worktree，vite 才能读到 vite.config.js)
+  (让 cwd = worktrees/release-prep，vite 才能读到 vite.config.js)
 - 验证 3006 `/api/v1/auth/dev-login` 返回 JSON（vite.config.js 加了 `preview.proxy`）
 - 验证 dist `index-Dkx3L-2V.js` 含 **10066 处** `&amp;`/`&lt;`/`&gt;`（HTML 实体转义）
 
 ## 五、为什么之前 vite.config.js 的 preview.proxy 没生效
 
 之前用 `npx vite preview` 启动，npx 会从 `npm-cache/_npx/.../node_modules/.bin/vite`
-启动，**cwd 是 d:\filework 而不是 release-prep-worktree**，所以 vite 找不到
-`release-prep-worktree/vite.config.js` 里的 `preview.proxy` 配置。
+启动，**cwd 是 d:\filework 而不是 worktrees/release-prep**，所以 vite 找不到
+`worktrees/release-prep/vite.config.js` 里的 `preview.proxy` 配置。
 
 正确启动方式（修复 3006 代理）：
 ```bash
-cd d:\filework\release-prep-worktree
+cd d:\filework\worktrees/release-prep
 node node_modules/vite/bin/vite.js preview --host 0.0.0.0 --port 3006 --outDir frontend_dist_files
 ```
 

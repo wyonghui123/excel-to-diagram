@@ -29,11 +29,11 @@ import time
 import argparse
 from pathlib import Path
 
-sys.path.insert(0, r"D:\filework\release-prep-worktree")
+sys.path.insert(0, r"D:\filework\worktrees/release-prep")
 
-DB = r"D:\filework\release-prep-worktree\meta\architecture.db"
+DB = r"D:\filework\worktrees/release-prep\meta\architecture.db"
 
-ARCHIVE_SCRIPT = r"D:\filework\release-prep-worktree\meta\scripts\archive_audit_logs.py"
+ARCHIVE_SCRIPT = r"D:\filework\worktrees/release-prep\meta\scripts\archive_audit_logs.py"
 
 
 def select_records_to_archive(conn, n: int):

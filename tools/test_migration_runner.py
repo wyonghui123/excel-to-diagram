@@ -17,7 +17,7 @@ MigrationRunner P0 增强功能单元测试
   11. 审计日志写入
 
 运行方式:
-  cd d:/filework/release-prep-worktree
+  cd d:/filework/worktrees/release-prep
   python tools/test_migration_runner.py
 """
 

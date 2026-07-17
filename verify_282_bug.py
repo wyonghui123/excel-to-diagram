@@ -6,7 +6,7 @@
 import sys
 import json
 import re
-sys.path.insert(0, 'd:/filework/release-prep-worktree')
+sys.path.insert(0, 'd:/filework/worktrees/release-prep')
 
 from test_helpers.browser_auth_cli import PlaywrightCLI
 

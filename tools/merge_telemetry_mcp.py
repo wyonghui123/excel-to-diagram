@@ -7,7 +7,7 @@ merge_telemetry_mcp.py - 从 V046 007.zip 抽 telemetry/ mcp/, 注入到 V007.21
 import zipfile, shutil
 from pathlib import Path
 
-ROOT = Path('d:/filework/release-prep-worktree')
+ROOT = Path('d:/filework/worktrees/release-prep')
 V46 = ROOT / 'deploy_bundle' / 'deploy-v20260704_007.zip'
 V21 = ROOT / 'deploy_bundle' / 'deploy-v20260706_021.zip'
 TMP = ROOT / 'deploy_bundle' / 'deploy-v20260706_021.merged.zip'

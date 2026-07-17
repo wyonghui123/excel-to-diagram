@@ -7,7 +7,7 @@ simulate_v46_deploy_pure.py - 纯 Python 模拟 V46 deploy.sh 跑 (无 subproces
 import os, shutil, subprocess, zipfile, re
 from pathlib import Path
 
-YONAA = Path(r'd:\filework\release-prep-worktree\deploy_bundle\.mock_yonaa_v46')
+YONAA = Path(r'd:\filework\worktrees/release-prep\deploy_bundle\.mock_yonaa_v46')
 if YONAA.exists():
     shutil.rmtree(YONAA)
 (YONAA / 'app' / 'deployments' / 'meta' / 'core' / 'enums').mkdir(parents=True)
@@ -43,7 +43,7 @@ class Cache:
 
 # zip (V007.21)
 ZIP = DEPLOYMENTS_DIR / 'deploy-v20260706_021.zip'
-shutil.copy(r'd:\filework\release-prep-worktree\deploy_bundle\deploy-v20260706_021.zip', ZIP)
+shutil.copy(r'd:\filework\worktrees/release-prep\deploy_bundle\deploy-v20260706_021.zip', ZIP)
 
 # current 软链接 (用目录代替)
 current_link = ROOT / 'current'

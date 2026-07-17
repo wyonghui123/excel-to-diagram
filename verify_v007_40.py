@@ -2,7 +2,7 @@
 import sys
 import re
 import os
-# 显式切换到 release-prep-worktree 目录
+# 显式切换到 worktrees/release-prep 目录
 SCRIPT_DIR = os.path.dirname(os.path.abspath('verify_v007_40.py'))
 # 用脚本所在目录
 BASE = SCRIPT_DIR

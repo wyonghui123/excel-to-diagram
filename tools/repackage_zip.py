@@ -6,7 +6,7 @@ import zipfile
 from pathlib import Path
 from datetime import datetime
 
-ROOT = Path("D:/filework/release-prep-worktree").resolve()
+ROOT = Path("D:/filework/worktrees/release-prep").resolve()
 BUILD = ROOT / "build" / "verify"
 
 # 版本

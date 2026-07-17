@@ -30,7 +30,7 @@ SECRET = 'v007.52-core-write'
 # prod core_service 19200 是 staging, prod 是 9200
 
 # 上传文件清单 (与 staging 同步, 但走 prod 路径)
-LOCAL = r'd:\filework\release-prep-worktree'
+LOCAL = r'd:\filework\worktrees/release-prep'
 REMOTE_BASE = '/opt/app/deployments'   # prod root
 
 FILES_TO_UPLOAD = [

@@ -15,7 +15,7 @@ import os, re
 from pathlib import Path
 
 # 1. 创建 mock yonaa 状态
-STAGING = Path(r'D:\filework\release-prep-worktree\deploy_bundle\.mock_yonaa')
+STAGING = Path(r'D:\filework\worktrees/release-prep\deploy_bundle\.mock_yonaa')
 if STAGING.exists():
     import shutil
     shutil.rmtree(STAGING)

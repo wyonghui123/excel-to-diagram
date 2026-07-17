@@ -31,18 +31,18 @@
 
 - [ ] **代码同步**：`meta/ → deploy_bundle/`
   ```powershell
-  python -c "import shutil,os; src=r'D:\filework\release-prep-worktree\meta'; dst=r'D:\filework\release-prep-worktree\deploy_bundle\meta'; [shutil.copy2(os.path.join(r,f), os.path.join(d,f)) for r,_,fs in os.walk(src) for f in fs]"
+  python -c "import shutil,os; src=r'D:\filework\worktrees/release-prep\meta'; dst=r'D:\filework\worktrees/release-prep\deploy_bundle\meta'; [shutil.copy2(os.path.join(r,f), os.path.join(d,f)) for r,_,fs in os.walk(src) for f in fs]"
   ```
 
 - [ ] **前端构建**：
   ```bash
-  cd d:\filework\release-prep-worktree\frontend
+  cd d:\filework\worktrees/release-prep\frontend
   npm run build
   ```
 
 - [ ] **批量上传**：
   ```bash
-  python d:\filework\release-prep-worktree\tools\batch_upload.py
+  python d:\filework\worktrees/release-prep\tools\batch_upload.py
   ```
 
 ---

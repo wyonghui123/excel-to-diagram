@@ -229,7 +229,7 @@ python tools/yonaa_exec.py upload tools/migration_lint.py /opt/app/staging/deplo
 
 ## §3. 部署流程
 
-> **节奏约定**: 详细见 [docs/DEPLOY_RHYTHM.md](file:///d:/filework/release-prep-worktree/docs/DEPLOY_RHYTHM.md)
+> **节奏约定**: 详细见 [docs/DEPLOY_RHYTHM.md](file:///d:/filework/worktrees/release-prep/docs/DEPLOY_RHYTHM.md)
 > 默认: **每天 1-3 次 staging 部署**, **每天 21:00 一次 prod 部署**
 > Hotfix: P0 故障时立即, 跳过等待窗口
 
@@ -276,14 +276,14 @@ DEPLOY_MODE=hotfix python tools/prod_deploy_orchestrator.py
 
 **Step 1**: 本地 rebuild
 ```bash
-cd D:\filework\release-prep-worktree
+cd D:\filework\worktrees/release-prep
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\rebuild_bundle.ps1
 Get-ChildItem deploy_bundle\ -Filter "*.sh"  # 验证 9 个 sh
 ```
 
 **Step 2**: SFTP (MobaXterm 面板)
 - 远端 → `/tmp/`
-- 本地 → `D:\filework\release-prep-worktree\deploy_bundle\`
+- 本地 → `D:\filework\worktrees/release-prep\deploy_bundle\`
 - **拖** `deploy_bundle/` 整个覆盖
 
 **Step 3**: SSH 远端跑
@@ -356,9 +356,9 @@ bash /tmp/deploy_bundle/rollback.sh --to v20260630_003 --port 5000
 | 远端日志 | `/opt/app/shared/logs/backend-*.log` |
 | 远端备份 | `/opt/app/backups/architecture.db.pre_p0_*` |
 | 远端上传临时 | `/opt/app/staging/tmp/` |
-| 本地 bundle | `D:\filework\release-prep-worktree\deploy_bundle\` |
-| 本地项目根 | `D:\filework\release-prep-worktree\` |
-| 本地工具 | `D:\filework\release-prep-worktree\tools\` |
+| 本地 bundle | `D:\filework\worktrees/release-prep\deploy_bundle\` |
+| 本地项目根 | `D:\filework\worktrees/release-prep\` |
+| 本地工具 | `D:\filework\worktrees/release-prep\tools\` |
 
 ### §5.2 端口速查 (同 §1.4)
 

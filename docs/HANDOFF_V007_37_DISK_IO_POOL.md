@@ -183,10 +183,10 @@ $r.success
 
 | 文件 | 路径 |
 |------|------|
-| 错误源头 | `D:\filework\release-prep-worktree\meta\core\sql_connection_pool.py` |
-| 错误源头 #2 | `D:\filework\release-prep-worktree\meta\core\sql_adapters.py` (retry 已加, 检查是否覆盖 _create_pooled_connection) |
-| export 路径 | `D:\filework\release-prep-worktree\meta\services\query_service.py` (BUG-V027 pt2 改的位置) |
-| Invariant 验证 | `D:\filework\release-prep-worktree\tools\verify_bundle.py` |
+| 错误源头 | `D:\filework\worktrees/release-prep\meta\core\sql_connection_pool.py` |
+| 错误源头 #2 | `D:\filework\worktrees/release-prep\meta\core\sql_adapters.py` (retry 已加, 检查是否覆盖 _create_pooled_connection) |
+| export 路径 | `D:\filework\worktrees/release-prep\meta\services\query_service.py` (BUG-V027 pt2 改的位置) |
+| Invariant 验证 | `D:\filework\worktrees/release-prep\tools\verify_bundle.py` |
 | 当前 HEAD | `d4af6c3` (V007.36 BUG-FIX) |
 
 ## 11. yonaa 真实数据 (无需 SSH 跑)

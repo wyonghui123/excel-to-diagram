@@ -15,8 +15,8 @@ Get-ChildItem $root -Directory | ForEach-Object {
     }
 } | Sort-Object GB -Descending | Select-Object -First 15 | Format-Table -AutoSize
 
-Write-Host '---- filework release-prep-worktree detail ----' -ForegroundColor Cyan
-Get-ChildItem 'D:\filework\release-prep-worktree' -Directory | ForEach-Object {
+Write-Host '---- filework worktrees/release-prep detail ----' -ForegroundColor Cyan
+Get-ChildItem 'D:\filework\worktrees/release-prep' -Directory | ForEach-Object {
     $size = 0
     Get-ChildItem -Path $_.FullName -Recurse -File -Force -ErrorAction SilentlyContinue | ForEach-Object { $size += $_.Length }
     [PSCustomObject]@{ Name = $_.Name; GB = [math]::Round($size / 1GB, 2) }

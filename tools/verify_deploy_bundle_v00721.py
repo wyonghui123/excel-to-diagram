@@ -5,7 +5,7 @@ verify_deploy_bundle_v00721.py - 验证 deploy_bundle/ 完整性
 import zipfile, re
 from pathlib import Path
 
-ROOT = Path('d:/filework/release-prep-worktree')
+ROOT = Path('d:/filework/worktrees/release-prep')
 BUNDLE = ROOT / 'deploy_bundle'
 ZIP = BUNDLE / 'deploy-v20260706_021.zip'
 DEPLOY_SH = BUNDLE / 'deploy.sh'

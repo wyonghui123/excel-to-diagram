@@ -2,14 +2,14 @@
 上传新 service 文件 + daemon-reload + restart + 验证 nobody 起服务
 """
 import sys
-sys.path.insert(0, r'd:\filework\release-prep-worktree\tools')
+sys.path.insert(0, r'd:\filework\worktrees/release-prep\tools')
 from yonaa_exec import yexec, yupload
 
-PROD_UNIT_LOCAL = r'd:\filework\release-prep-worktree\tools\log_service_prod.service'
+PROD_UNIT_LOCAL = r'd:\filework\worktrees/release-prep\tools\log_service_prod.service'
 PROD_UNIT_REMOTE_TMP = '/opt/app/deployments/log_service_prod.service'
 PROD_UNIT_REMOTE = '/etc/systemd/system/log_service_prod.service'
 
-STAGING_UNIT_LOCAL = r'd:\filework\release-prep-worktree\tools\log_service_staging.service'
+STAGING_UNIT_LOCAL = r'd:\filework\worktrees/release-prep\tools\log_service_staging.service'
 STAGING_UNIT_REMOTE_TMP = '/opt/app/staging/deploy/log_service_staging.service'
 STAGING_UNIT_REMOTE = '/etc/systemd/system/log_service_staging.service'
 

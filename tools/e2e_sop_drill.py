@@ -121,13 +121,13 @@ class SOPDrill:
     def phase1_diff(self):
         self.log_phase("PHASE 1", "差异对比 (本地 build/verify vs mock v003)")
         # 用我们之前测过的 diff_local_remote.py
-        build_verify = Path("D:/filework/release-prep-worktree/build/verify")
+        build_verify = Path("D:/filework/worktrees/release-prep/build/verify")
         if not build_verify.exists():
             self.log_fail("PHASE 1: build/verify 不存在")
             return
         try:
             result = subprocess.run(
-                ["python", "D:/filework/release-prep-worktree/tools/diff_local_remote.py",
+                ["python", "D:/filework/worktrees/release-prep/tools/diff_local_remote.py",
                  "--local", str(build_verify), "--local-only"],
                 capture_output=True, text=True, timeout=60
             )
@@ -313,7 +313,7 @@ class SOPDrill:
         # 改 host 为 127.0.0.1
         try:
             result = subprocess.run(
-                ["python", "D:/filework/release-prep-worktree/tools/verify_deploy.py",
+                ["python", "D:/filework/worktrees/release-prep/tools/verify_deploy.py",
                  "--host", "127.0.0.1",
                  "--frontend-port", "8081",
                  "--backend-port", "5000"],  # 用 v003 (5000) 不是 v004 (5001)
@@ -321,7 +321,7 @@ class SOPDrill:
             )
             self.log_info(f"verify_deploy.py exit code: {result.returncode}")
             # 看截图是否生成
-            screenshots = Path("D:/filework/release-prep-worktree/verify_screenshots")
+            screenshots = Path("D:/filework/worktrees/release-prep/verify_screenshots")
             if screenshots.exists():
                 pngs = list(screenshots.glob("*.png"))
                 if pngs:
@@ -421,7 +421,7 @@ class SOPDrill:
 
         # 复制真实的 v003 + v004 到 mock
         # v003 真实路径
-        v003_src = Path("D:/filework/release-prep-worktree/self_test/mock_v003")
+        v003_src = Path("D:/filework/worktrees/release-prep/self_test/mock_v003")
         v003_dst = self.drill_root / "opt/app/deployments/v20260630_003/backend"
         if v003_src.exists():
             shutil.copytree(v003_src, v003_dst, dirs_exist_ok=True)
@@ -432,7 +432,7 @@ class SOPDrill:
             self._create_minimal_v003_mock(v003_dst)
 
         # v004 真实路径 - 复制整个 build/verify/ (含 meta, telemetry, rls, mcp, schema)
-        v004_src = Path("D:/filework/release-prep-worktree/build/verify")
+        v004_src = Path("D:/filework/worktrees/release-prep/build/verify")
         v004_dst = self.drill_root / "opt/app/deployments/v20260703_002"
         if v004_src.exists():
             # 排除大文件 (node_modules, .db 等)

@@ -279,7 +279,7 @@ def check_v8u_zip_audit_logs_schema_completeness() -> tuple:
    ```bash
    # 1. 在本地 architecture.db 跑
    python meta/migrations/v007_45_add_audit_logs_created_at_epoch.py \
-       d:/filework/release-prep-worktree/meta/architecture.db
+       d:/filework/worktrees/release-prep/meta/architecture.db
    
    # 2. 验证
    sqlite3 meta/architecture.db "PRAGMA table_info(audit_logs)"

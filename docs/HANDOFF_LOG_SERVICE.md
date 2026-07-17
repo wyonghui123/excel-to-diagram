@@ -175,7 +175,7 @@ elif p.path == '/api/health':
 
 #### 4.6 拆分为独立仓库
 
-`log_service.py` 现在混在 `integration-worktree` 根目录。建议:
+`log_service.py` 现在混在 `worktrees/integration` 根目录。建议:
 - 拆到 `infra/log-service/` 独立仓库
 - 版本管理独立 (log-service-v1.0, v1.1, ...)
 - 不再随主项目部署
@@ -223,7 +223,7 @@ elif p.path == '/api/health':
 
 ## 7. 测试覆盖
 
-文件: `D:\filework\integration-worktree\tests\test_log_service_v3_5.py`
+文件: `D:\filework\worktrees/integration\tests\test_log_service_v3_5.py`
 
 | 测试 | 类型 | 状态 |
 |------|------|------|
@@ -249,7 +249,7 @@ elif p.path == '/api/health':
 cp /opt/app/deployments/log_service.py /opt/app/deployments/log_service.py.bak.v3.5
 
 # 2. 上传新版
-#    从 D:\filework\integration-worktree\log_service.py
+#    从 D:\filework\worktrees/integration\log_service.py
 
 # 3. 重启 (无 systemd 时)
 pkill -f log_service.py ; sleep 2
@@ -264,7 +264,7 @@ curl -s http://localhost:9101/api/sqlite/load?count=10
 # 期望: {"count":10, "table":"users", "ok":10, "fail":0, ...}
 
 # 5. 本地测试
-cd D:\filework\integration-worktree
+cd D:\filework\worktrees/integration
 python -m pytest tests/test_log_service_v3_5.py -v
 # 期望: 10 passed
 ```

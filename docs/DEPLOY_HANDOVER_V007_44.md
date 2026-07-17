@@ -119,7 +119,7 @@ except Exception as e:
 
 ```bash
 # 1. 构建 deploy bundle
-cd d:/filework/release-prep-worktree/deploy_bundle
+cd d:/filework/worktrees/release-prep/deploy_bundle
 python tools/build_v007_15_zip.py  # 或等效的打包脚本
 
 # 2. 上传到生产

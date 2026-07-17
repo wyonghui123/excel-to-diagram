@@ -67,7 +67,7 @@
 
 ### 3.1 文件位置
 
-- 本机: `d:\filework\release-prep-worktree\tools\core_service.py` (243 行)
+- 本机: `d:\filework\worktrees/release-prep\tools\core_service.py` (243 行)
 - yonaa: `/opt/app/shared/core_service.py` (v1.0 备份在 `/opt/app/shared/core_service.py.v1.0.bak`)
 - deploy_bundle: `deploy_bundle/tools/core_service.py`
 
@@ -378,7 +378,7 @@ curl -G "http://172.20.59.7:9200/api/exec" \
 
 **运行方法**：
 ```bash
-cd d:\filework\release-prep-worktree
+cd d:\filework\worktrees/release-prep
 python tools/e2e_core_service.py
 ```
 

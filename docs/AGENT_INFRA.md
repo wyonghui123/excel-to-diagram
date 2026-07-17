@@ -41,10 +41,10 @@
 | 用途 | 旧路径 (V007.70 之前) | **新路径 (V007.71+)** | 分支 | HEAD |
 |------|------|------|------|------|
 | **主仓库** | `D:/filework/excel-to-diagram/` | `D:/filework/excel-to-diagram/` (不变) | main / feat/annotation-category-filter | d2c8bcd |
-| **PM 部署用** | `D:/filework/release-prep-worktree/` | **`D:/filework/worktrees/release-prep/`** | release/pre-2026-06-29 | 790507f (V007.70) |
-| **Doc 整理** | `D:/filework/docs-handover-worktree/` | **`D:/filework/worktrees/docs-handover/`** | docs/deploy-history-2026-07-16 | 2d67624 |
-| **集成测试** | `D:/filework/integration-worktree/` | **`D:/filework/worktrees/integration/`** | integration/2026-07-04 | 2388bfd |
-| **V061 staging** | `D:/filework/worktree-V061-staging/` | **`D:/filework/worktrees/agent-v061-staging/`** | agent/v061-staging | c0190c7 |
+| **PM 部署用** | `D:/filework/worktrees/release-prep/` | **`D:/filework/worktrees/release-prep/`** | release/pre-2026-06-29 | 790507f (V007.70) |
+| **Doc 整理** | `D:/filework/worktrees/docs-handover/` | **`D:/filework/worktrees/docs-handover/`** | docs/deploy-history-2026-07-16 | 2d67624 |
+| **集成测试** | `D:/filework/worktrees/integration/` | **`D:/filework/worktrees/integration/`** | integration/2026-07-04 | 2388bfd |
+| **V061 staging** | `D:/filework/worktrees/agent-v061-staging/` | **`D:/filework/worktrees/agent-v061-staging/`** | agent/v061-staging | c0190c7 |
 | **Orphan (已删)** | `D:/filework/sim/` | ❌ **不存在** (1.6 GB orphan 副本, 已废弃) | — | — |
 
 ### 0.5.2 git worktree list 验证 (5 字段)
@@ -64,7 +64,7 @@ D:/filework/worktrees/release-prep       790507f [release/pre-2026-06-29]
 
 ```python
 # [X] 老路径 (V007.70 之前)
-Read: d:/filework/release-prep-worktree/docs/AGENT_INFRA.md
+Read: d:/filework/worktrees/release-prep/docs/AGENT_INFRA.md
 # → FileNotFound
 
 # [OK] 新路径 (V007.71+)
@@ -75,8 +75,8 @@ Read: d:/filework/worktrees/release-prep/docs/AGENT_INFRA.md
 
 ```bash
 # [X] 老命令
-git -C d:/filework/release-prep-worktree log --oneline -5
-# → fatal: cannot change to 'd:/filework/release-prep-worktree': No such file or directory
+git -C d:/filework/worktrees/release-prep log --oneline -5
+# → fatal: cannot change to 'd:/filework/worktrees/release-prep': No such file or directory
 
 # [OK] 新命令
 git -C d:/filework/worktrees/release-prep log --oneline -5
@@ -86,7 +86,7 @@ git -C d:/filework/worktrees/release-prep log --oneline -5
 
 ```bash
 # [X] 老命名
-git worktree add d:/filework/release-prep-worktree -b new-feature
+git worktree add d:/filework/worktrees/release-prep -b new-feature
 # → 工作区污染 + worktree entry 冲突
 
 # [OK] 新命名 (统一 D:/filework/worktrees/<name>/)
@@ -343,7 +343,7 @@ echo "=== 5. reload + verify ===" && \
 
 | 时间 | 改动 | 影响 |
 |------|------|------|
-| V007.71 | worktree 路径迁移 (e.g. `release-prep-worktree/` → `worktrees/release-prep/`) | 删了老路径, 但**没**更新 system config (cron / schtasks) |
+| V007.71 | worktree 路径迁移 (e.g. `worktrees/release-prep/` → `worktrees/release-prep/`) | 删了老路径, 但**没**更新 system config (cron / schtasks) |
 | V007.83 | 电脑重启后用户报告 "告警没起来" | `\yonaa_alert_monitor` 失败 -2147024629 (老路径 ERROR_FILE_NOT_FOUND) |
 | 累计 | **2 周** 系统配置不一致, 告警监控 5 分钟跑一次但都失败 | 用户没收到任何告警 |
 
@@ -368,10 +368,10 @@ from pathlib import Path
 
 # 老路径 patterns (V007.71 迁移过 + V007.85 新加)
 OLD_PATTERNS = [
-    r'D:\\filework\\release-prep-worktree\\',  # V007.71 老路径 (Windows)
-    r'D:/filework/release-prep-worktree/',     # V007.71 老路径 (POSIX-style)
-    r'd:\\filework\\release-prep-worktree\\',  # V007.71 老路径 (lowercase)
-    r'd:/filework/release-prep-worktree/',     # V007.71 老路径 (lowercase)
+    r'D:\\filework\\worktrees/release-prep\\',  # V007.71 老路径 (Windows)
+    r'D:/filework/worktrees/release-prep/',     # V007.71 老路径 (POSIX-style)
+    r'd:\\filework\\worktrees/release-prep\\',  # V007.71 老路径 (lowercase)
+    r'd:/filework/worktrees/release-prep/',     # V007.71 老路径 (lowercase)
     r'/opt/app/staging/deploy',                # V007.55 cron 老路径 (Linux)
 ]
 

@@ -71,7 +71,7 @@ def upload_batch(files, base_dir):
     return data
 
 def main():
-    project_root = r'd:\filework\release-prep-worktree'
+    project_root = r'd:\filework\worktrees/release-prep'
     ok_total = 0
     fail_total = 0
 

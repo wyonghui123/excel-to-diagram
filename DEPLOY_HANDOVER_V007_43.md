@@ -87,10 +87,10 @@ def _cleanup_resources(data_source):
 **目标环境**: 生产 5001 (172.20.59.7)
 
 **当前部署**: v20260708_011 (基于 git HEAD c418d691)
-**目标部署**: v20260708_012 (基于 release-prep-worktree HEAD 2e337ca)
+**目标部署**: v20260708_012 (基于 worktrees/release-prep HEAD 2e337ca)
 
 **部署步骤**:
-1. `cd D:\filework\release-prep-worktree && python tools/rebuild_zip.py` → v20260708_012
+1. `cd D:\filework\worktrees/release-prep && python tools/rebuild_zip.py` → v20260708_012
 2. scp 到生产 `/tmp/deploy-v20260708_012.zip`
 3. `mv v20260708_011 v20260708_011.bak` + 解压 + `ln -sfn v20260708_012 current`
 4. `kill <server.py PID> && cd /opt/app/deployments/meta && nohup python server.py &`
@@ -103,7 +103,7 @@ def _cleanup_resources(data_source):
 
 ## 🧪 验证
 
-**本地 3018 (integration-worktree 2388bfd)**:
+**本地 3018 (worktrees/integration 2388bfd)**:
 - ✅ BO 3228 → 155
 - ✅ 备注 0 → 841
 - ⚠️ 3018 用 waitress (不是 server.py 启动), 无法本地直接验证 shutdown 顺序
@@ -132,8 +132,8 @@ nohup python server.py > /tmp/server.log 2>&1 &
 
 ## ✅ 已完成
 
-- [x] 修复代码已 commit 到 release-prep-worktree (2e337ca)
-- [x] 修复代码已 commit 到 integration-worktree (2388bfd)
+- [x] 修复代码已 commit 到 worktrees/release-prep (2e337ca)
+- [x] 修复代码已 commit 到 worktrees/integration (2388bfd)
 - [ ] 重新构建 zip v20260708_012
 - [ ] 部署到生产 172.20.59.7
 - [ ] 重启生产 5001

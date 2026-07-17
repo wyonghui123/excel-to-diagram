@@ -42,7 +42,7 @@
 
 ### 3.2 合并步骤
 
-**Step 1**: 本地 dev-agent v3.5 源文件 → 合并到 release-prep-worktree/tools/log_service.py
+**Step 1**: 本地 dev-agent v3.5 源文件 → 合并到 worktrees/release-prep/tools/log_service.py
 
 **Step 2**: 解决 Python 3.9 兼容 (datetime | None 已修, 其他 type hint 检查)
 
@@ -56,7 +56,7 @@
 
 ## 4. dev-agent v3.5 源文件
 
-**Windows 本地路径**: `D:\filework\integration-worktree\log_service.py`
+**Windows 本地路径**: `D:\filework\worktrees/integration\log_service.py`
 **大小**: 15238 字节 (328 行)
 **远端目标**: `/opt/app/deployments/log_service.py`
 
@@ -161,7 +161,7 @@ def check_v8e_zip_log_service_v35_endpoints() -> tuple:
 
 ## 9. 工作清单
 
-- [ ] Step 1: 把 dev-agent v3.5 的 4 个新端点合并到 release-prep-worktree/tools/log_service.py
+- [ ] Step 1: 把 dev-agent v3.5 的 4 个新端点合并到 worktrees/release-prep/tools/log_service.py
 - [ ] Step 2: Python 3.9 兼容 (datetime | None 用 from __future__ import annotations)
 - [ ] Step 3: 本地测试 22 端点
 - [ ] Step 4: rebuild_zip + verify_bundle 9+1=V8e PASS

@@ -128,7 +128,7 @@ class DataSource:
 **目标**: 让 yonaa 稳定下来, 不再崩溃
 
 #### Task 1.1: 部署 V007.20 busy_timeout=30s
-**Commit**: 已经在 release-prep-worktree
+**Commit**: 已经在 worktrees/release-prep
 **动作**: 部署智能体重打包 + 部署 sql_connection_pool.py
 **验收**:
 - `/api/db/health` 返回 `busy_ms: 30000`

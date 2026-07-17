@@ -74,7 +74,7 @@ $readme = @"
 One-click deploy bundle. SFTP to /tmp/ on remote.
 
 ## 完整文档 (AI Agent 必读)
-D:\filework\release-prep-worktree\DEPLOY_INFRASTRUCTURE.md
+D:\filework\worktrees/release-prep\DEPLOY_INFRASTRUCTURE.md
 
 ## 上传
 MobaXterm SFTP: drag deploy_bundle/ to /tmp/

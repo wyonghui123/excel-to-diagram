@@ -84,7 +84,7 @@ files:
 
 - [ ] **Step 1.2: 跑测试, 确认失败**
 
-Run: `cd d:\filework\release-prep-worktree && python -m pytest tools/tests/test_delta_manifest.py -v`
+Run: `cd d:\filework\worktrees/release-prep && python -m pytest tools/tests/test_delta_manifest.py -v`
 Expected: FAIL (ModuleNotFoundError: No module named 'manifest_utils')
 
 - [ ] **Step 1.3: 实现 manifest_utils.py 基础类**
@@ -208,7 +208,7 @@ def get_git_branch(root: Path) -> str:
 
 - [ ] **Step 1.4: 跑测试, 确认 PASS**
 
-Run: `cd d:\filework\release-prep-worktree && python -m pytest tools/tests/test_delta_manifest.py::test_parse_manifest_basic -v`
+Run: `cd d:\filework\worktrees/release-prep && python -m pytest tools/tests/test_delta_manifest.py::test_parse_manifest_basic -v`
 Expected: PASS
 
 - [ ] **Step 1.5: 写失败测试 - generate_manifest 应正确生成**
@@ -266,7 +266,7 @@ def generate_manifest(root: Path, version: str, deployment_type: str = "delta",
 
 - [ ] **Step 1.7: 跑测试, 确认 PASS**
 
-Run: `cd d:\filework\release-prep-worktree && python -m pytest tools/tests/test_delta_manifest.py -v`
+Run: `cd d:\filework\worktrees/release-prep && python -m pytest tools/tests/test_delta_manifest.py -v`
 Expected: 2 PASS
 
 - [ ] **Step 1.8: 写失败测试 - compute_delta 应正确算差异**
@@ -330,13 +330,13 @@ def compute_delta(old: Manifest, new: Manifest) -> dict:
 
 - [ ] **Step 1.10: 跑测试, 确认 PASS**
 
-Run: `cd d:\filework\release-prep-worktree && python -m pytest tools/tests/test_delta_manifest.py -v`
+Run: `cd d:\filework\worktrees/release-prep && python -m pytest tools/tests/test_delta_manifest.py -v`
 Expected: 3 PASS
 
 - [ ] **Step 1.11: 提交**
 
 ```bash
-cd d:\filework\release-prep-worktree
+cd d:\filework\worktrees/release-prep
 git add tools/manifest_utils.py tools/tests/test_delta_manifest.py
 git commit --no-verify -m "feat(tools): manifest_utils - MANIFEST 读写/解析/sha256 [L17]"
 ```
@@ -398,7 +398,7 @@ def test_build_delta_zip(tmp_path):
 
 - [ ] **Step 2.2: 跑测试, 确认失败**
 
-Run: `cd d:\filework\release-prep-worktree && python -m pytest tools/tests/test_delta_manifest.py::test_build_delta_zip -v`
+Run: `cd d:\filework\worktrees/release-prep && python -m pytest tools/tests/test_delta_manifest.py::test_build_delta_zip -v`
 Expected: FAIL (no build_delta_zip function)
 
 - [ ] **Step 2.3: 实现 build_delta_zip 函数**
@@ -464,7 +464,7 @@ deleted: {len(delta['deleted'])}
 
 - [ ] **Step 2.4: 跑测试, 确认 PASS**
 
-Run: `cd d:\filework\release-prep-worktree && python -m pytest tools/tests/test_delta_manifest.py::test_build_delta_zip -v`
+Run: `cd d:\filework\worktrees/release-prep && python -m pytest tools/tests/test_delta_manifest.py::test_build_delta_zip -v`
 Expected: PASS
 
 - [ ] **Step 2.5: 集成到 rebuild_zip.py - 加 --delta 选项**
@@ -484,16 +484,16 @@ parser.add_argument("--prev-manifest", type=str, default=None,
 
 - [ ] **Step 2.6: 跑现有 zip 测试, 确认不破坏**
 
-Run: `cd d:\filework\release-prep-worktree && python tools/rebuild_zip.py --version v20260714_001 --out /tmp/test_full.zip 2>&1 | tail -20`
+Run: `cd d:\filework\worktrees/release-prep && python tools/rebuild_zip.py --version v20260714_001 --out /tmp/test_full.zip 2>&1 | tail -20`
 Expected: 成功生成 zip (全量, ~80MB)
 
 - [ ] **Step 2.7: 测 delta 模式**
 
 ```bash
 # 复制当前 MANIFEST 作为 prev
-cp d:\filework\release-prep-worktree\deploy_bundle\MANIFEST /tmp/prev_MANIFEST
+cp d:\filework\worktrees/release-prep\deploy_bundle\MANIFEST /tmp/prev_MANIFEST
 # 跑 delta 模式
-cd d:\filework\release-prep-worktree
+cd d:\filework\worktrees/release-prep
 python tools/rebuild_zip.py --version v20260714_001 --delta --prev-manifest /tmp/prev_MANIFEST --out /tmp/test_delta.zip 2>&1 | tail -20
 ls -la /tmp/test_delta.zip
 ```
@@ -502,7 +502,7 @@ Expected: zip 大小 < 5MB
 - [ ] **Step 2.8: 提交**
 
 ```bash
-cd d:\filework\release-prep-worktree
+cd d:\filework\worktrees/release-prep
 git add tools/rebuild_zip.py tools/manifest_utils.py tools/tests/test_delta_manifest.py
 git commit --no-verify -m "feat(tools): rebuild_zip.py 支持 --delta 模式 (只含 changed files)"
 ```
@@ -570,7 +570,7 @@ print('\n'.join(e['path'] for e in m.get('files', {}).get('entries', []))
 
 - [ ] **Step 3.2: 跑语法检查**
 
-Run: `bash -n d:\filework\release-prep-worktree\deploy_bundle\lib\sha256_compare.sh`
+Run: `bash -n d:\filework\worktrees/release-prep\deploy_bundle\lib\sha256_compare.sh`
 Expected: 无报错 (exit 0)
 
 - [ ] **Step 3.3: 实现 smart_extract.sh**
@@ -655,7 +655,7 @@ with open('$deploy_root/.delta_cache', 'w') as f:
 
 - [ ] **Step 3.4: 跑语法检查**
 
-Run: `bash -n d:\filework\release-prep-worktree\deploy_bundle\lib\smart_extract.sh`
+Run: `bash -n d:\filework\worktrees/release-prep\deploy_bundle\lib\smart_extract.sh`
 Expected: 无报错
 
 - [ ] **Step 3.5: 添加 ok/err/info 函数 fallback (deploy.sh 已 source common.sh)**
@@ -672,7 +672,7 @@ info() { echo "  $*"; }
 - [ ] **Step 3.6: 提交**
 
 ```bash
-cd d:\filework\release-prep-worktree
+cd d:\filework\worktrees/release-prep
 git add deploy_bundle/lib/smart_extract.sh deploy_bundle/lib/sha256_compare.sh
 git commit --no-verify -m "feat(deploy): smart_extract.sh + sha256_compare.sh [L17 智能 delta]"
 ```
@@ -736,13 +736,13 @@ fi
 
 - [ ] **Step 4.4: 跑语法检查**
 
-Run: `bash -n d:\filework\release-prep-worktree\deploy_bundle\deploy.sh`
+Run: `bash -n d:\filework\worktrees/release-prep\deploy_bundle\deploy.sh`
 Expected: 无报错
 
 - [ ] **Step 4.5: 提交**
 
 ```bash
-cd d:\filework\release-prep-worktree
+cd d:\filework\worktrees/release-prep
 git add deploy_bundle/deploy.sh
 git commit --no-verify -m "feat(deploy): deploy.sh PHASE 0.5 集成 smart_extract [L17]"
 ```
@@ -786,7 +786,7 @@ def test_verify_delta_manifest(tmp_path):
 
 - [ ] **Step 5.2: 跑测试, 确认失败**
 
-Run: `cd d:\filework\release-prep-worktree && python -m pytest tools/tests/test_delta_manifest.py::test_verify_delta_manifest -v`
+Run: `cd d:\filework\worktrees/release-prep && python -m pytest tools/tests/test_delta_manifest.py::test_verify_delta_manifest -v`
 Expected: FAIL
 
 - [ ] **Step 5.3: 实现 verify_delta_manifest 函数**
@@ -831,13 +831,13 @@ def verify_delta_manifest(deploy_dir: Path, manifest: Manifest) -> dict:
 
 - [ ] **Step 5.4: 跑测试, 确认 PASS**
 
-Run: `cd d:\filework\release-prep-worktree && python -m pytest tools/tests/test_delta_manifest.py -v`
+Run: `cd d:\filework\worktrees/release-prep && python -m pytest tools/tests/test_delta_manifest.py -v`
 Expected: 4 PASS
 
 - [ ] **Step 5.5: 提交**
 
 ```bash
-cd d:\filework\release-prep-worktree
+cd d:\filework\worktrees/release-prep
 git add tools/manifest_utils.py tools/tests/test_delta_manifest.py
 git commit --no-verify -m "feat(tools): verify_delta_manifest 全量 sha256 验证 [L17]"
 ```
@@ -850,7 +850,7 @@ git commit --no-verify -m "feat(tools): verify_delta_manifest 全量 sha256 验�
 
 ```bash
 # 1. 模拟"上一次部署" (用 V007.49 MANIFEST)
-cd d:\filework\release-prep-worktree
+cd d:\filework\worktrees/release-prep
 cp deploy_bundle\MANIFEST /tmp/prev_MANIFEST.yaml
 
 # 2. 改一个文件 (模拟新部署)
@@ -875,7 +875,7 @@ with zipfile.ZipFile('/tmp/dryrun_delta.zip') as zf:
 
 - [ ] **Step 6.2: 跑测试, 确认全 PASS**
 
-Run: `cd d:\filework\release-prep-worktree && python -m pytest tools/tests/test_delta_manifest.py -v`
+Run: `cd d:\filework\worktrees/release-prep && python -m pytest tools/tests/test_delta_manifest.py -v`
 Expected: 4 PASS
 
 ---
@@ -885,7 +885,7 @@ Expected: 4 PASS
 - [ ] **Step 7.1: 提交 docs**
 
 ```bash
-cd d:\filework\release-prep-worktree
+cd d:\filework\worktrees/release-prep
 git add docs/superpowers/specs/2026-07-14-smart-delta-deploy-design.md
 git add docs/superpowers/plans/2026-07-14-smart-delta-deploy.md
 git commit --no-verify -m "docs: 智能 delta 部署 spec + plan [L17]"

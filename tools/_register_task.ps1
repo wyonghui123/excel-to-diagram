@@ -1,7 +1,7 @@
 # Register Windows Task Scheduler task with elevated privileges
 # Requires: Administrator (will auto-elevate)
 
-$xmlPath = 'D:\filework\release-prep-worktree\tools\yonaa_alert_monitor.xml'
+$xmlPath = 'D:\filework\worktrees/release-prep\tools\yonaa_alert_monitor.xml'
 
 # Load the task XML and register
 try {

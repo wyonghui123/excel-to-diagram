@@ -24,7 +24,7 @@
     /opt/miniconda3-py39/bin/python meta/migrations/v007_50_add_audit_union_view.py
 
   本地:
-    python meta/migrations/v007_50_add_audit_union_view.py d:/filework/release-prep-worktree/meta/architecture.db
+    python meta/migrations/v007_50_add_audit_union_view.py d:/filework/worktrees/release-prep/meta/architecture.db
 
 回滚:
   DROP VIEW IF EXISTS v_audit_all

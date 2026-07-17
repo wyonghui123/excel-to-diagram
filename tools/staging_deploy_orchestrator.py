@@ -142,7 +142,7 @@ show(r, 800)
 
 # === Step 2: 上传新的 backfill + 相关工具 ===
 step('Step 2: 上传新版本 backfill (覆盖 staging)')
-LOCAL = r'd:\filework\release-prep-worktree'
+LOCAL = r'd:\filework\worktrees/release-prep'
 REMOTE_BASE = '/opt/app/staging/deploy'
 files_to_upload = [
     (f'{LOCAL}/tools/backfill_schema_migrations.py',

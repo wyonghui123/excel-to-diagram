@@ -12,7 +12,7 @@ import time
 import json
 import urllib.request
 
-sys.path.insert(0, r"D:\filework\release-prep-worktree\test_helpers")
+sys.path.insert(0, r"D:\filework\worktrees/release-prep\test_helpers")
 sys.path.insert(0, r"D:\filework\excel-to-diagram\test_helpers")
 
 from playwright.sync_api import sync_playwright

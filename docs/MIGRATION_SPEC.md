@@ -537,7 +537,7 @@ forbidden_files:
 ```yaml
 depends_on:
   - commit: 42ae0aa                          # NSFOCUS-L4 收尾 commit
-  - branch: release-prep-worktree            # 当前 worktree
+  - branch: worktrees/release-prep            # 当前 worktree
 
 blocks:
   - 后续所有涉及 schema 变更的功能开发        # 必须等 migration 框架就绪
@@ -1046,7 +1046,7 @@ if __name__ == '__main__':
 
 ```bash
 # Step 1: 在本地 dev 跑 (验证脚本本身工作)
-cd d:/filework/release-prep-worktree
+cd d:/filework/worktrees/release-prep
 python tools/backfill_schema_migrations.py --db-path meta/architecture.db --dry-run
 
 # Step 2: 在 staging 跑
@@ -1685,7 +1685,7 @@ python tools/test_migration_runner.py
 # 期望: 所有测试 PASS
 
 # 2. 本地 dry-run
-cd d:/filework/release-prep-worktree
+cd d:/filework/worktrees/release-prep
 python -c "from meta.core.migration_runner import MigrationRunner; from meta.core.datasource import get_data_source; r = MigrationRunner(get_data_source()); print(r.run_pending_migrations())"
 # 期望: 识别所有 pending migration
 

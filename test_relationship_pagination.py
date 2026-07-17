@@ -2,7 +2,7 @@
 import sqlite3
 import time
 
-db = r'D:\filework\release-prep-worktree\meta\architecture.db'
+db = r'D:\filework\worktrees/release-prep\meta\architecture.db'
 conn = sqlite3.connect(db)
 cur = conn.cursor()
 

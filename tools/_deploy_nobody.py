@@ -26,7 +26,7 @@ def reinstall(name):
     cfg = ENV_CONFIG[name]
     print(f'\n=== {name} reinstall (用新 unit) ===')
     # 1. upload 新 unit
-    local_unit = f'd:/filework/release-prep-worktree/tools/log_service_{name}.service'
+    local_unit = f'd:/filework/worktrees/release-prep/tools/log_service_{name}.service'
     remote_tmp = f'{cfg["deploy_root"]}/log_service_{name}.service'
     r = yupload(local_unit, remote_tmp, port=cfg['port'], secret=cfg['secret'], timeout=30)
     if r.get('error'):

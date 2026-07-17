@@ -47,7 +47,7 @@ from typing import List, Dict, Any, Optional
 
 ## ✅ 修复
 
-**Commit**: `76f7668` (release-prep-worktree HEAD), `b46fe80` (integration-worktree)
+**Commit**: `76f7668` (worktrees/release-prep HEAD), `b46fe80` (worktrees/integration)
 
 **Fix 内容** (1 行改动)：
 
@@ -66,13 +66,13 @@ from typing import List, Dict, Any, Optional
 **目标环境**：生产 5001 (`172.20.59.7`)
 
 **当前部署**：v20260708_010 (基于 git HEAD `c418d691`，含 v027-pt2 fix 但**缺 Tuple import**)
-**目标部署**：v20260708_011 (基于 release-prep-worktree HEAD `76f7668`)
+**目标部署**：v20260708_011 (基于 worktrees/release-prep HEAD `76f7668`)
 
 **部署步骤**：
 
-1. **构建新 zip**（在 release-prep-worktree）
+1. **构建新 zip**（在 worktrees/release-prep）
    ```bash
-   cd D:\filework\release-prep-worktree
+   cd D:\filework\worktrees/release-prep
    python tools/rebuild_zip.py
    # 生成 deploy-v20260708_011.zip (HEAD=76f7668)
    ```
@@ -123,7 +123,7 @@ from typing import List, Dict, Any, Optional
 
 **本地 3018 重启验证** (已通过)：
 ```bash
-cd D:\filework\integration-worktree\meta
+cd D:\filework\worktrees/integration\meta
 python tests\test_export_cascade_v027pt2.py
 ```
 
@@ -169,8 +169,8 @@ nohup python server.py > /tmp/server.log 2>&1 &
 
 ## ✅ 已完成
 
-- [x] 修复代码已 commit 到 release-prep-worktree (76f7668)
-- [x] 修复代码已 commit 到 integration-worktree (b46fe80)
+- [x] 修复代码已 commit 到 worktrees/release-prep (76f7668)
+- [x] 修复代码已 commit 到 worktrees/integration (b46fe80)
 - [ ] 重新构建 zip v20260708_011
 - [ ] 部署到生产 172.20.59.7
 - [ ] 重启生产 5001

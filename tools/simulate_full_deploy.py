@@ -21,7 +21,7 @@ import os, shutil, zipfile, re
 from pathlib import Path
 
 # 1. mock yonaa 状态
-YONAA = Path(r'D:\filework\release-prep-worktree\deploy_bundle\.mock_yonaa_full')
+YONAA = Path(r'D:\filework\worktrees/release-prep\deploy_bundle\.mock_yonaa_full')
 if YONAA.exists():
     shutil.rmtree(YONAA)
 YONAA.mkdir()
@@ -72,7 +72,7 @@ print(f'[MOCK] current/ (模拟空目录, 等同 v20260706_021/)')
 (DEPLOYMENTS / 'frontend_dist_files').mkdir(parents=True, exist_ok=True)
 
 # 把 V007.21 zip 里的 cache_manager 写到 deployments/meta (模拟上次解压)
-zf = zipfile.ZipFile(r'D:\filework\release-prep-worktree\deploy_bundle\deploy-v20260706_021.zip')
+zf = zipfile.ZipFile(r'D:\filework\worktrees/release-prep\deploy_bundle\deploy-v20260706_021.zip')
 zf.extract('meta/core/enums/cache_manager.py', str(DEPLOYMENTS))
 zf.extract('meta/core/sql_connection_pool.py', str(DEPLOYMENTS))
 zf.extract('meta/services/import_export_service.py', str(DEPLOYMENTS))
@@ -89,7 +89,7 @@ print('=== PHASE 0.5 模拟 ===')
 SERVER_DIR = DEPLOYMENTS / 'meta'  # 当前 current 指向 v20260706_021, 但 current 是空, server_dir 还是 deployments/meta
 VERSION = 'v20260706_021'
 VERSION_PATH = DEPLOYMENTS / VERSION
-ZIP_PATH = Path(r'D:\filework\release-prep-worktree\deploy_bundle\deploy-v20260706_021.zip')
+ZIP_PATH = Path(r'D:\filework\worktrees/release-prep\deploy_bundle\deploy-v20260706_021.zip')
 
 NEED_UNZIP = False
 

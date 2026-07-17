@@ -1,6 +1,6 @@
 # ============================================================
 # Build deploy package - PowerShell version
-# For release-prep-worktree single-layer directory structure
+# For worktrees/release-prep single-layer directory structure
 # Usage: .\build-deploy-package.ps1 [-Version "20260630_001"]
 # ============================================================
 

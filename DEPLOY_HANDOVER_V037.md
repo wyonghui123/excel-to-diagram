@@ -104,7 +104,7 @@ deploy-v20260703_002.zip (19MB) 的 MANIFEST 内容：
 
 ```bash
 # 1. 切换到 release 分支工作目录
-cd D:\filework\release-prep-worktree
+cd D:\filework\worktrees/release-prep
 
 # 2. 检查 .git 当前状态（确保 e981c54 已经存在）
 git log --oneline -1
@@ -207,11 +207,11 @@ http://<remote>/assets/ObjectDetailPage-<hash>.js.map
 
 | 文件 | 路径 |
 |---|---|
-| 本交接文档 | `D:\filework\release-prep-worktree\DEPLOY_HANDOVER_V037.md` |
+| 本交接文档 | `D:\filework\worktrees/release-prep\DEPLOY_HANDOVER_V037.md` |
 | 修复 commit (release) | `e981c54` (在 release 历史中) |
 | 完整 fix commit (feat) | `797edb8` |
 | 修改的源文件 | `src/views/ObjectDetailPage.vue` (line 138 新增 13 行) |
-| 3006 验证脚本 | 见 `release-prep-worktree/.tmp_*` 已清理 |
+| 3006 验证脚本 | 见 `worktrees/release-prep/.tmp_*` 已清理 |
 
 ---
 

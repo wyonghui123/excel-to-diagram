@@ -8,7 +8,7 @@
 #
 # 触发时机 (SOP §4.2 T1/T2):
 #   - release 有新 BUG cherry-pick 后
-#   - integration-worktree 落后 release > 1 commit
+#   - worktrees/integration 落后 release > 1 commit
 #   - 试跑期新 BUG 报告
 #
 # 行为:
@@ -28,8 +28,8 @@
 
 [CmdletBinding()]
 param(
-    [string]$ReleasePath = "D:\filework\release-prep-worktree",
-    [string]$IntegrationPath = "D:\filework\integration-worktree",
+    [string]$ReleasePath = "D:\filework\worktrees/release-prep",
+    [string]$IntegrationPath = "D:\filework\worktrees/integration",
     [string]$PythonExe = "C:\Users\Administrator\AppData\Local\Python\pythoncore-3.14-64\python.exe",
     [int]$BackendPort = 3018,
     [int]$WaitTimeoutSec = 30,

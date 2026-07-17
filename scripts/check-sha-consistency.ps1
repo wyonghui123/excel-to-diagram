@@ -7,7 +7,7 @@
 #   pwsh -File D:\filework\scripts\check-sha-consistency.ps1 -Json              # 输出 JSON (供 CI 解析)
 #
 # 检查范围:
-#   1. integration-worktree git HEAD SHA == release-prep-worktree git HEAD SHA
+#   1. worktrees/integration git HEAD SHA == worktrees/release-prep git HEAD SHA
 #   2. integration DB mtime 与 release DB mtime 差距 (DB 是否同步过)
 #   3. (可选 -RequireFrontend) 前端 dist/build 目录的 git SHA 文件 (如有)
 #
@@ -21,8 +21,8 @@
 
 [CmdletBinding()]
 param(
-    [string]$ReleasePath = "D:\filework\release-prep-worktree",
-    [string]$IntegrationPath = "D:\filework\integration-worktree",
+    [string]$ReleasePath = "D:\filework\worktrees/release-prep",
+    [string]$IntegrationPath = "D:\filework\worktrees/integration",
     [int]$DbStaleThresholdMinutes = 60,
     [switch]$RequireFrontend,
     [switch]$Strict,        # 严格模式: SHA 必须完全相同 (默认允许"内容等价")

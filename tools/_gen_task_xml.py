@@ -47,8 +47,8 @@ XML = r'''<?xml version="1.0" encoding="UTF-16"?>
   </Settings>
   <Actions Context="Author">
     <Exec>
-      <Command>D:\filework\release-prep-worktree\tools\alert_monitor.bat</Command>
-      <WorkingDirectory>D:\filework\release-prep-worktree\tools</WorkingDirectory>
+      <Command>D:\filework\worktrees/release-prep\tools\alert_monitor.bat</Command>
+      <WorkingDirectory>D:\filework\worktrees/release-prep\tools</WorkingDirectory>
     </Exec>
   </Actions>
   <Principals>
@@ -60,7 +60,7 @@ XML = r'''<?xml version="1.0" encoding="UTF-16"?>
 </Task>
 '''
 
-out = Path(r'd:\filework\release-prep-worktree\tools\yonaa_alert_monitor.xml')
+out = Path(r'd:\filework\worktrees/release-prep\tools\yonaa_alert_monitor.xml')
 # Write as UTF-16 (Task Scheduler requires UTF-16 LE with BOM)
 with open(out, 'wb') as f:
     f.write(b'\xff\xfe')  # BOM

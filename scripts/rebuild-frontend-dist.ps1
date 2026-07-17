@@ -26,7 +26,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$ReleasePath = "D:\filework\release-prep-worktree",
+    [string]$ReleasePath = "D:\filework\worktrees/release-prep",
     [string]$FrontendPort = "3006",
     [int]$BuildTimeoutSec = 180,
     [int]$RestartTimeoutSec = 30,

@@ -200,7 +200,7 @@ def main():
         # Save
         full_code = page.evaluate('() => typeof window.__lastMermaidCode === "string" ? window.__lastMermaidCode : null')
         if full_code:
-            with open('d:/filework/release-prep-worktree/tools/captured_mermaid_code.mmd', 'w', encoding='utf-8') as f:
+            with open('d:/filework/worktrees/release-prep/tools/captured_mermaid_code.mmd', 'w', encoding='utf-8') as f:
                 f.write(full_code)
             print(f'\n  Saved: tools/captured_mermaid_code.mmd ({len(full_code)} chars)')
 

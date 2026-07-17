@@ -9,10 +9,10 @@ V007.62 升级 (2026-07-16):
 from pathlib import Path
 
 PYTHONW = r'C:\Users\Administrator\AppData\Local\Python\bin\pythonw.exe'
-SCRIPT = r'D:\filework\release-prep-worktree\tools\alert_monitor_v0760.py'
-CONFIG = r'D:\filework\release-prep-worktree\tools\alert_monitor_config.json'
-LOGFILE = r'D:\filework\release-prep-worktree\tools\alert_monitor_v0760.log'
-WORKDIR = r'D:\filework\release-prep-worktree\tools'
+SCRIPT = r'D:\filework\worktrees/release-prep\tools\alert_monitor_v0760.py'
+CONFIG = r'D:\filework\worktrees/release-prep\tools\alert_monitor_config.json'
+LOGFILE = r'D:\filework\worktrees/release-prep\tools\alert_monitor_v0760.log'
+WORKDIR = r'D:\filework\worktrees/release-prep\tools'
 
 XML = f'''<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
@@ -69,7 +69,7 @@ XML = f'''<?xml version="1.0" encoding="UTF-16"?>
 </Task>
 '''
 
-out = Path(r'd:\filework\release-prep-worktree\tools\yonaa_alert_monitor_v0762.xml')
+out = Path(r'd:\filework\worktrees/release-prep\tools\yonaa_alert_monitor_v0762.xml')
 with open(out, 'wb') as f:
     f.write(b'\xff\xfe')
     f.write(XML.encode('utf-16-le'))

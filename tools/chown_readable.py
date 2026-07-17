@@ -11,7 +11,7 @@ chown 所有 log_service 启动需要读的文件/目录给 nobody
 - /opt/miniconda3-py39/bin/python                 (Python 解释器)
 """
 import sys
-sys.path.insert(0, r'd:\filework\release-prep-worktree\tools')
+sys.path.insert(0, r'd:\filework\worktrees/release-prep\tools')
 from yonaa_exec import yexec
 
 cmds_prod = [

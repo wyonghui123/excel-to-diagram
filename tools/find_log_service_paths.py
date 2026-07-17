@@ -1,6 +1,6 @@
 """查找 log_service.py 在 prod 和 staging 的真实路径"""
 import sys
-sys.path.insert(0, r'd:\filework\release-prep-worktree\tools')
+sys.path.insert(0, r'd:\filework\worktrees/release-prep\tools')
 from yonaa_exec import yexec
 
 for target, port in [('prod', 9200), ('staging', 19200)]:

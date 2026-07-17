@@ -113,17 +113,17 @@ function sanitizeMermaidLabel(text) {
 
 - `npm run build`：成功生成新 dist（`index-D1H_SYxC.js` + `index-Dkx3L-2V.js` 等 chunk）
 - 复制 `dist` → `d:/filework/frontend_dist_files`（vite preview cwd 解析路径）
-- 复制 `dist` → `d:/filework/release-prep-worktree/frontend_dist_files`（备选路径）
+- 复制 `dist` → `d:/filework/worktrees/release-prep/frontend_dist_files`（备选路径）
 - 重启 `vite preview --host 0.0.0.0 --port 3006 --outDir frontend_dist_files`
 - 验证 3006 能正常返回 200，HTML 引用的 chunk 含 sanitize 逻辑
-- `rg -o '#92' d:/filework/release-prep-worktree/dist/assets/index-Dkx3L-2V.js` → 4 处
+- `rg -o '#92' d:/filework/worktrees/release-prep/dist/assets/index-Dkx3L-2V.js` → 4 处
 - `rg -o '#quot' ...` → 1 处（在 sanitize 函数定义里）
 
 ### 5.3 重要路径解析经验
 
 vite preview 启动时 cwd 解析 `--outDir frontend_dist_files` 是**相对路径**，所以
 实际路径取决于启动进程的 cwd：
-- 如果在 `d:\filework\release-prep-worktree\` 下启动 → `frontend_dist_files` = `release-prep-worktree/frontend_dist_files`
+- 如果在 `d:\filework\worktrees/release-prep\` 下启动 → `frontend_dist_files` = `worktrees/release-prep/frontend_dist_files`
 - 如果在 `d:\filework\` 下启动 → `frontend_dist_files` = `d:/filework/frontend_dist_files`
 
 **两边都要复制**，否则无论 vite preview 在哪个 cwd 启动都会找不到对应 chunk。

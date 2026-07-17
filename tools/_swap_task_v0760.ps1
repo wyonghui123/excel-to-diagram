@@ -1,5 +1,5 @@
 # Swap old task for v0760 (requires admin)
-$xmlPath = 'D:\filework\release-prep-worktree\tools\yonaa_alert_monitor_v0760.xml'
+$xmlPath = 'D:\filework\worktrees/release-prep\tools\yonaa_alert_monitor_v0760.xml'
 
 try {
     # Delete old (idempotent)

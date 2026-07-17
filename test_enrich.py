@@ -1,5 +1,5 @@
 import sys
-sys.path.insert(0, r'D:\filework\release-prep-worktree')
+sys.path.insert(0, r'D:\filework\worktrees/release-prep')
 import sqlite3
 
 # 直接用 sqlite3 连接 db, 模拟 ds.query 的行为
@@ -14,7 +14,7 @@ class FakeDS:
         return [dict(r) for r in cur.fetchall()]
 
 
-conn = sqlite3.connect(r'D:\filework\release-prep-worktree\meta\architecture.db')
+conn = sqlite3.connect(r'D:\filework\worktrees/release-prep\meta\architecture.db')
 ds = FakeDS(conn)
 
 from meta.core.audit_derived_fields import enrich_audit_virtual_fields

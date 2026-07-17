@@ -2,7 +2,7 @@
 
 **接手人**: dev-agent (V050 worktree)
 **原 handoff 作者**: V046 协调智能体
-**原 handoff 文件**: `D:\filework\release-prep-worktree\docs\handoff_v050_disk_io_error.md`
+**原 handoff 文件**: `D:\filework\worktrees/release-prep\docs\handoff_v050_disk_io_error.md`
 **反馈日期**: 2026-07-06
 **状态**: V007.16 已实施并本地验证, 等协调智能体 cherry-pick + 部署
 
@@ -253,7 +253,7 @@ def reader(self, timeout: float = None):
 
 ```bash
 # 1. fetch V007.16 commits
-cd D:\filework\release-prep-worktree
+cd D:\filework\worktrees/release-prep
 git fetch origin fix/v050-orphan-tx
 
 # 2. 看 V007.16 commits

@@ -9,9 +9,9 @@ import sqlite3
 import time
 import traceback
 
-sys.path.insert(0, r"D:\filework\release-prep-worktree")
+sys.path.insert(0, r"D:\filework\worktrees/release-prep")
 
-DB = r"D:\filework\release-prep-worktree\meta\architecture.db"
+DB = r"D:\filework\worktrees/release-prep\meta\architecture.db"
 
 # 1. Clean v007_50 artifacts first
 print("=== Step 1: Clean v007_50 artifacts ===")

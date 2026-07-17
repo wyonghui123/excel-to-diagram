@@ -25,8 +25,8 @@ from pathlib import Path
 
 import pytest
 
-REAL_DB = r"D:\filework\release-prep-worktree\meta\architecture.db"
-ARCHIVE_SCRIPT = r"D:\filework\release-prep-worktree\meta\scripts\archive_audit_logs.py"
+REAL_DB = r"D:\filework\worktrees/release-prep\meta\architecture.db"
+ARCHIVE_SCRIPT = r"D:\filework\worktrees/release-prep\meta\scripts\archive_audit_logs.py"
 
 
 def _check_view_exists(conn):

@@ -1,6 +1,6 @@
 # P3 帮助中心 - 部署交接文档
 
-> 准备时间: 2026-07-13 | 准备人: AI Assistant | worktree: release-prep-worktree
+> 准备时间: 2026-07-13 | 准备人: AI Assistant | worktree: worktrees/release-prep
 > 目标分支: `release/pre-2026-06-29`
 
 ## 一、提交清单（2 commits on top of origin）
@@ -48,7 +48,7 @@ A  public/docs/scenarios/archdata-management/remark-chart-link.mp4 18.1 MB  Step
 
 ### 步骤 1: 拉取代码
 ```bash
-cd /path/to/release-prep-worktree
+cd /path/to/worktrees/release-prep
 git pull origin release/pre-2026-06-29
 # 验证: git log --oneline -3 应看到 3bcbd24, e9e433d 在前 2 位
 ```

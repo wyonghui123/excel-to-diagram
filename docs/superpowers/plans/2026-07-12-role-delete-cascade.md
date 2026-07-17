@@ -485,7 +485,7 @@ nohup python3 -u server.py > /tmp/server.log 2>&1 &
 ### 2. Placeholder scan
 - 无 "TBD"/"fill in"
 - 错误代码 SUPER_ADMIN_PROTECTED/SYSTEM_ROLE_PROTECTED 已具体定义
-- yaml 字段名与 [action_executor.py:1131](file:///d:/filework/release-prep-worktree/meta/core/action_executor.py#L1127-L1136) 期待的 `cascade_delete` 对应
+- yaml 字段名与 [action_executor.py:1131](file:///d:/filework/worktrees/release-prep/meta/core/action_executor.py#L1127-L1136) 期待的 `cascade_delete` 对应
 
 ### 3. Type consistency
 
