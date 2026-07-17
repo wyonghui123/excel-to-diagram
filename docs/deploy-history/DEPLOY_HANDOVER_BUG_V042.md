@@ -11,7 +11,7 @@
 
 > **BUG-V042 修复完成: audit_logs 表缺 6 列 (action_kind / outcome / cascade_root_* / retention_until / prev_hash/row_hash) + 5 索引**.
 >
-> 直接对 release-prep-worktree DB 执行 `meta/scripts/migrate_v318_audit.py --apply` 升级到 34 列, 业务代码无需变更, 端到端验证 10/10 success 0 error.
+> 直接对 worktrees/release-prep DB 执行 `meta/scripts/migrate_v318_audit.py --apply` 升级到 34 列, 业务代码无需变更, 端到端验证 10/10 success 0 error.
 >
 > 用户现在去 3006 修改 user / 创建 user, 审计页"操作日志" tab 能正确看到变更记录 (不是 _error fallback).
 
@@ -33,7 +33,7 @@
 ## 2. 根因分析
 
 ### 2.1 直接原因
-**release-prep-worktree DB 的 `audit_logs` 表只有 27 列**, 缺 7 个 v3.18 / v2 必加列:
+**worktrees/release-prep DB 的 `audit_logs` 表只有 27 列**, 缺 7 个 v3.18 / v2 必加列:
 - `action_kind` (v2, 写 instance/static)
 - `outcome` (v3.18, 写 success/failure/blocked/retry)
 - `cascade_root_id` (v3.18)
@@ -74,7 +74,7 @@
 
 | DB | 列数 (前→后) | 索引 (前→后) | 备注 |
 |----|-----|-----|------|
-| `D:\filework\release-prep-worktree\meta\architecture.db` | 27 → 34 | 1 → 5 | 加 6 列 + 1 索引, backfill 264,255 条 |
+| `D:\filework\worktrees/release-prep\meta\architecture.db` | 27 → 34 | 1 → 5 | 加 6 列 + 1 索引, backfill 264,255 条 |
 | `D:\filework\excel-to-diagram\meta\architecture.db` | 32 → 34 | 4 → 5 | 加 action_kind + 1 索引 |
 
 ---
@@ -105,7 +105,7 @@ POST /api/v2/bo/user { "username": "V042test_1783128286", ... }
 |------|------|--------|
 | 代码改动 (feat branch) | ✅ | `d2c8bcd` |
 | push origin | ✅ | `ff1288b..d2c8bcd` |
-| cherry-pick release-prep-worktree | ✅ | `64b3151` |
+| cherry-pick worktrees/release-prep | ✅ | `64b3151` |
 | release DB 升级 (apply migration) | ✅ | (DB 直接 ALTER, 已完成) |
 | 3011 后端 | ✅ | 不需要重启 (新进程可读到新 schema) |
 
@@ -142,7 +142,7 @@ POST /api/v2/bo/user { "username": "V042test_1783128286", ... }
 | Fix commit (feat branch) | `d2c8bcd` |
 | Cherry-pick commit (release branch) | `64b3151` |
 | 改动文件 | `D:\filework\excel-to-diagram\meta\scripts\migrate_v318_audit.py` |
-| Release DB | `D:\filework\release-prep-worktree\meta\architecture.db` |
+| Release DB | `D:\filework\worktrees/release-prep\meta\architecture.db` |
 | Feat DB | `D:\filework\excel-to-diagram\meta\architecture.db` |
 | Migration 脚本 | `meta/scripts/migrate_v318_audit.py --apply` |
 | 旧 audit_log 服务 | `meta/services/audit_service.py:545` (v3.18, 不需改) |

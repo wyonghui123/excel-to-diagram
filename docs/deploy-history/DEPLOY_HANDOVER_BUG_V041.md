@@ -52,7 +52,7 @@
 | 修复 1 (业务键回退逻辑) | `a8627c3` | ✅ |
 | 修复 2 (调用补传 record) | `ff1288b` | ✅ |
 | push origin | `f3c2bcc..ff1288b` | ✅ |
-| cherry-pick release-prep-worktree | `2246119` (在 `e36d007` 之上) | ✅ auto-merge OK |
+| cherry-pick worktrees/release-prep | `2246119` (在 `e36d007` 之上) | ✅ auto-merge OK |
 
 ### 3.2 代码改动 (1 文件, +13 -13)
 
@@ -113,7 +113,7 @@
 ### 4.1 已完成 ✅
 1. ✅ 3011 后端已重启 (PID 10512, 启动 8:55:53, 加载新 .pyc 8:55:42)
 2. ✅ E2E 验证通过
-3. ✅ 修复 commit 已在本地 feat + release-prep-worktree
+3. ✅ 修复 commit 已在本地 feat + worktrees/release-prep
 4. ✅ 修复 commit 已 push 到 origin
 
 ### 4.2 待 PM 确认 (可选)

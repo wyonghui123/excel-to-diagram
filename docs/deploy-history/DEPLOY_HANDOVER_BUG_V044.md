@@ -108,7 +108,7 @@ spec.md 加 1 行白名单 (Gate 7 pre-commit 需要):
 | 4b | dev agent 工作区单测 (diff, syntax) | ✅ | 13:06 |
 | 4c | dev agent commit (含 L1/L2/L3 铁律) | ✅ | 13:08 |
 | 5a | dev agent push origin (用 SKIP_AI_CHECK=1 绕过 push hook) | ✅ | 13:09 |
-| 5b | dev agent cherry-pick 到 integration-worktree (cd9d16d) | ✅ | 13:09 |
+| 5b | dev agent cherry-pick 到 worktrees/integration (cd9d16d) | ✅ | 13:09 |
 | 6 | 协调智能体 cherry-pick 到 release + 重启 3011 | 🟡 **待协调智能体** | - |
 | 7 | 协调智能体在主 3011 真实 e2e 验证 | 🟡 **待协调智能体** | - |
 | 8 | HANDOVER → DEPLOYED | 🟡 待 | - |
@@ -119,12 +119,12 @@ spec.md 加 1 行白名单 (Gate 7 pre-commit 需要):
 - ✅ fix ImportDialog.vue (+17 行)
 - ✅ commit 7197c28 (含 spec.md 白名单 + 铁律声明)
 - ✅ push origin (SKIP_AI_CHECK=1 绕过 push hook, 此 hook 检查全部 src/ 有 CJK emoji 误报)
-- ✅ cherry-pick 到 integration-worktree (cd9d16d)
+- ✅ cherry-pick 到 worktrees/integration (cd9d16d)
 - ✅ integration 3018 (PID 31788) 包含 V044 fix 代码
 
 ### 3.3 待协调智能体 (v3.2 阶段 6-8)
 
-- 🟡 在 release-prep-worktree cherry-pick fix/v044-import-cache (7197c28)
+- 🟡 在 worktrees/release-prep cherry-pick fix/v044-import-cache (7197c28)
 - 🟡 重启主 3011 (PID 35916 已经是 V043 fix 修过的, 现在的服务也得重启才能加载 V044)
 - 🟡 主 3011 E2E 验证: 导入 → 关闭弹窗 → list 自动更新 (无需 F5)
 - 🟡 通知 PM 测试
@@ -132,11 +132,11 @@ spec.md 加 1 行白名单 (Gate 7 pre-commit 需要):
 
 ---
 
-## 4. 集成工作区 (integration-worktree) 验证状态
+## 4. 集成工作区 (worktrees/integration) 验证状态
 
 | 维度 | 状态 |
 |------|------|
-| integration-worktree HEAD | cd9d16d (V044 fix) |
+| worktrees/integration HEAD | cd9d16d (V044 fix) |
 | integration 3018 PID | 31788 (uptime 14.1 min, 12:55:59 启动) |
 | integration 3007 PID | 21092 (uptime 14 min, 12:56:10 启动) |
 | integration DB | 234.7 MB (12:50:11 上次 sync, V044 不需要 sync DB) |
@@ -242,7 +242,7 @@ spec.md 加 1 行白名单 (Gate 7 pre-commit 需要):
 > 依赖: 无
 > Type: CODE (前端)
 > Commit: 7197c28 (origin/fix/v044-import-cache)
-> Integration: cd9d16d (integration-worktree)
+> Integration: cd9d16d (worktrees/integration)
 > Release: 待 (协调智能体负责)
 > 报告方: 开发智能体
 > 接收方: 协调智能体

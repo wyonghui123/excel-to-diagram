@@ -191,7 +191,7 @@ integration 3018 重启加载新代码后：
 ### 6.1 Cherry-pick V048 到 release
 
 ```bash
-cd D:\filework\release-prep-worktree
+cd D:\filework\worktrees/release-prep
 git fetch origin
 git cherry-pick 31a4b1c
 # 期望：无冲突（integration 干净 merge）
@@ -232,7 +232,7 @@ powershell -File D:\filework\scripts\service_manager.ps1 restart integration-bac
 ### 7.2 回滚
 
 ```bash
-cd D:\filework\integration-worktree
+cd D:\filework\worktrees/integration
 git reset --hard c8f2ca1  # 回滚到 V047 fix
 ```
 

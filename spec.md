@@ -3,7 +3,7 @@
 
 > **Task ID**: T-INTEGRATION-RBAC-IE-2026-06-26
 > **协调者**: coordinator agent
-> **Worktree**: d:/filework/integration-worktree/
+> **Worktree**: d:/filework/worktrees/integration/
 > **风险等级**: medium
 > **目标**: 把 IE 智能体的 23 个 commits (feat/ie-model-driven) 整合到 RBAC 智能体的分支
 
@@ -163,7 +163,7 @@ reason: |
 mitigation:
   - 回滚: git reset --hard refs/backup/integration-pre-merge-2026-06-26
   - 测试: IE 自己的 21 个 e2e spec
-  - 隔离: integration-worktree 独立
+  - 隔离: worktrees/integration 独立
   - 验证: 8 项验证 (markers / YAML / Python / function)
 ```
 
@@ -174,7 +174,7 @@ mitigation:
 ```yaml
 decisions:
   - 协调者分析 3 个活跃分支, 决定整合 RBAC + IE
-  - 创建 integration-worktree
+  - 创建 worktrees/integration
   - merge --no-commit 发现 3 个冲突, 全部解决
   - 8 项验证全部 PASS
   - pre-commit 拦截 GBK mojibake, 修复 11 处

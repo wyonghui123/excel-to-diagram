@@ -9,7 +9,7 @@
 
 ## 0. 一句话总结
 
-> **BUG-V040 修复已 commit + push + cherry-pick 到 release-prep-worktree**,
+> **BUG-V040 修复已 commit + push + cherry-pick 到 worktrees/release-prep**,
 > 但**3011 后端 (PID 33712, 启动于 2026-07-03 22:56:19) 加载的 .pyc 仍是旧代码**,
 > 必须**重启 3011 后端**才能让 BUG-V040 fix 生效。
 
@@ -50,7 +50,7 @@ Step 2 数据校验报错：
 |------|--------|------|
 | commit (feat branch) | `f3c2bcc` | ✅ |
 | push 到 origin | `e13fcb4..f3c2bcc` feat/annotation-category-filter | ✅ |
-| cherry-pick 到 release-prep-worktree | `eb5c8c0` | ✅ auto-merge OK |
+| cherry-pick 到 worktrees/release-prep | `eb5c8c0` | ✅ auto-merge OK |
 
 ### 3.2 代码改动 (2 文件, +63 -5)
 
