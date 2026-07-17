@@ -573,8 +573,8 @@ audit_queue = initialize_audit_async_queue(write_queue)
 ### 7.2 部署顺序
 
 ```bash
-# 1. 在 release-prep-worktree cherry-pick (协调智能体)
-cd D:\filework\release-prep-worktree
+# 1. 在 worktrees/release-prep cherry-pick (协调智能体)
+cd D:\filework\worktrees/release-prep
 git fetch origin fix/v050-orphan-tx
 git cherry-pick <L4_5_commit_hash>
 

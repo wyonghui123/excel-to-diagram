@@ -286,7 +286,7 @@ V007.16 改动**没有破坏** L4.5 audit_async_queue 任何测试。
 
 ```bash
 # 1. fetch V007.16 commit
-cd D:\filework\release-prep-worktree
+cd D:\filework\worktrees/release-prep
 git fetch origin fix/v050-orphan-tx
 
 # 2. 查看 commit (期望看到 3 个)
@@ -299,7 +299,7 @@ git log --oneline origin/fix/v050-orphan-tx -3
 
 # 3. cherry-pick V007.16 修复 (必须)
 git cherry-pick ccde2ab
-# 可能需要解决冲突 (release-prep-worktree 有 dirty changes)
+# 可能需要解决冲突 (worktrees/release-prep 有 dirty changes)
 
 # 4. cherry-pick V007.16 DEPLOY_HANDOVER (必须, 给 PM 看)
 git cherry-pick 9420633
@@ -319,7 +319,7 @@ git push origin release/pre-2026-06-29
 
 ### 6.2 部署智能体操作 (yonaa 生产)
 
-**重要**: yonaa 的 `/opt/app/deployments/meta/` **不是 git repo**, 是从 `release-prep-worktree` 同步过去的 (rsync 或部署脚本).
+**重要**: yonaa 的 `/opt/app/deployments/meta/` **不是 git repo**, 是从 `worktrees/release-prep` 同步过去的 (rsync 或部署脚本).
 
 ```bash
 # 1. SSH 到 yonaa 172.20.59.7
@@ -331,8 +331,8 @@ ls -la /opt/app/deployments/
 # 13040 启动时间 07:47:42 = V007.15 部署时间
 
 # 3. 部署新版本 (协调智能体提供的具体方法, 例如):
-# 方法 A: rsync from release-prep-worktree
-# rsync -avz --delete D:\filework\release-prep-worktree\ /opt/app/deployments/v20260706_001/
+# 方法 A: rsync from worktrees/release-prep
+# rsync -avz --delete D:\filework\worktrees/release-prep\ /opt/app/deployments/v20260706_001/
 
 # 方法 B: deploy 脚本 (如果有)
 # /opt/app/scripts/deploy.sh v20260706_001

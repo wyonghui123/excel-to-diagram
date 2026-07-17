@@ -28,7 +28,7 @@ def log_warn(msg): print(f"{YELLOW}[WARN]{NC} {msg}")
 
 def main():
     print(f"{CYAN}=== 验证 deploy.sh / rollback.sh 通用性 ==={NC}\n")
-    tools_dir = Path("D:/filework/release-prep-worktree/tools")
+    tools_dir = Path("D:/filework/worktrees/release-prep/tools")
 
     results = {"passed": 0, "failed": 0}
 

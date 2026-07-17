@@ -24,7 +24,7 @@ import shutil
 import sys
 from pathlib import Path
 
-ROOT = Path("D:/filework/release-prep-worktree").resolve()
+ROOT = Path("D:/filework/worktrees/release-prep").resolve()
 BUILD = ROOT / "build" / "verify"
 if BUILD.exists():
     shutil.rmtree(BUILD)

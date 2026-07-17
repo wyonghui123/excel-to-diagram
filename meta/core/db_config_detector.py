@@ -5,7 +5,7 @@
 设计动机:
 - 生产可能有 3 种配置:
   - State A: WAL + busy_timeout=5000 (worktree-V049 base 8bfcbff)
-  - State B: DELETE + busy_timeout=30000 (release-prep-worktree dirty)
+  - State B: DELETE + busy_timeout=30000 (worktrees/release-prep dirty)
   - State C: 其他 (未来)
 - 不同状态下, defense 行为需调整 (e.g. retry max, orphan detector interval)
 - 启动时检测, 全局 singleton, 不重复 connect

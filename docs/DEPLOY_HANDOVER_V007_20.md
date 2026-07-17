@@ -159,8 +159,8 @@ git cherry-pick 585c228   # → 2df7fd2
 git push origin release/pre-2026-06-29 --no-verify
 # 13909bd..2df7fd2 → origin/release/pre-2026-06-29
 
-# [OK] integration-worktree 同步
-git -C D:\filework\integration-worktree reset --hard 2df7fd2
+# [OK] worktrees/integration 同步
+git -C D:\filework\worktrees/integration reset --hard 2df7fd2
 
 # [OK] 本地服务
 3011 (release):  PID 33032,  busy_timeout=30000ms [OK]
@@ -310,7 +310,7 @@ print(d.get('v007_15',{}).get('connection_pool',{}).get('busy_timeout','?'))
 
 - [OK] cherry-pick V007.20 fix (`39c2156`) + test (`2df7fd2`)
 - [OK] push origin release/pre-2026-06-29
-- [OK] 同步 integration-worktree 到 release HEAD
+- [OK] 同步 worktrees/integration 到 release HEAD
 - [OK] 重启 3011 (release) + 3018 (integration) 后端
 - [OK] 验证 busy_timeout=30000ms
 - [OK] 写此 DEPLOY_HANDOVER 文档

@@ -43,7 +43,7 @@
 
 #### 方法 1: 复制粘贴 (推荐)
 
-1. **本地打开** [log_service.py](file:///D:/filework/integration-worktree/log_service.py) (我们刚 commit)
+1. **本地打开** [log_service.py](file:///D:/filework/worktrees/integration/log_service.py) (我们刚 commit)
 2. **复制整个文件内容** (约 200 行)
 3. **云控制台终端执行**:
    ```bash
@@ -64,7 +64,7 @@ cd /opt/app/deployments
 
 ```bash
 # 在本地 (Windows PowerShell)
-[Convert]::ToBase64String([IO.File]::ReadAllBytes("D:\filework\integration-worktree\log_service.py"))
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("D:\filework\worktrees/integration\log_service.py"))
 # 输出: aW1wb3J0IG9zCi...
 ```
 
@@ -169,7 +169,7 @@ nohup python3 /opt/app/deployments/server.py > /opt/app/deployments/meta/server.
 
 ## 2. 完整 log_service.py (粘贴到云控制台)
 
-[log_service.py](file:///D:/filework/integration-worktree/log_service.py) 已在本地仓库, **约 200 行**, 完整可运行。
+[log_service.py](file:///D:/filework/worktrees/integration/log_service.py) 已在本地仓库, **约 200 行**, 完整可运行。
 
 **核心 6 个 endpoint**:
 
@@ -189,7 +189,7 @@ nohup python3 /opt/app/deployments/server.py > /opt/app/deployments/meta/server.
 ### 立即 (Step 1-4, 12 min)
 
 - [ ] 登录 yonaa 云控制台 (root)
-- [ ] 复制本地 `D:\filework\integration-worktree\log_service.py` 全部内容
+- [ ] 复制本地 `D:\filework\worktrees/integration\log_service.py` 全部内容
 - [ ] 在 yonaa 控制台执行 `cat > /opt/app/deployments/log_service.py << 'EOF' ... EOF`
 - [ ] 执行 `chmod +x /opt/app/deployments/log_service.py` (可选, Python 文件不需要)
 - [ ] 执行 `nohup python3 /opt/app/deployments/log_service.py > /tmp/log_service.log 2>&1 &`
@@ -256,7 +256,7 @@ nohup python3 /opt/app/deployments/server.py > /opt/app/deployments/meta/server.
 
 **我需要协调智能体做的**:
 1. 登录 yonaa 云控制台 (root)
-2. 复制 [log_service.py](file:///D:/filework/integration-worktree/log_service.py) 全部内容
+2. 复制 [log_service.py](file:///D:/filework/worktrees/integration/log_service.py) 全部内容
 3. 在控制台粘贴 + 启动
 4. 验证 9101 端口 OK
 5. **告诉我 "log_service 已上线"**
@@ -304,7 +304,7 @@ nohup python3 /opt/app/deployments/server.py > /opt/app/deployments/meta/server.
 - **不能**: 找云厂商 support 或其他方式
 
 **如果能, 立即**:
-1. 复制 `D:\filework\integration-worktree\log_service.py` 全部内容
+1. 复制 `D:\filework\worktrees/integration\log_service.py` 全部内容
 2. 在 yonaa 控制台粘贴执行
 3. 启动 + 验证 9101
 4. 告诉我"log_service 已上线"

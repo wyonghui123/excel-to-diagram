@@ -169,7 +169,7 @@ If `git diff` only shows my 5 files, CRITICAL issues are pre-existing main. Coor
 **[接手协调智能体]**: 必须 cherry-pick **所有 V049 commit** (含接手协调智能体加的), **不**仅 cherry-pick 89c63f0.
 
 ```bash
-cd D:/filework/release-prep-worktree
+cd D:/filework/worktrees/release-prep
 git fetch origin fix/V049-import-fd-leak
 # 看完整 commit 列表
 git log origin/fix/V049-import-fd-leak --oneline 8bfcbff..HEAD
@@ -216,7 +216,7 @@ cat /proc/<pid>/limits | grep "open files"  # should be 65536
 ## 8. Retro (dev-agent part)
 
 Mistakes:
-1. Did not read SOP_INFRASTRUCTURE.md first, edited code in release-prep-worktree directly (violation of L5)
+1. Did not read SOP_INFRASTRUCTURE.md first, edited code in worktrees/release-prep directly (violation of L5)
 2. Used integration (local SQLite) to test production issue, wrong root cause
 3. User gave real error [Errno 24], I did not locate immediately, ran cProfile blindly
 
@@ -224,7 +224,7 @@ Correction:
 1. After user reminded, read SOP_INFRASTRUCTURE.md + development-workflow.md
 2. Created independent worktree-V049 (fix/V049-import-fd-leak)
 3. Commit to fix branch (not release)
-4. Reverted modifications in release-prep-worktree
+4. Reverted modifications in worktrees/release-prep
 5. Wrote DEPLOY_HANDOVER to notify coordinator
 
 Lessons:

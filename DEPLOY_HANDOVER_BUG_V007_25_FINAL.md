@@ -62,8 +62,8 @@
 
 | 端 | data | 来源 |
 |---|------|------|
-| **3006 (release-prep-worktree)** | ✅ 1 row: domain=[1,2] (采购管理/库存管理) | 测试时加 |
-| **3007 (integration-worktree)** | ✅ 1 row: domain=[1,2] (采购管理/库存管理) | 测试时加 |
+| **3006 (worktrees/release-prep)** | ✅ 1 row: domain=[1,2] (采购管理/库存管理) | 测试时加 |
+| **3007 (worktrees/integration)** | ✅ 1 row: domain=[1,2] (采购管理/库存管理) | 测试时加 |
 | **V050 (worktree-V050)** | ❌ 0 rows | 空 db |
 | **yonaa (生产)** | ❌ **0 rows** | **生产 db 真的没数据** |
 
@@ -209,7 +209,7 @@ sqlite3 architecture.db "SELECT * FROM role_dimension_scopes WHERE role_id=1"
 
 **操作步骤**:
 1. 在 yonaa 部署 `_dual_route.py` middleware (3006/3007 都有)
-2. 重新部署 server.py (从 release-prep-worktree)
+2. 重新部署 server.py (从 worktrees/release-prep)
 
 **预期**:
 - `/api/v1/management-dimensions` 在 yonaa 返回 "API Moved → /api/v2/bo/management_dimension"

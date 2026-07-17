@@ -5,7 +5,7 @@ import tempfile, shutil
 
 root = Path(tempfile.mkdtemp(prefix="v4_test_"))
 v4 = root / "meta"
-shutil.copytree(Path("D:/filework/release-prep-worktree/build/verify/meta"), v4)
+shutil.copytree(Path("D:/filework/worktrees/release-prep/build/verify/meta"), v4)
 env = os.environ.copy()
 env["PORT"] = "5001"
 env["JWT_SECRET_KEY"] = "test"

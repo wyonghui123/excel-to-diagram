@@ -13,7 +13,7 @@
 
 | 脚本 | O 编号 | 功能 | 何时用 |
 |---|---|---|---|
-| [`setup-integration.ps1`](./setup-integration.ps1) | (基线) | 一键准备/重置 integration-worktree | 首次部署 / 大改前 |
+| [`setup-integration.ps1`](./setup-integration.ps1) | (基线) | 一键准备/重置 worktrees/integration | 首次部署 / 大改前 |
 | [`start-integration.ps1`](./start-integration.ps1) | O7 | 一键启 integration (3018 + 3007) | 平时启停 |
 | [`stop-integration.ps1`](./stop-integration.ps1) | O8 | 一键停 integration + 清锁 | 平时启停 |
 | [`status-integration.ps1`](./status-integration.ps1) | O9 | 一键查 4 端口/进程/DB/锁/Git 同步 | **随时** |
@@ -45,7 +45,7 @@ pwsh -File D:\filework\scripts\stop-integration.ps1 -Force
 
 ```powershell
 # Step 1: 同步代码 (主仓库 → release → integration)
-cd D:\filework\release-prep-worktree
+cd D:\filework\worktrees/release-prep
 git cherry-pick <commit-sha>          # 或 git pull (看场景)
 # 此时 release 有新 commit
 
@@ -88,11 +88,11 @@ pwsh -File D:\filework\scripts\start-integration.ps1
 
 # 场景 C: 锁文件残留 (start 报 P0 lock 冲突)
 # 看是哪个 PID 持有, 死了就删锁文件
-Get-Content D:\filework\integration-worktree\meta\.architecture.lock
+Get-Content D:\filework\worktrees/integration\meta\.architecture.lock
 # 假设 PID 27460
 Get-Process -Id 27460 -ErrorAction SilentlyContinue
 # 如果不存在 (返回空), 删锁:
-Remove-Item D:\filework\integration-worktree\meta\.architecture.lock
+Remove-Item D:\filework\worktrees/integration\meta\.architecture.lock
 ```
 
 ---
@@ -113,21 +113,21 @@ Remove-Item D:\filework\integration-worktree\meta\.architecture.lock
 | 路径 | 说明 |
 |---|---|
 | `D:\filework\excel-to-diagram\` | 主仓库 (主工作台) |
-| `D:\filework\release-prep-worktree\` | release worktree (3006/3011) |
-| `D:\filework\integration-worktree\` | integration worktree (3007/3018) |
+| `D:\filework\worktrees/release-prep\` | release worktree (3006/3011) |
+| `D:\filework\worktrees/integration\` | integration worktree (3007/3018) |
 | `D:\filework\scripts\` | 本目录 (脚本) |
 | `D:\filework\INFRA_HANDOVER.md` | 完整 SOP 文档 |
 | `D:\filework\excel-to-diagram\PARALLEL_DEV_SOP.md` | v3.2 并行开发 SOP |
 
 ### 3.3 日志
 
-启动后日志会写到 integration-worktree 根目录:
+启动后日志会写到 worktrees/integration 根目录:
 
 ```
-D:\filework\integration-worktree\integration_3018_stdout.log
-D:\filework\integration-worktree\integration_3018_stderr.log
-D:\filework\integration-worktree\integration_3007_stdout.log
-D:\filework\integration-worktree\integration_3007_stderr.log
+D:\filework\worktrees/integration\integration_3018_stdout.log
+D:\filework\worktrees/integration\integration_3018_stderr.log
+D:\filework\worktrees/integration\integration_3007_stdout.log
+D:\filework\worktrees/integration\integration_3007_stderr.log
 ```
 
 出问题先看 stderr。
@@ -140,7 +140,7 @@ D:\filework\integration-worktree\integration_3007_stderr.log
 
 ```powershell
 pwsh -File D:\filework\scripts\start-integration.ps1
-    [-IntegrationPath <path>]    # 默认 D:\filework\integration-worktree
+    [-IntegrationPath <path>]    # 默认 D:\filework\worktrees/integration
     [-BackendPort <port>]       # 默认 3018
     [-FrontendPort <port>]      # 默认 3007
     [-PythonExe <path>]         # 默认 pythoncore-3.14-64
@@ -182,7 +182,7 @@ pwsh -File D:\filework\scripts\sync-integration-db.ps1
 
 **触发时机** (SOP §4.2):
 - T1: release 有新 BUG cherry-pick 后
-- T2: integration-worktree 落后 release > 1 commit
+- T2: worktrees/integration 落后 release > 1 commit
 - T3: 试跑期新 BUG 报告
 
 **注意**: 此脚本**只同步 DB, 不同步代码**。代码同步见 SOP §4.2 (cherry-pick / merge / setup reset)。
@@ -216,7 +216,7 @@ pwsh -File D:\filework\scripts\check-sha-consistency.ps1
 
 ```powershell
 pwsh -File D:\filework\scripts\rebuild-frontend-dist.ps1
-    [-ReleasePath <path>]              # 默认 D:\filework\release-prep-worktree
+    [-ReleasePath <path>]              # 默认 D:\filework\worktrees/release-prep
     [-FrontendPort <port>]             # 默认 3006 (主前端)
     [-BuildTimeoutSec <sec>]           # 默认 180
     [-RestartTimeoutSec <sec>]         # 默认 30
@@ -233,7 +233,7 @@ pwsh -File D:\filework\scripts\rebuild-frontend-dist.ps1
 
 # 2. 给 integration 3007 rebuild:
 pwsh -File D:\filework\scripts\rebuild-frontend-dist.ps1 `
-    -ReleasePath "D:\filework\integration-worktree" `
+    -ReleasePath "D:\filework\worktrees/integration" `
     -FrontendPort "3007" `
     -Force
 
@@ -267,11 +267,11 @@ A: 端口被占, 通常是之前的 integration 没干净停。
 A: 锁文件存的是持有 DB 的 PID。
 ```powershell
 # 看锁内容
-Get-Content D:\filework\integration-worktree\meta\.architecture.lock
+Get-Content D:\filework\worktrees/integration\meta\.architecture.lock
 # 看 PID 是否活着
 Get-Process -Id <PID> -ErrorAction SilentlyContinue
 # 死了就删
-Remove-Item D:\filework\integration-worktree\meta\.architecture.lock
+Remove-Item D:\filework\worktrees/integration\meta\.architecture.lock
 # 注意: 必须是 integration 的锁, 不是主 3011 的锁!
 ```
 

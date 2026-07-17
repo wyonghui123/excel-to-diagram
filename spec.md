@@ -11,7 +11,7 @@
 
 ## 涉及文件（黑名单，绝对禁止修改）
 - d:\filework\excel-to-diagram\**    (主工作树)
-- d:\filework\integration-worktree\**  (integration 主仓, 别人在跑)
+- d:\filework\worktrees/integration\**  (integration 主仓, 别人在跑)
 - d:\filework\.git\**                  (git metadata)
 - meta/server.py 除非必要（本任务只关心 interceptor 层）
 

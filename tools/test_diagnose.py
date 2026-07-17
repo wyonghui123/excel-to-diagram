@@ -175,7 +175,7 @@ if __name__ == "__main__":
     server_path = deploy_root / "deployments" / "v20260703_002" / "meta" / "server.py"
     server_path.write_text(server_py)
 
-    tools_dir = Path("D:/filework/release-prep-worktree/tools")
+    tools_dir = Path("D:/filework/worktrees/release-prep/tools")
     unified_dst = deploy_root / "unified_server.py"
     shutil.copy(tools_dir / "unified_server.py", unified_dst)
 

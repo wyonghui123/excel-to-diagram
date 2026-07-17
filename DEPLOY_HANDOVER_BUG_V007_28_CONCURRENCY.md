@@ -24,7 +24,7 @@
 
 ## 1. 100% 复现 — Python 并发测试
 
-### 1.1 测试脚本 (在 d:\filework\integration-worktree\_test_concurrency_v2.py)
+### 1.1 测试脚本 (在 d:\filework\worktrees/integration\_test_concurrency_v2.py)
 
 ```python
 # 16 个并发请求 (模拟架构管理页面)

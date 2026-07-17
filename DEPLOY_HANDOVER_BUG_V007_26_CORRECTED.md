@@ -24,15 +24,15 @@
 ### 1.1 我之前 V007.26 报告说
 
 > "V007.24 Phase 1 commit 93b6381 从未部署到生产"
-> "release-prep-worktree 主分支没有 93b6381"
+> "worktrees/release-prep 主分支没有 93b6381"
 > "yonaa 部署的是老版 datasource.py"
 
 ### 1.2 事实是 (基于 deploy_bundle 实际检查)
 
 | 项 | 实际状态 |
 |---|---------|
-| release-prep-worktree HEAD (630df25) git 里的 `datasource.py` | **OLD (9598B, 无 cache)** |
-| release-prep-worktree **工作区** `datasource.py` | ✅ **NEW (16500B, 有 cache)** |
+| worktrees/release-prep HEAD (630df25) git 里的 `datasource.py` | **OLD (9598B, 无 cache)** |
+| worktrees/release-prep **工作区** `datasource.py` | ✅ **NEW (16500B, 有 cache)** |
 | deploy_bundle/deploy-v20260725_001.zip 里的 `datasource.py` | ✅ **NEW (有 cache)** |
 | **yonaa 5001 实际部署的 datasource.py** | ✅ **NEW (有 cache)** |
 
@@ -40,7 +40,7 @@
 
 **之前我以为"git merge-base --is-ancestor 93b6381 release/pre-2026-06-29 → False" 意味着 V007.24 没部署, 这是错的!**
 
-**事实是**: V007.24 修复以**未提交的工作区修改**形式存在于 release-prep-worktree, 已被打包进 zip 并部署到 yonaa!
+**事实是**: V007.24 修复以**未提交的工作区修改**形式存在于 worktrees/release-prep, 已被打包进 zip 并部署到 yonaa!
 
 ### 1.3 yonaa 5001 实际 API 状态 (重新测试)
 
@@ -58,7 +58,7 @@
 
 ## 2. 真正的真因 — auth_api.py:44 `__file__` 路径 bug
 
-### 2.1 代码 (release-prep-worktree/meta/api/auth_api.py:35-46)
+### 2.1 代码 (worktrees/release-prep/meta/api/auth_api.py:35-46)
 
 ```python
 _data_source = None
@@ -74,7 +74,7 @@ def init_auth_services(data_source=None):
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             'architecture.db'
         )
-        # 本地:  d:\filework\release-prep-worktree\meta\architecture.db
+        # 本地:  d:\filework\worktrees/release-prep\meta\architecture.db
         # yonaa: __file__ = /opt/app/deployments/meta/api/auth_api.py
         #        db_path = /opt/app/deployments/meta/architecture.db
         # server.py 用的: /opt/app/deployments/meta/architecture.db
@@ -196,7 +196,7 @@ def init_all_api_data_sources(main_data_source):
 ### Step 3: 0.5h — 部署 (用现有 V007.25 完整 deploy_bundle)
 
 ```bash
-# 1. 在 release-prep-worktree 工作区改 (已经有 V007.24 修改, 现在加 V007.26 修改)
+# 1. 在 worktrees/release-prep 工作区改 (已经有 V007.24 修改, 现在加 V007.26 修改)
 # 2. cd tools && python rebuild_zip.py
 # 3. scp deploy-v*.zip user@172.20.59.7:/tmp/
 # 4. ssh user@172.20.59.7
@@ -219,7 +219,7 @@ def verify_v15_no_lazy_init():
 
 ## 5. 真正的部署状态 (修正)
 
-### 5.1 release-prep-worktree 工作区
+### 5.1 worktrees/release-prep 工作区
 
 ```
 HEAD: 630df25 (V007.25 完整部署保障)

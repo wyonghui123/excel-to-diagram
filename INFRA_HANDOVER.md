@@ -22,7 +22,7 @@
 
 | 任务 | 协调智能体 | 开发智能体 |
 |------|-----------|------------|
-| **integration-worktree 准备** (cp DB, 改 vite.config, cp node_modules) | ✅ **主理** | 辅助 |
+| **worktrees/integration 准备** (cp DB, 改 vite.config, cp node_modules) | ✅ **主理** | 辅助 |
 | **integration 服务启停** (AGENT_PORT=3018, vite dev --port 3007) | ✅ **主理** | 辅助 |
 | **integration 状态监控** (4 端口, 2 DB, 2 锁) | ✅ **主理** | 辅助 |
 | **integration DB 同步** (release → integration, 新 BUG 修复后) | ✅ **主理** | 辅助 |
@@ -63,7 +63,7 @@ Get-Process -Id <PID> | Select-Object Id, ProcessName, StartTime, @{Name='Uptime
 
 | 端口 | 服务 | PID (snapshot) | 启动时间 (snapshot) | Uptime (snapshot) | 用途 |
 |------|------|----------------|----------------------|-------------------|------|
-| **3006** | 主 vite (用户) | 35240 | 2026/7/3 23:13:05 | 12h+ | **用户** (release-prep-worktree) |
+| **3006** | 主 vite (用户) | 35240 | 2026/7/3 23:13:05 | 12h+ | **用户** (worktrees/release-prep) |
 | **3011** | 主 waitress (用户) | 10512 | 2026/7/4 8:55:53 | 2.5h | **用户** (P0 锁 release DB) |
 | **3007** | integration vite | 29408 | 2026/7/4 11:05:52 | ~24 min | **Agent 验证** (proxy → 3018) |
 | **3018** | integration waitress | 27460 | 2026/7/4 11:03:28 | ~27 min | **Agent 验证** (P0 锁 integration DB) |
@@ -72,26 +72,26 @@ Get-Process -Id <PID> | Select-Object Id, ProcessName, StartTime, @{Name='Uptime
 
 ```powershell
 # 实时查询 DB 状态
-Get-ChildItem D:\filework\integration-worktree\meta\architecture.db, D:\filework\release-prep-worktree\meta\architecture.db | Select-Object FullName, Length, LastWriteTime | Format-Table -AutoSize
+Get-ChildItem D:\filework\worktrees/integration\meta\architecture.db, D:\filework\worktrees/release-prep\meta\architecture.db | Select-Object FullName, Length, LastWriteTime | Format-Table -AutoSize
 
 # 实时查询锁
-Get-ChildItem D:\filework\integration-worktree\meta\.architecture.lock, D:\filework\release-prep-worktree\meta\.architecture.lock | Select-Object FullName, Length, LastWriteTime | Format-Table -AutoSize
+Get-ChildItem D:\filework\worktrees/integration\meta\.architecture.lock, D:\filework\worktrees/release-prep\meta\.architecture.lock | Select-Object FullName, Length, LastWriteTime | Format-Table -AutoSize
 ```
 
 | DB 路径 | 大小 (snapshot) | 修改时间 | 持有者 (PID snapshot) | 锁文件 |
 |---------|-----------------|----------|----------------------|--------|
-| `release-prep-worktree/meta/architecture.db` | 246MB | 7/4 10:30:02 | 10512 (主 3011) | `.architecture.lock` (27B, 8:55:56) |
-| `integration-worktree/meta/architecture.db` | 234.7MB | 7/4 10:50:02 (cp) | 27460 (integration 3018) | `.architecture.lock` (27B, 11:03:34) |
+| `worktrees/release-prep/meta/architecture.db` | 246MB | 7/4 10:30:02 | 10512 (主 3011) | `.architecture.lock` (27B, 8:55:56) |
+| `worktrees/integration/meta/architecture.db` | 234.7MB | 7/4 10:50:02 (cp) | 27460 (integration 3018) | `.architecture.lock` (27B, 11:03:34) |
 
 **关键**:
 - ❌ **不要让 2 个 waitress 共享同 DB**! P0 锁 (waitress_server.py:104-106) 会让 2 个启动先后冲突
 - ✅ **integration 必 cp release DB** (不能 symlink, 不能共享)
 - ⚠️ **DB 同步时机**: release 有新 BUG cherry-pick 后, integration 必须重新 cp 一遍 (脚本 O14)
 
-### 2.3 integration-worktree 文件状态
+### 2.3 worktrees/integration 文件状态
 
 ```
-D:/filework/integration-worktree/
+D:/filework/worktrees/integration/
 ├── .env                                  # (gitignored) VITE_DEV_PORT=3007, FLASK_PORT=3018
 ├── vite.config.js                        # port 3007, proxy 3018 (已改, 待 commit)
 ├── meta/architecture.db                  # 234.7MB (cp 自 release, 7/4 10:50:02)
@@ -116,7 +116,7 @@ D:/filework/integration-worktree/
 **根因**: `waitress_server.py:104-106` 启动时检测 PID 是否存活, 存活则 sys.exit(1)
 
 ```python
-# D:\filework\release-prep-worktree\waitress_server.py
+# D:\filework\worktrees/release-prep\waitress_server.py
 def _is_pid_alive(pid): ...
 if _is_pid_alive(stale_pid):
     print(f'[WAITRESS][P0 启动失败] 另一个实例 PID={stale_pid} 持有 DB 锁!')
@@ -163,8 +163,8 @@ if _is_pid_alive(stale_pid):
 
 | # | 发现 | 处理 |
 |---|------|------|
-| **D1** | integration-worktree 不带 `.env` (git worktree 不带 untracked) | setup-integration.ps1 含 .env 复制 |
-| **D2** | integration-worktree 不带 `node_modules` (.gitignore) | setup-integration.ps1 含 node_modules 复制 |
+| **D1** | worktrees/integration 不带 `.env` (git worktree 不带 untracked) | setup-integration.ps1 含 .env 复制 |
+| **D2** | worktrees/integration 不带 `node_modules` (.gitignore) | setup-integration.ps1 含 node_modules 复制 |
 | **D3** | FLASK_DEBUG 未设触发 production mode RuntimeError | setup-integration.ps1 含 .env 含 FLASK_DEBUG=true |
 
 ---
@@ -181,7 +181,7 @@ powershell -File D:\filework\scripts\setup-integration.ps1 -Action reset
 
 | # | 步骤 | 实现 | 输出 |
 |---|------|------|------|
-| 1 | 创建 git worktree (integration/2026-07-04) | `git worktree add -b integration/2026-07-04 D:/filework/integration-worktree 64b3151` | 5112 文件复制 |
+| 1 | 创建 git worktree (integration/2026-07-04) | `git worktree add -b integration/2026-07-04 D:/filework/worktrees/integration 64b3151` | 5112 文件复制 |
 | 2 | 复制 .env + 改 port | `cp .env` + `port 3006→3007, 3011→3018` | 5 行, 167B |
 | 3 | 修改 vite.config.js | `port 3007 + proxy 3018` (3 处替换) | ~250 行 |
 | 4 | 复制 architecture.db | `cp release → integration` | 234.7MB |
@@ -193,11 +193,11 @@ powershell -File D:\filework\scripts\setup-integration.ps1 -Action reset
 ### 4.1 后续手动步骤 (没写脚本)
 
 ```bash
-# 启 integration 后端 (cwd=D:\filework\integration-worktree)
+# 启 integration 后端 (cwd=D:\filework\worktrees/integration)
 $env:AGENT_PORT='3018'
 python waitress_server.py > integration_3018_stdout.log 2> integration_3018_stderr.log
 
-# 启 integration 前端 (cwd=D:\filework\integration-worktree)
+# 启 integration 前端 (cwd=D:\filework\worktrees/integration)
 node node_modules/vite/bin/vite.js dev --port 3007 --host 0.0.0.0 --strictPort > integration_3007_stdout.log 2> integration_3007_stderr.log
 ```
 
@@ -217,7 +217,7 @@ curl http://localhost:3007/api/v1/auth/dev-login?username=admin  # 期望 admin 
 | # | 触发时机 | 紧迫度 | 操作 |
 |---|---------|--------|------|
 | **T1** | 每次 release 有新 BUG cherry-pick 后 | 高 (必修) | 必须 |
-| **T2** | integration-worktree 落后 release > 1 commit | 高 (必修) | 必须 |
+| **T2** | worktrees/integration 落后 release > 1 commit | 高 (必修) | 必须 |
 | **T3** | 试跑期新 BUG 报告 (PM 标 SOP_VERSION: v3.2) | 高 (必修) | 必须 |
 | **T4** | integration 重启时 (代码 stale 但 DB 新) | 中 (建议) | 建议 |
 
@@ -232,7 +232,7 @@ curl http://localhost:3007/api/v1/auth/dev-login?username=admin  # 期望 admin 
 #### A 方案详细步骤 (推荐主流程)
 
 ```bash
-# 1. 同步 integration-worktree (在 D:\filework\integration-worktree)
+# 1. 同步 worktrees/integration (在 D:\filework\worktrees/integration)
 git fetch . release/pre-2026-06-29:refs/heads/release-tmp
 echo "=== 落后几个? ==="
 git log --oneline integration/2026-07-04..release-tmp
@@ -250,17 +250,17 @@ git merge --ff-only release/pre-2026-06-29
 # 3. 验证同步完成
 git rev-parse HEAD
 # 应等于 release HEAD
-cd D:\filework\release-prep-worktree
+cd D:\filework\worktrees/release-prep
 git rev-parse HEAD  # 应相同
 
 # 4. 同步 DB (代码变了, DB 也需新)
-Copy-Item D:\filework\release-prep-worktree\meta\architecture.db D:\filework\integration-worktree\meta\architecture.db -Force
+Copy-Item D:\filework\worktrees/release-prep\meta\architecture.db D:\filework\worktrees/integration\meta\architecture.db -Force
 
 # 5. 重启 integration 3018 (新代码)
 Stop-Process -Id 27460 -Force  # 当前 PID
 Start-Sleep 3
 $env:AGENT_PORT='3018'
-cd D:\filework\integration-worktree
+cd D:\filework\worktrees/integration
 Start-Process python.exe waitress_server.py
 
 # 6. 重启 integration 3007 (新前端)
@@ -273,7 +273,7 @@ node node_modules/vite/bin/vite.js dev --port 3007 --host 0.0.0.0 --strictPort
 #### C 方案 (备选, T4 或冲突时)
 
 ```powershell
-# 1. 重置 integration-worktree
+# 1. 重置 worktrees/integration
 pwsh -File D:\filework\scripts\setup-integration.ps1 -Action reset
 # 这会: 删 worktree, 重建, 重 cp DB, 重改 vite.config.js
 
@@ -285,7 +285,7 @@ pwsh -File D:\filework\scripts\setup-integration.ps1 -Action reset
 
 ```bash
 # A. 文件级 diff (integration vs release)
-cd D:\filework\integration-worktree
+cd D:\filework\worktrees/integration
 git diff release/pre-2026-06-29 --stat  # 应空 (除了 vite.config.js 改 port/proxy)
 
 # B. 服务级 smoke test
@@ -303,7 +303,7 @@ curl http://localhost:3007/api/v1/auth/dev-login?username=admin
 | # | 优化项 | 优先级 | 状态 | 责任人 | 触发 |
 |---|--------|--------|------|--------|------|
 | **O1** | setup-integration.ps1 | high | ✅ 完成 | (已移交) | - |
-| **O2** | integration-worktree 创建 | high | ✅ 完成 | (已移交) | - |
+| **O2** | worktrees/integration 创建 | high | ✅ 完成 | (已移交) | - |
 | **O3** | .env 改 port 自动化 | high | ✅ 完成 | (已移交) | - |
 | **O4** | vite.config.js 改 port/proxy | high | ✅ 完成 | (已移交) | - |
 | **O5** | DB cp | high | ✅ 完成 | (已移交) | - |
@@ -331,10 +331,10 @@ curl http://localhost:3007/api/v1/auth/dev-login?username=admin
 **修复**:
 ```bash
 # 确认 .env 有 FLASK_DEBUG=true
-Get-Content D:\filework\integration-worktree\.env
+Get-Content D:\filework\worktrees/integration\.env
 
 # 缺失则:
-Add-Content D:\filework\integration-worktree\.env "`nFLASK_DEBUG=true"
+Add-Content D:\filework\worktrees/integration\.env "`nFLASK_DEBUG=true"
 ```
 
 ### 6.2 integration 3007 proxy 不工作 (/api 返回 404)
@@ -348,11 +348,11 @@ Add-Content D:\filework\integration-worktree\.env "`nFLASK_DEBUG=true"
 ```bash
 # A: kill integration vite, 改用 vite dev
 Get-Process node -ErrorAction SilentlyContinue | Where-Object { $_.Id -eq 29408 } | Stop-Process
-cd D:\filework\integration-worktree
+cd D:\filework\worktrees/integration
 node node_modules/vite/bin/vite.js dev --port 3007 --host 0.0.0.0 --strictPort
 
 # B: 确认 vite.config.js
-Select-String -Path D:\filework\integration-worktree\vite.config.js -Pattern "port: 3007|target: 'http://localhost:3018'"
+Select-String -Path D:\filework\worktrees/integration\vite.config.js -Pattern "port: 3007|target: 'http://localhost:3018'"
 ```
 
 ### 6.3 P0 锁冲突 (另一个 PID 持有锁)
@@ -364,14 +364,14 @@ Select-String -Path D:\filework\integration-worktree\vite.config.js -Pattern "po
 **修复**:
 ```bash
 # 1. 检查 stale 锁文件
-Get-Item D:\filework\integration-worktree\meta\.architecture.lock
+Get-Item D:\filework\worktrees/integration\meta\.architecture.lock
 
 # 2. 看 PID 是否还存活
-$pid = (Get-Content D:\filework\integration-worktree\meta\.architecture.lock -First 1)
+$pid = (Get-Content D:\filework\worktrees/integration\meta\.architecture.lock -First 1)
 Get-Process -Id $pid -ErrorAction SilentlyContinue
 
 # 3a. 死了 → 删锁重启 (waitress 自带清理, 但手动更快)
-Remove-Item D:\filework\integration-worktree\meta\.architecture.lock
+Remove-Item D:\filework\worktrees/integration\meta\.architecture.lock
 # 重启 integration
 
 # 3b. 还活着 → 那个 PID 是 integration, 别误杀! 看 PID 是否是 27460
@@ -383,7 +383,7 @@ Remove-Item D:\filework\integration-worktree\meta\.architecture.lock
 
 ```powershell
 # 一行查所有 (端口 + 进程 + 锁)
-Write-Output "=== 端口 ===" ; Get-NetTCPConnection -State Listen -LocalPort 3006,3007,3011,3018 -ErrorAction SilentlyContinue | Select-Object LocalPort, OwningProcess | Format-Table -AutoSize ; Write-Output "=== 进程 (uptime) ===" ; Get-NetTCPConnection -State Listen -LocalPort 3006,3007,3011,3018 -ErrorAction SilentlyContinue | ForEach-Object { Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue | Select-Object Id, ProcessName, StartTime, @{Name='Uptime_min';Expression={[Math]::Round(((Get-Date) - $_.StartTime).TotalMinutes,1)}} } | Format-Table -AutoSize ; Write-Output "=== DB ===" ; Get-ChildItem D:\filework\integration-worktree\meta\architecture.db, D:\filework\release-prep-worktree\meta\architecture.db | Select-Object FullName, @{Name='Size_MB';Expression={[Math]::Round($_.Length / 1MB, 1)}}, LastWriteTime | Format-Table -AutoSize ; Write-Output "=== 锁 ===" ; Get-ChildItem D:\filework\integration-worktree\meta\.architecture.lock, D:\filework\release-prep-worktree\meta\.architecture.lock -ErrorAction SilentlyContinue | Select-Object FullName, LastWriteTime | Format-Table -AutoSize
+Write-Output "=== 端口 ===" ; Get-NetTCPConnection -State Listen -LocalPort 3006,3007,3011,3018 -ErrorAction SilentlyContinue | Select-Object LocalPort, OwningProcess | Format-Table -AutoSize ; Write-Output "=== 进程 (uptime) ===" ; Get-NetTCPConnection -State Listen -LocalPort 3006,3007,3011,3018 -ErrorAction SilentlyContinue | ForEach-Object { Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue | Select-Object Id, ProcessName, StartTime, @{Name='Uptime_min';Expression={[Math]::Round(((Get-Date) - $_.StartTime).TotalMinutes,1)}} } | Format-Table -AutoSize ; Write-Output "=== DB ===" ; Get-ChildItem D:\filework\worktrees/integration\meta\architecture.db, D:\filework\worktrees/release-prep\meta\architecture.db | Select-Object FullName, @{Name='Size_MB';Expression={[Math]::Round($_.Length / 1MB, 1)}}, LastWriteTime | Format-Table -AutoSize ; Write-Output "=== 锁 ===" ; Get-ChildItem D:\filework\worktrees/integration\meta\.architecture.lock, D:\filework\worktrees/release-prep\meta\.architecture.lock -ErrorAction SilentlyContinue | Select-Object FullName, LastWriteTime | Format-Table -AutoSize
 ```
 
 **预期输出** (当前 snapshot, 截至 2026-07-04 11:30):
@@ -408,14 +408,14 @@ LocalPort OwningProcess
 === DB ===
 FullName                                                        Size_MB LastWriteTime
 --------                                                        ------- -------------
-D:\filework\integration-worktree\meta\architecture.db              234.7 2026/7/4 10:50:02
-D:\filework\release-prep-worktree\meta\architecture.db             246.0 2026/7/4 10:30:02
+D:\filework\worktrees/integration\meta\architecture.db              234.7 2026/7/4 10:50:02
+D:\filework\worktrees/release-prep\meta\architecture.db             246.0 2026/7/4 10:30:02
 
 === 锁 ===
 FullName                                                  LastWriteTime
 --------                                                  -------------
-D:\filework\integration-worktree\meta\.architecture.lock  2026/7/4 11:03:34
-D:\filework\release-prep-worktree\meta\.architecture.lock 2026/7/4 8:55:56
+D:\filework\worktrees/integration\meta\.architecture.lock  2026/7/4 11:03:34
+D:\filework\worktrees/release-prep\meta\.architecture.lock 2026/7/4 8:55:56
 ```
 
 > ⚠️ "snapshot_pid 时间" = 跑这命令的时间. **不是写文档时**.
@@ -423,10 +423,10 @@ D:\filework\release-prep-worktree\meta\.architecture.lock 2026/7/4 8:55:56
 #### 6.0.1 Git 同步状态查询
 
 ```bash
-cd D:\filework\integration-worktree
+cd D:\filework\worktrees/integration
 echo "=== integration branch ===" ; git branch --show-current
 echo "=== integration HEAD ===" ; git rev-parse HEAD
-echo "=== release HEAD ===" ; (cd D:\filework\release-prep-worktree ; git rev-parse HEAD)
+echo "=== release HEAD ===" ; (cd D:\filework\worktrees/release-prep ; git rev-parse HEAD)
 echo "=== 落后 release 几个 ===" ; git fetch . release/pre-2026-06-29:refs/heads/release-tmp ; git log --oneline integration/2026-07-04..release-tmp | Select-Object -First 10 ; git branch -D release-tmp 2>$null | Out-Null
 ```
 
@@ -533,11 +533,11 @@ Stop-Process -Id 27460 -Force
 Start-Sleep 3
 
 # 3. 重新 cp DB
-Copy-Item D:\filework\release-prep-worktree\meta\architecture.db D:\filework\integration-worktree\meta\architecture.db -Force
+Copy-Item D:\filework\worktrees/release-prep\meta\architecture.db D:\filework\worktrees/integration\meta\architecture.db -Force
 
 # 4. 重启 integration 3018
 $env:AGENT_PORT='3018'
-cd D:\filework\integration-worktree
+cd D:\filework\worktrees/integration
 Start-Process python.exe waitress_server.py
 ```
 
@@ -549,7 +549,7 @@ Start-Process python.exe waitress_server.py
 
 **修复**:
 ```bash
-Copy-Item D:\filework\release-prep-worktree\node_modules D:\filework\integration-worktree\node_modules -Recurse -Force
+Copy-Item D:\filework\worktrees/release-prep\node_modules D:\filework\worktrees/integration\node_modules -Recurse -Force
 ```
 
 ---
@@ -592,7 +592,7 @@ pwsh -File D:\filework\scripts\setup-integration.ps1 -Action reset   # 重置 (c
 ### 阶段 6 (协调主理): 批量 cherry-pick + 重启 3006
 
 ```powershell
-# 1. cd release-prep-worktree, git cherry-pick (按 depends_on 拓扑序)
+# 1. cd worktrees/release-prep, git cherry-pick (按 depends_on 拓扑序)
 # 2. npm run build (主前端)
 # 3. restart 主 3011 (需 Delete-Item .pyc)
 # 4. restart 主 3006
@@ -658,7 +658,7 @@ pwsh -File D:\filework\scripts\setup-integration.ps1 -Action reset   # 重置 (c
 | 文件 | 状态 | 责任人 |
 |------|------|--------|
 | `D:\filework\scripts\setup-integration.ps1` | ✅ 完成 | 协调主理, 开发辅助 |
-| `D:\filework\integration-worktree\` | ✅ 跑中 | 协调主理 |
+| `D:\filework\worktrees/integration\` | ✅ 跑中 | 协调主理 |
 | `D:\filework\INFRA_HANDOVER.md` (本文档, v2 已修 4 遗漏) | ✅ 本交接 | (双方共享) |
 | `D:\filework\excel-to-diagram\PARALLEL_DEV_SOP.md` v3.2 ⚠️ **实际路径** (不在 D:\filework 根目录) | ✅ 含 §1.1 约束 | (双方共享) |
 | `D:\filework\excel-to-diagram\DEPLOY_HANDOVER_BUG_V###.md` (待写) | ⏳ 下次 BUG 报告 | 协调主理 review |

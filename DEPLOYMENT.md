@@ -9,7 +9,7 @@
 ### 1.1 重建 `_deploy_bundle/`
 
 ```bash
-cd D:\filework\release-prep-worktree
+cd D:\filework\worktrees/release-prep
 python tools/rebuild_bundle.py
 ```
 
@@ -50,7 +50,7 @@ python tools/self_test.py                # 工具自检 (26 PASS)
 ### 2.2 MobaXterm SFTP 拖文件
 
 - MobaXterm → SFTP 标签
-- 左侧本地：`D:\filework\release-prep-worktree\_deploy_bundle\`
+- 左侧本地：`D:\filework\worktrees/release-prep\_deploy_bundle\`
 - 右侧远端：`/tmp/`
 - **拖整个 `_deploy_bundle/` 目录**（不是单个文件！）
 
@@ -231,7 +231,7 @@ bash /tmp/_deploy_bundle/deploy.sh --version v20260801_001 --port 5002
 | `/tmp/_deploy_bundle/` | 部署包（你 SFTP 上传的）|
 | `/etc/systemd/system/excel-backend.service` | systemd service |
 
-### 本地 (D:\filework\release-prep-worktree)
+### 本地 (D:\filework\worktrees/release-prep)
 
 | 路径 | 内容 |
 |------|------|

@@ -751,7 +751,7 @@ ssh root@172.20.59.7 "openssl version"
 ### 12.2 Step 1: 本地打包
 
 ```bash
-cd d:\filework\release-prep-worktree
+cd d:\filework\worktrees/release-prep
 bash scripts/build-deploy-package.sh
 # 输出: deploy-vYYYYMMDD_NNN.zip + DEPLOY-README-YYYYMMDD_NNN.txt
 ```
@@ -761,7 +761,7 @@ bash scripts/build-deploy-package.sh
 ### 12.3 Step 2: 上传到堡垒机
 
 ```bash
-scp d:\filework\release-prep-worktree\deploy-v*.zip root@172.20.59.7:/opt/app/
+scp d:\filework\worktrees/release-prep\deploy-v*.zip root@172.20.59.7:/opt/app/
 ```
 
 > **注意**：远程 OpenSSH 已升级到 10.3p1（2026-06），客户端需使用 ed25519 密钥。ssh-rsa 旧密钥可能失败。

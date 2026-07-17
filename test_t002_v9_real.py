@@ -16,7 +16,7 @@ import time
 import json
 import urllib.request
 import urllib.error
-sys.path.insert(0, r'D:\filework\integration-worktree')
+sys.path.insert(0, r'D:\filework\worktrees/integration')
 
 from test_helpers.browser_auth_cli import PlaywrightCLI
 
@@ -29,7 +29,7 @@ print(f"[1] 准备在浏览器内创建 product: {UNIQUE_NAME}")
 
 # ===== 步骤 2: 打开浏览器, 走完整 UI 流程 =====
 print("\n[2] 打开浏览器...")
-cli = PlaywrightCLI(screenshot_dir=r'D:\filework\integration-worktree\test_output\t002')
+cli = PlaywrightCLI(screenshot_dir=r'D:\filework\worktrees/integration\test_output\t002')
 
 # 2.1 dev-login in browser
 cli.goto('http://localhost:3018/api/v1/auth/dev-login?username=admin', wait_until='domcontentloaded')

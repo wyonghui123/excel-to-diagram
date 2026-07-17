@@ -26,7 +26,7 @@
 
 ```bash
 cd /tmp
-# 复制 upgrade_log_service.sh 全部内容 (从 d:\filework\integration-worktree\upgrade_log_service.sh)
+# 复制 upgrade_log_service.sh 全部内容 (从 d:\filework\worktrees/integration\upgrade_log_service.sh)
 # 然后执行:
 bash upgrade_log_service.sh
 ```
@@ -39,7 +39,7 @@ pkill -f log_service.py
 sleep 1
 
 # 2. 写 v2 (升级版 log_service, 加 /api/find + 接受全路径)
-# 从本地 d:\filework\integration-worktree\upgrade_log_service.sh 复制整个 cat > ... << LOG_SERVICE_EOF 块
+# 从本地 d:\filework\worktrees/integration\upgrade_log_service.sh 复制整个 cat > ... << LOG_SERVICE_EOF 块
 
 # 3. 启动
 nohup python3 /opt/app/deployments/log_service.py > /tmp/log_service.log 2>&1 &
@@ -103,7 +103,7 @@ curl -s 'http://localhost:9101/api/find?name=architecture.db&path=/opt'
 bash /tmp/upgrade_log_service.sh
 ```
 
-[upgrade_log_service.sh](file:///D:\filework\integration-worktree\upgrade_log_service.sh) 已在本地仓库 (完整可执行)。
+[upgrade_log_service.sh](file:///D:\filework\worktrees/integration\upgrade_log_service.sh) 已在本地仓库 (完整可执行)。
 
 ---
 

@@ -3,7 +3,7 @@
 One-click deploy bundle. SFTP to /tmp/ on remote.
 
 ## 瀹屾暣鏂囨。 (AI Agent 蹇呰)
-D:\filework\release-prep-worktree\DEPLOY_INFRASTRUCTURE.md
+D:\filework\worktrees/release-prep\DEPLOY_INFRASTRUCTURE.md
 
 ## 涓婁紶
 MobaXterm SFTP: drag deploy_bundle/ to /tmp/

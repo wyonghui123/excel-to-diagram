@@ -57,7 +57,7 @@
 - **🅰️ 你没在 3006 实际测试过管理维度** (只在 3007 / 生产测过)
 - **🅱️ 你测的 3006 浏览器没访问过管理维度 tab** (3006 是个老前端, 行为可能跟 3007 不一样)
 - **🅲️ 你测的 3006 角色没有管理维度数据** (admin 在 3006 也有 domain=[1,2] 所以这不太可能)
-- **🅳️ 缓存问题** — 3006 是老 release-prep-worktree, 浏览器/cookie 状态可能没刷新
+- **🅳️ 缓存问题** — 3006 是老 worktrees/release-prep, 浏览器/cookie 状态可能没刷新
 
 ---
 
@@ -319,7 +319,7 @@ except sqlite3.OperationalError as e:
 
 ```bash
 # 1. 4 端都跑 migration
-cd d:\filework\release-prep-worktree
+cd d:\filework\worktrees/release-prep
 sqlite3 meta/architecture.db < meta/migrations/V007_25_create_management_dimensions.sql
 sqlite3 meta/architecture.db "SELECT * FROM management_dimensions;"
 

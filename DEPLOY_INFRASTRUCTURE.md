@@ -131,7 +131,7 @@ deploy_bundle/
 ### Step 1: 本地 rebuild bundle
 
 ```bash
-cd D:\filework\release-prep-worktree
+cd D:\filework\worktrees/release-prep
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\rebuild_bundle.ps1
 ```
 
@@ -145,7 +145,7 @@ Get-ChildItem deploy_bundle\ -Filter "*.sh" | Select Name
 
 **MobaXterm SFTP 面板**:
 - 远端导航: `/tmp/`
-- 本地导航: `D:\filework\release-prep-worktree\deploy_bundle\`
+- 本地导航: `D:\filework\worktrees/release-prep\deploy_bundle\`
 - **拖** `deploy_bundle/` 覆盖到 `/tmp/`
 
 ### Step 3: 远端跑 deploy
@@ -206,7 +206,7 @@ bash /tmp/deploy_bundle/watch.sh --loop 30 --rollback-on-fail
 ### 本地 (Windows) - 快速验证
 
 ```bash
-cd D:\filework\release-prep-worktree
+cd D:\filework\worktrees/release-prep
 python tests/test_deploy_e2e.py    # 11/11 PASS (验证 10 工具 + 关键逻辑)
 ```
 

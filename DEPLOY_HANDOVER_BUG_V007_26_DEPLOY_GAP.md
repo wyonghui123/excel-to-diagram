@@ -45,7 +45,7 @@
 
 ## 2. 完整根因 — V007.24 部署断层
 
-### 2.1 release-prep-worktree 主分支状态
+### 2.1 worktrees/release-prep 主分支状态
 
 ```
 release/pre-2026-06-29:
@@ -64,9 +64,9 @@ release/pre-2026-06-29:
 | 位置 | 是否有 _data_source_cache |
 |------|--------------------------|
 | `release/pre-2026-06-29:meta/core/datasource.py` | ❌ **没有** (依然 V007.16 老版) |
-| `integration-worktree:meta/core/datasource.py` | ✅ 有 (V007.24 Phase 1) |
+| `worktrees/integration:meta/core/datasource.py` | ✅ 有 (V007.24 Phase 1) |
 
-**yonaa 部署的 `datasource.py` 跟 release-prep-worktree 一样, 都没有 V007.24 cache**!
+**yonaa 部署的 `datasource.py` 跟 worktrees/release-prep 一样, 都没有 V007.24 cache**!
 
 ### 2.3 部署断层时间线
 
@@ -74,7 +74,7 @@ release/pre-2026-06-29:
 2026-07-07 06:00  V007.16 部署 (修 disk I/O)
 2026-07-07 08:21  V007.21 8:20 IO error (V007.16 已修)
 2026-07-07 09:25  V007.22 重新启动 server.py
-2026-07-07 14:25  V007.24 Phase 1 commit (in integration-worktree)
+2026-07-07 14:25  V007.24 Phase 1 commit (in worktrees/integration)
 2026-07-07 14:30  V007.25 P0 (admin dim scope) 修复 yonaa db
 2026-07-07 14:30  ❌ V007.24 未 cherry-pick 到 release/pre-2026-06-29
 2026-07-07 14:30  ❌ V007.24 未部署到 yonaa
@@ -85,7 +85,7 @@ release/pre-2026-06-29:
 
 | Layer | 真因 | 证据 |
 |-------|------|------|
-| **A** | V007.24 Phase 1 `93b6381` 在 integration-worktree, **未 cherry-pick** 到 release/pre-2026-06-29 | `git merge-base --is-ancestor` 返回 False |
+| **A** | V007.24 Phase 1 `93b6381` 在 worktrees/integration, **未 cherry-pick** 到 release/pre-2026-06-29 | `git merge-base --is-ancestor` 返回 False |
 | **B** | 即使 commit 存在, **打包 zip 时被漏掉**, 因为 release/pre-2026-06-29 没有这个 commit | `rebuild_zip.py` 只打包所在分支的 HEAD |
 | **C** | yonaa 端仍然跑老的 lazy init 模式 (30+ 文件 `_data_source = None`), 每次 v2 BOAction 创建新 pool | 自 V007.21 以来这个 lazy init 模式没修过 |
 
@@ -140,12 +140,12 @@ sudo systemctl restart excel-backend
 
 **效果**: 清掉当前 stale fd 持有者, 但**只能缓解, 根因还在**。
 
-### Step 2: 1-2h — Cherry-pick V007.24 Phase 1 到 release-prep-worktree
+### Step 2: 1-2h — Cherry-pick V007.24 Phase 1 到 worktrees/release-prep
 
-**在 integration-worktree cherry-pick 到 release-prep-worktree**:
+**在 worktrees/integration cherry-pick 到 worktrees/release-prep**:
 
 ```bash
-cd d:/filework/release-prep-worktree
+cd d:/filework/worktrees/release-prep
 
 # 1. 切换到 release/pre-2026-06-29
 git checkout release/pre-2026-06-29
@@ -166,7 +166,7 @@ python -m pytest meta/tests/test_datasource_cache.py -v
 ### Step 3: 0.5h — 重新打包 deploy_bundle
 
 ```bash
-cd d:/filework/release-prep-worktree/tools
+cd d:/filework/worktrees/release-prep/tools
 python rebuild_zip.py
 # 自动 dry-run (强制, V007.25 修复过)
 ```
@@ -227,7 +227,7 @@ def verify_v14_datasource_cache():
 
 ### 6.2 紧急修复 (2-4h)
 
-1. **cherry-pick `93b6381` 到 release-prep-worktree** — Step 2
+1. **cherry-pick `93b6381` 到 worktrees/release-prep** — Step 2
 2. **重新打包 deploy_bundle** — Step 3
 3. **部署到 yonaa** — Step 4
 4. **验证 V007.24 生效** — Step 4 末
@@ -242,7 +242,7 @@ def verify_v14_datasource_cache():
 
 - ❌ 不要回滚 V007.25 P0 (admin dim scope 修复是对的)
 - ❌ 不要重新部署 V007.16 (老版本, 已修过)
-- ❌ 不要改 release-prep-worktree 的 deploy.sh (V007.25 已经加固过了)
+- ❌ 不要改 worktrees/release-prep 的 deploy.sh (V007.25 已经加固过了)
 
 ---
 
@@ -252,8 +252,8 @@ def verify_v14_datasource_cache():
 |------|------|------|
 | `release/pre-2026-06-29:meta/core/datasource.py` | cherry-pick V007.24 Phase 1 | 1-2h |
 | `release/pre-2026-06-29:meta/core/observability.py` | 加 v007_24_pool_init_count | 1-2h |
-| `release-prep-worktree/tools/verify_bundle.py` | 加 V14 invariant | 0.5h |
-| `release-prep-worktree/deploy-v*.zip` | 重新打包 | 0.5h |
+| `worktrees/release-prep/tools/verify_bundle.py` | 加 V14 invariant | 0.5h |
+| `worktrees/release-prep/deploy-v*.zip` | 重新打包 | 0.5h |
 | yonaa `/opt/app/deployments/meta/` | 重新部署 | 1-2h |
 
 **总计**: 4-6h (半天)
@@ -269,26 +269,26 @@ def verify_v14_datasource_cache():
 > "可立即部署"
 > "建议: 先在 yonaa 部署 V007.21, 观察效果。如果 init 数 ≤ 3, 不需要 Phase 2-4"
 
-但我**没强调**: **V007.24 必须 cherry-pick 到 release-prep-worktree 然后才能部署到 yonaa**!
+但我**没强调**: **V007.24 必须 cherry-pick 到 worktrees/release-prep 然后才能部署到 yonaa**!
 
-这是我的失职。我之前以为 yonaa 会自动 cherry-pick, 实际上 yonaa 是从 `release-prep-worktree` 部署, 而 V007.24 commit `93b6381` 只在 `integration-worktree` 主分支上!
+这是我的失职。我之前以为 yonaa 会自动 cherry-pick, 实际上 yonaa 是从 `worktrees/release-prep` 部署, 而 V007.24 commit `93b6381` 只在 `worktrees/integration` 主分支上!
 
 ### 8.2 给协调智能体的建议
 
-1. **永远确认 commit 在 release-prep-worktree 主分支上** 才能部署
+1. **永远确认 commit 在 worktrees/release-prep 主分支上** 才能部署
 2. **永远 verify zip 内的代码 md5 跟 HEAD 一致** 才能部署
 3. **永远 SSH yonaa 验证修复生效** (不能相信本机)
 
 ### 8.3 给未来 dev-agent 的建议
 
-1. **永远跟踪 release-prep-worktree 主分支历史**, 不只是 integration-worktree
+1. **永远跟踪 worktrees/release-prep 主分支历史**, 不只是 worktrees/integration
 2. **永远先 cherry-pick 再打包再部署**, 而不是先 commit 再部署
 
 ---
 
 ## 9. 完整 git 历史状态
 
-### 9.1 release-prep-worktree (主分支 release/pre-2026-06-29) ❌
+### 9.1 worktrees/release-prep (主分支 release/pre-2026-06-29) ❌
 
 ```
 630df25 fix(infra): V007.25 完整部署保障 (14:44 修复 + 6 层防护)  ← HEAD
@@ -298,7 +298,7 @@ def verify_v14_datasource_cache():
 # 没有 V007.24 commit
 ```
 
-### 9.2 integration-worktree ✅
+### 9.2 worktrees/integration ✅
 
 ```
 93b6381 fix(v007.24-phase1): DataSource 缓存 + metric 上报 ← V007.24 在这里
@@ -311,7 +311,7 @@ ba08f31 docs(handover): V007.25 角色管理维度为空 - 第 3 次真因
 9a7928a docs(handover): V007.21 production event
 ```
 
-**V007.24 在 integration-worktree, 不在 release-prep-worktree**!
+**V007.24 在 worktrees/integration, 不在 worktrees/release-prep**!
 
 ---
 
@@ -321,7 +321,7 @@ ba08f31 docs(handover): V007.25 角色管理维度为空 - 第 3 次真因
 - SSH yonaa 重启 server.py, 临时缓解当前 IO error
 
 ### 优先级 P1 (1-2h):
-- cherry-pick V007.24 `93b6381` + `78d2636` 到 release-prep-worktree
+- cherry-pick V007.24 `93b6381` + `78d2636` 到 worktrees/release-prep
 
 ### 优先级 P2 (0.5h):
 - 重新打包 deploy_bundle (rebuild_zip.py)
@@ -338,7 +338,7 @@ ba08f31 docs(handover): V007.25 角色管理维度为空 - 第 3 次真因
 
 ## 11. 完整文件清单
 
-### 11.1 需要 cherry-pick 到 release-prep-worktree
+### 11.1 需要 cherry-pick 到 worktrees/release-prep
 
 | commit | 内容 |
 |--------|------|
@@ -351,7 +351,7 @@ release/pre-2026-06-29 上的 `datasource.py` (V007.16 后期):
 - L112 "其他参数" (跟 3006 一样)
 - 不含 `_data_source_cache`
 
-integration-worktree 上的 `datasource.py` (V007.24 Phase 1):
+worktrees/integration 上的 `datasource.py` (V007.24 Phase 1):
 - L112 "其他参数" (跟 3006 一样)
 - 含 `_data_source_cache` (新增)
 
