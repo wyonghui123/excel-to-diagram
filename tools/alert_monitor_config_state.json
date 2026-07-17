@@ -2,16 +2,16 @@
   "failed_keys": [],
   "last_alert_ts": 1784202001.5980022,
   "check_last_run": {
-    "real_health": 1784260801.8678517,
-    "db_can_write": 1784260801.8678517,
-    "journal_err": 1784260801.8678517,
-    "backend_err": 1784260801.8678517,
-    "core_service_err": 1784260801.8678517,
-    "db_health": 1784260801.8678517,
-    "disk_errors": 1784260801.8678517,
-    "disk_check": 1784260501.787439,
-    "disk_usage": 1784260501.787439
+    "real_health": 1784262301.6345294,
+    "db_can_write": 1784262301.6345294,
+    "journal_err": 1784262301.6345294,
+    "backend_err": 1784262301.6345294,
+    "core_service_err": 1784262301.6345294,
+    "db_health": 1784261941.7588043,
+    "disk_errors": 1784261941.7588043,
+    "disk_check": 1784261941.7588043,
+    "disk_usage": 1784261941.7588043
   },
   "check_last_fail": {},
-  "last_heartbeat_ts": 1784259902.0435016
+  "last_heartbeat_ts": 1784261961.7585359
 }

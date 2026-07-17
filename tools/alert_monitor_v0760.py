@@ -628,6 +628,8 @@ def run_once_v0760(cfg, state_path, force=False):
         save_v0760_state(state, state_path)
         _send_heartbeat(cfg, state, all_results, state_path)
         log('  [OK] 全部健康')
+        # V007.86f Layer 1: every-run heartbeat in log (for check_alert_monitor_health.py)
+        log(f'  [HEARTBEAT-V00786F] v00786g check_id={int(time.time())} ok={len(all_results)-sum(1 for r in all_results if not r.get("ok"))}/{len(all_results)}')
         return 0
 
 

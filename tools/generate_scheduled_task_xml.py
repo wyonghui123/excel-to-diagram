@@ -183,6 +183,11 @@ V007.86d 用法:
                         help='Start boundary in ISO format (default: now + 1 min)')
     parser.add_argument('--output', required=True,
                         help='Output XML file path')
+    parser.add_argument('--python', default=None,
+                        help='Python interpreter (e.g. pythonw.exe). If set, '
+                             'uses pythonw + script + args (V007.86e style, no .bat)')
+    parser.add_argument('--script-args', default='',
+                        help='Script arguments (e.g. --check-now --log-file foo.log)')
 
     args = parser.parse_args()
 
@@ -204,9 +209,10 @@ V007.86d 用法:
     if not os.path.exists(args.script):
         print(f'[FAIL] Script not found: {args.script}')
         sys.exit(2)
-    if not args.script.lower().endswith('.bat'):
+    if not args.python and not args.script.lower().endswith('.bat'):
         print(f'[WARN] Script is not .bat (V007.86d best practice: use .bat wrapper)')
         print(f'       (Reason: v0760.py needs --check-now, .bat wrapper provides it)')
+        print(f'       (V007.86e best practice: use --python pythonw.exe + --script-args)')
 
     # Verify workdir exists
     if not os.path.isdir(args.workdir):
@@ -214,15 +220,84 @@ V007.86d 用法:
         sys.exit(2)
 
     # Generate
-    xml_content = generate_xml(
-        task_name=args.task_name,
-        script_bat=args.script,
-        description=args.description,
-        workdir=args.workdir,
-        user_sid=args.user_sid,
-        interval_min=args.interval_min,
-        start_boundary=args.start_boundary,
-    )
+    if args.python:
+        # V007.86e style: pythonw + script + args (no .bat, no cmd window)
+        arguments = f'"{args.script}"'
+        if args.script_args:
+            arguments += f' {args.script_args}'
+        # Compute start_boundary
+        if args.start_boundary:
+            start_boundary_str = args.start_boundary
+        else:
+            import datetime as _dt
+            _now = _dt.datetime.now() + _dt.timedelta(minutes=1)
+            start_boundary_str = _now.strftime('%Y-%m-%dT%H:%M:%S')
+        # Override script_bat with pythonw.exe, build XML with separate Command + Arguments
+        xml_content = f'''<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Author>yonaa_admin</Author>
+    <Description>{args.description}</Description>
+    <URI>{args.task_name}</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <CalendarTrigger>
+      <Repetition>
+        <Interval>PT{args.interval_min}M</Interval>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
+      <StartBoundary>{start_boundary_str}</StartBoundary>
+      <Enabled>true</Enabled>
+      <ScheduleByDay>
+        <DaysInterval>1</DaysInterval>
+      </ScheduleByDay>
+    </CalendarTrigger>
+  </Triggers>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>true</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT10M</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>{args.python}</Command>
+      <Arguments>{arguments}</Arguments>
+      <WorkingDirectory>{args.workdir}</WorkingDirectory>
+    </Exec>
+  </Actions>
+  <Principals>
+    <Principal id="Author">
+      <UserId>{args.user_sid}</UserId>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+</Task>
+'''
+    else:
+        # V007.86d style: .bat wrapper
+        xml_content = generate_xml(
+            task_name=args.task_name,
+            script_bat=args.script,
+            description=args.description,
+            workdir=args.workdir,
+            user_sid=args.user_sid,
+            interval_min=args.interval_min,
+            start_boundary=None,  # use default in generate_xml
+        )
 
     # Write
     output_path = Path(args.output)
@@ -247,6 +322,8 @@ V007.86d 用法:
     print()
     print(f'[OK] XML written: {output_path} ({bytes_written} bytes)')
     print()
+    if args.python:
+        print('V007.86e style: pythonw.exe direct, NO .bat wrapper, NO cmd window')
     print('Next step:')
     print(f'  schtasks /Create /TN "{args.task_name}" /XML "{output_path}" /F')
 
