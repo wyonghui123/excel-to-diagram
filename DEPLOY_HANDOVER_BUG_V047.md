@@ -172,7 +172,7 @@ release/pre-2026-06-29 HEAD: ae9194a (V046 only, V047 待 cherry-pick)
 
 ```bash
 # 如果新 BUG，回滚 integration 到 c8f2ca1 之前
-cd D:\filework\integration-worktree
+cd D:\filework\worktrees/integration
 git reset --hard 79d965e   # V046 fix
 # 注意：V047 修复会被丢弃，需要重新 fix
 ```
@@ -184,7 +184,7 @@ git reset --hard 79d965e   # V046 fix
 ### 8.1 Cherry-pick 到 release
 
 ```bash
-cd D:\filework\release-prep-worktree
+cd D:\filework\worktrees/release-prep
 git fetch origin
 git cherry-pick c8f2ca1
 # 期望：spec.md 可能冲突（integration spec.md 包含 V046/V047），按 Git 自动解决或手动
@@ -195,7 +195,7 @@ git cherry-pick c8f2ca1
 ```bash
 # 1. 杀旧 main 进程（端口 3011）
 # 2. 重启
-cd D:\filework\release-prep-worktree
+cd D:\filework\worktrees/release-prep
 python -m meta.server --port 3011
 ```
 

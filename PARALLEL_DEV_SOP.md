@@ -44,11 +44,11 @@
 | **C4** | **HMR 端口冲突 (默认 24678)** | `--strictPort` + 不同端口, 不会冲突 |
 
 **integration worktree 准备清单 (协调智能体, 阶段 4 前必做)**:
-1. 创建 `D:/filework/integration-worktree` (git worktree, 独立目录)
+1. 创建 `D:/filework/worktrees/integration` (git worktree, 独立目录)
 2. 修改 `vite.config.js`: `server.port = 3007` + `proxy /api → 3018` + `proxy /socket.io → 3018`
-3. `cp D:/filework/release-prep-worktree/meta/architecture.db D:/filework/integration-worktree/meta/architecture.db`
-4. 启 integration 后端: `AGENT_PORT=3018 python waitress_server.py` (cwd=integration-worktree)
-5. 启 integration 前端: `npx vite dev --port 3007` (cwd=integration-worktree)
+3. `cp D:/filework/worktrees/release-prep/meta/architecture.db D:/filework/worktrees/integration/meta/architecture.db`
+4. 启 integration 后端: `AGENT_PORT=3018 python waitress_server.py` (cwd=worktrees/integration)
+5. 启 integration 前端: `npx vite dev --port 3007` (cwd=worktrees/integration)
 6. 验证: `curl http://localhost:3018/api/v1/health` + `curl http://localhost:3007` (代理到 3018)
 
 ---
@@ -58,7 +58,7 @@
 | 资源 | 拥有者 | 用户访问 |
 |------|--------|----------|
 | `D:\filework\excel-to-diagram\` (feat 分支) | Agent (R/W) | 0 |
-| `D:\filework\release-prep-worktree\` (release) | 协调智能体 (R/W) | 0 |
+| `D:\filework\worktrees/release-prep\` (release) | 协调智能体 (R/W) | 0 |
 | 主 release DB | 协调智能体 (R/W) | 间接 |
 | 主 3006 vite preview | 协调智能体 (R/W) | **用户** |
 | 主 3011 waitress_server.py | 协调智能体 (R/W) | 间接 |
@@ -294,16 +294,16 @@
 
 ```bash
 # 阶段 4a: 启 integration worktree + 3007/3018
-cd D:\filework\integration-worktree
+cd D:\filework\worktrees/integration
 git fetch origin   # 拉所有分支
 # (Agent 阶段 4A 各自 cherry-pick)
 
 # 阶段 4b: 启动 integration 服务
-Start-Process node.exe -ArgumentList "npx vite preview --port 3007" -WorkingDirectory "D:\filework\integration-worktree\frontend" -PassThru
-Start-Process python.exe -ArgumentList "waitress_server.py --port 3018" -WorkingDirectory "D:\filework\integration-worktree" -PassThru
+Start-Process node.exe -ArgumentList "npx vite preview --port 3007" -WorkingDirectory "D:\filework\worktrees/integration\frontend" -PassThru
+Start-Process python.exe -ArgumentList "waitress_server.py --port 3018" -WorkingDirectory "D:\filework\worktrees/integration" -PassThru
 
 # 阶段 4c: 拷贝 release DB → integration DB
-cp D:\filework\release-prep-worktree\meta\architecture.db D:\filework\integration-worktree\meta\architecture.db
+cp D:\filework\worktrees/release-prep\meta\architecture.db D:\filework\worktrees/integration\meta\architecture.db
 
 # 阶段 4d: 通知 Agent: integration ready
 echo "V### integration ready at http://localhost:3007 (Agent 自治 cherry-pick)" >> D:\filework\excel-to-diagram\DEPLOY_HANDOVER_BUG_V###.md
@@ -313,7 +313,7 @@ echo "V### integration ready at http://localhost:3007 (Agent 自治 cherry-pick)
 
 ```bash
 # Agent 阶段 4A: 自治 cherry-pick 到 integration
-cd D:\filework\integration-worktree
+cd D:\filework\worktrees/integration
 git fetch origin feat/annotation-category-filter
 git checkout -b integration-tmp origin/feat/annotation-category-filter
 git cherry-pick <feat-sha-A>
@@ -352,7 +352,7 @@ echo "E2E: PASS (5A-a 单独, 5A-b 兼容)" >> D:\filework\excel-to-diagram\DEPL
 # (后续如需要可加严, 见 R14)
 
 # 阶段 6b: 批量 cherry-pick (按 depends_on 拓扑序)
-cd D:\filework\release-prep-worktree
+cd D:\filework\worktrees/release-prep
 git cherry-pick <feat-sha-A> <feat-sha-B> ...   # 一次多个
 
 # 阶段 6c: 批量 restart

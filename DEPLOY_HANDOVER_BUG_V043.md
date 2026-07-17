@@ -97,8 +97,8 @@ def _is_production():
 
 | 文件 | FLASK_DEBUG | FLASK_ENV | FLASK_PRODUCTION |
 |------|-------------|-----------|------------------|
-| `release-prep-worktree/.env` | `true` | (空) | (空) |
-| `integration-worktree/.env` | `true` | (空) | (空) |
+| `worktrees/release-prep/.env` | `true` | (空) | (空) |
+| `worktrees/integration/.env` | `true` | (空) | (空) |
 
 **两者 .env 一致**, 但 integration 3018 工作, 主 3011 失败。**说明问题是主 3011 启动时被**父进程 env 覆盖**, 或 service_manager.ps1 启停脚本设了别的**。
 
@@ -126,14 +126,14 @@ public class ProcEnv {
 ```
 
 **或者** (更简单):
-- 看 `release-prep-worktree/meta/api/auth_api.py:188` 调用 `_is_production()` 时实际值
+- 看 `worktrees/release-prep/meta/api/auth_api.py:188` 调用 `_is_production()` 时实际值
 - 在 `_is_production()` 加 print 调试, 然后重启主 3011
 
 ### 3.2 看 service_manager.ps1 / start_be 脚本
 
 ```bash
-grep -E 'FLASK_PRODUCTION|FLASK_ENV' D:\filework\release-prep-worktree\start*.ps1
-grep -E 'FLASK_PRODUCTION|FLASK_ENV' D:\filework\release-prep-worktree\scripts\service_manager.ps1  # or similar
+grep -E 'FLASK_PRODUCTION|FLASK_ENV' D:\filework\worktrees/release-prep\start*.ps1
+grep -E 'FLASK_PRODUCTION|FLASK_ENV' D:\filework\worktrees/release-prep\scripts\service_manager.ps1  # or similar
 ```
 
 **期望**: 找到 `FLASK_PRODUCTION=true` 或 `FLASK_ENV=production` 在某个地方被设了
@@ -165,7 +165,7 @@ integration 3018 是用 `Start-Process python.exe` 启的 (我的脚本), 没有
 # 协调智能体重启主 3011, 设正确的 env
 $env:FLASK_PRODUCTION='false'
 $env:FLASK_ENV='development'
-Start-Process -FilePath 'python.exe' -ArgumentList 'waitress_server.py' -WorkingDirectory 'D:\filework\release-prep-worktree' -RedirectStandardOutput 'main_3011_stdout.log' -RedirectStandardError 'main_3011_stderr.log' -PassThru
+Start-Process -FilePath 'python.exe' -ArgumentList 'waitress_server.py' -WorkingDirectory 'D:\filework\worktrees/release-prep' -RedirectStandardOutput 'main_3011_stdout.log' -RedirectStandardError 'main_3011_stderr.log' -PassThru
 ```
 
 ### 4.2 长期 (修 service_manager.ps1)
@@ -188,7 +188,7 @@ curl.exe -X GET "http://localhost:3011/api/v1/auth/dev-login?username=admin"
 
 **协调智能体采用 永久方案 C**:
 
-**改动 1**: `release-prep-worktree/waitress_server.py:45`
+**改动 1**: `worktrees/release-prep/waitress_server.py:45`
 ```python
 # before
 load_dotenv(_env_path)
@@ -196,13 +196,13 @@ load_dotenv(_env_path)
 load_dotenv(_env_path, override=True)  # 强制覆盖父进程 env
 ```
 
-**改动 2**: `release-prep-worktree/.env.example` (仓库 tracked)
+**改动 2**: `worktrees/release-prep/.env.example` (仓库 tracked)
 ```
 FLASK_ENV=development
 FLASK_PRODUCTION=false
 ```
 
-**改动 3**: `release-prep-worktree/.env` (本地, 不在 git)
+**改动 3**: `worktrees/release-prep/.env` (本地, 不在 git)
 ```
 FLASK_ENV=development
 FLASK_PRODUCTION=false
@@ -215,7 +215,7 @@ FLASK_PRODUCTION=false
 - 修复后: GET /api/v1/auth/dev-login?username=admin → **200** + admin user data ✅
 
 **commit**: `8225c33 fix(be): V043 dev-login 500 root cause + permanent fix`
-- 已 commit 到 release-prep-worktree (领先 origin 1 commit, push 网络阻塞)
+- 已 commit 到 worktrees/release-prep (领先 origin 1 commit, push 网络阻塞)
 
 ---
 
@@ -350,7 +350,7 @@ fix(be): V043 dev-login 500 root cause + permanent fix
 
 ## 9. ⚠️ 待推送 (网络阻塞)
 
-- commit `8225c33` 已 commit 到 release-prep-worktree 本地
+- commit `8225c33` 已 commit 到 worktrees/release-prep 本地
 - **push 失败**:`Failed to connect to github.com port 443` (网络问题, 非配置问题)
 - 影响:远程开发者拉取不到 V043 修复
 - 缓解:PM 协调智能体后续重试 push

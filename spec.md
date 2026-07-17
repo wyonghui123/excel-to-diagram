@@ -2,7 +2,7 @@
 
 > **Task ID**: T-2026-07-15-coord-staging
 > **Agent**: coordinator (PMAgent 临时维护)
-> **Worktree**: `D:\filework\worktree-V061-staging`
+> **Worktree**: `D:\filework\worktrees/agent-v061-staging`
 > **Branch**: `agent/v061-staging`
 > **基于 commit**: `d2c8bcd` (main HEAD feat/annotation-category-filter)
 > **风险等级**: low (仅文档 + 测试, 无生产代码)
@@ -22,7 +22,7 @@ dev agent 工件从主仓库搬到独立 worktree commit, 避免触发 L2 铁律
 
 ## 1. 任务描述
 
-> 把主仓库 untracked 的 11 个 dev agent 工件收集到 worktree-V061-staging 单 commit.
+> 把主仓库 untracked 的 11 个 dev agent 工件收集到 worktrees/agent-v061-staging 单 commit.
 
 ---
 
@@ -87,7 +87,7 @@ modules: docs (10) + tests (1)
 
 decisions:
   - 2026-07-15 20:30: 跳过 V043.md 因 GBK mojibake, 其余 11 文件一次 commit
-  - 2026-07-15 20:35: 用 worktree-V061-staging 避 L2 铁律
+  - 2026-07-15 20:35: 用 worktrees/agent-v061-staging 避 L2 铁律
 
 blockers:
   - 2026-07-15 20:35: pre-commit v3.1 Gate 7 spec.md 白名单拦截, hook 解析行尾注释导致 whitelist 包含 # xxx, 已重写 spec.md 去掉行尾注释

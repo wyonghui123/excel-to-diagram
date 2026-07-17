@@ -191,7 +191,7 @@ NOT (object_id != :self_id AND object_type IN (:excluded_types))
 | 改文件 | 9 (3 yaml + 2 后端 + 3 前端 + 1 spec) |
 | 改行数 | +111, -1 |
 
-### 6.2 integration-worktree
+### 6.2 worktrees/integration
 
 | 项 | 值 |
 |----|-----|
@@ -200,7 +200,7 @@ NOT (object_id != :self_id AND object_type IN (:excluded_types))
 | 改文件 | 9 (含 spec.md 冲突解决) |
 | 改行数 | +114, -1 |
 
-### 6.3 release-prep-worktree
+### 6.3 worktrees/release-prep
 
 | 项 | 值 |
 |----|-----|
@@ -223,7 +223,7 @@ NOT (object_id != :self_id AND object_type IN (:excluded_types))
 
 ### 7.1 协调智能体责任
 
-- [ ] 在 release-prep-worktree cherry-pick 5bddf25
+- [ ] 在 worktrees/release-prep cherry-pick 5bddf25
 - [ ] 重启主 3011
 - [ ] 主 3011 真实 e2e: domain / sub_domain / service_module / product 详情页
   - 期望: 领域详情页"操作日志" tab 显示 5 自身 + 12 annotation (domain 683 case)

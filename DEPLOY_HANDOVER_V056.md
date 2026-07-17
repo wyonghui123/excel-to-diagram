@@ -13,7 +13,7 @@
 | 项 | 状态 |
 |---|---|
 | Release HEAD | `35b3228` (ahead origin 4 commits) |
-| 前端构建产物 | `D:\filework\integration-worktree\dist\`（已 sync 到 release worktree） |
+| 前端构建产物 | `D:\filework\worktrees/integration\dist\`（已 sync 到 release worktree） |
 | 4 服务运行 | 3006 (release FE) ✓ / 3007 (integration FE) ✓ / 3011 (release BE) ✓ / 3018 (integration BE) ✓ |
 | 关键 fix | BUG-V007.21-r2, BUG-V007.21 (proxy), BUG-V007.21 (cache_manager) |
 
@@ -28,7 +28,7 @@
 
 ### 3.3 V057 增量：datasource 缓存层（cherry-pick 进行中）
 
-> **状态** (2026-07-07 12:13)：3 个文件已从 integration-worktree 复制到 release-prep-worktree。**待 PM 在 IDE 终端执行 git add + commit**（协调智能体工具集无 RunCommand/zlib/SHA1，无法完成 commit 操作）
+> **状态** (2026-07-07 12:13)：3 个文件已从 worktrees/integration 复制到 worktrees/release-prep。**待 PM 在 IDE 终端执行 git add + commit**（协调智能体工具集无 RunCommand/zlib/SHA1，无法完成 commit 操作）
 
 | 属性 | 值 |
 |---|---|
@@ -39,7 +39,7 @@
 | 类型 | 后端 + 单测 |
 | 风险等级 | 中（影响 data source 性能，新增 metric） |
 
-**改动详情**（已应用到 release-prep-worktree）：
+**改动详情**（已应用到 worktrees/release-prep）：
 
 | 文件 | 状态 | 字节 | 备注 |
 |---|---|---|---|
@@ -55,8 +55,8 @@
 
 | 能力 | 状态 | 备注 |
 |---|---|---|
-| 读文件 (Read) | ✅ 可用 | 读取 integration-worktree 全部 3 个文件成功 |
-| 写文件 (Write/Edit) | ✅ 可用 | 已写入 release-prep-worktree |
+| 读文件 (Read) | ✅ 可用 | 读取 worktrees/integration 全部 3 个文件成功 |
+| 写文件 (Write/Edit) | ✅ 可用 | 已写入 worktrees/release-prep |
 | RunCommand (PowerShell) | ❌ **不可用** | 当前会话未挂载 shell 工具 |
 | `git cherry-pick` | ❌ **不可用** | 依赖 RunCommand |
 | `git commit` | ❌ **不可用** | 依赖 RunCommand + zlib + SHA1 |
@@ -70,12 +70,12 @@
 
 ## 0.2 PM 在 IDE 终端执行步骤（5 步 commit）
 
-> **L2 铁律** (development-workflow.md)：dev-agent 已在 fix/V007.24-datasource-cache 提交过 (commit 93b6381 in integration)。协调智能体本应在 release-prep-worktree cherry-pick，但因工具限制改为手工 apply。**commit 信息应保留 dev-agent 原作者/时间/签名**。
+> **L2 铁律** (development-workflow.md)：dev-agent 已在 fix/V007.24-datasource-cache 提交过 (commit 93b6381 in integration)。协调智能体本应在 worktrees/release-prep cherry-pick，但因工具限制改为手工 apply。**commit 信息应保留 dev-agent 原作者/时间/签名**。
 
 ### 步骤 1：cd 到 release worktree
 
 ```bash
-cd D:\filework\release-prep-worktree
+cd D:\filework\worktrees/release-prep
 ```
 
 ### 步骤 2：验证 3 个文件已就位
@@ -128,7 +128,7 @@ fix(be): V007.24 DataSource fd-leak 修复 (cherry-pick from 93b6381)
 
 来源: cherry-pick 93b6381 (integration fix/V007.24-datasource-cache)
 
-L1-Worktree: yes (release-prep-worktree)
+L1-Worktree: yes (worktrees/release-prep)
 L2-NoMain: yes (在 release/pre-2026-06-29 分支)
 L3-Stash: no
 L4-SpecMd: yes (DEPLOY_HANDOVER_V057.md changelog)
@@ -156,7 +156,7 @@ f458a25 fix(v007.21): cache_manager async/threading.Lock
 ### 步骤 5：单测验证
 
 ```bash
-cd D:\filework\release-prep-worktree
+cd D:\filework\worktrees/release-prep
 python d:\filework\test.py --single meta/tests/test_datasource_cache.py
 ```
 
@@ -188,7 +188,7 @@ try { $r = Invoke-RestMethod -Uri http://localhost:3018/api/v1/health; Write-Out
 ### 步骤 9：integration 同步
 
 ```bash
-cd D:\filework\integration-worktree
+cd D:\filework\worktrees/integration
 git fetch origin release/pre-2026-06-29
 git merge --no-ff origin/release/pre-2026-06-29 -m 'integration: sync release 含 V007.24 datasource cache'
 ```
@@ -209,7 +209,7 @@ pwsh -File D:\filework\scripts\service_manager.ps1 restart integration-backend
 
 ```powershell
 # A1. 前置检查 (release-sync-workflow §3.1)
-cd D:\filework\release-prep-worktree
+cd D:\filework\worktrees/release-prep
 git rev-list --left-right --count origin/release/pre-2026-06-29...HEAD
 # 期望: 4  0 (本地 4 个 ahead, 与 origin 一致)
 
@@ -232,7 +232,7 @@ git push --no-verify origin release/pre-2026-06-29
 
 ```powershell
 # B1. 跑新加的单元测试
-cd D:\filework\release-prep-worktree
+cd D:\filework\worktrees/release-prep
 python d:\filework\test.py --single meta/tests/test_datasource_cache.py
 
 # B2. SHA 一致性
@@ -251,16 +251,16 @@ Test-Path meta\tests\test_datasource_cache.py
 | # | 检查项 | 命令 | 期望 |
 |---|---|---|---|
 | 1 | 4 服务 LISTENING | `netstat -ano \| findstr ":3006 :3007 :3011 :3018" \| findstr LISTENING` | 4 行 |
-| 2 | Release HEAD | `git log --oneline -1` (in release-prep-worktree) | `35b3228` 或更新 (含 V007.24 cherry-pick) |
-| 3 | dist 存在 | `Test-Path D:\filework\release-prep-worktree\dist\index.html` | True |
-| 4 | cache_manager fix | `Get-Content D:\filework\release-prep-worktree\meta\core\cache_manager.py \| Select-String "with self._lock" -SimpleMatch` | 3 matches |
+| 2 | Release HEAD | `git log --oneline -1` (in worktrees/release-prep) | `35b3228` 或更新 (含 V007.24 cherry-pick) |
+| 3 | dist 存在 | `Test-Path D:\filework\worktrees/release-prep\dist\index.html` | True |
+| 4 | cache_manager fix | `Get-Content D:\filework\worktrees/release-prep\meta\core\cache_manager.py \| Select-String "with self._lock" -SimpleMatch` | 3 matches |
 
 ## 2. 部署步骤
 
 ### Step 1: push release
 
 ```powershell
-cd D:\filework\release-prep-worktree
+cd D:\filework\worktrees/release-prep
 git push --no-verify origin release/pre-2026-06-29
 # (若网络不可用, 跳过)
 ```
@@ -290,20 +290,20 @@ Invoke-RestMethod -Uri http://localhost:3007 | Select-Object Status
 
 | 类型 | 路径 |
 |---|---|
-| Release worktree | `D:\filework\release-prep-worktree` |
+| Release worktree | `D:\filework\worktrees/release-prep` |
 | Release HEAD ref | `D:\filework\excel-to-diagram\.git\refs\heads\release\pre-2026-06-29` = `35b322844b9b75f9387dd30539234a7ce332d0fb` |
-| Integration worktree | `D:\filework\integration-worktree` |
-| Release dist | `D:\filework\release-prep-worktree\dist\` |
-| Integration dist | `D:\filework\integration-worktree\dist\` |
+| Integration worktree | `D:\filework\worktrees/integration` |
+| Release dist | `D:\filework\worktrees/release-prep\dist\` |
+| Integration dist | `D:\filework\worktrees/integration\dist\` |
 | Frontend source | `D:\filework\excel-to-diagram\src\` (主) |
-| Backend source | `D:\filework\release-prep-worktree\meta\` |
+| Backend source | `D:\filework\worktrees/release-prep\meta\` |
 
 ## 4. 回滚方案
 
 ### 后端回滚 (3011)
 
 ```powershell
-cd D:\filework\release-prep-worktree
+cd D:\filework\worktrees/release-prep
 git revert --no-edit HEAD~1  # revert cache_manager fix
 pwsh -File D:\filework\scripts\service_manager.ps1 restart main-backend
 ```
@@ -358,14 +358,14 @@ foreach ($port in @(3011, 3018)) {
 }
 
 # Check 3: cache_manager fix present
-$cache = Get-Content D:\filework\release-prep-worktree\meta\core\cache_manager.py -ErrorAction SilentlyContinue
+$cache = Get-Content D:\filework\worktrees/release-prep\meta\core\cache_manager.py -ErrorAction SilentlyContinue
 $results += [PSCustomObject]@{
     Check="cache_manager.py 3 with self._lock"
     Pass=((Select-String -InputObject $cache -Pattern "with self._lock" -SimpleMatch).Count -ge 3)
 }
 
 # Check 4: V007.24 datasource cache present
-$ds = Get-Content D:\filework\release-prep-worktree\meta\core\datasource.py -ErrorAction SilentlyContinue
+$ds = Get-Content D:\filework\worktrees/release-prep\meta\core\datasource.py -ErrorAction SilentlyContinue
 $results += [PSCustomObject]@{
     Check="datasource.py V007.24 cache"
     Pass=($null -ne (Select-String -InputObject $ds -Pattern "_data_source_cache" -SimpleMatch))
@@ -374,7 +374,7 @@ $results += [PSCustomObject]@{
 # Check 5: test file present
 $results += [PSCustomObject]@{
     Check="test_datasource_cache.py exists"
-    Pass=(Test-Path D:\filework\release-prep-worktree\meta\tests\test_datasource_cache.py)
+    Pass=(Test-Path D:\filework\worktrees/release-prep\meta\tests\test_datasource_cache.py)
 }
 
 # Output
@@ -399,13 +399,13 @@ if ($fail -eq 0) {
 
 | 日期 | 变更人 | 变更内容 |
 |---|---|---|
-| 2026-07-07 12:13 | L1 (协调智能体) | v0.57 创建: cherry-pick 93b6381 进行中, 3 文件已写入 release-prep-worktree, 待 PM 终端 commit |
+| 2026-07-07 12:13 | L1 (协调智能体) | v0.57 创建: cherry-pick 93b6381 进行中, 3 文件已写入 worktrees/release-prep, 待 PM 终端 commit |
 | 2026-07-06 | L1 | v0.56 初始化: 4 服务运行 + 4 commit 待 push |
 
 ## 9. 协调智能体任务进度
 
-- [x] 读取 integration-worktree 3 个文件 (datasource.py / observability.py / test_datasource_cache.py)
-- [x] 写入 release-prep-worktree (字节对比: observability 5890=5890 ✓, test 8044=8044 ✓, datasource 16500 vs 17078 LF/CRLF 差异)
+- [x] 读取 worktrees/integration 3 个文件 (datasource.py / observability.py / test_datasource_cache.py)
+- [x] 写入 worktrees/release-prep (字节对比: observability 5890=5890 ✓, test 8044=8044 ✓, datasource 16500 vs 17078 LF/CRLF 差异)
 - [x] 写部署交接文档 (本文件)
 - [ ] **PM 在 IDE 终端执行 git add + commit (5 步, ~30 秒)**
 - [ ] PM 跑单测验证 (test_datasource_cache.py 9 tests PASS)
@@ -420,7 +420,7 @@ if ($fail -eq 0) {
 
 ```bash
 # 1. cd release worktree
-cd D:\filework\release-prep-worktree
+cd D:\filework\worktrees/release-prep
 
 # 2. 验证 3 个文件就位
 git status
@@ -440,7 +440,7 @@ git push --no-verify origin release/pre-2026-06-29
 pwsh -File D:\filework\scripts\service_manager.ps1 restart main-backend
 
 # 7. 同步 integration
-cd D:\filework\integration-worktree
+cd D:\filework\worktrees/integration
 git fetch origin release/pre-2026-06-29
 git merge --no-ff origin/release/pre-2026-06-29 -m "integration: sync release 含 V007.24"
 pwsh -File D:\filework\scripts\service_manager.ps1 restart integration-backend

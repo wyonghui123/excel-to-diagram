@@ -42,7 +42,7 @@ Get-WmiObject Win32_Process -Filter "ProcessId = 26136"
 输出:
 ```
 CommandLine : "C:\Users\Administrator\.trae-cn\binaries\node\versions\24.14.0\node.exe" 
-              D:\filework\integration-worktree\node_modules\.bin\..\vite\bin\vite.js 
+              D:\filework\worktrees/integration\node_modules\.bin\..\vite\bin\vite.js 
               preview --port 3007 --strictPort --host 0.0.0.0
 ```
 
@@ -91,7 +91,7 @@ build.err 7/6 20:43:12
 **选项 A（推荐）: 重 build**
 
 ```powershell
-cd D:\filework\integration-worktree
+cd D:\filework\worktrees/integration
 npm run build
 # 或: npx vite build
 ```
@@ -105,7 +105,7 @@ Get-NetTCPConnection -LocalPort 3007 -State Listen | ForEach-Object {
 }
 
 # 2. 启动 dev 模式
-cd D:\filework\integration-worktree
+cd D:\filework\worktrees/integration
 npm run dev
 ```
 
@@ -115,7 +115,7 @@ npm run dev
 
 ```powershell
 # 1. 重 build 后看 index.css
-Get-Content D:\filework\integration-worktree\frontend_dist_files\assets\index-*.css -Raw | 
+Get-Content D:\filework\worktrees/integration\frontend_dist_files\assets\index-*.css -Raw | 
     Select-String -Pattern 'el-drawer__header|el-drawer__body'
 
 # 期望输出: 找到 .el-drawer__header { padding: 8px 16px !important; ... }
