@@ -1,13 +1,13 @@
 @echo off
-REM 测试运行脚本 - Windows版本
-REM 用法: scripts\run_tests.bat [选项]
-REM 选项:
-REM   unit        - 仅运行单元测试
-REM   integration - 仅运行集成测试
-REM   api         - 仅运行API测试
-REM   performance - 仅运行性能测试
-REM   all         - 运行所有测试（默认）
-REM   coverage    - 运行测试并生成覆盖率报告
+REM testrunscript - Windowsversion
+REM usage: scripts\run_tests.bat [option]
+REM option:
+REM   unit        - only-rununittest
+REM   integration - only-runintegrationtest
+REM   api         - only-runAPItest
+REM   performance - only-runperftest
+REM   all         - runalltest(default)
+REM   coverage    - run-testsandgencoveragereport
 
 setlocal EnableDelayedExpansion
 
@@ -15,36 +15,36 @@ set TEST_TYPE=%1
 if "%TEST_TYPE%"=="" set TEST_TYPE=all
 
 echo ========================================
-echo 测试类型: %TEST_TYPE%
+echo testtype: %TEST_TYPE%
 echo ========================================
 echo.
 
 if "%TEST_TYPE%"=="unit" (
-    echo 运行单元测试...
+    echo rununittest...
     pytest -m unit -v --tb=short
 ) else if "%TEST_TYPE%"=="integration" (
-    echo 运行集成测试...
+    echo runintegrationtest...
     pytest -m integration -v --tb=short
 ) else if "%TEST_TYPE%"=="api" (
-    echo 运行API测试...
+    echo runAPItest...
     pytest -m api -v --tb=short
 ) else if "%TEST_TYPE%"=="performance" (
-    echo 运行性能测试...
+    echo runperftest...
     pytest meta/tests/performance/ -v --tb=short
     echo.
-    echo 生成性能报告...
+    echo genperfreport...
     python -m meta.tests.performance.performance_reporter --format markdown
 ) else if "%TEST_TYPE%"=="coverage" (
-    echo 运行所有测试并生成覆盖率报告...
+    echo runalltestandgencoveragereport...
     pytest --cov=meta --cov-report=html --cov-report=term-missing -v --tb=short
     echo.
-    echo 覆盖率报告已生成: htmlcov\index.html
+    echo coveragereport-generated: htmlcov\index.html
 ) else (
-    echo 运行所有测试...
+    echo runalltest...
     pytest -v --tb=short
 )
 
 echo.
 echo ========================================
-echo 测试完成
+echo testdone
 echo ========================================
