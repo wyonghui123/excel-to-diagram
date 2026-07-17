@@ -1,0 +1,721 @@
+{
+  "generated_at": "2026-07-17T14:44:41.083770",
+  "total": 42,
+  "covered": 22,
+  "partial": 18,
+  "none": 2,
+  "schemas": {
+    "new_object": {
+      "schema_id": "new_object",
+      "table_name": "new_objects",
+      "file": "meta\\schemas\\_template.yaml",
+      "coverage_level": "none",
+      "schema_id_files": 0,
+      "schema_id_refs": 0,
+      "table_name_files": 0,
+      "table_name_refs": 0,
+      "class_files": 0,
+      "sample_files": []
+    },
+    "ai_async_task": {
+      "schema_id": "ai_async_task",
+      "table_name": "ai_async_tasks",
+      "file": "meta\\schemas\\ai_async_task.yaml",
+      "coverage_level": "none",
+      "schema_id_files": 0,
+      "schema_id_refs": 0,
+      "table_name_files": 0,
+      "table_name_refs": 0,
+      "class_files": 0,
+      "sample_files": []
+    },
+    "annotation": {
+      "schema_id": "annotation",
+      "table_name": "annotations",
+      "file": "meta\\schemas\\annotation.yaml",
+      "coverage_level": "covered",
+      "schema_id_files": 22,
+      "schema_id_refs": 317,
+      "table_name_files": 14,
+      "table_name_refs": 85,
+      "class_files": 12,
+      "sample_files": [
+        "meta/tests\\_consolidated\\test_p0_other_domains.py",
+        "meta/tests\\interceptors\\test_cascade_interceptor_detailed.py",
+        "meta/tests\\permission_matrix\\test_annotation_permission.py",
+        "meta/tests\\post_v2_1\\audit_help\\test_audit_translation.py",
+        "meta/tests\\post_v2_1\\audit_help\\test_owner_chain_v2_1.py"
+      ]
+    },
+    "audit_aspect": {
+      "schema_id": "audit_aspect",
+      "table_name": "",
+      "file": "meta\\schemas\\aspects.yaml",
+      "coverage_level": "partial",
+      "schema_id_files": 4,
+      "schema_id_refs": 12,
+      "table_name_files": 0,
+      "table_name_refs": 0,
+      "class_files": 0,
+      "sample_files": [
+        "meta/tests\\_yaml_driver\\test_yaml_driven_constraints.py",
+        "meta/tests\\test_aspect_resolution.py",
+        "meta/tests\\test_object_adaptation_role.py",
+        "meta/tests\\test_object_adaptation_user_group.py"
+      ]
+    },
+    "hierarchy_aspect": {
+      "schema_id": "hierarchy_aspect",
+      "table_name": "",
+      "file": "meta\\schemas\\aspects.yaml",
+      "coverage_level": "partial",
+      "schema_id_files": 1,
+      "schema_id_refs": 3,
+      "table_name_files": 0,
+      "table_name_refs": 0,
+      "class_files": 0,
+      "sample_files": [
+        "meta/tests\\test_aspect_resolution.py"
+      ]
+    },
+    "naming_aspect": {
+      "schema_id": "naming_aspect",
+      "table_name": "",
+      "file": "meta\\schemas\\aspects.yaml",
+      "coverage_level": "partial",
+      "schema_id_files": 2,
+      "schema_id_refs": 5,
+      "table_name_files": 0,
+      "table_name_refs": 0,
+      "class_files": 0,
+      "sample_files": [
+        "meta/tests\\test_aspect_resolution.py",
+        "meta/tests\\test_version_cascade_delete.py"
+      ]
+    },
+    "owner_aspect": {
+      "schema_id": "owner_aspect",
+      "table_name": "",
+      "file": "meta\\schemas\\aspects.yaml",
+      "coverage_level": "partial",
+      "schema_id_files": 1,
+      "schema_id_refs": 1,
+      "table_name_files": 0,
+      "table_name_refs": 0,
+      "class_files": 0,
+      "sample_files": [
+        "meta/tests\\test_aspect_resolution.py"
+      ]
+    },
+    "audit_log": {
+      "schema_id": "audit_log",
+      "table_name": "audit_logs",
+      "file": "meta\\schemas\\audit_log.yaml",
+      "coverage_level": "covered",
+      "schema_id_files": 23,
+      "schema_id_refs": 239,
+      "table_name_files": 41,
+      "table_name_refs": 241,
+      "class_files": 10,
+      "sample_files": [
+        "meta/tests\\_yaml_driver\\test_yaml_driven_constraints.py",
+        "meta/tests\\core\\test_core_utilities.py",
+        "meta/tests\\e2e\\bo_action\\test_bug_v007_regression.py",
+        "meta/tests\\e2e\\bo_action\\test_bug_v007_regression_v2.py",
+        "meta/tests\\e2e\\bo_action\\test_unlock_admin_v314.py"
+      ]
+    },
+    "business_object": {
+      "schema_id": "business_object",
+      "table_name": "business_objects",
+      "file": "meta\\schemas\\business_object.yaml",
+      "coverage_level": "covered",
+      "schema_id_files": 95,
+      "schema_id_refs": 620,
+      "table_name_files": 48,
+      "table_name_refs": 239,
+      "class_files": 8,
+      "sample_files": [
+        "meta/tests\\_consolidated\\test_p1_custom_domains.py",
+        "meta/tests\\_consolidated\\test_p1_unit_domains.py",
+        "meta/tests\\api\\test_extended_apis.py",
+        "meta/tests\\bo\\test_hierarchy_bo.py",
+        "meta/tests\\factories\\tests\\test_factories_phase1.py"
+      ]
+    },
+    "change_event": {
+      "schema_id": "change_event",
+      "table_name": "change_events",
+      "file": "meta\\schemas\\change_event.yaml",
+      "coverage_level": "covered",
+      "schema_id_files": 7,
+      "schema_id_refs": 40,
+      "table_name_files": 3,
+      "table_name_refs": 9,
+      "class_files": 2,
+      "sample_files": [
+        "meta/tests\\bo\\test_formula_bo.py",
+        "meta/tests\\test_aggregate_refresh_integration.py",
+        "meta/tests\\test_change_notification_config.py",
+        "meta/tests\\test_change_notification_integration.py",
+        "meta/tests\\test_change_notification_service.py"
+      ]
+    },
+    "change_subscription": {
+      "schema_id": "change_subscription",
+      "table_name": "change_subscriptions",
+      "file": "meta\\schemas\\change_subscription.yaml",
+      "coverage_level": "partial",
+      "schema_id_files": 2,
+      "schema_id_refs": 13,
+      "table_name_files": 2,
+      "table_name_refs": 3,
+      "class_files": 0,
+      "sample_files": [
+        "meta/tests\\interceptors\\test_cascade_interceptor_detailed.py",
+        "meta/tests\\test_deletion_service.py",
+        "meta/tests\\test_phase3_final_verification.py",
+        "meta/tests\\test_state_adoption_verification.py"
+      ]
+    },
+    "data_permission": {
+      "schema_id": "data_permission",
+      "table_name": "data_permissions",
+      "file": "meta\\schemas\\data_permission.yaml",
+      "coverage_level": "covered",
+      "schema_id_files": 6,
+      "schema_id_refs": 14,
+      "table_name_files": 8,
+      "table_name_refs": 19,
+      "class_files": 6,
+      "sample_files": [
+        "meta/tests\\interceptors\\test_cascade_interceptor_detailed.py",
+        "meta/tests\\test_association_multi_hop.py",
+        "meta/tests\\test_auth_permission.py",
+        "meta/tests\\test_data_permission_api.py",
+        "meta/tests\\test_data_permission_generator.py"
+      ]
+    },
+    "dimension_object_mapping": {
+      "schema_id": "dimension_object_mapping",
+      "table_name": "",
+      "file": "meta\\schemas\\dimension_object_mapping.yaml",
+      "coverage_level": "partial",
+      "schema_id_files": 1,
+      "schema_id_refs": 1,
+      "table_name_files": 0,
+      "table_name_refs": 0,
+      "class_files": 1,
+      "sample_files": [
+        "meta/tests\\test_dimension_scope_and_visibility_v105.py"
+      ]
+    },
+    "domain": {
+      "schema_id": "domain",
+      "table_name": "domains",
+      "file": "meta\\schemas\\domain.yaml",
+      "coverage_level": "covered",
+      "schema_id_files": 138,
+      "schema_id_refs": 1455,
+      "table_name_files": 60,
+      "table_name_refs": 335,
+      "class_files": 5,
+      "sample_files": [
+        "meta/tests\\_consolidated\\test_p0_other_domains.py",
+        "meta/tests\\_consolidated\\test_p1_api_domains.py",
+        "meta/tests\\_consolidated\\test_p1_custom_domains.py",
+        "meta/tests\\_consolidated\\test_p1_unit_domains.py",
+        "meta/tests\\api\\test_extended_apis.py"
+      ]
+    },
+    "employee_data_scope": {
+      "schema_id": "employee_data_scope",
+      "table_name": "employee_data_scopes",
+      "file": "meta\\schemas\\employee_data_scope.yaml",
+      "coverage_level": "partial",
+      "schema_id_files": 0,
+      "schema_id_refs": 0,
+      "table_name_files": 1,
+      "table_name_refs": 4,
+      "class_files": 0,
+      "sample_files": [
+        "meta/tests\\test_condition_permission_service.py"
+      ]
+    },
+    "enum_type": {
+      "schema_id": "enum_type",
+      "table_name": "enum_types",
+      "file": "meta\\schemas\\enum_type.yaml",
+      "coverage_level": "covered",
+      "schema_id_files": 21,
+      "schema_id_refs": 97,
+      "table_name_files": 4,
+      "table_name_refs": 15,
+      "class_files": 3,
+      "sample_files": [
+        "meta/tests\\api\\test_enum_extended.py",
+        "meta/tests\\e2e\\bo_action\\test_all_19_actions.py",
+        "meta/tests\\e2e\\bo_action\\test_hypothesis_v318.py",
+        "meta/tests\\e2e\\bo_action\\test_permission_matrix.py",
+        "meta/tests\\test_analytics_p1_adaptation.py"
+      ]
+    },
+    "enum_value": {
+      "schema_id": "enum_value",
+      "table_name": "enum_values",
+      "file": "meta\\schemas\\enum_value.yaml",
+      "coverage_level": "covered",
+      "schema_id_files": 11,
+      "schema_id_refs": 79,
+      "table_name_files": 13,
+      "table_name_refs": 96,
+      "class_files": 1,
+      "sample_files": [
+        "meta/tests\\api\\test_enum_extended.py",
+        "meta/tests\\test_annotation_import.py",
+        "meta/tests\\test_bo_api_openapi.py",
+        "meta/tests\\test_bo_framework_display_name_api.py",
+        "meta/tests\\test_core_models.py"
+      ]
+    },
+    "filter_variant": {
+      "schema_id": "filter_variant",
+      "table_name": "filter_variants",
+      "file": "meta\\schemas\\filter_variant.yaml",
+      "coverage_level": "partial",
+      "schema_id_files": 0,
+      "schema_id_refs": 0,
+      "table_name_files": 4,
+      "table_name_refs": 7,
+      "class_files": 3,
+      "sample_files": [
+        "meta/tests\\interceptors\\test_cascade_interceptor_detailed.py",
+        "meta/tests\\test_browser_e2e.py",
+        "meta/tests\\test_deletion_service.py",
+        "meta/tests\\test_filter_e2e.py",
+        "meta/tests\\test_filter_variant_api.py"
+      ]
+    },
+    "group_data_permission": {
+      "schema_id": "group_data_permission",
+      "table_name": "group_data_permissions",
+      "file": "meta\\schemas\\group_data_permission.yaml",
+      "coverage_level": "partial",
+      "schema_id_files": 0,
+      "schema_id_refs": 0,
+      "table_name_files": 9,
+      "table_name_refs": 15,
+      "class_files": 0,
+      "sample_files": [
+        "meta/tests\\interceptors\\test_cascade_interceptor_detailed.py",
+        "meta/tests\\test_association_multi_hop.py",
+        "meta/tests\\test_auth_permission.py",
+        "meta/tests\\test_data_permission_service.py",
+        "meta/tests\\test_owner_scenarios_comprehensive.py"
+      ]
+    },
+    "hierarchies": {
+      "schema_id": "hierarchies",
+      "table_name": "",
+      "file": "meta\\schemas\\hierarchies.yaml",
+      "coverage_level": "partial",
+      "schema_id_files": 11,
+      "schema_id_refs": 47,
+      "table_name_files": 0,
+      "table_name_refs": 0,
+      "class_files": 0,
+      "sample_files": [
+        "meta/tests\\_consolidated\\test_p0_other_domains.py",
+        "meta/tests\\post_v2_1\\cascade\\test_cascade_bug_v013.py",
+        "meta/tests\\test_association_multi_hop.py",
+        "meta/tests\\test_cascade_service.py",
+        "meta/tests\\test_config_integration.py"
+      ]
+    },
+    "menu": {
+      "schema_id": "menu",
+      "table_name": "menus",
+      "file": "meta\\schemas\\menu.yaml",
+      "coverage_level": "covered",
+      "schema_id_files": 14,
+      "schema_id_refs": 59,
+      "table_name_files": 8,
+      "table_name_refs": 91,
+      "class_files": 4,
+      "sample_files": [
+        "meta/tests\\_consolidated\\test_p0_other_domains.py",
+        "meta/tests\\api\\test_role_permission_apis.py",
+        "meta/tests\\import_export\\test_export_filename_v320.py",
+        "meta/tests\\post_v2_1\\audit_help\\test_help_drawer_shortcut.py",
+        "meta/tests\\test_audit_labels.py"
+      ]
+    },
+    "menu_permission": {
+      "schema_id": "menu_permission",
+      "table_name": "menu_permissions",
+      "file": "meta\\schemas\\menu_permission.yaml",
+      "coverage_level": "partial",
+      "schema_id_files": 1,
+      "schema_id_refs": 7,
+      "table_name_files": 0,
+      "table_name_refs": 0,
+      "class_files": 2,
+      "sample_files": [
+        "meta/tests\\test_cleanup_integrity.py",
+        "meta/tests\\test_menu_permission_api.py",
+        "meta/tests\\test_v2_api_permissions.py"
+      ]
+    },
+    "permission": {
+      "schema_id": "permission",
+      "table_name": "permissions",
+      "file": "meta\\schemas\\permission.yaml",
+      "coverage_level": "covered",
+      "schema_id_files": 55,
+      "schema_id_refs": 180,
+      "table_name_files": 79,
+      "table_name_refs": 394,
+      "class_files": 12,
+      "sample_files": [
+        "meta/tests\\api\\test_enum_extended.py",
+        "meta/tests\\api\\test_extended_apis.py",
+        "meta/tests\\api\\test_role_permission_apis.py",
+        "meta/tests\\auth\\test_token_service.py",
+        "meta/tests\\e2e\\bo_action\\test_permission_matrix.py"
+      ]
+    },
+    "permission_bundle": {
+      "schema_id": "permission_bundle",
+      "table_name": "permission_bundles",
+      "file": "meta\\schemas\\permission_bundle.yaml",
+      "coverage_level": "partial",
+      "schema_id_files": 2,
+      "schema_id_refs": 13,
+      "table_name_files": 0,
+      "table_name_refs": 0,
+      "class_files": 2,
+      "sample_files": [
+        "meta/tests\\permission\\test_permission_services.py",
+        "meta/tests\\test_permission_bundle_api.py",
+        "meta/tests\\test_ui_config_enhanced.py",
+        "meta/tests\\test_v2_api_permissions.py"
+      ]
+    },
+    "permission_rule": {
+      "schema_id": "permission_rule",
+      "table_name": "permission_rules",
+      "file": "meta\\schemas\\permission_rule.yaml",
+      "coverage_level": "covered",
+      "schema_id_files": 4,
+      "schema_id_refs": 12,
+      "table_name_files": 4,
+      "table_name_refs": 11,
+      "class_files": 1,
+      "sample_files": [
+        "meta/tests\\test_audit_labels.py",
+        "meta/tests\\test_audit_parent_object_and_extract.py",
+        "meta/tests\\test_audit_role_parent_query_e2e.py",
+        "meta/tests\\test_condition_permission_service.py",
+        "meta/tests\\test_management_dimension_api.py"
+      ]
+    },
+    "product": {
+      "schema_id": "product",
+      "table_name": "products",
+      "file": "meta\\schemas\\product.yaml",
+      "coverage_level": "covered",
+      "schema_id_files": 94,
+      "schema_id_refs": 817,
+      "table_name_files": 36,
+      "table_name_refs": 146,
+      "class_files": 9,
+      "sample_files": [
+        "meta/tests\\_consolidated\\test_p1_unit_domains.py",
+        "meta/tests\\_yaml_driver\\test_yaml_driven_constraints.py",
+        "meta/tests\\api\\test_extended_apis.py",
+        "meta/tests\\bo\\test_hierarchy_bo.py",
+        "meta/tests\\e2e\\bo_action\\test_bug_v007_regression.py"
+      ]
+    },
+    "relationship": {
+      "schema_id": "relationship",
+      "table_name": "relationships",
+      "file": "meta\\schemas\\relationship.yaml",
+      "coverage_level": "covered",
+      "schema_id_files": 57,
+      "schema_id_refs": 466,
+      "table_name_files": 21,
+      "table_name_refs": 109,
+      "class_files": 13,
+      "sample_files": [
+        "meta/tests\\_consolidated\\test_p1_custom_domains.py",
+        "meta/tests\\bo\\test_formula_bo.py",
+        "meta/tests\\import_export\\test_export_pagination_and_options.py",
+        "meta/tests\\import_export\\test_import_export_apis.py",
+        "meta/tests\\post_v2_1\\audit_help\\test_owner_chain_v2_1.py"
+      ]
+    },
+    "role": {
+      "schema_id": "role",
+      "table_name": "roles",
+      "file": "meta\\schemas\\role.yaml",
+      "coverage_level": "covered",
+      "schema_id_files": 75,
+      "schema_id_refs": 529,
+      "table_name_files": 90,
+      "table_name_refs": 496,
+      "class_files": 11,
+      "sample_files": [
+        "meta/tests\\_consolidated\\test_p0_other_domains.py",
+        "meta/tests\\_consolidated\\test_p1_unit_domains.py",
+        "meta/tests\\_yaml_driver\\test_yaml_driven_constraints.py",
+        "meta/tests\\api\\test_enum_extended.py",
+        "meta/tests\\api\\test_extended_apis.py"
+      ]
+    },
+    "role_data_permission": {
+      "schema_id": "role_data_permission",
+      "table_name": "role_data_permissions",
+      "file": "meta\\schemas\\role_data_permission.yaml",
+      "coverage_level": "covered",
+      "schema_id_files": 3,
+      "schema_id_refs": 9,
+      "table_name_files": 8,
+      "table_name_refs": 17,
+      "class_files": 1,
+      "sample_files": [
+        "meta/tests\\test_association_multi_hop.py",
+        "meta/tests\\test_audit_labels.py",
+        "meta/tests\\test_audit_parent_object_and_extract.py",
+        "meta/tests\\test_audit_role_parent_query_e2e.py",
+        "meta/tests\\test_auth_permission.py"
+      ]
+    },
+    "role_dimension_scope": {
+      "schema_id": "role_dimension_scope",
+      "table_name": "role_dimension_scopes",
+      "file": "meta\\schemas\\role_dimension_scope.yaml",
+      "coverage_level": "covered",
+      "schema_id_files": 3,
+      "schema_id_refs": 5,
+      "table_name_files": 2,
+      "table_name_refs": 3,
+      "class_files": 2,
+      "sample_files": [
+        "meta/tests\\api\\test_role_permission_apis.py",
+        "meta/tests\\test_audit_labels.py",
+        "meta/tests\\test_audit_parent_object_and_extract.py",
+        "meta/tests\\test_audit_role_parent_query_e2e.py",
+        "meta/tests\\test_dimension_scope_engine.py"
+      ]
+    },
+    "role_permission": {
+      "schema_id": "role_permission",
+      "table_name": "role_permissions",
+      "file": "meta\\schemas\\role_permission.yaml",
+      "coverage_level": "partial",
+      "schema_id_files": 0,
+      "schema_id_refs": 0,
+      "table_name_files": 18,
+      "table_name_refs": 86,
+      "class_files": 2,
+      "sample_files": [
+        "meta/tests\\interceptors\\test_cascade_interceptor_detailed.py",
+        "meta/tests\\test_aggregate_manager.py",
+        "meta/tests\\test_association_crud_operations.py",
+        "meta/tests\\test_association_service.py",
+        "meta/tests\\test_association_validators.py"
+      ]
+    },
+    "scheduled_task": {
+      "schema_id": "scheduled_task",
+      "table_name": "scheduled_tasks",
+      "file": "meta\\schemas\\scheduled_task.yaml",
+      "coverage_level": "partial",
+      "schema_id_files": 0,
+      "schema_id_refs": 0,
+      "table_name_files": 2,
+      "table_name_refs": 22,
+      "class_files": 2,
+      "sample_files": [
+        "meta/tests\\test_scheduled_tasks_comprehensive.py",
+        "meta/tests\\test_scheduled_tasks_e2e.py",
+        "meta/tests\\test_task_scheduler.py"
+      ]
+    },
+    "service_module": {
+      "schema_id": "service_module",
+      "table_name": "service_modules",
+      "file": "meta\\schemas\\service_module.yaml",
+      "coverage_level": "covered",
+      "schema_id_files": 57,
+      "schema_id_refs": 524,
+      "table_name_files": 42,
+      "table_name_refs": 140,
+      "class_files": 3,
+      "sample_files": [
+        "meta/tests\\bo\\test_formula_bo.py",
+        "meta/tests\\bo\\test_hierarchy_bo.py",
+        "meta/tests\\performance\\test_api_performance.py",
+        "meta/tests\\performance\\test_concurrent_load.py",
+        "meta/tests\\performance\\test_database_performance.py"
+      ]
+    },
+    "sub_domain": {
+      "schema_id": "sub_domain",
+      "table_name": "sub_domains",
+      "file": "meta\\schemas\\sub_domain.yaml",
+      "coverage_level": "covered",
+      "schema_id_files": 73,
+      "schema_id_refs": 456,
+      "table_name_files": 47,
+      "table_name_refs": 193,
+      "class_files": 1,
+      "sample_files": [
+        "meta/tests\\_consolidated\\test_p2_enhancements.py",
+        "meta/tests\\api\\test_extended_apis.py",
+        "meta/tests\\bo\\test_formula_bo.py",
+        "meta/tests\\bo\\test_hierarchy_bo.py",
+        "meta/tests\\import_export\\test_export_filename_v320.py"
+      ]
+    },
+    "task_execution": {
+      "schema_id": "task_execution",
+      "table_name": "task_executions",
+      "file": "meta\\schemas\\task_execution.yaml",
+      "coverage_level": "partial",
+      "schema_id_files": 0,
+      "schema_id_refs": 0,
+      "table_name_files": 2,
+      "table_name_refs": 16,
+      "class_files": 0,
+      "sample_files": [
+        "meta/tests\\test_scheduled_tasks_e2e.py",
+        "meta/tests\\test_task_scheduler.py"
+      ]
+    },
+    "task_queue": {
+      "schema_id": "task_queue",
+      "table_name": "task_queues",
+      "file": "meta\\schemas\\task_queue.yaml",
+      "coverage_level": "partial",
+      "schema_id_files": 0,
+      "schema_id_refs": 0,
+      "table_name_files": 2,
+      "table_name_refs": 10,
+      "class_files": 1,
+      "sample_files": [
+        "meta/tests\\test_scheduled_tasks_e2e.py",
+        "meta/tests\\test_task_scheduler.py"
+      ]
+    },
+    "test_objects": {
+      "schema_id": "test_objects",
+      "table_name": "test_objects",
+      "file": "meta\\schemas\\test_objects.yaml",
+      "coverage_level": "partial",
+      "schema_id_files": 6,
+      "schema_id_refs": 21,
+      "table_name_files": 6,
+      "table_name_refs": 21,
+      "class_files": 0,
+      "sample_files": [
+        "meta/tests\\_consolidated\\test_p1_custom_domains.py",
+        "meta/tests\\bo\\test_hierarchy_bo.py",
+        "meta/tests\\test_formula_integration.py",
+        "meta/tests\\test_rule_engine.py",
+        "meta/tests\\test_schema_generator.py"
+      ]
+    },
+    "test_table": {
+      "schema_id": "test_table",
+      "table_name": "test_table",
+      "file": "meta\\schemas\\test_table.yaml",
+      "coverage_level": "partial",
+      "schema_id_files": 8,
+      "schema_id_refs": 73,
+      "table_name_files": 8,
+      "table_name_refs": 73,
+      "class_files": 0,
+      "sample_files": [
+        "meta/tests\\_consolidated\\test_p1_custom_domains.py",
+        "meta/tests\\test_audit_interceptor_comprehensive.py",
+        "meta/tests\\test_cascade_service.py",
+        "meta/tests\\test_key_template_engine.py",
+        "meta/tests\\test_query_builder.py"
+      ]
+    },
+    "user": {
+      "schema_id": "user",
+      "table_name": "users",
+      "file": "meta\\schemas\\user.yaml",
+      "coverage_level": "covered",
+      "schema_id_files": 189,
+      "schema_id_refs": 1596,
+      "table_name_files": 64,
+      "table_name_refs": 481,
+      "class_files": 17,
+      "sample_files": [
+        "meta/tests\\_consolidated\\test_p0_other_domains.py",
+        "meta/tests\\_consolidated\\test_p1_api_domains.py",
+        "meta/tests\\_consolidated\\test_p1_unit_domains.py",
+        "meta/tests\\_consolidated\\test_p2_enhancements.py",
+        "meta/tests\\_yaml_driver\\test_yaml_driven_constraints.py"
+      ]
+    },
+    "user_group": {
+      "schema_id": "user_group",
+      "table_name": "user_groups",
+      "file": "meta\\schemas\\user_group.yaml",
+      "coverage_level": "covered",
+      "schema_id_files": 45,
+      "schema_id_refs": 307,
+      "table_name_files": 28,
+      "table_name_refs": 106,
+      "class_files": 9,
+      "sample_files": [
+        "meta/tests\\factories\\tests\\test_factories_phase1.py",
+        "meta/tests\\interceptors\\test_cascade_interceptor_detailed.py",
+        "meta/tests\\m8\\test_m8_e2e.py",
+        "meta/tests\\metadata\\test_metadata_validators.py",
+        "meta/tests\\test_aggregate_manager.py"
+      ]
+    },
+    "user_group_member": {
+      "schema_id": "user_group_member",
+      "table_name": "user_group_members",
+      "file": "meta\\schemas\\user_group_member.yaml",
+      "coverage_level": "covered",
+      "schema_id_files": 2,
+      "schema_id_refs": 2,
+      "table_name_files": 34,
+      "table_name_refs": 123,
+      "class_files": 3,
+      "sample_files": [
+        "meta/tests\\interceptors\\test_cascade_interceptor_detailed.py",
+        "meta/tests\\test_aggregate_manager.py",
+        "meta/tests\\test_api.py",
+        "meta/tests\\test_association_audit_e2e.py",
+        "meta/tests\\test_association_crud_operations.py"
+      ]
+    },
+    "version": {
+      "schema_id": "version",
+      "table_name": "versions",
+      "file": "meta\\schemas\\version.yaml",
+      "coverage_level": "covered",
+      "schema_id_files": 91,
+      "schema_id_refs": 667,
+      "table_name_files": 49,
+      "table_name_refs": 193,
+      "class_files": 10,
+      "sample_files": [
+        "meta/tests\\_consolidated\\test_p1_custom_domains.py",
+        "meta/tests\\bo\\test_hierarchy_bo.py",
+        "meta/tests\\e2e\\bo_action\\test_all_19_actions.py",
+        "meta/tests\\e2e\\bo_action\\test_bug_v007_regression.py",
+        "meta/tests\\e2e\\bo_action\\test_bug_v007_regression_v2.py"
+      ]
+    }
+  }
+}

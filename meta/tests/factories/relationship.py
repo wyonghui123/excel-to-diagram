@@ -19,32 +19,32 @@ class RelationshipFactory(BaseFactory):
         n = cls._next_counter()
         suffix = unique_str(4)
         return {
+            # [FIX 2026-07-17 v1.1] 覆盖 yaml 必填字段:
+            # source_bo_id / target_bo_id / version_id (relationship.yaml required)
+            # 注意: yaml 只有 source_bo_id/target_bo_id (无 source_id/target_id/source_type)
+            'source_bo_id': None,  # 需配 BO
+            'target_bo_id': None,  # 需配 BO
+            'version_id': None,  # 由 VersionContextInterceptor 自动解析
+            # 业务字段
             'name': f'Test Relationship {n}_{suffix}',
-            'source_type': 'business_object',
-            'source_id': None,
-            'target_type': 'business_object',
-            'target_id': None,
-            'type': 'one_to_many',
         }
 
     @classmethod
-    def create_one_to_many(cls, source_id: int, target_id: int, cookie=None, **overrides) -> Dict[str, Any]:
+    def create_one_to_many(cls, source_bo_id: int, target_bo_id: int, cookie=None, **overrides) -> Dict[str, Any]:
         """1对多关系"""
         return cls.create(
             cookie=cookie,
-            source_id=source_id,
-            target_id=target_id,
-            type='one_to_many',
+            source_bo_id=source_bo_id,
+            target_bo_id=target_bo_id,
             **overrides
         )
 
     @classmethod
-    def create_many_to_many(cls, source_id: int, target_id: int, cookie=None, **overrides) -> Dict[str, Any]:
+    def create_many_to_many(cls, source_bo_id: int, target_bo_id: int, cookie=None, **overrides) -> Dict[str, Any]:
         """多对多关系"""
         return cls.create(
             cookie=cookie,
-            source_id=source_id,
-            target_id=target_id,
-            type='many_to_many',
+            source_bo_id=source_bo_id,
+            target_bo_id=target_bo_id,
             **overrides
         )

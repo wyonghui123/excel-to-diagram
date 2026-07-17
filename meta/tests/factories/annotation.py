@@ -19,6 +19,13 @@ class AnnotationFactory(BaseFactory):
         n = cls._next_counter()
         suffix = unique_str(4)
         return {
+            # [FIX 2026-07-17 v1.1] 覆盖 yaml 必填字段:
+            # category / target_type / target_id
+            # defaults 用 placeholder; 真实调用必须用 create_for_object() 覆盖
+            'category': 'general',
+            'target_type': 'business_object',
+            'target_id': None,  # 需配 BO
+            # 业务字段
             'text': f'Test annotation {n} {suffix}',
             'object_type': 'business_object',
             'object_id': None,  # 需配 BO

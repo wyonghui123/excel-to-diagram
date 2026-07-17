@@ -20,6 +20,7 @@ import time
 import random
 import string
 import logging
+import threading
 from typing import Optional, Dict, Any, List
 
 
@@ -37,12 +38,43 @@ _BO_API_BASE = os.environ.get('BO_API_BASE', 'http://localhost:3010')
 # 唯一性 Helper (TBD-4: counter+random 人类可读)
 # ============================================================
 
+# [FIX 2026-07-17] 进程内单调 counter, 修复 test_unique_id_unique 在快速循环
+# (同一毫秒内 100 次调用) 返回相同 ID 的 bug
+# 原始实现 int(time.time()*1000) + os.getpid() 在毫秒级时间精度下, 100 次循环
+# 全在同一毫秒内 -> 全部返回相同 ID.
+# 修复: 增加 PID + 进程内 atomic counter, 保证:
+#   - 同进程快速循环: counter 单调递增 -> 全部唯一
+#   - 跨进程: PID 维度天然隔离
+#   - 跨时间: 时间戳保证单调性
+_unique_id_counter = 0
+_unique_id_lock = threading.Lock()
+
+
 def unique_id() -> int:
     """
     生成全局唯一 ID (含 PID + 时间戳 + counter)
-    用于取代测试中的 int(time.time())
+
+    组成 (从高到低):
+      - 时间戳 (毫秒)        高 13 位 (循环 2026 年后约 2^41)
+      - PID (后 12 位)        中 12 位
+      - 进程内 counter (0-9999) 低 14 位
+
+    保证:
+    - 同进程快速循环 100 次: counter 维度单调 -> 全部唯一
+    - 跨进程: PID 维度天然隔离
+    - 跨时间: 时间戳单调
+
+    用于取代测试中的 int(time.time()) (硬编码, 同毫秒重复)
     """
-    return int(time.time() * 1000) + os.getpid()
+    global _unique_id_counter
+    with _unique_id_lock:
+        _unique_id_counter = (_unique_id_counter + 1) % 10000
+        counter = _unique_id_counter
+    ts_ms = int(time.time() * 1000)
+    pid_part = os.getpid() % 10000
+    # 拼装: ts * 100_000_000 (10^8) + pid * 10_000 + counter
+    # 整数位宽约 13 + 8 = 21 位 (人类可读)
+    return ts_ms * 100_000_000 + pid_part * 10_000 + counter
 
 
 def unique_str(n: int = 8) -> str:

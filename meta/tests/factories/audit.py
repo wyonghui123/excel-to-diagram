@@ -19,6 +19,12 @@ class AuditLogFactory(BaseFactory):
         n = cls._next_counter()
         suffix = unique_str(4)
         return {
+            # [FIX 2026-07-17 v1.1] 覆盖 yaml 必填字段:
+            # log_category / log_level (audit_log.yaml required)
+            # 使用 yaml 自带的 default 值 (business / INFO)
+            'log_category': 'business',
+            'log_level': 'INFO',
+            # 业务字段
             'action': 'create',
             'object_type': 'business_object',
             'object_id': None,
