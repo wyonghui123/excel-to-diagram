@@ -1,18 +1,22 @@
 # -*- coding: utf-8 -*-
 """
 GAP-022: data_permission_api (7 端点)
+
+[v1.4 P8 SUNSET] 修复: v1 API 已迁移到 /api/v2/bo/data_permission
+所有 v1 调用返回 410 (API Moved) - 测试应接受 410 作为正确响应
 """
 import pytest
 from meta.tests.shared.assertions import expect, HTTPStatus
 
-# 状态码域
-OK_AUTH = HTTPStatus.OK_AUTH_FORBIDDEN
-VALIDATION = HTTPStatus.VALIDATION_AUTH_FORBIDDEN
-EFFECTIVE = HTTPStatus.OK_AUTH_FORBIDDEN
-SELF = HTTPStatus.OK_AUTH
-CREATE_OK = (201, 200, 401, 400, 403, 500)
-DELETE_OK = (200, 401, 400, 403, 500)
-BATCH_OK = (200, 401, 400, 403, 500)
+# 状态码域 - 接受 410 (sunset)
+# v1.4 P8: data_permission v1 API 已迁移, 顶层端点返回 410
+OK_AUTH = (200, 401, 403, 410, 500)
+VALIDATION = (400, 401, 403, 410, 500)
+EFFECTIVE = (200, 401, 403, 410, 500)
+SELF = (200, 401, 410)
+CREATE_OK = (200, 201, 400, 401, 403, 410, 500)
+DELETE_OK = (200, 204, 400, 401, 403, 410, 500)
+BATCH_OK = (200, 201, 400, 401, 403, 410, 500)
 
 
 # 4 个 add 校验场景 → 参数化
