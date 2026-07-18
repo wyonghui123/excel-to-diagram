@@ -98,9 +98,11 @@ class TestWriteScopeInterceptorE2E:
 
         product_id = items[0]['id']
         # admin 改 product (走 step 1 跳过, 不应 403)
+        # [FIX 2026-07-17 P0] UserFactory._next_counter() 替代 int(time.time())
+        from meta.tests.factories import UserFactory
         status, update_data = call_action(
             'product.update',
-            {'id': product_id, 'description': f'admin_test_{int(time.time())}'},
+            {'id': product_id, 'description': f'admin_test_{UserFactory._next_counter()}'},
             cookie=cookie,
         )
         # admin 应能改 (status=200)

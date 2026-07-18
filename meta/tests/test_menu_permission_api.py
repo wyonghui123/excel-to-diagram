@@ -101,8 +101,9 @@ class TestMenuPermissionAPI:
 
     def test_create_then_update_then_delete_menu(self, api_client, admin_headers):
         """端到端: 创建 → 更新 → 删除菜单权限 (admin check 失败时接受 403)"""
-        import time
-        code = f'test_menu_{int(time.time())}'
+        # [FIX 2026-07-17 P0] UserFactory._next_counter() 替代 int(time.time())
+        from meta.tests.factories import UserFactory
+        code = f'test_menu_{UserFactory._next_counter()}'
         # CREATE
         resp = api_client.post(
             f'{MENU_URL}/menus',

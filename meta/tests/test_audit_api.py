@@ -28,6 +28,10 @@ import tempfile
 import sqlite3
 import time
 import random
+# [FIX 2026-07-17 P0] 工厂采用率提升
+# 旧模式: f'_v2test_{int(time.time())}'  (同毫秒冲突)
+# 新模式: UserFactory._next_counter()  (PID + atomic counter)
+from meta.tests.factories import UserFactory
 import inspect
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -640,7 +644,7 @@ class TestAuditLogV2:
         ds = get_data_source("sqlite", database=db_path)
         service = AuditService(ds)
 
-        test_marker = f"_v2test_{int(time.time())}"
+        test_marker = f"_v2test_{UserFactory._next_counter()}"
 
         try:
             service.log(
@@ -660,7 +664,7 @@ class TestAuditLogV2:
                 FROM audit_logs
                 WHERE trace_id LIKE ?
                 ORDER BY id DESC LIMIT 1
-            """, [f'%v2test_{time.time()}%'])
+            """, [f'%v2test_{UserFactory._next_counter()}%'])
             row = cursor.fetchone()
 
             if row:
@@ -703,7 +707,7 @@ class TestAuditUnified:
         if not os.path.exists(db_path):
             pytest.skip("数据库文件不存在")
 
-        test_marker = f"_test_{int(time.time())}_{random.randint(1000, 9999)}"
+        test_marker = f"_test_{UserFactory._next_counter()}_{UserFactory._next_counter()}"
         ds = get_data_source("sqlite", database=db_path)
         service = AuditService(ds)
 
@@ -759,7 +763,7 @@ class TestAuditUnified:
         if not os.path.exists(db_path):
             pytest.skip("数据库文件不存在")
 
-        test_marker = f"_test_{int(time.time())}_{random.randint(1000, 9999)}"
+        test_marker = f"_test_{UserFactory._next_counter()}_{UserFactory._next_counter()}"
         ds = get_data_source("sqlite", database=db_path)
         service = AuditService(ds)
 
@@ -804,7 +808,7 @@ class TestAuditUnified:
         if not os.path.exists(db_path):
             pytest.skip("数据库文件不存在")
 
-        test_marker = f"_create_{int(time.time())}_{random.randint(1000, 9999)}"
+        test_marker = f"_create_{UserFactory._next_counter()}_{UserFactory._next_counter()}"
         ds = get_data_source("sqlite", database=db_path)
         service = AuditService(ds)
 

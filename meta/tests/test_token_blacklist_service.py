@@ -13,6 +13,10 @@ import os
 import time
 from datetime import datetime, timedelta
 import pytest
+# [FIX 2026-07-17 P0] 工厂采用率提升
+# 旧模式: f'test_token_{int(time.time())}'  (同毫秒冲突)
+# 新模式: UserFactory._next_counter()  (PID + counter)
+from meta.tests.factories import UserFactory
 
 pytestmark = pytest.mark.unit
 
@@ -24,7 +28,7 @@ class TestTokenBlacklistService:
         """add + is_blacklisted 完整流程"""
         from meta.services.token_blacklist_service import TokenBlacklistService
         svc = TokenBlacklistService()
-        token = f'test_token_{int(time.time())}'
+        token = f'test_token_{UserFactory._next_counter()}'
         expires = datetime.utcnow() + timedelta(hours=1)
         # 添加到黑名单
         svc.add_to_blacklist(token, expires)
@@ -60,7 +64,7 @@ class TestTokenBlacklistService:
         """过期 token 被自动清理, 不再黑名单"""
         from meta.services.token_blacklist_service import TokenBlacklistService
         svc = TokenBlacklistService()
-        token = f'expired_{int(time.time())}'
+        token = f'expired_{UserFactory._next_counter()}'
         # 过期时间 = 1 小时前
         past = datetime.utcnow() - timedelta(hours=1)
         svc.add_to_blacklist(token, past)

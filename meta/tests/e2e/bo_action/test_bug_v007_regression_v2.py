@@ -247,7 +247,7 @@ def test_bug_v007_user_factory_deep_insert_creates_child(bo_action_server_check,
     TraceId.set(TraceId.get_or_generate())
 
     # 构造唯一产品编码
-    suffix = f'V007V2_{int(time.time())}_{uuid.uuid4().hex[:6].upper()}'
+    suffix = f'V007V2_{UserFactory._next_counter()}_{uuid.uuid4().hex[:6].upper()}'
     payload = {
         'parent': {
             'name': suffix,
@@ -299,7 +299,7 @@ def test_bug_v007_deep_insert_rollback_on_dup_name(bo_action_server_check,
     user, cookie = test_user_with_role
     TraceId.set(TraceId.get_or_generate())
 
-    suffix = f'V007V2_RO_{int(time.time())}_{uuid.uuid4().hex[:6].upper()}'
+    suffix = f'V007V2_RO_{UserFactory._next_counter()}_{uuid.uuid4().hex[:6].upper()}'
 
     # 第一次先正常创建
     payload_first = {
@@ -356,7 +356,7 @@ def test_bug_v007_audit_logs_complete(bo_action_server_check,
     user, cookie = test_user_with_role
     TraceId.set(TraceId.get_or_generate())
 
-    suffix = f'V007V2_AUD_{int(time.time())}_{uuid.uuid4().hex[:6].upper()}'
+    suffix = f'V007V2_AUD_{UserFactory._next_counter()}_{uuid.uuid4().hex[:6].upper()}'
     payload = {
         'parent': {
             'name': suffix, 'code': suffix,

@@ -23,6 +23,10 @@ from meta.core.interceptors.audit_interceptor import AuditInterceptor
 from meta.core.interceptors.context_interceptor import ContextInterceptor
 from meta.core.datasource import get_data_source
 from meta.core.yaml_loader import register_from_directory, get_yaml_schema_dir
+# [FIX 2026-07-17 P0] 工厂采用率提升
+# 旧模式: f'test_assoc_{random.randint(1000, 9999)}'  (4 处同毫秒冲突)
+# 新模式: UserFactory.build() 唯一 username
+from meta.tests.factories import UserFactory, UserGroupFactory
 
 
 @pytest.fixture(scope='class')
@@ -42,17 +46,20 @@ def bo_framework():
 
     framework.set_user_context(user_id=1, user_name='admin')
 
-    username = f'test_assoc_{random.randint(1000, 9999)}'
+    # [FIX 2026-07-17 P0] UserFactory.build() 唯一 username
+    user_data = UserFactory.build()
+    username = user_data['username']
     result = framework.create('user', {
         'username': username,
-        'email': f'{username}@test.com',
-        'display_name': f'Test User {username}',
+        'email': user_data.get('email', f'{username}@test.com'),
+        'display_name': user_data.get('display_name', f'Test User {username}'),
         'password_hash': 'test_hash',
     })
     if result.success:
         framework._test_user_id = result.data['id']
 
-    code = f'test_group_{random.randint(1000, 9999)}'
+    # [FIX 2026-07-17 P0] UserGroupFactory.build() 唯一 code
+    code = UserGroupFactory.build()['code']
     result = framework.create('user_group', {
         'code': code,
         'name': f'测试用户组 {code}',

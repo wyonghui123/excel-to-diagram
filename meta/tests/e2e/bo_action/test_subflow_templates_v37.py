@@ -14,6 +14,10 @@ import json
 
 # admin_token 路径在 conftest.py 已配 (走 sys.path)
 from admin_token import call_action  # noqa: E402
+# [FIX 2026-07-17 P0] 工厂采用率提升
+# 旧模式: f'a3_template_{int(time.time())}'  (4 处同毫秒冲突)
+# 新模式: UserFactory._next_counter()  (PID + atomic counter)
+from meta.tests.factories import UserFactory
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -21,7 +25,7 @@ from admin_token import call_action  # noqa: E402
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 def test_subflow_template_create(bo_action_server_check, admin_cookie):
     """[DECORATIVE] A3.1: PUT /_subflow_template/<name> 创建模板"""
-    name = f'a3_template_{int(time.time())}'
+    name = f'a3_template_{UserFactory._next_counter()}'
     body = json.dumps({
         'description': f'A3.1 test template {name}',
         'steps': [
@@ -48,7 +52,7 @@ def test_subflow_template_create(bo_action_server_check, admin_cookie):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 def test_subflow_template_get(bo_action_server_check, admin_cookie):
     """[DECORATIVE] A3.2: GET /_subflow_template/<name> 获取模板"""
-    name = f'a3_get_{int(time.time())}'
+    name = f'a3_get_{UserFactory._next_counter()}'
     # 先创建
     conn = http.client.HTTPConnection('localhost', 3010, timeout=10)
     body = json.dumps({
@@ -102,7 +106,7 @@ def test_subflow_template_list(bo_action_server_check, admin_cookie):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 def test_subflow_template_delete(bo_action_server_check, admin_cookie):
     """[DECORATIVE] A3.4: DELETE /_subflow_template/<name> 删除模板"""
-    name = f'a3_del_{int(time.time())}'
+    name = f'a3_del_{UserFactory._next_counter()}'
     # 先创建
     conn = http.client.HTTPConnection('localhost', 3010, timeout=10)
     body = json.dumps({
@@ -222,7 +226,7 @@ def test_subflow_inline_templates(bo_action_server_check, admin_cookie):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 def test_subflow_template_reference(bo_action_server_check, admin_cookie):
     """[DECORATIVE] A3.8: _chain template 字段, 引用已存模板"""
-    name = f'a3_ref_{int(time.time())}'
+    name = f'a3_ref_{UserFactory._next_counter()}'
     # 先创建模板
     conn = http.client.HTTPConnection('localhost', 3010, timeout=10)
     body = json.dumps({

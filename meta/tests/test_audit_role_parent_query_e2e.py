@@ -70,8 +70,10 @@ def admin_session():
 def _gen_unique_code(prefix='AUDIT_E2E'):
     """避免硬编码 id 跨次跑冲突 (跟 test-data-rules.md 一致).
     注意: BO v2 端点对 code 格式有强校验 (^[A-Z][A-Z0-9_]*$), 所以保持大写.
+    [FIX 2026-07-17 P0] UserFactory._next_counter() 替代 int(time.time())
     """
-    return f"{prefix}_{int(time.time())}_{uuid.uuid4().hex[:6].upper()}"
+    from meta.tests.factories import UserFactory
+    return f"{prefix}_{UserFactory._next_counter()}_{uuid.uuid4().hex[:6].upper()}"
 
 
 def _query_audit_logs(session, *, object_type=None, object_id=None,

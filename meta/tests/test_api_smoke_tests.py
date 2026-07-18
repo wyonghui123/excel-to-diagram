@@ -23,6 +23,10 @@ import requests
 import json
 import os
 import time
+# [FIX 2026-07-17 P0] 工厂采用率提升
+# 旧模式: f'test_user_{int(time.time())}'  (同毫秒冲突)
+# 新模式: UserFactory.build() 唯一 username/email/display_name
+from meta.tests.factories import UserFactory, RoleFactory
 
 
 BASE_URL = os.environ.get('TEST_API_URL', 'http://localhost:3010')  # v3.18 P1: 修复端口不一致
@@ -121,12 +125,10 @@ class TestAPISmokeTests:
         """
         self._skip_if_no_auth()
 
-        role_name = f'test_role_audit_{int(time.time())}'
-        role_data = {
-            'code': f'test_audit_{int(time.time())}',
-            'name': role_name,
-            'description': '冒烟测试角色'
-        }
+        # [FIX 2026-07-17 P0] RoleFactory.build() 唯一 code/name
+        role_data = RoleFactory.build()
+        role_data['description'] = '冒烟测试角色'
+        role_name = role_data['name']
 
         create_response = requests.post(
             f'{BASE_URL}/api/v2/bo/roles',
@@ -201,12 +203,10 @@ class TestAPISmokeTests:
         """
         self._skip_if_no_auth()
 
-        user_data = {
-            'username': f'test_del_user_{int(time.time())}',
-            'password': 'test123456',
-            'email': f'test_del_{int(time.time())}@example.com',
-            'display_name': f'删除测试用户_{int(time.time())}'
-        }
+        # [FIX 2026-07-17 P0] UserFactory.build() 唯一 username/email
+        user_data = UserFactory.build()
+        user_data['password'] = 'test123456'
+        user_data['display_name'] = f'删除测试用户_{UserFactory._next_counter()}'
 
         create_response = requests.post(
             f'{BASE_URL}/api/v2/bo/users',
@@ -257,11 +257,9 @@ class TestAPISmokeTests:
         """
         self._skip_if_no_auth()
 
-        role_data = {
-            'code': f'test_assoc_{int(time.time())}',
-            'name': f'关联测试角色_{int(time.time())}',
-            'description': '冒烟测试角色'
-        }
+        # [FIX 2026-07-17 P0] RoleFactory.build() 唯一 code/name
+        role_data = RoleFactory.build()
+        role_data['description'] = '冒烟测试角色'
 
         create_response = requests.post(
             f'{BASE_URL}/api/v2/bo/roles',
@@ -308,7 +306,7 @@ class TestAPISmokeTests:
         """
         self._skip_if_no_auth()
 
-        timestamp = int(time.time() * 1000)
+        timestamp = UserFactory._next_counter()
         enum_data = {
             'id': f'TE{timestamp}',
             'name': f'测试枚举_{timestamp}',

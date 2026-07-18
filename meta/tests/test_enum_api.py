@@ -10,6 +10,10 @@ GAP-006: enum_api 端到端测试 (15 用例)
 import json
 import time
 import pytest
+# [FIX 2026-07-17 P0] 工厂采用率提升
+# 旧模式: f'test_enum_{int(time.time())}'  (7 处同毫秒冲突)
+# 新模式: UserFactory._next_counter()  (PID + atomic counter)
+from meta.tests.factories import UserFactory
 
 pytestmark = pytest.mark.integration
 
@@ -65,7 +69,7 @@ class TestEnumAPI:
 
     def test_create_then_get_enum_type(self, api_client, admin_headers):
         """端到端: 创建枚举类型 → 读取 (admin)"""
-        enum_id = f'test_enum_{int(time.time())}'
+        enum_id = f'test_enum_{UserFactory._next_counter()}'
         resp = api_client.post(
             f'{ENUM_URL}/enum-types',
             json={
@@ -90,7 +94,7 @@ class TestEnumAPI:
     def test_create_enum_value_in_known_type(self, api_client, admin_headers):
         """POST /enum-types/<id>/values 在已存在类型下创建值"""
         # 先创建类型
-        enum_id = f'test_enum_v_{int(time.time())}'
+        enum_id = f'test_enum_v_{UserFactory._next_counter()}'
         api_client.post(
             f'{ENUM_URL}/enum-types',
             json={'id': enum_id, 'name': 'Test V', 'category': 'business', 'mutability': 'extensible'},
@@ -119,7 +123,7 @@ class TestEnumAPI:
 
     def test_create_enum_value_missing_fields_400(self, api_client, admin_headers):
         """POST /enum-types/<id>/values 缺 code/name → 400"""
-        enum_id = f'test_ef_{int(time.time())}'
+        enum_id = f'test_ef_{UserFactory._next_counter()}'
         api_client.post(
             f'{ENUM_URL}/enum-types',
             json={'id': enum_id, 'name': 'T', 'category': 'business', 'mutability': 'extensible'},
@@ -135,7 +139,7 @@ class TestEnumAPI:
 
     def test_list_enum_options_for_type(self, api_client, admin_headers):
         """GET /enums/<id>/options 轻量级选项 (仅 code/name)"""
-        enum_id = f'test_opt_{int(time.time())}'
+        enum_id = f'test_opt_{UserFactory._next_counter()}'
         api_client.post(
             f'{ENUM_URL}/enum-types',
             json={'id': enum_id, 'name': 'Opt', 'category': 'business', 'mutability': 'extensible'},
@@ -150,7 +154,7 @@ class TestEnumAPI:
 
     def test_list_enum_values_for_type(self, api_client, admin_headers):
         """GET /enum-types/<id>/values 完整列表"""
-        enum_id = f'test_lv_{int(time.time())}'
+        enum_id = f'test_lv_{UserFactory._next_counter()}'
         api_client.post(
             f'{ENUM_URL}/enum-types',
             json={'id': enum_id, 'name': 'LV', 'category': 'business', 'mutability': 'extensible'},
@@ -174,7 +178,7 @@ class TestEnumAPI:
 
     def test_update_enum_type_works(self, api_client, admin_headers):
         """PUT /enum-types/<id> 业务枚举可更新"""
-        enum_id = f'test_up_{int(time.time())}'
+        enum_id = f'test_up_{UserFactory._next_counter()}'
         api_client.post(
             f'{ENUM_URL}/enum-types',
             json={'id': enum_id, 'name': 'UP', 'category': 'business', 'mutability': 'extensible'},
@@ -194,7 +198,7 @@ class TestEnumAPI:
     def test_query_enum_values_via_general_endpoint(self, api_client, admin_headers):
         """GET /enum-values?enum_type_id=xxx 通用查询端点
         注: /api/v1/enum-values 已迁移 → 410"""
-        enum_id = f'test_qy_{int(time.time())}'
+        enum_id = f'test_qy_{UserFactory._next_counter()}'
         api_client.post(
             f'{ENUM_URL}/enum-types',
             json={'id': enum_id, 'name': 'QY', 'category': 'business', 'mutability': 'extensible'},

@@ -87,7 +87,9 @@ def admin_cookie():
 @pytest.fixture
 def unique_suffix():
     # 必须符合 ^[A-Z][A-Z0-9_]*$ 格式
-    return f'V007_{int(time.time())}_{uuid.uuid4().hex[:6].upper()}'
+    # [FIX 2026-07-17 P0] 用 UserFactory._next_counter() 替代 int(time.time())
+    from meta.tests.factories import UserFactory
+    return f'V007_{UserFactory._next_counter()}_{uuid.uuid4().hex[:6].upper()}'
 
 
 def _query_db(sql, params=()):

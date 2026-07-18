@@ -19,6 +19,10 @@ import pytest
 import json
 import time
 from datetime import datetime
+# [FIX 2026-07-17 P0] 工厂采用率提升
+# 旧模式: f'test_user_{int(time.time())}'  (同毫秒冲突, 不可重入)
+# 新模式: UserFactory.create()  (counter+lock 唯一保证)
+from meta.tests.factories import UserFactory, RoleFactory
 
 
 class TestAuditInterceptorUnified:
@@ -47,12 +51,11 @@ class TestAuditInterceptorUnified:
     @pytest.mark.requires_cleanup
     def test_user_create_audit(self, shared_client, admin_headers):
         """测试用户创建审计日志"""
-        test_user = {
-            'username': f'test_user_{int(time.time())}',
-            'password': 'test123456',
-            'email': f'test_{int(time.time())}@example.com',
-            'display_name': f'测试用户_{int(time.time())}'
-        }
+        # [FIX 2026-07-17 P0] 改用 UserFactory.build() 替代 hardcoded 时间戳 ID
+        # 旧: 32 处 f'test_user_{int(time.time())}'  (同毫秒冲突, 不可重入, 不可并行)
+        # 新: UserFactory.build() 只构造数据, 不写 DB (用 shared_client.post 调 API)
+        #      username/email/display_name 自动唯一
+        test_user = UserFactory.build()
 
         response = shared_client.post(
             '/api/v2/bo/user',
@@ -81,12 +84,8 @@ class TestAuditInterceptorUnified:
     @pytest.mark.requires_cleanup
     def test_user_update_audit_with_changes(self, shared_client, admin_headers):
         """测试用户更新审计日志（值有变化）"""
-        test_user = {
-            'username': f'test_user_{int(time.time())}',
-            'password': 'test123456',
-            'email': f'test_{int(time.time())}@example.com',
-            'display_name': f'测试用户_{int(time.time())}'
-        }
+        # [FIX 2026-07-17 P0] UserFactory.build() 唯一 username/email
+        test_user = UserFactory.build()
 
         response = shared_client.post(
             '/api/v2/bo/user',
@@ -105,7 +104,7 @@ class TestAuditInterceptorUnified:
         if not user_id:
             pytest.skip("无法获取创建的用户ID")
 
-        update_data = {'display_name': f'更新后_{int(time.time())}'}
+        update_data = {'display_name': f'更新后_{UserFactory._next_counter()}'}
         response = shared_client.put(
             f'/api/v2/bo/user/{user_id}',
             headers=admin_headers,
@@ -140,12 +139,8 @@ class TestAuditInterceptorUnified:
     @pytest.mark.requires_cleanup
     def test_user_delete_audit(self, shared_client, admin_headers):
         """测试用户删除审计日志"""
-        test_user = {
-            'username': f'test_user_{int(time.time())}',
-            'password': 'test123456',
-            'email': f'test_{int(time.time())}@example.com',
-            'display_name': f'测试用户_{int(time.time())}'
-        }
+        # [FIX 2026-07-17 P0] UserFactory.build() 唯一 username/email
+        test_user = UserFactory.build()
 
         response = shared_client.post(
             '/api/v2/bo/user',
@@ -184,10 +179,8 @@ class TestAuditInterceptorUnified:
     @pytest.mark.requires_cleanup
     def test_role_create_audit(self, shared_client, admin_headers):
         """测试角色创建审计日志"""
-        test_role = {
-            'code': f'test_role_{int(time.time())}',
-            'name': f'测试角色_{int(time.time())}'
-        }
+        # [FIX 2026-07-17 P0] RoleFactory.build() 唯一 code/name
+        test_role = RoleFactory.build()
 
         response = shared_client.post(
             '/api/v2/bo/roles',
@@ -214,10 +207,8 @@ class TestAuditInterceptorUnified:
     @pytest.mark.requires_cleanup
     def test_role_update_audit_with_changes(self, shared_client, admin_headers):
         """测试角色更新审计日志（值有变化）"""
-        test_role = {
-            'code': f'test_role_{int(time.time())}',
-            'name': f'测试角色_{int(time.time())}'
-        }
+        # [FIX 2026-07-17 P0] RoleFactory.build() 唯一 code/name
+        test_role = RoleFactory.build()
 
         response = shared_client.post(
             '/api/v2/bo/roles',
@@ -236,7 +227,7 @@ class TestAuditInterceptorUnified:
         if not role_id:
             pytest.skip("无法获取创建的角色ID")
 
-        update_data = {'name': f'更新后_{int(time.time())}'}
+        update_data = {'name': f'更新后_{RoleFactory._next_counter()}'}
         response = shared_client.put(
             f'/api/v2/bo/roles/{role_id}',
             headers=admin_headers,
@@ -251,10 +242,8 @@ class TestAuditInterceptorUnified:
     @pytest.mark.requires_cleanup
     def test_role_delete_audit(self, shared_client, admin_headers):
         """测试角色删除审计日志"""
-        test_role = {
-            'code': f'test_role_{int(time.time())}',
-            'name': f'测试角色_{int(time.time())}'
-        }
+        # [FIX 2026-07-17 P0] RoleFactory.build()
+        test_role = RoleFactory.build()
 
         response = shared_client.post(
             '/api/v2/bo/roles',
@@ -293,9 +282,11 @@ class TestAuditInterceptorUnified:
     @pytest.mark.requires_cleanup
     def test_enum_type_create_audit(self, shared_client, admin_headers):
         """测试枚举类型创建审计日志"""
+        # [FIX 2026-07-17 P0] enum_type 无 factory, 用 UserFactory._next_counter() 唯一化
+        n = UserFactory._next_counter()
         test_enum = {
-            'code': f'TEST_ENUM_{int(time.time())}',
-            'name': f'测试枚举_{int(time.time())}'
+            'code': f'TEST_ENUM_{n}',
+            'name': f'测试枚举_{n}'
         }
 
         response = shared_client.post(
@@ -323,9 +314,10 @@ class TestAuditInterceptorUnified:
     @pytest.mark.requires_cleanup
     def test_enum_type_update_audit(self, shared_client, admin_headers):
         """测试枚举类型更新审计日志"""
+        n = UserFactory._next_counter()
         test_enum = {
-            'code': f'TEST_ENUM_{int(time.time())}',
-            'name': f'测试枚举_{int(time.time())}'
+            'code': f'TEST_ENUM_{n}',
+            'name': f'测试枚举_{n}'
         }
 
         response = shared_client.post(
@@ -345,7 +337,7 @@ class TestAuditInterceptorUnified:
         if not enum_id:
             pytest.skip("无法获取创建的枚举类型ID")
 
-        update_data = {'name': f'更新后_{int(time.time())}'}
+        update_data = {'name': f'更新后_{UserFactory._next_counter()}'}
         response = shared_client.put(
             f'/api/v2/bo/enum_types/{enum_id}',
             headers=admin_headers,
@@ -360,9 +352,10 @@ class TestAuditInterceptorUnified:
     @pytest.mark.requires_cleanup
     def test_enum_type_delete_audit(self, shared_client, admin_headers):
         """测试枚举类型删除审计日志"""
+        n = UserFactory._next_counter()
         test_enum = {
-            'code': f'TEST_ENUM_{int(time.time())}',
-            'name': f'测试枚举_{int(time.time())}'
+            'code': f'TEST_ENUM_{n}',
+            'name': f'测试枚举_{n}'
         }
 
         response = shared_client.post(
@@ -422,7 +415,7 @@ class TestAuditInterceptorUnified:
         if not group_id:
             pytest.skip("无法获取用户组ID")
 
-        update_data = {'name': f'更新后_{int(time.time())}'}
+        update_data = {'name': f'更新后_{UserFactory._next_counter()}'}
         response = shared_client.put(
             f'/api/v2/bo/user_groups/{group_id}',
             headers=admin_headers,
@@ -461,12 +454,8 @@ class TestAuditInterceptorUnified:
     @pytest.mark.requires_cleanup
     def test_audit_value_comparison_different_value(self, shared_client, admin_headers):
         """测试值对比逻辑：不同值应记录"""
-        test_user = {
-            'username': f'test_user_{int(time.time())}',
-            'password': 'test123456',
-            'email': f'test_{int(time.time())}@example.com',
-            'display_name': f'测试用户_{int(time.time())}'
-        }
+        # [FIX 2026-07-17 P0] UserFactory.build()
+        test_user = UserFactory.build()
 
         response = shared_client.post(
             '/api/v2/bo/user',
@@ -486,7 +475,7 @@ class TestAuditInterceptorUnified:
             pytest.skip("无法获取创建的用户ID")
 
         original_name = data.get('data', {}).get('display_name')
-        update_data = {'display_name': f'变化后的名字_{int(time.time())}'}
+        update_data = {'display_name': f'变化后的名字_{UserFactory._next_counter()}'}
         response = shared_client.put(
             f'/api/v2/bo/user/{user_id}',
             headers=admin_headers,
@@ -508,12 +497,8 @@ class TestAuditInterceptorUnified:
     @pytest.mark.requires_cleanup
     def test_audit_log_required_fields(self, shared_client, admin_headers):
         """测试审计日志必填字段完整性"""
-        test_user = {
-            'username': f'test_user_{int(time.time())}',
-            'password': 'test123456',
-            'email': f'test_{int(time.time())}@example.com',
-            'display_name': f'测试用户_{int(time.time())}'
-        }
+        # [FIX 2026-07-17 P0] UserFactory.build()
+        test_user = UserFactory.build()
 
         response = shared_client.post(
             '/api/v2/bo/user',

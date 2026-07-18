@@ -25,6 +25,8 @@ from meta.services import async_audit_writer as _aaw
 _aaw._TESTING_MODE = True
 
 from meta.core.datasource import get_data_source
+# [FIX 2026-07-17 P0] 工厂采用率提升
+from meta.tests.factories import UserFactory
 
 
 @pytest.fixture
@@ -56,9 +58,10 @@ def _get_audit_logs(action=None, object_type=None, limit=50):
 def _create_user_group_with_roles(ds, user_id, role_id):
     """创建用户组并将用户添加到组，然后给组分配角色"""
     import time
-    import random
-    # v3.18: 添加随机后缀确保 code 唯一
-    random_suffix = f'{int(time.time() * 1000) % 100000}_{random.randint(1000, 9999)}'
+    # [FIX 2026-07-17 P0] 改用 UserFactory._next_counter() 替代 random.randint
+    # 旧: 同毫秒 + 9999 范围冲突
+    # 新: PID + atomic counter, 唯一性有保证
+    random_suffix = f'{UserFactory._next_counter()}_{UserFactory._next_counter()}'
     group_code = f'audit_group_{user_id}_{random_suffix}'
     
     # v3.18: 确保 role 存在

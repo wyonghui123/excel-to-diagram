@@ -15,6 +15,10 @@ import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+# [FIX 2026-07-17 P0] 工厂采用率提升
+# 旧模式: f'concurrent_user_{int(time.time() * 1000)}'  (8 处同毫秒冲突, 并发测试尤其危险)
+# 新模式: UserFactory.build()  (PID + counter, 跨进程安全)
+from meta.tests.factories import UserFactory
 
 pytestmark = pytest.mark.integration
 
@@ -51,7 +55,7 @@ class TestConcurrentCreation:
     def test_concurrent_create_same_username(self, client_and_headers):
         """并发创建相同username的用户，只有一个成功，其他返回冲突错误"""
         client, headers = client_and_headers
-        username = f'concurrent_user_{int(time.time() * 1000)}'
+        username = UserFactory.build()['username']
         
         pre_check_resp = client.post('/api/v2/bo/user',
             data=json.dumps({
@@ -100,23 +104,21 @@ class TestConcurrentCreation:
     def test_concurrent_create_different_users(self, client_and_headers):
         """并发创建不同用户，所有创建都应该成功"""
         client, headers = client_and_headers
-        
+
+        # [FIX 2026-07-17 P0] UserFactory.build() 唯一 username
+        precheck = UserFactory.build()
         pre_check_resp = client.post('/api/v2/bo/user',
-            data=json.dumps({
-                'username': f'precheck_{int(time.time())}',
-                'password': 'test123',
-                'email': f'precheck_{int(time.time())}@test.com'
-            }),
+            data=json.dumps(precheck),
             headers=headers)
         if pre_check_resp.status_code not in [200, 201]:
             pytest.skip("创建功能当前不可用，跳过并发测试")
-        
+
         results = []
 
         def create_user(index):
             try:
                 data = {
-                    'username': f'concurrent_user_{index}_{int(time.time() * 1000)}',
+                    'username': UserFactory.build()['username'],
                     'password': 'test123',
                     'email': f'user{index}@test.com'
                 }
@@ -144,7 +146,7 @@ class TestConcurrentUpdate:
     def test_concurrent_update_same_user(self, client_and_headers):
         """并发更新同一个用户，最后一个更新应该生效，或使用乐观锁机制"""
         client, headers = client_and_headers
-        username = f'concurrent_update_{int(time.time() * 1000)}'
+        username = UserFactory.build()['username']
 
         create_data = {
             'username': username,
@@ -196,7 +198,7 @@ class TestConcurrentUpdate:
     def test_concurrent_update_different_fields(self, client_and_headers):
         """并发更新同一用户的不同字段，所有更新都应该成功"""
         client, headers = client_and_headers
-        username = f'concurrent_fields_{int(time.time() * 1000)}'
+        username = UserFactory.build()['username']
 
         create_data = {
             'username': username,
@@ -253,7 +255,7 @@ class TestConcurrentDelete:
     def test_concurrent_delete_same_user(self, client_and_headers):
         """并发删除同一个用户，只有一个成功，其他返回404错误"""
         client, headers = client_and_headers
-        username = f'concurrent_delete_{int(time.time() * 1000)}'
+        username = UserFactory.build()['username']
 
         create_data = {
             'username': username,
@@ -307,7 +309,7 @@ class TestOptimisticLocking:
     def test_update_with_version_conflict(self, client_and_headers):
         """使用旧版本号更新应该失败，返回409冲突错误"""
         client, headers = client_and_headers
-        username = f'optimistic_lock_{int(time.time() * 1000)}'
+        username = UserFactory.build()['username']
 
         create_data = {
             'username': username,
