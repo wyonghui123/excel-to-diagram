@@ -179,9 +179,14 @@ def create_role():
         return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
 
     data = request.get_json(silent=True) or {}
-    code = data.get('code', '').strip()
-    name = data.get('name', '').strip()
-    description = data.get('description', '').strip()
+
+    # BUG-XXX 修复: 强制 string 类型, 避免 123.strip() AttributeError
+    def _to_str(v):
+        return str(v).strip() if v is not None else ''
+
+    code = _to_str(data.get('code', ''))
+    name = _to_str(data.get('name', ''))
+    description = _to_str(data.get('description', ''))
 
     if not code or not name:
         return jsonify({'success': False, 'message': '角色编码和名称不能为空'}), 400

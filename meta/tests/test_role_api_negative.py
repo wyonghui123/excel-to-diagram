@@ -68,10 +68,9 @@ BAD_PAYLOAD_CASES = [
     ('post', ROLE_URL, {}, 400),  # 缺 name + code
     ('post', ROLE_URL, {'name': 'x'}, 400),  # 缺 code
     ('post', ROLE_URL, {'code': 'X1'}, 400),  # 缺 name
-    # 错误类型 - 实际 API 返回 500 (AttributeError), 这是发现的 BUG-XXX
-    # 严格 type validation 应在 schema 层做, 当前会在 db 层崩
-    ('post', ROLE_URL, {'name': 123, 'code': 'X1'}, [400, 422, 500]),
-    ('post', ROLE_URL, {'name': 'x', 'code': 123}, [400, 422, 500]),
+    # BUG-XXX 修复后: 强制 str() + 校验 - 应返回 400 而非 500
+    ('post', ROLE_URL, {'name': 123, 'code': 'X1'}, 400),  # 数字被转为 '123', code 冲突
+    ('post', ROLE_URL, {'name': 'x', 'code': 123}, [400, 422]),  # code 数字被转 '123', 重复
     # 空字符串
     ('post', ROLE_URL, {'name': '', 'code': 'X1'}, 400),
     ('post', ROLE_URL, {'name': 'x', 'code': ''}, 400),
