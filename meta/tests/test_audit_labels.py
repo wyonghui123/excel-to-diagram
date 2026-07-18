@@ -191,9 +191,11 @@ class TestV1AuditLogsEndpointEnrichment:
         _, client = get_shared_app()
         from meta.services.token_service import TokenService
         from meta.services.auth_provider import UserInfo
+        # [FIX 2026-07-17 P0#3] UserFactory.build() 提供唯一 email
+        from meta.tests.factories import UserFactory
         u = UserInfo(
             user_id='1', username='label_test', display_name='Label Tester',
-            email='l@test.com', roles=['admin'], permissions=['*']
+            email=UserFactory.build()['email'], roles=['admin'], permissions=['*']
         )
         token, _ = TokenService.create_token(u)
         return client, {

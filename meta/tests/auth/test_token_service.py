@@ -47,10 +47,12 @@ class TestTokenCreation:
     def test_token_creation_returns_string(self):
         """Token 创建返回非空字符串"""
         from meta.services.token_service import TokenService
+        # [FIX 2026-07-17 P0#3] UserFactory.build() 提供唯一 username
+        from meta.tests.factories import UserFactory
 
         class MockUserInfo:
             user_id = 1
-            username = "testuser"
+            username = UserFactory.build()['username']
             display_name = "Test User"
             roles = ["admin"]
             permissions = ["*"]
@@ -62,10 +64,13 @@ class TestTokenCreation:
     def test_token_verification_returns_payload(self):
         """Token 验证返回有效 Payload"""
         from meta.services.token_service import TokenService
+        # [FIX 2026-07-17 P0#3] UserFactory.build() 提供唯一 username
+        from meta.tests.factories import UserFactory
+        verify_username = UserFactory.build()['username']
 
         class MockUserInfo:
             user_id = 42
-            username = "verify_test"
+            username = verify_username
             display_name = "Verify Test"
             roles = ["viewer"]
             permissions = ["user:read"]
@@ -75,7 +80,7 @@ class TestTokenCreation:
 
         if payload:
             assert payload['user_id'] == 42
-            assert payload['username'] == 'verify_test'
+            assert payload['username'] == verify_username
 
     def test_token_verification_invalid_token(self):
         """无效 Token 验证返回 None"""
@@ -101,10 +106,12 @@ class TestTokenCreation:
     def test_token_contains_required_claims(self):
         """Token Payload 包含必要声明"""
         from meta.services.token_service import TokenService
+        # [FIX 2026-07-17 P0#3] UserFactory.build() 提供唯一 username
+        from meta.tests.factories import UserFactory
 
         class MockUserInfo:
             user_id = 99
-            username = "claims_test"
+            username = UserFactory.build()['username']
             display_name = "Claims Test"
             roles = ["admin"]
             permissions = ["*"]

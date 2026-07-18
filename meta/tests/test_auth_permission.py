@@ -359,11 +359,13 @@ def test_auth_provider_login():
 def test_token_service():
     print("\n=== 测试 TokenService ===")
     
+    # [FIX 2026-07-17 P0#3] UserFactory.build() 提供唯一 username
+    from meta.tests.factories import UserFactory
     user_info = UserInfo(
         user_id=1,
-        username='testuser',
+        username=UserFactory.build()['username'],
         display_name='Test User',
-        email='test@example.com',
+        email=UserFactory.build()['email'],
         roles=['editor'],
         permissions=['domain:read', 'domain:write']
     )

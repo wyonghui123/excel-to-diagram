@@ -30,8 +30,10 @@ pytestmark = pytest.mark.integration
 
 
 def _mk_token(roles=None, perms=None):
+    # [FIX 2026-07-17 P0#3] UserFactory.build() 提供唯一 email
+    from meta.tests.factories import UserFactory
     u = UserInfo(user_id='1', username='schema_test', display_name='Schema Tester',
-                 email='s@test.com', roles=roles or ['admin'], permissions=perms or ['*'])
+                 email=UserFactory.build()['email'], roles=roles or ['admin'], permissions=perms or ['*'])
     t, _ = TokenService.create_token(u)
     return t
 

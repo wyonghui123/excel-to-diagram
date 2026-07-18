@@ -275,11 +275,13 @@ def test_log_filter_pbkdf2_pattern():
 def test_token_service_create_token_returns_tuple():
     print("\n=== 测试 TokenService.create_token 返回元组 ===")
 
+    # [FIX 2026-07-17 P0#3] UserFactory.build() 提供唯一 username
+    from meta.tests.factories import UserFactory
     user_info = UserInfo(
         user_id=1,
-        username='testuser',
+        username=UserFactory.build()['username'],
         display_name='Test User',
-        email='test@example.com',
+        email=UserFactory.build()['email'],
         roles=['admin'],
         permissions=['*']
     )
@@ -304,11 +306,13 @@ def test_token_service_create_token_returns_tuple():
 def test_token_service_extract_payload():
     print("\n=== 测试 TokenService.extract_payload_without_verification ===")
 
+    # [FIX 2026-07-17 P0#3] UserFactory.build() 提供唯一 username
+    from meta.tests.factories import UserFactory
     user_info = UserInfo(
         user_id=1,
-        username='testuser',
+        username=UserFactory.build()['username'],
         display_name='Test User',
-        email='test@example.com',
+        email=UserFactory.build()['email'],
         roles=['admin'],
         permissions=['*']
     )

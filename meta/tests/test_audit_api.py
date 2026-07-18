@@ -43,8 +43,10 @@ if not os.environ.get('JWT_SECRET_KEY'):
 def _mk_token(roles=None, perms=None):
     from meta.services.token_service import TokenService
     from meta.services.auth_provider import UserInfo
+    # [FIX 2026-07-17 P0#3] UserFactory.build() 提供唯一 email
+    from meta.tests.factories import UserFactory
     u = UserInfo(user_id='1', username='audit_test', display_name='Audit Tester',
-                 email='a@test.com', roles=roles or ['admin'], permissions=perms or ['*'])
+                 email=UserFactory.build()['email'], roles=roles or ['admin'], permissions=perms or ['*'])
     t, _ = TokenService.create_token(u)
     return t
 
@@ -892,11 +894,13 @@ def admin_token():
     from meta.services.token_service import TokenService
     from meta.services.auth_provider import UserInfo
     
+    # [FIX 2026-07-17 P0#3] UserFactory.build() 提供唯一 email
+    from meta.tests.factories import UserFactory
     user = UserInfo(
         user_id='1',
         username='audit_test',
         display_name='Audit Tester',
-        email='audit@test.com',
+        email=UserFactory.build()['email'],
         roles=['admin'],
         permissions=['*']
     )

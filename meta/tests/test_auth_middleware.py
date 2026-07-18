@@ -23,8 +23,10 @@ from meta.services.auth_provider import UserInfo
 
 
 def _mk_token(roles=None, perms=None, user_id='1', username='mw_test'):
+    # [FIX 2026-07-17 P0#3] UserFactory.build() 提供唯一 email
+    from meta.tests.factories import UserFactory
     u = UserInfo(user_id=user_id, username=username, display_name='MW Tester',
-                 email='mw@test.com', roles=roles or ['admin'], permissions=perms or ['*'])
+                 email=UserFactory.build()['email'], roles=roles or ['admin'], permissions=perms or ['*'])
     t, _ = TokenService.create_token(u)
     return t
 
