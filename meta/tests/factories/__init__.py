@@ -67,6 +67,10 @@ from .menu_permission import MenuPermissionFactory
 from .user_group_member import UserGroupMemberFactory
 from .test_table import TestTableFactory
 from .test_objects import TestObjectsFactory
+# [FIX 2026-07-18 P1-6] 新建 3 个 factory, 补枚举和菜单
+from .enum_type import EnumTypeFactory
+from .enum_value import EnumValueFactory
+from .menu import MenuFactory
 
 
 __all__ = [
@@ -105,6 +109,19 @@ __all__ = [
     'PermissionBundleFactory',
     'PermissionRuleFactory',
     'DataPermissionFactory',
+    # [FIX 2026-07-18 P1-5] 新建 factory
+    'TaskExecutionFactory',
+    'ScheduledTaskFactory',
+    'ChangeSubscriptionFactory',
+    'ChangeEventFactory',
+    'MenuPermissionFactory',
+    'UserGroupMemberFactory',
+    'TestTableFactory',
+    'TestObjectsFactory',
+    # [FIX 2026-07-18 P1-6] 新建 factory
+    'EnumTypeFactory',
+    'EnumValueFactory',
+    'MenuFactory',
 ]
 
 

@@ -1,0 +1,17 @@
+# M11 RLS 规则: enum_value (枚举值)
+
+entity: enum_value
+
+# 枚举值是元数据, 所有人可读, admin 可写
+# 注意: 系统枚举值 (is_system=true) 不能修改/删除
+row_filters:
+  - applies_to: [role:admin, role:user, role:viewer, role:manager]
+    condition: "true"
+
+field_masks: []
+
+actions:
+  create: [role:admin]
+  read: [role:admin, role:user, role:viewer, role:manager]
+  update: [role:admin]  # 系统枚举值不可改, 由 enum_type.mutability 进一步控制
+  delete: [role:admin]  # 仅 admin, 且不允许删 is_system=true

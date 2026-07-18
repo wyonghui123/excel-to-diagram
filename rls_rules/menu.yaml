@@ -1,0 +1,19 @@
+# M11 RLS 规则: menu (菜单)
+
+entity: menu
+
+# menu 是公开配置, 所有人可读, 仅 admin 可写
+row_filters:
+  - applies_to: [role:admin, role:user, role:viewer, role:manager]
+    condition: "true"
+
+field_masks:
+  # 普通用户隐藏内部 bo_bindings (用于前端路由)
+  - role: [role:user, role:viewer]
+    fields: [internal_audit_meta]
+
+actions:
+  create: [role:admin]
+  read: [role:admin, role:user, role:viewer, role:manager]
+  update: [role:admin]
+  delete: [role:admin]

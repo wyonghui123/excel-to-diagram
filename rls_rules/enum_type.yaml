@@ -1,0 +1,16 @@
+# M11 RLS 规则: enum_type (枚举类型)
+
+entity: enum_type
+
+# 枚举类型是元数据, 所有人可读, 仅 admin 可写
+row_filters:
+  - applies_to: [role:admin, role:user, role:viewer, role:manager]
+    condition: "true"
+
+field_masks: []
+
+actions:
+  create: [role:admin]
+  read: [role:admin, role:user, role:viewer, role:manager]
+  update: [role:admin]
+  delete: [role:admin]  # 删除时需 cascade 检查 enum_value

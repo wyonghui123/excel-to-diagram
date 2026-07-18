@@ -28,6 +28,8 @@ name: 管理维度对象映射
 description: 管理维度与业务对象字段的映射配置（替代硬编码）
 persistent: false
 
+aspects: [audit_aspect]
+
 # 保留兼容: 业务层级维度 (硬编码层级链)
 dimension_object_mappings:
   # ────────────────────────────────────────
