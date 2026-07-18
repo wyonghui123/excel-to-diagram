@@ -1,0 +1,19 @@
+# M11 RLS 规则：annotation（备注信息）
+
+entity: annotation
+
+row_filters:
+  - applies_to: [role:admin]
+    condition: "true"
+  - applies_to: [role:manager]
+    condition: "true"
+  - applies_to: [role:user, role:viewer]
+    condition: "annotation.created_by == $user.name OR annotation.visibility == 'public'"
+
+field_masks: []
+
+actions:
+  create: [role:admin, role:manager, role:user]
+  read: [role:admin, role:manager, role:user, role:viewer]
+  update: [role:admin, role:manager, role:user]
+  delete: [role:admin, role:manager]

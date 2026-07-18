@@ -8,6 +8,8 @@ name: 员工数据权限范围
 table_name: employee_data_scopes
 description: 员工数据权限范围模板，支持本人/部门/层级三种范围
 
+aspects: [audit_aspect]
+
 semantics:
   meaning: 员工数据权限范围定义
   category: system_entity

@@ -9,6 +9,8 @@ name: 过滤变体
 table_name: filter_variants
 description: 用户保存的过滤条件组合，支持个人和共享变体
 
+aspects: [audit_aspect]
+
 semantics:
   meaning: 过滤变体是用户保存的过滤条件预设
   category: system_entity

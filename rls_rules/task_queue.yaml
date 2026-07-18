@@ -1,0 +1,19 @@
+# M11 RLS 规则：task_queue（任务队列配置）
+
+entity: task_queue
+
+row_filters:
+  - applies_to: [role:admin]
+    condition: "true"
+  - applies_to: [role:manager]
+    condition: "task_queue.queue_type IN ('default', 'scheduled', 'notification')"
+  - applies_to: [role:user, role:viewer]
+    condition: "task_queue.is_public == true"
+
+field_masks: []
+
+actions:
+  create: [role:admin]
+  read: [role:admin, role:manager, role:user, role:viewer]
+  update: [role:admin]
+  delete: [role:admin]

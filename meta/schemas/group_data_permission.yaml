@@ -3,6 +3,8 @@ name: 用户组数据权限
 table_name: group_data_permissions
 description: 用户组的数据访问权限
 
+aspects: [audit_aspect]
+
 fields:
   - id: id
     name: ID

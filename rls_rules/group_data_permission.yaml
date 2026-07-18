@@ -1,0 +1,19 @@
+# M11 RLS 规则：group_data_permission（用户组数据权限）
+
+entity: group_data_permission
+
+row_filters:
+  - applies_to: [role:admin]
+    condition: "true"
+  - applies_to: [role:manager]
+    condition: "group_data_permission.group_id IN ($user.managed_group_ids)"
+  - applies_to: [role:user, role:viewer]
+    condition: "group_data_permission.group_id IN ($user.group_ids)"
+
+field_masks: []
+
+actions:
+  create: [role:admin, role:manager]
+  read: [role:admin, role:manager, role:user, role:viewer]
+  update: [role:admin, role:manager]
+  delete: [role:admin]

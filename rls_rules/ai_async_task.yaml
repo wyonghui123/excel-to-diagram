@@ -1,0 +1,20 @@
+# M11 RLS 规则：ai_async_task（AI异步任务）
+
+entity: ai_async_task
+
+row_filters:
+  - applies_to: [role:admin]
+    condition: "true"
+  - applies_to: [role:manager]
+    condition: "ai_async_task.created_by == $user.id OR ai_async_task.status IN ('completed', 'failed')"
+  - applies_to: [role:user, role:viewer]
+    condition: "ai_async_task.created_by == $user.id"
+
+field_masks: []
+
+actions:
+  create: [role:admin, role:manager, role:user]
+  read: [role:admin, role:manager, role:user, role:viewer]
+  update: [role:admin]
+  delete: [role:admin]
+  cancel: [role:admin, role:manager, role:user]

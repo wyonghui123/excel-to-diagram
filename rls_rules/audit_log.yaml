@@ -1,0 +1,24 @@
+# M11 RLS 规则：audit_log（审计日志）
+
+entity: audit_log
+
+row_filters:
+  - applies_to: [role:admin]
+    condition: "true"
+  - applies_to: [role:manager]
+    condition: "audit_log.object_type != 'user' AND audit_log.object_type != 'role'"
+  - applies_to: [role:user, role:viewer]
+    condition: "audit_log.user_name == $user.name"
+  - applies_to: [role:ai-agent]
+    condition: "audit_log.object_type IN ('business_object', 'domain', 'sub_domain', 'relationship')"
+
+field_masks:
+  - field: changed_fields
+    mask: "***HIDDEN***"
+    applies_to: [role:user, role:viewer, role:ai-agent]
+
+actions:
+  create: []
+  read: [role:admin, role:manager, role:user, role:viewer, role:ai-agent]
+  update: []
+  delete: [role:admin]

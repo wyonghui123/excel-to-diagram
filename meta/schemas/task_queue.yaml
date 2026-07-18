@@ -9,6 +9,8 @@ table_name: task_queues
 description: 管理任务调度队列，每个队列有独立的线程池和优先级
 persistent: true
 
+aspects: [audit_aspect]
+
 semantics:
   meaning: 任务调度队列配置
   category: system_entity

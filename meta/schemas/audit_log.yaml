@@ -21,6 +21,8 @@ import_export:
 # ────────────────────────────────────────────
 # 语义标注
 # ────────────────────────────────────────────
+aspects: [audit_aspect]
+
 semantics:
   meaning: 系统审计日志
   category: system_entity

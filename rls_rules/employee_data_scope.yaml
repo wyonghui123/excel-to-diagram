@@ -1,0 +1,19 @@
+# M11 RLS 规则：employee_data_scope（员工数据权限范围）
+
+entity: employee_data_scope
+
+row_filters:
+  - applies_to: [role:admin]
+    condition: "true"
+  - applies_to: [role:manager]
+    condition: "employee_data_scope.scope_type IN ('self', 'department', 'hierarchy')"
+  - applies_to: [role:user, role:viewer]
+    condition: "employee_data_scope.scope_type == 'self'"
+
+field_masks: []
+
+actions:
+  create: [role:admin, role:manager]
+  read: [role:admin, role:manager, role:user, role:viewer]
+  update: [role:admin, role:manager]
+  delete: [role:admin]

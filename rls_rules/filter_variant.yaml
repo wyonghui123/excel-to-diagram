@@ -1,0 +1,19 @@
+# M11 RLS 规则：filter_variant（过滤变体）
+
+entity: filter_variant
+
+row_filters:
+  - applies_to: [role:admin]
+    condition: "true"
+  - applies_to: [role:manager]
+    condition: "filter_variant.owner_id == $user.id OR filter_variant.is_shared == true"
+  - applies_to: [role:user, role:viewer]
+    condition: "filter_variant.owner_id == $user.id OR filter_variant.is_shared == true"
+
+field_masks: []
+
+actions:
+  create: [role:admin, role:manager, role:user]
+  read: [role:admin, role:manager, role:user, role:viewer]
+  update: [role:admin, role:manager, role:user]
+  delete: [role:admin, role:manager, role:user]

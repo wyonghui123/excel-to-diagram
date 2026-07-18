@@ -9,6 +9,8 @@ table_name: ai_async_tasks
 description: AI Agent异步执行的长期任务队列，支持优先级调度和成本追踪
 persistent: true
 
+aspects: [audit_aspect]
+
 semantics:
   meaning: AI异步任务队列
   category: system_entity
