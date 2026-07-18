@@ -159,6 +159,53 @@ def test_constraint_discovery_ran(constraint_specs):
 
 
 # ============================================================
+# v1.1 P0#2 新增: Hardcoded ID Lint Guard
+# ============================================================
+# 防止 f-string-int-time-time / random.randint 等高冲突风险模式蔓延
+# 调用 .trae/debug/lint_no_hardcoded_id.py 扫描 meta/tests, 必须保持 0 error
+# (warning / low 暂时允许, 未来逐个消除)
+
+def test_no_hardcoded_id_in_test_files():
+    """[P0#2 guard] 任何 meta/tests/test_*.py 不能有 f-string with int(time.time()) 模式.
+
+    退出条件 (lint default mode):
+      - 0 error: 通过
+      - >0 error: fail, 输出 lint 报告
+
+    这个 test 是工厂采用率的"长期保护" - 一旦有人新增 f-string-int-time-time,
+    v1.1 strict mode 立刻 fail, 防止 hardcoded 蔓延.
+    """
+    import subprocess
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    # lint 工具位置: 项目根 .trae/debug/lint_no_hardcoded_id.py
+    repo_root = _Path(__file__).resolve().parents[3]  # meta/tests/_yaml_driver/test_*.py -> 仓库根
+    lint_script = repo_root / ".trae" / "debug" / "lint_no_hardcoded_id.py"
+
+    if not lint_script.exists():
+        pytest.skip(f"lint 工具不存在: {lint_script}")
+
+    r = subprocess.run(
+        [_sys.executable, str(lint_script)],
+        capture_output=True, text=True, cwd=str(repo_root),
+        timeout=120,
+    )
+
+    # default 模式: 0 error = pass, >0 = fail
+    if r.returncode != 0:
+        # 提取关键信息 (前 60 行)
+        out_lines = (r.stdout or "").splitlines()
+        summary = "\n".join(out_lines[:60])
+        pytest.fail(
+            f"[P0#2] hardcoded ID detected in meta/tests/\n"
+            f"lint 退出码: {r.returncode}\n"
+            f"摘要 (前 60 行):\n{summary}\n"
+            f"修复: 用 UserFactory.build() / UserFactory._next_counter() 替换"
+        )
+
+
+# ============================================================
 # v1.1 新增: Aspects / RLS / Factory 一致性约束测试
 # ============================================================
 #
