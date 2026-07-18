@@ -1,6 +1,6 @@
 import pytest
 
-pytestmark = [pytest.mark.unit, pytest.mark.xfail(reason="v1.4 行为变更 - 待修复", strict=False)]
+pytestmark = [pytest.mark.unit, pytest.mark.xfail(reason="v1.4 interceptor 行为变更, 待修复 (XPASS=实际已通过)", strict=False)]
 
 # -*- coding: utf-8 -*-
 """

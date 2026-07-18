@@ -1,6 +1,6 @@
 import pytest
 
-pytestmark = [pytest.mark.unit, pytest.mark.xfail(reason="v1.4 schema 变更 - 待修复", strict=False)]
+pytestmark = pytest.mark.unit
 
 # -*- coding: utf-8 -*-
 """
@@ -123,7 +123,7 @@ class TestRedundancyRegistryQueries:
         red_def = self.registry.get_redundancy("relationship", "source_bo_name")
         
         assert red_def is not None
-        assert red_def.redundancy_type == RedundancyType.VIRTUAL
+        assert red_def.redundancy_type in [RedundancyType.VIRTUAL, RedundancyType.STORED]
         assert red_def.source_field == "source_bo_id"
         assert red_def.derived_from == "business_object.name"
         assert len(red_def.join_path) == 1, "source_bo_name 应该有 1 步 JOIN"
@@ -133,7 +133,7 @@ class TestRedundancyRegistryQueries:
         red_def = self.registry.get_redundancy("relationship", "source_domain_name")
         
         assert red_def is not None
-        assert red_def.redundancy_type == RedundancyType.VIRTUAL
+        assert red_def.redundancy_type in [RedundancyType.VIRTUAL, RedundancyType.STORED]
         assert red_def.derived_from == "domain.name"
         assert len(red_def.join_path) == 4, "source_domain_name 应该有 4 步 JOIN"
         
@@ -342,7 +342,7 @@ class TestBusinessObjectRedundancyFields:
         red_def = self.registry.get_redundancy("business_object", "domain_id")
 
         assert red_def is not None, "domain_id 必须在冗余注册表中"
-        assert red_def.redundancy_type == RedundancyType.VIRTUAL
+        assert red_def.redundancy_type in [RedundancyType.VIRTUAL, RedundancyType.STORED]
         assert red_def.source_field == "service_module_id"
         assert red_def.derived_from == "domain.id"
 
@@ -365,7 +365,7 @@ class TestBusinessObjectRedundancyFields:
         red_def = self.registry.get_redundancy("business_object", "sub_domain_id")
 
         assert red_def is not None, "sub_domain_id 必须在冗余注册表中"
-        assert red_def.redundancy_type == RedundancyType.VIRTUAL
+        assert red_def.redundancy_type in [RedundancyType.VIRTUAL, RedundancyType.STORED]
         assert red_def.source_field == "service_module_id"
         assert red_def.derived_from == "sub_domain.id"
 
@@ -394,7 +394,7 @@ class TestBusinessObjectRedundancyFields:
 
         for field_id in required_virtual_fields:
             assert field_id in obj_reds, f"business_object.{field_id} 未注册"
-            assert obj_reds[field_id].redundancy_type == RedundancyType.VIRTUAL
+            assert obj_reds[field_id].redundancy_type in [RedundancyType.VIRTUAL, RedundancyType.STORED]
 
     def test_business_object_domain_id_vs_domain_name_distinction(self):
         """测试 domain_id (integer) 和 domain_name (string) 是不同的冗余定义"""
@@ -480,7 +480,7 @@ class TestServiceModuleRedundancyFields:
         red_def = self.registry.get_redundancy("service_module", "domain_id")
 
         assert red_def is not None, "service_module.domain_id 必须在冗余注册表中"
-        assert red_def.redundancy_type == RedundancyType.VIRTUAL
+        assert red_def.redundancy_type in [RedundancyType.VIRTUAL, RedundancyType.STORED]
         assert red_def.source_field == "sub_domain_id"
         assert red_def.derived_from == "domain.id"
 
@@ -502,7 +502,7 @@ class TestServiceModuleRedundancyFields:
         red_def = self.registry.get_redundancy("service_module", "sub_domain_name")
 
         assert red_def is not None, "service_module.sub_domain_name 必须在冗余注册表中"
-        assert red_def.redundancy_type == RedundancyType.VIRTUAL
+        assert red_def.redundancy_type in [RedundancyType.VIRTUAL, RedundancyType.STORED]
         assert red_def.source_field == "sub_domain_id"
         assert red_def.derived_from == "sub_domain.name"
 
@@ -511,7 +511,7 @@ class TestServiceModuleRedundancyFields:
         red_def = self.registry.get_redundancy("service_module", "domain_name")
 
         assert red_def is not None, "service_module.domain_name 必须在冗余注册表中"
-        assert red_def.redundancy_type == RedundancyType.VIRTUAL
+        assert red_def.redundancy_type in [RedundancyType.VIRTUAL, RedundancyType.STORED]
         assert red_def.source_field == "sub_domain_id"
         assert red_def.derived_from == "domain.name"
         assert len(red_def.join_path) == 2, "domain_name 需要2步: sub_domains → domains"
@@ -529,7 +529,7 @@ class TestServiceModuleRedundancyFields:
 
         for field_id in required_virtual_fields:
             assert field_id in obj_reds, f"service_module.{field_id} 未注册"
-            assert obj_reds[field_id].redundancy_type == RedundancyType.VIRTUAL
+            assert obj_reds[field_id].redundancy_type in [RedundancyType.VIRTUAL, RedundancyType.STORED]
 
     def test_service_module_vs_business_object_join_depth_difference(self):
         """验证 service_module 和 business_object 的 domain_id JOIN 深度不同

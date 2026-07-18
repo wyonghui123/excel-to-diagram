@@ -1,6 +1,6 @@
 import pytest
 
-pytestmark = [pytest.mark.unit, pytest.mark.xfail(reason="v1.4 行为变更 - 待修复", strict=False)]
+pytestmark = [pytest.mark.unit, pytest.mark.xfail(reason="v1.4 association validator 错误消息变更 (source_name/源对象), 待修复", strict=False)]
 
 # -*- coding: utf-8 -*-
 """

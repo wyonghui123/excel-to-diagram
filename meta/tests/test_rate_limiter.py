@@ -13,7 +13,7 @@ import os
 import time
 import pytest
 
-pytestmark = [pytest.mark.unit, pytest.mark.xfail(reason="v1.4 行为变更 - 待修复", strict=False)]
+pytestmark = [pytest.mark.unit, pytest.mark.xfail(reason="v1.4 rate limiter 阈值变更, 待修复", strict=False)]
 
 
 class TestRateLimiter:

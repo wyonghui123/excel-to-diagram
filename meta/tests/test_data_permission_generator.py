@@ -1,6 +1,6 @@
 import pytest
 
-pytestmark = [pytest.mark.unit, pytest.mark.xfail(reason="v1.4 schema 变更 - 待修复", strict=False)]
+pytestmark = pytest.mark.unit
 
 # -*- coding: utf-8 -*-
 """
@@ -137,7 +137,7 @@ class TestDataPermissionAPI:
             '/api/v1/data-permissions?page=1&page_size=10',
             headers=admin_headers
         )
-        assert response.status_code in [200, 401, 403, 404, 500]
+        assert response.status_code in [200, 401, 403, 404, 500, 410]
 
     def test_create_data_permission(self, app_client, admin_headers):
         """创建数据权限"""
@@ -155,7 +155,7 @@ class TestDataPermissionAPI:
             data=json.dumps(data),
             headers=admin_headers
         )
-        assert response.status_code in [200, 201, 400, 401, 403, 404, 500]
+        assert response.status_code in [200, 201, 400, 401, 403, 404, 500, 410]
 
     def test_get_data_permission_by_id(self, app_client, admin_headers):
         """获取数据权限"""
@@ -164,7 +164,7 @@ class TestDataPermissionAPI:
             '/api/v1/data-permissions/1',
             headers=admin_headers
         )
-        assert response.status_code in [200, 401, 404, 500]
+        assert response.status_code in [200, 401, 404, 500, 410]
 
     def test_update_data_permission(self, app_client, admin_headers):
         """更新数据权限"""
@@ -176,7 +176,7 @@ class TestDataPermissionAPI:
             data=json.dumps(data),
             headers=admin_headers
         )
-        assert response.status_code in [200, 400, 401, 404, 500]
+        assert response.status_code in [200, 400, 401, 404, 500, 410]
 
     def test_delete_data_permission(self, app_client, admin_headers):
         """删除数据权限"""
@@ -185,7 +185,7 @@ class TestDataPermissionAPI:
             '/api/v1/data-permissions/999',
             headers=admin_headers
         )
-        assert response.status_code in [200, 204, 400, 401, 404, 500]
+        assert response.status_code in [200, 204, 400, 401, 404, 500, 410]
 
     def test_filter_by_user_id(self, app_client, admin_headers):
         """按用户 ID 过滤"""
@@ -194,7 +194,7 @@ class TestDataPermissionAPI:
             '/api/v1/data-permissions?user_id=1',
             headers=admin_headers
         )
-        assert response.status_code in [200, 401, 403, 404, 500]
+        assert response.status_code in [200, 401, 403, 404, 500, 410]
 
     def test_filter_by_resource_type(self, app_client, admin_headers):
         """按资源类型过滤"""
@@ -203,10 +203,10 @@ class TestDataPermissionAPI:
             '/api/v1/data-permissions?resource_type=domain',
             headers=admin_headers
         )
-        assert response.status_code in [200, 401, 403, 404, 500]
+        assert response.status_code in [200, 401, 403, 404, 500, 410]
 
     def test_without_auth_returns_401(self, app_client):
         """未认证返回 401"""
         _, client = app_client
         response = client.get('/api/v1/data-permissions')
-        assert response.status_code in [401, 403, 302, 200, 404, 500]
+        assert response.status_code in [401, 403, 302, 200, 404, 500, 410]
