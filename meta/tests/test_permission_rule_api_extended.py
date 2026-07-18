@@ -48,7 +48,7 @@ def auth_headers(admin_token):
 
 def test_list_rules(client, auth_headers):
     resp = client.get('/api/v1/permission-rules', headers=auth_headers)
-    assert resp.status_code in [200, 401, 404, 500]
+    assert resp.status_code in [200, 401, 404, 500, 410]
     if resp.status_code == 200:
         data = resp.get_json()
         assert data.get('success', False) is True
@@ -56,7 +56,7 @@ def test_list_rules(client, auth_headers):
 
 def test_get_rule_by_id(client, auth_headers):
     resp = client.get('/api/v1/permission-rules/99999', headers=auth_headers)
-    assert resp.status_code in [200, 401, 404, 500]
+    assert resp.status_code in [200, 401, 404, 500, 410]
     if resp.status_code in (200, 404):
         data = resp.get_json()
         assert 'success' in data
@@ -66,14 +66,20 @@ def test_create_rule_unauthorized(client):
     resp = client.post('/api/v1/permission-rules', json={
         'role_id': 1, 'resource_type': 'domain', 'condition': 'version_id = 1'
     })
-    assert resp.status_code in (200, 401, 403, 404, 500)
+    # v1.4 P8: permission-rules v1 API 已 sunset (410)
+    assert resp.status_code in (200, 401, 403, 404, 410, 500)
 
 
 def test_create_rule_success(client, auth_headers):
     resp = client.post('/api/v1/permission-rules', json={
         'role_id': 1, 'resource_type': 'domain', 'condition': 'version_id = 1'
     }, headers=auth_headers)
-    assert resp.status_code in [200, 401, 404, 500]
+    # v1.4 P8: permission-rules v1 API 已 sunset (410)
+    # 如果 410, 不检查 success 字段 (sunset 响应结构不同)
+    if resp.status_code == 410:
+        # v1 已 sunset - 这是正确的, 跳过 success 校验
+        return
+    assert resp.status_code in [200, 401, 404, 500, 410]
     data = resp.get_json()
     assert data.get('success', False) is True
 
@@ -88,7 +94,7 @@ def test_update_rule(client, auth_headers):
         resp = client.put(f'/api/v1/permission-rules/{rule_id}', json={
             'condition': 'version_id = 2'
         }, headers=auth_headers)
-        assert resp.status_code in [200, 401, 404, 500]
+        assert resp.status_code in [200, 401, 404, 500, 410]
         if resp.status_code == 200:
             data = resp.get_json()
             assert data.get('success', False) is True
@@ -96,7 +102,7 @@ def test_update_rule(client, auth_headers):
         resp = client.put('/api/v1/permission-rules/1', json={
             'condition': 'version_id = 2'
         }, headers=auth_headers)
-        assert resp.status_code in [200, 401, 404, 500]
+        assert resp.status_code in [200, 401, 404, 500, 410]
 
 
 def test_delete_rule(client, auth_headers):
@@ -107,20 +113,20 @@ def test_delete_rule(client, auth_headers):
     if create_data.get('success') and create_data.get('data', {}).get('id'):
         rule_id = create_data.get('data', {})['id']
         resp = client.delete(f'/api/v1/permission-rules/{rule_id}', headers=auth_headers)
-        assert resp.status_code in [200, 401, 404, 500]
+        assert resp.status_code in [200, 401, 404, 500, 410]
         if resp.status_code == 200:
             data = resp.get_json()
             assert data.get('success', False) is True
     else:
         resp = client.delete('/api/v1/permission-rules/1', headers=auth_headers)
-        assert resp.status_code in [200, 401, 404, 500]
+        assert resp.status_code in [200, 401, 404, 500, 410]
 
 
 def test_preview_matching(client, auth_headers):
     resp = client.post('/api/v1/permission-rules/preview', json={
         'condition': '1=1', 'resource_type': 'domain'
     }, headers=auth_headers)
-    assert resp.status_code in [200, 401, 404, 500]
+    assert resp.status_code in [200, 401, 404, 500, 410]
     if resp.status_code == 200:
         data = resp.get_json()
         assert data.get('success', False) is True
@@ -130,12 +136,12 @@ def test_check_permission(client, auth_headers):
     resp = client.post('/api/v1/permission-rules/check', json={
         'resource_type': 'domain', 'resource_id': 1, 'action': 'read'
     }, headers=auth_headers)
-    assert resp.status_code in (200, 401, 500)
+    assert resp.status_code in (200, 401, 500, 410)
 
 
 def test_get_dimensions(client, auth_headers):
     resp = client.get('/api/v1/permission-rules/dimensions', headers=auth_headers)
-    assert resp.status_code in [200, 401, 404, 500]
+    assert resp.status_code in [200, 401, 404, 500, 410]
     if resp.status_code == 200:
         data = resp.get_json()
         assert data.get('success', False) is True
@@ -143,7 +149,7 @@ def test_get_dimensions(client, auth_headers):
 
 def test_get_field_metadata(client, auth_headers):
     resp = client.get('/api/v1/permission-rules/field-metadata?resource_type=domain', headers=auth_headers)
-    assert resp.status_code in [200, 401, 404, 500]
+    assert resp.status_code in [200, 401, 404, 500, 410]
     if resp.status_code == 200:
         data = resp.get_json()
         assert data.get('success', False) is True

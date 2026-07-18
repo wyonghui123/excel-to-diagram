@@ -60,7 +60,7 @@ def admin_session():
         pytest.skip(f"dev-login failed, status={r.status_code}: {r.text[:200]}")
     # 验证 cookie 真的能访问受保护 API
     r = s.get(f'{BASE_URL}/api/v1/roles?page=1&page_size=1')
-    if r.status_code not in (200, 401, 403):
+    if r.status_code not in (200, 401, 403, 410):
         pytest.skip(f"Cookie invalid, status={r.status_code}")
     if r.status_code == 401:
         pytest.skip(f"Cookie rejected (401) — server may need restart")
