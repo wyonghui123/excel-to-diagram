@@ -23,7 +23,7 @@ import pytest
 import os
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parents[2]  # meta/tests/ -> excel-to-diagram/
 
 
 def _ensure_registry():

@@ -29,7 +29,7 @@ import sqlite3
 import os
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parents[2]  # meta/tests/ -> excel-to-diagram/
 DB_PATH = PROJECT_ROOT / 'meta' / 'architecture.db'
 
 

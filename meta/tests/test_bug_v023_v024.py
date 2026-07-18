@@ -29,7 +29,7 @@ import json
 import pytest
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parents[2]  # meta/tests/ -> excel-to-diagram/
 VERSION_YAML = PROJECT_ROOT / 'meta' / 'schemas' / 'version.yaml'
 SERVICE_FILE = PROJECT_ROOT / 'meta' / 'services' / 'import_export_service.py'
 
@@ -90,23 +90,25 @@ class TestBugV023VersionYamlOverrides:
             "(让 product sheet 展示, version sheet 不展示)"
         )
 
-    def test_visibility_override_exists(self):
-        """version.yaml 必须有 - id: visibility 字段定义 (覆盖继承)"""
+    def test_visibility_no_override_in_version_yaml(self):
+        """BUG-V025: version.yaml 不应定义 visibility 字段 (上移到 product 层)"""
         text = _read_yaml()
-        assert '- id: visibility' in text, (
-            "BUG-V023: version.yaml 必须定义 visibility 字段 (覆盖 owner_aspect 继承)"
+        # V025 决定: visibility 在 product 层管理, version 不应重复定义
+        # (否则与 owner_aspect 冲突)
+        assert '- id: visibility' not in text, (
+            "BUG-V025: version.yaml 不应定义 visibility 字段 "
+            "(visibility 在 product 层管理). 如要重新加入, 必须评估与 owner_aspect 的冲突"
         )
 
-    def test_visibility_export_visible_false(self):
-        """version.yaml 的 visibility 必须 export_visible: false"""
+    def test_visibility_removal_comment_exists(self):
+        """version.yaml 应有 visibility 字段删除/上移的注释记录"""
         text = _read_yaml()
-        m = re.search(
-            r'-\s+id:\s+visibility\s*\n.*?export_visible:\s*false',
-            text,
-            re.DOTALL,
+        # 应有注释表明 visibility 已上移到 product
+        has_comment = 'visibility' in text and (
+            '上移' in text or '移到' in text or '删' in text or 'removed' in text.lower()
         )
-        assert m, (
-            "BUG-V023: version.yaml 的 visibility 字段必须有 export_visible: false"
+        assert has_comment, (
+            "BUG-V025: version.yaml 缺少 visibility 字段删除/上移的注释记录"
         )
 
 
