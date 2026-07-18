@@ -1,3 +1,6 @@
+
+aspects: [audit_aspect]
+
 id: user_group_member
 name: 用户组成员
 table_name: user_group_members

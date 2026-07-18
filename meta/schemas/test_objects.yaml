@@ -3,6 +3,9 @@
 # 用于单元测试和集成测试
 # ============================================
 
+
+aspects: [audit_aspect]
+
 id: test_objects
 name: 测试对象
 table_name: test_objects

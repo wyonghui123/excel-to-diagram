@@ -1,0 +1,22 @@
+# M11 RLS 规则: dimension_object_mapping (维度对象映射配置)
+
+entity: dimension_object_mapping
+
+# dimension_object_mapping 是配置型 (persistent: false), 无 DB 表
+# 这里仅定义访问策略, 加载逻辑走 DimensionObjectMappingLoader
+
+row_filters:
+  # admin 可读写
+  - applies_to: [role:admin]
+    condition: "true"
+  # 所有人可读 (这是公开配置)
+  - applies_to: [role:user, role:viewer, role:manager]
+    condition: "true"
+
+field_masks: []
+
+actions:
+  create: [role:admin]
+  read: [role:admin, role:user, role:viewer, role:manager]
+  update: [role:admin]
+  delete: [role:admin]

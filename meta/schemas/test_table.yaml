@@ -3,6 +3,9 @@
 # 用于简单的事务测试
 # ============================================
 
+
+aspects: [audit_aspect]
+
 id: test_table
 name: 测试表
 table_name: test_table

@@ -1,0 +1,16 @@
+# M11 RLS 规则: test_objects (测试对象)
+
+entity: test_objects
+
+# test_objects 是开放测试对象 (authorization.check = false)
+row_filters:
+  - applies_to: [role:admin, role:user, role:viewer, role:manager]
+    condition: "true"
+
+field_masks: []
+
+actions:
+  create: [role:admin, role:user, role:viewer, role:manager]
+  read: [role:admin, role:user, role:viewer, role:manager]
+  update: [role:admin, role:user, role:viewer, role:manager]
+  delete: [role:admin, role:user, role:viewer, role:manager]

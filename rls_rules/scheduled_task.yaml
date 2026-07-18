@@ -1,0 +1,22 @@
+# M11 RLS 规则: scheduled_task (任务定义)
+
+entity: scheduled_task
+
+row_filters:
+  # admin 看全部任务定义
+  - applies_to: [role:admin]
+    condition: "true"
+  # 任务创建者/负责人可看自己创建的任务
+  - applies_to: [role:user, role:viewer]
+    condition: "scheduled_task.owner_id = $user.id OR scheduled_task.is_public = true"
+
+field_masks:
+  # 普通用户隐藏 handler 内部实现细节
+  - role: [role:user, role:viewer]
+    fields: [handler_impl]
+
+actions:
+  create: [role:admin, role:manager]
+  read: [role:admin, role:manager, role:user, role:viewer]
+  update: [role:admin, role:manager]
+  delete: [role:admin]

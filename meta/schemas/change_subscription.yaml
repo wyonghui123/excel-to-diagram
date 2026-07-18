@@ -3,6 +3,9 @@
 # 说明: 存储用户订阅配置，支持灵活的事件订阅
 # ============================================
 
+
+aspects: [audit_aspect]
+
 id: change_subscription
 name: 变更订阅
 table_name: change_subscriptions

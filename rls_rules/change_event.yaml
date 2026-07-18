@@ -1,0 +1,27 @@
+# M11 RLS 规则: change_event (变更事件)
+
+entity: change_event
+
+row_filters:
+  # admin 看全部事件
+  - applies_to: [role:admin]
+    condition: "true"
+  # 触发者看自己的事件 + 相关订阅者 (通过 change_subscription 关联)
+  - applies_to: [role:user, role:viewer]
+    condition: >
+      change_event.actor_user_id = $user.id
+      OR EXISTS (
+        SELECT 1 FROM change_subscription cs
+        WHERE cs.user_id = $user.id
+          AND cs.object_type = change_event.object_type
+          AND cs.is_active = true
+          AND (cs.event_types LIKE '%' || change_event.event_type || '%')
+      )
+
+field_masks: []
+
+actions:
+  create: [role:admin, role:system]
+  read: [role:admin, role:user, role:viewer]
+  update: []  # 事件不可修改
+  delete: [role:admin]

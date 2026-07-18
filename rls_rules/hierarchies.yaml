@@ -1,0 +1,18 @@
+# M11 RLS 规则: hierarchies (层级定义)
+
+entity: hierarchies
+
+# hierarchies 是配置型 (persistent: false), 无 DB 表
+# 所有人可读, 仅 admin 可写
+
+row_filters:
+  - applies_to: [role:admin, role:user, role:viewer, role:manager]
+    condition: "true"
+
+field_masks: []
+
+actions:
+  create: [role:admin]
+  read: [role:admin, role:user, role:viewer, role:manager]
+  update: [role:admin]
+  delete: [role:admin]

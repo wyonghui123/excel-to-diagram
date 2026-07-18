@@ -3,6 +3,9 @@
 # 说明: 定义后台调度任务的配置
 # ============================================
 
+
+aspects: [audit_aspect]
+
 id: scheduled_task
 name: 任务定义
 table_name: scheduled_tasks

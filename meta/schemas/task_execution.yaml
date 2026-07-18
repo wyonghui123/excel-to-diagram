@@ -3,6 +3,9 @@
 # 说明: 每次任务执行的记录，作为BO Object自动获得审计日志能力
 # ============================================
 
+
+aspects: [audit_aspect]
+
 id: task_execution
 name: 任务执行记录
 table_name: task_executions

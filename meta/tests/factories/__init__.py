@@ -58,6 +58,15 @@ from .role_data_permission import RoleDataPermissionFactory
 from .permission_bundle import PermissionBundleFactory
 from .permission_rule import PermissionRuleFactory
 from .data_permission import DataPermissionFactory
+# [FIX 2026-07-18 P1-5] 新建 8 个 factory, 补 8 个 HIGH 风险无测试 schema
+from .task_execution import TaskExecutionFactory
+from .scheduled_task import ScheduledTaskFactory
+from .change_subscription import ChangeSubscriptionFactory
+from .change_event import ChangeEventFactory
+from .menu_permission import MenuPermissionFactory
+from .user_group_member import UserGroupMemberFactory
+from .test_table import TestTableFactory
+from .test_objects import TestObjectsFactory
 
 
 __all__ = [

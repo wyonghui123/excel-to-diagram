@@ -1,3 +1,6 @@
+
+aspects: [audit_aspect]
+
 id: menu_permission
 name: 菜单权限
 table_name: menu_permissions

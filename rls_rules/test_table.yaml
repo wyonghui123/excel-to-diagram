@@ -1,0 +1,16 @@
+# M11 RLS 规则: test_table (测试表)
+
+entity: test_table
+
+# test_table 是开放测试表 (authorization.check = false), 所有人可读写
+row_filters:
+  - applies_to: [role:admin, role:user, role:viewer, role:manager]
+    condition: "true"
+
+field_masks: []
+
+actions:
+  create: [role:admin, role:user, role:viewer, role:manager]
+  read: [role:admin, role:user, role:viewer, role:manager]
+  update: [role:admin, role:user, role:viewer, role:manager]
+  delete: [role:admin]

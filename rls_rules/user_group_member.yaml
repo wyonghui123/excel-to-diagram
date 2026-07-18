@@ -1,0 +1,26 @@
+# M11 RLS 规则: user_group_member (用户组成员)
+
+entity: user_group_member
+
+row_filters:
+  # admin 看全部成员关系
+  - applies_to: [role:admin]
+    condition: "true"
+  # manager 看自己管理的组的所有成员
+  - applies_to: [role:manager]
+    condition: >
+      user_group_member.group_id IN (
+        SELECT group_id FROM user_group_members
+        WHERE user_id = $user.id AND is_manager = true
+      )
+  # 用户看自己的成员关系
+  - applies_to: [role:user, role:viewer]
+    condition: "user_group_member.user_id = $user.id"
+
+field_masks: []
+
+actions:
+  create: [role:admin, role:manager]
+  read: [role:admin, role:manager, role:user, role:viewer]
+  update: [role:admin, role:manager]
+  delete: [role:admin, role:manager]

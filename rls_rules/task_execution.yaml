@@ -1,0 +1,19 @@
+# M11 RLS 规则: task_execution (任务执行记录)
+
+entity: task_execution
+
+row_filters:
+  # admin 看全部
+  - applies_to: [role:admin]
+    condition: "true"
+  # 用户只看自己的执行记录
+  - applies_to: [role:user, role:viewer]
+    condition: "task_execution.user_id = $user.id OR task_execution.user_id IS NULL"
+
+field_masks: []
+
+actions:
+  create: [role:admin, role:system]
+  read: [role:admin, role:user, role:viewer]
+  update: [role:admin, role:system]
+  delete: [role:admin]

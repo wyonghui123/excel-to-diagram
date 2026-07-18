@@ -1,3 +1,6 @@
+
+aspects: [audit_aspect]
+
 id: menu
 name: 菜单
 table_name: menus

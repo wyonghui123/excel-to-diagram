@@ -1,0 +1,22 @@
+# M11 RLS 规则: change_subscription (变更订阅)
+
+entity: change_subscription
+
+row_filters:
+  # admin 看全部订阅
+  - applies_to: [role:admin]
+    condition: "true"
+  # 用户只看自己的订阅
+  - applies_to: [role:user, role:viewer, role:manager]
+    condition: "change_subscription.user_id = $user.id"
+
+field_masks:
+  # 隐藏 webhook_url 的认证 token 部分 (如果有)
+  - role: [role:user, role:viewer]
+    fields: [internal_token]
+
+actions:
+  create: [role:admin, role:user, role:manager]
+  read: [role:admin, role:user, role:viewer, role:manager]
+  update: [role:admin, role:user, role:manager]
+  delete: [role:admin, role:user, role:manager]

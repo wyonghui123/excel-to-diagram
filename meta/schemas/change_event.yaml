@@ -3,6 +3,9 @@
 # 说明: 存储变更事件记录，用于事件溯源和通知分发
 # ============================================
 
+
+aspects: [audit_aspect]
+
 id: change_event
 name: 变更事件
 table_name: change_events
