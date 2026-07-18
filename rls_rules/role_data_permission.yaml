@@ -1,0 +1,23 @@
+# RLS 规则：role_data_permission（角色数据权限）
+# 角色级别的数据访问权限配置
+
+entity: role_data_permission
+
+# 行级过滤
+row_filters:
+  # 管理员看所有
+  - applies_to: [role:admin]
+    condition: "true"
+  # 普通用户仅看自己角色的数据权限
+  - applies_to: [role:user, role:viewer]
+    condition: "role_data_permission.role_id IN (SELECT role_id FROM user_roles WHERE user_id = $user.id)"
+  # Manager 看自己管理的角色数据权限
+  - applies_to: [role:manager]
+    condition: "role_data_permission.role_id IN (SELECT role_id FROM user_roles WHERE user_id = $user.id)"
+
+# 操作权限
+actions:
+  create: [role:admin]
+  read: [role:admin, role:manager, role:user, role:viewer]
+  update: [role:admin]
+  delete: [role:admin]

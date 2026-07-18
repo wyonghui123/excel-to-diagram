@@ -1,0 +1,29 @@
+# RLS 规则：permission_bundle（权限包）
+# 预定义权限组合包
+
+entity: permission_bundle
+
+# 行级过滤
+row_filters:
+  # 管理员看所有
+  - applies_to: [role:admin]
+    condition: "true"
+  # 普通用户仅看启用的权限包
+  - applies_to: [role:user, role:viewer]
+    condition: "permission_bundle.is_active = true"
+  # Manager 看启用的权限包
+  - applies_to: [role:manager]
+    condition: "permission_bundle.is_active = true"
+
+# 字段脱敏
+field_masks:
+  - field: data_permission_template
+    mask: "***HIDDEN***"
+    applies_to: [role:user, role:viewer]  # 仅 admin/manager 可见数据权限模板
+
+# 操作权限
+actions:
+  create: [role:admin]
+  read: [role:admin, role:manager, role:user, role:viewer]
+  update: [role:admin]
+  delete: [role:admin]

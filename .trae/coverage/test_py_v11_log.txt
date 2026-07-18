@@ -1,0 +1,2 @@
+﻿FileNotFoundError: [Errno 2] No such file or directory: 'd:\\filework\\excel-to
+-diagram\\test_temp\\.trae\\coverage\\test_py_v11.json'

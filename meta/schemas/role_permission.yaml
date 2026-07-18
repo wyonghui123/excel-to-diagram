@@ -8,6 +8,8 @@ name: 角色权限
 table_name: role_permissions
 description: 角色与权限的多对多关联
 
+aspects: [audit_aspect]
+
 semantics:
   meaning: 角色权限关联
   category: system_entity

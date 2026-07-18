@@ -2,6 +2,9 @@ id: role_dimension_scope
 name: 角色维度范围
 table_name: role_dimension_scopes
 description: 角色的管理维度范围声明，是权限推导的入口。
+
+aspects: [audit_aspect]
+
 bo_category: configuration
 bo_sub_category: customizing
 

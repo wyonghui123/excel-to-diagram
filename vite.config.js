@@ -59,7 +59,9 @@ export default defineConfig({
   },
   server: {
     host: true,
-    port: 3005,
+    // [v3.3] 动态端口: 支持多 Agent worktree 自验证
+    // 默认 3005 (主仓库), Agent 通过 VITE_PORT 环境变量覆盖
+    port: parseInt(process.env.VITE_PORT || '3005', 10),
     // [FIX 2026-06-12 #13] 根治 MetaListPage toolbar/table "又这样了" 复发
     // 根因: 浏览器缓存 Vite 编译产物 (SCSS 改完后旧 CSS 被缓存)
     // 用户反馈"我刷新后现在又好了" 确认是缓存问题
@@ -80,9 +82,10 @@ export default defineConfig({
       timeout: 30000,
     },
     proxy: {
-      // [FR-009] 合并所有 /api/* 到统一代理规则 (原来 5 条独立规则, target 相同)
+      // [v3.3] 动态代理: 支持多 Agent worktree 自验证
+      // 默认代理到 3004 (主仓库后端), Agent 通过 BACKEND_PORT 环境变量覆盖
       '/api': {
-        target: 'http://localhost:3004',
+        target: `http://localhost:${process.env.BACKEND_PORT || '3004'}`,
         changeOrigin: true,
         ws: true,
         // [FIX BUG-V029 2026-06-28] 30s→180s
@@ -101,7 +104,7 @@ export default defineConfig({
         }
       },
       '/socket.io': {
-        target: 'http://localhost:3004',
+        target: `http://localhost:${process.env.BACKEND_PORT || '3004'}`,
         changeOrigin: true,
         ws: true,
       }

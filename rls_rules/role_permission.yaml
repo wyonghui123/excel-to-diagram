@@ -1,0 +1,23 @@
+# RLS 规则：role_permission（角色权限关联）
+# 角色权限关联行级安全
+
+entity: role_permission
+
+# 行级过滤
+row_filters:
+  # 管理员看所有
+  - applies_to: [role:admin]
+    condition: "true"
+  # 普通用户仅看自己角色的权限
+  - applies_to: [role:user, role:viewer]
+    condition: "role_permission.role_id IN (SELECT role_id FROM user_roles WHERE user_id = $user.id)"
+  # Manager 看自己管理的角色权限
+  - applies_to: [role:manager]
+    condition: "role_permission.role_id IN (SELECT role_id FROM user_roles WHERE user_id = $user.id)"
+
+# 操作权限
+actions:
+  create: [role:admin]
+  read: [role:admin, role:manager, role:user, role:viewer]
+  update: [role:admin]
+  delete: [role:admin]

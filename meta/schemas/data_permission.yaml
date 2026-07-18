@@ -3,6 +3,8 @@ name: 数据权限
 table_name: data_permissions
 description: 控制用户对特定资源实例的访问权限
 
+aspects: [audit_aspect]
+
 fields:
   - id: user_id
     name: 用户ID

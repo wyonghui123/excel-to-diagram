@@ -289,3 +289,28 @@ python meta/tests/_yaml_driver/discover_test_coverage.py \
 **覆盖度判定**: covered (3 维全命中) / partial (1-2 维) / none (0 维)
 
 **当前报告 (2026-07-17)**: 42 schema / 52% covered / 42% partial / 4% none (2 个无覆盖: `ai_async_task`, `new_object`)
+
+### deep_coverage_analysis.py (P2 综合分析工具)
+
+**作用**: 6 维度综合分析每个 schema 的覆盖度 + 风险评级 + 改进建议
+
+```bash
+python meta/tests/_yaml_driver/deep_coverage_analysis.py
+# 输出: .trae/coverage/deep_coverage.json
+```
+
+**6 维度**:
+1. **yaml-driven** (30 分): v1.0/v1.1 推导的自动 case 数
+2. **手写测试** (25 分): test_*.py 中严格命中的文件数
+3. **factory** (15 分): 是否有对应 factory
+4. **rls** (10 分): 是否有 rls_rules 规则
+5. **aspects** (10 分): 应用的 aspect 数
+6. **frontend** (10 分): 前端 .vue/.ts 文件引用
+
+**风险等级**: HIGH (0-39) / MEDIUM (40-69) / LOW (70-100)
+
+**当前报告 (2026-07-17)**:
+- 38 schema / 22 HIGH / 9 MEDIUM / 7 LOW
+- 平均分 ~43/100
+- 主要风险: Factory 65% 缺失 + RLS 76% 缺失
+- 工厂采用率 (419 个 test_*.py): 3% use Factory.create() — 行业基准 30-50%

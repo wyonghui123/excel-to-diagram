@@ -1,0 +1,639 @@
+{
+  "generated_at": "2026-07-17",
+  "total_schemas": 38,
+  "risk_summary": {
+    "high": 22,
+    "medium": 9,
+    "low": 7
+  },
+  "dim_coverage": {
+    "yaml-driven (>=1 case)": 35,
+    "factory": 16,
+    "rls": 9,
+    "aspects (>=1)": 13,
+    "manual test (>=1 file)": 29,
+    "frontend (>=1 file)": 31
+  },
+  "schemas": [
+    {
+      "schema_id": "dimension_object_mapping",
+      "score": 2,
+      "risk": "HIGH",
+      "yaml_auto_cases": 0,
+      "manual_test_files": 1,
+      "manual_test_refs": 1,
+      "has_factory": false,
+      "has_rls": false,
+      "aspects_count": 0,
+      "frontend_files": 0,
+      "missing_dims": [
+        "factory",
+        "rls",
+        "aspects",
+        "frontend",
+        "yaml-driven"
+      ]
+    },
+    {
+      "schema_id": "new_object",
+      "score": 8,
+      "risk": "HIGH",
+      "yaml_auto_cases": 4,
+      "manual_test_files": 0,
+      "manual_test_refs": 0,
+      "has_factory": false,
+      "has_rls": false,
+      "aspects_count": 0,
+      "frontend_files": 0,
+      "missing_dims": [
+        "factory",
+        "rls",
+        "aspects",
+        "frontend",
+        "manual-test"
+      ]
+    },
+    {
+      "schema_id": "task_execution",
+      "score": 16,
+      "risk": "HIGH",
+      "yaml_auto_cases": 7,
+      "manual_test_files": 0,
+      "manual_test_refs": 0,
+      "has_factory": false,
+      "has_rls": false,
+      "aspects_count": 0,
+      "frontend_files": 2,
+      "missing_dims": [
+        "factory",
+        "rls",
+        "aspects",
+        "manual-test"
+      ]
+    },
+    {
+      "schema_id": "role_permission",
+      "score": 16,
+      "risk": "HIGH",
+      "yaml_auto_cases": 6,
+      "manual_test_files": 0,
+      "manual_test_refs": 0,
+      "has_factory": false,
+      "has_rls": false,
+      "aspects_count": 0,
+      "frontend_files": 4,
+      "missing_dims": [
+        "factory",
+        "rls",
+        "aspects",
+        "manual-test"
+      ]
+    },
+    {
+      "schema_id": "permission_bundle",
+      "score": 16,
+      "risk": "HIGH",
+      "yaml_auto_cases": 5,
+      "manual_test_files": 2,
+      "manual_test_refs": 13,
+      "has_factory": false,
+      "has_rls": false,
+      "aspects_count": 0,
+      "frontend_files": 2,
+      "missing_dims": [
+        "factory",
+        "rls",
+        "aspects"
+      ]
+    },
+    {
+      "schema_id": "scheduled_task",
+      "score": 17,
+      "risk": "HIGH",
+      "yaml_auto_cases": 7,
+      "manual_test_files": 0,
+      "manual_test_refs": 0,
+      "has_factory": false,
+      "has_rls": false,
+      "aspects_count": 0,
+      "frontend_files": 3,
+      "missing_dims": [
+        "factory",
+        "rls",
+        "aspects",
+        "manual-test"
+      ]
+    },
+    {
+      "schema_id": "menu_permission",
+      "score": 17,
+      "risk": "HIGH",
+      "yaml_auto_cases": 6,
+      "manual_test_files": 1,
+      "manual_test_refs": 7,
+      "has_factory": false,
+      "has_rls": false,
+      "aspects_count": 0,
+      "frontend_files": 3,
+      "missing_dims": [
+        "factory",
+        "rls",
+        "aspects"
+      ]
+    },
+    {
+      "schema_id": "user_group_member",
+      "score": 18,
+      "risk": "HIGH",
+      "yaml_auto_cases": 5,
+      "manual_test_files": 2,
+      "manual_test_refs": 2,
+      "has_factory": false,
+      "has_rls": false,
+      "aspects_count": 0,
+      "frontend_files": 4,
+      "missing_dims": [
+        "factory",
+        "rls",
+        "aspects"
+      ]
+    },
+    {
+      "schema_id": "role_dimension_scope",
+      "score": 20,
+      "risk": "HIGH",
+      "yaml_auto_cases": 6,
+      "manual_test_files": 3,
+      "manual_test_refs": 5,
+      "has_factory": false,
+      "has_rls": false,
+      "aspects_count": 0,
+      "frontend_files": 2,
+      "missing_dims": [
+        "factory",
+        "rls",
+        "aspects"
+      ]
+    },
+    {
+      "schema_id": "role_data_permission",
+      "score": 20,
+      "risk": "HIGH",
+      "yaml_auto_cases": 6,
+      "manual_test_files": 3,
+      "manual_test_refs": 9,
+      "has_factory": false,
+      "has_rls": false,
+      "aspects_count": 0,
+      "frontend_files": 2,
+      "missing_dims": [
+        "factory",
+        "rls",
+        "aspects"
+      ]
+    },
+    {
+      "schema_id": "change_subscription",
+      "score": 20,
+      "risk": "HIGH",
+      "yaml_auto_cases": 8,
+      "manual_test_files": 2,
+      "manual_test_refs": 13,
+      "has_factory": false,
+      "has_rls": false,
+      "aspects_count": 0,
+      "frontend_files": 0,
+      "missing_dims": [
+        "factory",
+        "rls",
+        "aspects",
+        "frontend"
+      ]
+    },
+    {
+      "schema_id": "test_objects",
+      "score": 23,
+      "risk": "HIGH",
+      "yaml_auto_cases": 5,
+      "manual_test_files": 6,
+      "manual_test_refs": 21,
+      "has_factory": false,
+      "has_rls": false,
+      "aspects_count": 0,
+      "frontend_files": 1,
+      "missing_dims": [
+        "factory",
+        "rls",
+        "aspects"
+      ]
+    },
+    {
+      "schema_id": "permission_rule",
+      "score": 24,
+      "risk": "HIGH",
+      "yaml_auto_cases": 6,
+      "manual_test_files": 4,
+      "manual_test_refs": 12,
+      "has_factory": false,
+      "has_rls": false,
+      "aspects_count": 0,
+      "frontend_files": 4,
+      "missing_dims": [
+        "factory",
+        "rls",
+        "aspects"
+      ]
+    },
+    {
+      "schema_id": "task_queue",
+      "score": 26,
+      "risk": "HIGH",
+      "yaml_auto_cases": 4,
+      "manual_test_files": 0,
+      "manual_test_refs": 0,
+      "has_factory": true,
+      "has_rls": false,
+      "aspects_count": 0,
+      "frontend_files": 3,
+      "missing_dims": [
+        "rls",
+        "aspects",
+        "manual-test"
+      ]
+    },
+    {
+      "schema_id": "data_permission",
+      "score": 27,
+      "risk": "HIGH",
+      "yaml_auto_cases": 6,
+      "manual_test_files": 6,
+      "manual_test_refs": 14,
+      "has_factory": false,
+      "has_rls": false,
+      "aspects_count": 0,
+      "frontend_files": 3,
+      "missing_dims": [
+        "factory",
+        "rls",
+        "aspects"
+      ]
+    },
+    {
+      "schema_id": "filter_variant",
+      "score": 27,
+      "risk": "HIGH",
+      "yaml_auto_cases": 6,
+      "manual_test_files": 0,
+      "manual_test_refs": 0,
+      "has_factory": true,
+      "has_rls": false,
+      "aspects_count": 0,
+      "frontend_files": 0,
+      "missing_dims": [
+        "rls",
+        "aspects",
+        "frontend",
+        "manual-test"
+      ]
+    },
+    {
+      "schema_id": "employee_data_scope",
+      "score": 28,
+      "risk": "HIGH",
+      "yaml_auto_cases": 6,
+      "manual_test_files": 0,
+      "manual_test_refs": 0,
+      "has_factory": true,
+      "has_rls": false,
+      "aspects_count": 0,
+      "frontend_files": 1,
+      "missing_dims": [
+        "rls",
+        "aspects",
+        "manual-test"
+      ]
+    },
+    {
+      "schema_id": "ai_async_task",
+      "score": 28,
+      "risk": "HIGH",
+      "yaml_auto_cases": 5,
+      "manual_test_files": 0,
+      "manual_test_refs": 0,
+      "has_factory": true,
+      "has_rls": false,
+      "aspects_count": 0,
+      "frontend_files": 3,
+      "missing_dims": [
+        "rls",
+        "aspects",
+        "manual-test"
+      ]
+    },
+    {
+      "schema_id": "test_table",
+      "score": 29,
+      "risk": "HIGH",
+      "yaml_auto_cases": 4,
+      "manual_test_files": 8,
+      "manual_test_refs": 73,
+      "has_factory": false,
+      "has_rls": false,
+      "aspects_count": 0,
+      "frontend_files": 0,
+      "missing_dims": [
+        "factory",
+        "rls",
+        "aspects",
+        "frontend"
+      ]
+    },
+    {
+      "schema_id": "group_data_permission",
+      "score": 29,
+      "risk": "HIGH",
+      "yaml_auto_cases": 7,
+      "manual_test_files": 0,
+      "manual_test_refs": 0,
+      "has_factory": true,
+      "has_rls": false,
+      "aspects_count": 0,
+      "frontend_files": 0,
+      "missing_dims": [
+        "rls",
+        "aspects",
+        "frontend",
+        "manual-test"
+      ]
+    },
+    {
+      "schema_id": "change_event",
+      "score": 32,
+      "risk": "HIGH",
+      "yaml_auto_cases": 9,
+      "manual_test_files": 7,
+      "manual_test_refs": 40,
+      "has_factory": false,
+      "has_rls": false,
+      "aspects_count": 0,
+      "frontend_files": 0,
+      "missing_dims": [
+        "factory",
+        "rls",
+        "aspects",
+        "frontend"
+      ]
+    },
+    {
+      "schema_id": "hierarchies",
+      "score": 32,
+      "risk": "HIGH",
+      "yaml_auto_cases": 0,
+      "manual_test_files": 11,
+      "manual_test_refs": 47,
+      "has_factory": false,
+      "has_rls": false,
+      "aspects_count": 0,
+      "frontend_files": 12,
+      "missing_dims": [
+        "factory",
+        "rls",
+        "aspects",
+        "yaml-driven"
+      ]
+    },
+    {
+      "schema_id": "menu",
+      "score": 47,
+      "risk": "MEDIUM",
+      "yaml_auto_cases": 6,
+      "manual_test_files": 14,
+      "manual_test_refs": 59,
+      "has_factory": false,
+      "has_rls": false,
+      "aspects_count": 0,
+      "frontend_files": 33,
+      "missing_dims": [
+        "factory",
+        "rls",
+        "aspects"
+      ]
+    },
+    {
+      "schema_id": "enum_value",
+      "score": 48,
+      "risk": "MEDIUM",
+      "yaml_auto_cases": 5,
+      "manual_test_files": 11,
+      "manual_test_refs": 79,
+      "has_factory": false,
+      "has_rls": false,
+      "aspects_count": 1,
+      "frontend_files": 22,
+      "missing_dims": [
+        "factory",
+        "rls"
+      ]
+    },
+    {
+      "schema_id": "audit_log",
+      "score": 48,
+      "risk": "MEDIUM",
+      "yaml_auto_cases": 0,
+      "manual_test_files": 22,
+      "manual_test_refs": 239,
+      "has_factory": true,
+      "has_rls": false,
+      "aspects_count": 0,
+      "frontend_files": 8,
+      "missing_dims": [
+        "rls",
+        "aspects",
+        "yaml-driven"
+      ]
+    },
+    {
+      "schema_id": "enum_type",
+      "score": 48,
+      "risk": "MEDIUM",
+      "yaml_auto_cases": 5,
+      "manual_test_files": 21,
+      "manual_test_refs": 98,
+      "has_factory": false,
+      "has_rls": false,
+      "aspects_count": 1,
+      "frontend_files": 25,
+      "missing_dims": [
+        "factory",
+        "rls"
+      ]
+    },
+    {
+      "schema_id": "permission",
+      "score": 62,
+      "risk": "MEDIUM",
+      "yaml_auto_cases": 6,
+      "manual_test_files": 55,
+      "manual_test_refs": 180,
+      "has_factory": true,
+      "has_rls": false,
+      "aspects_count": 0,
+      "frontend_files": 58,
+      "missing_dims": [
+        "rls",
+        "aspects"
+      ]
+    },
+    {
+      "schema_id": "sub_domain",
+      "score": 64,
+      "risk": "MEDIUM",
+      "yaml_auto_cases": 5,
+      "manual_test_files": 73,
+      "manual_test_refs": 456,
+      "has_factory": false,
+      "has_rls": true,
+      "aspects_count": 3,
+      "frontend_files": 53,
+      "missing_dims": [
+        "factory"
+      ]
+    },
+    {
+      "schema_id": "annotation",
+      "score": 65,
+      "risk": "MEDIUM",
+      "yaml_auto_cases": 6,
+      "manual_test_files": 22,
+      "manual_test_refs": 317,
+      "has_factory": true,
+      "has_rls": false,
+      "aspects_count": 1,
+      "frontend_files": 43,
+      "missing_dims": [
+        "rls"
+      ]
+    },
+    {
+      "schema_id": "service_module",
+      "score": 66,
+      "risk": "MEDIUM",
+      "yaml_auto_cases": 6,
+      "manual_test_files": 57,
+      "manual_test_refs": 524,
+      "has_factory": false,
+      "has_rls": true,
+      "aspects_count": 3,
+      "frontend_files": 44,
+      "missing_dims": [
+        "factory"
+      ]
+    },
+    {
+      "schema_id": "relationship",
+      "score": 66,
+      "risk": "MEDIUM",
+      "yaml_auto_cases": 5,
+      "manual_test_files": 57,
+      "manual_test_refs": 466,
+      "has_factory": true,
+      "has_rls": false,
+      "aspects_count": 2,
+      "frontend_files": 50,
+      "missing_dims": [
+        "rls"
+      ]
+    },
+    {
+      "schema_id": "role",
+      "score": 71,
+      "risk": "LOW",
+      "yaml_auto_cases": 4,
+      "manual_test_files": 74,
+      "manual_test_refs": 529,
+      "has_factory": true,
+      "has_rls": true,
+      "aspects_count": 1,
+      "frontend_files": 84,
+      "missing_dims": []
+    },
+    {
+      "schema_id": "user_group",
+      "score": 71,
+      "risk": "LOW",
+      "yaml_auto_cases": 4,
+      "manual_test_files": 45,
+      "manual_test_refs": 307,
+      "has_factory": true,
+      "has_rls": true,
+      "aspects_count": 1,
+      "frontend_files": 28,
+      "missing_dims": []
+    },
+    {
+      "schema_id": "user",
+      "score": 73,
+      "risk": "LOW",
+      "yaml_auto_cases": 5,
+      "manual_test_files": 188,
+      "manual_test_refs": 1597,
+      "has_factory": true,
+      "has_rls": true,
+      "aspects_count": 1,
+      "frontend_files": 126,
+      "missing_dims": []
+    },
+    {
+      "schema_id": "version",
+      "score": 74,
+      "risk": "LOW",
+      "yaml_auto_cases": 4,
+      "manual_test_files": 91,
+      "manual_test_refs": 667,
+      "has_factory": true,
+      "has_rls": true,
+      "aspects_count": 2,
+      "frontend_files": 70,
+      "missing_dims": []
+    },
+    {
+      "schema_id": "product",
+      "score": 78,
+      "risk": "LOW",
+      "yaml_auto_cases": 6,
+      "manual_test_files": 93,
+      "manual_test_refs": 817,
+      "has_factory": true,
+      "has_rls": true,
+      "aspects_count": 2,
+      "frontend_files": 54,
+      "missing_dims": []
+    },
+    {
+      "schema_id": "business_object",
+      "score": 79,
+      "risk": "LOW",
+      "yaml_auto_cases": 5,
+      "manual_test_files": 95,
+      "manual_test_refs": 620,
+      "has_factory": true,
+      "has_rls": true,
+      "aspects_count": 3,
+      "frontend_files": 60,
+      "missing_dims": []
+    },
+    {
+      "schema_id": "domain",
+      "score": 79,
+      "risk": "LOW",
+      "yaml_auto_cases": 5,
+      "manual_test_files": 138,
+      "manual_test_refs": 1455,
+      "has_factory": true,
+      "has_rls": true,
+      "aspects_count": 3,
+      "frontend_files": 120,
+      "missing_dims": []
+    }
+  ]
+}

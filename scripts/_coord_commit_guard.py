@@ -161,6 +161,37 @@ def cmd_list_excludes():
     return 0
 
 
+def cmd_check_handover(wt_path: str):
+    """v3.3 新增: 检查 HANDOVER 文件是否包含 SELF_VERIFY_RESULTS"""
+    from pathlib import Path
+    wt = Path(wt_path)
+    handovers = list(wt.glob("DEPLOY_HANDOVER*.md"))
+    if not handovers:
+        print("[INFO] No HANDOVER files found in this worktree")
+        return 0
+
+    issues = 0
+    for h in handovers:
+        content = h.read_text(encoding="utf-8", errors="replace")
+        has_self_verify = "SELF_VERIFY_RESULTS" in content
+        has_verdict = content.count("PASS") + content.count("FAIL") > 0
+
+        if not has_self_verify:
+            print(f"  [X] {h.name}: MISSING SELF_VERIFY_RESULTS")
+            issues += 1
+        elif not has_verdict:
+            print(f"  [!] {h.name}: SELF_VERIFY_RESULTS exists but no PASS/FAIL verdicts")
+            issues += 1
+        else:
+            print(f"  [OK] {h.name}: SELF_VERIFY_RESULTS present")
+
+    if issues > 0:
+        print(f"\n[!] {issues} HANDOVER file(s) missing/invalid SELF_VERIFY_RESULTS")
+        print("[!] v3.3: HANDOVER without SELF_VERIFY_RESULTS is INVALID")
+        return 1
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="协调智能体 commit 防护脚本 - 防止 L2 §0.8.4 违规"
@@ -175,6 +206,9 @@ def main():
 
     sub.add_parser("list-excludes", help="列出排除名单")
 
+    handover_p = sub.add_parser("check-handover", help="v3.3: 检查 HANDOVER 是否包含 SELF_VERIFY_RESULTS")
+    handover_p.add_argument("wt_path")
+
     args = parser.parse_args()
 
     if args.cmd == "check":
@@ -183,6 +217,8 @@ def main():
         return cmd_safe_add(args.wt_path)
     elif args.cmd == "list-excludes":
         return cmd_list_excludes()
+    elif args.cmd == "check-handover":
+        return cmd_check_handover(args.wt_path)
     return 0
 
 

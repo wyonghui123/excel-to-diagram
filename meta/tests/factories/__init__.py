@@ -1,12 +1,13 @@
 """
-测试数据工厂库 (Phase 4 v3.18.3+)
-====================================
+测试数据工厂库 (Phase 4 v3.18.3+, Phase 5 v3.18.5+)
+====================================================
 
-提供 13+ 个核心工厂, 解决:
+提供 18+ 个核心工厂 (v3.18.5: +5 新建), 解决:
 - 硬编码 ID 泛滥 (1495 处 → ≤50)
 - 工厂采用率 0.28% → 80%
 - 清理率 0% → 95%
 - 唯一性规范化 (TBD-4)
+- [v3.18.5] HIGH 风险 schema 工厂补全 (5 个新增)
 
 设计原则:
 1. 必须走真实 API (不能用 mock)
@@ -44,6 +45,19 @@ from .relationship import RelationshipFactory
 from .product import ProductFactory
 from .import_export import ImportExportFactory
 from .webhook import WebhookFactory
+# [FIX 2026-07-17 P1] 新建 5 个 factory, 补 5 个 HIGH 风险 schema
+from .task_queue import TaskQueueFactory
+from .filter_variant import FilterVariantFactory
+from .employee_data_scope import EmployeeDataScopeFactory
+from .ai_async_task import AiAsyncTaskFactory
+from .group_data_permission import GroupDataPermissionFactory
+# [FIX 2026-07-18 P1] 新建 6 个权限域 factory, 补 6 个 HIGH 风险权限 schema
+from .role_permission import RolePermissionFactory
+from .role_dimension_scope import RoleDimensionScopeFactory
+from .role_data_permission import RoleDataPermissionFactory
+from .permission_bundle import PermissionBundleFactory
+from .permission_rule import PermissionRuleFactory
+from .data_permission import DataPermissionFactory
 
 
 __all__ = [
@@ -69,6 +83,19 @@ __all__ = [
     'ProductFactory',
     'ImportExportFactory',
     'WebhookFactory',
+    # [FIX 2026-07-17 P1] 新建 factory
+    'TaskQueueFactory',
+    'FilterVariantFactory',
+    'EmployeeDataScopeFactory',
+    'AiAsyncTaskFactory',
+    'GroupDataPermissionFactory',
+    # [FIX 2026-07-18 P1] 权限域 factory
+    'RolePermissionFactory',
+    'RoleDimensionScopeFactory',
+    'RoleDataPermissionFactory',
+    'PermissionBundleFactory',
+    'PermissionRuleFactory',
+    'DataPermissionFactory',
 ]
 
 

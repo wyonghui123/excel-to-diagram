@@ -1,0 +1,368 @@
+[
+  {
+    "file": "test_permission_service_edge.py",
+    "path": "meta/tests\\test_permission_service_edge.py",
+    "hardcoded": 37,
+    "patterns": [
+      "code=literal",
+      "username=literal"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_audit_interceptor_unified.py",
+    "path": "meta/tests\\test_audit_interceptor_unified.py",
+    "hardcoded": 32,
+    "patterns": [
+      "int(time.time())"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_permission_service.py",
+    "path": "meta/tests\\test_permission_service.py",
+    "hardcoded": 27,
+    "patterns": [
+      "code=literal",
+      "username=literal"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_security_authorization.py",
+    "path": "meta/tests\\test_security_authorization.py",
+    "hardcoded": 21,
+    "patterns": [
+      "code=literal",
+      "username=literal"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_data_permission_service.py",
+    "path": "meta/tests\\test_data_permission_service.py",
+    "hardcoded": 19,
+    "patterns": [
+      "code=literal",
+      "username=literal"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_user_group_service_edge.py",
+    "path": "meta/tests\\test_user_group_service_edge.py",
+    "hardcoded": 14,
+    "patterns": [
+      "code=literal",
+      "username=literal"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_condition_permission_service.py",
+    "path": "meta/tests\\test_condition_permission_service.py",
+    "hardcoded": 13,
+    "patterns": [
+      "code=literal",
+      "username=literal"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_audit_api.py",
+    "path": "meta/tests\\test_audit_api.py",
+    "hardcoded": 12,
+    "patterns": [
+      "int(time.time())",
+      "f-string time",
+      "random.randint",
+      "email=literal",
+      "username=literal"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_transaction_consistency.py",
+    "path": "meta/tests\\test_transaction_consistency.py",
+    "hardcoded": 12,
+    "patterns": [
+      "username=literal",
+      "email=literal",
+      "int(time.time())"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_owner_scenarios_comprehensive.py",
+    "path": "meta/tests\\test_owner_scenarios_comprehensive.py",
+    "hardcoded": 11,
+    "patterns": [
+      "code=literal",
+      "username=literal"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_concurrent_operations.py",
+    "path": "meta/tests\\test_concurrent_operations.py",
+    "hardcoded": 10,
+    "patterns": [
+      "username=literal",
+      "email=literal",
+      "int(time.time())"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_association_multi_hop.py",
+    "path": "meta/tests\\test_association_multi_hop.py",
+    "hardcoded": 9,
+    "patterns": [
+      "code=literal",
+      "username=literal"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_permission_unified_semantic.py",
+    "path": "meta/tests\\test_permission_unified_semantic.py",
+    "hardcoded": 9,
+    "patterns": [
+      "code=literal"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_api_smoke_tests.py",
+    "path": "meta/tests\\test_api_smoke_tests.py",
+    "hardcoded": 8,
+    "patterns": [
+      "int(time.time())"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_bo_api.py",
+    "path": "meta/tests\\test_bo_api.py",
+    "hardcoded": 8,
+    "patterns": [
+      "email=literal",
+      "username=literal"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_bo_transaction_lock.py",
+    "path": "meta/tests\\test_bo_transaction_lock.py",
+    "hardcoded": 8,
+    "patterns": [
+      "random.randint"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_boundary_conditions.py",
+    "path": "meta/tests\\test_boundary_conditions.py",
+    "hardcoded": 7,
+    "patterns": [
+      "email=literal",
+      "username=literal"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_enum_api.py",
+    "path": "meta/tests\\test_enum_api.py",
+    "hardcoded": 7,
+    "patterns": [
+      "int(time.time())"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_key_template_api.py",
+    "path": "meta/tests\\test_key_template_api.py",
+    "hardcoded": 5,
+    "patterns": [
+      "int(time.time())"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_token_service.py",
+    "path": "meta/tests\\auth\\test_token_service.py",
+    "hardcoded": 4,
+    "patterns": [
+      "username=literal"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_subflow_templates_v37.py",
+    "path": "meta/tests\\e2e\\bo_action\\test_subflow_templates_v37.py",
+    "hardcoded": 4,
+    "patterns": [
+      "int(time.time())"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_concurrent_load.py",
+    "path": "meta/tests\\performance\\test_concurrent_load.py",
+    "hardcoded": 4,
+    "patterns": [
+      "int(time.time())"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_database_performance.py",
+    "path": "meta/tests\\performance\\test_database_performance.py",
+    "hardcoded": 4,
+    "patterns": [
+      "int(time.time())"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_audit_p1_p2_fix.py",
+    "path": "meta/tests\\test_audit_p1_p2_fix.py",
+    "hardcoded": 4,
+    "patterns": [
+      "username=literal"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_auth_permission.py",
+    "path": "meta/tests\\test_auth_permission.py",
+    "hardcoded": 4,
+    "patterns": [
+      "email=literal",
+      "username=literal"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_delete_validation_e2e_regression.py",
+    "path": "meta/tests\\test_delete_validation_e2e_regression.py",
+    "hardcoded": 4,
+    "patterns": [
+      "int(time.time())"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_import_with_parent_resolution.py",
+    "path": "meta/tests\\test_import_with_parent_resolution.py",
+    "hardcoded": 4,
+    "patterns": [
+      "code=literal"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_manage_api.py",
+    "path": "meta/tests\\test_manage_api.py",
+    "hardcoded": 4,
+    "patterns": [
+      "int(time.time())"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_security_improvements.py",
+    "path": "meta/tests\\test_security_improvements.py",
+    "hardcoded": 4,
+    "patterns": [
+      "email=literal",
+      "username=literal"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_bug_v007_regression_v2.py",
+    "path": "meta/tests\\e2e\\bo_action\\test_bug_v007_regression_v2.py",
+    "hardcoded": 3,
+    "patterns": [
+      "int(time.time())"
+    ],
+    "has_factory": true
+  },
+  {
+    "file": "test_index_effectiveness.py",
+    "path": "meta/tests\\performance\\test_index_effectiveness.py",
+    "hardcoded": 3,
+    "patterns": [
+      "int(time.time())"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_bo_api_granular.py",
+    "path": "meta/tests\\test_bo_api_granular.py",
+    "hardcoded": 3,
+    "patterns": [
+      "email=literal",
+      "username=literal"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_deletion_blocked_audit.py",
+    "path": "meta/tests\\test_deletion_blocked_audit.py",
+    "hardcoded": 3,
+    "patterns": [
+      "code=literal"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_edge_cases.py",
+    "path": "meta/tests\\test_edge_cases.py",
+    "hardcoded": 3,
+    "patterns": [
+      "code=literal"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_frontend_e2e_test111.py",
+    "path": "meta/tests\\test_frontend_e2e_test111.py",
+    "hardcoded": 3,
+    "patterns": [
+      "int(time.time())"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_interceptors_unit.py",
+    "path": "meta/tests\\test_interceptors_unit.py",
+    "hardcoded": 3,
+    "patterns": [
+      "code=literal",
+      "username=literal"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_leaf_domain_issue.py",
+    "path": "meta/tests\\test_leaf_domain_issue.py",
+    "hardcoded": 3,
+    "patterns": [
+      "code=literal",
+      "email=literal",
+      "username=literal"
+    ],
+    "has_factory": false
+  },
+  {
+    "file": "test_token_blacklist_service.py",
+    "path": "meta/tests\\test_token_blacklist_service.py",
+    "hardcoded": 3,
+    "patterns": [
+      "int(time.time())"
+    ],
+    "has_factory": false
+  }
+]

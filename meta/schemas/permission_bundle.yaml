@@ -3,6 +3,8 @@ name: 权限包
 table_name: permission_bundles
 description: 预定义的权限组合包，支持一键分配功能权限+数据权限+菜单权限
 
+aspects: [audit_aspect]
+
 fields:
   - id: bundle_code
     name: 权限包编码
