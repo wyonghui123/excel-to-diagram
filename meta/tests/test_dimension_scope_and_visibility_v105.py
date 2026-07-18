@@ -32,7 +32,7 @@ _PROJECT_ROOT = os.path.dirname(
 )
 sys.path.insert(0, _PROJECT_ROOT)
 
-pytestmark = [pytest.mark.unit, pytest.mark.xfail(reason="V105 owner_exception_chain 行为变更, query 解析差异 - 待 v1.5 修复", strict=False)]
+pytestmark = [pytest.mark.unit, pytest.mark.xfail(reason="V105 owner_exception_chain SQL 解析差异, 实际 query 包含 owner_id 条件而测试期望对比 owner_id 值, 待 v1.5 修复", strict=False)]
 
 
 # ────────────────────────────────────────
