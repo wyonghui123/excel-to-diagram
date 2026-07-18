@@ -727,6 +727,122 @@ Start-Process "schtasks" "/Create /TN \yonaa_agent_health /XML D:\filework\workt
 
 ---
 
+## 0.10. 自验证 SOP (v3.3 新增)  [!] 必读
+
+> **背景**: PARALLEL_DEV_SOP v3.3 将 Integration 从常开改为按需, Agent 必须在自己 worktree 内完成真实服务自验证.
+> **适用**: 所有开发智能体, 在提交 HANDOVER 前必须完成.
+> **工具**: `_wt_service.py` (启停服务) + `self_verify.py` (自动化冒烟)
+
+### 0.10.1 5 步自验证 SOP (强制)
+
+```bash
+# 每次 BUG 修复完成后, HANDOVER 前必跑 (5 步, 5 分钟内)
+
+# Step 1: 启后端 (分配端口, 从 ports.json 自动读取)
+python scripts/_wt_service.py start-be <wt-name>
+
+# Step 2: 启前端 (如有前端改动)
+python scripts/_wt_service.py start-fe <wt-name>
+
+# Step 3: 跑冒烟测试
+python scripts/self_verify.py smoke <wt-name>
+
+# Step 4: 关服务
+python scripts/_wt_service.py stop <wt-name>
+
+# Step 5: 生成 SELF_VERIFY_RESULTS
+python scripts/self_verify.py report <wt-name>
+```
+
+### 0.10.2 一键自验证 (替代 5 步)
+
+```bash
+# 自动: 启服务 → 冒烟 → 关服务 → 输出报告
+python scripts/self_verify.py run <wt-name>
+```
+
+### 0.10.3 自验证退出条件
+
+| 条件 | 必须 |
+|------|------|
+| 后端 /api/v1/health 返回 200 | **是** |
+| BUG 相关 API 返回正确结果 | **是** |
+| 前端页面可访问 (如有前端改动) | **是** |
+| 单元测试 PASS (如有相关测试) | 建议 |
+| **SELF_VERIFY_RESULTS 已生成** | **是** |
+
+**无 SELF_VERIFY_RESULTS 的 HANDOVER = 无效, 协调智能体拒绝.**
+
+### 0.10.4 自验证环境参数
+
+| 项 | 来源 | 默认 |
+|----|------|------|
+| 后端端口 | `ports.json` allocated.backend_port | 按 owner 匹配 |
+| 前端端口 | `ports.json` allocated.frontend_port | backend_port - 4 |
+| DB | worktree 自己的 `meta/architecture.db` | 已有 |
+| 启动超时 | `paths.json` self_verify.backend_startup_timeout | 60s |
+
+### 0.10.5 自验证失败处理
+
+| 失败 | 行动 |
+|------|------|
+| 后端启动失败 | 检查端口是否被占, 检查 waitress_server.py 日志 |
+| API 返回非 200 | 检查代码逻辑, 修复后重跑 |
+| 前端启动失败 | 检查 VITE_PORT 是否被占, 检查 npm install |
+| 无法生成 SELF_VERIFY_RESULTS | 检查 self_verify.py 是否存在 |
+
+---
+
+## 0.11. Integration 按需决策 (v3.3 新增)
+
+> **v3.3 核心变更**: Integration 不再常开, 仅在特定条件下按需启用.
+> **默认**: 不需要 Integration — Agent 自验证 + PM 验证即可.
+
+### 0.11.1 Integration 启用条件 (满足任一即启用)
+
+| # | 条件 | 原因 |
+|---|------|------|
+| 1 | 2+ Agent 修改同一模块的不同文件 | 跨 Agent 兼容性风险 |
+| 2 | 1 Agent 修改了共享 API 接口 (其他 Agent 依赖) | 接口变更影响 |
+| 3 | 3+ Agent 同时提交 HANDOVER | 批量合并风险 |
+| 4 | PM 人工判断需要 | 安全网 |
+
+### 0.11.2 Integration 不需要的场景 (默认)
+
+- Agent 修复独立模块的 BUG (不同文件, 不同模块)
+- Agent 之间无代码依赖
+- PM 分配时明确标注"无需 Integration"
+
+### 0.11.3 Integration 启停命令 (按需)
+
+```bash
+# 启 Integration (协调智能体, 仅在需要时)
+python scripts/_wt_service.py start-be integration
+python scripts/_wt_service.py start-fe integration
+
+# Agent 在 Integration 跑 E2E (同 v3.2 阶段 5)
+# ...
+
+# 关 Integration
+python scripts/_wt_service.py stop integration
+```
+
+### 0.11.4 PM 分配 BUG 时的决策
+
+```
+PM 分配 BUG:
+  │
+  ├── Q1: 这个 BUG 与其他 Agent 的 BUG 是否碰同一模块
+  │   ├── YES → 需要 Integration
+  │   └── NO → 不需要 (默认)
+  │
+  └── Q2: 是否改了共享 API 接口
+      ├── YES → 需要 Integration
+      └── NO → 不需要
+```
+
+---
+
 ## 1. Agent 必知 (3 分钟读完)
 
 ### 1.1 5 个最常用工具 (直接调, 不需 SSH)
@@ -893,7 +1009,7 @@ docs/
 
 ### 5.1 文件清单 (10 项)
 
-| 文件 | 角色 | 是源代码? | git 跟踪? |
+| 文件 | 角色 | 是源代码 | git 跟踪 |
 |------|------|------|------|
 | `deploy.sh` | 部署入口 (含 precheck + smoke) | ✅ 是 | ✅ 必须 |
 | `precheck.sh` | 部署前 7 项检查 | ✅ 是 | ✅ 必须 |
@@ -960,7 +1076,7 @@ git HEAD 上 deploy_bundle 是"**只存脚本 + zip**"模式, 但 worktree 实�
 | 问题 | 答案 | 证据 |
 |------|------|------|
 | **现在有没有采用 delta?** | **形式上没, 体验上部分有** | deploy.sh 仍是 `unzip -o` 全量 (line 229); 但 11 文件 hash 守卫让"非关键改动 5s 走完" |
-| **执行上有保障吗?** | **部分有, 部分没** | LF 保障 ✅, MANIFEST hash ✅, 11 文件 hash ⚠️ (不覆盖前端), deploy_history 9 天没新记录 ❌ |
+| **执行上有保障吗** | **部分有, 部分没** | LF 保障 ✅, MANIFEST hash ✅, 11 文件 hash ⚠️ (不覆盖前端), deploy_history 9 天没新记录 ❌ |
 | **L17 真 delta?** | **代码写了, 没集成** | smart_extract.sh 在 deploy_bundle/ 不存在; rebuild_zip.py --delta 模式不默认 |
 
 ### 6.2 部署流程真相 (拆成 3 步看)

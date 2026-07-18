@@ -22,9 +22,11 @@ ports.json 维护脚本 - P0-3 自动清理 stale 端口 (2026-07-17 协调智�
 """
 import argparse
 import json
+import msvcrt
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -61,14 +63,58 @@ def load_ports() -> dict:
         return {"reserved": {}, "allocated": {}}
 
 
-def save_ports(ports: dict):
-    """写 ports.json"""
+def _lock_path() -> Path:
+    """获取 ports.json 的锁文件路径"""
     paths = load_paths()
-    p = Path(paths["ports_registry"])
-    p.parent.mkdir(parents=True, exist_ok=True)
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(ports, f, indent=2, ensure_ascii=False)
-    print(f"  saved: {p}")
+    return Path(paths["ports_registry"]).with_suffix(".lock")
+
+
+def _acquire_lock():
+    """获取 ports.json 文件锁 (Windows msvcrt, 阻塞式)"""
+    lock = _lock_path()
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    fd = open(lock, "w")
+    # 阻塞等待独占锁, 最多 10 秒
+    deadline = time.time() + 10
+    while True:
+        try:
+            msvcrt.locking(fd.fileno(), msvcrt.LK_NBLCK, 1)
+            return fd
+        except OSError:
+            if time.time() > deadline:
+                fd.close()
+                raise TimeoutError("ports.json lock timeout (10s)")
+            time.sleep(0.1)
+
+
+def _release_lock(fd):
+    """释放 ports.json 文件锁"""
+    try:
+        msvcrt.locking(fd.fileno(), msvcrt.LK_UNLCK, 1)
+    except OSError:
+        pass
+    fd.close()
+    try:
+        _lock_path().unlink()
+    except OSError:
+        pass
+
+
+def save_ports(ports: dict):
+    """写 ports.json (带文件锁, 防止并发写入)"""
+    import time
+    fd = None
+    try:
+        fd = _acquire_lock()
+        paths = load_paths()
+        p = Path(paths["ports_registry"])
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(ports, f, indent=2, ensure_ascii=False)
+        print(f"  saved: {p}")
+    finally:
+        if fd:
+            _release_lock(fd)
 
 
 def list_worktrees() -> list:
@@ -212,14 +258,43 @@ def cmd_clean(dry_run: bool = True):
 
 
 def cmd_allocate(agent: str, port: int):
-    """分配端口 (类似 allocate_ports.py 但写入协调层)"""
+    """分配端口 (类似 allocate_ports.py 但写入协调层, 检查全段冲突)"""
     ports = load_ports()
+
+    # [v3.3] 检查 reserved 段 (主仓库端口)
     if str(port) in ports.get("reserved", {}):
-        print(f"  ERROR: port {port} is reserved for main")
+        print(f"  ERROR: port {port} is reserved for main ({ports['reserved'][str(port)]['description']})")
         return
+
+    # [v3.3] 检查 persistent 段 (release-prep/integration)
+    for p_str, info in ports.get("persistent", {}).items():
+        for field in ("backend_port", "frontend_port"):
+            if info.get(field) == port:
+                print(f"  ERROR: port {port} conflicts with persistent entry '{info.get('owner')}' "
+                      f"(field={field}, key={p_str})")
+                return
+        try:
+            if int(p_str) == port:
+                print(f"  ERROR: port {port} is persistent key for '{info.get('owner')}'")
+                return
+        except ValueError:
+            pass
+
+    # [v3.3] 检查 allocated 段
     if str(port) in ports.get("allocated", {}):
-        print(f"  ERROR: port {port} already allocated to {ports['allocated'][str(port)]['owner']}")
+        existing = ports["allocated"][str(port)]
+        print(f"  ERROR: port {port} already allocated to {existing.get('owner')}")
         return
+
+    # [v3.3] 检查运行时状态 (端口是否正在使用)
+    for section in ("reserved", "persistent", "allocated"):
+        for p_str, info in ports.get(section, {}).items():
+            if info.get("runtime_status") == "running" and info.get("runtime_pid"):
+                for field in ("backend_port", "frontend_port"):
+                    if info.get(field) == port:
+                        print(f"  ERROR: port {port} is runtime-running by '{info.get('owner')}' "
+                              f"(PID={info.get('runtime_pid')})")
+                        return
 
     paths = load_paths()
     wt_path = f"{paths['worktree_base']}/{agent}"

@@ -1,4 +1,4 @@
-﻿﻿# Multi-Agent Task Spec: coordinator-staging-cleanup
+﻿# Multi-Agent Task Spec: coordinator-staging-cleanup
 
 > **Task ID**: T-2026-07-15-coord-staging
 > **Agent**: coordinator (PMAgent 临时维护)
@@ -41,6 +41,20 @@ new_files:
   - DEPLOY_HANDOVER_V056.md
   - meta/tests/test_role_delete_cascade_v061.py
   - spec.md
+  - scripts/_wt_service.py
+  - scripts/self_verify.py
+  - scripts/_wt_lifecycle.py
+  - scripts/_events.py
+  - scripts/_coord_log.py
+  - scripts/_config_backup.py
+  - scripts/_session_cleanup.py
+  - scripts/_sync_scripts.py
+
+modified_files:
+  - scripts/_coord_commit_guard.py
+  - scripts/_ports_sync.py
+  - vite.config.js
+  - docs/AGENT_INFRA.md
 
 ---
 
