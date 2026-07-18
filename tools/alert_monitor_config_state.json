@@ -1,17 +1,17 @@
 {
   "failed_keys": [],
-  "last_alert_ts": 1784202001.5980022,
+  "last_alert_ts": 1784334300.955513,
   "check_last_run": {
-    "real_health": 1784270700.962387,
-    "db_can_write": 1784270700.962387,
-    "journal_err": 1784270700.962387,
-    "backend_err": 1784270700.962387,
-    "core_service_err": 1784270700.962387,
-    "db_health": 1784270100.9783876,
-    "disk_errors": 1784270100.9783876,
-    "disk_check": 1784270100.9783876,
-    "disk_usage": 1784270100.9783876
+    "real_health": 1784343000.9791179,
+    "db_can_write": 1784343000.9791179,
+    "journal_err": 1784343000.9791179,
+    "backend_err": 1784343000.9791179,
+    "core_service_err": 1784343000.9791179,
+    "db_health": 1784343000.9791179,
+    "disk_errors": 1784343000.9791179,
+    "disk_check": 1784341500.9814453,
+    "disk_usage": 1784341500.9814453
   },
   "check_last_fail": {},
-  "last_heartbeat_ts": 1784269509.7041728
+  "last_heartbeat_ts": 1784341825.7092366
 }

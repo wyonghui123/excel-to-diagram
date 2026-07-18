@@ -1,8 +1,8 @@
 # AGENT_INFRA.md
 
-> **目标读者**: AI Agent (主入口)
-> **最后更新**: 2026-07-17 (协调智能体新增 §0.8 协同边界)
-> **更新者**: coordinator (P0-2 协同边界文档化)
+> **目标读者**: AI Agent (3 种角色共用入口 — 开发/协调/部署)
+> **最后更新**: 2026-07-18 (v3.3 部署智能体角色 + v33_pipeline + 端口防护)
+> **更新者**: coordinator (v3.3 可发现性补全)
 > **本文件用途**: AI Agent 5 分钟接手本项目, 知道: 这是什么、怎么部署、怎么远端操作、找哪个文档、**怎么监控告警**
 > **详细规范**: 见下方 §0 索引
 > **[!] V007.71 重要更新**: 所有 worktree 路径从 `D:/filework/<name>-worktree/` 迁移到 `D:/filework/worktrees/<name>/` — 详见 §0.5
@@ -26,6 +26,7 @@
 | **Migration 设计依据** | [docs/MIGRATION_SPEC.md](file:///d:/filework/worktrees/release-prep/docs/MIGRATION_SPEC.md) | 1711 | 完整设计 spec (历史 design, 不必读) |
 | **staging 操作** | [docs/STAGING_GUIDE.md](file:///d:/filework/worktrees/release-prep/docs/STAGING_GUIDE.md) | 200+ | staging 部署/排错 |
 | **部署规范** | [docs/DEPLOYMENT_STANDARDS.md](file:///d:/filework/worktrees/release-prep/docs/DEPLOYMENT_STANDARDS.md) | 587 | 编码/部署/审计规范 |
+| **并行开发SOP v3.3** | [PARALLEL_DEV_SOP.md](file:///d:/filework/worktrees/agent-v061-staging/PARALLEL_DEV_SOP.md) | — | **6阶段流程 (部署智能体关注阶段5-7)** |
 | **完整索引** | [docs/INDEX.md](file:///d:/filework/worktrees/release-prep/docs/INDEX.md) | (待建) | 全部 docs/ 分类 |
 
 ---
@@ -522,9 +523,10 @@ schtasks /Delete /TN "\yonaa_alert_monitor" /F
 
 | 角色 | 启动方式 | 主要职责 | 主要工作目录 |
 |------|---------|---------|-------------|
-| **开发智能体 (dev agent)** | `scripts/agent_bootstrap.ps1 -AgentName X -Port 301X` | 在指定 wt 完成业务功能 (fix/feat/refactor) | 自己的 wt (worktrees/X/) |
-| **协调智能体 (coordinator)** | 手动启动 (PM 决策) | 跨 wt 维护 (branch/wt 治理, 全局重构, 状态同步) | 全部 wt 只读, 协调目录可写 |
-| **PM** | 人工 | 决策、批准、合并 | excel-to-diagram 主仓库 |
+| **开发智能体 (dev agent)** | `scripts/agent_bootstrap.ps1 -AgentName X -Port 301X` | 在指定 wt 完成业务功能 (fix/feat/refactor) + 自验证 | 自己的 wt (worktrees/X/) |
+| **协调智能体 (coordinator)** | 手动启动 (PM 决策) | 跨 wt 维护 (branch/wt 治理, 全局重构, 状态同步, cherry-pick) | 全部 wt 只读, 协调目录可写 |
+| **部署打包智能体 (deploy agent)** | 手动启动 (PM 决策) | release-prep 打包 + 远端部署 + 监控告警 | release-prep worktree |
+| **PM** | 人工 | 决策、批准、验证、合并 | excel-to-diagram 主仓库 |
 
 ### 0.8.2 协调智能体可做 (无需 PM 特批)
 
@@ -597,11 +599,95 @@ schtasks /Delete /TN "\yonaa_alert_monitor" /F
 
 每次新会话开始, 协调智能体必须自检:
 
-- [ ] 是否读了 `D:/filework/.agent-status.json` (最近协调决策)
+- [ ] 是否读了 `D:/filework/.agent-status.json` (最近协调决策 + v33_pipeline 状态)
 - [ ] 是否读了 `D:/filework/.coord/paths.json` (路径配置)
 - [ ] 是否读了 `D:/filework/.coord/ports.json` (端口分配)
 - [ ] 是否跑了 `git -C D:/filework/excel-to-diagram worktree list` (wt 状态)
 - [ ] 是否检查 dev agent 是否有进行中的 task (`.trae/agents/*.json` 心跳 < 5 分钟)
+- [ ] 是否读了 `D:/filework/.coord/events.jsonl` 最近 20 条 (Agent 事件通知)
+- [ ] 是否检查 v33_pipeline 是否有 `pm_review_pending` 或 `deploy_pending`
+
+### 0.8.8 v33_pipeline 状态机 (v3.3 协调核心)
+
+**位置**: `D:/filework/.agent-status.json` → `v33_pipeline`
+
+**6 状态 5 转换**:
+
+```
+DRAFT → SELF_VERIFIED → CHERRY_PICKED → PM_VERIFIED → DEPLOYED → REVERTED
+  │          │               │               │            │
+  │   Agent   │  协调智能体   │    PM        │  协调智能体 │  PM决策
+  │  自验证    │  cherry-pick  │   签字       │   部署     │  回滚
+  │  PASS     │  +重启服务    │              │            │
+```
+
+| 转换 | 触发方 | 动作 |
+|------|--------|------|
+| DRAFT→SELF_VERIFIED | 开发智能体 | self_verify.py run PASS |
+| SELF_VERIFIED→CHERRY_PICKED | 协调智能体 | cherry-pick + 重启 3006/3011 |
+| CHERRY_PICKED→PM_VERIFIED | PM | 人工业务流验证通过 |
+| PM_VERIFIED→DEPLOYED | 协调智能体 | 触发部署 (staging_deploy_orchestrator.py) |
+| DEPLOYED→REVERTED | PM | 回滚决策 |
+
+**协调智能体关键职责**:
+- cherry-pick 后: 设置 `v33_pipeline.pm_review_pending.pending=true`
+- PM 验证通过后: 设置 `v33_pipeline.deploy_pending.pending=true` + `pm_review_pending.pending=false`
+- 部署后: 设置 `deploy_pending.last_deployed=<ts>` + HANDOVER STATUS: DEPLOYED
+
+### 0.8.9 阶段6→7衔接: PM 通知 + 部署触发 (v3.3)
+
+**PM 通知机制 (3 层)**:
+
+| 层 | 机制 | PM 查看方式 |
+|----|------|------------|
+| 1 | `.agent-status.json` → `v33_pipeline.pm_review_pending` | PM 会话启动时自动检查 |
+| 2 | `.coord/events.jsonl` → `CHERRY_PICKED` / `PM_VERIFIED` | `_events.py tail` |
+| 3 | 协调智能体口头报告 | PM 会话中 |
+
+**部署触发铁律**:
+1. 无 PM_VERIFIED = 不许部署
+2. 部署前确认 `deploy_pending.pm_verified_at` 已填
+3. 部署后更新 `deploy_pending.last_deployed` + HANDOVER STATUS: DEPLOYED
+4. 部署失败: 保持 `deploy_pending.pending=true`, 告警 PM 等待人工介入
+
+**部署触发命令**:
+```bash
+# 日常模式
+python tools/staging_deploy_orchestrator.py
+
+# 热修模式
+DEPLOY_MODE=hotfix python tools/staging_deploy_orchestrator.py
+```
+
+### 0.8.10 10 层端口防护体系 (v3.3)
+
+| 阶段 | 层级 | 防护机制 |
+|------|------|---------|
+| **注册时** | 1. reserved 段检查 | 端口已保留给其他用途则拒绝 |
+| **注册时** | 2. persistent 段检查 | 持久分配端口不可覆盖 |
+| **注册时** | 3. allocated 段检查 | 已分配端口不可重复分配 |
+| **启动时** | 4. owner 冲突检测 | 端口 owner 不匹配则拒绝启动 |
+| **启动时** | 5. 端口实际占用检测 | 端口已被其他进程占用则拒绝 |
+| **运行时** | 6. runtime_status 同步 | 启停后写回 ports.json 让其他 Agent 可见 |
+| **运行时** | 7. 会话清理 hook | _session_cleanup.py 防止孤儿服务 |
+| **校验时** | 8. reconcile | 检测孤儿/劫持/stale + 自动修正 |
+| **校验时** | 9. watchdog | 定时校验 + 自愈 (协调智能体可长期运行) |
+| **校验时** | 10. force-stop-port | 强制停止孤儿服务 |
+
+**协调智能体常用端口命令**:
+```bash
+# 校验一致性
+python scripts/_wt_service.py reconcile
+
+# 查看所有 wt 服务状态
+python scripts/_wt_service.py status-all
+
+# 清理 stale 端口
+python scripts/_ports_sync.py
+
+# 强制停止孤儿
+python scripts/_wt_service.py force-stop-port <port>
+```
 
 ---
 
@@ -724,6 +810,201 @@ Start-Process "schtasks" "/Create /TN \yonaa_agent_health /XML D:\filework\workt
 ```
 
 **期望**: schtasks /Query /FO LIST 显示 4 个 yonaa_* 任务.
+
+---
+
+## §0.12 状态源优先级与一致性 (v3.3 新增, P1-S4)
+
+### 3 个状态源定义
+
+| 状态源 | 路径 | 用途 | 写入方 |
+|-------|------|------|-------|
+| **真相源** | `.agent-status.json` 的 `v33_pipeline` | PM 通知 + 流程状态机 | 协调智能体 |
+| **事件流** | `.coord/events.jsonl` | Agent 间通知 + 审计 | 所有 Agent + 协调智能体 |
+| **操作日志** | `.coord/coordination.log` | 协调智能体操作审计 | 协调智能体 |
+
+### 优先级规则
+
+```
+冲突时以 .agent-status.json 的 v33_pipeline 为准
+
+原因:
+1. v33_pipeline 是结构化状态 (字段明确)
+2. v33_pipeline 有文件锁保护 (save_ports 同款 msvcrt.locking)
+3. v33_pipeline 是协调智能体主动写入的 (责任明确)
+
+events.jsonl 和 coordination.log 是 append-only, 用于:
+- 通知 (events.jsonl)
+- 审计 (coordination.log)
+不作为状态判断的依据
+```
+
+### 写入同步规则
+
+协调智能体在关键节点必须**同时更新** 3 个源:
+
+| 节点 | v33_pipeline | events.jsonl | coordination.log |
+|------|-------------|-------------|-----------------|
+| Agent HANDOVER 就绪 | — | `HANDOVER_READY` | — |
+| cherry-pick 完成 | `pm_review_pending.pending=true` | `CHERRY_PICKED` | `cherry_pick <bugs>` |
+| PM 验证通过 | `deploy_pending.pending=true` + `pm_review_pending.pending=false` | `PM_VERIFIED` | — |
+| 部署完成 | `deploy_pending.last_deployed=<ts>` | `DEPLOYED` | `deploy <version>` |
+| 冲突检测 | — | `CONFLICT_DETECTED` | `conflict <detail>` |
+| 异常恢复 | — | `RECOVERED` | `recover <wt>` |
+
+### PM 查看状态的方式
+
+1. **会话启动时**: 读 `.agent-status.json` 的 `v33_pipeline.pm_review_pending`
+2. **准实时**: `_events.py tail` (持续监听新事件)
+3. **历史查询**: `_coord_log.py recent` (最近协调操作)
+4. **协调智能体报告**: 协调智能体在 PM 会话中口头报告
+
+---
+
+## §0.13 自验证服务保持运行 (v3.3 新增, P1-E2)
+
+### 场景
+
+Agent 自验证完成后, 如果协调智能体即将 cherry-pick, 可以让 Agent 的服务保持运行, 避免协调智能体重启 3006/3011 的 60s 等待。
+
+### 用法
+
+```bash
+# 自验证完成后保持服务运行 (不调用 stop)
+python scripts/self_verify.py run <wt-name> --keep-running
+
+# 协调智能体 cherry-pick 后, Agent 手动停止服务
+python scripts/_wt_service.py stop <wt-name>
+```
+
+### 何时用 --keep-running
+
+| 场景 | 是否保持运行 |
+|------|-------------|
+| Agent 即将提交 HANDOVER, 协调智能体马上 cherry-pick | 是 |
+| Agent 还要继续改代码 | 否 |
+| Agent 要切换到其他任务 | 否 |
+| HIGH 风险变更, 需要 PM 立即验证 | 是 |
+
+### 铁律
+
+- `--keep-running` 的服务必须注册到 `_session_cleanup.py` (防止孤儿)
+- 协调智能体 cherry-pick 前必须检查 Agent 服务是否在运行
+- 最多保持 30 分钟, 超时由 watchdog 自动清理
+
+---  [!] 必读
+
+> **背景**: PARALLEL_DEV_SOP v3.3 将 Integration 从常开改为按需, Agent 必须在自己 worktree 内完成真实服务自验证.
+> **适用**: 所有开发智能体, 在提交 HANDOVER 前必须完成.
+> **工具**: `_wt_service.py` (启停服务) + `self_verify.py` (自动化冒烟)
+
+### 0.10.1 5 步自验证 SOP (强制)
+
+```bash
+# 每次 BUG 修复完成后, HANDOVER 前必跑 (5 步, 5 分钟内)
+
+# Step 1: 启后端 (分配端口, 从 ports.json 自动读取)
+python scripts/_wt_service.py start-be <wt-name>
+
+# Step 2: 启前端 (如有前端改动)
+python scripts/_wt_service.py start-fe <wt-name>
+
+# Step 3: 跑冒烟测试
+python scripts/self_verify.py smoke <wt-name>
+
+# Step 4: 关服务
+python scripts/_wt_service.py stop <wt-name>
+
+# Step 5: 生成 SELF_VERIFY_RESULTS
+python scripts/self_verify.py report <wt-name>
+```
+
+### 0.10.2 一键自验证 (替代 5 步)
+
+```bash
+# 自动: 启服务 → 冒烟 → 关服务 → 输出报告
+python scripts/self_verify.py run <wt-name>
+```
+
+### 0.10.3 自验证退出条件
+
+| 条件 | 必须 |
+|------|------|
+| 后端 /api/v1/health 返回 200 | **是** |
+| BUG 相关 API 返回正确结果 | **是** |
+| 前端页面可访问 (如有前端改动) | **是** |
+| 单元测试 PASS (如有相关测试) | 建议 |
+| **SELF_VERIFY_RESULTS 已生成** | **是** |
+
+**无 SELF_VERIFY_RESULTS 的 HANDOVER = 无效, 协调智能体拒绝.**
+
+### 0.10.4 自验证环境参数
+
+| 项 | 来源 | 默认 |
+|----|------|------|
+| 后端端口 | `ports.json` allocated.backend_port | 按 owner 匹配 |
+| 前端端口 | `ports.json` allocated.frontend_port | backend_port - 4 |
+| DB | worktree 自己的 `meta/architecture.db` | 已有 |
+| 启动超时 | `paths.json` self_verify.backend_startup_timeout | 60s |
+
+### 0.10.5 自验证失败处理
+
+| 失败 | 行动 |
+|------|------|
+| 后端启动失败 | 检查端口是否被占, 检查 waitress_server.py 日志 |
+| API 返回非 200 | 检查代码逻辑, 修复后重跑 |
+| 前端启动失败 | 检查 VITE_PORT 是否被占, 检查 npm install |
+| 无法生成 SELF_VERIFY_RESULTS | 检查 self_verify.py 是否存在 |
+
+---
+
+## 0.11. Integration 按需决策 (v3.3 新增)
+
+> **v3.3 核心变更**: Integration 不再常开, 仅在特定条件下按需启用.
+> **默认**: 不需要 Integration — Agent 自验证 + PM 验证即可.
+
+### 0.11.1 Integration 启用条件 (满足任一即启用)
+
+| # | 条件 | 原因 |
+|---|------|------|
+| 1 | 2+ Agent 修改同一模块的不同文件 | 跨 Agent 兼容性风险 |
+| 2 | 1 Agent 修改了共享 API 接口 (其他 Agent 依赖) | 接口变更影响 |
+| 3 | 3+ Agent 同时提交 HANDOVER | 批量合并风险 |
+| 4 | PM 人工判断需要 | 安全网 |
+
+### 0.11.2 Integration 不需要的场景 (默认)
+
+- Agent 修复独立模块的 BUG (不同文件, 不同模块)
+- Agent 之间无代码依赖
+- PM 分配时明确标注"无需 Integration"
+
+### 0.11.3 Integration 启停命令 (按需)
+
+```bash
+# 启 Integration (协调智能体, 仅在需要时)
+python scripts/_wt_service.py start-be integration
+python scripts/_wt_service.py start-fe integration
+
+# Agent 在 Integration 跑 E2E (同 v3.2 阶段 5)
+# ...
+
+# 关 Integration
+python scripts/_wt_service.py stop integration
+```
+
+### 0.11.4 PM 分配 BUG 时的决策
+
+```
+PM 分配 BUG:
+  │
+  ├── Q1: 这个 BUG 与其他 Agent 的 BUG 是否碰同一模块
+  │   ├── YES → 需要 Integration
+  │   └── NO → 不需要 (默认)
+  │
+  └── Q2: 是否改了共享 API 接口
+      ├── YES → 需要 Integration
+      └── NO → 不需要
+```
 
 ---
 
@@ -893,7 +1174,7 @@ docs/
 
 ### 5.1 文件清单 (10 项)
 
-| 文件 | 角色 | 是源代码? | git 跟踪? |
+| 文件 | 角色 | 是源代码 | git 跟踪 |
 |------|------|------|------|
 | `deploy.sh` | 部署入口 (含 precheck + smoke) | ✅ 是 | ✅ 必须 |
 | `precheck.sh` | 部署前 7 项检查 | ✅ 是 | ✅ 必须 |
@@ -960,7 +1241,7 @@ git HEAD 上 deploy_bundle 是"**只存脚本 + zip**"模式, 但 worktree 实�
 | 问题 | 答案 | 证据 |
 |------|------|------|
 | **现在有没有采用 delta?** | **形式上没, 体验上部分有** | deploy.sh 仍是 `unzip -o` 全量 (line 229); 但 11 文件 hash 守卫让"非关键改动 5s 走完" |
-| **执行上有保障吗?** | **部分有, 部分没** | LF 保障 ✅, MANIFEST hash ✅, 11 文件 hash ⚠️ (不覆盖前端), deploy_history 9 天没新记录 ❌ |
+| **执行上有保障吗** | **部分有, 部分没** | LF 保障 ✅, MANIFEST hash ✅, 11 文件 hash ⚠️ (不覆盖前端), deploy_history 9 天没新记录 ❌ |
 | **L17 真 delta?** | **代码写了, 没集成** | smart_extract.sh 在 deploy_bundle/ 不存在; rebuild_zip.py --delta 模式不默认 |
 
 ### 6.2 部署流程真相 (拆成 3 步看)
@@ -1028,3 +1309,110 @@ bash deploy.sh
 ---
 
 **维护**: AGENT 接手时, **5 分钟读本文件 → 30 秒跑 capability_probe → 5 分钟读 DEPLOY_INFRASTRUCTURE §0+§1 → 3 分钟读 [MONITORING_QUICK_REFERENCE.md](file:///d:/filework/worktrees/release-prep/docs/MONITORING_QUICK_REFERENCE.md)** = 完全 ready.
+
+---
+
+## 7. 部署打包智能体专属指南 (v3.3 新增)
+
+> **目标读者**: 部署打包智能体 (deploy agent)
+> **工作目录**: `D:/filework/worktrees/release-prep/`
+> **核心职责**: 接收协调智能体 cherry-pick → 本地验证 → 打包 → 远端部署 → 监控告警
+
+### 7.1 部署智能体在 v3.3 流程中的位置
+
+```
+PM分配 → 开发智能体实现 → 开发智能体自验证 → commit+HANDOVER →
+协调智能体cherry-pick → [部署智能体接手] → PM验证 → 部署
+
+                                    ↑ 你在这里
+```
+
+**v3.3 关键变化**:
+- Integration 不再常开, 部署智能体不需要等 Integration E2E
+- 开发智能体已用 `self_verify.py` 完成真实服务自验证
+- HANDOVER 必须包含 SELF_VERIFY_RESULTS (否则无效)
+- PM_VERIFIED 门控: 无 PM 签字不许部署
+
+### 7.2 部署智能体启动必读 (5 步)
+
+```bash
+# Step 1: 身份检查 (§0.6)
+echo "=== 1. USER ===" && git -C "$(pwd)" config --get user.name
+echo "=== 2. WORKTREE ===" && basename $(pwd)
+echo "=== 3. BRANCH ===" && git -C "$(pwd)" branch --show-current
+
+# Step 2: 读 v33_pipeline 状态
+cat D:/filework/.agent-status.json | python -c "import sys,json; d=json.load(sys.stdin); print(json.dumps(d.get('v33_pipeline',{}), indent=2))"
+
+# Step 3: 读基础设施 manifest
+cat infra_manifest.json | head -50
+
+# Step 4: 同步最新脚本到本 worktree
+python D:/filework/excel-to-diagram/scripts/_sync_scripts.py sync
+
+# Step 5: 检查远端连通
+python tools/remote_capability_probe.py
+```
+
+### 7.3 部署智能体工作流 (收到 PM_VERIFIED 后)
+
+```bash
+# 1. 确认 PM_VERIFIED
+# 检查 .agent-status.json → v33_pipeline.deploy_pending.pm_verified_at 已填
+
+# 2. 本地验证 (cherry-pick 已由协调智能体完成)
+python scripts/self_verify.py smoke release-prep
+# 或快速检查:
+python scripts/self_verify.py quick release-prep
+
+# 3. 打包
+python tools/rebuild_zip.py --version v2026xxxx_xxx
+# 验证打包质量:
+python tools/verify_deploy_bundle.py  # 6/6 PASS 才许上传
+
+# 4. 上传 + 部署
+python tools/staging_deploy_orchestrator.py
+# 或热修:
+DEPLOY_MODE=hotfix python tools/staging_deploy_orchestrator.py
+
+# 5. 部署后验证
+python tools/yonaa_exec.py exec "curl -s http://localhost:5001/api/v1/health" 9200
+python tools/yonaa_exec.py exec "python3 -m meta.core.migration_runner --status" 9200
+
+# 6. 更新状态
+# v33_pipeline.deploy_pending.last_deployed = <timestamp>
+# HANDOVER STATUS: DEPLOYED
+```
+
+### 7.4 部署智能体工具速查
+
+| 工具 | 位置 | 用途 |
+|------|------|------|
+| `rebuild_zip.py` | `tools/` | 打包发布 zip |
+| `verify_deploy_bundle.py` | `tools/` | 验证打包质量 (6项) |
+| `staging_deploy_orchestrator.py` | `tools/` | 一键 staging 部署 |
+| `remote_capability_probe.py` | `tools/` | 远端连通检查 |
+| `yonaa_exec.py` | `tools/` | 远端执行命令 |
+| `_sync_scripts.py` | `scripts/` (主仓库) | 同步最新脚本到本 worktree |
+| `self_verify.py` | `scripts/` (同步后) | 本地冒烟验证 |
+| `_wt_service.py` | `scripts/` (同步后) | 服务启停 |
+| `check_agent_health.py` | `tools/` | Agent 健康检查 |
+| `alert_monitor_v0760.py` | `tools/` | 监控告警 |
+
+### 7.5 部署铁律 (5 条)
+
+1. **verify_deploy_bundle 6/6 PASS 才许上传** — CRLF/权限/垃圾/db污染等
+2. **无 PM_VERIFIED 不许部署** — 检查 v33_pipeline.deploy_pending.pm_verified_at
+3. **部署后必须验证** — health + migration status + 基本功能
+4. **部署失败必须告警 PM** — 保持 deploy_pending.pending=true, 不自动重试
+5. **脚本修改后必须同步** — `_sync_scripts.py sync` 确保本 worktree 脚本最新
+
+### 7.6 部署智能体与协调智能体的区别
+
+| 维度 | 协调智能体 | 部署打包智能体 |
+|------|----------|-------------|
+| 主要工作 | cherry-pick + 全局状态同步 | 打包 + 远端部署 + 监控 |
+| 工作目录 | 全部 wt (只读) + 协调目录 | release-prep (读写) |
+| 能碰的文件 | .agent-status.json, .coord/, 协调脚本 | release-prep 全部 + tools/ |
+| 不能碰的 | src/ 业务代码 | 开发智能体的 worktree |
+| 触发点 | Agent HANDOVER 就绪 | PM_VERIFIED 签字后 |
