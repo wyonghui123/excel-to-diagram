@@ -1,6 +1,6 @@
 import pytest
 
-pytestmark = [pytest.mark.unit, pytest.mark.xfail(reason="v1.4 association validator 错误消息变更 (source_name/源对象), 待修复", strict=False)]
+pytestmark = pytest.mark.unit
 
 # -*- coding: utf-8 -*-
 """
@@ -62,7 +62,7 @@ class TestValidateSourceTargetExistence:
         )
         assert result is not None
         assert result.success is False
-        assert '源记录不存在' in result.message
+        assert '源用户不存在' in result.message  # [FIX 2026-07-18] v1.4 错误消息变更
 
     def test_target_not_found_returns_error(self):
         cursor1 = MagicMock()
@@ -79,7 +79,7 @@ class TestValidateSourceTargetExistence:
         )
         assert result is not None
         assert result.success is False
-        assert '目标记录不存在' in result.message
+        assert '目标角色不存在' in result.message  # [FIX 2026-07-18] v1.4 错误消息变更
 
     def test_both_exist_returns_none(self):
         ds = _mock_ds(fetchone_returns={'id': 1})
