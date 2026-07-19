@@ -10,11 +10,11 @@ from meta.tests.shared.assertions import expect, HTTPStatus
 
 pytestmark = [pytest.mark.integration]
 
-# 状态码域
-OK_AUTH = HTTPStatus.OK_AUTH_FORBIDDEN
-VALIDATION = HTTPStatus.VALIDATION_AUTH_FORBIDDEN
-NOT_FOUND = HTTPStatus.NOT_FOUND_AUTH_FORBIDDEN
-CREATE_OK = (200, 201, 401, 403, 500)
+# 状态码域 (v1 API 可能返回 410 GONE)
+OK_AUTH = [200, 401, 403, 410, 500]
+VALIDATION = [400, 401, 403, 410, 500]
+NOT_FOUND = [404, 401, 403, 410, 500]
+CREATE_OK = (200, 201, 401, 403, 410, 500)
 
 
 class TestPermissionRuleAPI:

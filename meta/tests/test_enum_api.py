@@ -8,7 +8,9 @@ GAP-006: enum_api 端到端测试 (15 用例)
 - 覆盖 happy + 系统枚举只读 + 锁定枚举不可写 + 404
 """
 import json
-import time
+import os
+import sqlite3
+
 import pytest
 # [FIX 2026-07-17 P0] 工厂采用率提升
 # 旧模式: f'test_enum_{int(time.time())}'  (7 处同毫秒冲突)
@@ -19,6 +21,38 @@ pytestmark = pytest.mark.integration
 
 
 ENUM_URL = '/api/v1'
+
+
+@pytest.fixture(scope='module', autouse=True)
+def _cleanup_test_enum_data():
+    """[FIX 2026-07-19] 模块级自动 fixture: 进入和退出时清理 test_* enum 数据
+
+    之前测试因为 cleanup 静默失败, 残留 test_enum_v_1 等记录,
+    导致下次运行时 UNIQUE constraint failed。
+    本 fixture 确保模块开始/结束时 DB 干净。
+    """
+    def _do_cleanup():
+        db_path = os.environ.get('SQLITE_DB_PATH') or os.environ.get('TEST_DB_PATH')
+        if not db_path:
+            # 回退到默认 architecture.db
+            db_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                'architecture.db'
+            )
+        if not os.path.exists(db_path):
+            return
+        try:
+            conn = sqlite3.connect(db_path, timeout=5)
+            conn.execute("DELETE FROM enum_values WHERE enum_type_id LIKE 'test_%'")
+            conn.execute("DELETE FROM enum_types WHERE id LIKE 'test_%'")
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
+    _do_cleanup()
+    yield
+    _do_cleanup()
 
 
 class TestEnumAPI:
@@ -219,9 +253,11 @@ class TestEnumAPI:
         if resp.status_code != 200:
             pytest.skip("Cannot filter by category")
         items = resp.get_json()['data']['data']
-        if not items:
-            pytest.skip("No system enum types")
-        sys_enum_id = items[0]['id']
+        # [FIX 2026-07-19] 跳过 id=None 的脏数据
+        valid_items = [it for it in items if it.get('id')]
+        if not valid_items:
+            pytest.skip("No system enum types with valid id")
+        sys_enum_id = valid_items[0]['id']
         # 尝试 PUT
         resp2 = api_client.put(
             f'{ENUM_URL}/enum-types/{sys_enum_id}',
@@ -252,8 +288,9 @@ class TestEnumAPIValidationFR:
 
     def _create_business_enum(self, api_client, headers, suffix=None, mutability='extensible'):
         """辅助: 创建一个业务枚举类型并返回 id"""
-        import time as _t
-        suffix = suffix or f'fr_{int(_t.time()*1000)}'
+        # [FIX 2026-07-19] 始终附加 counter, 避免参数化测试和重复运行时 ID 冲突
+        counter = UserFactory._next_counter()
+        suffix = f'{suffix}_{counter}' if suffix else f'fr_{counter}'
         enum_id = f'test_{suffix}'
         resp = api_client.post(
             f'{ENUM_URL}/enum-types',
@@ -275,8 +312,8 @@ class TestEnumAPIValidationFR:
     @pytest.mark.parametrize('bad_mut', ['mutable', 'immutable', 'frozen', 'fully_editable', 'FULL_EDITABLE'])
     def test_fr001_invalid_mutability_on_create(self, api_client, admin_headers, bad_mut):
         """FR-001: enum_type create 传入非法 mutability → 400 INVALID_MUTABILITY"""
-        import time as _t
-        enum_id = f'test_fr001_{bad_mut}_{int(_t.time()*1000)}'
+
+        enum_id = f'test_fr001_{bad_mut}_{UserFactory._next_counter()}'
         resp = api_client.post(
             f'{ENUM_URL}/enum-types',
             json={'id': enum_id, 'name': 'T', 'category': 'business', 'mutability': bad_mut},
@@ -306,8 +343,8 @@ class TestEnumAPIValidationFR:
 
     def test_fr001_valid_mutability_fullEditable(self, api_client, admin_headers):
         """FR-001: fullEditable 是合法的"""
-        import time as _t
-        enum_id = f'test_fr001_fe_{int(_t.time()*1000)}'
+
+        enum_id = f'test_fr001_fe_{UserFactory._next_counter()}'
         resp = api_client.post(
             f'{ENUM_URL}/enum-types',
             json={'id': enum_id, 'name': 'T', 'category': 'business', 'mutability': 'fullEditable'},
@@ -318,8 +355,8 @@ class TestEnumAPIValidationFR:
 
     def test_fr001_valid_mutability_locked(self, api_client, admin_headers):
         """FR-001: locked 是合法的"""
-        import time as _t
-        enum_id = f'test_fr001_lk_{int(_t.time()*1000)}'
+
+        enum_id = f'test_fr001_lk_{UserFactory._next_counter()}'
         resp = api_client.post(
             f'{ENUM_URL}/enum-types',
             json={'id': enum_id, 'name': 'T', 'category': 'business', 'mutability': 'locked'},
@@ -392,10 +429,10 @@ class TestEnumAPIValidationFR:
     @pytest.mark.parametrize('good_code', ['A', 'ABC', 'A_B_C', 'A1B2', 'X1_Y2_Z3', 'A_'])
     def test_fr007_valid_code_format_succeeds(self, api_client, admin_headers, good_code):
         """FR-007: 合法 code 格式 → 200"""
-        import time as _t
+
         enum_id = self._create_business_enum(
             api_client, admin_headers,
-            suffix=f'fr007_{good_code}_{int(_t.time()*1000)}',
+            suffix=f'fr007_{good_code}_{UserFactory._next_counter()}',
         )
         try:
             resp = api_client.post(
@@ -411,10 +448,10 @@ class TestEnumAPIValidationFR:
 
     def test_fr008_code_immutable_on_update(self, api_client, admin_headers):
         """FR-008: enum_value update 改 code → 400 CODE_IMMUTABLE"""
-        import time as _t
+
         enum_id = self._create_business_enum(
             api_client, admin_headers,
-            suffix=f'fr008_{int(_t.time()*1000)}',
+            suffix=f'fr008_{UserFactory._next_counter()}',
         )
         try:
             # 先创建值
@@ -448,10 +485,10 @@ class TestEnumAPIValidationFR:
 
     def test_fr008_code_same_value_allowed(self, api_client, admin_headers):
         """FR-008: code 传相同值不算修改 → 200"""
-        import time as _t
+
         enum_id = self._create_business_enum(
             api_client, admin_headers,
-            suffix=f'fr008b_{int(_t.time()*1000)}',
+            suffix=f'fr008b_{UserFactory._next_counter()}',
         )
         try:
             create_resp = api_client.post(
@@ -482,10 +519,10 @@ class TestEnumAPIValidationFR:
 
     def test_fr009_duplicate_name_returns_error(self, api_client, admin_headers):
         """FR-009: 同一 enum_type 下 name 重复 → 400 DUPLICATE_NAME"""
-        import time as _t
+
         enum_id = self._create_business_enum(
             api_client, admin_headers,
-            suffix=f'fr009_{int(_t.time()*1000)}',
+            suffix=f'fr009_{UserFactory._next_counter()}',
         )
         try:
             # 创建第一个
@@ -510,10 +547,10 @@ class TestEnumAPIValidationFR:
 
     def test_fr009_duplicate_code_returns_error(self, api_client, admin_headers):
         """FR-009: 同一 enum_type 下 code 重复 → 400 DUPLICATE_CODE"""
-        import time as _t
+
         enum_id = self._create_business_enum(
             api_client, admin_headers,
-            suffix=f'fr009c_{int(_t.time()*1000)}',
+            suffix=f'fr009c_{UserFactory._next_counter()}',
         )
         try:
             # 创建第一个
@@ -540,8 +577,8 @@ class TestEnumAPIValidationFR:
 
     def test_fr001_system_enum_create_blocked(self, api_client, admin_headers):
         """FR-001: 不可通过 API 创建 category=system 的枚举"""
-        import time as _t
-        enum_id = f'test_sys_create_{int(_t.time()*1000)}'
+
+        enum_id = f'test_sys_create_{UserFactory._next_counter()}'
         resp = api_client.post(
             f'{ENUM_URL}/enum-types',
             json={'id': enum_id, 'name': 'X', 'category': 'system', 'mutability': 'extensible'},
@@ -555,10 +592,10 @@ class TestEnumAPIValidationFR:
 
     def test_locked_enum_blocks_create_value(self, api_client, admin_headers):
         """locked 枚举不可添加值 (FR-006 ~ ENUM_VALUE_LOCKED)"""
-        import time as _t
+
         enum_id = self._create_business_enum(
             api_client, admin_headers,
-            suffix=f'fr_lk_{int(_t.time()*1000)}',
+            suffix=f'fr_lk_{UserFactory._next_counter()}',
             mutability='locked',
         )
         try:
@@ -575,10 +612,10 @@ class TestEnumAPIValidationFR:
 
     def test_locked_enum_blocks_update_value(self, api_client, admin_headers):
         """locked 枚举不可改 enum_value (需先创建值再 lock, 这里改 mutability)"""
-        import time as _t
+
         enum_id = self._create_business_enum(
             api_client, admin_headers,
-            suffix=f'fr_lku_{int(_t.time()*1000)}',
+            suffix=f'fr_lku_{UserFactory._next_counter()}',
             mutability='extensible',
         )
         try:
@@ -617,10 +654,10 @@ class TestEnumAPIValidationFR:
 
     def test_locked_enum_blocks_delete_value(self, api_client, admin_headers):
         """locked 枚举不可删 enum_value"""
-        import time as _t
+
         enum_id = self._create_business_enum(
             api_client, admin_headers,
-            suffix=f'fr_lkd_{int(_t.time()*1000)}',
+            suffix=f'fr_lkd_{UserFactory._next_counter()}',
             mutability='extensible',
         )
         try:
@@ -715,10 +752,10 @@ class TestEnumAPIValidationFR:
 
     def test_fr012_get_enum_type_includes_ui_actions_resolved(self, api_client, admin_headers):
         """FR-012: GET /enum-types/<id> 应返回 ui_actions_resolved 字段"""
-        import time as _t
+
         enum_id = self._create_business_enum(
             api_client, admin_headers,
-            suffix=f'fr012_{int(_t.time()*1000)}',
+            suffix=f'fr012_{UserFactory._next_counter()}',
         )
         try:
             resp = api_client.get(f'{ENUM_URL}/enum-types/{enum_id}', headers=admin_headers)
@@ -735,10 +772,10 @@ class TestEnumAPIValidationFR:
 
     def test_fr012_locked_enum_value_actions_blocked(self, api_client, admin_headers):
         """FR-012: locked 枚举的 value_actions 全部 False"""
-        import time as _t
+
         enum_id = self._create_business_enum(
             api_client, admin_headers,
-            suffix=f'fr012l_{int(_t.time()*1000)}',
+            suffix=f'fr012l_{UserFactory._next_counter()}',
             mutability='locked',
         )
         try:

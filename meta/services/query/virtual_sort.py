@@ -26,7 +26,17 @@ def build_virtual_field_order_join(
     storage = getattr(field, 'storage', None)
     logger.debug(f"[VirtualSort] Field '{sort_field}' storage={storage}, FieldStorage.VIRTUAL={FieldStorage.VIRTUAL}")
 
-    if storage != FieldStorage.VIRTUAL:
+    # [FIX 2026-07-19] db_trigger 维护的 stored 字段也走 join 排序逻辑:
+    # 这类字段 (如 business_object.domain_id) 物理上 stored (有 db_column),
+    # 但应用层视为 virtual (不写入, 由 DB trigger 维护). 排序时可用 join_path 构建 JOIN.
+    is_db_trigger = False
+    semantics = getattr(field, 'semantics', None)
+    if semantics is not None:
+        redundancy = getattr(semantics, 'redundancy', {}) or {}
+        if isinstance(redundancy, dict) and redundancy.get('maintained_by') == 'db_trigger':
+            is_db_trigger = True
+
+    if storage != FieldStorage.VIRTUAL and not is_db_trigger:
         logger.debug(f"[VirtualSort] Field '{sort_field}' is not virtual, using standard sort")
         return None
 
@@ -42,6 +52,16 @@ def build_virtual_field_order_join(
             return _build_audit_derived_order_join(
                 meta_obj.table_name, meta_obj.id, sort_field, sort_direction
             )
+
+        # [FIX 2026-07-19] db_trigger 字段: 直接从 semantics.redundancy.join_path 构建
+        if is_db_trigger and semantics is not None:
+            redundancy = getattr(semantics, 'redundancy', {}) or {}
+            if isinstance(redundancy, dict):
+                join_path_raw = redundancy.get('join_path') or []
+                if join_path_raw:
+                    return _build_join_from_raw_path(
+                        meta_obj.table_name, join_path_raw, sort_direction
+                    )
 
         logger.warning(f"[VirtualSort] No redundancy definition for {meta_obj.id}.{sort_field}")
         return None
@@ -82,6 +102,61 @@ def build_virtual_field_order_join(
 
     logger.info(f"[VirtualSort] Built JOIN: {join_clause}, order_by: {order_field_alias} {sort_direction}")
 
+    return join_clause, order_field_alias, sort_direction
+
+
+def _build_join_from_raw_path(
+    table_name: str,
+    join_path_raw: list,
+    sort_direction: str,
+) -> Optional[Tuple[str, str, str]]:
+    """从 yaml 原始 join_path (dict 列表) 构建 JOIN.
+
+    [FIX 2026-07-19] 用于 db_trigger 维护的 stored 字段 (无 RedundancyDef 注册),
+    直接从 semantics.redundancy.join_path 构建 JOIN.
+
+    Args:
+        table_name: 主表名
+        join_path_raw: list of dict, 每个 dict 含 table/from/to/select 键
+        sort_direction: 排序方向
+
+    Returns:
+        (join_clause, order_alias, sort_direction) 三元组
+    """
+    table_name = validate_table_name(table_name)
+    alias_counter = 0
+    join_parts = []
+    last_alias = table_name
+    target_field = None
+
+    for step in join_path_raw:
+        if not isinstance(step, dict):
+            continue
+        alias_counter += 1
+        join_alias = f"_j{alias_counter}"
+
+        step_table = step.get('table')
+        from_field = step.get('from')
+        to_field = step.get('to') or 'id'
+        select = step.get('select')
+
+        if not step_table or not from_field:
+            continue
+
+        join_sql = (
+            f"LEFT JOIN {step_table} AS {join_alias} "
+            f"ON {last_alias}.{from_field} = {join_alias}.{to_field}"
+        )
+        join_parts.append(join_sql)
+        last_alias = join_alias
+        if select:
+            target_field = select
+
+    if not target_field or not join_parts:
+        return None
+
+    join_clause = " ".join(join_parts)
+    order_field_alias = f"{last_alias}.{target_field}"
     return join_clause, order_field_alias, sort_direction
 
 

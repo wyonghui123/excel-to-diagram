@@ -1311,6 +1311,15 @@ def parse_field(data: Dict[str, Any], included_from: str = "") -> MetaField:
     if isinstance(semantics_data, dict) and semantics_data.get("virtual", False):
         storage = FieldStorage.VIRTUAL
 
+    # [FIX 2026-07-19] db_trigger 维护的冗余字段: 应用层视为 virtual (不写入),
+    # 但物理上仍 stored (DB trigger 维护). 设置 semantics.virtual=True 让 field_controls API 返回 virtual=True.
+    if isinstance(semantics_data, dict):
+        redundancy = semantics_data.get("redundancy") or {}
+        if isinstance(redundancy, dict) and redundancy.get("maintained_by") == "db_trigger":
+            # 在 semantics_data 副本上设置 virtual=True (不污染原 dict)
+            semantics_data = dict(semantics_data)
+            semantics_data["virtual"] = True
+
     return MetaField(
         id=data.get("id", ""),
         name=data.get("name", ""),

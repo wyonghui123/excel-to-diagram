@@ -29,6 +29,8 @@ class TestLogE2E:
         self.security = SecurityLogInterceptor(structured_logger=self.mock_logger)
         self.operation = OperationLogInterceptor(structured_logger=self.mock_logger)
         self.operation.DISABLED = False  # 测试时启用 (生产保持 DISABLED=True)
+        # [FIX 2026-07-19] 启用 CRUD 业务日志, 否则 CRUD 测试用例 log_business 不会被调用
+        self.business.AUDIT_CRUD_WRITE_DISABLED = False
 
     def _make_context(self, action, object_type='domain', success=True,
                       object_id=1, user_id=1, user_name='admin',

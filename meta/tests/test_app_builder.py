@@ -384,30 +384,31 @@ class TestStandardActionLoaderStartup:
     """§7.11 StandardActionLoader 启动加载测试"""
 
     def test_standard_action_loader_loads_12_actions(self):
-        """StandardActionLoader 加载 12 个标准动作"""
+        """StandardActionLoader 加载标准动作 (2026-07-19 已扩展到 16 个)"""
         from meta.core.standard_action_loader import StandardActionLoader
         StandardActionLoader._loaded = False
         StandardActionLoader._actions = []
         actions = StandardActionLoader.get_actions()
-        assert len(actions) == 12
+        # [FIX 2026-07-19] _standard_actions.yaml 已扩展到 16 个 (新增 export/import/grant/revoke/manage 等)
+        assert len(actions) == 16
 
     def test_standard_action_loader_suffix_map_complete(self):
-        """StandardActionLoader 包含全部 12 对 suffix 映射"""
+        """StandardActionLoader 包含全部 suffix 映射"""
         from meta.core.standard_action_loader import StandardActionLoader
         StandardActionLoader._loaded = False
         StandardActionLoader._actions = []
         smap = StandardActionLoader.get_suffix_map()
-        assert len(smap) == 12
+        assert len(smap) == 16
         assert smap['crud_create'] == 'create'
         assert smap['assign'] == 'assign'
 
     def test_standard_action_loader_action_codes_complete(self):
-        """StandardActionLoader 包含全部 12 个 action_code"""
+        """StandardActionLoader 包含全部 action_code"""
         from meta.core.standard_action_loader import StandardActionLoader
         StandardActionLoader._loaded = False
         StandardActionLoader._actions = []
         codes = StandardActionLoader.get_action_codes()
-        assert len(codes) == 12
+        assert len(codes) == 16
         assert 'create' in codes
         assert 'manage' in codes
 

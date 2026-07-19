@@ -211,12 +211,13 @@ class TestProductVersionAspects:
         assert 'updated_by' in field_ids
 
     def test_version_has_naming_aspect(self):
+        # [FIX 2026-07-19] version 已于 2026-06-13 移除 naming_aspect (与 name 语义重叠)
+        # 测试改为验证 version 不再包含 naming_aspect, 但仍保留 audit/owner aspect
         version = get_meta_object('version')
         assert version is not None, "version not found in registry"
-        assert 'naming_aspect' in version.aspects
-        field_ids = [f.id for f in version.fields]
-        assert 'code' in field_ids
-        assert 'name' in field_ids
+        assert 'naming_aspect' not in version.aspects, "version 不应含 naming_aspect (2026-06-13 已移除)"
+        assert 'audit_aspect' in version.aspects
+        assert 'owner_aspect' in version.aspects
 
     def test_version_audit_fields_have_auto_fill(self):
         version = get_meta_object('version')

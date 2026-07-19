@@ -113,7 +113,13 @@ def bo_action_server_or_start():
 
 @pytest.fixture(scope='session')
 def admin_cookie():
-    """获取 admin 登录 cookie (session scope, 1 次登录即可)"""
+    """获取 admin 登录 cookie (session scope, 1 次登录即可)
+
+    [FIX 2026-07-19] server 不在时 skip 而不是 error (避免 ConnectionRefusedError)
+    """
+    if not _check_server():
+        pytest.skip(f'BO Action 测试需 server 在 localhost:{DEFAULT_PORT} 跑, '
+                    f'请用 service_manager.ps1 start -Port {DEFAULT_PORT}')
     from admin_token import get_admin_cookie
     return get_admin_cookie()
 

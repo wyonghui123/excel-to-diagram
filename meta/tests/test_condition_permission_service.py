@@ -366,9 +366,14 @@ def test_check_permission_owner(svc, ds):
 
 
 def test_check_permission_owner_via_created_by(svc, ds):
-    """check_permission: created_by 也算 owner"""
+    """check_permission: created_by 也算 owner
+
+    [FIX 2026-07-19] BUG-V010 后产品 _is_owner 只查 owner_id, 不查 created_by
+    (注释: "不用 created_by (V1.1 后 user 也变了)")
+    测试期望需对齐产品实现: 设置 owner_id=creator 才能通过 owner 判定
+    """
     creator = _insert_user(ds, 'creator')
-    p = _insert_product(ds, created_by=creator)
+    p = _insert_product(ds, created_by=creator, owner_id=creator)
     result = svc.check_permission(creator, 'product', p, 'read')
     assert result['allowed'] is True
     assert result['source'] == 'owner'

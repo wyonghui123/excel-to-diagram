@@ -35,13 +35,21 @@ def setup():
 
 def test_delete_operation():
     print("=== 测试删除操作功能 ===\n")
-    
+
     data_source = setup()
     if data_source is None:
         return
     manage_service = ManageService(data_source)
     query_service = QueryService(data_source)
     import_export_service = ImportExportService(data_source, manage_service, query_service)
+
+    # [FIX 2026-07-19] import_cascade 内部触发 change_notification_service 等需要 Flask app context
+    # 使用 ExitStack 注册 pop, 避免修改整个测试 body 的缩进
+    import contextlib
+    from meta.tests.conftest import get_shared_app
+    app, _ = get_shared_app()
+    ctx = app.app_context()
+    ctx.push()
     
     # 1. 创建测试数据
     print("1. 创建测试数据...")
@@ -137,9 +145,11 @@ def test_delete_operation():
     
     if deleted_data:
         print(f"   [FAIL] Delete failed: data still exists (ID: {deleted_data['id']})")
+        ctx.pop()
         return False
     else:
         print(f"   [PASS] Delete success: data has been deleted")
+        ctx.pop()
         return True
 
 if __name__ == "__main__":

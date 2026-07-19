@@ -307,12 +307,15 @@ def test_token_service_extract_payload():
     print("\n=== 测试 TokenService.extract_payload_without_verification ===")
 
     # [FIX 2026-07-17 P0#3] UserFactory.build() 提供唯一 username
+    # [FIX 2026-07-19] 保留 username 到变量, 避免与 'testuser' 字面量比较失败
     from meta.tests.factories import UserFactory
+    test_username = UserFactory.build()['username']
+    test_email = UserFactory.build()['email']
     user_info = UserInfo(
         user_id=1,
-        username=UserFactory.build()['username'],
+        username=test_username,
         display_name='Test User',
-        email=UserFactory.build()['email'],
+        email=test_email,
         roles=['admin'],
         permissions=['*']
     )
@@ -321,7 +324,7 @@ def test_token_service_extract_payload():
     payload = TokenService.extract_payload_without_verification(token)
     assert payload is not None
     assert payload['user_id'] == 1
-    assert payload['username'] == 'testuser'
+    assert payload['username'] == test_username
     print("[PASS] extract_payload_without_verification 正常工作")
 
     payload = TokenService.extract_payload_without_verification('invalid.token.here')

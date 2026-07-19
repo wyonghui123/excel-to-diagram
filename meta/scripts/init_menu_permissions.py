@@ -221,7 +221,9 @@ def init_menu_permissions(db_path):
             'icon': 'User',
             'color': '#ef4444',
             'sort_order': 51,
-            'parent_menu': '',
+            # [FIX 2026-07-19] parent_menu 应为 'system' (与 business-config / audit-log 一致)
+            # 之前为空字符串导致 user-permission 不出现在 system 子菜单中
+            'parent_menu': 'system',
             'page_type': 'multi_object_hub',
             'primary_object_type': 'user',
             'object_types': json.dumps(['user', 'role', 'user_group']),

@@ -391,11 +391,14 @@ def _read_audit_log_via_v1(obj_id):
     try:
         from meta.api.audit_api import _extract_deleted_data
         ds = _get_data_source()
+        # [FIX 2026-07-19] 补齐 parent_object_type / parent_object_id 列,
+        # 否则 parent_object_type_label 永远不会被注入.
         cursor = ds.execute("""
             SELECT id, object_type, object_id, action, field_name, old_value, new_value,
                    user_id, user_name, ip_address, user_agent, created_at, trace_id,
                    transaction_id, status, retry_count, error_message, agent_id,
-                   agent_session_id, tool_call_id, agent_reasoning, extra_data
+                   agent_session_id, tool_call_id, agent_reasoning, extra_data,
+                   parent_object_type, parent_object_id
             FROM audit_logs WHERE id = ?
         """, [obj_id])
         row = cursor.fetchone()

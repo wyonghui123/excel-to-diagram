@@ -214,7 +214,7 @@ class TestAuthDataPermissionCRUD:
             'resource_id': 1,
             'permission_level': 'read',
             'inherit_to_children': True
-        }, expected_status=[201, 200, 400, 500, 401])
+        }, expected_status=[201, 200, 400, 500, 401, 410])
         if resp.status_code in [200, 201]:
             data = get_json(resp)
             assert data.get('success') is True
@@ -222,7 +222,7 @@ class TestAuthDataPermissionCRUD:
     def test_query_data_permission(self, api_helper):
         """查询数据权限"""
         resp = api_helper.get('/api/v1/data-permissions?user_id=1',
-                             expected_status=[200, 404, 500, 401])
+                             expected_status=[200, 404, 500, 401, 410])
 
     def test_delete_data_permission(self, api_helper):
         """删除数据权限"""
@@ -232,13 +232,13 @@ class TestAuthDataPermissionCRUD:
             'resource_id': 1,
             'permission_level': 'read',
             'inherit_to_children': True
-        }, expected_status=[201, 200, 400, 500, 401])
+        }, expected_status=[201, 200, 400, 500, 401, 410])
         if create_resp.status_code in [200, 201]:
             data = get_json(create_resp)
             perm_id = data.get('data', {}).get('id')
             if perm_id:
                 delete_resp = api_helper.delete(f'/api/v1/data-permissions/{perm_id}',
-                                               expected_status=[200, 204, 400, 500, 401])
+                                               expected_status=[200, 204, 400, 500, 401, 410])
 
 
 # ==================== 用户CRUD测试（严格验证） ====================

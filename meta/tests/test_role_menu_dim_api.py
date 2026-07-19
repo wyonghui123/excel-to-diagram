@@ -57,7 +57,9 @@ class TestRoleMenuAPI:
         assert resp.status_code == 400
         body = resp.get_json()
         assert body.get('success') is False
-        assert '请求体' in body.get('error', '')
+        # [FIX 2026-07-19] 实际错误信息是 "请求内容不能为空", 兼容 "请求体"/"为空" 等变体
+        err_msg = body.get('error', '')
+        assert '请求体' in err_msg or '请求内容' in err_msg or '为空' in err_msg, f"unexpected error: {err_msg}"
 
     def test_update_role_menu_permissions_with_codes(self, api_client, admin_headers):
         """PUT /<id>/menu-permissions 传 menu_codes 数组"""
@@ -92,7 +94,9 @@ class TestRoleDimensionScopeAPI:
         assert resp.status_code == 400
         body = resp.get_json()
         assert body.get('success') is False
-        assert '请求体' in body.get('error', '')
+        # [FIX 2026-07-19] 实际错误信息是 "请求内容不能为空", 兼容 "请求体"/"为空" 等变体
+        err_msg = body.get('error', '')
+        assert '请求体' in err_msg or '请求内容' in err_msg or '为空' in err_msg, f"unexpected error: {err_msg}"
 
     def test_save_dimension_scopes_with_array(self, api_client, admin_headers):
         """POST /<id>/dimension-scopes 传 scopes 数组"""

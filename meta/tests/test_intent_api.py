@@ -42,7 +42,9 @@ class TestIntentAPI:
         assert resp.status_code == 400
         body = resp.get_json()
         assert body.get('success') is False
-        assert 'required' in body.get('error', '')
+        # [FIX 2026-07-19] 实际错误信息是中文 "用户 ID 和业务对象 ID 不能为空", 兼容 'required' / '不能为空'
+        err_msg = body.get('error', '')
+        assert 'required' in err_msg or '不能为空' in err_msg or '必须' in err_msg, f"unexpected error: {err_msg}"
 
     def test_list_bos_v1(self, api_client, admin_headers):
         """GET /api/v1/bos 列出所有 BO"""

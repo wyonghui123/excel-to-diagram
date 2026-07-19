@@ -128,9 +128,13 @@ class TestUserStateTransitions:
 
         assert st is not None, "activate_user transition not found"
 
+        # [FIX 2026-07-19] 测试需模拟"用户显式激活"场景:
+        # - original_data: 转换前的状态 (inactive)
+        # - data: 转换后的状态 (active, = rule.to_state)
+        # 否则 Case 1.5 (effective_state == current_state) 会跳过 rule
         context = RuleContext(
             meta_object=user_meta,
-            data={'id': 1, 'username': 'test', 'status': 'inactive'},
+            data={'id': 1, 'username': 'test', 'status': 'active'},
             original_data={'id': 1, 'username': 'test', 'status': 'inactive'}
         )
 

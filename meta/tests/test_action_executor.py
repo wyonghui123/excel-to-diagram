@@ -34,6 +34,7 @@ def ds(tmp_path_factory):
     db_path = tmp_path_factory.mktemp("test_executor") / "test.db"
     data_source.connect(path=str(db_path))
     # 创建 audit_logs 表（所有测试都需要）
+    # [FIX 2026-07-19] 补齐 AuditLogger 所需的全部列
     audit_log_sql = """
     CREATE TABLE IF NOT EXISTS audit_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,7 +57,16 @@ def ds(tmp_path_factory):
         agent_id TEXT,
         agent_session_id TEXT,
         tool_call_id TEXT,
-        agent_reasoning TEXT
+        agent_reasoning TEXT,
+        parent_object_type TEXT,
+        parent_object_id TEXT,
+        log_category TEXT,
+        log_level TEXT,
+        outcome TEXT,
+        retention_until TEXT,
+        cascade_root_id INTEGER,
+        cascade_root_action TEXT,
+        error_message TEXT
     )
     """
     data_source.execute(audit_log_sql)
@@ -202,7 +212,14 @@ def setup_database(ds, parent, child):
         tool_call_id TEXT,
         agent_reasoning TEXT,
         parent_object_type TEXT,
-        parent_object_id TEXT
+        parent_object_id TEXT,
+        log_category TEXT,
+        log_level TEXT,
+        outcome TEXT,
+        retention_until TEXT,
+        cascade_root_id INTEGER,
+        cascade_root_action TEXT,
+        error_message TEXT
     )
     """
     ds.execute(audit_sql)
@@ -210,12 +227,12 @@ def setup_database(ds, parent, child):
 
 def test_audit_logger(tmp_path):
     print("\n=== 测试 AuditLogger ===")
-    
+
     ds = SQLiteAdapter()
     # v3.13+ :memory: 不支持，改用临时文件
     db_path = tmp_path / "test_audit.db"
     ds.connect(path=str(db_path))
-    
+
     ds.execute("""
         CREATE TABLE audit_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -240,7 +257,14 @@ def test_audit_logger(tmp_path):
             tool_call_id TEXT,
             agent_reasoning TEXT,
             parent_object_type TEXT,
-            parent_object_id TEXT
+            parent_object_id TEXT,
+            log_category TEXT,
+            log_level TEXT,
+            outcome TEXT,
+            retention_until TEXT,
+            cascade_root_id INTEGER,
+            cascade_root_action TEXT,
+            error_message TEXT
         )
     """)
     

@@ -902,7 +902,7 @@ class TestBoAPIGranularBatch:
             assert delete_resp.status_code in [200, 204, 400, 401, 404, 500]
 
 CRUD_TEST_CASES = [
-    ("create", "user", {"username": "test_user", "password": "pwd123", "email": "test@test.com"}, [201, 200], "创建用户"),
+    ("create", "user", {"username": "test_user", "password": "pwd123", "email": "test@test.com", "display_name": "Test User"}, [201, 200], "创建用户"),
     ("create_invalid", "user", {"username": "test_user"}, [400, 422], "缺少必填字段"),
     ("create_empty", "user", {}, [400, 422], "空请求体"),
     ("create_unknown", "unknown_type", {"name": "test"}, [400, 404], "未知对象类型"),
@@ -1029,6 +1029,11 @@ class TestBOAPICRUD:
         """创建操作测试"""
         if test_type == "create":
             data['username'] = f"{data['username']}_{os.urandom(4).hex()}"
+            # [FIX 2026-07-19] email 也加随机后缀, 避免 DB 脏数据 email='test@test.com' 冲突返回 400
+            if 'email' in data:
+                local, _, domain = data['email'].partition('@')
+                if domain:
+                    data['email'] = f"{local}_{os.urandom(4).hex()}@{domain}"
         
         resp = api_client.post(
             f'/api/v2/bo/{obj_type}',

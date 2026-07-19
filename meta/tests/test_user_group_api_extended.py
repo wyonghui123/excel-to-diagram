@@ -75,7 +75,8 @@ def created_group(client, admin_token):
 
 def test_get_user_groups_unauthenticated(client):
     resp = client.get('/api/v1/user-groups')
-    assert resp.status_code in [401, 500]
+    # [FIX 2026-07-19] v1 API sunset 返回 410 GONE
+    assert resp.status_code in [401, 410, 500]
 
 
 def test_get_user_groups_authenticated(client, admin_token):

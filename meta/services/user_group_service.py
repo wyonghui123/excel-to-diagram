@@ -259,12 +259,12 @@ class UserGroupService:
     def get_group_roles(self, group_id: int) -> List[Dict[str, Any]]:
         """获取用户组关联的角色列表"""
         cursor = self.ds.execute(
-            """SELECT gr.id, gr.role_id, r.code, r.name, r.description, r.priority, r.is_system,
+            """SELECT gr.id, gr.role_id, r.code, r.name, r.description, r.is_system,
                       gr.created_at
                FROM group_roles gr
                INNER JOIN roles r ON gr.role_id = r.id
                WHERE gr.group_id = ?
-               ORDER BY r.priority DESC, r.name""",
+               ORDER BY r.name""",
             [group_id]
         )
         return self._rows_to_dicts(cursor)
@@ -310,10 +310,10 @@ class UserGroupService:
     def get_roles_not_in_group(self, group_id: int) -> List[Dict[str, Any]]:
         """获取未关联到该用户组的角色列表"""
         cursor = self.ds.execute(
-            """SELECT id, code, name, description, priority, is_system
+            """SELECT id, code, name, description, is_system
                FROM roles
                WHERE id NOT IN (SELECT role_id FROM group_roles WHERE group_id = ?)
-               ORDER BY priority DESC, name""",
+               ORDER BY name""",
             [group_id]
         )
         return self._rows_to_dicts(cursor)
@@ -362,8 +362,8 @@ class UserGroupService:
 
             if not existing:
                 self.ds.execute(
-                    """INSERT INTO roles (code, name, description, is_system, priority)
-                       VALUES (?, ?, ?, 0, 0)""",
+                    """INSERT INTO roles (code, name, description, is_system)
+                       VALUES (?, ?, ?, 0)""",
                     [migration_role_code, migration_role_name,
                      f"从用户组 '{group['name']}' 的直接数据权限自动迁移生成，请手动整理"]
                 )

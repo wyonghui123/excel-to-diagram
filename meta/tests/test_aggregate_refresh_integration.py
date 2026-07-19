@@ -101,7 +101,14 @@ class TestAggregateRefreshOnCreate:
                 code TEXT,
                 source_code TEXT, target_code TEXT,
                 relation_code TEXT, relation_type TEXT, version_id INTEGER,
-                created_at TEXT, updated_at TEXT, created_by TEXT, updated_by TEXT
+                created_at TEXT, updated_at TEXT, created_by TEXT, updated_by TEXT,
+                /* [FIX 2026-07-19] 冗余字段 (yaml schema 要求, db_trigger 维护) */
+                source_domain_id INTEGER,
+                source_sub_domain_id INTEGER,
+                source_service_module_id INTEGER,
+                target_domain_id INTEGER,
+                target_sub_domain_id INTEGER,
+                target_service_module_id INTEGER
             )
         """)
         self.ds.execute("""
@@ -231,7 +238,14 @@ class TestAggregateRefreshOnUpdate:
                 code TEXT,
                 source_code TEXT, target_code TEXT,
                 relation_code TEXT, relation_type TEXT, version_id INTEGER,
-                created_at TEXT, updated_at TEXT, created_by TEXT, updated_by TEXT
+                created_at TEXT, updated_at TEXT, created_by TEXT, updated_by TEXT,
+                /* [FIX 2026-07-19] 冗余字段 (yaml schema 要求, db_trigger 维护) */
+                source_domain_id INTEGER,
+                source_sub_domain_id INTEGER,
+                source_service_module_id INTEGER,
+                target_domain_id INTEGER,
+                target_sub_domain_id INTEGER,
+                target_service_module_id INTEGER
             )
         """)
         self.ds.execute("""

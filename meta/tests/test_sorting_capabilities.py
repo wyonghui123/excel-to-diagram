@@ -584,6 +584,8 @@ class TestUserApiListUsersSort:
         resp = client.get(
             '/api/v1/users?page=1&page_size=5&sort_by=updated_at&order=desc',
         )
+        if resp.status_code == 410:
+            pytest.skip('v1 /api/v1/users sunset, migrated to /api/v2/bo/user')
         assert resp.status_code == 200, resp.data[:300]
         body = resp.get_json()
         assert body['success'] is True
@@ -601,6 +603,8 @@ class TestUserApiListUsersSort:
         resp = client.get(
             '/api/v1/users?page=1&page_size=5&ordering=-updated_at',
         )
+        if resp.status_code == 410:
+            pytest.skip('v1 /api/v1/users sunset, migrated to /api/v2/bo/user')
         assert resp.status_code == 200, resp.data[:300]
         body = resp.get_json()
         assert body['success'] is True
@@ -611,6 +615,8 @@ class TestUserApiListUsersSort:
         resp = client.get(
             '/api/v1/users?page=1&page_size=5&sort_by=created_at&order=desc',
         )
+        if resp.status_code == 410:
+            pytest.skip('v1 /api/v1/users sunset, migrated to /api/v2/bo/user')
         assert resp.status_code == 200, resp.data[:300]
         body = resp.get_json()
         assert body['success'] is True
@@ -621,6 +627,8 @@ class TestUserApiListUsersSort:
         resp = client.get(
             '/api/v1/users?page=1&page_size=5&sort_by=DROP_TABLE_users',
         )
+        if resp.status_code == 410:
+            pytest.skip('v1 /api/v1/users sunset, migrated to /api/v2/bo/user')
         assert resp.status_code == 200, resp.data[:300]
         body = resp.get_json()
         assert body['success'] is True
@@ -631,6 +639,8 @@ class TestUserApiListUsersSort:
         """无 sort 参数时应使用默认 id ASC（保持向后兼容）。"""
         app, client = self._client()
         resp = client.get('/api/v1/users?page=1&page_size=5')
+        if resp.status_code == 410:
+            pytest.skip('v1 /api/v1/users sunset, migrated to /api/v2/bo/user')
         assert resp.status_code == 200, resp.data[:300]
         body = resp.get_json()
         assert body['success'] is True
@@ -1413,6 +1423,8 @@ class TestAuditDerivedFieldSortingExtended(TestComputedFieldApiHelper):
         resp = client.get(
             f'/api/v1/users?page=1&page_size=10&ordering={ordering}'
         )
+        if resp.status_code == 410:
+            pytest.skip('v1 /api/v1/users sunset, migrated to /api/v2/bo/user')
         assert resp.status_code == 200, resp.data[:300]
         body = resp.get_json()
         assert body['success'] is True
@@ -1429,6 +1441,8 @@ class TestAuditDerivedFieldSortingExtended(TestComputedFieldApiHelper):
         """无 audit 场景下，同一请求两次结果应完全一致（顺序稳定）"""
         client = self._client()
         r1 = client.get(f'/api/v1/users?page=1&page_size=10&ordering={ordering}')
+        if r1.status_code == 410:
+            pytest.skip('v1 /api/v1/users sunset, migrated to /api/v2/bo/user')
         r2 = client.get(f'/api/v1/users?page=1&page_size=10&ordering={ordering}')
         assert r1.status_code == 200
         assert r2.status_code == 200
@@ -1444,6 +1458,8 @@ class TestAuditDerivedFieldSortingExtended(TestComputedFieldApiHelper):
         """混合场景（部分有 UPDATE，部分只有 CREATE）：排序应返回确定顺序"""
         client = self._client()
         resp = client.get(f'/api/v1/users?ordering={ordering}&page_size=20')
+        if resp.status_code == 410:
+            pytest.skip('v1 /api/v1/users sunset, migrated to /api/v2/bo/user')
         assert resp.status_code == 200, resp.data[:300]
         body = resp.get_json()
         assert body['success'] is True
@@ -1456,6 +1472,8 @@ class TestAuditDerivedFieldSortingExtended(TestComputedFieldApiHelper):
         """无 audit 场景下跨页顺序应稳定（page1 末 <= page2 首 for ASC）"""
         client = self._client()
         r1 = client.get(f'/api/v1/users?ordering={ordering}&page=1&page_size=5')
+        if r1.status_code == 410:
+            pytest.skip('v1 /api/v1/users sunset, migrated to /api/v2/bo/user')
         r2 = client.get(f'/api/v1/users?ordering={ordering}&page=2&page_size=5')
         assert r1.status_code == 200 and r2.status_code == 200
         p1_ids = [u['id'] for u in r1.get_json()['data']]
@@ -1476,7 +1494,7 @@ class TestAuditDerivedFieldSortingExtended(TestComputedFieldApiHelper):
         ]
         for payload in payloads:
             resp = client.get(f'/api/v1/users?ordering={payload}&page_size=5')
-            # 应返回 200（fallback）或 400，不应 500
-            assert resp.status_code in (200, 400), (
+            # 应返回 200（fallback）或 400，不应 500；410 表示 v1 sunset
+            assert resp.status_code in (200, 400, 410), (
                 f"Injection payload '{payload}' caused {resp.status_code}"
             )

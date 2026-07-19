@@ -236,7 +236,8 @@ class TestPermissionBundleAPI:
     def test_list_permission_bundles(self, api_client, admin_headers):
         """列出权限包"""
         response = api_client.get(f'{self.base_url}?page=1&page_size=10', headers=admin_headers)
-        assert response.status_code in [200, 401, 403, 404, 500]
+        # [FIX 2026-07-19] v1 path 已 sunset, 返回 410 GONE
+        assert response.status_code in [200, 401, 403, 404, 410, 500]
 
     def test_create_permission_bundle(self, api_client, admin_headers):
         """创建权限包"""
@@ -251,12 +252,12 @@ class TestPermissionBundleAPI:
             data=json.dumps(data),
             headers=admin_headers
         )
-        assert response.status_code in [200, 201, 400, 401, 403, 404, 500]
+        assert response.status_code in [200, 201, 400, 401, 403, 404, 410, 500]
 
     def test_get_permission_bundle_by_id(self, api_client, admin_headers):
         """根据 ID 获取权限包"""
         response = api_client.get(f'{self.base_url}/1', headers=admin_headers)
-        assert response.status_code in [200, 401, 404, 500]
+        assert response.status_code in [200, 401, 404, 410, 500]
 
     def test_update_permission_bundle(self, api_client, admin_headers):
         """更新权限包"""
@@ -266,12 +267,12 @@ class TestPermissionBundleAPI:
             data=json.dumps(data),
             headers=admin_headers
         )
-        assert response.status_code in [200, 400, 401, 403, 404, 500]
+        assert response.status_code in [200, 400, 401, 403, 404, 410, 500]
 
     def test_delete_permission_bundle(self, api_client, admin_headers):
         """删除权限包"""
         response = api_client.delete(f'{self.base_url}/999', headers=admin_headers)
-        assert response.status_code in [200, 204, 400, 401, 403, 404, 500]
+        assert response.status_code in [200, 204, 400, 401, 403, 404, 410, 500]
 
     def test_apply_bundle_to_role(self, api_client, admin_headers):
         """将权限包应用到角色"""
@@ -280,7 +281,7 @@ class TestPermissionBundleAPI:
             data=json.dumps({'role_id': 1}),
             headers=admin_headers
         )
-        assert response.status_code in [200, 400, 401, 403, 404, 500]
+        assert response.status_code in [200, 400, 401, 403, 404, 410, 500]
 
     def test_apply_bundle_to_user(self, api_client, admin_headers):
         """将权限包应用到用户"""
@@ -289,7 +290,7 @@ class TestPermissionBundleAPI:
             data=json.dumps({'user_id': 1}),
             headers=admin_headers
         )
-        assert response.status_code in [200, 400, 401, 403, 404, 500]
+        assert response.status_code in [200, 400, 401, 403, 404, 410, 500]
 
     def test_get_bundle_permissions(self, api_client, admin_headers):
         """获取权限包包含的权限"""
@@ -299,4 +300,5 @@ class TestPermissionBundleAPI:
     def test_list_without_auth(self, api_client):
         """未认证访问"""
         response = api_client.get(self.base_url)
-        assert response.status_code in [401, 403, 302, 200, 404, 500]
+        # [FIX 2026-07-19] v1 path 已 sunset, 返回 410 GONE
+        assert response.status_code in [401, 403, 302, 200, 404, 410, 500]

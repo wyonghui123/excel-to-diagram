@@ -117,10 +117,13 @@ class TestConcurrentCreation:
 
         def create_user(index):
             try:
+                factory_data = UserFactory.build()
                 data = {
-                    'username': UserFactory.build()['username'],
+                    'username': factory_data['username'],
                     'password': 'test123',
-                    'email': f'user{index}@test.com'
+                    'email': f'user{index}_{factory_data.get("username", "")}@test.com',
+                    # [FIX 2026-07-19] 必须含 display_name (否则 API 返回 400 "显示名称不能为空")
+                    'display_name': factory_data.get('display_name', f'User {index}'),
                 }
                 response = client.post(
                     '/api/v2/bo/user',

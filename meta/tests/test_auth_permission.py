@@ -358,27 +358,30 @@ def test_auth_provider_login():
 
 def test_token_service():
     print("\n=== 测试 TokenService ===")
-    
+
     # [FIX 2026-07-17 P0#3] UserFactory.build() 提供唯一 username
+    # [FIX 2026-07-19] 保留 username 到变量, 避免与 'testuser' 字面量比较失败
     from meta.tests.factories import UserFactory
+    test_username = UserFactory.build()['username']
+    test_email = UserFactory.build()['email']
     user_info = UserInfo(
         user_id=1,
-        username=UserFactory.build()['username'],
+        username=test_username,
         display_name='Test User',
-        email=UserFactory.build()['email'],
+        email=test_email,
         roles=['editor'],
         permissions=['domain:read', 'domain:write']
     )
-    
+
     token, _ = TokenService.create_token(user_info)
     assert token is not None
     assert len(token) > 50
     print(f"[PASS] Token 创建成功: {token[:50]}...")
-    
+
     payload = TokenService.verify_token(token)
     assert payload is not None
     assert payload['user_id'] == 1
-    assert payload['username'] == 'testuser'
+    assert payload['username'] == test_username
     assert 'editor' in payload['roles']
     print(f"[PASS] Token 验证成功: user_id={payload['user_id']}")
     

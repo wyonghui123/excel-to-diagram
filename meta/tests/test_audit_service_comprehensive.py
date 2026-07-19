@@ -199,7 +199,14 @@ class TestAuditServiceLog:
                 agent_id TEXT,
                 agent_session_id TEXT,
                 tool_call_id TEXT,
-                agent_reasoning TEXT
+                agent_reasoning TEXT,
+                outcome TEXT DEFAULT 'success',
+                cascade_root_id TEXT,
+                cascade_root_action TEXT,
+                retention_until TEXT,
+                prev_hash TEXT,
+                row_hash TEXT,
+                action_kind TEXT DEFAULT 'instance'
             );
         """)
         conn.commit()
@@ -520,7 +527,14 @@ class TestAuditServiceQuery:
                 agent_id TEXT,
                 agent_session_id TEXT,
                 tool_call_id TEXT,
-                agent_reasoning TEXT
+                agent_reasoning TEXT,
+                outcome TEXT DEFAULT 'success',
+                cascade_root_id TEXT,
+                cascade_root_action TEXT,
+                retention_until TEXT,
+                prev_hash TEXT,
+                row_hash TEXT,
+                action_kind TEXT DEFAULT 'instance'
             );
         """)
         
@@ -647,7 +661,14 @@ class TestAuditServiceObjectHistory:
                 agent_id TEXT,
                 agent_session_id TEXT,
                 tool_call_id TEXT,
-                agent_reasoning TEXT
+                agent_reasoning TEXT,
+                outcome TEXT DEFAULT 'success',
+                cascade_root_id TEXT,
+                cascade_root_action TEXT,
+                retention_until TEXT,
+                prev_hash TEXT,
+                row_hash TEXT,
+                action_kind TEXT DEFAULT 'instance'
             );
         """)
         
@@ -724,7 +745,21 @@ class TestAuditServiceUserActivities:
                 retry_count INTEGER DEFAULT 0,
                 error_message TEXT,
                 log_category TEXT DEFAULT 'business',
-                log_level TEXT DEFAULT 'INFO'
+                log_level TEXT DEFAULT 'INFO',
+                parent_object_type TEXT,
+                parent_object_id TEXT,
+                agent_id TEXT,
+                agent_session_id TEXT,
+                tool_call_id TEXT,
+                agent_reasoning TEXT,
+                extra_data TEXT,
+                outcome TEXT DEFAULT 'success',
+                cascade_root_id TEXT,
+                cascade_root_action TEXT,
+                retention_until TEXT,
+                prev_hash TEXT,
+                row_hash TEXT,
+                action_kind TEXT DEFAULT 'instance'
             );
         """)
         
@@ -797,7 +832,21 @@ class TestAuditServiceChangeSummary:
                 retry_count INTEGER DEFAULT 0,
                 error_message TEXT,
                 log_category TEXT DEFAULT 'business',
-                log_level TEXT DEFAULT 'INFO'
+                log_level TEXT DEFAULT 'INFO',
+                parent_object_type TEXT,
+                parent_object_id TEXT,
+                agent_id TEXT,
+                agent_session_id TEXT,
+                tool_call_id TEXT,
+                agent_reasoning TEXT,
+                extra_data TEXT,
+                outcome TEXT DEFAULT 'success',
+                cascade_root_id TEXT,
+                cascade_root_action TEXT,
+                retention_until TEXT,
+                prev_hash TEXT,
+                row_hash TEXT,
+                action_kind TEXT DEFAULT 'instance'
             );
         """)
         
@@ -877,7 +926,21 @@ class TestAuditServiceCategoryStatistics:
                 retry_count INTEGER DEFAULT 0,
                 error_message TEXT,
                 log_category TEXT DEFAULT 'business',
-                log_level TEXT DEFAULT 'INFO'
+                log_level TEXT DEFAULT 'INFO',
+                parent_object_type TEXT,
+                parent_object_id TEXT,
+                agent_id TEXT,
+                agent_session_id TEXT,
+                tool_call_id TEXT,
+                agent_reasoning TEXT,
+                extra_data TEXT,
+                outcome TEXT DEFAULT 'success',
+                cascade_root_id TEXT,
+                cascade_root_action TEXT,
+                retention_until TEXT,
+                prev_hash TEXT,
+                row_hash TEXT,
+                action_kind TEXT DEFAULT 'instance'
             );
         """)
         
@@ -951,7 +1014,21 @@ class TestAuditServiceFailedLogs:
                 retry_count INTEGER DEFAULT 0,
                 error_message TEXT,
                 log_category TEXT DEFAULT 'business',
-                log_level TEXT DEFAULT 'INFO'
+                log_level TEXT DEFAULT 'INFO',
+                parent_object_type TEXT,
+                parent_object_id TEXT,
+                agent_id TEXT,
+                agent_session_id TEXT,
+                tool_call_id TEXT,
+                agent_reasoning TEXT,
+                extra_data TEXT,
+                outcome TEXT DEFAULT 'success',
+                cascade_root_id TEXT,
+                cascade_root_action TEXT,
+                retention_until TEXT,
+                prev_hash TEXT,
+                row_hash TEXT,
+                action_kind TEXT DEFAULT 'instance'
             );
         """)
         
