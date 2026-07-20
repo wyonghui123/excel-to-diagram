@@ -38,7 +38,7 @@ def get_shared_app():
     必须在导入 shared.fixtures 之前定义，避免循环导入问题
     """
     global _SHARED_APP, _SHARED_CLIENT
-    
+
     if _SHARED_APP is None:
         if OPTIMIZER_AVAILABLE:
             create_app_func = create_app_with_retry(max_retries=5, retry_delay=1.0)
@@ -48,10 +48,15 @@ def get_shared_app():
             _SHARED_APP = create_app()
         _SHARED_APP.config['TESTING'] = True
         _SHARED_CLIENT = _SHARED_APP.test_client()
-    
+        # [FIX 2026-07-19] meta/server.py 用 load_dotenv(override=True) 加载 .env,
+        # .env 含 FLASK_ENV=production 会导致 dev-login 返回 404, 大量 integration 测试 fail.
+        # 测试环境下强制清除, 让 _is_production() 返回 False, dev-login 可用.
+        os.environ.pop('FLASK_ENV', None)
+        os.environ.pop('FLASK_PRODUCTION', None)
+
     if hasattr(_SHARED_CLIENT, '_cookies'):
         _SHARED_CLIENT._cookies.clear()
-    
+
     return _SHARED_APP, _SHARED_CLIENT
 
 # ─── 导入共享模块 ───
@@ -1301,7 +1306,7 @@ def shared_app():
     return _SHARED_APP
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def shared_client(shared_app):
     """Session 级别共享 Flask test_client"""
     global _SHARED_CLIENT
