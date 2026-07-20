@@ -10,6 +10,14 @@ description: 审计日志记录所有业务对象的变更历史，包括创建�
 persistent: false  # 审计日志是只读对象，不应该被手动创建或修改
 is_view: false
 
+# [P5-T1 2026-07-20] 资源类型声明 (Spec §3.6.1 / §4.5.1)
+# Subordinate: 自动继承被审计对象 (object_type + object_id) 的 owner
+resource:
+  type: subordinate
+  parent_type_field: object_type
+  parent_id_field: object_id
+  inherit_owner: true
+
 # ────────────────────────────────────────────
 # 导入导出配置（审计日志只读，不支持导入）
 # ────────────────────────────────────────────
@@ -21,6 +29,8 @@ import_export:
 # ────────────────────────────────────────────
 # 语义标注
 # ────────────────────────────────────────────
+aspects: [audit_aspect]
+
 semantics:
   meaning: 系统审计日志
   category: system_entity

@@ -19,6 +19,13 @@ parent_object: product
 # 影响：version 对象不再继承 code 字段，仅使用 name 作为业务键
 aspects: [audit_aspect, owner_aspect]
 
+# [P5-T1 2026-07-20] 资源类型声明 (Spec §3.6.1 / §4.5.1)
+resource:
+  type: hierarchy
+  parent: product
+  parent_field: product_id
+  inherit_to_children: true  # version 的 dim scope 向下展开到 domain/sub_domain
+
 # 管理维度绑定（Spec v1.3 数据权限统一模型）
 dimension_bindings:
   - dimension: version

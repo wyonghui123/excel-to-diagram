@@ -7,6 +7,13 @@ parent_object: version
 aspects:
 - hierarchy_aspect
 - audit_aspect
+
+# [P5-T1 2026-07-20] 资源类型声明 (Spec §3.6.1 / §4.5.1)
+# Association: 取两端 business_object 所在 product 的并集 (任一端可见即可见)
+resource:
+  type: association
+  source_field: source_bo_id
+  target_field: target_bo_id
 audit:
   enabled: true
   create:

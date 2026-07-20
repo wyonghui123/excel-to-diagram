@@ -2,6 +2,9 @@ id: role_dimension_scope
 name: 角色维度范围
 table_name: role_dimension_scopes
 description: 角色的管理维度范围声明，是权限推导的入口。
+
+aspects: [audit_aspect]
+
 bo_category: configuration
 bo_sub_category: customizing
 
@@ -46,6 +49,7 @@ fields:
     enum_values:
       - include
       - exclude
+      - all  # [P1-T1 2026-07-19] 通配符模式: 全量 ID (Spec §8.1 P1-T1)
 
 # ============================================
 # 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)
@@ -60,6 +64,7 @@ ui_badge:
     color_map:
       include: info
       exclude: info
+      all: success  # [P1-T1] 'all' 突出显示为 success (全量授权)
 
 routes:
   detail: /detail/role_dimension_scope/role_dimension_scope-detail
