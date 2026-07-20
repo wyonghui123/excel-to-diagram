@@ -132,6 +132,15 @@ f800616 feat(permission): Phase 11/12 拦截器更新
 6. **临时 `_*.py` 脚本** — 已清理 184 个
 7. **临时 `.gitignore-agent`** — 已配置 worktree-local exclude
 
+### P3 - 发现 (2026-07-20)
+
+8. **`test_audit_service_comprehensive.py` 32 skipped** (main 继承 bug)
+   - **症状**: 32 测试全部被 `conftest.py` raw SQL 检测器 skip
+   - **根因**: 文件含 21 处 `INSERT INTO audit_logs` 原始 SQL，违反项目规范（必须用 Factory）
+   - **影响**: 不阻塞 Phase 13，但 main 分支合并时需先修复
+   - **修复建议**: 把 raw SQL 改为 `AuditService.log()` API 调用
+   - **跟踪**: `fix_tasks.json` 待登记 `T-AUDIT-SVC-COMPREHENSIVE`
+
 ---
 
 ## 七、与主分支关系
