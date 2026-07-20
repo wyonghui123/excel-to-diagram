@@ -355,9 +355,11 @@ def run_all_tests():
     print("  导入外键解析集成测试")
     print("=" * 70)
 
-    import meta
-    meta._yaml_loaded = False
-    meta._load_from_yaml()
+    # [FIX 2026-07-19] meta._load_from_yaml 不存在, 用 register_from_directory
+    from meta.core.yaml_loader import get_yaml_schema_dir, register_from_directory
+    from meta.core.models import registry
+    schema_dir = get_yaml_schema_dir()
+    register_from_directory(schema_dir, registry._objects)
 
     tests = [
         test_01_create_with_parent_code,
