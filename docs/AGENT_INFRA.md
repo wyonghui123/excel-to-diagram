@@ -689,6 +689,62 @@ python scripts/_ports_sync.py
 python scripts/_wt_service.py force-stop-port <port>
 ```
 
+### 0.8.11 v33_pipeline 自动化钩子 (v3.3 新增, 2026-07-20)
+
+> **问题**: v33_pipeline 状态机写在 .agent-status.json 但**从未被实际推进**,
+> pm_review_pending / deploy_pending 永远 false, last_deployed 永远 null.
+> **修复**: 4 个自动推进工具接入 6 状态转换点.
+
+**核心库**: `_v33_state.py` (单一写入点, msvcrt 文件锁 + 自动备份 + events.jsonl 审计)
+
+**6 状态机**:
+```
+DRAFT → SELF_VERIFIED → CHERRY_PICKED → PM_VERIFIED → DEPLOYED → REVERTED
+```
+
+**4 个转换入口** (3 角色 × 各自工具):
+
+| 角色 | 触发点 | 命令 | 写入 |
+|------|--------|------|------|
+| **开发智能体** | 阶段 4 (commit+HANDOVER) | `python scripts/handover_v33_hook.py <HANDOVER.md>` | 自动从 HANDOVER 提取 BUG ID, 推到 SELF_VERIFIED (pm_review_pending.bugs 加) |
+| **协调智能体** | 阶段 5 (cherry-pick+重启) | `python scripts/handover_v33_hook.py <HANDOVER.md> --stage cherry_picked` | bug 进入 pm_review_pending.pending=true, ready_at=<now> |
+| **PM** | 阶段 6 (PM 验证) | `python scripts/pm_verify.py <BUG-ID> --note "..."` | bug 从 pm_review_pending 进入 deploy_pending, pm_verified_at=<now> |
+| **部署智能体** | 阶段 6→7 (部署触发) | `python scripts/deploy_v33_hook.py <BUG-ID>` | 部署成功则: bug 从 deploy_pending 退出, last_deployed=<now> |
+
+**手动查询**:
+
+```bash
+# 查所有待办
+python scripts/_v33_state.py query
+
+# 查单个 bug
+python scripts/_v33_state.py query --bug V046
+
+# 手动推进 (PM 决策回滚时)
+python scripts/_v33_state.py transition V046 REVERTED --actor pm --note "回滚原因"
+```
+
+**铁律**:
+1. **不许直接编辑 .agent-status.json 的 v33_pipeline** — 必须通过 transition() API 写入
+2. **PM 验证必须调用 pm_verify.py** — 不能口头"通过"而不推进状态
+3. **部署成功必须调用 deploy_v33_hook.py** — 不能直接改 last_deployed
+4. **回滚必须用 transition(..., REVERTED)** — 不能静默删除 bug
+
+**events.jsonl 审计**:
+每次状态转换自动追加一条 JSON 事件到 `D:/filework/.coord/events.jsonl`,
+包含 actor / bug_id / state / old_*_pending / new_*_pending 完整快照,
+供复盘和跨会话追溯.
+
+**集成示例** (协调智能体 cherry-pick 后):
+
+```bash
+git cherry-pick <commit-hash>
+python scripts/_wt_service.py restart release-prep  # 重启 3011
+python scripts/handover_v33_hook.py ./DEPLOY_HANDOVER_BUG_V046.md --stage cherry_picked
+# → pm_review_pending.bugs = [V046], pending=true
+# → PM 启动会话时: query 看到 V046 待验证
+```
+
 ---
 
 ## 0.9. 基础设施清单 SOP (V007.86h 新增)  [!] 必读
