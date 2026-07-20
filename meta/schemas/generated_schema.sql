@@ -314,6 +314,28 @@ CREATE TABLE IF NOT EXISTS role_dimension_scopes (
     scope_mode VARCHAR(200) DEFAULT 'include'
 )
 
+-- [P3-T1 2026-07-19] data_permission_rules 统一表: 合并 role_dimension_scopes +
+--   permission_rules + visibility 配置到单表, 通过 rule_type 区分.
+--   Spec: spec-permission-system-unification-2026-07-19 §3.5 / §8.3 P3-T1
+--   rule_type 枚举: condition | dimension | owner | visibility | prohibition
+CREATE TABLE IF NOT EXISTS data_permission_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    role_id INTEGER NOT NULL,
+    rule_type VARCHAR(50) NOT NULL DEFAULT 'condition',
+    resource_type VARCHAR(200),
+    dimension_code VARCHAR(200),
+    condition TEXT,
+    scope_mode VARCHAR(50) DEFAULT 'include',
+    permission_level VARCHAR(50) DEFAULT 'read',
+    is_denied INTEGER DEFAULT 0,
+    inherit_to_children INTEGER DEFAULT 1,
+    propagate_to_parents INTEGER DEFAULT 0,
+    source_table VARCHAR(100),
+    source_id INTEGER,
+    created_at VARCHAR(200),
+    updated_at VARCHAR(200)
+);
+
 -- 角色权限: 角色与权限的多对多关联
 CREATE TABLE IF NOT EXISTS role_permissions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

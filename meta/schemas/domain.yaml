@@ -8,6 +8,13 @@ aspects:
 - hierarchy_aspect
 - audit_aspect
 - naming_aspect
+
+# [P5-T1 2026-07-20] 资源类型声明 (Spec §3.6.1 / §4.5.1)
+resource:
+  type: hierarchy
+  parent: version
+  parent_field: version_id
+  inherit_to_children: true
 dimension_bindings:
 - dimension: domain
   field: id

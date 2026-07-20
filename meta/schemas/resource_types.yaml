@@ -1,0 +1,73 @@
+# ============================================
+# 资源类型声明 (Spec §4.5.1 / §3.6.1)
+# 单一事实来源 (SSOT) for Resource Type metadata
+# 引用方: meta/services/resource_inheritance_engine.py
+# ============================================
+#
+# 4 种资源类型:
+#   independent  — 独立资源 (product, user, role) — 不继承
+#   association  — 关联资源 (relationship) — 不继承, 取两端并集
+#   subordinate  — 附属资源 (annotation, audit_log) — 自动继承 parent.owner
+#   hierarchy    — 层级资源 (version, domain, sub_domain) — 向下展开, 不自动继承
+
+product:
+  type: independent
+  table: products
+
+version:
+  type: hierarchy
+  parent: product
+  parent_field: product_id
+  table: versions
+
+domain:
+  type: hierarchy
+  parent: version
+  parent_field: version_id
+  table: domains
+
+sub_domain:
+  type: hierarchy
+  parent: domain
+  parent_field: domain_id
+  table: sub_domains
+
+service_module:
+  type: hierarchy
+  parent: sub_domain
+  parent_field: sub_domain_id
+  table: service_modules
+
+business_object:
+  type: hierarchy
+  parent: service_module
+  parent_field: service_module_id
+  table: business_objects
+
+relationship:
+  type: association
+  source_field: source_bo_id
+  target_field: target_bo_id
+  table: relationships
+
+annotation:
+  type: subordinate
+  parent_type_field: parent_type
+  parent_id_field: parent_id
+  inherit_owner: true
+  table: annotations
+
+audit_log:
+  type: subordinate
+  parent_type_field: object_type
+  parent_id_field: object_id
+  inherit_owner: true
+  table: audit_logs
+
+user:
+  type: independent
+  table: users
+
+role:
+  type: independent
+  table: roles

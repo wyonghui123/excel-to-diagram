@@ -8,6 +8,14 @@ name: 备注信息
 table_name: annotations
 description: 为架构对象添加的业务备注信息，支持一个对象关联多条备注。
 
+# [P5-T1 2026-07-20] 资源类型声明 (Spec §3.6.1 / §4.5.1)
+# Subordinate: 自动继承 parent (parent_type + parent_id) 的 owner
+resource:
+  type: subordinate
+  parent_type_field: parent_type
+  parent_id_field: parent_id
+  inherit_owner: true  # 规则 4 附属跟随: annotation.owner = parent.owner
+
 # ────────────────────────────────────────────
 # 语义标注
 # ────────────────────────────────────────────
