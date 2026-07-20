@@ -150,6 +150,50 @@ class DimensionScopeEngine:
         expanded = {}
         for scope in scopes:
             code = scope['dimension_code']
+            # [P1-T2 2026-07-19] scope_mode='all' → 全量 ID + 向下继承
+            # Spec: spec-permission-system-unification-2026-07-19 §8.1 P1-T2
+            # 用途: 角色配置 scope_mode='all' 时返回该维度全量 ID
+            # 语义: 等效于 dimension_values 包含该维度所有 ID
+            scope_mode = scope.get('scope_mode', 'include')
+            if scope_mode == 'all':
+                all_ids = self._get_all_dimension_ids(code)
+                if not all_ids:
+                    continue
+                if code not in expanded:
+                    expanded[code] = set()
+                expanded[code].update(all_ids)
+                # [P1-T6 2026-07-19] 审计日志: scope_mode='all' 使用记录
+                logger.info(
+                    f'[P1-WILDCARD] scope_mode=all: role_id={role_id}, '
+                    f'dimension={code}, all_ids_count={len(all_ids)}'
+                )
+
+                # 向下展开子维度（inherit_children 默认 1）
+                if scope.get('inherit_children', 1) == 1:
+                    try:
+                        idx = HIERARCHY_CHAIN.index(code)
+                    except ValueError:
+                        continue
+                    current_ids = set(all_ids)
+                    for next_dim in HIERARCHY_CHAIN[idx + 1:]:
+                        parent_field = PARENT_FIELD_MAP.get(next_dim)
+                        child_table = RESOURCE_TABLE_MAP.get(next_dim)
+                        if not parent_field or not child_table or not current_ids:
+                            break
+                        ph = ','.join('?' * len(current_ids))
+                        rows = self._ds.execute(
+                            f"SELECT id FROM {child_table} WHERE {parent_field} IN ({ph})",
+                            list(current_ids)
+                        ).fetchall()
+                        current_ids = {row[0] for row in rows}
+                        if current_ids:
+                            if next_dim not in expanded:
+                                expanded[next_dim] = set()
+                            expanded[next_dim].update(current_ids)
+                        else:
+                            break
+                continue  # 跳过 include/exclude 处理
+
             # [FIX 2026-06-15] 兼容三种数据形态:
             # 1. dim_values 为 JSON 字符串 (主流, 来自 UI 配置)
             # 2. dim_values 为 list (Python 调用)
@@ -768,6 +812,33 @@ class DimensionScopeEngine:
         )
         cols = [d[0] for d in cursor.description]
         return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+    def _get_all_dimension_ids(self, dimension_code: str) -> Set[int]:
+        """[P1-T2 2026-07-19] 获取指定维度的全量 ID
+
+        Spec: spec-permission-system-unification-2026-07-19 §8.1 P1-T2
+        用途: scope_mode='all' 时查询该维度表的所有 ID
+        返回: 全量 ID 集合，查询失败返回空集合
+
+        注意: 仅支持 HIERARCHY_CHAIN 中的维度（product/version/domain/sub_domain）
+              其他维度返回空集合（由调用方处理）
+        """
+        table = RESOURCE_TABLE_MAP.get(dimension_code)
+        if not table:
+            logger.warning(
+                f'[_get_all_dimension_ids] unknown dimension_code: {dimension_code}'
+            )
+            return set()
+        try:
+            rows = self._ds.execute(
+                f"SELECT id FROM {table}"
+            ).fetchall()
+            return {row[0] for row in rows if row[0] is not None}
+        except Exception as e:
+            logger.warning(
+                f'[_get_all_dimension_ids] query failed for {dimension_code}: {e}'
+            )
+            return set()
 
     def _get_all_resource_types(self) -> List[str]:
         try:
