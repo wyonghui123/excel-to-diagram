@@ -26,7 +26,12 @@ export function useConditionRules(roleId: Ref<string>) {
 
     loading.value = true
     try {
-      const r = await permService.loadConditionRules({ role_id: roleId.value })
+      // [P11 Phase 11] Panel 3 只显示 rule_type='condition' 的规则
+      // (其他 rule_type 由各 Panel 自行加载: prohibition/owner/visibility)
+      const r = await permService.loadConditionRules({
+        role_id: roleId.value,
+        rule_type: 'condition'
+      })
 
       if (r.success) {
         rules.value = r.data || []

@@ -34,22 +34,43 @@
       </div>
 
       <div class="dimension-values">
+        <!-- [P1-T5 2026-07-19] scope_mode='all' 全量模式 -->
         <el-tag
-          v-for="val in (selectedValues[dim.id] || [])"
-          :key="val.id + '-' + readyFlag"
+          v-if="scopeAllFlags[dim.id]"
+          type="success"
+          size="small"
           closable
-          size="small"
-          :disable-transitions="false"
-          @close="removeDimensionValue(dim.id, val.id)"
+          @close="toggleScopeAll(dim.id, false)"
         >
-          {{ val.name || val.code || val.id }}
+          全部
         </el-tag>
+        <template v-else>
+          <el-tag
+            v-for="val in (selectedValues[dim.id] || [])"
+            :key="val.id + '-' + readyFlag"
+            closable
+            size="small"
+            :disable-transitions="false"
+            @close="removeDimensionValue(dim.id, val.id)"
+          >
+            {{ val.name || val.code || val.id }}
+          </el-tag>
+          <el-button
+            size="small"
+            :icon="Plus"
+            @click="openValuePicker(dim)"
+          >
+            添加{{ dim.name }}
+          </el-button>
+        </template>
         <el-button
+          v-if="!scopeAllFlags[dim.id]"
           size="small"
-          :icon="Plus"
-          @click="openValuePicker(dim)"
+          plain
+          type="success"
+          @click="toggleScopeAll(dim.id, true)"
         >
-          添加{{ dim.name }}
+          全部
         </el-button>
         <span v-if="getParentDim(dim.id) && !hasParentValues(dim.id)" class="cascade-disabled-hint">
           上级未选，所有选项可用
@@ -132,6 +153,7 @@ const dimensions = ref([])
 const dimensionsLoading = ref(false)
 const selectedValues = reactive({ product: [], version: [], domain: [], sub_domain: [] })
 const inheritFlags = reactive({})
+const scopeAllFlags = reactive({})  // [P1-T5] scope_mode='all' 标记
 const saving = ref(false)
 const refreshTrigger = ref(0)
 const readyFlag = ref(0)
@@ -260,6 +282,15 @@ function toggleInherit(dimId) {
   inheritFlags[dimId] = !(inheritFlags[dimId] !== false)
 }
 
+// [P1-T5 2026-07-19] scope_mode='all' 切换
+function toggleScopeAll(dimId, value) {
+  scopeAllFlags[dimId] = value
+  if (value) {
+    // 切换到"全部"模式时，清空具体选择的值（语义：全量，不需要具体值）
+    selectedValues[dimId] = []
+  }
+}
+
 async function loadDimensions() {
   dimensionsLoading.value = true
   try {
@@ -292,13 +323,20 @@ async function loadDimensionScopes() {
     if (result.success && result.data) {
       for (const scope of result.data) {
         const dimId = scope.dimension_code
-        const values = scope.dimension_values || []
-        if (values.length > 0) {
-          // Use direct assignment with new array reference - Vue 3 Proxy tracks this
-          selectedValues[dimId] = values.map(v => {
-            if (typeof v === 'object') return v
-            return { id: v, name: String(v), code: String(v) }
-          })
+        // [P1-T5] 回显 scope_mode='all'
+        if (scope.scope_mode === 'all') {
+          scopeAllFlags[dimId] = true
+          selectedValues[dimId] = []  // 'all' 模式不需要具体值
+        } else {
+          scopeAllFlags[dimId] = false
+          const values = scope.dimension_values || []
+          if (values.length > 0) {
+            // Use direct assignment with new array reference - Vue 3 Proxy tracks this
+            selectedValues[dimId] = values.map(v => {
+              if (typeof v === 'object') return v
+              return { id: v, name: String(v), code: String(v) }
+            })
+          }
         }
         inheritFlags[dimId] = scope.inherit_children !== 0 && scope.inherit_children !== false
       }
@@ -425,14 +463,24 @@ async function saveDimensionScopesInternal() {
   }
   const scopes = []
   for (const dim of sortedDimensions.value) {
-    const vals = selectedValues[dim.id] || []
-    if (vals.length > 0) {
+    // [P1-T5] scope_mode='all' 发送
+    if (scopeAllFlags[dim.id]) {
       scopes.push({
         dimension_code: dim.id,
-        dimension_values: vals.map(v => v.id),
+        dimension_values: [],
         inherit_children: inheritFlags[dim.id] !== false,
-        scope_mode: 'include'
+        scope_mode: 'all'
       })
+    } else {
+      const vals = selectedValues[dim.id] || []
+      if (vals.length > 0) {
+        scopes.push({
+          dimension_code: dim.id,
+          dimension_values: vals.map(v => v.id),
+          inherit_children: inheritFlags[dim.id] !== false,
+          scope_mode: 'include'
+        })
+      }
     }
   }
 
