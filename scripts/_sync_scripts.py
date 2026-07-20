@@ -31,7 +31,15 @@ SYNC_SCRIPTS = [
     "_config_backup.py",
     "_session_cleanup.py",
     "_sync_scripts.py",
-]
+    # v3.3 自动化套件 (2026-07-20)
+    "_v33_state.py",
+    "handover_v33_hook.py",
+    "pm_verify.py",
+    "deploy_v33_hook.py",
+    "_sync_precommit.py",
+    "_v33_panel.py",
+    "_wt_startup_probe.py",
+]  # 17 scripts: 同步列表 (含 v3.3 自动化套件)
 
 # 需要同步的配置文件 (从 .coord/ 同步)
 SYNC_CONFIG = [
