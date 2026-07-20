@@ -5,6 +5,7 @@
 
 from flask import Blueprint, jsonify, request, g
 from datetime import datetime
+from typing import Optional
 import csv
 import io
 
@@ -280,6 +281,10 @@ def get_audit_logs():
             # [FIX 2026-06-11] 解析 extra_data JSON: 提取 deleted_data (DELETE 明细)
             # 与 object_display (展示名) 字段, 供前端 drawer 渲染
             log['extra_data_parsed'] = _extract_deleted_data(log.pop('extra_data', ''))
+
+            # [NEW 2026-07-18] 注入 object_type_label / field_name_label /
+            # parent_object_type_label (中英文映射), 解决 test_audit_labels T8 端到端冒烟
+            _enrich_log_labels(log)
 
             logs.append(log)
 
@@ -760,3 +765,339 @@ def _extract_deleted_data(extra_data_raw) -> dict:
         return result if isinstance(result, dict) else {}
     except (ValueError, TypeError):
         return {}
+
+
+# ============================================================
+# [NEW 2026-07-18] 审计日志 label 映射 + enrich 函数
+# 解决 test_audit_labels 缺失符号 (OBJECT_TYPE_LABELS / FIELD_NAME_LABELS /
+# _enrich_log_labels / _enrich_log_labels_batch) 导致 33 个 integration fail
+# ============================================================
+
+OBJECT_TYPE_LABELS = {
+    # 核心对象
+    "user": "用户",
+    "role": "角色",
+    "user_group": "用户组",
+    "menu": "菜单",
+    "permission": "权限",
+    "permission_rule": "权限规则",
+    "product": "产品",
+    "version": "版本",
+    "domain": "领域",
+    "sub_domain": "子领域",
+    "service_module": "服务模块",
+    "business_object": "业务对象",
+    "relationship": "关系",
+    "annotation": "标注",
+    "enum_type": "枚举类型",
+    "enum_value": "枚举值",
+    # 权限相关
+    "role_menu": "角色菜单权限",
+    "role_dimension_scope": "角色维度范围",
+    "role_permissions": "角色功能权限",
+    "role_data_permission": "角色数据权限",
+    "role_v2_menu_permissions": "角色菜单权限(v2)",
+    "user_group_members": "用户组成员",
+    "group_roles": "用户组角色",
+    # 系统
+    "audit_log": "审计日志",
+    "system_config": "系统配置",
+    "view_config": "视图配置",
+}
+
+FIELD_NAME_LABELS = {
+    # 通用字段
+    "name": "名称",
+    "code": "编码",
+    "description": "描述",
+    "status": "状态",
+    "display_name": "显示名",
+    "email": "邮箱",
+    "username": "用户名",
+    "password": "密码",
+    "created_at": "创建时间",
+    "updated_at": "更新时间",
+    # 菜单/权限相关
+    "menu_codes": "菜单编码列表",
+    "menu_names": "菜单名称列表",
+    "dimension_codes": "维度编码列表",
+    "permission_ids": "权限ID列表",
+    "permission_names": "权限名称列表",
+    "scopes_count": "范围数量",
+    "is_denied": "是否禁止",
+    "inherit_to_children": "是否继承给子级",
+    "synced_permissions_count": "已同步权限数量",
+    # 关系/对象相关
+    "object_type": "对象类型",
+    "object_id": "对象ID",
+    "parent_object_type": "父对象类型",
+    "parent_object_id": "父对象ID",
+    "relation_type": "关系类型",
+    "relation_code": "关系编码",
+    "category_type": "分类类型",
+    "category_label": "分类标签",
+    # 版本/产品
+    "product_id": "产品ID",
+    "version_id": "版本ID",
+    "visibility": "可见性",
+    "owner_id": "所有者ID",
+    # 操作
+    "action": "操作",
+    "old_value": "旧值",
+    "new_value": "新值",
+    "field_name": "字段名",
+}
+
+
+def _enrich_log_labels(log):
+    """[NEW 2026-07-18] 为单条审计日志注入 3 个 label 字段.
+
+    注入字段:
+      - object_type_label: 根据 object_type 查 OBJECT_TYPE_LABELS
+      - field_name_label: 根据 field_name 查 FIELD_NAME_LABELS
+      - parent_object_type_label: 根据 parent_object_type 查 OBJECT_TYPE_LABELS
+
+    规则:
+      - 空/None 值不注入 (避免 label="" 前端显示空白)
+      - 已有 *_label 字段不覆盖 (调用方自定义优先)
+      - 未知类型降级为原值 (label == key)
+      - 非 dict 入参静默忽略 (不抛异常)
+    """
+    if not isinstance(log, dict):
+        return
+
+    ot = log.get('object_type', '') or ''
+    fn = log.get('field_name', '') or ''
+    pot = log.get('parent_object_type', '') or ''
+
+    if ot and not log.get('object_type_label'):
+        log['object_type_label'] = OBJECT_TYPE_LABELS.get(ot, ot)
+    if fn and not log.get('field_name_label'):
+        log['field_name_label'] = FIELD_NAME_LABELS.get(fn, fn)
+    if pot and not log.get('parent_object_type_label'):
+        log['parent_object_type_label'] = OBJECT_TYPE_LABELS.get(pot, pot)
+
+
+def _enrich_log_labels_batch(logs):
+    """[NEW 2026-07-18] 批量注入 label 字段 (列表版本).
+
+    Args:
+        logs: list[dict] 或 None. None/空列表静默忽略.
+    """
+    if not logs:
+        return
+    for log in logs:
+        _enrich_log_labels(log)
+
+
+# ============================================================================
+# [P9-T3 2026-07-20] 审计 API — GET /audit/decisions + /compliance
+# Spec §4.9 / §8.9 P9-T3
+# ============================================================================
+
+# 审计可访问角色 (Admin + Auditor)
+_AUDIT_ACCESSIBLE_ROLE_CODES = frozenset({'admin', 'auditor'})
+
+
+def _is_audit_accessible(current_user: dict) -> bool:
+    """[P9-T3] 校验当前用户是否有审计访问权限
+
+    仅 admin / auditor 角色可访问; 其他角色返回 403.
+
+    Args:
+        current_user: {'id': int, 'username': str, 'role_id': Optional[int]}
+
+    Returns:
+        True 表示可访问; False 表示禁止访问
+    """
+    if not current_user:
+        return False
+
+    # 检查 role_code (优先) 或 role_id (兜底)
+    role_code = current_user.get('role_code')
+    if role_code and role_code.lower() in _AUDIT_ACCESSIBLE_ROLE_CODES:
+        return True
+
+    # role_id 1 (Admin) / 2 (Auditor) — Spec §3.17 / §8.9 角色约定
+    role_id = current_user.get('role_id')
+    if role_id in (1, 2):
+        return True
+
+    # is_superuser / is_admin 旁路
+    if current_user.get('is_superuser') or current_user.get('is_admin'):
+        return True
+
+    # 通配符权限 '*'
+    perms = current_user.get('permissions', []) or []
+    if '*' in perms or 'audit_log:read' in perms:
+        return True
+
+    return False
+
+
+def get_permission_decisions(
+    data_source,
+    page: int = 1,
+    page_size: int = 20,
+    current_user: Optional[dict] = None,
+    filters: Optional[dict] = None,
+) -> dict:
+    """[P9-T3] GET /audit/decisions — 分页查询权限决策日志
+
+    仅审计角色 (admin/auditor) 可访问.
+
+    Args:
+        data_source: DB 数据源
+        page: 页码 (1-based)
+        page_size: 每页条数 (默认 20)
+        current_user: 当前用户 (用于权限校验)
+        filters: 可选过滤条件 {'user_id': N, 'resource_type': 'product', 'decision': 'allow'}
+
+    Returns:
+        分页结果 dict:
+            {'data': [...], 'total': N, 'page': P, 'page_size': S, 'total_pages': T}
+        或
+            {'error': 'forbidden', 'forbidden': True}
+    """
+    # 权限校验
+    if current_user is not None and not _is_audit_accessible(current_user):
+        return {
+            'error': 'permission_denied',
+            'forbidden': True,
+            'message': '仅审计角色 (admin/auditor) 可访问决策日志',
+        }
+
+    try:
+        # 查询全部
+        all_records = data_source.find('permission_decisions', filters=filters or {}) or []
+
+        # 按 created_at 倒序
+        all_records.sort(key=lambda r: r.get('created_at', ''), reverse=True)
+
+        total = len(all_records)
+        total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0
+
+        start = (page - 1) * page_size
+        end = start + page_size
+        page_records = all_records[start:end]
+
+        return {
+            'data': page_records,
+            'total': total,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': total_pages,
+        }
+    except Exception as e:
+        return {
+            'error': str(e),
+            'data': [],
+            'total': 0,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': 0,
+        }
+
+
+def get_compliance_report(
+    data_source,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    current_user: Optional[dict] = None,
+) -> dict:
+    """[P9-T3] GET /audit/compliance — 生成合规报告
+
+    仅审计角色 (admin/auditor) 可访问.
+
+    Args:
+        data_source: DB 数据源
+        start_date: 可选, 起始日期
+        end_date: 可选, 结束日期
+        current_user: 当前用户 (用于权限校验)
+
+    Returns:
+        {'report': {...}} 或 {'error': 'forbidden', 'forbidden': True}
+    """
+    # 权限校验
+    if current_user is not None and not _is_audit_accessible(current_user):
+        return {
+            'error': 'permission_denied',
+            'forbidden': True,
+            'message': '仅审计角色 (admin/auditor) 可访问合规报告',
+        }
+
+    try:
+        from meta.services.compliance_reporter import ComplianceReporter
+        reporter = ComplianceReporter(data_source)
+        report = reporter.generate_report(start_date=start_date, end_date=end_date)
+        return {'report': report}
+    except Exception as e:
+        return {'error': str(e), 'report': {}}
+
+
+# ============================================================================
+# Flask 路由 (Blueprint)
+# ============================================================================
+
+@audit_bp.route('/decisions', methods=['GET'])
+@login_required
+def get_audit_decisions_route():
+    """[P9-T3] GET /audit/decisions — Flask 路由"""
+    user = get_current_user()
+    # 提取 role_id (兼容 dict / object)
+    current_user = {
+        'id': user.get('id') if isinstance(user, dict) else getattr(user, 'id', None),
+        'username': user.get('username') if isinstance(user, dict) else getattr(user, 'username', ''),
+        'role_id': user.get('role_id') if isinstance(user, dict) else getattr(user, 'role_id', None),
+        'role_code': user.get('role_code') if isinstance(user, dict) else getattr(user, 'role_code', None),
+        'permissions': user.get('permissions', []) if isinstance(user, dict) else getattr(user, 'permissions', []),
+    }
+
+    page = int(request.args.get('page', 1))
+    page_size = int(request.args.get('page_size', 20))
+
+    # 过滤参数
+    filters = {}
+    if request.args.get('user_id'):
+        filters['user_id'] = int(request.args['user_id'])
+    if request.args.get('resource_type'):
+        filters['resource_type'] = request.args['resource_type']
+    if request.args.get('decision'):
+        filters['decision'] = request.args['decision']
+
+    ds = _data_source or get_data_source()
+    result = get_permission_decisions(
+        ds, page=page, page_size=page_size,
+        current_user=current_user, filters=filters,
+    )
+
+    if result.get('forbidden'):
+        return jsonify(result), 403
+    return jsonify(result)
+
+
+@audit_bp.route('/compliance', methods=['GET'])
+@login_required
+def get_compliance_report_route():
+    """[P9-T3] GET /audit/compliance — Flask 路由"""
+    user = get_current_user()
+    current_user = {
+        'id': user.get('id') if isinstance(user, dict) else getattr(user, 'id', None),
+        'username': user.get('username') if isinstance(user, dict) else getattr(user, 'username', ''),
+        'role_id': user.get('role_id') if isinstance(user, dict) else getattr(user, 'role_id', None),
+        'role_code': user.get('role_code') if isinstance(user, dict) else getattr(user, 'role_code', None),
+        'permissions': user.get('permissions', []) if isinstance(user, dict) else getattr(user, 'permissions', []),
+    }
+
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+
+    ds = _data_source or get_data_source()
+    result = get_compliance_report(
+        ds, start_date=start_date, end_date=end_date,
+        current_user=current_user,
+    )
+
+    if result.get('forbidden'):
+        return jsonify(result), 403
+    return jsonify(result)

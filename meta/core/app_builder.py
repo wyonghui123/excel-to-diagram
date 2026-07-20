@@ -294,7 +294,7 @@ class ApplicationBuilder:
         from meta.api.filter_variant_api import filter_variant_bp
         from meta.api.identity_api import identity_bp
         from meta.api.association_api import association_bp
-        from meta.api.bo_api import bo_bp, meta_v2_bp, role_v2_bp, permission_rule_v2_bp
+        from meta.api.bo_api import bo_bp, meta_v2_bp, role_v2_bp, permission_rule_v2_bp, permission_set_v2_bp
         from meta.api.value_help_api import value_help_bp
         from meta.api.special_routes_api import special_bp
         from meta.api.annotation_routes_api import annotation_bp
@@ -347,6 +347,7 @@ class ApplicationBuilder:
         app.register_blueprint(meta_v2_bp)
         app.register_blueprint(role_v2_bp)
         app.register_blueprint(permission_rule_v2_bp)
+        app.register_blueprint(permission_set_v2_bp)  # [P13-T4] Permission Set API
         app.register_blueprint(value_help_bp)
         app.register_blueprint(special_bp)
         app.register_blueprint(annotation_bp)
