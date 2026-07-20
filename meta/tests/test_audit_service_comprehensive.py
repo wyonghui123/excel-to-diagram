@@ -199,7 +199,12 @@ class TestAuditServiceLog:
                 agent_id TEXT,
                 agent_session_id TEXT,
                 tool_call_id TEXT,
-                agent_reasoning TEXT
+                agent_reasoning TEXT,
+                -- [v3.18 FR-005/009/013] AuditService.log() 必填列
+                outcome TEXT DEFAULT 'success',
+                retention_until TEXT,
+                cascade_root_id TEXT,
+                cascade_root_action TEXT
             );
         """)
         conn.commit()
@@ -520,30 +525,27 @@ class TestAuditServiceQuery:
                 agent_id TEXT,
                 agent_session_id TEXT,
                 tool_call_id TEXT,
-                agent_reasoning TEXT
+                agent_reasoning TEXT,
+                -- [v3.18 FR-005/009/013] AuditService.log() 必填列
+                outcome TEXT DEFAULT 'success',
+                retention_until TEXT,
+                cascade_root_id TEXT,
+                cascade_root_action TEXT
             );
         """)
         
+        # Pre-populate via service.log() (conn will be closed; service writes via ds)
         now = datetime.now().isoformat()
         old_date = (datetime.now() - timedelta(days=10)).isoformat()
-        
-        conn.execute("""
-            INSERT INTO audit_logs (object_type, object_id, action, user_id, user_name, created_at, log_category)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, ('user', '1', 'CREATE', 'admin', 'Administrator', now, 'business'))
-        conn.execute("""
-            INSERT INTO audit_logs (object_type, object_id, action, user_id, user_name, created_at, log_category)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, ('user', '2', 'UPDATE', 'admin', 'Administrator', now, 'business'))
-        conn.execute("""
-            INSERT INTO audit_logs (object_type, object_id, action, user_id, user_name, created_at, log_category)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, ('role', '1', 'CREATE', 'admin', 'Administrator', old_date, 'security'))
         conn.commit()
         conn.close()
-        
+
         ds = get_data_source("sqlite", database=path)
         service = AuditService(ds)
+        # service.log() writes to ds (which points to the same db file)
+        service.log(object_type='user', object_id='1', action='CREATE', user_id='admin', user_name='Administrator', log_category='business')
+        service.log(object_type='user', object_id='2', action='UPDATE', user_id='admin', user_name='Administrator', log_category='business')
+        service.log(object_type='role', object_id='1', action='CREATE', user_id='admin', user_name='Administrator', log_category='security')
         yield service, path
         
         try:
@@ -647,29 +649,26 @@ class TestAuditServiceObjectHistory:
                 agent_id TEXT,
                 agent_session_id TEXT,
                 tool_call_id TEXT,
-                agent_reasoning TEXT
+                agent_reasoning TEXT,
+                -- [v3.18 FR-005/009/013] AuditService.log() 必填列
+                outcome TEXT DEFAULT 'success',
+                retention_until TEXT,
+                cascade_root_id TEXT,
+                cascade_root_action TEXT
             );
         """)
         
+        # Pre-populate via service.log() (conn will be closed; service writes via ds)
         now = datetime.now().isoformat()
-        
-        conn.execute("""
-            INSERT INTO audit_logs (object_type, object_id, action, field_name, created_at)
-            VALUES (?, ?, ?, ?, ?)
-        """, ('user', '1', 'CREATE', 'name', now))
-        conn.execute("""
-            INSERT INTO audit_logs (object_type, object_id, action, field_name, created_at)
-            VALUES (?, ?, ?, ?, ?)
-        """, ('user', '1', 'UPDATE', 'email', now))
-        conn.execute("""
-            INSERT INTO audit_logs (object_type, object_id, action, field_name, parent_object_type, parent_object_id, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, ('user_role', '1', 'CREATE', 'role_id', 'user', '1', now))
         conn.commit()
         conn.close()
-        
+
         ds = get_data_source("sqlite", database=path)
         service = AuditService(ds)
+        # service.log() writes to ds (which points to the same db file)
+        service.log(object_type='user', object_id='1', action='CREATE', field_name='name')
+        service.log(object_type='user', object_id='1', action='UPDATE', field_name='email')
+        service.log(object_type='user_role', object_id='1', action='CREATE', field_name='role_id', parent_object_type='user', parent_object_id='1')
         yield service, path
         
         try:
@@ -724,29 +723,38 @@ class TestAuditServiceUserActivities:
                 retry_count INTEGER DEFAULT 0,
                 error_message TEXT,
                 log_category TEXT DEFAULT 'business',
-                log_level TEXT DEFAULT 'INFO'
+                log_level TEXT DEFAULT 'INFO',
+                extra_data TEXT,
+                parent_object_type TEXT,
+                parent_object_id TEXT,
+                agent_id TEXT,
+                agent_session_id TEXT,
+                tool_call_id TEXT,
+                agent_reasoning TEXT,
+                -- [v3.18 FR-005/009/013] AuditService.log() 必填列
+                outcome TEXT DEFAULT 'success',
+                retention_until TEXT,
+                cascade_root_id TEXT,
+                cascade_root_action TEXT
             );
         """)
         
-        now = datetime.now().isoformat()
-        
-        for i in range(5):
-            conn.execute("""
-                INSERT INTO audit_logs (object_type, object_id, action, user_id, user_name, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, ('user', str(i), 'CREATE', 'admin', 'Administrator', now))
-        
-        for i in range(3):
-            conn.execute("""
-                INSERT INTO audit_logs (object_type, object_id, action, user_id, user_name, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, ('role', str(i), 'UPDATE', 'admin', 'Administrator', now))
-        
-        conn.commit()
+        # conn closed - use AuditService.log() via ds
         conn.close()
         
         ds = get_data_source("sqlite", database=path)
         service = AuditService(ds)
+        
+        now = datetime.now().isoformat()
+        
+        # Pre-populate via service.log() (avoiding raw SQL in test files per conftest rule)
+        for i in range(5):
+            service.log(object_type='user', object_id=str(i), action='CREATE',
+                        user_id='admin', user_name='Administrator')
+        for i in range(3):
+            service.log(object_type='role', object_id=str(i), action='UPDATE',
+                        user_id='admin', user_name='Administrator')
+        
         yield service, path
         
         try:
@@ -797,30 +805,33 @@ class TestAuditServiceChangeSummary:
                 retry_count INTEGER DEFAULT 0,
                 error_message TEXT,
                 log_category TEXT DEFAULT 'business',
-                log_level TEXT DEFAULT 'INFO'
+                log_level TEXT DEFAULT 'INFO',
+                extra_data TEXT,
+                parent_object_type TEXT,
+                parent_object_id TEXT,
+                agent_id TEXT,
+                agent_session_id TEXT,
+                tool_call_id TEXT,
+                agent_reasoning TEXT,
+                -- [v3.18 FR-005/009/013] AuditService.log() 必填列
+                outcome TEXT DEFAULT 'success',
+                retention_until TEXT,
+                cascade_root_id TEXT,
+                cascade_root_action TEXT
             );
         """)
         
+        # Pre-populate via service.log() (conn will be closed; service writes via ds)
         now = datetime.now().isoformat()
-        
-        conn.execute("""
-            INSERT INTO audit_logs (object_type, object_id, action, field_name, user_name, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, ('user', '1', 'CREATE', 'name', 'admin', now))
-        conn.execute("""
-            INSERT INTO audit_logs (object_type, object_id, action, field_name, user_name, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, ('user', '1', 'UPDATE', 'email', 'admin', now))
-        conn.execute("""
-            INSERT INTO audit_logs (object_type, object_id, action, field_name, user_name, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, ('role', '1', 'CREATE', 'name', 'user1', now))
-        
         conn.commit()
         conn.close()
-        
+
         ds = get_data_source("sqlite", database=path)
         service = AuditService(ds)
+        # service.log() writes to ds (which points to the same db file)
+        service.log(object_type='user', object_id='1', action='CREATE', field_name='name', user_name='admin')
+        service.log(object_type='user', object_id='1', action='UPDATE', field_name='email', user_name='admin')
+        service.log(object_type='role', object_id='1', action='CREATE', field_name='name', user_name='user1')
         yield service, path
         
         try:
@@ -877,29 +888,37 @@ class TestAuditServiceCategoryStatistics:
                 retry_count INTEGER DEFAULT 0,
                 error_message TEXT,
                 log_category TEXT DEFAULT 'business',
-                log_level TEXT DEFAULT 'INFO'
+                log_level TEXT DEFAULT 'INFO',
+                extra_data TEXT,
+                parent_object_type TEXT,
+                parent_object_id TEXT,
+                agent_id TEXT,
+                agent_session_id TEXT,
+                tool_call_id TEXT,
+                agent_reasoning TEXT,
+                -- [v3.18 FR-005/009/013] AuditService.log() 必填列
+                outcome TEXT DEFAULT 'success',
+                retention_until TEXT,
+                cascade_root_id TEXT,
+                cascade_root_action TEXT
             );
         """)
         
-        now = datetime.now().isoformat()
-        
-        for i in range(5):
-            conn.execute("""
-                INSERT INTO audit_logs (object_type, object_id, action, log_category, log_level, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, ('user', str(i), 'CREATE', 'business', 'INFO', now))
-        
-        for i in range(3):
-            conn.execute("""
-                INSERT INTO audit_logs (object_type, object_id, action, log_category, log_level, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, ('user', str(i), 'LOGIN', 'security', 'WARNING', now))
-        
-        conn.commit()
+        # Use AuditService.log() via ds (avoiding raw SQL in test files per conftest rule)
         conn.close()
         
         ds = get_data_source("sqlite", database=path)
         service = AuditService(ds)
+        
+        now = datetime.now().isoformat()
+        
+        for i in range(5):
+            service.log(object_type='user', object_id=str(i), action='CREATE',
+                        log_category='business', log_level='INFO')
+        for i in range(3):
+            service.log(object_type='user', object_id=str(i), action='LOGIN',
+                        log_category='security', log_level='WARNING')
+        
         yield service, path
         
         try:
@@ -951,30 +970,35 @@ class TestAuditServiceFailedLogs:
                 retry_count INTEGER DEFAULT 0,
                 error_message TEXT,
                 log_category TEXT DEFAULT 'business',
-                log_level TEXT DEFAULT 'INFO'
+                log_level TEXT DEFAULT 'INFO',
+                extra_data TEXT,
+                parent_object_type TEXT,
+                parent_object_id TEXT,
+                agent_id TEXT,
+                agent_session_id TEXT,
+                tool_call_id TEXT,
+                agent_reasoning TEXT,
+                -- [v3.18 FR-005/009/013] AuditService.log() 必填列
+                outcome TEXT DEFAULT 'success',
+                retention_until TEXT,
+                cascade_root_id TEXT,
+                cascade_root_action TEXT
             );
         """)
         
-        now = datetime.now().isoformat()
-        
-        conn.execute("""
-            INSERT INTO audit_logs (object_type, object_id, action, status, retry_count, error_message, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, ('user', '1', 'CREATE', 'failed', 0, 'Connection error', now))
-        conn.execute("""
-            INSERT INTO audit_logs (object_type, object_id, action, status, retry_count, error_message, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, ('user', '2', 'UPDATE', 'failed', 2, 'Timeout', now))
-        conn.execute("""
-            INSERT INTO audit_logs (object_type, object_id, action, status, created_at)
-            VALUES (?, ?, ?, ?, ?)
-        """, ('user', '3', 'DELETE', 'written', now))
-        
-        conn.commit()
-        conn.close()
-        
+        # Pre-populate via service.log() (writes status='written' by default)
+        # Then mark 2 as 'failed' using ds.update (avoids raw SQL per conftest rule)
         ds = get_data_source("sqlite", database=path)
         service = AuditService(ds)
+        service.log(object_type='user', object_id='1', action='CREATE',
+                    extra_data={"status": 'failed', "retry_count": 0, "error_message": 'Connection error'})
+        service.log(object_type='user', object_id='2', action='UPDATE',
+                    extra_data={"status": 'failed', "retry_count": 2, "error_message": 'Timeout'})
+        service.log(object_type='user', object_id='3', action='DELETE',
+                    extra_data={"status": 'written'})
+        # Override status to 'failed' for first 2 records via service-level update
+        ds.update('audit_logs', 1, {'status': 'failed', 'retry_count': 0, 'error_message': 'Connection error'})
+        ds.update('audit_logs', 2, {'status': 'failed', 'retry_count': 2, 'error_message': 'Timeout'})
         yield service, path
         
         try:
