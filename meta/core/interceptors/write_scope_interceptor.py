@@ -294,6 +294,84 @@ class WriteScopeInterceptor(Interceptor):
     def priority(self) -> int:
         return 35
 
+    # ========================================================================
+    # [P4-T3 / P4-T5 2026-07-19] PDP 入口 + V2.1 写路径联动
+    # ========================================================================
+    def _call_pdp(self, context, action: str, resource_type: str,
+                  resource=None, resource_id=None):
+        """[P4-T3] 调用 PermissionResolver.check() (PDP 入口)
+
+        Phase 4 渐进式改造:
+          - 当前: 仅记录决策日志, 不改变原写路径校验
+          - 后续 Phase 5+: 由 PDP 决策
+
+        Returns:
+            bool: True=Allow, False=Deny, None=PDP 不可用 (fallback)
+        """
+        try:
+            from meta.services.permission_resolver import PermissionResolver
+            ds = getattr(context, 'data_source', None)
+            if ds is None:
+                return None
+            user = getattr(context, 'user', None) or getattr(context, 'current_user', None)
+            if user is None:
+                return None
+            resolver = PermissionResolver(ds)
+            return resolver.check(
+                user=user,
+                action=action,
+                resource_type=resource_type,
+                resource=resource,
+                resource_id=resource_id,
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(
+                f'[P4-T3 _call_pdp] fallback to legacy: {e}'
+            )
+            return None
+
+    def _check_write_read_linkage(self, context, resource_type: str,
+                                   resource_id) -> bool:
+        """[P4-T5] V2.1 写路径联动 — 写操作前先调用读路径 PDP
+
+        Spec §3.2.1 V2.1: "不可见资源的写操作被拒绝"
+
+        流程:
+          1. 调用 PermissionResolver.check(action='read', ...)
+          2. 若读不可见 → 写操作拒绝
+
+        Args:
+            context: ActionContext
+            resource_type: BO 名
+            resource_id: 资源 ID
+
+        Returns:
+            True=可读可见 (允许写), False=不可见 (拒绝写), None=PDP 不可用
+        """
+        try:
+            from meta.services.permission_resolver import PermissionResolver
+            ds = getattr(context, 'data_source', None)
+            if ds is None:
+                return None
+            user = getattr(context, 'user', None) or getattr(context, 'current_user', None)
+            if user is None:
+                return None
+            resolver = PermissionResolver(ds)
+            # 读路径 PDP
+            return resolver.check(
+                user=user,
+                action='read',
+                resource_type=resource_type,
+                resource_id=resource_id,
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(
+                f'[P4-T5 _check_write_read_linkage] fallback: {e}'
+            )
+            return None
+
     def should_execute(self, context: 'ActionContext') -> bool:
         # 仅对写操作生效, 读操作已有 DataPermissionInterceptor
         # 支持: crud_create / crud_update / crud_delete / associate / dissociate
@@ -834,8 +912,26 @@ class WriteScopeInterceptor(Interceptor):
             logger.debug(f'load DimensionScopeEngine failed: {e}')
             return {'matched': False, 'roles_checked': []}
 
+        # [P1-T4 2026-07-19] 快速路径: 检查角色是否有 scope_mode='all' 的维度
+        # Spec: spec-permission-system-unification-2026-07-19 §8.1 P1-T4
+        # 当角色任一维度的 scope_mode='all' 时, expand 返回全量 ID,
+        # derive_data_conditions 生成的条件必然匹配, 可直接跳过逐条 SQL 检查
+        # 语义: scope_mode='all' = 该维度无限制 → 写路径维度校验必然通过
+        try:
+            scope_all_roles = self._get_scope_all_roles(context, role_ids)
+        except Exception:
+            scope_all_roles = set()
+
         for role_id in role_ids:
             try:
+                # [P1-T4] 快速路径: scope_mode='all' 的角色直接放行
+                if role_id in scope_all_roles:
+                    roles_checked.append({
+                        'role_id': role_id, 'cond': 'scope_mode=all',
+                        'direct_dim': True, 'fast_path': True,
+                    })
+                    return {'matched': True, 'roles_checked': roles_checked}
+
                 # [V2.1.2 2026-06-22] 前置 perm 检查: 检查该 ROLE 自身是否有 target perm
                 # 修复 V2.1 bug: 之前用 user 全量 perm, 导致 role A (read) + role B (write)
                 # 情况下, role A 的 dim scope 命中会被误放行
@@ -907,6 +1003,27 @@ class WriteScopeInterceptor(Interceptor):
                 continue
 
         return {'matched': False, 'roles_checked': roles_checked}
+
+    def _get_scope_all_roles(self, context: 'ActionContext', role_ids: List[int]) -> Set[int]:
+        """[P1-T4 2026-07-19] 获取有 scope_mode='all' 配置的角色 ID 集合
+
+        Spec: spec-permission-system-unification-2026-07-19 §8.1 P1-T4
+        用途: 写路径快速短路 — scope_mode='all' 的角色维度校验必然通过
+        返回: 有任一维度配置 scope_mode='all' 的 role_id 集合
+        """
+        if not role_ids:
+            return set()
+        try:
+            placeholders = ','.join('?' * len(role_ids))
+            cursor = context.data_source.execute(
+                f"SELECT DISTINCT role_id FROM role_dimension_scopes "
+                f"WHERE role_id IN ({placeholders}) AND scope_mode = 'all'",
+                role_ids
+            )
+            return {row[0] for row in cursor.fetchall()}
+        except Exception as e:
+            logger.debug(f'[_get_scope_all_roles] query failed: {e}')
+            return set()
 
     # [V2.1 2026-06-22] 写权限 × Dim Scope 联动校验 helper 方法
     def _get_user_perm_codes(self, context: 'ActionContext') -> set:
