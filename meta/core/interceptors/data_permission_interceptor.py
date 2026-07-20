@@ -168,6 +168,64 @@ class DataPermissionInterceptor(Interceptor):
     def priority(self) -> int:
         return 30
 
+    # ========================================================================
+    # [P4-T2 2026-07-19] PDP 入口 — 渐进式 PDP 委托
+    # ========================================================================
+    def _call_pdp(self, context, action: str, resource_type: str,
+                  resource=None, resource_id=None):
+        """[P4-T2] 调用 PermissionResolver.check() (PDP 入口)
+
+        Phase 4 渐进式改造:
+          - 当前: 仅记录决策日志, 不改变原 SQL 过滤逻辑
+          - 后续 Phase 5+: 替代 _perm_filter, 由 PDP 决策
+
+        Args:
+            context: ActionContext
+            action: 'read' / 'write' / ...
+            resource_type: BO 名
+            resource: 资源 dict (可选)
+            resource_id: 资源 ID (可选)
+
+        Returns:
+            bool: True=Allow, False=Deny, None=PDP 不可用 (fallback 到原逻辑)
+        """
+        try:
+            from meta.services.permission_resolver import PermissionResolver
+            ds = getattr(context, 'data_source', None)
+            if ds is None:
+                return None
+            user = getattr(context, 'user', None) or getattr(context, 'current_user', None)
+            if user is None:
+                return None
+            resolver = PermissionResolver(ds)
+            return resolver.check(
+                user=user,
+                action=action,
+                resource_type=resource_type,
+                resource=resource,
+                resource_id=resource_id,
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(
+                f'[P4-T2 _call_pdp] fallback to legacy: {e}'
+            )
+            return None
+
+    def _build_pdp_context(self, context):
+        """[P4-T2] 从 ActionContext 组装 PDP 决策上下文
+
+        Returns:
+            dict: {user, action, resource_type, resource, resource_id}
+        """
+        return {
+            'user': getattr(context, 'user', None) or getattr(context, 'current_user', None),
+            'action': getattr(context, 'action', None) or getattr(context, 'action_type', None),
+            'resource_type': getattr(context, 'resource_type', None) or getattr(context, 'bo_name', None),
+            'resource': getattr(context, 'resource', None) or getattr(context, 'record', None),
+            'resource_id': getattr(context, 'resource_id', None) or getattr(context, 'record_id', None),
+        }
+
     # [V1.2.9 2026-06-17] 关联型 BO (relationship) 的权限过滤策略:
     # 不再"跳过所有过滤"，而是:
     #   1. 应用 dim scope OR 派生: source_bo_id IN (...) OR target_bo_id IN (...)
