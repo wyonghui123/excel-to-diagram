@@ -8,6 +8,7 @@
 from flask import Blueprint, request, jsonify, g
 from meta.services.auth_middleware import login_required, require_permission
 from meta.services.condition_permission_service import ConditionPermissionService
+from meta.api._deprecation import v1_deprecated
 from meta.core.datasource import get_data_source
 import os
 
@@ -41,6 +42,7 @@ def _get_service():
 @permission_rule_bp.route('', methods=['GET'])
 @login_required
 @require_permission('user:read')
+@v1_deprecated(migrated_to='/api/v2/permission-rules')
 def list_rules():
     """获取权限规则列表"""
     try:
@@ -61,6 +63,7 @@ def list_rules():
 @permission_rule_bp.route('/<int:rule_id>', methods=['GET'])
 @login_required
 @require_permission('user:read')
+@v1_deprecated(migrated_to='/api/v2/permission-rules/<rule_id>')
 def get_rule(rule_id):
     """获取单条权限规则"""
     try:
@@ -76,6 +79,7 @@ def get_rule(rule_id):
 @permission_rule_bp.route('', methods=['POST'])
 @login_required
 @require_permission('user:update')
+@v1_deprecated(migrated_to='/api/v2/permission-rules')
 def create_rule():
     """创建权限规则"""
     try:
@@ -114,6 +118,7 @@ def create_rule():
 @permission_rule_bp.route('/<int:rule_id>', methods=['PUT'])
 @login_required
 @require_permission('user:update')
+@v1_deprecated(migrated_to='/api/v2/permission-rules/<rule_id>')
 def update_rule(rule_id):
     """更新权限规则"""
     try:
@@ -130,6 +135,7 @@ def update_rule(rule_id):
 @permission_rule_bp.route('/<int:rule_id>', methods=['DELETE'])
 @login_required
 @require_permission('user:update')
+@v1_deprecated(migrated_to='/api/v2/permission-rules/<rule_id>')
 def delete_rule(rule_id):
     """删除权限规则"""
     try:

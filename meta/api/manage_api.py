@@ -6,6 +6,7 @@ from meta.services.hierarchy_filter_service import HierarchyFilterService
 from meta.services.cascade_service import get_type_order, HierarchyConfigLoader
 from meta.services.auth_middleware import login_required, get_current_user, is_admin
 from meta.services.data_permission_filter import DataPermissionFilter
+from meta.api._deprecation import v1_deprecated
 from meta.core.datasource import get_data_source
 from meta.core.models import registry
 from meta.core.enrichment_engine import init_enrichment_engine, enrich_record, enrich_records
@@ -1265,7 +1266,7 @@ def get_state_history(object_type, id):
     
     sql = """
         SELECT id, old_value, new_value, user_name, created_at, action
-        FROM v_audit_all
+        FROM audit_logs
         WHERE object_type = ? AND object_id = ? AND field_name = ?
         ORDER BY created_at ASC
     """
@@ -1351,7 +1352,7 @@ def get_stage_metrics(object_type, id):
     # 原因: status_entered_at DB 字段已删除 (冗余且被 state_transition 规则反复覆盖),
     # 单一事实源改为 audit_logs 表 (最近一次 field 变化时间)
     sql_entered_at = """
-        SELECT created_at FROM v_audit_all
+        SELECT created_at FROM audit_logs
         WHERE object_type = ? AND object_id = ? AND field_name = ? AND action = 'UPDATE'
         ORDER BY created_at DESC LIMIT 1
     """
@@ -1386,7 +1387,7 @@ def get_stage_metrics(object_type, id):
     
     sql = """
         SELECT old_value, new_value, created_at
-        FROM v_audit_all
+        FROM audit_logs
         WHERE object_type = ? AND object_id = ? AND field_name = ?
         ORDER BY created_at ASC
     """

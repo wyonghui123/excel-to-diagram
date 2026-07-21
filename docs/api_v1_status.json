@@ -1,0 +1,4777 @@
+{
+  "generated_at": "2026-07-21T18:07:57.149622",
+  "summary": {
+    "v1_total": 270,
+    "v2_total": 96,
+    "v1_by_status": {
+      "ACTIVE": 192,
+      "DEPRECATED": 25,
+      "SUNSET": 53,
+      "REMOVED": 0
+    }
+  },
+  "endpoints": [
+    {
+      "api_version": "v1",
+      "blueprint": "query",
+      "endpoint": "search",
+      "full_endpoint": "query.search",
+      "url": "/api/v1/query/search",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "query",
+      "endpoint": "full_text_search",
+      "full_endpoint": "query.full_text_search",
+      "url": "/api/v1/query/full-text",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "query",
+      "endpoint": "hierarchy_query",
+      "full_endpoint": "query.hierarchy_query",
+      "url": "/api/v1/query/hierarchy/<path:path>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "query",
+      "endpoint": "suggest",
+      "full_endpoint": "query.suggest",
+      "url": "/api/v1/query/suggest/<object_type>/<field>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "query",
+      "endpoint": "aggregate",
+      "full_endpoint": "query.aggregate",
+      "url": "/api/v1/query/aggregate",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "annotation",
+      "endpoint": "list_annotations_by_target",
+      "full_endpoint": "annotation.list_annotations_by_target",
+      "url": "/api/v1/annotations/by-target",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "annotation",
+      "endpoint": "get_annotation",
+      "full_endpoint": "annotation.get_annotation",
+      "url": "/api/v1/annotations/<int:annotation_id>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "annotation",
+      "endpoint": "create_annotation",
+      "full_endpoint": "annotation.create_annotation",
+      "url": "/api/v1/annotations",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "annotation",
+      "endpoint": "update_annotation",
+      "full_endpoint": "annotation.update_annotation",
+      "url": "/api/v1/annotations/<int:annotation_id>",
+      "methods": [
+        "PUT"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "annotation",
+      "endpoint": "delete_annotation",
+      "full_endpoint": "annotation.delete_annotation",
+      "url": "/api/v1/annotations/<int:annotation_id>",
+      "methods": [
+        "DELETE"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "annotation",
+      "endpoint": "get_annotation_category_stats",
+      "full_endpoint": "annotation.get_annotation_category_stats",
+      "url": "/api/v1/annotations/category-stats",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "special",
+      "endpoint": "list_relationships",
+      "full_endpoint": "special.list_relationships",
+      "url": "/api/v1/relationships",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/relationships",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "special",
+      "endpoint": "get_business_object_relations",
+      "full_endpoint": "special.get_business_object_relations",
+      "url": "/api/v1/business_object/<int:obj_id>/relations",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/business_object/<int:obj_id>/relations",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "special",
+      "endpoint": "analytics_query",
+      "full_endpoint": "special.analytics_query",
+      "url": "/api/v1/analytics/<object_type>",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "manage",
+      "endpoint": "create_record",
+      "full_endpoint": "manage.create_record",
+      "url": "/api/v1/<object_type>",
+      "methods": [
+        "POST"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/<object_type>",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "manage",
+      "endpoint": "deep_insert",
+      "full_endpoint": "manage.deep_insert",
+      "url": "/api/v1/<object_type>/deep",
+      "methods": [
+        "POST"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/<object_type>/deep",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "manage",
+      "endpoint": "get_record",
+      "full_endpoint": "manage.get_record",
+      "url": "/api/v1/<object_type>/<id>",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/<object_type>/<id>",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "manage",
+      "endpoint": "list_records",
+      "full_endpoint": "manage.list_records",
+      "url": "/api/v1/<object_type>",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/<object_type>",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "manage",
+      "endpoint": "list_records_post",
+      "full_endpoint": "manage.list_records_post",
+      "url": "/api/v1/<object_type>/list",
+      "methods": [
+        "POST"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/<object_type>/list",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "manage",
+      "endpoint": "update_record",
+      "full_endpoint": "manage.update_record",
+      "url": "/api/v1/<object_type>/<id>",
+      "methods": [
+        "PUT"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/<object_type>/<id>",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "manage",
+      "endpoint": "delete_record",
+      "full_endpoint": "manage.delete_record",
+      "url": "/api/v1/<object_type>/<id>",
+      "methods": [
+        "DELETE"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/<object_type>/<id>",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "manage",
+      "endpoint": "recover_from_log",
+      "full_endpoint": "manage.recover_from_log",
+      "url": "/api/v1/<object_type>/<id>/recover",
+      "methods": [
+        "POST"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/<object_type>/<id>/recover",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "manage",
+      "endpoint": "list_deleted_objects",
+      "full_endpoint": "manage.list_deleted_objects",
+      "url": "/api/v1/<object_type>/deleted",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/<object_type>/deleted",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "manage",
+      "endpoint": "batch_create",
+      "full_endpoint": "manage.batch_create",
+      "url": "/api/v1/<object_type>/batch-create",
+      "methods": [
+        "POST"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/<object_type>/batch-create",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "manage",
+      "endpoint": "batch_update",
+      "full_endpoint": "manage.batch_update",
+      "url": "/api/v1/<object_type>/batch-update",
+      "methods": [
+        "POST"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/<object_type>/batch-update",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "manage",
+      "endpoint": "batch_delete",
+      "full_endpoint": "manage.batch_delete",
+      "url": "/api/v1/<object_type>/batch-delete",
+      "methods": [
+        "POST"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/<object_type>/batch-delete",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "manage",
+      "endpoint": "list_actions",
+      "full_endpoint": "manage.list_actions",
+      "url": "/api/v1/<object_type>/<id>/actions",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/<object_type>/<id>/actions",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "manage",
+      "endpoint": "execute_action",
+      "full_endpoint": "manage.execute_action",
+      "url": "/api/v1/<object_type>/<id>/actions/<action_id>",
+      "methods": [
+        "POST"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/<object_type>/<id>/actions/<action_id>",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "manage",
+      "endpoint": "get_state_transitions",
+      "full_endpoint": "manage.get_state_transitions",
+      "url": "/api/v1/<object_type>/<id>/state_transitions",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/<object_type>/<id>/state_transitions",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "manage",
+      "endpoint": "get_state_history",
+      "full_endpoint": "manage.get_state_history",
+      "url": "/api/v1/<object_type>/<id>/state_history",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/<object_type>/<id>/state_history",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "manage",
+      "endpoint": "get_stage_metrics",
+      "full_endpoint": "manage.get_stage_metrics",
+      "url": "/api/v1/<object_type>/<id>/stage_metrics",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/<object_type>/<id>/stage_metrics",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "meta",
+      "endpoint": "list_objects",
+      "full_endpoint": "meta.list_objects",
+      "url": "/api/v1/meta/objects",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/meta/objects",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "meta",
+      "endpoint": "get_object",
+      "full_endpoint": "meta.get_object",
+      "url": "/api/v1/meta/objects/<object_type>",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/meta/objects/<object_type>",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "meta",
+      "endpoint": "get_view_config",
+      "full_endpoint": "meta.get_view_config",
+      "url": "/api/v1/meta/<object_type>/view-config",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/meta/<object_type>/view-config",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "meta",
+      "endpoint": "get_named_view_config",
+      "full_endpoint": "meta.get_named_view_config",
+      "url": "/api/v1/meta/<object_type>/view-config/<view_name>",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/meta/<object_type>/view-config/<view_name>",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "meta",
+      "endpoint": "get_list_view_config",
+      "full_endpoint": "meta.get_list_view_config",
+      "url": "/api/v1/meta/<object_type>/list-view",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/meta/<object_type>/list-view",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "meta",
+      "endpoint": "get_detail_view_config",
+      "full_endpoint": "meta.get_detail_view_config",
+      "url": "/api/v1/meta/<object_type>/detail-view",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/meta/<object_type>/detail-view",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "meta",
+      "endpoint": "get_form_view_config",
+      "full_endpoint": "meta.get_form_view_config",
+      "url": "/api/v1/meta/<object_type>/form-view",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/meta/<object_type>/form-view",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "meta",
+      "endpoint": "reload_meta",
+      "full_endpoint": "meta.reload_meta",
+      "url": "/api/v1/meta/reload",
+      "methods": [
+        "POST"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/meta/reload",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "meta",
+      "endpoint": "get_i18n",
+      "full_endpoint": "meta.get_i18n",
+      "url": "/api/v1/meta/i18n/<locale>",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/meta/i18n/<locale>",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "meta",
+      "endpoint": "get_i18n_text",
+      "full_endpoint": "meta.get_i18n_text",
+      "url": "/api/v1/meta/i18n/text/<path:key>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "meta",
+      "endpoint": "list_locales",
+      "full_endpoint": "meta.list_locales",
+      "url": "/api/v1/meta/i18n/locales",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "meta",
+      "endpoint": "get_enums_batch",
+      "full_endpoint": "meta.get_enums_batch",
+      "url": "/api/v1/meta/enums/batch",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "meta",
+      "endpoint": "get_filter_config",
+      "full_endpoint": "meta.get_filter_config",
+      "url": "/api/v1/meta/<object_type>/filter-config",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/meta/<object_type>/filter-config",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "meta",
+      "endpoint": "get_filter_tree_data",
+      "full_endpoint": "meta.get_filter_tree_data",
+      "url": "/api/v1/meta/<object_type>/filter-tree/<filter_key>",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/meta/<object_type>/filter-tree/<filter_key>",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "agent",
+      "endpoint": "get_tools",
+      "full_endpoint": "agent.get_tools",
+      "url": "/api/v1/agent/tools",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "agent",
+      "endpoint": "get_object_context",
+      "full_endpoint": "agent.get_object_context",
+      "url": "/api/v1/agent/context/<object_type>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "agent",
+      "endpoint": "get_full_schema",
+      "full_endpoint": "agent.get_full_schema",
+      "url": "/api/v1/agent/schema",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "export_import",
+      "endpoint": "export_data",
+      "full_endpoint": "export_import.export_data",
+      "url": "/api/v1/export",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "export_import",
+      "endpoint": "export_data_async",
+      "full_endpoint": "export_import.export_data_async",
+      "url": "/api/v1/export/async",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "export_import",
+      "endpoint": "export_status",
+      "full_endpoint": "export_import.export_status",
+      "url": "/api/v1/export/status/<task_id>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "export_import",
+      "endpoint": "download_export",
+      "full_endpoint": "export_import.download_export",
+      "url": "/api/v1/export/download/<path:filename>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "export_import",
+      "endpoint": "import_data",
+      "full_endpoint": "export_import.import_data",
+      "url": "/api/v1/import",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "export_import",
+      "endpoint": "import_data_async",
+      "full_endpoint": "export_import.import_data_async",
+      "url": "/api/v1/import/async",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "export_import",
+      "endpoint": "import_status",
+      "full_endpoint": "export_import.import_status",
+      "url": "/api/v1/import/status/<task_id>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "export_import",
+      "endpoint": "download_template",
+      "full_endpoint": "export_import.download_template",
+      "url": "/api/v1/import/template/<object_type>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "export_import",
+      "endpoint": "get_import_export_config",
+      "full_endpoint": "export_import.get_import_export_config",
+      "url": "/api/v1/import-export/config/<object_type>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "stats",
+      "endpoint": "get_stats_overview",
+      "full_endpoint": "stats.get_stats_overview",
+      "url": "/api/v1/stats/overview",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "stats",
+      "endpoint": "list_aggregates",
+      "full_endpoint": "stats.list_aggregates",
+      "url": "/api/v1/stats/aggregates",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "stats",
+      "endpoint": "query_aggregate",
+      "full_endpoint": "stats.query_aggregate",
+      "url": "/api/v1/stats/aggregates/<aggregate_id>/query",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "stats",
+      "endpoint": "refresh_aggregate",
+      "full_endpoint": "stats.refresh_aggregate",
+      "url": "/api/v1/stats/aggregates/<aggregate_id>/refresh",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "stats",
+      "endpoint": "get_all_freshness",
+      "full_endpoint": "stats.get_all_freshness",
+      "url": "/api/v1/stats/aggregates/freshness",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "stats",
+      "endpoint": "execute_olap_query",
+      "full_endpoint": "stats.execute_olap_query",
+      "url": "/api/v1/stats/olap/<object_type>",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "stats",
+      "endpoint": "drill_down_query",
+      "full_endpoint": "stats.drill_down_query",
+      "url": "/api/v1/stats/olap/<object_type>/drill-down",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "stats",
+      "endpoint": "roll_up_query",
+      "full_endpoint": "stats.roll_up_query",
+      "url": "/api/v1/stats/olap/<object_type>/roll-up",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "stats",
+      "endpoint": "get_analytical_model_info",
+      "full_endpoint": "stats.get_analytical_model_info",
+      "url": "/api/v1/stats/model/<object_type>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "stats",
+      "endpoint": "get_hierarchy_navigation",
+      "full_endpoint": "stats.get_hierarchy_navigation",
+      "url": "/api/v1/stats/model/<object_type>/navigation",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "stats",
+      "endpoint": "get_dimension_members",
+      "full_endpoint": "stats.get_dimension_members",
+      "url": "/api/v1/stats/model/<object_type>/dimensions/<dimension_id>/members",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "stats",
+      "endpoint": "get_cache_stats",
+      "full_endpoint": "stats.get_cache_stats",
+      "url": "/api/v1/stats/cache",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "stats",
+      "endpoint": "invalidate_cache",
+      "full_endpoint": "stats.invalidate_cache",
+      "url": "/api/v1/stats/cache/invalidate",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "schema",
+      "endpoint": "sync_schema",
+      "full_endpoint": "schema.sync_schema",
+      "url": "/api/v1/schema/sync",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "schema",
+      "endpoint": "list_tables",
+      "full_endpoint": "schema.list_tables",
+      "url": "/api/v1/schema/tables",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "schema",
+      "endpoint": "get_table_schema",
+      "full_endpoint": "schema.get_table_schema",
+      "url": "/api/v1/schema/tables/<table_name>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "schema",
+      "endpoint": "create_table",
+      "full_endpoint": "schema.create_table",
+      "url": "/api/v1/schema/tables/<table_name>/create",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "schema",
+      "endpoint": "get_schema_status",
+      "full_endpoint": "schema.get_schema_status",
+      "url": "/api/v1/schema/status",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "schema",
+      "endpoint": "get_index_report",
+      "full_endpoint": "schema.get_index_report",
+      "url": "/api/v1/schema/indexes/report",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "schema",
+      "endpoint": "get_object_index_report",
+      "full_endpoint": "schema.get_object_index_report",
+      "url": "/api/v1/schema/indexes/report/<object_id>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "schema",
+      "endpoint": "create_indexes",
+      "full_endpoint": "schema.create_indexes",
+      "url": "/api/v1/schema/indexes/create",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "schema",
+      "endpoint": "get_index_stats",
+      "full_endpoint": "schema.get_index_stats",
+      "url": "/api/v1/schema/indexes/stats",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "auth",
+      "endpoint": "login",
+      "full_endpoint": "auth.login",
+      "url": "/api/v1/auth/login",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "auth",
+      "endpoint": "logout",
+      "full_endpoint": "auth.logout",
+      "url": "/api/v1/auth/logout",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "auth",
+      "endpoint": "get_current_user_info",
+      "full_endpoint": "auth.get_current_user_info",
+      "url": "/api/v1/auth/me",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "auth",
+      "endpoint": "dev_login",
+      "full_endpoint": "auth.dev_login",
+      "url": "/api/v1/auth/dev-login",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "auth",
+      "endpoint": "change_password",
+      "full_endpoint": "auth.change_password",
+      "url": "/api/v1/auth/change-password",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "user",
+      "endpoint": "list_users",
+      "full_endpoint": "user.list_users",
+      "url": "/api/v1/users",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/user",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "user",
+      "endpoint": "create_user",
+      "full_endpoint": "user.create_user",
+      "url": "/api/v1/users",
+      "methods": [
+        "POST"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/user",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "user",
+      "endpoint": "get_current_user_profile",
+      "full_endpoint": "user.get_current_user_profile",
+      "url": "/api/v1/users/me",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "user",
+      "endpoint": "update_current_user_profile",
+      "full_endpoint": "user.update_current_user_profile",
+      "url": "/api/v1/users/me",
+      "methods": [
+        "PUT"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "user",
+      "endpoint": "get_user",
+      "full_endpoint": "user.get_user",
+      "url": "/api/v1/users/<int:user_id>",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/user",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "user",
+      "endpoint": "update_user",
+      "full_endpoint": "user.update_user",
+      "url": "/api/v1/users/<int:user_id>",
+      "methods": [
+        "PUT"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/user",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "user",
+      "endpoint": "delete_user",
+      "full_endpoint": "user.delete_user",
+      "url": "/api/v1/users/<int:user_id>",
+      "methods": [
+        "DELETE"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/user",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "user",
+      "endpoint": "batch_delete_users",
+      "full_endpoint": "user.batch_delete_users",
+      "url": "/api/v1/users/batch-delete",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "user",
+      "endpoint": "reset_password",
+      "full_endpoint": "user.reset_password",
+      "url": "/api/v1/users/<int:user_id>/reset-password",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "user",
+      "endpoint": "batch_add_user_data_permissions",
+      "full_endpoint": "user.batch_add_user_data_permissions",
+      "url": "/api/v1/users/batch-data-permissions",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "user",
+      "endpoint": "get_current_user_detail",
+      "full_endpoint": "user.get_current_user_detail",
+      "url": "/api/v1/users/self",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "user",
+      "endpoint": "update_user_self",
+      "full_endpoint": "user.update_user_self",
+      "url": "/api/v1/users/self",
+      "methods": [
+        "PUT"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "user",
+      "endpoint": "get_user_menus",
+      "full_endpoint": "user.get_user_menus",
+      "url": "/api/v1/users/<int:user_id>/menus",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "user",
+      "endpoint": "get_user_logs",
+      "full_endpoint": "user.get_user_logs",
+      "url": "/api/v1/users/<int:user_id>/logs",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "role",
+      "endpoint": "list_roles",
+      "full_endpoint": "role.list_roles",
+      "url": "/api/v1/roles",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "role",
+      "endpoint": "create_role",
+      "full_endpoint": "role.create_role",
+      "url": "/api/v1/roles",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "role",
+      "endpoint": "get_role",
+      "full_endpoint": "role.get_role",
+      "url": "/api/v1/roles/<int:role_id>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "role",
+      "endpoint": "assign_role_to_users",
+      "full_endpoint": "role.assign_role_to_users",
+      "url": "/api/v1/roles/<int:role_id>/users",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "role",
+      "endpoint": "remove_user_from_role",
+      "full_endpoint": "role.remove_user_from_role",
+      "url": "/api/v1/roles/<int:role_id>/users/<int:user_id>",
+      "methods": [
+        "DELETE"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "role",
+      "endpoint": "update_role",
+      "full_endpoint": "role.update_role",
+      "url": "/api/v1/roles/<int:role_id>",
+      "methods": [
+        "PUT"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "role",
+      "endpoint": "delete_role",
+      "full_endpoint": "role.delete_role",
+      "url": "/api/v1/roles/<int:role_id>",
+      "methods": [
+        "DELETE"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "role",
+      "endpoint": "set_role_permissions",
+      "full_endpoint": "role.set_role_permissions",
+      "url": "/api/v1/roles/<int:role_id>/permissions",
+      "methods": [
+        "PUT"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "role",
+      "endpoint": "get_role_permissions",
+      "full_endpoint": "role.get_role_permissions",
+      "url": "/api/v1/roles/<int:role_id>/permissions",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "role",
+      "endpoint": "get_role_menus",
+      "full_endpoint": "role.get_role_menus",
+      "url": "/api/v1/roles/<int:role_id>/menus",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "role",
+      "endpoint": "get_role_data_permissions",
+      "full_endpoint": "role.get_role_data_permissions",
+      "url": "/api/v1/roles/<int:role_id>/data-permissions",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "role",
+      "endpoint": "add_role_data_permission",
+      "full_endpoint": "role.add_role_data_permission",
+      "url": "/api/v1/roles/<int:role_id>/data-permissions",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "role",
+      "endpoint": "list_permissions",
+      "full_endpoint": "role.list_permissions",
+      "url": "/api/v1/roles/permissions",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "role",
+      "endpoint": "get_role_logs",
+      "full_endpoint": "role.get_role_logs",
+      "url": "/api/v1/roles/<int:role_id>/logs",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "data_permission",
+      "endpoint": "list_data_permissions",
+      "full_endpoint": "data_permission.list_data_permissions",
+      "url": "/api/v1/data-permissions",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/data_permission",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "data_permission",
+      "endpoint": "add_data_permission",
+      "full_endpoint": "data_permission.add_data_permission",
+      "url": "/api/v1/data-permissions",
+      "methods": [
+        "POST"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/data_permission",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "data_permission",
+      "endpoint": "delete_data_permission",
+      "full_endpoint": "data_permission.delete_data_permission",
+      "url": "/api/v1/data-permissions/<int:perm_id>",
+      "methods": [
+        "DELETE"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/data_permission",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "data_permission",
+      "endpoint": "batch_add_data_permissions",
+      "full_endpoint": "data_permission.batch_add_data_permissions",
+      "url": "/api/v1/data-permissions/batch",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "data_permission",
+      "endpoint": "get_effective_permissions",
+      "full_endpoint": "data_permission.get_effective_permissions",
+      "url": "/api/v1/data-permissions/effective",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "data_permission",
+      "endpoint": "get_self_data_permissions",
+      "full_endpoint": "data_permission.get_self_data_permissions",
+      "url": "/api/v1/data-permissions/self",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "role_menu",
+      "endpoint": "get_role_menu_permissions",
+      "full_endpoint": "role_menu.get_role_menu_permissions",
+      "url": "/api/v1/roles/<int:role_id>/menu-permissions",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "role_menu",
+      "endpoint": "get_role_unified_permissions",
+      "full_endpoint": "role_menu.get_role_unified_permissions",
+      "url": "/api/v1/roles/<int:role_id>/unified-permissions",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "role_menu",
+      "endpoint": "update_role_menu_permissions",
+      "full_endpoint": "role_menu.update_role_menu_permissions",
+      "url": "/api/v1/roles/<int:role_id>/menu-permissions",
+      "methods": [
+        "PUT"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "role_dim",
+      "endpoint": "get_dimension_scopes",
+      "full_endpoint": "role_dim.get_dimension_scopes",
+      "url": "/api/v1/roles/<int:role_id>/dimension-scopes",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "role_dim",
+      "endpoint": "save_dimension_scopes",
+      "full_endpoint": "role_dim.save_dimension_scopes",
+      "url": "/api/v1/roles/<int:role_id>/dimension-scopes",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "role_dim",
+      "endpoint": "get_derived_permissions",
+      "full_endpoint": "role_dim.get_derived_permissions",
+      "url": "/api/v1/roles/<int:role_id>/derived-permissions",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "management_dimension",
+      "endpoint": "get_dimensions",
+      "full_endpoint": "management_dimension.get_dimensions",
+      "url": "/api/v2/bo/management_dimension",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "management_dimension",
+      "endpoint": "get_dimension_instances",
+      "full_endpoint": "management_dimension.get_dimension_instances",
+      "url": "/api/v2/bo/management_dimension/<string:dimension_id>/instances",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "management_dimension",
+      "endpoint": "get_role_permission_rules",
+      "full_endpoint": "management_dimension.get_role_permission_rules",
+      "url": "/api/v2/bo/management_dimension/../roles/<int:role_id>/permission-rules",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "management_dimension_roles",
+      "endpoint": "get_role_permission_rules_v2",
+      "full_endpoint": "management_dimension_roles.get_role_permission_rules_v2",
+      "url": "/api/v1/roles/<int:role_id>/permission-rules",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "management_dimension_roles",
+      "endpoint": "save_permission_rule",
+      "full_endpoint": "management_dimension_roles.save_permission_rule",
+      "url": "/api/v1/roles/<int:role_id>/permission-rules",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "management_dimension_roles",
+      "endpoint": "calculate_impact",
+      "full_endpoint": "management_dimension_roles.calculate_impact",
+      "url": "/api/v1/roles/<int:role_id>/calculate-impact",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "management_dimension_meta",
+      "endpoint": "get_cache_stats",
+      "full_endpoint": "management_dimension_meta.get_cache_stats",
+      "url": "/api/v1/meta/cache-stats",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/meta/cache-stats",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "user_group",
+      "endpoint": "get_group_members",
+      "full_endpoint": "user_group.get_group_members",
+      "url": "/api/v1/user-groups/<int:group_id>/members",
+      "methods": [
+        "GET"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/bo/user_group/<group_id>/associations/members",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "user_group",
+      "endpoint": "add_group_member",
+      "full_endpoint": "user_group.add_group_member",
+      "url": "/api/v1/user-groups/<int:group_id>/members",
+      "methods": [
+        "POST"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/bo/user_group/<group_id>/associations/members",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "user_group",
+      "endpoint": "set_group_members",
+      "full_endpoint": "user_group.set_group_members",
+      "url": "/api/v1/user-groups/<int:group_id>/members",
+      "methods": [
+        "PUT"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "user_group",
+      "endpoint": "remove_group_member",
+      "full_endpoint": "user_group.remove_group_member",
+      "url": "/api/v1/user-groups/<int:group_id>/members/<int:user_id>",
+      "methods": [
+        "DELETE"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "user_group",
+      "endpoint": "get_group_data_permissions",
+      "full_endpoint": "user_group.get_group_data_permissions",
+      "url": "/api/v1/user-groups/<int:group_id>/data-permissions",
+      "methods": [
+        "GET"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/bo/user_group/<group_id>/associations/roles",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "user_group",
+      "endpoint": "add_group_data_permission",
+      "full_endpoint": "user_group.add_group_data_permission",
+      "url": "/api/v1/user-groups/<int:group_id>/data-permissions",
+      "methods": [
+        "POST"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/bo/user_group/<group_id>/associations/roles",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "user_group",
+      "endpoint": "remove_group_data_permission",
+      "full_endpoint": "user_group.remove_group_data_permission",
+      "url": "/api/v1/user-groups/<int:group_id>/data-permissions/<int:perm_id>",
+      "methods": [
+        "DELETE"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/bo/user_group/<group_id>/associations/roles",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "user_group",
+      "endpoint": "get_group_roles",
+      "full_endpoint": "user_group.get_group_roles",
+      "url": "/api/v1/user-groups/<int:group_id>/roles",
+      "methods": [
+        "GET"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/bo/user_group/<group_id>/associations/roles",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "user_group",
+      "endpoint": "set_group_roles",
+      "full_endpoint": "user_group.set_group_roles",
+      "url": "/api/v1/user-groups/<int:group_id>/roles",
+      "methods": [
+        "PUT"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "user_group",
+      "endpoint": "add_group_role",
+      "full_endpoint": "user_group.add_group_role",
+      "url": "/api/v1/user-groups/<int:group_id>/roles/<int:role_id>",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "user_group",
+      "endpoint": "remove_group_role",
+      "full_endpoint": "user_group.remove_group_role",
+      "url": "/api/v1/user-groups/<int:group_id>/roles/<int:role_id>",
+      "methods": [
+        "DELETE"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "user_group",
+      "endpoint": "get_available_roles_for_group",
+      "full_endpoint": "user_group.get_available_roles_for_group",
+      "url": "/api/v1/user-groups/<int:group_id>/roles/available",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "user_group",
+      "endpoint": "migrate_group_permissions",
+      "full_endpoint": "user_group.migrate_group_permissions",
+      "url": "/api/v1/system/migrate-group-permissions-to-roles",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "user_group",
+      "endpoint": "get_user_group_logs",
+      "full_endpoint": "user_group.get_user_group_logs",
+      "url": "/api/v1/user-groups/<int:group_id>/logs",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "enum",
+      "endpoint": "list_enum_types",
+      "full_endpoint": "enum.list_enum_types",
+      "url": "/api/v1/enum-types",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "enum",
+      "endpoint": "get_enum_type",
+      "full_endpoint": "enum.get_enum_type",
+      "url": "/api/v1/enum-types/<enum_type_id>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "enum",
+      "endpoint": "create_enum_type",
+      "full_endpoint": "enum.create_enum_type",
+      "url": "/api/v1/enum-types",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "enum",
+      "endpoint": "update_enum_type",
+      "full_endpoint": "enum.update_enum_type",
+      "url": "/api/v1/enum-types/<enum_type_id>",
+      "methods": [
+        "PUT"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "enum",
+      "endpoint": "delete_enum_type",
+      "full_endpoint": "enum.delete_enum_type",
+      "url": "/api/v1/enum-types/<enum_type_id>",
+      "methods": [
+        "DELETE"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "enum",
+      "endpoint": "get_enum_type_history",
+      "full_endpoint": "enum.get_enum_type_history",
+      "url": "/api/v1/enum-types/<enum_type_id>/history",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "enum",
+      "endpoint": "get_enum_options",
+      "full_endpoint": "enum.get_enum_options",
+      "url": "/api/v1/enums/<enum_type_id>/options",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "enum",
+      "endpoint": "list_enum_values",
+      "full_endpoint": "enum.list_enum_values",
+      "url": "/api/v1/enum-types/<enum_type_id>/values",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "enum",
+      "endpoint": "get_enum_value",
+      "full_endpoint": "enum.get_enum_value",
+      "url": "/api/v1/enum-values/<int:value_id>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "enum",
+      "endpoint": "create_enum_value",
+      "full_endpoint": "enum.create_enum_value",
+      "url": "/api/v1/enum-types/<enum_type_id>/values",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "enum",
+      "endpoint": "update_enum_value",
+      "full_endpoint": "enum.update_enum_value",
+      "url": "/api/v1/enum-values/<int:value_id>",
+      "methods": [
+        "PUT"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "enum",
+      "endpoint": "delete_enum_value",
+      "full_endpoint": "enum.delete_enum_value",
+      "url": "/api/v1/enum-values/<int:value_id>",
+      "methods": [
+        "DELETE"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "enum",
+      "endpoint": "query_enum_values",
+      "full_endpoint": "enum.query_enum_values",
+      "url": "/api/v1/enum-values",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "menu_permission",
+      "endpoint": "get_accessible_menus",
+      "full_endpoint": "menu_permission.get_accessible_menus",
+      "url": "/api/v1/menu-permission/menus",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "menu_permission",
+      "endpoint": "get_all_menus",
+      "full_endpoint": "menu_permission.get_all_menus",
+      "url": "/api/v1/menu-permission/menus/all",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "menu_permission",
+      "endpoint": "check_menu_visibility",
+      "full_endpoint": "menu_permission.check_menu_visibility",
+      "url": "/api/v1/menu-permission/menus/<menu_code>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "menu_permission",
+      "endpoint": "check_menu_consistency",
+      "full_endpoint": "menu_permission.check_menu_consistency",
+      "url": "/api/v1/menu-permission/menus/<menu_code>/consistency",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "menu_permission",
+      "endpoint": "get_permission_report",
+      "full_endpoint": "menu_permission.get_permission_report",
+      "url": "/api/v1/menu-permission/menus/report",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "menu_permission",
+      "endpoint": "create_menu_permission",
+      "full_endpoint": "menu_permission.create_menu_permission",
+      "url": "/api/v1/menu-permission/menus",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "menu_permission",
+      "endpoint": "update_menu_permission",
+      "full_endpoint": "menu_permission.update_menu_permission",
+      "url": "/api/v1/menu-permission/menus/<menu_code>",
+      "methods": [
+        "PUT"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "menu_permission",
+      "endpoint": "delete_menu_permission",
+      "full_endpoint": "menu_permission.delete_menu_permission",
+      "url": "/api/v1/menu-permission/menus/<menu_code>",
+      "methods": [
+        "DELETE"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "menu_permission",
+      "endpoint": "get_visible_menu_tree",
+      "full_endpoint": "menu_permission.get_visible_menu_tree",
+      "url": "/api/v1/menu-permission/visible",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_bundle",
+      "endpoint": "get_bundles",
+      "full_endpoint": "permission_bundle.get_bundles",
+      "url": "/api/v1/permission-bundles",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/permission_bundle",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_bundle",
+      "endpoint": "get_bundle",
+      "full_endpoint": "permission_bundle.get_bundle",
+      "url": "/api/v1/permission-bundles/<bundle_code>",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/permission_bundle",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_bundle",
+      "endpoint": "assign_bundle",
+      "full_endpoint": "permission_bundle.assign_bundle",
+      "url": "/api/v1/permission-bundles/assign",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_bundle",
+      "endpoint": "get_user_bundles",
+      "full_endpoint": "permission_bundle.get_user_bundles",
+      "url": "/api/v1/permission-bundles/user/<int:user_id>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_bundle",
+      "endpoint": "create_bundle",
+      "full_endpoint": "permission_bundle.create_bundle",
+      "url": "/api/v1/permission-bundles",
+      "methods": [
+        "POST"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/permission_bundle",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_bundle",
+      "endpoint": "update_bundle",
+      "full_endpoint": "permission_bundle.update_bundle",
+      "url": "/api/v1/permission-bundles/<bundle_code>",
+      "methods": [
+        "PUT"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/permission_bundle",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_bundle",
+      "endpoint": "delete_bundle",
+      "full_endpoint": "permission_bundle.delete_bundle",
+      "url": "/api/v1/permission-bundles/<bundle_code>",
+      "methods": [
+        "DELETE"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/permission_bundle",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_audit",
+      "endpoint": "get_audit_report",
+      "full_endpoint": "permission_audit.get_audit_report",
+      "url": "/api/v1/permission-audit/report",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_audit",
+      "endpoint": "get_user_summary",
+      "full_endpoint": "permission_audit.get_user_summary",
+      "url": "/api/v1/permission-audit/user/<int:user_id>/summary",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_audit",
+      "endpoint": "get_usage_stats",
+      "full_endpoint": "permission_audit.get_usage_stats",
+      "url": "/api/v1/permission-audit/stats",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_audit",
+      "endpoint": "find_orphan_permissions",
+      "full_endpoint": "permission_audit.find_orphan_permissions",
+      "url": "/api/v1/permission-audit/orphans",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_audit",
+      "endpoint": "find_excessive_permissions",
+      "full_endpoint": "permission_audit.find_excessive_permissions",
+      "url": "/api/v1/permission-audit/excessive",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_audit",
+      "endpoint": "get_change_history",
+      "full_endpoint": "permission_audit.get_change_history",
+      "url": "/api/v1/permission-audit/history",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_sync",
+      "endpoint": "sync_permissions",
+      "full_endpoint": "permission_sync.sync_permissions",
+      "url": "/api/v1/admin/permissions/sync",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_sync",
+      "endpoint": "validate_permissions",
+      "full_endpoint": "permission_sync.validate_permissions",
+      "url": "/api/v1/admin/permissions/validate",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_sync",
+      "endpoint": "get_permission_report",
+      "full_endpoint": "permission_sync.get_permission_report",
+      "url": "/api/v1/admin/permissions/report",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_sync",
+      "endpoint": "get_orphan_permissions",
+      "full_endpoint": "permission_sync.get_orphan_permissions",
+      "url": "/api/v1/admin/permissions/orphans",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_sync",
+      "endpoint": "cleanup_orphan_permissions",
+      "full_endpoint": "permission_sync.cleanup_orphan_permissions",
+      "url": "/api/v1/admin/permissions/orphans",
+      "methods": [
+        "DELETE"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "owner_transfer",
+      "endpoint": "validate_transfer",
+      "full_endpoint": "owner_transfer.validate_transfer",
+      "url": "/api/v1/admin/owner/validate",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "owner_transfer",
+      "endpoint": "transfer_ownership",
+      "full_endpoint": "owner_transfer.transfer_ownership",
+      "url": "/api/v1/admin/owner/transfer",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "owner_transfer",
+      "endpoint": "bulk_transfer_ownership",
+      "full_endpoint": "owner_transfer.bulk_transfer_ownership",
+      "url": "/api/v1/admin/owner/bulk-transfer",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "owner_transfer",
+      "endpoint": "get_transfer_history",
+      "full_endpoint": "owner_transfer.get_transfer_history",
+      "url": "/api/v1/admin/owner/transfer-history",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_rule",
+      "endpoint": "list_rules",
+      "full_endpoint": "permission_rule.list_rules",
+      "url": "/api/v1/permission-rules",
+      "methods": [
+        "GET"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/permission-rules",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_rule",
+      "endpoint": "get_rule",
+      "full_endpoint": "permission_rule.get_rule",
+      "url": "/api/v1/permission-rules/<int:rule_id>",
+      "methods": [
+        "GET"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/permission-rules/<rule_id>",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_rule",
+      "endpoint": "create_rule",
+      "full_endpoint": "permission_rule.create_rule",
+      "url": "/api/v1/permission-rules",
+      "methods": [
+        "POST"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/permission-rules",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_rule",
+      "endpoint": "update_rule",
+      "full_endpoint": "permission_rule.update_rule",
+      "url": "/api/v1/permission-rules/<int:rule_id>",
+      "methods": [
+        "PUT"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/permission-rules/<rule_id>",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_rule",
+      "endpoint": "delete_rule",
+      "full_endpoint": "permission_rule.delete_rule",
+      "url": "/api/v1/permission-rules/<int:rule_id>",
+      "methods": [
+        "DELETE"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/permission-rules/<rule_id>",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_rule",
+      "endpoint": "preview_matching",
+      "full_endpoint": "permission_rule.preview_matching",
+      "url": "/api/v1/permission-rules/preview",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_rule",
+      "endpoint": "check_permission",
+      "full_endpoint": "permission_rule.check_permission",
+      "url": "/api/v1/permission-rules/check",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_rule",
+      "endpoint": "get_field_metadata",
+      "full_endpoint": "permission_rule.get_field_metadata",
+      "url": "/api/v1/permission-rules/field-metadata",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_rule",
+      "endpoint": "get_employee_scopes",
+      "full_endpoint": "permission_rule.get_employee_scopes",
+      "url": "/api/v1/permission-rules/employee-scopes",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_rule",
+      "endpoint": "check_resource_references",
+      "full_endpoint": "permission_rule.check_resource_references",
+      "url": "/api/v1/permission-rules/reference-check",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_rule",
+      "endpoint": "list_dimension_values_for_rule",
+      "full_endpoint": "permission_rule.list_dimension_values_for_rule",
+      "url": "/api/v1/permission-rules/dimensions/<string:dimension_code>/values",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_rule",
+      "endpoint": "list_dimensions_for_rule",
+      "full_endpoint": "permission_rule.list_dimensions_for_rule",
+      "url": "/api/v1/permission-rules/dimensions",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "overlap",
+      "endpoint": "v1_get_role_overlaps",
+      "full_endpoint": "overlap.v1_get_role_overlaps",
+      "url": "/api/v1/roles/<int:role_id>/overlaps",
+      "methods": [
+        "GET"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/roles/<int:role_id>/overlaps",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "overlap",
+      "endpoint": "v2_get_role_overlaps",
+      "full_endpoint": "overlap.v2_get_role_overlaps",
+      "url": "/api/v2/roles/<int:role_id>/overlaps",
+      "methods": [
+        "GET"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/roles/<int:role_id>/overlaps",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "overlap",
+      "endpoint": "v1_get_role_overlap_summary",
+      "full_endpoint": "overlap.v1_get_role_overlap_summary",
+      "url": "/api/v1/roles/<int:role_id>/overlaps/summary",
+      "methods": [
+        "GET"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/roles/<int:role_id>/overlaps/summary",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "overlap",
+      "endpoint": "v2_get_role_overlap_summary",
+      "full_endpoint": "overlap.v2_get_role_overlap_summary",
+      "url": "/api/v2/roles/<int:role_id>/overlaps/summary",
+      "methods": [
+        "GET"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/roles/<int:role_id>/overlaps/summary",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_api",
+      "endpoint": "v1_explain_permission",
+      "full_endpoint": "permission_api.v1_explain_permission",
+      "url": "/api/v1/permissions/explain",
+      "methods": [
+        "POST"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/permissions/explain",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "permission_api",
+      "endpoint": "v2_explain_permission",
+      "full_endpoint": "permission_api.v2_explain_permission",
+      "url": "/api/v2/permissions/explain",
+      "methods": [
+        "POST"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/permissions/explain",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "permission_api",
+      "endpoint": "v1_check_permission",
+      "full_endpoint": "permission_api.v1_check_permission",
+      "url": "/api/v1/permissions/check",
+      "methods": [
+        "POST"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/permissions/check",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "permission_api",
+      "endpoint": "v2_check_permission",
+      "full_endpoint": "permission_api.v2_check_permission",
+      "url": "/api/v2/permissions/check",
+      "methods": [
+        "POST"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/permissions/check",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "intent_api",
+      "endpoint": "v1_check_intent_permission",
+      "full_endpoint": "intent_api.v1_check_intent_permission",
+      "url": "/api/v1/permissions/check_intent",
+      "methods": [
+        "POST"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/permissions/check_intent",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "intent_api",
+      "endpoint": "v2_check_intent_permission",
+      "full_endpoint": "intent_api.v2_check_intent_permission",
+      "url": "/api/v2/permissions/check_intent",
+      "methods": [
+        "POST"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/permissions/check_intent",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "intent_api",
+      "endpoint": "v1_list_bos",
+      "full_endpoint": "intent_api.v1_list_bos",
+      "url": "/api/v1/bos",
+      "methods": [
+        "GET"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/bos",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "intent_api",
+      "endpoint": "v2_list_bos",
+      "full_endpoint": "intent_api.v2_list_bos",
+      "url": "/api/v2/bos",
+      "methods": [
+        "GET"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/bos",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "intent_api",
+      "endpoint": "v1_list_bo_actions",
+      "full_endpoint": "intent_api.v1_list_bo_actions",
+      "url": "/api/v1/bos/<bo_id>/actions",
+      "methods": [
+        "GET"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/bos/<bo_id>/actions",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "intent_api",
+      "endpoint": "v2_list_bo_actions",
+      "full_endpoint": "intent_api.v2_list_bo_actions",
+      "url": "/api/v2/bos/<bo_id>/actions",
+      "methods": [
+        "GET"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/bos/<bo_id>/actions",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "intent_api",
+      "endpoint": "v1_get_bo_action",
+      "full_endpoint": "intent_api.v1_get_bo_action",
+      "url": "/api/v1/bos/<bo_id>/actions/<action_name>",
+      "methods": [
+        "GET"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/bos/<bo_id>/actions/<action_name>",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "intent_api",
+      "endpoint": "v2_get_bo_action",
+      "full_endpoint": "intent_api.v2_get_bo_action",
+      "url": "/api/v2/bos/<bo_id>/actions/<action_name>",
+      "methods": [
+        "GET"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/bos/<bo_id>/actions/<action_name>",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "intent_api",
+      "endpoint": "v1_list_role_intents",
+      "full_endpoint": "intent_api.v1_list_role_intents",
+      "url": "/api/v1/roles/<role_id>/intents",
+      "methods": [
+        "GET"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/roles/<role_id>/intents",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "intent_api",
+      "endpoint": "v2_list_role_intents",
+      "full_endpoint": "intent_api.v2_list_role_intents",
+      "url": "/api/v2/roles/<role_id>/intents",
+      "methods": [
+        "GET"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/roles/<role_id>/intents",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "intent_api",
+      "endpoint": "v1_grant_or_deny_intent",
+      "full_endpoint": "intent_api.v1_grant_or_deny_intent",
+      "url": "/api/v1/roles/<role_id>/intents/<bo_id>/<action_name>",
+      "methods": [
+        "PUT"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/roles/<role_id>/intents/<bo_id>/<action_name>",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "intent_api",
+      "endpoint": "v2_grant_or_deny_intent",
+      "full_endpoint": "intent_api.v2_grant_or_deny_intent",
+      "url": "/api/v2/roles/<role_id>/intents/<bo_id>/<action_name>",
+      "methods": [
+        "PUT"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/roles/<role_id>/intents/<bo_id>/<action_name>",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "intent_api",
+      "endpoint": "v1_revoke_intent",
+      "full_endpoint": "intent_api.v1_revoke_intent",
+      "url": "/api/v1/roles/<role_id>/intents/<bo_id>/<action_name>",
+      "methods": [
+        "DELETE"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/roles/<role_id>/intents/<bo_id>/<action_name>",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "intent_api",
+      "endpoint": "v2_revoke_intent",
+      "full_endpoint": "intent_api.v2_revoke_intent",
+      "url": "/api/v2/roles/<role_id>/intents/<bo_id>/<action_name>",
+      "methods": [
+        "DELETE"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/roles/<role_id>/intents/<bo_id>/<action_name>",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "audit",
+      "endpoint": "get_audit_logs",
+      "full_endpoint": "audit.get_audit_logs",
+      "url": "/api/v1/audit/logs",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "audit",
+      "endpoint": "get_audit_log_detail",
+      "full_endpoint": "audit.get_audit_log_detail",
+      "url": "/api/v1/audit/logs/<int:log_id>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "audit",
+      "endpoint": "export_audit_logs",
+      "full_endpoint": "audit.export_audit_logs",
+      "url": "/api/v1/audit/logs/export",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "audit",
+      "endpoint": "get_failed_audit_logs",
+      "full_endpoint": "audit.get_failed_audit_logs",
+      "url": "/api/v1/audit/failed",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "audit",
+      "endpoint": "get_audit_overview",
+      "full_endpoint": "audit.get_audit_overview",
+      "url": "/api/v1/audit/overview",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "audit",
+      "endpoint": "get_retry_worker_status",
+      "full_endpoint": "audit.get_retry_worker_status",
+      "url": "/api/v1/audit/retry/status",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "audit",
+      "endpoint": "trigger_retry_worker",
+      "full_endpoint": "audit.trigger_retry_worker",
+      "url": "/api/v1/audit/retry/trigger",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "notification",
+      "endpoint": "get_stats",
+      "full_endpoint": "notification.get_stats",
+      "url": "/api/v1/notifications/stats",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "notification",
+      "endpoint": "get_subscriptions",
+      "full_endpoint": "notification.get_subscriptions",
+      "url": "/api/v1/notifications/subscriptions",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "notification",
+      "endpoint": "create_subscription",
+      "full_endpoint": "notification.create_subscription",
+      "url": "/api/v1/notifications/subscriptions",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "notification",
+      "endpoint": "get_subscription",
+      "full_endpoint": "notification.get_subscription",
+      "url": "/api/v1/notifications/subscriptions/<int:sub_id>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "notification",
+      "endpoint": "update_subscription",
+      "full_endpoint": "notification.update_subscription",
+      "url": "/api/v1/notifications/subscriptions/<int:sub_id>",
+      "methods": [
+        "PUT"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "notification",
+      "endpoint": "delete_subscription",
+      "full_endpoint": "notification.delete_subscription",
+      "url": "/api/v1/notifications/subscriptions/<int:sub_id>",
+      "methods": [
+        "DELETE"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "notification",
+      "endpoint": "get_events",
+      "full_endpoint": "notification.get_events",
+      "url": "/api/v1/notifications/events",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "notification",
+      "endpoint": "get_event",
+      "full_endpoint": "notification.get_event",
+      "url": "/api/v1/notifications/events/<int:event_id>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "notification",
+      "endpoint": "retry_event",
+      "full_endpoint": "notification.retry_event",
+      "url": "/api/v1/notifications/events/<int:event_id>/retry",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "database",
+      "endpoint": "database_health",
+      "full_endpoint": "database.database_health",
+      "url": "/api/v1/system/database/health",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "database",
+      "endpoint": "database_metrics",
+      "full_endpoint": "database.database_metrics",
+      "url": "/api/v1/system/database/metrics",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "database",
+      "endpoint": "database_metrics_prometheus",
+      "full_endpoint": "database.database_metrics_prometheus",
+      "url": "/api/v1/system/database/metrics/prometheus",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "database",
+      "endpoint": "database_slow_queries",
+      "full_endpoint": "database.database_slow_queries",
+      "url": "/api/v1/system/database/slow-queries",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "database",
+      "endpoint": "database_vacuum",
+      "full_endpoint": "database.database_vacuum",
+      "url": "/api/v1/system/database/vacuum",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "database",
+      "endpoint": "database_analyze",
+      "full_endpoint": "database.database_analyze",
+      "url": "/api/v1/system/database/analyze",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "database",
+      "endpoint": "database_integrity_check",
+      "full_endpoint": "database.database_integrity_check",
+      "url": "/api/v1/system/database/integrity-check",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "database",
+      "endpoint": "database_wal_checkpoint",
+      "full_endpoint": "database.database_wal_checkpoint",
+      "url": "/api/v1/system/database/wal-checkpoint",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "database",
+      "endpoint": "database_reindex",
+      "full_endpoint": "database.database_reindex",
+      "url": "/api/v1/system/database/reindex",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "filter_variant",
+      "endpoint": "list_variants",
+      "full_endpoint": "filter_variant.list_variants",
+      "url": "/api/v1/filter-variants",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/filter_variant",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "filter_variant",
+      "endpoint": "get_variant",
+      "full_endpoint": "filter_variant.get_variant",
+      "url": "/api/v1/filter-variants/<int:variant_id>",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/filter_variant",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "filter_variant",
+      "endpoint": "create_variant",
+      "full_endpoint": "filter_variant.create_variant",
+      "url": "/api/v1/filter-variants",
+      "methods": [
+        "POST"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/filter_variant",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "filter_variant",
+      "endpoint": "update_variant",
+      "full_endpoint": "filter_variant.update_variant",
+      "url": "/api/v1/filter-variants/<int:variant_id>",
+      "methods": [
+        "PUT"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/filter_variant",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "filter_variant",
+      "endpoint": "delete_variant",
+      "full_endpoint": "filter_variant.delete_variant",
+      "url": "/api/v1/filter-variants/<int:variant_id>",
+      "methods": [
+        "DELETE"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/filter_variant",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "filter_variant",
+      "endpoint": "set_default_variant",
+      "full_endpoint": "filter_variant.set_default_variant",
+      "url": "/api/v1/filter-variants/<int:variant_id>/set-default",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "identity",
+      "endpoint": "get_single_identity",
+      "full_endpoint": "identity.get_single_identity",
+      "url": "/api/v1/identity",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "identity",
+      "endpoint": "get_batch_identities",
+      "full_endpoint": "identity.get_batch_identities",
+      "url": "/api/v1/identity/batch",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "identity",
+      "endpoint": "get_formatted_identity",
+      "full_endpoint": "identity.get_formatted_identity",
+      "url": "/api/v1/identity/formatted",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "identity",
+      "endpoint": "clear_cache",
+      "full_endpoint": "identity.clear_cache",
+      "url": "/api/v1/identity/cache/clear",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "association",
+      "endpoint": "assign_association",
+      "full_endpoint": "association.assign_association",
+      "url": "/api/v1/associations/<source_type>/<int:source_id>/<association_name>/<target_type>/<int:target_id>",
+      "methods": [
+        "POST"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/bo/<object_type>/<obj_id>/$associations/<association_name>/assign",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "association",
+      "endpoint": "unassign_association",
+      "full_endpoint": "association.unassign_association",
+      "url": "/api/v1/associations/<source_type>/<int:source_id>/<association_name>/<target_type>/<int:target_id>",
+      "methods": [
+        "DELETE"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/bo/<object_type>/<obj_id>/$associations/<association_name>/unassign",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "association",
+      "endpoint": "list_association_members",
+      "full_endpoint": "association.list_association_members",
+      "url": "/api/v1/associations/<source_type>/<int:source_id>/<association_name>",
+      "methods": [
+        "GET"
+      ],
+      "status": "DEPRECATED",
+      "migrated_to": "/api/v2/bo/<object_type>/<obj_id>/$associations/<association_name>",
+      "sunset_at": "2026-12-31"
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "association",
+      "endpoint": "delete_entity",
+      "full_endpoint": "association.delete_entity",
+      "url": "/api/v1/associations/<entity_type>/<int:entity_id>",
+      "methods": [
+        "DELETE"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/association",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "association",
+      "endpoint": "get_deletion_policy",
+      "full_endpoint": "association.get_deletion_policy",
+      "url": "/api/v1/associations/<entity_type>/deletion-policy",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "create_bo",
+      "full_endpoint": "bo_v2.create_bo",
+      "url": "/api/v2/bo/<object_type>",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "read_bo",
+      "full_endpoint": "bo_v2.read_bo",
+      "url": "/api/v2/bo/<object_type>/<int:obj_id>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "read_bo_by_string_id",
+      "full_endpoint": "bo_v2.read_bo_by_string_id",
+      "url": "/api/v2/bo/<object_type>/<path:obj_id>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "query_bo",
+      "full_endpoint": "bo_v2.query_bo",
+      "url": "/api/v2/bo/<object_type>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "deep_insert_bo",
+      "full_endpoint": "bo_v2.deep_insert_bo",
+      "url": "/api/v2/bo/<object_type>/deep",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "update_bo",
+      "full_endpoint": "bo_v2.update_bo",
+      "url": "/api/v2/bo/<object_type>/<int:obj_id>",
+      "methods": [
+        "PUT"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "update_bo_by_string_id",
+      "full_endpoint": "bo_v2.update_bo_by_string_id",
+      "url": "/api/v2/bo/<object_type>/<path:obj_id>",
+      "methods": [
+        "PUT"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "delete_bo",
+      "full_endpoint": "bo_v2.delete_bo",
+      "url": "/api/v2/bo/<object_type>/<int:obj_id>",
+      "methods": [
+        "DELETE"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "delete_bo_by_string_id",
+      "full_endpoint": "bo_v2.delete_bo_by_string_id",
+      "url": "/api/v2/bo/<object_type>/<path:obj_id>",
+      "methods": [
+        "DELETE"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "execute_action",
+      "full_endpoint": "bo_v2.execute_action",
+      "url": "/api/v2/bo/<object_type>/<int:obj_id>/actions/<action_id>",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "associate_bo",
+      "full_endpoint": "bo_v2.associate_bo",
+      "url": "/api/v2/bo/<object_type>/<int:obj_id>/associations/<association_name>",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "dissociate_bo",
+      "full_endpoint": "bo_v2.dissociate_bo",
+      "url": "/api/v2/bo/<object_type>/<int:obj_id>/associations/<association_name>",
+      "methods": [
+        "DELETE"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "query_associations_bo",
+      "full_endpoint": "bo_v2.query_associations_bo",
+      "url": "/api/v2/bo/<object_type>/<int:obj_id>/associations/<association_name>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "query_associations_v2",
+      "full_endpoint": "bo_v2.query_associations_v2",
+      "url": "/api/v2/bo/<object_type>/<int:obj_id>/$associations/<association_name>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "count_associations_v2",
+      "full_endpoint": "bo_v2.count_associations_v2",
+      "url": "/api/v2/bo/<object_type>/<int:obj_id>/$associations/<association_name>/count",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "assign_association_v2",
+      "full_endpoint": "bo_v2.assign_association_v2",
+      "url": "/api/v2/bo/<object_type>/<int:obj_id>/$associations/<association_name>/assign",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "unassign_association_v2",
+      "full_endpoint": "bo_v2.unassign_association_v2",
+      "url": "/api/v2/bo/<object_type>/<int:obj_id>/$associations/<association_name>/unassign",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "batch_assign_associations_v2",
+      "full_endpoint": "bo_v2.batch_assign_associations_v2",
+      "url": "/api/v2/bo/<object_type>/<int:obj_id>/$associations/<association_name>/batch_assign",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "batch_unassign_associations_v2",
+      "full_endpoint": "bo_v2.batch_unassign_associations_v2",
+      "url": "/api/v2/bo/<object_type>/<int:obj_id>/$associations/<association_name>/batch_unassign",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "batch_query_associations",
+      "full_endpoint": "bo_v2.batch_query_associations",
+      "url": "/api/v2/bo/<object_type>/$associations/<association_name>/batch-query",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "retrieve_with_associations",
+      "full_endpoint": "bo_v2.retrieve_with_associations",
+      "url": "/api/v2/bo/<object_type>/<int:obj_id>/retrieve",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "batch_delete_bo",
+      "full_endpoint": "bo_v2.batch_delete_bo",
+      "url": "/api/v2/bo/<object_type>/batch-delete",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "v2_list_records_post",
+      "full_endpoint": "bo_v2.v2_list_records_post",
+      "url": "/api/v2/bo/<object_type>/list",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "v2_batch_create",
+      "full_endpoint": "bo_v2.v2_batch_create",
+      "url": "/api/v2/bo/<object_type>/batch-create",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "v2_batch_update",
+      "full_endpoint": "bo_v2.v2_batch_update",
+      "url": "/api/v2/bo/<object_type>/batch-update",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "v2_list_actions",
+      "full_endpoint": "bo_v2.v2_list_actions",
+      "url": "/api/v2/bo/<object_type>/<int:obj_id>/actions",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "v2_list_actions_string",
+      "full_endpoint": "bo_v2.v2_list_actions_string",
+      "url": "/api/v2/bo/<object_type>/<int:obj_id>/actions",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "v2_recover_from_log",
+      "full_endpoint": "bo_v2.v2_recover_from_log",
+      "url": "/api/v2/bo/<object_type>/<int:obj_id>/recover",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "v2_list_deleted_objects",
+      "full_endpoint": "bo_v2.v2_list_deleted_objects",
+      "url": "/api/v2/bo/<object_type>/deleted",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "v2_get_state_history",
+      "full_endpoint": "bo_v2.v2_get_state_history",
+      "url": "/api/v2/bo/<object_type>/<int:obj_id>/state_history",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "v2_get_stage_metrics",
+      "full_endpoint": "bo_v2.v2_get_stage_metrics",
+      "url": "/api/v2/bo/<object_type>/<int:obj_id>/stage_metrics",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "get_architecture_preview",
+      "full_endpoint": "bo_v2.get_architecture_preview",
+      "url": "/api/v2/bo/architecture/preview",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "get_state_transitions",
+      "full_endpoint": "bo_v2.get_state_transitions",
+      "url": "/api/v2/bo/<object_type>/<int:obj_id>/state_transitions",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_v2",
+      "endpoint": "get_state_transitions_by_string_id",
+      "full_endpoint": "bo_v2.get_state_transitions_by_string_id",
+      "url": "/api/v2/bo/<object_type>/<path:obj_id>/state_transitions",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "meta_v2",
+      "endpoint": "get_schema_version",
+      "full_endpoint": "meta_v2.get_schema_version",
+      "url": "/api/v2/meta/schema-version",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "meta_v2",
+      "endpoint": "get_ui_config",
+      "full_endpoint": "meta_v2.get_ui_config",
+      "url": "/api/v2/meta/<object_type>/ui-config",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "meta_v2",
+      "endpoint": "get_object_schema",
+      "full_endpoint": "meta_v2.get_object_schema",
+      "url": "/api/v2/meta/<object_type>/schema",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "meta_v2",
+      "endpoint": "get_meta_full",
+      "full_endpoint": "meta_v2.get_meta_full",
+      "url": "/api/v2/meta/<object_type>/full",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "meta_v2",
+      "endpoint": "get_full_openapi",
+      "full_endpoint": "meta_v2.get_full_openapi",
+      "url": "/api/v2/meta/_openapi.json",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "meta_v2",
+      "endpoint": "get_field_policies",
+      "full_endpoint": "meta_v2.get_field_policies",
+      "url": "/api/v2/meta/<object_type>/field-policies",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "meta_v2",
+      "endpoint": "get_view_config",
+      "full_endpoint": "meta_v2.get_view_config",
+      "url": "/api/v2/meta/<object_type>/view-config/<view_name>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "meta_v2",
+      "endpoint": "get_view_config",
+      "full_endpoint": "meta_v2.get_view_config",
+      "url": "/api/v2/meta/<object_type>/view-config",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "meta_v2",
+      "endpoint": "list_view_configs",
+      "full_endpoint": "meta_v2.list_view_configs",
+      "url": "/api/v2/meta/<object_type>/views",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "meta_v2",
+      "endpoint": "get_hierarchy_tree",
+      "full_endpoint": "meta_v2.get_hierarchy_tree",
+      "url": "/api/v2/meta/hierarchy/tree",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "meta_v2",
+      "endpoint": "get_hierarchy_levels",
+      "full_endpoint": "meta_v2.get_hierarchy_levels",
+      "url": "/api/v2/meta/hierarchy/levels",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "role_v2",
+      "endpoint": "get_role_unified_permissions",
+      "full_endpoint": "role_v2.get_role_unified_permissions",
+      "url": "/api/v2/roles/<int:role_id>/unified-permissions",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "role_v2",
+      "endpoint": "update_role_menu_permissions",
+      "full_endpoint": "role_v2.update_role_menu_permissions",
+      "url": "/api/v2/roles/<int:role_id>/menu-permissions",
+      "methods": [
+        "PUT"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "permission_rule_v2",
+      "endpoint": "list_permission_rules_v2",
+      "full_endpoint": "permission_rule_v2.list_permission_rules_v2",
+      "url": "/api/v2/permission-rules",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "permission_rule_v2",
+      "endpoint": "create_permission_rule_v2",
+      "full_endpoint": "permission_rule_v2.create_permission_rule_v2",
+      "url": "/api/v2/permission-rules",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "permission_rule_v2",
+      "endpoint": "update_permission_rule_v2",
+      "full_endpoint": "permission_rule_v2.update_permission_rule_v2",
+      "url": "/api/v2/permission-rules/<int:rule_id>",
+      "methods": [
+        "PUT"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "permission_rule_v2",
+      "endpoint": "delete_permission_rule_v2",
+      "full_endpoint": "permission_rule_v2.delete_permission_rule_v2",
+      "url": "/api/v2/permission-rules/<int:rule_id>",
+      "methods": [
+        "DELETE"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "value_help",
+      "endpoint": "search_value_help",
+      "full_endpoint": "value_help.search_value_help",
+      "url": "/api/v2/value-help/<source_type>/<source_id>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "value_help",
+      "endpoint": "resolve_value_help",
+      "full_endpoint": "value_help.resolve_value_help",
+      "url": "/api/v2/value-help/<source_type>/<source_id>/resolve",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "value_help",
+      "endpoint": "pick_bo_by_code",
+      "full_endpoint": "value_help.pick_bo_by_code",
+      "url": "/api/v2/bo/business_object/pick_by_code",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "value_help",
+      "endpoint": "pick_bo_by_id",
+      "full_endpoint": "value_help.pick_bo_by_id",
+      "url": "/api/v2/bo/business_object/<int:bo_id>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "audit_mgmt",
+      "endpoint": "get_failed_audit_logs",
+      "full_endpoint": "audit_mgmt.get_failed_audit_logs",
+      "url": "/api/v1/audit/failed",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "audit_mgmt",
+      "endpoint": "retry_failed_audit_log",
+      "full_endpoint": "audit_mgmt.retry_failed_audit_log",
+      "url": "/api/v1/audit/failed/<int:record_id>/retry",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "audit_mgmt",
+      "endpoint": "get_audit_writer_stats",
+      "full_endpoint": "audit_mgmt.get_audit_writer_stats",
+      "url": "/api/v1/audit/stats",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "meta_util",
+      "endpoint": "get_object_types",
+      "full_endpoint": "meta_util.get_object_types",
+      "url": "/api/v1/meta/objects",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/meta/objects",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "meta_util",
+      "endpoint": "get_hierarchies",
+      "full_endpoint": "meta_util.get_hierarchies",
+      "url": "/api/v1/meta/hierarchies",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/meta/hierarchies",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "meta_util",
+      "endpoint": "get_hierarchy_levels",
+      "full_endpoint": "meta_util.get_hierarchy_levels",
+      "url": "/api/v1/meta/hierarchies/<hierarchy_id>/levels",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "meta_util",
+      "endpoint": "get_hierarchy_config",
+      "full_endpoint": "meta_util.get_hierarchy_config",
+      "url": "/api/v1/meta/hierarchies/config",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "meta_util",
+      "endpoint": "get_field_controls",
+      "full_endpoint": "meta_util.get_field_controls",
+      "url": "/api/v1/meta/objects/<object_type>/field_controls",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "task_api",
+      "endpoint": "task_scheduler_status",
+      "full_endpoint": "task_api.task_scheduler_status",
+      "url": "/api/v2/task-scheduler/status",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "task_api",
+      "endpoint": "task_scheduler_reload",
+      "full_endpoint": "task_api.task_scheduler_reload",
+      "url": "/api/v2/task-scheduler/reload",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "task_api",
+      "endpoint": "trigger_task",
+      "full_endpoint": "task_api.trigger_task",
+      "url": "/api/v2/tasks/<task_code>/trigger",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "task_api",
+      "endpoint": "enable_task",
+      "full_endpoint": "task_api.enable_task",
+      "url": "/api/v2/tasks/<task_code>/enable",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "task_api",
+      "endpoint": "disable_task",
+      "full_endpoint": "task_api.disable_task",
+      "url": "/api/v2/tasks/<task_code>/disable",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "task_api",
+      "endpoint": "retry_execution",
+      "full_endpoint": "task_api.retry_execution",
+      "url": "/api/v2/task-executions/<int:execution_id>/retry",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "task_api",
+      "endpoint": "cancel_execution",
+      "full_endpoint": "task_api.cancel_execution",
+      "url": "/api/v2/task-executions/<int:execution_id>/cancel",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "task_api",
+      "endpoint": "queue_stats",
+      "full_endpoint": "task_api.queue_stats",
+      "url": "/api/v2/task-queues/stats",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "key_template",
+      "endpoint": "get_config",
+      "full_endpoint": "key_template.get_config",
+      "url": "/api/v2/key-template/config/<object_type>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "key_template",
+      "endpoint": "preview_code",
+      "full_endpoint": "key_template.preview_code",
+      "url": "/api/v2/key-template/preview/<object_type>",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "key_template",
+      "endpoint": "list_objects",
+      "full_endpoint": "key_template.list_objects",
+      "url": "/api/v2/key-template/list-objects",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "test",
+      "endpoint": "ready",
+      "full_endpoint": "test.ready",
+      "url": "/api/v1/test/ready",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "debug",
+      "endpoint": "get_current_user_debug",
+      "full_endpoint": "debug.get_current_user_debug",
+      "url": "/api/v1/debug/current-user",
+      "methods": [
+        "GET"
+      ],
+      "status": "SUNSET",
+      "migrated_to": "/api/v2/bo/debug/current-user",
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_action",
+      "endpoint": "execute_action",
+      "full_endpoint": "bo_action.execute_action",
+      "url": "/api/v2/action/<path:action_id>",
+      "methods": [
+        "DELETE",
+        "GET",
+        "POST",
+        "PUT"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_action",
+      "endpoint": "list_action_schemas",
+      "full_endpoint": "bo_action.list_action_schemas",
+      "url": "/api/v2/action/_schemas",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_action",
+      "endpoint": "execute_subflow_endpoint",
+      "full_endpoint": "bo_action.execute_subflow_endpoint",
+      "url": "/api/v2/action/_chain",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_action",
+      "endpoint": "execute_subflow_stream_endpoint",
+      "full_endpoint": "bo_action.execute_subflow_stream_endpoint",
+      "url": "/api/v2/action/_chain_stream",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_action",
+      "endpoint": "list_subflow_templates",
+      "full_endpoint": "bo_action.list_subflow_templates",
+      "url": "/api/v2/action/_subflow_template",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_action",
+      "endpoint": "upsert_subflow_template",
+      "full_endpoint": "bo_action.upsert_subflow_template",
+      "url": "/api/v2/action/_subflow_template/<name>",
+      "methods": [
+        "PUT"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_action",
+      "endpoint": "delete_subflow_template",
+      "full_endpoint": "bo_action.delete_subflow_template",
+      "url": "/api/v2/action/_subflow_template/<name>",
+      "methods": [
+        "DELETE"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_action",
+      "endpoint": "get_subflow_template",
+      "full_endpoint": "bo_action.get_subflow_template",
+      "url": "/api/v2/action/_subflow_template/<name>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_action",
+      "endpoint": "subflow_metrics",
+      "full_endpoint": "bo_action.subflow_metrics",
+      "url": "/api/v2/action/_subflow_metrics",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_action",
+      "endpoint": "openapi_spec",
+      "full_endpoint": "bo_action.openapi_spec",
+      "url": "/api/v2/action/_openapi.json",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_action",
+      "endpoint": "swagger_ui",
+      "full_endpoint": "bo_action.swagger_ui",
+      "url": "/api/v2/action/_docs",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_action",
+      "endpoint": "list_actions",
+      "full_endpoint": "bo_action.list_actions",
+      "url": "/api/v2/action/",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "bo_action",
+      "endpoint": "health",
+      "full_endpoint": "bo_action.health",
+      "url": "/api/v2/action/_health",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "db_admin",
+      "endpoint": "db_health",
+      "full_endpoint": "db_admin.db_health",
+      "url": "/api/v2/action/_db_health",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "db_admin",
+      "endpoint": "db_backup",
+      "full_endpoint": "db_admin.db_backup",
+      "url": "/api/v2/action/db.backup",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v2",
+      "blueprint": "db_admin",
+      "endpoint": "db_recover",
+      "full_endpoint": "db_admin.db_recover",
+      "url": "/api/v2/action/db.recover",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "schema_dashboard",
+      "endpoint": "m13_get_summary",
+      "full_endpoint": "schema_dashboard.m13_get_summary",
+      "url": "/api/v1/schema/dashboard/summary",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "schema_dashboard",
+      "endpoint": "m13_get_entities",
+      "full_endpoint": "schema_dashboard.m13_get_entities",
+      "url": "/api/v1/schema/dashboard/entities",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "schema_dashboard",
+      "endpoint": "m13_get_diff_history",
+      "full_endpoint": "schema_dashboard.m13_get_diff_history",
+      "url": "/api/v1/schema/dashboard/diff-history",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "schema_dashboard",
+      "endpoint": "m13_get_sync_status",
+      "full_endpoint": "schema_dashboard.m13_get_sync_status",
+      "url": "/api/v1/schema/dashboard/sync-status",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "telemetry",
+      "endpoint": "get_stats",
+      "full_endpoint": "telemetry.get_stats",
+      "url": "/api/v1/telemetry/stats",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "telemetry",
+      "endpoint": "get_traces",
+      "full_endpoint": "telemetry.get_traces",
+      "url": "/api/v1/telemetry/traces",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "telemetry",
+      "endpoint": "get_slow_traces",
+      "full_endpoint": "telemetry.get_slow_traces",
+      "url": "/api/v1/telemetry/traces/slow",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "telemetry",
+      "endpoint": "get_trace_detail",
+      "full_endpoint": "telemetry.get_trace_detail",
+      "url": "/api/v1/telemetry/traces/<trace_id>",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "telemetry",
+      "endpoint": "configure",
+      "full_endpoint": "telemetry.configure",
+      "url": "/api/v1/telemetry/configure",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "telemetry",
+      "endpoint": "report_error",
+      "full_endpoint": "telemetry.report_error",
+      "url": "/api/v1/telemetry/error",
+      "methods": [
+        "POST"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    },
+    {
+      "api_version": "v1",
+      "blueprint": "telemetry",
+      "endpoint": "get_errors",
+      "full_endpoint": "telemetry.get_errors",
+      "url": "/api/v1/telemetry/errors",
+      "methods": [
+        "GET"
+      ],
+      "status": "ACTIVE",
+      "migrated_to": null,
+      "sunset_at": null
+    }
+  ]
+}

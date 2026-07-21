@@ -27,7 +27,7 @@ def task_scheduler_status():
         status = scheduler.get_status()
         return jsonify({'success': True, 'data': status})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 @task_api_bp.route('/api/v2/task-scheduler/reload', methods=['POST'])
@@ -37,7 +37,7 @@ def task_scheduler_reload():
         scheduler.reload()
         return jsonify({'success': True, 'message': 'Reloaded'})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 @task_api_bp.route('/api/v2/tasks/<task_code>/trigger', methods=['POST'])
@@ -50,9 +50,9 @@ def trigger_task(task_code):
             'message': f'Task {task_code} triggered'
         })
     except ValueError as e:
-        return jsonify({'success': False, 'error': str(e)}), 404
+        return jsonify({'success': False, 'message': str(e)}), 404
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 @task_api_bp.route('/api/v2/tasks/<task_code>/enable', methods=['POST'])
@@ -68,7 +68,7 @@ def enable_task(task_code):
         scheduler.reload()
         return jsonify({'success': True})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 @task_api_bp.route('/api/v2/tasks/<task_code>/disable', methods=['POST'])
@@ -84,7 +84,7 @@ def disable_task(task_code):
         scheduler.reload()
         return jsonify({'success': True})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 @task_api_bp.route('/api/v2/task-executions/<int:execution_id>/retry', methods=['POST'])
@@ -99,7 +99,7 @@ def retry_execution(execution_id):
         )
         if not exec_record:
             return jsonify(
-                {'success': False, 'error': 'Execution not found'}
+                {'success': False, 'message': 'Execution not found'}
             ), 404
         
         from datetime import datetime
@@ -113,7 +113,7 @@ def retry_execution(execution_id):
         
         return jsonify({'success': True})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 @task_api_bp.route('/api/v2/task-executions/<int:execution_id>/cancel', methods=['POST'])
@@ -131,7 +131,7 @@ def cancel_execution(execution_id):
         ds.commit()
         return jsonify({'success': True})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 @task_api_bp.route('/api/v2/task-queues/stats', methods=['GET'])
@@ -141,4 +141,4 @@ def queue_stats():
         stats = scheduler.queue_manager.get_queue_stats()
         return jsonify({'success': True, 'data': stats})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'message': str(e)}), 500

@@ -975,7 +975,7 @@ def assign_association_v2(object_type, obj_id, association_name):
     except Exception as e:
         import traceback
         logger.error(f"[assign_association_v2] Traceback: {traceback.format_exc()}")
-        return jsonify({'success': False, 'error': type(e).__name__, 'message': str(e)}), 500
+        return jsonify({'success': False, 'code': type(e).__name__, 'message': str(e)}), 500
 
     if result.success:
         return '', 204
@@ -1042,7 +1042,7 @@ def unassign_association_v2(object_type, obj_id, association_name):
     except Exception as e:
         import traceback
         logger.error(f"[unassign_association_v2] Traceback: {traceback.format_exc()}")
-        return jsonify({'success': False, 'error': type(e).__name__, 'message': str(e)}), 500
+        return jsonify({'success': False, 'code': type(e).__name__, 'message': str(e)}), 500
 
     if result.success:
         return '', 204
@@ -1081,7 +1081,7 @@ def batch_assign_associations_v2(object_type, obj_id, association_name):
     except Exception as e:
         import traceback
         logger.error(f"[batch_assign_associations_v2] Traceback: {traceback.format_exc()}")
-        return jsonify({'success': False, 'error': type(e).__name__, 'message': str(e)}), 500
+        return jsonify({'success': False, 'code': type(e).__name__, 'message': str(e)}), 500
 
     if result.success:
         return jsonify({'success': True, 'data': result.data, 'message': result.message})
@@ -1142,7 +1142,7 @@ def batch_unassign_associations_v2(object_type, obj_id, association_name):
     except Exception as e:
         import traceback
         logger.error(f"[batch_unassign_associations_v2] Traceback: {traceback.format_exc()}")
-        return jsonify({'success': False, 'error': type(e).__name__, 'message': str(e)}), 500
+        return jsonify({'success': False, 'code': type(e).__name__, 'message': str(e)}), 500
 
     if result.success:
         return jsonify({'success': True, 'data': result.data, 'message': result.message})

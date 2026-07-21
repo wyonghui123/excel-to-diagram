@@ -191,12 +191,12 @@ def register_diagnostics_route(app):
         try:
             from meta.api.db_admin_api import _ensure_current_user, _require_admin
         except ImportError:
-            return jsonify({'success': False, 'error': 'db_admin_api not available'}), 500
+            return jsonify({'success': False, 'message': 'db_admin_api not available'}), 500
 
         if not _ensure_current_user():
-            return jsonify({'success': False, 'error': 'unauthorized'}), 401
+            return jsonify({'success': False, 'message': 'unauthorized'}), 401
         if not _require_admin():
-            return jsonify({'success': False, 'error': 'admin_required'}), 403
+            return jsonify({'success': False, 'message': 'admin_required'}), 403
 
         # 调 build_diagnostics (返回 dict)
         trace_id = TraceId.get_or_generate()

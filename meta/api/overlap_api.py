@@ -40,6 +40,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from meta.core.dim_scope_overlap_detector import get_overlap_detector
+from meta.api._deprecation import v1_deprecated
 
 logger = logging.getLogger(__name__)
 
@@ -53,11 +54,12 @@ def _login_required(f):
     def wrapper(*args, **kwargs):
         from meta.core.auth_helpers import is_authenticated
         if not is_authenticated():
-            return jsonify({'success': False, 'error': '未登录'}), 401
+            return jsonify({'success': False, 'message': '未登录'}), 401
         return f(*args, **kwargs)
     return wrapper
 
 
+@v1_deprecated(migrated_to='/api/v2/roles/<int:role_id>/overlaps')
 def get_role_overlaps(role_id: int):
     """获取角色的所有重叠加"""
     try:
@@ -74,9 +76,10 @@ def get_role_overlaps(role_id: int):
         })
     except Exception as e:
         logger.error(f"get_role_overlaps failed: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
+@v1_deprecated(migrated_to='/api/v2/roles/<int:role_id>/overlaps/summary')
 def get_role_overlap_summary(role_id: int):
     """获取角色的重叠加摘要（轻量级）"""
     try:
@@ -88,7 +91,7 @@ def get_role_overlap_summary(role_id: int):
         })
     except Exception as e:
         logger.error(f"get_role_overlap_summary failed: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 # v1.4 修复：用 helper 注册 v1+v2 双路由（v1 保留 6 个月过渡）

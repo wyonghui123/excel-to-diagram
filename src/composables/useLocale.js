@@ -7,6 +7,7 @@
 import { ref, computed, watch } from 'vue'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import enUs from 'element-plus/es/locale/lang/en'
+import { apiV2 } from '@/utils/httpClient'
 
 const LOCALE_STORAGE_KEY = 'app_locale'
 const USER_LOCALE_KEY = 'user_locale'
@@ -28,14 +29,9 @@ async function syncLocaleToServer(locale) {
   try {
     // 后端会自动从 session 读 user, 只需 PUT/PATCH 当前 user
     // 端点路径参考 user_api.py:412 preference_fields
-    const res = await fetch('/api/v2/bo/user/me', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ locale }),
-    })
-    if (!res.ok) {
-      console.debug('[useLocale] sync to server failed:', res.status)
+    const result = await apiV2.PATCH('/bo/user/me', { locale })
+    if (!result.success) {
+      console.debug('[useLocale] sync to server failed:', result.message)
     }
   } catch (e) {
     console.debug('[useLocale] sync to server error:', e)

@@ -37,7 +37,9 @@ SYNC_SCRIPTS = [
     "pm_verify.py",
     "deploy_v33_hook.py",
     "_sync_precommit.py",
-]  # 15 scripts: 同步列表 (含 v3.3 自动化套件)
+    "_v33_panel.py",
+    "_wt_startup_probe.py",
+]  # 17 scripts: 同步列表 (含 v3.3 自动化套件)
 
 # 需要同步的配置文件 (从 .coord/ 同步)
 SYNC_CONFIG = [

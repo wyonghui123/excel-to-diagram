@@ -15,6 +15,8 @@ from flask import Blueprint, request, jsonify, g
 from datetime import datetime
 import os
 
+from meta.api._deprecation import v1_deprecated
+from meta.api._response_contract import ok, ok_message, error_response
 from meta.core.datasource import get_data_source
 from meta.core.yaml_loader import registry
 from meta.services.deletion_service import DeletionService
@@ -57,6 +59,7 @@ def _get_current_user():
 @association_bp.route('/<source_type>/<int:source_id>/<association_name>/<target_type>/<int:target_id>',
                        methods=['POST'])
 @login_required
+@v1_deprecated(migrated_to='/api/v2/bo/<object_type>/<obj_id>/$associations/<association_name>/assign')
 def assign_association(source_type, source_id, association_name, target_type, target_id):
     """
     分配关联 - ASSIGN
@@ -101,6 +104,7 @@ def assign_association(source_type, source_id, association_name, target_type, ta
 @association_bp.route('/<source_type>/<int:source_id>/<association_name>/<target_type>/<int:target_id>',
                        methods=['DELETE'])
 @login_required
+@v1_deprecated(migrated_to='/api/v2/bo/<object_type>/<obj_id>/$associations/<association_name>/unassign')
 def unassign_association(source_type, source_id, association_name, target_type, target_id):
     """
     取消关联 - REVOKE
@@ -137,6 +141,7 @@ def unassign_association(source_type, source_id, association_name, target_type, 
 
 @association_bp.route('/<source_type>/<int:source_id>/<association_name>', methods=['GET'])
 @login_required
+@v1_deprecated(migrated_to='/api/v2/bo/<object_type>/<obj_id>/$associations/<association_name>')
 def list_association_members(source_type, source_id, association_name):
     """
     查询关联成员列表 - LIST

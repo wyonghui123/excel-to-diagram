@@ -1,36 +1,26 @@
 {
   "heal_history": [
     {
-      "ts": 1784339700.930203,
-      "result": "OK",
-      "exit_before": 2519049,
-      "exit_after": 0
+      "ts": 1784638501.6051826,
+      "result": "FAIL",
+      "exit_before": -142925235574
     },
     {
-      "ts": 1784340600.9170752,
-      "result": "OK",
-      "exit_before": 2519049,
-      "exit_after": 0
+      "ts": 1784639701.5953765,
+      "result": "FAIL",
+      "exit_before": -142925235574
     },
     {
-      "ts": 1784341200.926646,
-      "result": "OK",
-      "exit_before": 2519049,
-      "exit_after": 0
+      "ts": 1784641201.5832567,
+      "result": "FAIL",
+      "exit_before": -142925235574
     },
     {
-      "ts": 1784341812.2592402,
-      "result": "OK",
-      "exit_before": 2519049,
-      "exit_after": 0
-    },
-    {
-      "ts": 1784342700.9428518,
-      "result": "OK",
-      "exit_before": 2519049,
-      "exit_after": 0
+      "ts": 1784641801.5893064,
+      "result": "FAIL",
+      "exit_before": -142925235574
     }
   ],
-  "consecutive_fails": 0,
+  "consecutive_fails": 11,
   "daemon_started_ts": 0
 }

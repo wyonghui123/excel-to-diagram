@@ -1,0 +1,8 @@
+{
+  "backend": {
+    "pid": 14928,
+    "port": 3011,
+    "started_at": "2026-07-21T12:53:23Z",
+    "state": "health_check_failed"
+  }
+}
