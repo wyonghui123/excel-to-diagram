@@ -94,7 +94,7 @@ def get_dimension_scopes(role_id):
             rows.append(item)
         return jsonify({'success': True, 'data': rows})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 @role_dim_bp.route('/<int:role_id>/dimension-scopes', methods=['POST'])
@@ -105,9 +105,9 @@ def save_dimension_scopes(role_id):
         # [FIX 2026-06-15] 空 list 是合法操作 (用户清空维度范围), 不应 400
         # 之前用 `if not data` 把空 list 当 400, 导致"移除 dim value 后保存"必失败
         if data is None:
-            return jsonify({'success': False, 'error': '请求体为空'}), 400
+            return jsonify({'success': False, 'message': '请求体为空'}), 400
         if not isinstance(data, list):
-            return jsonify({'success': False, 'error': '请求体必须为 list'}), 400
+            return jsonify({'success': False, 'message': '请求体必须为 list'}), 400
         ds = _ds()
         with ds.transaction():
             ds.execute("DELETE FROM role_dimension_scopes WHERE role_id = ?", [role_id])
@@ -137,7 +137,7 @@ def save_dimension_scopes(role_id):
         )
         return jsonify({'success': True, 'message': '\u7ef4\u5ea6\u8303\u56f4\u5df2\u4fdd\u5b58'})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 @role_dim_bp.route('/<int:role_id>/derived-permissions', methods=['GET'])
@@ -159,4 +159,4 @@ def get_derived_permissions(role_id):
         )
         return jsonify({'success': True, 'data': result})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'message': str(e)}), 500

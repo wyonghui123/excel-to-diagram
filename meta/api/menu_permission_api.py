@@ -500,4 +500,4 @@ def get_visible_menu_tree():
             'object_type_route_map': object_type_route_map,
         })
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'message': str(e)}), 500

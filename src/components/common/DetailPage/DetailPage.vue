@@ -1245,10 +1245,6 @@ async function handleSave() {
   saving.value = true
   try {
     const isCreate = effectiveMode.value === 'add' || props.id === 'new'
-    const url = isCreate 
-      ? `/api/v2/bo/${props.objectType}` 
-      : `/api/v2/bo/${props.objectType}/${props.id}`
-    const method = isCreate ? 'POST' : 'PUT'
 
     let payload
     if (isCreate) {

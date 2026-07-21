@@ -800,10 +800,17 @@ def create_app(db_path=None):
         'query', 'agent', 'schema', 'system', 'stats', 'manage', 'test',
         # v1.4 P2 修复：保留这些 v1 路径（与 v2 bo object_type 冲突时不迁）
         'permissions',  # /api/v1/permissions/* (FR-012 explain/check/check_intent)
-        'roles',        # /api/v1/roles/*/intents (FR-017)
+        # [FIX 2026-07-21] 'roles' 从 V1_SPECIAL_PREFIXES 移除
+        #   原因: roles 同时在 V1_CRUD_MIGRATION 中, 但 V1_SPECIAL_PREFIXES 优先检查,
+        #   导致 /api/v1/roles 顶层 CRUD 被放行(200) 而非 410.
+        #   子路径如 /api/v1/roles/<id>/intents 由 V1_CRUD_MIGRATION 的子路径放行逻辑正确处理.
+        # 'roles',      # REMOVED: /api/v1/roles/*/intents (FR-017) -> now handled by V1_CRUD_MIGRATION sub-path
         'bos',          # /api/v1/bos (FR-017 BO list)
-        'overlaps',     # /api/v1/roles/*/overlaps (FR-005)
+        'overlaps',     # /api/v1/overlaps (not actually used as top-level prefix, dead entry)
         'telemetry',    # M14: /api/v1/telemetry/* (stats/traces/configure)
+        # [FIX 2026-07-21] identity 是查询端点 (?object_type=...&object_id=...),
+        # 不是 CRUD list，不应被 before_request 拦截
+        'identity',
     }
 
     # v1.4 P8 Sunset (2026-06-05): 应当 sunset 到 v2 的主表 CRUD 资源
@@ -820,7 +827,6 @@ def create_app(db_path=None):
         'management-dimensions': 'management_dimension',
         'filter-variants': 'filter_variant',
         'menu-permission': 'menu_permission',
-        'identity': 'identity',
         'associations': 'association',
         'notifications': 'notification',
     }
@@ -875,13 +881,19 @@ def create_app(db_path=None):
         if len(path_parts) > 1 and path_parts[1]:
             v2_path += '/' + '/'.join(path_parts[1:])
 
-        return jsonify({
+        response = jsonify({
             'error': 'API Moved',
             'message': f'{request.method} {request.path} has moved to {v2_path}',
             'migrated_to': v2_path,
             'migrated_at': '2026-05-14',
             'sunset_at': '2026-06-05'
-        }), 410
+        })
+        response.status_code = 410
+        # 统一废弃状态响应头（与 _deprecation.py 装饰器体系一致）
+        response.headers['X-API-Version'] = 'v1'
+        response.headers['X-API-Status'] = 'SUNSET'
+        response.headers['X-API-Migrated-To'] = v2_path
+        return response
 
     # v1.4 P8 Sunset: 已移除 add_v1_deprecation_headers 中间件
     # v1 豁免路径不再加 Deprecation/Sunset 响应头

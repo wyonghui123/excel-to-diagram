@@ -162,7 +162,7 @@ def get_subscriptions():
     """获取当前用户的订阅列表"""
     user_id = g.get('user_id')
     if not user_id:
-        return jsonify({'success': False, 'error': '请先登录后再操作'}), 401
+        return jsonify({'success': False, 'message': '请先登录后再操作'}), 401
     
     if not ds:
         stats = websocket_manager.get_stats()
@@ -192,10 +192,10 @@ def create_subscription():
     """创建订阅"""
     user_id = g.get('user_id')
     if not user_id:
-        return jsonify({'success': False, 'error': '请先登录后再操作'}), 401
+        return jsonify({'success': False, 'message': '请先登录后再操作'}), 401
     
     if not ds:
-        return jsonify({'success': False, 'error': 'Service not initialized'}), 500
+        return jsonify({'success': False, 'message': 'Service not initialized'}), 500
     
     data = request.get_json() or {}
     
@@ -207,10 +207,10 @@ def create_subscription():
     filter_condition = data.get('filter_condition', {})
     
     if not object_type:
-        return jsonify({'success': False, 'error': 'object_type is required'}), 400
+        return jsonify({'success': False, 'message': 'object_type is required'}), 400
     
     if channel == 'webhook' and not webhook_url:
-        return jsonify({'success': False, 'error': 'webhook_url is required for webhook channel'}), 400
+        return jsonify({'success': False, 'message': 'webhook_url is required for webhook channel'}), 400
     
     subscription = {
         'user_id': user_id,
@@ -240,7 +240,7 @@ def create_subscription():
         
     except Exception as e:
         logger.error("Failed to create subscription: %s", e)
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 @notification_bp.route('/subscriptions/<int:sub_id>', methods=['GET'])
@@ -248,18 +248,18 @@ def get_subscription(sub_id):
     """获取单个订阅详情"""
     user_id = g.get('user_id')
     if not user_id:
-        return jsonify({'success': False, 'error': '请先登录后再操作'}), 401
+        return jsonify({'success': False, 'message': '请先登录后再操作'}), 401
     
     if not ds:
-        return jsonify({'success': False, 'error': 'Service not initialized'}), 500
+        return jsonify({'success': False, 'message': 'Service not initialized'}), 500
     
     subscription = ds.find_one('change_subscriptions', filters={'id': sub_id})
     
     if not subscription:
-        return jsonify({'success': False, 'error': '订阅不存在'}), 404
+        return jsonify({'success': False, 'message': '订阅不存在'}), 404
     
     if subscription.get('user_id') != user_id:
-        return jsonify({'success': False, 'error': '您没有执行此操作的权限'}), 403
+        return jsonify({'success': False, 'message': '您没有执行此操作的权限'}), 403
     
     return jsonify({
         'success': True,
@@ -272,18 +272,18 @@ def update_subscription(sub_id):
     """更新订阅"""
     user_id = g.get('user_id')
     if not user_id:
-        return jsonify({'success': False, 'error': '请先登录后再操作'}), 401
+        return jsonify({'success': False, 'message': '请先登录后再操作'}), 401
     
     if not ds:
-        return jsonify({'success': False, 'error': 'Service not initialized'}), 500
+        return jsonify({'success': False, 'message': 'Service not initialized'}), 500
     
     subscription = ds.find_one('change_subscriptions', filters={'id': sub_id})
     
     if not subscription:
-        return jsonify({'success': False, 'error': '订阅不存在'}), 404
+        return jsonify({'success': False, 'message': '订阅不存在'}), 404
     
     if subscription.get('user_id') != user_id:
-        return jsonify({'success': False, 'error': '您没有执行此操作的权限'}), 403
+        return jsonify({'success': False, 'message': '您没有执行此操作的权限'}), 403
     
     data = request.get_json() or {}
     
@@ -310,7 +310,7 @@ def update_subscription(sub_id):
         update_data['enabled'] = 1 if data['enabled'] else 0
     
     if not update_data:
-        return jsonify({'success': False, 'error': 'No fields to update'}), 400
+        return jsonify({'success': False, 'message': 'No fields to update'}), 400
     
     try:
         ds.update('change_subscriptions', sub_id, update_data)
@@ -326,7 +326,7 @@ def update_subscription(sub_id):
         
     except Exception as e:
         logger.error("Failed to update subscription: %s", e)
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 @notification_bp.route('/subscriptions/<int:sub_id>', methods=['DELETE'])
@@ -334,18 +334,18 @@ def delete_subscription(sub_id):
     """删除订阅"""
     user_id = g.get('user_id')
     if not user_id:
-        return jsonify({'success': False, 'error': '请先登录后再操作'}), 401
+        return jsonify({'success': False, 'message': '请先登录后再操作'}), 401
     
     if not ds:
-        return jsonify({'success': False, 'error': 'Service not initialized'}), 500
+        return jsonify({'success': False, 'message': 'Service not initialized'}), 500
     
     subscription = ds.find_one('change_subscriptions', filters={'id': sub_id})
     
     if not subscription:
-        return jsonify({'success': False, 'error': '订阅不存在'}), 404
+        return jsonify({'success': False, 'message': '订阅不存在'}), 404
     
     if subscription.get('user_id') != user_id:
-        return jsonify({'success': False, 'error': '您没有执行此操作的权限'}), 403
+        return jsonify({'success': False, 'message': '您没有执行此操作的权限'}), 403
     
     try:
         ds.delete('change_subscriptions', sub_id)
@@ -359,7 +359,7 @@ def delete_subscription(sub_id):
         
     except Exception as e:
         logger.error("Failed to delete subscription: %s", e)
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 @notification_bp.route('/events', methods=['GET'])
@@ -367,10 +367,10 @@ def get_events():
     """获取变更事件列表"""
     user_id = g.get('user_id')
     if not user_id:
-        return jsonify({'success': False, 'error': '请先登录后再操作'}), 401
+        return jsonify({'success': False, 'message': '请先登录后再操作'}), 401
     
     if not ds:
-        return jsonify({'success': False, 'error': 'Service not initialized'}), 500
+        return jsonify({'success': False, 'message': 'Service not initialized'}), 500
     
     object_type = request.args.get('object_type')
     status = request.args.get('status')
@@ -409,15 +409,15 @@ def get_event(event_id):
     """获取单个事件详情"""
     user_id = g.get('user_id')
     if not user_id:
-        return jsonify({'success': False, 'error': '请先登录后再操作'}), 401
+        return jsonify({'success': False, 'message': '请先登录后再操作'}), 401
     
     if not ds:
-        return jsonify({'success': False, 'error': 'Service not initialized'}), 500
+        return jsonify({'success': False, 'message': 'Service not initialized'}), 500
     
     event = ds.find_one('change_events', filters={'id': event_id})
     
     if not event:
-        return jsonify({'success': False, 'error': 'Event not found'}), 404
+        return jsonify({'success': False, 'message': 'Event not found'}), 404
     
     return jsonify({
         'success': True,
@@ -430,18 +430,18 @@ def retry_event(event_id):
     """重试事件投递"""
     user_id = g.get('user_id')
     if not user_id:
-        return jsonify({'success': False, 'error': '请先登录后再操作'}), 401
+        return jsonify({'success': False, 'message': '请先登录后再操作'}), 401
     
     if not ds:
-        return jsonify({'success': False, 'error': 'Service not initialized'}), 500
+        return jsonify({'success': False, 'message': 'Service not initialized'}), 500
     
     event = ds.find_one('change_events', filters={'id': event_id})
     
     if not event:
-        return jsonify({'success': False, 'error': 'Event not found'}), 404
+        return jsonify({'success': False, 'message': 'Event not found'}), 404
     
     if event.get('status') == 'delivered':
-        return jsonify({'success': False, 'error': 'Event already delivered'}), 400
+        return jsonify({'success': False, 'message': 'Event already delivered'}), 400
     
     try:
         from meta.services.webhook_service import webhook_service, WebhookConfig, WebhookPayload
@@ -456,7 +456,7 @@ def retry_event(event_id):
         )
         
         if not subscriptions:
-            return jsonify({'success': False, 'error': 'No webhook subscriptions found'}), 404
+            return jsonify({'success': False, 'message': 'No webhook subscriptions found'}), 404
         
         results = []
         for sub in subscriptions:
@@ -498,4 +498,4 @@ def retry_event(event_id):
         
     except Exception as e:
         logger.error("Failed to retry event: %s", e)
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'message': str(e)}), 500

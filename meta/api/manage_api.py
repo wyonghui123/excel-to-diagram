@@ -6,6 +6,7 @@ from meta.services.hierarchy_filter_service import HierarchyFilterService
 from meta.services.cascade_service import get_type_order, HierarchyConfigLoader
 from meta.services.auth_middleware import login_required, get_current_user, is_admin
 from meta.services.data_permission_filter import DataPermissionFilter
+from meta.api._deprecation import v1_deprecated
 from meta.core.datasource import get_data_source
 from meta.core.models import registry
 from meta.core.enrichment_engine import init_enrichment_engine, enrich_record, enrich_records

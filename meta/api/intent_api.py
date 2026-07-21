@@ -23,6 +23,7 @@ from meta.core.intent_resolver import (
     get_role_intent_dao,
 )
 from meta.core.bo_schema_loader import get_bo_schema_loader
+from meta.api._deprecation import v1_deprecated
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ intent_bp = Blueprint("intent_api", __name__)
 # Intent 权限检查
 # ============================================================
 
+@v1_deprecated(migrated_to='/api/v2/permissions/check_intent')
 def check_intent_permission():
     """FR-017 5 步 Intent 权限检查
 
@@ -95,6 +97,7 @@ def check_intent_permission():
 # BO 列表 & Action 查询
 # ============================================================
 
+@v1_deprecated(migrated_to='/api/v2/bos')
 def list_bos():
     """列出所有 BO（FR-017 AC-1）
 
@@ -139,6 +142,7 @@ def list_bos():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@v1_deprecated(migrated_to='/api/v2/bos/<bo_id>/actions')
 def list_bo_actions(bo_id):
     """列出 BO 的 actions（FR-017 AC-2）
 
@@ -160,6 +164,7 @@ def list_bo_actions(bo_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@v1_deprecated(migrated_to='/api/v2/bos/<bo_id>/actions/<action_name>')
 def get_bo_action(bo_id, action_name):
     """获取 BO 的单个 action 详情（FR-017 AC-2）
 
@@ -192,6 +197,7 @@ def get_bo_action(bo_id, action_name):
 # Role Intent CRUD
 # ============================================================
 
+@v1_deprecated(migrated_to='/api/v2/roles/<role_id>/intents')
 def list_role_intents(role_id):
     """列出角色的 Intent 权限（FR-017 AC-4）
 
@@ -214,6 +220,7 @@ def list_role_intents(role_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@v1_deprecated(migrated_to='/api/v2/roles/<role_id>/intents/<bo_id>/<action_name>')
 def grant_or_deny_intent(role_id, bo_id, action_name):
     """授予或拒绝 Intent 权限（FR-017 AC-4）
 
@@ -266,6 +273,7 @@ def grant_or_deny_intent(role_id, bo_id, action_name):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@v1_deprecated(migrated_to='/api/v2/roles/<role_id>/intents/<bo_id>/<action_name>')
 def revoke_intent(role_id, bo_id, action_name):
     """撤销 Intent 权限（FR-017 AC-4）
 

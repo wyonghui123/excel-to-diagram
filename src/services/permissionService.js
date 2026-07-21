@@ -131,7 +131,11 @@ export function getDimensionName(dimensions, resourceType) {
  * @returns {Promise<object>}
  */
 export async function loadRoles(params = {}) {
-  const r = await apiV1.get('/roles', { params })
+  const r = await apiV2.get('/bo/role', { params })
+  // v2 返回分页格式 {items, total, page, page_size}，适配为 v1 格式 {data: [array]}
+  if (r.success && r.data?.items) {
+    return { success: true, data: r.data.items }
+  }
   return r.success ? r : { data: r.data }
 }
 
@@ -141,7 +145,7 @@ export async function loadRoles(params = {}) {
  * @returns {Promise<object>}
  */
 export async function loadRole(roleId) {
-  return await apiV1.get(`/roles/${roleId}`)
+  return await apiV2.get(`/bo/role/${roleId}`)
 }
 
 /**
@@ -195,7 +199,12 @@ export async function loadDimensionInstances(dimensionId, params = {}) {
  * @returns {Promise<object>}
  */
 export async function loadPermissionRules(roleId, params = {}) {
-  return await apiV1.get(`/roles/${roleId}/permission-rules`, { params })
+  const r = await apiV2.get('/bo/permission_rule', { params: { role_id: roleId, ...params } })
+  // v2 返回分页格式，适配为 v1 格式 {data: {role_id, rules: [...]}}
+  if (r.success && r.data?.items) {
+    return { success: true, data: { role_id: roleId, rules: r.data.items } }
+  }
+  return r
 }
 
 /**
@@ -358,7 +367,7 @@ export async function saveConditionRule(rule) {
  * @returns {Promise<object>}
  */
 export async function searchUsers(keyword, params = {}) {
-  return await apiV1.get('/users', { params: { keyword, page_size: 20, ...params } })
+  return await apiV2.get('/bo/user', { params: { keyword, page_size: 20, ...params } })
 }
 
 /**

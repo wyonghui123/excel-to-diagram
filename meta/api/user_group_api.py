@@ -6,6 +6,7 @@
 """
 
 from flask import Blueprint, request, jsonify, g
+from meta.api._deprecation import v1_deprecated
 from meta.services.auth_middleware import login_required, require_permission, is_admin, get_current_user
 from meta.services.user_group_service import UserGroupService
 from meta.services.data_permission_service import DataPermissionService
@@ -23,7 +24,7 @@ def admin_required(f):
     def decorated(*args, **kwargs):
         user = get_current_user()
         if not user or not is_admin(user):
-            return jsonify({'success': False, 'error': '您没有执行此操作的权限，需要管理员权限'}), 403
+            return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
         return f(*args, **kwargs)
     return decorated
 
@@ -103,21 +104,16 @@ def _set_user_context():
 @user_group_bp.route('/user-groups/<int:group_id>/members', methods=['GET'])
 @login_required
 @require_permission('user:read')
+@v1_deprecated(migrated_to='/api/v2/bo/user_group/<group_id>/associations/members')
 def get_group_members(group_id):
     """
     [已废弃] 获取用户组成员
     请使用 v2 API: GET /api/v2/bo/user_group/{group_id}/associations/members
     """
-    import warnings
-    warnings.warn(
-        "此API已废弃，请使用 GET /api/v2/bo/user_group/{id}/associations/members",
-        DeprecationWarning,
-        stacklevel=2
-    )
     try:
         service = _get_group_service()
         members = service.get_group_members(group_id)
-        return jsonify({'success': True, 'data': members, '_deprecated': True})
+        return jsonify({'success': True, 'data': members})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
@@ -125,6 +121,7 @@ def get_group_members(group_id):
 @user_group_bp.route('/user-groups/<int:group_id>/members', methods=['POST'])
 @login_required
 @require_permission('user:update')
+@v1_deprecated(migrated_to='/api/v2/bo/user_group/<group_id>/associations/members')
 def add_group_member(group_id):
     """
     [已废弃] 添加成员到用户组
@@ -264,17 +261,13 @@ def remove_group_member(group_id, user_id):
 @user_group_bp.route('/user-groups/<int:group_id>/data-permissions', methods=['GET'])
 @login_required
 @require_permission('user:read')
+@v1_deprecated(migrated_to='/api/v2/bo/user_group/<group_id>/associations/roles')
 def get_group_data_permissions(group_id):
     """[已废弃] 获取用户组数据权限 - 建议通过角色关联获取权限"""
-    import warnings
-    warnings.warn(
-        "直接用户组数据权限已废弃，请使用 /user-groups/{id}/roles 接口通过角色管理权限",
-        DeprecationWarning, stacklevel=2
-    )
     try:
         service = _get_perm_service()
         perms = service.get_group_data_permissions(group_id)
-        return jsonify({'success': True, 'data': perms, '_deprecated': True,
+        return jsonify({'success': True, 'data': perms,
                         '_hint': '建议使用 /user-groups/{id}/roles 接口通过角色间接分配数据权限'})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
@@ -283,13 +276,9 @@ def get_group_data_permissions(group_id):
 @user_group_bp.route('/user-groups/<int:group_id>/data-permissions', methods=['POST'])
 @login_required
 @require_permission('user:update')
+@v1_deprecated(migrated_to='/api/v2/bo/user_group/<group_id>/associations/roles')
 def add_group_data_permission(group_id):
     """[已废弃] 为用户组添加数据权限 - 建议创建角色并关联到用户组"""
-    import warnings
-    warnings.warn(
-        "直接用户组数据权限已废弃，请先创建角色配置数据权限，再将角色关联到用户组",
-        DeprecationWarning, stacklevel=2
-    )
     try:
         service = _get_perm_service()
         data = request.get_json()
@@ -303,7 +292,7 @@ def add_group_data_permission(group_id):
 
         perm_id = service.add_group_data_permission(group_id, resource_type, resource_id, permission_level, inherit_to_children)
         if perm_id:
-            return jsonify({'success': True, 'data': {'id': perm_id}, '_deprecated': True})
+            return jsonify({'success': True, 'data': {'id': perm_id}})
         return jsonify({'success': False, 'message': 'Failed to add permission'}), 500
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
@@ -312,15 +301,14 @@ def add_group_data_permission(group_id):
 @user_group_bp.route('/user-groups/<int:group_id>/data-permissions/<int:perm_id>', methods=['DELETE'])
 @login_required
 @require_permission('user:update')
+@v1_deprecated(migrated_to='/api/v2/bo/user_group/<group_id>/associations/roles')
 def remove_group_data_permission(group_id, perm_id):
     """[已废弃] 删除用户组数据权限"""
-    import warnings
-    warnings.warn("直接用户组数据权限已废弃", DeprecationWarning, stacklevel=2)
     try:
         service = _get_perm_service()
         success = service.remove_group_data_permission(perm_id)
         if success:
-            return jsonify({'success': True, '_deprecated': True})
+            return jsonify({'success': True})
         return jsonify({'success': False, 'message': 'Failed to delete permission'}), 500
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
@@ -329,21 +317,16 @@ def remove_group_data_permission(group_id, perm_id):
 @user_group_bp.route('/user-groups/<int:group_id>/roles', methods=['GET'])
 @login_required
 @require_permission('user:read')
+@v1_deprecated(migrated_to='/api/v2/bo/user_group/<group_id>/associations/roles')
 def get_group_roles(group_id):
     """
     [已废弃] 获取用户组关联的角色列表
     请使用 v2 API: GET /api/v2/bo/user_group/{group_id}/associations/roles
     """
-    import warnings
-    warnings.warn(
-        "此API已废弃，请使用 GET /api/v2/bo/user_group/{id}/associations/roles",
-        DeprecationWarning,
-        stacklevel=2
-    )
     try:
         service = _get_group_service()
         roles = service.get_group_roles(group_id)
-        return jsonify({'success': True, 'data': roles, '_deprecated': True})
+        return jsonify({'success': True, 'data': roles})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 

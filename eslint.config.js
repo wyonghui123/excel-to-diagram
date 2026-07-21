@@ -143,6 +143,36 @@ export default [
     },
   },
 
+  // [NEW 2026-07-21] 禁止硬编码 /api/v1/ 或 /api/v2/ 路径
+  // 必须使用 httpClient 导出的 apiV1 / apiV2 命名空间
+  // 详见: .trae/rules/api-version-decision.md §6.2
+  {
+    files: ['src/**/*.{js,vue}'],
+    ignores: [
+      'src/utils/httpClient.js',           // 命名空间定义本身
+      'src/test/**',                        // 测试工厂
+      'src/**/__tests__/**',                // 测试目录
+      'src/**/*.spec.js',                   // 测试文件
+      'src/**/*.spec.ts',                   // 测试文件
+      'src/views/*/meta/*Meta.js',          // meta 配置（含 baseUrl 字段）
+    ],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          // 匹配字符串字面量: '/api/v1/...' 或 '/api/v2/...'
+          selector: "Literal[value=/^\\/api\\/v[12]\\//]",
+          message: '禁止硬编码 /api/v1/ 或 /api/v2/ 路径，必须使用 apiV1 或 apiV2 命名空间（见 .trae/rules/api-version-decision.md §6）',
+        },
+        {
+          // 匹配模板字面量: `/api/v1/...` 或 `/api/v2/...`
+          selector: "TemplateElement[value.raw=/^\\/api\\/v[12]\\//]",
+          message: '禁止硬编码 /api/v1/ 或 /api/v2/ 路径，必须使用 apiV1 或 apiV2 命名空间（见 .trae/rules/api-version-decision.md §6）',
+        },
+      ],
+    },
+  },
+
   // [NEW 2026-06-09] 禁止 Vue 文件内直接使用 Element Plus 的 ElMessage / ElNotification
   // 必须走 useCrudMessage (基于 useMessage/NotificationContainer, z-index 1700, teleport to body)
   // 原因：ElMessage fixed 定位在 high-z modal 场景下被遮挡, 文案五花八门不利于 i18n
