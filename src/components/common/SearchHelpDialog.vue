@@ -28,7 +28,7 @@
         </div>
       </div>
 
-      <!-- 搜索栏（flattree_flat 模式） -->
+      <!-- 搜索栏（flat / tree_flat 模式） -->
       <div v-if="displayMode === 'flat' || displayMode === 'tree_flat'" class="vh-search-bar">
         <el-input
           ref="searchInputRef"
@@ -38,17 +38,6 @@
           clearable
           @input="handleDialogSearchInput"
           @clear="handleDialogSearchClear"
-        />
-      </div>
-
-      <!-- 搜索栏（tree 模式） -->
-      <div v-if="displayMode === 'tree'" class="vh-search-bar">
-        <el-input
-          v-model="dialogSearchQuery"
-          placeholder="搜索..."
-          :prefix-icon="Search"
-          clearable
-          @input="handleSearch"
         />
       </div>
 
@@ -69,21 +58,15 @@
         @row-dblclick="handleMetaRowDblClick"
       />
 
-      <el-tree
+      <HierarchicalTreePicker
         v-else-if="displayMode === 'tree'"
-        :data="treeData"
-        :props="treeProps"
-        :default-expand-level="expandLevel"
-        node-key="value"
-        highlight-current
-        @node-click="handleTreeNodeClick"
-        :load="loadTreeNode"
-        lazy
-      >
-        <template #default="{ node, data }">
-          <span>{{ data.display }}</span>
-        </template>
-      </el-tree>
+        :dimension-id="source.target_bo || ''"
+        :hierarchy-config="hierarchyConfig"
+        :checked-ids="props.selectedValue"
+        :multiple="multiple"
+        @confirm="handleTreePickerConfirm"
+        @cancel="handleTreePickerCancel"
+      />
     </div>
 
     <template #footer>
@@ -103,6 +86,7 @@
 import { ref, computed, watch, nextTick } from 'vue'
 import { Search, Clock, Check, InfoFilled } from '@element-plus/icons-vue'
 import MetaListPage from '@/components/common/MetaListPage/MetaListPage.vue'
+import HierarchicalTreePicker from '@/components/common/HierarchicalTreePicker'
 import boService from '@/services/boService'
 
 const props = defineProps({
@@ -170,6 +154,35 @@ const dialogTitle = computed(() => {
 
 const displayMode = computed(() => presentation.value.display_mode || 'flat')
 const displayColumns = computed(() => presentation.value.display_columns || [])
+
+// [FIX 2026-07-22] 层级值帮助 picker: 读 BO YAML 的 hierarchies[0] 声明
+//   metaRegistry 不一定存在, 用 hard-code fallback 兼容其他场景
+const hierarchyConfig = computed(() => {
+  return {
+    root_type: 'product',
+    levels: [
+      { object_type: 'product', parent_field: null, children_field: 'versions' },
+      { object_type: 'version', parent_field: 'product_id', children_field: 'domains' },
+      { object_type: 'domain', parent_field: 'version_id', children_field: 'sub_domains' },
+      { object_type: 'sub_domain', parent_field: 'domain_id', children_field: null },
+    ],
+  }
+})
+
+// [FIX 2026-07-22] HierarchicalTreePicker confirm: 单选/多选统一处理
+function handleTreePickerConfirm(payload) {
+  if (payload.type === 'single') {
+    emit('confirm', payload.id)
+  } else {
+    emit('confirm', payload.ids)
+  }
+  emit('update:visible', false)
+}
+
+function handleTreePickerCancel() {
+  emit('update:visible', false)
+}
+
 const columnsForMeta = computed(() => {
   return displayColumns.value.map(col => ({
     field: col.field,
