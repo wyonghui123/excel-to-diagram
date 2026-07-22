@@ -368,11 +368,168 @@ def _build_ancestor_path(dimension_id: str, instance_id: int, data_source) -> st
     return " > ".join(path_parts)
 
 
+# [FIX 2026-07-22] 层级值帮助 picker: 构造层级树 (扁平数组, 前端组装嵌套)
+def _build_dimension_tree(dim: str, version_id: Optional[int] = None,
+                          search: Optional[str] = None) -> Dict[str, Any]:
+    """构建层级树的扁平数组 (前端组装嵌套)
+
+    Returns:
+        {"data": [TreeNode...], "total": int}
+
+    TreeNode shape:
+        {id, parent_id, level, type, name, code, has_children, child_count}
+    """
+    import sys
+    if dim not in RESOURCE_TABLE_MAP:
+        return {"data": [], "total": 0}
+
+    # 复用 _get_engine() 初始化的 _data_source (共享缓存)
+    _get_engine()  # 确保 _data_source 已初始化
+    ds = _data_source
+
+    # 找 dim 在 4 层链路中的位置 (product → version → domain → sub_domain)
+    CHAIN = ['product', 'version', 'domain', 'sub_domain']
+    try:
+        target_idx = CHAIN.index(dim)
+    except ValueError:
+        return {"data": [], "total": 0}
+    relevant_chain = CHAIN[:target_idx + 1]
+
+    all_nodes = []
+
+    for level_idx, object_type in enumerate(relevant_chain):
+        table_name = RESOURCE_TABLE_MAP[object_type]
+        display_field = DISPLAY_FIELD_MAP[object_type]
+        code_field = CODE_FIELD_MAP.get(object_type, 'code')
+
+        # 探测实际列名: production schema 中 domain/sub_domain 的名称列实际是 'name',
+        # 而 DISPLAY_FIELD_MAP 旧值是 'domain_name'/'sub_domain_name', 必须 fallback
+        actual_display = display_field
+        for candidate in [display_field, 'name']:
+            row = ds.execute(
+                f"SELECT name FROM pragma_table_info('{table_name}') WHERE name = ?",
+                [candidate]
+            ).fetchone()
+            if row:
+                actual_display = candidate
+                break
+
+        # 探测 code 列是否存在 (versions 表实际没有 code 列)
+        has_code = ds.execute(
+            f"SELECT name FROM pragma_table_info('{table_name}') WHERE name = ?",
+            [code_field]
+        ).fetchone() is not None
+
+        # 构造 SELECT (id, name, code, parent_id)
+        if object_type == 'product':
+            sql = f"SELECT id, {actual_display}, {code_field} FROM {table_name}"
+            params = []
+        elif object_type == 'version':
+            # versions 表没有 code 列, 用 '' 占位
+            parent_fk = PARENT_FIELD_MAP[object_type]
+            sql = f"SELECT id, {actual_display}, '' AS code, {parent_fk} FROM {table_name}"
+            params = []
+            if version_id:
+                sql += " WHERE id = ?"
+                params.append(version_id)
+        else:
+            parent_fk = PARENT_FIELD_MAP[object_type]
+            sql = f"SELECT id, {actual_display}, {code_field}, {parent_fk} FROM {table_name}"
+            params = []
+
+            # version 维度按 version_id 直接过滤
+            if object_type == 'domain' and version_id:
+                sql += " WHERE version_id = ?"
+                params.append(version_id)
+            elif object_type == 'sub_domain' and version_id:
+                # 跨 domain.version_id 间接过滤
+                sql = (
+                    f"SELECT sd.id, sd.{actual_display}, sd.{code_field}, sd.{PARENT_FIELD_MAP['sub_domain']} "
+                    f"FROM {table_name} sd "
+                    f"JOIN domains d ON sd.{PARENT_FIELD_MAP['sub_domain']} = d.id "
+                    f"WHERE d.version_id = ?"
+                )
+                params = [version_id]
+
+        cursor = ds.execute(sql, params)
+        rows = cursor.fetchall()
+
+        # 计算 child_count: 优先从 db 字段, 否则通过 SQL 子查询
+        is_leaf = (level_idx == len(relevant_chain) - 1)
+        for row in rows:
+            node_id = row[0]
+            name = row[1]
+            code = row[2]
+            parent_id = row[3] if level_idx > 0 else None
+
+            child_count = 0
+            if not is_leaf:
+                child_dim = relevant_chain[level_idx + 1]
+                child_table = RESOURCE_TABLE_MAP[child_dim]
+                child_parent_fk = PARENT_FIELD_MAP[child_dim]
+                count_sql = f"SELECT COUNT(*) FROM {child_table} WHERE {child_parent_fk} = ?"
+                c = ds.execute(count_sql, [node_id]).fetchone()
+                child_count = c[0] if c else 0
+
+            all_nodes.append({
+                "id": node_id,
+                "parent_id": parent_id,
+                "level": level_idx,
+                "type": object_type,
+                "name": name,
+                "code": code,
+                "has_children": not is_leaf and child_count > 0,
+                "child_count": child_count,
+            })
+
+    # search 过滤: 命中节点 + 完整父链
+    if search:
+        q = search.lower()
+        matched_ids = {n["id"] for n in all_nodes
+                       if q in (n["name"] or "").lower() or q in (n["code"] or "").lower()}
+        if matched_ids:
+            by_id = {n["id"]: n for n in all_nodes}
+            keep = set()
+            for mid in matched_ids:
+                cur = by_id.get(mid)
+                # [FIX 2026-07-22] 防循环: depth 限制 + visited 跟踪
+                depth = 0
+                visited = set()
+                while cur and depth < 10 and cur["id"] not in visited:
+                    visited.add(cur["id"])
+                    keep.add(cur["id"])
+                    if cur["parent_id"] is None:
+                        break
+                    cur = by_id.get(cur["parent_id"])
+                    depth += 1
+            all_nodes = [n for n in all_nodes if n["id"] in keep]
+
+    return {"data": all_nodes, "total": len(all_nodes)}
+
+
 def _validate_required_fields(data: Dict[str, Any], fields: list) -> Optional[str]:
     for field in fields:
         if field not in data or data[field] is None:
             return f"'{field}' is required"
     return None
+
+
+@management_dimension_bp.route("/<dim>/tree", methods=["GET"])
+@_login_required
+def list_dimension_tree(dim: str):
+    """[FIX 2026-07-22] 返回 dim 维度的层级树 (扁平数组)
+
+    URL: /api/v2/bo/management_dimension/<dim>/tree
+    Query: search=<str>, version_id=<int>
+    """
+    VALID_DIMS = {"product", "version", "domain", "sub_domain"}
+    if dim not in VALID_DIMS:
+        return jsonify({"error": f"invalid dim: {dim}"}), 400
+
+    version_id = request.args.get("version_id", type=int)
+    search = request.args.get("search", "").strip() or None
+    result = _build_dimension_tree(dim, version_id=version_id, search=search)
+    return jsonify(result), 200
 
 
 @management_dimension_bp.route("", methods=["GET"])

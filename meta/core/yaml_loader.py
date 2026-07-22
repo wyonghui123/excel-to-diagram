@@ -2348,6 +2348,37 @@ def get_yaml_schema_dir() -> str:
     return str(current_dir / "schemas")
 
 
+# [FIX 2026-07-22] 层级值帮助 picker: 读 hierarchies.yaml 的 biz_hierarchy
+_BIZ_HIERARCHY_CACHE = None
+
+
+def get_biz_hierarchy() -> Optional[Dict[str, Any]]:
+    """读 hierarchies.yaml 的 biz_hierarchy 定义
+
+    Returns: {"id": "biz_hierarchy", "levels": [{object, foreign_key_field, ...}, ...], ...}
+    """
+    global _BIZ_HIERARCHY_CACHE
+    if _BIZ_HIERARCHY_CACHE is not None:
+        return _BIZ_HIERARCHY_CACHE
+
+    schema_dir = get_yaml_schema_dir()
+    hierarchies_path = Path(schema_dir) / "hierarchies.yaml"
+    if not hierarchies_path.exists():
+        return None
+
+    try:
+        with open(hierarchies_path, 'r', encoding='utf-8') as f:
+            doc = yaml.safe_load(f) or {}
+        for h in doc.get('hierarchies', []) or []:
+            if h.get('id') == 'biz_hierarchy':
+                _BIZ_HIERARCHY_CACHE = h
+                return h
+    except Exception:
+        return None
+
+    return None
+
+
 def _infer_value_help_from_field(data: Dict[str, Any], ui_annotation) -> Optional["ValueHelpConfig"]:
     if not ui_annotation:
         return None
