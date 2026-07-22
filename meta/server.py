@@ -199,7 +199,7 @@ from meta.api.filter_variant_api import filter_variant_bp
 from meta.api.audit_api import audit_bp, init_audit_services
 from meta.api.object_identity_api import identity_bp, init_services as init_identity_services
 from meta.api.association_api import association_bp, init_association_services
-from meta.api.bo_api import bo_bp, meta_v2_bp, role_v2_bp, permission_rule_v2_bp
+from meta.api.bo_api import bo_bp, meta_v2_bp, role_v2_bp, permission_rule_v2_bp, permission_set_v2_bp
 from meta.api.value_help_api import value_help_bp
 from meta.api.special_routes_api import special_bp, init_special_services
 from meta.api.annotation_routes_api import annotation_bp, init_annotation_services
@@ -805,6 +805,7 @@ def create_app(db_path=None):
     app.register_blueprint(meta_v2_bp)
     app.register_blueprint(role_v2_bp)
     app.register_blueprint(permission_rule_v2_bp)
+    app.register_blueprint(permission_set_v2_bp)  # [P13-T4 pm-authorized]
     app.register_blueprint(value_help_bp)
     app.register_blueprint(audit_mgmt_bp)
     app.register_blueprint(meta_util_bp)

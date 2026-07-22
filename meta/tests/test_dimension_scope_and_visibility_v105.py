@@ -181,7 +181,7 @@ class TestDimensionScopeEngineYamlPath:
         # 模拟 expand: 用户配 product=[1]
         import unittest.mock as mock
         with mock.patch.object(engine, 'expand_dimension_values') as mock_expand:
-            mock_expand.return_value = {'product': {1}}
+            mock_expand.return_value = {'product': {'include': {1}, 'exclude': set(), 'wildcard': False}}
 
             conditions = engine.derive_data_conditions(role_id=1)
 

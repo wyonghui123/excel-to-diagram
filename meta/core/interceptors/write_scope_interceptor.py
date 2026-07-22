@@ -35,6 +35,13 @@ from meta.services.chain_owner_resolver import (
     resolve_root_owner as _chain_resolve_root_owner,
     resolve_root_product_id as _chain_resolve_root_product_id,
 )
+# [V2.2 2026-07-22] Spec 08 - 复用引擎新结构辅助函数 (Dict[str, Dict[str, Set]])
+from meta.services.dimension_scope_engine import (
+    _dim_has_any_values,
+    _dim_include_values,
+    _dim_is_wildcard,
+    _dim_exclude_values,
+)
 
 if TYPE_CHECKING:
     from meta.core.action_context import ActionContext
@@ -877,17 +884,29 @@ class WriteScopeInterceptor(Interceptor):
                 # [V1.1.8] 写权限: 只用直接声明的维度
                 expanded = engine.expand_dimension_values(role_id)
                 # 检查 object_type 是否在直接声明的维度中
-                if object_type in expanded and expanded[object_type]:
+                # [V2.2 2026-07-22] Spec 08: 新结构 Dict[str, Dict[str, Set]]
+                dim_data = expanded.get(object_type)
+                if _dim_has_any_values(dim_data):
                     # 直接声明: 用 derive_data_conditions 的 cond 匹配
                     conditions = engine.derive_data_conditions(role_id)
                     cond_expr = conditions.get(object_type)
+                    # [V2.2] wildcard-only (无 exclude) → 引擎跳过该维度生成条件 → 全可见
+                    is_wildcard_only = (
+                        cond_expr is None
+                        and _dim_is_wildcard(dim_data)
+                        and not _dim_exclude_values(dim_data)
+                    )
                     role_check_entry = {
                         'role_id': role_id, 'cond': cond_expr,
                         'direct_dim': True, 'dim_code': object_type,
                     }
+                    if is_wildcard_only:
+                        role_check_entry['wildcard'] = True
                     if _WRITE_SCOPE_V2_1_PERM_CHECK:
                         role_check_entry['perm_check'] = 'passed'
                     roles_checked.append(role_check_entry)
+                    if is_wildcard_only:
+                        return {'matched': True, 'roles_checked': roles_checked}
                     if cond_expr and self._record_matches_cond(
                         context, object_type, record, cond_expr
                     ):
@@ -1054,13 +1073,25 @@ class WriteScopeInterceptor(Interceptor):
             try:
                 expanded = engine.expand_dimension_values(role_id)
                 # 检查 parent 对象是否在直接声明的维度中
-                if object_type in expanded and expanded[object_type]:
+                # [V2.2 2026-07-22] Spec 08: 新结构
+                dim_data = expanded.get(object_type)
+                if _dim_has_any_values(dim_data):
                     conditions = engine.derive_data_conditions(role_id)
                     cond_expr = conditions.get(object_type)
-                    roles_checked.append({
+                    is_wildcard_only = (
+                        cond_expr is None
+                        and _dim_is_wildcard(dim_data)
+                        and not _dim_exclude_values(dim_data)
+                    )
+                    entry = {
                         'role_id': role_id, 'cond': cond_expr,
                         'direct_dim': True, 'dim_code': object_type,
-                    })
+                    }
+                    if is_wildcard_only:
+                        entry['wildcard'] = True
+                    roles_checked.append(entry)
+                    if is_wildcard_only:
+                        return {'matched': True, 'roles_checked': roles_checked}
                     if cond_expr and self._record_matches_cond(
                         context, object_type, record, cond_expr
                     ):
@@ -1139,13 +1170,25 @@ class WriteScopeInterceptor(Interceptor):
 
                 expanded = engine.expand_dimension_values(role_id)
                 # 检查 parent 对象是否在直接声明的维度中
-                if object_type in expanded and expanded[object_type]:
+                # [V2.2 2026-07-22] Spec 08: 新结构
+                dim_data = expanded.get(object_type)
+                if _dim_has_any_values(dim_data):
                     conditions = engine.derive_data_conditions(role_id)
                     cond_expr = conditions.get(object_type)
-                    roles_checked.append({
+                    is_wildcard_only = (
+                        cond_expr is None
+                        and _dim_is_wildcard(dim_data)
+                        and not _dim_exclude_values(dim_data)
+                    )
+                    entry = {
                         'role_id': role_id, 'cond': cond_expr,
                         'direct_dim': True, 'dim_code': object_type,
-                    })
+                    }
+                    if is_wildcard_only:
+                        entry['wildcard'] = True
+                    roles_checked.append(entry)
+                    if is_wildcard_only:
+                        return {'matched': True, 'roles_checked': roles_checked}
                     if cond_expr and self._record_matches_cond(
                         context, object_type, record, cond_expr
                     ):
@@ -1276,8 +1319,17 @@ class WriteScopeInterceptor(Interceptor):
             # dim scope 声明在 sub_domain=[299], 但 ancestor 循环从 obj_idx-1 开始
             # (跳过 sub_domain 自身), 导致 sub_domain 级别的 dim scope 永远不会被匹配
             # 修复: 步进后先检查 current_id 是否在 expanded[object_type] 中
-            if object_type in expanded and expanded[object_type]:
-                if current_id in expanded[object_type]:
+            # [V2.2 2026-07-22] Spec 08: 新结构 + wildcard 处理
+            step_dim_data = expanded.get(object_type)
+            if _dim_has_any_values(step_dim_data):
+                # wildcard-only (无 exclude) → 跳过该维度 (祖先层全可见)
+                if _dim_is_wildcard(step_dim_data) and not _dim_exclude_values(step_dim_data):
+                    logger.debug(
+                        f'[WriteScope EXT_CHAIN] wildcard-only match: {object_type} 全可见'
+                    )
+                    return True
+                # 仅 include 用于祖先匹配 (exclude 不参与祖先链推导)
+                if current_id in _dim_include_values(step_dim_data):
                     logger.debug(
                         f'[WriteScope EXT_CHAIN] direct match: {object_type}({current_id}) in dim scope'
                     )
@@ -1293,12 +1345,22 @@ class WriteScopeInterceptor(Interceptor):
             return False
 
         # 沿 chain 向上找, 检查每个祖先是否在直接声明的维度中
+        # [V2.2 2026-07-22] Spec 08: 新结构 + wildcard 处理
         for ancestor_idx in range(obj_idx - 1, -1, -1):
             ancestor_dim = HIERARCHY_CHAIN[ancestor_idx]
-            if ancestor_dim not in expanded or not expanded[ancestor_dim]:
+            ancestor_data = expanded.get(ancestor_dim)
+            if not _dim_has_any_values(ancestor_data):
                 continue
 
-            ancestor_ids = expanded[ancestor_dim]
+            # wildcard-only (无 exclude) → 跳过该维度 (祖先层全可见)
+            if _dim_is_wildcard(ancestor_data) and not _dim_exclude_values(ancestor_data):
+                logger.debug(
+                    f'[WriteScope ANCESTOR] wildcard-only match: {ancestor_dim} 全可见'
+                )
+                return True
+
+            # 仅 include 用于祖先匹配 (exclude 不参与祖先链推导)
+            ancestor_ids = _dim_include_values(ancestor_data)
 
             # 从 current_id (锚点 id) 沿 chain 向上逐步查到 ancestor_dim
             step_id = current_id
@@ -1473,6 +1535,9 @@ class WriteScopeInterceptor(Interceptor):
             return False
 
         # 检查每个 BO 链上每一级 ancestor dim 是否在 expanded scope 内
+        # [V2.2 2026-07-22] Spec 08: 新结构 + wildcard 处理
+        #   - wildcard-only (无 exclude) → 该维度全可见 → 祖先链直接匹配
+        #   - exclude/wildcard+exclude 不参与祖先链推导, 只匹配 include
         ancestor_field_to_dim = {
             'sub_domain_id': 'sub_domain',
             'domain_id': 'domain',
@@ -1490,7 +1555,17 @@ class WriteScopeInterceptor(Interceptor):
                     continue
                 for field, dim in ancestor_field_to_dim.items():
                     ancestor_id = row[['sub_domain_id', 'domain_id', 'version_id', 'product_id'].index(field) + 1]
-                    if ancestor_id and dim in expanded and expanded[dim] and ancestor_id in expanded[dim]:
+                    if not ancestor_id:
+                        continue
+                    dim_data = expanded.get(dim)
+                    if not _dim_has_any_values(dim_data):
+                        continue
+                    # wildcard-only (无 exclude) → 该维度全可见
+                    if _dim_is_wildcard(dim_data) and not _dim_exclude_values(dim_data):
+                        side_matches[side] = True
+                        break
+                    # 仅 include 用于祖先匹配
+                    if ancestor_id in _dim_include_values(dim_data):
                         side_matches[side] = True
                         break
                 break  # 每个 bo_id 只有一行
@@ -1703,25 +1778,37 @@ class WriteScopeInterceptor(Interceptor):
             # [FIX v1.2.32] 步进到 sub_domain 后, 直接检查其 domain_id 是否在 scope 内
             # 因为 sub_domain 是 HIERARCHY_CHAIN 最底层, 没有更深的 child dim 可检查
             # 但用户 scope 通常声明 domain (如 domain=[703]), 需要检查 sub_domain 的 domain_id
-            if effective_object_type == 'sub_domain' and 'domain' in expanded and expanded['domain']:
-                domain_ids = expanded['domain']
-                sd_row = context.data_source.execute(
-                    "SELECT domain_id FROM sub_domains WHERE id = ?",
-                    [current_id]
-                ).fetchone()
-                if sd_row and sd_row[0] in domain_ids:
-                    return True
+            # [V2.2 2026-07-22] Spec 08: 新结构 + wildcard 处理
+            if effective_object_type == 'sub_domain':
+                domain_data = expanded.get('domain')
+                if _dim_has_any_values(domain_data):
+                    # wildcard-only (无 exclude) → domain 层全可见 → parent match
+                    if _dim_is_wildcard(domain_data) and not _dim_exclude_values(domain_data):
+                        return True
+                    domain_ids = _dim_include_values(domain_data)
+                    sd_row = context.data_source.execute(
+                        "SELECT domain_id FROM sub_domains WHERE id = ?",
+                        [current_id]
+                    ).fetchone()
+                    if sd_row and sd_row[0] in domain_ids:
+                        return True
 
             # [FIX BUG-V059.2 2026-07-12] 步进到 sub_domain 后, 也检查 sub_domain 自身的 dim scope
             # 场景: BO create under SM, dim scope 声明在 sub_domain=[299,339] (非 domain 层级)
             # 之前只检查 domain 层级的 dim scope, 漏掉了 sub_domain 层级的直接匹配
-            if effective_object_type == 'sub_domain' and 'sub_domain' in expanded and expanded['sub_domain']:
-                sd_ids = expanded['sub_domain']
-                if current_id in sd_ids:
-                    logger.debug(
-                        f'_check_parent_dim_scope: sub_domain({current_id}) direct match in scope'
-                    )
-                    return True
+            # [V2.2 2026-07-22] Spec 08: 新结构 + wildcard 处理
+            if effective_object_type == 'sub_domain':
+                sd_data = expanded.get('sub_domain')
+                if _dim_has_any_values(sd_data):
+                    # wildcard-only (无 exclude) → sub_domain 层全可见 → parent match
+                    if _dim_is_wildcard(sd_data) and not _dim_exclude_values(sd_data):
+                        return True
+                    sd_ids = _dim_include_values(sd_data)
+                    if current_id in sd_ids:
+                        logger.debug(
+                            f'_check_parent_dim_scope: sub_domain({current_id}) direct match in scope'
+                        )
+                        return True
 
         # 找 effective_object_type 在 chain 中的位置
         try:
@@ -1730,12 +1817,20 @@ class WriteScopeInterceptor(Interceptor):
             return False
 
         # 检查所有更深层级的维度是否有直接声明
+        # [V2.2 2026-07-22] Spec 08: 新结构 + wildcard 处理
         for child_idx in range(obj_idx + 1, len(HIERARCHY_CHAIN)):
             child_dim = HIERARCHY_CHAIN[child_idx]
-            if child_dim not in expanded or not expanded[child_dim]:
+            child_data = expanded.get(child_dim)
+            if not _dim_has_any_values(child_data):
                 continue
 
-            child_ids = expanded[child_dim]
+            # wildcard-only (无 exclude) → child 层全可见 → parent match
+            if _dim_is_wildcard(child_data) and not _dim_exclude_values(child_data):
+                return True
+            # exclude 不参与 child 检查 (语义: exclude 不应扩大范围)
+            child_ids = _dim_include_values(child_data)
+            if not child_ids:
+                continue
             child_table = RESOURCE_TABLE_MAP.get(child_dim)
             if not child_table:
                 continue
@@ -2405,8 +2500,16 @@ class WriteScopeInterceptor(Interceptor):
 
         for role_id in role_ids:
             try:
+                expanded = engine.expand_dimension_values(role_id)
+                dim_data = expanded.get(target_bo)
+                # [V2.2 2026-07-22] Spec 08: 新结构 + wildcard 处理
+                if not _dim_has_any_values(dim_data):
+                    continue
                 conditions = engine.derive_data_conditions(role_id)
                 cond_expr = conditions.get(target_bo)
+                # wildcard-only (无 exclude) → 全可见 → FK 值必然在 scope 内
+                if cond_expr is None and _dim_is_wildcard(dim_data) and not _dim_exclude_values(dim_data):
+                    return True
                 if not cond_expr:
                     continue
 
@@ -2458,10 +2561,15 @@ class WriteScopeInterceptor(Interceptor):
         engine = DimensionScopeEngine(data_source)
 
         for role_id in role_ids:
+            expanded = engine.expand_dimension_values(role_id)
+            dim_data = expanded.get(target_bo)
             conditions = engine.derive_data_conditions(role_id)
             cond_expr = conditions.get(target_bo)
+            # [V2.2 2026-07-22] Spec 08: 优先展示 cond_expr, 其次 wildcard
             if cond_expr:
                 return f'{target_bo}: {cond_expr[:100]}'
+            if _dim_is_wildcard(dim_data) and not _dim_exclude_values(dim_data):
+                return f'{target_bo}: 全维度可见 (wildcard)'
 
         return f'{target_bo}: 无 dim scope 限制'
 

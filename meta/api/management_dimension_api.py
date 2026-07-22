@@ -111,6 +111,16 @@ def _get_user_dim_scope_ids(user_id: int, dimension_id: str) -> Optional[Set[int
         all_ids: Set[int] = set()
         has_any_scope = False
         any_dimension_scope: Dict[str, Set[int]] = {}
+        # [V2.2 2026-07-22] Spec 08: 新结构 Dict[str, Dict[str, Set]]
+        #   - wildcard-only (无 exclude) → 该 dim 全可见 → 直接返回 None (无限制)
+        #   - 其他情况 (include / exclude / wildcard+exclude) → 收集 include 集合
+        #     (exclude 由 derive_data_conditions 在 SQL 层处理, 此处仅做粗粒度 list filter)
+        from meta.services.dimension_scope_engine import (
+            _dim_has_any_values as _has_any,
+            _dim_include_values as _include_of,
+            _dim_is_wildcard as _is_wc,
+            _dim_exclude_values as _exclude_of,
+        )
 
         for role_id in role_ids:
             try:
@@ -119,12 +129,23 @@ def _get_user_dim_scope_ids(user_id: int, dimension_id: str) -> Optional[Set[int
                 expanded = {}
 
             # 收集该 role 全部 dimension 的 scope (用于后续 FK 链扩展)
-            for dim, ids in expanded.items():
-                if ids:
-                    has_any_scope = True
+            for dim, dim_data in expanded.items():
+                if not _has_any(dim_data):
+                    continue
+                has_any_scope = True
+                # wildcard-only (无 exclude) → 该 dim 全可见 → 整体返回 None
+                if _is_wc(dim_data) and not _exclude_of(dim_data):
+                    logger.info(
+                        f'[get_user_dimension_scope] role={role_id} dim={dim} wildcard-only '
+                        f'→ 全可见, 返回 None'
+                    )
+                    return None
+                # 其他情况: 收集 include 集合 (exclude 留给 SQL 层处理)
+                inc = _include_of(dim_data)
+                if inc:
                     if dim not in any_dimension_scope:
                         any_dimension_scope[dim] = set()
-                    any_dimension_scope[dim].update(ids)
+                    any_dimension_scope[dim].update(inc)
 
         if not has_any_scope:
             return None

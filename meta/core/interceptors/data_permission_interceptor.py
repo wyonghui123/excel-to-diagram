@@ -292,10 +292,26 @@ class DataPermissionInterceptor(Interceptor):
         # per_role_conditions: List[List[QueryCondition]]
         #   外层每个 role 一组 (role 之间 OR 关系, 实现为 type='or' group)
         #   内层每个 cond 是单段 IN/= 条件 (AND 关系)
+        # [V2.2 2026-07-22] Spec 08: 新结构 + wildcard 处理
+        #   任一 role 的 object_type wildcard-only → 全可见 → 不应用 dim scope 过滤
+        from meta.services.dimension_scope_engine import (
+            _dim_has_any_values as _has_any,
+            _dim_is_wildcard as _is_wc,
+            _dim_exclude_values as _exclude_of,
+        )
         per_role_conditions: List[List[Dict]] = []
 
         for role_id in role_ids:
             try:
+                expanded = engine.expand_dimension_values(role_id)
+                dim_data = expanded.get(object_type)
+                # wildcard-only (无 exclude) → 全可见 → 跳过 dim scope 过滤
+                if _has_any(dim_data) and _is_wc(dim_data) and not _exclude_of(dim_data):
+                    logger.info(
+                        f'[_apply_dimension_scope_filter] user={context.user_id} role={role_id} '
+                        f'object_type={object_type} wildcard-only → 全可见, 跳过 dim scope'
+                    )
+                    return False  # 不应用 dim scope 过滤
                 data_conditions = engine.derive_data_conditions(role_id)
                 cond_expr = data_conditions.get(object_type)
                 if not cond_expr:

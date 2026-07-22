@@ -118,7 +118,7 @@ def test_expand_dimension_values(ds):
     result = engine.expand_dimension_values(1)
     assert isinstance(result, dict)
     assert 'product' in result
-    assert 1 in result['product']
+    assert 1 in result['product']['include']
 
 
 def test_derive_data_conditions(ds):

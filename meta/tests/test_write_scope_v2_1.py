@@ -268,7 +268,7 @@ class TestV2_1CheckDimScopeWithPermCheck:
             ):
                 with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
                     mock_engine = mock_engine_cls.return_value
-                    mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                    mock_engine.expand_dimension_values.return_value = {'service_module': {'include': {1}, 'exclude': set(), 'wildcard': False}}
                     mock_engine.derive_data_conditions.return_value = {
                         'service_module': 'service_module.id IN (1)'
                     }
@@ -295,7 +295,7 @@ class TestV2_1CheckDimScopeWithPermCheck:
         with self._mock_role_ids([100]):
             with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
                 mock_engine = mock_engine_cls.return_value
-                mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                mock_engine.expand_dimension_values.return_value = {'service_module': {'include': {1}, 'exclude': set(), 'wildcard': False}}
                 mock_engine.derive_data_conditions.return_value = {
                     'service_module': 'service_module.id IN (1)'
                 }
@@ -332,7 +332,7 @@ class TestV2_1CheckDimScopeWithPermCheck:
             ):
                 with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
                     mock_engine = mock_engine_cls.return_value
-                    mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                    mock_engine.expand_dimension_values.return_value = {'service_module': {'include': {1}, 'exclude': set(), 'wildcard': False}}
                     mock_engine.derive_data_conditions.return_value = {
                         'service_module': 'service_module.id IN (1)'
                     }
@@ -363,7 +363,7 @@ class TestV2_1CheckDimScopeWithPermCheck:
         with self._mock_role_ids([100]):
             with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
                 mock_engine = mock_engine_cls.return_value
-                mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                mock_engine.expand_dimension_values.return_value = {'service_module': {'include': {1}, 'exclude': set(), 'wildcard': False}}
                 with patch.object(
                     self.interceptor, '_record_matches_cond', return_value=True
                 ):
@@ -392,7 +392,7 @@ class TestV2_1CheckDimScopeWithPermCheck:
         with self._mock_role_ids([100]):
             with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
                 mock_engine = mock_engine_cls.return_value
-                mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                mock_engine.expand_dimension_values.return_value = {'service_module': {'include': {1}, 'exclude': set(), 'wildcard': False}}
                 with patch.object(
                     self.interceptor, '_record_matches_cond', return_value=True
                 ):
@@ -424,7 +424,7 @@ class TestV2_1CheckDimScopeWithPermCheck:
             ):
                 with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
                     mock_engine = mock_engine_cls.return_value
-                    mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                    mock_engine.expand_dimension_values.return_value = {'service_module': {'include': {1}, 'exclude': set(), 'wildcard': False}}
                     mock_engine.derive_data_conditions.return_value = {
                         'service_module': 'service_module.id IN (1)'
                     }
@@ -456,7 +456,7 @@ class TestV2_1CheckDimScopeWithPermCheck:
             ):
                 with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
                     mock_engine = mock_engine_cls.return_value
-                    mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                    mock_engine.expand_dimension_values.return_value = {'service_module': {'include': {1}, 'exclude': set(), 'wildcard': False}}
                     mock_engine.derive_data_conditions.return_value = {
                         'service_module': 'service_module.id IN (1)'
                     }
@@ -495,7 +495,7 @@ class TestV2_1LegacyV118Compatibility:
         ):
             with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
                 mock_engine = mock_engine_cls.return_value
-                mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                mock_engine.expand_dimension_values.return_value = {'service_module': {'include': {1}, 'exclude': set(), 'wildcard': False}}
                 mock_engine.derive_data_conditions.return_value = {
                     'service_module': 'service_module.id IN (1)'
                 }
@@ -538,7 +538,7 @@ class TestV2_1TEST333WScenario:
     def test_edit_sm_in_scope_703_allowed(self, app_ctx, set_current_user):
         """同域 SM (domain=703) → 通过 (经 _check_ancestor_dim_scope 路径)
 
-        object_type=service_module, expanded={'domain': {703}}, record sub_domain_id=138(domain=703)
+        object_type=service_module, expanded={'domain': {'include': {703}, 'exclude': set(), 'wildcard': False}}, record sub_domain_id=138(domain=703)
         走 update 路径 → _check_ancestor_dim_scope 返回 True
         """
         set_current_user({
@@ -554,7 +554,7 @@ class TestV2_1TEST333WScenario:
             ):
                 with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
                     mock_engine = mock_engine_cls.return_value
-                    mock_engine.expand_dimension_values.return_value = {'domain': {703}}
+                    mock_engine.expand_dimension_values.return_value = {'domain': {'include': {703}, 'exclude': set(), 'wildcard': False}}
                     with patch.object(
                         self.interceptor, '_check_ancestor_dim_scope', return_value=True
                     ):
@@ -588,7 +588,7 @@ class TestV2_1TEST333WScenario:
             ):
                 with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
                     mock_engine = mock_engine_cls.return_value
-                    mock_engine.expand_dimension_values.return_value = {'domain': {703}}
+                    mock_engine.expand_dimension_values.return_value = {'domain': {'include': {703}, 'exclude': set(), 'wildcard': False}}
                     with patch.object(
                         self.interceptor, '_check_ancestor_dim_scope', return_value=False
                     ):
@@ -649,7 +649,7 @@ class TestWriteScopeV2_1_DimScopeLink:
             ):
                 with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
                     mock_engine = mock_engine_cls.return_value
-                    mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                    mock_engine.expand_dimension_values.return_value = {'service_module': {'include': {1}, 'exclude': set(), 'wildcard': False}}
                     mock_engine.derive_data_conditions.return_value = {
                         'service_module': 'service_module.id IN (1)'
                     }
@@ -682,7 +682,7 @@ class TestWriteScopeV2_1_DimScopeLink:
             ):
                 with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
                     mock_engine = mock_engine_cls.return_value
-                    mock_engine.expand_dimension_values.return_value = {'service_module': {999}}  # 不含 1
+                    mock_engine.expand_dimension_values.return_value = {'service_module': {'include': {999}, 'exclude': set(), 'wildcard': False}}  # 不含 1
                     mock_engine.derive_data_conditions.return_value = {
                         'service_module': 'service_module.id IN (999)'
                     }
@@ -716,7 +716,7 @@ class TestWriteScopeV2_1_DimScopeLink:
             ):
                 with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
                     mock_engine = mock_engine_cls.return_value
-                    mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                    mock_engine.expand_dimension_values.return_value = {'service_module': {'include': {1}, 'exclude': set(), 'wildcard': False}}
                     with patch(
                         'meta.core.interceptors.write_scope_interceptor._WRITE_SCOPE_V2_1_PERM_CHECK',
                         True,
@@ -743,7 +743,7 @@ class TestWriteScopeV2_1_DimScopeLink:
         ):
             with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
                 mock_engine = mock_engine_cls.return_value
-                mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                mock_engine.expand_dimension_values.return_value = {'service_module': {'include': {1}, 'exclude': set(), 'wildcard': False}}
                 with patch(
                     'meta.core.interceptors.write_scope_interceptor._WRITE_SCOPE_V2_1_PERM_CHECK',
                     True,
@@ -770,7 +770,7 @@ class TestWriteScopeV2_1_DimScopeLink:
         ):
             with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
                 mock_engine = mock_engine_cls.return_value
-                mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                mock_engine.expand_dimension_values.return_value = {'service_module': {'include': {1}, 'exclude': set(), 'wildcard': False}}
                 with patch(
                     'meta.core.interceptors.write_scope_interceptor._WRITE_SCOPE_V2_1_PERM_CHECK',
                     True,
@@ -801,7 +801,7 @@ class TestWriteScopeV2_1_DimScopeLink:
             ):
                 with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
                     mock_engine = mock_engine_cls.return_value
-                    mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                    mock_engine.expand_dimension_values.return_value = {'service_module': {'include': {1}, 'exclude': set(), 'wildcard': False}}
                     mock_engine.derive_data_conditions.return_value = {
                         'service_module': 'service_module.id IN (1)'
                     }
@@ -843,7 +843,7 @@ class TestWriteScopeV2_1_DimScopeLink:
             ):
                 with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
                     mock_engine = mock_engine_cls.return_value
-                    mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                    mock_engine.expand_dimension_values.return_value = {'service_module': {'include': {1}, 'exclude': set(), 'wildcard': False}}
                     mock_engine.derive_data_conditions.return_value = {
                         'service_module': 'service_module.id IN (1)'
                     }
@@ -881,7 +881,7 @@ class TestWriteScopeV2_1_DimScopeLink:
             ):
                 with patch('meta.services.dimension_scope_engine.DimensionScopeEngine') as mock_engine_cls:
                     mock_engine = mock_engine_cls.return_value
-                    mock_engine.expand_dimension_values.return_value = {'service_module': {1}}
+                    mock_engine.expand_dimension_values.return_value = {'service_module': {'include': {1}, 'exclude': set(), 'wildcard': False}}
                     mock_engine.derive_data_conditions.return_value = {
                         'service_module': 'service_module.id IN (1)'
                     }

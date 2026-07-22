@@ -141,6 +141,10 @@ def build_diagnostics() -> dict:
                 interceptor_warnings[key] = diag_state[key]
     except Exception:
         pass
+
+    # [Spec 08 FR-008] 6. dim scope 统计 (wildcard/exclude 配置 + 冲突用户 + feature flags)
+    dim_scope_stats = _build_dim_scope_stats()
+
     if health_simple.get('wal_size', '0') and 'MB' in str(health_simple['wal_size']):
         wal_mb = float(str(health_simple['wal_size']).replace('MB', '').strip() or 0)
         if wal_mb > 1.0:
@@ -172,10 +176,125 @@ def build_diagnostics() -> dict:
             'recovery_suggestions': suggestions,
             # [v2.1] interceptor 警告 (WriteScope / parent read / chain read)
             'interceptor_warnings': interceptor_warnings,
+            # [Spec 08 FR-008] dim scope 统计
+            'dim_scope': dim_scope_stats,
             'generated_at': datetime.utcnow().isoformat() + 'Z',
             'trace_id': trace_id,
         }
     }
+
+
+def _build_dim_scope_stats() -> dict:
+    """[Spec 08 FR-008] 构建 dim scope 配置统计
+
+    Returns:
+        {
+            'wildcard_count': int,
+            'exclude_count': int,
+            'wildcard_roles': [{role_id, role_code, dimension_code}, ...],
+            'exclude_roles': [{role_id, role_code, dimension_code, excluded_ids}, ...],
+            'conflict_users': [user_id, ...],
+            'feature_flags': {'wildcard_enabled': bool, 'exclude_enabled': bool}
+        }
+    """
+    result = {
+        'wildcard_count': 0,
+        'exclude_count': 0,
+        'wildcard_roles': [],
+        'exclude_roles': [],
+        'conflict_users': [],
+        'feature_flags': {
+            'wildcard_enabled': True,
+            'exclude_enabled': True,
+        },
+    }
+
+    # 1. feature flags
+    try:
+        from meta.services.dimension_scope_engine import is_wildcard_enabled, is_exclude_enabled
+        result['feature_flags'] = {
+            'wildcard_enabled': is_wildcard_enabled(),
+            'exclude_enabled': is_exclude_enabled(),
+        }
+    except ImportError:
+        pass
+
+    # 2. 查询数据库统计
+    try:
+        import sqlite3
+        import os
+        import json
+        db_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            'architecture.db'
+        )
+        if not os.path.exists(db_path):
+            return result
+
+        from meta.core.safe_connect import safe_connect_for_read
+        conn_cm = safe_connect_for_read(db_path)
+        conn = conn_cm.__enter__()
+        try:
+            # wildcard 统计 (dimension_values 含 '"*"')
+            wildcard_rows = conn.execute(
+                "SELECT rds.role_id, r.code, rds.dimension_code "
+                "FROM role_dimension_scopes rds "
+                "LEFT JOIN roles r ON rds.role_id = r.id "
+                "WHERE rds.dimension_values LIKE '%\"*\"%' "
+                "AND rds.scope_mode = 'include'"
+            ).fetchall()
+            result['wildcard_roles'] = [
+                {'role_id': r[0], 'role_code': r[1] or '', 'dimension_code': r[2]}
+                for r in wildcard_rows
+            ]
+            result['wildcard_count'] = len(wildcard_rows)
+
+            # exclude 统计
+            exclude_rows = conn.execute(
+                "SELECT rds.role_id, r.code, rds.dimension_code, rds.dimension_values "
+                "FROM role_dimension_scopes rds "
+                "LEFT JOIN roles r ON rds.role_id = r.id "
+                "WHERE rds.scope_mode = 'exclude'"
+            ).fetchall()
+            result['exclude_roles'] = []
+            for r in exclude_rows:
+                try:
+                    excluded_ids = json.loads(r[3] or '[]')
+                except (json.JSONDecodeError, TypeError):
+                    excluded_ids = []
+                result['exclude_roles'].append({
+                    'role_id': r[0], 'role_code': r[1] or '',
+                    'dimension_code': r[2], 'excluded_ids': excluded_ids,
+                })
+            result['exclude_count'] = len(exclude_rows)
+
+            # 3. 冲突用户检测 (FR-005: 同一用户的所有角色不允许同时有 wildcard + exclude)
+            # 查询同时绑定 wildcard 角色和 exclude 角色的用户
+            conflict_rows = conn.execute(
+                "SELECT DISTINCT ugm.user_id "
+                "FROM user_group_members ugm "
+                "JOIN group_roles gr1 ON ugm.group_id = gr1.group_id "
+                "JOIN role_dimension_scopes rds1 ON gr1.role_id = rds1.role_id "
+                "WHERE rds1.dimension_values LIKE '%\"*\"%' AND rds1.scope_mode = 'include' "
+                "AND EXISTS ("
+                "  SELECT 1 FROM group_roles gr2 "
+                "  JOIN role_dimension_scopes rds2 ON gr2.role_id = rds2.role_id "
+                "  WHERE gr2.group_id = ugm.group_id "
+                "  AND rds2.scope_mode = 'exclude'"
+                ")"
+            ).fetchall()
+            result['conflict_users'] = [r[0] for r in conflict_rows]
+
+        finally:
+            try:
+                conn_cm.__exit__(None, None, None)
+            except Exception:
+                pass
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f'[FR-008] _build_dim_scope_stats failed: {e}')
+
+    return result
 
 
 # Flask 路由注册
@@ -210,4 +329,42 @@ def register_diagnostics_route(app):
     def _diagnostics_intercept():
         if request.path == '/api/v2/action/_diagnostics' and request.method == 'GET':
             return _diagnostics_handler()
+        # [Spec 08 FR-006] feature flag 端点 (登录用户可访问, 用于前端探测功能开关)
+        if request.path == '/api/v2/_feature_flags' and request.method == 'GET':
+            return _feature_flags_handler()
         return None  # 继续走其他路由
+
+    def _feature_flags_handler():
+        """[FR-006] GET /api/v2/_feature_flags — 返回 feature flag 状态
+
+        前端启动时调用此端点, 决定是否显示"全维度可见"复选框和"排除已选值"复选框。
+        登录用户即可访问 (不需要 admin)。
+        """
+        from meta.api.user_api import login_required
+        from flask import g
+
+        # 复用登录鉴权
+        try:
+            from meta.api.db_admin_api import _ensure_current_user
+        except ImportError:
+            return jsonify({'success': False, 'message': 'auth unavailable'}), 500
+
+        if not _ensure_current_user():
+            return jsonify({'success': False, 'message': 'unauthorized'}), 401
+
+        try:
+            from meta.services.dimension_scope_engine import is_wildcard_enabled, is_exclude_enabled
+            flags = {
+                'dim_scope_wildcard_enabled': is_wildcard_enabled(),
+                'dim_scope_exclude_enabled': is_exclude_enabled(),
+            }
+        except ImportError:
+            flags = {
+                'dim_scope_wildcard_enabled': True,
+                'dim_scope_exclude_enabled': True,
+            }
+
+        trace_id = TraceId.get_or_generate()
+        resp = jsonify({'success': True, 'data': flags})
+        resp.headers['X-Trace-Id'] = trace_id
+        return resp

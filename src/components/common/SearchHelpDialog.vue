@@ -174,7 +174,9 @@ const columnsForMeta = computed(() => {
   return displayColumns.value.map(col => ({
     field: col.field,
     label: col.label,
-    width: col.width
+    width: col.width,
+    sortable: true,
+    filterable: true
   }))
 })
 const pageSize = computed(() => {
@@ -206,15 +208,44 @@ const sourceConfigParams = computed(() => {
 const dialogSearchKeyword = ref('')
 
 const valueHelpFetcher = (params) => {
-  const { page, sort } = params || {}
+  // buildFilterQueryParams 产出: { page, page_size, keyword, ordering, domain_code__like, ... }
+  // value help API 期望: { page, pageSize, search, sort, filters[field]=value }
+  // 需要做格式转换
+  const { page, sort, pageSize: _ps, page_size, keyword, ordering, ...restParams } = params || {}
   const queryParams = {
     page: page || 1,
     pageSize: pageSize.value,
     ...sourceConfigParams.value
   }
-  const searchKeyword = dialogSearchKeyword.value || ''
+  // 关键词搜索：dialogSearchKeyword 优先，fallback 到 buildFilterQueryParams 的 keyword
+  const searchKeyword = dialogSearchKeyword.value || keyword || ''
   if (searchKeyword) queryParams.search = searchKeyword
-  if (sort) queryParams.sort = sort
+  // 排序：ordering (Django style) → sort (value help style)
+  // ordering=-domain_code → sort=domain_code:desc
+  // ordering=domain_code  → sort=domain_code:asc
+  if (ordering) {
+    const isDesc = ordering.startsWith('-')
+    const sortField = isDesc ? ordering.slice(1) : ordering
+    queryParams.sort = `${sortField}:${isDesc ? 'desc' : 'asc'}`
+  } else if (sort) {
+    queryParams.sort = sort
+  }
+  // 列头过滤：__like/__in/__gte/__lte → filters[field__suffix]=value
+  // 保留 __like/__in/__gte/__lte 后缀，后端 BoValueHelpProvider 会解析
+  // __like → LIKE '%value%' (模糊匹配)
+  // __in  → IN (val1,val2) (多选)
+  // __gte/__lte → >= / <= (范围)
+  const skipKeys = ['value_field', 'display_field', 'code_field', 'value_filter', 'hierarchy', 'apply_target_permissions']
+  const filters = {}
+  for (const [key, value] of Object.entries(restParams)) {
+    if (skipKeys.includes(key)) continue
+    if (value === undefined || value === null || value === '') continue
+    // 直接保留 key（含 __like/__in/__gte/__lte 后缀）
+    filters[key] = value
+  }
+  if (Object.keys(filters).length > 0) {
+    queryParams.filters = filters
+  }
 
   return boService.searchValueHelp(
     sourceType.value,

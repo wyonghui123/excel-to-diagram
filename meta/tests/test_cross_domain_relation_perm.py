@@ -142,7 +142,7 @@ class TestRelationshipAncestorDimScopeIntegration:
 
     def setup_method(self):
         self.interceptor = WriteScopeInterceptor()
-        self.expanded = {'domain': {703}, 'sub_domain': {138, 139}}
+        self.expanded = {'domain': {'include': {703}, 'exclude': set(), 'wildcard': False}, 'sub_domain': {'include': {138, 139}, 'exclude': set(), 'wildcard': False}}
 
     def _mock_ancestor_match(self):
         """Mock: BO_A 的 ancestor domain=703 在 expanded 内 → OR 命中"""
@@ -206,7 +206,7 @@ class TestU05ViewerRoleSoftWarnVsHardReject:
 
     def setup_method(self):
         self.interceptor = WriteScopeInterceptor()
-        self.expanded = {'domain': {703}, 'sub_domain': {138, 139}}
+        self.expanded = {'domain': {'include': {703}, 'exclude': set(), 'wildcard': False}, 'sub_domain': {'include': {138, 139}, 'exclude': set(), 'wildcard': False}}
 
     def test_u05_soft_warn_mode_passes(self):
         """[Phase 1 软警告] D1-Viewer 跨域创建 → 软警告 log + 仍通过 (dim scope 派生 OR)"""
@@ -401,7 +401,7 @@ class TestU07U08UpdateDeleteSameAsCreate:
 
     def setup_method(self):
         self.interceptor = WriteScopeInterceptor()
-        self.expanded = {'domain': {703}}
+        self.expanded = {'domain': {'include': {703}, 'exclude': set(), 'wildcard': False}}
 
     def test_u07_update_with_bo_edit_passes(self):
         """U07: D1-Manager (BO:edit) update D1→D2 关系 → 成功"""

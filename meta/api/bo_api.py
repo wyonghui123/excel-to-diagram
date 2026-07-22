@@ -3,7 +3,7 @@ import logging
 import os
 from flask import Blueprint, request, jsonify, g
 
-# 用户输入 page_size 的上限（防止 DoS 攻击）
+# user输入 page_size 的上限（防止 DoS 攻击）
 # 注：内部硬编码调用（如预览端点 page_size=5000）不受此限制
 MAX_USER_PAGE_SIZE = 500
 
@@ -23,10 +23,10 @@ meta_v2_bp = Blueprint('meta_v2', __name__, url_prefix='/api/v2/meta')
 
 def _enrich_audit_log_items(items):
     """[FIX 2026-06-12] audit_log 列表通用 enrich.
-    1. 把 extra_data 字符串解析为 extra_data_parsed (前端 deleted-data-section 用)
+    1. 把 extra_data  field符串解析为 extra_data_parsed (前端 deleted-data-section 用)
     2. 注入 object_type_label / field_name_label / parent_object_type_label (中英文映射)
 
-    跟 v1 /audit/logs 接口对齐, 解决"v2 BO 列表看不到删除明细 JSON"问题.
+    跟 v1 /audit/logs 接口对齐, 解决"v2 BO 列表看不到delete明细 JSON"问题.
     复用 meta.api.audit_api 的 OBJECT_TYPE_LABELS / FIELD_NAME_LABELS 映射.
     """
     if not items:
@@ -91,10 +91,10 @@ def _extract_assoc_query_params(args):
     """从 request.args 中提取关联查询的过滤/排序/搜索参数。
 
     返回 (filters, ordering, search)：
-    - filters: dict，key 为字段名（含 __in/__like/__gte/__lte/_start/_end 后缀），
-               value 为标量或字符串
-    - ordering: 字符串（可能为 '-field' 形式），空字符串表示未指定
-    - search: 搜索关键词字符串
+    - filters: dict，key 为 field名（含 __in/__like/__gte/__lte/_start/_end 后缀），
+               value 为标量或 field符串
+    - ordering:  field符串（可能为 '-field' 形式），空 field符串表示未指定
+    - search: 搜索关键词 field符串
     """
     filters = {}
     ordering = ''
@@ -136,7 +136,7 @@ from meta.core.computed_field_query import ComputationNotSupportedError
 
 @bo_bp.errorhandler(ComputationNotSupportedError)
 def handle_computation_not_supported(e: ComputationNotSupportedError):
-    """计算字段不被支持 → 422 + 明确错误码, 不再 silent fallback
+    """计算 field不被支持 → 422 + 明确错误码, 不再 silent fallback
 
     [决策5] 422 Unprocessable Entity 语义最准:
     请求格式正确, 但服务器无法处理 (computation.type 配错了对象类型)
@@ -248,23 +248,23 @@ def _attach_change_history(record: dict, object_type: str, obj_id) -> None:
 @bo_bp.route('/<object_type>/<int:obj_id>', methods=['GET'])
 @login_required
 def read_bo(object_type, obj_id):
-    # [FIX 2026-06-12] audit_log 是只读对象 (persistent: false), BO framework 拒绝读 (404).
-    # v2 BO 接口必须跟 v1 /audit/logs/{id} 对齐, 否则前端拿不到 extra_data_parsed.deleted_data.
+    # [FIX 2026-06-12] audit_log  is 只读对象 (persistent: false), BO framework 拒绝读 (404).
+    # v2 BO 接口 required须跟 v1 /audit/logs/{id} 对齐, 否则前端拿不到 extra_data_parsed.deleted_data.
     # 这里直接走 v1 端点拿到完整数据 + 注入中文 label.
     if object_type == 'audit_log':
         return _read_audit_log_via_v1(obj_id)
 
     # [FIX v1.1.10 2026-06-15] 单条 get 应用 dim scope (跟 list 一致)
-    # 原 bug: DataPermissionInterceptor 派生的 query_conditions 是 list 用的,
+    # 原 bug: DataPermissionInterceptor 派生的 query_conditions  is  list 用的,
     #         单条 crud_read 走 `WHERE id = ?` 直接查, 拦截器条件不生效
     #         → TEST333 能 GET 任意 BO 单条 (含域外), 拿到完整 description / change_history
     #         → 安全漏洞 (绕过 dim scope)
     # 修复: read_bo API 层加 dim scope 校验, 不在范围内 → 404 (不暴露存在性)
-    # 注意: 关系 list 接口"上下文读取" (target_bo_name 等元数据) 走的是关系接口自
-    #       己 SQL, 不走 BO 单条 get, 不受此限制 (符合 SAP 风格字段级授权)
+    # 注意: 关系 list 接口"上下文读取" (target_bo_name 等元数据) 走的 is 关系接口自
+    #       己 SQL, 不走 BO 单条 get, 不受此限制 (符合 SAP 风格 field级授权)
     _deny = _check_single_bo_in_dim_scope(object_type, obj_id)
     if _deny:
-        return jsonify({'success': False, 'message': '对象不存在或无访问权限'}), 404
+        return jsonify({'success': False, 'message': '对象不存在或无访问permission'}), 404
 
     bo = _get_bo()
     result = bo.read(object_type, obj_id)
@@ -278,13 +278,13 @@ def _check_single_bo_in_dim_scope(object_type: str, obj_id: int):
     """[V1.1.10 2026-06-15] 单条 BO get 应用 dim scope 校验
 
     语义: 调用 DimensionScopeEngine.derive_data_conditions(role_id) 派生当前 object_type 的 cond_expr,
-          检查 obj_id 是否在派生范围内. 不在 → 返回 True (deny).
+          检查 obj_id  is 否在派生范围内. 不在 → 返回 True (deny).
 
-    [FIX 2026-06-17] owner 例外: 用户对自己 owner 的资源始终可见 (跟 _do_list 路径一致)
+    [FIX 2026-06-17] owner 例外: user对自己 owner 的资源始终可见 (跟 _do_list 路径一致)
       - 拿 obj_id 对应 record 的 owner_id, 等于 user.id → allow
       - 这与 DataPermissionInterceptor._add_owner_exception 行为一致
-      - 修复: TEST333 创建 product 493 (owner=TEST333) 后能直接看 detail
-              之前 dim scope 派生条件不含 owner, TEST333 不是 product 派生范围 → 404
+      - 修复: TEST333 create product 493 (owner=TEST333) 后能直接看 detail
+              之前 dim scope 派生条件不含 owner, TEST333 不 is  product 派生范围 → 404
 
     例: TEST333 + 5970 读域外 BO 316:
       - 5970 dim scope: domain=[703] → 派生 BO cond: `id IN (chain 派生 → 8 个 BO)`
@@ -309,12 +309,12 @@ def _check_single_bo_in_dim_scope(object_type: str, obj_id: int):
         user_id = user.get('id') or user.get('user_id')
         ds = _get_data_source()
 
-        # [FIX 2026-06-17] owner 例外: 用户对 owner=自己 的资源始终可见
-        # 优先级最高, 先检查 (避免不必要的 dim scope 派生)
+        # [FIX 2026-06-17] owner 例外: user对 owner=自己 的资源始终可见
+        # 优先级最高, 先检查 (避免不 required要的 dim scope 派生)
         meta_obj = registry.get(object_type)
         if meta_obj is not None and user_id:
             try:
-                # 检查 BO 是否有 owner_id 字段
+                # 检查 BO  is 否有 owner_id  field
                 has_owner_id = any(
                     getattr(f, 'id', getattr(f, 'name', '')) == 'owner_id'
                     for f in (getattr(meta_obj, 'fields', None) or [])
@@ -334,7 +334,7 @@ def _check_single_bo_in_dim_scope(object_type: str, obj_id: int):
             except Exception as e:
                 logger.debug(f'[_check_single_bo_in_dim_scope] owner check failed: {e}')
 
-        # [FIX BUG-V050 2026-07-10] owner chain 兜底: 关联型 BO (relationship) 无 owner_id 字段
+        # [FIX BUG-V050 2026-07-10] owner chain 兜底: 关联型 BO (relationship) 无 owner_id  field
         #   走 chain_owner_resolver 沿 source_bo_id/target_bo_id 业务链追溯到 product.owner_id
         #   跟 DataPermissionInterceptor._add_owner_exception 行为一致
         if object_type == 'relationship' and user_id:
@@ -352,7 +352,7 @@ def _check_single_bo_in_dim_scope(object_type: str, obj_id: int):
 
         # [FIX BUG-V050 2026-07-10] data_permissions 显式授权兜底
         #   跟 _apply_scope_filter_after_dimension 的 allowed_ids OR 兜底一致
-        #   场景: 用户在自己 owned product 下创建关系, dim scope 派生不匹配,
+        #   场景: user在自己 owned product 下create关系, dim scope 派生不匹配,
         #         但 data_permissions 表有显式授权 (create 时 auto-grant)
         if user_id:
             try:
@@ -381,16 +381,32 @@ def _check_single_bo_in_dim_scope(object_type: str, obj_id: int):
             return False
 
         # 多 role 任一允许 → 放行 (OR 语义)
-        from meta.services.dimension_scope_engine import DimensionScopeEngine
+        # [V2.2 2026-07-22] Spec 08: 新结构 + wildcard 处理
+        #   任一 role 的 object_type wildcard-only → 全可见 → 直接放行
+        from meta.services.dimension_scope_engine import (
+            DimensionScopeEngine,
+            _dim_has_any_values as _has_any,
+            _dim_is_wildcard as _is_wc,
+            _dim_exclude_values as _exclude_of,
+        )
         engine = DimensionScopeEngine(ds)
         for role_id in role_ids:
+            expanded = engine.expand_dimension_values(role_id)
+            dim_data = expanded.get(object_type)
+            # wildcard-only (无 exclude) → 全可见 → 放行
+            if _has_any(dim_data) and _is_wc(dim_data) and not _exclude_of(dim_data):
+                logger.info(
+                    f'[_check_single_bo_in_dim_scope] role={role_id} object_type={object_type} '
+                    f'wildcard-only → 全可见, 放行'
+                )
+                return False  # 在 dim scope 内 → 允许 (False = 不隐藏)
             data_conds = engine.derive_data_conditions(role_id)
             cond_expr = data_conds.get(object_type)
             if not cond_expr:
                 continue  # 该 role 无 dim scope 派生
             # 用 cond_expr 跑单条 id 校验
             # 把 cond_expr 的 "id IN (...)" 改为 "id = ?", 或者直接在子查询里加 WHERE id=?
-            # 简化: 用一个独立 SQL — 派生 "id" 字段 chain, 把 obj_id 加进去
+            # 简化: 用一个独立 SQL — 派生 "id"  field chain, 把 obj_id 加进去
             # 解析 cond_expr, 找 chain 的 leaf
             if not meta_obj:
                 continue
@@ -407,7 +423,7 @@ def _check_single_bo_in_dim_scope(object_type: str, obj_id: int):
         return True
     except Exception as e:
         logger.warning(f'[_check_single_bo_in_dim_scope] check failed, ALLOW (fail-open): {e}')
-        return False  # 校验失败 → 放行 (避免误杀)
+        return False  # 校验failed → 放行 (避免误杀)
 
 
 def _get_current_user_safe():
@@ -471,7 +487,7 @@ def _data_source_default():
 @bo_bp.route('/<object_type>/<path:obj_id>', methods=['GET'])
 @login_required
 def read_bo_by_string_id(object_type, obj_id):
-    """支持字符串ID的读取路由"""
+    """支持 field符串ID的读取路由"""
     # [FIX 2026-06-12] audit_log 走 v1 路径
     if object_type == 'audit_log':
         return _read_audit_log_via_v1(obj_id)
@@ -491,10 +507,10 @@ def query_bo(object_type):
     request_filters = dict(request.args)
     page = int(request.args.get('page', 1))
     page_size = int(request.args.get('page_size', request.args.get('pageSize', 20)))
-    page_size = max(1, min(page_size, MAX_USER_PAGE_SIZE))  # 防止 DoS：限制用户输入
+    page_size = max(1, min(page_size, MAX_USER_PAGE_SIZE))  # 防止 DoS：限制user输入
     ordering = request.args.get('ordering', '')
 
-    # 移除分页和排序参数，只保留过滤参数
+    # 移除分页 and 排序参数，只保留过滤参数
     clean_filters = {k: v for k, v in request_filters.items()
                      if k not in ('page', 'page_size', 'pageSize', 'ordering', '_limit', '_offset', '_order_by')}
 
@@ -563,13 +579,13 @@ def query_bo(object_type):
         except Exception as e:
             logger.warning(f"[query_bo] Failed to get filters from view-config: {e}")
 
-        # 检查是否是数组格式（来自 _do_list）
+        # 检查 is 否 is 数组格式（来自 _do_list）
         if isinstance(raw_data, list):
             computation_service.compute_by_semantics(object_type, raw_data)
             # [FIX 2026-06-12] audit_log 通用 enrich: 解析 extra_data 为 extra_data_parsed,
             # 注入 object_type_label / field_name_label / parent_object_type_label.
             # 让所有用 v2 BO /audit_log 列表的页面 (系统管理-审计日志管理, 全局搜索等)
-            # 都能直接展示"删除对象完整明细" JSON + 中英文标签, 跟 v1 /audit/logs 接口对齐.
+            # 都能直接展示"delete对象完整明细" JSON + 中英文标签, 跟 v1 /audit/logs 接口对齐.
             if object_type == 'audit_log':
                 _enrich_audit_log_items(raw_data)
             # 返回 { items: [], total: 20, filters: [] } 格式
@@ -585,7 +601,7 @@ def query_bo(object_type):
                 'message': result.message
             })
         else:
-            # 已经是正确格式
+            # 已经 is 正确格式
             if object_type == 'audit_log' and isinstance(result.data, dict) and isinstance(result.data.get('items'), list):
                 _enrich_audit_log_items(result.data['items'])
             return jsonify({'success': True, 'data': result.data, 'message': result.message})
@@ -596,14 +612,14 @@ def query_bo(object_type):
 
 
 # [SPR-08 T-S14-01] relationship 过滤白名单数据化
-# 简易白名单过滤 (前端用 crud_query 行为对齐: 多值字段用 __in, 逗号分隔)
+# 简易白名单过滤 (前端用 crud_query 行为对齐: 多值 field用 __in, 逗号分隔)
 # 注: relation_code 不在这里, 因为它跟 relation_code__in 互斥 (优先级 __in > 精确)
 # [CHANGED 2026-06-13] 移除 version_code - relationships 表无此列, 使用 version_id 过滤
 _RELATIONSHIP_SIMPLE_EQ_FIELDS = ('version_id', 'product_code')
-_RELATIONSHIP_IN_FIELD_KEYS = ('category_types__in', 'category_type__in', 'category_types', 'category_type')  # 复用同一 SQL 字段 category_type
+_RELATIONSHIP_IN_FIELD_KEYS = ('category_types__in', 'category_type__in', 'category_types', 'category_type')  # 复用同一 SQL  field category_type
 # [FIX 2026-06-15] 增加 relation_type IN 支持
-# 过滤面板的"关系类型"选的是 relation_type 枚举值 (GENERATES/UPDATES/TRIGGERS/REFERENCES),
-# 这些值会通过 relation_type__in 传到这里. 旧版本只支持 relation_code (历史字段) 导致查询返回空.
+# 过滤面板的"关系类型"选的 is  relation_type 枚举值 (GENERATES/UPDATES/TRIGGERS/REFERENCES),
+# 这些值会通过 relation_type__in 传到这里. 旧版本只支持 relation_code (历史 field) 导致查询返回空.
 _RELATIONSHIP_IN_FIELD_KEYS_FOR_TYPE = ('relation_type__in', 'relation_types__in', 'relation_type', 'relation_types')
 
 
@@ -639,7 +655,7 @@ def _build_relationship_filter_clause(clean_filters: dict) -> tuple:
         bind_params.append(clean_filters['relation_code'])
 
     # [FIX 2026-06-15] relation_type / relation_types 多值 IN
-    # 过滤面板"关系类型"下选的是 relation_type 枚举值, 走这个分支
+    # 过滤面板"关系类型"下选的 is  relation_type 枚举值, 走这个分支
     for key in _RELATIONSHIP_IN_FIELD_KEYS_FOR_TYPE:
         if key in clean_filters and clean_filters[key]:
             rts = [c.strip() for c in str(clean_filters[key]).split(',') if c.strip()]
@@ -666,7 +682,7 @@ def _build_relationship_filter_clause(clean_filters: dict) -> tuple:
 def _query_relationship_with_scope(page, page_size, offset, clean_filters, scope_sql, is_desc):
     """[FIX 2026-06-10] relationship + scope 排序专用查询路径.
 
-    DB 中 category_label / category_type 列大多为 NULL, 排序必须用 CASE WHEN 内联子查询
+    DB 中 category_label / category_type 列大多为 NULL, 排序 required须用 CASE WHEN 内联子查询
     计算层级 scope. 直接走 data_source.execute, 复用 special_routes_api 的 scope SQL.
 
     过滤白名单见 _RELATIONSHIP_SIMPLE_EQ_FIELDS / _RELATIONSHIP_IN_FIELD_KEYS.
@@ -685,7 +701,7 @@ def _query_relationship_with_scope(page, page_size, offset, clean_filters, scope
     direction = 'DESC' if is_desc else 'ASC'
     logger.info(f"[_query_relationship_with_scope] is_desc={is_desc}, direction={direction}")
     # 注意: scope_sql 使用了别名 r (r.source_bo_id, r.target_bo_id 等)
-    # 因此 FROM 子句必须使用相同的别名
+    # 因此 FROM 子句 required须使用相同的别名
     data_sql = f"""
         SELECT r.* FROM relationships r
         WHERE {where_clause}
@@ -698,11 +714,11 @@ def _query_relationship_with_scope(page, page_size, offset, clean_filters, scope
     columns_desc = [desc[0] for desc in cursor.description]
     raw_data = [dict(zip(columns_desc, row)) for row in cursor.fetchall()]
 
-    # [FIX 2026-06-11] 必须在 compute_by_semantics 前显式填充 source/target hierarchy ids,
-    # 否则 compute_scope 把所有关系 fallback 为 '同服务模块' (因为 source_domain_id 全是 None),
-    # 用户看到所有行 category_label 都是 '同服务模块', 误以为排序乱序.
-    # SQL 排序实际是对的 (id=29 sort_key=1, id=2-28 sort_key=3, id=1-27 sort_key=4),
-    # 但前端展示因 category_label 都是 '同服务模块' 而显得毫无变化.
+    # [FIX 2026-06-11]  required须在 compute_by_semantics 前显式充 source/target hierarchy ids,
+    # 否则 compute_scope 把所有关系 fallback 为 '同服务模块' (因为 source_domain_id 全 is  None),
+    # user看到所有行 category_label 都 is  '同服务模块', 误以为排序乱序.
+    # SQL 排序实际 is 对的 (id=29 sort_key=1, id=2-28 sort_key=3, id=1-27 sort_key=4),
+    # 但前端展示因 category_label 都 is  '同服务模块' 而显得毫无变化.
     from meta.services.query.computed_utils import ensure_hierarchy_ids_for_relationships
     ensure_hierarchy_ids_for_relationships(ds, raw_data)
     computation_service.compute_by_semantics('relationship', raw_data)
@@ -875,7 +891,7 @@ def query_associations_bo(object_type, obj_id, association_name):
     bo = _get_bo()
     page = int(request.args.get('page', 1))
     page_size = int(request.args.get('page_size', request.args.get('pageSize', 50)))
-    page_size = max(1, min(page_size, MAX_USER_PAGE_SIZE))  # 防止 DoS：限制用户输入
+    page_size = max(1, min(page_size, MAX_USER_PAGE_SIZE))  # 防止 DoS：限制user输入
 
     filters, ordering, search = _extract_assoc_query_params(request.args)
 
@@ -947,7 +963,7 @@ def count_associations_v2(object_type, obj_id, association_name):
 @bo_bp.route('/<object_type>/<int:obj_id>/$associations/<association_name>/assign', methods=['POST'])
 @login_required
 def assign_association_v2(object_type, obj_id, association_name):
-    """分配单个关联 - v2 API (返回 204)"""
+    """assign单个关联 - v2 API (返回 204)"""
     bo = _get_bo()
     data = request.get_json(silent=True) or {}
     target_id = data.get('target_id') or data.get('tgt_id')
@@ -985,7 +1001,7 @@ def assign_association_v2(object_type, obj_id, association_name):
 @bo_bp.route('/<object_type>/<int:obj_id>/$associations/<association_name>/unassign', methods=['POST'])
 @login_required
 def unassign_association_v2(object_type, obj_id, association_name):
-    """取消分配单个关联 - v2 API (返回 204)"""
+    """unassignassign单个关联 - v2 API (返回 204)"""
     bo = _get_bo()
     data = request.get_json(silent=True) or {}
     association_record_id = data.get('association_record_id')
@@ -1052,7 +1068,7 @@ def unassign_association_v2(object_type, obj_id, association_name):
 @bo_bp.route('/<object_type>/<int:obj_id>/$associations/<association_name>/batch_assign', methods=['POST'])
 @login_required
 def batch_assign_associations_v2(object_type, obj_id, association_name):
-    """批量分配关联 - v2 API"""
+    """批量assign关联 - v2 API"""
     bo = _get_bo()
     data = request.get_json(silent=True) or {}
     target_ids = data.get('target_ids', [])
@@ -1091,7 +1107,7 @@ def batch_assign_associations_v2(object_type, obj_id, association_name):
 @bo_bp.route('/<object_type>/<int:obj_id>/$associations/<association_name>/batch_unassign', methods=['POST'])
 @login_required
 def batch_unassign_associations_v2(object_type, obj_id, association_name):
-    """批量取消分配关联 - v2 API"""
+    """批量unassignassign关联 - v2 API"""
     bo = _get_bo()
     data = request.get_json(silent=True) or {}
     target_ids = data.get('target_ids', [])
@@ -1158,7 +1174,7 @@ def batch_query_associations(object_type, association_name):
     page = data.get('page', 1)
     page_size = data.get('page_size', data.get('pageSize', 20))
     try:
-        page_size = max(1, min(int(page_size), MAX_USER_PAGE_SIZE))  # 防止 DoS：限制用户输入
+        page_size = max(1, min(int(page_size), MAX_USER_PAGE_SIZE))  # 防止 DoS：限制user输入
     except (TypeError, ValueError):
         page_size = 20
     search = data.get('search', '')
@@ -1208,7 +1224,7 @@ def retrieve_with_associations(object_type, obj_id):
 @bo_bp.route('/<object_type>/batch-delete', methods=['POST'])
 @login_required
 def batch_delete_bo(object_type):
-    """批量删除记录"""
+    """批量delete记录"""
     from meta.services.manage_service import ManageService
     
     body = request.get_json(silent=True) or {}
@@ -1216,13 +1232,13 @@ def batch_delete_bo(object_type):
     force = body.get('force', False)
     
     if not ids:
-        return jsonify({'success': False, 'message': '请提供要删除的记录ID'}), 400
+        return jsonify({'success': False, 'message': '请提供要delete的记录ID'}), 400
     
     try:
         bo = _get_bo()
         manage_service = ManageService(bo._data_source)
         
-        # 设置审计用户
+        # 设置审计user
         current_user = getattr(g, 'current_user', None) or {}
         user_id = current_user.get('user_id') or request.headers.get('X-User-Id')
         user_name = current_user.get('display_name') or current_user.get('username') or request.headers.get('X-User-Name', '')
@@ -1286,14 +1302,14 @@ def v2_list_records_post(object_type):
 @bo_bp.route('/<object_type>/batch-create', methods=['POST'])
 @login_required
 def v2_batch_create(object_type):
-    """批量创建 — 委托给 v1 manage_api"""
+    """批量create — 委托给 v1 manage_api"""
     return _v1_handlers()['batch_create'](object_type)
 
 
 @bo_bp.route('/<object_type>/batch-update', methods=['POST'])
 @login_required
 def v2_batch_update(object_type):
-    """批量更新 — 委托给 v1 manage_api"""
+    """批量update — 委托给 v1 manage_api"""
     return _v1_handlers()['batch_update'](object_type)
 
 
@@ -1307,21 +1323,21 @@ def v2_list_actions(object_type, obj_id):
 @bo_bp.route('/<object_type>/<int:obj_id>/actions', methods=['GET'])
 @login_required
 def v2_list_actions_string(object_type, obj_id):
-    """[path variant] 字符串 id 兼容 — 委托给 v1 manage_api"""
+    """[path variant]  field符串 id 兼容 — 委托给 v1 manage_api"""
     return _v1_handlers()['list_actions'](object_type, obj_id)
 
 
 @bo_bp.route('/<object_type>/<int:obj_id>/recover', methods=['POST'])
 @login_required
 def v2_recover_from_log(object_type, obj_id):
-    """从 audit_log 恢复已删除 — 委托给 v1 manage_api"""
+    """从 audit_log 恢复已delete — 委托给 v1 manage_api"""
     return _v1_handlers()['recover_from_log'](object_type, obj_id)
 
 
 @bo_bp.route('/<object_type>/deleted', methods=['GET'])
 @login_required
 def v2_list_deleted_objects(object_type):
-    """查询已删除对象 — 委托给 v1 manage_api"""
+    """查询已delete对象 — 委托给 v1 manage_api"""
     return _v1_handlers()['list_deleted_objects'](object_type)
 
 
@@ -1442,11 +1458,11 @@ def get_architecture_preview():
             new_sd_ids = expanded['sd'] - existing_sd_ids
             new_sm_ids = expanded['sm'] - existing_sm_ids
             new_bo_ids = expanded['bo'] - existing_bo_ids
-            # 4. 拉元数据并加入列表 (is_external=false 因为是"已扩展 dim scope")
+            # 4. 拉元数据并加入列表 (is_external=false 因为 is "已扩展 dim scope")
             if new_bo_ids:
                 ph = ','.join('?' * len(new_bo_ids))
                 # [V1.1.13 fix] 外部 BO 的 domain_id/sub_domain_id 可能为 NULL,
-                # 必须通过 SM→SD→D 链路获取层级信息
+                #  required须通过 SM→SD→D 链路获取层级信息
                 rows = _ds2.execute(
                     f"SELECT bo.id, bo.code, bo.name, bo.domain_id, bo.sub_domain_id, "
                     f"bo.service_module_id, bo.visibility, "
@@ -1539,10 +1555,10 @@ def get_architecture_preview():
             logger.warning(f'[V1.1.13] dim scope inclusion failed: {e}')
 
         # ── [v32 2026-06-11] 补全 hierarchy 范围（外部 BO 引用的 SM/SD/Domain 需保留）
-        # 场景：用户在管理页勾选 SM 范围 + 关系范围"内+外部"，
+        # 场景：user在管理页勾选 SM 范围 + 关系范围"内+外部"，
         #      外部 SM 的 BO 会出现在 business_objects 中（因 bo_id_list 为空），
         #      但 modules/sub_domains/domains 已被严格过滤掉。
-        # 结果：前端 buildServiceModules 无法为外部 SM 创建容器，
+        # 结果：前端 buildServiceModules 无法为外部 SM create容器，
         #      外部 SM 的 BO 变成蓝色孤儿节点。
         # 修复：从 business_objects 反推缺失的 SM/SD/Domain 并补回。
         module_id_set = set(module_id_list) if module_id_list else None
@@ -1588,12 +1604,12 @@ def get_architecture_preview():
         #   → cross-boundary 关系的 target BO 在域外, 不在 business_objects
         #   → 图表渲染: 边存在 (target_bo_name 来自关系 join), 节点缺失
         #   → 图表显示异常: 5 个孤立节点 + 10 条边 (其中 3 条指向"幽灵节点")
-        # 业界标准 (SAP 字段级授权 + Salesforce OWD 引用模式):
+        # 业界标准 (SAP  field级授权 + Salesforce OWD 引用模式):
         #   关系引用的 BO 走"上下文读取"模式, 元数据 (id/code/name/type/domain) 可见
-        #   敏感字段 (description / attributes / custom_field) 仍受 BO 自身 dim scope 控制
-        #   (v1.1.10 单条 get 已加 dim scope 校验, 这里补的是"图谱节点元数据"可见性)
+        #   敏感 field (description / attributes / custom_field) 仍受 BO 自身 dim scope 控制
+        #   (v1.1.10 单条 get 已加 dim scope 校验, 这里补的 is "图谱节点元数据"可见性)
         # 实施: 收集所有关系引用的 BO id, diff 出"在关系里但不在 business_objects"
-        #       的 BO, 用 raw SQL 拉元数据字段 (绕过 DataPermissionInterceptor),
+        #       的 BO, 用 raw SQL 拉元数据 field (绕过 DataPermissionInterceptor),
         #       标记 is_external=true 让前端区分 (灰显/特殊样式)
         try:
             _ds = _get_data_source()
@@ -1681,7 +1697,7 @@ def get_architecture_preview():
                     else:
                         eff_domain_id = row[7] if row[7] else row[3]
                         eff_sub_domain_id = row[8] if row[8] else row[4]
-                    # 收集层级 id (无论是否跳过, 都需要用于容器补全)
+                    # 收集层级 id (无论 is 否跳过, 都需要用于容器补全)
                     if eff_domain_id: ext_domain_ids.add(eff_domain_id)
                     if eff_sub_domain_id: ext_sd_ids.add(eff_sub_domain_id)
                     sm_id = (version_bo_map.get(bo_code, [None])[5]
@@ -1729,7 +1745,7 @@ def get_architecture_preview():
                 # 原 bug: V32 的 hierarchy 补全在 V1.1.11 之前跑, 看不到 V1.1.11 补的外部 BO
                 #   → 图表渲染: 外部 BO 节点有 data, 但没有父级 group 包裹, 变成蓝色孤儿
                 # 修复: V1.1.11 补完外部 BO 后, 再从 business_objects (含外部) 反推 SM/SD/Domain
-                # 业界标准: 拉容器 id+name+parent_id 3 字段, 不拉 description/其他敏感字段
+                # 业界标准: 拉容器 id+name+parent_id 3  field, 不拉 description/其他敏感 field
                 # ────────────────────────────────────────────
                 # 收集当前 business_objects 涉及的 SM/SD/Domain id
                 # (注意: V1.1.11 补的 BO 也在 business_objects 内, 所以这里能拿到外部的)
@@ -1850,8 +1866,8 @@ def get_architecture_preview():
             center_scope = [b.get('code', '') for b in business_objects if b.get('domain_id') in domain_id_list]
         else:
             # [V1.2.9] 无显式过滤参数时，dim scope 过滤后的 domains 即为中心范围
-            # DataPermissionInterceptor 已按用户 dim scope 过滤了 domains
-            # 非 is_external 的 BO 都在用户 dim scope 内，即中心范围
+            # DataPermissionInterceptor 已按user dim scope 过滤了 domains
+            # 非 is_external 的 BO 都在user dim scope 内，即中心范围
             center_scope = [b.get('code', '') for b in business_objects if not b.get('is_external')]
 
         # ── Relation Classification（scope_type + category_type 下沉到后端）──
@@ -1868,7 +1884,7 @@ def get_architecture_preview():
         center_scope_set = set(center_scope)
         bo_code_map = {b.get('code'): b.get('id') for b in business_objects if b.get('code')}
 
-        # 对每条 relationship 附加 scope_type 和 category_type
+        # 对每条 relationship 附加 scope_type  and  category_type
         for rel in relationships:
             src_code = rel.get('source_code') or rel.get('sourceCode')
             tgt_code = rel.get('target_code') or rel.get('targetCode')
@@ -1879,7 +1895,7 @@ def get_architecture_preview():
                 rel['category_type'] = 'cross-domain'
                 continue
 
-            # 获取源和目标 BO 的层级信息
+            # 获取源 and 目标 BO 的层级信息
             src_bo_id = bo_code_map.get(src_code)
             tgt_bo_id = bo_code_map.get(tgt_code)
             src_info = bo_id_map.get(src_bo_id, {}) if src_bo_id else {}
@@ -1924,16 +1940,16 @@ def get_architecture_preview():
             rel['category_type'] = category_type
 
         # [V1.2.4→V1.2.9] 过滤 external 关系（对象范围外）
-        # DataPermissionInterceptor V1.2.9 已过滤权限域外关系（source 和 target 都不在 dim scope 内）
-        # 这里过滤的是对象范围外关系（source 和 target 都不在 center_scope 内）
+        # DataPermissionInterceptor V1.2.9 已过滤permission域外关系（source  and  target 都不在 dim scope 内）
+        # 这里过滤的 is 对象范围外关系（source  and  target 都不在 center_scope 内）
         # 两层过滤互补:
-        #   - 权限域外: source 和 target 都不在 dim scope (如库存管理→销售管理, 对采购管理用户)
-        #   - 对象范围外: source 和 target 都不在 center_scope (如跨权限域但不在选中范围内)
+        #   - permission域外: source  and  target 都不在 dim scope (如库存管理→销售管理, 对采购管理user)
+        #   - 对象范围外: source  and  target 都不在 center_scope (如跨permission域但不在选中范围内)
         relationships = [r for r in relationships if r.get('scope_type') != 'external']
 
-        # ── [V_NEW 2026-06-29] annotation 聚合 - 备注文本是辅助信息, 不影响主路径
-        # 主线不受影响: 失败时所有 BO/Rel/SM/SD/D 都返回空 annotation_content/category
-        # 这样前端 archDataConverter 即使没拿到字段也不会报错
+        # ── [V_NEW 2026-06-29] annotation 聚合 - 备注文本 is 辅助信息, 不影响主路径
+        # 主线不受影响: failed时所有 BO/Rel/SM/SD/D 都返回空 annotation_content/category
+        # 这样前端 archDataConverter 即使没拿到 field也不会报错
         try:
             from meta.services.preview_service import aggregate_annotations_for_targets
 
@@ -1979,7 +1995,7 @@ def get_architecture_preview():
                 d['annotation_contents'] = ann['contents']
                 d['annotation_categories'] = ann['categories']
         except Exception as e:
-            # 主线不受影响: annotation 聚合失败时, 给所有对象填空数组
+            # 主线不受影响: annotation 聚合failed时, 给所有对象空数组
             logger.warning(f'[bo_api.get_architecture_preview] annotation aggregation failed: {e}')
             for b in business_objects:
                 b.setdefault('annotation_contents', [])
@@ -2070,7 +2086,7 @@ def get_state_transitions(object_type, obj_id):
 @bo_bp.route('/<object_type>/<path:obj_id>/state_transitions', methods=['GET'])
 @login_required
 def get_state_transitions_by_string_id(object_type, obj_id):
-    """支持字符串ID的状态转换路由"""
+    """支持 field符串ID的状态转换路由"""
     meta_obj = registry.get(object_type)
     if not meta_obj:
         return jsonify({'success': False, 'message': f'Object type not found: {object_type}'}), 404
@@ -2303,7 +2319,7 @@ def get_full_openapi():
 @meta_v2_bp.route('/<object_type>/field-policies', methods=['GET'])
 @login_required
 def get_field_policies(object_type):
-    """获取字段策略评估结果"""
+    """获取 field策略评估结果"""
     try:
         context = request.args.get('context', 'read')
         mutability = request.args.get('mutability', None)
@@ -2587,10 +2603,10 @@ role_v2_bp = Blueprint('role_v2', __name__, url_prefix='/api/v2/roles')
 @role_v2_bp.route('/<int:role_id>/unified-permissions', methods=['GET'])
 @login_required
 def get_role_unified_permissions(role_id):
-    """获取角色的统一权限（菜单权限矩阵）
+    """获取角色的统一permission（菜单permission矩阵）
 
-    权限计算公式: effective = (auto_menu ∪ manual_include) - manual_exclude
-    - auto_menu: 已分配菜单的 required_permissions 自动派生
+    permission计算公式: effective = (auto_menu ∪ manual_include) - manual_exclude
+    - auto_menu: 已assign菜单的 required_permissions 自动派生
     - manual_include: role_permissions 中 granted=1 的记录
     - manual_exclude: role_permissions 中 granted=0 的记录
     """
@@ -2600,7 +2616,7 @@ def get_role_unified_permissions(role_id):
         ds = _get_data_source()
         menu_service = MenuPermissionService(ds)
 
-        # 获取角色已分配的菜单
+        # 获取角色已assign的菜单
         cursor = ds.execute("""
             SELECT rmp.menu_code, m.menu_name, m.menu_path, m.icon, m.sort_order
             FROM role_menu_permissions rmp
@@ -2621,7 +2637,7 @@ def get_role_unified_permissions(role_id):
                 'required_permissions': []
             }
 
-        # 查询角色的手动权限覆盖（include/exclude）
+        # 查询角色的手动permission覆盖（include/exclude）
         cursor = ds.execute("""
             SELECT rp.permission_id, rp.granted, p.code
             FROM role_permissions rp
@@ -2668,10 +2684,10 @@ def get_role_unified_permissions(role_id):
 
         # 动作标签映射
         action_labels = {
-            'read': '查看', 'create': '创建', 'update': '编辑',
-            'delete': '删除', 'list': '列表', 'manage': '管理',
-            'export': '导出', 'import': '导入', 'assign': '分配',
-            'unassign': '取消分配', 'associate': '关联', 'dissociate': '取消关联',
+            'read': '查看', 'create': 'create', 'update': '编辑',
+            'delete': 'delete', 'list': '列表', 'manage': '管理',
+            'export': '导出', 'import': '导入', 'assign': 'assign',
+            'unassign': 'unassignassign', 'associate': '关联', 'dissociate': 'unassign关联',
             'grant': '授权', 'revoke': '撤销',
         }
 
@@ -2690,12 +2706,12 @@ def get_role_unified_permissions(role_id):
             is_assigned = menu_code in assigned_menus
             required_perms = []
             for perm_code in required_perm_codes:
-                # 解析权限代码: "domain:read" -> domain, read
+                # 解析permission代码: "domain:read" -> domain, read
                 parts = perm_code.split(':')
                 resource = parts[0] if len(parts) > 0 else perm_code
                 action = parts[1] if len(parts) > 1 else 'read'
 
-                # 计算权限状态
+                # 计算permission状态
                 if perm_code in manual_overrides:
                     override = manual_overrides[perm_code]
                     granted = override['granted']
@@ -2722,7 +2738,7 @@ def get_role_unified_permissions(role_id):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
             # 按 BO 分组推导动作分组状态
-            # 收集每个 resource 的权限状态
+            # 收集每个 resource 的permission状态
             resource_perms = {}  # {resource: {action: {granted, source}}}
             for perm_code in required_perm_codes:
                 parts = perm_code.split(':')
@@ -2730,7 +2746,7 @@ def get_role_unified_permissions(role_id):
                 action = parts[1] if len(parts) > 1 else 'read'
                 if resource not in resource_perms:
                     resource_perms[resource] = {}
-                # 获取该权限的计算结果
+                # 获取该permission的计算结果
                 for p in required_perms:
                     if p['code'] == perm_code:
                         resource_perms[resource][action] = {
@@ -2745,7 +2761,7 @@ def get_role_unified_permissions(role_id):
                 groups = {}
                 for group_key, group_def in ACTION_GROUPS.items():
                     group_actions = group_def['actions']
-                    # 检查该 BO 是否有这些动作的权限
+                    # 检查该 BO  is 否有这些动作的permission
                     available_actions = [a for a in group_actions if a in actions_map]
                     if not available_actions:
                         continue  # 该 BO 没有此分组的动作
@@ -2836,7 +2852,7 @@ def get_role_unified_permissions(role_id):
 @role_v2_bp.route('/<int:role_id>/menu-permissions', methods=['PUT'])
 @login_required
 def update_role_menu_permissions(role_id):
-    """更新角色的菜单权限和功能权限
+    """update角色的菜单permission and 功能permission
 
     请求体:
     {
@@ -2847,7 +2863,7 @@ def update_role_menu_permissions(role_id):
         ]
     }
 
-    采用全量替换策略：DELETE 该角色所有 role_permissions 记录，再 INSERT 请求中的手动权限。
+    采用全量替换策略：DELETE 该角色所有 role_permissions 记录，再 INSERT 请求中的手动permission。
     """
     try:
         ds = _get_data_source()
@@ -2865,7 +2881,7 @@ def update_role_menu_permissions(role_id):
         permissions = data.get('permissions', [])
 
         with ds.transaction():
-            # 1. 保存菜单分配
+            # 1. 保存菜单assign
             ds.execute("DELETE FROM role_menu_permissions WHERE role_id = ?", [role_id])
             for menu_code in menu_codes:
                 ds.execute(
@@ -2873,7 +2889,7 @@ def update_role_menu_permissions(role_id):
                     [role_id, menu_code]
                 )
 
-            # 2. 全量替换手动权限 include/exclude
+            # 2. 全量替换手动permission include/exclude
             ds.execute("DELETE FROM role_permissions WHERE role_id = ?", [role_id])
             for perm in permissions:
                 perm_code = perm.get('code', '')
@@ -2886,7 +2902,7 @@ def update_role_menu_permissions(role_id):
                         VALUES (?, ?, ?, CURRENT_TIMESTAMP)
                     """, [role_id, perm_row[0], 1 if granted else 0])
 
-        # [FIX 2026-06-12] 角色 v2 菜单权限审计日志: 关联到角色对象
+        # [FIX 2026-06-12] 角色 v2 菜单permission审计日志: 关联到角色对象
         write_permission_config_audit(
             action='UPDATE',
             object_type='role_v2_menu_permissions',
@@ -2898,7 +2914,7 @@ def update_role_menu_permissions(role_id):
 
         return jsonify({
             'success': True,
-            'message': f'已更新 {len(menu_codes)} 个菜单权限和 {len(permissions)} 个功能权限'
+            'message': f'已update {len(menu_codes)} 个菜单permission and  {len(permissions)} 个功能permission'
         })
     except Exception as e:
         import traceback
@@ -2911,10 +2927,154 @@ def update_role_menu_permissions(role_id):
 permission_rule_v2_bp = Blueprint('permission_rule_v2', __name__, url_prefix='/api/v2/permission-rules')
 
 
+permission_set_v2_bp = Blueprint('permission_set_v2', __name__, url_prefix='/api/v2/permission-sets')
+
+
+def _get_permission_set_service():
+    from meta.services.permission_set_service import PermissionSetService
+    from meta.core.bo_framework import bo_framework
+    return PermissionSetService(bo_framework._data_source)
+
+
+@permission_set_v2_bp.route('', methods=['GET'])
+@login_required
+def list_permission_sets_v2():
+    try:
+        svc = _get_permission_set_service()
+        items = svc.list_all()
+        return jsonify({'success': True, 'data': items})
+    except Exception as e:
+        import traceback
+        logger.error(f"[P13-T4] list-permission-sets error: {e}\n{traceback.format_exc()}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@permission_set_v2_bp.route('', methods=['POST'])
+@login_required
+def create_permission_set_v2():
+    try:
+        svc = _get_permission_set_service()
+        data = request.get_json(silent=True) or {}
+        if not data.get('code') or not data.get('name'):
+            return jsonify({'success': False, 'message': 'code and name are required fields'}), 400
+        ps_id = svc.create({
+            'code': data['code'],
+            'name': data['name'],
+            'description': data.get('description', ''),
+        })
+        if ps_id is None:
+            return jsonify({'success': False, 'message': 'Failed to create Permission Set'}), 500
+        return jsonify({'success': True, 'data': {'id': ps_id, 'code': data['code']}, 'message': 'Permission Set created successfully'}), 201
+    except Exception as e:
+        import traceback
+        logger.error(f"[P13-T4] create-permission-set error: {e}\n{traceback.format_exc()}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@permission_set_v2_bp.route('/<int:ps_id>', methods=['GET'])
+@login_required
+def get_permission_set_v2(ps_id):
+    try:
+        svc = _get_permission_set_service()
+        ps = svc.get_by_id(ps_id)
+        if ps is None:
+            return jsonify({'success': False, 'message': 'Not found'}), 404
+        return jsonify({'success': True, 'data': ps})
+    except Exception as e:
+        logger.error(f"[P13-T4] get-permission-set error: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@permission_set_v2_bp.route('/<int:ps_id>', methods=['PUT'])
+@login_required
+def update_permission_set_v2(ps_id):
+    try:
+        svc = _get_permission_set_service()
+        data = request.get_json(silent=True) or {}
+        if svc.update(ps_id, data):
+            return jsonify({'success': True, 'message': 'Update successful'})
+        return jsonify({'success': False, 'message': 'Update failed'}), 400
+    except Exception as e:
+        logger.error(f"[P13-T4] update-permission-set error: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@permission_set_v2_bp.route('/<int:ps_id>', methods=['DELETE'])
+@login_required
+def delete_permission_set_v2(ps_id):
+    try:
+        svc = _get_permission_set_service()
+        if svc.delete(ps_id):
+            return jsonify({'success': True, 'message': 'Delete successful'})
+        return jsonify({'success': False, 'message': 'Delete failed'}), 400
+    except Exception as e:
+        logger.error(f"[P13-T4] delete-permission-set error: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@permission_set_v2_bp.route('/<int:ps_id>/assign', methods=['POST'])
+@login_required
+def assign_permission_set_v2(ps_id):
+    try:
+        svc = _get_permission_set_service()
+        data = request.get_json(silent=True) or {}
+        user_id = data.get('user_id')
+        if not user_id:
+            return jsonify({'success': False, 'message': 'user_id is a required field'}), 400
+        if svc.assign_to_user(user_id, ps_id):
+            return jsonify({'success': True, 'message': 'Assign successful'}), 201
+        return jsonify({'success': False, 'message': 'Assign failed'}), 400
+    except Exception as e:
+        logger.error(f"[P13-T4] assign-permission-set error: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@permission_set_v2_bp.route('/<int:ps_id>/unassign', methods=['POST'])
+@login_required
+def unassign_permission_set_v2(ps_id):
+    try:
+        svc = _get_permission_set_service()
+        data = request.get_json(silent=True) or {}
+        user_id = data.get('user_id')
+        if not user_id:
+            return jsonify({'success': False, 'message': 'user_id is a required field'}), 400
+        if svc.unassign_from_user(user_id, ps_id):
+            return jsonify({'success': True, 'message': 'Unassign successful'})
+        return jsonify({'success': False, 'message': 'Unassign failed'}), 400
+    except Exception as e:
+        logger.error(f"[P13-T4] unassign-permission-set error: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@permission_set_v2_bp.route('/<int:ps_id>/permissions', methods=['GET'])
+@login_required
+def list_set_permissions_v2(ps_id):
+    try:
+        svc = _get_permission_set_service()
+        perms = svc.get_set_permissions(ps_id)
+        return jsonify({'success': True, 'data': perms})
+    except Exception as e:
+        logger.error(f"[P13-T4] list-set-permissions error: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@permission_set_v2_bp.route('/user/<int:user_id>', methods=['GET'])
+@login_required
+def list_user_permission_sets_v2(user_id):
+    try:
+        svc = _get_permission_set_service()
+        items = svc.get_user_permission_sets(user_id)
+        return jsonify({'success': True, 'data': items})
+    except Exception as e:
+        logger.error(f"[P13-T4] list-user-permission-sets error: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+
 @permission_rule_v2_bp.route('', methods=['GET'])
 @login_required
 def list_permission_rules_v2():
-    """获取权限规则列表"""
+    """获取permission规则列表"""
     try:
         from meta.services.condition_permission_service import ConditionPermissionService
         from meta.core.bo_framework import bo_framework
@@ -2938,7 +3098,7 @@ def list_permission_rules_v2():
 @permission_rule_v2_bp.route('', methods=['POST'])
 @login_required
 def create_permission_rule_v2():
-    """创建权限规则"""
+    """createpermission规则"""
     try:
         from meta.services.condition_permission_service import ConditionPermissionService
         from meta.core.bo_framework import bo_framework
@@ -2950,9 +3110,9 @@ def create_permission_rule_v2():
         required_fields = ['role_id', 'resource_type', 'condition']
         for field in required_fields:
             if not data.get(field):
-                return jsonify({'success': False, 'message': f'{field} 是必填字段'}), 400
+                return jsonify({'success': False, 'message': f'{field}  is  required field'}), 400
         
-        # 获取当前用户
+        # 获取当前user
         current_user = getattr(g, 'current_user', None) or {}
         user_id = current_user.get('user_id')
         
@@ -2972,7 +3132,7 @@ def create_permission_rule_v2():
         return jsonify({
             'success': True,
             'data': {'id': rule_id},
-            'message': '权限规则创建成功'
+            'message': 'permission规则createsuccessful'
         }), 201
     except Exception as e:
         import traceback
@@ -2983,7 +3143,7 @@ def create_permission_rule_v2():
 @permission_rule_v2_bp.route('/<int:rule_id>', methods=['PUT'])
 @login_required
 def update_permission_rule_v2(rule_id):
-    """更新权限规则"""
+    """updatepermission规则"""
     try:
         from meta.services.condition_permission_service import ConditionPermissionService
         from meta.core.bo_framework import bo_framework
@@ -2995,8 +3155,8 @@ def update_permission_rule_v2(rule_id):
         success = service.update_rule(rule_id, data)
         
         if success:
-            return jsonify({'success': True, 'message': '权限规则更新成功'})
-        return jsonify({'success': False, 'message': '更新失败'}), 400
+            return jsonify({'success': True, 'message': 'permission规则updatesuccessful'})
+        return jsonify({'success': False, 'message': 'updatefailed'}), 400
     except Exception as e:
         import traceback
         logger.error(f"[bo_api] update-permission-rule-v2 error: {e}\n{traceback.format_exc()}")
@@ -3006,7 +3166,7 @@ def update_permission_rule_v2(rule_id):
 @permission_rule_v2_bp.route('/<int:rule_id>', methods=['DELETE'])
 @login_required
 def delete_permission_rule_v2(rule_id):
-    """删除权限规则"""
+    """deletepermission规则"""
     try:
         from meta.services.condition_permission_service import ConditionPermissionService
         from meta.core.bo_framework import bo_framework
@@ -3016,8 +3176,8 @@ def delete_permission_rule_v2(rule_id):
         success = service.delete_rule(rule_id)
         
         if success:
-            return jsonify({'success': True, 'message': '权限规则删除成功'})
-        return jsonify({'success': False, 'message': '删除失败'}), 400
+            return jsonify({'success': True, 'message': 'permission规则deletesuccessful'})
+        return jsonify({'success': False, 'message': 'deletefailed'}), 400
     except Exception as e:
         import traceback
         logger.error(f"[bo_api] delete-permission-rule-v2 error: {e}\n{traceback.format_exc()}")
@@ -3036,8 +3196,8 @@ _TYPE_MAP = {
 
 
 def _map_field_type(field_type) -> str:
-    """将内部字段类型映射为 OpenAPI/JSON Schema 类型（兼容 enum 和 str）"""
-    # 兼容 FieldType enum（.value / .name）和 str
+    """将内部 field类型映射为 OpenAPI/JSON Schema 类型（兼容 enum  and  str）"""
+    # 兼容 FieldType enum（.value / .name） and  str
     if hasattr(field_type, 'value'):
         field_type = field_type.value
     return _TYPE_MAP.get(str(field_type), 'string')
@@ -3047,18 +3207,18 @@ def _generate_bo_schema(meta_object) -> dict:
     """
     [DECORATIVE] [NEW] v1.2 / FR-2.3: 将 MetaObject 转换为 OpenAPI components/schemas 子对象
 
-    防御: 用 getattr(field, 'xxx', None) 处理字段可能缺失的属性
+    防御: 用 getattr(field, 'xxx', None) 处理 field可能缺失的属性
     """
     properties = {}
     required = []
     for field in meta_object.fields:
-        # MetaField 用 .field_type（FieldType enum），不是 .type
+        # MetaField 用 .field_type（FieldType enum），不 is  .type
         field_type = getattr(field, 'field_type', None) or getattr(field, 'type', None)
         prop = {"type": _map_field_type(field_type)}
         if getattr(field, 'description', None):
             prop["description"] = field.description
         if getattr(field, 'enum_values', None):
-            # [DECORATIVE] [NEW] v1.2 / bug #4 fix: 兼容 enum_values 元素可能是 str 或 dict
+            # [DECORATIVE] [NEW] v1.2 / bug #4 fix: 兼容 enum_values 元素可能 is  str 或 dict
             enum_list = []
             for v in field.enum_values:
                 if isinstance(v, dict):
@@ -3067,7 +3227,7 @@ def _generate_bo_schema(meta_object) -> dict:
                     enum_list.append(v)  # 兼容 str / int
             if enum_list:
                 prop["enum"] = enum_list
-        # ui 可能是 dict 或 UIAnnotation 对象
+        # ui 可能 is  dict 或 UIAnnotation 对象
         ui = getattr(field, 'ui', None)
         if isinstance(ui, dict):
             relation = ui.get('relation')
@@ -3094,12 +3254,12 @@ def _generate_bo_crud_paths(meta_objects) -> dict:
 
     端点:
     - GET    /api/v2/bo/{type}            列表
-    - POST   /api/v2/bo/{type}            创建
+    - POST   /api/v2/bo/{type}            create
     - GET    /api/v2/bo/{type}/{id}       详情
-    - PUT    /api/v2/bo/{type}/{id}       更新
-    - DELETE /api/v2/bo/{type}/{id}       删除
+    - PUT    /api/v2/bo/{type}/{id}       update
+    - DELETE /api/v2/bo/{type}/{id}       delete
     - POST   /api/v2/bo/{type}/deep       深度插入
-    - POST   /api/v2/bo/{type}/batch-delete  批量删除
+    - POST   /api/v2/bo/{type}/batch-delete  批量delete
     """
     paths = {}
     for obj in meta_objects:
@@ -3126,7 +3286,7 @@ def _generate_bo_crud_paths(meta_objects) -> dict:
             },
             'post': {
                 'operationId': f'bo_{type_name}_create',
-                'summary': f'创建 {getattr(obj, "display_name", None) or type_name}',
+                'summary': f'create {getattr(obj, "display_name", None) or type_name}',
                 'tags': [type_tag],
                 'requestBody': {
                     'content': {
@@ -3136,7 +3296,7 @@ def _generate_bo_crud_paths(meta_objects) -> dict:
                     }
                 },
                 'responses': {
-                    '201': {'description': '已创建'},
+                    '201': {'description': '已create'},
                     '400': {'description': '参数错误'},
                 },
             },
@@ -3149,31 +3309,31 @@ def _generate_bo_crud_paths(meta_objects) -> dict:
                 'parameters': [{'name': 'id', 'in': 'path', 'required': True, 'schema': {'type': 'string'}}],
                 'responses': {
                     '200': {'description': '详情数据', 'content': {'application/json': {'schema': {'$ref': f'#/components/schemas/{type_name}'}}}},
-                    '404': {'description': '未找到'},
+                    '404': {'description': 'Not found'},
                 },
             },
             'put': {
                 'operationId': f'bo_{type_name}_update',
-                'summary': f'更新 {type_name}',
+                'summary': f'update {type_name}',
                 'tags': [type_tag],
                 'parameters': [{'name': 'id', 'in': 'path', 'required': True, 'schema': {'type': 'string'}}],
                 'requestBody': {
                     'content': {'application/json': {'schema': {'$ref': f'#/components/schemas/{type_name}'}}}
                 },
                 'responses': {
-                    '200': {'description': '已更新'},
+                    '200': {'description': '已update'},
                     '400': {'description': '参数错误'},
-                    '404': {'description': '未找到'},
+                    '404': {'description': 'Not found'},
                 },
             },
             'delete': {
                 'operationId': f'bo_{type_name}_delete',
-                'summary': f'删除 {type_name}',
+                'summary': f'delete {type_name}',
                 'tags': [type_tag],
                 'parameters': [{'name': 'id', 'in': 'path', 'required': True, 'schema': {'type': 'string'}}],
                 'responses': {
-                    '204': {'description': '已删除'},
-                    '404': {'description': '未找到'},
+                    '204': {'description': '已delete'},
+                    '404': {'description': 'Not found'},
                 },
             },
         }
@@ -3193,7 +3353,7 @@ def _generate_bo_crud_paths(meta_objects) -> dict:
         paths[f'{base}/batch-delete'] = {
             'post': {
                 'operationId': f'bo_{type_name}_batch_delete',
-                'summary': f'批量删除 {type_name}',
+                'summary': f'批量delete {type_name}',
                 'tags': [type_tag],
                 'requestBody': {
                     'content': {'application/json': {'schema': {
@@ -3202,7 +3362,7 @@ def _generate_bo_crud_paths(meta_objects) -> dict:
                     }}}
                 },
                 'responses': {
-                    '200': {'description': '已批量删除'},
+                    '200': {'description': '已批量delete'},
                 },
             }
         }

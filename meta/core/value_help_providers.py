@@ -189,6 +189,15 @@ class BoValueHelpProvider(ValueHelpProvider):
                 field = key[:-7]
                 values = [v.strip() for v in str(val).split(',') if v.strip()] if isinstance(val, str) else list(val)
                 filter_conditions.append({"field": field, "op": "not_in", "value": values})
+            elif key.endswith('__like'):
+                field = key[:-6]
+                filter_conditions.append({"field": field, "op": "like", "value": val})
+            elif key.endswith('__gte'):
+                field = key[:-5]
+                filter_conditions.append({"field": field, "op": "gte", "value": val})
+            elif key.endswith('__lte'):
+                field = key[:-5]
+                filter_conditions.append({"field": field, "op": "lte", "value": val})
             else:
                 filter_conditions.append({"field": key, "op": "eq", "value": val})
 

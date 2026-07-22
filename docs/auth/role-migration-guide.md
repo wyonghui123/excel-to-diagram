@@ -32,6 +32,50 @@
 - 阶段 2 让"没空配 dim scope"的角色暂不阻塞 (admin 仍要补, 但不影响业务)
 - 阶段 3 最终强制 (跟头部产品行为一致)
 
+### 0.4 权限模型说明 (必读 — 避免角色分配误判)
+
+> **[关键] 角色分配生效路径 = 用户组链路, 不是 user_roles 表**
+>
+> 本项目采用 **三层权限模型**, 角色通过用户组间接分配给用户:
+>
+> ```
+> users → user_group_members → user_groups → group_roles → roles
+>        (成员关系)            (用户组)      (组-角色绑定)  (角色定义)
+> ```
+>
+> | 表 | 作用 | 是否生效路径 |
+> |----|------|--------------|
+> | `user_group_members` | 用户加入哪个用户组 | ✅ 生效 |
+> | `user_groups` | 用户组定义 | ✅ 生效 |
+> | `group_roles` | 用户组绑定哪些角色 | ✅ 生效 |
+> | `roles` | 角色定义 (含 dim scope 配置) | ✅ 生效 |
+> | `user_roles` | **历史遗留直连表** (admin + 孤儿数据) | ❌ 不再使用 |
+>
+> **`user_roles` 是历史遗留表, 仅有 2 条记录 (admin + 1 条孤儿), 不参与运行时权限决策.**
+> 任何"角色分配"操作必须通过用户组进行, 不要直接写 `user_roles` 表.
+>
+> **诊断用户角色时, 必须联查 user_group_members + group_roles, 不能只看 user_roles**:
+>
+> ```sql
+> -- ✅ 正确: 通过用户组链路查询用户角色
+> SELECT u.username, ug.name AS group_name, r.code AS role_code, r.name AS role_name
+> FROM users u
+> JOIN user_group_members ugm ON ugm.user_id = u.id
+> JOIN user_groups ug ON ug.id = ugm.group_id
+> JOIN group_roles gr ON gr.group_id = ug.id
+> JOIN roles r ON r.id = gr.role_id
+> WHERE u.username = 'wyonghui';
+>
+> -- ❌ 错误: 只看 user_roles 表 (会得出"用户无角色"的错误结论)
+> -- SELECT * FROM user_roles WHERE user_id = ?;
+> ```
+
+**用户组优先级原则**:
+- 一个用户可加入多个用户组, 每个用户组可绑定多个角色
+- 用户最终权限 = 所有用户组绑定的所有角色的 **Union** (并集)
+- 多角色 dim scope 也是 Union (WriteScopeInterceptor: 任一 role 满足即放行)
+- 不存在"用户组优先级"覆盖关系, 所有角色平等合并
+
 ---
 
 ## 1. 阶段 1: audit-only (1 周)
@@ -153,6 +197,8 @@ WRITE_SCOPE_AUDIT_ONLY=true  # 软警告
 
 ## 4. 现有角色补 dim scope 模板
 
+> **[提醒]** 本章只描述"如何给角色配 dim scope". 角色配好后, **还需通过用户组将角色分配给用户** (见 0.4 节权限模型说明). 直接写 `user_roles` 表不会生效.
+
 ### 4.1 admin 角色 (无需配)
 
 ```
@@ -218,15 +264,29 @@ sub_domain 维度: 不手动配 (自动展开)
 
 ## 5. 迁移 SQL 模板 (admin 备份后批量执行)
 
+> **[必读]** 备份范围必须包含**用户组链路三表** (`user_groups` / `group_roles` / `user_group_members`), 否则恢复后用户将失去角色分配 (详见 0.4). `user_roles` 表无需备份 (历史遗留, 不参与运行时).
+
 ### 5.1 备份
 
 ```sql
--- 备份原表
+-- 备份原表 (dim scope 配置)
 CREATE TABLE role_dimension_scopes_backup_20260615 AS
 SELECT * FROM role_dimension_scopes;
 
 CREATE TABLE role_permissions_backup_20260615 AS
 SELECT * FROM role_permissions;
+
+-- 备份用户组链路三表 (角色分配关系, 关键!)
+CREATE TABLE user_groups_backup_20260615 AS
+SELECT * FROM user_groups;
+
+CREATE TABLE group_roles_backup_20260615 AS
+SELECT * FROM group_roles;
+
+CREATE TABLE user_group_members_backup_20260615 AS
+SELECT * FROM user_group_members;
+
+-- user_roles 表无需备份 (历史遗留, 仅 admin + 1 孤儿, 不参与运行时)
 ```
 
 ### 5.2 通用模式: 给某角色配某产品的 dim scope
@@ -313,6 +373,18 @@ powershell -File scripts/service_manager.ps1 restart
 -- 恢复 role_dimension_scopes
 DELETE FROM role_dimension_scopes;
 INSERT INTO role_dimension_scopes SELECT * FROM role_dimension_scopes_backup_20260615;
+
+-- 恢复用户组链路三表 (角色分配关系, 关键!)
+DELETE FROM user_group_members;
+INSERT INTO user_group_members SELECT * FROM user_group_members_backup_20260615;
+
+DELETE FROM group_roles;
+INSERT INTO group_roles SELECT * FROM group_roles_backup_20260615;
+
+DELETE FROM user_groups;
+INSERT INTO user_groups SELECT * FROM user_groups_backup_20260615;
+
+-- user_roles 表无需恢复 (历史遗留, 不参与运行时)
 ```
 
 ---

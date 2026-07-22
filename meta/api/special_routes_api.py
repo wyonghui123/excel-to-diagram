@@ -121,11 +121,22 @@ def _derive_bo_ids_from_dim_scope(ds, user_id: int) -> list:
     #    之后用 nested SQL 反查 BO
     #    语义: 多 role 取并集 (跟 V1.1.7 OR-of-AND 修复一致)
     # 注: TEST333 5970 派生 {domain: [703]}, 然后用 SQL chain 派生 BO
+    # [V2.2 2026-07-22] Spec 08: 新结构 Dict[str, Dict[str, Set]]
+    #   - wildcard-only (无 exclude) → 该层全可见 → 不加入该层 IN 过滤 (跳过该层)
+    #   - 其他情况 → 收集 include 集合 (exclude 由 SQL 层 NOT IN 处理, 此处简化)
+    from meta.services.dimension_scope_engine import (
+        _dim_has_any_values as _has_any,
+        _dim_include_values as _include_of,
+        _dim_is_wildcard as _is_wc,
+        _dim_exclude_values as _exclude_of,
+    )
     all_d_ids = set()
     all_sd_ids = set()
     all_sm_ids = set()
     all_bo_ids = set()
     any_role_has_scope = False  # 至少一个 role 有 dim scope 配置
+    # 标记: 任一 role 在某层 wildcard-only → 该层不限制 (跳过 IN 过滤)
+    layer_wildcard = {'domain': False, 'sub_domain': False, 'service_module': False, 'business_object': False}
 
     for rid in user_role_ids:
         try:
@@ -136,40 +147,63 @@ def _derive_bo_ids_from_dim_scope(ds, user_id: int) -> list:
         if not expanded:
             continue
         any_role_has_scope = True
-        if 'domain' in expanded: all_d_ids.update(expanded['domain'])
-        if 'sub_domain' in expanded: all_sd_ids.update(expanded['sub_domain'])
-        if 'service_module' in expanded: all_sm_ids.update(expanded['service_module'])
-        # [V1.1.14 增强] business_object 直接在 expanded (如果 yaml mapping 配了)
-        if 'business_object' in expanded: all_bo_ids.update(expanded['business_object'])
+        for dim, dim_data in expanded.items():
+            if not _has_any(dim_data):
+                continue
+            # wildcard-only (无 exclude) → 该层全可见 → 标记跳过
+            if _is_wc(dim_data) and not _exclude_of(dim_data):
+                if dim in layer_wildcard:
+                    layer_wildcard[dim] = True
+                continue
+            # 其他情况: 收集 include 集合
+            inc = _include_of(dim_data)
+            if dim == 'domain':
+                all_d_ids.update(inc)
+            elif dim == 'sub_domain':
+                all_sd_ids.update(inc)
+            elif dim == 'service_module':
+                all_sm_ids.update(inc)
+            elif dim == 'business_object':
+                all_bo_ids.update(inc)
 
     # 没有任何 role 有 dim scope → 返回 [] 让 v1 维持 allowed_bo_ids=None (不应用过滤)
     # 跟 v2 DataPermissionInterceptor 'not per_role_conditions' 行为一致
     if not any_role_has_scope:
         return []
 
+    # [V2.2 2026-07-22] Spec 08: business_object wildcard → BO 层全可见 → 无限制
+    if layer_wildcard['business_object']:
+        logger.info(
+            f"[_derive_bo_ids_from_dim_scope] user={user_id} business_object wildcard-only "
+            f"→ BO 全可见, 返回 []"
+        )
+        return []
+
     # 3. 沿 chain 用 raw SQL 派生 BO ids
     #    条件: bo.service_module_id IN (sm_in_sd) OR sm_id IN (sm_ids) OR
     #          sd_id IN (sd_ids) OR bo.id IN (bo_ids)
+    #    [V2.2] wildcard 层跳过 IN 过滤 (该层全可见)
     parts = []
     params = []
-    if all_d_ids:
+    if all_d_ids and not layer_wildcard['domain']:
         ph = ','.join('?' * len(all_d_ids))
         parts.append(f"sm.sub_domain_id IN (SELECT id FROM sub_domains WHERE domain_id IN ({ph}))")
         params.extend(all_d_ids)
-    if all_sd_ids:
+    if all_sd_ids and not layer_wildcard['sub_domain']:
         ph = ','.join('?' * len(all_sd_ids))
         parts.append(f"sm.sub_domain_id IN ({ph})")
         params.extend(all_sd_ids)
-    if all_sm_ids:
+    if all_sm_ids and not layer_wildcard['service_module']:
         ph = ','.join('?' * len(all_sm_ids))
         parts.append(f"bo.service_module_id IN ({ph})")
         params.extend(all_sm_ids)
-    if all_bo_ids:
+    if all_bo_ids:  # business_object wildcard 已在上面 return []
         ph = ','.join('?' * len(all_bo_ids))
         parts.append(f"bo.id IN ({ph})")
         params.extend(all_bo_ids)
 
     if not parts:
+        # 所有层都 wildcard → 无限制
         return []
 
     try:
@@ -334,11 +368,31 @@ def _list_relationships_impl(ds, user, user_id, user_is_admin):
                     [user_id]
                 )
                 user_role_ids = [row[0] for row in cursor.fetchall()]
+                # [V2.2 2026-07-22] Spec 08: 新结构 + wildcard 处理
+                #   任一 role 的 relationship wildcard-only → 该 role 对 relationship 全可见
+                #   → 清空 dim_scope_conds (无限制)
+                from meta.services.dimension_scope_engine import (
+                    _dim_has_any_values as _has_any,
+                    _dim_is_wildcard as _is_wc,
+                    _dim_exclude_values as _exclude_of,
+                )
+                relationship_wildcard = False
                 for role_id in user_role_ids:
+                    expanded = ds_engine.expand_dimension_values(role_id)
+                    rel_data = expanded.get('relationship')
+                    if _has_any(rel_data) and _is_wc(rel_data) and not _exclude_of(rel_data):
+                        relationship_wildcard = True
+                        break
                     data_conds = ds_engine.derive_data_conditions(role_id)
                     rel_cond = data_conds.get('relationship')
                     if rel_cond:
                         dim_scope_conds.append(rel_cond)
+                if relationship_wildcard:
+                    logger.info(
+                        f"[relationships] user={user_id} relationship wildcard-only "
+                        f"→ 全可见, 清空 dim_scope_conds"
+                    )
+                    dim_scope_conds = []
         except Exception as e:
             logger.warning(f"[relationships] dim scope calc failed: {e}")
             dim_scope_conds = []

@@ -14,7 +14,8 @@
 
 import json
 import logging
-from typing import Dict, List, Set, Optional
+import os
+from typing import Dict, List, Set, Optional, Any
 
 from meta.core.models import registry
 from meta.core.dimension_object_mapping_loader import (
@@ -24,6 +25,87 @@ from meta.services.management_dimension_engine import RESOURCE_TABLE_MAP, \
     PARENT_FIELD_MAP
 
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# [Spec 08] Dimension Scope 通配符 + Exclude + scope_mode Bug 修复
+# Feature Flags (env var, 默认 on, 紧急关闭时设 false)
+# ============================================================================
+_DIM_SCOPE_WILDCARD_ENABLED = os.environ.get(
+    'DIM_SCOPE_WILDCARD_ENABLED', 'true'
+).lower() in ('true', '1', 'yes')
+_DIM_SCOPE_EXCLUDE_ENABLED = os.environ.get(
+    'DIM_SCOPE_EXCLUDE_ENABLED', 'true'
+).lower() in ('true', '1', 'yes')
+
+# 通配符标记
+WILDCARD_MARKER = '*'
+
+
+def is_wildcard_enabled() -> bool:
+    """Feature flag: * 通配功能是否启用"""
+    return _DIM_SCOPE_WILDCARD_ENABLED
+
+
+def is_exclude_enabled() -> bool:
+    """Feature flag: exclude 黑名单功能是否启用"""
+    return _DIM_SCOPE_EXCLUDE_ENABLED
+
+
+# ============================================================================
+# 维度数据辅助函数 (Spec 08 新结构: Dict[str, Set])
+#   dim_data = {'include': set(), 'exclude': set(), 'wildcard': bool}
+# ============================================================================
+def _is_wildcard_value(values) -> bool:
+    """检测 values 集合是否包含通配符 '*'"""
+    return WILDCARD_MARKER in values
+
+
+def _dim_has_any_values(dim_data: Optional[dict]) -> bool:
+    """检查维度数据是否有任何配置 (include/exclude/wildcard 任一非空)"""
+    if not dim_data:
+        return False
+    return bool(
+        dim_data.get('include')
+        or dim_data.get('exclude')
+        or dim_data.get('wildcard')
+    )
+
+
+def _dim_include_values(dim_data: Optional[dict]) -> set:
+    """获取维度的 include 集合"""
+    if not dim_data:
+        return set()
+    return dim_data.get('include', set()) or set()
+
+
+def _dim_exclude_values(dim_data: Optional[dict]) -> set:
+    """获取维度的 exclude 集合"""
+    if not dim_data:
+        return set()
+    return dim_data.get('exclude', set()) or set()
+
+
+def _dim_all_declared_values(dim_data: Optional[dict]) -> set:
+    """获取维度的所有声明值 (include ∪ exclude)
+
+    用于向后兼容的集合操作 (如 sorted(), 迭代, count_in_table 等),
+    这些操作只关心"用户声明了哪些维度值 ID", 不区分 include/exclude 语义。
+    """
+    if not dim_data:
+        return set()
+    return (dim_data.get('include', set()) or set()) | (dim_data.get('exclude', set()) or set())
+
+
+def _dim_is_wildcard(dim_data: Optional[dict]) -> bool:
+    """检查维度是否为通配符 (全维度可见)"""
+    if not dim_data:
+        return False
+    return bool(dim_data.get('wildcard', False))
+
+
+def _new_dim_data() -> dict:
+    """创建空的维度数据结构"""
+    return {'include': set(), 'exclude': set(), 'wildcard': False}
 
 
 def _resolve_table_name(bo_id: str) -> Optional[str]:
@@ -145,39 +227,86 @@ class DimensionScopeEngine:
     def __init__(self, data_source):
         self._ds = data_source
 
-    def expand_dimension_values(self, role_id: int) -> Dict[str, Set[int]]:
+    def expand_dimension_values(self, role_id: int) -> Dict[str, Dict[str, Set]]:
+        """[Spec 08] 展开角色的维度范围声明
+
+        返回结构 (升级):
+            {
+                'product': {'include': {1, 2, 3}, 'exclude': set(), 'wildcard': False},
+                'domain':  {'include': set(),   'exclude': {3},  'wildcard': True},
+            }
+
+        语义:
+            - include: 白名单集合 (scope_mode='include' + 非 '*' 值)
+            - exclude: 黑名单集合 (scope_mode='exclude')
+            - wildcard: 是否全维度可见 (dimension_values=["*"] + scope_mode='include')
+
+        向下展开 (inherit_children) 仅适用于 include 集合;
+        exclude 和 wildcard 不参与向下展开 (避免歧义)。
+        """
         scopes = self._load_scopes(role_id)
-        expanded = {}
+        expanded: Dict[str, Dict[str, Set]] = {}
         for scope in scopes:
             code = scope['dimension_code']
             # [FIX 2026-06-15] 兼容三种数据形态:
             # 1. dim_values 为 JSON 字符串 (主流, 来自 UI 配置)
             # 2. dim_values 为 list (Python 调用)
             # 3. dim_values 为 NULL (旧数据, id 实际存到 inherit_children)
-            # 修复前: dim_values=NULL 时 set(None) 抛 TypeError
-            # 修复后: NULL 时降级读 inherit_children (同样存 JSON 列表)
             raw_dv = scope.get('dimension_values')
             if raw_dv is None:
-                # [FIX 2026-06-15] Bug #3: NULL → 读 inherit_children 字段
                 raw_dv = scope.get('inherit_children')
                 if raw_dv is None:
                     continue
             if isinstance(raw_dv, str):
                 try:
-                    values = set(json.loads(raw_dv))
+                    parsed = json.loads(raw_dv)
                 except (json.JSONDecodeError, TypeError):
                     continue
             elif isinstance(raw_dv, (list, tuple)):
-                values = set(int(x) for x in raw_dv if str(x).lstrip('-').isdigit())
+                parsed = list(raw_dv)
             else:
                 continue
-            if not values:
+
+            # [Spec 08] 读取 scope_mode (默认 include 兼容老数据)
+            scope_mode = scope.get('scope_mode') or 'include'
+
+            # [Spec 08] 检测通配符 '*'
+            has_wildcard = WILDCARD_MARKER in parsed
+
+            # [Spec 08] Feature flag 关闭时的降级处理
+            if has_wildcard and not _DIM_SCOPE_WILDCARD_ENABLED:
+                # 通配符功能关闭: 视为空 include (该维度无权限)
+                continue
+            if scope_mode == 'exclude' and not _DIM_SCOPE_EXCLUDE_ENABLED:
+                # exclude 功能关闭: 按 include 处理
+                scope_mode = 'include'
+
+            # 解析数值 (过滤掉 '*' 字符串, 只保留整数 ID)
+            values = set()
+            for x in parsed:
+                if str(x).lstrip('-').isdigit():
+                    values.add(int(x))
+
+            # 初始化维度数据结构
+            if code not in expanded:
+                expanded[code] = _new_dim_data()
+
+            # [Spec 08] 通配符处理
+            if has_wildcard:
+                expanded[code]['wildcard'] = True
+                # 通配符不加入 include 集合, 也不做向下展开
                 continue
 
-            if code not in expanded:
-                expanded[code] = set()
-            expanded[code].update(values)
+            # [Spec 08] 按 scope_mode 分流
+            if scope_mode == 'exclude':
+                expanded[code]['exclude'].update(values)
+            else:
+                expanded[code]['include'].update(values)
 
+            # [Spec 08] 向下展开仅对 include 行生效
+            # (exclude 行不做向下展开 — 黑名单语义不应自动扩展子级)
+            if scope_mode != 'include':
+                continue
             if not (scope.get('inherit_children') or scope.get('inherit_children') == 1):
                 continue
 
@@ -200,46 +329,53 @@ class DimensionScopeEngine:
                 current_ids = {row[0] for row in rows}
                 if current_ids:
                     if next_dim not in expanded:
-                        expanded[next_dim] = set()
-                    expanded[next_dim].update(current_ids)
+                        expanded[next_dim] = _new_dim_data()
+                    # 向下展开的子级自动归入 include 集合
+                    expanded[next_dim]['include'].update(current_ids)
                 else:
                     break
         return expanded
 
     def derive_data_conditions(self, role_id: int) -> Dict[str, str]:
-        """派生每个 BO 的数据权限条件
+        """[Spec 08] 派生每个 BO 的数据权限条件
 
         [FIX 2026-06-10] 优先使用 dimension_object_mapping.yaml 的映射配置，
         硬编码 HIERARCHY_CHAIN/PARENT_FIELD_MAP 仅作 fallback（向后兼容）。
 
+        [Spec 08] 新增: 支持 wildcard (跳过维度) 和 exclude (NOT IN) SQL 生成
+
         支持的 filter_type:
           - direct: resource.field = dim_value
-            例: dimension=product, bo=product, field=id
-                  → product.id IN (1, 17)
           - fk: resource.field = dim_value (field 是 BO 自己的外键字段)
-            例: dimension=product, bo=version, field=product_id
-                  → version.product_id IN (1, 17)
           - chain: 沿 HIERARCHY_CHAIN 追溯到顶层 dim
-            例: dimension=product, bo=domain, field=product_id (chain)
-                  → 沿 version 表追溯 product_id
+          - fk_expanded: 从父维度值向下查询子维度值
+
+        SQL 生成规则 (Spec 08 §9.2.2):
+          - wildcard=True, exclude=空   → 跳过该维度 (不生成条件)
+          - wildcard=True, exclude={3}  → field NOT IN (3)
+          - include={1,2}, exclude=空   → field IN (1,2)
+          - include={1,2}, exclude={3}  → (field IN (1,2) AND field NOT IN (3))
+          - include=空,   exclude={3}   → field NOT IN (3)
         """
         expanded = self.expand_dimension_values(role_id)
         # [V2.1.5 2026-06-23] 保存未被向上展开污染的 expanded,
-        #   用于 line 384 "防止跨版本数据污染" 的 version 判断
-        #   避免 domain=[703] 误匹配 version_id=764
-        original_expanded = {k: set(v) for k, v in expanded.items()}
+        #   用于 "防止跨版本数据污染" 的 version 判断
+        # [Spec 08] 升级: 存 include 集合 (而非整个 dict)
+        original_expanded = {
+            k: set(_dim_include_values(v)) for k, v in expanded.items()
+        }
         loader = get_dimension_object_mapping_loader()
         use_yaml_mapping = loader.is_loaded()
 
         # [FIX v1.0.1] 向上展开: 已知子维度时, 反查父资源 ID
-        # 例: TEST60 有 version=[2,11,12], 要列 product
-        #     → 查 versions.product_id IN (2,11,12) → expanded['product'] = {1, ...}
-        chain_for_expansion = HIERARCHY_CHAIN  # 向上展开仍用硬编码层级链
+        # [Spec 08] 向上展开仅对 include 集合生效 (exclude/wildcard 不参与)
+        chain_for_expansion = HIERARCHY_CHAIN
         for dim_code, dim_idx in [(c, i) for i, c in enumerate(chain_for_expansion)]:
             if dim_code not in expanded:
                 continue
-            # 沿 chain 向上反查
-            current_ids = set(expanded[dim_code])
+            current_ids = set(_dim_include_values(expanded[dim_code]))
+            if not current_ids:
+                continue
             for i in range(dim_idx - 1, -1, -1):
                 target_dim = chain_for_expansion[i]
                 child_dim = chain_for_expansion[i + 1]
@@ -258,11 +394,11 @@ class DimensionScopeEngine:
                     logger.warning(f'expand_upward error: {e}')
                     break
                 if current_ids:
-                    expanded.setdefault(target_dim, set()).update(current_ids)
+                    if target_dim not in expanded:
+                        expanded[target_dim] = _new_dim_data()
+                    expanded[target_dim]['include'].update(current_ids)
 
         conditions = {}
-        # [FIX v3.18.1 2026-06-09] VERSION_AWARE_BOS / ALWAYS_VISIBLE_BOS
-        # 提升到模块级, 见文件顶部定义
         for resource_type in self._get_all_resource_types():
             if resource_type in ALWAYS_VISIBLE_BOS:
                 continue  # 系统级 BO 不参与 dimension 过滤
@@ -271,69 +407,29 @@ class DimensionScopeEngine:
             if use_yaml_mapping:
                 # ────────────────────────────────────────
                 # 新路径: 使用 dimension_object_mapping.yaml 配置
+                # [Spec 08] 支持 include/exclude/wildcard per dim
                 # ────────────────────────────────────────
                 for dim_code in expanded:
-                    if not expanded[dim_code]:
+                    dim_data = expanded[dim_code]
+                    if not _dim_has_any_values(dim_data):
                         continue
-                    # [V1.1.9 2026-06-15] 用 get_bindings_for_bo 拿所有 binding (multi-binding OR 合并)
-                    # 之前 get_field_for_bo 只取第一个, 导致 relationship 配的 target_bo_id 完全没用上
-                    # 现在 multi-binding (例: source_bo_id + target_bo_id) 用 OR 合并:
-                    #   source_bo_id IN (...) OR target_bo_id IN (...)
-                    # 表达"任一端在 dim scope 内"语义 (跨域 association 推导)
+                    # [Spec 08] wildcard + 无 exclude → 跳过该维度
+                    if _dim_is_wildcard(dim_data) and not _dim_exclude_values(dim_data):
+                        continue
+
                     bindings = loader.get_bindings_for_bo(dim_code, resource_type)
                     if not bindings:
                         continue
-                    vals = sorted(expanded[dim_code])
-                    if not vals:
-                        continue
 
-                    # [V1.1.9] multi-binding 内部用 OR 合并 (单 binding 时 OR 退化为单 cond)
+                    # [Spec 08] 为每个 binding 生成条件 (含 include/exclude)
                     binding_parts = []
                     for binding in bindings:
-                        field = binding.get('field')
-                        filter_type = binding.get('filter_type', 'direct')
-                        if not field:
-                            continue
-
-                        if filter_type == 'direct':
-                            if len(vals) == 1:
-                                binding_parts.append(f"{field} = {vals[0]}")
-                            else:
-                                binding_parts.append(
-                                    f"{field} IN ({','.join(str(v) for v in vals)})"
-                                )
-                        elif filter_type == 'fk':
-                            # 资源表的 field 是该维度的外键
-                            if len(vals) == 1:
-                                binding_parts.append(f"{field} = {vals[0]}")
-                            else:
-                                binding_parts.append(
-                                    f"{field} IN ({','.join(str(v) for v in vals)})"
-                                )
-                        elif filter_type == 'chain':
-                            chain_cond = self._build_chain_condition(
-                                resource_type, dim_code, vals,
-                                custom_field=field if field else None,
-                            )
-                            if chain_cond:
-                                binding_parts.append(chain_cond)
-                        elif filter_type == 'fk_expanded':
-                            # [FIX 2026-06-16] 从父维度值向下查询子维度值，再用子维度 FK 过滤
-                            # 例: domain=703 → 查 sub_domains WHERE domain_id=703 → [138,139,146]
-                            # → service_modules WHERE sub_domain_id IN (138,139,146)
-                            child_ids = self._expand_down(dim_code, resource_type, vals)
-                            if child_ids:
-                                if len(child_ids) == 1:
-                                    binding_parts.append(f"{field} = {child_ids[0]}")
-                                else:
-                                    binding_parts.append(
-                                        f"{field} IN ({','.join(str(v) for v in sorted(child_ids))})"
-                                    )
-                            else:
-                                # 没有子维度值 → 0 条可见
-                                binding_parts.append("1 = 0")
+                        cond = self._build_binding_condition(
+                            resource_type, dim_code, binding, dim_data
+                        )
+                        if cond:
+                            binding_parts.append(cond)
                     if binding_parts:
-                        # 多个 binding (例: source + target) 用 OR 合并
                         if len(binding_parts) == 1:
                             parts.append(binding_parts[0])
                         else:
@@ -341,17 +437,15 @@ class DimensionScopeEngine:
             else:
                 # ────────────────────────────────────────
                 # 老路径: 硬编码 HIERARCHY_CHAIN/PARENT_FIELD_MAP (向后兼容)
+                # [Spec 08] 支持 include/exclude/wildcard
                 # ────────────────────────────────────────
                 if resource_type in HIERARCHY_CHAIN:
                     # Case 1: 自身 expanded 有值 (id 过滤)
-                    if resource_type in expanded and expanded[resource_type]:
-                        vals = sorted(expanded[resource_type])
-                        if len(vals) == 1:
-                            parts.append(f"id = {vals[0]}")
-                        else:
-                            parts.append(
-                                f"id IN ({','.join(str(v) for v in vals)})"
-                            )
+                    self_data = expanded.get(resource_type)
+                    if _dim_has_any_values(self_data):
+                        cond = self._build_id_condition(self_data)
+                        if cond:
+                            parts.append(cond)
 
                     # Case 2: parent dim 有 expanded 值, 用 PARENT_FIELD 过滤
                     try:
@@ -361,55 +455,204 @@ class DimensionScopeEngine:
                     if res_idx > 0:
                         parent_dim = HIERARCHY_CHAIN[res_idx - 1]
                         field = PARENT_FIELD_MAP.get(resource_type)
-                        if field and parent_dim in expanded and expanded[parent_dim]:
-                            vals = sorted(expanded[parent_dim])
-                            if len(vals) == 1:
-                                parts.append(f"{field} = {vals[0]}")
-                            else:
-                                parts.append(
-                                    f"{field} IN ({','.join(str(v) for v in vals)})"
-                                )
+                        parent_data = expanded.get(parent_dim)
+                        if field and _dim_has_any_values(parent_data):
+                            cond = self._build_field_condition(parent_data, field)
+                            if cond:
+                                parts.append(cond)
 
             # VERSION_AWARE_BOS: 老路径下保留旧行为
+            # [Spec 08] 升级: 处理 version 维度的 include/exclude/wildcard
             if not use_yaml_mapping and resource_type in VERSION_AWARE_BOS:
-                if 'version' in expanded and expanded['version']:
-                    vals = sorted(expanded['version'])
-                    if len(vals) == 1:
-                        conditions[resource_type] = f"version_id = {vals[0]}"
-                    else:
-                        conditions[resource_type] = (
-                            f"version_id IN ({','.join(str(v) for v in vals)})"
-                        )
+                version_data = expanded.get('version')
+                if _dim_is_wildcard(version_data) and not _dim_exclude_values(version_data):
+                    # version wildcard + 无 exclude → 全版本可见, 跳过
+                    pass
+                else:
+                    cond = self._build_field_condition(version_data, 'version_id')
+                    if cond:
+                        conditions[resource_type] = cond
                 continue
 
             if parts:
                 conditions[resource_type] = ' AND '.join(parts)
 
         # [FIX 2026-06-22] 防止跨版本数据污染
-        # 当 expanded['version'] 非空时, 给所有有 version_id 字段的资源类型追加 version_id 过滤
-        # 适用资源: HIERARCHY_CHAIN (除 product, version 外) + VERSION_AWARE_BOS
-        # 例: TEST888 (product=475) 派生时, 应只命中 v=764/v=765 的关系
-        #     不应误命中 v=1/v=2 的关系 (即使 sub_domain 被复用)
-        # 注意: 'version' 和 'product' 本身没有 version_id 字段, 不能加此过滤
-        # [V2.1.5 2026-06-23 修复] 用 original_expanded (未被向上展开污染) 判断 version
-        #   之前的 bug: derive_data_conditions 内部 "向上展开" 会把 version/product 加进 expanded,
-        #   导致 domain=[703] 的 role 也会被强制加 version_id=764 过滤, 误排除 version_id=1 的 BO
+        # [Spec 08] 用 original_expanded (include 集合) 判断 version
         if 'version' in original_expanded and original_expanded['version']:
-            version_vals = sorted(expanded['version'])
-            version_cond = (
-                f"version_id = {version_vals[0]}" if len(version_vals) == 1
-                else f"version_id IN ({','.join(str(v) for v in version_vals)})"
-            )
-            # 这些资源类型都有 version_id 字段
-            # [FIX 2026-06-22] 排除 'version' 自身 (没有 version_id 字段, 加此过滤会 SQL 错误)
-            version_aware_resources = set(VERSION_AWARE_BOS.keys()) | {'domain', 'sub_domain'}
-            for resource_type in list(conditions.keys()):
-                if resource_type in version_aware_resources:
-                    existing = conditions[resource_type]
-                    # [FIX 2026-06-22] 不加额外括号包装, 让 v2 端点 _parse_compound_expr 能正确解析
-                    conditions[resource_type] = f"{existing} AND {version_cond}"
+            version_inc = _dim_include_values(expanded.get('version'))
+            if version_inc:
+                version_vals = sorted(version_inc)
+                version_cond = (
+                    f"version_id = {version_vals[0]}" if len(version_vals) == 1
+                    else f"version_id IN ({','.join(str(v) for v in version_vals)})"
+                )
+                version_aware_resources = set(VERSION_AWARE_BOS.keys()) | {'domain', 'sub_domain'}
+                for resource_type in list(conditions.keys()):
+                    if resource_type in version_aware_resources:
+                        existing = conditions[resource_type]
+                        conditions[resource_type] = f"{existing} AND {version_cond}"
 
         return conditions
+
+    def _build_binding_condition(
+        self, resource_type: str, dim_code: str, binding: dict, dim_data: dict
+    ) -> Optional[str]:
+        """[Spec 08] 为单个 binding 生成 SQL 条件 (支持 include/exclude/wildcard)
+
+        返回: SQL 字符串 或 None (该 binding 无条件)
+        """
+        field = binding.get('field')
+        filter_type = binding.get('filter_type', 'direct')
+        if not field:
+            return None
+
+        include_vals = _dim_include_values(dim_data)
+        exclude_vals = _dim_exclude_values(dim_data)
+        is_wildcard = _dim_is_wildcard(dim_data)
+
+        parts = []
+
+        # Include 部分 (wildcard 时跳过 — 全匹配)
+        if not is_wildcard and include_vals:
+            inc_sql = self._build_set_sql(
+                resource_type, dim_code, field, filter_type,
+                include_vals, negate=False
+            )
+            if inc_sql:
+                parts.append(inc_sql)
+
+        # Exclude 部分
+        if exclude_vals:
+            exc_sql = self._build_set_sql(
+                resource_type, dim_code, field, filter_type,
+                exclude_vals, negate=True
+            )
+            if exc_sql:
+                parts.append(exc_sql)
+
+        if not parts:
+            return None
+        if len(parts) == 1:
+            return parts[0]
+        return f"({' AND '.join(parts)})"
+
+    def _build_set_sql(
+        self, resource_type: str, dim_code: str, field: str,
+        filter_type: str, vals: set, negate: bool
+    ) -> Optional[str]:
+        """[Spec 08] 构建单集合 SQL 条件 (IN 或 NOT IN)
+
+        negate=False → field IN (vals) / field = val
+        negate=True  → field NOT IN (vals) / field != val
+        """
+        sorted_vals = sorted(vals)
+        if not sorted_vals:
+            return None
+
+        neg = 'NOT ' if negate else ''
+        if filter_type in ('direct', 'fk'):
+            if len(sorted_vals) == 1:
+                op = '!=' if negate else '='
+                return f"{field} {op} {sorted_vals[0]}"
+            return f"{field} {neg}IN ({','.join(str(v) for v in sorted_vals)})"
+
+        elif filter_type == 'chain':
+            chain_cond = self._build_chain_condition(
+                resource_type, dim_code, sorted_vals,
+                custom_field=field,
+            )
+            if not chain_cond:
+                return None
+            if negate:
+                # "field IN (...)" → "field NOT IN (...)"
+                chain_cond = chain_cond.replace(' IN (', ' NOT IN (', 1)
+            return chain_cond
+
+        elif filter_type == 'fk_expanded':
+            child_ids = self._expand_down(dim_code, resource_type, sorted_vals)
+            if not child_ids:
+                if negate:
+                    return None  # 无子级可排除
+                return "1 = 0"  # 无子级可包含 → 0 条可见
+            sorted_child = sorted(child_ids)
+            if len(sorted_child) == 1:
+                op = '!=' if negate else '='
+                return f"{field} {op} {sorted_child[0]}"
+            return f"{field} {neg}IN ({','.join(str(v) for v in sorted_child)})"
+
+        return None
+
+    def _build_id_condition(self, dim_data: dict) -> Optional[str]:
+        """[Spec 08] 构建 id 字段条件 (用于 resource_type 自身维度, 老路径 Case 1)
+
+        生成: id IN (...) / id NOT IN (...) / (id IN (...) AND id NOT IN (...))
+        wildcard + 无 exclude → None (跳过)
+        """
+        if not _dim_has_any_values(dim_data):
+            return None
+        if _dim_is_wildcard(dim_data) and not _dim_exclude_values(dim_data):
+            return None  # 全可见, 跳过
+
+        include_vals = _dim_include_values(dim_data)
+        exclude_vals = _dim_exclude_values(dim_data)
+        is_wildcard = _dim_is_wildcard(dim_data)
+
+        parts = []
+        if not is_wildcard and include_vals:
+            sorted_vals = sorted(include_vals)
+            if len(sorted_vals) == 1:
+                parts.append(f"id = {sorted_vals[0]}")
+            else:
+                parts.append(f"id IN ({','.join(str(v) for v in sorted_vals)})")
+        if exclude_vals:
+            sorted_vals = sorted(exclude_vals)
+            if len(sorted_vals) == 1:
+                parts.append(f"id != {sorted_vals[0]}")
+            else:
+                parts.append(f"id NOT IN ({','.join(str(v) for v in sorted_vals)})")
+
+        if not parts:
+            return None
+        if len(parts) == 1:
+            return parts[0]
+        return f"({' AND '.join(parts)})"
+
+    def _build_field_condition(self, dim_data: Optional[dict], field: str) -> Optional[str]:
+        """[Spec 08] 构建 field 条件 (用于 PARENT_FIELD 过滤 / VERSION_AWARE_BOS)
+
+        生成: field IN (...) / field NOT IN (...) / (field IN (...) AND field NOT IN (...))
+        wildcard + 无 exclude → None (跳过)
+        None dim_data → None
+        """
+        if not _dim_has_any_values(dim_data):
+            return None
+        if _dim_is_wildcard(dim_data) and not _dim_exclude_values(dim_data):
+            return None  # 全可见, 跳过
+
+        include_vals = _dim_include_values(dim_data)
+        exclude_vals = _dim_exclude_values(dim_data)
+        is_wildcard = _dim_is_wildcard(dim_data)
+
+        parts = []
+        if not is_wildcard and include_vals:
+            sorted_vals = sorted(include_vals)
+            if len(sorted_vals) == 1:
+                parts.append(f"{field} = {sorted_vals[0]}")
+            else:
+                parts.append(f"{field} IN ({','.join(str(v) for v in sorted_vals)})")
+        if exclude_vals:
+            sorted_vals = sorted(exclude_vals)
+            if len(sorted_vals) == 1:
+                parts.append(f"{field} != {sorted_vals[0]}")
+            else:
+                parts.append(f"{field} NOT IN ({','.join(str(v) for v in sorted_vals)})")
+
+        if not parts:
+            return None
+        if len(parts) == 1:
+            return parts[0]
+        return f"({' AND '.join(parts)})"
 
     def _build_chain_condition(
         self,
@@ -731,7 +974,8 @@ class DimensionScopeEngine:
                 # 关联 BO: 从 source 端点继承权限
                 if bo_id in ASSOCIATION_BOS:
                     source_bos = ASSOCIATION_BOS[bo_id]
-                    if any(rt in expanded and expanded[rt] for rt in source_bos):
+                    # [Spec 08] 使用 _dim_has_any_values 检查
+                    if any(_dim_has_any_values(expanded.get(rt)) for rt in source_bos):
                         for action in ('read', 'create', 'update', 'delete'):
                             perm_code = f'{bo_id}:{action}'
                             if _permission_code_exists(self._ds, perm_code):
@@ -741,7 +985,8 @@ class DimensionScopeEngine:
                 # 层级 BO: 自身 expanded 有值时派生
                 if bo_id not in HIERARCHY_CHAIN:
                     continue
-                if bo_id in expanded and expanded[bo_id]:
+                # [Spec 08] 使用 _dim_has_any_values 检查
+                if _dim_has_any_values(expanded.get(bo_id)):
                     # 推断: 当用户声明某 BO 维度范围, 该 BO 的 CRUD 应自动包含
                     for action in ('read', 'create', 'update', 'delete'):
                         perm_code = f'{bo_id}:{action}'
@@ -755,8 +1000,16 @@ class DimensionScopeEngine:
         menus = self.derive_recommended_menus(role_id)
         permissions = self.derive_permissions(role_id)
         conditions = self.derive_data_conditions(role_id)
+        # [Spec 08] 序列化新结构: {dim: {include: [...], exclude: [...], wildcard: bool}}
         return {
-            'dimension_scopes': {k: list(v) for k, v in expanded.items()},
+            'dimension_scopes': {
+                k: {
+                    'include': sorted(list(v.get('include', set()))),
+                    'exclude': sorted(list(v.get('exclude', set()))),
+                    'wildcard': bool(v.get('wildcard', False)),
+                }
+                for k, v in expanded.items()
+            },
             'recommended_menus': menus,
             'derived_permissions': permissions,
             'data_conditions': conditions,
@@ -786,7 +1039,7 @@ class DimensionScopeEngine:
         )
 
     def _menu_has_data(self, object_types: List[str],
-                        expanded: Dict[str, Set[int]]) -> bool:
+                        expanded: Dict[str, Dict[str, Set]]) -> bool:
         if not expanded:
             return True
 
@@ -796,6 +1049,11 @@ class DimensionScopeEngine:
         if not business_object_types:
             # 所有绑定的BO都是系统级的，不推荐
             return False
+
+        # [Spec 08] 如果任一声明的维度是 wildcard, 该角色可见全量数据 → 推荐
+        for dim_data in expanded.values():
+            if _dim_is_wildcard(dim_data):
+                return True
 
         for ot in business_object_types:
             if ot not in HIERARCHY_CHAIN:
@@ -808,7 +1066,8 @@ class DimensionScopeEngine:
 
             table = meta_obj.table_name
 
-            direct_values = expanded.get(ot, set())
+            # [Spec 08] 使用 include 集合 (exclude 不影响"是否有数据"判断)
+            direct_values = _dim_include_values(expanded.get(ot))
             if direct_values:
                 if self._count_in_table(table, 'id', direct_values) > 0:
                     return True
@@ -820,13 +1079,13 @@ class DimensionScopeEngine:
 
             if idx < len(HIERARCHY_CHAIN) - 1:
                 for descendant in HIERARCHY_CHAIN[idx + 1:]:
-                    if expanded.get(descendant):
+                    if _dim_has_any_values(expanded.get(descendant)):
                         return True
 
             if idx > 0:
                 parent_type = HIERARCHY_CHAIN[idx - 1]
                 parent_field = PARENT_FIELD_MAP.get(ot)
-                parent_values = expanded.get(parent_type, set())
+                parent_values = _dim_include_values(expanded.get(parent_type))
                 if parent_field and parent_values:
                     if self._count_in_table(table, parent_field, parent_values) > 0:
                         return True
