@@ -116,6 +116,8 @@ const valueHelpConfig = computed(() => ({
   source: {
     type: 'bo',
     target_bo: 'business_object',
+    // value_field / display_field / code_field 的默认值与 business_object.yaml 的 display_name_field 一致
+    // 如果 business_object.yaml 的 value_help 声明了这些字段，可由 ValueHelpField 自动读取
     value_field: 'id',
     display_field: 'name',
     code_field: 'code'
@@ -123,7 +125,7 @@ const valueHelpConfig = computed(() => ({
   presentation: {
     result_type: 'dialog',
     page_size: 15,
-    display_mode: 'flat',
+    display_mode: 'flat',  // BO 选择器使用 flat 模式，维度选择器使用 tree 模式
     display_columns: props.displayColumns.map(col => ({
       field: col.prop,
       label: col.label,

@@ -36,6 +36,8 @@ export const RESOURCE_LABELS = {
 
 /**
  * 维度父子映射
+ *
+ * 静态 fallback，优先使用 buildDimensionMapsFromConfig() 从 YAML 动态生成。
  */
 export const DIMENSION_PARENT_MAP = {
   product: null,
@@ -46,6 +48,8 @@ export const DIMENSION_PARENT_MAP = {
 
 /**
  * 维度层级
+ *
+ * 静态 fallback，优先使用 buildDimensionMapsFromConfig() 从 YAML 动态生成。
  */
 export const DIMENSION_LEVEL_MAP = {
   product: 0,
@@ -56,11 +60,44 @@ export const DIMENSION_LEVEL_MAP = {
 
 /**
  * 父字段映射
+ *
+ * 静态 fallback，优先使用 buildDimensionMapsFromConfig() 从 YAML 动态生成。
  */
 export const PARENT_FIELD_MAP = {
   version: 'product_id',
   domain: 'version_id',
   sub_domain: 'domain_id',
+}
+
+/**
+ * 从 hierarchies.yaml 配置动态生成维度映射常量
+ *
+ * 替代 DIMENSION_PARENT_MAP / DIMENSION_LEVEL_MAP / PARENT_FIELD_MAP 的硬编码版本。
+ * 当 hierarchyConfig 可用时，应优先使用此函数的返回值。
+ *
+ * @param {Object} hierarchyConfig - 来自 hierarchyService.fetchHierarchyConfig() 的配置
+ * @returns {{ parentMap: Object, levelMap: Object, fieldMap: Object, labelMap: Object }}
+ */
+export function buildDimensionMapsFromConfig(hierarchyConfig) {
+  const levels = hierarchyConfig?.hierarchy_levels || {}
+  const parentMap = {}
+  const levelMap = {}
+  const fieldMap = {}
+  const labelMap = {}
+
+  for (const [objType, cfg] of Object.entries(levels)) {
+    // 跳过非维度层级 (relationship 等)
+    if (cfg.kind === 'association') continue
+
+    parentMap[objType] = cfg.parent_object || null
+    levelMap[objType] = cfg.level
+    labelMap[objType] = cfg.display_name || objType
+    if (cfg.filter_param) {
+      fieldMap[objType] = cfg.filter_param
+    }
+  }
+
+  return { parentMap, levelMap, fieldMap, labelMap }
 }
 
 /**
@@ -420,6 +457,8 @@ export default {
   PARENT_FIELD_MAP,
   HIDDEN_DIMENSIONS,
   ACTION_LABELS,
+  // 动态映射生成（从 hierarchies.yaml 配置）
+  buildDimensionMapsFromConfig,
   // 纯函数
   getPermissionLevelType,
   getPermissionLevelLabel,

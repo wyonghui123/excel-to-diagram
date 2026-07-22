@@ -128,6 +128,8 @@ import { Plus } from '@element-plus/icons-vue'
 import { AppIcon } from '@/components/common/AppIcon'
 import SearchHelpDialog from '@/components/common/SearchHelpDialog.vue'
 import * as permService from '@/services/permissionService'
+import { buildDimensionMapsFromConfig } from '@/services/permissionService'
+import { fetchHierarchyConfig } from '@/services/hierarchyService'
 import { useCrudMessage } from '@/composables/useCrudMessage'
 
 const props = defineProps({
@@ -144,16 +146,44 @@ const emit = defineEmits({
 
 const message = useCrudMessage()
 
-// [REMOVED] 2026-06-03: service_module 和 business_object 从管理维度移除
-// 新的层级链: product → version → domain → sub_domain (4层)
+// 维度显示配置和映射缓存 (从 hierarchies.yaml 配置动态生成)
+const dimensionMaps = ref({
+  parentMap: permService.DIMENSION_PARENT_MAP,
+  levelMap: permService.DIMENSION_LEVEL_MAP,
+  fieldMap: permService.PARENT_FIELD_MAP,
+  labelMap: permService.RESOURCE_LABELS
+})
+const hierarchyDimConfigs = ref({})
 
-const DIMENSION_PARENT_LABEL = {
-  'version': '所属产品',
-  'domain': '所属版本',
-  'sub_domain': '所属领域'
-  // 'service_module': '所属子领域',  // 已移除
-  // 'business_object': '所属服务模块'  // 已移除
-}
+// 异步加载 hierarchy 配置，覆盖静态 fallback
+fetchHierarchyConfig().then(config => {
+  if (config?.hierarchy_levels) {
+    dimensionMaps.value = buildDimensionMapsFromConfig(config)
+  }
+  // 提取维度 display_mode 等配置
+  if (config?.dimensions) {
+    const dimConfigs = {}
+    for (const dim of config.dimensions) {
+      dimConfigs[dim.id] = dim
+    }
+    hierarchyDimConfigs.value = dimConfigs
+  }
+}).catch(() => {
+  // fetchHierarchyConfig 内部已有 fallback，此处仅防异常
+})
+
+// 从 hierarchies.yaml 配置动态生成维度父级标签
+const DIMENSION_PARENT_LABEL = computed(() => {
+  const { labelMap, parentMap } = dimensionMaps.value
+  const result = {}
+  for (const [dimId, parentId] of Object.entries(parentMap)) {
+    if (parentId) {
+      const parentLabel = labelMap[parentId] || parentId
+      result[dimId] = `所属${parentLabel}`
+    }
+  }
+  return result
+})
 
 const dimensions = ref([])
 const dimensionsLoading = ref(false)
@@ -264,24 +294,28 @@ const lastConfirmedDimId = ref(null)
 const pickerValueHelpConfig = computed(() => {
   if (!pickerDim.value) return {}
   const dimId = pickerDim.value.id
-  const parentLabel = DIMENSION_PARENT_LABEL[dimId]
+  const parentLabel = DIMENSION_PARENT_LABEL.value[dimId]
   const cols = [
     { field: 'name', label: '名称' },
     { field: 'code', label: '编码' }
   ]
   if (parentLabel) {
-    cols.push({ field: 'ancestor_path', label: '所属路径' })  // 方案 B: 完整祖先路径
+    cols.push({ field: 'ancestor_path', label: '所属路径' })
   }
+  // display_mode 从 hierarchies.yaml dimensions[].display_mode 驱动
+  // 新增维度时只需在 YAML 中添加 display_mode 即可，无需改前端代码
+  const dimConfig = hierarchyDimConfigs.value[dimId]
   return {
     source: { type: 'bo', target_bo: dimId },
     presentation: {
-      // [FIX 2026-07-22] 启用层级树形选择器 (HierarchicalTreePicker)
-      display_mode: 'tree',
+      display_mode: dimConfig?.display_mode || 'tree',
       display_columns: cols
     },
     behavior: { multiple: true }
   }
 })
+
+// 维度显示配置缓存 (从 fetchHierarchyConfig 获取, 已在上方初始化)
 
 const pickerSelectedIds = computed(() => {
   if (!pickerDim.value) return []

@@ -87,16 +87,25 @@ export function getLevelIndex(levels, type) {
 }
 
 /**
- * 推导 FK 字段名（合并原 getFKField + hierarchyFilterBuilder.getFilterParam）
+ * 推导 FK 字段名
  *
- * 约定: FK = parentType + '_id'
- * 例: business_object → service_module → FK = 'service_module_id'
+ * 优先级:
+ *   1. level.filter_param (来自 hierarchies.yaml，最权威)
+ *   2. level.foreign_key_field (来自 hierarchies.yaml)
+ *   3. 约定推导: parentType + '_id' (向后兼容 fallback)
+ *
+ * 例: sub_domain → filter_param='domain_id' → 返回 'domain_id'
  *
  * @param {Array} levels - 层级配置数组
  * @param {string} type - 当前对象类型
  * @returns {string|null} FK 字段名，无父级时返回 null
  */
 export function getFKField(levels, type) {
+  const level = levels.find(l => (l.object_type || l.object) === type)
+  // 优先使用 YAML 声明的 filter_param / foreign_key_field
+  if (level?.filter_param) return level.filter_param
+  if (level?.foreign_key_field) return level.foreign_key_field
+  // fallback: 约定推导
   const parent = getParentType(levels, type)
   if (!parent) return null
   return `${parent}_id`
