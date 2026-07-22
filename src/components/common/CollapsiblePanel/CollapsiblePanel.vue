@@ -2,7 +2,8 @@
   <div
     :class="['collapsible-panel', {
       'is-collapsed': !expanded,
-      'cp--height-full': heightFull
+      'cp--height-full': heightFull,
+      'cp--width-fixed': widthMode === 'fixed'
     }, props.class]"
     :style="containerStyle"
   >
@@ -81,6 +82,7 @@ import { ArrowLeft, ArrowRight, ArrowUp, ArrowDown } from '@element-plus/icons-v
  * @property {number} [defaultWidth] - 默认宽度 (px)
  * @property {'header'|'outside'} [collapsePosition] - 折叠按钮位置
  * @property {boolean} [heightFull] - 高度是否100%
+ * @property {'fluid'|'fixed'} [widthMode] - 宽度模式: fluid=不锁宽度跟随父容器(默认), fixed=锁死 defaultWidth(用于横向 splitter)
  * @property {string} [class] - 额外CSS类
  */
 
@@ -142,6 +144,16 @@ const props = defineProps({
     type: Boolean,
     default: true
   },
+  /**
+   * 宽度模式
+   * - fluid (默认): 不锁 width，跟随父容器自适应（适用 column 布局/多 panel 上下/左右堆叠）
+   * - fixed: 锁死 defaultWidth（适用横向 splitter, panel 是行内 flex item 的场景）
+   */
+  widthMode: {
+    type: String,
+    default: 'fluid',
+    validator: (v) => ['fluid', 'fixed'].includes(v)
+  },
   /** 额外CSS类 */
   class: {
     type: String,
@@ -162,14 +174,19 @@ const containerStyle = computed(() => {
     style.height = '100%'
   }
 
+  // [FIX 2026-07-22] 弹性宽度模式
+  // - fluid (默认): 不设 inline width，让 panel 跟随父容器自适应
+  //   解决 sidebar 拖宽时 panel 只占 defaultWidth、剩余部分留白的问题
+  // - fixed: 锁死 currentWidth（横向 splitter 场景，向后兼容旧行为）
   if (!expanded.value) {
     if (props.heightFull) {
       style.width = '48px'
       style.minWidth = '48px'
     }
-  } else {
+  } else if (props.widthMode === 'fixed') {
     style.width = `${currentWidth.value}px`
   }
+  // fluid 模式：不设 width，由 CSS width: 100% / flex: 1 等规则接管
 
   return style
 })
@@ -234,6 +251,15 @@ function startResize(e) {
   background: var(--color-bg-container);
   transition: width 0.3s ease;
   overflow: hidden;
+  /* [FIX 2026-07-22] 默认流体宽度：未设置 width mode 时撑满父容器（除非折叠态或 .is-collapsed） */
+  width: 100%;
+  min-width: 0;
+}
+
+/* [FIX 2026-07-22] fixed 模式下，恢复原本锁宽度的行为（横向 splitter 场景） */
+.collapsible-panel.cp--width-fixed {
+  width: auto;
+  min-width: auto;
 }
 
 .collapsible-panel.is-collapsed {
