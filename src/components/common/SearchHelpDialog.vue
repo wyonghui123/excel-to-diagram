@@ -423,6 +423,10 @@ function handleDialogSearchInput(query) {
   searchTimer = setTimeout(() => {
     dialogSearchKeyword.value = query || ''
     if (metaListRef.value) {
+      // [FIX] 搜索时重置分页到第1页，避免翻页后搜索结果为空
+      if (metaListRef.value.pagination) {
+        metaListRef.value.pagination.current = 1
+      }
       metaListRef.value.loadList()
     }
   }, 300)
@@ -432,6 +436,9 @@ function handleDialogSearchClear() {
   dialogSearchQuery.value = ''
   dialogSearchKeyword.value = ''
   if (metaListRef.value) {
+    if (metaListRef.value.pagination) {
+      metaListRef.value.pagination.current = 1
+    }
     metaListRef.value.loadList()
   }
 }
@@ -441,6 +448,9 @@ watch(dialogSearchQuery, (newVal) => {
   if (newVal === '' && dialogSearchKeyword.value !== '') {
     dialogSearchKeyword.value = ''
     if (metaListRef.value) {
+      if (metaListRef.value.pagination) {
+        metaListRef.value.pagination.current = 1
+      }
       metaListRef.value.loadList()
     }
   }
