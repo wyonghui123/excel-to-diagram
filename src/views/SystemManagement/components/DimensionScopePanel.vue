@@ -275,7 +275,8 @@ const pickerValueHelpConfig = computed(() => {
   return {
     source: { type: 'bo', target_bo: dimId },
     presentation: {
-      display_mode: 'flat',
+      // [FIX 2026-07-22] 启用层级树形选择器 (HierarchicalTreePicker)
+      display_mode: 'tree',
       display_columns: cols
     },
     behavior: { multiple: true }
