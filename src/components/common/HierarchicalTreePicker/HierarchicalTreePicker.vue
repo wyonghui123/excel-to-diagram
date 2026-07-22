@@ -37,7 +37,7 @@
         ref="treeRef"
         :data="treeData"
         :props="treeProps"
-        node-key="id"
+        node-key="__tk"
         :show-checkbox="multiple"
         check-strictly
         check-on-click-node
@@ -52,8 +52,8 @@
       >
         <template #default="{ data }">
           <span class="htp-node">
-            <el-icon v-if="getNodeIcon(data.type)" :size="14">
-              <component :is="getNodeIcon(data.type)" />
+            <el-icon v-if="resolveIcon(data.icon)" :size="14">
+              <component :is="resolveIcon(data.icon)" />
             </el-icon>
             <span class="htp-node-label" :title="data.name">{{ data.name }}</span>
             <span v-if="showCount && data.child_count > 0" class="htp-node-count">
@@ -107,14 +107,11 @@
  */
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { Search, Loading, Fold, Expand, Refresh } from '@element-plus/icons-vue'
-import { getNodeIcon } from './iconMap'
+import { resolveIcon } from './iconMap'
 
 const props = defineProps({
   // 必填: 维度 ID
   dimensionId: { type: String, required: true },
-
-  // 可选: 层级配置 (用于在 missing 时给 warning)
-  hierarchyConfig: { type: Object, default: null },
 
   // 已有选中 (编辑态回填):
   //   - 多选: number[]
@@ -139,17 +136,14 @@ const props = defineProps({
 
 const emit = defineEmits(['confirm', 'cancel', 'check-change'])
 
-// ── 警告缺失 hierarchyConfig ──
-if (!props.hierarchyConfig) {
-  console.warn('[HierarchicalTreePicker] hierarchyConfig is required')
-}
-
+// ── [REFACTOR 2026-07-22] 元数据驱动: hierarchy_meta 从 API 响应读取, 不再是 prop ──
 // ── State ──
 const treeRef = ref(null)
 const treeData = ref([])
 const loading = ref(false)
 const totalCount = ref(0)
 const searchQuery = ref('')
+const hierarchyMeta = ref({ root_type: null, levels: [], ui_config: {} })
 const debouncedSearch = ref('')
 const checkedIds = ref([])
 const currentId = ref(null)
@@ -158,11 +152,24 @@ const allExpanded = ref(false)
 
 const treeProps = { label: 'name', children: 'children' }
 
+// [FIX 2026-07-22] 业务 ID (type,id) -> __tk 映射, 用于 default-checked / setCheckedKeys
+const tkByTypeId = ref(new Map())
+function buildTkIndex(roots) {
+  const m = new Map()
+  function walk(nodes) {
+    for (const n of nodes) {
+      m.set(`${n.type}:${n.id}`, n.__tk)
+      if (n.children) walk(n.children)
+    }
+  }
+  walk(roots)
+  tkByTypeId.value = m
+}
+
 const initialCheckedKeys = computed(() => {
   if (!props.checkedIds) return []
-  return Array.isArray(props.checkedIds)
-    ? props.checkedIds.map(String)
-    : [String(props.checkedIds)]
+  const ids = Array.isArray(props.checkedIds) ? props.checkedIds : [props.checkedIds]
+  return ids.map(id => tkByTypeId.value.get(`${props.dimensionId}:${id}`)).filter(Boolean)
 })
 
 const canConfirm = computed(() => {
@@ -171,18 +178,23 @@ const canConfirm = computed(() => {
 })
 
 // ── 扁平数组 → 嵌套树 ──
+// [FIX 2026-07-22] 用后端的 unique_key 作匹配 key, 给每个 node 生成内部 __tk
+//   (el-tree 的 node-key), 保证全局唯一. 业务 API 仍用 n.id.
+//   生产数据中 id=1 可能同时是 product/version/domain/sub_domain
+let __tkCounter = 0
+function nextTk() { return `tk_${++__tkCounter}` }
+
 function buildNestedTree(flat) {
-  const byId = new Map()
+  const nodes = flat.map(n => ({ ...n, __tk: nextTk(), children: [] }))
+  const byUnique = new Map(nodes.map(n => [n.unique_key, n]))
   const roots = []
-  for (const n of flat) byId.set(n.id, { ...n, children: [] })
-  for (const n of flat) {
-    const node = byId.get(n.id)
-    if (n.parent_id == null) {
+  for (const node of nodes) {
+    if (node.parent_unique_key == null) {
       roots.push(node)
     } else {
-      const parent = byId.get(n.parent_id)
+      const parent = byUnique.get(node.parent_unique_key)
       if (parent) parent.children.push(node)
-      // dangling parent 忽略 (不会出现)
+      // dangling parent 忽略 (搜索时已带父链, 不应出现)
     }
   }
   return roots
@@ -202,7 +214,12 @@ async function loadTreeData() {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     const json = await resp.json()
     treeData.value = buildNestedTree(json.data || [])
+    buildTkIndex(treeData.value)
     totalCount.value = json.total || 0
+    // [REFACTOR 2026-07-22] 元数据驱动: 从响应读 hierarchy_meta
+    if (json.hierarchy_meta) {
+      hierarchyMeta.value = json.hierarchy_meta
+    }
   } catch (e) {
     console.error('[HierarchicalTreePicker] load failed:', e)
     treeData.value = []
@@ -235,7 +252,7 @@ function collectMatchedIds(query) {
   function walk(nodes) {
     for (const n of nodes) {
       if ((n.name || '').toLowerCase().includes(q) || (n.code || '').toLowerCase().includes(q)) {
-        result.push(n.id)
+        result.push(n.__tk)
       }
       if (n.children) walk(n.children)
     }
@@ -244,23 +261,29 @@ function collectMatchedIds(query) {
   return result
 }
 
-function collectParentKeys(matchedIds) {
-  const byId = new Map()
+function collectParentKeys(matchedTks) {
+  const byTk = new Map()
   function index(nodes) {
     for (const n of nodes) {
-      byId.set(n.id, n)
+      byTk.set(n.__tk, n)
       if (n.children) index(n.children)
     }
   }
   index(treeData.value)
 
   const result = new Set()
-  for (const id of matchedIds) {
-    let cur = byId.get(id)
+  for (const tk of matchedTks) {
+    let cur = byTk.get(tk)
     while (cur) {
-      result.add(String(cur.id))
-      if (cur.parent_id == null) break
-      cur = byId.get(cur.parent_id)
+      result.add(cur.__tk)
+      if (cur.parent_unique_key == null) break
+      // parent_unique_key 是 "{type}_{id}", 反查需要 unique_key -> __tk
+      const parentUnique = cur.parent_unique_key
+      let parent = null
+      for (const n of byTk.values()) {
+        if (n.unique_key === parentUnique) { parent = n; break }
+      }
+      cur = parent
     }
   }
   return [...result]
@@ -272,12 +295,23 @@ function filterNodeMethod(value, data) {
 }
 
 // ── 多选事件 ──
+// [FIX 2026-07-22] el-tree 用 __tk, 业务需要 id; 反向映射
 function onCheckMultiple(checkedInfo) {
-  const allChecked = [
+  const allTks = [
     ...(checkedInfo.checkedKeys || []),
     ...(checkedInfo.halfCheckedKeys || []),
-  ].map(k => Number(k))
-  checkedIds.value = allChecked
+  ]
+  // __tk -> (type,id) -> 业务 id
+  const byTk = new Map()
+  function walk(nodes) {
+    for (const n of nodes) {
+      byTk.set(n.__tk, n)
+      if (n.children) walk(n.children)
+    }
+  }
+  walk(treeData.value)
+  const ids = allTks.map(tk => byTk.get(tk)?.id).filter(id => id != null)
+  checkedIds.value = ids
   emit('check-change', { ids: checkedIds.value, nodes: checkedInfo.checkedNodes || [] })
 }
 
@@ -295,7 +329,10 @@ function onNodeClickSingle(node) {
 function removeChecked(id) {
   checkedIds.value = checkedIds.value.filter(x => x !== id)
   nextTick(() => {
-    treeRef.value?.setCheckedKeys(checkedIds.value.map(String), false)
+    const tks = checkedIds.value
+      .map(i => tkByTypeId.value.get(`${props.dimensionId}:${i}`))
+      .filter(Boolean)
+    treeRef.value?.setCheckedKeys(tks, false)
   })
 }
 
@@ -313,7 +350,7 @@ function collectAllIds(nodes) {
   const result = []
   function walk(arr) {
     for (const n of arr) {
-      result.push(n.id)
+      result.push(n.__tk)
       if (n.children) walk(n.children)
     }
   }

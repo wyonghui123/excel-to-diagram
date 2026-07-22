@@ -183,3 +183,47 @@ class TestDimensionTreeEndpoint:
         result = build('sub_domain', version_id=999)
         sd_nodes = [n for n in result['data'] if n['type'] == 'sub_domain']
         assert len(sd_nodes) == 0
+
+    # ── [REFACTOR 2026-07-22] 元数据驱动: hierarchy_meta 验证 ──
+
+    def test_response_includes_hierarchy_meta(self, app_with_data):
+        """响应包含 hierarchy_meta (元数据驱动)"""
+        build = app_with_data['build_dimension_tree']
+        result = build('sub_domain')
+        assert 'hierarchy_meta' in result
+        meta = result['hierarchy_meta']
+        assert 'root_type' in meta
+        assert 'levels' in meta
+        assert 'ui_config' in meta
+        assert 'version_id_injected' in meta
+        assert isinstance(meta['levels'], list)
+        assert len(meta['levels']) > 0
+
+    def test_hierarchy_meta_levels_have_display_name_and_icon(self, app_with_data):
+        """每个 level 含 display_name / icon / color (从 hierarchies.yaml 读取)"""
+        build = app_with_data['build_dimension_tree']
+        result = build('sub_domain')
+        meta = result['hierarchy_meta']
+        # 4 层 (product/version/domain/sub_domain) 都应有 display_name/icon
+        types_in_meta = [lv['object_type'] for lv in meta['levels']]
+        assert 'product' in types_in_meta
+        assert 'sub_domain' in types_in_meta
+        for lv in meta['levels']:
+            assert lv['display_name'], f"level {lv['object_type']} missing display_name"
+            # icon 应该来自 YAML (非空字符串, 不应该是 fallback)
+            assert lv['icon'], f"level {lv['object_type']} missing icon"
+
+    def test_each_node_carries_metadata(self, app_with_data):
+        """每个 tree node 含 display_name/icon/color (从 YAML 透传)"""
+        build = app_with_data['build_dimension_tree']
+        result = build('sub_domain')
+        for n in result['data']:
+            assert 'display_name' in n, f"node missing display_name: {n.get('unique_key')}"
+            assert 'icon' in n, f"node missing icon: {n.get('unique_key')}"
+            assert 'color' in n, f"node missing color: {n.get('unique_key')}"
+            # node icon 应该与对应 level 的 icon 一致
+            type_icon = next(
+                lv['icon'] for lv in result['hierarchy_meta']['levels']
+                if lv['object_type'] == n['type']
+            )
+            assert n['icon'] == type_icon, f"node {n['unique_key']} icon mismatch"

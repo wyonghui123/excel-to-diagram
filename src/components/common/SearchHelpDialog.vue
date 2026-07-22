@@ -61,7 +61,6 @@
       <HierarchicalTreePicker
         v-else-if="displayMode === 'tree'"
         :dimension-id="source.target_bo || ''"
-        :hierarchy-config="hierarchyConfig"
         :checked-ids="props.selectedValue"
         :multiple="multiple"
         @confirm="handleTreePickerConfirm"
@@ -155,19 +154,9 @@ const dialogTitle = computed(() => {
 const displayMode = computed(() => presentation.value.display_mode || 'flat')
 const displayColumns = computed(() => presentation.value.display_columns || [])
 
-// [FIX 2026-07-22] 层级值帮助 picker: 读 BO YAML 的 hierarchies[0] 声明
-//   metaRegistry 不一定存在, 用 hard-code fallback 兼容其他场景
-const hierarchyConfig = computed(() => {
-  return {
-    root_type: 'product',
-    levels: [
-      { object_type: 'product', parent_field: null, children_field: 'versions' },
-      { object_type: 'version', parent_field: 'product_id', children_field: 'domains' },
-      { object_type: 'domain', parent_field: 'version_id', children_field: 'sub_domains' },
-      { object_type: 'sub_domain', parent_field: 'domain_id', children_field: null },
-    ],
-  }
-})
+// [REFACTOR 2026-07-22] 元数据驱动: 层级配置由后端从 hierarchies.yaml 读取,
+//   经 /tree 响应 (hierarchy_meta) 透传给 HierarchicalTreePicker.
+//   此处不再 hardcode 4 层 chain.
 
 // [FIX 2026-07-22] HierarchicalTreePicker confirm: 单选/多选统一处理
 function handleTreePickerConfirm(payload) {

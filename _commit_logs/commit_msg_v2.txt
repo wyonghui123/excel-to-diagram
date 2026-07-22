@@ -1,0 +1,70 @@
+[REFACTOR 2026-07-22] hierarchical value-help: metadata-driven (audit 08 P0/P1 fix)
+
+# 触发
+docs/architecture/08-frontend-metadata-audit.md P0-2/P0-3/P1-3 明确指出:
+- 后端 /tree 端点 CHAIN 硬编码, 未用 get_biz_hierarchy()
+- SearchHelpDialog hierarchyConfig 硬编码 fallback
+- iconMap.js 含业务层 type->icon 硬编码
+
+# 目标
+搜索帮助(Search Help)的层级模式变成真正的"可复用 UI 组件":
+- 单一 prop (dimensionId) 驱动整个组件
+- 单选/多选由 multiple prop 控制
+- 层级元数据/图标全部从 hierarchies.yaml 单点驱动
+- 后端 _build_dimension_tree 动态读 YAML, fallback 到 CHAIN 硬编码
+
+# 后端 (meta/api/management_dimension_api.py)
+- _build_dimension_tree() 调用 get_biz_hierarchy() 动态读 levels
+  - 链: yaml_objects[:target_idx+1]
+  - icon: lv.ui.icon
+  - display_name: lv.display_name
+  - color: lv.ui.color
+- 响应新增 hierarchy_meta 字段:
+  {root_type, levels[{object_type, display_name, icon, color, level}],
+   ui_config, version_id_injected}
+- 每个 tree node 新增 display_name/icon/color (从 YAML 透传)
+- _empty_hierarchy_meta() fallback helper (YAML 加载失败时用)
+
+# 前端 (src/components/common/)
+- SearchHelpDialog.vue:
+  - 删 hierarchyConfig computed (4 层 chain hardcode)
+  - 删 :hierarchy-config prop 绑定
+  - 注释: 元数据驱动, 由后端 /tree 响应 (hierarchy_meta) 透传
+- HierarchicalTreePicker/HierarchicalTreePicker.vue:
+  - 删 hierarchyConfig prop
+  - 删 "missing hierarchyConfig" warning
+  - 新增 hierarchyMeta state, 从 API 响应读
+  - getNodeIcon(data.type) -> resolveIcon(data.icon) (从 node.icon 字符串读)
+- HierarchicalTreePicker/iconMap.js:
+  - 删 HIERARCHY_ICON_MAP 业务层 type->icon 硬编码 (6 行业务映射)
+  - 改为 resolveIcon(name) 纯字符串->组件桥接
+  - 命名空间转换: snake_case (YAML) -> PascalCase (Element Plus)
+  - getNodeIcon 保留为 fallback helper (业务 type 自动转换)
+
+# 测试
+- meta/tests/test_dimension_tree_endpoint.py: 5 -> 8 个测试 (3 个新增 hierarchy_meta 验证)
+- src/components/common/HierarchicalTreePicker/HierarchicalTreePicker.spec.js:
+  - mockData + mockFetch 加 hierarchy_meta (含 display_name/icon/color)
+  - 删所有 hierarchyConfig prop 引用 (mockHierarchyConfig 变量保留仅供 mockHierarchyMeta)
+  - 加 4 个可复用性测试 (单选/多选/dimension 切换/icon 自动)
+
+# 元数据驱动程度变化 (audit 6.2)
+| 模块             | 之前  | 之后  |
+| ---------------- | ----- | ----- |
+| 后端 /tree 端点  | ~30%  | ~90%  |
+| 层级元数据       | ~60%  | ~95%  |
+| 整体             | ~75%  | ~88%  |
+
+# 影响范围
+- 后端: _build_dimension_tree() 函数体内 (no breaking change, 响应只是新增字段)
+- 前端: SearchHelpDialog tree 模式 + HierarchicalTreePicker 内部
+- 测试: 单测 mock data 调整 (schema 兼容, 不需要改 production 调用)
+- 其他业务模块: 不受影响 (export_dialog/ObjectScopeSection 独立)
+
+# Files
+- meta/api/management_dimension_api.py
+- meta/tests/test_dimension_tree_endpoint.py
+- src/components/common/SearchHelpDialog.vue
+- src/components/common/HierarchicalTreePicker/HierarchicalTreePicker.vue
+- src/components/common/HierarchicalTreePicker/HierarchicalTreePicker.spec.js
+- src/components/common/HierarchicalTreePicker/iconMap.js

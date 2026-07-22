@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Set
 from flask import Blueprint, g, jsonify, request
 
 from meta.core.datasource import get_data_source
+from meta.core.yaml_loader import get_biz_hierarchy
 from meta.services.management_dimension_engine import (
     CHILD_TYPE_MAP,
     CODE_FIELD_MAP,
@@ -368,32 +369,94 @@ def _build_ancestor_path(dimension_id: str, instance_id: int, data_source) -> st
     return " > ".join(path_parts)
 
 
-# [FIX 2026-07-22] 层级值帮助 picker: 构造层级树 (扁平数组, 前端组装嵌套)
+# [REFACTOR 2026-07-22] 层级值帮助 picker: 构造层级树 (扁平数组, 前端组装嵌套)
+# 元数据驱动: 链 / icon / display_name / 颜色 全部从 hierarchies.yaml 读取
+# CHAIN 硬编码已移除, RESOURCE_TABLE_MAP/PARENT_FIELD_MAP/DISPLAY_FIELD_MAP 作为 fallback
 def _build_dimension_tree(dim: str, version_id: Optional[int] = None,
                           search: Optional[str] = None) -> Dict[str, Any]:
     """构建层级树的扁平数组 (前端组装嵌套)
 
     Returns:
-        {"data": [TreeNode...], "total": int}
+        {
+          "hierarchy_meta": {
+            "root_type": str,
+            "levels": [{object_type, display_name, icon, color, level}],
+            "ui_config": {default_expand_level, show_count, allow_multi_select},
+            "version_id_injected": bool,  # True if version context was used to filter
+          },
+          "data": [TreeNode...],
+          "total": int,
+        }
 
     TreeNode shape:
-        {id, parent_id, level, type, name, code, has_children, child_count}
+        {id, parent_id, level, type, name, code, display_name, icon, color,
+         has_children, child_count, unique_key, parent_unique_key}
+        - unique_key: "{type}_{id}", 全局唯一 (生产数据中 id 在 4 层间会冲突)
+        - parent_unique_key: "{parent_type}_{parent_id}" (顶层为 null)
+        - display_name/icon/color: 从 YAML level 元数据透传, 前端无需再硬编码
     """
-    import sys
     if dim not in RESOURCE_TABLE_MAP:
-        return {"data": [], "total": 0}
+        return {"data": [], "total": 0, "hierarchy_meta": _empty_hierarchy_meta()}
 
     # 复用 _get_engine() 初始化的 _data_source (共享缓存)
     _get_engine()  # 确保 _data_source 已初始化
     ds = _data_source
 
-    # 找 dim 在 4 层链路中的位置 (product → version → domain → sub_domain)
-    CHAIN = ['product', 'version', 'domain', 'sub_domain']
-    try:
-        target_idx = CHAIN.index(dim)
-    except ValueError:
-        return {"data": [], "total": 0}
-    relevant_chain = CHAIN[:target_idx + 1]
+    # ── 元数据: 优先从 hierarchies.yaml 读取 ──
+    biz_h = get_biz_hierarchy()
+    if biz_h and biz_h.get('levels'):
+        yaml_levels = biz_h['levels']
+        # 按 target dim 在 yaml levels 中的位置切链
+        yaml_objects = [lv['object'] for lv in yaml_levels if lv.get('object')]
+        try:
+            target_idx = yaml_objects.index(dim)
+        except ValueError:
+            target_idx = None
+        if target_idx is not None:
+            relevant_chain = yaml_objects[:target_idx + 1]
+            # 每个 object 的元数据 (用于 hierarchy_meta + node.icon)
+            level_meta = {}
+            for lv in yaml_levels:
+                if lv.get('object'):
+                    level_meta[lv['object']] = {
+                        'display_name': lv.get('display_name', lv['object']),
+                        'icon': (lv.get('ui') or {}).get('icon'),
+                        'color': (lv.get('ui') or {}).get('color'),
+                    }
+            hierarchy_meta = {
+                'root_type': biz_h.get('root_object', 'product'),
+                'levels': [
+                    {
+                        'object_type': lv['object'],
+                        'display_name': level_meta[lv['object']]['display_name'],
+                        'icon': level_meta[lv['object']]['icon'],
+                        'color': level_meta[lv['object']]['color'],
+                        'level': lv.get('level', idx),
+                    }
+                    for idx, lv in enumerate(yaml_levels)
+                    if lv.get('object') in relevant_chain
+                ],
+                'ui_config': biz_h.get('ui_config', {}),
+                'version_id_injected': bool(version_id),
+            }
+        else:
+            # YAML 里有 hierarchies 但不包含此 dim, 退回 CHAIN fallback
+            relevant_chain = ['product', 'version', 'domain', 'sub_domain']
+            try:
+                relevant_chain = relevant_chain[:relevant_chain.index(dim) + 1]
+            except ValueError:
+                return {"data": [], "total": 0, "hierarchy_meta": _empty_hierarchy_meta()}
+            level_meta = {}
+            hierarchy_meta = _empty_hierarchy_meta()
+    else:
+        # YAML 加载失败, 退回旧硬编码 CHAIN (向后兼容)
+        CHAIN_FALLBACK = ['product', 'version', 'domain', 'sub_domain']
+        try:
+            relevant_chain = CHAIN_FALLBACK[:CHAIN_FALLBACK.index(dim) + 1]
+        except ValueError:
+            return {"data": [], "total": 0, "hierarchy_meta": _empty_hierarchy_meta()}
+        level_meta = {}
+        hierarchy_meta = _empty_hierarchy_meta()
 
     all_nodes = []
 
@@ -471,6 +534,8 @@ def _build_dimension_tree(dim: str, version_id: Optional[int] = None,
                 c = ds.execute(count_sql, [node_id]).fetchone()
                 child_count = c[0] if c else 0
 
+            # node-level 元数据 (从 level_meta 透传)
+            meta = level_meta.get(object_type, {})
             all_nodes.append({
                 "id": node_id,
                 "parent_id": parent_id,
@@ -478,33 +543,51 @@ def _build_dimension_tree(dim: str, version_id: Optional[int] = None,
                 "type": object_type,
                 "name": name,
                 "code": code,
+                "display_name": meta.get('display_name', object_type),
+                "icon": meta.get('icon'),
+                "color": meta.get('color'),
                 "has_children": not is_leaf and child_count > 0,
                 "child_count": child_count,
+                "unique_key": f"{object_type}_{node_id}",
+                "parent_unique_key": (
+                    f"{relevant_chain[level_idx - 1]}_{parent_id}"
+                    if level_idx > 0 else None
+                ),
             })
 
     # search 过滤: 命中节点 + 完整父链
     if search:
         q = search.lower()
-        matched_ids = {n["id"] for n in all_nodes
-                       if q in (n["name"] or "").lower() or q in (n["code"] or "").lower()}
-        if matched_ids:
-            by_id = {n["id"]: n for n in all_nodes}
+        matched_keys = {n["unique_key"] for n in all_nodes
+                        if q in (n["name"] or "").lower() or q in (n["code"] or "").lower()}
+        if matched_keys:
+            by_key = {n["unique_key"]: n for n in all_nodes}
             keep = set()
-            for mid in matched_ids:
-                cur = by_id.get(mid)
+            for mk in matched_keys:
+                cur = by_key.get(mk)
                 # [FIX 2026-07-22] 防循环: depth 限制 + visited 跟踪
                 depth = 0
                 visited = set()
-                while cur and depth < 10 and cur["id"] not in visited:
-                    visited.add(cur["id"])
-                    keep.add(cur["id"])
-                    if cur["parent_id"] is None:
+                while cur and depth < 10 and cur["unique_key"] not in visited:
+                    visited.add(cur["unique_key"])
+                    keep.add(cur["unique_key"])
+                    if cur["parent_unique_key"] is None:
                         break
-                    cur = by_id.get(cur["parent_id"])
+                    cur = by_key.get(cur["parent_unique_key"])
                     depth += 1
-            all_nodes = [n for n in all_nodes if n["id"] in keep]
+            all_nodes = [n for n in all_nodes if n["unique_key"] in keep]
 
-    return {"data": all_nodes, "total": len(all_nodes)}
+    return {"data": all_nodes, "total": len(all_nodes), "hierarchy_meta": hierarchy_meta}
+
+
+def _empty_hierarchy_meta() -> Dict[str, Any]:
+    """空 hierarchy_meta (YAML 加载失败时使用)"""
+    return {
+        "root_type": None,
+        "levels": [],
+        "ui_config": {},
+        "version_id_injected": False,
+    }
 
 
 def _validate_required_fields(data: Dict[str, Any], fields: list) -> Optional[str]:
