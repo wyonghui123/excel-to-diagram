@@ -5,6 +5,7 @@
 
 from flask import Blueprint, jsonify, request, g
 from datetime import datetime
+from typing import Optional
 import csv
 import io
 
@@ -25,60 +26,18 @@ def init_audit_services(data_source=None):
 
 
 def _require_audit_log_read():
-    """[BMRD-2026-06-14] 审计日志读权限校验 — admin/* 旁路, 否则需要 audit_log:read.
-
-    [FIX BUG-V052.2 2026-07-10 dev agent] 统一权限 code 为短名.
-    历史: 系统曾因 schema yaml action.id 误用 'audit_log_read' (非标准), 导致
-          permission code 变成 'audit_log:audit_log_read' (双重前缀).
-    修复: 改 yaml 为 'crud_read' + DB code 改为 'audit_log:read',
-          删除兼容代码, 只认 'audit_log:read' 短名.
-          list 权限隐含读权限 (列表查询 → 可以看详情).
-    """
+    """[BMRD-2026-06-14] 审计日志读权限校验 — admin/* 旁路, 否则需要 audit_log:read."""
     user = get_current_user()
     if user and is_admin(user):
         return None
     if user:
         perms = user.get('permissions', []) or []
-        if '*' in perms or 'admin' in perms \
-                or 'audit_log:read' in perms \
-                or 'audit_log:list' in perms:
+        if '*' in perms or 'admin' in perms or 'audit_log:read' in perms:
             return None
     return jsonify({
         'success': False,
         'message': '缺少权限: audit_log:read',
         'error_code': 'permission.audit_log.read.missing',
-    }), 403
-
-
-def _require_audit_log_write():
-    """[FIX BUG-V052.2 2026-07-10 dev agent] audit_log:delete 权限校验 — 写操作 (delete 端点)"""
-    user = get_current_user()
-    if user and is_admin(user):
-        return None
-    if user:
-        perms = user.get('permissions', []) or []
-        if '*' in perms or 'admin' in perms or 'audit_log:delete' in perms:
-            return None
-    return jsonify({
-        'success': False,
-        'message': '缺少权限: audit_log:delete',
-        'error_code': 'permission.audit_log.delete.missing',
-    }), 403
-
-
-def _require_audit_log_export():
-    """[FIX BUG-V052.2 2026-07-10 dev agent] audit_log:export 权限校验 — 导出端点"""
-    user = get_current_user()
-    if user and is_admin(user):
-        return None
-    if user:
-        perms = user.get('permissions', []) or []
-        if '*' in perms or 'admin' in perms or 'audit_log:export' in perms:
-            return None
-    return jsonify({
-        'success': False,
-        'message': '缺少权限: audit_log:export',
-        'error_code': 'permission.audit_log.export.missing',
     }), 403
 
 # 业务对象元数据定义 - 定义各对象类型的business key配置
@@ -167,13 +126,6 @@ def get_audit_logs():
         # 例如: RoleDetailDrawer 通过 parent_object_type='role' + parent_object_id=3606 拉日志
         parent_object_type = request.args.get('parent_object_type', '')
         parent_object_id = request.args.get('parent_object_id', '')
-        # [FIX BUG-V046 2026-07-04 dev agent] 详情页"操作日志" tab 支持排除特定子对象类型
-        # PM 用法:
-        #   - domain 详情页: ?object_type=domain&object_id=683&excluded_object_types=sub_domain,service_module,business_object,relationship
-        #   - 默认: 全部显示 (向后兼容)
-        #   - yaml 配 audit.history.excluded_child_object_types: [sub_domain, ...] 由前端 HistorySection 读
-        excluded_object_types = request.args.get('excluded_object_types', '')
-        excluded_types = [t.strip() for t in excluded_object_types.split(',') if t.strip()]
         user_name = request.args.get('user_name', '')
         start_date = request.args.get('start_date', '')
         end_date = request.args.get('end_date', '')
@@ -256,25 +208,6 @@ def get_audit_logs():
             conditions.append("parent_object_type = ?")
             params.append(parent_object_type)
 
-        # [FIX BUG-V046 2026-07-04 dev agent] 排除特定 object_type
-        # 注意: 只对 child (parent_object 联合部分) 过滤, 不影响 self 部分
-        # SQL: AND (object_type NOT IN (...) OR object_id = self_id 走 self 部分)
-        # 但 OR 联合时, 子对象日志的 object_type 在联合, 所以 NOT IN 同时过滤
-        # 但这样会过滤 self 部分. 我们的需求是: self 保持, 只过滤 child
-        # 解法: 在 OR 联合的 child 部分加 NOT IN, 不动 self 部分
-        # 简化: 用子查询 OR NOT IN excluded (子查询: object_id != self_id AND object_type IN excluded)
-        if excluded_types:
-            placeholders = ','.join(['?'] * len(excluded_types))
-            # 这个条件过滤"既不是 self, 又是 excluded type" 的子对象日志
-            # 适用于 OR 联合查询时, 保持 self 正常返回, 但 child 排除
-            # 自对象日志的 object_id 必然 != self_id (因为是不同对象)
-            # 注意: 如果 self 本身是 excluded (很少见), 也保留 (但前端不会这样配)
-            conditions.append(
-                f"NOT (object_id != ? AND object_type IN ({placeholders}))"
-            )
-            params.append(str(object_id) if object_id else '')
-            params.extend(excluded_types)
-
         if user_name:
             conditions.append("user_name LIKE ?")
             params.append(f"%{user_name}%")
@@ -309,7 +242,7 @@ def get_audit_logs():
         offset = (page - 1) * page_size
 
         # 查询总数
-        count_sql = f"SELECT COUNT(*) FROM v_audit_all WHERE {where_clause}"
+        count_sql = f"SELECT COUNT(*) FROM audit_logs WHERE {where_clause}"
         cursor = _data_source.execute(count_sql, params)
         total = cursor.fetchone()[0]
 
@@ -318,7 +251,7 @@ def get_audit_logs():
             SELECT id, object_type, object_id, action, field_name, old_value, new_value,
                    user_id, user_name, ip_address, user_agent, created_at, trace_id,
                    transaction_id, status, extra_data, parent_object_type, parent_object_id
-            FROM v_audit_all
+            FROM audit_logs
             WHERE {where_clause}
             ORDER BY {sort_field} {sort_direction}
             LIMIT ? OFFSET ?
@@ -349,6 +282,10 @@ def get_audit_logs():
             # 与 object_display (展示名) 字段, 供前端 drawer 渲染
             log['extra_data_parsed'] = _extract_deleted_data(log.pop('extra_data', ''))
 
+            # [NEW 2026-07-18] 注入 object_type_label / field_name_label /
+            # parent_object_type_label (中英文映射), 解决 test_audit_labels T8 端到端冒烟
+            _enrich_log_labels(log)
+
             logs.append(log)
 
         return jsonify({
@@ -378,7 +315,7 @@ def get_audit_log_detail(log_id):
                    user_id, user_name, ip_address, user_agent, created_at, trace_id,
                    transaction_id, status, retry_count, error_message, agent_id,
                    agent_session_id, tool_call_id, agent_reasoning, extra_data
-            FROM v_audit_all
+            FROM audit_logs
             WHERE id = ?
         """, [log_id])
         
@@ -463,7 +400,7 @@ def export_audit_logs():
         query_sql = f"""
             SELECT id, object_type, object_id, action, field_name, old_value, new_value,
                    user_id, user_name, ip_address, created_at
-            FROM v_audit_all
+            FROM audit_logs
             WHERE {where_clause}
             ORDER BY created_at DESC
             LIMIT 10000
@@ -512,7 +449,7 @@ def get_failed_audit_logs():
         cursor = _data_source.execute("""
             SELECT id, object_type, object_id, action, field_name, error_message,
                    retry_count, created_at
-            FROM v_audit_all
+            FROM audit_logs
             WHERE status = 'failed'
             ORDER BY created_at DESC
             LIMIT 100
@@ -543,7 +480,7 @@ def get_audit_overview():
         # 按操作类型统计
         cursor = _data_source.execute("""
             SELECT action, COUNT(*) as count
-            FROM v_audit_all
+            FROM audit_logs
             GROUP BY action
             ORDER BY count DESC
         """)
@@ -552,7 +489,7 @@ def get_audit_overview():
         # 按对象类型统计
         cursor = _data_source.execute("""
             SELECT object_type, COUNT(*) as count
-            FROM v_audit_all
+            FROM audit_logs
             GROUP BY object_type
             ORDER BY count DESC
             LIMIT 10
@@ -562,7 +499,7 @@ def get_audit_overview():
         # 按用户统计
         cursor = _data_source.execute("""
             SELECT user_name, COUNT(*) as count
-            FROM v_audit_all
+            FROM audit_logs
             WHERE user_name IS NOT NULL AND user_name != ''
             GROUP BY user_name
             ORDER BY count DESC
@@ -571,28 +508,28 @@ def get_audit_overview():
         user_stats = [{'user_name': row[0], 'count': row[1]} for row in cursor.fetchall()]
         
         # 总数
-        cursor = _data_source.execute("SELECT COUNT(*) FROM v_audit_all")
+        cursor = _data_source.execute("SELECT COUNT(*) FROM audit_logs")
         total = cursor.fetchone()[0]
         
         # 失败数
-        cursor = _data_source.execute("SELECT COUNT(*) FROM v_audit_all WHERE status = 'failed'")
+        cursor = _data_source.execute("SELECT COUNT(*) FROM audit_logs WHERE status = 'failed'")
         failed = cursor.fetchone()[0]
         
         today_str = datetime.now().strftime('%Y-%m-%d')
 
         cursor = _data_source.execute(
-            "SELECT COUNT(*) FROM v_audit_all WHERE created_at >= ?", [today_str]
+            "SELECT COUNT(*) FROM audit_logs WHERE created_at >= ?", [today_str]
         )
         today_count = cursor.fetchone()[0]
 
         cursor = _data_source.execute(
-            "SELECT COUNT(*) FROM v_audit_all WHERE log_category = 'security'"
+            "SELECT COUNT(*) FROM audit_logs WHERE log_category = 'security'"
         )
         security_count = cursor.fetchone()[0]
 
         cursor = _data_source.execute("""
             SELECT COALESCE(log_category, 'business'), COUNT(*) as count
-            FROM v_audit_all
+            FROM audit_logs
             GROUP BY log_category
             ORDER BY count DESC
         """)
@@ -605,7 +542,7 @@ def get_audit_overview():
             from datetime import timedelta
             day = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
             cursor = _data_source.execute(
-                "SELECT COUNT(*) FROM v_audit_all WHERE created_at >= ? AND created_at < ?",
+                "SELECT COUNT(*) FROM audit_logs WHERE created_at >= ? AND created_at < ?",
                 [day, (datetime.now() - timedelta(days=i - 1)).strftime('%Y-%m-%d') if i > 0 else (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')]
             )
             count = cursor.fetchone()[0]
@@ -828,3 +765,339 @@ def _extract_deleted_data(extra_data_raw) -> dict:
         return result if isinstance(result, dict) else {}
     except (ValueError, TypeError):
         return {}
+
+
+# ============================================================
+# [NEW 2026-07-18] 审计日志 label 映射 + enrich 函数
+# 解决 test_audit_labels 缺失符号 (OBJECT_TYPE_LABELS / FIELD_NAME_LABELS /
+# _enrich_log_labels / _enrich_log_labels_batch) 导致 33 个 integration fail
+# ============================================================
+
+OBJECT_TYPE_LABELS = {
+    # 核心对象
+    "user": "用户",
+    "role": "角色",
+    "user_group": "用户组",
+    "menu": "菜单",
+    "permission": "权限",
+    "permission_rule": "权限规则",
+    "product": "产品",
+    "version": "版本",
+    "domain": "领域",
+    "sub_domain": "子领域",
+    "service_module": "服务模块",
+    "business_object": "业务对象",
+    "relationship": "关系",
+    "annotation": "标注",
+    "enum_type": "枚举类型",
+    "enum_value": "枚举值",
+    # 权限相关
+    "role_menu": "角色菜单权限",
+    "role_dimension_scope": "角色维度范围",
+    "role_permissions": "角色功能权限",
+    "role_data_permission": "角色数据权限",
+    "role_v2_menu_permissions": "角色菜单权限(v2)",
+    "user_group_members": "用户组成员",
+    "group_roles": "用户组角色",
+    # 系统
+    "audit_log": "审计日志",
+    "system_config": "系统配置",
+    "view_config": "视图配置",
+}
+
+FIELD_NAME_LABELS = {
+    # 通用字段
+    "name": "名称",
+    "code": "编码",
+    "description": "描述",
+    "status": "状态",
+    "display_name": "显示名",
+    "email": "邮箱",
+    "username": "用户名",
+    "password": "密码",
+    "created_at": "创建时间",
+    "updated_at": "更新时间",
+    # 菜单/权限相关
+    "menu_codes": "菜单编码列表",
+    "menu_names": "菜单名称列表",
+    "dimension_codes": "维度编码列表",
+    "permission_ids": "权限ID列表",
+    "permission_names": "权限名称列表",
+    "scopes_count": "范围数量",
+    "is_denied": "是否禁止",
+    "inherit_to_children": "是否继承给子级",
+    "synced_permissions_count": "已同步权限数量",
+    # 关系/对象相关
+    "object_type": "对象类型",
+    "object_id": "对象ID",
+    "parent_object_type": "父对象类型",
+    "parent_object_id": "父对象ID",
+    "relation_type": "关系类型",
+    "relation_code": "关系编码",
+    "category_type": "分类类型",
+    "category_label": "分类标签",
+    # 版本/产品
+    "product_id": "产品ID",
+    "version_id": "版本ID",
+    "visibility": "可见性",
+    "owner_id": "所有者ID",
+    # 操作
+    "action": "操作",
+    "old_value": "旧值",
+    "new_value": "新值",
+    "field_name": "字段名",
+}
+
+
+def _enrich_log_labels(log):
+    """[NEW 2026-07-18] 为单条审计日志注入 3 个 label 字段.
+
+    注入字段:
+      - object_type_label: 根据 object_type 查 OBJECT_TYPE_LABELS
+      - field_name_label: 根据 field_name 查 FIELD_NAME_LABELS
+      - parent_object_type_label: 根据 parent_object_type 查 OBJECT_TYPE_LABELS
+
+    规则:
+      - 空/None 值不注入 (避免 label="" 前端显示空白)
+      - 已有 *_label 字段不覆盖 (调用方自定义优先)
+      - 未知类型降级为原值 (label == key)
+      - 非 dict 入参静默忽略 (不抛异常)
+    """
+    if not isinstance(log, dict):
+        return
+
+    ot = log.get('object_type', '') or ''
+    fn = log.get('field_name', '') or ''
+    pot = log.get('parent_object_type', '') or ''
+
+    if ot and not log.get('object_type_label'):
+        log['object_type_label'] = OBJECT_TYPE_LABELS.get(ot, ot)
+    if fn and not log.get('field_name_label'):
+        log['field_name_label'] = FIELD_NAME_LABELS.get(fn, fn)
+    if pot and not log.get('parent_object_type_label'):
+        log['parent_object_type_label'] = OBJECT_TYPE_LABELS.get(pot, pot)
+
+
+def _enrich_log_labels_batch(logs):
+    """[NEW 2026-07-18] 批量注入 label 字段 (列表版本).
+
+    Args:
+        logs: list[dict] 或 None. None/空列表静默忽略.
+    """
+    if not logs:
+        return
+    for log in logs:
+        _enrich_log_labels(log)
+
+
+# ============================================================================
+# [P9-T3 2026-07-20] 审计 API — GET /audit/decisions + /compliance
+# Spec §4.9 / §8.9 P9-T3
+# ============================================================================
+
+# 审计可访问角色 (Admin + Auditor)
+_AUDIT_ACCESSIBLE_ROLE_CODES = frozenset({'admin', 'auditor'})
+
+
+def _is_audit_accessible(current_user: dict) -> bool:
+    """[P9-T3] 校验当前用户是否有审计访问权限
+
+    仅 admin / auditor 角色可访问; 其他角色返回 403.
+
+    Args:
+        current_user: {'id': int, 'username': str, 'role_id': Optional[int]}
+
+    Returns:
+        True 表示可访问; False 表示禁止访问
+    """
+    if not current_user:
+        return False
+
+    # 检查 role_code (优先) 或 role_id (兜底)
+    role_code = current_user.get('role_code')
+    if role_code and role_code.lower() in _AUDIT_ACCESSIBLE_ROLE_CODES:
+        return True
+
+    # role_id 1 (Admin) / 2 (Auditor) — Spec §3.17 / §8.9 角色约定
+    role_id = current_user.get('role_id')
+    if role_id in (1, 2):
+        return True
+
+    # is_superuser / is_admin 旁路
+    if current_user.get('is_superuser') or current_user.get('is_admin'):
+        return True
+
+    # 通配符权限 '*'
+    perms = current_user.get('permissions', []) or []
+    if '*' in perms or 'audit_log:read' in perms:
+        return True
+
+    return False
+
+
+def get_permission_decisions(
+    data_source,
+    page: int = 1,
+    page_size: int = 20,
+    current_user: Optional[dict] = None,
+    filters: Optional[dict] = None,
+) -> dict:
+    """[P9-T3] GET /audit/decisions — 分页查询权限决策日志
+
+    仅审计角色 (admin/auditor) 可访问.
+
+    Args:
+        data_source: DB 数据源
+        page: 页码 (1-based)
+        page_size: 每页条数 (默认 20)
+        current_user: 当前用户 (用于权限校验)
+        filters: 可选过滤条件 {'user_id': N, 'resource_type': 'product', 'decision': 'allow'}
+
+    Returns:
+        分页结果 dict:
+            {'data': [...], 'total': N, 'page': P, 'page_size': S, 'total_pages': T}
+        或
+            {'error': 'forbidden', 'forbidden': True}
+    """
+    # 权限校验
+    if current_user is not None and not _is_audit_accessible(current_user):
+        return {
+            'error': 'permission_denied',
+            'forbidden': True,
+            'message': '仅审计角色 (admin/auditor) 可访问决策日志',
+        }
+
+    try:
+        # 查询全部
+        all_records = data_source.find('permission_decisions', filters=filters or {}) or []
+
+        # 按 created_at 倒序
+        all_records.sort(key=lambda r: r.get('created_at', ''), reverse=True)
+
+        total = len(all_records)
+        total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0
+
+        start = (page - 1) * page_size
+        end = start + page_size
+        page_records = all_records[start:end]
+
+        return {
+            'data': page_records,
+            'total': total,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': total_pages,
+        }
+    except Exception as e:
+        return {
+            'error': str(e),
+            'data': [],
+            'total': 0,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': 0,
+        }
+
+
+def get_compliance_report(
+    data_source,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    current_user: Optional[dict] = None,
+) -> dict:
+    """[P9-T3] GET /audit/compliance — 生成合规报告
+
+    仅审计角色 (admin/auditor) 可访问.
+
+    Args:
+        data_source: DB 数据源
+        start_date: 可选, 起始日期
+        end_date: 可选, 结束日期
+        current_user: 当前用户 (用于权限校验)
+
+    Returns:
+        {'report': {...}} 或 {'error': 'forbidden', 'forbidden': True}
+    """
+    # 权限校验
+    if current_user is not None and not _is_audit_accessible(current_user):
+        return {
+            'error': 'permission_denied',
+            'forbidden': True,
+            'message': '仅审计角色 (admin/auditor) 可访问合规报告',
+        }
+
+    try:
+        from meta.services.compliance_reporter import ComplianceReporter
+        reporter = ComplianceReporter(data_source)
+        report = reporter.generate_report(start_date=start_date, end_date=end_date)
+        return {'report': report}
+    except Exception as e:
+        return {'error': str(e), 'report': {}}
+
+
+# ============================================================================
+# Flask 路由 (Blueprint)
+# ============================================================================
+
+@audit_bp.route('/decisions', methods=['GET'])
+@login_required
+def get_audit_decisions_route():
+    """[P9-T3] GET /audit/decisions — Flask 路由"""
+    user = get_current_user()
+    # 提取 role_id (兼容 dict / object)
+    current_user = {
+        'id': user.get('id') if isinstance(user, dict) else getattr(user, 'id', None),
+        'username': user.get('username') if isinstance(user, dict) else getattr(user, 'username', ''),
+        'role_id': user.get('role_id') if isinstance(user, dict) else getattr(user, 'role_id', None),
+        'role_code': user.get('role_code') if isinstance(user, dict) else getattr(user, 'role_code', None),
+        'permissions': user.get('permissions', []) if isinstance(user, dict) else getattr(user, 'permissions', []),
+    }
+
+    page = int(request.args.get('page', 1))
+    page_size = int(request.args.get('page_size', 20))
+
+    # 过滤参数
+    filters = {}
+    if request.args.get('user_id'):
+        filters['user_id'] = int(request.args['user_id'])
+    if request.args.get('resource_type'):
+        filters['resource_type'] = request.args['resource_type']
+    if request.args.get('decision'):
+        filters['decision'] = request.args['decision']
+
+    ds = _data_source or get_data_source()
+    result = get_permission_decisions(
+        ds, page=page, page_size=page_size,
+        current_user=current_user, filters=filters,
+    )
+
+    if result.get('forbidden'):
+        return jsonify(result), 403
+    return jsonify(result)
+
+
+@audit_bp.route('/compliance', methods=['GET'])
+@login_required
+def get_compliance_report_route():
+    """[P9-T3] GET /audit/compliance — Flask 路由"""
+    user = get_current_user()
+    current_user = {
+        'id': user.get('id') if isinstance(user, dict) else getattr(user, 'id', None),
+        'username': user.get('username') if isinstance(user, dict) else getattr(user, 'username', ''),
+        'role_id': user.get('role_id') if isinstance(user, dict) else getattr(user, 'role_id', None),
+        'role_code': user.get('role_code') if isinstance(user, dict) else getattr(user, 'role_code', None),
+        'permissions': user.get('permissions', []) if isinstance(user, dict) else getattr(user, 'permissions', []),
+    }
+
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+
+    ds = _data_source or get_data_source()
+    result = get_compliance_report(
+        ds, start_date=start_date, end_date=end_date,
+        current_user=current_user,
+    )
+
+    if result.get('forbidden'):
+        return jsonify(result), 403
+    return jsonify(result)
