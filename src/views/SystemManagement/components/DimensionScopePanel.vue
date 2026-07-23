@@ -33,23 +33,44 @@
         </span>
       </div>
 
-      <div class="dimension-values" v-if="!wildcardFlags[dim.id]">
+      <div class="dimension-values">
+        <!-- [P1-T5 2026-07-19] scope_mode='all' 全量模式 -->
         <el-tag
-          v-for="val in (selectedValues[dim.id] || [])"
-          :key="val.id + '-' + readyFlag"
+          v-if="scopeAllFlags[dim.id]"
+          type="success"
+          size="small"
           closable
-          size="small"
-          :disable-transitions="false"
-          @close="removeDimensionValue(dim.id, val.id)"
+          @close="toggleScopeAll(dim.id, false)"
         >
-          {{ val.name || val.code || val.id }}
+          全部
         </el-tag>
+        <template v-else>
+          <el-tag
+            v-for="val in (selectedValues[dim.id] || [])"
+            :key="val.id + '-' + readyFlag"
+            closable
+            size="small"
+            :disable-transitions="false"
+            @close="removeDimensionValue(dim.id, val.id)"
+          >
+            {{ val.name || val.code || val.id }}
+          </el-tag>
+          <el-button
+            size="small"
+            :icon="Plus"
+            @click="openValuePicker(dim)"
+          >
+            添加{{ dim.name }}
+          </el-button>
+        </template>
         <el-button
+          v-if="!scopeAllFlags[dim.id]"
           size="small"
-          :icon="Plus"
-          @click="openValuePicker(dim)"
+          plain
+          type="success"
+          @click="toggleScopeAll(dim.id, true)"
         >
-          添加{{ dim.name }}
+          全部
         </el-button>
         <span v-if="getParentDim(dim.id) && !hasParentValues(dim.id)" class="cascade-disabled-hint">
           上级未选，所有选项可用
@@ -57,10 +78,6 @@
         <span v-else-if="getParentDim(dim.id) && hasParentValues(dim.id)" class="cascade-active-hint">
           已按上级过滤
         </span>
-      </div>
-      <div v-else class="wildcard-hint">
-        <el-tag type="warning" size="small">全维度可见</el-tag>
-        <span class="wildcard-desc">该维度下所有资源均可见 (跳过维度检查)</span>
       </div>
 
       <label class="inherit-toggle">
@@ -70,29 +87,6 @@
           @change="toggleInherit(dim.id)"
         />
         <span>包含下级（自动扩展子级资源）</span>
-      </label>
-
-      <!-- [Spec 08 FR-004] 全维度可见复选框 (feature flag 控制显示) -->
-      <label class="inherit-toggle" v-if="featureFlags.dim_scope_wildcard_enabled">
-        <input
-          type="checkbox"
-          :checked="wildcardFlags[dim.id] === true"
-          @change="toggleWildcard(dim.id)"
-        />
-        <span>全维度可见（跳过该维度检查）</span>
-      </label>
-
-      <!-- [Spec 08 FR-004] 排除已选值复选框 (wildcard 勾选时隐藏; feature flag 控制显示) -->
-      <label
-        class="inherit-toggle"
-        v-if="!wildcardFlags[dim.id] && featureFlags.dim_scope_exclude_enabled"
-      >
-        <input
-          type="checkbox"
-          :checked="scopeModeFlags[dim.id] === 'exclude'"
-          @change="toggleScopeMode(dim.id)"
-        />
-        <span>排除已选值（黑名单模式：选中之外的资源均可见）</span>
       </label>
     </div>
 
@@ -128,8 +122,6 @@ import { Plus } from '@element-plus/icons-vue'
 import { AppIcon } from '@/components/common/AppIcon'
 import SearchHelpDialog from '@/components/common/SearchHelpDialog.vue'
 import * as permService from '@/services/permissionService'
-import { buildDimensionMapsFromConfig } from '@/services/permissionService'
-import { fetchHierarchyConfig } from '@/services/hierarchyService'
 import { useCrudMessage } from '@/composables/useCrudMessage'
 
 const props = defineProps({
@@ -146,61 +138,26 @@ const emit = defineEmits({
 
 const message = useCrudMessage()
 
-// 维度显示配置和映射缓存 (从 hierarchies.yaml 配置动态生成)
-const dimensionMaps = ref({
-  parentMap: permService.DIMENSION_PARENT_MAP,
-  levelMap: permService.DIMENSION_LEVEL_MAP,
-  fieldMap: permService.PARENT_FIELD_MAP,
-  labelMap: permService.RESOURCE_LABELS
-})
-const hierarchyDimConfigs = ref({})
+// [REMOVED] 2026-06-03: service_module 和 business_object 从管理维度移除
+// 新的层级链: product → version → domain → sub_domain (4层)
 
-// 异步加载 hierarchy 配置，覆盖静态 fallback
-fetchHierarchyConfig().then(config => {
-  if (config?.hierarchy_levels) {
-    dimensionMaps.value = buildDimensionMapsFromConfig(config)
-  }
-  // 提取维度 display_mode 等配置
-  if (config?.dimensions) {
-    const dimConfigs = {}
-    for (const dim of config.dimensions) {
-      dimConfigs[dim.id] = dim
-    }
-    hierarchyDimConfigs.value = dimConfigs
-  }
-}).catch(() => {
-  // fetchHierarchyConfig 内部已有 fallback，此处仅防异常
-})
-
-// 从 hierarchies.yaml 配置动态生成维度父级标签
-const DIMENSION_PARENT_LABEL = computed(() => {
-  const { labelMap, parentMap } = dimensionMaps.value
-  const result = {}
-  for (const [dimId, parentId] of Object.entries(parentMap)) {
-    if (parentId) {
-      const parentLabel = labelMap[parentId] || parentId
-      result[dimId] = `所属${parentLabel}`
-    }
-  }
-  return result
-})
+const DIMENSION_PARENT_LABEL = {
+  'version': '所属产品',
+  'domain': '所属版本',
+  'sub_domain': '所属领域'
+  // 'service_module': '所属子领域',  // 已移除
+  // 'business_object': '所属服务模块'  // 已移除
+}
 
 const dimensions = ref([])
 const dimensionsLoading = ref(false)
 const selectedValues = reactive({ product: [], version: [], domain: [], sub_domain: [] })
 const inheritFlags = reactive({})
+const scopeAllFlags = reactive({})  // [P1-T5] scope_mode='all' 标记
 const saving = ref(false)
 const refreshTrigger = ref(0)
 const readyFlag = ref(0)
 const autoDeriving = ref(false)
-
-// [Spec 08 FR-004] wildcard / exclude / feature flag 状态
-const wildcardFlags = reactive({})      // {product: false, ...} — 全维度可见
-const scopeModeFlags = reactive({})     // {product: 'include'|'exclude', ...}
-const featureFlags = ref({              // 从 /api/v2/_feature_flags 加载
-  dim_scope_wildcard_enabled: true,
-  dim_scope_exclude_enabled: true
-})
 
 const pickerVisible = ref(false)
 const pickerDim = ref(null)
@@ -294,28 +251,23 @@ const lastConfirmedDimId = ref(null)
 const pickerValueHelpConfig = computed(() => {
   if (!pickerDim.value) return {}
   const dimId = pickerDim.value.id
-  const parentLabel = DIMENSION_PARENT_LABEL.value[dimId]
+  const parentLabel = DIMENSION_PARENT_LABEL[dimId]
   const cols = [
     { field: 'name', label: '名称' },
     { field: 'code', label: '编码' }
   ]
   if (parentLabel) {
-    cols.push({ field: 'ancestor_path', label: '所属路径' })
+    cols.push({ field: 'ancestor_path', label: '所属路径' })  // 方案 B: 完整祖先路径
   }
-  // display_mode 从 hierarchies.yaml dimensions[].display_mode 驱动
-  // 新增维度时只需在 YAML 中添加 display_mode 即可，无需改前端代码
-  const dimConfig = hierarchyDimConfigs.value[dimId]
   return {
     source: { type: 'bo', target_bo: dimId },
     presentation: {
-      display_mode: dimConfig?.display_mode || 'tree',
+      display_mode: 'flat',
       display_columns: cols
     },
     behavior: { multiple: true }
   }
 })
-
-// 维度显示配置缓存 (从 fetchHierarchyConfig 获取, 已在上方初始化)
 
 const pickerSelectedIds = computed(() => {
   if (!pickerDim.value) return []
@@ -330,42 +282,12 @@ function toggleInherit(dimId) {
   inheritFlags[dimId] = !(inheritFlags[dimId] !== false)
 }
 
-// [Spec 08 FR-004] wildcard / exclude 切换函数
-function toggleWildcard(dimId) {
-  const newVal = !(wildcardFlags[dimId] === true)
-  wildcardFlags[dimId] = newVal
-  if (newVal) {
-    // 勾选 wildcard: 清空已选值, 重置 mode (避免与 exclude 冲突)
+// [P1-T5 2026-07-19] scope_mode='all' 切换
+function toggleScopeAll(dimId, value) {
+  scopeAllFlags[dimId] = value
+  if (value) {
+    // 切换到"全部"模式时，清空具体选择的值（语义：全量，不需要具体值）
     selectedValues[dimId] = []
-    scopeModeFlags[dimId] = 'include'
-  }
-}
-
-function toggleScopeMode(dimId) {
-  const cur = scopeModeFlags[dimId] || 'include'
-  scopeModeFlags[dimId] = cur === 'include' ? 'exclude' : 'include'
-  // PM 决策: 切换 mode 不清空已选值 (保留 [1,2,3] 直接变 exclude)
-}
-
-async function loadFeatureFlags() {
-  // [Spec 08 FR-006] 从后端加载 feature flag 状态
-  try {
-    const resp = await fetch('/api/v2/_feature_flags', {
-      headers: { 'Accept': 'application/json' },
-      credentials: 'include'
-    })
-    if (resp.ok) {
-      const result = await resp.json()
-      if (result.success && result.data) {
-        featureFlags.value = {
-          dim_scope_wildcard_enabled: result.data.dim_scope_wildcard_enabled !== false,
-          dim_scope_exclude_enabled: result.data.dim_scope_exclude_enabled !== false
-        }
-      }
-    }
-  } catch (e) {
-    // 加载失败时保持默认 (都启用)
-    console.warn('Failed to load feature flags:', e)
   }
 }
 
@@ -401,20 +323,13 @@ async function loadDimensionScopes() {
     if (result.success && result.data) {
       for (const scope of result.data) {
         const dimId = scope.dimension_code
-        const values = scope.dimension_values || []
-        const mode = scope.scope_mode || 'include'
-
-        // [Spec 08 FR-004] 识别 '*' 通配符
-        const isWildcard = Array.isArray(values)
-          ? values.some(v => v === '*' || (typeof v === 'object' && v.id === '*'))
-          : false
-
-        if (isWildcard) {
-          // 通配符: 标记 wildcard, 清空已选值
-          wildcardFlags[dimId] = true
-          selectedValues[dimId] = []
+        // [P1-T5] 回显 scope_mode='all'
+        if (scope.scope_mode === 'all') {
+          scopeAllFlags[dimId] = true
+          selectedValues[dimId] = []  // 'all' 模式不需要具体值
         } else {
-          wildcardFlags[dimId] = false
+          scopeAllFlags[dimId] = false
+          const values = scope.dimension_values || []
           if (values.length > 0) {
             // Use direct assignment with new array reference - Vue 3 Proxy tracks this
             selectedValues[dimId] = values.map(v => {
@@ -423,9 +338,6 @@ async function loadDimensionScopes() {
             })
           }
         }
-
-        // [Spec 08 FR-004] 保存 scope_mode
-        scopeModeFlags[dimId] = mode
         inheritFlags[dimId] = scope.inherit_children !== 0 && scope.inherit_children !== false
       }
     }
@@ -453,23 +365,13 @@ function openValuePicker(dim) {
 
 async function pickerFetcher(params) {
   if (!pickerDim.value) return { success: true, data: { items: [], total: 0 } }
-  const { page, pageSize: ps, keyword, ordering, ...restParams } = params || {}
+  const { page, pageSize: ps, keyword } = params || {}
 
   const serviceParams = {
     page: page || 1,
     page_size: ps || 20,
   }
   if (keyword) serviceParams.search = keyword
-  // [FIX 2026-07-22] 透传列头排序 (Django style: -field)
-  if (ordering) serviceParams.ordering = ordering
-  // [FIX 2026-07-22] 透传列头过滤 (保留 __like/__in/__gte/__lte 后缀, 后端 BoValueHelpProvider 解析)
-  // 跳过内部字段
-  const skipKeys = ['value_field', 'display_field', 'code_field', 'value_filter', 'hierarchy', 'apply_target_permissions']
-  for (const [k, v] of Object.entries(restParams)) {
-    if (skipKeys.includes(k)) continue
-    if (v === undefined || v === null || v === '') continue
-    serviceParams[k] = v
-  }
 
   const parentFilter = getParentFilterParams(pickerDim.value.id)
   Object.assign(serviceParams, parentFilter)
@@ -561,29 +463,25 @@ async function saveDimensionScopesInternal() {
   }
   const scopes = []
   for (const dim of sortedDimensions.value) {
-    const dimId = dim.id
-    const vals = selectedValues[dimId] || []
-    const isWildcard = wildcardFlags[dimId] === true
-    const mode = scopeModeFlags[dimId] || 'include'
-
-    // [Spec 08 FR-004] 通配符: 发送 ["*"], include mode
-    if (isWildcard) {
+    // [P1-T5] scope_mode='all' 发送
+    if (scopeAllFlags[dim.id]) {
       scopes.push({
-        dimension_code: dimId,
-        dimension_values: ['*'],
-        inherit_children: inheritFlags[dimId] !== false,
-        scope_mode: 'include'
+        dimension_code: dim.id,
+        dimension_values: [],
+        inherit_children: inheritFlags[dim.id] !== false,
+        scope_mode: 'all'
       })
-    } else if (vals.length > 0) {
-      // 正常 include/exclude: 发送选中的 ID 列表 + scope_mode
-      scopes.push({
-        dimension_code: dimId,
-        dimension_values: vals.map(v => v.id),
-        inherit_children: inheritFlags[dimId] !== false,
-        scope_mode: mode
-      })
+    } else {
+      const vals = selectedValues[dim.id] || []
+      if (vals.length > 0) {
+        scopes.push({
+          dimension_code: dim.id,
+          dimension_values: vals.map(v => v.id),
+          inherit_children: inheritFlags[dim.id] !== false,
+          scope_mode: 'include'
+        })
+      }
     }
-    // vals 为空且非 wildcard: 不发送 (该维度无配置)
   }
 
   const result = await permService.saveDimensionScopes(props.roleId, scopes)
@@ -608,8 +506,6 @@ async function saveDimensionScopes() {
 }
 
 onMounted(async () => {
-  // [Spec 08 FR-006] 先加载 feature flags (决定 UI 是否显示 wildcard/exclude 复选框)
-  await loadFeatureFlags()
   await loadDimensions()
   await loadDimensionScopes()
   initParentSnapshots()
