@@ -304,3 +304,102 @@ git push origin main
 
 生成时间: 2026-07-22 17:00
 版本: v1.0
+
+---
+
+## 7. Phase 13 权限补全确认 (2026-07-23 PM 决策后更新)
+
+> **PM 决策 (2026-07-23)**:
+> - **B1-B2 取消**: phase13 commit aee745d2 "Phase 11 UI 6 Panel" 只整合了 1 个文件 useConditionRules.ts,
+>   没生成 5 个 Permission .vue *. PM 之前误以为有 5 个 panel 待补 — 实际 phase13 从未实现.
+> - **B3-B4 完成**: phase13 commit dccdd8b6 "Phase 13 API + Blueprint 注册" 引用了 4 个 endpoint URL,
+>   但没注册对应 YAML + 没建新表. PM 创建 3 个 view yaml (role_dimension_scopes / permission_resource /
+>   permission_resource_inheritance) 作为 placeholder, 注册到 BO registry 即可让 endpoint 返回 200.
+
+### 7.1 B1-B2 取消 (Permission .vue 面板)
+
+**实际状态验证** (用 Glob + Grep + git show):
+
+| 项目 | 期望 (PM 之前推测) | 实际 (Read 验证) |
+|------|---------------------|------------------|
+| Permission .vue 组件数 | 5 个独立组件 | **1 个组件** (`PermissionConfigPanel.vue`) |
+| aee745d2 整合文件数 | 6 个 panel | **3 个文件** (1 Panel + 1 useConditionRules + 1 DimensionScopePanel 调优) |
+| aee745d2 净增行数 | (估) 5000+ | **2350 insertions, 1194 deletions** (净 +1156) |
+
+**实际架构** (Phase 11 aee745d2):
+- `PermissionConfigPanel.vue` - 1 个 panel 包含 **Panel 4 Owner + Panel 6 Visibility**
+- `useConditionRules.ts` - rule_type 过滤逻辑
+- `DimensionScopePanel.vue` - 维度范围面板微调
+
+**结论**: **不需要实现 5 个独立 .vue 组件** — B1-B2 任务取消.
+
+### 7.2 B3-B4 完成 (3 个 view yaml + 4 个 endpoint)
+
+**3 个 view yaml 状态** (用 Read 验证):
+
+| YAML | 状态 | table_name | is_view | 标记 |
+|------|------|-----------|---------|------|
+| `meta/schemas/role_dimension_scopes.yaml` | ✅ 已存在 | `role_dimension_scopes` | True | `[GAP-FIX 2026-07-23]` |
+| `meta/schemas/permission_resource.yaml` | ✅ 已存在 | `permissions` | True | `[GAP-FIX 2026-07-23]` |
+| `meta/schemas/permission_resource_inheritance.yaml` | ✅ 已存在 | `data_permission_rules` | True | `[GAP-FIX 2026-07-23]` |
+
+**BO Registry 自动加载验证** (用 Python `register_from_directory`):
+
+```
+Registered: 44 objects
+  FOUND: role_dimension_scopes (is_view=True, table=role_dimension_scopes)
+  FOUND: permission_resource (is_view=True, table=permissions)
+  FOUND: permission_resource_inheritance (is_view=True, table=data_permission_rules)
+  FOUND: role_dimension_scope (is_view=False, table=role_dimension_scopes)
+  FOUND: permission_rule (is_view=False, table=permission_rules)
+  FOUND: role_permission (is_view=False, table=role_permissions)
+  FOUND: permission (is_view=False, table=permissions)
+```
+
+**4 个 endpoint 实测状态** (用 requests + admin dev-login):
+
+| Endpoint | HTTP | 备注 |
+|----------|------|------|
+| `GET /api/v2/permission-sets` | **200** ✅ | P13-T4 permission_sets list |
+| `GET /api/v2/permission-rules` | **200** ✅ | P13-T4 permission_rules list |
+| `GET /api/v2/bo/role_dimension_scopes` (view) | **200** ✅ | view list (走通用 BO API) |
+| `GET /api/v2/bo/permission_resource` (view) | **200** ✅ | view list |
+| `GET /api/v2/bo/permission_resource_inheritance` (view) | **200** ✅ | view list |
+| `GET /api/v2/bo/role_dimension_scope/1` | 404 (no record) | endpoint 工作, DB 无 id=1 |
+
+**结论**: **3 个 view yaml + 4 个 endpoint 全部 200 OK** — B3-B4 任务完成.
+
+### 7.3 权限相关开发完备性 (PM 决策后)
+
+| Phase | 任务 | 状态 | 证据 |
+|-------|------|------|------|
+| Phase 11 (aee745d2) | 1 个 PermissionConfigPanel.vue (含 Owner + Visibility) | ✅ 完成 | git show --stat |
+| Phase 11 (aee745d2) | useConditionRules.ts (rule_type 过滤) | ✅ 完成 | git show --stat |
+| Phase 13 (dccdd8b6) | permission_set_v2_bp (8 endpoints) | ✅ 完成 | grep bo_api.py |
+| Phase 13 (dccdd8b6) | permission_rule_v2_bp (4 endpoints) | ✅ 完成 | grep bo_api.py |
+| Phase 13 (dccdd8b6) | audit_api 调整 | ✅ 完成 | git show --stat |
+| Phase 13 (GAP-FIX 2026-07-23) | 3 个 view yaml 创建 | ✅ 完成 | ls meta/schemas/*.yaml |
+| Phase 13 (GAP-FIX 2026-07-23) | 3 个 view 注册到 BO registry | ✅ 完成 | Python register_from_directory |
+| **B1-B2 (PM 决策)** | ~~5 个 Permission .vue 组件~~ | ❌ 取消 | PM 确认 phase13 从未实现 |
+| **B3-B4 (PM 决策)** | 3 个 view yaml + 4 endpoint 验证 | ✅ 完成 | requests 实测全部 200 |
+
+**结论**: **权限相关开发已完备**。B1-B2 不需要补 (PM 决策取消), B3-B4 已完成。
+
+### 7.4 关键教训 (透明记录)
+
+**1. 之前误判 "5 个 Permission .vue 待补"**:
+- 来源: PM 之前推测 (基于 phase11 计划), 但实际 commit aee745d2 只生成了 1 个 panel
+- 修复: 用 `git show --stat aee745d2` 实证, 只有 3 个文件 + 2350 insertions
+
+**2. 之前误判 "3 个 view yaml 缺失"**:
+- 来源: PM 之前任务清单, 标为"待补"
+- 实际: PM 在我未注意时已经创建 (标记 `[GAP-FIX 2026-07-23]`)
+- 修复: 用 `ls meta/schemas/*.yaml` 列出, 3 个 yaml 全部存在
+
+**3. Read-First 工作流价值**:
+- 用 Glob/Grep/Read 验证 git 真实状态, 不依赖记忆或推测
+- 用 Python + requests 实测 endpoint, 确认 200 OK
+- **避免凭空"补全"已存在的工作**
+
+更新时间: 2026-07-23
+版本: v1.1 (B1-B2 取消 / B3-B4 完成)
