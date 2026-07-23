@@ -26,6 +26,18 @@ from meta.services.management_dimension_engine import RESOURCE_TABLE_MAP, \
 logger = logging.getLogger(__name__)
 
 
+
+
+def _dim_has_any_values(dim_data: Optional[dict]) -> bool:
+    """检查维度数据是否有任何配置 (include/exclude/wildcard 任一非空)"""
+    if not dim_data:
+        return False
+    return bool(
+        dim_data.get('include')
+        or dim_data.get('exclude')
+        or dim_data.get('wildcard')
+    )
+
 def _resolve_table_name(bo_id: str) -> Optional[str]:
     """解析 BO 对应的数据库表名
 
