@@ -53,6 +53,11 @@ CHILD_TYPE_MAP = {
     # 'service_module': ['business_object'],  # 已移除
 }
 
+# [P7-T3 2026-07-20] 管理维度映射链 (Spec §3.15 / §8.7)
+# 4 层: product → version → domain → sub_domain
+# 用于声明式配置 (P7-T1) 和 dimension scope 派生 (P7-T3)
+MANAGEMENT_DIMENSION_CHAIN = ['product', 'version', 'domain', 'sub_domain']
+
 PARENT_FIELD_MAP = {
     'version': 'product_id',
     'domain': 'version_id',
@@ -79,6 +84,47 @@ CODE_FIELD_MAP = {
     # 'service_module': 'code',  # 已移除
     # 'business_object': 'code',  # 已移除
 }
+
+
+# ============================================================================
+# [P7-T3 2026-07-20] 管理维度映射链解析 (Spec §3.15 / §8.7)
+# ============================================================================
+
+def resolve_dimension_chain(
+    start: str,
+    end: str,
+    chain: Optional[List[str]] = None,
+) -> Optional[List[str]]:
+    """[P7-T3] 解析管理维度映射链的子链
+
+    从 start 解析到 end, 返回包含两端的子链.
+    若 start 或 end 不在链中, 或 start 在 end 之后, 返回 None.
+
+    Args:
+        start: 起始维度 (如 'product')
+        end: 结束维度 (如 'sub_domain')
+        chain: 可选, 自定义链 (默认用 MANAGEMENT_DIMENSION_CHAIN)
+
+    Returns:
+        List[str] 子链 (如 ['product', 'version', 'domain', 'sub_domain'])
+        或 None (无法解析)
+
+    Examples:
+        >>> resolve_dimension_chain('product', 'sub_domain')
+        ['product', 'version', 'domain', 'sub_domain']
+        >>> resolve_dimension_chain('version', 'domain')
+        ['version', 'domain']
+        >>> resolve_dimension_chain('product', 'nonexistent')
+        None
+    """
+    full_chain = chain if chain is not None else MANAGEMENT_DIMENSION_CHAIN
+    if start not in full_chain or end not in full_chain:
+        return None
+    start_idx = full_chain.index(start)
+    end_idx = full_chain.index(end)
+    if start_idx > end_idx:
+        return None
+    return full_chain[start_idx:end_idx + 1]
 
 
 class ManagementDimensionEngine:

@@ -157,7 +157,7 @@ class ConditionPermissionService:
         except Exception:
             return []
 
-    # ========== CRUD ==========
+    # ========== CRUD (legacy permission_rules 表) ==========
 
     def create_rule(self, data: Dict[str, Any]) -> Optional[int]:
         """创建权限规则"""
@@ -268,6 +268,147 @@ class ConditionPermissionService:
             rule['friendly_condition'] = self._generate_friendly_condition(rule.get('condition', ''))
         
         return rules
+
+    # ========== Unified CRUD (data_permission_rules 统一表, P11 Phase 11) ==========
+    # rule_type 枚举: condition | dimension | owner | visibility | prohibition
+    # Spec: spec-permission-system-unification-2026-07-19 §3.5 / §8.3 P3-T1 / §8.11 P11
+
+    VALID_RULE_TYPES = {'condition', 'dimension', 'owner', 'visibility', 'prohibition'}
+
+    def _ensure_unified_table(self):
+        """[P11] 确保 data_permission_rules 表存在 (lazy init, 幂等).
+
+        Phase 3 schema 定义了该表, 但部分测试 DB / 旧实例可能未应用 generated_schema.sql.
+        本方法在首次访问时自动建表, 避免迁移脚本依赖.
+        """
+        try:
+            self.ds.execute("""
+                CREATE TABLE IF NOT EXISTS data_permission_rules (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    role_id INTEGER NOT NULL,
+                    rule_type VARCHAR(50) NOT NULL DEFAULT 'condition',
+                    resource_type VARCHAR(200),
+                    dimension_code VARCHAR(200),
+                    condition TEXT,
+                    scope_mode VARCHAR(50) DEFAULT 'include',
+                    permission_level VARCHAR(50) DEFAULT 'read',
+                    is_denied INTEGER DEFAULT 0,
+                    inherit_to_children INTEGER DEFAULT 1,
+                    propagate_to_parents INTEGER DEFAULT 0,
+                    source_table VARCHAR(100),
+                    source_id INTEGER,
+                    created_at VARCHAR(200),
+                    updated_at VARCHAR(200)
+                )
+            """)
+        except Exception as e:
+            print(f"[P11] _ensure_unified_table (ignore if exists): {e}")
+
+    def create_unified_rule(self, data: Dict[str, Any]) -> Optional[int]:
+        """[P11] 创建统一权限规则 (写入 data_permission_rules 表)
+
+        支持 rule_type 字段区分 5 种规则类型, 默认 'condition' (向后兼容).
+        """
+        try:
+            self._ensure_unified_table()
+            rule_type = data.get('rule_type', 'condition')
+            if rule_type not in self.VALID_RULE_TYPES:
+                rule_type = 'condition'
+
+            cursor = self.ds.execute(
+                """INSERT INTO data_permission_rules
+                   (role_id, rule_type, resource_type, dimension_code, condition,
+                    scope_mode, permission_level, is_denied,
+                    inherit_to_children, propagate_to_parents, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+                [
+                    data['role_id'],
+                    rule_type,
+                    data.get('resource_type'),
+                    data.get('dimension_code'),
+                    data.get('condition'),
+                    data.get('scope_mode', 'include'),
+                    data.get('permission_level', 'read'),
+                    1 if data.get('is_denied') else 0,
+                    1 if data.get('inherit_to_children', True) else 0,
+                    1 if data.get('propagate_to_parents', False) else 0,
+                ]
+            )
+            return cursor.lastrowid
+        except Exception as e:
+            print(f"[P11] Error creating unified permission rule: {e}")
+            return None
+
+    def get_unified_rules_by_role(
+        self,
+        role_id: int,
+        rule_type: Optional[str] = None,
+    ) -> List[Dict]:
+        """[P11] 获取角色的统一权限规则 (从 data_permission_rules 表)
+
+        Args:
+            role_id: 角色 ID
+            rule_type: 可选, 按规则类型过滤 (condition/dimension/owner/visibility/prohibition)
+        """
+        self._ensure_unified_table()
+        if rule_type:
+            cursor = self.ds.execute(
+                """SELECT * FROM data_permission_rules
+                   WHERE role_id = ? AND rule_type = ?
+                   ORDER BY id""",
+                [role_id, rule_type]
+            )
+        else:
+            cursor = self.ds.execute(
+                """SELECT * FROM data_permission_rules
+                   WHERE role_id = ?
+                   ORDER BY rule_type, id""",
+                [role_id]
+            )
+        rules = self._rows_to_dicts(cursor)
+        # 补齐 friendly_condition (复用现有逻辑)
+        for rule in rules:
+            rule['friendly_condition'] = self._generate_friendly_condition(
+                rule.get('condition', '') or ''
+            )
+        return rules
+
+    def get_all_unified_rules(
+        self,
+        rule_type: Optional[str] = None,
+    ) -> List[Dict]:
+        """[P11] 获取所有统一权限规则 (从 data_permission_rules 表)"""
+        self._ensure_unified_table()
+        if rule_type:
+            cursor = self.ds.execute(
+                """SELECT * FROM data_permission_rules
+                   WHERE rule_type = ?
+                   ORDER BY role_id, id""",
+                [rule_type]
+            )
+        else:
+            cursor = self.ds.execute(
+                """SELECT * FROM data_permission_rules
+                   ORDER BY role_id, rule_type, id"""
+            )
+        rules = self._rows_to_dicts(cursor)
+        for rule in rules:
+            rule['friendly_condition'] = self._generate_friendly_condition(
+                rule.get('condition', '') or ''
+            )
+        return rules
+
+    def delete_unified_rule(self, rule_id: int) -> bool:
+        """[P11] 删除统一权限规则"""
+        self._ensure_unified_table()
+        try:
+            self.ds.execute(
+                "DELETE FROM data_permission_rules WHERE id = ?",
+                [rule_id]
+            )
+            return True
+        except Exception:
+            return False
 
     def _get_dimension_field_map(self) -> Dict[str, Dict]:
         """获取维度字段到维度信息的映射（从 hierarchies.yaml）"""
