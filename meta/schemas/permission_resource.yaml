@@ -1,0 +1,59 @@
+# ============================================
+# 权限资源 (Permission Resource) - Phase 13 placeholder
+# [GAP-FIX 2026-07-23] phase13 commit dccdd8b6 引用了此 endpoint
+# 但 phase13 整合时未注册 yaml + 未建表.
+# 这里注册为 permissions 表的视图 (返回 role-binding 视角的资源列表)
+# ============================================
+
+id: permission_resource
+name: 权限资源
+table_name: permissions
+description: 权限资源 (view over permissions table)
+is_view: true
+
+aspects: [audit_aspect]
+bo_category: configuration
+bo_sub_category: customizing
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+  - id: code
+    name: 编码
+    type: string
+    db_column: code
+    max_length: 100
+  - id: name
+    name: 名称
+    type: string
+    db_column: name
+    max_length: 200
+  - id: description
+    name: 描述
+    type: string
+    db_column: description
+    max_length: 500
+  - id: resource_type
+    name: 资源类型
+    type: string
+    db_column: resource_type
+    max_length: 100
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    semantics:
+      audit_field: true
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    semantics:
+      audit_field: true
+
+audit:
+  enabled: false
