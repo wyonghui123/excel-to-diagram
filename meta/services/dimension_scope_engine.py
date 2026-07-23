@@ -28,6 +28,32 @@ logger = logging.getLogger(__name__)
 
 
 
+
+
+def _dim_include_values(dim_data: Optional[dict]) -> set:
+    """获取维度的 include 集合"""
+    if not dim_data:
+        return set()
+    return dim_data.get('include', set()) or set()
+
+
+
+def _dim_is_wildcard(dim_data: Optional[dict]) -> bool:
+    """检查维度是否为通配符 (全维度可见)"""
+    if not dim_data:
+        return False
+    return bool(dim_data.get('wildcard', False))
+
+
+
+def _dim_exclude_values(dim_data: Optional[dict]) -> set:
+    """获取维度的 exclude 集合"""
+    if not dim_data:
+        return set()
+    return dim_data.get('exclude', set()) or set()
+
+
+
 def _dim_has_any_values(dim_data: Optional[dict]) -> bool:
     """检查维度数据是否有任何配置 (include/exclude/wildcard 任一非空)"""
     if not dim_data:
