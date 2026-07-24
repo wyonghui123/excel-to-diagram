@@ -416,4 +416,172 @@ describe('HierarchicalTreePicker', () => {
       expect(meta.levels[3].icon).toBe('account_tree')  // sub_domain
     })
   })
+
+  // ── [UX-FIX 2026-07-23] 6 项交互修复 ──
+
+  describe('UX 修复', () => {
+    it('onlyLeafSelectable=true (默认): 非叶子节点 isDisabledNode=true', async () => {
+      const wrapper = mount(HierarchicalTreePicker, {
+        props: { dimensionId: 'sub_domain' },
+      })
+      await flushPromises()
+      await flushPromises()
+
+      // product_1 是非叶子 (有 children)
+      const productNode = { id: 1, type: 'product', children: [{ id: 11 }] }
+      expect(wrapper.vm.isDisabledNode(productNode)).toBe(true)
+
+      // sub_domain_31 是叶子
+      const leafNode = { id: 31, type: 'sub_domain', children: [] }
+      expect(wrapper.vm.isDisabledNode(leafNode)).toBe(false)
+    })
+
+    it('onlyLeafSelectable=false: 所有节点都可选', async () => {
+      const wrapper = mount(HierarchicalTreePicker, {
+        props: { dimensionId: 'sub_domain', onlyLeafSelectable: false },
+      })
+      await flushPromises()
+      await flushPromises()
+
+      const productNode = { id: 1, type: 'product', children: [{ id: 11 }] }
+      expect(wrapper.vm.isDisabledNode(productNode)).toBe(false)
+    })
+
+    it('excludeIds + checkedIds: 命中节点 isExcludedNode=true', async () => {
+      const wrapper = mount(HierarchicalTreePicker, {
+        props: { dimensionId: 'sub_domain', checkedIds: [31], excludeIds: [32] },
+      })
+      await flushPromises()
+      await flushPromises()
+
+      expect(wrapper.vm.isExcludedNode({ id: 31 })).toBe(true)
+      expect(wrapper.vm.isExcludedNode({ id: 32 })).toBe(true)
+      expect(wrapper.vm.isExcludedNode({ id: 99 })).toBe(false)
+    })
+
+    it('暴露 confirm() / cancel() / getCheckedIds() 方法给外部调用', async () => {
+      const wrapper = mount(HierarchicalTreePicker, {
+        props: { dimensionId: 'sub_domain' },
+      })
+      await flushPromises()
+      await flushPromises()
+
+      // 通过 ref 暴露的方法
+      expect(typeof wrapper.vm.confirm).toBe('function')
+      expect(typeof wrapper.vm.cancel).toBe('function')
+      expect(typeof wrapper.vm.getCheckedIds).toBe('function')
+
+      // 初始 checkedIds 空
+      expect(wrapper.vm.getCheckedIds()).toEqual([])
+
+      // 直接赋值 checkedIds + 调用 confirm
+      wrapper.vm.checkedIds = [31]
+      wrapper.vm.confirm()
+      await flushPromises()
+
+      const events = wrapper.emitted('confirm')
+      expect(events).toBeTruthy()
+      expect(events[0][0].type).toBe('multiple')
+      expect(events[0][0].ids).toEqual([31])
+      expect(events[0][0].nodes[0].id).toBe(31)
+      expect(events[0][0].nodes[0].ancestorPath).toContain('采购订单')
+    })
+
+    it('cancel() emit cancel event', async () => {
+      const wrapper = mount(HierarchicalTreePicker, {
+        props: { dimensionId: 'sub_domain' },
+      })
+      await flushPromises()
+      await flushPromises()
+
+      wrapper.vm.cancel()
+      await flushPromises()
+
+      expect(wrapper.emitted('cancel')).toBeTruthy()
+    })
+
+    it('onCheckMultiple 过滤掉 excluded (不能绕过 UI 限制)', async () => {
+      const wrapper = mount(HierarchicalTreePicker, {
+        props: { dimensionId: 'sub_domain', checkedIds: [31] },
+      })
+      await flushPromises()
+      await flushPromises()
+
+      // 模拟外部直接触发 onCheckMultiple, 试图绕过 UI disabled
+      // (实际 el-tree 不会这样, 但 API 层必须防御)
+      wrapper.vm.onCheckMultiple({
+        checkedKeys: ['tk_1', 'tk_4'],  // tk_1=product, tk_4=sub_domain_31
+        halfCheckedKeys: [],
+        checkedNodes: [
+          { id: 1, __tk: 'tk_1', type: 'product' },
+          { id: 31, __tk: 'tk_4', type: 'sub_domain' },
+        ],
+      })
+      expect(wrapper.vm.checkedIds).toEqual([31])  // product_1 被过滤 (非叶子)
+    })
+
+    // [UX-FIX 2026-07-23-R2]
+    it('pruneToLeavesOnly: 父节点不展示, 只保留"叶子 + 最小父链"', async () => {
+      const wrapper = mount(HierarchicalTreePicker, {
+        props: { dimensionId: 'sub_domain', onlyLeafSelectable: true },
+      })
+      await flushPromises()
+      await flushPromises()
+
+      // 原始 treeData 包含 product_1, version_11, domain_21, sub_domain_31 (4层)
+      expect(wrapper.vm.treeData.length).toBeGreaterThan(0)
+      expect(wrapper.vm.treeData[0].children.length).toBeGreaterThan(0)
+
+      // displayTreeData 应该是: product_1 (有 children 包含叶子)
+      //   → version_11 (有 children 包含叶子)
+      //     → domain_21 (有 children 包含叶子)
+      //       → sub_domain_31 (叶子)
+      const display = wrapper.vm.displayTreeData
+      // 顶层 product_1 保留
+      expect(display.length).toBe(1)
+      expect(display[0].id).toBe(1)
+      // product_1 children = [version_11]
+      expect(display[0].children.length).toBe(1)
+      expect(display[0].children[0].id).toBe(11)
+      // version_11 children = [domain_21]
+      expect(display[0].children[0].children[0].id).toBe(21)
+      // domain_21 children = [sub_domain_31] (叶子, children=[])
+      expect(display[0].children[0].children[0].children[0].id).toBe(31)
+      expect(display[0].children[0].children[0].children[0].children).toEqual([])
+    })
+
+    it('pruneToLeavesOnly: onlyLeafSelectable=false 时不剪枝', async () => {
+      const wrapper = mount(HierarchicalTreePicker, {
+        props: { dimensionId: 'sub_domain', onlyLeafSelectable: false },
+      })
+      await flushPromises()
+      await flushPromises()
+
+      // 不剪枝: displayTreeData === treeData (引用相等或值相等)
+      expect(wrapper.vm.displayTreeData).toBe(wrapper.vm.treeData)
+    })
+
+    it('search 时 prune: 不匹配的整枝被剪掉', async () => {
+      const wrapper = mount(HierarchicalTreePicker, {
+        props: { dimensionId: 'sub_domain', onlyLeafSelectable: true },
+      })
+      await flushPromises()
+      await flushPromises()
+
+      // 模拟 search 命中 1 个叶子, 其他 1682 个被后端过滤掉 (返回的 data 数组只有匹配项)
+      // 直接测试 pruneToLeavesOnly 对 mixed 数据
+      const mixed = [
+        { id: 1, name: 'product_1', children: [
+          { id: 11, name: 'version_11', children: [] },  // 无叶子子节点 -> 整枝剪掉
+        ] },
+        { id: 2, name: 'product_2', children: [
+          { id: 22, name: 'version_22', children: [
+            { id: 222, name: 'domain_222', children: [] },  // 无叶子
+          ] },
+        ] },
+      ]
+      const pruned = wrapper.vm.pruneToLeavesOnly(mixed)
+      expect(pruned).toEqual([])  // 没有叶子 -> 全部剪掉
+    })
+  })
 })

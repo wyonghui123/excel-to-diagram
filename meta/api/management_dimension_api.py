@@ -534,6 +534,13 @@ def _build_dimension_tree(dim: str, version_id: Optional[int] = None,
                 c = ds.execute(count_sql, [node_id]).fetchone()
                 child_count = c[0] if c else 0
 
+            # [FIX 2026-07-24-R17] parent_id 为 None 时, parent_unique_key 必须为 None
+            #   旧逻辑: f"{parent_type}_{None}" = "version_None" (字符串)
+            #   新逻辑: None → None, 让前端正确识别为根节点候选
+            puk = None
+            if level_idx > 0 and parent_id is not None:
+                puk = f"{relevant_chain[level_idx - 1]}_{parent_id}"
+
             # node-level 元数据 (从 level_meta 透传)
             meta = level_meta.get(object_type, {})
             all_nodes.append({
@@ -549,11 +556,81 @@ def _build_dimension_tree(dim: str, version_id: Optional[int] = None,
                 "has_children": not is_leaf and child_count > 0,
                 "child_count": child_count,
                 "unique_key": f"{object_type}_{node_id}",
-                "parent_unique_key": (
-                    f"{relevant_chain[level_idx - 1]}_{parent_id}"
-                    if level_idx > 0 else None
-                ),
+                "parent_unique_key": puk,
             })
+
+    # [FIX 2026-07-24-R17] 反向过滤: 只保留与目标 dim 节点有祖先关系的节点
+    #   原因: 数据库存在大量孤儿节点 (parent_fk 指向不存在的记录, 或 parent_fk 为 NULL)
+    #   前端 R14v2 丢弃孤儿, 但为彻底消除顶级出现非 product 节点的问题, 后端也做反向过滤
+    #   逻辑: 从目标 dim 叶子反向追溯祖先链, 只保留链上的节点
+    #   效果: 顶级只剩 product (product 的 parent_unique_key 为 None 且在祖先链上)
+    # [FIX 2026-07-24-R18] 修复: 孤儿节点 (parent_unique_key=None 但 type != root) 不保留
+    #   旧 R17 bug: cur.parent_unique_key is None → break, 但 keep 已 add cur → 孤儿被保留
+    #   新 R18: 如果 cur.parent_unique_key is None 且 cur.type != root_type, 从 keep 中移除
+    if all_nodes and dim != relevant_chain[0]:
+        root_type = relevant_chain[0]  # 通常是 'product'
+        by_key = {n["unique_key"]: n for n in all_nodes}
+        target_keys = {n["unique_key"]: n for n in all_nodes if n["type"] == dim}
+        keep = set()
+        for tk, tnode in target_keys.items():
+            cur = tnode
+            depth = 0
+            visited = set()
+            chain_keys = []  # 先收集链, 验证根节点后再加入 keep
+            while cur and depth < 10 and cur["unique_key"] not in visited:
+                visited.add(cur["unique_key"])
+                chain_keys.append(cur["unique_key"])
+                if cur["parent_unique_key"] is None:
+                    # 到达根节点: 检查是否为 root_type
+                    if cur["type"] == root_type:
+                        # 合法链, 全部加入 keep
+                        keep.update(chain_keys)
+                    # 否则是孤儿 (非 root_type 但 parent_unique_key=None), 不保留
+                    break
+                cur = by_key.get(cur["parent_unique_key"])
+                depth += 1
+            else:
+                # while 循环正常结束 (没 break), 说明链断裂 (parent 找不到)
+                # 这是孤儿, 不保留
+                pass
+        all_nodes = [n for n in all_nodes if n["unique_key"] in keep]
+
+    # [DEBUG 2026-07-24-R17] 写 debug 信息到文件 (临时, 验证后删除)
+    try:
+        import os as _os
+        _debug_path = _os.path.join(
+            _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+            'test_temp', 'tree_debug.log'
+        )
+        _os.makedirs(_os.path.dirname(_debug_path), exist_ok=True)
+        _type_count = {}
+        for _n in all_nodes:
+            _type_count[_n["type"]] = _type_count.get(_n["type"], 0) + 1
+        _roots = [n for n in all_nodes if n["parent_unique_key"] is None]
+        _root_types = {}
+        for _r in _roots:
+            _root_types[_r["type"]] = _root_types.get(_r["type"], 0) + 1
+        _scm = [n for n in all_nodes if n.get("name") == "供应链云"]
+        _lines = [
+            f"dim={dim}, version_id={version_id}, search={search}",
+            f"total={len(all_nodes)}",
+            f"type_counts={_type_count}",
+            f"root_count={len(_roots)}, root_types={_root_types}",
+            f"供应链云 matches={len(_scm)}:",
+        ]
+        for _n in _scm:
+            _lines.append(
+                f"  id={_n['id']}, type={_n['type']}, "
+                f"unique_key={_n['unique_key']}, "
+                f"parent_unique_key={_n['parent_unique_key']}"
+            )
+        _lines.append("first 10 roots:")
+        for _r in _roots[:10]:
+            _lines.append(f"  id={_r['id']}, type={_r['type']}, name={_r['name']}")
+        with open(_debug_path, 'w', encoding='utf-8') as _f:
+            _f.write('\n'.join(_lines))
+    except Exception as _e:
+        logger.warning(f"[R17-DEBUG] write failed: {_e}")
 
     # search 过滤: 命中节点 + 完整父链
     if search:

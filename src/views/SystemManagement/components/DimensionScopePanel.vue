@@ -105,7 +105,6 @@
     </div>
 
     <SearchHelpDialog
-      v-show="pickerDim"
       v-model:visible="pickerVisible"
       :value-help-config="pickerValueHelpConfig"
       :multiple="true"
@@ -161,6 +160,109 @@ const autoDeriving = ref(false)
 
 const pickerVisible = ref(false)
 const pickerDim = ref(null)
+
+// [FIX 2026-07-23-R8] 名称缓存 (id → {name, code})
+//   后端 /roles/{id}/dimension-scopes 只返回 ids, 不含 name/code
+//   前端用 pickerFetcher 暖 cache, 用 cache 解析已选值的 name
+const valueNameCache = reactive({})  // { [dimId]: { [valueId]: {name, code} } }
+
+function cacheName(dimId, valueId, name, code) {
+  if (!valueNameCache[dimId]) valueNameCache[dimId] = {}
+  valueNameCache[dimId][valueId] = { name, code: code || '' }
+}
+
+function resolveValueName(dimId, valueId) {
+  return valueNameCache[dimId]?.[valueId] || null
+}
+
+// 把已选值填进 cache (picker confirm 时调)
+function primeCacheFromSelection(dimId, items) {
+  for (const item of items) {
+    if (item.name) cacheName(dimId, item.id, item.name, item.code)
+  }
+}
+
+// 用 cache 重写已选值 (把缺失 name 的补齐)
+function enrichSelectedValues(dimId, scopeValues) {
+  const cache = valueNameCache[dimId] || {}
+  return scopeValues.map(v => {
+    const id = typeof v === 'object' ? v.id : v
+    if (typeof v === 'object' && v.name) {
+      // 已有 name - 更新 cache 并保留
+      cacheName(dimId, id, v.name, v.code)
+      return v
+    }
+    // 用 cache 解析
+    const cached = cache[id]
+    if (cached) {
+      return { id, name: cached.name, code: cached.code }
+    }
+    // cache 也没有 - 用 id 作为 fallback (后续 loadDimNameLookup 会刷新)
+    return { id, name: String(id), code: String(id) }
+  })
+}
+
+// [FIX 2026-07-23-R11] R10 真正修复:
+//   1. 用 apiV2 (带 Authorization) + 分页拉全表
+//   2. 关键: warmupNameCache 完成时, 同步更新 selectedValues[dimId]
+//      (enrichSelectedValues 不是 computed, 不会自动重算)
+async function warmupNameCache(dimId, valueIds) {
+  if (!valueIds || valueIds.length === 0) return
+  try {
+    const cache = valueNameCache[dimId] || {}
+    const missingSet = new Set(valueIds.filter(id => !cache[id]))
+    if (missingSet.size === 0) return
+
+    // 分页拉取 (后端硬限 page_size <= 100)
+    const pageSize = 100
+    let page = 1
+    let totalCount = Infinity
+
+    while (missingSet.size > 0 && page * pageSize < totalCount + pageSize) {
+      const result = await permService.loadDimensionInstances(dimId, {
+        page,
+        page_size: pageSize,
+      })
+      const instances = result.data?.instances || result.data || []
+      totalCount = result.data?.pagination?.total_count || totalCount
+
+      for (const inst of instances) {
+        if (missingSet.has(inst.id)) {
+          cacheName(dimId, inst.id, inst.name, inst.code)
+          missingSet.delete(inst.id)
+        }
+      }
+
+      if (instances.length < pageSize) break  // 最后一页
+      page++
+      if (page > 20) break  // 安全上限 20 页 (2000 条)
+    }
+
+    // [R11 关键修复] 同步更新 selectedValues[dimId] 的 name/code
+    //   enrichSelectedValues 不是 computed, warmup 完成后必须手动重写
+    const currentVals = selectedValues[dimId] || []
+    let hasUpdate = false
+    const updated = currentVals.map(v => {
+      const cached = valueNameCache[dimId]?.[v.id]
+      if (cached && v.name === String(v.id)) {
+        // 当前显示的是 fallback "64" 但 cache 已有真 name — 替换
+        hasUpdate = true
+        return { ...v, name: cached.name, code: cached.code }
+      }
+      return v
+    })
+    if (hasUpdate) {
+      selectedValues[dimId] = updated
+    }
+    readyFlag.value++
+
+    if (missingSet.size > 0) {
+      console.warn(`[warmupNameCache R11] 未找到 ids:`, [...missingSet])
+    }
+  } catch (e) {
+    console.warn('[warmupNameCache R11] failed for dim', dimId, e)
+  }
+}
 
 const sortedDimensions = computed(() => {
   return [...dimensions.value].sort((a, b) => {
@@ -262,7 +364,9 @@ const pickerValueHelpConfig = computed(() => {
   return {
     source: { type: 'bo', target_bo: dimId },
     presentation: {
-      display_mode: 'flat',
+      // [FIX 2026-07-22] 启用层级树形选择器 (HierarchicalTreePicker) for dimension picker
+      // [REFACTOR 2026-07-22] 元数据驱动: tree 模式从后端 /tree 响应读 hierarchy_meta
+      display_mode: 'tree',
       display_columns: cols
     },
     behavior: { multiple: true }
@@ -331,11 +435,17 @@ async function loadDimensionScopes() {
           scopeAllFlags[dimId] = false
           const values = scope.dimension_values || []
           if (values.length > 0) {
-            // Use direct assignment with new array reference - Vue 3 Proxy tracks this
-            selectedValues[dimId] = values.map(v => {
-              if (typeof v === 'object') return v
-              return { id: v, name: String(v), code: String(v) }
-            })
+            // [FIX 2026-07-23-R8] 用 cache 补齐 name/code
+            //   后端只返回 ids; 用 pickerFetcher 暖 cache 后 enrich
+            const enriched = enrichSelectedValues(dimId, values)
+            selectedValues[dimId] = enriched
+            // 异步暖 cache (首次加载时把没命名的 id 反查成 {name, code})
+            const missingIds = enriched
+              .filter(v => v.name === String(v.id))
+              .map(v => v.id)
+            if (missingIds.length > 0) {
+              warmupNameCache(dimId, missingIds)
+            }
           }
         }
         inheritFlags[dimId] = scope.inherit_children !== 0 && scope.inherit_children !== false
@@ -406,7 +516,7 @@ function handlePickerConfirm(selection) {
   if (!pickerDim.value) return
   const dimId = pickerDim.value.id
   const items = Array.isArray(selection) ? selection : (selection ? [selection] : [])
-  
+
   // 增量添加：保留之前的选择，只添加新的
   const existingItems = selectedValues[dimId] || []
   const existingIds = new Set(existingItems.map(v => v.id))
@@ -417,17 +527,20 @@ function handlePickerConfirm(selection) {
     })
     .map(item => {
       const id = item.value != null ? item.value : item.id
-      // 尝试多种字段名来获取名称
-      const name = item.display || item.name || item.title || item.label || item.username || item.code || String(id)
+      // [FIX 2026-07-23-R8] 优先用 item.name (而非 display 路径), 后端 lookup API 的 name 是真名
+      const name = item.name || item.display || item.title || item.label || item.username || item.code || String(id)
       return {
         id: id,
         name: name,
         code: item.code || ''
       }
     })
-  
+
+  // [FIX 2026-07-23-R8] 把新选择的 item 填进 cache (供后续已选值 name 解析)
+  primeCacheFromSelection(dimId, newItems)
+
   selectedValues[dimId] = [...existingItems, ...newItems]
-  
+
   // 保存 dimId，用于对话框重新打开时
   lastConfirmedDimId.value = dimId
   pickerVisible.value = false
@@ -519,7 +632,6 @@ onMounted(async () => {
   padding: var(--spacing-lg);
   border: 1px solid var(--color-border-light);
 }
-
 .perm-header {
   display: flex;
   align-items: center;
@@ -528,7 +640,6 @@ onMounted(async () => {
   flex-wrap: wrap;
   gap: var(--spacing-sm);
 }
-
 .perm-header h4 {
   margin: 0;
   font-size: var(--font-size-base);
@@ -537,7 +648,6 @@ onMounted(async () => {
   align-items: center;
   gap: var(--spacing-xs);
 }
-
 .summary-item {
   font-size: var(--font-size-xs);
   padding: 2px 8px;
@@ -548,52 +658,45 @@ onMounted(async () => {
     color: var(--color-success);
   }
 }
-
 .perm-guide {
   font-size: var(--font-size-xs);
   color: var(--color-text-tertiary);
   margin-bottom: var(--spacing-md);
   padding: var(--spacing-sm) var(--spacing-md);
   background: var(--color-bg-spotlight);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   border-left: 3px solid var(--color-primary, #1890ff);
   line-height: 1.5;
 }
-
 .empty-hint {
   font-size: var(--font-size-sm);
   color: var(--color-text-quaternary);
   text-align: center;
   padding: var(--spacing-lg);
 }
-
 .dimension-row {
   margin-bottom: var(--spacing-md);
   padding: var(--spacing-md);
   background: var(--color-bg-secondary);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   border: 1px solid var(--color-border-light);
 }
-
 .dimension-row-header {
   display: flex;
   align-items: baseline;
   gap: var(--spacing-sm);
   margin-bottom: var(--spacing-sm);
 }
-
 .dimension-label {
   font-size: var(--font-size-sm);
   font-weight: 600;
   color: var(--color-text-primary);
 }
-
 .dimension-code {
   font-size: var(--font-size-xs);
   color: var(--color-text-quaternary);
   font-family: monospace;
 }
-
 .dimension-cascade-hint {
   font-size: 11px;
   color: var(--yonyou-orange-600, #ea580c);
@@ -602,25 +705,21 @@ onMounted(async () => {
   border-radius: 10px;
   font-weight: 500;
 }
-
 .dimension-cascade-hint::before {
   content: '上级: ';
   font-weight: 400;
   opacity: 0.7;
 }
-
 .dimension-row--has-parent {
   border-left: 3px solid var(--yonyou-orange-200, #fed7aa);
 }
-
 .dimension-values {
   display: flex;
   flex-wrap: wrap;
   gap: var(--spacing-xs);
   align-items: center;
-  margin-bottom: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
 }
-
 .inherit-toggle {
   display: flex;
   align-items: center;
@@ -634,13 +733,12 @@ onMounted(async () => {
     cursor: pointer;
   }
 }
-
 .derived-preview {
   margin-top: var(--spacing-md);
   padding: var(--spacing-md);
   background: #f6ffed;
   border: 1px solid #b7eb8f;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
 
   h5 {
     margin: 0 0 var(--spacing-sm);
@@ -648,14 +746,12 @@ onMounted(async () => {
     color: var(--color-text-primary);
   }
 }
-
 .derived-items {
   display: flex;
   flex-wrap: wrap;
   gap: var(--spacing-md);
   margin-bottom: var(--spacing-sm);
 }
-
 .derived-item {
   font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
@@ -667,21 +763,18 @@ onMounted(async () => {
     color: var(--color-primary);
   }
 }
-
 .derived-detail {
   display: flex;
   flex-wrap: wrap;
   gap: var(--spacing-sm);
 }
-
 .derived-detail-item {
   font-size: var(--font-size-xs);
   color: var(--color-text-tertiary);
   background: var(--color-bg-spotlight);
   padding: 2px 8px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
 }
-
 .perm-actions-bar {
   display: flex;
   align-items: center;
@@ -690,15 +783,13 @@ onMounted(async () => {
   padding-top: var(--spacing-md);
   border-top: 1px solid var(--color-border-light);
 }
-
 .actions-spacer {
   flex: 1;
 }
-
 .btn {
   cursor: pointer;
   padding: var(--spacing-xs) var(--spacing-md);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   border: 1px solid var(--color-border-light);
   background: transparent;
   color: var(--color-text-secondary);
@@ -726,21 +817,18 @@ onMounted(async () => {
     }
   }
 }
-
 .cascade-disabled-hint {
   font-size: 11px;
   color: var(--color-text-quaternary);
   margin-left: var(--spacing-sm);
   font-style: italic;
 }
-
 .cascade-active-hint {
   font-size: 11px;
   color: var(--color-success, #22c55e);
   margin-left: var(--spacing-sm);
   font-weight: 500;
 }
-
 .cascade-active-hint::before {
   content: '';
 }

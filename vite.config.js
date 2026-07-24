@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import AutoImport from 'unplugin-auto-import/vite'
 import Components from 'unplugin-vue-components/vite'
@@ -6,7 +6,12 @@ import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 import { visualizer } from 'rollup-plugin-visualizer'
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  // [FIX 2026-07-23-R16] 用 loadEnv 加载 .env, 让 BACKEND_PORT 生效
+  const env = loadEnv(mode, process.cwd(), '')
+  const backendPort = env.BACKEND_PORT || process.env.BACKEND_PORT || '3010'
+
+return {
   plugins: [
     vue(),
     AutoImport({
@@ -85,7 +90,7 @@ export default defineConfig({
       // [v3.3] 动态代理: 支持多 Agent worktree 自验证
       // 默认代理到 3004 (主仓库后端), Agent 通过 BACKEND_PORT 环境变量覆盖
       '/api': {
-        target: `http://localhost:${process.env.BACKEND_PORT || '3004'}`,
+        target: `http://localhost:${backendPort}`,
         changeOrigin: true,
         ws: true,
         // [FIX BUG-V029 2026-06-28] 30s→180s
@@ -104,7 +109,7 @@ export default defineConfig({
         }
       },
       '/socket.io': {
-        target: `http://localhost:${process.env.BACKEND_PORT || '3004'}`,
+        target: `http://localhost:${backendPort}`,
         changeOrigin: true,
         ws: true,
       }
@@ -123,4 +128,5 @@ export default defineConfig({
       '@': '/src'
     }
   }
+}
 })

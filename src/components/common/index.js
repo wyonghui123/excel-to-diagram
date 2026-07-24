@@ -40,6 +40,8 @@ import { SubNavTabs } from './SubNavTabs'
 import { ObjectChildSection } from './ObjectChildSection'
 import { PageShell } from './PageShell'
 import { FkLinkField } from './FkLinkField'
+import { default as HierarchicalTreePicker } from './HierarchicalTreePicker'
+import { SearchHelpListSingle, SearchHelpListMulti, SearchHelpTreeSingle, SearchHelpTreeMulti } from './SearchHelp'
 
 export { AppButton } from './AppButton'
 export { AppInput } from './AppInput'
@@ -70,6 +72,8 @@ export { SubNavTabs } from './SubNavTabs'
 export { ObjectChildSection } from './ObjectChildSection'
 export { PageShell } from './PageShell'
 export { FkLinkField } from './FkLinkField'
+export { default as HierarchicalTreePicker } from './HierarchicalTreePicker'
+export { SearchHelpListSingle, SearchHelpListMulti, SearchHelpTreeSingle, SearchHelpTreeMulti } from './SearchHelp'
 
 export default {
   AppButton,
@@ -114,5 +118,10 @@ export default {
   SubNavTabs,
   ObjectChildSection,
   PageShell,
-  FkLinkField
+  FkLinkField,
+  HierarchicalTreePicker,
+  SearchHelpListSingle,
+  SearchHelpListMulti,
+  SearchHelpTreeSingle,
+  SearchHelpTreeMulti
 }
