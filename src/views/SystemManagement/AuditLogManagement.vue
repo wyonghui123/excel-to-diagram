@@ -93,15 +93,30 @@
         <a class="id-link" @click.stop="handleViewDetail({ row })">{{ row.id }}</a>
       </template>
 
+      <template #cell-object_id="{ row }">
+        <span class="object-id">{{ row.object_id }}</span>
+        <span v-if="row.business_key || row.object_display" class="object-display" style="margin-left: 4px; color: #909399;">
+          ({{ row.object_display || row.business_key }})
+        </span>
+      </template>
+
       <template #cell-object_type="{ row }">
-        {{ getObjectTypeLabel(row.object_type) }}
+        {{ row.object_type_label || formatObjectTypeLabel(row.object_type) }}
       </template>
 
       <template #cell-field_name="{ row }">
         <span v-if="row.field_name && row.field_name !== '_record'" class="field-name-badge">
-          {{ getFieldName(row.field_name, row.object_type) }}
+          {{ row.field_name_label || getFieldLabel(row.field_name) }}
         </span>
         <span v-else class="no-field">-</span>
+      </template>
+
+      <template #cell-old_value="{ row }">
+        {{ getFieldValueDisplay(row.old_value, row.field_name) }}
+      </template>
+
+      <template #cell-new_value="{ row }">
+        {{ getFieldValueDisplay(row.new_value, row.field_name) }}
       </template>
     </MetaListPage>
 
@@ -131,11 +146,11 @@
           </el-descriptions-item>
           <el-descriptions-item label="操作类型">
             <el-tag :type="getActionTagType(selectedLog.action)" size="small">
-              {{ getActionLabel(selectedLog.action) }}
+              {{ formatActionLabel(selectedLog.action) }}
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="对象类型">
-            {{ getObjectTypeLabel(selectedLog.object_type) }}
+            {{ selectedLog.object_type_label || formatObjectTypeLabel(selectedLog.object_type) }}
           </el-descriptions-item>
           <el-descriptions-item label="对象">
             <span class="object-id">{{ selectedLog.object_id }}</span>
@@ -147,7 +162,7 @@
             </span>
           </el-descriptions-item>
           <el-descriptions-item v-if="selectedLog.parent_object_type" label="父对象">
-            <span class="parent-type">{{ getObjectTypeLabel(selectedLog.parent_object_type) }}</span>
+            <span class="parent-type">{{ selectedLog.parent_object_type_label || formatObjectTypeLabel(selectedLog.parent_object_type) }}</span>
             <span class="object-id">{{ selectedLog.parent_object_id }}</span>
             <span v-if="selectedLog.parent_object_display" class="object-display">
               {{ selectedLog.parent_object_display }}
@@ -157,19 +172,19 @@
             {{ selectedLog.formatted_identity || selectedLog.business_key || '-' }}
           </el-descriptions-item>
           <el-descriptions-item label="操作人">
-            {{ selectedLog.user_name || '-' }}
+            {{ getUserNameDisplay(selectedLog.user_name) }}
           </el-descriptions-item>
           <el-descriptions-item label="IP地址">
             {{ selectedLog.ip_address || '-' }}
           </el-descriptions-item>
           <el-descriptions-item label="字段名">
-            {{ getFieldName(selectedLog.field_name, selectedLog.object_type) }}
+            {{ selectedLog.field_name_label || getFieldLabel(selectedLog.field_name) }}
           </el-descriptions-item>
           <el-descriptions-item label="旧值">
-            <div class="value-text">{{ selectedLog.old_value || '-' }}</div>
+            <div class="value-text">{{ getFieldValueDisplay(selectedLog.old_value, selectedLog.field_name) }}</div>
           </el-descriptions-item>
           <el-descriptions-item label="新值">
-            <div class="value-text">{{ selectedLog.new_value || '-' }}</div>
+            <div class="value-text">{{ getFieldValueDisplay(selectedLog.new_value, selectedLog.field_name) }}</div>
           </el-descriptions-item>
           <el-descriptions-item label="链路追踪ID">
             {{ selectedLog.trace_id || '-' }}
@@ -198,6 +213,14 @@ import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { MetaListPage } from '@/components/common/MetaListPage'
 import { formatDate } from '@/composables/useMetaList'
 import * as auditLogService from '@/services/auditLogService'
+import {
+  getObjectTypeLabel as formatObjectTypeLabel,
+  getActionLabel as formatActionLabel,
+  getFieldLabel,
+  getFieldValueDisplay,
+  getUserNameDisplay,
+  isInternalField,
+} from '@/utils/auditLogFormat'
 // [FR-004] ECharts 按需导入: 只注册使用的图表类型, 减少 ~600KB
 import * as echarts from 'echarts/core'
 import { PieChart, LineChart } from 'echarts/charts'
@@ -284,14 +307,17 @@ const hasDeletedData = computed(() => {
   return Object.keys(deletedDataParsed.value).length > 0
 })
 
-const deletedDataKeys = computed(() => Object.keys(deletedDataParsed.value))
+const deletedDataKeys = computed(() => {
+  return Object.keys(deletedDataParsed.value).filter(k => !isInternalField(k))
+})
 
 const deletedDataFormatted = computed(() => {
-  try {
-    return JSON.stringify(deletedDataParsed.value, null, 2)
-  } catch (e) {
-    return String(deletedDataParsed.value)
-  }
+  const data = deletedDataParsed.value
+  return deletedDataKeys.value.map(key => {
+    const label = getFieldLabel(key)
+    const value = getFieldValueDisplay(data[key], key)
+    return `${label}: ${value}`
+  }).join('\n')
 })
 
 async function loadOverview() {
@@ -409,47 +435,8 @@ function forceElTableHeight() {
   // no-op: el-table 自适应 flex 布局, JS 改 height 反而会和 flex 冲突
 }
 
-const OBJECT_TYPE_MAP = {
-  'user': '用户',
-  'role': '角色',
-  'user_group': '用户组',
-  'product': '产品',
-  'version': '版本',
-  'domain': '领域',
-  'sub_domain': '子域',
-  'service_module': '服务模块',
-  'business_object': '业务对象',
-  'relationship': '关系',
-  'annotation': '标注',
-  'enum_type': '枚举类型',
-  'enum_value': '枚举值',
-  '__audit_failure__': '审计失败'
-}
-
-const COMMON_FIELD_NAMES = {
-  'id': 'ID',
-  'name': '名称',
-  'code': '编码',
-  'description': '描述',
-  'created_at': '创建时间',
-  'updated_at': '更新时间',
-  'created_by': '创建人',
-  'updated_by': '更新人',
-  'status': '状态',
-  'is_active': '是否激活',
-  'username': '用户名',
-  'display_name': '显示名称',
-  'email': '邮箱'
-}
-
-function getObjectTypeLabel(type) {
-  return OBJECT_TYPE_MAP[type] || type
-}
-
-function getFieldName(fieldKey, objectType) {
-  if (!fieldKey || fieldKey === '_record') return '-'
-  return COMMON_FIELD_NAMES[fieldKey] || fieldKey
-}
+// [FIX 2026-07-22] object_type/field_name/action 翻译统一使用 auditLogFormat.js (单一事实源)
+// 删除本地 OBJECT_TYPE_MAP / COMMON_FIELD_NAMES / getActionLabel, 覆盖更全且与后端 label 互补
 
 function getCategoryTagType(category) {
   const map = {
@@ -506,16 +493,7 @@ function getActionTagType(action) {
   return map[action] || 'info'
 }
 
-function getActionLabel(action) {
-  const map = {
-    'CREATE': '创建',
-    'UPDATE': '更新',
-    'DELETE': '删除',
-    'ASSOCIATE': '关联',
-    'DISSOCIATE': '取消关联'
-  }
-  return map[action] || action
-}
+// [FIX 2026-07-22] getActionLabel 已由 auditLogFormat.js 的 formatActionLabel 替代
 
 function formatDateTime(datetime) {
   return formatDate(datetime, 'YYYY-MM-DD HH:mm:ss')

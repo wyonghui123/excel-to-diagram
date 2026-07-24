@@ -229,10 +229,126 @@ fields:
         category: dimension
         type: categorical
         display_name: 操作类型
+    # [FIX 2026-07-22] action 列: 抽象业务动作，与 BO 解耦
+    #  来源:
+    #    1. _standard_actions.yaml (15 个标准动作 id, 如 crud_create → CREATE)
+    #    2. ActionExecutor 固定字面量 (CREATE/UPDATE/DELETE)
+    #    3. 系统事件硬编码 (LOGIN/STARTUP/AUDIT_WRITE_FAILED 等)
+    #  之前引用 enum_type_id=audit_action_type 但该 enum 不存在,
+    #  现在改为 enum_values 内联, 保证列表筛选能覆盖所有实际值
+    enum_values:
+      - value: CREATE
+        label: 创建
+        color: success
+      - value: UPDATE
+        label: 更新
+        color: info
+      - value: DELETE
+        label: 删除
+        color: danger
+      - value: READ
+        label: 查看
+        color: default
+      - value: ASSOCIATE
+        label: 添加关联
+        color: primary
+      - value: DISSOCIATE
+        label: 移除关联
+        color: info
+      - value: ASSIGN
+        label: 分配
+        color: primary
+      - value: UNASSIGN
+        label: 取消分配
+        color: info
+      - value: GRANT
+        label: 授权
+        color: primary
+      - value: REVOKE
+        label: 撤销
+        color: info
+      - value: MANAGE
+        label: 管理
+        color: warning
+      - value: APPROVE
+        label: 审批
+        color: primary
+      - value: EXPORT
+        label: 导出
+        color: default
+      - value: IMPORT
+        label: 导入
+        color: default
+      - value: BATCH_CREATE
+        label: 批量创建
+        color: success
+      - value: BATCH_UPDATE
+        label: 批量更新
+        color: info
+      - value: BATCH_DELETE
+        label: 批量删除
+        color: danger
+      - value: LOGIN
+        label: 登录
+        color: primary
+      - value: LOGOUT
+        label: 登出
+        color: info
+      - value: LOGIN_FAILED
+        label: 登录失败
+        color: danger
+      - value: PASSWORD_CHANGE
+        label: 密码修改
+        color: warning
+      - value: RESET_PASSWORD
+        label: 重置密码
+        color: warning
+      - value: PERMISSION_DENIED
+        label: 权限拒绝
+        color: danger
+      - value: SQL_INJECTION_ATTEMPT
+        label: SQL 注入拦截
+        color: danger
+      - value: unlock
+        label: 解锁
+        color: primary
+      - value: STARTUP
+        label: 系统启动
+        color: success
+      - value: SHUTDOWN
+        label: 系统关闭
+        color: info
+      - value: CONFIG_CHANGE
+        label: 配置变更
+        color: warning
+      - value: CONFIG_ERROR
+        label: 配置错误
+        color: danger
+      - value: AUDIT_WRITE_FAILED
+        label: 审计写入失败
+        color: danger
+      - value: DELETE_BLOCKED
+        label: 删除已阻止
+        color: danger
+      - value: CASCADE_DELETE
+        label: 级联删除
+        color: danger
+      - value: SUBFLOW
+        label: 执行子流程
+        color: primary
+      - value: SYNC
+        label: 数据同步
+        color: info
+      - value: DATA_SYNC
+        label: 数据同步
+        color: info
+      - value: METRIC_RECORD
+        label: 性能指标记录
+        color: warning
     value_help:
       source:
         type: enum
-        enum_type_id: audit_action_type
+        enum_type_id: standard_action
         sort_by: sort_order
       behavior:
         validation: true

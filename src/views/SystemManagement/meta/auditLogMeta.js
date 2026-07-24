@@ -84,29 +84,29 @@ export const auditLogMeta = {
       ]
     },
     {
-      // [DECORATIVE] FR-LOG-012: action_kind 列
+      // FR-LOG-012: action_kind 列
       key: 'action_kind',
-      label: 'Action Kind',
+      label: '操作维度',
       type: 'tag',
       width: 110,
       sortable: true,
       options: [
-        { label: '[DECORATIVE] Instance', value: 'instance', color: 'primary' },
-        { label: '[SYMBOL] Static', value: 'static', color: 'info' }
+        { label: '实例操作', value: 'instance', color: 'primary' },
+        { label: '静态操作', value: 'static', color: 'info' }
       ]
     },
     {
-      // [DECORATIVE] FR-LOG-012: outcome 列
+      // FR-LOG-012: outcome 列
       key: 'outcome',
       label: '执行结果',
       type: 'tag',
       width: 100,
       sortable: true,
       options: [
-        { label: '[OK] Success', value: 'success', color: 'success' },
-        { label: '[X] Failure', value: 'failure', color: 'danger' },
-        { label: '[SYMBOL] Denied', value: 'denied', color: 'warning' },
-        { label: '[REFRESH] Retry', value: 'retry', color: 'info' }
+        { label: '成功', value: 'success', color: 'success' },
+        { label: '失败', value: 'failure', color: 'danger' },
+        { label: '拒绝', value: 'denied', color: 'warning' },
+        { label: '重试', value: 'retry', color: 'info' }
       ]
     },
     {
@@ -240,28 +240,28 @@ export const auditLogMeta = {
       apiUrl: '/api/v2/bo/user?page_size=1000'
     },
     {
-      // [DECORATIVE] FR-LOG-012: action_kind filter
+      // FR-LOG-012: action_kind filter
       key: 'action_kind',
-      label: 'Action Kind',
+      label: '操作维度',
       type: 'select',
       options: [
         { label: '全部', value: '' },
-        { label: '[DECORATIVE] Instance', value: 'instance' },
-        { label: '[SYMBOL] Static', value: 'static' }
+        { label: '实例操作', value: 'instance' },
+        { label: '静态操作', value: 'static' }
       ],
       defaultValue: ''
     },
     {
-      // [DECORATIVE] FR-LOG-012: outcome filter
+      // FR-LOG-012: outcome filter
       key: 'outcome',
       label: '执行结果',
       type: 'select',
       options: [
         { label: '全部', value: '' },
-        { label: '[OK] Success', value: 'success' },
-        { label: '[X] Failure', value: 'failure' },
-        { label: '[SYMBOL] Denied', value: 'denied' },
-        { label: '[REFRESH] Retry', value: 'retry' }
+        { label: '成功', value: 'success' },
+        { label: '失败', value: 'failure' },
+        { label: '拒绝', value: 'denied' },
+        { label: '重试', value: 'retry' }
       ],
       defaultValue: ''
     },

@@ -1,43 +1,21 @@
 /**
- * auditLogFormat.js - 操作日志字段业务化工具
- *
- * 业务人员视角: 把后端技术字段翻译为业务术语
- * - object_type: 模型名 → 业务术语 (如 annotation → 备注)
- * - action: 内部 action → 业务动作 (如 DELETE_BLOCKED → 删除已阻止)
- * - user_name: system → 系统
+ * 审计日志格式化工具
  *
  * 单一事实源: 这里集中管理所有翻译 map, 列表页 + 详情弹窗共用
+ * 优先级: 业务级翻译 > 后端注入 label > 原值
  *
- * @module utils/auditLogFormat
+ * [FIX 2026-07-22] 暴露 category/level 翻译 + tag type, 替换各处本地翻译表
  */
 
 /**
- * object_type → 业务名 翻译表
+ * object_type → 业务对象名 翻译表
  *
- * 来源: yaml schema 的 name 字段 (meta/schemas/*.yaml)
- * 优先级: useHierarchyTypes.getLabel (运行时) > 此表 (静态回退)
+ * 覆盖后端 yaml_loader 解析出来的所有对象类型 + 审计专用伪类型
  */
 export const OBJECT_TYPE_LABELS = {
-  // 主层级
-  product: '产品',
-  version: '版本',
-  domain: '领域',
-  sub_domain: '子领域',
-  service_module: '服务模块',
-  business_object: '业务对象',
-  // 关联
-  relationship: '业务关系',
-  // 权限
-  permission: '权限',
-  permission_rule: '权限规则',
-  permission_bundle: '权限包',
-  role: '角色',
-  role_menu: '角色菜单',
-  role_permissions: '角色权限',
-  role_dimension_scope: '角色数据范围',
-  role_data_permission: '角色数据权限',
-  // 用户
+  // 身份与权限
   user: '用户',
+  role: '角色',
   user_group: '用户组',
   user_group_member: '用户组成员',
   // 菜单
@@ -58,7 +36,14 @@ export const OBJECT_TYPE_LABELS = {
   // 测试/内部
   test_objects: '测试对象',
   __audit_failure__: '审计异常',
-  _unknown: '未识别操作'
+  _unknown: '未识别操作',
+  product: '产品',
+  version: '版本',
+  domain: '领域',
+  sub_domain: '子域',
+  service_module: '服务模块',
+  business_object: '业务对象',
+  relationship: '业务关系',
 }
 
 /**
@@ -88,11 +73,11 @@ export const ACTION_LABELS = {
   BATCH_CREATE: '批量创建',
   BATCH_UPDATE: '批量更新',
   BATCH_DELETE: '批量删除',
-  BATCH_ASSIGN: '批量分配',
-  BATCH_UNASSIGN: '批量取消',
+  BATCH_IMPORT: '批量导入',
 
-  // 业务流
+  // 工作流 / 任务
   SUBFLOW: '执行子流程',
+  METRIC_RECORD: '性能指标记录',  // [FIX 2026-07-22] log_performance 占位，metric_name 在 extra_data
   SYNC: '数据同步',
   DATA_SYNC: '数据同步',
   EXPORT: '导出',
@@ -122,101 +107,64 @@ export const ACTION_LABELS = {
   CASCADE_DELETE: '级联删除',
 
   // 性能监控 (业务视图隐藏)
-  api_response_time: 'API 响应时间',
-  db_query_time: '数据库查询时间',
-  time: '性能计时',
-  METRIC: '性能指标',
-  UNKNOWN: '未识别操作'
+  PERF_THRESHOLD: '性能阈值',
+
+  // 通用占位
+  READONLY: '查看',
 }
 
 /**
- * 内部技术 action 集合 (业务视图应该隐藏, 仅在审计视图显示)
- * 包含: 性能监控 + 审计系统元数据 + 未知
+ * 业务隐藏的 action 集合 (审计员视图才能看到)
  */
-export const INTERNAL_ACTIONS = new Set([
+const HIDDEN_ACTIONS = new Set([
   'AUDIT_WRITE_FAILED',
   'AUDIT_RETRY_SUCCESS',
   'AUDIT_RETRY_FAILED',
-  'api_response_time',
-  'db_query_time',
-  'time',
-  'METRIC',
-  'UNKNOWN'
+  'PERF_THRESHOLD',
 ])
 
 /**
- * 是否是内部技术 action (业务视图应该隐藏)
- */
-export function isInternalAction(action) {
-  return INTERNAL_ACTIONS.has(action)
-}
-
-/**
- * 获取 object_type 业务名
- * @param {string} objectType - 后端 object_type 值
- * @returns {string} 业务名 (找不到回退原值)
- */
-export function getObjectTypeLabel(objectType) {
-  if (!objectType) return ''
-  return OBJECT_TYPE_LABELS[objectType] || objectType
-}
-
-/**
- * 获取 action 业务名
- * @param {string} action - 后端 action 值
- * @returns {string} 业务动作 (找不到回退原值)
+ * action → 业务动作
+ * @param {string} action - 后端 action 字段
+ * @returns {string} 业务动作名
  */
 export function getActionLabel(action) {
-  if (!action) return '未知'
+  if (!action) return ''
   return ACTION_LABELS[action] || action
 }
 
 /**
- * user_name 业务化
- * @param {string} userName
- * @returns {string}
+ * 是否是审计员视图才看到的 action (业务视图应隐藏)
  */
-export function getUserNameDisplay(userName) {
-  if (!userName) return '-'
-  if (userName === 'system') return '系统'
-  if (userName === '[REDACTED]') return '已脱敏'
-  return userName
+export function isInternalAction(action) {
+  return HIDDEN_ACTIONS.has(action)
 }
 
 /**
- * 内部技术字段精确集合 (业务视图应该隐藏)
- *
- * 隐藏规则:
- * 1. 精确匹配: 以下 Set 中的字段名
- * 2. 模式匹配: isInternalField() 中补充 _id 后缀等规则
+ * object_type → 业务对象名
+ * @param {string} type - 后端 object_type
+ * @returns {string} 业务对象名
  */
-export const INTERNAL_FIELDS = new Set([
-  '_record',          // 整个对象的 cud summary, 在 group header 已表明
-  'extra_data',       // 元数据
-  'cascade_root_id',  // 级联来源 ID
-  'cascade_root_action',
-  // 系统时间戳/操作人 (业务人员无需在变更字段中看到)
+export function getObjectTypeLabel(type) {
+  if (!type) return ''
+  return OBJECT_TYPE_LABELS[type] || type
+}
+
+/**
+ * 内部技术字段集合 (业务视图应该隐藏, 不在列表/详情展示)
+ *
+ * 包括:
+ * 1. 审计元字段: id, created_at/updated_at, created_by/updated_by, created_via, updated_via
+ * 2. 关系元字段: extra_data, transaction_id, trace_id, source_bo_id, target_bo_id
+ * 3. 主键字段: id (但 business_key 保留作为业务标识)
+ */
+const INTERNAL_FIELDS = new Set([
+  // 元字段
   'id',
-  'created_at',
-  'updated_at',
-  'created_by',
-  'updated_by',
-  // annotation 技术字段
-  'target_type',
-  'target_id',
-  // [FIX 2026-06-19] AI Agent 元数据 (业务视图隐藏)
-  'agent_id',
-  'agent_session_id',
-  'agent_reasoning',
-  'tool_call_id',
-  // [FIX 2026-06-19] 审计系统状态字段
-  'error_message',
-  'retry_count',
-  'status',
-  'status_entered_at',
-  'row_hash',
-  'prev_hash',
-  'retention_until',
+  'created_at', 'updated_at', 'created_by', 'updated_by',
+  'created_via', 'updated_via',
+  'transaction_id', 'trace_id',
+  'extra_data',
 ])
 
 /**
@@ -401,4 +349,104 @@ export function getFieldValueDisplay(value, fieldName) {
 
   // 3. 原值
   return str
+}
+
+/**
+ * 日志分类 (log_category) → 业务显示 + Element-Plus tag 类型
+ * 对应 audit_logs.log_category 字段
+ */
+export const LOG_CATEGORY_LABELS = {
+  business: { label: '业务审计', type: 'primary' },
+  security: { label: '安全日志', type: 'danger' },
+  operation: { label: '运营日志', type: 'info' },
+  performance: { label: '性能日志', type: 'warning' },
+  system: { label: '系统日志', type: '' }
+}
+
+/**
+ * 日志级别 (log_level) → 业务显示 + Element-Plus tag 类型
+ */
+export const LOG_LEVEL_LABELS = {
+  DEBUG: { label: '调试', type: 'info' },
+  INFO: { label: '信息', type: 'primary' },
+  WARNING: { label: '警告', type: 'warning' },
+  ERROR: { label: '错误', type: 'danger' },
+  CRITICAL: { label: '严重', type: 'danger' }
+}
+
+/**
+ * action → Element-Plus tag 类型 (用于按钮颜色)
+ */
+export const ACTION_TAG_TYPES = {
+  CREATE: 'success',
+  UPDATE: 'warning',
+  DELETE: 'danger',
+  DELETE_BLOCKED: 'danger',
+  ASSOCIATE: 'primary',
+  DISSOCIATE: 'info',
+  METRIC_RECORD: 'warning',  // [FIX 2026-07-22]
+  AUDIT_WRITE_FAILED: 'danger',
+  PERMISSION_DENIED: 'danger',
+  LOGIN_FAILED: 'danger',
+  SQL_INJECTION_ATTEMPT: 'danger',
+  CONFIG_CHANGE: 'warning',
+  CONFIG_ERROR: 'danger',
+  SUBFLOW: 'primary',
+  SYNC: 'info',
+  DATA_SYNC: 'info',
+  BATCH_CREATE: 'success',
+  BATCH_UPDATE: 'warning',
+  BATCH_DELETE: 'danger',
+  EXPORT: '',
+  IMPORT: '',
+  LOGIN: 'primary',
+  LOGOUT: 'info',
+  PASSWORD_CHANGE: 'warning',
+  RESET_PASSWORD: 'warning',
+  STARTUP: 'success',
+  SHUTDOWN: 'info',
+  CASCADE_DELETE: 'danger',
+  GRANT: 'primary',
+  REVOKE: 'info',
+  ASSIGN: 'primary',
+  UNASSIGN: 'info',
+  MANAGE: 'warning',
+  APPROVE: 'primary',
+  READ: 'info',
+  unlock: 'primary'
+}
+
+export function getCategoryLabel(category) {
+  return LOG_CATEGORY_LABELS[category]?.label || category
+}
+
+export function getCategoryTagType(category) {
+  return LOG_CATEGORY_LABELS[category]?.type || ''
+}
+
+export function getLevelLabel(level) {
+  return LOG_LEVEL_LABELS[level]?.label || level
+}
+
+export function getLevelTagType(level) {
+  return LOG_LEVEL_LABELS[level]?.type || 'info'
+}
+
+export function getActionTagType(action) {
+  return ACTION_TAG_TYPES[action] || 'info'
+}
+
+/**
+ * 用户名业务化 (例如 system → 系统, [REDACTED] → 已脱敏)
+ */
+const USER_NAME_LABELS = {
+  system: '系统',
+  admin: '管理员',
+  '[REDACTED]': '已脱敏',
+  anonymous: '匿名',
+}
+
+export function getUserNameDisplay(name) {
+  if (!name) return '-'
+  return USER_NAME_LABELS[name] || name
 }

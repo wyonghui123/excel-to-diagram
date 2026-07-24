@@ -7,11 +7,38 @@
         :enable-auto-crud="false"
         @detail="handleViewDetail"
       >
+        <template #cell-object_type="{ row }">
+          {{ row.object_type_label || formatObjectTypeLabel(row.object_type) }}
+        </template>
         <template #cell-field_name="{ row }">
           <span v-if="row.field_name && row.field_name !== '_record'" class="field-name-badge">
-            {{ getFieldName(row.field_name) }}
+            {{ row.field_name_label || getFieldLabel(row.field_name) }}
           </span>
           <span v-else class="no-field">-</span>
+        </template>
+        <template #cell-old_value="{ row }">
+          {{ getFieldValueDisplay(row.old_value, row.field_name) }}
+        </template>
+        <template #cell-new_value="{ row }">
+          {{ getFieldValueDisplay(row.new_value, row.field_name) }}
+        </template>
+        <template #cell-user_name="{ row }">
+          {{ getUserNameDisplay(row.user_name) }}
+        </template>
+        <template #cell-log_category="{ row }">
+          <el-tag :type="getCategoryTagType(row.log_category)" size="small">
+            {{ getCategoryLabel(row.log_category) }}
+          </el-tag>
+        </template>
+        <template #cell-log_level="{ row }">
+          <el-tag :type="getLevelTagType(row.log_level)" size="small">
+            {{ getLevelLabel(row.log_level) }}
+          </el-tag>
+        </template>
+        <template #cell-action="{ row }">
+          <el-tag :type="getActionTagType(row.action)" size="small">
+            {{ getActionLabel(row.action) }}
+          </el-tag>
         </template>
       </GenericObjectList>
     </div>
@@ -43,28 +70,28 @@
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="对象类型">
-            {{ getObjectTypeLabel(selectedLog.object_type) }}
+            {{ selectedLog.object_type_label || formatObjectTypeLabel(selectedLog.object_type) }}
           </el-descriptions-item>
           <el-descriptions-item label="对象ID">
             {{ selectedLog.object_id }}
           </el-descriptions-item>
           <el-descriptions-item label="业务标识">
-            {{ selectedLog.formatted_identity || selectedLog.business_key || '-' }}
+            {{ selectedLog.formatted_identity || selectedLog.business_key || selectedLog.object_display || '-' }}
           </el-descriptions-item>
           <el-descriptions-item label="操作人">
-            {{ selectedLog.user_name || '-' }}
+            {{ getUserNameDisplay(selectedLog.user_name) }}
           </el-descriptions-item>
           <el-descriptions-item label="IP地址">
             {{ selectedLog.ip_address || '-' }}
           </el-descriptions-item>
           <el-descriptions-item label="字段名">
-            {{ getFieldName(selectedLog.field_name) }}
+            {{ selectedLog.field_name_label || getFieldLabel(selectedLog.field_name) }}
           </el-descriptions-item>
           <el-descriptions-item label="旧值">
-            <div class="value-text">{{ selectedLog.old_value || '-' }}</div>
+            <div class="value-text">{{ getFieldValueDisplay(selectedLog.old_value, selectedLog.field_name) }}</div>
           </el-descriptions-item>
           <el-descriptions-item label="新值">
-            <div class="value-text">{{ selectedLog.new_value || '-' }}</div>
+            <div class="value-text">{{ getFieldValueDisplay(selectedLog.new_value, selectedLog.field_name) }}</div>
           </el-descriptions-item>
           <el-descriptions-item label="链路追踪ID">
             {{ selectedLog.trace_id || '-' }}
@@ -82,6 +109,18 @@
 import { ref } from 'vue'
 import GenericObjectList from '@/views/GenericObjectList.vue'
 import { formatDate } from '@/composables/useMetaList'
+import {
+  getObjectTypeLabel as formatObjectTypeLabel,
+  getActionLabel,
+  getFieldLabel,
+  getFieldValueDisplay,
+  getUserNameDisplay,
+  getCategoryLabel,
+  getCategoryTagType,
+  getLevelLabel,
+  getLevelTagType,
+  getActionTagType,
+} from '@/utils/auditLogFormat'
 
 const showDetail = ref(false)
 const selectedLog = ref(null)
@@ -89,78 +128,6 @@ const selectedLog = ref(null)
 function handleViewDetail(payload) {
   selectedLog.value = payload.row
   showDetail.value = true
-}
-
-const OBJECT_TYPE_MAP = {
-  'user': '用户',
-  'role': '角色',
-  'user_group': '用户组',
-  'product': '产品',
-  'version': '版本',
-  'domain': '领域',
-  'sub_domain': '子域',
-  'service_module': '服务模块',
-  'business_object': '业务对象',
-  'relationship': '关系',
-  'annotation': '标注',
-  'enum_type': '枚举类型',
-  'enum_value': '枚举值',
-  '__audit_failure__': '审计失败'
-}
-
-const COMMON_FIELD_NAMES = {
-  'id': 'ID',
-  'name': '名称',
-  'code': '编码',
-  'description': '描述',
-  'created_at': '创建时间',
-  'updated_at': '更新时间',
-  'created_by': '创建人',
-  'updated_by': '更新人',
-  'status': '状态',
-  'is_active': '是否激活',
-  'username': '用户名',
-  'display_name': '显示名称',
-  'email': '邮箱'
-}
-
-function getObjectTypeLabel(type) {
-  return OBJECT_TYPE_MAP[type] || type
-}
-
-function getFieldName(fieldKey) {
-  if (!fieldKey || fieldKey === '_record') return '-'
-  return COMMON_FIELD_NAMES[fieldKey] || fieldKey
-}
-
-function getCategoryTagType(category) {
-  const map = { business: 'primary', security: 'danger', operation: 'info', performance: 'warning', system: '' }
-  return map[category] || ''
-}
-
-function getCategoryLabel(category) {
-  const map = { business: '业务审计', security: '安全日志', operation: '运营日志', performance: '性能日志', system: '系统日志' }
-  return map[category] || category
-}
-
-function getLevelTagType(level) {
-  const map = { DEBUG: 'info', INFO: 'primary', WARNING: 'warning', ERROR: 'danger', CRITICAL: 'danger' }
-  return map[level] || 'info'
-}
-
-function getLevelLabel(level) {
-  const map = { DEBUG: '调试', INFO: '信息', WARNING: '警告', ERROR: '错误', CRITICAL: '严重' }
-  return map[level] || level
-}
-
-function getActionTagType(action) {
-  const map = { CREATE: 'success', UPDATE: 'warning', DELETE: 'danger', ASSOCIATE: 'primary', DISSOCIATE: 'info' }
-  return map[action] || 'info'
-}
-
-function getActionLabel(action) {
-  const map = { CREATE: '创建', UPDATE: '更新', DELETE: '删除', ASSOCIATE: '关联', DISSOCIATE: '取消关联' }
-  return map[action] || action
 }
 
 function formatDateTime(datetime) {
