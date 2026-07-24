@@ -640,6 +640,103 @@ Spec 01-07 建立了基于 `role_dimension_scopes` 的维度范围权限模型�
 - **Annotation parent derived**: 写权限继承 parent (target_type + target_id), orphan annotation 防御性放行
 - **Owner chain + functional perm 分离**: owner chain 命中时 WriteScopeInterceptor 放行, 但 functional perm 仍由 PermissionInterceptor 检查
 
+---
+
+## 6.5 PM 选项 B: 笛卡尔积语义 (AC-008, 2026-07-23)
+
+### 6.5.1 背景
+
+**PM 问题**: "管理维度比如领域选择了全部, 子领域选择了 采购供应, 这里合理的权限逻辑是什么?"
+
+**分析**: 利用 Python + sqlite3 实测发现, 修复前 role 配 `domain=all + sub_domain=[101]` 时, `sub_domain` 自动展开为全部 4 个 (`inherit_children=1` 默认), **PM 配置的 sub_domain=[101] 形同虚设**。
+
+### 6.5.2 PM 决策 (2026-07-23)
+
+- **采用 方案 B 笛卡尔积** (SAP/Salesforce 折衷, 详见 `docs/spec_权限体系升级/DIMENSION_LOGIC_ANALYSIS.md`)
+
+**语义**: 父维度 `all` 沿 HIERARCHY_CHAIN 向下展开子维度时, **若子维度已被显式 include 配置, 不再继承** (保留 PM 精确意图)。
+
+SQL 行为:
+- `sub_domain` SQL: `domain_id IN (1,2,3) AND id IN (101)` (笛卡尔积, 全 domain 范围内的 101)
+- `service_module` SQL: `sub_domain_id IN (101) AND ...` (精确 101)
+
+### 6.5.3 验收标准 (AC-008)
+
+- [AC-008.1] role 配 `domain=all + sub_domain=[101]` 时, `expand_dimension_values['sub_domain'] = {101}` (非全部)
+- [AC-008.2] role 配 `domain=all` (仅) 时, `expand_dimension_values['sub_domain'] = 全 4 个` (沿链展开 OK)
+- [AC-008.3] role 配 `sub_domain=[101]` (仅) 时, `expand_dimension_values['sub_domain'] = {101}` (无变化)
+- [AC-008.4] role 配 `domain=[1] + sub_domain=[101] (inherit=0)` 时, `expand_dimension_values['sub_domain'] = {101, 102}` (domain=1 下所有)
+- [AC-008.5] 现有 98 个 e2e 场景全部回归通过 (笛卡尔积不允许子维度 include 值被父 all 覆盖)
+
+### 6.5.4 实施细节
+
+**修改**: `meta/services/dimension_scope_engine.py`
+
+**1. L209-232 `expand_dimension_values`**: 在父维度 all 向下展开子维度时, 先检查子维度是否被显式 include 配置:
+
+```python
+for next_dim in HIERARCHY_CHAIN[idx + 1:]:
+    # [FIX Cartesion 2026-07-23 PM Option B]
+    if self._has_explicit_include_for_dim(scopes, next_dim):
+        # 子维度已显式 include, 笛卡尔积: 父 all AND 子 include 精确值
+        logger.info(f'[P1-CARTESION] parent={code} all, child={next_dim} '
+                    f'explicit include — break inherit chain')
+        break
+    # 否则继续向下展开
+    parent_field = PARENT_FIELD_MAP.get(next_dim)
+    ...
+```
+
+**2. 新增 helper `_has_explicit_include_for_dim`**: 检查 scopes 中是否对 dim_code 有显式 include 配置 (非空 dimension_values):
+
+```python
+def _has_explicit_include_for_dim(self, scopes, dim_code: str) -> bool:
+    """[P1-T2 2026-07-19] 检查 scopes 中 dim_code 是否有显式 include 配置"""
+    for scope in scopes:
+        if scope.get('dimension_code') != dim_code:
+            continue
+        scope_mode = scope.get('scope_mode', 'include')
+        if scope_mode != 'include':
+            continue
+        raw_dv = scope.get('dimension_values')
+        if raw_dv is None:
+            raw_dv = scope.get('inherit_children')
+        if raw_dv is None:
+            continue
+        # parse JSON/list/string → 检查非空
+        ...
+        if values:
+            return True
+    return False
+```
+
+### 6.5.5 实测结果
+
+临时 DB + DimensionScopeEngine 测试, 4 种场景:
+
+| 配置 | expand_dimension_values | 实测通过 |
+|------|-------------------------|----------|
+| A: `domain=all + sub_domain=[101]` | `{sub_domain: {101}}` | ✅ |
+| B: `domain=[1] + sub_domain=all` | `{sub_domain: 全 4 个}` | ✅ |
+| C: `仅 sub_domain=[101]` | `{sub_domain: {101}}` | ✅ |
+| D: `domain=[1] + sub_domain=[101] (inherit=0)` | `{sub_domain: {101, 102}}` | ✅ |
+
+修复前 (A 场景): `{sub_domain: 全 4 个}` ❌ 配置失效
+修复后 (A 场景): `{sub_domain: {101}}` ✅ 笛卡尔积精确生效
+
+### 6.5.6 业界对齐
+
+**SAP PFCG**: 父子嵌套, 强约束 — A 方案最强但配置繁琐
+**Salesforce View All Data**: OR 合并, 易越权 — C 方案
+**当前 (B 笛卡尔积)**: SAP 思想 + Salesforce 灵活 — 父子可独立配置但笛卡尔积精确生效
+
+### 6.5.7 相关文档
+
+- 详细分析: `docs/spec_权限体系升级/DIMENSION_LOGIC_ANALYSIS.md` (200+ 行)
+- 分析日期: 2026-07-23
+- PM 决策: 选项 B (笛卡尔积)
+- 实施日期: 2026-07-23
+
 ## 7. 单元测试
 
 ### test_dim_scope_conflict.py (24 个测试用例, 全部通过)

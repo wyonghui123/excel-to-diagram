@@ -214,6 +214,19 @@ class DimensionScopeEngine:
                         continue
                     current_ids = set(all_ids)
                     for next_dim in HIERARCHY_CHAIN[idx + 1:]:
+                        # [FIX Cartesion 2026-07-23 PM Option B]
+                        # 笛卡尔积语义: 父维度 all 沿 HIERARCHY_CHAIN 向下展开子维度,
+                        # 但若子维度已被显式 include 配置, 不再继承 (保留 PM 精确意图)
+                        # 例: role 配 domain=all + sub_domain=[101]:
+                        #   - 当前代码: sub_domain 被展开为全 4 个 (配置失效)
+                        #   - 修复后: sub_domain 保留 {101} (笛卡尔积生效)
+                        if self._has_explicit_include_for_dim(scopes, next_dim):
+                            # 子维度已显式 include, 笛卡尔积: 父 all AND 子 include 精确值
+                            logger.info(
+                                f'[P1-CARTESION] parent={code} all, child={next_dim} '
+                                f'explicit include — break inherit chain'
+                            )
+                            break
                         parent_field = PARENT_FIELD_MAP.get(next_dim)
                         child_table = RESOURCE_TABLE_MAP.get(next_dim)
                         if not parent_field or not child_table or not current_ids:
@@ -850,6 +863,39 @@ class DimensionScopeEngine:
         )
         cols = [d[0] for d in cursor.description]
         return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+    def _has_explicit_include_for_dim(self, scopes, dim_code: str) -> bool:
+        """[P1-T2 2026-07-19] 检查 scopes 中是否对 dim_code 有显式的 include 配置
+
+        Spec: spec-permission-system-unification-2026-07-19 §8.1 P1-T2
+        用途: scope_mode='all' 向下展开子维度时, 若子维度已被显式 include 配置,
+              保留精确值 (笛卡尔积语义), 避免被父维度 'all' 展开覆盖
+        返回: True 表示 scopes 中存在 dim_code 的显式 include scope (有非空 dimension_values)
+        """
+        for scope in scopes:
+            if scope.get('dimension_code') != dim_code:
+                continue
+            scope_mode = scope.get('scope_mode', 'include')
+            if scope_mode != 'include':
+                continue
+            raw_dv = scope.get('dimension_values')
+            if raw_dv is None:
+                # 兼容旧数据: NULL 时降级读 inherit_children 字段
+                raw_dv = scope.get('inherit_children')
+            if raw_dv is None:
+                continue
+            if isinstance(raw_dv, str):
+                try:
+                    values = json.loads(raw_dv)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+            elif isinstance(raw_dv, (list, tuple)):
+                values = raw_dv
+            else:
+                continue
+            if values:
+                return True
+        return False
 
     def _get_all_dimension_ids(self, dimension_code: str) -> Set[int]:
         """[P1-T2 2026-07-19] 获取指定维度的全量 ID
