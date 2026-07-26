@@ -102,15 +102,27 @@
  *
  *   注: scopeIds 变化时只触发 filterFlattenData（前端计算），不触发网络请求
  */
-import { reactive, watch, onMounted, toRef } from 'vue'
+import { reactive, watch, onMounted, toRef, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Loading, WarningFilled, DataLine } from '@element-plus/icons-vue'
 import { useTabStore } from '@/stores/tabStore'
 import { useChartArchDataStore } from '@/stores/chartArchDataStore'
 import { useChartPreview } from '@/views/AADiagramApp/composables/useChartPreview'
 import { useReactiveRenderer } from '@/views/AADiagramApp/composables/useReactiveRenderer'
+import { useMermaidWorker } from './useMermaidWorker.js'
 import ChartMiniToolbar from './ChartMiniToolbar.vue'
 import MermaidCanvas from './MermaidCanvas.vue'
+
+// ============================================================
+// Phase 6.4: Feature Flag（spec §5.0.7 可回退性设计）
+// 默认全部启用新路径，可通过 ENV 变量关闭
+//   VITE_USE_REACTIVE_RENDERER=false → 切回同步渲染
+//   VITE_USE_MERMAID_WORKER=false → 切回主线程计算
+// ============================================================
+const FEATURE_FLAGS = {
+  USE_REACTIVE_RENDERER: import.meta.env?.VITE_USE_REACTIVE_RENDERER !== 'false',
+  USE_MERMAID_WORKER: import.meta.env?.VITE_USE_MERMAID_WORKER !== 'false'
+}
 
 const props = defineProps({
   // Layer 1: scopeIds（只读，不得反向写入）
@@ -177,16 +189,99 @@ const {
 } = useChartPreview(versionIdRef, scopeIdsRef)
 
 // ============================================================
-// useReactiveRenderer：响应式渲染引擎
+// useReactiveRenderer：响应式渲染引擎（同步路径）
 // 注：rawData 由 useChartPreview 提供，useReactiveRenderer 内部 watch 自动触发渲染
 // ============================================================
-const {
-  mermaidText,
-  loading: renderLoading,
-  error: renderError,
-  forceRender,
-  lastChangeType
-} = useReactiveRenderer(rawData, chartConfig)
+const reactiveRenderer = useReactiveRenderer(rawData, chartConfig)
+
+// ============================================================
+// Phase 6.3: useMermaidWorker（异步路径，可选）
+// 当 FEATURE_FLAGS.USE_MERMAID_WORKER=true 时，scope/chartType 变化走 worker
+// 否则使用 useReactiveRenderer 的同步 mermaidText
+// ============================================================
+const mermaidWorker = useMermaidWorker()
+const workerMermaidText = ref('')
+const workerLoading = ref(false)
+const workerError = ref(null)
+
+// 实际使用的 mermaidText（根据 feature flag 选择）
+const mermaidText = computed(() => {
+  if (FEATURE_FLAGS.USE_MERMAID_WORKER && workerMermaidText.value) {
+    return workerMermaidText.value
+  }
+  return reactiveRenderer.mermaidText.value
+})
+
+const renderLoading = computed(() => {
+  if (FEATURE_FLAGS.USE_MERMAID_WORKER) {
+    return reactiveRenderer.loading.value || workerLoading.value
+  }
+  return reactiveRenderer.loading.value
+})
+
+const renderError = computed(() => {
+  if (FEATURE_FLAGS.USE_MERMAID_WORKER && workerError.value) {
+    return workerError.value
+  }
+  return reactiveRenderer.error.value
+})
+
+const lastChangeType = reactiveRenderer.lastChangeType
+
+// ============================================================
+// Phase 6.3: Worker 异步渲染触发器
+// 监听 rawData + chartType 变化 → 调用 worker.render
+// 注：颜色/布局变化仍走 useReactiveRenderer 的增量路径（更快）
+// ============================================================
+let workerRenderToken = 0  // 用于取消旧任务
+
+async function renderViaWorker(changeType) {
+  if (!FEATURE_FLAGS.USE_MERMAID_WORKER) return
+  if (!rawData.value) {
+    workerMermaidText.value = ''
+    return
+  }
+
+  // 只在 scope/chartType 变化时走 worker（颜色/布局走 reactive renderer 增量）
+  if (!['scope', 'chartType', 'initial'].includes(changeType)) return
+
+  // 取消旧任务（token 机制）
+  const myToken = ++workerRenderToken
+  workerLoading.value = true
+  workerError.value = null
+
+  try {
+    const result = await mermaidWorker.render(
+      rawData.value,
+      chartConfig.chartType,
+      {
+        layoutEngine: chartConfig.layoutEngine,
+        direction: chartConfig.direction
+      }
+    )
+
+    // 只接受最新 token 的结果
+    if (myToken !== workerRenderToken) return
+
+    workerMermaidText.value = result.mermaidText
+  } catch (err) {
+    if (myToken !== workerRenderToken) return
+    console.warn('[EmbeddedChartView] Worker render failed, falling back to reactive renderer:', err)
+    workerError.value = err
+    // 降级：清空 workerMermaidText，让 computed 回退到 reactiveRenderer.mermaidText
+    workerMermaidText.value = ''
+  } finally {
+    if (myToken === workerRenderToken) {
+      workerLoading.value = false
+    }
+  }
+}
+
+// 监听 rawData 变化（scope 变化）
+watch(rawData, () => renderViaWorker('scope'), { deep: true })
+
+// 监听 chartType 变化
+watch(() => chartConfig.chartType, () => renderViaWorker('chartType'))
 
 // ============================================================
 // MermaidCanvas 事件透传
@@ -240,6 +335,10 @@ watch(chartConfig, () => {
 onMounted(async () => {
   // 触发首次预加载（useChartPreview 内部 watch versionId 不会立即触发）
   await preloadData()
+  // Phase 6.3: 预加载完成后触发 worker 首次渲染
+  if (FEATURE_FLAGS.USE_MERMAID_WORKER && rawData.value) {
+    renderViaWorker('initial')
+  }
 })
 
 // ============================================================
@@ -247,13 +346,22 @@ onMounted(async () => {
 // ============================================================
 async function handleReload() {
   await reloadChartPreview()
+  // Phase 6.3: 重新加载后触发 worker 渲染
+  if (FEATURE_FLAGS.USE_MERMAID_WORKER) {
+    renderViaWorker('scope')
+  }
 }
 
 // ============================================================
 // 手动触发渲染（用于错误恢复）
 // ============================================================
 async function handleForceRender() {
-  await forceRender('scope')
+  // Phase 6.3: 优先走 worker 路径，失败时回退到 reactive renderer
+  if (FEATURE_FLAGS.USE_MERMAID_WORKER) {
+    await renderViaWorker('scope')
+  } else {
+    await reactiveRenderer.forceRender('scope')
+  }
 }
 
 // ============================================================

@@ -39,6 +39,18 @@
       <span>渲染中...</span>
     </div>
 
+    <!-- Phase 6: 渐进式绑定进度（5000+ 节点） -->
+    <div v-if="bindingProgress" class="mermaid-canvas__binding-progress">
+      <el-icon class="is-loading" :size="14"><Loading /></el-icon>
+      <span>绑定事件 {{ bindingProgress.bound }}/{{ bindingProgress.total }}</span>
+    </div>
+
+    <!-- Phase 6: 大数据量警告（5000+ 节点） -->
+    <div v-if="isLargeData" class="mermaid-canvas__large-warning" title="节点数超过 5000，交互可能略卡顿">
+      <el-icon :size="14"><WarningFilled /></el-icon>
+      <span>大数据量</span>
+    </div>
+
     <!-- 渲染失败提示 -->
     <div v-if="renderError" class="mermaid-canvas__error">
       <el-icon :size="20"><WarningFilled /></el-icon>
@@ -96,9 +108,11 @@
  *   - transform：contentRef 的 transform: translate() scale()
  *   - scale：当前缩放比例
  */
-import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import mermaid from 'mermaid'
 import { Loading, WarningFilled, Refresh } from '@element-plus/icons-vue'
+import { useRenderCache } from './useRenderCache.js'
+import { useProgressiveRender } from './useProgressiveRender.js'
 
 const props = defineProps({
   mermaidText: {
@@ -117,10 +131,24 @@ const props = defineProps({
     type: String,
     default: 'businessObject',
     validator: (v) => ['businessObject', 'serviceModule'].includes(v)
+  },
+  // Phase 6: 性能优化开关（默认 true，可通过 prop 关闭）
+  enableCache: {
+    type: Boolean,
+    default: true
+  },
+  enableProgressiveBind: {
+    type: Boolean,
+    default: true
+  },
+  // 缓存最大条目数（默认 10）
+  cacheMaxSize: {
+    type: Number,
+    default: 10
   }
 })
 
-const emit = defineEmits(['node-click', 'render-complete', 'render-error'])
+const emit = defineEmits(['node-click', 'render-complete', 'render-error', 'cache-hit', 'large-data-warning'])
 
 // ============================================================
 // Refs
@@ -144,6 +172,25 @@ let dragStart = { x: 0, y: 0, scrollLeft: 0, scrollTop: 0 }
 const renderError = ref(null) // { message, phase, detail? }
 let isRendering = false // 防止并发渲染
 let mermaidInitialized = false
+
+// ============================================================
+// Phase 6: useRenderCache（mermaidText → SVG LRU 缓存）
+// ============================================================
+const renderCache = useRenderCache(props.cacheMaxSize)
+
+// ============================================================
+// Phase 6: useProgressiveRender（5000+ 节点分批绑定事件）
+// ============================================================
+const {
+  isLargeData,
+  bindingProgress,
+  bindNodes,
+  unbindAll,
+  checkLargeData
+} = useProgressiveRender()
+
+// 当前节点点击事件处理器（用于 cleanup 时解绑）
+let currentNodeClickHandler = null
 
 // ============================================================
 // Mermaid 初始化（仅一次）
@@ -213,7 +260,7 @@ function restoreViewport(saved) {
 }
 
 // ============================================================
-// 核心：渲染 mermaid
+// 核心：渲染 mermaid（Phase 6: 集成 cache + progressive bind）
 // ============================================================
 async function renderMermaid() {
   // 防止并发渲染（watch 触发 + 防抖可能重叠）
@@ -239,10 +286,50 @@ async function renderMermaid() {
   const startTime = performance.now()
 
   try {
-    // Step 3: 准备渲染容器（mermaid 需要 <pre class="mermaid"> 或 <div class="mermaid">）
+    // Step 3: 准备渲染容器
     if (!contentRef.value) {
       isRendering = false
       return
+    }
+
+    // ============================================================
+    // Phase 6.1: 缓存命中检查（先尝试从缓存取 SVG）
+    // ============================================================
+    if (props.enableCache) {
+      const cached = renderCache.get(props.mermaidText, props.chartType)
+      if (cached.hit) {
+        // 缓存命中：直接 innerHTML = svg，跳过 mermaid.run()
+        const cacheStartTime = performance.now()
+
+        // 解绑旧节点事件（避免内存泄漏）
+        await unbindAll(contentRef.value, currentNodeClickHandler)
+
+        contentRef.value.innerHTML = cached.svg
+
+        // 重新绑定节点点击事件（progressive）
+        await bindNodeClickEventsProgressive()
+
+        // 恢复视口
+        restoreViewport(savedViewport)
+
+        const nodeCount = contentRef.value.querySelectorAll('.node').length
+        const elapsedMs = Math.round(performance.now() - cacheStartTime)
+
+        emit('cache-hit', { mermaidText: props.mermaidText, elapsedMs })
+        emit('render-complete', { nodeCount, elapsedMs, fromCache: true })
+
+        isRendering = false
+        return
+      }
+    }
+
+    // ============================================================
+    // 缓存未命中：走完整 mermaid.run() 渲染
+    // ============================================================
+
+    // 解绑旧节点事件（如果有）
+    if (currentNodeClickHandler) {
+      await unbindAll(contentRef.value, currentNodeClickHandler)
     }
 
     // 注入 mermaid 源码（mermaid.run() 会把 .mermaid 元素转换为 SVG）
@@ -255,17 +342,29 @@ async function renderMermaid() {
       nodes: contentRef.value.querySelectorAll('.mermaid')
     })
 
-    // Step 5: 绑定节点点击事件（事件委托）
-    bindNodeClickEvents()
+    // Step 5: 提取 SVG 字符串并写入缓存
+    if (props.enableCache) {
+      const svgEl = contentRef.value.querySelector('svg')
+      if (svgEl) {
+        const svgString = svgEl.outerHTML
+        renderCache.set(props.mermaidText, props.chartType, svgString)
+      }
+    }
 
-    // Step 6: 恢复视口
+    // Step 6: 检查数据量 + 绑定节点点击事件（progressive）
+    const { nodeCount, isLarge } = checkLargeData(contentRef.value)
+    if (isLarge) {
+      emit('large-data-warning', { nodeCount })
+    }
+
+    await bindNodeClickEventsProgressive()
+
+    // Step 7: 恢复视口
     restoreViewport(savedViewport)
 
-    // Step 7: 统计节点数（用于 emit）
-    const nodeCount = contentRef.value.querySelectorAll('.node').length
     const elapsedMs = Math.round(performance.now() - startTime)
 
-    emit('render-complete', { nodeCount, elapsedMs })
+    emit('render-complete', { nodeCount, elapsedMs, fromCache: false })
   } catch (err) {
     // 契约 5.10.4 ④：mermaid 库本身渲染失败 try-catch
     console.error('[MermaidCanvas] mermaid.run() failed:', err)
@@ -287,24 +386,55 @@ async function renderMermaid() {
 }
 
 // ============================================================
-// 节点点击事件委托
+// 节点点击事件委托（Phase 6: 集成 useProgressiveRender）
 // ============================================================
-function bindNodeClickEvents() {
+async function bindNodeClickEventsProgressive() {
   if (!contentRef.value) return
 
-  const nodes = contentRef.value.querySelectorAll('.node, .node-id')
-  nodes.forEach(node => {
-    node.style.cursor = 'pointer'
-    node.addEventListener('click', handleNodeClick, { once: false })
-  })
+  // 创建当前渲染的 click handler（保存引用，便于 cleanup）
+  currentNodeClickHandler = (event) => {
+    // 找到最近的 .node 元素
+    const target = event.currentTarget
+    if (!target) return
+
+    // 提取节点 ID
+    const nodeId = target.id || target.getAttribute('data-id') || target.getAttribute('data-node-id') || ''
+
+    emit('node-click', {
+      id: nodeId,
+      type: 'node',
+      dataset: { ...target.dataset },
+      text: target.textContent?.trim() || ''
+    })
+  }
+
+  if (props.enableProgressiveBind) {
+    // 渐进式绑定（5000+ 节点分批，避免阻塞主线程）
+    await bindNodes(contentRef.value, currentNodeClickHandler, {
+      batchSize: 200
+    })
+  } else {
+    // 兼容路径：一次性同步绑定
+    const nodes = contentRef.value.querySelectorAll('.node, .node-id')
+    nodes.forEach(node => {
+      node.style.cursor = 'pointer'
+      node.addEventListener('click', currentNodeClickHandler, { once: false })
+    })
+  }
+}
+
+// 兼容旧 API（保留函数名，内部转调 progressive 版本）
+function bindNodeClickEvents() {
+  // 同步触发 progressive 绑定（不等待，避免阻塞）
+  bindNodeClickEventsProgressive()
 }
 
 function handleNodeClick(event) {
-  // 找到最近的 .node 元素
+  // 兼容旧调用方（现在由 bindNodeClickEventsProgressive 内部创建 handler）
+  // 此函数保留是为了 onBeforeUnmount 中的 cleanup
   const target = event.currentTarget
   if (!target) return
 
-  // 提取节点 ID（mermaid 通常用 id="flowchart-N0-..." 或 class="node default" data-id="xxx"）
   const nodeId = target.id || target.getAttribute('data-id') || target.getAttribute('data-node-id') || ''
 
   emit('node-click', {
@@ -424,10 +554,15 @@ onBeforeUnmount(() => {
   document.removeEventListener('mousemove', handleDragMove)
   document.removeEventListener('mouseup', handleDragEnd)
 
-  // 清理节点点击事件
-  if (contentRef.value) {
+  // 清理节点点击事件（使用 progressive 绑定的 handler）
+  if (contentRef.value && currentNodeClickHandler) {
     const nodes = contentRef.value.querySelectorAll('.node, .node-id')
-    nodes.forEach(node => node.removeEventListener('click', handleNodeClick))
+    nodes.forEach(node => node.removeEventListener('click', currentNodeClickHandler))
+  }
+
+  // Phase 6: 清理缓存（释放内存）
+  if (props.enableCache) {
+    renderCache.clear()
   }
 })
 
@@ -435,7 +570,12 @@ onBeforeUnmount(() => {
 defineExpose({
   render: renderMermaid,
   resetViewport,
-  setScale
+  setScale,
+  // Phase 6: 暴露缓存统计 + 大数据量状态
+  cacheStats: renderCache.stats,
+  isLargeData,
+  bindingProgress,
+  clearCache: renderCache.clear
 })
 </script>
 
@@ -500,6 +640,48 @@ defineExpose({
   color: var(--color-text-secondary, #606266);
   pointer-events: none;
   z-index: 10;
+}
+
+/* Phase 6: 渐进式绑定进度 */
+.mermaid-canvas__binding-progress {
+  position: absolute;
+  top: var(--spacing-sm, 8px);
+  right: var(--spacing-sm, 8px);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs, 4px);
+  padding: 4px 10px;
+  background: rgba(64, 158, 255, 0.92);
+  border: 1px solid #409eff;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #fff;
+  pointer-events: none;
+  z-index: 11;
+  animation: mc-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes mc-pulse {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 1; }
+}
+
+/* Phase 6: 大数据量警告 */
+.mermaid-canvas__large-warning {
+  position: absolute;
+  top: var(--spacing-sm, 8px);
+  left: var(--spacing-sm, 8px);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs, 4px);
+  padding: 4px 10px;
+  background: rgba(230, 162, 60, 0.92);
+  border: 1px solid #e6a23c;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #fff;
+  pointer-events: none;
+  z-index: 11;
 }
 
 /* 渲染失败提示 */
