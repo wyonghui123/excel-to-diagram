@@ -2,9 +2,10 @@
 alwaysApply: true
 description: 多Agent协作规范 - worktree隔离、端口隔离、沙箱检测、PM授权例外
 ---
-# Multi-Agent 协作规范 (v3.24)
+# Multi-Agent 协作规范 (v3.26)
 
 > **多个 AI Coding Agent 并行开发, 测试基础设施需支持端口/DB/env 隔离。**
+> **v3.26: 新增 L7 基础设施同步（sync_infra + pre-commit hook） + L6 跨 wt branch 保护。**
 > **v3.24: 新增 L5 沙箱检测、PM 授权例外、Worktree 生命周期管理。**
 
 ## [!!!] 铁律：Agent 必须使用独立 Worktree [!!!]
@@ -33,6 +34,8 @@ description: 多Agent协作规范 - worktree隔离、端口隔离、沙箱检测
 | **L3: Post-commit Hook** | `.git/hooks/ai-guard-post-commit.ps1` v2.0 检测 stash 突变 | 告警：stash 数量变化 |
 | **L4: Stash 监控** | `scripts/stash_guard.ps1` 定期检查 | 巡检：发现遗漏 |
 | **L5: 沙箱检测** | Agent 启动时验证写权限（见下方） | 防止：假成功（exit 0 但未落盘） |
+| **L6: 跨 wt branch 保护** | `scripts/_wt_branch_guard.py snapshot/check/restore` | 防止：wt 被其他 agent 误 reset |
+| **L7: 基础设施同步 (v3.26)** | `scripts/sync_infra.py` + pre-commit hook `sync-infra` | 防止：公共脚本在 wt 间漂移 |
 
 ## L5: 沙箱隔离检测
 
@@ -236,9 +239,61 @@ git worktree remove ../agent-A-worktree
 - **L3**: Post-commit Hook 检测 stash 突变（本次实施）
 - **L4**: Stash 监控巡检（本次实施）
 
+## L6: 跨 Worktree 分支保护
+
+> **v3.26 紧急修复**：2026-07-22 phase13-worktree 被未知操作 reset 到 release-prep commit,
+> 本地 HEAD 从 `59dcad5` 变成 `e615b6a`, 幸而 git reflog + origin/phase13-main 保留可恢复。
+> **协调/部署智能体的 `git reset / git checkout` 只能作用于自己的 wt**，绝对禁止触碰其他 agent 的 wt。
+
+### 防护层
+
+| 防护层 | 机制 | 工具 |
+|--------|------|------|
+| **L6.1** | 每个 wt 打 immutable tag `wt-guard-<wt-name>` 记录安全 HEAD | `_wt_branch_guard.py snapshot` |
+| **L6.2** | 重启 agent 前自动检查 HEAD 是否仍匹配快照 | `_wt_branch_guard.py check <wt>` |
+| **L6.3** | Drift 检测告警 + 一键 restore 命令 | `_wt_branch_guard.py check + restore` |
+| **L6.4** | 操作前强制验证 "这个 wt 不属于我" | `_wt_branch_guard.py list` |
+
+详见：`scripts/_wt_branch_guard.py` 文件头注释。
+
+## L7: 基础设施同步 (v3.26+)
+
+> **问题**: 10 个 wt 各自有 `scripts/` 快照, 主仓改公共脚本后, 其他 wt 不知道。
+> **解决**: `scripts/sync_infra.py` 按 `infra-v3.26` tag 对比 wt vs 主仓, pre-commit hook 自动触发。
+
+### 防护层
+
+| 防护层 | 机制 | 工具 |
+|--------|------|------|
+| **L7.1** | 主仓打 `infra-v3.26` tag 标记"基础设施版本" | `git tag infra-v3.26` |
+| **L7.2** | `sync_infra.py` 按 tag 对比 21 个公共脚本 | `INFRA_FILES` 列表 |
+| **L7.3** | pre-commit hook `sync-infra` 在 wt commit 前自动检测 | `.pre-commit-config.yaml` |
+| **L7.4** | 默认 WARNING 不阻断, `STRICT_SYNC_INFRA=1` 自动 apply | `scripts/_hooks/pre_commit_sync_infra.py` |
+
+### 实战
+
+```bash
+# 协调 agent: 改主仓公共脚本
+cd d:/filework/excel-to-diagram
+# 改 scripts/service_manager.py
+git add scripts/service_manager.py
+git commit -m "fix(svc-mgr): xxx [PM-authorized]"
+git tag -d infra-v3.26
+git tag infra-v3.26   # 新 tag 指向新 commit
+
+# 任意 wt: commit 时 hook 自动跑
+cd d:/filework/worktrees/release-prep
+git commit -m "feat: ..."
+# → 输出: [sync_infra] 1 个公共脚本与主仓 infra-v3.26 不一致
+# → 不阻断, agent 决定手动 sync 或 STRICT 模式
+```
+
+详见：`.trae/rules/infra-sync.md`
+
 ## 参考
 
-- `.trae/rules/SESSION_REMINDER.md` - 18 铁律
+- `.trae/rules/SESSION_REMINDER.md` - 28 铁律 (v3.26+ 加铁律 5 基础设施同步)
+- `.trae/rules/infra-sync.md` - 基础设施同步详细规范 (v3.26+)
 - `docs/specs/spec-ai-agent-test-infra-v3.17.md` - D.7 详细设计
 - `scripts/agent_bootstrap.ps1` - Worktree 引导脚本
 - 业界: [Augment Code Multi-agent](https://www.augmentcode.com/guides/agent-observability-for-ai-coding)

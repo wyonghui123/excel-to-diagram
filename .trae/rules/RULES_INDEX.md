@@ -85,6 +85,7 @@ description: "规则索引：所有规则文件的目录和分类"
 |------|------|--------|
 | [multi-agent-coordination.md](./multi-agent-coordination.md) | 多智能体协调 | 必读 |
 | [agent-bootstrap.md](./agent-bootstrap.md) | AI Agent 启动 5 步检查（autoload 配套） | 必读 |
+| [infra-sync.md](./infra-sync.md) | **基础设施同步 (v3.26)** | **必读** | sync_infra + pre-commit hook + tag 机制 |
 
 ### AI 可观测性（2026-06-13 新增）
 
@@ -187,6 +188,8 @@ SESSION_REMINDER (核心入口)
    |     +-- powershell-curl-alias
    |
    +-- multi-agent-coordination (协作)
+   |     |
+   |     +-- infra-sync (v3.26 基础设施同步)
    |
    +-- doc-sync-rules (文档)
 ```
@@ -231,11 +234,13 @@ SESSION_REMINDER (核心入口)
 
 1. [multi-agent-coordination.md](./multi-agent-coordination.md)
 2. [core/agent-roles.md](./core/agent-roles.md)
+3. [infra-sync.md](./infra-sync.md) - 公共脚本跨 wt 同步 (v3.26+)
 
 ## CHANGELOG
 
 | 日期 | 变更人 | 变更内容 |
 |------|--------|----------|
+| 2026-07-30 | Smart Agent (PM-authorized) | **v3.26 基础设施分层**: 加 infra-sync.md + sync_infra.py + pre-commit hook; 加协作规范块新条目 + 依赖图新分支 |
 | 2026-06-19 | Smart Agent A | v2 升级：加 START_HERE.md 入口；加 INCIDENT_2026-06-17.md；加 AGENT_GUIDELINES.md v3.20；加 spec_template.md；加 5 个缺失规范；修正 SESSION_REMINDER 18 条（非 47 条）；把 ai-coding-standards.md 移到 deprecated/；修正重复标记（实际只有 1 处）|
 | 2026-06-13 | AI Assistant | 测试可观测性规范；标记 ai-coding-standards/powershell-curl-alias 重复 |
 | 2026-06-07 | AI Assistant | 创建 RULES_INDEX.md，统一规范索引和依赖图 |

@@ -61,6 +61,21 @@ description: "项目铁律入口 - pytest禁止、服务管理、curl陷阱、Po
 
 ---
 
+## 铁律 5：基础设施分层同步 (v3.26+)
+
+> **wt commit 前会自动 sync 主仓的基础设施脚本**
+> **WARNING 时**: 看 message 手动 `python scripts/sync_infra.py --apply`
+> **STRICT 模式**: 设 `$env:STRICT_SYNC_INFRA='1'` 再 commit 自动 apply
+
+**机制**: `scripts/sync_infra.py` 对比 wt vs 主仓 `infra-v3.26` tag (commit `34bb26b`)。
+**触发**: `.pre-commit-config.yaml` 注册了 `sync-infra` hook, 每个 wt commit 自动跑。
+**公共脚本清单**: `scripts/sync_infra.py` 顶部 `INFRA_FILES` (21 个脚本 + 2 个配置)。
+**改公共脚本后**: 主仓 commit + 重新打 tag `git tag infra-v3.26`, 通知其他 wt。
+
+详情：`.trae/rules/infra-sync.md`
+
+---
+
 ## 快速路由表
 
 | 任务 | 行动 |
@@ -74,6 +89,7 @@ description: "项目铁律入口 - pytest禁止、服务管理、curl陷阱、Po
 | **重启后端** | `python scripts/debug/restart/restart_safe.py restart` |
 | **代码定位** | `python scripts/debug/inspect/code_map.py --topic X` |
 | 服务管理 | `service_manager.ps1 [status\|start\|stop\|restart]` |
+| **基础设施同步** | `python scripts/sync_infra.py [--wt\|--all\|--apply]`，详见 infra-sync.md |
 | PowerShell + Git 兼容 | 详见 powershell-execution-guide.md |
 | trae-sandbox 行为 | 详见 powershell-execution-guide.md Part 1-2 |
 
