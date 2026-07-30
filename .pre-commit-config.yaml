@@ -1,4 +1,4 @@
-# Pre-commit hooks for AI content protection
+﻿# Pre-commit hooks for AI content protection
 # 自动阻止包含问题内容的代码被提交
 #
 # 安装: pre-commit install
@@ -49,3 +49,13 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-push]
+
+      # 6. 基础设施同步 (v3.26 Step-3) - wt commit 前自动 sync 公共脚本
+      # [STRICT_SYNC_INFRA=1] 时自动 apply; 默认 warning-only
+      - id: sync-infra
+        name: Sync Infra Scripts (auto from infra-v3.26 tag)
+        entry: python d:/filework/excel-to-diagram/scripts/_hooks/pre_commit_sync_infra.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
