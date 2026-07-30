@@ -171,6 +171,9 @@ meta/architecture.db.pre_*
 # IDE/agent runtime state
 .startup_state.json
 .trae/debug/
+# [v3.26 R1 PM-authorized] 例外: 调试 session yaml 对开发智能体可见
+!.trae/debug/sessions/
+!.trae/debug/sessions/*.yaml
 
 # Ad-hoc auto-commit / restart batch scripts
 /commit_v35p5.bat

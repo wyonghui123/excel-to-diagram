@@ -4,7 +4,7 @@
 统一服务管理器 - 多智能体协作场景下的前后端服务管理
 
 设计原则:
-  1. service_status.json 是单一事实源（磁盘文件，跨沙箱可读）
+  1. per-port 状态文件 .service_status_<port>.json 是唯一真相源（每个端口独立文件, 跨沙箱可读）
   2. 端口检测优先于 PID 检测（sandbox 权限隔离下 Get-Process 不可靠）
   3. 所有操作幂等：start 已运行=no-op, stop 已停止=no-op
   4. 管理锁防止并发管理操作（120s 超时）
@@ -17,10 +17,12 @@
   python scripts/service_manager.py restart    # 重启前后端
   python scripts/service_manager.py start-fe   # 仅启动前端
   python scripts/service_manager.py start-be   # 仅启动后端
+  python scripts/service_manager.py audit      # 全面审计: 端口/进程/孤儿/hijack
 """
 
 import json
 import os
+import shutil
 import signal
 import socket
 import subprocess
@@ -40,19 +42,26 @@ LOG_FILE = PROJECT_ROOT / ".service_manager.log"
 #       修复：直接调用 python，单一超时 60 秒，简单可靠。
 SERVICES = {
     "frontend": {
-        "port": 3004,
+        "port": 3005,
         "display_name": "Frontend (Vite)",
         "service_name": "frontend",
-        "start_cmd": ["npm", "run", "dev"],
+        "start_cmd": ["npm.cmd", "run", "dev"],
         "wait_seconds": 30,  # V4.0: 8 → 30（前端启动较慢）
+        # M4 [V2026-07-22]: 启动前端必须传 VITE_PORT, 否则 vite 用默认 5173
+        "env": {
+            "VITE_PORT": "3005",
+            "BACKEND_PORT": "3011",  # vite.config.js 需要
+        },
     },
     "backend": {
-        "port": 3010,
+        "port": 3011,
         "display_name": "Backend (Waitress)",
         "service_name": "backend",
         # V4.0: 直接启动 python（不再走 powershell 中间层）
-        "start_cmd": ["python", "-u", "waitress_server.py"],
+        "start_cmd": ["python.exe", "-u", "waitress_server.py"],
         "wait_seconds": 60,  # V4.0: 8 → 60（meta.server.py 初始化 + waitress 监听需 30+ 秒）
+        # [R2 PM-authorized] 自动传 AGENT_PORT=3011，避免 waitress 默认 3010 与 .env PORT 3011 不一致
+        "env": {"AGENT_PORT": "3011"},
     },
 }
 
@@ -169,7 +178,18 @@ def _check_code_version_stale() -> dict:
 
 
 def _read_status() -> dict:
-    """读取服务状态文件（兼容 utf-8-sig BOM）"""
+    """读取服务状态文件 (向后兼容 per-port + 裸 .service_status.json)
+
+    M8 [V2026-07-22]: 真相源迁移到 per-port 文件 .service_status_<port>.json
+    这里仍读取裸文件作为 fallback, 兼容历史 watchdog 写的旧数据。
+    """
+    # 优先 per-port 汇总
+    merged = {}
+    for port_str, info in _scan_per_port_status().items():
+        merged.update(info)
+    if merged:
+        return merged
+    # fallback: 裸文件
     if not STATUS_FILE.exists():
         return {}
     try:
@@ -185,10 +205,41 @@ def _read_status() -> dict:
         return {}
 
 
+def _scan_per_port_status() -> dict:
+    """扫描 .service_status_<port>.json 系列文件, 返回 {port: {svc: info}}"""
+    result = {}
+    pattern = ".service_status_*.json"
+    for p in PROJECT_ROOT.glob(pattern):
+        try:
+            for encoding in ("utf-8-sig", "utf-8"):
+                try:
+                    with open(p, "r", encoding=encoding) as f:
+                        data = json.load(f)
+                    port_key = p.stem.replace(".service_status_", "")
+                    result[port_key] = data
+                    break
+                except UnicodeDecodeError:
+                    continue
+        except (json.JSONDecodeError, OSError):
+            continue
+    return result
+
+
 def _write_status(status: dict):
-    """写入服务状态文件"""
-    with open(STATUS_FILE, "w", encoding="utf-8") as f:
-        json.dump(status, f, indent=2, ensure_ascii=False)
+    """写入服务状态文件
+
+    M8 [V2026-07-22]: 不再写裸 .service_status.json (避免多端口冲突)
+    改为写 per-port 文件 .service_status_<port>.json, 单一端口为唯一写入键
+    """
+    for svc_name, svc_info in status.items():
+        port = svc_info.get("port")
+        if not port:
+            continue
+        per_port_file = PROJECT_ROOT / f".service_status_{port}.json"
+        # 单端口文件只含该 svc
+        single_status = {svc_name: svc_info}
+        with open(per_port_file, "w", encoding="utf-8") as f:
+            json.dump(single_status, f, indent=2, ensure_ascii=False)
 
 
 # V4.0: 启动状态跟踪（区分"启动中"vs"启动失败"vs"未启动"）
@@ -343,6 +394,193 @@ def _kill_all_backend_processes() -> int:
         return killed
     except (subprocess.SubprocessError, FileNotFoundError):
         return 0
+
+
+def audit_command():
+    """全面审计: 端口/进程/孤儿/hijack — 开发智能体不再需要手写 audit 脚本"""
+    print("=" * 64)
+    print("  SERVICE AUDIT (service_manager.py audit)")
+    print("=" * 64)
+
+    # 1. 端口监听情况 (全端口扫描)
+    print("\n### 端口监听")
+    # M2 [V2026-07-22]: 端口从 ports.json 动态加载, 不再硬编码
+    known_ports = set()
+    ports_file = Path(r"D:\filework\.coord\ports.json")
+    if ports_file.exists():
+        try:
+            with open(ports_file, encoding='utf-8-sig') as f:
+                pdata = json.load(f)
+            for section in ("reserved", "persistent", "allocated"):
+                for port_str, info in pdata.get(section, {}).items():
+                    try:
+                        known_ports.add(int(port_str))
+                    except ValueError:
+                        pass
+                    for field in ("backend_port", "frontend_port"):
+                        if field in info:
+                            try:
+                                known_ports.add(int(info[field]))
+                            except (ValueError, TypeError):
+                                pass
+        except Exception as e:
+            print(f"  [WARN] 加载 ports.json 失败: {e}")
+    # fallback: 历史硬编码
+    if not known_ports:
+        known_ports = {3004, 3005, 3006, 3007, 3010, 3011, 3013, 3018}
+    try:
+        r = subprocess.run(['netstat', '-ano'], capture_output=True, text=True, timeout=10)
+        port_map = {}  # port -> (state, pid)
+        for line in r.stdout.split('\n'):
+            if 'LISTENING' not in line:
+                continue
+            parts = line.strip().split()
+            if len(parts) >= 5 and ':' in parts[1]:
+                try:
+                    port = int(parts[1].split(':')[-1])
+                    pid = int(parts[-1])
+                    port_map[port] = ('LISTENING', pid)
+                except ValueError:
+                    pass
+        for port in sorted(known_ports):
+            if port in port_map:
+                state, pid = port_map[port]
+                # 查找进程名
+                pname = _get_process_name(pid)
+                owner = _find_port_owner_in_ports_json(port)
+                print(f"  {port:5}  LISTENING  PID={pid:6}  {pname:15}  owner={owner or '?'}")
+            else:
+                owner = _find_port_owner_in_ports_json(port)
+                print(f"  {port:5}  CLOSED     {'':8}    {'':15}  owner={owner or '?'}")
+        # 额外发现的未知端口
+        for port in sorted(port_map.keys()):
+            if port not in known_ports and 3000 <= port <= 3020:
+                _, pid = port_map[port]
+                pname = _get_process_name(pid)
+                print(f"  {port:5}  LISTENING  PID={pid:6}  {pname:15}  owner=UNKNOWN")
+    except Exception as e:
+        print(f"  [ERROR] netstat failed: {e}")
+
+    # 2. 进程统计
+    print("\n### 进程统计")
+    for name in ['python.exe', 'pythonw.exe', 'node.exe', 'npm.cmd']:
+        try:
+            r = subprocess.run(['tasklist', '/FI', f'IMAGENAME eq {name}', '/FO', 'CSV'],
+                             capture_output=True, text=True, timeout=10)
+            count = r.stdout.count(name)
+            if count > 0:
+                print(f"  {name:15} count={count}")
+        except Exception:
+            pass
+
+    # 3. 孤儿检测 (端口在监听但不在 .service_status_<port>.json 中)
+    print("\n### 孤儿进程 (端口在监听但不受管理)")
+    status = _read_status()
+    managed_ports = set()
+    for svc_name, svc_info in SERVICES.items():
+        managed_ports.add(svc_info["port"])
+    for port in sorted(port_map.keys()):
+        if port not in managed_ports and 3000 <= port <= 3020:
+            _, pid = port_map[port]
+            pname = _get_process_name(pid)
+            print(f"  port={port}  PID={pid}  {pname}  (not in .service_status_<port>.json)")
+
+    # 4. hijack 统计
+    print("\n### Hijack 历史")
+    if status:
+        be_hijack = status.get("backend", {}).get("hijack_count", 0)
+        fe_hijack = status.get("frontend", {}).get("hijack_count", 0)
+        if be_hijack > 0 or fe_hijack > 0:
+            print(f"  Backend hijack_count: {be_hijack}")
+            print(f"  Frontend hijack_count: {fe_hijack}")
+            if be_hijack > 100 or fe_hijack > 50:
+                print("  [WARN] 极高 hijack 计数 → 端口被多个 Agent 反复占用, 考虑重置")
+        else:
+            print("  No hijack history")
+
+    # 5. service_status_<port>.json 健康检查
+    print("\n### per-port service status (M8)")
+    if status:
+        for svc_name in ("frontend", "backend"):
+            info = status.get(svc_name, {})
+            pid = info.get("pid")
+            port = info.get("port")
+            last_seen = info.get("last_seen", "?")
+            if pid:
+                alive = _is_pid_alive(pid)
+                port_ok = _check_port(port) if port else False
+                state = "RUNNING" if (alive and port_ok) else "DEAD"
+                print(f"  {svc_name}: pid={pid} port={port} last_seen={last_seen} state={state}")
+            else:
+                print(f"  {svc_name}: not in status file")
+    else:
+        print("  (empty)")
+
+    # 6. 僵尸 node.exe 检测
+    print("\n### 僵尸 node.exe")
+    try:
+        r = subprocess.run(['tasklist', '/FI', 'IMAGENAME eq node.exe', '/FO', 'CSV'],
+                         capture_output=True, text=True, timeout=10)
+        node_count = r.stdout.count('node.exe')
+        if node_count > 10:
+            print(f"  [WARN] {node_count} node.exe processes! Run: _wt_service.py clean-stale-node --apply")
+        elif node_count > 0:
+            print(f"  {node_count} node.exe (normal)")
+        else:
+            print("  0 node.exe")
+    except Exception:
+        pass
+
+    print("\n" + "=" * 64)
+    return 0
+
+
+def _get_process_name(pid: int) -> str:
+    """获取进程名"""
+    try:
+        r = subprocess.run(['tasklist', '/FI', f'PID eq {pid}', '/FO', 'CSV'],
+                         capture_output=True, text=True, timeout=5)
+        for line in r.stdout.split('\n'):
+            if str(pid) in line:
+                parts = line.strip().split('","')
+                if parts:
+                    return parts[0].strip('"')
+    except Exception:
+        pass
+    return "?"
+
+
+def _find_port_owner_in_ports_json(port: int) -> str | None:
+    """查找端口在 ports.json 中的 owner"""
+    ports_file = Path(r"D:\filework\.coord\ports.json")
+    if not ports_file.exists():
+        return None
+    try:
+        with open(ports_file, encoding='utf-8-sig') as f:
+            data = json.load(f)
+        for section in ("reserved", "persistent", "allocated"):
+            for port_str, info in data.get(section, {}).items():
+                try:
+                    if int(port_str) == port:
+                        return info.get("owner", f"{section}:?")
+                except ValueError:
+                    pass
+                for field in ("backend_port", "frontend_port"):
+                    if info.get(field) == port:
+                        return info.get("owner", f"{section}:?")
+    except Exception:
+        pass
+    return None
+
+
+def _is_pid_alive(pid: int) -> bool:
+    """检查 PID 是否存活"""
+    try:
+        r = subprocess.run(['tasklist', '/FI', f'PID eq {pid}', '/FO', 'CSV'],
+                         capture_output=True, text=True, timeout=5)
+        return str(pid) in r.stdout
+    except Exception:
+        return False
 
 
 def status_command():
@@ -501,9 +739,31 @@ def start_command(name: str = None):
             if sys.platform == "win32":
                 creation_flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
 
+            # 解析 start_cmd: 处理 .cmd/.bat/.ps1 等需要 shell 解释的命令
+            start_cmd = config["start_cmd"]
+            if start_cmd and start_cmd[0].lower().endswith(('.cmd', '.bat')):
+                # .cmd/.bat 必须通过 cmd.exe /c 启动
+                resolved = shutil.which(start_cmd[0])
+                if not resolved:
+                    # 再尝试在 PATH 中查找
+                    for p in os.environ.get('PATH', '').split(os.pathsep):
+                        candidate = Path(p) / start_cmd[0]
+                        if candidate.exists():
+                            resolved = str(candidate)
+                            break
+                if not resolved:
+                    resolved = start_cmd[0]  # fallback, 让 Popen 自行报错
+                start_cmd = ['cmd.exe', '/c', resolved] + start_cmd[1:]
+
+            # M4: 注入 services env (VITE_PORT, BACKEND_PORT 等)
+            svc_env = os.environ.copy()
+            for k, v in config.get("env", {}).items():
+                svc_env[k] = str(v)
+
             proc = subprocess.Popen(
-                config["start_cmd"],
+                start_cmd,
                 cwd=str(PROJECT_ROOT),
+                env=svc_env,
                 stdout=open(PROJECT_ROOT / "scripts" / "logs" / f"{config['service_name']}.out", "ab"),
                 stderr=open(PROJECT_ROOT / "scripts" / "logs" / f"{config['service_name']}.err", "ab"),
                 creationflags=creation_flags,
@@ -562,12 +822,28 @@ def main():
 
     command = sys.argv[1]
     target = None
-    if len(sys.argv) > 2:
-        arg = sys.argv[2]
-        if "fe" in arg or "front" in arg:
+    custom_port = None
+    # 解析剩余参数 (支持 --port N, 例如 restart_backend.py 委派时用)
+    for i, arg in enumerate(sys.argv[2:], start=2):
+        if arg in ("--port", "-p") and i + 1 < len(sys.argv):
+            try:
+                custom_port = int(sys.argv[i + 1])
+            except ValueError:
+                pass
+        elif arg.startswith("--port="):
+            try:
+                custom_port = int(arg.split("=", 1)[1])
+            except ValueError:
+                pass
+        elif "fe" in arg or "front" in arg:
             target = "frontend"
         elif "be" in arg or "back" in arg:
             target = "backend"
+
+    # 如果传了 --port, 临时覆盖 SERVICES 的端口 (用于 restart_backend.py 委派)
+    if custom_port is not None:
+        for svc_name in SERVICES:
+            SERVICES[svc_name]["port"] = custom_port
 
     if command == "status":
         return status_command()
@@ -581,6 +857,8 @@ def main():
         return stop_command(target)
     elif command == "restart":
         return restart_command(target)
+    elif command == "audit":
+        return audit_command()
     else:
         print(f"Unknown command: {command}")
         print(__doc__)

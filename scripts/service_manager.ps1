@@ -1,4 +1,4 @@
-# service_manager.ps1
+﻿# service_manager.ps1
 # 统一服务管理器 - PowerShell 版本
 # 用法: .\scripts\service_manager.ps1 [status|start|stop|restart|force-restart] [-Port <3010-3019>]
 # 用法: python scripts/service_manager.py [status|start|stop|restart] [--port <port>]
@@ -542,7 +542,9 @@ function Stop-Service($svcName) {
 
     $killed = $false
     if ($knownPid) {
-        try { taskkill /F /PID $knownPid 2>$null | Out-Null; Start-Sleep 2
+        try {
+            taskkill /F /PID $knownPid 2>$null | Out-Null
+            Start-Sleep 2
             if (-not (Test-Port $port)) { $killed = $true; Write-Log "  Stopped via PID $knownPid" }
         } catch {}
     }
@@ -550,7 +552,9 @@ function Stop-Service($svcName) {
     if (-not $killed) {
         $foundPid = Find-PidByPort $port
         if ($foundPid) {
-            try { taskkill /F /PID $foundPid 2>$null | Out-Null; Start-Sleep 1
+            try {
+                taskkill /F /PID $foundPid 2>$null | Out-Null
+                Start-Sleep 1
                 if (-not (Test-Port $port)) { Write-Log "  Stopped via port scan PID $foundPid" }
             } catch {}
         }
