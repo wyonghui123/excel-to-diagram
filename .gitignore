@@ -198,3 +198,5 @@ meta/architecture.db.pre_*
 /scripts/probe_*.py
 /scripts/list_*.py
 
+# Backup before restoring Phase 6 files (2026-08-01)
+test_helpers/scripts/_backup_2026_08_01_phase6/
