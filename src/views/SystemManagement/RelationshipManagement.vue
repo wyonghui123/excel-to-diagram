@@ -22,6 +22,42 @@
       </div>
     </template>
 
+    <!-- [FIX 2026-07-30 v2] chart-config slot: 注入 ChartMiniToolbar 到 GlobalToolbar
+         （图表类型/颜色分组/配色/备注/全屏）。
+         chartConfig 提升到本组件持有，让 GlobalToolbar 和 EmbeddedChartView 共享同一配置。
+         架构：通用模块（GlobalToolbar/MultiObjectManagementPage）零侵入，业务扩展只在 RelationshipManagement -->
+    <template #chart-config>
+      <ChartMiniToolbar
+        v-if="viewMode === 'chart'"
+        :chart-type="chartConfig.chartType"
+        :color-scheme="chartConfig.colorScheme"
+        :color-group-by="chartConfig.colorGroupBy"
+        :center-scope-highlight="chartConfig.centerScopeHighlight"
+        :show-annotation-icon="chartConfig.showAnnotationIcon"
+        :annotation-category-filter="chartConfig.annotationCategoryFilter"
+        :version-id="embeddedContext.versionId ?? null"
+        @update:chart-type="(v) => (chartConfig.chartType = v)"
+        @update:color-scheme="(v) => (chartConfig.colorScheme = v)"
+        @update:color-group-by="(v) => (chartConfig.colorGroupBy = v)"
+        @update:center-scope-highlight="(v) => (chartConfig.centerScopeHighlight = v)"
+        @update:show-annotation-icon="(v) => (chartConfig.showAnnotationIcon = v)"
+        @update:annotation-category-filter="(v) => (chartConfig.annotationCategoryFilter = v)"
+        @open-layout-settings="layoutDrawerVisible = true"
+      />
+    </template>
+
+    <!-- [Phase 2 v2.3 §5.0.2 ⑤] detailContent slot: 注入嵌入式图表视图 -->
+    <!-- [PHASE 6 COMPARE] 总是注入，由父组件 viewMode 控制显示 -->
+    <template #detailContent="{ context }">
+      <ArchDataChartSwitcher
+        :context="context"
+        :chart-config="chartConfig"
+        :layout-drawer-visible="layoutDrawerVisible"
+        @update:layout-drawer-visible="(v) => (layoutDrawerVisible = v)"
+        @node-click="handleChartNodeClick"
+      />
+    </template>
+
     <template #cell-source_bo_name="{ row }">
       <div class="bo-cell">
         <span class="bo-name">{{ row.source_bo_name }}</span>
@@ -48,8 +84,11 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, reactive, computed } from 'vue'
+import { ElMessage } from 'element-plus'
 import { MultiObjectManagementPage } from '@/components/common/MultiObjectManagementPage'
+import ArchDataChartSwitcher from '@/views/SystemManagement/components/ArchDataChart/ArchDataChartSwitcher.vue'
+import ChartMiniToolbar from '@/views/systemmanagement/components/archdatachart/ChartMiniToolbar.vue'
 
 defineOptions({ name: 'RelationshipManagement' })
 
@@ -60,16 +99,48 @@ const objectTypes = ['domain', 'sub_domain', 'service_module', 'business_object'
 const pageOptions = { defaultTab: 'relationship' }
 const pageRef = ref(null)
 
+// [FIX 2026-07-30 v2] chartConfig 提升到本组件持有，
+// 让 GlobalToolbar（chart-config slot）和 ArchDataChartSwitcher/EmbeddedChartView 共享同一份配置
+const chartConfig = reactive({
+  chartType: 'businessObject',
+  colorScheme: 'default',
+  colorGroupBy: 'domain',
+  centerScopeHighlight: true,
+  showAnnotationIcon: false,
+  annotationCategoryFilter: [],
+  layoutEngine: 'elk',
+  layoutControl: { groups: [], overallDirection: 'TB', engine: 'elk', enabled: false },
+  annotationConfig: null
+})
+
+// [FIX 2026-07-31] 布局设置抽屉可见性：ChartMiniToolbar 的"布局设置"按钮触发
+const layoutDrawerVisible = ref(false)
+
+
+// [FIX 2026-07-30 v2] viewMode 通过 MultiObjectManagementPage.expose({ viewMode }) 暴露。
+// 用 computed 包装，让模板中可以直接用 viewMode 而无需 pageRef.value.viewMode。
+const viewMode = computed(() => pageRef.value?.viewMode || 'list')
+
+// embeddedChartContext 包含 versionId/scopeIds/chartData 等（来自 MOMP.expose）
+const embeddedContext = computed(() => pageRef.value?.embeddedChartContext || {})
+
 function getCategoryTagType(categoryType) {
   return ''
 }
 
 function handleToolbarAction(action) {
-  switch (action) {
-    case 'refresh':
-      pageRef.value?.refresh()
-      break
+  // 兼容旧式 action string 和新式 { type, viewMode } 对象
+  const actionType = typeof action === 'string' ? action : action?.type
+  if (actionType === 'refresh') {
+    pageRef.value?.refresh()
   }
+  // 'view-mode-change' 由 MultiObjectManagementPage 内部处理，无需在此响应
+}
+
+// [A8 2026-07-30] 嵌入式图表节点点击: 简单提示，后续可扩展为打开详情抽屉
+function handleChartNodeClick(payload) {
+  const name = payload?.node?.name || payload?.name || payload?.id || '节点'
+  ElMessage?.info?.(`点击节点: ${name}`) || console.info('[A8] chart node click:', name)
 }
 </script>
 

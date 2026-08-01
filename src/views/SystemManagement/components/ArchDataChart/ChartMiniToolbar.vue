@@ -7,17 +7,16 @@
     - 颜色方案选择
     - 颜色分组维度选择（领域 / 子领域 / 服务模块）
     - 备注图标显示开关
-    - 全屏按钮（跳转到 /archdata-chart）
+    - 布局设置按钮（侧边抽屉打开布局控制面板）
 
   契约：见 chart-data-flow-and-interaction-upgrade.md §5.10.3 ③
 
-  Phase 2 实现：
-    - 简化版: 4 个 el-select 下拉 + 1 个全屏按钮
-    - v-model 双向绑定 chartConfig 各字段
-  Phase 3 升级计划：
-    - 增加 layoutEngine / direction / centerScope 配置
-    - 增加"配色预览"小色块
+  [FIX 2026-07-31] 移除全屏按钮，改为布局设置按钮：
+    - 全屏跳转功能已废弃（嵌入式图表就地展示，不再跳 /archdata-chart）
+    - 新增"布局设置"按钮，点击后侧边打开 LayoutControlPanel 抽屉
+    - 回溯修复：LayoutControlPanel 之前在 EmbeddedChartView 内有引用但抽屉未渲染（功能丢失）
 -->
+
 <template>
   <div class="chart-mini-toolbar">
     <!-- 图表类型 -->
@@ -25,7 +24,7 @@
       :model-value="chartType"
       size="small"
       class="cmt-select"
-      @update:model-value="handleUpdate('chart-type', $event)"
+      @update:model-value="(v) => emit('update:chartType', v)"
     >
       <template #prefix>
         <span class="cmt-label">图表类型</span>
@@ -39,14 +38,17 @@
       :model-value="colorGroupBy"
       size="small"
       class="cmt-select"
-      @update:model-value="handleUpdate('color-group-by', $event)"
+      @update:model-value="(v) => emit('update:colorGroupBy', v)"
     >
       <template #prefix>
         <span class="cmt-label">颜色分组</span>
       </template>
+      <!-- [FIX 2026-07-27] colorGroupBy 值必须与老图表 (StepConfig.vue line 258-261 / CenterDomainSelect.vue / ServiceModuleConfig.vue) 一致
+           老图表使用驼峰命名 'subDomain' / 'serviceModule'，下划线写法 ('sub_domain' / 'service_module')
+           会让 colorMapping 的 if 分支全部 miss，落到 else 当作 'domain' 处理 → 颜色分组切换无效 -->
       <el-option label="按领域" value="domain" />
-      <el-option label="按子领域" value="sub_domain" />
-      <el-option label="按服务模块" value="service_module" />
+      <el-option label="按子领域" value="subDomain" />
+      <el-option label="按服务模块" value="serviceModule" />
     </el-select>
 
     <!-- 颜色方案 -->
@@ -54,31 +56,87 @@
       :model-value="colorScheme"
       size="small"
       class="cmt-select cmt-select--short"
-      @update:model-value="handleUpdate('color-scheme', $event)"
+      @update:model-value="(v) => emit('update:colorScheme', v)"
     >
       <template #prefix>
         <span class="cmt-label">配色</span>
       </template>
+      <!-- [FIX 2026-07-27] colorScheme 值必须与老图表一致
+           老图表 StepConfig.vue line 245-253 的 COLOR_SCHEMES 表里使用 'vibrant' / 'pastel'
+           之前用 'high-contrast' / 'soft' 会触发 fallback 到 'default' → 用户看不到配色变化 -->
       <el-option label="默认" value="default" />
-      <el-option label="高对比" value="high-contrast" />
-      <el-option label="柔和" value="soft" />
+      <el-option label="鲜艳" value="vibrant" />
+      <el-option label="柔和" value="pastel" />
     </el-select>
 
-    <!-- 备注图标 -->
+    <!-- [NEW 2026-07-31] 区分中心范围下拉 (centerScopeHighlight 切换)
+         用户需求: 在 toolbar 增加"区分中心范围"下拉, 默认 true (区分)
+         - true (区分): centerScope 内的 BOs 会被高亮 (但当 colorGroupBy 活跃时不覆盖分组色)
+         - false (不区分): 所有节点按分组色渲染, 不做 centerScope 高亮 -->
+    <el-select
+      :model-value="centerScopeHighlight ? 'yes' : 'no'"
+      size="small"
+      class="cmt-select cmt-select--short"
+      @update:model-value="(v) => emit('update:centerScopeHighlight', v === 'yes')"
+    >
+      <template #prefix>
+        <span class="cmt-label">中心范围</span>
+      </template>
+      <el-option label="区分" value="yes" />
+      <el-option label="不区分" value="no" />
+    </el-select>
+
+    <!-- [FIX 2026-07-31] 备注类型多选下拉 (与老版本 CenterDomainSelect/StepConfig 一致)
+         - 选项从 enum_types.annotation_category 加载 (与 CenterDomainSelect 同样入口 EnumService)
+         - 默认空 = 不过滤 (向后兼容, 显示全部备注)
+         - 与老的"显示备注图标"按钮合并: 移除按钮 (v-model 改为 icon switch)
+         - 设计意图: 用户期望 toolbar 直接控制"展示哪些类型的备注", 与配置阶段的"备注类型过滤"对等 -->
+    <el-select
+      :model-value="annotationCategoryFilter"
+      multiple
+      collapse-tags
+      collapse-tags-tooltip
+      :max-collapse-tags="2"
+      filterable
+      clearable
+      placeholder="备注类型 (全选=全部)"
+      size="small"
+      class="cmt-select cmt-select--annotation"
+      :empty-values="false"
+      @update:model-value="(v) => emit('update:annotationCategoryFilter', v)"
+    >
+      <template #prefix>
+        <span class="cmt-label">备注类型</span>
+      </template>
+      <el-option
+        v-for="opt in annotationOptions"
+        :key="opt.value"
+        :label="opt.label"
+        :value="opt.value"
+      />
+      <div v-if="annotationOptions.length === 0" class="cmt-empty">
+        暂无配置
+      </div>
+    </el-select>
+
+    <!-- [FIX 2026-07-31] 备注图标显示按钮 (保留, 控制是否在节点上画 icon)
+         - filter 空 = 不过滤 = 不画 icon (避免节点被占满)
+         - filter 非空 = 在选中类型的备注上画 icon + 序号面板 -->
     <el-tooltip content="显示备注图标" placement="bottom" :teleported="false">
       <el-button
         size="small"
         :type="showAnnotationIcon ? 'primary' : 'default'"
         :icon="ChatDotRound"
-        @click="handleUpdate('show-annotation-icon', !showAnnotationIcon)"
+        :disabled="annotationCategoryFilter.length === 0"
+        @click="emit('update:showAnnotationIcon', !showAnnotationIcon)"
       />
     </el-tooltip>
 
     <div class="cmt-spacer"></div>
 
-    <!-- 全屏按钮 -->
-    <el-tooltip content="在新页面打开（全屏）" placement="bottom" :teleported="false">
-      <el-button size="small" :icon="FullScreen" @click="handleOpenFullscreen" />
+    <!-- 布局设置按钮：侧边打开 LayoutControlPanel 抽屉 -->
+    <el-tooltip content="布局设置" placement="bottom" :teleported="false">
+      <el-button size="small" :icon="SetUp" @click="emit('open-layout-settings')" />
     </el-tooltip>
   </div>
 </template>
@@ -92,30 +150,58 @@
  *   - 通过 v-model 与父组件 EmbeddedChartView 双向绑定
  *   - 仅作为 UI 层，触发 update 事件
  */
-import { ChatDotRound, FullScreen } from '@element-plus/icons-vue'
+import { ref, onMounted } from 'vue'
+import { ChatDotRound, SetUp } from '@element-plus/icons-vue'
+import EnumService from '@/services/enumService'
 
 const props = defineProps({
   chartType: { type: String, required: true },
   colorScheme: { type: String, required: true },
   colorGroupBy: { type: String, required: true },
-  showAnnotationIcon: { type: Boolean, default: false }
+  centerScopeHighlight: { type: Boolean, default: true },
+  showAnnotationIcon: { type: Boolean, default: false },
+  // [FIX 2026-07-31] 备注类型多选 (来自 chartConfig.annotationCategoryFilter)
+  annotationCategoryFilter: { type: Array, default: () => [] },
+  // [FIX 2026-07-31] 版本号 - 切换版本时重新加载 enum
+  versionId: { type: [Number, String], default: null }
 })
 
 const emit = defineEmits([
   'update:chart-type',
   'update:color-scheme',
   'update:color-group-by',
+  'update:center-scope-highlight',
   'update:show-annotation-icon',
-  'open-fullscreen'
+  'update:annotation-category-filter',
+  'open-layout-settings'
 ])
 
-function handleUpdate(field, value) {
-  emit(`update:${field}`, value)
+// [FIX 2026-07-31] 加载 enum_types.annotation_category 选项
+//   与 CenterDomainSelect/StepConfig 一致入口 (EnumService.loadOptions)
+const annotationOptions = ref([])
+const loadingAnnotations = ref(false)
+
+async function loadAnnotationOptions() {
+  if (loadingAnnotations.value) return
+  loadingAnnotations.value = true
+  try {
+    const result = await EnumService.loadOptions('annotation_category', { cache: true, throwError: false })
+    annotationOptions.value = (result || []).map(item => ({
+      value: item.value || item.code,
+      label: item.label || item.name || item.code,
+      count: item.count
+    }))
+  } catch (e) {
+    console.warn('[ChartMiniToolbar] 加载 annotation_category enum 失败:', e)
+    annotationOptions.value = []
+  } finally {
+    loadingAnnotations.value = false
+  }
 }
 
-function handleOpenFullscreen() {
-  emit('open-fullscreen')
-}
+onMounted(() => {
+  loadAnnotationOptions()
+})
 </script>
 
 <style lang="scss" scoped>
@@ -127,14 +213,44 @@ function handleOpenFullscreen() {
   background: var(--color-bg-container, #fff);
   border-bottom: 1px solid var(--color-border, #e4e7ed);
   flex-shrink: 0;
+  min-height: 48px;  // [FIX 2026-07-31] 固定 toolbar 高度, 多选下拉不允许撑开
+  max-height: 48px;
+  height: 48px;
+  overflow: hidden;
 }
 
 .cmt-select {
   width: 180px;
+  flex-shrink: 0;
 }
 
 .cmt-select--short {
   width: 120px;
+}
+
+// [FIX 2026-07-31] 备注类型多选下拉: 限制宽度, 不撑高 toolbar
+.cmt-select--annotation {
+  width: 200px;
+  max-width: 200px;
+
+  :deep(.el-select__wrapper) {
+    min-height: 28px;
+    max-height: 28px;
+    padding: 2px 8px;
+  }
+  // 让 el-select__selection (内部 tag 容器) 不撑高
+  :deep(.el-select__selection) {
+    max-height: 24px;
+    overflow: hidden;
+    flex-wrap: nowrap;
+  }
+  :deep(.el-select__selected-item) {
+    max-height: 22px;
+    line-height: 20px;
+  }
+  :deep(.el-select__placeholder) {
+    line-height: 24px;
+  }
 }
 
 .cmt-label {
@@ -148,5 +264,12 @@ function handleOpenFullscreen() {
 
 .cmt-spacer {
   flex: 1;
+}
+
+.cmt-empty {
+  padding: 8px;
+  font-size: 12px;
+  color: var(--color-text-tertiary, #909399);
+  text-align: center;
 }
 </style>

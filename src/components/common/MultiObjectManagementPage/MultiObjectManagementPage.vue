@@ -4,9 +4,32 @@
       ref="globalToolbarRef"
       :compact="true"
       :action-disabled="actionDisabledMap"
+      :hide-chart-button="true"
       @change="handleToolbarChange"
       @action="onGlobalAction"
-    />
+    >
+      <!-- [A7 2026-07-30] 嵌入式图表 toggle 按钮（默认启用，无需 flag）
+           替代老的"图表视图"按钮：list ↔ chart 就地切换，不跳路由 -->
+      <template #actions>
+        <el-tooltip :content="viewMode === 'chart' ? '切回列表视图' : '就地切换为图表视图'" placement="bottom" :teleported="false" popper-class="app-tooltip-popper">
+          <el-button
+            size="small"
+            :icon="TrendCharts"
+            :disabled="!page.canShowChart"
+            class="gt-btn-chart-toggle"
+            :class="{ 'is-active': viewMode === 'chart' }"
+            @click="toggleEmbeddedView"
+          >
+            {{ viewMode === 'chart' ? '列表展示' : '图表展示' }}
+          </el-button>
+        </el-tooltip>
+      </template>
+      <!-- [FIX 2026-07-31] chart-config slot 透传: 必须用 <template #chart-config> 包裹
+           才能正确传给 GlobalToolbar 的 chart-config slot（而非 default slot）
+           之前 <slot name="chart-config" /> 裸写，导致内容落入 GlobalToolbar default slot，
+           GlobalToolbar 的 <slot name="chart-config" /> 渲染为空 → ChartMiniToolbar 不显示 -->
+      <template #chart-config><slot name="chart-config" /></template>
+    </GlobalToolbar>
 
     <MasterDetailLayout
       sidebar-width="320px"
@@ -38,35 +61,45 @@
       <template #detail>
         <div class="momp-detail-content">
           <template v-if="page.versionContext.selectedVersionId">
-            <div class="momp-tabs-row">
-              <el-tabs v-if="page.tabs && page.tabs.length" v-model="page.activeTab" class="momp-tabs" @tab-change="$emit('tabChange', $event)">
-                <el-tab-pane
-                  v-for="tab in page.tabs"
-                  :key="tab?.name"
-                  :label="tab?.label"
-                  :name="tab?.name"
-                />
-              </el-tabs>
-              <slot name="tabsExtra" :context="tabsExtraContext" />
-            </div>
+            <!-- [FIX 2026-07-30] chart 视图下隐藏 tabs/list，只显示 detailContent slot -->
+            <template v-if="viewMode === 'list'">
+              <div class="momp-tabs-row">
+                <el-tabs v-if="page.tabs && page.tabs.length" v-model="page.activeTab" class="momp-tabs" @tab-change="$emit('tabChange', $event)">
+                  <el-tab-pane
+                    v-for="tab in page.tabs"
+                    :key="tab?.name"
+                    :label="tab?.label"
+                    :name="tab?.name"
+                  />
+                </el-tabs>
+                <slot name="tabsExtra" :context="tabsExtraContext" />
+              </div>
 
-            <template v-for="tab in page.tabs" :key="tab.name">
-              <MetaListPage
-                v-if="visitedTabs.has(tab.name)"
-                v-show="page.activeTab === tab.name"
-                :ref="el => { if (el) metaListPageRefs[tab.name] = el }"
-                :object-type="tab.name"
-                :initial-filters="page.combinedFilters"
-                :options="listOptions"
-                :enable-detail="true"
-                :enable-auto-crud="true"
-                @row-dblclick="(payload) => handleRowDblClick(tab.name, payload)"
-              >
-                <template v-for="(_, slotName) in $slots" :key="slotName" #[slotName]="slotProps">
-                  <slot :name="slotName" v-bind="slotProps" />
-                </template>
-              </MetaListPage>
+              <template v-for="tab in page.tabs" :key="tab.name">
+                <MetaListPage
+                  v-if="visitedTabs.has(tab.name)"
+                  v-show="page.activeTab === tab.name"
+                  :ref="el => { if (el) metaListPageRefs[tab.name] = el }"
+                  :object-type="tab.name"
+                  :initial-filters="page.combinedFilters"
+                  :options="listOptions"
+                  :enable-detail="true"
+                  :enable-auto-crud="true"
+                  @row-dblclick="(payload) => handleRowDblClick(tab.name, payload)"
+                >
+                  <template v-for="(_, slotName) in $slots" :key="slotName" #[slotName]="slotProps">
+                    <slot :name="slotName" v-bind="slotProps" />
+                  </template>
+                </MetaListPage>
+              </template>
             </template>
+
+            <!-- [A7 2026-07-30] 嵌入式图表视图: viewMode='chart' 时渲染业务方注入的 detailContent slot
+                 context 提供 chart 需要的 scopeIds/versionId/chartData (hierarchyFilter 等)
+                 [FIX 2026-07-30] chart 视图独占整个 detail 区域，不显示 list tabs -->
+            <div v-if="viewMode === 'chart'" class="momp-chart-mode">
+              <slot name="detailContent" :context="embeddedChartContext" />
+            </div>
           </template>
           <div v-else class="momp-empty-detail">
             <el-icon :size="48"><Connection /></el-icon>
@@ -206,7 +239,7 @@ import { ref, watch, computed, reactive, onMounted, onActivated, provide } from 
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useTabStore } from '@/stores/tabStore'
 import { useChartArchDataStore } from '@/stores/chartArchDataStore'
-import { FolderOpened, Connection } from '@element-plus/icons-vue'
+import { FolderOpened, Connection, TrendCharts } from '@element-plus/icons-vue'
 import { MasterDetailLayout } from '@/components/common/MasterDetailLayout'
 import { MetaListPage } from '@/components/common/MetaListPage'
 import { RelationScopeTree } from '@/components/common/RelationScopeTree'
@@ -249,6 +282,39 @@ const initialRelationCodes = ref([])
 const scopeTreeKey = ref(0)  // 用于返回图表后强制 RelationScopeTree 重新挂载, 恢复勾选
 const sidebarCollapsed = ref(false)
 
+// [A7 2026-07-30] 嵌入式图表视图 toggle 状态
+//   - viewMode: 'list' | 'chart'，切换 detail 区显示 MetaListPage 还是 detailContent slot
+//   - 默认 'list'，嵌入式入口是默认行为，无 flag
+const viewMode = ref('list')
+
+function toggleEmbeddedView() {
+  if (!page.canShowChart) return
+  if (viewMode.value === 'chart') {
+    viewMode.value = 'list'
+    return
+  }
+  // 进入 chart 模式前保存 list 状态 (复用 saveStateForDiagram 兼容老路径)
+  try { page.saveStateForDiagram() } catch (e) { console.warn('[toggleEmbeddedView] saveStateForDiagram failed:', e) }
+  viewMode.value = 'chart'
+}
+
+// [A7 2026-07-30] 嵌入式图表 context: 传给业务方 detailContent slot
+//   - versionId: 当前选中的版本
+//   - scopeIds: useMultiObjectPage.scopeIds（树勾选状态）
+//   - chartData: { hierarchyFilter, relationTypeFilter, relationIds, ... }
+//                 (复用 handleShowChart() 返回的同结构，老路径 / 新路径都用)
+//   - viewMode: 当前模式（业务方用于显示返回按钮）
+const embeddedChartContext = computed(() => ({
+  // [FIX 2026-07-30] useMultiObjectPage 返回的是原始对象（非 ref），
+  //   reactive(page) 会自动 depth reactive 包裹；访问 selectedVersionId 时已经 unwrap，
+  //   再加 .value 会变 undefined。直接读即可。
+  versionId: page.versionContext?.selectedVersionId,
+  productId: page.versionContext?.selectedProductId,
+  scopeIds: page.scopeIds,
+  chartData: page.handleShowChart ? (page.handleShowChart() || {}) : {},
+  viewMode: viewMode.value
+}))
+
 const coordinator = useRefreshCoordinator()
 provide('refreshCoordinator', coordinator)
 setRefreshCoordinator(coordinator)
@@ -257,6 +323,52 @@ const page = reactive(useMultiObjectPage(props.objectTypes, props.options, coord
 
 function handleSidebarCollapse(collapsed) {
   sidebarCollapsed.value = collapsed
+}
+
+// [FIX 2026-07-31] dev shortcut: 支持 URL shortcut=1 参数 + scope JSON 跳过 UI 选择直接进入 EmbeddedChartView
+//   设计目标: 让 AI/开发排查图表 bug 时 5 秒直达 EmbeddedChartView, 不必手动选产品/版本/勾选 scope 树/点图表按钮。
+//   用法: /system/archdata?shortcut=1&productCode=TTTTT000&versionCode=V11&scope=<base64JSON>
+//   scope JSON 格式 (可选): {"business_object":[boIds], "service_module":[smIds], "sub_domain":[sdIds], "domain":[dIds], "relation_codes":[...]}
+//   仅在 dev 环境启用 (import.meta.env.DEV); 生产构建短路掉, 不影响正式流程。
+//   注意: productCode/versionCode 由 useVersionContext.restoreContext 处理 (在 page 创建之前);
+//         这里只负责 scope 自动勾选 + toggle chart view。
+async function tryApplyShortcut() {
+  if (!import.meta.env.DEV) return
+  const params = new URLSearchParams(window.location.search)
+  if (params.get('shortcut') !== '1') return
+  console.log('[shortcut] tryApplyShortcut entered, canShowChart=', page.canShowChart)
+  if (!page.canShowChart) {
+    console.warn('[shortcut] canShowChart=false, 跳过 chart shortcut (等待 scope 勾选后再试)')
+    return
+  }
+
+  // scope 参数: base64(JSON), 兼容 ?scope=eyJidXNpbmVzc19...
+  const scopeRaw = params.get('scope')
+  if (scopeRaw) {
+    try {
+      const scopeJson = JSON.parse(atob(scopeRaw))
+      // scopeJson: { business_object:[ids], service_module:[ids], sub_domain:[ids], domain:[ids], relation_codes:[...] }
+      const scopePayload = {}
+      if (Array.isArray(scopeJson.domain)) scopePayload.selectedDomainIds = scopeJson.domain
+      if (Array.isArray(scopeJson.sub_domain)) scopePayload.selectedSubDomainIds = scopeJson.sub_domain
+      if (Array.isArray(scopeJson.service_module)) scopePayload.selectedServiceModuleIds = scopeJson.service_module
+      if (Array.isArray(scopeJson.business_object)) scopePayload.selectedBusinessObjectIds = scopeJson.business_object
+      if (Array.isArray(scopeJson.relation_codes)) scopePayload.selectedRelationCodes = scopeJson.relation_codes
+      if (Array.isArray(scopeJson.relation_ids)) scopePayload.selectedRelationIds = scopeJson.relation_ids
+      if (Array.isArray(scopeJson.relation_categories)) scopePayload.selectedCategoryTypes = scopeJson.relation_categories
+      page.handleScopeChange(scopePayload)
+    } catch (e) {
+      console.warn('[shortcut] scope JSON 解析失败, 忽略 scope 参数:', e)
+    }
+  }
+
+  // 等 canShowChart 在 scope 应用后变 true（如果有 scope 参数）
+  await new Promise(resolve => setTimeout(resolve, 200))
+
+  if (viewMode.value !== 'chart' && page.canShowChart) {
+    toggleEmbeddedView()
+    console.log('[shortcut] 已进入 EmbeddedChartView')
+  }
 }
 
 onMounted(() => {
@@ -273,7 +385,7 @@ onMounted(() => {
   //   必须让 URL 参数优先于 sessionStorage 快照，否则会被陈旧快照覆盖导致版本丢失。
   //   此时跳过 restoreStateFromDiagram() 中的 versionId/productId 恢复分支，
   //   仅保留 activeTab / scopeIds / filters 等"展示状态"恢复。
-  const urlHasProductContext = !!(route?.query?.productId || route?.query?.versionId)
+  const urlHasProductContext = !!(route?.query?.productId || route?.query?.versionId || route?.query?.productCode || route?.query?.versionCode)
   const restored = urlHasProductContext
     ? page.restoreStateFromDiagram({ skipVersionRestore: true })
     : page.restoreStateFromDiagram()
@@ -296,6 +408,11 @@ onMounted(() => {
       }
     }, 0)
   }
+
+  // [FIX 2026-07-31] shortcut: 等 versionContext 异步初始化完成后再 tryApplyShortcut
+  setTimeout(() => {
+    tryApplyShortcut().catch(e => console.warn('[shortcut] 应用失败:', e))
+  }, 600)
 })
 
 // [FR-005] SAP Fiori iAppState 模式：路由切回时保留状态，不自动刷新
@@ -462,7 +579,10 @@ defineExpose({
     page.clearScope()
     scopeTreeRef.value?.clear()
   },
-  page
+  page,
+  // [FIX 2026-07-30 v2] 暴露 viewMode 让业务方（如 RelationshipManagement）能根据当前模式
+  // 条件渲染 GlobalToolbar 的 chart-config slot（避免 list 视图显示图表按钮）
+  viewMode
 })
 
 // [FR-001] Per-tab MetaListPage: 每个 tab 独立实例，v-show 保留状态
@@ -503,6 +623,46 @@ watch(() => page.combinedFilters, (newFilters) => {
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
+}
+
+/* [A7 2026-07-30] 嵌入式图表视图占满 detail 区 */
+.momp-chart-mode {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* [A7 2026-07-30] 嵌入式图表 toggle 按钮激活态高亮（与 chart mode 一致样式） */
+.gt-btn-chart-toggle {
+  width: auto !important;
+  min-width: 90px;
+  padding: 4px 12px !important;
+  background: rgba(234, 88, 12, 0.08) !important;
+  border: 1px solid var(--color-primary, #ea580c) !important;
+  color: var(--color-primary, #ea580c) !important;
+  font-weight: 500;
+  gap: 4px;
+
+  .el-icon {
+    font-size: 14px;
+  }
+
+  &:hover:not(:disabled) {
+    background: var(--color-primary, #ea580c) !important;
+    color: #fff !important;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  &.is-active {
+    background: var(--color-primary, #ea580c) !important;
+    color: #fff !important;
+  }
 }
 
 .momp-tabs-row {
