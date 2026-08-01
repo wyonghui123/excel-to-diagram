@@ -297,8 +297,21 @@ function createVersionContext() {
     const urlVersionId = typeof window !== 'undefined'
       ? new URLSearchParams(window.location.search).get('versionId')
       : null
+    // [FIX 2026-08-01] 加 productCode/versionCode 支持 (dev shortcut 链路)
+    //   背景: shortcut_chart_view (test_helpers/browser_auth_cli.py) 默认传 product_code / version_code
+    //         (业务侧常用代码 'TTTTT000'/'V11' 而非数字 ID, 数字 ID 每次 seed 后会变, 不稳定)
+    //   之前只支持 productId/versionId (int), 导致快捷链路的 URL 参数被忽略,
+    //   EmbeddedChartView 不会渲染 (versionContext 未设置).
+    //   修复: 当 urlProductId 不存在但 urlProductCode 存在时, fetchProducts 后按 code 匹配;
+    //         urlVersionCode 同理.
+    const urlProductCode = typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search).get('productCode')
+      : null
+    const urlVersionCode = typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search).get('versionCode')
+      : null
 
-    if (urlProductId || urlVersionId) {
+    if (urlProductId || urlVersionId || urlProductCode || urlVersionCode) {
       await fetchProducts()
 
       let product = null
@@ -309,16 +322,41 @@ function createVersionContext() {
           //   之前未 await，导致下面 find version 时 versions 为空
           await selectProduct(product)
         }
+      } else if (urlProductCode) {
+        // [FIX 2026-08-01] 按 code 匹配 (dev shortcut 链路)
+        product = products.value.find(p => p.code === urlProductCode)
+        if (product) {
+          await selectProduct(product)
+        } else {
+          console.warn('[useVersionContext] Product not found for productCode from URL:', urlProductCode,
+            'available codes:', products.value.map(p => p.code).filter(Boolean))
+        }
       }
 
-      if (urlVersionId) {
+      // 解析目标 versionId: 优先级 versionId (int) > versionCode (str, 在已选 product 下查表)
+      //   [FIX 2026-08-01] versionCode 同时匹配 code 和 name:
+      //     实际数据集中 version.code 普遍为 null, 业务侧用 name (如 'V11') 作为版本标识。
+      //     若只匹配 code, shortcut 链路 URL 参数 versionCode=V11 永远找不到。
+      //     现在: 先按 code 精确匹配, 找不到则回退到 name 匹配。
+      let targetVersionId = urlVersionId ? Number(urlVersionId) : null
+      if (!targetVersionId && urlVersionCode && product) {
+        const matched = versions.value.find(v => v.code === urlVersionCode)
+          || versions.value.find(v => v.name === urlVersionCode)
+        if (matched) {
+          targetVersionId = matched.id
+        } else {
+          console.warn('[useVersionContext] Version not found for versionCode from URL:', urlVersionCode,
+            'available codes/names:', versions.value.map(v => v.code || v.name).filter(Boolean))
+        }
+      }
+
+      if (targetVersionId) {
         // [FIX 2026-06-17] selectProduct 已 await fetchVersions，无需重复调用
         //   仅当 product 不存在时（只有 versionId 没有 productId）才单独 fetchVersions
         if (!product && urlProductId) {
           // product 未找到但 urlProductId 存在，无法 fetchVersions
           console.warn('[useVersionContext] Product not found for productId from URL:', urlProductId)
         }
-        const targetVersionId = Number(urlVersionId)
         let version = versions.value.find(v => v.id === targetVersionId)
         if (!version && product) {
           try {
@@ -335,7 +373,7 @@ function createVersionContext() {
         if (version) {
           selectVersion(version)
         } else {
-          console.warn('[useVersionContext] Version not found for versionId from URL:', urlVersionId, 'available versions:', versions.value.map(v => ({ id: v.id, name: v.name })))
+          console.warn('[useVersionContext] Version not found for versionId from URL:', targetVersionId, 'available versions:', versions.value.map(v => ({ id: v.id, name: v.name })))
         }
       }
       return

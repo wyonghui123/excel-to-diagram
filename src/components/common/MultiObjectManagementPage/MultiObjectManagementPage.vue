@@ -336,13 +336,31 @@ async function tryApplyShortcut() {
   if (!import.meta.env.DEV) return
   const params = new URLSearchParams(window.location.search)
   if (params.get('shortcut') !== '1') return
-  console.log('[shortcut] tryApplyShortcut entered, canShowChart=', page.canShowChart)
-  if (!page.canShowChart) {
-    console.warn('[shortcut] canShowChart=false, 跳过 chart shortcut (等待 scope 勾选后再试)')
+  // [FIX 2026-08-01] 鸡生蛋修复: 之前只在 onMounted+600ms 后调一次, 若那时
+  //   versionContext 还未加载完 (canShowChart=false), tryApplyShortcut 直接 return
+  //   → scope 永不应用 → 永久停留在 list 视图.
+  //   现在分两步:
+  //     1) 等 versionContext 加载完 (最多 6s, retry 200ms)
+  //     2) 应用 scope (不管 canShowChart - scope 应用后 canShowChart 才变 true)
+  //     3) 再 toggle view
+  //   [FIX 2026-08-01] 加 productCode/versionCode 支持在 useVersionContext.restoreContext 中处理
+  //     (见 useVersionContext.js [FIX 2026-08-01]), 这里只负责 scope + toggle.
+  //   [FIX 2026-08-01] page.versionContext 通过 reactive() 包装, 内部 refs 已 auto-unwrap,
+  //     所以 selectedVersionId 直接是 number 不是 Ref (无需 .value).
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const vid = page.versionContext?.selectedVersionId
+    if (vid) break
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
+  const vid = page.versionContext?.selectedVersionId
+  console.log('[shortcut] tryApplyShortcut entered, versionContext.selectedVersionId=', vid)
+  if (!vid) {
+    console.warn('[shortcut] versionContext 未加载 (6s 内无 selectedVersionId), productCode/versionCode 可能错误')
     return
   }
 
   // scope 参数: base64(JSON), 兼容 ?scope=eyJidXNpbmVzc19...
+  // [FIX 2026-08-01] 不再以 canShowChart 为前置: scope 应用后才会有 hasScopeSelection=true
   const scopeRaw = params.get('scope')
   if (scopeRaw) {
     try {
@@ -362,9 +380,10 @@ async function tryApplyShortcut() {
     }
   }
 
-  // 等 canShowChart 在 scope 应用后变 true（如果有 scope 参数）
-  await new Promise(resolve => setTimeout(resolve, 200))
+  // 等 scope 应用完成 + canShowChart 变 true
+  await new Promise(resolve => setTimeout(resolve, 500))
 
+  console.log('[shortcut] after scope, canShowChart=', page.canShowChart)
   if (viewMode.value !== 'chart' && page.canShowChart) {
     toggleEmbeddedView()
     console.log('[shortcut] 已进入 EmbeddedChartView')
