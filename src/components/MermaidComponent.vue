@@ -53,6 +53,7 @@ import { AppIcon } from './common/AppIcon'
 import { useDiagramConfigStore } from '../stores/diagramConfigStore.js'
 
 import { useMermaidConfig } from '../composables/useMermaid/config/useMermaidConfig.js'
+import { installDiagnosticsToWindow, useDiagnostics } from '../composables/useMermaid/core/useDiagnostics.js'
 import { useInteraction } from '../composables/useMermaid/interaction/useInteraction.js'
 import { useBusinessObjectSyntax, useServiceModuleSyntax } from '../composables/useMermaid/syntax/index.js'
 import { useSvgStyle } from '../composables/useMermaid/style/index.js'
@@ -120,6 +121,7 @@ export default {
   setup(props, { emit }) {
     const { initializeMermaid } = useMermaidConfig()
     const interaction = useInteraction()
+    const diag = useDiagnostics()  // [FIX 2026-08-01] 渲染埋点 — chart_diag 一键读取耗时
     const svgStyle = useSvgStyle()
     const tooltip = useTooltip()
     const colors = useMermaidColors()
@@ -182,7 +184,11 @@ export default {
     let linkColorMappings = []
     let lastColorGroupBy = 'domain'
     let lastCustomColors = null
+    // [FIX 2026-07-31] 追踪 colorScheme / centerScopeHighlight 以支持增量更新
+    let lastColorScheme = null
+    let lastCenterScopeHighlight = null
     let isFirstRender = true
+    let lastDiagramType = null
 
     /**
      * 关键修复 v5：全屏切换后必须重新计算画布布局
@@ -323,6 +329,14 @@ export default {
         return
       }
       isRendering = true
+      // [FIX 2026-08-01] 渲染埋点 — useDiagnostics 记录开始时间, 触发 hooks.
+      // chart_diag / E2E 通过 window.__archPage.mermaid.lastRender 一键读取耗时.
+      diag.beginRender({
+        diagramType: props.diagramType,
+        layoutEngine: props.layoutEngine,
+        nodeCount: props.diagramData?.nodes?.length || 0,
+        linkCount: props.diagramData?.links?.length || 0
+      })
 
       // [v40 关系枚举预加载] 渲染前先预加载 relation_type / direction 枚举
       // 之前 fire-and-forget 时, 用户首次 hover 时 EnumService 还没加载完 → tooltip 显示 code
@@ -333,6 +347,8 @@ export default {
         })
       }
 
+      // [FIX 2026-08-01] effectiveLayoutEngine 提到 renderMermaid 函数顶部 (跨 try + nextTick 访问)
+      let effectiveLayoutEngine = props.layoutEngine
       if (mermaidContainer.value && props.diagramData) {
         try {
           // 暂时禁用 UnifiedRenderer，因为它缺少样式、tooltip、交互等功能
@@ -341,7 +357,6 @@ export default {
             initializeMermaid(props.diagramType, props.diagramData, props.layoutEngine, props.layoutType, props.preserveModelOrder, effectiveLayoutControlConfig.value, configStore.mermaidMaxTextSize)
             mermaidContainer.value.innerHTML = `<pre class="mermaid">${props.diagramData._unifiedMermaidCode}</pre>`
           } else {
-            let effectiveLayoutEngine = props.layoutEngine
             const positions = props.layoutPositions || []
             const zoneRowCount = props.zoneRowCount || 3
 
@@ -387,7 +402,24 @@ export default {
               const preElAfter = mermaidContainer.value?.querySelector('pre.mermaid')
               const svgElAfter = mermaidContainer.value?.querySelector('svg')
               if (svgElAfter) {
-                svgProcessor.processSvg(svgElAfter, props, relationDescriptions, mermaidContainer, nodeColorMappings)
+                svgProcessor.processSvg(svgElAfter, props, relationDescriptions, mermaidContainer, nodeColorMappings, interaction)
+
+                // [FIX 2026-07-31 v3] 初始渲染后用 centerScopeColor 覆盖中心节点 fill (与图例一致)
+                //   之前 v1 误用 stroke 边框区分, 改为 fill 覆盖 → toggle=true 时中心节点 fill=centerScopeColor
+                if (props.diagramData?.centerScopeHighlight && nodeColorMappings.length > 0) {
+                  const csSet = new Set(props.diagramData.centerScope || [])
+                  const csColor = props.diagramData.centerScopeColor || '#808080'
+                  nodeColorMappings.forEach(mapping => {
+                    if (csSet.has(mapping.nodeCode) || csSet.has(mapping.nodeName)) {
+                      const rect = svgElAfter.querySelector(
+                        `#${mapping.nodeId} rect, [data-code="${mapping.nodeCode}"] rect, [data-id="${mapping.nodeId}"] rect, g.node[id^="flowchart-${mapping.nodeId}-"] rect`
+                      )
+                      if (rect) {
+                        rect.style.setProperty('fill', csColor, 'important')
+                      }
+                    }
+                  })
+                }
 
                 // 设置交互功能
                 // 关键修复 v10：传 mermaidContainerEl（真 .mermaid-container）作为 wheel/mousedown 事件目标
@@ -401,17 +433,32 @@ export default {
                 svgProcessor.setupCanvasLayout(mermaidWrapper, mermaidContainer, draggableArea)
 
                 // 只在首次渲染时自动适应，后续更新保持当前缩放状态
-                if (isFirstRender) {
+                // [FIX 2026-07-31] 切换图表类型 (业务对象图 ↔ 服务模块图) 时也需 autoFit，
+                //   否则新 SVG 沿用旧 transform 导致画布视觉缩小。
+                //   之前只在 isFirstRender=true 时 autoFit，切换 chartType 后 isFirstRender 已是 false。
+                const diagramTypeChanged = lastDiagramType !== null && lastDiagramType !== props.diagramType
+                if (isFirstRender || diagramTypeChanged) {
                   setTimeout(() => {
                     interaction.autoFitDiagram()
                   }, 100)
                   isFirstRender = false
                 }
+                lastDiagramType = props.diagramType
 
                 lastColorGroupBy = props.diagramData?.colorGroupBy || 'domain'
+                lastColorScheme = props.diagramData?.colorScheme
+                lastCenterScopeHighlight = props.diagramData?.centerScopeHighlight
                 
                 // 渲染完成，重置渲染状态
                 isRendering = false
+                // [FIX 2026-08-01] 渲染完成埋点 — chart_diag / E2E 一键读取耗时和元数据
+                const finishedSvg = mermaidContainer.value?.querySelector('svg')
+                diag.endRender({
+                  layoutEngine: effectiveLayoutEngine,
+                  nodeCount: finishedSvg?.querySelectorAll('g.node').length || 0,
+                  edgeCount: finishedSvg?.querySelectorAll('path.flowchart-link').length || 0,
+                  containerCount: finishedSvg?.querySelectorAll('g.cluster').length || 0
+                })
 
                 // 额外使用CSS样式注入，解决优先级样式问题
                 const styleId = 'mermaid-italic-style'
@@ -621,10 +668,16 @@ export default {
             }).catch((err) => {
               console.error('[MermaidComponent] mermaid.run() rejected:', err)
               isRendering = false
+              // [FIX 2026-08-01] 渲染失败埋点
+              diag.recordError(err, 'renderMermaid')
+              diag.endRender({ error: err?.message || String(err) })
             })
         })
       } else {
         isRendering = false
+        // [FIX 2026-08-01] 跳过渲染也记录 (避免 lastRender 卡在 null)
+        diag.recordWarning('renderMermaid early return: container or diagramData missing', 'renderMermaid')
+        diag.endRender({ error: 'no_container_or_diagramData' })
       }
     }
 
@@ -698,14 +751,26 @@ export default {
         return false
       }
 
-      if (nodeColorMappings.length === 0 || linkColorMappings.length === 0) {
+      // [FIX 2026-07-31 v2] 之前用 `nodeColorMappings.length === 0 || linkColorMappings.length === 0` 短路,
+      //   导致只有节点没有连线 (BO 图常出现, 因为 BO 图很多 BO 之间无 link) 的场景
+      //   `linkColorMappings.length === 0` 触发, 整个 updateColorsOnly return false → 节点也不更新 → 变灰!
+      //   修复: 只检查 nodeColorMappings, linkColorMappings 为空仍继续 (link 颜色不更新即可)。
+      //   同时增加日志, 方便排查"为什么 updateColorsOnly 没生效"。
+      if (nodeColorMappings.length === 0) {
+        console.warn('[MermaidComponent.updateColorsOnly] nodeColorMappings 为空, 跳过颜色更新')
         return false
       }
 
       const currentColorGroupBy = props.diagramData?.colorGroupBy || 'domain'
       const currentCustomColors = props.diagramData?.customColors || {}
+      const currentColorScheme = props.diagramData?.colorScheme
+      const currentCenterScopeHighlight = props.diagramData?.centerScopeHighlight
 
-      if (currentColorGroupBy === lastColorGroupBy && !customColorsChanged) {
+      // [FIX 2026-07-31] 短路条件需纳入 colorScheme / centerScopeHighlight
+      //   之前: 只看 colorGroupBy 和 customColors → 切配色/中心范围时短路 return true → 不更新
+      if (currentColorGroupBy === lastColorGroupBy && !customColorsChanged
+          && currentColorScheme === lastColorScheme
+          && currentCenterScopeHighlight === lastCenterScopeHighlight) {
         return true
       }
 
@@ -723,16 +788,39 @@ export default {
         data.customColors || {}
       )
 
-      colors.updateNodeColors(svg, nodeColorMappings, objectToModuleMap, colorGroupBy, colorMap)
-      colors.updateLinkColors(svg, linkColorMappings, nodeColorMappings, objectToModuleMap, colorGroupBy, colorMap)
+      // [FIX 2026-07-31] 传 centerScopeHighlight 信息, 让 updateNodeColors 给 centerScope BOs 加边框区分
+      colors.updateNodeColors(svg, nodeColorMappings, objectToModuleMap, colorGroupBy, colorMap, {
+        centerScopeHighlight: data.centerScopeHighlight,
+        centerScope: data.centerScope || [],
+        centerScopeColor: data.centerScopeColor || '#808080'
+      })
+      // linkColorMappings 为空时跳过 (很多 BO 图无 link)
+      if (linkColorMappings && linkColorMappings.length > 0) {
+        colors.updateLinkColors(svg, linkColorMappings, nodeColorMappings, objectToModuleMap, colorGroupBy, colorMap)
+      }
 
       // 更新文字颜色
       const textColorSetting = props.diagramData?.textColor || 'black'
       svgStyle.updateNodeStyles(svg, textColorSetting)
       svgStyle.updateClusterStyles(svg, textColorSetting)
 
+      // [FIX 2026-07-31] 增量刷新颜色图例
+      //   之前切 colorGroupBy 只更新 rect fill, 不重建 legend panel → legend 颜色键仍按旧 colorGroupBy 显示
+      //   修复: 调 svgProcessor.updateColorLegend 重建 legend (复用 renderAnnotationOverlay 的 legend 部分逻辑)
+      if (props.annotationConfig && (props.diagramType === 'businessObject' || props.diagramType === 'serviceModule')) {
+        try {
+          // 同步更新 nodeColorMappings 数组内每个 mapping.color (供 buildColorLegendData 使用)
+          // updateNodeColors 已经做了: mapping.color = newColor
+          svgProcessor.updateColorLegend(svg, data, props.annotationConfig, nodeColorMappings)
+        } catch (e) {
+          console.warn('[MermaidComponent.updateColorsOnly] legend refresh failed:', e)
+        }
+      }
+
       lastColorGroupBy = currentColorGroupBy
       lastCustomColors = { ...currentCustomColors }
+      lastColorScheme = currentColorScheme
+      lastCenterScopeHighlight = currentCenterScopeHighlight
 
       return true
     }
@@ -758,11 +846,16 @@ export default {
           const nodesChanged = JSON.stringify(newVal.nodes) !== JSON.stringify(oldVal.nodes)
           const linksChanged = JSON.stringify(newVal.links) !== JSON.stringify(oldVal.links)
           const textColorChanged = newVal?.textColor !== oldVal?.textColor
+          // [FIX 2026-07-31] 配色 (colorScheme) 和 区分中心范围 (centerScopeHighlight) 也走增量更新
+          //   之前: 这两个变化走全量 renderMermaid(), 性能差
+          //   现在: 纳入增量路径, 只更新颜色
+          const colorSchemeChanged = newVal?.colorScheme !== oldVal?.colorScheme
+          const centerScopeHighlightChanged = newVal?.centerScopeHighlight !== oldVal?.centerScopeHighlight
 
-          // 如果节点和连线没变，只是颜色分组变化、自定义颜色变化或文字颜色变化，则只更新颜色
-          if (!nodesChanged && !linksChanged && (newColorGroupBy !== oldColorGroupBy || customColorsChanged || textColorChanged)) {
+          // 如果节点和连线没变，只是颜色相关配置变化，则只更新颜色
+          if (!nodesChanged && !linksChanged && (newColorGroupBy !== oldColorGroupBy || customColorsChanged || textColorChanged || colorSchemeChanged || centerScopeHighlightChanged)) {
             // 如果只是文字颜色变化，不需要重新生成颜色映射
-            if (textColorChanged && !customColorsChanged) {
+            if (textColorChanged && !customColorsChanged && !colorSchemeChanged && !centerScopeHighlightChanged) {
               const svg = mermaidContainer.value?.querySelector('svg')
               if (svg) {
                 svgStyle.updateNodeStyles(svg, newVal?.textColor || 'black')
@@ -825,7 +918,8 @@ export default {
         console.log('[MermaidComponent] annotationConfig changed, filter:', newVal.annotationCategoryFilter, 'panel:', newVal.annotationPanelPosition, 'icons:', newVal.showAnnotationIcons)
         // 重跑 processSvg (它内部会调 renderAnnotationOverlay)
         // 主线不受影响: annotation overlay 移除+重新渲染, 其他 SVG 元素不动 (renderAnnotationOverlay 内部 removeAnnotationLayers 后重画)
-        svgProcessor.processSvg(svgEl, props, relationDescriptions, mermaidContainer, nodeColorMappings)
+        // [FIX 2026-07-31] 传 interaction 让 annotation 点击居中能正常工作
+        svgProcessor.processSvg(svgEl, props, relationDescriptions, mermaidContainer, nodeColorMappings, interaction)
       },
       { deep: true }
     )
@@ -855,6 +949,10 @@ export default {
 
     // 组件挂载后初始化
     onMounted(() => {
+      // [FIX 2026-08-01] 安装 diagnostics 到 window.__archPage.mermaid,
+      //   chart_diag / E2E 可一键读取 lastRender / stepTimings / errors.
+      installDiagnosticsToWindow()
+
       if (props.diagramData) {
         renderMermaid()
       }
@@ -943,6 +1041,8 @@ export default {
           startOnLoad: true,
           securityLevel: 'loose',
           maxTextSize: configStore.mermaidMaxTextSize,
+          // [FIX 2026-07-30] maxEdges 必须为 TOP-LEVEL 配置 (mermaid 11 secure 项)
+          maxEdges: 10000,
           theme: 'base',
           themeVariables: {
             edgeLabelBackground: '#ffffff',
@@ -1274,6 +1374,8 @@ ${mermaidCode}
           startOnLoad: false,
           securityLevel: 'loose',
           maxTextSize: 1000000000,
+          // [FIX 2026-07-30] maxEdges 必须为 TOP-LEVEL 配置 (mermaid 11 secure 项)
+          maxEdges: 10000,
           theme: 'base',
           themeVariables: {
             edgeLabelBackground: '#ffffff',
@@ -2051,6 +2153,7 @@ ${mermaidCode}
       toggleMaximize,
       resetAdaptive: interaction.resetAdaptive,
       autoFitDiagram: interaction.autoFitDiagram,
+      relayoutCanvas: relayoutAfterSizeChange,
       exportAsImage,
       exportAsNative,
       exportAsHtmlSimple,

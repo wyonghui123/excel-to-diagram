@@ -10,7 +10,10 @@ import {
 
 let isDraggingState = false;
 
+import { useDiagnostics } from '../core/useDiagnostics.js'
+
 export function useAnnotationOverlay() {
+  const diag = useDiagnostics()  // [FIX 2026-08-01] annotation 埋点
 
   const overlayNumberMarkers = (svg, numberMap, annotations) => {
     return null;
@@ -300,12 +303,21 @@ export function useAnnotationOverlay() {
     return panel;
   };
 
-  const bindAnnotationInteraction = (svg, annotations) => {
+  const bindAnnotationInteraction = (svg, annotations, options = {}) => {
     // 先清理本实例上一次的监听器（panel header + svg 全局）
     cleanupListeners()
 
+    // [FIX 2026-08-01] 记录 annotation 监听器绑定 — 排查 "click annotation panel 没响应" 类问题
+    diag.recordStepMeta('bindAnnotationInteraction', {
+      svgId: svg.id || '',
+      annotationCount: annotations?.length || 0
+    })
+
     const container = svg.closest('.mermaid-container');
     if (!container) return;
+
+    // [FIX 2026-07-31] 居中回调: 选中 annotation 后调用 (实现"点备注滚到对应节点"功能)
+    const { onCenterElement } = options;
 
     const annotationMap = new Map();
     annotations.forEach(ann => {
@@ -318,9 +330,13 @@ export function useAnnotationOverlay() {
         const ann = annotationMap.get(targetId);
         const targetType = ann ? ann.targetType : null;
         if (targetId && targetType) {
-          highlightTargetElement(svg, targetId, targetType);
-          item.classList.add('annotation-item-selected');
-          item.style.background = 'rgba(0, 0, 0, 0.05)';
+          // [FIX 2026-08-01 v4] highlightTargetElement 内部已经同步 panel selected + 高亮 chart.
+          //   不再单独加 .annotation-item-selected / background — 否则会 "双击自己 item 时把 selected 重复加".
+          const targetEl = highlightTargetElement(svg, targetId, targetType);
+          // 调用居中回调 (MermaidComponent 注入)
+          if (onCenterElement && targetEl) {
+            try { onCenterElement(targetEl); } catch (e) { console.warn('[bindAnnotationInteraction] onCenterElement failed:', e) }
+          }
         }
       };
       const onItemMouseEnter = () => {
@@ -354,28 +370,206 @@ export function useAnnotationOverlay() {
       }, 100);
     };
     const onSvgClick = (e) => {
+      // [FIX 2026-08-01 v3] 同一 click 事件只处理一次 (防止 svg/label/path 多 listener 重复触发).
+      //   现状: bindAnnotationInteraction 在 svg、每个 edgeLabel、每个 flowchart-link path 上
+      //   都绑了同一个 onSvgClick. 用户的真实 click 会触发 svg 上的 capture 阶段 listener (svg.click),
+      //   然后冒泡阶段又触发 label.click → 同一个 handler 被调 2 次.
+      //   如果 addLinkCodeAttributes 在不同生命周期多次 bindAnnotationInteraction (annotation 更新),
+      //   cleanupListeners 清理 svg 的 listener 但 label/path 的 listener 因 _cleanupFns 闭包问题被残留,
+      //   handler 会被调 3+ 次 → 每次都累加 transform, 导致过冲 (用户感知"偏的比较多").
+      //   修复: 用 event.__annoHandled + e.timeStamp 双重标记.
+      //   实测: e.__annoHandled 单独不够 — 因为 dispatchEvent 内部似乎为子元素 click 创建了不同的事件路径.
+      //   改用 lastHandledTime 全局锁: 200ms 内同 svg 上的 click 只处理一次.
+      const svgEl = svg
+      if (svgEl && e) {
+        const now = (e.timeStamp) || Date.now()
+        if (svgEl.__lastAnnoClickTime && now - svgEl.__lastAnnoClickTime < 200) return
+        svgEl.__lastAnnoClickTime = now
+      }
       // 排除拖拽操作触发的点击
       if (!isDraggingState) {
         if (e.target === svg || e.target.closest('.annotation-dock-panel') === null) {
           // 检查点击目标是否是备注相关元素
           const isAnnotationItem = e.target.closest('.annotation-item');
-          const isHighlighted = e.target.closest('.annotation-highlighted');
           const isAnnotationOverlay = e.target.closest('.annotation-overlay');
+          if (isAnnotationItem || isAnnotationOverlay) return;
 
-          if (!isAnnotationItem && !isHighlighted && !isAnnotationOverlay) {
-            clearAllHighlights(svg);
+          // [FIX 2026-07-31] 单击节点/容器/连线 → 高亮 + 居中
+          //   设计意图: 用户期望单击图表元素时, 同步高亮(对齐备注面板) + 居中显示
+          //     - 与 annotation 面板 item 点击行为完全对等
+          //     - 支持 BO 图节点、BO 图容器 (serviceModule)、SM 图节点、SM 图容器、连线
+          //   之前 onSvgClick 只清高亮, 不处理单击节点 → 用户误以为"必须双击"(实际双击触发 autoFit)
+          const { nodeEl, containerEl, edgeEl, edgeLabelEl } = findTargetFromEvent(svg, e.target);
+          let clickedTargetEl = null;
+          let clickedTargetType = null;
+          let clickedTargetId = null;
+
+          if (nodeEl) {
+            clickedTargetEl = nodeEl;
+            clickedTargetType = 'node';
+            clickedTargetId = nodeEl.getAttribute('data-code') || nodeEl.getAttribute('data-id');
+          } else if (containerEl) {
+            clickedTargetEl = containerEl;
+            clickedTargetType = 'container';
+            // [FIX 2026-08-01] 优先 data-container-code (annotation 系统标识),
+            //   缺失时用 cur.id 兜底 (mermaid 11 ELK 默认形如 "G_D_供应链云").
+            //   否则 clickedTargetId 为 null 会导致整段 if (clickedTargetId) 跳过,
+            //   用户点 cluster 后无任何响应 (不居中不高亮).
+            clickedTargetId = containerEl.getAttribute('data-container-code') || containerEl.id;
+          } else if (edgeLabelEl) {
+            // edgeLabel 是 .edgeLabel > foreignObject (用户更常点中的是 label 文字)
+            // 找最近的 edge 元素 + relationCode
+            const labelG = edgeLabelEl.closest('g.edge') || edgeLabelEl.closest('g');
+            clickedTargetEl = labelG;
+            clickedTargetType = 'relation';
+            // [FIX 2026-07-31 v2] 优先级: data-relation-code > data-id="L_..." > edgeLabel text
+            //   addLinkCodeAttributes 在 link.code/relationCode/relationDesc 缺时无法匹配 ELK 自动 label
+            //   → 兜底用 edgeLabel textContent 作为 relation key (高亮可以工作, 但不精确对应 link)
+            clickedTargetId = findRelationCodeForLabel(svg, edgeLabelEl)
+              || (edgeLabelEl.querySelector('.label') && edgeLabelEl.querySelector('.label').getAttribute('data-id'))
+              || (edgeLabelEl.textContent || '').trim();
+          } else if (edgeEl) {
+            // 直接点 path, 找 path 上的 data-relation-code 或最近 edgeLabel
+            const g = edgeEl.closest('g.edge') || edgeEl.closest('g');
+            clickedTargetEl = g;
+            clickedTargetType = 'relation';
+            // [FIX 2026-07-31 v4] path 直接点击: 兜底用 closest('.edgeLabel') 的 textContent
+            //   path 不在 .edgeLabel 子树下, closest g 也不是 g.edge
+            //   真正的兜底: 用 path.getAttribute('d') 作为唯一 ID
+            const nearestLabel = edgeEl.closest('.edgeLabel');
+            clickedTargetId = edgeEl.getAttribute('data-relation-code')
+              || findRelationCodeForLabel(svg, edgeEl)
+              || (nearestLabel && (nearestLabel.textContent || '').trim())
+              || ('path-' + edgeEl.getAttribute('d').substring(0, 50));  // 终极兜底: 用 d 前 50 字符作为 ID
+          }
+
+          if (clickedTargetEl && clickedTargetType && clickedTargetId) {
+            // [FIX 2026-07-31 v3 v5] 给 highlightTargetElement 传 clickEdgeEl (label 或 path) 作为兜底
+            //   当 addLinkCodeAttributes 没设 data-relation-code 时 (ELK 自动 label 不可匹配),
+            //   highlightTargetElement 内部 text.includes(targetId) 找不到,
+            //   但我们已经有 clickEdgeEl 直接拿 DOM, 直接高亮
+            // [FIX 2026-08-01 v5] **不再居中** — 居中只在点 panel item 时触发.
+            //   chart 上的元素被点击只是"我点了这里"的临时反馈 (高亮表示), 用户视觉位置不动.
+            //   这样避免 "用户随手点 chart 任意位置 → 图表跳走" 的 UX 问题.
+            //   设计意图与 VSCode 大纲/面包屑: 选中元素不强制滚动, 用户可自行决定是否需要居中.
+            const clickEdgeEl = edgeLabelEl || edgeEl
+            // [FIX 2026-08-01 v5] syncPanel='auto': 仅当 panel 有对应 item 时同步 panel
+            //   - chart 元素被点击, 如果有对应 panel item → panel 切到该 item
+            //   - chart 元素被点击, 但无对应 panel item → panel 保留原状 (用户已选的备注还在)
+            highlightTargetElement(svg, clickedTargetId, clickedTargetType, clickEdgeEl, { syncPanel: 'auto' })
+          } else {
+            // 点击空白区域: 清高亮
+            clearAllHighlights(svg)
           }
         }
       }
+    };
+
+    /**
+     * [FIX 2026-07-31] 从事件 target 找节点/容器/连线
+     *   - 节点: .node (data-code)
+     *   - 容器: .subgraph / .cluster (data-container-code)
+     *   - 连线 label: .edgeLabel (含 foreignObject, 用户最常点)
+     *   - 连线 path: <path>
+     */
+    const findTargetFromEvent = (svg, target) => {
+      if (!target || target === svg) return {};
+      let cur = target;
+      // 上溯直到 svg 本身
+      while (cur && cur !== svg) {
+        if (cur.classList) {
+          // 节点
+          if (cur.classList.contains('node') && cur.hasAttribute('data-code')) {
+            return { nodeEl: cur };
+          }
+          // 容器
+          // [FIX 2026-08-01] 即使没有 data-container-code 也识别 cluster (mermaid 11 ELK 渲染时
+          //   不是所有容器都带此 attribute, 比如无 annotation 数据时). 没 data-container-code 时
+          //   用 cur.id 兜底 (id 形如 "G_D_供应链云").
+          // [FIX 2026-08-01 v3] BUG FIX: 仅 <g class="cluster"> (单容器, 有 id, 用户视觉上可看到
+          //   边框/标题/背景) 算 click 命中. 集合层 <g class="subgraphs"> 和 <g class="subgraph">
+          // (复数和单数) 是 mermaid 11 ELK 的透明 wrapper, 不渲染, 但**bbox 覆盖整个图表**.
+          //   用户在图表空白处点击时, e.target 落到这些 wrapper, findTargetFromEvent 上溯找到
+          //   wrapper → 错误地触发 onCenterElement → 图表跳到第一个 cluster.
+          //   修复: 只对真正的 cluster 触发, subgraphs/subgraph 视为空白 (clearHighlight 而非居中).
+          if (cur.classList.contains('cluster')) {
+            return { containerEl: cur };
+          }
+          // 连线 label
+          if (cur.classList.contains('edgeLabel')) {
+            return { edgeLabelEl: cur };
+          }
+          // 连线 path
+          if (cur.tagName && cur.tagName.toLowerCase() === 'path' && cur.parentElement) {
+            // edgeLabel 内部有时也含 path, 跳过
+            const pe = cur.parentElement
+            if (!pe.classList.contains('edgeLabel')) {
+              return { edgeEl: cur };
+            }
+          }
+        }
+        cur = cur.parentElement;
+      }
+      return {};
+    };
+
+    /**
+     * [FIX 2026-07-31] 从 edgeLabel DOM 找对应 relationCode
+     *   mermaid 11 在 edgeLabel 内的 foreignObject > div 写入 label 文字, 但通常不含 code
+     *   通过 addLinkCodeAttributes 设置的 data-relation-code 通常在 edgeLabel 同级的 edge 元素或 path 上
+     */
+    const findRelationCodeForLabel = (svg, labelOrPath) => {
+      if (!labelOrPath) return null;
+      // 直接找最近的 [data-relation-code]
+      let cur = labelOrPath;
+      while (cur && cur !== svg) {
+        if (cur.hasAttribute && cur.hasAttribute('data-relation-code')) {
+          return cur.getAttribute('data-relation-code');
+        }
+        cur = cur.parentElement;
+      }
+      // 退化: 找同 g.edge 下的 path
+      const edge = labelOrPath.closest && labelOrPath.closest('g.edge');
+      if (edge) {
+        const path = edge.querySelector('path[data-relation-code], path.flowchart-link');
+        if (path && path.hasAttribute('data-relation-code')) return path.getAttribute('data-relation-code');
+      }
+      return null;
     };
     addListener(svg, 'mousedown', onSvgMouseDown);
     addListener(svg, 'mousemove', onSvgMouseMove);
     addListener(svg, 'mouseup', onSvgMouseUp);
     addListener(svg, 'click', onSvgClick);
+
+    // [FIX 2026-07-31 v4] edgeLabel 和 edge path 上 useTooltip 调用了 e.stopPropagation,
+    //   阻止了 click 事件冒泡到 svg → onSvgClick 收不到
+    //   解决: 直接在所有 edgeLabel 和 flowchart-link path 上绑 click listener
+    //   内部调用同一份 onSvgClick 逻辑
+    svg.querySelectorAll('.edgeLabel').forEach(label => {
+      addListener(label, 'click', onSvgClick);
+    });
+    svg.querySelectorAll('path.flowchart-link').forEach(p => {
+      addListener(p, 'click', onSvgClick);
+    });
   };
 
-  const highlightTargetElement = (svg, targetId, targetType) => {
-    clearAllHighlights(svg);
+  const highlightTargetElement = (svg, targetId, targetType, clickEdgeLabelEl = null, options = {}) => {
+    // [FIX 2026-08-01 v4] 双向联动改造:
+    //   之前这里调 clearAllHighlights(svg) 会清掉 panel 上所有 .annotation-item-selected,
+    //   造成 "点 chart 上节点 → panel 选中消失" 的 UX bug (单向联动).
+    //   改造: 不再 clear panel items; 仅清 SVG 高亮. panel 同步在末尾 setSelectedItems() 完成,
+    //   这样能基于查找结果 panelMatched 做精准同步 (找不到时也能反映到 panel 清掉 selected).
+    // [FIX 2026-08-01 v5] 加 options.syncPanel (默认 'forced'):
+    //   - true / undefined → 'forced' 模式: 始终同步 panel (panel item 点击走这条)
+    //   - 'auto' 模式: 仅当 panel 有对应 item 时同步, 否则保留原状 (chart 元素点击走这条)
+    //   - false → 永远不同步 panel (极端 case, 保留接口)
+    const syncPanel = options.syncPanel === undefined ? 'forced' : options.syncPanel
+    clearSvgHighlightsOnly(svg);
+
+    // [FIX 2026-08-01] 记录高亮查找 — 排查 "annotation 点了没反应" 类问题
+    const tHL = diag.time('highlightTargetElement')
+
+    let resultEl = null;
 
     if (targetType === 'relation') {
       // 关系连线：查找边组
@@ -391,8 +585,20 @@ export function useAnnotationOverlay() {
         });
       }
 
+      // [FIX 2026-07-31 v3] 兜底: 如果 onSvgClick 传了 clickEdgeLabelEl, 直接高亮
+      //   当 addLinkCodeAttributes 没设 data-relation-code 时 (ELK 自动 label 不可匹配),
+      //   text.includes 失败, 但 clickEdgeLabelEl 是用户实际点击的元素, 直接用
+      if (!edgeEl && clickEdgeLabelEl) {
+        // [FIX v3.1] .edgeLabel 自身是 g, 直接用它. 它的 parent 才是真正的 edge g
+        edgeEl = clickEdgeLabelEl.tagName && clickEdgeLabelEl.tagName.toLowerCase() === 'g'
+          ? clickEdgeLabelEl
+          : clickEdgeLabelEl.closest('g.edge') || clickEdgeLabelEl.closest('g');
+      }
+
       if (edgeEl) {
         highlightElement(svg, edgeEl, 'relation', targetId);
+        // [FIX 2026-07-31] 返回包含 path 和 label 的边组 (用于居中)
+        resultEl = edgeEl.closest('g.edge') || edgeEl.closest('g[class*="edge"]') || edgeEl;
       }
     } else if (targetType === 'container') {
       // 容器备注：只选中容器
@@ -402,6 +608,14 @@ export function useAnnotationOverlay() {
         const containers = svg.querySelectorAll('.subgraph, .cluster');
         containers.forEach(c => {
           if (containerEl) return;
+          // [FIX 2026-08-01] 三级匹配:
+          //   1) data-container-code 完全匹配 (走 querySelector 失败说明 attribute 缺失)
+          //   2) c.id === targetId (mermaid 11 ELK 默认 ID 形如 G_D_供应链云, 我们已用 id 兜底)
+          //   3) label textContent 包含 targetId (annotation 系统语义化名称)
+          if (c.id === targetId) {
+            containerEl = c;
+            return;
+          }
           const label = c.querySelector('.cluster-label, text');
           if (label && label.textContent.includes(targetId)) {
             containerEl = c;
@@ -411,6 +625,7 @@ export function useAnnotationOverlay() {
 
       if (containerEl) {
         highlightElement(svg, containerEl, 'container');
+        resultEl = containerEl;
       }
     } else {
       // 节点备注：只选中节点
@@ -429,8 +644,39 @@ export function useAnnotationOverlay() {
 
       if (nodeEl) {
         highlightElement(svg, nodeEl, 'node');
+        resultEl = nodeEl;
       }
     }
+
+    // [FIX 2026-07-31] 返回选中的 DOM 元素 (供 bindAnnotationInteraction 居中回调使用)
+    // [FIX 2026-08-01] 记录高亮查找结果
+    // [FIX 2026-08-01 v4] 同时记录 panel sync 结果 (双向联动): 同步了多少 panel items
+    // [FIX 2026-08-01 v5] syncPanel 决策:
+    //   - 'forced' (默认): 始终同步 panel (panel item 点击走这条)
+    //   - false: 始终不同步 (保留接口)
+    //   - 'auto': 仅当 panel 有对应 item 时同步, 否则保留原状 (chart 元素点击走这条)
+    let panelSync = { matched: 0, mode: 'skipped' }
+    if (syncPanel === 'forced') {
+      panelSync = setSelectedItems(svg, targetId, targetType)
+      panelSync.mode = 'forced'
+    } else if (syncPanel === 'auto') {
+      if (hasPanelItemsFor(svg, targetId)) {
+        panelSync = setSelectedItems(svg, targetId, targetType)
+        panelSync.mode = 'auto-matched'
+      } else {
+        panelSync.mode = 'auto-preserved'  // 保留原 panel selected 不动
+      }
+    }
+    diag.recordStepMeta('highlightTargetElement', {
+      targetId, targetType,
+      found: !!resultEl,
+      resultTag: resultEl?.tagName || null,
+      resultKlass: (resultEl && resultEl.getAttribute && resultEl.getAttribute('class')) || '',
+      panelMatched: panelSync.matched,
+      panelMode: panelSync.mode
+    })
+    diag.endStep('highlightTargetElement', tHL)
+    return resultEl;
   };
 
   const highlightElement = (svg, el, targetType, targetId) => {
@@ -499,6 +745,24 @@ export function useAnnotationOverlay() {
   };
 
   const clearAllHighlights = (svg) => {
+    clearSvgHighlightsOnly(svg);
+
+    const container = svg.closest('.mermaid-container');
+    if (container) {
+      // [FIX 2026-08-01 v4] 双向联动: 同时清 panel items. 仅在 "用户明确取消选中" 场景调用
+      //   (点 svg 空白处 / hover 离开等). 高亮切换 (highlightTargetElement) 改用 setSelectedItems.
+      container.querySelectorAll('.annotation-item-selected').forEach(item => {
+        item.classList.remove('annotation-item-selected');
+        item.style.background = 'transparent';
+      });
+    }
+  };
+
+  /**
+   * [FIX 2026-08-01 v4] 只清 SVG 上的高亮 (filter / style / class), **不**动 panel items.
+   * 用于 highlightTargetElement 内部 — 切到新目标时, 让旧目标先"取消高亮"但 panel 的选中视觉不动.
+   */
+  const clearSvgHighlightsOnly = (svg) => {
     svg.querySelectorAll('.annotation-highlighted').forEach(el => {
       el.classList.remove('annotation-highlighted');
       const rect = el.querySelector('rect, polygon');
@@ -527,14 +791,49 @@ export function useAnnotationOverlay() {
       path.style.removeProperty('filter');
       path.style.strokeWidth = '2px';
     });
+  };
 
+  /**
+   * [FIX 2026-08-01 v4] 同步 panel 选中态到指定 target.
+   * 行为: 清掉所有 .annotation-item-selected, 给 data-target-id 匹配的 items 加 selected (可多个,
+   *   表示 "同一个 target 上有多条备注", 类似 VSCode 的 occurrences).
+   *   - 找不到任何匹配 → 全部 selected 都被清掉 (行为同 clearAllHighlights, 表示 "没对应 item").
+   *
+   * @param {string|null} targetId - null = 全部清掉
+   * @param {string} targetType - 保留参数便于未来按 type 过滤
+   */
+  const setSelectedItems = (svg, targetId, targetType) => {
     const container = svg.closest('.mermaid-container');
-    if (container) {
-      container.querySelectorAll('.annotation-item-selected').forEach(item => {
-        item.classList.remove('annotation-item-selected');
-        item.style.background = 'transparent';
-      });
-    }
+    if (!container) return { matched: 0 }
+    // 先清所有 selected
+    container.querySelectorAll('.annotation-item-selected').forEach(item => {
+      item.classList.remove('annotation-item-selected')
+      item.style.background = 'transparent'
+    })
+    // 再给匹配的加上
+    if (!targetId) return { matched: 0 }
+    const selector = `.annotation-item[data-target-id="${targetId}"]`
+    const matched = container.querySelectorAll(selector)
+    matched.forEach(item => {
+      item.classList.add('annotation-item-selected')
+      item.style.background = 'rgba(0, 0, 0, 0.05)'
+    })
+    return { matched: matched.length, targetId, targetType }
+  };
+
+  /**
+   * [FIX 2026-08-01 v5] 仅查询 panel items 是否有匹配的 targetId — 不修改 DOM.
+   * 用于 onSvgClick 中判断"chart 元素有无对应 panel item", 决定:
+   *   - 有对应 → 调 setSelectedItems (panel 同步到该 item)
+   *   - 无对应 → 保留 panel 原状 (用户已选的备注还在那里)
+   */
+  const hasPanelItemsFor = (svg, targetId) => {
+    if (!targetId) return false
+    const container = svg.closest('.mermaid-container')
+    if (!container) return false
+    return container.querySelectorAll(
+      `.annotation-item[data-target-id="${targetId}"]`
+    ).length > 0
   };
 
   const highlightByNumber = (svg, number) => {

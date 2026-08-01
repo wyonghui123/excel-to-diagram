@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { useDiagnostics } from '../core/useDiagnostics.js'
 
 // 关键修复 v19：用 window 全局对象共享拖动状态，跨 module reload 保持一致
 // HMR 替换 module 后老 addZoomAndPan 闭包内的 let isDragging 与新 handleMouseMove 的 let isDragging 是不同变量
@@ -9,6 +10,7 @@ export function useInteraction() {
   const scale = ref(1)
   const translateX = ref(0)
   const translateY = ref(0)
+  const diag = useDiagnostics()  // [FIX 2026-08-01] 交互埋点 — chart_diag 一键读取耗时
 
   /**
    * v4 重构：mermaid-content 不再 absolute 居中（由 CSS flex 居中接管）。
@@ -39,25 +41,226 @@ export function useInteraction() {
     const container = document.querySelector('.mermaid-container')
     if (!container) return
 
+    const tFit = diag.time('autoFit')
     const containerWidth = container.offsetWidth
     const containerHeight = container.offsetHeight
 
-    console.log('[autoFitDiagram] container size:', containerWidth, 'x', containerHeight)
-    console.log('[autoFitDiagram] fit: scale=1, translate=(0,0) (CSS auto-scales SVG to container)')
+    // [FIX 2026-08-01] 移除 console.log 噪音 — chart_diag 一键读取
+    diag.recordStepMeta('autoFitDiagram', {
+      container: `${containerWidth}x${containerHeight}`,
+      result: 'scale=1, translate=(0,0)'
+    })
 
     scale.value = 1
     translateX.value = 0
     translateY.value = 0
 
     updateTransform()
+    diag.endStep('autoFit', tFit)
   }
 
   const resetAdaptive = () => {
     autoFitDiagram()
   }
 
+  /**
+   * [FIX 2026-07-31] 居中显示指定 SVG 元素 (annotation 面板点击后调用)
+   *   设计意图: 选中 annotation 后, 用户期望图表自动滚到对应元素居中
+   *     - 节点 (g.node), 容器 (subgraph/cluster), 连线 (edgeLabel/path) 都支持
+   *     - 不修改 scale (保持当前缩放), 只平移到目标中心
+   *     - 平滑动画 (transform transition) - 300ms ease
+   *
+   *   公式推导 (transform-origin: center, transform: translate(t) scale(s)):
+   *     内容点 c 经过变换后屏幕位置 v = O + (c - O) * s + t
+   *     其中 O = 内容元素未变换时中心（transform-origin: center 意味着 O = 内容元素中心点）
+   *     设目标元素变换后屏幕位置 v_target, 我们要变换后 v_target_new = screenCenter:
+   *       screenCenter = O + (c_target - O) * s + t_new
+   *       t_new = screenCenter - O - (c_target - O) * s
+   *     从 v_target 反推 c_target: c_target = O + (v_target - O - t_old) / s
+   *     代入: t_new = screenCenter - O - (v_target - O - t_old)
+   *          = screenCenter - v_target + t_old
+   *     即: 增量平移 = screenCenter - v_target (与 scale 无关！)
+   *     端到端测试: scale=0.5/1/2 都精确居中 (diff = 0)
+   *
+   * @param {SVGElement} svgEl - mermaid SVG 根元素 (未使用, 保留参数兼容性)
+   * @param {SVGElement} targetEl - 目标节点/容器/连线元素
+   * @returns {boolean} 是否成功居中
+   */
+  const centerElement = (svgEl, targetEl) => {
+    if (!targetEl) return false
+    // [FIX 2026-08-01] 居中操作埋点 — chart_diag 报告里可看到 centerElement 调了几次,
+    //   dx/dy 各多少, 元素 tag/class. 排查 "click 没居中" 类问题时直接 dump 看是否调用过.
+    const tCenter = diag.time('centerElement')
+    try {
+      // [FIX 2026-08-01 v5] 路径中心用 bbox 几何中心 (getBBox + getScreenCTM).
+      //   实测对比三种方案:
+      //     - midStroke (getPointAtLength/totalLen): 对长 L 型折线 path,
+      //       midStroke 可能落在 stroke 起点附近 (例如 line 总长 1791 但起点段只有 19px → midStroke
+      //       几乎紧贴起点), 完全不代表视觉中心, 用户感知"偏的比较多"
+      //     - screen rect center (getBoundingClientRect): 与 bbox center 在 SVG 用户空间相同,
+      //       但 getBoundingClientRect 包含了 stroke 宽度 + CSS transforms 的累积影响,
+      //       对 path 而言与 bbox center 几乎一致
+      //     - bbox center (getBBox + getScreenCTM): 几何包围盒中心, 对任何形状都是
+      //       "用户视觉感知的线段中心"——线段两端与中心一目了然, 是居中连线最直观的锚点
+      // [FIX 2026-08-01 v5.1] 之前 v3 漏掉了 let centerX = null, centerY = null 声明,
+      //   改成赋值未声明变量 → ReferenceError → centerElement 总是 throw 然后 return false.
+      //   当时用户反馈"偏的比较多"实际是"根本没动"——因为函数抛错提前 return.
+      //   现在先声明, 再按类型计算.
+      let centerX = null
+      let centerY = null
+      const svg = svgEl || targetEl.closest('svg')
+
+      /**
+       * 取 SVG 元素的"几何中心" (基于 getBBox, 不含 stroke)
+       * getScreenCTM 返回 SVG 用户空间 → 屏幕空间的变换矩阵
+       * 二者结合 = 几何中心在屏幕坐标上的精确位置
+       */
+      const getBBoxCenterScreen = (el) => {
+        if (!el || typeof el.getBBox !== 'function') return null
+        let bbox
+        try { bbox = el.getBBox() } catch (e) { return null }
+        if (!bbox) return null
+        const ctm = el.getScreenCTM()
+        if (!ctm) return null
+        const cx = bbox.x + bbox.width / 2
+        const cy = bbox.y + bbox.height / 2
+        return {
+          x: cx * ctm.a + cy * ctm.c + ctm.e,
+          y: cx * ctm.b + cy * ctm.d + ctm.f
+        }
+      }
+
+      if (targetEl.tagName && targetEl.tagName.toLowerCase() === 'path') {
+        // [FIX v5] path 元素: 用 bbox center (getBBox + getScreenCTM)
+        //   几何中心是线段最直观的"中点"——用户看到两端和中间, 都能看到全貌
+        const c = getBBoxCenterScreen(targetEl)
+        if (c) {
+          centerX = c.x
+          centerY = c.y
+        } else {
+          // 兜底
+          const targetRect = targetEl.getBoundingClientRect()
+          if (targetRect && (targetRect.width > 0 || targetRect.height > 0)) {
+            centerX = targetRect.left + targetRect.width / 2
+            centerY = targetRect.top + targetRect.height / 2
+          }
+        }
+      } else if (targetEl.tagName && targetEl.tagName.toLowerCase() === 'g') {
+        // [FIX 2026-08-01 v5.2] onSvgClick 经常传入 g.edge / g.node / g.subgraph 等父元素,
+        //   而不是直接的 path/node/rect 子元素. 这里判断 g 是否包含 path → 当作连线处理.
+        //   这样无论调用方传 path 还是 g.edge, 都能精确居中到 path bbox 中心.
+        const innerPath = targetEl.querySelector('path.flowchart-link, path[data-relation-code]')
+        if (innerPath) {
+          const c = getBBoxCenterScreen(innerPath)
+          if (c) {
+            centerX = c.x
+            centerY = c.y
+          }
+        }
+        // 节点/容器 g: 用 g 自身的 bbox center (节点 g 含 rect+label, 容器 g 含 cluster rect)
+        if (centerX === null || centerY === null) {
+          const c = getBBoxCenterScreen(targetEl)
+          if (c) {
+            centerX = c.x
+            centerY = c.y
+          } else {
+            const targetRect = targetEl.getBoundingClientRect()
+            if (targetRect && (targetRect.width > 0 || targetRect.height > 0)) {
+              centerX = targetRect.left + targetRect.width / 2
+              centerY = targetRect.top + targetRect.height / 2
+            }
+          }
+        }
+      } else if (targetEl.classList && targetEl.classList.contains('edgeLabel')) {
+        // [FIX v5] edgeLabel: 找最近的 path (基于 bbox center), 用 path 的 bbox center
+        //   label rect 中心 ≈ label 视觉中心, 不代表"连线位置"
+        //   最近的 path 的 bbox center = 连线的几何中心
+        const labelRect = targetEl.getBoundingClientRect()
+        const labelCenter = { x: labelRect.left + labelRect.width / 2, y: labelRect.top + labelRect.height / 2 }
+        let bestPath = null
+        let bestDist = Infinity
+        const allPaths = svg.querySelectorAll('path.flowchart-link, path[data-relation-code]')
+        allPaths.forEach(p => {
+          try {
+            const c = getBBoxCenterScreen(p)
+            if (!c) return
+            const d = Math.abs(c.x - labelCenter.x) + Math.abs(c.y - labelCenter.y)
+            if (d < bestDist) { bestDist = d; bestPath = { el: p, center: c } }
+          } catch (e) { /* skip */ }
+        })
+        if (bestPath) {
+          centerX = bestPath.center.x
+          centerY = bestPath.center.y
+        }
+      }
+
+      if (centerX === null || centerY === null) {
+        // 兜底: 用 getBoundingClientRect (节点/容器通常走到这里)
+        const targetRect = targetEl.getBoundingClientRect()
+        if (!targetRect || (targetRect.width === 0 && targetRect.height === 0)) return false
+        centerX = targetRect.left + targetRect.width / 2
+        centerY = targetRect.top + targetRect.height / 2
+      }
+
+      const contentEl = document.querySelector('.mermaid-content')
+      if (!contentEl) return false
+      const wrapper = document.querySelector('.mermaid-wrapper') || document.querySelector('.mermaid-container')
+      const wrapperRect = wrapper ? wrapper.getBoundingClientRect() : null
+      if (!wrapperRect) return false
+
+      const screenCenter = {
+        x: wrapperRect.left + wrapperRect.width / 2,
+        y: wrapperRect.top + wrapperRect.height / 2
+      }
+      // 增量平移 = (屏幕中心 - 目标当前位置), 与 scale 无关
+      const dx = screenCenter.x - centerX
+      const dy = screenCenter.y - centerY
+
+      // 加过渡动画让移动看起来平滑 (不影响其他 transform 操作)
+      const prevTransition = contentEl.style.transition
+      contentEl.style.transition = 'transform 0.3s ease'
+      translateX.value = translateX.value + dx
+      translateY.value = translateY.value + dy
+      updateTransform()
+      // [FIX 2026-08-01] 记录居中结果 (成功路径)
+      diag.recordStepMeta('centerElement', {
+        tag: targetEl.tagName,
+        klass: (targetEl.getAttribute && targetEl.getAttribute('class')) || '',
+        id: targetEl.id || '',
+        centerX, centerY, dx, dy,
+        translateX: translateX.value,
+        translateY: translateY.value,
+        scale: scale.value,
+        succeeded: true
+      })
+      diag.endStep('centerElement', tCenter)
+      setTimeout(() => {
+        contentEl.style.transition = prevTransition
+      }, 350)
+      return true
+    } catch (e) {
+      // [FIX 2026-08-01] 记录居中失败 — 排查 "click 没居中" 类问题核心信号
+      diag.recordError(e, 'centerElement')
+      diag.recordStepMeta('centerElement', {
+        tag: targetEl?.tagName || 'null',
+        klass: (targetEl && targetEl.getAttribute && targetEl.getAttribute('class')) || '',
+        succeeded: false,
+        error: e?.message || String(e)
+      })
+      diag.endStep('centerElement', tCenter)
+      console.warn('[centerElement] failed:', e)
+      return false
+    }
+  }
+
   const addZoomAndPan = (mermaidContainerElRef, mermaidWrapperRef, mermaidContentRef) => {
     if (!mermaidContainerElRef?.value || !mermaidWrapperRef?.value || !mermaidContentRef?.value) return
+    // [FIX 2026-08-01] 记录 zoom/pan/dblclick 监听器注册 — 排查 "拖拽/缩放没反应" 类问题
+    diag.recordStepMeta('addZoomAndPan', {
+      containerEl: mermaidContainerElRef.value?.tagName,
+      wrapperEl: mermaidWrapperRef.value?.tagName,
+      contentEl: mermaidContentRef.value?.tagName
+    })
 
     // 关键修复 v10：把 wheel/mousedown/dblclick 绑在真 .mermaid-container 元素（mermaidContainerEl）上
     // 之前绑在 mermaidWrapper 上，全屏模式下 mermaidWrapper 仍受父级 CSS 限制，
@@ -171,6 +374,7 @@ export function useInteraction() {
     updateTransform,
     autoFitDiagram,
     resetAdaptive,
+    centerElement,
     addZoomAndPan
   }
 }

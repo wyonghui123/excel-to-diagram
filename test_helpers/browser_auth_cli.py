@@ -236,8 +236,10 @@ class PlaywrightCLI:
         Returns:
             是否成功
         """
+        # [FIX 2026-07-30] 3010 端口已无服务；改用 3004 (Vite proxy) 走与 base_url 同一端口，
+        # cookie 流转最稳妥，且不依赖具体后端端口
         result = self.request(
-            f"http://localhost:3010/api/v1/auth/dev-login?username={username}"
+            f"http://localhost:3004/api/v1/auth/dev-login?username={username}"
         )
 
         if "error" in result:
@@ -295,8 +297,9 @@ class PlaywrightCLI:
         page = self._ensure_browser()
 
         # Step 1: 浏览器访问 dev-login 设 cookie
+        # [FIX 2026-07-30] 3010 端口已无服务；改用 3004 (Vite proxy)，与 base_url 同端口
         page.goto(
-            "http://localhost:3010/api/v1/auth/dev-login?username=admin",
+            "http://localhost:3004/api/v1/auth/dev-login?username=admin",
             wait_until="domcontentloaded",
             timeout=10000
         )
@@ -1106,6 +1109,95 @@ class PlaywrightCLI:
         """刷新页面"""
         page = self._ensure_browser()
         page.reload(wait_until="domcontentloaded", timeout=self.NAVIGATION_TIMEOUT)
+
+    def shortcut_chart_view(
+        self,
+        target_path: str = '/system/archdata',
+        product_code: str = None,
+        product_id: int = None,
+        version_code: str = None,
+        version_id: int = None,
+        scope: dict = None,
+        base_url: str = "http://localhost:3004",
+        wait_for_selector: str = None,
+        timeout: int = 15000
+    ) -> Page:
+        """
+        [FIX 2026-07-31] dev shortcut: 通过 URL 参数直达 EmbeddedChartView (跳过产品/版本/scope 选择 UI)。
+
+        设计目的: 让 AI/开发排查 EmbeddedChartView bug 时 5 秒直达图表视图, 不必手动点选。
+        仅在 dev 构建中启用 (前端 import.meta.env.DEV 检测 shortcut 参数)。
+
+        Args:
+            target_path: 路由 path (默认 /system/archdata)
+            product_code: 产品 code (如 'TTTTT000')
+            product_id: 产品 ID (int, 优先于 product_code)
+            version_code: 版本 code (如 'V11')
+            version_id: 版本 ID (int, 优先于 version_code)
+            scope: 范围 dict, 可包含 domain/sub_domain/service_module/business_object/relation_codes/relation_ids/relation_categories 各为 ID 列表
+            base_url: 前端 base URL
+            wait_for_selector: 等待的 CSS 选择器 (默认 '.mermaid-container svg')
+            timeout: 超时 (ms)
+
+        Returns:
+            Page 对象
+
+        用法示例:
+            cli.shortcut_chart_view(
+                product_id=507,
+                version_id=863,
+                scope={'business_object': [1, 2, 3]}
+            )
+        """
+        import base64 as _b64
+        import urllib.parse as _urlparse
+
+        params = ['shortcut=1']
+        if product_id is not None:
+            params.append(f'productId={int(product_id)}')
+        elif product_code:
+            params.append(f'productCode={_urlparse.quote(product_code)}')
+        if version_id is not None:
+            params.append(f'versionId={int(version_id)}')
+        elif version_code:
+            params.append(f'versionCode={_urlparse.quote(version_code)}')
+        if scope:
+            # scope 用 base64(JSON) 编码, 避免 URL 转义麻烦
+            scope_b64 = _b64.b64encode(json.dumps(scope).encode('utf-8')).decode('ascii')
+            params.append(f'scope={scope_b64}')
+
+        full_url = f'{base_url}{target_path}?{"&".join(params)}'
+
+        # dev-login 设 cookie
+        page = self._ensure_browser()
+        page.goto(
+            f"{base_url}/api/v1/auth/dev-login?username=admin",
+            wait_until="domcontentloaded",
+            timeout=10000
+        )
+        # 直接 goto 完整 URL (触发整页刷新, 确保 URL 参数生效)
+        page.goto(full_url, wait_until="domcontentloaded", timeout=10000)
+
+        # 等 store + versionContext 就绪
+        self._wait_for_store_ready(timeout=timeout)
+
+        # 默认等待 svg 出现 (chart 渲染完成)
+        if wait_for_selector is None:
+            wait_for_selector = 'svg g.node'
+
+        try:
+            page.wait_for_selector(wait_for_selector, timeout=timeout)
+        except Exception:
+            # fallback: 等 .mermaid-container
+            try:
+                page.wait_for_selector('.mermaid-container', timeout=3000)
+            except Exception:
+                pass
+
+        # 等额外的渲染稳定时间
+        page.wait_for_timeout(800)
+
+        return page
 
     def go_back(self):
         """后退"""

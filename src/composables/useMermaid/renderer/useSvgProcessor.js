@@ -3,6 +3,7 @@ import { useTooltip } from '../tooltip/useTooltip.js'
 import { useAnnotation, useAnnotationOverlay } from '../annotation/index.js'
 import { useInteraction } from '../interaction/useInteraction.js'
 import { isBidirectionalLink } from '../syntax/_shared/arrowHelper.js'
+import { useDiagnostics } from '../core/useDiagnostics.js'
 
 /**
  * SVG 后处理逻辑
@@ -21,6 +22,7 @@ export function useSvgProcessor(options) {
     annotationOverlay: useAnnotationOverlay(),
     ...options
   }
+  const diag = useDiagnostics()  // [FIX 2026-08-01] 统一诊断入口
 
   /**
    * 修复 SVG ViewBox（处理负坐标）
@@ -114,10 +116,12 @@ export function useSvgProcessor(options) {
       const labelText = (edgeLabel.textContent || '').trim()
       if (!labelText) return
 
-      // [v40.1 关键修复] 同时匹配 3 个字段 (优先级: code > relationCode > relationDesc)
-      //   code: 关系实例编码 (arch data 路径下的 label 文本)
-      //   relationCode: 关系类型编码 (Excel 导入 / 旧版本下的 label 文本)
-      //   relationDesc: 关系描述 (兜底)
+      // [v40.1] 精确匹配 link.code / relationCode / relationDesc
+      //   ELK 引擎生成的 link label 是 sourceName-targetName 拼接 (如 "PLA001-PLD00201"),
+      //   与 link.sourceCode 不一致, 无法用文本精确匹配。
+      //   这种情况下 annotationList 里的 relation targetId 来自 link.relationCode,
+      //   annotation panel item 点击会通过 highlightTargetElement 找 [data-relation-code="..."],
+      //   若 ELK 自动 label 不可匹配, 此 attribute 缺失, 但不影响 annotation panel 链路 (annotationList 内部仍可工作)。
       const matchedLink = diagramData.links.find(link => {
         if (link.code && link.code === labelText) return true
         if (link.relationCode && link.relationCode === labelText) return true
@@ -133,13 +137,12 @@ export function useSvgProcessor(options) {
       }
     })
 
-    // [v40.2 诊断] 输出标记的 edgeLabel 数量
+    // [FIX 2026-08-01] 收集诊断信息但不在生产 console 输出
     const labeledCount = svgEl.querySelectorAll('g.edgeLabel[data-relation-code]').length
     const sampleCodes = Array.from(svgEl.querySelectorAll('g.edgeLabel[data-relation-code]'))
       .slice(0, 5)
       .map(el => el.getAttribute('data-relation-code'))
-    console.log('[v40.2 诊断] addLinkCodeAttributes: marked %d edgeLabels with data-relation-code, sample=%s',
-      labeledCount, JSON.stringify(sampleCodes))
+    diag.recordStepMeta('addLinkCodeAttributes', { labeledCount, sampleCodes })
   }
 
   /**
@@ -162,7 +165,7 @@ export function useSvgProcessor(options) {
    */
   const addBidirectionalAttributes = (svgEl, diagramData) => {
     if (!diagramData || !diagramData.links) {
-      console.log('[v40.2 诊断] addBidirectionalAttributes: no diagramData.links')
+      diag.recordStepMeta('addBidirectionalAttributes', { reason: 'no_diagramData_links' })
       return
     }
 
@@ -173,8 +176,11 @@ export function useSvgProcessor(options) {
         .map(link => link.relationCode)
         .filter(Boolean)
     )
-    console.log('[v40.2 诊断] addBidirectionalAttributes: totalLinks=%d, bidiCodes=%d, codes=%s',
-      (diagramData.links || []).length, bidiCodes.size, JSON.stringify([...bidiCodes]))
+    diag.recordStepMeta('addBidirectionalAttributes', {
+      totalLinks: (diagramData.links || []).length,
+      bidiCodesCount: bidiCodes.size,
+      bidiCodes: [...bidiCodes].slice(0, 5)
+    })
 
     if (bidiCodes.size === 0) return
 
@@ -211,14 +217,14 @@ export function useSvgProcessor(options) {
       })
       bidiEdgesMarked++
     })
-    console.log('[v40.2 诊断] addBidirectionalAttributes: marked %d paths with data-bidirectional=true', bidiEdgesMarked)
+    diag.recordStepMeta('addBidirectionalAttributes', { bidiEdgesMarked })
   }
 
   /**
    * 应用样式修复
    */
   const applyStyleFixes = (svgEl, diagramType, mermaidContainer, textColor) => {
-    console.log('[applyStyleFixes] textColor:', textColor)
+    // [FIX 2026-08-01] 移除 [v40.2 诊断] 噪音 console.log, 改由 useDiagnostics hooks 集中管理
     svgStyle.fixArrowMarkers(svgEl, diagramType, mermaidContainer, textColor)
     svgStyle.fixLabelBackground(svgEl)
   }
@@ -255,8 +261,9 @@ export function useSvgProcessor(options) {
 
   /**
    * 渲染备注叠加层
+   * @param {Object} interaction - (可选) useInteraction 实例, 提供 centerElement 回调用于点击 annotation 时居中元素
    */
-  const renderAnnotationOverlay = (svgEl, diagramData, diagramType, annotationConfig, nodeColorMappings) => {
+  const renderAnnotationOverlay = (svgEl, diagramData, diagramType, annotationConfig, nodeColorMappings, interaction = null) => {
     if (!annotationConfig) return
 
     // [V_NEW 2026-06-29] 传递 annotation category 过滤 - 主线不受影响 (空数组 = 不过滤)
@@ -272,6 +279,9 @@ export function useSvgProcessor(options) {
 
     annotationOverlay.removeAnnotationLayers(svgEl)
 
+    // [FIX 2026-07-31 v2] bindAnnotationInteraction 必须在 annotationList 为空时也调用
+    //   onSvgClick 处理节点单击 + 居中 - 与 annotation item 是否存在无关
+    //   之前只在 annotationList.length > 0 时调用 → 无 annotation 时单击节点无反应
     if (annotationList.length > 0) {
       const numberMap = annotation.buildNumberMap(annotationList)
       annotationOverlay.overlayNumberMarkers(svgEl, numberMap, annotationList)
@@ -279,8 +289,13 @@ export function useSvgProcessor(options) {
         position: annotationConfig.annotationPanelPosition || 'bottom',
         showIcons: annotationConfig.showAnnotationIcons || false
       })
-      annotationOverlay.bindAnnotationInteraction(svgEl, annotationList)
     }
+    // 始终绑定 svg click listener (支持单击节点/容器/连线 高亮 + 居中)
+    annotationOverlay.bindAnnotationInteraction(svgEl, annotationList, {
+      onCenterElement: interaction && interaction.centerElement
+        ? (targetEl) => interaction.centerElement(svgEl, targetEl)
+        : null
+    })
 
     // 渲染颜色图例
     if ((diagramType === 'serviceModule' || diagramType === 'businessObject') && diagramData) {
@@ -294,6 +309,31 @@ export function useSvgProcessor(options) {
   }
 
   /**
+   * [FIX 2026-07-31] 增量刷新颜色图例
+   *
+   * 用法: 切换 colorGroupBy 后, 不重跑 mermaid.run, 只重建 legend panel。
+   *   updateColorsOnly() 已负责更新节点/连线颜色, 这里只同步 legend。
+   *
+   * @param {SVGElement} svgEl - mermaid 渲染的 SVG
+   * @param {Object} diagramData - 包含 nodes/colorGroupBy/nodeColorMappings
+   * @param {Object} annotationConfig - centerScopeHighlight / legendPosition
+   * @param {Array} nodeColorMappings - 当前节点的 colorMap (从 generateMermaidCode 返回值)
+   */
+  const updateColorLegend = (svgEl, diagramData, annotationConfig, nodeColorMappings) => {
+    if (!annotationConfig) return
+    if (diagramData?.nodes?.[0]?.category !== 'object' && !diagramData?.serviceModules?.length) {
+      return
+    }
+    const centerScopeHighlight = annotationConfig.centerScopeHighlight !== false
+    const colorLegendData = buildColorLegendData(diagramData, nodeColorMappings, centerScopeHighlight)
+    if (colorLegendData && colorLegendData.length > 0) {
+      annotationOverlay.overlayColorLegend(svgEl, colorLegendData, {
+        position: annotationConfig.legendPosition || 'top-left'
+      })
+    }
+  }
+
+  /**
    * 构建颜色图例数据
    */
   const buildColorLegendData = (diagramData, nodeColorMappings, centerScopeHighlight = true) => {
@@ -301,6 +341,31 @@ export function useSvgProcessor(options) {
     const { nodes, colorGroupBy, centerScopeColor, centerObjectColor } = diagramData
 
     if (!nodes || nodes.length === 0) return legendData
+
+    // [FIX 2026-07-31 v3] 统计每个 groupKey 下是否全部节点都是中心节点
+    //   若是, 该 group 的图例项应隐藏 (因为所有节点都已被"中心范围"色块覆盖, 不会用分组色)
+    //   之前: 任何含节点的 groupKey 都会展示图例, 导致"需求计划"等全是中心节点的 group 出现空色块
+    const groupTotalNodes = new Map()
+    const groupCenterNodes = new Map()
+    nodes.forEach(node => {
+      let groupKey = null
+      if (colorGroupBy === 'subDomain') {
+        groupKey = node.subDomain
+      } else if (colorGroupBy === 'serviceModule') {
+        groupKey = node.serviceModuleName || node.serviceModule || node.name
+      } else {
+        groupKey = node.domain
+      }
+      if (!groupKey) return
+      groupTotalNodes.set(groupKey, (groupTotalNodes.get(groupKey) || 0) + 1)
+      if (centerScopeHighlight && node.isCenter) {
+        groupCenterNodes.set(groupKey, (groupCenterNodes.get(groupKey) || 0) + 1)
+      }
+    })
+    const isGroupFullyCenter = (groupKey) =>
+      centerScopeHighlight &&
+      groupCenterNodes.get(groupKey) === groupTotalNodes.get(groupKey) &&
+      groupTotalNodes.get(groupKey) > 0
 
     const colorMap = new Map()
     let hasCenterNodes = false
@@ -320,6 +385,9 @@ export function useSvgProcessor(options) {
         hasCenterNodes = true
       }
 
+      // [FIX 2026-07-31 v3] 跳过"全部都是中心节点"的 groupKey
+      if (isGroupFullyCenter(groupKey)) return
+
       if (!colorMap.has(groupKey)) {
         let color = null
         if (nodeColorMappings && nodeColorMappings.length > 0) {
@@ -332,34 +400,8 @@ export function useSvgProcessor(options) {
           color = node.color || '#e0e0e0'
         }
 
-        if (!(centerScopeHighlight && node.isCenter)) {
-          colorMap.set(groupKey, color)
-        }
+        colorMap.set(groupKey, color)
       }
-    })
-
-    nodes.forEach(node => {
-      let groupKey = null
-      if (colorGroupBy === 'subDomain') {
-        groupKey = node.subDomain
-      } else if (colorGroupBy === 'serviceModule') {
-        groupKey = node.serviceModuleName || node.serviceModule || node.name
-      } else {
-        groupKey = node.domain
-      }
-      if (!groupKey || colorMap.has(groupKey)) return
-
-      let color = null
-      if (nodeColorMappings && nodeColorMappings.length > 0) {
-        const mapping = nodeColorMappings.find(m => m.nodeCode === node.code)
-        if (mapping) {
-          color = mapping.color
-        }
-      }
-      if (!color) {
-        color = node.color || '#e0e0e0'
-      }
-      colorMap.set(groupKey, color)
     })
 
     // 先添加中心范围颜色项（如果有中心范围节点）
@@ -448,13 +490,15 @@ export function useSvgProcessor(options) {
       svgEl.setAttribute('preserveAspectRatio', 'xMidYMid slice')
     }
 
-    // 关键诊断 v7：输出关键尺寸到 console，便于排查"全屏留白"问题
-    console.log('[setupCanvasLayout] container:', containerWidth, 'x', containerHeight,
-      '| wrapper:', wrapper.style.width, 'x', wrapper.style.height,
-      '| draggable:', draggable.style.width, 'x', draggable.style.height,
-      '| pre:', pre.style.width, 'x', pre.style.height,
-      '| svg:', svgEl?.getAttribute('preserveAspectRatio'),
-      '| containerEl.offset:', containerEl.offsetWidth, 'x', containerEl.offsetHeight)
+    // [FIX 2026-08-01] 移除关键诊断 v7 console.log, 改由 useDiagnostics 收集 (chart_diag.dump() 一键读取)
+    diag.recordStepMeta('setupCanvasLayout', {
+      container: `${containerWidth}x${containerHeight}`,
+      wrapper: `${wrapper.style.width}x${wrapper.style.height}`,
+      draggable: `${draggable.style.width}x${draggable.style.height}`,
+      pre: `${pre.style.width}x${pre.style.height}`,
+      svgPreserveAspectRatio: svgEl?.getAttribute('preserveAspectRatio'),
+      containerElOffset: `${containerEl.offsetWidth}x${containerEl.offsetHeight}`
+    })
   }
 
   /**
@@ -538,12 +582,13 @@ export function useSvgProcessor(options) {
    * 完整的后处理流程
    * 注意：此函数只处理 SVG 元素，不包含交互设置（交互在组件中单独调用）
    */
-  const processSvg = (svgEl, props, relationDescriptions, mermaidContainer, nodeColorMappings) => {
-    console.log('[processSvg] START, svgEl:', !!svgEl, 'layoutEngine:', props?.layoutEngine)
+  const processSvg = (svgEl, props, relationDescriptions, mermaidContainer, nodeColorMappings, interaction = null) => {
     if (!svgEl) {
-      console.log('[processSvg] early return: svgEl is falsy')
+      diag.recordStepMeta('processSvg', { reason: 'svgEl_falsy' })
       return
     }
+    const tProcess = diag.time('process_svg')
+    diag.recordStepMeta('processSvg', { started: true, layoutEngine: props?.layoutEngine })
 
     const hideTails = props.layoutEngine === 'elk' || props.diagramData?.hideLinkLabelTails === true
 
@@ -573,7 +618,7 @@ export function useSvgProcessor(options) {
     reorderZoneRows(svgEl)
 
     if (props.annotationConfig) {
-      renderAnnotationOverlay(svgEl, props.diagramData, props.diagramType, props.annotationConfig, nodeColorMappings)
+      renderAnnotationOverlay(svgEl, props.diagramData, props.diagramType, props.annotationConfig, nodeColorMappings, interaction)
     }
 
     // [v33 关键修复] 调用 fixEdgeLabelSize, 必须在 layout 完成后
@@ -581,6 +626,7 @@ export function useSvgProcessor(options) {
     // 之前 fixEdgeLabelSize 导出后从未调用, 导致 v32 CSS 修复只在初次渲染生效
     // ELK 二次布局/全屏切换后宽度变化时, 右边字符仍被截掉
     scheduleEdgeLabelFix(svgEl)
+    diag.endStep('process_svg', tProcess)
   }
 
   /**
@@ -644,6 +690,8 @@ export function useSvgProcessor(options) {
     addBidirectionalAttributes,
     cleanup,
     // 关键导出 v26：导出 buildColorLegendData 让 HTML 导出器复用 legend 逻辑
-    buildColorLegendData
+    buildColorLegendData,
+    // [FIX 2026-07-31] 导出 updateColorLegend 供 MermaidComponent.updateColorsOnly 增量刷新 legend
+    updateColorLegend
   }
 }
