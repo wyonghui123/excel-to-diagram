@@ -6,6 +6,14 @@
 
 ---
 
+## 2026-08
+
+| 日期 | 主题 | 文档 | 核心要点 |
+|------|------|------|---------|
+| 08-01 | **Phase 6 EmbeddedChartView + 快捷验证链路 连续丢失深度复盘** | [2026-08-01-phase6-loss-deep-retrospective.md](2026-08-01-phase6-loss-deep-retrospective.md) | 4 类丢失(L1-L4+L3-附加) × 4 层根因(代码/流程/架构/规范) × 7 条铁律 × A1-A6 落地行动项 |
+
+---
+
 ## 2026-06
 
 | 日期 | 主题 | 文档 | 核心要点 |
@@ -13,14 +21,17 @@
 | 06-15 | **Mermaid 测试方法论 + 基础设施提案** | [2026-06-15-mermaid-test-methodology.md](2026-06-15-mermaid-test-methodology.md) | 三层坐标互转 / 6 个脚本演进的胜与痛 / 4 层基础设施提案 (`meta/tests/mermaid/`) / 8 条硬约束 |
 | 06-15 | **SVG edge label 居中问题 (v40.6→v40.8)** | [2026-06-15-svg-edge-label-centering.md](2026-06-15-svg-edge-label-centering.md) | xMidYMid slice 陷阱 / viewport 像素 ≠ SVG 单位 / 5 条铁律 |
 | 06-11 | **Edge label 截断问题** | [2026-06-11-edge-label-truncation.md](2026-06-11-edge-label-truncation.md) | 历史, edge label 截断 |
+| 06-04 | **RelationScopeTree 5 个连续 Bug** | [2026-06-04-relation-scope-tree-bug.md](2026-06-04-relation-scope-tree-bug.md) | 5 阶段清理 / 单一事实源 / e2e 权威化 |
 
 ---
 
 ## 按主题分类
 
 ### 🐛 Bug 复盘
+- [2026-08-01-phase6-loss-deep-retrospective.md](2026-08-01-phase6-loss-deep-retrospective.md) — Phase6 4类丢失连续bug (交付非原子/验证链路瘫痪/启动时序/数据分布)
 - [2026-06-15-svg-edge-label-centering.md](2026-06-15-svg-edge-label-centering.md) — 居中问题
 - [2026-06-11-edge-label-truncation.md](2026-06-11-edge-label-truncation.md) — 截断问题
+- [2026-06-04-relation-scope-tree-bug.md](2026-06-04-relation-scope-tree-bug.md) — RSS 5个连续Bug
 
 ### 🔧 测试方法论
 - [2026-06-15-mermaid-test-methodology.md](2026-06-15-mermaid-test-methodology.md) — Mermaid 图 AI 自动化测试
