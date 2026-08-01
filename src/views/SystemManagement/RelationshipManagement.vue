@@ -101,6 +101,8 @@ const pageRef = ref(null)
 
 // [FIX 2026-07-30 v2] chartConfig 提升到本组件持有，
 // 让 GlobalToolbar（chart-config slot）和 ArchDataChartSwitcher/EmbeddedChartView 共享同一份配置
+// [FIX 2026-08-01] 对齐 EmbeddedChartView 7/31 22:31 大重构版的 layoutControl 结构
+//   (含 layoutType/preserveOrder 字段, 默认 enabled=true 跟随 useDiagramData 自动分组)
 const chartConfig = reactive({
   chartType: 'businessObject',
   colorScheme: 'default',
@@ -109,8 +111,15 @@ const chartConfig = reactive({
   showAnnotationIcon: false,
   annotationCategoryFilter: [],
   layoutEngine: 'elk',
-  layoutControl: { groups: [], overallDirection: 'TB', engine: 'elk', enabled: false },
-  annotationConfig: null
+  direction: 'TD',
+  layoutControl: {
+    enabled: true,
+    layoutType: 'default',
+    overallDirection: 'TB',
+    engine: 'elk',
+    preserveOrder: true,
+    groups: []
+  }
 })
 
 // [FIX 2026-07-31] 布局设置抽屉可见性：ChartMiniToolbar 的"布局设置"按钮触发
