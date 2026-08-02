@@ -705,14 +705,13 @@ export { deriveLayoutGroups } from './layoutGroupsDeriver.js'
 /**
  * 分层管道 + 缓存（spec 4.4）：
  *   L1 树缓存: key = versionId + scopeHash（scope 变才重建）
- *   L2 投影缓存: key = treeRef + terminal（chartType 变才重建）
+ *   L2 投影缓存: key = tree 对象引用 + terminal（chartType 变才重建）
  *   L3/L4 无缓存（纯函数/每次生成）
  */
 export function createHierarchyPipeline() {
   let treeCache = null
   let treeKey = ''
-  let projectionCache = null
-  let projectionKey = ''
+  const projectionCache = new WeakMap()   // tree 对象 → { terminalKey, result }
 
   return {
     getTree({ preview, versionId, scopeHash }) {
@@ -723,11 +722,12 @@ export function createHierarchyPipeline() {
       return treeCache
     },
     project({ treeData, terminal }) {
-      const key = `${terminal}:${treeData?.tree?.id ?? 'root'}`
-      if (projectionCache && projectionKey === key) return projectionCache
-      projectionKey = key
-      projectionCache = projectTree(treeData, { terminalResolver: terminal })
-      return projectionCache
+      const terminalKey = terminal?.name || String(terminal)
+      const entry = projectionCache.get(treeData?.tree)
+      if (entry && entry.terminalKey === terminalKey) return entry.result
+      const result = projectTree(treeData, { terminalResolver: terminal })
+      projectionCache.set(treeData?.tree, { terminalKey, result })
+      return result
     },
   }
 }
@@ -744,6 +744,8 @@ Expected: 全部 PASS（buildHierarchyTree 3 + projectTree 3 + colorize 2 + layo
 git add src/services/hierarchyTree/index.js
 git commit -m "feat(hierarchy): 管道装配 createHierarchyPipeline + 分层缓存"
 ```
+
+> **执行修正记录（2026-08-02）**：原 L2 投影缓存 key 用 `tree.id`（固定为 `'P_ROOT'`），scope 变化触发 L1 重建后仍会命中旧投影缓存。改为 WeakMap 以 tree 对象引用作 key，树重建即自动失效，正确性不受影响。
 
 ---
 
