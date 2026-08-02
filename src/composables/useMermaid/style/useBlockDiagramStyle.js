@@ -22,8 +22,11 @@ export const BLOCK_DIAGRAM_STYLES = {
     fontSize: 16
   },
   classDefs: {
-    default: 'fill:#fafafa,stroke:#666666,stroke-width:1px,color:#000000,font-size:24px,text-align:center',
-    node: 'text-align:center,font-size:24px,font-weight:bold',
+    // [FIX 2026-08-02] 节点字号 24px→16px: classDef default 对所有无显式 class 的节点生效,
+    //   classDef node 由 :::node 标记应用, 两处 24px 导致 BO/SM 图节点字体过大 (用户反馈"字体很大")。
+    //   容器标题仍为 24px (CSS 注入 #mermaid-italic-style), 16px 节点 + 24px 容器形成正确层级。
+    default: 'fill:#fafafa,stroke:#666666,stroke-width:1px,color:#000000,font-size:16px,text-align:center',
+    node: 'text-align:center,font-size:16px,font-weight:bold',
     container: 'fill:#ffffff,stroke:#000000,stroke-width:2px',
     edgeLabel: 'color:#000000,fill:none,stroke:none,font-size:16px'
   }
