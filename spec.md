@@ -60,6 +60,14 @@ modified_files:
   - src/services/auditLogService.js
   # [FIX BUG-V047 2026-07-05 dev agent] GlobalToolbar 切回 d776211 + 加 fetchProducts (修 77b6d6f 改坏)
   - src/components/common/GlobalToolbar/GlobalToolbar.vue
+  # [FIX 2026-08-02 chart 增量渲染 bug1-3] SM 图中心范围/配色走增量路径 + 画布缩放修复
+  - src/components/MermaidComponent.vue
+  - src/composables/useMermaid/dataMap/useMermaidDataMap.js
+  - src/composables/useMermaid/renderer/useSvgProcessor.js
+  - src/services/serviceModuleDiagramBuilder.js
+  - src/views/AADiagramApp/composables/useDiagramData.js
+  - src/views/SystemManagement/components/ArchDataChart/EmbeddedChartView.vue
+  - test_helpers/chart_e2e.py
 
 new_files:
   # IE 智能体的 e2e 测试 (21)

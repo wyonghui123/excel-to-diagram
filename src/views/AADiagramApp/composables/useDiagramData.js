@@ -1569,7 +1569,11 @@ export function useDiagramData() {
           preview: pipelinePreview,
           chartType: 'serviceModule',
           versionId: currentVersionId.value,
-          scopeHash: computeConfigHash(),
+          // [FIX 2026-08-02] L1 树缓存 key 必须是"树的输入指纹" (preview 本身):
+          //   之前用 computeConfigHash (含颜色/布局配置) → 切配色/颜色分组时 L1 树重建,
+          //   违反 spec 4.4 (颜色变化只触发 L3/L4)。preview 指纹由内容决定,
+          //   天然区分 BO/SM (relationships 不同) 且不受颜色/布局配置影响。
+          scopeHash: JSON.stringify(pipelinePreview),
           serviceModules: smFromContainers,
           serviceModuleRelationships: filteredServiceModuleRelationships,
           domainProducts: filteredDomainProducts,
@@ -1711,7 +1715,10 @@ export function useDiagramData() {
           preview: pipelinePreview,
           chartType: 'businessObject',
           versionId: currentVersionId.value,
-          scopeHash: computeConfigHash()
+          // [FIX 2026-08-02] L1 树缓存 key 用 preview 输入指纹 (同 SM 路径):
+          //   computeConfigHash 含颜色/布局配置, 切配色/颜色分组时会让 L1 树重建,
+          //   违反 spec 4.4 (颜色变化只触发 L3/L4)。preview 指纹不受颜色配置影响。
+          scopeHash: JSON.stringify(pipelinePreview)
         })
 
         if (configStore.useUnifiedRenderer) {

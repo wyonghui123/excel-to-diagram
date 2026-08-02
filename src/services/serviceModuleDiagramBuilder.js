@@ -203,6 +203,12 @@ export function buildServiceModuleDiagramData({
       groups: deriveLayoutGroups(projection.containers),
     }
 
+    // [FIX 2026-08-02] 顶层补齐 centerScopeHighlight/centerScope 契约字段 (与 BO 图 builder 一致):
+    //   - MermaidComponent watch 用 diagramData.centerScopeHighlight 变化判定增量路径,
+    //     缺它 → 切换"区分中心范围"时 centerScopeHighlightChanged=false → 全量 renderMermaid() (用户感知"刷新图表区域")
+    //   - updateColorsOnly.updateNodeColors 用 centerScope 集合判定中心节点 fill,
+    //     缺它 → centerScopeSet 空 → 增量路径下中心节点不涂 centerScopeColor
+    //   centerScope 取自 colorize 已烘焙的 isCenter 节点 (与 useServiceModuleSyntax 语法层判定严格一致)
     return {
       nodes: coloredNodes,
       links,
@@ -212,6 +218,8 @@ export function buildServiceModuleDiagramData({
       nodeTextColor, layoutTemplate, customColors, hideLinkLabelTails,
       layoutControlConfig: unifiedLayoutConfig,
       groupControlTitleMap,
+      centerScopeHighlight: centerScopeHighlight !== false,
+      centerScope: coloredNodes.filter(n => n.isCenter).map(n => n.code),
     }
   }
 
@@ -370,7 +378,10 @@ export function buildServiceModuleDiagramData({
     customColors,
     hideLinkLabelTails,
     layoutControlConfig,
-    groupControlTitleMap
+    groupControlTitleMap,
+    // [FIX 2026-08-02] 与统一管道分支一致: 补齐顶层契约字段 (watch 增量路径 + updateNodeColors 依赖)
+    centerScopeHighlight: centerScopeHighlight !== false,
+    centerScope: [...finalCenterServiceModuleCodes]
   };
 }
 

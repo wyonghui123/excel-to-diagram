@@ -162,6 +162,9 @@ const {
 if (typeof window !== 'undefined') {
   window.__archPage = window.__archPage || {}
   window.__archPage.generateDiagram = generateDiagram
+  // [E2E 2026-08-02] 暴露 diagramData 引用 (只读诊断: 统一管道输出节点结构 / domain / subDomain,
+  //   以及颜色映射链路 buildObjectToModuleMap 的输入), chart_diag / probe 脚本读取验证。
+  window.__archPage.diagramData = diagramData
 }
 
 // [FIX 2026-07-29 画布缩小] 监听画布容器尺寸变化，调用 MermaidComponent.relayoutCanvas

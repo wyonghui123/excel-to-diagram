@@ -906,7 +906,18 @@ export default {
           const newCustomColors = newVal?.customColors || {}
           const oldCustomColors = oldVal?.customColors || {}
           const customColorsChanged = JSON.stringify(newCustomColors) !== JSON.stringify(oldCustomColors)
-          const nodesChanged = JSON.stringify(newVal.nodes) !== JSON.stringify(oldVal.nodes)
+          // [FIX 2026-08-02] 结构 diff 需忽略颜色派生字段 (color/textColor/isCenter):
+          //   统一管道 colorize 会把它们烘进节点对象, 若直接比对, 切换颜色分组/配色时
+          //   nodesChanged=true → 走全量 renderMermaid (mermaid.run 重排 + 缩放重置),
+          //   而升级前节点无这些字段 → 走 updateColorsOnly 增量变色 (直接改 SVG fill)。
+          //   颜色增量路径 (updateColorsOnly) 基于 nodeColorMappings + 当前 colorGroupBy/
+          //   colorScheme/customColors 重算, 不依赖节点内烘焙色, 因此忽略是安全的。
+          const stripColorDerived = (list) => (list || []).map((n) => {
+            if (!n || typeof n !== 'object') return n
+            const { color, textColor, isCenter, ...rest } = n
+            return rest
+          })
+          const nodesChanged = JSON.stringify(stripColorDerived(newVal.nodes)) !== JSON.stringify(stripColorDerived(oldVal.nodes))
           const linksChanged = JSON.stringify(newVal.links) !== JSON.stringify(oldVal.links)
           const textColorChanged = newVal?.textColor !== oldVal?.textColor
           // [FIX 2026-07-31] 配色 (colorScheme) 和 区分中心范围 (centerScopeHighlight) 也走增量更新

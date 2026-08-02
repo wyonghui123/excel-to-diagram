@@ -408,7 +408,14 @@ export function useSvgProcessor(options) {
     const draggable = draggableArea?.value || document.querySelector('.draggable-area')
     const content = document.querySelector('.mermaid-content')
     const pre = document.querySelector('pre.mermaid')
-    const containerEl = mermaidContainer?.value || document.querySelector('.mermaid-container')
+    // [FIX 2026-08-02] 必须用真 .mermaid-container, 不能依赖 mermaidContainer 参数:
+    //   该 ref 在模板里绑定在 .mermaid-content 上 (MermaidComponent L38), 其
+    //   getBoundingClientRect() 包含用户 wheel 缩放 transform 的视觉尺寸。
+    //   全量渲染 (切中心范围/图表类型等) 时 setupCanvasLayout 会把 wrapper/draggable
+    //   锁在"缩放后的视觉尺寸"上, 下次渲染再读取已缩小的尺寸 → 画布每次缩小一倍 (累积)。
+    //   调用点传参也不一致 (L276 传真容器 mermaidContainerEl, L479 传 content),
+    //   统一优先 DOM 查询真容器 (其 rect = 布局尺寸, 不受子元素 transform 影响)。
+    const containerEl = document.querySelector('.mermaid-container') || mermaidContainer?.value
 
     if (!wrapper || !draggable || !content || !pre || !containerEl) return
 

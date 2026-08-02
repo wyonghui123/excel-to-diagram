@@ -363,13 +363,18 @@ class ChartE2E:
             return {n['code']: n.get('fill') or '' for n in (s.get('nodes') or [])}
 
         def _switch_and_wait(key: str, value: Any) -> None:
-            """切换配置并等待重渲染; 超时不抛异常 (未重渲染时后续断言如实报"无变化")."""
+            """切换配置并等待其生效.
+
+            [FIX 2026-08-02] 颜色/分组/中心范围切换走增量路径 (updateColorsOnly 同步改 SVG,
+            不发新 render 标记): 等新标记 (clear_marker=True) 会因"更新已完成、标记已被清掉"
+            竞态等满超时 (30s/次)。策略: 先短等标记 (覆盖意外触发全量渲染的边界),
+            超时则短等待增量更新应用完成。"""
             self.diag.switch_chart_config(key, value)
             try:
-                self.diag.wait_render_stable()
+                self.diag.wait_render_stable(timeout_ms=3000)
             except TimeoutError:
-                self._print(f'  [WARN] 切换 {key}={value} 后渲染标记未更新 (未重渲染), 继续')
-                time.sleep(1.5)
+                self._print(f'  [WARN] 切换 {key}={value} 后未出现新渲染标记 (增量变色路径), 短等待后继续')
+                time.sleep(1.2)
 
         # B3: 颜色方案切换生效 (default → vibrant → 颜色集合变化)
         if is_smoke:
