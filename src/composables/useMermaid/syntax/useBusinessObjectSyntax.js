@@ -585,16 +585,21 @@ export function useBusinessObjectSyntax() {
     const colors = getColors(data.colorScheme)
 
     const uniqueGroups = new Set()
-    moduleGroups.forEach((group) => {
+    // [FIX 2026-07-31 v3] uniqueGroups 按 BO 自身字段去重 (而非 moduleGroup 的 info)
+    //   原因: moduleGroup 按 domain/submodule 维度聚合, 同 group 可能含多个不同 serviceModule 的 BO。
+    //   修复: 直接遍历 businessObjectNodes 用每个 BO 自身的字段算 groupKey。
+    businessObjectNodes.forEach(node => {
+      const nodeCode = node.code || node.originalName || node.name
+      const selfModule = objectToModuleMap.get(nodeCode) || {}
       let groupKey
       if (colorGroupBy === 'serviceModule') {
-        groupKey = group.info.serviceModuleName || group.info.serviceModule || group.info.name
+        groupKey = selfModule.serviceModuleName || selfModule.serviceModule
       } else if (colorGroupBy === 'subDomain') {
-        groupKey = group.info.subDomain
+        groupKey = selfModule.subDomain || node.subDomain
       } else {
-        groupKey = group.info.domain
+        groupKey = selfModule.domain || node.domain
       }
-      uniqueGroups.add(groupKey)
+      if (groupKey) uniqueGroups.add(groupKey)
     })
 
     const colorMap = assignColorsToGroups(new Set(uniqueGroups), colors, data.customColors || {})
@@ -624,36 +629,35 @@ export function useBusinessObjectSyntax() {
     const optimizedGroups = sortedGroups
 
     const nodeColorMap = new Map()
+    const centerNodeIds = new Set()  // [FIX 2026-08-02 v5] 中心范围节点 id 集合 (用于 centerScopeColor 填色区分)
     const centerScopeBoCodes = data.centerScope || []
     const centerScopeHighlight = data.centerScopeHighlight !== false  // 默认为true
-    const centerScopeColor = data.centerScopeColor || '#EDEDED'
-    const centerColorMap = {
-      'gray': '#808080',
-      '#1890FF': '#1890FF',
-      '#52C41A': '#52C41A',
-      '#FAAD14': '#FAAD14',
-      '#722ED1': '#722ED1'
-    }
-    const centerColor = centerColorMap[centerScopeColor] || centerScopeColor
+    const centerScopeColor = data.centerScopeColor === 'gray' ? '#808080' : (data.centerScopeColor || '#808080')
 
     optimizedGroups.forEach((group) => {
-      let groupKey
-      if (colorGroupBy === 'serviceModule') {
-        groupKey = group.info.serviceModuleName || group.info.serviceModule || group.info.name
-      } else if (colorGroupBy === 'subDomain') {
-        groupKey = group.info.subDomain
-      } else {
-        groupKey = group.info.domain
-      }
-      const groupColor = colorMap.get(groupKey)
-      // 如果 groupColor 不存在，使用第一个颜色作为默认      const defaultColor = colors[0]
+      // [FIX 2026-07-31 v3] 颜色按 BO 自身字段分组, 而非 moduleGroup 的 info
+      //   之前用 group.info.serviceModuleName 作为 groupKey, 但 moduleGroup 是按 domain/submodule
+      //   维度聚合的（多个不同 serviceModule 的 BO 会进同一个 moduleGroup）, 导致 group.info
+      //   只记录首个 BO 的 serviceModuleName, 后续 BO 全被染成同色。
+      //   修复: 用每个 node 自身的 serviceModuleName/serviceModule/subDomain/domain 算 groupKey。
       group.nodes.forEach(node => {
         const nodeCode = node.code || node.name
-        // 只有当centerScopeHighlight 为true 时，才对中心范围节点特殊处理
-        if (centerScopeHighlight && centerScopeBoCodes.includes(nodeCode)) {
-          nodeColorMap.set(node.id, centerColor)
+        let groupKey
+        if (colorGroupBy === 'serviceModule') {
+          // 优先用 BO 自身的 serviceModuleName, fallback 到 group.info
+          const selfModule = objectToModuleMap.get(nodeCode) || objectToModuleMap.get(node.originalName)
+          groupKey = selfModule?.serviceModuleName || selfModule?.serviceModule || group.info.serviceModuleName || group.info.serviceModule || group.info.name
+        } else if (colorGroupBy === 'subDomain') {
+          groupKey = group.info.subDomain
         } else {
-          nodeColorMap.set(node.id, groupColor || defaultColor)
+          groupKey = group.info.domain
+        }
+        const groupColor = colorMap.get(groupKey)
+        const defaultColor = colors[0]
+        // [FIX 2026-08-02 v5] 回到原方案: nodeColorMap 统一记分组色 (中心节点区分在 style 生成时用 centerScopeColor)
+        nodeColorMap.set(node.id, groupColor || defaultColor)
+        if (centerScopeHighlight && centerScopeBoCodes.includes(nodeCode)) {
+          centerNodeIds.add(node.id)
         }
       })
     })
@@ -829,7 +833,10 @@ export function useBusinessObjectSyntax() {
           const nodeCode = node.code
           const id = nodeCode ? nodeCodeToIdMap.get(nodeCode) : nodeNameToIdMap.get(node.originalName || node.name)
           const nodeColor = nodeColorMap.get(id)
-          mermaidCode += `  style ${id} ${getNodeStyle(nodeColor || '#FF9AA2', textColor)}\n`
+          const isCenter = centerNodeIds.has(id)
+          // [FIX 2026-08-02 v5] 回到原方案: 中心范围节点 fill = centerScopeColor (指定颜色), 默认边框
+          const finalColor = isCenter ? centerScopeColor : (nodeColor || '#FF9AA2')
+          mermaidCode += `  style ${id} ${getNodeStyle(finalColor, textColor)}\n`
           nodeColorMappings.push({ nodeId: id, color: nodeColor, nodeCode: node.code, nodeName: node.originalName || node.name })
         })
 
@@ -877,19 +884,19 @@ export function useBusinessObjectSyntax() {
             const isSourceCenter = centerScopeHighlight && centerScopeBoCodes.includes(linkSourceCode)
             const isTargetCenter = centerScopeHighlight && centerScopeBoCodes.includes(linkTargetCode)
 
-            // 新的颜色规则：            // 1. 如果源和目标中有一个非中心范围的节点，则采用该节点颜色
-            // 2. 如果两个都是非中心范围则采用黑色
-            // 3. 如果两个都是中心范围则采用该节点颜色
+            // [FIX 2026-08-02 v6] 连线颜色规则:
+            //   1. 双中心 (区分中心范围) -> centerScopeColor 灰 (与中心节点灰色一致)
+            //   2. 一中心一非中心 -> 非中心节点的颜色
+            //   3. 双非中心 或 不区分中心范围 (centerScopeHighlight=false) -> 黑色
             let linkColor
-            if (!isSourceCenter && !isTargetCenter) {
-              // 两个都是非中心范围-> 黑色
-              linkColor = '#000000'
-            } else if (isSourceCenter && isTargetCenter) {
-              // 两个都是中心范围 -> 采用源节点颜色（或目标节点颜色）
+            if (isSourceCenter && isTargetCenter) {
+              linkColor = centerScopeColor
+            } else if (isSourceCenter) {
+              linkColor = targetColor || sourceColor || '#333333'
+            } else if (isTargetCenter) {
               linkColor = sourceColor || targetColor || '#333333'
             } else {
-              // 一个中心，一个非中心 -> 采用非中心节点的颜色
-              linkColor = isSourceCenter ? targetColor : sourceColor
+              linkColor = '#000000'
             }
 
             // 关键修复 v26: mermaid 11 对 link label "|" 内空字符串或带特殊字符 ("\\n, |) 报 "Syntax error in text"
@@ -1010,12 +1017,28 @@ export function useBusinessObjectSyntax() {
     })
 
     const nodeColorMappings = []
+    // [FIX 2026-07-31 v3] 颜色分组 + classDef + class 修复 (覆盖无 layoutControlConfig 路径)
+    //   之前只用 style 命令, Mermaid 11 base theme 下 CSS specificity 不够, 切换 colorGroupBy 后变灰。
+    //   现在改用 mermaid 11 推荐的 classDef + class 形式 + style 兜底。
+    const textColorB = data.nodeTextColor || '#000000'
+    const classColorMapB = new Map()
+    let classIdxB = 0
     businessObjectNodes.forEach(node => {
       // 优先使用 code 查找 id，避免同名不同编码的对象冲突
       const nodeCode = node.code
       const id = nodeCode ? nodeCodeToIdMap.get(nodeCode) : nodeNameToIdMap.get(node.originalName || node.name)
       const nodeColor = nodeColorMap.get(id) || '#FF9AA2'
-      mermaidCode += `  style ${id} ${getNodeStyle(nodeColor)}\n`
+      // [FIX 2026-08-02 v5] 回到原方案: 中心节点 fill = centerScopeColor (指定颜色), 默认边框
+      const isCenter = centerNodeIds.has(id)
+      const finalColor = isCenter ? centerScopeColor : nodeColor
+      if (!classColorMapB.has(finalColor)) {
+        const className = `boColor${classIdxB++}`
+        classColorMapB.set(finalColor, className)
+        mermaidCode += `  classDef ${className} ${getNodeStyle(finalColor, textColorB)}\n`
+      }
+      const className = classColorMapB.get(finalColor)
+      mermaidCode += `  class ${id} ${className}\n`
+      mermaidCode += `  style ${id} ${getNodeStyle(finalColor, textColorB)}\n`
       nodeColorMappings.push({ nodeId: id, color: nodeColor, nodeCode: node.code, nodeName: node.originalName || node.name })
     })
 
@@ -1075,7 +1098,16 @@ export function useBusinessObjectSyntax() {
           }
         })
 
-        const linkColor = getLinkColor(sourceGroupKey, targetGroupKey, sourceColor, targetColor)
+        // [FIX 2026-08-02 v6] 与 layout 路径一致的连线颜色规则 (含中心范围判定)
+        const linkSourceCodeB = link.sourceCode || link.sourceName
+        const linkTargetCodeB = link.targetCode || link.targetName
+        const isSourceCenterB = centerScopeHighlight && centerScopeBoCodes.includes(linkSourceCodeB)
+        const isTargetCenterB = centerScopeHighlight && centerScopeBoCodes.includes(linkTargetCodeB)
+        const linkColor = getLinkColor(sourceGroupKey, targetGroupKey, sourceColor, targetColor, {
+          isSourceCenter: isSourceCenterB,
+          isTargetCenter: isTargetCenterB,
+          centerScopeColor
+        })
 
         // 关键修复 v26: 见上 (line 886) 的 mermaid label 特殊字符处理
         // [v39 关系线标题修复] 优先 code → relationCode → relationDesc (与上面 line 895 保持一致)

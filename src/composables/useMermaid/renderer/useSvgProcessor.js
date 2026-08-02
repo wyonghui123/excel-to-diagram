@@ -342,31 +342,10 @@ export function useSvgProcessor(options) {
 
     if (!nodes || nodes.length === 0) return legendData
 
-    // [FIX 2026-07-31 v3] 统计每个 groupKey 下是否全部节点都是中心节点
-    //   若是, 该 group 的图例项应隐藏 (因为所有节点都已被"中心范围"色块覆盖, 不会用分组色)
-    //   之前: 任何含节点的 groupKey 都会展示图例, 导致"需求计划"等全是中心节点的 group 出现空色块
-    const groupTotalNodes = new Map()
-    const groupCenterNodes = new Map()
-    nodes.forEach(node => {
-      let groupKey = null
-      if (colorGroupBy === 'subDomain') {
-        groupKey = node.subDomain
-      } else if (colorGroupBy === 'serviceModule') {
-        groupKey = node.serviceModuleName || node.serviceModule || node.name
-      } else {
-        groupKey = node.domain
-      }
-      if (!groupKey) return
-      groupTotalNodes.set(groupKey, (groupTotalNodes.get(groupKey) || 0) + 1)
-      if (centerScopeHighlight && node.isCenter) {
-        groupCenterNodes.set(groupKey, (groupCenterNodes.get(groupKey) || 0) + 1)
-      }
-    })
-    const isGroupFullyCenter = (groupKey) =>
-      centerScopeHighlight &&
-      groupCenterNodes.get(groupKey) === groupTotalNodes.get(groupKey) &&
-      groupTotalNodes.get(groupKey) > 0
-
+    // [FIX 2026-08-02] 移除 isGroupFullyCenter 跳过逻辑:
+    //   旧逻辑假设"全部为中心节点的 group"节点都被 centerScopeColor 覆盖, 图例色块无意义。
+    //   现在中心节点 fill 用指定颜色 centerScopeColor (v5 原方案), 图例里分组色仍按各 BO 显示,
+    //   所有组的图例都应正常显示。
     const colorMap = new Map()
     let hasCenterNodes = false
 
@@ -384,9 +363,6 @@ export function useSvgProcessor(options) {
       if (centerScopeHighlight && node.isCenter) {
         hasCenterNodes = true
       }
-
-      // [FIX 2026-07-31 v3] 跳过"全部都是中心节点"的 groupKey
-      if (isGroupFullyCenter(groupKey)) return
 
       if (!colorMap.has(groupKey)) {
         let color = null

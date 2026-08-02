@@ -30,8 +30,10 @@ export const BLOCK_DIAGRAM_STYLES = {
 }
 
 export function useBlockDiagramStyle() {
-  const getNodeStyle = (color, textColor = BLOCK_DIAGRAM_STYLES.node.textColor) => {
-    return `fill:${color},stroke:#333333,stroke-width:2px,color:${textColor}`
+  const getNodeStyle = (color, textColor = BLOCK_DIAGRAM_STYLES.node.textColor, stroke = '#333333', strokeWidth = 2, dashArray = null) => {
+    // [FIX 2026-08-02] 支持自定义边框: 中心范围节点用粗虚线边框区分 (fill 保持分组色)
+    const dashPart = dashArray ? `,stroke-dasharray:${dashArray}` : ''
+    return `fill:${color},stroke:${stroke},stroke-width:${strokeWidth}px,color:${textColor}${dashPart}`
   }
 
   const getContainerStyle = (fillColor) => {

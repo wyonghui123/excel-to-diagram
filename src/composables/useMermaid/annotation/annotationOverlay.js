@@ -399,7 +399,7 @@ export function useAnnotationOverlay() {
           //     - 与 annotation 面板 item 点击行为完全对等
           //     - 支持 BO 图节点、BO 图容器 (serviceModule)、SM 图节点、SM 图容器、连线
           //   之前 onSvgClick 只清高亮, 不处理单击节点 → 用户误以为"必须双击"(实际双击触发 autoFit)
-          const { nodeEl, containerEl, edgeEl, edgeLabelEl } = findTargetFromEvent(svg, e.target);
+          const { nodeEl, containerEl, edgeEl, edgeLabelEl } = findTargetFromEvent(svg, e.target, e);
           let clickedTargetEl = null;
           let clickedTargetType = null;
           let clickedTargetId = null;
@@ -407,7 +407,13 @@ export function useAnnotationOverlay() {
           if (nodeEl) {
             clickedTargetEl = nodeEl;
             clickedTargetType = 'node';
-            clickedTargetId = nodeEl.getAttribute('data-code') || nodeEl.getAttribute('data-id');
+            // [FIX 2026-08-02] data-code/data-id 缺失时, 用 nodeLabel 文本兜底
+            //   addNodeCodeAttributes 依赖 label 正则 `\(([^)]+)\)`, 部分节点匹配不上 → 无 data-code.
+            //   之前 fallback 到 data-id 也为空 → 整段 if 跳过 → 当作"空白"清高亮 / 或误命中外层 cluster.
+            //   现在用 label 文本作 targetId, highlightTargetElement 内部 text.includes 可命中.
+            clickedTargetId = nodeEl.getAttribute('data-code')
+              || nodeEl.getAttribute('data-id')
+              || getNodeLabelText(nodeEl);
           } else if (containerEl) {
             clickedTargetEl = containerEl;
             clickedTargetType = 'container';
@@ -471,15 +477,24 @@ export function useAnnotationOverlay() {
      *   - 容器: .subgraph / .cluster (data-container-code)
      *   - 连线 label: .edgeLabel (含 foreignObject, 用户最常点)
      *   - 连线 path: <path>
+     *
+     * [FIX 2026-08-02] 点 cluster 背景空白 ≠ 选中容器:
+     *   仅当点击命中 cluster 的标题/标签 (title) 时才视为容器元素;
+     *   否则 (点到大片空白背景) 继续上溯, 最终回落为空白 → 取消高亮。
+     *   根因: ELK 渲染的 cluster 背景 rect 覆盖整个子域面积,
+     *   用户点"画布空白"实际落到 cluster 背景 → 误选中容器 → 高亮一直不消失。
      */
-    const findTargetFromEvent = (svg, target) => {
+    const findTargetFromEvent = (svg, target, ev = null) => {
       if (!target || target === svg) return {};
       let cur = target;
       // 上溯直到 svg 本身
       while (cur && cur !== svg) {
         if (cur.classList) {
           // 节点
-          if (cur.classList.contains('node') && cur.hasAttribute('data-code')) {
+          // [FIX 2026-08-02] 不再要求 data-code: 无 data-code 的节点 (label 正则匹配不上)
+          //   之前会穿透到外层 cluster 造成"点节点高亮整个 cluster"的误判。
+          //   现在直接识别为 node, 由 onSvgClick 用 label 文本兜底 targetId。
+          if (cur.classList.contains('node')) {
             return { nodeEl: cur };
           }
           // 容器
@@ -492,8 +507,12 @@ export function useAnnotationOverlay() {
           //   用户在图表空白处点击时, e.target 落到这些 wrapper, findTargetFromEvent 上溯找到
           //   wrapper → 错误地触发 onCenterElement → 图表跳到第一个 cluster.
           //   修复: 只对真正的 cluster 触发, subgraphs/subgraph 视为空白 (clearHighlight 而非居中).
+          // [FIX 2026-08-02 v2] 再收紧: cluster 必须命中标题/标签才算是容器 (见函数头注释).
           if (cur.classList.contains('cluster')) {
-            return { containerEl: cur };
+            if (isClusterLabelHit(cur, ev)) {
+              return { containerEl: cur };
+            }
+            // 未命中标题 → 继续上溯 (嵌套场景可能命中外层容器标题, 否则最终回落为空白)
           }
           // 连线 label
           if (cur.classList.contains('edgeLabel')) {
@@ -512,6 +531,34 @@ export function useAnnotationOverlay() {
       }
       return {};
     };
+
+    /**
+     * [FIX 2026-08-02] 判断点击坐标是否命中 cluster 的标题/标签区域
+     *   只有命中标题才认为用户"选中容器", 否则视为点空白 (背景 rect 不视为元素)。
+     */
+    const isClusterLabelHit = (cluster, ev) => {
+      if (!ev || typeof ev.clientX !== 'number') return false
+      const label = cluster.querySelector('.cluster-label, .cluster-title, text')
+      if (!label) return false
+      try {
+        const r = label.getBoundingClientRect()
+        if (!r || (r.width === 0 && r.height === 0)) return false
+        const pad = 6  // 容差, 方便点击标题边缘
+        return ev.clientX >= r.left - pad && ev.clientX <= r.right + pad &&
+               ev.clientY >= r.top - pad && ev.clientY <= r.bottom + pad
+      } catch (e) {
+        return false
+      }
+    }
+
+    /**
+     * [FIX 2026-08-02] 取节点的显示文本 (nodeLabel), 作为无 data-code 时的 targetId 兜底
+     */
+    const getNodeLabelText = (nodeEl) => {
+      if (!nodeEl) return ''
+      const label = nodeEl.querySelector('.nodeLabel, text')
+      return label ? (label.textContent || '').trim() : ''
+    }
 
     /**
      * [FIX 2026-07-31] 从 edgeLabel DOM 找对应 relationCode
@@ -952,6 +999,8 @@ export function useAnnotationOverlay() {
         flex-shrink: 0;
         display: inline-block;
       `;
+      // [FIX 2026-08-02 v6] 中心范围图例项改为实心色块 (v5 起中心节点就是指定颜色 fill,
+      //   不再有"分组色 + 虚线边框"方案, 图例保持纯色块与其他项一致)
       colorDot.innerHTML = `
         <svg width="12" height="12" viewBox="0 0 12 12" xmlns="http://www.w3.org/2000/svg">
           <rect x="0" y="0" width="12" height="12" rx="2" fill="${item.color}" stroke="rgba(0,0,0,0.2)" stroke-width="0.5"/>

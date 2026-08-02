@@ -22,6 +22,22 @@ export function assignColorsToGroups(uniqueGroups, colors, customColors = {}) {
   return colorMap
 }
 
-export function getLinkColor(sourceGroupKey, targetGroupKey, sourceColor, targetColor) {
-  return sourceColor || targetColor || '#333333'
+// [FIX 2026-08-02 v6] getLinkColor 增加中心范围选项 (向后兼容):
+//   options.isSourceCenter / isTargetCenter / centerScopeColor
+//   规则:
+//   1. 双中心 -> centerScopeColor 灰 (与中心节点灰色一致)
+//   2. 一中心一非中心 -> 非中心节点的颜色
+//   3. 双非中心 或 不区分中心范围 -> 黑色
+export function getLinkColor(sourceGroupKey, targetGroupKey, sourceColor, targetColor, options = {}) {
+  const { isSourceCenter = false, isTargetCenter = false, centerScopeColor = '#333333' } = options
+  if (isSourceCenter && isTargetCenter) {
+    return centerScopeColor
+  }
+  if (isSourceCenter) {
+    return targetColor || sourceColor || '#333333'
+  }
+  if (isTargetCenter) {
+    return sourceColor || targetColor || '#333333'
+  }
+  return '#000000'
 }

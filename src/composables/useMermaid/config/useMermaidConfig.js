@@ -140,6 +140,12 @@ export function useMermaidConfig() {
       startOnLoad: false,
       securityLevel: 'loose',
       maxTextSize: maxTextSize,
+      // [FIX 2026-07-30] maxEdges 必须为 TOP-LEVEL 配置（不是 flowchart.maxEdges）
+      //   根因：mermaid 11 的 maxEdges 是顶层 secure 配置项，flowDiagram 读取 this.config.maxEdges
+      //   之前误放在 flowchart 下，导致 mermaid.run() 用默认 500，供应链云 BO 图 (>500边) 被阻断
+      //   错误: "Edge limit exceeded. 500 edges found, but the limit is 500"
+      //   项目规范：Mermaid 配置必须设置 maxEdges: 10000 (顶层)
+      maxEdges: 10000,
       theme: 'base',
       themeVariables: {
         edgeLabelBackground: '#ffffff',

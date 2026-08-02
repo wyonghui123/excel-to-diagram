@@ -266,6 +266,36 @@ if (viewMode.value !== 'chart' && page.canShowChart) toggleEmbeddedView()
 
 ---
 
+## 十、追加发现（2026-08-02）：GlobalToolbar slots / 颜色链路选择器 / 中心范围参数丢失
+
+> 用户反馈"图表视图按钮还在，没有图表展示按钮" + "选择颜色分组、配色、中心范围没有任何效果"，继续排查时从
+> **Trae History 全量扫描 + 运行时 DOM 验证** 又挖出 3 个与本次 reset 相关的丢失项（L5~L7），全部在 8/2 当天修复并经 Playwright 验证。
+
+### 10.1 问题分类
+
+| # | 丢失类别 | 具体表现 | 影响评估 | 证据 / 修复 |
+|---|---------|---------|---------|------------|
+| **L5** | **GlobalToolbar 缺 slot 声明** | 组件只有 4 个硬编码按钮，无 `<slot name="actions" />` / `<slot name="chart-config" />`，MOMP 注入的"图表展示"按钮和 ChartMiniToolbar 被**静默丢弃**（Vue 3 无 slot 时子内容不渲染）。 | 图表视图入口按钮消失 → 用户只能看到旧"图表视图"按钮，功能像没做。 | 从 Trae History 恢复 slots + `hideChartButton`/`activeView` props。[GlobalToolbar.vue](file:///d:/filework/excel-to-diagram/src/components/common/GlobalToolbar/GlobalToolbar.vue) |
+| **L6** | **useMermaidColors 选择器与 Mermaid 11.13 SVG 结构不匹配** | `updateNodeColors` 用 `#N29 rect`，但 Mermaid 11.13 节点 g.id 为 `flowchart-N29-37`（ELK 后缀），且 BO code 写在 `data-code` 而非 `data-id` → **颜色分组/配色切换时 `querySelector` 匹配不到 → 节点不变色**。 | 用户看到的"颜色分组、配色没效果"根因之一（另一个是 L7）。 | 按 Trae History 原始版恢复 `[data-code]` + `g.node[id^="flowchart-{nodeId}-"]` 选择器。[useMermaidColors.js L84-L86](file:///d:/filework/excel-to-diagram/src/composables/useMermaid/color/useMermaidColors.js#L84-L86) |
+| **L7** | **updateColorsOnly 的中心范围参数未接收** | MermaidComponent 已传 `{centerScopeHighlight, centerScope, centerScopeColor}` 给 `updateNodeColors`，但函数签名无第 6 参数 → **中心范围 区分/不区分 切换静默忽略**。 | 用户看到的"中心范围没效果"根因。 | 补上 options 参数 + 中心节点用 centerScopeColor 语义（与旧语法模块一致）+ 清除初始渲染的 `!important` fill。[useMermaidColors.js L48-L75](file:///d:/filework/excel-to-diagram/src/composables/useMermaid/color/useMermaidColors.js#L48-L75) |
+
+### 10.2 验证脚本污染教训（易被误判为产品 bug）
+
+- el-select 的**所有下拉在页面加载时就都挂载在 body**（含隐藏的下拉）。
+- 验证脚本用全局 `document.querySelectorAll('.el-select-dropdown__item')` 点选选项时，会把隐藏下拉中的同名项也点掉
+  （例：点"服务模块"同时命中图表类型下拉的"服务模块图"→ `chartType` 被误改为 serviceModule → 图表整体切到服务模块图，
+  节点数 41→12，**看起来像产品 bug 实际是脚本污染**）。
+- 正确做法：只点击"距目标 select 最近且有尺寸的 popper"内的选项（已固化到 `_verify_color_switch.py` 的 `select_option`）。
+
+### 10.3 修复后验证结果（Playwright，`_verify_color_switch.py`）
+
+- 颜色分组 domain→subDomain→serviceModule：颜色分布 5→6→8 种，✓ 生效
+- 配色 default→vibrant：调色板整体切换，✓ 生效
+- 中心范围 区分→不区分：30 个中心节点灰色 `#808080` → 恢复分组色（distinct 8→13），✓ 生效
+- `useMermaidColors.spec.js` 15/15 PASS
+
+---
+
 **本次复盘的最后一句话：**
 
 > Phase 6 restore 的 5 个 commit 和 4 类连续丢失的根根因，不是 AI"改错了代码"，而是**交付方式（非原子 + 非闭环 + 非鲁棒）使得正确的那版代码无法在 reset 后被正确接回**。后续只要守住 A1~A6 的 6 道闸门，此类"看起来正确但实际丢失 + 验证链路死了却没人知道"的大型损失将被降至接近 0。

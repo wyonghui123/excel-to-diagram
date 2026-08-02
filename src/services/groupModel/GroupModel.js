@@ -120,7 +120,13 @@ export class GroupModel {
     }
 
     if (!group) {
+      console.warn(`[DIAG mergeUserGroup] NOT FOUND: userGroup.id=${userGroup.id}, elementCode=${userGroup.elementCode}, title=${userGroup.title}, enabled=${userGroup.enabled}`)
       return
+    }
+
+    // [DIAG] 诊断：匹配成功
+    if (userGroup.enabled !== undefined || userGroup.layout?.enabled !== undefined) {
+      console.log(`[DIAG mergeUserGroup] MATCH: userGroup.id=${userGroup.id}, title=${userGroup.title}, userEnabled=${userGroup.enabled}, userLayoutEnabled=${userGroup.layout?.enabled} → group.id=${group.id}, group.title=${group.title}`)
     }
 
     if (userGroup.layout) {
@@ -166,8 +172,14 @@ export class GroupModel {
 
   isEnabled(groupId) {
     const group = this.groups.get(groupId)
-    const result = group ? group.layout?.enabled !== false : true
-    return result
+    if (!group) return true
+    // [FIX 2026-07-30 v11] 同时检查 layout.enabled（旧结构）和 group.enabled（新结构）
+    //   根因：buildServiceModuleGroupsFromDomainProducts 创建的 group 没有 layout 属性，
+    //   只有 enabled 属性。applyGroupStates 也只设置 item.enabled，不设置 item.layout.enabled。
+    //   旧代码只检查 group.layout?.enabled，导致新结构的 disabled 状态被忽略。
+    if (group.layout?.enabled === false) return false
+    if (group.enabled === false) return false
+    return true
   }
 
   getDisabledAncestorPath(groupId) {
@@ -244,6 +256,11 @@ export class GroupModel {
 
     const isEnabled = this.isEnabled(groupId)
     const isTerminal = isTerminalGroup(group, this.options.chartType)
+
+    // [DIAG] 诊断：processGroup 入口
+    if (group.title && (group.title.includes('供应链') || !isEnabled)) {
+      console.log(`[DIAG processGroup] id=${groupId}, title=${group.title}, isEnabled=${isEnabled}, isTerminal=${isTerminal}, group.enabled=${group.enabled}, group.layout?.enabled=${group.layout?.enabled}, disabledAncestorPath=${JSON.stringify(disabledAncestorPath)}`)
+    }
     
     const indent = '  '.repeat(depth)
 

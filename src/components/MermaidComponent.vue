@@ -404,8 +404,10 @@ export default {
               if (svgElAfter) {
                 svgProcessor.processSvg(svgElAfter, props, relationDescriptions, mermaidContainer, nodeColorMappings, interaction)
 
-                // [FIX 2026-07-31 v3] 初始渲染后用 centerScopeColor 覆盖中心节点 fill (与图例一致)
-                //   之前 v1 误用 stroke 边框区分, 改为 fill 覆盖 → toggle=true 时中心节点 fill=centerScopeColor
+                // [FIX 2026-08-02 v5] 回到原方案: 中心范围高亮 = 中心节点 fill 用 centerScopeColor (指定颜色)
+                //   v2 曾改为"分组色 + 粗虚线边框", 用户反馈虚线区分不明显, 改回用颜色区分。
+                //   语法层已对中心节点输出 centerScopeColor 的 style 指令, 这里再兜底覆盖一次,
+                //   防止个别节点 (如未进 nodeColorMap) 漏染。
                 if (props.diagramData?.centerScopeHighlight && nodeColorMappings.length > 0) {
                   const csSet = new Set(props.diagramData.centerScope || [])
                   const csColor = props.diagramData.centerScopeColor || '#808080'
@@ -796,7 +798,11 @@ export default {
       })
       // linkColorMappings 为空时跳过 (很多 BO 图无 link)
       if (linkColorMappings && linkColorMappings.length > 0) {
-        colors.updateLinkColors(svg, linkColorMappings, nodeColorMappings, objectToModuleMap, colorGroupBy, colorMap)
+        colors.updateLinkColors(svg, linkColorMappings, nodeColorMappings, objectToModuleMap, colorGroupBy, colorMap, {
+          centerScopeHighlight: data.centerScopeHighlight,
+          centerScope: data.centerScope || [],
+          centerScopeColor: data.centerScopeColor || '#808080'
+        })
       }
 
       // 更新文字颜色

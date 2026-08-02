@@ -421,7 +421,11 @@ export function useServiceModuleSyntax() {
 
     const nodeColorMappings = []
     nodes.forEach(node => {
-      mermaidCode += `  style ${node.id} ${getNodeStyle(node.color, textColor)}\n`
+      // [FIX 2026-08-02 v5] 回到原方案: 中心模块 (isCenter) fill 固定用 centerScopeColor 灰 (与 BO 图一致),
+      //   不再用粗虚线边框区分 (用户反馈虚线区分不明显)。
+      mermaidCode += node.isCenter
+        ? `  style ${node.id} ${getNodeStyle('#808080', textColor)}\n`
+        : `  style ${node.id} ${getNodeStyle(node.color, textColor)}\n`
       nodeColorMappings.push({ nodeId: node.id, color: node.color, nodeCode: node.code, nodeName: node.name })
     })
 

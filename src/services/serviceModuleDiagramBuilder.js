@@ -193,13 +193,9 @@ export function buildServiceModuleDiagramData({
     // 重要：只有当子领域本身就是中心子领域时才使用 centerSubDomainColor
     // 而不是根据 actualCenterSubDomain 来判断（这会导致整个子领域都变成中心颜色）
     filteredServiceModules.forEach(sm => {
-      // 只有当这个服务模块是中心服务模块时，才使用 centerScopeColor
-      // 否则使用领域颜色
-      if (finalCenterServiceModuleCodes.has(sm.code)) {
-        subDomainColors[sm.subDomain] = centerScopeColor;
-      } else {
-        subDomainColors[sm.subDomain] = domainColors[sm.domain];
-      }
+      // [FIX 2026-08-02] 中心模块的子领域不再用 centerScopeColor 覆盖 (与 BO 图"分组色+特殊边框"一致)
+      //   之前: 中心模块的子领域 subDomainColors = centerScopeColor → 按子领域分组时中心模块整片灰
+      subDomainColors[sm.subDomain] = domainColors[sm.domain];
     });
   }
 
@@ -221,7 +217,11 @@ export function buildServiceModuleDiagramData({
       baseColor = domainColors[sm.domain] || colors[0]
     }
 
-    const finalColor = isCenter ? centerScopeColor : baseColor
+    // [FIX 2026-08-02] 中心模块 fill 不再用 centerScopeColor 覆盖 (与 BO 图"分组色+特殊边框"一致)
+    //   之前: isCenter 模块 fill=centerScopeColor (#808080 灰) → 中心模块占大比时整图灰蒙蒙,
+    //   且切换配色/分组时语法层每次重建都重新赋灰 → 用户反馈"节点还是灰色的"。
+    //   现在: 中心模块 fill 用分组色 (联动变色), 由 useServiceModuleSyntax 根据 isCenter 加粗虚线边框区分。
+    const finalColor = baseColor
 
     return {
       id: sm.code,

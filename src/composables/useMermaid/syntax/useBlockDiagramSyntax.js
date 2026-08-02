@@ -89,7 +89,7 @@ export function useBlockDiagramSyntax() {
     return container.subDomain || container.name
   }
 
-  const calculateLinkColor = (sourceNode, targetNode, containers, centerSubDomain, colorScheme) => {
+  const calculateLinkColor = (sourceNode, targetNode, containers, centerSubDomain, colorScheme, centerScopeColor = '#808080') => {
     const sourceColor = sourceNode.color
     const targetColor = targetNode.color
 
@@ -119,25 +119,23 @@ export function useBlockDiagramSyntax() {
       })
     }
 
-    console.log('[calculateLinkColor] source:', sourceNode.id, 'target:', targetNode.id, 'isSourceCenter:', isSourceCenter, 'isTargetCenter:', isTargetCenter)
-
+    // [FIX 2026-08-02 v6] 连线颜色规则 (与 BO 图对齐):
+    //   1. 双中心 -> centerScopeColor 灰 (与中心模块灰色一致)
+    //   2. 一中心一非中心 -> 非中心节点的颜色
+    //   3. 双非中心 -> 黑色
     let linkColor = DEFAULT_LINK_COLOR
-    // 新的颜色规则：
-    // 1. 如果源和目标中有一个非中心范围的节点，则采用该节点颜色
-    // 2. 如果两个都是非中心范围则采用黑色
-    // 3. 如果两个都是中心范围则采用该节点颜色
-    if (!isSourceCenter && !isTargetCenter) {
-      // 两个都是非中心范围 -> 黑色
+    if (isSourceCenter && isTargetCenter) {
+      linkColor = centerScopeColor
+      console.log('[calculateLinkColor] -> 中心范围色:', linkColor)
+    } else if (isSourceCenter) {
+      linkColor = targetColor || sourceColor || DEFAULT_LINK_COLOR
+      console.log('[calculateLinkColor] -> 非中心颜色:', linkColor)
+    } else if (isTargetCenter) {
+      linkColor = sourceColor || targetColor || DEFAULT_LINK_COLOR
+      console.log('[calculateLinkColor] -> 非中心颜色:', linkColor)
+    } else {
       linkColor = '#000000'
       console.log('[calculateLinkColor] -> 黑色（两个都是非中心）')
-    } else if (isSourceCenter && isTargetCenter) {
-      // 两个都是中心范围 -> 采用源节点颜色（或目标节点颜色）
-      linkColor = sourceColor || targetColor || DEFAULT_LINK_COLOR
-      console.log('[calculateLinkColor] -> 中心颜色:', linkColor)
-    } else {
-      // 一个中心，一个非中心 -> 采用非中心节点的颜色
-      linkColor = isSourceCenter ? targetColor : sourceColor
-      console.log('[calculateLinkColor] -> 非中心颜色:', linkColor)
     }
 
     return linkColor

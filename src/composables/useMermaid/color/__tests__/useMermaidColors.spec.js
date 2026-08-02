@@ -125,84 +125,141 @@ describe('useMermaidColors - updateLinkColors', () => {
     }
   }
 
-  it('同域连线: 颜色 = 该域 colorMap 颜色', () => {
+  // [FIX 2026-08-02 v6] 新连线规则 (与语法层生成一致):
+  //   双非中心 / 不区分 -> 黑色; 双中心 -> centerScopeColor; 一中心一非中心 -> 非中心色
+  const objectToModuleMap = new Map([
+    ['N1', { domain: '业务A' }],
+    ['N2', { domain: '业务B' }]
+  ])
+  const nodeColorMappings = [
+    { nodeId: 'id1', nodeCode: 'N1', nodeName: '对象1' },
+    { nodeId: 'id2', nodeCode: 'N2', nodeName: '对象2' }
+  ]
+  const linkColorMappings = [{ sourceId: 'id1', targetId: 'id2', index: 0 }]
+  const colorMap = new Map([
+    ['业务A', '#FF0000'],
+    ['业务B', '#00FF00']
+  ])
+
+  it('双非中心连线 (默认) -> 黑色', () => {
     const { updateLinkColors } = useMermaidColors()
     const svg = createMockSvg(1)
-    const objectToModuleMap = new Map([
-      ['N1', { domain: '业务A' }],
-      ['N2', { domain: '业务A' }]
-    ])
-    const nodeColorMappings = [
-      { nodeId: 'id1', nodeCode: 'N1' },
-      { nodeId: 'id2', nodeCode: 'N2' }
-    ]
-    const linkColorMappings = [{
-      sourceId: 'id1', targetId: 'id2', index: 0
-    }]
-    const colorMap = new Map([['业务A', '#FF0000']])
     updateLinkColors(svg, linkColorMappings, nodeColorMappings, objectToModuleMap, 'domain', colorMap)
-    expect(svg.querySelectorAll('.edgePath path')[0].stroke).toBe('#FF0000')
+    expect(svg.querySelectorAll('.edgePath path')[0].stroke).toBe('#000000')
   })
 
-  it('跨域连线: 颜色 = source 域颜色 (而非 target)', () => {
+  it('双中心连线 -> centerScopeColor 灰', () => {
     const { updateLinkColors } = useMermaidColors()
     const svg = createMockSvg(1)
-    const objectToModuleMap = new Map([
-      ['N1', { domain: '业务A' }],
-      ['N2', { domain: '业务B' }]
-    ])
-    const nodeColorMappings = [
-      { nodeId: 'id1', nodeCode: 'N1' },
-      { nodeId: 'id2', nodeCode: 'N2' }
-    ]
-    const linkColorMappings = [{
-      sourceId: 'id1', targetId: 'id2', index: 0
-    }]
-    const colorMap = new Map([
-      ['业务A', '#FF0000'],
-      ['业务B', '#00FF00']
-    ])
-    updateLinkColors(svg, linkColorMappings, nodeColorMappings, objectToModuleMap, 'domain', colorMap)
-    expect(svg.querySelectorAll('.edgePath path')[0].stroke).toBe('#FF0000')  // 跟 source 同色
+    updateLinkColors(svg, linkColorMappings, nodeColorMappings, objectToModuleMap, 'domain', colorMap, {
+      centerScope: ['N1', 'N2'],
+      centerScopeColor: '#808080'
+    })
+    expect(svg.querySelectorAll('.edgePath path')[0].stroke).toBe('#808080')
   })
 
-  it('source 不在 colorMap 时, fallback target', () => {
+  it('一中心一非中心连线 -> 非中心节点颜色', () => {
     const { updateLinkColors } = useMermaidColors()
     const svg = createMockSvg(1)
-    const objectToModuleMap = new Map([
-      ['N1', { domain: '业务X' }],  // 不在 colorMap
-      ['N2', { domain: '业务A' }]
-    ])
-    const nodeColorMappings = [
-      { nodeId: 'id1', nodeCode: 'N1' },
-      { nodeId: 'id2', nodeCode: 'N2' }
-    ]
-    const linkColorMappings = [{
-      sourceId: 'id1', targetId: 'id2', index: 0
-    }]
-    const colorMap = new Map([['业务A', '#00FF00']])
-    updateLinkColors(svg, linkColorMappings, nodeColorMappings, objectToModuleMap, 'domain', colorMap)
-    expect(svg.querySelectorAll('.edgePath path')[0].stroke).toBe('#00FF00')  // fallback target
+    // 源 N1 是中心, 目标 N2 非中心 -> 用 N2 的域色 #00FF00
+    updateLinkColors(svg, linkColorMappings, nodeColorMappings, objectToModuleMap, 'domain', colorMap, {
+      centerScope: ['N1'],
+      centerScopeColor: '#808080'
+    })
+    expect(svg.querySelectorAll('.edgePath path')[0].stroke).toBe('#00FF00')
+  })
+
+  it('不区分中心范围 (centerScopeHighlight=false) -> 黑色', () => {
+    const { updateLinkColors } = useMermaidColors()
+    const svg = createMockSvg(1)
+    updateLinkColors(svg, linkColorMappings, nodeColorMappings, objectToModuleMap, 'domain', colorMap, {
+      centerScopeHighlight: false,
+      centerScope: ['N1', 'N2'],
+      centerScopeColor: '#808080'
+    })
+    expect(svg.querySelectorAll('.edgePath path')[0].stroke).toBe('#000000')
   })
 
   it('path index 越界时优雅降级 (不抛错)', () => {
     const { updateLinkColors } = useMermaidColors()
     const svg = createMockSvg(1)  // 只有 1 条 path
-    const objectToModuleMap = new Map([
-      ['N1', { domain: '业务A' }],
-      ['N2', { domain: '业务A' }]
-    ])
-    const nodeColorMappings = [
-      { nodeId: 'id1', nodeCode: 'N1' },
-      { nodeId: 'id2', nodeCode: 'N2' }
-    ]
-    const linkColorMappings = [{
+    const linkColorMappingsOverflow = [{
       sourceId: 'id1', targetId: 'id2', index: 999  // 越界
     }]
-    const colorMap = new Map([['业务A', '#FF0000']])
     expect(() => {
-      updateLinkColors(svg, linkColorMappings, nodeColorMappings, objectToModuleMap, 'domain', colorMap)
+      updateLinkColors(svg, linkColorMappingsOverflow, nodeColorMappings, objectToModuleMap, 'domain', colorMap)
     }).not.toThrow()
+  })
+})
+
+describe('useMermaidColors - updateNodeColors (中心范围"分组色+边框" 2026-08-02)', () => {
+  function createMockRect() {
+    // [FIX 2026-08-02 v4] updateNodeColors 改用 style.setProperty(fill, color, 'important')
+    //   覆盖 mermaid classDef default 生成的 !important 规则, mock 需提供 setProperty
+    return {
+      style: {
+        fill: '',
+        removeProperty: () => {},
+        setProperty: function(k, v) { this.fill = v }
+      },
+      setAttribute: function(k, v) { this[k] = v },
+      removeAttribute: function(k) { delete this[k] },
+      getAttribute: function(k) { return this[k] }
+    }
+  }
+
+  it('中心范围节点: fill=centerScopeColor (指定颜色) + 默认边框', () => {
+    const { updateNodeColors } = useMermaidColors()
+    const rect = createMockRect()
+    const svg = { querySelector: () => rect }
+    const objectToModuleMap = new Map([['N1', { domain: '业务A' }]])
+    const nodeColorMappings = [{ nodeCode: 'N1', nodeName: 'N1' }]
+    const colorMap = new Map([['业务A', '#1890FF']])
+    updateNodeColors(svg, nodeColorMappings, objectToModuleMap, 'domain', colorMap, {
+      centerScopeHighlight: true,
+      centerScope: ['N1'],
+      centerScopeColor: '#808080'
+    })
+    expect(rect.fill).toBe('#808080')       // 指定颜色 (原方案)
+    expect(rect.style.fill).toBe('#808080')
+    expect(rect.stroke).toBe('#333333')     // 默认边框, 不再用虚线
+    expect(rect['stroke-width']).toBe('2')
+    expect(rect['stroke-dasharray']).toBeUndefined()
+  })
+
+  it('centerScopeHighlight=false: 全部节点分组色 + 恢复默认边框', () => {
+    const { updateNodeColors } = useMermaidColors()
+    const rect = createMockRect()
+    const svg = { querySelector: () => rect }
+    const objectToModuleMap = new Map([['N1', { domain: '业务A' }]])
+    const nodeColorMappings = [{ nodeCode: 'N1', nodeName: 'N1' }]
+    const colorMap = new Map([['业务A', '#52C41A']])
+    updateNodeColors(svg, nodeColorMappings, objectToModuleMap, 'domain', colorMap, {
+      centerScopeHighlight: false,
+      centerScope: ['N1'],
+      centerScopeColor: '#808080'
+    })
+    expect(rect.fill).toBe('#52C41A')
+    expect(rect.stroke).toBe('#333333')
+    expect(rect['stroke-width']).toBe('2')
+    expect(rect['stroke-dasharray']).toBeUndefined()
+  })
+
+  it('非中心节点: 分组色 + 默认边框', () => {
+    const { updateNodeColors } = useMermaidColors()
+    const rect = createMockRect()
+    const svg = { querySelector: () => rect }
+    const objectToModuleMap = new Map([['N1', { domain: '业务A' }]])
+    const nodeColorMappings = [{ nodeCode: 'N1', nodeName: 'N1' }]
+    const colorMap = new Map([['业务A', '#FAAD14']])
+    updateNodeColors(svg, nodeColorMappings, objectToModuleMap, 'domain', colorMap, {
+      centerScopeHighlight: true,
+      centerScope: ['OTHER'],   // N1 不在中心范围
+      centerScopeColor: '#808080'
+    })
+    expect(rect.fill).toBe('#FAAD14')
+    expect(rect.stroke).toBe('#333333')
+    expect(rect['stroke-dasharray']).toBeUndefined()
   })
 })
 

@@ -168,6 +168,9 @@ meta/architecture.db.pre_*
 /test_output/
 /test_helpers/screenshots/
 
+# Test scripts' runtime output dirs (dumps/screenshots, regenerable by re-running scripts)
+test_helpers/scripts/*_out/
+
 # IDE/agent runtime state
 .startup_state.json
 .trae/debug/
