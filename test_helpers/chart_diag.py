@@ -621,21 +621,38 @@ class ChartDiag:
 
     def get_mermaid_code_edges(self) -> Dict[str, Any]:
         """解析 window.__lastMermaidCode → 节点定义集 + 边端点 (A: 边有效性断言).
-        mermaid 语法: id["label"] 定义节点, id1 --> id2 定义边."""
+        mermaid 语法: id["label"] 定义节点, id -->|"label"| id2 / id <-- x --> id2 定义边.
+        [FIX 2026-08-02] 支持带 label 的边 (`A -->|"x"| B`) 与双向边 (`A <-- x --> B`),
+          旧正则只匹配 `A --> B` (无 label), 而 getArrowSyntax 输出恒带 label →
+          A3b 边端点解析恒为 0 条, 断言形同虚设 (BO/SM 迁移回归全靠此断言暴露)."""
         return self.page.evaluate("""() => {
             const code = window.__lastMermaidCode || ''
             if (!code) return { error: '__lastMermaidCode 未设置 (MermaidComponent 未生成代码)' }
             const nodeIds = new Set()
             const edges = []
+            const patterns = [
+                // 双向无 label: A <--> B
+                /^([A-Za-z0-9_]+)\\s*<-->\\s*([A-Za-z0-9_]+)$/,
+                // 双向带 label: A <-- x --> B
+                /^([A-Za-z0-9_]+)\\s*<--\\s*(.*?)\\s*-->\\s*([A-Za-z0-9_]+)$/,
+                // 带 label 单向: A -->|"x"| B
+                /^([A-Za-z0-9_]+)\\s*-->\\s*\\|[^|]*\\|\\s*([A-Za-z0-9_]+)$/,
+                // 无 label 单向: A --> B
+                /^([A-Za-z0-9_]+)\\s*-->\\s*([A-Za-z0-9_]+)$/,
+            ]
             for (const raw of code.split('\\n')) {
                 const line = raw.trim()
                 const nodeDef = line.match(/^([A-Za-z0-9_]+)\\[/)
                 if (nodeDef) nodeIds.add(nodeDef[1])
-                const edgeMatch = line.match(/^([A-Za-z0-9_]+)\\s*--[>-]\\s*([A-Za-z0-9_]+)/)
-                if (edgeMatch) {
-                    nodeIds.add(edgeMatch[1])
-                    nodeIds.add(edgeMatch[2])
-                    edges.push([edgeMatch[1], edgeMatch[2]])
+                for (const p of patterns) {
+                    const m = line.match(p)
+                    if (m) {
+                        nodeIds.add(m[1])
+                        const target = m[m.length - 1]
+                        nodeIds.add(target)
+                        edges.push([m[1], target])
+                        break
+                    }
                 }
             }
             return { nodeIds: Array.from(nodeIds), edges, edgeCount: edges.length }

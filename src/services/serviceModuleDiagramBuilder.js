@@ -16,15 +16,17 @@
  */
 
 import { LAYOUT_TEMPLATES, COLOR_SCHEMES } from '@/constants/diagram'
-import { createHierarchyPipeline, GLOBAL_TERMINALS } from './hierarchyTree/index.js'
+import { createHierarchyPipeline, GLOBAL_TERMINALS, sharedHierarchyPipeline } from './hierarchyTree/index.js'
 import { colorize } from './hierarchyTree/colorize.js'
 import { deriveLayoutGroups } from './hierarchyTree/layoutGroupsDeriver.js'
 
 export { LAYOUT_TEMPLATES }
 
-// [FIX 2026-08-02] 模块级管道单例: L1 树 / L2 投影缓存跨 generateDiagram 调用生效 (spec 4.4)。
+// [FIX 2026-08-02] 管道单例: L1 树 / L2 投影缓存跨 generateDiagram 调用生效 (spec 4.4)。
+// [Task 10 2026-08-02] 改用 sharedHierarchyPipeline — BO/SM 图共享同一 L1 树缓存,
+// 切换图表类型不重建架构树, 仅重算 L2 投影 (terminal 不同 → 缓存 key 不同, 无串扰)。
 // 仅在传入 versionId/scopeHash 时启用缓存; 测试/旧路径不传时新建实例避免跨用例缓存串扰。
-const hierarchyPipeline = createHierarchyPipeline()
+const hierarchyPipeline = sharedHierarchyPipeline
 
 /**
  * 从分组配置中递归提取所有服务模块代码

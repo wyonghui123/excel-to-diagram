@@ -17,8 +17,15 @@
  */
 
 import { LAYOUT_TEMPLATES } from '@/constants/diagram'
+import { createHierarchyPipeline, GLOBAL_TERMINALS, sharedHierarchyPipeline } from './hierarchyTree/index.js'
+import { colorize } from './hierarchyTree/colorize.js'
+import { deriveLayoutGroups } from './hierarchyTree/layoutGroupsDeriver.js'
 
 export { LAYOUT_TEMPLATES }
+
+// [Task 10 2026-08-02] 管道单例: 与 serviceModuleDiagramBuilder 共享同一 L1 树缓存 (spec 4.4)。
+// 仅在传入 versionId/scopeHash 时启用缓存; 测试/旧路径不传时新建实例避免跨用例缓存串扰。
+const hierarchyPipeline = sharedHierarchyPipeline
 
 /**
  * 构建节点数据
@@ -107,8 +114,103 @@ export function buildDiagramData({
   hideLinkLabelTails = false,
   layoutControlConfig = null,
   centerScope = [],
-  centerScopeHighlight = true
+  centerScopeHighlight = true,
+  // [Task 10 2026-08-02] 统一管道参数 (spec 4.2): preview 传入且 chartType=businessObject 时走管道
+  preview = null,
+  chartType = '',
+  versionId = 0,
+  scopeHash = ''
 }) {
+  // [Task 10 2026-08-02] 统一管道分支 (spec 4.2): BO 末端投影。
+  // 投影产出 BO 节点 + SM/子领域/领域嵌套容器; nodes/containers/links 全部派生自同一棵架构树,
+  // 容器层级由树固定派生 (D→SD→SM→BO), 消除旧路径 groupModel 独立生成 + 名称匹配的错乱隐患。
+  if (preview && chartType === 'businessObject') {
+    const pipeline = (versionId || scopeHash) ? hierarchyPipeline : createHierarchyPipeline()
+    const treeData = pipeline.getTree({ preview, versionId, scopeHash })
+    const projection = pipeline.project({ treeData, terminal: GLOBAL_TERMINALS.businessObject })
+
+    // L3 着色 (中心范围 = centerScope BO codes; isCenter 由 colorize 统一计算)
+    const { nodes: coloredNodes } = colorize(projection.nodes, projection.containers, {
+      colorGroupBy, colorScheme, centerSubDomain: '', centerSubDomainColor: centerScopeColor,
+      customColors, centerServiceModuleCodes: centerScope?.length ? centerScope : null,
+      centerScopeHighlight, nodeTextColor,
+    })
+
+    // 补充 BO 语法层 (useBusinessObjectSyntax) 契约字段:
+    //   category/originalName/name/serviceModule/annotation* — 由 businessObjects 全量对象回查补全
+    const boByCode = new Map()
+    ;(businessObjects || []).forEach(bo => {
+      if (bo?.code != null && !boByCode.has(bo.code)) boByCode.set(bo.code, bo)
+    })
+    const nodes = coloredNodes.map(n => {
+      const bo = boByCode.get(n.code)
+      const name = bo?.name || n.name || n.code
+      return {
+        ...n,
+        category: 'object',
+        name,
+        originalName: name,
+        serviceModule: bo?.serviceModule,
+        serviceModuleName: bo?.serviceModuleName,
+        isCenter: !!n.isCenter,
+        annotationContents: bo?.annotationContents || bo?.annotation_contents || n.annotationContents || [],
+        annotationCategories: bo?.annotationCategories || bo?.annotation_categories || n.annotationCategories || [],
+        annotationCategory: bo?.annotationCategories?.[0] || bo?.annotation_category || 'info',
+        annotationContent: bo?.annotationContents?.[0] || bo?.annotation_content || ''
+      }
+    })
+
+    // links: 投影器已把端点重映射为 BO code 级; 补充关系元数据 (label/注释/双向) 供语法层消费
+    const relMap = new Map((relationships || []).map(r => [`${r.sourceCode}->${r.targetCode}`, r]))
+    const links = projection.links.map(l => {
+      const rel = relMap.get(`${l.source}->${l.target}`)
+      const srcBo = boByCode.get(l.source)
+      const tgtBo = boByCode.get(l.target)
+      return {
+        source: l.source, target: l.target,
+        sourceCode: l.source, targetCode: l.target,
+        sourceName: srcBo?.name || '', targetName: tgtBo?.name || '',
+        // [v39] 关系实例编码优先, 与旧 buildLinks 一致
+        code: rel?.code || l.label || '',
+        relationCode: rel?.relationCode || '',
+        relationDesc: rel?.relationDesc || '',
+        annotationContents: rel?.annotationContents || [],
+        annotationCategories: rel?.annotationCategories || [],
+        annotationCategory: rel?.annotationCategories?.[0] || rel?.annotation_category || 'info',
+        annotationContent: rel?.annotationContents?.[0] || rel?.annotation_content || '',
+        relationType: rel?.relationType || '',
+        relationDirection: rel?.relationDirection || null,
+        label: l.label || rel?.code || ''
+      }
+    }).filter(l => nodes.some(n => n.id === l.source) && nodes.some(n => n.id === l.target))
+
+    // groups 由同一容器树派生 (spec 4.2.4); groupType 标记供 EmbeddedChartView 识别管道产物
+    const unifiedLayoutConfig = {
+      enabled: true,
+      overallDirection: layoutControlConfig?.overallDirection || 'TB',
+      groups: deriveLayoutGroups(projection.containers),
+    }
+
+    return {
+      nodes,
+      links,
+      containers: projection.containers,
+      domainProducts,
+      serviceModules,
+      colorGroupBy,
+      colorScheme,
+      nodeTextColor,
+      centerScopeColor,
+      centerScope,
+      layoutTemplate,
+      customColors,
+      hideLinkLabelTails,
+      layoutControlConfig: unifiedLayoutConfig,
+      groupControlTitleMap: layoutControlConfig?.titleMap || {},
+      centerScopeHighlight
+    }
+  }
+
   const nodes = buildNodes(businessObjects);
   const links = buildLinks(relationships);
 

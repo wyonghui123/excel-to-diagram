@@ -294,7 +294,11 @@ export default {
       linkColorMappings = []
 
       try {
-        if (data && data.containers) {
+        // [FIX 2026-08-02] 语法路由由 diagramType 语义决定 (管道统一后 BO 数据也含 containers)。
+        //   旧启发式 `data.containers` 会把 BO 图 (统一管道投影也返回 containers) 误路由到
+        //   serviceModuleSyntax → BO 节点无 category 处理 + linkColorMappings 缺失 (B 断言 FAIL)。
+        //   SM 图: diagramType='serviceModule' 且数据必含 containers (serviceModuleDiagramBuilder)。
+        if (data && data.containers && props.diagramType === 'serviceModule') {
           const result = serviceModuleSyntax.generateMermaidCode(data, relationDescriptions, layoutEngine, layoutType, positions, zoneRowCount, preserveModelOrder, layoutControlConfig)
           if (typeof result === 'object' && result !== null) {
             nodeColorMappings = result.nodeColorMappings || []

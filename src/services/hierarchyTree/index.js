@@ -43,3 +43,7 @@ export function createHierarchyPipeline() {
     },
   }
 }
+
+// [Task 10 2026-08-02] 跨图表类型共享管道单例: BO/SM 图共用同一 L1 树缓存 (spec 4.4),
+// 切换图表类型不重建架构树, 仅重算 L2 投影 (terminal 不同 → 投影缓存 key 不同, 无串扰).
+export const sharedHierarchyPipeline = createHierarchyPipeline()

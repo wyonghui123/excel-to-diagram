@@ -1683,7 +1683,16 @@ export function useDiagramData() {
         // 4. 直接生成 Mermaid 配置（包含扁平化和标题处理）
         const layoutControlConfig = groupModel.toMermaidConfig()
 
-        // 5. 使用旧模型的 buildDiagramData，复用所有渲染逻辑
+        // 5. 使用 buildDiagramData，复用所有渲染逻辑
+        // [Task 10 2026-08-02] 统一管道入口 (spec 4.2.1): preview 裁剪到当前 scope
+        //   (filteredDomainProducts 已按 finalBoCodes 过滤), relationships 用 finalRelationships
+        //   (保留 selectedRelationIds 关系选择 + internalRelationFilter 过滤语义),
+        //   投影阶段会把指向范围外 BO 的悬空边丢弃, 与旧语法层 filter 行为一致。
+        //   chartType=businessObject → diagramDataBuilder 内部走 L1树→L2投影→L3着色 管道。
+        const pipelinePreview = {
+          domainProducts: filteredDomainProducts,
+          relationships: finalRelationships || []
+        }
         diagramData.value = buildDiagramData({
           businessObjects: filteredBusinessObjects,
           relationships: finalRelationships,
@@ -1698,7 +1707,11 @@ export function useDiagramData() {
           customColors: diagramConfig.value.customColors || {},
           hideLinkLabelTails: diagramConfig.value.hideLinkLabelTails,
           layoutControlConfig: layoutControlConfig,
-          centerScopeHighlight: diagramConfig.value.centerScopeHighlight
+          centerScopeHighlight: diagramConfig.value.centerScopeHighlight,
+          preview: pipelinePreview,
+          chartType: 'businessObject',
+          versionId: currentVersionId.value,
+          scopeHash: computeConfigHash()
         })
 
         if (configStore.useUnifiedRenderer) {

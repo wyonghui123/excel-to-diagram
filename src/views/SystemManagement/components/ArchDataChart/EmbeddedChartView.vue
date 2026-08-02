@@ -215,10 +215,14 @@ const layoutControlConfig = computed(() => {
   //   不能用 chartConfig.layoutControl.groups: 旧 SM 分组树 (syncLayoutControlFromDiagramData
   //   经 buildServiceModuleGroupsFromDomainProducts 写入) 含 SM 终端 group (SM_xxx→inner/boundary),
   //   groupedLayout 会为每个 SM 生成 G_SM_xxx subgraph → 复现"同一 SM 既容器又节点"重复渲染。
-  if (chartConfig.chartType === 'serviceModule') {
+  // [Task 10 2026-08-02] BO 图同迁移到统一管道: D→SD→SM→BO 容器层级由投影容器树派生,
+  //   渲染同样必须用 unifiedLayoutConfig。groupType 标记区分管道产物 (deriveLayoutGroups 输出),
+  //   旧 groupModel/legacy 分组 (含 type 字段、无 groupType) 不受影响, 继续走下方逻辑。
+  if (chartConfig.chartType === 'serviceModule' || chartConfig.chartType === 'businessObject') {
     const d = diagramData.value
     const unified = d?.diagramData?.layoutControlConfig || d?.layoutControlConfig
-    if (unified && unified.enabled && unified.groups && unified.groups.length > 0) {
+    if (unified && unified.enabled && unified.groups && unified.groups.length > 0
+        && unified.groups.some(g => g && g.groupType)) {
       return {
         enabled: true,
         layoutType: 'default',
