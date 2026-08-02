@@ -162,6 +162,8 @@ export default {
     const isMaximized = ref(false)
     let isRendering = false  // 防止无限循环
     let lastRenderData = null  // 上次渲染的数据，用于检测变化
+    // [FIX 2026-08-02] L5 渲染跳过 (spec 4.4): 上次生成的 mermaidCode, code-diff 用
+    let lastRenderedCode = null
     let interactionCleanup = null  // useInteraction 返回的清理函数（用于 onBeforeUnmount）
 
     const effectiveLayoutControlConfig = computed(() => {
@@ -277,7 +279,7 @@ export default {
       }, 50)
     }
 
-    // 生成Mermaid图表代码并保存关系说明信�?
+    // 生成Mermaid图表代码并保存关系说明信息
     let relationDescriptions = []
     // [v34 双向支持] 暴露 mermaidCode 到 window, E2E 可读取诊断 syntax error
     let lastMermaidCodeRef = ''
@@ -349,6 +351,8 @@ export default {
 
       // [FIX 2026-08-01] effectiveLayoutEngine 提到 renderMermaid 函数顶部 (跨 try + nextTick 访问)
       let effectiveLayoutEngine = props.layoutEngine
+      // [FIX 2026-08-02] 前置生成 mermaidCode: 供 L5 code-diff 跳过判断 (spec 4.4)
+      let mermaidCode = ''
       if (mermaidContainer.value && props.diagramData) {
         try {
           // 暂时禁用 UnifiedRenderer，因为它缺少样式、tooltip、交互等功能
@@ -366,7 +370,7 @@ export default {
                 effectiveLayoutEngine = 'dagre'
               } else {
                 try {
-                  const mermaidCode = generateMermaidCode(props.diagramData, 'elk', props.layoutType, positions, zoneRowCount, props.preserveModelOrder, effectiveLayoutControlConfig.value)
+                  mermaidCode = generateMermaidCode(props.diagramData, 'elk', props.layoutType, positions, zoneRowCount, props.preserveModelOrder, effectiveLayoutControlConfig.value)
                   // 关键修复：动态调整 maxTextSize，避免大图表报 'Maximum text size in diagram exceeded'
                   const dynamicMaxTextSize = Math.max(configStore.mermaidMaxTextSize || 500000, mermaidCode.length * 2 + 100000)
                   initializeMermaid(props.diagramType, props.diagramData, 'elk', props.layoutType, props.preserveModelOrder, effectiveLayoutControlConfig.value, dynamicMaxTextSize)
@@ -380,7 +384,7 @@ export default {
 
             if (!effectiveLayoutEngine || effectiveLayoutEngine !== 'elk') {
               try {
-                const mermaidCode = generateMermaidCode(props.diagramData, effectiveLayoutEngine || 'dagre', props.layoutType, positions, zoneRowCount, props.preserveModelOrder, effectiveLayoutControlConfig.value)
+                mermaidCode = generateMermaidCode(props.diagramData, effectiveLayoutEngine || 'dagre', props.layoutType, positions, zoneRowCount, props.preserveModelOrder, effectiveLayoutControlConfig.value)
                 // 关键修复：动态调整 maxTextSize，避免大图表报 'Maximum text size in diagram exceeded'
                 const dynamicMaxTextSize = Math.max(configStore.mermaidMaxTextSize || 500000, mermaidCode.length * 2 + 100000)
                 initializeMermaid(props.diagramType, props.diagramData, effectiveLayoutEngine || 'dagre', props.layoutType, props.preserveModelOrder, effectiveLayoutControlConfig.value, dynamicMaxTextSize)
@@ -394,6 +398,17 @@ export default {
           console.error('[MermaidComponent] renderMermaid error:', err)
           isRendering = false
         }
+
+      // [FIX 2026-08-02] L5 渲染跳过 (spec 4.4 增量更新): mermaidCode 与上次一致且已有 SVG
+      //   → 渲染结果不会变化, 跳过 mermaid.run() 全量重绘 (大图耗时主要在 mermaid.run)
+      //   触发场景: 缓存命中的重渲染 (如切换图表类型后切回), 仅配色变化走 updateColorsOnly 不受影响
+      if (mermaidCode && lastRenderedCode !== null && lastRenderedCode === mermaidCode && mermaidContainer.value?.querySelector('svg')) {
+        isRendering = false
+        return
+      }
+      if (mermaidCode) {
+        lastRenderedCode = mermaidCode
+      }
 
       nextTick(() => {
           const preEl = mermaidContainer.value?.querySelector('pre.mermaid')
@@ -504,7 +519,7 @@ export default {
                       fill: transparent !important;
                       fill-opacity: 0 !important;
                     }
-                    /* 注意：这些规则不适用�?.edge-label-clean，因为它有自己的背景规则 */
+                    /* 注意：这些规则不适用于.edge-label-clean，因为它有自己的背景规则 */
                     .mermaid-content.businessObject .edgeLabel:not(.edge-label-clean) .label {
                       background: transparent !important;
                       background-color: transparent !important;
@@ -521,7 +536,7 @@ export default {
                       background: transparent !important;
                       background-color: transparent !important;
                     }
-                    /* 隐藏 edgeLabel 内的装饰�?path 元素 */
+                    /* 隐藏 edgeLabel 内的装饰性path 元素 */
                     .mermaid-content.businessObject .edgeLabel path,
                     .mermaid-content.businessObject .edgeLabelBkg path,
                     .mermaid-content.businessObject g.edgeLabel path,
@@ -537,7 +552,7 @@ export default {
                       visibility: hidden !important;
                       opacity: 0 !important;
                     }
-                    /* 只让 labelBkg 有背景颜�?*/
+                    /* 只让 labelBkg 有背景颜色*/
                     .mermaid-content.businessObject .labelBkg {
                       background: #ffffff !important;
                       background-color: #ffffff !important;
@@ -759,7 +774,7 @@ export default {
 
     }
     
-    // 只在新增节点或连线时才重新渲染颜色，否则只更新图�?
+    // 只在新增节点或连线时才重新渲染颜色，否则只更新图表
     const updateColorsOnly = (newColorGroupBy, customColorsChanged) => {
       const svg = mermaidContainer.value?.querySelector('svg')
       if (!svg) {
@@ -1022,7 +1037,7 @@ export default {
       }
     }
 
-    // 导出为原生格�?
+    // 导出为原生格式
     const exportAsNative = () => {
       if (props.diagramData) {
         const positions = props.layoutPositions || []

@@ -18,8 +18,13 @@
 import { LAYOUT_TEMPLATES, COLOR_SCHEMES } from '@/constants/diagram'
 import { createHierarchyPipeline, GLOBAL_TERMINALS } from './hierarchyTree/index.js'
 import { colorize } from './hierarchyTree/colorize.js'
+import { deriveLayoutGroups } from './hierarchyTree/layoutGroupsDeriver.js'
 
 export { LAYOUT_TEMPLATES }
+
+// [FIX 2026-08-02] 模块级管道单例: L1 树 / L2 投影缓存跨 generateDiagram 调用生效 (spec 4.4)。
+// 仅在传入 versionId/scopeHash 时启用缓存; 测试/旧路径不传时新建实例避免跨用例缓存串扰。
+const hierarchyPipeline = createHierarchyPipeline()
 
 /**
  * 从分组配置中递归提取所有服务模块代码
@@ -159,9 +164,10 @@ export function buildServiceModuleDiagramData({
   // 消除双数据源: nodes/containers/links 全部派生自同一棵架构树（L1 树 → L2 投影 → L3 着色），
   // 容器层级由树固定派生, 同一 SM 只出现一次（作为显示节点; 归属于子领域容器为正常层级, 不再作为 subgraph 容器重复出现）。
   if (preview && chartType === 'serviceModule') {
-    const { getTree, project } = createHierarchyPipeline()
-    const treeData = getTree({ preview, versionId, scopeHash })
-    const projection = project({ treeData, terminal: GLOBAL_TERMINALS.serviceModule })
+    // 缓存生效条件: 调用方提供了 versionId/scopeHash (真实链路); 否则新建实例避免串扰
+    const pipeline = (versionId || scopeHash) ? hierarchyPipeline : createHierarchyPipeline()
+    const treeData = pipeline.getTree({ preview, versionId, scopeHash })
+    const projection = pipeline.project({ treeData, terminal: GLOBAL_TERMINALS.serviceModule })
 
     // L3 着色（投影节点自带 domain/subDomain, 由树上下文派生）
     const { nodes: coloredNodes } = colorize(projection.nodes, projection.containers, {
@@ -187,6 +193,14 @@ export function buildServiceModuleDiagramData({
       })
       .filter(l => coloredNodes.some(n => n.id === l.source) && coloredNodes.some(n => n.id === l.target))
 
+    // groups 由同一容器树派生 (spec 4.2.4): 取代 GroupModel 独立生成 + resolveGroupContainers 名称匹配。
+    // enabled 恒为 true: 容器层级由树固定派生, 不再受用户自定义分组开关影响
+    const unifiedLayoutConfig = {
+      enabled: true,
+      overallDirection: layoutControlConfig?.overallDirection || 'TB',
+      groups: deriveLayoutGroups(projection.containers),
+    }
+
     return {
       nodes: coloredNodes,
       links,
@@ -194,7 +208,8 @@ export function buildServiceModuleDiagramData({
       centerSubDomain: centerSubDomain || projection.nodes[0]?.subDomain || '',
       centerSubDomainColor, centerScopeColor, colorGroupBy, colorScheme,
       nodeTextColor, layoutTemplate, customColors, hideLinkLabelTails,
-      layoutControlConfig, groupControlTitleMap,
+      layoutControlConfig: unifiedLayoutConfig,
+      groupControlTitleMap,
     }
   }
 

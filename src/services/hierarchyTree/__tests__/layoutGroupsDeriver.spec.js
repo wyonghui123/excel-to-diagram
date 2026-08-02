@@ -9,7 +9,7 @@ const containers = [
 ]
 
 describe('deriveLayoutGroups', () => {
-  it('容器树 → LayoutControlPanel 格式 groups（domain→children, SM 终端→containers）', () => {
+  it('容器树 → routeLayout 格式 groups（domain→children, 叶子 nodeIds→directNodes）', () => {
     const groups = deriveLayoutGroups(containers)
     expect(groups).toHaveLength(1)
     expect(groups[0].groupType).toBe('domain')
@@ -17,8 +17,8 @@ describe('deriveLayoutGroups', () => {
     expect(groups[0].children).toHaveLength(1)
     const sd = groups[0].children[0]
     expect(sd.groupType).toBe('subDomain')
-    expect(sd.containers[0].groupType).toBe('serviceModule')
-    expect(sd.containers[0].elementCode).toBe('SM001')   // elementCode 无前缀
-    expect(sd.containers[0].id).toBe('SM_SM001')         // SM 终端 id 带前缀（createGroupId）
+    // SM 末端以 directNodes 直挂子领域 subgraph, 不再包 SM 容器 (消除重复容器)
+    expect(sd.directNodes).toEqual(['SM001'])
+    expect(sd.containers).toEqual([])
   })
 })

@@ -28,6 +28,26 @@ function makeNode(layerType, code, name, elementRef, parent) {
   }
 }
 
+// [FIX 2026-08-02] 同时按 id 与 code 索引: 真实 preview 的 BO 对象无 id 字段 (只有 code),
+// 但关系 (buildRelationships) 的 sourceId/targetId 是数字 id; 双索引保证两种形状都能解析.
+function indexNode(node, elementRefIndex) {
+  const ref = node.elementRef
+  if (ref?.id != null) elementRefIndex.set(ref.id, node)
+  if (ref?.code != null && ref.code !== ref.id) elementRefIndex.set(ref.code, node)
+}
+
+// [FIX 2026-08-02] 端点解析: id 优先 (fixture: source_bo_id ↔ BO.id), code 兜底
+// (真实 preview: sourceCode ↔ BO.code); 解析不到返回 null, 投影阶段作为悬空边丢弃.
+function resolveLinkEndpoint(rel, side, elementRefIndex) {
+  const id = rel[`${side}_bo_id`] ?? rel[`${side}Id`] ?? null
+  const code = rel[`${side}_code`] ?? rel[`${side}Code`] ?? null
+  const byId = id != null ? elementRefIndex.get(id) : null
+  if (byId) return byId.elementRef.id
+  const byCode = code != null ? elementRefIndex.get(code) : null
+  if (byCode) return byCode.elementRef.id
+  return null
+}
+
 /**
  * 构建统一架构树
  * @param {Object} preview - architecture preview 数据 { domainProducts, relationships }
@@ -48,6 +68,7 @@ export function buildHierarchyTree({ preview }) {
       root,
     )
     root.children.push(dNode)
+    indexNode(dNode, elementRefIndex)
     for (const sd of domain.modules || []) {
       const sdNode = makeNode(
         LAYERS.SUB_DOMAIN, sd.code || sd.name, sd.name,
@@ -55,6 +76,7 @@ export function buildHierarchyTree({ preview }) {
         dNode,
       )
       dNode.children.push(sdNode)
+      indexNode(sdNode, elementRefIndex)
       for (const sm of sd.submodules || []) {
         const smNode = makeNode(
           LAYERS.SERVICE_MODULE, sm.code || sm.name, sm.name,
@@ -62,28 +84,34 @@ export function buildHierarchyTree({ preview }) {
           sdNode,
         )
         sdNode.children.push(smNode)
+        indexNode(smNode, elementRefIndex)
         for (const bo of sm.businessObjects || []) {
+          // [FIX 2026-08-02] 兼容合成层级条目: businessObjects 可能是 code 字符串数组
+          const boCode = typeof bo === 'string' ? bo : (bo.code || bo.name || '')
+          const boName = typeof bo === 'string' ? bo : (bo.name || bo.code || '')
           const boNode = makeNode(
-            LAYERS.BUSINESS_OBJECT, bo.code, bo.name,
-            { type: LAYERS.BUSINESS_OBJECT, id: bo.id ?? bo.code, code: bo.code, name: bo.name },
+            LAYERS.BUSINESS_OBJECT, boCode, boName,
+            {
+              type: LAYERS.BUSINESS_OBJECT,
+              id: typeof bo === 'object' && bo != null ? (bo.id ?? boCode) : boCode,
+              code: boCode,
+              name: boName,
+            },
             smNode,
           )
           smNode.children.push(boNode)
-          elementRefIndex.set(boNode.elementRef.id, boNode)
+          indexNode(boNode, elementRefIndex)
         }
-        elementRefIndex.set(smNode.elementRef.id, smNode)
       }
-      elementRefIndex.set(sdNode.elementRef.id, sdNode)
     }
-    elementRefIndex.set(dNode.elementRef.id, dNode)
   }
 
   const links = (preview?.relationships || []).map(rel => ({
     id: rel.id,
-    source: rel.source_bo_id,
-    target: rel.target_bo_id,
-    code: rel.relation_code,
-    label: rel.relation_code,
+    source: resolveLinkEndpoint(rel, 'source', elementRefIndex),
+    target: resolveLinkEndpoint(rel, 'target', elementRefIndex),
+    code: rel.relation_code ?? rel.relationCode ?? rel.code ?? '',
+    label: rel.relation_code ?? rel.relationCode ?? rel.code ?? '',
   }))
 
   return { tree: root, elementRefIndex, links }

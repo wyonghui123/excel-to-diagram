@@ -251,6 +251,8 @@ export function useDiagramData() {
     assignmentMode: configStore.assignmentMode
   }))
   const diagramData = ref(null)
+  // [FIX 2026-08-02] 当前版本 ID: 统一管道 L1 树缓存 key 组成部分 (spec 4.4)
+  const currentVersionId = ref(0)
 
   // 中心范围的业务对象编码集合
   const centerBoCodes = computed(() => {
@@ -1552,7 +1554,22 @@ export function useDiagramData() {
           })
         })
 
+        // [FIX 2026-08-02] 统一管道入口 (spec 4.2.1): preview 裁剪到当前 scope
+        // (filteredDomainProducts 已按 finalBoCodes 过滤), relationships 同步裁剪,
+        // 保持与旧路径一致的过滤语义; 无过滤时用全量 preview
+        const pipelinePreview = {
+          domainProducts: filteredDomainProducts,
+          relationships: hasFilter
+            ? (previewData.value?.relationships || []).filter(rel =>
+                finalBoCodes.has(rel.sourceCode) && finalBoCodes.has(rel.targetCode))
+            : (previewData.value?.relationships || [])
+        }
+
         diagramData.value = buildServiceModuleDiagramData({
+          preview: pipelinePreview,
+          chartType: 'serviceModule',
+          versionId: currentVersionId.value,
+          scopeHash: computeConfigHash(),
           serviceModules: smFromContainers,
           serviceModuleRelationships: filteredServiceModuleRelationships,
           domainProducts: filteredDomainProducts,
@@ -2041,6 +2058,9 @@ export function useDiagramData() {
 
   async function initFromArchDataManager(archData) {
     const { versionId, hierarchyFilter, relationTypeFilter, relationIds: archRelationIds, relationCategoryTypes } = archData
+
+    // [FIX 2026-08-02] 记录当前版本 ID (统一管道 L1 树缓存 key 组成部分)
+    currentVersionId.value = versionId || 0
 
     loading.value = true
     try {

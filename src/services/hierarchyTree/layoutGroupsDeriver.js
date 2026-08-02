@@ -4,23 +4,15 @@
  * [spec 4.2.4] 取代 buildServiceModuleGroupsFromDomainProducts 的独立生成：
  * 保证 groups 与 containers 归属严格一致，消除 resolveGroupContainers 名称匹配。
  *
- * 输出格式与 buildServiceModuleGroupsFromDomainProducts 对齐（LayoutControlPanel 期望）：
- *   - domain (groupType='domain', direction='LR') → children: [subDomain]
- *   - subDomain (groupType='subDomain', direction='TB') → containers: [SM 终端]
- *   - SM 终端 (groupType='serviceModule', id 带前缀, elementCode 无前缀)
- *
- * [FIX 2026-08-02] 终端类型不从 nodeId 前缀推断（投影器 nodeIds 是无前缀 code），
- * 而是从"容器层的下一层"推断：SUB_DOMAIN → SERVICE_MODULE，SERVICE_MODULE → BUSINESS_OBJECT。
+ * 输出形状被 routeLayout/groupedLayout 消费（spec 4.2.4 执行记录 2026-08-02）：
+ *   - domain  (groupType='domain',  direction='LR') → children: [subDomain]
+ *   - subDomain (groupType='subDomain', direction='TB') → directNodes: [SM code]
+ * 叶子容器 (nodeIds) 转 directNodes 而非 containers: groupedLayout 会把 directNodes
+ * 渲染为 subgraph 内直接节点, 若放 containers 则 SM 终端不匹配真实容器被跳过或
+ * 包一层 SM subgraph → 复现"同一 SM 既容器又节点"重复渲染。
  */
 
-import { GroupType, createGroupId } from '../groupModel/types.js'
-
-// 容器层 → 下一层（nodeIds 元素类型）
-const LAYER_NEXT = {
-  [GroupType.DOMAIN]: GroupType.SUB_DOMAIN,
-  [GroupType.SUB_DOMAIN]: GroupType.SERVICE_MODULE,
-  [GroupType.SERVICE_MODULE]: GroupType.BUSINESS_OBJECT,
-}
+import { GroupType } from '../groupModel/types.js'
 
 const STYLE_BY_LAYER = {
   [GroupType.DOMAIN]: { fill: '#f5f5f5', stroke: '#333333', strokeWidth: 2, strokeDasharray: '' },
@@ -64,25 +56,10 @@ function convertContainer(c) {
       }
     }
   }
-  // 终端节点：nodeIds 元素类型 = 本容器层的下一层
-  const terminalType = LAYER_NEXT[c.layer] || GroupType.BUSINESS_OBJECT
-  const isSm = terminalType === GroupType.SERVICE_MODULE
-  for (const nodeId of c.nodeIds || []) {
-    group.containers.push({
-      id: isSm ? createGroupId(GroupType.SERVICE_MODULE, nodeId) : nodeId,
-      type: terminalType,
-      title: nodeId,
-      elementCode: nodeId,
-      elementRef: { type: terminalType, code: nodeId, name: nodeId },
-      parentId: group.id,
-      groupType: isSm ? 'serviceModule' : 'custom',
-      direction: 'TB',
-      visible: true,
-      enabled: true,
-      style: { fill: '#ffffff', stroke: '#666666', strokeWidth: 1, strokeDasharray: '' },
-      containers: [],
-      children: [],
-    })
+  // 叶子容器: nodeIds 直接作为 directNodes（routeLayout 渲染为 subgraph 内直接节点,
+  // 不再包一层 SM subgraph → 消除"同一 SM 既容器又节点"重复渲染）
+  if (c.nodeIds?.length) {
+    group.directNodes = [...c.nodeIds]
   }
   return group
 }
