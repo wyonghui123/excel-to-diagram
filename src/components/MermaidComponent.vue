@@ -921,7 +921,13 @@ export default {
         if (!newVal || !mermaidContainer.value) return
         const svgEl = mermaidContainer.value.querySelector('svg')
         if (!svgEl) return
-        console.log('[MermaidComponent] annotationConfig changed, filter:', newVal.annotationCategoryFilter, 'panel:', newVal.annotationPanelPosition, 'icons:', newVal.showAnnotationIcons)
+        // [O2 2026-08-02] 原 console.log 每次备注过滤/中心范围切换都刷屏,
+        //   改为 diag.recordStepMeta — chart_diag / window.__archPage.mermaid.stepMeta 可读, 不污染 console
+        diag.recordStepMeta('annotationConfigChanged', {
+          filter: newVal.annotationCategoryFilter,
+          panel: newVal.annotationPanelPosition,
+          icons: newVal.showAnnotationIcons
+        })
         // 重跑 processSvg (它内部会调 renderAnnotationOverlay)
         // 主线不受影响: annotation overlay 移除+重新渲染, 其他 SVG 元素不动 (renderAnnotationOverlay 内部 removeAnnotationLayers 后重画)
         // [FIX 2026-07-31] 传 interaction 让 annotation 点击居中能正常工作

@@ -74,6 +74,8 @@
 import { reactive, computed, watch, onMounted, onBeforeUnmount, ref, nextTick } from 'vue'
 import { Loading, WarningFilled, DataLine } from '@element-plus/icons-vue'
 import { useDiagramConfigStore } from '@/stores/diagramConfigStore'
+import { useDiagnostics } from '@/composables/useMermaid/core/useDiagnostics.js'
+import { createDefaultChartConfig } from './chartConfigDefaults.js'
 import { useDiagramData } from '@/views/AADiagramApp/composables/useDiagramData'
 // [FIX 2026-07-27] 用老图表组件替换自研 MermaidCanvas
 // [重构 2026-07-28] ChartMiniToolbar 不再在本组件内部使用，移到 GlobalToolbar slot
@@ -123,24 +125,9 @@ const emit = defineEmits([
 //   临时为 undefined，用 reactive 创建 local fallback 避免 computed 抛错。
 // [Phase 1 修复 2026-07-28] fallback 字段对齐 Pinia layoutControlConfig 契约：
 //   新增 overallDirection/preserveOrder，layoutEngine→engine。
+// [T1 2026-08-02] fallback 默认值统一走 chartConfigDefaults.js 工厂
 // ============================================================
-const chartConfig = props.chartConfig ?? reactive({
-  chartType: 'businessObject',
-  colorScheme: 'default',
-  colorGroupBy: 'domain',
-  centerScopeHighlight: true,
-  annotationCategoryFilter: [],
-  layoutEngine: 'elk',
-  direction: 'TD',
-  layoutControl: {
-    enabled: true,
-    layoutType: 'default',
-    overallDirection: 'TB',
-    engine: 'elk',
-    preserveOrder: true,
-    groups: []
-  }
-})
+const chartConfig = props.chartConfig ?? reactive(createDefaultChartConfig())
 
 // ============================================================
 // useDiagramData：复用老图表的核心数据逻辑
@@ -148,6 +135,7 @@ const chartConfig = props.chartConfig ?? reactive({
 // 输出：diagramData（喂给 MermaidComponent）
 // ============================================================
 const configStore = useDiagramConfigStore()
+const diag = useDiagnostics()  // [O1/V2 2026-08-02] 监听 MermaidComponent 渲染结束 (SVG 级口径)
 
 const {
   loading,
@@ -287,9 +275,9 @@ const annotationConfig = computed(() => ({
   // [FIX 2026-07-31] 从 chartConfig 读取, 不再硬编码 true
   //   用户可通过 ChartMiniToolbar 的"中心范围"下拉切换
   centerScopeHighlight: chartConfig.centerScopeHighlight !== false,
-  // [FIX 2026-07-31 v2] showAnnotationIcons 由 chartConfig.showAnnotationIcon 控制 (toolbar 按钮)
-  //   之前硬编码 true → 即使用户关掉了按钮也会展示 icon
-  showAnnotationIcons: chartConfig.showAnnotationIcon === true,
+  // [2026-08-02] "显示备注图标"按钮已移除: showIcons 从未被读取 (图标绘制是死代码), 恒为 false.
+  //   备注展示由"备注类型"过滤 + 底部备注面板 + 悬停 tooltip 承担, 不再依赖本开关.
+  showAnnotationIcons: false,
   // [FIX 2026-07-31 v2] 优先级: chartConfig.annotationCategoryFilter (toolbar 直接选) > scopeIds.globalFilters
   //   - 配置阶段用户在 RelationFilterSection 选: 存入 scopeIds.globalFilters.annotation_category (老通道)
   //   - 图表视图用户从 toolbar 直接选: 存在 chartConfig.annotationCategoryFilter (新通道)
@@ -305,7 +293,11 @@ const annotationConfig = computed(() => ({
 // ============================================================
 // 监听 chartType 变化 → 同步到 configStore + 重新生成
 // ============================================================
+// [E3 2026-08-02] 图表类型切换代数: 每次切换自增, 防止旧切换的异步同步
+//   在切换后覆盖新图表类型的 groups (竞态: 快速连点 BO↔SM 时旧同步晚到)
+let _chartTypeGenId = 0
 watch(() => chartConfig.chartType, async (newType) => {
+  const genId = ++_chartTypeGenId
   // [FIX 2026-07-29 v6.2] 在任何重置/重新生成之前，先快照旧 groups 的 enabled/visible 状态
   //   原因：generateDiagram() 会触发 LayoutControlPanel.onMounted 的 handleAutoGroupByDomain
   //   重置 groups（把所有 enabled 重置为 true），导致 syncLayoutControlFromDiagramData(true)
@@ -314,16 +306,19 @@ watch(() => chartConfig.chartType, async (newType) => {
   const preservedGroupStates = sharedExtractGroupStates(chartConfig.layoutControl?.groups)
 
   configStore.updateChartType(newType)
+  diag.recordStepMeta('generateDiagram', { source: 'chartType', at: Date.now() })
   // [FIX 2026-07-27] 同步后必须重新生成图表
   //   之前只调 updateChartType，没调 generateDiagram，切换无效果
   if (diagramData.value) await generateDiagram()
+  // [E3 2026-08-02] 期间又切换了图表类型 → 丢弃本次同步 (旧 groups 不覆盖新状态)
+  if (genId !== _chartTypeGenId) return
   // [FIX 2026-07-29 v6] 切换图表类型后强制重新生成 groups 并迁移旧 enabled/visible 状态
   //   之前只调 generateDiagram，没调 syncLayoutControlFromDiagramData，导致切换后 groups 为空。
   //   现在用 force=true 强制重新生成对应图表类型的 groups，同时把旧 groups 的 enabled/visible
   //   状态迁移到新 groups（按 elementCode 匹配），保留用户的 disable 配置。
   //   这样切换到 SM 图后，BO 图中 disable 的供应链云仍然是 disabled。
   //   [FIX v6.2] 状态从 watch 入口处快照获取（避免被 generateDiagram 重置后丢失）。
-  await syncLayoutControlFromDiagramData(true, preservedGroupStates)
+  await syncLayoutControlFromDiagramData(true, preservedGroupStates, genId)
 })
 
 // ============================================================
@@ -335,11 +330,13 @@ watch(() => chartConfig.chartType, async (newType) => {
 watch(() => chartConfig.colorScheme, (newScheme, oldScheme) => {
   if (newScheme === oldScheme) return
   configStore.updateColorScheme(newScheme)
+  diag.recordStepMeta('generateDiagram', { source: 'colorScheme', at: Date.now() })
 })
 
 watch(() => chartConfig.colorGroupBy, (newGroupBy, oldGroupBy) => {
   if (newGroupBy === oldGroupBy) return
   configStore.updateColorGroupBy(newGroupBy)
+  diag.recordStepMeta('generateDiagram', { source: 'colorGroupBy', at: Date.now() })
 })
 
 // [NEW 2026-07-31] 监听 chartConfig.centerScopeHighlight → 同步到 configStore
@@ -348,6 +345,7 @@ watch(() => chartConfig.colorGroupBy, (newGroupBy, oldGroupBy) => {
 watch(() => chartConfig.centerScopeHighlight, (newVal, oldVal) => {
   if (newVal === oldVal) return
   configStore.updateCenterScopeHighlight(newVal)
+  diag.recordStepMeta('generateDiagram', { source: 'centerScopeHighlight', at: Date.now() })
 })
 
 // ============================================================
@@ -363,23 +361,26 @@ watch(() => chartConfig.centerScopeHighlight, (newVal, oldVal) => {
 // [FIX 2026-07-29 v3] 标志位：syncLayoutControlFromDiagramData 主动写入 chartConfig.layoutControl 时
 //   跳过 watch 触发的 generateDiagram，避免循环刷新。
 let _skipLayoutControlWatch = false
+// [E1 2026-08-02] 防抖定时器: 布局面板拖拽分组时 groups 深层连续变化,
+//   每次都全量 generateDiagram + mermaid.run 开销极大, 合并为拖拽停顿后的单次渲染
+let _layoutControlTimer = null
 watch(
   () => chartConfig.layoutControl,
-  async (newLayout) => {
+  (newLayout) => {
     if (!newLayout) return
     if (_skipLayoutControlWatch) return
-    configStore.updateLayoutControlConfig(newLayout)
-    // [FIX 2026-07-29] 同步触发 useDiagramData 重新生成图表
-    //   根因：LayoutControlPanel 修改了 enabled/visible 等字段，但只有 store 更新，
-    //   MermaidComponent 没有 watch layoutControlConfig，导致用户禁用分组后
-    //   图表不响应（仍然渲染禁用分组的 cluster）。
-    //   修复：直接调用 generateDiagram 重新生成 diagramData，让 MermaidComponent
-    //   通过 diagramData watch 触发重新渲染。
-    try {
-      await generateDiagram()
-    } catch (e) {
-      console.error('[EmbeddedChartView] generateDiagram after layoutControl change failed:', e)
-    }
+    // [E1 2026-08-02] 250ms 防抖合并连续拖拽
+    clearTimeout(_layoutControlTimer)
+    _layoutControlTimer = setTimeout(async () => {
+      configStore.updateLayoutControlConfig(newLayout)
+      // [T3 2026-08-02] 触发来源标注 — chart_diag / window.__archPage.mermaid.stepMeta 可读
+      diag.recordStepMeta('generateDiagram', { source: 'layoutControl-debounced', at: Date.now() })
+      try {
+        await generateDiagram()
+      } catch (e) {
+        console.error('[EmbeddedChartView] generateDiagram after layoutControl change failed:', e)
+      }
+    }, 250)
   },
   { deep: true }
 )
@@ -395,6 +396,7 @@ watch(
     if (chartConfig.layoutControl) {
       chartConfig.layoutControl.engine = newEngine
     }
+    diag.recordStepMeta('generateDiagram', { source: 'layoutEngine', at: Date.now() })
     if (diagramData.value) generateDiagram()
   }
 )
@@ -409,15 +411,36 @@ watch(
 //   直接修改 props.chartConfig 即可（Vue 3 reactive object 引用透明）。
 
 // ============================================================
-// 监听 diagramData 变化 → emit render-complete
+// [O1/V2 2026-08-02] 渲染完成/失败 → emit (SVG 级口径)
+//   - 之前 watch(diagramData) 报的是数据级 nodeCount (diagramData.nodes.length),
+//     与真实渲染出的 SVG 节点数不一致, 且 render-complete 事件无人消费。
+//   - 现在通过 diag.hooks 监听 MermaidComponent 的真实渲染结束:
+//     diag.endRender 已统计 SVG 级 nodeCount/edgeCount/containerCount
+//     (g.node / path.flowchart-link / g.cluster), 口径与人工验证一致。
+//   - 渲染错误走 diag.recordError → onError hook → emit render-error。
 // ============================================================
-watch(diagramData, (newData) => {
-  if (newData) {
-    const nodeCount = newData.nodes?.length || newData.diagramData?.nodes?.length || 0
-    emit('render-complete', { nodeCount, source: 'mermaid-component' })
-  }
-})
+let _prevDiagOnRenderEnd = null
+let _prevDiagOnError = null
 
+const onDiagRenderEnd = (info) => {
+  if (info?.error) {
+    emit('render-error', { error: info.error, phase: 'mermaid', durationMs: info.durationMs ?? null })
+    return
+  }
+  emit('render-complete', {
+    nodeCount: info?.nodeCount ?? 0,
+    edgeCount: info?.edgeCount ?? 0,
+    containerCount: info?.containerCount ?? 0,
+    durationMs: info?.durationMs ?? null,
+    source: 'mermaid-svg'
+  })
+}
+
+const onDiagError = (entry) => {
+  emit('render-error', { error: entry, phase: entry?.context || 'mermaid' })
+}
+
+// 加载阶段错误 (useDiagramData 的 fetch 失败) 不走 diag 链路, 单独 watch
 watch(error, (err) => {
   if (err) emit('render-error', { error: err, phase: 'load' })
 })
@@ -426,6 +449,12 @@ watch(error, (err) => {
 // 初始化：从 arch data 注入数据
 // ============================================================
 onMounted(async () => {
+  // [O1/V2 2026-08-02] 安装 diag hooks (模块单例, 先保存旧值, 卸载时恢复)
+  _prevDiagOnRenderEnd = diag.hooks.onRenderEnd
+  _prevDiagOnError = diag.hooks.onError
+  diag.hooks.onRenderEnd = onDiagRenderEnd
+  diag.hooks.onError = onDiagError
+
   await configStore.updateChartType(chartConfig.chartType)
 
   // 把 scopeIds 转换成 hierarchyFilter + relationTypeFilter（复用老链路）
@@ -497,7 +526,7 @@ onMounted(async () => {
  * - BO 图：buildBusinessObjectGroups 路径（保持原逻辑）
  * - SM 图：buildServiceModuleGroupsFromDomainProducts 路径（v8，从 domainProducts 直接构建）
  */
-async function syncLayoutControlFromDiagramData(force = false, preservedStates = null) {
+async function syncLayoutControlFromDiagramData(force = false, preservedStates = null, genId = null) {
   // [FIX 2026-07-29 v3] 仅在 BO 图时同步（SM 图走 LayoutControlPanel.handleServiceModuleAutoGroup）
   // [FIX 2026-07-29 v5] SM 图改为通过 adaptGroupModelForLayoutPanel 预填充 groups，
   //   避免首次打开布局抽屉时 LayoutControlPanel.onMounted 检测 groups 为空 → 触发
@@ -536,6 +565,11 @@ async function syncLayoutControlFromDiagramData(force = false, preservedStates =
   while (waitCount < 25 && !isDiagramReadyForSync()) {
     await new Promise(r => setTimeout(r, 200))
     waitCount++
+  }
+  // [V3 2026-08-02] 超时可见化: 之前 5s 轮询超时后静默 return, 排查时序问题时
+  //   无法区分"等到了"还是"超时跳过"。现在记录 warning (chart_diag 可读)。
+  if (waitCount >= 25) {
+    diag.recordWarning(`syncLayoutControlFromDiagramData 等待 diagramData 超时 (5s), chartType=${chartConfig.chartType}`, 'syncLayoutControl')
   }
 
   // 等 nextTick 让 computed 重新计算
@@ -577,23 +611,29 @@ async function syncLayoutControlFromDiagramData(force = false, preservedStates =
     sharedApplyGroupStates(groups, oldGroupStates)
   }
 
+  // [E3 2026-08-02] 期间发生了更新的图表类型切换 → 放弃本次写入 (旧 groups 不覆盖新状态)
+  if (genId !== null && genId !== _chartTypeGenId) return
+
   // [FIX 2026-07-29 v3] 跳过 watch 触发的循环刷新（写入前设标志，写入后清标志）
+  // [T2 2026-08-02] try/finally 包裹: 之前靠 await nextTick 后复位, 若写入抛异常
+  //   标志位永远停留 true, 导致后续 layoutControl 变更全部被跳过 (难排查的隐性失效)
   _skipLayoutControlWatch = true
+  try {
+    // 写入 chartConfig.layoutControl
+    if (chartConfig.layoutControl) {
+      chartConfig.layoutControl.groups = JSON.parse(JSON.stringify(groups))
+      chartConfig.layoutControl.overallDirection = chartConfig.layoutControl.overallDirection || 'TB'
+      chartConfig.layoutControl.engine = chartConfig.layoutControl.engine || 'elk'
+      chartConfig.layoutControl.enabled = true
+    }
 
-  // 写入 chartConfig.layoutControl
-  if (chartConfig.layoutControl) {
-    chartConfig.layoutControl.groups = JSON.parse(JSON.stringify(groups))
-    chartConfig.layoutControl.overallDirection = chartConfig.layoutControl.overallDirection || 'TB'
-    chartConfig.layoutControl.engine = chartConfig.layoutControl.engine || 'elk'
-    chartConfig.layoutControl.enabled = true
+    // 同步到 configStore（让 useDiagramData 内部 watch 看到一致状态）
+    configStore.updateLayoutControlConfig(chartConfig.layoutControl)
+  } finally {
+    // 下一帧后清标志（让后续 watch 触发正常）
+    await nextTick()
+    _skipLayoutControlWatch = false
   }
-
-  // 同步到 configStore（让 useDiagramData 内部 watch 看到一致状态）
-  configStore.updateLayoutControlConfig(chartConfig.layoutControl)
-
-  // 下一帧后清标志（让后续 watch 触发正常）
-  await nextTick()
-  _skipLayoutControlWatch = false
 }
 
 /**
@@ -815,6 +855,12 @@ const links = computed(() => {
 //   避免组件销毁后 observer 仍在监听已移除的 DOM，触发异常或内存泄漏
 // ============================================================
 onBeforeUnmount(() => {
+  // [O1/V2 2026-08-02] 恢复 diag hooks (模块单例, 避免影响老图表路由)
+  diag.hooks.onRenderEnd = _prevDiagOnRenderEnd
+  diag.hooks.onError = _prevDiagOnError
+  _prevDiagOnRenderEnd = null
+  _prevDiagOnError = null
+
   if (resizeObserver) {
     resizeObserver.disconnect()
     resizeObserver = null
@@ -822,6 +868,11 @@ onBeforeUnmount(() => {
   if (resizeTimer) {
     clearTimeout(resizeTimer)
     resizeTimer = null
+  }
+  // [E1 2026-08-02] 清理布局控制防抖定时器
+  if (_layoutControlTimer) {
+    clearTimeout(_layoutControlTimer)
+    _layoutControlTimer = null
   }
 })
 

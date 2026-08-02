@@ -88,6 +88,7 @@
 import { defineAsyncComponent, reactive, ref, computed } from 'vue'
 import { Connection } from '@element-plus/icons-vue'
 import LayoutControlPanel from '@/views/AADiagramApp/components/LayoutControlPanel.vue'
+import { createDefaultChartConfig } from './chartConfigDefaults.js'
 
 const EmbeddedChartView = defineAsyncComponent(() =>
   import('./EmbeddedChartView.vue').catch(err => {
@@ -137,15 +138,9 @@ const embeddedChartRef = ref(null)
 
 // [FIX 2026-07-30 v2] chartConfig 直接用 props.chartConfig（父组件持有）。
 // 兜底：若父组件没传，本地 reactive 默认值（向后兼容）
-const _localDefaultChartConfig = reactive({
-  chartType: 'businessObject',
-  colorScheme: 'default',
-  colorGroupBy: 'domain',
-  showAnnotationIcon: false,
-  layoutEngine: 'elk',
-  layoutControl: { groups: [], overallDirection: 'TB', engine: 'elk' },
-  annotationConfig: null
-})
+// [T1 2026-08-02] 默认值统一走 chartConfigDefaults.js 工厂（原 _localDefaultChartConfig
+//   结构较旧: 缺 centerScopeHighlight/preserveOrder, 有废弃的 annotationConfig 字段）
+const _localDefaultChartConfig = reactive(createDefaultChartConfig())
 const chartConfig = props.chartConfig || _localDefaultChartConfig
 
 

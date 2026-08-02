@@ -33,14 +33,12 @@
         :color-scheme="chartConfig.colorScheme"
         :color-group-by="chartConfig.colorGroupBy"
         :center-scope-highlight="chartConfig.centerScopeHighlight"
-        :show-annotation-icon="chartConfig.showAnnotationIcon"
         :annotation-category-filter="chartConfig.annotationCategoryFilter"
         :version-id="embeddedContext.versionId ?? null"
         @update:chart-type="(v) => (chartConfig.chartType = v)"
         @update:color-scheme="(v) => (chartConfig.colorScheme = v)"
         @update:color-group-by="(v) => (chartConfig.colorGroupBy = v)"
         @update:center-scope-highlight="(v) => (chartConfig.centerScopeHighlight = v)"
-        @update:show-annotation-icon="(v) => (chartConfig.showAnnotationIcon = v)"
         @update:annotation-category-filter="(v) => (chartConfig.annotationCategoryFilter = v)"
         @open-layout-settings="layoutDrawerVisible = true"
       />
@@ -55,6 +53,8 @@
         :layout-drawer-visible="layoutDrawerVisible"
         @update:layout-drawer-visible="(v) => (layoutDrawerVisible = v)"
         @node-click="handleChartNodeClick"
+        @render-complete="handleChartRenderComplete"
+        @render-error="handleChartRenderError"
       />
     </template>
 
@@ -89,6 +89,7 @@ import { ElMessage } from 'element-plus'
 import { MultiObjectManagementPage } from '@/components/common/MultiObjectManagementPage'
 import ArchDataChartSwitcher from '@/views/SystemManagement/components/ArchDataChart/ArchDataChartSwitcher.vue'
 import ChartMiniToolbar from '@/views/systemmanagement/components/archdatachart/ChartMiniToolbar.vue'
+import { createDefaultChartConfig } from '@/views/SystemManagement/components/ArchDataChart/chartConfigDefaults.js'
 
 defineOptions({ name: 'RelationshipManagement' })
 
@@ -103,24 +104,8 @@ const pageRef = ref(null)
 // 让 GlobalToolbar（chart-config slot）和 ArchDataChartSwitcher/EmbeddedChartView 共享同一份配置
 // [FIX 2026-08-01] 对齐 EmbeddedChartView 7/31 22:31 大重构版的 layoutControl 结构
 //   (含 layoutType/preserveOrder 字段, 默认 enabled=true 跟随 useDiagramData 自动分组)
-const chartConfig = reactive({
-  chartType: 'businessObject',
-  colorScheme: 'default',
-  colorGroupBy: 'domain',
-  centerScopeHighlight: true,
-  showAnnotationIcon: false,
-  annotationCategoryFilter: [],
-  layoutEngine: 'elk',
-  direction: 'TD',
-  layoutControl: {
-    enabled: true,
-    layoutType: 'default',
-    overallDirection: 'TB',
-    engine: 'elk',
-    preserveOrder: true,
-    groups: []
-  }
-})
+// [T1 2026-08-02] 默认值统一走 chartConfigDefaults.js 工厂, 与 EmbeddedChartView/ArchDataChartSwitcher 共用
+const chartConfig = reactive(createDefaultChartConfig())
 
 // [FIX 2026-07-31] 布局设置抽屉可见性：ChartMiniToolbar 的"布局设置"按钮触发
 const layoutDrawerVisible = ref(false)
@@ -150,6 +135,25 @@ function handleToolbarAction(action) {
 function handleChartNodeClick(payload) {
   const name = payload?.node?.name || payload?.name || payload?.id || '节点'
   ElMessage?.info?.(`点击节点: ${name}`) || console.info('[A8] chart node click:', name)
+}
+
+// [O1 2026-08-02] 渲染状态反馈: render-complete/render-error 之前无人消费,
+//   用户侧对"图表是否渲染完成/失败"无感知。现在:
+//   - 成功: 仅首次/版本切换时提示 (避免每次过滤变化都刷 toast)
+//   - 失败: 始终提示
+let _lastRenderReportedKey = null
+function handleChartRenderComplete(payload) {
+  const versionKey = `v${embeddedContext.value.versionId ?? ''}`
+  if (_lastRenderReportedKey === versionKey) return
+  _lastRenderReportedKey = versionKey
+  const nodeCount = payload?.nodeCount ?? 0
+  const durationMs = payload?.durationMs
+  ElMessage.success(`图表渲染完成 (${nodeCount} 节点${durationMs != null ? `, ${durationMs}ms` : ''})`)
+}
+
+function handleChartRenderError(payload) {
+  const msg = payload?.error?.message || payload?.error || '未知错误'
+  ElMessage.error(`图表渲染失败: ${msg}`)
 }
 </script>
 

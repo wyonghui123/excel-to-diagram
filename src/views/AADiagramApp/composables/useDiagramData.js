@@ -1165,12 +1165,6 @@ export function useDiagramData() {
 
   // 关系分类树：基于 centerScope 和 previewData.relationships 计算
   const relationCategoryTree = computed(() => {
-    console.log('[relationCategoryTree] computed triggered')
-    console.log('[relationCategoryTree] previewData.relationships:', previewData.value?.relationships?.length)
-    console.log('[relationCategoryTree] previewData.businessObjects:', previewData.value?.businessObjects?.length)
-    console.log('[relationCategoryTree] centerScope type:', typeof centerScope.value, 'isArray:', Array.isArray(centerScope.value))
-    console.log('[relationCategoryTree] centerScope length:', centerScope.value?.length)
-
     if (!previewData.value?.relationships || !previewData.value?.businessObjects) {
       return []
     }
@@ -1913,56 +1907,25 @@ export function useDiagramData() {
     selectedRelationNodeIds.value = []
   }
 
-  let lastCustomColorsStr = ''
+  // [E2 2026-08-02] 合并 5 个配置字段 watch → 单个组合 watch:
+  //   之前 customColors/colorScheme/colorGroupBy/centerScopeHighlight/centerScopeColor
+  //   各有独立 watch, 用户在同一 flush 内快速切换多个配置时 (如连续选配色+分组维度),
+  //   每次字段变化都触发一次完整 generateDiagram (同步全量重建)。
+  //   合并后同一 flush 内多次字段变化只生成一次, 使用最终值, 消除中间态的浪费渲染。
   watch(
     () => {
-      const cc = diagramConfig.value?.customColors
-      return cc ? JSON.stringify(cc) : ''
+      const cfg = diagramConfig.value || {}
+      const cc = cfg.customColors
+      return [
+        cfg.colorScheme,
+        cfg.colorGroupBy,
+        cfg.centerScopeHighlight,
+        cfg.centerScopeColor,
+        cc ? JSON.stringify(cc) : ''
+      ].join('|')
     },
-    (newStr) => {
-      if (newStr !== lastCustomColorsStr) {
-        lastCustomColorsStr = newStr
-        if (previewData.value && newStr) {
-          generateDiagram()
-        }
-      }
-    }
-  )
-
-  watch(
-    () => diagramConfig.value?.colorScheme,
-    (newScheme, oldScheme) => {
-      if (newScheme !== oldScheme && previewData.value) {
-        generateDiagram()
-      }
-    }
-  )
-
-  watch(
-    () => diagramConfig.value?.colorGroupBy,
-    (newGroupBy, oldGroupBy) => {
-      if (newGroupBy !== oldGroupBy && previewData.value) {
-        generateDiagram()
-      }
-    }
-  )
-
-  watch(
-    () => diagramConfig.value?.centerScopeHighlight,
-    (newHighlight, oldHighlight) => {
-      if (newHighlight !== oldHighlight && previewData.value) {
-        generateDiagram()
-      }
-    }
-  )
-
-  // [修复 2026-06-29] 监听 centerScopeColor 变化, 重新生成 diagramData
-  //   之前缺少此 watch, 用户改中心范围颜色后 diagramData.centerScopeColor 不更新
-  //   导致 PDF/HTML 导出的 legend 中心范围颜色还是旧值
-  watch(
-    () => diagramConfig.value?.centerScopeColor,
-    (newColor, oldColor) => {
-      if (newColor !== oldColor && previewData.value) {
+    (newStr, oldStr) => {
+      if (newStr !== oldStr && previewData.value) {
         generateDiagram()
       }
     }

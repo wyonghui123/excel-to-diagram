@@ -6,7 +6,7 @@
     - 图表类型切换（业务对象图 / 服务模块图）
     - 颜色方案选择
     - 颜色分组维度选择（领域 / 子领域 / 服务模块）
-    - 备注图标显示开关
+    - 备注类型过滤多选
     - 布局设置按钮（侧边抽屉打开布局控制面板）
 
   契约：见 chart-data-flow-and-interaction-upgrade.md §5.10.3 ③
@@ -119,18 +119,9 @@
       </div>
     </el-select>
 
-    <!-- [FIX 2026-07-31] 备注图标显示按钮 (保留, 控制是否在节点上画 icon)
-         - filter 空 = 不过滤 = 不画 icon (避免节点被占满)
-         - filter 非空 = 在选中类型的备注上画 icon + 序号面板 -->
-    <el-tooltip content="显示备注图标" placement="bottom" :teleported="false">
-      <el-button
-        size="small"
-        :type="showAnnotationIcon ? 'primary' : 'default'"
-        :icon="ChatDotRound"
-        :disabled="annotationCategoryFilter.length === 0"
-        @click="emit('update:showAnnotationIcon', !showAnnotationIcon)"
-      />
-    </el-tooltip>
+    <!-- [2026-08-02] "显示备注图标"按钮已移除:
+         该开关写入 annotationConfig.showIcons 但从未被读取 (overlayNumberMarkers 返回 null, 图标绘制是死代码),
+         无视觉效果。备注展示由"备注类型"过滤 + 底部备注面板 + 悬停 tooltip 承担, 不再需要中间开关。 -->
 
     <div class="cmt-spacer"></div>
 
@@ -151,7 +142,7 @@
  *   - 仅作为 UI 层，触发 update 事件
  */
 import { ref, onMounted } from 'vue'
-import { ChatDotRound, SetUp } from '@element-plus/icons-vue'
+import { SetUp } from '@element-plus/icons-vue'
 import EnumService from '@/services/enumService'
 
 const props = defineProps({
@@ -159,7 +150,6 @@ const props = defineProps({
   colorScheme: { type: String, required: true },
   colorGroupBy: { type: String, required: true },
   centerScopeHighlight: { type: Boolean, default: true },
-  showAnnotationIcon: { type: Boolean, default: false },
   // [FIX 2026-07-31] 备注类型多选 (来自 chartConfig.annotationCategoryFilter)
   annotationCategoryFilter: { type: Array, default: () => [] },
   // [FIX 2026-07-31] 版本号 - 切换版本时重新加载 enum
@@ -171,7 +161,6 @@ const emit = defineEmits([
   'update:color-scheme',
   'update:color-group-by',
   'update:center-scope-highlight',
-  'update:show-annotation-icon',
   'update:annotation-category-filter',
   'open-layout-settings'
 ])
