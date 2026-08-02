@@ -479,6 +479,7 @@ class ManageService:
         #         导致级联删除被错误拒绝.
         # 修复: 如果所有 child 关联都是 cascade_delete=true, 跳过 cascade_service.before_delete 检查,
         #         让 cascade_interceptor 处理实际的级联删除 (它会读取 associations[] 配置).
+        cascade_result = None  # [FIX] 提前初始化, 避免 all-cascade 分支引用未定义变量
         if self._all_children_cascade_delete(meta_obj):
             logger.debug(
                 f'[BUG-V013] skip cascade_service.before_delete for {request.object_type}({request.id}) '
@@ -499,6 +500,35 @@ class ManageService:
         params = {"id": request.id}
         skip_rules = request.force
         result = self.executor.execute(meta_obj, "crud_delete", params, skip_rules=skip_rules)
+
+        # [FIX DELETE-500] 原 cascade_result 收尾/审计/return 语句被错误嵌入
+        # _all_children_cascade_delete 方法体内 (return False 之后) 成为死代码,
+        # 导致 delete() 隐式返回 None, 路由层访问 result.success 抛 AttributeError.
+        # 现在移回 delete() 方法内正常执行.
+        if cascade_result and cascade_result.get('_children_audit_info'):
+            try:
+                self._write_cascade_audit_logs(
+                    cascade_result['_parent_object_type'],
+                    cascade_result['_parent_object_id'],
+                    cascade_result['_children_audit_info']
+                )
+            except Exception as e:
+                logger.warning("Failed to write cascade audit logs: %s", str(e))
+
+        if result.success and old_data:
+            try:
+                audit_log_id = self._get_latest_audit_log_id(request.object_type, request.id)
+                self._publish_change_event(
+                    object_type=request.object_type,
+                    object_id=request.id,
+                    event_type="delete",
+                    old_data=old_data,
+                    audit_log_id=audit_log_id
+                )
+            except Exception as e:
+                logger.warning("Failed to publish delete event: %s", str(e))
+
+        return result
 
     def _all_children_cascade_delete(self, meta_obj) -> bool:
         """[FIX BUG-V011 2026-06-26] 检查 meta_obj 的所有 child 关联是否都是 cascade_delete=true.
@@ -529,31 +559,6 @@ class ManageService:
         except Exception as e:
             logger.debug(f'[BUG-V011] _all_children_cascade_delete check failed: {e}')
             return False
-
-        if cascade_result and cascade_result.get('_children_audit_info'):
-            try:
-                self._write_cascade_audit_logs(
-                    cascade_result['_parent_object_type'],
-                    cascade_result['_parent_object_id'],
-                    cascade_result['_children_audit_info']
-                )
-            except Exception as e:
-                logger.warning("Failed to write cascade audit logs: %s", str(e))
-
-        if result.success and old_data:
-            try:
-                audit_log_id = self._get_latest_audit_log_id(request.object_type, request.id)
-                self._publish_change_event(
-                    object_type=request.object_type,
-                    object_id=request.id,
-                    event_type="delete",
-                    old_data=old_data,
-                    audit_log_id=audit_log_id
-                )
-            except Exception as e:
-                logger.warning("Failed to publish delete event: %s", str(e))
-
-        return result
 
     def batch_create(self, object_type: str, data_list: List[Dict[str, Any]],
                      skip_validation: bool = False,

@@ -461,6 +461,19 @@ export default {
                   edgeCount: finishedSvg?.querySelectorAll('path.flowchart-link').length || 0,
                   containerCount: finishedSvg?.querySelectorAll('g.cluster').length || 0
                 })
+                // [FE1 2026-08-02] 暴露实际渲染色 (nodeCode → fill) 到 diagnostics:
+                //   E2E 颜色断言通过 window.__archPage.mermaid.stepMeta.nodeColorMappings 读取权威源,
+                //   无需从 SVG fill 反推 (SVG fill 可能被 CSS class 覆盖, 读取不可靠)。
+                //   nodeColorMappings 来自 useBusinessObjectSyntax/useServiceModuleSyntax 的 generateMermaidCode 返回。
+                if (nodeColorMappings && nodeColorMappings.length > 0) {
+                  diag.recordStepMeta('nodeColorMappings', nodeColorMappings)
+                }
+                // [FE4 2026-08-02] 暴露 link 颜色映射 (BO 图才有):
+                //   E2E B9 通过 stepMeta.linkColorMappings 读取权威源, 与 SVG link stroke 抽样对比,
+                //   防「节点染色了但边没染色」.
+                if (linkColorMappings && linkColorMappings.length > 0) {
+                  diag.recordStepMeta('linkColorMappings', linkColorMappings)
+                }
 
                 // 额外使用CSS样式注入，解决优先级样式问题
                 const styleId = 'mermaid-italic-style'

@@ -839,7 +839,7 @@ def create_app(db_path=None):
 
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 3010))
+    port = int(os.environ.get('PORT', 5000))
     
     is_reloader = os.environ.get('WERKZEUG_RUN_MAIN') == 'true'
     if not is_reloader:

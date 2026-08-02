@@ -198,6 +198,122 @@ const createDiagnostics = () => {
     warnings: warnings.slice()
   })
 
+  /**
+   * 统一读取面 — 一次调用返回图表当前渲染的结构化快照
+   * [E2E v2 2026-08-02] 断言从"多次 DOM 探测"收敛为"快照比对":
+   *   render       渲染元数据 (nodeCount/edgeCount/containerCount/durationMs/error/layoutEngine)
+   *   nodes        节点 code + 标签 + fill + 高亮态 (A/B/D 断言数据源)
+   *   links        SVG 连线 stroke + stepMeta.linkColorMappings (B 断言数据源)
+   *   containers   集群层级: totalClusters/nestedClusters/maxDepth/leafClusters (A 嵌套断言)
+   *   legend       图例名称 + 色块颜色 (B 图例完整性断言)
+   *   annotations  备注面板 items (C 备注断言数据源)
+   * Python 端 chart_diag.get_snapshot() 一行读取, 不再逐个 evaluate.
+   */
+  const snapshot = () => {
+    const doc = typeof document === 'undefined' ? null : document
+    const nodeEls = doc ? Array.from(doc.querySelectorAll('svg g.node[data-code]')) : []
+    const nodes = nodeEls.map(n => {
+      const rect = n.querySelector('rect')
+      return {
+        code: n.getAttribute('data-code'),
+        label: (n.textContent || '').trim(),
+        fill: rect ? (rect.getAttribute('fill') || rect.style.fill || '') : '',
+        highlighted: n.classList.contains('annotation-highlighted')
+      }
+    })
+    const clusterEls = doc ? Array.from(doc.querySelectorAll('svg g.cluster')) : []
+    // [FIX 2026-08-02] mermaid 11 ELK 渲染嵌套 subgraph 时 DOM 是平铺的
+    //   (g.cluster 之间无 DOM 包含关系, 节点也全部挂在顶层 g.nodes),
+    //   嵌套通过 rect bbox 包含体现: 内层 cluster 画在外层 cluster 的 rect 内.
+    //   因此 nestedClusters/maxDepth/leafClusters 必须基于 bbox 包含计算, 而非 DOM contains.
+    //   [FIX v2] 坐标必须用 getBoundingClientRect() 屏幕坐标:
+    //     getBBox() 返回元素本地坐标系 (不含祖先 transform), 而节点在 g.nodes 下带 translate,
+    //     cluster 与 node 的 getBBox 坐标系不可比 → 节点归属判断失效.
+    const rectOf = (el) => {
+      const r = el && el.querySelector('rect')
+      if (!r) return null
+      const b = r.getBoundingClientRect()
+      return { x: b.left, y: b.top, w: b.width, h: b.height }
+    }
+    const clusterRects = clusterEls
+      .map(c => ({ el: c, id: c.getAttribute('id') || '', ...rectOf(c) }))
+      .filter(r => r.w > 0)
+    const bboxContains = (a, b) => {
+      if (a === b) return false
+      if (a.w * a.h <= b.w * b.h) return false // 面积严格更大才可能是父 (防环)
+      const bx = b.x + b.w / 2
+      const by = b.y + b.h / 2
+      return bx >= a.x && bx <= a.x + a.w && by >= a.y && by <= a.y + a.h
+    }
+    const depthOf = (r) => {
+      const parent = clusterRects.find(o => bboxContains(o, r))
+      return parent ? depthOf(parent) + 1 : 1
+    }
+    const nodePos = nodeEls.map(n => {
+      const r = n.querySelector('rect')
+      const b = r ? r.getBoundingClientRect() : null
+      return { code: n.getAttribute('data-code'), x: b ? b.left + b.width / 2 : 0, y: b ? b.top + b.height / 2 : 0 }
+    })
+    const nodeInCluster = (rect, p) =>
+      p.x >= rect.x && p.x <= rect.x + rect.w && p.y >= rect.y && p.y <= rect.y + rect.h
+    // 叶子 cluster = 没有 bbox 子 cluster (不包含任何更小的 cluster); nodeCodes = bbox 内节点
+    const leafClusters = clusterRects
+      .filter(r => !clusterRects.some(o => bboxContains(r, o)))
+      .map(r => ({
+        id: r.id,
+        title: (r.el.querySelector('.cluster-label, text')?.textContent || '').trim(),
+        nodeCodes: nodePos.filter(p => nodeInCluster(r, p)).map(p => p.code)
+      }))
+    const legend = (() => {
+      const panel = doc && doc.querySelector('.color-legend-panel')
+      if (!panel) return []
+      const list = panel.children[1] || panel
+      return Array.from(list.querySelectorAll('div')).map(item => {
+        const rect = item.querySelector('svg rect')
+        return {
+          name: (item.querySelector('span:last-child')?.textContent || '').trim(),
+          color: rect ? (rect.getAttribute('fill') || '') : ''
+        }
+      }).filter(i => i.name)
+    })()
+    const annotationEls = doc
+      ? Array.from(doc.querySelectorAll('.annotation-dock-panel .annotation-item'))
+      : []
+    const annotations = annotationEls.map(i => {
+      const cls = i.className || ''
+      const m = cls.match(/annotation-(node|relation|container|item)/)
+      return {
+        targetId: i.getAttribute('data-target-id'),
+        targetType: m ? m[1] : 'unknown',
+        text: (i.textContent || '').trim().substring(0, 60),
+        selected: i.classList.contains('annotation-item-selected')
+      }
+    })
+    return {
+      render: lastRender.value,
+      nodes,
+      links: {
+        svgStrokes: doc
+          ? Array.from(doc.querySelectorAll('path.flowchart-link')).map(p => ({
+              id: p.getAttribute('id') || '',
+              stroke: (p.getAttribute('stroke') || p.style.stroke || '').trim().toLowerCase()
+            }))
+          : [],
+        colorMappings: Array.isArray(stepMeta.linkColorMappings)
+          ? stepMeta.linkColorMappings.flat()
+          : [],
+      },
+      containers: {
+        totalClusters: clusterRects.length,
+        nestedClusters: clusterRects.filter(r => clusterRects.some(o => bboxContains(o, r))).length,
+        maxDepth: clusterRects.length ? Math.max(...clusterRects.map(r => depthOf(r))) : 0,
+        leafClusters
+      },
+      legend,
+      annotations
+    }
+  }
+
   return {
     // state
     lastRender,
@@ -217,7 +333,8 @@ const createDiagnostics = () => {
     recordError,
     recordWarning,
     recordStepMeta,
-    dump
+    dump,
+    snapshot
   }
 }
 
@@ -245,6 +362,7 @@ export const installDiagnosticsToWindow = () => {
     get errors() { return diag.errors.slice() },
     get warnings() { return diag.warnings.slice() },
     hooks: diag.hooks,
-    dump: diag.dump
+    dump: diag.dump,
+    snapshot: diag.snapshot
   }
 }

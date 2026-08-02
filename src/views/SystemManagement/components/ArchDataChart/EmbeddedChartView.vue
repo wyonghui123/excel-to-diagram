@@ -129,6 +129,16 @@ const emit = defineEmits([
 // ============================================================
 const chartConfig = props.chartConfig ?? reactive(createDefaultChartConfig())
 
+// [FE3 2026-08-02] 暴露 chartConfig 到 __archPage — E2E 配置切换入口。
+//   E2E 直接改 window.__archPage.chartConfig.colorScheme = 'vibrant'
+//   触发下方 watcher → configStore.updateColorScheme → generateDiagram,
+//   避免操作 Element Plus 下拉弹层的脆弱 UI 交互。
+//   注意: 引用的是父组件 (RelationshipManagement) 的同一 reactive 对象。
+if (typeof window !== 'undefined') {
+  window.__archPage = window.__archPage || {}
+  window.__archPage.chartConfig = chartConfig
+}
+
 // ============================================================
 // useDiagramData：复用老图表的核心数据逻辑
 // 输入：versionId + hierarchyFilter + relationTypeFilter
@@ -423,6 +433,14 @@ let _prevDiagOnRenderEnd = null
 let _prevDiagOnError = null
 
 const onDiagRenderEnd = (info) => {
+  // [FE2 2026-08-02] DOM 渲染完成标记 — E2E 用 wait_for_selector 替代轮询, 更快更稳。
+  //   data-chart-rendered: 'true' / data-node-count: SVG 级节点数
+  if (canvasContainerRef.value) {
+    canvasContainerRef.value.setAttribute('data-chart-rendered', 'true')
+    canvasContainerRef.value.setAttribute('data-node-count', String(info?.nodeCount ?? 0))
+    canvasContainerRef.value.setAttribute('data-edge-count', String(info?.edgeCount ?? 0))
+    canvasContainerRef.value.setAttribute('data-container-count', String(info?.containerCount ?? 0))
+  }
   if (info?.error) {
     emit('render-error', { error: info.error, phase: 'mermaid', durationMs: info.durationMs ?? null })
     return
@@ -437,6 +455,10 @@ const onDiagRenderEnd = (info) => {
 }
 
 const onDiagError = (entry) => {
+  if (canvasContainerRef.value) {
+    canvasContainerRef.value.setAttribute('data-chart-rendered', 'false')
+    canvasContainerRef.value.setAttribute('data-error', String(entry?.message || entry))
+  }
   emit('render-error', { error: entry, phase: entry?.context || 'mermaid' })
 }
 

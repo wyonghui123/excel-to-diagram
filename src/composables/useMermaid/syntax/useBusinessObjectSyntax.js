@@ -837,7 +837,7 @@ export function useBusinessObjectSyntax() {
           // [FIX 2026-08-02 v5] 回到原方案: 中心范围节点 fill = centerScopeColor (指定颜色), 默认边框
           const finalColor = isCenter ? centerScopeColor : (nodeColor || '#FF9AA2')
           mermaidCode += `  style ${id} ${getNodeStyle(finalColor, textColor)}\n`
-          nodeColorMappings.push({ nodeId: id, color: nodeColor, nodeCode: node.code, nodeName: node.originalName || node.name })
+          nodeColorMappings.push({ nodeId: id, color: nodeColor, nodeCode: node.code, nodeName: node.originalName || node.name, isCenter })
         })
 
         const businessObjectLinks = data.links.filter(link => {
@@ -1039,7 +1039,7 @@ export function useBusinessObjectSyntax() {
       const className = classColorMapB.get(finalColor)
       mermaidCode += `  class ${id} ${className}\n`
       mermaidCode += `  style ${id} ${getNodeStyle(finalColor, textColorB)}\n`
-      nodeColorMappings.push({ nodeId: id, color: nodeColor, nodeCode: node.code, nodeName: node.originalName || node.name })
+      nodeColorMappings.push({ nodeId: id, color: nodeColor, nodeCode: node.code, nodeName: node.originalName || node.name, isCenter })
     })
 
     const businessObjectLinks = data.links.filter(link => {

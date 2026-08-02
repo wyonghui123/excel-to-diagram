@@ -46,6 +46,7 @@ chart_diag.py - 图表诊断工具集
 from __future__ import annotations
 import sys
 import json
+import time
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
 
@@ -102,60 +103,40 @@ class ChartDiag:
                    wait_for_selector: str = 'svg g.node',
                    timeout_ms: int = 30000) -> 'Page':
         """[FIX 2026-08-01] 一键打开 EmbeddedChartView (含产品/版本/scope + 图表展示按钮).
-        取代 verify_center_v2.py 中 8 行 setup 代码."""
+        取代 verify_center_v2.py 中 8 行 setup 代码.
+
+        [FIX 2026-08-02] 直接把目标 scope 传给 shortcut URL:
+          之前硬编码 scope=SHORT_SCOPE, 渲染后再调 handleScopeChange 改页面层 scopeIds.
+          但 chartData.hierarchyFilter 是 toggleEmbeddedView 时由 URL scope 快照的
+          (非响应式), 事后改 scopeIds 不生效 → 所有场景都渲染成 1 BO (2 节点).
+          现在 target scope 直接进 URL → tryApplyShortcut → chartData 快照 = 目标 scope."""
         scope = scope or DEFAULT_SCOPE
-        # shortcut_chart_view 用 SHORT_SCOPE 触发路由, 然后手动改 scope 再点图表展示
+        # shortcut_chart_view 用目标 scope 触发路由 (URL scope → chartData 快照)
         page = self.cli.shortcut_chart_view(
             target_path='/system/archdata',
             product_code=self.product_code,
             version_id=self.version_id,
-            scope=SHORT_SCOPE,
+            scope=scope,
             base_url=self.base_url,
             wait_for_selector='svg g.node',
             timeout=timeout_ms
         )
-        page.wait_for_timeout(2000)
-        # 尝试调 handleScopeChange (如果 __archPage 暴露了); 失败也无所谓
-        try:
-            page.evaluate("""(s) => {
-                if (window.__archPage && window.__archPage.handleScopeChange) {
-                    window.__archPage.handleScopeChange({
-                        selectedSubDomainIds: s.sub_domain,
-                        selectedBusinessObjectIds: s.business_object
-                    })
-                }
-            }""", scope)
-        except Exception as e:
-            print(f'[chart_diag] handleScopeChange 失败 (可忽略): {e}')
         page.wait_for_timeout(2500)
-        # 点"图表展示"按钮 (注意: shortcut 模式下可能不需要, 但兜底)
-        page.evaluate("""() => {
-            for (const b of document.querySelectorAll('button')) {
-                const t = (b.textContent || '').trim()
-                if (t === '图表展示') { b.click(); return }
-            }
-        }""")
-        # 等图表渲染
-        for _ in range(30):
-            page.wait_for_timeout(1500)
-            if page.evaluate("() => document.querySelectorAll('svg g.node').length") > 0:
-                break
-        page.wait_for_timeout(5000)
-        # 兜底: 若还没渲染 (因为 __archPage 没暴露), 走 scope 路径 (例如打开 scope panel)
+        # 兜底: 若 shortcut 未渲染 (旧构建/无 shortcut 支持), 尝试点击"图表展示"按钮
         if page.evaluate("() => document.querySelectorAll('svg g.node').length") == 0:
-            print('[chart_diag] 图表未渲染, 尝试直接调用 store')
-            try:
-                page.evaluate("""() => {
-                    // 通过 store 设置 scope
-                    if (window.__archPage && window.__archPage.archDataStore) {
-                        const s = window.__archPage.archDataStore
-                        if (s.setSelectedSubDomainIds) s.setSelectedSubDomainIds(arguments[0].sub_domain)
-                        if (s.setSelectedBusinessObjectIds) s.setSelectedBusinessObjectIds(arguments[0].business_object)
-                    }
-                }""", scope)
-                page.wait_for_timeout(5000)
-            except Exception as e:
-                print(f'[chart_diag] store 兜底也失败: {e}')
+            print('[chart_diag] shortcut 未渲染, 尝试点击图表展示按钮')
+            page.evaluate("""() => {
+                for (const b of document.querySelectorAll('button')) {
+                    const t = (b.textContent || '').trim()
+                    if (t === '图表展示') { b.click(); return }
+                }
+            }""")
+            # 等图表渲染
+            for _ in range(20):
+                page.wait_for_timeout(1000)
+                if page.evaluate("() => document.querySelectorAll('svg g.node').length") > 0:
+                    break
+        page.wait_for_timeout(3000)
         return page
 
     def reset_transform(self):
@@ -441,6 +422,317 @@ class ChartDiag:
             }
             return walk(root, 0)
         }""", {'sel': selector, 'depth': depth})
+
+    # ================================================================
+    # [E2E 2026-08-02] 校验辅助方法 — 供 chart_e2e.py 四类断言使用
+    #   依赖前端增强 (FE1 nodeColorMappings / FE2 data-chart-rendered / FE3 chartConfig)
+    # ================================================================
+
+    def wait_render_stable(self, timeout_ms: int = 30000, poll_ms: int = 300,
+                           clear_marker: bool = True) -> Dict[str, Any]:
+        """[FE2 2026-08-02] 等待图表渲染完成 (data-chart-rendered=true 标记).
+        替代固定 sleep — 渲染完成即可继续, 空等时间被省掉 (高效性).
+
+        clear_marker=True (默认): 等待前先移除旧标记, 确保等待的是"本次新渲染"
+        而非上一次留下的旧值 (配置切换后调用必须为 True, 否则旧标记误判已稳定).
+
+        返回 { rendered, nodeCount, edgeCount, containerCount, error }."""
+        if clear_marker:
+            self.page.evaluate("""() => {
+                const el = document.querySelector('.embedded-chart-view__canvas')
+                if (el) el.removeAttribute('data-chart-rendered')
+            }""")
+        deadline = time.time() + timeout_ms / 1000
+        while time.time() < deadline:
+            state = self.page.evaluate("""() => {
+                const el = document.querySelector('.embedded-chart-view__canvas[data-chart-rendered]')
+                if (!el) return null
+                return {
+                    rendered: el.getAttribute('data-chart-rendered'),
+                    nodeCount: parseInt(el.getAttribute('data-node-count') || '0'),
+                    edgeCount: parseInt(el.getAttribute('data-edge-count') || '0'),
+                    containerCount: parseInt(el.getAttribute('data-container-count') || '0'),
+                    error: el.getAttribute('data-error') || null
+                }
+            }""")
+            if state and state['rendered'] == 'true':
+                return state
+            self.page.wait_for_timeout(poll_ms)
+        raise TimeoutError(f'chart 渲染超时 ({timeout_ms}ms)')
+
+    def get_render_metrics(self) -> Dict[str, Any]:
+        """读取渲染指标: data-* DOM 属性 + useDiagnostics.lastRender (SVG 级口径).
+        数据完整性断言的数据源.
+        [FIX 2026-08-02] clear_marker=False: 这里读的是"当前已渲染状态",
+        若清标记会导致等下一次新渲染而超时 (图表已稳定, 不会再触发 endRender)."""
+        dom_state = self.wait_render_stable(timeout_ms=5000, clear_marker=False)
+        last_render = self.page.evaluate("() => window.__archPage?.mermaid?.lastRender || null")
+        return {'dom': dom_state, 'lastRender': last_render}
+
+    def get_node_colors(self) -> Dict[str, str]:
+        """读取 nodeCode → fill 映射 (FE1: stepMeta.nodeColorMappings, 权威源).
+        golden 生成时记录; 断言时与 SVG 实际 fill 对比, 防"颜色映射对但没渲染出来".
+        [FIX 2026-08-02] recordStepMeta 每次 push 形成嵌套数组, 需 .flat() 展开."""
+        return self.page.evaluate("""() => {
+            const meta = window.__archPage?.mermaid?.stepMeta || {}
+            const list = (Array.isArray(meta.nodeColorMappings) ? meta.nodeColorMappings : []).flat()
+            if (!Array.isArray(list) || list.length === 0) return {}
+            const out = {}
+            for (const m of list) {
+                if (m.nodeCode) out[m.nodeCode] = m.color || null
+            }
+            return out
+        }""")
+
+    def get_center_codes(self) -> set:
+        """读取中心节点 code 集合 (FE1: nodeColorMappings.isCenter).
+        [E2E 2026-08-02] B2 断言需跳过中心节点: 映射记录分组原始色,
+        渲染时中心节点被 centerScopeColor 覆盖 — 预期差异, 不算染色失败."""
+        return set(self.page.evaluate("""() => {
+            const meta = window.__archPage?.mermaid?.stepMeta || {}
+            const list = (Array.isArray(meta.nodeColorMappings) ? meta.nodeColorMappings : []).flat()
+            const out = []
+            for (const m of list) {
+                if (m.isCenter && m.nodeCode) out.push(m.nodeCode)
+            }
+            return out
+        }"""))
+
+    def get_svg_node_fills(self, limit: int = 500) -> Dict[str, str]:
+        """读 SVG 实际渲染的节点 fill (data-code → fill), 与 nodeColorMappings 对照.
+        防"报告对但 SVG 没染色"."""
+        return self.page.evaluate("""(limit) => {
+            const out = {}
+            const nodes = Array.from(document.querySelectorAll('svg g.node[data-code]'))
+            for (const n of nodes.slice(0, limit)) {
+                const code = n.getAttribute('data-code')
+                const rect = n.querySelector('rect')
+                out[code] = rect ? (rect.getAttribute('fill') || rect.style.fill || '') : ''
+            }
+            return out
+        }""", limit)
+
+    def switch_chart_config(self, key: str, value: Any) -> None:
+        """[FE3 2026-08-02] E2E 配置切换入口.
+        __archPage.chartConfig[key] = value → EmbeddedChartView watcher →
+        configStore.updateXxx → generateDiagram.
+        替代操作 Element Plus 下拉弹层的脆弱 UI 交互."""
+        self.page.evaluate("""({key, value}) => {
+            const cfg = window.__archPage && window.__archPage.chartConfig
+            if (!cfg) throw new Error('__archPage.chartConfig 未暴露 (EmbeddedChartView 未挂载)')
+            cfg[key] = value
+        }""", {'key': key, 'value': value})
+
+    def get_annotation_items(self) -> List[Dict[str, Any]]:
+        """读取备注面板 items (.annotation-dock-panel .annotation-item).
+        备注断言的数据源: 数量 / 类型 / 是否 selected.
+        [FIX 2026-08-02] item class = 'annotation-item annotation-{targetType}' (node/relation/container),
+        正则应匹配第二段 (node/relation/container), 不能贪心匹配到 'item'."""
+        return self.page.evaluate("""() => {
+            const items = Array.from(document.querySelectorAll('.annotation-dock-panel .annotation-item'))
+            return items.map(i => {
+                const cls = i.className || ''
+                const m = cls.match(/annotation-(node|relation|container|item)/)
+                return {
+                    targetId: i.getAttribute('data-target-id'),
+                    targetType: m ? m[1] : 'unknown',
+                    text: (i.textContent || '').trim().substring(0, 60),
+                    selected: i.classList.contains('annotation-item-selected')
+                }
+            })
+        }""")
+
+    # ================================================================
+    # [E2E v2 2026-08-02] 细化包辅助方法 — 结构/颜色/备注/交互深度断言的数据源
+    # ================================================================
+
+    # 备注类型全集 (与 chart_seed.py DEFAULT_SEEDS 的 category 分布对应)
+    ANNOTATION_CATEGORIES = ['important', 'warning', 'info', 'tip']
+
+    def get_snapshot(self) -> Dict[str, Any]:
+        """[E2E v2 2026-08-02] 统一读取面 — 一次 evaluate 读取完整图表快照.
+
+        收敛断言数据源: render/nodes/links/containers/legend/annotations,
+        替代逐个调用 get_annotation_items / get_svg_node_fills / get_legend_items 等
+        多次 DOM 探测 (每次 evaluate 有 ~ms 级往返, 且状态可能漂移).
+
+        对应前端 window.__archPage.mermaid.snapshot() (useDiagnostics.js).
+        返回 dict, chart_e2e.py 各维度断言直接复用同一份数据."""
+        return self.page.evaluate("""() => {
+            const api = window.__archPage && window.__archPage.mermaid
+            if (!api || typeof api.snapshot !== 'function') {
+                return { error: '__archPage.mermaid.snapshot() 未安装 (useDiagnostics 需含 snapshot)' }
+            }
+            return api.snapshot()
+        }""")
+
+    def show_all_annotations(self, timeout_ms: int = 15000) -> List[Dict[str, Any]]:
+        """[2026-08-02] 开启全部备注类型并等待 panel 渲染.
+
+        前端设计 (useAnnotation L127-132): annotationCategoryFilter=[] (默认未选)
+        时不展示任何备注。E2E 必须显式设置 filter 后 panel 才有 items。
+        overlay 重渲染不走 data-chart-rendered 标记 → 轮询 items 数量判断完成。
+
+        返回渲染后的 panel items (供断言复用)."""
+        self.switch_chart_config('annotationCategoryFilter', self.ANNOTATION_CATEGORIES)
+        deadline = time.time() + timeout_ms / 1000
+        last: List[Dict[str, Any]] = []
+        while time.time() < deadline:
+            self.page.wait_for_timeout(400)
+            last = self.get_annotation_items()
+            if last:
+                return last
+        print(f'[chart_diag] show_all_annotations: 超时未渲染出 items (共 {len(last)})')
+        return last
+
+    def set_annotation_filter(self, categories: List[str],
+                              expect_count: Optional[int] = None,
+                              timeout_ms: int = 10000) -> List[Dict[str, Any]]:
+        """[2026-08-02] 设置备注类型过滤并等待 items 数变化.
+        用于 C 类断言: 过滤生效验证 (数量变化) + 三态切换 (全选→单类→清空).
+        返回切换后的 items."""
+        self.switch_chart_config('annotationCategoryFilter', categories)
+        deadline = time.time() + timeout_ms / 1000
+        last: List[Dict[str, Any]] = []
+        while time.time() < deadline:
+            self.page.wait_for_timeout(400)
+            last = self.get_annotation_items()
+            if expect_count is not None:
+                if len(last) == expect_count:
+                    return last
+            else:
+                # 无期望值: 等 2 次读数一致 (渲染稳定)
+                time.sleep(0.5)
+                cur = self.get_annotation_items()
+                if cur == last:
+                    return cur
+                last = cur
+        return last
+
+    def get_node_labels(self) -> List[Dict[str, str]]:
+        """读取每个 g.node 的 data-code + 渲染标签文本 (A: 标签非空断言).
+        防「节点存在但 label 空白/缺失」."""
+        return self.page.evaluate("""() => {
+            return Array.from(document.querySelectorAll('svg g.node[data-code]')).map(n => ({
+                code: n.getAttribute('data-code'),
+                label: (n.textContent || '').trim()
+            }))
+        }""")
+
+    def get_mermaid_code_edges(self) -> Dict[str, Any]:
+        """解析 window.__lastMermaidCode → 节点定义集 + 边端点 (A: 边有效性断言).
+        mermaid 语法: id["label"] 定义节点, id1 --> id2 定义边."""
+        return self.page.evaluate("""() => {
+            const code = window.__lastMermaidCode || ''
+            if (!code) return { error: '__lastMermaidCode 未设置 (MermaidComponent 未生成代码)' }
+            const nodeIds = new Set()
+            const edges = []
+            for (const raw of code.split('\\n')) {
+                const line = raw.trim()
+                const nodeDef = line.match(/^([A-Za-z0-9_]+)\\[/)
+                if (nodeDef) nodeIds.add(nodeDef[1])
+                const edgeMatch = line.match(/^([A-Za-z0-9_]+)\\s*--[>-]\\s*([A-Za-z0-9_]+)/)
+                if (edgeMatch) {
+                    nodeIds.add(edgeMatch[1])
+                    nodeIds.add(edgeMatch[2])
+                    edges.push([edgeMatch[1], edgeMatch[2]])
+                }
+            }
+            return { nodeIds: Array.from(nodeIds), edges, edgeCount: edges.length }
+        }""")
+
+    def get_cluster_hierarchy(self) -> Dict[str, Any]:
+        """读取 SVG 容器层级 (A: 嵌套结构 + B: 同组同色).
+        返回: totalClusters / nestedClusters(含子 cluster) / maxDepth /
+              leafClusters(无子 cluster 且有节点) 的 {id, title, nodeCodes}.
+        [FIX 2026-08-02] mermaid 11 ELK 渲染嵌套 subgraph 时 DOM 平铺,
+          嵌套通过 rect bbox 包含体现 (与 snapshot() 的 containers 一致)."""
+        return self.page.evaluate("""() => {
+            const clusters = Array.from(document.querySelectorAll('svg g.cluster'))
+            const rectOf = (el) => {
+                const r = el && el.querySelector('rect')
+                if (!r) return null
+                const b = r.getBoundingClientRect()
+                return { x: b.left, y: b.top, w: b.width, h: b.height }
+            }
+            const rects = clusters
+                .map(c => ({ el: c, id: c.getAttribute('id') || '', ...rectOf(c) }))
+                .filter(r => r.w > 0)
+            const contains = (a, b) => {
+                if (a === b) return false
+                if (a.w * a.h <= b.w * b.h) return false
+                const bx = b.x + b.w / 2, by = b.y + b.h / 2
+                return bx >= a.x && bx <= a.x + a.w && by >= a.y && by <= a.y + a.h
+            }
+            const depthOf = (r) => {
+                const parent = rects.find(o => contains(o, r))
+                return parent ? depthOf(parent) + 1 : 1
+            }
+            const nodePos = Array.from(document.querySelectorAll('svg g.node[data-code]')).map(n => {
+                const r = n.querySelector('rect')
+                const b = r ? r.getBoundingClientRect() : null
+                return { code: n.getAttribute('data-code'), x: b ? b.left + b.width / 2 : 0, y: b ? b.top + b.height / 2 : 0 }
+            })
+            const nodeIn = (rect, p) => p.x >= rect.x && p.x <= rect.x + rect.w && p.y >= rect.y && p.y <= rect.y + rect.h
+            const leafClusters = rects
+                .filter(r => !rects.some(o => contains(r, o)))
+                .map(r => ({
+                    id: r.id,
+                    title: (r.el.querySelector('.cluster-label, text')?.textContent || '').trim(),
+                    nodeCodes: nodePos.filter(p => nodeIn(r, p)).map(p => p.code)
+                }))
+            return {
+                totalClusters: rects.length,
+                nestedClusters: rects.filter(r => rects.some(o => contains(o, r))).length,
+                maxDepth: rects.length ? Math.max(...rects.map(r => depthOf(r))) : 0,
+                leafClusters
+            }
+        }""")
+
+    def get_legend_items(self) -> List[Dict[str, str]]:
+        """读取图例项 (.color-legend-panel): 名称 + 色块颜色 (B: 图例完整性断言).
+        legend 结构: panel > [title div, legendList div] > item div (色块 svg + 名称 span)."""
+        return self.page.evaluate("""() => {
+            const panel = document.querySelector('.color-legend-panel')
+            if (!panel) return []
+            const list = panel.children[1] || panel
+            return Array.from(list.querySelectorAll('div')).map(item => {
+                const rect = item.querySelector('svg rect')
+                return {
+                    name: (item.querySelector('span:last-child')?.textContent || '').trim(),
+                    color: rect ? (rect.getAttribute('fill') || '') : ''
+                }
+            }).filter(i => i.name)
+        }""")
+
+    def get_link_color_mappings(self) -> List[Dict[str, Any]]:
+        """读取 linkColorMappings (FE 埋点 stepMeta.linkColorMappings).
+        结构: [{index, sourceId, targetId, color}]."""
+        return self.page.evaluate("""() => {
+            const meta = window.__archPage?.mermaid?.stepMeta || {}
+            return Array.isArray(meta.linkColorMappings) ? meta.linkColorMappings : []
+        }""")
+
+    def get_svg_link_strokes(self, limit: int = 500) -> List[Dict[str, str]]:
+        """读 SVG 实际连线 stroke (path.flowchart-link). 与 linkColorMappings 对照."""
+        return self.page.evaluate("""(limit) => {
+            return Array.from(document.querySelectorAll('path.flowchart-link')).slice(0, limit).map(p => ({
+                id: p.getAttribute('id') || '',
+                stroke: (p.getAttribute('stroke') || p.style.stroke || '').trim().toLowerCase()
+            }))
+        }""", limit)
+
+    def get_highlighted_codes(self) -> List[str]:
+        """读取当前被高亮的节点 code (annotation-highlighted, D: 高亮断言)."""
+        return self.page.evaluate("""() =>
+            Array.from(document.querySelectorAll('svg g.node.annotation-highlighted[data-code]'))
+                .map(n => n.getAttribute('data-code'))
+        """)
+
+    def get_all_node_codes(self) -> List[str]:
+        """读取 SVG 全部节点 code (数据指纹 A5)."""
+        return self.page.evaluate(
+            "() => Array.from(document.querySelectorAll('svg g.node[data-code]')).map(n => n.getAttribute('data-code'))")
 
     def close(self):
         self.cli.close()

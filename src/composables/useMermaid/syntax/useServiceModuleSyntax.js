@@ -426,7 +426,7 @@ export function useServiceModuleSyntax() {
       mermaidCode += node.isCenter
         ? `  style ${node.id} ${getNodeStyle('#808080', textColor)}\n`
         : `  style ${node.id} ${getNodeStyle(node.color, textColor)}\n`
-      nodeColorMappings.push({ nodeId: node.id, color: node.color, nodeCode: node.code, nodeName: node.name })
+      nodeColorMappings.push({ nodeId: node.id, color: node.color, nodeCode: node.code, nodeName: node.name, isCenter: !!node.isCenter })
     })
 
     return {
