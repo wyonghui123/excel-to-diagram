@@ -9,7 +9,8 @@
  *   - link 重映射：端点 elementRef.id → 最近显示节点 id；悬空/自环/折叠重复 → 丢弃
  *
  * 输出契约（贯穿全管道，勿改）：
- *   nodes:      [{ id: code（无前缀）, layer, code, name, elementRef, aggregated: { count } }]
+ *   nodes:      [{ id: code（无前缀）, layer, code, name, elementRef, domain, subDomain, aggregated: { count } }]
+ *               domain/subDomain 为树上下文派生名称（L3 着色分组用）
  *   containers: 嵌套树 [{ id: 'D_..'|'SD_..'|'SM_..', layer, code, name, elementRef, children: [], nodeIds: [code] }]
  *   links:      [{ ...link, source: code, target: code }]（已去重）
  */
@@ -54,18 +55,24 @@ export function projectTree({ tree, elementRefIndex, links }, { terminalResolver
 
   // 末端层由 activeTerminal 决定；activeTerminal 仅在领域层解析一次后下传，
   // 避免 per-domain resolver 在子树内被再次求值导致粒度漂移。
-  function walk(node, activeTerminal) {
+  // context 沿树派生 domain/subDomain 名称（L3 着色分组需要，见 spec 4.2.2/4.2.3）。
+  function walk(node, activeTerminal, context = {}) {
     const terminal = activeTerminal || resolveTerminal(node)
     if (node.layer === terminal) {
       const dn = {
         id: node.code, layer: node.layer, code: node.code, name: node.name,
         elementRef: node.elementRef, aggregated: { count: countDescendants(node) },
+        domain: node.layer === 'DOMAIN' ? node.name : context.domain,
+        subDomain: node.layer === 'SUB_DOMAIN' ? node.name : context.subDomain,
       }
       displayNodes.push(dn)
       registerTerminal(node, dn)
       return
     }
-    for (const child of node.children || []) walk(child, terminal)
+    const nextCtx = { ...context }
+    if (node.layer === 'DOMAIN') nextCtx.domain = node.name
+    else if (node.layer === 'SUB_DOMAIN') nextCtx.subDomain = node.name
+    for (const child of node.children || []) walk(child, terminal, nextCtx)
   }
 
   // 末端层之上的祖先链逐层生成嵌套容器；leaf 容器的 nodeIds 列出其直接显示节点

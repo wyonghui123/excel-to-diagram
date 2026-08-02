@@ -16,6 +16,8 @@
  */
 
 import { LAYOUT_TEMPLATES, COLOR_SCHEMES } from '@/constants/diagram'
+import { createHierarchyPipeline, GLOBAL_TERMINALS } from './hierarchyTree/index.js'
+import { colorize } from './hierarchyTree/colorize.js'
 
 export { LAYOUT_TEMPLATES }
 
@@ -102,6 +104,10 @@ function extractServiceModuleCodesFromGroups(groups, collectedCodes = new Set())
  * @param {String} params.colorScheme - 配色方案
  * @param {String} params.nodeTextColor - 服务模块标题文字颜色
  * @param {Array} params.centerServiceModuleCodes - 中心范围服务模块编码数组
+ * @param {Object} params.preview - 架构 preview 数据（统一管道分支: 传入则走 buildHierarchyTree→projectTree 管道）
+ * @param {String} params.chartType - 图表类型（'serviceModule' 时启用统一管道分支）
+ * @param {Number} params.versionId - 版本 ID（L1 树缓存 key 组成部分）
+ * @param {String} params.scopeHash - scope 哈希（L1 树缓存 key 组成部分）
  * @returns {Object} 图表数据
  */
 export function buildServiceModuleDiagramData({
@@ -120,7 +126,11 @@ export function buildServiceModuleDiagramData({
   layoutControlConfig = null,
   groupControlTitleMap = {},
   centerServiceModuleCodes = null,
-  centerScopeHighlight = true
+  centerScopeHighlight = true,
+  preview = null,
+  chartType = '',
+  versionId = 0,
+  scopeHash = ''
 }) {
   // 获取颜色方案
   const colors = COLOR_SCHEMES[colorScheme] || COLOR_SCHEMES.default;
@@ -142,6 +152,49 @@ export function buildServiceModuleDiagramData({
       filteredRelationships = serviceModuleRelationships.filter(rel =>
         groupSmCodes.has(rel.sourceServiceModuleCode) && groupSmCodes.has(rel.targetServiceModuleCode)
       )
+    }
+  }
+
+  // [FIX 2026-08-02] 统一管道分支（spec 4.2）：preview 传入且 chartType=serviceModule 时走管道。
+  // 消除双数据源: nodes/containers/links 全部派生自同一棵架构树（L1 树 → L2 投影 → L3 着色），
+  // 容器层级由树固定派生, 同一 SM 只出现一次（作为显示节点; 归属于子领域容器为正常层级, 不再作为 subgraph 容器重复出现）。
+  if (preview && chartType === 'serviceModule') {
+    const { getTree, project } = createHierarchyPipeline()
+    const treeData = getTree({ preview, versionId, scopeHash })
+    const projection = project({ treeData, terminal: GLOBAL_TERMINALS.serviceModule })
+
+    // L3 着色（投影节点自带 domain/subDomain, 由树上下文派生）
+    const { nodes: coloredNodes } = colorize(projection.nodes, projection.containers, {
+      colorGroupBy, colorScheme, centerSubDomain, centerSubDomainColor, customColors,
+      centerServiceModuleCodes, centerScopeHighlight, nodeTextColor,
+    })
+
+    // links: 投影器已把 BO 级关系折叠重映射为 SM code 级; 补充关系元数据 + 过滤悬空边
+    const relMap = new Map((filteredRelationships || []).map(r =>
+      [`${r.sourceServiceModuleCode}->${r.targetServiceModuleCode}`, r]))
+    const links = projection.links
+      .map(l => {
+        const rel = relMap.get(`${l.source}->${l.target}`)
+        return {
+          source: l.source, target: l.target,
+          label: l.label || rel?.serviceRelationshipCode || '',
+          tooltip: rel ? `关系编码: ${rel.serviceRelationshipCode}\n业务对象关系: ${rel.businessObjectRelationshipCodes?.join(', ')}` : '',
+          annotationContents: rel?.annotationContents || [],
+          annotationCategories: rel?.annotationCategories || [],
+          relationType: rel?.relationType || '',
+          relationDirection: rel?.relationDirection || null,
+        }
+      })
+      .filter(l => coloredNodes.some(n => n.id === l.source) && coloredNodes.some(n => n.id === l.target))
+
+    return {
+      nodes: coloredNodes,
+      links,
+      containers: projection.containers,
+      centerSubDomain: centerSubDomain || projection.nodes[0]?.subDomain || '',
+      centerSubDomainColor, centerScopeColor, colorGroupBy, colorScheme,
+      nodeTextColor, layoutTemplate, customColors, hideLinkLabelTails,
+      layoutControlConfig, groupControlTitleMap,
     }
   }
 

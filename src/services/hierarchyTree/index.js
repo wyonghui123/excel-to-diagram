@@ -12,6 +12,9 @@
  *   - L3/L4 无缓存（纯函数 / 每次生成，成本低）
  */
 
+import { buildHierarchyTree } from './buildHierarchyTree.js'
+import { projectTree, GLOBAL_TERMINALS } from './projectTree.js'
+
 export { buildHierarchyTree } from './buildHierarchyTree.js'
 export { projectTree, GLOBAL_TERMINALS } from './projectTree.js'
 export { colorize } from './colorize.js'

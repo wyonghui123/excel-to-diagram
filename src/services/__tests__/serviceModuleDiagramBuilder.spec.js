@@ -272,6 +272,51 @@ describe('serviceModuleDiagramBuilder', () => {
     })
   })
 
+  describe('统一管道（preview 传入）', () => {
+    // 递归收集容器树所有容器 id
+    function collectContainerIds(containers, acc = new Set()) {
+      for (const c of containers || []) {
+        acc.add(c.id)
+        collectContainerIds(c.children, acc)
+      }
+      return acc
+    }
+
+    it('preview 传入时走统一管道, 无重复容器（SM 只作为节点, 不作为容器）', () => {
+      const preview = {
+        domainProducts: [
+          { name: '营销云', code: 'MKT', modules: [
+            { name: '营销中台', code: 'MKT-M', submodules: [
+              { name: '会员中心', code: 'SM001', businessObjects: [
+                { id: 101, code: 'BO001', name: '会员' },
+              ] },
+            ] },
+          ] },
+        ],
+        relationships: [],
+      }
+      const result = buildServiceModuleDiagramData({
+        preview,
+        chartType: 'serviceModule',
+        colorGroupBy: 'subDomain',
+        colorScheme: 'default',
+      })
+      const nodeIds = new Set(result.nodes.map(n => n.id))
+      const containerIds = collectContainerIds(result.containers)
+      // SM001 必须是显示节点（serviceModule 末端）
+      expect(nodeIds.has('SM001')).toBe(true)
+      // 容器树中不存在 id 与节点 id 相同的容器（SM 不作为 subgraph 边框重复出现）
+      expect([...nodeIds].filter(id => containerIds.has(id))).toEqual([])
+      // BO001 折叠进 SM, 不作为节点出现
+      expect(nodeIds.has('BO001')).toBe(false)
+      // 容器层级: 领域 → 子领域（nodeIds 含 SM001, 即 SM 归属于子领域容器, 正常层级）
+      expect(result.containers).toHaveLength(1)
+      expect(result.containers[0].layer).toBe('DOMAIN')
+      expect(result.containers[0].children[0].layer).toBe('SUB_DOMAIN')
+      expect(result.containers[0].children[0].nodeIds).toEqual(['SM001'])
+    })
+  })
+
   describe('LAYOUT_TEMPLATES 常量', () => {
     it('应该包含 DEFAULT 模板', () => {
       expect(LAYOUT_TEMPLATES.DEFAULT).toBe('default')

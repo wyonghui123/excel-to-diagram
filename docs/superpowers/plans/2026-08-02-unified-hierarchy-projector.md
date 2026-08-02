@@ -336,18 +336,24 @@ export function projectTree({ tree, elementRefIndex, links }, { terminalResolver
 
   // 末端层由 activeTerminal 决定；activeTerminal 仅在领域层解析一次后下传，
   // 避免 per-domain resolver 在子树内被再次求值导致粒度漂移。
-  function walk(node, activeTerminal) {
+  // context 沿树派生 domain/subDomain 名称（L3 着色分组需要, 见 Task 6 修正记录）。
+  function walk(node, activeTerminal, context = {}) {
     const terminal = activeTerminal || resolveTerminal(node)
     if (node.layer === terminal) {
       const dn = {
         id: node.code, layer: node.layer, code: node.code, name: node.name,
         elementRef: node.elementRef, aggregated: { count: countDescendants(node) },
+        domain: node.layer === 'DOMAIN' ? node.name : context.domain,
+        subDomain: node.layer === 'SUB_DOMAIN' ? node.name : context.subDomain,
       }
       displayNodes.push(dn)
       registerTerminal(node, dn)
       return
     }
-    for (const child of node.children || []) walk(child, terminal)
+    const nextCtx = { ...context }
+    if (node.layer === 'DOMAIN') nextCtx.domain = node.name
+    else if (node.layer === 'SUB_DOMAIN') nextCtx.subDomain = node.name
+    for (const child of node.children || []) walk(child, terminal, nextCtx)
   }
 
   function countDescendants(node, terminalLayer) {
@@ -697,6 +703,10 @@ git commit -m "feat(hierarchy): L4 layoutGroupsDeriver groups 与容器一致派
 - [ ] **Step 1: 实现管道**
 
 ```js
+// 注意: re-export 不绑定本地作用域, createHierarchyPipeline 内调用需显式 import
+import { buildHierarchyTree } from './buildHierarchyTree.js'
+import { projectTree, GLOBAL_TERMINALS } from './projectTree.js'
+
 export { buildHierarchyTree } from './buildHierarchyTree.js'
 export { projectTree, GLOBAL_TERMINALS } from './projectTree.js'
 export { colorize } from './colorize.js'
@@ -761,33 +771,49 @@ git commit -m "feat(hierarchy): 管道装配 createHierarchyPipeline + 分层缓
 
 ```js
 // 追加到 serviceModuleDiagramBuilder.spec.js 的 describe 内
-it('preview 传入时走统一管道, 无重复容器（SM 只出现在 nodes 或 containers 之一）', () => {
-  const preview = {
-    domainProducts: [
-      { name: '营销云', code: 'MKT', modules: [
-        { name: '营销中台', code: 'MKT-M', submodules: [
-          { name: '会员中心', code: 'SM001', businessObjects: [
-            { id: 101, code: 'BO001', name: '会员' },
+describe('统一管道（preview 传入）', () => {
+  // 递归收集容器树所有容器 id
+  function collectContainerIds(containers, acc = new Set()) {
+    for (const c of containers || []) {
+      acc.add(c.id)
+      collectContainerIds(c.children, acc)
+    }
+    return acc
+  }
+
+  it('preview 传入时走统一管道, 无重复容器（SM 只作为节点, 不作为容器）', () => {
+    const preview = {
+      domainProducts: [
+        { name: '营销云', code: 'MKT', modules: [
+          { name: '营销中台', code: 'MKT-M', submodules: [
+            { name: '会员中心', code: 'SM001', businessObjects: [
+              { id: 101, code: 'BO001', name: '会员' },
+            ] },
           ] },
         ] },
-      ] },
-    ],
-    relationships: [],
-  }
-  const result = buildServiceModuleDiagramData({
-    preview,
-    chartType: 'serviceModule',
-    colorGroupBy: 'subDomain',
-    colorScheme: 'default',
+      ],
+      relationships: [],
+    }
+    const result = buildServiceModuleDiagramData({
+      preview,
+      chartType: 'serviceModule',
+      colorGroupBy: 'subDomain',
+      colorScheme: 'default',
+    })
+    const nodeIds = new Set(result.nodes.map(n => n.id))
+    const containerIds = collectContainerIds(result.containers)
+    // SM001 必须是显示节点（serviceModule 末端）
+    expect(nodeIds.has('SM001')).toBe(true)
+    // 容器树中不存在 id 与节点 id 相同的容器（SM 不作为 subgraph 边框重复出现）
+    expect([...nodeIds].filter(id => containerIds.has(id))).toEqual([])
+    // BO001 折叠进 SM, 不作为节点出现
+    expect(nodeIds.has('BO001')).toBe(false)
+    // 容器层级: 领域 → 子领域（nodeIds 含 SM001, 即 SM 归属于子领域容器, 正常层级）
+    expect(result.containers).toHaveLength(1)
+    expect(result.containers[0].layer).toBe('DOMAIN')
+    expect(result.containers[0].children[0].layer).toBe('SUB_DOMAIN')
+    expect(result.containers[0].children[0].nodeIds).toEqual(['SM001'])
   })
-  const nodeIds = new Set(result.nodes.map(n => n.id))
-  const containerContainsSm = (containers, nodeId) => containers.some(c =>
-    c.nodeIds?.includes(nodeId) || c.children?.some(cc => containerContainsSm([cc], nodeId)))
-  // SM001 必须是节点（serviceModule 末端）且不在任何容器内
-  expect(nodeIds.has('SM001')).toBe(true)
-  expect(containerContainsSm(result.containers, 'SM001')).toBe(false)
-  // BO001 不出现为节点（折叠）
-  expect(nodeIds.has('BO001')).toBe(false)
 })
 ```
 
@@ -798,31 +824,25 @@ Expected: 新增用例 FAIL（无 preview 分支）
 
 - [ ] **Step 3: 实现管道分支**
 
-在 `buildServiceModuleDiagramData` 函数签名增加参数（`preview = null`, `chartType = ''`, `versionId = 0`, `scopeHash = ''`）并插入管道分支（放在函数开头、颜色方案获取之后）：
+在 `buildServiceModuleDiagramData` 函数签名增加参数（`preview = null`, `chartType = ''`, `versionId = 0`, `scopeHash = ''`）；管道分支插入在 `filteredRelationships` 计算之后（分支用 `filteredRelationships` 补充 link 元数据，返回前不经过旧逻辑）：
 
 ```js
 // [FIX 2026-08-02] 统一管道分支（spec 4.2）：preview 传入且 chartType=serviceModule 时走管道。
-// 消除双数据源: nodes/containers/links 全部派生自同一棵架构树, 同一 SM 只出现一次。
+// 消除双数据源: nodes/containers/links 全部派生自同一棵架构树（L1 树 → L2 投影 → L3 着色），
+// 容器层级由树固定派生, 同一 SM 只出现一次（作为显示节点; 归属于子领域容器为正常层级, 不再作为 subgraph 容器重复出现）。
 if (preview && chartType === 'serviceModule') {
   const { getTree, project } = createHierarchyPipeline()
   const treeData = getTree({ preview, versionId, scopeHash })
   const projection = project({ treeData, terminal: GLOBAL_TERMINALS.serviceModule })
 
-  // 显示节点补充 domain/subDomain/isCenter（colorize 分组着色需要）
-  const smMap = new Map(filteredServiceModules.map(sm => [sm.code, sm]))
-  const enrichedNodes = projection.nodes.map(n => {
-    const sm = smMap.get(n.code) || {}
-    return { ...n, domain: sm.domain, subDomain: sm.subDomain, isCenter: sm.isCenter }
-  })
-
-  // L3 着色（复用原有颜色逻辑, 中心模块用分组色）
-  const { nodes: coloredNodes } = colorize(enrichedNodes, projection.containers, {
+  // L3 着色（投影节点自带 domain/subDomain, 由树上下文派生, 无需外部 serviceModules 补充）
+  const { nodes: coloredNodes } = colorize(projection.nodes, projection.containers, {
     colorGroupBy, colorScheme, centerSubDomain, centerSubDomainColor, customColors,
     centerServiceModuleCodes, centerScopeHighlight, nodeTextColor,
   })
 
-  // links: 投影器已把 BO 级关系折叠重映射为 SM code 级; 补充关系元数据 + 去重
-  const relMap = new Map(filteredRelationships.map(r =>
+  // links: 投影器已把 BO 级关系折叠重映射为 SM code 级; 补充关系元数据 + 过滤悬空边
+  const relMap = new Map((filteredRelationships || []).map(r =>
     [`${r.sourceServiceModuleCode}->${r.targetServiceModuleCode}`, r]))
   const links = projection.links
     .map(l => {
@@ -851,14 +871,14 @@ if (preview && chartType === 'serviceModule') {
 }
 ```
 
-同时在文件顶部增加 import：
+同时在文件顶部增加 import（index.js 需显式 import buildHierarchyTree，re-export 不绑定本地作用域）：
 
 ```js
 import { createHierarchyPipeline, GLOBAL_TERMINALS } from './hierarchyTree/index.js'
 import { colorize } from './hierarchyTree/colorize.js'
 ```
 
-> 实现说明：旧链路 `filteredServiceModules`（按 layoutControl 过滤后）用于补充 domain/subDomain 元数据；`filteredRelationships` 用于补充 link 的 label/tooltip/annotation 字段。若某 SM 不在 `filteredServiceModules` 中（被 layoutControl 过滤），投影仍从 preview 全量树产出——如需严格过滤，可仿照旧逻辑在投影前裁剪 `preview.domainProducts`。以 Task 8 的 useDiagramData 改造为准保持过滤语义一致。
+> 实现说明：`filteredRelationships`（按 layoutControl 过滤后）用于补充 link 的 label/tooltip/annotation 字段。若某 SM 不在 layoutControl 分组中，投影仍从 preview 全量树产出——如需严格过滤，可在投影前裁剪 `preview.domainProducts`（以 Task 8 的 useDiagramData 改造为准保持过滤语义一致）。
 
 - [ ] **Step 4: 运行确认通过**
 
@@ -875,6 +895,11 @@ Expected: 全部用例 PASS（含新增用例 + 既有用例不回归）
 git add src/services/serviceModuleDiagramBuilder.js src/services/__tests__/serviceModuleDiagramBuilder.spec.js
 git commit -m "feat(sm-diagram): buildServiceModuleDiagramData 走统一管道消除重复容器"
 ```
+
+> **执行修正记录（2026-08-02）**：
+> 1. **projectTree 增强**：显示节点由树上下文派生 `domain/subDomain` 名称（walk 携带 context），使管道分支的 L3 着色不依赖外部 `serviceModules` 参数补充元数据（该参数在 preview 分支调用时可能未传）。Task 2 测试不受影响。
+> 2. **「无重复容器」断言方向修正**：SM 显示节点归属于子领域容器 `nodeIds` 是正常层级（用户期望「SM 节点在子领域容器内」），真正的重复是「同一元素 id 既作为 nodes 节点又作为 containers 树中的容器」。断言改为收集容器树所有容器 id，与节点 id 集合求交集为空。
+> 3. **index.js 显式 import**：`export { buildHierarchyTree } from ...` 只 re-export 不绑定本地作用域，`createHierarchyPipeline` 内调用报 `buildHierarchyTree is not defined`，已补显式 import。
 
 ---
 
