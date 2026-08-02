@@ -49,125 +49,6 @@ function sortContainersForGrid(containers, centerSubDomain) {
   return result.filter(Boolean)
 }
 
-function resolveGroupContainers(layoutControlConfig, realContainers) {
-  if (!layoutControlConfig?.groups || !realContainers || realContainers.length === 0) {
-    return layoutControlConfig
-  }
-
-  const config = { ...layoutControlConfig, groups: [] }
-
-  for (const group of layoutControlConfig.groups) {
-    config.groups.push(resolveContainersInGroup(group, realContainers))
-  }
-
-  return config
-}
-
-function resolveContainersInGroup(group, realContainers) {
-  console.log('[resolveContainersInGroup] Processing group:', {
-    id: group.id,
-    type: group.type,
-    name: group.name,
-    title: group.title,
-    containersCount: group.containers?.length || 0,
-    childrenCount: group.children?.length || 0
-  })
-  
-  const resolved = { ...group }
-
-  if (group.containers && group.containers.length > 0) {
-    console.log('[resolveContainersInGroup] Group has containers, resolving...')
-    resolved.containers = group.containers.map(containerData => {
-      console.log('[resolveContainersInGroup] Processing container:', {
-        id: containerData?.id,
-        name: containerData?.name,
-        enabled: containerData?.enabled,
-        fullTitle: containerData?.fullTitle
-      })
-      if (typeof containerData === 'object' && containerData !== null) {
-        if (containerData.nodes && containerData.nodes.length > 0) {
-          console.log('[resolveContainersInGroup] Container already has nodes:', containerData.id || containerData.name)
-          return containerData
-        }
-        const found = realContainers.find(c =>
-          c.id === containerData.id ||
-          c.name === containerData.name ||
-          c.fullTitle === containerData.fullTitle ||
-          (containerData.elementCode && c.id === containerData.elementCode)
-        )
-        if (found) {
-          console.log('[resolveContainersInGroup] Matched container:', containerData.name, '-> found:', found.name, 'nodes:', found.nodes?.length)
-          console.log('[resolveContainersInGroup] containerData.fullTitle:', containerData.fullTitle)
-          console.log('[resolveContainersInGroup] containerData.enabled:', containerData.enabled)
-          const result = { ...found }
-          if (containerData.direction) result.direction = containerData.direction
-          // 保留原始的 fullTitle（包含禁用路径信息）
-          if (containerData.fullTitle) {
-            console.log('[resolveContainersInGroup] Preserving fullTitle:', containerData.fullTitle)
-            result.fullTitle = containerData.fullTitle
-          }
-          if (containerData.title && !result.title) {
-            result.title = containerData.title
-          }
-          // 保留原始的 enabled（当容器被禁用时）
-          if (containerData.enabled === false) {
-            console.log('[resolveContainersInGroup] Preserving enabled=false from containerData')
-            result.enabled = false
-          }
-          console.log('[resolveContainersInGroup] result.fullTitle:', result.fullTitle)
-          console.log('[resolveContainersInGroup] result.enabled:', result.enabled)
-          return result
-        } else {
-          console.log('[resolveContainersInGroup] No match found for container:', containerData)
-        }
-      }
-      return containerData
-    })
-  }
-
-  if (!resolved.containers || resolved.containers.length === 0) {
-    console.log('[resolveContainersInGroup] No containers yet, trying to match group against realContainers...')
-    console.log('[resolveContainersInGroup] group.name:', group.name, 'group.title:', group.title, 'group.elementCode:', group.elementCode, 'group.type:', group.type)
-    console.log('[resolveContainersInGroup] realContainers:', realContainers.map(c => ({ id: c.id, name: c.name })))
-
-    const matchedContainer = realContainers.find(c =>
-      c.name === group.name ||
-      c.name === group.title ||
-      c.id === group.elementCode ||
-      c.id === group.name ||
-      c.id === group.title
-    )
-
-    console.log('[resolveContainersInGroup] matchedContainer:', matchedContainer ? { id: matchedContainer.id, name: matchedContainer.name, nodes: matchedContainer.nodes?.length } : null)
-
-    if (matchedContainer && matchedContainer.nodes && matchedContainer.nodes.length > 0) {
-      const groupTitleMatchesContainer = (group.name && group.name === matchedContainer.name) ||
-        (group.title && group.title === matchedContainer.name)
-
-      if (groupTitleMatchesContainer) {
-        console.log('[resolveContainersInGroup] Group name matches container, using directNodes to avoid nested subgraph')
-        resolved.directNodes = matchedContainer.nodes.map(n => typeof n === 'object' ? (n.id || n.code || n.name) : n)
-      } else {
-        resolved.containers = [{
-          ...matchedContainer,
-          id: group.id,
-          name: group.name || group.title,
-          fullTitle: group.fullTitle || group.title
-        }]
-        console.log('[resolveContainersInGroup] Created container from matched:', resolved.containers[0])
-      }
-    }
-  }
-  
-  console.log('[resolveContainersInGroup] Final resolved.containers:', resolved.containers?.length || 0)
-
-  if (group.children && group.children.length > 0) {
-    resolved.children = group.children.map(child => resolveContainersInGroup(child, realContainers))
-  }
-
-  return resolved
-}
-
 export function useServiceModuleSyntax() {
   const { getContainerStyle, getLinkStyle, getNodeStyle, generateClassDefs } = useBlockDiagramStyle()
   const { preCalculateNodeSizes, createSimpleNodeMap, generateLinksCode } = useBlockDiagramSyntax()
@@ -298,7 +179,9 @@ export function useServiceModuleSyntax() {
       console.log('[useServiceModuleSyntax] sortedContainers count:', sortedContainers.length)
       console.log('[useServiceModuleSyntax] sortedContainers:', sortedContainers.map(c => ({ id: c.id, name: c.name, nodesCount: c.nodes?.length })))
       
-      const resolvedConfig = resolveGroupContainers(effectiveLayoutControlConfig, sortedContainers)
+      // [FIX 2026-08-02] 统一管道后 groups 由 deriveLayoutGroups 从同一容器树派生,
+      // 与 sortedContainers 归属严格一致, 不再需要按 name/code 匹配真实容器 (spec 4.3)
+      const resolvedConfig = effectiveLayoutControlConfig
       console.log('[useServiceModuleSyntax] resolvedConfig.groups:', JSON.stringify(resolvedConfig.groups, null, 2).substring(0, 2000))
       
       console.log('[useServiceModuleSyntax] containers after resolveGroupContainers (resolvedConfig):')
