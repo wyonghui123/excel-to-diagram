@@ -286,7 +286,12 @@ export function useServiceModuleSyntax() {
       })
     }
 
-    const { code: linksCode, relationDescriptions: relations } = generateLinksCode(links, nodeMap, {
+    // [FIX 2026-08-02] 取回 linkColorMappings (与 BO 图契约对齐):
+    //   generateLinksCode 内部已按 v6 规则计算每条连线的颜色并生成 linkStyle,
+    //   之前只解构 code/relationDescriptions, linkColorMappings 被丢弃 →
+    //   MermaidComponent.linkColorMappings 恒空 → 增量路径 updateLinkColors 永不执行
+    //   (切换 centerScopeHighlight 时连线颜色不更新, 用户观察"外部节点连线恒黑")。
+    const { code: linksCode, linkColorMappings: smLinkColorMappings, relationDescriptions: relations } = generateLinksCode(links, nodeMap, {
       containers,
       centerSubDomain,
       collectRelations: true
@@ -314,7 +319,11 @@ export function useServiceModuleSyntax() {
 
     return {
       mermaidCode,
-      nodeColorMappings
+      nodeColorMappings,
+      // [FIX 2026-08-02] 补齐 linkColorMappings 契约字段 (与 BO 图 useBusinessObjectSyntax 对齐):
+      //   MermaidComponent 增量路径 updateColorsOnly → updateLinkColors 依赖它;
+      //   缺失 → SM 图切换 centerScopeHighlight 时连线颜色不更新。
+      linkColorMappings: smLinkColorMappings || []
     }
   }
 

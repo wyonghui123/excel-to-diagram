@@ -302,6 +302,11 @@ export default {
           const result = serviceModuleSyntax.generateMermaidCode(data, relationDescriptions, layoutEngine, layoutType, positions, zoneRowCount, preserveModelOrder, layoutControlConfig)
           if (typeof result === 'object' && result !== null) {
             nodeColorMappings = result.nodeColorMappings || []
+            // [FIX 2026-08-02] SM 图补齐 linkColorMappings (与 BO 分支一致):
+            //   之前只取 nodeColorMappings → linkColorMappings 恒空 →
+            //   updateColorsOnly 的 `linkColorMappings.length > 0` 守卫拦截 →
+            //   切换 centerScopeHighlight 时连线颜色不更新 (外部节点连线恒黑)。
+            linkColorMappings = result.linkColorMappings || []
             const code = result.code || result.mermaidCode || ''
             lastMermaidCodeRef = code
             if (typeof window !== 'undefined') window.__lastMermaidCode = code

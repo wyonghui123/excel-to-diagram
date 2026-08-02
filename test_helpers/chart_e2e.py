@@ -487,16 +487,12 @@ class ChartE2E:
                          else f'图例异常: empty={empty_name[:3]} unknown={unknown[:3]}')
 
         # [v2 2026-08-02] B9: link 颜色 (linkColorMappings 非空 + SVG link stroke 抽样一致)
-        # [Task 9 2026-08-02] SM 图链路不产出 linkColorMappings (useServiceModuleSyntax 无此字段,
-        #   grep 确认仅 useBusinessObjectSyntax 生成), 仅 BO 图要求非空; SM 场景跳过避免误报回归
+        # [FIX 2026-08-02] SM 图已补齐 linkColorMappings 契约 (useServiceModuleSyntax 返回 +
+        #   MermaidComponent SM 分支接收), BO/SM 两图均要求非空, 不再跳过 (原 Task 9 skip 条件作废)
         links_snap = self._snap().get('links') or {}
         link_map = links_snap.get('colorMappings') or []
-        if self.scenario['chart_type'] != 'businessObject':
-            self._record('B', 'linkColorMappings (SM 图链路不产出, 跳过)',
-                         True, skipped=True)
-        else:
-            self._record('B', f'linkColorMappings 非空 ({len(link_map)} 条)',
-                         len(link_map) > 0, {'mapped': len(link_map)})
+        self._record('B', f'linkColorMappings 非空 ({len(link_map)} 条)',
+                     len(link_map) > 0, {'mapped': len(link_map)})
         if link_map:
             strokes = links_snap.get('svgStrokes') or []
             mismatched = []
