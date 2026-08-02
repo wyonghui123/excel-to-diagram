@@ -567,7 +567,7 @@ import { deriveLayoutGroups } from '../layoutGroupsDeriver.js'
 
 const containers = [
   { id: 'D_MKT', layer: 'DOMAIN', code: 'MKT', name: '营销云', children: [
-    { id: 'SD_MKT-M', layer: 'SUB_DOMAIN', code: 'MKT-M', name: '营销中台', nodeIds: ['SM_001'] },
+    { id: 'SD_MKT-M', layer: 'SUB_DOMAIN', code: 'MKT-M', name: '营销中台', nodeIds: ['SM001'] },
   ] },
 ]
 
@@ -581,7 +581,8 @@ describe('deriveLayoutGroups', () => {
     const sd = groups[0].children[0]
     expect(sd.groupType).toBe('subDomain')
     expect(sd.containers[0].groupType).toBe('serviceModule')
-    expect(sd.containers[0].elementCode).toBe('SM_001')
+    expect(sd.containers[0].elementCode).toBe('SM001')
+    expect(sd.containers[0].id).toBe('SM_SM001')
   })
 })
 ```
@@ -611,9 +612,16 @@ export function deriveLayoutGroups(containers) {
   return groups
 }
 
+// 容器层 → 下一层（nodeIds 元素类型）: SUB_DOMAIN → SERVICE_MODULE, SERVICE_MODULE → BUSINESS_OBJECT
+const LAYER_NEXT = {
+  [GroupType.DOMAIN]: GroupType.SUB_DOMAIN,
+  [GroupType.SUB_DOMAIN]: GroupType.SERVICE_MODULE,
+  [GroupType.SERVICE_MODULE]: GroupType.BUSINESS_OBJECT,
+}
+
 function convertContainer(c) {
   if (!c) return null
-  const isLeafContainer = (c.children && c.children.length > 0)
+  const hasChildren = c.children && c.children.length > 0
   const group = {
     id: c.id,
     title: c.name,
@@ -621,7 +629,7 @@ function convertContainer(c) {
     groupType: c.layer === GroupType.DOMAIN ? 'domain'
       : c.layer === GroupType.SUB_DOMAIN ? 'subDomain'
       : c.layer === GroupType.SERVICE_MODULE ? 'serviceModule' : 'custom',
-    direction: 'TB',
+    direction: c.layer === GroupType.DOMAIN ? 'LR' : 'TB',
     visible: true,
     enabled: true,
     style: { fill: '#ffffff', stroke: '#666666', strokeWidth: 2, strokeDasharray: '' },
@@ -629,20 +637,25 @@ function convertContainer(c) {
     children: [],
     parentId: null,
   }
-  if (isLeafContainer) {
+  if (hasChildren) {
     for (const child of c.children) {
       const childGroup = convertContainer(child)
-      if (childGroup) group.children.push(childGroup)
+      if (childGroup) {
+        childGroup.parentId = group.id
+        group.children.push(childGroup)
+      }
     }
   }
+  // 终端类型从"容器层的下一层"推断（投影器 nodeIds 是无前缀 code，不能靠前缀判断）
+  const terminalType = LAYER_NEXT[c.layer] || GroupType.BUSINESS_OBJECT
+  const isSm = terminalType === GroupType.SERVICE_MODULE
   for (const nodeId of c.nodeIds || []) {
-    const isSm = nodeId.startsWith('SM_')
     group.containers.push({
-      id: nodeId,
-      type: isSm ? GroupType.SERVICE_MODULE : GroupType.BUSINESS_OBJECT,
+      id: isSm ? createGroupId(GroupType.SERVICE_MODULE, nodeId) : nodeId,
+      type: terminalType,
       title: nodeId,
       elementCode: nodeId,
-      elementRef: { type: isSm ? GroupType.SERVICE_MODULE : GroupType.BUSINESS_OBJECT, code: nodeId, name: nodeId },
+      elementRef: { type: terminalType, code: nodeId, name: nodeId },
       parentId: group.id,
       groupType: isSm ? 'serviceModule' : 'custom',
       direction: 'TB',
@@ -668,6 +681,11 @@ Expected: 1 个用例 PASS
 git add src/services/hierarchyTree/layoutGroupsDeriver.js src/services/hierarchyTree/__tests__/layoutGroupsDeriver.spec.js
 git commit -m "feat(hierarchy): L4 layoutGroupsDeriver groups 与容器一致派生"
 ```
+
+> **执行修正记录（2026-08-02）**：原 fixtures/实现与投影器输出契约不一致——投影器 `nodeIds` 是无前缀 code（`'SM001'`），原实现 `nodeId.startsWith('SM_')` 判断会失效。修正：
+> 1. 终端类型从「容器层的下一层」推断（`LAYER_NEXT`：SUB_DOMAIN→SERVICE_MODULE、SERVICE_MODULE→BUSINESS_OBJECT），不依赖前缀。
+> 2. 输出对齐 `buildServiceModuleGroupsFromDomainProducts`：SM 终端 `id` 用 `createGroupId`（带前缀）、`elementCode` 无前缀、domain `direction='LR'`、子级 `parentId` 补全。
+> 3. fixtures 的 `nodeIds` 改为无前缀 `'SM001'`。
 
 ---
 
