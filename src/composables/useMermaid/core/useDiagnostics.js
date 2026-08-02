@@ -361,6 +361,10 @@ export const installDiagnosticsToWindow = () => {
     get stepMeta() { return JSON.parse(JSON.stringify(diag.stepMeta)) },
     get errors() { return diag.errors.slice() },
     get warnings() { return diag.warnings.slice() },
+    // [FIX 2026-08-02] L5 增量跳过信号 (spec 4.4) — MermaidComponent 每次命中 code-diff
+    //   跳过时递增 renderSkippedCount / 记录已渲染 code, chart_e2e A8 断言读取.
+    renderSkippedCount: 0,
+    lastRenderedCode: null,
     hooks: diag.hooks,
     dump: diag.dump,
     snapshot: diag.snapshot

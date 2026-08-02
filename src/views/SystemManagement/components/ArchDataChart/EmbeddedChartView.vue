@@ -155,6 +155,15 @@ const {
   initFromArchDataManager
 } = useDiagramData()
 
+// [E2E 2026-08-02] 暴露 generateDiagram — 供 E2E 触发"相同输入重渲染"验证 L5 增量跳过
+//   (Task 8 spec 4.4: mermaidCode 与上次一致时跳过 mermaid.run 全量重绘)。
+//   用法: window.__archPage.generateDiagram() → 新 diagramData 引用 → MermaidComponent
+//   watch 触发 renderMermaid → code-diff 相同 → renderSkippedCount+1 / lastRender 不更新。
+if (typeof window !== 'undefined') {
+  window.__archPage = window.__archPage || {}
+  window.__archPage.generateDiagram = generateDiagram
+}
+
 // [FIX 2026-07-29 画布缩小] 监听画布容器尺寸变化，调用 MermaidComponent.relayoutCanvas
 //   重设 .mermaid-wrapper / .draggable-area 的 inline style 尺寸。
 //
@@ -200,6 +209,26 @@ const onCanvasResize = () => {
 // ============================================================
 const layoutControlConfig = computed(() => {
   const rawGroups = chartConfig.layoutControl?.groups || []
+
+  // [FIX 2026-08-02 方案A] SM 图统一管道: 渲染容器层级必须用 unifiedLayoutConfig
+  //   (deriveLayoutGroups 从投影容器树派生, D→SD→directNodes)。
+  //   不能用 chartConfig.layoutControl.groups: 旧 SM 分组树 (syncLayoutControlFromDiagramData
+  //   经 buildServiceModuleGroupsFromDomainProducts 写入) 含 SM 终端 group (SM_xxx→inner/boundary),
+  //   groupedLayout 会为每个 SM 生成 G_SM_xxx subgraph → 复现"同一 SM 既容器又节点"重复渲染。
+  if (chartConfig.chartType === 'serviceModule') {
+    const d = diagramData.value
+    const unified = d?.diagramData?.layoutControlConfig || d?.layoutControlConfig
+    if (unified && unified.enabled && unified.groups && unified.groups.length > 0) {
+      return {
+        enabled: true,
+        layoutType: 'default',
+        layoutEngine: chartConfig.layoutControl?.engine || chartConfig.layoutEngine,
+        overallDirection: unified.overallDirection || chartConfig.layoutControl?.overallDirection || 'TB',
+        preserveOrder: chartConfig.layoutControl?.preserveOrder ?? true,
+        groups: unified.groups.map(g => normalizeGroupForRendering(g))
+      }
+    }
+  }
 
   // [FIX 2026-07-29] 当用户没创建分组时 (rawGroups 为空)，fallback 到 diagramData
   //   自动构建的分组 (useDiagramData.generateDiagram 内部通过 groupModel.toMermaidConfig()

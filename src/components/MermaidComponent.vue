@@ -358,12 +358,15 @@ export default {
           // 暂时禁用 UnifiedRenderer，因为它缺少样式、tooltip、交互等功能
           // UnifiedRenderer 的 disabled 提升功能已经通过 GroupModel.getFlattenedGroups 修复
           if (props.diagramData._unifiedMermaidCode && false) {
-            initializeMermaid(props.diagramType, props.diagramData, props.layoutEngine, props.layoutType, props.preserveModelOrder, effectiveLayoutControlConfig.value, configStore.mermaidMaxTextSize)
-            mermaidContainer.value.innerHTML = `<pre class="mermaid">${props.diagramData._unifiedMermaidCode}</pre>`
+            // [FIX 2026-08-02] 该分支被 `&& false` 短路, 永不执行, 保留仅作意图存档
           } else {
             const positions = props.layoutPositions || []
             const zoneRowCount = props.zoneRowCount || 3
 
+            // [FIX 2026-08-02] 阶段 1: 仅生成 mermaidCode, 不触碰 DOM.
+            //   L5 code-diff 跳过检查必须发生在 initializeMermaid + innerHTML 之前:
+            //   原实现在写入 <pre> 后才检查 querySelector('svg') — 旧 SVG 已被 innerHTML 销毁,
+            //   恒为 null → 跳过分支永不触发 (A8 增量跳过 FAIL 根因, 探针确诊 skip='undef').
             if (props.layoutEngine === 'elk') {
               const elkLoaded = await loadElkLayouts(true)
               if (!elkLoaded) {
@@ -371,10 +374,6 @@ export default {
               } else {
                 try {
                   mermaidCode = generateMermaidCode(props.diagramData, 'elk', props.layoutType, positions, zoneRowCount, props.preserveModelOrder, effectiveLayoutControlConfig.value)
-                  // 关键修复：动态调整 maxTextSize，避免大图表报 'Maximum text size in diagram exceeded'
-                  const dynamicMaxTextSize = Math.max(configStore.mermaidMaxTextSize || 500000, mermaidCode.length * 2 + 100000)
-                  initializeMermaid(props.diagramType, props.diagramData, 'elk', props.layoutType, props.preserveModelOrder, effectiveLayoutControlConfig.value, dynamicMaxTextSize)
-                  mermaidContainer.value.innerHTML = `<pre class="mermaid">${mermaidCode}</pre>`
                 } catch (e) {
                   console.error('[MermaidComponent] ELK Error generating mermaid code, falling back to dagre:', e)
                   effectiveLayoutEngine = 'dagre'
@@ -385,12 +384,47 @@ export default {
             if (!effectiveLayoutEngine || effectiveLayoutEngine !== 'elk') {
               try {
                 mermaidCode = generateMermaidCode(props.diagramData, effectiveLayoutEngine || 'dagre', props.layoutType, positions, zoneRowCount, props.preserveModelOrder, effectiveLayoutControlConfig.value)
-                // 关键修复：动态调整 maxTextSize，避免大图表报 'Maximum text size in diagram exceeded'
-                const dynamicMaxTextSize = Math.max(configStore.mermaidMaxTextSize || 500000, mermaidCode.length * 2 + 100000)
-                initializeMermaid(props.diagramType, props.diagramData, effectiveLayoutEngine || 'dagre', props.layoutType, props.preserveModelOrder, effectiveLayoutControlConfig.value, dynamicMaxTextSize)
-                mermaidContainer.value.innerHTML = `<pre class="mermaid">${mermaidCode}</pre>`
               } catch (e) {
                 console.error('[MermaidComponent] Error generating mermaid code:', e)
+              }
+            }
+
+            // [FIX 2026-08-02] 阶段 2: L5 code-diff 跳过检查 (此时旧 SVG 仍在 DOM 中, 判断可靠)
+            //   mermaidCode 与上次一致且已有 SVG → 渲染结果不会变化, 跳过 mermaid.run() 全量重绘
+            //   (大图耗时主要在 mermaid.run). 触发场景: 缓存命中的重渲染 (如切换图表类型后切回),
+            //   仅配色变化走 updateColorsOnly 不受影响.
+            if (mermaidCode && lastRenderedCode !== null && lastRenderedCode === mermaidCode && mermaidContainer.value?.querySelector('svg')) {
+              // [E2E 2026-08-02] 暴露增量跳过信号 — chart_e2e A8 断言读取
+              //   renderSkippedCount: 累计跳过次数 (每次 code-diff 命中 +1)
+              //   lastRenderedCode:   当前已渲染的 mermaid code (与 window.__lastMermaidCode 比对)
+              if (typeof window !== 'undefined' && window.__archPage?.mermaid) {
+                window.__archPage.mermaid.renderSkippedCount = (window.__archPage.mermaid.renderSkippedCount || 0) + 1
+                window.__archPage.mermaid.lastRenderedCode = mermaidCode
+              }
+              // 同步 data-chart-rendered 标记 (走 diag.endRender → EmbeddedChartView onDiagRenderEnd):
+              //   图表已是终态 (旧 SVG 即当前结果), 让 E2E wait_render_stable 不因"无新渲染"空等超时.
+              const skipSvg = mermaidContainer.value.querySelector('svg')
+              diag.endRender({
+                layoutEngine: effectiveLayoutEngine,
+                nodeCount: skipSvg?.querySelectorAll('g.node').length || 0,
+                edgeCount: skipSvg?.querySelectorAll('path.flowchart-link').length || 0,
+                containerCount: skipSvg?.querySelectorAll('g.cluster').length || 0,
+                skipped: true
+              })
+              isRendering = false
+              return
+            }
+
+            // [FIX 2026-08-02] 阶段 3: 未命中跳过 → 初始化 + 写入 <pre>, 交给下方 mermaid.run()
+            if (mermaidCode) {
+              // 关键修复：动态调整 maxTextSize，避免大图表报 'Maximum text size in diagram exceeded'
+              const dynamicMaxTextSize = Math.max(configStore.mermaidMaxTextSize || 500000, mermaidCode.length * 2 + 100000)
+              initializeMermaid(props.diagramType, props.diagramData, effectiveLayoutEngine || 'dagre', props.layoutType, props.preserveModelOrder, effectiveLayoutControlConfig.value, dynamicMaxTextSize)
+              mermaidContainer.value.innerHTML = `<pre class="mermaid">${mermaidCode}</pre>`
+              // 记录本次已渲染 code — 下次相同输入命中阶段 2 跳过
+              lastRenderedCode = mermaidCode
+              if (typeof window !== 'undefined' && window.__archPage?.mermaid) {
+                window.__archPage.mermaid.lastRenderedCode = mermaidCode
               }
             }
           }
@@ -399,17 +433,8 @@ export default {
           isRendering = false
         }
 
-      // [FIX 2026-08-02] L5 渲染跳过 (spec 4.4 增量更新): mermaidCode 与上次一致且已有 SVG
-      //   → 渲染结果不会变化, 跳过 mermaid.run() 全量重绘 (大图耗时主要在 mermaid.run)
-      //   触发场景: 缓存命中的重渲染 (如切换图表类型后切回), 仅配色变化走 updateColorsOnly 不受影响
-      if (mermaidCode && lastRenderedCode !== null && lastRenderedCode === mermaidCode && mermaidContainer.value?.querySelector('svg')) {
-        isRendering = false
-        return
-      }
-      if (mermaidCode) {
-        lastRenderedCode = mermaidCode
-      }
-
+      // [FIX 2026-08-02] nextTick + mermaid.run 位于 if (mermaidContainer.value && props.diagramData)
+      //   块内部 — 下方 `} else {` (L730) 匹配此 if, 不能在此闭合 if 块 (原实现即如此)
       nextTick(() => {
           const preEl = mermaidContainer.value?.querySelector('pre.mermaid')
           mermaid.run()

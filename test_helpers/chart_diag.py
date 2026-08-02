@@ -689,6 +689,12 @@ class ChartDiag:
             }
         }""")
 
+    def get_container_ids(self) -> List[str]:
+        """读取全部 SVG g.cluster 的 id (A6: 无重复容器断言数据源).
+        mermaid 渲染后 subgraph id 形如 'G_D_供应链云' / 'G_SM_DP' (G_ + 树 id 前缀 + code)."""
+        return self.page.evaluate(
+            "() => Array.from(document.querySelectorAll('svg g.cluster')).map(c => c.getAttribute('id') || '')")
+
     def get_legend_items(self) -> List[Dict[str, str]]:
         """读取图例项 (.color-legend-panel): 名称 + 色块颜色 (B: 图例完整性断言).
         legend 结构: panel > [title div, legendList div] > item div (色块 svg + 名称 span)."""
