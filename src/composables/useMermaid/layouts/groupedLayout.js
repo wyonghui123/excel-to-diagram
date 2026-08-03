@@ -178,7 +178,7 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
         if (!definedNodes.has(actualNodeId)) {
           const node = nodeMap.get(actualNodeId)
           if (node) {
-            const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+            const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
             code += `${indent}${actualNodeId}["${displayText}"]\n`
             definedNodes.add(actualNodeId)
           }
@@ -196,7 +196,7 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
               if (!definedNodes.has(actualNodeId)) {
                 const node = nodeMap.get(actualNodeId)
                 if (node) {
-                  const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+                  const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
                   code += `${indent}${actualNodeId}["${displayText}"]\n`
                   definedNodes.add(actualNodeId)
                 }
@@ -222,7 +222,7 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
               if (!definedNodes.has(actualNodeId)) {
                 const node = nodeMap.get(actualNodeId)
                 if (node) {
-                  const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+                  const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
                   code += `${indent}${actualNodeId}["${displayText}"]\n`
                   definedNodes.add(actualNodeId)
                 }
@@ -268,7 +268,7 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
       if (!definedNodes.has(actualNodeId)) {
         const node = nodeMap.get(actualNodeId)
         if (node) {
-          const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+          const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
           code += `${indent}  ${actualNodeId}["${displayText}"]:::node\n`
           definedNodes.add(actualNodeId)
         }
@@ -293,7 +293,7 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
             if (!definedNodes.has(actualNodeId)) {
               const node = nodeMap.get(actualNodeId)
               if (node) {
-                const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+                const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
                 code += `${indent}  ${actualNodeId}["${displayText}"]\n`
                 definedNodes.add(actualNodeId)
               }
@@ -334,7 +334,7 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
                 if (!definedNodes.has(actualNodeId)) {
                   const node = nodeMap.get(actualNodeId)
                   if (node) {
-                    const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+                    const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
                     innerCode += `${subInnerIndent}${actualNodeId}["${displayText}"]\n`
                     definedNodes.add(actualNodeId)
                   }
@@ -371,7 +371,7 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
             if (!definedNodes.has(actualNodeId)) {
               const node = nodeMap.get(actualNodeId)
               if (node) {
-                const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+                const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
                 code += `${indent}  ${actualNodeId}["${displayText}"]\n`
                 definedNodes.add(actualNodeId)
               }
@@ -489,7 +489,7 @@ function generateContainerCode(container, index, nodeMap, definedNodes, indent =
         if (definedNodes && !definedNodes.has(nodeId)) {
           const node = nodeMap.get(nodeId)
           if (node) {
-            const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+            const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
             code += `${indent}${nodeId}["${displayText}"]\n`
             definedNodes.add(nodeId)
           }
@@ -553,7 +553,7 @@ function generateContainerCode(container, index, nodeMap, definedNodes, indent =
         if (definedNodes && !definedNodes.has(nodeId)) {
           const node = nodeMap.get(nodeId)
           if (node) {
-            const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+            const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
             code += `${indent}      ${nodeId}["${displayText}"]:::node\n`
             definedNodes.add(nodeId)
           }
@@ -571,7 +571,7 @@ function generateContainerCode(container, index, nodeMap, definedNodes, indent =
         if (definedNodes && !definedNodes.has(nodeId)) {
           const node = nodeMap.get(nodeId)
           if (node) {
-            const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+            const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
             code += `${indent}      ${nodeId}["${displayText}"]:::node\n`
             definedNodes.add(nodeId)
           }
@@ -594,7 +594,7 @@ function generateContainerCode(container, index, nodeMap, definedNodes, indent =
       if (definedNodes && !definedNodes.has(nodeId)) {
         const node = nodeMap.get(nodeId)
         if (node) {
-          const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+          const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
           code += `${indent}    ${nodeId}["${displayText}"]:::node\n`
           definedNodes.add(nodeId)
         }
