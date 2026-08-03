@@ -151,7 +151,8 @@ export function useMermaidRenderer(containerRef, options = {}) {
       draggableArea.style.top = '50%'
       draggableArea.style.marginLeft = (-canvasSize / 2) + 'px'
       draggableArea.style.marginTop = (-canvasSize / 2) + 'px'
-      draggableArea.style.backgroundColor = '#E0E0E0'
+      // 画布背景: 白色 (与 MermaidComponent.css .draggable-area 一致, 用户偏好)
+      draggableArea.style.backgroundColor = '#FFFFFF'
     }
 
     // 统计渲染结果元数据 (chart_diag 一键读取)

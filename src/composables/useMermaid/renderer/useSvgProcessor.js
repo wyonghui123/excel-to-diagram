@@ -443,7 +443,8 @@ export function useSvgProcessor(options) {
     draggable.style.marginLeft = '0'
     draggable.style.marginTop = '0'
     draggable.style.boxSizing = 'border-box'
-    draggable.style.backgroundColor = '#F0F0F0'
+    // 画布背景: 白色 (与 MermaidComponent.css .draggable-area 一致, 用户偏好)
+    draggable.style.backgroundColor = '#FFFFFF'
 
     // 关键修复 v4：mermaid-content 不再 absolute 居中
     // 改用 CSS flex 居中（display: flex + align-items/justify-content: center）
