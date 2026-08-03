@@ -199,7 +199,10 @@ export function useBlockDiagramSyntax() {
             annotationContents: link.annotationContents || [],
             annotationCategories: link.annotationCategories || [],
             sourceCode: sourceNode.code,
-            targetCode: targetNode.code
+            targetCode: targetNode.code,
+            // [FIX 2026-08-03] 透传 SM 子关系数组, 供 useTooltip 展示所有子关系 BO 对.
+            //   BO 图 link 无此字段 → 空数组 → useTooltip 走单关系老逻辑 (单测兼容).
+            childRelations: link.childRelations || []
           })
         }
 

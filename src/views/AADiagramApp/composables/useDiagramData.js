@@ -105,12 +105,17 @@ function computedServiceModuleRelations(relationships, businessObjects, serviceM
 
   // 创建业务对象编码到服务模块的映射
   const boToModuleMap = new Map()
+  // [FIX 2026-08-03] BO 编码 → 名称映射, 用于回填子关系的 sourceName/targetName
+  //   (后端 *_bo_name 列 V863 全 NULL, 见 archDataConverter.js L225 注释,
+  //    子关系 tooltip 需 BO 名称展示, 必须从 businessObjects 反查)
+  const boCodeToNameMap = new Map()
   businessObjects.forEach(bo => {
     if (bo.code) {
       boToModuleMap.set(bo.code, {
         moduleCode: bo.serviceModule,
         moduleName: bo.serviceModuleName || bo.serviceModule
       })
+      boCodeToNameMap.set(bo.code, bo.name || '')
     }
   })
 
@@ -156,20 +161,30 @@ function computedServiceModuleRelations(relationships, businessObjects, serviceM
     if (boRelCode && !relation.businessObjectRelationshipCodes.includes(boRelCode)) {
       relation.businessObjectRelationshipCodes.push(boRelCode)
     }
-    
-    // 收集业务对象关系的备注
-    // [FIX 2026-06-29] 后端返回 annotationContents/Categories 数组
-    //   每个关系可能有多条 annotation, 这里把每条都收下来
-    const relContents = rel.annotationContents || []
-    const relCategories = rel.annotationCategories || []
-    relContents.forEach((content, idx) => {
-      if (!content) return
+
+    // [FIX 2026-08-03] SM 关系 tooltip 展示所有子关系:
+    //   每条 BO 级关系作为一个子关系 entry, 携带完整元数据 (source/target name+code,
+    //   type/direction/desc/annotations), 供下游 useTooltip 逐条渲染.
+    //   之前只存 annotationContent/Category, 缺少 BO 名称/类型/方向/desc →
+    //   tooltip 只能拼字符串, 无法展示"所有子关系 BO 对列表".
+    //   去重: 同 boRelCode 只入一次 (避免一对 BO 多条 annotation 导致重复 entry)
+    const alreadyHasBoRel = relation.businessObjectRelationships.some(r => r.relationCode === boRelCode)
+    if (!alreadyHasBoRel) {
       relation.businessObjectRelationships.push({
         relationCode: boRelCode,
-        annotationContent: content,
-        annotationCategory: relCategories[idx] || 'info'
+        code: rel.code || '',
+        sourceCode: rel.sourceCode || '',
+        // [FIX 2026-08-03] 后端 *_bo_name 列全 NULL, 从 businessObjects 反查 BO 名称
+        sourceName: rel.sourceName || boCodeToNameMap.get(rel.sourceCode) || '',
+        targetCode: rel.targetCode || '',
+        targetName: rel.targetName || boCodeToNameMap.get(rel.targetCode) || '',
+        relationType: rel.relationType || '',
+        relationDirection: rel.relationDirection || '',
+        relationDesc: rel.relationDesc || '',
+        annotationContents: rel.annotationContents || [],
+        annotationCategories: rel.annotationCategories || []
       })
-    })
+    }
   })
 
   // 处理备注内容
@@ -178,17 +193,23 @@ function computedServiceModuleRelations(relationships, businessObjects, serviceM
     // 去重后的业务对象关系编码
     const uniqueBoCodes = [...new Set(rel.businessObjectRelationshipCodes.filter(Boolean))]
 
-    // 构建备注内容：关系备注内容 + 业务对象关系编码
-    const boAnnotations = rel.businessObjectRelationships
-      .filter(boRel => boRel.annotationContent)
-      .map(boRel => {
+    // [FIX 2026-08-03] 兼容老消费方: 从子关系数组的 annotationContents/Categories 拼出
+    //   单字符串 annotationContent + 首个 annotationCategory.
+    //   新消费方 (useTooltip) 直接读 businessObjectRelationships 数组逐条渲染.
+    const annotationParts = []
+    const allCategories = []
+    rel.businessObjectRelationships.forEach(boRel => {
+      const contents = boRel.annotationContents || []
+      const categories = boRel.annotationCategories || []
+      contents.forEach((content, idx) => {
+        if (!content) return
         const code = boRel.relationCode || ''
-        return code ? `${boRel.annotationContent} ${code}` : boRel.annotationContent
+        annotationParts.push(code ? `${content} ${code}` : content)
+        allCategories.push(categories[idx] || 'info')
       })
+    })
+    const uniqueAnnotations = [...new Set(annotationParts)]
 
-    // 去重并用分号连接
-    const uniqueAnnotations = [...new Set(boAnnotations)]
-    
     result.push({
       sourceServiceModuleCode: rel.sourceServiceModuleCode,
       sourceServiceModuleName: rel.sourceServiceModuleName,
@@ -196,8 +217,10 @@ function computedServiceModuleRelations(relationships, businessObjects, serviceM
       targetServiceModuleName: rel.targetServiceModuleName,
       serviceRelationshipCode: `${rel.sourceServiceModuleCode}-${rel.targetServiceModuleCode}`,
       businessObjectRelationshipCodes: uniqueBoCodes,
+      // [FIX 2026-08-03] 完整子关系数组, 供下游 tooltip 展示"所有子关系 BO 对列表"
+      businessObjectRelationships: rel.businessObjectRelationships,
       annotationContent: uniqueAnnotations.join('; ') || '',
-      annotationCategory: rel.businessObjectRelationships[0]?.annotationCategory || 'info'
+      annotationCategory: allCategories[0] || 'info'
     })
   })
 

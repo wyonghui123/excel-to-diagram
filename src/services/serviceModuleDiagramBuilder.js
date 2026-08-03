@@ -191,6 +191,8 @@ export function buildServiceModuleDiagramData({
           annotationCategories: rel?.annotationCategories || [],
           relationType: rel?.relationType || '',
           relationDirection: rel?.relationDirection || null,
+          // [FIX 2026-08-03] 透传完整子关系数组, 供 useTooltip 展示"所有子关系 BO 对列表"
+          childRelations: rel?.businessObjectRelationships || [],
         }
       })
       .filter(l => coloredNodes.some(n => n.id === l.source) && coloredNodes.some(n => n.id === l.target))
@@ -329,7 +331,9 @@ export function buildServiceModuleDiagramData({
     annotationCategories: rel.annotationCategories || [],
     // [v34 双向支持] 透传 relationType + relationDirection
     relationType: rel.relationType || '',
-    relationDirection: rel.relationDirection || null
+    relationDirection: rel.relationDirection || null,
+    // [FIX 2026-08-03] 透传完整子关系数组, 供 useTooltip 展示"所有子关系 BO 对列表"
+    childRelations: rel.businessObjectRelationships || []
   }));
 
   // 构建容器（子领域）- 容器默认白色背景

@@ -231,57 +231,43 @@ export function useTooltip() {
   //   - undefined (未传): 走老逻辑, 用 relation.annotationContent (向后兼容单测)
   //   - [] (空数组, 用户未选类别): 不展示备注行
   //   - 非空数组: 只展示 relation.annotationContents 中 category 在 filter 内的备注
-  const formatTooltipText = (relation, annotationFilter) => {
-    if (!relation) return '无关系说明'
-    const relationCode = relation.relationCode || ''
-    const relationDesc = relation.relationDesc || '无关系说明'
-    const sourceName = relation.sourceName || ''
-    const targetName = relation.targetName || ''
+  // [FIX 2026-08-03] 新增 childRelations 支持:
+  //   - SM 图关系聚合多条 BO 级子关系, childRelations 携带每条子关系完整元数据
+  //   - 有 childRelations 时展示父关系概览 + 子关系列表; 否则走单关系老逻辑 (BO 图/单测兼容)
 
-    // [v34 双向支持] 关系类型 + 关系方向 - 从 relationDescriptions 透传
-    const relationType = relation.relationType || ''
-    const relationDirection = relation.relationDirection || ''
-
-    let text = `${relationCode}\n${sourceName} → ${targetName}`
-
-    // 🆕 v1.4 关系类型 (BusinessRelationType 枚举 code → 中文名)
-    if (relationType) {
-      // 优先用 EnumService._cache (L2), fallback 到 window.__relationTypeEnumMap (L3)
-      let typeLabel = relationType
-      const typeMap = getEnumMap('relation_type')
-      if (typeMap) {
-        const enumOption = typeMap[relationType]
-        if (enumOption && enumOption.label) {
-          typeLabel = `${enumOption.label} (${relationType})`  // 显示: 生成 (GENERATES)
-        }
+  // 关系类型 code → "中文名 (CODE)" 标签 (无枚举时显示原始 code)
+  const _resolveTypeLabel = (relationType) => {
+    if (!relationType) return ''
+    const typeMap = getEnumMap('relation_type')
+    if (typeMap) {
+      const enumOption = typeMap[relationType]
+      if (enumOption && enumOption.label) {
+        return `${enumOption.label} (${relationType})`
       }
-      text += `\n类型: ${typeLabel}`
     }
+    return relationType
+  }
 
-    // 🆕 v1.4 关系方向 (推/拉/双向, 直接中文) - [v39] 走 direction 枚举解析
-    if (relationDirection) {
-      let dirLabel = relationDirection
-      const dirMap = getEnumMap('direction')
-      if (dirMap) {
-        const enumOption = dirMap[relationDirection]
-        if (enumOption && enumOption.label) {
-          dirLabel = `${enumOption.label} (${relationDirection})`  // 显示: 推 (PUSH)
-        }
+  // 关系方向 code → "中文 (CODE)" 标签 (无枚举时显示原始 code)
+  const _resolveDirectionLabel = (relationDirection) => {
+    if (!relationDirection) return ''
+    const dirMap = getEnumMap('direction')
+    if (dirMap) {
+      const enumOption = dirMap[relationDirection]
+      if (enumOption && enumOption.label) {
+        return `${enumOption.label} (${relationDirection})`
       }
-      text += `\n方向: ${dirLabel}`
     }
+    return relationDirection
+  }
 
-    text += `\n${relationDesc}`
-
-    // [FIX 2026-06-30] 备注内容按 category filter 过滤
-    //   annotationFilter === undefined: 老逻辑 (单测兼容, 直接用 annotationContent)
-    //   annotationFilter === []: 不展示任何备注 (用户未选类别)
-    //   annotationFilter 非空: 用 annotationContents/Categories 数组过滤后拼接
-    let annotationLine = ''
+  // 备注行: 按 annotationFilter 过滤, 返回拼接后的字符串 (空则不展示)
+  const _resolveAnnotationLine = (relation, annotationFilter) => {
     if (annotationFilter === undefined) {
       // 老逻辑: 单测路径, relation.annotationContent 是单字符串
-      annotationLine = relation.annotationContent || ''
-    } else if (Array.isArray(annotationFilter) && annotationFilter.length > 0) {
+      return relation.annotationContent || ''
+    }
+    if (Array.isArray(annotationFilter) && annotationFilter.length > 0) {
       // 过滤模式: 优先用复数数组, fallback 到单数字段
       const contents = relation.annotationContents
       const categories = relation.annotationCategories
@@ -290,18 +276,65 @@ export function useTooltip() {
           .map((c, idx) => ({ content: c, category: categories[idx] || 'info' }))
           .filter(item => item.content && item.category && annotationFilter.includes(item.category))
           .map(item => item.content)
-        annotationLine = matched.join('; ')
-      } else if (relation.annotationContent && relation.annotationCategory && annotationFilter.includes(relation.annotationCategory)) {
-        // fallback: 单数字段, 仅当 category 匹配时展示
-        annotationLine = relation.annotationContent
+        return matched.join('; ')
+      }
+      if (relation.annotationContent && relation.annotationCategory && annotationFilter.includes(relation.annotationCategory)) {
+        return relation.annotationContent
       }
     }
-    // annotationFilter === [] 时 annotationLine 保持空字符串
+    // annotationFilter === [] 或其它: 不展示
+    return ''
+  }
 
-    if (annotationLine) {
-      text += `\n备注: ${annotationLine}`
-    }
+  // 格式化单个关系的完整文本块 (header + body), 可选缩进 (用于子关系列表)
+  const _formatRelationBlock = (relation, annotationFilter, indent = '') => {
+    const relationCode = relation.relationCode || ''
+    const relationDesc = relation.relationDesc || '无关系说明'
+    const sourceName = relation.sourceName || ''
+    const targetName = relation.targetName || ''
+    const relationType = relation.relationType || ''
+    const relationDirection = relation.relationDirection || ''
+
+    // 多行 desc 缩进: 把 desc 内部的换行也加上缩进, 保持子关系块对齐
+    const indentedDesc = indent ? String(relationDesc).replace(/\n/g, `\n${indent}`) : relationDesc
+
+    let text = `${indent}${relationCode}\n${indent}${sourceName} → ${targetName}`
+
+    const typeLabel = _resolveTypeLabel(relationType)
+    if (typeLabel) text += `\n${indent}类型: ${typeLabel}`
+
+    const dirLabel = _resolveDirectionLabel(relationDirection)
+    if (dirLabel) text += `\n${indent}方向: ${dirLabel}`
+
+    text += `\n${indent}${indentedDesc}`
+
+    const annotationLine = _resolveAnnotationLine(relation, annotationFilter)
+    if (annotationLine) text += `\n${indent}备注: ${annotationLine}`
+
     return text
+  }
+
+  const formatTooltipText = (relation, annotationFilter) => {
+    if (!relation) return '无关系说明'
+
+    // [FIX 2026-08-03] SM 图: childRelations 非空时展示父关系概览 + 所有子关系列表
+    //   (SM 下源和目标 BO 对的列表, 每条含 source/target/type/direction/desc/annotation)
+    //   BO 图/单测: childRelations 缺失或空 → 走单关系老逻辑 (向后兼容)
+    const childRelations = Array.isArray(relation.childRelations) ? relation.childRelations : []
+    if (childRelations.length > 0) {
+      const parentCode = relation.relationCode || ''
+      const parentSource = relation.sourceName || ''
+      const parentTarget = relation.targetName || ''
+      let text = `${parentCode}\n${parentSource} → ${parentTarget}`
+      text += `\n共 ${childRelations.length} 条子关系:`
+      childRelations.forEach((child, idx) => {
+        const block = _formatRelationBlock(child, annotationFilter, '    ')
+        text += `\n\n[${idx + 1}] ${block}`
+      })
+      return text
+    }
+
+    return _formatRelationBlock(relation, annotationFilter)
   }
 
   const createSelectionState = () => {
