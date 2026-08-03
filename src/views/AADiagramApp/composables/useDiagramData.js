@@ -210,6 +210,31 @@ function computedServiceModuleRelations(relationships, businessObjects, serviceM
     })
     const uniqueAnnotations = [...new Set(annotationParts)]
 
+    // [FIX 2026-08-03] SM 聚合关系方向推导:
+    //   - 任一子关系是 BIDIRECTIONAL/双向 → SM 关系双向 (用户期望: 子关系双向则 SM 连线也双向)
+    //   - 否则取首个非空子关系方向 (全部同向时取该方向; 混合方向如推+拉保持首个)
+    //   - 同时透传首个非空 relationType (tooltip 父关系概览展示)
+    //   之前 result 没有 relationDirection/relationType 字段 →
+    //   serviceModuleDiagramBuilder 透传空值 → getArrowSyntax 永远渲染 --> 单向
+    let smRelationDirection = ''
+    let smRelationType = ''
+    for (const boRel of rel.businessObjectRelationships) {
+      const dir = boRel.relationDirection
+      if (dir === 'BIDIRECTIONAL' || dir === '双向') {
+        smRelationDirection = 'BIDIRECTIONAL'
+        break
+      }
+      if (!smRelationDirection && dir) {
+        smRelationDirection = dir
+      }
+    }
+    for (const boRel of rel.businessObjectRelationships) {
+      if (boRel.relationType) {
+        smRelationType = boRel.relationType
+        break
+      }
+    }
+
     result.push({
       sourceServiceModuleCode: rel.sourceServiceModuleCode,
       sourceServiceModuleName: rel.sourceServiceModuleName,
@@ -219,6 +244,9 @@ function computedServiceModuleRelations(relationships, businessObjects, serviceM
       businessObjectRelationshipCodes: uniqueBoCodes,
       // [FIX 2026-08-03] 完整子关系数组, 供下游 tooltip 展示"所有子关系 BO 对列表"
       businessObjectRelationships: rel.businessObjectRelationships,
+      // [FIX 2026-08-03] 透传推导出的方向/类型, 供 getArrowSyntax 渲染双向连线
+      relationDirection: smRelationDirection,
+      relationType: smRelationType,
       annotationContent: uniqueAnnotations.join('; ') || '',
       annotationCategory: allCategories[0] || 'info'
     })

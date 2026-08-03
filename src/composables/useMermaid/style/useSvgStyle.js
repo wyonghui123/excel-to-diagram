@@ -81,6 +81,14 @@ export function useSvgStyle() {
     const paths = svg.querySelectorAll('.flowchart-link path, .edgePath path, path[class*="edge"]')
     const colorMap = new Map()
 
+    // [FIX 2026-08-03] Mermaid dagre 布局在 path 终点和节点 rect 间留约 2px 间隙,
+    //   导致箭头 tip 离节点边有"一点点距离".
+    //   修复: markerUnits='strokeWidth' (SM stroke-width=2), refX 从 8 减到 7
+    //   → tip 超出 path 终点 1 个 marker 单位 = 2px, 正好补偿间隙.
+    //   仅对 SM 图生效 (BO 图间隙情况未测, 保持原 refX=8 避免回归).
+    const isServiceModule = diagramType === 'serviceModule'
+    const targetRefX = isServiceModule ? '7' : '8'
+
     paths.forEach((path) => {
       const strokeColor = path.getAttribute('stroke') || path.style.stroke || '#333'
 
@@ -97,7 +105,7 @@ export function useSvgStyle() {
         marker.setAttribute('id', markerId)
         marker.setAttribute('markerWidth', '8')
         marker.setAttribute('markerHeight', '6')
-        marker.setAttribute('refX', '8')
+        marker.setAttribute('refX', targetRefX)
         marker.setAttribute('refY', '3')
         marker.setAttribute('orient', 'auto')
         marker.setAttribute('markerUnits', 'strokeWidth')
