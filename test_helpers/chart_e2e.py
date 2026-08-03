@@ -752,6 +752,54 @@ class ChartE2E:
         else:
             self._record('D', '点击节点高亮 (无节点, 跳过)', True, skipped=True)
 
+        # [v3 2026-08-03] D5b: 点击 svg 外部背景区域 → 清高亮 (用户报告的真实场景)
+        #   修复前: click 监听器绑 svg, 点击 .draggable-area (svg 外背景) 不冒泡到 svg, highlight 不清
+        #   修复后: click 监听器绑 .draggable-area, 点击背景区域也触发 clearAllHighlights
+        svg_nodes_for_bg = self.diag.page.evaluate(
+            "() => Array.from(document.querySelectorAll('svg g.node[data-code]')).slice(0, 3).map(n => n.getAttribute('data-code'))")
+        if svg_nodes_for_bg:
+            node_code_bg = svg_nodes_for_bg[0]
+            # 先点 node 高亮
+            self.diag.page.evaluate(
+                """(code) => {
+                    const n = document.querySelector(`svg g.node[data-code="${code}"]`)
+                    const r = n.getBoundingClientRect()
+                    n.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window,
+                        clientX: r.left + r.width/2, clientY: r.top + r.height/2, button: 0 }))
+                }""", node_code_bg)
+            self.diag.page.wait_for_timeout(700)
+            highlighted_before = self.diag.get_highlighted_codes()
+            # 点击 svg 外部背景区域 (.draggable-area 内但 svg 外)
+            #   svg 通常不占满 .draggable-area; 兼容小图 (svg 占满时回退到边缘外 1px)
+            self.diag.page.evaluate(
+                """() => {
+                    const draggable = document.querySelector('.draggable-area')
+                    const svg = document.querySelector('.mermaid-content svg')
+                    if (!draggable || !svg) return
+                    const dr = draggable.getBoundingClientRect()
+                    const sr = svg.getBoundingClientRect()
+                    let x, y
+                    if (sr.right + 5 < dr.right) {
+                        x = sr.right + 5; y = sr.top + 5
+                    } else if (sr.bottom + 5 < dr.bottom) {
+                        x = sr.left + 5; y = sr.bottom + 5
+                    } else {
+                        x = Math.max(dr.left + 1, sr.left - 1)
+                        y = Math.max(dr.top + 1, sr.top - 1)
+                    }
+                    draggable.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window,
+                        clientX: x, clientY: y, button: 0 }))
+                }""")
+            self.diag.page.wait_for_timeout(700)
+            highlighted_after = self.diag.get_highlighted_codes()
+            cleared = (node_code_bg in highlighted_before) and (node_code_bg not in highlighted_after)
+            self._record('D', f'点击 svg 外部背景区域 → 清高亮 ({node_code_bg})',
+                         cleared,
+                         {'before': highlighted_before[:5], 'after': highlighted_after[:5]},
+                         error=None if cleared else f'未清高亮: before={highlighted_before[:3]} after={highlighted_after[:3]}')
+        else:
+            self._record('D', '点击 svg 外部背景清高亮 (无节点, 跳过)', True, skipped=True)
+
         # [v2 2026-08-02] D6: panel→chart 反向联动 (真实 items 存在时: 点 panel item → 高亮 + 居中)
         items = self.diag.get_annotation_items()
         matched = [i for i in items if i['targetType'] == 'node']

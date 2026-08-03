@@ -730,7 +730,12 @@ export function useTooltip() {
         clearHighlight(selectedElements)
       }
     }
-    addListener(svg, 'click', onClick)
+    // [FIX 2026-08-03] 监听器从 <svg> 改为外层 .draggable-area 容器
+    //   之前绑 svg 时, 点击 svg 外部 (背景可拖拽区域) 事件不冒泡到 svg, clearHighlight 不触发
+    //   用户报告: 点击背景/可拖拽区域, highlighted 元素不取消; 只有 svg 内点击才取消
+    //   容器链 fallback 兼容单测 (svg 无 .draggable-area 祖先时退回 svg 自身)
+    const container = svg.closest('.draggable-area') || svg.closest('.mermaid-content') || svg
+    addListener(container, 'click', onClick)
   }
 
   const addMouseOverTooltips = (svg, relationDescriptions, diagramType, hideTails = false, annotationFilter = []) => {

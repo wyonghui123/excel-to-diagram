@@ -586,7 +586,13 @@ export function useAnnotationOverlay() {
     addListener(svg, 'mousedown', onSvgMouseDown);
     addListener(svg, 'mousemove', onSvgMouseMove);
     addListener(svg, 'mouseup', onSvgMouseUp);
-    addListener(svg, 'click', onSvgClick);
+    // [FIX 2026-08-03] click 监听器从 svg 改为外层 .draggable-area 容器
+    //   之前绑 svg 时, 点击 svg 外部 (背景可拖拽区域) 事件不冒泡到 svg, onSvgClick 不触发,
+    //   点击空白背景无法 clearAllHighlights → 用户报告 "highlight 不取消".
+    //   mousedown/mousemove/mouseup 仍绑 svg: isDraggingState 只关心 svg 内的拖动.
+    //   容器链 fallback 兼容单测 (svg 无 .draggable-area 祖先时退回 svg 自身).
+    const clickContainer = svg.closest('.draggable-area') || svg.closest('.mermaid-content') || svg;
+    addListener(clickContainer, 'click', onSvgClick);
 
     // [FIX 2026-07-31 v4] edgeLabel 和 edge path 上 useTooltip 调用了 e.stopPropagation,
     //   阻止了 click 事件冒泡到 svg → onSvgClick 收不到
