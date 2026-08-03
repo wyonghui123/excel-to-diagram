@@ -253,13 +253,24 @@ const layoutControlConfig = computed(() => {
     const unified = d?.diagramData?.layoutControlConfig || d?.layoutControlConfig
     if (unified && unified.enabled && unified.groups && unified.groups.length > 0
         && unified.groups.some(g => g && g.groupType)) {
+      // [FIX 2026-08-03] 应用用户在 LayoutControlPanel 的 enabled/visible 配置到 unified.groups.
+      //   deriveLayoutGroups (layoutGroupsDeriver.js L44) 硬编码 enabled=true/visible=true,
+      //   不读 chartConfig.layoutControl.groups → 用户 disable "供应链云" 后图表无变化.
+      //   修复: 用 extractGroupStates 从 chartConfig.layoutControl.groups 提取状态,
+      //   applyGroupStates 应用到 unified.groups (按 elementCode 匹配, 与切换图表类型状态迁移同链路).
+      //   深拷贝避免污染 diagramData (unified.groups 是 diagramData 的引用).
+      const userStates = sharedExtractGroupStates(chartConfig.layoutControl?.groups)
+      const mergedGroups = JSON.parse(JSON.stringify(unified.groups))
+      if (userStates.size > 0) {
+        sharedApplyGroupStates(mergedGroups, userStates)
+      }
       return {
         enabled: true,
         layoutType: 'default',
         layoutEngine: chartConfig.layoutControl?.engine || chartConfig.layoutEngine,
         overallDirection: unified.overallDirection || chartConfig.layoutControl?.overallDirection || 'TB',
         preserveOrder: chartConfig.layoutControl?.preserveOrder ?? true,
-        groups: unified.groups.map(g => normalizeGroupForRendering(g))
+        groups: mergedGroups.map(g => normalizeGroupForRendering(g))
       }
     }
   }
