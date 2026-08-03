@@ -910,6 +910,22 @@ export default {
       lastColorScheme = currentColorScheme
       lastCenterScopeHighlight = currentCenterScopeHighlight
 
+      // [C1 2026-08-03] 增量变色路径也发完成标记 — 让 e2e wait_render_stable 可靠等待
+      //   之前不发, e2e 只能 sleep 1.2s 兜底, 增量失败时无法捕获 (5 个 WARN)
+      //   现在发 incremental=true 标记, e2e 可用 wait_render_stable(timeout=3000) 精确等待
+      //   注: svg 变量在 L832 已取, 这里直接复用; L854 的短路 return true 是"无变化"路径, 不发标记
+      try {
+        diag.endRender({
+          layoutEngine: props.layoutEngine,
+          nodeCount: svg?.querySelectorAll('g.node').length || 0,
+          edgeCount: svg?.querySelectorAll('path.flowchart-link').length || 0,
+          containerCount: svg?.querySelectorAll('g.cluster').length || 0,
+          incremental: true
+        })
+      } catch (e) {
+        console.warn('[MermaidComponent.updateColorsOnly] endRender failed:', e)
+      }
+
       return true
     }
 

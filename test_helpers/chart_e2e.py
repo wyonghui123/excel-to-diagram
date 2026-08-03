@@ -365,16 +365,25 @@ class ChartE2E:
         def _switch_and_wait(key: str, value: Any) -> None:
             """切换配置并等待其生效.
 
-            [FIX 2026-08-02] 颜色/分组/中心范围切换走增量路径 (updateColorsOnly 同步改 SVG,
-            不发新 render 标记): 等新标记 (clear_marker=True) 会因"更新已完成、标记已被清掉"
-            竞态等满超时 (30s/次)。策略: 先短等标记 (覆盖意外触发全量渲染的边界),
-            超时则短等待增量更新应用完成。"""
+            [FIX 2026-08-03 C1] 增量变色路径 (updateColorsOnly) 现在也会发 data-chart-rendered
+            标记 (incremental=true), 不再需要 sleep 1.2s 兜底.
+            旧策略: 短等标记 (3000ms) 超时后 sleep 1.2s — 增量失败时无法捕获, 5 个 WARN.
+            新策略: switch 前清标记, wait(clear_marker=False) 等新标记; 超时则 WARN (真异常).
+
+            关键时序: updateColorsOnly 是同步执行的 (Vue watcher flush: 'pre' 在 switch_chart_config
+            返回前跑完), endRender 在 switch 返回时已设标记. 若 wait 用 clear_marker=True (默认),
+            会在 switch 之后清掉标记, 永远等不到新标记 → 必须在 switch 之前清, wait 时不清."""
+            # switch 之前清旧标记 (确保 wait 等的是本次新标记)
+            self.diag.page.evaluate("""() => {
+                const el = document.querySelector('.embedded-chart-view__canvas')
+                if (el) el.removeAttribute('data-chart-rendered')
+            }""")
             self.diag.switch_chart_config(key, value)
             try:
-                self.diag.wait_render_stable(timeout_ms=3000)
+                # clear_marker=False: 不能再清, 否则 switch 同步设的标记会被清掉
+                self.diag.wait_render_stable(timeout_ms=3000, clear_marker=False)
             except TimeoutError:
-                self._print(f'  [WARN] 切换 {key}={value} 后未出现新渲染标记 (增量变色路径), 短等待后继续')
-                time.sleep(1.2)
+                self._print(f'  [WARN] 切换 {key}={value} 后渲染超时 (增量路径未发标记)')
 
         # B3: 颜色方案切换生效 (default → vibrant → 颜色集合变化)
         if is_smoke:
