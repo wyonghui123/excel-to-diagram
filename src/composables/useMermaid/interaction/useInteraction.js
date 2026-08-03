@@ -37,7 +37,7 @@ export function useInteraction() {
    *   - mermaid 渲染时直接把 viewBox 尺寸做 attribute，没法区分"逻辑尺寸"和"渲染尺寸"
    * 唯一可靠的是让浏览器自己按 viewBox + CSS height:100% 自动缩放。
    */
-  const autoFitDiagram = () => {
+  const autoFitDiagram = (instant = false) => {
     const container = document.querySelector('.mermaid-container')
     if (!container) return
 
@@ -48,14 +48,39 @@ export function useInteraction() {
     // [FIX 2026-08-01] 移除 console.log 噪音 — chart_diag 一键读取
     diag.recordStepMeta('autoFitDiagram', {
       container: `${containerWidth}x${containerHeight}`,
-      result: 'scale=1, translate=(0,0)'
+      result: 'scale=1, translate=(0,0)',
+      instant
     })
 
     scale.value = 1
     translateX.value = 0
     translateY.value = 0
 
+    // [FIX 2026-08-03] instant 模式: 禁用 CSS transition, 让 transform 立即生效。
+    //   原因: .mermaid-content 有 CSS `transition: transform 0.15s ease-out`
+    //   (MermaidComponent.css L180)。若不禁用, autoFit 后 transform 仍在动画中,
+    //   getBoundingClientRect() 返回中间值 (含残余 zoom scale),
+    //   导致 mermaid.run() 内部 ELK layout 读到大 BCR → 节点 foW/rectW 被放大 ×zoom scale。
+    //   场景: 用户 zoom in 后切换图表类型, autoFit 重置 transform, 但 transition 动画中,
+    //   mermaid.run() 立即执行读到错误 BCR → 文字被 rect 裁剪, 刷新页面才恢复。
+    const contentEl = document.querySelector('.mermaid-content')
+    let prevTransition = ''
+    if (instant && contentEl) {
+      prevTransition = contentEl.style.transition
+      contentEl.style.transition = 'none'
+    }
+
     updateTransform()
+
+    // force reflow 让 transform 立即生效 (否则 transition 仍会影响下次 BCR 读取)
+    if (instant && contentEl) {
+      void contentEl.getBoundingClientRect()
+      // 不恢复 transition — 让 mermaid.run() 在无 transition 下跑完,
+      // transition 由 dblclick 路径 (非-instant) 自行管理。
+      // 若需要恢复, 调用方可在 mermaid.run().then() 后恢复。
+      // 保留 prevTransition 不还原是安全的: CSS 规则仍存在, 下次非-instant 调用会重设。
+      contentEl.style.transition = prevTransition
+    }
     diag.endStep('autoFit', tFit)
   }
 

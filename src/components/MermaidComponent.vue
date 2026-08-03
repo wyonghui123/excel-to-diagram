@@ -446,6 +446,25 @@ export default {
       //   块内部 — 下方 `} else {` (L730) 匹配此 if, 不能在此闭合 if 块 (原实现即如此)
       nextTick(() => {
           const preEl = mermaidContainer.value?.querySelector('pre.mermaid')
+          // [FIX 2026-08-03] 在 mermaid.run() 之前同步重置 transform (instant 模式)。
+          //   原实现: setTimeout(autoFitDiagram, 100) 在 mermaid.run().then() 内异步调度,
+          //   此时 mermaid.run() 已完成。但 mermaid.run() 内部 ELK layout 会读
+          //   .mermaid-content.getBoundingClientRect() (含 zoom transform) 算出大 viewBox,
+          //   导致节点 rect/foreignObject 维度被放大 (×zoom scale, 实测 foW 96→441)。
+          //   同时 processSvg 内 scheduleEdgeLabelFix (rAF×2 ~32ms) 调度 fixEdgeLabelSize,
+          //   该函数用 foreignObject.getCTM() (SVG 文档坐标, 不含 CSS transform) 除
+          //   labelBkg.getBoundingClientRect() (viewport 像素, 含 zoom transform),
+          //   得到 (真实宽度 × zoom scale), 永久写入 foreignObject width attribute,
+          //   导致 edgeLabel 文字被 rect 裁剪, 刷新页面才恢复。
+          //   修复: autoFitDiagram(instant=true) 同步重置 scale=1/translate=0,0 在 mermaid.run() 之前,
+          //   instant=true 禁用 CSS transition (MermaidComponent.css L180 transition: transform 0.15s)
+          //   并 force reflow, 确保 getBoundingClientRect() 立即返回 fit 状态下的正确 BCR,
+          //   既阻止 ELK 读到大 BCR, 也让 fixEdgeLabelSize 在 fit 状态下计算正确宽度。
+          //   约束: 仅在首次渲染或图表类型切换时重置, 颜色切换等保留用户 zoom 状态。
+          const diagramTypeChanged = lastDiagramType !== null && lastDiagramType !== props.diagramType
+          if (isFirstRender || diagramTypeChanged) {
+            interaction.autoFitDiagram(true)
+          }
           mermaid.run()
             .then(() => {
               const preElAfter = mermaidContainer.value?.querySelector('pre.mermaid')
@@ -487,11 +506,10 @@ export default {
                 // [FIX 2026-07-31] 切换图表类型 (业务对象图 ↔ 服务模块图) 时也需 autoFit，
                 //   否则新 SVG 沿用旧 transform 导致画布视觉缩小。
                 //   之前只在 isFirstRender=true 时 autoFit，切换 chartType 后 isFirstRender 已是 false。
-                const diagramTypeChanged = lastDiagramType !== null && lastDiagramType !== props.diagramType
+                // [FIX 2026-08-03] autoFitDiagram(instant=true) 已移到 mermaid.run() 之前同步执行 (见上方 L464-467),
+                //   此处仅更新 isFirstRender / lastDiagramType 状态。
+                //   diagramTypeChanged 复用上方计算结果 (同作用域, 同一次渲染)。
                 if (isFirstRender || diagramTypeChanged) {
-                  setTimeout(() => {
-                    interaction.autoFitDiagram()
-                  }, 100)
                   isFirstRender = false
                 }
                 lastDiagramType = props.diagramType
