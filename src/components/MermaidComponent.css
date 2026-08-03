@@ -219,9 +219,10 @@
      （两个 cluster 之间的空隙）显示为白色小块，跟 draggable 灰色背景不一致 */
   background: transparent !important;
   box-sizing: border-box;
-  /* 关键修复 v5：xMidYMid slice 让 SVG fill 容器（裁切超出）
-     viewBox 比例 ≠ 容器比例时不会出现 letterbox 留白 */
-  preserveAspectRatio: xMidYMid slice;
+  /* [FIX 2026-08-03] preserveAspectRatio: slice -> meet
+     原 v5 用 slice (fill 容器裁切超出), 对窄高 viewBox + 宽扁容器会按宽度缩放
+     → 上下严重裁剪 → SM/BO 图初始偏大. meet 按比例完整显示, 不裁剪. */
+  preserveAspectRatio: xMidYMid meet;
   /* viewBox 保持原样，浏览器自动按比例缩放 */
 }
 

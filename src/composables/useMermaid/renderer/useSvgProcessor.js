@@ -465,13 +465,16 @@ export function useSvgProcessor(options) {
 
     const svgEl = pre.querySelector('svg')
     if (svgEl) {
-      // 关键修复 v6：让 SVG 100%×100% 容器，preserveAspectRatio="xMidYMid slice" 让图表 fill 容器不留白
-      // 不再用 'auto' 收缩到 intrinsic（会溢出 mermaid-container）
+      // [FIX 2026-08-03] preserveAspectRatio: slice -> meet
+      //   原 v6 用 slice (fill 容器裁切超出), 对窄高 viewBox (SM 1177×2000, BO 3049×3848)
+      //   + 宽扁容器 (928×600) 会按宽度缩放 → 上下严重裁剪 → 图表偏大.
+      //   meet 按比例缩放到容器内完整显示 (可能左右留白), 不裁剪, 初始视图合适.
+      //   用户可 zoom in 放大看细节.
       svgEl.style.height = '100%'
       svgEl.style.width = '100%'
       svgEl.style.maxWidth = 'none'
       svgEl.style.maxHeight = 'none'
-      svgEl.setAttribute('preserveAspectRatio', 'xMidYMid slice')
+      svgEl.setAttribute('preserveAspectRatio', 'xMidYMid meet')
     }
 
     // [FIX 2026-08-01] 移除关键诊断 v7 console.log, 改由 useDiagnostics 收集 (chart_diag.dump() 一键读取)

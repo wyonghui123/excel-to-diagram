@@ -3,7 +3,7 @@
     <div class="toolbar">
       <!-- 查看操作组 -->
       <div class="toolbar-group">
-        <button class="toolbar-btn" @click="resetAdaptive" title="重置视图">
+        <button class="toolbar-btn" @click="handleReset" title="重置视图（重新加载图表 + 重置缩放）">
           <AppIcon name="refresh" size="sm" />
           <span class="toolbar-btn-label">重置</span>
         </button>
@@ -334,7 +334,8 @@ export default {
     }
 
     // 渲染Mermaid图表
-    const renderMermaid = async () => {
+    // [FIX 2026-08-03] 加 forceAutoFit 参数: 重置按钮触发时强制 autoFit (不依赖 isFirstRender)
+    const renderMermaid = async (forceAutoFit = false) => {
       // 防止无限循环
       if (isRendering) {
         return
@@ -402,7 +403,10 @@ export default {
             //   mermaidCode 与上次一致且已有 SVG → 渲染结果不会变化, 跳过 mermaid.run() 全量重绘
             //   (大图耗时主要在 mermaid.run). 触发场景: 缓存命中的重渲染 (如切换图表类型后切回),
             //   仅配色变化走 updateColorsOnly 不受影响.
-            if (mermaidCode && lastRenderedCode !== null && lastRenderedCode === mermaidCode && mermaidContainer.value?.querySelector('svg')) {
+            // [FIX 2026-08-03] forceAutoFit=true 时绕过跳过逻辑 (重置按钮期望 reload, 不是仅重置 zoom)
+            //   原: mermaidCode 没变就跳过 → 重置按钮只 resetAdaptive, 图表内容不变 → 用户感觉"没 reload"
+            //   现: forceAutoFit=true 时强制重新渲染 (清除高亮/选中态 + 重置视图)
+            if (mermaidCode && lastRenderedCode !== null && lastRenderedCode === mermaidCode && mermaidContainer.value?.querySelector('svg') && !forceAutoFit) {
               // [E2E 2026-08-02] 暴露增量跳过信号 — chart_e2e A8 断言读取
               //   renderSkippedCount: 累计跳过次数 (每次 code-diff 命中 +1)
               //   lastRenderedCode:   当前已渲染的 mermaid code (与 window.__lastMermaidCode 比对)
@@ -462,7 +466,8 @@ export default {
           //   既阻止 ELK 读到大 BCR, 也让 fixEdgeLabelSize 在 fit 状态下计算正确宽度。
           //   约束: 仅在首次渲染或图表类型切换时重置, 颜色切换等保留用户 zoom 状态。
           const diagramTypeChanged = lastDiagramType !== null && lastDiagramType !== props.diagramType
-          if (isFirstRender || diagramTypeChanged) {
+          // [FIX 2026-08-03] forceAutoFit: 重置按钮触发时强制 autoFit (用户期望 reload + 重置视图)
+          if (isFirstRender || diagramTypeChanged || forceAutoFit) {
             interaction.autoFitDiagram(true)
           }
           mermaid.run()
@@ -2264,6 +2269,13 @@ ${mermaidCode}
       }, 2000)
     }
 
+    // [FIX 2026-08-03] handleReset: 重置按钮触发完整 reload (renderMermaid + 强制 autoFit)
+    //   原 resetAdaptive 只调 autoFitDiagram (重置 zoom/pan), 不重新渲染图表.
+    //   用户期望"重置"= 重新加载图表 + 重置视图, 现在调 renderMermaid(true) 强制 autoFit.
+    const handleReset = () => {
+      renderMermaid(true)
+    }
+
     return {
       mermaidContainer,
       mermaidContainerEl,
@@ -2272,6 +2284,7 @@ ${mermaidCode}
       isMaximized,
       shouldHideTails,
       toggleMaximize,
+      handleReset,
       resetAdaptive: interaction.resetAdaptive,
       autoFitDiagram: interaction.autoFitDiagram,
       relayoutCanvas: relayoutAfterSizeChange,
