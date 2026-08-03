@@ -1210,7 +1210,7 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
               const node = nodeMap.get(nodeId)
               if (node && !definedNodes.has(nodeId)) {
                 const displayText = node.code ? `${node.name} · (${node.code})` : node.name
-                code += `    ${nodeId}["${displayText}"]\n`
+                code += `    ${nodeId}["${displayText}"]:::node\n`
                 definedNodes.add(nodeId)
               }
             })
@@ -1221,7 +1221,7 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
               const node = nodeMap.get(nodeId)
               if (node && !definedNodes.has(nodeId)) {
                 const displayText = node.code ? `${node.name} · (${node.code})` : node.name
-                code += `  ${nodeId}["${displayText}"]\n`
+                code += `  ${nodeId}["${displayText}"]:::node\n`
                 definedNodes.add(nodeId)
               }
             })
@@ -1249,7 +1249,7 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
             const node = nodeMap.get(nodeId)
             if (node && !definedNodes.has(nodeId)) {
               const displayText = node.code ? `${node.name} · (${node.code})` : node.name
-              code += `    ${nodeId}["${displayText}"]\n`
+              code += `    ${nodeId}["${displayText}"]:::node\n`
               definedNodes.add(nodeId)
             }
           })
@@ -1269,7 +1269,7 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
             const node = nodeMap.get(nodeId)
             if (node && !definedNodes.has(nodeId)) {
               const displayText = node.code ? `${node.name} · (${node.code})` : node.name
-              code += `      ${nodeId}["${displayText}"]\n`
+              code += `      ${nodeId}["${displayText}"]:::node\n`
               definedNodes.add(nodeId)
             }
           })
@@ -1280,7 +1280,7 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
             const node = nodeMap.get(nodeId)
             if (node && !definedNodes.has(nodeId)) {
               const displayText = node.code ? `${node.name} · (${node.code})` : node.name
-              code += `    ${nodeId}["${displayText}"]\n`
+              code += `    ${nodeId}["${displayText}"]:::node\n`
               definedNodes.add(nodeId)
             }
           })

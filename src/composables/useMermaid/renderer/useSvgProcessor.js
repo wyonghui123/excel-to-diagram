@@ -524,6 +524,13 @@ export function useSvgProcessor(options) {
   /**
    * 修复 ELK 布局下嵌套容器的边界和间距问题
    * ELK 引擎在处理嵌套 subgraph 时，可能不会正确计算容器的边界框
+   *
+   * [FIX 2026-08-03] 同时规范化 cluster-label foreignObject 高度:
+   *   mermaid labelHelper 在 BO→SM→BO 切换后会用不同 baseline 测量,
+   *   导致同一标题的 foreignObject height 从 24 (初始) 变为 36 (切回),
+   *   标题底部下移 12px, 吃掉容器顶部 padding, 与首个子节点重叠 (+33 处).
+   *   实际 inner div 渲染高度不变 (bcrH 一致), 仅 foreignObject height attribute 被错算.
+   *   修复: 强制设为 24 (24px 单行字体最小高度, 与初始渲染一致).
    */
   const fixContainerTitleCenter = (svgEl) => {
     const allClusters = svgEl.querySelectorAll('.cluster')
@@ -545,13 +552,20 @@ export function useSvgProcessor(options) {
           innerDiv.style.marginLeft = '0'
           innerDiv.style.paddingLeft = '0'
         }
-        
+
         const pEls = fo.querySelectorAll('p')
         pEls.forEach((el) => {
           el.style.textAlign = 'center'
           el.style.margin = '0'
           el.style.padding = '0'
         })
+
+        // [FIX 2026-08-03] 规范化 foreignObject height: 强制 24 (单行 24px 字体最小高度)
+        //   防止 mermaid labelHelper 切换后测量到 36px 导致标题遮挡首个子节点
+        const foH = parseFloat(fo.getAttribute('height') || '0')
+        if (foH && foH > 24) {
+          fo.setAttribute('height', '24')
+        }
       } else {
         const textEl = labelEl.querySelector('text')
         if (textEl) {

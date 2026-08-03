@@ -76,8 +76,9 @@ export function getElkConfig(data = null, layoutType = 'default', preserveModelO
     'elk.spacing.nodeNode': 100,
     'elk.layered.spacing.nodeNodeBetweenLayers': 150,
 
-    // 图表整体 padding（增加 left/right 以改善嵌套容器内边距）
-    'elk.padding': '[top=40,left=80,right=80,bottom=40]',
+    // 图表整体 padding（增加 top 以避免容器标题与首个子节点重叠：
+    // 标题区域 = subGraphTitleMargin.top(15) + labelH(24) = 39px，需额外间隙）
+    'elk.padding': '[top=60,left=80,right=80,bottom=40]',
 
     // 关键：支持嵌套结构
     'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
@@ -181,7 +182,11 @@ export function useMermaidConfig() {
         arrowHeadWidth: 6,
         arrowHeadHeight: 6,
         rankdir: rankdir,
-        subGraphTitleMargin: { top: 15, bottom: 15 }
+        // [FIX] title top=5 (非 15): ELK 嵌套容器首个子节点在 rect_top+39 (ELK 默认 padding+labelH),
+        //   标题 labelH=24, 若 top=15 则标题底=rect_top+39 与子节点贴合 (0px 间隙 → 重叠).
+        //   top=5 → 标题底=rect_top+29, 留 10px 间隙.
+        //   bottom=25 保持 total=30 不变, dagre 仅用 total 做布局, 不受影响.
+        subGraphTitleMargin: { top: 5, bottom: 25 }
       }
     }
 
