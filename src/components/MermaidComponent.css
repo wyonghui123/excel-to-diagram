@@ -144,7 +144,8 @@
   left: 0;
   width: 100%;
   height: 100%;
-  background-color: #F0F0F0;
+  /* 画布背景: 白色 (用户偏好, 与 mermaid-container/wrapper/content 多层透明背景一致显示为白) */
+  background-color: #FFFFFF;
   border-radius: 8px;
   box-sizing: border-box;
   z-index: 2;
