@@ -497,11 +497,18 @@ export function useTooltip() {
       }
     })
 
+    // [FIX 2026-08-03] 缺口2: 记录未匹配的 label/relation, 供 e2e 断言 + 排查 tooltip 错配.
+    //   之前 label 文本匹配 relationCodeMap 失败时静默跳过, tooltip 显示错关系无法排查.
+    //   现在收集 unmatchedLabels, 若非空则 console.warn + recordStepMeta('matchPathsToRelations').
+    const unmatchedLabels = []
+
     labels.forEach((label) => {
       const labelText = label.textContent || label.innerHTML
       const relation = relationCodeMap.get(labelText.trim())
       if (relation) {
         pathToRelationMap.set(label, relation)
+      } else {
+        unmatchedLabels.push((labelText || '').trim().substring(0, 40))
       }
     })
 
@@ -522,12 +529,36 @@ export function useTooltip() {
       }
     })
 
+    // [FIX 2026-08-03] 缺口2: 位置 fallback 匹配诊断.
+    //   之前用 idx < relationDescriptions.length 做位置匹配, 若顺序不一致会静默错配.
+    //   现在记录 fallback 匹配数 + 多出的 path 数, e2e 可断言 fallbackCount 是否异常.
+    const unmatchedPathCount = Math.max(0, realEdgePaths.length - relationDescriptions.length)
+    const fallbackMatchCount = Math.min(realEdgePaths.length, relationDescriptions.length)
     realEdgePaths.forEach((edgePathInfo, idx) => {
       if (idx < relationDescriptions.length) {
-        const relation = relationDescriptions[idx]
-        pathToRelationMap.set(edgePathInfo.path, relation)
+        pathToRelationMap.set(edgePathInfo.path, relationDescriptions[idx])
       }
     })
+
+    // 缺口2: 未匹配诊断写入 stepMeta (snapshot.links.matchStats 暴露)
+    const matchStats = {
+      totalLabels: labels.length,
+      totalRelations: relationDescriptions.length,
+      totalPaths: realEdgePaths.length,
+      unmatchedLabelCount: unmatchedLabels.length,
+      unmatchedLabels: unmatchedLabels.slice(0, 5),
+      fallbackMatchCount,
+      unmatchedPathCount
+    }
+    diag.recordStepMeta('matchPathsToRelations', matchStats)
+    if (unmatchedLabels.length > 0) {
+      console.warn('[useTooltip] matchPathsToRelations: %d labels 未匹配 relationCode (前5: %j)',
+        unmatchedLabels.length, unmatchedLabels.slice(0, 5))
+    }
+    if (unmatchedPathCount > 0) {
+      console.warn('[useTooltip] matchPathsToRelations: %d paths 无对应 relation (path 数 > relation 数)',
+        unmatchedPathCount)
+    }
 
     return { pathToRelationMap, realEdgePaths }
   }

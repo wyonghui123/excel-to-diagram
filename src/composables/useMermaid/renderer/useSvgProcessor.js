@@ -588,6 +588,11 @@ export function useSvgProcessor(options) {
     const tProcess = diag.time('process_svg')
     diag.recordStepMeta('processSvg', { started: true, layoutEngine: props?.layoutEngine })
 
+    // [FIX 2026-08-03] 缺口1: 镜像 relationDescriptions 到 diagnostics store,
+    //   供 snapshot.links.relations + dump().relationDescriptions 暴露给 e2e/排查.
+    //   必须在 addTooltips 之前设 (matchPathsToRelations 会读 relationDescriptions 做匹配诊断).
+    diag.setRelationDescriptions(relationDescriptions || [])
+
     const hideTails = props.layoutEngine === 'elk' || props.diagramData?.hideLinkLabelTails === true
 
     fixViewBox(svgEl)
@@ -603,6 +608,18 @@ export function useSvgProcessor(options) {
     }
 
     applyStyleFixes(svgEl, props.diagramType, mermaidContainer, props.diagramData?.textColor)
+
+    // [FIX 2026-08-03] 缺口3: 统计 fixArrowMarkers 实际渲染的 marker-start 数量,
+    //   与 addBidirectionalAttributes.bidiEdgesMarked 互补 (后者是标记前, 这里是渲染后).
+    //   e2e 可断言 bidiMarkerCount > 0 验证双向渲染生效 (commit 2ba5ec3 修复可验证).
+    const _allPaths = svgEl.querySelectorAll('path.flowchart-link, .edgePath path')
+    const _bidiMarkerCount = Array.from(_allPaths).filter(p => p.getAttribute('marker-start')).length
+    diag.recordStepMeta('fixArrowMarkers', {
+      totalPaths: _allPaths.length,
+      bidiMarkerCount: _bidiMarkerCount,
+      bidiDataAttrCount: Array.from(_allPaths).filter(p => p.getAttribute('data-bidirectional') === 'true').length
+    })
+
     // [FIX 2026-06-30] 透传 annotationCategoryFilter, 让 tooltip 弹窗只展示过滤后的备注
     addTooltips(svgEl, relationDescriptions, props.diagramType, hideTails, props.annotationConfig?.annotationCategoryFilter || [])
 

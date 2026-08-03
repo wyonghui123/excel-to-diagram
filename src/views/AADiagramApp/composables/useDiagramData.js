@@ -216,8 +216,10 @@ function computedServiceModuleRelations(relationships, businessObjects, serviceM
     //   - 同时透传首个非空 relationType (tooltip 父关系概览展示)
     //   之前 result 没有 relationDirection/relationType 字段 →
     //   serviceModuleDiagramBuilder 透传空值 → getArrowSyntax 永远渲染 --> 单向
+    //   [缺口4 2026-08-03] 混合方向 (推+拉共存, 无双向) 时 console.warn, 便于排查方向推导异常.
     let smRelationDirection = ''
     let smRelationType = ''
+    const _seenDirections = new Set()
     for (const boRel of rel.businessObjectRelationships) {
       const dir = boRel.relationDirection
       if (dir === 'BIDIRECTIONAL' || dir === '双向') {
@@ -227,6 +229,13 @@ function computedServiceModuleRelations(relationships, businessObjects, serviceM
       if (!smRelationDirection && dir) {
         smRelationDirection = dir
       }
+      if (dir) _seenDirections.add(dir)
+    }
+    // 缺口4: 混合方向 (>=2 种不同单向方向, 无双向) 时 warn
+    if (_seenDirections.size > 1 && smRelationDirection !== 'BIDIRECTIONAL') {
+      console.warn('[useDiagramData] SM 关系 %s 子关系方向混合 (%s), 取首个 %s',
+        `${rel.sourceServiceModuleCode}-${rel.targetServiceModuleCode}`,
+        [..._seenDirections].join('/'), smRelationDirection)
     }
     for (const boRel of rel.businessObjectRelationships) {
       if (boRel.relationType) {

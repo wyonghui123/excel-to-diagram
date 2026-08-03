@@ -90,6 +90,17 @@ const createDiagnostics = () => {
   }
   const getHighlightState = () => ({ ..._highlightState })
 
+  // [FIX 2026-08-03] 关系连线数据可排查可验证:
+  //   之前 relationDescriptions 只在 useSvgProcessor.processSvg 透传给 useTooltip, 闭包外无法观测.
+  //   e2e 无法断言"SM 关系是否双向/childRelations 数量", 排查只能 DOM 探测.
+  //   现在 processSvg 调 setRelationDescriptions, snapshot.links.relations 暴露精简字段,
+  //   dump 暴露完整数组, window.__archPage.mermaid.relations 一键读取.
+  let _lastRelationDescriptions = []
+  const setRelationDescriptions = (descs) => {
+    _lastRelationDescriptions = Array.isArray(descs) ? descs : []
+  }
+  const getRelationDescriptions = () => _lastRelationDescriptions.slice()
+
   /**
    * 业务可挂的回调 (e.g. chart_diag 用它来 track 渲染时间)
    */
@@ -209,7 +220,12 @@ const createDiagnostics = () => {
     stepTimings: { ...stepTimings },
     stepMeta: JSON.parse(JSON.stringify(stepMeta)),
     errors: errors.slice(),
-    warnings: warnings.slice()
+    warnings: warnings.slice(),
+    // [FIX 2026-08-03] 完整 relationDescriptions 数组 (含 childRelations 详情), 供深度排查
+    relationDescriptions: _lastRelationDescriptions.map(r => ({
+      ...r,
+      childRelations: Array.isArray(r.childRelations) ? r.childRelations : []
+    }))
   })
 
   /**
@@ -310,12 +326,39 @@ const createDiagnostics = () => {
         svgStrokes: doc
           ? Array.from(doc.querySelectorAll('path.flowchart-link')).map(p => ({
               id: p.getAttribute('id') || '',
-              stroke: (p.getAttribute('stroke') || p.style.stroke || '').trim().toLowerCase()
+              stroke: (p.getAttribute('stroke') || p.style.stroke || '').trim().toLowerCase(),
+              // [FIX 2026-08-03] 暴露 marker-start/marker-end 供 e2e 断言双向渲染
+              markerStart: p.getAttribute('marker-start') ? true : false,
+              markerEnd: p.getAttribute('marker-end') ? true : false,
+              bidi: p.getAttribute('data-bidirectional') === 'true'
             }))
           : [],
         colorMappings: Array.isArray(stepMeta.linkColorMappings)
           ? stepMeta.linkColorMappings.flat()
           : [],
+        // [FIX 2026-08-03] 暴露 relationDescriptions 精简字段供 e2e 断言:
+        //   - relationCode/sourceName/targetName/relationDirection (双向判定)
+        //   - childRelationsCount (子关系数量, 验证 SM tooltip 展示所有子关系)
+        //   完整数组走 dump().relationDescriptions (含 childRelations 详情, 供深度排查)
+        relations: _lastRelationDescriptions.map(r => ({
+          relationCode: r.relationCode || '',
+          sourceName: r.sourceName || '',
+          targetName: r.targetName || '',
+          relationDirection: r.relationDirection || '',
+          relationType: r.relationType || '',
+          childRelationsCount: Array.isArray(r.childRelations) ? r.childRelations.length : 0
+        })),
+        // [FIX 2026-08-03] matchPathsToRelations 未匹配诊断 (缺口2)
+        //   useTooltip.matchPathsToRelations 调 recordStepMeta('matchPathsToRelations', {...})
+        //   recordStepMeta 用 push 模式 (数组), 取最后一条最新值供 e2e 断言.
+        matchStats: Array.isArray(stepMeta.matchPathsToRelations)
+          ? stepMeta.matchPathsToRelations[stepMeta.matchPathsToRelations.length - 1] || null
+          : null,
+        // [FIX 2026-08-03] fixArrowMarkers 双向渲染统计 (缺口3)
+        //   useSvgProcessor.applyStyleFixes 后记 { bidiMarkerCount, totalPaths }
+        arrowMarkerStats: Array.isArray(stepMeta.fixArrowMarkers)
+          ? stepMeta.fixArrowMarkers[stepMeta.fixArrowMarkers.length - 1] || null
+          : null
       },
       containers: {
         totalClusters: clusterRects.length,
@@ -349,6 +392,8 @@ const createDiagnostics = () => {
     recordStepMeta,
     setHighlightState,
     getHighlightState,
+    setRelationDescriptions,
+    getRelationDescriptions,
     dump,
     snapshot
   }
@@ -385,6 +430,8 @@ export const installDiagnosticsToWindow = () => {
     // [P0-B 2026-08-03] useTooltip 闭包 highlight 状态镜像 (与 DOM .annotation-highlighted 互补)
     //   chart_e2e D 段断言 + chart_diag dump 一键读取, 排查"双高亮系统不对齐"类问题.
     get highlight() { return diag.getHighlightState() },
+    // [FIX 2026-08-03] 关系连线数据镜像 (e2e 断言双向/childRelations + 排查 tooltip 错配)
+    get relations() { return diag.getRelationDescriptions() },
     dump: diag.dump,
     snapshot: diag.snapshot
   }

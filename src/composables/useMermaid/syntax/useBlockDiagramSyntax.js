@@ -202,7 +202,11 @@ export function useBlockDiagramSyntax() {
             targetCode: targetNode.code,
             // [FIX 2026-08-03] 透传 SM 子关系数组, 供 useTooltip 展示所有子关系 BO 对.
             //   BO 图 link 无此字段 → 空数组 → useTooltip 走单关系老逻辑 (单测兼容).
-            childRelations: link.childRelations || []
+            childRelations: link.childRelations || [],
+            // [FIX 2026-08-03] 透传方向/类型, 供 snapshot.links.relations 暴露给 e2e 断言双向渲染.
+            //   之前缺失 → snapshot relations 的 relationDirection 恒空 → e2e 无法验证 SM 双向.
+            relationDirection: link.relationDirection || '',
+            relationType: link.relationType || ''
           })
         }
 
