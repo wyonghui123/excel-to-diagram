@@ -13,6 +13,7 @@ let tooltipInstance = null
 //   interop 处理, EnumServiceModule 直接是 EnumService 对象本身 (没有 default/named 包装)
 //   修复: 改用 namespace import, 然后用 mod.default || mod (Vite 会把 default export 作为 'default' key)
 import * as EnumServiceNS from '@/services/enumService.js'
+import { useDiagnostics } from '../core/useDiagnostics.js'
 const _enumServiceRef = {
   current: EnumServiceNS?.default || (EnumServiceNS?._cache ? EnumServiceNS : null)
 }
@@ -132,6 +133,55 @@ function triggerEnumPreload() {
 }
 
 export function useTooltip() {
+
+  // [P0-A 2026-08-03] 接入 diag 埋点 — highlight/clear/match 失败时 recordStepMeta,
+  //   之前 useTooltip 高亮完全无可观测信号, 与 annotationOverlay 的 .annotation-highlighted
+  //   DOM 查询不对齐, "点了没反应" 类问题排查困难.
+  // [P0-B 2026-08-03] 通过 diag.setHighlightState 暴露闭包内的 selectedElements 快照,
+  //   window.__archPage.mermaid.highlight 一键读取.
+  const diag = useDiagnostics()
+
+  // [P1-B 2026-08-03] 拖动守卫: 跨 click 事件保留 mousedown 起点.
+  //   用户拖动图表 (panning) 后浏览器仍 fire click 事件, 会误触发 clearHighlight 清掉高亮.
+  //   与 annotationOverlay.onSvgClick 的 isDraggingState 守卫对齐 (那里用 mousedown/mousemove/mouseup).
+  //   这里用更简单的位移判定: mousedown 记录起点, click 时位移 > 5px 视为拖动, 跳过 clear.
+  let _mouseDownPos = null
+
+  /**
+   * [P0-B] 把 selectedElements (含 DOM 引用) 序列化为可观测快照, 同步到 diag.
+   *   DOM 引用不暴露到 window (会泄漏 / 影响测试稳定性), 只暴露 code/id/text 等纯数据.
+   */
+  const _snapshotHighlight = (selectedElements) => {
+    const snapNode = (el) => {
+      if (!el) return null
+      return {
+        code: el.getAttribute ? (el.getAttribute('data-code') || null) : null,
+        id: el.id || null,
+        tag: el.tagName || null
+      }
+    }
+    const snapPath = (p) => {
+      if (!p) return null
+      const d = (p.getAttribute && p.getAttribute('d')) || ''
+      return {
+        relationCode: (p.getAttribute && p.getAttribute('data-relation-code')) || null,
+        dSnippet: d.substring(0, 50)
+      }
+    }
+    const snapLabel = (l) => {
+      if (!l) return null
+      return { text: ((l.textContent || '')).trim().substring(0, 50) }
+    }
+    const snapshot = {
+      hasHighlight: !!(selectedElements.path || selectedElements.label || selectedElements.sourceNode || selectedElements.targetNode),
+      path: snapPath(selectedElements.path),
+      label: snapLabel(selectedElements.label),
+      sourceNode: snapNode(selectedElements.sourceNode),
+      targetNode: snapNode(selectedElements.targetNode)
+    }
+    diag.setHighlightState(snapshot)
+    return snapshot
+  }
 
   const createTooltipElement = () => {
     let tooltip = document.getElementById('mermaid-tooltip')
@@ -264,6 +314,17 @@ export function useTooltip() {
   }
 
   const clearHighlight = (selectedElements) => {
+    // [P0-A] 记录清高亮前的状态 — 排查"高亮莫名消失"类问题
+    const hadHighlight = !!(selectedElements.path || selectedElements.sourceNode || selectedElements.targetNode || selectedElements.label)
+    if (hadHighlight) {
+      diag.recordStepMeta('useTooltipClearHighlight', {
+        hadPath: !!selectedElements.path,
+        hadLabel: !!selectedElements.label,
+        hadSource: !!selectedElements.sourceNode,
+        hadTarget: !!selectedElements.targetNode
+      })
+    }
+
     if (selectedElements.path) {
       selectedElements.path.style.strokeWidth = '2px'
       selectedElements.path.style.removeProperty('filter')
@@ -303,16 +364,37 @@ export function useTooltip() {
     if (selectedElements.label) {
       selectedElements.label = null
     }
+
+    // [P0-B] 同步空快照到 diag (window.__archPage.mermaid.highlight 反映 cleared 状态)
+    if (hadHighlight) {
+      _snapshotHighlight(selectedElements)
+    }
   }
 
   const highlightNode = (svg, nodeId, type, selectedElements) => {
     let nodeElement = svg.querySelector(`#${nodeId}`)
+    let matchStrategy = 'id-selector'
 
     if (!nodeElement) {
       const allNodes = svg.querySelectorAll('.node')
+      // [P1-A 2026-08-03] 边界检查: 之前 node.id.includes(nodeId) 会让 PUM01 误匹配 PUM010
+      //   (因为 "PUM010".includes("PUM01") === true). 改为:
+      //   1) 精确 === 优先
+      //   2) fallback 到边界正则 (^|[^a-zA-Z0-9])nodeId([^a-zA-Z0-9]|$),
+      //      要求 nodeId 前后是非字母数字 (含 - _ 边界) 或字符串首尾.
+      //      PUM010 的 "0" 是数字 → 不匹配, 正确排除.
+      //   边界正则同时兼容 mermaid 11 自动加前缀 (flowchart-PUM01-1) 的 case.
+      const escapedId = nodeId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const boundaryRe = new RegExp(`(^|[^a-zA-Z0-9])${escapedId}([^a-zA-Z0-9]|$)`)
       for (const node of allNodes) {
-        if (node.id && node.id.includes(nodeId)) {
+        if (node.id === nodeId) {
           nodeElement = node
+          matchStrategy = 'id-exact'
+          break
+        }
+        if (node.id && boundaryRe.test(node.id)) {
+          nodeElement = node
+          matchStrategy = 'id-boundary'
           break
         }
       }
@@ -320,6 +402,7 @@ export function useTooltip() {
 
     if (!nodeElement) {
       nodeElement = svg.querySelector(`[data-id="${nodeId}"]`)
+      if (nodeElement) matchStrategy = 'data-id'
     }
 
     if (nodeElement) {
@@ -343,6 +426,15 @@ export function useTooltip() {
       } else {
         selectedElements.targetNode = nodeContainer
       }
+      // [P0-A] 命中埋点: 记录 nodeId + 匹配策略, 排查"高亮错节点"类问题
+      diag.recordStepMeta('useTooltipHighlightNode', {
+        nodeId, type, matchStrategy, found: true
+      })
+    } else {
+      // [P0-A] 匹配失败埋点 — 排查"点 edge 但 source/target 没高亮"类问题
+      diag.recordStepMeta('useTooltipHighlightNode', {
+        nodeId, type, matchStrategy: 'none', found: false
+      })
     }
   }
 
@@ -444,6 +536,13 @@ export function useTooltip() {
           correspondingPath.style.filter = 'drop-shadow(0 0 8px rgba(0, 0, 0, 0.6))'
         }
       }
+      // [P0-A] 埋点 + [P0-B] 状态快照同步到 diag
+      diag.recordStepMeta('useTooltipLabelClick', {
+        hasRelation: !!relation,
+        relationCode: relation?.relationCode || null,
+        hasPath: !!selectedElements.path
+      })
+      _snapshotHighlight(selectedElements)
     }
 
     addListener(label, 'mouseenter', onEnter)
@@ -489,6 +588,14 @@ export function useTooltip() {
         highlightNode(svg, relation.source, 'source', selectedElements)
         highlightNode(svg, relation.target, 'target', selectedElements)
       }
+      // [P0-A] 埋点 + [P0-B] 状态快照同步到 diag
+      diag.recordStepMeta('useTooltipPathClick', {
+        hasRelation: !!relation,
+        relationCode: relation?.relationCode || null,
+        source: relation?.source || null,
+        target: relation?.target || null
+      })
+      _snapshotHighlight(selectedElements)
     }
 
     addListener(path, 'mouseenter', onEnter)
@@ -721,6 +828,22 @@ export function useTooltip() {
 
   const addClickToClearHighlight = (svg, selectedElements) => {
     const onClick = (e) => {
+      // [P1-B 2026-08-03] 拖动守卫: 与 annotationOverlay onSvgClick 的 isDraggingState 守卫对齐.
+      //   之前: 用户拖动图表 (panning) 后浏览器仍 fire click 事件, 触发 clearHighlight 误清高亮.
+      //   现在: mousedown 记录起点 (onMouseDown), click 时若位移 > 5px 视为拖动, 跳过 clear.
+      //   阈值 5px 与常规 click 抖动留出余量, 不影响真实空白点击清高亮 (D5b 测试覆盖).
+      if (_mouseDownPos) {
+        const dx = e.clientX - _mouseDownPos.x
+        const dy = e.clientY - _mouseDownPos.y
+        const dist = Math.sqrt(dx * dx + dy * dy)
+        _mouseDownPos = null
+        if (dist > 5) {
+          diag.recordStepMeta('useTooltipClearSkip', {
+            reason: 'drag', dist: Math.round(dist)
+          })
+          return
+        }
+      }
       const target = e.target
       const isNode = target.closest('.node')
       const isEdgePath = target.closest('.edgePath') || target.classList.contains('flowchart-link')
@@ -730,12 +853,16 @@ export function useTooltip() {
         clearHighlight(selectedElements)
       }
     }
+    const onMouseDown = (e) => {
+      _mouseDownPos = { x: e.clientX, y: e.clientY }
+    }
     // [FIX 2026-08-03] 监听器从 <svg> 改为外层 .draggable-area 容器
     //   之前绑 svg 时, 点击 svg 外部 (背景可拖拽区域) 事件不冒泡到 svg, clearHighlight 不触发
     //   用户报告: 点击背景/可拖拽区域, highlighted 元素不取消; 只有 svg 内点击才取消
     //   容器链 fallback 兼容单测 (svg 无 .draggable-area 祖先时退回 svg 自身)
     const container = svg.closest('.draggable-area') || svg.closest('.mermaid-content') || svg
     addListener(container, 'click', onClick)
+    addListener(container, 'mousedown', onMouseDown)
   }
 
   const addMouseOverTooltips = (svg, relationDescriptions, diagramType, hideTails = false, annotationFilter = []) => {
@@ -777,12 +904,20 @@ export function useTooltip() {
       _currentSvg.querySelectorAll('[data-trailing-line], [data-trailing-marker]').forEach(el => el.remove())
     }
     _currentSvg = null
+    // [P0-B] 清理时同步重置 diag highlight 状态 — chartType 切换 / 组件卸载后,
+    //   旧 selectedElements 闭包失效, diag._highlightState 不应再报告 hasHighlight=true.
+    //   D10 测试断言 chartType 切换后 highlight 干净 (DOM + 状态双重断言).
+    diag.setHighlightState(null)
+    _mouseDownPos = null
   }
 
   return {
     addMouseOverTooltips,
     cleanup,
     // [v34 双向支持] 导出供单测覆盖 (useTooltip.spec.js)
-    formatTooltipText
+    formatTooltipText,
+    // [P0-B 2026-08-03] 暴露 highlight 状态查询入口 (供 useDiagnostics → window.__archPage.mermaid.highlight)
+    //   返回 { hasHighlight, path, label, sourceNode, targetNode } 纯数据快照, 不含 DOM 引用.
+    getHighlightState: () => diag.getHighlightState()
   }
 }

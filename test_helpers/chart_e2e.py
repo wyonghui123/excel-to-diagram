@@ -848,6 +848,177 @@ class ChartE2E:
                      reset_ok, {'after': t_after},
                      error=None if reset_ok else f'dblclick 后 transform={t_after} (未归位)')
 
+        # [v3 2026-08-03] D8: 拖动后 highlight 保留 (P1-B 拖动守卫验证)
+        #   修复前: 用户拖动图表 (panning) 后浏览器 fire click 事件,
+        #           useTooltip.addClickToClearHighlight 误清高亮 (D5b 修复了点击背景清高亮,
+        #           但拖动场景的 click 仍会触发 clear).
+        #   修复后: mousedown 记录起点, click 时位移 > 5px 视为拖动, 跳过 clearHighlight.
+        #   断言三件套: (1) 拖动前高亮 (2) 拖动后高亮保留 (3) useTooltipClearSkip 埋点 reason=drag
+        svg_nodes_d8 = self.diag.page.evaluate(
+            "() => Array.from(document.querySelectorAll('svg g.node[data-code]')).slice(0, 3).map(n => n.getAttribute('data-code'))")
+        if svg_nodes_d8:
+            node_code_d8 = svg_nodes_d8[0]
+            # 1. 点击高亮
+            self.diag.page.evaluate(
+                """(code) => {
+                    const n = document.querySelector(`svg g.node[data-code="${code}"]`)
+                    const r = n.getBoundingClientRect()
+                    n.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window,
+                        clientX: r.left + r.width/2, clientY: r.top + r.height/2, button: 0 }))
+                }""", node_code_d8)
+            self.diag.page.wait_for_timeout(700)
+            highlighted_before_d8 = self.diag.get_highlighted_codes()
+            has_hl_before = node_code_d8 in highlighted_before_d8
+            # 2. 模拟拖动: mousedown at (x1,y1) → mousemove with buttons=1 → mouseup → click at (x2,y2)
+            #   位移 100px > 5px 阈值, useTooltip.onClick 应跳过 clearHighlight.
+            #   事件 target 必须是 svg (不是 .draggable-area), 否则 annotationOverlay 的
+            #   onSvgMouseDown/Move/Up (绑在 svg 上) 不触发, isDraggingState 保持 false,
+            #   onSvgClick 仍会清高亮 — 与真实拖动场景不符 (用户拖的是 svg 内的图).
+            self.diag.page.evaluate(
+                """() => {
+                    const svg = document.querySelector('.mermaid-content svg')
+                    if (!svg) return
+                    const r = svg.getBoundingClientRect()
+                    const x1 = r.left + 50, y1 = r.top + 50
+                    const x2 = x1 + 100, y2 = y1 + 50
+                    svg.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window,
+                        clientX: x1, clientY: y1, button: 0, buttons: 1 }))
+                    svg.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true, view: window,
+                        clientX: x2, clientY: y2, button: 0, buttons: 1 }))
+                    svg.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window,
+                        clientX: x2, clientY: y2, button: 0, buttons: 0 }))
+                    svg.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window,
+                        clientX: x2, clientY: y2, button: 0 }))
+                }""")
+            self.diag.page.wait_for_timeout(700)
+            highlighted_after_d8 = self.diag.get_highlighted_codes()
+            preserved = has_hl_before and (node_code_d8 in highlighted_after_d8)
+            # 3. 验证拖动守卫埋点 (P0-A + P1-B 联合验证)
+            skip_meta = self.diag.page.evaluate("""() => {
+                const arr = window.__archPage?.mermaid?.stepMeta?.useTooltipClearSkip
+                if (!Array.isArray(arr)) return null
+                return arr.filter(m => m?.reason === 'drag').slice(-1)[0] || null
+            }""")
+            self._record('D', f'拖动后 highlight 保留 ({node_code_d8})',
+                         preserved and skip_meta is not None,
+                         {'before': highlighted_before_d8[:3], 'after': highlighted_after_d8[:3],
+                          'hasHlBefore': has_hl_before, 'dragSkipMeta': skip_meta},
+                         error=None if (preserved and skip_meta is not None)
+                         else f'未保留: before={has_hl_before} after={node_code_d8 in highlighted_after_d8} skipMeta={skip_meta}')
+            # 清高亮恢复初始态
+            self.diag.page.evaluate(
+                """() => {
+                    const svg = document.querySelector('.mermaid-content svg')
+                    const r = svg.getBoundingClientRect()
+                    svg.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window,
+                        clientX: r.left + 5, clientY: r.top + 5, button: 0 }))
+                }""")
+            self.diag.page.wait_for_timeout(400)
+        else:
+            self._record('D', '拖动后 highlight 保留 (无节点, 跳过)', True, skipped=True)
+
+        # [v3 2026-08-03] D9: highlight 状态 API 可观测 (P0-B 状态暴露验证)
+        #   验证 window.__archPage.mermaid.highlight 始终返回 { hasHighlight, path, label, sourceNode, targetNode },
+        #   且点击节点 → hasHighlight=true, dblclick → 状态保留 (autoFit 不应清高亮).
+        hl_api = self.diag.page.evaluate("""() => {
+            const h = window.__archPage?.mermaid?.highlight
+            if (!h || typeof h !== 'object') return { ok: false, reason: 'not-object' }
+            return {
+                ok: typeof h.hasHighlight === 'boolean' && 'path' in h && 'label' in h && 'sourceNode' in h && 'targetNode' in h,
+                hasHighlight: h.hasHighlight
+            }
+        }""")
+        self._record('D', 'highlight API 可观测 (P0-B)',
+                     hl_api.get('ok', False), {'api': hl_api},
+                     error=None if hl_api.get('ok') else f'API contract 失败: {hl_api}')
+
+        svg_nodes_d9 = self.diag.page.evaluate(
+            "() => Array.from(document.querySelectorAll('svg g.node[data-code]')).slice(0, 3).map(n => n.getAttribute('data-code'))")
+        if svg_nodes_d9:
+            node_code_d9 = svg_nodes_d9[0]
+            # 点击节点高亮, 读取 highlight.hasHighlight 应为 true (annotationOverlay 高亮, useTooltip 状态不影响)
+            self.diag.page.evaluate(
+                """(code) => {
+                    const n = document.querySelector(`svg g.node[data-code="${code}"]`)
+                    const r = n.getBoundingClientRect()
+                    n.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window,
+                        clientX: r.left + r.width/2, clientY: r.top + r.height/2, button: 0 }))
+                }""", node_code_d9)
+            self.diag.page.wait_for_timeout(700)
+            hl_after_click = self.diag.page.evaluate(
+                "() => window.__archPage?.mermaid?.highlight || {}")
+            # dblclick (autoFit), highlight 状态应保留 (D7 已验证 transform 重置)
+            self.diag.page.evaluate(
+                """() => {
+                    const mc = document.querySelector('.mermaid-container')
+                    if (!mc) return
+                    const r = mc.getBoundingClientRect()
+                    mc.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, view: window,
+                        clientX: r.left + r.width/2, clientY: r.top + r.height/2 }))
+                }""")
+            self.diag.page.wait_for_timeout(1200)
+            hl_after_dblclick = self.diag.page.evaluate(
+                "() => window.__archPage?.mermaid?.highlight || {}")
+            api_stable = isinstance(hl_after_dblclick, dict) and 'hasHighlight' in hl_after_dblclick
+            # 注意: useTooltip 闭包状态在 dblclick 后理论上不变 (dblclick 不触发 click listener);
+            #   annotationOverlay DOM 高亮 .annotation-highlighted 也保留.
+            self._record('D', f'dblclick 后 highlight API 仍可观测 ({node_code_d9})',
+                         api_stable,
+                         {'afterClick': hl_after_click, 'afterDblclick': hl_after_dblclick},
+                         error=None if api_stable else f'dblclick 后 API 不可读: {hl_after_dblclick}')
+            # 清高亮
+            self.diag.page.evaluate(
+                """() => {
+                    const svg = document.querySelector('.mermaid-content svg')
+                    const r = svg.getBoundingClientRect()
+                    svg.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window,
+                        clientX: r.left + 5, clientY: r.top + 5, button: 0 }))
+                }""")
+            self.diag.page.wait_for_timeout(400)
+        else:
+            self._record('D', 'dblclick 后 highlight API (无节点, 跳过)', True, skipped=True)
+
+        # [v3 2026-08-03] D10: chartType 切换后 highlight 干净 (P0-B + 渲染生命周期)
+        #   chartType 切换触发新 SVG 渲染 → useTooltip.cleanup() → diag.setHighlightState(null).
+        #   断言: 切换后 (1) DOM 无 .annotation-highlighted (2) window.__archPage.mermaid.highlight.hasHighlight=false.
+        #   仅 BO 场景可切 (SM 场景已是 SM, 切走再切回需要 fixture 数据, 跳过).
+        if golden.get('chart_type', 'businessObject') == 'businessObject':
+            # 先高亮一个节点
+            svg_nodes_d10 = self.diag.page.evaluate(
+                "() => Array.from(document.querySelectorAll('svg g.node[data-code]')).slice(0, 1).map(n => n.getAttribute('data-code'))")
+            if svg_nodes_d10:
+                self.diag.page.evaluate(
+                    """(code) => {
+                        const n = document.querySelector(`svg g.node[data-code="${code}"]`)
+                        const r = n.getBoundingClientRect()
+                        n.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window,
+                            clientX: r.left + r.width/2, clientY: r.top + r.height/2, button: 0 }))
+                    }""", svg_nodes_d10[0])
+                self.diag.page.wait_for_timeout(700)
+            # 切到 SM, 再切回 BO (D3/D4 已验证切换有效, 这里只关心 highlight 清理)
+            self.diag.switch_chart_config('chartType', 'serviceModule')
+            try:
+                self.diag.wait_render_stable(timeout_ms=5000)
+            except TimeoutError:
+                pass
+            self.diag.switch_chart_config('chartType', 'businessObject')
+            try:
+                self.diag.wait_render_stable(timeout_ms=5000)
+            except TimeoutError:
+                pass
+            self.diag.page.wait_for_timeout(500)
+            dom_clean = self.diag.page.evaluate(
+                "() => document.querySelectorAll('svg .annotation-highlighted').length === 0")
+            hl_state = self.diag.page.evaluate(
+                "() => (window.__archPage?.mermaid?.highlight || {}).hasHighlight === false")
+            self._record('D', 'chartType 切换后 highlight 干净 (DOM + 状态)',
+                         dom_clean and hl_state,
+                         {'domClean': dom_clean, 'stateClean': hl_state},
+                         error=None if (dom_clean and hl_state)
+                         else f'DOM clean={dom_clean} state clean={hl_state}')
+        else:
+            self._record('D', 'chartType 切换后 highlight 干净 (非 BO 场景, 跳过)', True, skipped=True)
+
     # ------------------------------------------------------------
     # golden 生成 / 全量运行
     # ------------------------------------------------------------

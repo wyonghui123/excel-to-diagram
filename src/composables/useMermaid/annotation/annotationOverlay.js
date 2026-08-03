@@ -760,15 +760,46 @@ export function useAnnotationOverlay() {
         label.style.fill = '#ff4444';
       }
     } else if (targetType === 'relation') {
-      // 关系连线：先清除 useTooltip.js 的高亮，再触发点击
-      // 清除之前的连线高亮样式
-      svg.querySelectorAll('path').forEach(path => {
-        path.style.removeProperty('filter');
-        path.style.strokeWidth = '2px';
+      // [P0-C 2026-08-03] 消除 edgeLabel.click() 副作用 — 直接高亮 edge path
+      //   之前: edgeLabel.click() 间接触发 useTooltip.setupLabelEvents.onClick 给 path 加
+      //         strokeWidth=4px+filter, 但同时 (1) useTooltip 给 source/target node rect 加
+      //         #FF6B6B stroke — annotationOverlay 无 relation.source/target 数据, 视觉混乱;
+      //         (2) .click() 还会触发其他监听器 (e.g. annotationOverlay 自己的 onSvgClick 200ms 锁).
+      //   现在: 直接给 edge group 内的 path 加 strokeWidth=4px+filter (与 useTooltip 视觉一致),
+      //         放弃 source/target node 高亮 (用户直接点 edge 时 useTooltip.onClick 仍触发, 自己高亮).
+      //   残留清理: clearSvgHighlightsOnly 不清 useTooltip 给 source/target node rect 设的 stroke
+      //         (不在 .annotation-highlighted 子树), 这里手动清, 防止切换 highlight 时旧样式残留.
+      svg.querySelectorAll('.node rect, .node polygon').forEach(r => {
+        r.style.removeProperty('stroke');
+        r.style.strokeWidth = '2px';
+        r.style.removeProperty('filter');
       });
-      const edgeLabel = el.querySelector('.edgeLabel') || el;
-      if (edgeLabel && typeof edgeLabel.click === 'function') {
-        edgeLabel.click();
+      // 找 edge group 内的 path: 优先 flowchart-link / [data-relation-code], 兜底任意 path.
+      //   el 可能是 g.edge / g.edgeLabel / 任意 g, 多级 fallback 提高鲁棒性.
+      let edgePath = el.querySelector('path.flowchart-link, path[data-relation-code]')
+        || el.querySelector('path.edge-path')
+        || el.querySelector('path');
+      if (!edgePath) {
+        // el 可能不是 g.edge (e.g. edgeLabel 的父 g), 找最近的 g.edge 内的 path
+        const edgeGroup = el.closest('g.edge')
+          || (el.parentElement && el.parentElement.closest('g.edge'));
+        if (edgeGroup) {
+          edgePath = edgeGroup.querySelector('path.flowchart-link, path[data-relation-code]')
+            || edgeGroup.querySelector('path');
+        }
+      }
+      if (edgePath) {
+        edgePath.style.strokeWidth = '4px';
+        edgePath.style.filter = 'drop-shadow(0 0 8px rgba(0, 0, 0, 0.6))';
+        diag.recordStepMeta('annoOverlayHighlightRelation', {
+          targetId, found: true, pathTag: edgePath.tagName,
+          hasRelationCode: !!edgePath.getAttribute('data-relation-code')
+        });
+      } else {
+        diag.recordStepMeta('annoOverlayHighlightRelation', {
+          targetId, found: false, elTag: el.tagName,
+          elClass: el.getAttribute('class') || ''
+        });
       }
     } else {
       // 默认发光效果

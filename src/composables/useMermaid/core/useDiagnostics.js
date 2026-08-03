@@ -76,6 +76,20 @@ const createDiagnostics = () => {
   const errors = []
   const warnings = []
 
+  // [P0-B 2026-08-03] useTooltip highlight 状态暴露
+  //   之前 useTooltip 的 selectedElements 是闭包私有, 外部 (chart_e2e / 调试) 无法观测.
+  //   annotationOverlay 走 DOM class (.annotation-highlighted) 可 querySelectorAll, 但 useTooltip
+  //   走 inline style 不留 class → 双高亮系统状态不对齐, 排查困难.
+  //   现在 useTooltip 在每次 highlight/clear 时调 setHighlightState, 这里持有最新快照,
+  //   window.__archPage.mermaid.highlight 一键读取, 与 annotationOverlay 的 DOM 查询互补.
+  let _highlightState = { hasHighlight: false, path: null, label: null, sourceNode: null, targetNode: null }
+  const setHighlightState = (state) => {
+    _highlightState = state
+      ? { ...state }
+      : { hasHighlight: false, path: null, label: null, sourceNode: null, targetNode: null }
+  }
+  const getHighlightState = () => ({ ..._highlightState })
+
   /**
    * 业务可挂的回调 (e.g. chart_diag 用它来 track 渲染时间)
    */
@@ -333,6 +347,8 @@ const createDiagnostics = () => {
     recordError,
     recordWarning,
     recordStepMeta,
+    setHighlightState,
+    getHighlightState,
     dump,
     snapshot
   }
@@ -366,6 +382,9 @@ export const installDiagnosticsToWindow = () => {
     renderSkippedCount: 0,
     lastRenderedCode: null,
     hooks: diag.hooks,
+    // [P0-B 2026-08-03] useTooltip 闭包 highlight 状态镜像 (与 DOM .annotation-highlighted 互补)
+    //   chart_e2e D 段断言 + chart_diag dump 一键读取, 排查"双高亮系统不对齐"类问题.
+    get highlight() { return diag.getHighlightState() },
     dump: diag.dump,
     snapshot: diag.snapshot
   }
