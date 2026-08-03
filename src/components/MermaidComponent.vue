@@ -497,7 +497,9 @@ export default {
                 // 关键修复 v15：第 3 个参数必须传 mermaidContainer（.mermaid-content），
                 // 之前误传 draggableArea，导致 updateTransform 把 transform 设到 draggle 上而不是 content 上
                 // （v10 改 addZoomAndPan 签名时漏改调用方）
-                interaction.addZoomAndPan(mermaidContainerEl, mermaidWrapper, mermaidContainer)
+                // 关键修复 v19：接收 cleanup 返回值，调用前先清旧 — 否则 wheel/dblclick 监听器累积导致 zoom 步长翻倍
+                if (interactionCleanup) { interactionCleanup(); interactionCleanup = null }
+                interactionCleanup = interaction.addZoomAndPan(mermaidContainerEl, mermaidWrapper, mermaidContainer)
 
                 // 设置画布布局
                 svgProcessor.setupCanvasLayout(mermaidWrapper, mermaidContainer, draggableArea)

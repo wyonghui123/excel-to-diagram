@@ -385,10 +385,15 @@ export function useInteraction() {
     mermaidContainerElRef.value.style.cursor = 'grab'
 
     // 关键修复 v18：返回清理函数
+    // 关键修复 v19：补上 wheel/dblclick 的移除 — 否则切换图表时重复绑定导致 zoom 步长翻倍
     return () => {
       window.removeEventListener('mousedown', handleMouseDown, true)
       document.removeEventListener('mousemove', handleMouseMove, false)
       document.removeEventListener('mouseup', handleMouseUp, false)
+      if (mermaidContainerElRef.value) {
+        mermaidContainerElRef.value.removeEventListener('wheel', handleWheel)
+        mermaidContainerElRef.value.removeEventListener('dblclick', handleDblClick)
+      }
     }
   }
 
