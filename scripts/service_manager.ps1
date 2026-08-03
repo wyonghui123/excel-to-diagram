@@ -606,6 +606,8 @@ function Start-Service($svcName) {
         $env:CORS_ALLOWED_ORIGINS = 'http://localhost:5173,http://localhost:3010,http://localhost:3004,http://localhost:3005'
         # 🆕 v3.18: 注入 AGENT_PORT 给 waitress_server.py 用
         $env:AGENT_PORT = $port.ToString()
+        # 🆕 v3.25: 注入 BACKEND_PORT 给 vite.config.js 用 (前端代理到后端)
+        $env:BACKEND_PORT = $flaskPort.ToString()
 
         $proc = Start-Process -FilePath $cfg.cmd -ArgumentList $argStr `
             -WorkingDirectory $root -WindowStyle Hidden -PassThru `

@@ -162,6 +162,33 @@ const {
 if (typeof window !== 'undefined') {
   window.__archPage = window.__archPage || {}
   window.__archPage.generateDiagram = generateDiagram
+  // [FIX 2026-08-03] 暴露 reload (调 mermaidRef.forceRerender), 供 GlobalToolbar refresh 触发图表 reload.
+  //   slot ref 不绑定到父组件, 改用 window 暴露更可靠.
+  //   改用 forceRerender: 原 _renderNonce 方案 mermaid.run() 不带参数无法可靠把 <pre> 转 SVG (显示 text).
+  /**
+   * 触发图表 reload (强制 mermaid.run() 全量重绘 SVG).
+   *
+   * 调用路径: GlobalToolbar refresh → RelationshipManagement.handleToolbarAction('refresh')
+   *   → window.__archPage.reload() → MermaidComponent.forceRerender()
+   *   → 清空 lastRenderedCode (绕过 code-diff 跳过) + 设 forceAutoFit=true (重置 transform)
+   *   → renderMermaid() → mermaid.run() 重绘 SVG.
+   *
+   * 失败处理: mermaid.run().catch() / nextTick try/catch → diag.recordError + endRender({error})
+   *   → diag.hooks.onError → emit('render-error') → RelationshipManagement.handleChartRenderError
+   *   → ElMessage.error toast (非静默失败).
+   *
+   * 不调 generateDiagram: 避免两次引用变化 (第一次 code-diff 跳过 + 第二次 isRendering 跳过).
+   * 数据刷新由 MOMP.refresh → embeddedChartContext 变化 → watch generateDiagram 链路处理.
+   *
+   * [B6 2026-08-03] 这是 reload 的唯一入口 (slot ref 链路已移除, 见文件底部 defineExpose 注释).
+   *
+   * @returns {void}
+   */
+  window.__archPage.reload = () => {
+    if (mermaidRef.value && typeof mermaidRef.value.forceRerender === 'function') {
+      mermaidRef.value.forceRerender()
+    }
+  }
   // [E2E 2026-08-02] 暴露 diagramData 引用 (只读诊断: 统一管道输出节点结构 / domain / subDomain,
   //   以及颜色映射链路 buildObjectToModuleMap 的输入), chart_diag / probe 脚本读取验证。
   window.__archPage.diagramData = diagramData
@@ -928,11 +955,26 @@ onBeforeUnmount(() => {
     resizeTimer = null
   }
   // [E1 2026-08-02] 清理布局控制防抖定时器
-  if (_layoutControlTimer) {
-    clearTimeout(_layoutControlTimer)
-    _layoutControlTimer = null
-  }
+if (_layoutControlTimer) {
+  clearTimeout(_layoutControlTimer)
+  _layoutControlTimer = null
+}
 })
+
+// [FIX 2026-08-03] GlobalToolbar refresh 触发图表 reload:
+//   原 refresh 只调 MOMP.refresh (刷新元数据列表), 图表 reload 链路断裂.
+//   现 expose reload 方法: 调 MermaidComponent.forceRerender (清空 lastRenderedCode 让
+//   code-diff 不命中 → mermaid.run() 全量重绘), 用户视觉上看到 reload.
+//   不用 _renderNonce + watch: mermaidCode 相同时 mermaid.run() 不带参数无法可靠转换 <pre> (显示 text).
+//   不调 generateDiagram: 避免两次引用变化 (第一次 code-diff 跳过 + 第二次 isRendering 跳过).
+//   数据刷新由 MOMP.refresh → embeddedChartContext 变化 → watch generateDiagram 链路处理.
+//
+// [B6 2026-08-03] reload 唯一入口统一为 window.__archPage.reload (见上方 onMounted 内赋值).
+//   原本同时存在 EmbeddedChartView.defineExpose.reload + ArchDataChartSwitcher.defineExpose.reload
+//   两条 slot ref 链路, 但 slot ref 不绑定到父组件 (RelationshipManagement 无法稳定拿到实例),
+//   实际调用方 (RelationshipManagement.handleToolbarAction('refresh')) 走 window 暴露.
+//   现移除 slot ref 链路, 仅保留 window.__archPage.reload, 避免"两条路径谁生效"歧义.
+//   defineExpose 仍保留 containers/domainProducts/links/syncLayoutControlFromDiagramData (LayoutControlPanel 用).
 
 defineExpose({
   containers,

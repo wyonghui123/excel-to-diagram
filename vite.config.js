@@ -85,7 +85,7 @@ export default defineConfig({
       // [v3.3] 动态代理: 支持多 Agent worktree 自验证
       // 默认代理到 3004 (主仓库后端), Agent 通过 BACKEND_PORT 环境变量覆盖
       '/api': {
-        target: `http://localhost:${process.env.BACKEND_PORT || '3004'}`,
+        target: `http://localhost:${process.env.BACKEND_PORT || '3010'}`,
         changeOrigin: true,
         ws: true,
         // [FIX BUG-V029 2026-06-28] 30s→180s
@@ -104,7 +104,7 @@ export default defineConfig({
         }
       },
       '/socket.io': {
-        target: `http://localhost:${process.env.BACKEND_PORT || '3004'}`,
+        target: `http://localhost:${process.env.BACKEND_PORT || '3010'}`,
         changeOrigin: true,
         ws: true,
       }

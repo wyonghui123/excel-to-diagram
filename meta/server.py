@@ -617,6 +617,17 @@ def create_app(db_path=None):
     def handle_exception(error):
         error_msg = str(error)
         app_debug = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
+        # [FIX 2026-08-03] HTTPException (如 404/405) 应保留原始状态码, 不转成 500
+        from werkzeug.exceptions import HTTPException
+        if isinstance(error, HTTPException):
+            status_code = error.code
+            if app_debug:
+                print(f"[HTTP ERROR {status_code}] {error_msg}")
+            return jsonify({
+                'success': False,
+                'error': type(error).__name__,
+                'message': error_msg if app_debug else 'Not Found'
+            }), status_code
         if app_debug:
             import traceback
             error_trace = traceback.format_exc()

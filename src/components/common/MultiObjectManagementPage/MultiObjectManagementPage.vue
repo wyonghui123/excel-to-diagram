@@ -539,7 +539,14 @@ function onGlobalAction(action) {
     }
     return
   }
-  page.handleGlobalAction(action)
+  // [FIX 2026-08-03] 非 chart action 透传给父组件 (如 refresh → RelationshipManagement.handleToolbarAction)
+  //   原: 只调 page.handleGlobalAction, 父组件 (RelationshipManagement) 的 @toolbar-action 永远不触发.
+  //   现: emit('toolbarAction', action) 让父组件能响应 refresh/import/export 等 action.
+  //   refresh 特殊处理: 只 emit, 不调 page.handleGlobalAction (避免异步 generateDiagram 覆盖 reload nonce).
+  emit('toolbarAction', action)
+  if (action !== 'refresh') {
+    page.handleGlobalAction(action)
+  }
 }
 
 const tabsExtraContext = computed(() => {

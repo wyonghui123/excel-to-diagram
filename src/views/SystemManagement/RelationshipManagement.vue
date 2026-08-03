@@ -99,6 +99,7 @@ defineOptions({ name: 'RelationshipManagement' })
 const objectTypes = ['domain', 'sub_domain', 'service_module', 'business_object', 'relationship']
 const pageOptions = { defaultTab: 'relationship' }
 const pageRef = ref(null)
+// [B6 2026-08-03] chartSwitcherRef 已移除: reload 统一走 window.__archPage.reload (slot ref 不可靠).
 
 // [FIX 2026-07-30 v2] chartConfig 提升到本组件持有，
 // 让 GlobalToolbar（chart-config slot）和 ArchDataChartSwitcher/EmbeddedChartView 共享同一份配置
@@ -126,7 +127,16 @@ function handleToolbarAction(action) {
   // 兼容旧式 action string 和新式 { type, viewMode } 对象
   const actionType = typeof action === 'string' ? action : action?.type
   if (actionType === 'refresh') {
-    pageRef.value?.refresh()
+    // [FIX 2026-08-03] refresh 触发图表 reload (强制 mermaid.run() 全量重绘)
+    //   原: 只调 pageRef.refresh() (刷新元数据列表), 图表 reload 链路断裂.
+    //   现: 调 window.__archPage.reload() → MermaidComponent.forceRerender()
+    //   (清空 lastRenderedCode 让 code-diff 不命中 → mermaid.run() 重绘 SVG, 避免显示 text).
+    //   [B6 2026-08-03] reload 唯一入口: window.__archPage.reload (EmbeddedChartView 内赋值).
+    //     slot ref 链路 (ArchDataChartSwitcher.defineExpose.reload) 已移除, 不再使用.
+    //   不调 pageRef.refresh(): MOMP.refresh 异步触发 generateDiagram 会覆盖 reload 重绘.
+    if (typeof window !== 'undefined' && window.__archPage?.reload) {
+      window.__archPage.reload()
+    }
   }
   // 'view-mode-change' 由 MultiObjectManagementPage 内部处理，无需在此响应
 }

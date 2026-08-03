@@ -3,7 +3,7 @@
     <div class="toolbar">
       <!-- 查看操作组 -->
       <div class="toolbar-group">
-        <button class="toolbar-btn" @click="handleReset" title="重置视图（重新加载图表 + 重置缩放）">
+        <button class="toolbar-btn" @click="resetAdaptive" title="重置视图">
           <AppIcon name="refresh" size="sm" />
           <span class="toolbar-btn-label">重置</span>
         </button>
@@ -164,6 +164,11 @@ export default {
     let lastRenderData = null  // 上次渲染的数据，用于检测变化
     // [FIX 2026-08-02] L5 渲染跳过 (spec 4.4): 上次生成的 mermaidCode, code-diff 用
     let lastRenderedCode = null
+    // [FIX 2026-08-03] reload (forceRerender) 时设为 true, renderMermaid 内消费后重置.
+    //   必要性: reload 走 mermaid.run() 全量重排, 与首次渲染/chartType 切换等价,
+    //   若不 autoFit, ELK 会读含 zoom transform 的 BCR → 节点维度放大, 文字变小.
+    //   之前直接在 if 条件里引用未定义的 forceAutoFit → ReferenceError → reload 显示 text.
+    let forceAutoFit = false
     let interactionCleanup = null  // useInteraction 返回的清理函数（用于 onBeforeUnmount）
 
     const effectiveLayoutControlConfig = computed(() => {
@@ -334,8 +339,7 @@ export default {
     }
 
     // 渲染Mermaid图表
-    // [FIX 2026-08-03] 加 forceAutoFit 参数: 重置按钮触发时强制 autoFit (不依赖 isFirstRender)
-    const renderMermaid = async (forceAutoFit = false) => {
+    const renderMermaid = async () => {
       // 防止无限循环
       if (isRendering) {
         return
@@ -403,10 +407,9 @@ export default {
             //   mermaidCode 与上次一致且已有 SVG → 渲染结果不会变化, 跳过 mermaid.run() 全量重绘
             //   (大图耗时主要在 mermaid.run). 触发场景: 缓存命中的重渲染 (如切换图表类型后切回),
             //   仅配色变化走 updateColorsOnly 不受影响.
-            // [FIX 2026-08-03] forceAutoFit=true 时绕过跳过逻辑 (重置按钮期望 reload, 不是仅重置 zoom)
-            //   原: mermaidCode 没变就跳过 → 重置按钮只 resetAdaptive, 图表内容不变 → 用户感觉"没 reload"
-            //   现: forceAutoFit=true 时强制重新渲染 (清除高亮/选中态 + 重置视图)
-            if (mermaidCode && lastRenderedCode !== null && lastRenderedCode === mermaidCode && mermaidContainer.value?.querySelector('svg') && !forceAutoFit) {
+            // [FIX 2026-08-03] GlobalToolbar refresh reload 改用 forceRerender 显式清空 lastRenderedCode
+            //   绕过此跳过分支, 不再依赖 _renderNonce 字段 (原方案 mermaid.run() 不带参数无法可靠转换 pre).
+            if (mermaidCode && lastRenderedCode !== null && lastRenderedCode === mermaidCode && mermaidContainer.value?.querySelector('svg')) {
               // [E2E 2026-08-02] 暴露增量跳过信号 — chart_e2e A8 断言读取
               //   renderSkippedCount: 累计跳过次数 (每次 code-diff 命中 +1)
               //   lastRenderedCode:   当前已渲染的 mermaid code (与 window.__lastMermaidCode 比对)
@@ -449,6 +452,12 @@ export default {
       // [FIX 2026-08-02] nextTick + mermaid.run 位于 if (mermaidContainer.value && props.diagramData)
       //   块内部 — 下方 `} else {` (L730) 匹配此 if, 不能在此闭合 if 块 (原实现即如此)
       nextTick(() => {
+        // [FIX 2026-08-03] A1: 整个 nextTick 回调 try/catch 包裹.
+        //   之前 nextTick 内同步抛错 (e.g. ReferenceError 引用未定义变量) 会静默失败,
+        //   mermaid.run() 没机会执行 → <pre> 保留 mermaid code 文本 (用户看到 text 而非 SVG).
+        //   现在 sync error 走 diag 链路 → onError hook → EmbeddedChartView emit render-error → toast.
+        //   注意: mermaid.run().then().catch() 内部错误已被 Promise 链 catch 兜底, 此处主要兜 sync 部分.
+        try {
           const preEl = mermaidContainer.value?.querySelector('pre.mermaid')
           // [FIX 2026-08-03] 在 mermaid.run() 之前同步重置 transform (instant 模式)。
           //   原实现: setTimeout(autoFitDiagram, 100) 在 mermaid.run().then() 内异步调度,
@@ -466,13 +475,25 @@ export default {
           //   既阻止 ELK 读到大 BCR, 也让 fixEdgeLabelSize 在 fit 状态下计算正确宽度。
           //   约束: 仅在首次渲染或图表类型切换时重置, 颜色切换等保留用户 zoom 状态。
           const diagramTypeChanged = lastDiagramType !== null && lastDiagramType !== props.diagramType
-          // [FIX 2026-08-03] forceAutoFit: 重置按钮触发时强制 autoFit (用户期望 reload + 重置视图)
-          if (isFirstRender || diagramTypeChanged || forceAutoFit) {
+          // [FIX 2026-08-03] reload (forceRerender) 也走 mermaid.run() 全量重排,
+          //   必须在 run() 之前同步 autoFit 重置 transform, 否则 ELK 读含 zoom 的 BCR
+          //   → 节点维度放大, 文字变小 (与 chartType 切换前修复的同一根因).
+          //   forceAutoFit 由 forceRerender() 设置, 这里消费后立即重置 (避免影响下次普通重绘).
+          const _shouldForceAutoFit = forceAutoFit
+          forceAutoFit = false
+          if (isFirstRender || diagramTypeChanged || _shouldForceAutoFit) {
             interaction.autoFitDiagram(true)
           }
-          mermaid.run()
+          const _preBefore = mermaidContainer.value?.querySelector('pre.mermaid')
+          // [FIX 2026-08-03] mermaid 11 run() 内部检查 data-processed 属性, 有则跳过元素.
+          //   reload 时若上次 run() 抛错 (render2 reject), pre 已被设 data-processed=true 但 innerHTML
+          //   仍为 mermaid code 文本, 用户看到 text. 显式清除属性 + 显式传 nodes 避免扫描整个 document.
+          if (_preBefore) {
+            _preBefore.removeAttribute('data-processed')
+          }
+          const _runOpts = _preBefore ? { nodes: [_preBefore] } : undefined
+          mermaid.run(_runOpts)
             .then(() => {
-              const preElAfter = mermaidContainer.value?.querySelector('pre.mermaid')
               const svgElAfter = mermaidContainer.value?.querySelector('svg')
               if (svgElAfter) {
                 svgProcessor.processSvg(svgElAfter, props, relationDescriptions, mermaidContainer, nodeColorMappings, interaction)
@@ -761,6 +782,15 @@ export default {
               diag.recordError(err, 'renderMermaid')
               diag.endRender({ error: err?.message || String(err) })
             })
+        } catch (err) {
+          // [FIX 2026-08-03] A1: nextTick 同步异常兜底 (e.g. ReferenceError / TypeError).
+          //   不再静默失败: 走 diag 链路 → onError hook → EmbeddedChartView emit render-error →
+          //   RelationshipManagement.handleChartRenderError → ElMessage.error toast.
+          console.error('[MermaidComponent] nextTick callback sync error:', err)
+          isRendering = false
+          diag.recordError(err, 'renderMermaid.nextTick')
+          diag.endRender({ error: err?.message || String(err) })
+        }
         })
       } else {
         isRendering = false
@@ -768,6 +798,24 @@ export default {
         diag.recordWarning('renderMermaid early return: container or diagramData missing', 'renderMermaid')
         diag.endRender({ error: 'no_container_or_diagramData' })
       }
+    }
+
+    // [FIX 2026-08-03] forceRerender: GlobalToolbar refresh 触发 reload 时调用.
+    //   原 reload 用 _renderNonce 触发 watch → renderMermaid, 但 mermaidCode 相同时
+    //   即使 nonce 变化绕过 code-diff 跳过, mermaid.run() 不带参数无法可靠把 <pre> 转成 SVG
+    //   (mermaid 11 行为, 表现为图表显示 text 而非 SVG).
+    //   改为显式清空 lastRenderedCode 让 code-diff 不命中, 然后直接调 renderMermaid().
+    //   与 chartType 切换回来路径等价 (mermaidCode 不同 → code-diff 不命中 → mermaid.run() 成功).
+    //   设 forceAutoFit=true: reload 走全量重排, 需在 run() 前重置 transform (与首次渲染同).
+    const forceRerender = () => {
+      console.log('[MermaidComponent] forceRerender called, clearing lastRenderedCode to bypass code-diff skip')
+      // [FIX 2026-08-03] A3: reload 埋点 — 让 E2E / 监控感知 reload 发生.
+      //   chart_diag.read('stepMeta') / window.__archPage.mermaid.stepMeta.reload 可读取,
+      //   与 renderMermaid 内部 beginRender/endRender 配合, 一次 reload 完整链路可观测.
+      diag.recordStepMeta('reload', { source: 'forceRerender', at: Date.now() })
+      lastRenderedCode = null
+      forceAutoFit = true
+      renderMermaid()
     }
 
     const hideLinkLabelTails = () => {
@@ -2269,13 +2317,6 @@ ${mermaidCode}
       }, 2000)
     }
 
-    // [FIX 2026-08-03] handleReset: 重置按钮触发完整 reload (renderMermaid + 强制 autoFit)
-    //   原 resetAdaptive 只调 autoFitDiagram (重置 zoom/pan), 不重新渲染图表.
-    //   用户期望"重置"= 重新加载图表 + 重置视图, 现在调 renderMermaid(true) 强制 autoFit.
-    const handleReset = () => {
-      renderMermaid(true)
-    }
-
     return {
       mermaidContainer,
       mermaidContainerEl,
@@ -2284,10 +2325,11 @@ ${mermaidCode}
       isMaximized,
       shouldHideTails,
       toggleMaximize,
-      handleReset,
       resetAdaptive: interaction.resetAdaptive,
       autoFitDiagram: interaction.autoFitDiagram,
       relayoutCanvas: relayoutAfterSizeChange,
+      // [FIX 2026-08-03] GlobalToolbar refresh reload 调用, 绕过 code-diff 跳过强制 mermaid.run() 重绘
+      forceRerender,
       exportAsImage,
       exportAsNative,
       exportAsHtmlSimple,

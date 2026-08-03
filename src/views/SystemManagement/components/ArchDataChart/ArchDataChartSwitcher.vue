@@ -136,6 +136,12 @@ const drawerVisible = computed({
 // EmbeddedChartView 组件实例引用（用于获取 containers/domainProducts/links）
 const embeddedChartRef = ref(null)
 
+// [B6 2026-08-03] reload 唯一入口已统一为 window.__archPage.reload (EmbeddedChartView 内赋值).
+//   slot ref 链路 (本组件 defineExpose.reload → EmbeddedChartView.defineExpose.reload) 已移除:
+//   slot ref 不绑定到父组件 (RelationshipManagement 无法稳定拿到实例), 实际调用方走 window 暴露.
+//   保留 containers/domainProducts/links 的 defineExpose 由本组件 template 内 ref 直接访问
+//   (见上方 <LayoutControlPanel :containers="embeddedChartRef.containers" ...>), 不在此重复 expose.
+
 // [FIX 2026-07-30 v2] chartConfig 直接用 props.chartConfig（父组件持有）。
 // 兜底：若父组件没传，本地 reactive 默认值（向后兼容）
 // [T1 2026-08-02] 默认值统一走 chartConfigDefaults.js 工厂（原 _localDefaultChartConfig
