@@ -291,13 +291,19 @@ export function useInteraction() {
     // 之前绑在 mermaidWrapper 上，全屏模式下 mermaidWrapper 仍受父级 CSS 限制，
     // 事件触不到或 transform 视觉上没效果
     // mermaid-container 在真全屏时占满整个屏幕，事件能稳定触发
-    const minScale = 0.3
-    const maxScale = 10
+    // [A3 2026-08-03] 收窄 zoom 边界到合理区间
+    //   旧: 0.3 / 10 → 过小看不清字, 过大只能看一个节点
+    //   新: 0.5 / 5 → 适配 Mermaid 11 节点字号 16px 的可视区间
+    const minScale = 0.5
+    const maxScale = 5
 
     const handleWheel = (e) => {
       e.preventDefault()
 
-      const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1
+      // [A1 2026-08-03] zoom 步长对称化: in/out 互为倒数, 避免 in→out 不回 1.0 的 drift
+      //   旧: 0.9 / 1.1 → 5 次 in + 5 次 out 后 scale drift 至 0.886 (误差 -0.114)
+      //   新: (1/1.1) / 1.1 → 严格互为倒数, drift < 0.001
+      const zoomFactor = e.deltaY > 0 ? 1 / 1.1 : 1.1
       const newScale = Math.max(minScale, Math.min(maxScale, scale.value * zoomFactor))
       if (newScale === scale.value) return
 
