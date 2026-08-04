@@ -38,28 +38,6 @@
       <el-icon :size="48"><Connection /></el-icon>
       <span>请先选择产品和版本</span>
     </div>
-
-    <!-- [FIX 2026-07-31] 布局设置抽屉：回溯修复丢失的 LayoutControlPanel 功能
-         之前 EmbeddedChartView 注释说"布局抽屉已上移到 ArchDataChartSwitcher"，
-         但本组件从未实际渲染抽屉 → 功能丢失。现在补回。 -->
-    <el-drawer
-      v-model="drawerVisible"
-      title="布局设置"
-      direction="rtl"
-      size="380px"
-      :destroy-on-close="false"
-      :append-to-body="true"
-    >
-      <LayoutControlPanel
-        v-if="embeddedChartRef && drawerVisible"
-        :containers="embeddedChartRef.containers"
-        :domain-products="embeddedChartRef.domainProducts"
-        :links="embeddedChartRef.links"
-        :chart-type="chartConfig.chartType"
-        :model-value="chartConfig.layoutControl"
-        @update:model-value="(v) => Object.assign(chartConfig.layoutControl, v)"
-      />
-    </el-drawer>
   </div>
 </template>
 
@@ -85,9 +63,8 @@
  *   之前 EmbeddedChartView 内部 reactive 创建 chartConfig（与 GlobalToolbar 状态分散），
  *   现统一在本组件持有，确保 toolbar（chart-config slot）与 chart 视图共享单一数据源。
  */
-import { defineAsyncComponent, reactive, ref, computed } from 'vue'
+import { defineAsyncComponent, reactive, ref } from 'vue'
 import { Connection } from '@element-plus/icons-vue'
-import LayoutControlPanel from '@/views/AADiagramApp/components/LayoutControlPanel.vue'
 import { createDefaultChartConfig } from './chartConfigDefaults.js'
 
 const EmbeddedChartView = defineAsyncComponent(() =>
@@ -111,11 +88,6 @@ const props = defineProps({
   chartConfig: {
     type: Object,
     default: null
-  },
-  // [FIX 2026-07-31] 布局设置抽屉可见性：由 ChartMiniToolbar 的"布局设置"按钮控制
-  layoutDrawerVisible: {
-    type: Boolean,
-    default: false
   }
 })
 
@@ -123,15 +95,8 @@ const emit = defineEmits([
   'update:view-mode',          // 业务侧切换 viewMode（如 ESC 键返回 list）
   'node-click',                // 图表节点点击
   'render-complete',           // 渲染完成
-  'render-error',              // 渲染失败
-  'update:layoutDrawerVisible' // 布局抽屉可见性变化
+  'render-error'              // 渲染失败
 ])
-
-// [FIX 2026-07-31] 布局抽屉 v-model 代理
-const drawerVisible = computed({
-  get: () => props.layoutDrawerVisible,
-  set: (v) => emit('update:layoutDrawerVisible', v)
-})
 
 // EmbeddedChartView 组件实例引用（用于获取 containers/domainProducts/links）
 const embeddedChartRef = ref(null)
@@ -139,8 +104,9 @@ const embeddedChartRef = ref(null)
 // [B6 2026-08-03] reload 唯一入口已统一为 window.__archPage.reload (EmbeddedChartView 内赋值).
 //   slot ref 链路 (本组件 defineExpose.reload → EmbeddedChartView.defineExpose.reload) 已移除:
 //   slot ref 不绑定到父组件 (RelationshipManagement 无法稳定拿到实例), 实际调用方走 window 暴露.
-//   保留 containers/domainProducts/links 的 defineExpose 由本组件 template 内 ref 直接访问
-//   (见上方 <LayoutControlPanel :containers="embeddedChartRef.containers" ...>), 不在此重复 expose.
+// [布局设置 sidebar 整合] LayoutControlPanel 已迁移到 RelationScopeTree 第 4 个 CollapsiblePanel,
+//   containers/domainProducts/links 改由 EmbeddedChartView watch 写入 diagramConfigStore.chartDataSnapshot.
+//   embeddedChartRef 保留为 template ref (EmbeddedChartView 组件实例引用).
 
 // [FIX 2026-07-30 v2] chartConfig 直接用 props.chartConfig（父组件持有）。
 // 兜底：若父组件没传，本地 reactive 默认值（向后兼容）
