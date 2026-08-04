@@ -1,48 +1,13 @@
 <template>
   <div class="layout-control-panel">
     <div class="panel-content">
-      <!-- 全局参数：布局方向与高级选项（布局引擎） -->
-      <div class="global-params-section">
-        <div class="section-title">全局参数</div>
-        <div class="param-row">
-          <label class="param-label">布局方向</label>
-          <el-select
-            v-model="localConfig.overallDirection"
-            size="small"
-            class="param-select"
-            @change="emitUpdate"
-          >
-            <el-option label="垂直" value="TB" />
-            <el-option label="水平" value="LR" />
-          </el-select>
-        </div>
+      <!-- [MOVE 2026-08-04] 布局方向 + 高级选项 (布局引擎) 已移到 GlobalToolbar 的 ChartMiniToolbar
+           用 icon 表示方向 (TB/LR), 用 popover 展开/收起高级选项。
+           本面板仅保留未分配节点 + 分组列表。 -->
 
-        <!-- 高级选项折叠区：布局引擎选择 -->
-        <div class="advanced-options-wrapper">
-          <div class="advanced-toggle" @click="toggleAdvancedOptions">
-            <span class="advanced-toggle-text">高级选项</span>
-            <span class="advanced-toggle-icon">{{ showAdvancedOptions ? '▾' : '▸' }}</span>
-          </div>
-          <div v-if="showAdvancedOptions" class="advanced-options-body">
-            <div class="param-row">
-              <label class="param-label">布局引擎</label>
-              <el-radio-group
-                v-model="localConfig.engine"
-                size="small"
-                @change="emitUpdate"
-              >
-                <el-radio value="elk">
-                  直线/ELK
-                  <span class="radio-desc">更好的屏幕适配能力</span>
-                </el-radio>
-                <el-radio value="dagre">
-                  曲线/Dagre
-                  <span class="radio-desc">稳定可靠，自动布局</span>
-                </el-radio>
-              </el-radio-group>
-            </div>
-          </div>
-        </div>
+      <div class="lcp-toolbar">
+        <el-input v-model="searchText" class="lcp-search-input" placeholder="搜索分组" clearable size="small" />
+        <button class="lcp-add-group-btn" title="新增顶层分组" @click="handleAddGroup">+ 新增</button>
       </div>
 
       <div class="containers-section">
@@ -69,26 +34,17 @@
           分组列表
         </div>
         <div class="groups-container">
-          <div v-if="localConfig.groups.length === 0" class="empty-hint">
-            暂无分组，点击上方"新增分组"按钮添加
+          <div v-if="filteredGroups.length === 0" class="empty-hint">
+            暂无匹配分组
           </div>
-          <div v-else class="debug-info">分组数量: {{ debugGroups.length }}</div>
-
-          <GroupItem
-            v-for="(group, idx) in localConfig.groups"
-            :key="group.id + '-' + (diagramConfigStore.centerScopeColor || 'default')"
+          <LayoutGroupNode
+            v-for="(group, idx) in filteredGroups"
+            :key="group.id"
             :group="group"
             :depth="0"
             :containers="containers"
             :index="idx"
-            :color-scheme="diagramConfigStore.colorScheme"
-            :color-group-by="diagramConfigStore.colorGroupBy"
-            :custom-colors="diagramConfigStore.customColors"
             :color-mapping="colorMapping"
-            :center-scope="resolvedCenterScope"
-            :center-scope-version="diagramConfigStore.centerScope.length"
-            :center-scope-markers="diagramConfigStore.centerScopeMarkers"
-            :center-scope-color="diagramConfigStore.centerScopeColor"
             @update="handleGroupUpdate"
             @delete="handleGroupDelete"
             @add-child="handleAddChild"
@@ -105,7 +61,7 @@
 
 <script setup>
 import { ref, watch, computed, onMounted } from 'vue'
-import GroupItem from './GroupItem.vue'
+import LayoutGroupNode from './LayoutGroupNode.vue'
 import { useDiagramConfigStore } from '@/stores/diagramConfigStore'
 import { createGroupId, GroupType } from '@/services/groupModel/types.js'
 
@@ -187,12 +143,8 @@ const localConfig = ref({
   overallDirection: 'TB'
 })
 
-// 高级选项折叠面板的展开状态
-const showAdvancedOptions = ref(false)
-
-function toggleAdvancedOptions() {
-  showAdvancedOptions.value = !showAdvancedOptions.value
-}
+// [MOVE 2026-08-04] showAdvancedOptions / toggleAdvancedOptions 已移到 ChartMiniToolbar
+//   (高级选项 popover 由 toolbar 管理, 本面板不再持有展开状态)
 
 const draggingContainer = ref(null)
 const draggingIndex = ref(-1)
@@ -201,6 +153,22 @@ const lastProcessedChartType = ref(null)
 // 追踪 groups 变化的调试 computed
 const debugGroups = computed(() => {
   return localConfig.value.groups
+})
+
+// [TREE 2026-08-04] 搜索过滤：按分组标题（含子分组）递归匹配
+const searchText = ref('')
+
+function matchesSearch(group, keyword) {
+  if (!keyword) return true
+  const kw = keyword.toLowerCase()
+  if (group.title && group.title.toLowerCase().includes(kw)) return true
+  if (group.children && group.children.some(c => matchesSearch(c, kw))) return true
+  return false
+}
+
+const filteredGroups = computed(() => {
+  if (!searchText.value) return localConfig.value.groups
+  return localConfig.value.groups.filter(g => matchesSearch(g, searchText.value))
 })
 
 // 确保 centerScope 能够正确响应 props 变化
@@ -1536,6 +1504,32 @@ function handleAutoVirtualLayering(layerCount = 3) {
   gap: var(--spacing-lg);
 }
 
+.lcp-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.lcp-search-input {
+  flex: 1;
+}
+
+.lcp-add-group-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: rgba(234, 88, 12, 0.08);
+  color: var(--color-primary);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+  transition: all 0.2s;
+
+  &:hover {
+    background: rgba(234, 88, 12, 0.15);
+  }
+}
+
 .auto-group-section {
   padding: var(--spacing-sm) 0;
 }
@@ -1570,93 +1564,9 @@ function handleAutoVirtualLayering(layerCount = 3) {
   }
 }
 
-.overall-direction-section {
-  padding: var(--spacing-md);
-  background: var(--color-bg-secondary);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-border);
-}
-
-.direction-select {
-  width: 100%;
-  padding: var(--spacing-sm);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-  background: white;
-  cursor: pointer;
-
-  &:focus {
-    outline: none;
-    border-color: var(--color-primary);
-  }
-}
-
-/* 全局参数区块：布局方向 + 高级选项 */
-.global-params-section {
-  padding: var(--spacing-md);
-  background: var(--color-bg-secondary);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-border);
-}
-
-.param-row {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  margin-top: var(--spacing-sm);
-}
-
-.param-label {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-  min-width: 64px;
-  flex-shrink: 0;
-}
-
-.param-select {
-  width: 160px;
-}
-
-/* 高级选项折叠区 */
-.advanced-options-wrapper {
-  margin-top: var(--spacing-md);
-  border-top: 1px dashed var(--color-border);
-  padding-top: var(--spacing-sm);
-}
-
-.advanced-toggle {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-xs);
-  cursor: pointer;
-  user-select: none;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-
-  &:hover {
-    color: var(--color-primary);
-  }
-}
-
-.advanced-toggle-text {
-  font-weight: 500;
-}
-
-.advanced-toggle-icon {
-  font-size: 12px;
-}
-
-.advanced-options-body {
-  padding: var(--spacing-sm) 0 0;
-}
-
-.radio-desc {
-  display: inline-block;
-  margin-left: var(--spacing-xs);
-  font-size: var(--font-size-xs);
-  color: var(--color-text-secondary);
-}
+/* [MOVE 2026-08-04] 布局方向 + 高级选项相关样式 (.global-params-section /
+   .param-row / .param-label / .param-select / .advanced-options-wrapper /
+   .advanced-toggle / .radio-desc 等) 已删除: UI 移到 ChartMiniToolbar。 */
 
 .section-title {
   font-size: var(--font-size-sm);
