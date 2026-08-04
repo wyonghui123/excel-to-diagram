@@ -289,4 +289,49 @@ describe('diagramConfigStore', () => {
       expect(store.isServiceModuleChart).toBe(true)
     })
   })
+
+  describe('chartDataSnapshot & layoutPanelExpanded', () => {
+    it('初始状态: chartDataSnapshot 为空对象, layoutPanelExpanded 为 false', () => {
+      const store = useDiagramConfigStore()
+      expect(store.chartDataSnapshot).toEqual({ containers: [], domainProducts: [], links: [] })
+      expect(store.layoutPanelExpanded).toBe(false)
+    })
+
+    it('updateChartDataSnapshot 应该整体替换 snapshot', () => {
+      const store = useDiagramConfigStore()
+      store.updateChartDataSnapshot({
+        containers: [{ id: 'c1' }],
+        domainProducts: [{ name: 'dp1' }],
+        links: [{ source: 'a', target: 'b' }]
+      })
+      expect(store.chartDataSnapshot.containers).toEqual([{ id: 'c1' }])
+      expect(store.chartDataSnapshot.domainProducts).toEqual([{ name: 'dp1' }])
+      expect(store.chartDataSnapshot.links).toEqual([{ source: 'a', target: 'b' }])
+    })
+
+    it('updateChartDataSnapshot 缺省字段应 fallback 为空数组', () => {
+      const store = useDiagramConfigStore()
+      store.updateChartDataSnapshot({ containers: [{ id: 'c1' }] })
+      expect(store.chartDataSnapshot.containers).toEqual([{ id: 'c1' }])
+      expect(store.chartDataSnapshot.domainProducts).toEqual([])
+      expect(store.chartDataSnapshot.links).toEqual([])
+    })
+
+    it('setLayoutPanelExpanded 应该切换展开状态', () => {
+      const store = useDiagramConfigStore()
+      store.setLayoutPanelExpanded(true)
+      expect(store.layoutPanelExpanded).toBe(true)
+      store.setLayoutPanelExpanded(false)
+      expect(store.layoutPanelExpanded).toBe(false)
+    })
+
+    it('resetConfig 应该重置 chartDataSnapshot 和 layoutPanelExpanded', () => {
+      const store = useDiagramConfigStore()
+      store.updateChartDataSnapshot({ containers: [{ id: 'c1' }], domainProducts: [{}], links: [{}] })
+      store.setLayoutPanelExpanded(true)
+      store.resetConfig()
+      expect(store.chartDataSnapshot).toEqual({ containers: [], domainProducts: [], links: [] })
+      expect(store.layoutPanelExpanded).toBe(false)
+    })
+  })
 })

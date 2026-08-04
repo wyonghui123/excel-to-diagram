@@ -48,6 +48,15 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
   // [V_NEW 2026-06-29] annotation category 过滤 - 备注文本是辅助信息, 不影响主线
   // 默认 [] = 不过滤 (向后兼容)
   const annotationCategoryFilter = ref([])
+  // [布局设置 sidebar 整合] 图表渲染数据快照 — EmbeddedChartView 写入, RelationScopeTree 读取
+  //   shallowRef 避免对 1000+ 节点的 containers/domainProducts/links 创建深 Proxy (同 positions/centerScopeMarkers 模式)
+  const chartDataSnapshot = shallowRef({
+    containers: [],
+    domainProducts: [],
+    links: []
+  })
+  // [布局设置 sidebar 整合] 布局 panel 展开状态 — 跨组件共享 (RelationScopeTree 写, 外部可读)
+  const layoutPanelExpanded = ref(false)
   const useUnifiedRenderer = ref(true)
 
   // 分组控制配置
@@ -193,6 +202,20 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     annotationCategoryFilter.value = []
   }
 
+  // [布局设置 sidebar 整合] 更新图表渲染数据快照 (整体替换引用, 触发 shallowRef 依赖)
+  function updateChartDataSnapshot(snapshot) {
+    chartDataSnapshot.value = {
+      containers: snapshot?.containers ?? [],
+      domainProducts: snapshot?.domainProducts ?? [],
+      links: snapshot?.links ?? []
+    }
+  }
+
+  // [布局设置 sidebar 整合] 设置布局 panel 展开状态
+  function setLayoutPanelExpanded(expanded) {
+    layoutPanelExpanded.value = expanded
+  }
+
   function updateAssignmentMode(value) {
     assignmentMode.value = value?.value ?? value ?? 'auto'
   }
@@ -238,6 +261,9 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
       engine: 'elk',
       preserveOrder: true
     }
+    // [布局设置 sidebar 整合] 重置 snapshot 和 panel 状态
+    chartDataSnapshot.value = { containers: [], domainProducts: [], links: [] }
+    layoutPanelExpanded.value = false
     mermaidMaxTextSize.value = 500000
   }
 
@@ -268,6 +294,8 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     annotationCategoryFilter,
     useUnifiedRenderer,
     layoutControlConfig,
+    chartDataSnapshot,
+    layoutPanelExpanded,
     mermaidMaxTextSize,
 
     // Getters
@@ -297,6 +325,8 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     updatePositions,
     updateHideLinkLabelTails,
     updateLayoutControlConfig,
+    updateChartDataSnapshot,
+    setLayoutPanelExpanded,
     updateMermaidMaxTextSize,
     updateAnnotationPanelPosition,
     updateShowAnnotationIcons,
