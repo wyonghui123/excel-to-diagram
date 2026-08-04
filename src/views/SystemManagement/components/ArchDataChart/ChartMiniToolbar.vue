@@ -122,13 +122,6 @@
     <!-- [2026-08-02] "显示备注图标"按钮已移除:
          该开关写入 annotationConfig.showIcons 但从未被读取 (overlayNumberMarkers 返回 null, 图标绘制是死代码),
          无视觉效果。备注展示由"备注类型"过滤 + 底部备注面板 + 悬停 tooltip 承担, 不再需要中间开关。 -->
-
-    <div class="cmt-spacer"></div>
-
-    <!-- 布局设置按钮：侧边打开 LayoutControlPanel 抽屉 -->
-    <el-tooltip content="布局设置" placement="bottom" :teleported="false">
-      <el-button size="small" :icon="SetUp" @click="emit('open-layout-settings')" />
-    </el-tooltip>
   </div>
 </template>
 
@@ -142,7 +135,6 @@
  *   - 仅作为 UI 层，触发 update 事件
  */
 import { ref, onMounted } from 'vue'
-import { SetUp } from '@element-plus/icons-vue'
 import EnumService from '@/services/enumService'
 
 const props = defineProps({
@@ -161,8 +153,7 @@ const emit = defineEmits([
   'update:color-scheme',
   'update:color-group-by',
   'update:center-scope-highlight',
-  'update:annotation-category-filter',
-  'open-layout-settings'
+  'update:annotation-category-filter'
 ])
 
 // [FIX 2026-07-31] 加载 enum_types.annotation_category 选项
