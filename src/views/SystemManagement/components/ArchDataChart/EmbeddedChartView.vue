@@ -469,6 +469,25 @@ watch(
   { deep: true }
 )
 
+// ============================================================
+// [布局设置 sidebar 整合] 将 containers/domainProducts/links 同步到 store
+//   RelationScopeTree 第 4 个 CollapsiblePanel 从 store 读取后传给 LayoutControlPanel
+//   immediate: true 确保首次渲染即写入 (chart 视图打开时 panel 立即可用)
+//   注意: containers/domainProducts/links 都是 computed (L797/L941/L952),
+//         watch 监听 computed ref 的 .value 变化自动触发
+// ============================================================
+watch(
+  [containers, domainProducts, links],
+  ([c, dp, l]) => {
+    configStore.updateChartDataSnapshot({
+      containers: c,
+      domainProducts: dp,
+      links: l
+    })
+  },
+  { immediate: true }
+)
+
 // [Phase 1 修复 2026-07-28] 监听 chartConfig.layoutEngine 变化
 //   关系连线模式 elk/dagre 切换，同步到 configStore 并重新生成
 watch(
