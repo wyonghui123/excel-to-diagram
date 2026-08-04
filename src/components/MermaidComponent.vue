@@ -1078,6 +1078,10 @@ export default {
         // 方向或引擎变化 → 全量重渲染
         if (newVal.overallDirection !== oldVal.overallDirection ||
             newVal.layoutEngine !== oldVal.layoutEngine) {
+          // [FIX 2026-08-04] 方向/引擎切换也需在 mermaid.run() 前重置 zoom transform。
+          //   与「切换图表类型文字变小」同一根因: 不重置则 ELK 读含 zoom 的 BCR →
+          //   节点维度放大, 文字变小。forceAutoFit 由 nextTick 内 autoFit 分支消费后重置。
+          forceAutoFit = true
           renderMermaid()
           return
         }
@@ -1089,6 +1093,10 @@ export default {
           c: (g.containers || []).map(c => typeof c === 'string' ? c : (c.id || c.elementCode))
         })))
         if (sig(newVal) !== sig(oldVal)) {
+          // [FIX 2026-08-04] 分组禁用/显示也需在 mermaid.run() 前重置 zoom transform。
+          //   与方向/引擎切换同一根因: 用户已缩放时禁用/显示分组, 不重置则 ELK 读含 zoom 的
+          //   BCR → 节点维度放大, 文字变小。forceAutoFit 由 nextTick 内 autoFit 分支消费后重置。
+          forceAutoFit = true
           renderMermaid()
         }
       }

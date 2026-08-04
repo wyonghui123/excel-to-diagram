@@ -5,6 +5,7 @@
       :compact="true"
       :action-disabled="actionDisabledMap"
       :hide-chart-button="true"
+      :active-view="viewMode"
       @change="handleToolbarChange"
       @action="onGlobalAction"
     >

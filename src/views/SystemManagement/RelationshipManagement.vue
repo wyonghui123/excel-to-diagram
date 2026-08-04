@@ -34,12 +34,16 @@
         :color-group-by="chartConfig.colorGroupBy"
         :center-scope-highlight="chartConfig.centerScopeHighlight"
         :annotation-category-filter="chartConfig.annotationCategoryFilter"
+        :overall-direction="chartConfig.layoutControl?.overallDirection ?? 'TB'"
+        :engine="chartConfig.layoutControl?.engine ?? 'elk'"
         :version-id="embeddedContext.versionId ?? null"
         @update:chart-type="(v) => (chartConfig.chartType = v)"
         @update:color-scheme="(v) => (chartConfig.colorScheme = v)"
         @update:color-group-by="(v) => (chartConfig.colorGroupBy = v)"
         @update:center-scope-highlight="(v) => (chartConfig.centerScopeHighlight = v)"
         @update:annotation-category-filter="(v) => (chartConfig.annotationCategoryFilter = v)"
+        @update:overall-direction="(v) => (chartConfig.layoutControl.overallDirection = v)"
+        @update:engine="(v) => { chartConfig.layoutEngine = v; chartConfig.layoutControl.engine = v }"
       />
     </template>
 

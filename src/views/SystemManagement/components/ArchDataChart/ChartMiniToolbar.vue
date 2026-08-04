@@ -122,6 +122,65 @@
     <!-- [2026-08-02] "显示备注图标"按钮已移除:
          该开关写入 annotationConfig.showIcons 但从未被读取 (overlayNumberMarkers 返回 null, 图标绘制是死代码),
          无视觉效果。备注展示由"备注类型"过滤 + 底部备注面板 + 悬停 tooltip 承担, 不再需要中间开关。 -->
+
+    <div class="cmt-divider"></div>
+
+    <!-- [MOVE 2026-08-04] 布局方向: 从 LayoutControlPanel 移到 toolbar, 用 icon 表示
+         TB = 垂直 (top-to-bottom, Bottom icon), LR = 水平 (left-to-right, Right icon) -->
+    <el-tooltip content="布局方向" placement="bottom" :teleported="false" popper-class="app-tooltip-popper">
+      <div class="cmt-direction-group">
+        <el-button
+          :type="overallDirection === 'TB' ? 'primary' : 'default'"
+          size="small"
+          class="cmt-dir-btn"
+          @click="emit('update:overall-direction', 'TB')"
+        >
+          <el-icon><Bottom /></el-icon>
+        </el-button>
+        <el-button
+          :type="overallDirection === 'LR' ? 'primary' : 'default'"
+          size="small"
+          class="cmt-dir-btn"
+          @click="emit('update:overall-direction', 'LR')"
+        >
+          <el-icon><Right /></el-icon>
+        </el-button>
+      </div>
+    </el-tooltip>
+
+    <!-- [MOVE 2026-08-04] 高级选项: 从 LayoutControlPanel 移到 toolbar, 用 popover 展开/收起
+         当前仅含布局引擎 (elk/dagre) 切换 -->
+    <el-popover trigger="click" placement="bottom" :width="260" popper-class="cmt-advanced-popper">
+      <template #reference>
+        <el-button
+          size="small"
+          :type="engine !== 'elk' ? 'primary' : 'default'"
+          class="cmt-advanced-btn"
+        >
+          <el-icon><Setting /></el-icon>
+          <span class="cmt-adv-label">高级</span>
+        </el-button>
+      </template>
+      <div class="cmt-advanced-panel">
+        <div class="cmt-advanced-row">
+          <label class="cmt-advanced-label">布局引擎</label>
+          <el-radio-group
+            :model-value="engine"
+            size="small"
+            @update:model-value="(v) => emit('update:engine', v)"
+          >
+            <el-radio value="elk">
+              直线/ELK
+              <span class="cmt-radio-desc">更好的屏幕适配能力</span>
+            </el-radio>
+            <el-radio value="dagre">
+              曲线/Dagre
+              <span class="cmt-radio-desc">稳定可靠，自动布局</span>
+            </el-radio>
+          </el-radio-group>
+        </div>
+      </div>
+    </el-popover>
   </div>
 </template>
 
@@ -135,6 +194,7 @@
  *   - 仅作为 UI 层，触发 update 事件
  */
 import { ref, onMounted } from 'vue'
+import { Bottom, Right, Setting } from '@element-plus/icons-vue'
 import EnumService from '@/services/enumService'
 
 const props = defineProps({
@@ -145,7 +205,11 @@ const props = defineProps({
   // [FIX 2026-07-31] 备注类型多选 (来自 chartConfig.annotationCategoryFilter)
   annotationCategoryFilter: { type: Array, default: () => [] },
   // [FIX 2026-07-31] 版本号 - 切换版本时重新加载 enum
-  versionId: { type: [Number, String], default: null }
+  versionId: { type: [Number, String], default: null },
+  // [MOVE 2026-08-04] 布局方向 (TB/LR) - 从 LayoutControlPanel 移到 toolbar
+  overallDirection: { type: String, default: 'TB' },
+  // [MOVE 2026-08-04] 布局引擎 (elk/dagre) - 从 LayoutControlPanel 移到 toolbar 高级选项
+  engine: { type: String, default: 'elk' }
 })
 
 const emit = defineEmits([
@@ -153,7 +217,9 @@ const emit = defineEmits([
   'update:color-scheme',
   'update:color-group-by',
   'update:center-scope-highlight',
-  'update:annotation-category-filter'
+  'update:annotation-category-filter',
+  'update:overall-direction',
+  'update:engine'
 ])
 
 // [FIX 2026-07-31] 加载 enum_types.annotation_category 选项
@@ -251,5 +317,96 @@ onMounted(() => {
   font-size: 12px;
   color: var(--color-text-tertiary, #909399);
   text-align: center;
+}
+
+// [MOVE 2026-08-04] 方向切换 + 高级选项 popover 样式
+.cmt-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--color-border, #dcdfe6);
+  flex-shrink: 0;
+  margin: 0 4px;
+}
+
+.cmt-direction-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.cmt-dir-btn {
+  width: 32px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cmt-advanced-btn {
+  width: auto;
+  height: 28px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+
+  .el-icon {
+    font-size: 14px;
+  }
+}
+
+.cmt-adv-label {
+  font-size: 12px;
+  line-height: 1;
+}
+</style>
+
+// [MOVE 2026-08-04] 高级选项 popover 内容样式 (非 scoped, popper 渲染在 body)
+<style lang="scss">
+.cmt-advanced-popper {
+  .cmt-advanced-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 4px 0;
+  }
+
+  .cmt-advanced-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .cmt-advanced-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: #303133;
+  }
+
+  .el-radio-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .el-radio {
+    margin-right: 0;
+    height: auto;
+    display: flex;
+    align-items: flex-start;
+    white-space: normal;
+  }
+
+  .cmt-radio-desc {
+    display: block;
+    margin-left: 22px;
+    margin-top: 2px;
+    font-size: 11px;
+    color: var(--color-text-tertiary, #909399);
+    line-height: 1.4;
+  }
 }
 </style>

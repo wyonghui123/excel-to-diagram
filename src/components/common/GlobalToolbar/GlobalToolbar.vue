@@ -56,12 +56,6 @@
     <div class="gt-sep"></div>
 
     <div class="gt-actions">
-      <el-tooltip content="导入" placement="bottom" :teleported="false" popper-class="app-tooltip-popper">
-        <el-button size="small" :icon="Upload" :disabled="actionDisabled?.import" @click="handleAction('import')" />
-      </el-tooltip>
-      <el-tooltip content="导出" placement="bottom" :teleported="false" popper-class="app-tooltip-popper">
-        <el-button size="small" :icon="Download" :disabled="actionDisabled?.export" @click="handleAction('export')" />
-      </el-tooltip>
       <el-tooltip v-if="!hideChartButton" :content="activeView === 'chart' ? '返回列表视图' : '图表视图'" placement="bottom" :teleported="false" popper-class="app-tooltip-popper">
         <el-button
           size="small"
@@ -75,6 +69,17 @@
       </el-tooltip>
       <!-- [FIX 2026-07-30 merge] 业务方 actions slot: 在默认按钮组之后注入自定义按钮（如图表展示 toggle） -->
       <slot name="actions" />
+      <!-- [FIX 2026-08-04] 导入/导出移到图表展示按钮之后。
+           仅列表视图显示: 图表视图下隐藏 (导入/导出是列表操作, 图表视图不需要)。
+           activeView 由 MultiObjectManagementPage 传入 -->
+      <template v-if="activeView === 'list'">
+        <el-tooltip content="导入" placement="bottom" :teleported="false" popper-class="app-tooltip-popper">
+          <el-button size="small" :icon="Upload" :disabled="actionDisabled?.import" @click="handleAction('import')" />
+        </el-tooltip>
+        <el-tooltip content="导出" placement="bottom" :teleported="false" popper-class="app-tooltip-popper">
+          <el-button size="small" :icon="Download" :disabled="actionDisabled?.export" @click="handleAction('export')" />
+        </el-tooltip>
+      </template>
       <!-- [FIX 2026-07-30 merge] chart-config slot: chart 视图激活时由业务方注入 ChartMiniToolbar -->
       <slot name="chart-config" />
       <el-tooltip content="刷新" placement="bottom" :teleported="false" popper-class="app-tooltip-popper">

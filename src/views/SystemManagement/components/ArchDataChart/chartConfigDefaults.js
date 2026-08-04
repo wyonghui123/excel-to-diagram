@@ -14,11 +14,11 @@ export function createDefaultChartConfig() {
     centerScopeHighlight: true,
     annotationCategoryFilter: [],
     layoutEngine: 'elk',
-    direction: 'TD',
+    direction: 'LR',
     layoutControl: {
       enabled: true,
       layoutType: 'default',
-      overallDirection: 'TB',
+      overallDirection: 'LR',
       engine: 'elk',
       preserveOrder: true,
       groups: []
