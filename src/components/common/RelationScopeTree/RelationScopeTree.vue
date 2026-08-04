@@ -65,6 +65,25 @@
         @filter-change="handleFilterChange"
       />
     </CollapsiblePanel>
+
+    <CollapsiblePanel
+      v-if="hasChartData"
+      title="布局设置"
+      :default-expanded="layoutExpanded"
+      :height-full="false"
+      class="rst-panel-layout"
+      @toggle="handleLayoutToggle"
+    >
+      <LayoutControlPanel
+        v-if="injectedChartConfig"
+        :containers="diagramConfigStore.chartDataSnapshot.containers"
+        :domain-products="diagramConfigStore.chartDataSnapshot.domainProducts"
+        :links="diagramConfigStore.chartDataSnapshot.links"
+        :chart-type="injectedChartConfig.chartType"
+        :model-value="injectedChartConfig.layoutControl"
+        @update:model-value="(v) => Object.assign(injectedChartConfig.layoutControl, v)"
+      />
+    </CollapsiblePanel>
   </div>
 </template>
 
@@ -77,6 +96,8 @@ import ObjectScopeSection from './ObjectScopeSection.vue'
 import RelationScopeSection from './RelationScopeSection.vue'
 import RelationFilterSection from './RelationFilterSection.vue'
 import CollapsiblePanel from '@/components/common/CollapsiblePanel/CollapsiblePanel.vue'
+import LayoutControlPanel from '@/views/AADiagramApp/components/LayoutControlPanel.vue'
+import { useDiagramConfigStore } from '@/stores/diagramConfigStore'
 import { createTrace } from '@/utils/trace'
 
 const props = defineProps({
@@ -117,6 +138,16 @@ const objectScopeRef = ref(null)
 const relationScopeRef = ref(null)
 const filterSectionRef = ref(null)
 const coordinator = inject('refreshCoordinator', null)
+// [布局设置 sidebar 整合] inject chartConfig (由 RelationshipManagement provide)
+//   用于 LayoutControlPanel 的 :model-value 和 @update:model-value
+//   组件树: RelationshipManagement → MultiObjectManagementPage → RelationScopeTree
+const injectedChartConfig = inject('chartConfig', null)
+// [布局设置 sidebar 整合] inject viewMode (由 MultiObjectManagementPage provide)
+//   用于 hasChartData 判断 (仅 chart 视图显示布局 panel)
+const injectedViewMode = inject('mompViewMode', ref('chart'))
+
+// [布局设置 sidebar 整合] diagramConfigStore — 读取 chartDataSnapshot + 同步 layoutPanelExpanded
+const diagramConfigStore = useDiagramConfigStore()
 // [FIX] 从图表返回时 (initialRelationCodes 或 scopeIds.relationExtra.relationCodes 非空)
 //       自动展开关系范围面板, 让用户能直观看到已恢复的勾选
 const _hasInitialRelCodes = () => {
@@ -127,6 +158,28 @@ const _hasInitialRelCodes = () => {
 const objectExpanded = ref(true)
 const relationExpanded = ref(_hasInitialRelCodes())
 const filterExpanded = ref(false)
+// [布局设置 sidebar 整合] 第 4 panel: 布局设置
+const layoutExpanded = ref(false)
+// [布局设置 sidebar 整合] 仅 chart 视图且有渲染数据时显示布局 panel
+const hasChartData = computed(() => {
+  return injectedViewMode.value === 'chart' &&
+    diagramConfigStore.chartDataSnapshot.containers.length > 0
+})
+
+// [布局设置 sidebar 整合] chart → list 切换时自动收起布局 panel
+watch(hasChartData, (val) => {
+  if (!val && layoutExpanded.value) {
+    layoutExpanded.value = false
+    diagramConfigStore.setLayoutPanelExpanded(false)
+  }
+})
+
+// [布局设置 sidebar 整合] 外部修改 store.layoutPanelExpanded 时同步本地状态
+watch(() => diagramConfigStore.layoutPanelExpanded, (val) => {
+  if (val !== layoutExpanded.value) {
+    layoutExpanded.value = val
+  }
+})
 
 // [FIX] 监听 initialRelationCodes / scopeIds.relationExtra 变化, 动态展开关系范围面板
 // 场景: chart app 返回时, 父级 restore 流程异步更新 props, 初始 _hasInitialRelCodes() 是 false
@@ -153,6 +206,7 @@ function handleObjectToggle(expanded) {
   if (expanded) {
     relationExpanded.value = false
     filterExpanded.value = false
+    layoutExpanded.value = false
   }
 }
 
@@ -161,6 +215,7 @@ function handleRelationToggle(expanded) {
   if (expanded) {
     objectExpanded.value = false
     filterExpanded.value = false
+    layoutExpanded.value = false
     if (relationStale.value) {
       scheduleAutoLoad()
     }
@@ -172,7 +227,19 @@ function handleFilterToggle(expanded) {
   if (expanded) {
     objectExpanded.value = false
     relationExpanded.value = false
+    layoutExpanded.value = false
   }
+}
+
+// [布局设置 sidebar 整合] 第 4 panel toggle — 参与 4-panel 互斥, 同步 store
+function handleLayoutToggle(expanded) {
+  layoutExpanded.value = expanded
+  if (expanded) {
+    objectExpanded.value = false
+    relationExpanded.value = false
+    filterExpanded.value = false
+  }
+  diagramConfigStore.setLayoutPanelExpanded(expanded)
 }
 
 const metaObject = inject('metaObject', ref(null))
@@ -720,6 +787,12 @@ defineExpose({
 .rst-panel-filter {
   flex: 1;
   min-height: 48px;
+}
+
+/* [布局设置 sidebar 整合] 第 4 panel: 布局设置 — 展开时占满剩余空间 */
+.rst-panel-layout:not(.is-collapsed) {
+  flex: 1 1 0;
+  min-height: 200px;
 }
 
 /* v39: 过滤条件 badge 样式 */
