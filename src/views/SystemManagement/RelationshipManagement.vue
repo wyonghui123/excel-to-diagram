@@ -40,7 +40,6 @@
         @update:color-group-by="(v) => (chartConfig.colorGroupBy = v)"
         @update:center-scope-highlight="(v) => (chartConfig.centerScopeHighlight = v)"
         @update:annotation-category-filter="(v) => (chartConfig.annotationCategoryFilter = v)"
-        @open-layout-settings="layoutDrawerVisible = true"
       />
     </template>
 
@@ -50,8 +49,6 @@
       <ArchDataChartSwitcher
         :context="context"
         :chart-config="chartConfig"
-        :layout-drawer-visible="layoutDrawerVisible"
-        @update:layout-drawer-visible="(v) => (layoutDrawerVisible = v)"
         @node-click="handleChartNodeClick"
         @render-complete="handleChartRenderComplete"
         @render-error="handleChartRenderError"
@@ -84,7 +81,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, provide } from 'vue'
 import { ElMessage } from 'element-plus'
 import { MultiObjectManagementPage } from '@/components/common/MultiObjectManagementPage'
 import ArchDataChartSwitcher from '@/views/SystemManagement/components/ArchDataChart/ArchDataChartSwitcher.vue'
@@ -108,9 +105,11 @@ const pageRef = ref(null)
 // [T1 2026-08-02] 默认值统一走 chartConfigDefaults.js 工厂, 与 EmbeddedChartView/ArchDataChartSwitcher 共用
 const chartConfig = reactive(createDefaultChartConfig())
 
-// [FIX 2026-07-31] 布局设置抽屉可见性：ChartMiniToolbar 的"布局设置"按钮触发
-const layoutDrawerVisible = ref(false)
-
+// [布局设置 sidebar 整合] 提供 chartConfig 给 RelationScopeTree (sidebar)
+//   组件树: RelationshipManagement → MultiObjectManagementPage → RelationScopeTree (#master slot)
+//   RelationScopeTree inject('chartConfig') 读取 layoutControl, 用 Object.assign 写回
+//   与 ArchDataChartSwitcher 模式一致, layoutControl 不进 store
+provide('chartConfig', chartConfig)
 
 // [FIX 2026-07-30 v2] viewMode 通过 MultiObjectManagementPage.expose({ viewMode }) 暴露。
 // 用 computed 包装，让模板中可以直接用 viewMode 而无需 pageRef.value.viewMode。
