@@ -287,6 +287,10 @@ const sidebarCollapsed = ref(false)
 //   - 默认 'list'，嵌入式入口是默认行为，无 flag
 const viewMode = ref('list')
 
+// [布局设置 sidebar 整合] 提供 viewMode 给 RelationScopeTree
+//   RelationScopeTree 用它判断 hasChartData (viewMode==='chart' 时布局 panel 才显示)
+provide('mompViewMode', viewMode)
+
 function toggleEmbeddedView() {
   if (!page.canShowChart) return
   if (viewMode.value === 'chart') {
