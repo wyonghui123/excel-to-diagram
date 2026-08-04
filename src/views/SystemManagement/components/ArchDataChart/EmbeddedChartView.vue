@@ -268,7 +268,7 @@ const layoutControlConfig = computed(() => {
         enabled: true,
         layoutType: 'default',
         layoutEngine: chartConfig.layoutControl?.engine || chartConfig.layoutEngine,
-        overallDirection: unified.overallDirection || chartConfig.layoutControl?.overallDirection || 'TB',
+        overallDirection: chartConfig.layoutControl?.overallDirection || unified.overallDirection || 'TB',
         preserveOrder: chartConfig.layoutControl?.preserveOrder ?? true,
         groups: mergedGroups.map(g => normalizeGroupForRendering(g))
       }
@@ -836,7 +836,10 @@ const containers = computed(() => {
     return [{
       id: 'virtual',
       name: '业务对象节点',
-      nodes: diagramNodes.map(n => n.code || n.id || n.name)
+      nodes: diagramNodes.map(n => n.code || n.id || n.name),
+      nodeNames: Object.fromEntries(
+        diagramNodes.map(n => [n.code || n.id || n.name, n.name || n.code || n.id])
+      )
     }]
   }
 
@@ -918,6 +921,12 @@ const containers = computed(() => {
         domain: domainName,
         domainCode: domainCode,
         nodes: Array.from(boCodes),
+        nodeNames: Object.fromEntries(
+          Array.from(boCodes).map(code => {
+            const node = diagramNodes.find(n => (n.code || n.id) === code)
+            return [code, node?.name || code]
+          })
+        ),
         serviceModuleMap
       })
     })

@@ -155,9 +155,20 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
   }
 
   const hasContent = hasGroupContent(group, containers)
+  const groupEnabled = group.enabled !== false
 
+  // [FIX 2026-08-04] 禁用分组有 children/containers 时不能提前返回:
+  //   hasGroupContent 对 disabled 分组恒返回 false (见上方 L63-68), 但 disabled 分支
+  //   (下方 L170-250) 的职责正是"打平子元素到当前层级". 若在此提前返回, disabled 父域
+  //   的 children (子领域) 会被完全跳过 → 禁用供应链云后子领域也消失.
+  //   仅当 disabled 分组既无 directNodes 也无 children/containers 时才跳过.
   if (!hasContent && !group.directNodes) {
-    return { code, styleLines }
+    const hasFlattenableContent = !groupEnabled &&
+      ((group.children && group.children.length > 0) ||
+       (group.containers && group.containers.length > 0))
+    if (!hasFlattenableContent) {
+      return { code, styleLines }
+    }
   }
 
   const indent = '  '.repeat(depth)
@@ -165,7 +176,6 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
   const safeId = group.id.replace(/[^\w\u4e00-\u9fff]/g, '_')
   const groupId = `G_${safeId}`
   const groupTitle = formatContainerTitle(group.title || 'Group')
-  const groupEnabled = group.enabled !== false
 
   if (!groupEnabled) {
     // 禁用的分组：不再创建 subgraph，直接渲染子元素到当前层级

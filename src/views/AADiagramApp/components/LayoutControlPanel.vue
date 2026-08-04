@@ -1,6 +1,50 @@
 <template>
   <div class="layout-control-panel">
     <div class="panel-content">
+      <!-- 全局参数：布局方向与高级选项（布局引擎） -->
+      <div class="global-params-section">
+        <div class="section-title">全局参数</div>
+        <div class="param-row">
+          <label class="param-label">布局方向</label>
+          <el-select
+            v-model="localConfig.overallDirection"
+            size="small"
+            class="param-select"
+            @change="emitUpdate"
+          >
+            <el-option label="垂直" value="TB" />
+            <el-option label="水平" value="LR" />
+          </el-select>
+        </div>
+
+        <!-- 高级选项折叠区：布局引擎选择 -->
+        <div class="advanced-options-wrapper">
+          <div class="advanced-toggle" @click="toggleAdvancedOptions">
+            <span class="advanced-toggle-text">高级选项</span>
+            <span class="advanced-toggle-icon">{{ showAdvancedOptions ? '▾' : '▸' }}</span>
+          </div>
+          <div v-if="showAdvancedOptions" class="advanced-options-body">
+            <div class="param-row">
+              <label class="param-label">布局引擎</label>
+              <el-radio-group
+                v-model="localConfig.engine"
+                size="small"
+                @change="emitUpdate"
+              >
+                <el-radio value="elk">
+                  直线/ELK
+                  <span class="radio-desc">更好的屏幕适配能力</span>
+                </el-radio>
+                <el-radio value="dagre">
+                  曲线/Dagre
+                  <span class="radio-desc">稳定可靠，自动布局</span>
+                </el-radio>
+              </el-radio-group>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="containers-section">
         <div class="section-title">未分配节点</div>
         <div class="containers-pool">
@@ -12,7 +56,7 @@
             @dragstart="handleDragStart($event, container, idx)"
             @dragend="handleDragEnd"
           >
-            {{ container.name }}
+            {{ container.name }}{{ (container.code || container.elementCode) && (container.code || container.elementCode) !== container.name ? ' (' + (container.code || container.elementCode) + ')' : '' }}
           </div>
           <div v-if="unassignedContainers.length === 0" class="pool-empty">
             所有节点已分配到分组
@@ -142,6 +186,13 @@ const localConfig = ref({
   preserveOrder: true,
   overallDirection: 'TB'
 })
+
+// 高级选项折叠面板的展开状态
+const showAdvancedOptions = ref(false)
+
+function toggleAdvancedOptions() {
+  showAdvancedOptions.value = !showAdvancedOptions.value
+}
 
 const draggingContainer = ref(null)
 const draggingIndex = ref(-1)
@@ -322,10 +373,13 @@ const unassignedContainers = computed(() => {
       if (container.nodes) {
         container.nodes.forEach(node => {
           const nodeId = typeof node === 'string' ? node : (node.id || node.code)
-          const nodeName = typeof node === 'string' ? node : (node.name || node.id || node.code)
+          // [FIX 2026-08-04] BO nodes 是编码字符串, 名称在 container.nodeNames 里查找
+          const lookupName = typeof node === 'string' ? node : (node.name || node.id || node.code)
+          const nodeName = container.nodeNames?.[nodeId] || lookupName
           allNodes.push({
             id: nodeId,
             name: nodeName,
+            code: nodeId,
             containerName: container.name
           })
         })
@@ -629,11 +683,17 @@ function handleBusinessObjectAutoGroup() {
   // 构建节点编码到名称的映射
   const codeToNameMap = new Map()
   props.containers.forEach(container => {
+    // [FIX 2026-08-04] 优先用 container.nodeNames (从 diagramData.nodes 派生的 BO 编码→名称映射)
+    if (container.nodeNames) {
+      Object.entries(container.nodeNames).forEach(([code, name]) => {
+        if (code && name) codeToNameMap.set(code, name)
+      })
+    }
     if (container.nodes) {
       container.nodes.forEach(node => {
         const nodeCode = typeof node === 'string' ? node : (node.code || node.id)
         const nodeName = typeof node === 'string' ? node : (node.name || node.code || node.id)
-        if (nodeCode) {
+        if (nodeCode && !codeToNameMap.has(nodeCode)) {
           codeToNameMap.set(nodeCode, nodeName)
         }
       })
@@ -1530,6 +1590,72 @@ function handleAutoVirtualLayering(layerCount = 3) {
     outline: none;
     border-color: var(--color-primary);
   }
+}
+
+/* 全局参数区块：布局方向 + 高级选项 */
+.global-params-section {
+  padding: var(--spacing-md);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+}
+
+.param-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
+}
+
+.param-label {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  min-width: 64px;
+  flex-shrink: 0;
+}
+
+.param-select {
+  width: 160px;
+}
+
+/* 高级选项折叠区 */
+.advanced-options-wrapper {
+  margin-top: var(--spacing-md);
+  border-top: 1px dashed var(--color-border);
+  padding-top: var(--spacing-sm);
+}
+
+.advanced-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  cursor: pointer;
+  user-select: none;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+
+  &:hover {
+    color: var(--color-primary);
+  }
+}
+
+.advanced-toggle-text {
+  font-weight: 500;
+}
+
+.advanced-toggle-icon {
+  font-size: 12px;
+}
+
+.advanced-options-body {
+  padding: var(--spacing-sm) 0 0;
+}
+
+.radio-desc {
+  display: inline-block;
+  margin-left: var(--spacing-xs);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
 }
 
 .section-title {

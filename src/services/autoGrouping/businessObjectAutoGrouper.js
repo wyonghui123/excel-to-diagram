@@ -35,11 +35,18 @@ export function buildBusinessObjectGroups(containers = [], links = []) {
   // 构建节点编码到名称的映射
   const codeToNameMap = new Map()
   containers.forEach(container => {
+    // [FIX 2026-08-04] 优先用 container.nodeNames (从 diagramData.nodes 派生的 BO 编码→名称映射)
+    //   BO nodes 是字符串 (编码), 之前直接用 node (编码) 作为名称 → name=code → 显示只有编码
+    if (container.nodeNames) {
+      Object.entries(container.nodeNames).forEach(([code, name]) => {
+        if (code && name) codeToNameMap.set(code, name)
+      })
+    }
     if (container.nodes) {
       container.nodes.forEach(node => {
         const nodeCode = typeof node === 'string' ? node : (node.code || node.id)
         const nodeName = typeof node === 'string' ? node : (node.name || node.code || node.id)
-        if (nodeCode) {
+        if (nodeCode && !codeToNameMap.has(nodeCode)) {
           codeToNameMap.set(nodeCode, nodeName)
         }
       })

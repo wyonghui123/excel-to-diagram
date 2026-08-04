@@ -1064,6 +1064,36 @@ export default {
       }
     )
 
+    // [FIX 2026-08-04] 监听 layoutControlConfig 变化 (用户在布局设置面板调整方向/引擎/分组)
+    //   之前无此 watch, 用户切换布局方向或禁用分组后图表不重新渲染.
+    // [FIX 2026-08-04 v2] 颜色变更 (colorScheme/colorGroupBy/centerScopeHighlight) 会让
+    //   generateDiagram() → 新 diagramData → layoutControlConfig computed 重新求值 →
+    //   返回新对象. 但布局字段 (direction/engine/groups结构) 并未改变, 此时应由
+    //   diagramData watch 的 updateColorsOnly 增量路径处理, 不能走全量 renderMermaid.
+    //   方案: 只在布局相关字段实际变化时才触发 renderMermaid.
+    watch(
+      () => props.layoutControlConfig,
+      (newVal, oldVal) => {
+        if (!newVal || !oldVal || !props.diagramData || !mermaidContainer.value) return
+        // 方向或引擎变化 → 全量重渲染
+        if (newVal.overallDirection !== oldVal.overallDirection ||
+            newVal.layoutEngine !== oldVal.layoutEngine) {
+          renderMermaid()
+          return
+        }
+        // groups 结构变化 (enabled/visible/containers 迁移) → 全量重渲染
+        const sig = (cfg) => JSON.stringify((cfg?.groups || []).map(g => ({
+          e: g.elementCode || g.id,
+          en: g.enabled,
+          v: g.visible,
+          c: (g.containers || []).map(c => typeof c === 'string' ? c : (c.id || c.elementCode))
+        })))
+        if (sig(newVal) !== sig(oldVal)) {
+          renderMermaid()
+        }
+      }
+    )
+
     // 监听 zoneRowCount 变化
     watch(
       () => props.zoneRowCount,

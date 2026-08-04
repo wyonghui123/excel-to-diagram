@@ -105,23 +105,37 @@ describe('groupedLayout - 可见性 (visible)', () => {
 })
 
 describe('groupedLayout - 启用/禁用 enabled (Bug 2 回归)', () => {
-  it('group.enabled=false + 无 _disabledAncestorPath -> 不生成', () => {
+  it('group.enabled=false + 无内容 (无 children/containers/directNodes) -> 不生成', () => {
     const groups = [{
-      id: 'G1', title: '禁用组', enabled: false, containers: [containers[0]], children: []
+      id: 'G1', title: '禁用空组', enabled: false, containers: [], children: []
     }]
     const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
     expect(result.mermaidCode).not.toContain('subgraph G_G1')
   })
 
-  it('group.enabled=false + 有 _disabledAncestorPath -> 仍显示 (Bug 2 修复)', () => {
+  it('group.enabled=false + 有 containers -> 组自身 subgraph 不生成, 容器内容打平渲染', () => {
+    // [FIX 2026-08-04] disabled 分支职责: 打平子元素到当前层级.
+    //   旧 bug: hasGroupContent 对 disabled 恒 false → 提前返回 → 容器内容也消失.
+    //   修复后: 组自身 subgraph (G_G1[) 不生成, 但容器 subgraph (G_G1_C1) 生成并含节点.
+    const groups = [{
+      id: 'G1', title: '禁用组', enabled: false, containers: [containers[0]], children: []
+    }]
+    const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    // 组自身 subgraph 不生成 (精确匹配, 不误伤 G_G1_C1)
+    expect(result.mermaidCode).not.toContain('subgraph G_G1["')
+    // 容器内容仍渲染 (打平到当前层级)
+    expect(result.mermaidCode).toContain('N1')
+  })
+
+  it('group.enabled=false + 有 _disabledAncestorPath -> 容器内容仍显示', () => {
     const groups = [{
       id: 'G1', title: '被提升组', enabled: false,
       _disabledAncestorPath: ['parent-disabled-id'],
       containers: [containers[0]], children: []
     }]
     const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
-    // Bug 2 修复后: _disabledAncestorPath 非空 -> 仍显示
-    expect(result.mermaidCode).toContain('subgraph G_G1')
+    // Bug 2 修复后: _disabledAncestorPath 非空 -> 容器内容仍显示
+    expect(result.mermaidCode).toContain('N1')
   })
 
   it('group.enabled=true (默认) -> 正常显示', () => {
@@ -130,6 +144,28 @@ describe('groupedLayout - 启用/禁用 enabled (Bug 2 回归)', () => {
     }]
     const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
     expect(result.mermaidCode).toContain('subgraph G_G1')
+  })
+
+  it('group.enabled=false + 有 enabled children -> 子组仍生成 (Bug: 禁用供应链云后子领域消失)', () => {
+    // 场景: SM 图禁用父域 "供应链云", 子领域仍 enabled=true.
+    //   deriveLayoutGroups 输出: domain(enabled=false) → children: [subDomain(enabled=true, directNodes)]
+    //   期望: 父域 subgraph 不生成, 子域 subgraph 生成并包含节点.
+    const groups = [{
+      id: 'D1', title: '禁用父域', enabled: false,
+      containers: [], directNodes: undefined,
+      children: [{
+        id: 'S1', title: '子域', enabled: true,
+        directNodes: ['N1', 'N2'], containers: [], children: []
+      }]
+    }]
+    const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    // 父域 subgraph 不应生成 (disabled)
+    expect(result.mermaidCode).not.toContain('subgraph G_D1')
+    // 子域 subgraph 应该生成 (enabled, 被打平到顶层)
+    expect(result.mermaidCode).toContain('subgraph G_S1')
+    // 子域的节点应该生成
+    expect(result.mermaidCode).toContain('N1')
+    expect(result.mermaidCode).toContain('N2')
   })
 })
 
