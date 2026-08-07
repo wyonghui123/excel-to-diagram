@@ -383,6 +383,20 @@ async function tryApplyShortcut() {
     } catch (e) {
       console.warn('[shortcut] scope JSON 解析失败, 忽略 scope 参数:', e)
     }
+  } else {
+    // [NEW 2026-08-07] 无 scope 参数时自动全选所有业务对象
+    //   等待 scopeTreeRef 就绪 + tree 数据加载完成
+    console.log('[shortcut] 无 scope 参数, 尝试自动全选')
+    for (let attempt = 0; attempt < 30; attempt++) {
+      if (scopeTreeRef.value?.selectAll) break
+      await new Promise(resolve => setTimeout(resolve, 200))
+    }
+    if (scopeTreeRef.value?.selectAll) {
+      console.log('[shortcut] 调用 selectAll 全选所有业务对象')
+      scopeTreeRef.value.selectAll()
+    } else {
+      console.warn('[shortcut] 6s 内 scopeTreeRef 未就绪, 跳过全选')
+    }
   }
 
   // 等 scope 应用完成 + canShowChart 变 true

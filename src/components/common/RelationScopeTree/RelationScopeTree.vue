@@ -626,6 +626,11 @@ function loadTreeData() {
   objectScopeRef.value?.loadTreeData()
 }
 
+// [shortcut dev] 全选所有业务对象，用于 shortcut 模式自动全选
+function selectAll() {
+  objectScopeRef.value?.handleSelectAll()
+}
+
 async function refresh() {
   objectScopeRef.value?.loadTreeData({ silent: true })
   // [性能优化] 编辑/新增/删除后触发, force=true 跳过缓存强制重拉
@@ -723,6 +728,8 @@ defineExpose({
   clearAnnotationFilter,
   clearRelationFilter,
   loadTreeData,
+  // [shortcut dev] 全选所有业务对象
+  selectAll,
   refresh,
   loadRelationTypes,
   selectedAnnotationCategories,

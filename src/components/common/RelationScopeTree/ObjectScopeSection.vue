@@ -234,7 +234,7 @@ function handleToggleExpandAll() {
   isAllExpanded.value = !isAllExpanded.value
 }
 
-function handleSelectAll() {
+async function handleSelectAll() {
   if (USE_FILTERSOURCE) {
     const scope = collectAllScope(treeData.value)
     emit('scope-change', scope)
@@ -242,6 +242,15 @@ function handleSelectAll() {
   }
 
   if (!treeRef.value) return
+  // [shortcut dev] 等待 treeData 加载完成（最多 3s），避免 shortcut 模式在数据未加载时调用
+  for (let i = 0; i < 15; i++) {
+    if (treeData.value.length > 0) break
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
+  if (treeData.value.length === 0) {
+    console.warn('[handleSelectAll] treeData 为空, 跳过全选')
+    return
+  }
   const allKeys = collectAllKeys(treeData.value)
   treeRef.value.setCheckedKeys(allKeys)
   emitTypedScopeChange()
@@ -782,6 +791,8 @@ defineExpose({
   getCheckedBoIds,
   clear: handleClear,
   loadTreeData,
+  // [shortcut dev] 全选所有业务对象
+  handleSelectAll,
   // [TEST-ONLY] 暴露内部状态供 Playwright 测试诊断
   _test: {
     get treeData() { return treeData.value },
