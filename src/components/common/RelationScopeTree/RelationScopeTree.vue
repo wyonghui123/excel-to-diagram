@@ -627,8 +627,38 @@ function loadTreeData() {
 }
 
 // [shortcut dev] 全选所有业务对象，用于 shortcut 模式自动全选
-function selectAll() {
-  objectScopeRef.value?.handleSelectAll()
+async function selectAll() {
+  // [FIX 2026-08-07] 增加等待: objectScopeRef 可能还未挂载
+  // [FIX 2026-08-07] 后端 API 响应慢 (16s+), 增加等待到 100 次 × 200ms = 20s
+  for (let i = 0; i < 100; i++) {
+    if (objectScopeRef.value?.handleSelectAll) break
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
+  return objectScopeRef.value?.handleSelectAll()
+}
+
+// [shortcut dev] 按编码选择特定节点范围，用于 scopeCode 参数
+//   例如 selectByCode('SCP') 选择"供应链计划"子领域及其所有子孙
+async function selectByCode(code) {
+  // [FIX 2026-08-07] 增加等待: objectScopeRef 可能还未挂载
+  // [FIX 2026-08-07] 后端 API 响应慢 (16s+), 增加等待到 100 次 × 200ms = 20s
+  for (let i = 0; i < 100; i++) {
+    if (objectScopeRef.value?.selectByCode) break
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
+  return objectScopeRef.value?.selectByCode(code)
+}
+
+// [shortcut dev] 按多个编码选择多个节点范围，用于 scopeCodes 参数
+//   例如 selectByCodes(['SCP', 'SCM']) 选择多个子领域
+async function selectByCodes(codes) {
+  // [FIX 2026-08-07] 增加等待: objectScopeRef 可能还未挂载
+  // [FIX 2026-08-07] 后端 API 响应慢 (16s+), 增加等待到 100 次 × 200ms = 20s
+  for (let i = 0; i < 100; i++) {
+    if (objectScopeRef.value?.selectByCodes) break
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
+  return objectScopeRef.value?.selectByCodes(codes)
 }
 
 async function refresh() {
@@ -730,6 +760,10 @@ defineExpose({
   loadTreeData,
   // [shortcut dev] 全选所有业务对象
   selectAll,
+  // [shortcut dev] 按编码选择特定节点范围
+  selectByCode,
+  // [shortcut dev] 按多个编码选择多个节点范围
+  selectByCodes,
   refresh,
   loadRelationTypes,
   selectedAnnotationCategories,
@@ -738,7 +772,13 @@ defineExpose({
   relationCodesCount,
   filterCount,
   annotationCount,
-  relationCount
+  relationCount,
+  // [TEST-ONLY] 暴露内部状态供 debug 模式诊断
+  _test: {
+    get treeData() { return objectScopeRef.value?._test?.treeData || [] },
+    get loading() { return objectScopeRef.value?._test?.loading ?? false },
+    get checkedKeys() { return objectScopeRef.value?._test?.checkedKeys || [] }
+  }
 })
 </script>
 

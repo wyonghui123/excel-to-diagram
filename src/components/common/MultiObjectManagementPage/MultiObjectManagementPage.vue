@@ -334,13 +334,169 @@ function handleSidebarCollapse(collapsed) {
 //   设计目标: 让 AI/开发排查图表 bug 时 5 秒直达 EmbeddedChartView, 不必手动选产品/版本/勾选 scope 树/点图表按钮。
 //   用法: /system/archdata?shortcut=1&productCode=TTTTT000&versionCode=V11&scope=<base64JSON>
 //   scope JSON 格式 (可选): {"business_object":[boIds], "service_module":[smIds], "sub_domain":[sdIds], "domain":[dIds], "relation_codes":[...]}
+//   [NEW 2026-08-07] scopeCode 参数: 更简洁的编码选择, 如 &scopeCode=SCP 选择"供应链计划"子领域
 //   仅在 dev 环境启用 (import.meta.env.DEV); 生产构建短路掉, 不影响正式流程。
 //   注意: productCode/versionCode 由 useVersionContext.restoreContext 处理 (在 page 创建之前);
 //         这里只负责 scope 自动勾选 + toggle chart view。
+
+// [FIX 2026-08-07] 剥离树节点 ID 前缀 (d_, s_, sm_, bo_), 返回纯数字 ID
+//   树节点 ID 格式: d_2200, s_68, sm_135, bo_42
+//   注意: sub_domain 节点 ID 前缀是 s_ (不是 sd_), 见 ObjectScopeSection.vue:736
+//   后端 API 需要纯数字 ID
+function stripPrefix(id) {
+  if (typeof id === 'string') {
+    const match = id.match(/^(?:d_|s_|sm_|bo_)(\d+)$/)
+    if (match) return parseInt(match[1], 10)
+  }
+  return id
+}
+
+// [NEW 2026-08-07] 根据节点编码选择范围, 返回 scopePayload 供 page.handleScopeChange 使用
+//   等待 scopeTreeRef 就绪后调用 selectByCode, 再等待 hasScopeSelection 同步
+//   [FIX 2026-08-07] 改用 page.scopeIds 构建 payload, 替代 getCheckedBoIds
+//   因为 selectByCode 选中的是 service_module 叶子节点, getCheckedBoIds 返回空
+async function applyScopeCode(code) {
+  if (!code) return null
+  // [FIX 2026-08-07] 增加等待: 先等 scopeTreeRef 挂载, 再等 treeData 加载
+  //   避免跨组件异步等待链过长导致 HMR 未完全生效
+  //   [FIX 2026-08-07] 后端 API 响应慢 (16s+), 增加等待到 100 次 × 200ms = 20s
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if (scopeTreeRef.value?._test?.treeData?.length) break
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
+  if (!scopeTreeRef.value?._test?.treeData?.length) {
+    console.warn('[shortcut] 20s 内 scopeTreeRef treeData 未就绪')
+    return null
+  }
+  console.log('[shortcut] treeData 已就绪, 共', scopeTreeRef.value._test.treeData.length, '个根节点')
+  const ok = await scopeTreeRef.value.selectByCode(code)
+  if (!ok) return null
+  // 等待 scope 同步 (handleScopeChange 通过事件链更新 page.scopeIds)
+  await new Promise(resolve => setTimeout(resolve, 800))
+  // 从 page.scopeIds 构建 payload, 兼容 service_module 选中的场景
+  // [FIX 2026-08-07] objType 首字母大写, 生成 selectedDomainIds 而非 selecteddomainIds
+  const payload = {}
+  for (const objType of ['domain', 'sub_domain', 'service_module', 'business_object']) {
+    const scope = page.scopeIds?.[objType]
+    if (scope?.selected?.length) {
+      const pascalType = objType.charAt(0).toUpperCase() + objType.slice(1).replace(/_(\w)/g, (_, c) => c.toUpperCase())
+      const key = 'selected' + pascalType + 'Ids'
+      // [FIX 2026-08-07] 剥离树节点 ID 前缀 (d_/sd_/sm_/bo_), 转为纯数字 ID
+      payload[key] = scope.selected.map(stripPrefix)
+    }
+  }
+  if (Object.keys(payload).length === 0) {
+    console.warn('[shortcut] scopeCode 应用后 scopeIds 为空, 尝试全选兜底')
+    return null
+  }
+  console.log('[shortcut] applyScopeCode 返回 payload:', payload)
+  return payload
+}
+
+// [NEW 2026-08-07] 根据多个编码选择多个节点范围, 返回 scopePayload
+//   用于 scopeCode 参数逗号分隔, 例如 scopeCode=SCP,SCM 选择多个子领域
+//   合并所有编码的选中范围后统一 handleScopeChange
+async function applyScopeCodes(codes) {
+  if (!codes?.length) return null
+  // [FIX 2026-08-07] 增加等待: 先等 scopeTreeRef 挂载, 再等 treeData 加载
+  //   [FIX 2026-08-07] 后端 API 响应慢 (16s+), 增加等待到 100 次 × 200ms = 20s
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if (scopeTreeRef.value?._test?.treeData?.length) break
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
+  if (!scopeTreeRef.value?._test?.treeData?.length) {
+    console.warn('[shortcut] 20s 内 scopeTreeRef treeData 未就绪')
+    return null
+  }
+  console.log('[shortcut] treeData 已就绪, 共', scopeTreeRef.value._test.treeData.length, '个根节点')
+  const ok = await scopeTreeRef.value.selectByCodes(codes)
+  if (!ok) return null
+  // 等待 scope 同步
+  await new Promise(resolve => setTimeout(resolve, 800))
+  // 从 page.scopeIds 构建 payload
+  // [FIX 2026-08-07] objType 首字母大写, 生成 selectedDomainIds 而非 selecteddomainIds
+  const payload = {}
+  for (const objType of ['domain', 'sub_domain', 'service_module', 'business_object']) {
+    const scope = page.scopeIds?.[objType]
+    if (scope?.selected?.length) {
+      const pascalType = objType.charAt(0).toUpperCase() + objType.slice(1).replace(/_(\w)/g, (_, c) => c.toUpperCase())
+      const key = 'selected' + pascalType + 'Ids'
+      // [FIX 2026-08-07] 剥离树节点 ID 前缀 (d_/sd_/sm_/bo_), 转为纯数字 ID
+      payload[key] = scope.selected.map(stripPrefix)
+    }
+  }
+  if (Object.keys(payload).length === 0) {
+    console.warn('[shortcut] applyScopeCodes 后 scopeIds 为空')
+    return null
+  }
+  console.log('[shortcut] applyScopeCodes 返回 payload:', payload)
+  return payload
+}
+
+// [NEW 2026-08-07] debug 模式: 在控制台打印可用编码列表
+//   用法: &debug=scopeCodes 在页面加载后打印所有树节点的编码
+//   与 shortcut 参数独立, 可在任意视图下使用
+async function debugScopeCodes() {
+  // 等待 treeData 加载
+  for (let attempt = 0; attempt < 30; attempt++) {
+    if (scopeTreeRef.value?._test?.treeData?.length) break
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
+  const treeData = scopeTreeRef.value?._test?.treeData || []
+  if (!treeData.length) {
+    console.warn('[debug] 树数据未加载')
+    return
+  }
+  // 递归遍历树, 收集所有节点的 code/name/type
+  const codes = []
+  function walk(nodes, depth) {
+    for (const n of nodes) {
+      if (!n) continue
+      codes.push({
+        code: n.code || '-',
+        name: n.name || '-',
+        type: n.type || '-',
+        depth,
+        childCount: n.children?.length || 0
+      })
+      if (n.children?.length) walk(n.children, depth + 1)
+    }
+  }
+  walk(treeData, 0)
+  console.log('===== 可用 scopeCode 列表 =====')
+  console.table(codes.map(c => ({
+    code: c.code,
+    name: c.name,
+    type: c.type,
+    depth: c.depth,
+    '子节点数': c.childCount
+  })))
+  console.log('===============================')
+  console.log('使用示例:')
+  const subDomainCodes = codes.filter(c => c.type === 'sub_domain' || c.depth === 1)
+  subDomainCodes.forEach(c => {
+    if (c.code !== '-') {
+      console.log(`  &scopeCode=${c.code}  →  ${c.name} (${c.type})`)
+    }
+  })
+  console.log('多编码示例:')
+  const multiExample = subDomainCodes.slice(0, 2).map(c => c.code).filter(Boolean).join(',')
+  if (multiExample) {
+    console.log(`  &scopeCode=${multiExample}  →  同时选择多个子领域`)
+  }
+}
+
 async function tryApplyShortcut() {
   if (!import.meta.env.DEV) return
   const params = new URLSearchParams(window.location.search)
   if (params.get('shortcut') !== '1') return
+  // [FIX 2026-08-07] 防止 HMR 热更新导致组件重挂载后重复执行 shortcut
+  //   使用全局变量而非组件级 ref, 因为 HMR 会重置组件内 ref 为初始值
+  if (window.__SHORTCUT_APPLIED__) {
+    console.log('[shortcut] 已执行过, 跳过 (全局标记)')
+    return
+  }
+  window.__SHORTCUT_APPLIED__ = true
   // [FIX 2026-08-01] 鸡生蛋修复: 之前只在 onMounted+600ms 后调一次, 若那时
   //   versionContext 还未加载完 (canShowChart=false), tryApplyShortcut 直接 return
   //   → scope 永不应用 → 永久停留在 list 视图.
@@ -352,7 +508,8 @@ async function tryApplyShortcut() {
   //     (见 useVersionContext.js [FIX 2026-08-01]), 这里只负责 scope + toggle.
   //   [FIX 2026-08-01] page.versionContext 通过 reactive() 包装, 内部 refs 已 auto-unwrap,
   //     所以 selectedVersionId 直接是 number 不是 Ref (无需 .value).
-  for (let attempt = 0; attempt < 30; attempt++) {
+  //   [FIX 2026-08-07] 后端 API 响应慢 (16s+), 增加等待时间到 75 次 × 200ms = 15s
+  for (let attempt = 0; attempt < 75; attempt++) {
     const vid = page.versionContext?.selectedVersionId
     if (vid) break
     await new Promise(resolve => setTimeout(resolve, 200))
@@ -360,13 +517,16 @@ async function tryApplyShortcut() {
   const vid = page.versionContext?.selectedVersionId
   console.log('[shortcut] tryApplyShortcut entered, versionContext.selectedVersionId=', vid)
   if (!vid) {
-    console.warn('[shortcut] versionContext 未加载 (6s 内无 selectedVersionId), productCode/versionCode 可能错误')
+    console.warn('[shortcut] versionContext 未加载 (15s 内无 selectedVersionId), productCode/versionCode 可能错误或后端响应慢')
     return
   }
 
   // scope 参数: base64(JSON), 兼容 ?scope=eyJidXNpbmVzc19...
+  // [NEW 2026-08-07] scopeCode 参数: 按编码选择节点及其所有子孙, 如 ?scopeCode=SCP 选择"供应链计划"
+  //   优先级: scope > scopeCode > 无参数(全选)
   // [FIX 2026-08-01] 不再以 canShowChart 为前置: scope 应用后才会有 hasScopeSelection=true
   const scopeRaw = params.get('scope')
+  const scopeCode = params.get('scopeCode')
   if (scopeRaw) {
     try {
       const scopeJson = JSON.parse(atob(scopeRaw))
@@ -382,6 +542,24 @@ async function tryApplyShortcut() {
       page.handleScopeChange(scopePayload)
     } catch (e) {
       console.warn('[shortcut] scope JSON 解析失败, 忽略 scope 参数:', e)
+    }
+  } else if (scopeCode) {
+    // [NEW 2026-08-07] scopeCode 参数: 按编码选择特定节点范围
+    //   用法: &scopeCode=SCP 选择"供应链计划"子领域的所有业务对象
+    //   多编码: &scopeCode=SCP,SCM 选择多个子领域 (逗号分隔)
+    //   无需手动构造 base64 JSON, 适合快速排查验证
+    const codes = scopeCode.split(',').map(c => c.trim()).filter(Boolean)
+    console.log('[shortcut] 使用 scopeCode 参数:', scopeCode, '解析为', codes.length, '个编码')
+    let scopePayload = null
+    if (codes.length === 1) {
+      scopePayload = await applyScopeCode(codes[0])
+    } else {
+      scopePayload = await applyScopeCodes(codes)
+    }
+    if (scopePayload) {
+      page.handleScopeChange(scopePayload)
+    } else {
+      console.warn('[shortcut] scopeCode 应用失败, 尝试全选兜底')
     }
   } else {
     // [NEW 2026-08-07] 无 scope 参数时自动全选所有业务对象
@@ -459,6 +637,16 @@ onMounted(() => {
   setTimeout(() => {
     tryApplyShortcut().catch(e => console.warn('[shortcut] 应用失败:', e))
   }, 600)
+
+  // [NEW 2026-08-07] debug 模式: 独立于 shortcut, 在控制台打印可用编码列表
+  //   用法: /system/archdata?debug=scopeCodes&productCode=TTTTT000&versionCode=V11
+  //   无需 shortcut=1, 适合在手动选择产品版本后查看可用编码
+  const debugParam = route?.query?.debug || new URLSearchParams(window.location.search).get('debug')
+  if (debugParam === 'scopeCodes') {
+    setTimeout(() => {
+      debugScopeCodes().catch(e => console.warn('[debug] 失败:', e))
+    }, 1500)
+  }
 })
 
 // [FR-005] SAP Fiori iAppState 模式：路由切回时保留状态，不自动刷新

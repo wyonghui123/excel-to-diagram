@@ -430,11 +430,20 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
    *   关系过滤: scope.relationCodes/categoryTypes/filterRelationCodes → scopeIds.relationExtra
    */
   function handleScopeChange(scope) {
+    // [FIX 2026-08-07] 添加短字段名映射, 兼容 treeNodesToScope 返回的 { boIds, domainIds, ... } 格式
+    //   RelationScopeTree 的 scope-change 事件使用短字段名, 而 URL scope 参数使用 selected*Ids 格式
+    const typeToShortField = {
+      domain: 'domainIds',
+      sub_domain: 'subDomainIds',
+      service_module: 'serviceModuleIds',
+      business_object: 'boIds'
+    }
     objectTypes.forEach(type => {
       if (hierarchyService.isHierarchyType(levels.value, type)) {
         const selectedKey = `selected${_pascalCase(type)}Ids`
         const effectiveKey = `effective${_pascalCase(type)}Ids`
-        scopeIds[type].selected = scope[selectedKey] || []
+        const shortKey = typeToShortField[type]
+        scopeIds[type].selected = scope[selectedKey] || scope[shortKey] || []
         scopeIds[type].effective = scope[effectiveKey] || []
       }
     })

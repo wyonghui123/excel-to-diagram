@@ -1303,44 +1303,53 @@ export default {
 
         // [FIX 2026-08-07] 精确匹配 class 名（split 避免 nodes/cluster-label 等子串误匹配）
         const classList = cls.trim().split(/\s+/)
-        const isCluster = classList.includes('cluster')
+        const isCluster = classList.includes('cluster') || classList.includes('subgraph')
         const isNode = classList.includes('node')
         if (!isCluster && !isNode) {
-          console.log('[CTX] identifyGroupFromSvg: not a cluster or node, continuing up')
+          console.log('[CTX] identifyGroupFromSvg: not a cluster/subgraph or node, continuing up')
           el = el.parentElement
           continue
         }
 
-        // 提取分组 ID: cluster-xxx → xxx
-        let groupId = ''
-        if (id.startsWith('cluster-')) {
-          groupId = id.slice(8)
-        } else if (id.startsWith('flowchart-')) {
-          groupId = id.slice(10)
-        } else if (id.startsWith('node-')) {
-          groupId = id.slice(5)
+        // [FIX 2026-08-07 v2] 优先使用 data-container-code 属性获取容器编码
+        //   SVG 渲染后 useSvgProcessor 会在 g.cluster 上设置 data-container-code="SCM"，
+        //   避免从 ID "G_D_SCM" 解析失败的问题（G_D_/G_SD_/G_SM_ 前缀未完整剥离）。
+        let elementCode = el.getAttribute('data-container-code') || ''
+
+        if (!elementCode) {
+          // 提取分组 ID: cluster-xxx → xxx
+          let groupId = ''
+          if (id.startsWith('cluster-')) {
+            groupId = id.slice(8)
+          } else if (id.startsWith('flowchart-')) {
+            groupId = id.slice(10)
+          } else if (id.startsWith('node-')) {
+            groupId = id.slice(5)
+          } else {
+            groupId = id
+          }
+          if (!groupId) {
+            // cluster-label 等无 ID 的子元素，继续向上找父 cluster
+            console.log('[CTX] identifyGroupFromSvg: empty groupId, continuing up to parent')
+            el = el.parentElement
+            continue
+          }
+          console.log('[CTX] identifyGroupFromSvg: extracted groupId=' + groupId)
+
+          // [FIX 2026-08-07] 处理 Mermaid 特殊 ID 格式，提取真实的 elementCode
+          //   COLLAPSE_SD_MM-28 → SD_MM, G_SCM → SCM
+          elementCode = groupId
+          if (elementCode.startsWith('COLLAPSE_')) elementCode = elementCode.slice(9)
+          if (elementCode.startsWith('G_')) elementCode = elementCode.slice(2)
+          const dashIdx = elementCode.lastIndexOf('-')
+          if (dashIdx > 0 && /^\d+$/.test(elementCode.slice(dashIdx + 1))) {
+            elementCode = elementCode.slice(0, dashIdx)
+          }
+          if (elementCode !== groupId) {
+            console.log('[CTX] identifyGroupFromSvg: normalized elementCode=' + elementCode)
+          }
         } else {
-          groupId = id
-        }
-        if (!groupId) {
-          // cluster-label 等无 ID 的子元素，继续向上找父 cluster
-          console.log('[CTX] identifyGroupFromSvg: empty groupId, continuing up to parent')
-          el = el.parentElement
-          continue
-        }
-        console.log('[CTX] identifyGroupFromSvg: extracted groupId=' + groupId)
-
-        // [FIX 2026-08-07] 处理 Mermaid 特殊 ID 格式，提取真实的 elementCode
-        //   COLLAPSE_SD_MM-28 → SD_MM, G_SCM → SCM
-        let elementCode = groupId
-        if (elementCode.startsWith('COLLAPSE_')) elementCode = elementCode.slice(9)
-        if (elementCode.startsWith('G_')) elementCode = elementCode.slice(2)
-        const dashIdx = elementCode.lastIndexOf('-')
-        if (dashIdx > 0 && /^\d+$/.test(elementCode.slice(dashIdx + 1))) {
-          elementCode = elementCode.slice(0, dashIdx)
-        }
-        if (elementCode !== groupId) {
-          console.log('[CTX] identifyGroupFromSvg: normalized elementCode=' + elementCode)
+          console.log('[CTX] identifyGroupFromSvg: using data-container-code=' + elementCode)
         }
 
         // 在 configStore.layoutControlConfig.groups 中查找匹配的分组
