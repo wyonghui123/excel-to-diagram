@@ -192,7 +192,11 @@ export function extractGroupStates(groups) {
       if (key) {
         states.set(String(key), {
           enabled: item.enabled !== undefined ? item.enabled : true,
-          visible: item.visible !== undefined ? item.visible : true
+          visible: item.visible !== undefined ? item.visible : true,
+          // [FOLD 2026-08-05] 保留折叠状态, 否则折叠/展开在跨管道合并时丢失 (FR-002 断点).
+          //   applyViewTemplate / setSubtreeCollapsed 只改 chartConfig.layoutControl.groups,
+          //   渲染用的 merged groups 由 extract/apply 状态链路承载, 必须含 collapsed.
+          collapsed: item.collapsed !== undefined ? item.collapsed : false
         })
       }
       if (item.children && item.children.length > 0) traverse(item.children)
@@ -226,6 +230,8 @@ export function applyGroupStates(groups, states) {
         const state = states.get(key)
         item.enabled = state.enabled
         item.visible = state.visible
+        // [FOLD 2026-08-05] 与 extractGroupStates 对应, 回填折叠状态
+        item.collapsed = state.collapsed
         applied++
       }
       if (item.children && item.children.length > 0) traverse(item.children)
@@ -279,6 +285,7 @@ export function buildServiceModuleGroupsFromDomainProducts(domainProducts) {
       direction: 'LR',
       visible: true,
       enabled: true,
+      collapsed: false, // [FOLD 2026-08-05] 折叠语义: 折叠为单节点
       style: {
         fill: '#f5f5f5',
         stroke: '#333333',
@@ -304,6 +311,7 @@ export function buildServiceModuleGroupsFromDomainProducts(domainProducts) {
         direction: 'TB',
         visible: true,
         enabled: true,
+        collapsed: false, // [FOLD 2026-08-05] 折叠语义: 折叠为单节点
         style: {
           fill: '#ffffff',
           stroke: '#666666',
@@ -336,6 +344,7 @@ export function buildServiceModuleGroupsFromDomainProducts(domainProducts) {
           direction: 'TB',
           visible: true,
           enabled: true,
+          collapsed: false, // [FOLD 2026-08-05] 折叠语义: 折叠为单节点
           style: {
             fill: '#ffffff',
             stroke: '#666666',

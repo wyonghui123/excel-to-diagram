@@ -14,11 +14,12 @@ export function createDefaultChartConfig() {
     centerScopeHighlight: true,
     annotationCategoryFilter: [],
     layoutEngine: 'elk',
-    direction: 'LR',
+    // [DIR 2026-08-07] 布局方向默认垂直 (TB), 与 store/useLayoutControl 默认一致
+    direction: 'TB',
     layoutControl: {
       enabled: true,
       layoutType: 'default',
-      overallDirection: 'LR',
+      overallDirection: 'TB',
       engine: 'elk',
       preserveOrder: true,
       groups: []

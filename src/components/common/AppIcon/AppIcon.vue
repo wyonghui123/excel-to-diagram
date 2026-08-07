@@ -172,6 +172,15 @@
       <path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z" stroke="currentColor" stroke-width="1.5"/>
       <path d="M3 13l10-10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
     </template>
+    <!-- [VIS 2026-08-07] 可见/隐藏图标 (与 eye/eye-off 视觉近似, 语义独立, 供"可见/隐藏"开关使用) -->
+    <template v-else-if="name === 'view'">
+      <path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z" stroke="currentColor" stroke-width="1.5"/>
+      <circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.5"/>
+    </template>
+    <template v-else-if="name === 'hide'">
+      <path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z" stroke="currentColor" stroke-width="1.5"/>
+      <path d="M3 13l10-10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+    </template>
     <template v-else-if="name === 'lock'">
       <rect x="4" y="7" width="8" height="6" rx="1" stroke="currentColor" stroke-width="1.5"/>
       <path d="M6 7V5a2 2 0 114 0v2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
@@ -279,7 +288,7 @@ export default {
         // 语义图标
         'important', 'warning', 'info', 'tip',
         // 功能图标
-        'search', 'user', 'link', 'clipboard', 'eye', 'eye-off', 'lock', 'key',
+        'search', 'user', 'link', 'clipboard', 'eye', 'eye-off', 'view', 'hide', 'lock', 'key',
         'mobile', 'robot', 'chart-bar', 'edit', 'trash', 'help', 'filter',
         'mail', 'file', 'chat',
         // 新增图标

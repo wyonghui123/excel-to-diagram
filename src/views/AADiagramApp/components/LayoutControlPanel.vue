@@ -6,54 +6,65 @@
            本面板仅保留未分配节点 + 分组列表。 -->
 
       <div class="lcp-toolbar">
-        <el-input v-model="searchText" class="lcp-search-input" placeholder="搜索分组" clearable size="small" />
-        <button class="lcp-add-group-btn" title="新增顶层分组" @click="handleAddGroup">+ 新增</button>
-      </div>
-
-      <div class="containers-section">
-        <div class="section-title">未分配节点</div>
-        <div class="containers-pool">
-          <div
-            v-for="(container, idx) in unassignedContainers"
-            :key="container.id"
-            class="container-item"
-            draggable="true"
-            @dragstart="handleDragStart($event, container, idx)"
-            @dragend="handleDragEnd"
-          >
-            {{ container.name }}{{ (container.code || container.elementCode) && (container.code || container.elementCode) !== container.name ? ' (' + (container.code || container.elementCode) + ')' : '' }}
-          </div>
-          <div v-if="unassignedContainers.length === 0" class="pool-empty">
-            所有节点已分配到分组
-          </div>
+        <!-- [LEVEL 2026-08-06] 展开层级选择: 替代原"全部展开/收起"切换, 按层级展开容器树 -->
+        <el-dropdown trigger="click" @command="handleExpandToLevel">
+          <AppButton variant="text" size="sm">
+            <el-icon :size="14"><Expand /></el-icon>
+            <span>展开层级</span>
+            <el-icon :size="12" class="lcp-dropdown-caret"><ArrowDown /></el-icon>
+          </AppButton>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item
+                v-for="lvl in EXPAND_LEVELS" :key="lvl.key" :command="lvl.key"
+                :class="{ 'is-active': currentExpandLevel === lvl.key }"
+              >{{ lvl.label }}</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+        <AppButton variant="text" size="sm" @click="handleAddGroup">
+          <el-icon :size="14"><Plus /></el-icon>
+          <span>新增</span>
+        </AppButton>
+        <!-- [ADV 2026-08-07] 高级设置开关: 默认关. 打开后才展示业务对象叶子节点 + 各行的"启用/禁用"按钮
+             (默认隐藏禁用按钮, 避免视觉噪音; 高级设置打开时可精细控制) -->
+        <div class="lcp-bo-switch" :title="showAdvancedSettings ? '收起高级设置（隐藏业务对象叶子与启用/禁用按钮）' : '展开高级设置（显示业务对象叶子与启用/禁用按钮）'">
+          <el-switch v-model="showAdvancedSettings" size="small" />
+          <span class="lcp-bo-label" @click="showAdvancedSettings = !showAdvancedSettings">高级设置</span>
         </div>
       </div>
 
-      <div class="groups-section">
-        <div class="section-title">
-          分组列表
-        </div>
-        <div class="groups-container">
-          <div v-if="filteredGroups.length === 0" class="empty-hint">
-            暂无匹配分组
-          </div>
-          <LayoutGroupNode
-            v-for="(group, idx) in filteredGroups"
-            :key="group.id"
-            :group="group"
-            :depth="0"
-            :containers="containers"
-            :index="idx"
-            :color-mapping="colorMapping"
-            @update="handleGroupUpdate"
-            @delete="handleGroupDelete"
-            @add-child="handleAddChild"
-            @assign-container="handleAssignContainer"
-            @remove-container="handleRemoveContainer"
-            @reorder-groups="handleReorderGroups"
-          />
-        </div>
+      <!-- [中心范围 2026-08-05] 中心范围颜色不再在顶部重复提供选择器：
+           由分组列表中的中心分组色点直接控制 store.centerScopeColor（全局联动），
+           避免重复入口。中心分组通过标题文字样式（bold + 中心色）区分。 -->
 
+      <div class="groups-container">
+        <div v-if="groupedCount === 0" class="empty-hint">
+          暂无分组
+        </div>
+        <LayoutGroupNode
+          v-for="(group, idx) in localConfig.groups"
+          :key="group.id"
+          :group="group"
+          :depth="0"
+          :containers="containers"
+          :index="idx"
+          :color-mapping="colorMapping"
+          :show-business-objects="showAdvancedSettings"
+          :show-advanced-settings="showAdvancedSettings"
+          @update="handleGroupUpdate"
+          @delete="handleGroupDelete"
+          @add-child="handleAddChild"
+          @assign-container="handleAssignContainer"
+          @remove-container="handleRemoveContainer"
+          @reorder-groups="handleReorderGroups"
+          @move-group="handleMoveGroup"
+          @reorder-containers="handleReorderContainers"
+          @update-container="handleContainerUpdate"
+          @request-chart-focus="handleChartFocusRequest"
+          @subtree-action="handleSubtreeAction"
+          @set-visible-recursive="handleSetVisibleRecursive"
+        />
       </div>
     </div>
   </div>
@@ -62,8 +73,28 @@
 <script setup>
 import { ref, watch, computed, onMounted } from 'vue'
 import LayoutGroupNode from './LayoutGroupNode.vue'
+import { Expand, ArrowDown, Plus } from '@element-plus/icons-vue'
+import { AppButton } from '@/components/common/AppButton'
 import { useDiagramConfigStore } from '@/stores/diagramConfigStore'
 import { createGroupId, GroupType } from '@/services/groupModel/types.js'
+import { setSubtreeEnabled, collapseToNode, showDescendantsOnly } from '@/composables/useViewTemplates'
+// [LEVEL 2026-08-07] 展开层级共享工具: 与 ChartMiniToolbar 共用选项/层级计算/展开逻辑,
+//   store.expandLevel 共享当前层级, 保证工具栏与图表设置抽屉高亮一致.
+import { EXPAND_LEVELS, expandGroupsToLevel, applyDefaultExpandByScope } from '@/services/expandLevel.js'
+
+// [LEVEL 2026-08-07] 当前展开层级改为读 store.expandLevel (来自共享 expandLevel.js),
+//   与工具栏(ChartMiniToolbar)操作双向同步.
+const currentExpandLevel = computed(() => diagramConfigStore.expandLevel)
+
+// [LEVEL 2026-08-07] 展开到指定层级的"钻取"语义(逻辑统一在 services/expandLevel.js):
+//   目标层级及更深层级折叠为聚合节点 (COLLAPSE_<id>), 不再显示更深层内容.
+function handleExpandToLevel(key) {
+  diagramConfigStore.setExpandLevel(key)
+  if (localConfig.value.groups) {
+    expandGroupsToLevel(localConfig.value.groups, key)
+  }
+  emitUpdate()
+}
 
 const props = defineProps({
   containers: {
@@ -109,6 +140,12 @@ const emit = defineEmits(['update:modelValue', 'reset-chart-type-changed'])
 
 const diagramConfigStore = useDiagramConfigStore()
 
+// [FOCUS 2026-08-05] 布局面板节点单击 → 请求图表高亮居中 (经 configStore 单向联动到图表组件)
+function handleChartFocusRequest({ type, id }) {
+  if (!type || !id) return
+  diagramConfigStore.requestChartFocus({ type, id })
+}
+
 watch(() => diagramConfigStore.colorGroupBy, (newVal, oldVal) => {
   if (newVal !== oldVal && props.domainProducts && props.domainProducts.length > 0) {
     handleAutoGroupByDomain()
@@ -132,7 +169,8 @@ defineExpose({
   handleAutoVirtualLayering,
   handleOverallSort,
   handleInLayerSort,
-  optimizeGroupEnabledState
+  optimizeGroupEnabledState,
+  handleExpandToLevel
 })
 
 const localConfig = ref({
@@ -142,6 +180,10 @@ const localConfig = ref({
   preserveOrder: true,
   overallDirection: 'TB'
 })
+
+// [ADV 2026-08-07] 高级设置开关: 默认关. 控制业务对象叶子节点显示 + 各行的"启用/禁用"按钮.
+//   原"业务对象"开关改为"高级设置", 打开时才展示禁用按钮 (默认隐藏, 避免噪音).
+const showAdvancedSettings = ref(false)
 
 // [MOVE 2026-08-04] showAdvancedOptions / toggleAdvancedOptions 已移到 ChartMiniToolbar
 //   (高级选项 popover 由 toolbar 管理, 本面板不再持有展开状态)
@@ -155,21 +197,8 @@ const debugGroups = computed(() => {
   return localConfig.value.groups
 })
 
-// [TREE 2026-08-04] 搜索过滤：按分组标题（含子分组）递归匹配
-const searchText = ref('')
-
-function matchesSearch(group, keyword) {
-  if (!keyword) return true
-  const kw = keyword.toLowerCase()
-  if (group.title && group.title.toLowerCase().includes(kw)) return true
-  if (group.children && group.children.some(c => matchesSearch(c, kw))) return true
-  return false
-}
-
-const filteredGroups = computed(() => {
-  if (!searchText.value) return localConfig.value.groups
-  return localConfig.value.groups.filter(g => matchesSearch(g, searchText.value))
-})
+// [TREE 2026-08-04] 分组总数（用于空态判断，避免与未分配池混淆）
+const groupedCount = computed(() => localConfig.value.groups.length)
 
 // 确保 centerScope 能够正确响应 props 变化
 const resolvedCenterScope = computed(() => {
@@ -177,13 +206,37 @@ const resolvedCenterScope = computed(() => {
 })
 
 watch(() => diagramConfigStore.centerScope, (newVal) => {
+  // [SCOPE 2026-08-07] 对象范围变化后重新应用"按范围"的默认展开层级。
+  //   面板 auto-group 仅在挂载时执行一次, 若当时 centerScope 尚未选择（为空）则不会折叠;
+  //   用户后续选择/切换对象范围时若不重新应用, 图表会一直保持全展开(业务对象层级)。
+  //   与 generateDiagram 内对 store 配置的兜底修改配合, 保证初始展示与面板/图表一致。
+  if (newVal && newVal.length > 0 && localConfig.value.groups && localConfig.value.groups.length > 0) {
+    applyDefaultExpandByScopeToGroups()
+    emitUpdate()
+  }
 })
 
-watch(() => props.modelValue, (newVal, oldVal) => {
-  if (newVal) {
-    const newValStr = JSON.stringify(newVal)
-    const oldValStr = oldVal ? JSON.stringify(oldVal) : ''
-    if (newValStr !== oldValStr) {
+// [LEVEL 2026-08-07] 展开层级变化（无论来自本面板下拉 handleExpandToLevel，还是
+//   GlobalToolbar/ChartMiniToolbar 经 store.setExpandLevel）都应用到配置树：
+//   否则工具栏改变层级时，配置树（LayoutGroupNode 由 collapsed 驱动）不随之展开/收起。
+//   注: handleExpandToLevel 已直接就地应用，此 watcher 幂等（expandGroupsToLevel 仅当
+//   collapsed 需变化时才写），用于兜底外部入口，保证树与 store.expandLevel 始终一致。
+watch(() => diagramConfigStore.expandLevel, (key) => {
+  if (key && localConfig.value.groups && localConfig.value.groups.length > 0) {
+    expandGroupsToLevel(localConfig.value.groups, key)
+    emitUpdate()
+  }
+})
+
+// [FIX 2026-08-07] 缓存 groups JSON 用于检测深层变异（Vue 3 deep watcher 对 in-place mutation
+//   不产生深拷贝，newVal === oldVal 是同一引用，JSON.stringify 比较永远相等）。
+//   改用 groups JSON 字符串缓存，仅当 groups 内容实际变化时更新 localConfig。
+let _localGroupsJson = ''
+watch(() => props.modelValue, (newVal) => {
+  if (newVal && Array.isArray(newVal.groups)) {
+    const groupsJson = JSON.stringify(newVal.groups)
+    if (groupsJson !== _localGroupsJson) {
+      _localGroupsJson = groupsJson
       localConfig.value = JSON.parse(JSON.stringify(newVal))
     }
   }
@@ -370,6 +423,7 @@ function getDefaultGroup(title, parentId) {
     direction: 'TB',
     visible: true,
     enabled: true,
+    collapsed: false, // [FOLD 2026-08-05] 折叠语义: 折叠为单节点
     style: {
       fill: '#ffffff',
       stroke: '#666666',
@@ -448,6 +502,40 @@ function handleGroupUpdate({ id, updates }) {
   emitUpdate()
 }
 
+// [VIS 2026-08-07] 可见/隐藏级联: 递归设置分组自身 + 所有子孙 (children + containers) 的 visible
+//   visible=false 时整棵子树在渲染中不显示 (groupRenderer if(!layout.visible) return ''),
+//   面板树同步子孙状态, 与图表渲染一致。
+function setVisibleRecursive(group, visible) {
+  group.visible = visible
+  if (Array.isArray(group.children)) {
+    group.children.forEach(child => setVisibleRecursive(child, visible))
+  }
+  if (Array.isArray(group.containers)) {
+    group.containers.forEach(c => {
+      if (c && typeof c === 'object') c.visible = visible
+    })
+  }
+}
+function handleSetVisibleRecursive({ id, visible }) {
+  const group = findGroupById(localConfig.value.groups, id)
+  if (!group) return
+  setVisibleRecursive(group, visible)
+  emitUpdate()
+}
+
+// [UPLIFT 2026-08-05] 子树多态操作: 替代显式折叠. action ∈
+//   'collapseToNode'(折叠为节点: 自身启用+子孙禁用→自动上提) |
+//   'showDescendantsOnly'(仅显示子孙: 自身禁用+子孙启用) |
+//   'setEnabled'(级联启用/禁用自身+子孙)
+function handleSubtreeAction({ id, action, enabled }) {
+  const group = findGroupById(localConfig.value.groups, id)
+  if (!group) return
+  if (action === 'collapseToNode') collapseToNode(group)
+  else if (action === 'showDescendantsOnly') showDescendantsOnly(group)
+  else if (action === 'setEnabled') setSubtreeEnabled(group, enabled)
+  emitUpdate()
+}
+
 function handleGroupDelete(id) {
   deleteGroupFromTree(localConfig.value.groups, id)
   emitUpdate()
@@ -514,14 +602,73 @@ function handleRemoveContainer({ groupId, containerId }) {
   }
 }
 
-function handleReorderGroups({ sourceIndex, targetIndex }) {
-  if (sourceIndex !== targetIndex) {
-    const newGroups = [...localConfig.value.groups]
-    const [removed] = newGroups.splice(sourceIndex, 1)
-    newGroups.splice(targetIndex, 0, removed)
-    localConfig.value.groups = newGroups
+// [LEAF 2026-08-04] 更新业务对象叶子容器（容器）的字段（enabled/visible 等）
+function handleContainerUpdate({ groupId, containerId, updates }) {
+  const group = findGroupById(localConfig.value.groups, groupId)
+  if (group && group.containers) {
+    const container = group.containers.find(c => 
+      (typeof c === 'object' && c.id === containerId) || c === containerId
+    )
+    if (container && typeof container === 'object') {
+      Object.assign(container, updates)
+      emitUpdate()
+    }
+  }
+}
+
+// [REORDER 2026-08-04] 同级分组拖拽重排（支持嵌套层级）
+//   入参签名从 {sourceIndex,targetIndex} 改为 {sourceGroupId,targetGroupId,parentId}，
+//   通过 parentId 定位到正确的兄弟数组，从而支持任意层级的重排。
+function handleReorderGroups({ sourceGroupId, targetGroupId, parentId }) {
+  if (!sourceGroupId || !targetGroupId || sourceGroupId === targetGroupId) return
+  const siblings = parentId ? findGroupById(localConfig.value.groups, parentId)?.children : localConfig.value.groups
+  if (!siblings) return
+  const sourceIdx = siblings.findIndex(g => g.id === sourceGroupId)
+  const targetIdx = siblings.findIndex(g => g.id === targetGroupId)
+  if (sourceIdx !== -1 && targetIdx !== -1 && sourceIdx !== targetIdx) {
+    const [removed] = siblings.splice(sourceIdx, 1)
+    siblings.splice(targetIdx, 0, removed)
     emitUpdate()
   }
+}
+
+// [REORDER 2026-08-04] 群组内叶子容器同级重排
+function handleReorderContainers({ groupId, sourceContainerId, targetContainerId }) {
+  if (!groupId || !sourceContainerId || !targetContainerId || sourceContainerId === targetContainerId) return
+  const group = findGroupById(localConfig.value.groups, groupId)
+  if (group && Array.isArray(group.containers)) {
+    const sourceIdx = group.containers.findIndex(c => (typeof c === 'object' ? c.id : c) === sourceContainerId)
+    const targetIdx = group.containers.findIndex(c => (typeof c === 'object' ? c.id : c) === targetContainerId)
+    if (sourceIdx !== -1 && targetIdx !== -1 && sourceIdx !== targetIdx) {
+      const [removed] = group.containers.splice(sourceIdx, 1)
+      group.containers.splice(targetIdx, 0, removed)
+      emitUpdate()
+    }
+  }
+}
+
+// [TREE 2026-08-04] 拖拽分组到目标分组下作为子分组（跨层级移动）
+function handleMoveGroup({ sourceGroupId, targetGroupId }) {
+  if (!sourceGroupId || !targetGroupId || sourceGroupId === targetGroupId) return
+  const sourceGroup = findGroupById(localConfig.value.groups, sourceGroupId)
+  if (!sourceGroup) return
+  // 防止形成循环：目标分组不能是 sourceGroup 的子孙
+  if (isDescendantOf(sourceGroup, targetGroupId)) return
+  // 从原位置移除
+  deleteGroupFromTree(localConfig.value.groups, sourceGroupId)
+  // 添加到目标分组
+  const targetGroup = findGroupById(localConfig.value.groups, targetGroupId)
+  if (targetGroup) {
+    if (!targetGroup.children) targetGroup.children = []
+    sourceGroup.parentId = targetGroup.id
+    targetGroup.children.push(sourceGroup)
+    emitUpdate()
+  }
+}
+
+function isDescendantOf(group, targetId) {
+  if (group.children && group.children.some(c => c.id === targetId)) return true
+  return group.children ? group.children.some(c => isDescendantOf(c, targetId)) : false
 }
 
 const autoGroupButtonText = computed(() => {
@@ -537,6 +684,14 @@ function handleAutoGroupByDomain() {
     if (!props.containers || props.containers.length === 0) return
     handleBusinessObjectAutoGroup()
   }
+}
+
+// [SCOPE 2026-08-07] 初始图表智能默认展开层级：按对象范围区分。
+//   对象范围内的分组展开到服务模块，范围外的展开到子领域。
+//   仅在存在对象范围时生效（无对象范围则保持全展开，与 store.expandLevel 默认一致）。
+function applyDefaultExpandByScopeToGroups() {
+  const centerScopeCodes = new Set(diagramConfigStore.centerScope || [])
+  applyDefaultExpandByScope(localConfig.value.groups, (g) => isInCenterScope(g, centerScopeCodes))
 }
 
 function handleServiceModuleAutoGroup() {
@@ -562,6 +717,7 @@ function handleServiceModuleAutoGroup() {
       direction: 'LR',
       visible: true,
       enabled: true,
+      collapsed: false, // [FOLD 2026-08-05] 折叠语义: 折叠为单节点
       style: {
         fill: '#f5f5f5',
         stroke: '#333333',
@@ -587,6 +743,7 @@ function handleServiceModuleAutoGroup() {
         direction: 'TB',
         visible: true,
         enabled: true,
+        collapsed: false, // [FOLD 2026-08-05] 折叠语义: 折叠为单节点
         style: {
           fill: '#ffffff',
           stroke: '#666666',
@@ -620,6 +777,7 @@ function handleServiceModuleAutoGroup() {
           direction: 'TB',
           visible: true,
           enabled: true,
+          collapsed: false, // [FOLD 2026-08-05] 折叠语义: 折叠为单节点
           style: {
             fill: '#ffffff',
             stroke: '#666666',
@@ -644,6 +802,8 @@ function handleServiceModuleAutoGroup() {
 
   localConfig.value.groups = groups
   localConfig.value.enabled = true
+  // [SCOPE 2026-08-07] 初始智能默认展开层级（按对象范围）
+  applyDefaultExpandByScopeToGroups()
   emitUpdate()
 }
 
@@ -955,8 +1115,12 @@ function handleBusinessObjectAutoGroup() {
       groupType: 'domain',
       domainName: domainName,
       direction: 'TB',
-      visible: false,
-      enabled: false,
+      // [FIX 2026-08-06] 默认 enabled=true/visible=true: 与 businessObjectAutoGrouper.js 的
+      //   buildBusinessObjectGroups 保持一致. 之前设 enabled=false/visible=false 导致进入系统时
+      //   供应链云等所有 domain 默认禁用 (用户反馈"进入默认 disabled"), 且禁用的 domain 在
+      //   渲染时被打平, 与 buildBusinessObjectGroups 路径行为不一致.
+      visible: true,
+      enabled: true,
       style: {
         fill: '#f5f5f5',
         stroke: '#333333',
@@ -973,6 +1137,8 @@ function handleBusinessObjectAutoGroup() {
 
   localConfig.value.groups = groups
   localConfig.value.enabled = true
+  // [SCOPE 2026-08-07] 初始智能默认展开层级（按对象范围）
+  applyDefaultExpandByScopeToGroups()
   emitUpdate()
 }
 
@@ -1501,34 +1667,61 @@ function handleAutoVirtualLayering(layerCount = 3) {
 .panel-content {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-lg);
+  gap: var(--spacing-sm);
 }
 
 .lcp-toolbar {
   display: flex;
   align-items: center;
-  gap: var(--spacing-sm);
+  gap: var(--spacing-xs);
+  flex-wrap: wrap;
 }
 
-.lcp-search-input {
-  flex: 1;
+.lcp-toolbar :deep(.el-button) {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
 }
 
-.lcp-add-group-btn {
-  padding: 4px 10px;
-  border: 1px solid var(--color-primary);
-  border-radius: var(--radius-sm);
-  background: rgba(234, 88, 12, 0.08);
+.lcp-toolbar :deep(.el-button:hover) {
   color: var(--color-primary);
-  cursor: pointer;
-  font-size: var(--font-size-sm);
-  white-space: nowrap;
-  transition: all 0.2s;
-
-  &:hover {
-    background: rgba(234, 88, 12, 0.15);
-  }
+  background: var(--color-primary-bg);
 }
+
+/* [LEVEL 2026-08-06] 展开层级下拉: 触发按钮箭头 + 选中项高亮 */
+.lcp-dropdown-caret {
+  margin-left: 2px;
+  color: var(--color-text-secondary);
+}
+
+/* [BO 2026-08-07] 业务对象叶子显示开关: 紧凑布局, 标签可点击切换 */
+.lcp-bo-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  &:hover { background: var(--color-bg-secondary); }
+}
+.lcp-bo-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.lcp-toolbar :deep(.el-dropdown-item.is-active),
+.el-dropdown-menu :deep(.el-dropdown-item.is-active) {
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+/* [FOLD 2026-08-05] FR-005 视图模板选择条 (已移除 2026-08-06: "全部启用"/"仅服务模块" 按钮删除) */
 
 .auto-group-section {
   padding: var(--spacing-sm) 0;

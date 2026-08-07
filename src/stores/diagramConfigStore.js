@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed, shallowRef } from 'vue'
+import { applyViewTemplate as applyViewTemplateToGroups } from '../composables/useViewTemplates.js'
 
 export const useDiagramConfigStore = defineStore('diagramConfig', () => {
   // 图表类型
@@ -53,7 +54,8 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
   const chartDataSnapshot = shallowRef({
     containers: [],
     domainProducts: [],
-    links: []
+    links: [],
+    groupColorMap: {}                 // [FIX 2026-08-05] 与图表同源的分组色映射
   })
   // [布局设置 sidebar 整合] 布局 panel 展开状态 — 跨组件共享 (RelationScopeTree 写, 外部可读)
   const layoutPanelExpanded = ref(false)
@@ -68,8 +70,18 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     preserveOrder: true
   })
 
+  // [FOLD 2026-08-05] FR-005 视图模板: 当前生效模板 ('allEnabled' | 'onlyServiceModules' | '')
+  const viewTemplate = ref('')
+  // [LEVEL 2026-08-07] 展开层级: 工具栏(ChartMiniToolbar)与图表设置(LayoutControlPanel)共享,
+  //   值取 services/expandLevel.js EXPAND_LEVELS 的 key, 默认'businessObject'=全部展开
+  const expandLevel = ref('businessObject')
+
   // 渲染限制配置
   const mermaidMaxTextSize = ref(500000)
+
+  // [FOCUS 2026-08-05] 图表聚焦请求 — 布局设置面板 → 图表组件单向联动
+  //   seq 每次自增, 确保即使连续聚焦同一目标 (type/id 相同) 也能被 watcher 捕获
+  const chartFocusRequest = ref({ seq: 0, type: null, id: null })
 
   // Getters
   const centerBoCodes = computed(() => new Set(centerScope.value || []))
@@ -181,6 +193,22 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     layoutControlConfig.value = config?.value || config
   }
 
+  // [LEVEL 2026-08-07] 设置当前展开层级 (工具栏/图表设置共享)
+  function setExpandLevel(key) {
+    expandLevel.value = key || 'businessObject'
+  }
+
+  // [FOLD 2026-08-05] FR-005 应用视图模板到 layoutControlConfig.groups
+  //   allEnabled: 全部启用 (无折叠/无禁用)
+  //   onlyServiceModules: 仅服务模块 (BO 叶节点隐藏)
+  function applyViewTemplate(template) {
+    const config = layoutControlConfig.value
+    if (!config || !Array.isArray(config.groups)) return 0
+    const applied = applyViewTemplateToGroups(config.groups, template)
+    viewTemplate.value = template || ''
+    return applied
+  }
+
   function updateMermaidMaxTextSize(value) {
     mermaidMaxTextSize.value = typeof value === 'number' ? value : (parseInt(value) || 500000)
   }
@@ -207,7 +235,8 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     chartDataSnapshot.value = {
       containers: snapshot?.containers ?? [],
       domainProducts: snapshot?.domainProducts ?? [],
-      links: snapshot?.links ?? []
+      links: snapshot?.links ?? [],
+      groupColorMap: snapshot?.groupColorMap ?? {}
     }
   }
 
@@ -218,6 +247,11 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
 
   function updateAssignmentMode(value) {
     assignmentMode.value = value?.value ?? value ?? 'auto'
+  }
+
+  // [FOCUS 2026-08-05] 请求图表聚焦 (布局设置面板触发), seq 自增确保 watcher 每次都响应
+  function requestChartFocus({ type, id }) {
+    chartFocusRequest.value = { seq: chartFocusRequest.value.seq + 1, type, id }
   }
 
   function fallbackToLegacyRenderer() {
@@ -261,10 +295,13 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
       engine: 'elk',
       preserveOrder: true
     }
+    viewTemplate.value = ''
+    expandLevel.value = 'businessObject'
     // [布局设置 sidebar 整合] 重置 snapshot 和 panel 状态
-    chartDataSnapshot.value = { containers: [], domainProducts: [], links: [] }
+    chartDataSnapshot.value = { containers: [], domainProducts: [], links: [], groupColorMap: {} }
     layoutPanelExpanded.value = false
     mermaidMaxTextSize.value = 500000
+    chartFocusRequest.value = { seq: 0, type: null, id: null }
   }
 
   return {
@@ -294,9 +331,12 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     annotationCategoryFilter,
     useUnifiedRenderer,
     layoutControlConfig,
+    viewTemplate,
+    expandLevel,
     chartDataSnapshot,
     layoutPanelExpanded,
     mermaidMaxTextSize,
+    chartFocusRequest,
 
     // Getters
     centerBoCodes,
@@ -325,6 +365,8 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     updatePositions,
     updateHideLinkLabelTails,
     updateLayoutControlConfig,
+    setExpandLevel,
+    applyViewTemplate,
     updateChartDataSnapshot,
     setLayoutPanelExpanded,
     updateMermaidMaxTextSize,
@@ -333,6 +375,7 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     setAnnotationCategoryFilter,
     clearAnnotationCategoryFilter,
     updateAssignmentMode,
+    requestChartFocus,
     fallbackToLegacyRenderer,
     resetConfig
   }

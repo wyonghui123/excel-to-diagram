@@ -13,7 +13,7 @@
  *       在有 enabled 子组时才生成. 因此需要先创建有容器内容的 group
  */
 import { describe, it, expect, beforeEach } from 'vitest'
-import { generateGroupedLayout } from '../groupedLayout'
+import { generateGroupedLayout, getLiftedParentPathMap } from '../groupedLayout'
 import { generateLinearLayout } from '../linearLayout'
 import { generateZoneLayout } from '../elkZoneLayout'
 import { generateGridLayout } from '../gridLayout'
@@ -167,6 +167,32 @@ describe('groupedLayout - 启用/禁用 enabled (Bug 2 回归)', () => {
     expect(result.mermaidCode).toContain('N1')
     expect(result.mermaidCode).toContain('N2')
   })
+
+  it('[FIX 2026-08-06] 父容器 disabled 后被打平提升的子容器标题保持单行, 父名注册进 registry 供 tooltip', () => {
+    // 场景: SM 图禁用父域 "供应链云", 子域 "供应链计划" 仍 enabled=true → 被打平提升到顶层.
+    //   方案演进 (2026-08-06g): 标题改为单行 (只显示自身名 "供应链计划"), 父名称不再拼进标题
+    //   (原 "供应链计划（供应链云）" 会被 formatContainerTitle 拆两行, 与 ELK 单行预留冲突
+    //   → 后处理下移内容导致节点/子容器跑出容器盒, 已废弃). 父名称写入 registry,
+    //   由 SVG 处理器 attachLiftedParentTooltips 转成悬停 tooltip.
+    const groups = [{
+      id: 'D_SCM', title: '供应链云', enabled: false,
+      containers: [], directNodes: undefined,
+      children: [{
+        id: 'S_SCP', title: '供应链计划', enabled: true,
+        directNodes: ['N1', 'N2'], containers: [], children: []
+      }]
+    }]
+    const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    // 父域 subgraph 不生成 (disabled)
+    expect(result.mermaidCode).not.toContain('subgraph G_D_SCM')
+    // 子域 subgraph 标题为单行 (自身名), 不再拼父名
+    expect(result.mermaidCode).toContain('subgraph G_S_SCP["供应链计划"]')
+    // 父名称注册进 registry, 供 attachLiftedParentTooltips 挂 tooltip
+    expect(getLiftedParentPathMap()).toHaveProperty('G_S_SCP', '供应链云')
+    // 子域节点仍生成
+    expect(result.mermaidCode).toContain('N1')
+    expect(result.mermaidCode).toContain('N2')
+  })
 })
 
 describe('groupedLayout - 容器 enabled (Bug 1 回归)', () => {
@@ -184,6 +210,21 @@ describe('groupedLayout - 容器 enabled (Bug 1 回归)', () => {
     expect(result.mermaidCode).toContain('N2')
     // 验证 disabled 容器的标题 '容器2' 不出现
     expect(result.mermaidCode).not.toContain('容器2')
+  })
+
+  it('容器 visible=false -> 节点仍生成 (外提), 容器边框不显示 (LAYOUT 2026-08-04)', () => {
+    const groups = [{
+      id: 'G1', title: '组1', containers: [
+        { id: 'C1', name: '容器1', enabled: true, visible: true, nodes: ['N1'] },
+        { id: 'C2', name: '容器2', enabled: true, visible: false, nodes: ['N2'] }
+      ], children: []
+    }]
+    const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    // visible=false 的容器: 不生成 subgraph 边框, 节点 N2 打平渲染
+    expect(result.mermaidCode).toContain('N2')
+    expect(result.mermaidCode).not.toContain('容器2')
+    // visible=true 的容器: 正常生成 subgraph
+    expect(result.mermaidCode).toContain('容器1')
   })
 })
 
@@ -230,5 +271,124 @@ describe('groupedLayout - 边界', () => {
     expect(() => {
       generateGroupedLayout(groups, null, makeNodeMap([]), makeDefinedNodes(), 'TB')
     }).not.toThrow()
+  })
+})
+
+// [UPLIFT 2026-08-05] 上提语义 (FR-001/002) 回归保护: 取代显式 group.collapsed.
+//   分组 enabled 且无任何可见子孙 → 自动上提为单个聚合节点 (COLLAPSE_<id>).
+describe('groupedLayout - 上提 uplift', () => {
+  it('group enabled 且无可见子孙 -> 上提为聚合节点, 子孙/容器不渲染', () => {
+    const upliftGroup = {
+      id: 'G1', title: '采购云', enabled: true,
+      containers: [{ id: 'C1', name: '容器1', enabled: false, nodes: ['N1'] }],
+      children: [{ id: 'G1C', title: '子域', enabled: false, containers: [containers[1]], children: [] }],
+      directNodes: []
+    }
+    const result = generateGroupedLayout([upliftGroup], containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    // 上提聚合节点编码稳定
+    expect(result.mermaidCode).toContain('COLLAPSE_G1')
+    // 子孙节点文本不渲染
+    expect(result.mermaidCode).not.toContain('节点1')
+    expect(result.mermaidCode).not.toContain('节点2')
+    // 不创建该组的 subgraph (容器)
+    expect(result.mermaidCode).not.toContain('subgraph G_G1["')
+  })
+
+  it('group enabled 且有可见子孙 -> 正常渲染为容器, 不上提', () => {
+    const groups = [{
+      id: 'G1', title: '组1', direction: 'LR', containers: [containers[0]], children: []
+    }]
+    const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    expect(result.mermaidCode).toContain('direction LR')
+    expect(result.mermaidCode).toContain('N1')
+    expect(result.mermaidCode).not.toContain('COLLAPSE_')
+  })
+
+  it('container.collapsed=true -> 容器折叠为单个聚合节点, 节点外提不渲染', () => {
+    const groups = [{
+      id: 'G1', title: '组1', direction: 'LR',
+      containers: [{ id: 'C1', name: '容器1', collapsed: true, nodes: ['N1'] }],
+      children: []
+    }]
+    const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    expect(result.mermaidCode).toContain('COLLAPSE_C')
+    expect(result.mermaidCode).not.toContain('N1["节点1')
+  })
+
+  it('上提 submodule 分组标题追加祖先名称路径 (领域/子领域, 非编码)', () => {
+    const upliftGroup = {
+      id: 'G1', title: '需求计划 DP', enabled: true,
+      info: { type: 'submodule', name: '需求计划', parent: '供应链计划', grandparent: '供应链云' },
+      directNodes: [], containers: [], children: []
+    }
+    const result = generateGroupedLayout([upliftGroup], containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    expect(result.mermaidCode).toContain('COLLAPSE_G1')
+    // 标题含祖先名称路径 (祖父/父), 且为名称而非编码, 用 \n 转义两行显示
+    expect(result.mermaidCode).toContain('需求计划 DP')
+    expect(result.mermaidCode).toContain('供应链云/供应链计划')
+    expect(result.mermaidCode).toContain('\\n（供应链云/供应链计划）')
+  })
+
+  it('上提 module 分组标题追加父级名称路径 (领域)', () => {
+    const upliftGroup = {
+      id: 'G1', title: '供应链计划', enabled: true,
+      info: { type: 'module', name: '供应链计划', parent: '供应链云' },
+      directNodes: [], containers: [], children: []
+    }
+    const result = generateGroupedLayout([upliftGroup], containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    expect(result.mermaidCode).toContain('供应链云')
+  })
+
+  it('上提分组无祖先路径 (如 domain/自定义) 时标题不加路径', () => {
+    const upliftGroup = {
+      id: 'G1', title: '领域A', enabled: true,
+      info: { type: 'domain', name: '领域A' },
+      directNodes: [], containers: [], children: []
+    }
+    const result = generateGroupedLayout([upliftGroup], containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    expect(result.mermaidCode).toContain('COLLAPSE_G1')
+    expect(result.mermaidCode).toContain('领域A')
+    expect(result.mermaidCode).not.toContain('（')
+  })
+
+  it('[FIX 2026-08-06] info 缺失时上提服务模块标题从分组树推导祖先路径 (groupType=serviceModule)', () => {
+    const groups = [{
+      id: 'D_SCM', title: '供应链云', groupType: 'domain', enabled: true,
+      children: [{
+        id: 'SD_SCP', title: '供应链计划', groupType: 'subDomain', enabled: true,
+        children: [{
+          id: 'SM_DP', title: '需求计划', groupType: 'serviceModule', enabled: true,
+          directNodes: [], containers: [], children: []
+        }]
+      }]
+    }]
+    const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    // 叶子服务模块无可见子孙 → 自动上提为聚合节点
+    expect(result.mermaidCode).toContain('COLLAPSE_SM_DP')
+    // info 缺失 (null) 时, 从祖先链 (供应链云/供应链计划) + groupType=serviceModule 推导路径
+    expect(result.mermaidCode).toContain('需求计划\\n（供应链云/供应链计划）')
+    // 祖先路径用名称而非编码
+    expect(result.mermaidCode).not.toContain('SCM/SCP')
+  })
+
+  it('[FIX 2026-08-06] 上提叶子分组有 elementCode 时展示自身编码 而非祖先路径 (库存优化→SNPIO)', () => {
+    const groups = [{
+      id: 'D_SCM', title: '供应链云', groupType: 'domain', enabled: true,
+      children: [{
+        id: 'SD_SCP', title: '供应链计划', groupType: 'subDomain', enabled: true,
+        children: [{
+          id: 'SM_SNPIO', title: '库存优化', elementCode: 'SNPIO', groupType: 'serviceModule', enabled: true,
+          directNodes: [], containers: [], children: []
+        }]
+      }]
+    }]
+    const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    // 叶子服务模块上提为聚合节点
+    expect(result.mermaidCode).toContain('COLLAPSE_SM_SNPIO')
+    // 标题展示自身编码, 用 \n 转义两行
+    expect(result.mermaidCode).toContain('\\n（SNPIO）')
+    expect(result.mermaidCode).toContain('库存优化')
+    // 不再展示祖先路径 (长路径会导致节点宽度溢出/遮挡, 且叶子元素应展示自身编码)
+    expect(result.mermaidCode).not.toContain('供应链云/供应链计划')
   })
 })

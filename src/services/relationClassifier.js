@@ -792,8 +792,8 @@ export function buildRelationCategoryTree(relations, centerScope, businessObject
   // 构建树结构
   // [V1.2.8 修复] 添加 CROSS_BOUNDARY 节点，否则跨域关系不出现在树中，用户无法选中
   const tree = [
-    buildCategoryScopeNode(ScopeType.INTERNAL, '中心范围内对象关系', categoryStats[ScopeType.INTERNAL]),
-    buildCategoryScopeNode(ScopeType.CROSS_BOUNDARY, '中心范围与外部对象关系', categoryStats[ScopeType.CROSS_BOUNDARY]),
+    buildCategoryScopeNode(ScopeType.INTERNAL, '对象范围内对象关系', categoryStats[ScopeType.INTERNAL]),
+    buildCategoryScopeNode(ScopeType.CROSS_BOUNDARY, '对象范围与外部对象关系', categoryStats[ScopeType.CROSS_BOUNDARY]),
     buildCategoryScopeNode(ScopeType.EXTERNAL, '范围外对象关系', categoryStats[ScopeType.EXTERNAL])
   ];
 

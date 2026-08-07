@@ -26,6 +26,7 @@ import {
   getSelectedRelationIds
 } from '../../../services/relationClassifier.js'
 import { buildPreviewDataFromArchData, convertToRelationNodeIds } from '../../../services/archDataConverter.js'
+import { applyDefaultExpandByScope, isSubtreeInScope } from '../../../services/expandLevel.js'
 
 /**
  * @deprecated 旧版非分组控制逻辑，仅在用户启用"启用旧版非分组控制"时使用
@@ -1411,6 +1412,7 @@ export function useDiagramData() {
         const domainData = domainSubDomainCenterMap.get(domain.name)
         const filteredDomain = {
           name: domain.name,
+          code: domain.code || domain.name,
           isCenter: domainData ? domainData.center === domainData.total && domainData.total > 0 : false,
           modules: []
         }
@@ -1418,6 +1420,7 @@ export function useDiagramData() {
           const sdData = subDomainSmCenterMap.get(subDomain.name)
           const filteredSubDomain = {
             name: subDomain.name,
+            code: subDomain.code || subDomain.name,
             isCenter: sdData ? sdData.center === sdData.total && sdData.total > 0 : false,
             submodules: []
           }
@@ -1449,12 +1452,14 @@ export function useDiagramData() {
       previewData.value.domainProducts.forEach(domain => {
         const filteredDomain = {
           name: domain.name,
+          code: domain.code || domain.name,
           isCenter: false,
           modules: []
         }
         domain.modules?.forEach(subDomain => {
           const filteredSubDomain = {
             name: subDomain.name,
+            code: subDomain.code || subDomain.name,
             isCenter: false,
             submodules: []
           }
@@ -1499,6 +1504,7 @@ export function useDiagramData() {
             if (!domainEntry) {
               domainEntry = {
                 name: domainName,
+                code: domainName,
                 isCenter: false,
                 modules: []
               }
@@ -1510,6 +1516,7 @@ export function useDiagramData() {
             if (!sdEntry) {
               sdEntry = {
                 name: subDomainName,
+                code: subDomainName,
                 isCenter: false,
                 submodules: []
               }
@@ -1597,6 +1604,11 @@ export function useDiagramData() {
         // mermaidConfig 是从 GroupModel.fromUserConfig(architectureGroups, userConfig) 生成的
         // 已经合并了用户配置中的启用/禁用状态
         const layoutControlConfig = mermaidConfig
+
+        // [SCOPE 2026-08-07] 初始图表智能默认展开层级（按对象范围区分）：
+        //   对象范围内展开到服务模块，范围外展开到子领域。
+        //   必须在此渲染结构上应用（mergeUserGroup/toMermaidConfig 均不保留 collapsed）。
+        applyDefaultExpandByScope(layoutControlConfig?.groups, (g) => isSubtreeInScope(g, new Set(centerScope.value || [])))
 
         // 重要：将生成的 layoutControlConfig 更新到 store
         configStore.updateLayoutControlConfig(layoutControlConfig)
@@ -1746,6 +1758,16 @@ export function useDiagramData() {
 
         // 4. 直接生成 Mermaid 配置（包含扁平化和标题处理）
         const layoutControlConfig = groupModel.toMermaidConfig()
+
+        // [SCOPE 2026-08-07] 初始图表智能默认展开层级（按对象范围区分）：
+        //   对象范围内展开到服务模块，范围外展开到子领域。
+        //   注意: 渲染源是 configStore.layoutControlConfig（MermaidComponent 经 annotationConfig 读取
+        //   props.layoutControlConfig），且 buildDiagramData 会重新派生 groups（丢弃 collapsed），
+        //   而面板 auto-group 可能在 centerScope 设置前执行导致漏折叠。故在此（generate 时
+        //   centerScope 已确定）就地修改 store 配置分组树 collapsed 以兜底初始渲染。
+        const scopeCodeSet = new Set(centerScope.value || [])
+        applyDefaultExpandByScope(layoutControlConfig?.groups, (g) => isSubtreeInScope(g, scopeCodeSet))
+        applyDefaultExpandByScope(configStore.layoutControlConfig?.groups, (g) => isSubtreeInScope(g, scopeCodeSet))
 
         // 5. 使用 buildDiagramData，复用所有渲染逻辑
         // [Task 10 2026-08-02] 统一管道入口 (spec 4.2.1): preview 裁剪到当前 scope

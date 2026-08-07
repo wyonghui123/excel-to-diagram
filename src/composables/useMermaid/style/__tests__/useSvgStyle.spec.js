@@ -185,3 +185,157 @@ describe('useSvgStyle - fixEdgeLabelOverflow (v33 修复回归)', () => {
     document.body.removeChild(svg)
   })
 })
+
+// [FIX 2026-08-05] syncArrowMarkers: 箭头 marker 颜色跟随 path stroke (增量变色后箭头色同步)
+describe('useSvgStyle - syncArrowMarkers (箭头色跟随线色)', () => {
+  let svgStyle
+  let svg
+
+  const buildEdgePath = (id, stroke) => {
+    const svgNs = 'http://www.w3.org/2000/svg'
+    const g = document.createElementNS(svgNs, 'g')
+    g.setAttribute('class', 'edgePath')
+    const path = document.createElementNS(svgNs, 'path')
+    path.setAttribute('class', 'flowchart-link')
+    path.setAttribute('stroke', stroke)
+    g.appendChild(path)
+    return { g, path }
+  }
+
+  beforeEach(() => {
+    svgStyle = useSvgStyle()
+    svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  })
+
+  it('箭头 marker fill 与 path stroke 一致', () => {
+    const { g, path } = buildEdgePath('e1', '#1890ff')
+    svg.appendChild(g)
+    document.body.appendChild(svg)
+
+    svgStyle.syncArrowMarkers(svg, 'businessObject')
+
+    const defs = svg.querySelector('defs')
+    expect(defs).toBeTruthy()
+    // marker-end 指向 arrowhead-1890ff
+    expect(path.getAttribute('marker-end')).toContain('arrowhead-1890ff')
+    // marker polygon fill = 线色
+    const poly = defs.querySelector('#arrowhead-1890ff polygon')
+    expect(poly.getAttribute('fill')).toBe('#1890ff')
+    document.body.removeChild(svg)
+  })
+
+  it('改线色后再 sync, 箭头 marker 更新为新色 (增量变色后箭头色同步)', () => {
+    const { g, path } = buildEdgePath('e1', '#1890ff')
+    svg.appendChild(g)
+    document.body.appendChild(svg)
+
+    svgStyle.syncArrowMarkers(svg, 'businessObject')
+    expect(path.getAttribute('marker-end')).toContain('arrowhead-1890ff')
+
+    // 模拟 updateLinkColors 改线色为红色
+    path.setAttribute('stroke', '#f5222d')
+    path.style.stroke = '#f5222d'
+    svgStyle.syncArrowMarkers(svg, 'businessObject')
+
+    // marker-end 指向新色 marker
+    expect(path.getAttribute('marker-end')).toContain('arrowhead-f5222d')
+    const defs = svg.querySelector('defs')
+    const poly = defs.querySelector('#arrowhead-f5222d polygon')
+    expect(poly.getAttribute('fill')).toBe('#f5222d')
+    document.body.removeChild(svg)
+  })
+
+  it('单向边不残留 marker-start', () => {
+    const { g, path } = buildEdgePath('e1', '#1890ff')
+    svg.appendChild(g)
+    document.body.appendChild(svg)
+
+    svgStyle.syncArrowMarkers(svg, 'businessObject')
+    expect(path.getAttribute('marker-start')).toBeNull()
+    document.body.removeChild(svg)
+  })
+})
+
+// [OPT 2026-08-06] 多行容器标题最小高度修复 (解决换行后被节点/边框遮挡)
+describe('useSvgStyle - fixForeignObjectWidth (多行容器标题高度)', () => {
+  let svgStyle
+  let svg
+
+  const buildSubgraphFO = (text, height = 24) => {
+    const svgNs = 'http://www.w3.org/2000/svg'
+    const xhtmlNs = 'http://www.w3.org/1999/xhtml'
+
+    const g = document.createElementNS(svgNs, 'g')
+    g.setAttribute('class', 'subgraph')
+    const fo = document.createElementNS(svgNs, 'foreignObject')
+    fo.setAttribute('x', '0')
+    fo.setAttribute('y', '0')
+    fo.setAttribute('width', '200')
+    fo.setAttribute('height', String(height))
+    const div = document.createElementNS(xhtmlNs, 'div')
+    div.textContent = text
+    fo.appendChild(div)
+    g.appendChild(fo)
+    return { g, fo, div }
+  }
+
+  beforeEach(() => {
+    svgStyle = useSvgStyle()
+    svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  })
+
+  it('多行标题时高度扩展到容纳所有行', () => {
+    const { g, fo } = buildSubgraphFO('需求计划 DP\n（供应链云/供应链计划）', 24)
+    svg.appendChild(g)
+    document.body.appendChild(svg)
+
+    svgStyle.validateContainerTitles(svg)
+
+    // [FIX 2026-08-06] 行高对齐 Mermaid 实际 24px/行: 2 行 * 24 + 4 padding = 52
+    //   原旧算法用 24*1.3=31.2px/行 → 2 行得 70px, 会过度下探压到容器内容.
+    const newHeight = parseFloat(fo.getAttribute('height'))
+    expect(newHeight).toBeGreaterThan(24)
+    expect(newHeight).toBeGreaterThanOrEqual(2 * 24 + 4 - 1)
+    expect(newHeight).toBeLessThan(70)  // 不再过度拉升到 70 (旧行为)
+    document.body.removeChild(svg)
+  })
+
+  it('多行容器标题压缩行高+内边距, 避免父名称第二行被子内容遮挡', () => {
+    const { g, fo, div } = buildSubgraphFO('供应链计划\n（供应链云）', 24)
+    svg.appendChild(g)
+    document.body.appendChild(svg)
+
+    svgStyle.validateContainerTitles(svg)
+
+    // [FIX 2026-08-06] mermaid 按单行布局 subgraph 标签, 内容从标签下方即开始排列,
+    //   两行标签若用 1.3 行高, 父名称第二行会下探到内容区被遮挡. 压缩为 1.1 + 上下 2px 内边距,
+    //   让文字足迹收敛进 mermaid 预留的单行空间.
+    expect(div.style.lineHeight).toBe('1.1')
+    expect(div.style.padding).toBe('2px 8px')
+    expect(div.style.whiteSpace).toBe('pre-line')
+    document.body.removeChild(svg)
+  })
+
+  it('单行标题不改变高度 (回归保护)', () => {
+    const { g, fo } = buildSubgraphFO('采购管理', 24)
+    svg.appendChild(g)
+    document.body.appendChild(svg)
+
+    svgStyle.validateContainerTitles(svg)
+
+    expect(fo.getAttribute('height')).toBe('24')
+    document.body.removeChild(svg)
+  })
+
+  it('多行标题未超出当前高度时不重复扩展', () => {
+    const { g, fo } = buildSubgraphFO('需求计划 DP\n（供应链云/供应链计划）', 200)
+    svg.appendChild(g)
+    document.body.appendChild(svg)
+
+    svgStyle.validateContainerTitles(svg)
+
+    // 当前高度已足够, 不应被缩小
+    expect(fo.getAttribute('height')).toBe('200')
+    document.body.removeChild(svg)
+  })
+})

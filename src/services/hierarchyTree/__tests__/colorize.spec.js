@@ -21,4 +21,28 @@ describe('colorize', () => {
     expect(out[0].color).not.toBe('#808080')
     expect(out[0].isCenter).toBe(true)
   })
+
+  it('返回与图表同源的 groupColorMap（键与分组维度对齐）', () => {
+    const { groupColorMap } = colorize(nodes, [], {
+      colorGroupBy: 'subDomain', colorScheme: 'default',
+    })
+    // subDomain 分组 → 键为 subDomain 名
+    expect(groupColorMap['供应链计划']).toBeTruthy()
+    expect(groupColorMap['核算']).toBeTruthy()
+    // groupColorMap 与节点实际颜色一致（同源）
+    const { nodes: out } = colorize(nodes, [], { colorGroupBy: 'subDomain', colorScheme: 'default' })
+    expect(out[0].color).toBe(groupColorMap['供应链计划'])
+    expect(out[1].color).toBe(groupColorMap['核算'])
+  })
+
+  it('domain 分组时 groupColorMap 键为 domain 名', () => {
+    const { groupColorMap } = colorize(nodes, [], {
+      colorGroupBy: 'domain', colorScheme: 'default',
+    })
+    expect(groupColorMap['供应链云']).toBeTruthy()
+    expect(groupColorMap['财务云']).toBeTruthy()
+    const { nodes: out } = colorize(nodes, [], { colorGroupBy: 'domain', colorScheme: 'default' })
+    expect(out[0].color).toBe(groupColorMap['供应链云'])
+    expect(out[1].color).toBe(groupColorMap['财务云'])
+  })
 })

@@ -19,18 +19,21 @@
 
 <template>
   <div class="chart-mini-toolbar">
-    <!-- 图表类型 -->
+    <!-- 展开层级 [LEVEL 2026-08-07] 替换原"图表类型"下拉: 工具层级由图表设置(LayoutControlPanel)共享,
+         通过 diagramConfigStore.expandLevel 同步, 用 Expand 图标表达"展开颗粒度" -->
     <el-select
-      :model-value="chartType"
+      :model-value="expandLevel"
       size="small"
-      class="cmt-select"
-      @update:model-value="(v) => emit('update:chartType', v)"
+      class="cmt-select cmt-select--short"
+      @update:model-value="(v) => emit('update:expand-level', v)"
     >
       <template #prefix>
-        <span class="cmt-label">图表类型</span>
+        <el-icon class="cmt-prefix-icon"><Expand /></el-icon>
+        <span class="cmt-label">展开层级</span>
       </template>
-      <el-option label="业务对象图" value="businessObject" />
-      <el-option label="服务模块图" value="serviceModule" />
+      <el-option
+        v-for="lvl in EXPAND_LEVELS" :key="lvl.key" :label="lvl.label" :value="lvl.key"
+      />
     </el-select>
 
     <!-- 颜色分组维度 -->
@@ -80,7 +83,7 @@
       @update:model-value="(v) => emit('update:centerScopeHighlight', v === 'yes')"
     >
       <template #prefix>
-        <span class="cmt-label">中心范围</span>
+        <span class="cmt-label">对象范围</span>
       </template>
       <el-option label="区分" value="yes" />
       <el-option label="不区分" value="no" />
@@ -194,10 +197,13 @@
  *   - 仅作为 UI 层，触发 update 事件
  */
 import { ref, onMounted } from 'vue'
-import { Bottom, Right, Setting } from '@element-plus/icons-vue'
+import { Bottom, Right, Setting, Expand } from '@element-plus/icons-vue'
 import EnumService from '@/services/enumService'
+import { EXPAND_LEVELS } from '@/services/expandLevel.js'
 
 const props = defineProps({
+  // [LEVEL 2026-08-07] 展开层级 (替换原 chartType): 两处(工具栏/图表设置)共用, 走 store 同步
+  expandLevel: { type: String, default: 'businessObject' },
   chartType: { type: String, required: true },
   colorScheme: { type: String, required: true },
   colorGroupBy: { type: String, required: true },
@@ -213,6 +219,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
+  'update:expand-level',
   'update:chart-type',
   'update:color-scheme',
   'update:color-group-by',
@@ -306,6 +313,12 @@ onMounted(() => {
   padding-right: 4px;
   border-right: 1px solid var(--color-border, #dcdfe6);
   margin-right: 4px;
+}
+
+.cmt-prefix-icon {
+  font-size: 14px;
+  color: var(--color-text-secondary, #606266);
+  margin-right: 2px;
 }
 
 .cmt-spacer {

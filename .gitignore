@@ -203,3 +203,21 @@ test_helpers/scripts/*_out/
 
 # Backup before restoring Phase 6 files (2026-08-01)
 test_helpers/scripts/_backup_2026_08_01_phase6/
+
+# Playwright 测试报告产物
+playwright-report/
+test-results/
+
+# 临时截图/探测文件
+repro_*.png
+test_helpers/_shot_*.png
+test_helpers/_deep_out.json
+test_helpers/probe_*.txt
+test_helpers/probe_*.json
+test_helpers/_tmp_*.py
+test_helpers/fix_result.png
+test_helpers/occlude_shot.png
+test_helpers/scripts/layout_tree_archdata.png
+
+# 业务范围Excel
+影响范围_*.xlsx

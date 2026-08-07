@@ -172,7 +172,7 @@ export function buildServiceModuleDiagramData({
     const projection = pipeline.project({ treeData, terminal: GLOBAL_TERMINALS.serviceModule })
 
     // L3 着色（投影节点自带 domain/subDomain, 由树上下文派生）
-    const { nodes: coloredNodes } = colorize(projection.nodes, projection.containers, {
+    const { nodes: coloredNodes, groupColorMap } = colorize(projection.nodes, projection.containers, {
       colorGroupBy, colorScheme, centerSubDomain, centerSubDomainColor, customColors,
       centerServiceModuleCodes, centerScopeHighlight, nodeTextColor,
     })
@@ -222,6 +222,7 @@ export function buildServiceModuleDiagramData({
       groupControlTitleMap,
       centerScopeHighlight: centerScopeHighlight !== false,
       centerScope: coloredNodes.filter(n => n.isCenter).map(n => n.code),
+      groupColorMap,                    // [FIX 2026-08-05] 与图表同源的分组色映射
     }
   }
 

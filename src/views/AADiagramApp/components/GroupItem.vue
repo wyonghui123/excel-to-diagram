@@ -26,7 +26,7 @@
           <template v-if="!isEditingTitle">
             <span v-if="sortOrder" class="sort-order-badge" title="整体排序序号">{{ sortOrder }}</span>
             <span v-if="layerSortOrder" class="layer-sort-order-badge" title="层内排序序号">L{{ layerSortOrder }}</span>
-            <span v-if="group.isCenter" class="center-marker" title="中心范围">◆ </span>{{ group.title }}
+            <span v-if="group.isCenter" class="center-marker" title="对象范围">◆ </span>{{ group.title }}
             <span
               v-if="group.groupType"
               class="group-type-badge"

@@ -182,10 +182,12 @@ export function useMermaidConfig() {
         arrowHeadWidth: 6,
         arrowHeadHeight: 6,
         rankdir: rankdir,
-        // [FIX] title top=5 (非 15): ELK 嵌套容器首个子节点在 rect_top+39 (ELK 默认 padding+labelH),
-        //   标题 labelH=24, 若 top=15 则标题底=rect_top+39 与子节点贴合 (0px 间隙 → 重叠).
+        // [FIX] title top=5 (非 15): 嵌套容器首个子节点在 rect_top+labelH,
+        //   标题 labelH=24, 若 top=15 则标题底=rect_top+29 与子节点贴合 (0px 间隙 → 重叠).
         //   top=5 → 标题底=rect_top+29, 留 10px 间隙.
-        //   bottom=25 保持 total=30 不变, dagre 仅用 total 做布局, 不受影响.
+        //   [FIX 2026-08-06g] 容器标题已改回单行 (disabled 父名称改悬停 tooltip 展示),
+        //   不再需要为两行标题预留超大 bottom 边距。回退到单行合理值 total=30,
+        //   避免 dagre 下容器标题与内容之间出现过大空白。
         subGraphTitleMargin: { top: 5, bottom: 25 }
       }
     }

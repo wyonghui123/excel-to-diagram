@@ -68,7 +68,7 @@
 
     <CollapsiblePanel
       v-if="hasChartData"
-      title="布局设置"
+      title="图表设置"
       :default-expanded="layoutExpanded"
       :height-full="false"
       class="rst-panel-layout"
@@ -81,6 +81,7 @@
         :links="diagramConfigStore.chartDataSnapshot.links"
         :chart-type="injectedChartConfig.chartType"
         :model-value="injectedChartConfig.layoutControl"
+        :color-mapping="diagramConfigStore.chartDataSnapshot.groupColorMap"
         @update:model-value="(v) => Object.assign(injectedChartConfig.layoutControl, v)"
       />
     </CollapsiblePanel>

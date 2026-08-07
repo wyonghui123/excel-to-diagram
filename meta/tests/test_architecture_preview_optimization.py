@@ -113,13 +113,12 @@ class TestArchitecturePreviewIDPushdown:
         assert set(filters['target_bo_id__in']) == {10, 20}
 
     def test_all_4_entities_get_id_filter(self, make_bo_mock):
-        """[FR-009] 4 个实体都应下推 ID 过滤"""
+        """[FR-009] 3 个实体应下推 ID 过滤 (子领域特殊: 不再下推 id__in, 见 line 55)"""
         bo = make_bo_mock({})
         _patch_and_call(bo, '/api/v2/architecture/preview?domain_ids=1,2&sub_domain_ids=3,4&service_module_ids=5,6&business_object_ids=7,8')
 
         for entity, expected_ids in [
             ('domain', {1, 2}),
-            ('sub_domain', {3, 4}),
             ('service_module', {5, 6}),
             ('business_object', {7, 8}),
         ]:
@@ -128,6 +127,12 @@ class TestArchitecturePreviewIDPushdown:
             filters = call[0][1] or {}
             assert 'id__in' in filters, f"{entity} 应包含 id__in"
             assert set(filters['id__in']) == expected_ids
+
+        # [FIX 2026-08-06] 子领域不下推 id__in (保证 code 完整), 其余过滤条件仍保留
+        sub_call = next((c for c in bo.query.call_args_list if c[0][0] == 'sub_domain'), None)
+        assert sub_call is not None, "sub_domain 查询应存在"
+        sub_filters = sub_call[0][1] or {}
+        assert 'id__in' not in sub_filters, "sub_domain 不应包含 id__in"
 
     def test_id_filter_does_not_affect_center_scope(self, make_bo_mock):
         """[FR-009] center_scope 仍基于请求的 bo_id_list 计算（不变）"""

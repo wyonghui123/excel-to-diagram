@@ -21,8 +21,16 @@ const CENTER_COLOR_MAP = {
   '#722ED1': '#722ED1'
 }
 
+// colorMapping 支持两种传法：
+//   1) 普通对象（测试/一次性场景）
+//   2) getter 函数 () => props.colorMapping —— 组件内必须用 getter，
+//      否则闭包会捕获 setup 时的旧引用，导致 chartDataSnapshot 更新后
+//      (groupColorMap 每次 re-colorize 都是新对象) 色点仍读旧映射 → 清空自定义色后回不到默认色。
 export function useGroupDisplay(colorMapping) {
   const store = useDiagramConfigStore()
+
+  // 每次调用实时解析，保证读到当前 colorMapping（无闭包陈旧问题）
+  const resolveColorMap = () => (typeof colorMapping === 'function' ? colorMapping() : colorMapping)
 
   const colorScheme = computed(() => store.colorScheme)
   const colorGroupBy = computed(() => store.colorGroupBy)
@@ -40,7 +48,8 @@ export function useGroupDisplay(colorMapping) {
 
   function colorFromMap(key) {
     if (!key) return null
-    if (colorMapping && colorMapping[key]) return colorMapping[key]
+    const map = resolveColorMap()
+    if (map && map[key]) return map[key]
     if (customColors.value && customColors.value[key]) return customColors.value[key]
     return null
   }
@@ -198,6 +207,67 @@ export function useGroupDisplay(colorMapping) {
     return hashColor(colorKey)
   }
 
+  // 判断分组是否属于中心范围（区分中心范围时，其 BO/容器节点 code 命中 centerScope）
+  function isGroupInCenterScope(group, centerScopeSet) {
+    if (!group || !centerScopeSet || centerScopeSet.size === 0) return false
+    if (group.groupType === 'businessObject') {
+      const boid = group.elementCode || group.id || group.name
+      if (boid && centerScopeSet.has(boid)) return true
+    }
+    if (group.containers && group.containers.length) {
+      for (const c of group.containers) {
+        if (c.nodes && c.nodes.length) {
+          for (const n of c.nodes) {
+            const code = typeof n === 'object' ? (n.code || n.id || n.name) : n
+            if (code && centerScopeSet.has(code)) return true
+          }
+        }
+      }
+    }
+    if (group.directNodes && group.directNodes.length) {
+      for (const n of group.directNodes) {
+        const code = typeof n === 'object' ? (n.code || n.id || n.name) : n
+        if (code && centerScopeSet.has(code)) return true
+      }
+    }
+    if (group.children && group.children.length) {
+      return group.children.some(ch => isGroupInCenterScope(ch, centerScopeSet))
+    }
+    return false
+  }
+
+  // 分组节点取色（与 GroupItem.vue groupColor 逻辑一致；custom 分组不参与着色）
+  // 返回 { color, key, isCenter }：
+  //   - color 为当前展示色；key 为 customColors 写入键（与 colorize.js 维度 key 对齐）
+  //   - isCenter=true 表示该分组属于中心范围且区分开启 → color 用 centerScopeColor（与图表同源）
+  //     此时 key 置空（改色走 centerScopeColor，不写 customColors）。
+  function getGroupColor(group) {
+    if (!group) return { color: null, key: '', isCenter: false }
+    if (group.groupType === 'custom') return { color: null, key: '', isCenter: false }
+
+    // [中心范围 2026-08-05 方案A] 区分中心范围开启且分组属于中心范围 →
+    //   色点显示 centerScopeColor（灰），与图表中心节点被 centerScopeColor 覆盖一致。
+    const centerScopeSet = new Set(centerScope.value || [])
+    if (centerScopeHighlight.value && isGroupInCenterScope(group, centerScopeSet)) {
+      const cc = CENTER_COLOR_MAP[centerScopeColor.value] || centerScopeColor.value || '#808080'
+      return { color: cc, key: '', isCenter: true }
+    }
+
+    let colorKey = ''
+    if (colorGroupBy.value === 'subDomain') {
+      colorKey = group.subDomainName || group.title
+    } else if (colorGroupBy.value === 'serviceModule') {
+      colorKey = group.serviceModuleName || group.title
+    } else {
+      colorKey = group.domainName || group.title
+    }
+
+    const fromMap = colorFromMap(colorKey)
+    if (fromMap) return { color: fromMap, key: colorKey, isCenter: false }
+    if (!colorKey || typeof colorKey !== 'string') return { color: '#808080', key: colorKey, isCenter: false }
+    return { color: hashColor(colorKey), key: colorKey, isCenter: false }
+  }
+
   function getGroupTypeLabel(type) {
     const labels = {
       domain: '领域', subDomain: '子领域', serviceModule: '服务模块',
@@ -215,7 +285,7 @@ export function useGroupDisplay(colorMapping) {
   }
 
   return {
-    getContainerName, getNodeName, getContainerColor, getNodeColor,
+    getContainerName, getNodeName, getContainerColor, getNodeColor, getGroupColor,
     getGroupTypeLabel, getElkGroupHint, COLOR_SCHEMES
   }
 }

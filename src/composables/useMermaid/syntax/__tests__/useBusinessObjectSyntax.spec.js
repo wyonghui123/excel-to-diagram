@@ -127,4 +127,99 @@ describe('useBusinessObjectSyntax - relationDescriptions sourceName/targetName (
     expect(relationDescriptions[0].source).toMatch(/^N\d+$/)
     expect(relationDescriptions[0].target).toMatch(/^N\d+$/)
   })
+
+  // [FIX 2026-08-06] 折叠聚合节点连线颜色: 折叠后连线端点被重映射为 COLLAPSE_<id>,
+  //   nodeColorMap 不含聚合节点 → 连线颜色计算 sourceColor/targetColor 取不到 → 折叠连线变黑.
+  //   修复: applyUpliftNodeColors 产出 collapseColorMap, 连线颜色计算 fallback 到分组色.
+  it('折叠聚合节点连线使用分组色而非黑色 (FIX 2026-08-06)', () => {
+    const data = {
+      nodes: [
+        { code: 'BO1', name: 'BO1', originalName: 'BO1', category: 'object' },
+        { code: 'BO2', name: 'BO2', originalName: 'BO2', category: 'object' }
+      ],
+      links: [{ sourceCode: 'BO1', targetCode: 'BO2', relationCode: 'R1' }],
+      // 中心范围在 data 层 (与 useDiagramData 传递一致), 不在 layoutControlConfig
+      centerScope: ['BO1'],
+      domainProducts: [
+        { name: '领域A', code: 'DA', businessObjects: [{ code: 'BO1', name: 'BO1' }] },
+        { name: '领域B', code: 'DB', businessObjects: [{ code: 'BO2', name: 'BO2' }] }
+      ]
+    }
+    // 两个服务模块分组均折叠 (collapsed=true + enabled=true) → 上提为聚合节点,
+    // 但 BO1 折叠分组在中心范围 (centerScope 含 BO1) → 折叠连线应取分组色而非黑色.
+    const layoutControlConfig = {
+      enabled: true,
+      overallDirection: 'TB',
+      colorGroupBy: 'domain',
+      centerScopeHighlight: true,
+      centerScopeColor: '#808080',
+      groups: [
+        { id: 'A', title: '领域A', groupType: 'domain', enabled: true, collapsed: true,
+          containers: [{ id: 'bo1', nodes: ['BO1'], isVirtual: true, elementCode: 'BO1' }], children: [] },
+        { id: 'B', title: '领域B', groupType: 'domain', enabled: true, collapsed: true,
+          containers: [{ id: 'bo2', nodes: ['BO2'], isVirtual: true, elementCode: 'BO2' }], children: [] }
+      ]
+    }
+
+    const relationDescriptions = []
+    const result = syntax.generateMermaidCode(data, relationDescriptions, 'dagre', 'grouped', layoutControlConfig)
+
+    // 折叠聚合节点连线应被保留 (sourceId/targetId 为 COLLAPSE_ 聚合节点)
+    expect(result.linkColorMappings.length).toBeGreaterThan(0)
+    const link = result.linkColorMappings[0]
+    // 端点应为聚合节点编码
+    expect(String(link.sourceId).startsWith('COLLAPSE_')).toBe(true)
+    // 源 (BO1 折叠聚合, 中心范围) → 目标 (BO2 折叠聚合, 非中心) → 取目标分组色 (非黑色/非深灰)
+    expect(link.color).toBeDefined()
+    expect(link.color).not.toBe('#000000')
+    expect(link.color).not.toBe('#333333')
+  })
+
+  // [LEVEL 2026-08-06] "展开到领域" 语义: 领域 collapsed=true 时, 其嵌套子级
+  //   (子领域/服务模块/BO) 必须全部隐藏, mermaid 输出不得含子领域标题或 BO 名.
+  //   回归保护: 防止折叠领域后子级仍渲染 (用户反馈"展开到领域仍展示子领域").
+  it('嵌套结构: 领域 collapsed=true 时子领域及以下完全隐藏 (LEVEL 2026-08-06)', () => {
+    const data = {
+      nodes: [
+        { code: 'BO1', name: '客户主数据', originalName: '客户主数据', category: 'object' },
+        { code: 'BO2', name: '订单主数据', originalName: '订单主数据', category: 'object' }
+      ],
+      links: [{ sourceCode: 'BO1', targetCode: 'BO2', relationCode: 'R1' }],
+      domainProducts: [
+        { name: '领域A', code: 'DA', subDomains: [
+          { name: '子领域A1', code: 'SDA1', businessObjects: [
+            { code: 'BO1', name: '客户主数据' }, { code: 'BO2', name: '订单主数据' }
+          ] }
+        ] }
+      ]
+    }
+    // 领域 collapsed=true, 且含嵌套 children (子领域 → 服务模块 → BO 容器)
+    const layoutControlConfig = {
+      enabled: true,
+      overallDirection: 'TB',
+      colorGroupBy: 'domain',
+      groups: [
+        { id: 'd1', title: '领域A', groupType: 'domain', enabled: true, collapsed: true,
+          containers: [], children: [
+            { id: 'sd1', title: '子领域A1', groupType: 'subDomain', enabled: true,
+              containers: [
+                { id: 'bo1', nodes: ['BO1'], isVirtual: true, elementCode: 'BO1' },
+                { id: 'bo2', nodes: ['BO2'], isVirtual: true, elementCode: 'BO2' }
+              ],
+              children: [] }
+          ] }
+      ]
+    }
+
+    const relationDescriptions = []
+    const result = syntax.generateMermaidCode(data, relationDescriptions, 'dagre', 'grouped', layoutControlConfig)
+
+    // 领域折叠为聚合节点 → 领域标题出现 (带 … 提示)
+    expect(result.mermaidCode).toContain('COLLAPSE_d1')
+    // 子领域标题不得出现
+    expect(result.mermaidCode).not.toContain('子领域A1')
+    // BO 名不得出现 (子级完全隐藏)
+    expect(result.mermaidCode).not.toContain('客户主数据')
+    expect(result.mermaidCode).not.toContain('订单主数据')
+  })
 })

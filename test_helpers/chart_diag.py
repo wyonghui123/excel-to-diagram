@@ -543,7 +543,274 @@ class ChartDiag:
         }""")
 
     # ================================================================
-    # [E2E v2 2026-08-02] 细化包辅助方法 — 结构/颜色/备注/交互深度断言的数据源
+    # [2026-08-05] 调色板增量变色闭环辅助方法
+    #   收敛自 _verify_palette_change.py 的一次性内联逻辑 (get_fills/get_store/
+    #   get_diagram_data/pick_color), 避免每次排查改色问题重写 DOM 探测.
+    #   统一入口: open_palette() 展开布局面板 → get_fills_before() → pick_color()
+    #   → get_fills_after() → palette_loop() 一行跑完整闭环.
+    # ================================================================
+
+    def open_palette_panel(self) -> Dict[str, Any]:
+        """展开"图表设置"布局面板 (store.layoutPanelExpanded → 本地 layoutExpanded).
+        调色板色点在面板内, 默认折叠时是 hidden DOM 无法交互。
+        返回面板可见性 (色点宽高/数量)。"""
+        self.page.evaluate("""() => {
+            const cs = window.__configStore
+            if (!cs) return 'no store'
+            if (typeof cs.setLayoutPanelExpanded === 'function') cs.setLayoutPanelExpanded(true)
+            else cs.layoutPanelExpanded = true
+            return 'expanded layout panel'
+        }""")
+        self.page.wait_for_timeout(1200)
+        return self.page.evaluate("""() => {
+            const p = document.querySelector('.lgn-color-picker')
+            const r = p ? p.getBoundingClientRect() : null
+            return { w: r ? r.width : 0, h: r ? r.height : 0,
+                     count: document.querySelectorAll('.lgn-color-picker').length }
+        }""")
+
+    def get_fills(self) -> Dict[str, int]:
+        """统计图表节点 fill 分布 (color value → 数量)。
+        遍历所有 mermaid svg 的 g.node/g.nodes rect (兼容 mermaid 11 结构),
+        跳过 none/transparent。用于"改色前后节点 fill 对比"断言。
+        注意: 与 chart_diag.get_svg_node_fills(data-code→fill) 口径不同,
+        本方法是聚合分布, 两者互补。"""
+        return self.page.evaluate("""() => {
+            const fills = {}
+            let total = 0
+            document.querySelectorAll('.mermaid-container svg g.node rect, .mermaid-container svg g.nodes rect').forEach(r => {
+                const f = r.getAttribute('fill') || r.style.fill || 'none'
+                if (f === 'none' || f === 'transparent') return
+                fills[f] = (fills[f] || 0) + 1
+                total++
+            })
+            return { total, distinct: Object.keys(fills).length, fills }
+        }""")
+
+    def get_color_store(self) -> Dict[str, Any]:
+        """读取 diagramConfigStore 当前颜色配置 (colorGroupBy / customColors)。"""
+        return self.page.evaluate("""() => {
+            const cs = window.__configStore
+            if (!cs) return { error: 'no __configStore' }
+            return {
+                colorGroupBy: cs.colorGroupBy?.value ?? cs.colorGroupBy,
+                customColors: cs.customColors?.value ?? cs.customColors
+            }
+        }""")
+
+    def get_center_scope_snapshot(self) -> Dict[str, Any]:
+        """读取 store 对象范围配置 (codes/highlight/color)。
+        set_center_scope 的返回源 + 对象范围改色/图例验证的 before/after 快照。"""
+        return self.page.evaluate("""() => {
+            const cs = window.__configStore
+            if (!cs) return { error: 'no __configStore' }
+            const getv = (r) => (r && {}.hasOwnProperty.call(r, 'value')) ? r.value : r
+            return {
+                centerScope: getv(cs.centerScope),
+                centerScopeHighlight: getv(cs.centerScopeHighlight),
+                centerScopeColor: getv(cs.centerScopeColor)
+            }
+        }""")
+
+    def set_center_scope(self, codes: Optional[list] = None,
+                         highlight: Optional[bool] = None,
+                         color: Optional[str] = None,
+                         wait_ms: int = 8000) -> Dict[str, Any]:
+        """[2026-08-05] 一键设置对象范围 (store), 供对象范围颜色/图例 E2E 验证.
+        通过 __configStore.updateCenterScope/Highlight/Color 触发 (等价于配置面板操作),
+        再等待图表按新对象范围重渲染。返回设置后的对象范围快照。"""
+        self.page.evaluate("""({codes, highlight, color}) => {
+            const cs = window.__configStore
+            if (!cs) return 'no __configStore'
+            if (codes !== undefined) cs.updateCenterScope(codes)
+            if (highlight !== undefined) cs.updateCenterScopeHighlight(highlight)
+            if (color !== undefined) cs.updateCenterScopeColor(color)
+            return 'ok'
+        }""", {'codes': codes, 'highlight': highlight, 'color': color})
+        if wait_ms:
+            self.wait_render_stable(timeout_ms=wait_ms)
+        return self.get_center_scope_snapshot()
+
+    def get_diagram_snapshot(self) -> Dict[str, Any]:
+        """读取 __archPage.diagramData 关键字段 (customColors/colorGroupBy/colorScheme + 首节点色)。
+        验证 store.customColors 是否已传递到 diagramData 并驱动节点着色。"""
+        return self.page.evaluate("""() => {
+            const ap = window.__archPage
+            if (!ap || !ap.diagramData) return { error: 'no diagramData' }
+            const d = ap.diagramData.value ?? ap.diagramData
+            return {
+                hasData: !!d,
+                customColors: d?.customColors,
+                colorGroupBy: d?.colorGroupBy,
+                colorScheme: d?.colorScheme,
+                nodeCount: d?.nodes?.length,
+                sampleNode: d?.nodes?.[0] ? { id: d.nodes[0].id, name: d.nodes[0].name,
+                    domain: d.nodes[0].domain, subDomain: d.nodes[0].subDomain,
+                    color: d.nodes[0].color } : null
+            }
+        }""")
+
+    def pick_color(self, target_color: str) -> str:
+        """点击第一个色点并选择目标色 (predefine 色块) + 点"确定"提交。
+        target_color 内联进 evaluate (避开 CLI 参数包装)。
+        Element Plus 需点 confirm 才 emit update:model-value → store.customColors 更新。
+        返回提交结果 ("confirmed" / 错误信息)。"""
+        # 1. 点击第一个色点
+        self.page.evaluate("""() => {
+            const picker = document.querySelector('.lgn-color-picker')
+            if (!picker) return 'no picker'
+            const t = picker.querySelector('.el-color-picker__trigger') || picker
+            t.click()
+            return 'clicked picker'
+        }""")
+        self.page.wait_for_timeout(800)
+        # 2. 在 predefine 色块中找目标色
+        target_lower = target_color.lower()
+        self.page.evaluate(f"""() => {{
+            const btns = Array.from(document.querySelectorAll('.el-color-predefine__color-selector'))
+            for (const b of btns) {{
+                const aria = b.getAttribute('aria-label') || ''
+                const bg = b.style.backgroundColor || ''
+                if (aria.toLowerCase().includes('{target_lower}') || bg.toLowerCase().includes('{target_lower}')) {{
+                    b.click()
+                    return 'clicked color: ' + (aria || bg)
+                }}
+            }}
+            const cols = btns.map(b => b.getAttribute('aria-label') || b.style.backgroundColor)
+            return 'color not found, available: ' + JSON.stringify(cols)
+        }}""")
+        self.page.wait_for_timeout(800)
+        # 3. 点"确定"提交
+        r = self.page.evaluate("""() => {
+            const panels = Array.from(document.querySelectorAll('.el-color-picker__panel'))
+            const open = panels.find(p => getComputedStyle(p).display !== 'none' &&
+                                          p.getBoundingClientRect().width > 0)
+            if (!open) return 'no open panel'
+            const btn = open.querySelector('.el-color-footer__btn')
+            if (btn) { btn.click(); return 'confirmed' }
+            return 'no confirm btn'
+        }""")
+        self.page.wait_for_timeout(1200)
+        return r
+
+    def palette_loop(self, target_color: str = '#f5222d', verbose: bool = True) -> Dict[str, Any]:
+        """[2026-08-05] 一行跑完整"色点改色 → 图表增量变色"闭环验证。
+
+        流程: 展开面板 → 读 before (fills/store/diagramData) → pick_color →
+        读 after → 汇总对比结论。返回 { step, store_changed, fills_changed,
+        store_after, fills_before, fills_after, diagram_after, pick }。
+
+        verbose=True(默认) 打印每步状态与最终结论, 供人工/回归统一口径。"""
+        if verbose:
+            print('[v] 展开布局面板')
+        vis = self.open_palette_panel()
+        if verbose:
+            print(f'[v] 色点可见性: {vis}')
+
+        if verbose:
+            print('[v] BEFORE')
+        fills_before = self.get_fills()
+        store_before = self.get_color_store()
+        dd_before = self.get_diagram_snapshot()
+        if verbose:
+            print(f'  fills: {fills_before}')
+            print(f'  store: {store_before}')
+
+        if verbose:
+            print(f'[v] 选择 {target_color}')
+        pick = self.pick_color(target_color)
+        if verbose:
+            print(f'  pick: {pick}')
+
+        if verbose:
+            print('[v] AFTER')
+        fills_after = self.get_fills()
+        store_after = self.get_color_store()
+        dd_after = self.get_diagram_snapshot()
+        if verbose:
+            print(f'  fills: {fills_after}')
+            print(f'  store: {store_after}')
+
+        cc_before = json.dumps((store_before or {}).get('customColors', {}), sort_keys=True)
+        cc_after = json.dumps((store_after or {}).get('customColors', {}), sort_keys=True)
+        store_changed = cc_before != cc_after
+        fills_changed = fills_before.get('fills') != fills_after.get('fills')
+
+        result = {
+            'vis': vis, 'pick': pick,
+            'store_changed': store_changed,
+            'fills_changed': fills_changed,
+            'store_before': store_before, 'store_after': store_after,
+            'fills_before': fills_before, 'fills_after': fills_after,
+            'diagram_before': dd_before, 'diagram_after': dd_after,
+        }
+        if verbose:
+            print('\n========== 调色板闭环结论 ==========')
+            print(f'store.customColors 变化: {"是 ✓" if store_changed else "否 ✗"}')
+            if (store_after or {}).get('customColors'):
+                print(f'  customColors = {json.dumps(store_after["customColors"], ensure_ascii=False)}')
+            print(f'图表节点 fill 变化: {"是 ✓" if fills_changed else "否 ✗"}')
+            if fills_changed:
+                print(f'  BEFORE: {json.dumps(fills_before["fills"], ensure_ascii=False)}')
+                print(f'  AFTER : {json.dumps(fills_after["fills"], ensure_ascii=False)}')
+        return result
+
+    def center_color_loop(self, target_color: str = '#1890FF',
+                          verbose: bool = True) -> Dict[str, Any]:
+        """[2026-08-05] 验证"对象范围颜色"配置 → 图表中心节点 + 图例对象范围项 同源联动.
+        通过 store.updateCenterScopeColor 触发 (等价于对象范围色点选色), 读改前后:
+          - store.centerScopeColor 变化
+          - 图表中心节点 (isCenter) fill 变化
+          - 图例"对象范围"项色值变化
+        返回 { before, after, color_changed, center_nodes_changed, legend_changed, passed }。"""
+        if verbose:
+            print('[v] 读取对象范围/图例/中心节点 BEFORE')
+        before_center = self.get_center_scope_snapshot()
+        before_legend = {i['name']: i['color'] for i in self.get_legend_items()}
+        before_fills = self.get_svg_node_fills()
+        center_codes = self.get_center_codes()
+        if verbose:
+            print(f'  centerScopeColor={before_center.get("centerScopeColor")}')
+            print(f'  中心节点数={len(center_codes)}')
+
+        self.page.evaluate("""(color) => {
+            const cs = window.__configStore
+            if (!cs) throw new Error('no __configStore')
+            cs.updateCenterScopeColor(color)
+        }""", target_color)
+        self.wait_render_stable(timeout_ms=8000)
+
+        if verbose:
+            print('[v] AFTER')
+        after_center = self.get_center_scope_snapshot()
+        after_legend = {i['name']: i['color'] for i in self.get_legend_items()}
+        after_fills = self.get_svg_node_fills()
+
+        center_fills_before = {c: before_fills.get(c) for c in center_codes if c in before_fills}
+        center_fills_after = {c: after_fills.get(c) for c in center_codes if c in after_fills}
+        color_changed = before_center.get('centerScopeColor') != after_center.get('centerScopeColor')
+        center_nodes_changed = center_fills_before != center_fills_after
+        legend_changed = before_legend.get('对象范围') != after_legend.get('对象范围')
+        passed = color_changed and center_nodes_changed and legend_changed
+
+        result = {
+            'before': {**before_center, 'legend': before_legend, 'centerFills': center_fills_before},
+            'after': {**after_center, 'legend': after_legend, 'centerFills': center_fills_after},
+            'color_changed': color_changed,
+            'center_nodes_changed': center_nodes_changed,
+            'legend_changed': legend_changed,
+            'passed': passed,
+        }
+        if verbose:
+            print('\n========== 对象范围颜色闭环结论 ==========')
+            print(f'store.centerScopeColor 变化: {before_center.get("centerScopeColor")} → {after_center.get("centerScopeColor")} {"✓" if color_changed else "✗"}')
+            print(f'图表中心节点 fill 变化: {"✓" if center_nodes_changed else "✗"}')
+            print(f'图例"对象范围"项色值: {before_legend.get("对象范围")} → {after_legend.get("对象范围")} {"✓" if legend_changed else "✗"}')
+            print(f'  => {"PASS ✓" if passed else "FAIL ✗"}')
+        return result
+
+    # ================================================================
+    # [E2E 2026-08-02] 细化包辅助方法 — 结构/颜色/备注/交互深度断言的数据源
     # ================================================================
 
     # 备注类型全集 (与 chart_seed.py DEFAULT_SEEDS 的 category 分布对应)
@@ -728,6 +995,25 @@ class ChartDiag:
             }).filter(i => i.name)
         }""")
 
+    def assert_legend_skip(self, absent: List[str],
+                           present: List[str] = []) -> Dict[str, Any]:
+        """[2026-08-05] 断言图例项: absent 不应出现, present 必须出现.
+        用于验证"区分对象范围时, 整组都在对象范围的分组不单独列示图例"
+        (对应用户案例: 供应链计划为对象范围时, "需求计划"不出现)。
+        返回 { items, ok, missing_present, wrongly_present }。"""
+        items = self.get_legend_items()
+        names = {i['name'] for i in items}
+        missing_present = [n for n in present if n not in names]
+        wrongly_present = [n for n in absent if n in names]
+        ok = not missing_present and not wrongly_present
+        print(f'[legend] present={present} absent={absent}')
+        print(f'  items={sorted(names)}')
+        print(f'  缺失应出现: {missing_present or "无"}')
+        print(f'  误出现应跳过: {wrongly_present or "无"}')
+        print(f'  => {"OK ✓" if ok else "FAIL ✗"}')
+        return {'items': items, 'ok': ok,
+                'missing_present': missing_present, 'wrongly_present': wrongly_present}
+
     def get_link_color_mappings(self) -> List[Dict[str, Any]]:
         """读取 linkColorMappings (FE 埋点 stepMeta.linkColorMappings).
         结构: [{index, sourceId, targetId, color}]."""
@@ -756,6 +1042,152 @@ class ChartDiag:
         """读取 SVG 全部节点 code (数据指纹 A5)."""
         return self.page.evaluate(
             "() => Array.from(document.querySelectorAll('svg g.node[data-code]')).map(n => n.getAttribute('data-code'))")
+
+    # ================================================================
+    # [布局验证 2026-08-05] 面板编辑 → 渲染树合并结果的可复用验证
+    #   数据源: window.__archPage.debugLayout (EmbeddedChartView 合并链路的分步快照:
+    #   before → afterStates → afterMembership → afterTitles).
+    #   相比 DOM bbox 反推 (get_cluster_hierarchy), 这里读的是"权威合并树",
+    #   直接断言哪个分组含哪些元素 / enabled / title, 不用人工看 DOM.
+    #   取代 verify_disable_domain.py 这类一次性脚本的 setup + 断言部分.
+    # ================================================================
+
+    def get_layout_snapshot(self) -> Dict[str, Any]:
+        """读取布局合并链路的完整分步快照 (before/afterStates/afterMembership/afterTitles).
+        未走统一管道 (businessObject/serviceModule) 时返回 { error }."""
+        return self.page.evaluate("""() => {
+            const dl = window.__archPage && window.__archPage.debugLayout
+            if (!dl) return { error: '__archPage.debugLayout 未暴露 (需 EmbeddedChartView 挂载且走统一管道)' }
+            return dl
+        }""")
+
+    def get_layout_membership(self, step: str = 'afterTitles') -> Dict[str, List[str]]:
+        """把指定合并步骤的分组树拍平成 { code: [叶子code...] } 归属映射.
+        leaf = directNodes (node code) 或 containers (容器 code).
+        用于断言"某分组是否包住某些元素" (容器包裹关系)."""
+        return self.page.evaluate("""({step}) => {
+            const dl = window.__archPage && window.__archPage.debugLayout
+            const groups = dl && dl[step]
+            if (!Array.isArray(groups)) return { error: 'debugLayout.' + step + ' 缺失' }
+            const membership = {}
+            const walk = (gs) => {
+                for (const g of gs || []) {
+                    const key = g.elementCode || g.id
+                    const leaves = []
+                    if (Array.isArray(g.directNodes)) leaves.push(...g.directNodes)
+                    if (Array.isArray(g.containers)) {
+                        leaves.push(...g.containers.map(c => c.elementCode || c.id || c.code))
+                    }
+                    if (key) membership[key] = leaves
+                    if (Array.isArray(g.children)) walk(g.children)
+                }
+            }
+            walk(groups)
+            return membership
+        }""", {'step': step})
+
+    def _find_group(self, code: str, step: str = 'afterTitles') -> Optional[Dict[str, Any]]:
+        """按 elementCode/id 深查找某个分组的合并状态 (返回 None 表示没找到)."""
+        return self.page.evaluate("""({code, step}) => {
+            const dl = window.__archPage && window.__archPage.debugLayout
+            const groups = dl && dl[step]
+            const find = (gs) => {
+                for (const g of gs || []) {
+                    if ((g.elementCode || g.id) === code) return g
+                    const r = find(g.children)
+                    if (r) return r
+                }
+                return null
+            }
+            return find(groups)
+        }""", {'code': code, 'step': step})
+
+    def get_layout_group_codes(self, step: str = 'afterTitles') -> List[str]:
+        """返回指定合并步骤树中所有分组 code (含嵌套 children). 用于判断分组在合并树是否存在."""
+        return self.page.evaluate("""({step}) => {
+            const dl = window.__archPage && window.__archPage.debugLayout
+            const groups = dl && dl[step]
+            const out = []
+            const walk = (gs) => {
+                for (const g of gs || []) {
+                    const key = g.elementCode || g.id
+                    if (key) out.push(key)
+                    if (Array.isArray(g.children)) walk(g.children)
+                }
+            }
+            walk(groups)
+            return out
+        }""", {'step': step})
+
+    def get_leaf_bearing_groups(self, step: str = 'afterTitles') -> List[str]:
+        """返回指定合并步骤树中"直接承载叶子"的分组 code (directNodes 或 containers 非空).
+        [why] 领域/子领域分组的叶子在 children 子分组里, 不直接进 membership — 只有真正承载
+        叶子的分组 (directNodes/containers 形态) 才该有非空归属, 用于 L18 容器包裹回归守卫."""
+        return self.page.evaluate("""({step}) => {
+            const dl = window.__archPage && window.__archPage.debugLayout
+            const gs = dl && dl[step]
+            const out = []
+            const walk = (list) => {
+                for (const g of list || []) {
+                    const key = g.elementCode || g.id
+                    const hasLeaf = (Array.isArray(g.directNodes) && g.directNodes.length > 0)
+                        || (Array.isArray(g.containers) && g.containers.length > 0)
+                    if (key && hasLeaf) out.push(key)
+                    if (Array.isArray(g.children)) walk(g.children)
+                }
+            }
+            walk(gs)
+            return out
+        }""", {'step': step})
+
+    def assert_group_contains(self, group_code: str, expected_codes: List[str],
+                              step: str = 'afterTitles') -> bool:
+        """断言分组 group_code 的叶子归属包含 expected_codes (容器包裹关系).
+        数据源: 权威合并树, 非 DOM bbox 反推. 返回 bool + 打印 [OK]/[FAIL]."""
+        membership = self.get_layout_membership(step)
+        if isinstance(membership, dict) and 'error' in membership:
+            print(f'[FAIL] assert_group_contains: {membership["error"]}')
+            return False
+        actual = membership.get(group_code, [])
+        missing = [c for c in expected_codes if c not in actual]
+        ok = not missing
+        tag = '[OK]' if ok else '[FAIL]'
+        extra = f'  actual={actual}' if not ok else ''
+        print(f'{tag} 分组 {group_code} 包含 {expected_codes}{extra}'
+              + (f'  缺失={missing}' if missing else ''))
+        return ok
+
+    def assert_group_enabled(self, group_code: str, expected_enabled: bool,
+                             step: str = 'afterStates') -> bool:
+        """断言分组最终 enabled/disabled 状态 (默认看 afterStates = 状态合并步骤产物)."""
+        g = self._find_group(group_code, step)
+        if g is None:
+            print(f'[FAIL] assert_group_enabled: 分组 {group_code} 未找到 (step={step})')
+            return False
+        actual = bool(g.get('enabled'))
+        ok = actual == expected_enabled
+        tag = '[OK]' if ok else '[FAIL]'
+        print(f'{tag} 分组 {group_code}.enabled={actual} (期望 {expected_enabled})')
+        return ok
+
+    def assert_merge_steps_present(self) -> bool:
+        """断言合并链路分步快照齐全 (before/afterStates/afterMembership/afterTitles 均非空).
+        快速判定 EmbeddedChartView 是否走了统一管道并完成 4 步合并."""
+        snap = self.get_layout_snapshot()
+        if not isinstance(snap, dict) or 'chartType' not in snap:
+            print(f'[FAIL] assert_merge_steps_present: {snap.get("error", "debugLayout 缺失")}')
+            return False
+        ok = True
+        for step in ('before', 'afterStates', 'afterMembership', 'afterTitles'):
+            groups = snap.get(step)
+            present = isinstance(groups, list) and len(groups) > 0
+            if not present:
+                ok = False
+            print(f'  {"[OK]" if present else "[FAIL]"} 步骤 {step}: '
+                  f'{"有 " + str(len(groups)) + " 个分组" if present else "缺失"}')
+        if ok:
+            print(f'[OK] 合并链路 4 步快照齐全 (chartType={snap.get("chartType")})')
+        return ok
 
     def close(self):
         self.cli.close()
@@ -1072,6 +1504,112 @@ def run_center_regression(viewport: Tuple[int, int] = (1280, 720), report_timing
         return results
 
 
+def run_layout_verification(scope: Optional[dict] = None,
+                            viewport: Tuple[int, int] = (1280, 720)) -> Dict[str, Any]:
+    """[布局验证 2026-08-05] 一键验证布局面板编辑 → 渲染树合并链路的正确性.
+
+    取代 verify_disable_domain.py 这类一次性脚本: setup 复用 ChartDiag.open_chart(),
+    断言全部走新增的可复用方法 (assert_merge_steps_present / assert_group_contains /
+    assert_group_enabled), 不再依赖人工看 DOM.
+
+    验证点:
+      1. 合并链路 4 步快照齐全 (before/afterStates/afterMembership/afterTitles)
+      2. 容器包裹关系: 每个领域/子领域分组包含其下元素 (权威合并树, 非 DOM bbox 反推)
+      3. enabled 状态: 分组 enabled 默认 true (未禁用时)
+
+    scope 注意: DEFAULT_SCOPE 是 30 个 BO 的复杂图, 容器包裹断言覆盖更充分;
+    也可传 SHORT_SCOPE 单 BO 快速冒烟."""
+    print(f'=== 布局合并链路验证  viewport={viewport} ===\n')
+    checks = []
+    with ChartDiag(viewport=viewport) as diag:
+        diag.open_chart(scope=scope)
+        page = diag.page
+
+        # 1. 合并链路分步快照齐全
+        checks.append(('merge_steps_present', diag.assert_merge_steps_present()))
+
+        # 2. 校验合并树的"分组 → 叶子归属"自洽:
+        #    afterMembership(归属合并) 与 afterTitles(标题/顺序合并) 的叶子归属应一致
+        #    (第二步只改归属, 第三步只改标题/顺序, 不应再改变叶子归属).
+        mem_after_membership = diag.get_layout_membership('afterMembership')
+        mem_after_titles = diag.get_layout_membership('afterTitles')
+        if isinstance(mem_after_membership, dict) and 'error' not in mem_after_membership \
+           and isinstance(mem_after_titles, dict) and 'error' not in mem_after_titles:
+            # 逐个分组比对叶子归属, 报告差异
+            diff_groups = []
+            for code in set(mem_after_membership) | set(mem_after_titles):
+                a = sorted(mem_after_membership.get(code, []))
+                b = sorted(mem_after_titles.get(code, []))
+                if a != b:
+                    diff_groups.append({'group': code, 'afterMembership': a, 'afterTitles': b})
+            ok = not diff_groups
+            checks.append(('membership_titles_consistent', ok))
+            tag = '[OK]' if ok else '[FAIL]'
+            print(f'{tag} afterMembership 与 afterTitles 叶子归属一致'
+                  + ('  (差异: ' + str(diff_groups[:3]) + ')' if diff_groups else ''))
+
+        # 3. 叶子承载断言 (L18 回归守卫): 在 afterTitles 树中, 凡带 directNodes/containers 的
+        #    分组不应为空叶子 (若容器被误清空 → 这里露出 actual=[])。
+        #    注意: 领域/子领域分组的叶子在 children 子分组里, 不直接进 membership — 这里只查
+        #    真正承载叶子的分组 (directNodes 或 containers 形态), 避免把"领域含子分组"误判为缺陷.
+        snap = diag.get_layout_snapshot()
+        if isinstance(snap, dict) and 'afterTitles' in snap:
+            mem = diag.get_layout_membership('afterTitles')
+            if isinstance(mem, dict) and 'error' not in mem:
+                # 找出 afterTitles 里所有"应承载叶子"的分组 code
+                leaf_bearing = diag.page.evaluate("""() => {
+                    const dl = window.__archPage && window.__archPage.debugLayout
+                    const gs = dl && dl.afterTitles
+                    const out = []
+                    const walk = (list) => {
+                        for (const g of list || []) {
+                            const key = g.elementCode || g.id
+                            const hasLeaf = (Array.isArray(g.directNodes) && g.directNodes.length > 0)
+                                || (Array.isArray(g.containers) && g.containers.length > 0)
+                            if (key && hasLeaf) out.push(key)
+                            if (Array.isArray(g.children)) walk(g.children)
+                        }
+                    }
+                    walk(gs)
+                    return out
+                }""")
+                for code in leaf_bearing:
+                    actual = mem.get(code, [])
+                    ok = len(actual) > 0
+                    checks.append((f'leaf_{code}', ok))
+                    tag = '[OK]' if ok else '[FAIL]'
+                    print(f'{tag} 叶子分组 {code} 承载了 {len(actual)} 个叶子' + (f'  actual={actual}' if not ok else ''))
+
+        # 4. enabled 状态传播断言 (数据感知): applyGroupStates 应把面板的 enabled 状态
+        #    传播到合并树 afterStates. 不硬编码期望值 — 以 panelGroups 为准做比对.
+        #    [注意] 面板树可能含 ELK inner/boundary 子分组 (DP_inner/DP_boundary 等), 这些是
+        #    面板特有的结构分组, 统一管道会把它拍平, 不进入合并渲染树 → 只对"合并树中真正存在"
+        #    的分组做断言, 面板独有的结构分组跳过 (不是失败).
+        if isinstance(snap, dict) and 'panelGroups' in snap and 'afterStates' in snap:
+            merged_codes = set(diag.get_layout_group_codes('afterStates'))
+            panel_enabled = {}  # code -> expected enabled (仅面板显式设置过)
+            def walkp(gs):
+                for g in gs or []:
+                    key = g.get('elementCode') or g.get('id')
+                    if key:
+                        e = g.get('enabled')
+                        if isinstance(e, bool):
+                            panel_enabled[key] = e
+                    walkp(g.get('children'))
+            walkp(snap['panelGroups'])
+            for code, expected in panel_enabled.items():
+                if code not in merged_codes:
+                    # 面板独有的结构分组 (如 ELK inner/boundary), 渲染树已拍平 — 跳过
+                    print(f'  [SKIP] 面板分组 {code} 不在合并渲染树中 (面板结构分组, 已拍平)')
+                    continue
+                checks.append((f'enabled_{code}', diag.assert_group_enabled(code, expected)))
+
+        diag.screenshot('layout_verify')
+        passed = sum(1 for c in checks if c[1])
+        print(f'\n=== 布局验证总结: {passed}/{len(checks)} 通过 ===\n')
+        return {'passed': passed == len(checks), 'checks': checks}
+
+
 if __name__ == '__main__':
     # 用法: python -m test_helpers.chart_diag
     import argparse
@@ -1088,9 +1626,19 @@ if __name__ == '__main__':
     p3 = sub.add_parser('trace', help='捕获 click 触发链')
     p3.add_argument('--sel', default='svg g.edgeLabel')
 
+    p4 = sub.add_parser('layout-verify', help='布局合并链路验证 (取代一次性 verify_disable_domain.py)')
+    p4.add_argument('--w', type=int, default=1280)
+    p4.add_argument('--h', type=int, default=720)
+    p4.add_argument('--short', action='store_true', help='用 SHORT_SCOPE 单 BO 快速冒烟')
+
     args = parser.parse_args()
     if args.cmd == 'regression':
         run_center_regression(viewport=(args.w, args.h))
+    elif args.cmd == 'layout-verify':
+        run_layout_verification(
+            scope=SHORT_SCOPE if args.short else None,
+            viewport=(args.w, args.h)
+        )
     else:
         with ChartDiag() as diag:
             diag.open_chart()

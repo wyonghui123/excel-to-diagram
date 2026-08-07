@@ -142,6 +142,49 @@ with ChartDiag(viewport=(1280, 720)) as diag:
 
 ---
 
+## 颜色 / 图例 / 对象范围验证 (2026-08-05 新增)
+
+针对"区分对象范围 + 按分组着色 + 图例"链路, 提供一行闭环验证, 避免重复 DOM 探测。
+
+### 1. 对象范围一键设置 + 读快照
+
+```python
+# 设置对象范围 (codes/highlight/color 均可缺省), 自动等待图表重渲染
+diag.set_center_scope(codes=['DP01', 'DP02'], highlight=True, color='#1890FF')
+snap = diag.get_center_scope_snapshot()
+# snap → { centerScope, centerScopeHighlight, centerScopeColor }
+```
+
+等价于配置面板操作 (走 `__configStore.updateCenterScope/Highlight/Color`), 比操作 UI 下拉脆弱交互更可靠。
+
+### 2. 验证对象范围颜色 → 图表中心节点 + 图例 同源联动
+
+```python
+res = diag.center_color_loop(target_color='#1890FF')
+assert res['passed'], json.dumps(res)
+```
+
+验证 `store.centerScopeColor` 变化后:
+- **图表中心节点 (isCenter) fill** 同步变化
+- **图例"对象范围"项色值**同步变化
+
+### 3. 验证图例"整组在对象范围不单独列示"
+
+```python
+# 供应链计划为对象范围、按服务模块分组时, "需求计划"整组在对象范围 → 不应出现在图例
+r = diag.assert_legend_skip(absent=['需求计划'], present=['生产计划'])
+assert r['ok'], r
+```
+
+### 4. 调色板增量变色闭环 (既有)
+
+```python
+res = diag.palette_loop(target_color='#f5222d')   # 色点改色 → 图表增量变色
+assert res['store_changed'] and res['fills_changed']
+```
+
+---
+
 ## 配套模块: useDiagnostics
 
 `test_helpers/chart_diag.py` 是 Python 端入口, 对应的 JavaScript 端核心是

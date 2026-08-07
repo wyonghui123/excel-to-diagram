@@ -52,12 +52,13 @@ def get_architecture_preview_impl(bo):
         else:
             domain_filter = version_filter.copy()
             domain_page_size = 5000
-        if sub_domain_id_list:
-            sub_domain_filter = {**version_filter, 'id__in': sub_domain_id_list}
-            sub_domain_page_size = min(5000, len(sub_domain_id_list) * 2)
-        else:
-            sub_domain_filter = version_filter.copy()
-            sub_domain_page_size = 5000
+        # [FIX 2026-08-06] 子领域不再下推 id__in: 带 id__in 时框架仅对匹配行填充 code,
+        #   其余行 code=None → 前端 buildDomainProducts 回退用名称作 code →
+        #   折叠后连线标签一端显示名称 (e.g. SCP-采购供应, 采购供应应为 MM).
+        #   子领域按版本量级 (几十条) 较小, 全量查询成本可忽略, 由下方 Python 端
+        #   二次过滤 (line ~117) + extra_sub_domain 补全 (line ~142) 保留层级范围.
+        sub_domain_filter = version_filter.copy()
+        sub_domain_page_size = 5000
         if module_id_list:
             module_filter = {**version_filter, 'id__in': module_id_list}
             module_page_size = min(5000, len(module_id_list) * 2)
@@ -100,6 +101,13 @@ def get_architecture_preview_impl(bo):
         modules = module_result.data if module_result.success else []
         business_objects = bo_result.data if bo_result.success else []
         relationships = rel_result.data if rel_result.success else []
+
+        # [DIAG te] 临时诊断: 查看查询返回的 sub_domains 编码 (domain 2200)
+        try:
+            _diag_sds = [f"{sd.get('name')}={sd.get('code')}" for sd in sub_domains if sd.get('domain_id') == 2200]
+            logger.info(f"[DIAG te] query sub_domains(2200) cnt={len(_diag_sds)}: {_diag_sds}")
+        except Exception:
+            pass
 
         # v39.6: Python 端 OR 二次过滤，保留 cross-boundary 关系
         # 之前 SQL 只下推 source_bo_id__in, 但 management 页全量 12 条 vs chart 11 条
@@ -292,6 +300,13 @@ def get_architecture_preview_impl(bo):
 
             rel['scope_type'] = scope_type
             rel['category_type'] = category_type
+
+        # [DIAG te] 临时诊断: 返回前 sub_domains 编码 (domain 2200)
+        try:
+            _diag_sds2 = [f"{sd.get('name')}={sd.get('code')}" for sd in sub_domains if sd.get('domain_id') == 2200]
+            logger.info(f"[DIAG te] final sub_domains(2200) cnt={len(_diag_sds2)}: {_diag_sds2}")
+        except Exception:
+            pass
 
         return jsonify({
             'success': True,

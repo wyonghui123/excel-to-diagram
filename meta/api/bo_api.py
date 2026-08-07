@@ -1479,15 +1479,19 @@ def get_architecture_preview():
                     })
             if new_sd_ids:
                 ph = ','.join('?' * len(new_sd_ids))
+                # [FIX 2026-08-06] 补 sd.code: 原 SELECT 缺 code 列 → 经 V1.1.13 补全的
+                #   非选中子领域 code=None → 前端 buildDomainProducts 回退用名称作 code →
+                #   折叠后连线标签一端显示名称 (e.g. SCP-采购供应, 采购供应应为 MM).
                 rows = _ds2.execute(
-                    f"SELECT sd.id, sd.name, sd.domain_id, d.name as domain_name "
+                    f"SELECT sd.id, sd.name, sd.domain_id, sd.code, d.name as domain_name "
                     f"FROM sub_domains sd LEFT JOIN domains d ON sd.domain_id = d.id "
                     f"WHERE sd.id IN ({ph})", list(new_sd_ids)
                 ).fetchall()
                 for r in rows:
                     sub_domains.append({
                         'id': r[0], 'name': r[1], 'domain_id': r[2],
-                        'domain_name': r[3] or '',
+                        'code': r[3] or '',
+                        'domain_name': r[4] or '',
                         'is_included_via_relationship': True,
                     })
             if new_d_ids:

@@ -4,6 +4,7 @@ import { useAnnotation, useAnnotationOverlay } from '../annotation/index.js'
 import { useInteraction } from '../interaction/useInteraction.js'
 import { isBidirectionalLink } from '../syntax/_shared/arrowHelper.js'
 import { useDiagnostics } from '../core/useDiagnostics.js'
+import { getLiftedParentPathMap } from '../layouts/groupedLayout.js'
 
 /**
  * SVG 后处理逻辑
@@ -73,22 +74,37 @@ export function useSvgProcessor(options) {
    * 添加容器编码属性
    */
   const addContainerCodeAttributes = (svgEl, diagramData) => {
-    if (!diagramData || !diagramData.serviceModules) return
+    if (!diagramData) return
+
+    // [VIS 2026-08-07] 覆盖所有层级(领域/子领域/服务模块)容器: 从 domainProducts 递归收集 名称→code,
+    //   供增量隐藏(<hidden>)定位 g.cluster[data-container-code="..."]。原实现只覆盖 serviceModules。
+    const nameToCode = new Map()
+    const collectLevel = (list) => {
+      ;(list || []).forEach((item) => {
+        if (item && typeof item === 'object') {
+          if (item.name && item.code) nameToCode.set(item.name, item.code)
+          collectLevel(item.submodules)
+          collectLevel(item.modules)
+          collectLevel(item.businessObjects)
+        }
+      })
+    }
+    collectLevel(diagramData.domainProducts)
+    // 兼容没有 domainProducts 的路径 (直接读 serviceModules)
+    ;(diagramData.serviceModules || []).forEach((sm) => {
+      if (sm && sm.name && sm.code) nameToCode.set(sm.name, sm.code)
+    })
 
     const subgraphs = svgEl.querySelectorAll('.subgraph, .cluster')
-    subgraphs.forEach(subgraph => {
+    subgraphs.forEach((subgraph) => {
       const titleEl = subgraph.querySelector('.cluster-label, text')
       if (titleEl) {
         const titleText = titleEl.textContent || ''
         const titleMatch = titleText.match(/^([^\n(]+)/)
         const containerName = titleMatch ? titleMatch[1].trim() : titleText
-
-        const matchedSM = diagramData.serviceModules.find(sm =>
-          titleText.includes(sm.name) || containerName === sm.name
-        )
-
-        if (matchedSM && matchedSM.code) {
-          subgraph.setAttribute('data-container-code', matchedSM.code)
+        const matchedCode = nameToCode.get(containerName) || nameToCode.get(titleText)
+        if (matchedCode) {
+          subgraph.setAttribute('data-container-code', matchedCode)
         }
       }
     })
@@ -262,8 +278,11 @@ export function useSvgProcessor(options) {
   /**
    * 渲染备注叠加层
    * @param {Object} interaction - (可选) useInteraction 实例, 提供 centerElement 回调用于点击 annotation 时居中元素
+   * @param {Array} layoutGroups - (可选) layoutControlConfig.groups (分组树), 供图例项点击时定位分组并切换 visible
+   * @param {Function} onToggleGroupVisible - (可选) 图例项点击分组可见性切换回调 (name, visible, groups),
+   *   用于就地改 visible + 以新引用替换 store 配置, 触发增量隐/显与配置树双向同步
    */
-  const renderAnnotationOverlay = (svgEl, diagramData, diagramType, annotationConfig, nodeColorMappings, interaction = null) => {
+  const renderAnnotationOverlay = (svgEl, diagramData, diagramType, annotationConfig, nodeColorMappings, interaction = null, layoutGroups = null, onToggleGroupVisible = null) => {
     if (!annotationConfig) return
 
     // [V_NEW 2026-06-29] 传递 annotation category 过滤 - 主线不受影响 (空数组 = 不过滤)
@@ -299,10 +318,11 @@ export function useSvgProcessor(options) {
 
     // 渲染颜色图例
     if ((diagramType === 'serviceModule' || diagramType === 'businessObject') && diagramData) {
-      const colorLegendData = buildColorLegendData(diagramData, nodeColorMappings, annotationConfig.centerScopeHighlight)
+      const colorLegendData = buildColorLegendData(diagramData, nodeColorMappings, annotationConfig.centerScopeHighlight, layoutGroups)
       if (colorLegendData && colorLegendData.length > 0) {
         annotationOverlay.overlayColorLegend(svgEl, colorLegendData, {
-          position: annotationConfig.legendPosition || 'top-left'
+          position: annotationConfig.legendPosition || 'top-left',
+          onToggleGroupVisible
         })
       }
     }
@@ -319,33 +339,68 @@ export function useSvgProcessor(options) {
    * @param {Object} annotationConfig - centerScopeHighlight / legendPosition
    * @param {Array} nodeColorMappings - 当前节点的 colorMap (从 generateMermaidCode 返回值)
    */
-  const updateColorLegend = (svgEl, diagramData, annotationConfig, nodeColorMappings) => {
+  const updateColorLegend = (svgEl, diagramData, annotationConfig, nodeColorMappings, layoutGroups = null, onToggleGroupVisible = null) => {
     if (!annotationConfig) return
     if (diagramData?.nodes?.[0]?.category !== 'object' && !diagramData?.serviceModules?.length) {
       return
     }
     const centerScopeHighlight = annotationConfig.centerScopeHighlight !== false
-    const colorLegendData = buildColorLegendData(diagramData, nodeColorMappings, centerScopeHighlight)
+    const colorLegendData = buildColorLegendData(diagramData, nodeColorMappings, centerScopeHighlight, layoutGroups)
     if (colorLegendData && colorLegendData.length > 0) {
       annotationOverlay.overlayColorLegend(svgEl, colorLegendData, {
-        position: annotationConfig.legendPosition || 'top-left'
+        position: annotationConfig.legendPosition || 'top-left',
+        onToggleGroupVisible
       })
     }
   }
 
   /**
    * 构建颜色图例数据
+   * @param {Array|null} groups - layoutControlConfig.groups (分组树), 用于建立 层级名称→分组对象 映射,
+   *   供图例项点击时定位对应分组并切换 visible (与图表配置树双向同步)。传入空/缺省时不附加分组引用。
    */
-  const buildColorLegendData = (diagramData, nodeColorMappings, centerScopeHighlight = true) => {
+  const buildColorLegendData = (diagramData, nodeColorMappings, centerScopeHighlight = true, groups = null) => {
     const legendData = []
     const { nodes, colorGroupBy, centerScopeColor, centerObjectColor } = diagramData
 
     if (!nodes || nodes.length === 0) return legendData
 
-    // [FIX 2026-08-02] 移除 isGroupFullyCenter 跳过逻辑:
-    //   旧逻辑假设"全部为中心节点的 group"节点都被 centerScopeColor 覆盖, 图例色块无意义。
-    //   现在中心节点 fill 用指定颜色 centerScopeColor (v5 原方案), 图例里分组色仍按各 BO 显示,
-    //   所有组的图例都应正常显示。
+    // [LEGEND 2026-08-07] 收集分组树: 按层级(domain/subDomain/serviceModule)建立 名称→分组对象 映射,
+    //   供图例项点击隐藏/显示时定位对应分组 (可能多个同名分组, 如跨领域的同名子领域)。
+    //   兼容两种结构: LayoutControlPanel 面板树用 groupType(小写), GroupModel 渲染结构用 type(大写)。
+    const groupsByType = { domain: new Map(), subDomain: new Map(), serviceModule: new Map() }
+    if (Array.isArray(groups)) {
+      const collectType = (g) => {
+        if (!g || typeof g !== 'object') return
+        const t = String(g.groupType || g.type || '').toLowerCase()
+        let key = null
+        if (t === 'domain') key = 'domain'
+        else if (t === 'subdomain') key = 'subDomain'
+        else if (t === 'servicemodule') key = 'serviceModule'
+        if (key) {
+          // 注册分组: 同时用完整标题与去掉"(...)/（...）"后缀的裸名作键,
+          //   兼容标题含祖先路径/编码的情况 (如 "采购供应（供应链计划）"), 使 node.domain/subDomain/serviceModuleName 能命中。
+          const rawTitle = g.title || g.name
+          const bareTitle = (rawTitle || '').replace(/[（(].*$/, '').trim()
+          const keys = new Set([rawTitle, bareTitle].filter(Boolean))
+          keys.forEach((k) => {
+            if (!groupsByType[key].has(k)) groupsByType[key].set(k, [])
+            groupsByType[key].get(k).push(g)
+          })
+        }
+        ;(g.children || []).forEach(collectType)
+        ;(g.containers || []).forEach(collectType)
+      }
+      groups.forEach(collectType)
+    }
+
+    // [恢复 2026-08-05] isGroupFullyCenter 跳过逻辑（此前 2026-08-02 移除）：
+    //   区分对象范围时，整组都在对象范围（所有节点 isCenter）→ 该分组节点 fill 全被
+    //   centerScopeColor 覆盖，图例组色块无意义，不再单独列示。
+    //   例：供应链计划为对象范围、按服务模块分组时，"需求计划"（全属供应链计划）
+    //   不单独出现在图例。仅列出至少含一个非对象范围节点的分组。
+    const groupTotalNodes = new Map()
+    const groupCenterNodes = new Map()
     const colorMap = new Map()
     let hasCenterNodes = false
 
@@ -360,8 +415,11 @@ export function useSvgProcessor(options) {
       }
       if (!groupKey) return
 
-      if (centerScopeHighlight && node.isCenter) {
-        hasCenterNodes = true
+      // 统计每组总节点数与中心节点数（判断是否"整组都在对象范围"）
+      groupTotalNodes.set(groupKey, (groupTotalNodes.get(groupKey) || 0) + 1)
+      if (node.isCenter) {
+        groupCenterNodes.set(groupKey, (groupCenterNodes.get(groupKey) || 0) + 1)
+        if (centerScopeHighlight) hasCenterNodes = true
       }
 
       if (!colorMap.has(groupKey)) {
@@ -380,18 +438,35 @@ export function useSvgProcessor(options) {
       }
     })
 
-    // 先添加中心范围颜色项（如果有中心范围节点）
+    // 整组都在对象范围 → 不单独列示（区分对象范围开启时）
+    const isGroupFullyCenter = (groupKey) =>
+      centerScopeHighlight &&
+      groupCenterNodes.get(groupKey) === groupTotalNodes.get(groupKey) &&
+      (groupTotalNodes.get(groupKey) || 0) > 0
+
+    // 先添加对象范围颜色项（如果有对象范围节点）
     if (hasCenterNodes) {
       legendData.push({
-        name: '中心范围',
+        name: '对象范围',
         color: centerScopeColor || centerObjectColor || '#EDEDED',
         isCenter: true
       })
     }
 
-    // 再添加分组颜色项
+    // [LEGEND 2026-08-07] 图例按 colorGroupBy 判定分组层级, 用于点击时匹配对应分组
+    const typeKey = colorGroupBy === 'subDomain' ? 'subDomain'
+      : colorGroupBy === 'serviceModule' ? 'serviceModule'
+      : 'domain'
+
+    // 再添加分组颜色项（跳过整组都在对象范围的分组）
     colorMap.forEach((color, name) => {
-      legendData.push({ name, color })
+      if (isGroupFullyCenter(name)) return
+      legendData.push({
+        name,
+        color,
+        // 附加该分组树中匹配的分组对象引用 (供图例项点击切换 visible, 与配置树双向同步)
+        groups: (groupsByType[typeKey] && groupsByType[typeKey].get(name)) || []
+      })
     })
 
     return legendData
@@ -583,7 +658,7 @@ export function useSvgProcessor(options) {
    * 完整的后处理流程
    * 注意：此函数只处理 SVG 元素，不包含交互设置（交互在组件中单独调用）
    */
-  const processSvg = (svgEl, props, relationDescriptions, mermaidContainer, nodeColorMappings, interaction = null) => {
+  const processSvg = (svgEl, props, relationDescriptions, mermaidContainer, nodeColorMappings, interaction = null, onToggleGroupVisible = null) => {
     if (!svgEl) {
       diag.recordStepMeta('processSvg', { reason: 'svgEl_falsy' })
       return
@@ -612,6 +687,13 @@ export function useSvgProcessor(options) {
 
     applyStyleFixes(svgEl, props.diagramType, mermaidContainer, props.diagramData?.textColor)
 
+    // [FIX 2026-08-06g] 上提自禁用父容器的子分组: 标题保持单行, 父名称以悬停 tooltip 展示。
+    //   原方案 (fixLiftedClusterTitleOverlap 后处理下移内容+拉伸容器) 会导致节点/子容器
+    //   跑出容器盒, 已废弃。此处改为读取 groupedLayout 注册的父路径 map, 挂 hover tooltip。
+    try {
+      svgStyle.attachLiftedParentTooltips(svgEl, getLiftedParentPathMap())
+    } catch (e) { console.warn('[useSvgProcessor] attachLiftedParentTooltips failed:', e) }
+
     // [FIX 2026-08-03] 缺口3: 统计 fixArrowMarkers 实际渲染的 marker-start 数量,
     //   与 addBidirectionalAttributes.bidiEdgesMarked 互补 (后者是标记前, 这里是渲染后).
     //   e2e 可断言 bidiMarkerCount > 0 验证双向渲染生效 (commit 2ba5ec3 修复可验证).
@@ -636,7 +718,8 @@ export function useSvgProcessor(options) {
     reorderZoneRows(svgEl)
 
     if (props.annotationConfig) {
-      renderAnnotationOverlay(svgEl, props.diagramData, props.diagramType, props.annotationConfig, nodeColorMappings, interaction)
+      // [LEGEND 2026-08-07] 传响应式 layoutControlConfig.groups 供图例项点击切换 visible (与配置树双向同步)
+      renderAnnotationOverlay(svgEl, props.diagramData, props.diagramType, props.annotationConfig, nodeColorMappings, interaction, props.layoutControlConfig?.groups || null, onToggleGroupVisible)
     }
 
     // [v33 关键修复] 调用 fixEdgeLabelSize, 必须在 layout 完成后

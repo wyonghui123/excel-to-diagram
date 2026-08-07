@@ -29,6 +29,7 @@
     <template #chart-config>
       <ChartMiniToolbar
         v-if="viewMode === 'chart'"
+        :expand-level="configStore.expandLevel"
         :chart-type="chartConfig.chartType"
         :color-scheme="chartConfig.colorScheme"
         :color-group-by="chartConfig.colorGroupBy"
@@ -37,6 +38,7 @@
         :overall-direction="chartConfig.layoutControl?.overallDirection ?? 'TB'"
         :engine="chartConfig.layoutControl?.engine ?? 'elk'"
         :version-id="embeddedContext.versionId ?? null"
+        @update:expand-level="onExpandLevelChange"
         @update:chart-type="(v) => (chartConfig.chartType = v)"
         @update:color-scheme="(v) => (chartConfig.colorScheme = v)"
         @update:color-group-by="(v) => (chartConfig.colorGroupBy = v)"
@@ -91,8 +93,13 @@ import { MultiObjectManagementPage } from '@/components/common/MultiObjectManage
 import ArchDataChartSwitcher from '@/views/SystemManagement/components/ArchDataChart/ArchDataChartSwitcher.vue'
 import ChartMiniToolbar from '@/views/systemmanagement/components/archdatachart/ChartMiniToolbar.vue'
 import { createDefaultChartConfig } from '@/views/SystemManagement/components/ArchDataChart/chartConfigDefaults.js'
+import { useDiagramConfigStore } from '@/stores/diagramConfigStore'
+import { expandGroupsToLevel } from '@/services/expandLevel.js'
 
 defineOptions({ name: 'RelationshipManagement' })
+
+// [LEVEL 2026-08-07] 展开层级共享 store: 工具栏(ChartMiniToolbar)与图表设置(LayoutControlPanel)同步
+const configStore = useDiagramConfigStore()
 
 // [FIX v1.2.18 2026-06-20] annotation 不应作为顶层对象类型 (它是辅助关联数据, category=auxiliary)
 // 之前错误地加入 objectTypes, 现在移除
@@ -167,6 +174,14 @@ function handleChartRenderComplete(payload) {
 function handleChartRenderError(payload) {
   const msg = payload?.error?.message || payload?.error || '未知错误'
   ElMessage.error(`图表渲染失败: ${msg}`)
+}
+
+// [LEVEL 2026-08-07] 工具栏"展开层级"变更: 写入 store(与图表设置抽屉共享) + 应用到分组树
+function onExpandLevelChange(key) {
+  configStore.setExpandLevel(key)
+  if (chartConfig.layoutControl?.groups) {
+    expandGroupsToLevel(chartConfig.layoutControl.groups, key)
+  }
 }
 </script>
 

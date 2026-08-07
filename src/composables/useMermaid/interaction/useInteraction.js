@@ -294,8 +294,10 @@ export function useInteraction() {
     // [A3 2026-08-03] 收窄 zoom 边界到合理区间
     //   旧: 0.3 / 10 → 过小看不清字, 过大只能看一个节点
     //   新: 0.5 / 5 → 适配 Mermaid 11 节点字号 16px 的可视区间
+    // [A4 2026-08-07] 用户反馈小对象范围(如仅一个子领域)时 5x 仍太小看不清 →
+    //   提高上限到 10, 与 HTML 导出模板缩放上限一致, 允许放大到看清小图细节.
     const minScale = 0.5
-    const maxScale = 5
+    const maxScale = 10
 
     const handleWheel = (e) => {
       e.preventDefault()

@@ -86,6 +86,8 @@ import { buildBusinessObjectGroups } from '@/services/autoGrouping/businessObjec
 import { buildAnnotationFilterFromScope } from '@/services/scopeToFilter.js'
 // [FIX 2026-07-30 v8] SM 图分组构建 + 状态迁移共享函数（layoutPanelAdapter.js）
 import { buildServiceModuleGroupsFromDomainProducts, extractGroupStates as sharedExtractGroupStates, applyGroupStates as sharedApplyGroupStates } from '@/services/groupModel/layoutPanelAdapter.js'
+// [优化 2026-08-05] 布局面板编辑 → 渲染树的合并逻辑（纯函数, 可单测）
+import { applyContainerMembership, applyGroupTitlesAndOrder } from '@/services/hierarchyTree/layoutMergeLogic.js'
 
 const props = defineProps({
   scopeIds: {
@@ -261,15 +263,51 @@ const layoutControlConfig = computed(() => {
       //   深拷贝避免污染 diagramData (unified.groups 是 diagramData 的引用).
       const userStates = sharedExtractGroupStates(chartConfig.layoutControl?.groups)
       const mergedGroups = JSON.parse(JSON.stringify(unified.groups))
+      // [DEBUG 2026-08-05] 分步快照捕获, 供浏览器定位"哪一步合并出错":
+      //   before(派生树) → afterStates(状态) → afterMembership(归属) → afterTitles(标题/顺序)
+      //   替代旧的单点 debugLayout(只含最终 mergedGroups), 避免问题定位只能靠多轮试错.
+      const debugSteps = {
+        before: deepCloneForDebug(mergedGroups),
+        afterStates: null,
+        afterMembership: null,
+        afterTitles: null
+      }
       if (userStates.size > 0) {
         sharedApplyGroupStates(mergedGroups, userStates)
       }
+      debugSteps.afterStates = deepCloneForDebug(mergedGroups)
+      // [MOVE 2026-08-04] 用户把节点/容器拖拽到另一个分组下 → 基于新树结构生成图表。
+      //   unified.groups 的容器归属来自投影容器树（派生），不反映用户在面板的拖拽移动，
+      //   这里按容器 id/elementCode 重建每个分组的容器归属，追随面板树结构。
+      applyContainerMembership(mergedGroups, chartConfig.layoutControl?.groups)
+      debugSteps.afterMembership = deepCloneForDebug(mergedGroups)
+      // [FIX 2026-08-04] 用户在布局面板的"重命名标题 / 拖拽排序"也需反映到图表。
+      //   unified.groups 的 title/顺序来自 deriveLayoutGroups（投影容器树派生），
+      //   不反映用户在面板的编辑。这里按 elementCode 覆盖标题并按面板顺序重排。
+      applyGroupTitlesAndOrder(mergedGroups, chartConfig.layoutControl?.groups)
+      debugSteps.afterTitles = deepCloneForDebug(mergedGroups)
+      // [DEBUG 2026-08-04] 调试钩子, 供浏览器检查面板树与合并树各步骤结构
+      if (typeof window !== 'undefined') {
+        window.__archPage = window.__archPage || {}
+        window.__archPage.debugLayout = {
+          panelGroups: chartConfig.layoutControl?.groups,
+          ...debugSteps,
+          chartType: chartConfig.chartType,
+          disabledBoCodes: collectDisabledBoCodes(chartConfig.layoutControl?.groups)
+        }
+      }
+      // [FOLD 2026-08-05] FR-005: 收集"被禁用的 BO 叶"的业务编码集合.
+      //   mergedGroups 里 BO 叶是 directNodes (code), 无独立 enabled 状态; 而用户在面板
+      //   禁用的是容器表示 (isVirtual=true 的容器, nodes=[code]). 这里从面板树收集被禁用
+      //   BO 叶的 code, 透传给渲染层, 供 useBusinessObjectSyntax 隐藏对应节点并丢弃其连线.
+      const disabledBoCodes = collectDisabledBoCodes(chartConfig.layoutControl?.groups)
       return {
         enabled: true,
         layoutType: 'default',
         layoutEngine: chartConfig.layoutControl?.engine || chartConfig.layoutEngine,
         overallDirection: chartConfig.layoutControl?.overallDirection || unified.overallDirection || 'TB',
         preserveOrder: chartConfig.layoutControl?.preserveOrder ?? true,
+        disabledBoCodes,
         groups: mergedGroups.map(g => normalizeGroupForRendering(g))
       }
     }
@@ -342,6 +380,39 @@ function normalizeGroupForRendering(group) {
   // 之前这里会强制 enabled=false → enabled=true，但破坏了用户 disabled 意图。
   // 现在保留原值，让下游 render 决定如何处理 disabled。
   return cloned
+}
+
+// [DEBUG 2026-08-05] 深拷贝分组树快照, 供 debugLayout 分步对比（不污染 diagramData 引用）。
+function deepCloneForDebug(groups) {
+  return JSON.parse(JSON.stringify(groups))
+}
+
+// [FOLD 2026-08-05] FR-005: 从面板分组树收集"被禁用的 BO 叶"的业务编码集合.
+//   BO 叶在面板树中表示为 isVirtual=true 的容器 (nodes=[业务编码]); 用户禁用 (enabled=false)
+//   后, 渲染层无法从 mergedGroups (BO 叶是 directNodes) 感知, 故在此显式收集并透传.
+function collectDisabledBoCodes(groups) {
+  const codes = []
+  if (!groups) return codes
+  const addCode = (c) => { if (c != null && String(c).trim()) codes.push(String(c)) }
+  function walk(items) {
+    if (!items) return
+    for (const it of items) {
+      if (!it) continue
+      if (it.containers && it.containers.length) {
+        for (const c of it.containers) {
+          if (c && typeof c === 'object' && c.isVirtual === true && c.enabled === false) {
+            if (c.nodes && c.nodes.length) c.nodes.forEach(addCode)
+            if (c.elementRef?.code != null) addCode(c.elementRef.code)
+            if (c.elementCode != null) addCode(c.elementCode)
+          }
+        }
+      }
+      walk(it.children)
+      walk(it.containers)
+    }
+  }
+  walk(groups)
+  return codes
 }
 
 // ============================================================
@@ -443,28 +514,82 @@ watch(() => chartConfig.centerScopeHighlight, (newVal, oldVal) => {
 //   （enabled/visible/containers 等），不是整体替换 layoutControl 对象。
 // ============================================================
 // [FIX 2026-07-29 v3] 标志位：syncLayoutControlFromDiagramData 主动写入 chartConfig.layoutControl 时
-//   跳过 watch 触发的 generateDiagram，避免循环刷新。
+//   跳过 watch 触发的处理，避免循环刷新。
 let _skipLayoutControlWatch = false
 // [E1 2026-08-02] 防抖定时器: 布局面板拖拽分组时 groups 深层连续变化,
-//   每次都全量 generateDiagram + mermaid.run 开销极大, 合并为拖拽停顿后的单次渲染
+//   store 写入合并为拖拽停顿后的单次调用。
+// [P0 2026-08-05] 移除 generateDiagram —— 布局变更不改变 nodes/links 数据。
+//   布局变更已被两条更轻的链路消费:
+//     1) 下方 layoutControlConfig computed 响应式读 chartConfig.layoutControl → 新 prop
+//        → MermaidComponent watch(layoutControlConfig) → renderMermaid (仅重排)。
+//     2) 若分布局只改颜色派生字段, 走 diagramData watch 的 updateColorsOnly 增量。
+//   之前的 generateDiagram 会重新 fetch + 重建 diagramData + 再触发全量渲染, 纯属冗余。
+//   这里仅保留 store 同步, 供需要消费 configStore.layoutControlConfig 的组件保持一致性。
 let _layoutControlTimer = null
 watch(
   () => chartConfig.layoutControl,
   (newLayout) => {
     if (!newLayout) return
     if (_skipLayoutControlWatch) return
-    // [E1 2026-08-02] 250ms 防抖合并连续拖拽
+    // [E1 2026-08-02] 250ms 防抖合并连续拖拽 (仅合并 store 写入)
     clearTimeout(_layoutControlTimer)
-    _layoutControlTimer = setTimeout(async () => {
+    _layoutControlTimer = setTimeout(() => {
       configStore.updateLayoutControlConfig(newLayout)
       // [T3 2026-08-02] 触发来源标注 — chart_diag / window.__archPage.mermaid.stepMeta 可读
-      diag.recordStepMeta('generateDiagram', { source: 'layoutControl-debounced', at: Date.now() })
-      try {
-        await generateDiagram()
-      } catch (e) {
-        console.error('[EmbeddedChartView] generateDiagram after layoutControl change failed:', e)
-      }
+      diag.recordStepMeta('layoutControlUpdate', { source: 'layoutControl-debounced', at: Date.now() })
     }, 250)
+  },
+  { deep: true }
+)
+
+// ============================================================
+// [LEGEND-SYNC 2026-08-07] 图例点击隐藏 → store 变化 → 反向同步回 chartConfig.layoutControl。
+//   问题1根因: 图表设置面板 (LayoutControlPanel) 绑定的是 chartConfig.layoutControl
+//   (RelationScopeTree.vue :model-value="injectedChartConfig.layoutControl"),
+//   而图例点击 (MermaidComponent.handleToggleGroupVisible) 只更新 configStore.layoutControlConfig。
+//   若不反向同步, 面板不同步 (图表已隐藏但面板眼睛图标不变)。
+//   方案: 仅把 store 分组中的 visible 状态按 elementCode/id 写回 chartConfig.layoutControl,
+//   不覆盖结构 (enabled/containers/children 以面板为权威)。仅当值不同才赋值 → 无无限循环。
+// ============================================================
+function syncVisibilityToChartConfig(srcGroups, dstGroups) {
+  if (!Array.isArray(srcGroups) || !Array.isArray(dstGroups)) return
+  const srcMap = new Map()
+  const collect = (list) => {
+    ;(list || []).forEach(g => {
+      if (!g || typeof g !== 'object') return
+      const key = g.elementCode || g.id
+      if (key) srcMap.set(String(key), g)
+      collect(g.children)
+      collect((g.containers || []).filter(c => c && typeof c === 'object'))
+    })
+  }
+  collect(srcGroups)
+  const apply = (list) => {
+    ;(list || []).forEach(g => {
+      if (!g || typeof g !== 'object') return
+      const key = g.elementCode || g.id
+      const src = key ? srcMap.get(String(key)) : null
+      if (src && src.visible !== g.visible) {
+        g.visible = src.visible
+      }
+      apply(g.children)
+      apply((g.containers || []).filter(c => c && typeof c === 'object'))
+    })
+  }
+  apply(dstGroups)
+}
+let _syncingStoreToChart = false
+watch(
+  () => configStore.layoutControlConfig,
+  (newCfg) => {
+    if (!newCfg || !chartConfig.layoutControl) return
+    if (_syncingStoreToChart) return
+    _syncingStoreToChart = true
+    try {
+      syncVisibilityToChartConfig(newCfg.groups, chartConfig.layoutControl.groups)
+    } finally {
+      _syncingStoreToChart = false
+    }
   },
   { deep: true }
 )
@@ -975,7 +1100,9 @@ watch(
     configStore.updateChartDataSnapshot({
       containers: c,
       domainProducts: dp,
-      links: l
+      links: l,
+      // [FIX 2026-08-05] 透传与图表同源的分组色映射 (colorize 输出), 供色点取默认色
+      groupColorMap: diagramData.value?.diagramData?.groupColorMap || diagramData.value?.groupColorMap || {}
     })
   },
   { immediate: true }

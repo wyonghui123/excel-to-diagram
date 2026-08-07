@@ -112,3 +112,71 @@ describe('useSvgProcessor - processSvg 调用 fixEdgeLabelSize (v33 关键回归
     expect(() => api.fixEdgeLabelSize(undefined)).not.toThrow()
   })
 })
+
+describe('useSvgProcessor - buildColorLegendData 整组都在对象范围不单独列示 (2026-08-05 恢复)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  const makeApi = async () => {
+    const { useSvgProcessor } = await import('../useSvgProcessor.js')
+    return useSvgProcessor({})
+  }
+
+  it('区分对象范围时, 整组都在对象范围的服务模块不单独列示', async () => {
+    const api = await makeApi()
+    const diagramData = {
+      colorGroupBy: 'serviceModule',
+      centerScopeColor: '#808080',
+      centerObjectColor: '#EDEDED',
+      nodes: [
+        // 需求计划：整组都在对象范围（isCenter=true）→ 应被跳过
+        { code: 'A1', name: 'A1', serviceModuleName: '需求计划', subDomain: '供应链计划', domain: '计划', isCenter: true },
+        { code: 'A2', name: 'A2', serviceModuleName: '需求计划', subDomain: '供应链计划', domain: '计划', isCenter: true },
+        // 生产计划：含非对象范围节点 → 应保留
+        { code: 'B1', name: 'B1', serviceModuleName: '生产计划', subDomain: '制造', domain: '制造', isCenter: true },
+        { code: 'B2', name: 'B2', serviceModuleName: '生产计划', subDomain: '制造', domain: '制造', isCenter: false }
+      ]
+    }
+    const legend = api.buildColorLegendData(diagramData, [], true)
+    const names = legend.map(i => i.name)
+    expect(names).toContain('对象范围')          // 有对象范围节点 → 对象范围项在
+    expect(names).not.toContain('需求计划')       // 整组都在对象范围 → 跳过
+    expect(names).toContain('生产计划')           // 含非对象范围节点 → 保留
+  })
+
+  it('不区分对象范围时, 所有分组都正常列示', async () => {
+    const api = await makeApi()
+    const diagramData = {
+      colorGroupBy: 'serviceModule',
+      centerScopeColor: '#808080',
+      centerObjectColor: '#EDEDED',
+      nodes: [
+        { code: 'A1', name: 'A1', serviceModuleName: '需求计划', subDomain: '供应链计划', domain: '计划', isCenter: true },
+        { code: 'A2', name: 'A2', serviceModuleName: '需求计划', subDomain: '供应链计划', domain: '计划', isCenter: true }
+      ]
+    }
+    const legend = api.buildColorLegendData(diagramData, [], false)
+    const names = legend.map(i => i.name)
+    expect(names).not.toContain('对象范围')       // 不区分 → 无对象范围项
+    expect(names).toContain('需求计划')           // 不区分 → 整组对象范围也正常列出
+  })
+
+  it('按领域分组时, 整组都在对象范围的领域同样跳过', async () => {
+    const api = await makeApi()
+    const diagramData = {
+      colorGroupBy: 'domain',
+      centerScopeColor: '#808080',
+      centerObjectColor: '#EDEDED',
+      nodes: [
+        { code: 'A1', name: 'A1', serviceModuleName: 'M1', subDomain: 'S1', domain: '计划', isCenter: true },
+        { code: 'B1', name: 'B1', serviceModuleName: 'M2', subDomain: 'S2', domain: '计划', isCenter: true },
+        { code: 'C1', name: 'C1', serviceModuleName: 'M3', subDomain: 'S3', domain: '制造', isCenter: false }
+      ]
+    }
+    const legend = api.buildColorLegendData(diagramData, [], true)
+    const names = legend.map(i => i.name)
+    expect(names).not.toContain('计划')           // 整组都在对象范围 → 跳过
+    expect(names).toContain('制造')               // 含非对象范围节点 → 保留
+  })
+})

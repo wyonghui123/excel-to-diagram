@@ -306,7 +306,17 @@ export function useTooltip() {
     const dirLabel = _resolveDirectionLabel(relationDirection)
     if (dirLabel) text += `\n${indent}方向: ${dirLabel}`
 
-    text += `\n${indent}${indentedDesc}`
+    // [OPT 2026-08-06] 高层级关系 (源/目标均为 domain/subDomain/serviceModule 级别, 即 level<=2)
+    //   折叠到容器后, 关系说明对用户无意义 (例: "供应链云 → 供应链云, 关系说明: ..."), 故隐藏.
+    //   仅当源与目标任一端为 BO (level===3) 时展示. childRelations (SM 子关系) 不受影响.
+    //   feature flag: VITE_HIDE_HIGHLEVEL_DESC (默认 true)
+    const hideHighLevelDesc = import.meta.env.VITE_HIDE_HIGHLEVEL_DESC !== 'false'
+    const srcLevel = typeof relation.sourceLevel === 'number' ? relation.sourceLevel : 3
+    const tgtLevel = typeof relation.targetLevel === 'number' ? relation.targetLevel : 3
+    const hideDesc = hideHighLevelDesc && srcLevel <= 2 && tgtLevel <= 2
+    if (!hideDesc) {
+      text += `\n${indent}${indentedDesc}`
+    }
 
     const annotationLine = _resolveAnnotationLine(relation, annotationFilter)
     if (annotationLine) text += `\n${indent}备注: ${annotationLine}`

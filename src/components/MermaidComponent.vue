@@ -32,24 +32,42 @@
       </div>
     </div>
 
-    <div class="mermaid-wrapper" ref="mermaidWrapper">
+    <div class="mermaid-wrapper" ref="mermaidWrapper" @contextmenu.prevent="handleContextMenu">
       <div class="draggable-area" ref="draggableArea">
         <div class="diagram-canvas">
-          <div ref="mermaidContainer" class="mermaid-content" :class="[diagramType, { 'hide-tails': shouldHideTails }]"></div>
+          <div ref="mermaidContainer" class="mermaid-content" :class="[diagramType, { 'hide-tails': shouldHideTails }, { 'is-rendering': rendering }]"></div>
         </div>
+      </div>
+      <!-- [UX 2026-08-05] 渲染覆盖层: mermaid.run() 期间 SVG 元素堆叠在中心,
+           显示转圈覆盖层 + 隐藏未完成 SVG, 渲染完成后淡入, 消除"堆叠中心"闪烁 -->
+      <transition name="rendering-fade">
+        <div v-if="rendering" class="mermaid-rendering-overlay">
+          <el-icon class="mermaid-loading-icon" :size="28"><Loading /></el-icon>
+          <span class="mermaid-loading-text">图表渲染中<span class="mermaid-loading-dots"><i></i><i></i><i></i></span></span>
+        </div>
+      </transition>
+      <!-- [CTX 2026-08-07] 右键上下文菜单: 按分组类型展示折叠/展开选项 -->
+      <div v-if="ctxMenu?.visible" class="mermaid-ctx-menu"
+        :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }">
+        <div class="ctx-menu-header">{{ ctxMenu.groupTitle }}</div>
+        <div class="ctx-menu-divider"></div>
+        <div v-for="item in ctxMenu.items" :key="item.key"
+          class="ctx-menu-item"
+          @click="executeContextMenuAction(item.key)">{{ item.label }}</div>
       </div>
     </div>
   </div>
 </template>
 
 <script>
-import { ref, onMounted, onBeforeUnmount, watch, nextTick, computed } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, watch, nextTick, computed } from 'vue'
 import mermaid from 'mermaid'
 import { jsPDF } from 'jspdf'
 // eslint-disable-next-line no-unused-vars -- svg2pdf.js 注册 jsPDF 的 .svg() 方法
 import 'svg2pdf.js'
 import html2canvas from 'html2canvas'
 import { AppIcon } from './common/AppIcon'
+import { Loading } from '@element-plus/icons-vue'
 import { useDiagramConfigStore } from '../stores/diagramConfigStore.js'
 
 import { useMermaidConfig } from '../composables/useMermaid/config/useMermaidConfig.js'
@@ -60,9 +78,12 @@ import { useSvgStyle } from '../composables/useMermaid/style/index.js'
 import { useTooltip, preloadEnums } from '../composables/useMermaid/tooltip/index.js'
 import { useMermaidColors } from '../composables/useMermaid/color/index.js'
 import { useMermaidDataMap } from '../composables/useMermaid/dataMap/index.js'
+import { remapLinksToVisibleAncestors } from '../composables/useMermaid/layouts/linkRemapper.js'
+import { upliftNodeId } from '../composables/useMermaid/layouts/upliftDerivation.js'
 import { useAnnotation, useAnnotationOverlay } from '../composables/useMermaid/annotation/index.js'
 import { loadElkLayouts } from '../composables/useMermaid/renderer/useElkLoader.js'
 import { useSvgProcessor } from '../composables/useMermaid/renderer/useSvgProcessor.js'
+import { groupLevelOf } from '../services/expandLevel.js'
 import './MermaidComponent.css'
 
 export default {
@@ -137,8 +158,10 @@ export default {
       }
       
       function processGroup(group) {
+        // [FIX 2026-08-04] 用户手动重命名的分组 (标记 _userRenamed) 不被 titleMap 还原，
+        //   否则 groupControlTitleMap (原始数据名) 会把面板里的重命名标题覆盖掉。
         const matchedTitle = titleMap[group.id] || titleMap[group.elementCode] || titleMap[group.title]
-        if (matchedTitle) {
+        if (matchedTitle && !group._userRenamed) {
           group.title = matchedTitle
           group.fullTitle = matchedTitle
         }
@@ -161,6 +184,12 @@ export default {
     const draggableArea = ref(null)
     const isMaximized = ref(false)
     let isRendering = false  // 防止无限循环
+    // [UX 2026-08-05] 渲染覆盖层状态 (转圈 + SVG 淡入):
+    //   mermaid.run() 期间 SVG 元素尚未布局定位 (全部堆叠在中心), 用户体验差.
+    //   rendering 为响应式 ref, 模板据此显示覆盖层 + 隐藏未完成 SVG; 渲染完成后淡入.
+    //   setRendering 统一封装 (isRendering 防重入 guard + rendering 覆盖层开关), 避免遗漏退出点.
+    const rendering = ref(false)
+    const setRendering = (v) => { isRendering = v; rendering.value = v }
     let lastRenderData = null  // 上次渲染的数据，用于检测变化
     // [FIX 2026-08-02] L5 渲染跳过 (spec 4.4): 上次生成的 mermaidCode, code-diff 用
     let lastRenderedCode = null
@@ -299,6 +328,17 @@ export default {
       linkColorMappings = []
 
       try {
+        // [UPLIFT 2026-08-05] FR-003: 存在上提分组时, 在语法层前重映射连线端点.
+        //   上提分组由 enabled 自动推导 (见 upliftDerivation), 无需显式标记判断;
+        //   remapLinksToVisibleAncestors 内部无上提时返回原 links. 克隆 data 避免改动源.
+        const remapGroups = layoutControlConfig?.groups
+        if (data && data.links && data.links.length > 0 && remapGroups && remapGroups.length > 0) {
+          data = {
+            ...data,
+            links: remapLinksToVisibleAncestors(data.links, remapGroups, data.domainProducts)
+          }
+        }
+
         // [FIX 2026-08-02] 语法路由由 diagramType 语义决定 (管道统一后 BO 数据也含 containers)。
         //   旧启发式 `data.containers` 会把 BO 图 (统一管道投影也返回 containers) 误路由到
         //   serviceModuleSyntax → BO 节点无 category 处理 + linkColorMappings 缺失 (B 断言 FAIL)。
@@ -344,7 +384,14 @@ export default {
       if (isRendering) {
         return
       }
-      isRendering = true
+      setRendering(true)
+      // [FIX 2026-08-07] 强制 DOM flush: rendering=true 先把 overlay 刷进 DOM,
+      //   再跑大计算 (generateMermaidCode / mermaid.run). 否则非 ELK 路径完全无 await,
+      //   Vue scheduler 没机会 commit, overlay 永不显示 → 用户看到几秒钟空白.
+      //   nextTick (微任务, Vue DOM 更新完成) + rAF (下一帧浏览器绘制) 保证用户肉眼看到 loading,
+      //   才进入后续同步计算。
+      await nextTick()
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
       // [FIX 2026-08-01] 渲染埋点 — useDiagnostics 记录开始时间, 触发 hooks.
       // chart_diag / E2E 通过 window.__archPage.mermaid.lastRender 一键读取耗时.
       diag.beginRender({
@@ -427,7 +474,7 @@ export default {
                 containerCount: skipSvg?.querySelectorAll('g.cluster').length || 0,
                 skipped: true
               })
-              isRendering = false
+              setRendering(false)
               return
             }
 
@@ -446,7 +493,7 @@ export default {
           }
         } catch (err) {
           console.error('[MermaidComponent] renderMermaid error:', err)
-          isRendering = false
+          setRendering(false)
         }
 
       // [FIX 2026-08-02] nextTick + mermaid.run 位于 if (mermaidContainer.value && props.diagramData)
@@ -496,7 +543,7 @@ export default {
             .then(() => {
               const svgElAfter = mermaidContainer.value?.querySelector('svg')
               if (svgElAfter) {
-                svgProcessor.processSvg(svgElAfter, props, relationDescriptions, mermaidContainer, nodeColorMappings, interaction)
+                svgProcessor.processSvg(svgElAfter, props, relationDescriptions, mermaidContainer, nodeColorMappings, interaction, handleToggleGroupVisible)
 
                 // [FIX 2026-08-02 v5] 回到原方案: 中心范围高亮 = 中心节点 fill 用 centerScopeColor (指定颜色)
                 //   v2 曾改为"分组色 + 粗虚线边框", 用户反馈虚线区分不明显, 改回用颜色区分。
@@ -547,7 +594,7 @@ export default {
                 lastCenterScopeHighlight = props.diagramData?.centerScopeHighlight
                 
                 // 渲染完成，重置渲染状态
-                isRendering = false
+                setRendering(false)
                 // [FIX 2026-08-01] 渲染完成埋点 — chart_diag / E2E 一键读取耗时和元数据
                 const finishedSvg = mermaidContainer.value?.querySelector('svg')
                 diag.endRender({
@@ -777,7 +824,7 @@ export default {
                 }
             }).catch((err) => {
               console.error('[MermaidComponent] mermaid.run() rejected:', err)
-              isRendering = false
+              setRendering(false)
               // [FIX 2026-08-01] 渲染失败埋点
               diag.recordError(err, 'renderMermaid')
               diag.endRender({ error: err?.message || String(err) })
@@ -787,13 +834,13 @@ export default {
           //   不再静默失败: 走 diag 链路 → onError hook → EmbeddedChartView emit render-error →
           //   RelationshipManagement.handleChartRenderError → ElMessage.error toast.
           console.error('[MermaidComponent] nextTick callback sync error:', err)
-          isRendering = false
+          setRendering(false)
           diag.recordError(err, 'renderMermaid.nextTick')
           diag.endRender({ error: err?.message || String(err) })
         }
         })
       } else {
-        isRendering = false
+        setRendering(false)
         // [FIX 2026-08-01] 跳过渲染也记录 (避免 lastRender 卡在 null)
         diag.recordWarning('renderMermaid early return: container or diagramData missing', 'renderMermaid')
         diag.endRender({ error: 'no_container_or_diagramData' })
@@ -938,6 +985,10 @@ export default {
           centerScope: data.centerScope || [],
           centerScopeColor: data.centerScopeColor || '#808080'
         })
+        // [FIX 2026-08-05] 增量改线色后, 同步箭头 marker 颜色跟随线色
+        //   (updateLinkColors 只改 path stroke, 箭头 marker 仍留在全量渲染时的旧色 →
+        //    改对象范围色/配色后线色变了但箭头色没变).
+        svgStyle.syncArrowMarkers(svg, props.diagramType)
       }
 
       // 更新文字颜色
@@ -952,7 +1003,7 @@ export default {
         try {
           // 同步更新 nodeColorMappings 数组内每个 mapping.color (供 buildColorLegendData 使用)
           // updateNodeColors 已经做了: mapping.color = newColor
-          svgProcessor.updateColorLegend(svg, data, props.annotationConfig, nodeColorMappings)
+          svgProcessor.updateColorLegend(svg, data, props.annotationConfig, nodeColorMappings, props.layoutControlConfig?.groups || null, handleToggleGroupVisible)
         } catch (e) {
           console.warn('[MermaidComponent.updateColorsOnly] legend refresh failed:', e)
         }
@@ -980,6 +1031,456 @@ export default {
       }
 
       return true
+    }
+
+    // [VIS 2026-08-07] 增量可见性更新: 隐藏/显示分组时【不重跑 ELK 布局】,
+    //   直接对已渲染 SVG 的 容器(cluster)/节点(g.node)/连线(path) 做 display 切换。
+    //   语义区分: 隐藏(visible=false) 只做展示层隐藏(留空位), 不动布局;
+    //   禁用(enabled=false) 走全量渲染(子孙上浮打平+重新布局)。
+    //   输入: 当前 layoutControlConfig.groups (含各分组最新 visible 状态)
+    // [SCOPE 2026-08-07] 对象范围保护 (组件级共享): 范围内要素及其祖先链不因父分组隐藏而被隐藏。
+    //   例: 对象范围=供应链云下采购供应, 隐藏供应链云 → 只隐藏供应链云下其他要素,
+    //   采购供应及其中间祖先(供应链计划/供应链云)保持显示。
+    //   判断依据 configStore.centerScopeMarkers (每次读取最新, 避免 shallowRef 替换后捕获旧值):
+    //     serviceModules: 范围内服务模块 (name/code → true) → 直接范围分组 (整棵子树受保护)
+    //     subDomains/domains: hasCenter=true → 含范围内要素的祖先分组
+    //   标题可能含祖先路径/编码后缀 (如 "采购供应（供应链计划）"), 取裸名匹配 markers。
+    const isDirectScopeGroup = (g) => {
+      const scopeMarkers = configStore.centerScopeMarkers
+      if (!g || typeof g !== 'object' || !scopeMarkers) return false
+      const name = (g.title || g.name || '').replace(/[（(].*$/, '').trim()
+      const code = g.elementCode || ''
+      return !!scopeMarkers.serviceModules?.has(name) || (!!code && !!scopeMarkers.serviceModules?.has(code))
+    }
+    const isScopeAncestor = (g) => {
+      const scopeMarkers = configStore.centerScopeMarkers
+      if (!g || typeof g !== 'object' || !scopeMarkers) return false
+      const name = (g.title || g.name || '').replace(/[（(].*$/, '').trim()
+      if (scopeMarkers.subDomains?.get(name) === true) return true
+      if (scopeMarkers.domains?.get(name) === true) return true
+      return false
+    }
+    const isScopeProtected = (g) => isDirectScopeGroup(g) || isScopeAncestor(g)
+
+    const updateVisibilityOnly = (groups) => {
+      const svg = mermaidContainer.value?.querySelector('svg')
+      if (!svg) return false
+
+      const hiddenNodeCodes = new Set()
+      const hiddenContainerCodes = new Set()
+      // [VIS 2026-08-07] 聚合/折叠节点 id 集合 (COLLAPSE_<sanitized group id>):
+      //   展开到子领域/服务模块时, 子领域/服务模块折叠为聚合节点(渲染为 g.node 而非 g.cluster),
+      //   隐藏其所属分组时必须连同这些聚合节点及连到它们的连线一起隐藏(不重跑布局)。
+      const hiddenCollapseIds = new Set()
+
+      const collectLeafNodes = (leaf, set) => {
+        if (typeof leaf === 'string') { set.add(leaf); return }
+        if (!leaf || typeof leaf !== 'object') return
+        if (leaf.code) set.add(leaf.code)
+        else if (leaf.elementCode) set.add(leaf.elementCode)
+        else if (leaf.name) set.add(leaf.name)
+        ;(leaf.directNodes || []).forEach((n) => {
+          if (typeof n === 'string') set.add(n)
+          else if (n && typeof n === 'object') set.add(n.code || n.name)
+        })
+      }
+      const collectGroupNodes = (g, set) => {
+        ;(g.containers || []).forEach((c) => collectLeafNodes(c, set))
+        ;(g.directNodes || []).forEach((n) => {
+          if (typeof n === 'string') set.add(n)
+          else if (n && typeof n === 'object') set.add(n.code || n.name)
+        })
+        ;(g.children || []).forEach((ch) => collectGroupNodes(ch, set))
+      }
+      // [VIS 2026-08-07] 递归收集分组自身 + 所有子孙分组的 容器code 与 聚合节点id。
+      //   隐藏父分组(如领域)时, 其子孙分组(子领域/服务模块)渲染为独立的 g.cluster /
+      //   g.node(COLLAPSE_<id>) SVG 元素, 必须一并加入隐藏集合, 否则领域隐藏后
+      //   子领域容器/聚合节点仍显示。
+      const collectDescendantGroupIds = (g, containerCodes, collapseIds) => {
+        ;(g.children || []).forEach((ch) => {
+          if (!ch || typeof ch !== 'object') return
+          const code = ch.elementCode || ch.id
+          if (code) containerCodes.add(code)
+          if (ch.id) collapseIds.add(upliftNodeId(ch))
+          collectDescendantGroupIds(ch, containerCodes, collapseIds)
+        })
+        ;(g.containers || []).forEach((c) => {
+          if (!c || typeof c !== 'object') return
+          const code = c.elementCode || c.id
+          if (code) containerCodes.add(code)
+          if (c.id) collapseIds.add(upliftNodeId(c))
+          collectDescendantGroupIds(c, containerCodes, collapseIds)
+        })
+      }
+      // [SCOPE 2026-08-07] 对象范围保护逻辑见组件级共享函数 isScopeProtected (isDirectScopeGroup/isScopeAncestor)。
+      const walk = (list, inheritedHidden) => {
+        ;(list || []).forEach((g) => {
+          if (!g || typeof g !== 'object') return
+          const effectiveHidden = inheritedHidden || g.visible === false
+          const shouldHide = effectiveHidden && !isScopeProtected(g)
+          if (shouldHide) {
+            const code = g.elementCode || g.id
+            if (code) hiddenContainerCodes.add(code)
+            // [VIS 2026-08-07] 记录隐藏分组的聚合节点 id (用于隐藏 g.node 聚合节点及其连线)
+            if (g.id) hiddenCollapseIds.add(upliftNodeId(g))
+            collectGroupNodes(g, hiddenNodeCodes)
+            // [VIS 2026-08-07] 递归隐藏子孙分组的容器/聚合节点 (子领域/服务模块)
+            collectDescendantGroupIds(g, hiddenContainerCodes, hiddenCollapseIds)
+          }
+          // 叶子容器单独隐藏 (visible=false); 范围内叶子容器受保护
+          if (Array.isArray(g.containers)) {
+            g.containers.forEach((c) => {
+              if (c && typeof c === 'object' && c.visible === false && !isScopeProtected(c)) {
+                collectLeafNodes(c, hiddenNodeCodes)
+              }
+            })
+          }
+          walk(g.children, effectiveHidden)
+          walk(g.containers, effectiveHidden)
+        })
+      }
+      walk(groups, false)
+
+      // nodeId ↔ nodeCode 映射
+      const nodeIdToCode = new Map()
+      nodeColorMappings.forEach((m) => { if (m.nodeId) nodeIdToCode.set(m.nodeId, m.nodeCode) })
+
+      // 1) 节点: 按 data-code 隐藏/显示
+      nodeColorMappings.forEach((m) => {
+        if (!m.nodeCode) return
+        const hide = hiddenNodeCodes.has(m.nodeCode)
+        const el = svg.querySelector(`g.node[data-code="${m.nodeCode}"]`)
+        if (el) el.style.display = hide ? 'none' : ''
+      })
+
+      // 2) 连线: 任一端节点被隐藏则该连线隐藏
+      // [VIS 2026-08-07] 隐藏连线时必须连同连线标题(edgeLabel)一起隐藏, 否则连线消失但标题悬空显示。
+      //   Mermaid 的 edgeLabel 与 path 同在 g.edgePath / g.flowchart-link 分组内, 故隐藏整个
+      //   edge 分组(而非仅 path), 使连线与其标题一起隐/显。
+      if (linkColorMappings && linkColorMappings.length > 0) {
+        const paths = svg.querySelectorAll('.flowchart-link path, .edgePath path, .edgePaths > path')
+        // [LABEL 2026-08-07] Mermaid 11 中连线文字 (edgeLabel) 位于独立 g.edgeLabels > g.edgeLabel 分组,
+        //   不在 g.edgePath / g.flowchart-link 内; 隐藏连线分组不会隐藏 label, 须按相同 index 单独隐藏。
+        const edgeLabels = svg.querySelectorAll('g.edgeLabel')
+        linkColorMappings.forEach((mapping) => {
+          const srcCode = nodeIdToCode.get(mapping.sourceId)
+          const tgtCode = nodeIdToCode.get(mapping.targetId)
+          // [VIS 2026-08-07] 聚合端点 (COLLAPSE_<id>) 不在 nodeColorMappings 中 (nodeIdToCode 查不到),
+          //   需用 hiddenCollapseIds 判定端点是否属于隐藏分组。
+          const srcHidden = (srcCode && hiddenNodeCodes.has(srcCode)) || hiddenCollapseIds.has(mapping.sourceId)
+          const tgtHidden = (tgtCode && hiddenNodeCodes.has(tgtCode)) || hiddenCollapseIds.has(mapping.targetId)
+          const hide = srcHidden || tgtHidden
+          const pathEl = paths[mapping.index]
+          if (pathEl) {
+            const edgeGroup = pathEl.closest('g.edgePath, g.flowchart-link') || pathEl
+            edgeGroup.style.display = hide ? 'none' : ''
+          }
+          // [LABEL 2026-08-07] 独立隐藏对应连线文字, 防止连线消失但 label 悬空
+          const labelEl = edgeLabels[mapping.index]
+          if (labelEl) {
+            const labelGroup = labelEl.closest('g.edgeLabel') || labelEl
+            labelGroup.style.display = hide ? 'none' : ''
+          }
+        })
+      }
+
+      // 3) 容器: 按 data-container-code 隐藏/显示 (仅处理带 code 的, 未匹配到的不动)
+      svg.querySelectorAll('g.cluster, .subgraph').forEach((el) => {
+        const code = el.getAttribute('data-container-code')
+        if (!code) return
+        el.style.display = hiddenContainerCodes.has(code) ? 'none' : ''
+      })
+
+      // 3.5) 聚合/折叠节点 (COLLAPSE_<id>, 渲染为 g.node): 按 hiddenCollapseIds 隐藏/显示。
+      //   展开到子领域/服务模块时这些分组折叠为聚合节点, 不在 g.cluster 中, 须单独处理。
+      //   mermaid SVG 节点 id 形如 "flowchart-COLLAPSE_<safeId>-<N>", 截取到首个 "-"(计数器分隔)即为聚合 id。
+      svg.querySelectorAll('g.node[id^="flowchart-COLLAPSE_"]').forEach((el) => {
+        const id = el.id || ''
+        const cut = id.indexOf('-', 'flowchart-COLLAPSE_'.length)
+        const collapseId = cut === -1 ? id.substring('flowchart-'.length) : id.substring('flowchart-'.length, cut)
+        el.style.display = hiddenCollapseIds.has(collapseId) ? 'none' : ''
+      })
+
+      return true
+    }
+
+    // [LEGEND 2026-08-07] 图例项点击分组可见性切换回调 (由 useSvgProcessor → annotationOverlay 图例项 click 触发)。
+    //   关键: 不能就地改 live 分组对象后传同一引用, 否则 watcher 的 oldVal/newVal 共享同一已被改的
+    //   groups → sigVisibility 相等 → updateVisibilityOnly 不触发。正确做法: 深克隆 store 配置、
+    //   在克隆上改 visible, 再以新引用替换 → watcher 触发增量隐/显 (updateVisibilityOnly),
+    //   同时 LayoutControlPanel 监听同一 store 配置 → 面板树双向同步。与面板侧隐藏路径保持一致。
+    //   [FIX 2026-08-07 v2] 除 store 替换外, 直接调用 updateVisibilityOnly 强制立即隐/显图表,
+    //     不依赖 store → computed → prop → watcher 的传播链 (该链在部分场景下不触发)。
+    const handleToggleGroupVisible = (name, hidden, groups) => {
+      const cfg = configStore.layoutControlConfig
+      if (!cfg || !Array.isArray(groups) || groups.length === 0) return
+      const ids = new Set(groups.map(g => g.id || g.elementCode))
+      // hidden=true 表示"隐藏", 故设置 visible = !hidden
+      const visibleState = !hidden
+      // [SCOPE 2026-08-07] 隐藏时对象范围保护: 范围内要素及其祖先链保持可见 (修复问题2)。
+      //   - 直接范围分组 (isDirectScopeGroup, 如采购供应): 自身不隐藏, 且整棵子树不递归隐藏
+      //     (其业务对象均为范围内要素)。
+      //   - 范围祖先分组 (isScopeAncestor, 如供应链计划/供应链云): 自身不隐藏, 但仍递归,
+      //     使非范围内子孙被隐藏、范围内链保持可见。
+      //   这样 store/面板/渲染 三处状态一致, 避免"只在 updateVisibilityOnly 的 SVG 层做保护"
+      //   导致重渲染后范围内要素又被隐藏。
+      const setVis = (g, v) => {
+        if (!g || typeof g !== 'object') return
+        const hiding = v === false
+        const directScope = hiding && isDirectScopeGroup(g)
+        const ancestorScope = hiding && isScopeAncestor(g)
+        if (!directScope && !ancestorScope) {
+          g.visible = v
+        }
+        // 直接范围分组: 整棵子树受保护, 不再递归 (范围内业务对象保持可见)
+        if (directScope) return
+        // 祖先分组或普通分组: 递归 (普通分组整棵隐藏; 祖先分组隐藏非范围内子孙)
+        if (Array.isArray(g.children)) g.children.forEach(c => setVis(c, v))
+        if (Array.isArray(g.containers)) g.containers.forEach(c => setVis(c, v))
+      }
+      const walk = (list) => {
+        ;(list || []).forEach(g => {
+          if (!g || typeof g !== 'object') return
+          if (ids.has(g.id) || ids.has(g.elementCode)) setVis(g, visibleState)
+          walk(g.children)
+          walk((g.containers || []).filter(c => c && typeof c === 'object'))
+        })
+      }
+      const newConfig = JSON.parse(JSON.stringify(cfg))
+      walk(newConfig.groups)
+      // 1) 先以新引用替换 store → 触发面板树(LayoutControlPanel)双向同步。
+      //    必须放在 updateVisibilityOnly 之前(或其异常不影响面板同步), 否则 SVG 隐藏
+      //    若抛错会跳过 store 更新, 面板不同步而图表已部分隐藏(表现为"图表OK面板没动")。
+      configStore.updateLayoutControlConfig(newConfig)
+      // 2) 直接增量隐/显图表 (最可靠, 不依赖 watcher 传播链); 独立 try/catch 隔离异常。
+      try {
+        updateVisibilityOnly(newConfig.groups)
+      } catch (e) {
+        console.error('[LEGEND] updateVisibilityOnly failed', e)
+      }
+    }
+
+    // [CTX 2026-08-07] 右键上下文菜单
+    const ctxMenu = reactive({
+      visible: false,
+      x: 0,
+      y: 0,
+      groupTitle: '',
+      items: []  // { key: string, label: string }
+    })
+
+    // 查找分组树中匹配的节点
+    function findGroupInTree(list, matcher) {
+      if (!Array.isArray(list)) return null
+      for (const g of list) {
+        if (!g || typeof g !== 'object') continue
+        if (matcher(g)) return g
+        let found = findGroupInTree(g.children, matcher)
+        if (found) return found
+        found = findGroupInTree(g.containers, matcher)
+        if (found) return found
+      }
+      return null
+    }
+
+    // 根据 SVG target 识别分组元素
+    function identifyGroupFromSvg(target) {
+      if (!target) return null
+      // [FIX 2026-08-07] 持续向上遍历直到找到 cluster 或 node 的 g 元素
+      // 右键可能点击到 label/text/rect 等内部元素，最近的 g 是 label 而非 cluster/node
+      let el = target
+      while (el && el !== document.body) {
+        while (el && el.tagName !== 'g' && el !== document.body) {
+          el = el.parentElement
+        }
+        if (!el || el === document.body) {
+          console.log('[CTX] identifyGroupFromSvg: reached body, no g element found')
+          return null
+        }
+        const id = el.getAttribute('id') || ''
+        const cls = el.getAttribute('class') || ''
+        console.log('[CTX] identifyGroupFromSvg: found g element, id=' + id + ', class=' + cls)
+
+        // [FIX 2026-08-07] 精确匹配 class 名（split 避免 nodes/cluster-label 等子串误匹配）
+        const classList = cls.trim().split(/\s+/)
+        const isCluster = classList.includes('cluster')
+        const isNode = classList.includes('node')
+        if (!isCluster && !isNode) {
+          console.log('[CTX] identifyGroupFromSvg: not a cluster or node, continuing up')
+          el = el.parentElement
+          continue
+        }
+
+        // 提取分组 ID: cluster-xxx → xxx
+        let groupId = ''
+        if (id.startsWith('cluster-')) {
+          groupId = id.slice(8)
+        } else if (id.startsWith('flowchart-')) {
+          groupId = id.slice(10)
+        } else if (id.startsWith('node-')) {
+          groupId = id.slice(5)
+        } else {
+          groupId = id
+        }
+        if (!groupId) {
+          // cluster-label 等无 ID 的子元素，继续向上找父 cluster
+          console.log('[CTX] identifyGroupFromSvg: empty groupId, continuing up to parent')
+          el = el.parentElement
+          continue
+        }
+        console.log('[CTX] identifyGroupFromSvg: extracted groupId=' + groupId)
+
+        // [FIX 2026-08-07] 处理 Mermaid 特殊 ID 格式，提取真实的 elementCode
+        //   COLLAPSE_SD_MM-28 → SD_MM, G_SCM → SCM
+        let elementCode = groupId
+        if (elementCode.startsWith('COLLAPSE_')) elementCode = elementCode.slice(9)
+        if (elementCode.startsWith('G_')) elementCode = elementCode.slice(2)
+        const dashIdx = elementCode.lastIndexOf('-')
+        if (dashIdx > 0 && /^\d+$/.test(elementCode.slice(dashIdx + 1))) {
+          elementCode = elementCode.slice(0, dashIdx)
+        }
+        if (elementCode !== groupId) {
+          console.log('[CTX] identifyGroupFromSvg: normalized elementCode=' + elementCode)
+        }
+
+        // 在 configStore.layoutControlConfig.groups 中查找匹配的分组
+        const cfg = configStore.layoutControlConfig
+        if (!cfg || !Array.isArray(cfg.groups)) {
+          console.log('[CTX] identifyGroupFromSvg: no groups in config')
+          return null
+        }
+        console.log('[CTX] identifyGroupFromSvg: groups count=' + cfg.groups.length)
+        const group = findGroupInTree(cfg.groups, g => {
+          const key = g.elementCode || g.id
+          return key === elementCode || g.title === elementCode
+        })
+        if (group) {
+          console.log('[CTX] identifyGroupFromSvg: matched group:', group.title || group.elementCode || group.id)
+          return group
+        }
+        console.log('[CTX] identifyGroupFromSvg: no matching group for elementCode=' + elementCode + ', continuing up')
+        el = el.parentElement
+      }
+      return null
+    }
+
+    // 根据分组类型生成菜单项
+    function getContextMenuItems(group) {
+      const gtype = (group.groupType || '').toLowerCase()
+      if (gtype === 'domain') {
+        return [
+          { key: 'collapse', label: '折叠' },
+          { key: 'expandSub', label: '展开到子领域' },
+          { key: 'expandSM', label: '展开到服务模块' },
+          { key: 'expandBO', label: '展开到业务对象' }
+        ]
+      }
+      if (gtype === 'servicemodule' || gtype === 'service_module') {
+        return [
+          { key: 'collapse', label: '折叠' },
+          { key: 'expandBO', label: '展开到业务对象' }
+        ]
+      }
+      if (gtype === 'subdomain' || gtype === 'sub_domain') {
+        return [
+          { key: 'collapse', label: '折叠' },
+          { key: 'expandSM', label: '展开到服务模块' },
+          { key: 'expandBO', label: '展开到业务对象' }
+        ]
+      }
+      // 自定义等其他类型: 不展示菜单
+      return []
+    }
+
+    function handleContextMenu(event) {
+      console.log('[CTX] right-click on', event.target.tagName, event.target.id, event.target.className)
+      const group = identifyGroupFromSvg(event.target)
+      console.log('[CTX] identifyGroupFromSvg result:', group ? group.title || group.elementCode || group.id : 'null')
+      if (!group) {
+        ctxMenu.visible = false
+        return
+      }
+      const items = getContextMenuItems(group)
+      if (items.length === 0) {
+        ctxMenu.visible = false
+        return
+      }
+      ctxMenu.groupTitle = group.title || group.name || group.elementCode || group.id || ''
+      ctxMenu.items = items
+      ctxMenu.x = event.clientX
+      ctxMenu.y = event.clientY
+      ctxMenu.visible = true
+    }
+
+    // 在分组子树内展开到指定层级 (就地修改 collapsed)
+    function expandSubtreeToLevel(group, targetLevel) {
+      const currentLevel = groupLevelOf(group)
+      // 自身: 如果当前层级 >= 目标层级, 折叠; 否则展开
+      group.collapsed = currentLevel >= targetLevel
+      // 递归处理 children/containers
+      const recurse = (list) => {
+        if (!Array.isArray(list)) return
+        for (const g of list) {
+          if (!g || typeof g !== 'object') continue
+          const lv = groupLevelOf(g)
+          g.collapsed = lv >= targetLevel
+          recurse(g.children)
+          recurse(g.containers)
+        }
+      }
+      recurse(group.children)
+      recurse(group.containers)
+    }
+
+    function executeContextMenuAction(key) {
+      ctxMenu.visible = false
+      const cfg = configStore.layoutControlConfig
+      if (!cfg || !Array.isArray(cfg.groups)) return
+
+      // 从当前 ctxMenu 的 groupTitle 重新查找分组 (因为配置可能已变更)
+      const title = ctxMenu.groupTitle
+      const group = findGroupInTree(cfg.groups, g => {
+        const gt = g.title || g.name || g.elementCode || g.id
+        return gt === title
+      })
+      if (!group) return
+
+      const newConfig = JSON.parse(JSON.stringify(cfg))
+      // 在新配置中查找同名分组
+      const target = findGroupInTree(newConfig.groups, g => {
+        const gt = g.title || g.name || g.elementCode || g.id
+        return gt === title
+      })
+      if (!target) return
+
+      if (key === 'collapse') {
+        target.collapsed = true
+      } else if (key === 'expandSub') {
+        // 展开到子领域: targetLevel = 1 (subDomain)
+        expandSubtreeToLevel(target, 1)
+      } else if (key === 'expandSM') {
+        // 展开到服务模块: targetLevel = 2 (service module)
+        expandSubtreeToLevel(target, 2)
+      } else if (key === 'expandBO') {
+        // 展开到业务对象: targetLevel = 99 (全展开)
+        expandSubtreeToLevel(target, 99)
+      }
+
+      // 更新 store 触发重渲染
+      configStore.updateLayoutControlConfig(newConfig)
+    }
+
+    // 点击页面其他位置关闭右键菜单
+    function closeContextMenu(e) {
+      if (ctxMenu.visible) {
+        const wrapper = mermaidWrapper.value
+        if (wrapper && wrapper.contains(e.target)) {
+          // 在 mermaid-wrapper 内的点击, 如果是右键菜单元素本身则忽略
+          const menuEl = wrapper.querySelector('.mermaid-ctx-menu')
+          if (menuEl && menuEl.contains(e.target)) return
+        }
+        ctxMenu.visible = false
+      }
     }
 
     // 监听数据变化 - 合并了原来的 diagramData watcher（行 596-613）和 layoutType/layoutEngine watcher
@@ -1085,19 +1586,51 @@ export default {
           renderMermaid()
           return
         }
-        // groups 结构变化 (enabled/visible/containers 迁移) → 全量重渲染
-        const sig = (cfg) => JSON.stringify((cfg?.groups || []).map(g => ({
-          e: g.elementCode || g.id,
+        // groups 结构变化 (enabled/collapsed/containers 迁移/重命名/排序) → 全量重渲染
+        // [FIX 2026-08-04 v3] 递归签名: 原签名只含 elementCode/enabled/visible/顶层 containers,
+        //   遗漏 title (重命名不触发) 与 children (子分组移动/排序不触发)。现递归捕获标题、
+        //   嵌套 children 与容器顺序, 任何布局结构调整都会触发 renderMermaid。
+        // [HIDE 2026-08-07] 结构签名剔除 visible: 隐藏/显示是"增量"操作 (不动 ELK 布局,
+        //   留空位), 不该触发全量重排。visible 变化单独走 updateVisibilityOnly 增量路径,
+        //   避免每次隐/显都闪整屏 loading。disabled 语义不变 (enabled=false 走全量重排打平)。
+        const sigGroup = (g) => ({
+          id: g.elementCode || g.id,
+          title: g.title,
           en: g.enabled,
-          v: g.visible,
-          c: (g.containers || []).map(c => typeof c === 'string' ? c : (c.id || c.elementCode))
-        })))
+          // [EXPAND 2026-08-05] 树折叠参与渲染: collapsed 必须进签名, 否则"折叠/展开"切换不触发重渲染.
+          //   历史: 之前注释"无需单独捕获 collapsed (已移除显式折叠)" → 折叠时顺带改了 enabled
+          //   仍能触发, 但恢复展开只改 collapsed → 签名不变 → 图表不刷新 (self-test 复现).
+          //   现 collapsed=true (树折叠) 由 computeUplift 视为强制上提, 必须纳入变化检测.
+          co: g.collapsed === true,
+          cont: (g.containers || []).map(c => typeof c === 'string' ? c : (c.id || c.elementCode)),
+          // [MOVE 2026-08-04] unified 叶子存 directNodes (SM/BO code), 面板拖拽移动叶子即是
+          //   directNodes 迁移. 签名必须捕获 directNodes, 否则叶子移动到另一分组时签名不变,
+          //  不会触发 renderMermaid → 图表无变化.
+          dn: (g.directNodes || []).map(n => typeof n === 'object' ? (n.id || n.code || n.name) : n),
+          ch: (g.children || []).map(sigGroup)
+        })
+        const sig = (cfg) => JSON.stringify((cfg?.groups || []).map(sigGroup))
         if (sig(newVal) !== sig(oldVal)) {
-          // [FIX 2026-08-04] 分组禁用/显示也需在 mermaid.run() 前重置 zoom transform。
-          //   与方向/引擎切换同一根因: 用户已缩放时禁用/显示分组, 不重置则 ELK 读含 zoom 的
+          // [FIX 2026-08-04] 分组禁用也需在 mermaid.run() 前重置 zoom transform。
+          //   与方向/引擎切换同一根因: 用户已缩放时启用/禁用分组, 不重置则 ELK 读含 zoom 的
           //   BCR → 节点维度放大, 文字变小。forceAutoFit 由 nextTick 内 autoFit 分支消费后重置。
           forceAutoFit = true
           renderMermaid()
+          return
+        }
+        // [HIDE 2026-08-07] 仅 visible 变化 → 增量隐/显 (不动布局, 不触发整屏 loading)。
+        //   隐藏与禁用的区别: 隐藏 retain 空位 (容器/连线 display:none), 禁用走全量重排打平。
+        const sigGroupVisibility = (g) => ({
+          id: g.elementCode || g.id,
+          v: g.visible,
+          ch: (g.children || []).map(sigGroupVisibility),
+          cont: (g.containers || [])
+            .filter(c => c && typeof c === 'object' && Object.prototype.hasOwnProperty.call(c, 'visible'))
+            .map(c => ({ id: c.id || c.elementCode, v: c.visible }))
+        })
+        const sigVisibility = (cfg) => JSON.stringify((cfg?.groups || []).map(sigGroupVisibility))
+        if (sigVisibility(newVal) !== sigVisibility(oldVal)) {
+          updateVisibilityOnly(newVal.groups)
         }
       }
     )
@@ -1131,9 +1664,26 @@ export default {
         // 重跑 processSvg (它内部会调 renderAnnotationOverlay)
         // 主线不受影响: annotation overlay 移除+重新渲染, 其他 SVG 元素不动 (renderAnnotationOverlay 内部 removeAnnotationLayers 后重画)
         // [FIX 2026-07-31] 传 interaction 让 annotation 点击居中能正常工作
-        svgProcessor.processSvg(svgEl, props, relationDescriptions, mermaidContainer, nodeColorMappings, interaction)
+        svgProcessor.processSvg(svgEl, props, relationDescriptions, mermaidContainer, nodeColorMappings, interaction, handleToggleGroupVisible)
       },
       { deep: true }
+    )
+
+    // [FOCUS 2026-08-05] 布局设置面板 → 图表联动: 监听 chartFocusRequest, 高亮 + 居中目标元素
+    //   复用 annotationOverlay.focusOnTarget (高亮) + interaction.centerElement (居中),
+    //   行为与"点击备注面板项"完全一致。seq 自增保证连续聚焦同一目标也能响应。
+    watch(
+      () => configStore.chartFocusRequest.seq,
+      () => {
+        const { type, id } = configStore.chartFocusRequest
+        if (!type || !id) return
+        const svg = mermaidContainer.value?.querySelector('svg')
+        if (!svg) return
+        const targetEl = annotationOverlay.focusOnTarget(svg, id, type)
+        if (targetEl) {
+          interaction.centerElement(svg, targetEl)
+        }
+      }
     )
 
     // 关键修复 v14：用 debounced window resize 替代 ResizeObserver
@@ -1159,11 +1709,92 @@ export default {
       }, 150)
     }
 
+    // [DEBUG 2026-08-07] Ctrl+Shift+D 快捷键处理器 (在 setup 级别定义, 供 onMounted/onBeforeUnmount 共享)
+    let _debugKeydownHandler = null
+
     // 组件挂载后初始化
+    // [DEBUG 2026-08-07] 安装调试助手到 window.__archPage.debug,
+    //   提供浏览器控制台直接排查的能力, 无需增删 console.log/HMR 等待。
+    //   用法: 在浏览器控制台输入:
+    //     __archPage.debug.dump()                 // 全量状态
+    //     __archPage.debug.inspectGroups()         // 分组列表(含visible/collapsed)
+    //     __archPage.debug.findGroup('SD_MM')      // 按编码/标题查找分组
+    //     __archPage.debug.testRightClick('g.cluster') // 模拟右键 SVG 元素
+    //     __archPage.debug.checkVisibility()       // 隐藏状态
+    const installDebugHelpers = () => {
+      const flatten = (list, depth = 0) => {
+        if (!Array.isArray(list)) return []
+        return list.flatMap(g => {
+          if (!g || typeof g !== 'object') return []
+          const item = { ...g, _depth: depth }
+          return [item, ...flatten(g.children, depth + 1), ...flatten(g.containers, depth + 1)]
+        })
+      }
+      window.__archPage = window.__archPage || {}
+      window.__archPage.debug = {
+        // 全量状态 dump
+        dump: () => {
+          const cfg = configStore.layoutControlConfig
+          const svg = mermaidContainer.value?.querySelector('svg')
+          return {
+            layoutControlConfig: cfg ? { groupsCount: cfg.groups?.length, groups: flatten(cfg.groups) } : null,
+            ctxMenu: { ...ctxMenu },
+            svg: svg ? {
+              clusters: Array.from(svg.querySelectorAll('g.cluster')).map(e => ({ id: e.id, code: e.getAttribute('data-container-code'), class: e.className })),
+              nodes: Array.from(svg.querySelectorAll('g.node')).map(e => ({ id: e.id, code: e.getAttribute('data-code'), class: e.className })),
+              collapseNodes: Array.from(svg.querySelectorAll('g.node[id^="flowchart-COLLAPSE_"]')).map(e => ({ id: e.id }))
+            } : null,
+            centerScopeMarkers: configStore.centerScopeMarkers || null
+          }
+        },
+        // 分组列表 (flat)
+        inspectGroups: () => {
+          const cfg = configStore.layoutControlConfig
+          if (!cfg || !Array.isArray(cfg.groups)) return []
+          return flatten(cfg.groups).map(g => ({
+            title: g.title, code: g.elementCode || g.id, groupType: g.groupType,
+            visible: g.visible, collapsed: g.collapsed, _depth: g._depth
+          }))
+        },
+        // 按编码/标题查找分组
+        findGroup: (key) => {
+          const cfg = configStore.layoutControlConfig
+          if (!cfg || !Array.isArray(cfg.groups)) return null
+          return findGroupInTree(cfg.groups, g => {
+            const gt = g.title || g.name || g.elementCode || g.id
+            return gt === key || g.elementCode === key || g.id === key
+          })
+        },
+        // 模拟右键 SVG 元素 (selector 如 'g.cluster', 'g.node', 'text')
+        testRightClick: (selector) => {
+          const svg = mermaidContainer.value?.querySelector('svg')
+          if (!svg) return { error: 'no SVG' }
+          const el = selector ? svg.querySelector(selector) : svg.querySelector('g.cluster, g.node, text, rect')
+          if (!el) return { error: `no element matching "${selector}"` }
+          const event = new MouseEvent('contextmenu', {
+            bubbles: true, cancelable: true, clientX: 100, clientY: 100, button: 2
+          })
+          Object.defineProperty(event, 'target', { value: el, writable: true })
+          handleContextMenu(event)
+          return { triggered: true, target: el.tagName + (el.id ? '#' + el.id : ''), ctxMenu: { ...ctxMenu } }
+        },
+        // 隐藏状态检查
+        checkVisibility: () => {
+          const cfg = configStore.layoutControlConfig
+          if (!cfg || !Array.isArray(cfg.groups)) return []
+          return flatten(cfg.groups).filter(g => g.visible === false).map(g => ({
+            title: g.title, code: g.elementCode || g.id, groupType: g.groupType
+          }))
+        }
+      }
+    }
+
     onMounted(() => {
       // [FIX 2026-08-01] 安装 diagnostics 到 window.__archPage.mermaid,
       //   chart_diag / E2E 可一键读取 lastRender / stepTimings / errors.
       installDiagnosticsToWindow()
+      // [DEBUG 2026-08-07] 安装调试助手到 window.__archPage.debug
+      installDebugHelpers()
 
       if (props.diagramData) {
         renderMermaid()
@@ -1184,6 +1815,27 @@ export default {
 
       // 关键修复 v9：监听浏览器 fullscreenchange 事件
       document.addEventListener('fullscreenchange', handleFullscreenChange)
+      // [CTX 2026-08-07] 右键菜单: 全局点击关闭
+      document.addEventListener('click', closeContextMenu)
+      // [DEBUG 2026-08-07] Ctrl+Shift+D 一键 dump 状态到控制台
+      _debugKeydownHandler = (e) => {
+        if (e.ctrlKey && e.shiftKey && e.key === 'D') {
+          e.preventDefault()
+          const dump = window.__archPage?.debug?.dump
+          if (dump) {
+            const state = dump()
+            console.log('=== [DEBUG] Ctrl+Shift+D dump ===')
+            console.log('layoutControlConfig:', JSON.stringify(state.layoutControlConfig, null, 2).slice(0, 2000) + '...')
+            console.log('ctxMenu:', state.ctxMenu)
+            console.log('svg clusters:', state.svg?.clusters?.length)
+            console.log('svg nodes:', state.svg?.nodes?.length)
+            console.log('collapsed groups:', state.layoutControlConfig?.groups?.filter?.(g => g.collapsed)?.length)
+            console.log('hidden groups:', state.layoutControlConfig?.groups?.filter?.(g => g.visible === false)?.length)
+            console.log('=== end dump ===')
+          }
+        }
+      }
+      document.addEventListener('keydown', _debugKeydownHandler)
     })
 
     onBeforeUnmount(() => {
@@ -1191,6 +1843,10 @@ export default {
       window.removeEventListener('resize', handleWindowResize)
       // 关键修复 v9：清理 fullscreenchange 监听
       document.removeEventListener('fullscreenchange', handleFullscreenChange)
+      // [CTX 2026-08-07] 右键菜单: 清理全局点击关闭
+      document.removeEventListener('click', closeContextMenu)
+      // [DEBUG 2026-08-07] 清理键盘快捷键
+      if (_debugKeydownHandler) document.removeEventListener('keydown', _debugKeydownHandler)
       // 修复内存泄漏：清理 useInteraction 注册的 wheel/mousedown/mousemove/mouseup 监听器
       if (interactionCleanup) {
         interactionCleanup()
@@ -2373,7 +3029,15 @@ ${mermaidCode}
       exportAsHtmlSimple,
       exportAsHtmlFull,
       exportAsPdf,
-      copyToClipboard
+      copyToClipboard,
+      // [FIX 2026-08-07] 必须暴露 rendering 给模板: 模板 v-if="rendering" 控制 overlay (loading 转圈)
+      //   与 :class={ 'is-rendering': rendering } 隐藏未完成 SVG。此前未导出 → v-if 恒为 undefined/false,
+      //   overlay 永不渲染 → 用户看不到 loading; is-rendering 也失效 → 渲染期 SVG 裸露 (堆叠图闪烁)。
+      rendering,
+      // [CTX 2026-08-07] 右键上下文菜单
+      ctxMenu,
+      handleContextMenu,
+      executeContextMenuAction
     }
   }
 }

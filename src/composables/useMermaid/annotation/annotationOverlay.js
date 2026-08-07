@@ -701,8 +701,40 @@ export function useAnnotationOverlay() {
       }
     }
 
-    // [FIX 2026-07-31] 返回选中的 DOM 元素 (供 bindAnnotationInteraction 居中回调使用)
-    // [FIX 2026-08-01] 记录高亮查找结果
+    // [FOCUS 2026-08-06] 跨类型兜底: 布局树点击时调用方不知道目标渲染为 container 还是 node
+    //   (领域/子领域/服务模块通常渲染为 subgraph=container, 但折叠/上提后会变单节点;
+    //    服务模块图下服务模块也可能渲染为 g.node)。请求类型找不到时, 尝试另一类型的匹配,
+    //   使"只有业务对象高亮、领域/子领域/服务模块无效"的问题得到兜底。
+    if (!resultEl) {
+      if (targetType === 'container') {
+        let nodeEl = svg.querySelector(`[data-code="${targetId}"]`);
+        if (!nodeEl) {
+          svg.querySelectorAll('.node').forEach(node => {
+            if (nodeEl) return;
+            const label = node.querySelector('.nodeLabel');
+            if (label && label.textContent.includes(targetId)) nodeEl = node;
+          });
+        }
+        if (nodeEl) {
+          highlightElement(svg, nodeEl, 'node');
+          resultEl = nodeEl;
+        }
+      } else if (targetType === 'node') {
+        let containerEl = svg.querySelector(`[data-container-code="${targetId}"]`);
+        if (!containerEl) {
+          svg.querySelectorAll('.subgraph, .cluster').forEach(c => {
+            if (containerEl) return;
+            if (c.id === targetId) { containerEl = c; return; }
+            const label = c.querySelector('.cluster-label, text');
+            if (label && label.textContent.includes(targetId)) containerEl = c;
+          });
+        }
+        if (containerEl) {
+          highlightElement(svg, containerEl, 'container');
+          resultEl = containerEl;
+        }
+      }
+    }
     // [FIX 2026-08-01 v4] 同时记录 panel sync 结果 (双向联动): 同步了多少 panel items
     // [FIX 2026-08-01 v5] syncPanel 决策:
     //   - 'forced' (默认): 始终同步 panel (panel item 点击走这条)
@@ -926,6 +958,17 @@ export function useAnnotationOverlay() {
   const clearHighlight = (svg) => {
   };
 
+  /**
+   * [FOCUS 2026-08-05] 聚焦目标元素 (布局设置面板联动)
+   * 复用 highlightTargetElement 的查找 + 高亮逻辑, 返回命中的 DOM 元素供调用方居中。
+   * syncPanel 使用 'forced' 对齐"备注面板选中"行为 (与 annotation item 点击一致)。
+   * @returns {Element|null} 命中的图表元素 (供 centerElement 使用)
+   */
+  const focusOnTarget = (svg, targetId, targetType) => {
+    if (!svg || !targetId || !targetType) return null
+    return highlightTargetElement(svg, targetId, targetType, null, { syncPanel: 'forced' })
+  };
+
   const removeAnnotationLayers = (svg) => {
     // 关键：先清理事件监听器（panel header + svg 全局 + annotation-item）
     // 必须在删除 DOM 节点之前清理，否则 removeEventListener 无法匹配（节点引用变化）
@@ -943,9 +986,16 @@ export function useAnnotationOverlay() {
     }
   };
 
+  // [LEGEND 2026-08-07] 图例点击隐藏的持久化状态（模块级，重渲染后仍保持用户选择）
+  let legendDismissed = false;
+
   const overlayColorLegend = (svg, colorLegendData, options = {}) => {
     const {
-      position = 'top-right'
+      position = 'top-right',
+      // [LEGEND 2026-08-07] 分组可见性切换回调 (由 MermaidComponent 注入):
+      //   就地改 live 分组对象 visible + 以新引用替换 store 配置, 触发图表增量隐/显 + 配置树双向同步。
+      //   缺省时 (如 HTML/PDF 导出, 无 store 上下文) 退化为直接就地改 visible (仅作用于当前图例引用)。
+      onToggleGroupVisible = null
     } = options;
 
     const container = svg.closest('.mermaid-container');
@@ -998,8 +1048,45 @@ export function useAnnotationOverlay() {
       /* 不限制高度，避免图例项多时出现滚动条 */
     `;
 
+    // [LEGEND 2026-08-07] 图例支持点击隐藏：标题栏右侧提供关闭按钮(×)。
+    //   关闭后隐藏面板并在原位显示一个"图例"小按钮，点击可重新唤出。
+    const showToggleChip = () => {
+      if (container.querySelector('.color-legend-toggle')) return;
+      const chip = document.createElement('div');
+      chip.className = 'color-legend-toggle';
+      chip.setAttribute('data-annotation-layer', 'legend');
+      chip.style.cssText = `
+        ${positionStyles[position] || positionStyles['top-left']}
+        background: rgba(255,255,255,0.95);
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 4px 10px;
+        font-size: 11px;
+        color: #666;
+        cursor: pointer;
+        z-index: 99;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      `;
+      chip.textContent = '图例';
+      chip.title = '显示图例';
+      chip.addEventListener('click', () => {
+        legendDismissed = false;
+        legend.style.display = '';
+        chip.remove();
+      });
+      container.appendChild(chip);
+    };
+    const hideLegend = () => {
+      legendDismissed = true;
+      legend.style.display = 'none';
+      showToggleChip();
+    };
+
     const title = document.createElement('div');
     title.style.cssText = `
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
       font-weight: bold;
       font-size: 11px;
       color: #666;
@@ -1007,7 +1094,26 @@ export function useAnnotationOverlay() {
       border-bottom: 1px solid #eee;
       padding-bottom: 4px;
     `;
-    title.textContent = '图例';
+    const titleText = document.createElement('span');
+    titleText.textContent = '图例';
+    title.appendChild(titleText);
+
+    const closeBtn = document.createElement('span');
+    closeBtn.textContent = '×';
+    closeBtn.title = '隐藏图例';
+    closeBtn.style.cssText = `
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      padding: 0 2px;
+      color: #999;
+      user-select: none;
+    `;
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideLegend();
+    });
+    title.appendChild(closeBtn);
     legend.appendChild(title);
 
     const legendList = document.createElement('div');
@@ -1016,6 +1122,27 @@ export function useAnnotationOverlay() {
       flex-direction: column;
       gap: 4px;
     `;
+
+    // [LEGEND 2026-08-07] 点击图例项(领域/子领域/服务模块等按颜色分组)切换对应分组的 visible,
+    //   与图表配置树双向同步:
+    //   - 分组对象引用来自 layoutControlConfig.groups (共享响应式对象)
+    //   - 通过 onToggleGroupVisible 回调 (MermaidComponent 注入) 深克隆 store 配置 + 改 visible
+    //     后以新引用替换, 触发 updateVisibilityOnly() 增量隐/显 (不重排布局); LayoutControlPanel 面板树同步高亮
+    //   - 图例项自身维护 hidden 状态 (不依赖 store 对象身份, store 替换后原 group 引用会失效)
+    const setGroupVisible = (g, hidden) => {
+      // hidden=true 表示"隐藏", 故设置 visible = !hidden
+      g.visible = !hidden;
+      if (Array.isArray(g.children)) g.children.forEach(ch => setGroupVisible(ch, hidden));
+      if (Array.isArray(g.containers)) g.containers.forEach(c => {
+        if (c && typeof c === 'object') c.visible = !hidden;
+      });
+    };
+    const setItemHiddenVisual = (el, span, hidden) => {
+      el.style.opacity = hidden ? '0.4' : '';
+      el.style.background = hidden ? 'rgba(0,0,0,0.04)' : '';
+      span.style.textDecoration = hidden ? 'line-through' : '';
+      span.title = hidden ? '点击显示该分组' : '点击隐藏该分组';
+    };
 
     colorLegendData.forEach((item, index) => {
       const legendItem = document.createElement('div');
@@ -1057,6 +1184,27 @@ export function useAnnotationOverlay() {
       legendItem.appendChild(nameSpan);
       legendList.appendChild(legendItem);
 
+      // [LEGEND 2026-08-07] 可点击分组项: 匹配到分组引用的图例项可点击切换 visible
+      const clickable = !item.isCenter && Array.isArray(item.groups) && item.groups.length > 0;
+      if (clickable) {
+        legendItem.style.cursor = 'pointer';
+        // 图例项自身的 hidden 状态 (初始化时读取当前 group.visible, 兼容配置树侧已隐藏)
+        let hidden = item.groups.some(g => g.visible === false);
+        const applyVisual = () => setItemHiddenVisual(legendItem, nameSpan, hidden);
+        legendItem.addEventListener('click', (e) => {
+          e.stopPropagation();
+          hidden = !hidden;
+          if (typeof onToggleGroupVisible === 'function') {
+            onToggleGroupVisible(item.name, hidden, item.groups);
+          } else {
+            // 无回调 (如 HTML/PDF 导出) 时直接就地改 visible
+            item.groups.forEach(g => setGroupVisible(g, hidden));
+          }
+          applyVisual();
+        });
+        applyVisual();
+      }
+
       // 在中心范围项后添加分隔线
       if (item.isCenter && index < colorLegendData.length - 1) {
         const separator = document.createElement('div');
@@ -1071,6 +1219,11 @@ export function useAnnotationOverlay() {
 
     legend.appendChild(legendList);
     container.appendChild(legend);
+    // [LEGEND 2026-08-07] 若此前已点击隐藏，重渲染后保持隐藏并显示"图例"唤出按钮
+    if (legendDismissed) {
+      legend.style.display = 'none';
+      showToggleChip();
+    }
     return legend;
   };
 
@@ -1081,6 +1234,7 @@ export function useAnnotationOverlay() {
     bindAnnotationInteraction,
     highlightByNumber,
     clearHighlight,
+    focusOnTarget,
     removeAnnotationLayers
   };
 }

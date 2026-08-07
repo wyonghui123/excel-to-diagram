@@ -2,7 +2,7 @@
 chart_e2e.py - 嵌入图表 E2E 校验引擎 (数据完整性 / 颜色 / 备注 / 交互)
 ======================================================================
 
-[四类断言 (v2 2026-08-02 细化)]
+[五类断言 (v3 2026-08-05: 新增 E 布局)]
   A. 数据完整性 (Data Integrity)  渲染的节点/边/容器数 == golden, 关键节点存在,
                                   标签非空, 边端点有效, 容器嵌套结构, 数据指纹防漂移
   B. 颜色 (Color)                 映射一致 + 方案/分组/中心范围切换生效,
@@ -11,6 +11,8 @@ chart_e2e.py - 嵌入图表 E2E 校验引擎 (数据完整性 / 颜色 / 备注 
                                   孤儿备注检测 + 类型分布 == golden
   D. 交互 (Interaction)           点击联动/空白不动/图表类型切换/竞态守卫 +
                                   点击高亮 + panel→chart 反向联动 + 双击重置
+  E. 布局 (Layout)                合并链路 4 步快照齐全 + 归属/标题合并一致 +
+                                  叶子分组归属非空 + enabled 状态传播 (读 debugLayout 权威树)
 
 [用法]
   # 1. 首次: 生成 golden 基线 (打开真实图表记录指标)
@@ -1123,9 +1125,85 @@ class ChartE2E:
                      error=None if skipped and svg_ok
                      else f'未命中 code-diff 跳过: before={before} after={after} svgNodes={svg_ok}')
 
+    def check_layout(self, golden: Dict[str, Any]) -> None:
+        """[E 类 2026-08-05] 布局合并链路断言 (布局面板编辑 → 渲染树合并).
+
+        取代 verify_disable_domain.py 一次性脚本: 数据源是 __archPage.debugLayout
+        (EmbeddedChartView 合并链路的分步快照 before→afterStates→afterMembership→afterTitles),
+        直接断言权威合并树, 不用人工看 DOM bbox.
+
+        E1 合并链路 4 步快照齐全 (判定走了统一管道)
+        E2 afterMembership 与 afterTitles 叶子归属一致 (第三步只改标题/顺序, 不改归属)
+        E3 叶子承载分组归属非空 (L18 容器包裹回归守卫)
+        E4 enabled 状态传播 — 合并树 afterStates 与面板 panelGroups 一致
+        """
+        self._print('\n[E] 布局合并链路')
+        # E1: 合并链路分步快照齐全
+        self._record('E', '合并链路 4 步快照齐全',
+                     self.diag.assert_merge_steps_present())
+
+        # E2: 归属合并与标题合并的叶子归属应一致
+        mem_m = self.diag.get_layout_membership('afterMembership')
+        mem_t = self.diag.get_layout_membership('afterTitles')
+        if isinstance(mem_m, dict) and 'error' in mem_m:
+            self._record('E', 'afterMembership 归属可读', False,
+                         error=mem_m['error'])
+        elif isinstance(mem_t, dict) and 'error' in mem_t:
+            self._record('E', 'afterTitles 归属可读', False,
+                         error=mem_t['error'])
+        else:
+            diff = []
+            for code in set(mem_m) | set(mem_t):
+                a = sorted(mem_m.get(code, []))
+                b = sorted(mem_t.get(code, []))
+                if a != b:
+                    diff.append({'group': code, 'afterMembership': a, 'afterTitles': b})
+            self._record('E', f'归属合并 vs 标题合并一致 ({len(diff)} 组差异)',
+                         not diff, {'diff': diff[:3]},
+                         error=None if not diff else f'归属漂移: {diff[:3]}')
+
+        # E3: 叶子承载分组归属非空 (L18 回归守卫)
+        leaf_bearing = self.diag.get_leaf_bearing_groups('afterTitles')
+        if isinstance(leaf_bearing, dict) and 'error' in leaf_bearing:
+            self._record('E', '叶子承载分组归属非空', False,
+                         error=leaf_bearing['error'])
+        else:
+            empty = []
+            for code in leaf_bearing:
+                actual = (mem_t or {}).get(code, [])
+                if code in (mem_t or {}) and not actual:
+                    empty.append(code)
+            self._record('E', f'叶子分组归属非空 ({len(leaf_bearing) - len(empty)}/{len(leaf_bearing)})',
+                         not empty, {'empty': empty[:5]},
+                         error=None if not empty else f'空叶子分组: {empty[:5]}')
+
+        # E4: enabled 状态传播 — 合并树 afterStates 与面板 panelGroups 一致
+        snap = self.diag.get_layout_snapshot()
+        if isinstance(snap, dict) and 'panelGroups' in snap and 'afterStates' in snap:
+            merged_codes = set(self.diag.get_layout_group_codes('afterStates'))
+            mismatched = []
+            checked = 0
+            for pg in (snap.get('panelGroups') or []):
+                code = pg.get('elementCode') or pg.get('id')
+                if not code or code not in merged_codes:
+                    continue  # 面板结构分组 (DP_inner/DP_boundary), 合并树不存在, 跳过
+                if 'enabled' not in pg:
+                    continue
+                checked += 1
+                m = self.diag._find_group(code, 'afterStates')
+                actual = bool(m.get('enabled')) if m else None
+                if actual != bool(pg['enabled']):
+                    mismatched.append({'group': code, 'panel': pg['enabled'], 'merged': actual})
+            self._record('E', f'enabled 状态传播一致 ({checked} 组比对, {len(mismatched)} 组差异)',
+                         not mismatched, {'checked': checked, 'mismatched': mismatched[:3]},
+                         error=None if not mismatched else f'状态未传播: {mismatched[:3]}')
+        else:
+            self._record('E', 'enabled 状态传播一致 (panelGroups/afterStates 缺失, 跳过)',
+                         True, skipped=True)
+
     def run_all(self, include: Optional[List[str]] = None) -> List[CheckResult]:
-        """执行指定类别的断言 (默认全部 A/B/C/D + 性能)."""
-        include = include or ['A', 'B', 'C', 'D', 'P']
+        """执行指定类别的断言 (默认全部 A/B/C/D/E + 性能)."""
+        include = include or ['A', 'B', 'C', 'D', 'E', 'P']
         golden = get_scenario_golden(self.scenario_name) or {}
         if not golden:
             self._print(f'\n[WARN] 场景 {self.scenario_name} 无 golden, 只跑不依赖 golden 的断言')
@@ -1138,6 +1216,8 @@ class ChartE2E:
             self.check_annotations(golden)
         if 'D' in include:
             self.check_interactions(golden)
+        if 'E' in include:
+            self.check_layout(golden)
         if 'P' in include:
             self.check_performance(golden)
 
@@ -1202,7 +1282,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='嵌入图表 E2E 校验')
     parser.add_argument('--regenerate-golden', action='store_true', help='生成 golden 基线')
     parser.add_argument('--scenario', default=None, help='指定场景 (默认全部)')
-    parser.add_argument('--category', default=None, help='断言类别 A,B,C,D (默认全部)')
+    parser.add_argument('--category', default=None, help='断言类别 A,B,C,D,E (默认全部)')
     args = parser.parse_args()
 
     include = args.category.split(',') if args.category else None

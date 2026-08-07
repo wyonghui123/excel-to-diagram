@@ -130,7 +130,7 @@ export function buildDiagramData({
     const projection = pipeline.project({ treeData, terminal: GLOBAL_TERMINALS.businessObject })
 
     // L3 着色 (中心范围 = centerScope BO codes; isCenter 由 colorize 统一计算)
-    const { nodes: coloredNodes } = colorize(projection.nodes, projection.containers, {
+    const { nodes: coloredNodes, groupColorMap } = colorize(projection.nodes, projection.containers, {
       colorGroupBy, colorScheme, centerSubDomain: '', centerSubDomainColor: centerScopeColor,
       customColors, centerServiceModuleCodes: centerScope?.length ? centerScope : null,
       centerScopeHighlight, nodeTextColor,
@@ -207,7 +207,8 @@ export function buildDiagramData({
       hideLinkLabelTails,
       layoutControlConfig: unifiedLayoutConfig,
       groupControlTitleMap: layoutControlConfig?.titleMap || {},
-      centerScopeHighlight
+      centerScopeHighlight,
+      groupColorMap                    // [FIX 2026-08-05] 与图表同源的分组色映射
     }
   }
 

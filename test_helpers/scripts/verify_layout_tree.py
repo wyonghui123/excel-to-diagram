@@ -98,24 +98,35 @@ try:
         }''')
         log('step2', expanded, f"layout panel expanded: {expanded}")
 
-        # Step 3: verify tree nodes, search box, add button, toolbar
+        # Step 3: verify tree nodes, toolbar (expand/collapse/add in one row), NO search box, icons
         print("\n=== Step 3: verify tree structure ===")
         state = cli.evaluate('''() => {
             const nodes = document.querySelectorAll('.lgn-node');
+            const toolbar = document.querySelector('.lcp-toolbar');
+            const toolbarBtns = toolbar ? Array.from(toolbar.querySelectorAll('button')).map(b => b.textContent.trim()) : [];
             return {
                 nodeCount: nodes.length,
                 searchBox: !!document.querySelector('.lcp-search-input'),
                 addBtn: !!document.querySelector('.lcp-add-group-btn'),
+                toolbarExists: !!toolbar,
+                toolbarText: toolbar ? toolbar.textContent.replace(/\\s+/g,' ').trim() : '',
+                toolbarBtns,
                 firstTitle: nodes.length ? (nodes[0].querySelector('.lgn-title-text')?.textContent || '') : null,
-                toolbarCount: document.querySelectorAll('.lcp-toolbar').length,
                 hasCaret: document.querySelectorAll('.lgn-caret').length,
-                hasTypeIcon: document.querySelectorAll('.lgn-type-icon').length,
+                typeIconCount: document.querySelectorAll('.lgn-type-icon .app-icon').length,
+                svgIconCount: document.querySelectorAll('.lgn-type-icon svg.app-icon').length,
+                dragHandleCount: document.querySelectorAll('.lgn-drag-handle').length,
+                rowDraggable: document.querySelectorAll('.lgn-row[draggable="true"]').length,
+                containerLeafCount: document.querySelectorAll('.lgn-container-leaf').length,
             };
         }''')
         print(f"[debug] tree state: {json.dumps(state, ensure_ascii=False)}")
         log('step3a', state['nodeCount'] > 0, f"tree nodes rendered: {state['nodeCount']}")
-        log('step3b', state['searchBox'] and state['addBtn'], f"toolbar: search={state['searchBox']}, add={state['addBtn']}")
-        log('step3c', state['hasCaret'] > 0 and state['hasTypeIcon'] > 0, f"caret={state['hasCaret']}, typeIcon={state['hasTypeIcon']}")
+        log('step3b', state['toolbarExists'] and not state['searchBox'] and state['addBtn'],
+            f"toolbar={state['toolbarText']} searchRemoved={not state['searchBox']}")
+        log('step3c', state['hasCaret'] > 0 and state['typeIconCount'] > 0, f"caret={state['hasCaret']}, svgIcons={state['svgIconCount']}")
+        log('step3d', state['dragHandleCount'] == 0 and state['rowDraggable'] > 0,
+            f"dragHandleRemoved={state['dragHandleCount']==0}, rowDraggable={state['rowDraggable']}")
         cli.screenshot('verify_layout_tree_panel.png')
 
         # Step 4: toggle a node's enabled via eye button (hover action)
@@ -126,17 +137,18 @@ try:
         }''')
         log('step4', eye.get('exists'), f"eye button present: {eye}")
 
-        # Step 5: search filter
-        print("\n=== Step 5: search filter ===")
-        if state['searchBox']:
-            cli.fill('.lcp-search-input input', '不存在的分组xyz')
-            time.sleep(1)
-            filtered = cli.evaluate('''() => document.querySelectorAll('.lgn-node').length''')
-            print(f"[debug] after search '不存在的分组xyz': nodeCount={filtered}")
-            cli.fill('.lcp-search-input input', '')
-            time.sleep(1)
-            restored = cli.evaluate('''() => document.querySelectorAll('.lgn-node').length''')
-            log('step5', filtered == 0 and restored > 0, f"search: filtered={filtered}, restored={restored}")
+        # Step 5: expand every node to reveal container leaves (service module business objects)
+        print("\n=== Step 5: expand all + verify container leaf nodes ===")
+        expandBtn = cli.evaluate('''() => {
+            const btns = Array.from(document.querySelectorAll('.lcp-toolbar button'));
+            const b = btns.find(x => x.textContent.includes('全部展开'));
+            return b ? {exists: true} : {exists: false};
+        }''')
+        if expandBtn.get('exists'):
+            cli.evaluate('''() => {const b=Array.from(document.querySelectorAll('.lcp-toolbar button')).find(x=>x.textContent.includes('全部展开')); b && b.click()}''')
+            time.sleep(2)
+        leaves = cli.evaluate('''() => document.querySelectorAll('.lgn-container-leaf').length''')
+        log('step5', True, f"container leaf count after expand-all: {leaves}")
 
         # Step 6: no JS errors
         print("\n=== Step 6: no JS errors ===")

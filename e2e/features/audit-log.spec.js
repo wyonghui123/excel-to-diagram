@@ -291,7 +291,7 @@ test.describe('S09-F: 审计日志 - 分类/级别/详情页', () => {
   const detailPageScenarios = [
     { name: 'role',     urlPath: (id) => `/system/role-detail/${id}`,  apiPath: '/api/v1/roles?page=1&page_size=1' },
     { name: 'product',  urlPath: (id) => `/product-management/${id}`,  apiPath: '/api/v2/bo/product?page_size=1' },
-    { name: 'version',  urlPath: (id) => null,  // 版本路径需要 productId+versionId, 单独处理
+    { name: 'version',  urlPath: (id) => null }  // 版本路径需要 productId+versionId, 单独处理
   ]
 
   for (const scenario of detailPageScenarios) {

@@ -59,5 +59,18 @@ export function colorize(nodes, containers, {
     }
   })
 
-  return { nodes: outNodes, containers }
+  // [FIX 2026-08-05] 返回分组色映射（与图表同源）：
+  //   色点/composables 用同一份映射取"默认分组色"，避免 useGroupDisplay 的
+  //   hashColor（字符串哈希）与 colorize 的"分组遍历顺序索引"取色不一致，
+  //   导致设置面板色点与图表颜色不同源（清空自定义色后色点回不到默认色）。
+  //   groupColorMap 键与 useGroupDisplay.getGroupColor 的 colorKey 对齐：
+  //     domain 分组   → domainColors[domainName]
+  //     subDomain 分组 → subDomainColors[subDomainName]
+  //     serviceModule  → serviceModuleColors[serviceModuleName]
+  const groupColorMap =
+    colorGroupBy === 'serviceModule' ? serviceModuleColors :
+    colorGroupBy === 'subDomain' ? subDomainColors :
+    domainColors
+
+  return { nodes: outNodes, containers, groupColorMap }
 }

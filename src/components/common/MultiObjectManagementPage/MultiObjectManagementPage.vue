@@ -386,12 +386,20 @@ async function tryApplyShortcut() {
   }
 
   // 等 scope 应用完成 + canShowChart 变 true
-  await new Promise(resolve => setTimeout(resolve, 500))
-
+  // [FIX 2026-08-05] 改固定 500ms 为轮询: 冷加载时 scope 数据耗时 >500ms,
+  //   canShowChart 仍为 false → 放弃切换 → 永久停留 list 视图 (渲染不稳定)。
+  //   现轮询等待 canShowChart 变 true (最多 15s), 超时再放弃并告警。
+  let canShow = false
+  for (let attempt = 0; attempt < 75; attempt++) {  // 75 × 200ms = 15s
+    if (page.canShowChart) { canShow = true; break }
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
   console.log('[shortcut] after scope, canShowChart=', page.canShowChart)
-  if (viewMode.value !== 'chart' && page.canShowChart) {
+  if (viewMode.value !== 'chart' && canShow) {
     toggleEmbeddedView()
     console.log('[shortcut] 已进入 EmbeddedChartView')
+  } else if (!canShow) {
+    console.warn('[shortcut] 15s 内 canShowChart 未变 true, 未进入图表视图 (scope 数据加载慢或未选到有效范围)')
   }
 }
 

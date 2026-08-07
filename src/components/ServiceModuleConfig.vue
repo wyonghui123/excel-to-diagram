@@ -1,6 +1,6 @@
 <template>
   <div class="service-module-config">
-    <!-- 第一行：区分中心范围开关 + 中心范围服务模块背景颜色 -->
+    <!-- 第一行：区分对象范围开关 + 对象范围服务模块背景颜色 -->
     <div class="form-row">
       <div class="form-item">
         <label class="form-label checkbox-label">
@@ -9,11 +9,11 @@
             :checked="centerScopeHighlight"
             @change="$emit('update:centerScopeHighlight', $event.target.checked)"
           />
-          <span>区分中心范围</span>
+          <span>区分对象范围</span>
         </label>
       </div>
       <div class="form-item color-picker-wrapper" v-if="centerScopeHighlight">
-        <label class="form-label">中心范围服务模块背景颜色</label>
+        <label class="form-label">对象范围服务模块背景颜色</label>
         <input
           type="color"
           :value="centerScopeColor"
