@@ -1234,6 +1234,7 @@ export function useAnnotationOverlay() {
     bindAnnotationInteraction,
     highlightByNumber,
     clearHighlight,
+    clearSvgHighlightsOnly,
     focusOnTarget,
     removeAnnotationLayers
   };

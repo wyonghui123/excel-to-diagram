@@ -147,6 +147,12 @@ export function useTooltip() {
   //   这里用更简单的位移判定: mousedown 记录起点, click 时位移 > 5px 视为拖动, 跳过 clear.
   let _mouseDownPos = null
 
+  // [FIX 2026-08-10] 当前实例的 selectedElements 引用, 供 clearSelectionHighlight() 从组件外部
+  //   清除"选择高亮". 背景: 关系高亮 (MermaidComponent) 与选择高亮 (本模块) 是两套独立机制,
+  //   同一节点可同时被两者高亮. 若关系高亮把选择高亮样式误当作"原始样式"保存, 清除关系高亮时
+  //   会把这些样式错误恢复 → 节点残留高亮. 暴露清除入口让关系高亮在应用前先清掉选择高亮.
+  let _currentSelectedElements = null
+
   /**
    * [P0-B] 把 selectedElements (含 DOM 引用) 序列化为可观测快照, 同步到 diag.
    *   DOM 引用不暴露到 window (会泄漏 / 影响测试稳定性), 只暴露 code/id/text 等纯数据.
@@ -327,10 +333,31 @@ export function useTooltip() {
   const formatTooltipText = (relation, annotationFilter) => {
     if (!relation) return '无关系说明'
 
+    const childRelations = Array.isArray(relation.childRelations) ? relation.childRelations : []
+
+    // [AGG 2026-08-09] 领域/子领域/服务模块级别连线 (聚合) → 展示关系数量统计信息.
+    //   判定: 任一端点为折叠容器 (sourceLevel/targetLevel <= 2, 即 domain/subDomain/serviceModule).
+    //   聚合连线背后通常是多条 BO 级关系, 若逐条列示会很长 (几十上百条), 故只汇总"关系数量".
+    //   [OPT 2026-08-09] 方向和类型等关系级属性只在 BO 级连线下的列示 (childRelations 列表) 中展示,
+    //     聚合级别不展示 (对用户无意义, 例: "销售管理 → 外部对象管理, 方向: 推").
+    //   BO 级连线 (两端 level===3) 不受影响, 仍走 childRelations 列表.
+    const aggSrcLevel = typeof relation.sourceLevel === 'number' ? relation.sourceLevel : 3
+    const aggTgtLevel = typeof relation.targetLevel === 'number' ? relation.targetLevel : 3
+    const isAggregate = aggSrcLevel <= 2 || aggTgtLevel <= 2
+
+    if (isAggregate) {
+      const aggCode = relation.relationCode || ''
+      const aggSource = relation.sourceName || ''
+      const aggTarget = relation.targetName || ''
+      const total = childRelations.length || 1
+      let text = `${aggCode}\n${aggSource} → ${aggTarget}`
+      text += `\n关系数量: 共 ${total} 条`
+      return text
+    }
+
     // [FIX 2026-08-03] SM 图: childRelations 非空时展示父关系概览 + 所有子关系列表
     //   (SM 下源和目标 BO 对的列表, 每条含 source/target/type/direction/desc/annotation)
     //   BO 图/单测: childRelations 缺失或空 → 走单关系老逻辑 (向后兼容)
-    const childRelations = Array.isArray(relation.childRelations) ? relation.childRelations : []
     if (childRelations.length > 0) {
       const parentCode = relation.relationCode || ''
       const parentSource = relation.sourceName || ''
@@ -947,6 +974,7 @@ export function useTooltip() {
 
     const tooltip = createTooltipElement()
     const selectedElements = createSelectionState()
+    _currentSelectedElements = selectedElements
     const edgeLabels = getEdgeLabels(svg)
     _currentSvg = svg
 
@@ -978,6 +1006,7 @@ export function useTooltip() {
       _currentSvg.querySelectorAll('[data-trailing-line], [data-trailing-marker]').forEach(el => el.remove())
     }
     _currentSvg = null
+    _currentSelectedElements = null
     // [P0-B] 清理时同步重置 diag highlight 状态 — chartType 切换 / 组件卸载后,
     //   旧 selectedElements 闭包失效, diag._highlightState 不应再报告 hasHighlight=true.
     //   D10 测试断言 chartType 切换后 highlight 干净 (DOM + 状态双重断言).
@@ -985,9 +1014,18 @@ export function useTooltip() {
     _mouseDownPos = null
   }
 
+    // [FIX 2026-08-10] 从组件外部清除当前实例的"选择高亮" (关系高亮应用前调用),
+    //   避免关系高亮把选择高亮样式误存为原始样式而在清除时错误恢复.
+    const clearSelectionHighlight = () => {
+      if (_currentSelectedElements) {
+        clearHighlight(_currentSelectedElements)
+      }
+    }
+
   return {
     addMouseOverTooltips,
     cleanup,
+    clearSelectionHighlight,
     // [v34 双向支持] 导出供单测覆盖 (useTooltip.spec.js)
     formatTooltipText,
     // [P0-B 2026-08-03] 暴露 highlight 状态查询入口 (供 useDiagnostics → window.__archPage.mermaid.highlight)

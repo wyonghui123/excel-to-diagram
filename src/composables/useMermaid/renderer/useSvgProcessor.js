@@ -27,15 +27,24 @@ export function useSvgProcessor(options) {
 
   /**
    * 修复 SVG ViewBox（处理负坐标）
+   * [FIX 2026-08-10 幂等] 同一 SVG 元素只加一次 padding。
+   *   旧实现: 只要有负坐标就无条件 +20 padding, 且无已处理标记 → 同一元素每次被
+   *   processSvg 处理(如反复切换"区分对象范围")都会再 +20, viewBox 坐标范围逐次扩大
+   *   (实测 -28→-48→-68→...), 而 SVG 元素尺寸恒定, preserveAspectRatio: meet 缩放下
+   *   图表内容相对越来越小 → 用户看到的"每次切换图表微小缩小"。
+   *   修复: 用 data-viewbox-padded 标记, 已处理过就不再叠加, 保留首次渲染的精确外观。
    */
   const fixViewBox = (svgEl) => {
+    if (!svgEl) return svgEl
     const svgViewBox = svgEl.getAttribute('viewBox')
     if (svgViewBox) {
       const parts = svgViewBox.split(' ').map(Number)
       if (parts[0] < 0 || parts[1] < 0) {
+        if (svgEl.getAttribute('data-viewbox-padded') === 'true') return svgEl
         const padding = 20
         const newViewBox = `${parts[0] - padding} ${parts[1] - padding} ${parts[2] + padding * 2} ${parts[3] + padding * 2}`
         svgEl.setAttribute('viewBox', newViewBox)
+        svgEl.setAttribute('data-viewbox-padded', 'true')
       }
     }
     return svgEl
@@ -52,19 +61,39 @@ export function useSvgProcessor(options) {
       const nodeLabel = node.querySelector('.nodeLabel')
       if (nodeLabel) {
         const labelText = nodeLabel.textContent || ''
-        const codeMatch = labelText.match(/\(([^)]+)\)/)
-        const extractedCode = codeMatch ? codeMatch[1] : null
+        // [FIX 2026-08-08 v2] 兼容中文全角括号（SCP）和 ASCII 括号 (SCP)
+        //   COLLAPSE 节点标签使用中文括号（Mermaid 代码中的 `（${code}）`），
+        //   原 ASCII 括号正则无法匹配，导致 extractedCode 始终为 null，
+        //   data-container-code 属性缺失。改为匹配两种括号。
+        // [FIX 2026-08-09] 兼容新折叠节点格式 "领域 SCM"/"子领域 SCP"/"服务模块 DP" (无括号):
+        //   类型关键字后的 token 即编码, 优先于括号提取 (旧格式 "（编码）" 仍兼容).
+        const typeCodeMatch = labelText.match(/(?:领域|子领域|服务模块)\s*([^\s]+)/)
+        const codeMatch = labelText.match(/[（(]([^）)]+)[）)]/)
+        const extractedCode = (typeCodeMatch && typeCodeMatch[1]) || (codeMatch && codeMatch[1]) || null
 
         let matchedNode = null
         if (extractedCode) {
           matchedNode = diagramData.nodes.find(n => n.code === extractedCode)
         }
+        // [FIX 2026-08-09] 修复 BO 叶子节点 data-code 错配为同名前缀节点:
+        //   旧兜底 `labelText.includes(n.name)` 会命中"名称是标签子串"的节点——
+        //   服务模块"需求计划"(DP) 下的 BO"需求计划算法方案"(PLB034) 等, 因 DP01 名称
+        //   "需求计划" 是其标签前缀, 全被错误标成 data-code="DP01" → 点击高亮命中 DP01.
+        //   正确: BO 叶子节点标签格式为 `名称+编码`(编码在末尾), 应匹配"标签以编码结尾".
+        //   (COLLAPSE 容器节点由上方 extractedCode 精确处理, 不受此兜底影响)
         if (!matchedNode) {
-          matchedNode = diagramData.nodes.find(n => labelText.includes(n.name))
+          matchedNode = diagramData.nodes.find(n => n.code && labelText.endsWith(n.code))
         }
 
         if (matchedNode) {
           node.setAttribute('data-code', matchedNode.code || matchedNode.name)
+        }
+        // [FIX 2026-08-08] COLLAPSE 节点: 从标签提取编码, 设 data-container-code
+        //   COLLAPSE 节点是 g.node (无 data-container-code), 但 identifyGroupFromSvg
+        //   优先使用 data-container-code 识别分组. 从标签 "(编码)" 提取后直接设置.
+        const nodeId = node.getAttribute('id') || ''
+        if (nodeId.includes('COLLAPSE_') && extractedCode) {
+          node.setAttribute('data-container-code', extractedCode)
         }
       }
     })
@@ -72,12 +101,35 @@ export function useSvgProcessor(options) {
 
   /**
    * 添加容器编码属性
+   *
+   * [FIX 2026-08-08] 编码来源对齐分组树 elementCode:
+   *   增量隐藏(updateVisibilityOnly)按 group.elementCode 匹配 SVG 容器,
+   *   而本函数原实现仅按 domainProducts 的 名称→code 映射, 两者编码源可能不一致
+   *   (例: "销售管理" 分组树 elementCode=OM, domainProducts 名称映射=SCMSA)
+   *   → data-container-code=SCMSA 但 hiddenContainerCodes 只有 OM → 永远匹配不上 → 空容器无法隐藏.
+   *   修复: 优先按标题匹配分组树(layoutGroups)取其 elementCode, 兜底再用 domainProducts 名称映射,
+   *   保证 data-container-code 与 updateVisibilityOnly 消费的编码源一致.
    */
-  const addContainerCodeAttributes = (svgEl, diagramData) => {
+  const addContainerCodeAttributes = (svgEl, diagramData, layoutGroups = null) => {
     if (!diagramData) return
 
-    // [VIS 2026-08-07] 覆盖所有层级(领域/子领域/服务模块)容器: 从 domainProducts 递归收集 名称→code,
-    //   供增量隐藏(<hidden>)定位 g.cluster[data-container-code="..."]。原实现只覆盖 serviceModules。
+    // 1) 分组树 标题→elementCode (权威编码源, 与 updateVisibilityOnly 一致)
+    const titleToElementCode = new Map()
+    const collectGroups = (list) => {
+      ;(list || []).forEach((g) => {
+        if (!g || typeof g !== 'object') return
+        const title = g.title || g.name
+        const code = g.elementCode || g.id
+        if (title && code && !titleToElementCode.has(title)) {
+          titleToElementCode.set(title, code)
+        }
+        collectGroups(g.children)
+        collectGroups(g.containers)
+      })
+    }
+    collectGroups(layoutGroups)
+
+    // 2) domainProducts 名称→code (兜底, 兼容无 layoutGroups 路径)
     const nameToCode = new Map()
     const collectLevel = (list) => {
       ;(list || []).forEach((item) => {
@@ -101,8 +153,16 @@ export function useSvgProcessor(options) {
       if (titleEl) {
         const titleText = titleEl.textContent || ''
         const titleMatch = titleText.match(/^([^\n(]+)/)
-        const containerName = titleMatch ? titleMatch[1].trim() : titleText
-        const matchedCode = nameToCode.get(containerName) || nameToCode.get(titleText)
+        // [FIX 2026-08-09] 新容器标题带层级标记符号 (<名称>/ {名称}/ [名称]),
+        //   去除首尾标记后才是纯名称, 否则无法匹配分组树标题 → data-container-code 缺失
+        //   → 右键/双击无法识别容器 (需求计划 SM 容器右击无菜单/双击不折叠).
+        let containerName = titleMatch ? titleMatch[1].trim() : titleText
+        containerName = containerName.replace(/^[<{\[]/, '').replace(/[>}\]]$/, '')
+        // [FIX 2026-08-08] 优先分组树 elementCode, 兜底 domainProducts 名称映射
+        const matchedCode = titleToElementCode.get(containerName)
+          || titleToElementCode.get(titleText)
+          || nameToCode.get(containerName)
+          || nameToCode.get(titleText)
         if (matchedCode) {
           subgraph.setAttribute('data-container-code', matchedCode)
         }
@@ -145,10 +205,19 @@ export function useSvgProcessor(options) {
         return false
       })
 
-      if (matchedLink && matchedLink.relationCode) {
-        const edgeGroup = edgeLabel.closest('g')
-        if (edgeGroup) {
-          edgeGroup.setAttribute('data-relation-code', matchedLink.relationCode)
+      if (matchedLink) {
+        // [FIX 2026-08-09] 关系定位失败: arch data 流程 link.relationCode 为空(""),
+        //   旧守卫 `matchedLink.relationCode` 恒为 falsy → data-relation-code 永不设置
+        //   → 关系连线无法按编码定位 (点击/备注面板高亮全失效).
+        //   修复: relationCode 为空时回退到 link.code (即 `${source}-${target}` 渲染标签,
+        //   与 annotation targetId 的 `${link.source}-${link.target}` 兜底一致).
+        //   relationCode 非空时仍优先用 relationCode (addBidirectionalAttributes 依赖它).
+        const code = matchedLink.relationCode || matchedLink.code
+        if (code) {
+          const edgeGroup = edgeLabel.closest('g')
+          if (edgeGroup) {
+            edgeGroup.setAttribute('data-relation-code', code)
+          }
         }
       }
     })
@@ -338,14 +407,17 @@ export function useSvgProcessor(options) {
    * @param {Object} diagramData - 包含 nodes/colorGroupBy/nodeColorMappings
    * @param {Object} annotationConfig - centerScopeHighlight / legendPosition
    * @param {Array} nodeColorMappings - 当前节点的 colorMap (从 generateMermaidCode 返回值)
+   * @param {Array} layoutGroups - layoutControlConfig.groups (图例项点击定位分组用)
+   * @param {Function} onToggleGroupVisible - 图例项点击回调
+   * @param {Map|null} groupColorMap - 增量路径传入的 分组名→颜色 映射 (折叠视图用)
    */
-  const updateColorLegend = (svgEl, diagramData, annotationConfig, nodeColorMappings, layoutGroups = null, onToggleGroupVisible = null) => {
+  const updateColorLegend = (svgEl, diagramData, annotationConfig, nodeColorMappings, layoutGroups = null, onToggleGroupVisible = null, groupColorMap = null) => {
     if (!annotationConfig) return
     if (diagramData?.nodes?.[0]?.category !== 'object' && !diagramData?.serviceModules?.length) {
       return
     }
     const centerScopeHighlight = annotationConfig.centerScopeHighlight !== false
-    const colorLegendData = buildColorLegendData(diagramData, nodeColorMappings, centerScopeHighlight, layoutGroups)
+    const colorLegendData = buildColorLegendData(diagramData, nodeColorMappings, centerScopeHighlight, layoutGroups, groupColorMap)
     if (colorLegendData && colorLegendData.length > 0) {
       annotationOverlay.overlayColorLegend(svgEl, colorLegendData, {
         position: annotationConfig.legendPosition || 'top-left',
@@ -358,8 +430,10 @@ export function useSvgProcessor(options) {
    * 构建颜色图例数据
    * @param {Array|null} groups - layoutControlConfig.groups (分组树), 用于建立 层级名称→分组对象 映射,
    *   供图例项点击时定位对应分组并切换 visible (与图表配置树双向同步)。传入空/缺省时不附加分组引用。
+   * @param {Map|null} groupColorMap - 当前 colorGroupBy 下的 分组名→颜色 映射 (MermaidComponent 增量路径
+   *   传入, 与折叠节点/展开节点取色同源)。优先用其取色, 回退 nodeColorMappings / node.color。
    */
-  const buildColorLegendData = (diagramData, nodeColorMappings, centerScopeHighlight = true, groups = null) => {
+  const buildColorLegendData = (diagramData, nodeColorMappings, centerScopeHighlight = true, groups = null, groupColorMap = null) => {
     const legendData = []
     const { nodes, colorGroupBy, centerScopeColor, centerObjectColor } = diagramData
 
@@ -424,7 +498,13 @@ export function useSvgProcessor(options) {
 
       if (!colorMap.has(groupKey)) {
         let color = null
-        if (nodeColorMappings && nodeColorMappings.length > 0) {
+        // [FOLD 2026-08-09] 优先用增量路径传入的 groupColorMap (与折叠/展开节点取色同源).
+        //   折叠视图 nodeColorMappings 为空时, 若不传 groupColorMap, 回退 node.color 是
+        //   初始渲染烘焙的旧分组色 → 图例键色与折叠节点(按新 colorGroupBy 重算)不一致.
+        if (groupColorMap && typeof groupColorMap.get === 'function') {
+          color = groupColorMap.get(groupKey)
+        }
+        if (!color && nodeColorMappings && nodeColorMappings.length > 0) {
           const mapping = nodeColorMappings.find(m => m.nodeCode === node.code)
           if (mapping) {
             color = mapping.color
@@ -680,7 +760,10 @@ export function useSvgProcessor(options) {
     //   这样 fixArrowMarkers 才能看到 data-bidirectional='true' 并设置 marker-start
     if (props.diagramData) {
       addNodeCodeAttributes(svgEl, props.diagramData)
-      addContainerCodeAttributes(svgEl, props.diagramData)
+      // [FIX 2026-08-08] 传 layoutGroups, 让 data-container-code 对齐分组树 elementCode
+      //   (updateVisibilityOnly 按 elementCode 匹配容器; 仅靠 domainProducts 名称映射会因编码源
+      //   不一致导致空容器无法隐藏, 例: 销售管理 elementCode=OM vs domainProducts=SCMSA).
+      addContainerCodeAttributes(svgEl, props.diagramData, props.layoutControlConfig?.groups)
       addLinkCodeAttributes(svgEl, props.diagramData)
       addBidirectionalAttributes(svgEl, props.diagramData)
     }
@@ -775,6 +858,26 @@ export function useSvgProcessor(options) {
     }
   }
 
+  // [FIX 2026-08-10] 透传到内部 useTooltip 实例的"清除选择高亮"。
+  //   选择高亮 (点击连线高亮端点) 状态保存在本模块内部 tooltip 的闭包 selectedElements 里,
+  //   关系高亮 (MermaidComponent) 应用前必须先清掉它, 否则 saveRelHlOrigStyle 会把选择高亮
+  //   样式误存为"原始样式", 清除关系高亮时错误恢复 → 该节点残留高亮.
+  const clearSelectionHighlight = () => {
+    if (tooltip && typeof tooltip.clearSelectionHighlight === 'function') {
+      tooltip.clearSelectionHighlight()
+    }
+  }
+
+  // [FIX 2026-08-10] 透传到内部 useAnnotationOverlay 的"清除备注/节点点击高亮"。
+  //   点击节点/连线会走 annotationOverlay 的 highlightTargetElement (加 .annotation-highlighted 类),
+  //   这是独立于 useTooltip 选择高亮的另一套高亮。关系高亮 (MermaidComponent) 应用前必须先清掉它,
+  //   否则 saveRelHlOrigStyle 会把节点点击高亮样式误存为"原始样式", 清除关系高亮时错误恢复 → 节点残留高亮.
+  const clearAnnotationHighlight = (svgEl) => {
+    if (annotationOverlay && typeof annotationOverlay.clearSvgHighlightsOnly === 'function') {
+      annotationOverlay.clearSvgHighlightsOnly(svgEl)
+    }
+  }
+
   return {
     fixViewBox,
     fixContainerTitleCenter,
@@ -790,6 +893,8 @@ export function useSvgProcessor(options) {
     // [v34 双向支持] 导出 addBidirectionalAttributes 以便单测覆盖
     addBidirectionalAttributes,
     cleanup,
+    clearSelectionHighlight,
+    clearAnnotationHighlight,
     // 关键导出 v26：导出 buildColorLegendData 让 HTML 导出器复用 legend 逻辑
     buildColorLegendData,
     // [FIX 2026-07-31] 导出 updateColorLegend 供 MermaidComponent.updateColorsOnly 增量刷新 legend

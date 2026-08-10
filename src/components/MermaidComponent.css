@@ -710,6 +710,18 @@
   dominant-baseline: middle !important;
 }
 
+/* [TITLE 2026-08-09] 折叠聚合节点 (COLLAPSE_*) 文字放大 50% (mermaid 默认 16px → 24px).
+   折叠节点(领域/子领域/服务模块聚合)为 g.node 且 id 以 flowchart-COLLAPSE_ 开头;
+   业务对象节点(非 COLLAPSE)不受影响, 保持原字号. 注意: 本文件为普通 CSS(非 scoped),
+   不能用 :deep(), 直接写普通后代选择器. */
+.mermaid-content g.node[id^="flowchart-COLLAPSE_"] .nodeLabel,
+.mermaid-content g.node[id^="flowchart-COLLAPSE_"] .nodeLabel p,
+.mermaid-content g.node[id^="flowchart-COLLAPSE_"] .nodeLabel span,
+.mermaid-content g.node[id^="flowchart-COLLAPSE_"] .nodeLabel div {
+  font-size: 24px !important;
+  line-height: 1.3 !important;
+}
+
 .mermaid-content.businessObject :deep(.node .label) {
   text-align: center !important;
 }
@@ -801,6 +813,89 @@
 .mermaid-ctx-menu .ctx-menu-item:hover {
   background: #f0f5ff;
   color: #1a73e8;
+}
+
+/* [DBG 2026-08-08] 浮动调试面板 */
+.mermaid-debug-panel {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 9998;
+  width: 240px;
+  background: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+  font-size: 13px;
+  user-select: none;
+  overflow: hidden;
+}
+.mermaid-debug-panel .debug-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #1a73e8;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+.mermaid-debug-panel .debug-panel-close {
+  cursor: pointer;
+  opacity: 0.8;
+  font-size: 14px;
+  line-height: 1;
+}
+.mermaid-debug-panel .debug-panel-close:hover {
+  opacity: 1;
+}
+.mermaid-debug-panel .debug-panel-body {
+  padding: 8px;
+}
+.mermaid-debug-panel .debug-section {
+  margin-bottom: 8px;
+}
+.mermaid-debug-panel .debug-section-title {
+  font-size: 11px;
+  color: #999;
+  margin-bottom: 4px;
+  padding-left: 2px;
+}
+.mermaid-debug-panel .debug-btn {
+  display: inline-block;
+  padding: 4px 10px;
+  margin: 2px;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  background: #f8f8f8;
+  cursor: pointer;
+  font-size: 12px;
+  color: #333;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+.mermaid-debug-panel .debug-btn:hover {
+  background: #e8f0fe;
+  border-color: #1a73e8;
+  color: #1a73e8;
+}
+.mermaid-debug-panel .debug-panel-hint {
+  font-size: 11px;
+  color: #bbb;
+  text-align: center;
+  padding-top: 4px;
+  border-top: 1px solid #f0f0f0;
+  margin-top: 4px;
+}
+
+/* 调试面板按钮样式 */
+.toolbar-btn--debug {
+  color: #8e8cd8 !important;
+  border-color: #8e8cd8 !important;
+}
+.toolbar-btn--debug:hover {
+  background: #8e8cd8 !important;
+  color: #fff !important;
 }
 
 .mermaid-content.serviceModule :deep(.cluster-label),

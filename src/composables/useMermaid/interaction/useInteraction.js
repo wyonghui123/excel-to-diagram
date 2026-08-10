@@ -374,8 +374,28 @@ export function useInteraction() {
       dragState.isDragging = false
     }
 
-    const handleDblClick = () => {
-      autoFitDiagram()
+    // [FIX 2026-08-08] 双击: 只有点击空白区域时才 autoFit, 不干扰节点/容器的业务双击逻辑
+    //   根因: MermaidComponent.vue 的 @dblclick.prevent="handleDblClick" 在 .mermaid-wrapper 上
+    //   处理折叠/展开业务逻辑, 而这里在 .mermaid-container 上也绑了 dblclick → autoFitDiagram()。
+    //   两个 handler 都触发, 业务逻辑先执行, 但 autoFitDiagram() 随后重置视图。
+    //   修复: 检测目标是否在节点/容器内, 是则跳过 autoFit, 由业务逻辑处理。
+    const handleDblClick = (e) => {
+      // 检查 event.target 是否在 g.node/g.cluster/g.subgraph 内部
+      let el = e.target
+      let isOnGroupElement = false
+      while (el && el !== mermaidContainerElRef.value) {
+        if (el.tagName === 'g') {
+          const cls = (el.getAttribute('class') || '').trim().split(/\s+/)
+          if (cls.includes('node') || cls.includes('cluster') || cls.includes('subgraph')) {
+            isOnGroupElement = true
+            break
+          }
+        }
+        el = el.parentElement
+      }
+      if (!isOnGroupElement) {
+        autoFitDiagram()
+      }
     }
 
     // 关键修复 v18：mousemove/mouseup 改用 document bubble 模式绑（不要 capture）
