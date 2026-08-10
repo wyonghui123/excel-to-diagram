@@ -1,0 +1,2157 @@
+﻿svg ready: False nodeCount= 0
+=== BASELINE (scope default) ===
+{
+ "colorState": null,
+ "expandState": {
+  "expandLevel": "businessObject",
+  "expandLevelUserSet": false,
+  "scopeBoCount": 30,
+  "collapsedCount": 16,
+  "collapsedSizes": {
+   "domain": 0,
+   "subDomain": 4,
+   "serviceModule": 12,
+   "other": 0
+  },
+  "groupManualSet": false
+ },
+ "store": {
+  "groupManualSet": false,
+  "expandLevel": "businessObject",
+  "colorGroupBy": "domain",
+  "expandLevelUserSet": false
+ },
+ "panelCollapsed": {
+  "SCM": {
+   "t": "domain",
+   "collapsed": null,
+   "title": "供应链云"
+  },
+  "SCP": {
+   "t": "subDomain",
+   "collapsed": null,
+   "title": "供应链计划"
+  },
+  "DP": {
+   "t": "serviceModule",
+   "collapsed": null,
+   "title": "需求计划"
+  },
+  "DP_inner": {
+   "t": "custom",
+   "collapsed": null,
+   "title": "无外部关系"
+  },
+  "PLB041": {
+   "t": "",
+   "collapsed": null,
+   "title": "需求分类结果"
+  },
+  "PLD00202": {
+   "t": "",
+   "collapsed": null,
+   "title": "需求预测结果"
+  },
+  "PLB042": {
+   "t": "",
+   "collapsed": null,
+   "title": "预测偏差方案"
+  },
+  "PLB043": {
+   "t": "",
+   "collapsed": null,
+   "title": "预测偏差结果"
+  },
+  "DP_boundary": {
+   "t": "custom",
+   "collapsed": null,
+   "title": "有外部关系"
+  },
+  "DP10": {
+   "t": "",
+   "collapsed": null,
+   "title": "计划独立需求"
+  },
+  "PLB033": {
+   "t": "",
+   "collapsed": null,
+   "title": "需求分类算法方案"
+  },
+  "DP01": {
+   "t": "",
+   "collapsed": null,
+   "title": "需求计划"
+  },
+  "PLD00601": {
+   "t": "",
+   "collapsed": null,
+   "title": "需求计划协同对象"
+  },
+  "PLB034": {
+   "t": "",
+   "collapsed": null,
+   "title": "需求计划算法方案"
+  },
+  "PLD00201": {
+   "t": "",
+   "collapsed": null,
+   "title": "需求计划薄"
+  },
+  "EXT": {
+   "t": "serviceModule",
+   "collapsed": null,
+   "title": "外部对象管理"
+  },
+  "EXT10": {
+   "t": "",
+   "collapsed": null,
+   "title": "供需对象"
+  },
+  "EXT09": {
+   "t": "",
+   "collapsed": null,
+   "title": "消耗对象"
+  },
+  "PLAM": {
+   "t": "serviceModule",
+   "collapsed": null,
+   "title": "计划范围管理"
+  },
+  "PLAM_inner": {
+   "t": "custom",
+   "collapsed": null,
+   "title": "无外部关系"
+  },
+  "PLB011": {
+   "t": "",
+   "collapsed": null,
+   "title": "指标"
+  },
+  "PLB001": {
+   "t": "",
+   "collapsed": null,
+   "title": "期间类型"
+  },
+  "PLB002": {
+   "t": "",
+   "collapsed": null,
+   "title": "维度"
+  },
+  "PLD002": {
+   "t": "",
+   "collapsed": null,
+   "title": "计划簿详情"
+  },
+  "PLA002": {
+   "t": "",
+   "collapsed": null,
+   "title": "计划视图"
+  },
+  "PLAM_boundary": {
+   "t": "custom",
+   "collapsed": null,
+   "title": "有外部关系"
+  },
+  "PLD006": {
+   "t": "",
+   "collapsed": null,
+   "title": "计划协同对象"
+  },
+  "PLD003": {
+   "t": "",
+   "collapsed": null,
+   "title": "计划单"
+  },
+  "PLA001": {
+   "t": "",
+   "collapsed": null,
+   "title": "计划范围"
+  },
+  "SNC": {
+   "t": "serviceModule",
+   "collapsed": null,
+   "title": "供应网络"
+  },
+  "SNC_inner": {
+   "t": "custom",
+   "collapsed": null,
+   "title": "无外部关系"
+  },
+  "SCN03": {
+   "t": "",
+   "collapsed": null,
+   "title": "位置"
+  },
+  "SCN10": {
+   "t": "",
+   "collapsed": null,
+   "title": "供应网络管理方案"
+  },
+  "SCN02": {
+   "t": "",
+   "collapsed": null,
+   "title": "关系"
+  },
+  "SNC_boundary": {
+   "t": "custom",
+   "collapsed": null,
+   "title": "有外部关系"
+  },
+  "SCN01": {
+   "t": "",
+   "collapsed": null,
+   "title": "供应网络"
+  },
+  "SNPIO": {
+   "t": "serviceModule",
+   "collapsed": null,
+   "title": "库存优化"
+  },
+  "PLB035": {
+   "t": "",
+   "collapsed": null,
+   "title": "库存优化算法方案"
+  },
+  "PLD00203": {
+   "t": "",
+   "collapsed": null,
+   "title": "库存优化结果"
+  },
+  "SNPSP": {
+   "t": "serviceModule",
+   "collapsed": null,
+   "title": "供应计划"
+  },
+  "SNPSP_inner": {
+   "t": "custom",
+   "collapsed": null,
+   "title": "无外部关系"
+  },
+  "PRE01": {
+   "t": "",
+   "collapsed": null,
+   "title": "供需要素"
+  },
+  "SNPSP_boundary": {
+   "t": "custom",
+   "collapsed": null,
+   "title": "有外部关系"
+  },
+  "PLD00604": {
+   "t": "",
+   "collapsed": null,
+   "title": "供应计划协同对象"
+  },
+  "PLB050": {
+   "t": "",
+   "collapsed": null,
+   "title": "供应计划算法方案"
+  },
+  "PLD00204": {
+   "t": "",
+   "collapsed": null,
+   "title": "供应计划薄"
+  },
+  "MM": {
+   "t": "subDomain",
+   "collapsed": null,
+   "title": "采购供应"
+  },
+  "INV": {
+   "t": "serviceModule",
+   "collapsed": null,
+   "title": "库存管理"
+  },
+  "INV34": {
+   "t": "",
+   "collapsed": null,
+   "title": "产品入库单"
+  },
+  "INV51": {
+   "t": "",
+   "collapsed": null,
+   "title": "调拨订单"
+  },
+  "PUM": {
+   "t": "serviceModule",
+   "collapsed": null,
+   "title": "采购管理"
+  },
+  "PUM02": {
+   "t": "",
+   "collapsed": null,
+   "title": "请购单"
+  },
+  "PUM07": {
+   "t": "",
+   "collapsed": null,
+   "title": "采购订单"
+  },
+  "SM": {
+   "t": "subDomain",
+   "collapsed": null,
+   "title": "销售"
+  },
+  "OM": {
+   "t": "serviceModule",
+   "collapsed": null,
+   "title": "销售管理"
+  },
+  "OM04": {
+   "t": "",
+   "collapsed": null,
+   "title": "销售发货"
+  },
+  "OM03": {
+   "t": "",
+   "collapsed": null,
+   "title": "销售订单"
+  },
+  "MFG": {
+   "t": "domain",
+   "collapsed": null,
+   "title": "制造云"
+  },
+  "MFG_PROD": {
+   "t": "subDomain",
+   "collapsed": null,
+   "title": "生产制造"
+  },
+  "DM": {
+   "t": "serviceModule",
+   "collapsed": null,
+   "title": "需求管理"
+  },
+  "MR04": {
+   "t": "",
+   "collapsed": null,
+   "title": "计划独立需求"
+  },
+  "SOP": {
+   "t": "serviceModule",
+   "collapsed": null,
+   "title": "销售运营计划"
+  },
+  "SOP40": {
+   "t": "",
+   "collapsed": null,
+   "title": "供应计划"
+  },
+  "SOP02": {
+   "t": "",
+   "collapsed": null,
+   "title": "应用管理"
+  },
+  "SOP10": {
+   "t": "",
+   "collapsed": null,
+   "title": "销售预测"
+  },
+  "MKT": {
+   "t": "domain",
+   "collapsed": null,
+   "title": "营销云"
+  },
+  "MKT_HUB": {
+   "t": "subDomain",
+   "collapsed": null,
+   "title": "营销中台"
+  },
+  "SMKQM": {
+   "t": "serviceModule",
+   "collapsed": null,
+   "title": "配额管理"
+  },
+  "SMKQM04": {
+   "t": "",
+   "collapsed": null,
+   "title": "配额表"
+  }
+ },
+ "dbg": {
+  "afterStates": {
+   "SCM": {
+    "collapsed": false,
+    "t": "domain"
+   },
+   "SCP": {
+    "collapsed": false,
+    "t": "subDomain"
+   },
+   "DP": {
+    "collapsed": false,
+    "t": "serviceModule"
+   },
+   "EXT": {
+    "collapsed": false,
+    "t": "serviceModule"
+   },
+   "PLAM": {
+    "collapsed": false,
+    "t": "serviceModule"
+   },
+   "SNC": {
+    "collapsed": false,
+    "t": "serviceModule"
+   },
+   "SNPIO": {
+    "collapsed": false,
+    "t": "serviceModule"
+   },
+   "SNPSP": {
+    "collapsed": false,
+    "t": "serviceModule"
+   },
+   "MM": {
+    "collapsed": false,
+    "t": "subDomain"
+   },
+   "INV": {
+    "collapsed": false,
+    "t": "serviceModule"
+   },
+   "PUM": {
+    "collapsed": false,
+    "t": "serviceModule"
+   },
+   "SM": {
+    "collapsed": false,
+    "t": "subDomain"
+   },
+   "OM": {
+    "collapsed": false,
+    "t": "serviceModule"
+   },
+   "MFG": {
+    "collapsed": false,
+    "t": "domain"
+   },
+   "MFG_PROD": {
+    "collapsed": false,
+    "t": "subDomain"
+   },
+   "DM": {
+    "collapsed": false,
+    "t": "serviceModule"
+   },
+   "SOP": {
+    "collapsed": false,
+    "t": "serviceModule"
+   },
+   "MKT": {
+    "collapsed": false,
+    "t": "domain"
+   },
+   "MKT_HUB": {
+    "collapsed": false,
+    "t": "subDomain"
+   },
+   "SMKQM": {
+    "collapsed": false,
+    "t": "serviceModule"
+   }
+  },
+  "afterScopeExpand": {
+   "SCM": {
+    "collapsed": false,
+    "t": "domain"
+   },
+   "SCP": {
+    "collapsed": false,
+    "t": "subDomain"
+   },
+   "DP": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "EXT": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "PLAM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SNC": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SNPIO": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SNPSP": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "MM": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "INV": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "PUM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SM": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "OM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "MFG": {
+    "collapsed": false,
+    "t": "domain"
+   },
+   "MFG_PROD": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "DM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SOP": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "MKT": {
+    "collapsed": false,
+    "t": "domain"
+   },
+   "MKT_HUB": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "SMKQM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   }
+  }
+ }
+}
+svg after expand=domain: True 3
+=== AFTER setExpandLevel(domain) ===
+{
+ "colorState": null,
+ "expandState": {
+  "expandLevel": "domain",
+  "expandLevelUserSet": true,
+  "scopeBoCount": 30,
+  "collapsedCount": 20,
+  "collapsedSizes": {
+   "domain": 3,
+   "subDomain": 5,
+   "serviceModule": 12,
+   "other": 0
+  },
+  "groupManualSet": false
+ },
+ "store": {
+  "groupManualSet": false,
+  "expandLevel": "domain",
+  "colorGroupBy": "domain",
+  "expandLevelUserSet": true
+ },
+ "panelCollapsed": {
+  "SCM": {
+   "t": "domain",
+   "collapsed": true,
+   "title": "供应链云"
+  },
+  "SCP": {
+   "t": "subDomain",
+   "collapsed": true,
+   "title": "供应链计划"
+  },
+  "DP": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "需求计划"
+  },
+  "DP_inner": {
+   "t": "custom",
+   "collapsed": true,
+   "title": "无外部关系"
+  },
+  "PLB041": {
+   "t": "",
+   "collapsed": true,
+   "title": "需求分类结果"
+  },
+  "PLD00202": {
+   "t": "",
+   "collapsed": true,
+   "title": "需求预测结果"
+  },
+  "PLB042": {
+   "t": "",
+   "collapsed": true,
+   "title": "预测偏差方案"
+  },
+  "PLB043": {
+   "t": "",
+   "collapsed": true,
+   "title": "预测偏差结果"
+  },
+  "DP_boundary": {
+   "t": "custom",
+   "collapsed": true,
+   "title": "有外部关系"
+  },
+  "DP10": {
+   "t": "",
+   "collapsed": true,
+   "title": "计划独立需求"
+  },
+  "PLB033": {
+   "t": "",
+   "collapsed": true,
+   "title": "需求分类算法方案"
+  },
+  "DP01": {
+   "t": "",
+   "collapsed": true,
+   "title": "需求计划"
+  },
+  "PLD00601": {
+   "t": "",
+   "collapsed": true,
+   "title": "需求计划协同对象"
+  },
+  "PLB034": {
+   "t": "",
+   "collapsed": true,
+   "title": "需求计划算法方案"
+  },
+  "PLD00201": {
+   "t": "",
+   "collapsed": true,
+   "title": "需求计划薄"
+  },
+  "EXT": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "外部对象管理"
+  },
+  "EXT10": {
+   "t": "",
+   "collapsed": true,
+   "title": "供需对象"
+  },
+  "EXT09": {
+   "t": "",
+   "collapsed": true,
+   "title": "消耗对象"
+  },
+  "PLAM": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "计划范围管理"
+  },
+  "PLAM_inner": {
+   "t": "custom",
+   "collapsed": true,
+   "title": "无外部关系"
+  },
+  "PLB011": {
+   "t": "",
+   "collapsed": true,
+   "title": "指标"
+  },
+  "PLB001": {
+   "t": "",
+   "collapsed": true,
+   "title": "期间类型"
+  },
+  "PLB002": {
+   "t": "",
+   "collapsed": true,
+   "title": "维度"
+  },
+  "PLD002": {
+   "t": "",
+   "collapsed": true,
+   "title": "计划簿详情"
+  },
+  "PLA002": {
+   "t": "",
+   "collapsed": true,
+   "title": "计划视图"
+  },
+  "PLAM_boundary": {
+   "t": "custom",
+   "collapsed": true,
+   "title": "有外部关系"
+  },
+  "PLD006": {
+   "t": "",
+   "collapsed": true,
+   "title": "计划协同对象"
+  },
+  "PLD003": {
+   "t": "",
+   "collapsed": true,
+   "title": "计划单"
+  },
+  "PLA001": {
+   "t": "",
+   "collapsed": true,
+   "title": "计划范围"
+  },
+  "SNC": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "供应网络"
+  },
+  "SNC_inner": {
+   "t": "custom",
+   "collapsed": true,
+   "title": "无外部关系"
+  },
+  "SCN03": {
+   "t": "",
+   "collapsed": true,
+   "title": "位置"
+  },
+  "SCN10": {
+   "t": "",
+   "collapsed": true,
+   "title": "供应网络管理方案"
+  },
+  "SCN02": {
+   "t": "",
+   "collapsed": true,
+   "title": "关系"
+  },
+  "SNC_boundary": {
+   "t": "custom",
+   "collapsed": true,
+   "title": "有外部关系"
+  },
+  "SCN01": {
+   "t": "",
+   "collapsed": true,
+   "title": "供应网络"
+  },
+  "SNPIO": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "库存优化"
+  },
+  "PLB035": {
+   "t": "",
+   "collapsed": true,
+   "title": "库存优化算法方案"
+  },
+  "PLD00203": {
+   "t": "",
+   "collapsed": true,
+   "title": "库存优化结果"
+  },
+  "SNPSP": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "供应计划"
+  },
+  "SNPSP_inner": {
+   "t": "custom",
+   "collapsed": true,
+   "title": "无外部关系"
+  },
+  "PRE01": {
+   "t": "",
+   "collapsed": true,
+   "title": "供需要素"
+  },
+  "SNPSP_boundary": {
+   "t": "custom",
+   "collapsed": true,
+   "title": "有外部关系"
+  },
+  "PLD00604": {
+   "t": "",
+   "collapsed": true,
+   "title": "供应计划协同对象"
+  },
+  "PLB050": {
+   "t": "",
+   "collapsed": true,
+   "title": "供应计划算法方案"
+  },
+  "PLD00204": {
+   "t": "",
+   "collapsed": true,
+   "title": "供应计划薄"
+  },
+  "MM": {
+   "t": "subDomain",
+   "collapsed": true,
+   "title": "采购供应"
+  },
+  "INV": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "库存管理"
+  },
+  "INV34": {
+   "t": "",
+   "collapsed": true,
+   "title": "产品入库单"
+  },
+  "INV51": {
+   "t": "",
+   "collapsed": true,
+   "title": "调拨订单"
+  },
+  "PUM": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "采购管理"
+  },
+  "PUM02": {
+   "t": "",
+   "collapsed": true,
+   "title": "请购单"
+  },
+  "PUM07": {
+   "t": "",
+   "collapsed": true,
+   "title": "采购订单"
+  },
+  "SM": {
+   "t": "subDomain",
+   "collapsed": true,
+   "title": "销售"
+  },
+  "OM": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "销售管理"
+  },
+  "OM04": {
+   "t": "",
+   "collapsed": true,
+   "title": "销售发货"
+  },
+  "OM03": {
+   "t": "",
+   "collapsed": true,
+   "title": "销售订单"
+  },
+  "MFG": {
+   "t": "domain",
+   "collapsed": true,
+   "title": "制造云"
+  },
+  "MFG_PROD": {
+   "t": "subDomain",
+   "collapsed": true,
+   "title": "生产制造"
+  },
+  "DM": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "需求管理"
+  },
+  "MR04": {
+   "t": "",
+   "collapsed": true,
+   "title": "计划独立需求"
+  },
+  "SOP": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "销售运营计划"
+  },
+  "SOP40": {
+   "t": "",
+   "collapsed": true,
+   "title": "供应计划"
+  },
+  "SOP02": {
+   "t": "",
+   "collapsed": true,
+   "title": "应用管理"
+  },
+  "SOP10": {
+   "t": "",
+   "collapsed": true,
+   "title": "销售预测"
+  },
+  "MKT": {
+   "t": "domain",
+   "collapsed": true,
+   "title": "营销云"
+  },
+  "MKT_HUB": {
+   "t": "subDomain",
+   "collapsed": true,
+   "title": "营销中台"
+  },
+  "SMKQM": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "配额管理"
+  },
+  "SMKQM04": {
+   "t": "",
+   "collapsed": true,
+   "title": "配额表"
+  }
+ },
+ "dbg": {
+  "afterStates": {
+   "SCM": {
+    "collapsed": true,
+    "t": "domain"
+   },
+   "SCP": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "DP": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "EXT": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "PLAM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SNC": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SNPIO": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SNPSP": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "MM": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "INV": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "PUM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SM": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "OM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "MFG": {
+    "collapsed": true,
+    "t": "domain"
+   },
+   "MFG_PROD": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "DM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SOP": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "MKT": {
+    "collapsed": true,
+    "t": "domain"
+   },
+   "MKT_HUB": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "SMKQM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   }
+  },
+  "afterScopeExpand": {
+   "SCM": {
+    "collapsed": true,
+    "t": "domain"
+   },
+   "SCP": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "DP": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "EXT": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "PLAM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SNC": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SNPIO": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SNPSP": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "MM": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "INV": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "PUM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SM": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "OM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "MFG": {
+    "collapsed": true,
+    "t": "domain"
+   },
+   "MFG_PROD": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "DM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SOP": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "MKT": {
+    "collapsed": true,
+    "t": "domain"
+   },
+   "MKT_HUB": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "SMKQM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   }
+  }
+ }
+}
+node labels: ["<营销云>领域 MKT", "<制造云>领域 MFG", "<供应链云>领域 SCM"]
+DBLCLICK result: {"ok": true, "rect": {"x": 801, "y": 457}}
+svg after dblclick: True 5
+=== AFTER dblclick 供应链云 ===
+{
+ "colorState": null,
+ "expandState": {
+  "expandLevel": "domain",
+  "expandLevelUserSet": true,
+  "scopeBoCount": 30,
+  "collapsedCount": 19,
+  "collapsedSizes": {
+   "domain": 2,
+   "subDomain": 5,
+   "serviceModule": 12,
+   "other": 0
+  },
+  "groupManualSet": true
+ },
+ "store": {
+  "groupManualSet": true,
+  "expandLevel": "domain",
+  "colorGroupBy": "domain",
+  "expandLevelUserSet": true
+ },
+ "panelCollapsed": {
+  "SCM": {
+   "t": "domain",
+   "collapsed": false,
+   "title": "供应链云"
+  },
+  "SCP": {
+   "t": "subDomain",
+   "collapsed": true,
+   "title": "供应链计划"
+  },
+  "DP": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "需求计划"
+  },
+  "DP_inner": {
+   "t": "custom",
+   "collapsed": true,
+   "title": "无外部关系"
+  },
+  "PLB041": {
+   "t": "",
+   "collapsed": true,
+   "title": "需求分类结果"
+  },
+  "PLD00202": {
+   "t": "",
+   "collapsed": true,
+   "title": "需求预测结果"
+  },
+  "PLB042": {
+   "t": "",
+   "collapsed": true,
+   "title": "预测偏差方案"
+  },
+  "PLB043": {
+   "t": "",
+   "collapsed": true,
+   "title": "预测偏差结果"
+  },
+  "DP_boundary": {
+   "t": "custom",
+   "collapsed": true,
+   "title": "有外部关系"
+  },
+  "DP10": {
+   "t": "",
+   "collapsed": true,
+   "title": "计划独立需求"
+  },
+  "PLB033": {
+   "t": "",
+   "collapsed": true,
+   "title": "需求分类算法方案"
+  },
+  "DP01": {
+   "t": "",
+   "collapsed": true,
+   "title": "需求计划"
+  },
+  "PLD00601": {
+   "t": "",
+   "collapsed": true,
+   "title": "需求计划协同对象"
+  },
+  "PLB034": {
+   "t": "",
+   "collapsed": true,
+   "title": "需求计划算法方案"
+  },
+  "PLD00201": {
+   "t": "",
+   "collapsed": true,
+   "title": "需求计划薄"
+  },
+  "EXT": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "外部对象管理"
+  },
+  "EXT10": {
+   "t": "",
+   "collapsed": true,
+   "title": "供需对象"
+  },
+  "EXT09": {
+   "t": "",
+   "collapsed": true,
+   "title": "消耗对象"
+  },
+  "PLAM": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "计划范围管理"
+  },
+  "PLAM_inner": {
+   "t": "custom",
+   "collapsed": true,
+   "title": "无外部关系"
+  },
+  "PLB011": {
+   "t": "",
+   "collapsed": true,
+   "title": "指标"
+  },
+  "PLB001": {
+   "t": "",
+   "collapsed": true,
+   "title": "期间类型"
+  },
+  "PLB002": {
+   "t": "",
+   "collapsed": true,
+   "title": "维度"
+  },
+  "PLD002": {
+   "t": "",
+   "collapsed": true,
+   "title": "计划簿详情"
+  },
+  "PLA002": {
+   "t": "",
+   "collapsed": true,
+   "title": "计划视图"
+  },
+  "PLAM_boundary": {
+   "t": "custom",
+   "collapsed": true,
+   "title": "有外部关系"
+  },
+  "PLD006": {
+   "t": "",
+   "collapsed": true,
+   "title": "计划协同对象"
+  },
+  "PLD003": {
+   "t": "",
+   "collapsed": true,
+   "title": "计划单"
+  },
+  "PLA001": {
+   "t": "",
+   "collapsed": true,
+   "title": "计划范围"
+  },
+  "SNC": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "供应网络"
+  },
+  "SNC_inner": {
+   "t": "custom",
+   "collapsed": true,
+   "title": "无外部关系"
+  },
+  "SCN03": {
+   "t": "",
+   "collapsed": true,
+   "title": "位置"
+  },
+  "SCN10": {
+   "t": "",
+   "collapsed": true,
+   "title": "供应网络管理方案"
+  },
+  "SCN02": {
+   "t": "",
+   "collapsed": true,
+   "title": "关系"
+  },
+  "SNC_boundary": {
+   "t": "custom",
+   "collapsed": true,
+   "title": "有外部关系"
+  },
+  "SCN01": {
+   "t": "",
+   "collapsed": true,
+   "title": "供应网络"
+  },
+  "SNPIO": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "库存优化"
+  },
+  "PLB035": {
+   "t": "",
+   "collapsed": true,
+   "title": "库存优化算法方案"
+  },
+  "PLD00203": {
+   "t": "",
+   "collapsed": true,
+   "title": "库存优化结果"
+  },
+  "SNPSP": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "供应计划"
+  },
+  "SNPSP_inner": {
+   "t": "custom",
+   "collapsed": true,
+   "title": "无外部关系"
+  },
+  "PRE01": {
+   "t": "",
+   "collapsed": true,
+   "title": "供需要素"
+  },
+  "SNPSP_boundary": {
+   "t": "custom",
+   "collapsed": true,
+   "title": "有外部关系"
+  },
+  "PLD00604": {
+   "t": "",
+   "collapsed": true,
+   "title": "供应计划协同对象"
+  },
+  "PLB050": {
+   "t": "",
+   "collapsed": true,
+   "title": "供应计划算法方案"
+  },
+  "PLD00204": {
+   "t": "",
+   "collapsed": true,
+   "title": "供应计划薄"
+  },
+  "MM": {
+   "t": "subDomain",
+   "collapsed": true,
+   "title": "采购供应"
+  },
+  "INV": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "库存管理"
+  },
+  "INV34": {
+   "t": "",
+   "collapsed": true,
+   "title": "产品入库单"
+  },
+  "INV51": {
+   "t": "",
+   "collapsed": true,
+   "title": "调拨订单"
+  },
+  "PUM": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "采购管理"
+  },
+  "PUM02": {
+   "t": "",
+   "collapsed": true,
+   "title": "请购单"
+  },
+  "PUM07": {
+   "t": "",
+   "collapsed": true,
+   "title": "采购订单"
+  },
+  "SM": {
+   "t": "subDomain",
+   "collapsed": true,
+   "title": "销售"
+  },
+  "OM": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "销售管理"
+  },
+  "OM04": {
+   "t": "",
+   "collapsed": true,
+   "title": "销售发货"
+  },
+  "OM03": {
+   "t": "",
+   "collapsed": true,
+   "title": "销售订单"
+  },
+  "MFG": {
+   "t": "domain",
+   "collapsed": true,
+   "title": "制造云"
+  },
+  "MFG_PROD": {
+   "t": "subDomain",
+   "collapsed": true,
+   "title": "生产制造"
+  },
+  "DM": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "需求管理"
+  },
+  "MR04": {
+   "t": "",
+   "collapsed": true,
+   "title": "计划独立需求"
+  },
+  "SOP": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "销售运营计划"
+  },
+  "SOP40": {
+   "t": "",
+   "collapsed": true,
+   "title": "供应计划"
+  },
+  "SOP02": {
+   "t": "",
+   "collapsed": true,
+   "title": "应用管理"
+  },
+  "SOP10": {
+   "t": "",
+   "collapsed": true,
+   "title": "销售预测"
+  },
+  "MKT": {
+   "t": "domain",
+   "collapsed": true,
+   "title": "营销云"
+  },
+  "MKT_HUB": {
+   "t": "subDomain",
+   "collapsed": true,
+   "title": "营销中台"
+  },
+  "SMKQM": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "配额管理"
+  },
+  "SMKQM04": {
+   "t": "",
+   "collapsed": true,
+   "title": "配额表"
+  }
+ },
+ "dbg": {
+  "afterStates": {
+   "SCM": {
+    "collapsed": false,
+    "t": "domain"
+   },
+   "SCP": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "DP": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "EXT": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "PLAM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SNC": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SNPIO": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SNPSP": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "MM": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "INV": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "PUM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SM": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "OM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "MFG": {
+    "collapsed": true,
+    "t": "domain"
+   },
+   "MFG_PROD": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "DM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SOP": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "MKT": {
+    "collapsed": true,
+    "t": "domain"
+   },
+   "MKT_HUB": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "SMKQM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   }
+  },
+  "afterScopeExpand": {
+   "SCM": {
+    "collapsed": false,
+    "t": "domain"
+   },
+   "SCP": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "DP": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "EXT": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "PLAM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SNC": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SNPIO": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SNPSP": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "MM": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "INV": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "PUM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SM": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "OM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "MFG": {
+    "collapsed": true,
+    "t": "domain"
+   },
+   "MFG_PROD": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "DM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SOP": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "MKT": {
+    "collapsed": true,
+    "t": "domain"
+   },
+   "MKT_HUB": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "SMKQM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   }
+  }
+ }
+}
+node labels after dblclick: ["{销售}子领域 SM", "{采购供应}子领域 MM", "{供应链计划}子领域 SCP", "<营销云>领域 MKT", "<制造云>领域 MFG"]
+svg after color=serviceModule: True 10
+=== AFTER dblclick + colorGroupBy=serviceModule ===
+{
+ "colorState": {
+  "colorGroupBy": "serviceModule",
+  "nodeColorMappingsCount": 0,
+  "legendRefreshSkipped": true,
+  "unifiedColorMapKeys": []
+ },
+ "expandState": {
+  "expandLevel": "domain",
+  "expandLevelUserSet": true,
+  "scopeBoCount": 30,
+  "collapsedCount": 16,
+  "collapsedSizes": {
+   "domain": 0,
+   "subDomain": 4,
+   "serviceModule": 12,
+   "other": 0
+  },
+  "groupManualSet": true
+ },
+ "store": {
+  "groupManualSet": true,
+  "expandLevel": "domain",
+  "colorGroupBy": "serviceModule",
+  "expandLevelUserSet": true
+ },
+ "panelCollapsed": {
+  "SCM": {
+   "t": "domain",
+   "collapsed": false,
+   "title": "供应链云"
+  },
+  "SCP": {
+   "t": "subDomain",
+   "collapsed": false,
+   "title": "供应链计划"
+  },
+  "DP": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "需求计划"
+  },
+  "DP_inner": {
+   "t": "custom",
+   "collapsed": true,
+   "title": "无外部关系"
+  },
+  "PLB041": {
+   "t": "",
+   "collapsed": true,
+   "title": "需求分类结果"
+  },
+  "PLD00202": {
+   "t": "",
+   "collapsed": true,
+   "title": "需求预测结果"
+  },
+  "PLB042": {
+   "t": "",
+   "collapsed": true,
+   "title": "预测偏差方案"
+  },
+  "PLB043": {
+   "t": "",
+   "collapsed": true,
+   "title": "预测偏差结果"
+  },
+  "DP_boundary": {
+   "t": "custom",
+   "collapsed": true,
+   "title": "有外部关系"
+  },
+  "DP10": {
+   "t": "",
+   "collapsed": true,
+   "title": "计划独立需求"
+  },
+  "PLB033": {
+   "t": "",
+   "collapsed": true,
+   "title": "需求分类算法方案"
+  },
+  "DP01": {
+   "t": "",
+   "collapsed": true,
+   "title": "需求计划"
+  },
+  "PLD00601": {
+   "t": "",
+   "collapsed": true,
+   "title": "需求计划协同对象"
+  },
+  "PLB034": {
+   "t": "",
+   "collapsed": true,
+   "title": "需求计划算法方案"
+  },
+  "PLD00201": {
+   "t": "",
+   "collapsed": true,
+   "title": "需求计划薄"
+  },
+  "EXT": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "外部对象管理"
+  },
+  "EXT10": {
+   "t": "",
+   "collapsed": true,
+   "title": "供需对象"
+  },
+  "EXT09": {
+   "t": "",
+   "collapsed": true,
+   "title": "消耗对象"
+  },
+  "PLAM": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "计划范围管理"
+  },
+  "PLAM_inner": {
+   "t": "custom",
+   "collapsed": true,
+   "title": "无外部关系"
+  },
+  "PLB011": {
+   "t": "",
+   "collapsed": true,
+   "title": "指标"
+  },
+  "PLB001": {
+   "t": "",
+   "collapsed": true,
+   "title": "期间类型"
+  },
+  "PLB002": {
+   "t": "",
+   "collapsed": true,
+   "title": "维度"
+  },
+  "PLD002": {
+   "t": "",
+   "collapsed": true,
+   "title": "计划簿详情"
+  },
+  "PLA002": {
+   "t": "",
+   "collapsed": true,
+   "title": "计划视图"
+  },
+  "PLAM_boundary": {
+   "t": "custom",
+   "collapsed": true,
+   "title": "有外部关系"
+  },
+  "PLD006": {
+   "t": "",
+   "collapsed": true,
+   "title": "计划协同对象"
+  },
+  "PLD003": {
+   "t": "",
+   "collapsed": true,
+   "title": "计划单"
+  },
+  "PLA001": {
+   "t": "",
+   "collapsed": true,
+   "title": "计划范围"
+  },
+  "SNC": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "供应网络"
+  },
+  "SNC_inner": {
+   "t": "custom",
+   "collapsed": true,
+   "title": "无外部关系"
+  },
+  "SCN03": {
+   "t": "",
+   "collapsed": true,
+   "title": "位置"
+  },
+  "SCN10": {
+   "t": "",
+   "collapsed": true,
+   "title": "供应网络管理方案"
+  },
+  "SCN02": {
+   "t": "",
+   "collapsed": true,
+   "title": "关系"
+  },
+  "SNC_boundary": {
+   "t": "custom",
+   "collapsed": true,
+   "title": "有外部关系"
+  },
+  "SCN01": {
+   "t": "",
+   "collapsed": true,
+   "title": "供应网络"
+  },
+  "SNPIO": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "库存优化"
+  },
+  "PLB035": {
+   "t": "",
+   "collapsed": true,
+   "title": "库存优化算法方案"
+  },
+  "PLD00203": {
+   "t": "",
+   "collapsed": true,
+   "title": "库存优化结果"
+  },
+  "SNPSP": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "供应计划"
+  },
+  "SNPSP_inner": {
+   "t": "custom",
+   "collapsed": true,
+   "title": "无外部关系"
+  },
+  "PRE01": {
+   "t": "",
+   "collapsed": true,
+   "title": "供需要素"
+  },
+  "SNPSP_boundary": {
+   "t": "custom",
+   "collapsed": true,
+   "title": "有外部关系"
+  },
+  "PLD00604": {
+   "t": "",
+   "collapsed": true,
+   "title": "供应计划协同对象"
+  },
+  "PLB050": {
+   "t": "",
+   "collapsed": true,
+   "title": "供应计划算法方案"
+  },
+  "PLD00204": {
+   "t": "",
+   "collapsed": true,
+   "title": "供应计划薄"
+  },
+  "MM": {
+   "t": "subDomain",
+   "collapsed": true,
+   "title": "采购供应"
+  },
+  "INV": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "库存管理"
+  },
+  "INV34": {
+   "t": "",
+   "collapsed": true,
+   "title": "产品入库单"
+  },
+  "INV51": {
+   "t": "",
+   "collapsed": true,
+   "title": "调拨订单"
+  },
+  "PUM": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "采购管理"
+  },
+  "PUM02": {
+   "t": "",
+   "collapsed": true,
+   "title": "请购单"
+  },
+  "PUM07": {
+   "t": "",
+   "collapsed": true,
+   "title": "采购订单"
+  },
+  "SM": {
+   "t": "subDomain",
+   "collapsed": true,
+   "title": "销售"
+  },
+  "OM": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "销售管理"
+  },
+  "OM04": {
+   "t": "",
+   "collapsed": true,
+   "title": "销售发货"
+  },
+  "OM03": {
+   "t": "",
+   "collapsed": true,
+   "title": "销售订单"
+  },
+  "MFG": {
+   "t": "domain",
+   "collapsed": false,
+   "title": "制造云"
+  },
+  "MFG_PROD": {
+   "t": "subDomain",
+   "collapsed": true,
+   "title": "生产制造"
+  },
+  "DM": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "需求管理"
+  },
+  "MR04": {
+   "t": "",
+   "collapsed": true,
+   "title": "计划独立需求"
+  },
+  "SOP": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "销售运营计划"
+  },
+  "SOP40": {
+   "t": "",
+   "collapsed": true,
+   "title": "供应计划"
+  },
+  "SOP02": {
+   "t": "",
+   "collapsed": true,
+   "title": "应用管理"
+  },
+  "SOP10": {
+   "t": "",
+   "collapsed": true,
+   "title": "销售预测"
+  },
+  "MKT": {
+   "t": "domain",
+   "collapsed": false,
+   "title": "营销云"
+  },
+  "MKT_HUB": {
+   "t": "subDomain",
+   "collapsed": true,
+   "title": "营销中台"
+  },
+  "SMKQM": {
+   "t": "serviceModule",
+   "collapsed": true,
+   "title": "配额管理"
+  },
+  "SMKQM04": {
+   "t": "",
+   "collapsed": true,
+   "title": "配额表"
+  }
+ },
+ "dbg": {
+  "afterStates": {
+   "SCM": {
+    "collapsed": false,
+    "t": "domain"
+   },
+   "SCP": {
+    "collapsed": false,
+    "t": "subDomain"
+   },
+   "DP": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "EXT": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "PLAM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SNC": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SNPIO": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SNPSP": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "MM": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "INV": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "PUM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SM": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "OM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "MFG": {
+    "collapsed": false,
+    "t": "domain"
+   },
+   "MFG_PROD": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "DM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SOP": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "MKT": {
+    "collapsed": false,
+    "t": "domain"
+   },
+   "MKT_HUB": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "SMKQM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   }
+  },
+  "afterScopeExpand": {
+   "SCM": {
+    "collapsed": false,
+    "t": "domain"
+   },
+   "SCP": {
+    "collapsed": false,
+    "t": "subDomain"
+   },
+   "DP": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "EXT": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "PLAM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SNC": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SNPIO": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SNPSP": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "MM": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "INV": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "PUM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SM": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "OM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "MFG": {
+    "collapsed": false,
+    "t": "domain"
+   },
+   "MFG_PROD": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "DM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "SOP": {
+    "collapsed": true,
+    "t": "serviceModule"
+   },
+   "MKT": {
+    "collapsed": false,
+    "t": "domain"
+   },
+   "MKT_HUB": {
+    "collapsed": true,
+    "t": "subDomain"
+   },
+   "SMKQM": {
+    "collapsed": true,
+    "t": "serviceModule"
+   }
+  }
+ }
+}
+node labels after color switch: ["[供应计划]服务模块 SNPSP", "[库存优化]服务模块 SNPIO", "[供应网络]服务模块 SNC", "[计划范围管理]服务模块 PLAM", "[外部对象管理]服务模块 EXT", "[需求计划]服务模块 DP", "{销售}子领域 SM", "{采购供应}子领域 MM", "{生产制造}子领域 MFG_PROD", "{营销中台}子领域 MKT_HUB"]
