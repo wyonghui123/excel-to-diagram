@@ -208,6 +208,12 @@ test_helpers/scripts/_backup_2026_08_01_phase6/
 playwright-report/
 test-results/
 
+# Playwright 登录态 (每次运行重新生成, 含敏感 cookie)
+e2e/.auth/
+
+# 临时调试残留 (py-spy 采集)
+tmp_pyspy/
+
 # 临时截图/探测文件
 repro_*.png
 test_helpers/_shot_*.png
