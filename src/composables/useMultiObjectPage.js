@@ -901,7 +901,18 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
 
   // [E2E] dev 环境暴露给 e2e 测试
   if (typeof window !== 'undefined' && import.meta.env?.DEV) {
-    window.__archPage = { objectTypes, activeTab, tabs, versionContext, filterFlow, contextSource, scopeSource, scopeIds, hasScopeSelection, combinedFilters, tabFilters, scopeFilterKeys, handleScopeChange, clearScope, handleToolbarChange, saveStateForDiagram, restoreStateFromDiagram, handleShowChart }
+    window.__archPage = { objectTypes, activeTab, tabs, versionContext, filterFlow, contextSource, scopeSource, scopeIds, hasScopeSelection, combinedFilters, tabFilters, scopeFilterKeys, handleScopeChange, clearScope, handleToolbarChange, saveStateForDiagram, restoreStateFromDiagram, handleShowChart,
+      // [E2E 2026-08-08] 直接设置 scope (替代 enableChartButton 的 10 次轮询)
+      setScope: (domainId, versionId) => {
+        if (scopeIds?.domain) {
+          scopeIds.domain.selected = [domainId]
+          scopeIds.domain.effective = [domainId]
+        }
+        if (versionContext?.selectedVersionId) {
+          versionContext.selectedVersionId.value = versionId
+        }
+      }
+    }
   }
 
   return {

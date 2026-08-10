@@ -303,6 +303,20 @@ function toggleEmbeddedView() {
   viewMode.value = 'chart'
 }
 
+// [E2E 2026-08-08] 暴露 forceChartMode 到 window.__archPage (替代 ensureChartMode 的 12 次轮询)
+//   只能在 ?mode=debug 时使用, 跳过 canShowChart 检查直接进入图表模式
+if (typeof window !== 'undefined') {
+  const urlParams = new URLSearchParams(window.location.search)
+  if (urlParams.get('mode') === 'debug') {
+    window.__archPage = window.__archPage || {}
+    window.__archPage.forceChartMode = () => {
+      if (viewMode.value === 'chart') return
+      try { page.saveStateForDiagram() } catch (e) { console.warn('[forceChartMode] saveStateForDiagram failed:', e) }
+      viewMode.value = 'chart'
+    }
+  }
+}
+
 // [A7 2026-07-30] 嵌入式图表 context: 传给业务方 detailContent slot
 //   - versionId: 当前选中的版本
 //   - scopeIds: useMultiObjectPage.scopeIds（树勾选状态）
@@ -487,9 +501,26 @@ async function debugScopeCodes() {
 }
 
 async function tryApplyShortcut() {
-  if (!import.meta.env.DEV) return
   const params = new URLSearchParams(window.location.search)
-  if (params.get('shortcut') !== '1') return
+  // [NEW 2026-08-08] preset 参数: 一键启动预设, 扩展为完整 URL 参数
+  //   用法: &preset=scp 等价于 &productCode=TTTTT000&versionCode=V11&view=chart&scopeCode=SCP
+  //   目标: 只需记住一个参数, 无需拼凑 4 个参数
+  const preset = params.get('preset')
+  if (preset === 'scp') {
+    const url = new URL(window.location.href)
+    url.searchParams.set('productCode', 'TTTTT000')
+    url.searchParams.set('versionCode', 'V11')
+    url.searchParams.set('view', 'chart')
+    url.searchParams.set('scopeCode', 'SCP')
+    url.searchParams.delete('preset')
+    console.log('[shortcut] preset=scp 一键启动, 重定向到完整 URL:', url.toString())
+    window.location.replace(url.toString())
+    return
+  }
+  const isShortcut = params.get('shortcut') === '1'
+  const isViewChart = params.get('view') === 'chart'
+  if (!isShortcut && !isViewChart) return
+  if (isShortcut && !import.meta.env.DEV) return
   // [FIX 2026-08-07] 防止 HMR 热更新导致组件重挂载后重复执行 shortcut
   //   使用全局变量而非组件级 ref, 因为 HMR 会重置组件内 ref 为初始值
   if (window.__SHORTCUT_APPLIED__) {
@@ -559,7 +590,14 @@ async function tryApplyShortcut() {
     if (scopePayload) {
       page.handleScopeChange(scopePayload)
     } else {
-      console.warn('[shortcut] scopeCode 应用失败, 尝试全选兜底')
+      // [FIX 2026-08-08 v2] 绝不全选兜底: scopeCode 是用户明确指定的范围,
+      //   如果编码匹配失败就回退到全量加载(3230个对象), 完全违背用户意图,
+      //   会导致页面卡死 30s+ 且用户无法感知根因。
+      //   改为: 打印错误 → 停止执行 → 用户通过 &debug=scopeCodes 查看可用编码
+      console.error('【效率杀手】scopeCode 编码未匹配到任何节点, 快捷启动中止')
+      console.error('  使用 &debug=scopeCodes 查看可用编码列表, 或检查编码是否正确')
+      console.error('  例如: &scopeCode=SCP 选择"供应链计划", &scopeCode=SCM 选择"采购管理"')
+      return  // [!!!] 关键: 停止执行, 绝不进入全选兜底
     }
   } else {
     // [NEW 2026-08-07] 无 scope 参数时自动全选所有业务对象
