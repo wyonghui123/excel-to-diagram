@@ -1,6 +1,14 @@
 /**
  * S10: 架构图 - 功能测试
  *
+ * @deprecated 2026-08-08 本用例整体废弃（skip）：
+ *   - 原 /diagram 六步向导（导入→中心→关系→类型→配置→展示）+「业务对象图/服务模块图」图表类型选择
+ *     已无业务入口（见 src/router/modules/business.js /archdata-chart @deprecated）
+ *   - 业务层面不再区分「业务对象图 / 服务模块图」，图表展示统一为
+ *     /system/archdata 嵌入式 Mermaid 图表（EmbeddedChartView → MermaidComponent）
+ *   - 嵌入式图表的覆盖见 e2e/features/diagram-interaction.spec.js (S11)
+ *   - 本文件保留仅作历史参考，禁止作为新功能入口；如需迁移请基于嵌入图表流程
+ *
  * [E2E 规则速查] 修改前必读:
  * - 禁止 networkidle | 截图用 testInfo.attach() | 导航用 navigateAndWaitForPage()
  * - 权限用 setAdminPermissions() | 报告: npx playwright show-report --port 9326
@@ -33,7 +41,8 @@ async function navigateToDiagram(page) {
   await page.waitForTimeout(1500)
 }
 
-test.describe('S10: 架构图', () => {
+// [DEPRECATED 2026-08-08] 老 /diagram 向导 + 业务对象图/服务模块图类型选择已废弃，整体 skip
+test.describe.skip('S10: 架构图 (DEPRECATED - 老向导, 已废弃)', () => {
 
   test('C01: 架构图 - 页面加载与步骤导航器', async ({ page }, testInfo) => {
     await login(page)
@@ -85,7 +94,7 @@ test.describe('S10: 架构图', () => {
     const pv = await ensureProductWithVersion(page)
     console.log(`测试数据: product=${pv.product.id}, version=${pv.version.id}`)
 
-    await navigateAndWaitForPage(page, `/system/archdata?productId=${pv.product.id}&versionId=${pv.version.id}`, {
+    await navigateAndWaitForPage(page, `/system/archdata?productId=${pv.product.id}&versionId=${pv.version.id}&mode=debug`, {
       expectedPath: 'archdata',
       waitForTable: true
     })

@@ -62,6 +62,11 @@ export default defineConfig({
     // [v3.3] 动态端口: 支持多 Agent worktree 自验证
     // 默认 3005 (主仓库), Agent 通过 VITE_PORT 环境变量覆盖
     port: parseInt(process.env.VITE_PORT || '3005', 10),
+    // [FIX 2026-08-09 防重复实例] 端口被占时直接启动失败, 而非 Vite 默认静默落到下一个端口.
+    //   根因: service_manager 用 --port 3004, npm run dev 用 config 默认 3005, 两入口端口不一致
+    //   → 可同时并存互不冲突 → 两个 vite 抢 CPU 拖慢登录后页面.
+    //   strictPort 只对"同端口重复启动"生效, 各 Agent 用不同 VITE_PORT 时不受影响 (兼容多 Agent worktree).
+    strictPort: true,
     // [FIX 2026-06-12 #13] 根治 MetaListPage toolbar/table "又这样了" 复发
     // 根因: 浏览器缓存 Vite 编译产物 (SCSS 改完后旧 CSS 被缓存)
     // 用户反馈"我刷新后现在又好了" 确认是缓存问题

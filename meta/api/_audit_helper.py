@@ -21,6 +21,25 @@ from flask import g, request
 
 logger = logging.getLogger(__name__)
 
+# [FIX 2026-08-09 线程泄漏] 复用模块级单例数据源.
+#   get_data_source() 每次调用都新建 SQLiteAdapter → 新建 WriteQueue → 新建 "sqlite-writer" 线程,
+#   且从不 disconnect, 导致每次角色/权限配置编辑都泄漏线程.
+#   改为模块级懒加载单例, 整个进程只建一个 adapter/WriteQueue 线程.
+_data_source = None
+
+
+def _get_ds():
+    """获取模块级单例数据源 (懒加载, 进程内仅一个 adapter)."""
+    global _data_source
+    if _data_source is None:
+        from meta.core.datasource import get_data_source
+        db_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            'architecture.db'
+        )
+        _data_source = get_data_source('sqlite', database=db_path)
+    return _data_source
+
 # 计算/派生字段 - 不会作为独立 field update 写入 audit_logs
 # 跟 AuditLogger 内部 hardcoded skip list (updated_at/created_by 等) 类似,
 # 但本模块的 skip list 是 caller 侧过滤, 避免在 audit log 里出现 1 行 + N 个 count 行的噪音
@@ -62,12 +81,7 @@ def _resolve_permission_names(perm_ids: List[Any]) -> List[str]:
     if not perm_ids:
         return []
     try:
-        from meta.core.datasource import get_data_source
-        db_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
-            'architecture.db'
-        )
-        ds = get_data_source('sqlite', database=db_path)
+        ds = _get_ds()
         placeholders = ','.join('?' * len(perm_ids))
         cursor = ds.execute(
             f"SELECT id, code, name FROM permissions WHERE id IN ({placeholders})",
@@ -88,12 +102,7 @@ def _resolve_menu_names(menu_codes: List[str]) -> Dict[str, str]:
     if not menu_codes:
         return {}
     try:
-        from meta.core.datasource import get_data_source
-        db_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
-            'architecture.db'
-        )
-        ds = get_data_source('sqlite', database=db_path)
+        ds = _get_ds()
         placeholders = ','.join('?' * len(menu_codes))
         # [FIX 2026-06-12] 修正: menus 表列名是 menu_code / menu_name (不是 code/name)
         cursor = ds.execute(
@@ -172,14 +181,10 @@ def write_permission_config_audit(
     """
     try:
         from meta.core.action_executor import AuditLogger
-        from meta.core.datasource import get_data_source
 
         if audit_logger is None:
-            db_path = os.path.join(
-                os.path.dirname(os.path.dirname(__file__)),
-                'architecture.db'
-            )
-            audit_logger = AuditLogger(get_data_source('sqlite', database=db_path))
+            # [FIX 2026-08-09] 复用模块级单例 ds, 不再每次 new get_data_source() 泄漏线程
+            audit_logger = AuditLogger(_get_ds())
 
         user_id = _audit_user_id()
         user_name = _audit_user_name()

@@ -75,11 +75,16 @@ def get_operation_chain(trace_id: str):
 
     try:
         ds = get_data_source('sqlite', database=str(_get_db_path()))
-        records = ds.find(
-            'audit_logs',
-            filters={'trace_id': trace_id},
-            order_by='created_at ASC, id ASC',
-        )
+        try:
+            records = ds.find(
+                'audit_logs',
+                filters={'trace_id': trace_id},
+                order_by='created_at ASC, id ASC',
+            )
+        finally:
+            # [FIX 2026-08-09 线程泄漏] 一次性读取后必须 disconnect,
+            # 否则每次调用都泄漏一个 WriteQueue "sqlite-writer" 线程.
+            ds.disconnect()
     except Exception as e:
         from meta.api._problem_details import problem
         return problem.internal_error(f"查询操作链失败: {e}")

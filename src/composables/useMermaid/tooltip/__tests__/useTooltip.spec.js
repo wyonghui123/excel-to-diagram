@@ -258,3 +258,105 @@ describe('useTooltip - formatTooltipText (v34 双向支持)', () => {
     expect(descIdx).toBeLessThan(noteIdx)
   })
 })
+
+describe('useTooltip - formatTooltipText 聚合级关系数量统计 (2026-08-09)', () => {
+  let api
+  beforeEach(() => {
+    api = useTooltip()
+  })
+
+  it('任一端为折叠容器 (level<=2) → 只展示关系数量统计, 不含方向/类型等关系级属性', () => {
+    const text = api.formatTooltipText({
+      relationCode: 'PLAM-SNPSP',
+      sourceName: '供应链计划',
+      targetName: '销售计划',
+      sourceLevel: 1,
+      targetLevel: 1,
+      childRelations: [
+        { relationCode: 'A', sourceName: 'a', targetName: 'b', relationDirection: 'PUSH', relationType: 'GENERATES' },
+        { relationCode: 'B', sourceName: 'b', targetName: 'a', relationDirection: 'PULL', relationType: 'GENERATES' },
+        { relationCode: 'C', sourceName: 'c', targetName: 'd', relationDirection: 'PUSH', relationType: 'COMPOSES' }
+      ]
+    })
+    // 总条数
+    expect(text).toContain('共 3 条')
+    // 不逐条列示 (不出现 [1]/[2]/[3] 子关系标记)
+    expect(text).not.toContain('[1]')
+    expect(text).not.toContain('[2]')
+    // 聚合级不展示方向/类型 (只在 BO 级列示中展示)
+    expect(text).not.toContain('方向:')
+    expect(text).not.toContain('类型:')
+  })
+
+  it('聚合级 + childRelations 为空 (仅 1 条底层关系) → 总数显示 1', () => {
+    const text = api.formatTooltipText({
+      relationCode: 'PLAM-SNPSP',
+      sourceName: '供应链计划',
+      targetName: '销售计划',
+      sourceLevel: 1,
+      targetLevel: 2
+    })
+    expect(text).toContain('共 1 条')
+  })
+
+  it('两端均为 BO (level=3) → 不受聚合统计影响, 走 childRelations 逐条列表', () => {
+    const text = api.formatTooltipText({
+      relationCode: 'PLA001-PLD00201',
+      sourceName: '计划范围',
+      targetName: '需求计划薄',
+      sourceLevel: 3,
+      targetLevel: 3,
+      childRelations: [
+        { relationCode: 'A', sourceName: '计划范围', targetName: '需求计划薄', relationDirection: 'PUSH' },
+        { relationCode: 'B', sourceName: '需求计划薄', targetName: '计划范围', relationDirection: 'PULL' }
+      ]
+    })
+    expect(text).toContain('共 2 条子关系:')
+    expect(text).toContain('[1]')
+    expect(text).toContain('[2]')
+    expect(text).not.toContain('关系数量:')
+  })
+})
+
+describe('useTooltip - formatTooltipText childRelations 多关系列示 (2026-08-09)', () => {
+  let api
+  beforeEach(() => {
+    api = useTooltip()
+  })
+
+  it('childRelations 非空 → 展示父关系概览 + 逐条子关系 (编码/名称/类型/方向/描述)', () => {
+    const text = api.formatTooltipText({
+      relationCode: 'PLA001-PLD00201',
+      sourceName: '计划范围',
+      targetName: '需求计划薄',
+      childRelations: [
+        { relationCode: 'PLA001-PLD00201', sourceName: '计划范围', targetName: '需求计划薄', relationType: 'GENERATES', relationDirection: 'PUSH', relationDesc: '从计划范围生成需求计划薄' },
+        { relationCode: 'PLA001-PLD00201', sourceName: '需求计划薄', targetName: '计划范围', relationType: 'GENERATES', relationDirection: 'PULL', relationDesc: '反向关联' }
+      ]
+    })
+    expect(text).toContain('共 2 条子关系:')
+    expect(text).toContain('[1]')
+    expect(text).toContain('[2]')
+    // 父概览
+    expect(text).toContain('计划范围 → 需求计划薄')
+    // 子关系逐条含编码/类型/方向/描述
+    // 注: 单测环境 relation_direction enum 未加载 → 方向/类型显示原始 code (与真实渲染的"双向 (BIDIRECTIONAL)"映射由 enum 提供)
+    expect(text).toContain('方向: PUSH')
+    expect(text).toContain('方向: PULL')
+    expect(text).toContain('类型: GENERATES')
+    expect(text).toContain('从计划范围生成需求计划薄')
+    expect(text).toContain('反向关联')
+  })
+
+  it('childRelations 为空数组 → 走单关系老逻辑 (向后兼容)', () => {
+    const text = api.formatTooltipText({
+      relationCode: 'R1',
+      sourceName: 'A',
+      targetName: 'B',
+      relationDesc: 'desc',
+      childRelations: []
+    })
+    expect(text).not.toContain('子关系')
+    expect(text).toContain('A → B')
+  })
+})

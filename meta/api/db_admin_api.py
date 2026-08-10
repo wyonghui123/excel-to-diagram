@@ -137,8 +137,12 @@ def db_health():
     try:
         # [DECORATIVE] v3.16 fix: 显式传 file-based DB path (v3.13 起 :memory: 不支持)
         ds = get_data_source('sqlite', path=_get_db_path())
-        result['data']['pool_stats'] = ds.get_pool_stats()
-        result['data']['write_queue_stats'] = ds.get_write_queue_stats()
+        try:
+            result['data']['pool_stats'] = ds.get_pool_stats()
+            result['data']['write_queue_stats'] = ds.get_write_queue_stats()
+        finally:
+            # [FIX 2026-08-09 线程泄漏] 一次性读取后必须 disconnect
+            ds.disconnect()
     except Exception as e:
         result['data']['status'] = 'critical'
         result['data']['pool_stats'] = {'error': str(e)}

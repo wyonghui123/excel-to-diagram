@@ -76,13 +76,13 @@ describe('groupedLayout - 方向控制 (需要 enabled 节点)', () => {
 })
 
 describe('groupedLayout - 可见性 (visible)', () => {
-  it('group.visible=false -> subgraph 标题为空 "[ ]"', () => {
+  it('group.visible=false -> 整棵子树不渲染 (无 subgraph 输出)', () => {
     const groups = [{
       id: 'G1', title: '隐藏组', visible: false, containers: [containers[0]], children: []
     }]
     const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
-    // visible=false 产生空标题 subgraph (groupId 格式: G_<id>)
-    expect(result.mermaidCode).toMatch(/subgraph G_G1\[\s*\]/)
+    // [VIS 2026-08-07] 修复: visible=false 跳过整棵子树, 不再输出空标题 subgraph
+    expect(result.mermaidCode).not.toMatch(/subgraph G_G1/)
   })
 
   it('group.visible=true (默认) -> 标题正常', () => {
@@ -93,14 +93,30 @@ describe('groupedLayout - 可见性 (visible)', () => {
     expect(result.mermaidCode).toContain('subgraph G_G1["显示组"]')
   })
 
-  it('visible=false + 有子组 -> 子组仍生成', () => {
+  it('visible=false + 有子组 -> 子组一并隐藏 (级联子树不渲染)', () => {
     const groups = [{
       id: 'G1', title: '隐藏父', visible: false, containers: [containers[0]],
       children: [{ id: 'G2', title: '子组', containers: [containers[2]], children: [] }]
     }]
     const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
-    expect(result.mermaidCode).toContain('subgraph G_G1')
-    expect(result.mermaidCode).toContain('subgraph G_G2')
+    // [VIS 2026-08-07] 修复: 隐藏父领域 (如供应链云) 后其子领域 (如销售) 也应隐藏
+    expect(result.mermaidCode).not.toMatch(/subgraph G_G1/)
+    expect(result.mermaidCode).not.toMatch(/subgraph G_G2/)
+  })
+
+  it('父组 visible=true 但所有子组 hidden -> 父组空盒不渲染 (用户: 销售保留空容器)', () => {
+    // 用户场景: 隐藏供应链云后, 销售子领域下的服务模块(销售管理)已隐藏,
+    // 但销售子领域容器本身仍显示为空盒. 期望: 销售容器也应一并消失.
+    const groups = [{
+      id: 'SD_SM', title: '销售', visible: true, groupType: 'subDomain', containers: [],
+      children: [{
+        id: 'SM_OM', title: '销售管理', visible: false, groupType: 'serviceModule',
+        directNodes: ['N1'], containers: [], children: []
+      }]
+    }]
+    const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    // 子组(销售管理)已隐藏 → 父组(销售)无可见内容 → 不应渲染空盒 subgraph
+    expect(result.mermaidCode).not.toMatch(/subgraph G_SD_SM/)
   })
 })
 
@@ -385,10 +401,50 @@ describe('groupedLayout - 上提 uplift', () => {
     const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
     // 叶子服务模块上提为聚合节点
     expect(result.mermaidCode).toContain('COLLAPSE_SM_SNPIO')
-    // 标题展示自身编码, 用 \n 转义两行
-    expect(result.mermaidCode).toContain('\\n（SNPIO）')
+    // [TITLE 2026-08-09] 服务模块折叠节点: 名称置标记内, 类型+编码置下方 "[库存优化]\n服务模块 SNPIO"
+    expect(result.mermaidCode).toContain('\\n服务模块 SNPIO')
     expect(result.mermaidCode).toContain('库存优化')
     // 不再展示祖先路径 (长路径会导致节点宽度溢出/遮挡, 且叶子元素应展示自身编码)
     expect(result.mermaidCode).not.toContain('供应链云/供应链计划')
+  })
+
+  it('[TITLE 2026-08-09] 折叠节点标题: 名称置标记内, 类型+编码置下方 (领域/子领域/服务模块)', () => {
+    const cases = [
+      { id: 'D_SCM', title: '供应链云', groupType: 'domain', elementCode: 'SCM', expect: '<供应链云>\\n领域 SCM' },
+      { id: 'SD_SCP', title: '供应链计划', groupType: 'subDomain', elementCode: 'SCP', expect: '{供应链计划}\\n子领域 SCP' },
+      { id: 'SM_SD', title: '销售', groupType: 'serviceModule', elementCode: 'SD', expect: '[销售]\\n服务模块 SD' }
+    ]
+    cases.forEach((c) => {
+      const groups = [{
+        id: c.id, title: c.title, groupType: c.groupType, elementCode: c.elementCode,
+        directNodes: [], containers: [], children: []
+      }]
+      const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+      // 折叠节点应用 :::collapseNode (放大字体用)
+      expect(result.mermaidCode).toContain(`COLLAPSE_${c.id.replace(/[^\w\u4e00-\u9fff]/g, '_')}`)
+      expect(result.mermaidCode).toContain(':::collapseNode')
+      // 标题 = "<名称>\n类型 编码"
+      expect(result.mermaidCode).toContain(c.expect)
+    })
+  })
+
+  it('[TITLE 2026-08-09] 折叠节点/容器标题剔除被拼入的父路径后缀 (销售(供应链云) → {销售})', () => {
+    // 父分组名称泄漏到子分组标题的场景: group.title = "销售(供应链云)" (半角) / "销售（供应链云）" (全角)
+    const cases = [
+      { title: '销售(供应链云)', expect: '{销售}\\n子领域 SD' },
+      { title: '销售（供应链云）', expect: '{销售}\\n子领域 SD' }
+    ]
+    cases.forEach((c) => {
+      const groups = [{
+        id: 'SD_SD', title: c.title, groupType: 'subDomain', elementCode: 'SD',
+        directNodes: [], containers: [], children: []
+      }]
+      const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+      // 折叠节点标记内仅显示自身名称, 不含父路径
+      expect(result.mermaidCode).toContain(c.expect)
+      expect(result.mermaidCode).not.toContain('供应链云')
+      // 容器标题 (subgraph) 同样剔除父路径
+      expect(result.mermaidCode).toContain('{销售}')
+    })
   })
 })

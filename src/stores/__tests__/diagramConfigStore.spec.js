@@ -198,6 +198,16 @@ describe('diagramConfigStore', () => {
       expect(store.layoutControlConfig.enabled).toBe(true)
     })
 
+    it('markGroupManualSet 应置 groupManualSet=true (初始 false, reset 恢复 false)', () => {
+      const store = useDiagramConfigStore()
+      // [CTX-FIX 2026-08-09] 双击/右键手动调整分组折叠后置 true, 渲染层不再覆盖用户 collapsed.
+      expect(store.groupManualSet).toBe(false)
+      store.markGroupManualSet()
+      expect(store.groupManualSet).toBe(true)
+      store.resetConfig()
+      expect(store.groupManualSet).toBe(false)
+    })
+
     it('updateMermaidMaxTextSize 应该更新最大文本大小', () => {
       const store = useDiagramConfigStore()
       store.updateMermaidMaxTextSize(100000)
@@ -253,6 +263,30 @@ describe('diagramConfigStore', () => {
       expect(store.layoutEngine).toBe('elk')
       expect(store.customColors).toEqual({})
       expect(store.useUnifiedRenderer).toBe(false)
+    })
+  })
+
+  describe('展开层级 expandLevel', () => {
+    it('初始 expandLevel=业务对象, expandLevelUserSet=false (默认态)', () => {
+      const store = useDiagramConfigStore()
+      expect(store.expandLevel).toBe('businessObject')
+      expect(store.expandLevelUserSet).toBe(false)
+    })
+
+    it('setExpandLevel 设置层级并标记用户已显式选择', () => {
+      const store = useDiagramConfigStore()
+      store.setExpandLevel('serviceModule')
+      expect(store.expandLevel).toBe('serviceModule')
+      expect(store.expandLevelUserSet).toBe(true)
+    })
+
+    it('resetConfig 重置展开层级且清空用户标记', () => {
+      const store = useDiagramConfigStore()
+      store.setExpandLevel('serviceModule')
+      expect(store.expandLevelUserSet).toBe(true)
+      store.resetConfig()
+      expect(store.expandLevel).toBe('businessObject')
+      expect(store.expandLevelUserSet).toBe(false)
     })
   })
 

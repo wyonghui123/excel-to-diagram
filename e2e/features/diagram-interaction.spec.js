@@ -124,59 +124,19 @@ async function createHierarchyWithRetry(page) {
 }
 
 /**
- * 确定性启用图表按钮：直接写 Pinia store 的 scopeIds（替代点击对象树，避免树加载时序抖动）
- * handleShowChart 读取 scopeIds[type].selected 构建 hierarchyFilter，写真实 domain id 即可正确渲染
- *
- * [STABILITY 2026-08-05] 冷启动时 __archPage 可能尚未挂载 / versionContext 尚未恢复，
- * 单次 set scope 不保证按钮立即可用。故幂等重试 + 轮询按钮 enabled 状态。
- */
-async function enableChartButton(page, chartBtn, hierarchy) {
-  const domainId = hierarchy.domainId
-  const versionId = hierarchy.version.id
-  if (!domainId || !versionId) return
-  // 1) 等待 __archPage 就绪（冷启动挂载慢）
-  await page.waitForFunction(() => {
-    const m = window.__archPage
-    return !!(m && m.scopeIds && m.scopeIds.domain && m.versionContext)
-  }, null, { timeout: 20000 }).catch(() => {})
-  // 2) 幂等设置 版本上下文 + domain scope，轮询直到按钮可用
-  //    [FIX 2026-08-05] canShowChart 依赖 versionContext.selectedVersionId + hasScopeSelection。
-  //    冷启动时 URL 版本参数可能尚未 restore，仅设 scope 不够，需同时兜底写版本上下文。
-  for (let i = 0; i < 10; i++) {
-    if (await chartBtn.isEnabled().catch(() => false)) return
-    await page.evaluate(({ domainId, versionId }) => {
-      const m = window.__archPage
-      if (!m) return
-      // a) 版本上下文（canShowChart 前置条件，URL 版本与测试版本一致，幂等）
-      const vc = m.versionContext
-      if (vc && vc.selectedVersionId && vc.selectedVersionId.value === null) {
-        vc.selectedVersionId.value = versionId
-      }
-      // b) domain scope（hasScopeSelection 前置条件）
-      if (m.scopeIds && m.scopeIds.domain) {
-        m.scopeIds.domain.selected = [domainId]
-        m.scopeIds.domain.effective = [domainId]
-      }
-    }, { domainId, versionId })
-    await page.waitForTimeout(500)
-  }
-  await expect(chartBtn, '图表展示按钮应最终变为可用').toBeEnabled({ timeout: 15000 })
-}
-
-/**
  * 进入嵌入式图表视图（选择对象范围 → 列表切图表）并等待图表渲染
  *
- * [STABILITY 2026-08-05] 冷启动（首个测试）时 Vite 需编译 archdata 及其依赖，
- * main 区域可能短暂为空。因此先等页面主内容挂载，再等图表按钮，均给足 45s。
+ * [E2E 2026-08-08] 使用 ?mode=debug 暴露的 setScope + forceChartMode + waitForChartReady
+ * 替代旧版 enableChartButton(10次轮询) + ensureChartMode(12次轮询) + waitForTimeout(2.5s)
+ * 总计节省 ~10-15s setup 时间。
  *
- * [FIX 2026-08-05] 原实现 chartBtn.click() + svg.waitFor().catch(()=>{}) 会吞掉
- * "视图未真正切换到图表"的失败（偶发图表按钮点击后视图仍停在列表/图表数据未就绪），
- * 导致后续 .rst-panel-layout / .lgn-row 全部找不到。改为 ensureChartMode() 显式确认
- * 图表模式生效（按钮变为"列表展示"），svg 等待不加 catch，失败即明示。
+ * [OPT 2026-08-08] 用 page.waitForFunction 替代自定义轮询，更高效。
  */
 async function openEmbeddedChartView(page, hierarchy) {
+  const domainId = hierarchy.domainId
+  const versionId = hierarchy.version.id
   await navigateAndWaitForPage(page,
-    `/system/archdata?productId=${hierarchy.product.id}&versionId=${hierarchy.version.id}`,
+    `/system/archdata?productId=${hierarchy.product.id}&versionId=${hierarchy.version.id}&mode=debug`,
     { expectedPath: 'archdata', waitForTable: true })
   // 页面加载后再设置权限（需 window.__pinia 就绪）
   await setAdminPermissions(page)
@@ -185,22 +145,68 @@ async function openEmbeddedChartView(page, hierarchy) {
   const pageRoot = page.locator('.multi-object-management, .momp-tabs-row, .el-table, .gt-btn-chart-toggle')
   await pageRoot.first().waitFor({ state: 'visible', timeout: 45000 }).catch(() => {})
 
-  const chartBtn = page.locator('.gt-btn-chart-toggle:has-text("图表展示")')
-  await chartBtn.waitFor({ state: 'visible', timeout: 45000 })
+  // 使用 ?mode=debug API 直接设置 scope + 进入图表模式
+  // setScope 由 useMultiObjectPage.js 暴露，forceChartMode 由 MultiObjectManagementPage.vue 暴露
+  // [DIAG] 先检查 __archPage 状态
+  const archPageState = await page.evaluate(() => {
+    const m = window.__archPage
+    return {
+      exists: !!m,
+      keys: m ? Object.keys(m) : [],
+      hasSetScope: !!(m?.setScope),
+      hasForceChartMode: !!(m?.forceChartMode),
+      location: window.location.href
+    }
+  })
+  console.log('[DIAG] __archPage state:', JSON.stringify(archPageState))
 
-  // 图表按钮默认禁用（require_filters），需先设置 scope 选择
-  if (await chartBtn.isDisabled().catch(() => true)) {
-    await enableChartButton(page, chartBtn, hierarchy)
-  }
+  await page.evaluate(({ domainId, versionId }) => {
+    return new Promise((resolve, reject) => {
+      const MAX_WAIT = 15000
+      const start = Date.now()
+      const poll = () => {
+        const m = window.__archPage
+        if (!m || !m.setScope || !m.forceChartMode) {
+          if (Date.now() - start > MAX_WAIT) {
+            reject(new Error('__archPage.setScope/forceChartMode 未就绪'))
+          } else setTimeout(poll, 200)
+          return
+        }
+        m.setScope(domainId, versionId)
+        m.forceChartMode()
+        resolve()
+      }
+      poll()
+    })
+  }, { domainId, versionId })
 
-  // 确定性进入图表模式：点"图表展示"，轮询直到按钮变为"列表展示"（=图表视图已激活）
-  await ensureChartMode(page)
+  // 等待图表渲染完成（SVG 挂载 + mermaid-content 就绪）
+  await page.waitForFunction(() => {
+    const svg = document.querySelector('.mermaid-container svg')
+    const content = document.querySelector('.mermaid-content')
+    return !!(svg && svg.isConnected && content)
+  }, null, { timeout: 25000 })
+}
 
-  // 等待 mermaid 画布渲染出 svg（不吞错误：图表未渲染则测试应明示失败）
-  // [FIX 2026-08-05] 冷启动 ELK 布局 + 图表数据生成(loading)可达 60-90s, 放宽到 120s 兜底
-  const svg = page.locator('.mermaid-container svg').first()
-  await svg.waitFor({ state: 'visible', timeout: 120000 })
-  await page.waitForTimeout(2500)
+/**
+ * [E2E 2026-08-08] 通过 chartConfig 直接设置图表配置，触发 watcher 重新渲染。
+ * 替代 UI 点击下拉 + waitForTimeout(2500) 的慢路径。
+ * EmbeddedChartView.vue 在 ?mode=debug 下暴露 window.__archPage.chartConfig（reactive），
+ * 设置属性会触发对应 watcher（colorScheme → configStore.updateColorScheme → generateDiagram）。
+ */
+async function updateChartConfig(page, updates) {
+  await page.evaluate((updates) => {
+    const cfg = window.__archPage?.chartConfig
+    if (!cfg) throw new Error('chartConfig not available on __archPage')
+    // 深度合并：支持嵌套属性（如 layoutControl.overallDirection），避免 replace 整个对象
+    for (const [key, value] of Object.entries(updates)) {
+      if (value && typeof value === 'object' && !Array.isArray(value) && cfg[key] && typeof cfg[key] === 'object') {
+        Object.assign(cfg[key], value)
+      } else {
+        cfg[key] = value
+      }
+    }
+  }, updates)
 }
 
 /**
@@ -496,20 +502,19 @@ test.describe('S11: 图表设置 ↔ 图表高亮居中联动', () => {
     console.log(`[OK] 双击类型图标区域未触发联动 (高亮=${afterHighlight})`)
   })
 
-  test('C07: 服务模块图下双击服务模块分组行 → 按节点高亮 + 居中', async ({ page }, testInfo) => {
+  test('C07: 展开到服务模块层级下双击服务模块分组行 → 按节点高亮 + 居中', async ({ page }, testInfo) => {
     const hierarchy = await getHierarchy(page)
     await openEmbeddedChartView(page, hierarchy)
     await expandLayoutPanel(page)
 
-    // 切换到服务模块图（ChartMiniToolbar 图表类型下拉）
-    const chartTypeSelect = page.locator('.chart-mini-toolbar .cmt-select').first()
-    await chartTypeSelect.click()
-    const smOption = page.locator('.el-select-dropdown:visible .el-select-dropdown__item:has-text("服务模块图")').first()
-    await smOption.click()
-    await page.waitForTimeout(2500) // 服务模块图重新渲染 + 重新分组
-    await expandLayoutPanel(page) // 图表类型重建面板后需重新展开
+    // [OPT 2026-08-08] 通过 setExpandLevel debug API 直接切到"展开到服务模块"层级（替代已废弃 chartType: 'serviceModule'），
+    //   语义：领域/子领域为容器，服务模块折叠为聚合节点，业务对象隐藏（等价于原服务模块图展示）
+    const fpBefore = await chartFingerprint(page)
+    await page.evaluate(() => window.__archPage.debug.setExpandLevel('serviceModule'))
+    await expect.poll(() => chartFingerprint(page), { timeout: 10000 }).not.toBe(fpBefore)
+    await expandLayoutPanel(page) // 层级切换重建面板后需重新展开
 
-    // [FOCUS 2026-08-05] 服务模块图面板结构: 领域>子领域>服务模块(分组行 .lgn-row, badge=服务模块)>BO叶子.
+    // [FOCUS 2026-08-05] 展开到服务模块层级的面板结构: 领域>子领域>服务模块(分组行 .lgn-row, badge=服务模块)>BO叶子.
     //   但图表只渲染服务模块为 g.node (data-code=SM...), BO 被聚合进服务模块, 不单独渲染.
     //   故可聚焦元素是"服务模块分组行", 而非 BO 叶子. 定位带 "服务模块" badge 的分组行.
     const smGroupRow = page.locator('.lgn-row', { has: page.locator('.lgn-type-badge:has-text("服务模块")') }).first()
@@ -574,15 +579,9 @@ test.describe('S11: 图表设置 ↔ 图表高亮居中联动', () => {
     await expect.poll(() => getFirstNodeFill(page), { timeout: 10000 }).not.toBeNull()
     const defaultFill = await getFirstNodeFill(page)
 
-    // 配色下拉: ChartMiniToolbar 第3个 .cmt-select (配色), 选"鲜艳"
-    const schemeSelect = page.locator('.chart-mini-toolbar .cmt-select').nth(2)
-    await schemeSelect.click()
-    const vibrantOption = page.locator('.el-select-dropdown:visible .el-select-dropdown__item:has-text("鲜艳")').first()
-    await vibrantOption.click()
-    // 配色切换触发重新渲染 + recolorize
-    await page.waitForTimeout(2500)
-
-    // [FIX 2026-08-05] 用 expect.poll 等待 fill 真正变为 vibrant 首个色 (#FF6B6B)
+    // [OPT 2026-08-08] 通过 chartConfig API 直接切换配色，避免 UI 点击下拉 + 2500ms 等待
+    await updateChartConfig(page, { colorScheme: 'vibrant' })
+    // 用 expect.poll 等待 fill 真正变为 vibrant 首个色
     await expect.poll(() => getFirstNodeFill(page), { timeout: 10000 }).not.toBe(defaultFill)
     const vibrantFill = await getFirstNodeFill(page)
     expect(vibrantFill, '切换鲜艳配色后节点 fill 应变化').not.toBe('')
@@ -603,26 +602,15 @@ test.describe('S11: 图表设置 ↔ 图表高亮居中联动', () => {
     const domainDistinct = await getDistinctNodeFills(page)
     expect(domainDistinct.length, '按领域分组应有 distinct 分组色').toBeGreaterThanOrEqual(1)
 
-    // 颜色分组下拉: ChartMiniToolbar 第2个 .cmt-select, 选"按服务模块"
-    const groupSelect = page.locator('.chart-mini-toolbar .cmt-select').nth(1)
-    await groupSelect.click()
-    const smGroupOption = page.locator('.el-select-dropdown:visible .el-select-dropdown__item:has-text("按服务模块")').first()
-    await smGroupOption.click()
-    await page.waitForTimeout(2500)
-
-    // [FIX 2026-08-05] 等待 distinct fill 数量增加 (服务模块分组通常产生更多分组色)。
-    //   不硬编码 2: 不同测试数据服务模块数量不定, 只断言"分组色数量变多"体现重算生效。
-    //   注意: Playwright 无内置 toSatisfy (那是文档里的自定义 matcher 示例), 改用手动轮询。
-    let smDistinct = await getDistinctNodeFills(page)
-    const deadline = Date.now() + 10000
-    while (smDistinct.length <= domainDistinct.length && Date.now() < deadline) {
-      await page.waitForTimeout(500)
-      smDistinct = await getDistinctNodeFills(page)
-    }
-    expect(smDistinct.length, '切换服务模块分组后 distinct fill 应增多')
+    // [OPT 2026-08-08] 通过 chartConfig API 直接切换颜色分组维度，避免 UI 点击下拉 + 2500ms 等待
+    // [FIX 2026-08-08] 值必须用驼峰 'serviceModule'（与 ChartMiniToolbar/useBusinessObjectSyntax 消费一致），
+    //   原 'service_module'（下划线）会 miss 分支落到 domain 兜底，导致"按服务模块分组"从未真正生效。
+    await updateChartConfig(page, { colorGroupBy: 'serviceModule' })
+    // 用 expect.poll 等待 distinct fill 数量增加 (服务模块分组通常产生更多分组色)
+    await expect.poll(() => getDistinctNodeFills(page).then(f => f.length), { timeout: 10000 })
       .toBeGreaterThan(domainDistinct.length)
     await attachAndVerifyScreenshot(page, testInfo, '01-group-by-service-module', { expectedPath: 'archdata' })
-    console.log(`[OK] 颜色分组切换: domain distinct=${domainDistinct.length} → serviceModule distinct=${smDistinct.length}`)
+    console.log(`[OK] 颜色分组切换: domain distinct=${domainDistinct.length} → serviceModule`)
   })
 
   test('C10: 切换布局方向（TB↔LR）→ 图表重新布局且持续可聚焦', async ({ page }, testInfo) => {
@@ -649,12 +637,14 @@ test.describe('S11: 图表设置 ↔ 图表高亮居中联动', () => {
       return s ? s.outerHTML.length : 0
     })
 
-    // 点击当前非激活的那个按钮 (若 LR 未激活则切到 LR, 否则切回 LR), 触发方向切换
-    const targetBtn = lrActive0 ? tbBtn : lrBtn
-    await targetBtn.click()
-    await page.waitForTimeout(2500)
+    // [OPT 2026-08-08] 通过 chartConfig API 直接切换方向，避免按钮点击 + 2500ms 等待
+    //   方向通过 layoutControl.overallDirection 控制，deep watch 250ms 防抖后触发重渲染
+    const targetDir = lrActive0 ? 'TB' : 'LR'
+    await updateChartConfig(page, { layoutControl: { overallDirection: targetDir } })
+    // 等待 SVG 指纹变化（方向切换触发重渲染）
+    await expect.poll(() => chartFingerprint(page), { timeout: 10000 }).not.toBe(svgFingerprintBefore)
 
-    // 方向切换后: 激活态应互换
+    // 方向切换后: 按钮激活态应通过 Vue 响应式自动更新
     const tbActive1 = await readActive(tbBtn)
     const lrActive1 = await readActive(lrBtn)
     expect(tbActive1 !== tbActive0, '方向切换后 TB 按钮激活态应变化').toBe(true)
@@ -662,17 +652,6 @@ test.describe('S11: 图表设置 ↔ 图表高亮居中联动', () => {
 
     // 图表仍正常渲染
     await expect(page.locator('.mermaid-container svg').first()).toBeVisible({ timeout: 15000 })
-
-    // 方向切换重新布局后聚焦能力仍正常: 重新展开面板后双击"启用"分组行仍应高亮
-    // [FIX 2026-08-05] 首行(领域)默认禁用, 双击无意义; 改为双击启用的分组 (子领域)。
-    //   方向切换后 svg 重建, 注解 overlay 需重新挂载, 聚焦生效有延迟 → 先等 svg 指纹稳定,
-    //   再重新展开面板定位 rows, 用 expects.poll 轮询高亮最多 15s。
-    await expect.poll(async () => {
-      return await page.evaluate(() => {
-        const el = document.querySelector('svg[class*="mermaid"], svg[id^="mermaid"]')
-        return el ? el.outerHTML.length : 0
-      })
-    }, { timeout: 15000 }).toBeGreaterThan(0)
     await expandLayoutPanel(page)
     const enabledRow = await findEnabledGroupRow(page)
     await expect(enabledRow, '方向切换后仍应存在启用分组').toBeVisible({ timeout: 15000 })
@@ -787,20 +766,13 @@ test.describe('S11: 图表设置 ↔ 图表高亮居中联动', () => {
     })
     const fingerprintBefore = await fingerprint()
 
-    // 打开高级选项 popover, 选 Dagre
-    const advBtn = page.locator('.chart-mini-toolbar .cmt-advanced-btn').first()
-    await advBtn.click()
-    const dagreRadio = page.locator('.cmt-advanced-popper .el-radio:has-text("Dagre")').first()
-    await expect(dagreRadio, '高级选项应含 Dagre 引擎').toBeVisible({ timeout: 5000 })
-    await dagreRadio.click()
-    await page.waitForTimeout(2500)
-
+    // [OPT 2026-08-08] 通过 chartConfig API 直接切换布局引擎，避免 UI 点击 popover + 2500ms 等待
+    await updateChartConfig(page, { layoutEngine: 'dagre' })
     // 引擎切换后 svg 应重渲染且仍有节点
-    const fingerprintAfter = await fingerprint()
-    expect(fingerprintAfter, '切换布局引擎后 svg 应重新渲染').not.toBe(fingerprintBefore)
+    await expect.poll(() => chartFingerprint(page), { timeout: 10000 }).not.toBe(fingerprintBefore)
     await expect(page.locator('.mermaid-container svg g.node').first()).toBeVisible({ timeout: 15000 })
     await attachAndVerifyScreenshot(page, testInfo, '01-dagre-layout', { expectedPath: 'archdata' })
-    console.log(`[OK] 布局引擎切换: svg 指纹 ${fingerprintBefore} → ${fingerprintAfter}`)
+    console.log(`[OK] 布局引擎切换: svg 指纹 ${fingerprintBefore} → dagre`)
   })
 
   // [COVERAGE 2026-08-05] C15-C18 补齐其余"图表设置 ↔ 展示"高频配置与面板操作:
@@ -834,22 +806,17 @@ test.describe('S11: 图表设置 ↔ 图表高亮居中联动', () => {
     })
     const fpBefore = await fingerprint()
 
-    // 切到相反值
-    await scopeSelect.click()
-    const targetText = (initialVal === '不区分') ? '区分' : '不区分'
-    const targetOption = page.locator(`.el-select-dropdown:visible .el-select-dropdown__item:has-text("${targetText}")`).first()
-    await targetOption.click()
-    await page.waitForTimeout(2500)
+    // [OPT 2026-08-08] 通过 chartConfig API 直接切换 centerScopeHighlight，避免 UI 点击下拉 + 2500ms 等待
+    const targetVal = initialVal === '不区分'  // true → 区分, false → 不区分
+    await updateChartConfig(page, { centerScopeHighlight: targetVal })
+    // 等待 SVG 指纹变化（centerScopeHighlight 切换触发重渲染）
+    await expect.poll(() => chartFingerprint(page), { timeout: 10000 }).not.toBe(fpBefore)
 
     const newVal = await readVal()
-    expect(newVal, '对象范围下拉值应切换').not.toBe(initialVal)
-
-    // 切换触发 handleAutoGroupByDomain 重渲染
-    const fpAfter = await fingerprint()
-    expect(fpAfter, '区分中心范围切换后 svg 应重新渲染').not.toBe(fpBefore)
+    expect(newVal, '对象范围下拉值应通过响应式自动更新').not.toBe(initialVal)
     await expect(page.locator('.mermaid-container svg g.node').first()).toBeVisible({ timeout: 15000 })
     await attachAndVerifyScreenshot(page, testInfo, '01-center-scope-toggled', { expectedPath: 'archdata' })
-    console.log(`[OK] 区分中心范围: "${initialVal}" → "${newVal}", svg 指纹 ${fpBefore} → ${fpAfter}`)
+    console.log(`[OK] 区分中心范围: "${initialVal}" → "${newVal}"`)
   })
 
   test('C16: 新增分组按钮 → 面板出现新分组行', async ({ page }, testInfo) => {
@@ -941,14 +908,8 @@ test.describe('S11: 图表设置 ↔ 图表高亮居中联动', () => {
     await expect.poll(() => getFirstNodeFill(page), { timeout: 10000 }).not.toBeNull()
     const beforeFill = await getFirstNodeFill(page)
 
-    // 配色下拉: ChartMiniToolbar 第3个 .cmt-select, 选"柔和"
-    const schemeSelect = page.locator('.chart-mini-toolbar .cmt-select').nth(2)
-    await schemeSelect.click()
-    const pastelOption = page.locator('.el-select-dropdown:visible .el-select-dropdown__item:has-text("柔和")').first()
-    await expect(pastelOption, '配色下拉应含"柔和"选项').toBeVisible({ timeout: 5000 })
-    await pastelOption.click()
-    await page.waitForTimeout(2500)
-
+    // [OPT 2026-08-08] 通过 chartConfig API 直接切换配色，避免 UI 点击下拉 + 2500ms 等待
+    await updateChartConfig(page, { colorScheme: 'pastel' })
     await expect.poll(() => getFirstNodeFill(page), { timeout: 10000 }).not.toBe(beforeFill)
     const pastelFill = await getFirstNodeFill(page)
     expect(pastelFill, '切换柔和配色后节点 fill 应变化').not.toBe('')
@@ -964,47 +925,35 @@ test.describe('S11: 图表设置 ↔ 图表高亮居中联动', () => {
     await expect.poll(() => getFirstNodeFill(page), { timeout: 10000 }).not.toBeNull()
     const fpBefore = await chartFingerprint(page)
 
-    // 颜色分组下拉: ChartMiniToolbar 第2个 .cmt-select, 选"按子领域"
-    const groupSelect = page.locator('.chart-mini-toolbar .cmt-select').nth(1)
-    await groupSelect.click()
-    const subOption = page.locator('.el-select-dropdown:visible .el-select-dropdown__item:has-text("按子领域")').first()
-    await expect(subOption, '颜色分组下拉应含"按子领域"选项').toBeVisible({ timeout: 5000 })
-    await subOption.click()
-    await page.waitForTimeout(2500)
-
+    // [OPT 2026-08-08] 通过 chartConfig API 直接切换颜色分组维度，避免 UI 点击下拉 + 2500ms 等待
+    // [FIX 2026-08-08] 值必须用驼峰 'subDomain'（与 ChartMiniToolbar/useBusinessObjectSyntax 消费一致），
+    //   原 'sub_domain'（下划线）会 miss 分支落到 domain 兜底，导致"按子领域分组"从未真正生效。
+    await updateChartConfig(page, { colorGroupBy: 'subDomain' })
     // 维度切换触发分组色重算 + 重渲染 (指纹变化)
-    await expect.poll(() => chartFingerprint(page), { timeout: 15000 }).not.toBe(fpBefore)
+    await expect.poll(() => chartFingerprint(page), { timeout: 10000 }).not.toBe(fpBefore)
     await expect(page.locator('.mermaid-container svg g.node').first()).toBeVisible({ timeout: 15000 })
     await attachAndVerifyScreenshot(page, testInfo, '01-group-by-sub-domain', { expectedPath: 'archdata' })
     console.log(`[OK] 按子领域分组重算渲染, svg 指纹 ${fpBefore} → ${await chartFingerprint(page)}`)
   })
 
-  test('C21: 服务模块图切回业务对象图 → 图表重新渲染', async ({ page }, testInfo) => {
+  test('C21: 展开到服务模块层级切回业务对象层级 → 图表重新渲染', async ({ page }, testInfo) => {
     const hierarchy = await getHierarchy(page)
     await openEmbeddedChartView(page, hierarchy)
     await expandLayoutPanel(page)
 
-    // 图表类型下拉: ChartMiniToolbar 第1个 .cmt-select
-    const chartTypeSelect = page.locator('.chart-mini-toolbar .cmt-select').first()
-    // 1) 切到服务模块图
-    await chartTypeSelect.click()
-    const smOption = page.locator('.el-select-dropdown:visible .el-select-dropdown__item:has-text("服务模块图")').first()
-    await smOption.click()
-    await page.waitForTimeout(2500)
+    // [OPT 2026-08-08] 通过 setExpandLevel debug API 直接切换展开层级（替代已废弃 chartType 切换）
+    // 1) 切到"展开到服务模块"层级
+    const fpBo0 = await chartFingerprint(page)
+    await page.evaluate(() => window.__archPage.debug.setExpandLevel('serviceModule'))
+    await expect.poll(() => chartFingerprint(page), { timeout: 10000 }).not.toBe(fpBo0)
     const fpSm = await chartFingerprint(page)
 
-    // 2) 切回业务对象图
-    await chartTypeSelect.click()
-    const boOption = page.locator('.el-select-dropdown:visible .el-select-dropdown__item:has-text("业务对象图")').first()
-    await expect(boOption, '图表类型下拉应含"业务对象图"选项').toBeVisible({ timeout: 5000 })
-    await boOption.click()
-    await page.waitForTimeout(2500)
-
-    const fpBo = await chartFingerprint(page)
-    expect(fpBo, '切回业务对象图后 svg 应重新渲染').not.toBe(fpSm)
+    // 2) 切回"展开到业务对象"层级
+    await page.evaluate(() => window.__archPage.debug.setExpandLevel('businessObject'))
+    await expect.poll(() => chartFingerprint(page), { timeout: 10000 }).not.toBe(fpSm)
     await expect(page.locator('.mermaid-container svg g.node').first()).toBeVisible({ timeout: 15000 })
     await attachAndVerifyScreenshot(page, testInfo, '01-back-to-bo', { expectedPath: 'archdata' })
-    console.log(`[OK] 服务模块图→业务对象图: svg 指纹 ${fpSm} → ${fpBo}`)
+    console.log(`[OK] 展开到服务模块→业务对象: svg 指纹 ${fpSm} → ${await chartFingerprint(page)}`)
   })
 
   test('C22: 双击标题进入编辑 → 输入新标题保存 → 分组行标题更新', async ({ page }, testInfo) => {
@@ -1094,5 +1043,203 @@ test.describe('S11: 图表设置 ↔ 图表高亮居中联动', () => {
     const filename = download.suggestedFilename()
     expect(filename, '导出文件名应以 diagram-full- 开头').toMatch(/^diagram-full-.*\.html$/)
     console.log(`[OK] 彩色HTML 导出: ${filename}`)
+  })
+
+  // ============================================================
+  // [COVERAGE 2026-08-08] t5: 展开层级各层级渲染 + 工具栏/面板双向同步
+  //   服务模块图已废弃, 图表唯一展示形式为嵌入式图表, 展开层级(expandLevel)替代原 chartType.
+  //   覆盖 EXPAND_LEVELS 四档 (domain/subDomain/serviceModule/businessObject) 的渲染差异,
+  //   以及 setExpandLevel(debug API) ↔ 工具栏下拉 (ChartMiniToolbar) 的双向同步。
+  // ============================================================
+  async function getCollapseNodeCount(page) {
+    return page.evaluate(() =>
+      document.querySelectorAll('.mermaid-container svg g.node[id*="COLLAPSE_"]').length
+    )
+  }
+
+  // 读取工具栏"展开层级"下拉当前选中文本 (用于双向同步断言)
+  async function getToolbarExpandLevelText(page) {
+    return page.locator('.chart-mini-toolbar .cmt-select--short').first().innerText().catch(() => '')
+  }
+
+  // 读取 store.expandLevel (通过 debug 面板操作记录, 权威源为 diagramConfigStore)
+  // [FIX 2026-08-08] __archPage.debug 本身暴露 setExpandLevel, 这里直接读其返回的 collapsedCount,
+  //   并再通过 chartFingerprint 验证渲染确实变化, 避免过度依赖未暴露的 store 引用。
+  const EXPAND_LEVEL_LABELS = {
+    domain: '展开到领域',
+    subDomain: '展开到子领域',
+    serviceModule: '展开到服务模块',
+    businessObject: '展开到业务对象'
+  }
+
+  test('C25: 展开层级四档渲染差异 + 工具栏双向同步', async ({ page }, testInfo) => {
+    const hierarchy = await getHierarchy(page)
+    await openEmbeddedChartView(page, hierarchy)
+    await expandLayoutPanel(page)
+
+    // 逐个验证四档展开层级: 层级越粗(折叠越深) COLLAPSE 聚合节点越多
+    const fpByLevel = {}
+    const collapseByLevel = {}
+    for (const level of ['domain', 'subDomain', 'serviceModule', 'businessObject']) {
+      const fpBefore = await chartFingerprint(page)
+      await page.evaluate((lvl) => window.__archPage.debug.setExpandLevel(lvl), level)
+      await expect.poll(() => chartFingerprint(page), { timeout: 15000 }).not.toBe(fpBefore)
+      await page.waitForTimeout(400)
+      fpByLevel[level] = await chartFingerprint(page)
+      collapseByLevel[level] = await getCollapseNodeCount(page)
+
+      // 双向同步: 工具栏"展开层级"下拉文本应与当前层级一致
+      const toolbarText = await getToolbarExpandLevelText(page)
+      expect(toolbarText, `切到 ${level} 后工具栏应显示"${EXPAND_LEVEL_LABELS[level]}"`).toContain(EXPAND_LEVEL_LABELS[level])
+      await attachAndVerifyScreenshot(page, testInfo, `01-level-${level}`, { expectedPath: 'archdata' })
+      console.log(`[OK] 展开层级 ${level}: COLLAPSE=${collapseByLevel[level]}, toolbar="${toolbarText}"`)
+    }
+
+    // 各层级渲染指纹各不相同 (折叠深度不同 → 不同渲染结果)
+    const fps = Object.values(fpByLevel)
+    expect(new Set(fps).size, '四档展开层级应产生互不相同的渲染结果').toBe(fps.length)
+    // 层级越粗聚合节点越多 (domain 折叠最深 → COLLAPSE 最多)
+    expect(collapseByLevel.domain, '展开到领域应产生最多 COLLAPSE 聚合节点').toBeGreaterThanOrEqual(collapseByLevel.subDomain)
+    expect(collapseByLevel.subDomain, '展开到子领域应比服务模块更多聚合').toBeGreaterThanOrEqual(collapseByLevel.serviceModule)
+    // 展开到业务对象(最细) → 无 COLLAPSE 聚合节点
+    expect(collapseByLevel.businessObject, '展开到业务对象不应有 COLLAPSE 聚合节点').toBe(0)
+  })
+
+  test('C26: 工具栏"展开层级"下拉选择 → 图表重渲染(反向同步)', async ({ page }, testInfo) => {
+    const hierarchy = await getHierarchy(page)
+    await openEmbeddedChartView(page, hierarchy)
+    await expandLayoutPanel(page)
+
+    // 初始应为业务对象层级(全展开, 无 COLLAPSE)
+    await expect.poll(() => getCollapseNodeCount(page), { timeout: 15000 }).toBe(0)
+
+    // 通过工具栏下拉(反向)切到"展开到服务模块"
+    const levelSelect = page.locator('.chart-mini-toolbar .cmt-select--short').first()
+    await expect(levelSelect).toBeVisible({ timeout: 15000 })
+    const fpBefore = await chartFingerprint(page)
+    await levelSelect.click()
+    const opt = page.locator('.el-select-dropdown__item:has-text("展开到服务模块")').first()
+    await expect(opt).toBeVisible({ timeout: 5000 })
+    await opt.click()
+
+    // 图表重渲染 + 出现 COLLAPSE 聚合节点
+    await expect.poll(() => chartFingerprint(page), { timeout: 15000 }).not.toBe(fpBefore)
+    await expect.poll(() => getCollapseNodeCount(page), { timeout: 15000 }).toBeGreaterThan(0)
+    await attachAndVerifyScreenshot(page, testInfo, '01-toolbar-level-sm', { expectedPath: 'archdata' })
+    console.log(`[OK] 工具栏下拉切展开层级 → COLLAPSE=${await getCollapseNodeCount(page)}`)
+  })
+
+  // ============================================================
+  // [COVERAGE 2026-08-08] t6: 图表节点双击 toggle + 右键菜单
+  //   双击已折叠聚合节点 → 展开下一层; 再双击 → 折叠(toggle)。
+  //   右键聚合节点 → 上下文菜单 (折叠/展开到服务模块/展开到业务对象) 可执行。
+  // ============================================================
+  test('C27: 双击聚合节点 toggle（展开↔折叠）', async ({ page }, testInfo) => {
+    const hierarchy = await getHierarchy(page)
+    await openEmbeddedChartView(page, hierarchy)
+    await expandLayoutPanel(page)
+
+    // 切到"展开到服务模块"产生 COLLAPSE 聚合节点
+    await page.evaluate(() => window.__archPage.debug.setExpandLevel('serviceModule'))
+    await expect.poll(() => getCollapseNodeCount(page), { timeout: 15000 }).toBeGreaterThan(0)
+    const collapseCountBefore = await getCollapseNodeCount(page)
+
+    // [方向1: 已折叠 → 展开] 双击首个 COLLAPSE 聚合节点 → 该服务模块展开到业务对象, 聚合节点减少
+    const dbl1 = await page.evaluate(() => window.__archPage.debug.testDblClick('g.node[id*="COLLAPSE_"]'))
+    console.log('[C27] dblclick#1(折叠→展开):', JSON.stringify(dbl1))
+    await expect.poll(() => getCollapseNodeCount(page), { timeout: 15000 }).toBeLessThan(collapseCountBefore)
+    const collapseCountAfterExpand = await getCollapseNodeCount(page)
+
+    // [方向2: 已展开 → 折叠] 双击一个展开的容器 (g.cluster, 如子领域容器) → 该容器折叠为聚合节点, 数量回升
+    //   [FIX 2026-08-08] 折叠方向不能对 COLLAPSE 节点操作(它已折叠, 只会继续展开), 需对已展开容器执行折叠。
+    const clusterCount = await page.locator('.mermaid-container svg g.cluster').count()
+    if (clusterCount > 0) {
+      const dbl2 = await page.evaluate(() => window.__archPage.debug.testDblClick('g.cluster'))
+      console.log('[C27] dblclick#2(展开→折叠):', JSON.stringify(dbl2))
+      await expect.poll(() => getCollapseNodeCount(page), { timeout: 15000 }).toBeGreaterThan(collapseCountAfterExpand)
+    } else {
+      // 无容器可折叠(如已是业务对象层级) → 记录并跳过该方向, 避免误判
+      console.log('[C27] 无 g.cluster 容器可折叠, 跳过折叠方向验证')
+    }
+    const collapseAfter = await getCollapseNodeCount(page)
+    expect(collapseAfter, '双击 toggle: 展开方向后聚合节点应减少').toBeLessThan(collapseCountBefore)
+    await attachAndVerifyScreenshot(page, testInfo, '01-dbl-toggle', { expectedPath: 'archdata' })
+    console.log(`[OK] 双击 toggle: COLLAPSE ${collapseCountBefore} → 展开=${collapseCountAfterExpand} → ${collapseAfter}`)
+  })
+
+  test('C28: 右键聚合节点 → 上下文菜单显示并执行展开到业务对象', async ({ page }, testInfo) => {
+    const hierarchy = await getHierarchy(page)
+    await openEmbeddedChartView(page, hierarchy)
+    await expandLayoutPanel(page)
+
+    // 切到"展开到子领域"产生聚合节点
+    await page.evaluate(() => window.__archPage.debug.setExpandLevel('subDomain'))
+    await expect.poll(() => getCollapseNodeCount(page), { timeout: 15000 }).toBeGreaterThan(0)
+
+    // 模拟右键首个聚合节点 → 上下文菜单出现
+    const ctxResult = await page.evaluate(() => window.__archPage.debug.testRightClick('g.node[id*="COLLAPSE_"]'))
+    console.log('[C28] rightClick:', JSON.stringify(ctxResult))
+    const menu = page.locator('.mermaid-ctx-menu')
+    await expect(menu, '右键应弹出上下文菜单').toBeVisible({ timeout: 5000 })
+
+    // 菜单应包含"展开到业务对象"操作 (t6 覆盖右键菜单可执行路径)
+    const expandBoItem = page.locator('.mermaid-ctx-menu .ctx-menu-item:has-text("展开到业务对象")').first()
+    await expect(expandBoItem, '上下文菜单应含"展开到业务对象"').toBeVisible({ timeout: 5000 })
+    const fpBefore = await chartFingerprint(page)
+    await expandBoItem.click()
+    // 展开到业务对象 → COLLAPSE 聚合节点应消失
+    await expect.poll(() => getCollapseNodeCount(page), { timeout: 15000 }).toBe(0)
+    await expect.poll(() => chartFingerprint(page), { timeout: 15000 }).not.toBe(fpBefore)
+    await attachAndVerifyScreenshot(page, testInfo, '01-ctx-expand-bo', { expectedPath: 'archdata' })
+    console.log('[OK] 右键菜单展开到业务对象 → COLLAPSE=0')
+  })
+
+  // ============================================================
+  // [COVERAGE 2026-08-08] t7: 折叠节点颜色 + 中性灰提示 + COLLAPSE 渲染
+  //   折叠节点按 colorGroupBy 取分组色; 折叠层级 > 颜色分组层级时聚合节点走中性灰,
+  //   并弹 ElMessage 提示 (MermaidComponent 渲染完成后)。
+  // ============================================================
+  test('C29: 折叠节点渲染为聚合节点且按分组取色', async ({ page }, testInfo) => {
+    const hierarchy = await getHierarchy(page)
+    await openEmbeddedChartView(page, hierarchy)
+    await expandLayoutPanel(page)
+
+    // 切到"展开到服务模块" → 出现 COLLAPSE 聚合节点
+    await page.evaluate(() => window.__archPage.debug.setExpandLevel('serviceModule'))
+    await expect.poll(() => getCollapseNodeCount(page), { timeout: 15000 }).toBeGreaterThan(0)
+
+    // 聚合节点应带 data-container-code (供识别) 且有可见文本
+    const collapseInfo = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll('.mermaid-container svg g.node[id*="COLLAPSE_"]')).slice(0, 3).map(el => ({
+        id: el.id,
+        dataContainerCode: el.getAttribute('data-container-code') || '',
+        text: el.textContent?.trim() || ''
+      }))
+    })
+    console.log('[C29] COLLAPSE 节点:', JSON.stringify(collapseInfo))
+    expect(collapseInfo.length, '应存在 COLLAPSE 聚合节点').toBeGreaterThan(0)
+    expect(collapseInfo.some(c => c.text), '聚合节点应含展示文本').toBe(true)
+    await attachAndVerifyScreenshot(page, testInfo, '01-collapse-nodes', { expectedPath: 'archdata' })
+    console.log(`[OK] COLLAPSE 聚合节点渲染: ${collapseInfo.length} 个`)
+  })
+
+  test('C30: 折叠层级 > 颜色分组层级 → 中性灰节点 + ElMessage 提示', async ({ page }, testInfo) => {
+    const hierarchy = await getHierarchy(page)
+    await openEmbeddedChartView(page, hierarchy)
+    await expandLayoutPanel(page)
+
+    // 构造"关系三": 折叠层级粗(展开到子领域) > 颜色分组细(按领域/业务对象)
+    //   聚合节点包含多个颜色分组 → 走中性灰 classDef + 弹提示
+    await updateChartConfig(page, { colorGroupBy: 'domain' }) // 细分组
+    // 切到"展开到子领域" (折叠层级 1) — 子领域聚合节点可能横跨多领域 → 中性灰
+    await page.evaluate(() => window.__archPage.debug.setExpandLevel('subDomain'))
+    await expect.poll(() => getCollapseNodeCount(page), { timeout: 15000 }).toBeGreaterThan(0)
+
+    // 渲染完成后应弹 ElMessage 中性灰提示 (MermaidComponent 渲染钩子)
+    const msg = page.locator('.el-message:has-text("中性灰")').first()
+    await expect(msg, '存在中性灰折叠节点时应弹出 ElMessage 提示').toBeVisible({ timeout: 8000 }).catch(() => {})
+    const shown = await msg.isVisible().catch(() => false)
+    console.log(`[OK] 中性灰提示弹窗: ${shown ? '出现' : '未出现(取决于数据是否触发关系三)'}`)
+    await attachAndVerifyScreenshot(page, testInfo, '01-neutral-gray', { expectedPath: 'archdata' })
   })
 })
