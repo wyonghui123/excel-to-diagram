@@ -45,6 +45,46 @@ export function useMermaidColors() {
     return colorMap
   }
 
+  /**
+   * [FOLD 2026-08-09] 折叠视图下从全量 BO 节点构建颜色映射。
+   *
+   * 背景: 折叠视图 (领域/子领域/服务模块折叠为聚合节点) 时, syntax 层不产生
+   *   nodeColorMappings (空数组), 原 buildColorMap 依赖它 → colorMap 为空 →
+   *   updateCollapseNodeColors 全灰 + buildColorLegendData 无映射色。
+   * 本函数直接遍历 diagramData.nodes (折叠视图下仍含全量 BO 节点, 带
+   *   domain/subDomain/serviceModuleName 字段), 按 colorGroupBy 推导分组键,
+   *   与 buildColorLegendData / updateCollapseNodeColors 的取色键同源。
+   *
+   * @param {Array} nodes - diagramData.nodes (全量 BO 节点)
+   * @param {string} colorGroupBy - domain | subDomain | serviceModule
+   * @param {Object} colorSchemes - COLOR_SCHEMES[colorScheme]
+   * @param {Object} customColors - 用户自定义颜色 { groupKey: color }
+   * @returns {Map<string,string>} groupKey -> color
+   */
+  const buildColorMapFromNodes = (nodes, colorGroupBy, colorSchemes, customColors = {}) => {
+    const colorMap = new Map()
+    const uniqueGroups = new Set()
+    ;(nodes || []).forEach(node => {
+      let groupKey
+      if (colorGroupBy === 'serviceModule') {
+        groupKey = node.serviceModuleName || node.serviceModule || node.name
+      } else if (colorGroupBy === 'subDomain') {
+        groupKey = node.subDomain
+      } else {
+        groupKey = node.domain
+      }
+      if (groupKey) uniqueGroups.add(groupKey)
+    })
+    let colorIndex = 0
+    uniqueGroups.forEach(group => {
+      const useCustom = !!customColors[group]
+      const assigned = useCustom ? customColors[group] : colorSchemes[colorIndex % colorSchemes.length]
+      colorMap.set(group, assigned)
+      if (!useCustom) colorIndex++
+    })
+    return colorMap
+  }
+
   const updateNodeColors = (svg, nodeColorMappings, objectToModuleMap, colorGroupBy, colorMap, options = {}) => {
     // [FIX 2026-08-02 v5] 回到原方案: 区分中心范围时, 中心节点 fill = centerScopeColor (指定的颜色)
     //   v2 曾改为"分组色 + 粗虚线边框", 用户反馈虚线区分不明显, 改回用颜色区分。
@@ -201,14 +241,79 @@ export function useMermaidColors() {
     return true
   }
 
+  // [INC 2026-08-09] 增量更新「折叠视图」的折叠节点颜色。
+  //   折叠视图: 领域/子领域/服务模块折叠为 COLLAPSE_<id> 聚合节点 (g.node.collapseNode,
+  //   带 data-container-code), nodeColorMappings 为空, 原 updateNodeColors 无法着色 →
+  //   切换 colorGroupBy 时 MermaidComponent.updateColorsOnly 只能 return false → 回退
+  //   renderMermaid 全量重载 (闪 loading + 重置展开态)。
+  //   本函数基于「分组上下文 (domainName/subDomainName/serviceModuleName) + groupColorMap
+  //   (与图表同源)」, 按当前 colorGroupBy 重算每个折叠节点颜色, 直接改 SVG rect fill,
+  //   实现增量更新, 与语法层 applyUpliftNodeColors 取色规则一致:
+  //   - 中心范围折叠节点 → centerScopeColor
+  //   - 否则按 colorGroupBy 取分组 key → groupColorMap[key]
+  //   - 取不到 (折叠层级 > 颜色分组层级, 如"按服务模块"折叠了子领域) → 中性灰 #fafafa (同 classDef default)
+  const updateCollapseNodeColors = (svg, collapseContextMap, colorGroupBy, colorMap, options = {}) => {
+    if (!svg) return
+    const centerScopeHighlight = options.centerScopeHighlight !== false // 默认 true
+    const centerScopeColor = options.centerScopeColor || '#808080'
+    const centerScopeMarkers = options.centerScopeMarkers || {}
+
+    svg.querySelectorAll('g.node[id*="COLLAPSE_"], g.node.collapseNode').forEach((el) => {
+      const code = el.getAttribute('data-container-code')
+      if (!code) return
+      const ctx = collapseContextMap.get(code)
+      if (!ctx) return
+      const rect = el.querySelector('rect')
+      if (!rect) return
+
+      // 中心范围判定 (与 useGroupDisplay 中心判定一致, 按折叠节点层级查对应 markers)
+      // [FIX 2026-08-09 v3] subDomains/domains 标记的 value 是布尔 (hasCenter),
+      //   且【所有】分组都会写入 map (markers.subDomains.set(name, hasCenter) /
+      //   markers.domains.set(name, hasCenter)). 用 .has() 只查 key 是否存在 →
+      //   返回 true 与 value 无关 → 所有子领域/领域都被误判为中心范围 → 折叠节点全染 centerScopeColor.
+      //   必须 .get()===true 校验布尔值. serviceModules 只写入中心范围 SM (value 恒 true), .has() 无碍.
+      let isCenter = false
+      if (centerScopeHighlight) {
+        if (ctx.groupType === 'serviceModule') {
+          isCenter = !!centerScopeMarkers.serviceModules?.has(ctx.serviceModuleName)
+            || !!centerScopeMarkers.serviceModules?.has(code)
+        } else if (ctx.groupType === 'subDomain') {
+          isCenter = centerScopeMarkers.subDomains?.get(ctx.subDomainName) === true
+            || centerScopeMarkers.subDomains?.get(code) === true
+        } else if (ctx.groupType === 'domain') {
+          isCenter = centerScopeMarkers.domains?.get(ctx.domainName) === true
+            || centerScopeMarkers.domains?.get(code) === true
+        }
+      }
+      if (isCenter) {
+        rect.style.setProperty('fill', centerScopeColor, 'important')
+        return
+      }
+
+      let key
+      if (colorGroupBy === 'serviceModule') key = ctx.serviceModuleName || ctx.title
+      else if (colorGroupBy === 'subDomain') key = ctx.subDomainName || ctx.title
+      else key = ctx.domainName || ctx.title
+
+      // [FIX 2026-08-09] colorMap 键须与全量渲染/展开增量一致 (serviceModuleName/domain/subDomain),
+      //   不能直接用 colorize 的 groupColorMap (其 serviceModule 键是 BO 的 name, 键不一致 → 折叠节点全灰)。
+      //   colorMap 为 Map 或普通对象, 兼容两者.
+      const getColor = (m, k) => (m && typeof m.get === 'function' ? m.get(k) : m?.[k])
+      const color = (key && getColor(colorMap, key)) || '#fafafa'
+      rect.style.setProperty('fill', color, 'important')
+    })
+  }
+
   return {
     COLOR_SCHEMES,
     DEFAULT_COLOR,
     DEFAULT_LINK_COLOR,
     getColorScheme,
     buildColorMap,
+    buildColorMapFromNodes,
     updateNodeColors,
     updateLinkColors,
-    updateColorsOnly
+    updateColorsOnly,
+    updateCollapseNodeColors
   }
 }

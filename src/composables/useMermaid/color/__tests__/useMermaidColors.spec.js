@@ -104,6 +104,93 @@ describe('useMermaidColors - buildColorMap', () => {
   })
 })
 
+describe('useMermaidColors - buildColorMapFromNodes (折叠视图颜色映射 2026-08-09)', () => {
+  it('colorGroupBy=subDomain 时按 subDomain 分组, 相同 subDomain 合并取同一色', () => {
+    const { buildColorMapFromNodes } = useMermaidColors()
+    const nodes = [
+      { domain: '供应链云', subDomain: '采购供应', serviceModuleName: '需求计划', code: 'MM01' },
+      { domain: '供应链云', subDomain: '采购供应', serviceModuleName: '采购管理', code: 'MM02' },
+      { domain: '供应链云', subDomain: '销售', serviceModuleName: '销售管理', code: 'SM01' }
+    ]
+    const colorMap = buildColorMapFromNodes(nodes, 'subDomain', ['#1890FF', '#52C41A'])
+    expect(colorMap.size).toBe(2)
+    expect(colorMap.get('采购供应')).toBe('#1890FF')
+    expect(colorMap.get('销售')).toBe('#52C41A')
+  })
+
+  it('colorGroupBy=domain 时按 domain 分组', () => {
+    const { buildColorMapFromNodes } = useMermaidColors()
+    const nodes = [
+      { domain: '供应链云', subDomain: '采购供应', code: 'MM01' },
+      { domain: '供应链云', subDomain: '销售', code: 'SM01' },
+      { domain: '制造云', subDomain: '生产', code: 'MF01' }
+    ]
+    const colorMap = buildColorMapFromNodes(nodes, 'domain', ['#FF0000', '#00FF00'])
+    expect(colorMap.size).toBe(2)
+    expect(colorMap.get('供应链云')).toBe('#FF0000')
+    expect(colorMap.get('制造云')).toBe('#00FF00')
+  })
+
+  it('colorGroupBy=serviceModule 时 serviceModuleName 优先, serviceModule/name 兜底', () => {
+    const { buildColorMapFromNodes } = useMermaidColors()
+    const nodes = [
+      { domain: '供应链云', subDomain: '采购供应', serviceModuleName: '需求计划', code: 'N1' },
+      { domain: '供应链云', subDomain: '采购供应', serviceModule: '采购管理', code: 'N2' }, // serviceModule 兜底
+      { domain: '供应链云', subDomain: '采购供应', name: '销售管理', code: 'N3' }            // name 兜底
+    ]
+    const colorMap = buildColorMapFromNodes(nodes, 'serviceModule', ['#AA0000', '#00AA00', '#0000AA'])
+    expect(colorMap.get('需求计划')).toBe('#AA0000')
+    expect(colorMap.get('采购管理')).toBe('#00AA00')
+    expect(colorMap.get('销售管理')).toBe('#0000AA')
+  })
+
+  it('customColors 覆盖默认 scheme 颜色, 且被覆盖的分组不占用颜色 index', () => {
+    const { buildColorMapFromNodes } = useMermaidColors()
+    const nodes = [
+      { domain: '供应链云', subDomain: '采购供应', code: 'A' },
+      { domain: '供应链云', subDomain: '销售', code: 'B' }
+    ]
+    // 采购供应用自定义色, 销售用第一个 scheme 色 (#FF0000)
+    const colorMap = buildColorMapFromNodes(nodes, 'subDomain', ['#FF0000', '#00FF00'], {
+      '采购供应': '#123456'
+    })
+    expect(colorMap.get('采购供应')).toBe('#123456')
+    expect(colorMap.get('销售')).toBe('#FF0000')
+  })
+
+  it('颜色 index 超过 scheme 长度时循环', () => {
+    const { buildColorMapFromNodes } = useMermaidColors()
+    const nodes = []
+    for (let i = 0; i < 5; i++) {
+      nodes.push({ domain: '域0', subDomain: `子域${i}` })
+    }
+    const colorMap = buildColorMapFromNodes(nodes, 'subDomain', ['#FF0000', '#00FF00'])
+    // 5 个分组, scheme 只有 2 色; 第 5 个 (index=4) -> 4 % 2 = 0 -> #FF0000
+    expect(colorMap.size).toBe(5)
+    expect(colorMap.get('子域0')).toBe('#FF0000')
+    expect(colorMap.get('子域4')).toBe('#FF0000')
+    expect(colorMap.get('子域1')).toBe('#00FF00')
+  })
+
+  it('缺 groupKey 的节点被跳过', () => {
+    const { buildColorMapFromNodes } = useMermaidColors()
+    const nodes = [
+      { name: 'no-subDomain', code: 'X' },
+      { domain: '域0', subDomain: '子域A' }
+    ]
+    const colorMap = buildColorMapFromNodes(nodes, 'subDomain', ['#FF0000'])
+    expect(colorMap.size).toBe(1)
+    expect(colorMap.get('子域A')).toBe('#FF0000')
+  })
+
+  it('空 nodes / 空 scheme 时安全返回空 Map', () => {
+    const { buildColorMapFromNodes } = useMermaidColors()
+    expect(buildColorMapFromNodes([], 'domain', ['#FF0000']).size).toBe(0)
+    expect(buildColorMapFromNodes(null, 'domain', ['#FF0000']).size).toBe(0)
+    expect(buildColorMapFromNodes([{ domain: 'A' }], 'domain', []).size).toBe(1)
+  })
+})
+
 describe('useMermaidColors - updateLinkColors', () => {
   // 用 happy-dom 创建 mock svg
   function createMockSvg(numPaths = 1) {
@@ -260,6 +347,133 @@ describe('useMermaidColors - updateNodeColors (中心范围"分组色+边框" 20
     expect(rect.fill).toBe('#FAAD14')
     expect(rect.stroke).toBe('#333333')
     expect(rect['stroke-dasharray']).toBeUndefined()
+  })
+})
+
+describe('useMermaidColors - updateCollapseNodeColors (折叠节点增量变色 2026-08-09)', () => {
+  function createCollapseSvg(entries) {
+    const nodes = entries.map(e => {
+      const rect = {
+        style: { setProperty: function(k, v) { this.fill = v } },
+        getAttribute: () => null
+      }
+      return {
+        getAttribute: (k) => k === 'data-container-code' ? e.code : null,
+        querySelector: (sel) => sel === 'rect' ? rect : null,
+        __rect: rect
+      }
+    })
+    return {
+      querySelectorAll: (sel) => {
+        if (sel.includes('COLLAPSE_') || sel.includes('collapseNode')) return nodes
+        return []
+      }
+    }
+  }
+
+  it('按 serviceModule 分组: 折叠 SM 节点用 colorMap (键=serviceModuleName) 取色', () => {
+    const { updateCollapseNodeColors } = useMermaidColors()
+    // colorMap 键为 serviceModuleName (与 buildColorMap/全量渲染一致), 而非 BO name
+    const colorMap = new Map([
+      ['需求计划', '#1890FF'],
+      ['采购管理', '#2FC25B']
+    ])
+    const collapseContextMap = new Map([
+      ['DP', { groupType: 'serviceModule', serviceModuleName: '需求计划', title: '需求计划' }],
+      ['CG', { groupType: 'serviceModule', serviceModuleName: '采购管理', title: '采购管理' }]
+    ])
+    const svg = createCollapseSvg([{ code: 'DP' }, { code: 'CG' }])
+    updateCollapseNodeColors(svg, collapseContextMap, 'serviceModule', colorMap, {
+      centerScopeHighlight: false
+    })
+    expect(svg.querySelectorAll('g.node.collapseNode')[0].__rect.style.fill).toBe('#1890FF')
+    expect(svg.querySelectorAll('g.node.collapseNode')[1].__rect.style.fill).toBe('#2FC25B')
+  })
+
+  it('按 subDomain 分组: 折叠 SM 节点继承祖先 subDomain key 取色', () => {
+    const { updateCollapseNodeColors } = useMermaidColors()
+    const colorMap = new Map([['供应链计划', '#FACC14']])
+    // ctx.subDomainName 由祖先上下文传播填充 (折叠 SM + 按 subDomain 分组)
+    const collapseContextMap = new Map([
+      ['DP', { groupType: 'serviceModule', serviceModuleName: '需求计划', subDomainName: '供应链计划', domainName: '供应链云', title: '需求计划' }]
+    ])
+    const svg = createCollapseSvg([{ code: 'DP' }])
+    updateCollapseNodeColors(svg, collapseContextMap, 'subDomain', colorMap, {
+      centerScopeHighlight: false
+    })
+    expect(svg.querySelectorAll('g.node.collapseNode')[0].__rect.style.fill).toBe('#FACC14')
+  })
+
+  it('取不到颜色时回退中性灰 #fafafa (折叠层级 > 分组层级)', () => {
+    const { updateCollapseNodeColors } = useMermaidColors()
+    const colorMap = new Map([])
+    const collapseContextMap = new Map([
+      ['SCP', { groupType: 'subDomain', subDomainName: '供应链计划', title: '供应链计划' }]
+    ])
+    const svg = createCollapseSvg([{ code: 'SCP' }])
+    updateCollapseNodeColors(svg, collapseContextMap, 'serviceModule', colorMap, {
+      centerScopeHighlight: false
+    })
+    expect(svg.querySelectorAll('g.node.collapseNode')[0].__rect.style.fill).toBe('#fafafa')
+  })
+
+  it('中心范围折叠节点保持 centerScopeColor', () => {
+    const { updateCollapseNodeColors } = useMermaidColors()
+    const colorMap = new Map([['需求计划', '#1890FF']])
+    const collapseContextMap = new Map([
+      ['DP', { groupType: 'serviceModule', serviceModuleName: '需求计划', title: '需求计划' }]
+    ])
+    const svg = createCollapseSvg([{ code: 'DP' }])
+    updateCollapseNodeColors(svg, collapseContextMap, 'serviceModule', colorMap, {
+      centerScopeHighlight: true,
+      centerScopeColor: '#808080',
+      centerScopeMarkers: { serviceModules: new Set(['需求计划']) }
+    })
+    expect(svg.querySelectorAll('g.node.collapseNode')[0].__rect.style.fill).toBe('#808080')
+  })
+
+  // [FIX 2026-08-09 v3 回归] domains/subDomains 标记的 value 是布尔 (hasCenter), 且所有分组都会写入 map.
+  //   旧实现用 .has() 只查 key 存在 → value=false 的非中心领域/子领域也被误判为中心范围 → 折叠节点全染 centerScopeColor.
+  it('按 domain 分组: 非中心领域 (markers.domains value=false) 不得被染 centerScopeColor, 应取自身领域色', () => {
+    const { updateCollapseNodeColors } = useMermaidColors()
+    const colorMap = new Map([
+      ['供应链云', '#1890FF'],
+      ['营销云', '#FAAF14']
+    ])
+    // domains 标记: 所有领域都是 key, 只有 供应链云 hasCenter=true
+    const domains = new Map([['供应链云', true], ['制造云', false], ['营销云', false]])
+    const collapseContextMap = new Map([
+      ['SCM', { groupType: 'domain', domainName: '供应链云', title: '供应链云' }],
+      ['MKT', { groupType: 'domain', domainName: '营销云', title: '营销云' }]
+    ])
+    const svg = createCollapseSvg([{ code: 'SCM' }, { code: 'MKT' }])
+    updateCollapseNodeColors(svg, collapseContextMap, 'domain', colorMap, {
+      centerScopeHighlight: true,
+      centerScopeColor: '#808080',
+      centerScopeMarkers: { domains }
+    })
+    // 中心领域 → centerScopeColor
+    expect(svg.querySelectorAll('g.node.collapseNode')[0].__rect.style.fill).toBe('#808080')
+    // 非中心领域 → 自身领域色 (旧 .has() 会错误地返回 centerScopeColor)
+    expect(svg.querySelectorAll('g.node.collapseNode')[1].__rect.style.fill).toBe('#FAAF14')
+  })
+
+  it('按 subDomain 分组: 非中心子领域 (markers.subDomains value=false) 折叠为领域节点时回退中性灰而非 centerScopeColor', () => {
+    const { updateCollapseNodeColors } = useMermaidColors()
+    // 折叠层级=领域 > 分组层级=子领域 → 非中心领域取不到单一子领域 key → 中性灰 #fafafa
+    const colorMap = new Map([['供应链计划', '#1890FF']])
+    const subDomains = new Map([['供应链计划', true], ['营销中台', false]])
+    const collapseContextMap = new Map([
+      ['MKT', { groupType: 'domain', domainName: '营销云', title: '营销云', subDomainName: '' }]
+    ])
+    const svg = createCollapseSvg([{ code: 'MKT' }])
+    updateCollapseNodeColors(svg, collapseContextMap, 'subDomain', colorMap, {
+      centerScopeHighlight: true,
+      centerScopeColor: '#808080',
+      centerScopeMarkers: { subDomains }
+    })
+    // 非中心领域 (营销云, markers.subDomains value=false) → 中性灰, 而非 centerScopeColor
+    expect(svg.querySelectorAll('g.node.collapseNode')[0].__rect.style.fill).toBe('#fafafa')
   })
 })
 
