@@ -1,6 +1,14 @@
 /**
  * serviceModuleDiagramBuilder - 服务模块图数据构建服务
  *
+ * @deprecated 服务模块图（serviceModule）已废弃（2026-08-08）
+ *   - 业务层面已不再区分「业务对象图 / 服务模块图」两种图表模式
+ *   - 唯一业务入口为 /system/archdata 嵌入式 Mermaid 图表（EmbeddedChartView → MermaidComponent）
+ *   - 原「图表类型」下拉已被「展开层级」（expandLevel）取代；
+ *     serviceModule 仅作为图表内的「展开层级 / 颜色分组维度」，不再是独立图表模式
+ *   - chartType 配置固定为 'businessObject' 且 UI 无法切换，本文件渲染路径已无业务入口
+ *   - 保留仅作历史参考，禁止作为新功能入口
+ *
  * 所属模块：图表渲染
  * 主要功能：
  *   - 构建服务模块图的节点和连线数据

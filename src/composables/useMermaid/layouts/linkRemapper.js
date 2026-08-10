@@ -311,7 +311,7 @@ export function remapLinksToVisibleAncestors(links, groups, domainProducts) {
  */
 export function fuseLinks(links) {
   if (!links || !links.length) return links
-  const groups = new Map() // key -> { rep, hasReverse }
+  const groups = new Map() // key -> { members, hasReverse, src, tgt }
   const order = [] // 保持首次出现顺序
   for (const link of links) {
     const src = link.sourceCode != null ? String(link.sourceCode) : (link.source != null ? String(link.source) : '')
@@ -319,10 +319,11 @@ export function fuseLinks(links) {
     if (!src || !tgt) continue
     const key = [src, tgt].sort().join('\u0001')
     if (!groups.has(key)) {
-      groups.set(key, { rep: link, hasReverse: false, src, tgt })
+      groups.set(key, { members: [], hasReverse: false, src, tgt })
       order.push(key)
     }
     const g = groups.get(key)
+    g.members.push(link)
     // 反向检测: 当前 link 方向与代表方向相反, 或任一子连线明确双向 → 融合为双向
     if (src !== g.src || tgt !== g.tgt) {
       g.hasReverse = true
@@ -332,9 +333,23 @@ export function fuseLinks(links) {
   }
   return order.map(key => {
     const g = groups.get(key)
+    const rep = g.members[0]
+    let out = { ...rep }
     if (g.hasReverse) {
-      return { ...g.rep, relationDirection: 'BIDIRECTIONAL' }
+      out.relationDirection = 'BIDIRECTIONAL'
     }
-    return g.rep
+    // [FUSE 2026-08-09] 一个连线背后对应多个关系时, 携带全部关系元数据到 childRelations,
+    //   供 BO 图 tooltip 列示 (关系编码/名称/描述/方向/类型).
+    //   场景: ①方向相反融合为双向 (A->B + B->A) ②同源目标但关系编码不同 (A-B-01 + A-B-02).
+    //   useBlockDiagramSyntax 透传 link.childRelations, useTooltip.formatTooltipText 逐条列示.
+    //   relationCode 为空时回退到 code/label (= 源-目标, 与 useBlockDiagramSyntax 的 label 一致),
+    //   保证每条子关系的"关系编码"行非空.
+    if (g.members.length > 1) {
+      out.childRelations = g.members.map(m => ({
+        ...m,
+        relationCode: m.relationCode || m.code || m.label || ''
+      }))
+    }
+    return out
   })
 }

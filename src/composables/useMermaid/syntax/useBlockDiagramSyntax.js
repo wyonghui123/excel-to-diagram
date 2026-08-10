@@ -6,6 +6,12 @@ import { getArrowSyntax, sanitizeLabel } from './_shared/arrowHelper.js'
 
 export const DIAGRAM_TYPES = {
   BUSINESS_OBJECT: 'businessObject',
+  /**
+   * @deprecated 服务模块图（serviceModule）已废弃（2026-08-08）。
+   *   业务层面不再区分「业务对象图 / 服务模块图」，唯一业务入口为嵌入式 Mermaid 图表，
+   *   且「图表类型」下拉已被「展开层级」取代，chartType 固定为 'businessObject'。
+   *   保留仅作历史兼容，禁止作为新功能入口。
+   */
   SERVICE_MODULE: 'serviceModule'
 }
 
@@ -13,6 +19,7 @@ export const NODE_TEXT_FORMATS = {
   [DIAGRAM_TYPES.BUSINESS_OBJECT]: (node) => {
     return node.nodeCode ? `${node.originalName || node.name}\n(${node.nodeCode})` : (node.originalName || node.name)
   },
+  // @deprecated 服务模块图（serviceModule）已废弃（2026-08-08），与 DIAGRAM_TYPES.SERVICE_MODULE 一同保留仅作历史参考
   [DIAGRAM_TYPES.SERVICE_MODULE]: (node) => {
     return node.code ? `${node.name}\n(${node.code})` : node.name
   }

@@ -13,6 +13,46 @@ import { MAX_RECURSION_DEPTH, checkDepth, checkCycle, createVisitedSet } from '.
 import { formatContainerTitle } from '../../../utils/formatContainerTitle.js'
 import { markUplift } from './upliftDerivation.js'
 
+// [TITLE 2026-08-09] 折叠聚合节点标题: 名称置于标记内, 类型+编码置下方.
+//   - 领域:     <供应链云>\n领域 SCM
+//   - 子领域:   {供应链计划}\n子领域 SCP
+//   - 服务模块: [需求计划]\n服务模块 DP
+//   type 兼容大写带下划线 (DOMAIN/SUB_DOMAIN/SERVICE_MODULE) 与小写 groupType.
+//   无编码或名称或无法识别类型时返回空串(调用方回退原格式). 业务对象不经过折叠路径, 保持原样.
+function extractOwnGroupName(name) {
+  // [TITLE 2026-08-09] 去除 group.title 末尾可能被拼入的父路径后缀,
+  //   避免"父分组名称出现在子分组容器标题" (如 "销售(供应链云)" / "销售（供应链云）" → "销售").
+  //   兼容半角 () 与全角 （）; 仅去掉末尾的单个括号组 (内容不再含括号).
+  if (!name) return name
+  const str = String(name).trim()
+  const m = str.match(/^(.+?)[（(]([^（()]*)[）)]$/)
+  if (m && m[1]) return m[1].trim()
+  return str
+}
+
+function collapseFormatMarker(type, code, name) {
+  if (!code || !name) return ''
+  const t = String(type || '').toLowerCase().replace(/_/g, '')
+  const ownName = extractOwnGroupName(name)
+  if (t === 'domain') return `<${ownName}>\\n领域 ${code}`
+  if (t === 'subdomain') return `{${ownName}}\\n子领域 ${code}`
+  if (t === 'servicemodule') return `[${ownName}]\\n服务模块 ${code}`
+  return ''
+}
+
+// [TITLE 2026-08-09] 容器标题标记符号: 按层级类型返回包裹符号.
+//   - domain → <供应链云>
+//   - subdomain → {供应链计划}
+//   - servicemodule → [需求计划]
+//   其它类型 (业务对象等) 返回 null, 调用方保持原标题格式.
+function getContainerMarkers(type) {
+  const t = String(type || '').toLowerCase().replace(/_/g, '')
+  if (t === 'domain') return ['<', '>']
+  if (t === 'subdomain') return ['{', '}']
+  if (t === 'servicemodule') return ['[', ']']
+  return null
+}
+
 // [FIX 2026-08-06g] 上提自禁用父容器的子分组 → 父路径 registry (subgraphId → parentPath).
 //   背景: 之前把父名称拼进容器标题 ("供应链计划（供应链云）"), formatContainerTitle 拆成两行,
 //   与 ELK 布局"仅预留单行标签空间"冲突, 后处理下移内容又导致节点/子容器跑出容器盒, 方案废弃。
@@ -122,6 +162,12 @@ function hasGroupContent(group, containers, visited = null, depth = 0) {
     return false
   }
 
+  // [VIS 2026-08-07] 可见/隐藏: visible=false → 视为无内容, 父级据此不渲染空盒.
+  //   与 generateGroupCode 顶部"visible=false 跳过整棵子树"保持一致.
+  if (group.visible === false) {
+    return false
+  }
+
   // [UPLIFT 2026-08-05] 上提即内容: 分组被标记 _uplift=true (enabled 且无可见子孙 →
   //   渲染为 COLLAPSE_<id> 聚合节点). 该标记由 generateGroupedLayout 顶部 markUplift 推导,
   //   必须在此视为"有内容", 否则空内容分组被剪除后, 父级 hasGroupContent 级联返回 false,
@@ -226,6 +272,15 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
     return { code, styleLines }
   }
 
+  // [VIS 2026-08-07] 可见/隐藏: visible=false → 整棵子树不渲染 (增量隐藏, 留空位).
+  //   旧实现 (下方 L372-397) 只把 subgraph 标题置空 "[ ]" 却仍渲染子节点/子容器,
+  //   导致"隐藏父领域(如供应链云)"后其子领域(如销售)仍显示, 与面板
+  //   "隐藏（含子孙）" 的级联语义不符. 此处直接跳过整棵子树, 子孙由
+  //   setVisibleRecursive 已一并置为 false, 递归调用自然被此处拦截.
+  if (group.visible === false) {
+    return { code, styleLines }
+  }
+
   const hasContent = hasGroupContent(group, containers)
   const groupEnabled = group.enabled !== false
 
@@ -251,7 +306,11 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
   //   父名称不再拼进标题 (原 "供应链计划（供应链云）" 会被 formatContainerTitle 拆成两行, 与 ELK
   //   单行预留空间冲突 → 后处理下移内容导致节点/子容器跑出容器盒)。父名称改由 :hover tooltip
   //   展示, 记录进 registry (subgraphId → 父title), SVG 处理器读取后挂 tooltip。
-  const groupTitle = formatContainerTitle(group.title || 'Group')
+  const groupMarkers = getContainerMarkers(group.type || group.groupType)
+  const baseTitle = formatContainerTitle(extractOwnGroupName(group.title) || 'Group')
+  const groupTitle = groupMarkers
+    ? `${groupMarkers[0]}${baseTitle}${groupMarkers[1]}`
+    : baseTitle
   if (liftedFromDisabledParent) {
     registerLiftedParent(groupId, liftedFromDisabledParent)
   }
@@ -270,12 +329,18 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
       //   用 \n 转义 (mermaid 节点标签), 使多行文本正确换行且节点高度自适应.
       const ownCode = group.elementCode || group.code || ''
       const ancestorPath = buildUpliftAncestorPath(group, ancestorNames)
-      const displayText = ownCode
-        ? `${group.title || 'Group'}\\n（${ownCode}）`
-        : ancestorPath
-          ? `${group.title || 'Group'}\\n（${ancestorPath}）…`
-          : `${groupTitle}…`
-      code += `${indent}${collapseId}["${displayText}"]\n`
+      // [TITLE 2026-08-09] 折叠节点标题: 领域/子领域/服务模块 名称置于标记内, 类型+编码置下方
+      //   (如 "<供应链云>\n领域 SCM"、"<供应链计划>\n子领域 SCP"、"[需求计划]\n服务模块 DP").
+      //   编码缺失时回退原有 "(编码)"/祖先路径 格式; 业务对象不经过此路径, 保持原样.
+      const marker = collapseFormatMarker(group.type || group.groupType, ownCode, group.title || 'Group')
+      const displayText = marker
+        ? marker
+        : ownCode
+          ? `${group.title || 'Group'}\\n（${ownCode}）`
+          : ancestorPath
+            ? `${group.title || 'Group'}\\n（${ancestorPath}）…`
+            : `${groupTitle}…`
+      code += `${indent}${collapseId}["${displayText}"]:::collapseNode\n`
       definedNodes.add(collapseId)
     }
     return { code, styleLines }
@@ -292,7 +357,7 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
         if (!definedNodes.has(actualNodeId)) {
           const node = nodeMap.get(actualNodeId)
           if (node) {
-            const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+            const displayText = node.code ? `${node.name}\\n${node.code}` : node.name
             code += `${indent}${actualNodeId}["${displayText}"]\n`
             definedNodes.add(actualNodeId)
           }
@@ -310,7 +375,7 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
               if (!definedNodes.has(actualNodeId)) {
                 const node = nodeMap.get(actualNodeId)
                 if (node) {
-                  const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+                  const displayText = node.code ? `${node.name}\\n${node.code}` : node.name
                   code += `${indent}${actualNodeId}["${displayText}"]\n`
                   definedNodes.add(actualNodeId)
                 }
@@ -339,7 +404,7 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
               if (!definedNodes.has(actualNodeId)) {
                 const node = nodeMap.get(actualNodeId)
                 if (node) {
-                  const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+                  const displayText = node.code ? `${node.name}\\n${node.code}` : node.name
                   code += `${indent}${actualNodeId}["${displayText}"]\n`
                   definedNodes.add(actualNodeId)
                 }
@@ -388,8 +453,8 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
       if (!definedNodes.has(actualNodeId)) {
         const node = nodeMap.get(actualNodeId)
         if (node) {
-          const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
-          code += `${indent}  ${actualNodeId}["${displayText}"]:::node\n`
+          const displayText = node.code ? `${node.name}\\n${node.code}` : node.name
+            code += `${indent}  ${actualNodeId}["${displayText}"]:::node\n`
           definedNodes.add(actualNodeId)
         }
       }
@@ -413,7 +478,7 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
             if (!definedNodes.has(actualNodeId)) {
               const node = nodeMap.get(actualNodeId)
               if (node) {
-                const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+                const displayText = node.code ? `${node.name}\\n${node.code}` : node.name
                 code += `${indent}  ${actualNodeId}["${displayText}"]\n`
                 definedNodes.add(actualNodeId)
               }
@@ -454,7 +519,7 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
                 if (!definedNodes.has(actualNodeId)) {
                   const node = nodeMap.get(actualNodeId)
                   if (node) {
-                    const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+                    const displayText = node.code ? `${node.name}\\n${node.code}` : node.name
                     innerCode += `${subInnerIndent}${actualNodeId}["${displayText}"]\n`
                     definedNodes.add(actualNodeId)
                   }
@@ -492,7 +557,7 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
             if (!definedNodes.has(actualNodeId)) {
               const node = nodeMap.get(actualNodeId)
               if (node) {
-                const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+                const displayText = node.code ? `${node.name}\\n${node.code}` : node.name
                 code += `${indent}  ${actualNodeId}["${displayText}"]\n`
                 definedNodes.add(actualNodeId)
               }
@@ -610,7 +675,7 @@ function generateContainerCode(container, index, nodeMap, definedNodes, indent =
         if (definedNodes && !definedNodes.has(nodeId)) {
           const node = nodeMap.get(nodeId)
           if (node) {
-            const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+            const displayText = node.code ? `${node.name}\\n${node.code}` : node.name
             code += `${indent}${nodeId}["${displayText}"]\n`
             definedNodes.add(nodeId)
           }
@@ -629,8 +694,18 @@ function generateContainerCode(container, index, nodeMap, definedNodes, indent =
       ? `COLLAPSE_SM_${String(container.elementRef.code).replace(/[^\w\u4e00-\u9fff]/g, '_')}`
       : `COLLAPSE_C${index + 1}`
     if (definedNodes && !definedNodes.has(colId)) {
-      const colTitle = formatContainerTitle(container.fullTitle || container.name || container.title || 'Container')
-      code += `${indent}${colId}["${colTitle}…"]\n`
+      // [TITLE 2026-08-09] 容器级折叠节点: 若识别出类型/编码则按层级类型附加标记标题
+      //   (名称置标记内, 类型+编码置下方, 如 "[需求计划]\n服务模块 DP"),
+      //   否则保留原标题格式 (末尾加省略号).
+      const containerCode = container.elementRef?.code || container.code || ''
+      const containerType = container.type || container.groupType || container.elementRef?.type
+      const rawContainerTitle = container.fullTitle || container.name || container.title || 'Container'
+      const simpleName = container.name || container.title || rawContainerTitle
+      const marker = collapseFormatMarker(containerType, containerCode, simpleName)
+      const colTitle = marker
+        ? marker
+        : `${formatContainerTitle(rawContainerTitle)}…`
+      code += `${indent}${colId}["${colTitle}"]:::collapseNode\n`
       definedNodes.add(colId)
     }
     return code
@@ -688,7 +763,7 @@ function generateContainerCode(container, index, nodeMap, definedNodes, indent =
         if (definedNodes && !definedNodes.has(nodeId)) {
           const node = nodeMap.get(nodeId)
           if (node) {
-            const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+            const displayText = node.code ? `${node.name}\\n${node.code}` : node.name
             code += `${indent}      ${nodeId}["${displayText}"]:::node\n`
             definedNodes.add(nodeId)
           }
@@ -706,7 +781,7 @@ function generateContainerCode(container, index, nodeMap, definedNodes, indent =
         if (definedNodes && !definedNodes.has(nodeId)) {
           const node = nodeMap.get(nodeId)
           if (node) {
-            const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+            const displayText = node.code ? `${node.name}\\n${node.code}` : node.name
             code += `${indent}      ${nodeId}["${displayText}"]:::node\n`
             definedNodes.add(nodeId)
           }
@@ -729,7 +804,7 @@ function generateContainerCode(container, index, nodeMap, definedNodes, indent =
       if (definedNodes && !definedNodes.has(nodeId)) {
         const node = nodeMap.get(nodeId)
         if (node) {
-          const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+          const displayText = node.code ? `${node.name}\\n${node.code}` : node.name
           code += `${indent}    ${nodeId}["${displayText}"]:::node\n`
           definedNodes.add(nodeId)
         }

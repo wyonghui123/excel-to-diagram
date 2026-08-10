@@ -4,6 +4,12 @@
  */
 export default [
   {
+    /**
+     * @deprecated 老图表应用（AADiagramApp）2026-08-08 废弃。
+     *   业务层面已不再区分「业务对象图 / 服务模块图」，图表展示统一为
+     *   /system/archdata 嵌入式 Mermaid 图表（EmbeddedChartView → MermaidComponent）。
+     *   本路由保留仅作历史兼容（hiddenFromMenu，无菜单入口），禁止作为新功能入口。
+     */
     path: '/archdata-chart',
     name: 'archdata-chart',
     component: () => import('@/views/AADiagramApp/index.vue'),

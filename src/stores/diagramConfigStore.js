@@ -75,6 +75,17 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
   // [LEVEL 2026-08-07] 展开层级: 工具栏(ChartMiniToolbar)与图表设置(LayoutControlPanel)共享,
   //   值取 services/expandLevel.js EXPAND_LEVELS 的 key, 默认'businessObject'=全部展开
   const expandLevel = ref('businessObject')
+  // [SCOPE-DEFAULT 2026-08-08] 是否由用户显式选择过展开层级.
+  //   false=仍处于默认态 → EmbeddedChartView 会按对象范围应用默认展开(范围内折叠到服务模块);
+  //   true=用户已主动选择(含选择"展开到业务对象") → 尊重用户选择, 不再套用范围默认折叠.
+  //   解决: 加载 SCP 范围时系统仍显示业务对象(applyDefaultExpandByScope 受异步时序漏折叠).
+  const expandLevelUserSet = ref(false)
+  // [CTX-FIX 2026-08-09] 用户是否手动调整过分组折叠/展开 (双击 / 右键菜单).
+  //   false=未手动干预 → 渲染层可按对象范围套用默认展开;
+  //   true=已手动干预 → 尊重用户 per-group collapsed (经 sharedApplyGroupStates 应用),
+  //   渲染层不得再用 applyDefaultExpandByScope / expandGroupsToLevel 覆盖用户操作.
+  //   解决: 双击折叠容器 / 右键"折叠/展开"后图表无任何变化.
+  const groupManualSet = ref(false)
 
   // 渲染限制配置
   const mermaidMaxTextSize = ref(500000)
@@ -191,11 +202,26 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
 
   function updateLayoutControlConfig(config) {
     layoutControlConfig.value = config?.value || config
+    // [DBG 2026-08-10] 排查折叠 bug: 追踪谁以 MM collapsed=true 写入 store
+    if (typeof window !== 'undefined') {
+      const _find = (list) => { for (const g of list||[]) { if ((g.elementCode||g.id)==='MM') return g.collapsed; const r=_find(g.children); if(r!==undefined) return r; const r2=_find(g.containers); if(r2!==undefined) return r2; } return undefined; }
+      const mm = _find(layoutControlConfig.value?.groups)
+      if (mm === true) console.trace('[DBG-store-MM-true] updateLayoutControlConfig called with MM collapsed=true')
+    }
   }
 
   // [LEVEL 2026-08-07] 设置当前展开层级 (工具栏/图表设置共享)
   function setExpandLevel(key) {
     expandLevel.value = key || 'businessObject'
+    // [SCOPE-DEFAULT 2026-08-08] 用户显式选择过展开层级, 后续不再套用范围默认折叠.
+    //   注意: 默认态(businessObject)不调用本函数, 由 store 初始值承载, 故此处置 true 安全.
+    expandLevelUserSet.value = true
+  }
+
+  // [CTX-FIX 2026-08-09] 标记用户已手动调整过分组折叠/展开 (双击/右键菜单触发).
+  //   设置后渲染层不再套用范围默认展开/全局展开, 尊重用户 per-group collapsed.
+  function markGroupManualSet() {
+    groupManualSet.value = true
   }
 
   // [FOLD 2026-08-05] FR-005 应用视图模板到 layoutControlConfig.groups
@@ -297,6 +323,8 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     }
     viewTemplate.value = ''
     expandLevel.value = 'businessObject'
+    expandLevelUserSet.value = false
+    groupManualSet.value = false
     // [布局设置 sidebar 整合] 重置 snapshot 和 panel 状态
     chartDataSnapshot.value = { containers: [], domainProducts: [], links: [], groupColorMap: {} }
     layoutPanelExpanded.value = false
@@ -333,6 +361,12 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     layoutControlConfig,
     viewTemplate,
     expandLevel,
+    // [SCOPE-DEFAULT 2026-08-08] 用户是否显式选择过展开层级 (必须暴露, 否则组件读到 undefined).
+    //   之前漏在 return 里 → EmbeddedChartView/useDiagramData 读 undefined → !undefined=true
+    //   → 用户显式选过展开层级后仍被默认折叠覆盖 (功能失效). 见 diagramConfigStore.spec.js.
+    expandLevelUserSet,
+    // [CTX-FIX 2026-08-09] 用户是否手动调整过分组折叠/展开 (必须暴露, 否则组件读到 undefined).
+    groupManualSet,
     chartDataSnapshot,
     layoutPanelExpanded,
     mermaidMaxTextSize,
@@ -366,6 +400,7 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     updateHideLinkLabelTails,
     updateLayoutControlConfig,
     setExpandLevel,
+    markGroupManualSet,
     applyViewTemplate,
     updateChartDataSnapshot,
     setLayoutPanelExpanded,

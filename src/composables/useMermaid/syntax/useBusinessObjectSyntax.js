@@ -489,7 +489,11 @@ function pruneHiddenBoNodes(groups, hiddenBoIds) {
  * @param {Set} centerGroupIds 中心范围分组 id 集合 (含中心范围 BO 的分组)
  * @param {string} centerScopeColor 中心范围颜色
  * @param {boolean} centerScopeHighlight 是否启用中心范围高亮区分
- * @returns {Object} { code: 追加着色后的 mermaid 代码, colorMap: Map<collapseId, color> 聚合节点颜色映射 }
+ * @returns {Object} { code, colorMap, neutralCollapseIds }
+ *   - code: 追加着色后的 mermaid 代码
+ *   - colorMap: Map<collapseId, color> 聚合节点颜色映射
+ *   - neutralCollapseIds: Set<collapseId> 落入"中性灰"的折叠节点 (折叠层级 > 颜色分组层级,
+ *     无法用单一分组色表达, 走 classDef default 灰). 供上层提示"该折叠节点含多分组".
  */
 function applyUpliftNodeColors(groups, colorMap, colorGroupBy, mermaidCode, textColor, getNodeStyle, centerGroupIds, centerScopeColor, centerScopeHighlight) {
   // [FIX 2026-08-06] 聚合节点颜色映射 (COLLAPSE_<id> → color):
@@ -497,6 +501,8 @@ function applyUpliftNodeColors(groups, colorMap, colorGroupBy, mermaidCode, text
   //   sourceColor/targetColor 取不到 → 折叠连线变黑. 这里同步产出聚合节点颜色映射,
   //   供连线颜色计算 fallback, 与聚合节点 style 着色逻辑保持一致.
   const collapseColorMap = new Map()
+  // [FOLD-COLOR 2026-08-08] 中性灰折叠节点集合 (关系三: 折叠层级 > 颜色分组层级)
+  const neutralCollapseIds = new Set()
   function walk(items, ctx) {
     if (!items) return
     for (const g of items) {
@@ -514,6 +520,10 @@ function applyUpliftNodeColors(groups, colorMap, colorGroupBy, mermaidCode, text
           mermaidCode += `  style ${collapseId} ${getNodeStyle(centerScopeColor, textColor)}\n`
           collapseColorMap.set(collapseId, centerScopeColor)
         } else {
+          // [FOLD-COLOR 2026-08-08] 折叠节点取色遵循层级关系 (见函数头注释):
+          //   - 关系一 (折叠层级 == 分组层级): 分组自身 key (如折叠 SM + 按 SM 分组)
+          //   - 关系二 (折叠层级 < 分组层级, 折叠更细): 继承上层分组 key (如折叠 SM + 按 domain)
+          //   - 关系三 (折叠层级 > 分组层级, 折叠更粗): 取不到单一分组 key → 中性灰
           let key
           if (colorGroupBy === 'serviceModule') key = g.serviceModuleName || g.title
           else if (colorGroupBy === 'subDomain') key = g.subDomain || nextCtx.subDomain
@@ -522,6 +532,10 @@ function applyUpliftNodeColors(groups, colorMap, colorGroupBy, mermaidCode, text
           if (color) {
             mermaidCode += `  style ${collapseId} ${getNodeStyle(color, textColor)}\n`
             collapseColorMap.set(collapseId, color)
+          } else {
+            // [FOLD-COLOR 2026-08-08] 关系三: 折叠层级 > 颜色分组层级, 无法用单一分组色表达,
+            //   回退 classDef default (灰), 并收集供上层弹"含多分组"提示.
+            neutralCollapseIds.add(collapseId)
           }
         }
       }
@@ -531,7 +545,7 @@ function applyUpliftNodeColors(groups, colorMap, colorGroupBy, mermaidCode, text
     }
   }
   walk(groups, {})
-  return { code: mermaidCode, colorMap: collapseColorMap }
+  return { code: mermaidCode, colorMap: collapseColorMap, neutralCollapseIds }
 }
 
 function computeHiddenBoIds(groups, businessObjectNodes, nodeCodeToIdMap, nodeNameToIdMap, disabledBoCodes) {
@@ -1338,7 +1352,11 @@ export function useBusinessObjectSyntax() {
                 targetCode: link.targetCode,
                 // [OPT 2026-08-06] 透传端点显示层级 (0=domain/1=subDomain/2=serviceModule/3=BO), 供 tooltip 隐藏"高层级说明行"
                 sourceLevel: link.sourceLevel ?? 3,
-                targetLevel: link.targetLevel ?? 3
+                targetLevel: link.targetLevel ?? 3,
+                // [AGG 2026-08-09] 透传 childRelations: 融合后的底层关系数组 (由 fuseLinks 从
+                //   members>1 的组生成). 供 tooltip 统计聚合连线 (领域/子领域/服务模块级别)
+                //   的关系数量/方向/类型分布. 缺失时 tooltip 回退到"共 1 条".
+                childRelations: link.childRelations || []
               })
             }
           }
@@ -1349,7 +1367,10 @@ export function useBusinessObjectSyntax() {
         return {
           mermaidCode,
           nodeColorMappings,
-          linkColorMappings
+          linkColorMappings,
+          // [FOLD-COLOR 2026-08-08] 中性灰折叠节点集合透出: 供上层(MermaidComponent)在渲染后
+          //   弹出 ElMessage 提示"该折叠节点含多分组, 已显示为中性灰".
+          neutralCollapseIds: upliftStyleResult.neutralCollapseIds
         }
       }
     }
@@ -1568,7 +1589,9 @@ export function useBusinessObjectSyntax() {
     return {
       mermaidCode,
       nodeColorMappings,
-      linkColorMappings
+      linkColorMappings,
+      // [FOLD-COLOR 2026-08-08] 非分组路径无折叠聚合节点, 中性灰集合为空
+      neutralCollapseIds: new Set()
     }
   }
 
