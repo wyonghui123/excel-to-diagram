@@ -8,6 +8,11 @@
  */
 export function createDefaultChartConfig() {
   return {
+    /**
+     * @deprecated 2026-08-08 不再区分「业务对象图 / 服务模块图」。
+     *   固定为 'businessObject'（嵌入式 Mermaid 图表），serviceModule 值已废弃，
+     *   仅作为图表内「展开层级 / 颜色分组维度」，不再是独立图表模式。
+     */
     chartType: 'businessObject',
     colorScheme: 'default',
     colorGroupBy: 'domain',

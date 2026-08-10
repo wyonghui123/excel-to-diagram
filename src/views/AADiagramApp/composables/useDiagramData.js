@@ -1245,6 +1245,7 @@ export function useDiagramData() {
   })
 
   const generateDiagram = () => {
+    console.trace('[TRACE-generateDiagram] called, csh=' + (diagramConfig.value?.centerScopeHighlight ?? '?') + ', colorScheme=' + diagramConfig.value?.colorScheme + ', colorGroupBy=' + diagramConfig.value?.colorGroupBy + ', centerScopeColor=' + diagramConfig.value?.centerScopeColor)
     if (!previewData.value) {
       return
     }
@@ -1535,6 +1536,28 @@ export function useDiagramData() {
       })
     }
 
+    // [OBS 2026-08-08] 对象范围链路可观测摘要:
+    //   scopeCode → finalBoCodes → 过滤后各层计数. 快速确认范围过滤是否符合预期
+    //   (如 SCP 只含供应链计划 BO, 而非全量 3230). 用法: window.__archPage.scopeState.
+    //   scopeMatched=false(有过滤但 finalBoCodes 为空) 即命中"scopeCode 匹配失败",
+    //   应中止而非静默回退全量 (见项目铁律).
+    if (typeof window !== 'undefined') {
+      window.__archPage = window.__archPage || {}
+      window.__archPage.scopeState = {
+        centerScopeBoCount: (centerScope.value || []).length,
+        relationBoCount: relationFilteredBoCodes.value?.length || 0,
+        finalBoCodesCount: finalBoCodes.size,
+        hasFilter,
+        scopeMatched: hasFilter ? finalBoCodes.size > 0 : null,
+        filteredDomains: filteredDomainProducts.length,
+        filteredSubDomains: filteredDomainProducts.reduce((n, d) => n + (d.modules?.length || 0), 0),
+        filteredServiceModules: filteredServiceModules.length,
+        filteredBusinessObjects: filteredBusinessObjects.length,
+        filteredRelationships: filteredRelationships.length,
+        totalBusinessObjects: previewData.value?.businessObjects?.length || 0
+      }
+    }
+
     if (chartType.value === 'serviceModule') {
       // 从业务对象关系计算服务模块关系
       const serviceModuleRelationships = computedServiceModuleRelations(
@@ -1608,7 +1631,11 @@ export function useDiagramData() {
         // [SCOPE 2026-08-07] 初始图表智能默认展开层级（按对象范围区分）：
         //   对象范围内展开到服务模块，范围外展开到子领域。
         //   必须在此渲染结构上应用（mergeUserGroup/toMermaidConfig 均不保留 collapsed）。
-        applyDefaultExpandByScope(layoutControlConfig?.groups, (g) => isSubtreeInScope(g, new Set(centerScope.value || [])))
+        //   [SCOPE-DEFAULT 2026-08-08] 仅用户未显式选择时套用 (逻辑同 BO 图路径).
+        //   [FIX 2026-08-09] 仅 centerScope 非空才套用, 避免空范围误告警.
+        if (!configStore.expandLevelUserSet && (centerScope.value || []).length > 0) {
+          applyDefaultExpandByScope(layoutControlConfig?.groups, (g) => isSubtreeInScope(g, new Set(centerScope.value || [])))
+        }
 
         // 重要：将生成的 layoutControlConfig 更新到 store
         configStore.updateLayoutControlConfig(layoutControlConfig)
@@ -1765,9 +1792,18 @@ export function useDiagramData() {
         //   props.layoutControlConfig），且 buildDiagramData 会重新派生 groups（丢弃 collapsed），
         //   而面板 auto-group 可能在 centerScope 设置前执行导致漏折叠。故在此（generate 时
         //   centerScope 已确定）就地修改 store 配置分组树 collapsed 以兜底初始渲染。
+        //   [SCOPE-DEFAULT 2026-08-08] 仅当用户未显式选择过展开层级时套用默认折叠:
+        //   用户已选过(expandLevelUserSet=true)时跳过, 避免面板树 collapsed 与用户选择冲突
+        //   (渲染层 EmbeddedChartView 已按 store.expandLevel 显式应用, 见其 layoutControlConfig).
         const scopeCodeSet = new Set(centerScope.value || [])
-        applyDefaultExpandByScope(layoutControlConfig?.groups, (g) => isSubtreeInScope(g, scopeCodeSet))
-        applyDefaultExpandByScope(configStore.layoutControlConfig?.groups, (g) => isSubtreeInScope(g, scopeCodeSet))
+        // [FIX 2026-08-09] 仅在 centerScope 非空时才套用默认折叠, 避免空范围误告警
+        //   (applyDefaultExpandByScope 现会在谓词无命中时 console.warn, 空范围无对象范围不应告警).
+        // [CTX-FIX 2026-08-09] 用户手动调整过分组折叠/展开(groupManualSet)时跳过默认折叠,
+        //   避免数据重生成(generateDiagram)时把用户手动 collapsed 重置回范围默认值.
+        if (!configStore.expandLevelUserSet && !configStore.groupManualSet && scopeCodeSet.size > 0) {
+          applyDefaultExpandByScope(layoutControlConfig?.groups, (g) => isSubtreeInScope(g, scopeCodeSet))
+          applyDefaultExpandByScope(configStore.layoutControlConfig?.groups, (g) => isSubtreeInScope(g, scopeCodeSet))
+        }
 
         // 5. 使用 buildDiagramData，复用所有渲染逻辑
         // [Task 10 2026-08-02] 统一管道入口 (spec 4.2.1): preview 裁剪到当前 scope
@@ -2026,11 +2062,16 @@ export function useDiagramData() {
     selectedRelationNodeIds.value = []
   }
 
-  // [E2 2026-08-02] 合并 5 个配置字段 watch → 单个组合 watch:
+  // [E2 2026-08-02] 合并配置字段 watch → 单个组合 watch:
   //   之前 customColors/colorScheme/colorGroupBy/centerScopeHighlight/centerScopeColor
   //   各有独立 watch, 用户在同一 flush 内快速切换多个配置时 (如连续选配色+分组维度),
   //   每次字段变化都触发一次完整 generateDiagram (同步全量重建)。
   //   合并后同一 flush 内多次字段变化只生成一次, 使用最终值, 消除中间态的浪费渲染。
+  //   [FIX 2026-08-09] centerScopeHighlight 从本 watch 移除: 它只影响颜色, 不改变结构。
+  //     若在此触发 generateDiagram → 全量重建 → GroupModel.fromUserConfig 不保留用户
+  //     手动折叠/展开状态 → 切换"区分/不区分业务对象"后已展开的分组被折叠。
+  //     改为下方单独 watch 浅更新 diagramData.centerScopeHighlight, 由 MermaidComponent
+  //     的 updateColorsOnly 增量变色处理 (节点/连线/图例颜色更新, 不重建结构)。
   watch(
     () => {
       const cfg = diagramConfig.value || {}
@@ -2038,7 +2079,7 @@ export function useDiagramData() {
       return [
         cfg.colorScheme,
         cfg.colorGroupBy,
-        cfg.centerScopeHighlight,
+        // cfg.centerScopeHighlight,  // 已移除, 见下方单独 watch
         cfg.centerScopeColor,
         cc ? JSON.stringify(cc) : ''
       ].join('|')
@@ -2046,6 +2087,27 @@ export function useDiagramData() {
     (newStr, oldStr) => {
       if (newStr !== oldStr && previewData.value) {
         generateDiagram()
+      }
+    }
+  )
+
+  // [FIX 2026-08-09] 区分/不区分业务对象 (centerScopeHighlight) 只影响颜色 → 浅更新
+  //   diagramData.centerScopeHighlight, 不触发 generateDiagram 全量重建 (否则丢失
+  //   用户手动折叠/展开状态, 见上方注释). MermaidComponent 检测到 centerScopeHighlight
+  //   变化且 nodes/links 未变 → 走 updateColorsOnly 增量变色路径.
+  // [FIX 2026-08-09 v2] 必须"原地修改"而非新建对象引用!
+  //   之前 `diagramData.value = {...diagramData.value, centerScopeHighlight}` 产生新引用,
+  //   EmbeddedChartView.layoutControlConfig computed 依赖 diagramData.value → 重新求值
+  //   → 返回新 groups 对象 → MermaidComponent 的 layoutControlConfig watch 判 sig 变化
+  //   → 走全量 renderMermaid() → 用户手动展开的分组(如采购供应)被重新折叠.
+  //   现改为原地赋值: diagramData.value 引用不变, layoutControlConfig computed 不重算,
+  //   仅 MermaidComponent 对 props.diagramData 的 deep watch 捕获 centerScopeHighlight
+  //   变化 → nodes/links 未变 → updateColorsOnly 增量变色. (浏览器实测确认)
+  watch(
+    () => diagramConfig.value?.centerScopeHighlight,
+    (newVal, oldVal) => {
+      if (newVal !== oldVal && diagramData.value) {
+        diagramData.value.centerScopeHighlight = newVal
       }
     }
   )

@@ -146,22 +146,32 @@ function handleChartFocusRequest({ type, id }) {
   diagramConfigStore.requestChartFocus({ type, id })
 }
 
-watch(() => diagramConfigStore.colorGroupBy, (newVal, oldVal) => {
-  if (newVal !== oldVal && props.domainProducts && props.domainProducts.length > 0) {
-    handleAutoGroupByDomain()
-  }
+// [FIX 2026-08-09] colorGroupBy 变化不再重建分组树。
+//   根因: 原 watcher 调用 handleAutoGroupByDomain() 会从 domainProducts 重新构建整个
+//   localConfig.groups (collapsed 全部重置为 false), 直接抹掉用户在图表上的手动折叠/展开
+//   (双击/右键展开), 且该重建会让图表 nodesChanged → 全量 reload。
+//   颜色分组切换已由 MermaidComponent.updateColorsOnly 增量更新节点/连线/图例,
+//   面板分组颜色来自外部 colorMapping prop (对 colorGroupBy 响应式), 无需重建树。
+watch(() => diagramConfigStore.colorGroupBy, () => {
+  // no-op: 颜色分组切换走 MermaidComponent.updateColorsOnly 增量路径, 不重建分组树。
 })
 
-watch(() => diagramConfigStore.centerScopeHighlight, (newVal, oldVal) => {
-  if (newVal !== oldVal && props.domainProducts && props.domainProducts.length > 0) {
-    handleAutoGroupByDomain()
-  }
+// [FIX 2026-08-10] centerScopeHighlight(区分/不区分) 变化不再重建分组树。
+//   根因: 原 watcher 调用 handleAutoGroupByDomain() 从 domainProducts 重新构建整个
+//   localConfig.groups (collapsed 全部重置为 false), 随后 applyDefaultExpandByScopeToGroups()
+//   又把范围内服务模块(如 MM 采购供应)设为 collapsed=true → emitUpdate →
+//   RelationScopeTree 的 Object.assign 整体替换 chartConfig.layoutControl.groups。
+//   这正好抹掉用户"双击展开 MM → 切换区分/不区分"时保留的手动展开状态 (flaky 折叠 bug)。
+//   区分/不区分只影响中心范围颜色, 已由 MermaidComponent.updateColorsOnly 增量更新,
+//   面板分组颜色来自外部 colorMapping prop (对 centerScopeHighlight 响应式), 无需重建树。
+watch(() => diagramConfigStore.centerScopeHighlight, () => {
+  // no-op: 区分/不区分仅影响颜色, 走 updateColorsOnly 增量路径, 不重建分组树。
 })
 
-watch(() => diagramConfigStore.colorScheme, (newVal, oldVal) => {
-  if (newVal !== oldVal && props.domainProducts && props.domainProducts.length > 0) {
-    handleAutoGroupByDomain()
-  }
+// [FIX 2026-08-10] colorScheme(配色) 变化同样仅影响颜色, 不重建分组树。
+//   与 colorGroupBy/centerScopeHighlight 同理, 由 updateColorsOnly 增量更新。
+watch(() => diagramConfigStore.colorScheme, () => {
+  // no-op: 配色仅影响颜色, 走 updateColorsOnly 增量路径, 不重建分组树。
 })
 
 defineExpose({

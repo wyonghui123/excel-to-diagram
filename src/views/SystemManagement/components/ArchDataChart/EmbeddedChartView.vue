@@ -88,6 +88,8 @@ import { buildAnnotationFilterFromScope } from '@/services/scopeToFilter.js'
 import { buildServiceModuleGroupsFromDomainProducts, extractGroupStates as sharedExtractGroupStates, applyGroupStates as sharedApplyGroupStates } from '@/services/groupModel/layoutPanelAdapter.js'
 // [优化 2026-08-05] 布局面板编辑 → 渲染树的合并逻辑（纯函数, 可单测）
 import { applyContainerMembership, applyGroupTitlesAndOrder } from '@/services/hierarchyTree/layoutMergeLogic.js'
+// [SCOPE-DEFAULT 2026-08-08] 展开层级共享工具: 用户未显式设置时, 在渲染层按对象范围套用默认展开.
+import { applyDefaultExpandByScope, isSubtreeInScope, expandGroupsToLevel } from '@/services/expandLevel.js'
 
 const props = defineProps({
   scopeIds: {
@@ -194,6 +196,8 @@ if (typeof window !== 'undefined') {
   // [E2E 2026-08-02] 暴露 diagramData 引用 (只读诊断: 统一管道输出节点结构 / domain / subDomain,
   //   以及颜色映射链路 buildObjectToModuleMap 的输入), chart_diag / probe 脚本读取验证。
   window.__archPage.diagramData = diagramData
+  // [DBG 2026-08-10] 临时暴露 configStore 引用, 供诊断脚本检查别名/状态
+  window.__archPage.storeProxy = configStore
 }
 
 // [FIX 2026-07-29 画布缩小] 监听画布容器尺寸变化，调用 MermaidComponent.relayoutCanvas
@@ -261,7 +265,16 @@ const layoutControlConfig = computed(() => {
       //   修复: 用 extractGroupStates 从 chartConfig.layoutControl.groups 提取状态,
       //   applyGroupStates 应用到 unified.groups (按 elementCode 匹配, 与切换图表类型状态迁移同链路).
       //   深拷贝避免污染 diagramData (unified.groups 是 diagramData 的引用).
-      const userStates = sharedExtractGroupStates(chartConfig.layoutControl?.groups)
+      // [FIX 2026-08-10] 折叠状态源必须以 configStore.layoutControlConfig 为权威:
+      //   双击/右键菜单修改分组 collapsed 走 configStore.updateLayoutControlConfig(newConfig),
+      //   该方法整体替换对象, 使 configStore.layoutControlConfig 与 chartConfig.layoutControl
+      //   成为不同引用 (chartConfig 保留旧的、被替换前的 groups). 若此处从 chartConfig 取
+      //   userStates, 会在"双击展开 → 切区分/不区分(触发本 computed 重算)"时读到旧引用中
+      //   已折叠的 MM → sharedApplyGroupStates 把 MM 重新折叠 (用户反馈的 flaky 折叠 bug).
+      //   改为优先从 configStore.layoutControlConfig 取 (同步更新, 权威), 兜底 chartConfig.
+      const userStates = sharedExtractGroupStates(
+        configStore.layoutControlConfig?.groups || chartConfig.layoutControl?.groups
+      )
       const mergedGroups = JSON.parse(JSON.stringify(unified.groups))
       // [DEBUG 2026-08-05] 分步快照捕获, 供浏览器定位"哪一步合并出错":
       //   before(派生树) → afterStates(状态) → afterMembership(归属) → afterTitles(标题/顺序)
@@ -275,6 +288,11 @@ const layoutControlConfig = computed(() => {
       if (userStates.size > 0) {
         sharedApplyGroupStates(mergedGroups, userStates)
       }
+      // [DBG 2026-08-10] 排查折叠 bug: 打印各源 + 合并结果的 MM 状态
+      if (typeof window !== 'undefined') {
+        const _find = (list, code) => { for (const g of list||[]) { if ((g.elementCode||g.id)==code) return g.collapsed; const r=_find(g.children, code); if(r!==undefined) return r; const r2=_find(g.containers, code); if(r2!==undefined) return r2; } return undefined; }
+        console.log('[DBG-MM] groupManualSet=' + configStore.groupManualSet + ', expandLevelUserSet=' + configStore.expandLevelUserSet + ', storeMM=' + _find(configStore.layoutControlConfig?.groups, 'MM') + ', chartMM=' + _find(chartConfig.layoutControl?.groups, 'MM') + ', userMM=' + (userStates.get('MM')||{}).collapsed + ', mergedMM=' + _find(mergedGroups, 'MM') + ', userStatesSize=' + userStates.size)
+      }
       debugSteps.afterStates = deepCloneForDebug(mergedGroups)
       // [MOVE 2026-08-04] 用户把节点/容器拖拽到另一个分组下 → 基于新树结构生成图表。
       //   unified.groups 的容器归属来自投影容器树（派生），不反映用户在面板的拖拽移动，
@@ -286,9 +304,43 @@ const layoutControlConfig = computed(() => {
       //   不反映用户在面板的编辑。这里按 elementCode 覆盖标题并按面板顺序重排。
       applyGroupTitlesAndOrder(mergedGroups, chartConfig.layoutControl?.groups)
       debugSteps.afterTitles = deepCloneForDebug(mergedGroups)
+      // [SCOPE-DEFAULT 2026-08-08] 用户未显式选择过展开层级时, 在渲染层强制套用对象范围默认展开:
+      //   - 对象范围内分组 → 折叠到服务模块(聚合节点)
+      //   - 对象范围外分组 → 折叠到子领域
+      //   规避 useDiagramData 生成时 centerScope 未就绪 / 异步时序导致的漏折叠(初始加载仍显示业务对象).
+      //   仅当用户未干预(expandLevelUserSet=false)才套用, 用户显式选过则尊重用户选择, 不覆盖.
+      //   注意: 需在 sharedApplyGroupStates 之后执行, 因为面板树 collapsed 来自用户折叠, 不得被覆盖.
+      // [FIX 2026-08-09] 仅 centerScope 非空才套用默认折叠, 避免空范围误告警
+      //   (applyDefaultExpandByScope 现会在谓词无命中时 console.warn).
+      // [FIX 2026-08-09] 用户已手动调整过分组折叠/展开(双击/右键)时,
+      //   尊重用户 per-group collapsed(已由上方 sharedApplyGroupStates 应用),
+      //   不再套用范围默认展开/全局展开, 避免无条件覆盖用户操作导致图表无变化.
+      if (configStore.groupManualSet) {
+        // 不套用任何默认展开, 用户手动状态由 sharedApplyGroupStates 已写入 mergedGroups.
+      } else if (!configStore.expandLevelUserSet && (configStore.centerScope || []).length > 0) {
+        const scopeCodeSet = new Set(configStore.centerScope || [])
+        applyDefaultExpandByScope(mergedGroups, (g) => isSubtreeInScope(g, scopeCodeSet))
+      } else {
+        // [SCOPE-DEFAULT 2026-08-08] 用户显式选择过展开层级(工具栏/图表设置):
+        //   在渲染层按 store.expandLevel 就地应用展开, 确保用户选择必定生效.
+        //   防御: 工具栏只改面板树 collapsed(经 userStates→mergedGroups 按 elementCode 匹配),
+        //   若面板树与 unified 树 elementCode 不一致会导致状态丢失(仍显示业务对象), 此处兜底.
+        //   注意: 全局展开层级选择会统一覆盖各分组 collapsed, 与该语义一致.
+        expandGroupsToLevel(mergedGroups, configStore.expandLevel)
+      }
+      debugSteps.afterScopeExpand = deepCloneForDebug(mergedGroups)
       // [DEBUG 2026-08-04] 调试钩子, 供浏览器检查面板树与合并树各步骤结构
       if (typeof window !== 'undefined') {
         window.__archPage = window.__archPage || {}
+        // [OBS 2026-08-08] 展开层级可观测摘要: 一行即可判断"展开到服务模块"是否生效.
+        //   期望服务模块态: collapsedCount>0 且 collapsedSizes 覆盖 serviceModule 层级分组.
+        window.__archPage.expandState = {
+          expandLevel: configStore.expandLevel,
+          expandLevelUserSet: configStore.expandLevelUserSet,
+          scopeBoCount: (configStore.centerScope || []).length,
+          collapsedCount: countCollapsed(mergedGroups),
+          collapsedSizes: countCollapsedByLevel(mergedGroups)
+        }
         window.__archPage.debugLayout = {
           panelGroups: chartConfig.layoutControl?.groups,
           ...debugSteps,
@@ -415,6 +467,45 @@ function collectDisabledBoCodes(groups) {
   return codes
 }
 
+// [OBS 2026-08-08] 统计渲染树 collapsed=true 的分组总数 (供展开层级可观测).
+function countCollapsed(groups) {
+  let n = 0
+  function walk(list) {
+    if (!Array.isArray(list)) return
+    for (const g of list) {
+      if (!g) continue
+      if (g.collapsed === true) n++
+      walk(g.children)
+      walk(g.containers)
+    }
+  }
+  walk(groups)
+  return n
+}
+
+// [OBS 2026-08-08] 按 groupType 汇总各层级 collapsed 分组数.
+//   期望"展开到服务模块": { serviceModule: >0, custom: >0 } (BO 叶容器折叠), domain/subDomain=0.
+function countCollapsedByLevel(groups) {
+  const out = { domain: 0, subDomain: 0, serviceModule: 0, other: 0 }
+  function walk(list) {
+    if (!Array.isArray(list)) return
+    for (const g of list) {
+      if (!g) continue
+      if (g.collapsed === true) {
+        const t = g.groupType ? String(g.groupType).toLowerCase() : ''
+        if (t === 'domain') out.domain++
+        else if (t === 'subdomain') out.subDomain++
+        else if (t === 'servicemodule') out.serviceModule++
+        else out.other++
+      }
+      walk(g.children)
+      walk(g.containers)
+    }
+  }
+  walk(groups)
+  return out
+}
+
 // ============================================================
 // annotationConfig：触发 MermaidComponent 内部 renderAnnotationOverlay
 //   包含 centerScopeHighlight + showAnnotationIcons
@@ -534,6 +625,9 @@ watch(
     // [E1 2026-08-02] 250ms 防抖合并连续拖拽 (仅合并 store 写入)
     clearTimeout(_layoutControlTimer)
     _layoutControlTimer = setTimeout(() => {
+      // [DIAG] 排查 centerScopeHighlight 切换触发 layoutControl deep watch
+      const _findMM = (list) => { for (const g of list||[]) { if ((g.elementCode||g.id)==='MM') return g; const r=_findMM(g.children); if(r) return r; const r2=_findMM(g.containers); if(r2) return r2; } return null; }
+      console.log('[DIAG-layoutWatch] triggered, MM collapsed=' + (_findMM(newLayout?.groups)||{}).collapsed + ', stack=' + new Error().stack.split('\n').slice(1,6).join(' < ').slice(0,300))
       configStore.updateLayoutControlConfig(newLayout)
       // [T3 2026-08-02] 触发来源标注 — chart_diag / window.__archPage.mermaid.stepMeta 可读
       diag.recordStepMeta('layoutControlUpdate', { source: 'layoutControl-debounced', at: Date.now() })
@@ -564,6 +658,7 @@ function syncVisibilityToChartConfig(srcGroups, dstGroups) {
     })
   }
   collect(srcGroups)
+  let syncedCount = 0
   const apply = (list) => {
     ;(list || []).forEach(g => {
       if (!g || typeof g !== 'object') return
@@ -572,11 +667,20 @@ function syncVisibilityToChartConfig(srcGroups, dstGroups) {
       if (src && src.visible !== g.visible) {
         g.visible = src.visible
       }
+      // [CTX 2026-08-07] 同步折叠状态: 右键菜单"折叠/展开"修改了 configStore 中分组的 collapsed,
+      //   必须同步回 chartConfig.layoutControl, 否则 layoutControlConfig computed 读不到变化,
+      //   MermaidComponent 不会重渲染.
+      if (src && src.collapsed !== undefined && src.collapsed !== g.collapsed) {
+        console.log('[SYNC] syncVisibilityToChartConfig: syncing collapsed for ' + (g.title || g.elementCode || g.id) + ' from ' + g.collapsed + ' to ' + src.collapsed)
+        g.collapsed = src.collapsed
+        syncedCount++
+      }
       apply(g.children)
       apply((g.containers || []).filter(c => c && typeof c === 'object'))
     })
   }
   apply(dstGroups)
+  console.log('[SYNC] syncVisibilityToChartConfig: total synced=' + syncedCount + ', srcMap size=' + srcMap.size)
 }
 let _syncingStoreToChart = false
 watch(
@@ -755,6 +859,7 @@ onMounted(async () => {
  * - SM 图：buildServiceModuleGroupsFromDomainProducts 路径（v8，从 domainProducts 直接构建）
  */
 async function syncLayoutControlFromDiagramData(force = false, preservedStates = null, genId = null) {
+  console.log('[DBG-syncLayout] called force=' + force + ' genId=' + genId + ' chartType=' + chartConfig.chartType + ' stack=' + new Error().stack.split('\n').slice(1,4).join(' < ').slice(0,200))
   // [FIX 2026-07-29 v3] 仅在 BO 图时同步（SM 图走 LayoutControlPanel.handleServiceModuleAutoGroup）
   // [FIX 2026-07-29 v5] SM 图改为通过 adaptGroupModelForLayoutPanel 预填充 groups，
   //   避免首次打开布局抽屉时 LayoutControlPanel.onMounted 检测 groups 为空 → 触发

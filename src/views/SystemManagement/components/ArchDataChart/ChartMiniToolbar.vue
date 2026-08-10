@@ -19,22 +19,10 @@
 
 <template>
   <div class="chart-mini-toolbar">
-    <!-- 展开层级 [LEVEL 2026-08-07] 替换原"图表类型"下拉: 工具层级由图表设置(LayoutControlPanel)共享,
-         通过 diagramConfigStore.expandLevel 同步, 用 Expand 图标表达"展开颗粒度" -->
-    <el-select
-      :model-value="expandLevel"
-      size="small"
-      class="cmt-select cmt-select--short"
-      @update:model-value="(v) => emit('update:expand-level', v)"
-    >
-      <template #prefix>
-        <el-icon class="cmt-prefix-icon"><Expand /></el-icon>
-        <span class="cmt-label">展开层级</span>
-      </template>
-      <el-option
-        v-for="lvl in EXPAND_LEVELS" :key="lvl.key" :label="lvl.label" :value="lvl.key"
-      />
-    </el-select>
+    <!-- [CTX-GLOBAL 2026-08-10] 展开层级下拉已移除:
+         改用图表空白区域右键菜单 (展开到领域/子领域/服务模块/业务对象), 见 MermaidComponent.handleContextMenu.
+         原展开层级逻辑仍由 LayoutControlPanel(图表设置抽屉) 与 store.setExpandLevel 承载,
+         展开层级状态同步不变 (diagramConfigStore.expandLevel). -->
 
     <!-- 颜色分组维度 -->
     <el-select
@@ -197,13 +185,10 @@
  *   - 仅作为 UI 层，触发 update 事件
  */
 import { ref, onMounted } from 'vue'
-import { Bottom, Right, Setting, Expand } from '@element-plus/icons-vue'
+import { Bottom, Right, Setting } from '@element-plus/icons-vue'
 import EnumService from '@/services/enumService'
-import { EXPAND_LEVELS } from '@/services/expandLevel.js'
 
 const props = defineProps({
-  // [LEVEL 2026-08-07] 展开层级 (替换原 chartType): 两处(工具栏/图表设置)共用, 走 store 同步
-  expandLevel: { type: String, default: 'businessObject' },
   chartType: { type: String, required: true },
   colorScheme: { type: String, required: true },
   colorGroupBy: { type: String, required: true },
@@ -219,7 +204,6 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
-  'update:expand-level',
   'update:chart-type',
   'update:color-scheme',
   'update:color-group-by',
