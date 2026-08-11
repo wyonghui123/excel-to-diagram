@@ -12,46 +12,7 @@
 import { MAX_RECURSION_DEPTH, checkDepth, checkCycle, createVisitedSet } from '../../../services/groupModel/safetyUtils.js'
 import { formatContainerTitle } from '../../../utils/formatContainerTitle.js'
 import { markUplift } from './upliftDerivation.js'
-
-// [TITLE 2026-08-09] 折叠聚合节点标题: 名称置于标记内, 类型+编码置下方.
-//   - 领域:     <供应链云>\n领域 SCM
-//   - 子领域:   {供应链计划}\n子领域 SCP
-//   - 服务模块: [需求计划]\n服务模块 DP
-//   type 兼容大写带下划线 (DOMAIN/SUB_DOMAIN/SERVICE_MODULE) 与小写 groupType.
-//   无编码或名称或无法识别类型时返回空串(调用方回退原格式). 业务对象不经过折叠路径, 保持原样.
-function extractOwnGroupName(name) {
-  // [TITLE 2026-08-09] 去除 group.title 末尾可能被拼入的父路径后缀,
-  //   避免"父分组名称出现在子分组容器标题" (如 "销售(供应链云)" / "销售（供应链云）" → "销售").
-  //   兼容半角 () 与全角 （）; 仅去掉末尾的单个括号组 (内容不再含括号).
-  if (!name) return name
-  const str = String(name).trim()
-  const m = str.match(/^(.+?)[（(]([^（()]*)[）)]$/)
-  if (m && m[1]) return m[1].trim()
-  return str
-}
-
-function collapseFormatMarker(type, code, name) {
-  if (!code || !name) return ''
-  const t = String(type || '').toLowerCase().replace(/_/g, '')
-  const ownName = extractOwnGroupName(name)
-  if (t === 'domain') return `<${ownName}>\\n领域 ${code}`
-  if (t === 'subdomain') return `{${ownName}}\\n子领域 ${code}`
-  if (t === 'servicemodule') return `[${ownName}]\\n服务模块 ${code}`
-  return ''
-}
-
-// [TITLE 2026-08-09] 容器标题标记符号: 按层级类型返回包裹符号.
-//   - domain → <供应链云>
-//   - subdomain → {供应链计划}
-//   - servicemodule → [需求计划]
-//   其它类型 (业务对象等) 返回 null, 调用方保持原标题格式.
-function getContainerMarkers(type) {
-  const t = String(type || '').toLowerCase().replace(/_/g, '')
-  if (t === 'domain') return ['<', '>']
-  if (t === 'subdomain') return ['{', '}']
-  if (t === 'servicemodule') return ['[', ']']
-  return null
-}
+import { extractOwnGroupName, collapseFormatMarker, getContainerMarkers, businessObjectLabel } from '../syntax/nodeLabelTemplate.js'
 
 // [FIX 2026-08-06g] 上提自禁用父容器的子分组 → 父路径 registry (subgraphId → parentPath).
 //   背景: 之前把父名称拼进容器标题 ("供应链计划（供应链云）"), formatContainerTitle 拆成两行,
@@ -357,7 +318,7 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
         if (!definedNodes.has(actualNodeId)) {
           const node = nodeMap.get(actualNodeId)
           if (node) {
-            const displayText = node.code ? `${node.name}\\n${node.code}` : node.name
+            const displayText = businessObjectLabel(node)
             code += `${indent}${actualNodeId}["${displayText}"]\n`
             definedNodes.add(actualNodeId)
           }
@@ -375,7 +336,7 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
               if (!definedNodes.has(actualNodeId)) {
                 const node = nodeMap.get(actualNodeId)
                 if (node) {
-                  const displayText = node.code ? `${node.name}\\n${node.code}` : node.name
+                  const displayText = businessObjectLabel(node)
                   code += `${indent}${actualNodeId}["${displayText}"]\n`
                   definedNodes.add(actualNodeId)
                 }
@@ -404,7 +365,7 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
               if (!definedNodes.has(actualNodeId)) {
                 const node = nodeMap.get(actualNodeId)
                 if (node) {
-                  const displayText = node.code ? `${node.name}\\n${node.code}` : node.name
+                  const displayText = businessObjectLabel(node)
                   code += `${indent}${actualNodeId}["${displayText}"]\n`
                   definedNodes.add(actualNodeId)
                 }
@@ -453,7 +414,7 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
       if (!definedNodes.has(actualNodeId)) {
         const node = nodeMap.get(actualNodeId)
         if (node) {
-          const displayText = node.code ? `${node.name}\\n${node.code}` : node.name
+          const displayText = businessObjectLabel(node)
             code += `${indent}  ${actualNodeId}["${displayText}"]:::node\n`
           definedNodes.add(actualNodeId)
         }
@@ -478,7 +439,7 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
             if (!definedNodes.has(actualNodeId)) {
               const node = nodeMap.get(actualNodeId)
               if (node) {
-                const displayText = node.code ? `${node.name}\\n${node.code}` : node.name
+                const displayText = businessObjectLabel(node)
                 code += `${indent}  ${actualNodeId}["${displayText}"]\n`
                 definedNodes.add(actualNodeId)
               }
@@ -519,7 +480,7 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
                 if (!definedNodes.has(actualNodeId)) {
                   const node = nodeMap.get(actualNodeId)
                   if (node) {
-                    const displayText = node.code ? `${node.name}\\n${node.code}` : node.name
+                    const displayText = businessObjectLabel(node)
                     innerCode += `${subInnerIndent}${actualNodeId}["${displayText}"]\n`
                     definedNodes.add(actualNodeId)
                   }
@@ -557,7 +518,7 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
             if (!definedNodes.has(actualNodeId)) {
               const node = nodeMap.get(actualNodeId)
               if (node) {
-                const displayText = node.code ? `${node.name}\\n${node.code}` : node.name
+                const displayText = businessObjectLabel(node)
                 code += `${indent}  ${actualNodeId}["${displayText}"]\n`
                 definedNodes.add(actualNodeId)
               }
@@ -675,7 +636,7 @@ function generateContainerCode(container, index, nodeMap, definedNodes, indent =
         if (definedNodes && !definedNodes.has(nodeId)) {
           const node = nodeMap.get(nodeId)
           if (node) {
-            const displayText = node.code ? `${node.name}\\n${node.code}` : node.name
+            const displayText = businessObjectLabel(node)
             code += `${indent}${nodeId}["${displayText}"]\n`
             definedNodes.add(nodeId)
           }
@@ -763,7 +724,7 @@ function generateContainerCode(container, index, nodeMap, definedNodes, indent =
         if (definedNodes && !definedNodes.has(nodeId)) {
           const node = nodeMap.get(nodeId)
           if (node) {
-            const displayText = node.code ? `${node.name}\\n${node.code}` : node.name
+            const displayText = businessObjectLabel(node)
             code += `${indent}      ${nodeId}["${displayText}"]:::node\n`
             definedNodes.add(nodeId)
           }
@@ -781,7 +742,7 @@ function generateContainerCode(container, index, nodeMap, definedNodes, indent =
         if (definedNodes && !definedNodes.has(nodeId)) {
           const node = nodeMap.get(nodeId)
           if (node) {
-            const displayText = node.code ? `${node.name}\\n${node.code}` : node.name
+            const displayText = businessObjectLabel(node)
             code += `${indent}      ${nodeId}["${displayText}"]:::node\n`
             definedNodes.add(nodeId)
           }
@@ -804,7 +765,7 @@ function generateContainerCode(container, index, nodeMap, definedNodes, indent =
       if (definedNodes && !definedNodes.has(nodeId)) {
         const node = nodeMap.get(nodeId)
         if (node) {
-          const displayText = node.code ? `${node.name}\\n${node.code}` : node.name
+          const displayText = businessObjectLabel(node)
           code += `${indent}    ${nodeId}["${displayText}"]:::node\n`
           definedNodes.add(nodeId)
         }

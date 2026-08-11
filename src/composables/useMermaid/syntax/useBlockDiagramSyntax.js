@@ -3,6 +3,7 @@ import { DEFAULT_LINK_COLOR } from '../color/useMermaidColors.js'
 import { useBlockDiagramStyle } from '../style/useBlockDiagramStyle.js'
 import { useDynamicSizeConfig } from '../config/useDynamicSizeConfig.js'
 import { getArrowSyntax, sanitizeLabel } from './_shared/arrowHelper.js'
+import { businessObjectLabel } from './nodeLabelTemplate.js'
 
 export const DIAGRAM_TYPES = {
   BUSINESS_OBJECT: 'businessObject',
@@ -17,7 +18,8 @@ export const DIAGRAM_TYPES = {
 
 export const NODE_TEXT_FORMATS = {
   [DIAGRAM_TYPES.BUSINESS_OBJECT]: (node) => {
-    return node.nodeCode ? `${node.originalName || node.name}\n(${node.nodeCode})` : (node.originalName || node.name)
+    // [TEMPLATE 2026-08-11] 委托统一模板 (名称\n编码 两行)
+    return businessObjectLabel(node)
   },
   // @deprecated 服务模块图（serviceModule）已废弃（2026-08-08），与 DIAGRAM_TYPES.SERVICE_MODULE 一同保留仅作历史参考
   [DIAGRAM_TYPES.SERVICE_MODULE]: (node) => {

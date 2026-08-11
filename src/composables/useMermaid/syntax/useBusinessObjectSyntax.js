@@ -9,6 +9,7 @@ import { DataFlowLogger } from '../../../services/groupModel/dataFlowLogger.js'
 import { formatContainerTitle } from '../../../utils/formatContainerTitle.js'
 import { getArrowSyntax, sanitizeLabel } from './_shared/arrowHelper.js'
 import { computeUplift, markUplift, sanitizeId } from '../layouts/upliftDerivation.js'
+import { businessObjectLabel } from './nodeLabelTemplate.js'
 
 function sortVirtualContainersBySize(containers) {
   if (!containers || containers.length === 0) {
@@ -1143,8 +1144,8 @@ export function useBusinessObjectSyntax() {
             const key = node.originalName || node.name
             const id = nodeNameToIdMap.get(key)
             if (id && !definedNodes.has(id) && !hiddenBoIds.has(id)) {
-              // v21: use " · " separator (single-line), rect auto-calculates width
-              const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+              // [TEMPLATE 2026-08-11] BO 标签统一走模板 (名称\n编码 两行)
+              const displayText = businessObjectLabel(node)
               mermaidCode += `  ${id}["${displayText}"]:::node\n`
               definedNodes.add(id)
             }
@@ -1409,9 +1410,8 @@ export function useBusinessObjectSyntax() {
 
       visibleNodes.forEach(node => {
         const centerMark = node.isCenter ? '◆' : ''
-        // 关键修复 v21：mermaid 11 不支持 ["...\n..."] 换行语法（只支持 <br/>）
-        // 改成 " · " 单行分隔符，避免 <br/> 换行 + max-width 切第二行问题
-        const displayText = node.code ? `${centerMark}${node.name || node.originalName} · (${node.code})` : centerMark + (node.name || node.originalName)
+        // [TEMPLATE 2026-08-11] BO 标签统一走模板 (名称\n编码 两行)，中心标记经 opts 传入
+        const displayText = businessObjectLabel(node, { centerMark })
         mermaidCode += `    ${node.id}["${displayText}"]:::node\n`
       })
 
@@ -1629,7 +1629,7 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
             container.nodes.forEach(nodeId => {
               const node = nodeMap.get(nodeId)
               if (node && !definedNodes.has(nodeId)) {
-                const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+                const displayText = businessObjectLabel(node)
                 code += `    ${nodeId}["${displayText}"]:::node\n`
                 definedNodes.add(nodeId)
               }
@@ -1640,7 +1640,7 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
             container.nodes.forEach(nodeId => {
               const node = nodeMap.get(nodeId)
               if (node && !definedNodes.has(nodeId)) {
-                const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+                const displayText = businessObjectLabel(node)
                 code += `  ${nodeId}["${displayText}"]:::node\n`
                 definedNodes.add(nodeId)
               }
@@ -1668,7 +1668,7 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
           container.nodes.forEach(nodeId => {
             const node = nodeMap.get(nodeId)
             if (node && !definedNodes.has(nodeId)) {
-              const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+              const displayText = businessObjectLabel(node)
               code += `    ${nodeId}["${displayText}"]:::node\n`
               definedNodes.add(nodeId)
             }
@@ -1691,7 +1691,7 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
           container.nodes.forEach(nodeId => {
             const node = nodeMap.get(nodeId)
             if (node && !definedNodes.has(nodeId)) {
-              const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+              const displayText = businessObjectLabel(node)
               code += `      ${nodeId}["${displayText}"]:::node\n`
               definedNodes.add(nodeId)
             }
@@ -1702,7 +1702,7 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
           container.nodes.forEach(nodeId => {
             const node = nodeMap.get(nodeId)
             if (node && !definedNodes.has(nodeId)) {
-              const displayText = node.code ? `${node.name} · (${node.code})` : node.name
+              const displayText = businessObjectLabel(node)
               code += `    ${nodeId}["${displayText}"]:::node\n`
               definedNodes.add(nodeId)
             }
