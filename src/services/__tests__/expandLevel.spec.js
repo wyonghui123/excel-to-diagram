@@ -13,7 +13,9 @@ import {
   groupLevelOf,
   isSubtreeInScope,
   expandGroupsToLevel,
-  applyDefaultExpandByScope
+  applyDefaultExpandByScope,
+  computeDefaultExpandLevel,
+  applyDefaultExpandByCount
 } from '../expandLevel.js'
 
 afterEach(() => {
@@ -99,6 +101,31 @@ describe('expandGroupsToLevel', () => {
     expect(r.collapsedCount).toBe(0)
     expect(spy).toHaveBeenCalled()
   })
+
+  it('[VIS-RESET 2026-08-14] 默认不重置用户图例隐藏 (visible=false 保留)', () => {
+    const tree = buildTree()
+    // 模拟图例隐藏: 隐藏 SALE 子领域及其下 SM3
+    tree[0].children[1].visible = false
+    tree[0].children[1].children[0].visible = false
+    const r = expandGroupsToLevel(tree, 'subDomain')
+    // 渲染层每次重算/默认展开不重置用户主动隐藏 (2026-08-14 修复: 隐藏外部领域云后
+    // 双击服务模块不再重显)
+    expect(tree[0].children[1].visible).toBe(false)
+    expect(tree[0].children[1].children[0].visible).toBe(false)
+    expect(r.collapsedCount).toBeGreaterThan(0)
+  })
+
+  it('[VIS-RESET 2026-08-12] 显式切换全局展开层级 ({ resetVisible: true }) 时重置图例隐藏', () => {
+    const tree = buildTree()
+    // 模拟图例隐藏: 隐藏 SALE 子领域及其下 SM3
+    tree[0].children[1].visible = false
+    tree[0].children[1].children[0].visible = false
+    const r = expandGroupsToLevel(tree, 'subDomain', { resetVisible: true })
+    // 仅"用户显式切换全局展开层级"的操作方传 resetVisible 才重置 (2026-08-12 旧规则)
+    expect(tree[0].children[1].visible).toBe(true)
+    expect(tree[0].children[1].children[0].visible).toBe(true)
+    expect(r.collapsedCount).toBeGreaterThan(0)
+  })
 })
 
 describe('applyDefaultExpandByScope', () => {
@@ -137,6 +164,131 @@ describe('applyDefaultExpandByScope', () => {
     // 不匹配时应中止默认折叠, 树节点 collapsed 保持未设置(不折叠)
     expect(tree[0].collapsed).toBeFalsy()
     expect(tree[0].children[0].collapsed).toBeFalsy()
+  })
+})
+
+// [ELK-GROUP 2026-08-12] 系统自动分组: 无关系(inner)/有关系(boundary), _elkGroup 标记.
+//   它们是 ELK 布局的系统分组, 非用户可折叠层级, 展开/折叠时须保持容器形态(不折叠为聚合节点),
+//   且其默认 visible=false 表示"无边框但节点仍渲染"(系统语义), 不被展开层级重置.
+function buildElkTree() {
+  return [
+    {
+      elementCode: 'SC', groupType: 'domain', children: [
+        {
+          elementCode: 'SCP', groupType: 'subDomain', children: [
+            {
+              elementCode: 'SM1', groupType: 'serviceModule',
+              children: [
+                { id: 'SM1_inner', elementCode: 'SM1_inner', groupType: 'custom', _elkGroup: 'inner', visible: false, directNodes: ['N1', 'N2'] },
+                { id: 'SM1_boundary', elementCode: 'SM1_boundary', groupType: 'custom', _elkGroup: 'boundary', visible: false, directNodes: ['N3'] }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+
+describe('ELK 系统自动分组 (无关系/有关系)', () => {
+  it('expandGroupsToLevel 不折叠系统自动分组(_elkGroup), 保持容器形态', () => {
+    const tree = buildElkTree()
+    expandGroupsToLevel(tree, 'subDomain')
+    const sm = tree[0].children[0].children[0]     // SM1
+    const inner = sm.children[0]
+    const boundary = sm.children[1]
+    expect(sm.collapsed).toBe(true)                // 普通 serviceModule 折叠
+    expect(inner.collapsed).toBeFalsy()            // ELK inner 不折叠
+    expect(boundary.collapsed).toBeFalsy()         // ELK boundary 不折叠
+  })
+
+  it('expandGroupsToLevel 默认不重置任何 visible (含 ELK 系统自动分组)', () => {
+    const tree = buildElkTree()
+    expandGroupsToLevel(tree, 'businessObject')
+    const sm = tree[0].children[0].children[0]
+    expect(sm.children[0].visible).toBe(false)     // ELK inner visible=false 保留
+    expect(sm.children[1].visible).toBe(false)     // ELK boundary visible=false 保留
+  })
+
+  it('applyDefaultExpandByScope 不折叠系统自动分组', () => {
+    const tree = buildElkTree()
+    const r = applyDefaultExpandByScope(tree, (g) => ['SC', 'SCP', 'SM1'].includes(g.elementCode))
+    const sm = tree[0].children[0].children[0]
+    expect(sm.collapsed).toBe(true)                // 范围内 SM1 折叠到服务模块
+    expect(sm.children[0].collapsed).toBeFalsy()   // ELK inner 不折叠
+    expect(sm.children[1].collapsed).toBeFalsy()   // ELK boundary 不折叠
+    expect(r.collapsedCount).toBeGreaterThan(0)
+  })
+})
+
+// [DEFAULT-LEVEL 2026-08-12] 系统默认展开层级（按分组数量自适应）
+//   图表初始展示时, 从粗到细找第一个"分组数 > 1"的层级:
+//     >1 领域→领域; 否则 >1 子领域→子领域; 否则 >1 服务模块→服务模块; 否则→业务对象
+describe('computeDefaultExpandLevel / applyDefaultExpandByCount', () => {
+  const domain = (code, children = []) => ({ elementCode: code, groupType: 'domain', children })
+  const subDomain = (code, children = []) => ({ elementCode: code, groupType: 'subDomain', children })
+  const serviceModule = (code) => ({ elementCode: code, groupType: 'serviceModule', children: [] })
+
+  it('空/非数组 → 业务对象(全展开)', () => {
+    expect(computeDefaultExpandLevel(undefined)).toBe('businessObject')
+    expect(computeDefaultExpandLevel([])).toBe('businessObject')
+  })
+
+  it('>1 领域 → 展开到领域', () => {
+    const tree = [
+      domain('D1', [subDomain('S1')]),
+      domain('D2', [subDomain('S2')])
+    ]
+    expect(computeDefaultExpandLevel(tree)).toBe('domain')
+  })
+
+  it('单领域 + >1 子领域 → 展开到子领域', () => {
+    const tree = [domain('D1', [subDomain('S1'), subDomain('S2')])]
+    expect(computeDefaultExpandLevel(tree)).toBe('subDomain')
+  })
+
+  it('单领域 + 单子领域 + >1 服务模块 → 展开到服务模块', () => {
+    const tree = [domain('D1', [subDomain('S1', [serviceModule('SM1'), serviceModule('SM2')])])]
+    expect(computeDefaultExpandLevel(tree)).toBe('serviceModule')
+  })
+
+  it('单领域 + 单子领域 + 单服务模块 → 展开到业务对象', () => {
+    const tree = [domain('D1', [subDomain('S1', [serviceModule('SM1')])])]
+    expect(computeDefaultExpandLevel(tree)).toBe('businessObject')
+  })
+
+  it('统计跨 children/containers 递归 (混合嵌套)', () => {
+    // domain(1) 下: 2 个 subDomain(一个在 containers) → 展开到子领域
+    const tree = [{
+      elementCode: 'D1', groupType: 'domain',
+      children: [{ elementCode: 'S1', groupType: 'subDomain', children: [] }],
+      containers: [{ elementCode: 'S2', groupType: 'subDomain', children: [] }]
+    }]
+    expect(computeDefaultExpandLevel(tree)).toBe('subDomain')
+  })
+
+  it('ELK 系统自动分组(groupType=custom, level 3)不参与计数 → 不影响结果', () => {
+    const tree = [domain('D1', [
+      subDomain('S1', [
+        { elementCode: 'SM1', groupType: 'serviceModule', children: [
+          { id: 'inner', groupType: 'custom', _elkGroup: 'inner', children: [] },
+          { id: 'boundary', groupType: 'custom', _elkGroup: 'boundary', children: [] }
+        ] }
+      ])
+    ])]
+    // 服务模块数=1 (ELK inner/boundary 不算), 单领域单子领域单服务模块 → 业务对象
+    expect(computeDefaultExpandLevel(tree)).toBe('businessObject')
+  })
+
+  it('applyDefaultExpandByCount 返回 level 并按层级就地折叠', () => {
+    const tree = [domain('D1', [subDomain('S1', [serviceModule('SM1'), serviceModule('SM2')])])]
+    const r = applyDefaultExpandByCount(tree)
+    expect(r.level).toBe('serviceModule')
+    expect(r.collapsedCount).toBeGreaterThan(0)
+    // 展开到服务模块: domain/subDomain 容器, serviceModule 折叠
+    expect(tree[0].collapsed).toBe(false)
+    expect(tree[0].children[0].collapsed).toBe(false)
+    expect(tree[0].children[0].children[0].collapsed).toBe(true)
   })
 })
 

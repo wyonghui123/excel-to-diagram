@@ -101,23 +101,7 @@ export function buildBusinessObjectGroups(containers = [], links = []) {
     }
   })
 
-  // 构建节点到服务模块的映射（用于判断外部连线）
-  const nodeToServiceModuleMap = new Map()
-  domainMap.forEach((domainData, domainName) => {
-    domainData.subDomainMap.forEach((subDomainData, subDomainName) => {
-      subDomainData.smMap.forEach((smData, smName) => {
-        smData.boCodes.forEach(boCode => {
-          nodeToServiceModuleMap.set(boCode, smName)
-        })
-      })
-    })
-  })
-
-  // 计算每个服务模块的节点，并标记有外部连线的节点
-  const nodesWithExternalLinks = new Set()
-  const sourceToServiceModuleMap = new Map()
-
-  // 构建 source/target → 节点编码 的映射
+  // 构建 source/target → 节点编码 的映射（范围内所有 BO）
   const allNodeCodes = new Set()
   domainMap.forEach((domainData) => {
     domainData.subDomainMap.forEach((subDomainData) => {
@@ -127,20 +111,16 @@ export function buildBusinessObjectGroups(containers = [], links = []) {
     })
   })
 
-  // 识别有外部连线的节点（连线两端不在同一服务模块）
+  // [FIX 2026-08-14] 识别"有关系"节点: 在所选关系范围内有任意连线 (含服务模块内) 即标记.
+  //   之前只标记"跨服务模块连线", 导致只有模块内关系的 BO 被误归入"无外部关系"(现改名"无关系").
+  //   用户确认语义: 无关系分组只包含所选关系范围内完全没有关系的节点.
+  const nodesWithAnyLinks = new Set()
   links.forEach(link => {
     const sourceCode = link.sourceCode || link.source
     const targetCode = link.targetCode || link.target
 
-    if (sourceCode && allNodeCodes.has(sourceCode) && targetCode && allNodeCodes.has(targetCode)) {
-      const sourceSm = nodeToServiceModuleMap.get(sourceCode)
-      const targetSm = nodeToServiceModuleMap.get(targetCode)
-
-      if (sourceSm && targetSm && sourceSm !== targetSm) {
-        nodesWithExternalLinks.add(sourceCode)
-        nodesWithExternalLinks.add(targetCode)
-      }
-    }
+    if (sourceCode && allNodeCodes.has(sourceCode)) nodesWithAnyLinks.add(sourceCode)
+    if (targetCode && allNodeCodes.has(targetCode)) nodesWithAnyLinks.add(targetCode)
   })
 
   // 构建分组
@@ -157,9 +137,10 @@ export function buildBusinessObjectGroups(containers = [], links = []) {
       smMap.forEach((smData, smName) => {
         const { boCodes, smCode } = smData
 
-        // ELK 自动分组：将有/无外部连线的节点分离
-        const innerNodes = boCodes.filter(code => !nodesWithExternalLinks.has(code))
-        const boundaryNodes = boCodes.filter(code => nodesWithExternalLinks.has(code))
+        // [FIX 2026-08-14] ELK 自动分组: 按"所选关系范围内是否有关联关系"分离.
+        //   无关系 = 范围内无任何连线 (含模块内); 有关系 = 有任何连线 (内部/外部).
+        const innerNodes = boCodes.filter(code => !nodesWithAnyLinks.has(code))
+        const boundaryNodes = boCodes.filter(code => nodesWithAnyLinks.has(code))
 
         // 创建容器对象（供后续分组使用）
         const createNodeContainer = (boCode, elkType) => ({
@@ -174,9 +155,9 @@ export function buildBusinessObjectGroups(containers = [], links = []) {
           _elkGroup: elkType
         })
 
-        // 内部节点容器（无外部连线）
+        // 无关系节点容器
         const innerContainers = innerNodes.map(code => createNodeContainer(code, 'inner'))
-        // 边界节点容器（有外部连线）
+        // 有关系节点容器
         const boundaryContainers = boundaryNodes.map(code => createNodeContainer(code, 'boundary'))
 
         // 创建 ELK 子分组
@@ -203,10 +184,10 @@ export function buildBusinessObjectGroups(containers = [], links = []) {
           _elkGroup: elkType
         })
 
-        // 内部子分组（无外部关系）
-        const innerGroup = createElkSubGroup('无外部关系', innerContainers, 'inner')
-        // 边界子分组（有外部关系）
-        const boundaryGroup = createElkSubGroup('有外部关系', boundaryContainers, 'boundary')
+        // 无关系子分组
+        const innerGroup = createElkSubGroup('无关系', innerContainers, 'inner')
+        // 有关系子分组
+        const boundaryGroup = createElkSubGroup('有关系', boundaryContainers, 'boundary')
 
         // 根据是否有两类节点决定分组结构
         const hasInner = innerNodes.length > 0
@@ -241,7 +222,7 @@ export function buildBusinessObjectGroups(containers = [], links = []) {
           }
           smChildGroups.push(parentGroup)
         } else if (hasInner) {
-          // 只有无外部关系节点：只创建无外部关系分组（平铺，不嵌套）
+          // 只有无关系节点：只创建无关系分组（平铺，不嵌套）
           smChildGroups.push({
             id: createGroupId(GroupType.SERVICE_MODULE, smCode),
             title: smName,
@@ -265,7 +246,7 @@ export function buildBusinessObjectGroups(containers = [], links = []) {
             _elkGroup: 'inner'  // 标记为 ELK 分组
           })
         } else if (hasBoundary) {
-          // 只有有外部关系节点：只创建有外部关系分组（平铺，不嵌套）
+          // 只有有关系节点：只创建有关系分组（平铺，不嵌套）
           smChildGroups.push({
             id: createGroupId(GroupType.SERVICE_MODULE, smCode),
             title: smName,

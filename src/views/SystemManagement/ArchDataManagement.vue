@@ -23,27 +23,23 @@
     </template>
 
     <!-- [FIX 2026-07-30 v2] chart-config slot: 注入 ChartMiniToolbar 到 GlobalToolbar
-         （图表类型/颜色分组/配色/备注/全屏）。
+         （图表类型/备注/布局方向/高级）。颜色分组/配色/对象范围已移至图表右键菜单「颜色设置」。
          chartConfig 提升到本组件持有，让 GlobalToolbar 和 EmbeddedChartView 共享同一配置。
-         架构：通用模块（GlobalToolbar/MultiObjectManagementPage）零侵入，业务扩展只在 RelationshipManagement -->
+         架构：通用模块（GlobalToolbar/MultiObjectManagementPage）零侵入，业务扩展只在 ArchDataManagement -->
     <template #chart-config>
       <ChartMiniToolbar
         v-if="viewMode === 'chart'"
         :chart-type="chartConfig.chartType"
-        :color-scheme="chartConfig.colorScheme"
-        :color-group-by="chartConfig.colorGroupBy"
-        :center-scope-highlight="chartConfig.centerScopeHighlight"
         :annotation-category-filter="chartConfig.annotationCategoryFilter"
         :overall-direction="chartConfig.layoutControl?.overallDirection ?? 'TB'"
         :engine="chartConfig.layoutControl?.engine ?? 'elk'"
+        :hide-link-label-tails="configStore.hideLinkLabelTails"
         :version-id="embeddedContext.versionId ?? null"
         @update:chart-type="(v) => (chartConfig.chartType = v)"
-        @update:color-scheme="(v) => (chartConfig.colorScheme = v)"
-        @update:color-group-by="(v) => (chartConfig.colorGroupBy = v)"
-        @update:center-scope-highlight="(v) => (chartConfig.centerScopeHighlight = v)"
         @update:annotation-category-filter="(v) => (chartConfig.annotationCategoryFilter = v)"
         @update:overall-direction="(v) => (chartConfig.layoutControl.overallDirection = v)"
         @update:engine="(v) => { chartConfig.layoutEngine = v; chartConfig.layoutControl.engine = v }"
+        @update:hide-link-label-tails="(v) => configStore.updateHideLinkLabelTails(v)"
       />
     </template>
 
@@ -91,14 +87,16 @@ import { MultiObjectManagementPage } from '@/components/common/MultiObjectManage
 import ArchDataChartSwitcher from '@/views/SystemManagement/components/ArchDataChart/ArchDataChartSwitcher.vue'
 import ChartMiniToolbar from '@/views/systemmanagement/components/archdatachart/ChartMiniToolbar.vue'
 import { createDefaultChartConfig } from '@/views/SystemManagement/components/ArchDataChart/chartConfigDefaults.js'
+import { useDiagramConfigStore } from '@/stores/diagramConfigStore'
 
-defineOptions({ name: 'RelationshipManagement' })
+defineOptions({ name: 'ArchDataManagement' })
 
 // [FIX v1.2.18 2026-06-20] annotation 不应作为顶层对象类型 (它是辅助关联数据, category=auxiliary)
 // 之前错误地加入 objectTypes, 现在移除
 // annotation 通过其他对象的"备注"关联面板管理, 不通过顶层导入
 const objectTypes = ['domain', 'sub_domain', 'service_module', 'business_object', 'relationship']
-const pageOptions = { defaultTab: 'relationship' }
+// [DEFAULT-TAB 2026-08-15] 进入页面默认 Tab = 业务对象 (用户要求; 之前为 relationship)
+const pageOptions = { defaultTab: 'business_object' }
 const pageRef = ref(null)
 // [B6 2026-08-03] chartSwitcherRef 已移除: reload 统一走 window.__archPage.reload (slot ref 不可靠).
 
@@ -108,9 +106,12 @@ const pageRef = ref(null)
 //   (含 layoutType/preserveOrder 字段, 默认 enabled=true 跟随 useDiagramData 自动分组)
 // [T1 2026-08-02] 默认值统一走 chartConfigDefaults.js 工厂, 与 EmbeddedChartView/ArchDataChartSwitcher 共用
 const chartConfig = reactive(createDefaultChartConfig())
+// [TAIL 2026-08-12] 拖尾线开关直接读写 store.hideLinkLabelTails (与老版本 StepConfig 同一权威源,
+//   经 useDiagramData → diagramData.hideLinkLabelTails 驱动 MermaidComponent 渲染)
+const configStore = useDiagramConfigStore()
 
 // [布局设置 sidebar 整合] 提供 chartConfig 给 RelationScopeTree (sidebar)
-//   组件树: RelationshipManagement → MultiObjectManagementPage → RelationScopeTree (#master slot)
+//   组件树: ArchDataManagement → MultiObjectManagementPage → RelationScopeTree (#master slot)
 //   RelationScopeTree inject('chartConfig') 读取 layoutControl, 用 Object.assign 写回
 //   与 ArchDataChartSwitcher 模式一致, layoutControl 不进 store
 provide('chartConfig', chartConfig)

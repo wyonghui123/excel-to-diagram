@@ -43,8 +43,9 @@
             v-if="collapsible && collapsePosition === 'header'"
             class="collapsible-panel__toggle"
             type="button"
+            :title="expanded ? '折叠' : '展开'"
           >
-            <el-icon :size="14">
+            <el-icon :size="16">
               <ArrowUp v-if="expanded" />
               <ArrowDown v-else />
             </el-icon>
@@ -288,7 +289,7 @@ function startResize(e) {
 
 .collapsible-panel__collapse-btn:hover {
   color: var(--color-text-primary);
-  background: var(--color-bg-hover);
+  background: var(--color-bg-tertiary);
 }
 
 .collapsible-panel__container {
@@ -317,7 +318,7 @@ function startResize(e) {
 }
 
 .collapsible-panel__header:hover {
-  background: var(--color-bg-hover);
+  background: var(--color-bg-tertiary);
 }
 
 .collapsible-panel__header-left {
@@ -372,8 +373,8 @@ function startResize(e) {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   background: transparent;
   border: none;
@@ -384,7 +385,7 @@ function startResize(e) {
 }
 
 .collapsible-panel__toggle:hover {
-  background: var(--color-bg-hover);
+  background: var(--color-bg-tertiary);
   color: var(--color-text-primary);
 }
 

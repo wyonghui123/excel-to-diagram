@@ -6,17 +6,17 @@ export function getColors(schemeName) {
   return COLOR_SCHEMES[schemeName] || COLOR_SCHEMES.default
 }
 
+// [FIX 2026-08-11 colorIndex-drift] 改为按位置索引分配默认色, 而非"跳过自定义色"计数器.
+//   根因: 旧实现 colorIndex 只对非自定义色分组递增. 当某分组 (如 供应链云) 设了自定义色,
+//   它不再消耗 colorIndex → 后续分组 (如 制作云) 默认色索引整体前移
+//   (制作云 从 colors[1]=绿 变成 colors[0]=蓝). 用户改一个分组色, 其它分组颜色跟着漂移.
+//   修复: 默认色 = colors[分组在 uniqueGroups 中的位置 % len], 与自定义色无关 →
+//   改某分组自定义色不再影响其它分组默认色. 位置索引在结构不变时是稳定的.
 export function assignColorsToGroups(uniqueGroups, colors, customColors = {}) {
   const colorMap = new Map()
-  let colorIndex = 0
 
-  uniqueGroups.forEach((group) => {
-    if (customColors[group]) {
-      colorMap.set(group, customColors[group])
-    } else {
-      colorMap.set(group, colors[colorIndex % colors.length])
-      colorIndex++
-    }
+  Array.from(uniqueGroups).forEach((group, idx) => {
+    colorMap.set(group, customColors[group] || colors[idx % colors.length])
   })
 
   return colorMap

@@ -89,6 +89,7 @@ import { useContextFilterSource } from './filterSources/useContextFilterSource'
 import { useScopeFilterSource } from './filterSources/useScopeFilterSource'
 import { useHierarchyTypes } from './useHierarchyTypes'
 import * as hierarchyService from '@/services/hierarchyService'
+import { stripIdPrefix } from '@/services/archDataConverter'
 import { useAuthStore } from '@/stores/authStore'
 
 /**
@@ -631,7 +632,7 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
   }))
 
   // [任务B 2026-06-29] 导出对话框可选类型: 在原 objectTypes 基础上额外暴露 annotation
-  //   - annotation 不作为页面 Tab (RelationshipManagement.vue objectTypes 不含 annotation)
+  //   - annotation 不作为页面 Tab (ArchDataManagement.vue objectTypes 不含 annotation)
   //   - 仅在导出对话框作为可勾选类型, 默认不勾选 (ExportDialog defaultUnselectedTypes)
   //   - relationship 也出现在导出对话框, 默认不勾选
   //   - 后端 manage_api.py 已种入 annotation:export 权限, export_import_api.py 走 selected_types 路径
@@ -704,10 +705,12 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
       if (!scope) return
 
       // 优先使用 selected（用户在树上直接勾选），其次 effective（树计算的可见范围）
+      // [FIX 2026-08-14] 剥离树节点 ID 前缀 (d_/s_/sm_/bo_) 归一化为纯数字,
+      //   防止 prefixed ID 进入 chartData.hierarchyFilter → preview 请求 → 后端 500
       const ids = scope.selected.length > 0
-        ? [...scope.selected]
+        ? [...scope.selected].map(stripIdPrefix)
         : scope.effective.length > 0
-          ? [...scope.effective]
+          ? [...scope.effective].map(stripIdPrefix)
           : []
 
       if (ids.length > 0) {

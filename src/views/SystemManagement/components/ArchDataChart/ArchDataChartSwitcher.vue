@@ -12,7 +12,7 @@
   设计原则（§5.0.2 ⑤ 通用组件零侵入）：
     - 本组件是"业务组件"，承担视图切换的复杂度
     - MultiObjectManagementPage 通用组件仅提供 detailContent slot，不知道图表视图的具体实现
-    - 业务方（RelationshipManagement.vue）通过 detailContent slot 注入本组件
+    - 业务方（ArchDataManagement.vue）通过 detailContent slot 注入本组件
 
   Props:
     - context: MultiObjectManagementPage 提供的 slot scope 对象
@@ -29,6 +29,9 @@
       :scope-ids="context.scopeIds"
       :version-id="context.versionId"
       :hierarchy-filter="context.chartData.hierarchyFilter"
+      :relation-type-filter="context.chartData.relationTypeFilter || []"
+      :relation-ids="context.chartData.relationIds || []"
+      :relation-category-types="context.chartData.relationCategoryTypes || []"
       :chart-config="chartConfig"
       @node-click="handleNodeClick"
       @render-complete="handleRenderComplete"
@@ -81,7 +84,7 @@ const props = defineProps({
     type: Object,
     required: true
   },
-  // [FIX 2026-07-30 v2] chartConfig 由父组件（RelationshipManagement）持有，
+  // [FIX 2026-07-30 v2] chartConfig 由父组件（ArchDataManagement）持有，
   // 让 GlobalToolbar（chart-config slot）和 EmbeddedChartView 共享同一份配置。
   // 本组件只是透传者，不创建新 chartConfig。
   // 兜底：当父组件没传时仍能用本地默认（向后兼容旧用法）
@@ -103,7 +106,7 @@ const embeddedChartRef = ref(null)
 
 // [B6 2026-08-03] reload 唯一入口已统一为 window.__archPage.reload (EmbeddedChartView 内赋值).
 //   slot ref 链路 (本组件 defineExpose.reload → EmbeddedChartView.defineExpose.reload) 已移除:
-//   slot ref 不绑定到父组件 (RelationshipManagement 无法稳定拿到实例), 实际调用方走 window 暴露.
+//   slot ref 不绑定到父组件 (ArchDataManagement 无法稳定拿到实例), 实际调用方走 window 暴露.
 // [布局设置 sidebar 整合] LayoutControlPanel 已迁移到 RelationScopeTree 第 4 个 CollapsiblePanel,
 //   containers/domainProducts/links 改由 EmbeddedChartView watch 写入 diagramConfigStore.chartDataSnapshot.
 //   embeddedChartRef 保留为 template ref (EmbeddedChartView 组件实例引用).

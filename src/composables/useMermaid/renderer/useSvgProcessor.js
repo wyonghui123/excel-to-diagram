@@ -5,6 +5,7 @@ import { useInteraction } from '../interaction/useInteraction.js'
 import { isBidirectionalLink } from '../syntax/_shared/arrowHelper.js'
 import { useDiagnostics } from '../core/useDiagnostics.js'
 import { getLiftedParentPathMap } from '../layouts/groupedLayout.js'
+import { isFeatureEnabled } from '@/utils/featureFlags.js'
 
 /**
  * SVG 后处理逻辑
@@ -56,6 +57,17 @@ export function useSvgProcessor(options) {
   const addNodeCodeAttributes = (svgEl, diagramData) => {
     if (!diagramData || !diagramData.nodes) return
 
+    // [PERF 2026-08-13] 预建 code→node Map, 消除每个 SVG 节点的 O(节点) find.
+    //   大图 (286 节点) 下两次 find 合计 O(节点²); Map 化后主路径 O(1).
+    //   feature flag: ff_perfProcessSvg=0 回退原 find 逻辑.
+    const perfOpt = isFeatureEnabled('perfProcessSvg')
+    const nodesByCode = perfOpt ? new Map() : null
+    if (nodesByCode) {
+      for (const n of diagramData.nodes) {
+        if (n && n.code && !nodesByCode.has(n.code)) nodesByCode.set(n.code, n)
+      }
+    }
+
     const allNodes = svgEl.querySelectorAll('.node')
     allNodes.forEach(node => {
       const nodeLabel = node.querySelector('.nodeLabel')
@@ -73,7 +85,7 @@ export function useSvgProcessor(options) {
 
         let matchedNode = null
         if (extractedCode) {
-          matchedNode = diagramData.nodes.find(n => n.code === extractedCode)
+          matchedNode = nodesByCode ? nodesByCode.get(extractedCode) : diagramData.nodes.find(n => n.code === extractedCode)
         }
         // [FIX 2026-08-09] 修复 BO 叶子节点 data-code 错配为同名前缀节点:
         //   旧兜底 `labelText.includes(n.name)` 会命中"名称是标签子串"的节点——
@@ -82,7 +94,15 @@ export function useSvgProcessor(options) {
         //   正确: BO 叶子节点标签格式为 `名称+编码`(编码在末尾), 应匹配"标签以编码结尾".
         //   (COLLAPSE 容器节点由上方 extractedCode 精确处理, 不受此兜底影响)
         if (!matchedNode) {
-          matchedNode = diagramData.nodes.find(n => n.code && labelText.endsWith(n.code))
+          // [PERF] 先精确提取 \n 后编码走 Map O(1), miss 时回退原 endsWith 线性兜底.
+          if (nodesByCode) {
+            const nl = labelText.lastIndexOf('\n')
+            const tailCode = nl >= 0 ? labelText.slice(nl + 1).trim() : ''
+            if (tailCode) matchedNode = nodesByCode.get(tailCode) || null
+          }
+          if (!matchedNode) {
+            matchedNode = diagramData.nodes.find(n => n.code && labelText.endsWith(n.code))
+          }
         }
 
         if (matchedNode) {
@@ -187,6 +207,17 @@ export function useSvgProcessor(options) {
   const addLinkCodeAttributes = (svgEl, diagramData) => {
     if (!diagramData || !diagramData.links) return
 
+    // [PERF 2026-08-13] 预建 link 查找 Map, 把 O(边×标签) 的 .find() 降为 O(1) 查找.
+    //   大图 (如采购供应 602 边) 每条 edgeLabel 都对 links 全量 .find() 是 process_svg 主要热点.
+    //   用 !has() 守卫保留"取首个匹配"语义 (与原 .find() 一致, 避免同 key 多 link 时取到末尾).
+    const linkByKey = new Map()
+    for (const link of diagramData.links) {
+      if (!link) continue
+      if (link.code && !linkByKey.has(link.code)) linkByKey.set(link.code, link)
+      if (link.relationCode && !linkByKey.has(link.relationCode)) linkByKey.set(link.relationCode, link)
+      if (link.relationDesc && !linkByKey.has(link.relationDesc)) linkByKey.set(link.relationDesc, link)
+    }
+
     const edgeLabels = svgEl.querySelectorAll('.edgeLabel')
     edgeLabels.forEach(edgeLabel => {
       const labelText = (edgeLabel.textContent || '').trim()
@@ -198,12 +229,7 @@ export function useSvgProcessor(options) {
       //   这种情况下 annotationList 里的 relation targetId 来自 link.relationCode,
       //   annotation panel item 点击会通过 highlightTargetElement 找 [data-relation-code="..."],
       //   若 ELK 自动 label 不可匹配, 此 attribute 缺失, 但不影响 annotation panel 链路 (annotationList 内部仍可工作)。
-      const matchedLink = diagramData.links.find(link => {
-        if (link.code && link.code === labelText) return true
-        if (link.relationCode && link.relationCode === labelText) return true
-        if (link.relationDesc && link.relationDesc === labelText) return true
-        return false
-      })
+      const matchedLink = linkByKey.get(labelText) || null
 
       if (matchedLink) {
         // [FIX 2026-08-09] 关系定位失败: arch data 流程 link.relationCode 为空(""),
@@ -350,8 +376,10 @@ export function useSvgProcessor(options) {
    * @param {Array} layoutGroups - (可选) layoutControlConfig.groups (分组树), 供图例项点击时定位分组并切换 visible
    * @param {Function} onToggleGroupVisible - (可选) 图例项点击分组可见性切换回调 (name, visible, groups),
    *   用于就地改 visible + 以新引用替换 store 配置, 触发增量隐/显与配置树双向同步
+   * @param {Function} onLegendItemColorChange - (可选) 图例项色块改色回调 (colorKey, color),
+   *   写入 store.customColors 触发增量变色 (方案A, 由 MermaidComponent 注入)
    */
-  const renderAnnotationOverlay = (svgEl, diagramData, diagramType, annotationConfig, nodeColorMappings, interaction = null, layoutGroups = null, onToggleGroupVisible = null) => {
+  const renderAnnotationOverlay = (svgEl, diagramData, diagramType, annotationConfig, nodeColorMappings, interaction = null, layoutGroups = null, onToggleGroupVisible = null, onLegendItemColorChange = null) => {
     if (!annotationConfig) return
 
     // [V_NEW 2026-06-29] 传递 annotation category 过滤 - 主线不受影响 (空数组 = 不过滤)
@@ -391,7 +419,9 @@ export function useSvgProcessor(options) {
       if (colorLegendData && colorLegendData.length > 0) {
         annotationOverlay.overlayColorLegend(svgEl, colorLegendData, {
           position: annotationConfig.legendPosition || 'top-left',
-          onToggleGroupVisible
+          onToggleGroupVisible,
+          onLegendItemColorChange,
+          colorScheme: diagramData?.colorScheme || 'default'
         })
       }
     }
@@ -410,8 +440,9 @@ export function useSvgProcessor(options) {
    * @param {Array} layoutGroups - layoutControlConfig.groups (图例项点击定位分组用)
    * @param {Function} onToggleGroupVisible - 图例项点击回调
    * @param {Map|null} groupColorMap - 增量路径传入的 分组名→颜色 映射 (折叠视图用)
+   * @param {Function} onLegendItemColorChange - (方案A) 图例项色块改色回调 (colorKey, color)
    */
-  const updateColorLegend = (svgEl, diagramData, annotationConfig, nodeColorMappings, layoutGroups = null, onToggleGroupVisible = null, groupColorMap = null) => {
+  const updateColorLegend = (svgEl, diagramData, annotationConfig, nodeColorMappings, layoutGroups = null, onToggleGroupVisible = null, groupColorMap = null, onLegendItemColorChange = null) => {
     if (!annotationConfig) return
     if (diagramData?.nodes?.[0]?.category !== 'object' && !diagramData?.serviceModules?.length) {
       return
@@ -421,7 +452,9 @@ export function useSvgProcessor(options) {
     if (colorLegendData && colorLegendData.length > 0) {
       annotationOverlay.overlayColorLegend(svgEl, colorLegendData, {
         position: annotationConfig.legendPosition || 'top-left',
-        onToggleGroupVisible
+        onToggleGroupVisible,
+        onLegendItemColorChange,
+        colorScheme: diagramData?.colorScheme || 'default'
       })
     }
   }
@@ -435,9 +468,17 @@ export function useSvgProcessor(options) {
    */
   const buildColorLegendData = (diagramData, nodeColorMappings, centerScopeHighlight = true, groups = null, groupColorMap = null) => {
     const legendData = []
-    const { nodes, colorGroupBy, centerScopeColor, centerObjectColor } = diagramData
+    const { nodes, colorGroupBy, centerScopeColor, centerObjectColor, centerScope } = diagramData
 
     if (!nodes || nodes.length === 0) return legendData
+
+    // [FIX 2026-08-15] 中心判定不再依赖 node.isCenter (增量切"区分/不区分"时 nodes 的
+    //   isCenter 可能陈旧, 见 useDiagramData 高亮 watch 同步重算的注释), 优先由
+    //   diagramData.centerScope 直接判定, 与 useMermaidColors.updateNodeColors 取色口径一致.
+    //   centerScope 缺失 (如单测/合成数据只带 node.isCenter) 时回退 node.isCenter.
+    const hasCenterScope = Array.isArray(centerScope) && centerScope.length > 0
+    const centerScopeSet = new Set(hasCenterScope ? centerScope : [])
+    const nodeIsCenter = (node) => hasCenterScope ? centerScopeSet.has(node.code) : node.isCenter === true
 
     // [LEGEND 2026-08-07] 收集分组树: 按层级(domain/subDomain/serviceModule)建立 名称→分组对象 映射,
     //   供图例项点击隐藏/显示时定位对应分组 (可能多个同名分组, 如跨领域的同名子领域)。
@@ -491,7 +532,7 @@ export function useSvgProcessor(options) {
 
       // 统计每组总节点数与中心节点数（判断是否"整组都在对象范围"）
       groupTotalNodes.set(groupKey, (groupTotalNodes.get(groupKey) || 0) + 1)
-      if (node.isCenter) {
+      if (nodeIsCenter(node)) {
         groupCenterNodes.set(groupKey, (groupCenterNodes.get(groupKey) || 0) + 1)
         if (centerScopeHighlight) hasCenterNodes = true
       }
@@ -525,13 +566,19 @@ export function useSvgProcessor(options) {
       (groupTotalNodes.get(groupKey) || 0) > 0
 
     // 先添加对象范围颜色项（如果有对象范围节点）
-    if (hasCenterNodes) {
-      legendData.push({
-        name: '对象范围',
-        color: centerScopeColor || centerObjectColor || '#EDEDED',
-        isCenter: true
-      })
-    }
+    // [LEGEND-SECTION 2026-08-15] 区分对象范围时, 颜色分组只针对"对象范围外部"元素:
+    //   对象范围项之后插入 isSection 节标题项, 明确下方颜色分组属于范围外元素, 提升可读性.
+    const centerScopeItem = hasCenterNodes
+      ? [{
+          name: '对象范围',
+          color: centerScopeColor || centerObjectColor || '#EDEDED',
+          isCenter: true,
+          // [LEGEND-COLOR v2 2026-08-11] 对象范围色块也可改色: 特殊 colorKey 标记,
+          //   改色走 store.updateCenterScopeColor (非 customColors). annotationOverlay 借此
+          //   区分"中心范围改色"与"分组改色", 均弹同一调色板, 只是写入目标不同.
+          colorKey: '__centerScope__'
+        }]
+      : []
 
     // [LEGEND 2026-08-07] 图例按 colorGroupBy 判定分组层级, 用于点击时匹配对应分组
     const typeKey = colorGroupBy === 'subDomain' ? 'subDomain'
@@ -539,15 +586,28 @@ export function useSvgProcessor(options) {
       : 'domain'
 
     // 再添加分组颜色项（跳过整组都在对象范围的分组）
+    const groupItems = []
     colorMap.forEach((color, name) => {
       if (isGroupFullyCenter(name)) return
-      legendData.push({
+      groupItems.push({
         name,
         color,
+        // [LEGEND-COLOR 2026-08-11] 方案A: 图例项改色的 customColors 写入键.
+        //   与 useGroupDisplay.getGroupColor 的 key 对齐 (按 colorGroupBy 维度取
+        //   domain/subDomain/serviceModuleName), 供图例项色块点击后写 store.customColors,
+        //   经 updateColorsOnly 增量变色. 中心范围项不带此键(不可编辑).
+        colorKey: name,
         // 附加该分组树中匹配的分组对象引用 (供图例项点击切换 visible, 与配置树双向同步)
         groups: (groupsByType[typeKey] && groupsByType[typeKey].get(name)) || []
       })
     })
+
+    // 仅当存在对象范围项且其后还有范围外颜色分组时, 才插入"对象范围外部"节标题
+    if (centerScopeItem.length > 0 && groupItems.length > 0) {
+      legendData.push(...centerScopeItem, { isSection: true, name: '对象范围外部' }, ...groupItems)
+    } else {
+      legendData.push(...centerScopeItem, ...groupItems)
+    }
 
     return legendData
   }
@@ -738,7 +798,7 @@ export function useSvgProcessor(options) {
    * 完整的后处理流程
    * 注意：此函数只处理 SVG 元素，不包含交互设置（交互在组件中单独调用）
    */
-  const processSvg = (svgEl, props, relationDescriptions, mermaidContainer, nodeColorMappings, interaction = null, onToggleGroupVisible = null) => {
+  const processSvg = (svgEl, props, relationDescriptions, mermaidContainer, nodeColorMappings, interaction = null, onToggleGroupVisible = null, onLegendItemColorChange = null) => {
     if (!svgEl) {
       diag.recordStepMeta('processSvg', { reason: 'svgEl_falsy' })
       return
@@ -777,6 +837,12 @@ export function useSvgProcessor(options) {
       svgStyle.attachLiftedParentTooltips(svgEl, getLiftedParentPathMap())
     } catch (e) { console.warn('[useSvgProcessor] attachLiftedParentTooltips failed:', e) }
 
+    // [STAT-TOOLTIP 2026-08-14] 容器统计 tooltip: 业务对象数量 + 内部关系数量
+    //   (领域/子领域/服务模块, 含折叠聚合节点), 复用共享 #mermaid-tooltip.
+    try {
+      svgStyle.attachContainerStatTooltips(svgEl, props.diagramData, props.layoutControlConfig?.groups)
+    } catch (e) { console.warn('[useSvgProcessor] attachContainerStatTooltips failed:', e) }
+
     // [FIX 2026-08-03] 缺口3: 统计 fixArrowMarkers 实际渲染的 marker-start 数量,
     //   与 addBidirectionalAttributes.bidiEdgesMarked 互补 (后者是标记前, 这里是渲染后).
     //   e2e 可断言 bidiMarkerCount > 0 验证双向渲染生效 (commit 2ba5ec3 修复可验证).
@@ -802,7 +868,7 @@ export function useSvgProcessor(options) {
 
     if (props.annotationConfig) {
       // [LEGEND 2026-08-07] 传响应式 layoutControlConfig.groups 供图例项点击切换 visible (与配置树双向同步)
-      renderAnnotationOverlay(svgEl, props.diagramData, props.diagramType, props.annotationConfig, nodeColorMappings, interaction, props.layoutControlConfig?.groups || null, onToggleGroupVisible)
+      renderAnnotationOverlay(svgEl, props.diagramData, props.diagramType, props.annotationConfig, nodeColorMappings, interaction, props.layoutControlConfig?.groups || null, onToggleGroupVisible, onLegendItemColorChange)
     }
 
     // [v33 关键修复] 调用 fixEdgeLabelSize, 必须在 layout 完成后

@@ -1,4 +1,4 @@
-﻿﻿﻿﻿# service_manager.ps1
+# service_manager.ps1
 # 统一服务管理器 - PowerShell 版本
 # 用法: .\scripts\service_manager.ps1 [status|start|stop|restart|force-restart] [-Port <3010-3019>]
 # 用法: python scripts/service_manager.py [status|start|stop|restart] [--port <port>]

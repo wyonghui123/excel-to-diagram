@@ -31,7 +31,7 @@ async function findFilterTriggerByColumnTitle(page, columnTitle) {
 
 /**
  * 导航到 archdata 指定 tab, 等待表格就绪
- * [FIX 2026-06-13] RelationshipManagement.vue 默认 tab=relationship, 必须显式点击目标 tab
+ * [FIX 2026-06-13] 默认 tab=business_object(业务对象), 目标 tab 仍需显式点击
  */
 async function navigateToArchDataTab(page, pv, tab) {
   await page.goto(

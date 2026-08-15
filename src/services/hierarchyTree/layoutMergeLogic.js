@@ -40,7 +40,7 @@ export function applyContainerMembership(mergedGroups, userGroups) {
 
       // 重建该分组的叶子归属（追随面板：拖拽移动后叶子出现在新分组，不再出现在旧分组）
       // [FIX 2026-08-04] 面板分组可能把叶子放在 children 里的子分组（如 BO 图的 ELK
-      //   无外部关系/有外部关系），此时 u.containers 为空但叶子并未消失，不能据此清空
+      //   无关系/有关系），此时 u.containers 为空但叶子并未消失，不能据此清空
       //   合并树的 directNodes（否则容器"不包住子节点"）。仅当 u.containers 确有叶子时
       //   才重建；仅当分组既无叶子也无子分组时才真正为空（拖走最后一个叶子）。
       if (Array.isArray(u.containers)) {

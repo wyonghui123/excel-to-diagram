@@ -490,13 +490,14 @@ function pruneHiddenBoNodes(groups, hiddenBoIds) {
  * @param {Set} centerGroupIds 中心范围分组 id 集合 (含中心范围 BO 的分组)
  * @param {string} centerScopeColor 中心范围颜色
  * @param {boolean} centerScopeHighlight 是否启用中心范围高亮区分
+ * @param {Set} fullyCenterGroupIds 完全包含对象范围分组 id 集合 (所有后代 BO 都在中心范围)
  * @returns {Object} { code, colorMap, neutralCollapseIds }
  *   - code: 追加着色后的 mermaid 代码
  *   - colorMap: Map<collapseId, color> 聚合节点颜色映射
  *   - neutralCollapseIds: Set<collapseId> 落入"中性灰"的折叠节点 (折叠层级 > 颜色分组层级,
  *     无法用单一分组色表达, 走 classDef default 灰). 供上层提示"该折叠节点含多分组".
  */
-function applyUpliftNodeColors(groups, colorMap, colorGroupBy, mermaidCode, textColor, getNodeStyle, centerGroupIds, centerScopeColor, centerScopeHighlight) {
+function applyUpliftNodeColors(groups, colorMap, colorGroupBy, mermaidCode, textColor, getNodeStyle, centerGroupIds, centerScopeColor, centerScopeHighlight, fullyCenterGroupIds) {
   // [FIX 2026-08-06] 聚合节点颜色映射 (COLLAPSE_<id> → color):
   //   折叠后连线端点被重映射为聚合节点, nodeColorMap 不含聚合节点 → 连线颜色计算
   //   sourceColor/targetColor 取不到 → 折叠连线变黑. 这里同步产出聚合节点颜色映射,
@@ -508,6 +509,16 @@ function applyUpliftNodeColors(groups, colorMap, colorGroupBy, mermaidCode, text
     if (!items) return
     for (const g of items) {
       if (!g || typeof g !== 'object') continue
+      // [VIS-RESET 2026-08-14] 用户隐藏的分组 (visible=false, 非 ELK 系统自动分组) 跳过整棵子树:
+      //   否则 applyUpliftNodeColors 会为它生成 `style COLLAPSE_<id>`, mermaid 会因 style 指令
+      //   引用未定义节点 id 而自动创建聚合节点 → 用户反馈: "隐藏采购云后双击供应链云,
+      //   出现 COLLAPSE_D_PROC 聚合节点重显". 隐藏分组本就不渲染 (groupedLayout 顶部跳过),
+      //   其聚合节点也不该被 style 引用误创建.
+      //   ELK 系统自动分组 (无关系/有关系) visible=false 是"无边框但节点渲染"语义, 不属用户隐藏.
+      const isSystemAuto = g._elkGroup === 'inner' || g._elkGroup === 'boundary'
+      if (g.visible === false && !isSystemAuto) {
+        continue
+      }
       const nextCtx = { ...ctx }
       if (g.groupType === 'domain') nextCtx.domain = g.title
       else if (g.groupType === 'subDomain') nextCtx.subDomain = g.title
@@ -517,7 +528,14 @@ function applyUpliftNodeColors(groups, colorMap, colorGroupBy, mermaidCode, text
         const collapseId = `COLLAPSE_${safeId}`
         // [FIX 2026-08-06] 折叠聚合节点: 中心范围分组保持 centerScopeColor,
         //   与展开态中心范围内 BO 节点 (centerScopeColor) 的颜色一致.
-        if (centerScopeHighlight !== false && centerGroupIds && centerGroupIds.has(g.id)) {
+        // [PARTIAL-CENTER 2026-08-15] 部分包含对象范围 (中心分组但非完全包含, 范围内+范围外混合)
+        //   → 中性灰 (不写 style, 走 classDef default), 与增量路径 updateCollapseNodeColors 同规则.
+        //   不入 neutralCollapseIds (该集合用于"折叠层级 > 分组层级"的中性提示, 语义不同).
+        const isCenterGroup = centerScopeHighlight !== false && centerGroupIds && centerGroupIds.has(g.id)
+        if (isCenterGroup && (!fullyCenterGroupIds || !fullyCenterGroupIds.has(g.id))) {
+          continue
+        }
+        if (isCenterGroup) {
           mermaidCode += `  style ${collapseId} ${getNodeStyle(centerScopeColor, textColor)}\n`
           collapseColorMap.set(collapseId, centerScopeColor)
         } else {
@@ -525,6 +543,17 @@ function applyUpliftNodeColors(groups, colorMap, colorGroupBy, mermaidCode, text
           //   - 关系一 (折叠层级 == 分组层级): 分组自身 key (如折叠 SM + 按 SM 分组)
           //   - 关系二 (折叠层级 < 分组层级, 折叠更细): 继承上层分组 key (如折叠 SM + 按 domain)
           //   - 关系三 (折叠层级 > 分组层级, 折叠更粗): 取不到单一分组 key → 中性灰
+          // [FOLD-COLOR 2026-08-12] 关系三改为显式层级判断 (旧实现依赖 colorMap.get(key)
+          //   命中与否, 同码同名场景误命中: 子领域"内部交易"=ITTF 与服务模块"内部交易"同名,
+          //   key=g.title → 命中服务模块分组色 → 显示彩色而非中性)。
+          //   层级数值: domain=0, subDomain=1, serviceModule=2 (见 services/expandLevel.js groupTypeLevel)
+          const levelOf = (t) => (t === 'domain' ? 0 : t === 'subDomain' ? 1 : t === 'serviceModule' ? 2 : -1)
+          const foldLevel = levelOf(g.groupType)
+          const groupLevel = levelOf(colorGroupBy)
+          if (foldLevel >= 0 && groupLevel >= 0 && foldLevel < groupLevel) {
+            neutralCollapseIds.add(collapseId)
+            continue
+          }
           let key
           if (colorGroupBy === 'serviceModule') key = g.serviceModuleName || g.title
           else if (colorGroupBy === 'subDomain') key = g.subDomain || nextCtx.subDomain
@@ -896,6 +925,10 @@ export function useBusinessObjectSyntax() {
     //   与 data.centerScope 求交集判定该分组是否属于中心范围.
     const centerScopeCodeSet = new Set(centerScopeBoCodes)
     const centerGroupIds = new Set()
+    // [PARTIAL-CENTER 2026-08-15] 完全包含对象范围分组 id 集合: 该分组所有后代 BO 编码都在
+    //   centerScope 中. 与 centerGroupIds (任一后代在范围) 配合区分折叠节点着色:
+    //   fully → centerScopeColor; 部分包含 (范围内+范围外混合) → 中性灰.
+    const fullyCenterGroupIds = new Set()
     // [FIX 2026-08-06] 中心范围聚合节点编码集合 (COLLAPSE_<id>): 折叠后连线端点被重映射为
     //   COLLAPSE_<id>, 不在 centerScopeBoCodes 中, 需用该集合判定中心范围, 避免折叠连线变黑.
     const centerCollapseIds = new Set()
@@ -926,7 +959,15 @@ export function useBusinessObjectSyntax() {
         if (!g) continue
         const codes = new Set()
         collectDescendantBoCodes(g, codes)
-        for (const c of codes) if (centerScopeCodeSet.has(c)) { centerGroupIds.add(g.id); centerCollapseIds.add(`COLLAPSE_${sanitizeId(g.id)}`); break }
+        // [PARTIAL-CENTER 2026-08-15] 遍历全部编码同时判定 any/all (原实现命中首个中心即 break).
+        let anyCenter = false
+        let allCenter = codes.size > 0
+        for (const c of codes) {
+          if (centerScopeCodeSet.has(c)) anyCenter = true
+          else allCenter = false
+        }
+        if (anyCenter) { centerGroupIds.add(g.id); centerCollapseIds.add(`COLLAPSE_${sanitizeId(g.id)}`) }
+        if (allCenter) fullyCenterGroupIds.add(g.id)
         markCenterGroups(g.children)
       }
     }
@@ -960,6 +1001,18 @@ export function useBusinessObjectSyntax() {
       })
     })
 
+    // [FIX 2026-08-13] 折叠降阶失效根因修复: 进入生成流程前深拷贝 groups 为工作副本.
+    //   污染链: buildVirtualContainers 把 group.directNodes 的 BO code 原地改写成 mermaid id
+    //   (N1/N2) 并清空 directNodes; pruneHiddenBoNodes 再原地剪除折叠/禁用 BO 子孙;
+    //   markUplift / applyContainerSorting 亦原地写. 而 MermaidComponent 的
+    //   effectiveLayoutControlConfig 是有缓存的 computed → 上述原地改写会污染缓存对象,
+    //   导致第二次 generateMermaidCode 调用 (ELK 失败回退 dagre / watch 触发重渲染) 复用
+    //   被污染的分组树 → computeHiddenBoIds 按业务 code/name 匹配不到 → hiddenBoIds 为空
+    //   → 折叠不降阶、全部 BO 全量渲染 (44 节点而非 3 聚合节点).
+    //   修复: 让 buildVirtualContainers 及后续所有原地修改只作用于副本, 源缓存保持纯净,
+    //   每次调用都能正确推导隐藏 BO, 折叠真正缩减喂给 ELK 的 mermaid 源码规模.
+    const workingGroups = JSON.parse(JSON.stringify(effectiveLayoutControlConfig?.groups || []))
+
     // [FOLD 2026-08-05] FR-002/FR-005: 折叠分组 + 被禁用 BO 叶 → 隐藏的 BO 节点 id 集合.
     //   在 buildVirtualContainers 打平/转换分组前, 先用原始分组树收集
     //   (基于 code/name → 原始业务对象节点), 供后续回填节点 / 上色 / 连线解析跳过.
@@ -967,23 +1020,21 @@ export function useBusinessObjectSyntax() {
     //   无法再按业务 code/name 匹配.)
     //   提升到分支外: 两个渲染路径 (groupedLayout 与 SG 兜底路径) 都要过滤隐藏 BO 叶.
     const hiddenBoIds = computeHiddenBoIds(
-      effectiveLayoutControlConfig?.groups || [],
+      workingGroups,
       businessObjectNodes,
       nodeCodeToIdMap,
       nodeNameToIdMap,
       effectiveLayoutControlConfig?.disabledBoCodes || []
     )
 
-    if (effectiveLayoutControlConfig?.enabled && effectiveLayoutControlConfig?.groups?.length > 0) {
-      // [FIX 2026-08-06] 重映射快照: buildVirtualContainers / pruneHiddenBoNodes 会原地改写
-      //   effectiveLayoutControlConfig.groups (容器节点转为 mermaid id、折叠/禁用子孙被剪除),
-      //   导致 remapLinksToVisibleAncestors 拿到的分组树丢失原始 BO 引用 → buildUpliftAncestorMap
-      //   为空 → 折叠连线端点无法重映射到聚合节点 (折叠连线消失/变黑). 故在改写前深拷贝原始分组树,
-      //   供连线重映射使用 (保留业务 BO code 引用).
-      const remapGroups = JSON.parse(JSON.stringify(effectiveLayoutControlConfig.groups))
+    if (effectiveLayoutControlConfig?.enabled && workingGroups.length > 0) {
+      // [FIX 2026-08-13] 重映射快照基于工作副本: workingGroups 是纯净的原始分组树 (尚未被
+      //   buildVirtualContainers 改写), 保留业务 BO code 引用, 供 remapLinksToVisibleAncestors
+      //   把折叠连线端点重映射到聚合节点 (COLLAPSE_<id>).
+      const remapGroups = JSON.parse(JSON.stringify(workingGroups))
       const titleMap = data?.groupControlTitleMap || {}
       const virtualGroups = buildVirtualContainers(
-        effectiveLayoutControlConfig.groups,
+        workingGroups,
         moduleGroups,
         businessObjectNodes,
         nodeNameToIdMap,
@@ -1066,7 +1117,7 @@ export function useBusinessObjectSyntax() {
       //   否则服务模块 (enabled 且无可见子孙) 会落入 SG 空容器兜底 (只显示标题, 无节点).
       //   nodeMap/processedLinks 基于 businessObjectNodes/data.links, 不依赖 allContainers,
       //   routeLayout 收到 virtualGroups, 空容器下仍能按 uplift 上提渲染服务模块.
-      if (allContainers.length > 0 || (effectiveLayoutControlConfig?.groups?.length > 0)) {
+      if (allContainers.length > 0 || workingGroups.length > 0) {
         const nodeMap = new Map()
         
         businessObjectNodes.forEach(node => {
@@ -1175,7 +1226,7 @@ export function useBusinessObjectSyntax() {
         //   先确保 _uplift 已标记 (generateGroupedLayout 内 markUplift 可能作用于内部副本),
         //   再为每个上提分组追加 style 行, 使其成为"有颜色的节点"而非灰标签.
         markUplift(virtualGroups)
-        const upliftStyleResult = applyUpliftNodeColors(virtualGroups, colorMap, colorGroupBy, mermaidCode, textColor, getNodeStyle, centerGroupIds, centerScopeColor, centerScopeHighlight)
+        const upliftStyleResult = applyUpliftNodeColors(virtualGroups, colorMap, colorGroupBy, mermaidCode, textColor, getNodeStyle, centerGroupIds, centerScopeColor, centerScopeHighlight, fullyCenterGroupIds)
         mermaidCode = upliftStyleResult.code
         // [FIX 2026-08-06] 聚合节点颜色映射: 折叠连线端点 (COLLAPSE_<id>) 用它取色,
         //   避免折叠后连线因 nodeColorMap 查不到聚合节点而变黑.
@@ -1362,6 +1413,23 @@ export function useBusinessObjectSyntax() {
             }
           }
         })
+
+        // [ELK-FLAT 2026-08-14] 无边框打平 ELK 分组 → 布局辅助虚拟边 (透明不可见).
+        //   背景: ELK 对 subgraph 内互不连通的节点一字排开 (INV 58 节点单行 11737px),
+        //   打平分组 (inner/boundary visible=false) 已把节点渲染到父级, 此处追加虚拟链式边
+        //   引导 ELK 把节点排成多列网格 (见 groupedLayout.buildLayoutHelperEdges).
+        //   透明样式避免视觉污染; linkStyle 索引从真实边数量起算 (真实边 index 0..N-1),
+        //   不参与 linkColorMappings/relationDescriptions (tooltip/取色等逻辑不受影响).
+        const helperEdges = (layoutCode && layoutCode.layoutHelperEdges) || []
+        if (helperEdges.length > 0) {
+          const helperBaseIndex = businessObjectLinks.length
+          helperEdges.forEach((e) => {
+            mermaidCode += `  ${e.source} --> ${e.target}\n`
+          })
+          helperEdges.forEach((e, idx) => {
+            mermaidCode += `  linkStyle ${helperBaseIndex + idx} stroke-width:0,opacity:0\n`
+          })
+        }
 
         mermaidCode += generateClassDefs()
 

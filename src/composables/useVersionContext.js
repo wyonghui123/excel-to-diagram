@@ -434,10 +434,17 @@ function createVersionContext() {
       globalScope = effectScope(true)
       globalScope.run(() => {
         const route = useRoute()
+        // [FIX 2026-08-13] 监听补齐 productCode/versionCode: 单例 init() 只在首次调用执行一次,
+        //   之前只监听 productId/versionId, SPA 内导航带 productCode/versionCode (如 shortcut 链路
+        //   的 productCode=TTTTT000&versionCode=V11) 时 restoreContext 不会被重新调用,
+        //   selectedVersionId 恒为 null → 快捷测试链路失败. 补齐后与 restoreContext 的
+        //   参数检查 (productId/versionId/productCode/versionCode) 保持一致.
         watch(
-          () => [route.query?.productId, route.query?.versionId],
-          async ([newProductId, newVersionId], [oldProductId, oldVersionId]) => {
-            if (newProductId !== oldProductId || newVersionId !== oldVersionId) {
+          () => [route.query?.productId, route.query?.versionId, route.query?.productCode, route.query?.versionCode],
+          async ([newProductId, newVersionId, newProductCode, newVersionCode],
+                 [oldProductId, oldVersionId, oldProductCode, oldVersionCode]) => {
+            if (newProductId !== oldProductId || newVersionId !== oldVersionId
+                || newProductCode !== oldProductCode || newVersionCode !== oldVersionCode) {
               await restoreContext()
             }
           }

@@ -90,7 +90,11 @@ export default defineConfig({
       // [v3.3] 动态代理: 支持多 Agent worktree 自验证
       // 默认代理到 3004 (主仓库后端), Agent 通过 BACKEND_PORT 环境变量覆盖
       '/api': {
-        target: `http://localhost:${process.env.BACKEND_PORT || '3010'}`,
+        // [PERF 2026-08-15] target 用 127.0.0.1 而非 localhost:
+        //   localhost 优先解析 IPv6 (::1), 而 waitress 只监听 IPv4 (0.0.0.0),
+        //   每次代理新建连接先尝试 ::1 超时 ~2s 再回退 127.0.0.1,
+        //   导致前端所有 API 请求慢 2s (初始加载累积 40s+).
+        target: `http://127.0.0.1:${process.env.BACKEND_PORT || '3010'}`,
         changeOrigin: true,
         ws: true,
         // [FIX BUG-V029 2026-06-28] 30s→180s
@@ -109,7 +113,7 @@ export default defineConfig({
         }
       },
       '/socket.io': {
-        target: `http://localhost:${process.env.BACKEND_PORT || '3010'}`,
+        target: `http://127.0.0.1:${process.env.BACKEND_PORT || '3010'}`,
         changeOrigin: true,
         ws: true,
       }

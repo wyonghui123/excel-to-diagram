@@ -120,11 +120,40 @@ class ChartE2E:
                 self.diag.wait_render_stable(clear_marker=False)
             except TimeoutError as e:
                 print(f'  [WARN] 首渲染等待超时: {e}')
+        # [2026-08-13] 自适应默认展开(computeDefaultExpandLevel)会把多领域 scope 折叠到领域级
+        #   (如 bo_default 30BO → 3 领域节点), 与 golden 记录的"全展开"状态不符.
+        #   对非 smoke 场景显式展开到业务对象, 使 golden(41节点)有效且颜色/G1 可对范围外节点断言.
+        self._expand_to_business_object()
         # [种子数据 2026-08-02] 备注主场景: 前端 filter=[] 默认不显示备注,
         #   必须显式开启全部类型 (C 类断言前置)
         if self.scenario.get('expect_annotations'):
             items = self.diag.show_all_annotations()
             self._print(f'  [INFO] 备注场景已开启: panel items={len(items)}')
+
+    def _expand_to_business_object(self) -> None:
+        """[2026-08-13] 显式展开到业务对象层, 复用图表可观测/可测试能力 (configStore.setExpandLevel).
+        smoke (L0) 场景为单 BO 秒级回归, 保持默认展开状态即可."""
+        if self.scenario.get('tier') == 'L0':
+            return
+        # [FIX 2026-08-13] SM 图 (serviceModule) 渲染服务模块节点, 不展开到 BO 层级.
+        #   跨域关系裁剪后 SM 图展开到 businessObject 无重新渲染 (code 不变) → 不更新
+        #   data-chart-rendered 标记 → 后续 wait_render_stable 超时. SM 图跳过 BO 展开.
+        if self.scenario.get('chart_type') == 'serviceModule':
+            return
+        page = self.diag.page
+        res = page.evaluate("""() => {
+            const cs = window.__configStore
+            if (!cs || typeof cs.setExpandLevel !== 'function') return 'no-store'
+            cs.setExpandLevel('businessObject')
+            return 'ok'
+        }""")
+        if res != 'ok':
+            self._print('  [WARN] 展开到业务对象: __configStore.setExpandLevel 不可用, 跳过')
+            return
+        try:
+            self.diag.wait_render_stable(clear_marker=True)
+        except TimeoutError as e:
+            self._print(f'  [WARN] 展开渲染等待超时: {e}')
 
     def close(self) -> None:
         if self.diag:
@@ -324,14 +353,17 @@ class ChartE2E:
         self._print('\n[B] 颜色')
         # [L0 2026-08-02] smoke 场景: 2 节点图无颜色映射/切换无意义, 切换类断言跳过
         is_smoke = self.scenario.get('tier') == 'L0'
+        # [FIX 2026-08-13] SM 图跨域裁剪后默认折叠为服务模块聚合节点 (COLLAPSE_SM_*),
+        #   聚合节点统一中性灰, 无 per-BO nodeColorMappings/linkColorMappings. 颜色映射类断言跳过.
+        is_sm_chart = self.scenario.get('chart_type') == 'serviceModule'
         norm = self._norm_color
 
         # B1: nodeColorMappings 权威源非空 + 映射节点都在 SVG 中
         color_map = self.diag.get_node_colors()
         snap = self._snap()
         svg_fills = {n['code']: n.get('fill') or '' for n in (snap.get('nodes') or [])}
-        if is_smoke and not color_map:
-            self._record('B', 'nodeColorMappings (L0 smoke 场景跳过)',
+        if (is_smoke or is_sm_chart) and not color_map:
+            self._record('B', 'nodeColorMappings (L0 smoke/SM 聚合节点跳过)',
                          True, skipped=True, detail={'mapped': 0, 'svg': len(svg_fills)})
         else:
             self._record('B', f'nodeColorMappings 非空 ({len(color_map)} 节点)',
@@ -408,6 +440,10 @@ class ChartE2E:
         # B4: 分组维度切换生效 (domain → subDomain → 颜色集合变化)
         if is_smoke:
             self._record('B', 'colorGroupBy=subDomain 生效 (L0 smoke 场景跳过)', True, skipped=True)
+        elif len(set(v for v in _node_fills().values() if v)) <= 1:
+            # [FIX 2026-08-13] 跨域关系裁剪后, 对象范围可能只含单一领域/子领域 (如 SCP 30 BO
+            #   全属供应链计划), domain→subDomain 切换不会改变颜色分布 (都是单分组). 跳过.
+            self._record('B', 'colorGroupBy=subDomain 生效 (单分组, 跳过)', True, skipped=True)
         else:
             baseline_colors = set(_node_fills().values())
             _switch_and_wait('colorGroupBy', 'subDomain')
@@ -502,8 +538,12 @@ class ChartE2E:
         #   MermaidComponent SM 分支接收), BO/SM 两图均要求非空, 不再跳过 (原 Task 9 skip 条件作废)
         links_snap = self._snap().get('links') or {}
         link_map = links_snap.get('colorMappings') or []
-        self._record('B', f'linkColorMappings 非空 ({len(link_map)} 条)',
-                     len(link_map) > 0, {'mapped': len(link_map)})
+        if is_sm_chart and not link_map:
+            self._record('B', 'linkColorMappings (SM 聚合节点跳过)',
+                         True, skipped=True, detail={'mapped': 0})
+        else:
+            self._record('B', f'linkColorMappings 非空 ({len(link_map)} 条)',
+                         len(link_map) > 0, {'mapped': len(link_map)})
         if link_map:
             strokes = links_snap.get('svgStrokes') or []
             mismatched = []
@@ -527,6 +567,104 @@ class ChartE2E:
         else:
             self._record('B', 'SVG link stroke 与映射一致 (无 linkColorMappings, 跳过)',
                          True, skipped=True)
+
+    # ------------------------------------------------------------
+    # [G1 2026-08-13] 范围外节点着色 (增量变色回归保护)
+    # ------------------------------------------------------------
+    def check_scope_color(self) -> None:
+        """[G1 2026-08-13] 范围外节点着色: 变更某领域自定义色后, 该领域所有非中心渲染节点
+        (含对象范围外/折叠隐藏的 BO) 必须保持新领域色, 而非回退中性灰.
+
+        背景: 2026-08-13 修复 —— 增量变色路径 updateColorsOnly 的 unifiedColorMap 曾基于
+        nodeColorMappings (跳过被折叠隐藏的范围外 BO) 构建, 导致范围外领域的折叠聚合节点
+        取色失败回退中性灰. 修复后 unifiedColorMap 恒用 data.nodes 全量 BO 集构建.
+
+        自检测 (不硬编码领域名): 从 __archPage.diagramData.nodes 读 code→domain (含范围外/
+        折叠 BO, 与修复同源), 挑"非中心渲染节点最多"的领域 D, 经 configStore.updateCustomColors
+        变更 D 色, 断言 D 的所有非中心渲染节点 SVG fill == 新色 (无残留中性灰 rgb(128,128,128)).
+        """
+        self._print('\n[G1] 范围外节点着色')
+        # [FIX 2026-08-13] SM 图跨域裁剪后默认折叠为服务模块聚合节点 (COLLAPSE_SM_*),
+        #   聚合节点无 code→domain 映射 (code 是 SM code 而非 BO code), 着色逻辑不适用, 跳过.
+        if self.scenario.get('chart_type') == 'serviceModule':
+            self._record('B', '范围外节点着色 (SM 聚合节点, 跳过)', True, skipped=True)
+            return
+        NEW = '#123456'  # 鲜明测试色 (与默认/中性灰均可区分)
+        page = self.diag.page
+
+        # 1) 读 code→domain (diagramData.nodes, 兼容 ref/.value/_value)
+        domain_of = page.evaluate("""() => {
+            const d = window.__archPage && window.__archPage.diagramData
+            if (!d) return null
+            let arr = null
+            if (Array.isArray(d)) arr = d
+            else if (d.value && Array.isArray(d.value.nodes)) arr = d.value.nodes
+            else if (Array.isArray(d.nodes)) arr = d.nodes
+            else if (d._value && Array.isArray(d._value.nodes)) arr = d._value.nodes
+            if (!Array.isArray(arr) || arr.length === 0) return null
+            const m = {}
+            for (const n of arr) {
+                if (n && n.code && n.domain) m[n.code] = n.domain
+            }
+            return m
+        }""")
+        if not domain_of:
+            self._record('B', '范围外节点着色 (diagramData.nodes 未暴露, 跳过)', True,
+                         skipped=True, detail={'err': 'no diagramData.nodes'})
+            return
+
+        # 2) 渲染节点 code→fill + 中心节点 (中心节点染 centerScopeColor, 断言须跳过)
+        snap = self._snap()
+        rendered = {n['code']: n.get('fill') or '' for n in (snap.get('nodes') or [])}
+        center_codes = self.diag.get_center_codes()
+
+        # 3) 挑"非中心渲染节点最多"的领域 D (覆盖面最广, 更可能含范围外节点)
+        counts = {}
+        for code in rendered:
+            if code in center_codes:
+                continue
+            dom = domain_of.get(code)
+            if dom:
+                counts[dom] = counts.get(dom, 0) + 1
+        if not counts:
+            self._record('B', '范围外节点着色 (无匹配领域, 跳过)', True, skipped=True,
+                         detail={'rendered': len(rendered), 'center': len(center_codes)})
+            return
+        D = max(counts, key=counts.get)
+        nodes_of_D = [c for c in rendered if domain_of.get(c) == D and c not in center_codes]
+        before_fills = {c: self._norm_color(rendered[c]) for c in nodes_of_D}
+
+        # 4) 经 configStore.updateCustomColors 变更 D 色 (与图例改色同源路径)
+        res = page.evaluate("""({ key, val }) => {
+            const cs = window.__configStore
+            if (!cs || typeof cs.updateCustomColors !== 'function') return 'no-store'
+            const next = { ...(cs.customColors || {}) }
+            next[key] = val
+            cs.updateCustomColors(next)
+            return 'ok'
+        }""", {'key': D, 'val': NEW})
+        if res != 'ok':
+            self._record('B', f'范围外节点着色 (configStore.updateCustomColors 不可用, 跳过)',
+                         True, skipped=True, detail={'res': res})
+            return
+
+        # 5) 等增量变色生效.
+        #    updateCustomColors → Vue watcher(flush:'pre') 同步跑 updateColorsOnly, 在 evaluate
+        #    返回前 SVG fill 已更新; 但增量路径不保证发新 data-chart-rendered 标记 (旧标记仍 true),
+        #    故不用 marker 等待 (会误报超时), 固定短等待后直接断言.
+        page.wait_for_timeout(800)
+
+        # 6) 断言: D 的非中心渲染节点全部 == 新色 (无残留中性灰)
+        after_snap = self._snap()
+        after = {n['code']: n.get('fill') or '' for n in (after_snap.get('nodes') or [])}
+        new_norm = self._norm_color(NEW)
+        unchanged = [c for c in nodes_of_D if self._norm_color(after.get(c, '')) != new_norm]
+        self._record('B', f'范围外节点着色: 领域[{D}] 非中心渲染 {len(nodes_of_D)} 节点改色后全为新色',
+                     not unchanged,
+                     {'domain': D, 'count': len(nodes_of_D), 'unchanged': unchanged[:5],
+                      'beforeSample': dict(list(before_fills.items())[:3])},
+                     error=None if not unchanged
+                     else f'{len(unchanged)} 节点未着色(疑似回退中性灰): {unchanged[:5]}')
 
     # ------------------------------------------------------------
     # C. 备注
@@ -714,11 +852,16 @@ class ChartE2E:
                 self.diag.page.wait_for_timeout(500)
         final_type = self.diag.page.evaluate(
             "() => window.__archPage?.chartConfig?.chartType || '?'")
-        svg_ok = self.diag.page.evaluate(
-            "() => document.querySelectorAll('svg g.node[data-code]').length > 0")
+        # [FIX 2026-08-13] svg_ok 需等待活动 SVG 渲染出节点再断言:
+        #   SM→BO 切换时 wait_render_stable 返回后节点可能尚未入 DOM (竞态假失败).
+        #   [FIX 2026-08-13] 大图 (采购供应 602 边) 快速连点后, 自适应默认展开层级会把图表
+        #   折叠回领域级 (9 个 COLLAPSE_D_* 容器, 无 g.node[data-code]) → 统计 g.node[data-code]
+        #   恒为 0 误判失败. 改用 data_code=False 统计任意 g.node (折叠无关), 只验证 SVG 有节点.
+        svg_node_count = self.diag.wait_for_svg_nodes(min_count=1, data_code=False)
+        svg_ok = svg_node_count > 0
         self._record('D', '快速连点后 chartType=businessObject 且 SVG 正常',
                      final_type == 'businessObject' and svg_ok,
-                     {'chartType': final_type, 'svgNodes': svg_ok},
+                     {'chartType': final_type, 'svgNodes': svg_node_count},
                      error=None if final_type == 'businessObject' and svg_ok
                      else f'chartType={final_type} svgOk={svg_ok}')
 
@@ -1021,6 +1164,31 @@ class ChartE2E:
         else:
             self._record('D', 'chartType 切换后 highlight 干净 (非 BO 场景, 跳过)', True, skipped=True)
 
+        # [OBS 2026-08-13] D11: 关系高亮状态可观测 (relationHighlight + data-rel-dim)
+        #   触发走 __archPage.debug.highlightRelations, 需 ?mode=debug 暴露; 未暴露则跳过.
+        #   验证: 触发后 relationHighlight().active=true 且 connectedNodeCount/hlEdgeCount/dimmedCount
+        #   与 DOM [data-rel-hl]/[data-rel-dim] 实测一致; 断言其权威快照而非扫描 opacity.
+        has_debug_api = self.diag.page.evaluate("() => !!(window.__archPage && window.__archPage.debug && window.__archPage.debug.highlightRelations)")
+        if has_debug_api:
+            before = self.diag.get_relation_highlight()
+            if not before.get('active') and before.get('dom', {}).get('relHl', -1) >= 0:
+                state = self.diag.trigger_relation_highlight(None)
+                dom = state.get('dom', {})
+                ok = bool(state.get('active')) and dom.get('relHl', 0) > 0
+                consistency = (dom.get('relHl', 0) == (state.get('connectedNodeCount', 0) + state.get('hlEdgeCount', 0))
+                               and dom.get('relDim', 0) == state.get('dimmedCount', 0))
+                self._record('D', '关系高亮状态可观测 (relationHighlight 快照与 DOM 一致)',
+                             ok and consistency,
+                             {'state': {k: state.get(k) for k in
+                                        ('active', 'code', 'connectedNodeCount', 'hlEdgeCount', 'dimmedCount')},
+                              'dom': dom, 'consistent': consistency},
+                             error=None if (ok and consistency)
+                             else f'关系高亮可观测失败: state={state}')
+            else:
+                self._record('D', '关系高亮状态可观测 (初始即高亮/无渲染, 跳过)', True, skipped=True)
+        else:
+            self._record('D', '关系高亮状态可观测 (需 ?mode=debug, 跳过)', True, skipped=True)
+
     # ------------------------------------------------------------
     # golden 生成 / 全量运行
     # ------------------------------------------------------------
@@ -1116,12 +1284,15 @@ class ChartE2E:
             code: window.__archPage?.mermaid?.lastRenderedCode || '',
             dur: window.__archPage?.mermaid?.lastRender?.durationMs ?? null
         })""")
-        svg_ok = self.diag.page.evaluate(
-            "() => document.querySelectorAll('svg g.node[data-code]').length > 0")
+        # [FIX 2026-08-13] svg_ok 等待活动 SVG 渲染出节点再断言 (竞态假失败修复, 与 D4 一致).
+        #   data_code=False: SM 图折叠态聚合节点 (COLLAPSE_SM_*) 无 data-code 只有 data-container-code,
+        #   data_code=True 会漏统计 → svgNodes 假 0. 这里仅需"SVG 有节点保留", 任意 g.node 即可.
+        svg_node_count = self.diag.wait_for_svg_nodes(min_count=1, data_code=False)
+        svg_ok = svg_node_count > 0
         skipped = after['skip'] > before['skip']
         self._record('A', f'增量渲染跳过 (renderSkippedCount {before["skip"]}→{after["skip"]}, SVG保留={svg_ok})',
                      skipped and svg_ok,
-                     {'before': before, 'after': after, 'svgNodes': svg_ok},
+                     {'before': before, 'after': after, 'svgNodes': svg_node_count},
                      error=None if skipped and svg_ok
                      else f'未命中 code-diff 跳过: before={before} after={after} svgNodes={svg_ok}')
 
@@ -1212,6 +1383,7 @@ class ChartE2E:
             self.check_data_integrity(golden)
         if 'B' in include:
             self.check_colors(golden)
+            self.check_scope_color()
         if 'C' in include:
             self.check_annotations(golden)
         if 'D' in include:
@@ -1249,10 +1421,20 @@ def run_scenario(scenario_name: str, include: Optional[List[str]] = None) -> Dic
         return runner.summarize()
 
 
+def default_scenario_names() -> List[str]:
+    """默认套件仅包含 SCP 相关场景 (tier L0/L1, 供应链计划 ~30 BO).
+
+    [2026-08-13] 标准测试范围铁律: 常规回归必须基于供应链计划 (SCP) 子领域,
+    严禁加载大子域全量对象. bo_large (L2, 子域 329 全量 ~150 BO) 是独立的大图
+    性能专项, 不作为默认套件, 需显式 `--scenario bo_large` 调用.
+    """
+    return [n for n, s in CHART_FIXTURES['scenarios'].items() if s.get('tier') != 'L2']
+
+
 def regenerate_golden(scenario_name: Optional[str] = None) -> Dict[str, Any]:
     """生成 golden 基线 (打开每个场景, 记录实测指标)."""
     print('\n===== golden 基线生成 =====')
-    names = [scenario_name] if scenario_name else list(CHART_FIXTURES['scenarios'].keys())
+    names = [scenario_name] if scenario_name else default_scenario_names()
     generated = {}
     for name in names:
         print(f'\n--- 场景 {name}: 打开图表并记录指标 ---')
@@ -1290,7 +1472,9 @@ if __name__ == '__main__':
     if args.regenerate_golden:
         regenerate_golden(args.scenario)
     else:
-        names = [args.scenario] if args.scenario else list(CHART_FIXTURES['scenarios'].keys())
+        # [FIX 2026-08-13] 默认套件用 default_scenario_names() (排除 L2 大图),
+        #   与 golden 生成流程保持一致, 符合标准测试范围铁律 (SCP ~30 BO).
+        names = [args.scenario] if args.scenario else default_scenario_names()
         all_pass = True
         for name in names:
             summary = run_scenario(name, include=include)

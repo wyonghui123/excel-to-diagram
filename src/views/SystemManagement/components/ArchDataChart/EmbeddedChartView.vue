@@ -12,7 +12,7 @@
 
   [重构 2026-07-28] chartConfig 提升为父组件持有
     - 之前 chartConfig 在本组件内部 reactive 创建
-    - 现在由 RelationshipManagement 持有，通过 props.chartConfig 传入
+    - 现在由 ArchDataManagement 持有，通过 props.chartConfig 传入
     - 业务侧通过 GlobalToolbar 的 chart-config slot 渲染 ChartMiniToolbar，
       确保 toolbar 与 chart 视图共享单一数据源
 
@@ -85,11 +85,14 @@ import MermaidComponent from '@/components/MermaidComponent.vue'
 import { buildBusinessObjectGroups } from '@/services/autoGrouping/businessObjectAutoGrouper.js'
 import { buildAnnotationFilterFromScope } from '@/services/scopeToFilter.js'
 // [FIX 2026-07-30 v8] SM 图分组构建 + 状态迁移共享函数（layoutPanelAdapter.js）
-import { buildServiceModuleGroupsFromDomainProducts, extractGroupStates as sharedExtractGroupStates, applyGroupStates as sharedApplyGroupStates } from '@/services/groupModel/layoutPanelAdapter.js'
+import { buildServiceModuleGroupsFromDomainProducts, extractGroupStates as sharedExtractGroupStates, applyGroupStates as sharedApplyGroupStates, groupStateKey } from '@/services/groupModel/layoutPanelAdapter.js'
 // [优化 2026-08-05] 布局面板编辑 → 渲染树的合并逻辑（纯函数, 可单测）
 import { applyContainerMembership, applyGroupTitlesAndOrder } from '@/services/hierarchyTree/layoutMergeLogic.js'
 // [SCOPE-DEFAULT 2026-08-08] 展开层级共享工具: 用户未显式设置时, 在渲染层按对象范围套用默认展开.
-import { applyDefaultExpandByScope, isSubtreeInScope, expandGroupsToLevel } from '@/services/expandLevel.js'
+import { applyDefaultExpandByCount, expandGroupsToLevel } from '@/services/expandLevel.js'
+// [ELK-GROUP 2026-08-12] 面板"无关系/有关系"系统自动分组注入渲染树 (驱动面板切换).
+import { injectElkSubGroups } from './elkSubGroupsInjector.js'
+import { useDebugMode } from '@/composables/useDebugMode.js'
 
 const props = defineProps({
   scopeIds: {
@@ -104,12 +107,27 @@ const props = defineProps({
     type: Object,
     required: true
   },
-  // [重构 2026-07-28] chartConfig 提升为父组件（RelationshipManagement）持有，
+  // [重构 2026-07-28] chartConfig 提升为父组件（ArchDataManagement）持有，
   // 业务侧通过 GlobalToolbar 的 chart-config slot 渲染 ChartMiniToolbar，
   // EmbeddedChartView 仅消费，确保 toolbar 与 chart 视图同步刷新。
   chartConfig: {
     type: Object,
     required: true
+  },
+  // [FIX 2026-08-13] 关系范围透传: 之前本组件硬编码 relationIds: []，导致
+  //   "范围内关系不按关系范围选择展示" + "变更关系范围后刷新图表没变"。
+  //   现从 ArchDataChartSwitcher 的 context.chartData 透传，与老图表页 (AADiagramApp) 同源。
+  relationTypeFilter: {
+    type: Array,
+    default: () => []
+  },
+  relationIds: {
+    type: Array,
+    default: () => []
+  },
+  relationCategoryTypes: {
+    type: Array,
+    default: () => []
   }
   // [FIX 2026-07-28] layoutDrawerVisible 已移到 ArchDataChartSwitcher 处理，本组件不再关注。
 })
@@ -137,7 +155,7 @@ const chartConfig = props.chartConfig ?? reactive(createDefaultChartConfig())
 //   E2E 直接改 window.__archPage.chartConfig.colorScheme = 'vibrant'
 //   触发下方 watcher → configStore.updateColorScheme → generateDiagram,
 //   避免操作 Element Plus 下拉弹层的脆弱 UI 交互。
-//   注意: 引用的是父组件 (RelationshipManagement) 的同一 reactive 对象。
+//   注意: 引用的是父组件 (ArchDataManagement) 的同一 reactive 对象。
 if (typeof window !== 'undefined') {
   window.__archPage = window.__archPage || {}
   window.__archPage.chartConfig = chartConfig
@@ -150,13 +168,15 @@ if (typeof window !== 'undefined') {
 // ============================================================
 const configStore = useDiagramConfigStore()
 const diag = useDiagnostics()  // [O1/V2 2026-08-02] 监听 MermaidComponent 渲染结束 (SVG 级口径)
+const debugMode = useDebugMode()  // [PERF 2026-08-13] debugSteps 分步快照仅 ?mode=debug 时深拷贝
 
 const {
   loading,
   error,
   diagramData,
   generateDiagram,
-  initFromArchDataManager
+  initFromArchDataManager,
+  updateRelationScope
 } = useDiagramData()
 
 // [E2E 2026-08-02] 暴露 generateDiagram — 供 E2E 触发"相同输入重渲染"验证 L5 增量跳过
@@ -172,13 +192,13 @@ if (typeof window !== 'undefined') {
   /**
    * 触发图表 reload (强制 mermaid.run() 全量重绘 SVG).
    *
-   * 调用路径: GlobalToolbar refresh → RelationshipManagement.handleToolbarAction('refresh')
+   * 调用路径: GlobalToolbar refresh → ArchDataManagement.handleToolbarAction('refresh')
    *   → window.__archPage.reload() → MermaidComponent.forceRerender()
    *   → 清空 lastRenderedCode (绕过 code-diff 跳过) + 设 forceAutoFit=true (重置 transform)
    *   → renderMermaid() → mermaid.run() 重绘 SVG.
    *
    * 失败处理: mermaid.run().catch() / nextTick try/catch → diag.recordError + endRender({error})
-   *   → diag.hooks.onError → emit('render-error') → RelationshipManagement.handleChartRenderError
+   *   → diag.hooks.onError → emit('render-error') → ArchDataManagement.handleChartRenderError
    *   → ElMessage.error toast (非静默失败).
    *
    * 不调 generateDiagram: 避免两次引用变化 (第一次 code-diff 跳过 + 第二次 isRendering 跳过).
@@ -276,11 +296,14 @@ const layoutControlConfig = computed(() => {
         configStore.layoutControlConfig?.groups || chartConfig.layoutControl?.groups
       )
       const mergedGroups = JSON.parse(JSON.stringify(unified.groups))
+      // [PERF 2026-08-13] debugSteps 分步快照仅 ?mode=debug 时深拷贝, 生产返回 null,
+      //   避免每次 computed 重算 6 次 JSON 深拷贝 (~37ms, 大图 408 分组树).
+      const snapDebug = (groups) => debugMode.isDebug ? deepCloneForDebug(groups) : null
       // [DEBUG 2026-08-05] 分步快照捕获, 供浏览器定位"哪一步合并出错":
       //   before(派生树) → afterStates(状态) → afterMembership(归属) → afterTitles(标题/顺序)
       //   替代旧的单点 debugLayout(只含最终 mergedGroups), 避免问题定位只能靠多轮试错.
       const debugSteps = {
-        before: deepCloneForDebug(mergedGroups),
+        before: snapDebug(mergedGroups),
         afterStates: null,
         afterMembership: null,
         afterTitles: null
@@ -288,22 +311,24 @@ const layoutControlConfig = computed(() => {
       if (userStates.size > 0) {
         sharedApplyGroupStates(mergedGroups, userStates)
       }
-      // [DBG 2026-08-10] 排查折叠 bug: 打印各源 + 合并结果的 MM 状态
-      if (typeof window !== 'undefined') {
-        const _find = (list, code) => { for (const g of list||[]) { if ((g.elementCode||g.id)==code) return g.collapsed; const r=_find(g.children, code); if(r!==undefined) return r; const r2=_find(g.containers, code); if(r2!==undefined) return r2; } return undefined; }
-        console.log('[DBG-MM] groupManualSet=' + configStore.groupManualSet + ', expandLevelUserSet=' + configStore.expandLevelUserSet + ', storeMM=' + _find(configStore.layoutControlConfig?.groups, 'MM') + ', chartMM=' + _find(chartConfig.layoutControl?.groups, 'MM') + ', userMM=' + (userStates.get('MM')||{}).collapsed + ', mergedMM=' + _find(mergedGroups, 'MM') + ', userStatesSize=' + userStates.size)
-      }
-      debugSteps.afterStates = deepCloneForDebug(mergedGroups)
+      debugSteps.afterStates = snapDebug(mergedGroups)
       // [MOVE 2026-08-04] 用户把节点/容器拖拽到另一个分组下 → 基于新树结构生成图表。
       //   unified.groups 的容器归属来自投影容器树（派生），不反映用户在面板的拖拽移动，
       //   这里按容器 id/elementCode 重建每个分组的容器归属，追随面板树结构。
       applyContainerMembership(mergedGroups, chartConfig.layoutControl?.groups)
-      debugSteps.afterMembership = deepCloneForDebug(mergedGroups)
+      debugSteps.afterMembership = snapDebug(mergedGroups)
       // [FIX 2026-08-04] 用户在布局面板的"重命名标题 / 拖拽排序"也需反映到图表。
       //   unified.groups 的 title/顺序来自 deriveLayoutGroups（投影容器树派生），
       //   不反映用户在面板的编辑。这里按 elementCode 覆盖标题并按面板顺序重排。
       applyGroupTitlesAndOrder(mergedGroups, chartConfig.layoutControl?.groups)
-      debugSteps.afterTitles = deepCloneForDebug(mergedGroups)
+      debugSteps.afterTitles = snapDebug(mergedGroups)
+      // [ELK-GROUP 2026-08-12] 把面板树中"无关系/有关系"系统自动分组注入到渲染树
+      //   (deriveLayoutGroups 服务模块仅存扁平 directNodes, 不含 ELK 子分组 → 面板切换无效果).
+      //   注入后: enabled+visible → 分组盒; enabled+hidden → 无边框分组(节点仍渲染); disabled → 打平.
+      //   必须在此 (applyContainerMembership/applyGroupTitlesAndOrder 之后、展开层级之前) 执行,
+      //   使 ELK 子分组携带面板最新 enabled/visible 状态参与渲染.
+      injectElkSubGroups(mergedGroups, configStore.layoutControlConfig?.groups || chartConfig.layoutControl?.groups)
+      debugSteps.afterElk = snapDebug(mergedGroups)
       // [SCOPE-DEFAULT 2026-08-08] 用户未显式选择过展开层级时, 在渲染层强制套用对象范围默认展开:
       //   - 对象范围内分组 → 折叠到服务模块(聚合节点)
       //   - 对象范围外分组 → 折叠到子领域
@@ -317,9 +342,15 @@ const layoutControlConfig = computed(() => {
       //   不再套用范围默认展开/全局展开, 避免无条件覆盖用户操作导致图表无变化.
       if (configStore.groupManualSet) {
         // 不套用任何默认展开, 用户手动状态由 sharedApplyGroupStates 已写入 mergedGroups.
-      } else if (!configStore.expandLevelUserSet && (configStore.centerScope || []).length > 0) {
-        const scopeCodeSet = new Set(configStore.centerScope || [])
-        applyDefaultExpandByScope(mergedGroups, (g) => isSubtreeInScope(g, scopeCodeSet))
+      } else if (!configStore.expandLevelUserSet) {
+        // [DEFAULT-LEVEL 2026-08-12] 系统默认展开层级（按分组数量自适应）:
+        //   >1 领域→领域; 否则 >1 子领域→子领域; 否则 >1 服务模块→服务模块; 否则→业务对象.
+        //   取代原"对象范围默认折叠"(applyDefaultExpandByScope): 对任意范围都给出更自然的初始层级.
+        //   就地应用 + 同步 store.expandLevel（不置 userSet, 用户后续显式选择仍可覆盖）.
+        const defaultResult = applyDefaultExpandByCount(mergedGroups)
+        if (configStore.expandLevel !== defaultResult.level) {
+          configStore.setDefaultExpandLevel(defaultResult.level)
+        }
       } else {
         // [SCOPE-DEFAULT 2026-08-08] 用户显式选择过展开层级(工具栏/图表设置):
         //   在渲染层按 store.expandLevel 就地应用展开, 确保用户选择必定生效.
@@ -328,7 +359,28 @@ const layoutControlConfig = computed(() => {
         //   注意: 全局展开层级选择会统一覆盖各分组 collapsed, 与该语义一致.
         expandGroupsToLevel(mergedGroups, configStore.expandLevel)
       }
-      debugSteps.afterScopeExpand = deepCloneForDebug(mergedGroups)
+      debugSteps.afterScopeExpand = snapDebug(mergedGroups)
+      // [VIS-RESET 2026-08-14 简化] 重渲染即重置隐藏 (用户确认的设计意图):
+      //   渲染层强制所有用户分组 visible=true。增量隐藏/显示由 MermaidComponent.updateVisibilityOnly
+      //   基于 store visible 直接操作 SVG (不依赖渲染层 visible)，故任何全量重渲染
+      //   (双击展开/折叠、右键、切换展开层级/方向/引擎、禁用分组等) 时，隐藏的分组一律重新显示，
+      //   需用户再次手动隐藏。该设计消除了"隐藏聚合节点缺失/被 mermaid style 补建/取消隐藏无法恢复"
+      //   等一整套跨重渲染保持隐藏的复杂 bug。
+      //   ELK 系统自动分组 (无关系/有关系, _elkGroup=inner/boundary) visible=false 是
+      //   "无边框但节点渲染"的布局语义，非用户隐藏，保留不动。
+      const forceAllGroupsVisible = (groups) => {
+        const walk = (list) => {
+          ;(list || []).forEach(g => {
+            if (!g || typeof g !== 'object') return
+            const isSystemAuto = g._elkGroup === 'inner' || g._elkGroup === 'boundary'
+            if (!isSystemAuto) g.visible = true
+            walk(g.children)
+            walk(g.containers)
+          })
+        }
+        walk(groups)
+      }
+      forceAllGroupsVisible(mergedGroups)
       // [DEBUG 2026-08-04] 调试钩子, 供浏览器检查面板树与合并树各步骤结构
       if (typeof window !== 'undefined') {
         window.__archPage = window.__archPage || {}
@@ -594,6 +646,20 @@ watch(() => chartConfig.centerScopeHighlight, (newVal, oldVal) => {
   diag.recordStepMeta('generateDiagram', { source: 'centerScopeHighlight', at: Date.now() })
 })
 
+// [FIX 2026-08-11 反向同步] 监听 configStore.centerScopeHighlight → 写回 chartConfig.
+//   根因: 右键"颜色设置"子菜单切换"区分/不区分对象范围"走 configStore.updateCenterScopeHighlight,
+//   只更新 store, 不写 chartConfig. 而图例 updateColorLegend 读 annotationConfig
+//   (= chartConfig.centerScopeHighlight), toolbar 下拉也读 chartConfig → 两者都停留在旧值,
+//   表现为"切换后节点变色但图例/下拉不变". 反向同步保证 chartConfig 始终反映 store
+//   (权威源), 图例与工具栏均正确. 与上方 chartConfig→store 同步互为逆, 因同值写入
+//   各自 oldVal===newVal 短路, 不会死循环.
+watch(() => configStore.centerScopeHighlight, (newVal, oldVal) => {
+  if (newVal === oldVal) return
+  if (chartConfig.centerScopeHighlight !== newVal) {
+    chartConfig.centerScopeHighlight = newVal
+  }
+})
+
 // ============================================================
 // [Phase 1 修复 2026-07-28] 监听 chartConfig.layoutControl 变化 → 同步到 configStore
 //   LayoutControlPanel 修改 groups/overallDirection/engine 后，
@@ -625,9 +691,6 @@ watch(
     // [E1 2026-08-02] 250ms 防抖合并连续拖拽 (仅合并 store 写入)
     clearTimeout(_layoutControlTimer)
     _layoutControlTimer = setTimeout(() => {
-      // [DIAG] 排查 centerScopeHighlight 切换触发 layoutControl deep watch
-      const _findMM = (list) => { for (const g of list||[]) { if ((g.elementCode||g.id)==='MM') return g; const r=_findMM(g.children); if(r) return r; const r2=_findMM(g.containers); if(r2) return r2; } return null; }
-      console.log('[DIAG-layoutWatch] triggered, MM collapsed=' + (_findMM(newLayout?.groups)||{}).collapsed + ', stack=' + new Error().stack.split('\n').slice(1,6).join(' < ').slice(0,300))
       configStore.updateLayoutControlConfig(newLayout)
       // [T3 2026-08-02] 触发来源标注 — chart_diag / window.__archPage.mermaid.stepMeta 可读
       diag.recordStepMeta('layoutControlUpdate', { source: 'layoutControl-debounced', at: Date.now() })
@@ -645,14 +708,22 @@ watch(
 //   方案: 仅把 store 分组中的 visible 状态按 elementCode/id 写回 chartConfig.layoutControl,
 //   不覆盖结构 (enabled/containers/children 以面板为权威)。仅当值不同才赋值 → 无无限循环。
 // ============================================================
+// [FIX 2026-08-12 键碰撞] 匹配键升级为复合键 elementCode::groupType (复用 layoutPanelAdapter.groupStateKey):
+//   SM/ITTF 等编码在"子领域"与"服务模块"两个层级重复出现
+//   (子领域"销售"=SM 与 服务模块"服务管理"=SM; 子领域"内部交易"=ITTF 与
+//   服务模块"内部交易"=ITTF). 旧实现仅用 elementCode 作 Map 键 → srcMap['SM'] 被
+//   服务模块覆盖 → 子领域 expanded/collapsed 状态同步失败 → 双击展开子领域下的
+//   服务模块后, 面板树中的子领域保持陈旧折叠值, 250ms 后经 layoutControl deep watch
+//   写回 store → "内部交易整体折叠". collect 与 apply 必须共用同一键函数。
+// ============================================================
 function syncVisibilityToChartConfig(srcGroups, dstGroups) {
   if (!Array.isArray(srcGroups) || !Array.isArray(dstGroups)) return
   const srcMap = new Map()
   const collect = (list) => {
     ;(list || []).forEach(g => {
       if (!g || typeof g !== 'object') return
-      const key = g.elementCode || g.id
-      if (key) srcMap.set(String(key), g)
+      const key = groupStateKey(g)
+      if (key) srcMap.set(key, g)
       collect(g.children)
       collect((g.containers || []).filter(c => c && typeof c === 'object'))
     })
@@ -662,8 +733,8 @@ function syncVisibilityToChartConfig(srcGroups, dstGroups) {
   const apply = (list) => {
     ;(list || []).forEach(g => {
       if (!g || typeof g !== 'object') return
-      const key = g.elementCode || g.id
-      const src = key ? srcMap.get(String(key)) : null
+      const key = groupStateKey(g)
+      const src = key ? srcMap.get(key) : null
       if (src && src.visible !== g.visible) {
         g.visible = src.visible
       }
@@ -680,7 +751,6 @@ function syncVisibilityToChartConfig(srcGroups, dstGroups) {
     })
   }
   apply(dstGroups)
-  console.log('[SYNC] syncVisibilityToChartConfig: total synced=' + syncedCount + ', srcMap size=' + srcMap.size)
 }
 let _syncingStoreToChart = false
 watch(
@@ -723,7 +793,7 @@ watch(
 
 // ============================================================
 // [重构 2026-07-28] handle* 函数已移除：
-//   ChartMiniToolbar 的 emit('update:chartType' 等) 现在由父组件 RelationshipManagement 接收，
+//   ChartMiniToolbar 的 emit('update:chartType' 等) 现在由父组件 ArchDataManagement 接收，
 //   父组件负责更新 chartConfig 后通过 props 传回本组件。
 //   本组件只负责：
 //     1) 同步 chartConfig 到 configStore（触发 useDiagramData 重新生成）
@@ -789,15 +859,13 @@ onMounted(async () => {
 
   await configStore.updateChartType(chartConfig.chartType)
 
-  // 把 scopeIds 转换成 hierarchyFilter + relationTypeFilter（复用老链路）
-  const archData = {
-    versionId: Number(props.versionId),
-    hierarchyFilter: props.hierarchyFilter || {},
-    relationTypeFilter: [],
-    relationIds: [],
-    relationCategoryTypes: []
-  }
-  await initFromArchDataManager(archData)
+  // 把 scopeIds 转换成 hierarchyFilter + relationTypeFilter/relationIds（复用老链路）
+  // [FIX 2026-08-13] 关系范围不再硬编码为空，改从 props 透传。
+  await initFromArchDataManager(buildArchData())
+  // [PERF 2026-08-13] 记录首次 init 的版本, 供后续 watch 区分"版本变化(完整 init)"与"关系变化(轻量 update)"。
+  _lastVersionId = props.versionId
+  // [PERF 2026-08-14] 记录首次 init 的对象范围 (hierarchyFilter), 供 watch 区分"对象范围变化(完整 init)"。
+  _lastHierarchyFilter = JSON.stringify(props.hierarchyFilter || {})
 
   // 初始化后触发首次图表生成
   await generateDiagram()
@@ -991,31 +1059,90 @@ function isDiagramReadyForSync() {
 }
 
 // ============================================================
-// 监听 versionId 变化 → 重新初始化
+// 初始化数据源：从 props 组装 archData（versionId + 对象范围 + 关系范围）
+// [FIX 2026-08-13] 关系范围字段不再硬编码为空，改从 props 透传。
 // ============================================================
-watch(() => props.versionId, async (newVersionId) => {
-  if (!newVersionId) return
-  await initFromArchDataManager({
-    versionId: Number(newVersionId),
+function buildArchData() {
+  return {
+    versionId: Number(props.versionId),
     hierarchyFilter: props.hierarchyFilter || {},
-    relationTypeFilter: [],
-    relationIds: [],
-    relationCategoryTypes: []
-  })
+    relationTypeFilter: props.relationTypeFilter || [],
+    relationIds: props.relationIds || [],
+    relationCategoryTypes: props.relationCategoryTypes || []
+  }
+}
+
+// 重新初始化图表数据（完整: 版本/对象范围变化时用）
+async function reinitChart() {
+  await initFromArchDataManager(buildArchData())
   await generateDiagram()
-  // [FIX 2026-07-29 v3] 版本切换也要重新预生成分组布局数据模型
-  //   此时需要先把 chartConfig.layoutControl.groups 清空（让 syncLayoutControlFromDiagramData 真正写入新版本数据）
+  // [FIX 2026-07-29 v3] 重新预生成分组布局数据模型
+  //   此时需要先把 chartConfig.layoutControl.groups 清空（让 syncLayoutControlFromDiagramData 真正写入新数据）
   if (chartConfig.layoutControl) {
     chartConfig.layoutControl.groups = []
   }
   await syncLayoutControlFromDiagramData()
+}
+
+// 关系范围变更的轻量刷新（跳过 architecture/preview 重拉）
+async function reapplyRelationScope() {
+  // [LOG 2026-08-13] 关键日志: 关系范围变更触发轻量刷新.
+  console.log('[reapplyRelationScope] 关系范围变更触发轻量刷新: relationIds=' + JSON.stringify(props.relationIds || []))
+  await updateRelationScope(buildArchData())
+  await generateDiagram()
+  if (chartConfig.layoutControl) {
+    chartConfig.layoutControl.groups = []
+  }
+  await syncLayoutControlFromDiagramData()
+}
+
+// ============================================================
+// 监听数据源 props 变化（版本 + 关系范围）→ 防抖刷新
+// [FIX 2026-08-13] 之前只监听 versionId, 关系范围变化不会触发重初始化。
+// [PERF 2026-08-13] 用户多选关系范围时, 每次勾选都 emit scope-change → 连续触发刷新,
+//   用防抖 (400ms) 合并连续变更, 只对最后一次执行刷新; 版本变化走完整 init,
+//   仅关系变化走轻量 update (跳过 preview 重拉, 提升刷新性能)。
+// [PERF 2026-08-14] dataSourceKey 纳入 hierarchyFilter (对象范围):
+//   之前不含 hierarchyFilter → 对象范围变化不触发刷新 / 或走 reapplyRelationScope 用
+//   旧 hierarchyFilter 的 basePreviewData (preview 在后端按 hierarchyFilter 过滤) →
+//   图表显示旧对象范围的数据 (真实缺陷)。现纳入并在下方区分:
+//   - version / hierarchyFilter 变化 → reinitChart (完整 init, 用新 filter 重拉 preview)
+//   - 仅 relation 字段变化 → reapplyRelationScope (轻量, 跳过 preview 重拉)
+//   复用本 watch 的 400ms 防抖 (连续勾选对象/关系范围只刷新最后一次)。
+// ============================================================
+const dataSourceKey = computed(() => JSON.stringify({
+  versionId: props.versionId,
+  hierarchyFilter: props.hierarchyFilter || {},
+  relationIds: props.relationIds || [],
+  relationTypeFilter: props.relationTypeFilter || [],
+  relationCategoryTypes: props.relationCategoryTypes || []
+}))
+
+let _lastVersionId = null
+let _lastHierarchyFilter = null
+let _dataSourceDebounceTimer = null
+watch(dataSourceKey, () => {
+  if (!props.versionId) return
+  clearTimeout(_dataSourceDebounceTimer)
+  _dataSourceDebounceTimer = setTimeout(async () => {
+    const versionChanged = _lastVersionId !== null && props.versionId !== _lastVersionId
+    const filterKey = JSON.stringify(props.hierarchyFilter || {})
+    const filterChanged = _lastHierarchyFilter !== null && filterKey !== _lastHierarchyFilter
+    _lastVersionId = props.versionId
+    _lastHierarchyFilter = filterKey
+    if (versionChanged || filterChanged) {
+      await reinitChart()
+    } else {
+      await reapplyRelationScope()
+    }
+  }, 400)
 })
 
 // ============================================================
 // [FIX 2026-07-28] 暴露给 LayoutControlPanel 的数据：
 //   containers: 嵌套格式 [{ name, nodes: [{id, name, code}] }]，供拖拽到分组
 //   domainProducts: 领域树 [{name, modules: [{name, submodules: [...}]}]，供"按领域自动分组"
-//   links: 关系连线数组 [{source, target, ...}]，供 ELK 分离策略（有/无外部关系）
+//   links: 关系连线数组 [{source, target, ...}]，供 ELK 分离策略（有/无关系）
 // 父级 ArchDataChartSwitcher 在 drawer 渲染时通过 ref 拿这些传给 LayoutControlPanel。
 //
 // [Phase 1 修复 2026-07-28] 修复数据缺失：
@@ -1232,6 +1359,11 @@ onBeforeUnmount(() => {
     clearTimeout(resizeTimer)
     resizeTimer = null
   }
+  // [PERF 2026-08-13] 清理关系范围防抖定时器
+  if (_dataSourceDebounceTimer) {
+    clearTimeout(_dataSourceDebounceTimer)
+    _dataSourceDebounceTimer = null
+  }
   // [E1 2026-08-02] 清理布局控制防抖定时器
 if (_layoutControlTimer) {
   clearTimeout(_layoutControlTimer)
@@ -1249,8 +1381,8 @@ if (_layoutControlTimer) {
 //
 // [B6 2026-08-03] reload 唯一入口统一为 window.__archPage.reload (见上方 onMounted 内赋值).
 //   原本同时存在 EmbeddedChartView.defineExpose.reload + ArchDataChartSwitcher.defineExpose.reload
-//   两条 slot ref 链路, 但 slot ref 不绑定到父组件 (RelationshipManagement 无法稳定拿到实例),
-//   实际调用方 (RelationshipManagement.handleToolbarAction('refresh')) 走 window 暴露.
+//   两条 slot ref 链路, 但 slot ref 不绑定到父组件 (ArchDataManagement 无法稳定拿到实例),
+//   实际调用方 (ArchDataManagement.handleToolbarAction('refresh')) 走 window 暴露.
 //   现移除 slot ref 链路, 仅保留 window.__archPage.reload, 避免"两条路径谁生效"歧义.
 //   defineExpose 仍保留 containers/domainProducts/links/syncLayoutControlFromDiagramData (LayoutControlPanel 用).
 

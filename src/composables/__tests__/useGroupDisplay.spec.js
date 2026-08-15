@@ -22,7 +22,7 @@ describe('useGroupDisplay', () => {
 
   it('getElkGroupHint 返回提示', () => {
     const { getElkGroupHint } = setup()
-    expect(getElkGroupHint('inner')).toContain('无外部关系')
+    expect(getElkGroupHint('inner')).toContain('无关系')
   })
 
   it('getNodeColor 按 colorMapping 优先返回', () => {

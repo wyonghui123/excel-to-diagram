@@ -505,17 +505,33 @@ async function tryApplyShortcut() {
   // [NEW 2026-08-08] preset 参数: 一键启动预设, 扩展为完整 URL 参数
   //   用法: &preset=scp 等价于 &productCode=TTTTT000&versionCode=V11&view=chart&scopeCode=SCP
   //   目标: 只需记住一个参数, 无需拼凑 4 个参数
+  // [OBS 2026-08-15] 预设注册表: 所有"仅对象范围、无关系"场景可在此登记 (scopeCode 可多编码逗号分隔).
+  //   ⚠️ 需关系选择的场景 (如 mm-cross-domain 等命名场景) 无法用 scopeCode 表达关系,
+  //   必须用 test_helpers/scenario.py 生成的 base64 ?scope= URL:
+  //     python -c "from test_helpers import scenario as sc; print(sc.get_scenario_url('mm-cross-domain'))"
+  const PRESETS = {
+    // 标准测试范围 (效率铁律): 供应链计划(SCP) ~30 BO
+    scp: { productCode: 'TTTTT000', versionCode: 'V11', view: 'chart', scopeCode: 'SCP' },
+    // 采购供应(MM) 全子领域, 无关系 (对象范围选择)
+    mm: { productCode: 'TTTTT000', versionCode: 'V11', view: 'chart', scopeCode: 'MM' }
+  }
   const preset = params.get('preset')
-  if (preset === 'scp') {
-    const url = new URL(window.location.href)
-    url.searchParams.set('productCode', 'TTTTT000')
-    url.searchParams.set('versionCode', 'V11')
-    url.searchParams.set('view', 'chart')
-    url.searchParams.set('scopeCode', 'SCP')
-    url.searchParams.delete('preset')
-    console.log('[shortcut] preset=scp 一键启动, 重定向到完整 URL:', url.toString())
-    window.location.replace(url.toString())
-    return
+  if (preset) {
+    const p = PRESETS[preset]
+    if (p) {
+      const url = new URL(window.location.href)
+      url.searchParams.set('productCode', p.productCode)
+      url.searchParams.set('versionCode', p.versionCode)
+      if (p.view) url.searchParams.set('view', p.view)
+      if (p.scopeCode) url.searchParams.set('scopeCode', p.scopeCode)
+      url.searchParams.delete('preset')
+      console.log(`[shortcut] preset=${preset} 一键启动, 重定向到完整 URL:`, url.toString())
+      window.location.replace(url.toString())
+      return
+    }
+    // 未知 preset: 打印可用列表 + 关系场景取法, 便于发现 (排查/快速打开)
+    console.warn(`[shortcut] 未知 preset="${preset}". 可用: ${Object.keys(PRESETS).join(', ')}.
+  需关系的命名场景用: python -c "from test_helpers import scenario as sc; print(sc.get_scenario_url('<name>'))" (name: ${['mm-cross-domain', 'mm-proc', 'mm-fin', 'mm-prj'].join('/')})`)
   }
   const isShortcut = params.get('shortcut') === '1'
   const isViewChart = params.get('view') === 'chart'
@@ -563,13 +579,19 @@ async function tryApplyShortcut() {
       const scopeJson = JSON.parse(atob(scopeRaw))
       // scopeJson: { business_object:[ids], service_module:[ids], sub_domain:[ids], domain:[ids], relation_codes:[...] }
       const scopePayload = {}
-      if (Array.isArray(scopeJson.domain)) scopePayload.selectedDomainIds = scopeJson.domain
-      if (Array.isArray(scopeJson.sub_domain)) scopePayload.selectedSubDomainIds = scopeJson.sub_domain
-      if (Array.isArray(scopeJson.service_module)) scopePayload.selectedServiceModuleIds = scopeJson.service_module
-      if (Array.isArray(scopeJson.business_object)) scopePayload.selectedBusinessObjectIds = scopeJson.business_object
-      if (Array.isArray(scopeJson.relation_codes)) scopePayload.selectedRelationCodes = scopeJson.relation_codes
-      if (Array.isArray(scopeJson.relation_ids)) scopePayload.selectedRelationIds = scopeJson.relation_ids
-      if (Array.isArray(scopeJson.relation_categories)) scopePayload.selectedCategoryTypes = scopeJson.relation_categories
+      // [FIX 2026-08-14] scope JSON 中的 ID 统一 stripPrefix 归一化 (与 scopeCode 路径 applyScopeCode 行为一致),
+      //   防止 prefixed ID (d_2200) 写入 scopeIds → preview 请求 → 后端 500
+      if (Array.isArray(scopeJson.domain)) scopePayload.selectedDomainIds = scopeJson.domain.map(stripPrefix)
+      if (Array.isArray(scopeJson.sub_domain)) scopePayload.selectedSubDomainIds = scopeJson.sub_domain.map(stripPrefix)
+      if (Array.isArray(scopeJson.service_module)) scopePayload.selectedServiceModuleIds = scopeJson.service_module.map(stripPrefix)
+      if (Array.isArray(scopeJson.business_object)) scopePayload.selectedBusinessObjectIds = scopeJson.business_object.map(stripPrefix)
+      // [FIX 2026-08-13] 关系字段名对齐 handleScopeChange 的短字段名:
+      //   relationCodes / relationIds / categoryTypes (非 selected* 前缀)。
+      //   之前误用 selectedRelationCodes/selectedRelationIds/selectedCategoryTypes,
+      //   handleScopeChange 读 scope.relationCodes/relationIds/categoryTypes 拿不到 → 关系范围丢失。
+      if (Array.isArray(scopeJson.relation_codes)) scopePayload.relationCodes = scopeJson.relation_codes
+      if (Array.isArray(scopeJson.relation_ids)) scopePayload.relationIds = scopeJson.relation_ids
+      if (Array.isArray(scopeJson.relation_categories)) scopePayload.categoryTypes = scopeJson.relation_categories
       page.handleScopeChange(scopePayload)
     } catch (e) {
       console.warn('[shortcut] scope JSON 解析失败, 忽略 scope 参数:', e)
@@ -792,8 +814,8 @@ function onGlobalAction(action) {
     }
     return
   }
-  // [FIX 2026-08-03] 非 chart action 透传给父组件 (如 refresh → RelationshipManagement.handleToolbarAction)
-  //   原: 只调 page.handleGlobalAction, 父组件 (RelationshipManagement) 的 @toolbar-action 永远不触发.
+  // [FIX 2026-08-03] 非 chart action 透传给父组件 (如 refresh → ArchDataManagement.handleToolbarAction)
+  //   原: 只调 page.handleGlobalAction, 父组件 (ArchDataManagement) 的 @toolbar-action 永远不触发.
   //   现: emit('toolbarAction', action) 让父组件能响应 refresh/import/export 等 action.
   //   refresh 特殊处理: 只 emit, 不调 page.handleGlobalAction (避免异步 generateDiagram 覆盖 reload nonce).
   emit('toolbarAction', action)
@@ -859,7 +881,7 @@ defineExpose({
     scopeTreeRef.value?.clear()
   },
   page,
-  // [FIX 2026-07-30 v2] 暴露 viewMode 让业务方（如 RelationshipManagement）能根据当前模式
+  // [FIX 2026-07-30 v2] 暴露 viewMode 让业务方（如 ArchDataManagement）能根据当前模式
   // 条件渲染 GlobalToolbar 的 chart-config slot（避免 list 视图显示图表按钮）
   viewMode
 })

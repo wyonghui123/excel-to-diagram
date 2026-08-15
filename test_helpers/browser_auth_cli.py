@@ -1120,7 +1120,8 @@ class PlaywrightCLI:
         scope: dict = None,
         base_url: str = "http://localhost:3004",
         wait_for_selector: str = None,
-        timeout: int = 15000
+        timeout: int = 15000,
+        debug: bool = False
     ) -> Page:
         """
         [FIX 2026-07-31] dev shortcut: 通过 URL 参数直达 EmbeddedChartView (跳过产品/版本/scope 选择 UI)。
@@ -1153,6 +1154,9 @@ class PlaywrightCLI:
         import urllib.parse as _urlparse
 
         params = ['shortcut=1']
+        if debug:
+            # [PERF 2026-08-13] mode=debug 使前端 debugSteps 分步快照正常生成 (E 类布局断言依赖).
+            params.append('mode=debug')
         if product_id is not None:
             params.append(f'productId={int(product_id)}')
         elif product_code:

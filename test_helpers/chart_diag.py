@@ -86,7 +86,7 @@ class ChartDiag:
 
     OUTPUT_DIR = Path(__file__).resolve().parent / 'scripts' / 'chart_diag_out'
 
-    def __init__(self, base_url: str = 'http://localhost:3006',
+    def __init__(self, base_url: str = 'http://localhost:3004',
                  product_code: str = 'TTTTT000', version_id: int = 863,
                  viewport: Tuple[int, int] = (1280, 720)):
         self.base_url = base_url
@@ -119,7 +119,8 @@ class ChartDiag:
             scope=scope,
             base_url=self.base_url,
             wait_for_selector='svg g.node',
-            timeout=timeout_ms
+            timeout=timeout_ms,
+            debug=True
         )
         page.wait_for_timeout(2500)
         # 兜底: 若 shortcut 未渲染 (旧构建/无 shortcut 支持), 尝试点击"图表展示"按钮
@@ -464,10 +465,49 @@ class ChartDiag:
         """读取渲染指标: data-* DOM 属性 + useDiagnostics.lastRender (SVG 级口径).
         数据完整性断言的数据源.
         [FIX 2026-08-02] clear_marker=False: 这里读的是"当前已渲染状态",
-        若清标记会导致等下一次新渲染而超时 (图表已稳定, 不会再触发 endRender)."""
+        若清标记会导致等下一次新渲染而超时 (图表已稳定, 不会再触发 endRender).
+        [OBS 2026-08-13] 补充 subgraphInSrc: 源码 subgraph 数, 与 data-container-count 比对
+        可一条 evaluate 定位"源码有 subgraph 但 SVG 无容器"的渲染丢失问题."""
         dom_state = self.wait_render_stable(timeout_ms=5000, clear_marker=False)
         last_render = self.page.evaluate("() => window.__archPage?.mermaid?.lastRender || null")
+        subgraph = self.page.evaluate("() => window.__archPage?.mermaid?.subgraphInSrc ?? null")
+        if subgraph is not None:
+            last_render = {**last_render, 'subgraphInSrc': subgraph}
         return {'dom': dom_state, 'lastRender': last_render}
+
+    def get_relation_highlight(self) -> Dict[str, Any]:
+        """[OBS 2026-08-13] 关系高亮状态快照: __archPage.relationHighlight() 权威态
+        + DOM 实测 [data-rel-hl]/[data-rel-dim] 计数.
+        供 E2E 一条 evaluate 断言"高亮/清除/范围正确", 替代扫描 inline opacity 的脆弱断言."""
+        return self.page.evaluate("""() => {
+            const api = window.__archPage && window.__archPage.relationHighlight
+            const state = api ? api() : { error: '__archPage.relationHighlight 未暴露' }
+            const svg = document.querySelector('.mermaid-content svg')
+            const dom = {
+                relHl: svg ? svg.querySelectorAll('[data-rel-hl]').length : -1,
+                relDim: svg ? svg.querySelectorAll('[data-rel-dim]').length : -1
+            }
+            return { ...state, dom }
+        }""")
+
+    def trigger_relation_highlight(self, code: str, wait_ms: int = 800) -> Dict[str, Any]:
+        """[OBS 2026-08-13] 触发关系高亮 (需 ?mode=debug 暴露 __archPage.debug.highlightRelations)
+        并读取快照. 返回 {state, dom}. code 为空时自动取首个可见节点编码."""
+        if not code:
+            code = self.page.evaluate("""() => {
+                const el = document.querySelector('g.node[data-container-code]') ||
+                           document.querySelector('g.node[data-code]') ||
+                           document.querySelector('g.cluster[data-container-code]')
+                return el ? (el.getAttribute('data-container-code') || el.getAttribute('data-code')) : null
+            }""")
+        self.page.evaluate("(c) => window.__archPage.debug.highlightRelations(c)", code)
+        self.page.wait_for_timeout(wait_ms)
+        return self.get_relation_highlight()
+
+    def assert_expand_invariant(self, level: str) -> Dict[str, Any]:
+        """[OBS 2026-08-13] 展开/折叠不变式: 调 __archPage.assertExpandInvariant(level),
+        返回树各层计数 + 期望/实际容器数 + 比对, 供 E2E 断言展开层级正确性."""
+        return self.page.evaluate("(l) => window.__archPage.assertExpandInvariant(l)", level)
 
     def get_node_colors(self) -> Dict[str, str]:
         """读取 nodeCode → fill 映射 (FE1: stepMeta.nodeColorMappings, 权威源).
@@ -522,6 +562,24 @@ class ChartDiag:
             if (!cfg) throw new Error('__archPage.chartConfig 未暴露 (EmbeddedChartView 未挂载)')
             cfg[key] = value
         }""", {'key': key, 'value': value})
+
+    def wait_for_svg_nodes(self, min_count: int = 1, timeout_ms: int = 10000,
+                           poll_ms: int = 200, data_code: bool = True) -> int:
+        """[2026-08-13] 等待活动图表 SVG (.mermaid-content) 渲染出 >= min_count 个节点.
+        解决 wait_render_stable 返回后 SVG 仍在异步渲染的竞态: 有些切换 (如 SM→BO)
+        marker 提前置位但节点尚未入 DOM, 立即断言会假失败 (svgOk=False 抖动).
+        返回实际节点数.
+        data_code=True 统计 g.node[data-code] (BO 级节点); False 统计任意 g.node
+        (含 COLLAPSE_* 领域/子领域容器, 用于快速切换后可能折叠回领域级的场景)."""
+        selector = ('g.node[data-code]' if data_code else 'g.node')
+        deadline = time.time() + timeout_ms / 1000.0
+        while time.time() < deadline:
+            n = self.page.evaluate(
+                f"() => document.querySelectorAll('.mermaid-content svg {selector}').length")
+            if n >= min_count:
+                return n
+            self.page.wait_for_timeout(poll_ms)
+        return n
 
     def get_annotation_items(self) -> List[Dict[str, Any]]:
         """读取备注面板 items (.annotation-dock-panel .annotation-item).

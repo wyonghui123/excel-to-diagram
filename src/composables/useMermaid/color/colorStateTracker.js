@@ -20,6 +20,7 @@ export function createColorStateTracker(initial = {}) {
     colorGroupBy: initial.colorGroupBy ?? 'domain',
     colorScheme: initial.colorScheme ?? null,
     centerScopeHighlight: initial.centerScopeHighlight ?? null,
+    centerScopeColor: initial.centerScopeColor ?? null,
     customColors: initial.customColors ? { ...initial.customColors } : null
   }
 
@@ -31,18 +32,21 @@ export function createColorStateTracker(initial = {}) {
       colorGroupBy: d.colorGroupBy ?? 'domain',
       colorScheme: str(d.colorScheme),
       centerScopeHighlight: str(d.centerScopeHighlight),
+      centerScopeColor: str(d.centerScopeColor),
       customColors: d.customColors ? JSON.stringify(d.customColors) : null
     }
     const last = {
       colorGroupBy: state.colorGroupBy,
       colorScheme: str(state.colorScheme),
       centerScopeHighlight: str(state.centerScopeHighlight),
+      centerScopeColor: str(state.centerScopeColor),
       customColors: state.customColors ? JSON.stringify(state.customColors) : null
     }
     return {
       colorGroupBy: current.colorGroupBy !== last.colorGroupBy,
       colorScheme: current.colorScheme !== last.colorScheme,
       centerScopeHighlight: current.centerScopeHighlight !== last.centerScopeHighlight,
+      centerScopeColor: current.centerScopeColor !== last.centerScopeColor,
       customColors: current.customColors !== last.customColors
     }
   }
@@ -53,13 +57,14 @@ export function createColorStateTracker(initial = {}) {
     state.colorGroupBy = d.colorGroupBy ?? 'domain'
     state.colorScheme = d.colorScheme ?? null
     state.centerScopeHighlight = d.centerScopeHighlight ?? null
+    state.centerScopeColor = d.centerScopeColor ?? null
     state.customColors = d.customColors ? { ...d.customColors } : null
   }
 
   /** 是否有任一颜色字段变化（changed() 结果的便捷聚合）。 */
   function anyChanged(data) {
     const c = changed(data)
-    return c.colorGroupBy || c.colorScheme || c.centerScopeHighlight || c.customColors
+    return c.colorGroupBy || c.colorScheme || c.centerScopeHighlight || c.centerScopeColor || c.customColors
   }
 
   return { changed, snapshot, anyChanged, get state() { return state } }

@@ -4,10 +4,10 @@
   所属模块：嵌入式图表视图（Phase 2）
   主要功能：
     - 图表类型切换（业务对象图 / 服务模块图）
-    - 颜色方案选择
-    - 颜色分组维度选择（领域 / 子领域 / 服务模块）
     - 备注类型过滤多选
+    - 布局方向（TB/LR）+ 高级选项（布局引擎）
     - 布局设置按钮（侧边抽屉打开布局控制面板）
+    （颜色分组/配色/对象范围已移至图表空白区域右键菜单「颜色设置」，见 CTX-COLOR 注释）
 
   契约：见 chart-data-flow-and-interaction-upgrade.md §5.10.3 ③
 
@@ -23,59 +23,9 @@
          改用图表空白区域右键菜单 (展开到领域/子领域/服务模块/业务对象), 见 MermaidComponent.handleContextMenu.
          原展开层级逻辑仍由 LayoutControlPanel(图表设置抽屉) 与 store.setExpandLevel 承载,
          展开层级状态同步不变 (diagramConfigStore.expandLevel). -->
-
-    <!-- 颜色分组维度 -->
-    <el-select
-      :model-value="colorGroupBy"
-      size="small"
-      class="cmt-select"
-      @update:model-value="(v) => emit('update:colorGroupBy', v)"
-    >
-      <template #prefix>
-        <span class="cmt-label">颜色分组</span>
-      </template>
-      <!-- [FIX 2026-07-27] colorGroupBy 值必须与老图表 (StepConfig.vue line 258-261 / CenterDomainSelect.vue / ServiceModuleConfig.vue) 一致
-           老图表使用驼峰命名 'subDomain' / 'serviceModule'，下划线写法 ('sub_domain' / 'service_module')
-           会让 colorMapping 的 if 分支全部 miss，落到 else 当作 'domain' 处理 → 颜色分组切换无效 -->
-      <el-option label="按领域" value="domain" />
-      <el-option label="按子领域" value="subDomain" />
-      <el-option label="按服务模块" value="serviceModule" />
-    </el-select>
-
-    <!-- 颜色方案 -->
-    <el-select
-      :model-value="colorScheme"
-      size="small"
-      class="cmt-select cmt-select--short"
-      @update:model-value="(v) => emit('update:colorScheme', v)"
-    >
-      <template #prefix>
-        <span class="cmt-label">配色</span>
-      </template>
-      <!-- [FIX 2026-07-27] colorScheme 值必须与老图表一致
-           老图表 StepConfig.vue line 245-253 的 COLOR_SCHEMES 表里使用 'vibrant' / 'pastel'
-           之前用 'high-contrast' / 'soft' 会触发 fallback 到 'default' → 用户看不到配色变化 -->
-      <el-option label="默认" value="default" />
-      <el-option label="鲜艳" value="vibrant" />
-      <el-option label="柔和" value="pastel" />
-    </el-select>
-
-    <!-- [NEW 2026-07-31] 区分中心范围下拉 (centerScopeHighlight 切换)
-         用户需求: 在 toolbar 增加"区分中心范围"下拉, 默认 true (区分)
-         - true (区分): centerScope 内的 BOs 会被高亮 (但当 colorGroupBy 活跃时不覆盖分组色)
-         - false (不区分): 所有节点按分组色渲染, 不做 centerScope 高亮 -->
-    <el-select
-      :model-value="centerScopeHighlight ? 'yes' : 'no'"
-      size="small"
-      class="cmt-select cmt-select--short"
-      @update:model-value="(v) => emit('update:centerScopeHighlight', v === 'yes')"
-    >
-      <template #prefix>
-        <span class="cmt-label">对象范围</span>
-      </template>
-      <el-option label="区分" value="yes" />
-      <el-option label="不区分" value="no" />
-    </el-select>
+    <!-- [CTX-COLOR 2026-08-12] 颜色分组/配色/对象范围 3 个下拉已移除:
+         改用图表空白区域右键菜单「颜色设置」子菜单 (颜色分组维度/配色方案/区分对象范围),
+         见 MermaidComponent.buildColorSubmenuItems. 避免顶部工具栏与右键菜单功能重复. -->
 
     <!-- [FIX 2026-07-31] 备注类型多选下拉 (与老版本 CenterDomainSelect/StepConfig 一致)
          - 选项从 enum_types.annotation_category 加载 (与 CenterDomainSelect 同样入口 EnumService)
@@ -170,6 +120,24 @@
             </el-radio>
           </el-radio-group>
         </div>
+        <!-- [TAIL 2026-08-12] 关系标签拖尾线开关 (老版本图表展示导航配置步骤的"隐藏关系标签拖尾线").
+             值域: auto(自动, ELK隐藏/Dagre显示) / yes(强制隐藏) / no(强制显示), 与 configStore.hideLinkLabelTails
+             (null/true/false) 对应. -->
+        <div class="cmt-advanced-row">
+          <label class="cmt-advanced-label">关系标签拖尾线</label>
+          <el-radio-group
+            :model-value="tailMode"
+            size="small"
+            @update:model-value="onTailModeChange"
+          >
+            <el-radio value="auto">
+              自动
+              <span class="cmt-radio-desc">ELK隐藏，Dagre显示</span>
+            </el-radio>
+            <el-radio value="yes">隐藏</el-radio>
+            <el-radio value="no">显示</el-radio>
+          </el-radio-group>
+        </div>
       </div>
     </el-popover>
   </div>
@@ -184,15 +152,13 @@
  *   - 通过 v-model 与父组件 EmbeddedChartView 双向绑定
  *   - 仅作为 UI 层，触发 update 事件
  */
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { Bottom, Right, Setting } from '@element-plus/icons-vue'
 import EnumService from '@/services/enumService'
 
 const props = defineProps({
   chartType: { type: String, required: true },
-  colorScheme: { type: String, required: true },
-  colorGroupBy: { type: String, required: true },
-  centerScopeHighlight: { type: Boolean, default: true },
+  // [CTX-COLOR 2026-08-12] 颜色分组/配色/对象范围 props 已移除 (改由右键菜单颜色设置控制)
   // [FIX 2026-07-31] 备注类型多选 (来自 chartConfig.annotationCategoryFilter)
   annotationCategoryFilter: { type: Array, default: () => [] },
   // [FIX 2026-07-31] 版本号 - 切换版本时重新加载 enum
@@ -200,18 +166,27 @@ const props = defineProps({
   // [MOVE 2026-08-04] 布局方向 (TB/LR) - 从 LayoutControlPanel 移到 toolbar
   overallDirection: { type: String, default: 'TB' },
   // [MOVE 2026-08-04] 布局引擎 (elk/dagre) - 从 LayoutControlPanel 移到 toolbar 高级选项
-  engine: { type: String, default: 'elk' }
+  engine: { type: String, default: 'elk' },
+  // [TAIL 2026-08-12] 关系标签拖尾线: null=自动(true/undefined 值由 store 决定), true=隐藏, false=显示
+  hideLinkLabelTails: { default: null }
 })
 
 const emit = defineEmits([
   'update:chart-type',
-  'update:color-scheme',
-  'update:color-group-by',
-  'update:center-scope-highlight',
   'update:annotation-category-filter',
   'update:overall-direction',
-  'update:engine'
+  'update:engine',
+  'update:hide-link-label-tails'
 ])
+
+// [TAIL 2026-08-12] 拖尾线模式映射: store(null/true/false) ↔ UI(auto/yes/no)
+const tailMode = computed(() => {
+  const v = props.hideLinkLabelTails
+  return v === null ? 'auto' : (v ? 'yes' : 'no')
+})
+function onTailModeChange(mode) {
+  emit('update:hide-link-label-tails', mode === 'auto' ? null : (mode === 'yes'))
+}
 
 // [FIX 2026-07-31] 加载 enum_types.annotation_category 选项
 //   与 CenterDomainSelect/StepConfig 一致入口 (EnumService.loadOptions)
@@ -261,9 +236,7 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
-.cmt-select--short {
-  width: 120px;
-}
+// [CTX-COLOR 2026-08-12] .cmt-select--short 已删除 (颜色分组/配色/对象范围下拉移除后无使用)
 
 // [FIX 2026-07-31] 备注类型多选下拉: 限制宽度, 不撑高 toolbar
 .cmt-select--annotation {

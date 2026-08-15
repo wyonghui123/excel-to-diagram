@@ -45,6 +45,60 @@ function getLevelStyle(level) {
 const getContainerLevelStyle = getLevelStyle
 const getGroupLevelStyle = getLevelStyle
 
+// [ELK-GROUP 2026-08-12] 识别"系统自动分组"(无关系/有关系, ELK 布局自动生成).
+//   其 visible=false 表示"无边框但节点仍渲染"(ELK 布局语义), 与普通分组 visible=false
+//   (隐藏整棵子树) 不同, 渲染时需特殊处理.
+function isElkSystemAuto(group) {
+  return !!group && (group._elkGroup === 'inner' || group._elkGroup === 'boundary')
+}
+
+// [ELK-FLAT 2026-08-14] 收集 ELK 系统自动分组渲染出的节点 id, **按分组**收集.
+//   背景: ELK 分组 (inner/boundary) 内互不连通的节点会被 ELK 一字排开 (实测 INV boundary
+//   27 节点单行 5447px / 58 节点单行 11737px), 撑乱整个服务模块. 故收集这些节点,
+//   由调用方生成"布局辅助虚拟边" (透明不可见), 引导 ELK 把它们排成多列紧凑网格.
+//   [ELK-SEM 2026-08-14] 按分组收集: 每个 ELK 分组 (inner/boundary) 单独一组,
+//   虚拟边只在组内连接 (buildLayoutHelperEdges 逐组切片). 若全局混收, 切片会跨分组
+//   连接不同 subgraph 内的节点 → 虚拟边跨容器 → 破坏 ELK 布局.
+//   模块级状态在 generateGroupedLayout 每次调用时重置, 单图表场景安全.
+let flatElkGroups = []
+let elkCollectorStack = []
+function resetFlatElkGroups() {
+  flatElkGroups = []
+  elkCollectorStack = []
+}
+// 开始收集一个 ELK 分组的节点 (该分组渲染期间压入栈, 结束后弹栈).
+function beginElkCollector() {
+  const collector = []
+  elkCollectorStack.push(collector)
+  flatElkGroups.push(collector)
+}
+function collectElkFlatNode(actualNodeId) {
+  const top = elkCollectorStack[elkCollectorStack.length - 1]
+  if (top) top.push(actualNodeId)
+}
+function endElkCollector() {
+  elkCollectorStack.pop()
+}
+/**
+ * 根据打平的 ELK 分组节点列表生成布局辅助虚拟边 (链式切片).
+ * 每条链内节点按顺序两两相连 → ELK 将每条链视为独立连通分量 (component),
+ * TB 方向下多个 component 横向并列 → 整体呈"多列×每列 N 行"的紧凑网格.
+ * 链长 CHAIN_SIZE 决定列数与每列行数 (58 节点 / 12 ≈ 5 列 × 12 行).
+ * [ELK-FLAT 2026-08-14] 导出以便单测直接验证链式切片行为.
+ */
+export function buildLayoutHelperEdges(nodeIds) {
+  const edges = []
+  if (!nodeIds || nodeIds.length < 2) return edges
+  const CHAIN_SIZE = 12
+  for (let i = 0; i < nodeIds.length; i += CHAIN_SIZE) {
+    const chain = nodeIds.slice(i, i + CHAIN_SIZE)
+    for (let j = 0; j < chain.length - 1; j++) {
+      edges.push({ source: chain[j], target: chain[j + 1] })
+    }
+  }
+  return edges
+}
+
 /**
  * [OPT 2026-08-06] 上提(脱离父容器)分组标题的祖先名称路径.
  * 仅当分组被上提为聚合节点 (脱离其父容器) 时返回祖先路径, 用于在标题中追加
@@ -96,6 +150,8 @@ export function generateGroupedLayout(groups, containers, nodeMap, definedNodes,
 
   // [FIX 2026-08-06g] 每次生成前重置父路径 registry, 避免跨次渲染残留.
   resetLiftedParentRegistry()
+  // [ELK-FLAT 2026-08-14] 每次生成前重置 ELK 分组节点收集, 避免跨次渲染残留.
+  resetFlatElkGroups()
 
   // [UPLIFT 2026-08-05] 上提自动推导: 基于 enabled 标记 _uplift (enabled 且无可见子孙 → 聚合节点).
   markUplift(groups)
@@ -112,7 +168,8 @@ export function generateGroupedLayout(groups, containers, nodeMap, definedNodes,
     }
   })
 
-  return { mermaidCode, styleLines }
+  // [ELK-SEM 2026-08-14] 逐组生成虚拟边 (每组内链式连接), 合并为平铺数组.
+  return { mermaidCode, styleLines, layoutHelperEdges: flatElkGroups.flatMap((group) => buildLayoutHelperEdges(group)) }
 }
 
 /**
@@ -125,7 +182,9 @@ function hasGroupContent(group, containers, visited = null, depth = 0) {
 
   // [VIS 2026-08-07] 可见/隐藏: visible=false → 视为无内容, 父级据此不渲染空盒.
   //   与 generateGroupCode 顶部"visible=false 跳过整棵子树"保持一致.
-  if (group.visible === false) {
+  // [ELK-GROUP 2026-08-12] 系统自动分组(无关系/有关系)是例外: 其 visible=false
+  //   表示"无边框但节点仍渲染"(ELK 布局语义), 不属用户隐藏, 仍视为有内容.
+  if (group.visible === false && !isElkSystemAuto(group)) {
     return false
   }
 
@@ -238,7 +297,10 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
   //   导致"隐藏父领域(如供应链云)"后其子领域(如销售)仍显示, 与面板
   //   "隐藏（含子孙）" 的级联语义不符. 此处直接跳过整棵子树, 子孙由
   //   setVisibleRecursive 已一并置为 false, 递归调用自然被此处拦截.
-  if (group.visible === false) {
+  // [ELK-GROUP 2026-08-12] 系统自动分组(无关系/有关系)是例外: 其 visible=false
+  //   表示"无边框但节点仍渲染"(ELK 布局语义), 落到下方 enabled 分支渲染为无边框 subgraph,
+  //   不隐藏整棵子树, 否则默认 hidden 状态下 BO 会全部消失.
+  if (group.visible === false && !isElkSystemAuto(group)) {
     return { code, styleLines }
   }
 
@@ -307,9 +369,25 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
     return { code, styleLines }
   }
 
+  // [ELK-GROUP 2026-08-14] ELK 系统分组 (无关系/有关系) 默认 visible=false 无边框.
+  //   [ELK-SEM 2026-08-14] 语义对齐 (用户确认): enabled=true 的 ELK 分组**必须始终创建
+  //   subgraph 容器**, visible=false 仅表示"容器在但无边框/无标题" (隐藏不影响容器渲染),
+  //   不再复用 disabled 打平分支. 原实现 `!groupEnabled || (isElkAuto && visible===false)`
+  //   把启用+隐藏的 ELK 分组与禁用走同一打平分支 → 容器被删除 → 视觉与禁用完全一致
+  //   ("隐藏态污染启用" 用户反馈的 bug). 打平分支现在仅用于 enabled=false (禁用: 无容器).
+  //   [ELK-FLAT 2026-08-14] 无边框 subgraph 内互不连通的节点会被 ELK 一字排开 (INV boundary
+  //   27 节点单行 5447px / 58 节点单行 11737px), 故无论打平 (禁用) 还是 subgraph (启用)
+  //   分支, 渲染 ELK 分组节点时都按分组收集节点 id, 由调用方生成透明虚拟边引导 ELK
+  //   排成多列网格 (见 buildLayoutHelperEdges).
+  const isElkAuto = isElkSystemAuto(group)
   if (!groupEnabled) {
     // 禁用的分组：不再创建 subgraph，直接渲染子元素到当前层级
     // 这样 ELK 布局时不会把它们当作一个分组容器来计算间距
+
+    if (isElkAuto) beginElkCollector()
+    const collectFlatNode = (actualNodeId) => {
+      if (isElkAuto) collectElkFlatNode(actualNodeId)
+    }
 
     if (group.directNodes && group.directNodes.length > 0 && nodeMap && nodeMap.size > 0) {
       const reversedNodes = [...group.directNodes].reverse()
@@ -321,6 +399,7 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
             const displayText = businessObjectLabel(node)
             code += `${indent}${actualNodeId}["${displayText}"]\n`
             definedNodes.add(actualNodeId)
+            collectFlatNode(actualNodeId)
           }
         }
       })
@@ -339,6 +418,7 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
                   const displayText = businessObjectLabel(node)
                   code += `${indent}${actualNodeId}["${displayText}"]\n`
                   definedNodes.add(actualNodeId)
+                  collectFlatNode(actualNodeId)
                 }
               }
             })
@@ -368,6 +448,7 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
                   const displayText = businessObjectLabel(node)
                   code += `${indent}${actualNodeId}["${displayText}"]\n`
                   definedNodes.add(actualNodeId)
+                  collectFlatNode(actualNodeId)
                 }
               }
             })
@@ -392,8 +473,14 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
       })
     }
 
+    if (isElkAuto) endElkCollector()
     return { code, styleLines }
   }
+
+  // [ELK-SEM 2026-08-14] ELK 分组 (enabled=true) 进入 subgraph 分支: 开始收集组内节点
+  //   (visible=false 无边框 subgraph 内节点需虚拟边防单行; visible=true 有边框同样收集,
+  //   透明边仅增强约束, 无副作用).
+  if (isElkAuto) beginElkCollector()
 
   if (group.visible === false) {
     code += `${indent}subgraph ${groupId}[ ]\n`
@@ -417,6 +504,7 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
           const displayText = businessObjectLabel(node)
             code += `${indent}  ${actualNodeId}["${displayText}"]:::node\n`
           definedNodes.add(actualNodeId)
+          if (isElkAuto) collectElkFlatNode(actualNodeId)
         }
       }
     })
@@ -442,6 +530,7 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
                 const displayText = businessObjectLabel(node)
                 code += `${indent}  ${actualNodeId}["${displayText}"]\n`
                 definedNodes.add(actualNodeId)
+                if (isElkAuto) collectElkFlatNode(actualNodeId)
               }
             }
           })
@@ -561,6 +650,9 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
 
   const styleCode = generateGroupStyle(group, groupId, nextContainerDepth)
   styleLines.push(styleCode)
+
+  // [ELK-SEM 2026-08-14] 结束本 ELK 分组的节点收集 (与上方 beginElkCollector 配对).
+  if (isElkAuto) endElkCollector()
 
   return { code, styleLines }
 }

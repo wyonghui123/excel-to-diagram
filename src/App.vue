@@ -56,7 +56,7 @@ const cachedRouteNames = [
   'GenericObjectList', // 通用对象列表
   'ObjectDetail',      // 详情查看 (不含编辑)
   'GenericTabContainer', // 通用 Tab 容器 (v-show 保留状态)
-  'RelationshipManagement', // 架构数据管理 (per-tab 实例 + v-show)
+  'ArchDataManagement', // 架构数据管理 (per-tab 实例 + v-show)
 ]
 
 // [FR-007] 明确排除的组件名

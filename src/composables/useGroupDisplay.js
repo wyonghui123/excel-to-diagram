@@ -278,8 +278,8 @@ export function useGroupDisplay(colorMapping) {
 
   function getElkGroupHint(elkGroup) {
     const hints = {
-      inner: '无外部关系：此分组中的节点没有连接外部节点的边，需要与有外部关系的区分开，否则这些节点无法均匀布局',
-      boundary: '有外部关系：此分组中的节点有连接外部节点的边，需要与无外部关系的区分开，否则这些节点无法均匀布局'
+      inner: '无关系：此分组中的节点在所选关系范围内没有任何关联关系（含服务模块内），需要与有关系的区分开，否则这些节点无法均匀布局',
+      boundary: '有关系：此分组中的节点在所选关系范围内有关联关系（含服务模块内），需要与无关系的区分开，否则这些节点无法均匀布局'
     }
     return hints[elkGroup] || ''
   }

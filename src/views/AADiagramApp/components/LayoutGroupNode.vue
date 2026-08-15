@@ -1,5 +1,5 @@
 <template>
-  <!-- [SYS 2026-08-07] 系统自动分组(无外部关系/有外部关系, _elkGroup=inner/boundary)默认隐藏,
+  <!-- [SYS 2026-08-07] 系统自动分组(无关系/有关系, _elkGroup=inner/boundary)默认隐藏,
        仅"高级设置"开关打开时展示. 与用户手动分组(自定义)区分开, 减少默认视觉噪音. -->
   <div v-if="!isSystemAuto || showAdvancedSettings" class="lgn-node">
     <div class="lgn-row" :class="{ 'row-drag-over': isRowDragOver, 'is-hidden': group.visible === false }"
@@ -38,7 +38,7 @@
             @dblclick.stop="startEditTitle"
             :style="groupColorInfo.isCenter ? { color: centerScopeColorText } : {}"
             :title="groupColorInfo.isCenter ? '对象范围分组：颜色跟随『对象范围颜色』配置' : ''">{{ group.title }}</span>
-          <span v-if="group.title === '无外部关系' || group.title === '有外部关系'"
+          <span v-if="group.title === '无关系' || group.title === '有关系'"
             class="elk-hint" :title="getElkGroupHint(group._elkGroup)">ⓘ</span>
         </template>
         <input v-else ref="titleInput" v-model="editTitle" class="title-input"
@@ -213,7 +213,7 @@ const showTypeIcon = computed(() => {
     && props.group.groupType !== 'serviceModule'
 })
 
-// [SYS 2026-08-07] 系统自动分组识别: ELK 布局自动生成的无外部关系/有外部关系分组
+// [SYS 2026-08-07] 系统自动分组识别: ELK 布局自动生成的无关系/有关系分组
 const isSystemAuto = computed(() => {
   const elk = props.group._elkGroup
   return elk === 'inner' || elk === 'boundary'

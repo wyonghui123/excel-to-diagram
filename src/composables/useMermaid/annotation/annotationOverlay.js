@@ -7,6 +7,8 @@ import {
   toCircleNumber,
   PANEL_POSITION
 } from './annotationConfig.js';
+// [LEGEND-COLOR 2026-08-11] 方案A: 图例项改色调色板的预设 swatch 色源 (按当前配色方案)
+import { COLOR_SCHEMES } from '../../../constants/diagram.js';
 
 let isDraggingState = false;
 
@@ -995,7 +997,12 @@ export function useAnnotationOverlay() {
       // [LEGEND 2026-08-07] 分组可见性切换回调 (由 MermaidComponent 注入):
       //   就地改 live 分组对象 visible + 以新引用替换 store 配置, 触发图表增量隐/显 + 配置树双向同步。
       //   缺省时 (如 HTML/PDF 导出, 无 store 上下文) 退化为直接就地改 visible (仅作用于当前图例引用)。
-      onToggleGroupVisible = null
+      onToggleGroupVisible = null,
+      // [LEGEND-COLOR 2026-08-11] 方案A: 图例项色块改色回调 (colorKey, color):
+      //   由 MermaidComponent 注入, 写 store.customColors 触发增量变色 (updateColorsOnly)。
+      //   colorScheme: 当前配色方案, 用于弹出调色板的预设 swatch 色源。
+      onLegendItemColorChange = null,
+      colorScheme = 'default'
     } = options;
 
     const container = svg.closest('.mermaid-container');
@@ -1145,6 +1152,35 @@ export function useAnnotationOverlay() {
     };
 
     colorLegendData.forEach((item, index) => {
+      // [LEGEND-SECTION 2026-08-15] 节标题项 (isSection): 渲染为"标签 + 分隔线",
+      //   用于区分"对象范围"与"对象范围外部"两段 (见 buildColorLegendData).
+      if (item.isSection) {
+        const section = document.createElement('div');
+        section.style.cssText = `
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          margin: 6px 0 2px;
+        `;
+        const label = document.createElement('span');
+        label.style.cssText = `
+          font-size: 10px;
+          color: #909399;
+          white-space: nowrap;
+        `;
+        label.textContent = item.name || '';
+        const line = document.createElement('div');
+        line.style.cssText = `
+          flex: 1;
+          height: 1px;
+          background: #e5e7eb;
+        `;
+        section.appendChild(label);
+        section.appendChild(line);
+        legendList.appendChild(section);
+        return;
+      }
+
       const legendItem = document.createElement('div');
       legendItem.style.cssText = `
         display: flex;
@@ -1184,6 +1220,49 @@ export function useAnnotationOverlay() {
       legendItem.appendChild(nameSpan);
       legendList.appendChild(legendItem);
 
+      // [LEGEND-COLOR 2026-08-11] 方案A: 图例项颜色块点击改色.
+      //   交互设计 (与"隐藏/显示"点击分离, 避免冲突):
+      //   - 颜色块(12px) | 名称文本区(剩余整行) 双区点击:
+      //     * 点颜色块 → 弹出调色板改该分组颜色 (stopPropagation, 不触发行点击)
+      //     * 点名称文本区 → 切换分组隐藏/显示 (保持原有行为)
+      //   - 悬停颜色块浮现描边环 + 铅笔图标, 明确"此处可改色", 降低误触率.
+      //   - 改色写 store.customColors[colorKey] → updateColorsOnly 增量变色 (不重排).
+      // [LEGEND-COLOR v2 2026-08-11] 改色 editable 判定:
+      //   - 分组项 (colorKey) 可改色
+      //   - 对象范围项 (isCenter + colorKey='__centerScope__') 也可改色 (走 updateCenterScopeColor)
+      //   - 仅当 onLegendItemColorChange 回调注入 (feature flag legendItemColor 开启) 才附加 affordance
+      //   - 仍排除"无 colorKey"的项 (理论上不存在, 防御)
+      const colorEditable = onLegendItemColorChange && item.colorKey;
+      if (colorEditable) {
+        colorDot.style.cursor = 'pointer';
+        colorDot.style.position = 'relative';
+        colorDot.style.borderRadius = '2px';
+        colorDot.title = '点击修改颜色';
+        // 铅笔角标 (hover 时显示)
+        const pen = document.createElement('span');
+        pen.textContent = '✎';
+        pen.style.cssText = `
+          position: absolute; right: -3px; bottom: -3px;
+          font-size: 7px; line-height: 1; color: #fff;
+          background: rgba(0,0,0,0.55); border-radius: 50%;
+          width: 9px; height: 9px; display: none; align-items: center; justify-content: center;
+          pointer-events: none; z-index: 2;
+        `;
+        colorDot.appendChild(pen);
+        colorDot.addEventListener('mouseenter', () => {
+          colorDot.style.boxShadow = '0 0 0 2px #1a73e8';
+          pen.style.display = 'flex';
+        });
+        colorDot.addEventListener('mouseleave', () => {
+          colorDot.style.boxShadow = '';
+          pen.style.display = 'none';
+        });
+        colorDot.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openLegendColorPicker(colorDot, item, colorScheme, onLegendItemColorChange, container);
+        });
+      }
+
       // [LEGEND 2026-08-07] 可点击分组项: 匹配到分组引用的图例项可点击切换 visible
       const clickable = !item.isCenter && Array.isArray(item.groups) && item.groups.length > 0;
       if (clickable) {
@@ -1204,17 +1283,6 @@ export function useAnnotationOverlay() {
         });
         applyVisual();
       }
-
-      // 在中心范围项后添加分隔线
-      if (item.isCenter && index < colorLegendData.length - 1) {
-        const separator = document.createElement('div');
-        separator.style.cssText = `
-          height: 1px;
-          background: #eee;
-          margin: 4px 0;
-        `;
-        legendList.appendChild(separator);
-      }
     });
 
     legend.appendChild(legendList);
@@ -1225,6 +1293,188 @@ export function useAnnotationOverlay() {
       showToggleChip();
     }
     return legend;
+  };
+
+  // [LEGEND-COLOR 2026-08-11] 方案A: 图例项改色——弹出预设 swatch 调色板.
+  //   锚定在颜色块上, 展示当前配色方案 COLOR_SCHEMES 的预设色 + "恢复默认"项.
+  //   选色 → onLegendItemColorChange(colorKey, color) → store.customColors → updateColorsOnly 增量变色.
+  //   关闭: 点击外部 / Esc / 再次点击锚点. 同一时刻仅一个调色板 (移除旧实例).
+  const openLegendColorPicker = (anchor, item, colorScheme, onChange, container) => {
+    // 移除已存在的调色板 (避免重复弹出)
+    const prev = container.querySelector('.legend-color-picker');
+    if (prev) prev.remove();
+
+    const picker = document.createElement('div');
+    picker.className = 'legend-color-picker';
+    picker.setAttribute('data-annotation-layer', 'legend');
+    picker.style.cssText = `
+      position: absolute; z-index: 9999;
+      background: #fff; border: 1px solid #e0e0e0; border-radius: 6px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.15); padding: 8px;
+    `;
+
+    const title = document.createElement('div');
+    title.style.cssText = 'font-size: 11px; color: #888; margin-bottom: 6px; white-space: nowrap;';
+    title.textContent = item.name;
+    picker.appendChild(title);
+
+    // [LEGEND-COLOR v2 2026-08-11] 方案A增强(L2): 完整颜色板.
+    //   结构: 标题 → 预设色网格 → 分隔 → 自定义色(原生取色器+Hex输入) → 恢复默认.
+    const schemeColors = (COLOR_SCHEMES[colorScheme] || COLOR_SCHEMES.default || []);
+
+    // 当前选中颜色 (默认取 item 当前显示色, 无则取配色方案首色)
+    const currentColor = item.color && /^#[0-9a-fA-F]{6}$/.test(item.color) ? item.color : (schemeColors[0] || '#1890FF');
+
+    const applyColor = (color) => {
+      if (!color) return;
+      onChange(item.colorKey, color);
+      picker.remove();
+    };
+
+    const makeSwatch = (color, isReset) => {
+      const sw = document.createElement('div');
+      sw.style.cssText = `
+        width: 18px; height: 18px; border-radius: 3px; cursor: pointer;
+        border: 1px solid rgba(0,0,0,0.15); position: relative;
+      `;
+      sw.style.background = isReset
+        ? 'linear-gradient(45deg, #fff 25%, #e00 25%, #e00 50%, #fff 50%, #fff 75%, #e00 75%, #e00)'
+        : color;
+      sw.title = isReset ? '恢复默认颜色' : color;
+      sw.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (isReset) { onChange(item.colorKey, null); picker.remove(); return; }
+        applyColor(color);
+      });
+      return sw;
+    };
+
+    // 预设色网格
+    const grid = document.createElement('div');
+    grid.style.cssText = 'display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px;';
+    schemeColors.forEach((c) => grid.appendChild(makeSwatch(c, false)));
+    picker.appendChild(grid);
+
+    // 分隔线
+    const sep = document.createElement('div');
+    sep.style.cssText = 'height: 1px; background: #eee; margin: 6px 0;';
+    picker.appendChild(sep);
+
+    // 自定义色区: 原生取色器 + Hex 输入框
+    const customRow = document.createElement('div');
+    customRow.style.cssText = 'display:flex; align-items:center; gap:6px;';
+
+    const native = document.createElement('input');
+    native.type = 'color';
+    native.value = currentColor;
+    native.title = '打开系统取色器';
+    native.style.cssText = `
+      width: 22px; height: 22px; padding: 0; border: 1px solid #ccc;
+      border-radius: 3px; cursor: pointer; background: transparent;
+    `;
+    // 原生取色器选色即应用
+    native.addEventListener('input', (e) => {
+      hexInput.value = e.target.value;
+      hexInput.style.borderColor = '';
+    });
+    native.addEventListener('change', (e) => {
+      e.stopPropagation();
+      applyColor(e.target.value);
+    });
+
+    const hexInput = document.createElement('input');
+    hexInput.type = 'text';
+    hexInput.value = currentColor.toUpperCase();
+    hexInput.title = '输入 Hex 颜色值 (如 #1890FF) 后回车';
+    hexInput.style.cssText = `
+      flex: 1; min-width: 0; font-size: 11px; padding: 3px 6px;
+      border: 1px solid #ddd; border-radius: 3px; outline: none;
+      font-family: monospace;
+    `;
+    hexInput.addEventListener('input', (e) => {
+      // 随输入同步取色器 (合法则实时预览, 但回车才应用)
+      const v = e.target.value.trim();
+      if (/^#?[0-9a-fA-F]{6}$/.test(v)) {
+        native.value = v.startsWith('#') ? v : '#' + v;
+        hexInput.style.borderColor = '#ddd';
+      } else {
+        hexInput.style.borderColor = '#e00'; // 非法输入红色提示
+      }
+    });
+    hexInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.stopPropagation();
+        const v = hexInput.value.trim();
+        if (/^#?[0-9a-fA-F]{6}$/.test(v)) {
+          applyColor((v.startsWith('#') ? v : '#' + v).toUpperCase());
+        } else {
+          hexInput.style.borderColor = '#e00';
+        }
+      }
+    });
+
+    const applyBtn = document.createElement('button');
+    applyBtn.textContent = '应用';
+    applyBtn.style.cssText = `
+      font-size: 11px; padding: 3px 8px; border: 1px solid #1a73e8;
+      background: #1a73e8; color: #fff; border-radius: 3px; cursor: pointer;
+    `;
+    applyBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const v = hexInput.value.trim();
+      if (/^#?[0-9a-fA-F]{6}$/.test(v)) {
+        applyColor((v.startsWith('#') ? v : '#' + v).toUpperCase());
+      } else {
+        hexInput.style.borderColor = '#e00';
+      }
+    });
+
+    customRow.appendChild(native);
+    customRow.appendChild(hexInput);
+    customRow.appendChild(applyBtn);
+    picker.appendChild(customRow);
+
+    // "恢复默认" 按钮 (清除 customColors[key])
+    const resetSw = document.createElement('div');
+    resetSw.style.cssText = `display:flex; align-items:center; gap:4px; margin-top:6px; cursor:pointer;`;
+    resetSw.appendChild(makeSwatch(null, true));
+    const resetLabel = document.createElement('span');
+    resetLabel.style.cssText = 'font-size: 11px; color: #666;';
+    resetLabel.textContent = '恢复默认';
+    resetSw.appendChild(resetLabel);
+    resetSw.addEventListener('click', (e) => { e.stopPropagation(); });
+    picker.appendChild(resetSw);
+
+    // 定位: 优先锚点下方, 空间不足则上方
+    picker.style.visibility = 'hidden';
+    container.appendChild(picker);
+    const anch = anchor.getBoundingClientRect();
+    const pick = picker.getBoundingClientRect();
+    const cont = container.getBoundingClientRect();
+    let left = anch.left - cont.left;
+    let top = anch.bottom - cont.top + 4;
+    if (left + pick.width > cont.right - cont.left) left = anch.right - cont.left - pick.width;
+    if (left < 0) left = 0;
+    if (top + pick.height > cont.bottom - cont.top) top = anch.top - cont.top - pick.height - 4;
+    if (top < 0) top = 4;
+    picker.style.left = left + 'px';
+    picker.style.top = top + 'px';
+    picker.style.visibility = 'visible';
+
+    // 关闭: Esc / 点击容器外
+    const onDocClick = (e) => {
+      if (!picker.contains(e.target) && !anchor.contains(e.target)) picker.remove();
+    };
+    const onKey = (e) => { if (e.key === 'Escape') picker.remove(); };
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    picker.addEventListener('click', (e) => e.stopPropagation());
+    // 清理监听
+    picker._cleanup = () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+    picker.addEventListener('remove', () => { if (picker._cleanup) picker._cleanup(); });
   };
 
   return {

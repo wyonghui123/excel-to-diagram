@@ -47,7 +47,9 @@
         </thead>
         <tbody>
           <tr v-for="row in rows" :key="row.key + row.title"
-            :class="{ 'is-divergent': row.divergent }" :title="row.divergent ? '三份 collapsed 不一致' : ''">
+            :class="{ 'is-divergent': row.divergent }" class="is-clickable"
+            :title="`点击高亮+居中图表中对应分组: ${row.key}${row.divergent ? '\n⚠ 三份 collapsed 不一致' : ''}`"
+            @click="focusRow(row)">
             <td class="truth-panel__key">{{ row.title || row.key }} <span class="truth-panel__code">{{ row.key }}</span></td>
             <td class="truth-panel__type">{{ row.type || '-' }}</td>
             <td class="truth-panel__flag">{{ flagIcon(row.store?.collapsed) }}</td>
@@ -62,9 +64,10 @@
     </div>
 
     <div class="truth-panel__hint">
+      点击任意行 → 高亮+居中图表中对应分组（经 <code>__archPage.focusElement</code>）·
       Console 可用: <code>__archPage.diag()</code> · <code>__archPage.verify()</code> ·
-      <code>__archPage.captureNodeSignature()</code> · <code>__archPage.exportUrl()</code> ·
-      <code>__archPage.help()</code> (能力清单)
+      <code>__archPage.whyHidden('PO201')</code> · <code>__archPage.captureNodeSignature()</code> ·
+      <code>__archPage.exportUrl()</code> · <code>__archPage.help()</code> (能力清单)
     </div>
   </div>
 </template>
@@ -134,6 +137,14 @@ function exportUrl() {
   } catch (e) {
     alert('复现链接：\n' + url)
   }
+}
+
+// [LINK 2026-08-15] 点击诊断行 → 高亮+居中图表对应分组.
+//   经 __archPage.focusElement('container', key) → requestChartFocus → focusOnTarget (含 container/node 跨类型兜底) + centerElement.
+function focusRow(row) {
+  const api = window.__archPage
+  const ok = api?.focusElement?.('container', row.key)
+  if (!ok) console.warn('[TruthPanel] focusElement 不可用或无响应:', row.key)
 }
 
 onMounted(refresh)
@@ -214,6 +225,9 @@ onMounted(refresh)
 }
 .truth-panel__table th { background: #f5f7fa; position: sticky; top: 0; }
 .truth-panel__table tr.is-divergent { background: #fef0f0; }
+.truth-panel__table tbody tr.is-clickable { cursor: pointer; }
+.truth-panel__table tbody tr.is-clickable:hover { background: #ecf5ff; }
+.truth-panel__table tbody tr.is-divergent:hover { background: #fde2e2; }
 .truth-panel__key .truth-panel__code { color: #999; font-family: monospace; font-size: 10px; margin-left: 4px; }
 .truth-panel__type { color: #888; font-size: 11px; }
 .truth-panel__flag { text-align: center; }

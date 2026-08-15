@@ -15,6 +15,7 @@
  * 重建日期：2026-08-01 (Phase 6 restore)
  * 注: Trae History 中从未实际写过此文件 (Trae 内部开发过程中一直缺失)
  */
+import { stripIdPrefix } from './archDataConverter.js'
 
 /**
  * 把 scopeIds 转换成 fetchPreviewData 所需的 hierarchyFilter
@@ -32,17 +33,21 @@ export function buildHierarchyFilterFromScope(scopeIds) {
   // effective 已在 useMultiObjectPage.handleScopeChange 中正确计算
   const filter = {}
 
+  // [FIX 2026-08-14] 剥离树节点 ID 前缀 (d_/s_/sm_/bo_), 防止 prefixed ID
+  //   经懒加载降级链路 (useChartPreview.fallbackToLazyLoad) 进入 preview 请求导致后端 500
+  const stripArr = (arr) => (Array.isArray(arr) ? arr.map(stripIdPrefix) : arr)
+
   if (scopeIds.domain?.effective?.length) {
-    filter.domain_id = [...scopeIds.domain.effective]
+    filter.domain_id = stripArr(scopeIds.domain.effective)
   }
   if (scopeIds.sub_domain?.effective?.length) {
-    filter.sub_domain_id = [...scopeIds.sub_domain.effective]
+    filter.sub_domain_id = stripArr(scopeIds.sub_domain.effective)
   }
   if (scopeIds.service_module?.effective?.length) {
-    filter.service_module_id = [...scopeIds.service_module.effective]
+    filter.service_module_id = stripArr(scopeIds.service_module.effective)
   }
   if (scopeIds.business_object?.effective?.length) {
-    filter.business_object_id = [...scopeIds.business_object.effective]
+    filter.business_object_id = stripArr(scopeIds.business_object.effective)
   }
 
   return filter

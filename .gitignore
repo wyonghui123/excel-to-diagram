@@ -227,3 +227,14 @@ test_helpers/scripts/layout_tree_archdata.png
 
 # 业务范围Excel
 影响范围_*.xlsx
+
+# ===== v3.27: test_helpers / 根目录 调试残留 (2026-08-15) =====
+# 根目录探针/重命名验证输出
+/probe_*.txt
+/test_*_out.txt
+# test_helpers 临时调试文件 (可重新生成, 不应入仓)
+test_helpers/cj.txt
+test_helpers/.cache_*.json
+test_helpers/shots_*.png
+test_helpers/out/
+test_helpers/_dbg_*.py

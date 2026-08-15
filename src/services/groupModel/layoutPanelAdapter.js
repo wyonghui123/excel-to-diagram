@@ -180,6 +180,22 @@ export function adaptGroupModelForLayoutPanel(mermaidGroups, chartType) {
  * @param {Array} groups - 旧 groups
  * @returns {Map<string, {enabled: boolean, visible: boolean}>} elementCode → 状态
  */
+// [FIX 2026-08-12] 状态键必须含层级(groupType)以消除编码歧义:
+//   SM/ITTF 等编码会在"子领域"与"服务模块"两个层级重复出现
+//   (如 子领域"销售"=SM 与 服务模块"服务管理"=SM; 子领域"内部交易"=ITTF 与
+//   服务模块"内部交易"=ITTF). 若仅用 elementCode 作 Map 键, 二者会合并成一条状态,
+//   导致子领域展开状态被同码服务模块覆盖 → 双击子领域无响应(渲染层 sig 不变).
+//   键格式: "<code>::<groupType规范化>", 无 groupType/type 时退回纯 code (兼容 legacy/BO 叶).
+//   extract 与 apply 必须共用本函数, 保证两棵树的同一逻辑节点匹配到同一 key.
+export function groupStateKey(item) {
+  if (!item) return null
+  const base = item.elementCode || item.id
+  if (base == null) return null
+  const raw = item.groupType || item.type || ''
+  const gt = String(raw).toLowerCase().replace(/_/g, '')
+  return gt ? `${String(base)}::${gt}` : String(base)
+}
+
 export function extractGroupStates(groups) {
   const states = new Map()
   if (!groups || !Array.isArray(groups)) return states
@@ -188,9 +204,9 @@ export function extractGroupStates(groups) {
     if (!Array.isArray(items)) return
     for (const item of items) {
       if (!item) continue
-      const key = item.elementCode || item.id
+      const key = groupStateKey(item)
       if (key) {
-        states.set(String(key), {
+        states.set(key, {
           enabled: item.enabled !== undefined ? item.enabled : true,
           visible: item.visible !== undefined ? item.visible : true,
           // [FOLD 2026-08-05] 保留折叠状态, 否则折叠/展开在跨管道合并时丢失 (FR-002 断点).
@@ -225,7 +241,7 @@ export function applyGroupStates(groups, states) {
     if (!Array.isArray(items)) return
     for (const item of items) {
       if (!item) continue
-      const key = item.elementCode ? String(item.elementCode) : (item.id ? String(item.id) : null)
+      const key = groupStateKey(item)
       if (key && states.has(key)) {
         const state = states.get(key)
         item.enabled = state.enabled

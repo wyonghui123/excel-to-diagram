@@ -14,6 +14,7 @@ let tooltipInstance = null
 //   修复: 改用 namespace import, 然后用 mod.default || mod (Vite 会把 default export 作为 'default' key)
 import * as EnumServiceNS from '@/services/enumService.js'
 import { useDiagnostics } from '../core/useDiagnostics.js'
+import { isFeatureEnabled } from '@/utils/featureFlags.js'
 const _enumServiceRef = {
   current: EnumServiceNS?.default || (EnumServiceNS?._cache ? EnumServiceNS : null)
 }
@@ -560,9 +561,17 @@ export function useTooltip() {
       }
     })
 
+    // [PERF 2026-08-13] Set 去重替代 some() 线性扫描 (O(path²)→O(path)).
+    //   大图 602 path 时 some() 约 36 万次引用比较; Set.has O(1).
+    //   feature flag: ff_perfProcessSvg=0 回退原 some() 逻辑.
+    const seenPaths = isFeatureEnabled('perfProcessSvg')
+      ? new Set(realEdgePaths.map(item => item.path))
+      : null
     directEdgePaths.forEach((path, edgeIndex) => {
-      if (!realEdgePaths.some(item => item.path === path)) {
+      const dup = seenPaths ? seenPaths.has(path) : realEdgePaths.some(item => item.path === path)
+      if (!dup) {
         realEdgePaths.push({ path, index: edgeIndex + edgeContainers.length })
+        if (seenPaths) seenPaths.add(path)
       }
     })
 
@@ -636,6 +645,9 @@ export function useTooltip() {
           correspondingPath.style.strokeWidth = '4px'
           correspondingPath.style.filter = 'drop-shadow(0 0 8px rgba(0, 0, 0, 0.6))'
         }
+        // [FIX 2026-08-14] label 分支缺 highlightNode: 与委托路径一致, source/target 节点也要高亮
+        highlightNode(svg, relation.source, 'source', selectedElements)
+        highlightNode(svg, relation.target, 'target', selectedElements)
       }
       // [P0-A] 埋点 + [P0-B] 状态快照同步到 diag
       diag.recordStepMeta('useTooltipLabelClick', {
@@ -705,8 +717,145 @@ export function useTooltip() {
     addListener(path, 'click', onClick)
   }
 
+  // [PERF 2026-08-13] 事件委托: 用 svg 上的 4 个监听器替代每条边/路径的 8 个独立监听器
+  //   (大图 602 边 ≈ 4800 个 addEventListener → 4 个). mouseover/mouseout 冒泡 + closest 定位,
+  //   用 lastHoverEl 追踪避免子元素冒泡重复 show, relatedTarget 判断真正离开.
+  //   feature flag: ff_perfProcessSvg=0 回退 per-element 绑定.
+  const setupDelegatedTooltipEvents = (svg, tooltip, pathToRelationMap, labels, selectedElements, realEdgePaths, annotationFilter) => {
+    const labelSet = new Set(labels)
+    let lastHoverEl = null
+
+    const resolveTarget = (rawEl) => {
+      if (!rawEl || !rawEl.closest) return null
+      const labelEl = rawEl.closest('.edgeLabel')
+      if (labelEl && labelSet.has(labelEl)) return { kind: 'label', labelEl, pathEl: null }
+      // [FIX 2026-08-14] HTML label (foreignObject > div.labelBkg > span.edgeLabel) 与 SVG label
+      //   (g.edgeLabels > g.edgeLabel) 成对存在. span 因 getBBox 抛 ERR 被 getEdgeLabels 过滤,
+      //   不在 labelSet → 之前 resolveTarget 返回 null → 真实鼠标 hover/click 聚合连线 label 无反应
+      //   (tooltip 不显示 + 无高亮). 向上找同组的 g.edgeLabel (labelSet 内), 复用其 relation 映射.
+      if (labelEl && !labelSet.has(labelEl)) {
+        const svgLabelEl = labelEl.closest('g.edgeLabel')
+        if (svgLabelEl && labelSet.has(svgLabelEl)) {
+          return { kind: 'label', labelEl: svgLabelEl, pathEl: null }
+        }
+      }
+      let pathEl = null
+      if (rawEl.tagName === 'path' && rawEl.classList && rawEl.classList.contains('flowchart-link')) {
+        pathEl = rawEl
+      } else {
+        const ep = rawEl.closest('.edgePath')
+        if (ep) pathEl = ep.querySelector('path')
+      }
+      if (pathEl) return { kind: 'path', labelEl: null, pathEl }
+      return null
+    }
+
+    const onOver = (e) => {
+      const t = resolveTarget(e.target)
+      if (!t) return
+      const hoverEl = t.labelEl || t.pathEl
+      if (hoverEl === lastHoverEl) return  // 子元素冒泡重复触发, 跳过
+      lastHoverEl = hoverEl
+      if (t.kind === 'label') {
+        const relation = pathToRelationMap.get(t.labelEl)
+        if (relation) showTooltip(tooltip, formatTooltipText(relation, annotationFilter), e.clientX, e.clientY)
+      } else {
+        const relation = pathToRelationMap.get(t.pathEl)
+        const text = relation ? formatTooltipText(relation, annotationFilter) : '无关系说明'
+        showTooltip(tooltip, text, e.clientX, e.clientY)
+      }
+    }
+
+    const onMove = (e) => {
+      moveTooltip(tooltip, e.clientX, e.clientY)
+    }
+
+    const onOut = (e) => {
+      const t = resolveTarget(e.target)
+      if (!t) {
+        // [FIX 2026-08-14] mouseout target 无法解析 (svg 空白 / 移出 svg / HTML label 未映射) 时
+        //   也必须隐藏 tooltip, 否则 tooltip 残留 visible 并随 mousemove 一直跟随鼠标移动.
+        if (lastHoverEl) {
+          lastHoverEl = null
+          hideTooltip(tooltip)
+        }
+        return
+      }
+      const hoverEl = t.labelEl || t.pathEl
+      if (e.relatedTarget && hoverEl && hoverEl.contains(e.relatedTarget)) return  // 仍在目标内部, 不离开
+      lastHoverEl = null
+      hideTooltip(tooltip)
+    }
+
+    const onClick = (e) => {
+      const t = resolveTarget(e.target)
+      if (!t) return
+      e.stopPropagation()
+      if (t.kind === 'label') {
+        clearHighlight(selectedElements)
+        selectedElements.label = t.labelEl
+        const relation = pathToRelationMap.get(t.labelEl)
+        if (relation) {
+          const correspondingPath = realEdgePaths.find((item) => item.path && pathToRelationMap.get(item.path) === relation)?.path
+          if (correspondingPath) {
+            selectedElements.path = correspondingPath
+            correspondingPath.style.strokeWidth = '4px'
+            correspondingPath.style.filter = 'drop-shadow(0 0 8px rgba(0, 0, 0, 0.6))'
+          }
+          // [FIX 2026-08-14] label 分支缺 highlightNode: 点击连线 (真实命中 label 元素) 时
+          //   source/target 节点也要高亮, 与 path 分支行为一致.
+          highlightNode(svg, relation.source, 'source', selectedElements)
+          highlightNode(svg, relation.target, 'target', selectedElements)
+        }
+        diag.recordStepMeta('useTooltipLabelClick', {
+          hasRelation: !!relation,
+          relationCode: relation?.relationCode || null,
+          hasPath: !!selectedElements.path
+        })
+        _snapshotHighlight(selectedElements)
+      } else {
+        selectedElements.path = null
+        selectedElements.label = null
+        selectedElements.sourceNode = null
+        selectedElements.targetNode = null
+        selectedElements.path = t.pathEl
+        const relation = pathToRelationMap.get(t.pathEl)
+        if (relation) {
+          const relationCode = relation.relationCode
+          const correspondingLabel = Array.from(labels).find((label) => {
+            const labelText = label.textContent || label.innerHTML
+            return labelText.trim() === relationCode
+          })
+          if (correspondingLabel) selectedElements.label = correspondingLabel
+          highlightNode(svg, relation.source, 'source', selectedElements)
+          highlightNode(svg, relation.target, 'target', selectedElements)
+        }
+        diag.recordStepMeta('useTooltipPathClick', {
+          hasRelation: !!relation,
+          relationCode: relation?.relationCode || null,
+          source: relation?.source || null,
+          target: relation?.target || null
+        })
+        _snapshotHighlight(selectedElements)
+      }
+    }
+
+    addListener(svg, 'mouseover', onOver)
+    addListener(svg, 'mousemove', onMove)
+    addListener(svg, 'mouseout', onOut)
+    addListener(svg, 'click', onClick)
+  }
+
   const addTrailingDottedLines = (svg, labels, diagramType, hideTails = false) => {
     if (diagramType !== 'businessObject' && diagramType !== 'serviceModule') return
+
+    // [PERF 2026-08-13] ELK (hideTails=true) 下拖尾线本就该隐藏, 原实现仍对每条边执行
+    //   getBBox/getBoundingClientRect (强制 reflow) + getTotalLength + 51 次 getPointAtLength
+    //   (602 边 ≈ 3 万次 SVG 几何计算), 最后仅靠 CSS hide-tails 隐藏结果 → 纯浪费.
+    //   早退后大图 process_svg 从 ~2.4s 显著下降. feature flag: ff_perfProcessSvg=0 可回退.
+    if (isFeatureEnabled('perfProcessSvg') && hideTails) {
+      return
+    }
 
     let defs = svg.querySelector('defs')
     if (!defs) {
@@ -983,13 +1132,17 @@ export function useTooltip() {
 
     const { pathToRelationMap, realEdgePaths } = matchPathsToRelations(svg, edgeLabels, relationDescriptions)
 
-    edgeLabels.forEach((label, index) => {
-      setupLabelEvents(label, index, tooltip, relationDescriptions, pathToRelationMap, edgeLabels, selectedElements, svg, realEdgePaths, annotationFilter)
-    })
-
-    realEdgePaths.forEach((edgePathInfo) => {
-      setupPathEvents(edgePathInfo.path, tooltip, pathToRelationMap, edgeLabels, selectedElements, svg, annotationFilter)
-    })
+    // [PERF 2026-08-13] 事件委托路径 (替代 4800 独立监听器). feature flag 可回退.
+    if (isFeatureEnabled('perfProcessSvg')) {
+      setupDelegatedTooltipEvents(svg, tooltip, pathToRelationMap, edgeLabels, selectedElements, realEdgePaths, annotationFilter)
+    } else {
+      edgeLabels.forEach((label, index) => {
+        setupLabelEvents(label, index, tooltip, relationDescriptions, pathToRelationMap, edgeLabels, selectedElements, svg, realEdgePaths, annotationFilter)
+      })
+      realEdgePaths.forEach((edgePathInfo) => {
+        setupPathEvents(edgePathInfo.path, tooltip, pathToRelationMap, edgeLabels, selectedElements, svg, annotationFilter)
+      })
+    }
 
     addTrailingDottedLines(svg, edgeLabels, diagramType, hideTails)
 

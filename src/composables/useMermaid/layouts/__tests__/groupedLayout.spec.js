@@ -13,7 +13,7 @@
  *       在有 enabled 子组时才生成. 因此需要先创建有容器内容的 group
  */
 import { describe, it, expect, beforeEach } from 'vitest'
-import { generateGroupedLayout, getLiftedParentPathMap } from '../groupedLayout'
+import { generateGroupedLayout, getLiftedParentPathMap, buildLayoutHelperEdges } from '../groupedLayout'
 import { generateLinearLayout } from '../linearLayout'
 import { generateZoneLayout } from '../elkZoneLayout'
 import { generateGridLayout } from '../gridLayout'
@@ -446,5 +446,149 @@ describe('groupedLayout - 上提 uplift', () => {
       // 容器标题 (subgraph) 同样剔除父路径
       expect(result.mermaidCode).toContain('{销售}')
     })
+  })
+})
+
+// [ELK-GROUP 2026-08-12] 系统自动分组 (无关系/有关系, _elkGroup=inner/boundary).
+//   [ELK-SEM 2026-08-14] 语义对齐 (用户确认): enabled=true 的 ELK 分组**始终创建 subgraph
+//   容器**, visible=false 仅表示"容器在但无边框/无标题" (隐藏不影响容器渲染), 不再复用
+//   disabled 打平分支 (原实现删容器 → 与禁用视觉一致 → "隐藏态污染启用" bug).
+//   打平分支仅用于 enabled=false (禁用: 无容器). 两种分支渲染 ELK 节点时都**按分组**
+//   收集节点 id → 链式虚拟边 (buildLayoutHelperEdges), 防 ELK 无连线节点单行平铺.
+describe('groupedLayout - ELK 系统自动分组 (无关系/有关系)', () => {
+  it('enabled=true + visible=false → 无边框 subgraph (容器在): subgraph G_id[ ], 透明样式, 节点在容器内', () => {
+    const groups = [{
+      id: 'G1', title: '无关系', _elkGroup: 'inner', enabled: true, visible: false,
+      directNodes: ['N1', 'N2'], children: []
+    }]
+    const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    // [ELK-SEM 2026-08-14] 隐藏 ≠ 打平: 容器必须存在 (enabled=true 必有容器), 无标题
+    expect(result.mermaidCode).toContain('subgraph G_G1[ ]')
+    // 节点在容器内渲染, 不消失
+    expect(result.mermaidCode).toContain('N1')
+    expect(result.mermaidCode).toContain('N2')
+    // 无边框容器: 透明样式 (容器在但不可见, 样式行在 styleLines)
+    expect(result.styleLines.join('\n')).toContain('style G_G1 fill:none,stroke:none')
+    // 节点被收集 → 生成布局辅助虚拟边 (收集顺序跟随渲染顺序 reversedNodes: N2→N1)
+    expect(result.layoutHelperEdges).toEqual([{ source: 'N2', target: 'N1' }])
+  })
+
+  it('enabled=true + visible=true → 有标题 subgraph + 收集虚拟边', () => {
+    const groups = [{
+      id: 'G1', title: '无关系', _elkGroup: 'inner', enabled: true, visible: true,
+      directNodes: ['N1', 'N2'], children: []
+    }]
+    const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    expect(result.mermaidCode).toContain('subgraph G_G1["无关系"]')
+    expect(result.mermaidCode).toContain('N1')
+    // [ELK-SEM 2026-08-14] 有边框同样收集 (透明边仅增强约束, 防单行), 不再返回空
+    expect(result.layoutHelperEdges).toEqual([{ source: 'N2', target: 'N1' }])
+  })
+
+  it('enabled=false → 打平: 无 subgraph, 节点直接渲染到父层', () => {
+    const groups = [{
+      id: 'G1', title: '有关系', _elkGroup: 'boundary', enabled: false, visible: false,
+      directNodes: ['N1', 'N2'], children: []
+    }]
+    const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    expect(result.mermaidCode).not.toMatch(/subgraph G_G1/)
+    expect(result.mermaidCode).toContain('N1')
+    expect(result.mermaidCode).toContain('N2')
+    // disabled 分支同样打平 → 收集节点 → 有虚拟边
+    expect(result.layoutHelperEdges.length).toBe(1)
+  })
+})
+
+// [ELK-FLAT 2026-08-14] 布局辅助虚拟边: 把打平 ELK 分组的孤立节点引导成多列网格.
+//   纯函数 buildLayoutHelperEdges 直接单测 + 集成行为 (打平收集 → 返回值) 双覆盖.
+describe('groupedLayout - ELK-FLAT 布局辅助虚拟边', () => {
+  it('节点 < 2 → 无边', () => {
+    expect(buildLayoutHelperEdges([])).toEqual([])
+    expect(buildLayoutHelperEdges(['A'])).toEqual([])
+    expect(buildLayoutHelperEdges(null)).toEqual([])
+  })
+
+  it('节点 ≤ 12 → 单链, 按顺序两两相连 (n-1 条边)', () => {
+    const edges = buildLayoutHelperEdges(['N1', 'N2', 'N3', 'N4'])
+    expect(edges).toEqual([
+      { source: 'N1', target: 'N2' },
+      { source: 'N2', target: 'N3' },
+      { source: 'N3', target: 'N4' },
+    ])
+  })
+
+  it('58 节点 → 按 12 切片成 5 链 (12/12/12/12/10), 共 53 条边', () => {
+    const ids = Array.from({ length: 58 }, (_, i) => `N${i + 1}`)
+    const edges = buildLayoutHelperEdges(ids)
+    expect(edges.length).toBe(53) // 4 条满链 × 11 + 末链 9
+    // 链内两两相连
+    expect(edges.some(e => e.source === 'N1' && e.target === 'N2')).toBe(true)
+    expect(edges.some(e => e.source === 'N11' && e.target === 'N12')).toBe(true)
+    expect(edges.some(e => e.source === 'N13' && e.target === 'N14')).toBe(true)
+    expect(edges.some(e => e.source === 'N57' && e.target === 'N58')).toBe(true)
+    // 链边界不跨链相连 (N12 是链1末尾, N13 是链2开头)
+    expect(edges.some(e => e.source === 'N12' && e.target === 'N13')).toBe(false)
+    // 前 12 节点仅内部相连, 无跨链边
+    expect(edges.every(e => !(e.source === 'N1' && e.target !== 'N2'))).toBe(true)
+  })
+
+  it('集成: ELK 分组 visible=false → 无边框 subgraph + directNodes 节点被收集并生成链式边', () => {
+    const groups = [{
+      id: 'G1', title: '无关系', _elkGroup: 'inner', enabled: true, visible: false,
+      directNodes: ['N1', 'N2', 'N3'], children: []
+    }]
+    const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    // [ELK-SEM 2026-08-14] 容器在 (无标题 subgraph), 不再是打平
+    expect(result.mermaidCode).toContain('subgraph G_G1[ ]')
+    // 收集顺序跟随渲染顺序 (reversedNodes: N3→N2→N1)
+    expect(result.layoutHelperEdges).toEqual([
+      { source: 'N3', target: 'N2' },
+      { source: 'N2', target: 'N1' },
+    ])
+  })
+
+  it('集成: 多个 ELK 分组按组收集 → 虚拟边不跨组连接', () => {
+    const groups = [
+      { id: 'G1', title: '无关系', _elkGroup: 'inner', enabled: true, visible: false,
+        directNodes: ['N1', 'N2'], children: [] },
+      { id: 'G2', title: '有关系', _elkGroup: 'boundary', enabled: true, visible: false,
+        directNodes: ['N3'], children: [] }
+    ]
+    const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    // 两组分别收集: 组1 [N2,N1] → 1 边; 组2 [N3] 单节点 → 无边. 无跨组边 (N1↔N3 / N2↔N3)
+    expect(result.layoutHelperEdges).toEqual([{ source: 'N2', target: 'N1' }])
+  })
+
+  it('集成: _isDirectNodesContainer 容器内的节点同样被收集', () => {
+    const groups = [{
+      id: 'G1', title: '有关系', _elkGroup: 'boundary', enabled: true, visible: false,
+      directNodes: [], containers: [{ _isDirectNodesContainer: true, nodes: ['N1', 'N2'] }], children: []
+    }]
+    const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    expect(result.mermaidCode).toContain('subgraph G_G1[ ]')
+    expect(result.layoutHelperEdges).toEqual([{ source: 'N1', target: 'N2' }])
+  })
+
+  it('普通分组 enabled=false 打平 → 不收集节点 (layoutHelperEdges 为空)', () => {
+    const groups = [{
+      id: 'G1', title: '禁用组', enabled: false, visible: true,
+      directNodes: ['N1', 'N2'], children: []
+    }]
+    const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    expect(result.mermaidCode).not.toMatch(/subgraph G_G1/)
+    expect(result.layoutHelperEdges).toEqual([])
+  })
+
+  it('跨调用不残留: 上次打平收集的节点不影响本次调用', () => {
+    const flatGroups = [{
+      id: 'G1', title: '内', _elkGroup: 'inner', enabled: true, visible: false,
+      directNodes: ['N1', 'N2'], children: []
+    }]
+    const normalGroups = [{
+      id: 'G2', title: '普通组', containers: [containers[0]], children: []
+    }]
+    generateGroupedLayout(flatGroups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    const result2 = generateGroupedLayout(normalGroups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    expect(result2.layoutHelperEdges).toEqual([])
   })
 })

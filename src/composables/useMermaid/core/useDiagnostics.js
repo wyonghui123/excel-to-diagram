@@ -52,6 +52,29 @@ const createDiagnostics = () => {
   const lastRender = ref(null)
 
   /**
+   * [P0 2026-08-14] 渲染完成版本号 (确定性渲染完成信号).
+   *   背景: 验证脚本 (probe_elk_render / diag_*) 之前只能用 sleep(3s) 猜渲染完成,
+   *   或轮询 lastRenderedCode.length>30000, 环境慢时又脆又慢.
+   *   现在每次 endRender (成功/失败/跳过路径统一出口) 递增版本号 + 派发
+   *   CustomEvent 'archchart:render-end', 外部等待 version 变化即可:
+   *     await page.waitForFunction(v => window.__archPage.mermaid.renderVersion > v, prev)
+   *   或监听事件: window.addEventListener('archchart:render-end', ...)
+   *   [语义] 失败/异常也递增 (外部可感知"渲染尝试结束"), 与 lastRender.error 配合判定.
+   */
+  let _renderVersion = 0
+  const getRenderVersion = () => _renderVersion
+  const bumpRenderVersion = (info = {}) => {
+    _renderVersion++
+    if (typeof window !== 'undefined') {
+      try {
+        window.dispatchEvent(new CustomEvent('archchart:render-end', {
+          detail: { version: _renderVersion, error: info.error || null }
+        }))
+      } catch (e) { /* swallow: 事件派发失败不影响渲染流程 */ }
+    }
+  }
+
+  /**
    * 步骤级 timing 字典 (key = 步骤名, value = 累计 ms)
    * 例如 { syntax_gen: 12, mermaid_run: 480, svg_process: 8 }
    */
@@ -167,6 +190,8 @@ const createDiagnostics = () => {
       ...info
     }
     currentRender.value = null
+    // [P0 2026-08-14] 渲染完成确定性信号: 版本号 +1 + 派发事件 (见 getRenderVersion 注释)
+    bumpRenderVersion(info)
     if (hooks.onRenderEnd) {
       try { hooks.onRenderEnd(lastRender.value) } catch (e) { /* swallow */ }
     }
@@ -241,7 +266,11 @@ const createDiagnostics = () => {
    */
   const snapshot = () => {
     const doc = typeof document === 'undefined' ? null : document
-    const nodeEls = doc ? Array.from(doc.querySelectorAll('svg g.node[data-code]')) : []
+    // [FIX 2026-08-13] 只统计活动图表 SVG (.mermaid-content), 排除折叠缓冲层 (.mermaid-fold-buffer).
+    //   缓冲层是旧图深克隆, 无 cluster 且节点数与活动图不同, 若 querySelectorAll('svg g.node')
+    //   全文档统计会被误计入 → 节点数翻倍 (81 vs 41)、容器检查错乱.
+    const activeSvg = doc ? doc.querySelector('.mermaid-content svg.flowchart, .mermaid-content svg') : null
+    const nodeEls = activeSvg ? Array.from(activeSvg.querySelectorAll('g.node[data-code]')) : []
     const nodes = nodeEls.map(n => {
       const rect = n.querySelector('rect')
       return {
@@ -251,7 +280,7 @@ const createDiagnostics = () => {
         highlighted: n.classList.contains('annotation-highlighted')
       }
     })
-    const clusterEls = doc ? Array.from(doc.querySelectorAll('svg g.cluster')) : []
+    const clusterEls = activeSvg ? Array.from(activeSvg.querySelectorAll('g.cluster')) : []
     // [FIX 2026-08-02] mermaid 11 ELK 渲染嵌套 subgraph 时 DOM 是平铺的
     //   (g.cluster 之间无 DOM 包含关系, 节点也全部挂在顶层 g.nodes),
     //   嵌套通过 rect bbox 包含体现: 内层 cluster 画在外层 cluster 的 rect 内.
@@ -323,8 +352,8 @@ const createDiagnostics = () => {
       render: lastRender.value,
       nodes,
       links: {
-        svgStrokes: doc
-          ? Array.from(doc.querySelectorAll('path.flowchart-link')).map(p => ({
+        svgStrokes: activeSvg
+          ? Array.from(activeSvg.querySelectorAll('path.flowchart-link')).map(p => ({
               id: p.getAttribute('id') || '',
               stroke: (p.getAttribute('stroke') || p.style.stroke || '').trim().toLowerCase(),
               // [FIX 2026-08-03] 暴露 marker-start/marker-end 供 e2e 断言双向渲染
@@ -380,6 +409,8 @@ const createDiagnostics = () => {
     errors,
     warnings,
     hooks,
+    // [P0 2026-08-14] 渲染完成版本号 (确定性等待信号)
+    getRenderVersion,
     // actions
     resetStep,
     addStep,
@@ -418,6 +449,8 @@ export const installDiagnosticsToWindow = () => {
   window.__archPage.mermaid = {
     get lastRender() { return diag.lastRender.value },
     get currentRender() { return diag.currentRender.value },
+    // [P0 2026-08-14] 渲染完成版本号: 每次 endRender +1, 验证脚本 waitForFunction 等待其变化
+    get renderVersion() { return diag.getRenderVersion() },
     get stepTimings() { return { ...diag.stepTimings } },
     get stepMeta() { return JSON.parse(JSON.stringify(diag.stepMeta)) },
     get errors() { return diag.errors.slice() },

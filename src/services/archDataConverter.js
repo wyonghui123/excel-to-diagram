@@ -1,6 +1,19 @@
 /* global URLSearchParams */
 import { apiV2 } from '@/utils/httpClient'
 
+// [FIX 2026-08-14] 统一剥离树节点 ID 前缀 (d_/s_/sm_/bo_), 返回纯数字 ID
+//   树节点 ID 格式: d_2200, s_68, sm_135, bo_42 (见 ObjectScopeSection.vue 节点构造)
+//   后端 /bo/architecture/preview 用 int() 强转 ID, 收到 prefixed ID 会抛 ValueError → 500。
+//   scopeIds 在个别路径 (如 scope JSON shortcut) 可能携带 prefixed ID, 这里在
+//   preview 请求唯一出口强制归一化, 任何注入路径都不会把前缀 ID 发往后端。
+export function stripIdPrefix(id) {
+  if (typeof id === 'string') {
+    const match = id.match(/^(?:d_|s_|sm_|bo_)(\d+)$/)
+    if (match) return parseInt(match[1], 10)
+  }
+  return id
+}
+
 /**
  * 从后端 architecture/preview 聚合 API 获取完整树结构数据
  * 替代原先 5 次独立 API 调用 (4×boService.query + 1×fetchRelationships)
@@ -13,10 +26,12 @@ async function fetchPreviewData(versionId, hierarchyFilter = {}) {
   if (versionId) params.set('version_id', versionId)
 
   // 将 hierarchyFilter 中的 ID 数组转为逗号分隔字符串
-  const domainIds = hierarchyFilter.domain_id || hierarchyFilter.domainIds
-  const subDomainIds = hierarchyFilter.sub_domain_id || hierarchyFilter.subDomainIds
-  const serviceModuleIds = hierarchyFilter.service_module_id || hierarchyFilter.serviceModuleIds
-  const businessObjectIds = hierarchyFilter.business_object_id || hierarchyFilter.businessObjectIds
+  // [FIX 2026-08-14] 每个 ID 统一 stripIdPrefix 归一化为纯数字, 防止 prefixed ID (d_2200) 导致后端 500
+  const toPlainIds = (arr) => (Array.isArray(arr) ? arr.map(stripIdPrefix) : arr)
+  const domainIds = toPlainIds(hierarchyFilter.domain_id || hierarchyFilter.domainIds)
+  const subDomainIds = toPlainIds(hierarchyFilter.sub_domain_id || hierarchyFilter.subDomainIds)
+  const serviceModuleIds = toPlainIds(hierarchyFilter.service_module_id || hierarchyFilter.serviceModuleIds)
+  const businessObjectIds = toPlainIds(hierarchyFilter.business_object_id || hierarchyFilter.businessObjectIds)
 
   if (domainIds && domainIds.length > 0) params.set('domain_ids', domainIds.join(','))
   if (subDomainIds && subDomainIds.length > 0) params.set('sub_domain_ids', subDomainIds.join(','))

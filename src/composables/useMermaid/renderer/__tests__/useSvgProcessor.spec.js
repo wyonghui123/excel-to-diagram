@@ -232,6 +232,45 @@ describe('useSvgProcessor - buildColorLegendData 整组都在对象范围不单�
     expect(names).not.toContain('计划')           // 整组都在对象范围 → 跳过
     expect(names).toContain('制造')               // 含非对象范围节点 → 保留
   })
+
+  // [LEGEND-SECTION 2026-08-15] 区分对象范围时, 对象范围项后应插入"对象范围外部"节标题,
+  //   明确下方颜色分组属于范围外元素; 不区分或仅有对象范围项时不应有节标题.
+  it('区分对象范围且有范围外分组时, 插入"对象范围外部"节标题', async () => {
+    const api = await makeApi()
+    const diagramData = {
+      colorGroupBy: 'domain',
+      centerScopeColor: '#808080',
+      centerObjectColor: '#EDEDED',
+      centerScope: ['A1'],
+      nodes: [
+        { code: 'A1', name: 'A1', serviceModuleName: 'M1', subDomain: 'S1', domain: '计划', isCenter: true },
+        { code: 'C1', name: 'C1', serviceModuleName: 'M3', subDomain: 'S3', domain: '制造', isCenter: false }
+      ]
+    }
+    const legend = api.buildColorLegendData(diagramData, [], true)
+    const names = legend.map(i => i.name)
+    expect(names[0]).toBe('对象范围')
+    expect(names[1]).toBe('对象范围外部')
+    expect(legend[1].isSection).toBe(true)
+    expect(names).toContain('制造')
+  })
+
+  it('不区分对象范围时, 不插入节标题', async () => {
+    const api = await makeApi()
+    const diagramData = {
+      colorGroupBy: 'domain',
+      centerScopeColor: '#808080',
+      centerObjectColor: '#EDEDED',
+      centerScope: ['A1'],
+      nodes: [
+        { code: 'A1', name: 'A1', serviceModuleName: 'M1', subDomain: 'S1', domain: '计划', isCenter: true },
+        { code: 'C1', name: 'C1', serviceModuleName: 'M3', subDomain: 'S3', domain: '制造', isCenter: false }
+      ]
+    }
+    const legend = api.buildColorLegendData(diagramData, [], false)
+    expect(legend.some(i => i.isSection)).toBe(false)
+    expect(legend.some(i => i.name === '对象范围')).toBe(false)
+  })
 })
 
 describe('useSvgProcessor - addNodeCodeAttributes 同名前缀 BO 编码匹配 (2026-08-09)', () => {

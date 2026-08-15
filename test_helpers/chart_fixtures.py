@@ -39,7 +39,8 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 # 测试环境基线 (与 chart_diag.py 一致)
-BASE_URL = 'http://localhost:3006'
+# [FIX 2026-08-13] 3006 实例 API 已 500 无法认证; 活跃 dev 环境为 3004 (同数据: version 863 / sub_domain 299)
+BASE_URL = 'http://localhost:3004'
 PRODUCT_CODE = 'TTTTT000'
 VERSION_ID = 863
 
@@ -51,10 +52,11 @@ SCOPE_BO_DEFAULT = {
                         2778, 2782, 2785, 1636, 2796, 2783, 2790, 2791, 2786, 2787]
 }
 SCOPE_BO_SHORT = {'sub_domain': [299], 'business_object': [3220]}
-# [L2 2026-08-02] 大规模: 子域 329 全量 (150 BO, 见 _probe_subdomains.py 分布).
-#   原先用子域 299 全量 (仅 30 BO, 与 bo_default 相同) 不具备大图验证意义.
-#   150 BO 是默认 30 BO 的 5 倍, 验证性能 + ELK + 大图结构, 又不至于渲染过慢.
-SCOPE_BO_LARGE = {'sub_domain': [329]}
+# [L2 2026-08-13] 大规模: 采购供应 (sub_domain 339, code MM, 93 BO).
+#   用户指定大子域场景必须采用「采购供应」子领域.
+#   93 BO ≈ 标准 30 BO (SCP) 的 3 倍, 验证性能 + ELK + 大图结构, 又不至于渲染过慢.
+#   (原 sub_domain 329 150 BO 已被用户要求替换)
+SCOPE_BO_LARGE = {'sub_domain': [339]}
 
 
 def fingerprint(obj) -> str:

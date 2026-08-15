@@ -96,6 +96,34 @@ describe('archDataConverter', () => {
       expect(url).toContain('domain_ids=1%2C2')
     })
 
+    it('应该剥离树节点 ID 前缀 (d_/s_/sm_/bo_), 防止后端 int() 500', async () => {
+      mockApiV2Get.mockResolvedValue(makePreviewResponse())
+      await buildPreviewDataFromArchData(null, 1, {
+        domain_id: ['d_2200', 2201],
+        sub_domain_id: ['s_299'],
+        service_module_id: ['sm_615', 'sm_614'],
+        business_object_id: ['bo_42']
+      })
+      const url = mockApiV2Get.mock.calls[0][0]
+      expect(url).toContain('domain_ids=2200%2C2201')
+      expect(url).toContain('sub_domain_ids=299')
+      expect(url).toContain('service_module_ids=615%2C614')
+      expect(url).toContain('business_object_ids=42')
+      // 归一化后不应再出现任何 prefixed ID
+      expect(url).not.toMatch(/[?&](?:domain_ids|sub_domain_ids|service_module_ids|business_object_ids)=[^&]*(?:d_|s_|sm_|bo_)/)
+    })
+
+    it('stripIdPrefix 对纯数字 ID 原样返回', async () => {
+      mockApiV2Get.mockResolvedValue(makePreviewResponse())
+      await buildPreviewDataFromArchData(null, 1, {
+        domain_id: [2200],
+        sub_domain_id: [299]
+      })
+      const url = mockApiV2Get.mock.calls[0][0]
+      expect(url).toContain('domain_ids=2200')
+      expect(url).toContain('sub_domain_ids=299')
+    })
+
     it('API 失败应该抛出错误', async () => {
       mockApiV2Get.mockResolvedValue({ success: false, message: 'Server error' })
       await expect(buildPreviewDataFromArchData(null, 1, {})).rejects.toThrow('Server error')

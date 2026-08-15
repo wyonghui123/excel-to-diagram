@@ -12,7 +12,19 @@
 > - [x] P0-1(2026-08-10) 状态真相面板 `TruthPanel.vue` (任意模式可用, store/chart/渲染树三份并排、差异高亮、一键自检、导出复现链接)
 > - [x] P1-1(2026-08-10) URL 状态编码 `?fold=<json>&scopeHighlight=0|1` + `__archPage.exportUrl()` 应用与导出
 > - [x] (2026-08-10) 可发现性入口 `__archPage.help()` 统一能力清单 (后续能力容易被知道)
+> - [x] (2026-08-15) 补齐排查真实踩坑点: `getDiagramData()`(ref 解包, 直接读 nodes/links) /
+>   `getColorState()`(实时颜色快照, 不依赖增量路径副作用 colorState) / `getExpandState()`(实时展开/折叠统计) /
+>   `whyHidden(code)`(一键诊断某 BO/分组"为何不可见": 数据/SVG/父分组可见性/折叠祖先+原因清单) —
+>   全部注册到 help(), 并写入 CHART_DEBUG_COOKBOOK
+> - [x] (2026-08-15) preset 注册表 (MultiObjectManagementPage): `preset=scp|mm` 一键启动;
+>   未知 preset 打印可用列表 + 关系场景(scenario.py)取法, 提升"快速打开"可发现性
 > - [x] (2026-08-10) 复盘教训固化: 颜色字段统一 `colorStateTracker` 快照 diff (见 §七 S1~S4)
+> - [x] (2026-08-15) exportUrl 扩展为「完整状态快照链接」: 编码 `colorGroupBy(colorGroupBy)` /
+>   `colorScheme(colorScheme)` / `expandLevel` / `customColors` 到 `cfg` 参数 (base64 JSON),
+>   新增 `applyCfg()` 加载时应用; 一条 URL 精确复现折叠态+配色+颜色分组+展开层级+区分开关
+> - [x] (2026-08-15) whyHidden 与 TruthPanel 联动: 新增 `__archPage.focusElement(type,id)` →
+>   `requestChartFocus` → `focusOnTarget`(container/node 跨类型兜底)+`centerElement`;
+>   TruthPanel 表格行点击即高亮+居中图表对应分组 (含 divergences 行), 均注册到 help()
 > - [x] (2026-08-10) 验证通过: 单测 41/41 (useMermaidColors/foldPreservation/colorStateTracker) +
 >   `test_helpers/diag_observability.py` 浏览器实测 (help 完整、fold/scopeHighlight 应用、exportUrl、
 >   真相面板渲染、工具栏按钮)。注: headless 环境图表渲染极慢 (~38s), 脚本已改为轮询等待
@@ -31,14 +43,18 @@
 | 状态聚合 | `__archPage.diag()` | store/chart/render + divergences 分歧清单 (JSON) |
 | 行为断言 | `__archPage.verify({before, expandKeys})` | `{pass, checks}` 结构化自检 |
 | 节点签名 | `__archPage.captureNodeSignature()` | 判定是否全量重建 |
-| 复现链接 | `__archPage.exportUrl()` | 生成当前折叠态+区分/不区分的可复现 URL |
+| 复现链接 | `__archPage.exportUrl()` | 生成「完整状态快照」可复现 URL (折叠态+配色+颜色分组+展开层级+区分开关) |
+| 定位助手 | `__archPage.focusElement(type,id)` | 高亮+居中图表元素; TruthPanel 表格行点击即调用 |
+| 一键诊断 | `__archPage.whyHidden(code)` | 某 BO/分组"为何不可见"原因清单 |
 
 复现 URL 约定:
 ```
-/system/archdata?preset=scp&fold={"MM":false,"SCP":true}&scopeHighlight=1
+/system/archdata?preset=scp&fold={"MM":false,"SCP":true}&scopeHighlight=1&cfg=<base64>
 ```
 - `fold`: JSON 对象, key=分组 elementCode/id, value=collapsed (false=展开, true=折叠)
 - `scopeHighlight`: 0=不区分, 1=区分
+- `cfg`: base64(JSON), 可选字段 `cg`(colorGroupBy) / `cs`(colorScheme) / `el`(expandLevel) /
+  `cc`(customColors); 与 fold/scopeHighlight 组合成完整状态快照
 
 
 

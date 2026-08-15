@@ -26,7 +26,9 @@ import {
   getSelectedRelationIds
 } from '../../../services/relationClassifier.js'
 import { buildPreviewDataFromArchData, convertToRelationNodeIds } from '../../../services/archDataConverter.js'
-import { applyDefaultExpandByScope, isSubtreeInScope } from '../../../services/expandLevel.js'
+// [DEFAULT-LEVEL 2026-08-12] applyDefaultExpandByScope 已废弃: 初始展开层级
+// 由渲染层 EmbeddedChartView 按分组数量自适应 (applyDefaultExpandByCount) 决定,
+// 此处在生成阶段套用范围折叠会与自适应展开冲突, 故不再引入。
 
 /**
  * @deprecated 旧版非分组控制逻辑，仅在用户启用"启用旧版非分组控制"时使用
@@ -448,6 +450,15 @@ export function useDiagramData() {
   //   fallback: 用户在图表页手动操作时, 仍可用 getSelectedRelationIds
   const archRelationIdsRef = ref(null)
 
+  // [PERF 2026-08-13] 基础 previewData 快照 (首次 init 时的对象范围数据)。
+  //   关系范围变更时 (对象范围不变) 从此快照恢复, 避免重新拉取 architecture/preview,
+  //   同时清理上次补全累积的外部 BO (避免 previewData 越滚越大)。
+  const basePreviewData = ref(null)
+
+  // [PERF 2026-08-13] 上次渲染的领域数量 (用于检测关系范围变更是否引入新的领域层级)。
+  //   领域数变化 (如从 1 个领域 → 多个领域) 时, 应重置展开层级状态, 让渲染层重新自适应默认展开。
+  const lastFilteredDomainCount = ref(0)
+
   const filteredRelations = computed(() => {
     if (archRelationIdsRef.value && archRelationIdsRef.value.length > 0) {
       return [...archRelationIdsRef.value]
@@ -642,7 +653,15 @@ export function useDiagramData() {
     const markers = {
       domains: new Map(),
       subDomains: new Map(),
-      serviceModules: new Map()
+      serviceModules: new Map(),
+      // [PARTIAL-CENTER 2026-08-15] 完全包含对象范围标记 (该分组所有 BO 都在 centerScope):
+      //   fullyServiceModules / fullySubDomains / fullyDomains: key → 是否完全包含.
+      //   与 hasCenter 标记配合区分三种折叠节点着色:
+      //     hasCenter && fully → centerScopeColor; hasCenter && !fully → 中性灰; !hasCenter → 分组色.
+      //   兼容旧契约: 原 domains/subDomains/serviceModules 仍按布尔/仅含中心 SM 语义填充.
+      fullyDomains: new Map(),
+      fullySubDomains: new Map(),
+      fullyServiceModules: new Map()
     }
 
     // 只使用 centerScope，不使用 relationFilteredBoCodes
@@ -655,15 +674,44 @@ export function useDiagramData() {
       return
     }
 
+    // [PARTIAL-CENTER 2026-08-15] 按层级聚合 BO 计数 (total/center) — 数据源与旧逻辑一致 (previewData).
+    //   分组"完全包含对象范围" = 该分组所有【图表内】BO (finalBoCodes = centerScope ∪ 关系引入外部 BO)
+    //   都在 centerScope 中, 即: 有中心 BO 且无"关系引入的外部 BO".
+    //   关键: 外部 BO 判定基于 relationFilteredBoCodes (用户选中关系真正引入图表的 BO),
+    //   而非 previewData 全量窗口 — 否则 SCP-only (无外部 BO) 时 供应链云 领域因 previewData
+    //   含其他子领域 BO 被误判"部分包含"→ 折叠节点错误中性 (与语法层 collectDescendantBoCodes
+    //   按图表分组树判定完全包含的结果不一致, 见 2026-08-15 验证).
+    const externalBoSet = new Set()
+    ;(relationFilteredBoCodes.value || []).forEach(code => {
+      if (!centerScopeSet.has(code)) externalBoSet.add(code)
+    })
+    const smCounts = new Map()       // sm.code -> { total, center, external }
+    const sdCounts = new Map()       // subDomain.name -> { total, center, external }
+    const domainCounts = new Map()   // domain.name -> { total, center, external }
+    const bump = (map, key, isCenter, isExternal) => {
+      if (!key) return
+      const c = map.get(key) || { total: 0, center: 0, external: 0 }
+      c.total++
+      if (isCenter) c.center++
+      if (isExternal) c.external++
+      map.set(key, c)
+    }
+    ;(previewData.value?.businessObjects || []).forEach(bo => {
+      const isCenter = centerScopeSet.has(bo.code)
+      const isExternal = externalBoSet.has(bo.code)
+      bump(smCounts, bo.serviceModule, isCenter, isExternal)
+      bump(sdCounts, bo.subDomain, isCenter, isExternal)
+      bump(domainCounts, bo.domain, isCenter, isExternal)
+    })
+
     // 使用 previewData.value.serviceModules 来获取正确的服务模块名称
     // 因为 filteredContainers 也使用 serviceModules 来构建节点数据
     if (previewData.value?.serviceModules) {
       previewData.value.serviceModules.forEach(sm => {
-        // 检查这个服务模块是否包含中心范围的业务对象
-        const matchingBos = previewData.value.businessObjects?.filter(
-          bo => bo.serviceModule === sm.code && centerScopeSet.has(bo.code)
-        )
-        if (matchingBos && matchingBos.length > 0) {
+        const c = smCounts.get(sm.code)
+        const hasCenter = !!c && c.center > 0
+        const fullyCenter = !!c && c.center > 0 && c.external === 0
+        if (hasCenter) {
           // 存储服务模块的 name 和 code
           if (sm.name) {
             markers.serviceModules.set(sm.name, true)
@@ -671,6 +719,12 @@ export function useDiagramData() {
           if (sm.code) {
             markers.serviceModules.set(sm.code, true)
           }
+        }
+        if (sm.name) {
+          markers.fullyServiceModules.set(sm.name, fullyCenter)
+        }
+        if (sm.code) {
+          markers.fullyServiceModules.set(sm.code, fullyCenter)
         }
       })
     }
@@ -684,24 +738,24 @@ export function useDiagramData() {
     if (previewData.value?.domainProducts) {
       previewData.value.domainProducts.forEach(domain => {
         let domainHasCenter = false
+        let domainAllCenter = true
+        let domainTotal = 0
 
         domain.modules?.forEach(subDomain => {
-          let subDomainHasCenter = false
-
-          subDomain.submodules?.forEach(module => {
-            module.businessObjects?.forEach(bo => {
-              const boCode = typeof bo === 'string' ? bo : (bo.code || bo.name)
-              if (centerScopeSet.has(boCode)) {
-                subDomainHasCenter = true
-                domainHasCenter = true
-              }
-            })
-          })
+          const sdCount = sdCounts.get(subDomain.name)
+          const subDomainHasCenter = !!sdCount && sdCount.center > 0
+          const subDomainAllCenter = !!sdCount && sdCount.center > 0 && sdCount.external === 0
 
           markers.subDomains.set(subDomain.name, subDomainHasCenter)
+          markers.fullySubDomains.set(subDomain.name, subDomainAllCenter)
+
+          if (subDomainHasCenter) domainHasCenter = true
+          if (!subDomainAllCenter) domainAllCenter = false
+          domainTotal += (sdCount?.total || 0)
         })
 
         markers.domains.set(domain.name, domainHasCenter)
+        markers.fullyDomains.set(domain.name, domainAllCenter && domainTotal > 0)
       })
     }
 
@@ -1375,6 +1429,10 @@ export function useDiagramData() {
       if (selectedRelationIds && selectedRelationIds.length > 0) {
         filteredRelationships = filteredRelationships.filter(rel => selectedRelationIds.includes(rel.id))
       } else {
+        // [FIX 2026-08-13 v2] 未选择任何关系时, 不展示任何关系连线 (连内部关系也不展示).
+        //   之前此处保留"源靶都在对象范围"的内部关系, 导致折叠到子领域后子领域之间仍有连线,
+        //   与用户预期不符 (用户反馈: 没选关系范围却"多展示"了所有内部关系).
+        //   语义: 没选关系 = 只渲染对象范围节点, 0 条关系连线.
         filteredRelationships = []
       }
     }
@@ -1536,6 +1594,36 @@ export function useDiagramData() {
       })
     }
 
+    // [PERF 2026-08-13] 领域数量变化 → 数据范围结构变了 (关系范围引入了新领域/子领域),
+    //   重置展开层级状态, 让渲染层按自适应默认展开重新计算初始层级.
+    //   根因: 对象范围 1 个领域 + 选"跨领域关系"引入外部领域后, 若沿用用户之前的
+    //   expandLevelUserSet/groupManualSet (如"展开到业务对象"), 图表仍停留在业务对象级别,
+    //   而非自适应到"展开到领域(多个领域)". 领域数变化即触发重置.
+    const currentDomainCount = filteredDomainProducts.length
+    if (currentDomainCount !== lastFilteredDomainCount.value) {
+      // [LOG 2026-08-13] 关键日志: 领域数变化 → 触发状态重置 (展开层级 + 默认颜色配置).
+      console.log('[generateDiagram] 领域数变化: ' + lastFilteredDomainCount.value + ' → ' + currentDomainCount +
+        ' | 关系数=' + filteredRelationships.length +
+        ' | 中心BO=' + (centerScope.value || []).length +
+        ' | 最终BO=' + finalBoCodes.size)
+
+      lastFilteredDomainCount.value = currentDomainCount
+      configStore.resetExpandState()
+
+      // [DEFAULT-COLOR 2026-08-13] 数据范围结构变化 → 重置默认颜色配置:
+      //   1) colorGroupBy 跟随初始展开层级规则 (领域>1→domain, 子领域>1→subDomain, 否则 serviceModule)
+      //   2) centerScopeHighlight 无外部 BO (只对象范围) 时 false, 有外部 BO 时 true.
+      //      用户诉求: 没选关系范围时, 不区分对象范围(=false), 颜色按初始展开层级分组.
+      const subDomainCount = filteredDomainProducts.reduce((n, d) => n + (d.modules?.length || 0), 0)
+      const defaultGroupBy = currentDomainCount > 1
+        ? 'domain'
+        : subDomainCount > 1
+          ? 'subDomain'
+          : 'serviceModule'
+      const hasExternalBo = finalBoCodes.size > (centerScope.value || []).length
+      configStore.applyDefaultColorConfig(defaultGroupBy, hasExternalBo)
+    }
+
     // [OBS 2026-08-08] 对象范围链路可观测摘要:
     //   scopeCode → finalBoCodes → 过滤后各层计数. 快速确认范围过滤是否符合预期
     //   (如 SCP 只含供应链计划 BO, 而非全量 3230). 用法: window.__archPage.scopeState.
@@ -1627,15 +1715,6 @@ export function useDiagramData() {
         // mermaidConfig 是从 GroupModel.fromUserConfig(architectureGroups, userConfig) 生成的
         // 已经合并了用户配置中的启用/禁用状态
         const layoutControlConfig = mermaidConfig
-
-        // [SCOPE 2026-08-07] 初始图表智能默认展开层级（按对象范围区分）：
-        //   对象范围内展开到服务模块，范围外展开到子领域。
-        //   必须在此渲染结构上应用（mergeUserGroup/toMermaidConfig 均不保留 collapsed）。
-        //   [SCOPE-DEFAULT 2026-08-08] 仅用户未显式选择时套用 (逻辑同 BO 图路径).
-        //   [FIX 2026-08-09] 仅 centerScope 非空才套用, 避免空范围误告警.
-        if (!configStore.expandLevelUserSet && (centerScope.value || []).length > 0) {
-          applyDefaultExpandByScope(layoutControlConfig?.groups, (g) => isSubtreeInScope(g, new Set(centerScope.value || [])))
-        }
 
         // 重要：将生成的 layoutControlConfig 更新到 store
         configStore.updateLayoutControlConfig(layoutControlConfig)
@@ -1786,24 +1865,9 @@ export function useDiagramData() {
         // 4. 直接生成 Mermaid 配置（包含扁平化和标题处理）
         const layoutControlConfig = groupModel.toMermaidConfig()
 
-        // [SCOPE 2026-08-07] 初始图表智能默认展开层级（按对象范围区分）：
-        //   对象范围内展开到服务模块，范围外展开到子领域。
-        //   注意: 渲染源是 configStore.layoutControlConfig（MermaidComponent 经 annotationConfig 读取
-        //   props.layoutControlConfig），且 buildDiagramData 会重新派生 groups（丢弃 collapsed），
-        //   而面板 auto-group 可能在 centerScope 设置前执行导致漏折叠。故在此（generate 时
-        //   centerScope 已确定）就地修改 store 配置分组树 collapsed 以兜底初始渲染。
-        //   [SCOPE-DEFAULT 2026-08-08] 仅当用户未显式选择过展开层级时套用默认折叠:
-        //   用户已选过(expandLevelUserSet=true)时跳过, 避免面板树 collapsed 与用户选择冲突
-        //   (渲染层 EmbeddedChartView 已按 store.expandLevel 显式应用, 见其 layoutControlConfig).
-        const scopeCodeSet = new Set(centerScope.value || [])
-        // [FIX 2026-08-09] 仅在 centerScope 非空时才套用默认折叠, 避免空范围误告警
-        //   (applyDefaultExpandByScope 现会在谓词无命中时 console.warn, 空范围无对象范围不应告警).
-        // [CTX-FIX 2026-08-09] 用户手动调整过分组折叠/展开(groupManualSet)时跳过默认折叠,
-        //   避免数据重生成(generateDiagram)时把用户手动 collapsed 重置回范围默认值.
-        if (!configStore.expandLevelUserSet && !configStore.groupManualSet && scopeCodeSet.size > 0) {
-          applyDefaultExpandByScope(layoutControlConfig?.groups, (g) => isSubtreeInScope(g, scopeCodeSet))
-          applyDefaultExpandByScope(configStore.layoutControlConfig?.groups, (g) => isSubtreeInScope(g, scopeCodeSet))
-        }
+        // [DEFAULT-LEVEL 2026-08-12] 初始展开层级不再在此套用范围折叠:
+        // 由渲染层 EmbeddedChartView 按分组数量自适应 (applyDefaultExpandByCount) 决定,
+        // 并在 sharedApplyGroupStates/applyDefaultExpandByCount 阶段就地应用到渲染树.
 
         // 5. 使用 buildDiagramData，复用所有渲染逻辑
         // [Task 10 2026-08-02] 统一管道入口 (spec 4.2.1): preview 裁剪到当前 scope
@@ -2108,6 +2172,15 @@ export function useDiagramData() {
     (newVal, oldVal) => {
       if (newVal !== oldVal && diagramData.value) {
         diagramData.value.centerScopeHighlight = newVal
+        // [FIX 2026-08-15] 同步刷新 nodes 的 isCenter 字段 (原实现只改 highlight 不重算 isCenter):
+        //   colorize 在 generateDiagram 时把 isCenter 烘焙进节点; 增量切"区分/不区分对象范围"时
+        //   nodes 的 isCenter 停留旧值 → 图例 hasCenterNodes/整组跳过判定读到陈旧 false →
+        //   legend 不出现"对象范围"项. 这里按新 highlight + centerScope 原地重算 isCenter,
+        //   使图例/增量变色/整组跳过逻辑一致. (与 colorize L58 的 isCenter 口径一致)
+        const centerSet = new Set(centerScope.value || [])
+        ;(diagramData.value.nodes || []).forEach(n => {
+          n.isCenter = !!newVal && centerSet.has(n.code)
+        })
       }
     }
   )
@@ -2210,6 +2283,7 @@ export function useDiagramData() {
     relationFilteredBoCodes.value = null
     internalRelationFilter.value = 'off'
     diagramData.value = null
+    lastFilteredDomainCount.value = 0
     selectedStats.value = {
       domains: 0,
       subDomains: 0,
@@ -2236,25 +2310,15 @@ export function useDiagramData() {
         serviceModules: result.allServiceModules || result.serviceModules,
         relationships: result.relationships
       }
-      
+
+      // [PERF 2026-08-13] 保存基础 previewData 快照, 供关系范围变更时轻量恢复
+      //   (跳过 architecture/preview 重拉 + 清理上次补全累积的外部 BO)。
+      basePreviewData.value = JSON.parse(JSON.stringify(previewData.value))
+
       // 直接使用 buildPreviewDataFromArchData 返回的 centerScope，避免重复 API 调用
       const centerScopeCodes = result.centerScope || []
       configStore.updateCenterScope(centerScopeCodes)
 
-      // [V1.2.9 修复] 把精确的关系 IDs 存到 ref, 让 filteredRelations 优先用这个
-      //   之前: filteredRelations 走反向匹配后的 module 节点 relationIds, 过度匹配
-      //   (用户选 2 个关系 → module 节点含 3 个 → filteredRelations=3)
-      //   现在: 直接用 chartData 传入的 archRelationIds
-      if (archRelationIds && archRelationIds.length > 0) {
-        archRelationIdsRef.value = [...archRelationIds]
-      } else {
-        archRelationIdsRef.value = null
-      }
-
-      if (relationTypeFilter && relationTypeFilter.length > 0) {
-        selectedRelationNodeIds.value = convertToRelationNodeIds(relationTypeFilter)
-      }
-      
       isInitializedFromArchData.value = true
       
       updateCenterScopeMarkers()
@@ -2267,198 +2331,8 @@ export function useDiagramData() {
       
       await nextTick()
       
-      // [V1.2.9 修复] 节点匹配优先级：
-      //   1. archRelationIds 反向匹配（精确）：找出 relationIds 与 archRelationIds 有交集的叶子节点，
-      //      并向上回溯选中所有祖先节点（category + scope）
-      //   2. relationTypeFilter 匹配（回退）：用 relationCodes 匹配（可能过度匹配，但比全选好）
-      //   3. 全选 scope 节点（兜底）：只全选 internal/cross-boundary/external 三个根节点，
-      //      不再全选 category 节点（避免 selectedSet 闸门失效）
-      const archRelationIdsSet = archRelationIds && archRelationIds.length > 0
-        ? new Set(archRelationIds)
-        : null
+      await applyRelationScope(archRelationIds, relationTypeFilter, versionId)
 
-      if (archRelationIdsSet && relationCategoryTree.value) {
-        // 1. 精确反向匹配：找出所有"relationIds 与 archRelationIds 有交集"的叶子 module 节点
-        const matchedLeafNodes = [] // { node, ancestors: [parentNode...] }
-        function findLeafNodesWithRelationIds(node, ancestors) {
-          // 叶子节点判定：有 relationIds 且无 children（或 children 为空）
-          const hasChildren = node.children && node.children.length > 0
-          if (!hasChildren && node.relationIds && node.relationIds.length > 0) {
-            const hasIntersection = node.relationIds.some(id => archRelationIdsSet.has(id))
-            if (hasIntersection) {
-              matchedLeafNodes.push({ node, ancestors: [...ancestors] })
-            }
-          }
-          if (hasChildren) {
-            node.children.forEach(child => findLeafNodesWithRelationIds(child, [...ancestors, node]))
-          }
-        }
-        relationCategoryTree.value.forEach(rootNode => findLeafNodesWithRelationIds(rootNode, []))
-
-        // 2. 收集所有选中节点 ID（叶子 + 所有祖先）
-        const selectedIdSet = new Set()
-        matchedLeafNodes.forEach(({ node, ancestors }) => {
-          selectedIdSet.add(node.id)
-          ancestors.forEach(ancestor => selectedIdSet.add(ancestor.id))
-        })
-
-        if (selectedIdSet.size > 0) {
-          selectedRelationNodeIds.value = Array.from(selectedIdSet)
-        }
-      } else if (relationTypeFilter && relationTypeFilter.length > 0) {
-        // 回退：用 relationCodes 匹配（可能过度匹配，但比全选好）
-        const relationCodesFilter = new Set(relationTypeFilter)
-        
-        const nodeIds = []
-        function findNodeIdsForCodes(node) {
-          if (node.relationCodes && node.relationCodes.length > 0) {
-            const hasMatchingCode = node.relationCodes.some(code => relationCodesFilter.has(code))
-            if (hasMatchingCode) {
-              nodeIds.push(node.id)
-            }
-          }
-          if (node.children && node.children.length > 0) {
-            node.children.forEach(child => findNodeIdsForCodes(child))
-          }
-        }
-        
-        if (relationCategoryTree.value) {
-          relationCategoryTree.value.forEach(rootNode => findNodeIdsForCodes(rootNode))
-        }
-        
-        if (nodeIds.length > 0) {
-          selectedRelationNodeIds.value = nodeIds
-        }
-      } else {
-        // 兜底：只全选 scope 级节点（internal/cross-boundary/external）
-        // [V1.2.9 修复] 之前全选所有 category 节点，导致 selectedSet.has(node.id) 闸门对所有 category 节点都通过
-        //   现在只全选 scope 根节点，category 节点默认不选，闸门才能生效
-        const scopeNodeIds = []
-        if (relationCategoryTree.value) {
-          relationCategoryTree.value.forEach(rootNode => {
-            scopeNodeIds.push(rootNode.id)
-          })
-        }
-        if (scopeNodeIds.length > 0) {
-          selectedRelationNodeIds.value = scopeNodeIds
-        }
-      }
-      
-      if (selectedRelationNodeIds.value && selectedRelationNodeIds.value.length > 0) {
-        // 关键修复 v26: 改用 getSelectedRelationIds (按 rel.id 去重) 收集选中关系
-        // 之前用 getSelectedRelationCodes (按 code 去重) 会丢失空 code 关系涉及的 BO
-        // 现象: 用户 25 中心 BO 中不含 TEST600，但 id=29 关系 (TEST600→BO_WAREHOUSE, code='')
-        //       的 target BO_WAREHOUSE 没被加入 filteredBoCodes，导致显示 28 而非 29
-        const relationIds = new Set(getSelectedRelationIds(relationCategoryTree.value, selectedRelationNodeIds.value))
-
-        const filteredCodes = new Set(centerScopeCodes)
-
-        if (previewData.value.relationships) {
-          previewData.value.relationships.forEach(rel => {
-            if (relationIds.has(rel.id)) {
-              filteredCodes.add(rel.sourceCode)
-              filteredCodes.add(rel.targetCode)
-            }
-          })
-        }
-
-        // 关键修复 v27: rfb 已改为 computed, 这里不再赋值, 否则会覆盖 computed 行为
-        // (ref.value = Array.from(filteredCodes) 会在每次 init 重新设置, 反而"固定"了值)
-        // 之前: 1688 行原代码, 改为删除 (见 commit 上下文)
-        // 关键修复 v26: 后端 architecture/preview 按 business_object_ids 过滤时只返回那 25 个 BO
-        // 但 TEST600 这种"中心范围外、但有选中关系涉及"的 BO 仍可能在 relationships 里出现
-        // 现象: TEST600 不在 previewData.businessObjects 中 → 图表节点缺失 (25 vs 26) → 连线空白
-        // 补救: 从后端单独拉取缺失的 BO 补全 previewData.businessObjects
-        const existingBoCodes = new Set((previewData.value.businessObjects || []).map(b => b.code))
-        const missingBoCodes = Array.from(filteredCodes).filter(c => !existingBoCodes.has(c))
-        if (missingBoCodes.length > 0) {
-          try {
-            const missingRes = await apiV2.get(`/bo/business_object?version_id=${versionId}&codes=${missingBoCodes.join(',')}`)
-            if (missingRes.success && missingRes.data?.items) {
-              const converted = missingRes.data.items.map(bo => ({
-                id: bo.id,
-                code: bo.code,
-                name: bo.name,
-                domainId: bo.domain_id,
-                domain: bo.domain_name,
-                subDomainId: bo.sub_domain_id,
-                subDomain: bo.sub_domain_name,
-                serviceModuleId: bo.service_module_id,
-                serviceModule: bo.service_module_name,
-                serviceModuleName: bo.service_module_name
-              }))
-              // 同时补全这些 BO 所属的 domain/subDomain/serviceModule 到 previewData
-              // 现象: TEST600 有自己的 domain "TEST600_roundtrip_test"，但 previewData.domainProducts 不含
-              //       → groupModel 不知道 TEST600 该放哪个 subgraph → mermaid 报 "游离节点" 错
-              // 解决: 直接根据补全的 converted BO 构造 domainProducts 结构 (不依赖 domain API)
-              // 关键: 1) BO 的 domain 字段可能与 domain.name 不一致 (历史/缓存问题)
-              //       2) 即使 domain name 已在 domainProducts 中, 对应的 SM.businessObjects 也可能为空
-              //          → 强制按 (domain, subDomain, sm) 合并/创建 SM 并填入 BO code
-              const synthDomainMap = new Map() // domainName -> { subDomainName -> { smName -> { id, code, name, businessObjects: [] } } }
-              converted.forEach(bo => {
-                const dn = bo.domain || '未分类领域'
-                const sdn = bo.subDomain || '未分类子域'
-                const smn = bo.serviceModule || bo.serviceModuleName || '未分类服务模块'
-                if (!synthDomainMap.has(dn)) synthDomainMap.set(dn, new Map())
-                const sdMap = synthDomainMap.get(dn)
-                if (!sdMap.has(sdn)) sdMap.set(sdn, new Map())
-                const smMap = sdMap.get(sdn)
-                if (!smMap.has(smn)) smMap.set(smn, { id: bo.serviceModuleId, code: smn, name: smn, businessObjects: [] })
-                smMap.get(smn).businessObjects.push(bo.code)
-              })
-              // 合并到现有 domainProducts: 已有 domain → 在 modules 中找/创建 subDomain+sm
-              // 没有 → 新建 domain
-              const existingDomains = previewData.value.domainProducts || []
-              const extraDomainProducts = []
-              synthDomainMap.forEach((sdMap, dn) => {
-                const existing = existingDomains.find(d => d.name === dn)
-                if (existing) {
-                  // 把 SM 合并进 existing.modules[].submodules[]
-                  if (!existing.modules) existing.modules = []
-                  sdMap.forEach((smMap, sdn) => {
-                    let subDomainGroup = existing.modules.find(m => m.name === sdn)
-                    if (!subDomainGroup) {
-                      subDomainGroup = { name: sdn, submodules: [] }
-                      existing.modules.push(subDomainGroup)
-                    }
-                    if (!subDomainGroup.submodules) subDomainGroup.submodules = []
-                    smMap.forEach(sm => {
-                      let smGroup = subDomainGroup.submodules.find(s => s.code === sm.code)
-                      if (!smGroup) {
-                        smGroup = { id: sm.id, code: sm.code, name: sm.name, businessObjects: [] }
-                        subDomainGroup.submodules.push(smGroup)
-                      }
-                      // 合并 BO (避免重复)
-                      sm.businessObjects.forEach(boCode => {
-                        if (!smGroup.businessObjects.includes(boCode)) smGroup.businessObjects.push(boCode)
-                      })
-                    })
-                  })
-                } else {
-                  // 新建 domain
-                  const modules = []
-                  sdMap.forEach((smMap, sdn) => {
-                    const submodules = []
-                    smMap.forEach(sm => submodules.push(sm))
-                    modules.push({ name: sdn, submodules })
-                  })
-                  extraDomainProducts.push({ name: dn, modules })
-                }
-              })
-
-              previewData.value = {
-                ...previewData.value,
-                businessObjects: [...(previewData.value.businessObjects || []), ...converted],
-                domainProducts: [...(previewData.value.domainProducts || []), ...extraDomainProducts]
-              }
-              console.log(`[initFromArchDataManager] 补全 ${converted.length} 个缺失 BO, ${extraDomainProducts.length} 个缺失 domain`)
-            }
-          } catch (err) {
-            console.warn('[initFromArchDataManager] 补全缺失 BO 失败:', err.message)
-          }
-        }
-      }
-      
       loading.value = false
     } catch (error) {
       console.error('[useDiagramData] Failed to initialize from arch data:', error)
@@ -2466,6 +2340,193 @@ export function useDiagramData() {
     } finally {
       loading.value = false
     }
+  }
+
+  /**
+   * 应用关系范围: 更新 archRelationIdsRef + 反向匹配 selectedRelationNodeIds + 补全缺失 BO。
+   * [PERF 2026-08-13] 抽取自 initFromArchDataManager, 供"关系范围变更"轻量刷新复用
+   *   (跳过 architecture/preview 重拉)。centerScopeCodes 改为 centerScope.value (对象范围不变)。
+   */
+  async function applyRelationScope(archRelationIds, relationTypeFilter, versionId) {
+    // [V1.2.9] 把精确的关系 IDs 存到 ref, 让 filteredRelations 优先用这个 (避免反向匹配过度匹配)
+    if (archRelationIds && archRelationIds.length > 0) {
+      archRelationIdsRef.value = [...archRelationIds]
+    } else {
+      archRelationIdsRef.value = null
+    }
+
+    if (relationTypeFilter && relationTypeFilter.length > 0) {
+      selectedRelationNodeIds.value = convertToRelationNodeIds(relationTypeFilter)
+    }
+
+    // 节点匹配优先级:
+    //   1. archRelationIds 反向匹配（精确）
+    //   2. relationTypeFilter 匹配（回退）
+    //   3. 未选关系 → 空 (图表只渲染对象范围)
+    const archRelationIdsSet = archRelationIds && archRelationIds.length > 0
+      ? new Set(archRelationIds)
+      : null
+
+    if (archRelationIdsSet && relationCategoryTree.value) {
+      const matchedLeafNodes = []
+      function findLeafNodesWithRelationIds(node, ancestors) {
+        const hasChildren = node.children && node.children.length > 0
+        if (!hasChildren && node.relationIds && node.relationIds.length > 0) {
+          const hasIntersection = node.relationIds.some(id => archRelationIdsSet.has(id))
+          if (hasIntersection) {
+            matchedLeafNodes.push({ node, ancestors: [...ancestors] })
+          }
+        }
+        if (hasChildren) {
+          node.children.forEach(child => findLeafNodesWithRelationIds(child, [...ancestors, node]))
+        }
+      }
+      relationCategoryTree.value.forEach(rootNode => findLeafNodesWithRelationIds(rootNode, []))
+
+      const selectedIdSet = new Set()
+      matchedLeafNodes.forEach(({ node, ancestors }) => {
+        selectedIdSet.add(node.id)
+        ancestors.forEach(ancestor => selectedIdSet.add(ancestor.id))
+      })
+
+      if (selectedIdSet.size > 0) {
+        selectedRelationNodeIds.value = Array.from(selectedIdSet)
+      }
+    } else if (relationTypeFilter && relationTypeFilter.length > 0) {
+      const relationCodesFilter = new Set(relationTypeFilter)
+      const nodeIds = []
+      function findNodeIdsForCodes(node) {
+        if (node.relationCodes && node.relationCodes.length > 0) {
+          const hasMatchingCode = node.relationCodes.some(code => relationCodesFilter.has(code))
+          if (hasMatchingCode) {
+            nodeIds.push(node.id)
+          }
+        }
+        if (node.children && node.children.length > 0) {
+          node.children.forEach(child => findNodeIdsForCodes(child))
+        }
+      }
+      if (relationCategoryTree.value) {
+        relationCategoryTree.value.forEach(rootNode => findNodeIdsForCodes(rootNode))
+      }
+      if (nodeIds.length > 0) {
+        selectedRelationNodeIds.value = nodeIds
+      }
+    } else {
+      selectedRelationNodeIds.value = []
+    }
+
+    if (selectedRelationNodeIds.value && selectedRelationNodeIds.value.length > 0) {
+      // 改用 getSelectedRelationIds (按 rel.id 去重) 收集选中关系
+      const relationIds = new Set(getSelectedRelationIds(relationCategoryTree.value, selectedRelationNodeIds.value))
+
+      const filteredCodes = new Set(centerScope.value || [])
+
+      if (previewData.value.relationships) {
+        previewData.value.relationships.forEach(rel => {
+          if (relationIds.has(rel.id)) {
+            filteredCodes.add(rel.sourceCode)
+            filteredCodes.add(rel.targetCode)
+          }
+        })
+      }
+
+      // 补全"中心范围外、但有选中关系涉及"的 BO (否则图表节点缺失)
+      const existingBoCodes = new Set((previewData.value.businessObjects || []).map(b => b.code))
+      const missingBoCodes = Array.from(filteredCodes).filter(c => !existingBoCodes.has(c))
+      if (missingBoCodes.length > 0) {
+        try {
+          const missingRes = await apiV2.get(`/bo/business_object?version_id=${versionId}&codes=${missingBoCodes.join(',')}`)
+          if (missingRes.success && missingRes.data?.items) {
+            const converted = missingRes.data.items.map(bo => ({
+              id: bo.id,
+              code: bo.code,
+              name: bo.name,
+              domainId: bo.domain_id,
+              domain: bo.domain_name,
+              subDomainId: bo.sub_domain_id,
+              subDomain: bo.sub_domain_name,
+              serviceModuleId: bo.service_module_id,
+              serviceModule: bo.service_module_name,
+              serviceModuleName: bo.service_module_name
+            }))
+
+            const synthDomainMap = new Map()
+            converted.forEach(bo => {
+              const dn = bo.domain || '未分类领域'
+              const sdn = bo.subDomain || '未分类子域'
+              const smn = bo.serviceModule || bo.serviceModuleName || '未分类服务模块'
+              if (!synthDomainMap.has(dn)) synthDomainMap.set(dn, new Map())
+              const sdMap = synthDomainMap.get(dn)
+              if (!sdMap.has(sdn)) sdMap.set(sdn, new Map())
+              const smMap = sdMap.get(sdn)
+              if (!smMap.has(smn)) smMap.set(smn, { id: bo.serviceModuleId, code: smn, name: smn, businessObjects: [] })
+              smMap.get(smn).businessObjects.push(bo.code)
+            })
+
+            const existingDomains = previewData.value.domainProducts || []
+            const extraDomainProducts = []
+            synthDomainMap.forEach((sdMap, dn) => {
+              const existing = existingDomains.find(d => d.name === dn)
+              if (existing) {
+                if (!existing.modules) existing.modules = []
+                sdMap.forEach((smMap, sdn) => {
+                  let subDomainGroup = existing.modules.find(m => m.name === sdn)
+                  if (!subDomainGroup) {
+                    subDomainGroup = { name: sdn, submodules: [] }
+                    existing.modules.push(subDomainGroup)
+                  }
+                  if (!subDomainGroup.submodules) subDomainGroup.submodules = []
+                  smMap.forEach(sm => {
+                    let smGroup = subDomainGroup.submodules.find(s => s.code === sm.code)
+                    if (!smGroup) {
+                      smGroup = { id: sm.id, code: sm.code, name: sm.name, businessObjects: [] }
+                      subDomainGroup.submodules.push(smGroup)
+                    }
+                    sm.businessObjects.forEach(boCode => {
+                      if (!smGroup.businessObjects.includes(boCode)) smGroup.businessObjects.push(boCode)
+                    })
+                  })
+                })
+              } else {
+                const modules = []
+                sdMap.forEach((smMap, sdn) => {
+                  const submodules = []
+                  smMap.forEach(sm => submodules.push(sm))
+                  modules.push({ name: sdn, submodules })
+                })
+                extraDomainProducts.push({ name: dn, modules })
+              }
+            })
+
+            previewData.value = {
+              ...previewData.value,
+              businessObjects: [...(previewData.value.businessObjects || []), ...converted],
+              domainProducts: [...(previewData.value.domainProducts || []), ...extraDomainProducts]
+            }
+            console.log(`[applyRelationScope] 补全 ${converted.length} 个缺失 BO, ${extraDomainProducts.length} 个缺失 domain`)
+          }
+        } catch (err) {
+          console.warn('[applyRelationScope] 补全缺失 BO 失败:', err.message)
+        }
+      }
+    }
+  }
+
+  /**
+   * 关系范围变更的轻量刷新 (对象范围不变):
+   *   1. 从 basePreviewData 快照恢复 previewData (清理上次补全累积的外部 BO)
+   *   2. 重新应用关系范围 (反向匹配 + 补全)
+   * 相比 initFromArchDataManager, 跳过 architecture/preview API 重拉。
+   */
+  async function updateRelationScope(archData) {
+    const { relationTypeFilter, relationIds: archRelationIds, versionId } = archData
+
+    if (basePreviewData.value) {
+      previewData.value = JSON.parse(JSON.stringify(basePreviewData.value))
+    }
+
+    await applyRelationScope(archRelationIds, relationTypeFilter, versionId || currentVersionId.value)
   }
 
   return {
@@ -2512,6 +2573,7 @@ export function useDiagramData() {
     loadCenterScopePreset,
     clearRelationScope,
     initFromArchDataManager,
+    updateRelationScope,
 
     // [2026-06-15] 缓存读写 (切 tab 状态恢复用)
     loadCachedDiagram,

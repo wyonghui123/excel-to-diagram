@@ -50,4 +50,21 @@ describe('createColorStateTracker', () => {
     customColors.a = '#000'
     expect(t.changed({ colorGroupBy: 'domain', colorScheme: null, centerScopeHighlight: null, customColors: { a: '#fff' } }).customColors).toBe(false)
   })
+
+  // [LEGEND-COLOR v2 2026-08-11] 新增 centerScopeColor 追踪 (对象范围色块改色):
+  //   图例"对象范围"色块改色走 store.updateCenterScopeColor → useDiagramData 重建
+  //   → 本组件 watcher 需识别 centerScopeColor 变化 → updateColorsOnly 增量变色.
+  it('识别 centerScopeColor 变化 (对象范围色块改色)', () => {
+    const t = createColorStateTracker()
+    t.snapshot({ colorGroupBy: 'domain', colorScheme: 'default', centerScopeHighlight: true, centerScopeColor: '#808080', customColors: {} })
+    expect(t.changed({ colorGroupBy: 'domain', colorScheme: 'default', centerScopeHighlight: true, centerScopeColor: '#1890FF', customColors: {} }).centerScopeColor).toBe(true)
+    expect(t.anyChanged({ colorGroupBy: 'domain', colorScheme: 'default', centerScopeHighlight: true, centerScopeColor: '#1890FF', customColors: {} })).toBe(true)
+  })
+
+  it('centerScopeColor 未变时中心范围高亮切换仍只计高亮变化', () => {
+    const t = createColorStateTracker()
+    t.snapshot({ colorGroupBy: 'domain', centerScopeColor: '#808080', customColors: {} })
+    expect(t.changed({ colorGroupBy: 'domain', centerScopeColor: '#808080', centerScopeHighlight: true, customColors: {} }).centerScopeColor).toBe(false)
+    expect(t.changed({ colorGroupBy: 'domain', centerScopeColor: '#808080', centerScopeHighlight: true, customColors: {} }).centerScopeHighlight).toBe(true)
+  })
 })

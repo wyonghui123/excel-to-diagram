@@ -198,6 +198,17 @@ export function buildUpliftAncestorMap(groups) {
     if (!groupList || !groupList.length) return
     for (const group of groupList) {
       if (!group) continue
+      // [VIS-RESET 2026-08-14] 用户隐藏的分组 (visible=false, 非 ELK 系统自动分组) 整棵子树
+      //   不上提为聚合节点、子孙也不映射到 COLLAPSE_<id>。否则连线端点被重映射到聚合节点后,
+      //   该聚合节点因 visible=false 未被渲染 (groupedLayout.generateGroupCode 顶部跳过),
+      //   mermaid 会因连线引用 COLLAPSE_<id> 而自动补建节点 → 用户反馈:
+      //   "隐藏采购云后双击供应链云, 出现 COLLAPSE_D_PROC 聚合节点重显".
+      //   修复: 隐藏分组不参与端点重映射 → 连线保持原 BO 编码 → 被 hiddenBoIds 过滤丢弃.
+      //   ELK 系统自动分组 (无关系/有关系) visible=false 是"无边框但节点渲染"语义, 不属用户隐藏, 跳过.
+      const isSystemAuto = group._elkGroup === 'inner' || group._elkGroup === 'boundary'
+      if (group.visible === false && !isSystemAuto) {
+        continue
+      }
       const isUplift = uplift.has(group.id)
       const nextStack = isUplift ? [...upliftStack, upliftNodeId(group)] : upliftStack
       // 最近上提祖先 = 栈顶 (最深)

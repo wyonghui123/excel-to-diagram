@@ -10,7 +10,6 @@ export function useMermaidColors() {
 
   const buildColorMap = (nodeColorMappings, objectToModuleMap, colorGroupBy, colorSchemes, customColors = {}) => {
     const colors = colorSchemes
-    const colorMap = new Map()
     const uniqueGroups = new Set()
 
     console.log('[buildColorMap] customColors received:', customColors)
@@ -30,18 +29,20 @@ export function useMermaidColors() {
       }
     })
 
-    let colorIndex = 0
-    uniqueGroups.forEach(group => {
-      const useCustom = !!customColors[group]
-      const assigned = useCustom ? customColors[group] : colors[colorIndex % colors.length]
-      if (useCustom) {
-        colorMap.set(group, assigned)
-      } else {
-        colorMap.set(group, assigned)
-        colorIndex++
-      }
-    })
+    // [FIX 2026-08-11] 用位置索引分配默认色 (见 buildColorMapByIndex), 避免自定义色推移后续分组.
+    return buildColorMapByIndex(uniqueGroups, colors, customColors)
+  }
 
+  // [FIX 2026-08-11 colorIndex-drift] 位置索引分配默认色 (与 assignColorsToGroups 同规则).
+  //   旧实现 colorIndex 跳过自定义色分组 → 改某分组自定义色会推移后续分组默认色索引.
+  //   buildColorMap 与 buildColorMapFromNodes 是增量变色路径 (updateColorsOnly 用),
+  //   必须与全量渲染路径 (assignColorsToGroups) 用同一分配规则, 否则切换颜色后
+  //   增量路径算出的颜色与全量路径不一致 → 视觉色漂移.
+  const buildColorMapByIndex = (uniqueGroups, colors, customColors = {}) => {
+    const colorMap = new Map()
+    Array.from(uniqueGroups).forEach((group, idx) => {
+      colorMap.set(group, customColors[group] || colors[idx % colors.length])
+    })
     return colorMap
   }
 
@@ -59,30 +60,26 @@ export function useMermaidColors() {
    * @param {string} colorGroupBy - domain | subDomain | serviceModule
    * @param {Object} colorSchemes - COLOR_SCHEMES[colorScheme]
    * @param {Object} customColors - 用户自定义颜色 { groupKey: color }
+   * @param {Map|null} objectToModuleMap - 可选. 供分组键推导优先取 (与全量渲染路径同源),
+   *   缺失时回退 node 自身字段 (见下方 key 推导, 与 useBusinessObjectSyntax 的 colorMap 一致).
    * @returns {Map<string,string>} groupKey -> color
    */
-  const buildColorMapFromNodes = (nodes, colorGroupBy, colorSchemes, customColors = {}) => {
-    const colorMap = new Map()
+  const buildColorMapFromNodes = (nodes, colorGroupBy, colorSchemes, customColors = {}, objectToModuleMap = null) => {
     const uniqueGroups = new Set()
     ;(nodes || []).forEach(node => {
+      const selfModule = (objectToModuleMap && objectToModuleMap.get(node.code || node.name)) || {}
       let groupKey
       if (colorGroupBy === 'serviceModule') {
-        groupKey = node.serviceModuleName || node.serviceModule || node.name
+        groupKey = selfModule.serviceModuleName || selfModule.serviceModule || node.serviceModuleName || node.serviceModule || node.name
       } else if (colorGroupBy === 'subDomain') {
-        groupKey = node.subDomain
+        groupKey = selfModule.subDomain || node.subDomain
       } else {
-        groupKey = node.domain
+        groupKey = selfModule.domain || node.domain
       }
       if (groupKey) uniqueGroups.add(groupKey)
     })
-    let colorIndex = 0
-    uniqueGroups.forEach(group => {
-      const useCustom = !!customColors[group]
-      const assigned = useCustom ? customColors[group] : colorSchemes[colorIndex % colorSchemes.length]
-      colorMap.set(group, assigned)
-      if (!useCustom) colorIndex++
-    })
-    return colorMap
+    // [FIX 2026-08-11] 位置索引分配默认色 (与 buildColorMap/assignColorsToGroups 同规则)
+    return buildColorMapByIndex(uniqueGroups, colorSchemes, customColors)
   }
 
   const updateNodeColors = (svg, nodeColorMappings, objectToModuleMap, colorGroupBy, colorMap, options = {}) => {
@@ -148,37 +145,94 @@ export function useMermaidColors() {
     })
   }
 
+  // [FIX 2026-08-11 容器连线增量变色] 解析连线端点的分组色与中心状态。
+  //   旧 updateLinkColors 只处理 BO 端点 (nodeColorMappings + objectToModuleMap)，
+  //   折叠/上提容器连线端点 (COLLAPSE_<id>) 解析不到 → 改分组色后容器连线不变色
+  //   (用户反馈: 改供应链云色后 供应链计划→采购供应 连线不联动)。
+  //   现通过 collapseNodeMap (COLLAPSE_<id> → 分组上下文) 解析容器端点，与
+  //   updateCollapseNodeColors 同源 (colorMap + centerScopeMarkers)。
+  const resolveEndpointColor = (
+    endpointId,
+    nodeColorMappings,
+    objectToModuleMap,
+    colorGroupBy,
+    colorMap,
+    options,
+    collapseNodeMap,
+    centerScopeMarkers
+  ) => {
+    const centerScopeHighlight = options.centerScopeHighlight !== false
+    const centerScopeSet = new Set(options.centerScope || [])
+
+    // 容器/聚合端点 (COLLAPSE_<id>)
+    const collapseCtx = collapseNodeMap?.get(endpointId)
+    if (collapseCtx) {
+      let groupKey
+      if (colorGroupBy === 'serviceModule') groupKey = collapseCtx.serviceModuleName
+      else if (colorGroupBy === 'subDomain') groupKey = collapseCtx.subDomainName
+      else groupKey = collapseCtx.domainName
+      const color = groupKey ? colorMap.get(groupKey) : undefined
+      let isCenter = false
+      if (centerScopeHighlight) {
+        const m = centerScopeMarkers || {}
+        if (collapseCtx.groupType === 'serviceModule') {
+          isCenter = !!m.serviceModules?.has(collapseCtx.serviceModuleName)
+            || !!m.serviceModules?.has(collapseCtx.code)
+        } else if (collapseCtx.groupType === 'subDomain') {
+          isCenter = m.subDomains?.get(collapseCtx.subDomainName) === true
+            || m.subDomains?.get(collapseCtx.code) === true
+        } else if (collapseCtx.groupType === 'domain') {
+          isCenter = m.domains?.get(collapseCtx.domainName) === true
+            || m.domains?.get(collapseCtx.code) === true
+        }
+      }
+      return { groupKey, color, isCenter, resolved: true }
+    }
+
+    // BO 端点
+    const mapping = nodeColorMappings.find(n => n.nodeId === endpointId)
+    const module = mapping ? objectToModuleMap.get(mapping.nodeCode) : undefined
+    if (module) {
+      let groupKey
+      if (colorGroupBy === 'serviceModule') {
+        groupKey = module.serviceModuleName || module.serviceModule
+      } else if (colorGroupBy === 'subDomain') {
+        groupKey = module.subDomain
+      } else {
+        groupKey = module.domain
+      }
+      const color = groupKey ? colorMap.get(groupKey) : undefined
+      const isCenter = centerScopeHighlight
+        && (centerScopeSet.has(mapping.nodeCode) || centerScopeSet.has(mapping.nodeName))
+      return { groupKey, color, isCenter, resolved: true }
+    }
+
+    return null
+  }
+
   const updateLinkColors = (svg, linkColorMappings, nodeColorMappings, objectToModuleMap, colorGroupBy, colorMap, options = {}) => {
     // [FIX 2026-08-02 v6] 增量更新连线颜色也遵循中心范围规则 (与语法层生成一致):
     //   双中心 -> centerScopeColor 灰 / 一中心一非中心 -> 非中心色 / 双非中心(或不区分) -> 黑色
-    const centerScopeHighlight = options.centerScopeHighlight !== false  // 默认 true
-    const centerScopeSet = new Set(options.centerScope || [])
+    // [FIX 2026-08-11] 支持容器/聚合连线端点 (COLLAPSE_<id>), 见 resolveEndpointColor.
     const centerScopeColor = options.centerScopeColor || '#808080'
+    const collapseNodeMap = options.collapseNodeMap
+    const centerScopeMarkers = options.centerScopeMarkers
 
     linkColorMappings.forEach(mapping => {
-      const sourceMapping = nodeColorMappings.find(n => n.nodeId === mapping.sourceId)
-      const targetMapping = nodeColorMappings.find(n => n.nodeId === mapping.targetId)
-      const sourceModule = objectToModuleMap.get(sourceMapping?.nodeCode)
-      const targetModule = objectToModuleMap.get(targetMapping?.nodeCode)
+      const source = resolveEndpointColor(
+        mapping.sourceId, nodeColorMappings, objectToModuleMap, colorGroupBy, colorMap,
+        options, collapseNodeMap, centerScopeMarkers
+      )
+      const target = resolveEndpointColor(
+        mapping.targetId, nodeColorMappings, objectToModuleMap, colorGroupBy, colorMap,
+        options, collapseNodeMap, centerScopeMarkers
+      )
 
-      if (sourceModule && targetModule) {
-        let sourceGroupKey, targetGroupKey
-        if (colorGroupBy === 'serviceModule') {
-          sourceGroupKey = sourceModule.serviceModuleName || sourceModule.serviceModule
-          targetGroupKey = targetModule.serviceModuleName || targetModule.serviceModule
-        } else if (colorGroupBy === 'subDomain') {
-          sourceGroupKey = sourceModule.subDomain
-          targetGroupKey = targetModule.subDomain
-        } else {
-          sourceGroupKey = sourceModule.domain
-          targetGroupKey = targetModule.domain
-        }
-
-        const sourceGroupColor = colorMap.get(sourceGroupKey)
-        const targetGroupColor = colorMap.get(targetGroupKey)
-
-        const isSourceCenter = centerScopeHighlight && (centerScopeSet.has(sourceMapping.nodeCode) || centerScopeSet.has(sourceMapping.nodeName))
-        const isTargetCenter = centerScopeHighlight && (centerScopeSet.has(targetMapping.nodeCode) || centerScopeSet.has(targetMapping.nodeName))
+      if (source && target) {
+        const sourceGroupColor = source.color
+        const targetGroupColor = target.color
+        const isSourceCenter = source.isCenter
+        const isTargetCenter = target.isCenter
 
         let newColor
         if (isSourceCenter && isTargetCenter) {
@@ -261,7 +315,24 @@ export function useMermaidColors() {
     svg.querySelectorAll('g.node[id*="COLLAPSE_"], g.node.collapseNode').forEach((el) => {
       const code = el.getAttribute('data-container-code')
       if (!code) return
-      const ctx = collapseContextMap.get(code)
+      // [FIX 2026-08-12 同码歧义] 从聚合节点 id 解析层级 (COLLAPSE_SD_xxx=子领域聚合,
+      //   COLLAPSE_SM_xxx=服务模块聚合, COLLAPSE_D_xxx=领域聚合), 优先按 code::groupType
+      //   复合键取上下文 (构建端 MermaidComponent.walkGroups 同规则)。旧实现用 code 单一键,
+      //   同码子领域/服务模块 (销售SM↔服务管理SM / 内部交易ITTF↔服务模块ITTF) 互相覆盖:
+      //   按服务模块分组时子领域聚合节点显示服务模块色(应为中性灰), 按领域分组时取到错误领域色。
+      //   解析不到层级时回退纯 code 条目 (构建端保留首个同码条目, 不覆盖)。
+      const elId = el.getAttribute('id') || ''
+      const gtMatch = elId.match(/COLLAPSE_(D|SD|SM)_/)
+      let wantGt = ''
+      if (gtMatch) {
+        const p = gtMatch[1]
+        if (p === 'D') wantGt = 'domain'
+        else if (p === 'SD') wantGt = 'subdomain'
+        else if (p === 'SM') wantGt = 'servicemodule'
+      }
+      const ctx = wantGt
+        ? (collapseContextMap.get(`${code}::${wantGt}`) || collapseContextMap.get(String(code)))
+        : collapseContextMap.get(String(code))
       if (!ctx) return
       const rect = el.querySelector('rect')
       if (!rect) return
@@ -272,21 +343,54 @@ export function useMermaidColors() {
       //   markers.domains.set(name, hasCenter)). 用 .has() 只查 key 是否存在 →
       //   返回 true 与 value 无关 → 所有子领域/领域都被误判为中心范围 → 折叠节点全染 centerScopeColor.
       //   必须 .get()===true 校验布尔值. serviceModules 只写入中心范围 SM (value 恒 true), .has() 无碍.
+      // [PARTIAL-CENTER 2026-08-15] 折叠节点中心判定升级为「完全/部分包含对象范围」:
+      //   - fully (该分组所有 BO 都在对象范围) → centerScopeColor (旧行为)
+      //   - 部分包含 (既有对象范围内又有范围外元素) → 中性灰 (新规则)
+      //   fullyXxx 标记由 useDiagramData.updateCenterScopeMarkers 填充
+      //   (fullyServiceModules/fullySubDomains/fullyDomains).
       let isCenter = false
+      let fullyCenter = false
       if (centerScopeHighlight) {
         if (ctx.groupType === 'serviceModule') {
           isCenter = !!centerScopeMarkers.serviceModules?.has(ctx.serviceModuleName)
             || !!centerScopeMarkers.serviceModules?.has(code)
+          fullyCenter = centerScopeMarkers.fullyServiceModules?.get(ctx.serviceModuleName) === true
+            || centerScopeMarkers.fullyServiceModules?.get(code) === true
         } else if (ctx.groupType === 'subDomain') {
           isCenter = centerScopeMarkers.subDomains?.get(ctx.subDomainName) === true
             || centerScopeMarkers.subDomains?.get(code) === true
+          fullyCenter = centerScopeMarkers.fullySubDomains?.get(ctx.subDomainName) === true
+            || centerScopeMarkers.fullySubDomains?.get(code) === true
         } else if (ctx.groupType === 'domain') {
           isCenter = centerScopeMarkers.domains?.get(ctx.domainName) === true
             || centerScopeMarkers.domains?.get(code) === true
+          fullyCenter = centerScopeMarkers.fullyDomains?.get(ctx.domainName) === true
+            || centerScopeMarkers.fullyDomains?.get(code) === true
         }
       }
-      if (isCenter) {
+      // 完全包含对象范围 → centerScopeColor
+      if (isCenter && fullyCenter) {
         rect.style.setProperty('fill', centerScopeColor, 'important')
+        return
+      }
+      // 部分包含对象范围 (范围内 + 范围外混合) → 中性灰, 与"折叠层级 > 分组层级"中性语义一致
+      //   (聚合节点代表多种状态, 不宜用单一颜色表达)
+      if (isCenter && !fullyCenter) {
+        rect.style.setProperty('fill', '#fafafa', 'important')
+        return
+      }
+
+      // [FOLD-COLOR 2026-08-12 显式层级规则] 聚合节点层级 < 颜色分组层级 (折叠更粗, 分组更细)
+      //   → 聚合节点包含多个颜色组, 应显示中性灰, 而非取单一分组色。
+      //   旧实现只靠 colorMap.get(key) 命中与否判断中性, 同码同名场景会误命中:
+      //   子领域"内部交易"(title=内部交易) 与服务模块"内部交易"同名, key=ctx.title
+      //   → colorMap.get("内部交易") 命中服务模块分组色 → 显示彩色而非中性。
+      //   (层级数值: domain=0, subDomain=1, serviceModule=2, 见 services/expandLevel.js groupTypeLevel)
+      const levelOf = (t) => (t === 'domain' ? 0 : t === 'subDomain' ? 1 : t === 'serviceModule' ? 2 : -1)
+      const nodeLevel = levelOf(ctx.groupType)
+      const groupLevel = levelOf(colorGroupBy)
+      if (nodeLevel >= 0 && groupLevel >= 0 && nodeLevel < groupLevel) {
+        rect.style.setProperty('fill', '#fafafa', 'important')
         return
       }
 

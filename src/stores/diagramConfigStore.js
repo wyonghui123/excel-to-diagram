@@ -25,10 +25,15 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
   const centerScope = ref([])
   // [M2 PR-2.1] centerScopeMarkers 包含 3 个 Map，整体替换模式 (updateCenterScopeMarkers 整体赋值)
   //   改 shallowRef 避免对内部 Map 创建 Proxy
+  //   [PARTIAL-CENTER 2026-08-15] 新增 fullyXxx 标记: 分组是否"完全包含对象范围" (所有 BO 都在
+  //   centerScope), 与 hasCenter 标记配合区分折叠节点着色 (完全包含→centerScopeColor / 部分包含→中性灰).
   const centerScopeMarkers = shallowRef({
     domains: new Map(),
     subDomains: new Map(),
-    serviceModules: new Map()
+    serviceModules: new Map(),
+    fullyDomains: new Map(),
+    fullySubDomains: new Map(),
+    fullyServiceModules: new Map()
   })
 
   // 布局配置
@@ -138,11 +143,26 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
   }
 
   function updateCenterScope(codes) {
-    centerScope.value = Array.isArray(codes) ? codes : (codes?.value || [])
+    const next = Array.isArray(codes) ? codes : (codes?.value || [])
+    const prev = centerScope.value || []
+    const changed = next.length !== prev.length || next.some((c, i) => c !== prev[i])
+    centerScope.value = next
+    // [SCOPE-SWITCH 2026-08-13] 对象范围切换 = 新的初始展示: 重置用户展开层级/手动分组标记,
+    //   使渲染层按自适应默认展开层级(computeDefaultExpandByCount)重新计算初始层级.
+    //   根因: 同一会话内切换范围(如 SCP → 采购供应)时 expandLevelUserSet 残留上一次用户选择
+    //   (如"展开到业务对象"), 导致切换后仍沿用旧层级而非自适应默认 → 用户看到"默认展开到服务模块".
+    //   仅当范围实际变化才重置, 避免重复设置同一范围误清用户选择.
+    if (changed) {
+      expandLevelUserSet.value = false
+      groupManualSet.value = false
+    }
   }
 
   function updateCenterScopeMarkers(markers) {
-    centerScopeMarkers.value = markers || { domains: new Map(), subDomains: new Map(), serviceModules: new Map() }
+    centerScopeMarkers.value = markers || {
+      domains: new Map(), subDomains: new Map(), serviceModules: new Map(),
+      fullyDomains: new Map(), fullySubDomains: new Map(), fullyServiceModules: new Map()
+    }
   }
 
   function updateChartType(type) {
@@ -202,12 +222,6 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
 
   function updateLayoutControlConfig(config) {
     layoutControlConfig.value = config?.value || config
-    // [DBG 2026-08-10] 排查折叠 bug: 追踪谁以 MM collapsed=true 写入 store
-    if (typeof window !== 'undefined') {
-      const _find = (list) => { for (const g of list||[]) { if ((g.elementCode||g.id)==='MM') return g.collapsed; const r=_find(g.children); if(r!==undefined) return r; const r2=_find(g.containers); if(r2!==undefined) return r2; } return undefined; }
-      const mm = _find(layoutControlConfig.value?.groups)
-      if (mm === true) console.trace('[DBG-store-MM-true] updateLayoutControlConfig called with MM collapsed=true')
-    }
   }
 
   // [LEVEL 2026-08-07] 设置当前展开层级 (工具栏/图表设置共享)
@@ -218,10 +232,40 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     expandLevelUserSet.value = true
   }
 
+  // [DEFAULT-LEVEL 2026-08-12] 系统自动默认展开层级 (按分组数量自适应).
+  //   仅更新 expandLevel 值, 不设置 expandLevelUserSet: 这是系统初始默认,
+  //   用户后续显式选择(setExpandLevel)仍可覆盖, 且渲染层会继续套用自适应默认.
+  function setDefaultExpandLevel(key) {
+    expandLevel.value = key || 'businessObject'
+  }
+
   // [CTX-FIX 2026-08-09] 标记用户已手动调整过分组折叠/展开 (双击/右键菜单触发).
   //   设置后渲染层不再套用范围默认展开/全局展开, 尊重用户 per-group collapsed.
   function markGroupManualSet() {
     groupManualSet.value = true
+  }
+
+  // [PERF 2026-08-13] 重置展开层级/手动分组标记, 使渲染层按自适应默认展开层级重新计算.
+  //   触发场景: 关系范围变更引入新的领域/子领域层级 (数据范围结构变化) 时,
+  //   应重新自适应默认展开 (如从"1 个领域"变为"多个领域"→ 展开到领域),
+  //   而非沿用用户之前的展开层级/手动折叠状态.
+  function resetExpandState() {
+    expandLevelUserSet.value = false
+    groupManualSet.value = false
+    // [LOG 2026-08-13] 关键日志: 数据范围结构变化时重置展开层级/手动分组标记.
+    console.log('[resetExpandState] 重置展开状态: expandLevelUserSet=false, groupManualSet=false (当前 expandLevel=' + expandLevel.value + ')')
+  }
+
+  // [DEFAULT-COLOR 2026-08-13] 数据范围变化时应用默认颜色配置:
+  //   - centerScopeHighlight: 无外部 BO (只对象范围) 时 false, 有外部 BO 时 true
+  //   - colorGroupBy: 跟随初始展开层级 (domain/subDomain/serviceModule)
+  function applyDefaultColorConfig(groupBy, highlight) {
+    const prevGroupBy = colorGroupBy.value
+    const prevHighlight = centerScopeHighlight.value
+    colorGroupBy.value = groupBy || 'domain'
+    centerScopeHighlight.value = highlight ?? true
+    // [LOG 2026-08-13] 关键日志: 数据范围结构变化时重置默认颜色配置.
+    console.log('[applyDefaultColorConfig] colorGroupBy: ' + prevGroupBy + ' → ' + colorGroupBy.value + ' | centerScopeHighlight: ' + prevHighlight + ' → ' + centerScopeHighlight.value)
   }
 
   // [FOLD 2026-08-05] FR-005 应用视图模板到 layoutControlConfig.groups
@@ -300,7 +344,10 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     centerScopeMarkers.value = {
       domains: new Map(),
       subDomains: new Map(),
-      serviceModules: new Map()
+      serviceModules: new Map(),
+      fullyDomains: new Map(),
+      fullySubDomains: new Map(),
+      fullyServiceModules: new Map()
     }
     layoutTemplate.value = 'default'
     layoutEngine.value = 'elk'
@@ -400,7 +447,10 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     updateHideLinkLabelTails,
     updateLayoutControlConfig,
     setExpandLevel,
+    setDefaultExpandLevel,
     markGroupManualSet,
+    resetExpandState,
+    applyDefaultColorConfig,
     applyViewTemplate,
     updateChartDataSnapshot,
     setLayoutPanelExpanded,

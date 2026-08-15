@@ -2,6 +2,9 @@ const CONTAINER_TITLE_KEYWORDS = [
   '采购', '寻源', '合同', '价格', '任务', '供应商', '销售', '其他'
 ]
 
+// [STAT-TOOLTIP 2026-08-14] 容器统计纯函数 (业务对象数量 + 内部关系数量), 便于单元测试
+import { computeContainerStats } from '../tooltip/containerStats.js'
+
 export function useSvgStyle() {
   const validateContainerTitles = (svg) => {
     if (!svg) return
@@ -773,6 +776,80 @@ export function useSvgStyle() {
     })
   }
 
+  /**
+   * [STAT-TOOLTIP 2026-08-14] 为 领域/子领域/服务模块 容器 (含折叠聚合节点 COLLAPSE)
+   *   挂悬停 tooltip, 展示: 业务对象数量 + 内部关系数量.
+   *   复用共享的 #mermaid-tooltip 元素 (与 useTooltip 边 tooltip / attachLiftedParentTooltips 同源).
+   *
+   * 数据来源:
+   *   - diagramData.containers  (统一管道容器树, 叶子 nodeIds = BO code)
+   *   - 兜底 layoutGroups        (deriveLayoutGroups 产物, 叶子 directNodes = BO code)
+   * 计数口径: 基于"当前图表实际展示的 BO / 关系" (与 diagramData.nodes/links 对齐),
+   *   保证 tooltip 数字与所见图表一致 (而非全量对象)。
+   *
+   * 内部关系定义: source 与 target 均落在该容器子树内的关系 (两端都在内部)。
+   * @param {SVGElement} svgEl - Mermaid 渲染出的 SVG
+   * @param {Object} diagramData - 图表数据 (含 nodes/links/containers)
+   * @param {Array} layoutGroups - 兜底分组树 (layoutControlConfig.groups)
+   */
+  const attachContainerStatTooltips = (svgEl, diagramData, layoutGroups = null) => {
+    if (!svgEl || !diagramData) return
+
+    // [REFACTOR 2026-08-14] 统计逻辑抽到纯函数 containerStats.js (可单元测试)
+    const statByCode = computeContainerStats(diagramData, layoutGroups)
+    if (statByCode.size === 0) return
+
+    // 4) 挂 tooltip (容器 g.cluster / 折叠聚合节点 COLLAPSE 均带 data-container-code)
+    let tooltip = null
+    const ensureTooltip = () => {
+      if (tooltip) return tooltip
+      tooltip = document.getElementById('mermaid-tooltip')
+      if (!tooltip) {
+        tooltip = document.createElement('div')
+        tooltip.id = 'mermaid-tooltip'
+        tooltip.style.position = 'fixed'
+        tooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.85)'
+        tooltip.style.color = 'white'
+        tooltip.style.padding = '8px 12px'
+        tooltip.style.borderRadius = '6px'
+        tooltip.style.fontSize = '12px'
+        tooltip.style.zIndex = '100000'
+        tooltip.style.pointerEvents = 'none'
+        tooltip.style.visibility = 'hidden'
+        tooltip.style.whiteSpace = 'pre-line'
+        tooltip.style.lineHeight = '1.5'
+        tooltip.style.maxWidth = '300px'
+        tooltip.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)'
+        document.body.appendChild(tooltip)
+      }
+      return tooltip
+    }
+    const show = (text, x, y) => {
+      const t = ensureTooltip()
+      t.textContent = text
+      t.style.visibility = 'visible'
+      t.style.left = `${x + 12}px`
+      t.style.top = `${y + 12}px`
+    }
+    const hide = () => {
+      if (tooltip) tooltip.style.visibility = 'hidden'
+    }
+
+    svgEl.querySelectorAll('[data-container-code]').forEach((el) => {
+      const code = el.getAttribute('data-container-code')
+      const stat = statByCode.get(code)
+      if (!stat) return
+      // 幂等: 同一元素重复 processSvg 时不重复绑定
+      if (el.getAttribute('data-stat-tooltip-attached') === 'true') return
+      el.setAttribute('data-stat-tooltip-attached', 'true')
+      const titleEl = el.querySelector('.cluster-label, .nodeLabel, foreignObject, text') || el
+      const text = `业务对象：${stat.boCount}\n内部关系：${stat.relCount}`
+      titleEl.addEventListener('mouseenter', (e) => show(text, e.clientX, e.clientY))
+      titleEl.addEventListener('mousemove', (e) => show(text, e.clientX, e.clientY))
+      titleEl.addEventListener('mouseleave', hide)
+    })
+  }
+
   return {
     validateContainerTitles,
     fixArrowMarkers,
@@ -785,6 +862,8 @@ export function useSvgStyle() {
     forceEdgeLabelToMidpoint,
     // [FIX 2026-08-06g] 上提自禁用父容器的子分组: 悬停 tooltip 展示父名称
     attachLiftedParentTooltips,
+    // [STAT-TOOLTIP 2026-08-14] 容器统计 tooltip: 业务对象数量 + 内部关系数量
+    attachContainerStatTooltips,
     // 向后兼容别名
     applyContainerTitleItalic: validateContainerTitles
   }

@@ -222,4 +222,89 @@ describe('useBusinessObjectSyntax - relationDescriptions sourceName/targetName (
     expect(result.mermaidCode).not.toContain('客户主数据')
     expect(result.mermaidCode).not.toContain('订单主数据')
   })
+
+  // [PARTIAL-CENTER 2026-08-15] 折叠节点中性颜色 (部分包含对象范围):
+  //   领域分组同时含"对象范围内 BO"和"对象范围外 BO" → 折叠节点应显示中性灰 (走 classDef default),
+  //   而非 centerScopeColor. 与增量路径 updateCollapseNodeColors 的判定一致.
+  it('部分包含对象范围: 领域含范围内+范围外 BO → 折叠节点中性灰 (无 centerScopeColor style)', () => {
+    const data = {
+      nodes: [
+        { code: 'BO1', name: 'BO1', originalName: 'BO1', category: 'object' },
+        { code: 'BO2', name: 'BO2', originalName: 'BO2', category: 'object' }
+      ],
+      links: [],
+      // 只有 BO1 在对象范围; BO2 为跨域关系引入的范围外 BO (同领域)
+      centerScope: ['BO1'],
+      domainProducts: [
+        { name: '领域A', code: 'DA', businessObjects: [
+          { code: 'BO1', name: 'BO1' }, { code: 'BO2', name: 'BO2' }
+        ] }
+      ]
+    }
+    const layoutControlConfig = {
+      enabled: true,
+      overallDirection: 'TB',
+      colorGroupBy: 'domain',
+      centerScopeHighlight: true,
+      centerScopeColor: '#808080',
+      groups: [
+        { id: 'A', title: '领域A', groupType: 'domain', enabled: true, collapsed: true,
+          containers: [
+            { id: 'bo1', nodes: ['BO1'], isVirtual: true, elementCode: 'BO1' },
+            { id: 'bo2', nodes: ['BO2'], isVirtual: true, elementCode: 'BO2' }
+          ],
+          children: [] }
+      ]
+    }
+
+    const relationDescriptions = []
+    const result = syntax.generateMermaidCode(data, relationDescriptions, 'dagre', 'grouped', layoutControlConfig)
+
+    // 折叠节点存在
+    expect(result.mermaidCode).toContain('COLLAPSE_A')
+    // 部分包含 → 不生成 centerScopeColor 的 style (走 classDef default 中性灰 #fafafa)
+    expect(result.mermaidCode).not.toMatch(/style\s+COLLAPSE_A[^,\n]*#[8][0][8][0][8][0]/i)
+    // collapseColorMap 不应含 centerScopeColor
+    const colorForA = result.colorMap?.get && result.colorMap.get('COLLAPSE_A')
+    expect(colorForA).not.toBe('#808080')
+  })
+
+  // [PARTIAL-CENTER 2026-08-15] 完全包含对象范围: 领域所有 BO 都在对象范围 → centerScopeColor.
+  it('完全包含对象范围: 领域仅含范围内 BO → 折叠节点 centerScopeColor', () => {
+    const data = {
+      nodes: [
+        { code: 'BO1', name: 'BO1', originalName: 'BO1', category: 'object' },
+        { code: 'BO2', name: 'BO2', originalName: 'BO2', category: 'object' }
+      ],
+      links: [],
+      centerScope: ['BO1', 'BO2'],
+      domainProducts: [
+        { name: '领域A', code: 'DA', businessObjects: [
+          { code: 'BO1', name: 'BO1' }, { code: 'BO2', name: 'BO2' }
+        ] }
+      ]
+    }
+    const layoutControlConfig = {
+      enabled: true,
+      overallDirection: 'TB',
+      colorGroupBy: 'domain',
+      centerScopeHighlight: true,
+      centerScopeColor: '#808080',
+      groups: [
+        { id: 'A', title: '领域A', groupType: 'domain', enabled: true, collapsed: true,
+          containers: [
+            { id: 'bo1', nodes: ['BO1'], isVirtual: true, elementCode: 'BO1' },
+            { id: 'bo2', nodes: ['BO2'], isVirtual: true, elementCode: 'BO2' }
+          ],
+          children: [] }
+      ]
+    }
+
+    const relationDescriptions = []
+    const result = syntax.generateMermaidCode(data, relationDescriptions, 'dagre', 'grouped', layoutControlConfig)
+
+    expect(result.mermaidCode).toContain('COLLAPSE_A')
+    // 完全包含 → 生成 centerScopeColor style
+    expect(result.mermaidCode).toMatch(/style\s+COLLAPSE_A[^,\n]*#[8][0][8][0][8][0]/i)
+  })
 })

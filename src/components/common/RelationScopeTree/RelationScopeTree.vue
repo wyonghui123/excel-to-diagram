@@ -1,5 +1,13 @@
 <template>
-  <div class="relation-scope-tree">
+  <div
+    class="relation-scope-tree"
+    :class="{
+      'rst-active-object': objectExpanded,
+      'rst-active-relation': relationExpanded,
+      'rst-active-filter': filterExpanded,
+      'rst-active-layout': layoutExpanded
+    }"
+  >
     <CollapsiblePanel
       title="对象范围"
       :badge="selectedBoCount"
@@ -47,6 +55,7 @@
     </CollapsiblePanel>
 
     <CollapsiblePanel
+      v-if="injectedViewMode !== 'chart'"
       title="过滤条件"
       :default-expanded="filterExpanded"
       :height-full="false"
@@ -139,9 +148,9 @@ const objectScopeRef = ref(null)
 const relationScopeRef = ref(null)
 const filterSectionRef = ref(null)
 const coordinator = inject('refreshCoordinator', null)
-// [布局设置 sidebar 整合] inject chartConfig (由 RelationshipManagement provide)
+// [布局设置 sidebar 整合] inject chartConfig (由 ArchDataManagement provide)
 //   用于 LayoutControlPanel 的 :model-value 和 @update:model-value
-//   组件树: RelationshipManagement → MultiObjectManagementPage → RelationScopeTree
+//   组件树: ArchDataManagement → MultiObjectManagementPage → RelationScopeTree
 const injectedChartConfig = inject('chartConfig', null)
 // [布局设置 sidebar 整合] inject viewMode (由 MultiObjectManagementPage provide)
 //   用于 hasChartData 判断 (仅 chart 视图显示布局 panel)
@@ -494,6 +503,11 @@ function handleObjectScopeChange({ boIds, domainIds, subDomainIds, serviceModule
     // 后续：正常清空 RSS
     _restoreProtectionConsumed.value = true  // 标志已消费
     selectedRelationCodes.value = []
+    // [FIX 2026-08-15] 同步清空 selectedRelationIds。
+    //   之前只清 relationCodes 不清 relationIds，导致 emitScopeChange 发出
+    //   { relationCodes: [], relationIds: [旧值] }，父级 relationExtra.relationIds 保留旧值，
+    //   EmbeddedChartView 对象范围变更并行刷新时读到旧 relationIds → 旧关系连线残留。
+    selectedRelationIds.value = []
     emitScopeChange()
   }
   // emitScopeChange 同步执行 parent 的 handleScopeChange，scopeIds.relationExtra 现在是 []
@@ -577,6 +591,7 @@ function clearObjectScope() {
 function clearRelationScope() {
   relationScopeRef.value?.clear()
   selectedRelationCodes.value = []
+  selectedRelationIds.value = []
   emitScopeChange()
 }
 
@@ -617,6 +632,7 @@ function clear() {
   selectedSubDomainIds.value = []
   selectedServiceModuleIds.value = []
   selectedRelationCodes.value = []
+  selectedRelationIds.value = []
   localSelectedBoCount.value = 0
   relationStale.value = false
   emitScopeChange()
@@ -833,7 +849,7 @@ defineExpose({
 }
 
 .rst-panel-filter {
-  flex: 1;
+  flex: 0 1 auto;
   min-height: 48px;
 }
 
@@ -860,8 +876,28 @@ defineExpose({
   white-space: nowrap;
 }
 
-.relation-scope-tree:has(.rst-panel-relation.is-collapsed) .rst-panel-object {
-  flex: 1;
+/* [FIX 2026-08-15] 面板互斥布局: 展开的面板占满剩余空间, 折叠面板始终压成标题条.
+   替代原 :has() 方案 — 旧实现 `.relation-scope-tree:has(.rst-panel-relation.is-collapsed)
+   .rst-panel-object { flex: 1 }` 依赖 :has() 支持 + 只处理关系折叠一种情况,
+   浏览器不支持或对象树较短时折叠面板可能悬浮出现"半展开"空隙.
+   现按根容器上的 rst-active-* 类显式选择"当前展开面板", 折叠面板一律 flex: 0 0 auto
+   (48px 标题条), 保证任何情况下都无半折叠空隙. */
+.rst-panel-object:not(.is-collapsed) {
+  flex: 1 1 0;
+  min-height: 200px;
+}
+
+.rst-panel-filter:not(.is-collapsed) {
+  flex: 1 1 0;
+  min-height: 200px;
+}
+
+.relation-scope-tree.rst-active-object .rst-panel-object,
+.relation-scope-tree.rst-active-relation .rst-panel-relation,
+.relation-scope-tree.rst-active-filter .rst-panel-filter,
+.relation-scope-tree.rst-active-layout .rst-panel-layout {
+  flex: 1 1 0;
+  min-height: 200px;
 }
 
 /* [FIX] 关系范围面板展开时, 给 .collapsible-panel 一个明确的高度
