@@ -370,6 +370,12 @@ export function useSvgProcessor(options) {
     tooltip.addMouseOverTooltips(svgEl, relationDescriptions, diagramType, hideTails, annotationFilter)
   }
 
+  // [SIMPLE 2026-08-15] 增量刷新拖尾线(关系连线关联点): 关联点开关切换时调用,
+  //   只增删现有 SVG 拖尾线元素, 不触发 mermaid.run 全量重绘. 见 useTooltip.refreshTrailingDottedLines.
+  const refreshTrailingDottedLines = (svgEl, diagramType, hideTails = false) => {
+    tooltip.refreshTrailingDottedLines(svgEl, diagramType, hideTails)
+  }
+
   /**
    * 渲染备注叠加层
    * @param {Object} interaction - (可选) useInteraction 实例, 提供 centerElement 回调用于点击 annotation 时居中元素
@@ -811,7 +817,12 @@ export function useSvgProcessor(options) {
     //   必须在 addTooltips 之前设 (matchPathsToRelations 会读 relationDescriptions 做匹配诊断).
     diag.setRelationDescriptions(relationDescriptions || [])
 
-    const hideTails = props.layoutEngine === 'elk' || props.diagramData?.hideLinkLabelTails === true
+    // [SIMPLE 2026-08-15] 拖尾线(关系连线关联点)可见性:
+    //   hideLinkLabelTails = true → 隐藏; false → 始终显示(用户手动打开, 即使直线/ELK 也显示);
+    //   null/undefined(自动) → 跟随引擎: ELK(直线)隐藏, Dagre(曲线)显示.
+    //   之前无条件 `layoutEngine==='elk'` 导致直线+手动打开关联点也被隐藏 (用户反馈问题2).
+    const tailSetting = props.diagramData?.hideLinkLabelTails
+    const hideTails = tailSetting === true || (tailSetting !== false && props.layoutEngine === 'elk')
 
     fixViewBox(svgEl)
 
@@ -953,6 +964,7 @@ export function useSvgProcessor(options) {
     applyStyleFixes,
     fixEdgeLabelSize,
     addTooltips,
+    refreshTrailingDottedLines,
     renderAnnotationOverlay,
     setupCanvasLayout,
     processSvg,

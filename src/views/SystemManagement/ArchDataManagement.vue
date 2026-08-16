@@ -32,7 +32,7 @@
         :chart-type="chartConfig.chartType"
         :annotation-category-filter="chartConfig.annotationCategoryFilter"
         :overall-direction="chartConfig.layoutControl?.overallDirection ?? 'TB'"
-        :engine="chartConfig.layoutControl?.engine ?? 'elk'"
+        :engine="chartConfig.layoutEngine"
         :hide-link-label-tails="configStore.hideLinkLabelTails"
         :version-id="embeddedContext.versionId ?? null"
         @update:chart-type="(v) => (chartConfig.chartType = v)"

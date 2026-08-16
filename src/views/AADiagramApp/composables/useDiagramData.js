@@ -2195,6 +2195,20 @@ export function useDiagramData() {
     }
   )
 
+  // [SIMPLE 2026-08-15] 关系连线关联点 (hideLinkLabelTails) 原地更新 diagramData:
+  //   之前无此 watch — 切换关联点只改 store, 不触发 generateDiagram, diagramData.hideLinkLabelTails
+  //   停留旧值 → MermaidComponent 的 shouldHideTails 读到陈旧值 → "直线 + 手动打开关联点"也看不到拖尾线.
+  //   现原地更新 (引用不变), MermaidComponent deep watch 捕获 → nodes/links 未变 → renderMermaid 重绘,
+  //   processSvg 用新值重新判定拖尾线显隐. (与 centerScopeHighlight 原地更新同一模式)
+  watch(
+    () => diagramConfig.value?.hideLinkLabelTails,
+    (newVal, oldVal) => {
+      if (newVal !== oldVal && diagramData.value) {
+        diagramData.value.hideLinkLabelTails = newVal
+      }
+    }
+  )
+
   watchEffect(() => {
     if (centerScope.value && centerScope.value.length > 0 && previewData.value?.domainProducts) {
       updateCenterScopeMarkers()

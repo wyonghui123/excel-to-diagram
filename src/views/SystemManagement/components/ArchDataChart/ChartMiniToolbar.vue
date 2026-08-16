@@ -5,7 +5,7 @@
   主要功能：
     - 图表类型切换（业务对象图 / 服务模块图）
     - 备注类型过滤多选
-    - 布局方向（TB/LR）+ 高级选项（布局引擎）
+    - 布局方向（TB/LR）+ 高级选项（连线样式：直线/曲线、关系连线关联点）
     - 布局设置按钮（侧边抽屉打开布局控制面板）
     （颜色分组/配色/对象范围已移至图表空白区域右键菜单「颜色设置」，见 CTX-COLOR 注释）
 
@@ -89,8 +89,8 @@
       </div>
     </el-tooltip>
 
-    <!-- [MOVE 2026-08-04] 高级选项: 从 LayoutControlPanel 移到 toolbar, 用 popover 展开/收起
-         当前仅含布局引擎 (elk/dagre) 切换 -->
+    <!-- [SIMPLE 2026-08-15] 简化高级面板: 连线样式(直线/曲线) + 关系连线关联点(有/无).
+         引擎切换时自动同步关联点: 曲线→有, 直线→无; 用户可手动覆盖. -->
     <el-popover trigger="click" placement="bottom" :width="260" popper-class="cmt-advanced-popper">
       <template #reference>
         <el-button
@@ -103,40 +103,64 @@
         </el-button>
       </template>
       <div class="cmt-advanced-panel">
+        <!-- 开关1: 连线样式 (直线/曲线) -->
         <div class="cmt-advanced-row">
-          <label class="cmt-advanced-label">布局引擎</label>
-          <el-radio-group
-            :model-value="engine"
-            size="small"
-            @update:model-value="(v) => emit('update:engine', v)"
-          >
-            <el-radio value="elk">
-              直线/ELK
-              <span class="cmt-radio-desc">更好的屏幕适配能力</span>
-            </el-radio>
-            <el-radio value="dagre">
-              曲线/Dagre
-              <span class="cmt-radio-desc">稳定可靠，自动布局</span>
-            </el-radio>
-          </el-radio-group>
+          <label class="cmt-advanced-label">连线样式</label>
+          <div class="cmt-toggle-group">
+            <button
+              class="cmt-toggle-btn"
+              :class="{ active: engine === 'elk' }"
+              @click="onEngineChange('elk')"
+              title="直线 — 使用 ELK 布局引擎，连线为直线"
+            >
+              <svg class="cmt-toggle-icon" viewBox="0 0 36 24" fill="none">
+                <rect x="2" y="2" width="10" height="7" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+                <rect x="24" y="2" width="10" height="7" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+                <rect x="10" y="13" width="16" height="9" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+                <path d="M7 9v3.5c0 .3.2.5.5.5h6.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                <path d="M29 9v3.5c0 .3-.2.5-.5.5H22" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+              </svg>
+              <span class="cmt-toggle-name">直线</span>
+              <span class="cmt-toggle-desc">布局清晰</span>
+            </button>
+            <button
+              class="cmt-toggle-btn"
+              :class="{ active: engine === 'dagre' }"
+              @click="onEngineChange('dagre')"
+              title="曲线 — 使用 Dagre 布局引擎，连线为曲线"
+            >
+              <svg class="cmt-toggle-icon" viewBox="0 0 36 24" fill="none">
+                <rect x="2" y="2" width="10" height="7" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+                <rect x="24" y="2" width="10" height="7" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+                <rect x="10" y="13" width="16" height="9" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+                <path d="M7 9C4 12 4 17 7 21" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M29 9C32 12 32 17 29 21" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <span class="cmt-toggle-name">曲线</span>
+              <span class="cmt-toggle-desc">紧凑美观</span>
+            </button>
+          </div>
         </div>
-        <!-- [TAIL 2026-08-12] 关系标签拖尾线开关 (老版本图表展示导航配置步骤的"隐藏关系标签拖尾线").
-             值域: auto(自动, ELK隐藏/Dagre显示) / yes(强制隐藏) / no(强制显示), 与 configStore.hideLinkLabelTails
-             (null/true/false) 对应. -->
+
+        <!-- 开关2: 关系连线关联点 -->
         <div class="cmt-advanced-row">
-          <label class="cmt-advanced-label">关系标签拖尾线</label>
-          <el-radio-group
-            :model-value="tailMode"
-            size="small"
-            @update:model-value="onTailModeChange"
-          >
-            <el-radio value="auto">
-              自动
-              <span class="cmt-radio-desc">ELK隐藏，Dagre显示</span>
-            </el-radio>
-            <el-radio value="yes">隐藏</el-radio>
-            <el-radio value="no">显示</el-radio>
-          </el-radio-group>
+          <div class="cmt-tail-row">
+            <label class="cmt-advanced-label">关系连线关联点</label>
+            <el-switch
+              :model-value="tailEnabled"
+              size="small"
+              @update:model-value="onTailToggle"
+            />
+          </div>
+          <div class="cmt-tail-hint">
+            <svg class="cmt-tail-icon" viewBox="0 0 40 16" fill="none">
+              <rect x="1" y="3" width="11" height="10" rx="2" stroke="currentColor" stroke-width="1.2"/>
+              <path d="M12 8L26 8" stroke="currentColor" stroke-width="1" stroke-dasharray="3,2" stroke-linecap="round"/>
+              <circle cx="26" cy="8" r="2.5" fill="currentColor"/>
+              <path d="M28 8L35 8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+            </svg>
+            <span class="cmt-tail-hint-text">从关系名称到连线的虚线指示，曲线模式下自动开启</span>
+          </div>
         </div>
       </div>
     </el-popover>
@@ -179,13 +203,25 @@ const emit = defineEmits([
   'update:hide-link-label-tails'
 ])
 
-// [TAIL 2026-08-12] 拖尾线模式映射: store(null/true/false) ↔ UI(auto/yes/no)
-const tailMode = computed(() => {
+// [SIMPLE 2026-08-15] 关系连线关联点有效状态 (开关2):
+//   hideLinkLabelTails = null(自动) → 跟随引擎: 曲线(有), 直线(无)
+//   hideLinkLabelTails = false(显示) → 有(true), true(隐藏) → 无(false)
+//   手动开关必须用显式 false/true, 不能用 null(自动): null 在曲线模式下会被引擎重新拉回"有".
+const tailEnabled = computed(() => {
   const v = props.hideLinkLabelTails
-  return v === null ? 'auto' : (v ? 'yes' : 'no')
+  return v === null ? (props.engine === 'dagre') : !v
 })
-function onTailModeChange(mode) {
-  emit('update:hide-link-label-tails', mode === 'auto' ? null : (mode === 'yes'))
+
+// [SIMPLE 2026-08-15] 开关1 连线样式切换: 更新引擎, 并按规则联动关联点
+//   曲线→关联点有(显示=false), 直线→关联点无(隐藏=true).
+function onEngineChange(engineValue) {
+  emit('update:engine', engineValue)
+  emit('update:hide-link-label-tails', engineValue === 'dagre' ? false : true)
+}
+
+// [SIMPLE 2026-08-15] 开关2 手动覆盖: 开→显示(false), 关→隐藏(true)
+function onTailToggle(on) {
+  emit('update:hide-link-label-tails', on ? false : true)
 }
 
 // [FIX 2026-07-31] 加载 enum_types.annotation_category 选项
@@ -340,7 +376,7 @@ onMounted(() => {
   .cmt-advanced-panel {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 12px;
     padding: 4px 0;
   }
 
@@ -356,27 +392,76 @@ onMounted(() => {
     color: #303133;
   }
 
-  .el-radio-group {
+  // [SIMPLE 2026-08-15] 连线样式: 直线/曲线 两张卡片式按钮
+  .cmt-toggle-group {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .cmt-toggle-btn {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 6px;
+    border: 1px solid var(--color-border, #dcdfe6);
+    border-radius: 6px;
+    background: #fff;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: inherit;
+
+    &:hover {
+      border-color: var(--color-primary, #409eff);
+    }
+
+    &.active {
+      border-color: var(--color-primary, #409eff);
+      background: rgba(64, 158, 255, 0.08);
+      color: var(--color-primary, #409eff);
+    }
   }
 
-  .el-radio {
-    margin-right: 0;
-    height: auto;
+  .cmt-toggle-icon {
+    width: 44px;
+    height: 28px;
+    color: inherit;
+  }
+
+  .cmt-toggle-name {
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1;
+  }
+
+  .cmt-toggle-desc {
+    font-size: 10px;
+    color: var(--color-text-tertiary, #909399);
+    line-height: 1;
+  }
+
+  // [SIMPLE 2026-08-15] 关系连线关联点: 开关 + 图示说明
+  .cmt-tail-row {
     display: flex;
-    align-items: flex-start;
-    white-space: normal;
+    align-items: center;
+    justify-content: space-between;
   }
 
-  .cmt-radio-desc {
-    display: block;
-    margin-left: 22px;
-    margin-top: 2px;
+  .cmt-tail-hint {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     font-size: 11px;
     color: var(--color-text-tertiary, #909399);
     line-height: 1.4;
+  }
+
+  .cmt-tail-icon {
+    width: 40px;
+    height: 16px;
+    flex-shrink: 0;
+    color: var(--color-text-tertiary, #909399);
   }
 }
 </style>

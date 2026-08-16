@@ -165,7 +165,12 @@ const _hasInitialRelCodes = () => {
   if (Array.isArray(props.scopeIds?.relationExtra?.relationCodes) && props.scopeIds.relationExtra.relationCodes.length > 0) return true
   return false
 }
-const objectExpanded = ref(true)
+// [FIX 2026-08-15] 互斥初始化: 4 面板同一时刻只展开一个 (handleXxxToggle 都做互斥).
+//   之前 objectExpanded 恒为 true, 若关系范围从 chart 恢复 (relationCodes 非空) 时关系面板
+//   自动展开但对象面板未收起 → 根容器同时带 rst-active-object + rst-active-relation →
+//   两面板 flex:1 1 0 平分侧栏 → 关系面板只占一半高度、横条落在侧栏中间, 视觉上像"半展开态".
+//   现按 _hasInitialRelCodes() 决定默认展开对象面板还是关系面板, 保证互斥.
+const objectExpanded = ref(!_hasInitialRelCodes())
 const relationExpanded = ref(_hasInitialRelCodes())
 const filterExpanded = ref(false)
 // [布局设置 sidebar 整合] 第 4 panel: 布局设置
@@ -194,12 +199,16 @@ watch(() => diagramConfigStore.layoutPanelExpanded, (val) => {
 // [FIX] 监听 initialRelationCodes / scopeIds.relationExtra 变化, 动态展开关系范围面板
 // 场景: chart app 返回时, 父级 restore 流程异步更新 props, 初始 _hasInitialRelCodes() 是 false
 //       后续 props 同步进来时, 需要重新判断并展开
+// [FIX 2026-08-15] 展开关系面板时同步收起其他面板 (互斥), 避免双面板平分侧栏的"半展开"观感.
 watch(
   () => [props.initialRelationCodes, props.scopeIds?.relationExtra?.relationCodes],
   ([codes1, codes2]) => {
     const has = (Array.isArray(codes1) && codes1.length > 0) ||
                 (Array.isArray(codes2) && codes2.length > 0)
     if (has && !relationExpanded.value) {
+      objectExpanded.value = false
+      filterExpanded.value = false
+      layoutExpanded.value = false
       relationExpanded.value = true
       trace.log('autoExpand→relPanel', { codes1: codes1?.length, codes2: codes2?.length })
     }

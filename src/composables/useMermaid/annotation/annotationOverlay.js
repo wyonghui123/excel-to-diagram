@@ -367,9 +367,12 @@ export function useAnnotationOverlay() {
       }
     };
     const onSvgMouseUp = () => {
+      // [FIX 2026-08-16] 拖拽后浏览器可能 mousedown→move→mouseup 后 fire click,
+      //   若此处立即重置 isDraggingState=false, click handler 会误处理为"纯粹点击"并清高亮.
+      //   延长到 300ms 确保 click 事件到达时仍在拖拽窗口内, 跳过清高亮逻辑.
       setTimeout(() => {
         isDraggingState = false;
-      }, 100);
+      }, 300);
     };
     const onSvgClick = (e) => {
       // [FIX 2026-08-01 v3] 同一 click 事件只处理一次 (防止 svg/label/path 多 listener 重复触发).

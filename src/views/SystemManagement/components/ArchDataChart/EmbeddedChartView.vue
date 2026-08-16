@@ -72,6 +72,7 @@
 
 <script setup>
 import { reactive, computed, watch, onMounted, onBeforeUnmount, ref, nextTick } from 'vue'
+import { ElMessage } from 'element-plus'
 import { Loading, WarningFilled, DataLine } from '@element-plus/icons-vue'
 import { useDiagramConfigStore } from '@/stores/diagramConfigStore'
 import { useDiagnostics } from '@/composables/useMermaid/core/useDiagnostics.js'
@@ -408,7 +409,10 @@ const layoutControlConfig = computed(() => {
       return {
         enabled: true,
         layoutType: 'default',
-        layoutEngine: chartConfig.layoutControl?.engine || chartConfig.layoutEngine,
+        // [SIMPLE 2026-08-15] 引擎统一以 chartConfig.layoutEngine 为权威 (与 MermaidComponent
+        //   :layout-engine 同源), 不再优先 layoutControl.engine — 避免 layoutControl 被侧边栏等
+        //   Object.assign 重建时 engine 回退默认(直线)而 layoutEngine 仍为曲线 → 配置/图表失步.
+        layoutEngine: chartConfig.layoutEngine || 'elk',
         overallDirection: chartConfig.layoutControl?.overallDirection || unified.overallDirection || 'TB',
         preserveOrder: chartConfig.layoutControl?.preserveOrder ?? true,
         disabledBoCodes,
@@ -434,7 +438,7 @@ const layoutControlConfig = computed(() => {
       return {
         enabled: true,
         layoutType: 'default',
-        layoutEngine: chartConfig.layoutControl?.engine || chartConfig.layoutEngine,
+        layoutEngine: chartConfig.layoutEngine || 'elk',
         overallDirection: chartConfig.layoutControl?.overallDirection || autoConfig.overallDirection || 'TB',
         preserveOrder: chartConfig.layoutControl?.preserveOrder ?? true,
         groups: autoGroups
@@ -462,7 +466,7 @@ const groups = rawGroups.map(g => normalizeGroupForRendering(g))
   return {
     enabled: true,
     layoutType: 'default',
-    layoutEngine: chartConfig.layoutControl?.engine || chartConfig.layoutEngine,
+    layoutEngine: chartConfig.layoutEngine || 'elk',
     overallDirection: chartConfig.layoutControl?.overallDirection || 'TB',
     preserveOrder: chartConfig.layoutControl?.preserveOrder ?? true,
     groups
@@ -786,6 +790,10 @@ watch(
     if (chartConfig.layoutControl) {
       chartConfig.layoutControl.engine = newEngine
     }
+    // [SIMPLE 2026-08-15] 用户手动切回 dagre → 重置自动回退标志, 允许新一轮回退尝试
+    if (newEngine === 'dagre') {
+      _dagreFallbackDone = false
+    }
     diag.recordStepMeta('generateDiagram', { source: 'layoutEngine', at: Date.now() })
     if (diagramData.value) generateDiagram()
   }
@@ -811,6 +819,8 @@ watch(
 // ============================================================
 let _prevDiagOnRenderEnd = null
 let _prevDiagOnError = null
+// [SIMPLE 2026-08-15] dagre→ELK 自动回退标志: 仅回退一次, 用户手动切回曲线时重置
+let _dagreFallbackDone = false
 
 const onDiagRenderEnd = (info) => {
   // [FE2 2026-08-02] DOM 渲染完成标记 — E2E 用 wait_for_selector 替代轮询, 更快更稳。
@@ -838,6 +848,18 @@ const onDiagError = (entry) => {
   if (canvasContainerRef.value) {
     canvasContainerRef.value.setAttribute('data-chart-rendered', 'false')
     canvasContainerRef.value.setAttribute('data-error', String(entry?.message || entry))
+  }
+  // [SIMPLE 2026-08-15] dagre(曲线) 渲染失败 → 自动回退 ELK(直线) 并同步面板.
+  //   根因: mermaid dagre 在元素过多时无法完成布局 (报 text syntax error), ELK 可处理.
+  //   仅在 dagre 且疑似规模类错误时回退一次 (防循环), 用户手动切回曲线时重置.
+  const errMsg = String(entry?.message || entry || '')
+  const isLikelyScaleError = /text|size|syntax|maximum|edge|too (many|large)|layered/i.test(errMsg)
+  if (chartConfig.layoutEngine === 'dagre' && !_dagreFallbackDone && isLikelyScaleError) {
+    _dagreFallbackDone = true
+    chartConfig.layoutEngine = 'elk'
+    chartConfig.layoutControl.engine = 'elk'
+    ElMessage.warning('曲线(Dagre)布局在元素过多时无法渲染，已自动切换为直线(ELK)布局。')
+    return
   }
   emit('render-error', { error: entry, phase: entry?.context || 'mermaid' })
 }

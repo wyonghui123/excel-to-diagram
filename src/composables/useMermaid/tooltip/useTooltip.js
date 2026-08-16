@@ -631,6 +631,10 @@ export function useTooltip() {
       hideTooltip(tooltip)
     }
     const onClick = (e) => {
+      // [FIX 2026-08-16] 拖拽后的 click 不触发连线选择高亮 (与 bindEdgeFocus / annotationOverlay 对齐):
+      //   拖拽平移结束后鼠标恰好落在连线上, 浏览器会 fire click, 若不做守卫会误把当前高亮
+      //   替换成连线选择高亮 (即"拖拽导致高亮被取消/改变").
+      if (typeof window !== 'undefined' && window.__mermaidDrag && window.__mermaidDrag.wasDrag) return
       e.stopPropagation()
       clearHighlight(selectedElements)
       selectedElements.label = label
@@ -788,6 +792,8 @@ export function useTooltip() {
     }
 
     const onClick = (e) => {
+      // [FIX 2026-08-16] 拖拽后的 click 不触发连线选择高亮 (与 setupLabelEvents 分支对齐)
+      if (typeof window !== 'undefined' && window.__mermaidDrag && window.__mermaidDrag.wasDrag) return
       const t = resolveTarget(e.target)
       if (!t) return
       e.stopPropagation()
@@ -846,7 +852,7 @@ export function useTooltip() {
     addListener(svg, 'click', onClick)
   }
 
-  const addTrailingDottedLines = (svg, labels, diagramType, hideTails = false) => {
+  const addTrailingDottedLines = (svg, labels, diagramType, hideTails = false, pathToRelationMap = null, realEdgePaths = null) => {
     if (diagramType !== 'businessObject' && diagramType !== 'serviceModule') return
 
     // [PERF 2026-08-13] ELK (hideTails=true) 下拖尾线本就该隐藏, 原实现仍对每条边执行
@@ -855,6 +861,111 @@ export function useTooltip() {
     //   早退后大图 process_svg 从 ~2.4s 显著下降. feature flag: ff_perfProcessSvg=0 可回退.
     if (isFeatureEnabled('perfProcessSvg') && hideTails) {
       return
+    }
+
+    // [FIX 2026-08-15 v4.5] 拖尾线起点直接解析 g.edgeLabel 的 transform translate.
+    //   g.edgeLabel 是 g.edgeLabels 直接子级 (g.edgeLabels 无 transform), 其 transform
+    //   translate(x,y) 就是标签中心在 svg 用户空间的坐标. 文字相对锚点偏移很小 (<8px), 足够
+    //   表达"拖尾线属于该关系名称"的视觉关联.
+    const parseTranslate = (t) => {
+      if (!t) return null
+      const m = t.match(/translate\(([-\d.]+)[ ,]+([-\d.]+)\)/)
+      if (m) return { x: parseFloat(m[1]), y: parseFloat(m[2]) }
+      const m2 = t.match(/matrix\(([^)]+)\)/)
+      if (m2) {
+        const v = m2[1].split(/[ ,]+/).map(Number)
+        if (v.length >= 6) return { x: v[4], y: v[5] }
+      }
+      return null
+    }
+
+    // [FIX 2026-08-15 v4.7] 计算标签中心到对应 path 的最近点 (svg 用户空间).
+    //   之前 dot 终点 (x2,y2) 只在 draw 时刻算一次: draw 时标签仍贴在源节点 → 最近点算到
+    //   path 起点附近; 之后标签移到连线中点, observer 只同步了 x1,y1, dot 却留在旧位置 → dot 远离标题.
+    //   现在 observer 每次随标签移动重算最近点, 同时更新 x2,y2 与 dot 标记, 保证 dot 始终在
+    //   离标签最近的 path 位置上 (标签在 path 中点时 dot 与标题几乎重合).
+    const computeNearestPathPoint = (path, labelX, labelY, curSvg) => {
+      let pathLength = 0
+      try { pathLength = path.getTotalLength() } catch (e) { return null }
+      if (!pathLength) return null
+      const toSvgPathPoint = (pt) => {
+        try {
+          const g = new DOMPoint(pt.x, pt.y).matrixTransform(path.getScreenCTM())
+            .matrixTransform(curSvg.getScreenCTM().inverse())
+          return { x: g.x, y: g.y }
+        } catch (e) {
+          return { x: pt.x, y: pt.y }
+        }
+      }
+      const sampleCount = 50
+      let nearestPoint = null
+      let nearestDist = Infinity
+      for (let i = 0; i <= sampleCount; i++) {
+        const ratio = i / sampleCount
+        const point = toSvgPathPoint(path.getPointAtLength(pathLength * ratio))
+        const dist = Math.hypot(point.x - labelX, point.y - labelY)
+        if (dist < nearestDist) {
+          nearestDist = dist
+          nearestPoint = point
+        }
+      }
+      return nearestPoint
+    }
+
+    // [FIX 2026-08-15 v4.6] mermaid 对 edgeLabel transform 的定位是异步的, 且在大图上会持续
+    //   数秒才稳定 (实测: 拖尾线 draw 时刻 transform 仍在源节点中心, 如 MFG 99,164; 数秒后
+    //   才移到连线中点 415,201). 仅靠 setTimeout(2000) 延后一次不够, 之后标签继续移动会让
+    //   拖尾线起点远离关系名称. 用 MutationObserver 监听 g.edgeLabel 的 transform 变化,
+    //   标签每移动一次就同步更新对应拖尾线起点, 保证拖尾线始终紧贴关系名称文字.
+    const edgeLabelsContainer = svg.querySelector('g.edgeLabels')
+    if (edgeLabelsContainer && typeof MutationObserver !== 'undefined') {
+      const pendingLabels = new Set()
+      let flushScheduled = false
+      const flushTailSync = () => {
+        flushScheduled = false
+        for (const label of pendingLabels) {
+          const inner = label.querySelector('g.label')
+          const lid = (inner && inner.getAttribute('data-id')) || label.getAttribute('data-id') || ''
+          if (!lid) continue
+          const curSvg = label.closest('svg') || svg
+          const line = curSvg.querySelector(`line[data-trailing-line][data-label-id="${lid}"]`)
+          if (!line) continue
+          const c = parseTranslate(label.getAttribute('transform'))
+          if (!c) continue
+          // [v4.7] 同时重算最近点, 更新起点 + dot 终点, 让 dot 随标签移动到离标签最近的位置
+          const path = curSvg.querySelector(`path.flowchart-link[id="${lid}"]`)
+          const nearest = path ? computeNearestPathPoint(path, c.x, c.y, curSvg) : null
+          line.setAttribute('x1', c.x.toFixed(2))
+          line.setAttribute('y1', c.y.toFixed(2))
+          if (nearest) {
+            line.setAttribute('x2', nearest.x.toFixed(2))
+            line.setAttribute('y2', nearest.y.toFixed(2))
+            const marker = curSvg.querySelector(`circle[data-trailing-marker][data-label-id="${lid}"]`)
+            if (marker) {
+              marker.setAttribute('cx', nearest.x.toFixed(2))
+              marker.setAttribute('cy', nearest.y.toFixed(2))
+            }
+          }
+        }
+        pendingLabels.clear()
+      }
+      const tailObserver = new MutationObserver((mutations) => {
+        for (const m of mutations) {
+          if (m.type !== 'attributes' || m.attributeName !== 'transform') continue
+          const label = m.target
+          if (label && label.classList && label.classList.contains('edgeLabel')) {
+            pendingLabels.add(label)
+          }
+        }
+        if (!flushScheduled && pendingLabels.size) {
+          flushScheduled = true
+          requestAnimationFrame(flushTailSync)
+        }
+      })
+      tailObserver.observe(edgeLabelsContainer, {
+        attributes: true, subtree: true, attributeFilter: ['transform']
+      })
+      _cleanupFns.push(() => tailObserver.disconnect())
     }
 
     let defs = svg.querySelector('defs')
@@ -869,47 +980,42 @@ export function useTooltip() {
         return
       }
 
-      const labelTransform = label.getAttribute('transform') || ''
-      const translateMatch = labelTransform.match(/translate\(([^,]+),\s*([^)]+)\)/)
+      // [FIX 2026-08-15 v4.4] 拖尾线坐标必须等 mermaid 把 edge label 的 transform 定位到最终位置.
+      //   根因: processSvg 在 mermaid.run() resolve 后立即执行, 但 mermaid 对 edgeLabel 的
+      //   transform translate(x,y) 是异步定位的, 500ms 时上半段标签仍贴源节点 (起点算到源节点
+      //   中心, 如 MFG 标签应 415,207 却得 99,164) → 拖尾线起点远离关系名称. 实测 2s 后 transform
+      //   才稳定到最终位置. 故用 setTimeout(2000) 延后到标签定位完成后再测.
+      //   [v4.3] 同时用 label.closest('svg') 重新取当前文档中的 svg (防重渲染后旧引用).
+      setTimeout(() => {
+        if (!label.isConnected) return
+        const curSvg = label.closest('svg') || svg
+        if (!curSvg) return
+        const labelParent = label.parentElement
+        const rootGroup = labelParent?.parentElement
+        const allEdgePathsInRoot = rootGroup?.querySelectorAll('.edgePath path, path.flowchart-link')
 
-      if (!translateMatch) {
-        console.warn(`标签 ${index} 没有 Transform`)
-        return
-      }
-
-      const translateX = parseFloat(translateMatch[1])
-      const translateY = parseFloat(translateMatch[2])
-
-      // 获取标签内容元素（foreignObject 或文本）
-      const foreignObject = label.querySelector('foreignObject')
-      let contentWidth = 0
-      let contentHeight = 0
-
-      if (foreignObject) {
-        // 如果有 foreignObject，使用其子元素的实际尺寸
-        const foDiv = foreignObject.querySelector('div')
-        if (foDiv) {
-          const rect = foDiv.getBoundingClientRect()
-          contentWidth = rect.width
-          contentHeight = rect.height
+      // [FIX 2026-08-15 v4.5] 拖尾线起点 = g.edgeLabel transform translate (parseTranslate 见函数顶部).
+      //   draw 时若 transform 尚未稳定 (异步布局), v4.6 的 MutationObserver 会在标签移动后自动同步.
+      let labelCenter = parseTranslate(label.getAttribute('transform'))
+      // 兜底: g.label 的 bbox 中心 → svg 用户空间 (getScreenCTM, 含 CSS transform/autofit)
+      if (!labelCenter) {
+        try {
+          const gLabel = label.querySelector('g.label')
+          const el = gLabel || label
+          const b = el.getBBox()
+          const p = new DOMPoint(b.x + b.width / 2, b.y + b.height / 2)
+            .matrixTransform(el.getScreenCTM())
+            .matrixTransform(curSvg.getScreenCTM().inverse())
+          labelCenter = { x: p.x, y: p.y }
+        } catch (e) {
+          console.warn(`标签 ${index} 无法定位中心, 跳过`)
+          return
         }
       }
-
-      // 如果无法获取内容尺寸，使用 getBBox 作为备选
-      const labelBBox = label.getBBox()
-      const finalWidth = contentWidth > 0 ? contentWidth : labelBBox.width
-      const finalHeight = contentHeight > 0 ? contentHeight : labelBBox.height
-
-      // 计算标签中心位置（基于 transform）
-      const labelCenterX = translateX
-      const labelCenterY = translateY
-      const labelLeft = labelCenterX - finalWidth / 2
-      const labelTop = labelCenterY - finalHeight / 2
-
-      const labelParent = label.parentElement
-
-      // [OK] 纯 CSS 方案：添加 CSS 类，由 CSS 隐藏装饰元素
-      label.classList.add('edge-label-clean')
+      const labelCenterX = labelCenter.x
+      const labelCenterY = labelCenter.y
+        // [OK] 纯 CSS 方案：添加 CSS 类，由 CSS 隐藏装饰元素
+        label.classList.add('edge-label-clean')
 
       // [OK] 创建白色背景 rect
       // 使用 requestAnimationFrame 确保 Mermaid 渲染完成后再设置
@@ -1012,11 +1118,18 @@ export function useTooltip() {
         }
       })
 
-      const rootGroup = labelParent?.parentElement
-      const allEdgePathsInRoot = rootGroup?.querySelectorAll('.edgePath path, path.flowchart-link')
-
+      // [FIX 2026-08-15 v4] 拖尾线 path 匹配: 用 data-id / id 属性直接匹配 label↔path.
+      //   根因: 原 pathToRelationMap 的 path→relation 映射按索引 (idx < relationDescriptions.length)
+      //   dagre 下 path 顺序 ≠ label 顺序 → 索引错位, 拖尾线连到错误边, 起点远离文字.
+      //   SVG 结构: g.label[data-id="L_COLLAPSE_X_Y_0"] 与 path[id="L_COLLAPSE_X_Y_0"] 共享
+      //   相同 data-id, 用此精确匹配, 无需经 relation 对象间接查找.
       let correspondingPath = null
-      if (allEdgePathsInRoot && allEdgePathsInRoot.length > index) {
+      const labelDataId = label.querySelector('g.label')?.getAttribute('data-id')
+      if (labelDataId) {
+        correspondingPath = curSvg.querySelector(`path.flowchart-link[id="${labelDataId}"]`)
+      }
+      // 兜底: 映射不可用/未匹配时退回原索引匹配 (保持兼容)
+      if (!correspondingPath && allEdgePathsInRoot && allEdgePathsInRoot.length > index) {
         correspondingPath = allEdgePathsInRoot[index]
       }
 
@@ -1026,8 +1139,22 @@ export function useTooltip() {
       }
 
       const pathLength = correspondingPath.getTotalLength()
-      const startPoint = correspondingPath.getPointAtLength(0)
-      const endPoint = correspondingPath.getPointAtLength(pathLength)
+      // [FIX 2026-08-15 v4] path 的 getPointAtLength 返回 path 局部坐标; dagre 下 path 是
+      //   g.edgePaths 直接子级 (无 transform), 局部 = svg 用户空间. 保险起见仍经 getScreenCTM
+      //   (含 CSS transform) 转 svg 用户空间, 与 labelCenter 同一坐标系比较; 无 transform 时
+      //   path.getScreenCTM() 与 svg.getScreenCTM() 抵消, 结果不变. 不用 getCTM (缺 CSS 变换).
+      const toSvgPathPoint = (pt) => {
+        try {
+          const p = new DOMPoint(pt.x, pt.y)
+          const g = p.matrixTransform(correspondingPath.getScreenCTM())
+            .matrixTransform(curSvg.getScreenCTM().inverse())
+          return { x: g.x, y: g.y }
+        } catch (e) {
+          return { x: pt.x, y: pt.y }
+        }
+      }
+      const startPoint = toSvgPathPoint(correspondingPath.getPointAtLength(0))
+      const endPoint = toSvgPathPoint(correspondingPath.getPointAtLength(pathLength))
 
       const sampleCount = 50
       let nearestPoint = null
@@ -1035,7 +1162,7 @@ export function useTooltip() {
 
       for (let i = 0; i <= sampleCount; i++) {
         const ratio = i / sampleCount
-        const point = correspondingPath.getPointAtLength(pathLength * ratio)
+        const point = toSvgPathPoint(correspondingPath.getPointAtLength(pathLength * ratio))
         const dist = Math.hypot(point.x - labelCenterX, point.y - labelCenterY)
         if (dist < nearestDist) {
           nearestDist = dist
@@ -1058,7 +1185,8 @@ export function useTooltip() {
       tailLine.setAttribute('stroke-dasharray', '4,3')
       tailLine.setAttribute('opacity', '0.8')
       tailLine.setAttribute('data-trailing-line', 'true')
-      svg.appendChild(tailLine)
+      tailLine.setAttribute('data-label-id', labelDataId || '')
+      curSvg.appendChild(tailLine)
 
       const endMarker = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
       endMarker.setAttribute('cx', useNearestPoint.x.toFixed(2))
@@ -1067,7 +1195,10 @@ export function useTooltip() {
       endMarker.setAttribute('fill', '#333333')
       endMarker.setAttribute('opacity', '0.8')
       endMarker.setAttribute('data-trailing-marker', 'true')
-      svg.appendChild(endMarker)
+      // [v4.7] dot 标记带 data-label-id, 供 MutationObserver 随标签移动同步更新位置
+      endMarker.setAttribute('data-label-id', labelDataId || '')
+      curSvg.appendChild(endMarker)
+      }) // end setTimeout (坐标延迟到 transform 稳定后)
     })
 
     // 使用 CSS 类控制拖尾线显示/隐藏
@@ -1144,15 +1275,26 @@ export function useTooltip() {
       })
     }
 
-    addTrailingDottedLines(svg, edgeLabels, diagramType, hideTails)
+    addTrailingDottedLines(svg, edgeLabels, diagramType, hideTails, pathToRelationMap, realEdgePaths)
 
     addClickToClearHighlight(svg, selectedElements)
   }
 
-  // 清理本实例注册的所有事件监听器 + 当前 svg 上的装饰元素
-  // 不清理 tooltip DOM 元素（fullscreen 切换需要复用）
-  // 不影响其他 MermaidComponent 实例
-  const cleanup = () => {
+  // [SIMPLE 2026-08-15] 增量刷新拖尾线(关系连线关联点): 关联点开关切换时调用,
+  //   只增删现有 SVG 上的拖尾线元素, 不触发 mermaid.run 全量重绘.
+  //   hideTails=true → 移除拖尾线; false → 移除旧线后按当前 edgeLabel 重绘.
+  const refreshTrailingDottedLines = (svg, diagramType, hideTails = false) => {
+      if (!svg) return
+      svg.querySelectorAll('[data-trailing-line], [data-trailing-marker]').forEach(el => el.remove())
+      if (hideTails || (diagramType !== 'businessObject' && diagramType !== 'serviceModule')) return
+      const edgeLabels = getEdgeLabels(svg)
+      addTrailingDottedLines(svg, edgeLabels, diagramType, false)
+    }
+
+    // 清理本实例注册的所有事件监听器 + 当前 svg 上的装饰元素
+    // 不清理 tooltip DOM 元素（fullscreen 切换需要复用）
+    // 不影响其他 MermaidComponent 实例
+    const cleanup = () => {
     _cleanupFns.forEach(fn => fn())
     _cleanupFns = []
     if (_currentSvg) {
@@ -1177,6 +1319,7 @@ export function useTooltip() {
 
   return {
     addMouseOverTooltips,
+    refreshTrailingDottedLines,
     cleanup,
     clearSelectionHighlight,
     // [v34 双向支持] 导出供单测覆盖 (useTooltip.spec.js)

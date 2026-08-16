@@ -407,6 +407,11 @@ export default {
     let lastRenderData = null  // 上次渲染的数据，用于检测变化
     // [FIX 2026-08-02] L5 渲染跳过 (spec 4.4): 上次生成的 mermaidCode, code-diff 用
     let lastRenderedCode = null
+    // [SIMPLE 2026-08-15] 追踪最近一次关联点设置 (diagramData.hideLinkLabelTails).
+    //   关联点切换只改 diagramData 字段, 不改变 mermaid code → code-diff 会跳过 mermaid.run,
+    //   processSvg 无法用新值重算拖尾线 → 需清空 lastRenderedCode 强制重绘 (问题2: 直线+手动打开
+    //   关联点立即生效, 无需等刷新).
+    let lastTailSetting = null
     // [FIX 2026-08-03] reload (forceRerender) 时设为 true, renderMermaid 内消费后重置.
     //   必要性: reload 走 mermaid.run() 全量重排, 与首次渲染/chartType 切换等价,
     //   若不 autoFit, ELK 会读含 zoom transform 的 BCR → 节点维度放大, 文字变小.
@@ -430,8 +435,12 @@ export default {
       return mergedConfig
     })
 
+    // [SIMPLE 2026-08-15] 拖尾线(关系连线关联点)可见性 — 模板 hide-tails 类绑定:
+    //   true → 隐藏; false → 始终显示(直线/ELK 下手动打开也显示);
+    //   null/undefined(自动) → 跟随引擎: ELK(直线)隐藏, Dagre(曲线)显示.
     const shouldHideTails = computed(() => {
-      return props.layoutEngine === 'elk' || props.diagramData?.hideLinkLabelTails === true
+      const tailSetting = props.diagramData?.hideLinkLabelTails
+      return tailSetting === true || (tailSetting !== false && props.layoutEngine === 'elk')
     })
 
     let nodeColorMappings = []
@@ -858,6 +867,59 @@ export default {
                 if (interactionCleanup) { interactionCleanup(); interactionCleanup = null }
                 interactionCleanup = interaction.addZoomAndPan(mermaidContainerEl, mermaidWrapper, mermaidContainer)
 
+                // [REL-HL 2026-08-16] 连线交互: 左击→高亮连线+源/目标(不淡化); 右击→弹菜单, 选"高亮关系"才淡化.
+                //   只在首次渲染后绑定 (svg 引用唯一), 避免重复绑定.
+                const bindEdgeFocus = (svg) => {
+                  if (!svg || svg.getAttribute('data-edge-focus-bound')) return
+                  svg.setAttribute('data-edge-focus-bound', '1')
+                  const edgeIdxFromTarget = (e) => {
+                    // 优先: 连线标签 (g.edgeLabel 分组) — 注意 .edgeLabel 类在 <span> 上, 必须取最近 g.edgeLabel 分组做索引
+                    const labelGroup = e.target.closest('g.edgeLabel')
+                    if (labelGroup) return Array.from(svg.querySelectorAll('g.edgeLabel')).indexOf(labelGroup)
+                    // 其次: 连线 path (可能直接命中 path, 或命中 g.edgePath/g.edgePaths 容器)
+                    const edgePaths = getAppEdgePaths(svg)
+                    const hitEl = e.target.closest('path.flowchart-link, path.edge-thickness-normal, g.edgePath, g.edgePaths, g.edges, .edgePath, .edgePaths')
+                    if (hitEl) {
+                      const realPath = hitEl.tagName === 'path' ? hitEl : (hitEl.querySelector && hitEl.querySelector('path'))
+                      if (realPath) return edgePaths.indexOf(realPath)
+                    }
+                    return -1
+                  }
+                  svg.addEventListener('click', (e) => {
+                    // [FIX 2026-08-16] 拖拽后的 click 不触发连线高亮 (只有纯粹点击才处理)
+                    if (window.__mermaidDrag && window.__mermaidDrag.wasDrag) return
+                    const idx = edgeIdxFromTarget(e)
+                    if (idx >= 0) {
+                      e.stopPropagation()
+                      // 左击选中: 高亮连线+源/目标, 不淡化其余
+                      highlightEdgeFocus(svg, idx, false)
+                    }
+                  })
+                  svg.addEventListener('contextmenu', (e) => {
+                    const idx = edgeIdxFromTarget(e)
+                    if (idx >= 0) {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      // 右击连线 → 弹菜单: 标题=连线标签(XXX-YYY), 分隔线, 选项"关系高亮"(选中后连线+源/目标+其余淡化)
+                      const labels = svg.querySelectorAll('g.edgeLabel')
+                      const labelText = (labels[idx] && (labels[idx].textContent || '').trim()) || '关系高亮'
+                      ctxMenu.visible = false
+                      closeSubmenu()
+                      ctxMenu.isGlobal = false
+                      ctxMenu.groupTitle = labelText.slice(0, 60)
+                      ctxMenu.elementCode = ''
+                      ctxMenu.edgeIdx = idx
+                      ctxMenu.items = [
+                        { key: 'edgeFocus', label: '关系高亮' }
+                      ]
+                      ctxMenu.x = e.clientX
+                      ctxMenu.y = e.clientY
+                      ctxMenu.visible = true
+                    }
+                  })
+                }
+                bindEdgeFocus(svgElAfter)
+
                 // 设置画布布局
                 svgProcessor.setupCanvasLayout(mermaidWrapper, mermaidContainer, draggableArea)
 
@@ -1100,8 +1162,12 @@ export default {
                   `
                   styleEl.textContent = cssRules
 
-                  const shouldHideTails = props.layoutEngine === 'elk' ||
-                    props.diagramData?.hideLinkLabelTails === true
+                  // [SIMPLE 2026-08-15] 拖尾线(关系连线关联点)可见性:
+                  //   true → 隐藏; false → 始终显示(直线/ELK 下手动打开也显示);
+                  //   null/undefined(自动) → 跟随引擎: ELK(直线)隐藏, Dagre(曲线)显示.
+                  const tailSetting = props.diagramData?.hideLinkLabelTails
+                  const shouldHideTails = tailSetting === true ||
+                    (tailSetting !== false && props.layoutEngine === 'elk')
 
                   if (shouldHideTails) {
                     // [FIX 2026-08-12] 立即隐藏拖尾线+dot, 消除首屏 2s 闪烁 (用户反馈:
@@ -1645,6 +1711,8 @@ export default {
       // [FIX 2026-08-08] 新增 elementCode: 用于 executeContextMenuAction 中精确匹配分组,
       //   避免仅靠 groupTitle (标题) 匹配可能因标题重名/空格/编码差异导致 findGroupInTree 找不到.
       elementCode: '',
+      // [EDGE-HL 2026-08-16] 右击连线菜单: 记录被右击连线的索引, 供 "edgeFocus" 菜单项执行聚焦高亮.
+      edgeIdx: null,
       // [CTX-GLOBAL 2026-08-10] 空白区域右键 = 全局展开层级菜单 (替代 GlobalToolbar 展开层级下拉).
       //   true 时 groupTitle 显示"展开层级", 各选项为 expandGlobal:<key>.
       isGlobal: false,
@@ -2329,6 +2397,76 @@ export default {
       relHlState = { active: true, code: codeStr, connectedNodeCount: connected.size, hlEdgeCount: hlEdges.size, dimmedCount: relHlDimmed.size }
     }
 
+    // [EDGE-HL 2026-08-16] 应用内边路径统一选择器 (兼容 mermaid 11 各版本边结构)
+    const getAppEdgePaths = (svg) => Array.from(svg.querySelectorAll('path.flowchart-link, path.edge-thickness-normal, g.edges > g.edgePaths > path, g.edgePaths > path, .edgePath path'))
+
+    // [REL-HL 2026-08-16] 单条连线聚焦: 高亮该连线 + 源/目标节点.
+    //   dimOthers=true (右击菜单项"高亮关系") 时其余元素整体淡化; false (左击选中) 时不高亮不淡化.
+    //   与 highlightRelations 共享同一套样式管理 (saveRelHlOrigStyle / dimElement).
+    function highlightEdgeFocus(svg, edgeIdx, dimOthers = true) {
+      clearRelationsHighlight()
+      svgProcessor.clearSelectionHighlight?.()
+      svgProcessor.clearAnnotationHighlight?.(svg)
+      const edgePaths = getAppEdgePaths(svg)
+      const edgeLabels = svg.querySelectorAll('g.edgeLabel')
+      const pathEl = edgePaths[edgeIdx]
+      if (!pathEl) return
+      const codeToEl = new Map()
+      svg.querySelectorAll('g.node').forEach((el) => {
+        const c = el.getAttribute('data-container-code') || el.getAttribute('data-code')
+        if (c && !codeToEl.has(c)) codeToEl.set(c, el)
+      })
+      svg.querySelectorAll('g.cluster[data-container-code]').forEach((el) => {
+        const c = el.getAttribute('data-container-code')
+        if (c && !codeToEl.has(c)) codeToEl.set(c, el)
+      })
+      const connected = new Set()
+      const labelEl = edgeLabels[edgeIdx]
+      const parts = labelEl ? (labelEl.textContent || '').split('-').map(p => p.trim()) : []
+      // 复用 highlightRelations 的层级映射与"解析到最近可见祖先"逻辑
+      const { parentMap } = buildRelHlMaps()
+      const resolveVisible = (code) => resolveVisibleAncestor(code, codeToEl, parentMap)
+      if (parts.length >= 2) {
+        const a = resolveVisible(parts[0])
+        const b = resolveVisible(parts[parts.length - 1])
+        if (a) connected.add(a)
+        if (b) connected.add(b)
+      }
+      // 高亮连线
+      pathEl.setAttribute('data-rel-hl', '1')
+      saveRelHlOrigStyle(pathEl)
+      pathEl.style.strokeWidth = '3px'
+      pathEl.style.filter = 'drop-shadow(0 0 4px rgba(255, 107, 107, 0.9))'
+      // 高亮源/目标节点
+      connected.forEach((c) => {
+        const el = codeToEl.get(c)
+        if (!el) return
+        el.setAttribute('data-rel-hl', '1')
+        const rect = el.querySelector('rect, polygon')
+        if (rect) {
+          saveRelHlOrigStyle(rect)
+          rect.style.filter = 'drop-shadow(0 0 10px rgba(255, 107, 107, 0.85))'
+          rect.style.stroke = '#FF6B6B'
+          rect.style.strokeWidth = '2px'
+        }
+        const label = el.querySelector('.nodeLabel, .cluster-label, text')
+        if (label) {
+          saveRelHlOrigStyle(label)
+          label.style.fontWeight = 'bold'
+          label.style.fill = '#FF6B6B'
+        }
+      })
+      // 淡化其余 (仅 dimOthers=true; 左击选中不高亮不淡化): 其余连线 + 其余节点 + 其余连线标题
+      if (dimOthers) {
+        const hlEdges = new Set([pathEl])
+        edgePaths.forEach(p => { if (!hlEdges.has(p)) dimElement(p) })
+        edgeLabels.forEach((l, idx) => { const p = edgePaths[idx]; if (!p || !hlEdges.has(p)) dimElement(l) })
+        codeToEl.forEach((el, c) => { if (!connected.has(c)) dimElement(el) })
+      }
+      lastRelHlAt = Date.now()
+      relHlState = { active: true, code: parts.slice(0, 2).join('-'), connectedNodeCount: connected.size, hlEdgeCount: 1, dimmedCount: relHlDimmed.size }
+    }
+
     // [CTX-COLOR 2026-08-11] 构建"颜色设置"子菜单项 (含当前值勾选标记 checked).
     //   三种颜色控制: 颜色分组维度 / 配色方案 / 区分对象范围. 所有项通过
     //   executeContextMenuAction 的 setColorGroupBy:/setColorScheme:/setScopeHighlight: 分发,
@@ -2490,6 +2628,12 @@ export default {
         highlightRelations(ctxMenu.elementCode)
         return
       }
+      // [EDGE-HL 2026-08-16] 右击连线菜单项: 高亮该连线 + 源/目标节点 + 其余淡化.
+      if (key === 'edgeFocus') {
+        const svg = mermaidContainer.value?.querySelector('svg')
+        if (svg && ctxMenu.edgeIdx != null) highlightEdgeFocus(svg, ctxMenu.edgeIdx, true)
+        return
+      }
       // [FIX 2026-08-08 v2] 与 identifyGroupFromSvg 保持一致: 优先用 effectiveLayoutControlConfig
       const ctxCfg = effectiveLayoutControlConfig.value || configStore.layoutControlConfig
       debug.debugLog('[CTX] executeContextMenuAction: key=' + key + ', title=' + ctxMenu.groupTitle + ', code=' + ctxMenu.elementCode + ', hasCfg=' + !!ctxCfg)
@@ -2574,8 +2718,14 @@ export default {
       }
       const hasClosest = e.target && typeof e.target.closest === 'function'
       const content = hasClosest ? e.target.closest('.mermaid-content') : null
-      if (content && Date.now() - lastRelHlAt > 400
-          && !e.target.closest('g.node, g.cluster, g.edgeLabel, g.edgePath, g.edges, .mermaid-ctx-menu')) {
+      // [FIX 2026-08-16] 拖拽后的 click 不取消高亮: 仅"纯粹点击"(无拖拽位移) 才清除关系高亮.
+      //   拖拽由 useInteraction 的 window.__mermaidDrag.wasDrag 标记 (位移>8px).
+      const wasDrag = !!(typeof window !== 'undefined' && window.__mermaidDrag && window.__mermaidDrag.wasDrag)
+      // [FIX 2026-08-16] 容器点击也取消高亮: 排除列表去掉 g.cluster/.subgraph (分组容器)
+      //   与 g.node (节点点击本身会重新聚焦选中), 让"点击图表任意位置"都能清除关系/连线高亮,
+      //   不必非得点空白位置. 仅排除"会重新聚焦"的连线/右键菜单.
+      if (content && !wasDrag && Date.now() - lastRelHlAt > 400
+          && !e.target.closest('g.edgeLabel, g.edgePath, g.edges, .mermaid-ctx-menu')) {
         clearRelationsHighlight()
       }
     }
@@ -2592,6 +2742,11 @@ export default {
         }
 
         // 判断是否只需要更新颜色
+        // [SIMPLE 2026-08-15] diff 变量提升到块外, 供下方"纯关联点变化增量刷新"判断复用
+        let nodesChanged = false
+        let linksChanged = false
+        let textColorChanged = false
+        let colorConfigChanged = false
         if (oldVal) {
           // [FIX 2026-08-02] 结构 diff 需忽略颜色派生字段 (color/textColor/isCenter):
           //   统一管道 colorize 会把它们烘进节点对象, 若直接比对, 切换颜色分组/配色时
@@ -2604,9 +2759,9 @@ export default {
             const { color, textColor, isCenter, ...rest } = n
             return rest
           })
-          const nodesChanged = JSON.stringify(stripColorDerived(newVal.nodes)) !== JSON.stringify(stripColorDerived(oldVal.nodes))
-          const linksChanged = JSON.stringify(newVal.links) !== JSON.stringify(oldVal.links)
-          const textColorChanged = newVal?.textColor !== oldVal?.textColor
+          nodesChanged = JSON.stringify(stripColorDerived(newVal.nodes)) !== JSON.stringify(stripColorDerived(oldVal.nodes))
+          linksChanged = JSON.stringify(newVal.links) !== JSON.stringify(oldVal.links)
+          textColorChanged = newVal?.textColor !== oldVal?.textColor
           // [FIX 2026-08-10] 颜色字段 (colorGroupBy/colorScheme/centerScopeHighlight/customColors)
           //   统一用 colorTracker.changed 基于 last* 快照对比, 而非失效的 oldVal.
           //   根因: centerScopeHighlight 走"原地修改"(引用不变), deep watch 时 oldVal===newVal,
@@ -2615,7 +2770,7 @@ export default {
           //   → 走 updateColorsOnly 增量变色. textColor 不走原地修改且 tracker 不含此字段,
           //   故保留 oldVal 判断.
           const colorChanged = colorTracker.changed(newVal)
-          const colorConfigChanged = colorChanged.colorGroupBy || colorChanged.customColors
+          colorConfigChanged = colorChanged.colorGroupBy || colorChanged.customColors
             || colorChanged.colorScheme || colorChanged.centerScopeHighlight || colorChanged.centerScopeColor
 
           // 如果节点和连线没变，只是颜色相关配置变化，则只更新颜色
@@ -2636,6 +2791,22 @@ export default {
             }
             return
           }
+        }
+
+        // [SIMPLE 2026-08-15] 关联点设置变化:
+        //   纯关联点变化 (节点/连线/颜色均未变) → 增量更新拖尾线, 不触发 mermaid.run 全量重绘.
+        //   否则 → 清空 lastRenderedCode 强制重绘 (deep watch 原地修改 oldVal===newVal, 用 lastTailSetting 追踪).
+        const currentTail = newVal?.hideLinkLabelTails ?? null
+        if (currentTail !== lastTailSetting) {
+          lastTailSetting = currentTail
+          if (!nodesChanged && !linksChanged && !colorConfigChanged && !textColorChanged) {
+            const svg = mermaidContainer.value?.querySelector('svg')
+            if (svg && typeof svgProcessor.refreshTrailingDottedLines === 'function') {
+              svgProcessor.refreshTrailingDottedLines(svg, props.diagramType, shouldHideTails.value)
+              return
+            }
+          }
+          lastRenderedCode = null
         }
 
         renderMermaid()
@@ -4238,99 +4409,9 @@ ${mermaidCode}
           }
           
           if (svg) {
-            // 获取所有子图（容器）- 尝试多种选择器
-            let subgraphs = Array.from(svg.querySelectorAll('.cluster'));
-            // 如果找不到，尝试其他选择器
-            if (subgraphs.length === 0) {
-              // flowchart-elk 使用不同的class名
-              subgraphs = Array.from(svg.querySelectorAll('g.cluster'));
-            }
-            
-            if (subgraphs.length === 0) {
-              // 尝试通过rect元素查找容器
-              const allRects = svg.querySelectorAll('rect');
-              // 收集所有rect及其尺寸信息
-              const rectInfos = [];
-              allRects.forEach(rect => {
-                const width = parseFloat(rect.getAttribute('width')) || 0;
-                const height = parseFloat(rect.getAttribute('height')) || 0;
-                const area = width * height;
-                const parent = rect.closest('g');
-                rectInfos.push({ rect, width, height, area, parent });
-              });
-              
-              // 按面积排序，找出大尺寸的容器
-              rectInfos.sort((a, b) => b.area - a.area);
-              
-              // 计算面积分布，找出容器阈值
-              const areas = rectInfos.map(r => r.area);
-              const maxArea = Math.max(...areas);
-              const minArea = Math.min(...areas);
-              const avgArea = areas.reduce((a, b) => a + b, 0) / areas.length;
-              
-              // 容器通常是面积较大的元素（大于平均面积的2倍）
-              const containerThreshold = avgArea * 2;
-              const containerGroups = new Set();
-              
-              rectInfos.forEach(info => {
-                if (info.area >= containerThreshold && info.parent) {
-                  containerGroups.add(info.parent);
-                }
-              });
-              
-              subgraphs = Array.from(containerGroups);
-            }
-            
-            // 计算每个容器的嵌套层级
-            const getNestingLevel = (subgraph) => {
-              let level = 0;
-              let parent = subgraph.parentElement;
-              while (parent) {
-                if (parent.tagName === 'g' && subgraphs.includes(parent)) {
-                  level++;
-                }
-                parent = parent.parentElement;
-              }
-              return level;
-            };
-            
-            // 为每个容器计算层级
-            const containerLevels = new Map();
-            subgraphs.forEach(subgraph => {
-              containerLevels.set(subgraph, getNestingLevel(subgraph));
-            });
-            
-            // 按层级分组
-            const levelGroups = new Map();
-            subgraphs.forEach(subgraph => {
-              const level = containerLevels.get(subgraph);
-              if (!levelGroups.has(level)) {
-                levelGroups.set(level, []);
-              }
-              levelGroups.get(level).push(subgraph);
-            });
-            
-            // 按层级分配颜色（外层浅色，内层深色）
-            const colors = ['#ffffff', '#e0e0e0', '#c0c0c0', '#a0a0a0'];
-            const maxLevel = Math.max(...containerLevels.values());
-            
-            subgraphs.forEach((subgraph, index) => {
-              const rect = subgraph.querySelector('rect');
-              if (rect) {
-                const level = containerLevels.get(subgraph);
-                // 根据层级选择颜色（外层=0用白色，内层递增）
-                const colorIndex = Math.min(level, colors.length - 1);
-                const color = colors[colorIndex];
-                rect.setAttribute('fill', color);
-                rect.setAttribute('stroke', '#666666');
-                rect.setAttribute('stroke-width', '2');
-                rect.style.fill = color;
-                rect.style.stroke = '#666666';
-                rect.style.strokeWidth = '2px';
-                rect.style.opacity = '1';
-                rect.setAttribute('opacity', '1');
-              }
-            });
+            // [EXP-HTML 2026-08-16] 移除强制容器上色后处理:
+            //   容器填充由 mermaid 代码内的 LEVEL_STYLES 渲染 (与应用内一致的灰白灰层叠 + #333333 描边),
+            //   此处不再覆盖, 保证导出与应用完全一致.
             
             // 修复容器标题斜体
             const clusterLabels = svg.querySelectorAll('.cluster-label, .label');
@@ -4389,14 +4470,17 @@ ${mermaidCode}
           const sep = (item.isCenter && idx < colorLegendDataFull.length - 1)
             ? '<div class="legend-sep"></div>'
             : ''
-          return `<div class="legend-item" title="${item.name || ''}">
+          return `<div class="legend-item" title="点击隐藏/显示该分组: ${item.name || ''}" data-legend-name="${item.name || ''}">
             <span class="legend-dot" style="background:${item.color || '#e0e0e0'}"></span>
             <span class="legend-name">${item.name || ''}</span>
           </div>${sep}`
         }).join('')
         const legendHtmlFull = colorLegendDataFull.length > 0
           ? `<div class="color-legend-panel" data-annotation-layer="legend">
-              <div class="color-legend-title">图例</div>
+              <div class="color-legend-title">
+                <span>图例</span>
+                <span class="color-legend-close" id="export-legend-close" title="隐藏图例">&times;</span>
+              </div>
               <div class="color-legend-list">${legendItemsHtmlFull}</div>
             </div>`
           : ''
@@ -4466,6 +4550,46 @@ ${mermaidCode}
           }
         }
         
+        // [EXP-INTERACT 2026-08-16] 嵌入导出交互所需的编码映射 (节点 data-code / 容器
+        //   data-container-code 标题匹配 / 关系层级 子→父 映射), 供导出 HTML 内联脚本
+        //   复刻应用内交互: 节点/容器识别、关系高亮 (相关连线+源/目标节点)、右键高亮。
+        //   数据均为纯 JSON 可序列化对象 (编码/标题/层级), 不泄漏 DOM/函数引用。
+        const exportNodeCodes = [...new Set((props.diagramData?.nodes || []).map(n => n.code).filter(Boolean))]
+        const exportGroupTitleCode = {}
+        const collectExportTitles = (list) => {
+          ;(list || []).forEach((g) => {
+            if (!g || typeof g !== 'object') return
+            const title = g.title || g.name
+            const code = g.elementCode || g.id
+            if (title && code && !exportGroupTitleCode[title]) exportGroupTitleCode[title] = code
+            collectExportTitles(g.children)
+            collectExportTitles(g.containers)
+          })
+        }
+        collectExportTitles(effectiveLayoutControlConfig.value?.groups || [])
+        const exportChildrenMap = {}
+        const exportParentMap = {}
+        const exportAddChild = (p, c) => {
+          if (!p || !c || p === c) return
+          if (!exportChildrenMap[p]) exportChildrenMap[p] = []
+          if (!exportChildrenMap[p].includes(c)) exportChildrenMap[p].push(c)
+          exportParentMap[c] = p
+        }
+        ;(props.diagramData?.domainProducts || []).forEach(domain => {
+          ;(domain.modules || []).forEach(module => {
+            exportAddChild(domain.code, module.code)
+            ;(module.submodules || []).forEach(sub => {
+              exportAddChild(module.code, sub.code)
+              ;(sub.businessObjects || []).forEach(bo => exportAddChild(sub.code, bo.code))
+            })
+            ;(module.businessObjects || []).forEach(bo => exportAddChild(module.code, bo.code))
+          })
+          ;(domain.businessObjects || []).forEach(bo => exportAddChild(domain.code, bo.code))
+        })
+        ;(props.diagramData?.nodes || []).forEach(n => {
+          if (n.serviceModule && n.code) exportAddChild(n.serviceModule, n.code)
+        })
+
         const htmlContent = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -4535,11 +4659,56 @@ ${mermaidCode}
       z-index: 100;
     }
     .color-legend-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
       font-weight: bold;
       margin-bottom: 6px;
       border-bottom: 1px solid #eee;
       padding-bottom: 4px;
     }
+    /* [EXP-INTERACT 2026-08-16] 图例隐藏/唤出 (与应用内一致) + 交互高亮样式 */
+    .color-legend-close {
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      color: #999;
+      padding: 0 2px;
+      user-select: none;
+    }
+    .color-legend-close:hover { color: #666; }
+    .color-legend-toggle {
+      position: fixed;
+      top: 60px;
+      left: 20px;
+      background: rgba(255, 255, 255, 0.95);
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 4px 10px;
+      font-size: 12px;
+      color: #666;
+      cursor: pointer;
+      z-index: 100;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      user-select: none;
+    }
+    .exp-hl-edge {
+      stroke-width: 4px !important;
+      filter: drop-shadow(0 0 4px rgba(255, 107, 107, 0.9)) !important;
+    }
+    .exp-hl-node rect, .exp-hl-node polygon {
+      stroke: #FF6B6B !important;
+      stroke-width: 2px !important;
+      filter: drop-shadow(0 0 10px rgba(255, 107, 107, 0.85)) !important;
+    }
+    .exp-hl-node .nodeLabel, .exp-hl-node .cluster-label, .exp-hl-node text {
+      font-weight: bold !important;
+      fill: #FF6B6B !important;
+    }
+    .exp-dim { opacity: 0.1 !important; }
+    .exp-dim-line { opacity: 0.02 !important; }
+    /* [EXP-DIM 2026-08-16] 连线淡化再加强: 更透明 + 更浅 + 更细 (用户反馈"不明显") */
+    path.exp-dim-line { stroke: #e6e6e6 !important; stroke-width: 1px !important; }
     .color-legend-list {
       display: flex;
       flex-direction: column;
@@ -4618,8 +4787,349 @@ ${mermaidCode}
     let isDragging = false;
     let lastX = 0;
     let lastY = 0;
-    const minScale = 0.1;
+    // [EXP-DRAG 2026-08-16] 拖拽标记: 拖拽平移结束浏览器会 fire click, 若不做守卫会误清高亮
+    //   (与应用内 window.__mermaidDrag.wasDrag 对齐: 位移 >8px 视为拖拽, 只有纯粹点击才清高亮).
+    let expWasDrag = false;
+    let downX = 0;
+    let downY = 0;
+    // [EXP-FIT 2026-08-16] minScale 改为 let: 渲染后按图表实际尺寸动态设为 fitScale×0.2,
+    //   保证元素很多时也能缩到全貌 (原固定 0.1 对大图不够).
+    let minScale = 0.1;
     const maxScale = 10;
+    let fitScale = 1;
+    
+    // [EXP-INTERACT 2026-08-16] 嵌入编码映射 (来自应用侧生成, 见 exportAsHtmlFull):
+    //   EXPORT_NODES: 所有 BO 业务编码; EXPORT_GROUPS: 分组标题→elementCode;
+    //   EXPORT_CHILDREN/EXPORT_PARENT: 编码层级 子→父 映射 (关系高亮用).
+    const EXPORT_NODES = ${JSON.stringify(exportNodeCodes).replace(/<\//g, '<\\/')};
+    const EXPORT_GROUPS = ${JSON.stringify(exportGroupTitleCode).replace(/<\//g, '<\\/')};
+    const EXPORT_CHILDREN = ${JSON.stringify(exportChildrenMap).replace(/<\//g, '<\\/')};
+    const EXPORT_PARENT = ${JSON.stringify(exportParentMap).replace(/<\//g, '<\\/')};
+
+    // 渲染后为节点/容器打业务编码属性 (复刻应用内 addNodeCodeAttributes/addContainerCodeAttributes 的简化版)
+    const exportTagElements = (svg) => {
+      const nodeSet = new Set(EXPORT_NODES);
+      // [EXP-HL 2026-08-16] mermaid 用 br 换行 (textContent 无换行符), 按"标签文本以编码结尾"匹配, 长编码优先.
+      const nodeList = EXPORT_NODES.slice().sort((a, b) => b.length - a.length);
+      svg.querySelectorAll('g.node').forEach((node) => {
+        const label = node.querySelector('.nodeLabel');
+        if (!label) return;
+        const text = (label.textContent || '').trim();
+        const nl = text.lastIndexOf('\\n');
+        const tail = nl >= 0 ? text.slice(nl + 1).trim() : '';
+        if (tail && nodeSet.has(tail)) { node.setAttribute('data-code', tail); return; }
+        const matched = nodeList.find(c => c && text.endsWith(c));
+        if (matched) { node.setAttribute('data-code', matched); return; }
+        const m1 = text.match(/(?:领域|子领域|服务模块)\\s*([^\\s]+)/);
+        const m2 = text.match(/[（(]([^）)]+)[）)]/);
+        const code = (m1 && m1[1]) || (m2 && m2[1]) || '';
+        const isCollapse = (node.id || '').indexOf('COLLAPSE_') !== -1;
+        // [EXP-HL 2026-08-16] 折叠/聚合节点 (领域/子领域/服务模块): 标签编码是分组编码
+        //   (非 BO 编码, 不在 EXPORT_NODES 内), 直接打 data-container-code 即可供右键关系高亮识别.
+        if (isCollapse && code) {
+          node.setAttribute('data-container-code', code);
+          return;
+        }
+        if (code && nodeSet.has(code)) {
+          node.setAttribute('data-code', code);
+        }
+      });
+      svg.querySelectorAll('g.cluster, .subgraph').forEach((c) => {
+        const titleEl = c.querySelector('.cluster-label, text');
+        if (!titleEl) return;
+        const t = (titleEl.textContent || '').trim().replace(/^[<{\\[]/, '').replace(/[>}\\]]$/, '');
+        const name = t.split('\\n')[0].trim();
+        const code = EXPORT_GROUPS[name] || EXPORT_GROUPS[t];
+        if (code) c.setAttribute('data-container-code', code);
+      });
+    };
+
+    // [EXP-FIT 2026-08-16] 按图表实际尺寸 fit 到视口 (初始即见全貌), 并动态下探 minScale
+    const fitToScreen = (svg) => {
+      if (!svg) return;
+      try {
+        const bbox = svg.getBBox();
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        if (!bbox || !bbox.width || !bbox.height) return;
+        fitScale = Math.min(vw / bbox.width, vh / bbox.height) * 0.92;
+        if (!isFinite(fitScale) || fitScale <= 0) fitScale = 1;
+        minScale = fitScale * 0.2;
+        scale = fitScale;
+        translateX = (vw - bbox.width * fitScale) / 2 - bbox.x * fitScale;
+        translateY = (vh - bbox.height * fitScale) / 2 - bbox.y * fitScale;
+        updateTransform(svg);
+      } catch (err) { /* fit 失败时保持默认 */ }
+    };
+
+    // [EXP-HL 2026-08-16] 关系高亮: 解析边标签 "<源>-<目标>", 高亮相关连线 + 源/目标节点, 淡化其余
+    const exportSubtreeCodes = (root) => {
+      const res = new Set([root]);
+      const queue = [root];
+      while (queue.length) {
+        const cur = queue.shift();
+        const kids = EXPORT_CHILDREN[cur];
+        if (!kids) continue;
+        kids.forEach((k) => { if (!res.has(k)) { res.add(k); queue.push(k); } });
+      }
+      return res;
+    };
+    const exportResolveVisible = (code, codeToEl) => {
+      if (!code) return null;
+      if (codeToEl.has(code)) return code;
+      let cur = code;
+      let guard = 0;
+      while (cur && guard < 12) {
+        cur = EXPORT_PARENT[cur];
+        guard++;
+        if (cur && codeToEl.has(cur)) return cur;
+      }
+      return null;
+    };
+    let exportRelHl = { nodes: [], edges: [], dims: [], labels: [] };
+    const clearExportRelationsHl = () => {
+      exportRelHl.nodes.forEach((el) => el.classList.remove('exp-hl-node'));
+      exportRelHl.edges.forEach((el) => el.classList.remove('exp-hl-edge'));
+      // [FIX 2026-08-16] dims 里既含节点(exp-dim)也含连线 path(exp-dim-line), 必须两个类都清,
+      //   否则清除高亮时连线残留淡化样式 (表现为"淡化不稳定/残留").
+      // [EXP-DIM 2026-08-16] 连线 path 同时还原箭头 marker (淡化时临时指向 -dim 变体).
+      exportRelHl.dims.forEach((el) => {
+        el.classList.remove('exp-dim');
+        el.classList.remove('exp-dim-line');
+        if (el.tagName === 'path') exportRestoreEdgeMarkers(el);
+      });
+      exportRelHl.labels.forEach((el) => el.classList.remove('exp-dim-line'));
+      exportRelHl = { nodes: [], edges: [], dims: [], labels: [] };
+    };
+    // [EXP-HL 2026-08-16] 真实 mermaid 边路径: path.flowchart-link (g.edgePaths 内为兜底).
+    //   data-edge-hit 是透明命中带 (见 addEdgeHitAreas), 必须排除以免索引错位.
+    // [EXP-DIM 2026-08-16] 选择器放宽到 g.edgePaths/.edgePath 后代, 兼容不同 mermaid 版本
+    //   边 DOM 结构 (直接/嵌套), 避免个别连线漏淡化造成"时隐时现"的不稳定.
+    const exportGetEdgePaths = (svg) => Array.from(svg.querySelectorAll('path.flowchart-link, path.edge-thickness-normal, g.edgePaths path, .edgePath path')).filter(p => !p.hasAttribute('data-edge-hit'));
+
+    // [EXP-HL 2026-08-16] 给每条边加透明加宽的命中带 (stroke 16px), 解决"细线难点中"导致点击连线不高亮.
+    //   命中带置于真实 path 之后 (SVG 后绘者在上), pointer-events: stroke → 点线及附近都命中;
+    //   点击命中带在事件委托里按 data-edge-hit 索引映射回真实 path.
+    const addEdgeHitAreas = (svg) => {
+      const paths = exportGetEdgePaths(svg);
+      paths.forEach((realPath, idx) => {
+        if (realPath.getAttribute('data-hit-added')) return;
+        realPath.setAttribute('data-hit-added', '1');
+        const hit = realPath.cloneNode(false);
+        hit.removeAttribute('id');
+        hit.removeAttribute('data-relation-code');
+        hit.classList.remove('flowchart-link', 'edge-thickness-normal', 'edge-pattern-solid');
+        hit.setAttribute('data-edge-hit', String(idx));
+        hit.setAttribute('stroke', 'transparent');
+        hit.setAttribute('stroke-width', '16');
+        hit.setAttribute('fill', 'none');
+        hit.style.pointerEvents = 'stroke';
+        hit.style.cursor = 'pointer';
+        if (realPath.nextSibling) realPath.parentNode.insertBefore(hit, realPath.nextSibling);
+        else realPath.parentNode.appendChild(hit);
+      });
+    };
+
+    // [EXP-LEGEND 2026-08-16] 图例项点击 → 隐藏/显示该分组下的所有元素 (节点/折叠节点/分组容器/相关连线).
+    //   与应用内"图例项点击切换分组 visible"语义一致 (增量隐藏, 不重排布局).
+    const exportLegendToggle = (name, hidden) => {
+      const svg = document.querySelector('.mermaid svg');
+      if (!svg) return;
+      let code = EXPORT_GROUPS[name] || EXPORT_GROUPS[(name || '').replace(/[（(].*$/, '').trim()];
+      if (!code && EXPORT_CHILDREN[name]) code = name;
+      if (!code) return;
+      const scope = exportSubtreeCodes(code);
+      const display = hidden ? 'none' : '';
+      svg.querySelectorAll('g.node').forEach((el) => {
+        const c = el.getAttribute('data-container-code') || el.getAttribute('data-code');
+        if (c && scope.has(c)) el.style.display = display;
+      });
+      svg.querySelectorAll('g.cluster[data-container-code], .subgraph[data-container-code]').forEach((el) => {
+        const c = el.getAttribute('data-container-code');
+        if (c && scope.has(c)) el.style.display = display;
+      });
+      const labels = Array.from(svg.querySelectorAll('g.edgeLabel'));
+      const paths = exportGetEdgePaths(svg);
+      labels.forEach((labelEl, idx) => {
+        const parts = (labelEl.textContent || '').split('-').map((p) => p.trim());
+        if (parts.length < 2) return;
+        const a = parts[0];
+        const b = parts[parts.length - 1];
+        if (scope.has(a) || scope.has(b)) {
+          const pathEl = paths[idx];
+          if (pathEl) {
+            pathEl.style.display = display;
+            // 同步隐藏该连线的透明命中带 (否则隐藏线仍可点击, 触发高亮一个不可见的线)
+            const hit = pathEl.nextElementSibling;
+            if (hit && hit.hasAttribute('data-edge-hit')) hit.style.display = display;
+          }
+          labelEl.style.display = display;
+        }
+      });
+    };
+    // [EXP-HL 2026-08-16] 构建 编码→SVG元素 映射 (节点 data-code / 折叠 data-container-code / 分组容器)
+    const exportBuildCodeToEl = (svg) => {
+      const codeToEl = new Map();
+      svg.querySelectorAll('g.node').forEach((el) => {
+        const c = el.getAttribute('data-container-code') || el.getAttribute('data-code');
+        if (c && !codeToEl.has(c)) codeToEl.set(c, el);
+      });
+      svg.querySelectorAll('g.cluster[data-container-code], .subgraph[data-container-code]').forEach((el) => {
+        const c = el.getAttribute('data-container-code');
+        if (c && !codeToEl.has(c)) codeToEl.set(c, el);
+      });
+      return codeToEl;
+    };
+
+    // [EXP-HL 2026-08-16] 其余全部透明化: 未高亮连线 + 未高亮连线标题 + 未高亮节点/容器.
+    //   hlEdges=已高亮连线集合; connected=已高亮节点编码集合; codeToEl=编码→元素.
+    //   注意: 已高亮节点的祖先分组不淡化 (否则父级 opacity 0.25 会弱化子节点的高亮红框).
+    //   mermaid 中 g.cluster 与 g.node 是 DOM 兄弟 (非父子), 不能用 el.contains 判断祖先,
+    //   改用 EXPORT_PARENT 编码链判断"候选编码是否为已高亮编码的祖先".
+    const exportIsAncestorCode = (code, descendant) => {
+      let cur = descendant;
+      let guard = 0;
+      while (cur && guard < 12) {
+        cur = EXPORT_PARENT[cur];
+        guard++;
+        if (cur === code) return true;
+      }
+      return false;
+    };
+    // [EXP-DIM 2026-08-16] 箭头 marker 淡化: mermaid 的箭头 marker 在 <defs> 内,
+    //   给 path 设 opacity 只淡化描边, 不淡化 marker (箭头). 这里创建浅色变体 marker,
+    //   临时把 path 的 marker-end/start 指向该变体, 清除时换回原 marker.
+    const exportDimEdgeMarkers = (path) => {
+      const svg = path.closest('svg');
+      if (!svg) return;
+      const defs = svg.querySelector('defs');
+      if (!defs) return;
+      ['marker-end', 'marker-start'].forEach((attr) => {
+        const markerUrl = path.getAttribute(attr);
+        if (!markerUrl) return;
+        const match = markerUrl.match(/#([^)]+)/);
+        if (!match) return;
+        const origId = match[1];
+        const dimId = origId + '-dim';
+        // 同一颜色的变体 marker 只创建一次
+        if (!defs.querySelector('#' + dimId)) {
+          const orig = defs.querySelector('#' + origId);
+          if (!orig) return;
+          const clone = orig.cloneNode(true);
+          clone.id = dimId;
+          // [EXP-DIM 2026-08-16] 箭头必须跟着线一起"消失": 近白色 + 低透明度.
+          //   之前用 #cccccc 全透明度的 marker, 线的 opacity 在部分浏览器不作用于 marker,
+          //   导致"线透明了箭头还明显" → 用户感知连线淡化不足.
+          clone.setAttribute('opacity', '0.35');
+          clone.querySelectorAll('*').forEach((el) => {
+            const fill = el.getAttribute('fill');
+            if (fill && fill !== 'none') el.setAttribute('fill', '#eeeeee');
+            const stroke = el.getAttribute('stroke');
+            if (stroke && stroke !== 'none') el.setAttribute('stroke', '#eeeeee');
+          });
+          defs.appendChild(clone);
+        }
+        path.setAttribute('data-marker-orig-' + attr, markerUrl);
+        path.setAttribute(attr, 'url(#' + dimId + ')');
+      });
+    };
+    const exportRestoreEdgeMarkers = (path) => {
+      ['marker-end', 'marker-start'].forEach((attr) => {
+        const orig = path.getAttribute('data-marker-orig-' + attr);
+        if (orig) {
+          path.setAttribute(attr, orig);
+          path.removeAttribute('data-marker-orig-' + attr);
+        }
+      });
+    };
+    const exportDimOthers = (svg, hlEdges, connected, codeToEl) => {
+      const edgePaths = exportGetEdgePaths(svg);
+      const edgeLabels = Array.from(svg.querySelectorAll('g.edgeLabel'));
+      edgePaths.forEach((p) => { if (!hlEdges.has(p)) { p.classList.add('exp-dim-line'); exportDimEdgeMarkers(p); exportRelHl.dims.push(p); } });
+      edgeLabels.forEach((l, idx) => { const p = edgePaths[idx]; if (!p || !hlEdges.has(p)) { l.classList.add('exp-dim-line'); exportRelHl.labels.push(l); } });
+      const connectedArr = Array.from(connected);
+      codeToEl.forEach((el, c) => {
+        if (connected.has(c)) return;
+        const isAncestorOfHl = connectedArr.some((d) => c !== d && exportIsAncestorCode(c, d));
+        if (isAncestorOfHl) return;
+        el.classList.add('exp-dim');
+        exportRelHl.dims.push(el);
+      });
+    };
+
+    const applyExportRelationsHl = (code, svg) => {
+      clearExportRelationsHl();
+      if (!svg || !code) return;
+      const codeToEl = exportBuildCodeToEl(svg);
+      const scope = exportSubtreeCodes(String(code));
+      const edgeLabels = Array.from(svg.querySelectorAll('g.edgeLabel'));
+      const edgePaths = exportGetEdgePaths(svg);
+      const connected = new Set([String(code)]);
+      const hlEdges = new Set();
+      edgeLabels.forEach((labelEl, idx) => {
+        const parts = (labelEl.textContent || '').split('-').map((p) => p.trim());
+        if (parts.length < 2) return;
+        const a = parts[0];
+        const b = parts[parts.length - 1];
+        const aIn = a && scope.has(a);
+        const bIn = b && scope.has(b);
+        if (aIn || bIn) {
+          const pathEl = edgePaths[idx];
+          if (pathEl) hlEdges.add(pathEl);
+          // [EXP-HL 2026-08-16] 端点两侧都解析到可见元素并加入高亮:
+          //   右击容器时, 容器内那一侧端点 (BO/子分组) 也要高亮, 不能只高亮外侧端点.
+          const va = a && exportResolveVisible(a, codeToEl); if (va) connected.add(va);
+          const vb = b && exportResolveVisible(b, codeToEl); if (vb) connected.add(vb);
+        }
+      });
+      connected.forEach((c) => {
+        const el = codeToEl.get(c);
+        if (el) { el.classList.add('exp-hl-node'); exportRelHl.nodes.push(el); }
+      });
+      hlEdges.forEach((pathEl) => {
+        if (!pathEl.classList.contains('exp-hl-edge')) {
+          pathEl.classList.add('exp-hl-edge');
+          exportRelHl.edges.push(pathEl);
+        }
+      });
+      exportDimOthers(svg, hlEdges, connected, codeToEl);
+    };
+
+    // [EXP-HL 2026-08-16] 点击单条连线/连线标签 → 高亮该连线 + 源/目标节点 + 其余(含其余连线)透明化 (类似关系高亮)
+    const applyExportEdgeHl = (edgeIdx, svg) => {
+      clearExportRelationsHl();
+      clearExportEdgeHl();
+      const edgePaths = exportGetEdgePaths(svg);
+      const edgeLabels = Array.from(svg.querySelectorAll('g.edgeLabel'));
+      const pathEl = edgePaths[edgeIdx];
+      if (!pathEl) return;
+      pathEl.classList.add('exp-hl-edge');
+      exportHlEdge = pathEl;
+      const codeToEl = exportBuildCodeToEl(svg);
+      const connected = new Set();
+      const labelEl = edgeLabels[edgeIdx];
+      const parts = (labelEl ? (labelEl.textContent || '') : '').split('-').map((p) => p.trim());
+      if (parts.length >= 2) {
+        const a = exportResolveVisible(parts[0], codeToEl);
+        const b = exportResolveVisible(parts[parts.length - 1], codeToEl);
+        if (a) connected.add(a);
+        if (b) connected.add(b);
+      }
+      connected.forEach((c) => {
+        const el = codeToEl.get(c);
+        if (el) { el.classList.add('exp-hl-node'); exportRelHl.nodes.push(el); }
+      });
+      exportDimOthers(svg, new Set([pathEl]), connected, codeToEl);
+    };
+
+    // [EXP-HL 2026-08-16] 点击连线高亮 (应用内 annotation 点击连线一致)
+    let exportHlEdge = null;
+    const clearExportEdgeHl = () => {
+      if (exportHlEdge) {
+        exportHlEdge.classList.remove('exp-hl-edge');
+        exportHlEdge = null;
+      }
+    };
     
     const updateTransform = (svg) => {
       svg.style.transform = 'translate(' + translateX + 'px, ' + translateY + 'px) scale(' + scale + ')';
@@ -4663,6 +5173,10 @@ ${mermaidCode}
       const svgRect = svg.getBoundingClientRect();
       if (e.clientX >= svgRect.left && e.clientX <= svgRect.right &&
           e.clientY >= svgRect.top && e.clientY <= svgRect.bottom) {
+        // [EXP-DRAG 2026-08-16] 记录按下起点 + 重置拖拽标记 (位移从按下起累计)
+        expWasDrag = false;
+        downX = e.clientX;
+        downY = e.clientY;
         isDragging = true;
         lastX = e.clientX;
         lastY = e.clientY;
@@ -4675,6 +5189,12 @@ ${mermaidCode}
       
       const svg = document.querySelector('.mermaid svg');
       if (!svg) return;
+
+      // [EXP-DRAG 2026-08-16] 从按下起总位移 >8px → 标记为拖拽, 供 click 判断不清高亮
+      if (!expWasDrag) {
+        const moved = Math.abs(e.clientX - downX) + Math.abs(e.clientY - downY);
+        if (moved > 8) expWasDrag = true;
+      }
       
       const dx = e.clientX - lastX;
       const dy = e.clientY - lastY;
@@ -4732,78 +5252,120 @@ ${mermaidCode}
             }
           }
         }, 200);
-        
-        // 渲染完成后修改容器颜色，增加嵌套容器区分度
+
+        // [EXP-INTERACT 2026-08-16] 渲染稳定后接线导出交互:
+        //   1) 节点/容器打业务编码属性 (右键关系高亮前置)  2) fit 到视口 (见全貌) + 动态 minScale
+        //   3) 图例可点击隐藏/唤出  4) 点击连线高亮  5) 右键元素→高亮相关连线+源/目标节点  6) 双击空白恢复 fit
         setTimeout(() => {
           const svg = document.querySelector('.mermaid svg');
-          if (svg) {
-            let subgraphs = Array.from(svg.querySelectorAll('.cluster'));
-            if (subgraphs.length === 0) {
-              subgraphs = Array.from(svg.querySelectorAll('g.cluster'));
-            }
-            
-            if (subgraphs.length === 0) {
-              const allRects = svg.querySelectorAll('rect');
-              const rectInfos = [];
-              allRects.forEach(rect => {
-                const width = parseFloat(rect.getAttribute('width')) || 0;
-                const height = parseFloat(rect.getAttribute('height')) || 0;
-                const area = width * height;
-                const parent = rect.closest('g');
-                rectInfos.push({ rect, width, height, area, parent });
-              });
-              
-              rectInfos.sort((a, b) => b.area - a.area);
-              const areas = rectInfos.map(r => r.area);
-              const avgArea = areas.reduce((a, b) => a + b, 0) / areas.length;
-              const containerThreshold = avgArea * 2;
-              const containerGroups = new Set();
-              
-              rectInfos.forEach(info => {
-                if (info.area >= containerThreshold && info.parent) {
-                  containerGroups.add(info.parent);
-                }
-              });
-              subgraphs = Array.from(containerGroups);
-            }
-            
-            const getNestingLevel = (subgraph) => {
-              let level = 0;
-              let parent = subgraph.parentElement;
-              while (parent) {
-                if (parent.tagName === 'g' && subgraphs.includes(parent)) {
-                  level++;
-                }
-                parent = parent.parentElement;
-              }
-              return level;
-            };
-            
-            const containerLevels = new Map();
-            subgraphs.forEach(subgraph => {
-              containerLevels.set(subgraph, getNestingLevel(subgraph));
-            });
-            
-            const colors = ['#ffffff', '#e0e0e0', '#c0c0c0', '#a0a0a0'];
-            
-            subgraphs.forEach((subgraph, index) => {
-              const rect = subgraph.querySelector('rect');
-              if (rect) {
-                const level = containerLevels.get(subgraph);
-                const colorIndex = Math.min(level, colors.length - 1);
-                const color = colors[colorIndex];
-                rect.setAttribute('fill', color);
-                rect.setAttribute('stroke', '#666666');
-                rect.setAttribute('stroke-width', '2');
-                rect.style.fill = color;
-                rect.style.stroke = '#666666';
-                rect.style.strokeWidth = '2px';
-                rect.style.opacity = '1';
-                rect.setAttribute('opacity', '1');
+          if (!svg) return;
+          
+          exportTagElements(svg);
+          fitToScreen(svg);
+          
+          // 3) 图例隐藏/唤出 (与应用内一致)
+          const legendPanel = document.querySelector('.color-legend-panel');
+          const legendClose = document.getElementById('export-legend-close');
+          let legendToggle = null;
+          if (legendPanel && legendClose) {
+            legendClose.addEventListener('click', (e) => {
+              e.stopPropagation();
+              legendPanel.style.display = 'none';
+              if (!legendToggle) {
+                legendToggle = document.createElement('div');
+                legendToggle.className = 'color-legend-toggle';
+                legendToggle.textContent = '图例';
+                legendToggle.title = '显示图例';
+                legendToggle.addEventListener('click', () => {
+                  legendPanel.style.display = '';
+                  if (legendToggle) { legendToggle.remove(); legendToggle = null; }
+                });
+                document.body.appendChild(legendToggle);
               }
             });
           }
-        }, 500);
+          
+          // [EXP-HL 2026-08-16] 连线加透明命中带: 细线难点中, 加宽可点区域 (点击连线高亮的前提).
+          addEdgeHitAreas(svg);
+          
+          // 图例项点击 → 切换分组可见性 (隐藏/显示该分组下所有元素, 与应用内图例项一致)
+          const legendHidden = new Map();
+          document.querySelectorAll('.color-legend-list .legend-item').forEach((item) => {
+            const name = item.getAttribute('data-legend-name');
+            if (!name) return;
+            item.style.cursor = 'pointer';
+            item.addEventListener('click', (e) => {
+              e.stopPropagation();
+              const hidden = !(legendHidden.get(name) || false);
+              legendHidden.set(name, hidden);
+              exportLegendToggle(name, hidden);
+              item.style.opacity = hidden ? '0.4' : '';
+              item.style.background = hidden ? 'rgba(0,0,0,0.04)' : '';
+              const nm = item.querySelector('.legend-name');
+              if (nm) nm.style.textDecoration = hidden ? 'line-through' : '';
+              item.title = hidden ? '点击显示该分组' : '点击隐藏该分组';
+            });
+          });
+          
+          // [EXP-HL 2026-08-16] 点击: 连线/连线标签→高亮该线+源/目标节点+其余透明化; 节点/容器→关系高亮
+          svg.addEventListener('click', (e) => {
+            // [EXP-DRAG 2026-08-16] 拖拽后的 click 不取消/不触发高亮 (与 UI 一致):
+            //   拖拽平移结束鼠标落在连线上, 浏览器 fire click, 若不守卫会误清当前高亮.
+            if (expWasDrag) return;
+            clearExportRelationsHl();
+            clearExportEdgeHl();
+            // 1) 命中带 / 连线标签 / 连线 path → 高亮该连线 + 源/目标节点 + 其余透明化
+            let edgeIdx = -1;
+            const hitEl = e.target.closest('[data-edge-hit]');
+            if (hitEl) {
+              edgeIdx = parseInt(hitEl.getAttribute('data-edge-hit'), 10);
+            } else {
+              // [FIX 2026-08-16] 标签文字点击热点: 必须 closest('g.edgeLabel') 而非 closest('.edgeLabel').
+              //   根因: mermaid 标签文字是 <span class="edgeLabel">, 用 .edgeLabel 会命中 span 自身,
+              //   而 indexOf 是在 g.edgeLabel 分组列表上查 → 返回 -1 → 点文字无任何高亮.
+              //   closest('g.edgeLabel') 从 span 上溯到分组, 与应用内 bindEdgeFocus 一致.
+              const labelG = e.target.closest('g.edgeLabel');
+              if (labelG) {
+                edgeIdx = Array.from(svg.querySelectorAll('g.edgeLabel')).indexOf(labelG);
+              } else {
+                const textEl = e.target.closest('.edgeLabel');
+                if (textEl) {
+                  // 兜底: 标签文字不在 g.edgeLabel 内 (兼容不同 mermaid 版本), 按文本匹配
+                  const t = (textEl.textContent || '').trim();
+                  edgeIdx = Array.from(svg.querySelectorAll('g.edgeLabel')).findIndex((gg) => (gg.textContent || '').trim() === t);
+                } else {
+                  // 点击连线本身 (path) → 按真实边路径索引 (label 分支修复时不能丢此分支)
+                  const pathEl = e.target.closest('path.flowchart-link, path[data-relation-code]');
+                  if (pathEl) edgeIdx = exportGetEdgePaths(svg).indexOf(pathEl);
+                }
+              }
+            }
+            if (edgeIdx >= 0) { applyExportEdgeHl(edgeIdx, svg); return; }
+            // 2) 节点 → 关系高亮 (左击仅节点; 容器/分组只支持右击)
+            const nodeEl = e.target.closest('g.node');
+            if (nodeEl) {
+              const code = nodeEl.getAttribute('data-container-code') || nodeEl.getAttribute('data-code');
+              if (code) applyExportRelationsHl(code, svg);
+            }
+          });
+          // [EXP-HL 2026-08-16] 右键: 与左击一致, 对节点/容器做关系高亮
+          svg.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            clearExportRelationsHl();
+            clearExportEdgeHl();
+            const target = e.target.closest('g.node') || e.target.closest('g.cluster, .subgraph');
+            if (!target) return;
+            const code = target.getAttribute('data-container-code') || target.getAttribute('data-code');
+            if (!code) return;
+            applyExportRelationsHl(code, svg);
+          });
+          
+          // 6) 双击空白 → 恢复 fit (与应用内双击空白 autoFit 一致)
+          svg.addEventListener('dblclick', (e) => {
+            const onEl = e.target.closest('g.node, g.cluster, .subgraph, .edgeLabel');
+            if (!onEl) fitToScreen(svg);
+          });
+        }, 600);
       }).catch(err => {
         console.error('Mermaid渲染失败:', err);
         const notice = document.querySelector('.notice');

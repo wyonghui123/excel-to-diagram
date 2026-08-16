@@ -350,8 +350,15 @@ export function useInteraction() {
       if (isInToolbar || isInAnnotation) return  // 不阻止默认, 让 click 事件正常触发
 
       dragState.isDragging = true
+      dragState.wasDrag = false  // [FIX 2026-08-16] 每次 mousedown 重置"是否拖拽"标记
       dragState.startX = e.clientX - translateX.value
       dragState.startY = e.clientY - translateY.value
+      // [FIX 2026-08-16] 记录 mousedown 时屏幕坐标, 供 handleMouseMove 计算"从按下起的总位移".
+      //   之前用 startX + translateX.value 推算, 但 translateX 每次 move 都更新,
+      //   导致 moved 只反映"上一次 move 的增量" — 慢速小幅拖动 (每次 <8px 累计 >8px) 永远
+      //   不置 wasDrag=true, 拖拽结束的 click 会误清高亮. 现在直接存初始坐标, 稳定判断.
+      dragState.clientX = e.clientX
+      dragState.clientY = e.clientY
       mermaidContainerElRef.value.style.cursor = 'grabbing'
       mermaidContainerElRef.value.classList.add('dragging')
       // [v13 log 已移除, 避免 console spam]
@@ -360,6 +367,12 @@ export function useInteraction() {
     const handleMouseMove = (e) => {
       if (!dragState.isDragging) {
         return
+      }
+      // [FIX 2026-08-16] 位移超过阈值 → 标记为拖拽. 供 click 处理判断"拖拽不取消高亮, 只有纯粹点击才取消".
+      //   clientX/clientY 为 mousedown 时的初始屏幕坐标, 差值即本次拖拽总位移 (与 translate 无关).
+      if (!dragState.wasDrag) {
+        const moved = Math.abs(e.clientX - dragState.clientX) + Math.abs(e.clientY - dragState.clientY)
+        if (moved > 8) dragState.wasDrag = true
       }
       translateX.value = e.clientX - dragState.startX
       translateY.value = e.clientY - dragState.startY
