@@ -200,12 +200,19 @@ watch(() => diagramConfigStore.layoutPanelExpanded, (val) => {
 // 场景: chart app 返回时, 父级 restore 流程异步更新 props, 初始 _hasInitialRelCodes() 是 false
 //       后续 props 同步进来时, 需要重新判断并展开
 // [FIX 2026-08-15] 展开关系面板时同步收起其他面板 (互斥), 避免双面板平分侧栏的"半展开"观感.
+// [FIX 2026-08-16] 用户主动交互后不再自动展开关系面板:
+//   场景: 在对象范围选择数据时, loadRelationships/勾选回写会临时写入 relationCodes,
+//   触发本 watch 自动展开关系面板 (用户投诉"选择对象后关系范围自动展开").
+//   一旦用户手动切换面板或修改范围, 面板状态完全交给用户, 不再自动跳转.
+//   restore 路径不受影响: ObjectScopeSection 在 setCheckedKeys 时 guard 抑制 emit,
+//   restore 不触发 handleObjectScopeChange, flag 保持 false, 自动展开仍生效.
+let userToggledPanel = false
 watch(
   () => [props.initialRelationCodes, props.scopeIds?.relationExtra?.relationCodes],
   ([codes1, codes2]) => {
     const has = (Array.isArray(codes1) && codes1.length > 0) ||
                 (Array.isArray(codes2) && codes2.length > 0)
-    if (has && !relationExpanded.value) {
+    if (has && !relationExpanded.value && !userToggledPanel) {
       objectExpanded.value = false
       filterExpanded.value = false
       layoutExpanded.value = false
@@ -221,6 +228,7 @@ const selectedFilterRelationCodes = ref([])
 const localSelectedBoCount = ref(0)
 
 function handleObjectToggle(expanded) {
+  userToggledPanel = true  // [FIX 2026-08-16] 用户手动切换面板 → 停止自动展开
   objectExpanded.value = expanded
   if (expanded) {
     relationExpanded.value = false
@@ -230,6 +238,7 @@ function handleObjectToggle(expanded) {
 }
 
 function handleRelationToggle(expanded) {
+  userToggledPanel = true  // [FIX 2026-08-16]
   relationExpanded.value = expanded
   if (expanded) {
     objectExpanded.value = false
@@ -242,6 +251,7 @@ function handleRelationToggle(expanded) {
 }
 
 function handleFilterToggle(expanded) {
+  userToggledPanel = true  // [FIX 2026-08-16]
   filterExpanded.value = expanded
   if (expanded) {
     objectExpanded.value = false
@@ -252,6 +262,7 @@ function handleFilterToggle(expanded) {
 
 // [布局设置 sidebar 整合] 第 4 panel toggle — 参与 4-panel 互斥, 同步 store
 function handleLayoutToggle(expanded) {
+  userToggledPanel = true  // [FIX 2026-08-16]
   layoutExpanded.value = expanded
   if (expanded) {
     objectExpanded.value = false
@@ -490,6 +501,7 @@ const computedCategories = computed(() => {
 })
 
 function handleObjectScopeChange({ boIds, domainIds, subDomainIds, serviceModuleIds }) {
+  userToggledPanel = true  // [FIX 2026-08-16] 用户修改对象范围 → 停止自动展开关系面板
   selectedBoIds.value = boIds || []
   selectedDomainIds.value = domainIds || []
   selectedSubDomainIds.value = subDomainIds || []
@@ -539,6 +551,7 @@ function handleObjectScopeChange({ boIds, domainIds, subDomainIds, serviceModule
 }
 
 function handleRelationScopeChange({ relationCodes, relationIds }) {
+  userToggledPanel = true  // [FIX 2026-08-16] 用户手动勾选关系 → 停止自动展开
   selectedRelationCodes.value = relationCodes || []
   // [FIX] 传递 relationIds 用于精确过滤
   selectedRelationIds.value = relationIds || []
@@ -546,6 +559,7 @@ function handleRelationScopeChange({ relationCodes, relationIds }) {
 }
 
 function handleFilterChange({ annotationCategories, relationCodes }) {
+  userToggledPanel = true  // [FIX 2026-08-16] 用户修改过滤条件 → 停止自动展开
   selectedAnnotationCategories.value = annotationCategories || []
   selectedFilterRelationCodes.value = relationCodes || []
   emitScopeChange()

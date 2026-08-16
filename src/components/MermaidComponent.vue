@@ -34,13 +34,9 @@
       
       <!-- 导出操作组 -->
       <div class="toolbar-group">
-        <button class="toolbar-btn" @click="copyToClipboard" title="复制代码">
-          <AppIcon name="copy" size="sm" />
-          <span class="toolbar-btn-label">复制</span>
-        </button>
-        <button class="toolbar-btn toolbar-btn--primary" @click="exportAsHtmlFull" title="导出 HTML（彩色版 - 可直接双击打开）">
+        <button class="toolbar-btn toolbar-btn--primary" @click="exportAsHtmlFull" title="导出 HTML（可直接双击打开）">
           <AppIcon name="export" size="sm" />
-          <span class="toolbar-btn-label">彩色HTML</span>
+          <span class="toolbar-btn-label">HTML</span>
         </button>
         <button class="toolbar-btn toolbar-btn--primary" @click="exportAsPdf" title="导出 PDF（横版矢量图）">
           <AppIcon name="export" size="sm" />

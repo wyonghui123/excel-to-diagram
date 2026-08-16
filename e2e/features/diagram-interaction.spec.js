@@ -1029,11 +1029,11 @@ test.describe('S11: 图表设置 ↔ 图表高亮居中联动', () => {
     console.log(`[OK] 重置视图: transform ${focusedTransform} → ${resetTransform}`)
   })
 
-  test('C24: 点击"彩色HTML"导出 → 触发下载 diagram-full-*.html', async ({ page }) => {
+  test('C24: 点击"HTML"导出 → 触发下载 diagram-full-*.html', async ({ page }) => {
     const hierarchy = await getHierarchy(page)
     await openEmbeddedChartView(page, hierarchy)
 
-    const exportBtn = page.locator('.toolbar-btn:has-text("彩色HTML")').first()
+    const exportBtn = page.locator('.toolbar-btn:has-text("HTML")').first()
     await expect(exportBtn).toBeVisible({ timeout: 15000 })
 
     const [download] = await Promise.all([
@@ -1042,7 +1042,7 @@ test.describe('S11: 图表设置 ↔ 图表高亮居中联动', () => {
     ])
     const filename = download.suggestedFilename()
     expect(filename, '导出文件名应以 diagram-full- 开头').toMatch(/^diagram-full-.*\.html$/)
-    console.log(`[OK] 彩色HTML 导出: ${filename}`)
+    console.log(`[OK] HTML 导出: ${filename}`)
   })
 
   // ============================================================
