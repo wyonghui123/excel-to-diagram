@@ -58,6 +58,14 @@ scope = sc.scope_dict(sub_domain='MM', relation_mode='all_cross_domain')  # {'su
 | `whyHidden(code)` | 一键诊断某 BO/分组"为何不可见": 是否在数据/中心范围/SVG + 分组树祖先链 (visible/collapsed) + 原因清单 | `whyHidden('PO201')` |
 | `focusElement(type,id)` | 高亮+居中图表元素 (`'container'`/`'node'`, 跨类型兜底); TruthPanel 表格行点击即调用 | `focusElement('container','SCM')` |
 | `exportUrl()` | 生成**完整状态快照**复现链接: fold + scopeHighlight + `cfg`(colorGroupBy/colorScheme/expandLevel/customColors, base64) | `exportUrl()` |
+| `exportHtmlFull()` | ⚡ **免下载取导出 HTML 字符串** (async) — 探针一条 evaluate 拿到完整 HTML, 跳过"点按钮→下载→加载"链路 | `await __archPage.exportHtmlFull()` |
+| `debug.chartLinks()` | **连线诊断**: 一条命令确认当前图表是否有连线 (links/nodes/edgeLabels/edgePaths/scope) | `debug.chartLinks()` |
+
+**导出页内自暴露快照** (`window.__exportHl.*`, 在导出的 HTML 页面里, 加载后可用):
+| API | 作用 | 示例 |
+|-----|------|------|
+| `__exportHl.snapshot()` | 一条 evaluate 读导出页连线/标签/高亮/淡化状态: `{paths, labels[], hlEdge, hlNode, dimLine, dim}` | `__exportHl.snapshot()` |
+| `__exportHl.dimLineOpacity()` | 读被淡化连线的计算透明度 | `__exportHl.dimLineOpacity()` |
 
 > 背景: `colorState`/`expandState` 原先只在增量路径 (`updateColorsOnly`) 或特定时机写入, 全量渲染后读不到;
 > `diagramData` 暴露的是 Vue ref 直接 `.nodes` 返回 undefined — 排查时极易踩坑。这三个函数改为"实时计算、随时可读"。
@@ -88,6 +96,37 @@ ELK 布局下每个服务模块自动生成「无关系/有关系」系统分组
 
 ### 5. 终端中文乱码
 Windows 控制台打印中文可能乱码。排查脚本统一: 结果写 JSON 文件 (`runner.dump()` / `scenario.py` 探针), 控制台只打 ASCII 摘要。
+
+### 6. 当前后端数据无关系连线 (2026-08-16 关键发现)
+**现状**: 标准测试范围(SCP/PLAM 等) `diagramData.links` 恒为 0, SVG 中无 `g.edgeLabel`/`path.flowchart-link` 元素。
+- 原因: 后端数据当前不提供关系连线。连线交互功能(导出高亮/淡化/标签热点)的验证只能通过**合成连线注入**。
+- 验证导出连线交互: `python test_helpers/verify_export_interaction.py` — 自动注入合成连线 + 走新钩子验证。
+- 如果要验证真实数据的连线交互, 需要后端提供 `diagramData.links`。当前不适合做"连线功能回归"断言。
+
+---
+
+### 7. 导出 HTML 验证 — 2026-08-16 优化后工作流
+新钩子让验证链路从「点按钮→下载→file:// 加载→等 7s→注入」缩短为「evaluate 取 HTML→落盘→新页加载→注入」:
+
+```python
+# 1) 取导出 HTML (免下载)
+html = page.evaluate("async () => await window.__archPage.exportHtmlFull()")
+open('exported.html', 'w', encoding='utf-8').write(html)
+
+# 2) 加载导出页 (新浏览器页)
+page2 = cli._browser.new_page()
+page2.goto('file:///exported.html', wait_until='domcontentloaded')
+page2.wait_for_selector('.mermaid svg')
+
+# 3) 合成连线注入 (数据无连线时)
+page2.evaluate(INJECT_SCRIPT)
+
+# 4) 用 __exportHl.snapshot() 断言 (替代扫描 DOM)
+s = page2.evaluate("() => window.__exportHl.snapshot()")
+assert s['hlEdge'] == 1 and s['dimLine'] == 1  # 点击后高亮+淡化
+```
+
+完整示例: `test_helpers/verify_export_interaction.py`。
 
 ---
 
