@@ -238,3 +238,12 @@ test_helpers/.cache_*.json
 test_helpers/shots_*.png
 test_helpers/out/
 test_helpers/_dbg_*.py
+# ===== v3.28: 一次性诊断/探针/验证脚本 + cookie 导出 (2026-08-16) =====
+# test_helpers/scripts 下的一次性诊断脚本 (diag_/repro_/verify_/probe_), 可重新生成
+test_helpers/scripts/diag_*.py
+test_helpers/scripts/repro_*.py
+test_helpers/scripts/verify_*.py
+test_helpers/scripts/_probe_*.py
+test_helpers/scripts/_ck*.txt
+# cookie 导出 (含 auth token, 敏感, 严禁入仓)
+test_helpers/_ck*.txt
