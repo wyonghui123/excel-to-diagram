@@ -4399,8 +4399,8 @@ ${mermaidCode}
           if (svg && mermaidDiv) {
             let scale = 1;
             const minScale = 0.1;
-            const maxScale = 10;
-            
+            // [A5 2026-08-16] 与应用内一致: 上限 10→20 (对齐 Miro 2000%), 看清大图 BO 文字
+            const maxScale = 20;
             mermaidDiv.addEventListener('wheel', (e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -4811,7 +4811,8 @@ ${mermaidCode}
     // [EXP-FIT 2026-08-16] minScale 改为 let: 渲染后按图表实际尺寸动态设为 fitScale×0.2,
     //   保证元素很多时也能缩到全貌 (原固定 0.1 对大图不够).
     let minScale = 0.1;
-    const maxScale = 10;
+    // [A5 2026-08-16] 与应用内一致: 上限 10→20 (对齐 Miro 2000%), 看清大图 BO 文字
+    const maxScale = 20;
     let fitScale = 1;
     
     // [EXP-INTERACT 2026-08-16] 嵌入编码映射 (来自应用侧生成, 见 exportAsHtmlFull):

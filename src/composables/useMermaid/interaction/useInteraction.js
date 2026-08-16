@@ -296,8 +296,11 @@ export function useInteraction() {
     //   新: 0.5 / 5 → 适配 Mermaid 11 节点字号 16px 的可视区间
     // [A4 2026-08-07] 用户反馈小对象范围(如仅一个子领域)时 5x 仍太小看不清 →
     //   提高上限到 10, 与 HTML 导出模板缩放上限一致, 允许放大到看清小图细节.
+    // [A5 2026-08-16] 展开到业务对象后 10x 仍不足以看清 BO 文字 (fit 后大图文字仅 3-5px):
+    //   调研: draw.io 5x, Mermaid 查看器 3-4x, vscode-mermaid-chart 5x(用户要 10x),
+    //   Figma 16x, Miro 官方 2000%(20x). 上限提到 20x (对齐 Miro), 覆盖数百 BO 大图.
     const minScale = 0.5
-    const maxScale = 10
+    const maxScale = 20
 
     const handleWheel = (e) => {
       e.preventDefault()
