@@ -3336,6 +3336,20 @@ export default {
           clearRelationsHighlight()
           return { cleared: true }
         },
+        // [EXP-VERIFY 2026-08-16] 图表连线诊断: 一条 evaluate 判断当前图表是否有连线/标签.
+        //   用途: 验证连线类功能(高亮/导出连线/标签热点)前先确认当前范围有连线 —
+        //   SCP 子领域等范围 links=0 (无连线), 需换含连线的范围(如 PLAM 展开到 BO)才能验证连线功能.
+        chartLinks: () => {
+          const svg = mermaidContainer.value?.querySelector('svg')
+          const d = props.diagramData || {}
+          return {
+            links: Array.isArray(d.links) ? d.links.length : 0,
+            nodes: Array.isArray(d.nodes) ? d.nodes.length : 0,
+            edgeLabels: svg ? svg.querySelectorAll('g.edgeLabel').length : 0,
+            edgePaths: svg ? svg.querySelectorAll('g.edges.edgePaths > path').length : 0,
+            scope: (d && d.scopeCode) || (props.scopeCode) || null
+          }
+        },
         // [DBG 2026-08-08] 调试: 检查 SVG 中 COLLAPSE 节点的识别结果
         identifyCollapseNodes: () => {
           const svg = mermaidContainer.value?.querySelector('svg')
@@ -3812,6 +3826,10 @@ export default {
         }
         return url.toString()
       }
+      // [EXP-VERIFY 2026-08-16] 导出 HTML 钩子: 直接返回完整 HTML 字符串, 免去下载/加载链路.
+      //   用法: const html = await window.__archPage.exportHtmlFull()
+      //   探针取到字符串后, 可直接落盘 + 浏览器加载, 或提取内联脚本做语法检查.
+      window.__archPage.exportHtmlFull = () => exportAsHtmlFull({ returnHtml: true })
       // [REL-HL OBS 2026-08-13] 关系高亮权威状态快照: 一条 evaluate 读取, 替代扫描 DOM.
       //   返回 {active, code, connectedNodeCount, hlEdgeCount, dimmedCount}.
       window.__archPage.relationHighlight = () => ({ ...relHlState })
@@ -4444,9 +4462,11 @@ ${mermaidCode}
     }
 
     // 导出为 HTML 文件（彩色版 - 内嵌库，可直接双击打开）
-    const exportAsHtmlFull = async () => {
+    // [EXP-VERIFY 2026-08-16] 导出 HTML 支持 returnHtml 模式: 测试钩子可直接取字符串, 免去下载/加载链路.
+    //   用法: await window.__archPage.exportHtmlFull()  → 返回当前图表对应的完整导出 HTML 字符串
+    const exportAsHtmlFull = async (opts = {}) => {
       if (props.diagramData) {
-        showToast('正在生成彩色版，请稍候...')
+        if (!opts.returnHtml) showToast('正在生成彩色版，请稍候...')
 
         const positions = props.layoutPositions || []
         const zoneRowCount = props.zoneRowCount || 3
@@ -5366,6 +5386,30 @@ ${mermaidCode}
             if (!onEl) fitToScreen(svg);
           });
         }, 600);
+
+        // [EXP-VERIFY 2026-08-16] 导出页自暴露状态快照: 探针加载导出 HTML 后一条 evaluate 读取
+        //   连线/标签/高亮/淡化状态, 替代扫描 DOM 的脆弱断言.
+        //   用法(在导出页): window.__exportHl.snapshot()  /  window.__exportHl.dimLineOpacity()
+        window.__exportHl = {
+          snapshot() {
+            const svg = document.querySelector('.mermaid svg');
+            if (!svg) return { error: 'no svg' };
+            const paths = Array.from(svg.querySelectorAll('path.flowchart-link, g.edgePaths path, .edgePath path')).filter(p => !p.hasAttribute('data-edge-hit'));
+            return {
+              paths: paths.length,
+              labels: Array.from(svg.querySelectorAll('g.edgeLabel')).map(l => (l.textContent || '').trim()),
+              hlEdge: svg.querySelectorAll('.exp-hl-edge').length,
+              hlNode: svg.querySelectorAll('.exp-hl-node').length,
+              dimLine: svg.querySelectorAll('path.exp-dim-line').length,
+              dim: svg.querySelectorAll('.exp-dim').length
+            };
+          },
+          dimLineOpacity() {
+            const svg = document.querySelector('.mermaid svg');
+            const p = svg && svg.querySelector('path.exp-dim-line');
+            return p ? getComputedStyle(p).opacity : null;
+          }
+        };
       }).catch(err => {
         console.error('Mermaid渲染失败:', err);
         const notice = document.querySelector('.notice');
@@ -5395,6 +5439,8 @@ ${mermaidCode}
   <\/script>
 <\/body>
 <\/html>`
+        // [EXP-VERIFY 2026-08-16] returnHtml 模式: 不下载, 直接返回字符串 (测试钩子用)
+        if (opts.returnHtml) return htmlContent
         const blob = new Blob([htmlContent], { type: 'text/html' })
         const link = document.createElement('a')
         link.href = URL.createObjectURL(blob)
