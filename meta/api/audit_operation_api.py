@@ -74,7 +74,8 @@ def get_operation_chain(trace_id: str):
         return problem.validation_error('trace_id', 'trace_id 长度至少 8')
 
     try:
-        ds = get_data_source('sqlite', database=str(_get_db_path()))
+        # [FIX 2026-08-15] force_new=True: 一次性读取后 disconnect, 不能用共享缓存实例
+        ds = get_data_source('sqlite', force_new=True, database=str(_get_db_path()))
         try:
             records = ds.find(
                 'audit_logs',

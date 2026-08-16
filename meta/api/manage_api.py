@@ -395,7 +395,10 @@ def create_record(object_type):
         user = get_current_user()
         if user and result.data and result.data.get('id'):
             from meta.services.data_permission_service import DataPermissionService
-            ds = _get_data_source() if _data_source else get_data_source("sqlite", database=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'architecture.db'))
+            # [FIX 2026-08-15] 复用模块单例 _data_source (init_services 设置):
+            #   原写法 _get_data_source() 在本模块未定义 → NameError; 且 get_data_source()
+            #   每次新建 WriteQueue 线程泄漏.
+            ds = _data_source
             perm_service = DataPermissionService(ds)
             perm_service.add_data_permission(
                 user_id=user.get('user_id'),
@@ -492,11 +495,13 @@ def get_record(object_type, id):
         record = enrich_record(object_type, record)
 
         # 填充 FK display names（与 _do_list 保持一致）
-        from meta.core.datasource import get_data_source
         meta_obj = registry.get(object_type)
         if meta_obj:
             from meta.core.enrichment_engine import EnrichmentEngine
-            ds = get_data_source()
+            # [FIX 2026-08-15] 复用模块级单例 _data_source (init_services 时设置):
+            #   原 get_data_source() 无 path 在 v3.13+ 直接抛 ValueError (需 file-based DB),
+            #   且即便有 path 也会每次新建 WriteQueue 线程泄漏. 改走 _data_source.
+            ds = _data_source
             record = EnrichmentEngine.for_data_source(ds).enrich_fk_display_names(meta_obj, record)
 
         record['can_delete'] = _get_manage_service().check_can_delete(object_type, record)

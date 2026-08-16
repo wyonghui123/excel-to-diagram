@@ -9,9 +9,11 @@
 - API接口: REST (预留)
 """
 
+import os
+import threading
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from typing import List, Dict, Any, Optional, Type
+from typing import List, Dict, Any, Optional, Tuple, Type
 from enum import Enum
 
 
@@ -416,22 +418,52 @@ class DataSourceFactory:
         return list(cls._adapters.keys())
 
 
-def get_data_source(source_type: str, **kwargs) -> DataSource:
+# [FIX 2026-08-15 线程泄漏] 模块级 adapter 缓存 (按 source_type + db_path).
+#   根因: get_data_source() 之前每次调用都 DataSourceFactory.create() 新建 SQLiteAdapter
+#   → _connect_pool() 里 WriteQueue.start() 新建 'sqlite-writer' 线程; 多处调用方
+#   (e.g. meta_api._build_hierarchy_tree / _build_category_tree, manage_api) 在请求处理函数里
+#   直接调用且从不 disconnect, 导致每次请求都泄漏 1 个线程, 长时间运行累积到数千线程
+#   → waitress 8 worker 全部被拖慢 → "整体都慢" (观察到的泄漏进程: 2566 线程 / 34205 句柄).
+#   修复: 同 (type, db_path) 只建一次 adapter 并缓存复用, 与 bo_api/_audit_helper 的
+#   模块级单例模式一致, 一次性覆盖所有现在/未来的泄漏调用方.
+#   force_new=True 供"创建即用即 disconnect"的调用方 (db_admin_api / audit_operation_api)
+#   绕过缓存, 避免共享实例被 disconnect 破坏.
+_DS_CACHE: Dict[Tuple[DataSourceType, str], DataSource] = {}
+_DS_CACHE_LOCK = threading.Lock()
+
+
+def get_data_source(source_type: str, force_new: bool = False, **kwargs) -> DataSource:
     """
     获取数据源的便捷函数
-    
+
     Args:
         source_type: 数据源类型字符串
-        **kwargs: 连接参数
-        
+        force_new: True 时跳过缓存, 返回新建实例 (供"用后即 disconnect"的调用方)
+        **kwargs: 连接参数 (database/path 作为缓存键)
+
     Returns:
         数据源实例
     """
     from meta.core import sql_adapters
-    
+
     try:
         dst = DataSourceType(source_type.lower())
     except ValueError:
         raise ValueError("Unknown data source type: {0}".format(source_type))
-    
+
+    # [FIX 2026-08-15 线程泄漏] 仅对带 db path 的调用启用缓存 (v3.13+ 无 path 会抛错,
+    # 保持原行为). 不同 path 各自缓存, 测试 snapshot DB 不受影响.
+    db_key = kwargs.get("database") or kwargs.get("path")
+    if db_key and not force_new:
+        norm_key = (dst, os.path.normcase(os.path.abspath(db_key)))
+        cached = _DS_CACHE.get(norm_key)
+        if cached is not None:
+            return cached
+        with _DS_CACHE_LOCK:
+            cached = _DS_CACHE.get(norm_key)
+            if cached is None:
+                cached = DataSourceFactory.create(dst, **kwargs)
+                _DS_CACHE[norm_key] = cached
+            return cached
+
     return DataSourceFactory.create(dst, **kwargs)

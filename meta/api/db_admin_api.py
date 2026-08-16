@@ -136,7 +136,8 @@ def db_health():
     # 1. Pool stats
     try:
         # [DECORATIVE] v3.16 fix: 显式传 file-based DB path (v3.13 起 :memory: 不支持)
-        ds = get_data_source('sqlite', path=_get_db_path())
+        # [FIX 2026-08-15] force_new=True: 本端点一次性读取后 disconnect, 不能用共享缓存实例.
+        ds = get_data_source('sqlite', force_new=True, path=_get_db_path())
         try:
             result['data']['pool_stats'] = ds.get_pool_stats()
             result['data']['write_queue_stats'] = ds.get_write_queue_stats()
