@@ -132,6 +132,24 @@ def main():
         print('[PATH-CLICK]', json.dumps(s2, ensure_ascii=False), '=>', 'PASS' if (ok_path and ok_op) else 'FAIL')
         if not (ok_path and ok_op): fails.append('path-click/dim')
 
+        # 5) 导出拖拽守卫: 拖拽后 click 不应清除当前高亮 (与 UI 一致)
+        drag_res = page2.evaluate("""() => {
+          const svg = document.querySelector('.mermaid svg');
+          const r = svg.getBoundingClientRect();
+          const cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+          document.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: cx, clientY: cy }));
+          document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: cx + 60, clientY: cy + 40 }));
+          document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: cx + 60, clientY: cy + 40 }));
+          // 拖拽结束的 click (落到 svg) → expWasDrag=true 应跳过清高亮
+          svg.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+          return true;
+        }""")
+        page2.wait_for_timeout(250)
+        s3 = page2.evaluate("() => (window.__exportHl && window.__exportHl.snapshot()) || {}")
+        ok_drag = s3.get('hlEdge') == 1  # 拖拽后的 click 不清除高亮
+        print('[DRAG-GUARD]', json.dumps(s3, ensure_ascii=False), '=>', 'PASS' if ok_drag else 'FAIL')
+        if not ok_drag: fails.append('drag-guard')
+
         print('\n[RESULT]', 'PASS' if not fails else 'FAIL: ' + ', '.join(fails))
     finally:
         cli.close()
