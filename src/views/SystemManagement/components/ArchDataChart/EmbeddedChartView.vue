@@ -43,6 +43,16 @@
         <el-button type="primary" size="small" @click="generateDiagram">重试</el-button>
       </div>
 
+      <div v-else-if="scopeGuardState === 'hard'" class="embedded-chart-view__guard">
+        <!-- [SCALE-GUARD 2026-08-18] 硬线: 阻断渲染, 弹窗引导折叠/返回 -->
+        <ScaleGuardDialog
+          :nodes="scopeGuardCounts.nodes"
+          :relations="scopeGuardCounts.relations"
+          @fold-to-sm="foldToServiceModule"
+          @back="emit('back-to-narrow')"
+        />
+      </div>
+
       <div v-else-if="!diagramData" class="embedded-chart-view__empty">
         <el-icon :size="32"><DataLine /></el-icon>
         <span>暂无数据，请检查左侧对象范围选择</span>
@@ -61,6 +71,14 @@
           :preserve-model-order="false"
           :layout-control-config="layoutControlConfig"
           :annotation-config="annotationConfig"
+        />
+        <!-- [SCALE-GUARD 2026-08-18] 软线: 正常渲染 + 非阻断横幅 -->
+        <ScaleGuardBanner
+          v-if="scopeGuardState === 'soft' && scopeGuardBannerVisible"
+          :nodes="scopeGuardCounts.nodes"
+          :relations="scopeGuardCounts.relations"
+          @fold-to-sm="foldToServiceModule"
+          @close="dismissGuard"
         />
       </div>
     </div>
@@ -94,6 +112,11 @@ import { applyDefaultExpandByCount, expandGroupsToLevel } from '@/services/expan
 // [ELK-GROUP 2026-08-12] 面板"无关系/有关系"系统自动分组注入渲染树 (驱动面板切换).
 import { injectElkSubGroups } from './elkSubGroupsInjector.js'
 import { useDebugMode } from '@/composables/useDebugMode.js'
+// [SCALE-GUARD 2026-08-18] 图表规模防护: 进入图表前按可见数拦截 (软横幅/硬弹窗)
+import { estimateVisible } from '@/services/scaleGuard/estimator'
+import { decideEntryState } from './scaleGuardEntry'
+import ScaleGuardBanner from '@/components/common/ScaleGuardBanner.vue'
+import ScaleGuardDialog from '@/components/common/ScaleGuardDialog.vue'
 
 const props = defineProps({
   scopeIds: {
@@ -1361,6 +1384,58 @@ watch(
   },
   { immediate: true }
 )
+
+// ============================================================
+// [SCALE-GUARD 2026-08-18] 进入图表规模拦截
+//   用 layoutControlConfig.groups (含折叠状态) + links 预估可见数, 分层:
+//   soft → 正常渲染 + 横幅; hard → 阻断渲染 + 弹窗。阈值存 configStore.scopeGuard。
+//   判定用 computed (同步), 避免 watch 滞后导致首帧先渲染再被硬线移除。
+// ============================================================
+// URL 覆盖阈值 (E2E 用小阈值触发): ?scopeGuard.hardRels=50&scopeGuard.enabled=1
+function applyUrlScopeGuardOverrides() {
+  const q = new URLSearchParams(window.location.search)
+  const keys = ['softRels', 'softNodes', 'hardRels', 'hardNodes']
+  const patch = {}
+  for (const k of keys) {
+    const v = q.get(`scopeGuard.${k}`)
+    if (v != null && !Number.isNaN(Number(v))) patch[k] = Number(v)
+  }
+  const eng = q.get('scopeGuard.engine') === 'dagre' ? 'dagre' : 'elk'
+  if (q.get('scopeGuard.enabled') != null) patch.enabled = q.get('scopeGuard.enabled') !== '0'
+  if (Object.keys(patch).length) {
+    const cfg = { ...(configStore.scopeGuard[eng] || configStore.scopeGuard.elk), ...patch }
+    configStore.setScopeGuard({ [eng]: cfg })
+  }
+}
+applyUrlScopeGuardOverrides()
+
+const scopeGuardEstimate = computed(() => {
+  const groups = layoutControlConfig.value?.groups || []
+  if (!configStore.scopeGuard.enabled || groups.length === 0) return null
+  return estimateVisible(groups, links.value)
+})
+
+const scopeGuardDecided = computed(() => {
+  const est = scopeGuardEstimate.value
+  if (!est) return null
+  return decideEntryState(est, configStore.activeScopeGuard)
+})
+
+const scopeGuardState = computed(() => scopeGuardDecided.value?.level || 'ok')
+const scopeGuardCounts = computed(() => scopeGuardDecided.value?.counts || { nodes: 0, relations: 0 })
+const scopeGuardBannerVisible = ref(false)
+watch(scopeGuardState, (lv) => {
+  if (lv === 'soft') scopeGuardBannerVisible.value = true
+}, { immediate: true })
+
+function foldToServiceModule() {
+  const cfg = JSON.parse(JSON.stringify(layoutControlConfig.value || {}))
+  if (cfg.groups) expandGroupsToLevel(cfg.groups, 'serviceModule')
+  configStore.updateLayoutControlConfig(cfg)
+  configStore.setExpandLevel('serviceModule') // 内部同时置 expandLevelUserSet=true
+  scopeGuardBannerVisible.value = false
+}
+function dismissGuard() { scopeGuardBannerVisible.value = false }
 
 // ============================================================
 // [FIX 2026-07-28 画布缩小] 组件卸载时清理 ResizeObserver + 防抖定时器
