@@ -87,6 +87,79 @@ export function useAnnotationOverlay() {
     _cleanupFns = []
   }
 
+  // [FOLD-ANN 2026-08-18] 判断元素是否真正可见 (自身或祖先 display:none 视为不可见).
+  //   updateVisibilityOnly 增量隐藏时元素仍在 DOM 但 style.display='none' (节点/容器自身,
+  //   关系连线作用于 edgeLabel/edgePath 子元素), 需沿链检查。
+  const isElementEffectivelyVisible = (el, targetType) => {
+    let cur = el
+    while (cur && cur.nodeType === 1) {
+      if (cur.style && cur.style.display === 'none') return false
+      cur = cur.parentElement
+    }
+    // 关系连线: 增量隐藏作用在 edgeLabel / edgePath / path 子元素上
+    if (targetType === 'relation') {
+      const parts = el.querySelectorAll('.edgeLabel, .edgePath, path.flowchart-link')
+      for (const p of parts) {
+        if (p.style && p.style.display === 'none') return false
+      }
+    }
+    return true
+  }
+
+  // [FOLD-ANN 2026-08-18] 按 annotation 目标在 SVG 中查找对应元素 (与 highlightTargetElement
+  //   查找逻辑一致), 找不到返回 null。折叠/隐藏的父容器会将其子孙从渲染 SVG 中移除
+  //   (groupedLayout.generateGroupCode: collapsed → 上提为聚合节点, visible=false → 整棵子树
+  //   不渲染), 故"DOM 中找不到目标"即代表该元素当前未展示在图表上。
+  const findAnnotationTargetEl = (svg, ann) => {
+    if (!svg || !ann || !ann.targetId) return null
+    const targetId = ann.targetId
+    let el = null
+    if (ann.targetType === 'relation') {
+      el = svg.querySelector(`[data-relation-code="${targetId}"]`)
+      if (!el) {
+        svg.querySelectorAll('.edgeLabel').forEach(label => {
+          if (el) return
+          if ((label.textContent || '').includes(targetId)) el = label.closest('g') || label
+        })
+      }
+    } else if (ann.targetType === 'container') {
+      el = svg.querySelector(`[data-container-code="${targetId}"]`)
+      if (!el) {
+        svg.querySelectorAll('.subgraph, .cluster').forEach(c => {
+          if (el) return
+          if (c.id === targetId) { el = c; return }
+          const label = c.querySelector('.cluster-label, text')
+          if (label && (label.textContent || '').includes(targetId)) el = c
+        })
+      }
+    } else {
+      el = svg.querySelector(`[data-code="${targetId}"]`)
+      if (!el) {
+        svg.querySelectorAll('.node').forEach(node => {
+          if (el) return
+          const label = node.querySelector('.nodeLabel')
+          if (label && (label.textContent || '').includes(targetId)) el = node
+        })
+      }
+    }
+    if (!el) return null
+    return isElementEffectivelyVisible(el, ann.targetType) ? el : null
+  }
+
+  // [FOLD-ANN 2026-08-18] 增量刷新备注面板项: 根据当前 SVG 中目标元素是否可见, 显/隐已有
+  //   .annotation-item (不重建 panel)。用于 updateVisibilityOnly 增量隐藏/显示分组后的联动,
+  //   使"隐藏分组 → 其元素的备注项同步消失"无需等待全量重渲染。
+  const refreshAnnotationPanelVisibility = (svg) => {
+    const container = svg ? svg.closest('.mermaid-container') : null
+    if (!container) return
+    container.querySelectorAll('.annotation-item').forEach(item => {
+      const targetId = item.getAttribute('data-target-id')
+      const targetType = item.getAttribute('data-target-type') || 'node'
+      const visible = !!findAnnotationTargetEl(svg, { targetId, targetType })
+      item.style.display = visible ? '' : 'none'
+    })
+  }
+
   const overlayAnnotationPanel = (svg, annotations, options = {}) => {
     const {
       position = PANEL_POSITION.BOTTOM
@@ -224,6 +297,11 @@ export function useAnnotationOverlay() {
     console.log('[overlayAnnotationPanel] header click listener attached via onclick+addEventListener, header.outerHTML:', header.outerHTML.substring(0, 200))
 
     annotations.forEach(ann => {
+      // [FOLD-ANN 2026-08-18] 只展示图表上当前可见元素相关的备注:
+      //   父级折叠/隐藏后其子孙元素不在渲染 SVG 中, 对应备注项不展示
+      //   (如供应链云被折叠 → 子领域采购供应即使有备注也不再展示)。
+      if (!findAnnotationTargetEl(svg, ann)) return
+
       // [FIX 2026-06-29 v5] categoryConfig 可能 null (ann.category 不在 CATEGORY_CONFIG 中)
       //   兜底链: getCategoryConfig(ann.category) -> getCategoryConfig('info') -> inline default
       //   修复 'Cannot read properties of null (reading border)' 错误
@@ -231,6 +309,7 @@ export function useAnnotationOverlay() {
       const item = document.createElement('div');
       item.className = `annotation-item annotation-${ann.targetType}`;
       item.setAttribute('data-target-id', ann.targetId);
+      item.setAttribute('data-target-type', ann.targetType);
       item.style.cssText = `
         display: flex;
         align-items: baseline;
@@ -1483,6 +1562,7 @@ export function useAnnotationOverlay() {
   return {
     overlayNumberMarkers,
     overlayAnnotationPanel,
+    refreshAnnotationPanelVisibility,
     overlayColorLegend,
     bindAnnotationInteraction,
     highlightByNumber,

@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { buildRelationCategoryTree, getSelectedRelationIds } from '@/services/relationClassifier.js'
+import {
+  buildRelationCategoryTree, getSelectedRelationIds,
+  buildRelationScopeTree, classifyRelation, ScopeType
+} from '@/services/relationClassifier.js'
 
 /**
  * 复现 28 vs 29 关系数问题 (v3.18)
@@ -142,5 +145,63 @@ describe('真实数据复现 (v3.18)', () => {
     expect(ids.length).toBe(relationships.length)
     // 关键断言: 不能比 API 总数少 (修复前少 1 是 bug)
     expect(ids.length).toBeGreaterThanOrEqual(relationships.length)
+  })
+})
+
+/**
+ * 空范围语义 (2026-08-17)
+ *
+ * 背景: 对象范围无任何选择时, "对象范围内部/外部"是相对已选范围的划分.
+ *   空范围 = 空集 → 没有任何对象在范围内 → 所有关系两端都不在范围内
+ *   → 全部归「对象范围外部」(EXTERNAL).
+ *   修复前: classifyRelation 的 else 分支 srcInScope=tgtInScope=true,
+ *   把空范围当作"隐式全选", 导致全部关系归「对象范围内部」.
+ */
+describe('空对象范围: 关系全部归「对象范围外部」 (2026-08-17)', () => {
+  // 3 BO: A/B 同域同子域同模块, C 在不同域
+  const businessObjects = [
+    { id: 1, code: 'BO_A', name: 'A', domainId: 10, domain: 'D1', subDomainId: 11, subDomain: 'SD1', serviceModuleId: 12, serviceModule: 'SM1', serviceModuleName: 'SM1' },
+    { id: 2, code: 'BO_B', name: 'B', domainId: 10, domain: 'D1', subDomainId: 11, subDomain: 'SD1', serviceModuleId: 12, serviceModule: 'SM1', serviceModuleName: 'SM1' },
+    { id: 3, code: 'BO_C', name: 'C', domainId: 20, domain: 'D2', subDomainId: 21, subDomain: 'SD2', serviceModuleId: 22, serviceModule: 'SM2', serviceModuleName: 'SM2' }
+  ]
+
+  const relationships = [
+    { id: 1, sourceBoId: 1, targetBoId: 2, sourceCode: 'BO_A', targetCode: 'BO_B', relationCode: 'R1' }, // 同模块
+    { id: 2, sourceBoId: 1, targetBoId: 3, sourceCode: 'BO_A', targetCode: 'BO_C', relationCode: 'R2' }  // 跨域
+  ]
+
+  const EMPTY_FILTER = { domainIds: [], subDomainIds: [], serviceModuleIds: [], businessObjectIds: [] }
+
+  it('classifyRelation: 空范围 → EXTERNAL (不再 INTERNAL)', () => {
+    // classifyRelation 依赖 rel._sourceBo/_targetBo (buildRelationScopeTree 内预填充)
+    const relsWithBo = relationships.map(rel => ({
+      ...rel,
+      _sourceBo: businessObjects.find(b => b.id === rel.sourceBoId),
+      _targetBo: businessObjects.find(b => b.id === rel.targetBoId)
+    }))
+    for (const rel of relsWithBo) {
+      const result = classifyRelation(rel, EMPTY_FILTER, businessObjects)
+      expect(result.scopeType).toBe(ScopeType.EXTERNAL)
+    }
+  })
+
+  it('buildRelationScopeTree: 空范围 → 树只含「对象范围外部」节点', () => {
+    const tree = buildRelationScopeTree(EMPTY_FILTER, relationships, businessObjects)
+    // 内部 / 内部与外部 count=0 被过滤, 只剩外部
+    expect(tree.length).toBe(1)
+    expect(tree[0].scopeType).toBe(ScopeType.EXTERNAL)
+    expect(tree[0].name).toBe('对象范围外部')
+    // 两条关系都应归到外部节点下
+    expect(tree[0].count).toBe(2)
+  })
+
+  it('buildRelationScopeTree: 有选择时按三段式分类 (不回归)', () => {
+    // 选 BO_A + BO_B: A→B 两端都在范围内 → internal; A→C 一端在范围内 → cross-boundary
+    const tree = buildRelationScopeTree(
+      { domainIds: [], subDomainIds: [], serviceModuleIds: [], businessObjectIds: [1, 2] },
+      relationships, businessObjects
+    )
+    const scopeTypes = tree.map(n => n.scopeType)
+    expect(scopeTypes).toEqual(expect.arrayContaining([ScopeType.INTERNAL, ScopeType.CROSS_BOUNDARY]))
   })
 })

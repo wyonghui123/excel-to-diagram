@@ -75,8 +75,14 @@ export function classifyRelation(rel, filterParams, businessObjects) { // eslint
     srcInScope = domainIds.includes(srcDomainId)
     tgtInScope = domainIds.includes(tgtDomainId)
   } else {
-    srcInScope = true
-    tgtInScope = true
+    // [FIX 2026-08-17] 空范围 = 空集: 没有任何对象在范围内,
+    //   所有关系两端都不在范围内 → 全部归「对象范围外部」(EXTERNAL).
+    //   之前 srcInScope=tgtInScope=true 把空范围当作"隐式全选",
+    //   导致空范围时全部关系归「对象范围内部」, 与"内部/外部"相对已选范围的
+    //   语义相悖. 用户确认: 空范围时应全归外部.
+    //   与旧版 classifyRelationByCodes 的 centerScope.includes 空集语义一致.
+    srcInScope = false
+    tgtInScope = false
   }
 
   const scopeType = (srcInScope && tgtInScope)

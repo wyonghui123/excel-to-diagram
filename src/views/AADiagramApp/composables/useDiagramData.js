@@ -1335,6 +1335,32 @@ export function useDiagramData() {
 
     const hasFilter = finalBoCodes && finalBoCodes.size > 0
 
+    // [FIX 2026-08-17] 空范围 → 空态: 对象范围 + 关系范围都无选择时 finalBoCodes 为空.
+    //   之前 hasFilter=false 会展示 previewData 的全部 BO + 全部关系 (全量大图),
+    //   导致 3230 BO / 5721 关系卡死, 且与"空范围=空集"语义矛盾.
+    //   现在置空 diagramData 触发渲染层空态提示 ("请先在对象范围选择对象").
+    //   注意: 对象范围空但关系范围勾选外部关系时 finalBoCodes 非空 (hasFilter=true),
+    //   仍正常展示关系网络, 不受影响. 同时天然覆盖 scopeCode 匹配失败场景 (不再回退全量).
+    if (!hasFilter) {
+      diagramData.value = null
+      // 空态可观测: 与下方 scopeState 同构, 便于确认空范围未走全量渲染
+      if (typeof window !== 'undefined') {
+        window.__archPage = window.__archPage || {}
+        window.__archPage.scopeState = {
+          centerScopeBoCount: (centerScope.value || []).length,
+          relationBoCount: relationFilteredBoCodes.value?.length || 0,
+          finalBoCodesCount: finalBoCodes.size,
+          hasFilter,
+          scopeMatched: false,
+          emptyScope: true,
+          filteredBusinessObjects: 0,
+          filteredRelationships: 0,
+          totalBusinessObjects: previewData.value?.businessObjects?.length || 0
+        }
+      }
+      return null
+    }
+
     // 计算业务对象的 isCenter 标识
     // isCenter 只取决于是否在 centerScope 中，与 relationFilteredBoCodes 无关
     const centerScopeSet = new Set(centerScope.value || [])
@@ -2331,7 +2357,14 @@ export function useDiagramData() {
 
       // 直接使用 buildPreviewDataFromArchData 返回的 centerScope，避免重复 API 调用
       const centerScopeCodes = result.centerScope || []
-      configStore.updateCenterScope(centerScopeCodes)
+      // [FIX 2026-08-17] 空对象范围 → 后端 architecture/preview 无 filter 时把 center_scope
+      //   设为全部 BO (TTTTT000/V11 为 3230), 导致空范围图表仍渲染全量大图.
+      //   这里空范围强制 centerScope = [] (空集), 与"空范围=空集"语义一致:
+      //   - 关系范围也空 → finalBoCodes 空 → generateDiagram 空态 (不渲染全量, 见下方空态分支)
+      //   - 关系范围勾选 → finalBoCodes = 关系引入BO → 正常展示关系网络
+      //   有对象范围时仍采用后端返回的 centerScope (按 filter 过滤, 正确).
+      const hasObjectScope = hierarchyFilter && Object.keys(hierarchyFilter).length > 0
+      configStore.updateCenterScope(hasObjectScope ? centerScopeCodes : [])
 
       isInitializedFromArchData.value = true
       
