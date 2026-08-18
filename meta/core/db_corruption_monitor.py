@@ -12,10 +12,13 @@ import sqlite3
 import json
 import time
 import os
+import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 import threading
+
+logger = logging.getLogger(__name__)
 
 class DBCorruptionMonitor:
     """DB 损坏监控器"""
@@ -75,6 +78,18 @@ class DBCorruptionMonitor:
 
     def _log_corruption(self, error_msg: str):
         """记录损坏事件"""
+        # [2026-08-18] 升级为 ERROR 日志 + 写损坏标记文件.
+        #   背景: v20260817 事故中 wal_checkpoint 检测到 malformed 只打 WARNING,
+        #   无告警导致 03:00→14:55 无人处理. 现在:
+        #   1) 日志级别 ERROR (日志监控/ELK 可按 ERROR 告警)
+        #   2) 写 DB_CORRUPT_FLAG 标记文件 (目录内, 供运维/CI 一眼发现)
+        logger.error(f"[DBCorruption] DB 损坏: {error_msg} | db={self.db_path}")
+        try:
+            flag = os.path.join(self.log_dir, "DB_CORRUPT_FLAG")
+            with open(flag, "a", encoding="utf-8") as f:
+                f.write(f"{datetime.now().isoformat()} {error_msg}\n")
+        except Exception:
+            pass
         with self._lock:
             event = {
                 "ts": datetime.now().isoformat(),

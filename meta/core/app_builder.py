@@ -445,9 +445,19 @@ class ApplicationBuilder:
             if result == "ok":
                 logger.info(f"[AppBuilder] Preflight DB check: OK ({file_size} bytes)")
             else:
-                logger.error(f"[AppBuilder] Preflight DB integrity_check FAILED: {result}")
+                # [2026-08-18] FAIL-FAST: DB 损坏时中止启动, 避免带伤运行几小时后才暴露
+                #   (v20260817 事故: 03:00 已 malformed 仍运行到 12:40 写入才失败).
+                #   中止前提示恢复方案 (用最近 quick_check=ok 的备份替换 + 重启).
+                raise RuntimeError(
+                    f"[AppBuilder] Preflight DB integrity_check FAILED: {result}. "
+                    f"DB 已损坏, 中止启动. 请用最近可用备份恢复 {db_path} 后重启. "
+                    f"(备份候选: *.bak.20260715_* / *.pre_v20260712_* / *.predeploy_*)"
+                )
         except sqlite3.DatabaseError:
-            logger.error("[AppBuilder] Preflight: DB is corrupt")
+            raise RuntimeError(
+                f"[AppBuilder] Preflight DB is corrupt: {db_path}. "
+                f"中止启动, 请先恢复 DB."
+            )
         except Exception as e:
             logger.error(f"[AppBuilder] Preflight DB error: {e}")
         return self
