@@ -53,8 +53,10 @@
       </div>
       <!-- [UX 2026-08-05] 渲染覆盖层: mermaid.run() 期间 SVG 元素堆叠在中心,
            显示转圈覆盖层 + 隐藏未完成 SVG, 渲染完成后淡入, 消除"堆叠中心"闪烁 -->
+      <!-- [ESCALATE 2026-08-17] 折叠/展开长耗时渲染 (超 FOLD_ESCALATE_MS 未完成) 也触发此遮罩,
+           复用整屏"图表渲染中"提示, 解决角落小指示器对 10s 级渲染感知不足的问题 -->
       <transition name="rendering-fade">
-        <div v-if="rendering" class="mermaid-rendering-overlay">
+        <div v-if="rendering || foldRenderingEscalated" class="mermaid-rendering-overlay">
           <el-icon class="mermaid-loading-icon" :size="28"><Loading /></el-icon>
           <span class="mermaid-loading-text">图表渲染中<span class="mermaid-loading-dots"><i></i><i></i><i></i></span></span>
         </div>
@@ -311,13 +313,34 @@ export default {
     const FOLD_LOADING_DELAY_MS = 500
     const foldLoadingVisible = ref(false)
     let foldLoadingTimer = null
+    // [ESCALATE 2026-08-17] 长耗时折叠/展开渲染升级整屏遮罩:
+    //   角落小指示器 (foldLoadingVisible) 对 10s 级渲染太弱, 用户感知不到反馈.
+    //   折叠渲染开始 FOLD_ESCALATE_MS 后仍未完成 → foldRenderingEscalated=true,
+    //   触发与全量渲染相同的整屏"图表渲染中"遮罩 (模板 v-if 或关系, CSS 复用).
+    //   快速折叠 (<阈值) 不升级, 保持"不闪整屏 loading"的平滑体验.
+    const FOLD_ESCALATE_MS = 2000
+    const foldRenderingEscalated = ref(false)
+    let foldEscalateTimer = null
+    const scheduleFoldEscalate = () => {
+      if (foldEscalateTimer) clearTimeout(foldEscalateTimer)
+      foldEscalateTimer = setTimeout(() => {
+        foldEscalateTimer = null
+        foldRenderingEscalated.value = true
+      }, FOLD_ESCALATE_MS)
+    }
+    const cancelFoldEscalate = () => {
+      if (foldEscalateTimer) { clearTimeout(foldEscalateTimer); foldEscalateTimer = null }
+      foldRenderingEscalated.value = false
+    }
     const showFoldLoading = () => {
       if (foldLoadingTimer) clearTimeout(foldLoadingTimer)
       foldLoadingTimer = setTimeout(() => { foldLoadingVisible.value = true }, FOLD_LOADING_DELAY_MS)
+      scheduleFoldEscalate()  // [ESCALATE 2026-08-17] 超时升级整屏遮罩
     }
     const hideFoldLoading = () => {
       if (foldLoadingTimer) { clearTimeout(foldLoadingTimer); foldLoadingTimer = null }
       foldLoadingVisible.value = false
+      cancelFoldEscalate()  // [ESCALATE 2026-08-17] 渲染结束统一清除升级状态
     }
     const setRendering = (v) => {
       isRendering = v
@@ -1603,6 +1626,12 @@ export default {
         const collapseId = cut === -1 ? id.substring('flowchart-'.length) : id.substring('flowchart-'.length, cut)
         el.style.display = hiddenCollapseIds.has(collapseId) ? 'none' : ''
       })
+
+      // [FOLD-ANN 2026-08-18] 增量隐藏/显示后联动刷新备注面板:
+      //   被隐藏分组的元素备注项同步消失, 恢复显示时同步回归 (无需全量重渲染)。
+      try { annotationOverlay.refreshAnnotationPanelVisibility(svg) } catch (e) {
+        console.warn('[updateVisibilityOnly] refreshAnnotationPanelVisibility failed:', e)
+      }
 
       return true
     }
@@ -5836,6 +5865,9 @@ ${mermaidCode}
       foldRendering,
       // [UX 2026-08-13] 折叠渲染角落等待指示器: 模板 v-if="foldLoadingVisible" 依赖此绑定.
       foldLoadingVisible,
+      // [ESCALATE 2026-08-17] 折叠渲染长耗时升级整屏遮罩: 模板 v-if="rendering || foldRenderingEscalated"
+      //   依赖此绑定. 与 foldLoadingVisible 类似, 不暴露则模板取 undefined → 升级遮罩永不显示.
+      foldRenderingEscalated,
       // [CTX 2026-08-07] 右键上下文菜单
       ctxMenu,
       handleContextMenu,
