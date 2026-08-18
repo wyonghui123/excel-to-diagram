@@ -71,6 +71,8 @@
           :preserve-model-order="false"
           :layout-control-config="layoutControlConfig"
           :annotation-config="annotationConfig"
+          :scope-guard-groups="layoutControlConfig.groups"
+          :scope-guard-links="links"
         />
         <!-- [SCALE-GUARD 2026-08-18] 软线: 正常渲染 + 非阻断横幅 -->
         <ScaleGuardBanner

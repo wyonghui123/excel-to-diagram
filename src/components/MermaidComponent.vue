@@ -183,6 +183,9 @@ import { useAnnotation, useAnnotationOverlay } from '../composables/useMermaid/a
 import { loadElkLayouts } from '../composables/useMermaid/renderer/useElkLoader.js'
 import { useSvgProcessor } from '../composables/useMermaid/renderer/useSvgProcessor.js'
 import { groupLevelOf, expandGroupsToLevel } from '../services/expandLevel.js'
+// [SCALE-GUARD 2026-08-18] 图表规模防护: 展开前置预估 + 阈值判定/文案
+import { estimateExpand, estimateVisible } from '../services/scaleGuard/estimator.js'
+import { classify, buildExpandMessages } from '../services/scaleGuard/guard.js'
 import TruthPanel from './TruthPanel.vue'
 import './MermaidComponent.css'
 
@@ -237,6 +240,16 @@ export default {
     hideLinkLabelTails: {
       type: Boolean,
       default: false
+    },
+    // [SCALE-GUARD 2026-08-18] 图表规模防护: 展开前置拦截 + 渲染后兜底
+    //   由父组件传入"将渲染的分组树(含 collapsed) + 关系数组"供预估可见数.
+    scopeGuardGroups: {
+      type: Array,
+      default: null
+    },
+    scopeGuardLinks: {
+      type: Array,
+      default: null
     }
   },
   emits: ['layout-change'],
@@ -966,6 +979,21 @@ export default {
                   edgeCount: finishedSvg?.querySelectorAll('path.flowchart-link').length || 0,
                   containerCount: finishedSvg?.querySelectorAll('g.cluster').length || 0
                 })
+                // [SCALE-GUARD 2026-08-18] 渲染后兜底: 预估误差导致实际仍超硬线 → 提示折叠.
+                //   仅按 (关系,节点) 签名变化弹一次, 避免同态下每次重渲染重复 toast.
+                if (configStore.scopeGuard.enabled && configStore.scopeGuard.renderCheck
+                    && Array.isArray(props.scopeGuardGroups) && props.scopeGuardGroups.length > 0) {
+                  const actualEst = estimateVisible(props.scopeGuardGroups, props.scopeGuardLinks || [])
+                  if (classify(actualEst, configStore.activeScopeGuard) === 'hard') {
+                    const sig = actualEst.relations + ':' + actualEst.nodes
+                    if (sig !== _lastGuardWarnSig) {
+                      _lastGuardWarnSig = sig
+                      ElMessage.warning(
+                        `图表实际含 ${actualEst.relations} 关系 / ${actualEst.nodes} 节点, 超出可读范围。可用右键菜单「折叠到服务模块层」或缩小对象范围。`
+                      )
+                    }
+                  }
+                }
                 // [FOLD-COLOR 2026-08-08] 中性灰折叠节点提示: 折叠层级 > 颜色分组层级时,
                 //   聚合节点无法用单一分组色表达, 走中性灰 classDef. 渲染完成后弹一次提示,
                 //   帮助用户理解"为何某折叠节点是灰色". (feature-flag: 无独立开关, 跟随折叠/配色逻辑)
@@ -2071,6 +2099,12 @@ export default {
           debug.debugLog('[DBL] handleDblClick: no expandKey for gtype=' + gtype)
           return
         }
+        // [SCALE-GUARD 2026-08-18] 展开前置拦截: 硬线阻止本次展开
+        const guardLevel = expandKey === 'expandSub' ? 1 : (expandKey === 'expandSM' ? 2 : 99)
+        if (guardExpandBefore(group, guardLevel) === 'block') {
+          debug.debugLog('[DBL] handleDblClick: blocked by scale guard')
+          return
+        }
         debug.debugLog('[DBL] handleDblClick: expanding with key=' + expandKey)
         executeContextMenuAction(expandKey)
       } else {
@@ -2110,6 +2144,26 @@ export default {
       }
       recurse(group.children)
       recurse(group.containers)
+    }
+
+    // [SCALE-GUARD 2026-08-18] 展开前置拦截: 预估展开后可见数 → 软/硬处理.
+    //   group: 被展开的分组; targetLevel: 展开目标层级 (1=子领域/2=服务模块/99=全展开).
+    //   返回 'allow' | 'block'. 需在 configStore.scopeGuard.enabled 且父组件传入分组树时生效.
+    let _lastGuardWarnSig = '' // 渲染后兜底 toast 去重签名
+    function guardExpandBefore(group, targetLevel) {
+      if (!props.scopeGuardGroups || !configStore.scopeGuard.enabled) return 'allow'
+      const gid = (group && (group.elementCode || group.id)) || ''
+      if (!gid) return 'allow'
+      const projected = estimateExpand(props.scopeGuardGroups, props.scopeGuardLinks || [], gid, targetLevel)
+      const cfg = configStore.activeScopeGuard
+      const level = classify(projected, cfg)
+      const msg = buildExpandMessages(projected, cfg)
+      if (level === 'hard') {
+        ElMessage.warning(msg.hard)
+        return 'block'
+      }
+      if (level === 'soft') ElMessage.info(msg.soft)
+      return 'allow'
     }
 
     // [CTX-GLOBAL 2026-08-10] 全局展开到指定层级 (空白区域右键菜单).
@@ -2682,6 +2736,15 @@ export default {
       })
       debug.debugLog('[CTX] executeContextMenuAction: found target in newConfig=' + (target ? target.title || target.elementCode || target.id : 'null') + ', collapsed before=' + target?.collapsed)
       if (!target) return
+
+      // [SCALE-GUARD 2026-08-18] 右键菜单展开前置拦截 (硬线阻止)
+      if (key === 'expandSub' || key === 'expandSM' || key === 'expandBO') {
+        const guardLevel = key === 'expandSub' ? 1 : (key === 'expandSM' ? 2 : 99)
+        if (guardExpandBefore(target, guardLevel) === 'block') {
+          debug.debugLog('[CTX] executeContextMenuAction: blocked by scale guard, key=' + key)
+          return
+        }
+      }
 
       if (key === 'collapse') {
         // [VIS-RESET 2026-08-14] 移除图例隐藏重置: 右键折叠是局部操作, 应保留用户主动隐藏
