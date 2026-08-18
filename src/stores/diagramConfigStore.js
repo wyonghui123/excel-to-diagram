@@ -42,6 +42,18 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
   const layoutType = ref('grouped')
   const assignmentMode = ref('auto')
 
+  // [SCALE-GUARD 2026-08-18] 图表规模防护配置。
+  //   阈值以"可见渲染数"计: 关系数为主指标, 节点数为辅。校准依据见
+  //   docs/superpowers/specs/2026-08-18-chart-scale-guard-design.md。
+  //   按引擎双阈值: ELK 为主(实际生效), dagre 备用独立调参。
+  //   enabled=false 一键关闭所有拦截(退化为现状)。
+  const scopeGuard = ref({
+    enabled: true,
+    elk:  { softRels: 300, softNodes: 250, hardRels: 600, hardNodes: 400 },
+    dagre:{ softRels: 300, softNodes: 250, hardRels: 600, hardNodes: 400 },
+    renderCheck: true
+  })
+
   // 其他配置
   const customColors = ref({})
   // [M2 PR-2.1] positions 节点位置数组可能包含 1000+ 节点坐标，整体替换模式 (updatePositions 整体赋值)
@@ -112,6 +124,12 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
 
   const isBusinessObjectChart = computed(() => chartType.value === 'businessObject')
   const isServiceModuleChart = computed(() => chartType.value === 'serviceModule')
+
+  // [SCALE-GUARD 2026-08-18] 当前生效阈值 (按 layoutEngine 取对应引擎配置)
+  const activeScopeGuard = computed(() => {
+    const eng = (layoutEngine.value === 'dagre' ? 'dagre' : 'elk')
+    return scopeGuard.value[eng] || scopeGuard.value.elk
+  })
 
   // Actions
   function updateColorScheme(value) {
@@ -230,6 +248,11 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     // [SCOPE-DEFAULT 2026-08-08] 用户显式选择过展开层级, 后续不再套用范围默认折叠.
     //   注意: 默认态(businessObject)不调用本函数, 由 store 初始值承载, 故此处置 true 安全.
     expandLevelUserSet.value = true
+  }
+
+  // [SCALE-GUARD 2026-08-18] 覆盖 scaleGuard 配置 (整体/局部合并)
+  function setScopeGuard(patch) {
+    scopeGuard.value = { ...scopeGuard.value, ...patch }
   }
 
   // [DEFAULT-LEVEL 2026-08-12] 系统自动默认展开层级 (按分组数量自适应).
@@ -418,12 +441,15 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     layoutPanelExpanded,
     mermaidMaxTextSize,
     chartFocusRequest,
+    // [SCALE-GUARD 2026-08-18] 图表规模防护配置
+    scopeGuard,
 
     // Getters
     centerBoCodes,
     resolvedColorConfig,
     isBusinessObjectChart,
     isServiceModuleChart,
+    activeScopeGuard,
 
     // Actions
     updateColorScheme,
@@ -447,6 +473,7 @@ export const useDiagramConfigStore = defineStore('diagramConfig', () => {
     updateHideLinkLabelTails,
     updateLayoutControlConfig,
     setExpandLevel,
+    setScopeGuard,
     setDefaultExpandLevel,
     markGroupManualSet,
     resetExpandState,
