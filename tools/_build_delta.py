@@ -167,13 +167,19 @@ def filter_permission_revert(old: Manifest, new: Manifest, root: Path) -> set:
     permission optimization). Since feat branch == main for them, deploying would
     REVERT staging's permission code to main. Exclude them from BOTH manifests so
     staging keeps its current (agent) version untouched.
+
+    [FIX 2026-08-18] 处理 "added" 权限文件: 上一轮 (v20260817) 已用本方案剔除权限文件,
+    因此它们在 old manifest 中不存在 → 本轮计算为 added (in new, not in old)。
+    原实现 `path not in old_map → continue` 会跳过这些 added 文件, 导致它们重新进入 delta
+    并覆盖 staging 的 agent 权限代码。现在对 modified 与 added 统一判断 (feat==main 即剔除)。
     """
     old_map = {f.path: f.sha256 for f in old.files}
     new_map = {f.path: f.sha256 for f in new.files}
     to_remove = set()
     for path, sha in new_map.items():
-        if path not in old_map or old_map[path] == sha:
-            continue  # not a modified file
+        # 未修改 (old 有且 sha 相同) → 部署无变化, 保留
+        if path in old_map and old_map[path] == sha:
+            continue
         if not _is_permission_file(path):
             continue
         feat_h = _git_blob_hash(root, "feat/annotation-category-filter", path)
@@ -191,6 +197,36 @@ def filter_permission_revert(old: Manifest, new: Manifest, root: Path) -> set:
     else:
         print("  [PERM-EXCLUDE] 无需要剔除的权限文件")
     return to_remove
+
+def filter_new_manifest(new: Manifest, root: Path) -> Manifest:
+    """[FIX 2026-08-18] 从新 manifest 剔除未跟踪的本地杂项文件。
+
+    build_staging() 从磁盘整目录拷贝 meta/, 会带入大量 untracked 杂项
+    (exports/*.xlsx 导出模板、tests/coverage_html、.pytest_cache、_debug_test.py、
+    _profile_rel_out.txt、check_*.py 等)。这些文件不属于部署包, 但会因不在旧 manifest
+    中而显示为 added 并被打进 delta。此处仅保留 git 跟踪文件 + frontend_dist_files/
+    (dist 为 gitignore 但必须部署), 使 delta 只含真实代码变更。
+    """
+    tracked = _get_tracked_paths(root)
+    if not tracked:
+        return new
+    tracked.add("frontend_dist_files/")
+    kept = []
+    removed = 0
+    for f in new.files:
+        path = f.path
+        if path.startswith("frontend_dist_files/"):
+            kept.append(f)
+            continue
+        if path in tracked:
+            kept.append(f)
+            continue
+        removed += 1
+    if removed:
+        print(f"  [FILTER-NEW] new manifest: removed {removed} untracked entries "
+              f"({len(new.files)} → {len(kept)})")
+    new.files = kept
+    return new
 
 def force_lf_in_tree(root: Path) -> int:
     """Force LF line endings for all .sh/.py/.yaml/.json files (avoid CRLF false-delta)."""
@@ -239,10 +275,15 @@ def build_staging():
     dist_staging = STAGING_DIR / "dist"
     if dist_staging.exists():
         fe = STAGING_DIR / "frontend_dist_files"
+        renamed = False
         if not fe.exists():
-            dist_staging.rename(fe)
-            print("  [OK] dist/ → frontend_dist_files/")
-        else:
+            try:
+                dist_staging.rename(fe)
+                print("  [OK] dist/ → frontend_dist_files/")
+                renamed = True
+            except OSError as e:
+                print(f"  [WARN] rename dist/ blocked ({e}), fallback to copy")
+        if not renamed:
             # fallback: copy (rename may fail if file handles held on Windows)
             shutil.copytree(dist_staging, fe, dirs_exist_ok=True)
             shutil.rmtree(dist_staging, ignore_errors=True)
@@ -290,6 +331,10 @@ def main():
     new_manifest = generate_manifest(staging, version=VERSION, deployment_type="delta",
                                      prev_version=old_manifest.version)
     print(f"  New: {len(new_manifest.files)} files, {sum(f.size for f in new_manifest.files)/1024/1024:.1f}MB")
+
+    # [FIX 2026-08-18] 剔除新 manifest 中的 untracked 杂项 (exports/coverage/pytest_cache 等)
+    print("\n[Step 3.2] 剔除新 manifest untracked 杂项...")
+    filter_new_manifest(new_manifest, ROOT)
 
     # Step 3.5: 方案B - 剔除权限相关且 feat==main 的文件 (staging 保留 agent 权限代码)
     print("\n[Step 3.5] 剔除权限回退文件 (方案B)...")
