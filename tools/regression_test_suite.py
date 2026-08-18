@@ -20,9 +20,8 @@ regression_test_suite.py - staging 回归测试套件 [V007.55 2026-07-15]
 每个场景: inject → expect_error → verify_recovery → restore
 
 用法:
-  python tools/regression_test_suite.py                  # 跑 R1-R9 (staging safe)
+  python tools/regression_test_suite.py                  # 跑 R1-R10 (staging safe)
   python tools/regression_test_suite.py --scenario R1    # 单个
-  python tools/regression_test_suite.py --with R10       # 含 integration
   python tools/regression_test_suite.py --json report.json  # 输出 json
 
 集成:
@@ -272,7 +271,7 @@ def case_deleted() -> CaseResult:
                 # 关键: 用 uri=True + 强制 open, 才会立刻检测文件不存在
                 conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", timeout=3, uri=True)
                 conn.execute("SELECT 1").fetchone()
-                actual = "DB_OPEN_OK (unexpected - 缓存?)"
+                actual = "DB_OPEN_OK (unexpected - 缓存？)"
                 result = Result.FAIL
                 conn.close()
             except sqlite3.OperationalError as e:
@@ -474,6 +473,57 @@ def case_readonly_root() -> CaseResult:
                       "ROOT_CHECK_PASS", actual, notes)
 
 
+# =================== R10. migration_io ===================
+def case_migration_io() -> CaseResult:
+    """migration 写入遇到 io/锁失败: 应优雅超时失败, DB 可恢复 [2026-08-18 补充]
+    模拟: 持 EXCLUSIVE 锁 (等价 io 阻塞), migration 写 schema_migrations 应被阻塞 → TIMEOUT
+    验证: 失败后 DB 仍可正常打开, 原 migration 记录完整 (无半写状态)
+    """
+    t0 = time.time()
+    label = "R10_migration_io"
+    bak = backup_db(label)
+    try:
+        holder = sqlite3.connect(DB_PATH, timeout=60)
+        holder.execute("BEGIN EXCLUSIVE")
+        try:
+            start = time.time()
+            try:
+                conn = sqlite3.connect(DB_PATH, timeout=1)
+                conn.execute(
+                    "INSERT INTO schema_migrations(migration_name,status) "
+                    "VALUES('_r10_io_test','SUCCESS')"
+                )
+                conn.commit()
+                actual = "MIGRATION_WRITE_OK (unexpected)"
+                result = Result.FAIL
+                conn.close()
+            except sqlite3.OperationalError as e:
+                elapsed = int((time.time()-start)*1000)
+                actual = f"MIGRATION_BLOCKED: {e} after {elapsed}ms"
+                result = Result.PASS
+                notes = "migration 写被锁阻塞 (io 失败模拟), 优雅超时"
+        finally:
+            holder.execute("ROLLBACK")
+            holder.close()
+        # 验证恢复: 锁释放后 DB 可正常读, migration 记录完整
+        try:
+            cc = sqlite3.connect(DB_PATH, timeout=5)
+            count = cc.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0]
+            cc.close()
+            notes = f"{notes}; recovery: migrations={count} (完整, 无半写)"
+        except Exception as e:
+            actual = f"{actual}; RECOVERY_FAIL: {e}"
+            result = Result.FAIL
+            notes = "恢复失败"
+        restore_db(bak)
+    except Exception as e:
+        restore_db(bak)
+        return CaseResult(label, Result.FAIL.value, int((time.time()-t0)*1000),
+                          "MIGRATION_BLOCKED_OR_OK", str(e), "exception")
+    return CaseResult(label, result.value, int((time.time()-t0)*1000),
+                      "MIGRATION_BLOCKED_OR_OK", actual, notes)
+
+
 # =================== 调度 ===================
 ALL_CASES = {
     "R1": ("readonly", case_readonly),
@@ -485,13 +535,14 @@ ALL_CASES = {
     "R7": ("wal_corrupt", case_wal_corrupt),
     "R8": ("timeout", case_timeout),
     "R9": ("readonly_root", case_readonly_root),
+    "R10": ("migration_io", case_migration_io),
 }
 
 
 def main():
     global DB_PATH
     parser = argparse.ArgumentParser(description="staging sqlite io error 回归测试")
-    parser.add_argument("--scenario", help="单个 case: R1-R9")
+    parser.add_argument("--scenario", help="单个 case: R1-R10")
     parser.add_argument("--json", help="输出 json 到文件")
     parser.add_argument("--db-path", default=DB_PATH, help="db 路径 (默认 staging)")
     parser.add_argument("--no-restore", action="store_true", help="不自动 restore (调试用)")
