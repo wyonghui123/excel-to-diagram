@@ -46,10 +46,15 @@ export default defineConfig({
             if (id.includes('/xlsx/') || id.includes('/codepage/')) {
               return 'vendor-xlsx'
             }
-            // PDF 导出
-            if (id.includes('/html2canvas/') || id.includes('/jspdf/') || id.includes('/canvg/')) {
-              return 'vendor-pdf'
-            }
+            // [FIX 2026-08-18] PDF 导出依赖 (html2canvas/jspdf/canvg) 不再单独分包:
+            //   之前独立 vendor-pdf chunk 与 vendor-mermaid 形成循环依赖
+            //   (mermaid 为 PNG 导出 import canvg, canvg import d3/其他 mermaid 依赖),
+            //   Rollup 报 "Circular chunk: vendor-pdf -> vendor-mermaid -> vendor-pdf",
+            //   运行时 vendor-pdf 内 `class X extends _a` (extends 自 vendor-mermaid)
+            //   因 ESM 循环初始化顺序抛 "Class extends value undefined" → 整个前端无法挂载
+            //   (v20260817 起已受影响, 仅靠 HTTP 200 校验未发现).
+            //   修复: 让 pdf 依赖落到下方默认 vendor-mermaid 桶, 消除跨 chunk 循环.
+            //   代价: 首屏多加载 ~0.6MB (pdf 导出库), 换取构建可运行.
             // 其他第三方库 (与 mermaid 合并, 避免循环)
             return 'vendor-mermaid'
           }
