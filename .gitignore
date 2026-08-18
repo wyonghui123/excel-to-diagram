@@ -5,6 +5,11 @@ node_modules/
 dist/
 release/
 
+# Delta deploy packages (build artifacts, not source)
+deploy-*.zip
+.baseline_staging/
+.staging/
+
 # Environment variables (IMPORTANT: Contains secrets)
 .env
 .env.local
