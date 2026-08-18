@@ -69,39 +69,40 @@ mkdir -p $BACKUP_DIR
 cp -rf $DEPLOY_DIR/* $BACKUP_DIR/ 2>/dev/null && echo "[OK] 备份到 $BACKUP_DIR" || echo "[WARN] 备份部分失败, 继续"
 echo ""
 
-# ============== 3. 强杀 (杀 server + unified + log_service, 释放 DB 连接) ==============
-echo "[Step 3] 强杀 server.py + unified + log_service"
-pkill -9 -f "server.py" 2>/dev/null && echo "  [OK] server.py killed" || echo "  [INFO] server.py not running"
-pkill -9 -f "unified_server" 2>/dev/null && echo "  [OK] unified killed" || echo "  [INFO] unified not running"
-# [V007.49] 也杀 log_service: 它持有 DB 连接, 阻碍 journal_mode WAL→DELETE 切换
-pkill -9 -f "log_service.py" 2>/dev/null && echo "  [OK] log_service killed" || echo "  [INFO] log_service not running"
-sleep 3
+# ============== 3. 优雅停止 (SIGTERM → 等待 → SIGKILL 兜底) ==============
+# [2026-08-18] 强杀(pkill -9)会导致 WAL 未正确 checkpoint/关闭 → DB malformed.
+# 改为先 SIGTERM 让进程优雅释放 DB 连接, 等待退出后再 SIGKILL 兜底.
+echo "[Step 3] 优雅停止 server + unified + log_service"
+for pat in "server.py" "unified_server" "log_service.py"; do
+    pkill -TERM -f "$pat" 2>/dev/null && echo "  [OK] $pat SIGTERM sent" || echo "  [INFO] $pat not running"
+done
+# 等待优雅退出 (最多 10s)
+for i in $(seq 1 10); do
+    if ! pgrep -f "server.py|unified_server|log_service.py" >/dev/null 2>&1; then
+        break
+    fi
+    sleep 1
+done
+# SIGKILL 兜底 (仅超时残留时)
+REMAIN=$(pgrep -f "server.py|unified_server|log_service.py" 2>/dev/null | wc -l)
+if [ "${REMAIN:-0}" -gt 0 ]; then
+    echo "  [WARN] ${REMAIN} 个进程未优雅退出, SIGKILL 兜底"
+    pkill -9 -f "server.py" 2>/dev/null
+    pkill -9 -f "unified_server" 2>/dev/null
+    pkill -9 -f "log_service.py" 2>/dev/null
+fi
+sleep 2
 
-# 3.5 WAL→DELETE 迁移 (必须在所有 DB 连接释放后执行)
-# [V007.49] journal_mode WAL→DELETE 根治 disk I/O error
-# DB 当前是 WAL 模式, 必须在 server 启动前切到 DELETE, 否则 server 初始化时
-# PRAGMA journal_mode=DELETE 被阻塞 (log_service 等残留连接)
-echo "[Step 3.5] WAL→DELETE 迁移"
+# 3.5 DB 安全预检 + WAL→DELETE 迁移 (db_preflight.sh)
+# [2026-08-18] 统一走 db_preflight.sh: PASSIVE checkpoint + journal_mode=DELETE + quick_check,
+#   失败即中止部署 (fail-fast), 防止带伤 DB 上线.
+echo "[Step 3.5] DB 安全预检 + WAL→DELETE (db_preflight.sh)"
 DB_PATH=$DEPLOY_DIR/architecture.db
 if [ -f "$DB_PATH" ]; then
-    $PY -c "
-import sqlite3, sys
-conn = sqlite3.connect('$DB_PATH', timeout=10)
-try:
-    # 先 checkpoint WAL
-    conn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
-except Exception as e:
-    print(f'  [WARN] WAL checkpoint 失败 (可能无 WAL): {e}')
-try:
-    result = conn.execute('PRAGMA journal_mode=DELETE').fetchone()
-    if result and result[0].lower() == 'delete':
-        print('  [OK] journal_mode=DELETE (WAL 已清除)')
-    else:
-        print(f'  [WARN] journal_mode 切换返回: {result} (可能被残留连接阻塞)')
-except Exception as e:
-    print(f'  [WARN] journal_mode 切换失败: {e}')
-conn.close()
-" 2>&1
+    if ! PYTHON="$PY" bash "$SCRIPT_DIR/db_preflight.sh" "$DB_PATH"; then
+        echo "[FATAL] DB 预检失败, 中止部署 (请先恢复 DB 或用备份)"
+        exit 1
+    fi
 else
     echo "  [SKIP] DB 不存在, 跳过"
 fi
