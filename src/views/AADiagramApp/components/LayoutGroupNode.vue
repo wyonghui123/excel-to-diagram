@@ -177,8 +177,10 @@ function onColorChange(color) {
 // 清除：custom 分组 → 恢复默认 group.style；中心范围分组 → 恢复默认 centerScopeColor；否则删除该分组自定义色
 function onColorClear() {
   if (props.group.groupType === 'custom' && !(props.group._elkGroup === 'inner' || props.group._elkGroup === 'boundary')) {
+    // [FIX 2026-08-19] defStyle 必须放在展开的 group.style **之后**, 才能覆盖重置 fill/stroke.
+    //   原 `{ ...defStyle, ...group.style }` 顺序相反 → 用户已设置的 fill 覆盖默认白 → 清空无效.
     const defStyle = { fill: '#ffffff', stroke: '#666666', strokeWidth: 2, strokeDasharray: '' }
-    emit('update', { id: props.group.id, updates: { style: { ...defStyle, ...(props.group.style || {}) } } })
+    emit('update', { id: props.group.id, updates: { style: { ...(props.group.style || {}), ...defStyle } } })
     return
   }
   const info = groupColorInfo.value

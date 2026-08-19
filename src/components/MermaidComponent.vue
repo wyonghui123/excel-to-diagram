@@ -2946,6 +2946,11 @@ export default {
           title: g.title,
           en: g.enabled,
           v: isElkSystemAuto(g) ? g.visible : undefined,
+          // [CUSTOM-COLOR 2026-08-19] 分组 style(fill/stroke)纳入签名:
+          //   自定义分组配色是 mermaid code 内 style 行, 必须全量重渲染才能刷新 SVG.
+          //   若不纳入, 面板改色后 groups 结构不变 → watch 不触发 → 图表颜色不更新
+          //   (用户反馈"清空/配色后图表不刷新"). 任一配色变化即触发 renderMermaid.
+          st: g.style ? JSON.stringify(g.style) : undefined,
           // [EXPAND 2026-08-05] 树折叠参与渲染: collapsed 必须进签名, 否则"折叠/展开"切换不触发重渲染.
           //   历史: 之前注释"无需单独捕获 collapsed (已移除显式折叠)" → 折叠时顺带改了 enabled
           //   仍能触发, 但恢复展开只改 collapsed → 签名不变 → 图表不刷新 (self-test 复现).
@@ -2973,6 +2978,9 @@ export default {
           title: g.title,
           en: g.enabled,
           v: isElkSystemAuto(g) ? g.visible : undefined,
+          // [CUSTOM-COLOR 2026-08-19] 同步 fold 签名含 style: 配色变化是结构重渲染,
+          //   非折叠操作 (若 sigNoFold 不含 style, sig 变而 sigNoFold 不变 → 误判为折叠 → 平滑过渡)
+          st: g.style ? JSON.stringify(g.style) : undefined,
           cont: (g.containers || []).map(c => typeof c === 'string' ? c : (c.id || c.elementCode)),
           dn: (g.directNodes || []).map(n => typeof n === 'object' ? (n.id || n.code || n.name) : n),
           ch: (g.children || []).map(sigNoFold)
