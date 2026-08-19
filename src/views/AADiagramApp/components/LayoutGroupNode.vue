@@ -45,6 +45,12 @@
           @blur="finishEditTitle" @keyup.enter="finishEditTitle" @keyup.escape="cancelEditTitle" />
       </div>
       <div class="lgn-inline-actions">
+        <!-- [DEL 2026-08-19] 删除自定义分组: 仅用户自定义分组(非系统/非ELK)显示,
+             默认隐藏, hover 行才显现 → 不挤占常显的启用/隐藏按钮. 置于操作区首位. -->
+        <button v-if="isUserCustomGroup" class="lgn-group-del" :title="'删除分组（含其子分组与叶子）'"
+          @click.stop="handleDelete">
+          <AppIcon name="trash" size="sm" />
+        </button>
         <!-- [ADV 2026-08-07] 启用/禁用按钮: 默认隐藏, 仅"高级设置"开关打开时展示.
              与"可见/隐藏"正交: disabled=隐藏自身+子孙上浮打平 (全量重排);
              visible=false=整棵子树不渲染 (增量隐藏, 留空位).
@@ -59,12 +65,6 @@
         <button class="lgn-eye" :class="{ off: group.visible === false }"
           :title="group.visible !== false ? '隐藏（仅容器框，子节点保留）' : '显示'" @click="toggleVisible">
           <AppIcon :name="group.visible !== false ? 'view' : 'hide'" size="sm" />
-        </button>
-        <!-- [DEL 2026-08-19] 删除自定义分组: 仅用户自定义分组(非系统/非ELK)显示,
-             默认隐藏, hover 行才显现 → 不挤占正常行内按钮空间 -->
-        <button v-if="isUserCustomGroup" class="lgn-group-del" :title="'删除分组（含其子分组与叶子）'"
-          @click.stop="handleDelete">
-          <AppIcon name="trash" size="sm" />
         </button>
       </div>
     </div>
@@ -95,9 +95,13 @@
         @dragover.prevent="handleContainerDragOver"
         @drop="handleContainerDrop($event, container)"
       >
+        <!-- [ALIGN 2026-08-19] 与分组行(.lgn-row)对齐: 分组行先有 caret(18px) 再标题,
+             叶子行补同宽占位, 使 file 图标/名称列与分组标题列对齐; 高度统一 28px. -->
+        <span class="lgn-leaf-caret-placeholder"></span>
         <AppIcon name="file" size="xs" />
         <span class="leaf-name">{{ getContainerName(container) }}</span>
         <div class="lgn-leaf-actions">
+          <!-- [ALIGN 2026-08-19] 操作按钮与分组行按钮同尺寸(22px), 右侧对齐 -->
           <button v-if="showAdvancedSettings" class="lgn-leaf-toggle" :class="{ off: container.enabled === false }"
             :title="container.enabled !== false ? '点击禁用（禁用即从图表移除）' : '点击启用'"
             @click.stop="toggleContainerEnabled(container)">
@@ -500,16 +504,18 @@ function handleRowDrop(event) {
 
 /* 容器叶子节点（如服务模块下的业务对象） */
 .lgn-container-leaf {
-  display: flex; align-items: center; gap: 4px; height: 24px; padding: 0 6px;
+  display: flex; align-items: center; gap: 4px; height: 28px; padding: 0 6px;
   border-radius: 4px; font-size: var(--font-size-xs); color: var(--color-text-secondary);
   overflow: hidden; user-select: none; cursor: grab;
   &:hover { background: var(--color-bg-secondary); color: var(--color-text-primary); }
   &:active { cursor: grabbing; opacity: 0.7; }
   &.leaf-disabled { opacity: 0.5; }
+  /* [ALIGN 2026-08-19] 与分组行 .lgn-caret 同宽占位, 使名称列与分组标题列对齐 */
+  .lgn-leaf-caret-placeholder { width: 18px; flex-shrink: 0; }
   .leaf-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
   .lgn-leaf-actions { display: flex; align-items: center; gap: 2px; opacity: 1; }
   .lgn-leaf-toggle {
-    display: flex; align-items: center; justify-content: center; width: 20px; height: 20px;
+    display: flex; align-items: center; justify-content: center; width: 22px; height: 22px;
     border: none; background: transparent; color: var(--color-text-tertiary); cursor: pointer; border-radius: 3px;
     &:hover { background: var(--color-bg-secondary); color: var(--color-text-primary); }
     &.off { color: var(--color-text-disabled); }
