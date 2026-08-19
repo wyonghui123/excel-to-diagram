@@ -148,13 +148,22 @@ const centerScopeColorText = computed(() => {
   return (cc && cc !== 'gray') ? cc : '#808080'
 })
 const hasCustomColor = computed(() => {
+  // [CUSTOM-COLOR 2026-08-19] 用户自定义分组: 色点始终可清除 (恢复默认 group.style)
+  if (props.group.groupType === 'custom' && !(props.group._elkGroup === 'inner' || props.group._elkGroup === 'boundary')) return true
   const info = groupColorInfo.value
   if (info.isCenter) return true // 中心范围：允许清除恢复默认 centerScopeColor
   return !!info.key && !!diagramConfigStore.customColors[info.key]
 })
 
-// 选色：中心范围分组 → 写 centerScopeColor（方案C 联动）；否则写 store.customColors[分组key]（增量变色）
+// 选色：custom 分组 → 写 group.style (容器/节点复用); 中心范围分组 → 写 centerScopeColor（方案C 联动）；
+//   否则写 store.customColors[分组key]（增量变色）
 function onColorChange(color) {
+  if (!color) { onColorClear(); return }
+  if (props.group.groupType === 'custom' && !(props.group._elkGroup === 'inner' || props.group._elkGroup === 'boundary')) {
+    const style = { ...(props.group.style || {}), fill: color, stroke: color }
+    emit('update', { id: props.group.id, updates: { style } })
+    return
+  }
   const info = groupColorInfo.value
   if (info.isCenter) {
     diagramConfigStore.updateCenterScopeColor(color || '#808080')
@@ -162,12 +171,16 @@ function onColorChange(color) {
   }
   const key = info.key
   if (!key) return
-  if (!color) { onColorClear(); return }
   diagramConfigStore.updateCustomColors({ ...diagramConfigStore.customColors, [key]: color })
 }
 
-// 清除：中心范围分组 → 恢复默认 centerScopeColor；否则删除该分组自定义色，恢复配色方案默认
+// 清除：custom 分组 → 恢复默认 group.style；中心范围分组 → 恢复默认 centerScopeColor；否则删除该分组自定义色
 function onColorClear() {
+  if (props.group.groupType === 'custom' && !(props.group._elkGroup === 'inner' || props.group._elkGroup === 'boundary')) {
+    const defStyle = { fill: '#ffffff', stroke: '#666666', strokeWidth: 2, strokeDasharray: '' }
+    emit('update', { id: props.group.id, updates: { style: { ...defStyle, ...(props.group.style || {}) } } })
+    return
+  }
   const info = groupColorInfo.value
   if (info.isCenter) {
     diagramConfigStore.updateCenterScopeColor('#808080')

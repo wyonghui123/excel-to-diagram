@@ -45,6 +45,22 @@ function getLevelStyle(level) {
 const getContainerLevelStyle = getLevelStyle
 const getGroupLevelStyle = getLevelStyle
 
+// [CUSTOM-COLOR 2026-08-19] 用户自定义分组(groupType='custom' 且非 ELK 系统自动分组)
+//   使用面板配置的 group.style 着色 (fill/stroke/strokeWidth, getDefaultGroup 已带默认值,
+//   之前被忽略). 容器(subgraph)与上提节点(COLLAPSE)都生效.
+//   ELK 系统分组(_elkGroup)除外: 其 style 是 ELK 布局内部语义色, 不应在此应用.
+function resolveCustomGroupColor(group) {
+  if (!group) return null
+  const isUserCustom = group.groupType === 'custom'
+    && !(group._elkGroup === 'inner' || group._elkGroup === 'boundary')
+  if (!isUserCustom || !group.style) return null
+  const fill = group.style.fill
+  const stroke = group.style.stroke || fill
+  const strokeWidth = group.style.strokeWidth
+  if (!fill) return null
+  return { fill, stroke, strokeWidth, isCustom: true }
+}
+
 // [ELK-GROUP 2026-08-12] 识别"系统自动分组"(无关系/有关系, ELK 布局自动生成).
 //   其 visible=false 表示"无边框但节点仍渲染"(ELK 布局语义), 与普通分组 visible=false
 //   (隐藏整棵子树) 不同, 渲染时需特殊处理.
@@ -368,9 +384,19 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
           ? `${group.title || 'Group'}\\n（${ownCode}）`
           : ancestorPath
             ? `${group.title || 'Group'}\\n（${ancestorPath}）…`
-            : `${groupTitle}…`
+            // [FIX 2026-08-19] 空自定义分组自动上提的节点不带省略号: 空分组无可展开内容,
+            //   "…" 是"折叠容器, 可展开"的暗示, 对空节点有误导. 仅显式折叠(collapsed=true)
+            //   才保留 (此时表明确实有内容待展开). 系统分组走 marker 分支, 不落此兜底.
+            : group.collapsed === true
+              ? `${groupTitle}…`
+              : `${groupTitle}`
       code += `${indent}${collapseId}["${displayText}"]:::collapseNode\n`
       definedNodes.add(collapseId)
+      // [CUSTOM-COLOR 2026-08-19] 自定义分组上提节点用面板配置色 (style), 容器/节点同源
+      const customColor = resolveCustomGroupColor(group)
+      if (customColor) {
+        code += `${indent}style ${collapseId} fill:${customColor.fill},stroke:${customColor.stroke}\n`
+      }
     }
     return { code, styleLines }
   }
@@ -888,8 +914,18 @@ function generateContainerCode(container, index, nodeMap, definedNodes, indent =
  * @param {number} containerDepth - 容器嵌套层次
  */
 function generateGroupStyle(group, groupId, containerDepth = 1) {
-  if (!group.visible) {
+  // [FIX 2026-08-19] 用 group.visible === false 判断 (与 generateGroupCode 隐藏语义一致):
+  //   原 `!group.visible` 会把 visible 未定义(undefined)的分组也当隐藏 → 着透明色,
+  //   导致新建自定义分组容器无色/透明 (getDefaultGroup 虽设 visible:true, 但防御训练不可靠).
+  if (group.visible === false) {
     return `style ${groupId} fill:none,stroke:none\n`
+  }
+
+  // [CUSTOM-COLOR 2026-08-19] 用户自定义分组用面板配置色 (resolveCustomGroupColor),
+  //   优先于按层级 LEVEL_STYLES; 其余系统分组保持原逻辑不变.
+  const custom = resolveCustomGroupColor(group)
+  if (custom) {
+    return `style ${groupId} fill:${custom.fill},stroke:${custom.stroke},stroke-width:${custom.strokeWidth || 2}\n`
   }
 
   const levelStyle = getGroupLevelStyle(containerDepth)

@@ -380,6 +380,56 @@ describe('groupedLayout - 上提 uplift', () => {
     expect(result.mermaidCode).toContain('COLLAPSE_grp_custom_2')
   })
 
+  it('[FIX 2026-08-19 节点标题] 空自定义分组自动上提节点标题不带省略号, 显式折叠保留省略号', () => {
+    // 空内容自动上提: 无可展开内容, 标题纯标题不带 "…" (省略号暗示"折叠容器可展开", 对空节点有误导)
+    const empty = [{
+      id: 'grp_noellipsis', title: '空白分组', groupType: 'custom', enabled: true,
+      containers: [], children: [], directNodes: []
+    }]
+    const rEmpty = generateGroupedLayout(empty, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    expect(rEmpty.mermaidCode).toMatch(/COLLAPSE_grp_noellipsis\["空白分组"\]/)
+    expect(rEmpty.mermaidCode).not.toContain('空白分组…')
+    // 显式折叠(collapsed=true) 的…省略: 表明有内容待展开 → 保留
+    const folded = JSON.parse(JSON.stringify(empty[0]))
+    folded.id = 'grp_ellipsis'; folded.title = '折叠分组'; folded.collapsed = true
+    const rFolded = generateGroupedLayout([folded], containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    expect(rFolded.mermaidCode).toMatch(/COLLAPSE_grp_ellipsis\["折叠分组…"\]/)
+  })
+
+  it('[FIX 2026-08-19 自定义分组着色] 容器形态用 group.style 填充色 (fill/stroke)', () => {
+    const groups = [{
+      id: 'grp_color_c', title: '彩色分组', groupType: 'custom', enabled: true,
+      style: { fill: '#ff0000', stroke: '#0000ff', strokeWidth: 3, strokeDasharray: '' },
+      containers: [{ id: 'C1', name: '容器1', enabled: true, nodes: ['N1'] }], children: []
+    }]
+    const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    // 容器 subgraph + style 行(在 styleLines)用面板配置色 (跳过按层级 LEVEL_STYLES)
+    expect(result.mermaidCode).toContain('subgraph G_grp_color_c["彩色分组"]')
+    expect(result.styleLines.some(l => l.includes('style G_grp_color_c fill:#ff0000,stroke:#0000ff,stroke-width:3'))).toBe(true)
+  })
+
+  it('[FIX 2026-08-19 自定义分组着色] 空分组上提节点用 group.style 色 (fill/stroke)', () => {
+    const groups = [{
+      id: 'grp_color_n', title: '彩色节点', groupType: 'custom', enabled: true,
+      style: { fill: '#ff0000', stroke: '#0000ff' },
+      containers: [], children: [], directNodes: []
+    }]
+    const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    expect(result.mermaidCode).toContain('COLLAPSE_grp_color_n')
+    expect(result.mermaidCode).toContain('style COLLAPSE_grp_color_n fill:#ff0000,stroke:#0000ff')
+  })
+
+  it('[FIX 2026-08-19 自定义分组着色] ELK 系统分组(_elkGroup) 不受 group.style 着色影响', () => {
+    const groups = [{
+      id: 'G_elk', title: '有关系', groupType: 'custom', enabled: true, visible: false, _elkGroup: 'boundary',
+      style: { fill: '#fff3e0', stroke: '#ff9800' },
+      containers: [{ id: 'C1', name: '容器1', enabled: true, nodes: ['N1'] }], children: []
+    }]
+    const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    // ELK 分组不应用 custom style 着色 (走原本无边框/系统逻辑), 不产生 G_elk 的颜色 style 行
+    expect(result.styleLines.some(l => l.includes('style G_elk fill:#fff3e0,stroke:#ff9800'))).toBe(false)
+  })
+
   it('container.collapsed=true -> 容器折叠为单个聚合节点, 节点外提不渲染', () => {
     const groups = [{
       id: 'G1', title: '组1', direction: 'LR',

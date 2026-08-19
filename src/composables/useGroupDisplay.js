@@ -243,7 +243,12 @@ export function useGroupDisplay(colorMapping) {
   //     此时 key 置空（改色走 centerScopeColor，不写 customColors）。
   function getGroupColor(group) {
     if (!group) return { color: null, key: '', isCenter: false }
-    if (group.groupType === 'custom') return { color: null, key: '', isCenter: false }
+    // [CUSTOM-COLOR 2026-08-19] 用户自定义分组(非 ELK 系统自动分组)支持 group.style 配色:
+    //   色点显示 style.fill (面板配置), key 置空 (改色走 group.style, 不写 customColors).
+    //   ELK 系统自动分组(_elkGroup)除外: 其 style 是 ELK 布局内部语义色, 不显示色点.
+    if (group.groupType === 'custom' && !(group._elkGroup === 'inner' || group._elkGroup === 'boundary')) {
+      return { color: group.style?.fill || '#808080', key: '', isCenter: false }
+    }
 
     // [中心范围 2026-08-05 方案A] 区分中心范围开启且分组属于中心范围 →
     //   色点显示 centerScopeColor（灰），与图表中心节点被 centerScopeColor 覆盖一致。
