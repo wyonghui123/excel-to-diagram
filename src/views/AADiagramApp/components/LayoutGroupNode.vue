@@ -60,6 +60,12 @@
           :title="group.visible !== false ? '隐藏（仅容器框，子节点保留）' : '显示'" @click="toggleVisible">
           <AppIcon :name="group.visible !== false ? 'view' : 'hide'" size="sm" />
         </button>
+        <!-- [DEL 2026-08-19] 删除自定义分组: 仅用户自定义分组(非系统/非ELK)显示,
+             默认隐藏, hover 行才显现 → 不挤占正常行内按钮空间 -->
+        <button v-if="isUserCustomGroup" class="lgn-group-del" :title="'删除分组（含其子分组与叶子）'"
+          @click.stop="handleDelete">
+          <AppIcon name="trash" size="sm" />
+        </button>
       </div>
     </div>
 
@@ -234,6 +240,12 @@ const isSystemAuto = computed(() => {
   return elk === 'inner' || elk === 'boundary'
 })
 
+// [DEL 2026-08-19] 用户自定义分组(可删除): groupType=custom 且非 ELK 系统自动分组.
+//   系统分组(领域/子领域/服务模块)与 ELK 分组不允许删除.
+const isUserCustomGroup = computed(() => {
+  return props.group.groupType === 'custom' && !isSystemAuto.value
+})
+
 // [SYS 2026-08-07] 类型标签: 系统自动分组显示"系统自动", 其余走 groupType 映射
 const typeLabel = computed(() => {
   if (isSystemAuto.value) return '系统自动'
@@ -280,7 +292,7 @@ function cancelEditTitle() { isEditingTitle.value = false }
 //   [FIX 2026-08-06] 之前用 elementCode (编码) 作 id, 而 subgraph 标题是分组名, 匹配不到;
 //   且服务模块行误发 type:'node' (其实际渲染为容器), 导致领域/子领域/服务模块高亮失效。
 function handleRowClick(e) {
-  if (e.target.closest('.title-input') || e.target.closest('.lgn-color-picker') || e.target.closest('.lgn-eye') || e.target.closest('.lgn-caret') || e.target.closest('.lgn-type-icon') || e.target.closest('.el-dropdown') || e.target.closest('.lgn-multistate')) return
+  if (e.target.closest('.title-input') || e.target.closest('.lgn-color-picker') || e.target.closest('.lgn-eye') || e.target.closest('.lgn-group-del') || e.target.closest('.lgn-caret') || e.target.closest('.lgn-type-icon') || e.target.closest('.el-dropdown') || e.target.closest('.lgn-multistate')) return
   emit('request-chart-focus', {
     type: 'container',
     id: props.group.title || props.group.elementCode
@@ -467,6 +479,14 @@ function handleRowDrop(event) {
   border: none; background: transparent; color: var(--color-text-tertiary); cursor: pointer; border-radius: 3px;
   &:hover { background: var(--color-bg-secondary); color: var(--color-text-primary); }
 }
+/* [DEL 2026-08-19] 删除按钮: 默认隐藏, hover 行才显现, 避免挤占常显的启用/隐藏按钮 */
+.lgn-group-del {
+  display: flex; align-items: center; justify-content: center; width: 22px; height: 22px;
+  border: none; background: transparent; color: var(--color-text-tertiary); cursor: pointer; border-radius: 3px;
+  opacity: 0; transition: opacity .12s;
+  &:hover { background: var(--color-bg-secondary); color: var(--color-error); }
+}
+.lgn-row:hover .lgn-group-del { opacity: 1; }
 .lgn-eye.off, .lgn-collapse.off, .lgn-multistate.off { color: var(--color-text-disabled); }
 .lgn-delete:hover { color: var(--color-error); }
 .lgn-context-anchor { display: none; }

@@ -125,4 +125,20 @@ describe('injectElkSubGroups', () => {
     expect(sm.children).toHaveLength(1)
     expect(sm.children[0]._elkGroup).toBe('inner')
   })
+
+  it('[FIX 2026-08-19] SM 下已有 ELK 兄弟分组时, 保留用户自定义分组不被覆盖', () => {
+    // 渲染树 SM.children 含用户新建的自定义分组 (applyContainerMembership 补入)
+    const merged = renderTree()
+    findSm(merged).children = [
+      { id: 'grp_custom', elementCode: 'grp_custom', groupType: 'custom', directNodes: ['EXTRA'], containers: [], children: [] }
+    ]
+    injectElkSubGroups(merged, panelTree())
+    const sm = findSm(merged)
+    const ids = sm.children.map(c => c.id || c.elementCode)
+    // ELK 注入 + 用户自定义分组都保留 (原 sm.children=children 会覆盖掉用户分组 → 不展示)
+    expect(ids).toContain('P_SM_DP_inner')
+    expect(ids).toContain('P_SM_DP_boundary')
+    expect(ids).toContain('grp_custom')
+    expect(sm.children).toHaveLength(3)
+  })
 })

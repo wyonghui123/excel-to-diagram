@@ -63,7 +63,11 @@ export function injectElkSubGroups(mergedGroups, panelGroups) {
     const covered = new Set()
     children.forEach(ch => (ch.directNodes || []).forEach(n => covered.add(n)))
     sm.directNodes = (sm.directNodes || []).filter(n => !covered.has(n))
-    sm.children = children
+    // [CUSTOM-COLOR 2026-08-19] 保留 SM 下非 ELK 的孩子(用户在同一服务模块下新建的自定义分组),
+    //   只在前面注入 ELK 子分组, 不覆盖 children. 原 `sm.children = children` 会把用户新建分组整体覆盖掉
+    //   → 若 SM 下已有"无关系/有关系"兄弟容器, 新增的自定义分组不展示 (用户反馈的 bug).
+    const nonElkChildren = (sm.children || []).filter(c => !c || !(c._elkGroup === 'inner' || c._elkGroup === 'boundary'))
+    sm.children = [...children, ...nonElkChildren]
   }
 
   function walk(groups) {

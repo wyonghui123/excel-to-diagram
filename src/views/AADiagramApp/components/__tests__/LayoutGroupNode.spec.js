@@ -74,6 +74,20 @@ describe('LayoutGroupNode', () => {
     expect(payload.container.id).toBe('c1')
   })
 
+  it('[DEL 2026-08-19] 用户自定义分组显示删除按钮, 点击 emit delete', async () => {
+    const group = makeGroup({ id: 'cg1', title: '自定义', groupType: 'custom' })
+    const wrapper = mount(LayoutGroupNode, { props: { group, depth: 0, containers: [] } })
+    const del = wrapper.find('.lgn-group-del')
+    expect(del.exists()).toBe(true)
+    await del.trigger('click')
+    expect(wrapper.emitted('delete')?.[0]?.[0]).toBe('cg1')
+  })
+
+  it('[DEL 2026-08-19] 系统分组(领域)不显示删除按钮', () => {
+    const wrapper = mount(LayoutGroupNode, { props: { group: makeGroup(), depth: 0, containers: [] } })
+    expect(wrapper.find('.lgn-group-del').exists()).toBe(false)
+  })
+
   it('[FOCUS] 双击标题文字仅进入编辑, 不触发 request-chart-focus (.stop 隔离)', async () => {
     const wrapper = mount(LayoutGroupNode, { props: { group: makeGroup(), depth: 0, containers: [] } })
     await wrapper.find('.lgn-title-text').trigger('dblclick')
