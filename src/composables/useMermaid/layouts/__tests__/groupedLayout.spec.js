@@ -184,6 +184,45 @@ describe('groupedLayout - 启用/禁用 enabled (Bug 2 回归)', () => {
     expect(result.mermaidCode).toContain('N2')
   })
 
+  it('[FIX 2026-08-19] 禁用分组(directNodes)嵌套在启用父级内 -> 节点打平在父容器内不逃逸', () => {
+    // 用户反馈: 库存管理禁用后子节点应还在采购供应容器内 (而非跑到父容器之外).
+    // 结构: 父容器 G1(enabled) → 子分组 G2(disabled, directNodes=['N3'])
+    // 期望: G1 subgraph 生成, N3 以缩进行渲染在 G1 内 (禁用分支打平到父容器层级).
+    const groups = [{
+      id: 'G1', title: '父容器', enabled: true, containers: [], directNodes: [],
+      children: [{
+        id: 'G2', title: '禁用组', enabled: false, containers: [], directNodes: ['N3'], children: []
+      }]
+    }]
+    const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    expect(result.mermaidCode).toContain('subgraph G_G1')
+    expect(result.mermaidCode).not.toContain('subgraph G_G2')
+    // N3 渲染为缩进行 (位于 G_G1 内), 而非顶层无缩进
+    expect(result.mermaidCode).toContain('  N3["节点3')
+    expect(result.mermaidCode).not.toContain('\nN3[')
+  })
+
+  it('[FIX 2026-08-19] 禁用分组(enabled 后代)嵌套在启用父级内 -> 父级不被整体跳过 (hasGroupContent)', () => {
+    // 原 bug: hasGroupContent 对 disabled 恒 false → 父级级联 false → 父级被整体跳过
+    //   → 禁用子领域后整个图表塌缩. 修复: disabled 分组若有渲染后代视为有内容.
+    // 结构: G1(enabled) → G2(disabled) → G3(enabled, directNodes=['N3'])
+    // 期望: G1 与 G3 subgraph 均生成, G2 自身 subgraph 不生成.
+    const groups = [{
+      id: 'G1', title: '父域', enabled: true, containers: [], directNodes: [],
+      children: [{
+        id: 'G2', title: '禁用子域', enabled: false, containers: [], directNodes: [],
+        children: [{
+          id: 'G3', title: '启用子组', enabled: true, containers: [], directNodes: ['N3'], children: []
+        }]
+      }]
+    }]
+    const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    expect(result.mermaidCode).toContain('subgraph G_G1')
+    expect(result.mermaidCode).not.toContain('subgraph G_G2')
+    expect(result.mermaidCode).toContain('subgraph G_G3')
+    expect(result.mermaidCode).toContain('N3')
+  })
+
   it('[FIX 2026-08-06] 父容器 disabled 后被打平提升的子容器标题保持单行, 父名注册进 registry 供 tooltip', () => {
     // 场景: SM 图禁用父域 "供应链云", 子域 "供应链计划" 仍 enabled=true → 被打平提升到顶层.
     //   方案演进 (2026-08-06g): 标题改为单行 (只显示自身名 "供应链计划"), 父名称不再拼进标题
@@ -318,6 +357,27 @@ describe('groupedLayout - 上提 uplift', () => {
     expect(result.mermaidCode).toContain('direction LR')
     expect(result.mermaidCode).toContain('N1')
     expect(result.mermaidCode).not.toContain('COLLAPSE_')
+  })
+
+  it('[FIX 2026-08-19] 空自定义分组(groupType=custom)不自动上提 → 渲染为 subgraph 容器而非 COLLAPSE 节点', () => {
+    // 用户新建的空自定义分组: enabled 无子孙, 应渲染为容器框 (用户预期"渲染成容器"),
+    //   而非空内容自动上提成聚合节点.
+    const groups = [{
+      id: 'grp_custom_1', title: '自定义分组A', groupType: 'custom', enabled: true,
+      containers: [], children: [], directNodes: []
+    }]
+    const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    expect(result.mermaidCode).toContain('subgraph G_grp_custom_1["自定义分组A"]')
+    expect(result.mermaidCode).not.toContain('COLLAPSE_grp_custom_1')
+  })
+
+  it('[FIX 2026-08-19] 空自定义分组显式折叠(collapsed=true) 仍上提为聚合节点 (尊重用户操作)', () => {
+    const groups = [{
+      id: 'grp_custom_2', title: '自定义分组B', groupType: 'custom', enabled: true, collapsed: true,
+      containers: [], children: [], directNodes: []
+    }]
+    const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
+    expect(result.mermaidCode).toContain('COLLAPSE_grp_custom_2')
   })
 
   it('container.collapsed=true -> 容器折叠为单个聚合节点, 节点外提不渲染', () => {

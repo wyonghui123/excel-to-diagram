@@ -109,6 +109,44 @@ describe('applyContainerMembership', () => {
     applyContainerMembership(merged, [])
     expect(merged).toEqual(snapshot)
   })
+
+  it('[FIX 2026-08-19] 用户新建自定义分组不在渲染树 → 补入, 容器归属随面板', () => {
+    const merged = [
+      { elementCode: 'D1', groupType: 'domain', children: [
+        { elementCode: 'SD1', groupType: 'subDomain', directNodes: ['SM1'], containers: [] }
+      ] }
+    ]
+    const user = [
+      { elementCode: 'D1', groupType: 'domain', containers: [], children: [
+        { elementCode: 'SD1', groupType: 'subDomain', containers: [], children: [] }
+      ] },
+      // 用户新建的自定义分组 (不在 merged 中)
+      { id: 'grp_custom_1', title: '自定义分组A', groupType: 'custom', containers: [{ isVirtual: true, nodes: ['SM1'] }], children: [] }
+    ]
+    applyContainerMembership(merged, user)
+    const added = merged.find(g => g.id === 'grp_custom_1')
+    expect(added).toBeTruthy()
+    expect(added.groupType).toBe('custom')
+    expect(added.enabled).toBe(true)
+    // 面板新建分组用 containers 存叶子 (BO 虚拟容器 { isVirtual, nodes } 形态),
+    //   补入后保持该形态 (不强制转 directNodes, 否则容器节点数据丢失).
+    expect(added.containers).toEqual(user[1].containers)
+    expect(added.directNodes).toBeUndefined()
+  })
+
+  it('[FIX 2026-08-19] ELK 系统分组(_elkGroup) 不因补入逻辑重复注入', () => {
+    const merged = [
+      { elementCode: 'SM1', groupType: 'serviceModule', children: [], directNodes: ['BO1'] }
+    ]
+    const user = [
+      { elementCode: 'SM1', groupType: 'serviceModule', children: [
+        { id: 'G_ELK_inner', elementCode: 'SM1_inner', groupType: 'custom', _elkGroup: 'inner', containers: [{ elementCode: 'BO1' }] }
+      ] }
+    ]
+    applyContainerMembership(merged, user)
+    // _elkGroup 分组不被 applyContainerMembership 补入 (由 injectElkSubGroups 单独处理)
+    expect(merged.find(g => g.elementCode === 'SM1_inner')).toBeFalsy()
+  })
 })
 
 describe('applyGroupTitlesAndOrder', () => {

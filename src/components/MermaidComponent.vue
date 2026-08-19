@@ -1689,25 +1689,11 @@ export default {
       // hidden=true 表示"隐藏", 故设置 visible = !hidden
       const visibleState = !hidden
       // [SCOPE 2026-08-07] 隐藏时对象范围保护: 范围内要素及其祖先链保持可见 (修复问题2)。
-      //   - 直接范围分组 (isDirectScopeGroup, 如采购供应): 自身不隐藏, 且整棵子树不递归隐藏
-      //     (其业务对象均为范围内要素)。
-      //   - 范围祖先分组 (isScopeAncestor, 如供应链计划/供应链云): 自身不隐藏, 但仍递归,
-      //     使非范围内子孙被隐藏、范围内链保持可见。
-      //   这样 store/面板/渲染 三处状态一致, 避免"只在 updateVisibilityOnly 的 SVG 层做保护"
-      //   导致重渲染后范围内要素又被隐藏。
+      // [HIDE 2026-08-19] 隐藏新语义: 只隐藏该分组容器框, 子节点保留 (是"隐藏"非"禁用"),
+      //   故不再递归级联子孙; 隐藏容器框不隐藏任何范围内元素, 也无需对象范围保护.
       const setVis = (g, v) => {
         if (!g || typeof g !== 'object') return
-        const hiding = v === false
-        const directScope = hiding && isDirectScopeGroup(g)
-        const ancestorScope = hiding && isScopeAncestor(g)
-        if (!directScope && !ancestorScope) {
-          g.visible = v
-        }
-        // 直接范围分组: 整棵子树受保护, 不再递归 (范围内业务对象保持可见)
-        if (directScope) return
-        // 祖先分组或普通分组: 递归 (普通分组整棵隐藏; 祖先分组隐藏非范围内子孙)
-        if (Array.isArray(g.children)) g.children.forEach(c => setVis(c, v))
-        if (Array.isArray(g.containers)) g.containers.forEach(c => setVis(c, v))
+        g.visible = v
       }
       const walk = (list) => {
         ;(list || []).forEach(g => {
@@ -2973,6 +2959,12 @@ export default {
           ch: (g.children || []).map(sigGroup)
         })
         const sig = (cfg) => JSON.stringify((cfg?.groups || []).map(sigGroup))
+          // [FIX 2026-08-19] 配置级 disabledBoCodes 也须参与签名:
+          //   BO 叶在渲染树中是 directNode(裸 code), 容器 enabled 不体现在 groups 签名里;
+          //   面板禁用 BO 叶 → EmbeddedChartView 收集 disabledBoCodes → 渲染树按它剪除节点.
+          //   若不纳入签名, 禁用 BO 叶后 groups 结构不变 → watch 不触发 → 图表无变化
+          //   (用户反馈"业务对象禁用无效"). 与 groups 签名拼接, 任一变化即触发 renderMermaid.
+          + '|dBo=' + JSON.stringify(cfg?.disabledBoCodes || [])
         // [A1 2026-08-10] 方案 A: 折叠识别签名 — 剔除 collapsed (co) 字段.
         //   若"无折叠签名"相同而"含折叠签名"不同 → 本次结构变化仅来自折叠/展开,
         //   置位 foldRenderPending, 使 renderMermaid 跳过整屏 loading + 走双缓冲平滑过渡.
@@ -3053,6 +3045,38 @@ export default {
           }
         }
       }
+    )
+
+    // [FIX 2026-08-19] 面板隐藏/显示同步 (store 可见性 watch):
+    //   面板(LayoutControlPanel)修改 visible → chartConfig.layoutControl →
+    //   EmbeddedChartView deep watch(250ms 防抖) → configStore.updateLayoutControlConfig.
+    //   渲染树 visible 被 forceAllGroupsVisible 重置为 true (VIS-RESET 设计), 无法从
+    //   props watch 的 sigVisibility 感知面板隐藏; 而 store 保留面板 visible.
+    //   此处监听 store 可见性变化 → 直接增量隐/显 SVG (与图例 handleToggleGroupVisible
+    //   同机制), 恢复"图表设置面板隐藏分组/业务对象叶"功能 (用户反馈 BO 隐藏无效).
+    let _lastStoreVisSig = null
+    const sigGroupStoreVis = (g) => ({
+      id: g.elementCode || g.id,
+      v: g.visible,
+      ch: (g.children || []).map(sigGroupStoreVis),
+      cont: (g.containers || [])
+        .filter(c => c && typeof c === 'object' && Object.prototype.hasOwnProperty.call(c, 'visible'))
+        .map(c => ({ id: c.id || c.elementCode, v: c.visible }))
+    })
+    watch(
+      () => configStore.layoutControlConfig,
+      (cfg) => {
+        if (!cfg || !props.diagramData || !mermaidContainer.value) return
+        const sig = JSON.stringify((cfg.groups || []).map(sigGroupStoreVis))
+        if (sig === _lastStoreVisSig) return
+        _lastStoreVisSig = sig
+        try {
+          updateVisibilityOnly(cfg.groups)
+        } catch (e) {
+          console.warn('[VIS-STORE] updateVisibilityOnly failed:', e)
+        }
+      },
+      { deep: true }
     )
 
     // 监听 zoneRowCount 变化
@@ -3358,13 +3382,8 @@ export default {
           const newConfig = JSON.parse(JSON.stringify(cfg))
           const setVis = (g, v) => {
             if (!g || typeof g !== 'object') return
-            const hiding = v === false
-            const directScope = hiding && isDirectScopeGroup(g)
-            const ancestorScope = hiding && isScopeAncestor(g)
-            if (!directScope && !ancestorScope) g.visible = v
-            if (directScope) return
-            if (Array.isArray(g.children)) g.children.forEach(c => setVis(c, v))
-            if (Array.isArray(g.containers)) g.containers.forEach(c => setVis(c, v))
+            // [HIDE 2026-08-19] 隐藏新语义: 只隐藏该分组容器框 (子节点保留), 无需级联/范围保护
+            g.visible = v
           }
           const findAndSet = (list) => {
             ;(list || []).forEach(g => {
@@ -3474,11 +3493,8 @@ export default {
           // 与 updateVisibilityOnly 内 hasVisibleContent 保持一致的递归判定
           const hasVisibleContent = (g) => {
             if (!g || typeof g !== 'object') return false
-            if (g.visible === false) return false
-            // [FIX 2026-08-09] 折叠子分组算作内容: collapsed=true 的子分组会在父容器内
-            //   渲染为 COLLAPSE_<id> 聚合节点 (见 groupedLayout 容器级折叠逻辑), 故父容器
-            //   并非空盒. 此前未识别折叠子节点导致 SCP(6 个子服务模块全折叠)被误判为空容器,
-            //   verifyChart 的 empty-container 检查对正常折叠图误报. 与 hasGroupContent 语义对齐.
+            // [HIDE 2026-08-19] 隐藏仅作用于容器框, 分组仍可能有子节点渲染 → 不再因
+            //   visible=false 短路 (与 collectHiddenState.hasVisibleContent 保持一致)
             if (g.collapsed === true) return true
             if (g.directNodes && g.directNodes.length > 0) return true
             if (Array.isArray(g.containers)) {

@@ -54,10 +54,10 @@
           :title="group.enabled !== false ? '禁用（隐藏自身，子孙上浮）' : '启用（保留此层级）'" @click="toggleEnabled">
           <AppIcon :name="group.enabled !== false ? 'enabled' : 'disabled'" size="sm" />
         </button>
-        <!-- [VIS 2026-08-07] 可见/隐藏: visible=false 时整棵子树不渲染 (见 groupRenderer),
-             点击级联切换自身+所有子孙的 visible -->
+        <!-- [VIS 2026-08-07] 可见/隐藏: visible=false 只隐藏本分组容器框, 子节点保留 (见 collectHiddenState),
+             [HIDE 2026-08-19] 不再级联子孙 (与"禁用: 子孙上浮"区分) -->
         <button class="lgn-eye" :class="{ off: group.visible === false }"
-          :title="group.visible !== false ? '隐藏（含子孙）' : '显示（含子孙）'" @click="toggleVisible">
+          :title="group.visible !== false ? '隐藏（仅容器框，子节点保留）' : '显示'" @click="toggleVisible">
           <AppIcon :name="group.visible !== false ? 'view' : 'hide'" size="sm" />
         </button>
       </div>

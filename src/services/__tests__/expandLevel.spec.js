@@ -221,6 +221,49 @@ describe('ELK 系统自动分组 (无关系/有关系)', () => {
   })
 })
 
+// [CUSTOM-GROUP 2026-08-19] 用户自定义分组: 图表配置新建的分组 (groupType='custom',
+//   无 _elkGroup) 预期渲染为容器框, 不应被展开层级/范围折叠成聚合节点.
+function buildCustomTree() {
+  return [
+    {
+      elementCode: 'SC', groupType: 'domain', children: [
+        {
+          elementCode: 'SCP', groupType: 'subDomain', children: [
+            { elementCode: 'SM1', groupType: 'serviceModule', children: [] }
+          ]
+        }
+      ]
+    },
+    // 用户新建的自定义分组 (顶层, 无 elementCode 仅 id, 无 _elkGroup)
+    { id: 'grp_custom_1', title: '自定义分组A', groupType: 'custom', children: [], containers: [] }
+  ]
+}
+
+describe('用户自定义分组 (groupType=custom, 非 ELK 系统分组)', () => {
+  it('expandGroupsToLevel 不折叠用户自定义分组 → 保持容器形态', () => {
+    const tree = buildCustomTree()
+    expandGroupsToLevel(tree, 'serviceModule')
+    const custom = tree[1]
+    expect(custom.collapsed).toBe(false)          // 自定义分组不折叠
+    const sm = tree[0].children[0].children[0]
+    expect(sm.collapsed).toBe(true)               // 普通 serviceModule 仍折叠
+  })
+
+  it('expandGroupsToLevel(businessObject) 不折叠自定义分组', () => {
+    const tree = buildCustomTree()
+    expandGroupsToLevel(tree, 'businessObject')
+    expect(tree[1].collapsed).toBe(false)
+  })
+
+  it('applyDefaultExpandByScope 不折叠用户自定义分组', () => {
+    const tree = buildCustomTree()
+    const r = applyDefaultExpandByScope(tree, (g) => ['SC', 'SCP', 'SM1'].includes(g.elementCode))
+    expect(tree[1].collapsed).toBe(false)         // 自定义分组不折叠
+    expect(tree[0].children[0].children[0].collapsed).toBe(true) // SM1 仍折叠
+    expect(r.collapsedCount).toBeGreaterThan(0)
+  })
+})
+
 // [DEFAULT-LEVEL 2026-08-12] 系统默认展开层级（按分组数量自适应）
 //   图表初始展示时, 从粗到细找第一个"分组数 > 1"的层级:
 //     >1 领域→领域; 否则 >1 子领域→子领域; 否则 >1 服务模块→服务模块; 否则→业务对象

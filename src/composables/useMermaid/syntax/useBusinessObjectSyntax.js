@@ -262,14 +262,13 @@ function buildVirtualContainers(groups, moduleGroups, businessObjectNodes, nodeN
       group.title = matchedTitle
     }
     
-    // 如果分组被禁用，不创建 virtualContainer（避免生成多余的子图容器）
-    const isGroupEnabled = group.enabled !== false
-    if (!isGroupEnabled) {
-      // 清除 directNodes 和 containers，避免后续生成子图
-      group.directNodes = []
-      group.containers = []
-    }
-    
+    // [FIX 2026-08-19] 分组禁用: 不再清除 directNodes/containers.
+    //   原逻辑在此清空 → BO 从树中消失 → groupedLayout 禁用分支(打平到当前层级)
+    //   渲染不到它们 → 后续在顶层"回填" → 子对象跑到父容器之外 (用户反馈:
+    //   库存管理禁用后, 子节点应还在采购供应容器内).
+    //   保留 directNodes/containers 后, 下方会转成 virtualContainer, groupedLayout
+    //   禁用分支把节点打平渲染到父容器层级 (不生成多余子图), 语义符合预期.
+
     if (group.directNodes && group.directNodes.length > 0) {
       const convertedNodeIds = group.directNodes.map(nodeId => {
         if (typeof nodeId === 'object') {

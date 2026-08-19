@@ -26,46 +26,28 @@ function collectLeafNodes(leaf, set) {
   if (leaf.code) set.add(leaf.code)
   else if (leaf.elementCode) set.add(leaf.elementCode)
   else if (leaf.name) set.add(leaf.name)
+  // [FIX 2026-08-19] BO 虚拟叶容器 (isVirtual=true) 存 nodes=[业务编码],
+  //   之前只读 code/elementCode/name/directNodes → 单个 BO 叶隐藏时收集不到
+  //   任何编码 → updateVisibilityOnly 无效果 (用户反馈 BO 隐藏无效).
+  ;(leaf.nodes || []).forEach((n) => {
+    if (typeof n === 'string') set.add(n)
+    else if (n && typeof n === 'object') set.add(n.code || n.name)
+  })
   ;(leaf.directNodes || []).forEach((n) => {
     if (typeof n === 'string') set.add(n)
     else if (n && typeof n === 'object') set.add(n.code || n.name)
   })
 }
 
-function collectGroupNodes(g, set) {
-  ;(g.containers || []).forEach((c) => collectLeafNodes(c, set))
-  ;(g.directNodes || []).forEach((n) => {
-    if (typeof n === 'string') set.add(n)
-    else if (n && typeof n === 'object') set.add(n.code || n.name)
-  })
-  ;(g.children || []).forEach((ch) => collectGroupNodes(ch, set))
-}
-
-// 隐藏父分组(如领域)时, 其子孙分组的 容器code 与 聚合节点id 一并加入隐藏集合
-function collectDescendantGroupIds(g, containerCodes, collapseIds) {
-  ;(g.children || []).forEach((ch) => {
-    if (!ch || typeof ch !== 'object') return
-    const code = ch.elementCode || ch.id
-    if (code) containerCodes.add(code)
-    if (ch.id) collapseIds.add(upliftNodeId(ch))
-    collectDescendantGroupIds(ch, containerCodes, collapseIds)
-  })
-  ;(g.containers || []).forEach((c) => {
-    if (!c || typeof c !== 'object') return
-    const code = c.elementCode || c.id
-    if (code) containerCodes.add(code)
-    if (c.id) collapseIds.add(upliftNodeId(c))
-    collectDescendantGroupIds(c, containerCodes, collapseIds)
-  })
-}
-
 /**
  * 分组子树是否"有可见内容" (空容器判定).
  * [ELK-GROUP 2026-08-14] ELK 系统分组虽 visible=false 但实际渲染节点, 视为有内容.
+ * [HIDE 2026-08-19] 分组隐藏新语义: visible=false 只隐藏该分组容器框, 子孙仍渲染,
+ *   故空容器判定不再因 g.visible === false 短路 (否则隐藏子领域后, 父领域被判为空
+ *   而整体隐藏 → 容器框级联消失).
  */
 export function hasVisibleContent(g) {
   if (!g || typeof g !== 'object') return false
-  if (g.visible === false) return false
   if (g.directNodes && g.directNodes.length > 0) return true
   if (Array.isArray(g.containers)) {
     for (const c of g.containers) {
@@ -98,20 +80,24 @@ export function collectHiddenState(groups, { isScopeProtected = () => false } = 
   const hiddenContainerCodes = new Set()
   const hiddenCollapseIds = new Set()
 
-  const walk = (list, inheritedHidden) => {
+  const walk = (list) => {
     ;(list || []).forEach((g) => {
       if (!g || typeof g !== 'object') return
-      // [ELK-GROUP 2026-08-14] ELK 系统分组 visible=false 不算用户隐藏 (无边框盒语义)
-      const effectiveHidden = inheritedHidden || (g.visible === false && !isElkSystemAuto(g))
-      const shouldHide = effectiveHidden && !isScopeProtected(g)
+      // [HIDE 2026-08-19] 分组隐藏新语义: visible=false 只隐藏该分组**容器框**,
+      //   子节点 (directNodes/containers/children) 继续展示 (是"隐藏", 非"禁用").
+      //   因此: ① 不再收集子孙 (原 collectGroupNodes/collectDescendantGroupIds 移除);
+      //       ② 不再向子孙传播 inheritedHidden (每个分组独立判断自身 visible);
+      //       ③ 不再受对象范围保护阻断 (隐藏容器框不隐藏任何范围内元素);
+      //       ④ 不再排除 _elkGroup 标记分组: 服务模块等真实分组可能被 ELK 渲染
+      //          产物污染 _elkGroup 标记, 旧逻辑把它们当"系统自动分组"跳过 → 隐藏无效.
+      //          新语义无级联, 原"防止级联隐藏 ELK 分组 BO"的目的已不存在, 故移除.
+      const shouldHide = (g.visible === false)
       if (shouldHide) {
         const code = g.elementCode || g.id
         if (code) hiddenContainerCodes.add(code)
         if (g.id) hiddenCollapseIds.add(upliftNodeId(g))
-        collectGroupNodes(g, hiddenNodeCodes)
-        collectDescendantGroupIds(g, hiddenContainerCodes, hiddenCollapseIds)
       }
-      // 叶子容器单独隐藏 (visible=false); 范围内叶子容器受保护
+      // 叶子容器单独隐藏 (BO 叶 visible=false → 隐藏该节点); 范围内叶子容器受保护
       if (Array.isArray(g.containers)) {
         g.containers.forEach((c) => {
           if (c && typeof c === 'object' && c.visible === false && !isScopeProtected(c)) {
@@ -119,18 +105,20 @@ export function collectHiddenState(groups, { isScopeProtected = () => false } = 
           }
         })
       }
-      walk(g.children, effectiveHidden)
-      walk(g.containers, effectiveHidden)
+      walk(g.children)
+      walk(g.containers)
     })
   }
-  walk(groups, false)
+  walk(groups)
 
   // 空容器隐藏: 分组可见但整棵子树内容全被隐藏 → 渲染为空盒, 一并隐藏其 g.cluster
   //   (上提/折叠分组渲染为 COLLAPSE 聚合节点, 由 hiddenCollapseIds 管理, 不受本段影响)
+  // [FIX 2026-08-19] 用户自定义分组(groupType='custom')为空时也保留容器框显示
+  //   (新建分组预期渲染成容器, 不因空内容被隐藏).
   const collectEmptyGroupContainers = (list) => {
     ;(list || []).forEach((g) => {
       if (!g || typeof g !== 'object') return
-      if (g.visible !== false && g._uplift !== true && !hasVisibleContent(g)) {
+      if (g.visible !== false && g._uplift !== true && g.groupType !== 'custom' && !hasVisibleContent(g)) {
         const code = g.elementCode || g.id
         if (code) hiddenContainerCodes.add(code)
       }

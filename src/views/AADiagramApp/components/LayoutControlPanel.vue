@@ -515,19 +515,12 @@ function handleGroupUpdate({ id, updates }) {
   emitUpdate()
 }
 
-// [VIS 2026-08-07] 可见/隐藏级联: 递归设置分组自身 + 所有子孙 (children + containers) 的 visible
-//   visible=false 时整棵子树在渲染中不显示 (groupRenderer if(!layout.visible) return ''),
-//   面板树同步子孙状态, 与图表渲染一致。
+// [VIS 2026-08-07] 可见/隐藏: 隐藏仅作用于该分组**容器框** (visible=false),
+//   子节点继续展示 (是"隐藏", 非"禁用"). 故不再级联子孙的 visible.
+//   [HIDE 2026-08-19] 原实现递归级联子孙 visible=false → 隐藏父分组时整棵子树隐藏
+//   (子节点消失), 与"隐藏容器框、子节点保留"语义不符, 移除级联.
 function setVisibleRecursive(group, visible) {
   group.visible = visible
-  if (Array.isArray(group.children)) {
-    group.children.forEach(child => setVisibleRecursive(child, visible))
-  }
-  if (Array.isArray(group.containers)) {
-    group.containers.forEach(c => {
-      if (c && typeof c === 'object') c.visible = visible
-    })
-  }
 }
 function handleSetVisibleRecursive({ id, visible }) {
   const group = findGroupById(localConfig.value.groups, id)

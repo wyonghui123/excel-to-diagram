@@ -31,12 +31,35 @@ export function applyContainerMembership(mergedGroups, userGroups) {
     return c.elementCode || c.elementRef?.code || c.code || c.id
   }
 
+  // [FIX 2026-08-19] 用户新建的自定义分组不在派生渲染树(projection)中 → 补入渲染树,
+  //   使其作为容器渲染 (否则"图表配置新建分组不渲染成容器"). 仅处理 groupType='custom'
+  //   且非 ELK 系统分组(_elkGroup, 由 injectElkSubGroups 单独注入, 避免重复).
+  //   保留 u 的容器/子分组结构 (不强制 directNodes), 由下方归属重建逻辑决定叶子形态:
+  //   BO 虚拟容器(含 nodes)走 containers 分支, 避免把容器 id 当 BO code 塞进 directNodes.
+  function cloneUserGroup(u) {
+    const m = JSON.parse(JSON.stringify(u))
+    m.groupType = 'custom'
+    m.enabled = u.enabled !== false
+    m.visible = u.visible !== false
+    m.collapsed = u.collapsed === true
+    if (!Array.isArray(m.containers)) m.containers = []
+    if (!Array.isArray(m.children)) m.children = []
+    return m
+  }
+
   function walk(mergedItems, userItems) {
     if (!Array.isArray(mergedItems) || !Array.isArray(userItems)) return
     for (const u of userItems) {
       const key = u.elementCode || u.id
-      const m = mergedItems.find(x => (x.elementCode || x.id) === key)
-      if (!m) continue
+      let m = mergedItems.find(x => (x.elementCode || x.id) === key)
+      if (!m) {
+        if (u && u.groupType === 'custom' && !(u._elkGroup === 'inner' || u._elkGroup === 'boundary')) {
+          m = cloneUserGroup(u)
+          mergedItems.push(m)
+        } else {
+          continue
+        }
+      }
 
       // 重建该分组的叶子归属（追随面板：拖拽移动后叶子出现在新分组，不再出现在旧分组）
       // [FIX 2026-08-04] 面板分组可能把叶子放在 children 里的子分组（如 BO 图的 ELK

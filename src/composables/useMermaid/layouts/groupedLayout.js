@@ -11,7 +11,7 @@
  */
 import { MAX_RECURSION_DEPTH, checkDepth, checkCycle, createVisitedSet } from '../../../services/groupModel/safetyUtils.js'
 import { formatContainerTitle } from '../../../utils/formatContainerTitle.js'
-import { markUplift } from './upliftDerivation.js'
+import { markUplift, hasShownDescendants } from './upliftDerivation.js'
 import { extractOwnGroupName, collapseFormatMarker, getContainerMarkers, businessObjectLabel } from '../syntax/nodeLabelTemplate.js'
 
 // [FIX 2026-08-06g] 上提自禁用父容器的子分组 → 父路径 registry (subgraphId → parentPath).
@@ -198,10 +198,14 @@ function hasGroupContent(group, containers, visited = null, depth = 0) {
   
   // 对于 disabled 的分组，不显示（返回 false）
   // 但如果分组有 disabled 祖先路径（_disabledAncestorPath），说明它是被提升的，应该显示
+  // [FIX 2026-08-19] disabled 分组对父级而言是否"有内容": 若其子孙仍会渲染
+  //   (上浮打平到父级, 见 generateGroupCode 禁用分支), 则视为有内容.
+  //   原逻辑恒返回 false → 父级 hasGroupContent 级联 false → 父级被整体跳过 →
+  //   禁用子领域后整个图表塌缩 (所有 BO 顶层回填). 修复: 返回 hasShownDescendants.
   if (group.enabled === false) {
     if (group._disabledAncestorPath && group._disabledAncestorPath.length > 0) {
     } else {
-      return false
+      return hasShownDescendants(group)
     }
   }
 
@@ -311,8 +315,10 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
   //   hasGroupContent 对 disabled 分组恒返回 false (见上方 L63-68), 但 disabled 分支
   //   (下方 L170-250) 的职责正是"打平子元素到当前层级". 若在此提前返回, disabled 父域
   //   的 children (子领域) 会被完全跳过 → 禁用供应链云后子领域也消失.
-  //   仅当 disabled 分组既无 directNodes 也无 children/containers 时才跳过.
-  if (!hasContent && !group.directNodes) {
+  // 仅当 disabled 分组既无 directNodes 也无 children/containers 时才跳过.
+  // [FIX 2026-08-19] 用户自定义分组(groupType='custom')即使空也渲染为容器框
+  //   (新建分组预期"渲染成容器", 见 applyContainerMembership 补入逻辑), 不在此跳过.
+  if (!hasContent && !group.directNodes && group.groupType !== 'custom') {
     const hasFlattenableContent = !groupEnabled &&
       ((group.children && group.children.length > 0) ||
        (group.containers && group.containers.length > 0))

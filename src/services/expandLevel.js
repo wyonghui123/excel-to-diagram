@@ -49,6 +49,14 @@ function isElkSystemAuto(item) {
   return !!item && (item._elkGroup === 'inner' || item._elkGroup === 'boundary')
 }
 
+// [FIX 2026-08-19] 识别"用户自定义分组"(groupType='custom' 且非 ELK 系统自动分组).
+//   用户在图表配置新建的分组预期渲染为容器框, 不应被展开层级自动折叠成聚合节点
+//   (用户反馈"新建分组不渲染成容器": 默认展开到服务模块时 custom 按 level 3 被折叠).
+//   ELK 系统自动分组同样 groupType='custom', 须排除 (已有 isElkSystemAuto 处理).
+function isCustomUserGroup(item) {
+  return !!item && item.groupType === 'custom' && !isElkSystemAuto(item)
+}
+
 // [SCOPE 2026-08-07] 判断分组子树是否包含任一对象范围编码（兼容 containers/children/directNodes 嵌套）。
 export function isSubtreeInScope(group, codeSet) {
   if (!group || !codeSet || codeSet.size === 0) return false
@@ -108,7 +116,9 @@ export function expandGroupsToLevel(items, key, options = {}) {
       }
       // [ELK-GROUP 2026-08-12] 系统自动分组(无关系/有关系)不参与折叠(非用户可折叠层级),
       //   始终保持容器形态, 由 enabled/visible 单独控制其盒子显示.
-      const shouldCollapse = expandAll ? false : (isSystemAuto ? false : (groupTypeLevel(item.groupType) >= target.level))
+      // [FIX 2026-08-19] 用户自定义分组(groupType='custom')同样不被展开层级折叠:
+      //   新建分组预期渲染为容器框 (groupTypeLevel('custom')=3 会按最深层被误折叠).
+      const shouldCollapse = expandAll ? false : (isSystemAuto || isCustomUserGroup(item) ? false : (groupTypeLevel(item.groupType) >= target.level))
       if (item.collapsed !== shouldCollapse) item.collapsed = shouldCollapse
       if (shouldCollapse) collapsedCount++
       setLevels(item.children)
@@ -159,7 +169,9 @@ export function applyDefaultExpandByScope(items, isInScope) {
       if (inScope) inScopeCount++
       const targetLevel = inScope ? 2 : 1
       // [ELK-GROUP 2026-08-12] 系统自动分组(无关系/有关系)不参与范围折叠, 保持容器形态.
-      const shouldCollapse = isElkSystemAuto(item) ? false : (groupLevelOf(item) >= targetLevel)
+      // [FIX 2026-08-19] 用户自定义分组(groupType='custom')同样不被范围折叠:
+      //   新建分组预期渲染为容器框.
+      const shouldCollapse = (isElkSystemAuto(item) || isCustomUserGroup(item)) ? false : (groupLevelOf(item) >= targetLevel)
       if (item.collapsed !== shouldCollapse) item.collapsed = shouldCollapse
       if (shouldCollapse) collapsedCount++
       setLevels(item.children)
