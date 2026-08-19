@@ -1584,6 +1584,57 @@ export default {
     }
     const isScopeProtected = (g) => isDirectScopeGroup(g) || isScopeAncestor(g)
 
+    // [CUSTOM-COLOR 2026-08-19 增量] 仅改自定义分组配色 (fill/stroke), 不重排 ELK 布局.
+    //   用户自定义分组(groupType=custom 且非 ELK)的 style 是 mermaid code 内 style 行,
+    //   渲染成 SVG rect 内联 fill/stroke. 面板改色/清空 → 直接扫当前 groups 定位 SVG 元素
+    //   改 rect style, 不动节点结构 → 无闪屏/无布局变化 (用户反馈"配色要 reload 才生效, 非增量").
+    //   - 容器(subgraph): g.cluster[id="G_<safeId>"] (groupedLayout 的 groupId 规则)
+    //   - 上提节点(COLLAPSE): g.node[id*="COLLAPSE_<safeId>"]
+    const updateCustomGroupColors = (groups) => {
+      const svg = mermaidContainer.value?.querySelector('svg')
+      if (!svg) return false
+      let touched = 0
+      const walk = (list) => {
+        ;(list || []).forEach((g) => {
+          if (!g || typeof g !== 'object') return
+          const isUserCustom = g.groupType === 'custom'
+            && !(g._elkGroup === 'inner' || g._elkGroup === 'boundary')
+          if (isUserCustom && g.id && g.style) {
+            const fill = g.style.fill
+            const stroke = g.style.stroke || fill
+            if (fill) {
+              const safeId = String(g.id).replace(/[^\w\u4e00-\u9fff]/g, '_')
+              // 容器 subgraph
+              const cluster = svg.querySelector(`g.cluster[id="G_${safeId}"]`)
+              if (cluster) {
+                const rect = cluster.querySelector('rect')
+                if (rect) {
+                  rect.style.setProperty('fill', fill, 'important')
+                  rect.style.setProperty('stroke', stroke || fill, 'important')
+                  touched++
+                }
+              }
+              // 上提聚合节点 (mermaid 渲染 id 为 flowchart-COLLAPSE_<safe>-<n>)
+              const collapseNode = Array.from(svg.querySelectorAll('g.node'))
+                .find(n => (n.id || '').includes(`COLLAPSE_${safeId}`))
+              if (collapseNode) {
+                const rect = collapseNode.querySelector('rect')
+                if (rect) {
+                  rect.style.setProperty('fill', fill, 'important')
+                  rect.style.setProperty('stroke', stroke || fill, 'important')
+                  touched++
+                }
+              }
+            }
+          }
+          walk(g.children)
+          walk(g.containers)
+        })
+      }
+      walk(groups)
+      return touched > 0
+    }
+
     const updateVisibilityOnly = (groups) => {
       const svg = mermaidContainer.value?.querySelector('svg')
       if (!svg) return false
@@ -2946,11 +2997,9 @@ export default {
           title: g.title,
           en: g.enabled,
           v: isElkSystemAuto(g) ? g.visible : undefined,
-          // [CUSTOM-COLOR 2026-08-19] 分组 style(fill/stroke)纳入签名:
-          //   自定义分组配色是 mermaid code 内 style 行, 必须全量重渲染才能刷新 SVG.
-          //   若不纳入, 面板改色后 groups 结构不变 → watch 不触发 → 图表颜色不更新
-          //   (用户反馈"清空/配色后图表不刷新"). 任一配色变化即触发 renderMermaid.
-          st: g.style ? JSON.stringify(g.style) : undefined,
+          // [CUSTOM-COLOR 2026-08-19 修订] style 不再进结构签名:
+          //   自定义分组配色走独立增量路径 updateCustomGroupColors(只改 SVG fill, 不重排 ELK 布局),
+          //   不参与结构签名, 避免配色触发全量重排(闪屏/动布局).
           // [EXPAND 2026-08-05] 树折叠参与渲染: collapsed 必须进签名, 否则"折叠/展开"切换不触发重渲染.
           //   历史: 之前注释"无需单独捕获 collapsed (已移除显式折叠)" → 折叠时顺带改了 enabled
           //   仍能触发, 但恢复展开只改 collapsed → 签名不变 → 图表不刷新 (self-test 复现).
@@ -2978,9 +3027,7 @@ export default {
           title: g.title,
           en: g.enabled,
           v: isElkSystemAuto(g) ? g.visible : undefined,
-          // [CUSTOM-COLOR 2026-08-19] 同步 fold 签名含 style: 配色变化是结构重渲染,
-          //   非折叠操作 (若 sigNoFold 不含 style, sig 变而 sigNoFold 不变 → 误判为折叠 → 平滑过渡)
-          st: g.style ? JSON.stringify(g.style) : undefined,
+          // [CUSTOM-COLOR 2026-08-19 修订] style 移出 fold 签名, 见 sigGroup 注释.
           cont: (g.containers || []).map(c => typeof c === 'string' ? c : (c.id || c.elementCode)),
           dn: (g.directNodes || []).map(n => typeof n === 'object' ? (n.id || n.code || n.name) : n),
           ch: (g.children || []).map(sigNoFold)
@@ -2999,6 +3046,27 @@ export default {
           //   BCR → 节点维度放大, 文字变小。forceAutoFit 由 nextTick 内 autoFit 分支消费后重置。
           forceAutoFit = true
           renderMermaid()
+          return
+        }
+        // [CUSTOM-COLOR 2026-08-19 增量] 结构签名未变, 仅自定义分组配色(style)变化 →
+        //   增量改色 (updateCustomGroupColors), 不重排 ELK 布局 (用户反馈"配色要 reload, 非增量").
+        //   清空/换色/新增分组样式都在此处理: 结构不变(仅 style 字段) → 直接改 SVG rect fill.
+        const sigCustomColorOfGroup = (g) => {
+          const isUserCustom = g && g.groupType === 'custom'
+            && !(g._elkGroup === 'inner' || g._elkGroup === 'boundary')
+          return {
+            id: g.elementCode || g.id,
+            st: isUserCustom && g.style ? JSON.stringify(g.style) : undefined,
+            ch: (g.children || []).map(sigCustomColorOfGroup)
+          }
+        }
+        const sigCustomColors = (cfg) => JSON.stringify((cfg?.groups || []).map(sigCustomColorOfGroup))
+        if (sigCustomColors(newVal) !== sigCustomColors(oldVal)) {
+          try {
+            updateCustomGroupColors(newVal?.groups)
+          } catch (e) {
+            console.warn('[CUSTOM-COLOR] updateCustomGroupColors failed:', e)
+          }
           return
         }
         // [HIDE 2026-08-07] 仅 visible 变化 → 增量隐/显 (不动布局, 不触发整屏 loading)。
