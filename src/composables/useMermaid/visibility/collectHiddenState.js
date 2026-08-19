@@ -113,12 +113,12 @@ export function collectHiddenState(groups, { isScopeProtected = () => false } = 
 
   // 空容器隐藏: 分组可见但整棵子树内容全被隐藏 → 渲染为空盒, 一并隐藏其 g.cluster
   //   (上提/折叠分组渲染为 COLLAPSE 聚合节点, 由 hiddenCollapseIds 管理, 不受本段影响)
-  // [FIX 2026-08-19] 用户自定义分组(groupType='custom')为空时也保留容器框显示
-  //   (新建分组预期渲染成容器, 不因空内容被隐藏).
+  //   [FIX 2026-08-19 修订] 空分组(含 custom)已由 computeUplift 统一上提为聚合节点
+  //   (_uplift=true, 走 hiddenCollapseIds 路径), 不再渲染空容器, 无需 custom 豁免.
   const collectEmptyGroupContainers = (list) => {
     ;(list || []).forEach((g) => {
       if (!g || typeof g !== 'object') return
-      if (g.visible !== false && g._uplift !== true && g.groupType !== 'custom' && !hasVisibleContent(g)) {
+      if (g.visible !== false && g._uplift !== true && !hasVisibleContent(g)) {
         const code = g.elementCode || g.id
         if (code) hiddenContainerCodes.add(code)
       }

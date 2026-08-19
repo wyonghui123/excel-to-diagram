@@ -359,19 +359,19 @@ describe('groupedLayout - 上提 uplift', () => {
     expect(result.mermaidCode).not.toContain('COLLAPSE_')
   })
 
-  it('[FIX 2026-08-19] 空自定义分组(groupType=custom)不自动上提 → 渲染为 subgraph 容器而非 COLLAPSE 节点', () => {
-    // 用户新建的空自定义分组: enabled 无子孙, 应渲染为容器框 (用户预期"渲染成容器"),
-    //   而非空内容自动上提成聚合节点.
+  it('[FIX 2026-08-19 修订] 空自定义分组(groupType=custom, 无内容)自动上提 → COLLAPSE 聚合节点', () => {
+    // 用户新建的空自定义分组(末端叶子, 无任何 BO): 渲染空容器框没有视觉意义,
+    //   统一上提为聚合节点 (与系统分组空内容行为一致). 拖入 BO 后自动变容器.
     const groups = [{
       id: 'grp_custom_1', title: '自定义分组A', groupType: 'custom', enabled: true,
       containers: [], children: [], directNodes: []
     }]
     const result = generateGroupedLayout(groups, containers, makeNodeMap(nodes), makeDefinedNodes(), 'TB')
-    expect(result.mermaidCode).toContain('subgraph G_grp_custom_1["自定义分组A"]')
-    expect(result.mermaidCode).not.toContain('COLLAPSE_grp_custom_1')
+    expect(result.mermaidCode).toContain('COLLAPSE_grp_custom_1')
+    expect(result.mermaidCode).not.toContain('subgraph G_grp_custom_1["自定义分组A"]')
   })
 
-  it('[FIX 2026-08-19] 空自定义分组显式折叠(collapsed=true) 仍上提为聚合节点 (尊重用户操作)', () => {
+  it('[FIX 2026-08-19] 空自定义分组显式折叠(collapsed=true) 上提为聚合节点 (尊重用户操作)', () => {
     const groups = [{
       id: 'grp_custom_2', title: '自定义分组B', groupType: 'custom', enabled: true, collapsed: true,
       containers: [], children: [], directNodes: []

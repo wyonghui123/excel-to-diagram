@@ -316,9 +316,9 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
   //   (下方 L170-250) 的职责正是"打平子元素到当前层级". 若在此提前返回, disabled 父域
   //   的 children (子领域) 会被完全跳过 → 禁用供应链云后子领域也消失.
   // 仅当 disabled 分组既无 directNodes 也无 children/containers 时才跳过.
-  // [FIX 2026-08-19] 用户自定义分组(groupType='custom')即使空也渲染为容器框
-  //   (新建分组预期"渲染成容器", 见 applyContainerMembership 补入逻辑), 不在此跳过.
-  if (!hasContent && !group.directNodes && group.groupType !== 'custom') {
+  // [FIX 2026-08-19 修订] 空分组(含 custom)已由 computeUplift 统一上提为聚合节点,
+  //   hasGroupContent 对 _uplift 短路返回 true, 不会走到此处 → 无需 custom 豁免.
+  if (!hasContent && !group.directNodes) {
     const hasFlattenableContent = !groupEnabled &&
       ((group.children && group.children.length > 0) ||
        (group.containers && group.containers.length > 0))

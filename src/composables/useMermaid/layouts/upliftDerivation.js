@@ -77,11 +77,11 @@ export function computeUplift(groups) {
   const uplift = new Map()
   function walk(group) {
     if (!group) return
-    // [FIX 2026-08-19] 用户自定义分组(groupType='custom')不因"空内容"自动上提:
-    //   新建的空自定义分组应渲染为容器框 (用户预期"渲染成容器"), 而非 COLLAPSE 聚合节点.
-    //   显式折叠(collapsed=true, 如右键折叠)仍上提, 尊重用户操作.
-    const isCustom = group.groupType === 'custom'
-    if (group.enabled !== false && (group.collapsed === true || (!isCustom && !hasShownDescendants(group)))) {
+    // [FIX 2026-08-19 修订] 空分组统一上提为聚合节点 (无论 groupType):
+    //   空内容的分组渲染成"空容器框"没有视觉意义, 收成一个节点更合理 (用户确认).
+    //   8-19 曾让空自定义分组渲染空容器框, 经设计 review 改为"末端空白分组 → 节点".
+    //   有可见内容(含 custom) 走下方容器逻辑; 显式折叠(collapsed=true) 仍上提.
+    if (group.enabled !== false && (group.collapsed === true || !hasShownDescendants(group))) {
       uplift.set(group.id, true)
       return // 上提后子孙隐藏, 不再标记 (嵌套上提会与父上提冲突)
     }
