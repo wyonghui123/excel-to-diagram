@@ -67,7 +67,6 @@ INFRA_FILES = [
     "scripts/_clean_stale_node.py",       # 清理残留 node 进程
     "scripts/_ports_sync.py",             # 端口同步
     "scripts/release_prep.py",            # release-prep 编排
-    "scripts/schema_health_check.py",     # schema 健康检查
     "scripts/sync_infra.py",              # 同步器自己
     "scripts/_hooks/pre_commit_sync_infra.py",  # pre-commit hook
     ".gitignore",                          # 公共 ignore

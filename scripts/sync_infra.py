@@ -60,7 +60,6 @@ INFRA_FILES = [
     "scripts/_clean_stale_node.py",
     "scripts/_ports_sync.py",
     "scripts/release_prep.py",
-    "scripts/schema_health_check.py",
     ".gitignore",  # 公共 ignore 规则也算基础设施
 ]
 
