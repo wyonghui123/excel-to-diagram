@@ -648,6 +648,37 @@ describe('useMermaidColors - updateCollapseNodeColors (折叠节点增量变色 
     // 非中心领域 (营销云, markers.subDomains value=false) → 中性灰, 而非 centerScopeColor
     expect(svg.querySelectorAll('g.node.collapseNode')[0].__rect.style.fill).toBe('#fafafa')
   })
+
+  // [CUSTOM-COLOR 2026-08-19] 用户自定义分组的聚合节点保留面板配置色 (customFill),
+  //   不被 colorGroupBy 覆盖 (拖入领域/子领域下后仍保持面板色, 用户反馈"变蓝").
+  it('用户自定义分组聚合节点: 保留面板色 customFill, 不被 colorGroupBy 覆盖为领域色', () => {
+    const { updateCollapseNodeColors } = useMermaidColors()
+    // colorMap 有供应链云蓝 (#1890FF), 但自定义分组应保持 customFill (#FAAD14 黄)
+    const colorMap = new Map([['供应链云', '#1890FF']])
+    // 自定义分组: groupType=custom, 无 _elkGroup, 带 customFill=面板色
+    const collapseContextMap = new Map([
+      ['grp_custom_1', { groupType: 'custom', _elkGroup: '', domainName: '供应链云', title: '分组 1', customFill: '#FAAD14' }]
+    ])
+    const svg = createCollapseSvg([{ code: 'grp_custom_1' }])
+    updateCollapseNodeColors(svg, collapseContextMap, 'domain', colorMap, {
+      centerScopeHighlight: false
+    })
+    expect(svg.querySelectorAll('g.node.collapseNode')[0].__rect.style.fill).toBe('#FAAD14')
+  })
+
+  it('ELK 系统自动分组 (groupType=custom 且带 _elkGroup) 不被当作自定义分组, 维持 colorGroupBy 覆盖', () => {
+    const { updateCollapseNodeColors } = useMermaidColors()
+    const colorMap = new Map([['供应链云', '#1890FF']])
+    // ELK 系统分组: groupType=custom + _elkGroup='inner', 无 customFill → 走 colorGroupBy 取领域色
+    const collapseContextMap = new Map([
+      ['SM1_inner', { groupType: 'custom', _elkGroup: 'inner', domainName: '供应链云', title: '无关系', customFill: '' }]
+    ])
+    const svg = createCollapseSvg([{ code: 'SM1_inner' }])
+    updateCollapseNodeColors(svg, collapseContextMap, 'domain', colorMap, {
+      centerScopeHighlight: false
+    })
+    expect(svg.querySelectorAll('g.node.collapseNode')[0].__rect.style.fill).toBe('#1890FF')
+  })
 })
 
 describe('filterEnabledContainers (Bug 1 回归保护)', () => {

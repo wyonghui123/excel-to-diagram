@@ -258,6 +258,19 @@ export function useGroupDisplay(colorMapping) {
       return { color: cc, key: '', isCenter: true }
     }
 
+    // [FOLD-COLOR 2026-08-20] 分组层级比颜色分组层级更粗（折叠更粗、分组更细）→ 该分组包含
+    //   多个颜色分组，无法用单一分组色表达 → 中性灰，与图表聚合节点层级规则一致
+    //   (useMermaidColors.updateCollapseNodeColors / useBusinessObjectSyntax.applyUpliftNodeColors).
+    //   根因: colorGroupBy=subDomain 时领域分组无 subDomainName → 回退 hashColor(title) 得到
+    //   红色等任意色 (用户反馈"按子领域分组时领域节点显示红色供应链云")；层级低于分组层级应显示中性灰.
+    const levelOf = (t) => (t === 'domain' ? 0 : t === 'subDomain' ? 1 : t === 'serviceModule' ? 2 : -1)
+    const groupLevel = levelOf(group.groupType)
+    const byLevel = levelOf(colorGroupBy.value)
+    if (groupLevel >= 0 && byLevel >= 0 && groupLevel < byLevel) {
+      // key 置空: 该分组不代表单一颜色分组, 不应允许单独改色 (改色会落到 colorKey=title 的歧义键).
+      return { color: '#808080', key: '', isCenter: false }
+    }
+
     let colorKey = ''
     if (colorGroupBy.value === 'subDomain') {
       colorKey = group.subDomainName || group.title

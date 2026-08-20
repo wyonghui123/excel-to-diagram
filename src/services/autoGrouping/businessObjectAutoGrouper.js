@@ -351,5 +351,19 @@ export function buildBusinessObjectGroups(containers = [], links = []) {
     groups.push(group)
   })
 
+  // [PARENTID 2026-08-19] 自动分组树 children 有层级但各节点 parentId 恒为 null,
+  //   与树结构不一致 → 面板拖拽同级重排判定 (data.parentId===props.group.parentId)
+  //   全部为 null 相等但 reorder 用 parentId 定位兄弟数组时在根数组找不到嵌套分组 →
+  //   静默 no-op ("拖不动"). 返回前统一对齐 parentId 与 children 层级.
+  syncGroupParentIds(groups)
   return groups
+}
+
+// [PARENTID 2026-08-19] 递归将每个节点 parentId 与 children 层级对齐.
+function syncGroupParentIds(groups, parentId = null) {
+  if (!Array.isArray(groups)) return
+  for (const g of groups) {
+    if (g.parentId !== parentId) g.parentId = parentId
+    if (Array.isArray(g.children)) syncGroupParentIds(g.children, g.id)
+  }
 }

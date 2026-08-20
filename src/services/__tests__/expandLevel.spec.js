@@ -219,6 +219,32 @@ describe('ELK 系统自动分组 (无关系/有关系)', () => {
     expect(sm.children[1].collapsed).toBeFalsy()   // ELK boundary 不折叠
     expect(r.collapsedCount).toBeGreaterThan(0)
   })
+
+  // [FIX 2026-08-19] 面板树平铺模式(服务模块下仅"无关系"或仅"有关系"节点)会把 _elkGroup
+  //   标在 serviceModule 分组上(groupType='serviceModule'), 此时它是正常服务模块层级,
+  //   须参与展开层级折叠; 不能仅凭 _elkGroup 豁免(否则面板树展开层级与图表渲染不一致).
+  it('平铺模式 serviceModule(带 _elkGroup 但 groupType=serviceModule) 应被折叠', () => {
+    const tree = buildElkTree()
+    // 把 SM1 改成平铺模式: serviceModule 分组自身带 _elkGroup='inner'
+    tree[0].children[0].children[0]._elkGroup = 'inner'
+    tree[0].children[0].children[0].children = []
+    tree[0].children[0].children[0].containers = [{ id: 'bo1', nodes: ['N1'] }]
+    const r = expandGroupsToLevel(tree, 'serviceModule')
+    expect(tree[0].children[0].children[0].collapsed).toBe(true)  // 平铺 serviceModule 折叠
+    expect(r.collapsedCount).toBeGreaterThan(0)
+  })
+
+  it('平铺模式 serviceModule 不被 isElkSystemAuto 误判', () => {
+    const sm = { groupType: 'serviceModule', _elkGroup: 'inner' }
+    // 通过导出 API 间接验证: 直接验证折叠行为即可(上一条), 此处补充 applyDefaultExpandByScope
+    const tree = buildElkTree()
+    tree[0].children[0].children[0]._elkGroup = 'inner'
+    tree[0].children[0].children[0].children = []
+    tree[0].children[0].children[0].containers = [{ id: 'bo1', nodes: ['N1'] }]
+    const r = applyDefaultExpandByScope(tree, (g) => ['SC', 'SCP', 'SM1'].includes(g.elementCode))
+    expect(tree[0].children[0].children[0].collapsed).toBe(true)  // 范围内平铺 SM 折叠
+    expect(r.collapsedCount).toBeGreaterThan(0)
+  })
 })
 
 // [CUSTOM-GROUP 2026-08-19] 用户自定义分组: 图表配置新建的分组 (groupType='custom',

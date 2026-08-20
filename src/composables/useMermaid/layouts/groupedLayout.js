@@ -55,7 +55,10 @@ function resolveCustomGroupColor(group) {
     && !(group._elkGroup === 'inner' || group._elkGroup === 'boundary')
   if (!isUserCustom || !group.style) return null
   const fill = group.style.fill
-  const stroke = group.style.stroke || fill
+  // [BORDER 2026-08-20] 自定义分组描边: 未显式设置或用旧浅灰(#666666)时, 统一用
+  //   标准节点黑边 #333333 (用户要求"新增分组 render 成节点也要有黑边"). 保留显式自定义 stroke.
+  let stroke = group.style.stroke
+  if (!stroke || stroke === '#666666') stroke = '#333333'
   const strokeWidth = group.style.strokeWidth
   if (!fill) return null
   return { fill, stroke, strokeWidth, isCustom: true }

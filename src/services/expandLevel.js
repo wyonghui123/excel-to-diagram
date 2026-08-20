@@ -45,8 +45,12 @@ export function groupLevelOf(group) {
 
 // [ELK-GROUP 2026-08-12] 识别"系统自动分组"(无关系/有关系, _elkGroup=inner/boundary).
 //   它们是 ELK 布局的系统分组, 非用户可折叠层级, 展开/折叠时不应被折叠为聚合节点.
+//   [FIX 2026-08-19] 须同时满足 groupType='custom': 面板树平铺模式(服务模块下仅"无关系"或
+//   仅"有关系"节点)会把 _elkGroup 标在 serviceModule 分组上(groupType='serviceModule'),
+//   此时它是正常服务模块层级, 应参与展开层级折叠; 若仅按 _elkGroup 判定会被误豁免 →
+//   面板树不折叠而图表渲染折叠, 两者不一致 (用户反馈: 图表配置默认展开层级与实际不符).
 function isElkSystemAuto(item) {
-  return !!item && (item._elkGroup === 'inner' || item._elkGroup === 'boundary')
+  return !!item && item.groupType === 'custom' && (item._elkGroup === 'inner' || item._elkGroup === 'boundary')
 }
 
 // [FIX 2026-08-19] 识别"用户自定义分组"(groupType='custom' 且非 ELK 系统自动分组).
@@ -110,7 +114,7 @@ export function expandGroupsToLevel(items, key, options = {}) {
     if (!Array.isArray(list)) return
     for (const item of list) {
       if (!item || typeof item !== 'object') continue
-      const isSystemAuto = item._elkGroup === 'inner' || item._elkGroup === 'boundary'
+      const isSystemAuto = item.groupType === 'custom' && (item._elkGroup === 'inner' || item._elkGroup === 'boundary')
       if (resetVisible) {
         if (item.visible === false && !isSystemAuto) item.visible = true
       }

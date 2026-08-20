@@ -38,9 +38,26 @@
            由分组列表中的中心分组色点直接控制 store.centerScopeColor（全局联动），
            避免重复入口。中心分组通过标题文字样式（bold + 中心色）区分。 -->
 
-      <div class="groups-container">
+      <div class="groups-container" :class="{ 'has-top-zone': draggingGroup }">
         <div v-if="groupedCount === 0" class="empty-hint">
           暂无分组
+        </div>
+        <!-- [MOVE-TOP 2026-08-19] 顶层放置区: 把分组(含子分组)拖到此处 → 提升为顶层分组.
+             [DRAG-FIX 2026-08-19] 始终渲染, 用 .is-visible 控制显隐 (不用 v-if):
+             ① v-if 会在 dragstart 同步增删 DOM 节点 → Vue 重建 children → 浏览器
+               在拖拽图像创建前取消原生拖拽 (实测 dragstart→dragend ~2ms, 用户反馈
+               "新增后无法拖拽").
+             ② drop-zone 绝对定位 + 容器 .has-top-zone 预留 padding-top 空间,
+               使 drop-zone 显示在列表上方(不遮挡任何行) — 遮挡源行也会取消拖拽. -->
+        <div
+          class="lgn-top-drop-zone"
+          :class="{ 'is-visible': draggingGroup, 'is-over': topDropOver }"
+          @dragover.prevent="onTopDropZoneDragOver"
+          @dragleave="onTopDropZoneDragLeave"
+          @drop="onTopDropZoneDrop"
+        >
+          <el-icon :size="12"><Top /></el-icon>
+          <span>拖分组到此处，提升到顶层</span>
         </div>
         <LayoutGroupNode
           v-for="(group, idx) in localConfig.groups"
@@ -71,16 +88,16 @@
 </template>
 
 <script setup>
-import { ref, watch, computed, onMounted } from 'vue'
+import { ref, watch, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import LayoutGroupNode from './LayoutGroupNode.vue'
-import { Expand, ArrowDown, Plus } from '@element-plus/icons-vue'
+import { Expand, ArrowDown, Plus, Top } from '@element-plus/icons-vue'
 import { AppButton } from '@/components/common/AppButton'
 import { useDiagramConfigStore } from '@/stores/diagramConfigStore'
 import { createGroupId, GroupType } from '@/services/groupModel/types.js'
 import { setSubtreeEnabled, collapseToNode, showDescendantsOnly } from '@/composables/useViewTemplates'
 // [LEVEL 2026-08-07] 展开层级共享工具: 与 ChartMiniToolbar 共用选项/层级计算/展开逻辑,
 //   store.expandLevel 共享当前层级, 保证工具栏与图表设置抽屉高亮一致.
-import { EXPAND_LEVELS, expandGroupsToLevel, applyDefaultExpandByScope } from '@/services/expandLevel.js'
+import { EXPAND_LEVELS, expandGroupsToLevel, applyDefaultExpandByCount } from '@/services/expandLevel.js'
 
 // [LEVEL 2026-08-07] 当前展开层级改为读 store.expandLevel (来自共享 expandLevel.js),
 //   与工具栏(ChartMiniToolbar)操作双向同步.
@@ -219,38 +236,53 @@ const resolvedCenterScope = computed(() => {
 })
 
 watch(() => diagramConfigStore.centerScope, (newVal) => {
-  // [SCOPE 2026-08-07] 对象范围变化后重新应用"按范围"的默认展开层级。
+  // [SCOPE 2026-08-07] 对象范围变化后重新应用默认展开层级。
   //   面板 auto-group 仅在挂载时执行一次, 若当时 centerScope 尚未选择（为空）则不会折叠;
   //   用户后续选择/切换对象范围时若不重新应用, 图表会一直保持全展开(业务对象层级)。
-  //   与 generateDiagram 内对 store 配置的兜底修改配合, 保证初始展示与面板/图表一致。
-  if (newVal && newVal.length > 0 && localConfig.value.groups && localConfig.value.groups.length > 0) {
-    applyDefaultExpandByScopeToGroups()
-    emitUpdate()
+  //   [PANEL-EXPAND 2026-08-19] 改用 applyPanelDefaultExpand (与渲染层一致的默认展开算法),
+  //   保证面板树与实际渲染层级对齐.
+  if (newVal && newVal.length > 0) {
+    applyPanelDefaultExpand()
   }
 })
 
 // [LEVEL 2026-08-07] 展开层级变化（无论来自本面板下拉 handleExpandToLevel，还是
 //   GlobalToolbar/ChartMiniToolbar 经 store.setExpandLevel）都应用到配置树：
 //   否则工具栏改变层级时，配置树（LayoutGroupNode 由 collapsed 驱动）不随之展开/收起。
-//   注: handleExpandToLevel 已直接就地应用，此 watcher 幂等（expandGroupsToLevel 仅当
-//   collapsed 需变化时才写），用于兜底外部入口，保证树与 store.expandLevel 始终一致。
-watch(() => diagramConfigStore.expandLevel, (key) => {
-  if (key && localConfig.value.groups && localConfig.value.groups.length > 0) {
-    expandGroupsToLevel(localConfig.value.groups, key)
-    emitUpdate()
-  }
+//   [PANEL-EXPAND 2026-08-19] 统一走 applyPanelDefaultExpand: 默认态按分组数量自适应,
+//   用户显式选择后按 store.expandLevel, 并尊重 groupManualSet(用户手动折叠不覆盖).
+watch(() => diagramConfigStore.expandLevel, () => {
+  applyPanelDefaultExpand()
 })
 
 // [FIX 2026-08-07] 缓存 groups JSON 用于检测深层变异（Vue 3 deep watcher 对 in-place mutation
 //   不产生深拷贝，newVal === oldVal 是同一引用，JSON.stringify 比较永远相等）。
 //   改用 groups JSON 字符串缓存，仅当 groups 内容实际变化时更新 localConfig。
 let _localGroupsJson = ''
+// [PANEL-EXPAND 2026-08-19] 面板自身 emitUpdate 标志: 区分"外部填充 groups"与"面板自身操作"。
+//   外部填充(syncLayoutControlFromDiagramData 预填充/切换范围) → 需按默认展开折叠面板树;
+//   面板自身操作(拖拽/重命名/折叠切换等) → 尊重用户当前状态, 不重新折叠.
+let _panelEmitting = false
 watch(() => props.modelValue, (newVal) => {
   if (newVal && Array.isArray(newVal.groups)) {
     const groupsJson = JSON.stringify(newVal.groups)
     if (groupsJson !== _localGroupsJson) {
       _localGroupsJson = groupsJson
       localConfig.value = JSON.parse(JSON.stringify(newVal))
+      // [PARENTID 2026-08-19] 外部填充的分组树(来自 businessObjectAutoGrouper/layoutPanelAdapter)
+      //   children 有层级但 parentId 恒 null → 拖拽同级重排失效. 在面板统一消费点对齐
+      //   parentId 与 children 层级 (单一收敛点, 覆盖所有构建源).
+      syncGroupParentIds(localConfig.value.groups)
+      // [PANEL-EXPAND 2026-08-19] 外部填充/替换 groups 后按默认展开折叠, 与渲染层对齐.
+      //   根因: 面板树被 syncLayoutControlFromDiagramData 预填充(未折叠)后 onMounted 自动分组
+      //   被跳过(shouldAutoGroup=false), 且无兜底折叠 → collapsed 全 false → 面板树展开到
+      //   业务对象层级, 而图表渲染到子领域/服务模块 (用户反馈不一致). 此处兜底折叠.
+      //   防循环: applyPanelDefaultExpand 内 emitUpdate → modelValue 变化 → _panelEmitting=true,
+      //   本 watch 再次进入时跳过折叠并复位.
+      if (!_panelEmitting && !diagramConfigStore.groupManualSet) {
+        applyPanelDefaultExpand()
+      }
+      _panelEmitting = false
     }
   }
 }, { immediate: true, deep: true })
@@ -310,6 +342,28 @@ onMounted(() => {
     }
   }, 100)
 })
+
+// [MOVE-TOP 2026-08-19] 监听分组拖拽状态: LayoutGroupNode 发出 lcp-group-drag 事件,
+//   控制顶层放置区 v-if 显隐 (dragstart 不冒泡, 故经 window 自定义事件中转).
+onMounted(() => {
+  window.addEventListener('lcp-group-drag', onGroupDragEvent)
+  // [DRAG-STUCK 2026-08-19] drop 触发 emitUpdate → 面板重建 → 拖拽源 DOM 被移除 →
+  //   浏览器不再派发 dragend → draggingGroup 卡 true (放置区常显, 后续拖拽失效).
+  //   兜底: 监听 window 级 drop/dragend, 任何拖放结束都可靠复位 (不依赖拖拽源是否存活).
+  window.addEventListener('drop', onWindowDragSettle)
+  window.addEventListener('dragend', onWindowDragSettle)
+})
+onUnmounted(() => {
+  window.removeEventListener('lcp-group-drag', onGroupDragEvent)
+  window.removeEventListener('drop', onWindowDragSettle)
+  window.removeEventListener('dragend', onWindowDragSettle)
+})
+
+// [DRAG-STUCK 2026-08-19] 兜底复位: window 级 drop/dragend 都走这里, 确保拖拽结束后
+//   draggingGroup 归位 (即使拖拽源因 emitUpdate 重建被销毁, drop 仍会在目标处派发).
+function onWindowDragSettle() {
+  if (draggingGroup.value) onGroupDragEvent({ detail: { dragging: false } })
+}
 
 function countServiceModulesInDomainProducts(domainProducts) {
   let count = 0
@@ -439,18 +493,41 @@ function getDefaultGroup(title, parentId) {
     collapsed: false, // [FOLD 2026-08-05] 折叠语义: 折叠为单节点
     style: {
       fill: '#ffffff',
-      stroke: '#666666',
+      // [BORDER 2026-08-20] 默认描边用 #333333 (与标准节点一致, 用户要求"新增分组 render
+      //   成节点也要有黑边"). 旧值 #666666 过浅.
+      stroke: '#333333',
       strokeWidth: 2,
       strokeDasharray: ''
     },
     containers: [],
     children: [],
-    parentId
+    parentId: parentId ?? null
   }
 }
 
+// [PARENTID 2026-08-19] 将分组树的每个节点 parentId 与 children 真实层级对齐。
+//   根因: 自动分组构建(handleBusinessObjectAutoGroup/handleServiceModuleAutoGroup)
+//   的 children 有层级但各节点 parentId 恒为 null, 与树结构不一致 → 同级拖拽判定
+//   data.parentId===props.group.parentId 全为 null, 而 handleReorderGroups 用 parentId
+//   定位兄弟数组时在根数组找不到嵌套分组 → 静默 no-op ("拖不动").
+//   构建后统一调用, 使同级重排/跨级移动都能正确定位.
+function syncGroupParentIds(groups, parentId = null) {
+  if (!Array.isArray(groups)) return
+  for (const g of groups) {
+    if (g.parentId !== parentId) g.parentId = parentId
+    if (Array.isArray(g.children)) syncGroupParentIds(g.children, g.id)
+  }
+}
+
+// [PANEL-EXPAND 2026-08-19] emitUpdate 前标记 _panelEmitting=true:
+//   使 watch modelValue 能区分"面板自身操作"(不重新折叠, 尊重用户状态) 与
+//   "外部填充 groups"(需按默认展开折叠).
+//   复位: watch modelValue 内立即复位 + nextTick 兜底(emit 内容与当前 modelValue 相同
+//   时 watch 不触发, 避免 _panelEmitting 卡在 true 误跳过后续外部填充的折叠).
 function emitUpdate() {
+  _panelEmitting = true
   emit('update:modelValue', JSON.parse(JSON.stringify(localConfig.value)))
+  nextTick(() => { _panelEmitting = false })
 }
 
 function toggleEnabled() {
@@ -460,7 +537,8 @@ function toggleEnabled() {
 
 function handleAddGroup() {
   const newGroup = getDefaultGroup(`分组 ${localConfig.value.groups.length + 1}`)
-  localConfig.value.groups.push(newGroup)
+  // [ADD-TOP 2026-08-19] 新增分组插到最上面, 便于用户立即看到/继续拖放
+  localConfig.value.groups.unshift(newGroup)
   emitUpdate()
 }
 
@@ -677,6 +755,46 @@ function isDescendantOf(group, targetId) {
   return group.children ? group.children.some(c => isDescendantOf(c, targetId)) : false
 }
 
+// [MOVE-TOP 2026-08-19] 顶层放置区状态与处理: 拖分组到面板顶部区域 → 提升为顶层分组.
+//   数据沿用 LayoutGroupNode dragstart 写入的 { type:'group', groupId, parentId }.
+//   draggingGroup: 是否正在拖拽分组 (经 LayoutGroupNode 的 lcp-group-drag 事件控制).
+//     为 true 时放置区 v-if 显现, 平时不占空间 (用户要求"拖拽的时候再出现").
+const draggingGroup = ref(false)
+function onGroupDragEvent(e) {
+  draggingGroup.value = e?.detail?.dragging === true
+  if (!draggingGroup.value) topDropOver.value = false
+}
+const topDropOver = ref(false)
+function onTopDropZoneDragOver(event) {
+  try {
+    const data = JSON.parse(event.dataTransfer.getData('text/plain'))
+    if (data.type === 'group') {
+      topDropOver.value = true
+      event.dataTransfer.dropEffect = 'move'
+    }
+  } catch { /* 非法拖拽数据忽略 */ }
+}
+function onTopDropZoneDragLeave() { topDropOver.value = false }
+function onTopDropZoneDrop(event) {
+  topDropOver.value = false
+  try {
+    const data = JSON.parse(event.dataTransfer.getData('text/plain'))
+    if (data.type !== 'group' || !data.groupId) return
+    handleMoveGroupToTop(data.groupId)
+  } catch (e) { /* 忽略非法拖拽数据 */ }
+}
+function handleMoveGroupToTop(sourceGroupId) {
+  const sourceGroup = findGroupById(localConfig.value.groups, sourceGroupId)
+  if (!sourceGroup) return
+  // 已在顶层则无需操作
+  if (localConfig.value.groups.some(g => g.id === sourceGroupId)) return
+  // 从原父级移除 → 追加到顶层末尾
+  deleteGroupFromTree(localConfig.value.groups, sourceGroupId)
+  sourceGroup.parentId = null
+  localConfig.value.groups.push(sourceGroup)
+  emitUpdate()
+}
+
 const autoGroupButtonText = computed(() => {
   return props.chartType === 'serviceModule' ? '基于领域自动分组（领域→子领域）' : '基于领域自动分组（领域→子领域→服务模块）'
 })
@@ -692,12 +810,26 @@ function handleAutoGroupByDomain() {
   }
 }
 
-// [SCOPE 2026-08-07] 初始图表智能默认展开层级：按对象范围区分。
-//   对象范围内的分组展开到服务模块，范围外的展开到子领域。
-//   仅在存在对象范围时生效（无对象范围则保持全展开，与 store.expandLevel 默认一致）。
-function applyDefaultExpandByScopeToGroups() {
-  const centerScopeCodes = new Set(diagramConfigStore.centerScope || [])
-  applyDefaultExpandByScope(localConfig.value.groups, (g) => isInCenterScope(g, centerScopeCodes))
+// [PANEL-EXPAND 2026-08-19] 面板树默认展开与渲染层对齐 (取代原 applyDefaultExpandByScopeToGroups):
+//   渲染层 EmbeddedChartView 用 applyDefaultExpandByCount(按分组数量自适应) 决定初始展开层级,
+//   面板树此前用 applyDefaultExpandByScope(按对象范围) — 两套算法不一致, 且面板树被
+//   syncLayoutControlFromDiagramData 预填充后 onMounted 自动分组被跳过(shouldAutoGroup=false),
+//   折叠逻辑从未执行 → 面板树全展开(业务对象) 而图表渲染到子领域/服务模块 (用户反馈不一致).
+//   统一策略:
+//   - groupManualSet(用户双击/右键手动折叠) → 尊重用户折叠, 不覆盖.
+//   - expandLevelUserSet(用户显式选择过展开层级) → 按 store.expandLevel 折叠.
+//   - 默认态 → computeDefaultExpandLevel(按分组数量) 自适应折叠, 与渲染层一致.
+function applyPanelDefaultExpand() {
+  if (diagramConfigStore.groupManualSet) return 0
+  const groups = localConfig.value.groups
+  if (!groups || groups.length === 0) return 0
+  let level = diagramConfigStore.expandLevel
+  if (!diagramConfigStore.expandLevelUserSet) {
+    level = applyDefaultExpandByCount(groups).level
+  }
+  const r = expandGroupsToLevel(groups, level)
+  emitUpdate()
+  return r.collapsedCount
 }
 
 function handleServiceModuleAutoGroup() {
@@ -808,9 +940,11 @@ function handleServiceModuleAutoGroup() {
 
   localConfig.value.groups = groups
   localConfig.value.enabled = true
-  // [SCOPE 2026-08-07] 初始智能默认展开层级（按对象范围）
-  applyDefaultExpandByScopeToGroups()
-  emitUpdate()
+  // [PARENTID 2026-08-19] 自动分组树 children 有层级但 parentId 全 null →
+  //   拖拽同级重排失效. 构建后统一对齐 parentId 与 children 层级.
+  syncGroupParentIds(localConfig.value.groups)
+  // [SCOPE 2026-08-07] 初始智能默认展开层级（与渲染层一致算法）
+  applyPanelDefaultExpand()
 }
 
 function handleBusinessObjectAutoGroup() {
@@ -1140,9 +1274,11 @@ function handleBusinessObjectAutoGroup() {
 
   localConfig.value.groups = groups
   localConfig.value.enabled = true
-  // [SCOPE 2026-08-07] 初始智能默认展开层级（按对象范围）
-  applyDefaultExpandByScopeToGroups()
-  emitUpdate()
+  // [PARENTID 2026-08-19] 自动分组树 children 有层级但 parentId 全 null →
+  //   拖拽同级重排失效. 构建后统一对齐 parentId 与 children 层级.
+  syncGroupParentIds(localConfig.value.groups)
+  // [SCOPE 2026-08-07] 初始智能默认展开层级（与渲染层一致算法）
+  applyPanelDefaultExpand()
 }
 
 function countNodesInGroup(group) {
@@ -1836,6 +1972,14 @@ function handleAutoVirtualLayering(layerCount = 3) {
   display: flex;
   flex-direction: column;
   gap: var(--spacing-sm);
+  /* [DRAG-FIX 2026-08-19] 拖拽时 .has-top-zone 预留顶部空间给顶层放置区.
+     padding-top 变化只发生在延迟宏任务后(拖拽会话已建立), 不打断原生拖拽;
+     且 drop-zone 显示在预留空间内, 不遮挡任何分组行. */
+  position: relative;
+  transition: padding-top 0.1s;
+  &.has-top-zone {
+    padding-top: 34px;
+  }
 }
 
 .empty-hint {
@@ -1845,6 +1989,40 @@ function handleAutoVirtualLayering(layerCount = 3) {
   font-size: var(--font-size-sm);
   background: var(--color-bg-secondary);
   border-radius: var(--radius-md);
+}
+
+/* [MOVE-TOP 2026-08-19] 顶层放置区: 拖分组到此处提升为顶层分组. 轻量横条.
+   [DRAG-FIX 2026-08-19]
+   ① 始终渲染 + display:none 默认隐藏, 拖拽中 .is-visible → flex (不用 v-if, 避免
+      dragstart 同步增删节点重建 children → 打断原生拖拽会话);
+   ② 定位在 .groups-container.has-top-zone 预留的 padding-top(34px) 空间内 (top:0),
+      显示时不遮挡任何分组行 (遮挡源行也会导致浏览器取消拖拽). */
+.lgn-top-drop-zone {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  display: none;  /* 默认隐藏; 拖拽中 .is-visible → flex */
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px dashed var(--color-border, #dcdfe6);
+  border-radius: 4px;
+  background: var(--color-bg, #fff);
+  color: var(--color-text-tertiary, #909399);
+  font-size: var(--font-size-xs, 12px);
+  user-select: none;
+  cursor: default;
+  &.is-visible {
+    display: flex;
+  }
+  &.is-over {
+    border-color: var(--color-success, #67c23a);
+    background: var(--color-success-bg, #f0f9eb);
+    color: var(--color-success, #67c23a);
+  }
 }
 
 .add-group-btn {

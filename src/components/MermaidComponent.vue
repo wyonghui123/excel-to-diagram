@@ -1398,7 +1398,17 @@ export default {
         subDomainName: ctx.subDomain || '',
         serviceModuleName: ctx.serviceModule || '',
         title: g.title || g.name || '',
-        groupType: g.groupType || ''
+        groupType: g.groupType || '',
+        // [CUSTOM-COLOR 2026-08-19] 记录 ELK 标记, 供 updateCollapseNodeColors 区分
+        //   "用户自定义分组"(groupType=custom, 无 _elkGroup) 与"ELK 系统自动分组"
+        //   (无关系/有关系, 同样是 custom 但带 _elkGroup): 自定义分组聚合节点保留面板色,
+        //   不被 colorGroupBy 覆盖; ELK 系统分组维持原覆盖逻辑.
+        _elkGroup: g._elkGroup || '',
+        // [CUSTOM-COLOR 2026-08-19] 用户自定义分组的面板配置色 (group.style.fill),
+        //   供 updateCollapseNodeColors 增量路径保留该色 (跳过 colorGroupBy 覆盖).
+        customFill: (g.groupType === 'custom' && !(g._elkGroup === 'inner' || g._elkGroup === 'boundary') && g.style && g.style.fill)
+          ? g.style.fill
+          : ''
       })
       // [FIX 2026-08-11 容器连线增量变色] collapseNodeMap: COLLAPSE_<sanitized g.id> → 分组上下文,
       //   供 updateLinkColors 解析容器/聚合连线端点 (与语法层 COLLAPSE_${sanitizeId(g.id)} 同规则).

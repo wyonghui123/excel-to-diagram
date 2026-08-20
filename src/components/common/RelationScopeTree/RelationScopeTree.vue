@@ -91,7 +91,7 @@
         :chart-type="injectedChartConfig.chartType"
         :model-value="injectedChartConfig.layoutControl"
         :color-mapping="diagramConfigStore.chartDataSnapshot.groupColorMap"
-        @update:model-value="(v) => Object.assign(injectedChartConfig.layoutControl, v)"
+        @update:model-value="handleLayoutControlUpdate"
       />
     </CollapsiblePanel>
   </div>
@@ -158,6 +158,18 @@ const injectedViewMode = inject('mompViewMode', ref('chart'))
 
 // [布局设置 sidebar 整合] diagramConfigStore — 读取 chartDataSnapshot + 同步 layoutPanelExpanded
 const diagramConfigStore = useDiagramConfigStore()
+
+// [LAYOUT-SYNC 2026-08-20] 图表设置面板(LayoutControlPanel)发出 update:model-value 时的处理.
+//   根因: 之前只 Object.assign 改 injectedChartConfig.layoutControl, 而图表渲染 watch 的是
+//   configStore.layoutControlConfig → store 感知不到折叠/展开变更 → 面板展开分组图表无反应.
+//   修复: 写回 chartConfig.layoutControl 后, 同步调用 updateLayoutControlConfig 触发图表重渲染
+//   (与 EmbeddedChartView.syncLayoutControlFromDiagramData 的 store 同步一致).
+function handleLayoutControlUpdate(v) {
+  if (injectedChartConfig && injectedChartConfig.layoutControl) {
+    Object.assign(injectedChartConfig.layoutControl, v)
+    diagramConfigStore.updateLayoutControlConfig(injectedChartConfig.layoutControl)
+  }
+}
 // [FIX] 从图表返回时 (initialRelationCodes 或 scopeIds.relationExtra.relationCodes 非空)
 //       自动展开关系范围面板, 让用户能直观看到已恢复的勾选
 const _hasInitialRelCodes = () => {

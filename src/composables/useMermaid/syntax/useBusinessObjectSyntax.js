@@ -525,6 +525,21 @@ function applyUpliftNodeColors(groups, colorMap, colorGroupBy, mermaidCode, text
       if (g._uplift === true) {
         const safeId = String(g.id).replace(/[^\w\u4e00-\u9fff]/g, '_')
         const collapseId = `COLLAPSE_${safeId}`
+        // [CUSTOM-COLOR 2026-08-19] 用户自定义分组的聚合节点用面板配置色 (group.style),
+        //   不被 colorGroupBy/中心范围覆盖: 用户把自定义分组拖入某领域/子领域下后, 其折叠
+        //   聚合节点仍应保持面板设置色 (如黄色), 而非继承所属领域的分组色 (用户反馈"变蓝").
+        //   groupedLayout 已为自定义分组聚合节点写 style 行, 此处再用自定义色写 style 并同步
+        //   collapseColorMap (供折叠连线 fallback), 然后跳过下方 colorGroupBy 取色分支.
+        const isUserCustomGroup = g.groupType === 'custom'
+          && !(g._elkGroup === 'inner' || g._elkGroup === 'boundary')
+        if (isUserCustomGroup) {
+          const customFill = g.style && g.style.fill
+          if (customFill) {
+            mermaidCode += `  style ${collapseId} ${getNodeStyle(customFill, textColor)}\n`
+            collapseColorMap.set(collapseId, customFill)
+          }
+          continue
+        }
         // [FIX 2026-08-06] 折叠聚合节点: 中心范围分组保持 centerScopeColor,
         //   与展开态中心范围内 BO 节点 (centerScopeColor) 的颜色一致.
         // [PARTIAL-CENTER 2026-08-15] 部分包含对象范围 (中心分组但非完全包含, 范围内+范围外混合)

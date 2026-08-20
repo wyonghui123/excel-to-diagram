@@ -2,20 +2,19 @@
   <!-- [SYS 2026-08-07] 系统自动分组(无关系/有关系, _elkGroup=inner/boundary)默认隐藏,
        仅"高级设置"开关打开时展示. 与用户手动分组(自定义)区分开, 减少默认视觉噪音. -->
   <div v-if="!isSystemAuto || showAdvancedSettings" class="lgn-node">
-    <div class="lgn-row" :class="{ 'row-drag-over': isRowDragOver, 'is-hidden': group.visible === false }"
+    <div class="lgn-row" :class="{ 'row-drag-over': isRowDragOver, 'is-left-drop-zone': isLeftDropZone, 'is-hidden': group.visible === false }"
       draggable="true"
       @click="handleRowClick"
       @dragstart="handleGroupDragStart" @dragend="handleGroupDragEnd"
       @dragover.prevent="handleRowDragOver" @dragleave="handleRowDragLeave" @drop="handleRowDrop">
+      <!-- [DROP-ZONE 2026-08-20] 拖拽 group 悬停左侧区时提示: 拖到此处将成为子分组 -->
+      <span v-if="isLeftDropZone" class="lgn-drop-into-hint">成为其子分组</span>
       <button class="lgn-caret" @click="toggleExpanded" :class="{ expanded: expanded }"
         :title="hasChildren ? (expanded ? '收起' : '展开') : ''">
         <span v-if="hasChildren" class="caret-arrow">▸</span>
         <span v-else class="caret-placeholder"></span>
       </button>
-      <!-- [ICON 2026-08-07] 领域/子领域/服务模块分组行不再显示图标，仅保留业务对象叶子图标 -->
-      <span v-if="showTypeIcon" class="lgn-type-icon" :title="typeLabel">
-        <AppIcon :name="typeIcon" size="sm" />
-      </span>
+      <!-- [ICON-REMOVE 2026-08-20] 分组行类型图标已移除 (用户确认不需要), 仅保留叶子图标 -->
       <!-- [COLOR 2026-08-05] 分组级色点：展示当前分组色（与图表一致），点击弹出调色板选色
            写入 store.customColors[分组key]，经增量 updateColorsOnly 即时变色 -->
       <el-color-picker
@@ -33,11 +32,14 @@
       />
       <div class="lgn-title">
         <template v-if="!isEditingTitle">
+          <!-- [CUSTOM-TAG 2026-08-20] 用户自定义分组前置小『自』记号, 与系统自动分组区分 (不占额外空格).
+               系统分组(领域/子领域/服务模块/ELK系统分组)无此标记, 悬停标题可看类型说明。 -->
+          <span v-if="isUserCustomGroup" class="lgn-custom-tag" title="用户自定义分组">自</span>
           <!-- [中心范围 2026-08-05] 中心分组用标题文字样式区分（bold + 中心色），替代 ◆ 标识，省空间 -->
           <span class="lgn-title-text" :class="{ 'is-center': groupColorInfo.isCenter, 'is-hidden': group.visible === false }"
             @dblclick.stop="startEditTitle"
             :style="groupColorInfo.isCenter ? { color: centerScopeColorText } : {}"
-            :title="groupColorInfo.isCenter ? '对象范围分组：颜色跟随『对象范围颜色』配置' : ''">{{ group.title }}</span>
+            :title="groupTitleTooltip">{{ group.title }}</span>
           <span v-if="group.title === '无关系' || group.title === '有关系'"
             class="elk-hint" :title="getElkGroupHint(group._elkGroup)">ⓘ</span>
         </template>
@@ -145,7 +147,7 @@ const emit = defineEmits(['update', 'delete', 'add-child', 'assign-container', '
 // [FIX 2026-08-05] 传 getter 而非 props.colorMapping 值：
 //   useGroupDisplay 闭包需实时读取当前 colorMapping (chartDataSnapshot.groupColorMap
 //   每次 re-colorize 都是新对象)，否则清空自定义色后色点回不到默认分组色。
-const { getGroupTypeLabel, getElkGroupHint, getGroupColor } = useGroupDisplay(() => props.colorMapping)
+const { getElkGroupHint, getGroupColor } = useGroupDisplay(() => props.colorMapping)
 
 const diagramConfigStore = useDiagramConfigStore()
 
@@ -214,6 +216,7 @@ const isEditingTitle = ref(false)
 const editTitle = ref('')
 const titleInput = ref(null)
 const isRowDragOver = ref(false)
+const isLeftDropZone = ref(false)  // [DROP-ZONE 2026-08-20] 拖拽悬停在本行左侧(将成子分组)
 
 // [EXPAND 2026-08-05] 跟随 group.collapsed 数据变化 (模板应用/全部展开收起/外部写回),
 //   保证树的展开态始终反映图表渲染用的 collapsed 状态.
@@ -227,17 +230,6 @@ const hasChildren = computed(() => {
   return childCount > 0 || containerCount > 0
 })
 
-// [UNIFIED 2026-08-04] 所有分组统一使用同一图标（领域/子领域样式），
-// 服务模块/自定义/虚拟层等不再区分图标，保持视觉一致
-const typeIcon = computed(() => 'layers')
-
-// [ICON 2026-08-07] 领域/子领域/服务模块分组行不显示图标，仅保留业务对象叶子图标
-const showTypeIcon = computed(() => {
-  return props.group.groupType !== 'domain'
-    && props.group.groupType !== 'subDomain'
-    && props.group.groupType !== 'serviceModule'
-})
-
 // [SYS 2026-08-07] 系统自动分组识别: ELK 布局自动生成的无关系/有关系分组
 const isSystemAuto = computed(() => {
   const elk = props.group._elkGroup
@@ -249,11 +241,17 @@ const isSystemAuto = computed(() => {
 const isUserCustomGroup = computed(() => {
   return props.group.groupType === 'custom' && !isSystemAuto.value
 })
-
-// [SYS 2026-08-07] 类型标签: 系统自动分组显示"系统自动", 其余走 groupType 映射
-const typeLabel = computed(() => {
-  if (isSystemAuto.value) return '系统自动'
-  return getGroupTypeLabel(props.group.groupType)
+// [CUSTOM-TAG 2026-08-20] 分组类型悬停提示 (中心范围与类型组合), 零占位区分自定义/系统分组
+const groupTitleTooltip = computed(() => {
+  const parts = []
+  if (groupColorInfo.value.isCenter) parts.push('对象范围分组：颜色跟随『对象范围颜色』配置')
+  if (isUserCustomGroup.value) parts.push('用户自定义分组（可拖拽调整层级/排序，可删除）')
+  else if (isSystemAuto.value) parts.push('系统自动分组（无关系/有关系）')
+  else if (props.group.groupType === 'domain') parts.push('领域 · 系统分组')
+  else if (props.group.groupType === 'subDomain') parts.push('子领域 · 系统分组')
+  else if (props.group.groupType === 'serviceModule') parts.push('服务模块 · 系统分组')
+  else parts.push('系统分组')
+  return parts.join(' · ')
 })
 
 // 容器叶子节点名称：兼容 name / title / code 等多种字段
@@ -271,6 +269,12 @@ function toggleExpanded() {
     //   展开(expanded=true)  → collapsed=false → 恢复为容器 (内部渲染启用子孙).
     //   collapsed 由 computeUplift 视为"强制上提"条件, 无需改子孙 enabled.
     emit('update', { id: props.group.id, updates: { collapsed: !nextExpanded } })
+    // [EXPAND-SYNC 2026-08-20] 面板箭头折叠/展开 = 用户显式干预分组展开层级.
+    //   必须标记 groupManualSet, 与图表双击/右键链路 (MermaidComponent.executeContextMenuAction)
+    //   一致: 否则 EmbeddedChartView.layoutControlConfig computed 在 groupManualSet=false 且
+    //   expandLevelUserSet=false 时仍执行 applyDefaultExpandByCount(mergedGroups) 覆盖本处
+    //   修改后的 collapsed → 面板展开/折叠图表无反应 (用户反馈).
+    diagramConfigStore.markGroupManualSet()
   }
 }
 
@@ -296,7 +300,7 @@ function cancelEditTitle() { isEditingTitle.value = false }
 //   [FIX 2026-08-06] 之前用 elementCode (编码) 作 id, 而 subgraph 标题是分组名, 匹配不到;
 //   且服务模块行误发 type:'node' (其实际渲染为容器), 导致领域/子领域/服务模块高亮失效。
 function handleRowClick(e) {
-  if (e.target.closest('.title-input') || e.target.closest('.lgn-color-picker') || e.target.closest('.lgn-eye') || e.target.closest('.lgn-group-del') || e.target.closest('.lgn-caret') || e.target.closest('.lgn-type-icon') || e.target.closest('.el-dropdown') || e.target.closest('.lgn-multistate')) return
+  if (e.target.closest('.title-input') || e.target.closest('.lgn-color-picker') || e.target.closest('.lgn-eye') || e.target.closest('.lgn-group-del') || e.target.closest('.lgn-caret') || e.target.closest('.el-dropdown') || e.target.closest('.lgn-multistate')) return
   emit('request-chart-focus', {
     type: 'container',
     id: props.group.title || props.group.elementCode
@@ -361,9 +365,18 @@ function handleGroupDragStart(event) {
     sourceIndex: props.index,
     parentId: props.group.parentId
   }))
+  // [MOVE-TOP 2026-08-19] 通知顶层放置区显示 (dragstart 不冒泡, 经 window 自定义事件,
+  //   LayoutControlPanel 监听后显现顶层放置区, 拖拽结束再隐藏).
+  // [DRAG-FIX 2026-08-19] 延迟到宏任务再显示: dragstart 同步修改 DOM (显示放置区/
+  //   容器 padding 变化) 会让浏览器在拖拽图像创建前取消原生拖拽会话
+  //   (用户反馈"新增后无法拖拽", 实测 dragstart→dragend 仅 ~2ms). 拖拽会话建立后再显示.
+  const _show = () => { try { window.dispatchEvent(new CustomEvent('lcp-group-drag', { detail: { dragging: true } })) } catch (e) {} }
+  setTimeout(_show, 0)
   event.stopPropagation()
 }
-function handleGroupDragEnd() {}
+function handleGroupDragEnd() {
+  try { window.dispatchEvent(new CustomEvent('lcp-group-drag', { detail: { dragging: false } })) } catch (e) {}
+}
 
 // [LEAF 2026-08-04] 业务对象叶子节点可拖拽（在各分组间移动）+ 可见/禁用开关
 function handleContainerDragStart(event, container) {
@@ -410,15 +423,24 @@ function toggleContainerVisible(container) {
   })
 }
 
+// [DROP-ZONE 2026-08-20] 拖拽 group 悬停位置: leftZone=true 表示拖到本行左侧区(将成子分组).
 function handleRowDragOver(event) {
   try {
     const data = JSON.parse(event.dataTransfer.getData('text/plain'))
-    if (data.type === 'container') isRowDragOver.value = true
+    if (data.type === 'container') {
+      isRowDragOver.value = true
+    } else if (data.type === 'group') {
+      const rect = event.currentTarget.getBoundingClientRect()
+      const dropX = event.clientX - (rect ? rect.left : 0)
+      isRowDragOver.value = true
+      isLeftDropZone.value = rect ? (dropX < rect.width * 0.35) : false
+    }
   } catch { isRowDragOver.value = true }
 }
-function handleRowDragLeave() { isRowDragOver.value = false }
+function handleRowDragLeave() { isRowDragOver.value = false; isLeftDropZone.value = false }
 function handleRowDrop(event) {
   isRowDragOver.value = false
+  isLeftDropZone.value = false
   try {
     const data = JSON.parse(event.dataTransfer.getData('text/plain'))
     if (data.type === 'container') {
@@ -430,13 +452,23 @@ function handleRowDrop(event) {
     } else if (data.type === 'group') {
       // [TREE 2026-08-04] 支持拖拽 group 到当前 group 作为子分组
       // [REORDER 2026-08-04] 同级（parentId 相同）拖拽 → 重排；跨级 → 作为子分组
+      // [DROP-ZONE 2026-08-20] 根级分组(parentId 相同)之间: 拖到行的左侧区 = 成为子分组(move-group);
+      //   拖到右侧区 = 同级重排(reorder-groups). 因为根级行无缩进, 左侧本是 caret/icon 区,
+      //   天然作为"拖入成为子分组"的命中区 (用户心智: 拖到分组"里面/下面"= 成为其子分组).
       if (data.groupId !== props.group.id) {
+        const rect = event.currentTarget.getBoundingClientRect()
+        const dropX = event.clientX - (rect ? rect.left : 0)
+        const isLeftZone = rect ? (dropX < rect.width * 0.35) : false
         if (data.parentId === props.group.parentId) {
-          emit('reorder-groups', {
-            sourceGroupId: data.groupId,
-            targetGroupId: props.group.id,
-            parentId: props.group.parentId
-          })
+          if (isLeftZone) {
+            emit('move-group', { sourceGroupId: data.groupId, targetGroupId: props.group.id })
+          } else {
+            emit('reorder-groups', {
+              sourceGroupId: data.groupId,
+              targetGroupId: props.group.id,
+              parentId: props.group.parentId
+            })
+          }
         } else {
           emit('move-group', { sourceGroupId: data.groupId, targetGroupId: props.group.id })
         }
@@ -450,16 +482,23 @@ function handleRowDrop(event) {
 .lgn-row {
   display: flex; align-items: center; gap: 4px; height: 28px;
   padding: 0 6px; border-radius: 4px; cursor: grab; user-select: none;
+  position: relative;  // [DROP-ZONE 2026-08-20] 供 .lgn-drop-into-hint 绝对定位锚定
   &:active { cursor: grabbing; }
   &:hover { background: var(--color-primary-bg); }
   &.row-drag-over { background: var(--color-success-bg); outline: 1px dashed var(--color-success); }
+  // [DROP-ZONE 2026-08-20] 拖拽 group 悬停左侧区 → 将成为子分组, 左侧高亮引导.
+  &.is-left-drop-zone { box-shadow: inset 3px 0 0 var(--color-primary); }
+  .lgn-drop-into-hint {
+    position: absolute; left: 34px; font-size: 11px; color: var(--color-primary);
+    background: var(--color-primary-bg); padding: 1px 6px; border-radius: 3px;
+    pointer-events: none; white-space: nowrap; z-index: 3;
+  }
   &.is-hidden { opacity: 0.5; }
 }
 .lgn-caret { width: 18px; height: 18px; border: none; background: transparent; cursor: pointer; color: var(--color-text-tertiary); padding: 0; flex-shrink: 0; }
 .caret-arrow { display: inline-block; transition: transform 0.15s; }
 .lgn-caret.expanded .caret-arrow { transform: rotate(90deg); }
 .caret-placeholder { display: inline-block; width: 8px; }
-.lgn-type-icon { display: inline-flex; align-items: center; flex-shrink: 0; color: var(--color-text-secondary); }
 .lgn-color-picker {
   flex-shrink: 0;
   width: 22px;
@@ -470,6 +509,14 @@ function handleRowDrop(event) {
 }
 .lgn-title { flex: 1; display: flex; align-items: center; gap: 4px; overflow: hidden;
   white-space: nowrap; text-overflow: ellipsis; }
+/* [CUSTOM-TAG 2026-08-20] 自定义分组前置小『自』记号: 与系统自动分组区分, 占用极小不撑排版 */
+.lgn-custom-tag {
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+  font-size: 9px; line-height: 1; font-weight: 600; padding: 2px 3px; border-radius: 3px;
+  color: var(--color-primary); background: var(--color-primary-bg);
+  border: 1px solid var(--color-primary-4, rgba(24,144,255,.35));
+  user-select: none; cursor: default;
+}
 .lgn-title-text { font-size: var(--font-size-sm); font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
 /* [中心范围 2026-08-05] 中心分组标题：加粗 + 中心色（替代 ◆ 标识），行内样式绑定 centerScopeColor */
 .lgn-title-text.is-center { font-weight: 700; }

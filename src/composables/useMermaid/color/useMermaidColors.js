@@ -337,6 +337,19 @@ export function useMermaidColors() {
       const rect = el.querySelector('rect')
       if (!rect) return
 
+      // [CUSTOM-COLOR 2026-08-19] 用户自定义分组 (groupType=custom 且非 ELK 系统自动分组)
+      //   的聚合节点保留面板配置色 (group.style), 不被 colorGroupBy/中心范围覆盖.
+      //   根因: 用户把自定义分组拖入某领域下后, 其折叠聚合节点被按 colorGroupBy 取所属领域色
+      //   (如供应链云蓝), 覆盖了面板设置色 (如黄色, 用户反馈"图表与设置不一致").
+      //   与语法层 applyUpliftNodeColors 的处理保持同规则 (自同色 + skip).
+      //   注意: ELK 系统分组 (无关系/有关系, 同为 custom 但带 _elkGroup) 不是用户自定义分组,
+      //   维持原 colorGroupBy 覆盖逻辑.
+      if (ctx.groupType === 'custom' && !(ctx._elkGroup === 'inner' || ctx._elkGroup === 'boundary')) {
+        // 面板色不存在时(理论不应发生, 自定义分组必有 style.fill)回退中性灰
+        rect.style.setProperty('fill', ctx.customFill || '#fafafa', 'important')
+        return
+      }
+
       // 中心范围判定 (与 useGroupDisplay 中心判定一致, 按折叠节点层级查对应 markers)
       // [FIX 2026-08-09 v3] subDomains/domains 标记的 value 是布尔 (hasCenter),
       //   且【所有】分组都会写入 map (markers.subDomains.set(name, hasCenter) /
