@@ -9,7 +9,7 @@ import { DataFlowLogger } from '../../../services/groupModel/dataFlowLogger.js'
 import { formatContainerTitle } from '../../../utils/formatContainerTitle.js'
 import { getArrowSyntax, sanitizeLabel } from './_shared/arrowHelper.js'
 import { computeUplift, markUplift, sanitizeId } from '../layouts/upliftDerivation.js'
-import { businessObjectLabel } from './nodeLabelTemplate.js'
+import { businessObjectLabel, escapeMermaidLabelText } from './nodeLabelTemplate.js'
 
 function sortVirtualContainersBySize(containers) {
   if (!containers || containers.length === 0) {
@@ -1734,7 +1734,7 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
     return code
   }
 
-  code += `  subgraph ${groupId}["${groupTitle}"]\n`
+  code += `  subgraph ${groupId}["${escapeMermaidLabelText(groupTitle)}"]\n`
   code += `    direction ${actualDirection}\n`
 
   if (group.children && group.children.length > 0) {
@@ -1767,7 +1767,7 @@ function generateGroupMermaid(group, nodeMap, definedNodes, actualDirection) {
         if (containerEnabled && containerVisible) {
           const containerId = `${groupId}_C${idx + 1}`
           const containerTitle = formatContainerTitle(container.fullTitle || container.name || 'Container')
-          code += `    subgraph ${containerId}["${containerTitle}"]\n`
+          code += `    subgraph ${containerId}["${escapeMermaidLabelText(containerTitle)}"]\n`
           code += `      direction ${actualDirection}\n`
           
           container.nodes.forEach(nodeId => {

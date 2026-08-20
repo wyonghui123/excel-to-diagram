@@ -3,6 +3,7 @@ import { useBlockDiagramStyle } from '../style/useBlockDiagramStyle.js'
 import { useBlockDiagramSyntax, DIAGRAM_TYPES } from './useBlockDiagramSyntax.js'
 import { routeLayout, DEPRECATED_LAYOUT_TYPES, isDeprecatedLayout, convertDeprecatedLayout } from '../layouts/index.js'
 import { formatContainerTitle } from '../../../utils/formatContainerTitle.js'
+import { escapeMermaidLabelText } from './nodeLabelTemplate.js'
 import { GroupType } from '../../../services/groupModel/types.js'
 
 /**
@@ -220,7 +221,7 @@ export function useServiceModuleSyntax() {
         // 渲染未分组的节点（不在 definedNodes 中的节点）
         nodes.forEach(node => {
           if (!definedNodes.has(node.id)) {
-            const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+            const displayText = escapeMermaidLabelText(node.code ? `${node.name}\\n(${node.code})` : node.name)
             mermaidCode += `  ${node.id}["${displayText}"]\n`
             definedNodes.add(node.id)
           }
@@ -232,7 +233,7 @@ export function useServiceModuleSyntax() {
           const containerId = `C${sortedContainers.length - index}`
           const containerTitle = formatContainerTitle(container.fullTitle || container.name || 'Container')
 
-          mermaidCode += `  subgraph ${containerId}["${containerTitle}"]\n`
+          mermaidCode += `  subgraph ${containerId}["${escapeMermaidLabelText(containerTitle)}"]\n`
           // subgraph 内部方向跟随整体方向：LR=水平排列，TB=垂直排列
           mermaidCode += `    direction ${actualDirection}\n`
 
@@ -242,7 +243,7 @@ export function useServiceModuleSyntax() {
             const node = nodeMap.get(nodeId)
             if (node) {
               if (!definedNodes.has(node.id)) {
-                const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+                const displayText = escapeMermaidLabelText(node.code ? `${node.name}\\n(${node.code})` : node.name)
                 mermaidCode += `    ${node.id}["${displayText}"]\n`
                 definedNodes.add(node.id)
               } else {
@@ -262,7 +263,7 @@ export function useServiceModuleSyntax() {
         const containerId = `C${sortedContainers.length - index}`
         const containerTitle = formatContainerTitle(container.fullTitle || container.name || 'Container')
 
-        mermaidCode += `  subgraph ${containerId}["${containerTitle}"]\n`
+        mermaidCode += `  subgraph ${containerId}["${escapeMermaidLabelText(containerTitle)}"]\n`
         // subgraph 内部方向跟随整体方向：LR=水平排列，TB=垂直排列
         mermaidCode += `    direction ${actualDirection}\n`
 
@@ -272,7 +273,7 @@ export function useServiceModuleSyntax() {
           const node = nodeMap.get(nodeId)
           if (node) {
             if (!definedNodes.has(node.id)) {
-              const displayText = node.code ? `${node.name}\\n(${node.code})` : node.name
+              const displayText = escapeMermaidLabelText(node.code ? `${node.name}\\n(${node.code})` : node.name)
               mermaidCode += `    ${node.id}["${displayText}"]\n`
               definedNodes.add(node.id)
             } else {
