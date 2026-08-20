@@ -343,12 +343,77 @@ def get_audit_log_detail(log_id):
 
         # [FIX 2026-06-11] 解析 extra_data JSON: deleted_data 与 object_display
         log['extra_data_parsed'] = _extract_deleted_data(log.pop('extra_data', ''))
-        
+
+        # [OPT 2026-07-25 P0-3] detail 接口也注入 label 字段, 与 list 接口一致
+        _enrich_log_labels(log)
+
         return jsonify({
             'success': True,
             'data': log
         })
     
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@audit_bp.route('/meta/actions', methods=['GET'])
+@login_required
+def get_audit_meta_actions():
+    """[P0-3 2026-07-25] 返回 audit_log action 字段的 enum_values 元数据
+
+    单一事实源: meta/schemas/audit_log.yaml fields[action].enum_values
+
+    Returns:
+      {
+        "success": true,
+        "data": [
+          {"value": "CREATE", "label": "创建", "color": "success"},
+          {"value": "UPDATE", "label": "更新", "color": "info"},
+          ...
+        ]
+      }
+
+    用途:
+      - 前端启动时调一次, 缓存到 store, 替代 auditLogFormat.js ACTION_LABELS
+      - 前端 ACTION_TAG_TYPES color_mapping 也可由此驱动
+      - 列表筛选 dropdown 的 options 来源
+    """
+    perm_check = _require_audit_log_read()
+    if perm_check:
+        return perm_check
+
+    try:
+        result: list = []
+        try:
+            from meta.core.yaml_loader import registry
+            audit_meta = registry.get('audit_log')
+            if audit_meta and hasattr(audit_meta, 'fields'):
+                for field in audit_meta.fields:
+                    if getattr(field, 'id', None) != 'action':
+                        continue
+                    enum_values = getattr(field, 'enum_values', None) or []
+                    for ev in enum_values:
+                        if isinstance(ev, dict):
+                            val = ev.get('value')
+                            if not val:
+                                continue
+                            result.append({
+                                'value': val,
+                                'label': ev.get('label', val),
+                                'color': ev.get('color', ''),
+                            })
+                        elif isinstance(ev, str):
+                            result.append({'value': ev, 'label': ev, 'color': ''})
+                    break
+        except Exception as _e:
+            import logging
+            logging.getLogger(__name__).warning(
+                f"[audit_api] /meta/actions load enum_values failed: {_e}"
+            )
+
+        return jsonify({'success': True, 'data': result})
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -805,6 +870,99 @@ OBJECT_TYPE_LABELS = {
     "view_config": "视图配置",
 }
 
+
+# [OPT 2026-07-25 P0-3] ACTION_LABELS: 从 audit_log.yaml 的 enum_values 单一事实源加载
+#   - 避免前后端双重维护 (前端 auditLogFormat.js ACTION_LABELS 已降级为 fallback)
+#   - 启动时加载一次, 模块级缓存
+_ACTION_LABELS_CACHE: Optional[dict] = None
+
+
+def _load_action_labels_from_schema() -> dict:
+    """从 audit_log.yaml 加载 action 字段的 enum_values → {value: label}
+
+    单一事实源: meta/schemas/audit_log.yaml fields[action].enum_values
+    失败时降级返回空 dict (调用方用原值)
+    """
+    global _ACTION_LABELS_CACHE
+    if _ACTION_LABELS_CACHE is not None:
+        return _ACTION_LABELS_CACHE
+
+    result: dict = {}
+    try:
+        from meta.core.yaml_loader import registry
+        audit_meta = registry.get('audit_log')
+        if audit_meta and hasattr(audit_meta, 'fields'):
+            for field in audit_meta.fields:
+                if getattr(field, 'id', None) != 'action':
+                    continue
+                enum_values = getattr(field, 'enum_values', None) or []
+                for ev in enum_values:
+                    # 兼容 dict 和 str 两种形式 (见 bo_api.py:3229)
+                    if isinstance(ev, dict):
+                        val = ev.get('value')
+                        label = ev.get('label', val)
+                        if val:
+                            result[val] = label
+                    elif isinstance(ev, str):
+                        result[ev] = ev
+                break
+    except Exception as _e:
+        # 降级: 返回空 dict, 调用方用原值
+        import logging
+        logging.getLogger(__name__).warning(
+            f"[audit_api] _load_action_labels_from_schema failed: {_e}, "
+            f"action_label will fallback to raw action"
+        )
+
+    _ACTION_LABELS_CACHE = result
+    return result
+
+
+def get_action_label(action: str) -> str:
+    """[P0-3] action → 业务动作 label (供 _enrich_log_labels 和 /meta/actions 使用)"""
+    if not action:
+        return ''
+    labels = _load_action_labels_from_schema()
+    return labels.get(action, action)
+
+
+# [P0-2 2026-07-25] 字段值业务化显示
+#   - 解决前端 auditLogFormat.getFieldValueDisplay 客户端 N 次 JSON.parse 的性能问题
+#   - 后端在 list/detail 接口直接返回 old_value_display / new_value_display
+def _format_field_value(value) -> str:
+    """格式化字段值为业务可读形式
+
+    规则:
+      1. None/空 → '(空)'
+      2. JSON 字符串 (FK 结构化值) → 解析出 target_display / target_key
+      3. 原值 → str(value)
+
+    Args:
+        value: 后端字段原值 (可能是 str/None/int/float)
+
+    Returns:
+        str: 业务可读字符串
+    """
+    if value is None:
+        return ''
+    if isinstance(value, str):
+        if value == '':
+            return ''
+        # FK 结构化值: {"target_type":"...","target_id":470,"target_display":"采购订单"}
+        if value.startswith('{'):
+            try:
+                import json as _json
+                parsed = _json.loads(value)
+                if isinstance(parsed, dict):
+                    if parsed.get('target_display'):
+                        return str(parsed['target_display'])
+                    if parsed.get('target_key'):
+                        return str(parsed['target_key'])
+            except (ValueError, TypeError):
+                pass
+        return value
+    return str(value)
+
 FIELD_NAME_LABELS = {
     # 通用字段
     "name": "名称",
@@ -849,33 +1007,145 @@ FIELD_NAME_LABELS = {
 }
 
 
+_display_name_service = None
+
+
+def _get_display_name_service():
+    """[P1-D 2026-07-25] 懒加载 DisplayNameService (基于 yaml registry)
+
+    DisplayNameService 是字段显示名称的单一事实源:
+      - 字段级: registry.get(object_type).fields[i].name (yaml schema 定义)
+      - 对象级: registry.get(object_type).name (yaml schema 顶层 name)
+      - 视图覆盖: ui_view_config.list.columns[].title (例外配置)
+
+    失败时返回 None, 调用方降级走 OBJECT_TYPE_LABELS / FIELD_NAME_LABELS.
+    """
+    global _display_name_service
+    if _display_name_service is not None:
+        return _display_name_service
+    try:
+        from meta.services.display_name_service import DisplayNameService
+        from meta.core.yaml_loader import registry as _yaml_registry
+        _display_name_service = DisplayNameService(_yaml_registry)
+    except Exception as _e:
+        import logging
+        logging.getLogger(__name__).warning(
+            f"[audit_api] DisplayNameService init failed: {_e}, "
+            f"field_name_label will fallback to FIELD_NAME_LABELS"
+        )
+        _display_name_service = None
+    return _display_name_service
+
+
+def _get_object_type_label(object_type: str) -> str:
+    """[P1-D 2026-07-25] 获取 object_type 的中文标签
+
+    优先级:
+      1. yaml registry.get(object_type).name (单一事实源)
+         - 覆盖 user→用户, role→角色, product→产品, version→版本 等
+      2. OBJECT_TYPE_LABELS 硬编码 fallback
+         - 覆盖 audit 专用伪类型 (如 __audit_failure__, _unknown)
+         - 覆盖 registry 未注册的衍生类型 (如 role_menu, role_permissions)
+      3. object_type 原值
+    """
+    if not object_type:
+        return ''
+    # 优先: yaml registry (单一事实源)
+    try:
+        from meta.core.yaml_loader import registry as _yaml_registry
+        meta = _yaml_registry.get(object_type)
+        if meta and getattr(meta, 'name', None):
+            return meta.name
+    except Exception:
+        pass
+    # 降级: 硬编码 (audit 专用伪类型 / 衍生类型)
+    return OBJECT_TYPE_LABELS.get(object_type, object_type)
+
+
+def _get_field_name_label(object_type: str, field_name: str) -> str:
+    """[P1-D 2026-07-25] 获取字段的中文标签
+
+    优先级:
+      1. DisplayNameService.get_field_name(object_type, field_name, context='list')
+         - yaml schema fields[].name (单一事实源)
+         - 视图覆盖: ui_view_config.list.columns[].title
+      2. FIELD_NAME_LABELS 硬编码 fallback
+         - 覆盖 audit 专用字段 (action, old_value, new_value, field_name)
+         - 覆盖 registry 未注册的 object_type 场景
+      3. field_name 原值
+
+    注意:
+      - DisplayNameService 只对 registry 中已注册的 object_type 有效,
+        对于 audit 专用伪类型 (如 __audit_failure__) 会直接降级到硬编码.
+      - 当 DisplayNameService 返回值等于 field_name 时, 视为未找到, 继续降级.
+    """
+    if not field_name:
+        return ''
+    # 优先: DisplayNameService (yaml schema field.name 单一事实源)
+    if object_type:
+        try:
+            svc = _get_display_name_service()
+            if svc is not None:
+                label = svc.get_field_name(object_type, field_name, context='list')
+                if label and label != field_name:
+                    return label
+        except Exception:
+            pass
+    # 降级: 硬编码
+    return FIELD_NAME_LABELS.get(field_name, field_name)
+
+
 def _enrich_log_labels(log):
-    """[NEW 2026-07-18] 为单条审计日志注入 3 个 label 字段.
+    """[NEW 2026-07-18] 为单条审计日志注入 6 个 label/display 字段.
 
     注入字段:
-      - object_type_label: 根据 object_type 查 OBJECT_TYPE_LABELS
-      - field_name_label: 根据 field_name 查 FIELD_NAME_LABELS
-      - parent_object_type_label: 根据 parent_object_type 查 OBJECT_TYPE_LABELS
+      - action_label: 根据 action 查 audit_log.yaml enum_values (单一事实源)
+      - object_type_label: 根据 object_type 查 yaml registry (DisplayNameService)
+      - field_name_label: 根据 field_name 查 yaml schema (DisplayNameService)
+      - parent_object_type_label: 根据 parent_object_type 查 yaml registry
+      - old_value_display: 格式化 old_value (FK JSON 解析为 target_display)
+      - new_value_display: 格式化 new_value (FK JSON 解析为 target_display)
 
     规则:
       - 空/None 值不注入 (避免 label="" 前端显示空白)
       - 已有 *_label 字段不覆盖 (调用方自定义优先)
       - 未知类型降级为原值 (label == key)
       - 非 dict 入参静默忽略 (不抛异常)
+
+    [OPT 2026-07-25 P0-3] 新增 action_label 注入, 消除前端 ACTION_LABELS 重复表
+    [OPT 2026-07-25 P0-2] 新增 old_value_display / new_value_display,
+                          消除前端 N 次 JSON.parse 的性能问题
+    [OPT 2026-07-25 P1-D] object_type_label / field_name_label 改用
+                          DisplayNameService (yaml schema 单一事实源),
+                          OBJECT_TYPE_LABELS / FIELD_NAME_LABELS 降级为 fallback.
+                          消除后端硬编码与 yaml schema 字段中文名的重复维护.
     """
     if not isinstance(log, dict):
         return
 
+    act = log.get('action', '') or ''
     ot = log.get('object_type', '') or ''
     fn = log.get('field_name', '') or ''
     pot = log.get('parent_object_type', '') or ''
 
+    # [P0-3] action_label 从 schema 加载, 单一事实源
+    if act and not log.get('action_label'):
+        log['action_label'] = get_action_label(act)
+    # [P1-D] object_type_label 优先 DisplayNameService (yaml registry.name)
     if ot and not log.get('object_type_label'):
-        log['object_type_label'] = OBJECT_TYPE_LABELS.get(ot, ot)
+        log['object_type_label'] = _get_object_type_label(ot)
+    # [P1-D] field_name_label 优先 DisplayNameService (yaml schema field.name)
     if fn and not log.get('field_name_label'):
-        log['field_name_label'] = FIELD_NAME_LABELS.get(fn, fn)
+        log['field_name_label'] = _get_field_name_label(ot, fn)
+    # [P1-D] parent_object_type_label 同样走 DisplayNameService
     if pot and not log.get('parent_object_type_label'):
-        log['parent_object_type_label'] = OBJECT_TYPE_LABELS.get(pot, pot)
+        log['parent_object_type_label'] = _get_object_type_label(pot)
+
+    # [P0-2] 字段值业务化显示, 替代前端 getFieldValueDisplay 客户端解析
+    if 'old_value_display' not in log:
+        log['old_value_display'] = _format_field_value(log.get('old_value'))
+    if 'new_value_display' not in log:
+        log['new_value_display'] = _format_field_value(log.get('new_value'))
 
 
 def _enrich_log_labels_batch(logs):

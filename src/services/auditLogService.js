@@ -271,6 +271,20 @@ export async function exportLogs({ filters = {} } = {}) {
   return apiV1.get(`/audit/logs/export?${params.toString()}`)
 }
 
+/**
+ * [P1-A 2026-07-25] 获取 audit_log action 字段的 enum_values 元数据
+ *
+ * 调用后端 GET /audit/meta/actions, 返回 [{value, label, color}].
+ * 用于替代前端 auditLogFormat.js ACTION_LABELS / ACTION_TAG_TYPES 硬编码表.
+ *
+ * 单一事实源: meta/schemas/audit_log.yaml fields[action].enum_values
+ *
+ * @returns {Promise<{success: boolean, data?: Array<{value:string,label:string,color:string}>}>}
+ */
+export async function getMetaActions() {
+  return apiV1.get('/audit/meta/actions')
+}
+
 // ============================================================================
 // 6. API 函数 — v2 BO API（替代 useAuditLogs 的 'audit_logs' hack）
 // ============================================================================

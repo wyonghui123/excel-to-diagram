@@ -246,7 +246,7 @@ import { computed, ref, watch } from 'vue'
 import AppButton from '@/components/common/AppButton/AppButton.vue'
 import AppCollapse from '@/components/common/AppCollapse/AppCollapse.vue'
 import { dateFormatService } from '@/services/DateFormatService'
-import { getActionLabel, getUserNameDisplay, isInternalField, isInternalAction, getFieldLabel, getFieldValueDisplay, getObjectTypeLabel } from '@/utils/auditLogFormat'
+import { getActionLabel, getUserNameDisplay, isInternalField, isInternalAction, getFieldLabel, getFieldValueDisplay, getObjectTypeLabel, parseTargetDisplay } from '@/utils/auditLogFormat'
 
 const props = defineProps({
   logs: {
@@ -649,19 +649,6 @@ function groupBusinessKey(group) {
     return `#${group.object_id}`
   }
   return ''
-}
-
-function parseTargetDisplay(raw) {
-  if (!raw) return '-'
-  try {
-    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
-    if (parsed && parsed.target_display && parsed.target_type) {
-      return `${parsed.target_display}（${parsed.target_type}）`
-    }
-    return raw
-  } catch {
-    return raw
-  }
 }
 
 function formatBatchTargets(targets) {

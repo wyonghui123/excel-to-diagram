@@ -5,12 +5,45 @@
  * 优先级: 业务级翻译 > 后端注入 label > 原值
  *
  * [FIX 2026-07-22] 暴露 category/level 翻译 + tag type, 替换各处本地翻译表
+ *
+ * [P1-A 2026-07-25] action 翻译/颜色单一事实源迁移到后端 /audit/meta/actions
+ *   - 启动时 auditMetaStore.loadActions() 拉取 enum_values 并缓存
+ *   - getActionLabel / getActionTagType 优先读 store, 本地 ACTION_LABELS /
+ *     ACTION_TAG_TYPES 仅作为降级 fallback (网络失败/启动未完成时)
+ *   - 详见 stores/auditMetaStore.js + services/auditLogService.js#getMetaActions
  */
+
+import { useAuditMetaStore } from '@/stores/auditMetaStore'
+
+// [P1-A] 懒加载 auditMetaStore 实例 (避免模块加载时 Pinia 未就绪)
+//   - 首次调用 _getMetaStore() 时 try useAuditMetaStore(), 失败/未就绪返回 null
+//   - 缓存结果, 后续调用直接返回
+let _cachedMetaStore = null
+let _metaStoreTried = false
+function _getMetaStore() {
+  if (_metaStoreTried) return _cachedMetaStore
+  _metaStoreTried = true
+  try {
+    _cachedMetaStore = useAuditMetaStore()
+  } catch (_e) {
+    // Pinia 未安装或不在 setup 上下文 - 降级走本地 fallback
+    _cachedMetaStore = null
+  }
+  return _cachedMetaStore
+}
 
 /**
  * object_type → 业务对象名 翻译表
  *
- * 覆盖后端 yaml_loader 解析出来的所有对象类型 + 审计专用伪类型
+ * [降级策略 2026-07-25 P1-D]
+ * 后端 _enrich_log_labels 已改用 DisplayNameService (yaml registry) 注入 object_type_label.
+ * 此硬编码表仅作为 fallback:
+ *   - 调用方未传 log 参数 (如 AuditLog.vue 的 formatObjectTypeLabel(group.object_type))
+ *   - 后端注入失败 (yaml registry 未注册该 object_type)
+ *   - audit 专用伪类型 (__audit_failure__, _unknown) 不在 registry 中
+ *
+ * TODO(P2): 后端新增 /audit/meta/object-types 接口后, getObjectTypeLabel 可改为
+ *           auditMetaStore 优先 (与 getActionLabel 一致), 此表可进一步缩减.
  */
 export const OBJECT_TYPE_LABELS = {
   // 身份与权限
@@ -126,10 +159,30 @@ const HIDDEN_ACTIONS = new Set([
 /**
  * action → 业务动作
  * @param {string} action - 后端 action 字段
+ * @param {object} [log] - 完整日志对象 (可选, 优先读后端注入的 action_label)
  * @returns {string} 业务动作名
+ *
+ * [OPT 2026-07-25] 优先用后端注入的 action_label, 降级才查本地表
+ *   - 后端注入位置: audit_api._enrich_log_labels (虽当前未注入 action_label,
+ *     但保留接口兼容未来扩展)
+ *
+ * [P1-A 2026-07-25] 优先级调整:
+ *   1. log.action_label (后端 per-log 注入, 最权威)
+ *   2. auditMetaStore.actionMap.get(action).label (后端 enum_values 单一事实源)
+ *   3. ACTION_LABELS[action] (本地硬编码 fallback, 网络失败/启动未完成时)
+ *   4. action 原值
  */
-export function getActionLabel(action) {
+export function getActionLabel(action, log) {
   if (!action) return ''
+  // 优先级 1: 后端注入的 label 字段
+  if (log && log.action_label) return log.action_label
+  // 优先级 2: auditMetaStore (后端 enum_values 缓存)
+  const store = _getMetaStore()
+  if (store && store.loaded) {
+    const item = store.actionMap.get(action)
+    if (item && item.label) return item.label
+  }
+  // 优先级 3: 本地翻译表 (降级, 保证后端缺失时仍可显示)
   return ACTION_LABELS[action] || action
 }
 
@@ -143,10 +196,17 @@ export function isInternalAction(action) {
 /**
  * object_type → 业务对象名
  * @param {string} type - 后端 object_type
+ * @param {object} [log] - 完整日志对象 (可选, 优先读后端注入的 object_type_label)
  * @returns {string} 业务对象名
+ *
+ * [OPT 2026-07-25] 优先用后端注入的 object_type_label, 降级才查本地表
+ *   - 后端注入位置: audit_api._enrich_log_labels (audit_api.py:873)
  */
-export function getObjectTypeLabel(type) {
+export function getObjectTypeLabel(type, log) {
   if (!type) return ''
+  // 优先级 1: 后端注入的 label 字段
+  if (log && log.object_type_label) return log.object_type_label
+  // 优先级 2: 本地翻译表 (降级)
   return OBJECT_TYPE_LABELS[type] || type
 }
 
@@ -208,8 +268,15 @@ export function isInternalField(fieldName) {
 /**
  * 字段名 → 业务名 翻译表
  *
- * 把技术字段名翻译为业务人员可理解的术语
- * 优先级: 此表 > 原字段名
+ * [降级策略 2026-07-25 P1-D]
+ * 后端 _enrich_log_labels 已改用 DisplayNameService (yaml schema field.name) 注入 field_name_label.
+ * 此硬编码表仅作为 fallback:
+ *   - 调用方未传 log 参数 (如 AuditLog.vue 的 getFieldLabel(item.field_name))
+ *   - 后端注入失败 (yaml schema 中该 object_type 无此 field)
+ *   - audit 专用字段 (old_value, new_value, field_name) 不在任何 object_type 的 fields 中
+ *
+ * TODO(P2): 后端新增 /audit/meta/fields?object_type=xxx 接口后, getFieldLabel 可改为
+ *           auditMetaStore 优先 (与 getActionLabel 一致), 此表可进一步缩减.
  */
 export const FIELD_LABELS = {
   // 通用业务字段
@@ -310,10 +377,17 @@ export const FIELD_VALUE_LABELS = {
 /**
  * 获取字段业务名
  * @param {string} fieldName - 后端字段名
+ * @param {object} [log] - 完整日志对象 (可选, 优先读后端注入的 field_name_label)
  * @returns {string} 业务名 (找不到回退格式化后的字段名)
+ *
+ * [OPT 2026-07-25] 优先用后端注入的 field_name_label, 降级才查本地表
+ *   - 后端注入位置: audit_api._enrich_log_labels (audit_api.py:875)
  */
-export function getFieldLabel(fieldName) {
+export function getFieldLabel(fieldName, log) {
   if (!fieldName) return ''
+  // 优先级 1: 后端注入的 label 字段
+  if (log && log.field_name_label) return log.field_name_label
+  // 优先级 2: 本地翻译表 (降级)
   if (FIELD_LABELS[fieldName]) return FIELD_LABELS[fieldName]
   // 回退: 把下划线分隔转为更可读的格式 (relation_type → Relation Type)
   // 但优先用翻译表
@@ -324,13 +398,27 @@ export function getFieldLabel(fieldName) {
  * 获取字段值业务显示
  * @param {string} value - 后端字段值
  * @param {string} [fieldName] - 字段名 (用于上下文相关翻译)
+ * @param {object} [log] - 完整日志对象 (可选, 优先读后端注入的 *_display 字段)
  * @returns {string} 业务值
+ *
+ * [OPT 2026-07-25 P0-2] 优先读后端注入的 old_value_display / new_value_display
+ *   - 后端注入位置: audit_api._enrich_log_labels (audit_api.py:1049)
+ *   - 消除前端 N 次 JSON.parse 的性能问题
+ *   - 降级才走前端 JSON 解析 + 枚举翻译
  */
-export function getFieldValueDisplay(value, fieldName) {
+export function getFieldValueDisplay(value, fieldName, log) {
   if (value === null || value === undefined || value === '') return '(空)'
+
+  // 优先级 1: 后端注入的 *_display 字段
+  //   调用方需传 log, 并根据当前是 old/new 自动选择对应 display
+  if (log) {
+    if (log.old_value === value && log.old_value_display) return log.old_value_display
+    if (log.new_value === value && log.new_value_display) return log.new_value_display
+  }
+
   const str = String(value)
 
-  // 1. FK 结构化值: {"target_type":"business_object","target_id":470,"target_key":"BO_PO","target_display":"采购订单"}
+  // 优先级 2: FK 结构化值: {"target_type":"business_object","target_id":470,"target_key":"BO_PO","target_display":"采购订单"}
   //    → 显示 target_display
   if (str.startsWith('{')) {
     try {
@@ -344,10 +432,10 @@ export function getFieldValueDisplay(value, fieldName) {
     }
   }
 
-  // 2. 枚举值翻译
+  // 优先级 3: 枚举值翻译
   if (FIELD_VALUE_LABELS[str]) return FIELD_VALUE_LABELS[str]
 
-  // 3. 原值
+  // 优先级 4: 原值
   return str
 }
 
@@ -432,7 +520,27 @@ export function getLevelTagType(level) {
   return LOG_LEVEL_LABELS[level]?.type || 'info'
 }
 
+/**
+ * [P1-A 2026-07-25] 优先级调整:
+ *   1. auditMetaStore.actionMap.get(action).color (后端 enum_values 单一事实源)
+ *      - 'default' / 空 → 规范化为 '' (Element Plus default 样式)
+ *   2. ACTION_TAG_TYPES[action] (本地硬编码 fallback)
+ *   3. 'info' 默认
+ */
 export function getActionTagType(action) {
+  if (!action) return 'info'
+  // 优先级 1: auditMetaStore (后端 enum_values 缓存)
+  const store = _getMetaStore()
+  if (store && store.loaded) {
+    const item = store.actionMap.get(action)
+    if (item && item.color) {
+      // 规范化: 'default' / 空 → '' (Element Plus 无类型)
+      const c = item.color
+      if (c && c !== 'default') return c
+      return ''
+    }
+  }
+  // 优先级 2: 本地 fallback
   return ACTION_TAG_TYPES[action] || 'info'
 }
 
@@ -449,4 +557,30 @@ const USER_NAME_LABELS = {
 export function getUserNameDisplay(name) {
   if (!name) return '-'
   return USER_NAME_LABELS[name] || name
+}
+
+/**
+ * 解析 FK 结构化值中的 target_display
+ *
+ * 后端 FK 值格式: {"target_type":"business_object","target_id":470,"target_key":"BO_PO","target_display":"采购订单"}
+ * 解析后显示: "采购订单（business_object）"
+ *
+ * 优先级:
+ *   1. 后端注入的 *_display 字段 (getFieldValueDisplay 已处理)
+ *   2. 本函数解析 raw JSON 中的 target_display
+ *   3. 原值
+ *
+ * [C5 2026-07-25] 从 AuditLog.vue + AuditLogDetail.vue 抽取为公共函数, 消除重复实现
+ */
+export function parseTargetDisplay(raw) {
+  if (!raw) return '-'
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+    if (parsed && parsed.target_display && parsed.target_type) {
+      return `${parsed.target_display}（${parsed.target_type}）`
+    }
+    return raw
+  } catch {
+    return raw
+  }
 }

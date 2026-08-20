@@ -101,22 +101,22 @@
       </template>
 
       <template #cell-object_type="{ row }">
-        {{ row.object_type_label || formatObjectTypeLabel(row.object_type) }}
+        {{ formatObjectTypeLabel(row.object_type, row) }}
       </template>
 
       <template #cell-field_name="{ row }">
         <span v-if="row.field_name && row.field_name !== '_record'" class="field-name-badge">
-          {{ row.field_name_label || getFieldLabel(row.field_name) }}
+          {{ getFieldLabel(row.field_name, row) }}
         </span>
         <span v-else class="no-field">-</span>
       </template>
 
       <template #cell-old_value="{ row }">
-        {{ getFieldValueDisplay(row.old_value, row.field_name) }}
+        {{ getFieldValueDisplay(row.old_value, row.field_name, row) }}
       </template>
 
       <template #cell-new_value="{ row }">
-        {{ getFieldValueDisplay(row.new_value, row.field_name) }}
+        {{ getFieldValueDisplay(row.new_value, row.field_name, row) }}
       </template>
     </MetaListPage>
 
@@ -146,11 +146,11 @@
           </el-descriptions-item>
           <el-descriptions-item label="操作类型">
             <el-tag :type="getActionTagType(selectedLog.action)" size="small">
-              {{ formatActionLabel(selectedLog.action) }}
+              {{ formatActionLabel(selectedLog.action, selectedLog) }}
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="对象类型">
-            {{ selectedLog.object_type_label || formatObjectTypeLabel(selectedLog.object_type) }}
+            {{ formatObjectTypeLabel(selectedLog.object_type, selectedLog) }}
           </el-descriptions-item>
           <el-descriptions-item label="对象">
             <span class="object-id">{{ selectedLog.object_id }}</span>
@@ -162,7 +162,7 @@
             </span>
           </el-descriptions-item>
           <el-descriptions-item v-if="selectedLog.parent_object_type" label="父对象">
-            <span class="parent-type">{{ selectedLog.parent_object_type_label || formatObjectTypeLabel(selectedLog.parent_object_type) }}</span>
+            <span class="parent-type">{{ formatObjectTypeLabel(selectedLog.parent_object_type, selectedLog) }}</span>
             <span class="object-id">{{ selectedLog.parent_object_id }}</span>
             <span v-if="selectedLog.parent_object_display" class="object-display">
               {{ selectedLog.parent_object_display }}
@@ -178,13 +178,13 @@
             {{ selectedLog.ip_address || '-' }}
           </el-descriptions-item>
           <el-descriptions-item label="字段名">
-            {{ selectedLog.field_name_label || getFieldLabel(selectedLog.field_name) }}
+            {{ getFieldLabel(selectedLog.field_name, selectedLog) }}
           </el-descriptions-item>
           <el-descriptions-item label="旧值">
-            <div class="value-text">{{ getFieldValueDisplay(selectedLog.old_value, selectedLog.field_name) }}</div>
+            <div class="value-text">{{ getFieldValueDisplay(selectedLog.old_value, selectedLog.field_name, selectedLog) }}</div>
           </el-descriptions-item>
           <el-descriptions-item label="新值">
-            <div class="value-text">{{ getFieldValueDisplay(selectedLog.new_value, selectedLog.field_name) }}</div>
+            <div class="value-text">{{ getFieldValueDisplay(selectedLog.new_value, selectedLog.field_name, selectedLog) }}</div>
           </el-descriptions-item>
           <el-descriptions-item label="链路追踪ID">
             {{ selectedLog.trace_id || '-' }}
@@ -213,13 +213,21 @@ import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { MetaListPage } from '@/components/common/MetaListPage'
 import { formatDate } from '@/composables/useMetaList'
 import * as auditLogService from '@/services/auditLogService'
+// [P1-A 2026-07-25] 防御性预加载 audit action 元数据 (idempotent, 已加载则 no-op)
+//   - main.js 启动时已预加载, 这里作为二级保险 (直接深链进入时)
+import { useAuditMetaStore } from '@/stores/auditMetaStore'
 import {
   getObjectTypeLabel as formatObjectTypeLabel,
   getActionLabel as formatActionLabel,
+  getActionTagType,
   getFieldLabel,
   getFieldValueDisplay,
   getUserNameDisplay,
   isInternalField,
+  getCategoryLabel,
+  getCategoryTagType,
+  getLevelLabel,
+  getLevelTagType,
 } from '@/utils/auditLogFormat'
 // [FR-004] ECharts 按需导入: 只注册使用的图表类型, 减少 ~600KB
 import * as echarts from 'echarts/core'
@@ -238,6 +246,9 @@ echarts.use([
   CanvasRenderer
 ])
 import { Document, Lock, WarningFilled, DataLine, Delete, ArrowUp, ArrowDown, DataAnalysis } from '@element-plus/icons-vue'
+
+// [P1-A 2026-07-25] auditMetaStore 实例 (用于 onMounted 触发 loadActions)
+const _auditMetaStore = useAuditMetaStore()
 
 const metaListRef = ref(null)
 const showDetail = ref(false)
@@ -342,21 +353,13 @@ const CATEGORY_COLORS = {
   system: '#6b7280'
 }
 
-const CATEGORY_LABELS = {
-  business: '业务审计',
-  security: '安全日志',
-  operation: '运营日志',
-  performance: '性能日志',
-  system: '系统日志'
-}
-
 function renderPieChart(categoryData) {
   if (!pieChartRef.value) return
   if (!pieChart) {
     pieChart = echarts.init(pieChartRef.value)
   }
   const data = categoryData.map(item => ({
-    name: CATEGORY_LABELS[item.category] || item.category,
+    name: getCategoryLabel(item.category),
     value: item.count,
     itemStyle: { color: CATEGORY_COLORS[item.category] || '#909399' }
   }))
@@ -409,6 +412,10 @@ function handleResize() {
 
 onMounted(() => {
   loadOverview()
+  // [P1-A 2026-07-25] 防御性预加载 audit action 元数据
+  //   - idempotent: 已加载则 no-op; 失败静默降级到本地 ACTION_LABELS
+  //   - 触发后 store.loaded=true, 后续 getActionLabel/getActionTagType 自动读 store
+  _auditMetaStore.loadActions().catch(() => { /* 静默: 已有本地 fallback */ })
   window.addEventListener('resize', handleResize)
   // [FIX 2026-06-12] 强制覆盖 el-table inline style height (MetaListPage :height='100%').
   // inline style 优先级 > CSS !important, 必须 JS 改. window resize 也要重新应用.
@@ -437,63 +444,8 @@ function forceElTableHeight() {
 
 // [FIX 2026-07-22] object_type/field_name/action 翻译统一使用 auditLogFormat.js (单一事实源)
 // 删除本地 OBJECT_TYPE_MAP / COMMON_FIELD_NAMES / getActionLabel, 覆盖更全且与后端 label 互补
-
-function getCategoryTagType(category) {
-  const map = {
-    'business': 'primary',
-    'security': '',
-    'operation': '',
-    'performance': '',
-    'system': ''
-  }
-  return map[category] || ''
-}
-
-function getCategoryLabel(category) {
-  const map = {
-    'business': '业务审计',
-    'security': '安全日志',
-    'operation': '运营日志',
-    'performance': '性能日志',
-    'system': '系统日志'
-  }
-  return map[category] || category
-}
-
-function getLevelTagType(level) {
-  const map = {
-    'DEBUG': 'info',
-    'INFO': 'primary',
-    'WARNING': 'warning',
-    'ERROR': 'danger',
-    'CRITICAL': 'danger'
-  }
-  return map[level] || 'info'
-}
-
-function getLevelLabel(level) {
-  const map = {
-    'DEBUG': '调试',
-    'INFO': '信息',
-    'WARNING': '警告',
-    'ERROR': '错误',
-    'CRITICAL': '严重'
-  }
-  return map[level] || level
-}
-
-function getActionTagType(action) {
-  const map = {
-    'CREATE': 'success',
-    'UPDATE': 'warning',
-    'DELETE': 'danger',
-    'ASSOCIATE': 'primary',
-    'DISSOCIATE': 'info'
-  }
-  return map[action] || 'info'
-}
-
-// [FIX 2026-07-22] getActionLabel 已由 auditLogFormat.js 的 formatActionLabel 替代
+// [FIX 2026-07-25] getCategoryTagType/Label, getLevelTagType/Label, getActionTagType
+// 也统一从 auditLogFormat.js 导入, 消除本地重复定义
 
 function formatDateTime(datetime) {
   return formatDate(datetime, 'YYYY-MM-DD HH:mm:ss')

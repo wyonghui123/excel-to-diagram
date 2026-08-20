@@ -101,7 +101,7 @@
         <div class="ald-single-change">
           <div class="ald-single-row">
             <span class="ald-label">关系</span>
-            <span class="ald-value">{{ log.field_name || '-' }}</span>
+            <span class="ald-value">{{ getFieldLabel(log.field_name) || '-' }}</span>
           </div>
           <div class="ald-single-row">
             <span class="ald-label">目标对象</span>
@@ -151,7 +151,7 @@
 <script setup>
 import { computed } from 'vue'
 import { dateFormatService } from '@/services/DateFormatService'
-import { getObjectTypeLabel, getUserNameDisplay, isInternalField, isInternalAction, getFieldLabel, getFieldValueDisplay, getActionLabel } from '@/utils/auditLogFormat'
+import { getObjectTypeLabel, getUserNameDisplay, isInternalField, isInternalAction, getFieldLabel, getFieldValueDisplay, getActionLabel, parseTargetDisplay } from '@/utils/auditLogFormat'
 
 const props = defineProps({
   visible: {
@@ -201,18 +201,7 @@ const actionClass = computed(() => {
   return action
 })
 
-const actionLabel = computed(() => {
-  const actionMap = {
-    'CREATE': '创建',
-    'UPDATE': '更新',
-    'DELETE': '删除',
-    'ASSOCIATE': '添加关联',
-    'DISSOCIATE': '移除关联',
-    'ASSIGN': '分配',
-    'REVOKE': '撤销'
-  }
-  return actionMap[props.log?.action] || props.log?.action || '未知'
-})
+const actionLabel = computed(() => getActionLabel(props.log?.action) || '未知')
 
 const isCreateAction = computed(() => props.log?.action === 'CREATE')
 const isDeleteAction = computed(() => props.log?.action === 'DELETE')
@@ -272,19 +261,6 @@ const changes = computed(() => {
 
 function handleClose() {
   emit('update:visible', false)
-}
-
-function parseTargetDisplay(raw) {
-  if (!raw) return '-'
-  try {
-    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
-    if (parsed && parsed.target_display && parsed.target_type) {
-      return `${parsed.target_display}（${parsed.target_type}）`
-    }
-    return raw
-  } catch {
-    return raw
-  }
 }
 </script>
 
