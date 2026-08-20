@@ -433,6 +433,25 @@ class WriteScopeInterceptor(Interceptor):
         if '*' in permissions:
             return
 
+        # [Phase 2 2026-07-25] Feature flag 切换到 IntentScopeAdapter (新路径)
+        # Spec: docs/spec_权限体系升级/12_implementation_plan.md P2.13
+        # 当 effective_intents_enabled=True 时, 用 role_effective_intents 表
+        # (Layer 1 事实层) 替代 _check_target (dim scope + visibility + owner chain)
+        # 默认关闭, 不影响现有系统
+        # [Note] WriteScopeDenied 会被正常抛出 (语义: 拒绝), 其他异常回退到 legacy
+        try:
+            from meta.core.permission_flags import is_enabled
+            if is_enabled('effective_intents_enabled'):
+                if self._apply_effective_intents_write_check(context, user_id):
+                    return  # 新路径已应用, 跳过原逻辑
+        except WriteScopeDenied:
+            raise  # 拒绝异常向上抛 (保持原语义)
+        except Exception as e:
+            logger.warning(
+                f'[P2-WriteHook] effective_intents check failed, '
+                f'fallback to legacy: {e}'
+            )
+
         # 遍历 target (主对象 + 关联操作 src/target)
         for side, target in self._get_targets(context):
             self._check_target(context, user_id, side, target)
@@ -440,6 +459,180 @@ class WriteScopeInterceptor(Interceptor):
         # [v2.0 2026-06-16] FK 字段写路径 dim scope 校验
         # Spec: docs/specs/spec-write-scope-policy-v2.md FR-002/FR-003/FR-005/FR-006
         self._validate_fk_scope_policies(context, user_id)
+
+    def _apply_effective_intents_write_check(
+        self, context: 'ActionContext', user_id: int
+    ) -> bool:
+        """[Phase 2 P2.13] 使用 IntentScopeAdapter 校验写权限
+
+        Returns:
+            True  — 已校验通过 (调用方应跳过原逻辑)
+            False — 未应用 (调用方应回退到原逻辑)
+
+        [拒绝语义]
+            任一 target 拒绝 → 抛 WriteScopeDenied (调用方 before_action 直接抛出)
+
+        [Feature flag]
+            effective_intents_enabled=True 时启用
+            失败时回退到原逻辑 (防御性)
+
+        [多 target 语义]
+            associate/dissociate: src + dst 两个 target 都要通过才放行
+            crud_create: 1 个 parent target (parent 必须在 scope 内)
+            crud_update/crud_delete: 1 个 primary target
+        """
+        try:
+            from meta.core.intent_scope_adapter import IntentScopeAdapter
+
+            db_path = self._get_db_path(context)
+            if not db_path:
+                return False
+
+            role_ids = self._get_user_role_ids(context, user_id)
+            if not role_ids:
+                return False  # 无 role, 回退到 legacy (legacy 也会拒绝)
+
+            targets = self._get_targets(context)
+            if not targets:
+                # 顶层 BO create 等场景无 target, legacy 也不处理
+                # 但回退让 legacy 决定 (保持原行为)
+                return False
+
+            action_name = self._get_action_name_for_write(context)
+
+            adapter = IntentScopeAdapter(db_path)
+
+            for side, target in targets:
+                object_type = target['type']
+                target_id = target['id']
+                if not target_id:
+                    continue
+
+                result = adapter.check_record_allowed(
+                    role_ids=role_ids,
+                    bo_id=object_type,
+                    action_name=action_name,
+                    record_id=target_id,
+                    user_id=user_id,
+                )
+
+                # [P5 修复 2026-07-26] 区分 source 语义:
+                # - 'record_not_found': 记录不存在, 回退到 legacy (legacy 也会抛 WriteScopeDenied,
+                #   但语义正确, B2 测试期望 404/拒绝)
+                # - 'no_intent_allows_all': 无 Intent 配置, 回退到 legacy 5 步检查
+                #   (legacy 包含 owner chain + dim scope + visibility 完整链路, C1/D2 测试依赖)
+                # - 其他 not allowed (exclude/default_deny/no_role): 真正拒绝, 抛 WriteScopeDenied
+                source = result.get('source')
+                if source in ('record_not_found', 'no_intent_allows_all'):
+                    logger.info(
+                        f'[P2-WriteHook] fallback to legacy: user={user_id} '
+                        f'bo={object_type} id={target_id} action={action_name} '
+                        f'source={source} reason={result.get("reason")}'
+                    )
+                    return False  # 回退到 legacy 5 步检查
+
+                if not result['allowed']:
+                    # 真正拒绝 → 抛 WriteScopeDenied (保持原异常类型)
+                    logger.info(
+                        f'[P2-WriteHook] denied: user={user_id} '
+                        f'bo={object_type} id={target_id} action={action_name} '
+                        f'source={source} reason={result.get("reason")}'
+                    )
+                    raise WriteScopeDenied(
+                        object_type, target_id, user_id,
+                        {
+                            'source': source,
+                            'reason': result.get('reason'),
+                            'hook': 'effective_intents',
+                        },
+                        side,
+                    )
+
+                # [P5 修复 2026-07-26] 补充 visibility 检查 (V1.1.6 H13 严格化)
+                # IntentScopeAdapter 只校验 include/exclude SQL, 不校验 visibility
+                # 写权限 = owner chain 命中 OR (dim_scope 命中 AND visibility=public)
+                # create_parent / relationship update 例外: 不修改 BO 本身, 仅作 chain 引用
+                # 典型场景: B1/D2 - admin 创建 sub_domain/BO (visibility=private),
+                #   wyonghui dim_scope 匹配 (domain=2200) 但不应能修改非 owner 的 private 资源
+                is_create_path = (side == 'create_parent')
+                is_relationship_update = (
+                    context.action == 'crud_update' and object_type == 'relationship'
+                )
+                # owner 命中时 visibility 不限制 (IntentScopeAdapter 已检查 _is_owner)
+                is_owner_match = (result.get('source') == 'owner')
+                if (
+                    not is_create_path
+                    and not is_relationship_update
+                    and not is_owner_match
+                ):
+                    record = self._load_record(context, object_type, target_id)
+                    if record:
+                        visibility_check = self._check_visibility(
+                            context, object_type, record
+                        )
+                        if not visibility_check.get('allow'):
+                            logger.info(
+                                f'[P2-WriteHook] denied (visibility): user={user_id} '
+                                f'bo={object_type} id={target_id} action={action_name} '
+                                f'source={source} visibility={visibility_check.get("visibility")}'
+                            )
+                            raise WriteScopeDenied(
+                                object_type, target_id, user_id,
+                                {
+                                    'source': 'effective_intents_visibility_check',
+                                    'reason': (
+                                        f"dim scope matched but visibility="
+                                        f"{visibility_check.get('visibility')}"
+                                    ),
+                                    'hook': 'effective_intents',
+                                    'visibility': visibility_check.get('visibility'),
+                                },
+                                side,
+                            )
+
+            # 所有 target 都允许
+            logger.info(
+                f'[P2-WriteHook] allowed: user={user_id} '
+                f'bo={context.object_type} action={action_name} '
+                f'targets={len(targets)}'
+            )
+            return True
+        except WriteScopeDenied:
+            raise  # 重新抛出, 不吞掉
+        except Exception as e:
+            logger.warning(f'[P2-WriteHook] internal error: {e}')
+            return False
+
+    def _get_db_path(self, context: 'ActionContext') -> Optional[str]:
+        """[Phase 2] 从 context 获取 db_path
+
+        复用 DataPermissionInterceptor 同名方法的逻辑
+        """
+        ds = getattr(context, 'data_source', None)
+        if ds is not None:
+            db_path = getattr(ds, 'db_path', None) or getattr(ds, '_db_path', None)
+            if db_path:
+                return db_path
+        # fallback: 从环境变量或默认路径
+        return os.environ.get('DB_PATH') or os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            'db', 'archdata.db'
+        )
+
+    def _get_action_name_for_write(self, context: 'ActionContext') -> str:
+        """[Phase 2] 将 context.action 映射为 Intent action_name
+
+        Returns:
+            'create' / 'update' / 'delete'
+
+        [映射规则] (跟 _ACTION_TO_PERM_SUFFIX 一致)
+            crud_create → 'create'
+            crud_update → 'update'
+            crud_delete → 'delete'
+            associate   → 'update'  (关联动作算 update)
+            dissociate  → 'delete'  (解除关联算 delete)
+        """
+        return _ACTION_TO_PERM_SUFFIX.get(context.action, 'update')
 
     def _get_targets(self, context: 'ActionContext') -> List[Tuple[str, Dict[str, Any]]]:
         """获取需要校验的 target 列表

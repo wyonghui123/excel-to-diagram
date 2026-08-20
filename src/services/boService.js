@@ -39,6 +39,29 @@ class BOService extends BaseService {
   deepInsert(objectType, parent, children, options) { return this._crud.deepInsert(objectType, parent, children, options) }
   suggestKeyTemplateCode(objectType, fieldValues, parentParams) { return this._crud.suggestKeyTemplateCode(objectType, fieldValues, parentParams) }
 
+  /**
+   * [P1-C 2026-07-25] 批量 FK 解析 — 一次性解析多 object_type 多 id 的 display_name
+   *
+   * 替代场景: 列表渲染 N 个外键 ID 时, 避免 N+1 次调用 boService.read(type, id)
+   *
+   * @param {Array<{object_type: string, ids: (number|string)[]}>} requests
+   * @param {string[]} [fields] - 可选, 指定返回字段 (默认 id/display_name/name/code)
+   * @returns {Promise<{success: boolean, data?: Object, errors?: Array, message?: string}>}
+   *   data 形如: { user: {"1": {id, display_name, ...}}, role: {"10": {...}} }
+   *
+   * @example
+   *   const res = await boService.batchResolve([
+   *     { object_type: 'user', ids: [1, 2, 3] },
+   *     { object_type: 'role', ids: [10, 20] }
+   *   ])
+   *   // res.data.user['1'].display_name → 'Alice'
+   */
+  batchResolve(requests, fields = null) {
+    const body = { requests }
+    if (fields && Array.isArray(fields)) body.fields = fields
+    return this._request('POST', '/bo/batch-resolve', { body })
+  }
+
   // 关联操作 — 委托到 associationService（FR-GAP-018）
   associate(objectType, id, associationName, targetId, targetType) { return _assocService.associate(objectType, id, associationName, targetId, targetType) }
   dissociate(objectType, id, associationName, targetId, targetType) { return _assocService.dissociate(objectType, id, associationName, targetId, targetType) }

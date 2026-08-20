@@ -14,12 +14,15 @@
     </div>
 
     <!-- 工具栏 -->
-    <div v-if="showToolbar && multiple" class="htp-toolbar">
+    <div v-if="showToolbar" class="htp-toolbar">
+      <!-- [R26 2026-07-24] 工具栏显示逻辑修复: 不再依赖 multiple
+           历史 bug: v-if="showToolbar && multiple" 让单选模式下工具栏 (展开/收起/刷新/清除) 全部不可见
+           新逻辑: 工具栏始终可见 (single 模式下去掉清除按钮, 因为没有勾选概念) -->
       <el-button text size="small" @click="toggleExpandAll">
         <el-icon><component :is="allExpanded ? Fold : Expand" /></el-icon>
         {{ allExpanded ? '收起' : '展开' }}
       </el-button>
-      <el-button text size="small" :disabled="checkedIds.length === 0" @click="handleClear">清除</el-button>
+      <el-button v-if="multiple" text size="small" :disabled="checkedIds.length === 0" @click="handleClear">清除</el-button>
       <el-button text size="small" :disabled="loading" @click="loadTreeData">
         <el-icon><Refresh /></el-icon>
         刷新
@@ -50,7 +53,33 @@
         @node-click="onNodeClickSingle"
       >
         <template #default="{ data }">
-          <span :class="['htp-node', { 'htp-node-disabled': isExcludedNode(data) }]">
+          <el-tooltip
+            v-if="!isTargetDimNode(data)"
+            :content="getNodeTooltip(data)"
+            placement="top"
+            :show-after="400"
+            :disabled="isExcludedNode(data)"
+          >
+            <span
+              :class="['htp-node', 'htp-node-parent',
+                { 'htp-node-disabled': isExcludedNode(data) }]"
+              :data-tk="data.__tk"
+            >
+              <el-icon v-if="resolveIcon(data.icon)" :size="14">
+                <component :is="resolveIcon(data.icon)" />
+              </el-icon>
+              <span class="htp-node-label" :title="data.name">{{ data.name }}</span>
+              <span v-if="data.code" class="htp-node-code">{{ data.code }}</span>
+              <el-tag v-if="isExcludedNode(data)" size="small" type="info" class="htp-node-tag">
+                已选
+              </el-tag>
+            </span>
+          </el-tooltip>
+          <span
+            v-else
+            :class="['htp-node', { 'htp-node-disabled': isExcludedNode(data) }]"
+            :data-tk="data.__tk"
+          >
             <el-icon v-if="resolveIcon(data.icon)" :size="14">
               <component :is="resolveIcon(data.icon)" />
             </el-icon>
@@ -177,6 +206,9 @@ const checkedIds = ref([])
 const currentId = ref(null)
 const defaultExpandedKeys = ref([])
 const allExpanded = ref(false)
+// [R25 2026-07-24] 手动双击检测: 记录上次点击的节点 + 时间戳
+//   300ms 内同节点再次点击 → 视为双击
+const lastClickInfo = ref(null)
 
 const treeProps = { label: 'name', children: 'children' }
 const extendedTreeProps = computed(() => ({
@@ -214,8 +246,35 @@ function isExcludedNode(data) {
   return allExcludedIds.value.has(data.id)
 }
 
+// [R22 2026-07-24] 父节点 tooltip 文案 (按是否有 children 区分展开/收起)
+//   行业标准 (WAI-ARIA TreeView): 父节点 = 展开/收起操作, 不是选中操作
+//   提示用户 "这是分组节点, 点击仅展开/收起, 请选择叶子节点"
+function getNodeTooltip(data) {
+  if (!data) return ''
+  if (isLeaf(data)) return data.name || ''
+  // 父节点: 提示展开/收起语义
+  const action = data.__expanded ? '收起' : '展开'
+  return `${action}分组: ${data.name || ''}`
+}
+
+// [R22 2026-07-24] 父节点不可选 (交互修正: 树形选择器语义 = 仅选目标维度叶子)
+//   行业标准 (SAP Fiori / WAI-ARIA TreeView / Ant Design TreeSelect):
+//     - 父节点 = "分组壳", 仅展开/收起, 不可选中
+//     - 叶子节点 = 唯一可选目标
+//   原实现问题: 父节点可被点击选中 (currentId 直接 = node.id, 无类型判断),
+//     用户被树形结构诱导, 误选领域/子领域
+//   新规则: 当前 dimensionId 决定的"目标维度"节点才能被选中
+//     例 dimensionId='service_module' → 只有 type='service_module' 节点可选
+//     父节点 (product/version/domain/sub_domain) 全部 disabled
+function isTargetDimNode(data) {
+  return data && data.type === props.dimensionId
+}
+
 function isDisabledNode(data) {
   if (isExcludedNode(data)) return true
+  // [R22] 类型校验: 仅目标维度节点可选 (父节点统一禁用)
+  if (!isTargetDimNode(data)) return true
+  // [R22 + 历史兼容] 仅叶子可选 (onlyLeafSelectable 时, 父节点不可点)
   if (props.onlyLeafSelectable && !isLeaf(data)) return true
   return false
 }
@@ -313,6 +372,21 @@ function collectAllKeys(nodes) {
   return result
 }
 
+// [R28] 收集到指定层级的 __tk (用于 el-tree 的 default-expanded-keys)
+//   level=1 → 仅根节点, level=2 → 根+子, level=3 → 根+子+孙...
+function collectKeysToLevel(nodes, targetLevel, currentLevel = 1) {
+  const result = []
+  for (const n of nodes) {
+    if (currentLevel <= targetLevel) {
+      result.push(n.__tk)
+    }
+    if (n.children && currentLevel < targetLevel) {
+      result.push(...collectKeysToLevel(n.children, targetLevel, currentLevel + 1))
+    }
+  }
+  return result
+}
+
 // ── 数据加载 ──
 async function loadTreeData() {
   loading.value = true
@@ -332,10 +406,10 @@ async function loadTreeData() {
     if (json.hierarchy_meta) {
       hierarchyMeta.value = json.hierarchy_meta
     }
-    // [UX-FIX 2026-07-24-R20] 默认仅展开根节点 (渐进披露, 非全展开)
-    //   旧: collectAllKeys → 全展开 (大数据量时 DOM 卡顿, 用户视线跳跃)
-    //   新: 只收集根节点 __tk → 仅展开第一级
-    defaultExpandedKeys.value = displayTreeData.value.map(n => n.__tk)
+    // [R28] defaultExpandedKeys: 按 default_expand_level 收集, 非仅根节点
+    //   default_expand_level=2 → 收集 product + version 的 __tk
+    const expandLevel = hierarchyMeta.value?.ui_config?.default_expand_level || 1
+    defaultExpandedKeys.value = collectKeysToLevel(displayTreeData.value, expandLevel)
   } catch (e) {
     console.error('[HierarchicalTreePicker] load failed:', e)
     treeData.value = []
@@ -343,14 +417,16 @@ async function loadTreeData() {
   } finally {
     loading.value = false
   }
-  // [R20] 默认展开行为: 搜索时全展开, 非搜索时仅展开根节点
+  // [R28] 默认展开行为: 搜索时全展开, 非搜索时按 default_expand_level 展开
   //   搜索后全展开: 用户搜索时期望快速看到匹配结果, 不需要手动逐级展开
-  //   非搜索仅展开根: 遵循渐进披露, 避免大数据量 DOM 卡顿
+  //   非搜索按层级展开: 遵循 SAP InitialExpansionLevel 标准, 渐进披露
+  //   default_expand_level=2 → 展开到领域层 (产品↘版本↘领域)
   await nextTick()
   if (debouncedSearch.value) {
     expandAllNodes(displayTreeData.value)
   } else {
-    expandRootNodesOnly(displayTreeData.value)
+    const expandLevel = getDefaultExpandLevel()
+    expandToLevel(displayTreeData.value, expandLevel)
   }
   // [FIX R19] 数据重新加载后, 重新设置 checked 并同步父组件 internalSelectedItems
   //   原因: 第二次打开弹窗时 onMounted 不会再触发, 需在此处重新回显勾选
@@ -394,16 +470,34 @@ function syncCheckedState() {
   emit('check-change', { ids: validIds, nodes: emitNodes })
 }
 
-// [R20] 仅展开根节点 (渐进披露, 非全展开)
-function expandRootNodesOnly(nodes) {
+// [R20→R28] 基于元模型 default_expand_level 的智能展开 (遵循 SAP 标准)
+//   SAP Fiori: UI.PresentationVariant.InitialExpansionLevel + GroupBy 联合控制
+//   我们: hierarchyMeta.ui_config.default_expand_level 驱动展开深度
+//   层级链: product(0) → version(1) → domain(2) → sub_domain(3) → service_module(4)
+//   default_expand_level=2 → 展开到领域层 (产品↘版本↘领域), 用户最熟悉的分类维度
+//   无配置时 fallback: 仅展开根节点 (渐进披露)
+function expandToLevel(nodes, targetLevel, currentLevel = 0) {
   if (!treeRef.value || !nodes || nodes.length === 0) return
   for (const n of nodes) {
     const treeNode = treeRef.value.getNode(n.__tk)
     if (treeNode && n.children && n.children.length > 0) {
-      treeNode.expanded = true
+      if (currentLevel < targetLevel) {
+        treeNode.expanded = true
+        // 递归展开子节点 (层级+1)
+        expandToLevel(n.children, targetLevel, currentLevel + 1)
+      }
+      // currentLevel >= targetLevel: 不展开, 遵循渐进披露
     }
-    // 不递归子节点
   }
+}
+
+// [R28] 从 hierarchyMeta 读取 default_expand_level, fallback=1 (仅根节点)
+function getDefaultExpandLevel() {
+  const cfg = hierarchyMeta.value?.ui_config
+  if (cfg && typeof cfg.default_expand_level === 'number' && cfg.default_expand_level > 0) {
+    return cfg.default_expand_level
+  }
+  return 1 // fallback: 仅展开根节点
 }
 
 // [R19] 主动展开所有节点 (用于搜索后自动展开)
@@ -462,10 +556,20 @@ function onCheckMultiple(checkedInfo) {
 
   const ids = checkedTks.map(tk => byTk.get(tk)?.id).filter(id => id != null)
   const filteredIds = ids.filter(id => !allExcludedIds.value.has(id))
-  checkedIds.value = filteredIds
+  // [R22 2026-07-24] 类型校验: 多选模式下也只保留目标维度节点
+  //   防止用户通过 checkbox 误选父节点
+  //   注意: el-tree 在父节点上的 checkbox 状态通常不应被展示
+  //         (依赖 isDisabledNode 在 disabled 状态下不响应点击), 此处兜底
+  const targetIds = filteredIds.filter(id => {
+    const tk = tkByTypeId.value.get(`${props.dimensionId}:${id}`)
+    const node = byTk.get(tk)
+    return node && isTargetDimNode(node)
+  })
+  checkedIds.value = targetIds
 
   // 同步 emit 完整 nodes (SearchHelpDialog 用)
-  const emitNodes = filteredIds.map(id => {
+  // [R22] 使用 targetIds 保持 ids 和 nodes 一致 (避免按钮显示(1)但 chips 显示 0 的不一致)
+  const emitNodes = targetIds.map(id => {
     const tk = tkByTypeId.value.get(`${props.dimensionId}:${id}`)
     return byTk.get(tk) || { id, name: `#${id}`, type: '' }
   })
@@ -473,13 +577,54 @@ function onCheckMultiple(checkedInfo) {
 }
 
 // ── 单选事件 ──
+// [R22 2026-07-24] 父节点点击 = 仅展开/收起, 不选中
+//   行业标准 (SAP Fiori / WAI-ARIA TreeView / Ant Design TreeSelect):
+//     - 点击父节点 → 展开/收起 (不选中)
+//     - 点击叶子节点 → 选中 (取消已选则取消选中)
 function onNodeClickSingle(node) {
   if (!node) return
-  if (isDisabledNode(node)) return
+  // [R22] 父节点: 仅展开/收起, 不进入选中逻辑
+  if (!isTargetDimNode(node)) {
+    toggleNodeExpand(node)
+    return
+  }
+  // [R25 2026-07-24] 叶子节点: 手动检测双击 (Element Plus el-tree 没有原生 node-dblclick)
+  //   业务背景: 用户期望双击叶子节点 = 直接确认 (类似 file picker 双击打开/确认)
+  //   检测规则: 300ms 内同一叶子节点连续两次点击 → 视为双击
+  //   - 第一次 click: 选中 (emit check-change, 走标准选中流程)
+  //   - 第二次 click (300ms 内, 同节点): 触发双击 (emit confirm + 关闭 dialog)
+  const now = Date.now()
+  const isDouble = lastClickInfo.value?.id === node.id && (now - lastClickInfo.value?.ts) < 300
+  lastClickInfo.value = { id: node.id, ts: now }
+  if (isDouble) {
+    // 双击: 保持选中 + 触发 confirm (SearchHelpDialog 关闭)
+    currentId.value = node.id
+    // [R25 2026-07-24] 先 emit check-change 让 SearchHelpDialog 同步 currentSingleItem
+    //   (handleConfirm 用 currentSingleItem.value 传给 ValueHelpField.handleDialogConfirm)
+    //   再 emit confirm 走双击快速通道 (避免点"确认选择"按钮)
+    emit('check-change', { ids: [node.id], nodes: [node] })
+    emit('confirm', { type: 'single', id: node.id, node })
+    return
+  }
+  // 叶子节点: 原选中逻辑
   if (currentId.value === node.id) {
     currentId.value = null
   } else {
     currentId.value = node.id
+  }
+  // [R21 2026-07-24] emit check-change 让 SearchHelpDialog 更新 currentSingleItem
+  //   这样单选模式下"确认选择"按钮能正确显示/隐藏
+  emit('check-change', { ids: currentId.value != null ? [currentId.value] : [], nodes: currentId.value != null ? [node] : [] })
+}
+
+// [R22 2026-07-24] 切换节点的展开/收起状态 (父节点点击行为)
+function toggleNodeExpand(node) {
+  if (!node || !treeRef.value) return
+  if (!isLeaf(node)) {
+    const treeNode = treeRef.value.getNode(node.__tk)
+    if (treeNode) {
+      treeNode.expanded = !treeNode.expanded
+    }
   }
 }
 
@@ -644,6 +789,15 @@ onMounted(async () => {
 .htp-node-disabled {
   color: var(--el-text-color-placeholder);
   cursor: not-allowed;
+}
+/* [R22 2026-07-24] 父节点样式: 分组壳, 不可点选中, 加粗+默认 cursor */
+.htp-node-parent {
+  font-weight: 500;
+  cursor: default;
+  color: var(--el-text-color-regular);
+}
+.htp-node-parent .htp-node-label {
+  font-weight: 500;
 }
 .htp-node-label { font-size: 13px; }
 .htp-node-code {

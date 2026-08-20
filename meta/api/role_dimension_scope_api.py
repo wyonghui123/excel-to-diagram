@@ -325,6 +325,27 @@ def _ds():
     return _data_source
 
 
+def _get_db_path(ds=None):
+    """[P5 补充 2026-07-26] 从 data_source 获取 db_path
+
+    用于 derivation_pipeline 等需要直接操作 SQLite 的模块
+    """
+    if ds is not None:
+        db_path = getattr(ds, 'db_path', None) or getattr(ds, '_db_path', None)
+        if db_path:
+            return db_path
+    # fallback: 环境变量或默认路径
+    import os as _os
+    return (
+        _os.environ.get('SQLITE_DB_PATH')
+        or _os.environ.get('ARCH_DB_PATH')
+        or _os.path.join(
+            _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+            'architecture.db'
+        )
+    )
+
+
 def admin_required(f):
     @wraps(f)
     @login_required
@@ -468,6 +489,31 @@ def save_dimension_scopes(role_id):
             _log_dim_scope_changes(ds, role_id, old_scopes, data, current_user)
         except Exception as audit_err:
             logger.warning(f'[FR-007] _log_dim_scope_changes failed: {audit_err}')
+
+        # [P5 补充 2026-07-26] 触发 derivation_pipeline 重新生成 role_effective_intents
+        # 当 effective_intents_enabled=True 时, IntentScopeAdapter/DataPermissionInterceptor
+        # 从 role_effective_intents 表读取权限。如果不触发 derivation, 表数据不会更新,
+        # 导致 E2 (exclude 后 wyonghui4 看不到 339) / A2 (wyonghui4 sub_domain 包含 339) 测试失败
+        try:
+            from meta.core.permission_flags import is_enabled
+            if is_enabled('effective_intents_enabled'):
+                from meta.core.derivation_pipeline import PermissionDerivationPipeline
+                from meta.core.effective_intent_dao import EffectiveIntentDAO
+                db_path = _get_db_path(ds)
+                if db_path:
+                    dao = EffectiveIntentDAO(db_path)
+                    pipeline = PermissionDerivationPipeline(db_path=db_path, dao=dao)
+                    pipeline.derive(role_id=role_id)
+                    logger.info(
+                        f'[P5-AutoDerive] derivation_pipeline.derive(role_id={role_id}) '
+                        f'completed after dimension-scopes update'
+                    )
+        except Exception as derive_err:
+            # 不阻塞保存操作, 只记录警告
+            logger.warning(
+                f'[P5-AutoDerive] derivation_pipeline.derive(role_id={role_id}) '
+                f'failed (non-fatal): {derive_err}'
+            )
 
         return jsonify({'success': True, 'message': '\u7ef4\u5ea6\u8303\u56f4\u5df2\u4fdd\u5b58'})
     except Exception as e:

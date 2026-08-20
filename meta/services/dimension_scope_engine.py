@@ -30,34 +30,65 @@ logger = logging.getLogger(__name__)
 
 
 
-def _dim_include_values(dim_data: Optional[dict]) -> set:
-    """获取维度的 include 集合"""
+def _dim_include_values(dim_data) -> set:
+    """获取维度的 include 集合
+
+    [P5 修复 2026-07-26] 兼容两种返回结构:
+      - 旧结构 (Set[int]): expand_dimension_values 返回 Dict[str, Set[int]]
+        此时 dim_data 是 set, 整个 set 即为 include
+      - 新结构 (Dict[str, Set]): Spec 08 要求 Dict[str, Dict[str, Set]]
+        此时 dim_data 是 dict, 读取 'include' 键
+    """
     if not dim_data:
         return set()
+    if isinstance(dim_data, set):
+        return dim_data  # 旧结构: set 即 include
     return dim_data.get('include', set()) or set()
 
 
 
-def _dim_is_wildcard(dim_data: Optional[dict]) -> bool:
-    """检查维度是否为通配符 (全维度可见)"""
+def _dim_is_wildcard(dim_data) -> bool:
+    """检查维度是否为通配符 (全维度可见)
+
+    [P5 修复 2026-07-26] 兼容旧结构 (set 无 wildcard 信息, 返回 False)
+    """
     if not dim_data:
         return False
+    if isinstance(dim_data, set):
+        return False  # 旧结构无 wildcard 信息
     return bool(dim_data.get('wildcard', False))
 
 
 
-def _dim_exclude_values(dim_data: Optional[dict]) -> set:
-    """获取维度的 exclude 集合"""
+def _dim_exclude_values(dim_data) -> set:
+    """获取维度的 exclude 集合
+
+    [P5 修复 2026-07-26] 兼容旧结构 (set 无 exclude 信息, 返回空 set)
+    """
     if not dim_data:
         return set()
+    if isinstance(dim_data, set):
+        return set()  # 旧结构无 exclude 信息
     return dim_data.get('exclude', set()) or set()
 
 
 
-def _dim_has_any_values(dim_data: Optional[dict]) -> bool:
-    """检查维度数据是否有任何配置 (include/exclude/wildcard 任一非空)"""
+def _dim_has_any_values(dim_data) -> bool:
+    """检查维度数据是否有任何配置 (include/exclude/wildcard 任一非空)
+
+    [P5 修复 2026-07-26] 兼容两种返回结构:
+      - 旧结构 (Set[int]): 非空 set 即视为有值
+      - 新结构 (Dict[str, Set]): 检查 include/exclude/wildcard 任一非空
+
+    修复前: 当 expand_dimension_values 返回 set 时, dim_data.get('include')
+            抛 AttributeError 'set' object has no attribute 'get',
+            异常被 _check_dim_scope 静默捕获 → role 被跳过 → 写权限被拒
+    修复后: set 类型直接检查非空, dict 类型走原有逻辑
+    """
     if not dim_data:
         return False
+    if isinstance(dim_data, set):
+        return bool(dim_data)  # 旧结构: 非空 set = 有值
     return bool(
         dim_data.get('include')
         or dim_data.get('exclude')
@@ -193,6 +224,10 @@ class DimensionScopeEngine:
             # 用途: 角色配置 scope_mode='all' 时返回该维度全量 ID
             # 语义: 等效于 dimension_values 包含该维度所有 ID
             scope_mode = scope.get('scope_mode', 'include')
+            # [P5 修复 2026-07-26] scope_mode='exclude' 由 _load_exclude_values 处理
+            # 这里跳过, 避免被误当作 include
+            if scope_mode == 'exclude':
+                continue
             if scope_mode == 'all':
                 all_ids = self._get_all_dimension_ids(code)
                 if not all_ids:
@@ -259,13 +294,65 @@ class DimensionScopeEngine:
                     continue
             if isinstance(raw_dv, str):
                 try:
-                    values = set(json.loads(raw_dv))
+                    parsed = json.loads(raw_dv)
                 except (json.JSONDecodeError, TypeError):
                     continue
             elif isinstance(raw_dv, (list, tuple)):
-                values = set(int(x) for x in raw_dv if str(x).lstrip('-').isdigit())
+                parsed = list(raw_dv)
             else:
                 continue
+
+            # [P5 修复 2026-07-26] 检测通配符 '*' (WILDCARD_MARKER)
+            # 当 dimension_values 包含 '*' 时, 视为 wildcard 配置
+            # 展开为该维度全量 ID (等价于 scope_mode='all')
+            # 修复前: '*' 被当作字符串放入 set, 生成 SQL "id = *" 导致语法错误
+            # 修复后: 检测到 '*' 时展开为全量 ID
+            if any(str(v).strip() == '*' for v in parsed):
+                all_ids = self._get_all_dimension_ids(code)
+                if not all_ids:
+                    # 全量查询失败 → 跳过此维度 (避免误授权)
+                    continue
+                if code not in expanded:
+                    expanded[code] = set()
+                expanded[code].update(all_ids)
+                logger.info(
+                    f'[P5-WILDCARD] dimension_values=["*"]: role_id={role_id}, '
+                    f'dimension={code}, all_ids_count={len(all_ids)}'
+                )
+                # 向下展开子维度 (inherit_children 默认 1)
+                if scope.get('inherit_children', 1) == 1:
+                    try:
+                        idx = HIERARCHY_CHAIN.index(code)
+                    except ValueError:
+                        continue
+                    current_ids = set(all_ids)
+                    for next_dim in HIERARCHY_CHAIN[idx + 1:]:
+                        if self._has_explicit_include_for_dim(scopes, next_dim):
+                            logger.info(
+                                f'[P1-CARTESION] parent={code} wildcard, '
+                                f'child={next_dim} explicit include — break inherit chain'
+                            )
+                            break
+                        parent_field = PARENT_FIELD_MAP.get(next_dim)
+                        child_table = RESOURCE_TABLE_MAP.get(next_dim)
+                        if not parent_field or not child_table or not current_ids:
+                            break
+                        ph = ','.join('?' * len(current_ids))
+                        rows = self._ds.execute(
+                            f"SELECT id FROM {child_table} WHERE {parent_field} IN ({ph})",
+                            list(current_ids)
+                        ).fetchall()
+                        current_ids = {row[0] for row in rows}
+                        if current_ids:
+                            if next_dim not in expanded:
+                                expanded[next_dim] = set()
+                            expanded[next_dim].update(current_ids)
+                        else:
+                            break
+                continue  # 通配符已处理, 跳过普通 include 逻辑
+
+            # 普通数值 ID 处理
+            values = set(int(x) for x in parsed if str(x).lstrip('-').isdigit())
             if not values:
                 continue
 
@@ -307,6 +394,12 @@ class DimensionScopeEngine:
         [FIX 2026-06-10] 优先使用 dimension_object_mapping.yaml 的映射配置，
         硬编码 HIERARCHY_CHAIN/PARENT_FIELD_MAP 仅作 fallback（向后兼容）。
 
+        [P5 修复 2026-07-26] 支持 scope_mode='exclude':
+          - exclude 模式的 dimension_values 表示"排除这些 ID"
+          - 生成的 SQL: id NOT IN (excluded_ids)
+          - 例: sub_domain exclude [339] → sub_domain.id NOT IN (339)
+          - 当 include 和 exclude 同时存在时, AND 连接
+
         支持的 filter_type:
           - direct: resource.field = dim_value
             例: dimension=product, bo=product, field=id
@@ -323,6 +416,8 @@ class DimensionScopeEngine:
         #   用于 line 384 "防止跨版本数据污染" 的 version 判断
         #   避免 domain=[703] 误匹配 version_id=764
         original_expanded = {k: set(v) for k, v in expanded.items()}
+        # [P5 修复 2026-07-26] 加载 exclude 配置 (单独存储, 不污染 expanded)
+        excluded = self._load_exclude_values(role_id)
         loader = get_dimension_object_mapping_loader()
         use_yaml_mapping = loader.is_loaded()
 
@@ -479,6 +574,21 @@ class DimensionScopeEngine:
 
             if parts:
                 conditions[resource_type] = ' AND '.join(parts)
+
+            # [P5 修复 2026-07-26] 处理 exclude: 生成 id NOT IN (...)
+            # exclude 仅对 dimension 自身的 BO 生效 (例: sub_domain exclude [339] → sub_domain.id NOT IN (339))
+            # 不向上/向下传播 (避免误伤父子维度)
+            if resource_type in excluded and excluded[resource_type]:
+                excl_vals = sorted(excluded[resource_type])
+                if len(excl_vals) == 1:
+                    excl_sql = f"id != {excl_vals[0]}"
+                else:
+                    excl_sql = f"id NOT IN ({','.join(str(v) for v in excl_vals)})"
+                if resource_type in conditions:
+                    conditions[resource_type] = f"{conditions[resource_type]} AND {excl_sql}"
+                else:
+                    # 无 include 条件但存在 exclude: 用 1=1 占位 + NOT IN
+                    conditions[resource_type] = f"1=1 AND {excl_sql}"
 
         # [FIX 2026-06-22] 防止跨版本数据污染
         # 当 expanded['version'] 非空时, 给所有有 version_id 字段的资源类型追加 version_id 过滤
@@ -863,6 +973,95 @@ class DimensionScopeEngine:
         )
         cols = [d[0] for d in cursor.description]
         return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+    def get_wildcard_dims(self, role_id: int) -> set:
+        """[P5 修复 2026-07-26] 获取角色配置为 wildcard 的维度集合
+
+        检测条件:
+          - scope_mode='all' (显式 wildcard)
+          - scope_mode='include' 且 dimension_values 包含 '*' (隐式 wildcard)
+
+        用途:
+          derivation_pipeline 对 wildcard 维度存储空 include (动态条件),
+          而非静态 ID 列表, 避免新增对象后 intent 过期。
+
+        Returns:
+            set of dimension_code (如 {'product', 'domain'})
+        """
+        wildcard_dims = set()
+        try:
+            scopes = self._load_scopes(role_id)
+            for scope in scopes:
+                scope_mode = scope.get('scope_mode', 'include')
+                if scope_mode == 'all':
+                    code = scope.get('dimension_code')
+                    if code:
+                        wildcard_dims.add(code)
+                    continue
+                # 检测 dimension_values=['*']
+                if scope_mode == 'include':
+                    raw_dv = scope.get('dimension_values')
+                    if raw_dv is None:
+                        raw_dv = scope.get('inherit_children')
+                    if raw_dv is None:
+                        continue
+                    if isinstance(raw_dv, str):
+                        try:
+                            parsed = json.loads(raw_dv)
+                        except (json.JSONDecodeError, TypeError):
+                            continue
+                    elif isinstance(raw_dv, (list, tuple)):
+                        parsed = list(raw_dv)
+                    else:
+                        continue
+                    if any(str(v).strip() == '*' for v in parsed):
+                        code = scope.get('dimension_code')
+                        if code:
+                            wildcard_dims.add(code)
+        except Exception as e:
+            logger.warning(f'get_wildcard_dims failed for role {role_id}: {e}')
+        return wildcard_dims
+
+    def _load_exclude_values(self, role_id: int) -> Dict[str, Set[int]]:
+        """[P5 修复 2026-07-26] 加载 scope_mode='exclude' 的维度排除值
+
+        返回: {dimension_code: set(excluded_ids)}
+        例: {'sub_domain': {339}}
+
+        [设计原则]
+          - exclude 仅对自身维度生效, 不沿 HIERARCHY_CHAIN 传播
+          - 多个 exclude scope 同维度时, ID 取并集
+          - exclude 与 include 独立处理 (不互相覆盖)
+        """
+        scopes = self._load_scopes(role_id)
+        excluded: Dict[str, Set[int]] = {}
+        for scope in scopes:
+            scope_mode = scope.get('scope_mode', 'include')
+            if scope_mode != 'exclude':
+                continue
+            code = scope.get('dimension_code')
+            if not code:
+                continue
+            raw_dv = scope.get('dimension_values')
+            if raw_dv is None:
+                raw_dv = scope.get('inherit_children')
+            if raw_dv is None:
+                continue
+            if isinstance(raw_dv, str):
+                try:
+                    values = set(json.loads(raw_dv))
+                except (json.JSONDecodeError, TypeError):
+                    continue
+            elif isinstance(raw_dv, (list, tuple)):
+                values = set(int(x) for x in raw_dv if str(x).lstrip('-').isdigit())
+            else:
+                continue
+            if not values:
+                continue
+            if code not in excluded:
+                excluded[code] = set()
+            excluded[code].update(values)
+        return excluded
 
     def _has_explicit_include_for_dim(self, scopes, dim_code: str) -> bool:
         """[P1-T2 2026-07-19] 检查 scopes 中是否对 dim_code 有显式的 include 配置

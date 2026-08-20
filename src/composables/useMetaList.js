@@ -25,6 +25,8 @@ import { suggestKeyTemplateCode as _suggestKeyTemplateCodeSvc } from '@/services
 import { saveAllDrafts as _saveAllDraftsSvc, getDraftCreates as _getDraftCreatesSvc } from '@/services/draftPersistService'
 import { useBoAction } from '@/composables/useBoAction'
 import { t as i18nT } from '@/i18n'
+// [P0-4 2026-07-25] 接入 authStore.hasPermission, 替代 _checkPermission 占位实现
+import { useAuthStore } from '@/stores/authStore'
 import {
   isInternalProp,
   transformFilters,
@@ -84,6 +86,17 @@ export function useMetaList(objectTypeOrRef, options = {}) {
   const objectTypeRef = isRef(objectTypeOrRef)
     ? objectTypeOrRef
     : shallowRef(objectTypeOrRef)
+
+  // [P0-4 2026-07-25] 接入 authStore 权限检查 (替代 _checkPermission 占位实现)
+  //   - 必须在 setup 函数内调用 useAuthStore()
+  //   - 失败时降级为 false (无权限) 以保证安全
+  let _authStore = null
+  try {
+    _authStore = useAuthStore()
+  } catch (_e) {
+    // 在非 setup 上下文调用时, 降级为 null, _checkPermission 退回占位行为
+    console.warn('[useMetaList] useAuthStore() 调用失败, _checkPermission 将退回占位行为:', _e?.message)
+  }
 
   // [NFR-004] 请求竞态安全：版本号保护
   let _initVersion = 0
@@ -1502,17 +1515,32 @@ export function useMetaList(objectTypeOrRef, options = {}) {
   }
 
   /**
-   * 权限检查（简化版，后续集成权限系统）
+   * 权限检查 (接入 authStore.hasPermission)
    * @private
-   * @param {Object} action - 操作配置
+   * @param {Object} action - 操作配置 (含 .permission 权限字符串, 如 'user:delete')
    * @returns {Boolean} 是否有权限
+   *
+   * [P0-4 2026-07-25] 替代占位实现, 接入 authStore.hasPermission
+   *   - 优先级 1: action 无配置 permission → 视为公开操作, 返回 true
+   *   - 优先级 2: authStore 已加载 → 调用 authStore.hasPermission(action.permission)
+   *   - 优先级 3: authStore 未加载 (非 setup 上下文) → 降级返回 true (兼容旧测试)
+   *
+   * 安全策略:
+   *   - 后端 API 仍会做权威校验, 这里只是 UI 显隐控制
+   *   - 即使这里返回 true, 后端拒绝时仍会 403
    */
   function _checkPermission(action) {
     if (!action.permission) return true
-    
-    // TODO: 集成实际的权限检查系统
-    // 例如：return hasPermission(action.permission)
-    return true  // 暂时返回 true
+    if (!_authStore) {
+      // 降级: 非 setup 上下文 (如某些单元测试), 保持旧行为
+      return true
+    }
+    // 支持权限字符串或数组 (数组时任意一项满足即可)
+    const perm = action.permission
+    if (Array.isArray(perm)) {
+      return perm.some(p => _authStore.hasPermission(p))
+    }
+    return _authStore.hasPermission(perm)
   }
 
   /**

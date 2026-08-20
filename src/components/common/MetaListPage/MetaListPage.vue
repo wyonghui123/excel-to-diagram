@@ -572,6 +572,8 @@ import { boService } from '@/services/boService'
 import { metaService } from '@/services/metaService'
 import { objectTypeService } from '@/services/objectTypeService'
 import { useListActionStore } from '@/stores/listActionStore'
+// [P1-B 2026-07-25] 接入 ActionPolicy, 替代 canDelete 硬编码状态判断
+import { canPerformAction as _canPerformActionByPolicy } from '@/services/actionPolicyService'
 
 // [FR-004] 声明组件名以支持 keep-alive include 白名单匹配
 defineOptions({ name: 'MetaListPage' })
@@ -1343,12 +1345,17 @@ function canPerformCrud() {
 }
 
 function canDelete(row) {
-  if (!props.rowMutability) return true
-  if (props.rowMutability === 'locked') return false
-  if (props.rowMutability === 'extensible') {
-    return row?.is_system !== true && row?.system_value !== true
-  }
-  return true
+  // [P1-B 2026-07-25] 委托给 actionPolicyService, 统一行级状态规则
+  //   规则源: services/actionPolicyService.js#canPerformAction
+  //   - locked: 禁
+  //   - extensible + is_system: 禁
+  //   - 其他: 允许
+  const policy = _canPerformActionByPolicy(
+    { key: 'delete' },
+    row,
+    { rowMutability: props.rowMutability }
+  )
+  return policy.allowed
 }
 
 /**

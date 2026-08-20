@@ -36,8 +36,6 @@ def _get_db_path() -> str:
     return os.path.join(current, 'architecture.db')
 
 
-from meta.core.safe_connect import safe_connect_for_read
-
 # ============================================================
 # Role Intent DAO
 # ============================================================
@@ -46,10 +44,23 @@ class RoleIntentDAO:
     """role_intents 表 DAO（FR-017 AC-4）
 
     替代 role_actions + role_menu_permissions。
+
+    [P1-B4 修复 2026-07-26] 改用与 EffectiveIntentDAO 一致的直连模式
+    背景:
+      - 旧实现用 safe_connect_for_write, 但该函数的 tx_state 探测在新连接上
+        总是返回 NONE, 导致 ConnectionRefusedError → DAO 静默返回 False
+      - API 未检查返回值 → 返回 success=True 但实际未写入
+      - EffectiveIntentDAO 已用 sqlite3.connect() 直连模式, 此处对齐
     """
 
     def __init__(self, db_path: Optional[str] = None):
         self._db_path = db_path or _get_db_path()
+
+    def _get_conn(self) -> sqlite3.Connection:
+        """获取数据库连接 (与 EffectiveIntentDAO 一致)"""
+        conn = sqlite3.connect(self._db_path, timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        return conn
 
     @staticmethod
     def make_parameters_hash(parameters: Optional[Dict[str, Any]]) -> str:
@@ -68,26 +79,18 @@ class RoleIntentDAO:
     ) -> bool:
         """授予 Intent 权限
 
-        [V007.41 BUG-FIX] 调用方必须在外层事务中:
-            with bo_framework.transaction() as txn:
-                dao.grant(role_id=..., bo_id=..., action_name=...)
-            # txn 退出时统一 commit; dao 不再自己 commit
-
         Returns:
             True if 成功
         """
         params_hash = self.make_parameters_hash(parameters)
         try:
-            # [V007.41 BUG-FIX] 用 safe_connect_for_write 统一 L0 写入口
-            # 不再 force_no_tx=True: 强制调用方在外层事务中, 根治 silent partial commit
-            with safe_connect_for_write(self._db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
+            with self._get_conn() as conn:
+                conn.execute("""
                     INSERT OR REPLACE INTO role_intents
                     (role_id, bo_id, action_name, parameters_hash, granted, source, updated_at)
                     VALUES (?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)
                 """, (role_id, bo_id, action_name, params_hash, source))
-                # [V007.41] 不再 conn.commit(): 让外层 bo_framework.transaction() 负责
+                conn.commit()
             return True
         except Exception as e:  # noqa: BLE001
             logger.error(f"Failed to grant intent: {e}")
@@ -100,21 +103,16 @@ class RoleIntentDAO:
         action_name: str,
         parameters: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        """拒绝 Intent 权限（grant=0）
-
-        [V007.41 BUG-FIX] 调用方必须在外层事务中.
-        """
+        """拒绝 Intent 权限（grant=0）"""
         params_hash = self.make_parameters_hash(parameters)
         try:
-            # [V007.41 BUG-FIX] 用 safe_connect_for_write 统一 L0 写入口
-            with safe_connect_for_write(self._db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
+            with self._get_conn() as conn:
+                conn.execute("""
                     INSERT OR REPLACE INTO role_intents
                     (role_id, bo_id, action_name, parameters_hash, granted, source, updated_at)
                     VALUES (?, ?, ?, ?, 0, 'manual', CURRENT_TIMESTAMP)
                 """, (role_id, bo_id, action_name, params_hash))
-                # [V007.41] 不再 conn.commit(): 让外层 bo_framework.transaction() 负责
+                conn.commit()
             return True
         except Exception as e:  # noqa: BLE001
             logger.error(f"Failed to deny intent: {e}")
@@ -127,21 +125,16 @@ class RoleIntentDAO:
         action_name: str,
         parameters: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        """撤销 Intent 权限
-
-        [V007.41 BUG-FIX] 调用方必须在外层事务中.
-        """
+        """撤销 Intent 权限"""
         params_hash = self.make_parameters_hash(parameters)
         try:
-            # [V007.41 BUG-FIX] 用 safe_connect_for_write 统一 L0 写入口
-            with safe_connect_for_write(self._db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
+            with self._get_conn() as conn:
+                conn.execute("""
                     DELETE FROM role_intents
                     WHERE role_id = ? AND bo_id = ? AND action_name = ?
                       AND parameters_hash = ?
                 """, (role_id, bo_id, action_name, params_hash))
-                # [V007.41] 不再 conn.commit(): 让外层 bo_framework.transaction() 负责
+                conn.commit()
             return True
         except Exception as e:  # noqa: BLE001
             logger.error(f"Failed to revoke intent: {e}")
@@ -150,17 +143,14 @@ class RoleIntentDAO:
     def list_for_role(self, role_id: int) -> List[Dict[str, Any]]:
         """列出角色的所有 Intent 权限"""
         try:
-            # [V007.41 BUG-FIX] 用 safe_connect_for_read 统一 L0 只读入口
-            with safe_connect_for_read(self._db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
+            with self._get_conn() as conn:
+                rows = conn.execute("""
                     SELECT id, role_id, bo_id, action_name, parameters_hash,
                            granted, source, created_at, updated_at
                     FROM role_intents
                     WHERE role_id = ?
                     ORDER BY bo_id, action_name
-                """, (role_id,))
-                rows = cursor.fetchall()
+                """, (role_id,)).fetchall()
             return [
                 {
                     'id': r[0],
@@ -191,11 +181,9 @@ class RoleIntentDAO:
             return False
         params_hash = self.make_parameters_hash(parameters)
         try:
-            # [V007.41 BUG-FIX] 用 safe_connect_for_read 统一 L0 只读入口
-            with safe_connect_for_read(self._db_path) as conn:
-                cursor = conn.cursor()
+            with self._get_conn() as conn:
                 placeholders = ','.join('?' * len(role_ids))
-                cursor.execute(f"""
+                cursor = conn.execute(f"""
                     SELECT COUNT(*) FROM role_intents
                     WHERE role_id IN ({placeholders})
                       AND bo_id = ? AND action_name = ?

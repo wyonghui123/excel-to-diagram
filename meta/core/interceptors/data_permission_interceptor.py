@@ -252,6 +252,21 @@ class DataPermissionInterceptor(Interceptor):
         if self._is_admin(context):
             return
 
+        # [Phase 2 2026-07-25] Feature flag 切换到 IntentScopeAdapter (新路径)
+        # Spec: docs/spec_权限体系升级/12_implementation_plan.md P2.6
+        # 当 effective_intents_enabled=True 时, 用 role_effective_intents 表
+        # (Layer 1 事实层) 替代 role_dimension_scopes + data_permission_rules
+        # 默认关闭, 不影响现有系统
+        try:
+            from meta.core.permission_flags import is_enabled
+            if is_enabled('effective_intents_enabled'):
+                if self._apply_effective_intents_filter(context):
+                    return  # 新路径已应用, 跳过原逻辑
+        except Exception as e:
+            logger.warning(
+                f'[P2-Hook] effective_intents filter failed, fallback to legacy: {e}'
+            )
+
         # [V1.2.9 2026-06-17] relationship 不再跳过 dim scope 过滤
         # 走正常的 _apply_dimension_scope_filter (OR 派生: source OR target)
         # 但跳过 visibility scope + owner 例外 (relationship 无这些字段)
@@ -286,6 +301,98 @@ class DataPermissionInterceptor(Interceptor):
             # 没 dimension scope, 走原 scope filter
             self._apply_scope_filter(context)
             self._apply_data_permission_filter(context)
+
+    def _apply_effective_intents_filter(self, context: 'ActionContext') -> bool:
+        """[Phase 2 P2.6] 使用 IntentScopeAdapter 应用权限过滤
+
+        Returns:
+            True if 已应用过滤 (调用方应跳过原逻辑)
+            False if 未应用 (调用方应回退到原逻辑)
+
+        [Feature flag]
+            effective_intents_enabled=True 时启用
+            失败时回退到原逻辑 (防御性)
+        """
+        if not context.user_id:
+            return False
+
+        try:
+            from meta.core.intent_scope_adapter import IntentScopeAdapter
+            # 获取 db_path (兼容不同 context 结构)
+            db_path = self._get_db_path(context)
+            if not db_path:
+                return False
+
+            # 获取 role_ids
+            role_ids = self._get_role_ids(context)
+            if not role_ids:
+                return False
+
+            adapter = IntentScopeAdapter(db_path)
+            result = adapter.get_filter_for_roles(
+                role_ids=role_ids,
+                bo_id=context.object_type,
+                action_name='read',
+                user_id=context.user_id,
+            )
+
+            if result is None:
+                # [P5 修复 2026-07-26] 无 Intent = 未配置 = 允许所有 (与 legacy 一致)
+                # 旧系统 DataPermissionInterceptor: 无 dim scope = 不加过滤 = 允许所有
+                # IntentScopeAdapter.get_filter_for_roles 也已对齐此语义 (返回 None)
+                # 之前这里注入 1=0 导致 A2 测试失败 (wyonghui4 看不到 sub_domain 339)
+                logger.info(
+                    f'[P2-Hook] no_intent_allows_all: user={context.user_id} '
+                    f'bo={context.object_type} (no effective intent = allow all)'
+                )
+                return True  # 不加过滤条件 = 允许所有
+
+            # 注入过滤条件
+            if 'query_conditions' not in context.extra:
+                context.extra['query_conditions'] = []
+            context.extra['query_conditions'].append({
+                'type': 'raw',
+                'expr': result['cond_expr'],
+                'params': result['params'],
+            })
+            logger.info(
+                f'[P2-Hook] applied: user={context.user_id} '
+                f'bo={context.object_type} sources={result["sources"]}'
+            )
+            return True
+        except Exception as e:
+            logger.warning(f'[P2-Hook] failed: {e}')
+            return False
+
+    def _get_db_path(self, context: 'ActionContext') -> Optional[str]:
+        """从 context 获取 db_path"""
+        # 尝试从 data_source 获取
+        ds = getattr(context, 'data_source', None)
+        if ds is not None:
+            db_path = getattr(ds, 'db_path', None) or getattr(ds, '_db_path', None)
+            if db_path:
+                return db_path
+        # fallback: 从环境变量或默认路径
+        import os
+        return os.environ.get('DB_PATH') or os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            'db', 'archdata.db'
+        )
+
+    def _get_role_ids(self, context: 'ActionContext') -> List[int]:
+        """从 context 获取当前用户的所有 role_id"""
+        try:
+            cursor = context.data_source.execute(
+                """SELECT DISTINCT gr.role_id
+                   FROM group_roles gr
+                   JOIN user_group_members ugm ON gr.group_id = ugm.group_id
+                   WHERE ugm.user_id = ?""",
+                [context.user_id]
+            )
+            return [row[0] for row in cursor.fetchall()]
+        except Exception as e:
+            logger.debug(f'[_get_role_ids] failed: {e}')
+            return []
 
     def _apply_dimension_scope_filter(self, context: 'ActionContext') -> bool:
         """[FIX v1.0.2 / v1.0.3] 应用 role_dimension_scopes 派生条件

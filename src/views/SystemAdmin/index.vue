@@ -8,19 +8,19 @@
         @detail="handleViewDetail"
       >
         <template #cell-object_type="{ row }">
-          {{ row.object_type_label || formatObjectTypeLabel(row.object_type) }}
+          {{ formatObjectTypeLabel(row.object_type, row) }}
         </template>
         <template #cell-field_name="{ row }">
           <span v-if="row.field_name && row.field_name !== '_record'" class="field-name-badge">
-            {{ row.field_name_label || getFieldLabel(row.field_name) }}
+            {{ getFieldLabel(row.field_name, row) }}
           </span>
           <span v-else class="no-field">-</span>
         </template>
         <template #cell-old_value="{ row }">
-          {{ getFieldValueDisplay(row.old_value, row.field_name) }}
+          {{ getFieldValueDisplay(row.old_value, row.field_name, row) }}
         </template>
         <template #cell-new_value="{ row }">
-          {{ getFieldValueDisplay(row.new_value, row.field_name) }}
+          {{ getFieldValueDisplay(row.new_value, row.field_name, row) }}
         </template>
         <template #cell-user_name="{ row }">
           {{ getUserNameDisplay(row.user_name) }}
@@ -37,7 +37,7 @@
         </template>
         <template #cell-action="{ row }">
           <el-tag :type="getActionTagType(row.action)" size="small">
-            {{ getActionLabel(row.action) }}
+            {{ getActionLabel(row.action, row) }}
           </el-tag>
         </template>
       </GenericObjectList>
@@ -66,11 +66,11 @@
           </el-descriptions-item>
           <el-descriptions-item label="操作类型">
             <el-tag :type="getActionTagType(selectedLog.action)" size="small">
-              {{ getActionLabel(selectedLog.action) }}
+              {{ getActionLabel(selectedLog.action, selectedLog) }}
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="对象类型">
-            {{ selectedLog.object_type_label || formatObjectTypeLabel(selectedLog.object_type) }}
+            {{ formatObjectTypeLabel(selectedLog.object_type, selectedLog) }}
           </el-descriptions-item>
           <el-descriptions-item label="对象ID">
             {{ selectedLog.object_id }}
@@ -85,13 +85,13 @@
             {{ selectedLog.ip_address || '-' }}
           </el-descriptions-item>
           <el-descriptions-item label="字段名">
-            {{ selectedLog.field_name_label || getFieldLabel(selectedLog.field_name) }}
+            {{ getFieldLabel(selectedLog.field_name, selectedLog) }}
           </el-descriptions-item>
           <el-descriptions-item label="旧值">
-            <div class="value-text">{{ getFieldValueDisplay(selectedLog.old_value, selectedLog.field_name) }}</div>
+            <div class="value-text">{{ getFieldValueDisplay(selectedLog.old_value, selectedLog.field_name, selectedLog) }}</div>
           </el-descriptions-item>
           <el-descriptions-item label="新值">
-            <div class="value-text">{{ getFieldValueDisplay(selectedLog.new_value, selectedLog.field_name) }}</div>
+            <div class="value-text">{{ getFieldValueDisplay(selectedLog.new_value, selectedLog.field_name, selectedLog) }}</div>
           </el-descriptions-item>
           <el-descriptions-item label="链路追踪ID">
             {{ selectedLog.trace_id || '-' }}

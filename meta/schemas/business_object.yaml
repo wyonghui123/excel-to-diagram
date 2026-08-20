@@ -576,20 +576,23 @@ fields:
 - id: domain_id
   name: 领域
   type: integer
-  description: 所属领域（用于级联筛选，新建后不可变更，由 DB trigger 自动从 service_module_id 推导并维护）
+  description: 所属领域（由 service_module_id 反向推导，详情页只读展示）
   storage: stored
   db_column: domain_id
-  editable: true
+  editable: false
   ui:
     widget: select
     relation: domain
     display_field: domain_name
+    editable: false
     depends_on: version_id
     cascade_group: hierarchy
     cascade_level: 2
   semantics:
-    meaning: 用于级联筛选子领域（由 trigger 维护）
+    meaning: 由 service_module_id 反向推导 (详情页只读)
+    readonly_always: true
     immutable: true
+    derived_from: service_module_id
     redundancy:
       type: stored
       source_field: service_module_id
@@ -634,20 +637,23 @@ fields:
 - id: sub_domain_id
   name: 子领域
   type: integer
-  description: 所属子领域（用于级联筛选，新建后不可变更，由 DB trigger 自动从 service_module_id 推导并维护）
+  description: 所属子领域（由 service_module_id 反向推导，详情页只读展示）
   storage: stored
   db_column: sub_domain_id
-  editable: true
+  editable: false
   ui:
     widget: select
     relation: sub_domain
     display_field: sub_domain_name
+    editable: false
     depends_on: domain_id
     cascade_group: hierarchy
     cascade_level: 3
   semantics:
-    meaning: 用于级联筛选服务模块（由 trigger 维护）
+    meaning: 由 service_module_id 反向推导 (详情页只读)
+    readonly_always: true
     immutable: true
+    derived_from: service_module_id
     redundancy:
       type: stored
       source_field: service_module_id
@@ -730,7 +736,11 @@ fields:
         target_field: sub_domain_id
         required: true
     presentation:
-      result_type: dropdown
+      # [R21 2026-07-24] dropdown → dialog+tree: 用 Tree Search Help 单选
+      #   原因: 5层层级(产品→版本→领域→子领域→服务模块)用树形比级联下拉更高效
+      #   版本由全局 useVersionContext 注入, 树自动按版本过滤
+      result_type: dialog
+      display_mode: tree
       display_format: '{code} - {name}'
       columns:
       - field: code

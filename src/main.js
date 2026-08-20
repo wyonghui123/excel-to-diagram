@@ -4,6 +4,8 @@ import { createPersistedState } from 'pinia-plugin-persistedstate'
 import router from './router'
 import { setOnUnauthorized } from './utils/api'
 import { useAuthStore } from './stores/authStore'
+// [P1-A 2026-07-25] 启动时预加载审计日志 action 元数据 (单一事实源: 后端 enum_values)
+import { useAuditMetaStore } from './stores/auditMetaStore'
 import { logger } from './utils/logger'
 
 // [FR-004] 移除 Element Plus 全量注册,改用 unplugin-vue-components 按需导入
@@ -95,4 +97,14 @@ app.provide('elementPlusLocale', epLocale)
 const authStore = useAuthStore()
 authStore.loadFromCookie('restore').then(() => {
   app.mount('#app')
+  // [P1-A 2026-07-25] 应用启动后异步预加载审计日志 action 元数据
+  //   - 不阻塞 mount, 失败静默降级到本地 ACTION_LABELS fallback
+  //   - 后续 audit log 页面打开时可直接读 store, 无需等待
+  //   - 仅登录后才拉取 (避免未登录用户无意义请求 /audit/meta/actions 401)
+  if (authStore.isLoggedIn) {
+    const auditMetaStore = useAuditMetaStore()
+    auditMetaStore.loadActions().catch(e => {
+      logger.warn('[main] auditMetaStore.loadActions failed (will use local fallback):', e)
+    })
+  }
 })

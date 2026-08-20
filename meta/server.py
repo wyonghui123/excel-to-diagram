@@ -352,6 +352,20 @@ def create_app(db_path=None):
 
     data_source = get_data_source("sqlite", database=db_path)
 
+    # [P5 补充 2026-07-26] 启动时检测 SQLite 运行时配置 (WAL/busy_timeout/...)
+    # 必须在任何 layer 调用 get_runtime_config() 之前完成
+    # 解决: DEMO 用户创建 product 时 RuntimeError: DB config not detected yet
+    try:
+        from meta.core.db_config_detector import detect_runtime_config
+        detect_runtime_config(db_path)
+        logging.getLogger(__name__).info(
+            "[PREFLIGHT] detect_runtime_config() called for db_path=%s", db_path
+        )
+    except Exception as e:
+        logging.getLogger(__name__).warning(
+            "[PREFLIGHT] detect_runtime_config failed (non-fatal): %s", e
+        )
+
     from meta.core.db_health_monitor import init_monitor
     init_monitor(db_path)
     logging.getLogger(__name__).info("DBHealthMonitor initialized")
@@ -680,6 +694,9 @@ def create_app(db_path=None):
     app.register_blueprint(role_v2_bp)
     app.register_blueprint(permission_rule_v2_bp)
     app.register_blueprint(permission_set_v2_bp)  # [P13-T4] Permission Set API
+    # [Phase 3 P3.1-P3.7 2026-07-25] 统一权限管理 API (permission_rules_v2 CRUD + 推导 + 预览 + 模拟)
+    from meta.api.unified_permission_api import unified_permission_bp
+    app.register_blueprint(unified_permission_bp)
     app.register_blueprint(value_help_bp)
     app.register_blueprint(audit_mgmt_bp)
     app.register_blueprint(meta_util_bp)

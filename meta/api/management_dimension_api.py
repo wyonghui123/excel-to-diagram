@@ -373,7 +373,8 @@ def _build_ancestor_path(dimension_id: str, instance_id: int, data_source) -> st
 # 元数据驱动: 链 / icon / display_name / 颜色 全部从 hierarchies.yaml 读取
 # CHAIN 硬编码已移除, RESOURCE_TABLE_MAP/PARENT_FIELD_MAP/DISPLAY_FIELD_MAP 作为 fallback
 def _build_dimension_tree(dim: str, version_id: Optional[int] = None,
-                          search: Optional[str] = None) -> Dict[str, Any]:
+                          search: Optional[str] = None,
+                          user_id: Optional[int] = None) -> Dict[str, Any]:
     """构建层级树的扁平数组 (前端组装嵌套)
 
     Returns:
@@ -460,6 +461,9 @@ def _build_dimension_tree(dim: str, version_id: Optional[int] = None,
 
     all_nodes = []
 
+    # [TEMP DEBUG R21]
+    print(f"[R21-DEBUG] dim={dim}, version_id={version_id}, relevant_chain={relevant_chain}")
+
     for level_idx, object_type in enumerate(relevant_chain):
         table_name = RESOURCE_TABLE_MAP[object_type]
         display_field = DISPLAY_FIELD_MAP[object_type]
@@ -513,9 +517,33 @@ def _build_dimension_tree(dim: str, version_id: Optional[int] = None,
                     f"WHERE d.version_id = ?"
                 )
                 params = [version_id]
+            elif object_type == 'service_module' and version_id:
+                # [R21 2026-07-24] service_module: 跨 sub_domain → domain → version 三层 JOIN
+                sql = (
+                    f"SELECT sm.id, sm.{actual_display}, sm.{code_field}, sm.{PARENT_FIELD_MAP['service_module']} "
+                    f"FROM {table_name} sm "
+                    f"JOIN sub_domains sd ON sm.{PARENT_FIELD_MAP['service_module']} = sd.id "
+                    f"JOIN domains d ON sd.{PARENT_FIELD_MAP['sub_domain']} = d.id "
+                    f"WHERE d.version_id = ?"
+                )
+                params = [version_id]
+            elif object_type == 'business_object' and version_id:
+                # [R21 2026-07-24] business_object: 跨 service_module → sub_domain → domain → version 四层 JOIN
+                sql = (
+                    f"SELECT bo.id, bo.{actual_display}, bo.{code_field}, bo.{PARENT_FIELD_MAP['business_object']} "
+                    f"FROM {table_name} bo "
+                    f"JOIN service_modules sm ON bo.{PARENT_FIELD_MAP['business_object']} = sm.id "
+                    f"JOIN sub_domains sd ON sm.{PARENT_FIELD_MAP['service_module']} = sd.id "
+                    f"JOIN domains d ON sd.{PARENT_FIELD_MAP['sub_domain']} = d.id "
+                    f"WHERE d.version_id = ?"
+                )
+                params = [version_id]
 
         cursor = ds.execute(sql, params)
         rows = cursor.fetchall()
+
+        # [TEMP DEBUG R21]
+        print(f"[R21-DEBUG] level={level_idx} type={object_type} rows={len(rows)} sql={sql[:80]}...")
 
         # 计算 child_count: 优先从 db 字段, 否则通过 SQL 子查询
         is_leaf = (level_idx == len(relevant_chain) - 1)
@@ -593,7 +621,11 @@ def _build_dimension_tree(dim: str, version_id: Optional[int] = None,
                 # while 循环正常结束 (没 break), 说明链断裂 (parent 找不到)
                 # 这是孤儿, 不保留
                 pass
+        # [TEMP DEBUG R21]
+        target_count = len(target_keys)
+        print(f"[R21-DEBUG] reverse_filter: target_keys={target_count}, keep={len(keep)}, before={len(all_nodes)}")
         all_nodes = [n for n in all_nodes if n["unique_key"] in keep]
+        print(f"[R21-DEBUG] reverse_filter: after={len(all_nodes)}")
 
     # [DEBUG 2026-07-24-R17] 写 debug 信息到文件 (临时, 验证后删除)
     try:
@@ -631,6 +663,33 @@ def _build_dimension_tree(dim: str, version_id: Optional[int] = None,
             _f.write('\n'.join(_lines))
     except Exception as _e:
         logger.warning(f"[R17-DEBUG] write failed: {_e}")
+
+    # [R21 2026-07-24] 权限过滤: 与 get_dimension_instances 保持一致
+    #   复用 _get_user_dim_scope_ids (含 FK 链扩展, 支持 service_module)
+    #   仅过滤目标 dim 节点 (如 service_module), 父节点 (product/version/domain/sub_domain) 保留作为路径
+    #   admin 跳过; 用户无 scope 配置 (返回 None) 跳过
+    if user_id and not _is_admin_user():
+        scope_ids = _get_user_dim_scope_ids(int(user_id), dim)
+        if scope_ids is not None:
+            if scope_ids:
+                allowed = scope_ids
+                before = len(all_nodes)
+                all_nodes = [
+                    n for n in all_nodes
+                    if n["type"] != dim or n["id"] in allowed
+                ]
+                logger.info(
+                    f"[R21-dim-scope] user_id={user_id} dim={dim} "
+                    f"scope={len(allowed)}ids → {before}→{len(all_nodes)}nodes"
+                )
+            else:
+                # 空集: 用户有 scope 但 expand 后无 ids → 移除所有目标 dim 节点
+                before = len(all_nodes)
+                all_nodes = [n for n in all_nodes if n["type"] != dim]
+                logger.info(
+                    f"[R21-dim-scope] user_id={user_id} dim={dim} "
+                    f"empty scope → {before}→{len(all_nodes)}nodes (target dim removed)"
+                )
 
     # search 过滤: 命中节点 + 完整父链
     if search:
@@ -682,13 +741,18 @@ def list_dimension_tree(dim: str):
     URL: /api/v2/bo/management_dimension/<dim>/tree
     Query: search=<str>, version_id=<int>
     """
-    VALID_DIMS = {"product", "version", "domain", "sub_domain"}
+    # [R21 2026-07-24] 加 service_module/business_object: 详情页字段用 Tree Search Help
+    VALID_DIMS = {"product", "version", "domain", "sub_domain", "service_module", "business_object"}
     if dim not in VALID_DIMS:
         return jsonify({"error": f"invalid dim: {dim}"}), 400
 
     version_id = request.args.get("version_id", type=int)
     search = request.args.get("search", "").strip() or None
-    result = _build_dimension_tree(dim, version_id=version_id, search=search)
+    # [R21] 传入 user_id 做权限过滤 (与 get_dimension_instances 保持一致)
+    user_id = None
+    if hasattr(g, "current_user") and g.current_user:
+        user_id = g.current_user.get("user_id")
+    result = _build_dimension_tree(dim, version_id=version_id, search=search, user_id=user_id)
     return jsonify(result), 200
 
 

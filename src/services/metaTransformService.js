@@ -9,6 +9,8 @@
 
 import { normalizeFilterType, inferFilterType } from './filterService'
 import { sortColumnsByDefaultOrder } from './columnOrderService'
+// [P1-B 2026-07-25] 接入 ActionPolicy, 替代 filterRowActions 中硬编码状态判断
+import { canPerformAction as _canPerformActionByPolicy } from './actionPolicyService'
 
 /**
  * 转换列定义为 Element Plus el-table-column 格式
@@ -448,37 +450,11 @@ export function filterRowActions(rowActions, row, objectType, rowMutability, che
     if (checkPermission && !checkPermission(action)) return false
     if (evaluateCondition && !evaluateCondition(action.condition, row)) return false
 
-    const actionKey = (action.key || '').toLowerCase()
-
-    // [FIX 2026-06-13] 未保存的新行 (_isNew=true / __new_xxx)
-    //   - 隐藏单行 edit/update (新行的编辑由 inline cell 处理)
-    //   - 隐藏单行 delete (新行的"删除"应该走本地 removeNewRow, 不调后端)
-    if (row && (row._isNew === true || (typeof row.id === 'string' && row.id.startsWith('__new_')))) {
-      if (actionKey === 'edit' || actionKey === 'update' || actionKey === 'delete') {
-        return false
-      }
-    }
-
-    if (objectType === 'enum_type' && row?.category === 'system') {
-      if (actionKey === 'edit' || actionKey === 'update' || actionKey === 'delete') {
-        return false
-      }
-    }
-
-    if (rowMutability === 'locked') {
-      if (actionKey === 'edit' || actionKey === 'update' || actionKey === 'delete') {
-        return false
-      }
-    }
-
-    if (rowMutability === 'extensible') {
-      if (actionKey === 'edit' || actionKey === 'update') {
-        return false
-      }
-      if (actionKey === 'delete') {
-        return row?.is_system !== true && row?.system_value !== true
-      }
-    }
+    // [P1-B 2026-07-25] 行级状态规则统一委托给 actionPolicyService
+    //   替代原散落的 _isNew / category=system / rowMutability 硬编码块
+    //   规则源: services/actionPolicyService.js#canPerformAction
+    const policy = _canPerformActionByPolicy(action, row, { objectType, rowMutability })
+    if (!policy.allowed) return false
 
     return true
   })

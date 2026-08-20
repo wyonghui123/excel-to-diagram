@@ -23,11 +23,30 @@ from meta.core.intent_resolver import (
     get_role_intent_dao,
 )
 from meta.core.bo_schema_loader import get_bo_schema_loader
+from meta.core.bo_framework import bo_framework
 from meta.api._deprecation import v1_deprecated
 
 logger = logging.getLogger(__name__)
 
 intent_bp = Blueprint("intent_api", __name__)
+
+
+def _get_db_path(ds=None):
+    """[P1-B4 修复 2026-07-26] 获取 architecture.db 文件路径
+
+    问题: get_data_source('sqlite') 不带 database 参数时, 会创建 :memory: 连接池
+         导致 derivation_pipeline 报错 "v3.13+ :memory: 数据库已不支持"
+    修复: 直接返回文件路径, 不依赖 datasource (与 EffectiveIntentDAO 一致)
+    """
+    # 优先: 环境变量 (允许覆盖)
+    env_path = os.environ.get('SQLITE_DB_PATH') or os.environ.get('ARCH_DB_PATH')
+    if env_path and env_path != ':memory:' and os.path.exists(env_path):
+        return env_path
+    # 默认: meta/architecture.db (与 _get_db_path in intent_resolver.py 一致)
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'architecture.db'
+    )
 
 
 # ============================================================
@@ -236,6 +255,11 @@ def grant_or_deny_intent(role_id, bo_id, action_name):
             "success": true,
             "data": {"granted": true, "bo_id": "...", "action_name": "..."}
         }
+
+    [P1-B4 补充 2026-07-26] manual intent 变更后触发 derivation_pipeline 重推导
+      - FR-013: manual intent 优先级最高, 覆盖 derived/template
+      - 调用 derivation_pipeline.derive(role_id) 重新生成 role_effective_intents
+      - 失败不阻塞主操作, 仅记录警告
     """
     try:
         payload = request.get_json(force=True, silent=True) or {}
@@ -244,25 +268,57 @@ def grant_or_deny_intent(role_id, bo_id, action_name):
         source = payload.get("source", "manual")
 
         dao = get_role_intent_dao()
-        # [V007.41 BUG-FIX] 用 bo_framework.transaction() 包裹 grant/deny
-        # 背景: dao.grant/deny 内部已不再自己 commit, 必须有外层事务.
-        #       否则会触发 safe_connect_for_write 的 None tx raise.
-        with bo_framework.transaction() as txn:
-            if granted:
-                dao.grant(
-                    role_id=int(role_id),
-                    bo_id=bo_id,
-                    action_name=action_name,
-                    parameters=parameters,
-                    source=source,
-                )
-            else:
-                dao.deny(
-                    role_id=int(role_id),
-                    bo_id=bo_id,
-                    action_name=action_name,
-                    parameters=parameters,
-                )
+        # [P1-B4 修复 2026-07-26] 移除 bo_framework.transaction() 包装
+        # 背景: DAO 已改用 sqlite3.connect() 直连 + conn.commit() (与 EffectiveIntentDAO 一致)
+        #       bo_framework.transaction() 不会在新 sqlite3 连接上设置 tx_state,
+        #       反而导致 safe_connect_for_write 探测失败 (已移除)
+        # 修复: 检查 DAO 返回值, 失败时返回 500 (避免静默 success)
+        if granted:
+            ok = dao.grant(
+                role_id=int(role_id),
+                bo_id=bo_id,
+                action_name=action_name,
+                parameters=parameters,
+                source=source,
+            )
+        else:
+            ok = dao.deny(
+                role_id=int(role_id),
+                bo_id=bo_id,
+                action_name=action_name,
+                parameters=parameters,
+            )
+
+        if not ok:
+            return jsonify({
+                "success": False,
+                "error": f"DAO {'grant' if granted else 'deny'} failed (see server logs)",
+            }), 500
+
+        # [P1-B4 补充 2026-07-26] manual intent 变更后触发 derivation 重推导
+        # FR-013: manual intent 优先级最高, derive 后会合并到 role_effective_intents
+        try:
+            from meta.core.permission_flags import is_enabled
+            if is_enabled('effective_intents_enabled'):
+                from meta.core.derivation_pipeline import PermissionDerivationPipeline
+                from meta.core.effective_intent_dao import EffectiveIntentDAO
+                # [P1-B4 修复] 不调用 get_data_source('sqlite') (会创建 :memory: 连接池)
+                # 直接获取文件路径
+                db_path = _get_db_path()
+                if db_path:
+                    eff_dao = EffectiveIntentDAO(db_path)
+                    pipeline = PermissionDerivationPipeline(db_path=db_path, dao=eff_dao)
+                    pipeline.derive(role_id=int(role_id))
+                    logger.info(
+                        f'[P1-B4] derivation_pipeline.derive(role_id={role_id}) '
+                        f'completed after manual intent grant/deny '
+                        f'(bo={bo_id}, action={action_name}, granted={granted})'
+                    )
+        except Exception as derive_err:
+            logger.warning(
+                f'[P1-B4] derivation_pipeline.derive(role_id={role_id}) '
+                f'failed (non-fatal): {derive_err}'
+            )
 
         return jsonify({
             "success": True,
@@ -281,7 +337,9 @@ def grant_or_deny_intent(role_id, bo_id, action_name):
 def revoke_intent(role_id, bo_id, action_name):
     """撤销 Intent 权限（FR-017 AC-4）
 
-    [V007.41 BUG-FIX] 用 bo_framework.transaction() 包裹 revoke
+    [P1-B4 修复 2026-07-26] 移除 bo_framework.transaction() 包装, 检查 DAO 返回值
+
+    [P1-B4 补充 2026-07-26] revoke 后触发 derivation 重推导 (同 grant/deny)
 
     Response:
         {
@@ -291,12 +349,41 @@ def revoke_intent(role_id, bo_id, action_name):
     """
     try:
         dao = get_role_intent_dao()
-        with get_bo_framework().transaction() as txn:
-            dao.revoke(
-                role_id=int(role_id),
-                bo_id=bo_id,
-                action_name=action_name,
+        ok = dao.revoke(
+            role_id=int(role_id),
+            bo_id=bo_id,
+            action_name=action_name,
+        )
+
+        if not ok:
+            return jsonify({
+                "success": False,
+                "error": "DAO revoke failed (see server logs)",
+            }), 500
+
+        # [P1-B4 补充 2026-07-26] revoke 后触发 derivation 重推导
+        try:
+            from meta.core.permission_flags import is_enabled
+            if is_enabled('effective_intents_enabled'):
+                from meta.core.derivation_pipeline import PermissionDerivationPipeline
+                from meta.core.effective_intent_dao import EffectiveIntentDAO
+                # [P1-B4 修复] 不调用 get_data_source('sqlite') (会创建 :memory: 连接池)
+                db_path = _get_db_path()
+                if db_path:
+                    eff_dao = EffectiveIntentDAO(db_path)
+                    pipeline = PermissionDerivationPipeline(db_path=db_path, dao=eff_dao)
+                    pipeline.derive(role_id=int(role_id))
+                    logger.info(
+                        f'[P1-B4] derivation_pipeline.derive(role_id={role_id}) '
+                        f'completed after manual intent revoke '
+                        f'(bo={bo_id}, action={action_name})'
+                    )
+        except Exception as derive_err:
+            logger.warning(
+                f'[P1-B4] derivation_pipeline.derive(role_id={role_id}) '
+                f'failed (non-fatal): {derive_err}'
             )
+
         return jsonify({
             "success": True,
             "data": {

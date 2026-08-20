@@ -474,7 +474,9 @@ fields:
     cascade_level: 2
   semantics:
     meaning: 用于级联筛选子领域（从子领域推导，由 trigger 维护）
+    readonly_always: true
     immutable: true
+    derived_from: sub_domain_id
     redundancy:
       type: stored
       source_field: sub_domain_id
@@ -556,7 +558,11 @@ fields:
         target_field: domain_id
         required: true
     presentation:
-      result_type: dropdown
+      # [R21 2026-07-24] dropdown → dialog+tree: 用 Tree Search Help 单选
+      #   原因: 子领域在领域下, 用树形比级联下拉更高效
+      #   版本由全局 useVersionContext 注入, 树自动按版本过滤
+      result_type: dialog
+      display_mode: tree
       display_format: '{code} - {name}'
       columns:
       - field: code

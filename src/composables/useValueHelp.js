@@ -6,6 +6,9 @@ export function useValueHelp(valueHelpConfig, options = {}) {
   const loading = ref(false)
   const error = ref(null)
   const displayValue = ref('')
+  // [R21 2026-07-24] 层级维度祖先路径 (用于 service_module 等 tooltip 展示)
+  //   由 resolveDisplay 从后端 resolve 接口响应填充, 仅层级维度非空
+  const ancestorPath = ref('')
 
   const source = computed(() => valueHelpConfig?.source || {})
   const behavior = computed(() => valueHelpConfig?.behavior || {})
@@ -186,11 +189,13 @@ export function useValueHelp(valueHelpConfig, options = {}) {
     const isEmpty = !value && value !== 0 || (Array.isArray(value) && value.length === 0)
     if (isEmpty) {
       displayValue.value = ''
+      ancestorPath.value = ''
       return
     }
 
     if (!sourceId.value) {
       displayValue.value = String(value)
+      ancestorPath.value = ''
       return
     }
 
@@ -198,6 +203,8 @@ export function useValueHelp(valueHelpConfig, options = {}) {
       const response = await boService.resolveValueHelp(sourceType.value, sourceId.value, value, sourceConfigParams.value)
       if (response.success && response.data) {
         displayValue.value = response.data.display || String(value)
+        // [R21 2026-07-24] 同步祖先路径 (层级维度才有, 其他维度为空字符串)
+        ancestorPath.value = response.data.ancestor_path || ''
         const resolved = response.data
         const exists = optionsList.value.some(opt => String(opt.value) === String(resolved.value))
         if (!exists) {
@@ -208,9 +215,11 @@ export function useValueHelp(valueHelpConfig, options = {}) {
         }
       } else {
         displayValue.value = String(value)
+        ancestorPath.value = ''
       }
     } catch (e) {
       displayValue.value = String(value)
+      ancestorPath.value = ''
     }
   }
 
@@ -248,7 +257,9 @@ export function useValueHelp(valueHelpConfig, options = {}) {
   }
 
   const outMappings = computed(() => {
-    return behavior.value.out_mappings || []
+    const v = behavior.value.out_mappings || []
+    console.debug('[useValueHelp] outMappings computed:', v)
+    return v
   })
 
   // 最近使用功能
@@ -277,6 +288,7 @@ export function useValueHelp(valueHelpConfig, options = {}) {
   }
 
   function applyOutMappings(selectedItem, formValues) {
+    console.debug('[useValueHelp] applyOutMappings called, outMappings.length=', outMappings.value.length, 'selectedItem=', selectedItem)
     if (!outMappings.value.length || !selectedItem) return {}
 
     const updates = {}
@@ -302,6 +314,7 @@ export function useValueHelp(valueHelpConfig, options = {}) {
     loading,
     error,
     displayValue,
+    ancestorPath,
     sourceType,
     sourceId,
     loadOptions,

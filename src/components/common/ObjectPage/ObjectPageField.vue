@@ -22,6 +22,17 @@
       >{{ formatReadValue(fieldKey) }}</span>
     </template>
 
+    <!-- [R27 2026-07-24] value_help 字段 readonly 时 (派生字段) 用纯文本展示
+         业务背景: domain_id/sub_domain_id 由 service_module_id 反推, 默认 disabled
+           但 ValueHelpField 显示依赖内部 displayValue ref, 异步 resolve 后才更新,
+           详情页 user experience 不友好. 直接展示 _display 字段 (sync 已写入). -->
+    <div
+      v-else-if="valueHelpFieldKeys.has(fieldKey) && isFieldReadonly(fieldKey)"
+      class="op-field-readonly-display"
+    >
+      <template v-if="getFieldReadonlyDisplay(fieldKey)">{{ getFieldReadonlyDisplay(fieldKey) }}</template>
+      <span v-else class="op-field-placeholder">随服务模块自动填充</span>
+    </div>
     <ValueHelpField
       v-else-if="valueHelpFieldKeys.has(fieldKey)"
       :key="`vh-${fieldKey}-${formRenderKey}`"
@@ -34,8 +45,14 @@
       @update:display-value="val => emit('field-display-update', { key: fieldKey, displayValue: val })"
       @out-mapping="updates => emit('out-mapping', updates)"
     />
+    <!-- [R27 2026-07-24] 非 value_help 的其他字段 readonly 时纯文本展示
+         业务背景: 详情页 readonly 字段 (如 domain_id 子级 el-select) 应该展示 _display 文本,
+           但这些字段不一定注册到 valueHelpFieldKeys 中 -->
+    <div v-else-if="isFieldReadonly(fieldKey)" class="op-field-readonly-display">
+      {{ formatReadValue(fieldKey) }}
+    </div>
     <el-select
-      v-else-if="getFieldWidget(fieldKey) === 'el-select'"
+      v-else-if="getFieldWidget(fieldKey) === 'el-select' && !isFieldReadonly(fieldKey)"
       v-model="formData[fieldKey]"
       :disabled="isFieldReadonly(fieldKey)"
       :placeholder="getFieldPlaceholder(fieldKey)"
@@ -49,6 +66,14 @@
         :value="opt.value"
       />
     </el-select>
+    <!-- [R23 2026-07-24] readonly el-select 字段: 用纯文本展示 (派生字段, 无需搜索/下拉)
+         业务背景: domain_id/sub_domain_id 由 service_module_id 反推回填,
+           data 里有 id 但 options 为空 (el-select 无法显示 label),
+           这里直接展示 formData[fieldKey + '_display'] -->
+    <div v-else-if="getFieldWidget(fieldKey) === 'el-select' && isFieldReadonly(fieldKey)" class="op-field-readonly-display">
+      <template v-if="getFieldReadonlyDisplay(fieldKey)">{{ getFieldReadonlyDisplay(fieldKey) }}</template>
+      <span v-else class="op-field-placeholder">随服务模块自动填充</span>
+    </div>
     <ElInput
       v-else-if="isCodeAutoManagedFinal(isCodeAutoManaged) && fieldKey === 'code'"
       v-model="formData[fieldKey]"
@@ -447,6 +472,17 @@ function isFieldReadonly(key) {
   if (props.editing) {
     if (fieldDef.readonly === true) return true
     if (fieldDef.immutable === true && props.objectId && props.objectId !== 'new') return true
+    // [R21 2026-07-24] 元模型驱动: 有 derived_from 或 readonly_always 的字段始终 readonly
+    //   business_object: domain_id/sub_domain_id → derived_from: service_module_id
+    //   service_module: domain_id → derived_from: sub_domain_id
+    //   relationship: source_*/target_* → derived_from: source_bo_id/target_bo_id
+    if (fieldDef.semantics?.readonly_always === true) return true
+    if (fieldDef.semantics?.derived_from) return true
+    // [R21 2026-07-24] 层级入口字段: 被 derived_from 引用的字段, 不受父级联检查
+    //   识别方式: YAML 中 ui.depends_on 为空或字段本身有 value_help (tree picker 入口)
+    //   保留显式列表作为安全网, 与 YAML derived_from 声明对应
+    if (key === 'service_module_id' || key === 'sub_domain_id'
+        || key === 'source_bo_id' || key === 'target_bo_id') return false
     if (props.isCascadeField(key)) {
       const parentField = props.getCascadeParent(key)
       if (parentField && !props.formData[parentField]) return true
@@ -457,6 +493,11 @@ function isFieldReadonly(key) {
   if (fieldDef.editable === false) return true
   if (fieldDef.readonly === true) return true
   if (fieldDef.immutable === true && props.objectId && props.objectId !== 'new') return true
+  // [R21] 查看模式同样: 元模型驱动的 readonly 判断
+  if (fieldDef.semantics?.readonly_always === true) return true
+  if (fieldDef.semantics?.derived_from) return true
+  if (key === 'service_module_id' || key === 'sub_domain_id'
+      || key === 'source_bo_id' || key === 'target_bo_id') return false
 
   if (props.isCascadeField(key)) {
     const parentField = props.getCascadeParent(key)
@@ -549,6 +590,26 @@ function getFieldOptions(key) {
     value: opt.value != null ? opt.value : opt.id,
     label: opt.label || opt.name || String(opt.value ?? opt.id ?? '')
   }))
+}
+
+// [R23 2026-07-24] readonly 字段 (派生) 的展示文本
+// 优先级: formData[key + '_display'] → formData[key + '_name'] → fallback 显示 id
+// 业务背景: domain_id/sub_domain_id 由 service_module 反推, formData 已写入 id 和 _display
+// [R27 2026-07-24] 关键修复: 即使 val 为空也要尝试展示 _display (避免重选最近使用后, field-update
+//   先于 syncDerivedHierarchyFields 完成时显示空白)
+function getFieldReadonlyDisplay(key) {
+  const formData = props.formData || {}
+  // 1. 优先 _display
+  const display = formData[`${key}_display`] || formData[`${key}_name`]
+  if (display) return display
+  // 2. fallback: 显示 id (如果有)
+  const val = formData[key]
+  if (val !== null && val !== undefined && val !== '') return `#${val}`
+  // 3. 派生字段且值为空 → 提示"随服务模块自动填充"
+  const fieldDef = props.fieldDefs?.[key]
+  if (fieldDef?.semantics?.derived_from && !val) return ''
+  // 4. 空状态 placeholder
+  return '—'
 }
 </script>
 
@@ -659,5 +720,22 @@ function getFieldOptions(key) {
 .kt-reset-link:hover {
   text-decoration: underline;
   color: var(--el-color-primary-light-3, #4096ff);
+}
+
+/* [R23 2026-07-24] readonly el-select 派生字段展示样式 */
+.op-field-readonly-display {
+  padding: 4px 11px;
+  min-height: 32px;
+  line-height: 24px;
+  color: var(--el-text-color-regular, #606266);
+  background-color: var(--el-fill-color-light, #f5f7fa);
+  border: 1px solid var(--el-border-color-light, #e4e7ed);
+  border-radius: 4px;
+  cursor: not-allowed;
+}
+
+.op-field-placeholder {
+  color: var(--el-text-color-placeholder, #c0c4cc);
+  font-style: italic;
 }
 </style>

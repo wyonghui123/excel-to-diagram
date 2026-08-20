@@ -64,6 +64,7 @@
         :dimension-id="source.target_bo || ''"
         :checked-ids="props.selectedValue"
         :multiple="multiple"
+        :filter-params="props.treeFilterParams"
         @confirm="handleTreePickerConfirm"
         @cancel="handleTreePickerCancel"
         @check-change="handleTreeCheckChange"
@@ -101,6 +102,8 @@ const props = defineProps({
   multiple: { type: Boolean, default: false },
   selectedValue: { type: [String, Number, Array], default: '' },
   customFetcher: { type: Function, default: null },
+  // [R21 2026-07-24] tree 模式的过滤参数 (如 version_id, 由 ValueHelpField 注入)
+  treeFilterParams: { type: Object, default: () => ({}) },
 })
 
 const emit = defineEmits(['update:visible', 'confirm'])
@@ -162,6 +165,7 @@ const DIMENSION_LABEL_MAP = {
   version: '版本',
   domain: '领域',
   sub_domain: '子领域',
+  service_module: '服务模块',
 }
 
 const dialogTitle = computed(() => {
@@ -184,10 +188,27 @@ const displayColumns = computed(() => presentation.value.display_columns || [])
 //   此处不再 hardcode 4 层 chain.
 
 // [FIX 2026-07-22] HierarchicalTreePicker confirm: 单选/多选统一处理
+// [R24 2026-07-24] 单选分支: emit 标准 selection 对象 (跟 flat 模式一致)
+//   修复: 原 emit payload.id 是原始数字, ValueHelpField.handleDialogConfirm 期望 {value, display}
+//         第二次选择时 currentSingleItem 已被 handleOpen 清空, 若走 confirm 按钮分支 OK,
+//         但若走 dblclick 分支 (onNodeDblClickSingle) 没经过 handleConfirm, 必须 emit 标准对象
 function handleTreePickerConfirm(payload) {
   if (payload.type === 'single') {
-    // 单选: emit 单个 id (跟原 flat 模式一致)
-    emit('confirm', payload.id)
+    // [R24] 单选: 优先用 payload.node 构造标准 selection 对象
+    //   payload 可能带 node 字段 (双击), 也可能只带 id (键盘 Enter 触发)
+    const node = payload.node
+    const item = node ? {
+      value: node.id,
+      display: node.name || String(node.id),
+      code: node.code || '',
+      name: node.name || '',
+    } : {
+      value: payload.id,
+      display: String(payload.id),
+      code: '',
+      name: '',
+    }
+    emit('confirm', item)
   } else {
     // [UX-FIX 2026-07-23] 多选 tree: emit 标准 items shape (跟 flat 模式一致)
     // payload.nodes 是 [{ id, name, type, ancestorPath }, ...]
@@ -211,6 +232,7 @@ function handleTreePickerCancel() {
 //   让 dialog 的 canConfirm / 底部 chips / 确定按钮的 count 都能正确响应
 // [UX-FIX 2026-07-23-R2] 不再 guard displayMode — 即使 tree_flat 也会触发, 安全
 // [FIX 2026-07-23-R12] 从 nodes 提取 name, 避免标签显示 ID
+// [R21 2026-07-24] 单选模式: 同步 currentSingleItem, 让"确认选择"按钮能显示
 function handleTreeCheckChange({ ids, nodes }) {
   const nodeMap = new Map((nodes || []).map(n => [n.id, n]))
   internalSelectedItems.value = ids.map(id => {
@@ -220,6 +242,20 @@ function handleTreeCheckChange({ ids, nodes }) {
     const name = node?.name || ''
     return { value: id, display: name || String(id), code: node?.type || '', name }
   })
+  // [R21] 单选模式: 同步 currentSingleItem
+  if (!props.multiple) {
+    if (ids.length > 0) {
+      const node = nodeMap.get(ids[0])
+      currentSingleItem.value = {
+        value: ids[0],
+        display: node?.name || String(ids[0]),
+        code: node?.code || '',
+        name: node?.name || '',
+      }
+    } else {
+      currentSingleItem.value = null
+    }
+  }
 }
 
 const columnsForMeta = computed(() => {

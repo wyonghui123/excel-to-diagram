@@ -315,6 +315,18 @@ class PersistenceInterceptor(Interceptor):
                     return "(" + " AND ".join(sub_parts) + ")", sub_params
                 return '', []
 
+            # [P4 补充 2026-07-26] type='raw' 支持 (IntentScopeAdapter 注入的原生 SQL)
+            # data_permission_interceptor._apply_effective_intents_filter 注入格式:
+            #   {'type': 'raw', 'expr': 'id IN (SELECT ...)', 'params': []}
+            # 之前未处理导致 fallthrough 到 field/operator/value 默认分支,
+            # 生成 " = ?" 错误 SQL, 引发 "near '=': syntax error"
+            if cond_obj.get('type') == 'raw':
+                expr = cond_obj.get('expr', '') or cond_obj.get('sql', '')
+                raw_params = cond_obj.get('params', [])
+                if expr:
+                    return expr, list(raw_params) if isinstance(raw_params, (list, tuple)) else []
+                return '', []
+
             field = cond_obj.get('field', '')
             op = cond_obj.get('operator', 'eq')
             value = cond_obj.get('value')

@@ -72,8 +72,10 @@ DISPLAY_FIELD_MAP = {
     'version': 'name',
     'domain': 'domain_name',
     'sub_domain': 'sub_domain_name',
-    # 'service_module': 'module_name',  # 已移除
-    # 'business_object': 'object_name',  # 已移除
+    # [R21 2026-07-24] 加回 service_module: tree API 需要展示服务模块树
+    'service_module': 'name',
+    # [R21 2026-07-24] 加回 business_object: 关系详情页源/目标业务对象 tree picker 需要
+    'business_object': 'name',
 }
 
 CODE_FIELD_MAP = {
@@ -81,8 +83,10 @@ CODE_FIELD_MAP = {
     'version': 'code',
     'domain': 'code',
     'sub_domain': 'code',
-    # 'service_module': 'code',  # 已移除
-    # 'business_object': 'code',  # 已移除
+    # [R21 2026-07-24] 加回 service_module: tree API 需要
+    'service_module': 'code',
+    # [R21 2026-07-24] 加回 business_object: 关系详情页源/目标业务对象 tree picker 需要
+    'business_object': 'code',
 }
 
 

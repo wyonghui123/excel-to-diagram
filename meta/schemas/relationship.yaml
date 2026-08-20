@@ -507,7 +507,9 @@ fields:
   semantics:
     meaning: Search Help - 用于级联筛选源端业务对象（由 trigger 维护）
     search_help_for: source_bo_id
+    readonly_always: true
     immutable: true
+    derived_from: source_bo_id
     export_visible: false
     redundancy:
       type: stored
@@ -570,7 +572,9 @@ fields:
   semantics:
     meaning: Search Help - 用于级联筛选源端业务对象（由 trigger 维护）
     search_help_for: source_bo_id
+    readonly_always: true
     immutable: true
+    derived_from: source_bo_id
     export_visible: false
     redundancy:
       type: stored
@@ -630,7 +634,9 @@ fields:
   semantics:
     meaning: Search Help - 用于级联筛选源端业务对象（由 trigger 维护）
     search_help_for: source_bo_id
+    readonly_always: true
     immutable: true
+    derived_from: source_bo_id
     export_visible: false
     redundancy:
       type: stored
@@ -686,7 +692,9 @@ fields:
   semantics:
     meaning: Search Help - 用于级联筛选目标端业务对象（由 trigger 维护）
     search_help_for: target_bo_id
+    readonly_always: true
     immutable: true
+    derived_from: target_bo_id
     export_visible: false
     redundancy:
       type: stored
@@ -749,7 +757,9 @@ fields:
   semantics:
     meaning: Search Help - 用于级联筛选目标端业务对象（由 trigger 维护）
     search_help_for: target_bo_id
+    readonly_always: true
     immutable: true
+    derived_from: target_bo_id
     export_visible: false
     redundancy:
       type: stored
@@ -808,7 +818,9 @@ fields:
   semantics:
     meaning: Search Help - 用于级联筛选目标端业务对象（由 trigger 维护）
     search_help_for: target_bo_id
+    readonly_always: true
     immutable: true
+    derived_from: target_bo_id
     export_visible: false
     redundancy:
       type: stored
@@ -891,7 +903,11 @@ fields:
         target_field: service_module_id
         required: true
     presentation:
-      result_type: dropdown
+      # [R21 2026-07-24] dropdown → dialog+tree: 用 Tree Search Help 单选
+      #   原因: 4层层级(领域→子领域→服务模块→业务对象)用树形比级联下拉更高效
+      #   版本由全局 useVersionContext 注入, 树自动按版本过滤
+      result_type: dialog
+      display_mode: tree
       display_format: '{code} - {name}'
       columns:
       - field: code
@@ -944,7 +960,11 @@ fields:
         target_field: service_module_id
         required: true
     presentation:
-      result_type: dropdown
+      # [R21 2026-07-24] dropdown → dialog+tree: 用 Tree Search Help 单选
+      #   原因: 4层层级(领域→子领域→服务模块→业务对象)用树形比级联下拉更高效
+      #   版本由全局 useVersionContext 注入, 树自动按版本过滤
+      result_type: dialog
+      display_mode: tree
       display_format: '{code} - {name}'
       columns:
       - field: code
