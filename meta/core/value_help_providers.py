@@ -1,7 +1,98 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from meta.core.models import ValueHelpSource
+
+
+# [R23 2026-07-24] 详情页字段反推: 一次性返回 path (展示用) 和 ids (回填用)
+#   业务背景: 详情页 service_module_id 是唯一可操作字段, domain_id/sub_domain_id 由它反推
+#   前端通过 ancestor_ids 拿各层级 dim 的 id 直接写入表单, 无需解析路径字符串
+#   返回:
+#     - ancestor_path: "产品名 > 版本名 > 领域名 > 子领域名" (str, 顶层维度为空串)
+#     - ancestor_ids: {"version": 1, "domain": 703, "sub_domain": 138} (按 dim_name → id)
+#                    不含当前节点自身, 仅祖先层级
+def _build_ancestors(dimension_id: str, instance_id: int, data_source) -> Tuple[str, Dict[str, int], Dict[str, str]]:
+    """[R23] 构建维度实例的祖先路径 + 祖先 ids + 祖先 names
+
+    层级链: product → version → domain → sub_domain → service_module → business_object
+
+    复用 management_dimension_api._PARENT_INFO_MAP / RESOURCE_TABLE_MAP 逻辑
+    最多递归 6 层 (product → business_object)
+
+    返回:
+        - ancestor_path: "产品名 > 版本名 > 领域名 > 子领域名" (str, 顶层维度为空串)
+        - ancestor_ids: {"version": 1, "domain": 703, "sub_domain": 138} (按 dim_name → id)
+                       不含当前节点自身, 仅祖先层级
+        - [R24 2026-07-24] ancestor_names: {"domain": "采购管理", "sub_domain": "采购需求", ...}
+                       用于详情页前端一次性拿到 display 文本, 避免多次异步 resolve
+    """
+    # [FIX 2026-06-15] parent_display 字段名纠正: 实际 schema 中所有子表都用 'name'
+    _PARENT_INFO_MAP = {
+        'version': ('product', 'products', 'product_id', 'name'),
+        'domain': ('version', 'versions', 'version_id', 'name'),
+        'sub_domain': ('domain', 'domains', 'domain_id', 'name'),
+        'service_module': ('sub_domain', 'sub_domains', 'sub_domain_id', 'name'),
+        'business_object': ('service_module', 'service_modules', 'service_module_id', 'name'),
+    }
+    _RESOURCE_TABLE_MAP = {
+        'product': 'products',
+        'version': 'versions',
+        'domain': 'domains',
+        'sub_domain': 'sub_domains',
+        'service_module': 'service_modules',
+        'business_object': 'business_objects',
+    }
+
+    if dimension_id == 'product':
+        return '', {}, {}
+
+    path_parts: List[str] = []
+    ids_map: Dict[str, int] = {}
+    names_map: Dict[str, str] = {}
+    current_dim = dimension_id
+    current_id = instance_id
+
+    # 最多递归 6 层
+    for _ in range(6):
+        parent_info = _PARENT_INFO_MAP.get(current_dim)
+        if not parent_info:
+            break
+
+        parent_type, parent_table, parent_fk, parent_display = parent_info
+        current_table = _RESOURCE_TABLE_MAP.get(current_dim)
+        if not current_table:
+            break
+
+        try:
+            sql = (
+                f"SELECT main.{parent_fk}, parent.{parent_display}, parent.code "
+                f"FROM {current_table} main "
+                f"LEFT JOIN {parent_table} parent ON main.{parent_fk} = parent.id "
+                f"WHERE main.id = ?"
+            )
+            cursor = data_source.execute(sql, [current_id])
+            row = cursor.fetchone()
+        except Exception:
+            break
+
+        if not row:
+            break
+
+        parent_id, parent_name, parent_code = row
+        if parent_id is None or parent_name is None:
+            break
+
+        path_parts.insert(0, str(parent_name))
+        ids_map[parent_type] = int(parent_id)
+        # [R24] 同时记录编码, 让前端展示 "编码 - 名称"
+        names_map[parent_type] = (
+            f"{parent_code} - {parent_name}" if parent_code else str(parent_name)
+        )
+
+        current_dim = parent_type
+        current_id = parent_id
+
+    return " > ".join(path_parts), ids_map, names_map
 
 
 class ValueHelpProvider(ABC):
@@ -263,11 +354,43 @@ class BoValueHelpProvider(ValueHelpProvider):
         if not record:
             return None
 
-        return {
+        result = {
             "value": record.get(self.value_field),
             "display": record.get(effective_display, ""),
             "code": record.get(effective_code, ""),
         }
+
+        # [R21 2026-07-24] 层级维度: 返回 ancestor_path / ancestor_ids
+        #   业务背景: service_module 等层级字段在详情页只读态显示"编码 - 名称"，
+        #   通过 hover tooltip 展示完整祖先路径 (产品 > 版本 > 领域 > 子领域 > 服务模块)
+        #   顶层维度 (product) 无祖先, ancestor_path 为空字符串
+        #   实现复用 management_dimension_api._build_ancestor_path, 保持与 /instances 接口一致
+        # [R23 2026-07-24] 详情页字段反推: 同时返回 ancestor_ids (按 dim_name → id 映射)
+        #   场景: 详情页 service_module_id 变化时, 自动回填 sub_domain_id / domain_id / version_id
+        #   前端只需读 ancestor_ids[parent_dim] 即可, 无需自己解析路径字符串
+        HIERARCHY_DIMS = {
+            'version', 'domain', 'sub_domain', 'service_module', 'business_object'
+        }
+        if self.target_bo in HIERARCHY_DIMS:
+            try:
+                from meta.api import management_dimension_api as mda
+                mda._get_engine()  # 确保 _data_source 已初始化
+                if mda._data_source is not None:
+                    raw_id = record.get(self.value_field)
+                    if raw_id is not None:
+                        # [R23+R24] 调用扩展接口, 一次性拿 ids + names
+                        ancestor_path, ancestor_ids, ancestor_names = _build_ancestors(
+                            self.target_bo, int(raw_id), mda._data_source
+                        )
+                        result["ancestor_path"] = ancestor_path
+                        result["ancestor_ids"] = ancestor_ids
+                        # [R24] ancestor_names: 详情页前端展示用, 避免多次异步 resolve
+                        result["ancestor_names"] = ancestor_names
+            except Exception:
+                # ancestor_path/ancestor_ids 是增强信息, 失败时不影响主流程
+                pass
+
+        return result
 
 
 class CustomValueHelpProvider(ValueHelpProvider):
