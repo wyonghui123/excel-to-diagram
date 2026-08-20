@@ -3,7 +3,8 @@ import {
   extractOwnGroupName,
   getContainerMarkers,
   collapseFormatMarker,
-  businessObjectLabel
+  businessObjectLabel,
+  escapeMermaidLabelText
 } from '../nodeLabelTemplate.js'
 
 describe('nodeLabelTemplate.extractOwnGroupName', () => {
@@ -73,6 +74,11 @@ describe('nodeLabelTemplate.collapseFormatMarker', () => {
   it('无法识别类型时返回空串', () => {
     expect(collapseFormatMarker('businessObject', 'X', '名称')).toBe('')
   })
+
+  it('内部 name/code 含特殊字符时转义, 保留容器标记 (SEC 2026-08-19)', () => {
+    expect(collapseFormatMarker('domain', 'SCM', '销售<折扣>')).toBe('<销售&lt;折扣&gt;>\\n领域 SCM')
+    expect(collapseFormatMarker('servicemodule', 'D"P', '需求&计划')).toBe('[需求&amp;计划]\\n服务模块 D&quot;P')
+  })
 })
 
 describe('nodeLabelTemplate.businessObjectLabel', () => {
@@ -102,5 +108,46 @@ describe('nodeLabelTemplate.businessObjectLabel', () => {
 
   it('无名称时返回空串', () => {
     expect(businessObjectLabel({ code: 'X' })).toBe('')
+  })
+})
+
+describe('nodeLabelTemplate.escapeMermaidLabelText (SEC 2026-08-19 XSS 转义)', () => {
+  it('普通文本不变 (no-op)', () => {
+    expect(escapeMermaidLabelText('采购订单')).toBe('采购订单')
+    expect(escapeMermaidLabelText('PO201')).toBe('PO201')
+    expect(escapeMermaidLabelText('')).toBe('')
+  })
+
+  it('null/undefined 原样返回', () => {
+    expect(escapeMermaidLabelText(null)).toBe(null)
+    expect(escapeMermaidLabelText(undefined)).toBe(undefined)
+  })
+
+  it('转义 & < > " 为 HTML 实体', () => {
+    expect(escapeMermaidLabelText('<img onerror=x>')).toBe('&lt;img onerror=x&gt;')
+    expect(escapeMermaidLabelText('a&b')).toBe('a&amp;b')
+    expect(escapeMermaidLabelText('say "hi"')).toBe('say &quot;hi&quot;')
+  })
+
+  it('顺序正确: 先 & 避免二次转义', () => {
+    expect(escapeMermaidLabelText('&lt;')).toBe('&amp;lt;') // 字面 &lt; → &amp;lt;，非 &amp;amp;lt;
+  })
+
+  it('不破坏 mermaid 换行转义 \\n', () => {
+    expect(escapeMermaidLabelText('名称\\n编码')).toBe('名称\\n编码')
+  })
+})
+
+describe('nodeLabelTemplate.businessObjectLabel XSS 转义 (SEC 2026-08-19)', () => {
+  it('含 < 的名称转义为 &lt;', () => {
+    expect(businessObjectLabel({ name: '销售<折扣>', code: 'S1' })).toBe('销售&lt;折扣&gt;\\nS1')
+  })
+
+  it('含 " 的编码转义为 &quot;', () => {
+    expect(businessObjectLabel({ name: '订单', code: 'O"1' })).toBe('订单\\nO&quot;1')
+  })
+
+  it('含 & 的名称转义为 &amp;', () => {
+    expect(businessObjectLabel({ name: 'R&D', code: 'R1' })).toBe('R&amp;D\\nR1')
   })
 })

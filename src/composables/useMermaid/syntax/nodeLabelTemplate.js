@@ -38,14 +38,32 @@ export function getContainerMarkers(type) {
 //   - 子领域:   {供应链计划}\n子领域 SCP
 //   - 服务模块: [需求计划]\n服务模块 DP
 //   无编码或名称或无法识别类型时返回空串（调用方回退原格式）。业务对象不经过此路径。
+//   [SEC 2026-08-19] 容器标记 < > { } [ ] 是 mermaid 语法, 不能整体转义; 仅对内部 name/code 做
+//   HTML 实体转义, 防业务数据注入 + 防语法破坏, 显示不变 (浏览器解码实体回原字符)。
 export function collapseFormatMarker(type, code, name) {
   if (!code || !name) return ''
   const t = String(type || '').toLowerCase().replace(/_/g, '')
-  const ownName = extractOwnGroupName(name)
-  if (t === 'domain') return `<${ownName}>\\n领域 ${code}`
-  if (t === 'subdomain') return `{${ownName}}\\n子领域 ${code}`
-  if (t === 'servicemodule') return `[${ownName}]\\n服务模块 ${code}`
+  const ownName = escapeMermaidLabelText(extractOwnGroupName(name))
+  const safeCode = escapeMermaidLabelText(code)
+  if (t === 'domain') return `<${ownName}>\\n领域 ${safeCode}`
+  if (t === 'subdomain') return `{${ownName}}\\n子领域 ${safeCode}`
+  if (t === 'servicemodule') return `[${ownName}]\\n服务模块 ${safeCode}`
   return ''
+}
+
+// [SEC 2026-08-19] 对进入 mermaid 节点标签 ["..."] 的文本做 HTML 实体转义。
+//   背景: 渲染用 securityLevel:'loose' + htmlLabels:true, 节点标签经 foreignObject HTML 渲染。
+//   - & < > 若不转义会被当作 HTML 标签/实体解析 → 业务数据(名称/编码)可注入 DOM (XSS)
+//   - " 若不转义会提前结束 mermaid 的 ["..."] 字符串 → 非法语法
+//   改用 HTML 实体后浏览器解码显示为原字符 → 视觉不变, 且阻断注入。
+//   注意: \n (两字符字面, mermaid 节点标签换行) 不受影响; 顺序先 & 避免二次转义。
+export function escapeMermaidLabelText(value) {
+  if (value == null) return value
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
 }
 
 // BO 叶子节点标签：统一「名称\n编码」两行显示。
@@ -57,5 +75,8 @@ export function businessObjectLabel(node, opts = {}) {
   const separator = opts.separator !== undefined ? opts.separator : '\\n'
   const code = node.code || node.nodeCode
   if (!name) return ''
-  return code ? `${centerMark}${name}${separator}${code}` : `${centerMark}${name}`
+  // [SEC 2026-08-19] 名称/编码进入 ["..."] 前做 HTML 实体转义, 防 XSS + 防语法破坏
+  const safeName = escapeMermaidLabelText(name)
+  if (!code) return `${centerMark}${safeName}`
+  return `${centerMark}${safeName}${separator}${escapeMermaidLabelText(code)}`
 }

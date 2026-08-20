@@ -681,6 +681,9 @@ export function useTooltip() {
       hideTooltip(tooltip)
     }
     const onClick = (e) => {
+      // [FIX 2026-08-19] 与 setupLabelEvents.onClick 对齐: 拖拽后的 click 不触发连线选中。
+      //   之前 path 分支缺 wasDrag 守卫, 拖拽平移结束鼠标落在连线上会误触发选中高亮。
+      if (typeof window !== 'undefined' && window.__mermaidDrag && window.__mermaidDrag.wasDrag) return
       e.stopPropagation()
 
       selectedElements.path = null

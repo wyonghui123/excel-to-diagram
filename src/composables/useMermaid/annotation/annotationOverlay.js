@@ -1569,6 +1569,9 @@ export function useAnnotationOverlay() {
     clearHighlight,
     clearSvgHighlightsOnly,
     focusOnTarget,
-    removeAnnotationLayers
+    removeAnnotationLayers,
+    // [CLEANUP 2026-08-19] 暴露实例事件监听器清理, 供 useSvgProcessor.cleanup() 在卸载时调用,
+    //   避免组件卸载后 svg/container 上的监听器依赖 DOM 回收兜底 (不对称清理)。
+    cleanupListeners
   };
 }

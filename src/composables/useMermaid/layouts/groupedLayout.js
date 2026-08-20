@@ -12,7 +12,7 @@
 import { MAX_RECURSION_DEPTH, checkDepth, checkCycle, createVisitedSet } from '../../../services/groupModel/safetyUtils.js'
 import { formatContainerTitle } from '../../../utils/formatContainerTitle.js'
 import { markUplift, hasShownDescendants } from './upliftDerivation.js'
-import { extractOwnGroupName, collapseFormatMarker, getContainerMarkers, businessObjectLabel } from '../syntax/nodeLabelTemplate.js'
+import { extractOwnGroupName, collapseFormatMarker, getContainerMarkers, businessObjectLabel, escapeMermaidLabelText } from '../syntax/nodeLabelTemplate.js'
 
 // [FIX 2026-08-06g] 上提自禁用父容器的子分组 → 父路径 registry (subgraphId → parentPath).
 //   背景: 之前把父名称拼进容器标题 ("供应链计划（供应链云）"), formatContainerTitle 拆成两行,
@@ -161,6 +161,8 @@ function buildUpliftAncestorPath(group, ancestorNames = []) {
 
 export function generateGroupedLayout(groups, containers, nodeMap, definedNodes, overallDirection = 'TB', layoutEngine = 'dagre', links = []) {
   if (!groups || groups.length === 0) {
+    // [FIX 2026-08-19] 空分组也复位 ELK 收集器, 清掉上一次异常中断可能残留的脏状态 (原来提前 return 跳过 reset)。
+    resetFlatElkGroups()
     return { mermaidCode: '', styleLines: [] }
   }
 
@@ -175,20 +177,26 @@ export function generateGroupedLayout(groups, containers, nodeMap, definedNodes,
   // [UPLIFT 2026-08-05] 上提自动推导: 基于 enabled 标记 _uplift (enabled 且无可见子孙 → 聚合节点).
   markUplift(groups)
 
-  const reversedGroups = [...groups].reverse()
+  try {
+    const reversedGroups = [...groups].reverse()
 
-  reversedGroups.forEach((group, index) => {
-    const groupIndex = index + 1
-    
-    const result = generateGroupCode(group, containers, nodeMap, definedNodes, 0, groupIndex, createVisitedSet(), layoutEngine, links, 0, [])
-    if (result.code) {
-      mermaidCode += result.code
-      styleLines.push(...result.styleLines)
-    }
-  })
+    reversedGroups.forEach((group, index) => {
+      const groupIndex = index + 1
 
-  // [ELK-SEM 2026-08-14] 逐组生成虚拟边 (每组内链式连接), 合并为平铺数组.
-  return { mermaidCode, styleLines, layoutHelperEdges: flatElkGroups.flatMap((group) => buildLayoutHelperEdges(group)) }
+      const result = generateGroupCode(group, containers, nodeMap, definedNodes, 0, groupIndex, createVisitedSet(), layoutEngine, links, 0, [])
+      if (result.code) {
+        mermaidCode += result.code
+        styleLines.push(...result.styleLines)
+      }
+    })
+
+    // [ELK-SEM 2026-08-14] 逐组生成虚拟边 (每组内链式连接), 合并为平铺数组.
+    //   注意: return 会先求值 flatElkGroups.flatMap 得到快照, finally 再清空, 安全无副作用。
+    return { mermaidCode, styleLines, layoutHelperEdges: flatElkGroups.flatMap((group) => buildLayoutHelperEdges(group)) }
+  } finally {
+    // [FIX 2026-08-19] 无论成功或异常, 复位 ELK 收集器, 避免异常中断残留 global state 污染下次渲染。
+    resetFlatElkGroups()
+  }
 }
 
 /**
@@ -355,7 +363,7 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
   //   单行预留空间冲突 → 后处理下移内容导致节点/子容器跑出容器盒)。父名称改由 :hover tooltip
   //   展示, 记录进 registry (subgraphId → 父title), SVG 处理器读取后挂 tooltip。
   const groupMarkers = getContainerMarkers(group.type || group.groupType)
-  const baseTitle = formatContainerTitle(extractOwnGroupName(group.title) || 'Group')
+  const baseTitle = escapeMermaidLabelText(formatContainerTitle(extractOwnGroupName(group.title) || 'Group'))
   const groupTitle = groupMarkers
     ? `${groupMarkers[0]}${baseTitle}${groupMarkers[1]}`
     : baseTitle
@@ -384,9 +392,9 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
       const displayText = marker
         ? marker
         : ownCode
-          ? `${group.title || 'Group'}\\n（${ownCode}）`
+          ? `${escapeMermaidLabelText(group.title || 'Group')}\\n（${escapeMermaidLabelText(ownCode)}）`
           : ancestorPath
-            ? `${group.title || 'Group'}\\n（${ancestorPath}）…`
+            ? `${escapeMermaidLabelText(group.title)}\\n（${escapeMermaidLabelText(ancestorPath)}）…`
             // [FIX 2026-08-19] 空自定义分组自动上提的节点不带省略号: 空分组无可展开内容,
             //   "…" 是"折叠容器, 可展开"的暗示, 对空节点有误导. 仅显式折叠(collapsed=true)
             //   才保留 (此时表明确实有内容待展开). 系统分组走 marker 分支, 不落此兜底.
@@ -625,7 +633,8 @@ function generateGroupCode(group, containers, nodeMap, definedNodes, depth = 0, 
         })
 
         // 用外层 wrapper 包装
-        let wrappedSubCode = `${subIndent}subgraph ${subGroupId}["${containerData.title || containerData.name}"]\n${subIndent}  direction ${subDirection}\n`
+        // [SEC 2026-08-19] SubDomain 嵌套容器标题进入 ["..."] 前做 HTML 实体转义 (防 XSS + 防语法破坏)
+        let wrappedSubCode = `${subIndent}subgraph ${subGroupId}["${escapeMermaidLabelText(formatContainerTitle(containerData.title || containerData.name))}"]\n${subIndent}  direction ${subDirection}\n`
         wrappedSubCode += innerCode
         wrappedSubCode += `${subIndent}end\n`
         containerCodes.push(wrappedSubCode)
@@ -792,7 +801,7 @@ function generateContainerCode(container, index, nodeMap, definedNodes, indent =
       const marker = collapseFormatMarker(containerType, containerCode, simpleName)
       const colTitle = marker
         ? marker
-        : `${formatContainerTitle(rawContainerTitle)}…`
+        : `${escapeMermaidLabelText(formatContainerTitle(rawContainerTitle))}…`
       code += `${indent}${colId}["${colTitle}"]:::collapseNode\n`
       definedNodes.add(colId)
     }
@@ -803,7 +812,8 @@ function generateContainerCode(container, index, nodeMap, definedNodes, indent =
   // 如果容器有 fullTitle（包含完整路径，如 "财务云 / 费控服务"），说明它是 disabled 域的容器
   // 使用 fullTitle 而不是 name，这样会显示完整路径
   const rawContainerName = container.fullTitle || container.name || container.title || 'Container'
-  const containerName = formatContainerTitle(rawContainerName)
+  // [SEC 2026-08-19] 容器标题进入 ["..."] 前做 HTML 实体转义 (防 XSS + 防语法破坏, 显示不变)
+  const containerName = escapeMermaidLabelText(formatContainerTitle(rawContainerName))
   
   code += `${indent}  subgraph ${actualContainerId}["${containerName}"]\n`
 

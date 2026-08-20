@@ -6,6 +6,10 @@ const CONTAINER_TITLE_KEYWORDS = [
 import { computeContainerStats } from '../tooltip/containerStats.js'
 
 export function useSvgStyle() {
+  // [CLEANUP 2026-08-19] 记录当前实例创建的所有 MutationObserver, 供 cleanup() 统一 disconnect.
+  //   修复: fixArrowMarkers 在 serviceModule 下每次渲染都 new 一个 observer 且从不 disconnect,
+  //   组件卸载后 observer 仍长期存活 → 内存/资源泄漏. 归入 useSvgProcessor.unmount 卸载链释放.
+  const activeObservers = []
   const validateContainerTitles = (svg) => {
     if (!svg) return
 
@@ -279,6 +283,7 @@ export function useSvgStyle() {
         attributes: true,
         attributeFilter: ['style', 'class']
       })
+      activeObservers.push(observer)
     }
   }
 
@@ -850,6 +855,18 @@ export function useSvgStyle() {
     })
   }
 
+  // [CLEANUP 2026-08-19] 释放本实例创建的 MutationObserver。幂等。
+  const cleanup = () => {
+    activeObservers.forEach((observer) => {
+      try {
+        observer.disconnect()
+      } catch (e) {
+        // ignore: observer 已失效
+      }
+    })
+    activeObservers.length = 0
+  }
+
   return {
     validateContainerTitles,
     fixArrowMarkers,
@@ -864,6 +881,8 @@ export function useSvgStyle() {
     attachLiftedParentTooltips,
     // [STAT-TOOLTIP 2026-08-14] 容器统计 tooltip: 业务对象数量 + 内部关系数量
     attachContainerStatTooltips,
+    // [CLEANUP 2026-08-19] 释放实例内 MutationObserver
+    cleanup,
     // 向后兼容别名
     applyContainerTitleItalic: validateContainerTitles
   }

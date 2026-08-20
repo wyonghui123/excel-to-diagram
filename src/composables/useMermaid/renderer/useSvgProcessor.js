@@ -933,6 +933,24 @@ export function useSvgProcessor(options) {
         console.warn('[useSvgProcessor.cleanup] tooltip.cleanup failed:', e)
       }
     }
+    // [CLEANUP 2026-08-19] 释放 useSvgStyle 内部创建的 MutationObserver
+    //   (fixArrowMarkers serviceModule 分支), 避免组件卸载后 observer 泄漏。
+    if (svgStyle && typeof svgStyle.cleanup === 'function') {
+      try {
+        svgStyle.cleanup()
+      } catch (e) {
+        console.warn('[useSvgProcessor.cleanup] svgStyle.cleanup failed:', e)
+      }
+    }
+    // [CLEANUP 2026-08-19] 释放 annotationOverlay 注册的事件监听器 (svg/edgeLabel/path/panel),
+    //   补齐卸载清理链 (之前仅 tooltip/svgStyle 被清理)。
+    if (annotationOverlay && typeof annotationOverlay.cleanupListeners === 'function') {
+      try {
+        annotationOverlay.cleanupListeners()
+      } catch (e) {
+        console.warn('[useSvgProcessor.cleanup] annotationOverlay.cleanupListeners failed:', e)
+      }
+    }
   }
 
   // [FIX 2026-08-10] 透传到内部 useTooltip 实例的"清除选择高亮"。

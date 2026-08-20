@@ -461,11 +461,14 @@ const metaObject = inject('metaObject', ref(null))
 async function loadRelationships(options = {}) {
   const { force = false } = options
   if (!props.versionId) return
+  // [RACE-FIX 2026-08-19] 捕获本次请求的目标版本。修复: versionId 在分页/去重 await 期间
+  //   变化时, 旧版本请求返回会用旧数据覆盖新版本, 并把 cachedVersionId 错配为最新 versionId
+  //   (缓存 key 与数据版本不一致 → 后续命中缓存拿到错版本数据)。守卫: 仅最新版本能写入副作用。
+  const targetVersion = props.versionId
 
   const isStaleRefresh = props.stale
   const isSilentRefresh = !isStaleRefresh && classifierLoading.value === false && allRelationships.value.length > 0
   if (isStaleRefresh) isAllExpanded.value = false
-  console.log('[RelationScopeSection] loadRelationships START: isSilentRefresh=' + isSilentRefresh + ', isStaleRefresh=' + isStaleRefresh + ', allRelationships=' + allRelationships.value.length + ', boIds=' + props.selectedBoIds?.length)
 
   if (isStaleRefresh && !USE_FILTERSOURCE) {
     preservedCheckedKeys.value = new Set()
@@ -524,7 +527,6 @@ async function loadRelationships(options = {}) {
   }
   loadError.value = ''
   try {
-    console.log('[RelationScopeSection] loadRelationships: version_id=' + props.versionId)
     // [v1.1.15 修复] 用 v2 端点 /api/v2/bo/relationship 替代 v1 端点
     //   背景: TEST888 用户调 /api/v1/relationships?version_id=764 返回 0 条关系,
     //         但调 /api/v2/bo/relationship?version_id=764 返回 11 条 (跟 list 表格一致)
@@ -549,20 +551,21 @@ async function loadRelationships(options = {}) {
     )
 
     // 准备新 businessObjects
+    // [RACE-FIX 2026-08-19] 分页 await 期间 version 可能已切换 → 丢弃过期请求, 避免旧数据覆盖
+    if (props.versionId !== targetVersion) return
     let newBusinessObjects
     if (metaObject.value?.business_objects?.length > 0) {
       newBusinessObjects = metaObject.value.business_objects || metaObject.value.businessObjects || []
     } else {
       newBusinessObjects = await loadBusinessObjectsWithHierarchy()
     }
-    console.log('[RelationScopeSection] loadRelationships: newRelationships=' + newRelationships.length + ', newBusinessObjects=' + newBusinessObjects.length)
+    // [RACE-FIX 2026-08-19] loadBusinessObjectsWithHierarchy 的 await 期间 version 可能已切换 → 丢弃
+    if (props.versionId !== targetVersion) return
 
     // 直接赋值 (store.setData hook 会处理状态恢复)
     allRelationships.value = newRelationships
-    console.log('[RelationScopeSection] ASSIGNED allRelationships: ' + newRelationships.length)
     businessObjects.value = newBusinessObjects
     cachedVersionId.value = props.versionId  // [性能优化] 记录缓存 key
-    console.log('[RelationScopeSection] after assign: treeData=' + (classifierTreeData.value?.length || 0))
 
     if (USE_FILTERSOURCE) {
       classifierTreeData.value = buildRelationScopeTree(
@@ -575,7 +578,6 @@ async function loadRelationships(options = {}) {
         newRelationships,
         newBusinessObjects
       )
-      console.log('[RelationScopeSection] FILTERSOURCE: built tree with ' + classifierTreeData.value.length + ' root nodes')
     }
 
     emit('load', { relationships: allRelationships.value })
@@ -726,7 +728,6 @@ function handleClassifierCheck(data, { checkedKeys, checkedNodes, halfCheckedNod
   const effectiveChecked = checkedKeys || []
   preservedCheckedKeys.value = new Set(effectiveChecked)
   preservedHalfCheckedKeys.value = new Set(halfCheckedNodes?.map(n => n.id) || [])
-  console.log('[RelationScopeSection] handleClassifierCheck: preserved=' + preservedCheckedKeys.value.size)
   classifier.selectedScopeIds.value = effectiveChecked
   emitScopeChange()
 
@@ -734,7 +735,6 @@ function handleClassifierCheck(data, { checkedKeys, checkedNodes, halfCheckedNod
     nextTick(() => {
       const currentChecked = relationTreeRef.value?.getCheckedKeys?.() || []
       if (currentChecked.length > 0) {
-        console.log('[RelationScopeSection] handleClassifierCheck: force clear lingering keys:', currentChecked.length)
         guard.enter()
         relationTreeRef.value?.setCheckedKeys([], false)
         guard.exit()

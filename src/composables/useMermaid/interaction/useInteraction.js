@@ -4,7 +4,7 @@ import { useDiagnostics } from '../core/useDiagnostics.js'
 // 关键修复 v19：用 window 全局对象共享拖动状态，跨 module reload 保持一致
 // HMR 替换 module 后老 addZoomAndPan 闭包内的 let isDragging 与新 handleMouseMove 的 let isDragging 是不同变量
 // 改用 window.__mermaidDrag 全局对象，所有 handler 引用同一对象，状态跨 HMR/闭包保持一致
-const dragState = (typeof window !== 'undefined' && (window.__mermaidDrag || (window.__mermaidDrag = { isDragging: false, startX: 0, startY: 0 }))) || { isDragging: false, startX: 0, startY: 0 }
+const dragState = (typeof window !== 'undefined' && (window.__mermaidDrag || (window.__mermaidDrag = { isDragging: false, startX: 0, startY: 0, wasDrag: false, target: null }))) || { isDragging: false, startX: 0, startY: 0, target: null }
 
 export function useInteraction() {
   const scale = ref(1)
@@ -354,6 +354,9 @@ export function useInteraction() {
 
       dragState.isDragging = true
       dragState.wasDrag = false  // [FIX 2026-08-16] 每次 mousedown 重置"是否拖拽"标记
+      // [FIX 2026-08-19] 记录发起拖拽的实例, handleMouseMove 据此只响应本图,
+      //   避免多图并存时全局 isDragging 被其它实例的 document mousemove 误用。
+      dragState.target = mermaidContainerElRef.value
       dragState.startX = e.clientX - translateX.value
       dragState.startY = e.clientY - translateY.value
       // [FIX 2026-08-16] 记录 mousedown 时屏幕坐标, 供 handleMouseMove 计算"从按下起的总位移".
@@ -369,6 +372,11 @@ export function useInteraction() {
 
     const handleMouseMove = (e) => {
       if (!dragState.isDragging) {
+        return
+      }
+      // [FIX 2026-08-19] 多图实例归属: 只响应发起 mousedown 的这张图 (target 已记录),
+      //   避免全局 isDragging + document mousemove 导致其它图也跟着平移。
+      if (dragState.target !== mermaidContainerElRef.value) {
         return
       }
       // [FIX 2026-08-16] 位移超过阈值 → 标记为拖拽. 供 click 处理判断"拖拽不取消高亮, 只有纯粹点击才取消".
