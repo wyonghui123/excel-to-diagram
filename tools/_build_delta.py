@@ -11,9 +11,9 @@ import hashlib
 import argparse
 from pathlib import Path
 
-# Import manifest_utils from release-prep
-_RELEASE_PREP = Path(r"D:\filework\worktrees\release-prep")
-sys.path.insert(0, str(_RELEASE_PREP / "tools"))
+# manifest_utils 与 _build_delta 同位于 tools/, 直接本目录导入
+# (不再依赖已删的 release-prep worktree, 修复 delta 工具链断链)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from manifest_utils import generate_manifest, build_delta_zip, Manifest, FileEntry, compute_delta, parse_manifest
 
 # Current branch root
@@ -228,6 +228,36 @@ def filter_new_manifest(new: Manifest, root: Path) -> Manifest:
     new.files = kept
     return new
 
+def _add_git_meta(zip_path: Path, root: Path):
+    """在 delta zip 顶层嵌入 git_commit 溯源文件 (供部署追溯/回滚).
+
+    不写入业务 MANIFEST 条目 (避免 filter_new_manifest 误判),
+    只作包追加的"部署 ↔ git 提交"映射。
+    """
+    import subprocess as _sp
+    import json as _json
+    import time as _time
+
+    def _g(*args):
+        r = _sp.run(["git", "-C", str(root)] + list(args),
+                    capture_output=True, text=True, timeout=30)
+        return r.stdout.strip() if r.returncode == 0 else ""
+
+    meta = {
+        "branch": _g("rev-parse", "--abbrev-ref", "HEAD"),
+        "commit": _g("rev-parse", "HEAD"),
+        "commit_short": _g("rev-parse", "--short", "HEAD"),
+        "committed_at": _g("log", "-1", "--format=%ci"),
+        "built_at": _time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    payload = _json.dumps(meta, ensure_ascii=False, indent=2) + "\n"
+    with zipfile.ZipFile(zip_path, "a", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("git_commit.json", payload)
+    print(f"  [GIT-META] 嵌入 git_commit.json -> "
+          f"{meta['branch']}@{meta['commit_short'] or 'n/a'} "
+          f"({(meta['committed_at'] or '').strip()})")
+
+
 def force_lf_in_tree(root: Path) -> int:
     """Force LF line endings for all .sh/.py/.yaml/.json files (avoid CRLF false-delta)."""
     count = 0
@@ -360,6 +390,9 @@ def main():
 
     # Build delta zip
     result = build_delta_zip(staging, old_manifest, new_manifest, OUT)
+
+    # 嵌入 git_commit 溯源 (部署 ↔ 提交 映射, 供追踪/回滚)
+    _add_git_meta(OUT, ROOT)
 
     size_mb = OUT.stat().st_size / 1024 / 1024
     print(f"\n  [OK] Delta zip: {OUT.name} ({size_mb:.1f}MB)")
